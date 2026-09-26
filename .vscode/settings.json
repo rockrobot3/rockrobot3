@@ -1,0 +1,14 @@
+{
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32"
+  },
+  "idf.currentSetup": "/Users/qianmi/.espressif/v6.1/esp-idf",
+  "idf.port": "/dev/tty.usbserial-1410",
+  "clangd.path": "/Users/qianmi/.espressif/tools/esp-clangd/esp-21.1.3_20260408/esp-clangd/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/Users/qianmi/Documents/trae_projects/my_test/build"
+  ],
+  "idf.flashType": "UART"
+}
