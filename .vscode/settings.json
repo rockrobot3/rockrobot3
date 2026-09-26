@@ -8,7 +8,7 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=/Users/qianmi/Documents/trae_projects/my_test/build"
+    "--compile-commands-dir=/Users/qianmi/Documents/trae_projects/my_test/MakeRobot/firmware-c/build"
   ],
   "idf.flashType": "UART"
 }
