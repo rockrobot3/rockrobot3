@@ -4,8 +4,12 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# 复用 MakeRobot 的独立模块（core/llm 等）
-list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../core/llm")
+# 复用 MakeRobot 的独立模块（core/）
+list(APPEND EXTRA_COMPONENT_DIRS
+     "${CMAKE_CURRENT_LIST_DIR}/../core/llm"
+     "${CMAKE_CURRENT_LIST_DIR}/../core/wifi"
+     "${CMAKE_CURRENT_LIST_DIR}/../core/audio"
+     "${CMAKE_CURRENT_LIST_DIR}/../core/relay")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(template-app)

@@ -1,12 +1,16 @@
-/* 音频硬件模块：I2S 麦克风 + 功放 + 板载继电器 */
-#ifndef APP_AUDIO_H
-#define APP_AUDIO_H
+/* audio —— 独立音频模块（ESP-IDF 组件 core/audio）
+ * I2S 全双工：INMP441 麦克风录音 + MAX98357A 功放播放
+ * 公开契约：16kHz 采样、32位整型、AUDIO_CHUNK 帧 */
+#ifndef AUDIO_H
+#define AUDIO_H
 
 #include <stdint.h>
 #include <stddef.h>
-#include <stdbool.h>
 
-void audio_init(void);
+#define AUDIO_SAMPLE_RATE 16000   /* 采样率（模块固定契约） */
+#define AUDIO_CHUNK       256     /* 单次缓冲帧数（采样数） */
+
+void audio_init(void);            /* 初始化 I2S（麦克风+功放） */
 /* 读麦克风原始数据（32bit 整型），返回 ESP_OK/失败 */
 int  audio_read(int32_t *buf, int max_bytes, size_t *bytes_read, int timeout_ms);
 /* 往喇叭写播放数据（32bit 整型） */
@@ -15,8 +19,5 @@ int  audio_write(const void *data, size_t bytes, int timeout_ms);
 void audio_play_tone(int freq, int ms);
 /* 麦克风单采样处理：去直流 + 加增益，返回原始峰值（VAD 判断用） */
 int  audio_mic_process(int32_t raw, int16_t *out);
-
-void relay_init(void);            /* 初始化板载继电器引脚 */
-void relay_set(bool on);          /* 继电器吸合/断开 */
 
 #endif

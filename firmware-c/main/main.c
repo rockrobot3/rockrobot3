@@ -14,8 +14,9 @@
 #include "esp_timer.h"
 #include "esp_err.h"
 #include "config.h"
-#include "app_wifi.h"
-#include "app_audio.h"
+#include "wifi.h"
+#include "audio.h"
+#include "relay.h"
 #include "llm.h"
 
 /* ---------------- TTS 回调：PCM 增益放大后送喇叭 ---------------- */
@@ -33,9 +34,9 @@ static void chat_task(void *arg)
 {
     /* 等联网（最多 30 秒） */
     int w = 0;
-    while (!app_wifi_connected() && w++ < 150)
+    while (!wifi_connected() && w++ < 150)
         vTaskDelay(pdMS_TO_TICKS(200));
-    if (!app_wifi_connected()) {
+    if (!wifi_connected()) {
         printf("✘ WiFi 没连上，请重启板子重试\n");
         vTaskDelete(NULL);
     }
@@ -46,8 +47,8 @@ static void chat_task(void *arg)
 
     llm_chat_init();
 
-    int32_t raw[CHUNK];
-    int16_t tmp[CHUNK];
+    int32_t raw[AUDIO_CHUNK];
+    int16_t tmp[AUDIO_CHUNK];
     int round = 0;
     while (1) {
         round++;
@@ -56,7 +57,7 @@ static void chat_task(void *arg)
         /* 先连接识别服务再等你说话：握手期间的安静不会丢任何声音 */
         printf("（连接识别服务...）\n");
         fflush(stdout);
-        llm_asr_t *asr = llm_asr_begin(SAMPLE_RATE, MAX_REC_S);
+        llm_asr_t *asr = llm_asr_begin(AUDIO_SAMPLE_RATE, MAX_REC_S);
         if (!asr) {
             printf("✘ 连不上识别服务，3 秒后重试\n");
             vTaskDelay(pdMS_TO_TICKS(3000));
@@ -79,13 +80,13 @@ static void chat_task(void *arg)
                 int p = audio_mic_process(raw[i], &tmp[i]);
                 if (p > wp) wp = p;
             }
-            int ms = n * 1000 / SAMPLE_RATE;
+            int ms = n * 1000 / AUDIO_SAMPLE_RATE;
             since_ms += ms;
             if (llm_asr_chunk(asr, tmp, n * 2) < 0) {
                 if (!loud) {   /* 还没说话连接就断了：重连一次继续听 */
                     printf("（连接中断，重连...）\n");
                     llm_asr_abort(asr);
-                    if ((asr = llm_asr_begin(SAMPLE_RATE, MAX_REC_S)) == NULL) { up_err = true; break; }
+                    if ((asr = llm_asr_begin(AUDIO_SAMPLE_RATE, MAX_REC_S)) == NULL) { up_err = true; break; }
                     since_ms = 0;
                     continue;
                 }
@@ -104,7 +105,7 @@ static void chat_task(void *arg)
                 if (!loud && since_ms > IDLE_RESTART_MS) {
                     /* 一直没人说话：重连一次，防连接老化 */
                     llm_asr_abort(asr);
-                    if ((asr = llm_asr_begin(SAMPLE_RATE, MAX_REC_S)) == NULL) { up_err = true; break; }
+                    if ((asr = llm_asr_begin(AUDIO_SAMPLE_RATE, MAX_REC_S)) == NULL) { up_err = true; break; }
                     printf("（就绪，请说话）\n");
                     since_ms = 0;
                 }
@@ -116,7 +117,7 @@ static void chat_task(void *arg)
                     silent_ms = 0;
                 }
                 /* 已发字节达到声明长度，强制结束防止发超 */
-                if (llm_asr_sent(asr) + n * 2 > SAMPLE_RATE * MAX_REC_S * 2) break;
+                if (llm_asr_sent(asr) + n * 2 > AUDIO_SAMPLE_RATE * MAX_REC_S * 2) break;
             }
         }
 
@@ -163,7 +164,7 @@ static void chat_task(void *arg)
 
         /* ---- 合成 + 播放（llm 模块回调交付 PCM，这里送喇叭） ---- */
         printf("[播放回答...]\n");
-        if (llm_tts_play(answer, SAMPLE_RATE, tts_sink, NULL) != 0)
+        if (llm_tts_play(answer, AUDIO_SAMPLE_RATE, tts_sink, NULL) != 0)
             printf("✘ 播放失败\n");
         int32_t zero[64] = {0};        /* 150ms 静音收尾防截断 */
         for (int i = 0; i < 6; i++)
@@ -188,7 +189,7 @@ void app_main(void)
     }
 
     printf("\n=== AI 语音管家（免唤醒，直接说话） ===\n");
-    app_wifi_start();
+    wifi_start();
     audio_init();
     relay_init();
     xTaskCreate(chat_task, "chat", 32768, NULL, 5, NULL);
