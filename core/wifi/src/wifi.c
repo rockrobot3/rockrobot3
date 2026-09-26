@@ -16,17 +16,25 @@ static volatile int  s_ap_clients;    /* 面板热点在线设备数（>0 = 配�
 static char s_ssid[33] = WIFI_SSID;   /* 当前使用的账号（NVS 优先，默认兜底） */
 static TaskHandle_t s_recon_task;
 
-/* 重连专用任务：断开后 3 秒重试；热点上有设备时暂停（防信道跳变踢掉面板用户） */
+/* 重连专用任务：断开后重试，间隔指数退避（5s→10s→...→60s 封顶）
+ * 关键：每次 esp_wifi_connect 都要全信道扫描 1~2 秒，期间 AP 信标暂停，
+ * 疯狂重试会把面板热点弄成半失联，所以必须退避；热点有设备在线时暂停 */
 static void recon_task(void *arg)
 {
+    int wait_ms = 5000;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        vTaskDelay(pdMS_TO_TICKS(3000));
         while (!s_got_ip) {
-            if (s_ap_clients == 0)
+            if (s_ap_clients == 0) {
+                printf("尝试连接 WiFi：%s\n", s_ssid);
                 esp_wifi_connect();
-            vTaskDelay(pdMS_TO_TICKS(3000));
+                vTaskDelay(pdMS_TO_TICKS(wait_ms));
+                wait_ms = wait_ms < 60000 ? wait_ms * 2 : 60000;
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(1000));   /* 配网模式：等面板用户离开 */
+            }
         }
+        wait_ms = 5000;   /* 连上后重置退避 */
     }
 }
 
@@ -168,7 +176,11 @@ int wifi_scan(wifi_scan_item_t *items, int max)
 {
     if (!items || max <= 0) return -1;
     wifi_scan_config_t sc = { .show_hidden = false };
-    if (esp_wifi_scan_start(&sc, true) != ESP_OK) return -1;
+    /* STA 可能正在连接导致扫描忙，稍等重试一次 */
+    if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(700));
+        if (esp_wifi_scan_start(&sc, true) != ESP_OK) return -1;
+    }
     uint16_t n = 0;
     esp_wifi_scan_get_ap_num(&n);
     if (n > (uint16_t)max) n = (uint16_t)max;

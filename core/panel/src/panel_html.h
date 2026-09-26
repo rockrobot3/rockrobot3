@@ -77,7 +77,7 @@
 "async function selftest(){document.getElementById('selfres').textContent='自检中…';" \
 "try{let j=await(await fetch('/api/selftest',{method:'POST'})).json();" \
 "document.getElementById('selfres').textContent=" \
-"『喇叭』+(j.tone?'正常 ✓':'异常')+'\\n『继电器』'+(j.relay?'开合正常 ✓':'异常')+" \
+"'『喇叭』'+(j.tone?'正常 ✓':'异常')+'\\n『继电器』'+(j.relay?'开合正常 ✓':'异常')+" \
 "'\\n『麦克风』'+(j.mic_read?'能读数据 ✓':'读不到 ✘')+'（峰值 '+j.mic_peak+'，>100 表示拾音正常）'}" \
 "catch(e){document.getElementById('selfres').textContent='自检失败'}}" \
 "async function reboot(){if(!confirm('确定重启设备？'))return;await fetch('/api/reboot',{method:'POST'});" \
