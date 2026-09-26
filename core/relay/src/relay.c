@@ -19,3 +19,8 @@ void relay_set(bool on)
 {
     gpio_set_level(RELAY_GPIO, on ? 1 : 0);
 }
+
+bool relay_get(void)
+{
+    return gpio_get_level(RELAY_GPIO) != 0;
+}
