@@ -7,10 +7,10 @@
 ```
 core/llm/
 ├── include/llm.h      ← 公开 API（使用方只 include 这一个头文件）
-├── llm.c              ← 实现：流式 ASR / LLM 对话(带历史记忆) / TTS
-├── llm_config.h       ← 模块参数：API 密钥、模型、音色、超时
+├── src/llm.c          ← 实现：流式 ASR / LLM 对话(带历史记忆) / TTS
+├── src/llm_config.h   ← 模块参数：API 密钥、模型、音色、超时
 ├── CMakeLists.txt     ← 组件注册
-└── idf_component.yml  ← 依赖 cJSON
+└── idf_component.yml  ← 依赖 cJSON（构建清单，与 CMakeLists 同类）
 ```
 
 ## 能力清单
@@ -31,7 +31,7 @@ list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../core/llm")
 ```
 
 2. 使用方组件的 `REQUIRES` 里加 `llm`，代码里 `#include "llm.h"`。
-3. 改 API 密钥/模型/音色：编辑本目录 `llm_config.h`。
+3. 改 API 密钥/模型/音色：编辑 `src/llm_config.h`。
 
 ## ASR 调用约定
 

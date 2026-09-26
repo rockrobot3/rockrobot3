@@ -1,9 +1,9 @@
 /* 语音管家配置区：对话策略参数（VAD 阈值/录音时长/播放音量）
  * 硬件与网络参数在各模块自己的配置里：
- *   WiFi   → core/wifi/wifi_config.h
- *   录音   → core/audio/audio_config.h（增益/引脚）
- *   继电器 → core/relay/relay_config.h（GPIO）
- *   云端AI → core/llm/llm_config.h（密钥/模型/音色） */
+ *   WiFi   → core/wifi/src/wifi_config.h
+ *   录音   → core/audio/src/audio_config.h（增益/引脚）
+ *   继电器 → core/relay/src/relay_config.h（GPIO）
+ *   云端AI → core/llm/src/llm_config.h（密钥/模型/音色） */
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 
