@@ -7,11 +7,14 @@
 ```
 core/<模块名>/
 ├── include/<模块名>.h   ← 公开 API（使用方只 include 这个头）
-├── src/<模块名>.c       ← 实现（源码都集中在 src/）
-├── <模块名>_config.h    ← 模块自己的参数（密钥/引脚/阈值，改这里不碰源码）
-├── CMakeLists.txt       ← 组件注册：SRCS "src/xxx.c" + INCLUDE_DIRS "include" + PRIV_INCLUDE_DIRS "."
+├── src/                 ← 实现与模块配置（源码都集中在 src/）
+│   ├── <模块名>.c
+│   └── <模块名>_config.h ← 模块自己的参数（密钥/引脚/阈值，改这里不碰源码）
+├── CMakeLists.txt       ← 组件注册：SRCS "src/xxx.c" + INCLUDE_DIRS "include" + PRIV_INCLUDE_DIRS "src"
 └── README.md            ← API 表 + 配置说明 + 复用方法
 ```
+
+模块根目录只允许这 4 类文件/目录（include、src、CMakeLists、README），不出现任何源码或配置散件。
 
 ## 模块清单
 
@@ -40,4 +43,4 @@ main（主流程/对话策略）──► llm / audio / relay / wifi
                                     "${CMAKE_CURRENT_LIST_DIR}/../core/relay")
    ```
 2. 使用方组件 `REQUIRES` 加模块名（如 `audio`），代码 `#include "audio.h"`
-3. 调模块参数：改对应模块根目录的 `*_config.h`
+3. 调模块参数：改对应模块 `src/` 里的 `<模块名>_config.h`

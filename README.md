@@ -6,10 +6,14 @@
 
 ```
 MakeRobot/
-├── core/llm/     ← 独立可复用模块：云端 AI 能力（ASR/LLM/TTS，ESP-IDF 组件）
-│   └── llm_config.h ← API 密钥/模型/音色在这里改
-├── firmware-c/   ← 主系统平台：语音管家 C 固件（语音对话/继电器，已跑通）
-│   └── main/     ← config.h + main.c（主流程）+ app_wifi/audio
+├── core/         ← 独立可复用模块库（ESP-IDF 组件，高内聚低耦合）
+│   ├── llm/      ← 云端 AI：流式 ASR + 大模型对话(带记忆) + TTS(PCM 回调)
+│   ├── wifi/     ← WiFi 联网 + 断线自动重连
+│   ├── audio/    ← I2S 麦克风 + 功放、提示音、VAD 前置处理
+│   └── relay/    ← 板载继电器开关
+│   （统一布局：include/ 公开 API + src/ 实现 + *_config.h 模块参数）
+├── firmware-c/   ← 主系统平台：语音管家固件（主流程/对话策略，薄壳）
+│   └── main/     ← config.h(对话策略) + main.c(编排各模块)
 ├── rust/         ← 新模块 Rust 工程（esp-hal，逐个实验开发）
 │   └── src/bin/  ← 每个模块一个独立可烧录的程序
 │       ├── screen_*   屏幕（OLED 表情）
@@ -52,26 +56,22 @@ I2S 全双工：麦克风和功放共享 BCLK/WS 时钟（GPIO4/GPIO5）。
 ```
 firmware-c/
 ├── main/
-│   ├── config.h      ← 固件参数：WiFi、音量、VAD 阈值、继电器
-│   ├── main.c        ← 主流程：对话循环、VAD 断句、语音指令分发、TTS 播放回调
-│   ├── app_wifi.c    ← WiFi 联网 + 自动重连
-│   └── app_audio.c   ← I2S 麦克风/功放驱动、提示音、继电器
-└── CMakeLists.txt    ← 通过 EXTRA_COMPONENT_DIRS 挂载 core/llm 组件
+│   ├── config.h      ← 对话策略：VAD 阈值、最长录音、播放音量
+│   └── main.c        ← 编排各模块：对话循环、VAD 断句、语音指令分发、TTS 播放回调
+└── CMakeLists.txt    ← 通过 EXTRA_COMPONENT_DIRS 挂载 core/ 各组件
 ```
 
-云端 AI（语音识别 → 大模型 → 语音合成）已拆分为独立组件 `../core/llm/`，固件通过 `#include "llm.h"` 复用；模型/密钥在 `core/llm/llm_config.h` 配置。
+固件是"薄壳"：联网（core/wifi）、音频（core/audio）、继电器（core/relay）、云端 AI（core/llm）都是 `../core/` 下的独立组件，`main.c` 只做编排。改任何模块参数去对应模块的 `*_config.h`。
 
 ## 可调参数（config.h）
 
-| 参数 | 默认 | 说明 |
+| 参数（firmware-c/main/config.h） | 默认 | 说明 |
 |------|------|------|
-| `WIFI_SSID` / `WIFI_PASS` | iPhone 热点 | WiFi 名字**区分大小写** |
 | `PLAY_GAIN` | 3 | 播放音量 4=满，2=半 |
-| `REC_GAIN` | 1 | 识别不准可试 2 |
 | `VAD_START` / `VAD_END` | 3200 / 2200 | 环境太吵误触发 → 调大 |
 | `IDLE_RESTART_MS` | 45000 | 没人说话多久重连服务器 |
 
-云端模型/音色在 `core/llm/llm_config.h`：`LLM_MODEL` 默认 Qwen2.5-7B（免费，换 DeepSeek 收费），`TTS_VOICE` 默认 bella 女声（换 alex 男声）。
+模块参数在各模块的 `*_config.h`：WiFi 账号在 `core/wifi`，录音增益 `REC_GAIN` 在 `core/audio`，云端模型/音色在 `core/llm`（`LLM_MODEL` 默认 Qwen2.5-7B 免费，`TTS_VOICE` 默认 bella 女声）。
 
 ## 编译烧录
 
