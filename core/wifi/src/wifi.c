@@ -1,5 +1,5 @@
-#include "app_wifi.h"
-#include "config.h"
+#include "wifi.h"
+#include "wifi_config.h"
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -25,7 +25,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
     }
 }
 
-void app_wifi_start(void)
+void wifi_start(void)
 {
     esp_netif_init();
     esp_event_loop_create_default();
@@ -42,7 +42,7 @@ void app_wifi_start(void)
     esp_wifi_connect();
 }
 
-bool app_wifi_connected(void)
+bool wifi_connected(void)
 {
     return s_got_ip;
 }
