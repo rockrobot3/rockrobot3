@@ -218,6 +218,7 @@ void panel_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 8192;
+    cfg.max_uri_handlers = 16;   /* 默认 8 不够（本面板 9 个接口） */
 
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &cfg) != ESP_OK) {

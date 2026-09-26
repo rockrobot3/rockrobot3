@@ -12,16 +12,38 @@
 #include "nvs.h"
 
 static volatile bool s_got_ip;
+static volatile int  s_ap_clients;    /* 面板热点在线设备数（>0 = 配网模式） */
 static char s_ssid[33] = WIFI_SSID;   /* 当前使用的账号（NVS 优先，默认兜底） */
+static TaskHandle_t s_recon_task;
+
+/* 重连专用任务：断开后 3 秒重试；热点上有设备时暂停（防信道跳变踢掉面板用户） */
+static void recon_task(void *arg)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        while (!s_got_ip) {
+            if (s_ap_clients == 0)
+                esp_wifi_connect();
+            vTaskDelay(pdMS_TO_TICKS(3000));
+        }
+    }
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t base,
                                int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *ev = (wifi_event_sta_disconnected_t *)data;
         s_got_ip = false;
-        printf("WiFi 断开，3 秒后重试...\n");
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        esp_wifi_connect();
+        printf("WiFi 断开（原因码 %d），3 秒后重试\n", ev->reason);
+        xTaskNotifyGive(s_recon_task);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
+        s_ap_clients++;
+        printf("设备已连上面板热点（配网模式：暂停连路由，防信道冲突）\n");
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
+        if (s_ap_clients > 0) s_ap_clients--;
+        if (!s_got_ip) xTaskNotifyGive(s_recon_task);   /* 面板用户走了，恢复连路由 */
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
         printf("★ WiFi 已连接！本机 IP: " IPSTR "（面板：手机连热点 %s 开 192.168.4.1）\n",
@@ -53,6 +75,7 @@ void wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL);
+    xTaskCreate(recon_task, "wifi_recon", 3072, NULL, 5, &s_recon_task);
 
     char ssid[33] = WIFI_SSID, pass[65] = WIFI_PASS;
     if (load_saved_creds(ssid, sizeof(ssid), pass, sizeof(pass)))

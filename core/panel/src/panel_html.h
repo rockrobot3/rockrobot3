@@ -34,7 +34,7 @@
 "<div class=card><input id=ssid placeholder='WiFi 名称（区分大小写，仅2.4G）'>" \
 "<input id=pass type=password placeholder='WiFi 密码'>" \
 "<button class=act onclick='connect()'>连接</button><div id=msg></div>" \
-"<p class=dim>连接成功后如 IP 变化，可用新 IP 访问面板，或继续连本机热点 MakeRobot 访问 192.168.4.1</p></div></div>" \
+"<p class=dim>提示：热点提供者（如手机）连上 MakeRobot 面板热点后，它自己的热点会暂时关闭。若目标是本手机热点：点连接后直接离开本面板，设备会自动连上它；之后可用面板显示的设备 IP 访问面板</p></div></div>" \
 "<div class=page id=p2>" \
 "<div class=card><div class=kv><b>继电器（灯开关）</b><span id=rel>—</span></div>" \
 "<button class=act onclick='relay(1)'>开灯（吸合）</button>" \
