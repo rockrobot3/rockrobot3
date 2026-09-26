@@ -9,7 +9,8 @@ list(APPEND EXTRA_COMPONENT_DIRS
      "${CMAKE_CURRENT_LIST_DIR}/../core/llm"
      "${CMAKE_CURRENT_LIST_DIR}/../core/wifi"
      "${CMAKE_CURRENT_LIST_DIR}/../core/audio"
-     "${CMAKE_CURRENT_LIST_DIR}/../core/relay")
+     "${CMAKE_CURRENT_LIST_DIR}/../core/relay"
+     "${CMAKE_CURRENT_LIST_DIR}/../core/panel")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(template-app)

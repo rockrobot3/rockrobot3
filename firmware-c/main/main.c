@@ -17,6 +17,7 @@
 #include "wifi.h"
 #include "audio.h"
 #include "relay.h"
+#include "panel.h"
 #include "llm.h"
 
 /* ---------------- TTS 回调：PCM 增益放大后送喇叭 ---------------- */
@@ -190,6 +191,7 @@ void app_main(void)
 
     printf("\n=== AI 语音管家（免唤醒，直接说话） ===\n");
     wifi_start();
+    panel_start();
     audio_init();
     relay_init();
     xTaskCreate(chat_task, "chat", 32768, NULL, 5, NULL);
