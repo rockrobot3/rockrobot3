@@ -17,9 +17,9 @@ I2S 全双工音频：INMP441 麦克风录音 + MAX98357A 功放播放，供任�
 - 采样率 `AUDIO_SAMPLE_RATE` = 16kHz，数据 `AUDIO_CHUNK` = 256 帧
 - 麦克风与功放共享 BCLK/WS 时钟
 
-## 配置（audio_config.h）
+## 配置（src/audio_config.h）
 
-I2S 引脚（BCLK/WS/DOUT/DIN）与 `REC_GAIN` 录音增益，都在模块根目录的 `audio_config.h`。
+I2S 引脚（BCLK/WS/DOUT/DIN）与 `REC_GAIN` 录音增益，都在 `src/audio_config.h`。
 
 ## 复用方法
 

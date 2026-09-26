@@ -9,7 +9,7 @@
 | `relay_init` | 初始化引脚（默认断开） |
 | `relay_set(bool on)` | true=吸合(通电)，false=断开 |
 
-## 配置（relay_config.h）
+## 配置（src/relay_config.h）
 
 `RELAY_GPIO` 继电器 GPIO（默认 GPIO21 板载 REL 丝印针）。
 
