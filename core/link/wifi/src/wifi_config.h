@@ -5,8 +5,8 @@
 #ifndef WIFI_CONFIG_H
 #define WIFI_CONFIG_H
 
-#define WIFI_SSID     "716"
-#define WIFI_PASS     "71688888"
+#define WIFI_SSID     "<ssid>"
+#define WIFI_PASS     "<ssid>er002"
 
 #define WIFI_AP_SSID  "RockRobot3"
 #define WIFI_AP_PASS  "12345678"
