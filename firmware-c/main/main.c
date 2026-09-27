@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_err.h"
 #include "esp_app_desc.h"
@@ -42,14 +43,15 @@ static esp_err_t tts_sink(const int16_t *pcm, int samples, void *ctx)
 /* ---------------- 主对话任务 ---------------- */
 static void chat_task(void *arg)
 {
-    /* 等联网（最多 30 秒） */
+    /* 等联网：一直等（配网/断线重连可能要几十秒到几分钟），每 10 秒提示一次。
+     * 不能等超时就退出——那会让语音助手在首次配网慢的机器上永久失效 */
     int w = 0;
-    while (!wifi_connected() && w++ < 150)
+    while (!wifi_connected()) {
+        if (w % 50 == 0)
+            log_writef("（等待网络连接...）");
+        w++;
+        esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(200));
-    if (!wifi_connected()) {
-        log_writef("✘ WiFi 没连上，语音助手不启动（面板/蓝牙仍可用）");
-        vTaskDelete(NULL);
-        return;
     }
     log_writef("★ 网络就绪，进入语音对话模式");
 
@@ -229,8 +231,14 @@ void app_main(void)
     panel_start();
     audio_init();
     relay_init();
+    /* 对话任务必须在 bt_start 之前创建：Bluedroid 初始化要吃掉 ~50KB 堆，
+     * 之后连 16KB 的任务栈都分配不出来（实测 16384/32768 均失败） */
+    if (xTaskCreate(chat_task, "chat", 32768, NULL, 5, NULL) != pdPASS)
+        log_writef("✘ 对话任务创建失败（内存不足），请重启设备");
+    else
+        log_writef("对话任务已启动（空闲堆 %u KB）",
+                   (unsigned)(esp_get_free_heap_size() / 1024));
     bt_start();      /* 经典蓝牙 SPP 控制台（不依赖 WiFi） */
     nearlink_start();/* 星闪/以太网：接口预留，日志提示硬件状态 */
     eth_start();
-    xTaskCreate(chat_task, "chat", 32768, NULL, 5, NULL);
 }
