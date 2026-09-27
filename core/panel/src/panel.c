@@ -57,6 +57,22 @@ static bool json_int(const char *body, const char *key, int *out)
     return true;
 }
 
+/* 解析 JSON 布尔字段（atoi 对 true/false 一律返回 0，不能混用） */
+static bool json_bool(const char *body, const char *key, bool dft)
+{
+    char pat[32];
+    snprintf(pat, sizeof(pat), "\"%s\"", key);
+    const char *p = strstr(body, pat);
+    if (!p) return dft;
+    const char *v = strchr(p, ':');
+    if (!v) return dft;
+    v++;
+    while (*v == ' ') v++;
+    if (strncmp(v, "true", 4) == 0) return true;
+    if (strncmp(v, "false", 5) == 0) return false;
+    return atoi(v) != 0;
+}
+
 static void restart_ms(int ms)
 {
     vTaskDelay(pdMS_TO_TICKS(ms));
@@ -157,7 +173,7 @@ static esp_err_t h_relay(httpd_req_t *req)
     if (len <= 0 || len >= (int)sizeof(body)) len = sizeof(body) - 1;
     httpd_req_recv(req, body, len);
     int on = 0;
-    json_int(body, "on", &on);
+    on = json_bool(body, "on", false) ? 1 : 0;
     relay_set(on != 0);
     data_inc(on ? DATA_RELAY_ON : DATA_RELAY_OFF);
     log_writef("面板：继电器%s", on ? "吸合（开灯）" : "断开（关灯）");
@@ -179,7 +195,7 @@ static esp_err_t h_mic(httpd_req_t *req)
     if (len <= 0 || len >= (int)sizeof(body)) len = sizeof(body) - 1;
     httpd_req_recv(req, body, len);
     int on = audio_mic_enabled();
-    json_int(body, "on", &on);
+    on = json_bool(body, "on", on != 0) ? 1 : 0;
     audio_mic_set_enable(on != 0);
     log_writef("面板：麦克风%s", on ? "开启" : "静音");
     char buf[64];
