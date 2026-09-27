@@ -192,22 +192,40 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 
 void bt_start(void)
 {
+#if !BT_ENABLE
+    log_writef("蓝牙未启用（BT_ENABLE=0）：内存优先给语音对话；无网排查时改 bt_config.h 后重烧");
+    (void)spp_cb;   /* 保留引用避免 unused 警告 */
+    return;
+#else
+    esp_err_t err;
+    /* 优雅降级：蓝牙与其他功能抢内存时失败，只记日志不崩溃，语音助手照常 */
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
-    ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT));
-    ESP_ERROR_CHECK(esp_bluedroid_init());
-    ESP_ERROR_CHECK(esp_bluedroid_enable());
-    ESP_ERROR_CHECK(esp_spp_register_callback(spp_cb));
+    if ((err = esp_bt_controller_init(&bt_cfg)) != ESP_OK ||
+        (err = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT)) != ESP_OK) {
+        log_writef("✘ 蓝牙控制器初始化失败(%s)，跳过蓝牙", esp_err_to_name(err));
+        return;
+    }
+    if ((err = esp_bluedroid_init()) != ESP_OK ||
+        (err = esp_bluedroid_enable()) != ESP_OK ||
+        (err = esp_spp_register_callback(spp_cb)) != ESP_OK) {
+        log_writef("✘ Bluedroid 初始化失败(%s)，跳过蓝牙", esp_err_to_name(err));
+        return;
+    }
     const esp_spp_cfg_t spp_cfg = {
         .mode = ESP_SPP_MODE_CB,
         .enable_l2cap_ertm = true,
         .tx_buffer_size = 0,
     };
-    ESP_ERROR_CHECK(esp_spp_enhanced_init(&spp_cfg));
+    if ((err = esp_spp_enhanced_init(&spp_cfg)) != ESP_OK) {
+        log_writef("✘ SPP 初始化失败(%s)，跳过蓝牙", esp_err_to_name(err));
+        return;
+    }
 
     s_cmdq = xQueueCreate(4, sizeof(s_rxbuf));
     xTaskCreate(bt_worker, "bt_cmd", 8192, NULL, 4, NULL);
     log_set_mirror(bt_mirror);
+    log_writef("蓝牙控制台就绪（设备名 RockRobot3）");
+#endif /* BT_ENABLE */
 }
 
 bool bt_connected(void)
