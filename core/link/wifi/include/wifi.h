@@ -1,6 +1,6 @@
 /* wifi —— 独立联网模块（ESP-IDF 组件 core/wifi）
  * STA 联网（NVS 凭据优先，编译默认兜底）+ 断线自动重连
- * AP 热点常开（MakeRobot），供手机直连操作面板（<ap-gateway-ip>） */
+ * AP 热点常开（RockRobot3），供手机直连操作面板（<ap-gateway-ip>） */
 #ifndef WIFI_H
 #define WIFI_H
 
