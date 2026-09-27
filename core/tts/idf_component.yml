@@ -1,0 +1,5 @@
+## tts 组件依赖：构造请求体的 JSON
+dependencies:
+  idf:
+    version: '>=4.1.0'
+  espressif/cjson: '*'

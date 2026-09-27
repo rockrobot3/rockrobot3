@@ -1,4 +1,4 @@
-# MakeRobot Rust 模块工程（esp-hal）
+# RockRobot3 Rust 模块工程（esp-hal）
 
 新模块用 Rust 开发：屏幕（表情）、身体（舵机）、外接传感器。每个模块是 `src/bin/` 下一个独立程序，单独编译烧录，互不影响主系统固件（`../firmware-c/`）。
 
