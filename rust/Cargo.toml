@@ -1,5 +1,5 @@
 [package]
-name = "makerobot-rust"
+name = "rockrobot3-rust"
 version = "0.1.0"
 edition = "2021"
 

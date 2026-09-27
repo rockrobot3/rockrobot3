@@ -1,6 +1,8 @@
 #include "audio.h"
 #include "audio_config.h"
 #include <math.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/i2s_std.h"
 #include "esp_err.h"
 
@@ -10,6 +12,7 @@
 
 static i2s_chan_handle_t s_tx, s_rx;
 static int32_t s_dc;           /* 麦克风直流偏移估计 */
+static bool s_mic_en = true;   /* 麦克风静音开关（默认开） */
 
 void audio_init(void)
 {
@@ -33,6 +36,11 @@ void audio_init(void)
 
 int audio_read(int32_t *buf, int max_bytes, size_t *bytes_read, int timeout_ms)
 {
+    *bytes_read = 0;
+    if (!s_mic_en) {                      /* 静音：等到超时再返回 0 字节，调用方自然空转 */
+        vTaskDelay(pdMS_TO_TICKS(20));
+        return ESP_OK;
+    }
     return i2s_channel_read(s_rx, buf, max_bytes, bytes_read, timeout_ms);
 }
 
@@ -65,4 +73,14 @@ int audio_mic_process(int32_t raw, int16_t *out)
     else if (g < -32000) g = -32000;
     *out = (int16_t)g;
     return peak;
+}
+
+void audio_mic_set_enable(bool en)
+{
+    s_mic_en = en;
+}
+
+bool audio_mic_enabled(void)
+{
+    return s_mic_en;
 }
