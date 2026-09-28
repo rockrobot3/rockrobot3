@@ -1,5 +1,17 @@
-build/
-managed_components/
-dependencies.lock
-sdkconfig.old
-.cache/
+# Rockrobot3 项目仓
+# 策略：非必要不追踪
+# 默认忽略所有文件
+*
+# 项目仓必要文件（白名单）
+!.gitignore
+!.gitmodules
+!README.md
+!README_zh.md
+!LICENSE
+# 项目仓必要文档（社区/安全/Docker 构建依赖，须入库）
+!.dockerignore
+# 项目仓直属模块（非 submodule，需完整追踪）
+!.github/
+!.github/**
+!docs/
+!docs/**
