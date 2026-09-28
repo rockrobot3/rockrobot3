@@ -43,6 +43,10 @@ static esp_err_t tts_sink(const int16_t *pcm, int samples, void *ctx)
 /* ---------------- 主对话任务 ---------------- */
 static void chat_task(void *arg)
 {
+    /* 注册本任务到看门狗：必须在任何 esp_task_wdt_reset() 之前，
+     * 否则"喂狗给未注册任务"会每 200ms 刷一条 task not found 错误 */
+    esp_task_wdt_add(NULL);
+
     /* 等联网：一直等（配网/断线重连可能要几十秒到几分钟），每 10 秒提示一次。
      * 不能等超时就退出——那会让语音助手在首次配网慢的机器上永久失效 */
     int w = 0;
@@ -60,8 +64,7 @@ static void chat_task(void *arg)
 
     llm_chat_init();
 
-    /* 注册本任务到看门狗：单轮 HTTP 最长 90 秒，超时阈值在 sdkconfig 调大 */
-    esp_task_wdt_add(NULL);
+    /* 单轮 HTTP 最长 90 秒，看门狗超时阈值在 sdkconfig 调大 */
 
     int32_t raw[AUDIO_CHUNK];
     int16_t tmp[AUDIO_CHUNK];
@@ -223,6 +226,16 @@ void app_main(void)
 
     log_init();      /* 尽早接管日志：之后所有 ESP_LOGx 都进 RAM 缓冲可回放 */
     data_init();     /* 运行数据载入 NVS，开机次数 +1 */
+
+    /* 看门狗超时改 120 秒：对话任务单轮云端 HTTP 最长 90 秒是设计行为。
+     * 注意 sdkconfig 的 ESP_TASK_WDT_TIMEOUT_S 只允许 1~60（120 会被静默丢弃回退 5s），
+     * 所以这里用运行时 API 重配 */
+    const esp_task_wdt_config_t twdt_cfg = {
+        .timeout_ms = 120000,
+        .idle_core_mask = (1 << 0) | (1 << 1),   /* 保持监控两个 IDLE 任务 */
+        .trigger_panic = false,
+    };
+    ESP_ERROR_CHECK(esp_task_wdt_reconfigure(&twdt_cfg));
 
     const esp_app_desc_t *app = esp_app_get_description();
     log_writef("=== RockRobot3（马克3号）v%s | 免唤醒语音助手 ===", app->version);
