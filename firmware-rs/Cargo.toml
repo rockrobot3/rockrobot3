@@ -1,0 +1,25 @@
+[package]
+name = "firmware-rs"
+version = "0.1.0"
+edition = "2021"
+description = "RockRobot3 Rust 固件（esp-idf-svc 路线，阶段1：blink）"
+rust-version = "1.82"
+
+[[bin]]
+name = "firmware-rs"
+harness = false
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+[dependencies]
+log = "0.4"
+anyhow = "1"
+esp-idf-svc = { version = "0.53", features = ["critical-section"] }
+
+[build-dependencies]
+embuild = "0.33.5"
