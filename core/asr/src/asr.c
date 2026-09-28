@@ -95,6 +95,11 @@ asr_t *asr_begin(int sample_rate, int max_seconds)
 int asr_chunk(asr_t *s, const void *data, int len)
 {
     if (!s || len <= 0) return 0;
+    /* 上传字节严格不超过声明总长：静音等待期间也会累计字节（VAD 前的安静
+     * 同样上传），一旦发超 Content-Length 就与服务端实际收到的不符 → 400 */
+    if (s->sent >= s->max_bytes) return 0;
+    if (len > s->max_bytes - s->sent)
+        len = s->max_bytes - s->sent;
     if (write_all(s->c, (const char *)data, len) < 0) return -1;
     s->sent += len;
     return 0;
