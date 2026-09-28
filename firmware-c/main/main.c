@@ -91,6 +91,9 @@ static void chat_task(void *arg)
         }
         log_writef("（就绪，请说话）");
 
+        /* 环形预缓冲：VAD 触发前 0.75 秒的声音（防丢开头），静音期间不上传（防服务端背压卡死） */
+        static int16_t prebuf[AUDIO_SAMPLE_RATE * 3 / 4];
+        int pre_len = 0;
         int loud_f = 0, silent_ms = 0, since_ms = 0;
         bool loud = false, up_err = false;
 
@@ -109,22 +112,22 @@ static void chat_task(void *arg)
             }
             int ms = n * 1000 / AUDIO_SAMPLE_RATE;
             since_ms += ms;
-            if (asr_chunk(asr, tmp, n * 2) < 0) {
-                if (!loud) {   /* 还没说话连接就断了：重连一次继续听 */
-                    log_writef("（连接中断，重连...）");
-                    asr_abort(asr);
-                    if ((asr = asr_begin(AUDIO_SAMPLE_RATE, MAX_REC_S)) == NULL) { up_err = true; break; }
-                    since_ms = 0;
-                    continue;
-                }
-                up_err = true;
-                break;
+            /* 静音期间只进预缓冲不上传：每 chunk 先缓存，触发时一次补传 */
+            if (pre_len + n > AUDIO_SAMPLE_RATE * 3 / 4) {
+                int drop = pre_len + n - AUDIO_SAMPLE_RATE * 3 / 4;
+                memmove(prebuf, prebuf + drop, (pre_len - drop) * 2);
+                pre_len -= drop;
             }
+            memcpy(prebuf + pre_len, tmp, n * 2);
+            pre_len += n;
             if (!loud) {
                 if (wp >= VAD_START) {
                     if (++loud_f >= 2) {
                         loud = true;
                         log_writef("（录音中，说完自动停）");
+                        /* 补传触发前的声音（预缓冲），此后说话内容实时上传 */
+                        if (asr_chunk(asr, prebuf, pre_len * 2) < 0) { up_err = true; break; }
+                        pre_len = 0;
                     }
                 } else {
                     loud_f = 0;
@@ -135,8 +138,10 @@ static void chat_task(void *arg)
                     if ((asr = asr_begin(AUDIO_SAMPLE_RATE, MAX_REC_S)) == NULL) { up_err = true; break; }
                     log_writef("（就绪，请说话）");
                     since_ms = 0;
+                    pre_len = 0;
                 }
             } else {
+                if (asr_chunk(asr, tmp, n * 2) < 0) { up_err = true; break; }   /* 上传失败直接结束本轮 */
                 if (wp < VAD_END) {
                     silent_ms += ms;
                     if (silent_ms >= VAD_END_MS) break;   /* 说完了 */
