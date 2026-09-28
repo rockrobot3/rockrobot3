@@ -12,6 +12,7 @@ fn main() -> anyhow::Result<()> {
     EspLogger::initialize_default();
 
     info!("RockRobot3 Rust 阶段1：工具链验证，板载 LED 闪烁");
+    println!("RockRobot3 Rust 阶段1：工具链验证，板载 LED 闪烁");
 
     let peripherals = Peripherals::take().unwrap();
     // 板载 LED 在 GPIO2，高电平点亮
@@ -25,7 +26,7 @@ fn main() -> anyhow::Result<()> {
         FreeRtos::delay_ms(500);
         n += 1;
         if n % 2 == 0 {
-            info!("blink {}", n / 2);
+            println!("blink {}", n / 2);
         }
     }
 }

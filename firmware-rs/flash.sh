@@ -15,19 +15,14 @@ fi
 BUILD_DIR=$(dirname "$ARGS_JSON")
 echo "构建目录：$BUILD_DIR"
 
-# python 解析 flash_files（偏移->文件）与 flash 参数
-MAP=$(python3 - "$ARGS_JSON" <<'EOF'
+# python 解析 flash_files（偏移->文件）
+OFFSET_FILES=$(python3 - "$ARGS_JSON" <<'EOF'
 import json, sys
 d = json.load(open(sys.argv[1]))
-files = d["flash_files"]
-extra = d.get("extra_esptool_args", {})
-parts = [f"{o}={d['flash_settings']['flash_dir'] and f}" for o, f in files.items()]
-print(" ".join(f"{o}={f}" for o, f in files.items()))
-print(d["flash_settings"].get("flash_freq", ""), d["flash_settings"].get("flash_mode", ""), d["flash_settings"].get("flash_size", ""), file=sys.stderr)
+print(" ".join(f"{o}={f}" for o, f in d["flash_files"].items()))
 EOF
 )
 
-OFFSET_FILES=$(echo "$MAP" | head -1)
 echo "烧录映射：$OFFSET_FILES"
 
 FLASH_ARGS=""
