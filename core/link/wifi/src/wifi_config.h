@@ -5,8 +5,8 @@
 #ifndef WIFI_CONFIG_H
 #define WIFI_CONFIG_H
 
-#define WIFI_SSID     "ziroom602"
-#define WIFI_PASS     "ziroomer002"
+#define WIFI_SSID     "WXYYBG"
+#define WIFI_PASS     "12345678"
 
 #define WIFI_AP_SSID  "RockRobot3"
 #define WIFI_AP_PASS  "12345678"
