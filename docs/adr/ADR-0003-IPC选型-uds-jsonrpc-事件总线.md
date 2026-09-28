@@ -1,6 +1,6 @@
 # ADR-0003：IPC 选型 —— UDS + JSON-RPC 2.0 + 定长消息头事件总线
 
-- **状态**：已接受
+- **状态**：已接受；**线格式部分已被 [ADR-0006](ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) 修订**（自造 32B 头 → Airy IPC 128B 头，UDS 路径定为 `/var/run/rock3-ipc.sock`）
 - **日期**：2026-09-28
 - **关联**：[architecture.md](../architecture.md) · contracts/envelope.schema.json
 
