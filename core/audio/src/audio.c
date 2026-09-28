@@ -19,6 +19,7 @@ void audio_init(void)
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.dma_frame_num = AUDIO_CHUNK;
     chan_cfg.dma_desc_num = 10;   /* 缓冲 160ms */
+    chan_cfg.auto_clear = true;   /* 数据断流时 DMA 发静音；否则会循环重放最后一段（卡字） */
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &s_tx, &s_rx));
 
     i2s_std_config_t std_cfg = {
