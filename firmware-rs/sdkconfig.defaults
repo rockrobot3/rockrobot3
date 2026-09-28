@@ -1,0 +1,5 @@
+# Rust 固件 sdkconfig 默认值（2MB flash）
+# 自定义分区表：factory 1984KB（Rust+std 镜像 ~1.2MB，默认 1MB 装不下）
+# 注意：embuild 的 cmake 在 build/out 里跑，相对路径会找不到，必须写绝对路径
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="/Users/qianmi/Documents/trae_projects/my_test/rockrobot3/firmware-rs/partitions.csv"

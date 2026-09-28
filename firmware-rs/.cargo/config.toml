@@ -14,3 +14,5 @@ MCU = "esp32"
 ESP_IDF = "/Users/qianmi/.espressif/esp-idf/v5.5.5"
 # 工具装进 ~/.espressif（与 C 固件 v6.1 工具共存），避免 target 目录清理后重复下载
 ESP_IDF_TOOLS_INSTALL_DIR = "global"
+# 自定义分区表/配置（factory 1984KB，Rust 镜像 ~1.2MB 需要大分区）
+ESP_IDF_SDKCONFIG_DEFAULTS = "/Users/qianmi/Documents/trae_projects/my_test/rockrobot3/firmware-rs/sdkconfig.defaults"
