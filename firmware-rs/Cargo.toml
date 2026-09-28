@@ -20,6 +20,7 @@ opt-level = "z"
 log = "0.4"
 anyhow = "1"
 esp-idf-svc = { version = "0.53", features = ["critical-section"] }
+embedded-svc = { version = "0.29", features = ["std"] }
 
 [build-dependencies]
 embuild = "0.33.5"
