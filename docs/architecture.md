@@ -1,8 +1,8 @@
 # rock3 总体架构文档
 
-- **状态**：v0.2（草案落定，随实现迭代）
+- **状态**：v0.3（草案落定，随实现迭代）
 - **日期**：2026-09-28
-- **关联决策**：[ADR-0001](adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md) · [ADR-0002](adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](adr/ADR-0005-命名规约-rr3前缀矩阵.md)
+- **关联决策**：[ADR-0001](adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md) · [ADR-0002](adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](adr/ADR-0007-控制面分层与模块级升级.md)
 - **命名速查**：[naming.md](naming.md)
 
 ---
@@ -56,7 +56,7 @@ RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人�
 ```
 rock3/
 ├── contracts/                       ← [SC] 字节级共享契约（Rust/Python 双方唯一事实源）
-│   ├── envelope.schema.json         ← 消息封套：定长头 + JSON-RPC 2.0 body
+│   ├── envelope.schema.json         ← A-IPC 128B 消息头 + 5 种 payload 类型契约（ADR-0006）
 │   ├── topics.toml                  ← 全部主题注册表（rrd 校验前缀归属）
 │   └── events/*.schema.json         ← 各模块事件负载 schema
 │
@@ -67,11 +67,11 @@ rock3/
 │   │   ├── patches/                 ← 内核/Buildroot 补丁（含 maskrom 自烧录）
 │   │   └── package/                 ← rrd 与 rr3-* 模块打包
 │   ├── runtime/                     ← Rust workspace
-│   │   ├── rr-ipc/                  ← envelope 编解码、UDS 帧协议
+│   │   ├── rr-ipc/                  ← A-IPC 协议层（纯编解码）+ transport trait（uds/shm/tcp）
 │   │   ├── rr-bus/                  ← 主题匹配订阅、QoS、回压
 │   │   ├── rr-registry/             ← manifest 解析、依赖仲裁、生命周期状态机
 │   │   ├── rr-hal/                  ← traits + linux/{alsa,gpiod,nm} + sim/ 双实现
-│   │   ├── rr-ota/                  ← slot 状态机、回滚判定、factory recovery
+│   │   ├── rr-ota/                  ← slot 状态机、回滚判定、factory recovery、模块级更新（预留）
 │   │   └── rrd/                     ← 主守护进程（装配层：supervisor/health/config）
 │   └── ota/                         ← 分区布局文档 + rr3-ota-ctl CLI
 │
@@ -178,26 +178,26 @@ pub trait Rr3NetLink  { async fn state(&self) -> Result<LinkState>; }
 
 ---
 
-## 6. IPC 与事件总线
+## 6. IPC 与事件总线（Airy IPC，ADR-0006）
 
-### 6.1 消息封套（contracts/envelope.schema.json，[SC] 字节级契约）
+### 6.1 协议：采用 Airy IPC 线格式
 
-定长 32B 消息头 + JSON-RPC 2.0 body（对齐 AirymaxRT gateway 规约）：
+- **128B 定长消息头**（Layout C，L1 永久稳定）+ **5 种 payload 类型**：REQUEST/RESPONSE（RPC）、EVENT（事件总线）、STREAM（音频/运动数据流，有序投递）、NOTIFICATION（心跳/系统通知）
+- 事务面 payload 默认 JSON-RPC 2.0；rock3 的 topic 字符串与 `phase`（normal/degraded/recovery）置于 payload 内，不占用消息头 reserved 区
+- RESPONSE.status 采用 AIRY_E* 子集；src_task 由 rrd（受信运行时）在模块注册时分配并校验
+- capability 令牌、内核强制等 AirymaxRT 运行时机制不引入（单机可信环境），具身化时再评估（ADR-0007）
 
-```json
-{
-  "trace_id": "b7f3…",
-  "ts_ns": 1790000000000000000,
-  "source": "rr3-sense",
-  "phase": "normal",
-  "topic": "rr3-sense/audio/vad_start",
-  "params": { "rms": 4120 }
-}
+### 6.2 rr-ipc 分层
+
+```
+rr-ipc/
+├── protocol/     ← 128B 头与 payload 纯编解码，与传输无关（Rust/Python 对齐同一 schema）
+└── transport/    ← trait Transport：uds（M2 唯一实现）/ shm（控制面，M5）/ tcp（多机，预留）
 ```
 
-`phase ∈ {normal, degraded, recovery}` 贯穿全链路，供 brain 与 base 做降级决策。
+UDS 路径 `/var/run/rock3-ipc.sock`（自有路径，避免与真实 Airymax 运行时同机冲突）。
 
-### 6.2 主题命名
+### 6.3 主题命名
 
 格式 `rr3-<模块>/<域>/<事件>`，全小写 snake_case。已规划主题：
 
@@ -242,6 +242,16 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 
 急停、限位、低电保护逻辑在 rrd/rr-hal：即使 rr3-brain 崩溃或未注册，rrd 仍监听 `rr3-power/battery/low` 并直接执行保护动作。
 
+### 7.4 控制面三级分层（ADR-0007）
+
+| 层 | 频率 | 承载 | 典型内容 |
+|---|---|---|---|
+| 反射环（进程内） | 1k–10kHz | 不进总线：act 进程内本地闭环 | 电机 FOC/PID、平衡控制 |
+| 实时控制面 | 100Hz–1kHz | A-IPC over 共享内存 + `F_ZEROCOPY`/`F_URGENT` | 关节状态、力矩指令、音频 PCM 流 |
+| 事务面 | <100Hz | A-IPC over UDS + JSON-RPC | 事件、RPC、对话、配置 |
+
+反射环永远不出进程——安全闭环不依赖任何总线；总线只承载指令与状态摘要。
+
 ---
 
 ## 8. legacy 迁移映射
@@ -261,7 +271,7 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 
 ## 9. Airymax 接入路径（摘要，详见 ADR-0004）
 
-- 接入点定在**运行时层**：rock3 经 JSON-RPC 对接 AirymaxRT gateway（agentrt 仓真实可用，35 万行 C）
+- 接入点定在**运行时层**：rock3 已采用 Airy IPC 128B 线格式作为 [SC] 契约（ADR-0006），与 AirymaxRT 字节级同格式，经 JSON-RPC 对接 gateway 的成本进一步降低
 - OS 层每半年复查 Airymax distro 仓的 aarch64/headless 产物，有则评估切换
 - sdk-rust（Apache-2.0）可作 rr3-connect 试点依赖
 - 许可证走 Apache-2.0 路径；memoryrovol（商业 EULA）不引入
@@ -274,11 +284,11 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 |---|---|---|
 | M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 |
 | M1 | base/os：Buildroot 在 Radxa ZERO 3 跑通 | 串口出 shell；maskrom 自烧录镜像成功 |
-| M2 | rrd MVP：bus + registry + sim 双假模块 | x86 与板上均能注册/心跳/崩溃自动重启 |
-| M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线 |
+| M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 |
+| M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线，音频走 STREAM |
 | M4 | rr3-brain：移植 asr/llm/tts | 全语音对话闭环（legacy 功能等价） |
-| M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报 |
-| M6 | A/B OTA + 恢复出厂 | 断电升级不 brick，坏 slot 自动回滚 |
+| M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 |
+| M6 | A/B OTA + 恢复出厂 | 断电升级不 brick，坏 slot 自动回滚；genimage 预留模块独立可写分区 |
 
 ---
 
@@ -291,3 +301,5 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 | R3 | Python brain GIL/冷启动 | M4 | 策略预载；必要时 brain 拆子进程 |
 | R4 | Rust↔Python 契约漂移 | M2+ | contracts/ 目录 [SC] 唯一事实源 + rrd 启动校验 |
 | R5 | 0.5L 体积散热（RK3566 被动散热） | 硬件 | 选型时评估无风扇功耗档，后期实机温测 |
+| R6 | A-IPC 自实现运行时与标准偏差 | M2 | IPC-T-001~003 必测；半年复查时对照标准版本变更 |
+| R7 | 待机 <1W 需 suspend/电源状态机与 OS 深度协同 | M5 | rr3-power 与 rrd 电源状态机设计前置，模块声明 wake 权限 |
