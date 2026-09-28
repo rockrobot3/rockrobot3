@@ -9,8 +9,8 @@ CONFIG_BT_BLE_ENABLED=n
 CONFIG_BTDM_CTRL_MODE_BLE_ONLY=n
 CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=y
 
-# ---- 看门狗：对话任务单轮云端 HTTP 最长 90 秒，默认 5s 会误杀 ----
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=120
+# ---- 看门狗：超时在 main.c 里用 esp_task_wdt_reconfigure 运行时改 120s ----
+# （此配置项合法范围 1~60 秒，写 120 会被静默丢弃回退 5s，勿在此调大）
 
 # ---- 分区表：2MB flash 单大 app 分区（factory 1984KB）----
 CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
