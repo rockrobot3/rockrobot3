@@ -5,7 +5,10 @@
 //! - `src_task` 由 rrd 分配并在应答 result 里回带；注册后上行帧的 `src_task` 必须等于分配值
 //!   （AOS-STD-IPC-024：用户态不得自设）——伪造的那一帧被拒，但连接不断（一次笔误不该让整机掉线）；
 //! - 注册完成前不收心跳、不判活（legacy 教训 76c0ad8）；未注册连接由读超时收掉；
-//! - `rr3.unregister` 是模块主动退场，**不走** restart_policy（那是崩溃语义）。
+//! - `rr3.unregister` 是模块主动退场，**不走** restart_policy（那是崩溃语义）；
+//! - 上行 `Event` 是业务发布：过三层归属检查（冒充内建命名空间 → 前缀/在册 owner 越权 →
+//!   主题未登记）后原样转发给**除发布者外**的在册连接，头改写成发布者 task + `dst=0`；
+//!   任何一种拒法都只回错误帧 + 计数，不断连（spec §6、ADR-0006 决策 2/4）。
 //!
 //! 写面（本任务的并发形状）：reader 线程写应答、writer 线程写广播，两者持有同一 socket 的
 //! `try_clone` 句柄、共用一把 `Mutex<UnixStream>`、且一帧一次 `write_all` → **整帧原子**；
@@ -30,7 +33,8 @@ use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_te
 use crate::registry::RrdRegistry;
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_manifest_param, rr3_rpc_parse_request,
-    rr3_rpc_status_for_register, Rr3RpcMethod,
+    rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register, rr3_rpc_topic_param,
+    Rr3RpcMethod,
 };
 use crate::rr3_log;
 
@@ -279,8 +283,9 @@ fn rr3_serve_frame(
     }
     match ty {
         Rr3PayloadType::Request => rr3_serve_request(out, ctx, me, &body),
-        // Task 8 在这里插 `Rr3PayloadType::Event => rr3_publish(...)` 一支；
-        // 现在先把所有非 Request 上行拒掉——拒是默认值，放行才需要理由。
+        Rr3PayloadType::Event => rr3_publish(out, ctx, me, &body),
+        // 拒是默认值，放行才需要理由：Event 之外的非 Request 上行（Notification / Response
+        // 冒充上行）仍然一律拒帧不断连。
         other => {
             rr3_reply_err(
                 out,
@@ -292,6 +297,86 @@ fn rr3_serve_frame(
             Ok(Rr3Flow::Keep)
         }
     }
+}
+
+/// 业务发布：三层归属检查在 Task 5 的关联函数里，这里只负责"拒的话怎么回、过的话怎么转"。
+/// 拒法都回错误帧并计数，但**不断连**——发布越权是数据面问题，不该带走控制面
+/// （与 `src_task` 伪造、payload 类型不支持同一口径：回帧 + `Rr3Flow::Keep`）。
+/// 体的形状错误（非 JSON、缺/坏 `topic`）同理：那是客户端的一次笔误，不是协议失步，
+/// 按崩溃收尾会白记一次 `rr3_reg_death` 并可能触发重启。
+///
+/// `sender_name` 取 `me.name`——它是**这条连接注册时**由 rrd 收下并分配的在册身份
+/// （`Rr3Peer` 随握手成功才存在），不是从帧体或注册报文里现读的字。`registry.rs` 那句
+/// "唯一防线建在调用侧"的前提到这里是成立的：帧上的 `src_task` 已在上面被强制等于
+/// `me.task`，而 `me.name` 与 `me.task` 出自同一次 `rr3_reg_add`。
+fn rr3_publish(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    body: &[u8],
+) -> Result<Rr3Flow, String> {
+    let parsed = match serde_json::from_slice::<Value>(body) {
+        Ok(v) => v,
+        Err(e) => {
+            rr3_reply_err(
+                out,
+                me,
+                rr3_best_effort_id(body),
+                Rr3StatusCode::Invalid,
+                &format!("Event 体必须是 JSON 对象: {e}"),
+            );
+            return Ok(Rr3Flow::Keep);
+        }
+    };
+    let topic = match rr3_rpc_topic_param(&parsed) {
+        Ok(t) => t,
+        Err((_, msg)) => {
+            rr3_reply_err(out, me, rr3_best_effort_id(body), Rr3StatusCode::Invalid, &msg);
+            return Ok(Rr3Flow::Keep);
+        }
+    };
+    let deny = {
+        let check = RrdRegistry::rr3_reg_publish_check(&me.name, &topic, &ctx.topics);
+        if let Err(e) = check {
+            rr3_lock(&ctx.shared).rr3_reg_note_denied();
+            Some(e)
+        } else {
+            None
+        }
+    };
+    if let Some(e) = deny {
+        rr3_reply_err(
+            out,
+            me,
+            rr3_best_effort_id(body),
+            rr3_rpc_status_for_publish_deny(&e),
+            &e.to_string(),
+        );
+        return Ok(Rr3Flow::Keep);
+    }
+    // 转发：保留体，头改写成"发布者 task + 广播目的"，类型仍是 Event。
+    // 这里第三处自己构造帧（另两处是 `rr3_out_frame` 的应答）：转发帧的 src 是**发布者**
+    // 而不是 rrd，套不进那个 src 恒为 RR3_TASK_RRD 的写法。
+    // `payload_len` 必须从**编出来的字节串**取，不能从 `body` 取——少了那 2 字节前缀
+    // 就是 Task 1 帧层的 `LengthMismatch`，收侧当场把这条链打死。
+    let payload = rr3_body_encode(Rr3PayloadType::Event, body);
+    let frame = Rr3Frame {
+        header: Rr3Header {
+            opcode: opcode::SEND,
+            flags: 0,
+            trace_id: 0,
+            timestamp_ns: rr3_now_ns(),
+            src_task: me.task,
+            dst_task: rr_bus::RR3_BROADCAST_DST_TASK,
+            payload_len: payload.len() as u32,
+        },
+        payload,
+    };
+    // 排除项是发布者自己：模块不该收到自己发出的广播（`rr3_reg_fanout` 只按 task 排除，
+    // 不看帧的 dst，见该函数文档）。
+    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, me.task);
+    rr3_log(&format!("转发 {topic} 到 {n} 个连接"));
+    Ok(Rr3Flow::Keep)
 }
 
 /// 三个上行方法。RPC 解析失败一律回 Invalid——Task 6 已保证解析器不产别的码，
