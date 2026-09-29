@@ -1,6 +1,7 @@
 # rr3-connect
 
-连接模块：WiFi 链路、云端会话、蓝牙配网。骨架由 `rr3-mkmod` 生成（conventions §3）。
+连接模块：WiFi 链路、云端会话、蓝牙配网。结构由 `rr3-mkmod` 生成
+（[`conventions.md`](../../docs/process/conventions.md) §3）。
 
 ## 目录结构
 
@@ -25,11 +26,12 @@ modules/rr3-connect/
 
 `bt.rs` 尚无登记主题：启用前必须先改 `contracts/topics.toml`（改契约 = 走 review）。
 
-## 实现进度
-
-v0.0.1 交付结构 + manifest。D-Bus 交互与 TLS 会话随 M5；密钥只经构建期环境变量注入
-（conventions §3）。本地自检：
+## 本地自检
 
 ```bash
 cargo run --manifest-path modules/rr3-connect/Cargo.toml --bin rr3-connect
 ```
+
+**交付到哪一批不在本文件登记**：D-Bus 交互与 TLS 会话今天有没有实现，唯一落点是
+[`docs/status.md`](../../docs/status.md)；密钥只经构建期环境变量注入这条纪律见
+[`conventions.md`](../../docs/process/conventions.md) §3。

@@ -10,12 +10,12 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 | `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举 | L1 |
 | `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001 的**同机**基准；跨架构等值另见下） | L1 |
 | `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_publish_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
-| `events/*.schema.json` | 各模块事件负载 schema（首个真实 schema 随 M3 落） | L2 |
+| `events/*.schema.json` | 各模块事件负载 schema（命名规则与模板见 [`events/README.md`](events/README.md)） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
 > 跨架构（x86 与 aarch64 布局一致，即 IPC-T-003）的等值证明需要交叉编译两端对拍，
-> 当前 HEAD 无此能力，故 IPC-T-003 记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered` 里，
-> 随 M2 落地。
+> 当前 HEAD 无此能力，故 IPC-T-003 记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered` 里；
+> 它何时补上属实况，见 [docs/status.md](../docs/status.md)。
 
 > **`envelope.schema.json` 是"给人读、给测试对照"的数据契约，不是喂校验器的 schema**：它该读、
 > 该对照，但**不该**喂给 JSON Schema 校验器——文件里的 `"$schema": ".../draft/2020-12/schema"` 键
@@ -45,15 +45,16 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
    | `stream` | STREAM(4) | 有序投递（ADR-0007 实时控制面候选） |
    | `notification` | NOTIFICATION(5) | 心跳 / 系统通知 |
 
-   即：4 个 `kind` 覆盖 5 个 `payload_type`，唯一的折叠处是 `request`。v0.0.1 注册表实际分布为
-   request 7 / event 8 / stream 3 / notification 3，合计 21 条主题、7 个 owner。
+   即：4 个 `kind` 覆盖 5 个 `payload_type`，唯一的折叠处是 `request`。注册表当前的 owner 数、
+   topic 数与 kind 分布**就是 `topics.toml` 本身**，本文件不抄副本（抄来的数一次 append 就漂）。
    STREAM 类主题 v0.0.1 仅登记、不实现传输。
 5. **上述形状是机器钉住的**：`cargo test -p rr-registry --test contract` 里的
-   `registry_shape_is_pinned` 按 `contracts/topics.toml` 的解析结果断言 owner 数 7、topic 数 21、
-   kind 分布 7/8/3/3，以及全部 21 条 `(name, owner, kind)` 三元组逐条在册。计数做成硬 pin 是
+   `registry_shape_is_pinned` 按 `contracts/topics.toml` 的解析结果断言 owner 数、topic 数、
+   `kind` 分布，以及全部 `(name, owner, kind)` 三元组逐条在册。计数做成硬 pin 是
    **刻意的，不是禁止 append**：新增主题合法，但必须是一次有意识的编辑——同一次改动里同时更新
-   `contracts/topics.toml`、该测试的期望值，以及把这些数字当事实来写的
-   `docs/architecture/architecture.md` §6.3 / `docs/process/naming.md` §3 / 本文件。删主题、改 kind、改 owner 数都会红。
+   `contracts/topics.toml`、该测试的期望值，以及任何把这些数字当事实抄进正文的文档
+   （用例条数的唯一登记处是 [docs/process/conventions.md](../docs/process/conventions.md) §2）。
+   删主题、改 kind、改 owner 数都会红。
 
 ## 演进规则（ADR-0007 决策二）
 
@@ -67,7 +68,8 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 4. 六步检查以 `bash tools/ci/check.sh` 为**唯一入口**（本地与 CI 同一命令，命名沿用方案 D7 的"三检查"；
    远程在 atomgit，平台自动触发待确认，见方案 §7 遗留项）：
    ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试 /
-   ② manifest schema 校验 + 注册表形状 pin / ②b mkmod 输出即契约用例 / ③ 主题前缀归属
+   ② manifest schema 校验 + 注册表形状 pin / ②b mkmod 输出即契约用例 / ③ 主题前缀归属 /
+   ④ 仓内所有独立 Rust 工程编译
    （步序、命令与每步条数的权威表见 [docs/process/conventions.md](../docs/process/conventions.md) §2，
    本文件不抄数字）
 
@@ -96,3 +98,6 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
   但 §3.2–3.6 的 C 结构体首字段分别是 `request_id`/`event_id`/`stream_id`，未写清该前缀
   的宽度与对齐。**v0.0.1 只冻结 128B 头与 5 个 payload 类型枚举值，payload 视为不透明
   JSON 字节**；前缀编码留 M2 决策（届时同步影响 IPC-T-004 的 golden 向量）。
+  Rust 侧实现按 **2 字节小端**取值（`rr-ipc` 的 `RR3_BODY_TYPE_PREFIX_LEN`，可照抄的字面量见
+  [docs/reference/rrd-rpc.md](../docs/reference/rrd-rpc.md) §1），**契约本体尚未把这一宽度写进
+  `envelope.schema.json` 的冻结范围**——把它升进契约是一次契约变更（走 review），不是实现细节。

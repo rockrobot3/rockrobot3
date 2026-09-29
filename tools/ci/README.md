@@ -10,10 +10,15 @@
 | 步 | 命令 | 覆盖 |
 |---|---|---|
 | ① | `cargo check --all-targets --workspace`（在 `base/runtime`） | 编译，含 `#[cfg(test)]` 目标 |
-| ①b | `cargo test --workspace` | 全量测试（2026-09-29 实测 56 条），兜住未被点名的守护用例 |
-| ② | `cargo test -p rr-registry --test contract` | manifest schema 校验 + 注册表形状 pin（22 条） |
-| ②b | `cargo test --manifest-path tools/mkmodule/Cargo.toml` | mkmod 产物即契约（5 条） |
-| ③ | `cargo test -p rr-registry topics_prefix` | 主题前缀归属（② 那 22 条的子集） |
+| ①b | `cargo test --workspace` | 全量测试，兜住未被点名的守护用例 |
+| ② | `cargo test -p rr-registry --test contract` | manifest schema 校验 + 注册表形状 pin |
+| ②b | `cargo test --manifest-path tools/mkmodule/Cargo.toml` | mkmod 产物即契约（独立包，①b 覆盖不到） |
+| ③ | `cargo test -p rr-registry topics_prefix` | 主题前缀归属（② 那个测试目标里的筛选子集） |
+| ④ | 逐工程 `cargo check -q --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，显式排除 `base/runtime/*`） | 仓内**所有独立 Rust 工程**编译：它们各自成 workspace，①/①b 打不到 |
+
+**每步跑多少条测试不在本文件登记**：唯一落点是
+[`docs/process/conventions.md`](../../docs/process/conventions.md) §2（含两平台条数为何不等的
+逐条解释）。本文件只写"跑什么命令、为什么这么跑"。
 
 两处设计约束（改动前请读脚本头部注释）：
 

@@ -8,7 +8,9 @@
 - `schema_version` 必填整数，只增不改
 - 负载内不重复放 topic 字符串与 phase：topic 在帧外层由 rr-bus 承载，phase 随 payload 走
   （ADR-0006 §2「语义字段置于 payload 内」的落点）
-- v0.0.1 不产出真实 schema，首个随 M3（rr3-sense 的 VAD 事件）落地
+
+本目录今天有没有真实 schema 属实况，唯一落点
+[`../../docs/status.md`](../../docs/status.md)，本文件不记进度。
 
 模板：
 

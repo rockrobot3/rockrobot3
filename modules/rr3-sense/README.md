@@ -1,6 +1,7 @@
 # rr3-sense
 
-感知模块：麦克风阵列采集、环境传感器、IMU。骨架由 `rr3-mkmod` 生成（conventions §3）。
+感知模块：麦克风阵列采集、环境传感器、IMU。结构由 `rr3-mkmod` 生成
+（[`conventions.md`](../../docs/process/conventions.md) §3）。
 
 ## 目录结构
 
@@ -8,7 +9,7 @@
 modules/rr3-sense/
 ├── module.toml          ← manifest；发布面只能引用 contracts/topics.toml 已登记主题
 ├── config.toml          ← 运行参数（VAD 阈值等），改参数不碰源码
-├── Cargo.toml           ← 独立 workspace；M2 起 path 依赖 rr-ipc / rr-bus
+├── Cargo.toml           ← 独立 workspace；接总线时 path 依赖 rr-ipc / rr-bus
 └── src/
     ├── main.rs          ← 入口：打印自述与发布面，未接总线
     ├── audio/mod.rs
@@ -28,13 +29,14 @@ modules/rr3-sense/
 | publish | `rr3-sense/imu/state` | stream |
 | rpc | `rr3-sense/capture/dump` | request |
 
-PCM 与 IMU 属实时控制面摘要；shm 零拷贝传输随 M5（ADR-0007 §裁定 3）。
+PCM 与 IMU 属实时控制面摘要；shm 零拷贝传输的裁定见 ADR-0007 §裁定 3。
 
-## 实现进度
-
-v0.0.1 交付结构 + manifest（已过 `tools/ci/check.sh` ②④）。总线接入随 M2（rrd + UDS），
-ALSA / 传感器读取随 M3（rr-hal linux 后端）。本地自检：
+## 本地自检
 
 ```bash
 cargo run --manifest-path modules/rr3-sense/Cargo.toml --bin rr3-sense
 ```
+
+**交付到哪一批不在本文件登记**：总线接入（rrd + UDS）、ALSA / 传感器读取（rr-hal linux 后端）
+这些能力今天有没有实现，唯一落点是 [`docs/status.md`](../../docs/status.md)；
+门禁与用例条数见 [`docs/process/conventions.md`](../../docs/process/conventions.md) §2。

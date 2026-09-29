@@ -32,11 +32,12 @@ modules/rr3-brain/
 
 主题均已在 [`contracts/topics.toml`](../../contracts/topics.toml) 登记；新增主题要先改契约。
 
-## 实现进度
-
-v0.0.1 只交付**结构**：接口签名、状态机数据形状、密钥来源。三处 `NotImplementedError`
-随 M4（云端链路）实现。本地自检：
+## 本地自检
 
 ```bash
 python -m compileall rr3_brain && python -m rr3_brain
 ```
+
+交付面是**结构**：接口签名、状态机数据形状、密钥来源。云端链路（ASR / LLM / TTS 三处
+`NotImplementedError`）今天接到哪一段属实况，唯一落点
+[`docs/status.md`](../../docs/status.md)，本文件不记进度。
