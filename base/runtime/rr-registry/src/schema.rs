@@ -2,7 +2,8 @@
 
 use toml::Value;
 
-/// manifest 契约 schema 版本（与 contracts/schema_version 同步）
+/// manifest 契约 schema 版本（对应 `module.schema.toml` 的 `schema_version` 键；
+/// 与信封契约的 `x-schema-version` 是两套键，见 `contracts/README.md` 演进规则 2）
 pub const RR3_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 const RR3_MODULE_SCHEMA_TOML: &str = include_str!("module.schema.toml");
