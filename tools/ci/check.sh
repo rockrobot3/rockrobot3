@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # 规约三检查（方案 D7）。本地与 CI 同一入口，避免"CI 绿本地红"的两套逻辑。
-# 测试步（②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
+# ① 用 --all-targets：普通 cargo check 根本不编译 #[cfg(test)] 目标，
+#    测试代码里的类型错误会一路绿灯（实测：注入 E0308 后 check 退 0，--all-targets 退 1）。
+# ①b 跑 workspace 全量测试：②/③ 只点名 rr-registry 的 21 条（③ 是那 21 条的子集），
+#    其余 30 条——含 rr-ipc 的 13 个 envelope 契约守护——若不在此步覆盖，门里就没有任何力量行
+#    contracts/README 所称"契约的执行入口"。
+# 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
 # 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；
 # 退出码仍是首要信号（编译错误、错误 --test 目标名照样红）。① 不跑测试，只看得退出码。
 set -uo pipefail
@@ -51,7 +56,10 @@ run_tests() {
 }
 
 step "① workspace 编译"
-run sh -c 'cd base/runtime && cargo check --workspace'
+run sh -c 'cd base/runtime && cargo check --all-targets --workspace'
+
+step "①b workspace 全量测试（含未被点名的守护用例）"
+run_tests sh -c 'cd base/runtime && cargo test --workspace'
 
 step "② manifest schema 校验"
 run_tests sh -c 'cd base/runtime && cargo test -p rr-registry --test contract'
