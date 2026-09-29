@@ -37,6 +37,19 @@ use serde_json::{json, Value};
 pub const RR3_OVERLAY_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/sim-topics.toml");
 
+/// 既有 19+1+5 条线级用例（`register_publish` / `socket_banner` / `e2e_sim_peer`）统一用的
+/// "安静 tick"（1 小时）。**为什么把既有测试钉在"不过期"上**：
+/// Task 10 的 diff 不该改动 Task 7/8/9 任何一条用例的可观察行为——那里的模块注册完就不再
+/// 喂狗（手搓帧用例只喂测试要的那一颗），真 tick 会让它们集体被判死，多出的 failed 广播与
+/// 判死日志会污染"这条连接上不该出现 X"那类否定断言，也会让 `task=` 号段的既有断言变成
+/// 重启后的新号。安静 tick 让线程照起、照打启动行，但在一条用例的寿命内永不扫到到期。
+/// 只有 `rrd/tests/e2e_watchdog.rs` 显式要小 tick。
+pub const RR3_QUIET_WATCHDOG_TICK_MS: u64 = 3_600_000;
+
+/// watchdog 线级用例的 tick。放在 support 而不是测试文件里：它与夹具 manifest 的
+/// `watchdog_ms = 500` 一起决定"到期上界 520ms"这条算式，两处各写一个数就是两处真值。
+pub const E2E_TICK_MS: u64 = 20;
+
 /// 等到 rrd 打出"监听 <path>"的超时
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
 /// 单条日志等待
@@ -109,7 +122,13 @@ impl RrdTest {
     pub fn rr3_start(tag: &str) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
         // 就绪判据用日志而非 connect：connect 探测会留下一条"首帧读取失败"噪声日志
-        RrdTest::rr3_spawn_with_overlay(&socket, None, &socket, Some(Path::new(RR3_OVERLAY_PATH)))
+        RrdTest::rr3_spawn_with_overlay(
+            &socket,
+            None,
+            &socket,
+            Some(Path::new(RR3_OVERLAY_PATH)),
+            RR3_QUIET_WATCHDOG_TICK_MS,
+        )
     }
 
     /// **不带** `--topics-overlay` 的起法：在册的只有 `contracts/topics.toml` 那 21 条生产主题。
@@ -118,7 +137,26 @@ impl RrdTest {
     /// 套接字名与 `rr3_start` 同一套 pid+tag 唯一名规则（Global Constraints 8）。
     pub fn rr3_start_no_overlay(tag: &str) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
-        RrdTest::rr3_spawn_with_overlay(&socket, None, &socket, None)
+        RrdTest::rr3_spawn_with_overlay(
+            &socket,
+            None,
+            &socket,
+            None,
+            RR3_QUIET_WATCHDOG_TICK_MS,
+        )
+    }
+
+    /// watchdog 线级用例的唯一入口。**没有默认值**是刻意的：到期判死必须是用例自己声明的
+    /// 条件，不能是"忘了传参数"传出来的。
+    pub fn rr3_start_with_tick(tag: &str, tick_ms: u64) -> RrdTest {
+        let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
+        RrdTest::rr3_spawn_with_overlay(
+            &socket,
+            None,
+            &socket,
+            Some(Path::new(RR3_OVERLAY_PATH)),
+            tick_ms,
+        )
     }
 
     /// 真正的起进程处。三个路径各管各的：
@@ -132,16 +170,27 @@ impl RrdTest {
     /// 参数表里没有 `tag`：套接字名由**调用方**决定（`rr3_start` 把 tag 拼进路径，
     /// `socket_banner.rs` 自己拼名字），起进程这一层用不上它（M-5：死参数已删）。
     pub fn rr3_spawn(socket: &Path, cwd: Option<&Path>, socket_arg: &Path) -> RrdTest {
-        RrdTest::rr3_spawn_with_overlay(socket, cwd, socket_arg, Some(Path::new(RR3_OVERLAY_PATH)))
+        RrdTest::rr3_spawn_with_overlay(
+            socket,
+            cwd,
+            socket_arg,
+            Some(Path::new(RR3_OVERLAY_PATH)),
+            RR3_QUIET_WATCHDOG_TICK_MS,
+        )
     }
 
     /// 起进程那一层：`overlay` 为 `None` 时**整条 `--topics-overlay` 都不传**
     /// （`rr3_start_no_overlay` 用这条口径证明叠加层不是生产放行口）。
+    ///
+    /// `watchdog_tick_ms` 也走参数而不是"各调用点自己拼"：它是本任务唯一的线程参数，
+    /// 而 `rr3_spawn_with_overlay` 末尾会等 `watchdog 启动 tick={它}ms` 那一行——
+    /// 传进去的数与等的数必须是同一个来源，否则接线断了没人发现（那条等待同时钉住接线）。
     pub fn rr3_spawn_with_overlay(
         socket: &Path,
         cwd: Option<&Path>,
         socket_arg: &Path,
         overlay: Option<&Path>,
+        watchdog_tick_ms: u64,
     ) -> RrdTest {
         let _ = std::fs::remove_file(socket);
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rrd"));
@@ -152,6 +201,7 @@ impl RrdTest {
         }
         cmd.args(["--restart-base-ms", "20"])
             .args(["--pre-register-timeout-ms", "300"])
+            .args(["--watchdog-tick-ms", &watchdog_tick_ms.to_string()])
             .stdout(Stdio::piped())
             // stderr 直接继承：出错就在 cargo 输出里，不必再开一条管道读（也避免缓冲区写满把 rrd 卡死）
             .stderr(Stdio::inherit());
@@ -166,6 +216,10 @@ impl RrdTest {
 
         let mut me = RrdTest { socket: socket.to_path_buf(), child, lines, seen: Vec::new() };
         me.rr3_wait_log(&format!("监听 {}", socket.display()));
+        // 每个用例都付这一行的等待代价，换来的是一条全局前提：**监视线程真的起了**。
+        // "起了但不扫"（tick 传错、循环一开始就死锁）由 e2e_watchdog 的判据抓，
+        // 这里只抓"根本没起"。needle 带上传进去的具体数值，所以它同时钉住接线。
+        me.rr3_wait_log(&format!("watchdog 启动 tick={watchdog_tick_ms}ms"));
         me
     }
 
@@ -407,6 +461,11 @@ pub fn rr3_drain_until_closed(c: &mut RrdClient) -> Vec<Rr3Frame> {
     got
 }
 
+/// 收集侧的硬墙钟上限：`rr3_collect_within` 的终止条件是"安静 dur"，一条持续发帧的连接
+/// 让它永远安静不下来。真出现那种形状（风暴广播）时，正确的结论是"帧流在 cap 内没停过"
+/// 并把手上收到的帧打出来，而不是让整条测试目标挂死。
+const COLLECT_WALL_CLOCK_CAP: Duration = Duration::from_secs(5);
+
 /// 在 `dur` 内把这一条连接上**能读到的帧全部收走**（不 panic：读不到就是这一轮结束）。
 /// 队列里的存货先算进返回值（`rr3_try_recv` 的既有口径），用于"这条连接上不该出现 X"的否定断言。
 /// 它是**破坏性**读法：取走的帧**不回队列**（与本文件头和 `rr3_read_where` 那种"未匹配帧存回队列、
@@ -418,14 +477,32 @@ pub fn rr3_drain_until_closed(c: &mut RrdClient) -> Vec<Rr3Frame> {
 /// 白等 4.85 s，Task 10/11 的否定断言一多就把测试时长推到分钟级。这里临时把读超时压到 `dur`、
 /// **收完把原值设回去**：设回去不是洁癖——同一连接后来的读法要靠 5 s 等到慢副作用（重启、
 /// watchdog），留下 150 ms 就等于把别的用例改成随机红。
+///
+/// 终止条件之外还有一条**墙钟上限**（`COLLECT_WALL_CLOCK_CAP`，Task 8 验收项 A-1）：
+/// "安静 dur"这一条只挡得住"帧流会停"的连接，一条持续发帧的连接能让它永远收不完、
+/// 于是整条测试目标挂到 cargo 超时且诊断信息为零。超限即 panic 并打印已收到的帧数与类型。
 pub fn rr3_collect_within(c: &mut RrdClient, dur: Duration) -> Vec<Rr3Frame> {
     let saved = c.stream.read_timeout().ok();
     c.stream
         .set_read_timeout(Some(dur))
         .expect("临时读超时不可设");
+    let started = Instant::now();
     let mut got = Vec::new();
     while let Ok(f) = rr3_try_recv(c) {
         got.push(f);
+        if started.elapsed() > COLLECT_WALL_CLOCK_CAP {
+            // 恢复超时要尽力做：panic 路径上管不上，至少不是"把一个 5 s 读超时留给别的用例"
+            c.stream.set_read_timeout(saved.flatten()).ok();
+            let kinds: Vec<String> = got
+                .iter()
+                .map(|f| rr3_body_split(&f.payload).map(|(ty, _)| format!("{ty:?}")).unwrap_or_else(|_| "坏前缀".into()))
+                .collect();
+            panic!(
+                "帧流在 {COLLECT_WALL_CLOCK_CAP:?} 内没停过（收到 {} 帧）: {}",
+                got.len(),
+                kinds.join(",")
+            );
+        }
     }
     c.stream
         .set_read_timeout(saved.flatten())

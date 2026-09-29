@@ -17,10 +17,30 @@ pub mod conn;
 #[cfg(unix)]
 pub mod daemon;
 
+// 只被下面那条 `#[cfg(unix)]` 的 `rr3_lock` 用到，所以两处都必须带 cfg。实测（本轮在 Windows
+// 上跑 `cargo check --all-targets -p rrd`）：import 不加 cfg 是 `unused_imports` 警告，
+// `rr3_lock` 不加 cfg 是 `dead_code` 警告（"never used"，实测 1 条）——而本仓的门禁是零警告。
+// 两个调用方（`conn`/`daemon`）都是 `#[cfg(unix)]` 模块，所以 cfg 就是它们的编译面。
+#[cfg(unix)]
+use std::sync::{Mutex, MutexGuard};
+
 /// 统一日志出口：stdout、行首 `rrd: `。集成测试的可观察面全靠它。
 /// 走 `println!`：Rust stdout 是行缓冲，管道里也按行 flush，父进程逐行读得到。
 pub fn rr3_log(msg: &str) {
     println!("rrd: {msg}");
+}
+
+/// 锁中毒的唯一处理口径：中毒只可能来自 panic 的持锁者，继续用比弃连接/比整个守护停摆好。
+/// **单点**原因：`conn.rs`（应答与收尾）与 `daemon.rs`（watchdog 扫描与广播）共用同一把
+/// 在册表锁，两处各写一份"怎么处理中毒"迟早分叉——与 Task 9 抽 `rr3_spawn_line_reader`
+/// 是同一条理由。
+///
+/// `#[cfg(unix)]` 不是多余的装饰而是零警告的前提：它的两个调用方（`conn`/`daemon`）都是
+/// `#[cfg(unix)]` 模块，非 Unix 下无条件定义会立刻变成 `dead_code`（Windows ①b 的门禁是
+/// 零警告）。若将来平台无关代码也要用这把锁，那时候再把这一行去掉。
+#[cfg(unix)]
+pub(crate) fn rr3_lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// 非 Unix 平台的唯一出口文案（Task 3 Step 6 的实证按它断言，别改字面量）

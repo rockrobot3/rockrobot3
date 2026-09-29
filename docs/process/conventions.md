@@ -24,7 +24,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 165 条（Windows）/191 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 167 条（Windows）/197 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -33,27 +33,31 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-30 M2 Task 9 收口（`rrd` 包新增测试夹具二进制 `src/bin/sim_peer.rs` +
-新测试目标 `rrd/tests/e2e_sim_peer.rs` 5 条 + support 抽出共享行收集器 `rr3_spawn_line_reader` /
-`rr3_wait_line`）后复测。**本轮新增的是"跨进程夹具"这一类证据**——第二个**真进程**（另一个
-`[[bin]]` 产物）通过 UDS 走 rrd 的线上入口完成注册→心跳→发布→退场，不是又一批同进程手搓帧的
-用例；同一套帧由第二份独立编解码实现读写还能绿，"协议层不是测试自己跟自己说话"这句话才有证据。
+测试面如实登记（2026-09-30 M2 Task 10 收口（`rrd` **唯一的** watchdog 线程 `rr3_spawn_watchdog` +
+CLI `--watchdog-tick-ms` + `Rr3Expiry` 回带 `elapsed_ms`/`watchdog_ms` 两个判据数字 + 锁中毒口径
+`rr3_lock` 收进 `lib.rs` 单点 + 新测试目标 `rrd/tests/e2e_watchdog.rs` 4 条 + support 的 tick 参数与
+`rr3_collect_within` 的墙钟上限）后复测。**本轮新增的是"时间判定"这一类证据**——到期判死、
+恰好一条 `failed` 回报、判死后心跳被拒且不复活，都是**真进程 + 真 UDS + 真超时**跑出来的：
+表级用例只把 `now_ms` 当参数喂（回答"怎么算到期"），线级用例才证明"到期之后线程真的做了那几件事、
+而且只做一次"。**上一轮的"跨进程夹具"这一类证据仍在**（`e2e_sim_peer` 的 5 条本轮未动）。
 **两个平台的条数本就应当不等**，所以各记各的、
-不合并成单一数字：Windows x86_64-pc-windows-msvc **165**（本轮 ①b 实测量，与上一轮**同数**——
-新增的 5 条全在 `#![cfg(unix)]` 目标里、Windows 不参与编译，而新 bin `sim_peer` 自己的单元测试
-目标实测 `running 0 tests`，见下）、
-WSL2 Linux x86_64 **191**（本轮 L2 全量实跑 `191 passed; 0 failed`；逐目标相加而非算术倒推：
+不合并成单一数字：Windows x86_64-pc-windows-msvc **167**（本轮 ①b 实测量，= 上一轮 165
+再加 `registry::tests` 的 1 条（到期回报回显判据数字）与 `cli::tests` 的 1 条（tick 可配且拒 0）——
+新增的 4 条 `e2e_watchdog` 全在 `#![cfg(unix)]` 目标里、Windows 不参与编译，该目标实测
+`running 0 tests`，见下）、
+WSL2 Linux x86_64 **197**（本轮 L2 全量实跑 `197 passed; 0 failed`；逐目标相加而非算术倒推：
 rr-bus 4 + rr-hal 4 + rr-ipc lib 26 + rr-ipc `envelope_meta` 4 + rr-ota 4 + rr-registry lib 15 +
-契约 24 + rrd lib 85 + `src/main.rs` 0 + `src/bin/sim_peer.rs` 0 + `e2e_sim_peer` 5 +
-`register_publish` 19 + `socket_banner` 1 = 191；上一轮记的是 186）。
+契约 24 + rrd lib 87 + `src/main.rs` 0 + `src/bin/sim_peer.rs` 0 + `e2e_sim_peer` 5 +
+`e2e_watchdog` 4 + `register_publish` 19 + `socket_banner` 1 = 197；上一轮记的是 191）。
 `aarch64-unknown-linux-gnu` 交叉 + qemu-user
-本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 26 条全部可枚举：
-Unix 独有的 25 条线级用例（`register_publish` 19 + `socket_banner` 1 + `e2e_sim_peer` 5）+ `cli::tests` 里那 1 条
+本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 30 条全部可枚举：
+Unix 独有的 29 条线级用例（`register_publish` 19 + `socket_banner` 1 + `e2e_sim_peer` 5 +
+`e2e_watchdog` 4）+ `cli::tests` 里那 1 条
 `#[cfg(unix)]` 用例。cargo 1.95—1.97：
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
-Unix 侧行为不据此声称；25 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
+Unix 侧行为不据此声称；29 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **165** 条（Windows）/ **191** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **167** 条（Windows）/ **197** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
@@ -61,9 +65,9 @@ Unix 侧行为不据此声称；25 条线级用例在 Windows ①b 里显示 `ru
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24（M2 Task 6 给 `Rr3TopicSet` 加 `rr3_topic_set_kind`
 访问器，实证并进了既有的 merge 用例，故条数不变）；
-rrd 的 84 条（Windows）/85 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
-全在 lib 目标（`cli::tests` 11/12 + `topics_load::tests` 16 + `manifest::tests` 7 + 横幅 2
-+ `registry::tests` 38 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
+rrd 的 86 条（Windows）/87 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
+全在 lib 目标（`cli::tests` 12/13 + `topics_load::tests` 16 + `manifest::tests` 7 + 横幅 2
++ `registry::tests` 39 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
 形状错误标注来源 1、路径值不得以 `-` 开头 1；M2 Task 4 再补 `manifest::tests` 7 条；
 M2 Task 5 补在册表/状态机/发布归属 29 条与合并后复验 1 条；
 M2 Task 5 修复轮 1 再补 `registry::tests` 3 条：在册 owner ≠ 首段时的越权终判 1、
@@ -99,6 +103,12 @@ Task 8 另补 `registry::tests` 1 条（遗留 ②）——`rr3_reg_add` 容量�
 因为当时没有任何用例把"表满"与"同名 Failed"两个条件同时凑齐；新用例
 `full_table_still_allows_re_registering_a_failed_module` 就是那个组合，另带两条对照
 （满表上的新名字仍被容量拒、满表上的同名非 Failed 仍回 `Duplicate`）。
+M2 Task 10 补 `registry::tests` 1 条——`Rr3Expiry` 必须回显**判定用的那两个数**：`elapsed_ms` 是
+`now - last_beat`（不是 `now - 注册时刻`）、`watchdog_ms` 是**该模块自己**的值（不是全局常量）。
+线程侧那行判死日志与线级断言都从这两个数派生；表里少回显一个，线上便只能靠掐时间判对错，
+而掐时间正是"随机红"的来源。同批补 `cli::tests` 1 条——`--watchdog-tick-ms` 默认 200、可配、
+**拒 0 而不是夹 1**（0 = 每拍都扫 = 忙循环，那是另一种错法）；并把既有默认值用例扩成三值同钉
+（`restart_base_ms` / `pre_register_timeout_ms` / `watchdog_tick_ms`）。
 M2 Task 7 的 UDS 层没有新增 lib 用例（`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]` 的线程与 IO，
 纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住；Task 8 是唯一动到 lib 的那一支——上面那段
 `registry::tests` 的容量门实证 1 条，其余全在测试目标里），它的 10 条（Task 8 之后 20 条）在两个独立测试目标
@@ -131,7 +141,40 @@ M2 Task 8 的发布面再补 7 条，共 **19** 条——合法发布被转发�
 FIN/RST 双路连同退出码一起归 Task 11。Task 11 拿到退出码后必须改写本条并在提交里点名）、
 同一个二进制配两份 manifest → 两个身份而 `RR3_SIM_PEER_ROLE` 只改行为不改身份。
 身份的唯一来源是 `RR3_MANIFEST` 指向的那份 `tests/fixtures/sim{a,b}/module.toml`，
-两份的 `entry` 是占位符 `@SIM_PEER_ENTRY@`，交 rrd 之前才换成构建产物的绝对路径——仓里不留假路径）；
+两份的 `entry` 是占位符 `@SIM_PEER_ENTRY@`，交 rrd 之前才换成构建产物的绝对路径——仓里不留假路径）与
+`rrd/tests/e2e_watchdog.rs`（M2 Task 10 新增 4 条**时间判定**用例，客户端同样是 `sim_peer` 真进程——
+"不喂狗但 fd 还开着"这个形状只有真进程维持得住，手搓帧的用例一注册完就 EOF，watchdog 根本无从判活：
+静默 peer 被 `watchdog 判死 rr3-sima task=…` 点名，并且把**日志里那两个数**读回来断言
+`elapsed ≥ 500` 与"≥ 超时 500ms"（把"判得对不对"钉成内容判据，而不是掐时间）；
+健康 peer 连喂 3 次、同一时刻静默 peer 已被点名，而 `watchdog 判死 rr3-simb` 在 300ms 观察窗内
+**一条都没有**（`rr3_assert_no_log` 是否证写法，不是"sleep 之后还没死"那种猜时间），
+且两条连接都还活着——判死改的是在册相位，不关你的 fd（spec §5.0 只说"超时即判 crash"，
+断开连接是另一件事，本轮没做也不该被顺带做掉）；
+**恰好一条** `failed`：判死之后再跨 3 拍（60ms，跨度由已知 tick 导出而非猜行为）按**内容**挑
+`phase=="failed" && module=="rr3-sima"` 的 Notification 计数 `== 1`，日志侧同样不得出现第二条判死行；
+判死后连喂 5 次心跳**全部被拒**且**不复活**——只判第 5 次那颗（那一刻已静默 ≥780ms，远超到期上界
+520ms，"被拒"不是运气；前四次落在哪一拍是合法时序，不判），且判死行里没有 `attempt=`：到期路径
+今天不查 `restart_policy`、不产重启计划，这笔欠账显式留给 Task 11，钉在这里是为了让它不能被
+悄悄宣布成"崩溃检测已完成"。**没有第 5 条**（brief 的 W5"CLI 的 tick 接到了线程"）：它与 support
+末尾那句 `rr3_wait_log("watchdog 启动 tick=…ms")` 是同一条判据——本文件把它钉在 `20`、既有
+19+1+5 条线级用例把它钉在 `3_600_000`，两个互不相同的值都只能由 CLI 传进来才对得上（线程里硬编码
+200、或把 `pre_register_timeout_ms` 当 tick 传，会让这两批同时超时红），再加一条只断言
+"套接字文件还在"的用例不新增任何判据，按"不许空转断言"就不写。四条的等待**全是内容判据**
+（`rr3_wait_log` 3s / `SimPeer::rr3_wait` 5s），唯一的时长断言在第一条且是粗上限。
+**时间能进判据邻域而不让整套用例变随机红**，靠的是两处口径各收在一处：
+`RR3_QUIET_WATCHDOG_TICK_MS = 3_600_000` 让**既有**每一批线级用例里的 watchdog"起了但不扫"
+（Task 10 的 diff 不得改变 Task 7/8/9 用例的可观察行为——真按生产 200ms 起跑会在它们中间插入
+判死日志与 `failed` 广播），只有 `e2e_watchdog` 走 `rr3_start_with_tick` 显式要小 tick；
+`E2E_TICK_MS = 20` 与夹具 manifest 的 `watchdog_ms = 500`（一起决定"到期上界 520ms"这条算式）
+都放在 support 而不是测试文件里，两处各写一个数就是两处真值。
+`rr3_collect_within` 本轮加 **5s 墙钟上限**（`COLLECT_WALL_CLOCK_CAP`）并在 panic 里点名已收帧的
+kind：一条连接上有**两个写者**（RPC 应答由该连接的读线程写、状态广播由该连接的写线程写），
+帧整体是原子的但**相对顺序无保证**，所以 brief 里 A-1 那种"先收一条 RPC 应答当栅栏帧、
+再断言状态广播已到齐"的写法**不成立**、被否掉；替代口径只有"按内容挑帧 + 墙钟兜底"——
+广播停不下来这类形状过去会卡在 64 帧的扫描预算里出不来（整个目标表现为超时），现在是一条点名帧流的
+panic。四条判据的非空转由三处定向变异实证：去掉 `rr3_reg_expire` 的 skip-failed → 第三条红；
+到期不看相位、每拍一律回报 → 第一/二/三条全红；广播里的相位写错 → 第一/三条红
+（每次变异只改一处、复跑后即复原））；
 `src/main.rs` 自 M2 只剩"参数 + 装载 + 平台门 + 把主循环交棒 `daemon`"、其 `[[bin]]` 目标 0 条——纯逻辑放进 lib，
 后续的 `rrd/tests/*.rs` 才引用得到（bin 里的模块对外不可见）；M2 Task 9 的第二个 `[[bin]]`
 `src/bin/sim_peer.rs`（测试夹具二进制）同样 0 条，它的 5 条全在 `e2e_sim_peer` 目标里跨进程跑。

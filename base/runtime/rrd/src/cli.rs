@@ -16,9 +16,15 @@ pub struct RrdConfig {
     pub restart_base_ms: u64,
     /// 连接接受后多久没完成注册判为启动失败（legacy 教训 76c0ad8：注册前不判活）
     pub pre_register_timeout_ms: u64,
+    /// 唯一 watchdog 线程的扫描间隔。生产默认 200ms：远小于任何真实
+    /// `watchdog_timeout_ms`，所以 tick 误差不参与"判活/判死"的时机争议。
+    /// **0 在 parse 处就拒，不 `.max(1)` 静默夹**：0 的语义是"每毫秒全表扫一遍"，
+    /// 那是一条烧核的忙循环，不是"差一点点"。静默夹成 1 等于横幅与实况各说一套
+    /// ——对照 `--restart-base-ms` 的上界处理：策略结论必须在启动时让运维听到。
+    pub watchdog_tick_ms: u64,
 }
 
-const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>]";
+const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>]";
 
 /// `--restart-base-ms` 的上界：退避表末档（60）乘上去仍要不溢出 u64。
 /// 为什么在 CLI 就拒、而不是让 `rr3_reg_death` 的饱和乘法默默兜住：饱和成 `u64::MAX`
@@ -75,6 +81,7 @@ pub fn rr3_cli_parse_with_env(
         manifests: Vec::new(),
         restart_base_ms: 1000,
         pre_register_timeout_ms: 3000,
+        watchdog_tick_ms: 200,
     };
     let mut i = 0;
     while i < args.len() {
@@ -99,6 +106,17 @@ pub fn rr3_cli_parse_with_env(
             "--pre-register-timeout-ms" => {
                 cfg.pre_register_timeout_ms =
                     parse_ms("--pre-register-timeout-ms", &need_value("--pre-register-timeout-ms", args, i)?)?;
+                i += 2;
+            }
+            "--watchdog-tick-ms" => {
+                let raw = need_value("--watchdog-tick-ms", args, i)?;
+                let n = parse_ms("--watchdog-tick-ms", &raw)?;
+                if n == 0 {
+                    return Err(
+                        "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）".to_string(),
+                    );
+                }
+                cfg.watchdog_tick_ms = n;
                 i += 2;
             }
             "-h" | "--help" => {
@@ -174,7 +192,23 @@ mod tests {
         assert_eq!(rr3_default_socket(&env_none), PathBuf::from(RR3_UDS_PATH_DEFAULT));
         assert_eq!(cfg.overlay, None);
         assert!(cfg.manifests.is_empty());
-        assert_eq!((cfg.restart_base_ms, cfg.pre_register_timeout_ms), (1000, 3000));
+        assert_eq!(
+            (cfg.restart_base_ms, cfg.pre_register_timeout_ms, cfg.watchdog_tick_ms),
+            (1000, 3000, 200)
+        );
+    }
+
+    /// tick 默认 200、可配、且 0 必被拒（忙循环不是"再快一点"）。
+    /// 三值同钉：`restart_base_ms` / `pre_register_timeout_ms` / `watchdog_tick_ms`
+    /// 都从同一个 parse 出来，漂任何一个都会让集成测试的时间口径与生产不一致。
+    #[test]
+    fn watchdog_tick_is_configurable_and_never_zero() {
+        let ok = rr3_cli_parse_with_env(&a(&["--socket", "/tmp/x.sock"]), &env_none).unwrap();
+        assert_eq!(ok.watchdog_tick_ms, 200, "默认 tick 必须与 USAGE/字段文档同口径");
+        let ok = rr3_cli_parse_with_env(&a(&["--watchdog-tick-ms", "20"]), &env_none).unwrap();
+        assert_eq!(ok.watchdog_tick_ms, 20);
+        let err = rr3_cli_parse_with_env(&a(&["--watchdog-tick-ms", "0"]), &env_none).unwrap_err();
+        assert!(err.contains("忙循环"), "拒 0 的文案必须说清为什么不是夹成 1: {err}");
     }
 
     /// env 覆盖必须生效（rrd 与模块用同一个 env 键找总线，spec §4）——但覆盖的是**注入的表**：
