@@ -170,3 +170,10 @@ kind = "notification"
 owner = "rr3-runtime"
 stable = "L1"
 note = "模块上下线/重启事件，phase 字段置于 payload 内（ADR-0006 §2）"
+
+[[topic]]
+name = "rr3-sense/capture/dump"
+kind = "request"
+owner = "rr3-sense"
+stable = "L2"
+note = "sense 抓取转储 RPC（rpc.exposes 事务面，request 语义）"
