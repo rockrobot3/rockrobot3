@@ -107,6 +107,10 @@ check_docs() {
   local list bad f d l
   list="$(mktemp)" || return 1; bad="$(mktemp)" || return 1
   git -c core.quotepath=false ls-files '*.md' | grep -v '^legacy/' > "$list" || true
+  if [ ! -s "$list" ]; then
+    printf 'FAIL  ⑤ md 列表打空（ls-files 无结果属门禁失效，不放行）\n'
+    rm -f "$list" "$bad"; return 1
+  fi
   while IFS= read -r f; do
     [ -s "$f" ] || printf '空文档  %s\n' "$f" >> "$bad"
     d="$(dirname "$f")"
