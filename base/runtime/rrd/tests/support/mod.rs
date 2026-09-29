@@ -1,5 +1,10 @@
 //! 集成测试助手：起**真 rrd 子进程** + 裸 UDS 客户端，断言线级行为。
 //!
+//! M2 Task 9 起它还管**第二个真进程**：`SimPeer`（跑 `rrd` 包的 `sim_peer` 二进制）与
+//! `rr3_fixture_manifest`（读 `base/runtime/tests/fixtures/<dir>/module.toml`，把 entry 占位符
+//! 换成构建产物的绝对路径后落到 pid 唯一的 /tmp，返回 `SimManifest` 守卫）。逐行收集与等待
+//! 抽成 `rr3_spawn_line_reader` / `rr3_wait_line` 两个自由函数，rrd 与 sim-peer 共用一份口径。
+//!
 //! 只在 Unix 编译（每个测试文件顶层 `#![cfg(unix)]`），Windows 侧这个模块整体不参与编译，
 //! 所以 `cargo check --all-targets` 在 Windows 上是绿的——那不是证据，是盲区。
 //!
@@ -17,7 +22,7 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,6 +41,60 @@ pub const RR3_OVERLAY_PATH: &str =
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
 /// 单条日志等待
 const LOG_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// 从子进程 stdout 逐行收集（`RrdTest` 与 `SimPeer` 共用一份口径）。
+/// 为什么必须共用：两处各写一份逐行读码，EOF 与超时的处理迟早分叉——而这两件事正是
+/// "跨进程用例为什么红"最常见的真实原因（管道坏了 vs 被测行为不对，得分得开）。
+/// `tag` 只出现在"读流本身报错"这一条诊断行里——读不到日志时"是谁的管道坏了"必须一眼可辨。
+pub fn rr3_spawn_line_reader(stdout: ChildStdout, tag: &'static str) -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel::<String>();
+    thread::spawn(move || {
+        let mut log = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            match log.read_line(&mut line) {
+                Ok(0) => break, // EOF：子进程已退出
+                Ok(_) => {
+                    let t = line.trim_end().to_string();
+                    if !t.is_empty() && tx.send(t).is_err() {
+                        break; // 接收端已 drop
+                    }
+                }
+                Err(e) => {
+                    // 不静默 break：把坏流本身当一条"日志"送出去，等待方在超时诊断里能看到它
+                    let _ = tx.send(format!("{tag} 读输出失败: {e}"));
+                    break;
+                }
+            }
+        }
+    });
+    rx
+}
+
+/// 等到一条含 needle 的行（先查已缓冲的）；超时把全部已读行打进 panic，便于定位
+pub fn rr3_wait_line(
+    lines: &mpsc::Receiver<String>,
+    seen: &mut Vec<String>,
+    needle: &str,
+    dur: Duration,
+) -> String {
+    if let Some(i) = seen.iter().position(|l| l.contains(needle)) {
+        return seen.remove(i);
+    }
+    let deadline = Instant::now() + dur;
+    loop {
+        match lines.recv_timeout(Duration::from_millis(50)) {
+            Ok(l) if l.contains(needle) => return l,
+            Ok(l) => seen.push(l),
+            Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected)
+                if Instant::now() > deadline =>
+            {
+                panic!("{dur:?} 内没等到 {needle:?}；已读到:\n{}", seen.join("\n"))
+            }
+            Err(_) => {}
+        }
+    }
+}
 
 pub struct RrdTest {
     pub socket: PathBuf,
@@ -103,23 +162,9 @@ impl RrdTest {
             .spawn()
             .unwrap_or_else(|e| panic!("起 rrd 失败: {e}"));
 
-        let (tx, rx) = mpsc::channel::<String>();
-        let mut log = BufReader::new(child.stdout.take().expect("stdout 必须是管道"));
-        thread::spawn(move || loop {
-            let mut line = String::new();
-            match log.read_line(&mut line) {
-                Ok(0) => break, // EOF：子进程已退出
-                Ok(_) => {
-                    let t = line.trim_end().to_string();
-                    if !t.is_empty() && tx.send(t).is_err() {
-                        break; // 接收端已 drop
-                    }
-                }
-                Err(_) => break,
-            }
-        });
+        let lines = rr3_spawn_line_reader(child.stdout.take().expect("stdout 必须是管道"), "rrd");
 
-        let mut me = RrdTest { socket: socket.to_path_buf(), child, lines: rx, seen: Vec::new() };
+        let mut me = RrdTest { socket: socket.to_path_buf(), child, lines, seen: Vec::new() };
         me.rr3_wait_log(&format!("监听 {}", socket.display()));
         me
     }
@@ -143,23 +188,11 @@ impl RrdTest {
         }
     }
 
-    /// 等到一条含 needle 的日志（先查已缓冲的）；超时把全部已读日志打进 panic，便于定位
+    /// 等到一条含 needle 的日志（先查已缓冲的）；超时把全部已读日志打进 panic，便于定位。
+    /// 逐行收集与等待都委托给本文件的 `rr3_spawn_line_reader` / `rr3_wait_line`——
+    /// `SimPeer` 读的是另一个进程，必须走同一份口径，否则两处的 EOF/超时语义会分叉。
     pub fn rr3_wait_log(&mut self, needle: &str) -> String {
-        if let Some(i) = self.seen.iter().position(|l| l.contains(needle)) {
-            return self.seen.remove(i);
-        }
-        let deadline = Instant::now() + LOG_TIMEOUT;
-        loop {
-            match self.rr3_next_line(Duration::from_millis(50)) {
-                Some(l) if l.contains(needle) => return l,
-                Some(l) => self.seen.push(l),
-                None if Instant::now() > deadline => panic!(
-                    "{LOG_TIMEOUT:?} 内没等到日志 {needle:?}；已读到:\n{}",
-                    self.seen.join("\n")
-                ),
-                None => {}
-            }
-        }
+        rr3_wait_line(&self.lines, &mut self.seen, needle, LOG_TIMEOUT)
     }
 
     /// 排干 dur 内的全部输出（等异步副作用：watchdog、重启），返回拼接文本
@@ -375,8 +408,10 @@ pub fn rr3_drain_until_closed(c: &mut RrdClient) -> Vec<Rr3Frame> {
 }
 
 /// 在 `dur` 内把这一条连接上**能读到的帧全部收走**（不 panic：读不到就是这一轮结束）。
-/// 队列里的存货先算进返回值（`rr3_try_recv` 的既有口径），所以它也是非破坏性的——
-/// 收走的帧都在返回值里，用于"这条连接上不该出现 X"的否定断言。
+/// 队列里的存货先算进返回值（`rr3_try_recv` 的既有口径），用于"这条连接上不该出现 X"的否定断言。
+/// 它是**破坏性**读法：取走的帧**不回队列**（与本文件头和 `rr3_read_where` 那种"未匹配帧存回队列、
+/// 可重读"的口径正相反）。
+/// **只准用在用例末尾**——之后同一连接不得再有读法，否则后续否定断言会空转、正向读法会白等 5 s。
 ///
 /// 为什么不能直接用 `rr3_drain_until_closed`：那条的终止条件是 `rr3_connect` 设的 **5 s 读超时**
 /// （`support/mod.rs` 的 `rr3_connect`），拿它做"150 ms 内没回显即通过"的判据会让每条这样的用例
@@ -424,4 +459,102 @@ pub fn rr3_read_state(c: &mut RrdClient, module: &str, phase: &str) -> Value {
         }
     });
     rr3_json_of(&f)
+}
+
+// ---------- 跨进程夹具（sim_peer）----------
+
+/// 夹具 manifest 的 entry 占位符（两份 module.toml 顶部注释解释了为什么留占位符）
+pub const RR3_ENTRY_PLACEHOLDER: &str = "@SIM_PEER_ENTRY@";
+
+/// 落盘守卫：Drop 里删文件。**必须**用守卫而不是让用例自己删——断言失败会 panic，
+/// 自己删的那一行根本跑不到，/tmp 就攒下一堆残留（Task 7 评审 N-1 同一条教训）。
+pub struct SimManifest {
+    pub path: PathBuf,
+}
+
+impl Drop for SimManifest {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// 读 `tests/fixtures/<dir>/module.toml` → 把 entry 占位符换成 sim_peer 的**真实绝对路径**
+/// → 写到 pid+tag 唯一的 /tmp 路径（Global Constraints 8 的同一套唯一名规则），返回守卫。
+///
+/// 上溯方式与 `RR3_OVERLAY_PATH` 一致（`CARGO_MANIFEST_DIR` + `../tests/fixtures`）：夹具的
+/// **数据文件**在 rrd 包外、bin 在 rrd 包内，这两件事各有理由，见 `rrd/src/lib.rs` 文件头。
+///
+/// 替换发生在这里、发生在交给 rrd 之前：所以"身份来自 manifest 文件"与
+/// "entry 来自构建产物"两件事各归其位，占位符不上线。
+pub fn rr3_fixture_manifest(tag: &str, dir: &str) -> SimManifest {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/fixtures")
+        .join(dir)
+        .join("module.toml");
+    let text = std::fs::read_to_string(&src)
+        .unwrap_or_else(|e| panic!("读夹具 manifest {} 失败: {e}", src.display()));
+    let entry = env!("CARGO_BIN_EXE_sim_peer");
+    assert!(
+        Path::new(entry).is_absolute(),
+        "CARGO_BIN_EXE 必须是绝对路径，否则 entry 门禁会拒: {entry}"
+    );
+    let rendered = text.replace(RR3_ENTRY_PLACEHOLDER, entry);
+    assert!(!rendered.contains(RR3_ENTRY_PLACEHOLDER), "entry 占位符没被替换: {dir}");
+    let path = PathBuf::from(format!(
+        "/tmp/rr3-m2-sim-{}-{tag}-{dir}.toml",
+        std::process::id()
+    ));
+    std::fs::write(&path, rendered)
+        .unwrap_or_else(|e| panic!("写夹具 manifest {} 失败: {e}", path.display()));
+    SimManifest { path }
+}
+
+/// sim_peer 子进程 + 它的 stdout 收集线程。
+pub struct SimPeer {
+    child: Child,
+    lines: mpsc::Receiver<String>,
+    seen: Vec<String>,
+}
+
+impl SimPeer {
+    /// 三个环境变量各管各的事：`RR3_BUS_PATH` 连哪儿、`RR3_MANIFEST` **是谁**（身份唯一来源）、
+    /// `RR3_SIM_PEER_ROLE` 做**什么**（行为脚本）。role 不参与身份判定，见本轮约定 1。
+    /// stderr 继承：夹具自己出错就直接进 cargo 输出，不必再开一条管道（与 `RrdTest` 同一理由）。
+    pub fn rr3_start(socket: &Path, manifest: &SimManifest, role: &str) -> SimPeer {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_sim_peer"));
+        cmd.env("RR3_BUS_PATH", socket)
+            .env("RR3_MANIFEST", &manifest.path)
+            .env("RR3_SIM_PEER_ROLE", role)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        let mut child = cmd
+            .spawn()
+            .unwrap_or_else(|e| panic!("起 sim_peer（role={role}）失败: {e}"));
+        let lines = rr3_spawn_line_reader(child.stdout.take().expect("stdout 必须是管道"), "sim-peer");
+        SimPeer { child, lines, seen: Vec::new() }
+    }
+
+    /// 等到夹具自己打出的里程碑行（5 s 上限，卡住即失败而不是挂住整个测试目标）
+    pub fn rr3_wait(&mut self, needle: &str) -> String {
+        rr3_wait_line(&self.lines, &mut self.seen, needle, Duration::from_secs(5))
+    }
+
+    /// 还活着吗。`try_wait` 不阻塞——"活着"在本轮是**否证**（没打出"喂狗被拒"、没退出），
+    /// 不是时间测量，所以绝不用 `sleep + try_wait` 去猜"过了多久还没死"。
+    pub fn rr3_alive(&mut self) -> bool {
+        self.child.try_wait().expect("try_wait 不该失败").is_none()
+    }
+
+    /// 硬杀（spec §9 的 SIGKILL 场景；Task 11 的重启用例走同一条）
+    pub fn rr3_kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for SimPeer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }

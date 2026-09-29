@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 165 条（Windows）/186 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 165 条（Windows）/191 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -31,21 +31,27 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-30 M2 Task 8 收口（`conn.rs` 补 `Event` 发布分支 + 6 条发布面线级用例 +
-1 条转发乱序反例 + `registry::tests` 1 条容量门实证 + 叠加层路径改在装载入口内规范化）后复测。
+测试面如实登记（2026-09-30 M2 Task 9 收口（`rrd` 包新增测试夹具二进制 `src/bin/sim_peer.rs` +
+新测试目标 `rrd/tests/e2e_sim_peer.rs` 5 条 + support 抽出共享行收集器 `rr3_spawn_line_reader` /
+`rr3_wait_line`）后复测。**本轮新增的是"跨进程夹具"这一类证据**——第二个**真进程**（另一个
+`[[bin]]` 产物）通过 UDS 走 rrd 的线上入口完成注册→心跳→发布→退场，不是又一批同进程手搓帧的
+用例；同一套帧由第二份独立编解码实现读写还能绿，"协议层不是测试自己跟自己说话"这句话才有证据。
 **两个平台的条数本就应当不等**，所以各记各的、
-不合并成单一数字：Windows x86_64-pc-windows-msvc **165**（本轮 ①b 实测量，= 上一轮 164
-再加 `registry::tests` 的 1 条；发布面的 7 条线级用例在 Windows 压根不参与编译，见下）、
-WSL2 Linux x86_64 **186**（= 上一轮 178 加 `register_publish` 的 7 条与 `registry::tests` 的
-1 条，本轮 L2 全量实跑 `186 passed; 0 failed`）。
+不合并成单一数字：Windows x86_64-pc-windows-msvc **165**（本轮 ①b 实测量，与上一轮**同数**——
+新增的 5 条全在 `#![cfg(unix)]` 目标里、Windows 不参与编译，而新 bin `sim_peer` 自己的单元测试
+目标实测 `running 0 tests`，见下）、
+WSL2 Linux x86_64 **191**（本轮 L2 全量实跑 `191 passed; 0 failed`；逐目标相加而非算术倒推：
+rr-bus 4 + rr-hal 4 + rr-ipc lib 26 + rr-ipc `envelope_meta` 4 + rr-ota 4 + rr-registry lib 15 +
+契约 24 + rrd lib 85 + `src/main.rs` 0 + `src/bin/sim_peer.rs` 0 + `e2e_sim_peer` 5 +
+`register_publish` 19 + `socket_banner` 1 = 191；上一轮记的是 186）。
 `aarch64-unknown-linux-gnu` 交叉 + qemu-user
-本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 21 条全部可枚举：
-Unix 独有的 20 条线级用例（`register_publish` 19 + `socket_banner` 1）+ `cli::tests` 里那 1 条
+本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 26 条全部可枚举：
+Unix 独有的 25 条线级用例（`register_publish` 19 + `socket_banner` 1 + `e2e_sim_peer` 5）+ `cli::tests` 里那 1 条
 `#[cfg(unix)]` 用例。cargo 1.95—1.97：
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
-Unix 侧行为不据此声称；20 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
+Unix 侧行为不据此声称；25 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **165** 条（Windows）/ **186** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **165** 条（Windows）/ **191** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
@@ -111,9 +117,27 @@ M2 Task 8 的发布面再补 7 条，共 **19** 条——合法发布被转发�
 连接上同时有应答/状态广播/发布转发三类帧，顺序无关性得再证一型））与
 `rrd/tests/socket_banner.rs`（CF-3 新增 1 条：子进程 CWD 设为 `/tmp`、`--socket` 只给文件名，
 断言**版本横幅的 bus 字段与"监听 …"行都回显解析后的绝对路径**，并且按那个路径真能连上、注册得了——
-只断言"字符串像绝对路径"抓不到"横幅与 bind 各说一套"这个原始缺陷）；
+只断言"字符串像绝对路径"抓不到"横幅与 bind 各说一套"这个原始缺陷）与
+`rrd/tests/e2e_sim_peer.rs`（M2 Task 9 新增 5 条**跨进程**用例，客户端是另一个二进制 `sim_peer`
+而不是测试自己：注册应答里的 `src_task` 与 rrd 日志里那个分配值逐字相等并连喂 3 次心跳被接受、
+发布被转发给**早已在册**的旁观连接（体原样、类型仍是 Event、`src_task` 是发布者的分配值）、
+主动 `rr3.unregister` → 恰好一条 `unregistered` 广播且 `never` 策略不产生重启计划、
+**特征化**用例"被打死的 peer 今天只是一次 EOF"（`unregistered` + `重启计划 attempt=1 delay_ms=20`
++ 回显 manifest 里那条绝对 entry；夹具在 `abort` 前先把接收队列排空——队列里留着未读的广播帧时
+内核会把这次关闭改成 RST，rrd 读到的就不是 EOF 而是 ECONNRESET、广播相位随之变成 `failed`，
+实测不排空时该用例 10 次红 1 次；那一维量的是"进程有没有把 socket 读干净"，不是"有没有体面退场"，
+FIN/RST 双路连同退出码一起归 Task 11。Task 11 拿到退出码后必须改写本条并在提交里点名）、
+同一个二进制配两份 manifest → 两个身份而 `RR3_SIM_PEER_ROLE` 只改行为不改身份。
+身份的唯一来源是 `RR3_MANIFEST` 指向的那份 `tests/fixtures/sim{a,b}/module.toml`，
+两份的 `entry` 是占位符 `@SIM_PEER_ENTRY@`，交 rrd 之前才换成构建产物的绝对路径——仓里不留假路径）；
 `src/main.rs` 自 M2 只剩"参数 + 装载 + 平台门 + 把主循环交棒 `daemon`"、其 `[[bin]]` 目标 0 条——纯逻辑放进 lib，
-后续的 `rrd/tests/*.rs` 才引用得到（bin 里的模块对外不可见）；
+后续的 `rrd/tests/*.rs` 才引用得到（bin 里的模块对外不可见）；M2 Task 9 的第二个 `[[bin]]`
+`src/bin/sim_peer.rs`（测试夹具二进制）同样 0 条，它的 5 条全在 `e2e_sim_peer` 目标里跨进程跑。
+它落在 `rrd` 包内而不是 spec §8 影响面清单写的 `base/runtime/tests/sim-peer/`，唯一理由是测试要
+`env!("CARGO_BIN_EXE_sim_peer")` 这个**只对同包 bin 生效**的绝对路径（独立 workspace 成员只能靠
+`current_exe()` 往上猜 target 目录，那是一份假路径）；夹具的**数据文件**（两份 `module.toml` 与
+`sim-topics.toml`）仍在 `base/runtime/tests/fixtures/` 下，spec R5 的"不进 modules/、
+不进 contracts/topics.toml"不受影响；落点偏离的文字同步归 Task 13；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
 硬 pin：7 owner / 21 topic / kind 7-8-3-3 / 21 条三元组；`every_module_manifest_passes_contract`

@@ -15,6 +15,13 @@ path = "src/lib.rs"
 name = "rrd"
 path = "src/main.rs"
 
+# 测试夹具二进制（spec §6 / R5）：为什么在 rrd 包里而不是 spec §8 写的 base/runtime/tests/sim-peer/
+# ——测试要 `env!("CARGO_BIN_EXE_sim_peer")` 的绝对路径（manifest 的 entry 门禁要绝对路径，
+# 而构建产物路径随机器/平台/CARGO_TARGET_DIR 变），cargo 只为**同一个包**的 bin 设这个变量。
+[[bin]]
+name = "sim_peer"
+path = "src/bin/sim_peer.rs"
+
 [dependencies]
 rr-ipc = { path = "../rr-ipc" }
 rr-registry = { path = "../rr-registry" }

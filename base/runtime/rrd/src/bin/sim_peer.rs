@@ -1,0 +1,221 @@
+//! sim-peer —— 基座测试夹具二进制（spec §6 / R5）。
+//!
+//! 它是**第二个真进程**：走 rrd 的线上入口完成注册→心跳→发布→退场，用来证明协议层不是
+//! "测试自己跟自己说话"。不进 `modules/`、不进 `contracts/topics.toml`。
+//!
+//! 为什么是 `rrd` 包里的一个 `[[bin]]` 而不是独立 workspace 成员：测试要用
+//! `env!("CARGO_BIN_EXE_sim_peer")` 拿到它的绝对路径（manifest 的 entry 门禁要绝对路径，
+//! 而构建产物路径随机器变），cargo 只为同一个包的 bin 设置那个变量。
+//! 平台无关的部分放在 `rrd` 的 lib 里（`rrd::manifest`），bin 才能直接复用。
+
+fn main() {
+    #[cfg(unix)]
+    if let Err(e) = peer::rr3_peer_main() {
+        println!("sim-peer: 失败: {e}");
+        std::process::exit(1);
+    }
+    #[cfg(not(unix))]
+    {
+        println!("sim-peer: 本平台不支持 UDS（需 Unix）");
+        std::process::exit(2);
+    }
+}
+
+/// 整个夹具只在 Unix 有意义（要连 UDS）。非 Unix 下这块不参与编译，
+/// 所以 Windows 的 `cargo check --all-targets` 绿只证明 cfg 边界没破，不证明它能跑。
+#[cfg(unix)]
+mod peer {
+    use std::env;
+    use std::os::unix::net::UnixStream;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use rr_bus::RR3_TASK_RRD;
+    use rr_ipc::{
+        opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
+        Rr3Header, Rr3PayloadType,
+    };
+    use rrd::manifest::rr3_manifest_facts_from_text;
+    use serde_json::{json, Value};
+
+    /// 一次"挑自己的应答"最多扫多少帧。与集成测试夹具同口径，理由也相同：
+    /// 应答由 conn 线程写、state 广播由这条连接的 writer 线程写，**整帧原子但相对次序不保证**，
+    /// 所以只能按 id 挑、不能读第 N 帧。扫不到就是 rrd 真没发，不是预算不够。
+    const REPLY_SCAN_BUDGET: usize = 64;
+
+    /// 排空接收队列（`rr3_drain_incoming`）时单次读的最长等待。
+    /// 它不是"过了多久"的测量，只用来回答"还有没有存货"：读到空即返回，所以这个数放大
+    /// 只会让 abort 支多等一会儿，不影响任何判据（本轮用例都不测时长）。
+    const DRAIN_READ_TIMEOUT: Duration = Duration::from_millis(150);
+
+    /// 身份只从 manifest 来；role 只选行为。见 support 的约定 1。
+    pub fn rr3_peer_main() -> Result<(), String> {
+        let bus = env::var("RR3_BUS_PATH").map_err(|_| "缺 RR3_BUS_PATH".to_string())?;
+        let manifest_path = env::var("RR3_MANIFEST").map_err(|_| "缺 RR3_MANIFEST".to_string())?;
+        let role = env::var("RR3_SIM_PEER_ROLE").unwrap_or_else(|_| "resident".to_string());
+
+        let text = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("读 {manifest_path} 失败: {e}"))?;
+        let facts = rr3_manifest_facts_from_text(&text).map_err(|errs| errs.join("; "))?;
+
+        let mut stream = UnixStream::connect(&bus).map_err(|e| format!("连 {bus} 失败: {e}"))?;
+        // 有超时：卡住要成为"夹具退出并打一行原因"，而不是把整个 cargo test 挂住
+        stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
+
+        // 注册前还没有 task，按契约填 0（"用户态不得自设"的另一种写法，与夹具同形）
+        rr3_send(
+            &mut stream,
+            Rr3PayloadType::Request,
+            0,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "rr3.register",
+                    "params": {"name": facts.name, "manifest": text}}),
+        )?;
+        let reply = rr3_wait_reply(&mut stream, 1)?;
+        if reply["error"].is_object() {
+            return Err(format!("注册被拒: {}", &reply["error"]));
+        }
+        let task = reply["result"]["src_task"].as_u64().ok_or("注册应答里没有 result.src_task")?;
+        println!("sim-peer: 注册成功 name={} task={task}", facts.name);
+
+        match role.as_str() {
+            "resident" => rr3_resident(&mut stream, task, facts.heartbeat_ms),
+            "publish_once" => {
+                // 主题名从自己的 manifest 取（约定 2），不硬编码
+                let topic = rr3_first_publish(&text).ok_or("publish_once 需要 publishes 非空")?;
+                rr3_send(&mut stream, Rr3PayloadType::Event, task, &json!({"topic": topic, "seq": 1}))?;
+                println!("sim-peer: 已发布 {topic}");
+                rr3_beat(&mut stream, task, 10)
+            }
+            "exit_clean" => {
+                rr3_send(
+                    &mut stream,
+                    Rr3PayloadType::Request,
+                    task,
+                    &json!({"jsonrpc": "2.0", "id": 2, "method": "rr3.unregister", "params": {}}),
+                )?;
+                let r = rr3_wait_reply(&mut stream, 2)?;
+                if r["error"].is_object() {
+                    return Err(format!("退场被拒: {}", &r["error"]));
+                }
+                println!("sim-peer: 已主动退场");
+                Ok(()) // 返回即 drop 掉 stream
+            }
+            "abort" => {
+                rr3_beat(&mut stream, task, 10)?;
+                // 先排空接收队列再打死。为什么这属于夹具而不是被测行为：队列里留着未读的
+                // 广播帧时，内核在进程死亡那一刻把关闭改成 RST，rrd 读到的就是 ECONNRESET
+                // 而不是 EOF → 收尾走 `Err` 分支（phase `failed`）；队列空了才是 FIN → EOF →
+                // `Rr3FrameError::Closed`（phase `unregistered`）。实测未排空时本用例 10 次红 1 次。
+                // 这一维量的是"进程有没有把 socket 读干净"，不是"有没有体面退场"，
+                // 所以本任务把它当混淆项排掉；FIN/RST 双路（连同退出码）归 Task 11 的崩溃检测。
+                rr3_drain_incoming(&mut stream)?;
+                println!("sim-peer: 即将 abort");
+                // 不 close、不 unregister：让 rrd 只看到一次 EOF。`abort` 本身就跳过析构，
+                // 这里显式 forget 是为了让"socket 有没有被优雅关闭"不靠编译器心情。
+                std::mem::forget(stream);
+                std::process::abort();
+            }
+            other => Err(format!("未知 RR3_SIM_PEER_ROLE: {other}")),
+        }
+    }
+
+    /// 常驻：按 manifest 的 heartbeat_ms 一直喂狗，直到被杀。
+    /// 里程碑只打一行（第 3 次），见约定 3。
+    fn rr3_resident(stream: &mut UnixStream, task: u64, heartbeat_ms: u64) -> Result<(), String> {
+        let mut id = 10u64;
+        for beat in 1..=3u32 {
+            rr3_beat(stream, task, id)?;
+            if beat == 3 {
+                println!("sim-peer: 连喂 {beat} 次均被接受");
+            }
+            id += 1;
+            std::thread::sleep(Duration::from_millis(heartbeat_ms));
+        }
+        loop {
+            rr3_beat(stream, task, id)?;
+            id += 1;
+            std::thread::sleep(Duration::from_millis(heartbeat_ms));
+        }
+    }
+
+    /// 把接收队列读到"读不出完整一帧"为止（超时 / EOF / 坏帧都算排完）。
+    /// 只在 abort 支用，理由见那里。上限 8 帧：本夹具一条连接上最多攒 4 帧
+    /// （注册应答 + registered 广播 + 补发快照 + 心跳应答），8 已是富余；
+    /// 单次读最多等 `DRAIN_READ_TIMEOUT`，所以这个循环必然终止、不会把夹具挂住。
+    fn rr3_drain_incoming(stream: &mut UnixStream) -> Result<(), String> {
+        stream
+            .set_read_timeout(Some(DRAIN_READ_TIMEOUT))
+            .map_err(|e| format!("设排空读超时失败: {e}"))?;
+        for _ in 0..8 {
+            if rr3_frame_read(&mut *stream).is_err() {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    fn rr3_beat(stream: &mut UnixStream, task: u64, id: u64) -> Result<(), String> {
+        rr3_send(
+            stream,
+            Rr3PayloadType::Request,
+            task,
+            &json!({"jsonrpc": "2.0", "id": id, "method": "rr3.heartbeat", "params": {}}),
+        )?;
+        let reply = rr3_wait_reply(stream, id)?;
+        if reply["error"].is_object() {
+            // 被拒即致命：继续喂一条已经不在册的连接没有任何观察价值
+            return Err(format!("喂狗被拒: {}", &reply["error"]));
+        }
+        Ok(())
+    }
+
+    /// 写一帧：payload 先编（2 字节类型前缀），`payload_len` 取**编出来之后**的字节数
+    fn rr3_send(stream: &mut UnixStream, ty: Rr3PayloadType, src: u64, body: &Value) -> Result<(), String> {
+        let payload = rr3_body_encode(ty, body.to_string().as_bytes());
+        let frame = Rr3Frame {
+            header: Rr3Header {
+                opcode: opcode::SEND,
+                flags: 0,
+                trace_id: 0,
+                timestamp_ns: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0),
+                src_task: src,
+                dst_task: RR3_TASK_RRD,
+                payload_len: payload.len() as u32,
+            },
+            payload,
+        };
+        rr3_frame_write(stream, &frame).map_err(|e| format!("写帧失败: {e:?}"))
+    }
+
+    /// 按 id 挑自己的应答，跳过途中遇到的广播帧（见 `REPLY_SCAN_BUDGET` 的注释）
+    fn rr3_wait_reply(stream: &mut UnixStream, id: u64) -> Result<Value, String> {
+        for _ in 0..REPLY_SCAN_BUDGET {
+            // `rr3_frame_read` 收 `impl Read`（按值），所以这里必须逐次 reborrow，
+            // 否则第一帧就把 `stream` 移走、循环第二轮编译不过。
+            let frame = rr3_frame_read(&mut *stream).map_err(|e| format!("读帧失败: {e:?}"))?;
+            let (ty, body) =
+                rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+            if ty != Rr3PayloadType::Response {
+                continue; // 下行广播（Notification）不是我要的
+            }
+            let v: Value = serde_json::from_slice(&body).map_err(|e| format!("应答体不是 JSON: {e}"))?;
+            if v["id"].as_u64() == Some(id) {
+                return Ok(v);
+            }
+        }
+        Err(format!("{REPLY_SCAN_BUDGET} 帧内没等到 id={id} 的应答"))
+    }
+
+    /// `events.publishes[0]`（约定 2）。取不到返回 None，由调用方决定是不是错。
+    fn rr3_first_publish(text: &str) -> Option<String> {
+        let root: toml::Value = text.parse().ok()?;
+        root.get("events")?
+            .get("publishes")?
+            .as_array()?
+            .first()?
+            .as_str()
+            .map(str::to_string)
+    }
+}
