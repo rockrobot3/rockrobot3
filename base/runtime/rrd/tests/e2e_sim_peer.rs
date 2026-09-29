@@ -103,9 +103,12 @@ fn sim_peer_clean_exit_broadcasts_unregistered_and_never_restarts() {
     rrd.rr3_assert_no_log("重启计划", Duration::from_millis(300));
 }
 
-/// 特征化用例（**不是**验收"崩溃检测已做好"）：今天 abort 与主动退场在 rrd 侧同为一次 EOF
+/// 特征化用例（**不是**验收"崩溃检测已做好"）：abort 与主动退场在这条连接上同为一次 EOF。
+/// 为什么 11b 之后它仍然是 EOF：这个进程**不是 rrd 起的**（E-1）——退出码握在别人的父进程里，
+/// rrd 只能给出 `unregistered` 加一行 `跳过重启`。owned 那一路（真退出码 → `failed`）
+/// 由 `e2e_spawn_restart.rs` 的 S2 与它同框对照。
 #[test]
-fn killed_peer_is_only_an_eof_until_task_11_holds_the_child() {
+fn killed_foreign_peer_is_only_an_eof_and_its_plan_is_skipped() {
     let mut rrd = RrdTest::rr3_start("e2e-abort");
 
     let mut b = rrd.rr3_connect();
@@ -122,22 +125,26 @@ fn killed_peer_is_only_an_eof_until_task_11_holds_the_child() {
     // EOF 走 conn.rs 的 `Rr3FrameError::Closed` 分支 → clean_exit = true：
     // 广播 phase 是 unregistered（不是 failed），而 always 策略照样给出重启计划。
     // rrd 分不清"被信号杀掉"与"体面退出"，因为这条连接上它只看得见 EOF；
-    // 退出码在**父进程**手里，那是 Task 11 spawn 之后的事（spec §5.4 崩溃检测双路）。
-    // 这条钉的是**现值**。Task 11 落地后必须把它改写成 failed + 退出码判据，
-    // 届时改写要在提交说明里点名这一条，不许悄悄留成"崩溃检测通过"的假象。
+    // 退出码在**父进程**手里，而那个父进程不是 rrd（E-1 的所有权边界）——所以这一格
+    // 在 11b 之后仍然只有 `unregistered`，spec §5.4 的"崩溃检测双路"里只有 conn 这一路被走到。
     rr3_read_state(&mut b, "rr3-sima", "unregistered");
 
     let plan = rrd.rr3_wait_log("重启计划 attempt=1 delay_ms=20");
     // 这一条把"被打死走的到底是哪条读分支"也钉住：夹具在 abort 前把接收队列排空，于是内核以
     // FIN 收尾 → `Rr3FrameError::Closed` → `clean_exit = true` → 文案是"干净收尾"。
     // 队列里留着未读广播时改成 RST → rrd 读到 ECONNRESET → 这里是"帧读取失败…→ failed 广播"，
-    // 本用例的 unregistered 判据就会随机红（实测未排空 10 次红 1 次）。FIN/RST 双路连同退出码
-    // 一起归 Task 11；本轮排掉这个混淆项，不是把它判给"不存在"。
+    // 本用例的 unregistered 判据就会随机红（实测未排空 10 次红 1 次）。RST 那一支**仍然没人测**
+    // ——11b 把"退出码定性"补给了 owned 那一路（`e2e_spawn_restart` 的 S1/S2），而这条连接是
+    // 外来的，它连 RST 都只会读成一次 EOF。这里排掉混淆项，不是把它判给"不存在"。
     assert!(plan.contains("退出（干净收尾）"), "现值：EOF 才叫干净收尾；实际 {plan}");
     assert!(
         plan.contains(&format!("entry={}", env!("CARGO_BIN_EXE_sim_peer"))),
         "重启计划必须回显 manifest 里那条绝对 entry（占位符确实被替换过的证据）: {plan}"
     );
+    // 11b 的新事实：计划真的投递出去了，而 supervisor 不执行它（`jobs` 里没有这个 name，E-1）。
+    // 正面钉这一行是把"接线断了"与"接线在、但被判成外来"分开——只留上面那两条 `contains`，
+    // `sup.rr3_restart(p)` 被删掉这条用例照样绿。
+    rrd.rr3_wait_log("跳过重启 rr3-sima");
 }
 
 /// 同一个二进制、两份 manifest → 两个身份；role 只改行为、不改身份（两边都用正面断言）

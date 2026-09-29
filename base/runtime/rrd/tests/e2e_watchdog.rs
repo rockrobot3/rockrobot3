@@ -142,7 +142,7 @@ fn watchdog_broadcasts_exactly_one_failed_state() {
     rrd.rr3_assert_no_log("watchdog 判死 rr3-sima task=", Duration::from_millis(300));
 }
 
-/// W4 — 判死后喂狗一律被拒、且不复活、不产重启计划
+/// W4 — 判死后喂狗一律被拒、且不复活：计划照策略给，但**不执行**（E-1）
 #[test]
 fn beats_after_expiry_are_rejected_and_do_not_revive() {
     let (mut rrd, m) = rr3_watched("wd-revive");
@@ -153,12 +153,15 @@ fn beats_after_expiry_are_rejected_and_do_not_revive() {
     peer.rr3_wait("已试喂 5 次");
 
     let line = rrd.rr3_wait_log("watchdog 判死 rr3-sima");
-    // 判据是"整个观察窗内 rrd 没打出任何重启计划"，不是"判死那一行里有没有 attempt="——
-    // 后者在任何实现下都不可能红（判死行的格式里就没有那个字段），而 Task 11 把重启接进
-    // watchdog 时最自然的写法是另起一行打计划，那时它照样绿。前者才钉得住：
-    // Task 11 一接线，这一条立刻红，逼它显式改写本用例。
+    // 判死后不复活由两条一起钉：**喂狗被拒**（上面 peer 那两行）+ **不 spawn**（下面那条否定）。
+    // Task 11b 接线后这一格的真形状是"计划照策略给，但不执行"（E-1：`jobs` 里没有它），
+    // 所以旧的否定 needle `重启计划` 已经不再是用例的重点——到期那一路的计划现在确实存在，
+    // 只是它到 supervisor 那里换成一行 `跳过重启`。正面钉这一行，负面钉"没起进程"。
     // 窗口取 300ms：到这一刻 peer 已静默 ≥ 700 + 4×150 = 1300ms，判死必然已发生
-    // （`rr3_wait_log` 在上面已经拿到那一行），所以"没有重启计划"不是"还没轮到"。
-    rrd.rr3_assert_no_log("重启计划", Duration::from_millis(300));
+    // （`rr3_wait_log` 在上面已经拿到那一行），所以"没有第二个进程"不是"还没轮到"。
+    // needle 选 `spawn rr3-sima` 而不是裸 `spawn `：`spawn ` 只出现在成功起进程那一行
+    //（起不来写的是 `起进程失败`），而点名身份能顺手避开 `跳过重启 …` 那一行自己的措辞。
+    rrd.rr3_wait_log("跳过重启 rr3-sima");
+    rrd.rr3_assert_no_log("spawn rr3-sima", Duration::from_millis(300));
     assert!(!line.contains("attempt="), "判死行只描述判死本身: {line}");
 }
