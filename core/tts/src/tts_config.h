@@ -2,7 +2,11 @@
 #ifndef TTS_CONFIG_H
 #define TTS_CONFIG_H
 
-#define API_KEY     "sk-tgvtipnqvzonqjxltidszzitsnfraecqjlgpxuoyhkuxsmqj"
+/* 密钥不入库：构建时由 -DSILICONFLOW_API_KEY="…" 注入，来源见 core/README.md */
+#ifndef SILICONFLOW_API_KEY
+#error "SILICONFLOW_API_KEY 未定义：先 export 该环境变量再 idf.py build"
+#endif
+#define API_KEY     SILICONFLOW_API_KEY
 #define API_BASE    "https://api.siliconflow.cn"
 
 #define TTS_MODEL   "FunAudioLLM/CosyVoice2-0.5B"
