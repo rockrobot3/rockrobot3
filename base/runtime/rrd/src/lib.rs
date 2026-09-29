@@ -1,4 +1,4 @@
-//! rrd 的平台无关部分：命令行参数、所有权表装载与 manifest 运行期事实读取。
+//! rrd 的平台无关部分：命令行参数、所有权表装载、manifest 运行期事实与在册表状态机。
 //!
 //! 纯逻辑放在 lib 里，`tests/*.rs` 与后续 `rrd/src/bin/sim_peer.rs` 才能直接引用
 //! （bin 里的模块对外不可见）。UDS 与进程派生只在 `#[cfg(unix)]` 的 `conn`/`daemon`
@@ -7,6 +7,7 @@
 
 pub mod cli;
 pub mod manifest;
+pub mod registry;
 pub mod topics_load;
 
 /// 非 Unix 平台的唯一出口文案（Task 3 Step 6 的实证按它断言，别改字面量）

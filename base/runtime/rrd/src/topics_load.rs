@@ -67,8 +67,42 @@ fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<S
     }
 }
 
+/// 合并后对**整张表**再自检一次（Task 3 评审 DEFER→Task 5 的欠账）。
+///
+/// `read_set` 只对契约、叠加层各自自检，合并这一步本身从未被验证过：
+/// `rr3_topic_set_merge` 只要退化（漏带一条生产 topic、把某条的 owner 改成叠加层的值、
+/// kinds 与 topics 失配），装载就会把一张被改写过的所有权表交出去——那正是 spec §6
+/// "叠加层不是生产放行口"最坏的实现方式。故合并后逐项复验两件事：
+/// ① merged 自身形状合法；② 契约的每一条 topic 都还在、owner 一字未改（叠加层只能新增）。
+/// 与 `reject_reserved_namespace` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
+fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
+    let mut errs: Vec<String> = merged
+        .rr3_topic_set_check()
+        .into_iter()
+        .map(|e| format!("合并后主题集形状不合: {e}"))
+        .collect();
+    for name in base.rr3_topic_set_names() {
+        let want = base.rr3_topic_set_owner(&name);
+        if !merged.rr3_topic_set_contains(&name) {
+            errs.push(format!("合并后契约 topic 丢失: {name}（叠加层不得覆盖生产条目）"));
+        } else if merged.rr3_topic_set_owner(&name) != want {
+            errs.push(format!(
+                "契约 topic {name} 的 owner 被叠加层改写: {:?} → {:?}",
+                want,
+                merged.rr3_topic_set_owner(&name)
+            ));
+        }
+    }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs)
+    }
+}
+
 /// 装载：契约 →（可选）叠加层合并。返回主题集与"叠加层新增的条目清单"。
 /// 叠加层两道拒绝：撞名 → 点名冲突条目；声明 `rr3-runtime/*` → 点名冒充条目。
+/// 合并后还有一道：见 `reject_inconsistent_merge`。
 pub fn rr3_topics_load(
     contract: &Path,
     overlay: Option<&Path>,
@@ -79,6 +113,7 @@ pub fn rr3_topics_load(
     reject_reserved_namespace(&ov_set, ov)?;
     let added = ov_set.rr3_topic_set_names();
     let merged = base.rr3_topic_set_merge(&ov_set)?; // 撞名 → Err(冲突条目)
+    reject_inconsistent_merge(&base, &merged)?;
     Ok((merged, added))
 }
 
@@ -144,6 +179,31 @@ mod tests {
         assert_eq!(added.len(), 3);
         assert!(added.contains(&"rr3-sima/ping/state".to_string()));
         assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
+    }
+
+    /// 合并后必须**逐条复验**（Task 3 评审 DEFER→Task 5）：装载交出去的那张表，
+    /// 除了"两边各自合法"，还得保证生产条目一条不少、owner 一字未改。
+    /// 断言取自 `rr3_topics_load` 的真实返回，而不是再拼一遍期望集合——去掉装载处的
+    /// 复验步骤本身不会让本测试变红（正确的 merge 造不出不自洽的表），它挡的是
+    /// merge 将来退化；装载处的复验是同一件事的 fail-closed 版本。
+    #[test]
+    fn merged_set_is_rechecked_against_the_contract() {
+        let (base_set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
+        let (merged, _) = rr3_topics_load(&contract(), Some(&fixture_overlay())).expect("夹具应能合并");
+        assert!(merged.rr3_topic_set_check().is_empty(), "{:?}", merged.rr3_topic_set_check());
+        for name in base_set.rr3_topic_set_names() {
+            assert!(
+                merged.rr3_topic_set_contains(&name),
+                "合并后契约条目丢失: {name}"
+            );
+            assert_eq!(
+                merged.rr3_topic_set_owner(&name),
+                base_set.rr3_topic_set_owner(&name),
+                "契约 topic {name} 的 owner 被叠加层改写"
+            );
+        }
+        // 叠加层新增的 owner 也必须进了这张表，否则"复验"会连合法新增一起否掉
+        assert_eq!(merged.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(), Some("rr3-sima"));
     }
 
     /// 撞名必须拒启动并点名条目。
