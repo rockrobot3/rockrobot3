@@ -9,7 +9,10 @@ use rr_ipc::{RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 pub struct RrdConfig {
     pub socket: PathBuf,
     pub overlay: Option<PathBuf>,
-    /// 待启动模块的 manifest（绝对路径，可重复 `--manifest`；实际 spawn 序按 start_priority 重排）
+    /// 待启动模块的 manifest（绝对路径，可重复 `--manifest`）。
+    /// **已落地**（Task 11b）：`supervisor` 按 `start_priority` **升序、稳定**排后逐条 boot spawn，
+    /// 同优先级保持本 CLI 顺序（`sort_by_key` 是稳定排序）。CLI 序只是"同优先级之间的 tie-break"，
+    /// 不是 spawn 序本身。
     pub manifests: Vec<PathBuf>,
     /// 重启退避基数（表值 × base）。生产 1000ms；集成测试压到 20ms 才跑得完上限序列。
     /// 下界 1 与上界 `RR3_RESTART_BASE_MS_MAX` 都在 parse 处强制（见 `parse_restart_base`）。
@@ -22,9 +25,13 @@ pub struct RrdConfig {
     /// 那是一条烧核的忙循环，不是"差一点点"。静默夹成 1 等于横幅与实况各说一套
     /// ——对照 `--restart-base-ms` 的上界处理：策略结论必须在启动时让运维听到。
     pub watchdog_tick_ms: u64,
+    /// 注入给 boot 子进程的 `RR3_SIM_PEER_ROLE` 值（spec §5.4"由 rrd 注入"的那件环境）。
+    /// **原样透传、rrd 不校验取值**（E-6）：role 的合法集是**夹具**的约定，不是守护进程的契约；
+    /// rrd 一旦校验就要跟着夹具新增的脚本改，那是第二处真值。默认 `resident`。
+    pub boot_role: String,
 }
 
-const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>]";
+const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]\n说明: --boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。";
 
 /// `--restart-base-ms` 的上界：退避表末档（60）乘上去仍要不溢出 u64。
 /// 为什么在 CLI 就拒、而不是让 `rr3_reg_death` 的饱和乘法默默兜住：饱和成 `u64::MAX`
@@ -82,6 +89,7 @@ pub fn rr3_cli_parse_with_env(
         restart_base_ms: 1000,
         pre_register_timeout_ms: 3000,
         watchdog_tick_ms: 200,
+        boot_role: "resident".to_string(),
     };
     let mut i = 0;
     while i < args.len() {
@@ -117,6 +125,27 @@ pub fn rr3_cli_parse_with_env(
                     );
                 }
                 cfg.watchdog_tick_ms = n;
+                i += 2;
+            }
+            "--boot-role" => {
+                let raw = need_value("--boot-role", args, i)?;
+                // 两道拒法都只为一个目的：**role 进了子进程才炸，就查不出是谁给的**。
+                // 空值：`sim_peer` 会打"未知 RR3_SIM_PEER_ROLE: "（一个空名字的错误行，
+                // 既指不出参数也指不出用例）；疑似开关的值：`--boot-role --socket` 会把
+                // `--socket` 当成 role 吞下、于是**下一个真开关**丢了（与 `need_path_value`
+                // 当年修的"叠加层被静默丢掉"同一形状，只是这里丢的是 socket 路径）。
+                if raw.is_empty() {
+                    return Err(format!(
+                        "--boot-role 不得为空（role 由夹具解释，空值只会得到一条查不出来源的\"未知 RR3_SIM_PEER_ROLE\"）\n{USAGE}"
+                    ));
+                }
+                if raw.starts_with('-') {
+                    return Err(format!(
+                        "--boot-role 缺参数：收到疑似开关的 {raw}（role 不得以 - 开头）\n{USAGE}"
+                    ));
+                }
+                // **不校验取值**（E-6）：合法集是夹具的约定，rrd 只透传。
+                cfg.boot_role = raw;
                 i += 2;
             }
             "-h" | "--help" => {
@@ -209,6 +238,35 @@ mod tests {
         assert_eq!(ok.watchdog_tick_ms, 20);
         let err = rr3_cli_parse_with_env(&a(&["--watchdog-tick-ms", "0"]), &env_none).unwrap_err();
         assert!(err.contains("忙循环"), "拒 0 的文案必须说清为什么不是夹成 1: {err}");
+    }
+
+    /// `--boot-role`（E-6）：默认 `resident`、**原样透传不解释**、空值必拒。
+    /// 为什么拒空值而不是让子进程去报："未知 RR3_SIM_PEER_ROLE: " 后面跟一个空名字，
+    /// 那条失败查不出来源（是参数丢了？还是解析成了空串？），而 CLI 拒一次就点名到位。
+    /// 为什么**不**校验取值：role 的合法集是夹具 `sim_peer` 的约定，不是守护进程的契约——
+    /// rrd 校验它就要跟着夹具新增的脚本一起改（第二处真值），而且真设备模块根本不读这个变量。
+    #[test]
+    fn boot_role_defaults_to_resident_and_is_pass_through_verbatim() {
+        let dflt = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        assert_eq!(dflt.boot_role, "resident", "默认必须是 resident（与夹具不传 RR3_SIM_PEER_ROLE 时的回落一致）");
+        // 原样透传：不做大小写归一、不裁剪、不映射
+        for role in ["abort", "go_silent", "publish_once", "SOME-UNKNOWN-role"] {
+            let got = rr3_cli_parse_with_env(&a(&["--boot-role", role]), &env_none).unwrap();
+            assert_eq!(got.boot_role, role, "rrd 不校验 role 取值，必须逐字进 cfg（{role} 被改写就是它在替夹具做主）");
+        }
+        // 空值拒，且文案要点名开关与理由
+        let e = rr3_cli_parse_with_env(&a(&["--boot-role", ""]), &env_none).unwrap_err();
+        assert!(
+            e.contains("--boot-role") && e.contains("不得为空") && e.contains("用法"),
+            "报错要点名开关、理由与用法: {e}"
+        );
+        // 缺值走 need_value 的同一条口径（`--boot-role` 是最后一个参数）
+        let e = rr3_cli_parse_with_env(&a(&["--boot-role"]), &env_none).unwrap_err();
+        assert!(e.contains("--boot-role 缺参数") && e.contains("用法"), "{e}");
+        // 疑似开关的值不当 role 吞下（否则后面那个真开关就被吃了，与 need_path_value 同形）
+        let e = rr3_cli_parse_with_env(&a(&["--boot-role", "--socket", "/tmp/x.sock"]), &env_none)
+            .unwrap_err();
+        assert!(e.contains("--boot-role 缺参数") && e.contains("--socket"), "必须点名被误当值的开关: {e}");
     }
 
     /// env 覆盖必须生效（rrd 与模块用同一个 env 键找总线，spec §4）——但覆盖的是**注入的表**：

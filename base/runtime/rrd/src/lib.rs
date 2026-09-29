@@ -1,10 +1,11 @@
 //! rrd 的平台无关部分：命令行参数、所有权表装载、manifest 运行期事实、在册表状态机与上行 RPC 编解码。
 //!
 //! 纯逻辑放在 lib 里，`tests/*.rs` 与后续 `rrd/src/bin/sim_peer.rs` 才能直接引用
-//! （bin 里的模块对外不可见）。UDS 与进程派生只在 `#[cfg(unix)]` 的 `conn`/`daemon`
-//! 模块里（Task 7 落地），非 Unix 平台它们根本不参与编译，
+//! （bin 里的模块对外不可见）。UDS、watchdog 与进程派生只在 `#[cfg(unix)]` 的
+//! `conn`/`daemon`/`supervisor` 模块里（Task 7 落地监听、Task 11b 落地 spawn），
+//! 非 Unix 平台它们根本不参与编译，
 //! 所以 Windows 侧既能 `cargo check --all-targets` 也能跑到这里的全部测试——但那只证明
-//! cfg 边界未破，`conn.rs`/`daemon.rs` 的每一行都要靠 Unix 侧（L2/L3）才有证据。
+//! cfg 边界未破，`conn.rs`/`daemon.rs`/`supervisor.rs` 的每一行都要靠 Unix 侧（L2/L3）才有证据。
 
 pub mod cli;
 pub mod manifest;
@@ -16,11 +17,13 @@ pub mod topics_load;
 pub mod conn;
 #[cfg(unix)]
 pub mod daemon;
+#[cfg(unix)]
+pub mod supervisor;
 
 // 只被下面那条 `#[cfg(unix)]` 的 `rr3_lock` 用到，所以两处都必须带 cfg。实测（本轮在 Windows
 // 上跑 `cargo check --all-targets -p rrd`）：import 不加 cfg 是 `unused_imports` 警告，
 // `rr3_lock` 不加 cfg 是 `dead_code` 警告（"never used"，实测 1 条）——而本仓的门禁是零警告。
-// 两个调用方（`conn`/`daemon`）都是 `#[cfg(unix)]` 模块，所以 cfg 就是它们的编译面。
+// 三个调用方（`conn`/`daemon`/`supervisor`）都是 `#[cfg(unix)]` 模块，所以 cfg 就是它们的编译面。
 #[cfg(unix)]
 use std::sync::{Mutex, MutexGuard};
 
@@ -31,12 +34,12 @@ pub fn rr3_log(msg: &str) {
 }
 
 /// 锁中毒的唯一处理口径：中毒只可能来自 panic 的持锁者，继续用比弃连接/比整个守护停摆好。
-/// **单点**原因：`conn.rs`（应答与收尾）与 `daemon.rs`（watchdog 扫描与广播）共用同一把
-/// 在册表锁，两处各写一份"怎么处理中毒"迟早分叉——与 Task 9 抽 `rr3_spawn_line_reader`
-/// 是同一条理由。
+/// **单点**原因：`conn.rs`（应答与收尾）、`daemon.rs`（watchdog 扫描与广播）与 `supervisor.rs`
+/// （收尸与重启）共用同一本在册表锁，三处各写一份"怎么处理中毒"迟早分叉——与 Task 9 抽
+/// `rr3_spawn_line_reader` 是同一条理由。
 ///
-/// `#[cfg(unix)]` 不是多余的装饰而是零警告的前提：它的两个调用方（`conn`/`daemon`）都是
-/// `#[cfg(unix)]` 模块，非 Unix 下无条件定义会立刻变成 `dead_code`（Windows ①b 的门禁是
+/// `#[cfg(unix)]` 不是多余的装饰而是零警告的前提：它的三个调用方（`conn`/`daemon`/`supervisor`）
+/// 都是 `#[cfg(unix)]` 模块，非 Unix 下无条件定义会立刻变成 `dead_code`（Windows ①b 的门禁是
 /// 零警告）。若将来平台无关代码也要用这把锁，那时候再把这一行去掉。
 #[cfg(unix)]
 pub(crate) fn rr3_lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
