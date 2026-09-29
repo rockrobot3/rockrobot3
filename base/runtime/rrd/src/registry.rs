@@ -33,13 +33,20 @@ pub const RR3_RESTART_FAILURE_CAP: u32 = 5;
 /// 注册完成前超时（`pre_register_timeout_ms`）的判定在 conn 层，届时新增取值即可。
 pub const RR3_EXPIRE_HEARTBEAT_TIMEOUT: &str = "heartbeat_timeout";
 
-/// 生命周期阶段：registered → running ⇄ degraded，任何超时/退出即 failed
+/// 生命周期阶段。本文件**当前可发生**的转移只有三条：
+/// `registered → running`（`rr3_reg_beat`）、`registered | running → failed`
+/// （`rr3_reg_expire` 超时、`rr3_reg_death` 退出）。
+/// `Degraded` 今天**没有任何置位路径**，`degraded → running` 那条边也就无从发生——
+/// 它在此只是 spec §5.0 词表里的一个名字（`as_str()` 要回显它），不是已交付的状态。
+/// degraded 的 setter 与持久化随 Task 9/11 落地；**届时 `rr3_reg_beat` 不得再无条件升
+/// `Running`**（见该函数文档），否则一颗心跳就会把降级标注抹掉。
+/// failed 之后同身份可重注册（换新 task 号），旧条目整体替换。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rr3Phase {
     /// 已注册、尚未收到任何心跳：此刻不判活（legacy 教训 76c0ad8）
     Registered,
     Running,
-    /// 依赖的 base 能力未就位、或整体降级（由 daemon 层在 spawn/依赖判定处置位，spec §5.0）
+    /// 依赖的 base 能力未就位、或整体降级（setter 未落地：随 Task 9/11 与持久化一起）
     Degraded,
     Failed,
 }
@@ -80,7 +87,12 @@ impl fmt::Display for Rr3RegisterError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rr3PublishDeny {
     ReservedNamespace { topic: String },
+    /// `owner` 回显主题集里登记的 owner；主题根本不在册时取不到，只能回显 `?`。
+    /// 两条都是**终判拒绝**（这一条发布已经被拒了），不是"owner 未知、待定再查"——
+    /// 日志读者别把 `owner=?` 读成待办事项。
     ForeignPrefix { topic: String, owner: String, sender: String },
+    /// "未注册"指的是**主题**不在主题集里（首段与发送方相符、名字却拼错或没登记），
+    /// **不是**指发送方那个模块没在册：本函数是关联函数、不碰 `self`，看不见在册表。
     NotRegistered { topic: String },
 }
 
@@ -156,6 +168,18 @@ impl RrdRegistry {
         tx: Sender<Rr3Frame>,
         now_ms: u64,
     ) -> Result<u64, Rr3RegisterError> {
+        // 入库前提：watchdog_ms 必须为正，否则 `now_ms - last_beat_ms >= watchdog_ms` 恒成立，
+        // 首轮到期扫描就把所有模块秒判死。`rr3_manifest_facts_from_text` 只在**文本**读取期
+        // 拒非正整数（`manifest.rs` 的 `req_int`），而 `Rr3ManifestFacts` 字段全 `pub`，
+        // 直接构造的 facts 绕得过那道校验，故这里再钉一次。
+        // 用 debug_assert 而不是返回 Err：绕过 facts 读取入口是调用方的编程错误，而
+        // `Rr3RegisterError` 的三个变体是冻结接口，不能为它加第四个；release 侧的硬门禁
+        // 属 Task 7/8 的 CLI/装载校验，本轮不发明。
+        debug_assert!(
+            facts.watchdog_ms > 0,
+            "watchdog_ms = 0 的模块 {} 一入库就会被到期扫描判死",
+            facts.name
+        );
         if facts.name == crate::topics_load::RR3_RESERVED_OWNER {
             return Err(Rr3RegisterError::ReservedName { name: facts.name.clone() });
         }
@@ -193,8 +217,13 @@ impl RrdRegistry {
         Ok(task)
     }
 
-    /// 心跳：registered/degraded → running 并刷新到期基准。
+    /// 心跳：registered / running → running，并刷新到期基准。
     /// 未在册的 task、以及已 failed 的条目一律拒（failed 的模块不得靠补心跳复活自己）。
+    /// **注意本函数对任何非 failed 相位都无条件写 `Running`**：今天这是全集，因为
+    /// `Degraded` 尚无 setter、除它之外没有第三种非 failed 相位；Task 9/11 落地 degraded
+    /// 的置位与持久化时，必须同时把这里改成"degraded 只续命、不升级"，否则一个心跳周期
+    /// 就会把降级标注抹平（当前语义由 `heartbeat_promotes_registered_to_running` 钉住：
+    /// 心跳之后相位必须是 `running`，改置 `degraded` 即红）。
     pub fn rr3_reg_beat(&mut self, src_task: u64, now_ms: u64) -> bool {
         let Some(name) = self.by_task.get(&src_task).cloned() else { return false };
         let Some(e) = self.modules.get_mut(&name) else { return false };
@@ -230,12 +259,26 @@ impl RrdRegistry {
         out
     }
 
-    /// 发布归属判定。三层顺序即安全语义：下行冒充 → 前缀越权 → 未在册。
+    /// 发布归属判定。三层顺序即安全语义：下行冒充 → 前缀越权 → 未在册，`Ok` 之前再把
+    /// 主题集里登记的 owner 与发送方比一次（见末段）。
     /// 关联函数（不碰 self），故生产路径与测试路径完全同码。
     ///
     /// 顺序不是洁癖：`rr3-runtime/*` 的冒充者在主题集里可以"合法在册"（owner 就写
     /// `rr3-runtime`），若先查前缀或先查在册，它会得到 ForeignPrefix/Ok 而不是"冒充"这条
     /// 最严重的定性。rrd 自己是该命名空间唯一合法发布者，走的是下行广播路径，不调本函数。
+    ///
+    /// **`sender_name` 的来源是调用方必须保证的前提，本函数无法替你保证**：签名收
+    /// `&str`、不碰 `self`，所以它既不知道这个名字是否在册（从未注册、或已 `Failed`
+    /// 的名字照样能拿到 `Ok`），也不知道它是不是报文里编出来的。唯一的防线建在调用侧：
+    /// `sender_name` 一律由 `rr3_reg_name_of(src_task)` 从连接持有的 task 号**反查**得到，
+    /// **绝不得取自帧体或注册报文里自称的 name 字段**。Task 6 的上行处理必须照此接线。
+    ///
+    /// 末段的 owner 比对不是重复劳动：首段 == `sender_name` 只是主题串的**语法**事实，
+    /// `rr3_topic_set_owner(topic) == sender_name` 才是**在册表登记的事实**。二者今天恒等，
+    /// 是因为 `rr3_topic_set_check` 强制"首段 == owner"，而那条前置只在 `rr3_topics_load`
+    /// 的装载路径上被强制；`rr3_registry_topic_set_from_text` 本身是 public，绕开 check
+    /// 造一张"首段是 rr3-sima、登记 owner 是 rr3-simb"的表并不费力。安全判定不该押在
+    /// "上游一定查过"上，故这里就地把两条都查一遍（多一次 O(log n) 查表，无副作用）。
     pub fn rr3_reg_publish_check(
         sender_name: &str,
         topic: &str,
@@ -255,6 +298,16 @@ impl RrdRegistry {
         if !topics.rr3_topic_set_contains(topic) {
             return Err(Rr3PublishDeny::NotRegistered { topic: topic.to_string() });
         }
+        // 首段相符只说明主题串"写着是这个命名空间"；在册 owner 是别人就是越权。
+        // 取不到 owner（登记表里 owner 缺失）同样按越权拒，绝不因"查不到"而放行。
+        let owner = topics.rr3_topic_set_owner(topic);
+        if owner.as_deref() != Some(sender_name) {
+            return Err(Rr3PublishDeny::ForeignPrefix {
+                topic: topic.to_string(),
+                owner: owner.unwrap_or_default(),
+                sender: sender_name.to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -269,15 +322,20 @@ impl RrdRegistry {
     }
 
     /// 死亡处理：策略决定是否重启；连续失败到上限即永久 failed
+    ///
+    /// `now_ms` 在本函数里**没有读者**，签名却是冻结的（Task 6/8 照样传）：把它写进
+    /// `last_beat_ms` 是一处死写——`rr3_reg_expire` 跳过 failed、`rr3_reg_beat` 拒 failed、
+    /// 同身份重注册时整条 `Entry` 被替换，没有任何路径会再读那颗基准，故收下但不写。
+    /// 死亡时刻若将来要进日志，那是新增字段的事，不是复用到期基准。
     pub fn rr3_reg_death(
         &mut self,
         name: &str,
         clean_exit: bool,
         now_ms: u64,
     ) -> Option<Rr3RestartPlan> {
+        let _ = now_ms;
         let e = self.modules.get_mut(name)?;
         e.tx = None;
-        e.last_beat_ms = now_ms;
         e.phase = Rr3Phase::Failed;
         let restart = match e.facts.restart_policy.as_str() {
             "always" => true,
@@ -328,7 +386,11 @@ impl RrdRegistry {
         self.modules.get(name).map(|e| e.facts.clone())
     }
 
-    /// 投给除 `exclude_task` 外的所有在册连接；返回成功入队数。接收者已 drop 不算错。
+    /// 投给除 `exclude_task` 外的所有**活**连接；返回成功入队数。接收者已 drop 不算错。
+    /// **只做广播，不看 `frame.header.dst_task`**：该字段原样带上、本函数不读它，所以
+    /// 它**不是**单播入口（签名冻结，不改）——`expired_module_is_excluded_from_fanout`
+    /// 就把这条事实编码了：帧的 dst 写的是已判死的 simb，实际收到的是 sima。
+    /// 要点名发给某一个模块，请由 conn 层直接用那条连接的 `Sender`，别指望本函数过滤。
     pub fn rr3_reg_fanout(&self, frame: &Rr3Frame, exclude_task: u64) -> usize {
         self.modules
             .values()
@@ -509,6 +571,22 @@ watchdog_timeout_ms = {wd}
         assert_eq!(r.rr3_reg_name_of(rr_bus::RR3_TASK_FIRST_MODULE + RR3_REG_MAX_MODULES as u64), None);
     }
 
+    /// 注册期不许把 `watchdog_ms = 0` 收进表里：那样 `now - last_beat >= 0` 恒成立，
+    /// 首轮到期扫描就把全表秒判死。`rr3_manifest_facts_from_text` 已经把非正整数拒在
+    /// 读取期，但 `Rr3ManifestFacts` 字段全 `pub`，调用方可以直接构造绕过它——所以入库
+    /// 那一刻还得钉一次。`cargo test` 跑的是 debug 构建（`debug_assertions` 开），
+    /// 故这里用 catch_unwind 断言它当场被拦；release 侧的硬门禁属 Task 7/8 的 CLI 校验。
+    #[cfg(debug_assertions)]
+    #[test]
+    fn zero_watchdog_is_caught_at_register_time() {
+        let mut r = RrdRegistry::new(1000);
+        let mut f = facts("rr3-sima", 100, 500, "always");
+        f.watchdog_ms = 0; // 绕过 manifest.rs 校验的唯一途径：pub 字段直接改
+        let caught =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.rr3_reg_add(&f, chan().0, 0)));
+        assert!(caught.is_err(), "watchdog_ms = 0 必须在入库那一刻被拦下，不能留给到期扫描去判死");
+    }
+
     /// 注册即 registered；收到心跳才 running；未在册 task 的心跳被拒
     #[test]
     fn heartbeat_promotes_registered_to_running() {
@@ -575,6 +653,42 @@ watchdog_timeout_ms = {wd}
                 owner: "rr3-simb".into(),
                 sender: "rr3-sima".into(),
             }
+        );
+    }
+
+    /// 归属判定的**最后一道**看的是主题集里登记的 owner，而不是主题串的首段：
+    /// 首段相等只可能来自"表没被 `rr3_topic_set_check` 复验过"（check 强制首段 == owner，
+    /// `rr-registry/src/topics.rs` 的 `rr3_topic_set_check`），而那条前置只在
+    /// `rr3_topics_load` 的装载路径上成立。`rr3_registry_topic_set_from_text` 是 public，
+    /// 任何绕开 check 造出来的表都可能带着"首段是 rr3-sima、owner 登记的是 rr3-simb"的条目。
+    /// 故本用例**刻意不用** `topic_set()`（它 assert 过 check，结构上造不出这张表）。
+    #[test]
+    fn publish_check_uses_the_registered_owner_not_just_the_first_segment() {
+        let set = rr_registry::rr3_registry_topic_set_from_text(
+            r#"schema_version = 1
+[[owner]]
+name = "rr3-simb"
+[[topic]]
+name = "rr3-sima/ping/state"
+kind = "event"
+owner = "rr3-simb"
+"#,
+        );
+        // 夹具前提三条：首段就是发送方自己、主题确实在册、owner 登记的却是别人。
+        assert_eq!(set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(), Some("rr3-simb"));
+        assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
+        assert!(
+            !set.rr3_topic_set_check().is_empty(),
+            "前提：这张表本来就形状不合法（首段 ≠ owner），装载路径永不产出它，只用于验第三道防线"
+        );
+        assert_eq!(
+            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set),
+            Err(Rr3PublishDeny::ForeignPrefix {
+                topic: "rr3-sima/ping/state".into(),
+                owner: "rr3-simb".into(),
+                sender: "rr3-sima".into(),
+            }),
+            "前缀对得上但在册 owner 是别人：必须按越权拒，而不是因为首段相符就放行"
         );
     }
 
@@ -667,6 +781,24 @@ watchdog_timeout_ms = {wd}
         assert_eq!(delays, vec![1000, 2000, 4000, 8000, 16000], "退避必须按表 × base");
         assert_eq!(r.rr3_reg_death("rr3-sima", false, 600), None, "达上限必须停止重启");
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
+    }
+
+    /// `--restart-base-ms 0` 的**现值**是 `delay_ms = 0`（第 1 档 1×0、第 2 档 2×0 都是 0，
+    /// 即"立即重启"）。本条只把现值钉死，不裁下限：`0` 该不该被拒/钳到某个最小值是
+    /// Task 7/8 的 CLI 门禁（计划显式划走），本轮不发明。
+    /// 它挡的是 Task 7/8 之前有人"顺手"在延迟算术里给 base 补一个 `.max(1)` 之类的下界——
+    /// 那会让这里从 0 变成 1，而配置面看起来什么都没改。
+    #[test]
+    fn zero_restart_base_ms_currently_yields_zero_delay() {
+        let mut r = RrdRegistry::new(0);
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+        let p = r.rr3_reg_death("rr3-sima", false, 600).expect("base=0 不改变是否给计划");
+        assert_eq!((p.attempt, p.delay_ms), (1, 0), "现值：第 1 档 1×0 = 0");
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", false, 700).expect("第 2 次仍有计划").delay_ms,
+            0,
+            "现值：第 2 档 2×0 仍是 0（不是被补成 1ms）"
+        );
     }
 
     /// 退避乘法是纯算术：base 大到会溢出时封顶，绝不 panic（debug 的 `*` 会 panic）
