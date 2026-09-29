@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "rr-ipc",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+rr-ipc = { path = "rr-ipc" }
+rr-bus = { path = "rr-bus" }
+rr-registry = { path = "rr-registry" }
+rr-hal = { path = "rr-hal" }
+rr-ota = { path = "rr-ota" }
+toml = "0.8"
+async-trait = "0.1"
+serde_json = "1"
+
+# 空壳阶段只看能否编译与测试，产物体积/速度优先
+[profile.dev]
+opt-level = 0
+debug = 1
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
