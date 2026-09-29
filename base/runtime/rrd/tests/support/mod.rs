@@ -374,6 +374,30 @@ pub fn rr3_drain_until_closed(c: &mut RrdClient) -> Vec<Rr3Frame> {
     got
 }
 
+/// 在 `dur` 内把这一条连接上**能读到的帧全部收走**（不 panic：读不到就是这一轮结束）。
+/// 队列里的存货先算进返回值（`rr3_try_recv` 的既有口径），所以它也是非破坏性的——
+/// 收走的帧都在返回值里，用于"这条连接上不该出现 X"的否定断言。
+///
+/// 为什么不能直接用 `rr3_drain_until_closed`：那条的终止条件是 `rr3_connect` 设的 **5 s 读超时**
+/// （`support/mod.rs` 的 `rr3_connect`），拿它做"150 ms 内没回显即通过"的判据会让每条这样的用例
+/// 白等 4.85 s，Task 10/11 的否定断言一多就把测试时长推到分钟级。这里临时把读超时压到 `dur`、
+/// **收完把原值设回去**：设回去不是洁癖——同一连接后来的读法要靠 5 s 等到慢副作用（重启、
+/// watchdog），留下 150 ms 就等于把别的用例改成随机红。
+pub fn rr3_collect_within(c: &mut RrdClient, dur: Duration) -> Vec<Rr3Frame> {
+    let saved = c.stream.read_timeout().ok();
+    c.stream
+        .set_read_timeout(Some(dur))
+        .expect("临时读超时不可设");
+    let mut got = Vec::new();
+    while let Ok(f) = rr3_try_recv(c) {
+        got.push(f);
+    }
+    c.stream
+        .set_read_timeout(saved.flatten())
+        .expect("恢复读超时失败");
+    got
+}
+
 /// 第一条 Response
 pub fn rr3_read_rpc_frame(c: &mut RrdClient) -> Rr3Frame {
     rr3_read_where(c, " Response", |f| {

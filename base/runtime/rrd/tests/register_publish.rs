@@ -288,6 +288,21 @@ fn legal_publish_is_forwarded_to_other_peers() {
     assert_eq!(got.header.dst_task, rr_bus::RR3_BROADCAST_DST_TASK, "发布是广播语义");
     assert_eq!(rr3_json_of(&got)["seq"], 1, "体必须原样转发");
     rrd.rr3_assert_no_log("拒绝", Duration::from_millis(150));
+
+    // F1（评审 I-1）：b 侧的正向断言只证明"帧到了别人"，不证明"没回到自己手上"。
+    // "排除项 = 发布者 task" 是 `conn.rs` 的接线选择（`rr3_reg_fanout(&frame, me.task)`），
+    // 只有 registry 级用例钉过它；改成不排除（`exclude_task = 0`，0 不是任何模块的 task）时
+    // 上面三条全绿。这条否定断言就是那一个变异的红证：自回显会让"订阅后转发"型模块形成回环。
+    let mine = rr3_collect_within(&mut a, Duration::from_millis(150));
+    let my_topics: Vec<String> = mine
+        .iter()
+        .filter_map(|f| rr3_json_of(f)["topic"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        !my_topics.iter().any(|t| t == "rr3-sima/ping/state"),
+        "发布者不得收到自己的转发（fanout 排除项 = me.task）；a 侧 150 ms 内收到的 {} 帧 topic = {my_topics:?}",
+        mine.len()
+    );
 }
 
 /// 越权前缀：owner 是 simb 的主题由 sima 发 → AIRY_EPERM + 计数 + 不断连
@@ -322,7 +337,7 @@ fn foreign_prefix_publish_is_eperm_and_counted() {
 /// 冒充内建命名空间（最危险的伪造面）：rr3-runtime/* 是 rrd 的下行广播，上行必拒
 #[test]
 fn impersonating_runtime_namespace_is_refused() {
-    let mut rrd = RrdTest::rr3_start("pub-impersonate");
+    let rrd = RrdTest::rr3_start("pub-impersonate");
     let mut a = rrd.rr3_connect();
     rr3_send(&mut a, &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"));
     rr3_read_rpc(&mut a);
@@ -341,7 +356,7 @@ fn impersonating_runtime_namespace_is_refused() {
 /// 在册但前缀对、主题没登记（拼错域名）→ AIRY_EINVAL，不是静默丢弃
 #[test]
 fn unregistered_topic_is_einval() {
-    let mut rrd = RrdTest::rr3_start("pub-unknown");
+    let rrd = RrdTest::rr3_start("pub-unknown");
     let mut a = rrd.rr3_connect();
     rr3_send(&mut a, &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"));
     rr3_read_rpc(&mut a);
