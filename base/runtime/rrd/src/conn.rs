@@ -391,7 +391,12 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         Err(e) => e.clone(),
     };
     rr3_conn_finish(&ctx, &me, clean_exit, &reason);
-    // 所有 Sender 都已随注册表条目释放 → writer 的 iter() 自然结束
+    // 所有 Sender 都已随注册表条目释放 → writer 的 iter() 自然结束。
+    // 成立前提（F5/I-5）：这句只在**条目被移除时**成立。僵尸在册条目——注册之后不再读 socket
+    // 的模块——条目仍留在表里、Sender 不会被释放，而 `mpsc::channel` 是无界的：writer 一阻塞在
+    // write_all，那条连接的积压就无限增长。有界化 + 丢弃最旧 + 断连是 Task 10 的行为改动（已记
+    // carry，watchdog 心跳过期正是现成的回收路径），本轮只把前提写清、不改通道形状
+    // （brief 29-31 行约定的是 `mpsc::Receiver<Rr3Frame>` 这个类型，`sync_channel` 同样满足）。
     let _ = writer.join();
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())
