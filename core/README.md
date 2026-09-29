@@ -16,6 +16,34 @@ core/<模块名>/
 
 模块根目录只允许这 4 类文件/目录（include、src、CMakeLists、README），不出现任何源码或配置散件。
 
+## 密钥注入（SILICONFLOW_API_KEY）
+
+`core/llm|asr|tts` 的 `*_config.h` 只引用宏 `SILICONFLOW_API_KEY`，**密钥不在仓库里**。
+构建前注入环境变量，缺失则 CMake 直接 FATAL_ERROR（不产出能编译但上线 401 的固件）：
+
+```bash
+# bash / zsh
+export SILICONFLOW_API_KEY=sk-…
+idf.py build
+```
+
+```powershell
+# PowerShell
+$env:SILICONFLOW_API_KEY = "sk-…"
+idf.py build
+```
+
+注入链路：组件 `CMakeLists.txt` 在 `idf_component_register` 之后用
+`target_compile_definitions(${COMPONENT_LIB} PRIVATE SILICONFLOW_API_KEY="$ENV{SILICONFLOW_API_KEY}")`
+把环境变量变成编译期宏；三个 `*_config.h` 里的 `#define API_KEY SILICONFLOW_API_KEY`
+因此零改动地沿用原有 `snprintf(auth, …, "Bearer %s", API_KEY)` 使用点。
+`*_config.h` 的 `#ifndef SILICONFLOW_API_KEY / #error` 是第二道保险：
+若某个新工程忘记挂载这段 CMake，构建同样在编译该组件时报错而不是静默产出坏固件。
+
+历史注记：2026-09-29 之前该 key 明文写在三个头文件里并已推送远程，**已按泄露处理并在服务商侧轮换**；
+仓库不做历史重写（filter-repo + force push 的协作代价大于收益），旧密钥视为永久失效凭据。
+`firmware-c/sdkconfig` 已从索引移出（生成物，且会把密钥相关配置落进本地产物），`sdkconfig.defaults` 保持跟踪。
+
 ## 模块清单
 
 | 模块 | 能力 | 依赖 |
