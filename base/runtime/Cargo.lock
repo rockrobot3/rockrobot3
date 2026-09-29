@@ -101,8 +101,11 @@ dependencies = [
 name = "rrd"
 version = "0.0.1"
 dependencies = [
+ "rr-bus",
  "rr-ipc",
  "rr-registry",
+ "serde_json",
+ "toml",
 ]
 
 [[package]]

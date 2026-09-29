@@ -8,6 +8,12 @@ use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
 /// 广播目标（A-IPC 标准：dst_task = 0 表示广播）
 pub const RR3_BROADCAST_DST_TASK: u64 = 0;
 
+/// `rrd` 自身的 task 号：0 已被广播占用，守护进程固定 1（spec §5.0）
+pub const RR3_TASK_RRD: u64 = 1;
+
+/// 模块 `src_task` 分配池的起点（0=广播、1=rrd 均保留）
+pub const RR3_TASK_FIRST_MODULE: u64 = 2;
+
 /// EVENT 优先级下界。
 ///
 /// **占位值**：v0.0.1 没有任何契约/ADR/文档定义过优先级区间，这两个数只是给
@@ -30,6 +36,15 @@ mod tests {
     #[test]
     fn broadcast_dst_task_matches_standard() {
         assert_eq!(RR3_BROADCAST_DST_TASK, 0);
+    }
+
+    /// 任务号三段不得重叠：0 广播 / 1 rrd / ≥2 模块
+    #[test]
+    fn task_id_space_is_disjoint() {
+        assert_eq!(RR3_BROADCAST_DST_TASK, 0);
+        assert_eq!(RR3_TASK_RRD, 1);
+        assert_eq!(RR3_TASK_FIRST_MODULE, 2);
+        assert!(RR3_TASK_FIRST_MODULE > RR3_TASK_RRD, "模块池必须让开两个保留号");
     }
 
     /// 占位窗口要有内容可言：区间非空（MIN < MAX），且两个值都落在常量文档自己声明的
