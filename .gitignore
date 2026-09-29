@@ -15,6 +15,9 @@
 !.github/**
 !docs/
 !docs/**
+# Agent 工作产物不入库：实施计划/账本属会话副产物，不是项目交付物
+docs/superpowers/
+.superpowers/
 
 # ---- v0.0.1 结构化改造：新骨架必须可追踪 ----
 !base/
