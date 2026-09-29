@@ -12,7 +12,7 @@
 
 1. **传输**：Unix Domain Socket（UDS），单机场景，无网络栈开销
 2. **协议**：JSON-RPC 2.0 body + **定长 32B 消息头**（trace_id / ts_ns / source / phase / topic）——头部格式对齐 AirymaxRT gateway 规约，为将来对接预留字节级兼容
-3. **事件主题**：`rr3-<模块>/<域>/<事件>`，全量登记于 `contracts/topics.toml`，rrd 启动校验前缀归属（= manifest.name），越权发布拒绝
+3. **事件主题**：`rr3-<模块>/<域>/<事件>`，全量登记于 `contracts/topics.toml`，rrd 启动校验前缀归属（= manifest.name），越权发布拒绝（v0.0.1 现状：前缀归属已由 CI 契约测试强制，见 `tools/ci/check.sh` ③；rrd 运行时校验待 M1/M2 落地）
 4. **phase 字段**：`normal | degraded | recovery` 贯穿全链路，供 brain 与 base 做降级决策
 5. **契约管理**：`contracts/` 为顶层目录，envelope 与事件负载 schema 为 [SC] 字节级共享契约，Rust（rr-ipc）与 Python（rr3_brain.ipc）双方唯一事实源
 
