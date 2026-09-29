@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RockRobot3 A-IPC envelope (Airy IPC 128B header, Layout C)",
+  "description": "字节级唯一事实源。布局永久稳定（AOS-STD-IPC-001/002, L1）。所有多字节字段小端序（AOS-STD-IPC-003, L1）。标准原文：airymaxhub/docs/openstandards/02-airy-ipc-protocol-standard.md v1.0。v0.0.1 冻结范围 = 消息头 128B + payload 类型枚举值 + flags + 错误码；payload 体内部编码（含 type 前缀字节宽度）留 M2。",
+  "x-rock3-status": "frozen-v0.0.1",
+  "x-rock3-deferred": ["payload_body_encoding"],
+  "type": "object",
+  "properties": {
+    "header": {
+      "type": "object",
+      "x-byte-size": 128,
+      "x-alignment": "packed, no padding, 2 cache lines",
+      "x-endianness": "little",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "x-offset-sum": "4+2+2+8+8+8+8+4+84 = 128",
+          "x-offset-table": [
+            { "name": "magic", "offset": 0, "length": 4, "type": "uint32", "value": 1096681265, "hex": "0x41524531", "wire_bytes_hex": "31455241", "stability": "L1", "note": "标准注释写作 'ARE1'，与 LE 字段值矛盾；rock3 取 LE 字段值为准，见 contracts/README.md 歧义登记" },
+            { "name": "opcode", "offset": 4, "length": 2, "type": "uint16", "enum_ref": "opcode", "stability": "L1" },
+            { "name": "flags", "offset": 6, "length": 2, "type": "uint16", "enum_ref": "flags", "stability": "L1", "x-undefined-bits": "发送方必须置 0；接收方必须忽略未知位（AOS-STD-IPC-004 前向兼容）" },
+            { "name": "trace_id", "offset": 8, "length": 8, "type": "uint64", "stability": "L1", "note": "OpenTelemetry；单调递增 + 随机后缀" },
+            { "name": "timestamp_ns", "offset": 16, "length": 8, "type": "uint64", "stability": "L1", "note": "CLOCK_REALTIME 纳秒，对齐北京时间 UTC+8" },
+            { "name": "src_task", "offset": 24, "length": 8, "type": "uint64", "stability": "L1", "note": "0 表示内核发起；rock3 由 rrd（受信运行时）在模块注册时分配并校验，用户态不得自设（ADR-0006 §4 / AOS-STD-IPC-024）" },
+            { "name": "dst_task", "offset": 32, "length": 8, "type": "uint64", "stability": "L1", "note": "0 表示广播；广播不占独立标志位" },
+            { "name": "payload_len", "offset": 40, "length": 4, "type": "uint32", "stability": "L1", "minimum": 0, "maximum": 67108864, "note": "0 表示无 payload；上限 64 MiB（AOS-STD-IPC-021）" },
+            { "name": "reserved", "offset": 44, "length": 84, "type": "bytes", "stability": "L1", "x-must-be": "all-zero", "note": "扩展只允许写本区并经 flags 标记启用（ADR-0006 §1）" }
+          ]
+        }
+      }
+    },
+    "opcode": {
+      "type": "object",
+      "x-description": "传输层操作码，与 payload 类型分属不同层次",
+      "SEND": 1, "RECV": 2, "SEND_BATCH": 3, "CANCEL": 4
+    },
+    "flags": {
+      "type": "object",
+      "x-layer-note": "bit0-1 由 [SC] SSoT 锁定（NOWAIT/SIGNAL），扩展标志从 bit2 起编号",
+      "AIRY_IPC_F_NOWAIT": 1,
+      "AIRY_IPC_F_SIGNAL": 2,
+      "AIRY_IPC_F_ZEROCOPY": 4,
+      "AIRY_IPC_F_CAP_CARRY": 8,
+      "AIRY_IPC_F_COMPRESS": 16,
+      "AIRY_IPC_F_ENCRYPT": 32,
+      "AIRY_IPC_F_URGENT": 64,
+      "AIRY_IPC_F_NOREPLY": 128,
+      "x-rock3-adopted": ["AIRY_IPC_F_NOWAIT", "AIRY_IPC_F_SIGNAL", "AIRY_IPC_F_ZEROCOPY", "AIRY_IPC_F_URGENT", "AIRY_IPC_F_NOREPLY"],
+      "x-rock3-deferred": {
+        "AIRY_IPC_F_CAP_CARRY": "capability 令牌机制不引入，具身化时再评估（ADR-0006 备选否决项）",
+        "AIRY_IPC_F_COMPRESS": "单机 UDS 无需 LZ4",
+        "AIRY_IPC_F_ENCRYPT": "单机可信环境，无 SM4/HMAC-SM3"
+      }
+    },
+    "payload_type": {
+      "type": "object",
+      "x-stability": "L1（AOS-STD-IPC-005）；新增类型必须追加 0x0006 之后，不得改既有值",
+      "REQUEST": 1,
+      "RESPONSE": 2,
+      "EVENT": 3,
+      "STREAM": 4,
+      "NOTIFICATION": 5,
+      "x-rock3-mapping": {
+        "REQUEST": "rr3-* RPC 调用（JSON-RPC 2.0 body）",
+        "RESPONSE": "RPC 响应；request_id 必须与 REQUEST 配对",
+        "EVENT": "事件总线（尽力投递，允许丢失）",
+        "STREAM": "音频 PCM / 关节状态（有序投递，实时控制面，ADR-0007）",
+        "NOTIFICATION": "心跳 / 系统通知"
+      }
+    },
+    "error_codes": {
+      "type": "object",
+      "x-adopted-by": "ADR-0006 §3：RESPONSE.status 采用 AIRY_E* 子集",
+      "AIRY_EOK": 0,
+      "AIRY_EINVAL": -2,
+      "AIRY_EBUSY": -16,
+      "AIRY_EPERM": -22,
+      "AIRY_ETIMEDOUT": -1004,
+      "x-not-adopted": {
+        "AIRY_ELIMIT": "-7 内核资源上限，单机可信环境不引入",
+        "AIRY_EMSGSIZE": "-1201 由 rrd 前置校验 payload_len 代替",
+        "AIRY_ENOMSG": "-1202 随 M2 的 RPC 实现引入"
+      }
+    },
+    "transport": {
+      "type": "object",
+      "x-uds-path": "/var/run/rock3-ipc.sock",
+      "x-env-key": "RR3_BUS_PATH",
+      "x-implementations": {
+        "uds": "M2 唯一实现",
+        "shm": "实时控制面 100Hz–1kHz，M5（ADR-0007）",
+        "tcp": "多机协作，预留；标准端口 6060"
+      }
+    },
+    "compatibility_tests": {
+      "type": "object",
+      "x-adopted-by": "ADR-0006 后果项：IPC-T-001~003 必测",
+      "IPC-T-001": "消息头 128 字节，字段偏移精确匹配",
+      "IPC-T-002": "非 0x41524531 的消息被拒绝",
+      "IPC-T-003": "x86 与 aarch64 字节布局一致",
+      "IPC-T-010": "未知标志位不报错（前向兼容）",
+      "x-rock3-v0.0.1-coverage": ["IPC-T-001", "IPC-T-002", "IPC-T-003", "IPC-T-010"]
+    }
+  }
+}
