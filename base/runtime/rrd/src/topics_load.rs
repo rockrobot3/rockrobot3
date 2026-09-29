@@ -70,10 +70,18 @@ fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<S
 /// 合并后对**整张表**再自检一次（Task 3 评审 DEFER→Task 5 的欠账）。
 ///
 /// `read_set` 只对契约、叠加层各自自检，合并这一步本身从未被验证过：
-/// `rr3_topic_set_merge` 只要退化（漏带一条生产 topic、把某条的 owner 改成叠加层的值、
-/// kinds 与 topics 失配），装载就会把一张被改写过的所有权表交出去——那正是 spec §6
-/// "叠加层不是生产放行口"最坏的实现方式。故合并后逐项复验两件事：
-/// ① merged 自身形状合法；② 契约的每一条 topic 都还在、owner 一字未改（叠加层只能新增）。
+/// `rr3_topic_set_merge` 只要退化（漏带一条生产 topic、把某条的 owner 改成叠加层的值），
+/// 装载就会把一张被改写过的所有权表交出去——那正是 spec §6
+/// "叠加层不是生产放行口"最坏的实现方式。故合并后复检两件事并逐条点名：
+/// ① merged 自身形状合法（`rr3_topic_set_check` 的范围：名字规则、owner 已登记、
+///    首段 == owner、kind 在白名单内）；② 契约的**每一条 topic 名**都仍在 merged 里、
+///    且它的 **owner** 一字未改（叠加层只能新增）。
+///
+/// **②只比 name 与 owner，不比 kind**：契约某条 topic 的 kind 被 merge 改写时，本函数
+/// 两道分支都抓不到（①只验 kind 是否合法、不比对契约原值）。这不是笔误而是能力上限——
+/// `Rr3TopicSet` 只暴露 `contains/owner/names`，没有 kind 访问器。kind 的访问器与 kind
+/// 复检随 Task 6 的批次一起做（给 `Rr3TopicSet` 加访问器是 API 变更），在此之前本注释
+/// 不得把复检范围说成"逐项/全字段复验"。
 /// 与 `reject_reserved_namespace` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
 fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
     let mut errs: Vec<String> = merged
@@ -181,8 +189,9 @@ mod tests {
         assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
     }
 
-    /// 合并后必须**逐条复验**（Task 3 评审 DEFER→Task 5）：装载交出去的那张表，
-    /// 除了"两边各自合法"，还得保证生产条目一条不少、owner 一字未改。
+    /// 合并后必须**逐条复验 topic 名与 owner**（Task 3 评审 DEFER→Task 5）：装载交出去的那张表，
+    /// 除了"两边各自合法"，还得保证生产条目一条不少、owner 一字未改。**kind 不在本复验范围**
+    /// （`Rr3TopicSet` 无 kind 访问器，随 Task 6 批次补），别把这条读成全字段复验。
     /// 断言取自 `rr3_topics_load` 的真实返回，而不是再拼一遍期望集合——去掉装载处的
     /// 复验步骤本身不会让本测试变红（正确的 merge 造不出不自洽的表），它挡的是
     /// merge 将来退化；装载处的复验是同一件事的 fail-closed 版本。
