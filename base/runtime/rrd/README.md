@@ -14,7 +14,7 @@ health / config，事件总线的宿主（[`architecture.md`](../../../docs/arch
 | `src/manifest.rs` | 运行期事实的读取与入口校验：`Rr3ManifestFacts`、`rr3_manifest_facts_from_text`、`rr3_manifest_entry_is_absolute` |
 | `src/registry.rs` | 在册表 `RrdRegistry`：注册、心跳、到期判活、死亡记账与重启计划、扇出、快照，以及发布归属判定 |
 | `src/rpc.rs` | 上行 JSON-RPC 的方法白名单、参数校验、应答形状与错误码映射 |
-| `src/conn.rs` · `src/daemon.rs` | **整体 `#[cfg(unix)]`**：UDS 监听与 accept 循环、每连接 **2 条线程 + 2 个 fd**（accept 处 spawn 的 reader 线程 + `conn.rs` 为同一条连接 spawn 的 writer 线程与它那份 `try_clone`，连接账见 `daemon.rs` 模块 doc），注册握手、上行分发与发布转发 |
+| `src/conn.rs` · `src/daemon.rs` | **整体 `#[cfg(unix)]`**：UDS 监听与 accept 循环、每连接 **2 条线程 + 2 个 fd**（accept 处 spawn 的 reader 线程 + `conn.rs` 为同一条连接 spawn 的 writer 线程与它那份 `try_clone`，连接账见 `daemon.rs` 模块 doc），外加**全进程唯一**的 watchdog 线程（`rr3_spawn_watchdog`：按 tick 扫到期、判死、在锁外广播 `failed`），以及注册握手、上行分发与发布转发 |
 | `src/lib.rs` | 上述模块声明 + 两个字面量：`rr3_banner` 与 `RRD_UNSUPPORTED` |
 
 **接口字面量不在本文件复述**：启动参数与默认值、横幅、退出码见
