@@ -24,7 +24,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 167 条（Windows）/197 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 175 条（Windows）/205 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -41,14 +41,14 @@ CLI `--watchdog-tick-ms` + `Rr3Expiry` 回带 `elapsed_ms`/`watchdog_ms` 两个�
 表级用例只把 `now_ms` 当参数喂（回答"怎么算到期"），线级用例才证明"到期之后线程真的做了那几件事、
 而且只做一次"。**上一轮的"跨进程夹具"这一类证据仍在**（`e2e_sim_peer` 的 5 条本轮未动）。
 **两个平台的条数本就应当不等**，所以各记各的、
-不合并成单一数字：Windows x86_64-pc-windows-msvc **167**（本轮 ①b 实测量，= 上一轮 165
-再加 `registry::tests` 的 1 条（到期回报回显判据数字）与 `cli::tests` 的 1 条（tick 可配且拒 0）——
+不合并成单一数字：Windows x86_64-pc-windows-msvc **175**（M2 Task 11a ①b 实测量，= Task 10 的 167
+再加 `registry::tests` 净增的 8 条崩溃记账用例——
 新增的 4 条 `e2e_watchdog` 全在 `#![cfg(unix)]` 目标里、Windows 不参与编译，该目标实测
 `running 0 tests`，见下）、
-WSL2 Linux x86_64 **197**（本轮 L2 全量实跑 `197 passed; 0 failed`；逐目标相加而非算术倒推：
+WSL2 Linux x86_64 **205**（本轮 L2 全量实跑 `205 passed; 0 failed`；逐目标相加而非算术倒推：
 rr-bus 4 + rr-hal 4 + rr-ipc lib 26 + rr-ipc `envelope_meta` 4 + rr-ota 4 + rr-registry lib 15 +
-契约 24 + rrd lib 87 + `src/main.rs` 0 + `src/bin/sim_peer.rs` 0 + `e2e_sim_peer` 5 +
-`e2e_watchdog` 4 + `register_publish` 19 + `socket_banner` 1 = 197；上一轮记的是 191）。
+契约 24 + rrd lib 95 + `src/main.rs` 0 + `src/bin/sim_peer.rs` 0 + `e2e_sim_peer` 5 +
+`e2e_watchdog` 4 + `register_publish` 19 + `socket_banner` 1 = 205；Task 10 记的是 197）。
 `aarch64-unknown-linux-gnu` 交叉 + qemu-user
 本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 30 条全部可枚举：
 Unix 独有的 29 条线级用例（`register_publish` 19 + `socket_banner` 1 + `e2e_sim_peer` 5 +
@@ -57,7 +57,7 @@ Unix 独有的 29 条线级用例（`register_publish` 19 + `socket_banner` 1 + 
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
 Unix 侧行为不据此声称；29 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **167** 条（Windows）/ **197** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **175** 条（Windows）/ **205** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
@@ -65,9 +65,9 @@ Unix 侧行为不据此声称；29 条线级用例在 Windows ①b 里显示 `ru
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24（M2 Task 6 给 `Rr3TopicSet` 加 `rr3_topic_set_kind`
 访问器，实证并进了既有的 merge 用例，故条数不变）；
-rrd 的 86 条（Windows）/87 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
+rrd 的 94 条（Windows）/95 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
 全在 lib 目标（`cli::tests` 12/13 + `topics_load::tests` 16 + `manifest::tests` 7 + 横幅 2
-+ `registry::tests` 39 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
++ `registry::tests` 47 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
 形状错误标注来源 1、路径值不得以 `-` 开头 1；M2 Task 4 再补 `manifest::tests` 7 条；
 M2 Task 5 补在册表/状态机/发布归属 29 条与合并后复验 1 条；
 M2 Task 5 修复轮 1 再补 `registry::tests` 3 条：在册 owner ≠ 首段时的越权终判 1、
@@ -109,6 +109,27 @@ M2 Task 10 补 `registry::tests` 1 条——`Rr3Expiry` 必须回显**判定用�
 而掐时间正是"随机红"的来源。同批补 `cli::tests` 1 条——`--watchdog-tick-ms` 默认 200、可配、
 **拒 0 而不是夹 1**（0 = 每拍都扫 = 忙循环，那是另一种错法）；并把既有默认值用例扩成三值同钉
 （`restart_base_ms` / `pre_register_timeout_ms` / `watchdog_tick_ms`）。
+M2 Task 11a（崩溃记账收口）净增 `registry::tests` 8 条（39→47）：删掉旧的 `always_policy_backs_off_and_caps`
+1 条、补 9 条把"唯一一本账"钉死——`crash_streak` 按 **name** 计、跨重注册连续不归零（这是旧 `Entry.restarts`
+被同名替换归零、5 次上限今天撞不到的根因）、退避表 `RR3_RESTART_BACKOFF` × `restart_base_ms` 且饱和不回绕、
+`RR3_RESTART_FAILURE_CAP = 5` 到顶即停、`rr3_charge` 是三条死亡路（conn EOF、watchdog 到期、子进程退出码）
+唯一共用的记账入口（双路只记一次账）、活满一整条自己的窗口才归零、达上限停止重启。
+**D-6**：`rr3_reg_beat` 返回值从 `bool` 改成三态 `Rr3Beat{Rejected, Kept, Promoted}`，只有 `Promoted`
+那一次是 `registered → running` 的升级。**相位面（本轮边界）**：`running` 今天**只落到日志面**
+（`conn.rs` 打 `{name} → running` 这一行钉住"唯一升级时刻"），`rr3-runtime/module/state` 上那条
+`running` 广播**留给 Task 11b**——上线广播属"广播几条"的判据面，11a 不碰。`Degraded` 分支归 `Kept`
+（只续命不升级），结掉"一颗心跳抹平降级"的欠账。**D-8**：`Rr3Expiry` 新增 `restart: Option<Rr3RestartPlan>`
+（到期那一路的记账结果），但 11a 的 daemon 侧 `let _ = ex.restart;` **收下不使用**、绝不据此打
+"重启计划"日志——一旦打了就当场打死 `e2e_watchdog` 的 W4（判据是观察窗内 stdout 不得出现"重启计划"），
+`supervisor` 派生重启归 11b。**本轮终态的欠账（degraded 死相位）**：degraded 是"有 enum 变体、无写入方"的
+死相位——它的 setter 与 base 能力门（`depends.required` 的 `bus.publish`/`bus.subscribe`/`bus.rpc` 就位判定，
+spec §5.3）都不在 11/11b，一个要新相位上线、一个要给 21 条生产主题建能力字典，均不阻塞 §9 验收；
+这句话同时写在 `registry.rs` 文件头与本台账，不许被任何"已实现状态机"的措辞盖过去。
+11a 对生产代码的**唯一**非 registry 改动是 `conn.rs` 的 `rr3_reg_beat` 调用点与 `rr3_reg_death` 返回类型适配
+（`Rr3Death` 三态），四个 e2e 文件一条用例未改；`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]`，故 Task 11a 的一处
+同线程重入自死锁（把 `rr3_lock(..).rr3_reg_death(..)` 直接写进 `match` 被匹配表达式，守卫临时量延寿到整个
+match 语句、`Broadcast` 分支再 `rr3_lock` 同一把锁）Windows L1 编不到、看不见，只有 L2 的 3 条 e2e 超时把它抓出——
+`running 0 tests` 是盲区不是绿的又一记实证。
 M2 Task 7 的 UDS 层没有新增 lib 用例（`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]` 的线程与 IO，
 纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住；Task 8 是唯一动到 lib 的那一支——上面那段
 `registry::tests` 的容量门实证 1 条，其余全在测试目标里），它的 10 条（Task 8 之后 20 条）在两个独立测试目标
