@@ -1,7 +1,10 @@
 //! 监听、accept、连接线程编排（spec §4）。
 //!
 //! Task 10 在这里加唯一的 watchdog 线程，Task 11 加 spawn/重启。本任务只做：
-//! 清残留套接字 → bind → accept 循环，每连接一条线程。
+//! 清残留套接字 → bind → accept 循环。
+//! 连接账（M-1）：每连接 **2 条线程 + 2 个 fd**，不是一条——accept 处 spawn 的 reader 线程，
+//! 加上 `conn.rs` 里为同一条连接 spawn 的 writer 线程与它那份 `try_clone`（评审资源探针实测
+//! 一条活跃连接 +2 线程 +2 fd）。Task 10/11 算并发与文件描述符账按这个数。
 //! 单次 accept 失败只记日志不带走守护进程；协议错误只结束那一条连接。
 
 use std::os::unix::net::UnixListener;
