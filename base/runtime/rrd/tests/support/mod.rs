@@ -109,6 +109,43 @@ pub fn rr3_wait_line(
     }
 }
 
+/// 从一行日志里抽 `key=<数字>` 的那个数（`pid=` / `task=` / `attempt=`）。
+///
+/// **一律抽取、不写字面量**（A-5① 的处置）：boot 之后 task 号跟着 spawn 序走，pid 更是
+/// 每次都不一样，写死就是猜。它是 `e2e_sim_peer.rs` 里那段 inline `split(..).nth(1)` 的
+/// 提取版——同一段代码出现第三次就该是个函数（那一处本轮不改：既有 28 条线级用例的断言
+/// 一字不许动，等 Task 13 的夹具整合再切过来）。
+/// 抽不到即 panic 并回显整行：把"needle 与日志格式对不上"这种夹具 bug 当场报出来，
+/// 而不是让它退化成 `unwrap_or(0)` 之后比出一个假相等。
+pub fn rr3_field_from_log(line: &str, key: &str) -> u64 {
+    let raw = line
+        .split(key)
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .unwrap_or_else(|| panic!("日志行 {line:?} 里没有 {key:?}"));
+    raw.parse::<u64>()
+        .unwrap_or_else(|e| panic!("日志行 {line:?} 里的 {key:?} 不是数字（{raw}）: {e}"))
+}
+
+/// 有界轮询一个条件：每 20ms 求值一次，最多 `dur`。返回"是否在期限内成立"。
+///
+/// 与 `rr3_wait_line` 同一口径：**判据是内容**（条件成立与否），`dur` 只是"不再等"的上限，
+/// 所以它不是 `sleep` 的别名——`sleep(2s)` 断言的是"过了两秒"，这条断言的是"两秒内成真"。
+/// 不 panic 而是返回 bool：让调用方把"没成真时该看到什么"写在自己的断言消息里
+/// （例如 `/proc/{pid}` 那一格，pid 才是现场）。
+pub fn rr3_wait_until<F: FnMut() -> bool>(mut pred: F, dur: Duration) -> bool {
+    let started = Instant::now();
+    loop {
+        if pred() {
+            return true;
+        }
+        if started.elapsed() >= dur {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 pub struct RrdTest {
     pub socket: PathBuf,
     child: Child,
@@ -159,6 +196,27 @@ impl RrdTest {
         )
     }
 
+    /// 带 boot spawn 的起法：`manifests` 原样进 `--manifest`（顺序即 CLI 序，spawn 序由
+    /// start_priority 重排），`boot_role` 进 `--boot-role`。**tick 必传**（与
+    /// `rr3_start_with_tick` 同一理由：到期判死是用例自己声明的条件）。
+    ///
+    /// **但这一处的 tick 不只是"判死节拍"**：Task 11b 的 E-5 让 supervisor 的**扫尸节拍**
+    /// 复用同一个旋钮（`recv_timeout(sweep)`），所以拿 `RR3_QUIET_WATCHDOG_TICK_MS` 起 boot
+    /// 用例会让收尸一小时不发生 —— boot 用例**必须**传小 tick（`E2E_TICK_MS`）。
+    /// 这条耦合是指据不是坑：它钉住了"全 daemon 只有一条执行线程 + 一个节拍旋钮"。
+    pub fn rr3_start_boot(tag: &str, manifests: &[&Path], boot_role: &str, tick_ms: u64) -> RrdTest {
+        let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
+        RrdTest::rr3_spawn_inner(
+            &socket,
+            None,
+            &socket,
+            Some(Path::new(RR3_OVERLAY_PATH)),
+            tick_ms,
+            manifests,
+            Some(boot_role),
+        )
+    }
+
     /// 真正的起进程处。三个路径各管各的：
     /// - `socket_arg` 原样写进 `--socket`（可以是相对路径，CF-3 就靠这一点）
     /// - `cwd` 是子进程的工作目录（`None` = 继承测试进程的），相对 `socket_arg` 按它解析
@@ -192,12 +250,36 @@ impl RrdTest {
         overlay: Option<&Path>,
         watchdog_tick_ms: u64,
     ) -> RrdTest {
+        // `boot = (无 manifest, None)`：既有 28 条线级用例的可观察面因此一字未动
+        //（既不传 `--manifest`，也不等 `supervisor 启动` 那一行）。
+        RrdTest::rr3_spawn_inner(socket, cwd, socket_arg, overlay, watchdog_tick_ms, &[], None)
+    }
+
+    /// 起进程的唯一实现。`boot_role: Some(role)` 时才传 `--boot-role`，并且**多等一行**
+    /// `supervisor 启动 sweep={tick}ms`：与 `watchdog 启动 tick=` 同一口径——它证明的是
+    /// "那条线程真的跑起来过"，而不是"daemon 走到了 spawn 那一行"，同时钉住
+    /// "sweep 复用的就是 `--watchdog-tick-ms`"这条接线（E-5）。
+    fn rr3_spawn_inner(
+        socket: &Path,
+        cwd: Option<&Path>,
+        socket_arg: &Path,
+        overlay: Option<&Path>,
+        watchdog_tick_ms: u64,
+        boot_manifests: &[&Path],
+        boot_role: Option<&str>,
+    ) -> RrdTest {
         let _ = std::fs::remove_file(socket);
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rrd"));
         cmd.arg("--socket")
             .arg(socket_arg);
         if let Some(ov) = overlay {
             cmd.arg("--topics-overlay").arg(ov);
+        }
+        for m in boot_manifests {
+            cmd.arg("--manifest").arg(m);
+        }
+        if let Some(role) = boot_role {
+            cmd.arg("--boot-role").arg(role);
         }
         cmd.args(["--restart-base-ms", "20"])
             .args(["--pre-register-timeout-ms", "300"])
@@ -220,6 +302,9 @@ impl RrdTest {
         // "起了但不扫"（tick 传错、循环一开始就死锁）由 e2e_watchdog 的判据抓，
         // 这里只抓"根本没起"。needle 带上传进去的具体数值，所以它同时钉住接线。
         me.rr3_wait_log(&format!("watchdog 启动 tick={watchdog_tick_ms}ms"));
+        if boot_role.is_some() {
+            me.rr3_wait_log(&format!("supervisor 启动 sweep={watchdog_tick_ms}ms"));
+        }
         me
     }
 

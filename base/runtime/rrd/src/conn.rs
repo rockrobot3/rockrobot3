@@ -30,12 +30,13 @@ use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
-use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, RrdRegistry};
+use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Phase, Rr3Death, RrdRegistry};
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_manifest_param, rr3_rpc_parse_request,
     rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register, rr3_rpc_topic_param,
     Rr3RpcMethod,
 };
+use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log};
 
 /// 一条已注册连接的身份证
@@ -50,6 +51,9 @@ pub struct Rr3ConnCtx {
     pub topics: Arc<Rr3TopicSet>,
     pub t0: Instant,
     pub pre_register_timeout_ms: u64,
+    /// 重启计划的**唯一去路**（`supervisor.rs`）。conn 只负责"要不要投"，
+    /// "起不起得来"由 supervisor 按所有权裁定（E-1）——收尾这一路绝不自己 `Command::spawn`。
+    pub sup: Rr3Supervisor,
 }
 
 impl Rr3ConnCtx {
@@ -213,7 +217,13 @@ fn rr3_handshake(
     let now = ctx.rr3_ctx_now_ms();
     // 一份 Sender 进在册表（此后它是这条连接唯一的广播入口），一份留在这里给"后到者补快照"用
     let replay_tx = fan_tx.clone();
-    let task = match rr3_lock(&ctx.shared).rr3_reg_add(&facts, fan_tx, now) {
+    // 硬规矩（11a 的回归换来的那条）：锁结果一律先 `let` 绑再 `match`。把
+    // `rr3_lock(..).rr3_reg_add(..)` 写进被匹配表达式，`MutexGuard` 临时量会延寿到整个 `match`
+    // 语句结束，而 `Err` 分支里的 `rr3_refuse` → `rr3_write` 要取的是**另一把**锁（out），
+    // 今天不死锁也只因为臂内没再碰在册表——将来谁在臂里加一次 `rr3_lock(&ctx.shared)` 就是
+    // 同线程重入自死锁，且 `#[cfg(unix)]` 让 Windows 侧全绿看不见。与 `rr3_conn_finish` 同形。
+    let added = rr3_lock(&ctx.shared).rr3_reg_add(&facts, fan_tx, now);
+    let task = match added {
         Ok(t) => t,
         Err(e) => {
             // 状态码映射只在这一处（Task 6 的 rr3_rpc_status_for_register），别在 conn 里重写一遍
@@ -398,9 +408,6 @@ fn rr3_serve_request(
         }
         Rr3RpcMethod::Heartbeat => {
             // D-6：三态回报。Rejected 回错误帧；Kept/Promoted 都回 OK（合法心跳都得续命）。
-            // 11a **不做广播**（广播要 fanout，而"广播几条"是 11b 的判据面）：只把 Promoted 落到
-            // 一行日志上，钉住"registered→running 的唯一升级时刻"，11b 再把它推上线。
-            // Rr3Flow::Keep 保持不变（与今天一致，不影响既有帧序判据）。
             let beat = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
             match beat {
                 Rr3Beat::Rejected => {
@@ -409,7 +416,20 @@ fn rr3_serve_request(
                 other => {
                     rr3_reply_ok(out, me, req.id, &json!({"beat": "accepted"}));
                     if other == Rr3Beat::Promoted {
-                        rr3_log(&format!("{} → running", me.name));
+                        // E-8：`registered → running` 的**唯一**升级时刻，11b 起它第一次上线。
+                        // 相位名走 `Rr3Phase::Running.as_str()`，不写字面量 "running"（Task 10
+                        // 定下的同一条理由：写两处就有第二本真值）。
+                        // 只在 Promoted 上广播：`Kept` 走的是同一条 `other` 分支，拿"这一支被接受"
+                        // 当条件就是每次心跳重发一条 state（spec §5.0 的 state 是**转移**流，
+                        // 不是快照流；"恰好一条"这类判据正是靠这一条成立的）。
+                        let frame =
+                            rr3_state_frame(&me.name, Rr3Phase::Running.as_str(), me.task);
+                        // E-9：这里的排除项是 `RR3_TASK_RRD`，等于**不排除**——发起者自己也要收到
+                        // 关于自己的 running（它是唯一知道自己上线的连接）。supervisor 收尸那一路
+                        // 排的是 `crashed.src_task`，两处口径不同是**已知**的第三/第四种口径，
+                        // 归 Task 13 的 A-3 文档化，本轮不"统一"（统一成哪一种都没有判据支持）。
+                        let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, RR3_TASK_RRD);
+                        rr3_log(&format!("{} → running（广播到 {n} 个连接）", me.name));
                     }
                 }
             }
@@ -425,12 +445,16 @@ fn rr3_serve_request(
     }
 }
 
-/// 收尾：死亡记账（决定要不要重启）+ 恰好一条 state 广播。
+/// 收尾：死亡记账（决定要不要重启）+ **至多**一条 state 广播 + 把计划交出去。
 ///
-/// state 广播有**两处调用、一个构造函数**（`daemon.rs` 的 `rr3_state_frame`）：这里是
-/// "连接自己收尾"，另一处是 watchdog 的到期判死。两处各自只发一条——各自 `fanout` 一次，
-/// 且 `rr3_reg_expire` 跳过 failed 条目，所以判死过的模块不会被第二拍再回报一次
-/// （线上由 `watchdog_broadcasts_exactly_one_failed_state` 钉）。
+/// 11b 之后"三条公开路"的分工是：本函数（conn 见 EOF/unregister）、watchdog 到期
+/// （`daemon.rs`）、子进程退出码（`supervisor.rs` 的 `rr3_reap`）。三条各自只发**自己那一条**
+/// state，护栏都在 registry：`rr3_reg_death` 对已 failed 的条目回 `Silent`、对 owned 的回
+/// `DeferredToExitStatus`，`rr3_reg_child_exit` 对已 failed 的同样回 `Silent`——
+/// 所以"一次死亡被记两次 / 广播两次"在表上不可能（ledger R-A4 结清点，线上由
+/// `watchdog_broadcasts_exactly_one_failed_state` 与 `e2e_spawn_restart` 的 S2 各自钉住一半）。
+///
+/// 另两处 state 广播点（`registered` 与 `running`）不走本函数：它们与死亡无关。
 fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &str) {
     // 死亡记账的结果必须先绑到 `let`：若把 `rr3_lock(..).rr3_reg_death(..)` 直接写进 `match` 的
     // 被匹配表达式，返回的 `MutexGuard` 临时量会活到整个 `match` 语句结束（Rust 的临时量寿命
@@ -439,22 +463,45 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
     // 日志，e2e 的三条 EOF/退场用例集体 3s 超时。绑到 `let` 后守卫在 `;` 处即释放。
     let death = rr3_lock(&ctx.shared).rr3_reg_death(&me.name, clean_exit, ctx.rr3_ctx_now_ms());
     match death {
-        // owned（11b supervisor）：EOF 不改相位/不广播/不记账，三件事一起让给退出码那一路。
-        // 11a 生产路径无人 own 任何 name，这一支不可达。
-        Rr3Death::DeferredToExitStatus => {}
+        // owned（本守护起的进程）：EOF 不改相位/不广播/不记账，三件事一起让给退出码那一路
+        //（`supervisor.rs::rr3_reap`）。这里必须留一行痕迹：否则运维只看日志会以为这条连接
+        // 什么都没发生，而"没发生"和"让给了别人"是两件不同的话。
+        // 刻意不写"退出"两字：`rr3_assert_no_log("退出")` 那类否定 needle 测的是 EOF 收尾文案，
+        // 这一路今天只在传了 `--manifest` 的用例里可达（见 A-5③ 第 3 条）。
+        Rr3Death::DeferredToExitStatus => {
+            rr3_log(&format!(
+                "{} 连接断开（{reason}），终态交给子进程退出码那一路",
+                me.name
+            ));
+        }
         // 已被 watchdog 判死：终态广播与重启预算都归 watchdog 那一拍，收尾不得双计（R-A4）。
-        Rr3Death::Silent => {}
+        // 同样不打计划、不投 supervisor——那份计划到期时已经投过一次。
+        Rr3Death::Silent => {
+            rr3_log(&format!(
+                "{} 连接断开（{reason}），不重复广播：终态已由到期扫描记过",
+                me.name
+            ));
+        }
         // 刚由 live 转终态，或 unregister 后条目已摘（plan=None）：调用方广播恰好一条 state。
         Rr3Death::Broadcast { plan } => {
             // D-7：死因→phase 的字面量只在 registry 一处，conn 不再各写各的。
             let phase = rr3_phase_for_exit(clean_exit);
+            // E-9：这里排 `RR3_TASK_RRD` 等于不排除（发起者自己也收到关于自己的终态）；
+            // supervisor 收尸那一路排的是 `crashed.src_task`。两种口径是**已知**的第三/第四种
+            // 口径，归 Task 13 的 A-3 文档化，本任务不"统一"——统一成哪一种都没有判据支持。
             let n = rr3_lock(&ctx.shared)
                 .rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD);
             match plan {
-                Some(p) => rr3_log(&format!(
-                    "{} 退出（{reason}）→ 重启计划 attempt={} delay_ms={} entry={}（spawn 见 Task 11b）",
-                    p.name, p.attempt, p.delay_ms, p.entry
-                )),
+                Some(p) => {
+                    rr3_log(&format!(
+                        "{} 退出（{reason}）→ 重启计划 attempt={} delay_ms={} entry={}（非本守护起的模块不 spawn）",
+                        p.name, p.attempt, p.delay_ms, p.entry
+                    ));
+                    // 投出去就完事：起不起由 supervisor 按 `jobs`（"我能起谁"的全集）裁定（E-1）。
+                    // 顺序要紧：日志在投之前——`rr3_restart` 只做一次 send，但把"计划是什么"
+                    // 钉在"谁拿到了它"前面，读日志时才不会先看到结果再找原因。
+                    ctx.sup.rr3_restart(p);
+                }
                 None => rr3_log(&format!("{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接", me.name)),
             }
         }
@@ -511,7 +558,8 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
     // carry，watchdog 心跳过期正是现成的回收路径），本轮只把前提写清、不改通道形状
     // （brief 29-31 行约定的是 `mpsc::Receiver<Rr3Frame>` 这个类型，`sync_channel` 同样满足）。
     // Task 10 落地的是 tick 线程，**没有**动通道形状；静默模块的回收现在由 expire 置
-    // `tx = None` 这一路提供（写线程随之结束、fd 随之释放），有界化 + 丢弃最旧仍归 Task 11。
+    // `tx = None` 这一路提供（写线程随之结束、fd 随之释放），有界化 + 丢弃最旧**仍没做**
+    // （11b 只加了 supervisor 线程与 boot/重启，通道形状一字未动；这条 carry 还在原处）。
     let _ = writer.join();
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())

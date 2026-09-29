@@ -253,7 +253,10 @@ impl RrdRegistry {
     ///
     /// `entry` 的绝对性门禁不在这里（计划"与 spec 的偏离 6"：注册只拒语法，存在性/可执行
     /// 位随 spawn 那一刻查），那是 conn/daemon 层的职责：路径绝对性已随 Task 7 落地
-    /// （`conn.rs` 的握手拒相对 entry、回 AIRY_EINVAL 并点名字段），存在性/可执行位随 Task 11 的 spawn。
+    /// （`conn.rs` 的握手拒相对 entry、回 AIRY_EINVAL 并点名字段）；存在性/可执行位已随
+    /// Task 11b 落地，但**只查本守护要 spawn 的那批**——`supervisor.rs` 的
+    /// `rr3_boot_job_from_manifest` 在 boot 那一刻查（E-3，拒法是 `拒绝启动`）。走线上注册的
+    /// 外来模块 rrd 永不 spawn 它（E-1），所以那条 entry 的存在性根本无人裁定，也不是本表的职责。
     pub fn rr3_reg_add(
         &mut self,
         facts: &Rr3ManifestFacts,
@@ -559,8 +562,10 @@ impl RrdRegistry {
     }
 
     /// 所有权标记（D-3）：name ∈ owned ⟺ "这个进程是我起的，它的退出码才是死因的权威"。
-    /// 11a 的生产路径无人调用（没有 spawn），故 conn 见 EOF 永不走 DeferredToExitStatus；
-    /// 该标记由 11b 的 supervisor 在派生子进程时写入。
+    /// 写入方是 Task 11b 的 supervisor（`rr3_boot_spawn` 在 `Command::spawn` **之前** own，
+    /// 次序理由见该函数文档），清除方有两处：起进程失败时当场 `rr3_reg_unown`，以及
+    /// `rr3_reg_child_exit` 收完这一次尸时撤下（同名新实例的 EOF 不该等一个不再来的退出码）。
+    /// 11a 之前生产路径无人调用它，conn 见 EOF 因此永不走 `DeferredToExitStatus`。
     pub fn rr3_reg_own(&mut self, name: &str) {
         self.owned.insert(name.to_string());
     }
