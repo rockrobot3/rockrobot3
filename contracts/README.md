@@ -1,6 +1,7 @@
 # contracts —— 字节级共享契约（[SC] 唯一事实源）
 
-Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对同一份文件做编解码。
+Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一份文件做编解码；brain 侧
+何时接入属实况，见 [docs/status.md](../docs/status.md)。
 任何一侧改格式，必须先改这里，且只增不改。
 
 ## 内容
