@@ -308,7 +308,7 @@ pub trait Rr3Link: Send + Sync {                   // 网络链路读数
 ### 6.1 协议：采用 Airy IPC 线格式
 
 - **128B 定长消息头**（Layout C，L1 永久稳定）+ **5 种 payload 类型**：REQUEST/RESPONSE（RPC）、EVENT（事件总线）、STREAM（音频/运动数据流，有序投递）、NOTIFICATION（心跳/系统通知）。枚举是 `Rr3PayloadType`（`Request` = 0x0001 起连续取值），字节布局的唯一事实源是 `contracts/envelope.schema.json`
-- 事务面 payload 默认 JSON-RPC 2.0；rock3 的 topic 字符串与 `phase` 置于 payload 内，不占用消息头 reserved 区。`phase` 的字面量就是 §4.2 那张词表（`registered`/`running`/`degraded`/`failed`），由 `Rr3Phase::as_str()` 给出；模块主动退场那条广播额外用 `unregistered`
+- 事务面 payload 默认 JSON-RPC 2.0；rock3 的 topic 字符串与 `phase` 置于 payload 内，不占用消息头 reserved 区。`phase` 的字面量就是 §4.2 那张词表（`registered`/`running`/`degraded`/`failed`），由 `Rr3Phase` 的 `as_str` 给出；模块主动退场那条广播额外用 `unregistered`
 - RESPONSE.status 采用 AIRY_E* 子集（枚举 `Rr3StatusCode`）；`src_task` 由 rrd（受信运行时）在模块注册时分配并校验——用户态自设的 `src_task` 属协议违例，那一帧被拒但连接不断（AOS-STD-IPC-024，接线见 `conn.rs` 与 §4.2 的 task 号不变式）
 - capability 令牌、内核强制等 AirymaxRT 运行时机制不引入（单机可信环境），具身化时再评估（ADR-0007）
 
@@ -381,9 +381,9 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
    ③ 主题不在注册表 → `NotRegistered`
    ④ 在册 owner ≠ 发送方 → `ForeignPrefix`（首段相符只是**语法**事实，owner 相符才是**登记事实**；
    owner 取不到同样按越权拒，绝不因"查不到"而放行）。
-   判定是关联函数、不碰在册表，所以 **`sender_name` 必须由调用方从连接持有的 task 号反查**
-   （`rr3_reg_name_of(src_task)`），**绝不得取自帧体或注册报文里自称的 name 字段**——这条前提
-   本函数替不了调用方保证。越权只计数不牵连：`rr3_reg_note_denied` 饱和加，既不改发布者生命周期
+   判定是关联函数、不碰在册表，所以 **`sender_name` 必须由调用方按这条连接持有的 rrd 在册身份取得**
+   （注册握手时确立的登记名，而非从帧体现读），**绝不得取自帧体或注册报文里自称的 name 字段**——
+   这条前提本函数替不了调用方保证。越权只计数不牵连：`rr3_reg_note_denied` 饱和加，既不改发布者生命周期
    状态也不影响其它连接的转发。返回值与错误映射的细节表留给
    [`../reference/rrd-rpc.md`](../reference/rrd-rpc.md)（在册表侧的门序与常量见
    [`../reference/rrd-registry.md`](../reference/rrd-registry.md)）。

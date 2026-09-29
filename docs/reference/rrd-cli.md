@@ -4,10 +4,17 @@
 > [`rrd/src/cli.rs`](../../base/runtime/rrd/src/cli.rs)、
 > [`rrd/src/lib.rs`](../../base/runtime/rrd/src/lib.rs)、
 > [`rrd/src/main.rs`](../../base/runtime/rrd/src/main.rs) 的字面量。
-> 其中三类文字由用例**逐字**断言——启动横幅（`rr3_banner`）、非 Unix 退出文案
-> （`RRD_UNSUPPORTED`）、错误码映射（`rr3_rpc_status_for_register` 与
-> `rr3_rpc_status_for_publish_deny`，见 [`rrd-rpc.md`](rrd-rpc.md)）——
-> **改代码必须同批改本档的对应字面量**，否则文档与线上文案各说一套。
+> 断言口径分三档，说清楚免得改字面量时踩空：启动横幅（`rr3_banner`）由
+> `lib.rs:41-48` 与 `tests/socket_banner.rs:24-28` 用 `contains` 片段钉住，**不是逐字**；
+> `Rr3RegisterError` / `Rr3PublishDeny` 的 `Display` 文案在 `registry.rs:528-542` 与
+> `registry.rs:547-563` 逐字 `assert_eq` 钉住，但集成侧（`tests/register_publish.rs`）
+> 按 `contains` 子串区分"被哪一层拒的"；错误码映射（`rr3_rpc_status_for_register`
+> 与 `rr3_rpc_status_for_publish_deny`，见 [`rrd-rpc.md`](rrd-rpc.md) §5）在
+> `rpc.rs:224-260` 的单元用例里逐枚举断言判别值。**唯一例外**：非 Unix 退出文案
+> `RRD_UNSUPPORTED` 本 HEAD 的 Rust 用例里**没有任何一条按字面断言**它——全仓只有
+> `lib.rs:27`（定义）、`main.rs:13` 与 `main.rs:99`（非 Unix 分支打印）三处使用，
+> `base/runtime/rrd/README.md` 复述过它——改这个字面量的话，这两处与运行期任何按
+> 字面匹配的脚本要同批查。**改代码必须同批改本档的对应字面量**，否则文档与线上文案各说一套。
 > "接到了哪一步"属实况，唯一落点是 [`../status.md`](../status.md)，本档只写接口契约。
 
 调用方读这一份就够：`rrd` 的全部命令行事实。设计语义（为什么这样切层）在
@@ -23,7 +30,10 @@
 用法: rrd [--socket <path>] [--topics-overlay <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>]
 ```
 
-所有 `-h` / `--help` 的输出与所有参数错误的第二段都是这一串（出处 `cli.rs:21`）。
+`-h` / `--help` 打印的就是这一串（`cli.rs:105`）。多数参数错误也在文案第二段拼上它
+（`cli.rs:32/41/108/144/149` 各 `\n{USAGE}` 分支）——但**不是全部**：`--socket 不得为空`
+（`cli.rs:112`）与 `{flag} 需为非负整数毫秒`（`cli.rs:118`，`parse_ms`）这两支只报第一行、
+**不带 USAGE**（见 §3 表）。出处 `cli.rs:21`。
 
 ## 2 参数表
 
@@ -34,10 +44,10 @@
 | 开关 | 值类型 | 默认 | 语义 | 出处 |
 |---|---|---|---|---|
 | `--socket` | 路径 | `rr3_default_socket`：环境键 `RR3_BUS_PATH`（常量 `RR3_BUS_PATH_ENV`）优先，缺省回落 `RR3_UDS_PATH_DEFAULT`（值 `/var/run/rock3-ipc.sock`） | UDS 绑定路径；进横幅与 `UnixListener::bind` 前被绝对化 | `cli.rs:48-50`、`cli.rs:82-85`、`transport/mod.rs:14` |
-| `--topics-overlay` | 路径 | `None`（不加载） | 主题叠加层，**仅测试用**；装载与横幅共用同一个 canonicalize 结果 | `cli.rs:86-89`、`main.rs:39-48` |
+| `--topics-overlay` | 路径 | `None`（不加载） | 主题叠加层，**仅测试用**；`main.rs` 与装载入口各规范化一次（横幅凭证取 `main.rs` 那次、致命文案取装载入口那次，见 §4） | `cli.rs:86-89`、`main.rs:39-48`、`topics_load.rs:77-80` |
 | `--manifest` | 路径，**可重复** | 空表，顺序原样保留 | 待启动模块的 manifest；约定为绝对路径 | `cli.rs:90-93` |
 | `--restart-base-ms` | 整数毫秒 | `1000` | 重启退避基数：`delay_ms` = 表值 × base；下界 1、上界 `RR3_RESTART_BASE_MS_MAX` | `cli.rs:94-98`、`cli.rs:16` |
-| `--pre-register-timeout-ms` | 整数毫秒 | `3000` | 连接 accept 后多久没完成注册判为失败；`conn.rs` 侧按 `.max(1)` 用作读超时 | `cli.rs:99-103`、`conn.rs:368` |
+| `--pre-register-timeout-ms` | 整数毫秒 | `3000` | 连接 accept 后多久没完成注册判为失败；`conn.rs` 侧按 `.max(1)` 用作读超时 | `cli.rs:99-103`、`conn.rs:455` |
 | `-h` / `--help` | 无值 | — | 向 stdout 打印 `USAGE`，**然后继续解析并继续启动**：解析器没有短路分支，退出码不由这条决定 | `cli.rs:104-107` |
 
 `RrdConfig` 的字段名（供调用库版本的读者）：`socket`、`overlay`、`manifests`、
@@ -82,10 +92,10 @@
 | 路径 | 用的函数 | 为什么是它 | 失败文案 |
 |---|---|---|---|
 | `--socket` | `rr3_socket_absolute_path` → `std::path::absolute`（`cli.rs:128-131`） | `bind` 之前套接字文件**必然还不存在**，`canonicalize` 会以 ENOENT 拒掉一个完全合法的待创建路径；代价是不解析符号链接 | `套接字路径 {path} 无法解析为绝对路径: {e}`，`main.rs` 打印时前缀 `rrd: ` |
-| `--topics-overlay` | `rr3_topics_absolute_path` → `std::fs::canonicalize`（`topics_load.rs:44-47`） | 叠加层必须**已经存在**才可装载；横幅那行是"叠加层已生效"的可见凭证，按 CLI 原词回显会让凭证内容依赖 CWD | `路径 {path} 无法解析为绝对路径: {e}`，`main.rs` 前缀为 `rrd: 主题叠加层参数不可用: ` |
-| 契约主题路径 | `rr3_contract_resolved` → `std::fs::canonicalize`（`topics_load.rs:63-66`） | `RR3_CONTRACT_TOPICS_PATH` 由 `CARGO_MANIFEST_DIR` 拼出、字面就带 `..`；不规范化则致命文案里漏出 `..`，运维按**自己**的 CWD 展开会查错文件 | `读不到主题契约 {path}: {e}`，`main.rs` 前缀为 `rrd: 主题装载失败: ` |
+| `--topics-overlay` | `rr3_topics_absolute_path` → `std::fs::canonicalize`（`topics_load.rs:46-49`） | 叠加层必须**已经存在**才可装载；横幅那行是"叠加层已生效"的可见凭证，按 CLI 原词回显会让凭证内容依赖 CWD。**注意 `2f3453a` 起分两次规范化**：`main.rs` 这次只给横幅凭证，装载入口 `rr3_overlay_resolved`（`topics_load.rs:77-80`）**独立**再 canonicalize 一次给致命文案——同工具、同结果，但**不是共用同一个返回值**（详见 [`../status.md`](../status.md)） | `路径 {path} 无法解析为绝对路径: {e}`，`main.rs` 前缀为 `rrd: 主题叠加层参数不可用: ` |
+| 契约主题路径 | `rr3_contract_resolved` → `std::fs::canonicalize`（`topics_load.rs:65-68`） | `RR3_CONTRACT_TOPICS_PATH` 由 `CARGO_MANIFEST_DIR` 拼出、字面就带 `..`；不规范化则致命文案里漏出 `..`，运维按**自己**的 CWD 展开会查错文件 | `读不到主题契约 {path}: {e}`，`main.rs` 前缀为 `rrd: 主题装载失败: ` |
 
-三处都不静默回落原词（`cli.rs:121-127`、`topics_load.rs:40-43`、`topics_load.rs:49-62`）。
+三处都不静默回落原词（`cli.rs:121-127`、`topics_load.rs:46-49`、`topics_load.rs:65-68`）；叠加层在横幅与装载入口各规范化一次（`topics_load.rs:77-80`），工具与结果一致，只是不是同一份返回值。
 
 ## 5 启动序列、输出流与退出码
 

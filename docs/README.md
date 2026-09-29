@@ -28,7 +28,7 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | 主题清单与 kind | [`../contracts/topics.toml`](../contracts/topics.toml) | 只写"如何登记、如何校验、前缀归属"，不抄表 |
 | manifest 字段字典 | [`../base/runtime/rr-registry/src/module.schema.toml`](../base/runtime/rr-registry/src/module.schema.toml) | 只写字段语义与一份合规示例 |
 | 字节布局（128B 头 / payload 枚举） | [`../contracts/envelope.schema.json`](../contracts/envelope.schema.json) + [`../contracts/golden/`](../contracts/golden/) | 只写语义与歧义裁定 |
-| 运行期接口字面量（rrd 参数与默认值、RPC 方法与错误码、在册表常量与门序） | [`reference/`](reference/) 三件 | 架构文档只留判据与设计语义，指针指向 reference/；这些字面量由用例逐字断言，**改代码须同批改 reference/** |
+| 运行期接口字面量（rrd 参数与默认值、RPC 方法与错误码、在册表常量与门序） | [`reference/`](reference/) 三件 | 架构文档只留判据与设计语义，指针指向 reference/；断言口径分档（`Display`/错误码逐字 `assert_eq`，横幅只 `contains`，`RRD_UNSUPPORTED` 无用例断言——见各文件顶部），**改代码须同批改 reference/** |
 
 ## 阅读顺序
 
