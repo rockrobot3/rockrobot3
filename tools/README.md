@@ -3,6 +3,7 @@
 | 目录 | bin | 用途 |
 |---|---|---|
 | `mkmodule/` | `rr3-mkmod` | 生成合规模块四件套，产出物自动过 schema 校验 |
+| `ci/` | — | `check.sh`：规约三检查的唯一实现与唯一入口（① workspace 编译 / ②②b manifest schema 与 mkmod 产物 / ③ 主题前缀归属），本地与 CI 跑同一命令 |
 | `rrctl/` | `rr3-ctl` | 订阅总线查状态/日志/触发 OTA（M2+） |
 | `sim/` | `rr3-sim` | mock HAL + 假模块，x86 全链路联调（M2+） |
 
