@@ -227,7 +227,7 @@ Registered ──── rr3_reg_beat（心跳，刷新到期基准）───�
   一条连接的退出只发一条 `rr3-runtime/module/state`，不会"死亡一条 + 退场一条"。
 
 三条不变式（前两条与 `registry.rs` 的头注同条；上限那条钉在 `RR3_REG_MAX_MODULES` 的注释里。
-细节表留给 `reference/rrd-registry.md`，本档只留判据）：
+细节表留给 [`../reference/rrd-registry.md`](../reference/rrd-registry.md)，本档只留判据）：
 
 1. **task 号只增不回收**：`0` 是广播、`1` 是 rrd（`RR3_BROADCAST_DST_TASK` / `RR3_TASK_RRD`），
    模块从 `RR3_TASK_FIRST_MODULE`（值 2）起单调分配；条目 failed 或被移除后旧号作废、绝不复用
@@ -343,7 +343,7 @@ rr-ipc/
 套接字路径的三级决定：`--socket` > 环境变量 `RR3_BUS_PATH`（常量键 `RR3_BUS_PATH_ENV`）>
 `RR3_UDS_PATH_DEFAULT`（`/var/run/rock3-ipc.sock`，自有路径，避免与真实 Airymax 运行时同机冲突）。
 横幅回显的路径在打印**之前**就已绝对化，与 `UnixListener::bind` 取同一个值——两处各说一套比直接
-报错更难查。参数与默认值的字面量归 `reference/rrd-cli.md`（本档不复述）。
+报错更难查。参数与默认值的字面量归 [`../reference/rrd-cli.md`](../reference/rrd-cli.md)（本档不复述）。
 
 ### 6.3 主题命名
 
@@ -384,7 +384,9 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
    判定是关联函数、不碰在册表，所以 **`sender_name` 必须由调用方从连接持有的 task 号反查**
    （`rr3_reg_name_of(src_task)`），**绝不得取自帧体或注册报文里自称的 name 字段**——这条前提
    本函数替不了调用方保证。越权只计数不牵连：`rr3_reg_note_denied` 饱和加，既不改发布者生命周期
-   状态也不影响其它连接的转发。返回值与错误映射的细节表留给 `reference/rrd-rpc.md`。
+   状态也不影响其它连接的转发。返回值与错误映射的细节表留给
+   [`../reference/rrd-rpc.md`](../reference/rrd-rpc.md)（在册表侧的门序与常量见
+   [`../reference/rrd-registry.md`](../reference/rrd-registry.md)）。
 
 入口 ③ 给的是**判定逻辑**；把它接到线上流量（UDS 受理路径上的发布分支）是 `conn.rs` 的职责，
 "接到了哪一步"属实况，见 [`../status.md`](../status.md)。上面的代码块是**设计期草图**，
