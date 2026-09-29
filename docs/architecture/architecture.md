@@ -77,7 +77,7 @@ rock3/
 │
 ├── base/                          ← 基座层（横切关注点，见 §2 原则 1）
 │   ├── os/                        ← Buildroot 层（ADR-0001）：README.md 里定义了 configs/、board/、
-│   │                                 patches/、package/ 四类交付物的落点
+│   │                                 patches/、post-build.sh 四类交付物的落点
 │   ├── ota/                       ← README.md + partition-layout.md（A/B/factory 布局文档）
 │   │   └── rr3-ota-ctl/           ← 独立 workspace，bin 名 `rr3-ota-ctl`（升级入口 CLI）
 │   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-registry rr-bus rr-hal rr-ota rrd
@@ -93,7 +93,7 @@ rock3/
 │   │   ├── rr-hal/                ← HAL trait 与数据类型（§5）：lib.rs + backend.rs
 │   │   ├── rr-ota/                ← 升级通道的类型形状（§8、ADR-0007 决策二）
 │   │   ├── rrd/                   ← 主守护进程（装配层）
-│   │   │   ├── src/               ← 九个文件，逐个职责见下
+│   │   │   ├── src/               ← 十个文件（九个模块文件 + `bin/sim_peer.rs`），逐个职责见下
 │   │   │   │   ├── cli.rs         ← 命令行与总线路径解析（平台无关）
 │   │   │   │   ├── main.rs        ← 启动序（§7.1）
 │   │   │   │   ├── lib.rs         ← 平台无关模块图 + `#[cfg(unix)]` 门 + 横幅/日志出口
@@ -102,10 +102,16 @@ rock3/
 │   │   │   │   ├── rpc.rs         ← 上行 JSON-RPC 方法的编解码
 │   │   │   │   ├── topics_load.rs ← 契约主题表装载 + 仅测试的主题叠加层
 │   │   │   │   ├── conn.rs        ← 单连接服务（reader + writer 线程）——`#[cfg(unix)]`
-│   │   │   │   └── daemon.rs      ← 监听 / accept / 连接线程编排——`#[cfg(unix)]`
-│   │   │   └── tests/             ← register_publish.rs、socket_banner.rs（均 `#![cfg(unix)]`）
-│   │   │                             + support/mod.rs（起真 rrd 子进程的线级助手）
+│   │   │   │   ├── daemon.rs      ← 监听 / accept / 连接线程编排——`#[cfg(unix)]`
+│   │   │   │   └── bin/
+│   │   │   │       └── sim_peer.rs ← 跨进程 e2e 的对端夹具二进制：第二个真进程，走 rrd 的线上
+│   │   │   │                           入口做注册→心跳→发布→退场；不是产品入口（只在测试里被起）
+│   │   │   └── tests/             ← register_publish.rs、socket_banner.rs、e2e_sim_peer.rs
+│   │   │                             （三文件首行都是 `#![cfg(unix)]`）+ support/mod.rs
+│   │   │                             （起真 rrd 子进程的线级助手）
 │   │   └── tests/fixtures/        ← sim-topics.toml：仅测试的主题叠加层夹具（不吃契约 pin）
+│   │                                 + sima/module.toml、simb/module.toml：e2e_sim_peer.rs 那两个
+│   │                                   假模块的 manifest 夹具
 │
 ├── modules/                       ← 统一内构（`rr3-mkmod` 落盘五件）：module.toml + config.toml +
 │                                     Cargo.toml + src/main.rs + README.md；Rust 模块各带 Cargo.lock
@@ -287,7 +293,7 @@ pub trait Rr3Link: Send + Sync {                   // 网络链路读数
 |---|---|---|
 | traits + 数据类型 | `rr-hal/src/lib.rs` | 上面五个 trait 与配套类型，模块只见 trait、不见 Linux 细节 |
 | 后端标识常量 | `rr-hal/src/backend.rs` | `RR3_BACKEND_{LINUX,SIM,PLACEHOLDER}`，写入日志与诊断主题 `rr3-runtime/module/state` |
-| linux 后端（ALSA / gpiod / NetworkManager-D-Bus） | `rr-hal` 内 `linux` 后端 | 落点定在 `rr-hal`，承载面见 `backend.rs` 的表 |
+| linux 后端 | `rr-hal` 内 `linux` 后端 | 落点定在 `rr-hal`，承载面见 `backend.rs` 的表（那张表的词表本档不复述） |
 | sim 后端（主机联调） | `rr-hal` 内 `sim` 后端 + `tools/sim` 的虚拟设备 | 让 CI 与无硬件开发共用同一套 trait |
 | `shm` 加速路径 | `rr-ipc` 的传输层（不在 HAL） | 实时控制面的零拷贝通道，见 §7.4 与 ADR-0007 |
 
@@ -341,7 +347,7 @@ rr-ipc/
   反射环永远不进任何一层（ADR-0007 §裁定 1）；各层的实现进度见 [`../status.md`](../status.md)。
 
 套接字路径的三级决定：`--socket` > 环境变量 `RR3_BUS_PATH`（常量键 `RR3_BUS_PATH_ENV`）>
-`RR3_UDS_PATH_DEFAULT`（`/var/run/rock3-ipc.sock`，自有路径，避免与真实 Airymax 运行时同机冲突）。
+`RR3_UDS_PATH_DEFAULT`（自有路径常量，避免与真实 Airymax 运行时同机冲突）。
 横幅回显的路径在打印**之前**就已绝对化，与 `UnixListener::bind` 取同一个值——两处各说一套比直接
 报错更难查。参数与默认值的字面量归 [`../reference/rrd-cli.md`](../reference/rrd-cli.md)（本档不复述）。
 

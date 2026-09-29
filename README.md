@@ -21,6 +21,7 @@ Discussions and contributions are welcome — Issues are the front door.
 | [contracts/README.md](contracts/README.md) | Byte-level contract and ambiguity rulings |
 | [docs/process/adr/](docs/process/adr/) | Decision records ADR-0001 ~ ADR-0007 |
 | [legacy/README.md](legacy/README.md) | ESP32 firmware in progress (frozen zone) |
+| [README_zh.md](README_zh.md) | Chinese (Simplified) edition of this entry point |
 
 ## License
 

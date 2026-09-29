@@ -22,6 +22,7 @@
 | [contracts/README.md](contracts/README.md) | 字节级契约与歧义裁定 |
 | [docs/process/adr/](docs/process/adr/) | 决策记录 ADR-0001 ~ ADR-0007 |
 | [legacy/README.md](legacy/README.md) | ESP32 在编固件（冻结区） |
+| [README.md](README.md) | 本门面的英文版 |
 
 ## 许可
 
