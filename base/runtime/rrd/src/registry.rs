@@ -209,8 +209,9 @@ impl RrdRegistry {
         // 拒非正整数（`manifest.rs` 的 `req_int`），而 `Rr3ManifestFacts` 字段全 `pub`，
         // 直接构造的 facts 绕得过那道校验，故这里再钉一次。
         // 用 debug_assert 而不是返回 Err：绕过 facts 读取入口是调用方的编程错误，而
-        // `Rr3RegisterError` 的三个变体是冻结接口，不能为它加第四个；release 侧的硬门禁
-        // 属 Task 7/8 的 CLI/装载校验，本轮不发明。
+        // `Rr3RegisterError` 的三个变体是冻结接口，不能为它加第四个；release 侧的下界已有归属：
+        // `watchdog_ms` 只能从 manifest 文本来，而 `manifest.rs` 的 `req_int` 在**读取期**（不分
+        // debug/release）就拒非正整数，CLI 面也没有 watchdog 这个旋钮可绕——本表不替它裁定语义。
         // 位置在**三条拒绝门之后**，让本函数文档里那句检查序在 debug 构建里也成立：断言
         // 抢在前面的话，一个带坏 watchdog 的重复/保留名/超额注册会先 panic 而不是如实返回
         // Err，调用方拿不到拒绝理由（Task 6 的 `rr3_rpc_status_for_register` 便无从映射——
@@ -383,8 +384,9 @@ impl RrdRegistry {
             attempt: e.restarts,
             // 退避倍数 × base：溢出既不 panic（debug 的 `*` 会 panic）也不回绕
             // （release 的 `*` 会 wrap），封顶到 u64::MAX 让"永远等下去"成为唯一保守解。
-            // `restart_base_ms = 0` 的下界语义（→ 立即重启）属 Task 7/8 的 CLI 门禁，
-            // 这里不替它裁定（计划把该项显式划给了 Task 7/8）。
+            // `restart_base_ms = 0` 的下界语义（→ 立即重启）已由 Task 7 的 CLI 门禁拦住
+            // （`cli.rs::parse_restart_base`，提交 f69eda8：拒 0、拒超上界），
+            // 本表不替它裁定语义——这里只保证乘算本身不 panic 也不回绕。
             delay_ms: RR3_RESTART_BACKOFF[idx].checked_mul(self.restart_base_ms).unwrap_or(u64::MAX),
             entry: e.facts.entry.clone(),
         })
@@ -412,7 +414,7 @@ impl RrdRegistry {
         self.by_task.get(&src_task).cloned()
     }
 
-    /// 取某模块的 facts（Task 7 的 spawn 序要用 start_priority 与 entry）
+    /// 取某模块的 facts（Task 11 的 spawn 序要用 start_priority 与 entry）
     pub fn rr3_reg_facts(&self, name: &str) -> Option<Rr3ManifestFacts> {
         self.modules.get(name).map(|e| e.facts.clone())
     }
@@ -606,7 +608,8 @@ watchdog_timeout_ms = {wd}
     /// 首轮到期扫描就把全表秒判死。`rr3_manifest_facts_from_text` 已经把非正整数拒在
     /// 读取期，但 `Rr3ManifestFacts` 字段全 `pub`，调用方可以直接构造绕过它——所以入库
     /// 那一刻还得钉一次。`cargo test` 跑的是 debug 构建（`debug_assertions` 开），
-    /// 故这里用 catch_unwind 断言它当场被拦；release 侧的硬门禁属 Task 7/8 的 CLI 校验。
+    /// 故这里用 catch_unwind 断言它当场被拦；release 侧的下界不在本表也不在 CLI（没有 watchdog
+    /// 这个旋钮），由 `manifest.rs` 的 `req_int` 在文本读取期拦住（Task 4 已落，debug/release 都拦）。
     #[cfg(debug_assertions)]
     #[test]
     fn zero_watchdog_is_caught_at_register_time() {
@@ -944,9 +947,9 @@ owner = "rr3-simb"
     }
 
     /// `--restart-base-ms 0` 的**现值**是 `delay_ms = 0`（第 1 档 1×0、第 2 档 2×0 都是 0，
-    /// 即"立即重启"）。本条只把现值钉死，不裁下限：`0` 该不该被拒/钳到某个最小值是
-    /// Task 7/8 的 CLI 门禁（计划显式划走），本轮不发明。
-    /// 它挡的是 Task 7/8 之前有人"顺手"在延迟算术里给 base 补一个 `.max(1)` 之类的下界——
+    /// 即"立即重启"）。本条只把**本表算术**的现值钉死，不裁下限：下界已由 Task 7 的 CLI 门禁
+    /// 拦住（`cli.rs::parse_restart_base` 拒 0，提交 f69eda8），所以配置面根本进不来 0。
+    /// 它挡的是有人"顺手"在延迟算术里给 base 补一个 `.max(1)` 之类的下界——
     /// 那会让这里从 0 变成 1，而配置面看起来什么都没改。
     #[test]
     fn zero_restart_base_ms_currently_yields_zero_delay() {
@@ -1037,7 +1040,7 @@ owner = "rr3-simb"
         assert!(r.rr3_reg_live("rr3-sima"));
     }
 
-    /// `rr3_reg_facts` 的现值钉住（Task 7 的 spawn 序靠它取 start_priority / entry）：
+    /// `rr3_reg_facts` 的现值钉住（Task 11 的 spawn 序靠它取 start_priority / entry）：
     /// 在册名字必须原样回**入库时那份 facts**（逐字段相等，不是只回个名字），不在册的名字
     /// 回 None——既不能 panic，也不能回一条半数据（空的 start_priority 会让 spawn 序排错位）。
     #[test]
