@@ -1,0 +1,34 @@
+[manifest]
+schema_version = 1
+name = "rr3-sense"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "rr3-sense"
+
+[provides]
+capabilities = ["audio.capture", "env.temperature"]
+
+[depends]
+required = ["bus.subscribe"]
+optional = ["net.online"]
+
+[events]
+publishes = ["rr3-sense/audio/vad_start", "rr3-sense/env/temperature"]
+subscribes = ["rr3-runtime/module/state"]
+
+[rpc]
+exposes = ["rr3-sense/capture/dump"]
+
+[resources]
+restart_policy = "on-failure"
+mem_limit_mb = 24
+start_priority = 60
+
+[health]
+heartbeat_ms = 2000
+watchdog_timeout_ms = 10000
+
+[upgrades]
+min_from_semver = "0.0.1"
+staging = true
