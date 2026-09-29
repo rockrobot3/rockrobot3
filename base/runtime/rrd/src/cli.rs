@@ -169,7 +169,8 @@ mod tests {
     #[test]
     fn defaults_come_from_contract_constants() {
         let cfg = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
-        assert_eq!(cfg.socket, rr3_default_socket(&env_none));
+        // M-6：原来这里还有一行 `assert_eq!(cfg.socket, rr3_default_socket(&env_none))`，
+        // 两边同走一个函数、恒真（自证），删掉。真正起锚作用的是下面与契约常量的对账。
         assert_eq!(rr3_default_socket(&env_none), PathBuf::from(RR3_UDS_PATH_DEFAULT));
         assert_eq!(cfg.overlay, None);
         assert!(cfg.manifests.is_empty());
