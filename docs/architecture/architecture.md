@@ -53,12 +53,14 @@ RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人�
 
 ## 3. 仓库目录树（文件级）
 
-> **状态（2026-09-29，v0.0.1）**：`contracts/`、`base/runtime/`（6 crate）、`tools/mkmodule`、
-> `tools/ci/` 已建立并通过 `bash tools/ci/check.sh`；**`modules/` 六个模块已落位**
+> **状态（2026-09-29，v0.0.1）**：`contracts/`、`base/runtime/`（6 crate）、`base/ota/`
+> （布局文档 + `rr3-ota-ctl` 只读侧）、`tools/`（`mkmodule` / `rrctl` / `sim` / `ci`）已建立
+> 并通过 `bash tools/ci/check.sh`；**`modules/` 六个模块已落位**
 > （rr3-sense/act/interact/power/connect 由 `rr3-mkmod` 生成骨架 + 内构目录，rr3-brain 为
-> Python 包），六份 `module.toml` 由 ② 步校验、五个 Rust crate 由 ④ 步编译，约定见
+> Python 包），六份 `module.toml` 由 ② 步校验、九个独立 Rust 工程由 ④ 步编译，约定见
 > [conventions.md](conventions.md)；ESP32 在编固件已迁入 `legacy/`（tag `v0-pre-legacy`）。
-> **模块只有结构，没有实现**：入口打印自述后退出，总线接入随 M2、采集/驱动随 M3–M5。
+> **模块与 CLI 只有结构，没有实现**：入口打印自述后退出，总线接入随 M2、采集/驱动随 M3–M5、
+> OTA 写侧与 `base/os/` Buildroot 层随 M6。
 > 下图/下表仍含 M1–M6 未落地项，标注"规划"者以里程碑表（§10）为准。
 
 ```
@@ -211,7 +213,7 @@ pub trait Rr3Link: Send + Sync {                   // 网络链路读数
 | traits + 数据类型 | `rr-hal/src/lib.rs` | 已在 HEAD |
 | 占位后端 + 后端名常量 | `rr-hal/src/lib.rs` / `rr-hal/src/backend.rs` | 已在 HEAD |
 | linux 后端（ALSA / gpiod / NetworkManager-D-Bus） | **规划（M2+），当前 HEAD 无此文件** | 未落地 |
-| sim 后端（配合 `tools/sim`，主机联调） | **规划（M2+），当前 HEAD 无此文件** | 未落地 |
+| sim 后端（配合 `tools/sim`，主机联调） | `tools/sim` 骨架已在 HEAD（只产模拟 PCM 流），`rr-hal` 侧的 sim 后端实现**随 M2** | 后端未落地 |
 | 音频**输出** trait（播放，`rr3-interact` 的消费面） | **规划（M2+），当前 HEAD 无此 trait**（只有上行 `Rr3AudioSource`） | 未落地 |
 
 > 本文档 v0.2 在此列过一套与 HEAD 不符的接口名与 `rr-hal/src/{traits,linux,sim}/` 目录布局
