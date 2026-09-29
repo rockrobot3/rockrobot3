@@ -29,8 +29,8 @@
 !legacy/**
 
 # ---- 永不入库：再生件与本地密钥 ----
-# sdkconfig 由 idf.py 从 sdkconfig.defaults 再生成；密钥经 SILICONFLOW_API_KEY 注入后
-# 会落进 sdkconfig 产物，绝不入库（sdkconfig.defaults 保持追踪）
+# sdkconfig 由 idf.py 从 sdkconfig.defaults 每次 configure 再生成，含本机绝对路径与本地配置，绝不入库
+# （sdkconfig.defaults 是权威输入，保持追踪；编译期 -D 注入的密钥不会落进 sdkconfig，只会进 build/ 产物）
 **/sdkconfig
 **/sdkconfig.local
 **/target/

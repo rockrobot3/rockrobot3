@@ -19,7 +19,7 @@ core/<模块名>/
 ## 密钥注入（SILICONFLOW_API_KEY）
 
 `core/llm|asr|tts` 的 `*_config.h` 只引用宏 `SILICONFLOW_API_KEY`，**密钥不在仓库里**。
-构建前注入环境变量，缺失则 CMake 直接 FATAL_ERROR（不产出能编译但上线 401 的固件）：
+构建前注入环境变量，缺失或留空则 CMake 直接 FATAL_ERROR（不产出能编译但上线 401 的固件）：
 
 ```bash
 # bash / zsh
@@ -40,9 +40,18 @@ idf.py build
 `*_config.h` 的 `#ifndef SILICONFLOW_API_KEY / #error` 是第二道保险：
 若某个新工程忘记挂载这段 CMake，构建同样在编译该组件时报错而不是静默产出坏固件。
 
-历史注记：2026-09-29 之前该 key 明文写在三个头文件里并已推送远程，**已按泄露处理并在服务商侧轮换**；
-仓库不做历史重写（filter-repo + force push 的协作代价大于收益），旧密钥视为永久失效凭据。
-`firmware-c/sdkconfig` 已从索引移出（生成物，且会把密钥相关配置落进本地产物），`sdkconfig.defaults` 保持跟踪。
+历史注记：2026-09-29 之前该 key 明文写在三个头文件里并已推送远程，须按泄露处理——
+**旧密钥必须在服务商侧作废并轮换（待办，本机无法确认是否已执行，未经确认）**；维护者完成轮换后，
+请把作废/轮换证据（时间、工单或截图编号）补记到本仓库安全条目，勿仅停留在口头断言。
+仓库不做历史重写（filter-repo + force push 的协作代价大于收益），旧密钥在历史中永久可见，一律视为已泄露。
+
+`firmware-c/sdkconfig` 已从索引移出：它是 `idf.py` 每次 configure 重新生成的产物，含本机绝对路径与本地配置，
+不宜入库；`sdkconfig.defaults` 才是随仓库分发、保持追踪的权威输入。（勘误：编译期 `-D` 注入的密钥不会落进
+`sdkconfig`，移出动机是「再生件 + 本机绝对路径」，非「密钥写进 sdkconfig 产物」。）
+
+密钥门只在 CMake configure 阶段执行一次，成功后值即缓存进 `target_compile_definitions`；若此后才
+`unset SILICONFLOW_API_KEY`，Ninja 会用缓存值静默重建而不再触发 FATAL_ERROR——改动该环境变量后务必
+`idf.py fullclean`（或删除 `build/`）强制重新 configure，让密钥门（含空值校验）重新生效。
 
 ## 模块清单
 
