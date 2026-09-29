@@ -160,6 +160,11 @@ fn identity_comes_from_manifest_not_from_the_role_env() {
     // 换 role 不换身份：行为变了（它会发布），name 仍是 manifest 里那个。
     // 先 drop p1：同名重复注册会被 EBUSY 挡住（Task 7 已钉），那样测不到 role 这一维。
     drop(p1);
+    // 再等 rrd 把 p1 那条连接的收尾做完才起 p3：同名在册条目要等 conn 线程走到
+    // `rr3_conn_finish` 才腾出来。不等就是拿 fork/exec 的先后当同步手段——本轮 20 次实测全绿
+    // 也只说明运气好，不说明判据成立。needle 只取"退出"两字，因为 EOF 与 ECONNRESET
+    // 两支文案不同（干净收尾 / 帧读取失败），而这里要钉的是"收尾发生过"，不是"怎么收的"。
+    rrd.rr3_wait_log("rr3-sima 退出");
     let mut p3 = SimPeer::rr3_start(&rrd.socket, &ma, "publish_once");
     p3.rr3_wait("注册成功 name=rr3-sima");
     p3.rr3_wait("已发布 rr3-sima/ping/state");
