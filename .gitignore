@@ -15,3 +15,23 @@
 !.github/**
 !docs/
 !docs/**
+
+# ---- v0.0.1 结构化改造：新骨架必须可追踪 ----
+!base/
+!base/**
+!modules/
+!modules/**
+!contracts/
+!contracts/**
+!tools/
+!tools/**
+!legacy/
+!legacy/**
+
+# ---- 永不入库：再生件与本地密钥 ----
+# sdkconfig 由 idf.py 从 sdkconfig.defaults 再生成；密钥经 SILICONFLOW_API_KEY 注入后
+# 会落进 sdkconfig 产物，绝不入库（sdkconfig.defaults 保持追踪）
+**/sdkconfig
+**/sdkconfig.local
+**/target/
+**/build/
