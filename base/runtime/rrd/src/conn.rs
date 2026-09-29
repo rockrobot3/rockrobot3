@@ -16,7 +16,7 @@
 
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -36,7 +36,7 @@ use crate::rpc::{
     rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register, rr3_rpc_topic_param,
     Rr3RpcMethod,
 };
-use crate::rr3_log;
+use crate::{rr3_lock, rr3_log};
 
 /// 一条已注册连接的身份证
 struct Rr3Peer {
@@ -56,11 +56,6 @@ impl Rr3ConnCtx {
     pub fn rr3_ctx_now_ms(&self) -> u64 {
         rr3_now_ms(self.t0)
     }
-}
-
-/// 写侧锁中毒只可能来自 panic 的 writer；继续用比弃连接好
-fn rr3_lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// 唯一的写出口：锁覆盖整帧 → 与并发 writer 的字节永不交错
@@ -420,7 +415,12 @@ fn rr3_serve_request(
     }
 }
 
-/// 收尾：死亡记账（决定要不要重启）+ 恰好一条 state 广播。全进程只有这一处发 state。
+/// 收尾：死亡记账（决定要不要重启）+ 恰好一条 state 广播。
+///
+/// state 广播有**两处调用、一个构造函数**（`daemon.rs` 的 `rr3_state_frame`）：这里是
+/// "连接自己收尾"，另一处是 watchdog 的到期判死。两处各自只发一条——各自 `fanout` 一次，
+/// 且 `rr3_reg_expire` 跳过 failed 条目，所以判死过的模块不会被第二拍再回报一次
+/// （线上由 `watchdog_broadcasts_exactly_one_failed_state` 钉）。
 fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &str) {
     let plan = rr3_lock(&ctx.shared).rr3_reg_death(&me.name, clean_exit, ctx.rr3_ctx_now_ms());
     let phase = if clean_exit { "unregistered" } else { "failed" };

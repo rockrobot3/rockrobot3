@@ -47,6 +47,15 @@ mod peer {
     /// 只会让 abort 支多等一会儿，不影响任何判据（本轮用例都不测时长）。
     const DRAIN_READ_TIMEOUT: Duration = Duration::from_millis(150);
 
+    /// `silent_then_beat` 的先静默时长：必须**显著大于**到期上界
+    /// （`watchdog_ms 500 + tick 20` = 520ms）。取 700ms 留 180ms 余量，而真正让判据
+    /// 不靠运气的是这条算式：本支在第 700/850/1000/1150/1300ms 各喂一次，
+    /// **只有最后一次的结果进判据**（见 W4），到那一刻已静默 ≥780ms，
+    /// watchdog 只要跑过任何一拍就必然已判死。
+    const SILENT_BEFORE_REVIVE: Duration = Duration::from_millis(700);
+    /// 复活尝试的喂狗间隔
+    const REVIVE_BEAT_GAP_MS: u64 = 150;
+
     /// 身份只从 manifest 来；role 只选行为。见 support 的约定 1。
     pub fn rr3_peer_main() -> Result<(), String> {
         let bus = env::var("RR3_BUS_PATH").map_err(|_| "缺 RR3_BUS_PATH".to_string())?;
@@ -114,6 +123,37 @@ mod peer {
                 std::mem::forget(stream);
                 std::process::abort();
             }
+            // 注册 + 一颗心跳后**彻底静默**（不再喂狗，也不再读帧）。
+            // 这正是 watchdog 要抓的形状：连接还在、fd 没关、只是不喂狗了。
+            // 里程碑只打一行（约定 3：只打里程碑，不打循环）。
+            "go_silent" => {
+                rr3_beat(&mut stream, task, 10)?;
+                println!("sim-peer: 静默中（已喂 1 次）");
+                loop {
+                    std::thread::sleep(Duration::from_secs(3600));
+                }
+            }
+            // 静默到必然已过期，再回头连续喂 5 次，并把每一次的接受/被拒打出来。
+            // 与 `rr3_beat` 的区别：那个把被拒当致命错误直接退出（继续喂一条已不在册的
+            // 连接没有观察价值）；本支要观察的恰是"被拒之后是什么样"，所以必须用
+            // `rr3_beat_verdict`。
+            "silent_then_beat" => {
+                rr3_beat(&mut stream, task, 10)?;
+                println!("sim-peer: 静默中（已喂 1 次）");
+                std::thread::sleep(SILENT_BEFORE_REVIVE);
+                for n in 1..=5u64 {
+                    let accepted = rr3_beat_verdict(&mut stream, task, 20 + n)?;
+                    println!(
+                        "sim-peer: 喂狗 #{n} {}",
+                        if accepted { "接受" } else { "被拒" }
+                    );
+                    std::thread::sleep(Duration::from_millis(REVIVE_BEAT_GAP_MS));
+                }
+                println!("sim-peer: 已试喂 5 次");
+                loop {
+                    std::thread::sleep(Duration::from_secs(3600));
+                }
+            }
             other => Err(format!("未知 RR3_SIM_PEER_ROLE: {other}")),
         }
     }
@@ -168,6 +208,20 @@ mod peer {
             return Err(format!("喂狗被拒: {}", &reply["error"]));
         }
         Ok(())
+    }
+
+    /// 喂一次狗，返回"被接受了吗"——**不**把被拒当致命错误。
+    /// 与 `rr3_beat` 的分工是刻意的：那条的"被拒即退出"服务于"常驻模块不该继续用一条
+    /// 已不在册的连接"，这条服务于"要看被拒之后的形状"。合成一条会让两边都失去自己的语义。
+    fn rr3_beat_verdict(stream: &mut UnixStream, task: u64, id: u64) -> Result<bool, String> {
+        rr3_send(
+            stream,
+            Rr3PayloadType::Request,
+            task,
+            &json!({"jsonrpc": "2.0", "id": id, "method": "rr3.heartbeat", "params": {}}),
+        )?;
+        let reply = rr3_wait_reply(stream, id)?;
+        Ok(!reply["error"].is_object())
     }
 
     /// 写一帧：payload 先编（2 字节类型前缀），`payload_len` 取**编出来之后**的字节数
