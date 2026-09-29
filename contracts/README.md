@@ -9,7 +9,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 |---|---|---|
 | `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举 | L1 |
 | `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001 的**同机**基准；跨架构等值另见下） | L1 |
-| `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口：`rr3-mkmod` 生成自检 + `rr-registry` 契约测试；rrd 运行时注册校验属 M1/M2 待落地） | L2 |
+| `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_publish_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
 | `events/*.schema.json` | 各模块事件负载 schema（首个真实 schema 随 M3 落） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
@@ -21,9 +21,13 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 > 该对照，但**不该**喂给 JSON Schema 校验器——文件里的 `"$schema": ".../draft/2020-12/schema"` 键
 > 是从模板带过来的残迹（vestigial），文件真正承载的是 `x-rock3-*` 偏移表与冻结枚举值，按 JSON
 > Schema 语义解释会得出错误结论。（`events/*.schema.json` 落定时则相反：那才是给校验器用的负载
-> schema。）契约的执行入口只有两处：`cargo test -p rr-ipc`（17 条守护：13 条偏移/枚举对齐 +
-> `tests/envelope_meta.rs` 的 4 条元数据守护，读 JSON 而非 Rust 自比）与
-> `bash tools/ci/check.sh`（manifest、主题前缀与注册表形状）。
+> schema。）契约的执行入口分两层说：envelope 字节级由 `cargo test -p rr-ipc`（偏移/枚举对齐
+> 与 `tests/envelope_meta.rs` 的元数据守护，读 JSON 而非 Rust 自比；守护条数的唯一登记处是
+> [docs/process/conventions.md](../docs/process/conventions.md) §2，本文件不复述数字）与
+> `bash tools/ci/check.sh`（manifest、主题前缀与注册表形状）兜住；主题前缀归属则在生成/契约
+> 两路自检之外有第三处入口——rrd 在册表 `RrdRegistry::rr3_reg_publish_check`（判定逻辑已交付，
+> 是否接到线上连接路径以 [docs/status.md](../docs/status.md) 为准；三入口职责见
+> [docs/architecture/architecture.md](../docs/architecture/architecture.md) §6.3）。
 
 ## topics.toml 裁定
 
@@ -62,9 +66,10 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 3. 消息头扩展**只允许写 reserved 区**并经 `flags` 标记启用（保持与 A-IPC 标准逐字节兼容）
 4. 六步检查以 `bash tools/ci/check.sh` 为**唯一入口**（本地与 CI 同一命令，命名沿用方案 D7 的"三检查"；
    远程在 atomgit，平台自动触发待确认，见方案 §7 遗留项）：
-   ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试（56 条）/
-   ② manifest schema 校验 + 注册表形状 pin（22 条）/ ②b mkmod 输出即契约用例 / ③ 主题前缀归属
-   （步序与命令的权威表见 [docs/process/conventions.md](../docs/process/conventions.md) §2）
+   ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试 /
+   ② manifest schema 校验 + 注册表形状 pin / ②b mkmod 输出即契约用例 / ③ 主题前缀归属
+   （步序、命令与每步条数的权威表见 [docs/process/conventions.md](../docs/process/conventions.md) §2，
+   本文件不抄数字）
 
 ### 演进登记（逐条留痕）
 
