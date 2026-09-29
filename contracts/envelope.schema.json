@@ -100,7 +100,10 @@
       "IPC-T-002": "非 0x41524531 的消息被拒绝",
       "IPC-T-003": "x86 与 aarch64 字节布局一致",
       "IPC-T-010": "未知标志位不报错（前向兼容）",
-      "x-rock3-v0.0.1-coverage": ["IPC-T-001", "IPC-T-002", "IPC-T-003", "IPC-T-010"]
+      "x-rock3-v0.0.1-coverage": ["IPC-T-001", "IPC-T-002", "IPC-T-010"],
+      "x-rock3-v0.0.1-uncovered": {
+        "IPC-T-003": "跨架构（x86 与 aarch64）字节布局一致：v0.0.1 只有同机 golden 往返（rr-ipc 的 header_matches_golden_vector），无交叉编译等值测试；该用例须随 M2 落地（ADR-0006 后果项 / architecture.md §10 里程碑 M2）"
+      }
     }
   }
 }

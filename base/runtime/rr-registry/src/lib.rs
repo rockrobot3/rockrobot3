@@ -2,7 +2,9 @@
 //!
 //! [SC] 契约层的消费方：manifest 字段契约（`module.schema.toml`）与
 //! 主题所有权（`contracts/topics.toml`）的校验实现。
-//! rrd 在模块注册时调用本 crate 决定是否放行（architecture.md §7）。
+//! v0.0.1 的调用方是 `tools/mkmodule`（生成自检）与本 crate 的契约测试（`tests/contract.rs`，
+//! 由 `tools/ci/check.sh` ②/③ 点名）；"rrd 在模块注册时调用本 crate 决定放行"属
+//! M1/M2 待落地的运行时环节（architecture.md §6.3、§7）。
 
 pub mod schema;
 pub mod validate;
