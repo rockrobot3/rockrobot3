@@ -2,7 +2,7 @@
 
 - **状态**：已接受
 - **日期**：2026-09-28
-- **关联**：[architecture.md](../architecture.md)
+- **关联**：[architecture.md](../../architecture/architecture.md)
 
 ## 背景
 

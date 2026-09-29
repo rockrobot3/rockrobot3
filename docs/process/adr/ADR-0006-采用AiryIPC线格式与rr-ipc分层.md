@@ -2,7 +2,7 @@
 
 - **状态**：已接受（修订 [ADR-0003](ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) 的线格式部分）
 - **日期**：2026-09-28
-- **关联**：[architecture.md §6](../architecture.md) · [ADR-0004](ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0007](ADR-0007-控制面分层与模块级升级.md)
+- **关联**：[architecture.md §6](../../architecture/architecture.md) · [ADR-0004](ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0007](ADR-0007-控制面分层与模块级升级.md)
 
 ## 背景
 
