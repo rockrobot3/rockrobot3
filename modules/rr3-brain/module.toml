@@ -1,0 +1,34 @@
+[manifest]
+schema_version = 1
+name = "rr3-brain"
+version = "0.0.1"
+type = "brain"
+lang = "python"
+# 打包时由 base/os/package/rr3-brain 安装同名 shim，实际执行 `python -m rr3_brain`
+# （naming.md §3：目录名 == 进程名 == manifest.name）
+entry = "rr3-brain"
+
+[provides]
+capabilities = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[depends]
+required = ["bus.subscribe", "bus.rpc", "net.online"]
+optional = ["power.battery"]
+
+# brain 只走事务面与意图事件：ASR/LLM/TTS 编排是云端往返，不进反射路径
+# （ADR-0007 控制面三级分层）。密钥一律构建期环境变量注入，不落盘、不入库。
+[events]
+publishes = ["rr3-brain/intent/result"]
+subscribes = ["rr3-interact/asr/text", "rr3-connect/net/link"]
+
+[rpc]
+exposes = ["rr3-brain/llm/completion"]
+
+[resources]
+restart_policy = "on-failure"
+mem_limit_mb = 256
+start_priority = 80
+
+[health]
+heartbeat_ms = 2000
+watchdog_timeout_ms = 10000

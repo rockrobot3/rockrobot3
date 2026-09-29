@@ -1,0 +1,16 @@
+# rr3-interact 运行期配置（secret 一律走环境变量，不落盘）
+# 预缓冲数值来自 legacy 语音链路调优（提交 0cf029e）：抗抖动而不增加可听延迟。
+
+[rr3-interact]
+log_level = "info"
+
+[rr3-interact.player]
+prebuffer_ms = 500
+volume_pct = 70
+
+[rr3-interact.face]
+default_expression = "idle"
+
+[rr3-interact.panel]
+bind = "127.0.0.1"        # 随 M5 决定是否对外；默认只绑回环
+port = 8080

@@ -455,3 +455,50 @@ fn registry_shape_is_pinned() {
         );
     }
 }
+
+/// modules/ 下每个模块的 module.toml 都必须过同一份 manifest 契约。
+/// 骨架可以没有实现，manifest 不可以不合契约——否则要等 rrd 上线才暴露拒注册。
+#[test]
+fn every_module_manifest_passes_contract() {
+    let modules = repo_root().join("modules");
+    let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(&modules)
+        .expect("读不到 modules/ 目录")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.join("module.toml").is_file())
+        .collect();
+    dirs.sort();
+    let names: Vec<&str> = dirs
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["rr3-act", "rr3-brain", "rr3-connect", "rr3-interact", "rr3-power", "rr3-sense"],
+        "modules/ 的模块集合漂移：新增须走 rr3-mkmod，删除须走 ADR"
+    );
+    for name in names {
+        let report =
+            rr_registry::rr3_registry_validate_manifest(&modules.join(name).join("module.toml"));
+        assert!(report.ok(), "{name} 的 module.toml 不合契约: {:?}", report.errors);
+    }
+}
+
+/// contracts/topics.toml 每条 owner 的 `path` 必须真的存在。
+/// 曾经 6 个 owner 指向不存在的 modules/rr3-*：契约在说谎，且五步检查无人拦截。
+#[test]
+fn every_owner_path_exists() {
+    let root = repo_root();
+    let v: toml::Value = toml::from_str(&topics_toml()).expect("topics.toml 必须可解析");
+    let owners = v.get("owner").and_then(toml::Value::as_array).expect("缺 [[owner]] 数组");
+    assert_eq!(owners.len(), 7, "owner 计数漂移（注册表形状 pin 之外的交叉检查）");
+    for o in owners {
+        let name = o.get("name").and_then(toml::Value::as_str).expect("owner 缺 name");
+        let path = o.get("path").and_then(toml::Value::as_str).expect("owner 缺 path");
+        assert!(
+            !path.starts_with('/') && !path.split('/').any(|s| s == ".."),
+            "owner {name} 的 path 必须是仓库内相对路径: {path}"
+        );
+        assert!(root.join(path).is_dir(), "owner {name} 登记的 path 不存在: {path}");
+    }
+}

@@ -1,0 +1,15 @@
+# rr3-sense 运行期配置（由模块自己读取；secret 一律走环境变量，不落盘）
+# 阈值继承 legacy/main.c 的对话策略，改参数不碰源码（naming.md §4）。
+
+[rr3-sense]
+log_level = "info"
+
+[rr3-sense.audio]
+sample_rate = 16000
+channels = 1
+frame_ms = 20
+
+[rr3-sense.vad]
+rms_start = 1500        # 起音阈值
+silence_tail_ms = 700   # 判停尾静音
+min_speech_ms = 200

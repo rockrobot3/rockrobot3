@@ -1,0 +1,38 @@
+[manifest]
+schema_version = 1
+name = "rr3-sense"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "rr3-sense"
+
+[provides]
+capabilities = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
+
+[depends]
+required = ["bus.publish"]
+optional = []
+
+# 只登记 contracts/topics.toml 已注册的 M0 主题；新增主题 = 改契约 = 走 review。
+# 采集/IMU 是 stream（实时控制面摘要），VAD 边沿与环境量是 event。
+[events]
+publishes = [
+    "rr3-sense/audio/pcm",
+    "rr3-sense/audio/vad_start",
+    "rr3-sense/env/temperature",
+    "rr3-sense/imu/state",
+]
+subscribes = []
+
+# request 语义的自有主题走事务面，不混进 publishes
+[rpc]
+exposes = ["rr3-sense/capture/dump"]
+
+[resources]
+restart_policy = "always"
+mem_limit_mb = 64
+start_priority = 20
+
+[health]
+heartbeat_ms = 1000
+watchdog_timeout_ms = 5000
