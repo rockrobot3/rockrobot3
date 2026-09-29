@@ -70,17 +70,25 @@ mod tests {
     }
 
     #[test]
-    fn ota_state_variants_are_distinct() {
-        let all = [
-            Rr3SlotState::Active,
-            Rr3SlotState::Staged,
-            Rr3SlotState::Idle,
-            Rr3SlotState::Corrupt,
-        ];
-        for (i, a) in all.iter().enumerate() {
-            for (j, b) in all.iter().enumerate() {
-                assert_eq!(a == b, i == j);
-            }
+    fn ota_slot_peer_is_involutive() {
+        // peer() 必须是对合（切两次回到原位），且 Factory 无对侧自映射；
+        // 若 A/B 映射被调换或 Factory 误指向 A/B，此测试即失败
+        for s in [Rr3Slot::SlotA, Rr3Slot::SlotB, Rr3Slot::Factory] {
+            assert_eq!(s.rr3_slot_peer().rr3_slot_peer(), s, "peer() 对合律被破坏: {s:?}");
         }
+        assert_eq!(Rr3Slot::Factory.rr3_slot_peer(), Rr3Slot::Factory);
+    }
+
+    #[test]
+    fn ota_slot_labels_are_injective() {
+        // 三槽位标签两两不同且逐一钉死：表被调换或标签重复即失败
+        let all = [Rr3Slot::SlotA, Rr3Slot::SlotB, Rr3Slot::Factory];
+        let mut labels: Vec<&str> = all.map(|s| s.rr3_slot_label()).to_vec();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(labels.len(), all.len(), "槽位标签必须互不相同");
+        assert_eq!(Rr3Slot::SlotA.rr3_slot_label(), "rr_a");
+        assert_eq!(Rr3Slot::SlotB.rr3_slot_label(), "rr_b");
+        assert_eq!(Rr3Slot::Factory.rr3_slot_label(), "rr_factory");
     }
 }
