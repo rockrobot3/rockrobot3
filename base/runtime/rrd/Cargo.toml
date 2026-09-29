@@ -1,0 +1,16 @@
+[package]
+name = "rrd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "base 层守护进程（模块注册与健康）"
+
+[[bin]]
+name = "rrd"
+path = "src/main.rs"
+
+[dependencies]
+rr-ipc = { path = "../rr-ipc" }
+rr-registry = { path = "../rr-registry" }
