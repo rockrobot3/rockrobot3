@@ -407,7 +407,7 @@ fn registry_triples(text: &str) -> Vec<(String, String, String)> {
 /// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
 /// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
 /// 也要更新这里的 `RR3_PINNED_TOPICS` / 四个计数期望，以及把这些形状当事实来写的
-/// 文档（`docs/architecture.md` §6.3、`docs/naming.md` §3、`contracts/README.md`）。
+/// 文档（`docs/architecture/architecture.md` §6.3、`docs/architecture/naming.md` §3、`contracts/README.md`）。
 /// 少改任何一处，本用例即红。
 ///
 /// 反过来说，删一条主题、改一条 kind、改一个 owner 数同样会红——评审证明这正是
