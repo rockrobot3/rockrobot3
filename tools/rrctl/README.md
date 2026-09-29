@@ -1,8 +1,9 @@
 # tools/rrctl —— `rr3-ctl` 总线侧运维 CLI
 
-规划能力（architecture.md §3）：查在册模块、看健康状态、取日志、触发 OTA。
-**v0.0.1 只交付命令面**：参数解析、套接字路径解析与输出形状先定下来，真正的
-UDS 往返随 M2 —— rrd 还没上线时无处可问，先写死一条假链路只会骗过测试。
+规划能力（[`architecture.md`](../../docs/architecture/architecture.md) §3）：查在册模块、看健康状态、取日志、触发 OTA。
+**当前交付的是命令面**：参数解析、套接字路径解析与输出形状先定下来。UDS 往返之所以还不做，
+是因为先写死一条假链路只会骗过测试——真链路接到哪一段属实况，唯一落点
+[`docs/status.md`](../../docs/status.md)。
 
     rr3-ctl [--bus-path <path>] <status|health|logs|ota>
 
