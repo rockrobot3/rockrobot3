@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use rr3_mkmod::rr3_mkmod_generate;
 
 fn tmp(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("rr3-mkmod-{tag}"));
+    // 掺入进程 id，使并发运行的测试进程（同一 tag）不会互相覆盖临时根目录
+    let p = std::env::temp_dir().join(format!("rr3-mkmod-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&p);
     std::fs::create_dir_all(&p).unwrap();
     p

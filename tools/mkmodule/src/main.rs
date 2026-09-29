@@ -21,7 +21,9 @@ fn main() {
         Ok(files) => {
             println!("已生成模块骨架 ({} 个文件):", files.len());
             for f in files {
-                println!("  {}", f.display());
+                // 仅规范化展示用的路径分隔符为 `/`，落盘与返回值不受影响
+                let display = f.to_string_lossy().replace('\\', "/");
+                println!("  {display}");
             }
             println!("\n下一步：在 contracts/topics.toml 登记主题（见模块 README）");
         }

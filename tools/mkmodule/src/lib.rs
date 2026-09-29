@@ -151,7 +151,11 @@ fn readme(id: &str) -> String {
     )
 }
 
-/// 在 `out_root` 下生成 `<id>/` 全套骨架；返回生成的文件列表（绝对路径）
+/// 在 `out_root` 下生成 `<id>/` 全套骨架；返回生成的文件列表。
+///
+/// 返回的路径均以调用方传入的 `out_root` 为根原样拼接：`out_root` 为绝对路径时
+/// 返回绝对路径，为相对路径时返回相对路径（其解析依赖调用方当前工作目录）。
+/// 本函数不会把 `out_root` 规范化为绝对路径。
 pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, Rr3MkmodError> {
     let id = rr3_mkmod_stem(name)?;
     let target = out_root.join(&id);
