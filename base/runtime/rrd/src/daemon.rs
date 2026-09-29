@@ -1,7 +1,7 @@
 //! 监听、accept、连接线程编排（spec §4）。
 //!
-//! Task 10 在这里加唯一的 watchdog 线程，Task 11 加 spawn/重启。本任务只做：
-//! 清残留套接字 → bind → accept 循环。
+//! Task 10 已加**唯一的** watchdog 线程（`rr3_spawn_watchdog`）；Task 11 在这里加 spawn/重启。
+//! 本任务做的：清残留套接字 → bind → 起监视线程 → accept 循环。
 //! 连接账（M-1）：每连接 **2 条线程 + 2 个 fd**，不是一条——accept 处 spawn 的 reader 线程，
 //! 加上 `conn.rs` 里为同一条连接 spawn 的 writer 线程与它那份 `try_clone`（评审资源探针实测
 //! 一条活跃连接 +2 线程 +2 fd）。Task 10/11 算并发与文件描述符账按这个数。
@@ -10,7 +10,7 @@
 use std::os::unix::net::UnixListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rr_bus::{RR3_BROADCAST_DST_TASK, RR3_TASK_RRD};
 use rr_ipc::{opcode, rr3_body_encode, Rr3Frame, Rr3Header};
@@ -19,8 +19,8 @@ use serde_json::json;
 
 use crate::cli::RrdConfig;
 use crate::conn::{rr3_conn_serve, Rr3ConnCtx};
-use crate::registry::RrdRegistry;
-use crate::rr3_log;
+use crate::registry::{Rr3Phase, RrdRegistry};
+use crate::{rr3_lock, rr3_log};
 
 /// 相对进程起点的单调毫秒：在册表的时钟单位（Task 5"时钟约定"）
 pub fn rr3_now_ms(t0: Instant) -> u64 {
@@ -33,6 +33,45 @@ pub fn rr3_now_ns() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0)
+}
+
+/// 唯一的 watchdog 监视线程（spec §5.0"心跳"段）。
+///
+/// 为什么是一条、不是每连接一条：到期判定要比全表 `last_beat_ms`，而连接线程只看得见
+/// 自己那条；每连接一条既分不清"对端不喂狗"与"对端刚注册完还没喂第一颗"，又会把
+/// failed 广播放大成 O(连接数)。tick 由 `--watchdog-tick-ms` 决定（生产 200，
+/// 集成测试要么 20 要么 1 小时，见 `RR3_QUIET_WATCHDOG_TICK_MS`）。
+///
+/// 先睡后扫：注册完成那一刻不必立刻扫一遍，第一拍在 t+tick。
+/// 每拍只锁一次、扫完立刻放锁：`rr3_reg_expire` 持锁期间 accept 线程与 conn 线程都在等
+/// 同一把锁，所以锁的粒度就是全表扫描本身（≤ `RR3_REG_MAX_MODULES` = 16 条，有硬上界）。
+/// 广播在锁外做（`rr3_reg_fanout` 自己再锁一次）：判死与广播之间不持锁，
+/// 避免"持锁 sleep"那种把整个守护卡住的写法。
+///
+/// panic 面：循环体里唯一会 panic 的是 `rr3_lock` 的毒锁 unwrap，与 conn 线程同一口径，
+/// 本任务不额外加 catch_unwind。Task 11 若把重启做进这条线程，必须重估这个决定
+/// （那时循环体里会多出 spawn 与退避睡眠）。
+fn rr3_spawn_watchdog(shared: Arc<Mutex<RrdRegistry>>, t0: Instant, tick_ms: u64) {
+    rr3_log(&format!("watchdog 启动 tick={tick_ms}ms"));
+    thread::spawn(move || {
+        let tick = Duration::from_millis(tick_ms);
+        loop {
+            thread::sleep(tick);
+            let expiries = rr3_lock(&shared).rr3_reg_expire(rr3_now_ms(t0));
+            for ex in expiries {
+                rr3_log(&format!(
+                    "watchdog 判死 {} task={} 距上次心跳 {}ms ≥ 超时 {}ms",
+                    ex.name, ex.src_task, ex.elapsed_ms, ex.watchdog_ms
+                ));
+                let frame = rr3_state_frame(&ex.name, Rr3Phase::Failed.as_str(), ex.src_task);
+                // 阶段名取自 `Rr3Phase::as_str()`，不写字面量 "failed"：那是第二个真值
+                // （as_str 改了而广播没改，`rr3_read_state(.., "failed")` 会替我们抓到，
+                // 但抓到的是一条本该不必存在的失败）。
+                let n = rr3_lock(&shared).rr3_reg_fanout(&frame, ex.src_task);
+                rr3_log(&format!("watchdog 广播 failed 到 {n} 个连接"));
+            }
+        }
+    });
 }
 
 /// `rr3-runtime/module/state` 下行广播帧：owner 是内建命名空间，只许 rrd 发（spec §5.0）
@@ -73,6 +112,8 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
 
     let shared = Arc::new(Mutex::new(RrdRegistry::new(cfg.restart_base_ms)));
     let topics = Arc::new(topics);
+
+    rr3_spawn_watchdog(shared.clone(), t0, cfg.watchdog_tick_ms);
 
     for accepted in listener.incoming() {
         let stream = match accepted {

@@ -126,11 +126,17 @@ struct Entry {
     tx: Option<Sender<Rr3Frame>>,
 }
 
+/// watchdog 到期回报。`elapsed_ms` / `watchdog_ms` 必须由**判定处**一并交出：
+/// 线程侧要在日志里写清"距上次心跳 501ms ≥ 超时 500ms"，而表外的人拿不到 `last_beat_ms`
+/// （`rr3_reg_facts` 只给 manifest 事实，不给心跳时刻）。少了这两个字段，日志就只能写
+/// "判死了"，线上用例便无法把"判得对不对"钉成内容断言，只能靠掐时间——那是随机红的来源。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rr3Expiry {
     pub name: String,
     pub src_task: u64,
     pub reason: &'static str,
+    pub elapsed_ms: u64,
+    pub watchdog_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,13 +280,17 @@ impl RrdRegistry {
             }
             // saturating_sub：调用方的毫秒读数理论上单调，但真出现倒退时宁可判"未到期"
             // 也不回绕成一个巨大差值把健康模块集体判死。
-            if now_ms.saturating_sub(e.last_beat_ms) >= e.facts.watchdog_ms {
+            // 差值提成一个绑定：判据与回报共用它，写两遍就是两处真值。
+            let elapsed_ms = now_ms.saturating_sub(e.last_beat_ms);
+            if elapsed_ms >= e.facts.watchdog_ms {
                 e.phase = Rr3Phase::Failed;
                 e.tx = None;
                 out.push(Rr3Expiry {
                     name: e.name.clone(),
                     src_task: e.src_task,
                     reason: RR3_EXPIRE_HEARTBEAT_TIMEOUT,
+                    elapsed_ms,
+                    watchdog_ms: e.facts.watchdog_ms,
                 });
             }
         }
@@ -756,10 +766,29 @@ watchdog_timeout_ms = {wd}
         assert!(r.rr3_reg_expire(499).is_empty(), "距上次心跳 499-400=99ms < 500ms 不得判死");
         assert_eq!(
             r.rr3_reg_expire(901),
-            vec![Rr3Expiry { name: "rr3-sima".into(), src_task: t, reason: "heartbeat_timeout" }]
+            vec![Rr3Expiry {
+                name: "rr3-sima".into(),
+                src_task: t,
+                reason: "heartbeat_timeout",
+                elapsed_ms: 501,
+                watchdog_ms: 500,
+            }]
         );
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
         assert!(!r.rr3_reg_beat(t, 950), "已 failed 的模块不得靠补心跳复活");
+    }
+
+    /// 回报里的两个数必须就是判定本身：`elapsed_ms == now - last_beat`、
+    /// `watchdog_ms == 该模块自己的超时值`。线程侧的日志逐字引用它们，
+    /// 日志说"501 ≥ 500"而实际按别的数判死，就是线上唯一可读的判死证据在撒谎。
+    #[test]
+    fn expiry_report_carries_the_numbers_that_decided_it() {
+        let mut r = RrdRegistry::new(1000);
+        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), mpsc::channel().0, 0).unwrap();
+        assert!(r.rr3_reg_beat(t, 400), "夹具心跳必须先被接受，否则 elapsed 无从谈起");
+        let e = &r.rr3_reg_expire(1_001)[0];
+        assert_eq!(e.elapsed_ms, 601, "elapsed 必须是 now-last_beat，不是 now-注册时刻");
+        assert_eq!(e.watchdog_ms, 500, "必须回显该模块自己的 watchdog_ms，不是全局常量");
     }
 
     /// registered（一颗心跳都没拿到）同样受 watchdog 约束
