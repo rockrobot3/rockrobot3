@@ -235,7 +235,7 @@ fn main() -> anyhow::Result<()> {
 ## 四、构建 / 烧录 / 验证
 
 ```bash
-cd firmware-rs
+cd legacy/firmware-rs
 
 # 1) 构建（必须先 source 工具链环境，否则 bindgen 用错 esp-clang 报 xtensa 三元组错误）
 source ~/export-esp.sh
