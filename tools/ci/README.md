@@ -15,6 +15,7 @@
 | ②b | `cargo test --manifest-path tools/mkmodule/Cargo.toml` | mkmod 产物即契约（独立包，①b 覆盖不到） |
 | ③ | `cargo test -p rr-registry topics_prefix` | 主题前缀归属（② 那个测试目标里的筛选子集） |
 | ④ | 逐工程 `cargo check -q --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，显式排除 `base/runtime/*`） | 仓内**所有独立 Rust 工程**编译：它们各自成 workspace，①/①b 打不到 |
+| ⑤ | 遍历 `git -c core.quotepath=false ls-files '*.md'`（排除 `legacy/`），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在 | 已跟踪 md **不得为空**、相对链接**不得断**：空文档与断链逐条打印（`空文档` / `断链`）后整步 FAIL。`legacy/` 是冻结区，其内 README 允许残留 1 处已知旧路径（记录见 `docs/status.md`），纳入门禁只会逼人或改冻结区或加豁免名单，两者都不是目的 |
 
 **每步跑多少条测试不在本文件登记**：唯一落点是
 [`docs/process/conventions.md`](../../docs/process/conventions.md) §2（含两平台条数为何不等的

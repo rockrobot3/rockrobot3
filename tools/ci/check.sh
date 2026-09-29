@@ -94,6 +94,34 @@ if [ "$found" -eq 0 ]; then
   fail=1
 fi
 
+# ⑤ 文档门：已跟踪的 md 不得为空、相对链接不得断。
+#    为什么排除 legacy/：那是冻结区（只读的历史代码，不再演进），其内 README 本就允许残留
+#    旧路径——已知 1 处旧路径记录在 docs/status.md；把它拉进门禁只会逼人改冻结区或加豁免名单，
+#    两者都不是我们要的。
+#    空文档判据用 `-s`（字节数为 0 即空），断链判据只取 `](...)` 里的相对路径
+#    （跳过 http(s)://、mailto:、以 / 开头的绝对路径与纯锚点 #…）。
+#    `git ls-files` 显式关掉 core.quotepath：默认 true 时非 ASCII 文件名（如
+#    docs/process/dev/0.0.1版本…）会被转义成八进制串，`-s`/`-e` 检的是那个不存在的名字，
+#    门禁会在别人机器上凭空报一条假红。
+check_docs() {
+  local list bad f d l
+  list="$(mktemp)" || return 1; bad="$(mktemp)" || return 1
+  git -c core.quotepath=false ls-files '*.md' | grep -v '^legacy/' > "$list" || true
+  while IFS= read -r f; do
+    [ -s "$f" ] || printf '空文档  %s\n' "$f" >> "$bad"
+    d="$(dirname "$f")"
+    while IFS= read -r l; do
+      [ -e "$d/$l" ] || printf '断链    %s -> %s\n' "$f" "$l" >> "$bad"
+    done < <(grep -ohE '\]\([^)]+\)' "$f" 2>/dev/null \
+             | sed 's/^](//; s/)$//; s/#.*//; s/ .*//' \
+             | grep -vE '^(https?:|mailto:|/|$)')
+  done < "$list"
+  if [ -s "$bad" ]; then cat "$bad"; rm -f "$list" "$bad"; return 1; fi
+  rm -f "$list" "$bad"
+}
+step "⑤ 文档门（已跟踪 md 不得为空、相对链接不得断）"
+run check_docs
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"

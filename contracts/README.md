@@ -66,11 +66,11 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
    `topics.toml` 与 `base/runtime/rr-registry/src/module.schema.toml` 各自另有同名整型键
    `schema_version`（当前同为 1），三者不要混写
 3. 消息头扩展**只允许写 reserved 区**并经 `flags` 标记启用（保持与 A-IPC 标准逐字节兼容）
-4. 六步检查以 `bash tools/ci/check.sh` 为**唯一入口**（本地与 CI 同一命令，命名沿用方案 D7 的"三检查"；
+4. 七步检查以 `bash tools/ci/check.sh` 为**唯一入口**（本地与 CI 同一命令，命名沿用方案 D7 的"三检查"；
    远程在 atomgit，平台自动触发待确认，见方案 §7 遗留项）：
    ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试 /
    ② manifest schema 校验 + 注册表形状 pin / ②b mkmod 输出即契约用例 / ③ 主题前缀归属 /
-   ④ 仓内所有独立 Rust 工程编译
+   ④ 仓内所有独立 Rust 工程编译 / ⑤ 文档门（已跟踪 md 不得为空、相对链接不得断）
    （步序、命令与每步条数的权威表见 [docs/process/conventions.md](../docs/process/conventions.md) §2，
    本文件不抄数字）
 
