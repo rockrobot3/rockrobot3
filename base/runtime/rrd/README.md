@@ -23,7 +23,7 @@ health / config，事件总线的宿主（[`architecture.md`](../../../docs/arch
 常量表、四道归属门与重启退避见 [`docs/reference/rrd-registry.md`](../../../docs/reference/rrd-registry.md)。
 主题与 kind 的事实源是 [`contracts/topics.toml`](../../../contracts/topics.toml)。
 
-**进度也不在本文件复述**：哪一条能力接到了线上、watchdog 线程与模块 spawn 还缺哪一手，
+**进度也不在本文件复述**：哪一条能力接到了线上、模块 spawn/重启执行还缺哪一手，
 唯一落点 [`docs/status.md`](../../../docs/status.md)；测试条数只登记在
 [`docs/process/conventions.md`](../../../docs/process/conventions.md) §2。
 本 crate 真正跑起来只在 Unix 上；非 Unix 平台启动即打印 `RRD_UNSUPPORTED` 并以非 0 退出，

@@ -433,7 +433,8 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁 →
 ⑤ 打印横幅（契约/manifest schema 版本、总线绝对路径、装载到的主题数）
    主题数取自装载结果，不写死；给了叠加层就再打一行绝对路径与新增条目清单
 ⑥ 平台分岔：
-   Unix     → `rr3_daemon_run`：清残留套接字 → `UnixListener::bind` → accept 循环，
+   Unix     → `rr3_daemon_run`：清残留套接字 → `UnixListener::bind` → 起唯一的 watchdog
+              监视线程 → accept 循环，
               每连接 2 条线程 + 2 个 fd（`daemon.rs` 在 accept 处 spawn reader，
               `conn.rs` 为同一条连接再 spawn writer 并自带一份 `try_clone`）
               （该环节永不返回，除非 bind 失败）

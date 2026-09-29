@@ -22,12 +22,12 @@
 
 | 项 | 事实 | 出处 |
 |---|---|---|
-| 类型 | `RrdRegistry`，字段 `modules`（`BTreeMap` 名→条目）、`by_task`（task→名）、`next_task`、`restart_base_ms`、`denied_publish` | `registry.rs:152-159` |
-| 构造 | `RrdRegistry::new(restart_base_ms)`，`next_task` 起点 = `RR3_TASK_FIRST_MODULE`，`denied_publish` = 0 | `registry.rs:161-170` |
+| 类型 | `RrdRegistry`，字段 `modules`（`BTreeMap` 名→条目）、`by_task`（task→名）、`next_task`、`restart_base_ms`、`denied_publish` | `registry.rs:158-165` |
+| 构造 | `RrdRegistry::new(restart_base_ms)`，`next_task` 起点 = `RR3_TASK_FIRST_MODULE`，`denied_publish` = 0 | `registry.rs:167-176` |
 | 平台 | 平台无关：只碰 `BTreeMap` / `mpsc` / `u64` 单调毫秒；UDS 与进程派生在 `conn.rs` / `daemon.rs`（整体 `#[cfg(unix)]`） | `registry.rs:1-6` |
-| 共享 | 守护进程持一份 `Arc<Mutex<RrdRegistry>>`，每连接一份 `Rr3ConnCtx` 引用同一把锁 | `daemon.rs:74-88` |
-| 取锁 | `rr3_lock`：写侧锁中毒只可能来自 panic 的 writer，**继续用比弃连接好**（`into_inner`） | `conn.rs:61-64` |
-| task 分配 | `next_task` 用 `saturating_add(1)` 单调递增；0 与 1 永不出现 | `registry.rs:230-231` |
+| 共享 | 守护进程持一份 `Arc<Mutex<RrdRegistry>>`，每连接一份 `Rr3ConnCtx` 引用同一把锁；watchdog 线程拿的是同一份 `shared` 的克隆 | `daemon.rs:113-131` |
+| 取锁 | `rr3_lock`：锁中毒只可能来自 panic 的持锁者，**继续用比弃连接/比整个守护停摆好**（`unwrap_or_else(into_inner)`）。自 `08d460f` 起它是 `lib.rs` 里的 `pub(crate)` **单点**，`conn.rs`（应答与收尾）与 `daemon.rs`（watchdog 扫描与广播）共用，不再各写一份 | `lib.rs:33-44` |
+| task 分配 | `next_task` 用 `saturating_add(1)` 单调递增；0 与 1 永不出现 | `registry.rs:236-237` |
 
 ## 2 常量表
 
@@ -58,9 +58,9 @@
 
 | 边 | 由谁触发 | 出处 |
 |---|---|---|
-| `registered → running`（并刷新到期基准） | `rr3_reg_beat(src_task, now_ms)` | `registry.rs:255-264` |
-| `registered \| running → failed`（心跳超 `watchdog_ms`） | `rr3_reg_expire(now_ms)` | `registry.rs:269-288` |
-| `registered \| running → failed`（连接收尾） | `rr3_reg_death(name, clean_exit, now_ms)` | `registry.rs:362-393` |
+| `registered → running`（并刷新到期基准） | `rr3_reg_beat(src_task, now_ms)` | `registry.rs:261-270` |
+| `registered \| running → failed`（心跳超 `watchdog_ms`） | `rr3_reg_expire(now_ms)` | `registry.rs:275-298` |
+| `registered \| running → failed`（连接收尾） | `rr3_reg_death(name, clean_exit, now_ms)` | `registry.rs:372-403` |
 
 两条要记住的限定：
 
@@ -68,7 +68,7 @@
   它在此只是 spec §5.0 词表里的一个名字（`as_str()` 要回显它）。
   置位与持久化按注释随 rrd 实现计划的 Task 9/11 落地，进度见
   [`../status.md`](../status.md)。**届时 `rr3_reg_beat` 不得再无条件升 `Running`**
-  （必须改成"degraded 只续命、不升级"），否则一颗心跳就把降级标注抹平（`registry.rs:41-43`、`registry.rs:248-254`）。
+  （必须改成"degraded 只续命、不升级"），否则一颗心跳就把降级标注抹平（`registry.rs:41-43`、`registry.rs:254-260`）。
 - 另有第五个词 `unregistered` **不属** `Rr3Phase`：干净退场时由 `conn.rs:426` 现算后进 state 帧。
 
 ## 4 时钟约定
@@ -77,31 +77,31 @@
 刚好超窗"两种情形（`registry.rs:11-13`）。调用方读数以进程起点 `t0` 为基准
 （`rr3_now_ms(t0)`，`daemon.rs:25-28`），条目里只存 `last_beat_ms`（`registry.rs:123-124`）。
 差值用 `saturating_sub`：真出现时钟倒退时宁可判"未到期"，也不回绕成巨大差值把健康模块集体判死
-（`registry.rs:275-277`）。
+（`registry.rs:281-285`；差值提成 `elapsed_ms` 绑定，判据与回报共用同一个数）。
 
 ## 5 `rr3_reg_add`：门序即语义
 
 签名 `(facts: &Rr3ManifestFacts, tx: Sender<Rr3Frame>, now_ms: u64) -> Result<u64, Rr3RegisterError>`，
-成功回**分配到的 task**（`registry.rs:177-246`）。门序固定为**保留名 → 同名在册（`failed` 除外）→
+成功回**分配到的 task**（`registry.rs:183-252`）。门序固定为**保留名 → 同名在册（`failed` 除外）→
 超额 → 分配 task**：
 
 | 序 | 门 | 命中时 | 说明 |
 |---|---|---|---|
 | 1 | `facts.name` == `RR3_RESERVED_OWNER` | `Rr3RegisterError::ReservedName` | `rr3-runtime` 是 rrd 自己的号段，冒充即最危险的伪造面 |
 | 2 | 同名条目在册且相位不是 `Failed` | `Rr3RegisterError::Duplicate { name, src_task }` | 拒重复**不改**已在册条目的状态，也不换它的 task |
-| 3 | 表满且**不是**替换式重注册 | `Rr3RegisterError::Capacity { limit }` | 容量门认 `superseded`：表满但同名条目是 `Failed` 时旧条目即将腾出槽位，这是合法替换，不得被容量拒（`registry.rs:202-206`） |
-| 4 | `debug_assert!(facts.watchdog_ms > 0)` | debug 构建当场 panic | `watchdog_ms = 0` 一入库就会被到期扫描秒判死；`manifest.rs` 的 `req_int` 已在文本读取期拒非正整数，这里是防绕过入口直接构造 `pub` 字段的第二道钉。位置在**三条拒绝门之后**，否则带坏 watchdog 的重复/保留名/超额注册会先 panic 而让调用方拿不到拒绝理由（`registry.rs:207-223`） |
+| 3 | 表满且**不是**替换式重注册 | `Rr3RegisterError::Capacity { limit }` | 容量门认 `superseded`：表满但同名条目是 `Failed` 时旧条目即将腾出槽位，这是合法替换，不得被容量拒（`registry.rs:208-212`） |
+| 4 | `debug_assert!(facts.watchdog_ms > 0)` | debug 构建当场 panic | `watchdog_ms = 0` 一入库就会被到期扫描秒判死；`manifest.rs` 的 `req_int` 已在文本读取期拒非正整数，这里是防绕过入口直接构造 `pub` 字段的第二道钉。位置在**三条拒绝门之后**，否则带坏 watchdog 的重复/保留名/超额注册会先 panic 而让调用方拿不到拒绝理由（`registry.rs:213-229`） |
 
 其余事实：
 
 - **入库前不动表**：待替换条目的 task 号先记下，真正的摘除延后到门与断言全过之后
-  ——被 `catch_unwind` 吞掉的 panic 不许留下"已改一半的表"（`registry.rs:189-192`、`registry.rs:224-229`）。
+  ——被 `catch_unwind` 吞掉的 panic 不许留下"已改一半的表"（`registry.rs:195-198`、`registry.rs:230-235`）。
 - **`Failed` 后同身份可重注册**：旧条目整体替换、**换新 task 号**，旧号从 `by_task` 里摘掉，
-  迟到的旧心跳既喂不到新条目也存不活旧条目（`registry.rs:186-201`、`registry.rs:226-228`）。
+  迟到的旧心跳既喂不到新条目也存不活旧条目（`registry.rs:192-207`、`registry.rs:232-234`）。
 - `restarts` 随旧条目一起作废：要跨重注册成立"连续 5 次"，必须由 daemon 层在派生新进程时
-  把预算带进来，**本表不猜**（`registry.rs:187-189`）。
-- `entry` 的绝对性门禁**不在这里**：那是 conn 层（`conn.rs:206-217`）的职责，
-  存在性/可执行位随 spawn 那一刻才查（`registry.rs:174-176`）。
+  把预算带进来，**本表不猜**（`registry.rs:193-195`）。
+- `entry` 的绝对性门禁**不在这里**：那是 conn 层（`conn.rs:201-212`）的职责，
+  存在性/可执行位随 spawn 那一刻才查（`registry.rs:180-182`）。
 
 `Rr3RegisterError` 的 `Display` 文案逐字（`registry.rs:74-86`）：
 
@@ -118,26 +118,61 @@ ReservedName → `Permission`(-22)。
 
 | 入口 | 返回 | 判定 | 出处 |
 |---|---|---|---|
-| `rr3_reg_beat(src_task, now_ms) -> bool` | `false` = 未在册的 task、或条目已 `Failed`（**failed 的模块不得靠补心跳复活自己**） | 非 `Failed` 则写 `Running` + 刷新 `last_beat_ms`；未在册 task 的判定走 `by_task` 反查 | `registry.rs:248-264` |
-| `rr3_reg_expire(now_ms) -> Vec<Rr3Expiry>` | 每tick 全表扫，只回报到期者：`Rr3Expiry { name, src_task, reason }`，`reason` 取 `RR3_EXPIRE_HEARTBEAT_TIMEOUT` | `now_ms - last_beat_ms >= facts.watchdog_ms` 即置 `Failed` 并把 `tx` 置 `None`（此后 fanout 不再往死连接塞）；已 `Failed` 的条目跳过、不重复回报；健康模块不受牵连 | `registry.rs:266-288` |
+| `rr3_reg_beat(src_task, now_ms) -> bool` | `false` = 未在册的 task、或条目已 `Failed`（**failed 的模块不得靠补心跳复活自己**） | 非 `Failed` 则写 `Running` + 刷新 `last_beat_ms`；未在册 task 的判定走 `by_task` 反查 | `registry.rs:254-270` |
+| `rr3_reg_expire(now_ms) -> Vec<Rr3Expiry>` | 每拍全表扫，只回报到期者：`Rr3Expiry { name, src_task, reason, elapsed_ms, watchdog_ms }`，`reason` 取 `RR3_EXPIRE_HEARTBEAT_TIMEOUT` | `now_ms - last_beat_ms >= facts.watchdog_ms` 即置 `Failed` 并把 `tx` 置 `None`（此后 fanout 不再往死连接塞）；已 `Failed` 的条目跳过、不重复回报；健康模块不受牵连 | `registry.rs:272-298` |
 
-`rr3_reg_expire` 的文档自己写着"（唯一的监视线程调用）"——**那个线程还不存在**，
-本 HEAD 里没有 tick 循环去驱动它。这属实况，见 [`../status.md`](../status.md)；
-后果由那一档写清，本档不重复。
+`Rr3Expiry` 的字段形状见 `registry.rs:133-140`。后两个字段（`elapsed_ms` / `watchdog_ms`）是
+**判定本身**的数字：`elapsed_ms = now_ms - last_beat_ms`（同一个绑定既当判据又进回报，
+`registry.rs:284-293`）、`watchdog_ms` 是**该模块自己**manifest 的值（不是全局常量）。它们必须由
+判定处一并交出——判死日志要逐字回显"距上次心跳 Xms ≥ 超时 Yms"，而表外的人拿不到 `last_beat_ms`
+（`rr3_reg_facts` 只给 manifest 事实、不给心跳时刻，`registry.rs:129-132` 把这条理由写在结构体上）；
+少了这两个字段，线级用例就只能靠掐时间来判"判得对不对"。单元侧由
+`expiry_report_carries_the_numbers_that_decided_it` 钉住（`elapsed_ms` 必须是 `now - last_beat`
+而非 `now - 注册时刻`）。
+
+### 6.1 驱动它的那条线程：接口形状
+
+`rr3_reg_expire` 的文档注释自题"（唯一的监视线程调用）"（`registry.rs:272`）——**那条线程存在**：
+[`daemon.rs`](../../base/runtime/rrd/src/daemon.rs) 的 `rr3_spawn_watchdog`（`daemon.rs:54`），
+由 `rr3_daemon_run` 在 accept 循环之前调用（`daemon.rs:116`），循环体每拍执行
+`rr3_lock(&shared).rr3_reg_expire(rr3_now_ms(t0))`（`daemon.rs:60`）。三条形状（函数文档
+`daemon.rs:38-53` 自述，改线程先看这三条）：
+
+- **先睡后扫**：进循环第一件事是 `thread::sleep(tick)`（`daemon.rs:59`），注册完成那一刻不扫，
+  第一拍落在 t+tick；到期判定因此自带一个 tick 的松弛量。
+- **每拍只锁一次**：只有全表扫描那一次持锁（`daemon.rs:60`），锁的粒度就是扫描本身，
+  上限 `RR3_REG_MAX_MODULES` = 16 条。
+- **广播在锁外**：判死与 `rr3_reg_fanout` 之间不持锁，`rr3_reg_fanout` 自己再锁一次
+  （`daemon.rs:70`）——刻意不写"持锁 sleep"那种把整个守护卡住的形状。
+
+tick 的值就是 CLI 的 `--watchdog-tick-ms`（默认 200、拒 0），字面量见
+[`rrd-cli.md`](rrd-cli.md) §2 §3。这条线程对外的可观察面只有 stdout 三行（行首 `rrd: `，
+前缀的由来见 `rrd-cli.md` §5），逐字如下——`{...}` 是 `Rr3Expiry` 对应字段的替换位
+（源里的格式串是四个 `{}`，`daemon.rs:63-64`）：
+
+```text
+watchdog 启动 tick={tick_ms}ms
+watchdog 判死 {name} task={src_task} 距上次心跳 {elapsed_ms}ms ≥ 超时 {watchdog_ms}ms
+watchdog 广播 failed 到 {n} 个连接
+```
+
+一条**接口级**的欠账（不是进度）：到期路径不读 `facts.restart_policy`、不产 `Rr3RestartPlan`——
+判死与重启计划今天是两条互不相连的入口（本节与 §7），`failed` 广播照发、重启照旧不发生。
+至于接到哪一步、还缺哪一手，属实况，唯一落点 [`../status.md`](../status.md)，本档不复述。
 
 ## 7 `rr3_reg_death`：重启计划
 
-签名 `(name, clean_exit, now_ms) -> Option<Rr3RestartPlan>`（`registry.rs:355-393`）。
+签名 `(name, clean_exit, now_ms) -> Option<Rr3RestartPlan>`（`registry.rs:365-403`）。
 无条件先置 `Failed` 并丢弃 `tx`，再按 `facts.restart_policy` 决定给不给计划：
 
 | `restart_policy` | 给计划的条件 | 备注 |
 |---|---|---|
-| `always` | 总是（未达上限时） | 非预期值（如大小写错的 `ALWAYS`）一律按 `never` 处理：不 panic、也不擅自重启（`registry.rs:372-376`） |
+| `always` | 总是（未达上限时） | 非预期值（如大小写错的 `ALWAYS`）一律按 `never` 处理：不 panic、也不擅自重启（`registry.rs:382-386`） |
 | `on-failure` | 仅 `clean_exit == false` | 干净退出不重启 |
 | `never` | 从不 | — |
 | 其他字符串 | 从不 | 校验在 manifest 读取期已挡，运行期只保证不猜 |
 
-计划的形状 `Rr3RestartPlan { name, attempt, delay_ms, entry }`（`registry.rs:136-142`）：
+计划的形状 `Rr3RestartPlan { name, attempt, delay_ms, entry }`（`registry.rs:142-148`）：
 
 - `attempt` = 递增后的 `restarts`（从 1 起）；`restarts >= RR3_RESTART_FAILURE_CAP` 即回 `None`。
 - `delay_ms` = `RR3_RESTART_BACKOFF[attempt-1]`（索引按 `min(表长-1)` 收口）× `restart_base_ms`，
@@ -146,7 +181,7 @@ ReservedName → `Permission`(-22)。
   `cli.rs::parse_restart_base` 拦住（见 [`rrd-cli.md`](rrd-cli.md) §3），本表不替它裁语义。
 - `now_ms` 在本函数里**没有读者**（签名冻结，conn 层照样传 `rr3_ctx_now_ms()`）：写进
   `last_beat_ms` 是死写，因为 `rr3_reg_expire` 跳过 failed、`rr3_reg_beat` 拒 failed、
-  同身份重注册会整条替换 `Entry`（`registry.rs:357-361`）。
+  同身份重注册会整条替换 `Entry`（`registry.rs:367-371`）。
 - 计划**只算不执行**：`conn.rs:429-435` 把它写进日志（`spawn 见 Task 11`），进程派生本 HEAD 一行都没有。
   进度归 [`../status.md`](../status.md)。
 
@@ -154,7 +189,7 @@ ReservedName → `Permission`(-22)。
 
 `RrdRegistry::rr3_reg_publish_check(sender_name, topic, topics) -> Result<(), Rr3PublishDeny>`
 是**关联函数**（不碰 `self`，看不见在册表），生产路径与测试路径完全同码
-（`registry.rs:290-343`）——线上调用点是发布入口 `rr3_publish`（`conn.rs:341`，见
+（`registry.rs:300-353`）——线上调用点是发布入口 `rr3_publish`（`conn.rs:336`，见
 [`rrd-rpc.md`](rrd-rpc.md) §7）：
 
 | 门 | 条件 | 拒绝 | 映射码 |
@@ -168,16 +203,16 @@ ReservedName → `Permission`(-22)。
 
 - **顺序不是洁癖**：`rr3-runtime/*` 的冒充者在主题集里可以"合法在册"（`owner` 就写
   `rr3-runtime`），先查前缀或先查在册会把它判成 `ForeignPrefix` / `Ok` 而不是"冒充"这条
-  最严重的定性。rrd 自己是该命名空间唯一合法发布者，走下行广播路径，**不调本函数**（`registry.rs:294-296`）。
+  最严重的定性。rrd 自己是该命名空间唯一合法发布者，走下行广播路径，**不调本函数**（`registry.rs:304-306`）。
 - **④ 不是重复劳动**：首段 == `sender_name` 只是主题串的**语法**事实，登记 `owner` ==
   `sender_name` 才是**在册事实**。`rr3_topic_set_check` 的"首段 == owner"前置只在
   `rr3_topics_load` 的装载路径上强制，而 `rr3_registry_topic_set_from_text` 本身是 public，
   绕开 check 造一张"首段是 rr3-sima、登记 owner 是 rr3-simb"的表并不费力——安全判定不押在
-  "上游一定查过"上（`registry.rs:305-310`）。
+  "上游一定查过"上（`registry.rs:315-320`）。
 - **③ 指的是主题不在册**（首段与发送方相符、名字拼错或没登记），**不是**指发送方那个模块
   没在册：本函数不碰 `self`（`registry.rs:97-99`）。
 
-`owner` 回显只有一种写法（`owner_for_echo`，`registry.rs:144-150`）：在册但登记文本没写
+`owner` 回显只有一种写法（`owner_for_echo`，`registry.rs:150-156`）：在册但登记文本没写
 `owner` 键（解析成空串）与根本不在册（`None`）**都渲染 `?`**，两处构造点共用它。
 两条都是**终判拒绝**，别把 `owner=?` 读成待办事项。
 
@@ -192,39 +227,39 @@ ReservedName → `Permission`(-22)。
 **调用方义务（本函数替不了你保证）**：`rr3_reg_publish_check` 收 `sender_name: &str`、
 不碰 `self`，所以它既不知道这个名字是否在册（从未注册、或已 `Failed` 的名字照样能拿到
 `Ok`），也不知道它是不是报文里编出来的——唯一的防线建在调用侧：传进来的发送方**绝不得
-取自帧体或注册报文里自称的 `name` 字段**（`registry.rs:298-304`）。HEAD 的线上发布分支
+取自帧体或注册报文里自称的 `name` 字段**（`registry.rs:308-313`）。HEAD 的线上发布分支
 （`rr3_publish`）用 `me.name` 兑现这条前提——它是 `Rr3Peer` 随握手成功才存在的、
-rrd 在注册时收下并分配的在册身份（`conn.rs:242`），帧上的 `src_task` 又已在分发前被强制
-等于 `me.task`（`conn.rs:272`），而 `me.name` 与 `me.task` 出自同一次 `rr3_reg_add`
-（`conn.rs:310-313`、`conn.rs:341`）。`registry.rs` 的 doc 注把这套义务表述成"由
+rrd 在注册时收下并分配的在册身份（`conn.rs:237`），帧上的 `src_task` 又已在分发前被强制
+等于 `me.task`（`conn.rs:267`），而 `me.name` 与 `me.task` 出自同一次 `rr3_reg_add`
+（`conn.rs:305-308`、`conn.rs:336`）。`registry.rs` 的 doc 注把这套义务表述成"由
 `rr3_reg_name_of(src_task)` 反查"，线上是换了一种等价做法（登记期身份 + `src_task` 强校验）
 把它守住的；`rr3_reg_name_of` 本身目前仍无生产调用点。进度归 [`../status.md`](../status.md)。
 
 越权**只计数不牵连**：`rr3_reg_note_denied` 对 `denied_publish` 做**饱和加**
 （撞顶 `u32` 后停在原值，绝不回绕成 0 抹平审计线索），`rr3_reg_denied` 读数；
-一次坏发布既不改发布者生命周期状态，也不影响其它连接的转发（`registry.rs:345-353`、`registry.rs:13`）。
+一次坏发布既不改发布者生命周期状态，也不影响其它连接的转发（`registry.rs:355-363`、`registry.rs:13`）。
 
 ## 9 `rr3_reg_fanout`：只做广播，**不读** `dst_task`
 
-签名 `(frame: &Rr3Frame, exclude_task: u64) -> usize`（`registry.rs:422-434`）。
+签名 `(frame: &Rr3Frame, exclude_task: u64) -> usize`（`registry.rs:432-444`）。
 
 | 事实 | 说明 |
 |---|---|
 | 筛选条件只有两个 | 条目 `src_task != exclude_task` **且** `tx` 还是 `Some`（已到期/已崩溃的条目句柄当场丢弃） |
 | `frame.header.dst_task` | **原样带上、本函数不读它**。所以它**不是单播入口**（签名冻结，不改）：一帧的 `dst_task` 写着某个具体模块，实际收到的是别的活连接。要点名发给某一个模块，由 conn 层直接用那条连接的 `Sender` |
 | 返回值 | 成功**入队**数；接收者已 `drop` 只是少计，不算错、不 panic |
-| `exclude_task` 用 `RR3_TASK_RRD` 的现值 | 1 不是任何模块的 task，等于"谁都不排除"：`conn.rs` 的注册广播与退场广播都这样调用（`conn.rs:243`、`conn.rs:428`）；业务发布那次的 fanout 排除的是发布者自己（`conn.rs:379`，`me.task`），不用 `RR3_TASK_RRD` |
+| `exclude_task` 用 `RR3_TASK_RRD` 的现值 | 1 不是任何模块的 task，等于"谁都不排除"：`conn.rs` 的注册广播与退场广播都这样调用（`conn.rs:238`、`conn.rs:428`）；业务发布那次的 fanout 排除的是发布者自己（`conn.rs:374`，`me.task`），watchdog 判死那次的 fanout 排除的是被判死的模块自己（`daemon.rs:70`，`ex.src_task`）——两处都不再用 `RR3_TASK_RRD` |
 | 锁与投递 | 入队发生在持有在册表锁的期间；真正的字节写盘在各连接自己的 writer 线程 → 入队次序 ≠ 上线次序，客户端按类型/字段挑帧（见 [`rrd-rpc.md`](rrd-rpc.md) §1） |
 
 ## 10 其余入口（签名即契约）
 
 | 入口 | 返回 | 语义 | 出处 |
 |---|---|---|---|
-| `rr3_reg_remove(name) -> bool` | 是否真删了 | 连带摘掉 `by_task` 映射；task 号**不回收**；重复移除回 `false` | `registry.rs:395-403` |
-| `rr3_reg_live(name) -> bool` | — | 相位不是 `Failed` **且** 句柄是 `Some`，两者缺一即不活；不在册也是 `false` | `registry.rs:405-410` |
-| `rr3_reg_name_of(src_task) -> Option<String>` | — | task→名反查，测试与运维可用；**目前无生产调用点**——conn 层的 `src_task` 校验直接用连接自带的 `me.task`（`conn.rs:272`），`sender_name` 用登记期身份 `me.name`（`conn.rs:341`），都不经此函数（见 §8 调用方义务） | `registry.rs:412-415` |
-| `rr3_reg_facts(name) -> Option<Rr3ManifestFacts>` | 入库那份的克隆 | 不在册回 `None`（不 panic、不给半数据）；spawn 序靠它取 `start_priority` 与 `entry` | `registry.rs:417-420` |
-| `rr3_reg_snapshot() -> Vec<(String, u64, Rr3Phase)>` | — | 按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，名字序只是 `BTreeMap` 的顺带结果，故显式排序。后到连接补发快照用的就是它（`conn.rs:250-256`，排除自己同名条目） | `registry.rs:436-443` |
+| `rr3_reg_remove(name) -> bool` | 是否真删了 | 连带摘掉 `by_task` 映射；task 号**不回收**；重复移除回 `false` | `registry.rs:405-413` |
+| `rr3_reg_live(name) -> bool` | — | 相位不是 `Failed` **且** 句柄是 `Some`，两者缺一即不活；不在册也是 `false` | `registry.rs:415-420` |
+| `rr3_reg_name_of(src_task) -> Option<String>` | — | task→名反查，测试与运维可用；**目前无生产调用点**——conn 层的 `src_task` 校验直接用连接自带的 `me.task`（`conn.rs:267`），`sender_name` 用登记期身份 `me.name`（`conn.rs:336`），都不经此函数（见 §8 调用方义务） | `registry.rs:422-425` |
+| `rr3_reg_facts(name) -> Option<Rr3ManifestFacts>` | 入库那份的克隆 | 不在册回 `None`（不 panic、不给半数据）；spawn 序靠它取 `start_priority` 与 `entry` | `registry.rs:427-430` |
+| `rr3_reg_snapshot() -> Vec<(String, u64, Rr3Phase)>` | — | 按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，名字序只是 `BTreeMap` 的顺带结果，故显式排序。后到连接补发快照用的就是它（`conn.rs:245-251`，排除自己同名条目） | `registry.rs:446-453` |
 
 ## 11 相关文档
 
