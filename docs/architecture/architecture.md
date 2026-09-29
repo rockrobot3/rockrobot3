@@ -2,7 +2,7 @@
 
 - **状态**：v0.3（草案落定，随实现迭代）
 - **日期**：2026-09-28
-- **关联决策**：[ADR-0001](adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md) · [ADR-0002](adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](adr/ADR-0007-控制面分层与模块级升级.md)
+- **关联决策**：[ADR-0001](../adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md) · [ADR-0002](../adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](../adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](../adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](../adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](../adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](../adr/ADR-0007-控制面分层与模块级升级.md)
 - **命名速查**：[naming.md](naming.md)
 
 ---
@@ -251,7 +251,7 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
 > **v0.0.1 裁定**：base 运行时主题命名空间改用 `rr3-runtime/`（如 `rr3-runtime/module/state`、
 > `rr3-runtime/system/heartbeat`），不再使用 `base/` 前缀——契约要求每段主题首段等于某个
 > `[manifest].name`，而模块名规则是 `^rr3-[a-z]+$`。全量已登记主题以
-> [`contracts/topics.toml`](../contracts/topics.toml) 为准（7 owner / 21 topic）。
+> [`contracts/topics.toml`](../../contracts/topics.toml) 为准（7 owner / 21 topic）。
 
 前缀归属的**校验入口现为** `rr3-mkmod` 生成自检 + `rr-registry` 契约测试（`cargo test -p
 rr-registry`），**rrd 运行时注册校验属 M1/M2 待落地**。上面的代码块是**设计期草图**：
