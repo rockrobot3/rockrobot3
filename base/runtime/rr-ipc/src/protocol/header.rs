@@ -84,7 +84,8 @@ pub enum Rr3PayloadType {
 }
 
 impl Rr3PayloadType {
-    /// 由类型枚举值解析。payload 体首字节的取法留 M2（payload 前缀宽度未冻结）。
+    /// 由类型枚举值解析。payload 体的前缀宽度已在 M2 冻结为 2 字节（`protocol::body`，
+    /// `RR3_BODY_TYPE_PREFIX_LEN`），本函数就是它把线上字节还原成枚举的唯一入口。
     pub fn from_u16(v: u16) -> Option<Self> {
         match v {
             0x0001 => Some(Self::Request),
