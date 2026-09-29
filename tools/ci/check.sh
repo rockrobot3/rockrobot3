@@ -9,7 +9,7 @@
 # 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
 # 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；
 # 退出码仍是首要信号（编译错误、错误 --test 目标名照样红）。① 不跑测试，只看得退出码。
-# ④ 是模块侧编译步（不是测试步）：modules/ 各 crate 独立成 workspace，①/①b 覆盖不到。
+# ④ 是独立工程编译步（不是测试步）：modules/、tools/、base/ota 各自成 workspace，①/①b 覆盖不到。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内，规约门拒绝执行。" >&2
@@ -70,19 +70,28 @@ run_tests sh -c 'cargo test --manifest-path tools/mkmodule/Cargo.toml'
 step "③ 主题前缀归属"
 run_tests sh -c 'cd base/runtime && cargo test -p rr-registry topics_prefix'
 
-# ④ modules/ 逐 crate 编译。模块 crate 各自是独立 workspace（conventions §3），
-# ①/①b 只覆盖 base/runtime，所以没有这一步的话，模块骨架烂掉无人知晓。
-# 没有 Cargo.toml 的模块目录（rr3-brain 是 Python）跳过，其语法检查属人工检查点。
-step "④ modules/ 每个 Rust 模块编译"
-for dir in modules/*/; do
-  [ -f "${dir}Cargo.toml" ] || continue
-  if sh -c "cargo check -q --all-targets --manifest-path '${dir}Cargo.toml'"; then
-    printf 'PASS  cargo check %s\n' "$dir"
+# ④ 仓内所有**独立** Rust 工程编译。①/①b 的作用域是 base/runtime 那一个 workspace，
+# 模块 crate 与 tools/、base/ota 各自独立成 workspace，不在其覆盖内；没有 ④ 的话
+# 这些目录烂掉无人知晓。没有 Cargo.toml 的模块目录（rr3-brain 是 Python）自然跳过，
+# 其语法检查属人工检查点。
+step "④ 独立 Rust 工程编译（modules/ + tools/ + base/ota）"
+found=0
+# 用 NUL 分隔 + 进程替换：for 循环的单词分割会在路径带空格时把一份工程拆成两个，
+# 而管道里的 while 在子 shell 中执行，fail 计数带不回来。
+while IFS= read -r -d '' manifest; do
+  found=1
+  if sh -c "cargo check -q --all-targets --manifest-path '$manifest'"; then
+    printf 'PASS  cargo check %s\n' "$manifest"
   else
-    printf 'FAIL  cargo check %s\n' "$dir"
+    printf 'FAIL  cargo check %s\n' "$manifest"
     fail=1
   fi
-done
+done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
+                    -not -path "base/runtime/*" -print0 | sort -z)
+if [ "$found" -eq 0 ]; then
+  printf 'FAIL  ④ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
+  fail=1
+fi
 
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then

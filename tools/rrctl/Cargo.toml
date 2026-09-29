@@ -1,0 +1,19 @@
+[package]
+name = "rr3-ctl"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "总线侧运维 CLI：查在册模块、看健康状态、触发 OTA（骨架）"
+
+# 独立工程：tools/ 不在 base/runtime workspace 内（与 rr3-mkmod 同构）
+[workspace]
+
+[[bin]]
+name = "rr3-ctl"
+path = "src/main.rs"
+
+[dependencies]
+rr-bus = { path = "../../base/runtime/rr-bus" }
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
