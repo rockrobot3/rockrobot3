@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 66 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 77 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -31,9 +31,11 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-29 实测）：①b **66** 条（`base/runtime` workspace 全量，含 rr-ipc 的 25 个
+测试面如实登记（2026-09-29 实测）：①b **77** 条（`base/runtime` workspace 全量，含 rr-ipc 的 25 个
 envelope 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
 的元数据守护（`x-byte-size` / `x-offset-sum` / `payload_len.minimum|maximum` / `x-schema-version`）；
+rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
+`validate::text_entry_tests` 5）+ 契约 24；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
 硬 pin：7 owner / 21 topic / kind 7-8-3-3 / 21 条三元组；`every_module_manifest_passes_contract`
