@@ -11,7 +11,7 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 
 | 档 / 路径 | 内容 | 谁在它上面兜底 |
 |---|---|---|
-| [`architecture/architecture.md`](architecture/architecture.md) | 唯一架构图：定位、分层、目录树、模块模型、HAL、IPC、数据流、迁移映射、里程碑 M0–M6、风险登记 | 目录树变更必须同步其 §3（`process/conventions.md` §5 文档纪律） |
+| [`architecture/architecture.md`](architecture/architecture.md) | 唯一架构图：定位、分层、目录树、模块模型、HAL、IPC、数据流、迁移映射、风险登记（§10 只留一行指向 `status.md`，本档不写进度） | 目录树变更必须同步其 §3（`process/conventions.md` §5 文档纪律） |
 | `reference/rrd-cli.md` · `reference/rrd-rpc.md` · `reference/rrd-registry.md` | 运行期接口的可照抄事实：启动参数与默认值、RPC 方法与错误映射、在册表阶段与退避上限 | 与代码同批变更；引用须与代码逐字一致 |
 | [`process/conventions.md`](process/conventions.md) | 开发规约：分支 / 提交 / CI 门禁 / DoD | 门禁唯一入口 `bash tools/ci/check.sh`；**步序与条数只登记在其 §2**，本索引不抄数字 |
 | [`process/naming.md`](process/naming.md) | 命名唯一权威（`rr3-` 前缀矩阵、模块目录四件套的四类结构角色） | `rr3-mkmod` 生成自检 + `rr-registry` 契约测试强制，不靠人记 |
@@ -20,8 +20,6 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | [`status.md`](status.md) | 唯一实况快照：能力 × 状态 × 证据路径、里程碑进度（M0–M6 当前实况）、本机无法收口的三项、在制品 | 收口时整篇重写，不做增量修补；**测试条数一律不抄进来**（见其开篇规矩） |
 
 > `reference/` 三件尚未落位，故本索引那行仍不放链接（放了就是断链），落位的那次改动补一行。
-> `status.md` 的里程碑表与 [`architecture/architecture.md`](architecture/architecture.md) §10
-> **暂时并存**（迁入已做、删原未做），下一次架构文档收口时删掉 §10 原表。
 
 ## 事实归属（改文档前先对这张表）
 
@@ -43,9 +41,9 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 
 ## 实况与规划的边界
 
-**实况与规划分家**：架构文档只写目标架构与设计语义，不再承载"当前 HEAD 有没有"这类实况——
-后者唯一落在 [`status.md`](status.md)（见上文"事实归属"表）。里程碑的验收标准原文仍在架构文档
-§10，而每条里程碑的**当前进度**在 `status.md` 的"里程碑进度"节；两份并存是迁入过程中的一次性
-状态，架构文档收口时删原表。
+**实况与规划分家**：架构文档只写目标架构与设计语义，不承载"某能力今天有没有"这类实况——
+后者唯一落在 [`status.md`](status.md)（见上文"事实归属"表）。里程碑的**内容、验收标准与每条的
+当前进度都在 `status.md` 的"里程碑进度"一节**，架构文档 §10 只留一行指向它：同一张表抄两份
+必然漂移，所以只留一份。
 
 写文档时不要把设计期草图当既成事实——这是本项目已发生过的最大一次订正。
