@@ -10,9 +10,9 @@
 | 模块目录 / crate / 进程 / bin | `rr3-<域>` | `rr3-sense`、`rr3-brain`、`rr3-ctl` |
 | 基座内部 crate（workspace 成员） | `rr-<设施名>`（无 3） | `rr-ipc`、`rr-bus`、`rr-hal` |
 | Rust lib target（crate 真名） | 连字符转下划线 | `rr3_sense` |
-| Rust 跨 crate 导出自由函数 | `rr3_<域>_<动作>` | `rr3_ipc_publish()`、`rr3_hal_audio_open()` |
+| Rust 跨 crate 导出自由函数 | `rr3_<域>_<动作>` | `rr3_frame_read()`、`rr3_body_encode()`（`rr-ipc` 导出，`rrd/src/conn.rs` 实际消费） |
 | Rust 导出类型 | `Rr3` 前缀 | `Rr3Envelope`、`Rr3Error` |
-| Rust trait | `Rr3` 前缀；方法不加（挂在 trait 下无歧义） | `trait Rr3AudioInput { async fn start_capture(); }` |
+| Rust trait | `Rr3` 前缀；方法不加（挂在 trait 下无歧义） | `trait Rr3AudioSource { async fn open(&self, cfg: Rr3AudioCfg); async fn read(&self, frames: usize); }`（`rr-hal/src/lib.rs`） |
 | Rust crate 内部私有函数 | 不加前缀（crate 可见性已限定归属） | `fn parse_vad_frame()` |
 | Python 包 / 模块 | `rr3_<域>` | `rr3_brain.dialog` |
 | Python 包级可见全局函数 | `rr3_<域>_<动作>` | `rr3_brain_submit_text()` |
@@ -38,9 +38,13 @@
 
 ## 3. 一致性校验（v0.0.1 由生成器与契约测试把关）
 
-> **校验入口（v0.0.1 实况）**：`rr3-mkmod` 生成自检 + `rr-registry` 契约测试
-> （`cargo test -p rr-registry`，由 `tools/ci/check.sh` ②/③ 步点名）。下面三条是**规则本身**，
-> 其中"rrd 运行时注册校验"（进程启动时按 manifest.name 判前缀归属并放行/拒绝）属 M1/M2 待落地。
+> **校验入口（v0.0.1 实况，与 [architecture.md](../architecture/architecture.md) §6.3 同一口径）**：
+> 共**三处**，职责各不相同——① `rr3-mkmod` 生成自检；② `rr-registry` 契约测试
+> （`cargo test -p rr-registry`，由 `tools/ci/check.sh` ②/③ 步点名）；③ rrd 在册表判定
+> `RrdRegistry::rr3_reg_publish_check`（按 `manifest.name` 判前缀归属并放行/拒绝，四道门）。
+> 入口 ③ 的**判定逻辑已交付**（`base/runtime/rrd/src/registry.rs`，被同文件单元用例覆盖），
+> 但 `conn.rs` 连接层尚未把它接进线上发布分支——"接到哪一段"属实况，以
+> [`../status.md`](../status.md) 为准。下面三条是**规则本身**。
 
 1. 目录名 == crate 名 == 进程名 == manifest.name
 2. 事件/RPC 主题前缀 == manifest.name（越权发布不予合入）

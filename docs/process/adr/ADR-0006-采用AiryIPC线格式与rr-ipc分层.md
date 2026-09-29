@@ -20,7 +20,7 @@
    - 事务面 payload 默认 JSON-RPC 2.0（标准默认，零改动）
 2. **语义字段放置**：rock3 的 topic 字符串与 phase（normal/degraded/recovery）置于 payload 内，**不占用消息头 reserved 区**（保持与标准逐字节兼容）
 3. **错误码**：RESPONSE.status 采用 AIRY_E* 子集（EOK/EINVAL/EPERM/EBUSY/ETIMEDOUT）
-4. **运行时自实现**：src_task 由 rrd（受信用户态运行时）在模块注册时分配并校验；capability 令牌、内核强制、防重放窗口等 AirymaxRT 运行时机制**不引入**（单机可信环境，见 ADR-0007 后续演进）（v0.0.1 现状：rrd 仅打印启动横幅，src_task 分配/校验与握手回显随 M2 落地）
+4. **运行时自实现**：src_task 由 rrd（受信用户态运行时）在模块注册时分配并校验；capability 令牌、内核强制、防重放窗口等 AirymaxRT 运行时机制**不引入**（单机可信环境，见 ADR-0007 后续演进）（v0.0.1 现状注记，2026-09-30 更新；旧注记称 rrd 是"打印横幅即退出的存根"，该说法已作废：自 `16de912` 起 rrd 已是守护进程——[`daemon.rs`](../../../base/runtime/rrd/src/daemon.rs) 清残留套接字 → `UnixListener::bind` → accept 循环、每连接一条线程（仅 Unix），[`conn.rs`](../../../base/runtime/rrd/src/conn.rs) 完成 `rr3.register`/`rr3.heartbeat`/`rr3.unregister` 注册握手，src_task 由 `rr3_reg_add` 分配并在应答 result 回带，注册后自设不同 src_task 的上行帧直接拒；横幅回显的是打印前已绝对化的套接字路径（`4204656`）。仍未交付的：watchdog 线程、模块 spawn/重启执行、发布归属判定的线上接线——判定逻辑 `RrdRegistry::rr3_reg_publish_check` 已在 [`registry.rs`](../../../base/runtime/rrd/src/registry.rs)，但 `conn.rs` 没有把它接到发布分支。实况以 [../../status.md](../../status.md) 为准）
 5. **rr-ipc 分层**：
    - `protocol/`：128B 头与 payload 纯编解码，与传输无关；Rust/Python 双侧对齐同一 schema
    - `transport/`：`trait Transport`，uds 为 M2 唯一实现；shm（控制面，ADR-0007）、tcp（多机）预留
