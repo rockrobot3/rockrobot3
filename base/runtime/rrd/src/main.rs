@@ -19,10 +19,23 @@ fn main() -> std::process::ExitCode {
         }
     };
 
+    // 叠加层路径在这里一次性绝对化：装载与横幅共用同一个解析结果（spec §6 的可见凭证）。
+    // 解析失败即致命——横幅是"叠加层已生效"的可见凭证，按 CLI 原词回显会让它依赖 CWD。
+    let overlay = match cfg.overlay.as_deref() {
+        Some(ov) => match topics_load::rr3_topics_absolute_path(ov) {
+            Ok(abs) => Some(abs),
+            Err(e) => {
+                eprintln!("rrd: 主题叠加层参数不可用: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+
     // 装载在两个平台都做：契约坏了要当场看见，而不是"等不到 UDS"
     let (topics, added) = match topics_load::rr3_topics_load(
         Path::new(topics_load::RR3_CONTRACT_TOPICS_PATH),
-        cfg.overlay.as_deref(),
+        overlay.as_deref(),
     ) {
         Ok(t) => t,
         Err(errs) => {
@@ -42,8 +55,8 @@ fn main() -> std::process::ExitCode {
             topics.rr3_topic_set_names().len()
         )
     );
-    if let Some(ov) = &cfg.overlay {
-        // 叠加层的可见凭证（spec §6：非生产放行口）
+    if let Some(ov) = &overlay {
+        // 叠加层的可见凭证（spec §6：非生产放行口）：绝对路径，与 CWD 无关
         println!("rrd: 主题叠加层已加载（仅测试用）: {}", ov.display());
         for t in &added {
             println!("rrd: 叠加主题 {t}");
