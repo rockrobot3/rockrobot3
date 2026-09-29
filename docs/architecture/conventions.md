@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 92 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 97 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -31,14 +31,16 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-29 实测，平台 Windows x86_64-pc-windows-msvc / cargo 1.95：
+测试面如实登记（2026-09-30 实测，平台 Windows x86_64-pc-windows-msvc / cargo 1.95：
 `#[cfg(unix)]` 的代码在本机**不参与编译**，故下列条数只覆盖平台无关逻辑，Unix 侧行为不据此声称）：
-①b **92** 条（`base/runtime` workspace 全量，含 rr-ipc 的 25 个
+①b **97** 条（`base/runtime` workspace 全量，含 rr-ipc 的 25 个
 envelope 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
 的元数据守护（`x-byte-size` / `x-offset-sum` / `payload_len.minimum|maximum` / `x-schema-version`）；
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24；
-rrd 的 16 条全在 lib 目标（`cli::tests` 5 + `topics_load::tests` 9 + 横幅 2），
+rrd 的 21 条全在 lib 目标（`cli::tests` 6 + `topics_load::tests` 13 + 横幅 2；
+2026-09-30 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
+形状错误标注来源 1、路径值不得以 `-` 开头 1），
 `src/main.rs` 自 M2 只剩"参数 + 装载 + 平台门"、其 `[[bin]]` 目标 0 条——纯逻辑放进 lib，
 后续的 `rrd/tests/*.rs` 才引用得到（bin 里的模块对外不可见）；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
