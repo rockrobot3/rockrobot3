@@ -7,6 +7,7 @@
 pub mod protocol;
 pub mod transport;
 
+pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{
     flags, opcode, Rr3Header, Rr3HdrError, Rr3PayloadType, Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN,
     RR3_IPC_HDR_SIZE,

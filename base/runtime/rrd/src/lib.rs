@@ -2,14 +2,26 @@
 //!
 //! 纯逻辑放在 lib 里，`tests/*.rs` 与后续 `rrd/src/bin/sim_peer.rs` 才能直接引用
 //! （bin 里的模块对外不可见）。UDS 与进程派生只在 `#[cfg(unix)]` 的 `conn`/`daemon`
-//! 模块里，那两块随 Task 8 落地后才在此追加声明；非 Unix 平台它们根本不参与编译，
-//! 所以 Windows 侧既能 `cargo check --all-targets` 也能跑到这里的全部测试。
+//! 模块里（Task 7 落地），非 Unix 平台它们根本不参与编译，
+//! 所以 Windows 侧既能 `cargo check --all-targets` 也能跑到这里的全部测试——但那只证明
+//! cfg 边界未破，`conn.rs`/`daemon.rs` 的每一行都要靠 Unix 侧（L2/L3）才有证据。
 
 pub mod cli;
 pub mod manifest;
 pub mod registry;
 pub mod rpc;
 pub mod topics_load;
+
+#[cfg(unix)]
+pub mod conn;
+#[cfg(unix)]
+pub mod daemon;
+
+/// 统一日志出口：stdout、行首 `rrd: `。集成测试的可观察面全靠它。
+/// 走 `println!`：Rust stdout 是行缓冲，管道里也按行 flush，父进程逐行读得到。
+pub fn rr3_log(msg: &str) {
+    println!("rrd: {msg}");
+}
 
 /// 非 Unix 平台的唯一出口文案（Task 3 Step 6 的实证按它断言，别改字面量）
 pub const RRD_UNSUPPORTED: &str =

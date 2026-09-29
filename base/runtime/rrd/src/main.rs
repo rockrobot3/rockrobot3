@@ -6,8 +6,11 @@
 use std::path::Path;
 
 use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
-use rr_registry::RR3_MANIFEST_SCHEMA_VERSION;
-use rrd::{cli, rr3_banner, topics_load, RRD_UNSUPPORTED};
+use rr_registry::{Rr3TopicSet, RR3_MANIFEST_SCHEMA_VERSION};
+use rrd::{cli, rr3_banner, topics_load};
+// 只在非 Unix 分支用得到：Unix 侧这句文案压根不参与编译，不 gate 会有未使用导入告警。
+#[cfg(not(unix))]
+use rrd::RRD_UNSUPPORTED;
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -63,10 +66,24 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    if !cfg!(unix) {
-        eprintln!("{RRD_UNSUPPORTED}");
-        return std::process::ExitCode::FAILURE;
+    rr3_run(cfg, topics)
+}
+
+/// （Unix）把守护主循环交出去：它永不返回，除非 bind 失败。
+#[cfg(unix)]
+fn rr3_run(cfg: cli::RrdConfig, topics: Rr3TopicSet) -> std::process::ExitCode {
+    match rrd::daemon::rr3_daemon_run(&cfg, topics) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::ExitCode::FAILURE
+        }
     }
-    println!("rrd: 已进入 Unix 分支，监听阶段随 Task 8 落地");
-    std::process::ExitCode::SUCCESS
+}
+
+/// （非 Unix）到此为止：`conn`/`daemon` 两个模块压根没参与编译，如实说不支持。
+#[cfg(not(unix))]
+fn rr3_run(_cfg: cli::RrdConfig, _topics: Rr3TopicSet) -> std::process::ExitCode {
+    eprintln!("{RRD_UNSUPPORTED}");
+    std::process::ExitCode::FAILURE
 }
