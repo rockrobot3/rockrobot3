@@ -78,80 +78,80 @@ impl std::fmt::Display for Rr3HalError {
 /// 数字输出（继电器、LED）
 #[async_trait]
 pub trait Rr3GpioOut: Send + Sync {
-    async fn rr3_gpio_set(&self, level: bool) -> Result<(), Rr3HalError>;
-    async fn rr3_gpio_level(&self) -> Result<bool, Rr3HalError>;
+    async fn set(&self, level: bool) -> Result<(), Rr3HalError>;
+    async fn level(&self) -> Result<bool, Rr3HalError>;
 }
 
 /// PWM 舵机（角度级指令，闭环在 rr3-act 反射环内）
 #[async_trait]
 pub trait Rr3PwmServo: Send + Sync {
-    async fn rr3_servo_set_angle(&self, deg: u16) -> Result<(), Rr3HalError>;
-    async fn rr3_servo_angle(&self) -> Result<u16, Rr3HalError>;
+    async fn set_angle(&self, deg: u16) -> Result<(), Rr3HalError>;
+    async fn angle(&self) -> Result<u16, Rr3HalError>;
 }
 
 /// 音频源（上行拾音）
 #[async_trait]
 pub trait Rr3AudioSource: Send + Sync {
-    async fn rr3_audio_open(&self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError>;
-    async fn rr3_audio_read(&self, frames: usize) -> Result<Rr3PcmStream, Rr3HalError>;
+    async fn open(&self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError>;
+    async fn read(&self, frames: usize) -> Result<Rr3PcmStream, Rr3HalError>;
 }
 
 /// 电源读数
 #[async_trait]
 pub trait Rr3Power: Send + Sync {
-    async fn rr3_power_battery(&self) -> Result<Rr3BatteryState, Rr3HalError>;
+    async fn battery(&self) -> Result<Rr3BatteryState, Rr3HalError>;
 }
 
 /// 网络链路读数
 #[async_trait]
 pub trait Rr3Link: Send + Sync {
-    async fn rr3_link_state(&self) -> Result<Rr3LinkState, Rr3HalError>;
+    async fn state(&self) -> Result<Rr3LinkState, Rr3HalError>;
 }
 
 /// 占位后端：所有能力返回 `Unsupported`。v0.0.1 用它证明 trait 形状可用，
 /// M2 起由 `backend::linux` / `backend::sim` 替换。
-pub struct UnavailableSource;
+pub struct Rr3UnavailableSource;
 
 #[async_trait]
-impl Rr3GpioOut for UnavailableSource {
-    async fn rr3_gpio_set(&self, _level: bool) -> Result<(), Rr3HalError> {
+impl Rr3GpioOut for Rr3UnavailableSource {
+    async fn set(&self, _level: bool) -> Result<(), Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/gpio"))
     }
-    async fn rr3_gpio_level(&self) -> Result<bool, Rr3HalError> {
+    async fn level(&self) -> Result<bool, Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/gpio"))
     }
 }
 
 #[async_trait]
-impl Rr3PwmServo for UnavailableSource {
-    async fn rr3_servo_set_angle(&self, _deg: u16) -> Result<(), Rr3HalError> {
+impl Rr3PwmServo for Rr3UnavailableSource {
+    async fn set_angle(&self, _deg: u16) -> Result<(), Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/pwm"))
     }
-    async fn rr3_servo_angle(&self) -> Result<u16, Rr3HalError> {
+    async fn angle(&self) -> Result<u16, Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/pwm"))
     }
 }
 
 #[async_trait]
-impl Rr3AudioSource for UnavailableSource {
-    async fn rr3_audio_open(&self, _cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
+impl Rr3AudioSource for Rr3UnavailableSource {
+    async fn open(&self, _cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/audio"))
     }
-    async fn rr3_audio_read(&self, _frames: usize) -> Result<Rr3PcmStream, Rr3HalError> {
+    async fn read(&self, _frames: usize) -> Result<Rr3PcmStream, Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/audio"))
     }
 }
 
 #[async_trait]
-impl Rr3Power for UnavailableSource {
-    async fn rr3_power_battery(&self) -> Result<Rr3BatteryState, Rr3HalError> {
+impl Rr3Power for Rr3UnavailableSource {
+    async fn battery(&self) -> Result<Rr3BatteryState, Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/power"))
     }
 }
 
 #[async_trait]
-impl Rr3Link for UnavailableSource {
-    async fn rr3_link_state(&self) -> Result<Rr3LinkState, Rr3HalError> {
+impl Rr3Link for Rr3UnavailableSource {
+    async fn state(&self) -> Result<Rr3LinkState, Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/link"))
     }
 }
@@ -166,11 +166,11 @@ mod tests {
 
     #[async_trait]
     impl Rr3GpioOut for DummyGpio {
-        async fn rr3_gpio_set(&self, level: bool) -> Result<(), Rr3HalError> {
+        async fn set(&self, level: bool) -> Result<(), Rr3HalError> {
             self.0.store(level, Ordering::Relaxed);
             Ok(())
         }
-        async fn rr3_gpio_level(&self) -> Result<bool, Rr3HalError> {
+        async fn level(&self) -> Result<bool, Rr3HalError> {
             Ok(self.0.load(Ordering::Relaxed))
         }
     }
@@ -182,10 +182,10 @@ mod tests {
         let boxed: Box<dyn Rr3GpioOut + Send + Sync> = Box::new(DummyGpio(AtomicBool::new(false)));
         let as_ref: &dyn Rr3GpioOut = &*boxed;
         let _ = as_ref;
-        let _: Box<dyn Rr3AudioSource + Send + Sync> = Box::new(UnavailableSource);
-        let _: Box<dyn Rr3Power + Send + Sync> = Box::new(UnavailableSource);
-        let _: Box<dyn Rr3Link + Send + Sync> = Box::new(UnavailableSource);
-        let _: Box<dyn Rr3PwmServo + Send + Sync> = Box::new(UnavailableSource);
+        let _: Box<dyn Rr3AudioSource + Send + Sync> = Box::new(Rr3UnavailableSource);
+        let _: Box<dyn Rr3Power + Send + Sync> = Box::new(Rr3UnavailableSource);
+        let _: Box<dyn Rr3Link + Send + Sync> = Box::new(Rr3UnavailableSource);
+        let _: Box<dyn Rr3PwmServo + Send + Sync> = Box::new(Rr3UnavailableSource);
         let _ = boxed;
     }
 
