@@ -3,6 +3,7 @@
   "title": "RockRobot3 A-IPC envelope (Airy IPC 128B header, Layout C)",
   "description": "字节级唯一事实源。布局永久稳定（AOS-STD-IPC-001/002, L1）。所有多字节字段小端序（AOS-STD-IPC-003, L1）。标准原文：airymaxhub/docs/openstandards/02-airy-ipc-protocol-standard.md v1.0。v0.0.1 冻结范围 = 消息头 128B + payload 类型枚举值 + flags + 错误码；payload 体内部编码（含 type 前缀字节宽度）留 M2。",
   "x-rock3-status": "frozen-v0.0.1",
+  "x-schema-version": 1,
   "x-rock3-deferred": ["payload_body_encoding"],
   "type": "object",
   "properties": {

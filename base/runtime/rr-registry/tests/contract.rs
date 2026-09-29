@@ -356,3 +356,102 @@ fn topics_registry_zero_topics_is_rejected() {
         report.errors
     );
 }
+
+// ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
+
+/// v0.0.1 注册表的全部 21 条 `(name, owner, kind)` 三元组。
+/// 顺序即 `contracts/topics.toml` 的登记顺序。
+const RR3_PINNED_TOPICS: [(&str, &str, &str); 21] = [
+    ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
+    ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
+    ("rr3-sense/env/temperature", "rr3-sense", "event"),
+    ("rr3-sense/imu/state", "rr3-sense", "stream"),
+    ("rr3-act/servo/command", "rr3-act", "request"),
+    ("rr3-act/servo/state", "rr3-act", "stream"),
+    ("rr3-act/motor/reflex", "rr3-act", "notification"),
+    ("rr3-act/led/effect", "rr3-act", "request"),
+    ("rr3-interact/face/expression", "rr3-interact", "request"),
+    ("rr3-interact/tts/text", "rr3-interact", "request"),
+    ("rr3-interact/asr/text", "rr3-interact", "event"),
+    ("rr3-interact/dialog/turn", "rr3-interact", "event"),
+    ("rr3-power/battery/state", "rr3-power", "event"),
+    ("rr3-power/charger/state", "rr3-power", "event"),
+    ("rr3-connect/net/link", "rr3-connect", "event"),
+    ("rr3-connect/cloud/session", "rr3-connect", "request"),
+    ("rr3-brain/llm/completion", "rr3-brain", "request"),
+    ("rr3-brain/intent/result", "rr3-brain", "event"),
+    ("rr3-runtime/system/heartbeat", "rr3-runtime", "notification"),
+    ("rr3-runtime/module/state", "rr3-runtime", "notification"),
+    ("rr3-sense/capture/dump", "rr3-sense", "request"),
+];
+
+/// 从 topics.toml 文本解析出的 (name, owner, kind) 三元组
+fn registry_triples(text: &str) -> Vec<(String, String, String)> {
+    fn topic_str(v: &toml::Value, k: &str) -> String {
+        v.get(k).and_then(toml::Value::as_str).unwrap_or_default().to_string()
+    }
+
+    let root: toml::Value = text
+        .parse()
+        .expect("contracts/topics.toml 必须是合法 TOML");
+    let arr = root
+        .get("topic")
+        .and_then(toml::Value::as_array)
+        .expect("contracts/topics.toml 缺 [[topic]] 数组");
+    arr.iter().map(|e| (topic_str(e, "name"), topic_str(e, "owner"), topic_str(e, "kind"))).collect()
+}
+
+/// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
+/// 以及全部 21 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
+///
+/// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
+/// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
+/// 也要更新这里的 `RR3_PINNED_TOPICS` / 四个计数期望，以及把这些形状当事实来写的
+/// 文档（`docs/architecture.md` §6.3、`docs/naming.md` §3、`contracts/README.md`）。
+/// 少改任何一处，本用例即红。
+///
+/// 反过来说，删一条主题、改一条 kind、改一个 owner 数同样会红——评审证明这正是
+/// 此前门禁的空洞（只有 owner 数与 fixture 引用的四条主题被钉住）。
+#[test]
+fn registry_shape_is_pinned() {
+    use std::collections::HashSet;
+
+    let text = topics_toml();
+
+    // 1) owner 侧：7 个，且不重名
+    let owners = rr_registry::rr3_registry_topic_owners(&text);
+    assert_eq!(owners.len(), 7, "v0.0.1 契约固定 7 个 owner（5+1 模块 + rrd）");
+    let unique_owners: HashSet<&String> = owners.iter().collect();
+    assert_eq!(unique_owners.len(), owners.len(), "owner 名不得重复登记: {owners:?}");
+
+    // 2) topic 侧：21 条，且不重名（重名会让下面的子集论证失去意义）
+    let topics = registry_triples(&text);
+    assert_eq!(topics.len(), 21, "v0.0.1 契约固定 21 条主题");
+    let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
+    assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
+
+    // 3) kind 分布：7 request / 8 event / 3 stream / 3 notification
+    let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
+    assert_eq!(count("request"), 7, "kind=request 的分布漂移");
+    assert_eq!(count("event"), 8, "kind=event 的分布漂移");
+    assert_eq!(count("stream"), 3, "kind=stream 的分布漂移");
+    assert_eq!(count("notification"), 3, "kind=notification 的分布漂移");
+    assert_eq!(
+        count("request") + count("event") + count("stream") + count("notification"),
+        topics.len(),
+        "存在四类之外的 kind: {topics:?}"
+    );
+
+    // 4) 21 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
+    for (name, owner, kind) in RR3_PINNED_TOPICS {
+        assert!(
+            topics.iter().any(|t| t.0 == name && t.1 == owner && t.2 == kind),
+            "主题三元组缺失或漂移: 期望 ({name}, {owner}, {kind})，实际注册表 {:?}",
+            topics
+                .iter()
+                .filter(|t| t.0 == name)
+                .map(|t| (&t.0, &t.1, &t.2))
+                .collect::<Vec<_>>()
+        );
+    }
+}
