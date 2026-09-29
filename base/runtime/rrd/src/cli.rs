@@ -43,19 +43,34 @@ fn need_path_value(flag: &str, args: &[String], i: usize) -> Result<String, Stri
     Ok(raw)
 }
 
-/// 默认总线路径：env 覆盖优先（与 rr-ipc 常量一致）
-fn rr3_cli_default_socket() -> PathBuf {
-    PathBuf::from(std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string()))
+/// 默认总线路径：env 覆盖优先（与 rr-ipc 常量一致）。
+/// 环境值的读取由调用方注入（`env`），本函数**不碰进程环境**——理由见 `rr3_cli_parse_with_env`。
+fn rr3_default_socket(env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
+    PathBuf::from(env(RR3_BUS_PATH_ENV).unwrap_or_else(|| RR3_UDS_PATH_DEFAULT.to_string()))
 }
 
-/// 解析参数。未知选项 / 缺参数 / 值以 `-` 开头（路径型）/ 非数字一律报错，
-/// 不静默回落默认值（fail-closed）。
-///
-/// 数值门禁：`--restart-base-ms` 必须 ∈ `1..=RR3_RESTART_BASE_MS_MAX`（见 `parse_restart_base`），
-/// `--pre-register-timeout-ms` 仍只要求非负整数。
+/// 解析参数（生产入口：默认值从进程环境取）。
 pub fn rr3_cli_parse(args: &[String]) -> Result<RrdConfig, String> {
+    rr3_cli_parse_with_env(args, &|k| std::env::var(k).ok())
+}
+
+/// 解析参数，默认值来源是注入的 `env` 而不是进程环境。
+///
+/// 为什么要有这一层：`RrdConfig.socket` 的默认值来自 `RR3_BUS_PATH_ENV`，而进程 env 是
+/// **全局可变态**。上一版的测试为了断言这条默认值，只能在用例里 `set_var`/`remove_var`，
+/// 再挂一把 `OnceLock<Mutex<()>>`（ENV_LOCK）把同批用例串行化——那是把生产代码的环境依赖
+/// 搬进测试来还债：锁一漏，并行时"默认值"读到的就是别人刚设的值（假绿）；edition 升 2024 后
+/// `set_var` 还得写 unsafe。现在默认值走参数：测试塞一张表即可，不碰全局态、也不需要锁；
+/// 生产路径（`rr3_cli_parse`）的形状对 `main.rs` 与既有调用方保持不变。
+///
+/// 其余门禁不变：未知选项 / 缺参数 / 值以 `-` 开头（路径型）/ 非数字一律报错，
+/// 不静默回落默认值（fail-closed）。
+pub fn rr3_cli_parse_with_env(
+    args: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<RrdConfig, String> {
     let mut cfg = RrdConfig {
-        socket: rr3_cli_default_socket(),
+        socket: rr3_default_socket(env),
         overlay: None,
         manifests: Vec::new(),
         restart_base_ms: 1000,
@@ -129,66 +144,81 @@ fn parse_restart_base(raw: &str) -> Result<u64, String> {
 mod tests {
     use super::*;
     use crate::registry::RR3_RESTART_BACKOFF;
-    use std::sync::{Mutex, OnceLock};
 
     fn a(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
     }
 
-    /// 进程 env 是全局可变态，同二进制内的测试默认多线程并行。
-    /// 不变式：本 lib 内改动/读取 `RR3_BUS_PATH_ENV` 的测试必须先取得此锁
-    /// （沿用 rr-ipc/rrd 旧 main.rs 已确立的纪律，否则并行时"默认值"断言会读到别人设的值）。
-    /// （edition 2021：`set_var`/`remove_var` 安全；升 edition 2024 时需改 unsafe 块并保留该锁。）
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    /// 没有 env 覆盖时的那张"空表"：默认值断言全部按它跑，不碰进程环境
+    fn env_none(_: &str) -> Option<String> {
+        None
     }
 
     #[test]
     fn defaults_come_from_contract_constants() {
-        let _guard = env_guard();
-        let saved = std::env::var(RR3_BUS_PATH_ENV).ok();
-        std::env::remove_var(RR3_BUS_PATH_ENV);
-        let cfg = rr3_cli_parse(&a(&[])).unwrap();
-        assert_eq!(cfg.socket, rr3_cli_default_socket());
-        assert_eq!(rr3_cli_default_socket(), PathBuf::from(RR3_UDS_PATH_DEFAULT));
+        let cfg = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        assert_eq!(cfg.socket, rr3_default_socket(&env_none));
+        assert_eq!(rr3_default_socket(&env_none), PathBuf::from(RR3_UDS_PATH_DEFAULT));
         assert_eq!(cfg.overlay, None);
         assert!(cfg.manifests.is_empty());
         assert_eq!((cfg.restart_base_ms, cfg.pre_register_timeout_ms), (1000, 3000));
-        match saved {
-            Some(v) => std::env::set_var(RR3_BUS_PATH_ENV, v),
-            None => std::env::remove_var(RR3_BUS_PATH_ENV),
-        }
     }
 
-    /// env 覆盖必须生效（rrd 与模块用同一个 env 键找总线，spec §4）
+    /// env 覆盖必须生效（rrd 与模块用同一个 env 键找总线，spec §4）——但覆盖的是**注入的表**：
+    /// 本文件里没有任何 `set_var`，进程环境从头到尾没被碰过，因此也不需要串行化锁。
     #[test]
     fn default_socket_follows_bus_env() {
-        let _guard = env_guard();
-        let saved = std::env::var(RR3_BUS_PATH_ENV).ok();
-        std::env::set_var(RR3_BUS_PATH_ENV, "/tmp/rr3-m2-env.sock");
-        assert_eq!(rr3_cli_default_socket(), PathBuf::from("/tmp/rr3-m2-env.sock"));
-        match saved {
-            Some(v) => std::env::set_var(RR3_BUS_PATH_ENV, v),
-            None => std::env::remove_var(RR3_BUS_PATH_ENV),
+        let injected = |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-env.sock".to_string());
+        let cfg = rr3_cli_parse_with_env(&a(&[]), &injected).unwrap();
+        assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-env.sock"));
+        // 命令行显式给值时压过 env
+        let overridden = rr3_cli_parse_with_env(
+            &a(&["--socket", "/tmp/rr3-m2-order.sock"]),
+            &injected,
+        )
+        .unwrap();
+        assert_eq!(overridden.socket, PathBuf::from("/tmp/rr3-m2-order.sock"));
+    }
+
+    /// 默认值的来源必须是**注入的参数**，不是进程环境：本用例全程不 `set_var`，
+    /// 所以它与其它用例并行时既不会污染别人也不会读到别人的值——ENV_LOCK 因此不再需要。
+    #[test]
+    fn default_socket_comes_from_injected_env() {
+        let injected = |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-inject.sock".to_string());
+        let cfg = rr3_cli_parse_with_env(&a(&[]), &injected).unwrap();
+        assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-inject.sock"));
+        // 表里没有这个键 → 回落契约常量（两条分支各自可达，不是一律吞注入值）
+        let none = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        assert_eq!(none.socket, PathBuf::from(RR3_UDS_PATH_DEFAULT));
+    }
+
+    /// 生产入口的默认值仍然来自**进程环境**（spec §4：rrd 与模块共用同一个 env 键）。
+    /// 只读不写，所以这条也不依赖任何串行化锁；它钉住"委托没写反"，防止
+    /// `rr3_cli_parse` 被悄悄改成"常量默认值"而没人发现。
+    #[test]
+    fn production_entry_delegates_to_the_process_env() {
+        let from_parse = rr3_cli_parse(&a(&[])).unwrap();
+        let from_reader = rr3_cli_parse_with_env(&a(&[]), &|k| std::env::var(k).ok()).unwrap();
+        assert_eq!(from_parse, from_reader);
+        match std::env::var(RR3_BUS_PATH_ENV) {
+            Ok(v) => assert_eq!(from_parse.socket, PathBuf::from(v), "env 设了值就必须照它来"),
+            Err(_) => assert_eq!(from_parse.socket, PathBuf::from(RR3_UDS_PATH_DEFAULT)),
         }
     }
 
     #[test]
     fn overlay_and_repeated_manifests_keep_order() {
-        let _guard = env_guard(); // rr3_cli_parse 读 env 取默认值，见上面 ENV_LOCK 注释
-        let cfg = rr3_cli_parse(&a(&[
-            "--topics-overlay",
-            "/tmp/sim-topics.toml",
-            "--manifest",
-            "/m/b.toml",
-            "--manifest",
-            "/m/a.toml",
-        ]))
+        let cfg = rr3_cli_parse_with_env(
+            &a(&[
+                "--topics-overlay",
+                "/tmp/sim-topics.toml",
+                "--manifest",
+                "/m/b.toml",
+                "--manifest",
+                "/m/a.toml",
+            ]),
+            &env_none,
+        )
         .unwrap();
         assert_eq!(cfg.overlay, Some(PathBuf::from("/tmp/sim-topics.toml")));
         assert_eq!(cfg.manifests, vec![PathBuf::from("/m/b.toml"), PathBuf::from("/m/a.toml")]);
@@ -197,7 +227,6 @@ mod tests {
     /// 数字参数必须真是数字：笔误不许悄悄变成默认值
     #[test]
     fn numeric_flags_reject_garbage() {
-        let _guard = env_guard();
         for args in [a(&["--restart-base-ms", "fast"]), a(&["--pre-register-timeout-ms", "-1"])] {
             let e = rr3_cli_parse(&args).expect_err("非法数字必须报错");
             assert!(e.contains("需为非负整数毫秒"), "{e}");
@@ -206,7 +235,6 @@ mod tests {
 
     #[test]
     fn missing_value_unknown_option_and_empty_socket_are_errors() {
-        let _guard = env_guard();
         let e = rr3_cli_parse(&a(&["--socket"])).expect_err("缺参数必须报错");
         assert!(e.contains("--socket 缺参数") && e.contains("用法"), "{e}");
         assert!(rr3_cli_parse(&a(&["--shard", "/tmp/x"]))
@@ -219,7 +247,6 @@ mod tests {
     /// `--topics-overlay` 当套接字路径吞下、静默丢掉叠加层（唯一的 fail-open 缝）。
     #[test]
     fn path_values_must_not_start_with_dash() {
-        let _guard = env_guard();
         for (flag, next) in [
             ("--socket", "--topics-overlay"),
             ("--topics-overlay", "--manifest"),
@@ -243,7 +270,6 @@ mod tests {
     /// （spec §5.3 的退避表正是为了避免这个）。下界因此是 1，不是"允许 0 当缺省"。
     #[test]
     fn restart_base_ms_floor_is_one() {
-        let _guard = env_guard();
         let e = rr3_cli_parse(&a(&["--restart-base-ms", "0"])).expect_err("0 必须拒：退避恒为 0 = 热重启循环");
         assert!(e.contains("--restart-base-ms") && e.contains("正整数") && e.contains("用法"), "报错要点名下界: {e}");
         // 1 是下界本身，必须收：否则"拒 0"会悄悄变成"拒一切小值"
@@ -255,7 +281,6 @@ mod tests {
     /// 而不是算术意外，必须在启动时就听到，不能等模块再也回不来才发现。
     #[test]
     fn restart_base_ms_ceiling_is_tied_to_the_backoff_table() {
-        let _guard = env_guard();
         let last = *RR3_RESTART_BACKOFF.last().expect("退避表非空");
         let max_ok = u64::MAX / last;
         // 常量和表必须同源：改表（加一档、把末档改成 120）不改常量的话，溢出缝就悄悄回来了
