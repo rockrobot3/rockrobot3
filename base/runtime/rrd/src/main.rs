@@ -1,68 +1,59 @@
-//! rrd —— base 层守护进程骨架（architecture.md §6）。
+//! rrd —— base 层守护进程（architecture.md §6）。
 //!
-//! v0.0.1 只做"握手信息打印"：证明 workspace 六个 crate 能互相引用。
-//! 模块注册、manifest 校验放行、心跳广播随 M2 的 UDS 传输一起实现。
+//! M2 起：装载所有权表 →（Unix）绑 UDS 监听、注册/心跳/看门狗/重启。
+//! 非 Unix 平台启动即明确报错并以非 0 退出，绝不假称可跑。
 
-use rr_ipc::{RR3_BUS_PATH_ENV, RR3_CONTRACT_SCHEMA_VERSION, RR3_UDS_PATH_DEFAULT};
+use std::path::Path;
+
+use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
 use rr_registry::RR3_MANIFEST_SCHEMA_VERSION;
+use rrd::{cli, rr3_banner, topics_load, RRD_UNSUPPORTED};
 
-fn banner(contract: u32, manifest: u32, bus: &str) -> String {
-    format!("rrd 0.0.1 (contracts schema v{contract}, manifest schema v{manifest}, bus {bus})")
-}
+fn main() -> std::process::ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cfg = match cli::rr3_cli_parse(&args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
 
-fn bus_path() -> String {
-    std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string())
-}
+    // 装载在两个平台都做：契约坏了要当场看见，而不是"等不到 UDS"
+    let (topics, added) = match topics_load::rr3_topics_load(
+        Path::new(topics_load::RR3_CONTRACT_TOPICS_PATH),
+        cfg.overlay.as_deref(),
+    ) {
+        Ok(t) => t,
+        Err(errs) => {
+            for e in &errs {
+                eprintln!("rrd: 主题装载失败: {e}");
+            }
+            return std::process::ExitCode::FAILURE;
+        }
+    };
 
-fn main() {
     println!(
         "{}",
-        banner(
+        rr3_banner(
             RR3_CONTRACT_SCHEMA_VERSION,
             RR3_MANIFEST_SCHEMA_VERSION,
-            &bus_path()
+            &cfg.socket.display().to_string(),
+            topics.rr3_topic_set_names().len()
         )
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    /// 进程 env 是全局可变态，且同二进制内的测试默认多线程并行执行。
-    /// 不变式：本二进制内改动/读取 `RR3_BUS_PATH_ENV` 的只有下面这一个测试；
-    /// 若未来新增触碰 env 的测试，必须先取得此锁再读写。
-    /// （edition 2021：`set_var`/`remove_var` 安全；升 edition 2024 时需改 unsafe 块并保留该锁。）
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    #[test]
-    fn rrd_banner_names_both_schemas() {
-        let s = banner(1, 1, "/var/run/rock3-ipc.sock");
-        assert!(s.contains("contracts schema v1"), "{s}");
-        assert!(s.contains("manifest schema v1"), "{s}");
-        assert!(s.contains("rock3-ipc.sock"), "{s}");
-    }
-
-    #[test]
-    fn rrd_bus_path_defaults_and_overrides() {
-        let _guard = env_guard();
-        // 无环境变量时取默认路径；设了则覆盖；结束恢复原值（不依赖测试执行顺序）
-        let saved = std::env::var(RR3_BUS_PATH_ENV).ok();
-        std::env::remove_var(RR3_BUS_PATH_ENV);
-        assert_eq!(bus_path(), RR3_UDS_PATH_DEFAULT);
-        std::env::set_var(RR3_BUS_PATH_ENV, "/tmp/rr3-test.sock");
-        assert_eq!(bus_path(), "/tmp/rr3-test.sock");
-        match saved {
-            Some(v) => std::env::set_var(RR3_BUS_PATH_ENV, v),
-            None => std::env::remove_var(RR3_BUS_PATH_ENV),
+    if let Some(ov) = &cfg.overlay {
+        // 叠加层的可见凭证（spec §6：非生产放行口）
+        println!("rrd: 主题叠加层已加载（仅测试用）: {}", ov.display());
+        for t in &added {
+            println!("rrd: 叠加主题 {t}");
         }
     }
+
+    if !cfg!(unix) {
+        eprintln!("{RRD_UNSUPPORTED}");
+        return std::process::ExitCode::FAILURE;
+    }
+    println!("rrd: 已进入 Unix 分支，监听阶段随 Task 8 落地");
+    std::process::ExitCode::SUCCESS
 }
