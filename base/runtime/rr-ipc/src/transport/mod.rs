@@ -8,6 +8,8 @@
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）永远不进总线，见 ADR-0007 §裁定 1。
 
+pub mod frame;
+
 /// 默认 UDS 路径（ADR-0006 §6，自有路径避免与同机真实 Airymax 运行时冲突）
 pub const RR3_UDS_PATH_DEFAULT: &str = "/var/run/rock3-ipc.sock";
 
