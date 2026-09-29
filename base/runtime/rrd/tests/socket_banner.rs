@@ -18,7 +18,7 @@ fn banner_and_listen_line_show_the_resolved_absolute_path() {
     let abs = PathBuf::from("/tmp").join(&name);
     // 子进程 CWD = /tmp，CLI 原词只给文件名：rr3_spawn 的就绪判据等的就是"监听 <绝对路径>"，
     // 横幅若按原词回显，这里 3s 超时并把实际读到的日志打出来。
-    let mut rrd = RrdTest::rr3_spawn("banner", &abs, Some(Path::new("/tmp")), Path::new(&name));
+    let mut rrd = RrdTest::rr3_spawn(&abs, Some(Path::new("/tmp")), Path::new(&name));
 
     let banner = rrd.rr3_wait_log("rrd 0.0.1");
     assert!(

@@ -338,6 +338,9 @@ owner = "rr3-sense"
             e.iter().all(|m| m.contains(&want.display().to_string())),
             "文案里的路径必须是规范化后的那一份 {want:?}，收到 {e:?}"
         );
+        // M-10：自己收自己的临时件（Global Constraints 8）——这条用例按 pid 建目录，
+        // 不清就得在 /tmp 里每个测试进程留一份。
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
