@@ -14,8 +14,10 @@
 
 ## 已知不可构建项（Windows 本机）
 
-`firmware-rs/.cargo/config.toml`、`rust/.cargo/config.toml`、`firmware-rs/sdkconfig.defaults`
-中写死了 `/Users/qianmi/...` 的绝对路径与特定工具链版本。这些文件在 legacy 内**按原样冻结**，
+`firmware-rs/.cargo/config.toml:14,18` 与 `firmware-rs/sdkconfig.defaults:5` 写死了
+`/Users/qianmi/...` 的绝对路径。两个 Rust 工程（`firmware-rs/`、`rust/`）还各自把工具链钉在
+`channel = "esp"`（`rust-toolchain.toml`，由 espup 提供，stock rustup 无此通道；
+`rust/.cargo/config.toml` 本身不含绝对路径）。这些文件在 legacy 内**按原样冻结**，
 不做修复；如要复用，改自己环境副本（`.gitignore` 已忽略 `**/sdkconfig`）。
 
 ## 回滚
@@ -24,6 +26,10 @@
 git log --oneline --diff-filter=R -3        # 找到重命名提交
 git revert <该提交>                          # 恢复原顶层布局（推荐，不改历史）
 ```
+
+注意 revert 会把本节 README 一并撤销，并留下两处残迹需手动收拾：未追踪的本机
+`firmware-c/sdkconfig`（约 107 KB 生成物）不会随 revert 移动，revert 后它会滞留在
+`legacy/firmware-c/` 下；顶层四目录则由 git 重新创建。
 
 ## 与主系统的关系
 
