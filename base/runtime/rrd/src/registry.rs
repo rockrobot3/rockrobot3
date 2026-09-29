@@ -1,7 +1,8 @@
 //! 在册模块表与生命周期状态机（architecture.md §4.2 的状态集，不新增状态）。
 //!
 //! 平台无关：只碰 BTreeMap / mpsc / u64 单调毫秒。UDS 与进程派生都在 daemon 层
-//! （`conn.rs`/`daemon.rs`，随 Task 8 落地且全部 `#[cfg(unix)]`）。因此本文件的测试在
+//! （`conn.rs`/`daemon.rs`，全部 `#[cfg(unix)]`）：UDS 监听与注册握手已随 Task 7 落地，
+//! 进程派生与重启随 Task 11。因此本文件的测试在
 //! Windows 上照跑——M2 里"rrd 的行为"有相当一部分在本机就有证据（L1）。
 //!
 //! 三条不变量（改动前先读）：
@@ -171,7 +172,8 @@ impl RrdRegistry {
     /// 注册：保留名 → 同名在册（failed 除外）→ 超额 → 分配 task
     ///
     /// `entry` 的绝对性门禁不在这里（计划"与 spec 的偏离 6"：注册只拒语法，存在性/可执行
-    /// 位随 spawn 那一刻查），那是 Task 6/8 的 conn/daemon 层职责。
+    /// 位随 spawn 那一刻查），那是 conn/daemon 层的职责：路径绝对性已随 Task 7 落地
+    /// （`conn.rs` 的握手拒相对 entry、回 AIRY_EINVAL 并点名字段），存在性/可执行位随 Task 11 的 spawn。
     pub fn rr3_reg_add(
         &mut self,
         facts: &Rr3ManifestFacts,
@@ -183,7 +185,7 @@ impl RrdRegistry {
         }
         // 重启后同身份重注册：旧条目整体替换，旧 task 号作废但不回收。
         // 注意 restarts 随旧条目一起作废——"连续 5 次"的计数要跨重注册成立，
-        // 就得由 daemon 层（Task 8）在派生新进程时把预算带进来，本表不猜。
+        // 就得由 daemon 层（Task 11 的 spawn/重启）在派生新进程时把预算带进来，本表不猜。
         // 这里只**记下**待替换条目的 task 号，真正的摘除延后到门+断言全过之后：
         // 被 catch_unwind 吞掉的 debug panic（坏 watchdog）不许留下已改一半的表
         // （`caught_panic_leaves_the_failed_entry_registered` 钉住）。
@@ -211,7 +213,8 @@ impl RrdRegistry {
         // 属 Task 7/8 的 CLI/装载校验，本轮不发明。
         // 位置在**三条拒绝门之后**，让本函数文档里那句检查序在 debug 构建里也成立：断言
         // 抢在前面的话，一个带坏 watchdog 的重复/保留名/超额注册会先 panic 而不是如实返回
-        // Err，调用方拿不到拒绝理由（Task 6 的 `rr3_rpc_status_for_register` 便无从映射）。
+        // Err，调用方拿不到拒绝理由（Task 6 的 `rr3_rpc_status_for_register` 便无从映射——
+        // 那个调用方已随 Task 7 落地，就是 `conn.rs` 注册被拒时走的 `rr3_refuse`）。
         debug_assert!(
             facts.watchdog_ms > 0,
             "watchdog_ms = 0 的模块 {} 一入库就会被到期扫描判死",
@@ -295,7 +298,8 @@ impl RrdRegistry {
     /// `&str`、不碰 `self`，所以它既不知道这个名字是否在册（从未注册、或已 `Failed`
     /// 的名字照样能拿到 `Ok`），也不知道它是不是报文里编出来的。唯一的防线建在调用侧：
     /// `sender_name` 一律由 `rr3_reg_name_of(src_task)` 从连接持有的 task 号**反查**得到，
-    /// **绝不得取自帧体或注册报文里自称的 name 字段**。Task 6 的上行处理必须照此接线。
+    /// **绝不得取自帧体或注册报文里自称的 name 字段**。Task 7 已落地的上行处理（`conn.rs`）与
+    /// 此后 Task 8 的发布分支都必须照此接线。
     ///
     /// 末段的 owner 比对不是重复劳动：首段 == `sender_name` 只是主题串的**语法**事实，
     /// `rr3_topic_set_owner(topic) == sender_name` 才是**在册表登记的事实**。二者今天恒等，
@@ -349,7 +353,8 @@ impl RrdRegistry {
 
     /// 死亡处理：策略决定是否重启；连续失败到上限即永久 failed
     ///
-    /// `now_ms` 在本函数里**没有读者**，签名却是冻结的（Task 6/8 照样传）：把它写进
+    /// `now_ms` 在本函数里**没有读者**，签名却是冻结的（Task 7 的 conn 层照样传
+    /// `rr3_ctx_now_ms()`）：把它写进
     /// `last_beat_ms` 是一处死写——`rr3_reg_expire` 跳过 failed、`rr3_reg_beat` 拒 failed、
     /// 同身份重注册时整条 `Entry` 被替换，没有任何路径会再读那颗基准，故收下但不写。
     /// 死亡时刻若将来要进日志，那是新增字段的事，不是复用到期基准。
@@ -616,7 +621,8 @@ watchdog_timeout_ms = {wd}
     /// 三条拒绝门必须先于 watchdog 断言：`rr3_reg_add` 的文档序是"保留名 → 同名在册 →
     /// 超额 → 分配 task"，而断言原先坐在函数第一行，debug 构建里一个带着坏 watchdog 的
     /// 重复注册会 panic 而不是如实返回 Duplicate——调用方拿不到拒绝理由，也就回不出
-    /// 正确错误码（Task 6 的 `rr3_rpc_status_for_register` 正是拿这个 Err 去映射）。
+    /// 正确错误码（Task 6 的 `rr3_rpc_status_for_register` 正是拿这个 Err 去映射，它的调用方
+    /// `conn.rs` 已随 Task 7 落地）。
     /// 三条门各给一个"坏 watchdog + 该拒"的输入，缺一条就抓不到。
     #[cfg(debug_assertions)]
     #[test]
