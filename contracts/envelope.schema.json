@@ -16,7 +16,7 @@
           "type": "array",
           "x-offset-sum": "4+2+2+8+8+8+8+4+84 = 128",
           "x-offset-table": [
-            { "name": "magic", "offset": 0, "length": 4, "type": "uint32", "value": 1096681265, "hex": "0x41524531", "wire_bytes_hex": "31455241", "stability": "L1", "note": "标准注释写作 'ARE1'，与 LE 字段值矛盾；rock3 取 LE 字段值为准，见 contracts/README.md 歧义登记" },
+            { "name": "magic", "offset": 0, "length": 4, "type": "uint32", "value": 1095910705, "hex": "0x41524531", "wire_bytes_hex": "31455241", "stability": "L1", "note": "标准注释写作 'ARE1'，与 LE 字段值矛盾；rock3 取 LE 字段值为准，见 contracts/README.md 歧义登记" },
             { "name": "opcode", "offset": 4, "length": 2, "type": "uint16", "enum_ref": "opcode", "stability": "L1" },
             { "name": "flags", "offset": 6, "length": 2, "type": "uint16", "enum_ref": "flags", "stability": "L1", "x-undefined-bits": "发送方必须置 0；接收方必须忽略未知位（AOS-STD-IPC-004 前向兼容）" },
             { "name": "trace_id", "offset": 8, "length": 8, "type": "uint64", "stability": "L1", "note": "OpenTelemetry；单调递增 + 随机后缀" },
