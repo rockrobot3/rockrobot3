@@ -2,10 +2,11 @@
 # 规约三检查（方案 D7）。本地与 CI 同一入口，避免"CI 绿本地红"的两套逻辑。
 # ① 用 --all-targets：普通 cargo check 根本不编译 #[cfg(test)] 目标，
 #    测试代码里的类型错误会一路绿灯（实测：注入 E0308 后 check 退 0，--all-targets 退 1）。
-# ①b 跑 workspace 全量测试：②/③ 只点名 rr-registry 的 22 条（③ 是那 22 条的子集），
-#    其余 34 条——含 rr-ipc 的 17 个 envelope 契约守护（13 条偏移/枚举 + tests/envelope_meta.rs
-#    的 4 条读 JSON 的元数据守护）与 rr-registry 的注册表形状 pin——若不在此步覆盖，
-#    门里就没有任何力量行 contracts/README 所称"契约的执行入口"。
+# ①b 跑 workspace 全量测试：②/③ 只点名 rr-registry 的 contract 目标（③ 是它的子集），
+#    其余用例——含 rr-ipc 的 envelope 契约守护与 rr-registry 的注册表形状 pin——若不在此步
+#    覆盖，门里就没有任何力量行 contracts/README 所称"契约的执行入口"。
+#    逐步实测条数只登记在 docs/architecture/conventions.md §2，本文件不抄数字：
+#    测试集每加一条就要改一处注释，抄第二次必然失真。
 # 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
 # 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；
 # 退出码仍是首要信号（编译错误、错误 --test 目标名照样红）。① 不跑测试，只看得退出码。
