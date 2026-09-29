@@ -88,8 +88,8 @@ impl fmt::Display for Rr3RegisterError {
 pub enum Rr3PublishDeny {
     ReservedNamespace { topic: String },
     /// `owner` 回显主题集里登记的 owner；**取不到就回显 `?`**——主题根本不在册、或在册但
-    /// 登记文本没写 owner（解析成空串）都算取不到，两条分支同一写法，不留"一会儿空串
-    /// 一会儿 `?`"的两种未知。
+    /// 登记文本没写 owner（解析成空串）都算取不到，两条分支同一写法（两处构造点共用
+    /// `owner_for_echo`），不留"一会儿空串一会儿 `?`"的两种未知。
     /// 两条都是**终判拒绝**（这一条发布已经被拒了），不是"owner 未知、待定再查"——
     /// 日志读者别把 `owner=?` 读成待办事项。
     ForeignPrefix { topic: String, owner: String, sender: String },
@@ -140,6 +140,14 @@ pub struct Rr3RestartPlan {
     pub entry: String,
 }
 
+/// `ForeignPrefix.owner` 的回显唯一写法：在册但登记文本没写 owner 键（解析成空串）与
+/// 根本不在册（None）都渲染 `?`。`rr3_reg_publish_check` 的两处 `ForeignPrefix` 构造点
+/// 都必须经它——任何一处绕过它就会把"同一种未知"写成两种回显（由
+/// `foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites` 钉住）。
+fn owner_for_echo(registered: Option<String>) -> String {
+    registered.filter(|o| !o.is_empty()).unwrap_or_else(|| "?".to_string())
+}
+
 #[derive(Debug)]
 pub struct RrdRegistry {
     modules: BTreeMap<String, Entry>,
@@ -173,6 +181,13 @@ impl RrdRegistry {
         if facts.name == crate::topics_load::RR3_RESERVED_OWNER {
             return Err(Rr3RegisterError::ReservedName { name: facts.name.clone() });
         }
+        // 重启后同身份重注册：旧条目整体替换，旧 task 号作废但不回收。
+        // 注意 restarts 随旧条目一起作废——"连续 5 次"的计数要跨重注册成立，
+        // 就得由 daemon 层（Task 8）在派生新进程时把预算带进来，本表不猜。
+        // 这里只**记下**待替换条目的 task 号，真正的摘除延后到门+断言全过之后：
+        // 被 catch_unwind 吞掉的 debug panic（坏 watchdog）不许留下已改一半的表
+        // （`caught_panic_leaves_the_failed_entry_registered` 钉住）。
+        let mut superseded: Option<u64> = None;
         if let Some(old) = self.modules.get(&facts.name) {
             if old.phase != Rr3Phase::Failed {
                 return Err(Rr3RegisterError::Duplicate {
@@ -180,13 +195,11 @@ impl RrdRegistry {
                     src_task: old.src_task,
                 });
             }
-            // 重启后同身份重注册：旧条目整体替换，旧 task 号作废但不回收。
-            // 注意 restarts 随旧条目一起作废——"连续 5 次"的计数要跨重注册成立，
-            // 就得由 daemon 层（Task 8）在派生新进程时把预算带进来，本表不猜。
-            self.by_task.remove(&old.src_task);
-            self.modules.remove(&facts.name);
+            superseded = Some(old.src_task);
         }
-        if self.modules.len() >= RR3_REG_MAX_MODULES {
+        // 容量门认 superseded：表满但同名条目是 Failed 时，旧条目即将腾出槽位，
+        // 这是合法的 Failed 重注册，不得被容量拒（与移位前的现行行为一致）。
+        if superseded.is_none() && self.modules.len() >= RR3_REG_MAX_MODULES {
             return Err(Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES });
         }
         // 入库前提：watchdog_ms 必须为正，否则 `now_ms - last_beat_ms >= watchdog_ms` 恒成立，
@@ -204,6 +217,12 @@ impl RrdRegistry {
             "watchdog_ms = 0 的模块 {} 一入库就会被到期扫描判死",
             facts.name
         );
+        // 到这里门与断言全过，才动表：先摘旧 Failed 条目（task→name 映射与条目本体），
+        // 再插入新条目。panic 路径在上面就返回了，走不到这一步。
+        if let Some(t) = superseded {
+            self.by_task.remove(&t);
+            self.modules.remove(&facts.name);
+        }
         let task = self.next_task;
         self.next_task = self.next_task.saturating_add(1);
         self.by_task.insert(task, facts.name.clone());
@@ -296,7 +315,7 @@ impl RrdRegistry {
         if head != sender_name {
             return Err(Rr3PublishDeny::ForeignPrefix {
                 topic: topic.to_string(),
-                owner: topics.rr3_topic_set_owner(topic).unwrap_or_else(|| "?".to_string()),
+                owner: owner_for_echo(topics.rr3_topic_set_owner(topic)),
                 sender: sender_name.to_string(),
             });
         }
@@ -305,12 +324,13 @@ impl RrdRegistry {
         }
         // 首段相符只说明主题串"写着是这个命名空间"；在册 owner 是别人就是越权。
         // 取不到 owner（登记表里 owner 缺失 = 没写这个键，解析成空串）同样按越权拒，
-        // 绝不因"查不到"而放行；回显与另一条 ForeignPrefix 分支一致地写 `?`。
+        // 绝不因"查不到"而放行；回显与另一条 ForeignPrefix 分支一致地写 `?`（同走
+        // `owner_for_echo`）。
         let owner = topics.rr3_topic_set_owner(topic);
         if owner.as_deref() != Some(sender_name) {
             return Err(Rr3PublishDeny::ForeignPrefix {
                 topic: topic.to_string(),
-                owner: owner.filter(|o| !o.is_empty()).unwrap_or_else(|| "?".to_string()),
+                owner: owner_for_echo(owner),
                 sender: sender_name.to_string(),
             });
         }
@@ -618,7 +638,7 @@ watchdog_timeout_ms = {wd}
             Err(Rr3RegisterError::Duplicate { name: "rr3-sima".into(), src_task: t }),
             "同名在册必须先拒"
         );
-        // 表已经装了 rr3-sima 一条，故这里只补到上限（15 条），第 16 条留给下面的 over
+        // 循环补 15 条，加上已有的 rr3-sima 正好占满 16 槽；下面的 over 是第 17 次尝试，必须被容量门拒
         for i in 0..RR3_REG_MAX_MODULES - 1 {
             r.rr3_reg_add(&facts(&format!("rr3-m{i}"), 100, 500, "never"), chan().0, 0).unwrap();
         }
@@ -634,6 +654,31 @@ watchdog_timeout_ms = {wd}
             RR3_REG_MAX_MODULES,
             "三次拒绝都不许留下影子条目"
         );
+    }
+
+    /// watchdog 断言移位后，被 catch_unwind 捕获的 debug panic 不许留下"已改过的表"：
+    /// Failed 同身份重注册路径上，旧条目的摘除原先发生在断言**之前**，panic 一旦被外层
+    /// 吞掉，Failed 条目与它的 task→name 映射就双双蒸发（发布归属、fanout、
+    /// `rr3_reg_name_of` 全部受影响）。现在摘除延后到门+断言全过之后，panic 时表必须原样。
+    /// 仅 debug 构建（`debug_assert` 在 release 被编译掉，这条窗口在 release 不存在）。
+    #[cfg(debug_assertions)]
+    #[test]
+    fn caught_panic_leaves_the_failed_entry_registered() {
+        let mut r = RrdRegistry::new(1000);
+        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "never"), chan().0, 0).unwrap();
+        assert!(r.rr3_reg_death("rr3-sima", true, 600).is_none(), "never 不给重启计划");
+        assert_eq!(r.rr3_reg_snapshot(), vec![("rr3-sima".into(), t, Rr3Phase::Failed)]);
+        let mut again = facts("rr3-sima", 100, 500, "never");
+        again.watchdog_ms = 0; // 绕过 facts 读取入口，触发入库断言
+        let caught =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.rr3_reg_add(&again, chan().0, 700)));
+        assert!(caught.is_err(), "watchdog_ms = 0 必须仍被断言拦下");
+        assert_eq!(
+            r.rr3_reg_snapshot(),
+            vec![("rr3-sima".into(), t, Rr3Phase::Failed)],
+            "被捕获的 panic 不得改动在册表：Failed 条目与 task 号必须原样留在表里"
+        );
+        assert_eq!(r.rr3_reg_name_of(t).as_deref(), Some("rr3-sima"), "task→name 映射同样不许被摘掉");
     }
 
     /// 注册即 registered；收到心跳才 running；未在册 task 的心跳被拒
@@ -762,6 +807,42 @@ owner = "rr3-simb"
                 sender: "rr3-sima".into(),
             }),
             "登记 owner 缺失必须回显 ?，不得回显空串"
+        );
+    }
+
+    /// `owner=?` 回显的一致性：`ForeignPrefix` 有**两处**构造点（前缀不符 / owner 比对不符），
+    /// 两处遇到"在册但登记文本没写 owner 键（解析成空串）"都必须回显 `?`——同一种"不知道
+    /// owner 是谁"不许一处空串一处 `?`。本用例把 `Rr3PublishDeny::ForeignPrefix` 文档里那句
+    /// "两条分支同一写法"逐分支钉住：前一段打第一处构造点（head ≠ sender），
+    /// 后一段打第三道分支（head == sender、在册、owner 却取不到）。
+    #[test]
+    fn foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites() {
+        // 第一处构造点：主题 rr3-sima/x/y 在册且 owner 键缺失，发送方 rr3-simb → 前缀不符分支
+        let set = rr_registry::rr3_registry_topic_set_from_text(
+            "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/x/y\"\nkind = \"event\"\n",
+        );
+        assert_eq!(set.rr3_topic_set_owner("rr3-sima/x/y").as_deref(), Some(""));
+        assert_eq!(
+            RrdRegistry::rr3_reg_publish_check("rr3-simb", "rr3-sima/x/y", &set),
+            Err(Rr3PublishDeny::ForeignPrefix {
+                topic: "rr3-sima/x/y".into(),
+                owner: "?".into(),
+                sender: "rr3-simb".into(),
+            }),
+            "前缀不符分支在 owner 键缺失时必须回显 ?，不得回显登记的空串"
+        );
+        // 第三道分支：首段与发送方相符、主题在册、owner 键缺失 → 只有 owner 比对能拒
+        let set2 = rr_registry::rr3_registry_topic_set_from_text(
+            "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"event\"\n",
+        );
+        assert_eq!(
+            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set2),
+            Err(Rr3PublishDeny::ForeignPrefix {
+                topic: "rr3-sima/ping/state".into(),
+                owner: "?".into(),
+                sender: "rr3-sima".into(),
+            }),
+            "owner 比对分支在 owner 键缺失时必须回显 ?（与 publish_foreign_prefix_echoes_question_mark_when_owner_is_missing 同路径，这里双分支同测）"
         );
     }
 
