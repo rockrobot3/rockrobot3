@@ -135,12 +135,15 @@ fn readme(id: &str) -> String {
 
 ## 落位
 
+生成器落盘**五个文件**（四类结构角色 + crate 清单，见 docs/naming.md §4）：
+
 | 文件 | 作用 |
 |---|---|
 | `module.toml` | manifest，字段契约见 `base/runtime/rr-registry/src/module.schema.toml` |
 | `config.toml` | 运行期配置（密钥不入库，见 docs/conventions.md） |
 | `Cargo.toml` | 独立 crate，M2 起 path 依赖 `rr-ipc`/`rr-bus` |
 | `src/main.rs` | 入口骨架 |
+| `README.md` | 本文件：能力表 + 事件表 + 配置说明 |
 
 ## 下一步
 

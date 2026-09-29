@@ -52,8 +52,12 @@ pub mod flags {
     pub const URGENT: u16 = 0x0040;
     pub const NOREPLY: u16 = 0x0080;
 
-    /// 标准已定义位掩码：发送方不得置位掩码之外的位（AOS-STD-IPC-004）；
-    /// 接收方对掩码之外的位必须忽略而非报错（前向兼容），见 `Rr3Header::from_bytes`。
+    /// 标准已定义位掩码（AOS-STD-IPC-004 的前向兼容约定）。
+    ///
+    /// 实际行为（v0.0.1 不做运行时校验，也不得据此声称已强制）：
+    /// `to_bytes`/`from_bytes` 对 `flags` 是**原样透传**——掩码之外的位既不报错也不清零，
+    /// 编解码两个方向都保留（见 `header_ignores_unknown_flags`）。标准对发送方"应只置已定义位"
+    /// 的期望属调用方自律与 M2 传输层的职责，本 crate 不拦截；接收方忽略未知位正是 IPC-T-010。
     pub const DEFINED: u16 = NOWAIT
         | SIGNAL
         | ZEROCOPY
@@ -267,7 +271,10 @@ mod tests {
         assert_eq!(Rr3Header::from_bytes(&bytes), Err(Rr3HdrError::BadMagic { got: 0x3145_5241 }));
     }
 
-    /// IPC-T-003：与 golden 向量逐字节一致，且 decode→encode 往返无损
+    /// 与 golden 向量逐字节一致，且 decode→encode 往返无损。
+    /// 这是**同机**字节基准（IPC-T-001 侧）；IPC-T-003 要求的 x86↔aarch64 交叉编译等值
+    /// 测试当前 HEAD 没有，已记在 `contracts/envelope.schema.json` 的
+    /// `x-rock3-v0.0.1-uncovered`，随 M2 落地。
     #[test]
     fn header_matches_golden_vector() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/golden/event-header-128.hex");

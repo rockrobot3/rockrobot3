@@ -36,10 +36,14 @@
   [conventions.md](conventions.md) §2）兜底；**Rust 符号前缀**在 v0.0.1 没有 lint
   （方案 D7 只冻结三条语义检查），靠评审——将来可在 `tools/` 补脚本，但需与上一条裁定一并收口
 
-## 3. 一致性校验（rrd 启动时强制）
+## 3. 一致性校验（v0.0.1 由生成器与契约测试把关）
+
+> **校验入口（v0.0.1 实况）**：`rr3-mkmod` 生成自检 + `rr-registry` 契约测试
+> （`cargo test -p rr-registry`，由 `tools/ci/check.sh` ②/③ 步点名）。下面三条是**规则本身**，
+> 其中"rrd 运行时注册校验"（进程启动时按 manifest.name 判前缀归属并放行/拒绝）属 M1/M2 待落地。
 
 1. 目录名 == crate 名 == 进程名 == manifest.name
-2. 事件/RPC 主题前缀 == manifest.name（越权发布拒绝注册）
+2. 事件/RPC 主题前缀 == manifest.name（越权发布不予合入）
 3. 发布/订阅的主题必须已在 [`contracts/topics.toml`](../contracts/topics.toml) 逐条登记
    （v0.0.1 收口时 7 owner / 21 topic）。该注册表反映的是 **M0 已登记的主题**，不是"全部可能的主题"：
    各模块其余主题随里程碑推进逐条 append（新增主题 = 改契约 = 走 review）

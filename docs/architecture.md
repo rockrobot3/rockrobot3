@@ -62,7 +62,8 @@ RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人�
 rock3/
 ├── contracts/                       ← [SC] 字节级共享契约（Rust/Python 双方唯一事实源）
 │   ├── envelope.schema.json         ← A-IPC 128B 消息头 + 5 种 payload 类型契约（ADR-0006）
-│   ├── topics.toml                  ← 全部主题注册表（rrd 校验前缀归属）
+│   ├── topics.toml                  ← 全部主题注册表（校验入口见 §6.3）
+│   ├── golden/event-header-128.hex  ← 一条真实头的 hex 向量（同机字节基准，见 contracts/README.md）
 │   └── events/*.schema.json         ← 各模块事件负载 schema
 │
 ├── base/
@@ -75,12 +76,12 @@ rock3/
 │   │   ├── rr-ipc/                  ← A-IPC 协议层（纯编解码）+ transport trait（uds/shm/tcp）
 │   │   ├── rr-bus/                  ← 主题匹配订阅、QoS、回压
 │   │   ├── rr-registry/             ← manifest 解析、依赖仲裁、生命周期状态机
-│   │   ├── rr-hal/                  ← traits + linux/{alsa,gpiod,nm} + sim/ 双实现
+│   │   ├── rr-hal/                  ← HAL trait 与数据类型（lib.rs）+ 后端名常量（backend.rs）；linux/sim 后端规划（M2+）
 │   │   ├── rr-ota/                  ← slot 状态机、回滚判定、factory recovery、模块级更新（预留）
 │   │   └── rrd/                     ← 主守护进程（装配层：supervisor/health/config）
 │   └── ota/                         ← 分区布局文档 + rr3-ota-ctl CLI
 │
-├── modules/                         ← 模块统一内构：module.toml + config.toml + src/ + README.md (+ tests/)
+├── modules/                         ← 模块统一内构（rr3-mkmod 落盘五件）：module.toml + config.toml + Cargo.toml + src/main.rs + README.md
 │   ├── rr3-sense/       采集+VAD（src/audio/{capture,vad}.rs）
 │   ├── rr3-act/         执行：relay.rs、motion/（预留）
 │   ├── rr3-interact/    播放 player.rs + Web 面板 panel/{server.rs,www/}
@@ -91,10 +92,12 @@ rock3/
 ├── tools/
 │   ├── mkmodule/        bin: rr3-mkmod，生成合规模块骨架
 │   ├── rrctl/           bin: rr3-ctl，订阅总线查状态/日志/触发 OTA
-│   └── sim/             bin: rr3-sim，mock HAL + 假模块，x86 全链路联调
+│   ├── sim/             bin: rr3-sim，mock HAL + 假模块，x86 全链路联调
+│   └── ci/check.sh      ← 规约检查唯一入口（五步，见 conventions.md §2）
 │
-├── docs/                ← 本文档 + naming.md + adr/
-└── legacy/              ← 冻结：firmware-c/ + core/（只读参照，不再演进）
+├── docs/                ← 本文档 + naming.md + conventions.md + adr/
+└── legacy/              ← 冻结四棵 ESP32 树：firmware-c/ + core/ + firmware-rs/ + rust/
+                          （只读参照，不再演进；组件计数见 legacy/README.md）
 ```
 
 ---
@@ -108,7 +111,7 @@ schema 定义在 `base/runtime/rr-registry/src/module.schema.toml`，mkmodule �
 ```toml
 [manifest]
 schema_version = 1
-name    = "rr3-sense"       # 必须与目录名/进程名/IPC 前缀一致，rrd 启动时校验
+name    = "rr3-sense"       # 必须与目录名/进程名/IPC 前缀一致（校验入口见下方要点与 §6.3）
 version = "0.1.0"
 type    = "module"          # module | brain
 lang    = "rust"            # rust | python
@@ -139,7 +142,8 @@ watchdog_timeout_ms = 5000
 ```
 
 要点：
-- 事件/RPC 主题必须以 `manifest.name` 为前缀，越权发布在注册时拒绝
+- 事件/RPC 主题必须以 `manifest.name` 为前缀，越权发布一律拒绝；校验入口现为 `rr3-mkmod`
+  生成自检 + `rr-registry` 契约测试，rrd 运行时注册校验属 M1/M2 待落地
 - 模块间依赖走 capabilities，未来更换传感器模块不影响 brain
 
 ### 4.2 生命周期（rr-registry 状态机）
@@ -160,26 +164,54 @@ registered → resolved(依赖满足) → starting → running ⇄ degraded
 
 ## 5. HAL 分层（rr-hal）
 
+> 本节按 **当前 HEAD 实况**书写。v0.0.1 的 HAL 只有 trait 与数据类型，没有任何平台后端；
+> 唯一实现处是 `base/runtime/rr-hal/src/lib.rs`，`base/runtime/rr-hal/src/backend.rs` 里只有
+> 后端名常量（`RR3_BACKEND_{LINUX,SIM,PLACEHOLDER}`）与落地排期，没有实现文件。
+
 ```rust
-// traits/ —— [IND] 独立层：模块只见 trait，不见 Linux 细节
+// [IND] 独立层：模块只见 trait，不见 Linux 细节。
+// trait 名带 Rr3 前缀、方法名不带（naming.md §2），错误统一 Rr3HalError。
 #[async_trait]
-pub trait Rr3AudioInput: Send + Sync {
-    async fn start_capture(&self, cfg: AudioCfg) -> Result<PcmStream>;
-    async fn set_mic_mute(&self, on: bool) -> Result<()>;
+pub trait Rr3AudioSource: Send + Sync {            // 上行拾音
+    async fn open(&self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError>;
+    async fn read(&self, frames: usize) -> Result<Rr3PcmStream, Rr3HalError>;
 }
-pub trait Rr3AudioOutput {
-    async fn play(&self, pcm: PcmStream, gain: u8) -> Result<()>;
+#[async_trait]
+pub trait Rr3GpioOut: Send + Sync {                // 数字输出（继电器、LED）
+    async fn set(&self, level: bool) -> Result<(), Rr3HalError>;
+    async fn level(&self) -> Result<bool, Rr3HalError>;
 }
-pub trait Rr3GpioOut  { async fn set_level(&self, level: bool) -> Result<()>; }
-pub trait Rr3PowerMon { async fn battery(&self) -> Result<BatteryState>; }
-pub trait Rr3NetLink  { async fn state(&self) -> Result<LinkState>; }
+#[async_trait]
+pub trait Rr3PwmServo: Send + Sync {               // PWM 舵机（闭环在 act 反射环内）
+    async fn set_angle(&self, deg: u16) -> Result<(), Rr3HalError>;
+    async fn angle(&self) -> Result<u16, Rr3HalError>;
+}
+#[async_trait]
+pub trait Rr3Power: Send + Sync {                  // 电源读数
+    async fn battery(&self) -> Result<Rr3BatteryState, Rr3HalError>;
+}
+#[async_trait]
+pub trait Rr3Link: Send + Sync {                   // 网络链路读数
+    async fn state(&self) -> Result<Rr3LinkState, Rr3HalError>;
+}
 ```
 
-| 层 | 位置 | 说明 |
+配套数据类型也全部带 `Rr3` 前缀：`Rr3AudioCfg`（默认常量 `RR3_AUDIO_CFG_16K_MONO16` =
+16k/单声道/16bit）、`Rr3PcmStream`（时长用 `rr3_pcm_duration_ms()`）、`Rr3BatteryState`、
+`Rr3LinkState`，以及错误枚举 `Rr3HalError`。占位实现 `Rr3UnavailableSource` 让五个 trait 的
+每个方法都返回 `Unsupported`——object-safety 由 `lib.rs` 的测试在 `cargo test` 时机器校验。
+
+| 层 | 位置 | 状态 |
 |---|---|---|
-| traits | `rr-hal/src/traits/` | 平台无关接口 |
-| linux 实现 | `rr-hal/src/linux/{alsa,gpiod,nm}.rs` | ALSA / gpiod / NetworkManager(D-Bus) |
-| sim 实现 | `rr-hal/src/sim/` | 主机联调（配合 rr3-sim） |
+| traits + 数据类型 | `rr-hal/src/lib.rs` | 已在 HEAD |
+| 占位后端 + 后端名常量 | `rr-hal/src/lib.rs` / `rr-hal/src/backend.rs` | 已在 HEAD |
+| linux 后端（ALSA / gpiod / NetworkManager-D-Bus） | **规划（M2+），当前 HEAD 无此文件** | 未落地 |
+| sim 后端（配合 `tools/sim`，主机联调） | **规划（M2+），当前 HEAD 无此文件** | 未落地 |
+| 音频**输出** trait（播放，`rr3-interact` 的消费面） | **规划（M2+），当前 HEAD 无此 trait**（只有上行 `Rr3AudioSource`） | 未落地 |
+
+> 本文档 v0.2 在此列过一套与 HEAD 不符的接口名与 `rr-hal/src/{traits,linux,sim}/` 目录布局
+> （设计期草图当既成事实写），现已按上面的实况整段重写；后续新增 trait/后端时，本节须与
+> `rr-hal` 源码同批更新。
 
 ---
 
@@ -204,12 +236,12 @@ UDS 路径 `/var/run/rock3-ipc.sock`（自有路径，避免与真实 Airymax �
 
 ### 6.3 主题命名
 
-格式 `rr3-<模块>/<域>/<事件>`，全小写 snake_case。v0.0.1 规划的主题草图：
+格式 `rr3-<模块>/<域>/<事件>`，全小写 snake_case。v0.0.1 规划的主题草图（**示意，非注册表**）：
 
 ```
 rr3-sense/audio/vad_start      rr3-sense/audio/asr_partial   rr3-sense/audio/asr_final
 rr3-brain/dialog/response      rr3-brain/dialog/error
-rr3-act/relay/set              rr3-act/relay/state
+rr3-act/relay/set              rr3-act/relay/state          ← 示意：relay/* 尚未登记
 rr3-interact/audio/play_done
 rr3-power/battery/state        rr3-power/battery/low         rr3-power/charger/event
 rr3-connect/wifi/state         rr3-connect/bt/state
@@ -221,9 +253,21 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
 > `[manifest].name`，而模块名规则是 `^rr3-[a-z]+$`。全量已登记主题以
 > [`contracts/topics.toml`](../contracts/topics.toml) 为准（7 owner / 21 topic）。
 
-rrd 启动时按 `manifest.name` 校验前缀归属（越权发布拒绝注册）。上面的代码块是**设计期草图**：
+前缀归属的**校验入口现为** `rr3-mkmod` 生成自检 + `rr-registry` 契约测试（`cargo test -p
+rr-registry`），**rrd 运行时注册校验属 M1/M2 待落地**。上面的代码块是**设计期草图**：
 `contracts/topics.toml` 才是事实源（v0.0.1 收口时 7 owner / 21 topic），两者不一致时以注册表为准；
 注册表按"只增不改"演进，各模块其余主题随里程碑（M2+）逐条 append，不预先占位。
+登记之前，任何 manifest 的 `events.publishes`/`rpc.exposes` 引用未注册主题都会被契约测试拒绝。
+
+> **`rr3-act` 的对账（Task 4 评审遗留项）**：注册表里 `rr3-act` 的**已登记面是舵机与电机**
+> （`rr3-act/servo/command` request、`rr3-act/servo/state` stream、`rr3-act/motor/reflex`
+> notification、`rr3-act/led/effect` request，owner 角色写作"执行：舵机/电机、反射环宿主进程"）。
+> ADR-0002 §1 把 rr3-act 的职责写作"继电器、未来运动控制（gpiod、PWM）"——**继电器那一半
+> 尚未进注册表**：`rr3-act/relay/*`（本节草图与 §7.2 数据流图里的 `relay/set`、`relay/state`）
+> 都是**未登记主题，仅作示意**。要落地必须先按"契约只增不改"把它们 **APPEND** 进
+> `contracts/topics.toml`（同批更新 `rr-registry` 的形状 pin 与本节的 7 owner / 21 topic 计数），
+> 再在 manifest 里引用；ADR-0002 的决策正文不改（继电器本身没有被本批裁定否定），本节即其
+> 状态注记位置。
 
 ---
 
@@ -237,6 +281,10 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 ```
 
 ### 7.2 对话主闭环（legacy main.c 对话策略的分布式版）
+
+> **草图（示意）**：下图只表达数据流向。其中的主题串**以 `contracts/topics.toml` 为准**——
+> `rr3-act/relay/state`、`rr3-brain/dialog/response`、`rr3-connect/wifi/state`、
+> `rr3-power/battery/low` 等**均未登记**（对账见 §6.3 的 `rr3-act` 注记），使用前须先 append 契约。
 
 ```
                     ┌─────────────── rrd 事件总线 (UDS) ───────────────┐
@@ -252,7 +300,8 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 
 ### 7.3 安全兜底（不依赖 brain）
 
-急停、限位、低电保护逻辑在 rrd/rr-hal：即使 rr3-brain 崩溃或未注册，rrd 仍监听 `rr3-power/battery/low` 并直接执行保护动作。
+急停、限位、低电保护逻辑在 rrd/rr-hal：即使 rr3-brain 崩溃或未注册，rrd 仍监听
+`rr3-power/battery/low`（**示意：该主题未登记，已登记的是 `rr3-power/battery/state`**）并直接执行保护动作。
 
 ### 7.4 控制面三级分层（ADR-0007）
 
@@ -313,7 +362,7 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 | R1 | Buildroot + RK3566 DTS/音频补丁工作量超预期 | M1 | 先 Radxa ZERO 3 现成板验证，自绘板后置；必要时 Armbian 临时垫层 |
 | R2 | ALSA 全双工延迟不达标 | M3 | legacy 闭环 2~5s 为基线，Linux 侧硬件换血预期更好；先实测再优化 |
 | R3 | Python brain GIL/冷启动 | M4 | 策略预载；必要时 brain 拆子进程 |
-| R4 | Rust↔Python 契约漂移 | M2+ | contracts/ 目录 [SC] 唯一事实源 + rrd 启动校验 |
+| R4 | Rust↔Python 契约漂移 | M2+ | contracts/ 目录 [SC] 唯一事实源 + 契约测试校验（rrd 运行时注册校验属 M1/M2 待落地） |
 | R5 | 0.5L 体积散热（RK3566 被动散热） | 硬件 | 选型时评估无风扇功耗档，后期实机温测 |
 | R6 | A-IPC 自实现运行时与标准偏差 | M2 | IPC-T-001~003 必测；半年复查时对照标准版本变更 |
 | R7 | 待机 <1W 需 suspend/电源状态机与 OS 深度协同 | M5 | rr3-power 与 rrd 电源状态机设计前置，模块声明 wake 权限 |
