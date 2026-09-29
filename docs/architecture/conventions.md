@@ -1,7 +1,7 @@
 # rock3 开发规约（v0.0.1 起生效）
 
 来源：`docs/dev/0.0.1版本洛克三号开发方案.md` §5。本文只收录**可机械检查**或与
-评审判定直接相关的条目；架构语义以 `docs/architecture.md` 与 ADR 为准。
+评审判定直接相关的条目；架构语义以 `docs/architecture/architecture.md` 与 ADR 为准。
 
 ## 1 分支与提交
 
@@ -67,4 +67,4 @@ M2 起随运行时语义落地再扩点名范围。
 ## 5 文档纪律
 
 - 状态、进度写 ADR/方案，不写散落的周报式文档
-- `docs/architecture.md` 是唯一架构图；目录树变更必须同步其 §3
+- `docs/architecture/architecture.md` 是唯一架构图；目录树变更必须同步其 §3

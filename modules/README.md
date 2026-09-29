@@ -1,7 +1,7 @@
 # modules —— rr3-* 模块（生成器落盘五个文件）
 
 每个模块固定由 `rr3-mkmod` 生成下列**五个文件**，缺件不合入
-（四类结构角色见 [naming.md](../docs/naming.md) §4，`Cargo.toml` 属"源码"那件的 crate 半边）：
+（四类结构角色见 [naming.md](../docs/architecture/naming.md) §4，`Cargo.toml` 属"源码"那件的 crate 半边）：
 
     modules/rr3-<域>/
     ├── module.toml   ← manifest：身份/能力/事件/资源/健康
