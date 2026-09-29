@@ -368,6 +368,106 @@ mod tests {
         }
     }
 
+    /// 契约节点里所有整数值成员（flags / opcode 的位-值表；字符串、数组、对象条目
+    /// 如 x-layer-note / x-rock3-adopted 天然被过滤掉）
+    fn contract_int_entries(obj: &serde_json::Value) -> std::collections::BTreeMap<String, i64> {
+        obj.as_object()
+            .expect("契约该节点必须是对象")
+            .iter()
+            .filter_map(|(k, v)| v.as_i64().map(|n| (k.clone(), n)))
+            .collect()
+    }
+
+    /// magic 是本仓最 contested 字段：契约 `x-offset-table` 的 magic 条目
+    /// value / hex / wire_bytes_hex 三种表示必须全部钉在 Rust `MAGIC` 常量上（ADR-0006）
+    #[test]
+    fn magic_contract_entries_match_rust() {
+        let json = schema_json();
+        let tbl = json["properties"]["header"]["properties"]["fields"]["x-offset-table"]
+            .as_array()
+            .expect("缺 x-offset-table");
+        let magic = tbl
+            .iter()
+            .find(|f| f["name"].as_str() == Some("magic"))
+            .expect("契约偏移表缺 magic 条目");
+        assert_eq!(
+            magic["value"].as_u64().expect("缺 magic value"),
+            MAGIC as u64,
+            "magic.value 与 Rust MAGIC 漂移"
+        );
+        let hex = magic["hex"].as_str().expect("缺 magic hex");
+        assert_eq!(
+            u32::from_str_radix(hex.trim_start_matches("0x"), 16)
+                .unwrap_or_else(|e| panic!("magic.hex {hex} 非法: {e}")),
+            MAGIC,
+            "magic.hex 解析后与 Rust MAGIC 漂移"
+        );
+        let wire = magic["wire_bytes_hex"].as_str().expect("缺 magic wire_bytes_hex");
+        assert_eq!(
+            hex_to_bytes(wire),
+            MAGIC.to_le_bytes().to_vec(),
+            "magic.wire_bytes_hex 与 MAGIC 的 LE 落盘字节不一致"
+        );
+    }
+
+    /// 契约 `properties.flags` 与 Rust `flags::` 双向逐值一致（值漂移 / 缺位 / 多位都算红），
+    /// 且 DEFINED 掩码 == 契约位集按位或
+    #[test]
+    fn flags_match_contract() {
+        let rust: std::collections::BTreeMap<&str, u16> = [
+            ("AIRY_IPC_F_NOWAIT", flags::NOWAIT),
+            ("AIRY_IPC_F_SIGNAL", flags::SIGNAL),
+            ("AIRY_IPC_F_ZEROCOPY", flags::ZEROCOPY),
+            ("AIRY_IPC_F_CAP_CARRY", flags::CAP_CARRY),
+            ("AIRY_IPC_F_COMPRESS", flags::COMPRESS),
+            ("AIRY_IPC_F_ENCRYPT", flags::ENCRYPT),
+            ("AIRY_IPC_F_URGENT", flags::URGENT),
+            ("AIRY_IPC_F_NOREPLY", flags::NOREPLY),
+        ]
+        .into_iter()
+        .collect();
+        let contract = contract_int_entries(&schema_json()["properties"]["flags"]);
+        for name in contract.keys() {
+            assert!(rust.contains_key(name.as_str()), "契约定义了 {name}，Rust flags 缺");
+        }
+        for name in rust.keys() {
+            assert!(contract.contains_key(*name), "Rust 定义了 {name}，契约 flags 缺");
+        }
+        let mut mask = 0u16;
+        for (name, c_val) in &contract {
+            let r = rust[name.as_str()];
+            assert_eq!(r as i64, *c_val, "{name} 值漂移");
+            mask |= r;
+        }
+        assert_eq!(flags::DEFINED, mask, "DEFINED 掩码与契约位集合不一致");
+    }
+
+    /// 契约 `properties.opcode` 与 Rust `opcode::` 双向逐值一致（同 flags 的两向集合检查）
+    #[test]
+    fn opcode_values_match_contract() {
+        let rust: std::collections::BTreeMap<&str, u16> = [
+            ("SEND", opcode::SEND),
+            ("RECV", opcode::RECV),
+            ("SEND_BATCH", opcode::SEND_BATCH),
+            ("CANCEL", opcode::CANCEL),
+        ]
+        .into_iter()
+        .collect();
+        let contract = contract_int_entries(&schema_json()["properties"]["opcode"]);
+        for name in contract.keys() {
+            assert!(rust.contains_key(name.as_str()), "契约定义了 {name}，Rust opcode 缺");
+        }
+        for name in rust.keys() {
+            assert!(contract.contains_key(*name), "Rust 定义了 {name}，契约 opcode 缺");
+        }
+        for (name, c_val) in &contract {
+            assert_eq!(
+                rust[name.as_str()] as i64, *c_val,
+                "opcode {name} 与契约漂移"
+            );
+        }
+    }
+
     /// 传输路径与环境键逐字对齐 ADR-0006 §6 / naming.md
     #[test]
     fn transport_path_matches_adr() {
