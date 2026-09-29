@@ -1,9 +1,11 @@
 /* 语音管家配置区：对话策略参数（VAD 阈值/录音时长/播放音量）
- * 硬件与网络参数在各模块自己的配置里：
- *   WiFi   → core/wifi/src/wifi_config.h
- *   录音   → core/audio/src/audio_config.h（增益/引脚）
- *   继电器 → core/relay/src/relay_config.h（GPIO）
- *   云端AI → core/llm/src/llm_config.h（密钥/模型/音色） */
+ * 硬件与网络参数在各模块自己的配置里（路径为迁入 legacy/ 后的真实位置）：
+ *   WiFi   → legacy/core/link/wifi/src/wifi_config.h
+ *   录音   → legacy/core/audio/src/audio_config.h（增益/引脚）
+ *   继电器 → legacy/core/relay/src/relay_config.h（GPIO）
+ *   云端AI → legacy/core/llm/src/llm_config.h（模型/人设/地址）
+ *            云端密钥不在任何 config.h 里：构建期注入 SILICONFLOW_API_KEY，
+ *            注入方式与缺失后果见 legacy/core/README.md 的「密钥注入」一节 */
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 

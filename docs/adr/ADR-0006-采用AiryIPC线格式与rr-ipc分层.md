@@ -11,7 +11,11 @@
 ## 决策
 
 1. **线格式：直接采用 Airy IPC 128B 定长消息头（Layout C）**，不再维护自造 32B 头
-   - 布局 L1 永久稳定：magic 'ARE1'（0x41524531）、opcode、flags、trace_id、timestamp_ns、src_task、dst_task、payload_len、reserved[84]；扩展只允许写 reserved 区
+   - 布局 L1 永久稳定：magic 'ARE1'（**字段值** 0x41524531；消息头所有多字节字段小端序落盘，
+     故 magic 在线上字节为 `31 45 52 41`，与 `contracts/envelope.schema.json`、
+     `contracts/golden/event-header-128.hex` 一致；标准注释按 ASCII 序读会得 `41 52 45 31`，
+     本项目采规范条目 LE 为准，歧义登记见 ADR-0004 追加复查项与 `contracts/README.md`）、
+     opcode、flags、trace_id、timestamp_ns、src_task、dst_task、payload_len、reserved[84]；扩展只允许写 reserved 区
    - 5 种 payload 类型全采用：REQUEST/RESPONSE（RPC）、EVENT（事件总线）、STREAM（音频/运动数据流，有序投递）、NOTIFICATION（心跳/系统通知）
    - 事务面 payload 默认 JSON-RPC 2.0（标准默认，零改动）
 2. **语义字段放置**：rock3 的 topic 字符串与 phase（normal/degraded/recovery）置于 payload 内，**不占用消息头 reserved 区**（保持与标准逐字节兼容）
