@@ -22,8 +22,9 @@ v0.0.1 + M2 Task 3 实况：
 - 上行 `Event` 的发布归属（Task 8）：三层顺序判定 = 冒充内建命名空间 `rr3-runtime/*` → EPERM、
   前缀/在册 owner 不是自己 → EPERM 并点名 owner、在册但未登记主题 → EINVAL；三种拒法都只回
   错误帧 + 计数（`rr3_reg_denied`），**不断连、不记崩溃**，体的形状错（非 JSON、缺/坏 `topic`）
-  同口径。放行后原样转发，头改写成发布者的分配 task + `dst_task=0`，`payload_len` 取
-  **编出来之后**的字节数（2 字节前缀不能少），且发布者收不到自己发的那一条。
+  同口径地只回错误帧、不断连不记崩溃，但**不计数**——计数只指上述三种归属拒法（冒充 / 越权前缀 /
+  未在册），形状错不是"被拒的发布"。放行后原样转发，头改写成发布者的分配 task + `dst_task=0`，
+  `payload_len` 取 **编出来之后**的字节数（2 字节前缀不能少），且发布者收不到自己发的那一条。
 - 非 Unix 平台启动即打印 `rrd::RRD_UNSUPPORTED` 并以退出码 1 结束，绝不假称可跑
   （Windows 本机实测 `EXIT=1`；UDS 分支在 `#[cfg(unix)]` 之后，本机连编译都不参与）。
 - 命令行：`--socket`、`--topics-overlay`、可重复的 `--manifest`、`--restart-base-ms`、
