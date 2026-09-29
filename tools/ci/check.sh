@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
 # 规约三检查（方案 D7）。本地与 CI 同一入口，避免"CI 绿本地红"的两套逻辑。
+# 测试步（②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
+# 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；
+# 退出码仍是首要信号（编译错误、错误 --test 目标名照样红）。① 不跑测试，只看得退出码。
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内，规约门拒绝执行。" >&2
+  exit 1
+}
+if [ -z "$root" ] || ! cd "$root"; then
+  echo "ERROR: 无法进入仓库根：'$root'，规约门拒绝执行。" >&2
+  exit 1
+fi
+
 fail=0
+tmpout="$(mktemp)" || { echo "ERROR: mktemp 失败，无法捕获步骤输出。" >&2; exit 1; }
+trap 'rm -f "$tmpout"' EXIT INT TERM
 
 step() { printf '\n=== %s ===\n' "$1"; }
+
+# 只看退出码的步骤（供 ① 使用）。
 run() {
   if "$@"; then
     printf 'PASS  %s\n' "$*"
@@ -15,16 +30,33 @@ run() {
   fi
 }
 
+# 跑测试的步骤：cargo 退出码为首要信号；退出码 0 但输出中不存在任何
+# "test result: ok. N passed"（N≥1）时判 FAIL，封死空过滤器/测试集丢失的 fail-open。
+# 全量输出经 tee 实时流给操作者，同时落盘临时文件供 grep，不吞日志。
+run_tests() {
+  if ! "$@" 2>&1 | tee "$tmpout"; then
+    printf 'FAIL  %s\n' "$*"
+    fail=1
+    return
+  fi
+  if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' "$tmpout"; then
+    printf 'FAIL  %s ——命令成功但 0 个测试通过（过滤器打空或测试集丢失），视为门禁失效\n' "$*"
+    fail=1
+    return
+  fi
+  printf 'PASS  %s\n' "$*"
+}
+
 step "① workspace 编译"
 run sh -c 'cd base/runtime && cargo check --workspace'
 
 step "② manifest schema 校验"
-run sh -c 'cd base/runtime && cargo test -p rr-registry --test contract'
+run_tests sh -c 'cd base/runtime && cargo test -p rr-registry --test contract'
 step "②b mkmod 输出即契约用例（方案 P3）"
-run sh -c 'cargo test --manifest-path tools/mkmodule/Cargo.toml'
+run_tests sh -c 'cargo test --manifest-path tools/mkmodule/Cargo.toml'
 
 step "③ 主题前缀归属"
-run sh -c 'cd base/runtime && cargo test -p rr-registry topics_prefix'
+run_tests sh -c 'cd base/runtime && cargo test -p rr-registry topics_prefix'
 
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
