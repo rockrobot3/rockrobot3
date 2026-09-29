@@ -14,7 +14,7 @@
 |---|---|
 | [docs/dev/0.0.1版本洛克三号开发方案.md](docs/dev/0.0.1版本洛克三号开发方案.md) | 当前版本改造方案与 DoD |
 | [docs/architecture.md](docs/architecture.md) | 目标架构（RK3566 + 5+1 模块） |
-| [docs/conventions.md](docs/conventions.md) | 开发规约（分支/提交/CI 四步/DoD） |
+| [docs/conventions.md](docs/conventions.md) | 开发规约（分支/提交/CI 五步/DoD） |
 | [docs/naming.md](docs/naming.md) | 命名唯一权威 |
 | [contracts/README.md](contracts/README.md) | 字节级契约与歧义裁定 |
 | [docs/adr/](docs/adr/) | 决策记录 ADR-0001 ~ ADR-0007 |

@@ -44,8 +44,9 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 1. **只增不改**：既有字段、偏移、枚举值不得变更语义
 2. 破坏性变更必须升 `schema.version` major，并在 `topics.toml` 登记受影响主题
 3. 消息头扩展**只允许写 reserved 区**并经 `flags` 标记启用（保持与 A-IPC 标准逐字节兼容）
-4. CI 在 PR 上强制四步（唯一入口 `bash tools/ci/check.sh`，命名沿用方案 D7 的"三检查"）：
-   ① workspace 编译 / ② manifest schema 校验 / ②b mkmod 输出即契约用例 / ③ 主题前缀归属
+4. CI 在 PR 上强制五步（唯一入口 `bash tools/ci/check.sh`，命名沿用方案 D7 的"三检查"）：
+   ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试（51 条）/
+   ② manifest schema 校验 / ②b mkmod 输出即契约用例 / ③ 主题前缀归属
    （步序与命令的权威表见 [docs/conventions.md](../docs/conventions.md) §2）
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
