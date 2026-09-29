@@ -17,17 +17,18 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | [`process/naming.md`](process/naming.md) | 命名唯一权威（`rr3-` 前缀矩阵、模块目录四件套的四类结构角色） | `rr3-mkmod` 生成自检 + `rr-registry` 契约测试强制，不靠人记 |
 | [`process/adr/`](process/adr/) | 决策记录 ADR-0001 ~ ADR-0007（平台选型 / 模块模型 / IPC 选型 / Airymax 接入 / 命名规约 / AiryIPC 线格式 / 控制面分层） | 架构文档每节顶部回链对应 ADR |
 | [`process/dev/0.0.1版本洛克三号开发方案.md`](process/dev/0.0.1版本洛克三号开发方案.md) | 当前版本改造方案与 Definition of Done | 收口评审按此逐条对账 |
-| `status.md` | 唯一实况快照：HEAD 能跑什么、不能跑什么 + 里程碑进度 | 收口时整篇重写，不做增量修补 |
+| [`status.md`](status.md) | 唯一实况快照：能力 × 状态 × 证据路径、里程碑进度（M0–M6 当前实况）、本机无法收口的三项、在制品 | 收口时整篇重写，不做增量修补；**测试条数一律不抄进来**（见其开篇规矩） |
 
-> `status.md` 与 `reference/` 三件是本轮重构的目标档位：文件落位前本索引不放链接（放了就是
-> 断链），落位的那次改动各自补一行。
+> `reference/` 三件尚未落位，故本索引那行仍不放链接（放了就是断链），落位的那次改动补一行。
+> `status.md` 的里程碑表与 [`architecture/architecture.md`](architecture/architecture.md) §10
+> **暂时并存**（迁入已做、删原未做），下一次架构文档收口时删掉 §10 原表。
 
 ## 事实归属（改文档前先对这张表）
 
 | 事实类型 | 唯一落点 | 其他文档的写法 |
 |---|---|---|
 | 门禁步序、测试条数 | [`process/conventions.md`](process/conventions.md) §2 | "步序与条数见 conventions §2"——`tools/ci/check.sh` 头部注释已立此规 |
-| 已实装 / 未实装、里程碑进度 | `status.md` | 不写。`architecture/` 只写设计语义，不写"当前 HEAD 有没有" |
+| 已实装 / 未实装、里程碑进度 | [`status.md`](status.md) | 不写。`architecture/` 只写设计语义，不写"当前 HEAD 有没有" |
 | 主题清单与 kind | [`../contracts/topics.toml`](../contracts/topics.toml) | 只写"如何登记、如何校验、前缀归属"，不抄表 |
 | manifest 字段字典 | [`../base/runtime/rr-registry/src/module.schema.toml`](../base/runtime/rr-registry/src/module.schema.toml) | 只写字段语义与一份合规示例 |
 | 字节布局（128B 头 / payload 枚举） | [`../contracts/envelope.schema.json`](../contracts/envelope.schema.json) + [`../contracts/golden/`](../contracts/golden/) | 只写语义与歧义裁定 |
@@ -42,6 +43,9 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 
 ## 实况与规划的边界
 
-架构文档同时承载**目标架构**与**当前实况**：v0.0.1 阶段 `modules/` 尚无模块实现、
-`base/runtime/` 六 crate 多为骨架，标注"规划（M2+…）"的内容以 §10 里程碑表为准。
+**实况与规划分家**：架构文档只写目标架构与设计语义，不再承载"当前 HEAD 有没有"这类实况——
+后者唯一落在 [`status.md`](status.md)（见上文"事实归属"表）。里程碑的验收标准原文仍在架构文档
+§10，而每条里程碑的**当前进度**在 `status.md` 的"里程碑进度"节；两份并存是迁入过程中的一次性
+状态，架构文档收口时删原表。
+
 写文档时不要把设计期草图当既成事实——这是本项目已发生过的最大一次订正。
