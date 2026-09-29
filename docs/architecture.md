@@ -83,7 +83,7 @@ rock3/
 │
 ├── modules/                         ← 模块统一内构（rr3-mkmod 落盘五件）：module.toml + config.toml + Cargo.toml + src/main.rs + README.md
 │   ├── rr3-sense/       采集+VAD（src/audio/{capture,vad}.rs）
-│   ├── rr3-act/         执行：relay.rs、motion/（预留）
+│   ├── rr3-act/         执行：servo/command·servo/state·motor/reflex·led/effect（规划）；relay 尚未登记，见 §6.3 对账
 │   ├── rr3-interact/    播放 player.rs + Web 面板 panel/{server.rs,www/}
 │   ├── rr3-power/       battery.rs、charger.rs
 │   ├── rr3-connect/     wifi.rs（NetworkManager/D-Bus）、bt.rs（BlueZ）
@@ -221,7 +221,7 @@ pub trait Rr3Link: Send + Sync {                   // 网络链路读数
 
 - **128B 定长消息头**（Layout C，L1 永久稳定）+ **5 种 payload 类型**：REQUEST/RESPONSE（RPC）、EVENT（事件总线）、STREAM（音频/运动数据流，有序投递）、NOTIFICATION（心跳/系统通知）
 - 事务面 payload 默认 JSON-RPC 2.0；rock3 的 topic 字符串与 `phase`（normal/degraded/recovery）置于 payload 内，不占用消息头 reserved 区
-- RESPONSE.status 采用 AIRY_E* 子集；src_task 由 rrd（受信运行时）在模块注册时分配并校验
+- RESPONSE.status 采用 AIRY_E* 子集；src_task 由 rrd（受信运行时）在模块注册时分配并校验（v0.0.1 现状：rrd 仍是只打印横幅的空壳，src_task 分配与校验随 M2 落地）
 - capability 令牌、内核强制等 AirymaxRT 运行时机制不引入（单机可信环境），具身化时再评估（ADR-0007）
 
 ### 6.2 rr-ipc 分层
