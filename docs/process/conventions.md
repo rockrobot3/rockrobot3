@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 164 条（Windows）/175 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 164 条（Windows）/178 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -31,19 +31,19 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-29 M2 Task 7 收口（CF-3 横幅绝对路径 + CF-4 契约路径规范化）后复测。
-**两个平台的条数本就应当不等**，所以各记各的、不合并成单一数字：
-Windows x86_64-pc-windows-msvc **164**（本轮 ①b 实测量）、
-WSL2 Linux x86_64 **175**（= 控制器在 CF-3 那份树上 L2 实测的 174，加 CF-4 这 1 条
-**平台无关**的 lib 用例；本批 Unix 侧的绝对数待控制器下一次 L2 复核，不据此声称已跑）。
+测试面如实登记（2026-09-30 M2 Task 7 修复轮 1 收口（夹具 `RrdClient` 按连接待处理队列 +
+3 条 `dst_task` 门禁线级用例）后复测。**两个平台的条数本就应当不等**，所以各记各的、
+不合并成单一数字：Windows x86_64-pc-windows-msvc **164**（本轮 ①b 实测量）、
+WSL2 Linux x86_64 **178**（= 修复轮 1 前 L2 实测 175，加本轮 `register_publish` 3 条
+门禁线级用例，评审与本控制器各自独立复跑 L2 全量同为 178）。
 `aarch64-unknown-linux-gnu` 交叉 + qemu-user
-本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 11 条全部可枚举：
-Unix 独有的 10 条线级用例（`register_publish` 9 + `socket_banner` 1）+ `cli::tests` 里那 1 条
+本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 14 条全部可枚举：
+Unix 独有的 13 条线级用例（`register_publish` 12 + `socket_banner` 1）+ `cli::tests` 里那 1 条
 `#[cfg(unix)]` 用例。cargo 1.95—1.97：
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
-Unix 侧行为不据此声称；10 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
+Unix 侧行为不据此声称；13 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **164** 条（Windows）/ **175** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **164** 条（Windows）/ **178** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
@@ -83,7 +83,10 @@ M2 Task 7 的 UDS 层没有新增 lib 用例（`conn.rs`/`daemon.rs` 是 `#[cfg(
 纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住），它的 10 条在两个独立测试目标
 `rrd/tests/register_publish.rs`（顶层 `#![cfg(unix)]`，只在 Linux/aarch64 真跑：task 号与上线广播、
 重复名 EBUSY、保留名 EPERM、坏 manifest 点名字段、首帧必须 `rr3.register`、`src_task` 伪造拒帧不断连、
-上行只许 Request、未注册连接按读超时收掉、`rr3.unregister` 干净退场不重启，共 9 条）与
+上行只许 Request、未注册连接按读超时收掉、`rr3.unregister` 干净退场不重启，共 9 条；
+修复轮 1 再补 3 条门禁线级用例——`conn.rs:149` 首帧 `dst_task` 非 rrd 时拒帧、
+`conn.rs:262` 注册后 `dst_task=0` 上行帧按崩溃收尾不回 accepted、
+`conn.rs:87` `rr3_reply_ok` 的应答 dst 点对点不广播，共 **12** 条）与
 `rrd/tests/socket_banner.rs`（CF-3 新增 1 条：子进程 CWD 设为 `/tmp`、`--socket` 只给文件名，
 断言**版本横幅的 bus 字段与"监听 …"行都回显解析后的绝对路径**，并且按那个路径真能连上、注册得了——
 只断言"字符串像绝对路径"抓不到"横幅与 bind 各说一套"这个原始缺陷）；
