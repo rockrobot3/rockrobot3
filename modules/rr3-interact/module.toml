@@ -1,0 +1,32 @@
+[manifest]
+schema_version = 1
+name = "rr3-interact"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "rr3-interact"
+
+[provides]
+capabilities = ["ui.face", "audio.playback"]
+
+[depends]
+required = ["bus.publish", "bus.subscribe"]
+optional = []
+
+# asr/text 与 dialog/turn 是面向其它模块的呈现事件（owner 即命名空间归属，
+# 生产者可以是 brain，见 contracts/topics.toml 的 owner 字段语义）
+[events]
+publishes = ["rr3-interact/asr/text", "rr3-interact/dialog/turn"]
+subscribes = ["rr3-brain/intent/result"]
+
+[rpc]
+exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text"]
+
+[resources]
+restart_policy = "always"
+mem_limit_mb = 96
+start_priority = 60
+
+[health]
+heartbeat_ms = 1000
+watchdog_timeout_ms = 5000

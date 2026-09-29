@@ -32,7 +32,7 @@
   既不是 trait 方法，也不是私有函数。v0.0.1 裁定 **视为合规，加不加 `rr3_` 前缀均可**，既有实现
   （`rr3_pcm_duration_ms`、`rr3_slot_peer`、`rr3_slot_label`）保持带前缀不改名；矩阵将来若要收紧，
   须先出 ADR 再改 `base/runtime` 的导出名
-- 该边界的**主题/crate/manifest 名**部分由 CI 五步（`tools/ci/check.sh`，见
+- 该边界的**主题/crate/manifest 名**部分由 CI 六步（`tools/ci/check.sh`，见
   [conventions.md](conventions.md) §2）兜底；**Rust 符号前缀**在 v0.0.1 没有 lint
   （方案 D7 只冻结三条语义检查），靠评审——将来可在 `tools/` 补脚本，但需与上一条裁定一并收口
 

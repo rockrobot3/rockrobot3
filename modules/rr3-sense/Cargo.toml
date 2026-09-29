@@ -1,0 +1,18 @@
+[package]
+name = "rr3-sense"
+version = "0.0.1"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+# 独立工程：modules/ 不在 base/runtime workspace 内
+[workspace]
+
+[[bin]]
+name = "rr3-sense"
+path = "src/main.rs"
+
+[dependencies]
+# M2 接入总线时启用（path 依赖，勿用 crates.io 同名包）：
+# rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# rr-bus = { path = "../../base/runtime/rr-bus" }

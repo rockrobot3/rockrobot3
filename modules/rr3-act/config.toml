@@ -1,0 +1,12 @@
+# rr3-act 运行期配置（secret 一律走环境变量，不落盘）
+
+[rr3-act]
+log_level = "info"
+
+[rr3-act.servo]
+angle_limit_deg = [0, 180]
+move_timeout_ms = 800     # 超时即停，不给堵转留机会
+
+[rr3-act.reflex]
+loop_hz = 1000            # 闭环频率；永不进总线（ADR-0007 裁定 1）
+saturate_notice_ms = 500

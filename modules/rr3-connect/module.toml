@@ -1,0 +1,31 @@
+[manifest]
+schema_version = 1
+name = "rr3-connect"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "rr3-connect"
+
+[provides]
+capabilities = ["net.wifi", "net.bt"]
+
+[depends]
+required = ["bus.publish"]
+optional = ["net.online"]
+
+[events]
+publishes = ["rr3-connect/net/link"]
+subscribes = []
+
+# 云端会话是请求/应答事务面，不是事件
+[rpc]
+exposes = ["rr3-connect/cloud/session"]
+
+[resources]
+restart_policy = "always"
+mem_limit_mb = 32
+start_priority = 30
+
+[health]
+heartbeat_ms = 2000
+watchdog_timeout_ms = 10000

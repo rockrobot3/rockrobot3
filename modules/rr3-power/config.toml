@@ -1,0 +1,13 @@
+# rr3-power 运行期配置（secret 一律走环境变量，不落盘）
+# 关断阈值是本地安全决策的输入，不依赖总线可达（architecture §7.3）。
+
+[rr3-power]
+log_level = "info"
+
+[rr3-power.battery]
+sample_period_ms = 5000
+low_voltage_mv = 3300
+cutoff_voltage_mv = 3150
+
+[rr3-power.charger]
+state_period_ms = 2000

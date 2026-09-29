@@ -10,7 +10,7 @@
 - 涉及架构决策的提交 body **必须**引用 ADR 编号（`引用：ADR-0006`）
 - 一次提交只做一件事；`git mv` 类纯移动不得混入内容改动
 
-## 2 机器可检查项（CI 五步，见 `tools/ci/check.sh`）
+## 2 机器可检查项（CI 六步，见 `tools/ci/check.sh`）
 
 | 步 | 检查 | 命令 |
 |---|---|---|
@@ -19,20 +19,26 @@
 | ② | manifest schema + 注册表形状 pin | `cargo test -p rr-registry --test contract` |
 | ②b | mkmod 输出即契约用例（方案 P3） | `cargo test --manifest-path tools/mkmodule/Cargo.toml` |
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
+| ④ | modules/ 每个 Rust 模块编译 | 逐目录 `cargo check --all-targets --manifest-path modules/<id>/Cargo.toml` |
 
-入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**五步**：
+入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 56 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断。
+①b 把 workspace 的 66 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+④ 覆盖 `modules/`——模块 crate 各自是独立 workspace，①/①b 打不到它们，
+没有 ④ 的话骨架烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过）。
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记：①b **56** 条（`base/runtime` workspace 全量，含 rr-ipc 的 17 个 envelope 契约
-守护——13 条偏移/枚举对齐 + `tests/envelope_meta.rs` 的 4 条**读 JSON** 的元数据守护
-（`x-byte-size` / `x-offset-sum` / `payload_len.minimum|maximum` / `x-schema-version`）；
+测试面如实登记（2026-09-29 实测）：①b **66** 条（`base/runtime` workspace 全量，含 rr-ipc 的 25 个
+envelope 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
+的元数据守护（`x-byte-size` / `x-offset-sum` / `payload_len.minimum|maximum` / `x-schema-version`）；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
-它们连编译都不做，更谈不上执行）；② **22** 条（含 `registry_shape_is_pinned` 的注册表形状
-硬 pin：7 owner / 21 topic / kind 7-8-3-3 / 21 条三元组）、③ **5** 条（均为 ①b 的子集）、
-②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）。
+它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
+硬 pin：7 owner / 21 topic / kind 7-8-3-3 / 21 条三元组；`every_module_manifest_passes_contract`
+钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
+每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
+②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
+④ **5** 个模块 crate（rr3-brain 为 Python，不参与 cargo 检查）。
 ① 用 `--all-targets` 而非 `cargo check`：普通 check 不编译 `#[cfg(test)]` 目标，
 实测在测试代码里注入一个类型错误，`cargo check --workspace` 照样退 0。
 M2 起随运行时语义落地再扩点名范围。
