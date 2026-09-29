@@ -3,6 +3,8 @@
 //! 叠加层不是生产放行口（spec §6 / R6）：默认不加载；加载时由 main 打印绝对路径
 //! （`rr3_topics_absolute_path` 一次解析，装载与横幅共用）与新增条目清单；
 //! 与契约 topic 撞名 → 拒绝启动；声明内建命名空间 `rr3-runtime/*` 的 topic → 同样拒绝。
+//! 两条路径（契约、叠加层）都在**本入口内**各自规范化一次（CF-4 / 遗留 ③），所以调用方
+//! 传相对原词也改不了"致命文案回显绝对路径"这一条；main 那次解析服务的是横幅凭证。
 
 use std::path::{Path, PathBuf};
 
@@ -63,6 +65,18 @@ pub fn rr3_topics_absolute_path(path: &Path) -> Result<PathBuf, String> {
 fn rr3_contract_resolved(contract: &Path) -> Result<PathBuf, Vec<String>> {
     std::fs::canonicalize(contract)
         .map_err(|e| vec![format!("读不到主题契约 {}: {e}", contract.display())])
+}
+
+/// 叠加层路径与契约同口径进装载入口即规范化（Task 7 评审遗留 ③，与 CF-4 同一修法）。
+///
+/// 原先只有 `main.rs` 绝对化叠加层（为了给横幅留一张与 CWD 无关的凭证），装载入口拿到的
+/// 却仍是调用方给什么就用什么 —— 于是**叠加层**的撞名/冒充内建命名空间这类致命文案里
+/// 可能漏出相对原词（带 `..` 或裸文件名）：运维照报错里的路径去查，展开的是他自己的 CWD。
+/// 与契约那一条同理，"不存在"在叠加层这条路径上也是错误（它必须读得出来），所以
+/// `canonicalize` 的 ENOENT 正是该如实报的那一条，文案措辞与 `read_set` 的读失败保持一致。
+fn rr3_overlay_resolved(overlay: &Path) -> Result<PathBuf, Vec<String>> {
+    std::fs::canonicalize(overlay)
+        .map_err(|e| vec![format!("读不到主题叠加层 {}: {e}", overlay.display())])
 }
 
 /// 叠加层里出现内建命名空间的名字 = 冒充 rrd 的下行广播（spec §5.0）。
@@ -136,7 +150,8 @@ fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result
 }
 
 /// 装载：契约 →（可选）叠加层合并。返回主题集与"叠加层新增的条目清单"。
-/// 契约路径先经 `rr3_contract_resolved` 规范化（CF-4），后续所有文案都取规范化后的那一个。
+/// 两条路径都在进装载入口时被规范化（CF-4 契约 / 遗留 ③ 叠加层），后续所有文案都取
+/// 规范化后的那一个：`rr3_contract_resolved` 与 `rr3_overlay_resolved` 各管一条。
 /// 叠加层两道拒绝：撞名 → 点名冲突条目；声明 `rr3-runtime/*` → 点名冒充条目。
 /// 合并后还有一道：见 `reject_inconsistent_merge`。
 pub fn rr3_topics_load(
@@ -146,8 +161,9 @@ pub fn rr3_topics_load(
     let contract = rr3_contract_resolved(contract)?;
     let base = read_set(&contract, "主题契约")?;
     let Some(ov) = overlay else { return Ok((base, Vec::new())) };
-    let ov_set = read_set(ov, "主题叠加层")?;
-    reject_reserved_namespace(&ov_set, ov)?;
+    let ov = rr3_overlay_resolved(ov)?;
+    let ov_set = read_set(&ov, "主题叠加层")?;
+    reject_reserved_namespace(&ov_set, &ov)?;
     let added = ov_set.rr3_topic_set_names();
     let merged = base.rr3_topic_set_merge(&ov_set)?; // 撞名 → Err(冲突条目)
     reject_inconsistent_merge(&base, &merged)?;
@@ -483,10 +499,19 @@ owner = "rr3-sima"
     /// 叠加层声明内建命名空间 `rr3-runtime/*` 的新条目必须被装载处拒掉并点名。
     /// owner 写成 `rr3-runtime` 让这份叠加层**形状完全合法**（首段与 owner 一致、owner 已登记），
     /// 故拦下它的只可能是保留命名空间规则，不是形状规则——两条规则各测各的。
+    ///
+    /// 遗留 ③ 的另一半实证：喂进去的是**带 `..` 的相对原词**，而致命文案里的路径必须是
+    /// 规范化后的那一份（`rr3_overlay_resolved`）。原先只有 `main.rs` 绝对化叠加层，装载入口
+    /// 直接拿调用方给的原词做文案 → 运维照报错里的路径去查，展开的是他自己的 CWD。
+    /// 与 `contract_path_is_normalised_before_it_reaches_the_error_text`（CF-4）同口径、同工具。
     #[test]
     fn overlay_declaring_reserved_namespace_is_rejected() {
-        let ov = tmp_named(
-            "reserved",
+        let dir = std::env::temp_dir().join(format!("rr3-ov-cf3-{}", std::process::id()));
+        let nested = dir.join("nested");
+        std::fs::create_dir_all(&nested).expect("建用例临时目录");
+        let target = dir.join("rr3-reserved-overlay.toml");
+        std::fs::write(
+            &target,
             r#"
 [[owner]]
 name = "rr3-runtime"
@@ -501,16 +526,29 @@ name = "rr3-sima/extra/state"
 kind = "event"
 owner = "rr3-sima"
 "#,
+        )
+        .expect("写坏叠加层");
+        let ov = nested.join("..").join("rr3-reserved-overlay.toml");
+        assert!(
+            ov.components().any(|c| c == std::path::Component::ParentDir),
+            "用例前提：喂进去的必须真带 .. 分量，收到 {ov:?}"
         );
         let e = rr3_topics_load(&contract(), Some(&ov)).expect_err("冒充内建命名空间必须拒");
+        let want = std::fs::canonicalize(&target).expect("用例夹具必须能规范化");
         assert_eq!(
             e,
             vec![format!(
                 "主题叠加层 {} 冒充内建命名空间: rr3-runtime/evil/cmd（rr3-runtime/* 属 rrd 的下行广播，叠加层不得声明）",
-                ov.display()
+                want.display()
             )],
-            "必须只点名冒充的那条，合法条目不受牵连"
+            "必须只点名冒充的那条，合法条目不受牵连，且路径是规范化后的 {want:?}，收到 {e:?}"
         );
+        assert!(
+            !e[0].contains(".."),
+            "报错文案不得漏出 `..`（那串按运维自己的 CWD 展开），收到 {e:?}"
+        );
+        // M-10：自己收自己的临时件（Global Constraints 8）
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 形状错误必须自带来源——契约的错与叠加层的错打出来不能一样
