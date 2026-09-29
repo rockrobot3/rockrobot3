@@ -17,6 +17,13 @@ v0.0.1 + M2 Task 3 实况：
 - 叠加层路径在 `main` 里经 `rr3_topics_absolute_path`（`std::fs::canonicalize`）**一次**绝对化，
   装载与横幅共用同一个值，故"主题叠加层已加载"这行凭证与 CWD 无关
   （Windows 上 canonicalize 带 `\\?\` verbatim 前缀，仍是绝对路径；Linux 侧是干净的 `/abs/…`）。
+  调用方**绕开 main 直接**喂 `rr3_topics_load` 时也一样：契约与叠加层两条路径都在装载入口内
+  各自规范化（CF-4 / Task 7 遗留 ③），致命文案里的路径与 CWD 无关。
+- 上行 `Event` 的发布归属（Task 8）：三层顺序判定 = 冒充内建命名空间 `rr3-runtime/*` → EPERM、
+  前缀/在册 owner 不是自己 → EPERM 并点名 owner、在册但未登记主题 → EINVAL；三种拒法都只回
+  错误帧 + 计数（`rr3_reg_denied`），**不断连、不记崩溃**，体的形状错（非 JSON、缺/坏 `topic`）
+  同口径。放行后原样转发，头改写成发布者的分配 task + `dst_task=0`，`payload_len` 取
+  **编出来之后**的字节数（2 字节前缀不能少），且发布者收不到自己发的那一条。
 - 非 Unix 平台启动即打印 `rrd::RRD_UNSUPPORTED` 并以退出码 1 结束，绝不假称可跑
   （Windows 本机实测 `EXIT=1`；UDS 分支在 `#[cfg(unix)]` 之后，本机连编译都不参与）。
 - 命令行：`--socket`、`--topics-overlay`、可重复的 `--manifest`、`--restart-base-ms`、
@@ -27,12 +34,15 @@ v0.0.1 + M2 Task 3 实况：
 
 **待落地（M2 后续任务）**：
 
-- 加载 manifests → 依赖仲裁 → 按 `start_priority` 拉起模块（Task 4/8）
-- 在册表 + 状态机 + 发布归属 + 重启记账（Task 5）、上行 RPC 三方法（Task 6）
-- 心跳监督 + 按 `restart_policy` 处理崩溃（Task 7/8 的 `conn`/`daemon`）
-- 主题前缀的**运行时注册**校验（模块在 RPC 里声称 `rr3-runtime/*` 时的拒绝）：
-  `rr3_topics_is_reserved_topic` 现在有两个消费点——装载处（`rr3_topics_load` 拒叠加层冒充）
-  已落地，注册处随 Task 5/6 的在册表与 RPC 接上
+- 加载 manifests → 依赖仲裁 → 按 `start_priority` 拉起模块（Task 9/11）
+- 在册表 + 状态机 + 发布归属 + 重启记账（Task 5）、上行 RPC 三方法（Task 6）、
+  UDS 监听 + 注册握手（Task 7）、发布前缀强制与冒充拒绝（Task 8）——**这四批已落地**，
+  列在这里只说明"装配层还没有 watchdog 线程与 spawn"
+- 心跳监督的**驱动线程**（到期扫描由 `registry.rs` 提供、Task 10 接上）与按 `restart_policy`
+  真正重启进程（`conn.rs` 已回 `Rr3RestartPlan`，spawn 见 Task 11）
+- 主题前缀的**运行时注册**校验：`rr3_topics_is_reserved_topic` 的两个消费点都已落地——
+  装载处（`rr3_topics_load` 拒叠加层冒充）与在册表（`RrdRegistry::rr3_reg_publish_check`
+  拒上行冒充 `rr3-runtime/*`，经 Task 8 的 `conn.rs` Event 分支走到线上）
 - 安全兜底（急停/限位/低电保护）不经 brain 直接在 rrd 执行（§7.3）
 
 运行：`cargo run -p rrd -- --socket <path> [--topics-overlay <path>] [--manifest <path>]...`；
