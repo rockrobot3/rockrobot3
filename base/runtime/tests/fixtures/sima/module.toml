@@ -26,4 +26,5 @@ restart_policy = "always"
 
 [health]
 heartbeat_ms = 100
+# 500 同时是 e2e_watchdog 判据里的字面量（elapsed ≥ 500 / ≥ 超时 500ms），改它要同步行断言。
 watchdog_timeout_ms = 500

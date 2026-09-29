@@ -43,17 +43,33 @@ pub fn rr3_now_ns() -> u64 {
 /// 集成测试要么 20 要么 1 小时，见 `RR3_QUIET_WATCHDOG_TICK_MS`）。
 ///
 /// 先睡后扫：注册完成那一刻不必立刻扫一遍，第一拍在 t+tick。
-/// 每拍只锁一次、扫完立刻放锁：`rr3_reg_expire` 持锁期间 accept 线程与 conn 线程都在等
-/// 同一把锁，所以锁的粒度就是全表扫描本身（≤ `RR3_REG_MAX_MODULES` = 16 条，有硬上界）。
+/// 每拍为扫描只锁一次（每个到期回报再锁一次做广播）：`rr3_reg_expire` 持锁期间 accept 线程与
+/// conn 线程都在等同一把锁，所以锁的粒度就是全表扫描本身（≤ `RR3_REG_MAX_MODULES` = 16 条，有硬上界）。
 /// 广播在锁外做（`rr3_reg_fanout` 自己再锁一次）：判死与广播之间不持锁，
 /// 避免"持锁 sleep"那种把整个守护卡住的写法。
+///
+/// 放锁与广播之间有一个窗口：同一身份可在 `Failed` 之后被重新注册（`rr3_reg_add` 允许），
+/// 新连接的 `task` 与 `ex.src_task` 不同，于是 `exclude_task` 挡不住它——它会收到一条
+/// 关于**自己上一世**的 failed。今天无害（多一条陈旧广播），Task 11 做重启时必须处理
+/// （重启正是"同身份新 task"的量产现场）。
 ///
 /// panic 面：循环体里唯一会 panic 的是 `rr3_lock` 的毒锁 unwrap，与 conn 线程同一口径，
 /// 本任务不额外加 catch_unwind。Task 11 若把重启做进这条线程，必须重估这个决定
 /// （那时循环体里会多出 spawn 与退避睡眠）。
+///
+/// 到期判死**不**走死亡记账：它只改相位 + 回报，`restarts` 一颗都不扣。
+/// 由此产生一条本轮没有收口的次序：被 watchdog 判死的模块，它的连接后来真的断开时仍会走
+/// `conn.rs` 的 `rr3_conn_finish` → `rr3_reg_death`——那条**没有** skip-failed 护栏
+/// （`registry.rs`，与 `rr3_reg_expire` 相对），于是同一身份被记两次死亡、并可能按
+/// `restart_policy` 再扣一次重启预算。本轮不修：判死该不该计入重启预算、由谁计入，
+/// 是 Task 11 的"两条崩溃路汇到同一份重启预算"那条裁定的一部分（见 ledger R-A4），
+/// 在这里各写各的只会让 Task 11 拿到两份互相矛盾的账。
 fn rr3_spawn_watchdog(shared: Arc<Mutex<RrdRegistry>>, t0: Instant, tick_ms: u64) {
-    rr3_log(&format!("watchdog 启动 tick={tick_ms}ms"));
     thread::spawn(move || {
+        // 日志在线程内打：harness 每个用例都等这一行（`support` 的
+        // `rr3_spawn_with_overlay`），打在 spawn 之前它就只能证明"走到了这一行"，
+        // 打在这里它证明的是"线程真的跑起来过"。文案与格式一字不改（needle 依赖它）。
+        rr3_log(&format!("watchdog 启动 tick={tick_ms}ms"));
         let tick = Duration::from_millis(tick_ms);
         loop {
             thread::sleep(tick);

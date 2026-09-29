@@ -495,7 +495,11 @@ pub fn rr3_collect_within(c: &mut RrdClient, dur: Duration) -> Vec<Rr3Frame> {
             c.stream.set_read_timeout(saved.flatten()).ok();
             let kinds: Vec<String> = got
                 .iter()
-                .map(|f| rr3_body_split(&f.payload).map(|(ty, _)| format!("{ty:?}")).unwrap_or_else(|_| "坏前缀".into()))
+                .map(|f| {
+                    rr3_body_split(&f.payload)
+                        .map(|(ty, _)| format!("{ty:?}"))
+                        .unwrap_or_else(|_| "坏前缀".into())
+                })
                 .collect();
             panic!(
                 "帧流在 {COLLECT_WALL_CLOCK_CAP:?} 内没停过（收到 {} 帧）: {}",
