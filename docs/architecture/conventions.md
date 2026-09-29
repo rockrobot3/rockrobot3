@@ -39,7 +39,7 @@ envelope 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `tests/env
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24；
 rrd 的 28 条全在 lib 目标（`cli::tests` 6 + `topics_load::tests` 13 + `manifest::tests` 7 + 横幅 2；
-2026-09-30 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
+2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
 形状错误标注来源 1、路径值不得以 `-` 开头 1；M2 Task 4 再补 `manifest::tests` 7 条），
 `src/main.rs` 自 M2 只剩"参数 + 装载 + 平台门"、其 `[[bin]]` 目标 0 条——纯逻辑放进 lib，
 后续的 `rrd/tests/*.rs` 才引用得到（bin 里的模块对外不可见）；
