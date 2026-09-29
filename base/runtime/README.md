@@ -14,7 +14,6 @@
 依赖预算：只用 `[workspace.dependencies]` 里已声明的 `toml`、`async-trait`、`serde_json`，
 不引入 tokio/regex/nix/mio。当前边：`toml` → rr-registry、rrd；`async-trait` → rr-hal；
 `serde_json` → rr-ipc（dev-dep）、rrd；路径依赖 `rr-bus` → rrd。
-rrd 的这三条边（`toml`、`serde_json`、`rr-bus`）都是给 M2 后续任务的 manifest/RPC/任务号预留，
-**本阶段 rrd 的代码一条都还没 `use`**（含 `rr-bus`：任务号常量 `RR3_TASK_RRD`/`RR3_TASK_FIRST_MODULE`
-已在 rr-bus 里定义，但 rrd 侧要到 Task 5/6 的在册表与 RPC 才引用它），
+rrd 的 `toml` 边自 M2 Task 4（`manifest.rs` 取运行期事实）起已被真实 `use`；
+`serde_json`、`rr-bus` 两条边仍是给后续任务预留的（RPC 编解码与任务号引用要到 Task 5/6），
 `cargo check` 不会因未使用依赖告警，故在此如实登记。
