@@ -19,7 +19,7 @@
 # 一次性：安装 Rust ESP32 工具链
 cargo install espup && espup install
 
-cd rust
+cd legacy/rust
 cargo build --release --bin blink          # 编译
 espflash flash --speed 460800 target/xtensa-esp32-none-elf/release/blink -p /dev/tty.usbserial-1410   # 烧录
 espflash monitor -p /dev/tty.usbserial-1410   # 串口（115200）
