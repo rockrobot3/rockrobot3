@@ -20,7 +20,7 @@ pub const RR3_PRIORITY_MAX: u32 = 139;
 /// 主题分隔符
 pub const RR3_TOPIC_SEP: char = '/';
 
-/// 契约 schema 版本透传（rrd 握手时回显）
+/// 契约 schema 版本透传（rr-bus 侧的再导出；rrd 握手回显属 M2 待落地）
 pub const RR3_BUS_CONTRACT_VERSION: u32 = RR3_CONTRACT_SCHEMA_VERSION;
 
 #[cfg(test)]
