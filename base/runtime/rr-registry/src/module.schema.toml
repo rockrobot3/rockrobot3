@@ -1,5 +1,5 @@
 # 模块 manifest（modules/<id>/module.toml）的字段契约
-# 逐行来源：docs/dev/0.0.1版本洛克三号开发方案.md §4（D3 模块四件套之 manifest）
+# 逐行来源：docs/process/dev/0.0.1版本洛克三号开发方案.md §4（D3 模块四件套之 manifest）
 # 消费方：base/runtime/rr-registry（校验实现）、tools/mkmodule（bin rr3-mkmod，生成自检）、CI（D7②）
 # 演进：只增不改；破坏性变更须升 schema_version 并同步 rr-registry 测试
 # 引用：ADR-0002（能力仲裁）、ADR-0007 决策二（upgrades 字段先就位、实现后置）
