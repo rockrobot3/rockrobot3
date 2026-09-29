@@ -1,4 +1,4 @@
-# RockRobot3
+# Rockrobot3
 
 Toward embodiment. RockRobot3 is a desktop companion robot: it listens, speaks, and interacts.
 
