@@ -1,0 +1,17 @@
+[package]
+name = "rr-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "A-IPC 协议层（128B 头编解码）+ transport trait（uds/shm/tcp）"
+
+[lib]
+name = "rr_ipc"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+serde_json = { workspace = true }
