@@ -10,7 +10,7 @@
 - 涉及架构决策的提交 body **必须**引用 ADR 编号（`引用：ADR-0006`）
 - 一次提交只做一件事；`git mv` 类纯移动不得混入内容改动
 
-## 2 机器可检查项（CI 六步，见 `tools/ci/check.sh`）
+## 2 机器可检查项（CI 七步，见 `tools/ci/check.sh`）
 
 | 步 | 检查 | 命令 |
 |---|---|---|
@@ -20,14 +20,16 @@
 | ②b | mkmod 输出即契约用例（方案 P3） | `cargo test --manifest-path tools/mkmodule/Cargo.toml` |
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
 | ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`） |
+| ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（**排除 `legacy/`**：那是冻结区，其内 README 允许残留 1 处已知旧路径，见 `docs/status.md`；不排除只会逼人改冻结区或加豁免名单），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；违规逐条点名后非 0 退出 |
 
-入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
+入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
 ①b 把 workspace 的 165 条（Windows）/191 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
 `base/runtime/*` 由 ①/①b 负责，④ 显式排除以免重复）。
+⑤ 是文档门（空 md 与断链），判据与 `legacy/` 的排除理由都写在上表那一行。
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
