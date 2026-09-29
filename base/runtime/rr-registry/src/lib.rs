@@ -7,14 +7,16 @@
 //! M1/M2 待落地的运行时环节（architecture.md §6.3、§7）。
 
 pub mod schema;
+pub mod topics;
 pub mod validate;
 
 pub use schema::{
     Rr3FieldSpec, RR3_MANIFEST_SCHEMA_VERSION, rr3_registry_field_specs,
     rr3_registry_get_by_path, rr3_registry_rule_list,
 };
+pub use topics::{Rr3TopicSet, rr3_registry_topic_set_from_text};
 pub use validate::{
     Rr3ValidationReport, rr3_registry_check, rr3_registry_topic_names,
     rr3_registry_topic_owners, rr3_registry_validate_manifest,
-    rr3_registry_validate_topics,
+    rr3_registry_validate_manifest_text, rr3_registry_validate_topics,
 };

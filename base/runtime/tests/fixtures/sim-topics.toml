@@ -1,0 +1,36 @@
+# 仅测试用的主题叠加层（spec §6 / R6）：不是生产放行口，只有 rrd 带 --topics-overlay 时才装载。
+# 与 contracts/topics.toml 同构，故 rr-registry 复用同一套解析与形状检查。
+# 落位：与 rr3-sima/rr3-simb 两份夹具 manifest 都在 base/runtime/tests 下——
+# 刻意不进 modules/、不进 contracts/topics.toml（不吃 7 owner / 21 topic 的 pin 代价）。
+schema_version = 1
+
+[[owner]]
+name = "rr3-sima"
+path = "base/runtime/tests/fixtures/sima"
+role = "基座测试夹具：常驻、always 重启"
+
+[[owner]]
+name = "rr3-simb"
+path = "base/runtime/tests/fixtures/simb"
+role = "基座测试夹具：合法发布 + 越权尝试，never 重启"
+
+[[topic]]
+name = "rr3-sima/ping/state"
+kind = "event"
+owner = "rr3-sima"
+stable = "L2"
+note = "夹具自检事件"
+
+[[topic]]
+name = "rr3-sima/fault/selftest"
+kind = "notification"
+owner = "rr3-sima"
+stable = "L2"
+note = "夹具自报异常（越权用例的反例对照组）"
+
+[[topic]]
+name = "rr3-simb/pong/state"
+kind = "event"
+owner = "rr3-simb"
+stable = "L2"
+note = "夹具对 ping 的应答事件"
