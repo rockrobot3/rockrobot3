@@ -7,11 +7,11 @@
 
 | 对象 | 规则 | 示例 |
 |---|---|---|
-| 模块目录 / crate / 进程 / bin | `rr3-<域>` | `rr3-sense`、`rr3-brain`、`rr3-ctl` |
-| 基座内部 crate（workspace 成员） | `rr-<设施名>`（无 3） | `rr-ipc`、`rr-bus`、`rr-hal` |
+| 模块目录 / crate / 进程 / bin | `rr3-<域>` | `rr3-sense`、`rr3-brain`、`rr3-ctl`、`rr3-mkmod`、`rr3-sim`、`rr3-ota-ctl` |
+| 基座内部 crate（workspace 成员） | `rr-<设施名>`（无 3） | `rr-ipc`、`rr-bus`、`rr-hal`、`rr-registry`、`rr-ota` |
 | Rust lib target（crate 真名） | 连字符转下划线 | `rr3_sense` |
 | Rust 跨 crate 导出自由函数 | `rr3_<域>_<动作>` | `rr3_frame_read()`、`rr3_body_encode()`（`rr-ipc` 导出，`rrd/src/conn.rs` 实际消费） |
-| Rust 导出类型 | `Rr3` 前缀 | `Rr3Envelope`、`Rr3Error` |
+| Rust 导出类型 | `Rr3` 前缀 | `Rr3Header`、`Rr3StatusCode`（`rr-ipc/src/protocol/header.rs`）、`Rr3Frame`（`rr-ipc/src/transport/frame.rs`） |
 | Rust trait | `Rr3` 前缀；方法不加（挂在 trait 下无歧义） | `trait Rr3AudioSource { async fn open(&self, cfg: Rr3AudioCfg); async fn read(&self, frames: usize); }`（`rr-hal/src/lib.rs`） |
 | Rust crate 内部私有函数 | 不加前缀（crate 可见性已限定归属） | `fn parse_vad_frame()` |
 | Python 包 / 模块 | `rr3_<域>` | `rr3_brain.dialog` |
@@ -32,6 +32,11 @@
   既不是 trait 方法，也不是私有函数。v0.0.1 裁定 **视为合规，加不加 `rr3_` 前缀均可**，既有实现
   （`rr3_pcm_duration_ms`、`rr3_slot_peer`、`rr3_slot_label`）保持带前缀不改名；矩阵将来若要收紧，
   须先出 ADR 再改 `base/runtime` 的导出名
+- **既成例外（不外扩）**：`rrd`（基座守护进程的包名与它的同名 bin）与 `rrd` 包里的 `[[bin]] sim_peer`
+  都不落在 §1 矩阵的任何一行——`rrd` 是基座守护进程的历史既定名，`sim_peer` 是**仅测试夹具**的 bin
+  （跨进程 e2e 的对端，落点见 [../architecture/architecture.md](../architecture/architecture.md) §3）。
+  两者只作既成例外登记，**不外扩为新规则**：新起的包、bin、模块目录仍须按矩阵取名。矩阵将来若要
+  收紧或给这两个名字改名，须先出 ADR 再动 `base/runtime` 的包名与 bin 名
 - 该边界的**主题/crate/manifest 名**部分由 CI 七步（`tools/ci/check.sh`，见
   [conventions.md](conventions.md) §2）兜底；**Rust 符号前缀**在 v0.0.1 没有 lint
   （方案 D7 只冻结三条语义检查），靠评审——将来可在 `tools/` 补脚本，但需与上一条裁定一并收口
@@ -51,7 +56,9 @@
 1. 目录名 == crate 名 == 进程名 == manifest.name
 2. 事件/RPC 主题前缀 == manifest.name（越权发布不予合入）
 3. 发布/订阅的主题必须已在 [`contracts/topics.toml`](../../contracts/topics.toml) 逐条登记
-   （v0.0.1 收口时 7 owner / 21 topic）。该注册表反映的是 **M0 已登记的主题**，不是"全部可能的主题"：
+   （owner 数与 topic 数本文件不抄：条数以 [conventions.md](conventions.md) §2 的注册表形状 pin 为准，
+   主题全集以 [`contracts/topics.toml`](../../contracts/topics.toml) 本身为准）。该注册表反映的是
+   **M0 已登记的主题**，不是"全部可能的主题"：
    各模块其余主题随里程碑推进逐条 append（新增主题 = 改契约 = 走 review）
 
 ## 4. 模块目录四件套（mkmodule 生成模板）

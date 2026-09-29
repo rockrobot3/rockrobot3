@@ -14,8 +14,8 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 | `events/*.schema.json` | 各模块事件负载 schema（命名规则与模板见 [`events/README.md`](events/README.md)） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
-> 跨架构（x86 与 aarch64 布局一致，即 IPC-T-003）的等值证明需要交叉编译两端对拍，
-> 当前 HEAD 无此能力，故 IPC-T-003 记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered` 里；
+> 跨架构（x86 与 aarch64 布局一致，即 IPC-T-003）的等值证明需要交叉编译两端对拍，那属**契约外**的
+> 验证环节、本契约未覆盖它，故 IPC-T-003 记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered` 里；
 > 它何时补上属实况，见 [docs/status.md](../docs/status.md)。
 
 > **`envelope.schema.json` 是"给人读、给测试对照"的数据契约，不是喂校验器的 schema**：它该读、

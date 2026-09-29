@@ -11,7 +11,7 @@ decode→encode 往返无损；`tests/envelope_meta.rs` 另断言其解码字节
 
 **效力边界**（与 [`../README.md`](../README.md) 一致）：它只钉住"本机 Rust 编解码与契约
 字节逐位一致"。跨架构等值（x86 与 aarch64 布局一致，即 IPC-T-003）需要交叉编译两端对拍，
-当前 HEAD 无此能力，故记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered`；
+那属**契约外**的验证环节、本契约未覆盖它，故记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered`；
 何时补上属实况，见 [`../../docs/status.md`](../../docs/status.md)。
 
 演进规则：magic 与 golden 向量**不适用"只增不改"**的冻结约束，属评审裁定的许可项；
