@@ -240,7 +240,9 @@ fn rr3_handshake(
     rr3_log(&format!("广播 registered 到 {n} 个连接"));
     // 后到者的状态快照：state 是"当前生命周期"的唯一可见面，只发转移不发快照的话，
     // 按 start_priority 后起的模块永远看不到先起模块上线过（Task 9 的依赖判定就没有输入）。
-    // 排在应答与本模块广播之后入队，保证这一条连接的帧序仍是"应答在第一个"。
+    // 注意这里说的只是**入队次序**，不构成上线次序：writer 线程可能在 reader 取锁前就把别的
+    // 广播落盘了。所以这一条连接的帧序不做任何保证，读侧一律按类型/字段挑帧（夹具的按连接
+    // 待处理队列正是为此而存在，见 `rrd/tests/support/mod.rs` 的文件头）。
     let snapshot = rr3_lock(&ctx.shared).rr3_reg_snapshot();
     let mut replayed = 0usize;
     for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != peer.name) {
