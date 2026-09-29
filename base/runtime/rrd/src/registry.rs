@@ -87,7 +87,9 @@ impl fmt::Display for Rr3RegisterError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rr3PublishDeny {
     ReservedNamespace { topic: String },
-    /// `owner` 回显主题集里登记的 owner；主题根本不在册时取不到，只能回显 `?`。
+    /// `owner` 回显主题集里登记的 owner；**取不到就回显 `?`**——主题根本不在册、或在册但
+    /// 登记文本没写 owner（解析成空串）都算取不到，两条分支同一写法，不留"一会儿空串
+    /// 一会儿 `?`"的两种未知。
     /// 两条都是**终判拒绝**（这一条发布已经被拒了），不是"owner 未知、待定再查"——
     /// 日志读者别把 `owner=?` 读成待办事项。
     ForeignPrefix { topic: String, owner: String, sender: String },
@@ -168,18 +170,6 @@ impl RrdRegistry {
         tx: Sender<Rr3Frame>,
         now_ms: u64,
     ) -> Result<u64, Rr3RegisterError> {
-        // 入库前提：watchdog_ms 必须为正，否则 `now_ms - last_beat_ms >= watchdog_ms` 恒成立，
-        // 首轮到期扫描就把所有模块秒判死。`rr3_manifest_facts_from_text` 只在**文本**读取期
-        // 拒非正整数（`manifest.rs` 的 `req_int`），而 `Rr3ManifestFacts` 字段全 `pub`，
-        // 直接构造的 facts 绕得过那道校验，故这里再钉一次。
-        // 用 debug_assert 而不是返回 Err：绕过 facts 读取入口是调用方的编程错误，而
-        // `Rr3RegisterError` 的三个变体是冻结接口，不能为它加第四个；release 侧的硬门禁
-        // 属 Task 7/8 的 CLI/装载校验，本轮不发明。
-        debug_assert!(
-            facts.watchdog_ms > 0,
-            "watchdog_ms = 0 的模块 {} 一入库就会被到期扫描判死",
-            facts.name
-        );
         if facts.name == crate::topics_load::RR3_RESERVED_OWNER {
             return Err(Rr3RegisterError::ReservedName { name: facts.name.clone() });
         }
@@ -199,6 +189,21 @@ impl RrdRegistry {
         if self.modules.len() >= RR3_REG_MAX_MODULES {
             return Err(Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES });
         }
+        // 入库前提：watchdog_ms 必须为正，否则 `now_ms - last_beat_ms >= watchdog_ms` 恒成立，
+        // 首轮到期扫描就把所有模块秒判死。`rr3_manifest_facts_from_text` 只在**文本**读取期
+        // 拒非正整数（`manifest.rs` 的 `req_int`），而 `Rr3ManifestFacts` 字段全 `pub`，
+        // 直接构造的 facts 绕得过那道校验，故这里再钉一次。
+        // 用 debug_assert 而不是返回 Err：绕过 facts 读取入口是调用方的编程错误，而
+        // `Rr3RegisterError` 的三个变体是冻结接口，不能为它加第四个；release 侧的硬门禁
+        // 属 Task 7/8 的 CLI/装载校验，本轮不发明。
+        // 位置在**三条拒绝门之后**，让本函数文档里那句检查序在 debug 构建里也成立：断言
+        // 抢在前面的话，一个带坏 watchdog 的重复/保留名/超额注册会先 panic 而不是如实返回
+        // Err，调用方拿不到拒绝理由（Task 6 的 `rr3_rpc_status_for_register` 便无从映射）。
+        debug_assert!(
+            facts.watchdog_ms > 0,
+            "watchdog_ms = 0 的模块 {} 一入库就会被到期扫描判死",
+            facts.name
+        );
         let task = self.next_task;
         self.next_task = self.next_task.saturating_add(1);
         self.by_task.insert(task, facts.name.clone());
@@ -299,12 +304,13 @@ impl RrdRegistry {
             return Err(Rr3PublishDeny::NotRegistered { topic: topic.to_string() });
         }
         // 首段相符只说明主题串"写着是这个命名空间"；在册 owner 是别人就是越权。
-        // 取不到 owner（登记表里 owner 缺失）同样按越权拒，绝不因"查不到"而放行。
+        // 取不到 owner（登记表里 owner 缺失 = 没写这个键，解析成空串）同样按越权拒，
+        // 绝不因"查不到"而放行；回显与另一条 ForeignPrefix 分支一致地写 `?`。
         let owner = topics.rr3_topic_set_owner(topic);
         if owner.as_deref() != Some(sender_name) {
             return Err(Rr3PublishDeny::ForeignPrefix {
                 topic: topic.to_string(),
-                owner: owner.unwrap_or_default(),
+                owner: owner.filter(|o| !o.is_empty()).unwrap_or_else(|| "?".to_string()),
                 sender: sender_name.to_string(),
             });
         }
@@ -587,6 +593,49 @@ watchdog_timeout_ms = {wd}
         assert!(caught.is_err(), "watchdog_ms = 0 必须在入库那一刻被拦下，不能留给到期扫描去判死");
     }
 
+    /// 三条拒绝门必须先于 watchdog 断言：`rr3_reg_add` 的文档序是"保留名 → 同名在册 →
+    /// 超额 → 分配 task"，而断言原先坐在函数第一行，debug 构建里一个带着坏 watchdog 的
+    /// 重复注册会 panic 而不是如实返回 Duplicate——调用方拿不到拒绝理由，也就回不出
+    /// 正确错误码（Task 6 的 `rr3_rpc_status_for_register` 正是拿这个 Err 去映射）。
+    /// 三条门各给一个"坏 watchdog + 该拒"的输入，缺一条就抓不到。
+    #[cfg(debug_assertions)]
+    #[test]
+    fn register_gates_run_before_the_watchdog_assertion() {
+        let mut r = RrdRegistry::new(1000);
+        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+
+        let mut reserved = facts("rr3-runtime", 100, 500, "always");
+        reserved.watchdog_ms = 0;
+        assert_eq!(
+            r.rr3_reg_add(&reserved, chan().0, 0),
+            Err(Rr3RegisterError::ReservedName { name: "rr3-runtime".into() }),
+            "保留名必须先拒，不能让 watchdog 断言把拒绝变成 panic"
+        );
+        let mut dup = facts("rr3-sima", 100, 500, "always");
+        dup.watchdog_ms = 0;
+        assert_eq!(
+            r.rr3_reg_add(&dup, chan().0, 0),
+            Err(Rr3RegisterError::Duplicate { name: "rr3-sima".into(), src_task: t }),
+            "同名在册必须先拒"
+        );
+        // 表已经装了 rr3-sima 一条，故这里只补到上限（15 条），第 16 条留给下面的 over
+        for i in 0..RR3_REG_MAX_MODULES - 1 {
+            r.rr3_reg_add(&facts(&format!("rr3-m{i}"), 100, 500, "never"), chan().0, 0).unwrap();
+        }
+        let mut over = facts("rr3-over", 100, 500, "never");
+        over.watchdog_ms = 0;
+        assert_eq!(
+            r.rr3_reg_add(&over, chan().0, 0),
+            Err(Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES }),
+            "超额必须先拒"
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot().len(),
+            RR3_REG_MAX_MODULES,
+            "三次拒绝都不许留下影子条目"
+        );
+    }
+
     /// 注册即 registered；收到心跳才 running；未在册 task 的心跳被拒
     #[test]
     fn heartbeat_promotes_registered_to_running() {
@@ -689,6 +738,30 @@ owner = "rr3-simb"
                 sender: "rr3-sima".into(),
             }),
             "前缀对得上但在册 owner 是别人：必须按越权拒，而不是因为首段相符就放行"
+        );
+    }
+
+    /// 在册表里 owner 缺失（`[[topic]]` 没写 owner 键，解析成空串）时，越权文案的 owner
+    /// 必须回显 `?`：与 `Rr3PublishDeny::ForeignPrefix` 的文档、也与"主题根本不在册"那条
+    /// 分支（`owner: ...unwrap_or_else(|| "?")`）一致——同一种"不知道 owner 是谁"不许一会儿
+    /// 空串一会儿 `?`，否则日志里两种写法要人猜是不是两回事。
+    /// 夹具要点：主题**在册**且首段与发送方相符，所以前两道分支都不会命中，只有第三道
+    /// （登记 owner 与发送方比对）能拒——本用例钉的就是它的回显值。
+    #[test]
+    fn publish_foreign_prefix_echoes_question_mark_when_owner_is_missing() {
+        let set = rr_registry::rr3_registry_topic_set_from_text(
+            "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"event\"\n",
+        );
+        assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"), "用例前提：主题在册");
+        assert_eq!(set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(), Some(""));
+        assert_eq!(
+            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set),
+            Err(Rr3PublishDeny::ForeignPrefix {
+                topic: "rr3-sima/ping/state".into(),
+                owner: "?".into(),
+                sender: "rr3-sima".into(),
+            }),
+            "登记 owner 缺失必须回显 ?，不得回显空串"
         );
     }
 
@@ -875,6 +948,22 @@ owner = "rr3-simb"
         assert!(!r.rr3_reg_beat(t, 800), "旧 task 号不得再被认成在册");
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Registered);
         assert!(r.rr3_reg_live("rr3-sima"));
+    }
+
+    /// `rr3_reg_facts` 的现值钉住（Task 7 的 spawn 序靠它取 start_priority / entry）：
+    /// 在册名字必须原样回**入库时那份 facts**（逐字段相等，不是只回个名字），不在册的名字
+    /// 回 None——既不能 panic，也不能回一条半数据（空的 start_priority 会让 spawn 序排错位）。
+    #[test]
+    fn facts_roundtrip_for_known_and_unknown_names() {
+        let mut r = RrdRegistry::new(1000);
+        let f = facts("rr3-sima", 100, 500, "on-failure");
+        r.rr3_reg_add(&f, chan().0, 0).unwrap();
+        assert_eq!(
+            r.rr3_reg_facts("rr3-sima").as_ref(),
+            Some(&f),
+            "取回的 facts 必须与入库的那份逐字段相同"
+        );
+        assert_eq!(r.rr3_reg_facts("rr3-nobody"), None, "不在册的名字必须 None");
     }
 
     /// fanout：跳过发起者；对端已 drop 只是少计，不 panic

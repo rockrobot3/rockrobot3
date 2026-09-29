@@ -67,21 +67,22 @@ fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<S
     }
 }
 
-/// 合并后对**整张表**再自检一次（Task 3 评审 DEFER→Task 5 的欠账）。
+/// 合并后对**整张表**再自检一次（Task 3 评审 DEFER→Task 5 的欠账；kind 一支随 Task 6 批次补齐）。
 ///
 /// `read_set` 只对契约、叠加层各自自检，合并这一步本身从未被验证过：
-/// `rr3_topic_set_merge` 只要退化（漏带一条生产 topic、把某条的 owner 改成叠加层的值），
-/// 装载就会把一张被改写过的所有权表交出去——那正是 spec §6
+/// `rr3_topic_set_merge` 只要退化（漏带一条生产 topic、把某条的 owner 或 kind 换成叠加层
+/// 的值），装载就会把一张被改写过的所有权表交出去——那正是 spec §6
 /// "叠加层不是生产放行口"最坏的实现方式。故合并后复检两件事并逐条点名：
 /// ① merged 自身形状合法（`rr3_topic_set_check` 的范围：名字规则、owner 已登记、
-///    首段 == owner、kind 在白名单内）；② 契约的**每一条 topic 名**都仍在 merged 里、
-///    且它的 **owner** 一字未改（叠加层只能新增）。
+///    首段 == owner、kind 在白名单内）；② 契约的**每一条 topic 名**都仍在 merged 里，
+///    且它的 **owner 与 kind** 一字未改（叠加层只能新增）。
 ///
-/// **②只比 name 与 owner，不比 kind**：契约某条 topic 的 kind 被 merge 改写时，本函数
-/// 两道分支都抓不到（①只验 kind 是否合法、不比对契约原值）。这不是笔误而是能力上限——
-/// `Rr3TopicSet` 只暴露 `contains/owner/names`，没有 kind 访问器。kind 的访问器与 kind
-/// 复检随 Task 6 的批次一起做（给 `Rr3TopicSet` 加访问器是 API 变更），在此之前本注释
-/// 不得把复检范围说成"逐项/全字段复验"。
+/// ② 里为什么要单独比 kind：`rr3_topic_set_check` 只问 kind 在不在
+/// `[rules] topic_allowed_kinds` 白名单里，不问它是不是契约原值——契约某条 topic 的 kind
+/// 被 merge 换成另一个白名单值时，①照样全过、owner 也比得出"没变"，只有拿契约原值逐条
+/// 比对才抓得到（访问器 `Rr3TopicSet::rr3_topic_set_kind` 即为此而加）。
+/// 复验范围到 kind 为止：主题集只存 name→owner、name→kind 与 owner 名单，`stable`、
+/// `note` 那类注释性字段不在它的视图里，故本注释不称"全字段复验"。
 /// 与 `reject_reserved_namespace` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
 fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
     let mut errs: Vec<String> = merged
@@ -91,6 +92,7 @@ fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result
         .collect();
     for name in base.rr3_topic_set_names() {
         let want = base.rr3_topic_set_owner(&name);
+        let want_kind = base.rr3_topic_set_kind(&name);
         if !merged.rr3_topic_set_contains(&name) {
             errs.push(format!("合并后契约 topic 丢失: {name}（叠加层不得覆盖生产条目）"));
         } else if merged.rr3_topic_set_owner(&name) != want {
@@ -98,6 +100,12 @@ fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result
                 "契约 topic {name} 的 owner 被叠加层改写: {:?} → {:?}",
                 want,
                 merged.rr3_topic_set_owner(&name)
+            ));
+        } else if merged.rr3_topic_set_kind(&name) != want_kind {
+            errs.push(format!(
+                "契约 topic {name} 的 kind 被叠加层改写: {:?} → {:?}",
+                want_kind,
+                merged.rr3_topic_set_kind(&name)
             ));
         }
     }
@@ -189,12 +197,14 @@ mod tests {
         assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
     }
 
-    /// 合并后必须**逐条复验 topic 名与 owner**（Task 3 评审 DEFER→Task 5）：装载交出去的那张表，
-    /// 除了"两边各自合法"，还得保证生产条目一条不少、owner 一字未改。**kind 不在本复验范围**
-    /// （`Rr3TopicSet` 无 kind 访问器，随 Task 6 批次补），别把这条读成全字段复验。
+    /// 合并后必须**逐条复验 topic 名、owner 与 kind**（Task 3 评审 DEFER→Task 5；kind 一支随
+    /// Task 6 批次补，`Rr3TopicSet::rr3_topic_set_kind` 就是为它加的访问器）：装载交出去的那张表，
+    /// 除了"两边各自合法"，还得保证生产条目一条不少、owner 与 kind 一字未改。复验范围到 kind
+    /// 为止（`stable`、`note` 不在主题集的视图里），别把这条读成全字段复验。
     /// 断言取自 `rr3_topics_load` 的真实返回，而不是再拼一遍期望集合——去掉装载处的
     /// 复验步骤本身不会让本测试变红（正确的 merge 造不出不自洽的表），它挡的是
-    /// merge 将来退化；装载处的复验是同一件事的 fail-closed 版本。
+    /// merge 将来退化；装载处的复验是同一件事的 fail-closed 版本，kind 那一支的**反向**实证
+    /// 见 `contract_topic_kind_rewritten_by_the_merge_is_rejected`。
     #[test]
     fn merged_set_is_rechecked_against_the_contract() {
         let (base_set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
@@ -209,6 +219,11 @@ mod tests {
                 merged.rr3_topic_set_owner(&name),
                 base_set.rr3_topic_set_owner(&name),
                 "契约 topic {name} 的 owner 被叠加层改写"
+            );
+            assert_eq!(
+                merged.rr3_topic_set_kind(&name),
+                base_set.rr3_topic_set_kind(&name),
+                "契约 topic {name} 的 kind 被叠加层改写"
             );
         }
         // 叠加层新增的 owner 也必须进了这张表，否则"复验"会连合法新增一起否掉
@@ -304,6 +319,73 @@ owner = "rr3-sense"
         let (set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
         assert_eq!(set.rr3_topic_set_owner("rr3-nobody/not/registered"), None);
         assert_eq!(set.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(), Some("rr3-sense"));
+    }
+
+    /// 复验必须连 **kind** 一起比（Task 5 评审 M-15）：`rr3_topic_set_check` 只问 kind
+    /// 在不在白名单里，不问它是不是契约原值——把契约某条 topic 的 kind 从 `stream` 改成
+    /// 另一个合法值 `event`，形状自检照样过，owner 也比得出"没变"，两条分支都抓不到。
+    /// 本用例刻意不走 `rr3_topics_load`（正确的 merge 造不出 kind 被改写的表），而是手写
+    /// 一对 base/merged 代表"merge 退化后的产物"，直接打复验函数；同一对输入里的合法新增
+    /// 对照组证明这条规则不会把"只加新 topic"一起否掉。
+    #[test]
+    fn contract_topic_kind_rewritten_by_the_merge_is_rejected() {
+        let base = rr3_registry_topic_set_from_text(
+            r#"schema_version = 1
+[[owner]]
+name = "rr3-sense"
+[[topic]]
+name = "rr3-sense/audio/pcm"
+kind = "stream"
+owner = "rr3-sense"
+"#,
+        );
+        // 退化 merge 的产物：名字与 owner 都没动，只把 kind 换成另一个白名单值
+        let tampered = rr3_registry_topic_set_from_text(
+            r#"schema_version = 1
+[[owner]]
+name = "rr3-sense"
+[[topic]]
+name = "rr3-sense/audio/pcm"
+kind = "event"
+owner = "rr3-sense"
+"#,
+        );
+        assert!(
+            tampered.rr3_topic_set_check().is_empty(),
+            "用例前提：kind 换成 event 仍是合法值，形状自检抓不到（{:?}），只能靠复验抓",
+            tampered.rr3_topic_set_check()
+        );
+        assert_eq!(
+            reject_inconsistent_merge(&base, &tampered).expect_err("契约 topic 的 kind 被改写必须拒"),
+            vec![
+                "契约 topic rr3-sense/audio/pcm 的 kind 被叠加层改写: Some(\"stream\") → Some(\"event\")"
+                    .to_string()
+            ],
+            "必须点名 topic 与改写前后的两个 kind 值：写法与上面那条 owner 改写错误一致\
+            （Debug 打在 Option 上，所以是 Some(...) 而不是裸引号串）"
+        );
+        // 对照组：只新增 topic、契约条目一字未动 —— 合法叠加层不得被误拒
+        let legit = rr3_registry_topic_set_from_text(
+            r#"schema_version = 1
+[[owner]]
+name = "rr3-sense"
+[[owner]]
+name = "rr3-sima"
+[[topic]]
+name = "rr3-sense/audio/pcm"
+kind = "stream"
+owner = "rr3-sense"
+[[topic]]
+name = "rr3-sima/ping/state"
+kind = "event"
+owner = "rr3-sima"
+"#,
+        );
+        assert!(
+            reject_inconsistent_merge(&base, &legit).is_ok(),
+            "合法新增不得被 kind 复验误拒: {:?}",
+            reject_inconsistent_merge(&base, &legit)
+        );
     }
 
     /// 横幅凭证必须绝对：用**相对**叠加层路径调用解析入口，断言拿回的是绝对路径
