@@ -53,6 +53,11 @@ RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人�
 
 ## 3. 仓库目录树（文件级）
 
+> **状态（2026-09-29，v0.0.1）**：`contracts/`、`base/runtime/`（6 crate）、`tools/mkmodule`、
+> `tools/ci/` 已建立并通过 `bash tools/ci/check.sh`；`modules/` 仅有规约 README（尚无模块，约定见
+> [conventions.md](conventions.md)）；ESP32 在编固件已迁入 `legacy/`（tag `v0-pre-legacy`）。
+> 下图/下表仍含 M1–M6 未落地项，标注"规划"者以里程碑表（§10）为准。
+
 ```
 rock3/
 ├── contracts/                       ← [SC] 字节级共享契约（Rust/Python 双方唯一事实源）
@@ -199,7 +204,7 @@ UDS 路径 `/var/run/rock3-ipc.sock`（自有路径，避免与真实 Airymax �
 
 ### 6.3 主题命名
 
-格式 `rr3-<模块>/<域>/<事件>`，全小写 snake_case。已规划主题：
+格式 `rr3-<模块>/<域>/<事件>`，全小写 snake_case。v0.0.1 规划的主题草图：
 
 ```
 rr3-sense/audio/vad_start      rr3-sense/audio/asr_partial   rr3-sense/audio/asr_final
@@ -208,10 +213,17 @@ rr3-act/relay/set              rr3-act/relay/state
 rr3-interact/audio/play_done
 rr3-power/battery/state        rr3-power/battery/low         rr3-power/charger/event
 rr3-connect/wifi/state         rr3-connect/bt/state
-base/module/lifecycle          base/module/crash             base/ota/progress
+rr3-runtime/module/state       rr3-runtime/system/heartbeat
 ```
 
-主题全量登记于 `contracts/topics.toml`，rrd 启动时按 manifest.name 校验前缀归属。
+> **v0.0.1 裁定**：base 运行时主题命名空间改用 `rr3-runtime/`（如 `rr3-runtime/module/state`、
+> `rr3-runtime/system/heartbeat`），不再使用 `base/` 前缀——契约要求每段主题首段等于某个
+> `[manifest].name`，而模块名规则是 `^rr3-[a-z]+$`。全量已登记主题以
+> [`contracts/topics.toml`](../contracts/topics.toml) 为准（7 owner / 21 topic）。
+
+rrd 启动时按 `manifest.name` 校验前缀归属（越权发布拒绝注册）。上面的代码块是**设计期草图**：
+`contracts/topics.toml` 才是事实源（v0.0.1 收口时 7 owner / 21 topic），两者不一致时以注册表为准；
+注册表按"只增不改"演进，各模块其余主题随里程碑（M2+）逐条 append，不预先占位。
 
 ---
 
@@ -258,14 +270,16 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁(resolved) →
 
 | legacy（已冻结） | 去向 | 方式 |
 |---|---|---|
-| core/audio | rr3-sense（采集+VAD）/ rr3-interact（播放） | HAL 换 ALSA，VAD 逻辑移植 |
-| core/asr · llm · tts | rr3-brain/cloud/ | Python 直接移植 HTTP 逻辑（含 Content-Length 等踩坑） |
-| core/relay | rr3-act | gpiod |
-| core/link/wifi · btctl | rr3-connect | NetworkManager(D-Bus) / BlueZ |
-| core/panel | rr3-interact/panel | HTML 资产直接搬入 |
-| core/applog · data | base/runtime | 日志与计数是基座职责 |
-| firmware-c/main/config.h | rr3-brain/config.toml | 对话策略参数平移 |
-| firmware-c/main/main.c | rr3-brain/dialog.py | 编排逻辑移植 |
+| `legacy/core/audio` | rr3-sense（采集+VAD）/ rr3-interact（播放） | HAL 换 ALSA，VAD 逻辑移植 |
+| `legacy/core/asr` · `legacy/core/llm` · `legacy/core/tts` | rr3-brain/cloud/ | Python 直接移植 HTTP 逻辑（含 Content-Length 等踩坑） |
+| `legacy/core/relay` | rr3-act | gpiod |
+| `legacy/core/link/wifi` · `legacy/core/link/btctl` | rr3-connect | NetworkManager(D-Bus) / BlueZ |
+| `legacy/core/panel` | rr3-interact/panel | HTML 资产直接搬入 |
+| `legacy/core/applog` · `legacy/core/data` | base/runtime | 日志与计数是基座职责 |
+| `legacy/firmware-c/main/config.h` | rr3-brain/config.toml | 对话策略参数平移 |
+| `legacy/firmware-c/main/main.c` | rr3-brain/dialog.py | 编排逻辑移植 |
+
+> 路径以迁移后（`e98a3d1`）的真实位置为准：`core/`、`firmware-c/` 已整体位于 `legacy/` 下。
 
 ---
 

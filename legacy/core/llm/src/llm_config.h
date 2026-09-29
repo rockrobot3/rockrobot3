@@ -1,4 +1,5 @@
-/* llm 模块配置区：对话服务的密钥、模型、人设 */
+/* llm 模块配置区：对话服务的模型、人设、地址（密钥不在本文件：构建期注入 SILICONFLOW_API_KEY，
+ * 注入方式与缺失后果见 legacy/core/README.md 的「密钥注入」一节） */
 #ifndef LLM_CONFIG_H
 #define LLM_CONFIG_H
 

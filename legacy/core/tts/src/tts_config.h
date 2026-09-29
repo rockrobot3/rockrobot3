@@ -1,4 +1,5 @@
-/* tts 模块配置区：合成服务的密钥、地址、模型、音色 */
+/* tts 模块配置区：合成服务的地址、模型、音色（密钥不在本文件：构建期注入 SILICONFLOW_API_KEY，
+ * 注入方式与缺失后果见 legacy/core/README.md 的「密钥注入」一节） */
 #ifndef TTS_CONFIG_H
 #define TTS_CONFIG_H
 
