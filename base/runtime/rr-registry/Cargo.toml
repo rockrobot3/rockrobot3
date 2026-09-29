@@ -1,0 +1,15 @@
+[package]
+name = "rr-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "manifest 契约与主题所有权校验（[SC] 契约层消费方）"
+
+[lib]
+name = "rr_registry"
+path = "src/lib.rs"
+
+[dependencies]
+toml = { workspace = true }

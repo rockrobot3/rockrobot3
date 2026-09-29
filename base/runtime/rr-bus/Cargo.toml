@@ -1,0 +1,15 @@
+[package]
+name = "rr-bus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "总线客户端骨架：主题/广播常量层（M2 接 UDS 客户端）"
+
+[lib]
+name = "rr_bus"
+path = "src/lib.rs"
+
+[dependencies]
+rr-ipc = { path = "../rr-ipc" }

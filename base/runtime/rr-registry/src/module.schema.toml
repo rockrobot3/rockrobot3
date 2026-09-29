@@ -1,0 +1,129 @@
+# 模块 manifest（modules/<id>/module.toml）的字段契约
+# 逐行来源：docs/dev/0.0.1版本洛克三号开发方案.md §4（D3 模块四件套之 manifest）
+# 消费方：base/runtime/rr-registry（启动校验）、tools/rr3-mkmod（生成自检）、CI（D7②）
+# 演进：只增不改；破坏性变更须升 schema_version 并同步 rr-registry 测试
+# 引用：ADR-0002（能力仲裁）、ADR-0007 决策二（upgrades 字段先就位、实现后置）
+
+schema_version = 1
+
+# ---------- [manifest] ----------
+[[field]]
+path = "manifest.schema_version"
+kind = "int"
+required = true
+
+[[field]]
+path = "manifest.name"
+kind = "string"
+required = true
+rule = "module_name"
+
+[[field]]
+path = "manifest.version"
+kind = "string"
+required = true
+rule = "semver"
+
+[[field]]
+path = "manifest.type"
+kind = "string"
+required = true
+rule = "type"
+
+[[field]]
+path = "manifest.lang"
+kind = "string"
+required = true
+rule = "lang"
+
+[[field]]
+path = "manifest.entry"
+kind = "string"
+required = true
+
+# ---------- [provides] / [depends] ----------
+[[field]]
+path = "provides.capabilities"
+kind = "list"
+required = false
+rule = "capability"
+
+[[field]]
+path = "depends.required"
+kind = "list"
+required = false
+rule = "capability"
+
+[[field]]
+path = "depends.optional"
+kind = "list"
+required = false
+rule = "capability"
+
+# ---------- [events] / [rpc] ----------
+[[field]]
+path = "events.publishes"
+kind = "list"
+required = true
+rule = "own_topic"
+
+[[field]]
+path = "events.subscribes"
+kind = "list"
+required = true
+rule = "topic"
+
+[[field]]
+path = "rpc.exposes"
+kind = "list"
+required = false
+rule = "own_topic"
+
+# ---------- [resources] ----------
+[[field]]
+path = "resources.restart_policy"
+kind = "string"
+required = true
+rule = "restart_policy"
+
+[[field]]
+path = "resources.mem_limit_mb"
+kind = "int"
+required = false
+
+[[field]]
+path = "resources.start_priority"
+kind = "int"
+required = false
+
+# ---------- [health]（跨字段规则 heartbeat < watchdog 在 validate.rs 内实现） ----------
+[[field]]
+path = "health.heartbeat_ms"
+kind = "int"
+required = true
+
+[[field]]
+path = "health.watchdog_timeout_ms"
+kind = "int"
+required = true
+
+# ---------- [upgrades]（ADR-0007 预留，v0.0.1 允许缺省） ----------
+[[field]]
+path = "upgrades.min_from_semver"
+kind = "string"
+required = false
+rule = "semver"
+
+[[field]]
+path = "upgrades.staging"
+kind = "bool"
+required = false
+
+# ---------- 规则表（rr3_registry_check 消费） ----------
+[rules]
+type = ["module", "brain"]
+lang = ["rust", "python"]
+restart_policy = ["always", "on-failure", "never"]
+topic_allowed_kinds = ["request", "event", "stream", "notification"]
+# v0.0.1 只有 base 内建能力可被依赖；跨模块能力仲裁随 rrd 注册表（M2）落地
+base_capabilities = ["bus.publish", "bus.subscribe", "bus.rpc", "net.online", "power.battery"]
