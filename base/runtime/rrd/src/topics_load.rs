@@ -46,6 +46,25 @@ pub fn rr3_topics_absolute_path(path: &Path) -> Result<PathBuf, String> {
         .map_err(|e| format!("路径 {} 无法解析为绝对路径: {e}", path.display()))
 }
 
+/// 契约路径进装载前先规范化（Task 7 评审遗留 CF-4）。
+///
+/// **为什么这里用 `fs::canonicalize`，而套接字路径（`cli::rr3_socket_absolute_path`）用的是
+/// `std::path::absolute`**：契约主题表**必须已经存在**——它是 spec §6 的生产真相，
+/// `missing_contract_is_fatal` 钉死了"文件丢了就拒启动"。"不存在"在这条路径上是错误，
+/// 不是像待创建套接字那样的合法常态，所以 ENOENT 正是该如实报的那一条；反过来在套接字那边
+/// 用 canonicalize 就会误拒一个 bind 前必然不存在的合法值（两个入口的分工由此而定，别互换）。
+///
+/// **为什么非规范化不可**：`RR3_CONTRACT_TOPICS_PATH` 由 `CARGO_MANIFEST_DIR` 拼出，字面就带
+/// `..`（`…/rrd/../../../contracts/topics.toml`），而 `main.rs` 只把**叠加层**路径绝对化
+/// （`rr3_topics_absolute_path`）、契约这条没走那一步——于是装载失败的致命文案里漏出 `..`：
+/// 运维照报错里的路径去查，那串 `..` 是按**他自己**的 CWD 展开的，指向的往往不是 rrd 刚读的那一份。
+/// 放在装载入口而不是 main，是为了让**每个**调用方（含测试与后续 sim 侧）都在同一口径上。
+/// canonicalize 失败与"读不到契约"是同一个前提、同一句文案，不静默回落原词。
+fn rr3_contract_resolved(contract: &Path) -> Result<PathBuf, Vec<String>> {
+    std::fs::canonicalize(contract)
+        .map_err(|e| vec![format!("读不到主题契约 {}: {e}", contract.display())])
+}
+
 /// 叠加层里出现内建命名空间的名字 = 冒充 rrd 的下行广播（spec §5.0）。
 /// 逐条点名；不命中的条目不受牵连。
 fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<String>> {
@@ -117,13 +136,15 @@ fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result
 }
 
 /// 装载：契约 →（可选）叠加层合并。返回主题集与"叠加层新增的条目清单"。
+/// 契约路径先经 `rr3_contract_resolved` 规范化（CF-4），后续所有文案都取规范化后的那一个。
 /// 叠加层两道拒绝：撞名 → 点名冲突条目；声明 `rr3-runtime/*` → 点名冒充条目。
 /// 合并后还有一道：见 `reject_inconsistent_merge`。
 pub fn rr3_topics_load(
     contract: &Path,
     overlay: Option<&Path>,
 ) -> Result<(Rr3TopicSet, Vec<String>), Vec<String>> {
-    let base = read_set(contract, "主题契约")?;
+    let contract = rr3_contract_resolved(contract)?;
+    let base = read_set(&contract, "主题契约")?;
     let Some(ov) = overlay else { return Ok((base, Vec::new())) };
     let ov_set = read_set(ov, "主题叠加层")?;
     reject_reserved_namespace(&ov_set, ov)?;
@@ -277,6 +298,46 @@ owner = "rr3-sense"
         let e = rr3_topics_load(Path::new("/nonexistent/rr3-topics.toml"), None)
             .expect_err("契约缺失必须拒");
         assert!(e[0].contains("读不到主题契约"), "{e:?}");
+    }
+
+    /// CF-4：装载入口必须先把契约路径规范化再进文案。带 `..` 的原词漏进报错时，运维照着查，
+    /// 那串 `..` 是按**他自己**的 CWD 展开的，指向的不是 rrd 刚读的那一份。
+    /// 前提两条各自钉住，免得这条修法对着假想敌：① 生产常量 `RR3_CONTRACT_TOPICS_PATH`
+    /// 字面就带 `..`（它由 `CARGO_MANIFEST_DIR` 拼出）；② 喂进装载入口的路径确实绕了 `..`。
+    /// 与 CF-3（套接字用 `std::path::absolute`）的分工见 `rr3_contract_resolved` 的注释：
+    /// 契约**必须已存在**，所以 canonicalize 在这里恰是对的工具，而 bind 前的套接字用它会误拒。
+    #[test]
+    fn contract_path_is_normalised_before_it_reaches_the_error_text() {
+        assert!(
+            RR3_CONTRACT_TOPICS_PATH.contains(".."),
+            "用例前提：生产常量本身就是带 .. 的形状，否则这条修法没有对象（收到 {RR3_CONTRACT_TOPICS_PATH}）"
+        );
+        let dir = std::env::temp_dir().join(format!("rr3-cf4-{}", std::process::id()));
+        let nested = dir.join("nested");
+        std::fs::create_dir_all(&nested).expect("建用例临时目录");
+        let target = dir.join("cf4-contract.toml");
+        std::fs::write(
+            &target,
+            "\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"telepathy\"\nowner = \"rr3-sima\"\n",
+        )
+        .expect("写坏契约");
+        let ladden = nested.join("..").join("cf4-contract.toml");
+        assert!(
+            ladden.components().any(|c| c == std::path::Component::ParentDir),
+            "用例前提：喂进去的必须真带 .. 分量，收到 {ladden:?}"
+        );
+
+        let e = rr3_topics_load(&ladden, None).expect_err("坏契约必须拒");
+        assert!(e.iter().all(|m| m.starts_with("主题契约 ")), "{e:?}");
+        assert!(
+            e.iter().all(|m| !m.contains("..")),
+            "报错文案不得漏出 `..`，收到 {e:?}"
+        );
+        let want = std::fs::canonicalize(&target).expect("用例夹具必须能规范化");
+        assert!(
+            e.iter().all(|m| m.contains(&want.display().to_string())),
+            "文案里的路径必须是规范化后的那一份 {want:?}，收到 {e:?}"
+        );
     }
 
     #[test]
