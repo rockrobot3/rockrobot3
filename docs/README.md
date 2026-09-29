@@ -1,20 +1,41 @@
-# docs —— 文档索引
+# docs —— 文档索引（四档）
 
-三份权威文档 + 决策记录 + 版本方案。**每类内容只有一个权威落点**，其余文档引用它、
-不复述它——复述是漂移的源头（架构文档 §5 曾因把设计期草图当既成事实书写而整段重写）。
+docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变，读者要的是"为什么这样切"；
+`reference/` 随代码同批变，读者要的是"照着写、照着调"；`process/` 是协作契约，读者要的是
+"提交前对什么"；`status.md` 是快照，每次里程碑收口整篇重写。
 
-| 路径 | 内容 | 谁在它上面兜底 |
+**每类内容只有一个权威落点**，其余文档引用它、不复述它——复述是漂移的源头（架构文档 §5
+曾因把设计期草图当既成事实书写而整段重写）。
+
+## 四档落点
+
+| 档 / 路径 | 内容 | 谁在它上面兜底 |
 |---|---|---|
-| [`architecture/architecture.md`](architecture/architecture.md) | 唯一架构图：定位、分层、目录树、模块模型、HAL、IPC、数据流、迁移映射、里程碑 M0–M6、风险登记 | 目录树变更必须同步其 §3（`conventions.md` §5 文档纪律） |
-| [`architecture/conventions.md`](architecture/conventions.md) | 开发规约：分支/提交/CI 五步/DoD | 门禁唯一入口 `bash tools/ci/check.sh` |
-| [`architecture/naming.md`](architecture/naming.md) | 命名唯一权威（`rr3-` 前缀矩阵、模块目录四件套的四类结构角色） | `rr3-mkmod` 生成自检 + `rr-registry` 契约测试强制，不靠人记 |
-| [`adr/`](adr/) | 决策记录 ADR-0001 ~ ADR-0007（平台选型 / 模块模型 / IPC 选型 / Airymax 接入 / 命名规约 / AiryIPC 线格式 / 控制面分层） | 架构文档每节顶部回链对应 ADR |
-| [`dev/0.0.1版本洛克三号开发方案.md`](dev/0.0.1版本洛克三号开发方案.md) | 当前版本改造方案与 Definition of Done | 收口评审按此逐条对账 |
+| [`architecture/architecture.md`](architecture/architecture.md) | 唯一架构图：定位、分层、目录树、模块模型、HAL、IPC、数据流、迁移映射、里程碑 M0–M6、风险登记 | 目录树变更必须同步其 §3（`process/conventions.md` §5 文档纪律） |
+| `reference/rrd-cli.md` · `reference/rrd-rpc.md` · `reference/rrd-registry.md` | 运行期接口的可照抄事实：启动参数与默认值、RPC 方法与错误映射、在册表阶段与退避上限 | 与代码同批变更；引用须与代码逐字一致 |
+| [`process/conventions.md`](process/conventions.md) | 开发规约：分支 / 提交 / CI 门禁 / DoD | 门禁唯一入口 `bash tools/ci/check.sh`；**步序与条数只登记在其 §2**，本索引不抄数字 |
+| [`process/naming.md`](process/naming.md) | 命名唯一权威（`rr3-` 前缀矩阵、模块目录四件套的四类结构角色） | `rr3-mkmod` 生成自检 + `rr-registry` 契约测试强制，不靠人记 |
+| [`process/adr/`](process/adr/) | 决策记录 ADR-0001 ~ ADR-0007（平台选型 / 模块模型 / IPC 选型 / Airymax 接入 / 命名规约 / AiryIPC 线格式 / 控制面分层） | 架构文档每节顶部回链对应 ADR |
+| [`process/dev/0.0.1版本洛克三号开发方案.md`](process/dev/0.0.1版本洛克三号开发方案.md) | 当前版本改造方案与 Definition of Done | 收口评审按此逐条对账 |
+| `status.md` | 唯一实况快照：HEAD 能跑什么、不能跑什么 + 里程碑进度 | 收口时整篇重写，不做增量修补 |
+
+> `status.md` 与 `reference/` 三件是本轮重构的目标档位：文件落位前本索引不放链接（放了就是
+> 断链），落位的那次改动各自补一行。
+
+## 事实归属（改文档前先对这张表）
+
+| 事实类型 | 唯一落点 | 其他文档的写法 |
+|---|---|---|
+| 门禁步序、测试条数 | [`process/conventions.md`](process/conventions.md) §2 | "步序与条数见 conventions §2"——`tools/ci/check.sh` 头部注释已立此规 |
+| 已实装 / 未实装、里程碑进度 | `status.md` | 不写。`architecture/` 只写设计语义，不写"当前 HEAD 有没有" |
+| 主题清单与 kind | [`../contracts/topics.toml`](../contracts/topics.toml) | 只写"如何登记、如何校验、前缀归属"，不抄表 |
+| manifest 字段字典 | [`../base/runtime/rr-registry/src/module.schema.toml`](../base/runtime/rr-registry/src/module.schema.toml) | 只写字段语义与一份合规示例 |
+| 字节布局（128B 头 / payload 枚举） | [`../contracts/envelope.schema.json`](../contracts/envelope.schema.json) + [`../contracts/golden/`](../contracts/golden/) | 只写语义与歧义裁定 |
 
 ## 阅读顺序
 
-新人：`architecture/architecture.md` §1–§3 → `architecture/conventions.md`（提交前必读）→
-`adr/ADR-0002` 与 `ADR-0006`（模块模型与线格式两根支柱）。
+新人：`architecture/architecture.md` §1–§3 → `process/conventions.md`（提交前必读）→
+`process/adr/ADR-0002` 与 `ADR-0006`（模块模型与线格式两根支柱）。
 
 改契约/字节格式：先读 [`../contracts/README.md`](../contracts/README.md)（歧义裁定与演进规则），
 再动 `contracts/` 本体。

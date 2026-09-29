@@ -2,8 +2,8 @@
 
 - **状态**：v0.3（草案落定，随实现迭代）
 - **日期**：2026-09-28
-- **关联决策**：[ADR-0001](../adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md) · [ADR-0002](../adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](../adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](../adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](../adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](../adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](../adr/ADR-0007-控制面分层与模块级升级.md)
-- **命名速查**：[naming.md](naming.md)
+- **关联决策**：[ADR-0001](../process/adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md) · [ADR-0002](../process/adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](../process/adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](../process/adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](../process/adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](../process/adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](../process/adr/ADR-0007-控制面分层与模块级升级.md)
+- **命名速查**：[naming.md](../process/naming.md)
 
 ---
 
@@ -58,7 +58,7 @@ RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人�
 > 并通过 `bash tools/ci/check.sh`；**`modules/` 六个模块已落位**
 > （rr3-sense/act/interact/power/connect 由 `rr3-mkmod` 生成骨架 + 内构目录，rr3-brain 为
 > Python 包），六份 `module.toml` 由 ② 步校验、九个独立 Rust 工程由 ④ 步编译，约定见
-> [conventions.md](conventions.md)；ESP32 在编固件已迁入 `legacy/`（tag `v0-pre-legacy`）。
+> [conventions.md](../process/conventions.md)；ESP32 在编固件已迁入 `legacy/`（tag `v0-pre-legacy`）。
 > **模块与 CLI 只有结构，没有实现**：入口打印自述后退出，总线接入随 M2、采集/驱动随 M3–M5、
 > OTA 写侧与 `base/os/` Buildroot 层随 M6。
 > 下图/下表仍含 M1–M6 未落地项，标注"规划"者以里程碑表（§10）为准。

@@ -5,7 +5,7 @@
 # ①b 跑 workspace 全量测试：②/③ 只点名 rr-registry 的 contract 目标（③ 是它的子集），
 #    其余用例——含 rr-ipc 的 envelope 契约守护与 rr-registry 的注册表形状 pin——若不在此步
 #    覆盖，门里就没有任何力量行 contracts/README 所称"契约的执行入口"。
-#    逐步实测条数只登记在 docs/architecture/conventions.md §2，本文件不抄数字：
+#    逐步实测条数只登记在 docs/process/conventions.md §2，本文件不抄数字：
 #    测试集每加一条就要改一处注释，抄第二次必然失真。
 # 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
 # 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；

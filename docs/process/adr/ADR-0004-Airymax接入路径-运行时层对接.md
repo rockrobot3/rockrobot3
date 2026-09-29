@@ -2,7 +2,7 @@
 
 - **状态**：已接受；**线格式引用已被 [ADR-0006](ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) 修订**（本 ADR §决策 1 所称"定长 32B 头"→ Airy IPC 128B 定长头 Layout C；按 ADR-0003 先例只在状态行注明，决策正文不改）
 - **日期**：2026-09-28
-- **关联**：[architecture.md §9](../architecture.md) · ADR-0003
+- **关联**：[architecture.md §9](../../architecture/architecture.md) · ADR-0003
 
 ## 背景
 

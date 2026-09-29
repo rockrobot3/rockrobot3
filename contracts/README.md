@@ -49,7 +49,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
    kind 分布 7/8/3/3，以及全部 21 条 `(name, owner, kind)` 三元组逐条在册。计数做成硬 pin 是
    **刻意的，不是禁止 append**：新增主题合法，但必须是一次有意识的编辑——同一次改动里同时更新
    `contracts/topics.toml`、该测试的期望值，以及把这些数字当事实来写的
-   `docs/architecture/architecture.md` §6.3 / `docs/architecture/naming.md` §3 / 本文件。删主题、改 kind、改 owner 数都会红。
+   `docs/architecture/architecture.md` §6.3 / `docs/process/naming.md` §3 / 本文件。删主题、改 kind、改 owner 数都会红。
 
 ## 演进规则（ADR-0007 决策二）
 
@@ -64,7 +64,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
    远程在 atomgit，平台自动触发待确认，见方案 §7 遗留项）：
    ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试（56 条）/
    ② manifest schema 校验 + 注册表形状 pin（22 条）/ ②b mkmod 输出即契约用例 / ③ 主题前缀归属
-   （步序与命令的权威表见 [docs/architecture/conventions.md](../docs/architecture/conventions.md) §2）
+   （步序与命令的权威表见 [docs/process/conventions.md](../docs/process/conventions.md) §2）
 
 ### 演进登记（逐条留痕）
 
