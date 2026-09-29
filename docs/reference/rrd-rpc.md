@@ -105,7 +105,7 @@ EOF 同样算干净收尾（`conn.rs:413-418`、`conn.rs:470`）。
 
 | 码 | 判别值 | 契约名 | 触发面 | 出处 |
 |---|---|---|---|---|
-| `Invalid` | -2 | `AIRY_EINVAL` | §2 全部、§4 的 2–10 步、`src_task` 伪造、`Event` 之外的非 `Request` 上行、注册后重复 `rr3.register`、`Rr3PublishDeny::NotRegistered`（含发布帧体缺/坏 `topic` 的形状错，`conn.rs:333-336`） | `rpc.rs:97-111`、`conn.rs:394-401` |
+| `Invalid` | -2 | `AIRY_EINVAL` | §2 全部、§4 的 2–10 步、`src_task` 伪造、`Event` 之外的非 `Request` 上行、注册后重复 `rr3.register`、`Rr3PublishDeny::NotRegistered`（在册表第三道门，**经映射函数**得出）。发布面的**形状错**是另外两支：帧体非 JSON、体里缺/坏 `topic`——`conn.rs:320-337` 直接回 `Invalid`，**既不套进 `Rr3PublishDeny` 枚举、也不计数**（`rr3_reg_note_denied` 只在归属被拒时调） | `rpc.rs:97-111`、`conn.rs:394-401` |
 | `Busy` | -16 | `AIRY_EBUSY` | `Rr3RegisterError::Duplicate`、`Rr3RegisterError::Capacity` | `rpc.rs:99` |
 | `Permission` | -22 | `AIRY_EPERM` | `Rr3RegisterError::ReservedName`；`Rr3PublishDeny::ReservedNamespace`、`Rr3PublishDeny::ForeignPrefix` | `rpc.rs:100-110` |
 | `TimedOut` | -1004 | `AIRY_ETIMEDOUT` | `rr3.heartbeat` 的 task 已过期或不在册：`该 task 已过期或不在册，需重新注册` | `conn.rs:408-409` |

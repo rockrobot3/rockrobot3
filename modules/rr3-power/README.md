@@ -1,6 +1,7 @@
 # rr3-power
 
-电源模块：电池、充电、低压关断兜底。骨架由 `rr3-mkmod` 生成（conventions §3）。
+电源模块：电池、充电、低压关断兜底。结构由 `rr3-mkmod` 生成
+（[`conventions.md`](../../docs/process/conventions.md) §3）。
 
 ## 目录结构
 
@@ -23,12 +24,15 @@ modules/rr3-power/
 | publish | `rr3-power/charger/state` | event |
 
 `subscribes` 为空是**设计**：低压关断是本模块的本地决策，不依赖总线、不等 brain
-（architecture §7.3 安全兜底、topics.toml 同条 note）。总线路径故障不得影响关断。
+（[`architecture.md`](../../docs/architecture/architecture.md) §7.3 安全兜底、
+[`contracts/topics.toml`](../../contracts/topics.toml) 同条 note）。总线路径故障不得影响关断。
 
-## 实现进度
-
-v0.0.1 交付结构 + manifest。ADC/ gauge 读取随 M5（rr-hal linux 后端）。本地自检：
+## 本地自检
 
 ```bash
 cargo run --manifest-path modules/rr3-power/Cargo.toml --bin rr3-power
 ```
+
+**交付到哪一批不在本文件登记**：ADC / gauge 读取（rr-hal linux 后端）今天有没有实现，
+唯一落点是 [`docs/status.md`](../../docs/status.md)；门禁与用例条数见
+[`docs/process/conventions.md`](../../docs/process/conventions.md) §2。

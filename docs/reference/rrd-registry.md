@@ -4,7 +4,11 @@
 > [`rrd/src/registry.rs`](../../base/runtime/rrd/src/registry.rs) 的字面量，
 > 其中 `Rr3Phase` 的 `as_str` 四个词与 `Rr3RegisterError` / `Rr3PublishDeny` 的
 > `Display` 文案是**线上词表**（下行 state 帧与集成侧按字面比对）。断言口径分档：
-> 这四组 `Display` 在 `registry.rs:528-563` 的单元用例里逐字 `assert_eq` 钉住，集成侧
+> 线上词表里**只有两枚 `Display`**——`Rr3RegisterError` 三条 + `Rr3PublishDeny` 三条，共六串文案，
+> 在 `registry::tests` 的 `register_error_display_is_verbatim` 与
+> `publish_deny_display_distinguishes_the_three_layers` 里逐字 `assert_eq` 钉住；
+> `Rr3Phase::as_str` 的四个阶段词是同一个 tests 模块里另一组逐字断言
+> （`phase_names_are_the_wire_vocabulary`）。集成侧
 > （`tests/register_publish.rs`）按 `contains` 子串区分"被哪一层拒的"；错误码映射
 > （`rr3_rpc_status_for_register` / `rr3_rpc_status_for_publish_deny`）在 `rpc.rs:224-260`
 > 逐枚举断言判别值。**两点提醒**：启动横幅（`rr3_banner`）只是 `contains` 片段、并非逐字；

@@ -16,7 +16,8 @@
 
 自检：`rr3_mkmod_generate` 落盘后立即调用 `rr-registry` 的
 `rr3_registry_validate_manifest` 校验生成的 `module.toml`，不过即回滚报错——
-"生成物天然合契约"，无需人再记一遍 naming.md。
+"生成物天然合契约"，无需人再记一遍
+[`docs/process/naming.md`](../../docs/process/naming.md)。
 
 独立工程：自带空 `[workspace]`，**不在** `base/runtime` 的 workspace 内。它以路径依赖
 消费 `rr-registry`，若把自己挂进基座 workspace 会让"生成器"变成"运行时的一部分"。
