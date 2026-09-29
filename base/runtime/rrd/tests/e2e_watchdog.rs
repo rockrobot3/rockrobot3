@@ -74,7 +74,17 @@ fn watchdog_expires_a_silent_peer_and_broadcasts_failed() {
     // （线程没起 / 扫了但判错 / 判了不广播），却会把"机器恰好慢"变成随机红。
     // 3s 的粗上限足够抓"watchdog 压根没跑"。
     rr3_read_state(&mut b, "rr3-sima", "failed");
-    assert!(rrd.rr3_wait_log("watchdog 广播 failed 到").contains("个连接"));
+    // 广播面是个可算出来的数：此刻在册且带句柄的只有那条旁观连接（sima 已被
+    // `exclude_task` 排除、且 expire 已把它的 `tx` 置 None）。写成数字断言，
+    // 而不是"这行里含有个连接"——后者与 needle 同源于一条格式串，抓不到任何事。
+    let n: u64 = rrd
+        .rr3_wait_log("watchdog 广播 failed 到")
+        .split("到 ")
+        .nth(1)
+        .and_then(|s| s.split(" 个连接").next())
+        .and_then(|s| s.parse().ok())
+        .expect("广播行里没有可解析的连接数");
+    assert_eq!(n, 1, "只该发给那条旁观连接: {n}");
 }
 
 /// W2 — 健康模块不受牵连（正反两路同框）
@@ -106,6 +116,10 @@ fn watchdog_broadcasts_exactly_one_failed_state() {
     let mut peer = SimPeer::rr3_start(&rrd.socket, &m, "go_silent");
     peer.rr3_wait("静默中（已喂 1 次）");
     rrd.rr3_wait_log("watchdog 判死 rr3-sima");
+    // 先等到广播行再开窗：fanout 发生在判死日志**之后**，若紧跟 `rr3_collect_within`，
+    // 60ms 的窗口还要吸收"入队 + 唤醒写线程"，失败方向是 `failed == 0`（假红）。
+    // 先等到广播行，窗口就只剩"重复回报"这一维，不再兼测入队延迟。
+    rrd.rr3_wait_log("watchdog 广播 failed 到");
 
     // 判死之后再跨 3 拍（60ms）收：每拍都重复回报的话，这里会数到 >1。
     // 窗口跨度由已知 tick 算出，不是猜被测行为的时间。
@@ -139,7 +153,12 @@ fn beats_after_expiry_are_rejected_and_do_not_revive() {
     peer.rr3_wait("已试喂 5 次");
 
     let line = rrd.rr3_wait_log("watchdog 判死 rr3-sima");
-    // 到期路径今天**不查 restart_policy**、不产重启计划。这是本任务显式留给 Task 11 的
-    // 欠账，钉在这里是为了让它无法被悄悄宣布成"崩溃检测已完成"。
-    assert!(!line.contains("attempt="), "判死路径今天不产重启计划（Task 11 的活）: {line}");
+    // 判据是"整个观察窗内 rrd 没打出任何重启计划"，不是"判死那一行里有没有 attempt="——
+    // 后者在任何实现下都不可能红（判死行的格式里就没有那个字段），而 Task 11 把重启接进
+    // watchdog 时最自然的写法是另起一行打计划，那时它照样绿。前者才钉得住：
+    // Task 11 一接线，这一条立刻红，逼它显式改写本用例。
+    // 窗口取 300ms：到这一刻 peer 已静默 ≥ 700 + 4×150 = 1300ms，判死必然已发生
+    // （`rr3_wait_log` 在上面已经拿到那一行），所以"没有重启计划"不是"还没轮到"。
+    rrd.rr3_assert_no_log("重启计划", Duration::from_millis(300));
+    assert!(!line.contains("attempt="), "判死行只描述判死本身: {line}");
 }
