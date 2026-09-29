@@ -184,26 +184,36 @@ pub fn rr3_registry_validate_manifest(path: &Path) -> Rr3ValidationReport {
             "int" => value.as_integer().is_some(),
             "list" => match (value.as_array(), spec.rule.as_deref()) {
                 (Some(arr), Some(rule)) => {
-                    for item in arr.iter().filter_map(Value::as_str) {
+                    for (idx, item) in arr.iter().enumerate() {
+                        // F1：列表项非字符串是 manifest 类型错误，必须报告而非被 filter_map 静默
+                        // 丢弃（否则同段的合法项会掩盖它，fail-open）。
+                        let Some(s) = item.as_str() else {
+                            report.errors.push(format!(
+                                "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
+                                spec.path,
+                                idx + 1
+                            ));
+                            continue;
+                        };
                         if rule == "own_topic" {
-                            report.errors.extend(rr3_registry_check("topic", item));
+                            report.errors.extend(rr3_registry_check("topic", s));
                             let want = format!("{self_name}/");
-                            if !self_name.is_empty() && !item.starts_with(&want) {
+                            if !self_name.is_empty() && !s.starts_with(&want) {
                                 report.errors.push(format!(
-                                    "越权主题 {item}（前缀必须是 {want}）"
+                                    "越权主题 {s}（前缀必须是 {want}）"
                                 ));
                             }
-                            // 主题注册表只登记总线事件流；rpc.exposes 走 RPC 事务面，
-                            // v0.0.1 不要求出现在 contracts/topics.toml（见报告偏差说明）。
-                            let check_registered = spec.path == "events.publishes";
-                            if check_registered
-                                && !registered.is_empty()
-                                && !registered.iter().any(|t| t == item)
-                            {
-                                report.errors.push(format!("未注册主题 {item}"));
+                            // F2：events.publishes 与 rpc.exposes 都必须在 contracts/topics.toml
+                            // 注册（CI 检查③），未注册的 RPC 名不再放行。
+                            // F3：去掉 `!registered.is_empty()` 护栏——空注册表不得让成员检查
+                            // 被空洞满足。
+                            let check_registered =
+                                spec.path == "events.publishes" || spec.path == "rpc.exposes";
+                            if check_registered && !registered.iter().any(|t| t == s) {
+                                report.errors.push(format!("未注册主题 {s}"));
                             }
                         } else {
-                            report.errors.extend(rr3_registry_check(rule, item));
+                            report.errors.extend(rr3_registry_check(rule, s));
                         }
                     }
                     true
@@ -232,7 +242,15 @@ pub fn rr3_registry_validate_manifest(path: &Path) -> Rr3ValidationReport {
     let base = rr3_registry_rule_list("base_capabilities").unwrap_or_default();
     for field in ["depends.required", "depends.optional"] {
         if let Some(arr) = rr3_registry_get_by_path(&root, field).and_then(Value::as_array) {
-            for cap in arr.iter().filter_map(Value::as_str) {
+            for (idx, item) in arr.iter().enumerate() {
+                // F1：非字符串依赖项同样是 manifest 类型错误，必须报告
+                let Some(cap) = item.as_str() else {
+                    report.errors.push(format!(
+                        "字段 {field} 第 {} 项应为字符串，实际为 {item:?}",
+                        idx + 1
+                    ));
+                    continue;
+                };
                 if !base.iter().any(|b| b == cap) {
                     report.errors.push(format!("{field} 依赖了未知能力 {cap}"));
                 }
@@ -241,14 +259,13 @@ pub fn rr3_registry_validate_manifest(path: &Path) -> Rr3ValidationReport {
     }
 
     // 4) subscribes 必须已注册（订阅方不要求前缀归属）
-    if !registered.is_empty() {
-        if let Some(arr) = rr3_registry_get_by_path(&root, "events.subscribes")
-            .and_then(Value::as_array)
-        {
-            for topic in arr.iter().filter_map(Value::as_str) {
-                if !registered.iter().any(|t| t == topic) {
-                    report.errors.push(format!("events.subscribes 引用未注册主题 {topic}"));
-                }
+    // F3：去掉 `!registered.is_empty()` 护栏——空注册表不得让订阅成员检查被空洞满足。
+    // 非字符串项的类型错误已由逐字段循环（rule=topic）报告，这里只做成员检查。
+    if let Some(arr) = rr3_registry_get_by_path(&root, "events.subscribes").and_then(Value::as_array)
+    {
+        for topic in arr.iter().filter_map(Value::as_str) {
+            if !registered.iter().any(|t| t == topic) {
+                report.errors.push(format!("events.subscribes 引用未注册主题 {topic}"));
             }
         }
     }
@@ -297,8 +314,16 @@ pub fn rr3_registry_validate_topics(text: &str, known_owners: &[String]) -> Vec<
     };
     let allowed_kinds = rr3_registry_rule_list("topic_allowed_kinds").unwrap_or_default();
     let declared_owners = owner_names_in(&root);
+    let topics = root.get("topic").and_then(Value::as_array);
 
-    for entry in root.get("topic").and_then(Value::as_array).into_iter().flatten() {
+    // F3：注册表为空（0 个 [[topic]]）是契约事故，不是放行许可证。若坐视空表，
+    // 下游成员检查（publishes/rpc.exposes/subscribes）会被空洞满足而 fail-open。
+    // owner 维度的登记检查保持原样，仅新增这条零主题护栏。
+    if topics.map_or(true, |v| v.is_empty()) {
+        errs.push("主题注册表为空：必须至少登记一个 [[topic]]（ADR-0006）".to_string());
+    }
+
+    for entry in topics.into_iter().flatten() {
         let Some(t) = entry.as_table() else { continue };
         let Some(name) = t.get("name").and_then(Value::as_str) else {
             errs.push("topic 缺少 name".to_string());
