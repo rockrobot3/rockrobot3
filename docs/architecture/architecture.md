@@ -106,9 +106,10 @@ rock3/
 │   │   │   │   └── bin/
 │   │   │   │       └── sim_peer.rs ← 跨进程 e2e 的对端夹具二进制：第二个真进程，走 rrd 的线上
 │   │   │   │                           入口做注册→心跳→发布→退场；不是产品入口（只在测试里被起）
-│   │   │   └── tests/             ← register_publish.rs、socket_banner.rs、e2e_sim_peer.rs
-│   │   │                             （三文件首行都是 `#![cfg(unix)]`）+ support/mod.rs
-│   │   │                             （起真 rrd 子进程的线级助手）
+│   │   │   └── tests/             ← register_publish.rs、socket_banner.rs、e2e_sim_peer.rs、
+│   │   │                             e2e_watchdog.rs（整体挂在 `#![cfg(unix)]` 门后：
+│   │   │                             `e2e_watchdog.rs` 因头注更长落在第 20 行，其余在首行）
+│   │   │                             + support/mod.rs（起真 rrd 子进程的线级助手）
 │   │   └── tests/fixtures/        ← sim-topics.toml：仅测试的主题叠加层夹具（不吃契约 pin）
 │   │                                 + sima/module.toml、simb/module.toml：e2e_sim_peer.rs 那两个
 │   │                                   假模块的 manifest 夹具
