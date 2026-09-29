@@ -23,12 +23,24 @@ fn need_value(flag: &str, args: &[String], i: usize) -> Result<String, String> {
     args.get(i + 1).cloned().ok_or_else(|| format!("{flag} 缺参数\n{USAGE}"))
 }
 
+/// 路径型开关取值：以 `-` 开头的一律当"下一个开关名"拒掉，不作值。
+/// 否则 `rrd --socket --topics-overlay` 会把 `--topics-overlay` 当成套接字路径吞下，
+/// 叠加层静默丢失（fail-open）。数字型开关由 `parse_ms` 拒 `-…`，口径一致。
+fn need_path_value(flag: &str, args: &[String], i: usize) -> Result<String, String> {
+    let raw = need_value(flag, args, i)?;
+    if raw.starts_with('-') {
+        return Err(format!("{flag} 缺参数：收到疑似开关的 {raw}（路径值不得以 - 开头）\n{USAGE}"));
+    }
+    Ok(raw)
+}
+
 /// 默认总线路径：env 覆盖优先（与 rr-ipc 常量一致）
 fn rr3_cli_default_socket() -> PathBuf {
     PathBuf::from(std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string()))
 }
 
-/// 解析参数。未知选项 / 缺参数 / 非数字一律报错，不静默回落默认值（fail-closed）。
+/// 解析参数。未知选项 / 缺参数 / 值以 `-` 开头（路径型）/ 非数字一律报错，
+/// 不静默回落默认值（fail-closed）。
 pub fn rr3_cli_parse(args: &[String]) -> Result<RrdConfig, String> {
     let mut cfg = RrdConfig {
         socket: rr3_cli_default_socket(),
@@ -41,15 +53,15 @@ pub fn rr3_cli_parse(args: &[String]) -> Result<RrdConfig, String> {
     while i < args.len() {
         match args[i].as_str() {
             "--socket" => {
-                cfg.socket = PathBuf::from(need_value("--socket", args, i)?);
+                cfg.socket = PathBuf::from(need_path_value("--socket", args, i)?);
                 i += 2;
             }
             "--topics-overlay" => {
-                cfg.overlay = Some(PathBuf::from(need_value("--topics-overlay", args, i)?));
+                cfg.overlay = Some(PathBuf::from(need_path_value("--topics-overlay", args, i)?));
                 i += 2;
             }
             "--manifest" => {
-                cfg.manifests.push(PathBuf::from(need_value("--manifest", args, i)?));
+                cfg.manifests.push(PathBuf::from(need_path_value("--manifest", args, i)?));
                 i += 2;
             }
             "--restart-base-ms" => {
@@ -132,6 +144,7 @@ mod tests {
 
     #[test]
     fn overlay_and_repeated_manifests_keep_order() {
+        let _guard = env_guard(); // rr3_cli_parse 读 env 取默认值，见上面 ENV_LOCK 注释
         let cfg = rr3_cli_parse(&a(&[
             "--topics-overlay",
             "/tmp/sim-topics.toml",
@@ -148,6 +161,7 @@ mod tests {
     /// 数字参数必须真是数字：笔误不许悄悄变成默认值
     #[test]
     fn numeric_flags_reject_garbage() {
+        let _guard = env_guard();
         for args in [a(&["--restart-base-ms", "fast"]), a(&["--pre-register-timeout-ms", "-1"])] {
             let e = rr3_cli_parse(&args).expect_err("非法数字必须报错");
             assert!(e.contains("需为非负整数毫秒"), "{e}");
@@ -156,11 +170,35 @@ mod tests {
 
     #[test]
     fn missing_value_unknown_option_and_empty_socket_are_errors() {
+        let _guard = env_guard();
         let e = rr3_cli_parse(&a(&["--socket"])).expect_err("缺参数必须报错");
         assert!(e.contains("--socket 缺参数") && e.contains("用法"), "{e}");
         assert!(rr3_cli_parse(&a(&["--shard", "/tmp/x"]))
             .expect_err("未知选项必须报错")
             .contains("未知选项 --shard"));
         assert!(rr3_cli_parse(&a(&["--socket", ""])).expect_err("空路径必须报错").contains("不得为空"));
+    }
+
+    /// 值以 `-` 开头 = 那是下一个开关，不是值。`--socket --topics-overlay` 曾经把
+    /// `--topics-overlay` 当套接字路径吞下、静默丢掉叠加层（唯一的 fail-open 缝）。
+    #[test]
+    fn path_values_must_not_start_with_dash() {
+        let _guard = env_guard();
+        for (flag, next) in [
+            ("--socket", "--topics-overlay"),
+            ("--topics-overlay", "--manifest"),
+            ("--manifest", "--socket"),
+        ] {
+            let e = rr3_cli_parse(&a(&[flag, next])).expect_err("路径型开关不能把开关名当值吞下");
+            assert!(
+                e.contains(&format!("{flag} 缺参数")) && e.contains(next) && e.contains("用法"),
+                "报错必须点名开关与值: {e}"
+            );
+        }
+        // 单横杠同样拦（`-h` 不是路径）
+        assert!(rr3_cli_parse(&a(&["--socket", "-h"])).expect_err("-h 不是路径值").contains("不得以 - 开头"));
+        // 数字型开关的负值仍按原口径报，不是这条规则替它背锅
+        let n = rr3_cli_parse(&a(&["--restart-base-ms", "-5"])).expect_err("负数毫秒必须拒");
+        assert!(n.contains("需为非负整数毫秒"), "{n}");
     }
 }
