@@ -42,9 +42,11 @@
 > 共**三处**，职责各不相同——① `rr3-mkmod` 生成自检；② `rr-registry` 契约测试
 > （`cargo test -p rr-registry`，由 `tools/ci/check.sh` ②/③ 步点名）；③ rrd 在册表判定
 > `RrdRegistry::rr3_reg_publish_check`（按 `manifest.name` 判前缀归属并放行/拒绝，四道门）。
-> 入口 ③ 的**判定逻辑已交付**（`base/runtime/rrd/src/registry.rs`，被同文件单元用例覆盖），
-> 但 `conn.rs` 连接层尚未把它接进线上发布分支——"接到哪一段"属实况，以
-> [`../status.md`](../status.md) 为准。下面三条是**规则本身**。
+> 入口 ③ 的判定逻辑在 `base/runtime/rrd/src/registry.rs`（`RrdRegistry::rr3_reg_publish_check`
+> 返回 `Rr3PublishDeny`，四道门次序即安全语义）；**它接到线上流量的哪一段属实况，一律以
+> [`../status.md`](../status.md) 为准，本文不复述**。接口字面量（门序、错误码、`Display` 文案）
+> 归 [`../reference/rrd-registry.md`](../reference/rrd-registry.md) §8 与
+> [`../reference/rrd-rpc.md`](../reference/rrd-rpc.md) §7。下面三条是**规则本身**。
 
 1. 目录名 == crate 名 == 进程名 == manifest.name
 2. 事件/RPC 主题前缀 == manifest.name（越权发布不予合入）
