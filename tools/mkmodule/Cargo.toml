@@ -1,0 +1,23 @@
+[package]
+name = "rr3-mkmod"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "rr3-mkmod：新模块脚手架（生成即过契约校验）"
+
+# 独立工程：tools/ 不在 base/runtime 的 workspace 内，显式声明避免被将来
+# 可能出现的仓库根 workspace 吞并
+[workspace]
+
+[lib]
+name = "rr3_mkmod"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rr3-mkmod"
+path = "src/main.rs"
+
+[dependencies]
+rr-registry = { path = "../../base/runtime/rr-registry" }
