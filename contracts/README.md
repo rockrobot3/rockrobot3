@@ -8,16 +8,22 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 | 文件 | 作用 | 稳定级 |
 |---|---|---|
 | `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举 | L1 |
-| `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001/003 基准） | L1 |
-| `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（rrd 启动与 CI 双重校验） | L2 |
+| `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001 的**同机**基准；跨架构等值另见下） | L1 |
+| `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口：`rr3-mkmod` 生成自检 + `rr-registry` 契约测试；rrd 运行时注册校验属 M1/M2 待落地） | L2 |
 | `events/*.schema.json` | 各模块事件负载 schema（首个真实 schema 随 M3 落） | L2 |
+
+> **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
+> 跨架构（x86 与 aarch64 布局一致，即 IPC-T-003）的等值证明需要交叉编译两端对拍，
+> 当前 HEAD 无此能力，故 IPC-T-003 记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered` 里，
+> 随 M2 落地。
 
 > **`envelope.schema.json` 是"给人读、给测试对照"的数据契约，不是喂校验器的 schema**：它该读、
 > 该对照，但**不该**喂给 JSON Schema 校验器——文件里的 `"$schema": ".../draft/2020-12/schema"` 键
 > 是从模板带过来的残迹（vestigial），文件真正承载的是 `x-rock3-*` 偏移表与冻结枚举值，按 JSON
 > Schema 语义解释会得出错误结论。（`events/*.schema.json` 落定时则相反：那才是给校验器用的负载
-> schema。）契约的执行入口只有两处：`cargo test -p rr-ipc`（13 条偏移/枚举对齐守护）与
-> `bash tools/ci/check.sh`（manifest 与主题前缀）。
+> schema。）契约的执行入口只有两处：`cargo test -p rr-ipc`（17 条守护：13 条偏移/枚举对齐 +
+> `tests/envelope_meta.rs` 的 4 条元数据守护，读 JSON 而非 Rust 自比）与
+> `bash tools/ci/check.sh`（manifest、主题前缀与注册表形状）。
 
 ## topics.toml 裁定
 
@@ -38,16 +44,37 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
    即：4 个 `kind` 覆盖 5 个 `payload_type`，唯一的折叠处是 `request`。v0.0.1 注册表实际分布为
    request 7 / event 8 / stream 3 / notification 3，合计 21 条主题、7 个 owner。
    STREAM 类主题 v0.0.1 仅登记、不实现传输。
+5. **上述形状是机器钉住的**：`cargo test -p rr-registry --test contract` 里的
+   `registry_shape_is_pinned` 按 `contracts/topics.toml` 的解析结果断言 owner 数 7、topic 数 21、
+   kind 分布 7/8/3/3，以及全部 21 条 `(name, owner, kind)` 三元组逐条在册。计数做成硬 pin 是
+   **刻意的，不是禁止 append**：新增主题合法，但必须是一次有意识的编辑——同一次改动里同时更新
+   `contracts/topics.toml`、该测试的期望值，以及把这些数字当事实来写的
+   `docs/architecture.md` §6.3 / `docs/naming.md` §3 / 本文件。删主题、改 kind、改 owner 数都会红。
 
 ## 演进规则（ADR-0007 决策二）
 
 1. **只增不改**：既有字段、偏移、枚举值不得变更语义
-2. 破坏性变更必须升 `schema.version` major，并在 `topics.toml` 登记受影响主题
+2. 破坏性变更必须升 `envelope.schema.json` 顶层的 **`x-schema-version`** major（该键是 2026-09-29
+   追加的元数据键，当前值 1，由 `cargo test -p rr-ipc --test envelope_meta` 与 Rust
+   `RR3_CONTRACT_SCHEMA_VERSION` 逐值钉住），并在 `topics.toml` 登记受影响主题。
+   `topics.toml` 与 `base/runtime/rr-registry/src/module.schema.toml` 各自另有同名整型键
+   `schema_version`（当前同为 1），三者不要混写
 3. 消息头扩展**只允许写 reserved 区**并经 `flags` 标记启用（保持与 A-IPC 标准逐字节兼容）
 4. CI 在 PR 上强制五步（唯一入口 `bash tools/ci/check.sh`，命名沿用方案 D7 的"三检查"）：
-   ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试（51 条）/
-   ② manifest schema 校验 / ②b mkmod 输出即契约用例 / ③ 主题前缀归属
+   ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试（56 条）/
+   ② manifest schema 校验 + 注册表形状 pin（22 条）/ ②b mkmod 输出即契约用例 / ③ 主题前缀归属
    （步序与命令的权威表见 [docs/conventions.md](../docs/conventions.md) §2）
+
+### 演进登记（逐条留痕）
+
+- **2026-09-29 · `envelope.schema.json` 追加顶层元数据键 `x-schema-version`（值 1）**：
+  只加一个给人读/给测试对照的整型元数据键，**不动任何偏移、字段宽度、枚举值与线上行为**，
+  故属"只增不改"允许范围，**不是** schema major 升级（版本仍为 1）。加它的理由是演进规则 2 此前
+  无实物可指：`RR3_CONTRACT_SCHEMA_VERSION`（rrd 横幅的 "contracts schema v1"）当时无人断言。
+- **2026-09-29 · `envelope.schema.json` 的 `x-rock3-v0.0.1-coverage` 去掉 `IPC-T-003`**，并新增
+  `x-rock3-v0.0.1-uncovered` 记录 IPC-T-003（跨架构字节布局一致）待 M2 的交叉编译等值测试。
+  理由一句话：**coverage 列表是"关于测试的陈述"，纠正它不是契约变更**——它不触碰偏移、枚举、
+  magic 与 golden 向量，因此不适用"只增不改"的冻结约束，而是评审裁定的许可项。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

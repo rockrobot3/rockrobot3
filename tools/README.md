@@ -2,10 +2,10 @@
 
 | 目录 | bin | 用途 |
 |---|---|---|
-| `mkmodule/` | `rr3-mkmod` | 生成合规模块四件套，产出物自动过 schema 校验 |
+| `mkmodule/` | `rr3-mkmod` | 生成合规模块骨架，落盘**五个文件**（`module.toml` / `config.toml` / `Cargo.toml` / `src/main.rs` / `README.md`），产出物自动过 schema 校验 |
 | `ci/` | — | `check.sh`：规约检查的唯一实现与唯一入口，执行五步（① workspace 编译含测试目标 / ①b workspace 全量测试 / ②②b manifest schema 与 mkmod 产物 / ③ 主题前缀归属），本地与 CI 跑同一命令；标题沿用方案 D7 的"三检查"语义命名 |
 | `rrctl/` | `rr3-ctl` | 订阅总线查状态/日志/触发 OTA（M2+） |
 | `sim/` | `rr3-sim` | mock HAL + 假模块，x86 全链路联调（M2+） |
 
 `rr3-mkmod` 是**独立工程**（`tools/mkmodule/Cargo.toml` 自带空 `[workspace]`），不在 `base/runtime` 的 workspace 内：它以路径依赖消费 `rr-registry`，把自己挂进 workspace 会让"生成器"变成"运行时的一部分"。测试用 `cargo test --manifest-path tools/mkmodule/Cargo.toml` 单独跑，CI 里单列为 ②b。
-mkmod 是规约的执行器：命名、四件套结构、主题前缀规则都在生成器里强制，而不是靠人记 naming.md。
+mkmod 是规约的执行器：命名、模块骨架的五件结构、主题前缀规则都在生成器里强制，而不是靠人记 naming.md。

@@ -8,7 +8,7 @@
 | 路径 | 内容 | 工具链 |
 |---|---|---|
 | `firmware-c/` | 主系统固件（ESP-IDF v6.1，语音助手在编版） | 需 `source $IDF_PATH/export.sh` |
-| `core/` | 12 个可复用 ESP-IDF 组件（llm/asr/tts/link/audio/relay/panel/applog/data） | 同上 |
+| `core/` | 9 个顶层目录 / 12 个可复用 ESP-IDF 组件：`applog asr audio data llm panel relay tts` 八个直属组件，加 `link/` 命名空间下的 `wifi btctl nearlink eth` 四个链路组件（`link/` 自身不是组件，只作分组）。`firmware-c/CMakeLists.txt:20-31` 逐条挂载的 12 个 `../core/...` 路径即这 12 个组件 | 同上 |
 | `firmware-rs/` | Rust 语音固件实验（esp-idf-hal） | ESP-IDF v5.5.5 |
 | `rust/` | Rust 外设模块试验（esp-hal，blink/OLED/舵机/DHT11） | espup |
 
