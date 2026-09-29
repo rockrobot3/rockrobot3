@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 164 条（Windows）/178 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 165 条（Windows）/186 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -31,19 +31,21 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-30 M2 Task 7 修复轮 1 收口（夹具 `RrdClient` 按连接待处理队列 +
-3 条 `dst_task` 门禁线级用例）后复测。**两个平台的条数本就应当不等**，所以各记各的、
-不合并成单一数字：Windows x86_64-pc-windows-msvc **164**（本轮 ①b 实测量）、
-WSL2 Linux x86_64 **178**（= 修复轮 1 前 L2 实测 175，加本轮 `register_publish` 3 条
-门禁线级用例，评审与本控制器各自独立复跑 L2 全量同为 178）。
+测试面如实登记（2026-09-30 M2 Task 8 收口（`conn.rs` 补 `Event` 发布分支 + 6 条发布面线级用例 +
+1 条转发乱序反例 + `registry::tests` 1 条容量门实证 + 叠加层路径改在装载入口内规范化）后复测。
+**两个平台的条数本就应当不等**，所以各记各的、
+不合并成单一数字：Windows x86_64-pc-windows-msvc **165**（本轮 ①b 实测量，= 上一轮 164
+再加 `registry::tests` 的 1 条；发布面的 7 条线级用例在 Windows 压根不参与编译，见下）、
+WSL2 Linux x86_64 **186**（= 上一轮 178 加 `register_publish` 的 7 条与 `registry::tests` 的
+1 条，本轮 L2 全量实跑 `186 passed; 0 failed`）。
 `aarch64-unknown-linux-gnu` 交叉 + qemu-user
-本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 14 条全部可枚举：
-Unix 独有的 13 条线级用例（`register_publish` 12 + `socket_banner` 1）+ `cli::tests` 里那 1 条
+本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 21 条全部可枚举：
+Unix 独有的 20 条线级用例（`register_publish` 19 + `socket_banner` 1）+ `cli::tests` 里那 1 条
 `#[cfg(unix)]` 用例。cargo 1.95—1.97：
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
-Unix 侧行为不据此声称；13 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
+Unix 侧行为不据此声称；20 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **164** 条（Windows）/ **178** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **165** 条（Windows）/ **186** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
@@ -51,9 +53,9 @@ Unix 侧行为不据此声称；13 条线级用例在 Windows ①b 里显示 `ru
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24（M2 Task 6 给 `Rr3TopicSet` 加 `rr3_topic_set_kind`
 访问器，实证并进了既有的 merge 用例，故条数不变）；
-rrd 的 83 条（Windows）/84 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
+rrd 的 84 条（Windows）/85 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
 全在 lib 目标（`cli::tests` 11/12 + `topics_load::tests` 16 + `manifest::tests` 7 + 横幅 2
-+ `registry::tests` 37 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
++ `registry::tests` 38 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
 形状错误标注来源 1、路径值不得以 `-` 开头 1；M2 Task 4 再补 `manifest::tests` 7 条；
 M2 Task 5 补在册表/状态机/发布归属 29 条与合并后复验 1 条；
 M2 Task 5 修复轮 1 再补 `registry::tests` 3 条：在册 owner ≠ 首段时的越权终判 1、
@@ -79,14 +81,34 @@ ENOENT 正是该报的那一条，而 bind 前的套接字用 canonicalize 会�
 同批既有 15 条 `topics_load` 用例的**逐字文案断言**全部原样通过（含两条全等断言的
 `overlay_conflict_refuses_startup_and_names_the_entry` / `overlay_declaring_reserved_namespace_is_rejected`），
 故规范化只改了契约那一条路径的来源，没有改写任何错误词汇。
+**这后半句到 M2 Task 8 不再成立**：遗留 ③ 把**叠加层**那条路径也收进装载入口规范化，
+`overlay_declaring_reserved_namespace_is_rejected` 的全等断言随之从"CLI 原词"改成
+"canonicalize 后那一份"（用例本身没增删，仍是 16 条 `topics_load::tests`），并额外断言
+文案整串不含 `..`；契约那一支的文案断言仍逐字未动。
+Task 8 另补 `registry::tests` 1 条（遗留 ②）——`rr3_reg_add` 容量门里 `superseded.is_none() &&`
+那半句**承重**：表满 + 同名条目已是 Failed 时必须放行重注册（旧条目即将腾出槽位），
+删掉这半句它就变成 `Capacity` 拒。Task 5 的 17 组变异实验里这一支变红而全绿无人察觉，
+因为当时没有任何用例把"表满"与"同名 Failed"两个条件同时凑齐；新用例
+`full_table_still_allows_re_registering_a_failed_module` 就是那个组合，另带两条对照
+（满表上的新名字仍被容量拒、满表上的同名非 Failed 仍回 `Duplicate`）。
 M2 Task 7 的 UDS 层没有新增 lib 用例（`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]` 的线程与 IO，
-纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住），它的 10 条在两个独立测试目标
+纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住；Task 8 是唯一动到 lib 的那一支——上面那段
+`registry::tests` 的容量门实证 1 条，其余全在测试目标里），它的 10 条（Task 8 之后 20 条）在两个独立测试目标
 `rrd/tests/register_publish.rs`（顶层 `#![cfg(unix)]`，只在 Linux/aarch64 真跑：task 号与上线广播、
 重复名 EBUSY、保留名 EPERM、坏 manifest 点名字段、首帧必须 `rr3.register`、`src_task` 伪造拒帧不断连、
 上行只许 Request、未注册连接按读超时收掉、`rr3.unregister` 干净退场不重启，共 9 条；
 修复轮 1 再补 3 条门禁线级用例——`conn.rs:149` 首帧 `dst_task` 非 rrd 时拒帧、
 `conn.rs:262` 注册后 `dst_task=0` 上行帧按崩溃收尾不回 accepted、
-`conn.rs:87` `rr3_reply_ok` 的应答 dst 点对点不广播，共 **12** 条）与
+`conn.rs:87` `rr3_reply_ok` 的应答 dst 点对点不广播，共 **12** 条；
+M2 Task 8 的发布面再补 7 条，共 **19** 条——合法发布被转发给别的连接且**不回 ACK**
+（头三项逐个断言：`src_task` 是 rrd 分配给发布者的号、`dst_task=0`、体原样）、
+越权前缀 → EPERM 且点名 owner（两个变量：在册的 `rr3-simb/pong/state` 与既不在册、
+首段也不是自己的 `rr3-simb/pong/typo`，后者才让三层顺序里"前缀"那一道在线上级承重）、
+冒充 `rr3-runtime/*` 两支 → EPERM 且文案含"冒充"、在册但主题没登记 → EINVAL"未注册主题"、
+**不带 `--topics-overlay`** 时夹具主题根本不在册而生产主题由 owner 挡住（K4：叠加层不是生产
+放行口）、`Event` 体缺 `topic` 只回错误帧且同一条连接之后照常喂狗（裁定 R5：不按崩溃收尾）、
+两条不同 seq 的转发在收侧**按内容逆序**挑帧再回头挑一条 Response（遗留 ⑤：Task 8 之后同一条
+连接上同时有应答/状态广播/发布转发三类帧，顺序无关性得再证一型））与
 `rrd/tests/socket_banner.rs`（CF-3 新增 1 条：子进程 CWD 设为 `/tmp`、`--socket` 只给文件名，
 断言**版本横幅的 bus 字段与"监听 …"行都回显解析后的绝对路径**，并且按那个路径真能连上、注册得了——
 只断言"字符串像绝对路径"抓不到"横幅与 bind 各说一套"这个原始缺陷）；
