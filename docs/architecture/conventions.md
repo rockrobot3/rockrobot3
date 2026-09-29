@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 153 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 158 条（Windows）/167 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -31,10 +31,15 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-29 M2 Task 6 修复轮 1 及其 carry-forward 后复测，平台 Windows x86_64-pc-windows-msvc / cargo 1.95：
-`#[cfg(unix)]` 的代码在本机**不参与编译**，故下列条数只覆盖平台无关逻辑，Unix 侧行为不据此声称）：
-①b **153** 条（`base/runtime` workspace 全量，含 rr-ipc 的 25 个
-envelope 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
+测试面如实登记（2026-09-29 M2 Task 7 后复测，三级各测一次：Windows x86_64-pc-windows-msvc /
+WSL2 Linux x86_64 / `aarch64-unknown-linux-gnu` 交叉 + qemu-user，cargo 1.95—1.97：
+`#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
+Unix 侧行为不据此声称；9 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
+边界的正确结果而不是通过）：
+①b **158** 条（Windows）/ **167** 条（Linux x86_64 与 aarch64-qemu 各 167，`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
+（M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
++ `tests/envelope_meta.rs` 的 4 条**读 JSON**
 的元数据守护（`x-byte-size` / `x-offset-sum` / `payload_len.minimum|maximum` / `x-schema-version`）；
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24（M2 Task 6 给 `Rr3TopicSet` 加 `rr3_topic_set_kind`
@@ -50,7 +55,12 @@ M2 Task 6 补上行 RPC `rpc::tests` 10 条，同批 carry-forward 再补 4 条�
 watchdog 断言（仅 debug 构建）1、`rr3_reg_facts` 的取值回显 1；
 Task 6 修复轮 1 再补 2 条——两处 `ForeignPrefix` 构造点的 owner 回显都为 `?`（前缀不符 /
 owner 比对两支同测）1、被捕获的 watchdog panic 不得改动在册表（仅 debug 构建）1），
-`src/main.rs` 自 M2 只剩"参数 + 装载 + 平台门"、其 `[[bin]]` 目标 0 条——纯逻辑放进 lib，
+M2 Task 7 的 UDS 层没有新增 lib 用例（`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]` 的线程与 IO，
+纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住），它的 9 条在独立测试目标
+`rrd/tests/register_publish.rs`（顶层 `#![cfg(unix)]`，只在 Linux/aarch64 真跑：task 号与上线广播、
+重复名 EBUSY、保留名 EPERM、坏 manifest 点名字段、首帧必须 `rr3.register`、`src_task` 伪造拒帧不断连、
+上行只许 Request、未注册连接按读超时收掉、`rr3.unregister` 干净退场不重启）；
+`src/main.rs` 自 M2 只剩"参数 + 装载 + 平台门 + 把主循环交棒 `daemon`"、其 `[[bin]]` 目标 0 条——纯逻辑放进 lib，
 后续的 `rrd/tests/*.rs` 才引用得到（bin 里的模块对外不可见）；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
