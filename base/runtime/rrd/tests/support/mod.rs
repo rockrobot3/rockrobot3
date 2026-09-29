@@ -50,7 +50,16 @@ impl RrdTest {
     pub fn rr3_start(tag: &str) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
         // 就绪判据用日志而非 connect：connect 探测会留下一条"首帧读取失败"噪声日志
-        RrdTest::rr3_spawn(&socket, None, &socket)
+        RrdTest::rr3_spawn_with_overlay(&socket, None, &socket, Some(Path::new(RR3_OVERLAY_PATH)))
+    }
+
+    /// **不带** `--topics-overlay` 的起法：在册的只有 `contracts/topics.toml` 那 21 条生产主题。
+    /// 专治"叠加层被当成生产放行口"（K4）：夹具命名空间 `rr3-sima/*` 在这里根本不存在，
+    /// 而生产命名空间的 owner 又不是夹具模块 → 两种拒法都必须在**生产口径**下成立。
+    /// 套接字名与 `rr3_start` 同一套 pid+tag 唯一名规则（Global Constraints 8）。
+    pub fn rr3_start_no_overlay(tag: &str) -> RrdTest {
+        let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
+        RrdTest::rr3_spawn_with_overlay(&socket, None, &socket, None)
     }
 
     /// 真正的起进程处。三个路径各管各的：
@@ -64,13 +73,25 @@ impl RrdTest {
     /// 参数表里没有 `tag`：套接字名由**调用方**决定（`rr3_start` 把 tag 拼进路径，
     /// `socket_banner.rs` 自己拼名字），起进程这一层用不上它（M-5：死参数已删）。
     pub fn rr3_spawn(socket: &Path, cwd: Option<&Path>, socket_arg: &Path) -> RrdTest {
+        RrdTest::rr3_spawn_with_overlay(socket, cwd, socket_arg, Some(Path::new(RR3_OVERLAY_PATH)))
+    }
+
+    /// 起进程那一层：`overlay` 为 `None` 时**整条 `--topics-overlay` 都不传**
+    /// （`rr3_start_no_overlay` 用这条口径证明叠加层不是生产放行口）。
+    pub fn rr3_spawn_with_overlay(
+        socket: &Path,
+        cwd: Option<&Path>,
+        socket_arg: &Path,
+        overlay: Option<&Path>,
+    ) -> RrdTest {
         let _ = std::fs::remove_file(socket);
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rrd"));
         cmd.arg("--socket")
-            .arg(socket_arg)
-            .arg("--topics-overlay")
-            .arg(RR3_OVERLAY_PATH)
-            .args(["--restart-base-ms", "20"])
+            .arg(socket_arg);
+        if let Some(ov) = overlay {
+            cmd.arg("--topics-overlay").arg(ov);
+        }
+        cmd.args(["--restart-base-ms", "20"])
             .args(["--pre-register-timeout-ms", "300"])
             .stdout(Stdio::piped())
             // stderr 直接继承：出错就在 cargo 输出里，不必再开一条管道读（也避免缓冲区写满把 rrd 卡死）
@@ -243,6 +264,16 @@ pub struct RrdClient {
 /// 一次"挑帧"最多扫多少帧。扫不到就是**夹具 bug**（谓词写错、或 rrd 真没发这一帧），
 /// 不是把预算调大就能糊过去的偶发；提为常量是因为 Task 8 加 Event 分支、Task 10 加 watchdog
 /// 广播之后一条连接上几秒内的帧数会超过旧的字面值 16（M-4）。
+///
+/// **预算的口径与它的前提（Task 8 评审遗留 ④）**：这颗预算**同时**计"从队列弹帧"与"从 socket
+/// 读帧"——`rr3_try_recv` 先弹 `pending` 再读 socket，所以队列里有存货时，后续读法会先在队列上
+/// 花掉帧数。之所以不把它改成"只计 socket 读"：那样一次挑帧的**总**工作量就没有上界了
+/// （队列可以被反复扫过），而本常量存在的目的正是给"扫不到即夹具 bug"这一判定一个可终止的边界。
+/// 于是这里立一条硬前提：**传给 `rr3_read_where` 的谓词必须是纯函数**——同一帧重复求值结果相同、
+/// 且不改外部状态。原因就在上面那句：pending 里的帧会被下一轮、下下轮重新求值，带计数器/时间戳/
+/// 内部缓存的谓词会在"第二次扫到同一帧"时给出不同答案，那时预算就不再是"扫了多少帧"而是
+/// "谓词心情如何"。本目标现有谓词全部是字段/类型比较（`rr3_body_split` 的枚举比对、
+/// `rr3_json_of(f)["字段"] == 值`），无一例外满足此条件；新增读法请照此约束写。
 const SCAN_BUDGET: usize = 64;
 
 /// 帧的一行摘要，只用于失败诊断
@@ -294,6 +325,7 @@ pub fn rr3_json_of(frame: &Rr3Frame) -> Value {
 /// 实现要点：本轮扫过的帧先攒在 `deferred` 里、**扫完才回队列**。要是边扫边 `push_back`，
 /// 下一轮 `rr3_try_recv` 会优先弹队列，于是同一帧被反复弹出又塞回，永远读不到 socket 上
 /// 后面的帧（第一版就栽在这里：`duplicate_name…` 等 6 条用例以"64 帧内没等到"的形式变红）。
+/// 又因为"塞回队列的帧之后还会被重新求值"，**谓词必须是纯函数**（见 `SCAN_BUDGET` 的注释）。
 pub fn rr3_read_where<F: FnMut(&Rr3Frame) -> bool>(
     c: &mut RrdClient,
     what: &str,
