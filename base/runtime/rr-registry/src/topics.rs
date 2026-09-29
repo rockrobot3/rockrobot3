@@ -56,6 +56,15 @@ impl Rr3TopicSet {
         self.topics.get(topic).cloned()
     }
 
+    /// 该 topic 的在册 kind（不在册 = None）。
+    /// 存在的唯一理由是让装载处能拿**契约原值**复验 merge：`rr3_topic_set_check` 只问
+    /// kind 在不在 `[rules] topic_allowed_kinds` 白名单里，不问它有没有被改写，
+    /// 光靠形状自检抓不到"stream 被换成 event"这种退化（消费方见 rrd 的
+    /// `reject_inconsistent_merge`）。
+    pub fn rr3_topic_set_kind(&self, topic: &str) -> Option<String> {
+        self.kinds.get(topic).cloned()
+    }
+
     pub fn rr3_topic_set_names(&self) -> Vec<String> {
         self.topics.keys().cloned().collect()
     }
@@ -139,9 +148,15 @@ mod tests {
         assert_eq!(merged.topics.len(), 24, "21 契约 + 3 夹具");
         assert_eq!(merged.owners.len(), 9);
         assert_eq!(merged.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(), Some("rr3-sense"));
+        // kind 走同一条"只增不改"承诺：契约条目的 kind 必须以契约原值回、叠加层的 kind 必须
+        // 带得过来、不在册的必须回 None——rrd 装载处的 kind 复验就建在这三个事实上。
+        assert_eq!(merged.rr3_topic_set_kind("rr3-sense/audio/pcm").as_deref(), Some("stream"));
+        assert_eq!(merged.rr3_topic_set_kind("rr3-sima/ping/state").as_deref(), Some("event"));
+        assert_eq!(merged.rr3_topic_set_kind("rr3-nobody/x/y"), None, "不在册 topic 的 kind 是 None 而非空串");
         assert!(merged.rr3_topic_set_contains("rr3-sima/ping/state"));
         // self 未被改动
         assert_eq!(base.topics.len(), 21);
+        assert_eq!(base.rr3_topic_set_kind("rr3-sima/ping/state"), None, "merge 不得把叠加层的 kind 写回 self");
     }
 
     /// 撞名必须 Err 并点名条目（测试注入不得改写生产契约的 owner/kind）
