@@ -9,8 +9,15 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`，M4）对�
 |---|---|---|
 | `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举 | L1 |
 | `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001/003 基准） | L1 |
-| `topics.toml` | 全部主题注册表 + `[owners]` 前缀归属（rrd 启动与 CI 双重校验） | L2 |
+| `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（rrd 启动与 CI 双重校验） | L2 |
 | `events/*.schema.json` | 各模块事件负载 schema（首个真实 schema 随 M3 落） | L2 |
+
+## topics.toml 裁定
+
+1. 主题字符串**不进 128B 消息头**（ADR-0006 §2：topic 置于 payload 内）。本文件是"谁有权发布什么"的**离线注册表**，运行时用于校验与文档生成，不参与线格式。
+2. 规范形式：`<owner>/<域>/<事件>`，三段。`owner` 必须等于某个模块的 `[manifest].name`（方案 §4：`^rr3-[a-z]+$`，**词干只许小写字母**，不含数字与连字符）；域与事件段用小写字母 + 下划线（`^[a-z_]+$`，与 capability 段同规则）。**逐条列举而非正则通配**，是为了让"新增主题必须改契约文件"成为显式动作（改契约 = 走 review）。
+3. 每个 topic 的 owner **必须**在 `[[owner]]` 中登记；一个 topic 只有一个 owner（发布方唯一），订阅方可多个。
+4. `kind` 取值 `request|event|stream|notification`，与 A-IPC payload 类型一一对应（request 表示 REQUEST+RESPONSE 往返）。STREAM 类主题即 ADR-0007 的实时控制面候选，v0.0.1 仅登记、不实现传输。
 
 ## 演进规则（ADR-0007 决策二）
 
