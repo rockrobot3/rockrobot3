@@ -1,0 +1,13 @@
+name: ci
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 规约三检查
+        run: bash tools/ci/check.sh
