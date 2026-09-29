@@ -1,0 +1,19 @@
+[package]
+name = "rr3-sim"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "x86 全链路联调：mock HAL 设备源 + 假模块（骨架）"
+
+# 独立工程：tools/ 不在 base/runtime workspace 内（与 rr3-mkmod/rr3-ctl 同构）
+[workspace]
+
+[[bin]]
+name = "rr3-sim"
+path = "src/main.rs"
+
+[dependencies]
+rr-hal = { path = "../../base/runtime/rr-hal" }
+rr-ipc = { path = "../../base/runtime/rr-ipc" }

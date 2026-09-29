@@ -19,13 +19,15 @@
 | ② | manifest schema + 注册表形状 pin | `cargo test -p rr-registry --test contract` |
 | ②b | mkmod 输出即契约用例（方案 P3） | `cargo test --manifest-path tools/mkmodule/Cargo.toml` |
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
-| ④ | modules/ 每个 Rust 模块编译 | 逐目录 `cargo check --all-targets --manifest-path modules/<id>/Cargo.toml` |
+| ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`） |
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
 ①b 把 workspace 的 66 条测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
-④ 覆盖 `modules/`——模块 crate 各自是独立 workspace，①/①b 打不到它们，
-没有 ④ 的话骨架烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过）。
+④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
+`tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
+没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
+`base/runtime/*` 由 ①/①b 负责，④ 显式排除以免重复）。
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
@@ -38,7 +40,8 @@ envelope 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `tests/env
 钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
 每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
 ②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
-④ **5** 个模块 crate（rr3-brain 为 Python，不参与 cargo 检查）。
+④ **9** 个独立工程（modules 五模块 + rr3-mkmod + rr3-ctl + rr3-sim + rr3-ota-ctl；
+rr3-brain 为 Python，不参与 cargo 检查，其语法检查属人工检查点）。
 ① 用 `--all-targets` 而非 `cargo check`：普通 check 不编译 `#[cfg(test)]` 目标，
 实测在测试代码里注入一个类型错误，`cargo check --workspace` 照样退 0。
 M2 起随运行时语义落地再扩点名范围。
