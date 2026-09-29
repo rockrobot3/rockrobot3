@@ -138,19 +138,21 @@ mod peer {
     }
 
     /// 把接收队列读到"读不出完整一帧"为止（超时 / EOF / 坏帧都算排完）。
-    /// 只在 abort 支用，理由见那里。上限 8 帧：本夹具一条连接上最多攒 4 帧
-    /// （注册应答 + registered 广播 + 补发快照 + 心跳应答），8 已是富余；
-    /// 单次读最多等 `DRAIN_READ_TIMEOUT`，所以这个循环必然终止、不会把夹具挂住。
+    /// 只在 abort 支用，理由见那里。
+    ///
+    /// 不设帧数上限：上限是一条会随任务推进失效的假设——本轮这条连接上最多攒 4 帧，
+    /// 但 Task 10 的 watchdog 广播与 Task 11 的重启扰动都会把它推高，排不完就留未读、
+    /// 未读就把 FIN 变成 RST，用例于是从"判据"退化成"运气"。终止性由 `DRAIN_READ_TIMEOUT`
+    /// 保证：读到空即返回，最多比存货多等一次超时。
     fn rr3_drain_incoming(stream: &mut UnixStream) -> Result<(), String> {
         stream
             .set_read_timeout(Some(DRAIN_READ_TIMEOUT))
             .map_err(|e| format!("设排空读超时失败: {e}"))?;
-        for _ in 0..8 {
+        loop {
             if rr3_frame_read(&mut *stream).is_err() {
                 return Ok(());
             }
         }
-        Ok(())
     }
 
     fn rr3_beat(stream: &mut UnixStream, task: u64, id: u64) -> Result<(), String> {
