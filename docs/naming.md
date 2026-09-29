@@ -28,13 +28,21 @@
 
 - **加前缀**：跨 crate 导出的自由函数、导出类型、trait 名 —— 消费方在自己代码里调用时可见归属
 - **不加前缀**：crate 内部私有函数、trait 的方法（方法命名空间已挂在 trait/impl 下）
-- 该边界由 CI 规约检查兜底（后续可在 tools/ 加 lint 脚本）
+- **导出类型上的 inherent `pub` 方法**（`impl Rr3Xxx { pub fn … }`）：上面两条都没覆盖到这一类——
+  既不是 trait 方法，也不是私有函数。v0.0.1 裁定 **视为合规，加不加 `rr3_` 前缀均可**，既有实现
+  （`rr3_pcm_duration_ms`、`rr3_slot_peer`、`rr3_slot_label`）保持带前缀不改名；矩阵将来若要收紧，
+  须先出 ADR 再改 `base/runtime` 的导出名
+- 该边界的**主题/crate/manifest 名**部分由 CI 四步（`tools/ci/check.sh`，见
+  [conventions.md](conventions.md) §2）兜底；**Rust 符号前缀**在 v0.0.1 没有 lint
+  （方案 D7 只冻结三条语义检查），靠评审——将来可在 `tools/` 补脚本，但需与上一条裁定一并收口
 
 ## 3. 一致性校验（rrd 启动时强制）
 
 1. 目录名 == crate 名 == 进程名 == manifest.name
 2. 事件/RPC 主题前缀 == manifest.name（越权发布拒绝注册）
-3. 主题全量登记于 `contracts/topics.toml`
+3. 发布/订阅的主题必须已在 [`contracts/topics.toml`](../contracts/topics.toml) 逐条登记
+   （v0.0.1 收口时 7 owner / 21 topic）。该注册表反映的是 **M0 已登记的主题**，不是"全部可能的主题"：
+   各模块其余主题随里程碑推进逐条 append（新增主题 = 改契约 = 走 review）
 
 ## 4. 模块目录四件套（mkmodule 生成模板）
 
@@ -45,3 +53,6 @@ modules/rr3-<域>/
 ├── src/             ← Rust crate 或 Python 包
 └── README.md        ← 能力表 + 事件表 + 配置说明
 ```
+
+> 生成器 `rr3-mkmod` 实际落盘 **5 个文件**：上面四类结构角色 + crate 的 `Cargo.toml`
+> （清单与校验流程见 [conventions.md](conventions.md) §3）。

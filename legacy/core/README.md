@@ -9,7 +9,8 @@ core/<模块名>/
 ├── include/<模块名>.h   ← 公开 API（使用方只 include 这个头）
 ├── src/                 ← 实现与模块配置（源码都集中在 src/）
 │   ├── <模块名>.c
-│   └── <模块名>_config.h ← 模块自己的参数（密钥/引脚/阈值，改这里不碰源码）
+│   └── <模块名>_config.h ← 模块自己的参数（引脚/阈值/模型/地址，改这里不碰源码；
+│                            云端密钥不在此文件，见下方「密钥注入」）
 ├── CMakeLists.txt       ← 组件注册：SRCS "src/xxx.c" + INCLUDE_DIRS "include" + PRIV_INCLUDE_DIRS "src"
 └── README.md            ← API 表 + 配置说明 + 复用方法
 ```
@@ -52,6 +53,10 @@ idf.py build
 密钥门只在 CMake configure 阶段执行一次，成功后值即缓存进 `target_compile_definitions`；若此后才
 `unset SILICONFLOW_API_KEY`，Ninja 会用缓存值静默重建而不再触发 FATAL_ERROR——改动该环境变量后务必
 `idf.py fullclean`（或删除 `build/`）强制重新 configure，让密钥门（含空值校验）重新生效。
+
+**已知门局限（v0.0.1 记录，未修）**：密钥判据是 `NOT DEFINED ENV{…} OR "$ENV{…}" STREQUAL ""`，
+即只拒**未设置**与**空串**两种情形；只含空白的值（如 `" "`）非空，会通过 configure，最终产出一个
+Bearer 头为空白、上线必 401 的固件。构建方须自行确保注入的是真实密钥串。
 
 ## 模块清单
 

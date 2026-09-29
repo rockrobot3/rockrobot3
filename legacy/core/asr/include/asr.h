@@ -2,7 +2,8 @@
  * 流式上传 PCM 到云端识别服务，返回文字。
  * 用法：begin 先握手（约1~2秒，期间不丢音）→ 边录边 chunk 上传 →
  *       finish 补零收尾并取识别结果；中途放弃用 abort。
- * 模块参数（密钥/模型）在 asr_config.h，复用方法见本目录 README.md
+ * 模块参数（模型/地址/超时）在 asr_config.h；密钥不在仓库里，构建期注入
+ * SILICONFLOW_API_KEY（见 legacy/core/README.md「密钥注入」）。复用方法见本目录 README.md
  */
 #ifndef ASR_H
 #define ASR_H

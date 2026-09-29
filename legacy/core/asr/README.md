@@ -18,4 +18,6 @@ asr_abort(s);                          // 中途放弃
 - 服务端**不支持 chunked 分块上传**（HTTP 500），用固定 Content-Length 声明
   `max_seconds` 总长 + WAV 头同长，说完提前结束、剩余补静音零。
 - 晚高峰响应慢，`ASR_TIMEOUT_MS` 保持 ≥90 秒。
-- 模块参数在 `src/asr_config.h`（密钥/模型/超时）。
+- 模块参数在 `src/asr_config.h`（模型/地址/超时）。密钥**不在**该文件里：构建期由环境变量
+  `SILICONFLOW_API_KEY` 注入成编译宏，注入方式与缺失后果见 [`legacy/core/README.md`](../README.md)
+  的「密钥注入」一节。

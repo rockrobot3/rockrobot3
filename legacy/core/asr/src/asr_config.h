@@ -1,4 +1,5 @@
-/* asr 模块配置区：识别服务的密钥、地址、模型 */
+/* asr 模块配置区：识别服务的地址、模型（密钥不在本文件：构建期注入 SILICONFLOW_API_KEY，
+ * 注入方式与缺失后果见 legacy/core/README.md 的「密钥注入」一节） */
 #ifndef ASR_CONFIG_H
 #define ASR_CONFIG_H
 
