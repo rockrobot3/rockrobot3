@@ -1,0 +1,29 @@
+# 基座测试夹具 manifest（spec §6 / R5）：刻意不进 modules/、不进 contracts/topics.toml，
+# 所以不吃"7 个 owner / 21 条 topic"的契约 pin；rr-registry 的 contract.rs 只遍历 modules/
+# （已核实 contract.rs:464 的 read_dir 目标），不会把这两份扫进契约用例。
+#
+# entry 为什么是占位符：注册门禁要求 entry 是**绝对路径**（conn.rs 的 rr3_manifest_entry_is_absolute），
+# 而 sim_peer 的构建产物路径随机器、平台、CARGO_TARGET_DIR 变——写死进仓就是一份假路径。
+# 测试在把这份文本交给 rrd 之前，用 env!("CARGO_BIN_EXE_sim_peer") 替换掉它，
+# 所以占位符**永远不会**出现在线上。
+#
+# publishes 必须与 tests/fixtures/sim-topics.toml 里 rr3-sima 名下的那条一致：
+# 叠加层是发布归属的唯一来源，改了这边不改那边就会在注册阶段被"未注册主题"挡住。
+[manifest]
+schema_version = 1
+name = "rr3-sima"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "@SIM_PEER_ENTRY@"
+
+[events]
+publishes = ["rr3-sima/ping/state"]
+subscribes = ["rr3-runtime/module/state"]
+
+[resources]
+restart_policy = "always"
+
+[health]
+heartbeat_ms = 100
+watchdog_timeout_ms = 500
