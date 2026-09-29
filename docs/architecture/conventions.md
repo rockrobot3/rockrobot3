@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 163 条（Windows）/174 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 164 条（Windows）/175 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -31,16 +31,19 @@
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
-测试面如实登记（2026-09-29 M2 Task 7 收口（CF-3：横幅回显绝对套接字路径）后复测。**两个平台的条数本就应当不等**，
-所以各记各的、不合并成单一数字：Windows x86_64-pc-windows-msvc **163**（本轮 ①b 实测量）、
-WSL2 Linux x86_64 **174**（控制器在同一份树上跑的 L2）。`aarch64-unknown-linux-gnu` 交叉 + qemu-user
+测试面如实登记（2026-09-29 M2 Task 7 收口（CF-3 横幅绝对路径 + CF-4 契约路径规范化）后复测。
+**两个平台的条数本就应当不等**，所以各记各的、不合并成单一数字：
+Windows x86_64-pc-windows-msvc **164**（本轮 ①b 实测量）、
+WSL2 Linux x86_64 **175**（= 控制器在 CF-3 那份树上 L2 实测的 174，加 CF-4 这 1 条
+**平台无关**的 lib 用例；本批 Unix 侧的绝对数待控制器下一次 L2 复核，不据此声称已跑）。
+`aarch64-unknown-linux-gnu` 交叉 + qemu-user
 本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 11 条全部可枚举：
 Unix 独有的 10 条线级用例（`register_publish` 9 + `socket_banner` 1）+ `cli::tests` 里那 1 条
 `#[cfg(unix)]` 用例。cargo 1.95—1.97：
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
 Unix 侧行为不据此声称；10 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **163** 条（Windows）/ **174** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **164** 条（Windows）/ **175** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
@@ -48,8 +51,8 @@ Unix 侧行为不据此声称；10 条线级用例在 Windows ①b 里显示 `ru
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24（M2 Task 6 给 `Rr3TopicSet` 加 `rr3_topic_set_kind`
 访问器，实证并进了既有的 merge 用例，故条数不变）；
-rrd 的 82 条（Windows）/83 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
-全在 lib 目标（`cli::tests` 11/12 + `topics_load::tests` 15 + `manifest::tests` 7 + 横幅 2
+rrd 的 83 条（Windows）/84 条（Unix；差的那 1 条是 `cli::tests` 里 `#[cfg(unix)]` 的绝对路径幂等用例）
+全在 lib 目标（`cli::tests` 11/12 + `topics_load::tests` 16 + `manifest::tests` 7 + 横幅 2
 + `registry::tests` 37 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
 形状错误标注来源 1、路径值不得以 `-` 开头 1；M2 Task 4 再补 `manifest::tests` 7 条；
 M2 Task 5 补在册表/状态机/发布归属 29 条与合并后复验 1 条；
@@ -68,6 +71,14 @@ Task 7 的 carry-forward 再补 `cli::tests` 4 条——`--restart-base-ms` 下�
 `fs::canonicalize`：bind 之前套接字文件必然不存在，canonicalize 会以 ENOENT/os error 2 拒掉一个合法值；
 把实现换成 canonicalize 该用例即实测变红）1、已经是绝对路径时原样返回（`#[cfg(unix)]`，幂等——它是
 "横幅、`UnixListener::bind`、模块侧看到的 `RR3_BUS_PATH` 是同一个字符串"的前提）1；
+CF-4 再补 `topics_load::tests` 1 条——契约路径进装载入口即被 `fs::canonicalize` 规范化，
+坏契约的致命文案里不得漏出 `..`（`RR3_CONTRACT_TOPICS_PATH` 由 `CARGO_MANIFEST_DIR` 拼出、
+字面就带 `..`，而 `main.rs` 只绝对化叠加层那一条；运维照报错里的 `..` 去查是按他自己的 CWD 展开的）；
+这条与 CF-3 恰好用**相反**的工具，理由写进 `rr3_contract_resolved` 的注释：契约必须已存在，
+ENOENT 正是该报的那一条，而 bind 前的套接字用 canonicalize 会误拒合法值。
+同批既有 15 条 `topics_load` 用例的**逐字文案断言**全部原样通过（含两条全等断言的
+`overlay_conflict_refuses_startup_and_names_the_entry` / `overlay_declaring_reserved_namespace_is_rejected`），
+故规范化只改了契约那一条路径的来源，没有改写任何错误词汇。
 M2 Task 7 的 UDS 层没有新增 lib 用例（`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]` 的线程与 IO，
 纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住），它的 10 条在两个独立测试目标
 `rrd/tests/register_publish.rs`（顶层 `#![cfg(unix)]`，只在 Linux/aarch64 真跑：task 号与上线广播、
