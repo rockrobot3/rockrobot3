@@ -1,0 +1,24 @@
+# 基座测试夹具 manifest 的第二份（spec §6 / R5），与 sima/module.toml 同形状，
+# 差异只有三处：name、publishes、restart_policy = "never"。
+# never 是 `sim_peer_clean_exit_broadcasts_unregistered_and_never_restarts` 要的判据：
+# 干净退出不该产生重启计划（与 sima 的 always 形成正反两路）。
+# 同上：entry 是占位符，交 rrd 前由测试换成 sim_peer 构建产物的绝对路径；
+# publishes 与 tests/fixtures/sim-topics.toml 里 rr3-simb 名下的那条一致。
+[manifest]
+schema_version = 1
+name = "rr3-simb"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "@SIM_PEER_ENTRY@"
+
+[events]
+publishes = ["rr3-simb/pong/state"]
+subscribes = ["rr3-runtime/module/state"]
+
+[resources]
+restart_policy = "never"
+
+[health]
+heartbeat_ms = 100
+watchdog_timeout_ms = 500
