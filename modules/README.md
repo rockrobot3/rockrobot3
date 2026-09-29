@@ -1,7 +1,7 @@
 # modules —— rr3-* 模块（生成器落盘五个文件）
 
 每个模块固定由 `rr3-mkmod` 生成下列**五个文件**，缺件不合入
-（四类结构角色见 [naming.md](../docs/architecture/naming.md) §4，`Cargo.toml` 属"源码"那件的 crate 半边）：
+（四类结构角色见 [naming.md](../docs/process/naming.md) §4，`Cargo.toml` 属"源码"那件的 crate 半边）：
 
     modules/rr3-<域>/
     ├── module.toml   ← manifest：身份/能力/事件/资源/健康
@@ -10,6 +10,17 @@
     ├── Cargo.toml    ← 独立 crate（M2 起 path 依赖 rr-ipc/rr-bus）
     ├── src/main.rs   ← 入口骨架（Rust crate 或 Python 包）
     └── README.md     ← 能力表 + 事件表 + 配置说明
+
+**`entry` 字段：在仓相对，装机绝对**。六份 `module.toml` 的 `entry` 写的是**相对**值
+（如 `entry = "rr3-sense"`）——它们是**契约工件**，不是注册输入：供 ② 步的
+`every_module_manifest_passes_contract` 校验 manifest 形状并钉住模块集合，同时是 `rr3-mkmod`
+落盘的产物形态。真正的注册输入是设备上那份：rrd 的注册握手（`base/runtime/rrd/src/conn.rs`）
+要求 `manifest.entry` 必须是绝对路径——M2 的 manifest 从线上（wire）来，没有"所在目录"可依据，
+相对 `entry` 会被 `AIRY_EINVAL` 拒掉；线级用例
+`rrd/tests/register_publish.rs::bad_manifests_name_the_field_and_keep_rrd_alive`
+把这条门禁与"文案必须点名绝对路径"钉着。所以：**不要为了让门禁放行而把仓内 `module.toml`
+改成绝对路径**（那会把契约工件变成注册输入，等于用仓内夹具去定义生产语义）；绝对 `entry`
+由装机环节写入——磁盘装载随 M3、打包与路径改写随 M6。
 
 **当前状态（2026-09-29）**：六个模块已全部落位 —— rr3-sense / rr3-act / rr3-interact /
 rr3-power / rr3-connect（Rust，`rr3-mkmod` 生成）+ rr3-brain（Python 包，`rr3_brain/`，
