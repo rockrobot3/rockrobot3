@@ -484,6 +484,8 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
     // write_all，那条连接的积压就无限增长。有界化 + 丢弃最旧 + 断连是 Task 10 的行为改动（已记
     // carry，watchdog 心跳过期正是现成的回收路径），本轮只把前提写清、不改通道形状
     // （brief 29-31 行约定的是 `mpsc::Receiver<Rr3Frame>` 这个类型，`sync_channel` 同样满足）。
+    // Task 10 落地的是 tick 线程，**没有**动通道形状；静默模块的回收现在由 expire 置
+    // `tx = None` 这一路提供（写线程随之结束、fd 随之释放），有界化 + 丢弃最旧仍归 Task 11。
     let _ = writer.join();
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())

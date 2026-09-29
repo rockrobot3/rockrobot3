@@ -784,7 +784,7 @@ watchdog_timeout_ms = {wd}
     #[test]
     fn expiry_report_carries_the_numbers_that_decided_it() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), mpsc::channel().0, 0).unwrap();
+        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
         assert!(r.rr3_reg_beat(t, 400), "夹具心跳必须先被接受，否则 elapsed 无从谈起");
         let e = &r.rr3_reg_expire(1_001)[0];
         assert_eq!(e.elapsed_ms, 601, "elapsed 必须是 now-last_beat，不是 now-注册时刻");
