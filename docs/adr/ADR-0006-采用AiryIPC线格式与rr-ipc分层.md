@@ -20,7 +20,7 @@
    - 事务面 payload 默认 JSON-RPC 2.0（标准默认，零改动）
 2. **语义字段放置**：rock3 的 topic 字符串与 phase（normal/degraded/recovery）置于 payload 内，**不占用消息头 reserved 区**（保持与标准逐字节兼容）
 3. **错误码**：RESPONSE.status 采用 AIRY_E* 子集（EOK/EINVAL/EPERM/EBUSY/ETIMEDOUT）
-4. **运行时自实现**：src_task 由 rrd（受信用户态运行时）在模块注册时分配并校验；capability 令牌、内核强制、防重放窗口等 AirymaxRT 运行时机制**不引入**（单机可信环境，见 ADR-0007 后续演进）
+4. **运行时自实现**：src_task 由 rrd（受信用户态运行时）在模块注册时分配并校验；capability 令牌、内核强制、防重放窗口等 AirymaxRT 运行时机制**不引入**（单机可信环境，见 ADR-0007 后续演进）（v0.0.1 现状：rrd 仅打印启动横幅，src_task 分配/校验与握手回显随 M2 落地）
 5. **rr-ipc 分层**：
    - `protocol/`：128B 头与 payload 纯编解码，与传输无关；Rust/Python 双侧对齐同一 schema
    - `transport/`：`trait Transport`，uds 为 M2 唯一实现；shm（控制面，ADR-0007）、tcp（多机）预留
