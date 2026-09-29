@@ -1,0 +1,15 @@
+[package]
+name = "rr-hal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "硬件抽象层（HAL）trait 定义：gpio/pwm/audio/power/link，后端随 M2/M5 落地"
+
+[lib]
+name = "rr_hal"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
