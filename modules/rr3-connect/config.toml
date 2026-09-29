@@ -1,0 +1,14 @@
+# rr3-connect 运行期配置
+# 铁律：任何凭据/PSK/token 都不写在这里，只走环境变量（conventions §3）。
+# SSID/密码属用户数据，运行期由 NetworkManager 侧持有，本模块不持久化。
+
+[rr3-connect]
+log_level = "info"
+
+[rr3-connect.wifi]
+link_report_period_ms = 5000
+roam_probe_enabled = false
+
+[rr3-connect.session]
+tls_min_version = "1.3"     # 与 legacy 云链路调优一致（提交 0cf029e）
+timeout_ms = 20000

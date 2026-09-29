@@ -54,8 +54,11 @@ RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人�
 ## 3. 仓库目录树（文件级）
 
 > **状态（2026-09-29，v0.0.1）**：`contracts/`、`base/runtime/`（6 crate）、`tools/mkmodule`、
-> `tools/ci/` 已建立并通过 `bash tools/ci/check.sh`；`modules/` 仅有规约 README（尚无模块，约定见
-> [conventions.md](conventions.md)）；ESP32 在编固件已迁入 `legacy/`（tag `v0-pre-legacy`）。
+> `tools/ci/` 已建立并通过 `bash tools/ci/check.sh`；**`modules/` 六个模块已落位**
+> （rr3-sense/act/interact/power/connect 由 `rr3-mkmod` 生成骨架 + 内构目录，rr3-brain 为
+> Python 包），六份 `module.toml` 由 ② 步校验、五个 Rust crate 由 ④ 步编译，约定见
+> [conventions.md](conventions.md)；ESP32 在编固件已迁入 `legacy/`（tag `v0-pre-legacy`）。
+> **模块只有结构，没有实现**：入口打印自述后退出，总线接入随 M2、采集/驱动随 M3–M5。
 > 下图/下表仍含 M1–M6 未落地项，标注"规划"者以里程碑表（§10）为准。
 
 ```
@@ -93,7 +96,7 @@ rock3/
 │   ├── mkmodule/        bin: rr3-mkmod，生成合规模块骨架
 │   ├── rrctl/           bin: rr3-ctl，订阅总线查状态/日志/触发 OTA
 │   ├── sim/             bin: rr3-sim，mock HAL + 假模块，x86 全链路联调
-│   └── ci/check.sh      ← 规约检查唯一入口（五步，见 conventions.md §2）
+│   └── ci/check.sh      ← 规约检查唯一入口（六步，见 conventions.md §2）
 │
 ├── docs/                ← 本文档 + naming.md + conventions.md + adr/
 └── legacy/              ← 冻结四棵 ESP32 树：firmware-c/ + core/ + firmware-rs/ + rust/
@@ -144,6 +147,8 @@ watchdog_timeout_ms = 5000
 要点：
 - 事件/RPC 主题必须以 `manifest.name` 为前缀，越权发布一律拒绝；校验入口现为 `rr3-mkmod`
   生成自检 + `rr-registry` 契约测试，rrd 运行时注册校验属 M1/M2 待落地
+- **上面的示例只演示字段形状，其中 `audio/asr_final`、`audio/set_mute` 并未登记**：照抄会被
+  ② 步以"未注册主题"拒。`modules/` 下六份真实 manifest 是可直接对照的样板
 - 模块间依赖走 capabilities，未来更换传感器模块不影响 brain
 
 ### 4.2 生命周期（rr-registry 状态机）

@@ -1,0 +1,29 @@
+[manifest]
+schema_version = 1
+name = "rr3-power"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "rr3-power"
+
+[provides]
+capabilities = ["power.battery", "power.charger"]
+
+[depends]
+required = ["bus.publish"]
+optional = []
+
+# 低压关断是本模块的本地决策，不依赖总线（contracts/topics.toml 同条 note）：
+# 因此 subscribes 为空是设计而非遗漏。
+[events]
+publishes = ["rr3-power/battery/state", "rr3-power/charger/state"]
+subscribes = []
+
+[resources]
+restart_policy = "always"
+mem_limit_mb = 16
+start_priority = 10
+
+[health]
+heartbeat_ms = 2000
+watchdog_timeout_ms = 10000

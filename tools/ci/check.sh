@@ -9,8 +9,8 @@
 # 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
 # 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；
 # 退出码仍是首要信号（编译错误、错误 --test 目标名照样红）。① 不跑测试，只看得退出码。
+# ④ 是模块侧编译步（不是测试步）：modules/ 各 crate 独立成 workspace，①/①b 覆盖不到。
 set -uo pipefail
-
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内，规约门拒绝执行。" >&2
   exit 1
@@ -69,6 +69,20 @@ run_tests sh -c 'cargo test --manifest-path tools/mkmodule/Cargo.toml'
 
 step "③ 主题前缀归属"
 run_tests sh -c 'cd base/runtime && cargo test -p rr-registry topics_prefix'
+
+# ④ modules/ 逐 crate 编译。模块 crate 各自是独立 workspace（conventions §3），
+# ①/①b 只覆盖 base/runtime，所以没有这一步的话，模块骨架烂掉无人知晓。
+# 没有 Cargo.toml 的模块目录（rr3-brain 是 Python）跳过，其语法检查属人工检查点。
+step "④ modules/ 每个 Rust 模块编译"
+for dir in modules/*/; do
+  [ -f "${dir}Cargo.toml" ] || continue
+  if sh -c "cargo check -q --all-targets --manifest-path '${dir}Cargo.toml'"; then
+    printf 'PASS  cargo check %s\n' "$dir"
+  else
+    printf 'FAIL  cargo check %s\n' "$dir"
+    fail=1
+  fi
+done
 
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then

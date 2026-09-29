@@ -1,0 +1,18 @@
+# rr3-brain 运行期配置
+# 铁律：密钥 / token 一律走环境变量（SILICONFLOW_API_KEY），本文件不落任何凭据。
+# 逐行来源：legacy/core/{asr,llm,tts}/src/*_config.h 中曾硬编码密钥，迁移时改为读环境。
+
+[rr3-brain]
+log_level = "info"
+
+[rr3-brain.cloud]
+base_url = "https://api.siliconflow.cn/v1"
+asr_model = "iic/SenseVoiceSmall"
+llm_model = "deepseek-ai/DeepSeek-V3"
+tts_model = "FunAudioLLM/CosyVoice2-0.5B"
+timeout_s = 20
+
+[rr3-brain.dialog]
+# 对话策略：拾音状态机的静默判停阈值，来自 legacy/main.c
+silence_tail_ms = 700
+max_turn_chars = 800
