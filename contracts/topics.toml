@@ -1,0 +1,172 @@
+# RockRobot3 主题所有权注册表（[SC] 契约层，单一事实源）
+# 消费方：base/runtime/rr-registry（校验）、tools/mkmodule（脚手架自检）、docs 生成
+# 约束：owner 唯一；topic 必须以 "<owner>/" 开头；kind 对应 A-IPC payload 类型
+# 引用：ADR-0006 §2/§6、ADR-0007 决策一、naming.md
+
+schema_version = 1
+
+# ---------- 模块所有权（v0.0.1 的 5+1 模块 + base 运行时） ----------
+[[owner]]
+name = "rr3-sense"
+path = "modules/rr3-sense"
+role = "感知：麦克风阵列、环境传感器、IMU"
+
+[[owner]]
+name = "rr3-act"
+path = "modules/rr3-act"
+role = "执行：舵机/电机、反射环宿主进程"
+
+[[owner]]
+name = "rr3-interact"
+path = "modules/rr3-interact"
+role = "交互：表情屏、TTS 播放、拾音状态机"
+
+[[owner]]
+name = "rr3-power"
+path = "modules/rr3-power"
+role = "电源：电池、充电、低压关断兜底"
+
+[[owner]]
+name = "rr3-connect"
+path = "modules/rr3-connect"
+role = "连接：WiFi 链路、云端会话"
+
+[[owner]]
+name = "rr3-brain"
+path = "modules/rr3-brain"
+role = "认知：ASR/LLM/TTS 编排（Python）"
+
+[[owner]]
+name = "rr3-runtime"
+path = "base/runtime/rrd"
+role = "base 守护进程：注册、健康、系统广播"
+
+# ---------- 主题 ----------
+[[topic]]
+name = "rr3-sense/audio/pcm"
+kind = "stream"
+owner = "rr3-sense"
+stable = "L1"
+note = "原始 PCM 上行。ADR-0007 归实时控制面；M5 前不实现 shm 传输"
+
+[[topic]]
+name = "rr3-sense/audio/vad_start"
+kind = "event"
+owner = "rr3-sense"
+stable = "L2"
+note = "静音/起音边沿，携带置信度摘要而非闭环数据"
+
+[[topic]]
+name = "rr3-sense/env/temperature"
+kind = "event"
+owner = "rr3-sense"
+stable = "L2"
+
+[[topic]]
+name = "rr3-sense/imu/state"
+kind = "stream"
+owner = "rr3-sense"
+stable = "L2"
+note = "IMU 姿态摘要（融合在 act 反射环内完成，此处仅摘要上报）"
+
+[[topic]]
+name = "rr3-act/servo/command"
+kind = "request"
+owner = "rr3-act"
+stable = "L1"
+note = "角度/时限指令，JSON-RPC 事务面（<100Hz）"
+
+[[topic]]
+name = "rr3-act/servo/state"
+kind = "stream"
+owner = "rr3-act"
+stable = "L2"
+
+[[topic]]
+name = "rr3-act/motor/reflex"
+kind = "notification"
+owner = "rr3-act"
+stable = "L1"
+note = "仅反射环异常/饱和通告。闭环本身永不进总线（ADR-0007 裁定 1）"
+
+[[topic]]
+name = "rr3-act/led/effect"
+kind = "request"
+owner = "rr3-act"
+stable = "L2"
+
+[[topic]]
+name = "rr3-interact/face/expression"
+kind = "request"
+owner = "rr3-interact"
+stable = "L1"
+note = "表情切换（idle/blink/talk/think/happy）"
+
+[[topic]]
+name = "rr3-interact/tts/text"
+kind = "request"
+owner = "rr3-interact"
+stable = "L1"
+
+[[topic]]
+name = "rr3-interact/asr/text"
+kind = "event"
+owner = "rr3-interact"
+stable = "L1"
+
+[[topic]]
+name = "rr3-interact/dialog/turn"
+kind = "event"
+owner = "rr3-interact"
+stable = "L2"
+
+[[topic]]
+name = "rr3-power/battery/state"
+kind = "event"
+owner = "rr3-power"
+stable = "L1"
+note = "电压/电量/温度摘要；低压关断为 power 模块本地决策，不依赖总线"
+
+[[topic]]
+name = "rr3-power/charger/state"
+kind = "event"
+owner = "rr3-power"
+stable = "L2"
+
+[[topic]]
+name = "rr3-connect/net/link"
+kind = "event"
+owner = "rr3-connect"
+stable = "L1"
+
+[[topic]]
+name = "rr3-connect/cloud/session"
+kind = "request"
+owner = "rr3-connect"
+stable = "L2"
+
+[[topic]]
+name = "rr3-brain/llm/completion"
+kind = "request"
+owner = "rr3-brain"
+stable = "L1"
+
+[[topic]]
+name = "rr3-brain/intent/result"
+kind = "event"
+owner = "rr3-brain"
+stable = "L2"
+
+[[topic]]
+name = "rr3-runtime/system/heartbeat"
+kind = "notification"
+owner = "rr3-runtime"
+stable = "L1"
+note = "dst_task=0 广播（RR3_BROADCAST_DST_TASK）"
+
+[[topic]]
+name = "rr3-runtime/module/state"
+kind = "notification"
+owner = "rr3-runtime"
+stable = "L1"
+note = "模块上下线/重启事件，phase 字段置于 payload 内（ADR-0006 §2）"
