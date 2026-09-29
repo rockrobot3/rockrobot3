@@ -23,7 +23,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**六步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 158 条（Windows）/167 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 162 条（Windows）/171 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -36,7 +36,7 @@ WSL2 Linux x86_64 / `aarch64-unknown-linux-gnu` 交叉 + qemu-user，cargo 1.95�
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
 Unix 侧行为不据此声称；9 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **158** 条（Windows）/ **167** 条（Linux x86_64 与 aarch64-qemu 各 167，`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **162** 条（Windows）/ **171** 条（Linux x86_64 与 aarch64-qemu 各 171，`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**
@@ -44,7 +44,7 @@ Unix 侧行为不据此声称；9 条线级用例在 Windows ①b 里显示 `run
 rr-registry 的 39 条 = lib 15（schema 4 + 主题集 `topics::tests` 6 + 按文本入口
 `validate::text_entry_tests` 5）+ 契约 24（M2 Task 6 给 `Rr3TopicSet` 加 `rr3_topic_set_kind`
 访问器，实证并进了既有的 merge 用例，故条数不变）；
-rrd 的 77 条全在 lib 目标（`cli::tests` 6 + `topics_load::tests` 15 + `manifest::tests` 7 + 横幅 2
+rrd 的 81 条全在 lib 目标（`cli::tests` 10 + `topics_load::tests` 15 + `manifest::tests` 7 + 横幅 2
 + `registry::tests` 37 + `rpc::tests` 10；2026-09-29 修复轮新增 5 条：叠加层路径绝对化 2、`rr3-runtime/*` 冒充在装载处被拒 1、
 形状错误标注来源 1、路径值不得以 `-` 开头 1；M2 Task 4 再补 `manifest::tests` 7 条；
 M2 Task 5 补在册表/状态机/发布归属 29 条与合并后复验 1 条；
@@ -54,7 +54,11 @@ M2 Task 6 补上行 RPC `rpc::tests` 10 条，同批 carry-forward 再补 4 条�
 被 merge 改写时在装载处被拒 1、登记 owner 缺失时越权文案回显 `?` 1、三条拒绝门先于
 watchdog 断言（仅 debug 构建）1、`rr3_reg_facts` 的取值回显 1；
 Task 6 修复轮 1 再补 2 条——两处 `ForeignPrefix` 构造点的 owner 回显都为 `?`（前缀不符 /
-owner 比对两支同测）1、被捕获的 watchdog panic 不得改动在册表（仅 debug 构建）1），
+owner 比对两支同测）1、被捕获的 watchdog panic 不得改动在册表（仅 debug 构建）1；
+Task 7 的 carry-forward 再补 `cli::tests` 4 条——`--restart-base-ms` 下界 1（0 = 退避恒为 0 =
+热重启循环）1、上界由退避表末档导出（`u64::MAX / 60`，过界即饱和成"永不重启"，须在启动时拒）1、
+默认套接字取自**注入的表**而非进程环境（`ENV_LOCK` 随之一并删除）1、生产入口 `rr3_cli_parse`
+仍委托进程环境读取（只读断言，不 `set_var`）1；
 M2 Task 7 的 UDS 层没有新增 lib 用例（`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]` 的线程与 IO，
 纯逻辑仍在 `registry.rs`/`rpc.rs` 里已被钉住），它的 9 条在独立测试目标
 `rrd/tests/register_publish.rs`（顶层 `#![cfg(unix)]`，只在 Linux/aarch64 真跑：task 号与上线广播、
