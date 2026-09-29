@@ -57,13 +57,16 @@ pub fn rr3_now_ns() -> u64 {
 /// 本任务不额外加 catch_unwind。Task 11 若把重启做进这条线程，必须重估这个决定
 /// （那时循环体里会多出 spawn 与退避睡眠）。
 ///
-/// 到期判死**不**走死亡记账：它只改相位 + 回报，`restarts` 一颗都不扣。
-/// 由此产生一条本轮没有收口的次序：被 watchdog 判死的模块，它的连接后来真的断开时仍会走
-/// `conn.rs` 的 `rr3_conn_finish` → `rr3_reg_death`——那条**没有** skip-failed 护栏
-/// （`registry.rs`，与 `rr3_reg_expire` 相对），于是同一身份被记两次死亡、并可能按
-/// `restart_policy` 再扣一次重启预算。本轮不修：判死该不该计入重启预算、由谁计入，
-/// 是 Task 11 的"两条崩溃路汇到同一份重启预算"那条裁定的一部分（见 ledger R-A4），
-/// 在这里各写各的只会让 Task 11 拿到两份互相矛盾的账。
+/// 到期判死**现在也走记账**（Task 11a 的 registry 收口）：`rr3_reg_expire` 在判死那一拍调
+/// `rr3_charge` 给出一条重启计划（`Rr3Expiry.restart`）。但 11a 的 daemon 侧**只收下不使用**
+/// （下面那行 `let _ = ex.restart;`）：真正接管它、据它派生重启进程的是 11b 的 supervisor。
+/// 于是 ledger R-A4 那条"同一身份被记两次死"的双计隐患**在表上已结清**——被 watchdog 判死后，
+/// 它的连接后来真断开时走 `conn.rs` 的 `rr3_conn_finish` → `rr3_reg_death`，那条现在有 skip-failed
+/// 护栏（返回 `Rr3Death::Silent`），既不重复广播也不重复记账。
+///
+/// **为什么 11a 不在这里打"重启计划"日志**：任何含"重启计划"四字的新日志行都会把
+/// `e2e_watchdog` 的 W4 当场打死（W4 判据是窗口内 rrd stdout 不出现那四字），而 W4 的改写与
+/// "重启计划"上线必须同一次提交成对发生——那是 11b 的活（见 11b 的 A-5③ 裁定）。
 fn rr3_spawn_watchdog(shared: Arc<Mutex<RrdRegistry>>, t0: Instant, tick_ms: u64) {
     thread::spawn(move || {
         // 日志在线程内打：harness 每个用例都等这一行（`support` 的
@@ -85,6 +88,9 @@ fn rr3_spawn_watchdog(shared: Arc<Mutex<RrdRegistry>>, t0: Instant, tick_ms: u64
                 // 但抓到的是一条本该不必存在的失败）。
                 let n = rr3_lock(&shared).rr3_reg_fanout(&frame, ex.src_task);
                 rr3_log(&format!("watchdog 广播 failed 到 {n} 个连接"));
+                // D-8：到期那一路的记账结果在 11a 只收下不使用——11b 的 supervisor 接管它，
+                // 并据它派生重启。此刻绝不打"重启计划"日志（会打死 e2e_watchdog 的 W4）。
+                let _ = ex.restart;
             }
         }
     });

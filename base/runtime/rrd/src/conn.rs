@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
-use crate::registry::RrdRegistry;
+use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, RrdRegistry};
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_manifest_param, rr3_rpc_parse_request,
     rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register, rr3_rpc_topic_param,
@@ -397,11 +397,21 @@ fn rr3_serve_request(
             Ok(Rr3Flow::Keep)
         }
         Rr3RpcMethod::Heartbeat => {
-            let accepted = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
-            if accepted {
-                rr3_reply_ok(out, me, req.id, &json!({"beat": "accepted"}));
-            } else {
-                rr3_reply_err(out, me, req.id, Rr3StatusCode::TimedOut, "该 task 已过期或不在册，需重新注册");
+            // D-6：三态回报。Rejected 回错误帧；Kept/Promoted 都回 OK（合法心跳都得续命）。
+            // 11a **不做广播**（广播要 fanout，而"广播几条"是 11b 的判据面）：只把 Promoted 落到
+            // 一行日志上，钉住"registered→running 的唯一升级时刻"，11b 再把它推上线。
+            // Rr3Flow::Keep 保持不变（与今天一致，不影响既有帧序判据）。
+            let beat = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
+            match beat {
+                Rr3Beat::Rejected => {
+                    rr3_reply_err(out, me, req.id, Rr3StatusCode::TimedOut, "该 task 已过期或不在册，需重新注册");
+                }
+                other => {
+                    rr3_reply_ok(out, me, req.id, &json!({"beat": "accepted"}));
+                    if other == Rr3Beat::Promoted {
+                        rr3_log(&format!("{} → running", me.name));
+                    }
+                }
             }
             Ok(Rr3Flow::Keep)
         }
@@ -422,16 +432,32 @@ fn rr3_serve_request(
 /// 且 `rr3_reg_expire` 跳过 failed 条目，所以判死过的模块不会被第二拍再回报一次
 /// （线上由 `watchdog_broadcasts_exactly_one_failed_state` 钉）。
 fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &str) {
-    let plan = rr3_lock(&ctx.shared).rr3_reg_death(&me.name, clean_exit, ctx.rr3_ctx_now_ms());
-    let phase = if clean_exit { "unregistered" } else { "failed" };
-    let n = rr3_lock(&ctx.shared)
-        .rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD);
-    match plan {
-        Some(p) => rr3_log(&format!(
-            "{} 退出（{reason}）→ 重启计划 attempt={} delay_ms={} entry={}（spawn 见 Task 11）",
-            p.name, p.attempt, p.delay_ms, p.entry
-        )),
-        None => rr3_log(&format!("{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接", me.name)),
+    // 死亡记账的结果必须先绑到 `let`：若把 `rr3_lock(..).rr3_reg_death(..)` 直接写进 `match` 的
+    // 被匹配表达式，返回的 `MutexGuard` 临时量会活到整个 `match` 语句结束（Rust 的临时量寿命
+    // 规则： scrutinee 位置的临时量延寿到所属语句收尾），于是 `Broadcast` 分支里再 `rr3_lock`
+    // 同一把在册表锁就成了同线程重入自死锁（std Mutex 不可重入）——收尾永远走不到 fanout 与
+    // 日志，e2e 的三条 EOF/退场用例集体 3s 超时。绑到 `let` 后守卫在 `;` 处即释放。
+    let death = rr3_lock(&ctx.shared).rr3_reg_death(&me.name, clean_exit, ctx.rr3_ctx_now_ms());
+    match death {
+        // owned（11b supervisor）：EOF 不改相位/不广播/不记账，三件事一起让给退出码那一路。
+        // 11a 生产路径无人 own 任何 name，这一支不可达。
+        Rr3Death::DeferredToExitStatus => {}
+        // 已被 watchdog 判死：终态广播与重启预算都归 watchdog 那一拍，收尾不得双计（R-A4）。
+        Rr3Death::Silent => {}
+        // 刚由 live 转终态，或 unregister 后条目已摘（plan=None）：调用方广播恰好一条 state。
+        Rr3Death::Broadcast { plan } => {
+            // D-7：死因→phase 的字面量只在 registry 一处，conn 不再各写各的。
+            let phase = rr3_phase_for_exit(clean_exit);
+            let n = rr3_lock(&ctx.shared)
+                .rr3_reg_fanout(&rr3_state_frame(&me.name, phase, me.task), RR3_TASK_RRD);
+            match plan {
+                Some(p) => rr3_log(&format!(
+                    "{} 退出（{reason}）→ 重启计划 attempt={} delay_ms={} entry={}（spawn 见 Task 11b）",
+                    p.name, p.attempt, p.delay_ms, p.entry
+                )),
+                None => rr3_log(&format!("{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接", me.name)),
+            }
+        }
     }
 }
 
