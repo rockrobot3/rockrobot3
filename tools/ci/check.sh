@@ -16,7 +16,8 @@ fi
 
 fail=0
 tmpout="$(mktemp)" || { echo "ERROR: mktemp 失败，无法捕获步骤输出。" >&2; exit 1; }
-trap 'rm -f "$tmpout"' EXIT INT TERM
+trap 'rm -f "$tmpout"' EXIT
+trap 'rm -f "$tmpout"; exit 130' INT TERM
 
 step() { printf '\n=== %s ===\n' "$1"; }
 
@@ -30,8 +31,9 @@ run() {
   fi
 }
 
-# 跑测试的步骤：cargo 退出码为首要信号；退出码 0 但输出中不存在任何
-# "test result: ok. N passed"（N≥1）时判 FAIL，封死空过滤器/测试集丢失的 fail-open。
+# 跑测试的步骤：cargo 退出码为首要信号；退出码 0 时还须同时出现行首的
+# "running N tests"（N≥1）与 "test result: ok. N passed"（N≥1）才判 PASS，
+# 封死空过滤器/测试集丢失、以及仅凭一行仿造文本蒙混过关的 fail-open。
 # 全量输出经 tee 实时流给操作者，同时落盘临时文件供 grep，不吞日志。
 run_tests() {
   if ! "$@" 2>&1 | tee "$tmpout"; then
@@ -39,7 +41,8 @@ run_tests() {
     fail=1
     return
   fi
-  if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' "$tmpout"; then
+  if ! grep -qE '^running [1-9][0-9]* tests?' "$tmpout" \
+     || ! grep -qE '^test result: ok\. [1-9][0-9]* passed' "$tmpout"; then
     printf 'FAIL  %s ——命令成功但 0 个测试通过（过滤器打空或测试集丢失），视为门禁失效\n' "$*"
     fail=1
     return
