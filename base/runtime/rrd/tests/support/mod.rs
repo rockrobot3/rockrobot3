@@ -11,7 +11,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
@@ -44,17 +44,34 @@ impl RrdTest {
     /// （Task 11 要跑完 1..60 档），注册前读超时 300ms（本任务测试 8 用它）。
     pub fn rr3_start(tag: &str) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
-        let _ = std::fs::remove_file(&socket);
-        let mut child = Command::new(env!("CARGO_BIN_EXE_rrd"))
-            .arg("--socket")
-            .arg(&socket)
+        // 就绪判据用日志而非 connect：connect 探测会留下一条"首帧读取失败"噪声日志
+        RrdTest::rr3_spawn(tag, &socket.clone(), None, &socket)
+    }
+
+    /// 真正的起进程处。三个路径各管各的：
+    /// - `socket_arg` 原样写进 `--socket`（可以是相对路径，CF-3 就靠这一点）
+    /// - `cwd` 是子进程的工作目录（`None` = 继承测试进程的），相对 `socket_arg` 按它解析
+    /// - `socket` 是**期望的绝对路径**：用于清残留、连它、以及等横幅回显它
+    ///
+    /// 把"传给 CLI 的原词"和"期望的绝对路径"分成两个参数，正是为了让用例能断言
+    /// 横幅回显的是后者而不是前者（`rrd/tests/socket_banner.rs`）。
+    pub fn rr3_spawn(tag: &str, socket: &Path, cwd: Option<&Path>, socket_arg: &Path) -> RrdTest {
+        let _ = std::fs::remove_file(socket);
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_rrd"));
+        cmd.arg("--socket")
+            .arg(socket_arg)
             .arg("--topics-overlay")
             .arg(RR3_OVERLAY_PATH)
             .args(["--restart-base-ms", "20"])
             .args(["--pre-register-timeout-ms", "300"])
             .stdout(Stdio::piped())
             // stderr 直接继承：出错就在 cargo 输出里，不必再开一条管道读（也避免缓冲区写满把 rrd 卡死）
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        let _ = tag; // tag 只用于生成默认路径，命名一致性由调用方保证
+        let mut child = cmd
             .spawn()
             .unwrap_or_else(|e| panic!("起 rrd 失败: {e}"));
 
@@ -74,8 +91,7 @@ impl RrdTest {
             }
         });
 
-        let mut me = RrdTest { socket: socket.clone(), child, lines: rx, seen: Vec::new() };
-        // 就绪判据用日志而非 connect：connect 探测会留下一条"首帧读取失败"噪声日志
+        let mut me = RrdTest { socket: socket.to_path_buf(), child, lines: rx, seen: Vec::new() };
         me.rr3_wait_log(&format!("监听 {}", socket.display()));
         me
     }

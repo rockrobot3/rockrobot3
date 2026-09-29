@@ -1,6 +1,6 @@
 //! 命令行与总线路径解析（纯逻辑，平台无关）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rr_ipc::{RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 
@@ -116,6 +116,18 @@ pub fn rr3_cli_parse_with_env(
 
 fn parse_ms(flag: &str, raw: &str) -> Result<u64, String> {
     raw.parse::<u64>().map_err(|_| format!("{flag} 需为非负整数毫秒，收到 {raw}"))
+}
+
+/// 把 `--socket` 解析成绝对路径：横幅回显与 `UnixListener::bind` 必须共用同一个值。
+///
+/// 用 `std::path::absolute` 而不是 `topics_load` 那套 `std::fs::canonicalize`：bind 之前
+/// 套接字文件**必然还不存在**，canonicalize 会以 ENOENT 拒掉一个完全合法的待创建路径。
+/// 代价是这条路径不解析符号链接、也不保证唯一——对"横幅说的就是绑的地方"这个目的足够。
+/// 失败（极少数畸形路径，如空字符串配空 CWD）如实报错，不回落原词：静默回落等于把
+/// "运维照横幅连错地方"这条缝留在原地。
+pub fn rr3_socket_absolute_path(path: &Path) -> Result<PathBuf, String> {
+    std::path::absolute(path)
+        .map_err(|e| format!("套接字路径 {} 无法解析为绝对路径: {e}", path.display()))
 }
 
 /// `--restart-base-ms` 专用门禁：`0` 与"末档乘溢出"都在 parse 处拒掉，不落默认值。
@@ -291,5 +303,25 @@ mod tests {
         let e = rr3_cli_parse(&a(&["--restart-base-ms", &(max_ok + 1).to_string()]))
             .expect_err("溢出必须拒，不能饱和成「永不重启」");
         assert!(e.contains("--restart-base-ms") && e.contains("用法"), "报错要点名开关: {e}");
+    }
+
+    /// 待创建的套接字路径**不存在**是常态（bind 之前哪来的文件），解析必须照样成功。
+    /// 这条钉住"为什么是 `std::path::absolute` 而不是 `canonicalize`"：后者会 ENOENT。
+    #[test]
+    fn socket_absolute_path_does_not_require_existence() {
+        let raw = Path::new("rr3-m2-never-created-check.sock");
+        assert!(!raw.exists(), "夹具必须真的不存在：这条测的就是「不存在也能解析」");
+        let abs = rr3_socket_absolute_path(raw).expect("待创建路径不该被拒");
+        assert!(abs.is_absolute(), "{abs:?} 不是绝对路径");
+        assert_eq!(abs.file_name(), Some(std::ffi::OsStr::new("rr3-m2-never-created-check.sock")));
+    }
+
+    /// 已经是绝对路径时原样返回（幂等）：`main.rs` 只解析一次，重复解析不会改值，
+    /// 所以横幅、bind、以及模块侧看到的 `RR3_BUS_PATH` 才是同一个字符串。
+    #[cfg(unix)]
+    #[test]
+    fn absolute_socket_path_is_returned_verbatim_on_unix() {
+        let raw = Path::new("/tmp/rr3-m2-absolute-check.sock");
+        assert_eq!(rr3_socket_absolute_path(raw).unwrap(), raw);
     }
 }

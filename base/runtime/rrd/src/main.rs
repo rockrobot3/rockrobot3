@@ -14,13 +14,25 @@ use rrd::RRD_UNSUPPORTED;
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let cfg = match cli::rr3_cli_parse(&args) {
+    let mut cfg = match cli::rr3_cli_parse(&args) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{e}");
             return std::process::ExitCode::FAILURE;
         }
     };
+
+    // 套接字路径在打印横幅**之前**绝对化：横幅回显的必须正是 daemon 要绑的那一个。
+    // 按 CLI 原词回显（`--socket rel.sock`）会让运维照自己 shell 的 CWD 去连，而 daemon
+    // 绑的是 rrd 的 CWD + rel.sock——两处各说一套，比直接报错更难查。
+    // 绝对化失败即致命：静默回落原词等于把这条缝留在原地。
+    match cli::rr3_socket_absolute_path(&cfg.socket) {
+        Ok(abs) => cfg.socket = abs,
+        Err(e) => {
+            eprintln!("rrd: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
 
     // 叠加层路径在这里一次性绝对化：装载与横幅共用同一个解析结果（spec §6 的可见凭证）。
     // 解析失败即致命——横幅是"叠加层已生效"的可见凭证，按 CLI 原词回显会让它依赖 CWD。
