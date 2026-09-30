@@ -27,6 +27,8 @@ pub enum Rr3FrameError {
     Header(Rr3HdrError),
     /// 写侧：头声明的 payload_len 与实际 payload 长度不符
     LengthMismatch { declares: u32, actual: usize },
+    /// 缓冲未 seal 就要取整帧字节（头区还是全 0，发出去是对端眼里的坏 magic）
+    Unsealed,
     /// 其它 IO 错误（文案只带 os 原因，不带对端数据）
     Io(String),
 }
@@ -39,7 +41,8 @@ impl From<Rr3HdrError> for Rr3FrameError {
 
 /// 读满 `buf`。返回 `Ok(Some(已读字节数))`；`Ok(None)` = 第一个字节都没读到（对端关闭）。
 /// 已读字节数必须由计数给出：payload 本身可以含任意 0 字节。
-fn read_fill(r: &mut impl Read, buf: &mut [u8]) -> Result<Option<usize>, Rr3FrameError> {
+/// crate 内可见：`buf.rs` 的 `rr3_framebuf_read` 复用同一份计数语义，不另写第二份。
+pub(crate) fn read_fill(r: &mut impl Read, buf: &mut [u8]) -> Result<Option<usize>, Rr3FrameError> {
     let mut done = 0usize;
     while done < buf.len() {
         match r.read(&mut buf[done..]) {
