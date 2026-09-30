@@ -23,7 +23,6 @@
 //! S2 把两条路放在同一框里对照。
 mod support;
 
-use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -60,16 +59,21 @@ fn rr3_broadcast_count(line: &str) -> u64 {
 /// 为什么需要：`go_silent` 那一世睡在 `sleep(3600s)` 里、不再读 socket，rrd 死后没人收它
 /// （std 的 `Child` drop 既不 kill 也不 wait，而 rrd 才是它的父进程）。S4 的判据链要求
 /// "第三世也被起出来"，那第三世就是这条泄漏。
-/// 为什么不算判据、也不算依赖：它不断言任何东西，失败一律忽略；且只动 `/proc/<pid>/cmdline`
-/// 里确实是 `sim_peer` 的那一个——pid 被回收也不会误杀别人。
+/// 为什么不算判据、也不算依赖：它不断言任何东西，失败一律忽略；且只动 `ps` 查出来
+/// 确实是 `sim_peer` 的那一个——pid 被回收也不会误杀别人。
+/// （`ps` 而不是 `/proc/{pid}/cmdline`：macOS 没有 /proc，照抄 Linux 写法这条卫生在
+/// mac 上会静默变成 no-op，挂死夹具全部泄漏——S5 同一个教训。）
 /// （产品侧的对应事实是已知边界③：rrd 不持有 SIGCHLD，也不在退出时杀子进程；S5 只管常驻支。）
 fn rr3_kill_hung_fixture(pid: u64) {
-    let cmdline = format!("/proc/{pid}/cmdline");
-    match std::fs::read(&cmdline) {
-        Ok(b) if String::from_utf8_lossy(&b).contains("sim_peer") => {
-            let _ = Command::new("/bin/kill").arg(pid.to_string()).status();
-        }
-        _ => {}
+    let ps = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output();
+    let is_sim_peer = ps
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("sim_peer"))
+        .unwrap_or(false);
+    if is_sim_peer {
+        let _ = Command::new("/bin/kill").arg(pid.to_string()).status();
     }
 }
 
@@ -136,6 +140,10 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
 fn an_owned_crash_is_failed_while_a_foreign_one_is_unregistered() {
     let owned = rr3_fixture_manifest("sr-s2-own", "simb"); // 被 boot 的那一份
     let foreign = rr3_fixture_manifest("sr-s2-fgn", "sima"); // 测试自己起的那一份
+    // 夹具默认的 wd=500ms 是 e2e_watchdog 的判据，不是本用例要的：这里钉的是"退出码定性"，
+    // 必须把 watchdog 那一路从判据里排掉（负载下收尸可能晚于 500ms，谁先记就是掷硬币）。
+    rr3_fixture_watchdog_ms(&owned, 60_000);
+    rr3_fixture_watchdog_ms(&foreign, 60_000);
     let mut rrd = RrdTest::rr3_start_boot("sr-s2-own", &[&owned.path], "abort", E2E_TICK_MS);
     let mut b = rr3_observer(&mut rrd, "rr3-obs");
 
@@ -179,6 +187,8 @@ fn an_owned_crash_is_failed_while_a_foreign_one_is_unregistered() {
 #[test]
 fn never_policy_crash_does_not_spawn_again() {
     let m = rr3_fixture_manifest("sr-s3", "simb"); // restart_policy = never
+    // 同 S2：钉的是退出码那一路的定性 + never 不再起，500ms watchdog 抢记会把两路搅在一起
+    rr3_fixture_watchdog_ms(&m, 60_000);
     let mut rrd = RrdTest::rr3_start_boot("sr-s3", &[&m.path], "abort", E2E_TICK_MS);
     let mut b = rr3_observer(&mut rrd, "rr3-obs");
 
@@ -252,13 +262,15 @@ fn rrd_death_does_not_leave_boot_spawned_children() {
     let pid = rr3_field_from_log(&spawn, "pid=");
     rrd.rr3_wait_log("注册 rr3-sima task=");
     // 前置必须先成立：进程还活着，否则"它消失了"什么也没测。
-    assert!(Path::new(&format!("/proc/{pid}")).exists(), "夹具必须还在: {spawn}");
+    // 判活走 `rr3_pid_alive` 而不是 `/proc/{pid}`：macOS 没有 /proc，照抄 Linux 写法
+    // 这条前置在 mac 上恒假，S5 从来没法在 mac 上跑到 drop 那一半。
+    assert!(rr3_pid_alive(pid), "夹具必须还在: {spawn}");
 
     drop(rrd); // → `RrdTest::drop` 杀 rrd 并 unlink 套接字
 
     // 依据是读代码读来的，不是猜的：`sim_peer::rr3_resident` 每颗心跳都读应答，rrd 一死
     // socket 即 EOF → `rr3_wait_reply` 立刻 Err → 进程退出。
     // 有界轮询：判据是"消失"这件事本身，2s 只是不再等的上限（与 `rr3_wait_line` 同一口径）。
-    let gone = rr3_wait_until(|| !Path::new(&format!("/proc/{pid}")).exists(), Duration::from_secs(2));
-    assert!(gone, "rrd 死后 boot 起的常驻夹具必须自己退出；/proc/{pid} 两秒内没消失");
+    let gone = rr3_wait_until(|| !rr3_pid_alive(pid), Duration::from_secs(2));
+    assert!(gone, "rrd 死后 boot 起的常驻夹具必须自己退出；pid={pid} 两秒内没消失");
 }

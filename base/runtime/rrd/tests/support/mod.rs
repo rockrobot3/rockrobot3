@@ -50,10 +50,15 @@ pub const RR3_QUIET_WATCHDOG_TICK_MS: u64 = 3_600_000;
 /// `watchdog_ms = 500` 一起决定"到期上界 520ms"这条算式，两处各写一个数就是两处真值。
 pub const E2E_TICK_MS: u64 = 20;
 
-/// 等到 rrd 打出"监听 <path>"的超时
-const READY_TIMEOUT: Duration = Duration::from_secs(5);
-/// 单条日志等待
-const LOG_TIMEOUT: Duration = Duration::from_secs(3);
+/// "等一条**应当出现的行**"的统一耐心上限——既管启动就绪行（监听 / 线程横幅），也管
+/// 运行期日志（注册 / 判死 / 重启）。为什么统一：两者的到来时刻都由**宿主机负载**支配
+/// （boot 场景是 spawn → 子进程 exec → 连接 → 注册的整条链，exec 在过载机上就要秒级），
+/// 都不是被测行为的时间语义。本仓库开发机（2015 双核 i7，4 线程）在 rust-analyzer/编译
+/// 并发的 load>10 下实测：子进程 exec 后 **8.3s** 才打出横幅（sample 抓到 16K 物理内存 +
+/// 未知二进制段的 exec 早期现场），空载只要 ~100ms；旧值 5s/3s 因此让线级用例间歇 spawn
+/// 超时。20s = 实测最坏值 ×2 以上余量。**行为上的否定断言不走这里**——那是
+/// `rr3_assert_no_log` 的显式时长，判断据是"窗口内没出现"。
+const READY_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// 从子进程 stdout 逐行收集（`RrdTest` 与 `SimPeer` 共用一份口径）。
 /// 为什么必须共用：两处各写一份逐行读码，EOF 与超时的处理迟早分叉——而这两件事正是
@@ -328,10 +333,11 @@ impl RrdTest {
     }
 
     /// 等到一条含 needle 的日志（先查已缓冲的）；超时把全部已读日志打进 panic，便于定位。
+    /// 耐心上限是 READY_TIMEOUT（见其文档：日志的到来时刻由宿主机负载支配）。
     /// 逐行收集与等待都委托给本文件的 `rr3_spawn_line_reader` / `rr3_wait_line`——
     /// `SimPeer` 读的是另一个进程，必须走同一份口径，否则两处的 EOF/超时语义会分叉。
     pub fn rr3_wait_log(&mut self, needle: &str) -> String {
-        rr3_wait_line(&self.lines, &mut self.seen, needle, LOG_TIMEOUT)
+        rr3_wait_line(&self.lines, &mut self.seen, needle, READY_TIMEOUT)
     }
 
     /// 排干 dur 内的全部输出（等异步副作用：watchdog、重启），返回拼接文本
@@ -675,6 +681,42 @@ pub fn rr3_fixture_manifest(tag: &str, dir: &str) -> SimManifest {
     SimManifest { path }
 }
 
+/// 把夹具 manifest 副本的 `watchdog_timeout_ms` 改写成 `ms`（只动本用例 pid 唯一的 /tmp 副本，
+/// 共用夹具文件一字不动）。改写没命中就 panic——夹具形状变了时"静默不改"会让隔离失效。
+///
+/// 为什么存在：S2/S3（e2e_spawn_restart）要钉"子进程退出码是 owned 崩溃定性的权威"，而
+/// 共用夹具的 500ms watchdog 是给 e2e_watchdog 的判据用的。高负载机上 supervisor 的收尸
+/// （try_wait + 扫尸节拍）可能饿到 500ms 以上，watchdog 就抢先把条目记成 failed——
+/// 收尸那一路于是走 Silent，断言红在竞争噪声而不是被测行为上。拉大这一用例副本的
+/// watchdog 窗口，把"谁先记"的竞争从用判据里排掉（R-A4 本来就允许两路任一先记）。
+pub fn rr3_fixture_watchdog_ms(m: &SimManifest, ms: u64) {
+    let text =
+        std::fs::read_to_string(&m.path).unwrap_or_else(|e| panic!("读夹具副本失败: {e}"));
+    let needle = "watchdog_timeout_ms = 500";
+    let replaced = text.replace(needle, &format!("watchdog_timeout_ms = {ms}"));
+    assert!(
+        replaced != text && replaced.contains(&format!("watchdog_timeout_ms = {ms}")),
+        "夹具副本里没有 {needle:?} 可改——fixture 形状变了，本助手的隔离前提失效"
+    );
+    std::fs::write(&m.path, replaced)
+        .unwrap_or_else(|e| panic!("写夹具副本失败: {e}"));
+}
+
+/// pid 还活着吗。Linux 走 `/proc/{pid}`；macOS 没有 /proc（S5 在 mac 上恒红的根因），
+/// 用 `kill -0` 探测——0 号信号不投递，只查权限，"能发"即"活着"。
+/// 同用户进程不会 EPERM；僵尸进程返回"活着"，但 S5 的判据是"rrd 死后夹具自己退场"，
+/// 夹具退出后由 launchd/init 收尸，窗口里多算的一拍不影响判据方向。
+pub fn rr3_pid_alive(pid: u64) -> bool {
+    if Path::new(&format!("/proc/{pid}")).exists() {
+        return true;
+    }
+    Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// sim_peer 子进程 + 它的 stdout 收集线程。
 pub struct SimPeer {
     child: Child,
@@ -700,9 +742,10 @@ impl SimPeer {
         SimPeer { child, lines, seen: Vec::new() }
     }
 
-    /// 等到夹具自己打出的里程碑行（5 s 上限，卡住即失败而不是挂住整个测试目标）
+    /// 等到夹具自己打出的里程碑行。上限用 READY_TIMEOUT（与 `RrdTest::rr3_wait_ready`
+    /// 同一理由：里程碑行的到来时刻由宿主机负载决定，不是被测行为的时间语义）。
     pub fn rr3_wait(&mut self, needle: &str) -> String {
-        rr3_wait_line(&self.lines, &mut self.seen, needle, Duration::from_secs(5))
+        rr3_wait_line(&self.lines, &mut self.seen, needle, READY_TIMEOUT)
     }
 
     /// 还活着吗。`try_wait` 不阻塞——"活着"在本轮是**否证**（没打出"喂狗被拒"、没退出），
