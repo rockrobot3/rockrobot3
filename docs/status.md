@@ -3,13 +3,13 @@
 本文件是仓内**唯一**允许回答"某能力在当前 HEAD 有没有实现"的地方。其余文档只写设计语义，
 不写实况；设计文档里出现"已落地/未落地"的字样一律视为待订正（架构文档 §5 就因此整段重写过）。
 
-- **实况锚点**：本快照按锚点提交 `08d460f`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
+- **实况锚点**：本快照按锚点提交 `48322d5`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
   本文里的"当前 HEAD"一律指这个锚点提交的那棵树，锚点之外的增量不进本表。
 - **状态只取三值**：`已实装` / `骨架` / `未设计`。限定条件（如"仅 Unix 参与编译""仅单元层"）
   写在证据列，不塞进状态列——否则三值就退化成自由文本，也就失去了可对比性。
   这套词表里**没有"未实现"这个值**，所以"设计已定但一行没写"的项只能落进 `未设计`（无接口形状）
   或 `骨架`（类型/计划已在、动作缺席）；不软化的保证不在状态列，而在证据列那句实话——
-  例如"退避算得出、但无人 spawn"与"依赖仲裁连类型都未定义"就各自写清了缺的是哪一手。
+  例如"shm/tcp 的线上签名已定型、实现一行没写"就各自写清了缺的是哪一手。
 - **本文件不写测试条数**。两平台条数本就不等、且每加一条就变；唯一的登记处是
   [`process/conventions.md`](process/conventions.md) §2（含差额的逐条可枚举解释）。
 - **本文件不抄主题表，也不抄 manifest 字段**：主题与 kind 的真相是
@@ -23,24 +23,26 @@
 
 | 能力 | 状态 | 证据（读代码取得，非规划） |
 |---|---|---|
-| 128B 定长消息头编解码（Layout C） | 已实装 | [`header.rs`](../base/runtime/rr-ipc/src/protocol/header.rs)：`RR3_IPC_HDR_SIZE = 128`、`Rr3Header::from_bytes` / `to_bytes`（reserved 自动全 0），偏移逐字段对齐契约 |
-| 帧读写（半帧 / 坏 magic / 长度不符即拒） | 已实装 | [`frame.rs`](../base/runtime/rr-ipc/src/transport/frame.rs)：`rr3_frame_read` / `rr3_frame_write` / `rr3_frame_to_bytes`；`Rr3FrameError` 区分"头只读了一半就 EOF"与"头本身非法"；校验失败时不得有半帧落进流里 |
+| 128B 定长消息头编解码（Layout C） | 已实装 | [`header.rs`](../base/runtime/rr-ipc/src/protocol/header.rs)：`RR3_IPC_HDR_SIZE = 128`、`Rr3Header::from_bytes` / `to_bytes`（reserved 自动全 0），偏移逐字段对齐契约；另有**编译期 const 断言**（偏移连续 / 头长合计 128 / magic LE 线上字节 31 45 52 41 / payload 枚举值冻结）——任意目标编译通过即成立，不依赖测试有人跑 |
+| 帧读写（半帧 / 坏 magic / 长度不符即拒） | 已实装 | [`frame.rs`](../base/runtime/rr-ipc/src/transport/frame.rs)：`rr3_frame_read` / `rr3_frame_write` / `rr3_frame_to_bytes`；`Rr3FrameError` 区分"头只读了一半就 EOF"与"头本身非法"，另有 `Unsealed`（缓冲未 seal 就取整帧字节）；校验失败时不得有半帧落进流里 |
 | payload 类型前缀（前 2 字节小端枚举） | 已实装 | [`body.rs`](../base/runtime/rr-ipc/src/protocol/body.rs)：`rr3_body_encode` / `rr3_body_split`；枚举 `Rr3PayloadType` 定义在 [`header.rs`](../base/runtime/rr-ipc/src/protocol/header.rs) |
-| `trait Transport` 与 uds / shm / tcp 分层 | 未设计 | [`transport/mod.rs`](../base/runtime/rr-ipc/src/transport/mod.rs) 头注明确把签名推给 M2 一并定，理由是"以免现在造一个 ADR-0007 §裁定 3 要推翻的接口"；该目录只有 `frame.rs` 与两个路径常量 `RR3_UDS_PATH_DEFAULT` / `RR3_BUS_PATH_ENV`，**无任何 trait 定义** |
+| 所有权移交整帧缓冲（零拷贝落点） | 已实装 | [`buf.rs`](../base/runtime/rr-ipc/src/transport/buf.rs)：`Rr3FrameBuf` 单块连续内存（`[0..128)` 头预留区 + payload）、`rr3_seal` 原地幂等编头、`rr3_framebuf_read` 读侧同一错误语义；`Rr3Frame` 保留为纯值视图，两形状低成本互转（ADR-0007 裁定 3 / ADR-0008） |
+| `trait Transport` 与 uds / shm / tcp 分层 | 已实装 | **限定：uds 是唯一实现；shm（M5）/tcp（预留）只有线上签名、一行实现都没有**（ADR-0008 裁定 4：不写半成品）。[`transport/mod.rs`](../base/runtime/rr-ipc/src/transport/mod.rs)：三 trait——`Rr3TransportConn`（`rr3_send_buf` 消费缓冲 / `rr3_recv_buf` 返回所有权缓冲；对一切 `Read + Write + Send` 有 blanket 实现，send 前幂等 seal）、`Rr3TransportListener`、`Rr3TransportEndpoint`（cleanup → bind）；[`uds.rs`](../base/runtime/rr-ipc/src/transport/uds.rs)（`#[cfg(unix)]`）：`Rr3UdsListener`（`type Conn = UnixStream`）与客户端入口 `rr3_connect`。**不引 async**（裁定 1）。裁定全文见 [ADR-0008](process/adr/ADR-0008-传输层trait定型与uds实现.md) |
+| IPC-T-003 跨架构对拍（x86 ↔ aarch64 字节布局一致） | 骨架 | **夹具与脚本就绪、双架构真跑未发生**：[`src/bin/ipct003_dump.rs`](../base/runtime/rr-ipc/src/bin/ipct003_dump.rs) 输出 golden 头 + 五种 payload 类型各一整帧的 hex（全编译期字面量；header 行已实测与 [`golden/event-header-128.hex`](../contracts/golden/event-header-128.hex) 逐字节一致）；[`tools/ci/ipct003.sh`](../tools/ci/ipct003.sh) 三方对拍（宿主 / linux-arm64 容器 / golden，不进七步门，登记于 conventions.md §2）；缺 Docker 与 aarch64 目标时脚本打 `SKIP` 明说。登记见 [`envelope.schema.json`](../contracts/envelope.schema.json) 的 `x-rock3-v0.0.1-uncovered` 与 [contracts/README.md](../contracts/README.md) 演进登记 |
 | manifest 校验（字段 + 跨字段规则） | 已实装 | [`schema.rs`](../base/runtime/rr-registry/src/schema.rs) + [`validate.rs`](../base/runtime/rr-registry/src/validate.rs)（入口 `rr3_registry_validate_manifest_text`）；契约面在 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs) |
 | 主题注册表与前缀归属 | 已实装 | [`topics.toml`](../contracts/topics.toml)（内容本身不在此复述）+ [`topics.rs`](../base/runtime/rr-registry/src/topics.rs) 的 `Rr3TopicSet` / `rr3_topic_set_owner`；装载侧规范化与叠加见 [`topics_load.rs`](../base/runtime/rrd/src/topics_load.rs) |
-| rrd 在册表：注册 / 心跳 / 死亡记账 / 扇出 / 快照 | 已实装 | **且被连接层实际调用**：[`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `rr3_reg_add` / `rr3_reg_beat` / `rr3_reg_remove` / `rr3_reg_death` / `rr3_reg_fanout` / `rr3_reg_snapshot`，六个都有 `rr3_lock(&ctx.shared)` 的调用点在 [`conn.rs`](../base/runtime/rrd/src/conn.rs)。（同文件的 `rr3_reg_name_of` 今天仍**没有**跨文件调用点：`registry.rs` 那段 doc 注把它写成"发布分支该用的取名方式"，但已落地的发布分支改用登记期身份 `me.name`（见下文"发布归属判定"一行），故这个反查函数实际无人调） |
-| 在册表阶段机（`Rr3Phase`） | 已实装 | [`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `enum Rr3Phase { Registered, Running, Degraded, Failed }`。**限定：四个阶段里只有三个有置位路径**——`Degraded` 的 setter 与持久化按其文档注释随 rrd 实现计划的 Task 9/11 落地，今天无从发生；`as_str()` 仍会回显 `"degraded"`，所以词表是完整的 |
-| 模块重启的退避计算 | 已实装 | **只算不执行**（派生动作单列为下文的"模块 spawn / 重启执行"一行）：`rr3_reg_death` 返回的重启计划带 `attempt` / `delay_ms` / `entry`，见 [`registry.rs`](../base/runtime/rrd/src/registry.rs)；[`conn.rs`](../base/runtime/rrd/src/conn.rs) 的 `rr3_conn_finish` 把这份计划**写进日志**，并注明 spawn 见 rrd 实现计划 Task 11 |
-| 发布归属判定（越权前缀 / 冒充内建命名空间） | 已实装 | **已接到线上**：`RrdRegistry::rr3_reg_publish_check`（返回 `Rr3PublishDeny`）不再只有单元用例——`conn.rs` 的上行分发把 `Rr3PayloadType::Event` 交 `rr3_publish`（`conn.rs:281`），后者依次调 `rr3_rpc_topic_param`（`conn.rs:328`）、`rr3_reg_publish_check(&me.name, …)`（`conn.rs:336`）、越权时用 `rr3_rpc_status_for_publish_deny`（`conn.rs:349`）回错误帧并 `rr3_reg_note_denied` 计数。发送方身份取 `me.name`（注册期 `Rr3Peer` 在册名，`conn.rs:237`），帧上 `src_task` 在分发前就校验：不等于 `me.task` 即那一帧被拒（`conn.rs:267` 起）——`registry.rs` doc 注里"由 `rr3_reg_name_of` 反查"的表述线上换成了这套等价做法。拒帧不断连，与 `src_task` 伪造同一口径。接口字面量归 `reference/rrd-rpc.md` §7 与 `reference/rrd-registry.md` §8 |
-| rrd 上行 JSON-RPC 三方法 | 已实装 | [`rpc.rs`](../base/runtime/rrd/src/rpc.rs)：`Rr3RpcMethod` = `rr3.register` / `rr3.heartbeat` / `rr3.unregister`，含 `rr3_rpc_parse_request` 的版本与 id 校验、`rr3_rpc_build_result` / `rr3_rpc_build_error` 错误映射 |
-| rrd UDS 监听与注册握手 | 已实装 | **限定：仅 Unix**——`conn` / `daemon` 两模块整体挂在 `#[cfg(unix)]` 下。[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 的 `rr3_daemon_run`：清残留套接字 → `UnixListener::bind` → 起唯一的 watchdog 监视线程 → accept 循环，每连接 spawn 一条 reader 线程（加上 [`conn.rs`](../base/runtime/rrd/src/conn.rs) 为同一条连接 spawn 的 writer 线程与它那份 `try_clone`，连接账是每连接 **2 条线程 + 2 个 fd**，`daemon.rs` 模块 doc 明示"不是一条"；全进程另有那条 watchdog 线程，不在这个"每连接"账里）；[`conn.rs`](../base/runtime/rrd/src/conn.rs) 的 `rr3_conn_serve` / `rr3_handshake`：首帧必须是发给 `RR3_TASK_RRD` 的 `rr3.register`，`src_task` 由 rrd 分配、伪造者那一帧被拒但连接不断，注册前设读超时收掉静默连接。线级用例：[`tests/register_publish.rs`](../base/runtime/rrd/tests/register_publish.rs)、[`tests/socket_banner.rs`](../base/runtime/rrd/tests/socket_banner.rs)、[`tests/e2e_sim_peer.rs`](../base/runtime/rrd/tests/e2e_sim_peer.rs)（跨进程对端夹具：由 `env!("CARGO_BIN_EXE_sim_peer")` 起的第二个真进程，证明注册→心跳→发布→退场整条链在线上走得通）与 [`tests/e2e_watchdog.rs`](../base/runtime/rrd/tests/e2e_watchdog.rs)（Task 10 的时间判定），这些线级目标整体挂在 `#![cfg(unix)]` 门后（`e2e_watchdog.rs` 因文件头注更长而落在第 20 行，其余在首行），故 Windows 侧它们**不参与编译**（那是 cfg 边界的正确结果，不等于通过）。cfg 边界的自述见 [`lib.rs`](../base/runtime/rrd/src/lib.rs) |
-| 模块 spawn / 重启执行 | 未设计 | **一行实现都没有，也没有接口形状**：进程内线程现有**三类**——每连接的 reader（[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 的 `thread::spawn`，`daemon.rs:132`）与 writer（[`conn.rs`](../base/runtime/rrd/src/conn.rs) 的 `thread::spawn`，`conn.rs:446`；这条账仍是**每连接** 2 条线程 + 2 个 fd），加上全进程唯一的那条 watchdog 线程（`daemon.rs:56`）——**三类里没有一类是进程派生**：`base/runtime/rrd/src/` 内 `Command::new` / `std::process::Command` 命中为零（全仓唯一的 `Command` 在测试夹具 [`tests/support/mod.rs`](../base/runtime/rrd/tests/support/mod.rs) 里，用来起 `rrd` 与 `sim_peer` 两个真进程，不是产品代码）。[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 头注逐字（源中相邻两行，这里用 + 连接）："Task 10 已加**唯一的** watchdog 线程（`rr3_spawn_watchdog`）；Task 11 在这里加 spawn/重启。" + "本任务做的：清残留套接字 → bind → 起监视线程 → accept 循环。"——这里的 Task 号属 **rrd 实现计划**，与本文档所属的文档重构计划无关。与下文两行的区分要留住：退避计划**算得出**、到期判死**已接线**，本行缺的是进程派生与"到期路径按 `restart_policy` 产重启计划" |
-| 到期判活扫描（`rr3_reg_expire`） | 已实装 | **已实装且已被唯一 watchdog 线程按 tick 调用**。[`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `rr3_reg_expire(now_ms) -> Vec<Rr3Expiry>` 逻辑完整（`saturating_sub` 防时钟倒退、已 `Failed` 的条目跳过不重复回报、死连接句柄当场丢弃、回报里回带 `elapsed_ms` / `watchdog_ms` 两个判据数字），调用者就是 `daemon.rs` 里 `rr3_spawn_watchdog`（`daemon.rs:54`）起的那条线程：每拍执行 `rr3_lock(&shared).rr3_reg_expire(rr3_now_ms(t0))`（`daemon.rs:60`）。**仍成立的限定：到期路径不查 `restart_policy`、不产重启计划**——协作者自己的线级用例 `tests/e2e_watchdog.rs` 就以"判死行里没有 `attempt=`"钉着这条欠账，它归 rrd 实现计划 Task 11 |
-| watchdog 监视线程 | 已实装 | **限定：仅 Unix**（`daemon.rs` 整模块挂在 `#[cfg(unix)]` 下）。[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 的 `rr3_spawn_watchdog`（`daemon.rs:54`）由 `rr3_daemon_run` 在 accept 循环之前起（`daemon.rs:116`），全进程只有这一条。tick 来自 CLI 的 `--watchdog-tick-ms`（默认值与"拒 0"的字面量归 [`reference/rrd-cli.md`](reference/rrd-cli.md) §2 §3，本行不抄）；循环**先睡后扫**（第一拍在 t+tick，`daemon.rs:59`）、**每拍只锁一次**（扫全表那一次，`daemon.rs:60`）、**广播在锁外**（判死与 `rr3_reg_fanout` 之间不持锁，`daemon.rs:70`）；判死日志把**判据数字本身**一起回显（name、task、距上次心跳毫秒、超时毫秒四个量，源 `daemon.rs:63-64`；渲染形状归 [`reference/rrd-registry.md`](reference/rrd-registry.md) §6.1，本行不抄）。线级证据：[`tests/e2e_watchdog.rs`](../base/runtime/rrd/tests/e2e_watchdog.rs)，覆盖：静默即判死、健康者不受牵连、恰好一条 `failed` 广播、判死后喂狗被拒且不复活不产计划；该文件与其余线级目标同在 `#![cfg(unix)]` 门后，Windows 侧不参与编译。manifest 侧的 `health.watchdog_timeout_ms` 由 [`manifest.rs`](../base/runtime/rrd/src/manifest.rs) 解析并跨字段校验（要求 `heartbeat_ms < watchdog_ms`），今天它正是这条线程读的判据 |
+| rrd 在册表：注册 / 心跳 / 死亡记账 / 扇出 / 快照 | 已实装 | **且被连接层与 supervisor 实际调用**：[`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `rr3_reg_add` / `rr3_reg_beat` / `rr3_reg_remove` / `rr3_reg_death` / `rr3_reg_child_exit` / `rr3_reg_fanout` / `rr3_reg_snapshot`。心跳回**三态** `Rr3Beat { Rejected, Kept, Promoted }`（`Promoted` = registered → running 的唯一升级，conn 据此广播一次 running 上线）；死亡回**三态** `Rr3Death { DeferredToExitStatus, Silent, Broadcast }`。表级账三件：`crash_streak`（按 name 计、跨重注册成立）、`owned`（"这个进程是我起的"所有权标记）、`stopped`（显式退场标记）。（同文件的 `rr3_reg_name_of` 今天仍**没有**跨文件调用点：已落地的发布分支改用登记期身份 `me.name`，见下文"发布归属判定"一行） |
+| 在册表阶段机（`Rr3Phase`） | 已实装 | [`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `enum Rr3Phase { Registered, Running, Degraded, Failed }`。**限定：四个阶段里只有三个有置位路径**——`Degraded` 仍是"有 enum 变体、无写入方"的死相位（setter 与 base 能力门随 M5 落地，见 supervisor.rs 文件头已知边界④）；但 `rr3_reg_beat` 对 `Degraded` 的"只续命、不升级"兜底**已实装**，届时一颗心跳不会把降级标注抹平；`as_str()` 仍会回显 `"degraded"`，词表完整 |
+| 模块 spawn / 重启执行 | 已实装 | **限定：仅 Unix**（[`supervisor.rs`](../base/runtime/rrd/src/supervisor.rs) 整模块 `#[cfg(unix)]`）。全 daemon **唯一的执行线程**（`rr3_spawn_supervisor`）：一条线程串行做 收件（boot / restart 两种请求）→ `try_wait` 扫尸 → 到期重启，**退避不是睡眠**（计划进 `due` 到期表，绝不 `sleep(delay)`）；`Command::spawn` 是全仓产品代码里唯一的进程派生。boot 序：先全部装载（`rr3_boot_job_from_manifest`——entry 存在性 + 可执行位在 boot 那一刻查，被拒打 `拒绝启动` 且**不吃预算**）→ 按 `start_priority` **稳定升序**排 → 投 boot 队列（E-7）。所有权模型（E-1/E-2）：`jobs`（"我能起谁"的全集）只由 `--manifest` 填，**外来模块的计划一律跳过**（只打 `跳过重启 {name}：不是本守护起的进程`）；spawn 前先 `rr3_reg_own`、成功后 env 注入三件（`RR3_BUS_PATH` / `RR3_MANIFEST` / `RR3_SIM_PEER_ROLE`）、子进程 stdout 接 `Stdio::null()`。**四条已知边界**（supervisor.rs 文件头自述）：①非本守护起的模块永不重启；②own 与注册只靠 name 相关；③无 `SIGCHLD`/`waitpid`，"进程已死"到"rrd 知道"有一个 sweep 延迟（≤ tick）；④depends/degraded 两条不做。线级证据：[`tests/e2e_spawn_restart.rs`](../base/runtime/rrd/tests/e2e_spawn_restart.rs) 5 条（S1 boot→running→崩溃重启、S2 owned 崩溃 vs 外来对照、S3 never 不再起、S4 watchdog 判死挂死模块先杀再起、S5 孤儿卫生） |
+| 模块重启的退避计算 | 已实装 | **且已被执行**（派生动作归上行"模块 spawn / 重启执行"）：唯一记账处 `rr3_charge`（[`registry.rs`](../base/runtime/rrd/src/registry.rs)），三条死亡路（conn EOF / watchdog 到期 / 子进程退出码）共用一本账——`crash_streak` 按 **name** 计、跨重注册不归零（活满一整条自己的窗口才清，`rr3_reg_expire` 段 2）；策略门（`always` / `on-failure` 且不干净 / 其余不重启）与预算门（`RR3_RESTART_FAILURE_CAP = 5` 到顶即 `None` 且不再增长）；`attempt` 从 1 起，`delay_ms` = `RR3_RESTART_BACKOFF[attempt-1]` × base，`checked_mul` 溢出封顶 `u64::MAX`（"永远等下去"是唯一保守解）。达上限的查询单列 `rr3_reg_hit_cap`，supervisor 打 `停止重启 {name}：连续崩溃达上限，运行时降级（spec §5.3）`（仅日志面，"整体标 degraded"要新增 topic、属改契约，未做） |
+| 到期判活扫描（`rr3_reg_expire`） | 已实装 | **已实装且已被唯一 watchdog 线程按 tick 调用**。[`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `rr3_reg_expire(now_ms) -> Vec<Rr3Expiry>` **一趟扫描、两个生命周期决定**：①恢复归零——`Running` 且活过一整条自己的窗口（看 `registered_at_ms`）即清 crash_streak；②判死——`now - last_beat >= facts.watchdog_ms` 即置 `Failed` 并**当场产记账结果** `Rr3Expiry.restart: Option<Rr3RestartPlan>`（`saturating_sub` 防时钟倒退、已 `Failed` 跳过不重复回报、死连接句柄当场丢弃、回报里回带 `elapsed_ms` / `watchdog_ms` 两个判据数字）。"到期路径不产重启计划"的旧账**已结清** |
+| watchdog 监视线程 | 已实装 | **限定：仅 Unix**（`daemon.rs` 整模块挂在 `#[cfg(unix)]` 下）。[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 的 `rr3_spawn_watchdog`，全进程只有这一条。tick 来自 CLI 的 `--watchdog-tick-ms`（默认值与"拒 0"的字面量归 [`reference/rrd-cli.md`](reference/rrd-cli.md) §2 §3，本行不抄）；循环**先睡后扫**、**每拍只锁一次**（扫全表那一次）、**广播在锁外**；判死日志把**判据数字本身**一起回显（渲染形状归 [`reference/rrd-registry.md`](reference/rrd-registry.md) §6.1，本行不抄）。判死那一拍广播 failed 后，把 `ex.restart` 交 `sup.rr3_restart(p)`（只做一次 send，**绝不**在这条线程里 spawn/睡眠）；**这一路不打"重启计划"日志**——A-5③ 的 needle 口径要求"重启计划"四个字只有一个来源（conn 收尾那一路）。线级证据：[`tests/e2e_watchdog.rs`](../base/runtime/rrd/tests/e2e_watchdog.rs)。manifest 侧的 `health.watchdog_timeout_ms` 由 [`manifest.rs`](../base/runtime/rrd/src/manifest.rs) 解析并跨字段校验（要求 `heartbeat_ms < watchdog_ms`） |
 | 依赖仲裁 | 未设计 | **连类型都未定义**：全仓 rrd 内没有 resolve / arbitrate 相关的任何实现（命中的 `rr3_contract_resolved` 在 [`topics_load.rs`](../base/runtime/rrd/src/topics_load.rs)，那是契约路径规范化，与依赖仲裁无关） |
-| CLI 参数与默认值注入 | 已实装 | [`cli.rs`](../base/runtime/rrd/src/cli.rs) + [`main.rs`](../base/runtime/rrd/src/main.rs)（套接字路径在打印横幅**之前**绝对化，横幅与 bind 取同一个值，由 [`tests/socket_banner.rs`](../base/runtime/rrd/tests/socket_banner.rs) 钉住）；参数与默认值的字面量归 `reference/rrd-cli.md`（**本档**计划的 Task 7 落位），此处不复述 |
-| HAL trait 形状与占位后端 | 骨架 | [`lib.rs`](../base/runtime/rr-hal/src/lib.rs) 定义了 `Rr3GpioOut` / `Rr3PwmServo` / `Rr3AudioSource` / `Rr3Power` / `Rr3Link` 与 `Rr3UnavailableSource`（所有能力一律回 `Rr3HalError::Unsupported`）；具名后端 `linux` / `sim` **只有注释没有实现**——[`backend.rs`](../base/runtime/rr-hal/src/backend.rs) 通体只有 `RR3_BACKEND_LINUX` / `RR3_BACKEND_SIM` / `RR3_BACKEND_PLACEHOLDER` 三个常量 |
+| CLI 参数与默认值注入 | 已实装 | [`cli.rs`](../base/runtime/rrd/src/cli.rs) + [`main.rs`](../base/runtime/rrd/src/main.rs)（套接字路径在打印横幅**之前**绝对化，横幅与 bind 取同一个值，由 [`tests/socket_banner.rs`](../base/runtime/rrd/tests/socket_banner.rs) 钉住）；Task 11b 增 `--boot-role`：默认 `resident`、**原样透传不校验取值**（role 的合法集是夹具的约定，rrd 一校验就是第二处真值），空值与疑似开关值在 parse 处当场拒；参数与默认值的字面量归 `reference/rrd-cli.md`，此处不复述 |
+| rrd UDS 监听与注册握手 | 已实装 | **限定：仅 Unix**——`conn` / `daemon` 两模块整体挂在 `#[cfg(unix)]` 下。[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 的 `rr3_daemon_run`：`Rr3UdsListener::rr3_cleanup` 清残留 → `rr3_bind`（bind/cleanup/accept 走 trait 工厂，ADR-0008 裁定 3 接缝最小化，`conn.rs` 一字未动）→ 起 supervisor → 起 watchdog → 投 boot 队列 → accept 循环，每连接 spawn 一条 reader 线程（加上 [`conn.rs`](../base/runtime/rrd/src/conn.rs) 为同一条连接 spawn 的 writer 线程与它那份 `try_clone`，连接账是每连接 **2 条线程 + 2 个 fd**；全进程另有**唯一** watchdog 线程与**唯一** supervisor 执行线程，不在这个"每连接"账里）；[`conn.rs`](../base/runtime/rrd/src/conn.rs) 的 `rr3_conn_serve` / `rr3_handshake`：首帧必须是发给 `RR3_TASK_RRD` 的 `rr3.register`，`src_task` 由 rrd 分配、伪造者那一帧被拒但连接不断，注册前设读超时收掉静默连接。线级用例：[`tests/register_publish.rs`](../base/runtime/rrd/tests/register_publish.rs)、[`tests/socket_banner.rs`](../base/runtime/rrd/tests/socket_banner.rs)、[`tests/e2e_sim_peer.rs`](../base/runtime/rrd/tests/e2e_sim_peer.rs)（跨进程对端夹具：由 `env!("CARGO_BIN_EXE_sim_peer")` 起的第二个真进程，证明注册→心跳→发布→退场整条链在线上走得通）、[`tests/e2e_watchdog.rs`](../base/runtime/rrd/tests/e2e_watchdog.rs) 与 [`tests/e2e_spawn_restart.rs`](../base/runtime/rrd/tests/e2e_spawn_restart.rs)，这些线级目标整体挂在 `#![cfg(unix)]` 门后，故 Windows 侧它们**不参与编译**（那是 cfg 边界的正确结果，不等于通过）。cfg 边界的自述见 [`lib.rs`](../base/runtime/rrd/src/lib.rs) |
+| 发布归属判定（越权前缀 / 冒充内建命名空间） | 已实装 | **已接到线上**：`RrdRegistry::rr3_reg_publish_check`（返回 `Rr3PublishDeny`）不再只有单元用例——`conn.rs` 的上行分发把 `Rr3PayloadType::Event` 交 `rr3_publish`，后者依次调 `rr3_rpc_topic_param`、`rr3_reg_publish_check(&me.name, …)`、越权时回错误帧并 `rr3_reg_note_denied` 计数。发送方身份取 `me.name`（注册期 `Rr3Peer` 在册名），帧上 `src_task` 在分发前就校验：不等于 `me.task` 即那一帧被拒——`registry.rs` doc 注里"由 `rr3_reg_name_of` 反查"的表述线上换成了这套等价做法。拒帧不断连，与 `src_task` 伪造同一口径。接口字面量归 `reference/rrd-rpc.md` §7 与 `reference/rrd-registry.md` §8 |
+| rrd 上行 JSON-RPC 三方法 | 已实装 | [`rpc.rs`](../base/runtime/rrd/src/rpc.rs)：`Rr3RpcMethod` = `rr3.register` / `rr3.heartbeat` / `rr3.unregister`，含 `rr3_rpc_parse_request` 的版本与 id 校验、`rr3_rpc_build_result` / `rr3_rpc_build_error` 错误映射 |
+| HAL trait 形状与占位后端 | 骨架 | [`lib.rs`](../base/runtime/rr-hal/src/lib.rs) 定义了 `Rr3GpioOut` / `Rr3PwmServo` / `Rr3AudioSource` / `Rr3Power` / `Rr3Link` 与 `Rr3UnavailableSource`（所有能力一律回 `Rr3HalError::Unsupported`）；具名后端 `linux` / `sim` **只有注释没有实现**——[`backend.rs`](../base/runtime/rr-hal/src/backend.rs) 通体只有 `RR3_BACKEND_LINUX` / `RR3_BACKEND_SIM` / `RR3_BACKEND_PLACEHOLDER` 三个常量（M3 计划：`Rr3AudioSink` trait 与 sim/linux 后端随阶段 2 落地） |
 | A/B OTA 切换 | 骨架 | [`rr-ota/src/lib.rs`](../base/runtime/rr-ota/src/lib.rs) 只冻结类型形状（`Rr3Slot`）；[`rr3-ota-ctl/src/main.rs`](../base/ota/rr3-ota-ctl/src/main.rs) 的 `rr3_ota_ctl_refuse_switch` 对任意目标恒拒，注释写明"随 M6 落地，当前拒绝执行" |
 | Buildroot OS 层 | 骨架 | [`base/os/`](../base/os/) 目录下只有一个 README，无 recipe、无 defconfig、无 genimage 配置 |
 | `rr3-act` / `rr3-connect` / `rr3-interact` / `rr3-power` / `rr3-sense` | 骨架 | [`modules/*/src/main.rs`](../modules/) 五个 Rust 入口，实测 11–17 行，只打印自述；各目录的 `module.toml` 由 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs) 逐目录读回判合规（`rr3-brain` 那份也在内） |
@@ -57,21 +59,21 @@
 架构文档 §10 已收口为一行指向本节（迁入与删原分两步做，是为了让删除那次改动单独可审）。
 **当前实况**一栏是本快照读代码实测的结论，不是对验收标准的复述或期望。
 
-| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`08d460f` 实测） |
+| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`48322d5` 实测） |
 |---|---|---|---|
-| M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 | 目录树已落地，ADR 已写到 0007（超出原验收范围），`rr3-mkmod` 的产物被回灌进契约用例 —— **已收口** |
+| M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 | 目录树已落地，ADR 已写到 0008（超出原验收范围），`rr3-mkmod` 的产物被回灌进契约用例 —— **已收口** |
 | M1 | base/os：Buildroot 在 Radxa ZERO 3 跑通 | 串口出 shell；maskrom 自烧录镜像成功 | [`base/os/`](../base/os/) 只有一个 README，无 recipe / defconfig —— **未开工** |
-| M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **部分交付，且交付面与原规划错位**。已到位：协议层（128B 头 + 帧读写 + payload 类型前缀）、在册表的注册/心跳/死亡记账/扇出/快照（被连接层调用）、上行三方法、UDS 监听与注册握手（仅 Unix）、**sim 双假模块**（到位形态是**夹具级**：[`fixtures/sima/module.toml`](../base/runtime/tests/fixtures/sima/module.toml) 与 [`fixtures/simb/module.toml`](../base/runtime/tests/fixtures/simb/module.toml) 两份假模块 manifest，配 `rrd` 包里的 `[[bin]] sim_peer`（[`src/bin/sim_peer.rs`](../base/runtime/rrd/src/bin/sim_peer.rs)）与上文那组跨进程用例——第二个真进程走线上入口完成注册→心跳→发布→退场；这**不等于** `tools/sim` 那套 mock HAL 虚拟设备，后者另有一行）——注意原规划把 "uds" 记为仍缺，这一条**已不成立**。仍缺三项：① **崩溃自动重启**——到期判死与恰好一条 `failed` 广播**已接线**（唯一的 watchdog 线程按 tick 调 `rr3_reg_expire`），仍缺的是**进程 spawn** 与"到期路径按 `restart_policy` 产重启计划"（都属 rrd 实现计划 Task 11）；② `trait Transport`（`transport/mod.rs` 只有注释与两个路径常量）；③ IPC-T-003 跨架构字节布局等值——需交叉编译两端对拍，当前 HEAD 无此能力，见 [`contracts/README.md`](../contracts/README.md) 与 [`envelope.schema.json`](../contracts/envelope.schema.json) 的 `x-rock3-v0.0.1-uncovered` |
+| M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **已收口（留一条环境敞口）**。验收标准逐条对照：注册/心跳/崩溃自动重启——**全到位**（注册/心跳/死亡记账/扇出被连接层调用；崩溃自动重启由唯一 supervisor 线程执行：boot spawn、串行收尸、到期重启、按策略退避，线级证据 `e2e_spawn_restart` 5 条）；IPC-T-001/002——同机 golden 往返 + 契约逐字段对齐，全绿；IPC-T-003——**夹具与脚本就绪**（`ipct003_dump` 头行已与 golden 逐字节一致 + 编译期 const 断言随任意目标求值），**双架构真跑待容器环境**（本机无 Docker），这是 M2 唯一敞口，见上文能力表"IPC-T-003"行与"本机无法收口"第 4 条。`trait Transport` 已随 ADR-0008 定型并落地 uds 实现（`conn.rs` 一字未动），上一版"仍缺三项"里的①②两条就此结清 |
 | M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线，音频走 STREAM | HAL 只有 trait 形状与恒回 `Unsupported` 的占位后端，`linux` / `sim` 无实现 —— **未开工** |
 | M4 | rr3-brain：移植 asr/llm/tts | 全语音对话闭环（legacy 功能等价） | `rr3-brain` 各 py 文件均为自述占位，注释写明不做任何网络调用 —— **未开工** |
-| M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 | 五个 Rust 模块入口均为 11–17 行自述；shm 只在 `transport/mod.rs` 注释里挂号 —— **未开工** |
+| M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 | 五个 Rust 模块入口均为 11–17 行自述；shm/tcp 的**线上签名已定型**（`trait Transport` 三件，ADR-0008 裁定 4：不写半成品），实现一行没有 —— **未开工** |
 | M6 | A/B OTA + 恢复出厂 | 断电升级不 brick，坏 slot 自动回滚；genimage 预留模块独立可写分区 | `rr-ota` 只有类型形状 `Rr3Slot`，`rr3-ota-ctl switch` 恒拒 —— **未开工** |
 
 ---
 
-## 本机无法收口的三项
+## 本机无法收口的项
 
-这三项**不是待办清单里的模糊项，是本机没有能力证明的项**。任何"应该是好的"的推断都不构成
+这些**不是待办清单里的模糊项，是本机没有能力证明的项**。任何"应该是好的"的推断都不构成
 收口证据，所以下面如实写明缺的是哪一手证据，不软化。
 
 | # | 无法收口的项 | 缺的证据 | 现状与后果 |
@@ -79,30 +81,26 @@
 | 1 | GitHub Actions 从未在本 remote 触发过 | 一次真实的 workflow 运行记录 | 仓里的 workflow 面向 GitHub，remote 是 atomgit，它**一次都没有跑过**。门禁实际只靠本地 `bash tools/ci/check.sh`，也就是说：门禁的强度等于"提代码的人记不记得跑它"。步序见 [`process/conventions.md`](process/conventions.md) §2，脚本入口 [`tools/ci/check.sh`](../tools/ci/check.sh) |
 | 2 | 设备侧 `idf.py build` 的密钥门未验证 | 在装有 ESP-IDF 的机器上的一次成功构建 + 一次无密钥失败的对照 | 本机没有 ESP-IDF，也没有目标设备；`legacy/` 是冻结区，不在本轮改动范围内，但"固件侧改一处配置会不会撞上密钥门"这件事至今无人拿过证据 |
 | 3 | 泄漏 API key 的提供方侧轮换未确认 | 提供方控制台里那把 key 已失效/已替换的凭据 | 仓内曾经出现过的 key 从 git 历史里抹不掉；**从仓库角度能做的都做完了**（移到 `legacy/` 冻结、文档不再复述），但"这把 key 现在还能不能用"只有提供方能回答，这一条不闭环，第 3 项就一直是敞口 |
+| 4 | IPC-T-003 的双架构真跑 | 一次 `linux/arm64` 容器（或 aarch64 交叉 + qemu）里 `ipct003_dump` 与宿主输出的逐字节 diff | 本机无 Docker、未装 aarch64 目标。脚本与夹具已就绪且**不静默冒充已验证**：缺环境时 `ipct003.sh` 打 `SKIP` 明说（`--strict` 供有容器环境的一方拒绝放行）。Docker 装好后跑一次 `bash tools/ci/ipct003.sh`，跑成即可把 [`envelope.schema.json`](../contracts/envelope.schema.json) 里该条移入 coverage |
+| 5 | 本机 macOS 上 ①b 的线级用例不可信 | 登记平台（Windows L1 / WSL2 Linux L2）的一次 ①b 全绿 | `cargo test --workspace` 里 `e2e_sim_peer` 等 5 条跨进程用例在本机**间歇失败**（"3s 内没等到监听行"、子进程无输出）——**基线 `240fb02` 经 `git stash` 复现同样失败**，属 macOS 对新链接二进制的首跑/并发 exec 延迟（syspolicyd 类机制），非代码缺陷；手工直跑同一二进制的同一用例时可过。**本机 ①b 为红不作为回归信号**，门禁证据以 conventions §2 登记的两平台实测为准 |
 
 ---
 
 ## 在制品
 
-**本快照只记锚点提交 `08d460f` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
+**本快照只记锚点提交 `48322d5` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
 改动，都不进本表，重锚时随锚点一并更新。**
 
-以下增量**不写进任何文档**，因为它们不在锚点那棵树里；写进去就等于把"某人在做"记成"仓里有"：
-
-- 上一版快照（锚点 `e69c298`）把并行协作者压在 `base/runtime/rrd/` 上的改动记为"锚点树外的在制品、
-  不描述它做到哪一步"。那批改动随后作为 `08d460f`（rrd 实现计划 Task 10：唯一的 watchdog 线程 +
-  `tests/e2e_watchdog.rs`）进了树，而 `08d460f` 正是本快照的锚点，于是它今天**在锚点树内**、
-  已按实况计入上文能力表。这里留一句是为了记下教训：**锚点必须跟着树走**，否则本文件回答的
-  是一个已经过去的提交。
-- 曾经挂在"在制品"名下的 socket 横幅绝对路径与 `--socket` 注入参数**已经进树**了
-  （`4204656` 横幅回显绝对路径、`13dc1d5` 默认值改注入参数、`1cfde17` 契约路径装载即规范化）。
-  本轮盘点时起草的旧稿把它们当未跟踪文件，是这次快照里最需要订正的一处。
+本锚点本身携带两个增量提交：`e0a1250`（trait Transport 定型 + `Rr3FrameBuf` + uds 实现 +
+ADR-0008，即上一版快照记为"未设计"的那一行）与 `48322d5`（IPC-T-003 就绪：dump 夹具 +
+对拍脚本 + 编译期 const 断言 + coverage 陈述更正）。两者都已按实况计入上文能力表，
+此处不再单列"在制品"——**锚点树内没有在途的未提交改动**。
 
 **已知偏差（有意保留，不是遗漏）：**
 
 - [`legacy/README.md`](../legacy/README.md) 第 3 行仍指向 `docs/architecture.md`，该路径在四档
   迁移后已不存在（现为 [`architecture/architecture.md`](architecture/architecture.md)）。
   `legacy/` 是冻结区，规约是"不动它"，所以这条断链**不修**，在此记为已知偏差。
-- 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 10 已加唯一的 watchdog 线程"、`registry.rs` 的"Task 7 已落地"）
-  指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，读文档时别把它们
-  对齐；这些注释不属于本任务订正范围。
+- 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的
+  "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
+  读文档时别把它们对齐；这些注释不属于本任务订正范围。
