@@ -91,6 +91,22 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   登记于 conventions.md §2 的平台条件脚本）、header.rs 的编译期 const 断言（偏移连续、
   头长 128、magic LE 字节、payload 枚举值，随任意目标编译求值）。偏移、枚举、magic、
   golden 向量与线上行为一字未动；Docker 装好后容器真跑，跑成即可把该条移入 coverage。
+- **2026-09-30 · `contracts/events/` 落首个真实事件 schema `sense-audio-vad_start.schema.json`
+  （schema_version 1，M3）**：新增文件，append 不改既有，`topics.toml` 无需变更（
+  `rr3-sense/audio/vad_start` 已在册）。schema 形状以 `rr3-sense/src/audio/mod.rs` 的
+  `rr3_vad_event_body` 为事实源：同主题承载 onset/offset 两种边沿，`rms_peak` 仅 onset 携带
+  （用 `allOf`+`if/then` 表达），`seq` 是 vad 事件流自己的计数、与 `rr3-sense/audio/pcm` 的
+  stream seq 各自独立。`rr3-sense/audio/pcm` 的 STREAM 负载 schema 未落（pcm_b64 编码的
+  冻结时机属 M5 shm 迁移裁定，ADR-0007），登记为已知空缺，见 [docs/status.md](../docs/status.md)。
+- **2026-09-30 · trace_id 语义登记（rock3 对 128B 头 `trace_id` 字段的用法细化，非契约变更）**：
+  128B 头的 `trace_id`（offset 8，uint64）在 rock3 v0.0.1 的线上语义为——
+  **0 = 非代理**（普通发布 / 直发帧的缺省值）；**`rr3.call` 代理请求的 trace_id = 调用方 task**
+  （rrd 转发时写入，被调方应答须原样带回，rrd 按它把 Response 改道回调用方连接——
+  实现在 `rrd/src/conn.rs` 的 `rr3_route_call` / `rr3_route_response`，客户端侧为
+  `rr-bus/src/client.rs` 的 `rr3_reply_call`）。这与 `envelope.schema.json` 里 trace_id 的
+  OpenTelemetry 注释是分层关系：字节布局与"不解释即透传"是 L1 冻结面，rock3 的用法语义
+  登记在本文件演进记录层，不改偏移、不改字段宽度、不改线上行为。计划中的 OpenTelemetry
+  串联（单调递增 + 随机后缀）留具身化阶段，届时如与本条冲突走"只增不改"评审。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 
