@@ -100,11 +100,15 @@ fi
 #    两者都不是我们要的。
 #    空文档判据用 `-s`（字节数为 0 即空），断链判据只取 `](...)` 里的相对路径
 #    （跳过 http(s)://、mailto:、以 / 开头的绝对路径与纯锚点 #…）。
+#    第三件判据是导航覆盖：仓内每份 README 都要在 docs/README.md 的库地图里有一条链接——
+#    地图靠人记得添必然漏，而没进导航的 README 事实上等于不存在。判据与上面两条同口径：
+#    逐条点名（`导航漏链`）后整步 FAIL。docs/README.md 自身是导航本身，不参与被检；
+#    legacy/ 已被 list 排除，冻结区因此也不被要求进导航。
 #    `git ls-files` 显式关掉 core.quotepath：默认 true 时非 ASCII 文件名（如
 #    docs/process/dev/0.0.1版本…）会被转义成八进制串，`-s`/`-e` 检的是那个不存在的名字，
 #    门禁会在别人机器上凭空报一条假红。
 check_docs() {
-  local list bad f d l
+  local list bad nav f d l
   list="$(mktemp)" || return 1; bad="$(mktemp)" || return 1
   git -c core.quotepath=false ls-files '*.md' | grep -v '^legacy/' > "$list" || true
   if [ ! -s "$list" ]; then
@@ -120,10 +124,28 @@ check_docs() {
              | sed 's/^](//; s/)$//; s/#.*//; s/ .*//' \
              | grep -vE '^(https?:|mailto:|/|$)')
   done < "$list"
-  if [ -s "$bad" ]; then cat "$bad"; rm -f "$list" "$bad"; return 1; fi
-  rm -f "$list" "$bad"
+  # 导航覆盖：把 docs/README.md 里的相对链接按 docs/ 归一成仓根路径后，逐个 README 对号。
+  # 本索引住在 docs/ 下，链接里的 `../` 只可能出现在开头，故一次折叠即够。
+  nav="$(mktemp)" || return 1
+  while IFS= read -r l; do
+    printf '%s\n' "docs/$l" | sed 's#^docs/\./##; s#^docs/\.\./##' >> "$nav"
+  done < <(grep -ohE '\]\([^)]+\)' docs/README.md 2>/dev/null \
+           | sed 's/^](//; s/)$//; s/#.*//; s/ .*//' \
+           | grep -vE '^(https?:|mailto:|/|$)')
+  if [ ! -s "$nav" ]; then
+    printf 'FAIL  ⑤ 导航链接列表打空（docs/README.md 读不到链接属门禁失效，不放行）\n'
+    rm -f "$list" "$bad" "$nav"; return 1
+  fi
+  while IFS= read -r f; do
+    case "$f" in
+      *README.md) [ "$f" = "docs/README.md" ] || grep -qxF "$f" "$nav" \
+                    || printf '导航漏链  %s\n' "$f" >> "$bad" ;;
+    esac
+  done < "$list"
+  if [ -s "$bad" ]; then cat "$bad"; rm -f "$list" "$bad" "$nav"; return 1; fi
+  rm -f "$list" "$bad" "$nav"
 }
-step "⑤ 文档门（已跟踪 md 不得为空、相对链接不得断）"
+step "⑤ 文档门（已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航）"
 run check_docs
 
 printf '\n=== 汇总 ===\n'
