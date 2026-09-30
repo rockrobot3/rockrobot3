@@ -1,12 +1,49 @@
 //! rr-hal —— 硬件抽象层 trait 定义（architecture.md §5）。
 //!
-//! 只有 trait 与数据类型；后端实现（linux/sim）随 M2/M5 落地，见 `backend.rs`。
+//! trait 与数据类型 + sim / linux 两个音频后端与后端选择入口，见 `backend.rs`。
 //! 慢速事件级接口优先：1kHz 以上闭环属模块进程内的反射环，永不进 HAL trait
 //! （ADR-0007 裁定 1）。
+
+use std::future::Future;
+use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use async_trait::async_trait;
 
 pub mod backend;
+#[cfg(all(target_os = "linux", feature = "alsa"))]
+pub mod linux;
+pub mod sim;
+
+/// 无操作 waker 的 vtable（`Waker::noop` 要 1.85，workspace 锁 1.82，故手写同语义版本）。
+/// 四个函数全部 no-op：本 crate 的 future 全部首拍即完成，永不真正挂起等唤醒。
+static RR3_NOOP_VTABLE: RawWakerVTable = RawWakerVTable::new(
+    |d| RawWaker::new(d, &RR3_NOOP_VTABLE), // clone
+    |_| {},                                 // wake
+    |_| {},                                 // wake_by_ref
+    |_| {},                                 // drop
+);
+
+/// 模块侧的执行入口：同步代码驱动 async trait 方法。
+///
+/// 裁定（随 M3 接口定型）：v0.0.1 **不引 async 运行时**——本 crate 的全部 HAL 实现
+/// （sim 的纯计算、linux 的阻塞 ALSA 读写）都在**首次 poll 内完成**，不依赖 waker
+/// 唤醒，因此 noop-waker 的 `poll` 循环就是正确实现。将来若真出现会返回 `Pending`
+/// 的 future，本函数会退化成自旋让步（能跑但烧 CPU）——那是接口违约，届时应换
+/// 真运行时而不是修补这里。
+pub fn rr3_block_on<F: Future>(fut: F) -> F::Output {
+    let raw = RawWaker::new(std::ptr::null(), &RR3_NOOP_VTABLE);
+    // SAFETY：vtable 的四个函数都只处理 null 数据指针，clone 返回同一 vtable，
+    // 不解引用任何内存（同 `Waker::noop` 的语义，见上）。
+    let waker = unsafe { Waker::from_raw(raw) };
+    let mut cx = Context::from_waker(&waker);
+    let mut fut = std::pin::pin!(fut);
+    loop {
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(v) => return v,
+            Poll::Pending => std::thread::yield_now(),
+        }
+    }
+}
 
 /// HAL 采样配置
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +133,16 @@ pub trait Rr3AudioSource: Send + Sync {
     async fn read(&self, frames: usize) -> Result<Rr3PcmStream, Rr3HalError>;
 }
 
+/// 音频播放面（下行出话）——M3 接口定型（architecture.md §5 裁定 2 的"同一次定型给形状"）。
+///
+/// 与 [`Rr3AudioSource`] 对称：open 固定采样配置，write 消费整段 [`Rr3PcmStream`]。
+/// TTS 文本到 PCM 的合成属模块侧（rr3-interact），不进 HAL；HAL 只搬运已合成的波形。
+#[async_trait]
+pub trait Rr3AudioSink: Send + Sync {
+    async fn open(&self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError>;
+    async fn write(&self, pcm: Rr3PcmStream) -> Result<(), Rr3HalError>;
+}
+
 /// 电源读数
 #[async_trait]
 pub trait Rr3Power: Send + Sync {
@@ -108,8 +155,9 @@ pub trait Rr3Link: Send + Sync {
     async fn state(&self) -> Result<Rr3LinkState, Rr3HalError>;
 }
 
-/// 占位后端：所有能力返回 `Unsupported`。v0.0.1 用它证明 trait 形状可用，
-/// M2 起由 `backend::linux` / `backend::sim` 替换。
+/// 占位后端：所有能力返回 `Unsupported`。它承载的是"能力缺失必须显式回错，不许静默退化"
+/// 的设计裁定，不是一时代替后端的临时件。音频两路（source/sink）已由 `backend::sim` /
+/// `backend::linux` 承担（M3）；gpio/pwm/power/link 仍由本占位回错，直到 M5 的三模块实装。
 pub struct Rr3UnavailableSource;
 
 #[async_trait]
@@ -138,6 +186,16 @@ impl Rr3AudioSource for Rr3UnavailableSource {
         Err(Rr3HalError::Unsupported("placeholder/audio"))
     }
     async fn read(&self, _frames: usize) -> Result<Rr3PcmStream, Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/audio"))
+    }
+}
+
+#[async_trait]
+impl Rr3AudioSink for Rr3UnavailableSource {
+    async fn open(&self, _cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/audio"))
+    }
+    async fn write(&self, _pcm: Rr3PcmStream) -> Result<(), Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/audio"))
     }
 }
@@ -183,6 +241,7 @@ mod tests {
         let as_ref: &dyn Rr3GpioOut = &*boxed;
         let _ = as_ref;
         let _: Box<dyn Rr3AudioSource + Send + Sync> = Box::new(Rr3UnavailableSource);
+        let _: Box<dyn Rr3AudioSink + Send + Sync> = Box::new(Rr3UnavailableSource);
         let _: Box<dyn Rr3Power + Send + Sync> = Box::new(Rr3UnavailableSource);
         let _: Box<dyn Rr3Link + Send + Sync> = Box::new(Rr3UnavailableSource);
         let _: Box<dyn Rr3PwmServo + Send + Sync> = Box::new(Rr3UnavailableSource);
@@ -208,5 +267,16 @@ mod tests {
         // 2400 帧 @16kHz 单声道 = 150ms
         let full = Rr3PcmStream { cfg: RR3_AUDIO_CFG_16K_MONO16, samples: vec![0i16; 2400] };
         assert_eq!(full.rr3_pcm_duration_ms(), 150);
+    }
+
+    /// rr3_block_on 的契约：首拍即完成的 future 拿到值返回。sim 源的一条 read
+    /// 走的就是这条路径（模块侧的真实用法）。
+    #[test]
+    fn block_on_drives_first_poll_completion() {
+        let sink = sim::Rr3SimAudioSink::rr3_sim_sink_new(16000);
+        rr3_block_on(sink.open(RR3_AUDIO_CFG_16K_MONO16)).expect("open 应成功");
+        let pcm = Rr3PcmStream { cfg: RR3_AUDIO_CFG_16K_MONO16, samples: vec![3i16; 320] };
+        rr3_block_on(sink.write(pcm)).expect("write 应成功");
+        assert_eq!(sink.rr3_sim_sink_played(), vec![3i16; 320]);
     }
 }

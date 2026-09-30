@@ -21,3 +21,6 @@
 `serde_json` → rr-ipc（dev-dep，契约元数据守护测试读 JSON）与 rrd（`rpc.rs` / `conn.rs` /
 `daemon.rs` 的应答与帧体）；路径依赖 `rr-bus` → rrd（`registry.rs` / `conn.rs` / `daemon.rs`
 取 `RR3_TASK_RRD`、`RR3_TASK_FIRST_MODULE`、`RR3_BROADCAST_DST_TASK`）。
+例外：`alsa = "0.9"` 是 rr-hal 的**目标门控依赖**（`cfg(all(target_os = "linux",
+feature = "alsa"))` 才编译，配 `RR3_HAL_ALSA_DEVICE`），主机 CI（macOS）不触碰；
+libc 为 alsa 的传递依赖，受控引入（ADR-0009 前不直接 use）。
