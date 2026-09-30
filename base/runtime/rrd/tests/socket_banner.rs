@@ -8,16 +8,21 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use support::*;
 
 /// 横幅与监听行都必须回显解析后的绝对路径，且那个路径真的能连上并注册
 #[test]
 fn banner_and_listen_line_show_the_resolved_absolute_path() {
     let name = format!("rr3-m2-{}-banner.sock", std::process::id());
-    let abs = PathBuf::from("/tmp").join(&name);
+    // 期望值按 rrd 同一把尺子算：macOS 上 /tmp 是 /private/tmp 的符号链接，内核 getcwd
+    // 返回的是真实路径，`std::path::absolute` 拼出来的横幅因此是 /private/tmp/…。
+    // 本用例钉的是"横幅=解析后的绝对路径，不是 CLI 原词"，不是钉 /tmp 的拼写。
+    let abs = std::fs::canonicalize("/tmp")
+        .expect("/tmp 必须存在")
+        .join(&name);
     // 子进程 CWD = /tmp，CLI 原词只给文件名：rr3_spawn 的就绪判据等的就是"监听 <绝对路径>"，
-    // 横幅若按原词回显，这里 3s 超时并把实际读到的日志打出来。
+    // 横幅若按原词回显，这里超时并把实际读到的日志打出来。
     let mut rrd = RrdTest::rr3_spawn(&abs, Some(Path::new("/tmp")), Path::new(&name));
 
     let banner = rrd.rr3_wait_log("rrd 0.0.1");

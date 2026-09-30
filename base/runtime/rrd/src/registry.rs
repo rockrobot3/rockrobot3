@@ -673,6 +673,32 @@ impl RrdRegistry {
         v.sort_by_key(|(_, t, _)| *t);
         v
     }
+
+    /// 查 `rr3.call` 的被调方（M3 模块间请求路由的路由表读取口）。
+    /// 被调条件：**在册且活着**（phase ≠ `Failed` 且 `tx` 存在，与 `rr3_reg_live` 同一判据）
+    /// 且 manifest 的 `[rpc].exposes` 里登记了这个 topic——call 的路由表来自被调方
+    /// 自己的声明，不走 topics.toml 的发布归属（那是 publish 的检查，与 call 无关）。
+    /// 多个模块 exposes 同一 topic 时取 **src_task 最小者**：路由必须确定，不能随
+    /// BTreeMap 的名字序漂。
+    pub fn rr3_reg_callee_for(&self, topic: &str) -> Option<(String, u64)> {
+        self.modules
+            .values()
+            .filter(|e| e.phase != Rr3Phase::Failed && e.tx.is_some())
+            .filter(|e| e.facts.rpc_exposes.iter().any(|t| t == topic))
+            .min_by_key(|e| e.src_task)
+            .map(|e| (e.name.clone(), e.src_task))
+    }
+
+    /// 点名投递：按 task 找到那条连接的 `Sender` 投一帧。返回是否成功入队。
+    /// 这是 `rr3_reg_fanout` 文档里"要点名请另用 Sender"的那个入口：fanout 的签名
+    /// 冻结不动（它只广播），单播由本函数承担。找不到在册连接（已退场/已过期）或
+    /// 对端收件人已 drop 都回 `false`，由调用方决定回什么错。
+    pub fn rr3_reg_send_to(&self, task: u64, frame: &Rr3Frame) -> bool {
+        let Some(name) = self.by_task.get(&task) else { return false };
+        let Some(entry) = self.modules.get(name) else { return false };
+        let Some(tx) = entry.tx.as_ref() else { return false };
+        tx.send(frame.clone()).is_ok()
+    }
 }
 
 #[cfg(test)]
@@ -708,6 +734,94 @@ watchdog_timeout_ms = {wd}
 
     fn chan() -> (Sender<Rr3Frame>, std::sync::mpsc::Receiver<Rr3Frame>) {
         mpsc::channel()
+    }
+
+    /// 带 `[rpc].exposes` 的 facts（M3 路由用例的夹具；exposes 为空 = 无 [rpc] 段）
+    fn facts_exposes(name: &str, exposes: &[&str]) -> Rr3ManifestFacts {
+        let rpc = if exposes.is_empty() {
+            String::new()
+        } else {
+            let list = exposes.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+            format!("[rpc]\nexposes = [{list}]\n\n")
+        };
+        let text = format!(
+            r#"[manifest]
+schema_version = 1
+name = "{name}"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "/usr/bin/{name}"
+
+[events]
+publishes = []
+subscribes = []
+
+{rpc}[resources]
+restart_policy = "never"
+
+[health]
+heartbeat_ms = 100
+watchdog_timeout_ms = 500
+"#
+        );
+        rr3_manifest_facts_from_text(&text).expect("测试 manifest 必须可读")
+    }
+
+    /// 路由表读取：exposes 匹配、多 callee 取 task 最小、failed 排除、未声明回 None
+    #[test]
+    fn callee_for_matches_exposes_and_prefers_lowest_task() {
+        let mut r = RrdRegistry::new(1000);
+        // simb 先注册（task 小），同样 exposes t/a；sima 晚 300ms 注册（判死时刻随之错开）
+        let b = r.rr3_reg_add(&facts_exposes("rr3-simb", &["rr3-x/t/a"]), chan().0, 0).unwrap();
+        let a = r
+            .rr3_reg_add(&facts_exposes("rr3-sima", &["rr3-x/t/a", "rr3-x/t/b"]), chan().0, 300)
+            .unwrap();
+        r.rr3_reg_add(&facts_exposes("rr3-silent", &[]), chan().0, 0).unwrap();
+        // 多个 callee：取 src_task 最小的 simb（注册序在前），不随名字序漂
+        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/a"), Some(("rr3-simb".into(), b)));
+        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/b"), Some(("rr3-sima".into(), a)));
+        // 没人 exposes 的 topic：None
+        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/none"), None);
+        // 判死后（failed + tx 摘除）不再是被调方：600ms 时 simb（watchdog 500、基准 0）已死，
+        // sima（基准 300，300 < 500）还活着
+        r.rr3_reg_expire(600);
+        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/a"), Some(("rr3-sima".into(), a)));
+        r.rr3_reg_expire(1200);
+        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/b"), None, "failed 条目必须被路由排除");
+    }
+
+    /// 点名投递：在册活连接收得到，未知 task / 已死连接回 false
+    #[test]
+    fn send_to_delivers_to_named_connection_only() {
+        use rr_ipc::{opcode, rr3_body_encode, Rr3Header, Rr3PayloadType};
+        let mut r = RrdRegistry::new(1000);
+        let (tx, rx) = chan();
+        let t = r.rr3_reg_add(&facts_exposes("rr3-sima", &["rr3-x/t/a"]), tx, 0).unwrap();
+        let payload = rr3_body_encode(Rr3PayloadType::Notification, b"hello");
+        let frame = Rr3Frame {
+            header: Rr3Header {
+                opcode: opcode::SEND,
+                flags: 0,
+                trace_id: 0,
+                timestamp_ns: 0,
+                src_task: rr_bus::RR3_TASK_RRD,
+                dst_task: t,
+                payload_len: payload.len() as u32,
+            },
+            payload,
+        };
+        assert!(r.rr3_reg_send_to(t, &frame));
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap().payload,
+            frame.payload
+        );
+        // 未知 task 与非在册号段都不投
+        assert!(!r.rr3_reg_send_to(999, &frame));
+        assert!(!r.rr3_reg_send_to(rr_bus::RR3_TASK_RRD, &frame));
+        // 判死后 tx 被摘：不投
+        r.rr3_reg_expire(600);
+        assert!(!r.rr3_reg_send_to(t, &frame));
     }
 
     /// 分配从 2 起单调递增，0/1 永不出现；快照按 task 升序

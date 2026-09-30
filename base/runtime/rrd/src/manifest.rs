@@ -15,6 +15,9 @@ pub struct Rr3ManifestFacts {
     pub entry: String,
     pub start_priority: i64,
     pub depends_required: Vec<String>,
+    /// `[rpc].exposes`：本模块愿意被 `rr3.call` 点名的主题（M3 路由的路由表来源）。
+    /// 可选段，缺省空 vec——不声明就是"不接模块间请求"，与 publishes 的归属检查互不相干。
+    pub rpc_exposes: Vec<String>,
 }
 
 fn lookup<'a>(root: &'a Value, dotted: &str) -> Option<&'a Value> {
@@ -83,6 +86,23 @@ pub fn rr3_manifest_facts_from_text(text: &str) -> Result<Rr3ManifestFacts, Vec<
             "health.heartbeat_ms({heartbeat_ms}) 必须小于 watchdog_timeout_ms({watchdog_ms})"
         ));
     }
+    // [rpc].exposes：可选；给了就必须是**非空字符串数组**——类型错要报错，
+    // 不能静默当空表（空表 = "不接请求"，类型错被吞掉会让调用方拿到"无人在册"的假诊断）
+    let mut rpc_exposes = Vec::new();
+    match lookup(&root, "rpc.exposes") {
+        None => {}
+        Some(v) => match v.as_array() {
+            Some(items) => {
+                for item in items {
+                    match item.as_str() {
+                        Some(s) if !s.is_empty() => rpc_exposes.push(s.to_string()),
+                        _ => errs.push("[rpc].exposes 的每一项都必须是非空字符串".to_string()),
+                    }
+                }
+            }
+            None => errs.push("rpc.exposes 应为字符串数组".to_string()),
+        },
+    }
     if !errs.is_empty() {
         return Err(errs);
     }
@@ -97,6 +117,7 @@ pub fn rr3_manifest_facts_from_text(text: &str) -> Result<Rr3ManifestFacts, Vec<
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
             .unwrap_or_default(),
+        rpc_exposes,
     })
 }
 
@@ -201,6 +222,27 @@ watchdog_timeout_ms = 1000
 
         let no_prio = GOOD.replace("start_priority = 40\n", "");
         assert_eq!(rr3_manifest_facts_from_text(&no_prio).unwrap().start_priority, 100);
+    }
+
+    /// [rpc].exposes：可选段（缺省空 vec = 不接 rr3.call），给了就逐项进 facts
+    #[test]
+    fn rpc_exposes_is_optional_and_typed() {
+        // 缺省：GOOD 没有 [rpc] 段
+        assert!(rr3_manifest_facts_from_text(GOOD).unwrap().rpc_exposes.is_empty());
+        // 合法声明
+        let with = GOOD.replace("[health]", "[rpc]\nexposes = [\"rr3-interact/tts/text\", \"rr3-interact/face/expression\"]\n\n[health]");
+        let f = rr3_manifest_facts_from_text(&with).expect("带 exposes 的 manifest 应能读取");
+        assert_eq!(
+            f.rpc_exposes,
+            vec!["rr3-interact/tts/text".to_string(), "rr3-interact/face/expression".to_string()]
+        );
+        // 类型错必须报错，不许静默当空表
+        let bad = GOOD.replace("[health]", "[rpc]\nexposes = \"rr3-interact/tts/text\"\n\n[health]");
+        let errs = rr3_manifest_facts_from_text(&bad).expect_err("字符串不是数组必须报错");
+        assert!(errs.iter().any(|e| e.contains("rpc.exposes 应为字符串数组")), "{errs:?}");
+        let empty_item = GOOD.replace("[health]", "[rpc]\nexposes = [\"\"]\n\n[health]");
+        let errs = rr3_manifest_facts_from_text(&empty_item).expect_err("空串项必须报错");
+        assert!(errs.iter().any(|e| e.contains("每一项都必须是非空字符串")), "{errs:?}");
     }
 
     /// entry 绝对性判定（M2 只接受绝对路径，见本计划"与 spec 的偏离 3"）。
