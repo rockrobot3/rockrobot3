@@ -1,0 +1,62 @@
+# rockrobot3 —— Radxa ZERO 3（RK3566）Buildroot defconfig
+#
+# 架构裁定：ADR-0001（Buildroot 主路线 + Linux 6.6 mainline + Radxa ZERO 3）。
+# 分区布局的事实源：base/os/board/radxa-zero3/genimage.cfg（标签唯一事实源在
+# base/runtime/rr-ota/src/lib.rs，由 cargo test -p rr-ota 的 include_str 守护钉死）。
+#
+# 档位说明（诚实边界）：本文件是"结构就绪"档——配置逻辑本机可评审，全量 make
+# 构建只能在 Linux/容器侧进行（本仓库开发机为 macOS）。dts 是否随 6.6 mainline
+# 提供、U-Boot defconfig 名是否命中，见 patches/README.md 的核对清单；未核对项
+# 不得当作已验证。rrd 与各模块产物**不在 Buildroot 里编译**（它们是本仓自己的
+# workspace），由 aarch64 交叉编译后经 post-build.sh 装入目标根文件系统。
+
+# ---- 架构与工具链 -----------------------------------------------------------
+BR2_aarch64=y
+BR2_cortex_a55=y
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TARGET_GENERIC_ISSUE="Welcome to rockrobot3 (rock3_zero3)"
+
+# ---- 系统形态：BusyBox init（无 systemd，开机自启走 /etc/init.d/S99rrd）------
+BR2_INIT_BUSYBOX=y
+BR2_ROOTFS_POST_BUILD_SCRIPT="board/radxa-zero3/post-build.sh"
+# post-image 脚本序：先注入容量参数（genimage.cfg 在 git 里只有占位符），
+# 再跑 Buildroot 自带的 genimage.sh 生成整盘镜像。
+BR2_ROOTFS_POST_IMAGE_SCRIPT="board/radxa-zero3/post-image.sh support/scripts/genimage.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT_ARGS="-c $(BUILD_DIR)/genimage-rock3.cfg"
+
+# ---- 内核：Linux 6.6 mainline -----------------------------------------------
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6"
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+BR2_LINUX_KERNEL_IMAGE=y
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+# 注意：rk3566-radxa-zero-3 若不在 6.6 的 in-tree dts 名单里，此值会在
+# 内核编译期报错——届时按 patches/README.md 的回移（backport）流程补丁，
+# 不要在此处改成"看起来存在"的名字。
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-radxa-zero-3"
+
+# ---- 引导链：U-Boot（extlinux 走 distro boot）-------------------------------
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2024.10"
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="radxa-zero-3-rk3566"
+BR2_TARGET_UBOOT_NEEDS_DTC=y
+# RK3566 需要 idbloader.img（SPL+TPL 合体）与 u-boot.itb 两级产物，
+# 布局中的烧写偏移见 genimage.cfg（板上核对项）。
+BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
+BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="idbloader.img"
+BR2_TARGET_UBOOT_FORMAT_ITB=y
+
+# ---- 用户态包（M3 音频链路的板上依赖）---------------------------------------
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_PYTHON3=y
+
+# ---- 镜像产物 ---------------------------------------------------------------
+# 根文件系统只出 ext4 一份；rr_a / rr_b 两个槽位镜像由 genimage 从同一份
+# rootfs.ext4 生成（两槽内容在出厂烧录时一致，升级后才分叉）。
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_PACKAGE_HOST_GENIMAGE=y

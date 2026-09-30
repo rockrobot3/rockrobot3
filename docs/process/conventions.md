@@ -24,7 +24,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 176 条（Windows）/211 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 177 条（Windows）/212 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -39,14 +39,14 @@ boot spawn、串行收尸 `try_wait`、到期重启与"先杀挂死旧世再起"
 5 条 + support 的 boot 起法与 `rr3_field_from_log`/`rr3_wait_until` 两个助手）后复测。
 **本轮新增的是"真起子进程、真等退避、真重启"这一类证据**——上一轮"时间判定"与上上轮
 "跨进程夹具"那两类的描述原文照旧适用。**两个平台的条数本就应当不等**，所以各记各的、
-不合并成单一数字：Windows x86_64-pc-windows-msvc **176**（M2 Task 11b ①b 实测量，= Task 11a 的 175
-再加 `cli::tests` 净增的 1 条 `--boot-role` 用例——`supervisor.rs` 与整个 `e2e_spawn_restart` 目标都是
-`#[cfg(unix)]`，Windows 不参与编译，该目标在 L1 打 `running 0 tests`，见下）、
-WSL2 Linux x86_64 **211**（本轮 L2 全量实跑 `211 passed; 0 failed`；逐目标相加而非算术倒推：
-rr-bus 4 + rr-hal 4 + rr-ipc lib 26 + rr-ipc `envelope_meta` 4 + rr-ota 4 + rr-registry lib 15 +
+不合并成单一数字：Windows x86_64-pc-windows-msvc **177**（M1 板上就绪轮在 Task 11b 的 176 之上
+再加 `rr-ota` 净增的 1 条 include_str 分区标签守护用例 `ota_labels_match_genimage_cfg`——
+平台无关，两平台同加 1）、
+WSL2 Linux x86_64 **212**（M1 轮 212 条 = Task 11b 实跑 211 + 同一条守护用例；逐目标相加而非算术倒推：
+rr-bus 4 + rr-hal 4 + rr-ipc lib 26 + rr-ipc `envelope_meta` 4 + rr-ota 5 + rr-registry lib 15 +
 契约 24 + rrd lib 96 + `src/main.rs` 0 + `src/bin/sim_peer.rs` 0 + `e2e_sim_peer` 5 +
-`e2e_spawn_restart` 5 + `e2e_watchdog` 4 + `register_publish` 19 + `socket_banner` 1 = 211；
-Task 10 记 197、Task 11a 记 205）。
+`e2e_spawn_restart` 5 + `e2e_watchdog` 4 + `register_publish` 19 + `socket_banner` 1 = 212；
+Task 10 记 197、Task 11a 记 205、Task 11b 记 211）。
 `aarch64-unknown-linux-gnu` 交叉 + qemu-user
 本轮未重跑，沿用上一轮"与 Linux x86_64 同数"的记录，不据此声称本轮。两数差额 35 条全部可枚举：
 Unix 独有的 34 条线级用例（`register_publish` 19 + `socket_banner` 1 + `e2e_sim_peer` 5 +
@@ -55,7 +55,7 @@ Unix 独有的 34 条线级用例（`register_publish` 19 + `socket_banner` 1 + 
 `#[cfg(unix)]` 的代码在 Windows 上**不参与编译**，故 Windows 条数只覆盖平台无关逻辑，
 Unix 侧行为不据此声称；34 条线级用例在 Windows ①b 里显示 `running 0 tests`，那是 cfg
 边界的正确结果而不是通过）：
-①b **176** 条（Windows）/ **211** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
+①b **177** 条（Windows）/ **212** 条（Linux x86_64；`base/runtime` workspace 全量，含 rr-ipc 的 30 个
 契约守护——13 条偏移/枚举对齐 + 帧层 8 条 + `protocol::body::tests` 的 5 条 payload 类型前缀
 （M2 Task 7：前 2 字节小端 `Rr3PayloadType`，round-trip / 截断 / 未知值各一条）
 + `tests/envelope_meta.rs` 的 4 条**读 JSON**

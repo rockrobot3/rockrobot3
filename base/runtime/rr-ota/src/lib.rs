@@ -24,7 +24,8 @@ pub enum Rr3SlotState {
     Corrupt,
 }
 
-/// A/B 槽位名称（与 genimage.cfg 分区标签一致，M2 建分区时核对）
+/// A/B 槽位名称（与 base/os/board/radxa-zero3/genimage.cfg 的分区标签一致，
+/// 由下方 include_str 守护用例逐字钉死）
 pub const RR3_OTA_SLOT_NAMES: [&str; 2] = ["rr_a", "rr_b"];
 
 /// 模块级更新的 staging 分区标签（ADR-0007 决策二：布局现在即预留）
@@ -90,5 +91,52 @@ mod tests {
         assert_eq!(Rr3Slot::SlotA.rr3_slot_label(), "rr_a");
         assert_eq!(Rr3Slot::SlotB.rr3_slot_label(), "rr_b");
         assert_eq!(Rr3Slot::Factory.rr3_slot_label(), "rr_factory");
+    }
+
+    /// genimage.cfg 里的分区标签必须与本文件的常量逐字一致。
+    ///
+    /// include_str! 把布局文件拉进编译：文件改名/移动则**编译**失败（守存在），
+    /// 标签改动则本用例**测试**失败（守一致）——"文档说 rr_a、代码用 rr_x"
+    /// 的分家在结构上不可能发生（base/ota/README.md 的承诺由此兑现）。
+    /// 容量是构建期占位符（post-image.sh 注入），不在本用例关心范围内。
+    #[test]
+    fn ota_labels_match_genimage_cfg() {
+        const GENIMAGE: &str = include_str!("../../../../base/os/board/radxa-zero3/genimage.cfg");
+
+        // 从 cfg 文本里抓出全部 `label = "X"`（逐段扫描，不引正则依赖）
+        let mut labels_in_cfg: Vec<&str> = Vec::new();
+        let mut rest = GENIMAGE;
+        while let Some(pos) = rest.find("label = \"") {
+            rest = &rest[pos + "label = \"".len()..];
+            let end = rest.find('"').expect("genimage.cfg 的 label 值缺右引号");
+            labels_in_cfg.push(&rest[..end]);
+            rest = &rest[end..];
+        }
+        assert!(!labels_in_cfg.is_empty(), "genimage.cfg 里没有任何 label 条目");
+
+        // 四个 OTA 槽位标签必须与常量逐字一致
+        let ota_labels = [
+            Rr3Slot::SlotA.rr3_slot_label(),
+            Rr3Slot::SlotB.rr3_slot_label(),
+            Rr3Slot::Factory.rr3_slot_label(),
+            RR3_OTA_STAGING_PARTITION,
+        ];
+        for want in ota_labels {
+            assert!(
+                labels_in_cfg.contains(&want),
+                "genimage.cfg 缺 OTA 槽位标签 {want:?}，实有 {labels_in_cfg:?}——\
+                 布局与 rr-ota 常量分家，改布局须同批改常量（反之亦然）"
+            );
+        }
+
+        // 也不得有常量认领不了的杂牌标签（防手误拼出 rr_A / rr_Staging 之类）：
+        // 已知合法的非 OTA 标签只有 boot 与 rr_data。
+        for got in &labels_in_cfg {
+            assert!(
+                ota_labels.contains(&got) || matches!(*got, "boot" | "rr_data"),
+                "genimage.cfg 出现未知分区标签 {got:?}——若为新增分区，\
+                 须同批在 rr-ota 登记常量或在本用例登记合法清单"
+            );
+        }
     }
 }
