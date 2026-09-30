@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "总线客户端骨架：主题/广播常量层（M2 接 UDS 客户端）"
+description = "总线常量层 + 模块侧同步 UDS 客户端（连接/注册/心跳/发布/rr3.call/收帧）"
 
 [lib]
 name = "rr_bus"
@@ -13,3 +13,5 @@ path = "src/lib.rs"
 
 [dependencies]
 rr-ipc = { path = "../rr-ipc" }
+toml = { workspace = true }
+serde_json = { workspace = true }
