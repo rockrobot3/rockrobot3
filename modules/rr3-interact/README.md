@@ -9,11 +9,11 @@
 modules/rr3-interact/
 ├── module.toml
 ├── config.toml
-├── Cargo.toml
+├── Cargo.toml           ← 独立 workspace；path 依赖 rr-ipc / rr-bus / rr-hal
 └── src/
-    ├── main.rs           ← 入口：打印自述与发布面，未接总线
-    ├── face.rs           ← 表情渲染（idle/blink/talk/think/happy）
-    ├── player.rs         ← 出话播放（预缓冲/抗抖动参数继承 legacy 调优）
+    ├── main.rs          ← 真入口：RR3_MANIFEST → rr3_connect（注册/心跳）→ 收帧循环应答两个点名
+    ├── face.rs          ← 最小表情机（五态白名单；talk 自动挂起/恢复，显式指令可打断）
+    ├── player.rs        ← 占位 TTS：440Hz 正弦 burst，60ms/字符封顶 10s（真 TTS 随 M4 云面）
     ├── panel/mod.rs      ← 面板总览
     ├── panel/server.rs   ← HTTP 服务（默认只绑回环）
     └── panel/www/        ← 静态页
@@ -35,9 +35,16 @@ modules/rr3-interact/
 ## 本地自检
 
 ```bash
-cargo run --manifest-path modules/rr3-interact/Cargo.toml --bin rr3-interact
+cargo test --manifest-path modules/rr3-interact/Cargo.toml
 ```
 
-本目录交出的是结构 + manifest + 静态页占位（面板内容由总线数据填充）。**屏驱与 HTTP 监听面
-今天有没有实现**属实况，唯一落点 [`docs/status.md`](../../docs/status.md)；
+运行要挂总线：`RR3_MANIFEST` 指向 module.toml、`RR3_BUS_PATH` 指向 rrd 的 UDS、
+音频后端 `RR3_HAL_BACKEND`（sim / linux）；让 rrd boot spawn 本模块则三者都由它注入。
+两个 rpc 点名的应答形状（`{"played_ms","chars"}` / `{"expression","previous"}`）与
+业务性失败折 `result.error`（而非断链）的口径，事实源在 `main.rs` /
+[`docs/reference/rrd-rpc.md`](../../docs/reference/rrd-rpc.md) §8。
+
+本目录交出的是 M3 实装 + manifest + 静态页占位（面板内容由总线数据填充）。**屏驱、
+HTTP 监听面与真 TTS 今天有没有实现**属实况，唯一落点
+[`docs/status.md`](../../docs/status.md)；
 门禁与用例条数见 [`docs/process/conventions.md`](../../docs/process/conventions.md) §2。
