@@ -32,6 +32,46 @@ pub const LEN_DST_TASK: usize = 8;
 pub const LEN_PAYLOAD_LEN: usize = 4;
 pub const LEN_RESERVED: usize = 84;
 
+// ---------------------------------------------------------------------------
+// IPC-T-003 编译期布局断言（ADR-0006 后果项）。
+//
+// 这些 `const _` 在 **const 求值期**校验：任意目标——含 `cargo check --target
+// aarch64-unknown-linux-gnu` 交叉编译——只要编译通过，下列偏移连续性、头长合计、
+// magic 小端线上字节与 payload 类型枚举值即已成立，不依赖 `cargo test` 有没有人跑。
+// 它们与运行期守护（本模块 tests 与 tests/envelope_meta.rs 读契约 JSON 的那批）分工：
+// 这里钉"布局自洽"，那里钉"与契约文件一致"；跨架构等值本身由 `tools/ci/ipct003.sh`
+// 三方对拍（登记于 conventions.md §2，不进七步门）。
+const _: () = assert!(OFF_MAGIC == 0 && LEN_MAGIC == 4, "magic 必须在偏移 0、宽 4");
+const _: () = assert!(OFF_OPCODE == OFF_MAGIC + LEN_MAGIC, "opcode 偏移出现空洞/重叠");
+const _: () = assert!(OFF_FLAGS == OFF_OPCODE + LEN_OPCODE, "flags 偏移出现空洞/重叠");
+const _: () = assert!(OFF_TRACE_ID == OFF_FLAGS + LEN_FLAGS, "trace_id 偏移出现空洞/重叠");
+const _: () = assert!(OFF_TIMESTAMP_NS == OFF_TRACE_ID + LEN_TRACE_ID, "timestamp_ns 偏移出现空洞/重叠");
+const _: () = assert!(OFF_SRC_TASK == OFF_TIMESTAMP_NS + LEN_TIMESTAMP_NS, "src_task 偏移出现空洞/重叠");
+const _: () = assert!(OFF_DST_TASK == OFF_SRC_TASK + LEN_SRC_TASK, "dst_task 偏移出现空洞/重叠");
+const _: () = assert!(OFF_PAYLOAD_LEN == OFF_DST_TASK + LEN_DST_TASK, "payload_len 偏移出现空洞/重叠");
+const _: () = assert!(OFF_RESERVED == OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN, "reserved 偏移出现空洞/重叠");
+const _: () = assert!(
+    OFF_RESERVED + LEN_RESERVED == RR3_IPC_HDR_SIZE,
+    "偏移合计必须恰为 128（Layout C）"
+);
+// magic 的 LE 线上字节 31 45 52 41（contracts/README.md 歧义裁定：采字段值 0x41524531 小端存储）
+const _: () = assert!(
+    MAGIC.to_le_bytes()[0] == 0x31
+        && MAGIC.to_le_bytes()[1] == 0x45
+        && MAGIC.to_le_bytes()[2] == 0x52
+        && MAGIC.to_le_bytes()[3] == 0x41,
+    "magic LE 线上字节必须为 31 45 52 41"
+);
+// payload 类型枚举值 L1 冻结（AOS-STD-IPC-005）；改任一值这里先于任何测试变红
+const _: () = assert!(
+    Rr3PayloadType::Request as u16 == 0x0001
+        && Rr3PayloadType::Response as u16 == 0x0002
+        && Rr3PayloadType::Event as u16 == 0x0003
+        && Rr3PayloadType::Stream as u16 == 0x0004
+        && Rr3PayloadType::Notification as u16 == 0x0005,
+    "payload 类型枚举值冻结（L1），不得变更"
+);
+
 /// 传输层操作码（与 payload 类型分属不同层次）
 pub mod opcode {
     pub const SEND: u16 = 0x0001;
