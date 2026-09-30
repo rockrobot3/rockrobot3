@@ -54,6 +54,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../contracts/golden/README.md`](../contracts/golden/README.md) | 对同机字节基准向量做编解码校验时 |
 | [`../base/README.md`](../base/README.md) | 基座层为什么承载横切关注点、模块为什么不碰它 |
 | [`../base/os/README.md`](../base/os/README.md) | Buildroot 层：内核、A/B 分区与 maskrom 自烧录 |
+| [`../base/os/patches/README.md`](../base/os/patches/README.md) | 建镜像前内核/U-Boot 的 dts 与 defconfig 核对清单、补丁回移流程、交叉产物注入方式 |
 | [`../base/ota/README.md`](../base/ota/README.md) | OTA 布局文档与槽位 CLI（不写实际槽位写入） |
 | [`../base/runtime/README.md`](../base/runtime/README.md) | 基座 Rust workspace 的 crate 职责表与依赖预算 |
 | [`../base/runtime/rr-ipc/README.md`](../base/runtime/rr-ipc/README.md) | 协议层 + 传输层：帧读写、契约版本再导出 |
@@ -91,7 +92,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | 提交前对门禁 | [`process/conventions.md`](process/conventions.md) §2 + [`../tools/ci/README.md`](../tools/ci/README.md) |
 | 看进度实况与在制品 | [`status.md`](status.md) |
 | 名字对不上（目录 / crate / bin / trait） | [`process/naming.md`](process/naming.md) |
-| 改 Buildroot 镜像与分区 | [`../base/os/README.md`](../base/os/README.md) |
+| 改 Buildroot 镜像与分区 | [`../base/os/README.md`](../base/os/README.md) + [`../base/os/board/radxa-zero3/flash-maskrom.md`](../base/os/board/radxa-zero3/flash-maskrom.md) |
 | 动 OTA 槽位与双轨 | [`../base/ota/README.md`](../base/ota/README.md) + [`../base/runtime/rr-ota/README.md`](../base/runtime/rr-ota/README.md) |
 | 无硬件跑通整条链路 | [`../tools/sim/README.md`](../tools/sim/README.md) |
 | 对照 legacy ESP32 固件 | [`../legacy/README.md`](../legacy/README.md) + [`architecture/architecture.md`](architecture/architecture.md) §8 |
