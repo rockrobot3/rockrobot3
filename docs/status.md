@@ -3,7 +3,7 @@
 本文件是仓内**唯一**允许回答"某能力在当前 HEAD 有没有实现"的地方。其余文档只写设计语义，
 不写实况；设计文档里出现"已落地/未落地"的字样一律视为待订正（架构文档 §5 就因此整段重写过）。
 
-- **实况锚点**：本快照按锚点提交 `41e1990`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
+- **实况锚点**：本快照按锚点提交 `f932448`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
   本文里的"当前 HEAD"一律指这个锚点提交的那棵树，锚点之外的增量不进本表。
 - **状态只取三值**：`已实装` / `骨架` / `未设计`。限定条件（如"仅 Unix 参与编译""仅单元层"）
   写在证据列，不塞进状态列——否则三值就退化成自由文本，也就失去了可对比性。
@@ -41,15 +41,18 @@
 | CLI 参数与默认值注入 | 已实装 | [`cli.rs`](../base/runtime/rrd/src/cli.rs) + [`main.rs`](../base/runtime/rrd/src/main.rs)（套接字路径在打印横幅**之前**绝对化，横幅与 bind 取同一个值，由 [`tests/socket_banner.rs`](../base/runtime/rrd/tests/socket_banner.rs) 钉住）；Task 11b 增 `--boot-role`：默认 `resident`、**原样透传不校验取值**（role 的合法集是夹具的约定，rrd 一校验就是第二处真值），空值与疑似开关值在 parse 处当场拒；参数与默认值的字面量归 `reference/rrd-cli.md`，此处不复述 |
 | rrd UDS 监听与注册握手 | 已实装 | **限定：仅 Unix**——`conn` / `daemon` 两模块整体挂在 `#[cfg(unix)]` 下。[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 的 `rr3_daemon_run`：`Rr3UdsListener::rr3_cleanup` 清残留 → `rr3_bind`（bind/cleanup/accept 走 trait 工厂，ADR-0008 裁定 3 接缝最小化，`conn.rs` 一字未动）→ 起 supervisor → 起 watchdog → 投 boot 队列 → accept 循环，每连接 spawn 一条 reader 线程（加上 [`conn.rs`](../base/runtime/rrd/src/conn.rs) 为同一条连接 spawn 的 writer 线程与它那份 `try_clone`，连接账是每连接 **2 条线程 + 2 个 fd**；全进程另有**唯一** watchdog 线程与**唯一** supervisor 执行线程，不在这个"每连接"账里）；[`conn.rs`](../base/runtime/rrd/src/conn.rs) 的 `rr3_conn_serve` / `rr3_handshake`：首帧必须是发给 `RR3_TASK_RRD` 的 `rr3.register`，`src_task` 由 rrd 分配、伪造者那一帧被拒但连接不断，注册前设读超时收掉静默连接。线级用例：[`tests/register_publish.rs`](../base/runtime/rrd/tests/register_publish.rs)、[`tests/socket_banner.rs`](../base/runtime/rrd/tests/socket_banner.rs)、[`tests/e2e_sim_peer.rs`](../base/runtime/rrd/tests/e2e_sim_peer.rs)（跨进程对端夹具：由 `env!("CARGO_BIN_EXE_sim_peer")` 起的第二个真进程，证明注册→心跳→发布→退场整条链在线上走得通）、[`tests/e2e_watchdog.rs`](../base/runtime/rrd/tests/e2e_watchdog.rs) 与 [`tests/e2e_spawn_restart.rs`](../base/runtime/rrd/tests/e2e_spawn_restart.rs)，这些线级目标整体挂在 `#![cfg(unix)]` 门后，故 Windows 侧它们**不参与编译**（那是 cfg 边界的正确结果，不等于通过）。cfg 边界的自述见 [`lib.rs`](../base/runtime/rrd/src/lib.rs) |
 | 发布归属判定（越权前缀 / 冒充内建命名空间） | 已实装 | **已接到线上**：`RrdRegistry::rr3_reg_publish_check`（返回 `Rr3PublishDeny`）不再只有单元用例——`conn.rs` 的上行分发把 `Rr3PayloadType::Event` 交 `rr3_publish`，后者依次调 `rr3_rpc_topic_param`、`rr3_reg_publish_check(&me.name, …)`、越权时回错误帧并 `rr3_reg_note_denied` 计数。发送方身份取 `me.name`（注册期 `Rr3Peer` 在册名），帧上 `src_task` 在分发前就校验：不等于 `me.task` 即那一帧被拒——`registry.rs` doc 注里"由 `rr3_reg_name_of` 反查"的表述线上换成了这套等价做法。拒帧不断连，与 `src_task` 伪造同一口径。接口字面量归 `reference/rrd-rpc.md` §7 与 `reference/rrd-registry.md` §8 |
-| rrd 上行 JSON-RPC 三方法 | 已实装 | [`rpc.rs`](../base/runtime/rrd/src/rpc.rs)：`Rr3RpcMethod` = `rr3.register` / `rr3.heartbeat` / `rr3.unregister`，含 `rr3_rpc_parse_request` 的版本与 id 校验、`rr3_rpc_build_result` / `rr3_rpc_build_error` 错误映射 |
-| HAL trait 形状与占位后端 | 骨架 | [`lib.rs`](../base/runtime/rr-hal/src/lib.rs) 定义了 `Rr3GpioOut` / `Rr3PwmServo` / `Rr3AudioSource` / `Rr3Power` / `Rr3Link` 与 `Rr3UnavailableSource`（所有能力一律回 `Rr3HalError::Unsupported`）；具名后端 `linux` / `sim` **只有注释没有实现**——[`backend.rs`](../base/runtime/rr-hal/src/backend.rs) 通体只有 `RR3_BACKEND_LINUX` / `RR3_BACKEND_SIM` / `RR3_BACKEND_PLACEHOLDER` 三个常量（M3 计划：`Rr3AudioSink` trait 与 sim/linux 后端随阶段 2 落地） |
-| A/B OTA 切换 | 骨架 | [`rr-ota/src/lib.rs`](../base/runtime/rr-ota/src/lib.rs) 只冻结类型形状（`Rr3Slot`），**新增分区标签守护已实装**：`ota_labels_match_genimage_cfg` 用 `include_str!` 把 [`base/os/board/radxa-zero3/genimage.cfg`](../base/os/board/radxa-zero3/genimage.cfg) 拉进编译（守文件存在）并断言四槽位标签与 `RR3_OTA_SLOT_NAMES` / `RR3_OTA_STAGING_PARTITION` 逐字一致（守一致）；[`rr3-ota-ctl/src/main.rs`](../base/ota/rr3-ota-ctl/src/main.rs) 的 `rr3_ota_ctl_refuse_switch` 对任意目标恒拒，注释写明"随 M6 落地，当前拒绝执行" |
+| rrd 上行 JSON-RPC 四方法 | 已实装 | [`rpc.rs`](../base/runtime/rrd/src/rpc.rs)：`Rr3RpcMethod` = `rr3.register` / `rr3.heartbeat` / `rr3.unregister` / `rr3.call`（M3 增），含 `rr3_rpc_parse_request` 的版本与 id 校验、`rr3_rpc_build_result` / `rr3_rpc_build_error` 错误映射、`rr3_rpc_call_params`（`params.topic` 非空、`args` 可缺省、成功不回 result 只回 accepted） |
+| 模块间点名路由与应答回路（rr3.call） | 已实装 | **请求方向**：[`conn.rs`](../base/runtime/rrd/src/conn.rs) 的 `rr3_route_call`——查 [`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `rr3_reg_callee_for`（exposes 该主题的在册模块里**取 task 最小者**）→ `rr3_reg_send_to` 点对点投递，转发帧 `trace_id`=调用方 task（语义登记见 [contracts/README.md](../contracts/README.md) 演进登记）；三种拒绝（未注册主题 / 无 callee / exposes 不符）逐字文案归 [`reference/rrd-rpc.md`](reference/rrd-rpc.md) §8。**应答方向**：`rr3_route_response` 按 trace_id 原路回给调用方。线级证据：[`tests/module_call.rs`](../base/runtime/rrd/tests/module_call.rs) 4 条（点名回路 + 三种拒法）+ [`tests/e2e_audio_chain.rs`](../base/runtime/rrd/tests/e2e_audio_chain.rs) 1 条（**三真进程**：rrd + rr3-sense(sim) + rr3-interact(sim)，vad_start 事件上总线、pcm STREAM 有序转发、rr3.call 应答回到调用方） |
+| 模块侧同步总线客户端 | 已实装 | [`client.rs`](../base/runtime/rr-bus/src/client.rs)：`rr3_connect`（读 manifest → UDS 连接 → 注册 → 独立线程喂心跳）、`rr3_task` / `rr3_name`、`rr3_call` / `rr3_publish` / `rr3_reply_call`、`rr3_poll` / `rr3_poll_wait` / `rr3_try_recv`、`rr3_connected` 死亡探针（断开后 `poll_wait` 返回空 Vec 与"暂时没帧"不可区分，事件循环必须探——两个真入口都探了）、`rr3_frame_body` 解帧；manifest entry 相对路径按所在目录绝对化（rrd spawn 注入的契约环境变量）。6 条用例，无平台门 |
+| HAL 音频面（源/汇 trait + sim/linux 后端） | 已实装 | **限定：音频面已实装；GPIO / PWM / 电源 / 链路仍占位**。[`lib.rs`](../base/runtime/rr-hal/src/lib.rs) 的 `Rr3AudioSource` / `Rr3AudioSink`（async_trait，open/read 与 open/write 对称——ADR-0008 裁定 2 的 M3 定型）与 `rr3_block_on`（同步桥接，**不引 async 运行时**——裁定 1）；[`sim.rs`](../base/runtime/rr-hal/src/sim.rs) 三种波形（正弦 / 噪声 / 静音），时长换算走 `Rr3PcmStream::rr3_pcm_duration_ms()` 不算第二遍；[`linux.rs`](../base/runtime/rr-hal/src/linux.rs) ALSA 后端挂 `cfg(all(target_os = "linux", feature = "alsa"))` 门（配 `RR3_HAL_ALSA_DEVICE`），主机 CI（macOS）不参与编译；[`backend.rs`](../base/runtime/rr-hal/src/backend.rs) 按 `RR3_HAL_BACKEND` 环境变量选 `rr3_hal_audio_source()` / `rr3_hal_audio_sink()`。其余 `Rr3GpioOut` / `Rr3PwmServo` / `Rr3Power` / `Rr3Link` 仍回 `Rr3HalError::Unsupported`（M5） |
+| A/B OTA 切换 | 骨架 | [`rr-ota/src/lib.rs`](../base/runtime/rr-ota/src/lib.rs) 只冻结类型形状（`Rr3Slot`），**分区标签守护已实装**：`ota_labels_match_genimage_cfg` 用 `include_str!` 把 [`base/os/board/radxa-zero3/genimage.cfg`](../base/os/board/radxa-zero3/genimage.cfg) 拉进编译（守文件存在）并断言四槽位标签与 `RR3_OTA_SLOT_NAMES` / `RR3_OTA_STAGING_PARTITION` 逐字一致（守一致）；[`rr3-ota-ctl/src/main.rs`](../base/ota/rr3-ota-ctl/src/main.rs) 的 `rr3_ota_ctl_refuse_switch` 对任意目标恒拒，注释写明"随 M6 落地，当前拒绝执行" |
 | Buildroot OS 层（defconfig / 分区布局 / 引导链 / 烧录文档） | 骨架 | **结构就绪、构建与实板验证未发生**（硬件未采购）。已落树：[`configs/rock3_zero3_defconfig`](../base/os/configs/rock3_zero3_defconfig)（Buildroot + Linux 6.6 + aarch64，BusyBox init，ALSA/Python，post-build/post-image 挂钩）；[`board/radxa-zero3/genimage.cfg`](../base/os/board/radxa-zero3/genimage.cfg)（boot + `rr_a`/`rr_b`/`rr_factory`/`rr_staging`/data 六分区；**容量一律 `@XXX_SIZE@` 构建期占位符**，由 [`post-image.sh`](../base/os/board/radxa-zero3/post-image.sh) 注入并做残留检查——容量不在配置里冻结，见 [`base/ota/README.md`](../base/ota/README.md)）；[`extlinux.conf`](../base/os/board/radxa-zero3/extlinux.conf)（root=LABEL=rr_a；bootlimit/altbootcmd 回滚链属 M6 写侧）；[`post-build.sh`](../base/os/board/radxa-zero3/post-build.sh)（/var/run tmpfs、rr_data/rr_staging 挂载、S99rrd 自启、产物安装位，缺席只警告）；[`flash-maskrom.md`](../base/os/board/radxa-zero3/flash-maskrom.md)（rkdeveloptool 操作序，全条目标注板上核对）；[`patches/README.md`](../base/os/patches/README.md)（dts/defconfig 核对清单，**无补丁本体**——不虚构来源）。分区标签与代码常量的逐字一致性由 `rr-ota` 的 include_str 守护用例钉死（见上行"A/B OTA 切换"）。缺的手：全量 make 构建（需 Linux/容器）、dts 与 U-Boot defconfig 核对、串口出 shell、maskrom 实烧——均属板上/Linux 侧收口 |
-| `rr3-act` / `rr3-connect` / `rr3-interact` / `rr3-power` / `rr3-sense` | 骨架 | [`modules/*/src/main.rs`](../modules/) 五个 Rust 入口，实测 11–17 行，只打印自述；各目录的 `module.toml` 由 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs) 逐目录读回判合规（`rr3-brain` 那份也在内） |
+| `rr3-sense` / `rr3-interact` | 已实装（sim 侧） | [`modules/rr3-sense/src/main.rs`](../modules/rr3-sense/src/main.rs)：注册/心跳 → 按后端开拾音面 → 自 pacing 采集循环（sim read 即时返回、ALSA read 自耗一拍，两种后端同一形状）→ pcm STREAM + VAD 边沿上行 → `capture/dump` 点名应答（14 条模块用例 + golden PCM 向量）；[`modules/rr3-interact/src/main.rs`](../modules/rr3-interact/src/main.rs)：注册/心跳 → 占位 TTS（440Hz burst，60ms/字符封顶 10s）+ 五态表情机（talk 自动挂起/恢复）应答两个 rpc 点名（12 条模块用例）。两者失败语义同一：**业务性失败折 error 应答回话，传输性失败 `exit(1)` 交 supervisor**（不装"活着"）。**板上 ALSA 采集/回放未发生（硬件未采购）**；三真进程整链证据在 [`e2e_audio_chain.rs`](../base/runtime/rrd/tests/e2e_audio_chain.rs) |
+| `rr3-act` / `rr3-connect` / `rr3-power` | 骨架 | [`modules/*/src/main.rs`](../modules/) 三个 Rust 入口仍是十几行自述占位（M5）；各目录 `module.toml` 由 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs) 逐目录读回判合规（`rr3-brain` 那份也在内） |
 | `rr3-brain` | 骨架 | **不是 Rust 模块，没有 `src/main.rs`**：入口是 [`rr3_brain/__main__.py`](../modules/rr3-brain/rr3_brain/__main__.py)，`dialog.py` 与 `cloud/{asr,llm,tts}.py` 均为十几行的自述占位，注释写明"不做任何网络调用：握手/注册随 M2 与 M4 接入"；配置见 [`config.toml`](../modules/rr3-brain/config.toml) |
 | `rr3-ctl` | 骨架 | [`tools/rrctl/src/commands.rs`](../tools/rrctl/src/commands.rs) 的 `COMMANDS = ["status", "health", "logs", "ota"]`，各命令均只回显计划文案（"实现随 M2"）；参数解析与套接字优先级在 [`main.rs`](../tools/rrctl/src/main.rs) 已实装 |
-| `rr3-sim` | 骨架 | [`tools/sim/src/devices.rs`](../tools/sim/src/devices.rs) 的 `rr3_sim_silence` 只出静音帧以钉住尺寸与时长换算，注释写明"波形注入（正弦/噪声）随 M2" |
-| `contracts/events/*.schema.json` | 未设计 | [`contracts/events/`](../contracts/events/) 目录下只有一个 README，无任何 schema 文件 |
+| `rr3-sim` | 骨架 | [`tools/sim/src/devices.rs`](../tools/sim/src/devices.rs) 的 `rr3_sim_silence` 只出静音帧以钉住尺寸与时长换算；**波形注入已不欠本工具**——正弦/噪声/静音由 [`rr-hal/src/sim.rs`](../base/runtime/rr-hal/src/sim.rs) 承担、`rr3-sense` 经 `RR3_HAL_BACKEND` 直接用（见 [`tools/sim/README.md`](../tools/sim/README.md)） |
+| `contracts/events/*.schema.json` | 已实装（1 个） | [`sense-audio-vad_start.schema.json`](../contracts/events/sense-audio-vad_start.schema.json)：schema_version 1，$schema draft 2020-12，required `["seq","edge","speech_ms"]`，`rms_peak` 仅 onset 携带（`allOf` + `if/then`），`additionalProperties false`；事实源 `rr3_vad_event_body`。**pcm STREAM 的 schema 未落**——属 M5 流控裁定，[contracts/README.md](../contracts/README.md) 演进登记为已知空缺 |
 
 ---
 
@@ -59,14 +62,14 @@
 架构文档 §10 已收口为一行指向本节（迁入与删原分两步做，是为了让删除那次改动单独可审）。
 **当前实况**一栏是本快照读代码实测的结论，不是对验收标准的复述或期望。
 
-| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`41e1990` 实测） |
+| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`f932448` 实测） |
 |---|---|---|---|
 | M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 | 目录树已落地，ADR 已写到 0008（超出原验收范围），`rr3-mkmod` 的产物被回灌进契约用例 —— **已收口** |
 | M1 | base/os：Buildroot 在 Radxa ZERO 3 跑通 | 串口出 shell；maskrom 自烧录镜像成功 | **结构就绪，未收口（板上敞口）**。defconfig、genimage.cfg（容量=构建期占位符）、extlinux.conf、post-build/post-image、flash-maskrom.md、patches/ 核对清单已全部落树，分区标签守护用例进 rr-ota；缺的是：全量 make 构建（Linux/容器侧）、dts 与 U-Boot defconfig 核对、串口出 shell、maskrom 实烧——目标硬件 Radxa ZERO 3 **未采购**，板上收口项在硬件到位前不 claim（证据见上行能力表"Buildroot OS 层"） |
 | M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **已收口（留一条环境敞口）**。验收标准逐条对照：注册/心跳/崩溃自动重启——**全到位**（注册/心跳/死亡记账/扇出被连接层调用；崩溃自动重启由唯一 supervisor 线程执行：boot spawn、串行收尸、到期重启、按策略退避，线级证据 `e2e_spawn_restart` 5 条）；IPC-T-001/002——同机 golden 往返 + 契约逐字段对齐，全绿；IPC-T-003——**夹具与脚本就绪**（`ipct003_dump` 头行已与 golden 逐字节一致 + 编译期 const 断言随任意目标求值），**双架构真跑待容器环境**（本机无 Docker），这是 M2 唯一敞口，见上文能力表"IPC-T-003"行与"本机无法收口"第 4 条。`trait Transport` 已随 ADR-0008 定型并落地 uds 实现（`conn.rs` 一字未动），上一版"仍缺三项"里的①②两条就此结清 |
-| M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线，音频走 STREAM | HAL 只有 trait 形状与恒回 `Unsupported` 的占位后端，`linux` / `sim` 无实现 —— **未开工** |
+| M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线，音频走 STREAM | **已收口（板上 ALSA 敞口）**。sim 侧证据齐：`rr3-sense` / `rr3-interact` 实装（见能力表两行）、rr-bus 同步客户端、rrd 四方法 RPC 与 rr3.call 路由应答回路、**三真进程** e2e（vad_start 事件上总线、pcm STREAM 有序转发、点名应答回到调用方，`e2e_audio_chain` 绿）、七步门禁 exit=0（①b 实测 249 条，见 conventions §2 M3 台账）；ALSA 后端代码与 feature 门配置就绪，**板上录音回放未发生**——Radxa ZERO 3 未采购，板上证据为零（见"本机无法收口"第 7 条），硬件到位前不 claim |
 | M4 | rr3-brain：移植 asr/llm/tts | 全语音对话闭环（legacy 功能等价） | `rr3-brain` 各 py 文件均为自述占位，注释写明不做任何网络调用 —— **未开工** |
-| M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 | 五个 Rust 模块入口均为 11–17 行自述；shm/tcp 的**线上签名已定型**（`trait Transport` 三件，ADR-0008 裁定 4：不写半成品），实现一行没有 —— **未开工** |
+| M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 | `rr3-act` / `rr3-connect` / `rr3-power` 三个 Rust 模块入口仍是自述占位；shm/tcp 的**线上签名已定型**（`trait Transport` 三件，ADR-0008 裁定 4：不写半成品），实现一行没有 —— **未开工** |
 | M6 | A/B OTA + 恢复出厂 | 断电升级不 brick，坏 slot 自动回滚；genimage 预留模块独立可写分区 | `rr-ota` 只有类型形状 `Rr3Slot`（分区标签守护已实装），`rr3-ota-ctl switch` 恒拒；genimage.cfg 的分区集合（含 rr_staging 独立可写分区）已随 M1 落树，容量定型与写侧实板验证仍属 M6 —— **未收口** |
 
 ---
@@ -82,21 +85,23 @@
 | 2 | 设备侧 `idf.py build` 的密钥门未验证 | 在装有 ESP-IDF 的机器上的一次成功构建 + 一次无密钥失败的对照 | 本机没有 ESP-IDF，也没有目标设备；`legacy/` 是冻结区，不在本轮改动范围内，但"固件侧改一处配置会不会撞上密钥门"这件事至今无人拿过证据 |
 | 3 | 泄漏 API key 的提供方侧轮换未确认 | 提供方控制台里那把 key 已失效/已替换的凭据 | 仓内曾经出现过的 key 从 git 历史里抹不掉；**从仓库角度能做的都做完了**（移到 `legacy/` 冻结、文档不再复述），但"这把 key 现在还能不能用"只有提供方能回答，这一条不闭环，第 3 项就一直是敞口 |
 | 4 | IPC-T-003 的双架构真跑 | 一次 `linux/arm64` 容器（或 aarch64 交叉 + qemu）里 `ipct003_dump` 与宿主输出的逐字节 diff | 本机无 Docker、未装 aarch64 目标。脚本与夹具已就绪且**不静默冒充已验证**：缺环境时 `ipct003.sh` 打 `SKIP` 明说（`--strict` 供有容器环境的一方拒绝放行）。Docker 装好后跑一次 `bash tools/ci/ipct003.sh`，跑成即可把 [`envelope.schema.json`](../contracts/envelope.schema.json) 里该条移入 coverage |
-| 5 | 本机 macOS 上 ①b 的线级用例不可信 | 登记平台（Windows L1 / WSL2 Linux L2）的一次 ①b 全绿 | `cargo test --workspace` 里 `e2e_sim_peer` 等 5 条跨进程用例在本机**间歇失败**（"3s 内没等到监听行"、子进程无输出）——**基线 `240fb02` 经 `git stash` 复现同样失败**，属 macOS 对新链接二进制的首跑/并发 exec 延迟（syspolicyd 类机制），非代码缺陷；手工直跑同一二进制的同一用例时可过。**本机 ①b 为红不作为回归信号**，门禁证据以 conventions §2 登记的两平台实测为准 |
+| 5 | 登记平台（Windows L1 / WSL2 Linux L2）的一轮 ①b 全绿回执 | 登记平台的一次 ①b 全绿 | M3 收口轮在本机 macOS 实测 ①b **全绿一次**（249 条，含 6 个线级目标与 23s 的 `e2e_audio_chain`），上一轮记录的 macOS 线级用例间歇失败（基线 `240fb02` 亦复现）**本轮未再出现**——是否彻底消除需更多轮次观察。conventions §2 的两平台实测仍是唯一权威口径，macOS 单次全绿不替代它 |
 | 6 | M1 的板上收口四件 | 一次全量 make 产出的镜像 + 实板串口出 shell + maskrom 实烧 + 分区容量定型 | 目标硬件 Radxa ZERO 3 **未采购**，且全量 Buildroot 构建需 Linux/容器侧（本机 macOS 无环境）。defconfig 里 `BR2_LINUX_KERNEL_INTREE_DTS_NAME` 与 `BR2_TARGET_UBOOT_BOARD_DEFCONFIG` 两个名字是否命中、genimage 引导裸区偏移是否正确，都**未核对**——核对清单在 [`patches/README.md`](../base/os/patches/README.md)，逐条回填前结构就绪不等于可跑 |
+| 7 | M3 的板上录音回放 | Radxa ZERO 3 上一次真机采集/回放 + `RR3_HAL_ALSA_DEVICE` 设备名核对 | 硬件未采购（同第 6 条）。ALSA 后端（[`rr-hal/src/linux.rs`](../base/runtime/rr-hal/src/linux.rs)）只有 feature 门内的代码与用例形状，**真机上一行都没跑过**；sim 侧证据（三真进程 e2e + 模块用例）不能替代板上证据 |
 
 ---
 
 ## 在制品
 
-**本快照只记锚点提交 `41e1990` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
+**本快照只记锚点提交 `f932448` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
 改动，都不进本表，重锚时随锚点一并更新。**
 
-本锚点本身携带三个增量提交：`e0a1250`（trait Transport 定型 + `Rr3FrameBuf` + uds 实现 +
-ADR-0008）、`48322d5`（IPC-T-003 就绪：dump 夹具 + 对拍脚本 + 编译期 const 断言）与 `41e1990`
-（M1 板上就绪：Buildroot defconfig / genimage.cfg / extlinux / post-build / maskrom 文档 /
-patches 核对清单 + rr-ota 的 include_str 分区标签守护，conventions §2 条数同批 176/211 →
-177/212）。三者都已按实况计入上文能力表，此处不再单列"在制品"——
+本锚点本身携带 M3 音频链的 8 个提交：`d05cd2b`（rr-hal 源汇对称 + sim 三波形 + linux ALSA
+feature 门）、`1aaa7b4`（rr-bus 同步总线客户端）、`f19e750`（rrd rr3.call 路由应答回路 +
+三真进程音频链 e2e + 夹具修复）、`68e987b`（rr3-sense 实装）、`65d9d8d`（rr3-interact 实装）、
+`f60dd7a`（contracts 首个事件 schema + trace_id 语义登记）、`376b8e0`（rrctl 锁刷新）、
+`f932448`（docs 同批：rrd-rpc §8 / rrd-registry / architecture §5 / conventions §2 M3 台账）。
+八个提交都已按实况计入上文能力表，此处不再单列"在制品"——
 **锚点树内没有在途的未提交改动**。
 
 **已知偏差（有意保留，不是遗漏）：**
