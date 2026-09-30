@@ -13,6 +13,7 @@
 
 | 文档 | 内容 |
 |---|---|
+| [docs/README.md](docs/README.md) | 文档库地图：仓内每份 README 各在何时该读，以及"我要做 X"该看哪篇 |
 | [docs/architecture/architecture.md](docs/architecture/architecture.md) | 架构（设计）：分层、模块模型、HAL、IPC、数据流、风险登记 |
 | [docs/status.md](docs/status.md) | 唯一实况快照：HEAD 上有什么、里程碑进度、本机无法收口的三项 |
 | [docs/reference/](docs/reference/) | 运行期接口的可照抄事实：rrd 启动参数 / 上行 RPC / 在册表规则 |

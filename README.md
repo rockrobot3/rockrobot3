@@ -12,6 +12,7 @@ Discussions and contributions are welcome — Issues are the front door.
 
 | Document | Contents |
 |---|---|
+| [docs/README.md](docs/README.md) | Documentation map: every README in the repo plus which doc answers which question |
 | [docs/architecture/architecture.md](docs/architecture/architecture.md) | Architecture (design): layering, module model, HAL, IPC, data flows, risk register |
 | [docs/status.md](docs/status.md) | Single live-status snapshot: what exists at HEAD, milestone progress, open unknowns |
 | [docs/reference/](docs/reference/) | Copy-ready runtime interfaces: rrd CLI / upstream RPC / registry rules |
