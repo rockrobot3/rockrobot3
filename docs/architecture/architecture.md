@@ -342,10 +342,16 @@ rr-ipc/
   写侧 `rr3_frame_to_bytes` **先**校验头声明的 `payload_len` 与实际 payload 等长
   （不符即 `Rr3FrameError::LengthMismatch{declares, actual}` 且一个字节都不发出去），
   再把头与体拼成整块交 `rr3_frame_write` 单次 `write_all` + `flush`——读侧因此不可能看到两半。
-- **transport/mod.rs**：只有分层注记与两个路径常量，**没有 `trait Transport`**。这是裁定而不是缺项：
-  零拷贝的 buffer 所有权移交语义与 ADR-0007 §裁定 3 的取舍必须一起定型，先落一个 trait 反而会
-  造出一个要被推翻的接口。分层设计仍是 uds（事件/事务面）/ shm（实时控制面）/ tcp（多机，预留），
-  反射环永远不进任何一层（ADR-0007 §裁定 1）；各层的实现进度见 [`../status.md`](../status.md)。
+- **transport/mod.rs**：trait 三件（ADR-0008）——连接侧 `Rr3TransportConn`（同步阻塞、
+  **所有权移交**：`rr3_send_buf` 消费整帧缓冲、幂等 seal 后单次 `write_all`；`rr3_recv_buf`
+  返回所有权缓冲）、监听侧 `Rr3TransportListener`、端点 `Rr3TransportEndpoint`（清理残留 →
+  bind）。零拷贝语义落在 `transport/buf.rs` 的 `Rr3FrameBuf`（单块内存 `[0..128)` 头预留区 +
+  payload，原地编头）而不是方法签名上——M5 的 shm 在同一签名下把拷贝降为环形缓冲 grant，
+  接口不再推翻（这就是 ADR-0007 §裁定 3 的落点）。裁定 1（ADR-0008）：传输层保持同步阻塞
+  线程模型，不引 async；async 运行时只进模块侧。
+  分层设计是 uds（事件/事务面，M2 唯一实现 `transport/uds.rs` 的 `Rr3UdsListener`）/
+  shm（实时控制面，M5）/ tcp（多机，预留），反射环永远不进任何一层（ADR-0007 §裁定 1）；
+  各层的实现进度见 [`../status.md`](../status.md)。
 
 套接字路径的三级决定：`--socket` > 环境变量 `RR3_BUS_PATH`（常量键 `RR3_BUS_PATH_ENV`）>
 `RR3_UDS_PATH_DEFAULT`（自有路径常量，避免与真实 Airymax 运行时同机冲突）。

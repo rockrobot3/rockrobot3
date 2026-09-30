@@ -9,14 +9,16 @@
 //! 一条活跃连接 +2 线程 +2 fd）。Task 10/11 算并发与文件描述符账按这个数。
 //! 单次 accept 失败只记日志不带走守护进程；协议错误只结束那一条连接。
 
-use std::os::unix::net::UnixListener;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rr_bus::{RR3_BROADCAST_DST_TASK, RR3_TASK_RRD};
-use rr_ipc::{opcode, rr3_body_encode, Rr3Frame, Rr3Header};
+use rr_ipc::{
+    opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3TransportEndpoint, Rr3TransportListener,
+    Rr3UdsListener,
+};
 use rr_registry::Rr3TopicSet;
 use serde_json::json;
 
@@ -150,11 +152,11 @@ pub fn rr3_state_frame(name: &str, phase: &str, src_task: u64) -> Rr3Frame {
 /// 3. 投 boot 队列 —— 放在 accept 循环之前，否则第一条消息永远没人取。
 pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String> {
     let t0 = Instant::now();
-    if cfg.socket.exists() {
-        std::fs::remove_file(&cfg.socket)
-            .map_err(|e| format!("清理残留套接字 {}: {e}", cfg.socket.display()))?;
-    }
-    let listener = UnixListener::bind(&cfg.socket)
+    // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
+    // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
+    Rr3UdsListener::rr3_cleanup(&cfg.socket)
+        .map_err(|e| format!("清理残留套接字 {}: {e}", cfg.socket.display()))?;
+    let listener = Rr3UdsListener::rr3_bind(&cfg.socket)
         .map_err(|e| format!("绑定 {} 失败: {e}", cfg.socket.display()))?;
     rr3_log(&format!("监听 {}", cfg.socket.display()));
 
@@ -197,8 +199,8 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         sup.rr3_boot(job);
     }
 
-    for accepted in listener.incoming() {
-        let stream = match accepted {
+    loop {
+        let stream = match listener.rr3_accept() {
             Ok(s) => s,
             Err(e) => {
                 rr3_log(&format!("accept 失败（继续服务）: {e}"));
@@ -218,5 +220,4 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             }
         });
     }
-    Ok(())
 }
