@@ -97,7 +97,11 @@ pub fn rr3_frame_write(w: &mut impl Write, f: &Rr3Frame) -> Result<(), Rr3FrameE
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::header::opcode;
+    use crate::protocol::header::{
+        opcode, LEN_DST_TASK, LEN_MAGIC, LEN_OPCODE, LEN_PAYLOAD_LEN, LEN_RESERVED, LEN_SRC_TASK,
+        LEN_TIMESTAMP_NS, LEN_TRACE_ID, OFF_DST_TASK, OFF_MAGIC, OFF_OPCODE, OFF_PAYLOAD_LEN,
+        OFF_RESERVED, OFF_SRC_TASK, OFF_TIMESTAMP_NS, OFF_TRACE_ID,
+    };
     use std::io::Cursor;
 
     fn hdr(payload_len: u32) -> Rr3Header {
@@ -139,6 +143,68 @@ mod tests {
         .unwrap();
         assert_eq!(&body[..RR3_IPC_HDR_SIZE], &g[..], "帧头部与 golden 向量漂移");
         assert_eq!(body.len(), 128 + 96);
+    }
+
+    /// 跨架构等值的**发射端**（`tools/ci/xarch-verify.sh` 在 x86-64 与 aarch64 各跑一次比对）。
+    /// 为什么不复用上面那条 golden 往返：往返测的是"编解码自洽"，两种架构可以各自自洽地
+    /// 编出**不同**的字节；IPC-T-003 要的是"同一份构造输入 → 同一串线上字节"，所以判据必须
+    /// 压在构造路径（`rr3_hdr_broadcast` + 显式字段赋值）上，而不是压在 golden 的读回上。
+    /// 输出必须**纯确定性**：固定输入、固定字段值、无时间无随机，否则两侧比对没有意义。
+    #[test]
+    fn rr3_xarch_encode_emits_deterministic_header() {
+        let bytes = hdr(5).to_bytes();
+        assert_eq!(bytes.len(), RR3_IPC_HDR_SIZE, "发射的必须是完整 128B 头");
+        // 偏移断言直接压在契约的 OFF_*/LEN_* 常量上（与 `x-offset-table` 同源，见本文件
+        // tests 的 offset_table），所以这里**不是**在重复 header.rs 的实现，而是在重复契约。
+        assert_eq!(
+            &bytes[OFF_MAGIC..OFF_MAGIC + LEN_MAGIC],
+            &[0x31, 0x45, 0x52, 0x41],
+            "magic 0x41524531 必须小端落在线上"
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[OFF_OPCODE..OFF_OPCODE + LEN_OPCODE].try_into().unwrap()),
+            opcode::SEND
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[OFF_TRACE_ID..OFF_TRACE_ID + LEN_TRACE_ID].try_into().unwrap()),
+            0x1234_5678
+        );
+        assert_eq!(
+            u64::from_le_bytes(
+                bytes[OFF_TIMESTAMP_NS..OFF_TIMESTAMP_NS + LEN_TIMESTAMP_NS]
+                    .try_into()
+                    .unwrap()
+            ),
+            100
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[OFF_SRC_TASK..OFF_SRC_TASK + LEN_SRC_TASK].try_into().unwrap()),
+            7
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[OFF_DST_TASK..OFF_DST_TASK + LEN_DST_TASK].try_into().unwrap()),
+            0,
+            "广播：dst_task=0"
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                bytes[OFF_PAYLOAD_LEN..OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN]
+                    .try_into()
+                    .unwrap()
+            ),
+            5
+        );
+        assert!(
+            bytes[OFF_RESERVED..OFF_RESERVED + LEN_RESERVED].iter().all(|&b| b == 0),
+            "reserved 必须全 0，否则两侧比的是垃圾位而不是布局"
+        );
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex.len(),
+            RR3_IPC_HDR_SIZE * 2,
+            "发射行必须是 256 位小写 hex（脚本按此长度校验）"
+        );
+        println!("rr3-xarch-encode={hex}");
     }
 
     /// payload_len = 0 合法（无 payload 的心跳/应答形状）
