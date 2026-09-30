@@ -1,7 +1,15 @@
 //! # rr-bus
 //!
-//! 总线客户端骨架：主题/广播常量层。M2 在此之上实现 UDS 客户端与订阅分发
-//! （architecture.md §6）。v0.0.1 故意不放半成品的 `BusClient`，避免 M2 推翻自己。
+//! 总线常量层 + 模块侧同步 UDS 客户端（architecture.md §6，M3 落地）。
+//! 客户端见 [`client`]：连接 → 注册（entry 绝对化）→ 心跳线程 → 发布 / `rr3.call`
+//! / 收帧，是模块与 rrd 之间唯一的标准说话方式。
+
+pub mod client;
+#[cfg(unix)]
+pub use client::{
+    rr3_manifest_entry_absolutize, rr3_manifest_identity, Rr3BusClient, Rr3BusIdentity,
+    RR3_METHOD_CALL,
+};
 
 use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
 
