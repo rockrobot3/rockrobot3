@@ -11,5 +11,15 @@ description = "硬件抽象层（HAL）trait 定义：gpio/pwm/audio/power/link�
 name = "rr_hal"
 path = "src/lib.rs"
 
+# linux ALSA 后端的双门：feature `alsa`（经 dep:alsa 只激活目标平台内声明的可选依赖）
+# + `target_os = "linux"`（与 src/linux.rs 的 #[cfg] 门一致）。cargo 不支持在 target cfg
+# 表里写 feature = "..."（会警告且不生效），所以依赖挂 target 表 + optional，feature 只做开关。
+# 非 linux 平台开 `alsa` feature 是 no-op（依赖不参与解析），真机验证属板上收口（docs/status.md）。
+[features]
+alsa = ["dep:alsa"]
+
 [dependencies]
 async-trait = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = { version = "0.9", optional = true }
