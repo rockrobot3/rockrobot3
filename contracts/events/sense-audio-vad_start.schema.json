@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-sense/audio/vad_start",
+  "schema_version": 1,
+  "description": "VAD 边沿事件（首个真实事件负载 schema，2026-09-30 随 M3 落地）。同主题承载起音（onset）与静音（offset）两种边沿（contracts/topics.toml 在册的 event 主题）。topic 字符串在帧外层由 rr-bus 承载，payload 内不重复（events/README.md 约定）。边沿负载只带摘要、不带任何闭环数据（ADR-0007 §决策一）；生产者 rr3-sense/src/audio/mod.rs 的 rr3_vad_event_body 是形状唯一事实源。",
+  "type": "object",
+  "required": ["seq", "edge", "speech_ms"],
+  "properties": {
+    "seq": { "type": "integer", "minimum": 0, "description": "rr3-sense 事件发布序号（本模块 vad 事件流自己的计数，与 audio/pcm 的 seq 各自独立）" },
+    "edge": { "type": "string", "enum": ["onset", "offset"], "description": "onset=起音，offset=静音" },
+    "rms_peak": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "起音窗内的峰值帧 RMS（s16 线性 PCM 的整型均方根）；仅 onset 携带，offset 不带" },
+    "speech_ms": { "type": "integer", "minimum": 0, "description": "语音段时长（毫秒）：onset 时为达到 min_speech 阈的时长，offset 时为整段语音时长" }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "edge": { "const": "onset" } } },
+      "then": { "required": ["rms_peak"] }
+    }
+  ]
+}
