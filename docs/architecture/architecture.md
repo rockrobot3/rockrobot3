@@ -76,8 +76,12 @@ rock3/
 │   └── events/                    ← 各模块事件负载 JSON Schema 的落点（命名与登记规矩在其 README）
 │
 ├── base/                          ← 基座层（横切关注点，见 §2 原则 1）
-│   ├── os/                        ← Buildroot 层（ADR-0001）：README.md 里定义了 configs/、board/、
-│   │                                 patches/、post-build.sh 四类交付物的落点
+│   ├── os/                        ← Buildroot 层（ADR-0001）
+│   │   ├── configs/               ← rock3_zero3_defconfig（Buildroot+Linux 6.6+aarch64）
+│   │   ├── board/radxa-zero3/     ← genimage.cfg（容量=构建期占位符）· extlinux.conf ·
+│   │   │                             post-build.sh（rrd 自启/fstab/产物安装位）·
+│   │   │                             post-image.sh（容量参数注入）· flash-maskrom.md
+│   │   └── patches/               ← 内核/U-Boot 回移补丁（核对清单见其 README）
 │   ├── ota/                       ← README.md + partition-layout.md（A/B/factory 布局文档）
 │   │   └── rr3-ota-ctl/           ← 独立 workspace，bin 名 `rr3-ota-ctl`（升级入口 CLI）
 │   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-registry rr-bus rr-hal rr-ota rrd
