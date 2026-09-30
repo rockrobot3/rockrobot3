@@ -23,7 +23,7 @@
 | 项 | 要求 | 出处 |
 |---|---|---|
 | 承载 | `Rr3Frame`：128B 定长头 + payload（`opcode` = `opcode::SEND`），payload 前 2 字节是 `Rr3PayloadType` 小端前缀 | `rr-ipc/src/protocol/body.rs`、`conn.rs:69-83` |
-| payload 类型 | 上行 `Rr3PayloadType::Request` 走三方法 RPC、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）；注册后其余类型（`Notification` / `Response` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs:284-293`） | `rpc.rs:3-5`、`conn.rs:279-294` |
+| payload 类型 | 上行 `Rr3PayloadType::Request` 走四方法 RPC、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）、`Rr3PayloadType::Response` 走 `rr3.call` 应答回路（见 §8）；注册后其余类型（`Notification` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs:292-305`） | `rpc.rs:3-5`、`conn.rs:292-305` |
 | `dst_task` | 必须是 `RR3_TASK_RRD`（值 `1`）。注册前违反 → 先回错误帧再断开；注册后违反 → 按协议违规收尾，**走死亡记账** | `conn.rs:148-156`、`conn.rs:263-265` |
 | `src_task` | 由 rrd 分配，用户态**不得自设**（AOS-STD-IPC-024）。注册帧里它还没被分配，rrd 只把对端自报值当作拒答的 `dst_task` 回显用；注册后 `src_task` 必须等于分配值，伪造者**那一帧被拒、连接不断**（应答带回原 `id` + `Invalid`） | `conn.rs:134-135`、`conn.rs:267-278` |
 | 应答寻址 | rrd 的应答是**点对点**：帧头 `dst_task` = 该连接的 task，`src_task` = `RR3_TASK_RRD`；`RR3_BROADCAST_DST_TASK`（值 `0`）只用于 rrd 的下行广播与发布转发 | `conn.rs:68-93`、`daemon.rs:78-100` |
@@ -41,7 +41,7 @@
 | `jsonrpc` 必须**等于字符串** `2.0` | `jsonrpc 必须等于 "2.0"` | `rpc.rs:51-53` |
 | `id` 必须能按无符号整数取出（`as_u64`） | `缺 id（要求无符号整数）` | `rpc.rs:54-56` |
 | `method` 必须是字符串 | `缺 method（要求字符串）` | `rpc.rs:57-59` |
-| `method` 必须在三方法白名单内 | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs:60-62` |
+| `method` 必须在四方法白名单内 | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs:60-62` |
 | `params` 可缺省 | 缺省时为 `Value::Null`，不是错误；各方法自己校验 | `rpc.rs:63` |
 
 解析产物是 `Rr3RpcRequest { id, method, params }`（`rpc.rs:38-43`）。
@@ -57,22 +57,25 @@
 `rr3_best_effort_id` 尽力取 JSON 的 `id`，取不到用 `0`（`conn.rs:95-101`）——
 **客户端判失败要看 `code`，别只看 `id`**。
 
-## 3 三个方法（白名单 = `Rr3RpcMethod`，`rpc.rs:13-36`）
+## 3 四个方法（白名单 = `Rr3RpcMethod`，`rpc.rs:16-41`）
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
 | `rr3.register` | `Register` | `params.manifest`：非空字符串（manifest **全文文本**，不是路径）；`params.name` **不被读取**，身份取自 manifest 里的 `[manifest].name` | `{"src_task":<分配到的 u64>}` | `rpc.rs:75-77`、`conn.rs:187-190`、`conn.rs:229-236` |
 | `rr3.heartbeat` | `Heartbeat` | 无必填 `params`（`json!({})` 即可） | `{"beat":"accepted"}` | `conn.rs:399-402`（成功支；同一分支的失败面见 §5 `TimedOut` 行） |
 | `rr3.unregister` | `Unregister` | 无必填 `params` | `{"removed":<bool>}` | `conn.rs:408-412` |
+| `rr3.call` | `Call` | `params.topic`：非空字符串（被调方须在 manifest `[rpc].exposes` 声明）；`params.args` 可缺省（缺省为 `Null`，被调方自己校验） | **不回 `result` 给调用方**——成功即转发，调用方的应答是被调方沿 trace_id 回路送回的 Response（见 §8） | `rpc.rs:93-97`、`conn.rs:450`、`conn.rs:463-519` |
 
 取值助手对字符串参数的口径一致（`param_str`，`rpc.rs:66-73`）：非 `str`、空串、
 缺键一律 `Invalid`，文案 `缺 params.{key}（要求非空字符串）`。
 `rr3_rpc_topic_param`（`rpc.rs:79-81`）按同一口径取发布帧体里的 `topic`，线上调用点是
-发布入口 `rr3_publish`（`conn.rs:328`，见 §7）。
+发布入口 `rr3_publish`（`conn.rs:328`，见 §7）；`rr3_rpc_call_params`（`rpc.rs:93-97`）
+取点名帧的 `topic` + `args`，线上调用点是 `rr3_route_call`（`conn.rs:472`，见 §8）。
 
-三个方法的差异在收尾：`rr3.unregister` 返回 `Rr3Flow::QuitClean`，条目直接
+四个方法的差异在收尾：`rr3.unregister` 返回 `Rr3Flow::QuitClean`，条目直接
 `rr3_reg_remove` 移出在册表、**不走** `restart_policy`（那是崩溃语义）；
-EOF 同样算干净收尾（`conn.rs:408-413`、`conn.rs:470`）。
+EOF 同样算干净收尾（`conn.rs:408-413`、`conn.rs:470`）。`rr3.register` / `rr3.heartbeat` /
+`rr3.call` 的成功与业务拒绝都返回 `Rr3Flow::Keep`——连接保持，下一帧照常服务。
 
 ## 4 注册握手的额外门禁与错误码
 
@@ -187,7 +190,47 @@ payload 类型 `Notification`（`daemon.rs:87`），`src_task` = `RR3_TASK_RRD`�
 缓存的 `me.name`，二者都是"连接持有的身份"、都不来自帧体，语义等价。判定函数本身是关联函数、
 看不见在册表，替不了调用方保证这件事。
 
-## 8 相关文档
+## 8 模块间点名 `rr3.call`（M3，请求路由 + 应答回路）
+
+`rr3.call` 让模块 A 点名调用模块 B 的一个 `[rpc].exposes` 主题。rrd 在中间只做**路由**，
+不做执行：请求沿在册表转发给被调方，应答沿帧头 `trace_id` 原路改道回调用方。
+
+**trace_id 的 rock3 线上语义**（字节布局不动，语义登记见
+[`../../contracts/README.md`](../../contracts/README.md) 演进登记 2026-09-30 条）：
+`0` = 非代理（普通发布 / 直发帧的缺省值）；**`rr3.call` 转发帧的 `trace_id` = 调用方 task**。
+被调方应答必须把 `trace_id` 原样带回——客户端侧的成对助手是
+`rr-bus/src/client.rs` 的 `rr3_reply_call`（它拒绝 `trace_id = 0` 的转发帧，回 `Err`）。
+
+请求方向（`rr3_route_call`，`conn.rs:463-519`；分派点 `conn.rs:450`）：
+
+1. `rr3_rpc_call_params` 取 `params.topic` + `params.args`（`rpc.rs:93-97`）；畸形 → 回
+   `Invalid` + `Keep`（**不断连**，下同）。
+2. **查表、构帧、投递在同一把在册表锁内完成**（`conn.rs:482-507`）——避免"查到 callee、
+   锁一放它就死了"的窗口里构出一帧注定无处投递的转发。查表用
+   `rr3_reg_callee_for`（`registry.rs:683-695`）：按 `[rpc].exposes` 找在册被调方。
+3. 三种拒法，全部只回错误帧（`Invalid`）不断连：
+   - **无人在册**：`没有在册模块 exposes 主题 {topic}（被调方须在 manifest 的 [rpc].exposes 里声明）`；
+   - **自呼**：`主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼`；
+   - **投递前退场**：查表时还在、`rr3_reg_send_to`（`registry.rs:696-…`）投递时条目已不在册 →
+     `主题 {topic} 的被调方在投递前退场`。
+4. 成功转发帧的头三处改写：`src_task` = 调用方 task、`dst_task` = 被调方 task、
+   `trace_id` = 调用方 task；**body 原样**（JSON-RPC `id` 是被调方应答配对的凭据，rrd 不碰）。
+
+应答方向（`rr3_route_response`，`conn.rs:525-566`；分派点 `conn.rs:296`）：上行 `Response`
+帧的 `trace_id` 就是投递地址——`0` 回 `Invalid`（`上行 Response 缺回路：trace_id 必须为
+调用方 task（0 = 无从投递）`）；调用方已不在册（退场 / 被判死摘册）回 `Invalid`
+（`应答的调用方 task={trace} 已不在册，无处投递`）；否则 body 原样、只把 `dst_task`
+改写成 `trace_id` 定向回投。**被调方的业务性失败走 `Response.result` 槽**
+（如 `{"error":"缺 params.text（要求非空字符串）"}`），JSON-RPC `error` 槽留给 rrd 的
+路由拒绝——业务失败与传输失败在线上是两个槽位。
+
+模块侧的完整闭环（连接 / 注册 / 收点名 / 应答）由 `rr-bus` 同步客户端承载
+（`base/runtime/rr-bus/src/client.rs`，模块与 rrd 之间唯一的标准说话方式）；线级钉住
+"头三处改写 + 三种拒法不断连"的是 `base/runtime/rrd/tests/module_call.rs`，
+三真进程端到端（TTS / 表情 / 坏参数折 `result.error`）的是
+`base/runtime/rrd/tests/e2e_audio_chain.rs`。
+
+## 9 相关文档
 
 - 在册表阶段机与发布归属四道门：[`rrd-registry.md`](rrd-registry.md)
 - 启动参数、横幅、退出码：[`rrd-cli.md`](rrd-cli.md)
