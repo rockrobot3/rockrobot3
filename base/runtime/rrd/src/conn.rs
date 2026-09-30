@@ -8,7 +8,10 @@
 //! - `rr3.unregister` 是模块主动退场，**不走** restart_policy（那是崩溃语义）；
 //! - 上行 `Event` 是业务发布：过三层归属检查（冒充内建命名空间 → 前缀/在册 owner 越权 →
 //!   主题未登记）后原样转发给**除发布者外**的在册连接，头改写成发布者 task + `dst=0`；
-//!   任何一种拒法都只回错误帧 + 计数，不断连（spec §6、ADR-0006 决策 2/4）。
+//!   任何一种拒法都只回错误帧 + 计数，不断连（spec §6、ADR-0006 决策 2/4）；
+//! - 上行 `Response` 是 M3 `rr3.call` 的应答回路：trace_id = 调用方 task（转发时写入），
+//!   body 原样、dst 改写为 trace_id 定向回投；trace_id=0 或调用方已不在册都只回错误帧
+//!   不断连（M3 定型，见 `rr3_route_call` / `rr3_route_response`）。
 //!
 //! 写面（本任务的并发形状）：reader 线程写应答、writer 线程写广播，两者持有同一 socket 的
 //! `try_clone` 句柄、共用一把 `Mutex<UnixStream>`、且一帧一次 `write_all` → **整帧原子**；
@@ -32,9 +35,9 @@ use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
 use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Phase, Rr3Death, RrdRegistry};
 use crate::rpc::{
-    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_manifest_param, rr3_rpc_parse_request,
-    rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register, rr3_rpc_topic_param,
-    Rr3RpcMethod,
+    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_manifest_param,
+    rr3_rpc_parse_request, rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register,
+    rr3_rpc_topic_param, Rr3RpcMethod,
 };
 use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log};
@@ -289,7 +292,9 @@ fn rr3_serve_frame(
     match ty {
         Rr3PayloadType::Request => rr3_serve_request(out, ctx, me, &body),
         Rr3PayloadType::Event => rr3_publish(out, ctx, me, &body),
-        // 拒是默认值，放行才需要理由：Event 之外的非 Request 上行（Notification / Response
+        // M3：上行 Response 是 rr3.call 的应答回路（trace_id 改道回调用方）
+        Rr3PayloadType::Response => rr3_route_response(out, ctx, me, frame, &body),
+        // 拒是默认值，放行才需要理由：Request/Event/Response 之外的上行（Notification
         // 冒充上行）仍然一律拒帧不断连。
         other => {
             rr3_reply_err(
@@ -442,7 +447,122 @@ fn rr3_serve_request(
             rr3_reply_ok(out, me, req.id, &json!({"removed": removed}));
             Ok(Rr3Flow::QuitClean)
         }
+        Rr3RpcMethod::Call => rr3_route_call(out, ctx, me, req.id, &req.params, body),
     }
+}
+
+/// `rr3.call` 的路由（M3，architecture.md §6"模块间请求"）：按 params.topic 查
+/// `[rpc].exposes` 它的在册模块，把**原始 body 原样**转发成 Request 帧——
+/// src = 调用方 task、dst = 被调方 task、**trace_id = 调用方 task**（应答回路的
+/// 唯一凭据，被调方应答时必须原样带回头上的 trace_id，见 `rr3_route_response`）。
+///
+/// 这里**没有同步应答**：rrd 是转发器不是代理，调用方在 `rr3_call_topic` 上等的
+/// 就是被调方沿 Response 回路送回来的那一帧。拒法（畸形参数 / 无人在册 / 自呼 /
+/// 被调方已死）都回错误帧 + 不断连，口径与 publish 的形状错一致；无人在册是
+/// `Invalid` 不是 `Busy`——"没人接"是路由事实，不是容量问题。
+fn rr3_route_call(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    id: u64,
+    params: &Value,
+    body: &[u8],
+) -> Result<Rr3Flow, String> {
+    // 参数先在锁外验（畸形是调用方的笔误，用不着查表）
+    let topic = match rr3_rpc_call_params(params) {
+        Ok((t, _)) => t,
+        Err((_, msg)) => {
+            // 解析器只产 Invalid（Task 6 的口径），这里不重建 id→code 映射
+            rr3_reply_err(out, me, id, Rr3StatusCode::Invalid, &msg);
+            return Ok(Rr3Flow::Keep);
+        }
+    };
+    // 查表 + 构帧 + 投递在同一把锁内完成：避免"查到 callee、锁一放它就死了"的窗口里
+    // 构出一帧注定无处投递的转发。锁内 send 与 `rr3_reg_fanout` 同一口径（无界 mpsc 不阻塞）。
+    let outcome: Result<bool, String> = {
+        let g = rr3_lock(&ctx.shared);
+        match g.rr3_reg_callee_for(&topic) {
+            None => Err(format!(
+                "没有在册模块 exposes 主题 {topic}（被调方须在 manifest 的 [rpc].exposes 里声明）"
+            )),
+            Some((_, task)) if task == me.task => {
+                Err(format!("主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼"))
+            }
+            Some((name, task)) => {
+                let payload = rr3_body_encode(Rr3PayloadType::Request, body);
+                let frame = Rr3Frame {
+                    header: Rr3Header {
+                        opcode: opcode::SEND,
+                        flags: 0,
+                        trace_id: me.task,
+                        timestamp_ns: rr3_now_ns(),
+                        src_task: me.task,
+                        dst_task: task,
+                        payload_len: payload.len() as u32,
+                    },
+                    payload,
+                };
+                rr3_log(&format!("rr3.call {topic}: {}(task={}) → {name}(task={task})", me.name, me.task));
+                Ok(g.rr3_reg_send_to(task, &frame))
+            }
+        }
+    };
+    match outcome {
+        Ok(true) => {}
+        // 查表时还活着、投递时收件人没了：对调用方而言就是"这一拍没人接"
+        Ok(false) => {
+            rr3_reply_err(out, me, id, Rr3StatusCode::Invalid, &format!("主题 {topic} 的被调方在投递前退场"));
+        }
+        Err(msg) => rr3_reply_err(out, me, id, Rr3StatusCode::Invalid, &msg),
+    }
+    Ok(Rr3Flow::Keep)
+}
+
+/// 上行 Response 的回路（M3）：rr3.call 的应答去路。头上的 `trace_id` 是**调用方
+/// task**（`rr3_route_call` 转发时写入，被调方须原样带回）；body 原样转发，只把
+/// dst 改写成 trace_id。trace_id = 0 无从投递，回 Invalid；调用方已不在册（已退场 /
+/// 已过期）同样无处投递——两种都是"拒帧不断连"，与 src_task 伪造同一口径。
+fn rr3_route_response(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    frame: &Rr3Frame,
+    body: &[u8],
+) -> Result<Rr3Flow, String> {
+    let trace = frame.header.trace_id;
+    if trace == 0 {
+        rr3_reply_err(
+            out,
+            me,
+            rr3_best_effort_id(body),
+            Rr3StatusCode::Invalid,
+            "上行 Response 缺回路：trace_id 必须为调用方 task（0 = 无从投递）",
+        );
+        return Ok(Rr3Flow::Keep);
+    }
+    let payload = rr3_body_encode(Rr3PayloadType::Response, body);
+    let fwd = Rr3Frame {
+        header: Rr3Header {
+            opcode: opcode::SEND,
+            flags: 0,
+            trace_id: trace,
+            timestamp_ns: rr3_now_ns(),
+            src_task: me.task,
+            dst_task: trace,
+            payload_len: payload.len() as u32,
+        },
+        payload,
+    };
+    if !rr3_lock(&ctx.shared).rr3_reg_send_to(trace, &fwd) {
+        rr3_reply_err(
+            out,
+            me,
+            rr3_best_effort_id(body),
+            Rr3StatusCode::Invalid,
+            &format!("应答的调用方 task={trace} 已不在册，无处投递"),
+        );
+    }
+    Ok(Rr3Flow::Keep)
 }
 
 /// 收尾：死亡记账（决定要不要重启）+ **至多**一条 state 广播 + 把计划交出去。

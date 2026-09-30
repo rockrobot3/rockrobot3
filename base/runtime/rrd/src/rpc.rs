@@ -1,8 +1,11 @@
-//! 模块 ↔ rrd 的上行 RPC：JSON-RPC 2.0，MVP 只有三个方法（spec §5.0）。
+//! 模块 ↔ rrd 的上行 RPC：JSON-RPC 2.0（spec §5.0 + M3 的第 4 个方法）。
 //!
 //! 上行一律 `Rr3PayloadType::Request` + `dst_task = RR3_TASK_RRD`。
 //! `rr3-runtime/system/heartbeat` 与 `rr3-runtime/module/state` 是 rrd 的**下行广播**，
 //! 不是模块的上行心跳——模块要喂狗只能调 `rr3.heartbeat`。
+//! `rr3.call` 是 M3 定型的模块间请求路由：rrd 按 params.topic 查被调方的
+//! manifest `[rpc].exposes` 后定向转发，应答沿 trace_id 回路返回调用方
+//! （rrd-rpc.md"trace_id 语义"）。
 
 use rr_ipc::Rr3StatusCode;
 use serde_json::Value;
@@ -14,6 +17,7 @@ pub enum Rr3RpcMethod {
     Register,
     Heartbeat,
     Unregister,
+    Call,
 }
 
 impl Rr3RpcMethod {
@@ -22,6 +26,8 @@ impl Rr3RpcMethod {
             Self::Register => "rr3.register",
             Self::Heartbeat => "rr3.heartbeat",
             Self::Unregister => "rr3.unregister",
+            // 方法名的唯一真值点在 rr-bus（模块侧客户端与 rrd 共用一份）
+            Self::Call => rr_bus::RR3_METHOD_CALL,
         }
     }
 
@@ -30,6 +36,7 @@ impl Rr3RpcMethod {
             "rr3.register" => Some(Self::Register),
             "rr3.heartbeat" => Some(Self::Heartbeat),
             "rr3.unregister" => Some(Self::Unregister),
+            s if s == rr_bus::RR3_METHOD_CALL => Some(Self::Call),
             _ => None,
         }
     }
@@ -78,6 +85,15 @@ pub fn rr3_rpc_manifest_param(params: &Value) -> Result<String, (i32, String)> {
 
 pub fn rr3_rpc_topic_param(params: &Value) -> Result<String, (i32, String)> {
     param_str(params, "topic")
+}
+
+/// `rr3.call` 的参数形状：`topic` 必填非空字符串，`args` 可选（缺省 `Null`）。
+/// 被调方收到的转发体里 params 原样带过去——这里的解析只服务 rrd 的**路由**判定
+/// （查 callee 用 topic），不重写调用方的参数。
+pub fn rr3_rpc_call_params(params: &Value) -> Result<(String, Value), (i32, String)> {
+    let topic = rr3_rpc_topic_param(params)?;
+    let args = params.get("args").cloned().unwrap_or(Value::Null);
+    Ok((topic, args))
 }
 
 pub fn rr3_rpc_build_result(id: u64, result: &Value) -> Vec<u8> {
@@ -189,6 +205,33 @@ mod tests {
         assert_eq!(rr3_rpc_topic_param(&json!({"topic":"rr3-sima/ping/state"})).unwrap(), "rr3-sima/ping/state");
         assert!(rr3_rpc_topic_param(&json!({})).is_err());
         assert!(rr3_rpc_topic_param(&json!({"topic": 3})).is_err());
+    }
+
+    /// 第 4 个上行方法：rr3.call 能解析（方法名走 rr-bus 的唯一真值点）
+    #[test]
+    fn parses_call_method() {
+        let got = rr3_rpc_parse_request(&bytes(json!({
+            "jsonrpc":"2.0","id":3,"method":rr_bus::RR3_METHOD_CALL,
+            "params":{"topic":"rr3-interact/tts/text","args":{"text":"hi"}}
+        })))
+        .expect("rr3.call 应能解析");
+        assert_eq!(got.method, Rr3RpcMethod::Call);
+        assert_eq!(Rr3RpcMethod::Call.as_str(), "rr3.call");
+    }
+
+    /// rr3.call 的参数：topic 必填，args 缺省 Null 且原样透传
+    #[test]
+    fn call_params_need_topic_and_args_default_to_null() {
+        let (topic, args) =
+            rr3_rpc_call_params(&json!({"topic":"t/a","args":{"text":"hi"}})).expect("应有参数");
+        assert_eq!(topic, "t/a");
+        assert_eq!(args["text"], "hi");
+        let (topic, args) = rr3_rpc_call_params(&json!({"topic":"t/a"})).expect("args 可省");
+        assert_eq!(topic, "t/a");
+        assert_eq!(args, Value::Null);
+        let (code, msg) = rr3_rpc_call_params(&json!({"args":{}})).expect_err("缺 topic 必须拒");
+        assert_eq!(code, Rr3StatusCode::Invalid as i32);
+        assert!(msg.contains("params.topic"), "{msg}");
     }
 
     /// 应答形状：JSON-RPC 2.0 + 同 id + result；注册回带的 src_task 是唯一的 task 来源
