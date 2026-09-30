@@ -84,6 +84,13 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   `x-rock3-v0.0.1-uncovered` 记录 IPC-T-003（跨架构字节布局一致）待 M2 的交叉编译等值测试。
   理由一句话：**coverage 列表是"关于测试的陈述"，纠正它不是契约变更**——它不触碰偏移、枚举、
   magic 与 golden 向量，因此不适用"只增不改"的冻结约束，而是评审裁定的许可项。
+- **2026-09-30 · IPC-T-003 就绪登记（仍是"关于测试的陈述"更正，非契约变更）**：
+  `x-rock3-v0.0.1-uncovered` 里 IPC-T-003 的描述更新为"夹具与脚本就绪、双架构真跑待容器环境"。
+  新增三件：`rr-ipc/src/bin/ipct003_dump.rs`（golden 头 + 五种 payload 类型各一帧的 hex 夹具）、
+  `tools/ci/ipct003.sh`（宿主 / linux-arm64 容器 / golden 三方对拍；**不进七步门**，
+  登记于 conventions.md §2 的平台条件脚本）、header.rs 的编译期 const 断言（偏移连续、
+  头长 128、magic LE 字节、payload 枚举值，随任意目标编译求值）。偏移、枚举、magic、
+  golden 向量与线上行为一字未动；Docker 装好后容器真跑，跑成即可把该条移入 coverage。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

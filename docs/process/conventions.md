@@ -263,6 +263,17 @@ M2 起随运行时语义落地再扩点名范围。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
+**七步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
+ADR-0006 后果项）**不在七步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
+塞进门禁等于让无容器环境的机器永远红。它做三件事：①宿主跑 `rr-ipc` 的
+`src/bin/ipct003_dump.rs`（golden 头 + 五种 payload 类型各一整帧的 hex，全部编译期字面量），
+header 行对 `contracts/golden/event-header-128.hex`；②已装 `aarch64-unknown-linux-gnu`
+目标则交叉 `cargo check`，header.rs 的编译期 const 断言（偏移连续 / 头长 128 /
+magic LE 字节 31 45 52 41 / payload 枚举值）随之在该目标求值；③有 Docker 则
+`--platform linux/arm64` 容器真跑并与宿主输出逐行 diff。缺环境打 `SKIP` 并明说，
+不静默当作已验证；`--strict` 供有容器环境的一方在 SKIP 时拒绝放行（退 2）。
+双架构真跑结果何时回填，见 [../status.md](../status.md)。
+
 ## 3 结构纪律
 
 - 新模块一律由生成器产出：`cargo run --manifest-path tools/mkmodule/Cargo.toml --bin rr3-mkmod -- rr3-<名>`
