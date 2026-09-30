@@ -41,3 +41,7 @@ docs/superpowers/
 # rr3-brain 是 Python 包：编译产物随 build 再生，不入库（modules/** 白名单覆盖过宽）
 **/__pycache__/
 **/*.py[cod]
+# ESP-IDF 组件缓存与配置备份：idf.py reconfigure 自动再生，不入库
+**/managed_components/
+**/dependencies.lock
+**/sdkconfig.old
