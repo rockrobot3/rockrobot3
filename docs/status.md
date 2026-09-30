@@ -3,7 +3,7 @@
 本文件是仓内**唯一**允许回答"某能力在当前 HEAD 有没有实现"的地方。其余文档只写设计语义，
 不写实况；设计文档里出现"已落地/未落地"的字样一律视为待订正（架构文档 §5 就因此整段重写过）。
 
-- **实况锚点**：本快照按锚点提交 `48322d5`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
+- **实况锚点**：本快照按锚点提交 `41e1990`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
   本文里的"当前 HEAD"一律指这个锚点提交的那棵树，锚点之外的增量不进本表。
 - **状态只取三值**：`已实装` / `骨架` / `未设计`。限定条件（如"仅 Unix 参与编译""仅单元层"）
   写在证据列，不塞进状态列——否则三值就退化成自由文本，也就失去了可对比性。
@@ -43,8 +43,8 @@
 | 发布归属判定（越权前缀 / 冒充内建命名空间） | 已实装 | **已接到线上**：`RrdRegistry::rr3_reg_publish_check`（返回 `Rr3PublishDeny`）不再只有单元用例——`conn.rs` 的上行分发把 `Rr3PayloadType::Event` 交 `rr3_publish`，后者依次调 `rr3_rpc_topic_param`、`rr3_reg_publish_check(&me.name, …)`、越权时回错误帧并 `rr3_reg_note_denied` 计数。发送方身份取 `me.name`（注册期 `Rr3Peer` 在册名），帧上 `src_task` 在分发前就校验：不等于 `me.task` 即那一帧被拒——`registry.rs` doc 注里"由 `rr3_reg_name_of` 反查"的表述线上换成了这套等价做法。拒帧不断连，与 `src_task` 伪造同一口径。接口字面量归 `reference/rrd-rpc.md` §7 与 `reference/rrd-registry.md` §8 |
 | rrd 上行 JSON-RPC 三方法 | 已实装 | [`rpc.rs`](../base/runtime/rrd/src/rpc.rs)：`Rr3RpcMethod` = `rr3.register` / `rr3.heartbeat` / `rr3.unregister`，含 `rr3_rpc_parse_request` 的版本与 id 校验、`rr3_rpc_build_result` / `rr3_rpc_build_error` 错误映射 |
 | HAL trait 形状与占位后端 | 骨架 | [`lib.rs`](../base/runtime/rr-hal/src/lib.rs) 定义了 `Rr3GpioOut` / `Rr3PwmServo` / `Rr3AudioSource` / `Rr3Power` / `Rr3Link` 与 `Rr3UnavailableSource`（所有能力一律回 `Rr3HalError::Unsupported`）；具名后端 `linux` / `sim` **只有注释没有实现**——[`backend.rs`](../base/runtime/rr-hal/src/backend.rs) 通体只有 `RR3_BACKEND_LINUX` / `RR3_BACKEND_SIM` / `RR3_BACKEND_PLACEHOLDER` 三个常量（M3 计划：`Rr3AudioSink` trait 与 sim/linux 后端随阶段 2 落地） |
-| A/B OTA 切换 | 骨架 | [`rr-ota/src/lib.rs`](../base/runtime/rr-ota/src/lib.rs) 只冻结类型形状（`Rr3Slot`）；[`rr3-ota-ctl/src/main.rs`](../base/ota/rr3-ota-ctl/src/main.rs) 的 `rr3_ota_ctl_refuse_switch` 对任意目标恒拒，注释写明"随 M6 落地，当前拒绝执行" |
-| Buildroot OS 层 | 骨架 | [`base/os/`](../base/os/) 目录下只有一个 README，无 recipe、无 defconfig、无 genimage 配置 |
+| A/B OTA 切换 | 骨架 | [`rr-ota/src/lib.rs`](../base/runtime/rr-ota/src/lib.rs) 只冻结类型形状（`Rr3Slot`），**新增分区标签守护已实装**：`ota_labels_match_genimage_cfg` 用 `include_str!` 把 [`base/os/board/radxa-zero3/genimage.cfg`](../base/os/board/radxa-zero3/genimage.cfg) 拉进编译（守文件存在）并断言四槽位标签与 `RR3_OTA_SLOT_NAMES` / `RR3_OTA_STAGING_PARTITION` 逐字一致（守一致）；[`rr3-ota-ctl/src/main.rs`](../base/ota/rr3-ota-ctl/src/main.rs) 的 `rr3_ota_ctl_refuse_switch` 对任意目标恒拒，注释写明"随 M6 落地，当前拒绝执行" |
+| Buildroot OS 层（defconfig / 分区布局 / 引导链 / 烧录文档） | 骨架 | **结构就绪、构建与实板验证未发生**（硬件未采购）。已落树：[`configs/rock3_zero3_defconfig`](../base/os/configs/rock3_zero3_defconfig)（Buildroot + Linux 6.6 + aarch64，BusyBox init，ALSA/Python，post-build/post-image 挂钩）；[`board/radxa-zero3/genimage.cfg`](../base/os/board/radxa-zero3/genimage.cfg)（boot + `rr_a`/`rr_b`/`rr_factory`/`rr_staging`/data 六分区；**容量一律 `@XXX_SIZE@` 构建期占位符**，由 [`post-image.sh`](../base/os/board/radxa-zero3/post-image.sh) 注入并做残留检查——容量不在配置里冻结，见 [`base/ota/README.md`](../base/ota/README.md)）；[`extlinux.conf`](../base/os/board/radxa-zero3/extlinux.conf)（root=LABEL=rr_a；bootlimit/altbootcmd 回滚链属 M6 写侧）；[`post-build.sh`](../base/os/board/radxa-zero3/post-build.sh)（/var/run tmpfs、rr_data/rr_staging 挂载、S99rrd 自启、产物安装位，缺席只警告）；[`flash-maskrom.md`](../base/os/board/radxa-zero3/flash-maskrom.md)（rkdeveloptool 操作序，全条目标注板上核对）；[`patches/README.md`](../base/os/patches/README.md)（dts/defconfig 核对清单，**无补丁本体**——不虚构来源）。分区标签与代码常量的逐字一致性由 `rr-ota` 的 include_str 守护用例钉死（见上行"A/B OTA 切换"）。缺的手：全量 make 构建（需 Linux/容器）、dts 与 U-Boot defconfig 核对、串口出 shell、maskrom 实烧——均属板上/Linux 侧收口 |
 | `rr3-act` / `rr3-connect` / `rr3-interact` / `rr3-power` / `rr3-sense` | 骨架 | [`modules/*/src/main.rs`](../modules/) 五个 Rust 入口，实测 11–17 行，只打印自述；各目录的 `module.toml` 由 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs) 逐目录读回判合规（`rr3-brain` 那份也在内） |
 | `rr3-brain` | 骨架 | **不是 Rust 模块，没有 `src/main.rs`**：入口是 [`rr3_brain/__main__.py`](../modules/rr3-brain/rr3_brain/__main__.py)，`dialog.py` 与 `cloud/{asr,llm,tts}.py` 均为十几行的自述占位，注释写明"不做任何网络调用：握手/注册随 M2 与 M4 接入"；配置见 [`config.toml`](../modules/rr3-brain/config.toml) |
 | `rr3-ctl` | 骨架 | [`tools/rrctl/src/commands.rs`](../tools/rrctl/src/commands.rs) 的 `COMMANDS = ["status", "health", "logs", "ota"]`，各命令均只回显计划文案（"实现随 M2"）；参数解析与套接字优先级在 [`main.rs`](../tools/rrctl/src/main.rs) 已实装 |
@@ -59,15 +59,15 @@
 架构文档 §10 已收口为一行指向本节（迁入与删原分两步做，是为了让删除那次改动单独可审）。
 **当前实况**一栏是本快照读代码实测的结论，不是对验收标准的复述或期望。
 
-| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`48322d5` 实测） |
+| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`41e1990` 实测） |
 |---|---|---|---|
 | M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 | 目录树已落地，ADR 已写到 0008（超出原验收范围），`rr3-mkmod` 的产物被回灌进契约用例 —— **已收口** |
-| M1 | base/os：Buildroot 在 Radxa ZERO 3 跑通 | 串口出 shell；maskrom 自烧录镜像成功 | [`base/os/`](../base/os/) 只有一个 README，无 recipe / defconfig —— **未开工** |
+| M1 | base/os：Buildroot 在 Radxa ZERO 3 跑通 | 串口出 shell；maskrom 自烧录镜像成功 | **结构就绪，未收口（板上敞口）**。defconfig、genimage.cfg（容量=构建期占位符）、extlinux.conf、post-build/post-image、flash-maskrom.md、patches/ 核对清单已全部落树，分区标签守护用例进 rr-ota；缺的是：全量 make 构建（Linux/容器侧）、dts 与 U-Boot defconfig 核对、串口出 shell、maskrom 实烧——目标硬件 Radxa ZERO 3 **未采购**，板上收口项在硬件到位前不 claim（证据见上行能力表"Buildroot OS 层"） |
 | M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **已收口（留一条环境敞口）**。验收标准逐条对照：注册/心跳/崩溃自动重启——**全到位**（注册/心跳/死亡记账/扇出被连接层调用；崩溃自动重启由唯一 supervisor 线程执行：boot spawn、串行收尸、到期重启、按策略退避，线级证据 `e2e_spawn_restart` 5 条）；IPC-T-001/002——同机 golden 往返 + 契约逐字段对齐，全绿；IPC-T-003——**夹具与脚本就绪**（`ipct003_dump` 头行已与 golden 逐字节一致 + 编译期 const 断言随任意目标求值），**双架构真跑待容器环境**（本机无 Docker），这是 M2 唯一敞口，见上文能力表"IPC-T-003"行与"本机无法收口"第 4 条。`trait Transport` 已随 ADR-0008 定型并落地 uds 实现（`conn.rs` 一字未动），上一版"仍缺三项"里的①②两条就此结清 |
 | M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线，音频走 STREAM | HAL 只有 trait 形状与恒回 `Unsupported` 的占位后端，`linux` / `sim` 无实现 —— **未开工** |
 | M4 | rr3-brain：移植 asr/llm/tts | 全语音对话闭环（legacy 功能等价） | `rr3-brain` 各 py 文件均为自述占位，注释写明不做任何网络调用 —— **未开工** |
 | M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 | 五个 Rust 模块入口均为 11–17 行自述；shm/tcp 的**线上签名已定型**（`trait Transport` 三件，ADR-0008 裁定 4：不写半成品），实现一行没有 —— **未开工** |
-| M6 | A/B OTA + 恢复出厂 | 断电升级不 brick，坏 slot 自动回滚；genimage 预留模块独立可写分区 | `rr-ota` 只有类型形状 `Rr3Slot`，`rr3-ota-ctl switch` 恒拒 —— **未开工** |
+| M6 | A/B OTA + 恢复出厂 | 断电升级不 brick，坏 slot 自动回滚；genimage 预留模块独立可写分区 | `rr-ota` 只有类型形状 `Rr3Slot`（分区标签守护已实装），`rr3-ota-ctl switch` 恒拒；genimage.cfg 的分区集合（含 rr_staging 独立可写分区）已随 M1 落树，容量定型与写侧实板验证仍属 M6 —— **未收口** |
 
 ---
 
@@ -83,18 +83,21 @@
 | 3 | 泄漏 API key 的提供方侧轮换未确认 | 提供方控制台里那把 key 已失效/已替换的凭据 | 仓内曾经出现过的 key 从 git 历史里抹不掉；**从仓库角度能做的都做完了**（移到 `legacy/` 冻结、文档不再复述），但"这把 key 现在还能不能用"只有提供方能回答，这一条不闭环，第 3 项就一直是敞口 |
 | 4 | IPC-T-003 的双架构真跑 | 一次 `linux/arm64` 容器（或 aarch64 交叉 + qemu）里 `ipct003_dump` 与宿主输出的逐字节 diff | 本机无 Docker、未装 aarch64 目标。脚本与夹具已就绪且**不静默冒充已验证**：缺环境时 `ipct003.sh` 打 `SKIP` 明说（`--strict` 供有容器环境的一方拒绝放行）。Docker 装好后跑一次 `bash tools/ci/ipct003.sh`，跑成即可把 [`envelope.schema.json`](../contracts/envelope.schema.json) 里该条移入 coverage |
 | 5 | 本机 macOS 上 ①b 的线级用例不可信 | 登记平台（Windows L1 / WSL2 Linux L2）的一次 ①b 全绿 | `cargo test --workspace` 里 `e2e_sim_peer` 等 5 条跨进程用例在本机**间歇失败**（"3s 内没等到监听行"、子进程无输出）——**基线 `240fb02` 经 `git stash` 复现同样失败**，属 macOS 对新链接二进制的首跑/并发 exec 延迟（syspolicyd 类机制），非代码缺陷；手工直跑同一二进制的同一用例时可过。**本机 ①b 为红不作为回归信号**，门禁证据以 conventions §2 登记的两平台实测为准 |
+| 6 | M1 的板上收口四件 | 一次全量 make 产出的镜像 + 实板串口出 shell + maskrom 实烧 + 分区容量定型 | 目标硬件 Radxa ZERO 3 **未采购**，且全量 Buildroot 构建需 Linux/容器侧（本机 macOS 无环境）。defconfig 里 `BR2_LINUX_KERNEL_INTREE_DTS_NAME` 与 `BR2_TARGET_UBOOT_BOARD_DEFCONFIG` 两个名字是否命中、genimage 引导裸区偏移是否正确，都**未核对**——核对清单在 [`patches/README.md`](../base/os/patches/README.md)，逐条回填前结构就绪不等于可跑 |
 
 ---
 
 ## 在制品
 
-**本快照只记锚点提交 `48322d5` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
+**本快照只记锚点提交 `41e1990` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
 改动，都不进本表，重锚时随锚点一并更新。**
 
-本锚点本身携带两个增量提交：`e0a1250`（trait Transport 定型 + `Rr3FrameBuf` + uds 实现 +
-ADR-0008，即上一版快照记为"未设计"的那一行）与 `48322d5`（IPC-T-003 就绪：dump 夹具 +
-对拍脚本 + 编译期 const 断言 + coverage 陈述更正）。两者都已按实况计入上文能力表，
-此处不再单列"在制品"——**锚点树内没有在途的未提交改动**。
+本锚点本身携带三个增量提交：`e0a1250`（trait Transport 定型 + `Rr3FrameBuf` + uds 实现 +
+ADR-0008）、`48322d5`（IPC-T-003 就绪：dump 夹具 + 对拍脚本 + 编译期 const 断言）与 `41e1990`
+（M1 板上就绪：Buildroot defconfig / genimage.cfg / extlinux / post-build / maskrom 文档 /
+patches 核对清单 + rr-ota 的 include_str 分区标签守护，conventions §2 条数同批 176/211 →
+177/212）。三者都已按实况计入上文能力表，此处不再单列"在制品"——
+**锚点树内没有在途的未提交改动**。
 
 **已知偏差（有意保留，不是遗漏）：**
 
