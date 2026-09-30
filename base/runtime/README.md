@@ -7,7 +7,7 @@
 | `rr-ipc` | A-IPC 字节层：128B 定长消息头编解码、payload 类型前缀、帧读写与传输路径常量 |
 | `rr-bus` | 总线客户端的落点（主题匹配订阅、QoS、回压）；现为总线常量层（广播/任务号/优先级窗口） |
 | `rr-registry` | manifest 字段字典与校验器、主题注册表 `Rr3TopicSet`、前缀归属规则——rrd 与 rr3-mkmod 共用 |
-| `rr-hal` | 硬件能力 trait + 数据类型 + 占位后端（`linux{alsa,gpiod,nm}` / `sim` 后端实现同一套 trait） |
+| `rr-hal` | 硬件能力 trait + 数据类型 + 占位后端；具名后端有哪几路、各路由什么承载，以 `src/backend.rs` 的后端表为准，本表不复述 |
 | `rr-ota` | 升级"双轨"的类型形状：整镜像 A/B 与模块级 staging |
 | `rrd` | 主守护进程装配层（supervisor / health / config），事件总线的宿主：CLI 参数、主题装载、manifest 运行期事实、在册表、上行 RPC、UDS 监听与连接处理 |
 

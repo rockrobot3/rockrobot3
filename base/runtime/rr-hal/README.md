@@ -10,8 +10,9 @@
 | 占位后端 `Rr3UnavailableSource`（所有方法返回 `Unsupported`），object-safety 由 `src/lib.rs` 的单元测试在 `cargo test` 时机器校验 | `src/lib.rs` |
 | 后端名常量 `RR3_BACKEND_LINUX` / `RR3_BACKEND_SIM` / `RR3_BACKEND_PLACEHOLDER` | `src/backend.rs`（只有常量，无实现文件） |
 
-具名后端（linux 的 ALSA / gpiod / NM-D-Bus 与 sim）以及音频**输出** trait（rr3-interact 的消费面，
-当前只有上行）属 §5 规划的形状；它们今天有没有实现、缺哪一手，唯一落点是
+具名后端有哪几路、各自由什么承载，逐条见 `src/backend.rs` 顶部那张后端表（本文件不复述用词）。
+音频**输出** trait（rr3-interact 的消费面）与这些具名后端同属 §5 规划的形状；它们今天有没有
+实现、缺哪一手，唯一落点是
 [`docs/status.md`](../../../docs/status.md)。测试条数只登记在
 [`docs/process/conventions.md`](../../../docs/process/conventions.md) §2。
 
