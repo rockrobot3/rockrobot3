@@ -102,7 +102,7 @@
       "IPC-T-010": "未知标志位不报错（前向兼容）",
       "x-rock3-v0.0.1-coverage": ["IPC-T-001", "IPC-T-002", "IPC-T-010"],
       "x-rock3-v0.0.1-uncovered": {
-        "IPC-T-003": "跨架构（x86 与 aarch64）字节布局一致：v0.0.1 只有同机 golden 往返（rr-ipc 的 header_matches_golden_vector），无交叉编译等值测试；该用例须随 M2 落地（ADR-0006 后果项 / architecture.md §10 里程碑 M2）"
+        "IPC-T-003": "跨架构（x86 与 aarch64）字节布局一致：夹具与脚本已就绪——rr-ipc 的 ipct003_dump 输出 golden 头与五种 payload 类型各一帧 hex（src/bin/ipct003_dump.rs），tools/ci/ipct003.sh 三方对拍（宿主 / linux-arm64 容器 / 本 golden，不进七步门，登记于 docs/process/conventions.md §2），偏移连续性 / 头长合计 / magic 小端线上字节 / payload 枚举值的编译期 const 断言随任意目标编译（含 aarch64 交叉 cargo check）自动求值；双架构真跑待容器环境，跑成后本条移入 coverage"
       }
     }
   }
