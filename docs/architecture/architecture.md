@@ -90,7 +90,7 @@ rock3/
 │   │   │   ├── src/protocol/      ← header.rs（128B 头编解码）、body.rs（payload 类型前缀）、mod.rs
 │   │   │   ├── src/transport/     ← frame.rs（整帧读写）、mod.rs（传输分层 + 两个路径常量）
 │   │   │   └── tests/             ← envelope_meta.rs：与 envelope.schema.json 逐字段对齐的守护测试
-│   │   ├── rr-bus/                ← 总线客户端骨架：task 号与主题常量（订阅分发/QoS/回压的设计落点）
+│   │   ├── rr-bus/                ← 总线常量 + 模块侧同步客户端（client.rs：连接/注册/心跳/发布/rr3.call/收帧）
 │   │   ├── rr-registry/           ← manifest 解析与校验、主题集（§4.1、§6.3）
 │   │   │   ├── src/               ← schema.rs、validate.rs、topics.rs、module.schema.toml（字段字典）
 │   │   │   └── tests/             ← contract.rs（契约面用例）+ fixtures/rr3-sense.toml
@@ -265,6 +265,11 @@ pub trait Rr3AudioSource: Send + Sync {            // 上行拾音
     async fn read(&self, frames: usize) -> Result<Rr3PcmStream, Rr3HalError>;
 }
 #[async_trait]
+pub trait Rr3AudioSink: Send + Sync {              // 下行播放（与 source 对称，M3 定型）
+    async fn open(&self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError>;
+    async fn write(&self, pcm: Rr3PcmStream) -> Result<(), Rr3HalError>;
+}
+#[async_trait]
 pub trait Rr3GpioOut: Send + Sync {                // 数字输出（继电器、LED）
     async fn set(&self, level: bool) -> Result<(), Rr3HalError>;
     async fn level(&self) -> Result<bool, Rr3HalError>;
@@ -287,7 +292,7 @@ pub trait Rr3Link: Send + Sync {                   // 网络链路读数
 配套数据类型也全部带 `Rr3` 前缀：`Rr3AudioCfg`（默认常量 `RR3_AUDIO_CFG_16K_MONO16` =
 16k/单声道/16bit）、`Rr3PcmStream`（时长用 `rr3_pcm_duration_ms()`）、`Rr3BatteryState`、
 `Rr3LinkState`，以及错误枚举 `Rr3HalError`（变体 `Unsupported(&'static str)` / `Busy` /
-`InvalidParam(String)`）。占位实现 `Rr3UnavailableSource` 让五个 trait 的
+`InvalidParam(String)`）。占位实现 `Rr3UnavailableSource` 让六个 trait 的
 每个方法都回 `Rr3HalError::Unsupported`——它承载的是设计裁定"**能力缺失必须显式回错，不许静默退化**"，
 不是一时代替后端的临时件；object-safety 由 `lib.rs` 的 `dyn` 装箱用例在 `cargo test` 时机器校验
 （注册表要持有异构设备集合，trait 对象装不进盒子就是接口设计错了）。
@@ -296,7 +301,7 @@ pub trait Rr3Link: Send + Sync {                   // 网络链路读数
 
 | 层 | 位置 | 承载 |
 |---|---|---|
-| traits + 数据类型 | `rr-hal/src/lib.rs` | 上面五个 trait 与配套类型，模块只见 trait、不见 Linux 细节 |
+| traits + 数据类型 | `rr-hal/src/lib.rs` | 上面六个 trait 与配套类型，模块只见 trait、不见 Linux 细节；另有 `rr3_block_on`（同步面进 async 世界的唯一桥，ADR-0008 同步优先） |
 | 后端标识常量 | `rr-hal/src/backend.rs` | `RR3_BACKEND_{LINUX,SIM,PLACEHOLDER}`，写入日志与诊断主题 `rr3-runtime/module/state` |
 | linux 后端 | `rr-hal` 内 `linux` 后端 | 落点定在 `rr-hal`，承载面见 `backend.rs` 的表（那张表的词表本档不复述） |
 | sim 后端（主机联调） | `rr-hal` 内 `sim` 后端 + `tools/sim` 的虚拟设备 | 让 CI 与无硬件开发共用同一套 trait |
@@ -306,8 +311,9 @@ pub trait Rr3Link: Send + Sync {                   // 网络链路读数
 
 1. **反射环不进 HAL**：1k–10kHz 的电机 FOC/PID 闭环留在 `rr3-act` 进程内，永不进 trait、
    更不进总线（ADR-0007 §裁定 1）。HAL 只承载慢速事件级接口。
-2. **播放面在本节 trait 清单之外**：上表只列上行拾音 `Rr3AudioSource`；
-   `rr3-interact` 消费侧的输出接口与后端在同一次接口定型里给形状，形状未定前本节不预先造名字。
+2. **播放面与拾音面对称**：`Rr3AudioSink`（M3 定型，`open`/`write` 两方法，与 source 的
+   `open`/`read` 对称）。同步模块代码经 `rr3_block_on` 进出 async trait；sim 后端写在内存
+   尾窗（不落盘），linux 后端走 ALSA（feature 门，板上件）。
 
 新增 trait/后端时本节与 `rr-hal` 源码同批更新。谁在本节写下"某后端已可用"，就是把实况塞进了
 设计文档——那类句子一律落 [`../status.md`](../status.md)。

@@ -24,7 +24,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 177 条（Windows）/212 条（Linux）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 204 条（Windows，推算）/249 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -260,6 +260,26 @@ rr3-brain 为 Python，不参与 cargo 检查，其语法检查属人工检查�
 ① 用 `--all-targets` 而非 `cargo check`：普通 check 不编译 `#[cfg(test)]` 目标，
 实测在测试代码里注入一个类型错误，`cargo check --workspace` 照样退 0。
 M2 起随运行时语义落地再扩点名范围。
+
+测试面如实登记（2026-10-01 M3 音频链收口复测。本轮 ①b 在 macOS x86_64（Unix）实跑 **249** 条，
+逐目标相加：rr-bus 10（lib 4 + `client.rs` 新增 6——同步总线客户端的连接/注册/心跳/发布/收帧/应答）+
+rr-hal 13（lib 5 + `sim.rs` 7 + `backend.rs` 1——`Rr3AudioSource`/`Rr3AudioSink` 源汇对称、
+sim 三种波形、`RR3_HAL_BACKEND` 选择与 `rr3_block_on`）+ rr-ipc lib 38 + `envelope_meta` 4 +
+rr-ota 5 + rr-registry lib 15 + 契约 24 + rrd lib 101（`cli::tests` 14 + `topics_load::tests` 16 +
+`manifest::tests` 8 + 横幅 2 + `registry::tests` 49 + `rpc::tests` 12）+ `src/main.rs` 0 +
+`src/bin/sim_peer.rs` 0 + 线级 `e2e_audio_chain` 1（三真进程音频链）+ `module_call` 4（rr3.call 回路）+
+`e2e_sim_peer` 5 + `e2e_spawn_restart` 5 + `e2e_watchdog` 4 + `register_publish` 19 + `socket_banner` 1
+= 249）。**rr-ipc 台账勘误**：上一轮（M2 Task 11b）把 rr-ipc lib 记作 26，漏记了 `buf.rs` 6 条、
+`uds.rs` 5 条与 `frame.rs` 的第 9 条——锚点 `c49b085` 的树上代码本就带 38 条（本轮实测与逐文件
+`grep -c '#\[test\]'` 核对一致），故上一轮两平台实数应读作 Unix **224** / Windows **184**，
+"212/177"是台账漏记而非代码回退。本轮两数：Unix **249**（224 + M3 平台无关新增 20：rr-bus 6 +
+rr-hal 9 + rrd lib 5——`registry` 2 / `manifest` 1 / `rpc` 2——+ 线级 Unix 独有 5：`e2e_audio_chain` 1 +
+`module_call` 4）；Windows **204**（未实跑，按 184 + 平台无关 20 推算）。差额 45 条全部可枚举：
+旧 Unix 独有线级 34（`register_publish` 19 + `socket_banner` 1 + `e2e_sim_peer` 5 + `e2e_watchdog` 4 +
+`e2e_spawn_restart` 5）+ `cli::tests` 里 1 条 `#[cfg(unix)]` + `uds.rs` 整模块 `#[cfg(unix)]` 的 5 条 +
+本轮两个新测试目标整体挂 `#![cfg(unix)]` 门的 5 条。M3 新增的六个测试模块（`client.rs` / `backend.rs` /
+`sim.rs` / `registry.rs` / `manifest.rs` / `rpc.rs` 的增量）无一挂平台门，Windows 上照常参与编译。
+②/②b/③/④ 本轮无变化（仍是 ② 24 / ②b 5 / ③ 5 / ④ 9 个独立工程）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

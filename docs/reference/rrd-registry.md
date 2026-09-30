@@ -325,7 +325,7 @@ rrd 在注册时收下并分配的在册身份（`conn.rs:225`），帧上的 `s
 | 事实 | 说明 |
 |---|---|
 | 筛选条件只有两个 | 条目 `src_task != exclude_task` **且** `tx` 还是 `Some`（已到期/已崩溃的条目句柄当场丢弃） |
-| `frame.header.dst_task` | **原样带上、本函数不读它**。所以它**不是单播入口**（签名冻结，不改）：一帧的 `dst_task` 写着某个具体模块，实际收到的是别的活连接。要点名发给某一个模块，由 conn 层直接用那条连接的 `Sender` |
+| `frame.header.dst_task` | **原样带上、本函数不读它**。所以它**不是单播入口**（签名冻结，不改）：一帧的 `dst_task` 写着某个具体模块，实际收到的是别的活连接。要点名发给某一个模块，走 M3 的单播入口 `rr3_reg_send_to`（§10） |
 | 返回值 | 成功**入队**数；接收者已 `drop` 只是少计，不算错、不 panic |
 | `exclude_task` 用 `RR3_TASK_RRD` 的现值 | 1 不是任何模块的 task，等于"谁都不排除"：`conn.rs` 的注册广播与退场广播都这样调用（`conn.rs:248`、`conn.rs:493`）；业务发布那次的 fanout 排除的是发布者自己（`conn.rs:384`，`me.task`），watchdog 判死那次的 fanout 排除的是被判死的模块自己（`daemon.rs:108`，`ex.src_task`），supervisor 收尸那一路的广播排除的是退出条目自己的 task（`supervisor.rs:191`，`crashed.src_task`）——这几处都不再用 `RR3_TASK_RRD` |
 | 锁与投递 | 入队发生在持有在册表锁的期间；真正的字节写盘在各连接自己的 writer 线程 → 入队次序 ≠ 上线次序，客户端按类型/字段挑帧（见 [`rrd-rpc.md`](rrd-rpc.md) §1） |
@@ -343,6 +343,8 @@ rrd 在注册时收下并分配的在册身份（`conn.rs:225`），帧上的 `s
 | `rr3_reg_crash_streak(name) -> u32` | — | 某 name 当前的崩溃连击数（表级、跨重注册成立）：观测面，不写字 | `registry.rs:593-595` |
 | `rr3_reg_child_exit(facts, clean_exit, now_ms) -> Rr3ChildExit` | 三态 | 子进程退出码那一路，supervisor 收尸用；语义见 §7.2 | `registry.rs:600-635` |
 | `rr3_reg_snapshot() -> Vec<(String, u64, Rr3Phase)>` | — | 按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，名字序只是 `BTreeMap` 的顺带结果，故显式排序。后到连接补发快照用的就是它（`conn.rs:255-262`，排除自己同名条目） | `registry.rs:670-675` |
+| `rr3_reg_callee_for(topic) -> Option<(String, u64)>` | (名， task) | M3 `rr3.call` 的被调方查找：在**相位非 `Failed` 且句柄在**、`[rpc].exposes` 含该主题的在册条目里取 **task 最小**者（同主题多提供方时的确定性裁定）；无人匹配回 `None`。唯一生产调用点 `rr3_route_call`（`conn.rs:484`，[`rrd-rpc.md`](rrd-rpc.md) §8） | `registry.rs:683-690` |
+| `rr3_reg_send_to(task, frame) -> bool` | 是否成功入队 | M3 点名**单播**：按 `by_task` 找到那条连接的 `Sender` 投一帧（`rr3_reg_fanout` 签名冻结不动，单播由本函数承担）。不在册 / 句柄已 drop / 收件人已 drop 都回 `false`，由调用方决定回什么错。两个生产调用点都在 conn 层的 `rr3.call` 面上：转发请求（`conn.rs:506`）与应答回路改道（`conn.rs:556`） | `registry.rs:696-701` |
 
 ## 11 相关文档
 
