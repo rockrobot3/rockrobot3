@@ -321,6 +321,27 @@ rr-ipc lib 38 + `envelope_meta` 4 + rr-ota 5 + rr-registry lib 23 + 契约 29 + 
 `e2e_watchdog` 4 + `module_call` 4 + `register_publish` 19 + `socket_banner` 1 = 269）/
 Windows **221**（未实跑，按 214 + 平台无关 7 推算）。② 29 条无变化；③/②b/④ 无变化）。
 
+测试面如实登记（2026-10-01 F3 控制通道收口复测（`rr3.ctl.*` 查询面 + rr3-ctl 实装，
+语义裁定全文见 ADR-0010）。净增 **10** 条 + 独立工程 **12** 条：rr-registry lib 23→25——
+`registry::tests` 2 条（`rr3_reg_health_snapshot` 的判定数回显：task 升序 + `since_beat_ms`
+= `now - last_beat` 三数逐一对、`saturating_sub` 对 now < last_beat 夹 0 不回绕）+
+rrd lib 105→108——`rpc::tests` 1 条（四个 ctl 方法过同一解析器且 `is_ctl` 判据与方法面一致、
+模块四方法全部 `!is_ctl`）+ `registry::tests` 2 条并入上面 rr-registry 段、rrd 侧实为
+`cli`/`manifest` 0 条；线级新目标 `rrd/tests/e2e_ctl.rs` **5** 条（整体 `#![cfg(unix)]`，
+Unix 独有）：status 列出真注册模块且 **ctl 连接自己不得进快照**（裁定 2）+ 应答后连接被收掉
+（一问一答即断）、health 回显条目自己的 heartbeat/watchdog 配置与 since_beat、logs 环里
+必须有启动横幅（`rr3_log` 单点落环的线上实证）、ota 恒拒 `Permission(-22)` 且文案点 M6
+（契约冻结集不自造 NotSupported）、已注册连接上行 ctl 被 `Permission` 拒但同一条连接
+心跳照常被接受（一次笔误不掉线）。本轮 ①b：Unix **279**（实跑 = F2 的 269 + 平台无关 5 +
+Unix 独有 5；逐目标：rr-bus 10 + rr-hal 13 + rr-ipc lib 38 + `envelope_meta` 4 + rr-ota 5 +
+rr-registry lib 25 + 契约 29 + rrd lib 108 + 线级 `e2e_audio_chain` 1 + `e2e_ctl` 5 +
+`e2e_depends` 3 + `e2e_sim_peer` 5 + `e2e_spawn_restart` 5 + `e2e_watchdog` 4 + `module_call` 4 +
+`register_publish` 19 + `socket_banner` 1 = 279）/ Windows **226**（未实跑，按 221 + 平台无关 5
+推算；`e2e_ctl` 整体挂 Unix 门不计入）。② 29 / ③ 5 / ②b 5 / ④ 9 个独立工程均无变化。
+**②b 的姊妹注记**：rr3-ctl 的 12 条（含 2 条 fake-rrd 真 UDS 往返）属独立 workspace，
+①/①b 打不到、④ 只 `cargo check` 编译不执行——与 ②b 把 mkmod 的产物喂回契约测试同一
+精神，收口轮在本地实跑 `cargo test --manifest-path tools/rrctl/Cargo.toml`（本轮 12/12 绿）。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
