@@ -54,7 +54,7 @@ mod run {
                 return 2;
             }
         };
-        // --brain 走 M4 四真进程演练（ADR-0012 裁定 4），与两面演练互斥
+        // --brain 走 M4 四真进程演练（ADR-0014 裁定 4），与两面演练互斥
         if a.brain {
             return match crate::brain::rr3_brain_drill(&a) {
                 Ok(report) => {
