@@ -435,6 +435,22 @@ fn rr3_serve_request(
                         // 归 Task 13 的 A-3 文档化，本轮不"统一"（统一成哪一种都没有判据支持）。
                         let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, RR3_TASK_RRD);
                         rr3_log(&format!("{} → running（广播到 {n} 个连接）", me.name));
+                        // ADR-0009 裁定 3 的恢复半边：本模块刚 Promoted，若它是某能力
+                        // 的提供者 → 依赖它的 Degraded 模块逐个重算，全部 required
+                        // 就位才回 Running。与断供那半边同一分工：谁记的账谁传播。
+                        let recovered = rr3_lock(&ctx.shared).rr3_reg_undegrade_after(&me.name);
+                        for (dep, task) in recovered {
+                            // 排除项 `RR3_TASK_RRD`（不排除）：解除与置位同一条理据——
+                            // 被解除者必须自己听到"我回来了"。
+                            let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
+                                &rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
+                                RR3_TASK_RRD,
+                            );
+                            rr3_log(&format!(
+                                "{dep} 依赖恢复 → running（提供者 {} 回到 Running）广播到 {n} 个连接",
+                                me.name
+                            ));
+                        }
                     }
                 }
             }
@@ -623,6 +639,22 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
                     ctx.sup.rr3_restart(p);
                 }
                 None => rr3_log(&format!("{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接", me.name)),
+            }
+            // ADR-0009 裁定 3：本路刚记完一条死亡/注销（EOF 或 unregister），若死者
+            // 是某能力在 boot 全集里的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
+            // 只置位与广播，不记账不出计划（裁定 4）。Deferred/Silent 两路不在这里传播：
+            // 死亡分别由退出码那一路（supervisor）与到期那一路（watchdog）记，各自的
+            // 落点负责各自的传播，一次死亡恰好传播一次。
+            let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade_after(&me.name);
+            for (dep, task) in degraded {
+                let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
+                    &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                    task,
+                );
+                rr3_log(&format!(
+                    "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
+                    me.name
+                ));
             }
         }
     }

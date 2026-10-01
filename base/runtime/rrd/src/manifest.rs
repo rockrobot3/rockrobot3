@@ -1,4 +1,5 @@
-//! 从 manifest 文本里取 rrd 运行期要用的"事实"（health / policy / entry / priority / depends）。
+//! 从 manifest 文本里取 rrd 运行期要用的"事实"（health / policy / entry / priority /
+//! depends / provides）。
 //!
 //! 字段合法性由 `rr-registry::rr3_registry_validate_manifest_text` 负责（Task 2）。
 //! 本模块**不校验规则**，只做"取不到就点名"的读取，供状态机与 spawn 使用。
@@ -15,6 +16,10 @@ pub struct Rr3ManifestFacts {
     pub entry: String,
     pub start_priority: i64,
     pub depends_required: Vec<String>,
+    /// `[provides].capabilities`：本模块向 boot 全集声明提供的能力（ADR-0009 裁定 1）。
+    /// 可选段，缺省空 vec——不声明就是"不提供跨模块能力"。boot 仲裁用它建边、
+    /// 运行期降级传播用它定"谁死了谁的下游降级"。
+    pub provides: Vec<String>,
     /// `[rpc].exposes`：本模块愿意被 `rr3.call` 点名的主题（M3 路由的路由表来源）。
     /// 可选段，缺省空 vec——不声明就是"不接模块间请求"，与 publishes 的归属检查互不相干。
     pub rpc_exposes: Vec<String>,
@@ -103,6 +108,38 @@ pub fn rr3_manifest_facts_from_text(text: &str) -> Result<Rr3ManifestFacts, Vec<
             None => errs.push("rpc.exposes 应为字符串数组".to_string()),
         },
     }
+    // [depends].required 与 [provides].capabilities（ADR-0009 裁定 1）：可选段，
+    // 给了就必须是**非空字符串数组**——类型错要报错，与 rpc.exposes 同一条纪律
+    let mut depends_required = Vec::new();
+    match lookup(&root, "depends.required") {
+        None => {}
+        Some(v) => match v.as_array() {
+            Some(items) => {
+                for item in items {
+                    match item.as_str() {
+                        Some(s) if !s.is_empty() => depends_required.push(s.to_string()),
+                        _ => errs.push("depends.required 的每一项都必须是非空字符串".to_string()),
+                    }
+                }
+            }
+            None => errs.push("depends.required 应为字符串数组".to_string()),
+        },
+    }
+    let mut provides = Vec::new();
+    match lookup(&root, "provides.capabilities") {
+        None => {}
+        Some(v) => match v.as_array() {
+            Some(items) => {
+                for item in items {
+                    match item.as_str() {
+                        Some(s) if !s.is_empty() => provides.push(s.to_string()),
+                        _ => errs.push("provides.capabilities 的每一项都必须是非空字符串".to_string()),
+                    }
+                }
+            }
+            None => errs.push("provides.capabilities 应为字符串数组".to_string()),
+        },
+    }
     if !errs.is_empty() {
         return Err(errs);
     }
@@ -113,10 +150,8 @@ pub fn rr3_manifest_facts_from_text(text: &str) -> Result<Rr3ManifestFacts, Vec<
         restart_policy,
         entry,
         start_priority: lookup(&root, "resources.start_priority").and_then(Value::as_integer).unwrap_or(100),
-        depends_required: lookup(&root, "depends.required")
-            .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-            .unwrap_or_default(),
+        depends_required,
+        provides,
         rpc_exposes,
     })
 }
@@ -163,6 +198,7 @@ watchdog_timeout_ms = 1000
         assert_eq!((f.name.as_str(), f.heartbeat_ms, f.watchdog_ms, f.restart_policy.as_str()), ("rr3-sima", 200, 1000, "always"));
         assert_eq!((f.entry.as_str(), f.start_priority), ("/usr/bin/sim_peer", 40));
         assert!(f.depends_required.is_empty());
+        assert!(f.provides.is_empty());
     }
 
     /// 缺字段逐条点名且继续检查其余字段（不是遇一个就返回）
@@ -213,7 +249,7 @@ watchdog_timeout_ms = 1000
         );
     }
 
-    /// depends.required 取出来，供 Task 9 判 base 能力是否就位；start_priority 缺省 100
+    /// depends.required 取出来，供 boot 仲裁判能力是否就位；start_priority 缺省 100
     #[test]
     fn depends_and_default_priority() {
         let text = GOOD.replace("[resources]", "[depends]\nrequired = [\"bus.publish\", \"bus.rpc\"]\n\n[resources]");
@@ -222,6 +258,25 @@ watchdog_timeout_ms = 1000
 
         let no_prio = GOOD.replace("start_priority = 40\n", "");
         assert_eq!(rr3_manifest_facts_from_text(&no_prio).unwrap().start_priority, 100);
+    }
+
+    /// [provides].capabilities：可选段（缺省空 vec），给了就逐项进 facts；
+    /// 类型错必须报错（与 depends.required 同一条纪律——旧代码对非字符串项
+    /// filter_map 静默吞掉是 fail-open，随 ADR-0009 落地改判错误）
+    #[test]
+    fn provides_is_optional_and_typed() {
+        let with = GOOD.replace("[health]", "[provides]\ncapabilities = [\"audio.capture\"]\n\n[health]");
+        let f = rr3_manifest_facts_from_text(&with).expect("带 provides 的 manifest 应能读取");
+        assert_eq!(f.provides, vec!["audio.capture".to_string()]);
+
+        let bad = GOOD.replace("[health]", "[provides]\ncapabilities = 3\n\n[health]");
+        let errs = rr3_manifest_facts_from_text(&bad).expect_err("非数组必须报错");
+        assert!(errs.iter().any(|e| e.contains("provides.capabilities 应为字符串数组")), "{errs:?}");
+
+        // 非字符串项逐条点名，不再被静默吞掉（fail-closed）
+        let item = GOOD.replace("[health]", "[provides]\ncapabilities = [\"ok\", 1]\n\n[health]");
+        let errs = rr3_manifest_facts_from_text(&item).expect_err("非字符串项必须报错");
+        assert!(errs.iter().any(|e| e.contains("每一项都必须是非空字符串")), "{errs:?}");
     }
 
     /// [rpc].exposes：可选段（缺省空 vec = 不接 rr3.call），给了就逐项进 facts
