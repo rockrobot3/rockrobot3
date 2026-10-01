@@ -22,7 +22,10 @@ impl From<std::io::Error> for Rr3MkmodError {
 impl std::fmt::Display for Rr3MkmodError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidName(n) => write!(f, "模块名非法: {n}（要求 rr3-[a-z]+，词干 2..=24 个小写字母）"),
+            Self::InvalidName(n) => write!(
+                f,
+                "模块名非法: {n}（要求 rr3-[a-z]+，词干 2..=24 个小写字母）"
+            ),
             Self::AlreadyExists(p) => write!(f, "目录已存在: {}", p.display()),
             Self::Io(e) => write!(f, "IO 失败: {e}"),
             Self::Manifest(errs) => write!(f, "生成的 manifest 不合规:\n  {}", errs.join("\n  ")),
@@ -36,9 +39,7 @@ const RR3_NAME_HEAD: &str = "rr3-";
 /// 词干必须匹配方案 §4 的 `^rr3-[a-z]+$`（小写字母，不含数字/连字符），长度 2..=24
 fn rr3_mkmod_stem(name: &str) -> Result<String, Rr3MkmodError> {
     let stem = name.strip_prefix(RR3_NAME_HEAD).unwrap_or(name);
-    let ok = stem.len() >= 2
-        && stem.len() <= 24
-        && stem.chars().all(|c| c.is_ascii_lowercase());
+    let ok = stem.len() >= 2 && stem.len() <= 24 && stem.chars().all(|c| c.is_ascii_lowercase());
     if !ok {
         return Err(Rr3MkmodError::InvalidName(name.to_string()));
     }
@@ -179,7 +180,7 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
         ("README.md", readme(&id)),
     ];
     for (rel, body) in &files {
-        let path = staging.join(rel.to_string());
+        let path = staging.join(rel);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -193,5 +194,8 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
     }
 
     std::fs::rename(&staging, &target)?;
-    Ok(files.iter().map(|(rel, _)| target.join(rel.to_string())).collect())
+    Ok(files
+        .iter()
+        .map(|(rel, _)| target.join(rel))
+        .collect())
 }

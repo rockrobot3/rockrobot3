@@ -28,7 +28,10 @@ pub struct Rr3Face {
 
 impl Default for Rr3Face {
     fn default() -> Self {
-        Self { current: "idle", suspended: None }
+        Self {
+            current: "idle",
+            suspended: None,
+        }
     }
 }
 
@@ -101,7 +104,10 @@ mod tests {
 
     #[test]
     fn whitelist_covers_five_expressions() {
-        assert_eq!(RR3_FACE_EXPRESSIONS, ["idle", "blink", "talk", "think", "happy"]);
+        assert_eq!(
+            RR3_FACE_EXPRESSIONS,
+            ["idle", "blink", "talk", "think", "happy"]
+        );
         // 初始态 idle：首次切换的"切换前"就是它
         assert_eq!(Rr3Face::default().rr3_face_set("blink").unwrap().1, "idle");
     }
@@ -128,7 +134,11 @@ mod tests {
         let mut f = Rr3Face::default();
         f.rr3_face_set("think").unwrap();
         assert_eq!(f.rr3_face_begin_talk(), "think", "挂起前的表情");
-        assert_eq!(f.rr3_face_set("blink").unwrap(), ("blink", "talk"), "talk 期间 current 是 talk");
+        assert_eq!(
+            f.rr3_face_set("blink").unwrap(),
+            ("blink", "talk"),
+            "talk 期间 current 是 talk"
+        );
         // talk 期间被点名打断了挂起态，end_talk 只能回 idle——见 explicit_set 测试；
         // 这里另起一台机器验证正常恢复路径
         let mut g = Rr3Face::default();
@@ -148,7 +158,11 @@ mod tests {
         f.rr3_face_begin_talk();
         assert_eq!(f.rr3_face_begin_talk(), "happy", "嵌套挂起不丢原表情");
         assert_eq!(f.rr3_face_end_talk(), "happy");
-        assert_eq!(f.rr3_face_set("think").unwrap(), ("think", "happy"), "恢复到位");
+        assert_eq!(
+            f.rr3_face_set("think").unwrap(),
+            ("think", "happy"),
+            "恢复到位"
+        );
     }
 
     #[test]
@@ -165,7 +179,10 @@ mod tests {
 
     #[test]
     fn args_and_result_shapes() {
-        assert_eq!(rr3_face_parse_args(&json!({ "expression": "blink" })).unwrap(), "blink");
+        assert_eq!(
+            rr3_face_parse_args(&json!({ "expression": "blink" })).unwrap(),
+            "blink"
+        );
         assert!(rr3_face_parse_args(&json!({})).is_err());
         assert!(rr3_face_parse_args(&json!({ "expression": 1 })).is_err());
         let r = rr3_face_result("talk", "idle");

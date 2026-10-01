@@ -61,7 +61,10 @@ impl Rr3RpcMethod {
     /// 已注册连接的上行拒绝用显式 OR 臂（带守卫的臂不计入穷尽性），两处由
     /// 编译器共同看护：新增 ctl 变体漏改任何一处都会变红。
     pub fn is_ctl(&self) -> bool {
-        matches!(self, Self::CtlStatus | Self::CtlHealth | Self::CtlLogs | Self::CtlOta)
+        matches!(
+            self,
+            Self::CtlStatus | Self::CtlHealth | Self::CtlLogs | Self::CtlOta
+        )
     }
 }
 
@@ -74,23 +77,47 @@ pub struct Rr3RpcRequest {
 
 /// 解析上行 RPC。错误码走契约的 AIRY_E* 子集，不自造。
 pub fn rr3_rpc_parse_request(payload: &[u8]) -> Result<Rr3RpcRequest, (i32, String)> {
-    let text = std::str::from_utf8(payload)
-        .map_err(|e| (Rr3StatusCode::Invalid as i32, format!("payload 非 UTF-8: {e}")))?;
-    let v: Value = serde_json::from_str(text)
-        .map_err(|e| (Rr3StatusCode::Invalid as i32, format!("JSON-RPC 解析失败: {e}")))?;
+    let text = std::str::from_utf8(payload).map_err(|e| {
+        (
+            Rr3StatusCode::Invalid as i32,
+            format!("payload 非 UTF-8: {e}"),
+        )
+    })?;
+    let v: Value = serde_json::from_str(text).map_err(|e| {
+        (
+            Rr3StatusCode::Invalid as i32,
+            format!("JSON-RPC 解析失败: {e}"),
+        )
+    })?;
     if v["jsonrpc"] != "2.0" {
-        return Err((Rr3StatusCode::Invalid as i32, "jsonrpc 必须等于 \"2.0\"".to_string()));
+        return Err((
+            Rr3StatusCode::Invalid as i32,
+            "jsonrpc 必须等于 \"2.0\"".to_string(),
+        ));
     }
     let Some(id) = v["id"].as_u64() else {
-        return Err((Rr3StatusCode::Invalid as i32, "缺 id（要求无符号整数）".to_string()));
+        return Err((
+            Rr3StatusCode::Invalid as i32,
+            "缺 id（要求无符号整数）".to_string(),
+        ));
     };
     let Some(method_str) = v["method"].as_str() else {
-        return Err((Rr3StatusCode::Invalid as i32, "缺 method（要求字符串）".to_string()));
+        return Err((
+            Rr3StatusCode::Invalid as i32,
+            "缺 method（要求字符串）".to_string(),
+        ));
     };
     let Some(method) = Rr3RpcMethod::parse(method_str) else {
-        return Err((Rr3StatusCode::Invalid as i32, format!("未知方法 {method_str}")));
+        return Err((
+            Rr3StatusCode::Invalid as i32,
+            format!("未知方法 {method_str}"),
+        ));
     };
-    Ok(Rr3RpcRequest { id, method, params: v.get("params").cloned().unwrap_or(Value::Null) })
+    Ok(Rr3RpcRequest {
+        id,
+        method,
+        params: v.get("params").cloned().unwrap_or(Value::Null),
+    })
 }
 
 fn param_str(params: &Value, key: &str) -> Result<String, (i32, String)> {
@@ -99,7 +126,12 @@ fn param_str(params: &Value, key: &str) -> Result<String, (i32, String)> {
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .ok_or_else(|| (Rr3StatusCode::Invalid as i32, format!("缺 params.{key}（要求非空字符串）")))
+        .ok_or_else(|| {
+            (
+                Rr3StatusCode::Invalid as i32,
+                format!("缺 params.{key}（要求非空字符串）"),
+            )
+        })
 }
 
 pub fn rr3_rpc_manifest_param(params: &Value) -> Result<String, (i32, String)> {
@@ -135,7 +167,9 @@ pub fn rr3_rpc_build_error(id: u64, code: Rr3StatusCode, message: &str) -> Vec<u
 
 pub fn rr3_rpc_status_for_register(e: &Rr3RegisterError) -> Rr3StatusCode {
     match e {
-        Rr3RegisterError::Duplicate { .. } | Rr3RegisterError::Capacity { .. } => Rr3StatusCode::Busy,
+        Rr3RegisterError::Duplicate { .. } | Rr3RegisterError::Capacity { .. } => {
+            Rr3StatusCode::Busy
+        }
         Rr3RegisterError::ReservedName { .. } => Rr3StatusCode::Permission,
     }
 }
@@ -162,8 +196,10 @@ mod tests {
     #[test]
     fn parses_three_upstream_methods() {
         for m in ["rr3.register", "rr3.heartbeat", "rr3.unregister"] {
-            let got = rr3_rpc_parse_request(&bytes(json!({"jsonrpc":"2.0","id":7,"method":m,"params":{}})))
-                .unwrap_or_else(|e| panic!("{m} 应能解析: {e:?}"));
+            let got = rr3_rpc_parse_request(&bytes(
+                json!({"jsonrpc":"2.0","id":7,"method":m,"params":{}}),
+            ))
+            .unwrap_or_else(|e| panic!("{m} 应能解析: {e:?}"));
             assert_eq!(got.id, 7);
             assert_eq!(got.method.as_str(), m);
         }
@@ -174,10 +210,16 @@ mod tests {
     #[test]
     fn rejects_malformed_request() {
         for (v, hint) in [
-            (json!({"jsonrpc":"1.0","id":1,"method":"rr3.heartbeat"}), "jsonrpc"),
+            (
+                json!({"jsonrpc":"1.0","id":1,"method":"rr3.heartbeat"}),
+                "jsonrpc",
+            ),
             (json!({"id":1,"method":"rr3.heartbeat"}), "jsonrpc"),
             (json!({"jsonrpc":"2.0","method":"rr3.heartbeat"}), "id"),
-            (json!({"jsonrpc":"2.0","id":"x","method":"rr3.heartbeat"}), "id"),
+            (
+                json!({"jsonrpc":"2.0","id":"x","method":"rr3.heartbeat"}),
+                "id",
+            ),
             (json!({"jsonrpc":"2.0","id":1}), "method"),
         ] {
             // `bytes` 按值收 Value，而下一行的断言消息还要用 `{v}` 指名是哪一样，
@@ -215,7 +257,11 @@ mod tests {
             rr3_rpc_manifest_param(&json!({"name":"rr3-sima","manifest":"[manifest]\n"})).unwrap(),
             "[manifest]\n"
         );
-        for v in [json!({"name":"rr3-sima"}), json!({"manifest":5}), json!({"manifest":""})] {
+        for v in [
+            json!({"name":"rr3-sima"}),
+            json!({"manifest":5}),
+            json!({"manifest":""}),
+        ] {
             let (code, msg) = rr3_rpc_manifest_param(&v).expect_err("{v} 必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid as i32);
             assert!(msg.contains("params.manifest"), "{msg}");
@@ -225,7 +271,10 @@ mod tests {
     /// Event payload 的 topic 取值同样严格（Task 8 的发布面靠它）
     #[test]
     fn topic_param_is_strict() {
-        assert_eq!(rr3_rpc_topic_param(&json!({"topic":"rr3-sima/ping/state"})).unwrap(), "rr3-sima/ping/state");
+        assert_eq!(
+            rr3_rpc_topic_param(&json!({"topic":"rr3-sima/ping/state"})).unwrap(),
+            "rr3-sima/ping/state"
+        );
         assert!(rr3_rpc_topic_param(&json!({})).is_err());
         assert!(rr3_rpc_topic_param(&json!({"topic": 3})).is_err());
     }
@@ -245,9 +294,16 @@ mod tests {
     /// F3（ADR-0010）：四个 ctl 方法走同一解析器，is_ctl 的判据与方法面一致
     #[test]
     fn parses_ctl_methods_and_flags_them() {
-        for m in ["rr3.ctl.status", "rr3.ctl.health", "rr3.ctl.logs", "rr3.ctl.ota"] {
-            let got = rr3_rpc_parse_request(&bytes(json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}})))
-                .unwrap_or_else(|e| panic!("{m} 应能解析: {e:?}"));
+        for m in [
+            "rr3.ctl.status",
+            "rr3.ctl.health",
+            "rr3.ctl.logs",
+            "rr3.ctl.ota",
+        ] {
+            let got = rr3_rpc_parse_request(&bytes(
+                json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}}),
+            ))
+            .unwrap_or_else(|e| panic!("{m} 应能解析: {e:?}"));
             assert_eq!(got.method.as_str(), m);
             assert!(got.method.is_ctl(), "{m} 必须被 is_ctl 判为控制方法");
         }
@@ -288,7 +344,11 @@ mod tests {
     fn error_shape_uses_contract_status_codes() {
         let out = rr3_rpc_build_error(9, Rr3StatusCode::Busy, "已在册");
         let v: Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(v["error"]["code"], Rr3StatusCode::Busy as i32, "AIRY_EBUSY = -16");
+        assert_eq!(
+            v["error"]["code"],
+            Rr3StatusCode::Busy as i32,
+            "AIRY_EBUSY = -16"
+        );
         assert_eq!(v["error"]["message"], "已在册");
         assert!(v.get("result").is_none());
 
@@ -305,7 +365,10 @@ mod tests {
     fn register_error_maps_to_status_code() {
         use crate::registry::Rr3RegisterError;
         assert_eq!(
-            rr3_rpc_status_for_register(&Rr3RegisterError::Duplicate { name: "a".into(), src_task: 2 }),
+            rr3_rpc_status_for_register(&Rr3RegisterError::Duplicate {
+                name: "a".into(),
+                src_task: 2
+            }),
             Rr3StatusCode::Busy
         );
         assert_eq!(
@@ -313,7 +376,9 @@ mod tests {
             Rr3StatusCode::Busy
         );
         assert_eq!(
-            rr3_rpc_status_for_register(&Rr3RegisterError::ReservedName { name: "rr3-runtime".into() }),
+            rr3_rpc_status_for_register(&Rr3RegisterError::ReservedName {
+                name: "rr3-runtime".into()
+            }),
             Rr3StatusCode::Permission
         );
     }
@@ -323,7 +388,9 @@ mod tests {
     fn publish_deny_maps_to_status_code() {
         use crate::registry::Rr3PublishDeny;
         assert_eq!(
-            rr3_rpc_status_for_publish_deny(&Rr3PublishDeny::ReservedNamespace { topic: "t".into() }),
+            rr3_rpc_status_for_publish_deny(&Rr3PublishDeny::ReservedNamespace {
+                topic: "t".into()
+            }),
             Rr3StatusCode::Permission
         );
         assert_eq!(

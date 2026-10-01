@@ -24,12 +24,20 @@ pub fn rr3_registry_slot_table_from_text(text: &str) -> Rr3SlotTable {
         return Rr3SlotTable::default();
     };
     let mut table = Rr3SlotTable::default();
-    for s in root.get("slot").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_table)
+    for s in root
+        .get("slot")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_table)
     {
         if let Some(name) = s.get("name").and_then(Value::as_str) {
             table.layers.insert(
                 name.to_string(),
-                s.get("layer").and_then(Value::as_str).unwrap_or("").to_string(),
+                s.get("layer")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
             );
         }
     }
@@ -73,7 +81,9 @@ impl Rr3SlotTable {
         for (name, layer) in &self.layers {
             errs.extend(crate::validate::rr3_registry_check("capability", name));
             if !RR3_SLOT_LAYERS.contains(&layer.as_str()) {
-                errs.push(format!("slot {name} 的 layer 非法: {layer}（只允许 {RR3_SLOT_LAYERS:?}）"));
+                errs.push(format!(
+                    "slot {name} 的 layer 非法: {layer}（只允许 {RR3_SLOT_LAYERS:?}）"
+                ));
             }
         }
         errs
@@ -97,8 +107,15 @@ mod tests {
         assert!(table.rr3_slot_table_contains("audio.capture"));
         assert!(table.rr3_slot_table_contains("bus.rpc"));
         assert!(!table.rr3_slot_table_contains("audio"), "单段名不是格位");
-        assert_eq!(table.rr3_slot_table_layer("cognition.dialog").as_deref(), Some("cognition"));
-        assert!(table.rr3_slot_table_check().is_empty(), "{:?}", table.rr3_slot_table_check());
+        assert_eq!(
+            table.rr3_slot_table_layer("cognition.dialog").as_deref(),
+            Some("cognition")
+        );
+        assert!(
+            table.rr3_slot_table_check().is_empty(),
+            "{:?}",
+            table.rr3_slot_table_check()
+        );
     }
 
     /// 坏文本给空表，空表必须报错（fail-open 护栏）
@@ -123,7 +140,10 @@ layer = "telepathy"
 "#,
         );
         let errs = bad.rr3_slot_table_check();
-        assert!(errs.iter().any(|e| e.contains("capability 非法")), "{errs:?}");
+        assert!(
+            errs.iter().any(|e| e.contains("capability 非法")),
+            "{errs:?}"
+        );
         assert!(errs.iter().any(|e| e.contains("layer 非法")), "{errs:?}");
     }
 }

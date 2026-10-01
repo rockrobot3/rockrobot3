@@ -22,9 +22,12 @@ use rr_ipc::{
 };
 
 fn schema_json() -> serde_json::Value {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/envelope.schema.json");
-    let raw = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("读不到契约文件 {path}: {e}"));
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../contracts/envelope.schema.json"
+    );
+    let raw =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("读不到契约文件 {path}: {e}"));
     serde_json::from_str(&raw).expect("envelope.schema.json 必须是合法 JSON")
 }
 
@@ -55,8 +58,10 @@ fn contract_field<'a>(json: &'a serde_json::Value, name: &str) -> &'a serde_json
 }
 
 fn golden_bytes() -> Vec<u8> {
-    let path =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/golden/event-header-128.hex");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../contracts/golden/event-header-128.hex"
+    );
     let text = std::fs::read_to_string(path).expect("读不到 golden hex 向量");
     hex_to_bytes(text.trim())
 }
@@ -64,7 +69,9 @@ fn golden_bytes() -> Vec<u8> {
 fn hex_to_bytes(s: &str) -> Vec<u8> {
     (0..s.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap_or_else(|e| panic!("非法 hex {s:?}: {e}")))
+        .map(|i| {
+            u8::from_str_radix(&s[i..i + 2], 16).unwrap_or_else(|e| panic!("非法 hex {s:?}: {e}"))
+        })
         .collect()
 }
 
@@ -77,8 +84,7 @@ fn contract_byte_size_matches_rust_offsets_and_golden() {
         .expect("契约缺 properties.header.x-byte-size");
 
     assert_eq!(
-        byte_size as usize,
-        RR3_IPC_HDR_SIZE,
+        byte_size as usize, RR3_IPC_HDR_SIZE,
         "契约 x-byte-size({byte_size}) 与 Rust RR3_IPC_HDR_SIZE({RR3_IPC_HDR_SIZE}) 漂移"
     );
 
@@ -97,7 +103,11 @@ fn contract_byte_size_matches_rust_offsets_and_golden() {
     );
     // 只比长度还不够：golden 必须真按这个尺寸解析得动、且能被 Rust 逐字节复现
     let hdr = Rr3Header::from_bytes(&golden).expect("golden 向量必须能按契约尺寸解析");
-    assert_eq!(hdr.to_bytes().to_vec(), golden, "Rust 编码必须逐字节复现 golden 向量");
+    assert_eq!(
+        hdr.to_bytes().to_vec(),
+        golden,
+        "Rust 编码必须逐字节复现 golden 向量"
+    );
 }
 
 /// C1②：`x-offset-sum` 与偏移表是**两处独立记账**，三者（自身加数 / 自身结果 / 偏移表）
@@ -108,9 +118,9 @@ fn contract_offset_sum_agrees_with_offset_table_and_rust() {
     let raw = json["properties"]["header"]["properties"]["fields"]["x-offset-sum"]
         .as_str()
         .expect("契约缺 x-offset-sum（应为 \"4+2+… = 128\" 字符串）");
-    let (lhs, rhs) = raw.split_once('=').unwrap_or_else(|| {
-        panic!("x-offset-sum 必须是 \"a+b+… = N\" 形式，实际 {raw:?}")
-    });
+    let (lhs, rhs) = raw
+        .split_once('=')
+        .unwrap_or_else(|| panic!("x-offset-sum 必须是 \"a+b+… = N\" 形式，实际 {raw:?}"));
     let stated: usize = rhs
         .trim()
         .parse()
@@ -152,12 +162,15 @@ fn contract_offset_sum_agrees_with_offset_table_and_rust() {
 fn payload_len_bounds_match_contract() {
     let json = schema_json();
     let field = contract_field(&json, "payload_len");
-    let c_min = field["minimum"].as_u64().expect("契约缺 payload_len.minimum");
-    let c_max = field["maximum"].as_u64().expect("契约缺 payload_len.maximum");
+    let c_min = field["minimum"]
+        .as_u64()
+        .expect("契约缺 payload_len.minimum");
+    let c_max = field["maximum"]
+        .as_u64()
+        .expect("契约缺 payload_len.maximum");
 
     assert_eq!(
-        c_max,
-        MAX_PAYLOAD_LEN as u64,
+        c_max, MAX_PAYLOAD_LEN as u64,
         "契约 payload_len.maximum({c_max}) 与 Rust MAX_PAYLOAD_LEN({MAX_PAYLOAD_LEN}) 漂移"
     );
     assert_eq!(

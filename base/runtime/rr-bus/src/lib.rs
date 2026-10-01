@@ -52,7 +52,12 @@ mod tests {
         assert_eq!(RR3_BROADCAST_DST_TASK, 0);
         assert_eq!(RR3_TASK_RRD, 1);
         assert_eq!(RR3_TASK_FIRST_MODULE, 2);
-        assert!(RR3_TASK_FIRST_MODULE > RR3_TASK_RRD, "模块池必须让开两个保留号");
+        const {
+            assert!(
+                RR3_TASK_FIRST_MODULE > RR3_TASK_RRD,
+                "模块池必须让开两个保留号"
+            );
+        }
     }
 
     /// 占位窗口要有内容可言：区间非空（MIN < MAX），且两个值都落在常量文档自己声明的
@@ -61,12 +66,10 @@ mod tests {
     #[test]
     fn priority_window_is_nonempty_placeholder_band() {
         const BAND: std::ops::RangeInclusive<u32> = 0..=139; // 常量文档声明的占位带
-        assert!(
-            RR3_PRIORITY_MIN < RR3_PRIORITY_MAX,
-            "占位窗口为空：MIN={} MAX={}",
-            RR3_PRIORITY_MIN,
-            RR3_PRIORITY_MAX
-        );
+        const {
+            // const 上下文不允许 format!：字面值见上方两个常量本体，此处只钉关系
+            assert!(RR3_PRIORITY_MIN < RR3_PRIORITY_MAX, "占位窗口为空（MIN >= MAX）");
+        }
         assert!(
             BAND.contains(&RR3_PRIORITY_MIN) && BAND.contains(&RR3_PRIORITY_MAX),
             "占位值越出常量文档声明的 {BAND:?}：MIN={} MAX={}",

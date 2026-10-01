@@ -10,7 +10,10 @@ use rr_ipc::{RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 
 fn usage() -> ! {
     eprintln!("用法: rr3-ctl [--bus-path <path>] <命令>");
-    eprintln!("命令: {}（status/health/logs 实查 rrd；ota 恒拒随 M6）", commands::COMMANDS.join(" | "));
+    eprintln!(
+        "命令: {}（status/health/logs 实查 rrd；ota 恒拒随 M6）",
+        commands::COMMANDS.join(" | ")
+    );
     std::process::exit(2)
 }
 
@@ -81,8 +84,8 @@ mod tests {
     #[test]
     fn bus_path_override_beats_default() {
         assert_eq!(resolve_bus_path(Some("/tmp/x.sock")), "/tmp/x.sock");
-        let expected = std::env::var(RR3_BUS_PATH_ENV)
-            .unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
+        let expected =
+            std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
         assert_eq!(resolve_bus_path(None), expected);
     }
 }

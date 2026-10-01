@@ -54,8 +54,11 @@ pub struct Rr3AudioCfg {
 }
 
 /// 与 legacy ESP32 链路一致的默认拾音格式（16k/单声道/16bit）
-pub const RR3_AUDIO_CFG_16K_MONO16: Rr3AudioCfg =
-    Rr3AudioCfg { sample_rate_hz: 16000, channels: 1, bit_depth: 16 };
+pub const RR3_AUDIO_CFG_16K_MONO16: Rr3AudioCfg = Rr3AudioCfg {
+    sample_rate_hz: 16000,
+    channels: 1,
+    bit_depth: 16,
+};
 
 /// PCM 帧缓冲。所有权随返回值移交（M2 的 shm 零拷贝沿用同一语义）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,7 +254,10 @@ mod tests {
     #[test]
     fn audio_default_cfg_matches_legacy_pcm() {
         let cfg = RR3_AUDIO_CFG_16K_MONO16;
-        assert_eq!((cfg.sample_rate_hz, cfg.channels, cfg.bit_depth), (16000, 1, 16));
+        assert_eq!(
+            (cfg.sample_rate_hz, cfg.channels, cfg.bit_depth),
+            (16000, 1, 16)
+        );
     }
 
     #[test]
@@ -262,10 +268,16 @@ mod tests {
 
     #[test]
     fn pcm_stream_duration_uses_channels_and_rate() {
-        let s = Rr3PcmStream { cfg: RR3_AUDIO_CFG_16K_MONO16, samples: vec![] };
+        let s = Rr3PcmStream {
+            cfg: RR3_AUDIO_CFG_16K_MONO16,
+            samples: vec![],
+        };
         assert_eq!(s.rr3_pcm_duration_ms(), 0);
         // 2400 帧 @16kHz 单声道 = 150ms
-        let full = Rr3PcmStream { cfg: RR3_AUDIO_CFG_16K_MONO16, samples: vec![0i16; 2400] };
+        let full = Rr3PcmStream {
+            cfg: RR3_AUDIO_CFG_16K_MONO16,
+            samples: vec![0i16; 2400],
+        };
         assert_eq!(full.rr3_pcm_duration_ms(), 150);
     }
 
@@ -275,7 +287,10 @@ mod tests {
     fn block_on_drives_first_poll_completion() {
         let sink = sim::Rr3SimAudioSink::rr3_sim_sink_new(16000);
         rr3_block_on(sink.open(RR3_AUDIO_CFG_16K_MONO16)).expect("open 应成功");
-        let pcm = Rr3PcmStream { cfg: RR3_AUDIO_CFG_16K_MONO16, samples: vec![3i16; 320] };
+        let pcm = Rr3PcmStream {
+            cfg: RR3_AUDIO_CFG_16K_MONO16,
+            samples: vec![3i16; 320],
+        };
         rr3_block_on(sink.write(pcm)).expect("write 应成功");
         assert_eq!(sink.rr3_sim_sink_played(), vec![3i16; 320]);
     }

@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use rr3_mkmod::rr3_mkmod_generate;
+use std::path::{Path, PathBuf};
 
 fn tmp(tag: &str) -> PathBuf {
     // 掺入进程 id，使并发运行的测试进程（同一 tag）不会互相覆盖临时根目录
@@ -24,7 +24,14 @@ fn with_contract(root: &Path) {
 fn rr3_mkmod_rejects_bad_name() {
     let root = tmp("bad");
     // 方案 §4：manifest.name 必须匹配 ^rr3-[a-z]+$，词干只许小写字母
-    for n in ["Sense", "rr3-", "rr3-a-b", "mod_audio", "rr3-demo2", "rr3-1x"] {
+    for n in [
+        "Sense",
+        "rr3-",
+        "rr3-a-b",
+        "mod_audio",
+        "rr3-demo2",
+        "rr3-1x",
+    ] {
         assert!(
             matches!(
                 rr3_mkmod_generate(n, &root),
@@ -43,7 +50,12 @@ fn rr3_mkmod_creates_five_files() {
     let made = rr3_mkmod_generate("rr3-demo", &root).expect("生成失败");
     let names: Vec<String> = made
         .iter()
-        .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
+        .map(|p| {
+            p.strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
         .collect();
     for want in [
         "rr3-demo/module.toml",
@@ -52,7 +64,10 @@ fn rr3_mkmod_creates_five_files() {
         "rr3-demo/src/main.rs",
         "rr3-demo/README.md",
     ] {
-        assert!(names.iter().any(|n| n == want), "缺少 {want}，实际 {names:?}");
+        assert!(
+            names.iter().any(|n| n == want),
+            "缺少 {want}，实际 {names:?}"
+        );
     }
     std::fs::remove_dir_all(&root).ok();
 }
@@ -62,10 +77,12 @@ fn rr3_mkmod_generated_manifest_passes_contract() {
     let root = tmp("manifest");
     with_contract(&root);
     rr3_mkmod_generate("rr3-tmpdemo", &root).unwrap();
-    let report = rr_registry::rr3_registry_validate_manifest(
-        &root.join("rr3-tmpdemo/module.toml"),
+    let report = rr_registry::rr3_registry_validate_manifest(&root.join("rr3-tmpdemo/module.toml"));
+    assert!(
+        report.ok(),
+        "生成的 manifest 必须直接合规: {:?}",
+        report.errors
     );
-    assert!(report.ok(), "生成的 manifest 必须直接合规: {:?}", report.errors);
     std::fs::remove_dir_all(&root).ok();
 }
 

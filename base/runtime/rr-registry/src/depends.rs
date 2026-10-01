@@ -87,7 +87,12 @@ pub fn rr3_registry_depends_facts_from_text(text: &str) -> Result<Rr3DependsFact
     if !errs.is_empty() {
         return Err(errs);
     }
-    Ok(Rr3DependsFacts { name, provides, depends_required, start_priority })
+    Ok(Rr3DependsFacts {
+        name,
+        provides,
+        depends_required,
+        start_priority,
+    })
 }
 
 /// 依赖仲裁本体（ADR-0009 裁定 1/2）：返回 boot 启动序（模块名），或逐条错误。
@@ -111,7 +116,10 @@ fn rr3_registry_resolve_boot_order_excluding(
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     for f in facts {
         if !seen.insert(f.name.as_str()) {
-            errs.push(format!("manifest 名重复: {}（依赖仲裁要求模块名唯一）", f.name));
+            errs.push(format!(
+                "manifest 名重复: {}（依赖仲裁要求模块名唯一）",
+                f.name
+            ));
         }
     }
     if !errs.is_empty() {
@@ -182,7 +190,10 @@ fn rr3_registry_resolve_boot_order_excluding(
     let mut order = Vec::with_capacity(facts.len());
     while let Some(&(prio, name)) = ready.iter().next() {
         ready.remove(&(prio, name));
-        let idx = facts.iter().position(|f| f.name == name).expect("名字已在 facts 里");
+        let idx = facts
+            .iter()
+            .position(|f| f.name == name)
+            .expect("名字已在 facts 里");
         order.push(name.to_string());
         if let Some(deps) = dependents.get(&idx) {
             for d in deps {
@@ -205,7 +216,10 @@ fn rr3_registry_resolve_boot_order_excluding(
             .map(|f| f.name.as_str())
             .filter(|n| !excluded.contains(*n) && !order.iter().any(|o| o == n))
             .collect();
-        errs.push(format!("{RR3_CYCLE_ERROR_HEAD}（含环下游，拒整个 boot）: {}", stuck.join(", ")));
+        errs.push(format!(
+            "{RR3_CYCLE_ERROR_HEAD}（含环下游，拒整个 boot）: {}",
+            stuck.join(", ")
+        ));
         return Err(errs);
     }
     Ok(order)
@@ -217,7 +231,7 @@ fn rr3_registry_resolve_boot_order_excluding(
 /// - 否则 `order` = 可 boot 模块的启动序，`rejected` = 不可满足被拒的模块名——
 ///   它们的 provides **仍计入**可满足性宇宙（依赖它们能力的其余模块照常 boot，
 ///   运行期按裁定 3 降级），重仲裁剔除它们不会把下游连坐。
-/// 终止性：每个非 fatal 轮次至少剔除一个名字，`excluded` 有 `facts.len()` 上界。
+///   终止性：每个非 fatal 轮次至少剔除一个名字，`excluded` 有 `facts.len()` 上界。
 pub fn rr3_registry_plan_boot(facts: &[Rr3DependsFacts]) -> Rr3BootPlan {
     let mut excluded: BTreeSet<String> = BTreeSet::new();
     loop {
@@ -244,7 +258,10 @@ pub fn rr3_registry_plan_boot(facts: &[Rr3DependsFacts]) -> Rr3BootPlan {
                     if excluded.contains(&f.name) {
                         continue;
                     }
-                    if errs.iter().any(|e| e.starts_with(&unsatisfiable_prefix(&f.name))) {
+                    if errs
+                        .iter()
+                        .any(|e| e.starts_with(&unsatisfiable_prefix(&f.name)))
+                    {
                         excluded.insert(f.name.clone());
                     }
                 }
@@ -303,22 +320,35 @@ start_priority = 40
         let bare = rr3_registry_depends_facts_from_text("[manifest]\nname = \"rr3-y\"\n")
             .expect("最小文本也应能提取");
         assert!(bare.provides.is_empty() && bare.depends_required.is_empty());
-        assert_eq!(bare.start_priority, 100, "缺省 100，与 rrd manifest.rs 同一缺省");
+        assert_eq!(
+            bare.start_priority, 100,
+            "缺省 100，与 rrd manifest.rs 同一缺省"
+        );
     }
 
     #[test]
     fn facts_missing_name_and_non_string_items_reported() {
         let errs = rr3_registry_depends_facts_from_text("[provides]\ncapabilities = [\"x\"]\n")
             .expect_err("缺名字必须报错");
-        assert!(errs.iter().any(|e| e.contains("缺少 manifest.name")), "{errs:?}");
+        assert!(
+            errs.iter().any(|e| e.contains("缺少 manifest.name")),
+            "{errs:?}"
+        );
 
         let errs = rr3_registry_depends_facts_from_text(
             "[manifest]\nname = \"rr3-x\"\n[provides]\ncapabilities = [1]\n[depends]\nrequired = [true]\n",
         )
         .expect_err("非字符串项必须报错");
         assert_eq!(errs.len(), 2, "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("provides.capabilities 第 1 项")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("depends.required 第 1 项")), "{errs:?}");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("provides.capabilities 第 1 项")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("depends.required 第 1 项")),
+            "{errs:?}"
+        );
     }
 
     #[test]
@@ -382,7 +412,10 @@ start_priority = 40
             facts("rr3-user", &[], &["cap.y"], 90),
         ]);
         assert!(plan.fatal.is_empty(), "{plan:?}");
-        assert_eq!(plan.rejected, vec!["rr3-ghost".to_string(), "rr3-ghost2".to_string()]);
+        assert_eq!(
+            plan.rejected,
+            vec!["rr3-ghost".to_string(), "rr3-ghost2".to_string()]
+        );
         assert_eq!(plan.order, vec!["rr3-user".to_string()]);
     }
 
@@ -394,7 +427,10 @@ start_priority = 40
             facts("rr3-b", &["cap.b"], &["cap.a"], 100),
             facts("rr3-c", &[], &[], 100),
         ]);
-        assert!(plan.fatal.iter().any(|e| e.starts_with("依赖环涉及")), "{plan:?}");
+        assert!(
+            plan.fatal.iter().any(|e| e.starts_with("依赖环涉及")),
+            "{plan:?}"
+        );
         assert!(plan.order.is_empty(), "{plan:?}");
     }
 }

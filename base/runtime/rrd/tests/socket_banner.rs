@@ -33,6 +33,13 @@ fn banner_and_listen_line_show_the_resolved_absolute_path() {
 
     // 只断言"字符串像绝对路径"不够：连得上、注册得了才证明横幅说的就是绑的那个地方
     let mut c = rrd.rr3_connect();
-    rr3_send(&mut c, &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"));
-    assert_eq!(rr3_read_rpc(&mut c)["result"]["src_task"], 2, "按横幅里的路径连得上、注册得了");
+    rr3_send(
+        &mut c,
+        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
+    );
+    assert_eq!(
+        rr3_read_rpc(&mut c)["result"]["src_task"],
+        2,
+        "按横幅里的路径连得上、注册得了"
+    );
 }

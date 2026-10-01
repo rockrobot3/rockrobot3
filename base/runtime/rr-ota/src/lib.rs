@@ -65,7 +65,10 @@ mod tests {
     fn ota_labels_match_partition_plan() {
         assert_eq!(
             RR3_OTA_SLOT_NAMES,
-            [Rr3Slot::SlotA.rr3_slot_label(), Rr3Slot::SlotB.rr3_slot_label()]
+            [
+                Rr3Slot::SlotA.rr3_slot_label(),
+                Rr3Slot::SlotB.rr3_slot_label()
+            ]
         );
         assert_eq!(RR3_OTA_STAGING_PARTITION, "rr_staging");
     }
@@ -75,7 +78,11 @@ mod tests {
         // peer() 必须是对合（切两次回到原位），且 Factory 无对侧自映射；
         // 若 A/B 映射被调换或 Factory 误指向 A/B，此测试即失败
         for s in [Rr3Slot::SlotA, Rr3Slot::SlotB, Rr3Slot::Factory] {
-            assert_eq!(s.rr3_slot_peer().rr3_slot_peer(), s, "peer() 对合律被破坏: {s:?}");
+            assert_eq!(
+                s.rr3_slot_peer().rr3_slot_peer(),
+                s,
+                "peer() 对合律被破坏: {s:?}"
+            );
         }
         assert_eq!(Rr3Slot::Factory.rr3_slot_peer(), Rr3Slot::Factory);
     }
@@ -113,7 +120,10 @@ mod tests {
             labels_in_cfg.push(&rest[..end]);
             rest = &rest[end..];
         }
-        assert!(!labels_in_cfg.is_empty(), "genimage.cfg 里没有任何 label 条目");
+        assert!(
+            !labels_in_cfg.is_empty(),
+            "genimage.cfg 里没有任何 label 条目"
+        );
 
         // 四个 OTA 槽位标签必须与常量逐字一致
         let ota_labels = [
@@ -134,7 +144,7 @@ mod tests {
         // 已知合法的非 OTA 标签只有 boot 与 rr_data。
         for got in &labels_in_cfg {
             assert!(
-                ota_labels.contains(&got) || matches!(*got, "boot" | "rr_data"),
+                ota_labels.contains(got) || matches!(*got, "boot" | "rr_data"),
                 "genimage.cfg 出现未知分区标签 {got:?}——若为新增分区，\
                  须同批在 rr-ota 登记常量或在本用例登记合法清单"
             );

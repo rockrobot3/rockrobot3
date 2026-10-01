@@ -20,7 +20,7 @@ use rr_ipc::{
     opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3TransportEndpoint, Rr3TransportListener,
     Rr3UdsListener,
 };
-use rr_registry::{Rr3DependsFacts, Rr3TopicSet, rr3_registry_plan_boot};
+use rr_registry::{rr3_registry_plan_boot, Rr3DependsFacts, Rr3TopicSet};
 use serde_json::json;
 
 use crate::cli::RrdConfig;
@@ -240,7 +240,10 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     let mut providers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for j in &jobs {
         for cap in &j.facts.provides {
-            providers.entry(cap.clone()).or_default().insert(j.facts.name.clone());
+            providers
+                .entry(cap.clone())
+                .or_default()
+                .insert(j.facts.name.clone());
         }
     }
     rr3_lock(&shared).rr3_reg_set_providers(providers);
@@ -249,8 +252,10 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
         ));
     }
-    let mut by_name: BTreeMap<String, Rr3SpawnJob> =
-        jobs.into_iter().map(|j| (j.facts.name.clone(), j)).collect();
+    let mut by_name: BTreeMap<String, Rr3SpawnJob> = jobs
+        .into_iter()
+        .map(|j| (j.facts.name.clone(), j))
+        .collect();
     for name in &plan.order {
         if let Some(job) = by_name.remove(name) {
             sup.rr3_boot(job);

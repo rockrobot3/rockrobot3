@@ -136,7 +136,10 @@ fn killed_foreign_peer_is_only_an_eof_and_its_plan_is_skipped() {
     // 本用例的 unregistered 判据就会随机红（实测未排空 10 次红 1 次）。RST 那一支**仍然没人测**
     // ——11b 把"退出码定性"补给了 owned 那一路（`e2e_spawn_restart` 的 S1/S2），而这条连接是
     // 外来的，它连 RST 都只会读成一次 EOF。这里排掉混淆项，不是把它判给"不存在"。
-    assert!(plan.contains("退出（干净收尾）"), "现值：EOF 才叫干净收尾；实际 {plan}");
+    assert!(
+        plan.contains("退出（干净收尾）"),
+        "现值：EOF 才叫干净收尾；实际 {plan}"
+    );
     assert!(
         plan.contains(&format!("entry={}", env!("CARGO_BIN_EXE_sim_peer"))),
         "重启计划必须回显 manifest 里那条绝对 entry（占位符确实被替换过的证据）: {plan}"
@@ -161,8 +164,12 @@ fn identity_comes_from_manifest_not_from_the_role_env() {
     p2.rr3_wait("注册成功 name=rr3-simb");
 
     // task 号各不同且按注册序递增（rrd 分配，与被测进程无关）
-    assert!(rrd.rr3_wait_log("注册 rr3-sima task=2").contains("policy=always"));
-    assert!(rrd.rr3_wait_log("注册 rr3-simb task=3").contains("policy=never"));
+    assert!(rrd
+        .rr3_wait_log("注册 rr3-sima task=2")
+        .contains("policy=always"));
+    assert!(rrd
+        .rr3_wait_log("注册 rr3-simb task=3")
+        .contains("policy=never"));
 
     // 换 role 不换身份：行为变了（它会发布），name 仍是 manifest 里那个。
     // 先 drop p1：同名重复注册会被 EBUSY 挡住（Task 7 已钉），那样测不到 role 这一维。

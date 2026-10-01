@@ -34,8 +34,10 @@ use rr_ipc::{
 use serde_json::{json, Value};
 
 /// 叠加层（Task 2 提交的那份）：夹具主题只在测试里在册
-pub const RR3_OVERLAY_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/sim-topics.toml");
+pub const RR3_OVERLAY_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../tests/fixtures/sim-topics.toml"
+);
 
 /// 既有 19+1+5 条线级用例（`register_publish` / `socket_banner` / `e2e_sim_peer`）统一用的
 /// "安静 tick"（1 小时）。**为什么把既有测试钉在"不过期"上**：
@@ -179,13 +181,7 @@ impl RrdTest {
     /// 套接字名与 `rr3_start` 同一套 pid+tag 唯一名规则（Global Constraints 8）。
     pub fn rr3_start_no_overlay(tag: &str) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
-        RrdTest::rr3_spawn_with_overlay(
-            &socket,
-            None,
-            &socket,
-            None,
-            RR3_QUIET_WATCHDOG_TICK_MS,
-        )
+        RrdTest::rr3_spawn_with_overlay(&socket, None, &socket, None, RR3_QUIET_WATCHDOG_TICK_MS)
     }
 
     /// watchdog 线级用例的唯一入口。**没有默认值**是刻意的：到期判死必须是用例自己声明的
@@ -209,7 +205,12 @@ impl RrdTest {
     /// 复用同一个旋钮（`recv_timeout(sweep)`），所以拿 `RR3_QUIET_WATCHDOG_TICK_MS` 起 boot
     /// 用例会让收尸一小时不发生 —— boot 用例**必须**传小 tick（`E2E_TICK_MS`）。
     /// 这条耦合是指据不是坑：它钉住了"全 daemon 只有一条执行线程 + 一个节拍旋钮"。
-    pub fn rr3_start_boot(tag: &str, manifests: &[&Path], boot_role: &str, tick_ms: u64) -> RrdTest {
+    pub fn rr3_start_boot(
+        tag: &str,
+        manifests: &[&Path],
+        boot_role: &str,
+        tick_ms: u64,
+    ) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
         RrdTest::rr3_spawn_inner(
             &socket,
@@ -257,7 +258,15 @@ impl RrdTest {
     ) -> RrdTest {
         // `boot = (无 manifest, None)`：既有 28 条线级用例的可观察面因此一字未动
         //（既不传 `--manifest`，也不等 `supervisor 启动` 那一行）。
-        RrdTest::rr3_spawn_inner(socket, cwd, socket_arg, overlay, watchdog_tick_ms, &[], None)
+        RrdTest::rr3_spawn_inner(
+            socket,
+            cwd,
+            socket_arg,
+            overlay,
+            watchdog_tick_ms,
+            &[],
+            None,
+        )
     }
 
     /// 起进程的唯一实现。`boot_role: Some(role)` 时才传 `--boot-role`，并且**多等一行**
@@ -275,8 +284,7 @@ impl RrdTest {
     ) -> RrdTest {
         let _ = std::fs::remove_file(socket);
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rrd"));
-        cmd.arg("--socket")
-            .arg(socket_arg);
+        cmd.arg("--socket").arg(socket_arg);
         if let Some(ov) = overlay {
             cmd.arg("--topics-overlay").arg(ov);
         }
@@ -295,13 +303,16 @@ impl RrdTest {
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
         }
-        let mut child = cmd
-            .spawn()
-            .unwrap_or_else(|e| panic!("起 rrd 失败: {e}"));
+        let mut child = cmd.spawn().unwrap_or_else(|e| panic!("起 rrd 失败: {e}"));
 
         let lines = rr3_spawn_line_reader(child.stdout.take().expect("stdout 必须是管道"), "rrd");
 
-        let mut me = RrdTest { socket: socket.to_path_buf(), child, lines, seen: Vec::new() };
+        let mut me = RrdTest {
+            socket: socket.to_path_buf(),
+            child,
+            lines,
+            seen: Vec::new(),
+        };
         me.rr3_wait_log(&format!("监听 {}", socket.display()));
         // 每个用例都付这一行的等待代价，换来的是一条全局前提：**监视线程真的起了**。
         // "起了但不扫"（tick 传错、循环一开始就死锁）由 e2e_watchdog 的判据抓，
@@ -317,10 +328,18 @@ impl RrdTest {
     /// 返回的是带待处理队列的 `RrdClient`（F1），不是裸 `UnixStream`。
     pub fn rr3_connect(&self) -> RrdClient {
         let s = UnixStream::connect(&self.socket).unwrap_or_else(|e| {
-            panic!("连接 {} 失败: {e}；rrd 已打印:\n{}", self.socket.display(), self.seen.join("\n"))
+            panic!(
+                "连接 {} 失败: {e}；rrd 已打印:\n{}",
+                self.socket.display(),
+                self.seen.join("\n")
+            )
         });
-        s.set_read_timeout(Some(Duration::from_secs(5))).expect("set_read_timeout");
-        RrdClient { stream: s, pending: VecDeque::new() }
+        s.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set_read_timeout");
+        RrdClient {
+            stream: s,
+            pending: VecDeque::new(),
+        }
     }
 
     fn rr3_next_line(&mut self, dur: Duration) -> Option<String> {
@@ -354,7 +373,10 @@ impl RrdTest {
     /// 断言 dur 内**没有**某串（重启/广播这类"不该发生"的副作用靠它抓）
     pub fn rr3_assert_no_log(&mut self, needle: &str, dur: Duration) {
         let logs = self.rr3_logs(dur);
-        assert!(!logs.contains(needle), "不该出现 {needle:?}；实际日志:\n{logs}");
+        assert!(
+            !logs.contains(needle),
+            "不该出现 {needle:?}；实际日志:\n{logs}"
+        );
     }
 }
 
@@ -427,7 +449,12 @@ pub fn rr3_rpc_frame(method: &str, id: u64, params: Value, src_task: u64) -> Rr3
 
 /// 注册帧（此时模块还没有 task，按契约填 0——"用户态不得自设"的另一种写法）
 pub fn rr3_register_frame(manifest: &str, name: &str) -> Rr3Frame {
-    rr3_rpc_frame("rr3.register", 1, json!({"name": name, "manifest": manifest}), 0)
+    rr3_rpc_frame(
+        "rr3.register",
+        1,
+        json!({"name": name, "manifest": manifest}),
+        0,
+    )
 }
 
 /// 一条连接上的裸客户端 + **按连接存在的待处理队列**（F1）。
@@ -467,7 +494,11 @@ fn rr3_pending_dump(c: &RrdClient) -> String {
     format!(
         "队列里已积压 {} 帧:\n{}",
         c.pending.len(),
-        c.pending.iter().map(rr3_frame_brief).collect::<Vec<_>>().join("\n---\n")
+        c.pending
+            .iter()
+            .map(rr3_frame_brief)
+            .collect::<Vec<_>>()
+            .join("\n---\n")
     )
 }
 
@@ -608,7 +639,9 @@ pub fn rr3_collect_within(c: &mut RrdClient, dur: Duration) -> Vec<Rr3Frame> {
 /// 第一条 Response
 pub fn rr3_read_rpc_frame(c: &mut RrdClient) -> Rr3Frame {
     rr3_read_where(c, " Response", |f| {
-        rr3_body_split(&f.payload).map(|(ty, _)| ty == Rr3PayloadType::Response).unwrap_or(false)
+        rr3_body_split(&f.payload)
+            .map(|(ty, _)| ty == Rr3PayloadType::Response)
+            .unwrap_or(false)
     })
 }
 
@@ -619,17 +652,21 @@ pub fn rr3_read_rpc(c: &mut RrdClient) -> Value {
 
 /// 第一条 `rr3-runtime/module/state` 广播且 module/phase 匹配，返回体
 pub fn rr3_read_state(c: &mut RrdClient, module: &str, phase: &str) -> Value {
-    let f = rr3_read_where(c, &format!("state 广播 {module}/{phase}"), |f| {
-        match rr3_body_split(&f.payload) {
+    let f = rr3_read_where(
+        c,
+        &format!("state 广播 {module}/{phase}"),
+        |f| match rr3_body_split(&f.payload) {
             Ok((Rr3PayloadType::Notification, body)) => {
-                let Ok(v) = serde_json::from_slice::<Value>(&body) else { return false };
+                let Ok(v) = serde_json::from_slice::<Value>(&body) else {
+                    return false;
+                };
                 v["topic"] == "rr3-runtime/module/state"
                     && v["module"] == module
                     && v["phase"] == phase
             }
             _ => false,
-        }
-    });
+        },
+    );
     rr3_json_of(&f)
 }
 
@@ -671,7 +708,10 @@ pub fn rr3_fixture_manifest(tag: &str, dir: &str) -> SimManifest {
         "CARGO_BIN_EXE 必须是绝对路径，否则 entry 门禁会拒: {entry}"
     );
     let rendered = text.replace(RR3_ENTRY_PLACEHOLDER, entry);
-    assert!(!rendered.contains(RR3_ENTRY_PLACEHOLDER), "entry 占位符没被替换: {dir}");
+    assert!(
+        !rendered.contains(RR3_ENTRY_PLACEHOLDER),
+        "entry 占位符没被替换: {dir}"
+    );
     let path = PathBuf::from(format!(
         "/tmp/rr3-m2-sim-{}-{tag}-{dir}.toml",
         std::process::id()
@@ -690,16 +730,14 @@ pub fn rr3_fixture_manifest(tag: &str, dir: &str) -> SimManifest {
 /// 收尸那一路于是走 Silent，断言红在竞争噪声而不是被测行为上。拉大这一用例副本的
 /// watchdog 窗口，把"谁先记"的竞争从用判据里排掉（R-A4 本来就允许两路任一先记）。
 pub fn rr3_fixture_watchdog_ms(m: &SimManifest, ms: u64) {
-    let text =
-        std::fs::read_to_string(&m.path).unwrap_or_else(|e| panic!("读夹具副本失败: {e}"));
+    let text = std::fs::read_to_string(&m.path).unwrap_or_else(|e| panic!("读夹具副本失败: {e}"));
     let needle = "watchdog_timeout_ms = 500";
     let replaced = text.replace(needle, &format!("watchdog_timeout_ms = {ms}"));
     assert!(
         replaced != text && replaced.contains(&format!("watchdog_timeout_ms = {ms}")),
         "夹具副本里没有 {needle:?} 可改——fixture 形状变了，本助手的隔离前提失效"
     );
-    std::fs::write(&m.path, replaced)
-        .unwrap_or_else(|e| panic!("写夹具副本失败: {e}"));
+    std::fs::write(&m.path, replaced).unwrap_or_else(|e| panic!("写夹具副本失败: {e}"));
 }
 
 /// pid 还活着吗。Linux 走 `/proc/{pid}`；macOS 没有 /proc（S5 在 mac 上恒红的根因），
@@ -738,8 +776,13 @@ impl SimPeer {
         let mut child = cmd
             .spawn()
             .unwrap_or_else(|e| panic!("起 sim_peer（role={role}）失败: {e}"));
-        let lines = rr3_spawn_line_reader(child.stdout.take().expect("stdout 必须是管道"), "sim-peer");
-        SimPeer { child, lines, seen: Vec::new() }
+        let lines =
+            rr3_spawn_line_reader(child.stdout.take().expect("stdout 必须是管道"), "sim-peer");
+        SimPeer {
+            child,
+            lines,
+            seen: Vec::new(),
+        }
     }
 
     /// 等到夹具自己打出的里程碑行。上限用 READY_TIMEOUT（与 `RrdTest::rr3_wait_ready`

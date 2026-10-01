@@ -31,7 +31,9 @@ impl Rr3TransportEndpoint for Rr3UdsListener {
 
     /// `UnixListener::bind`。调用前先 `rr3_cleanup`：uds 不允许 bind 到已存在的路径。
     fn rr3_bind(path: &Path) -> io::Result<Self> {
-        Ok(Self { inner: UnixListener::bind(path)? })
+        Ok(Self {
+            inner: UnixListener::bind(path)?,
+        })
     }
 }
 
@@ -53,10 +55,10 @@ impl Rr3UdsListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{Rr3TransportConn, Rr3TransportEndpoint, Rr3TransportListener};
     use crate::protocol::header::{opcode, Rr3Header};
     use crate::transport::buf::Rr3FrameBuf;
     use crate::transport::frame::Rr3Frame;
+    use crate::transport::{Rr3TransportConn, Rr3TransportEndpoint, Rr3TransportListener};
 
     /// 唯一临时路径：进程号 + 自增计数，免引外部依赖
     fn tmp_sock(tag: &str) -> std::path::PathBuf {
@@ -116,7 +118,10 @@ mod tests {
             Rr3Frame::try_from(conn.rr3_recv_buf().unwrap()).unwrap()
         });
         let mut client = Rr3UdsListener::rr3_connect(&p).unwrap();
-        let f = Rr3Frame { header: hdr(3), payload: b"abc"[..].to_vec() };
+        let f = Rr3Frame {
+            header: hdr(3),
+            payload: b"abc"[..].to_vec(),
+        };
         client.rr3_send_buf(Rr3FrameBuf::from(&f)).unwrap();
         let back = server.join().unwrap();
         assert_eq!(back, f);

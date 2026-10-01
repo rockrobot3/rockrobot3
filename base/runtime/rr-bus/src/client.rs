@@ -50,7 +50,9 @@ pub struct Rr3BusIdentity {
 }
 
 pub fn rr3_manifest_identity(text: &str) -> Result<Rr3BusIdentity, String> {
-    let root: toml::Value = text.parse().map_err(|e| format!("manifest 不是合法 TOML: {e}"))?;
+    let root: toml::Value = text
+        .parse()
+        .map_err(|e| format!("manifest 不是合法 TOML: {e}"))?;
     let name = root
         .get("manifest")
         .and_then(|m| m.get("name"))
@@ -78,7 +80,9 @@ pub fn rr3_manifest_entry_absolutize(text: &str, exe: &Path) -> Result<String, S
     if !Path::new(&exe).is_absolute() {
         return Err(format!("entry 绝对化失败：{exe} 不是绝对路径"));
     }
-    let mut root: toml::Value = text.parse().map_err(|e| format!("manifest 不是合法 TOML: {e}"))?;
+    let mut root: toml::Value = text
+        .parse()
+        .map_err(|e| format!("manifest 不是合法 TOML: {e}"))?;
     root.get_mut("manifest")
         .ok_or("manifest 缺 [manifest] 表")?
         .as_table_mut()
@@ -88,7 +92,10 @@ pub fn rr3_manifest_entry_absolutize(text: &str, exe: &Path) -> Result<String, S
 }
 
 fn rr3_now_ns() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
 }
 
 struct Rr3Inner {
@@ -107,8 +114,11 @@ struct Rr3Inner {
 impl Rr3Inner {
     fn rr3_write_frame(&self, mut frame: Rr3Frame) -> Result<(), String> {
         frame.header.payload_len = frame.payload.len() as u32;
-        rr3_frame_write(&mut *self.sock.lock().unwrap_or_else(|p| p.into_inner()), &frame)
-            .map_err(|e| format!("写帧失败: {e:?}"))
+        rr3_frame_write(
+            &mut *self.sock.lock().unwrap_or_else(|p| p.into_inner()),
+            &frame,
+        )
+        .map_err(|e| format!("写帧失败: {e:?}"))
     }
 
     /// 上行 Request 一次一答。先占邮箱再发帧：应答不可能落在邮箱就位前。
@@ -121,7 +131,10 @@ impl Rr3Inner {
     ) -> Result<Value, String> {
         let id = self.rr3_next_id();
         let (tx, rx) = mpsc::sync_channel(1);
-        self.pending.lock().unwrap_or_else(|p| p.into_inner()).insert(id, tx);
+        self.pending
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(id, tx);
         let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         let frame = Rr3Frame {
             header: Rr3Header {
@@ -136,13 +149,19 @@ impl Rr3Inner {
             payload: rr3_body_encode(Rr3PayloadType::Request, body.to_string().as_bytes()),
         };
         if let Err(e) = self.rr3_write_frame(frame) {
-            self.pending.lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
+            self.pending
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&id);
             return Err(e);
         }
         match rx.recv_timeout(timeout) {
             Ok(v) => v,
             Err(_) => {
-                self.pending.lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
+                self.pending
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
                 Err(format!("RPC {method} 等应答超时（{timeout:?}）"))
             }
         }
@@ -164,7 +183,9 @@ pub struct Rr3BusClient {
 
 impl Clone for Rr3BusClient {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -172,7 +193,8 @@ impl Rr3BusClient {
     /// 一站式连接：读环境变量 → 取身份 → 绝对化 entry → 连接 → 注册 → 起心跳。
     /// 模块 main 的第一行就该是它；失败即返回 `Err`，由调用方决定退出。
     pub fn rr3_connect(manifest_text: &str) -> Result<Self, String> {
-        let path = std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
+        let path =
+            std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
         let identity = rr3_manifest_identity(manifest_text)?;
         let exe = std::env::current_exe().map_err(|e| format!("取 current_exe 失败: {e}"))?;
         let wire = rr3_manifest_entry_absolutize(manifest_text, &exe)?;
@@ -180,9 +202,15 @@ impl Rr3BusClient {
     }
 
     /// 测试与特殊部署的注入口：路径、身份、线上 manifest 三者显式给定。
-    fn rr3_connect_with(path: &str, identity: Rr3BusIdentity, wire_manifest: &str) -> Result<Self, String> {
+    fn rr3_connect_with(
+        path: &str,
+        identity: Rr3BusIdentity,
+        wire_manifest: &str,
+    ) -> Result<Self, String> {
         let stream = UnixStream::connect(path).map_err(|e| format!("连总线 {path} 失败: {e}"))?;
-        let writer = stream.try_clone().map_err(|e| format!("try_clone 失败: {e}"))?;
+        let writer = stream
+            .try_clone()
+            .map_err(|e| format!("try_clone 失败: {e}"))?;
         let (tx, rx) = mpsc::channel::<Rr3Frame>();
         let inner = Arc::new(Rr3Inner {
             task: AtomicU64::new(0),
@@ -244,7 +272,12 @@ impl Rr3BusClient {
                     return;
                 }
                 if hb_inner
-                    .rr3_call_inner(hb_inner.rr3_task(), "rr3.heartbeat", json!({}), Duration::from_secs(5))
+                    .rr3_call_inner(
+                        hb_inner.rr3_task(),
+                        "rr3.heartbeat",
+                        json!({}),
+                        Duration::from_secs(5),
+                    )
                     .is_err()
                     && !hb_inner.stop.load(Ordering::Relaxed)
                 {
@@ -275,14 +308,29 @@ impl Rr3BusClient {
     }
 
     /// 上行 RPC 一次一答（rr3.heartbeat 由心跳线程用，模块业务也可用）
-    pub fn rr3_call(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
-        self.inner.rr3_call_inner(self.inner.rr3_task(), method, params, timeout)
+    pub fn rr3_call(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        self.inner
+            .rr3_call_inner(self.inner.rr3_task(), method, params, timeout)
     }
 
     /// 模块间请求：`rr3.call`（第 4 个上行 RPC 方法）。`args` 原样进 params.args，
     /// 由 rrd 路由到 exposes 该 topic 的在册模块，trace_id = 调用方 task。
-    pub fn rr3_call_topic(&self, topic: &str, args: Value, timeout: Duration) -> Result<Value, String> {
-        self.rr3_call(RR3_METHOD_CALL, json!({"topic": topic, "args": args}), timeout)
+    pub fn rr3_call_topic(
+        &self,
+        topic: &str,
+        args: Value,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        self.rr3_call(
+            RR3_METHOD_CALL,
+            json!({"topic": topic, "args": args}),
+            timeout,
+        )
     }
 
     /// 业务发布：Event 帧，topic 并入体（conn.rs 按 body["topic"] 归属检查）。
@@ -363,7 +411,8 @@ impl Rr3BusClient {
     /// 解出帧的 payload 类型与 JSON 体；非 JSON 体返回 `Err`。
     /// 模块分派循环的第一步（payload 前缀 + 体的形状在这里一并落地）。
     pub fn rr3_frame_body(frame: &Rr3Frame) -> Result<(Rr3PayloadType, Value), String> {
-        let (ty, body) = rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+        let (ty, body) =
+            rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
         let v: Value = serde_json::from_slice(&body).map_err(|e| format!("帧体不是 JSON: {e}"))?;
         Ok((ty, v))
     }
@@ -385,11 +434,8 @@ impl Drop for Rr3BusClient {
 
 /// reader 主循环：Response 按 id 投邮箱，其余进 inbox；连接死亡时唤醒所有等待者。
 fn rr3_reader_loop(sock: &mut UnixStream, inner: Arc<Rr3Inner>, inbox_tx: mpsc::Sender<Rr3Frame>) {
-    loop {
-        let frame = match rr3_frame_read(&mut *sock) {
-            Ok(f) => f,
-            Err(_) => break, // EOF / 超时 / 坏帧：统一按断开处理
-        };
+    // EOF / 超时 / 坏帧：统一按断开处理
+    while let Ok(frame) = rr3_frame_read(&mut *sock) {
         if inner.stop.load(Ordering::Relaxed) {
             break;
         }
@@ -404,7 +450,11 @@ fn rr3_reader_loop(sock: &mut UnixStream, inner: Arc<Rr3Inner>, inbox_tx: mpsc::
                 Err(_) => break,
             };
             let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
-            let sender = inner.pending.lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
+            let sender = inner
+                .pending
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&id);
             if let Some(tx) = sender {
                 let payload = match v.get("result") {
                     Some(r) => Ok(r.clone()),
@@ -435,7 +485,6 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
-    use std::sync::atomic::AtomicUsize;
 
     const MANIFEST: &str = "[manifest]\nschema_version = 1\nname = \"rr3-bus-t\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/bin/true\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 50\n";
 
@@ -443,11 +492,19 @@ mod tests {
     /// 点名 Request 原样记账。行为写死（测试夹具，不是通用服务器）。
     fn fake_rrd(listener: UnixListener, log: Arc<Mutex<Vec<(String, Value)>>>) {
         let (mut stream, _) = listener.accept().expect("假 rrd 应接受到连接");
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         loop {
-            let Some(frame) = rr3_frame_read(&mut stream).ok() else { return };
-            let Ok((ty, body)) = rr3_body_split(&frame.payload) else { return };
-            let Ok(v) = serde_json::from_slice::<Value>(&body) else { return };
+            let Some(frame) = rr3_frame_read(&mut stream).ok() else {
+                return;
+            };
+            let Ok((ty, body)) = rr3_body_split(&frame.payload) else {
+                return;
+            };
+            let Ok(v) = serde_json::from_slice::<Value>(&body) else {
+                return;
+            };
             match ty {
                 Rr3PayloadType::Request => {
                     let method = v["method"].as_str().unwrap_or("").to_string();
@@ -457,10 +514,17 @@ mod tests {
                         "rr3.heartbeat" => (json!({"beat": "accepted"}), true),
                         _ => (json!({"noop": true}), true),
                     };
-                    log.lock().unwrap().push((method.clone(), v["params"].clone()));
+                    log.lock()
+                        .unwrap()
+                        .push((method.clone(), v["params"].clone()));
                     if method != RR3_METHOD_CALL {
-                        let reply = if ok { json!({"jsonrpc": "2.0", "id": id, "result": result}) } else { v.clone() };
-                        let payload = rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
+                        let reply = if ok {
+                            json!({"jsonrpc": "2.0", "id": id, "result": result})
+                        } else {
+                            v.clone()
+                        };
+                        let payload =
+                            rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
                         let out = Rr3Frame {
                             header: Rr3Header {
                                 opcode: opcode::SEND,
@@ -482,7 +546,9 @@ mod tests {
                     log.lock().unwrap().push(("EVENT".into(), v.clone()));
                     let payload = rr3_body_encode(
                         Rr3PayloadType::Event,
-                        json!({"topic": "rr3-fake/echo", "echo": true}).to_string().as_bytes(),
+                        json!({"topic": "rr3-fake/echo", "echo": true})
+                            .to_string()
+                            .as_bytes(),
                     );
                     let out = Rr3Frame {
                         header: Rr3Header {
@@ -507,7 +573,14 @@ mod tests {
 
     fn tmp_bus_path(tag: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("rr3-bus-t-{tag}-{}-{}.sock", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos()));
+        p.push(format!(
+            "rr3-bus-t-{tag}-{}-{}.sock",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
         p
     }
 
@@ -515,8 +588,12 @@ mod tests {
         let path = tmp_bus_path(tag);
         let listener = UnixListener::bind(&path).unwrap();
         std::thread::spawn(move || fake_rrd(listener, log));
-        let client = Rr3BusClient::rr3_connect_with(path.to_str().unwrap(), rr3_manifest_identity(MANIFEST).unwrap(), MANIFEST)
-            .expect("连假 rrd 应成功");
+        let client = Rr3BusClient::rr3_connect_with(
+            path.to_str().unwrap(),
+            rr3_manifest_identity(MANIFEST).unwrap(),
+            MANIFEST,
+        )
+        .expect("连假 rrd 应成功");
         (client, path)
     }
 
@@ -526,14 +603,20 @@ mod tests {
         assert_eq!(id.name, "rr3-bus-t");
         assert_eq!(id.heartbeat_ms, 50);
         assert!(rr3_manifest_identity("no-toml-here [").is_err());
-        assert!(rr3_manifest_identity("[manifest]\nname=\"x\"\n").is_err(), "缺 heartbeat_ms 必须报错");
+        assert!(
+            rr3_manifest_identity("[manifest]\nname=\"x\"\n").is_err(),
+            "缺 heartbeat_ms 必须报错"
+        );
     }
 
     #[test]
     fn entry_absolutize_rewrites_entry_and_keeps_rest() {
         let out = rr3_manifest_entry_absolutize(MANIFEST, Path::new("/opt/rr3/rr3-sense")).unwrap();
         let root: toml::Value = out.parse().unwrap();
-        assert_eq!(root["manifest"]["entry"].as_str(), Some("/opt/rr3/rr3-sense"));
+        assert_eq!(
+            root["manifest"]["entry"].as_str(),
+            Some("/opt/rr3/rr3-sense")
+        );
         assert_eq!(root["manifest"]["name"].as_str(), Some("rr3-bus-t"));
         assert_eq!(root["health"]["heartbeat_ms"].as_integer(), Some(50));
         assert!(rr3_manifest_entry_absolutize(MANIFEST, Path::new("rel/bin")).is_err());
@@ -545,10 +628,15 @@ mod tests {
         let (client, path) = connect_on("call", log.clone());
         assert_eq!(client.rr3_task(), 7);
         assert_eq!(client.rr3_name(), "rr3-bus-t");
-        let r = client.rr3_call("rr3.heartbeat", json!({}), Duration::from_secs(2)).unwrap();
+        let r = client
+            .rr3_call("rr3.heartbeat", json!({}), Duration::from_secs(2))
+            .unwrap();
         assert_eq!(r["beat"], "accepted");
         let log = log.lock().unwrap();
-        assert!(log.iter().any(|(m, _)| m == "rr3.register"), "注册帧必须到过假 rrd");
+        assert!(
+            log.iter().any(|(m, _)| m == "rr3.register"),
+            "注册帧必须到过假 rrd"
+        );
         assert!(log.iter().any(|(m, _)| m == "rr3.heartbeat"));
         drop(client);
         let _ = std::fs::remove_file(&path);
@@ -559,14 +647,20 @@ mod tests {
         let log = Arc::new(Mutex::new(Vec::new()));
         let (client, path) = connect_on("pub", log.clone());
         client.rr3_publish("rr3-t/pcm", json!({"seq": 1})).unwrap();
-        assert!(client.rr3_publish("bad", json!([])).is_err(), "非对象体必须被拒");
+        assert!(
+            client.rr3_publish("bad", json!([])).is_err(),
+            "非对象体必须被拒"
+        );
         let frames = client.rr3_poll_wait(Duration::from_secs(2));
         assert_eq!(frames.len(), 1, "回播的广播应落进 inbox");
         let (ty, v) = Rr3BusClient::rr3_frame_body(&frames[0]).unwrap();
         assert_eq!(ty, Rr3PayloadType::Event);
         assert_eq!(v["topic"], "rr3-fake/echo");
         let log = log.lock().unwrap();
-        let pubed = log.iter().find(|(m, _)| *m == "EVENT").expect("发布应到达假 rrd");
+        let pubed = log
+            .iter()
+            .find(|(m, _)| *m == "EVENT")
+            .expect("发布应到达假 rrd");
         assert_eq!(pubed.1["topic"], "rr3-t/pcm");
         assert_eq!(pubed.1["seq"], 1);
         drop(client);
@@ -581,7 +675,10 @@ mod tests {
         // 假 rrd 对 rr3.call 不回标准应答（走 _ 分支回了 {"noop":true}）——够用来核对线上形状
         let _ = client.rr3_call_topic("rr3-t/say", json!({"text": "hi"}), Duration::from_secs(2));
         let log = log.lock().unwrap();
-        let (_, params) = log.iter().find(|(m, _)| m == RR3_METHOD_CALL).expect("rr3.call 应到达");
+        let (_, params) = log
+            .iter()
+            .find(|(m, _)| m == RR3_METHOD_CALL)
+            .expect("rr3.call 应到达");
         assert_eq!(params["topic"], "rr3-t/say");
         assert_eq!(params["args"]["text"], "hi");
         drop(client);
@@ -600,13 +697,17 @@ mod tests {
         // 让 stream 掉线（FIN）——直接退场会和 connect 返回赛跑，探针的初值就成了赌运气
         let (close_tx, close_rx) = mpsc::channel::<()>();
         std::thread::spawn(move || {
-            let Ok(mut stream) = listener.accept().map(|(s, _)| s) else { return };
+            let Ok(mut stream) = listener.accept().map(|(s, _)| s) else {
+                return;
+            };
             if rr3_frame_read(&mut stream).is_err() {
                 return;
             }
             let payload = rr3_body_encode(
                 Rr3PayloadType::Response,
-                json!({"jsonrpc": "2.0", "id": 1, "result": {"src_task": 7}}).to_string().as_bytes(),
+                json!({"jsonrpc": "2.0", "id": 1, "result": {"src_task": 7}})
+                    .to_string()
+                    .as_bytes(),
             );
             let out = Rr3Frame {
                 header: Rr3Header {
@@ -647,7 +748,10 @@ mod tests {
         // 断开后的 poll_wait 立即返回空（满转僵尸的根源，这里钉住它是"可检测的"）
         let started = Instant::now();
         assert!(client.rr3_poll_wait(Duration::from_secs(5)).is_empty());
-        assert!(started.elapsed() < Duration::from_secs(1), "断开后 poll_wait 必须立即返回");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "断开后 poll_wait 必须立即返回"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

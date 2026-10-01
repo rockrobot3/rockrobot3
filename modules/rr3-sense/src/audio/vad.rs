@@ -27,7 +27,11 @@ pub struct Rr3VadConfig {
 
 impl Default for Rr3VadConfig {
     fn default() -> Self {
-        Self { rms_start: 1500, silence_tail_ms: 700, min_speech_ms: 200 }
+        Self {
+            rms_start: 1500,
+            silence_tail_ms: 700,
+            min_speech_ms: 200,
+        }
     }
 }
 
@@ -205,7 +209,10 @@ mod tests {
         }
         assert_eq!(
             vad.rr3_vad_feed(&frame(3000)),
-            Some(Rr3VadEdge::Onset { rms_peak: 3000, speech_ms: 200 })
+            Some(Rr3VadEdge::Onset {
+                rms_peak: 3000,
+                speech_ms: 200
+            })
         );
     }
 
@@ -256,7 +263,10 @@ mod tests {
         }
         assert_eq!(
             vad.rr3_vad_feed(&frame(4000)),
-            Some(Rr3VadEdge::Onset { rms_peak: 4000, speech_ms: 200 })
+            Some(Rr3VadEdge::Onset {
+                rms_peak: 4000,
+                speech_ms: 200
+            })
         );
     }
 
@@ -289,7 +299,11 @@ mod tests {
         // 再 35 帧静音 → 第 35 帧发 Offset，净 speech_ms = 200（起音）+ 200（恢复），
         // 首段尾静音（600ms）与第二段尾静音均不计入
         for i in 1..35u32 {
-            assert_eq!(vad.rr3_vad_feed(&frame(0)), None, "恢复后静音第 {i} 帧不该发边沿");
+            assert_eq!(
+                vad.rr3_vad_feed(&frame(0)),
+                None,
+                "恢复后静音第 {i} 帧不该发边沿"
+            );
         }
         assert_eq!(
             vad.rr3_vad_feed(&frame(0)),

@@ -76,13 +76,18 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return (Box::new(crate::linux::Rr3AlsaAudioSource::rr3_alsa_source_default()), RR3_BACKEND_LINUX);
+            return (
+                Box::new(crate::linux::Rr3AlsaAudioSource::rr3_alsa_source_default()),
+                RR3_BACKEND_LINUX,
+            );
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         _ => (
-            Box::new(crate::sim::Rr3SimAudioSource::rr3_sim_source_new(rr3_hal_sim_wave())),
+            Box::new(crate::sim::Rr3SimAudioSource::rr3_sim_source_new(
+                rr3_hal_sim_wave(),
+            )),
             RR3_BACKEND_SIM,
         ),
     }
@@ -93,7 +98,10 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return (Box::new(crate::linux::Rr3AlsaAudioSink::rr3_alsa_sink_default()), RR3_BACKEND_LINUX);
+            return (
+                Box::new(crate::linux::Rr3AlsaAudioSink::rr3_alsa_sink_default()),
+                RR3_BACKEND_LINUX,
+            );
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }

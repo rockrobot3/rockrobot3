@@ -33,7 +33,11 @@ fn rr3_alsa_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
     Ok(())
 }
 
-fn rr3_alsa_open(cfg: Rr3AudioCfg, dir: alsa::Direction, device: &str) -> Result<alsa::pcm::PCM, Rr3HalError> {
+fn rr3_alsa_open(
+    cfg: Rr3AudioCfg,
+    dir: alsa::Direction,
+    device: &str,
+) -> Result<alsa::pcm::PCM, Rr3HalError> {
     let pcm = alsa::pcm::PCM::new(device, dir, false)
         .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 打开设备 {device:?} 失败: {e}")))?;
     {
@@ -43,10 +47,13 @@ fn rr3_alsa_open(cfg: Rr3AudioCfg, dir: alsa::Direction, device: &str) -> Result
             .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 设 access 失败: {e}")))?;
         hwp.set_format(alsa::pcm::Format::s16())
             .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 设 s16 格式失败: {e}")))?;
-        hwp.set_channels(cfg.channels as u32)
-            .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 设声道 {} 失败: {e}", cfg.channels)))?;
+        hwp.set_channels(cfg.channels as u32).map_err(|e| {
+            Rr3HalError::InvalidParam(format!("alsa 设声道 {} 失败: {e}", cfg.channels))
+        })?;
         hwp.set_rate(cfg.sample_rate_hz, alsa::ValueOr::Nearest)
-            .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 设采样率 {} 失败: {e}", cfg.sample_rate_hz)))?;
+            .map_err(|e| {
+                Rr3HalError::InvalidParam(format!("alsa 设采样率 {} 失败: {e}", cfg.sample_rate_hz))
+            })?;
         pcm.hw_params(&hwp)
             .map_err(|e| Rr3HalError::InvalidParam(format!("alsa hw_params 提交失败: {e}")))?;
     }
@@ -78,7 +85,10 @@ pub struct Rr3AlsaAudioSource {
 impl Rr3AlsaAudioSource {
     /// 设备名取 `RR3_HAL_ALSA_DEVICE`（未设则 `default`），见 backend.rs
     pub fn rr3_alsa_source_default() -> Self {
-        Self { device: rr3_alsa_device(), open: Mutex::new(None) }
+        Self {
+            device: rr3_alsa_device(),
+            open: Mutex::new(None),
+        }
     }
 }
 
@@ -110,7 +120,10 @@ impl Rr3AudioSource for Rr3AlsaAudioSource {
                 }
             }
         }
-        Ok(Rr3PcmStream { cfg: open.cfg, samples: buf })
+        Ok(Rr3PcmStream {
+            cfg: open.cfg,
+            samples: buf,
+        })
     }
 }
 
@@ -123,7 +136,10 @@ pub struct Rr3AlsaAudioSink {
 impl Rr3AlsaAudioSink {
     /// 设备名取 `RR3_HAL_ALSA_DEVICE`（未设则 `default`），见 backend.rs
     pub fn rr3_alsa_sink_default() -> Self {
-        Self { device: rr3_alsa_device(), open: Mutex::new(None) }
+        Self {
+            device: rr3_alsa_device(),
+            open: Mutex::new(None),
+        }
     }
 }
 
@@ -139,7 +155,9 @@ impl Rr3AudioSink for Rr3AlsaAudioSink {
     async fn write(&self, pcm_in: Rr3PcmStream) -> Result<(), Rr3HalError> {
         let mut guard = self.open.lock().unwrap_or_else(|p| p.into_inner());
         let Some(open) = guard.as_mut() else {
-            return Err(Rr3HalError::InvalidParam("alsa 扬声器 write 前必须 open".into()));
+            return Err(Rr3HalError::InvalidParam(
+                "alsa 扬声器 write 前必须 open".into(),
+            ));
         };
         if pcm_in.cfg != open.cfg {
             return Err(Rr3HalError::InvalidParam(format!(

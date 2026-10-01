@@ -68,7 +68,9 @@ mod peer {
 
         let mut stream = UnixStream::connect(&bus).map_err(|e| format!("连 {bus} 失败: {e}"))?;
         // 有超时：卡住要成为"夹具退出并打一行原因"，而不是把整个 cargo test 挂住
-        stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .map_err(|e| e.to_string())?;
 
         // 注册前还没有 task，按契约填 0（"用户态不得自设"的另一种写法，与夹具同形）
         rr3_send(
@@ -80,9 +82,11 @@ mod peer {
         )?;
         let reply = rr3_wait_reply(&mut stream, 1)?;
         if reply["error"].is_object() {
-            return Err(format!("注册被拒: {}", &reply["error"]));
+            return Err(format!("注册被拒: {}", reply["error"]));
         }
-        let task = reply["result"]["src_task"].as_u64().ok_or("注册应答里没有 result.src_task")?;
+        let task = reply["result"]["src_task"]
+            .as_u64()
+            .ok_or("注册应答里没有 result.src_task")?;
         println!("sim-peer: 注册成功 name={} task={task}", facts.name);
 
         match role.as_str() {
@@ -90,7 +94,12 @@ mod peer {
             "publish_once" => {
                 // 主题名从自己的 manifest 取（约定 2），不硬编码
                 let topic = rr3_first_publish(&text).ok_or("publish_once 需要 publishes 非空")?;
-                rr3_send(&mut stream, Rr3PayloadType::Event, task, &json!({"topic": topic, "seq": 1}))?;
+                rr3_send(
+                    &mut stream,
+                    Rr3PayloadType::Event,
+                    task,
+                    &json!({"topic": topic, "seq": 1}),
+                )?;
                 println!("sim-peer: 已发布 {topic}");
                 rr3_beat(&mut stream, task, 10)
             }
@@ -103,7 +112,7 @@ mod peer {
                 )?;
                 let r = rr3_wait_reply(&mut stream, 2)?;
                 if r["error"].is_object() {
-                    return Err(format!("退场被拒: {}", &r["error"]));
+                    return Err(format!("退场被拒: {}", r["error"]));
                 }
                 println!("sim-peer: 已主动退场");
                 Ok(()) // 返回即 drop 掉 stream
@@ -205,7 +214,7 @@ mod peer {
         let reply = rr3_wait_reply(stream, id)?;
         if reply["error"].is_object() {
             // 被拒即致命：继续喂一条已经不在册的连接没有任何观察价值
-            return Err(format!("喂狗被拒: {}", &reply["error"]));
+            return Err(format!("喂狗被拒: {}", reply["error"]));
         }
         Ok(())
     }
@@ -225,7 +234,12 @@ mod peer {
     }
 
     /// 写一帧：payload 先编（2 字节类型前缀），`payload_len` 取**编出来之后**的字节数
-    fn rr3_send(stream: &mut UnixStream, ty: Rr3PayloadType, src: u64, body: &Value) -> Result<(), String> {
+    fn rr3_send(
+        stream: &mut UnixStream,
+        ty: Rr3PayloadType,
+        src: u64,
+        body: &Value,
+    ) -> Result<(), String> {
         let payload = rr3_body_encode(ty, body.to_string().as_bytes());
         let frame = Rr3Frame {
             header: Rr3Header {
@@ -256,7 +270,8 @@ mod peer {
             if ty != Rr3PayloadType::Response {
                 continue; // 下行广播（Notification）不是我要的
             }
-            let v: Value = serde_json::from_slice(&body).map_err(|e| format!("应答体不是 JSON: {e}"))?;
+            let v: Value =
+                serde_json::from_slice(&body).map_err(|e| format!("应答体不是 JSON: {e}"))?;
             if v["id"].as_u64() == Some(id) {
                 return Ok(v);
             }

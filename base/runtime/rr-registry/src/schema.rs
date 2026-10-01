@@ -45,7 +45,12 @@ pub fn rr3_registry_field_specs() -> Vec<Rr3FieldSpec> {
 pub fn rr3_registry_rule_list(name: &str) -> Option<Vec<String>> {
     let root: Value = toml::from_str(RR3_MODULE_SCHEMA_TOML).ok()?;
     let arr = root.get("rules")?.get(name)?.as_array()?;
-    Some(arr.iter().filter_map(Value::as_str).map(str::to_string).collect())
+    Some(
+        arr.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
 /// 按点分路径取 manifest 值（`"events.publishes"` → 两级 table 遍历）
@@ -63,9 +68,9 @@ mod tests {
 
     #[test]
     fn schema_get_by_path_resolves_nested_list() {
-        let v: Value = toml::from_str("[events]\npublishes = [\"rr3-sense/audio/vad_start\"]\n").unwrap();
-        let got = rr3_registry_get_by_path(&v, "events.publishes")
-            .expect("嵌套路径必须解析到");
+        let v: Value =
+            toml::from_str("[events]\npublishes = [\"rr3-sense/audio/vad_start\"]\n").unwrap();
+        let got = rr3_registry_get_by_path(&v, "events.publishes").expect("嵌套路径必须解析到");
         assert_eq!(got.as_array().unwrap().len(), 1);
     }
 
@@ -95,7 +100,16 @@ mod tests {
         seen.sort_unstable();
         seen.dedup();
         assert_eq!(seen.len(), before, "字段路径不得重复");
-        let sections = ["manifest", "provides", "depends", "events", "rpc", "resources", "health", "upgrades"];
+        let sections = [
+            "manifest",
+            "provides",
+            "depends",
+            "events",
+            "rpc",
+            "resources",
+            "health",
+            "upgrades",
+        ];
         for s in &specs {
             let head = s.path.split('.').next().unwrap();
             assert!(sections.contains(&head), "未知段 {} in {}", head, s.path);
