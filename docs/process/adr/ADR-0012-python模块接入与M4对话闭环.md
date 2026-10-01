@@ -2,7 +2,7 @@
 
 - **状态**：已接受
 - **日期**：2026-10-01
-- **关联**：[ADR-0006](ADR-0006-采用AiryIPC线格式与rr-ipc分层.md)（线格式与传输分层）· [ADR-0007](ADR-0007-控制面分层与模块级升级.md)（决策一：对话属事务面）· [ADR-0010](ADR-0010-rr3ctl控制面.md)（ctl 旁支不复用）· architecture.md §2（brain 是唯一编排者）· legacy/core/{asr,llm,tts}（API 形状的移植来源）
+- **关联**：[ADR-0006](ADR-0006-采用AiryIPC线格式与rr-ipc分层.md)（线格式与传输分层）· [ADR-0007](ADR-0007-控制面分层与模块级升级.md)（决策一：对话属事务面）· [ADR-0010](ADR-0010-控制通道与查询面.md)（ctl 旁支不复用）· architecture.md §2（brain 是唯一编排者）· legacy/core/{asr,llm,tts}（API 形状的移植来源）
 
 ## 背景
 
