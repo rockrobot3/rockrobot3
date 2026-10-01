@@ -13,6 +13,8 @@ pub const RR3_SIM_MODULE_A: &str = "rr3-sense";
 pub const RR3_SIM_MODULE_B: &str = "rr3-interact";
 /// B 发布的主题（契约 event，owner=rr3-interact）
 pub const RR3_SIM_B_TOPIC: &str = "rr3-interact/asr/text";
+/// --brain 演练（M4）里的第三个真模块：Python 认知层
+pub const RR3_SIM_MODULE_BRAIN: &str = "rr3-brain";
 
 /// 演练参数（全部有默认值：在仓内任意目录直接 `rr3-sim` 即可跑）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,10 +25,14 @@ pub struct Rr3SimArgs {
     pub repo: Option<PathBuf>,
     /// 收尾不杀 rrd（保留现场人工排查）
     pub keep: bool,
-    /// 三个二进制的显式覆盖（缺省按仓内 target/debug 布局推）
+    /// 走 --brain 演练（rrd + rr3-sense(sim) + rr3-brain + rr3-interact 四真进程）
+    pub brain: bool,
+    /// 各二进制的显式覆盖（缺省按仓内 target/debug 布局推）
     pub rrd: Option<PathBuf>,
     pub sim_peer: Option<PathBuf>,
     pub rrctl: Option<PathBuf>,
+    pub sense: Option<PathBuf>,
+    pub interact: Option<PathBuf>,
 }
 
 /// 解析 `rr3-sim` 参数。未知参数即错（脚本工具的第一错法是静默忽略拼写错误）。
@@ -35,16 +41,20 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         socket: None,
         repo: None,
         keep: false,
+        brain: false,
         rrd: None,
         sim_peer: None,
         rrctl: None,
+        sense: None,
+        interact: None,
     };
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].as_str();
         match flag {
             "--keep" => a.keep = true,
-            "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" => {
+            "--brain" => a.brain = true,
+            "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense" | "--interact" => {
                 let v = args
                     .get(i + 1)
                     .ok_or_else(|| format!("{flag} 缺参数"))?
@@ -58,11 +68,17 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
                     "--repo" => a.repo = Some(p),
                     "--rrd" => a.rrd = Some(p),
                     "--sim-peer" => a.sim_peer = Some(p),
+                    "--sense" => a.sense = Some(p),
+                    "--interact" => a.interact = Some(p),
                     _ => a.rrctl = Some(p),
                 }
                 i += 1;
             }
-            other => return Err(format!("未知参数 {other}（可用：--socket --repo --keep --rrd --sim-peer --rrctl）")),
+            other => {
+                return Err(format!(
+                    "未知参数 {other}（可用：--socket --repo --keep --brain --rrd --sim-peer --rrctl --sense --interact）"
+                ))
+            }
         }
         i += 1;
     }
@@ -109,6 +125,17 @@ pub fn rr3_require_bins(rrd: &Path, peer: &Path, rrctl: &Path) -> Result<(), Str
     Ok(())
 }
 
+/// 二进制就位检查的扩展版（--brain 演练用）：调用方自己列 (路径, 构建指引) 对，
+/// 检查逻辑与 `rr3_require_bins` 同一真值。
+pub fn rr3_require_bins_ext(bins: &[(&Path, &str)]) -> Result<(), String> {
+    for (p, build) in bins {
+        if !p.is_file() {
+            return Err(format!("缺二进制 {}：先 {build}", p.display()));
+        }
+    }
+    Ok(())
+}
+
 /// 演练用 manifest 文本。与 rrd/tests/support 的 `rr3_manifest` 同形但**不共用**：
 /// 那是 base/runtime 的测试夹具，tools/ 不能反向依赖测试代码。
 /// `entry` 由调用方传**绝对路径**（sim_peer 二进制），注册门禁（`rr3_manifest_entry_is_absolute`）要求它。
@@ -144,6 +171,51 @@ watchdog_timeout_ms = {wd_ms}
         entry_abs.display(),
         pubs.join(", ")
     )
+}
+
+/// 演练用 manifest 文本的全量形状（--brain 演练用）：publishes / subscribes /
+/// exposes 三面都可指定，`type` 可标 brain（rr3-brain 是 manifest.type=brain 的
+/// 唯一在册模块）。与 `rr3_manifest_text` 同形但三面显式——既有两面演练继续走
+/// 旧签名，新形状单独可测。
+pub fn rr3_manifest_text_ext(
+    name: &str,
+    entry_abs: &Path,
+    module_type: &str,
+    lang: &str,
+    hb_ms: u64,
+    wd_ms: u64,
+    policy: &str,
+    publishes: &[&str],
+    subscribes: &[&str],
+    exposes: &[&str],
+) -> String {
+    let list = |xs: &[&str]| {
+        xs.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ")
+    };
+    let mut out = format!(
+        r#"[manifest]
+schema_version = 1
+name = "{name}"
+version = "0.0.1"
+type = "{module_type}"
+lang = "{lang}"
+entry = "{}"
+
+[events]
+publishes = [{}]
+subscribes = [{}]
+"#,
+        entry_abs.display(),
+        list(publishes),
+        list(subscribes),
+    );
+    if !exposes.is_empty() {
+        out.push_str(&format!("\n[rpc]\nexposes = [{}]\n", list(exposes)));
+    }
+    out.push_str(&format!(
+        "\n[resources]\nrestart_policy = \"{policy}\"\n\n[health]\nheartbeat_ms = {hb_ms}\nwatchdog_timeout_ms = {wd_ms}\n"
+    ));
+    out
 }
 
 /// 解析 `rr3-ctl status` 的人读表（F3 裁定 6 的输出形状）：
