@@ -9,6 +9,7 @@
 //! 一条活跃连接 +2 线程 +2 fd）。Task 10/11 算并发与文件描述符账按这个数。
 //! 单次 accept 失败只记日志不带走守护进程；协议错误只结束那一条连接。
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -19,7 +20,7 @@ use rr_ipc::{
     opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3TransportEndpoint, Rr3TransportListener,
     Rr3UdsListener,
 };
-use rr_registry::Rr3TopicSet;
+use rr_registry::{Rr3DependsFacts, Rr3TopicSet, rr3_registry_plan_boot};
 use serde_json::json;
 
 use crate::cli::RrdConfig;
@@ -112,6 +113,22 @@ fn rr3_spawn_watchdog(
                 if let Some(p) = ex.restart {
                     sup.rr3_restart(p);
                 }
+                // ADR-0009 裁定 3：提供者离开 Running（到期判死这一路，死亡已在
+                // `rr3_reg_expire` 里落账）→ 降级传播。只置位与广播，不产计划、
+                // 不经 supervisor（裁定 4：降级不是崩溃）。
+                let degraded = rr3_lock(&shared).rr3_reg_degrade_after(&ex.name);
+                for (dep, task) in degraded {
+                    // 排除项是 `RR3_TASK_RRD`（等于不排除，E-9 的同一理据）：依赖者自己
+                    // 恰恰是最需要知道"我已降级"的一方——它没有别的途径查自己的相位。
+                    let n = rr3_lock(&shared).rr3_reg_fanout(
+                        &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                        RR3_TASK_RRD,
+                    );
+                    rr3_log(&format!(
+                        "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
+                        ex.name
+                    ));
+                }
             }
         }
     });
@@ -184,19 +201,60 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     rr3_spawn_watchdog(shared.clone(), t0, cfg.watchdog_tick_ms, sup.clone());
 
     // E-7 启动序：先**全部装载**（含 E-3 的存在性/可执行位门禁，被拒的当场打 `拒绝启动`），
-    // 再排序投递。分成两段而不是边读边投：`拒绝启动` 走的是 CLI 顺序、`spawn` 走的是
-    // start_priority 顺序，两种序混在日志里就没有可读性可言（先装载后投递让这两段各自连续）。
-    // `sort_by_key` 是**稳定**排序：同 `start_priority` 保持 CLI 顺序（E-7 明令不许用
-    // `sort_unstable_by_key`，否则"同优先级按 CLI 序"这句话不成立）。
+    // 再交给 rr-registry 仲裁（ADR-0009），最后按裁定投递。分成几段而不是边读边投：
+    // `拒绝启动` 走的是 CLI 顺序、`spawn` 走的是仲裁序，两种序混在日志里就没有可读性
+    // 可言（先装载后投递让这两段各自连续）。
     let mut jobs: Vec<Rr3SpawnJob> = Vec::new();
     for manifest in &cfg.manifests {
         if let Some(job) = rr3_boot_job_from_manifest(manifest) {
             jobs.push(job);
         }
     }
-    jobs.sort_by_key(|j| j.facts.start_priority);
-    for job in jobs {
-        sup.rr3_boot(job);
+    // ADR-0009 裁定 1/2：装载全集交给 rr-registry 仲裁——rrd 只**执行**裁定，不 reimplement：
+    // 环 / 名重复 → `fatal` 非空，拒整个 boot（先逐条点名到 stdout 日志，再以 Err 退出，
+    // main 据此非 0 退出）；不可满足 → `rejected` 点名模块照既有口径 `拒绝启动`（不吃预算），
+    // 其余模块照常；`order` = 拓扑序为主键、层内 (start_priority, name) 确定性次键——
+    // 旧的"start_priority 全局稳定升序"从主键降级为次键，不再直接排 boot 队列。
+    let arb: Vec<Rr3DependsFacts> = jobs
+        .iter()
+        .map(|j| Rr3DependsFacts {
+            name: j.facts.name.clone(),
+            provides: j.facts.provides.clone(),
+            depends_required: j.facts.depends_required.clone(),
+            start_priority: j.facts.start_priority,
+        })
+        .collect();
+    let plan = rr3_registry_plan_boot(&arb);
+    if !plan.fatal.is_empty() {
+        for e in &plan.fatal {
+            rr3_log(&format!("拒绝 boot：{e}"));
+        }
+        return Err(format!(
+            "拒绝进入 boot 阶段（ADR-0009 裁定 2，环拒整个 boot）: {}",
+            plan.fatal.join("; ")
+        ));
+    }
+    // 提供者表（裁定 1/3 的运行期账本）：boot 全集一次性写入，**含被拒模块**——
+    // 它们的 provides 仍计入可满足性宇宙（`plan_boot` 的同一口径），运行期不重排。
+    // 降级传播只认这张表：不在表里的能力按 base 内建处理（永远在位）。
+    let mut providers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for j in &jobs {
+        for cap in &j.facts.provides {
+            providers.entry(cap.clone()).or_default().insert(j.facts.name.clone());
+        }
+    }
+    rr3_lock(&shared).rr3_reg_set_providers(providers);
+    for name in &plan.rejected {
+        rr3_log(&format!(
+            "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
+        ));
+    }
+    let mut by_name: BTreeMap<String, Rr3SpawnJob> =
+        jobs.into_iter().map(|j| (j.facts.name.clone(), j)).collect();
+    for name in &plan.order {
+        if let Some(job) = by_name.remove(name) {
+            sup.rr3_boot(job);
+        }
     }
 
     loop {

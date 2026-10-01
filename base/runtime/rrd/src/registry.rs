@@ -35,23 +35,23 @@ pub const RR3_RESTART_FAILURE_CAP: u32 = 5;
 /// 注册完成前超时（`pre_register_timeout_ms`）的判定在 conn 层，届时新增取值即可。
 pub const RR3_EXPIRE_HEARTBEAT_TIMEOUT: &str = "heartbeat_timeout";
 
-/// 生命周期阶段。本文件**当前可发生**的转移只有三条：
-/// `registered → running`（`rr3_reg_beat` 回报 `Rr3Beat::Promoted`，`running` 目前只落到
-/// 日志面、上线广播随 Task 11b）、`registered | running → failed`
-/// （`rr3_reg_expire` 超时、`rr3_reg_death` 退出、`rr3_reg_child_exit` 收尸）。
-/// `Degraded` 今天**没有任何置位路径**，`degraded → running` 那条边也就无从发生——
-/// 它在此只是 spec §5.0 词表里的一个名字（`as_str()` 要回显它），不是已交付的状态。
-/// **本轮终态里 degraded 是"有 enum 变体、无写入方"的死相位**：setter 与 base 能力门
-/// （`depends.required` 的 `bus.publish`/`bus.subscribe`/`bus.rpc` 就位判定）都不在 11/11b，
-/// 二者一个要新相位上线、一个要给 21 条生产主题建能力字典，都不阻塞 §9 验收。
-/// `rr3_reg_beat` 现在遇 `Degraded` 归 `Kept`（只续命不升级），已把"一个心跳抹平降级"的欠账结清。
+/// 生命周期阶段。本文件**当前可发生**的转移：
+/// `registered → running`（`rr3_reg_beat` 回报 `Rr3Beat::Promoted`）、
+/// `registered | running → failed`（`rr3_reg_expire` 超时、`rr3_reg_death` 退出、
+/// `rr3_reg_child_exit` 收尸）、`running → degraded`（`rr3_reg_degrade_after`：required
+/// 能力的提供者全灭，ADR-0009 裁定 3）、`degraded → running`（`rr3_reg_undegrade_after`：
+/// 任一提供者回 Running 且全部 required 能力重新就位）。
+/// `Degraded` 的语义 = 既有兜底：心跳只续命不升级（`rr3_reg_beat` 归 `Kept`，一颗心跳
+/// 不许把降级标注抹平）；降级**不**重启、不吃预算、不经 supervisor（裁定 4——下游进程
+/// 没病，重启治不了依赖缺失）。
 /// failed 之后同身份可重注册（换新 task 号），旧条目整体替换。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rr3Phase {
     /// 已注册、尚未收到任何心跳：此刻不判活（legacy 教训 76c0ad8）
     Registered,
     Running,
-    /// 依赖的 base 能力未就位、或整体降级（setter 未落地：随 Task 9/11 与持久化一起）
+    /// required 能力的全部提供者离开 Running（ADR-0009 裁定 3；写入方
+    /// `rr3_reg_degrade_after`，解除方 `rr3_reg_undegrade_after`）
     Degraded,
     Failed,
 }
@@ -233,6 +233,11 @@ pub struct RrdRegistry {
     /// 显式退场标记（D-4）：`rr3_reg_remove`（unregister RPC）记进这里，`rr3_reg_add` 移出。
     /// 作用只有一个：已显式停掉的模块，其子进程后来退出时不得再被记账成一次崩溃。
     stopped: BTreeSet<String>,
+    /// 能力 → 提供者名字集合（ADR-0009 裁定 1/3）。**boot 仲裁的产物**：daemon 在
+    /// 投 boot 队列前一次性写入（含被仲裁拒绝的模块——它们的 provides 仍计入
+    /// 可满足性宇宙），运行期**不**重排（不做清单 2：动态重仲裁不做）。
+    /// 只含非 base 能力：base 内建能力不在表里即"永远在位"（`rr3_deps_all_satisfied`）。
+    providers: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl RrdRegistry {
@@ -246,7 +251,14 @@ impl RrdRegistry {
             crash_streak: BTreeMap::new(),
             owned: BTreeSet::new(),
             stopped: BTreeSet::new(),
+            providers: BTreeMap::new(),
         }
+    }
+
+    /// 写入能力 → 提供者表（boot 一次，见字段文档）。空表 = 无跨模块能力（全 base），
+    /// 传播方法随之全部空转——与"没有模块声明 provides"的既有行为兼容。
+    pub fn rr3_reg_set_providers(&mut self, providers: BTreeMap<String, BTreeSet<String>>) {
+        self.providers = providers;
     }
 
     /// 注册：保留名 → 同名在册（failed 除外）→ 超额 → 分配 task
@@ -592,6 +604,97 @@ impl RrdRegistry {
     /// 某 name 当前的崩溃连击数（表级、跨重注册成立）：观测面，不写字。
     pub fn rr3_reg_crash_streak(&self, name: &str) -> u32 {
         self.crash_streak.get(name).copied().unwrap_or(0)
+    }
+
+    /// 降级传播（ADR-0009 裁定 3）：`provider` 离开 Running（判死 / 退出 / 注销三路
+    /// 都已先在本表记完账）之后调用。它提供的能力若再无任何 **Running** 的提供者，
+    /// 依赖该能力的在册 `Running` 模块逐个置 `Degraded`；多提供者时任一存活即满足。
+    /// 返回发生转移的 (模块名, task)，调用方照它广播 state——本方法只管表，不管线。
+    /// **只置位，不记账不出计划**（裁定 4：降级不是崩溃，不吃预算不经 supervisor）。
+    /// 前置：调用时 `provider` 的死亡已落账（三条死亡路各自先记账再传播），否则
+    /// "它自己还 Running"会挡住判空。
+    pub fn rr3_reg_degrade_after(&mut self, provider: &str) -> Vec<(String, u64)> {
+        let caps: Vec<String> = self
+            .providers
+            .iter()
+            .filter(|(_, names)| names.contains(provider))
+            .map(|(c, _)| c.clone())
+            .collect();
+        let mut out = Vec::new();
+        for cap in caps {
+            // 该能力还有在册且 Running 的提供者吗？刚死的那个已在表里置 Failed
+            // （或已注销摘除），天然不在数内，无需按名排除。
+            let names = self.providers.get(&cap).cloned().unwrap_or_default();
+            let any_alive = self
+                .modules
+                .values()
+                .any(|e| e.phase == Rr3Phase::Running && names.contains(&e.name));
+            if any_alive {
+                continue;
+            }
+            for e in self.modules.values_mut() {
+                if e.phase == Rr3Phase::Running && e.facts.depends_required.iter().any(|d| d == &cap)
+                {
+                    e.phase = Rr3Phase::Degraded;
+                    out.push((e.name.clone(), e.src_task));
+                }
+            }
+        }
+        out
+    }
+
+    /// 解除传播（ADR-0009 裁定 3 的恢复半边）：`provider` 回到 Running（`Promoted`
+    /// 那一拍）之后调用。依赖它能力的在册 `Degraded` 模块逐个重算——**全部**
+    /// required 能力重新就位才回 `Running`（只回来一个提供者不代表别的依赖也好了）。
+    /// 返回与 `rr3_reg_degrade_after` 同形。
+    pub fn rr3_reg_undegrade_after(&mut self, provider: &str) -> Vec<(String, u64)> {
+        let caps: Vec<String> = self
+            .providers
+            .iter()
+            .filter(|(_, names)| names.contains(provider))
+            .map(|(c, _)| c.clone())
+            .collect();
+        let mut out = Vec::new();
+        for cap in caps {
+            // 先按不可变借用收齐本拍要重算的名字，再逐个改（两段式借用，与
+            // `rr3_reg_expire` 同一条纪律）。刚解除的模块在下一轮 cap 里已是 Running，
+            // 不会被重复处理。
+            let candidates: Vec<String> = self
+                .modules
+                .values()
+                .filter(|e| {
+                    e.phase == Rr3Phase::Degraded
+                        && e.facts.depends_required.iter().any(|d| d == &cap)
+                })
+                .map(|e| e.name.clone())
+                .collect();
+            for name in candidates {
+                let deps = self
+                    .modules
+                    .get(&name)
+                    .map(|e| e.facts.depends_required.clone())
+                    .unwrap_or_default();
+                if self.rr3_deps_all_satisfied(&deps) {
+                    let e = self.modules.get_mut(&name).expect("刚读过、仍在册");
+                    e.phase = Rr3Phase::Running;
+                    out.push((name, e.src_task));
+                }
+            }
+        }
+        out
+    }
+
+    /// 某模块的 required 能力是否全部就位。不在提供者表里的能力视为 base 内建
+    /// （永远在位）。走线上注册的模块若依赖 boot 全集之外的能力，这里同样按"在位"
+    /// 处理——那是"运行期动态重仲裁不做"（ADR-0009 不做清单 2）的同一条边界：
+    /// 可满足性宇宙只在 boot 时定一次，线上补注册的模块不做二次裁定（实施报告记录）。
+    fn rr3_deps_all_satisfied(&self, required: &[String]) -> bool {
+        required.iter().all(|cap| match self.providers.get(cap) {
+            None => true,
+            Some(names) => names
+                .iter()
+                .any(|n| self.modules.get(n).is_some_and(|e| e.phase == Rr3Phase::Running)),
+        })
     }
 
     /// 子进程退出码那一路（11b 的 supervisor 收尸用；11a 只把表级记账钉死）。
@@ -1691,6 +1794,144 @@ owner = "rr3-simb"
     fn phase_for_exit_is_the_single_source_of_the_two_words() {
         assert_eq!(rr3_phase_for_exit(true), "unregistered");
         assert_eq!(rr3_phase_for_exit(false), "failed");
+    }
+
+    // ---------- 降级传播（ADR-0009 裁定 3/4）----------
+
+    /// 带 [depends].required 的 facts（wd 取 60s：判死只该发生在被点名的提供者身上）
+    fn facts_with_depends(name: &str, deps: &[&str]) -> Rr3ManifestFacts {
+        let list = deps.iter().map(|d| format!("\"{d}\"")).collect::<Vec<_>>().join(", ");
+        let text = format!(
+            r#"[manifest]
+schema_version = 1
+name = "{name}"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "/usr/bin/{name}"
+
+[events]
+publishes = []
+subscribes = []
+
+[depends]
+required = [{list}]
+
+[resources]
+restart_policy = "always"
+
+[health]
+heartbeat_ms = 100
+watchdog_timeout_ms = 60000
+"#
+        );
+        rr3_manifest_facts_from_text(&text).expect("测试 manifest 必须可读")
+    }
+
+    fn providers_of(pairs: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {
+        let mut m: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (cap, names) in pairs {
+            m.entry(cap.to_string())
+                .or_default()
+                .extend(names.iter().map(|n| n.to_string()));
+        }
+        m
+    }
+
+    /// 唯一提供者死了（conn EOF 路）→ 依赖它的 Running 模块置 Degraded；
+    /// 心跳只续命不升级（Kept），降级不被一颗心跳抹平
+    #[test]
+    fn provider_death_degrades_running_dependent() {
+        let mut r = RrdRegistry::new(20);
+        r.rr3_reg_set_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
+        let p = facts("rr3-prov", 100, 5000, "always");
+        let d = facts_with_depends("rr3-dep", &["cap.x"]);
+        let (ptx, _) = chan();
+        let (dtx, _) = chan();
+        let pt = r.rr3_reg_add(&p, ptx, 0).expect("provider 入册");
+        let dt = r.rr3_reg_add(&d, dtx, 0).expect("dependent 入册");
+        assert_eq!(r.rr3_reg_beat(pt, 10), Rr3Beat::Promoted);
+        assert_eq!(r.rr3_reg_beat(dt, 20), Rr3Beat::Promoted);
+
+        // 提供者判死前传播必须空转（前置：死亡先落账）
+        assert!(r.rr3_reg_degrade_after("rr3-prov").is_empty(), "死亡未落账时不得误判");
+
+        assert!(matches!(r.rr3_reg_death("rr3-prov", false, 30), Rr3Death::Broadcast { .. }));
+        assert_eq!(
+            r.rr3_reg_degrade_after("rr3-prov"),
+            vec![("rr3-dep".to_string(), dt)],
+            "唯一提供者全灭 → 下游 Degraded"
+        );
+        let snap = r.rr3_reg_snapshot();
+        assert!(
+            snap.iter().any(|(n, t, ph)| n == "rr3-dep" && *t == dt && *ph == Rr3Phase::Degraded),
+            "{snap:?}"
+        );
+        // 降级后心跳：Kept（续命不升级），相位不被抹平
+        assert_eq!(r.rr3_reg_beat(dt, 40), Rr3Beat::Kept);
+        assert_eq!(r.rr3_reg_snapshot().iter().find(|(n, _, _)| n == "rr3-dep").map(|x| x.2), Some(Rr3Phase::Degraded));
+    }
+
+    /// 多提供者"任一存活即满足"：只死一个不降级；两个全灭才降级
+    #[test]
+    fn any_surviving_provider_keeps_dependent_running() {
+        let mut r = RrdRegistry::new(20);
+        r.rr3_reg_set_providers(providers_of(&[("cap.x", &["rr3-p1", "rr3-p2"])]));
+        let d = facts_with_depends("rr3-dep", &["cap.x"]);
+        let (t1x, _) = chan();
+        let (t2x, _) = chan();
+        let (dtx, _) = chan();
+        let t1 = r.rr3_reg_add(&facts("rr3-p1", 100, 5000, "always"), t1x, 0).expect("p1 入册");
+        let t2 = r.rr3_reg_add(&facts("rr3-p2", 100, 5000, "always"), t2x, 0).expect("p2 入册");
+        let dt = r.rr3_reg_add(&d, dtx, 0).expect("dep 入册");
+        for t in [t1, t2, dt] {
+            assert_eq!(r.rr3_reg_beat(t, 10), Rr3Beat::Promoted);
+        }
+        assert!(matches!(r.rr3_reg_death("rr3-p1", false, 20), Rr3Death::Broadcast { .. }));
+        assert!(r.rr3_reg_degrade_after("rr3-p1").is_empty(), "p2 还活着，不降级");
+        assert!(matches!(r.rr3_reg_death("rr3-p2", false, 30), Rr3Death::Broadcast { .. }));
+        assert_eq!(r.rr3_reg_degrade_after("rr3-p2"), vec![("rr3-dep".to_string(), dt)]);
+    }
+
+    /// 解除的判据是"全部 required 就位"：只回来一个提供者不许解除
+    #[test]
+    fn provider_recovery_undegrades_only_when_all_deps_satisfied() {
+        let mut r = RrdRegistry::new(20);
+        r.rr3_reg_set_providers(providers_of(&[
+            ("cap.x", &["rr3-px"]),
+            ("cap.y", &["rr3-py"]),
+        ]));
+        let d = facts_with_depends("rr3-dep", &["cap.x", "cap.y"]);
+        let (dtx, _) = chan();
+        let dt = r.rr3_reg_add(&d, dtx, 0).expect("dep 入册");
+        let promote = |r: &mut RrdRegistry, name: &str| -> u64 {
+            let (tx, _) = chan();
+            let t = r.rr3_reg_add(&facts(name, 100, 5000, "always"), tx, 0).expect("入册");
+            assert_eq!(r.rr3_reg_beat(t, 10), Rr3Beat::Promoted);
+            t
+        };
+        let px = promote(&mut r, "rr3-px");
+        promote(&mut r, "rr3-py");
+        assert_eq!(r.rr3_reg_beat(dt, 20), Rr3Beat::Promoted);
+
+        assert!(matches!(r.rr3_reg_death("rr3-px", false, 30), Rr3Death::Broadcast { .. }));
+        // 断供即降级（非对称设计的前半）：cap.x 已无任何在位提供者，dep 缺它就跑不了，
+        // 不等 cap.y 也断——置位要快，解除才从严
+        assert_eq!(r.rr3_reg_degrade_after("rr3-px"), vec![("rr3-dep".to_string(), dt)]);
+        assert!(matches!(r.rr3_reg_death("rr3-py", false, 40), Rr3Death::Broadcast { .. }));
+        // 已经 Degraded 的不重复传播（Running 过滤器天然挡住）
+        assert!(r.rr3_reg_degrade_after("rr3-py").is_empty(), "重复置位不是传播");
+
+        // px 回来了（新 task 重注册 + Promoted），但 cap.y 还没好 → 不解除
+        let px2 = promote(&mut r, "rr3-px");
+        assert_ne!(px, px2, "重注册必须换新 task");
+        assert!(r.rr3_reg_undegrade_after("rr3-px").is_empty(), "cap.y 仍无提供者在位");
+        assert_eq!(r.rr3_reg_snapshot().iter().find(|(n, _, _)| n == "rr3-dep").map(|x| x.2), Some(Rr3Phase::Degraded));
+
+        // py 也回来了 → 全部就位 → 解除回 Running
+        promote(&mut r, "rr3-py");
+        assert_eq!(r.rr3_reg_undegrade_after("rr3-py"), vec![("rr3-dep".to_string(), dt)]);
+        assert_eq!(r.rr3_reg_snapshot().iter().find(|(n, _, _)| n == "rr3-dep").map(|x| x.2), Some(Rr3Phase::Running));
     }
 
     /// 小测试辅助：主题集
