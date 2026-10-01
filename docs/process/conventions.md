@@ -392,6 +392,12 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
 - 模块 crate 之间**不得**互相依赖，只能经 `rr-ipc`/`rr-bus`（一票否决项）
 - 密钥、token 不进仓库：构建期环境变量注入（`SILICONFLOW_API_KEY`，见 `legacy/core/README.md`）
 - 反射环（1k–10kHz 闭环）留在模块进程内，永不进总线（ADR-0007 裁定 1）
+- `contracts/slots.toml` 能力格总表（ADR-0012，**规划落点**，实体落盘后生效）：与 topics.toml
+  同级同纪律——只增不改，破坏性变更升 `schema_version`；manifest 的
+  `provides`/`depends` 只许引用表内格位，查册门随实体落盘接入 CI 全集层（与仲裁共用真值）
+- 装配单（ADR-0012，**规划落点**）：`profiles/<机型>.toml` 是纯数据（`[os]` / `[bindings]` /
+  `[faces]`），不得包含逻辑；新增机型 = 新增文件，不改代码；F⊗F 非法（brain 不许运行期
+  决定能力归属，rrd 不许运行期重排装配）
 
 ## 4 Definition of Done
 
