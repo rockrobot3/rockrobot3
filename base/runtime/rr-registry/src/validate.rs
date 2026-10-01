@@ -271,27 +271,7 @@ fn rr3_registry_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) 
         }
     }
 
-    // 3) 依赖必须命中 base 内建能力（v0.0.1 无跨模块能力注册表）
-    let base = rr3_registry_rule_list("base_capabilities").unwrap_or_default();
-    for field in ["depends.required", "depends.optional"] {
-        if let Some(arr) = rr3_registry_get_by_path(&root, field).and_then(Value::as_array) {
-            for (idx, item) in arr.iter().enumerate() {
-                // F1：非字符串依赖项同样是 manifest 类型错误，必须报告
-                let Some(cap) = item.as_str() else {
-                    report.errors.push(format!(
-                        "字段 {field} 第 {} 项应为字符串，实际为 {item:?}",
-                        idx + 1
-                    ));
-                    continue;
-                };
-                if !base.iter().any(|b| b == cap) {
-                    report.errors.push(format!("{field} 依赖了未知能力 {cap}"));
-                }
-            }
-        }
-    }
-
-    // 4) subscribes 必须已注册（订阅方不要求前缀归属）
+    // 3) subscribes 必须已注册（订阅方不要求前缀归属）
     // F3：空主题集的内核入口已由两个包装 fail-closed——空注册表不得让订阅成员检查被空洞满足。
     // 非字符串项的类型错误已由逐字段循环（rule=topic）报告，这里只做成员检查。
     if let Some(arr) = rr3_registry_get_by_path(&root, "events.subscribes").and_then(Value::as_array)
