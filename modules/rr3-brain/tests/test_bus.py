@@ -1,4 +1,4 @@
-"""总线客户端单测：golden 对拍 + 假 rrd 全握手（stdlib unittest，ADR-0012 裁定 1）。
+"""总线客户端单测：golden 对拍 + 假 rrd 全握手（stdlib unittest，ADR-0014 裁定 1）。
 
 golden 向量与 Rust 侧共用同一份 `contracts/golden/event-header-128.hex`——
 跨语言对拍不做第二份基准。假 rrd 收注册回 src_task=7、心跳回 accepted、

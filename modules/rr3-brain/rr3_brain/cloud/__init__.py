@@ -1,4 +1,4 @@
-"""云端适配器：ASR / LLM / TTS 三家的调用边界（ADR-0012 裁定 2）。
+"""云端适配器：ASR / LLM / TTS 三家的调用边界（ADR-0014 裁定 2）。
 
 线上契约逐项对齐 legacy/core/{asr,llm,tts}（SiliconFlow /v1）：
 - ASR  POST {base}/v1/audio/transcriptions   multipart(model + WAV) → {"text": …}

@@ -14,7 +14,7 @@ modules/rr3-brain/
 └── rr3_brain/
     ├── __init__.py      ← 包级 API：rr3_brain_submit_text()
     ├── __main__.py      ← python -m rr3_brain 入口：连总线 → 事件循环 → 整轮对话
-    ├── bus.py           ← 模块侧同步总线客户端（128B 头逐语义镜像 rr-bus client.rs，ADR-0012 裁定 1）
+    ├── bus.py           ← 模块侧同步总线客户端（128B 头逐语义镜像 rr-bus client.rs，ADR-0014 裁定 1）
     ├── dialog.py        ← Rr3Dialog / Rr3DialogTurn 对话状态机（onset 起轮 / offset+时长双判停）
     └── cloud/
         ├── __init__.py  ← 密钥只从 SILICONFLOW_API_KEY 读；RR3_BRAIN_CLOUD 选 real / mock
@@ -43,6 +43,6 @@ python3 -m unittest discover -s tests
 cargo run --manifest-path tools/sim/Cargo.toml --bin rr3-sim -- --brain
 ```
 
-M4 交付面（ADR-0012）：云端链路 ASR / LLM / TTS 已按 legacy 移植实装（urllib，零第三方），
+M4 交付面（ADR-0014）：云端链路 ASR / LLM / TTS 已按 legacy 移植实装（urllib，零第三方），
 `RR3_BRAIN_CLOUD=mock` 是测试注入点不是产品路径；缺 `SILICONFLOW_API_KEY` 的 real 调用
 照报缺环境变量，不静默降级。失败语义：业务失败折日志弃轮，传输失败 exit(1) 交 supervisor。

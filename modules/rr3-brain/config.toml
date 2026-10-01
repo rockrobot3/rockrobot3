@@ -17,5 +17,5 @@ timeout_s = 20
 silence_tail_ms = 700
 max_turn_chars = 800
 # 一轮 utterance 的时长上限：连续语音无 offset 边沿时也要有界
-# （继承 legacy asr_begin(max_seconds) 的精神，ADR-0012 裁定 3）
+# （继承 legacy asr_begin(max_seconds) 的精神，ADR-0014 裁定 3）
 max_utterance_ms = 8000

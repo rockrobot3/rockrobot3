@@ -1,4 +1,4 @@
-"""模块侧同步总线客户端（M4，ADR-0012 裁定 1）。
+"""模块侧同步总线客户端（M4，ADR-0014 裁定 1）。
 
 stdlib-only（socket / struct / json / threading / queue / tomllib），逐语义镜像
 `base/runtime/rr-bus/src/client.rs`（Rust 侧唯一真值点）：

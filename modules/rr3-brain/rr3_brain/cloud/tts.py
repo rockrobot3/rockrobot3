@@ -1,7 +1,7 @@
 """TTS 适配器（CosyVoice2）：文本 → PCM 字节流（s16le）。
 
 M4 的 PCM 是验证性消费（非空 + 时长换算入日志）；真播放随 M5 板上 ALSA sink
-（ADR-0012 裁定 3）。响应无 Content-Length、服务端发完即断（read-until-close），
+（ADR-0014 裁定 3）。响应无 Content-Length、服务端发完即断（read-until-close），
 urllib 的 resp.read() 天然就是这个语义。
 """
 

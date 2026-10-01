@@ -1,4 +1,4 @@
-//! `--brain` 演练（M4，ADR-0012 裁定 4）：rrd + rr3-sense(sim) + rr3-brain + rr3-interact
+//! `--brain` 演练（M4，ADR-0014 裁定 4）：rrd + rr3-sense(sim) + rr3-brain + rr3-interact
 //! 四真进程全语音对话闭环。
 //!
 //! 与既有两面演练（main.rs `run` 模块）同构：夹具（临时目录 + 套接字 + 三份 wire
@@ -7,7 +7,7 @@
 //! brain 日志出现"对话轮完成"证据 → `rr3-ctl status` 断言三模块 running 且
 //! `denied_publish = 0` → 报告 + 收尾。
 //!
-//! 云端走 mock（`RR3_BRAIN_CLOUD=mock`，ADR-0012 裁定 2）：brain 的 ASR/LLM/TTS
+//! 云端走 mock（`RR3_BRAIN_CLOUD=mock`，ADR-0014 裁定 2）：brain 的 ASR/LLM/TTS
 //! 全部确定性应答——闭环里只有云端 socket 一跳是假的，其余（总线、rrd 路由、
 //! rr3.call、事件扇出）全是真进程真套接字。本模块依赖 UDS 与真进程，仅 Unix 参与编译。
 
