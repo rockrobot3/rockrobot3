@@ -55,3 +55,19 @@ jobs:
       - name: rr3-brain unittest
         working-directory: modules/rr3-brain
         run: python3 -m unittest discover -s tests
+
+  # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进七步门，
+  # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
+  # Docker）。--strict：任何一步 SKIP 即不放行（退 2）。
+  # QEMU 仿真下容器内 cargo 构建较慢属预期；rust-cache 与 conventions/lint 共享加速。
+  ipct003:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - uses: docker/setup-qemu-action@v3
+      - name: IPC-T-003 跨架构对拍（--strict）
+        run: bash tools/ci/ipct003.sh --strict
