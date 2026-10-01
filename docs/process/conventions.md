@@ -341,6 +341,12 @@ rr-registry lib 25 + 契约 29 + rrd lib 108 + 线级 `e2e_audio_chain` 1 + `e2e
 **②b 的姊妹注记**：rr3-ctl 的 12 条（含 2 条 fake-rrd 真 UDS 往返）属独立 workspace，
 ①/①b 打不到、④ 只 `cargo check` 编译不执行——与 ②b 把 mkmod 的产物喂回契约测试同一
 精神，收口轮在本地实跑 `cargo test --manifest-path tools/rrctl/Cargo.toml`（本轮 12/12 绿）。
+2026-10-01 F4（rr3-sim 完整化）同口径：`tools/sim` 3→**9** 条（drill 纯逻辑 7：参数解析 /
+仓根标记搜索 / 缺二进制点名构建指引 / manifest 文本含绝对 entry 与真契约主题 /
+status 表解析跳过非行 / 注入式轮询达成与超时点缺 / 演练身份在真契约里存在——
+最后一条把"演练用真 owner 名"钉成机器可检查；devices 2 条原样），**base/runtime 不动，
+①b 条数无变化**；编排（Unix-only）与纯逻辑分居两模块，9 条单测全平台可跑。
+9/9 绿 + 全链路演练实跑 3/3 OK（见 tools/sim/README.md 五步脚本）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
