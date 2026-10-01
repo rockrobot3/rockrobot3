@@ -65,7 +65,8 @@ fn rr3_run() -> Result<(), String> {
         cfg.audio.sample_rate, cfg.audio.channels, cfg.audio.frame_ms
     );
 
-    let frames_per_tick = audio::capture::rr3_frames_per_tick(cfg.audio.sample_rate, cfg.audio.frame_ms);
+    let frames_per_tick =
+        audio::capture::rr3_frames_per_tick(cfg.audio.sample_rate, cfg.audio.frame_ms);
     let mut vad = Rr3VadState::rr3_vad_new(cfg.vad, cfg.audio.frame_ms);
     let tick = Duration::from_millis(cfg.audio.frame_ms);
     let mut seq: u64 = 0;
@@ -79,7 +80,10 @@ fn rr3_run() -> Result<(), String> {
         bus.rr3_publish("rr3-sense/audio/pcm", audio::rr3_pcm_event_body(seq, &pcm))?;
 
         if let Some(edge) = vad.rr3_vad_feed(&pcm.samples) {
-            bus.rr3_publish("rr3-sense/audio/vad_start", audio::rr3_vad_event_body(seq, edge))?;
+            bus.rr3_publish(
+                "rr3-sense/audio/vad_start",
+                audio::rr3_vad_event_body(seq, edge),
+            )?;
         }
 
         // 排空 inbox：v0.0.1 不订阅任何主题，inbox 只会有点名 Request——

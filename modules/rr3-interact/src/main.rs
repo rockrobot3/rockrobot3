@@ -91,8 +91,11 @@ fn rr3_run() -> Result<(), String> {
             let result = match topic {
                 player::RR3_TTS_TOPIC => rr3_handle_tts(&bus, sink.as_ref(), &mut face, &args),
                 face::RR3_FACE_TOPIC => rr3_handle_face(&mut face, &args),
-                other => Err(format!("rr3-interact 只 exposes {}/{}，收到 {other}",
-                    player::RR3_TTS_TOPIC, face::RR3_FACE_TOPIC)),
+                other => Err(format!(
+                    "rr3-interact 只 exposes {}/{}，收到 {other}",
+                    player::RR3_TTS_TOPIC,
+                    face::RR3_FACE_TOPIC
+                )),
             };
             let result = result.unwrap_or_else(|e| json!({ "error": e }));
             bus.rr3_reply_call(frame.header.trace_id, id, result)?;
@@ -112,7 +115,10 @@ fn rr3_handle_tts(
     let played = player::rr3_tts_play(sink, &text);
     face.rr3_face_end_talk();
     let played_ms = played?;
-    println!("tts: {} 字符播了 {played_ms}ms（talk 挂起 {suspended}）", text.chars().count());
+    println!(
+        "tts: {} 字符播了 {played_ms}ms（talk 挂起 {suspended}）",
+        text.chars().count()
+    );
     Ok(player::rr3_tts_result(&text, played_ms))
 }
 

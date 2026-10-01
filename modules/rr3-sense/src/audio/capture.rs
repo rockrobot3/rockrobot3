@@ -21,6 +21,10 @@ mod tests {
         assert_eq!(rr3_frames_per_tick(16000, 10), 160);
         assert_eq!(rr3_frames_per_tick(8000, 20), 160);
         assert_eq!(rr3_frames_per_tick(22050, 20), 441, "22050×20/1000 整除");
-        assert_eq!(rr3_frames_per_tick(16000, 0), 0, "0ms 节拍读 0 帧（不 panic）");
+        assert_eq!(
+            rr3_frames_per_tick(16000, 0),
+            0,
+            "0ms 节拍读 0 帧（不 panic）"
+        );
     }
 }

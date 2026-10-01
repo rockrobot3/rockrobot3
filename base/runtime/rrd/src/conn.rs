@@ -33,7 +33,7 @@ use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
-use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Phase, Rr3Death, RrdRegistry};
+use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry};
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_manifest_param,
     rr3_rpc_parse_request, rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register,
@@ -91,12 +91,32 @@ fn rr3_out_frame(ty: Rr3PayloadType, dst_task: u64, body: &[u8]) -> Rr3Frame {
 
 /// 成功/失败应答的两个写法（合起来只有一处构造帧）
 fn rr3_reply_ok(out: &Arc<Mutex<UnixStream>>, me: &Rr3Peer, id: u64, result: &Value) {
-    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, me.task, &rr3_rpc_build_result(id, result)));
+    rr3_write(
+        out,
+        &rr3_out_frame(
+            Rr3PayloadType::Response,
+            me.task,
+            &rr3_rpc_build_result(id, result),
+        ),
+    );
 }
 
-fn rr3_reply_err(out: &Arc<Mutex<UnixStream>>, me: &Rr3Peer, id: u64, code: Rr3StatusCode, msg: &str) {
+fn rr3_reply_err(
+    out: &Arc<Mutex<UnixStream>>,
+    me: &Rr3Peer,
+    id: u64,
+    code: Rr3StatusCode,
+    msg: &str,
+) {
     rr3_log(&format!("{} 应答错误 {}: {msg}", me.name, code as i32));
-    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, me.task, &rr3_rpc_build_error(id, code, msg)));
+    rr3_write(
+        out,
+        &rr3_out_frame(
+            Rr3PayloadType::Response,
+            me.task,
+            &rr3_rpc_build_error(id, code, msg),
+        ),
+    );
 }
 
 /// 解析失败时尽力取 JSON-RPC 的 id；取不到用 0（客户端只按 code 判定）
@@ -116,9 +136,22 @@ enum Rr3Flow {
 }
 
 /// 注册期拒绝的统一出口：按对端自报的 src_task 回错误帧，再把原因交回上层断开连接
-fn rr3_refuse(out: &Arc<Mutex<UnixStream>>, dst_task: u64, id: u64, code: Rr3StatusCode, msg: &str) -> String {
+fn rr3_refuse(
+    out: &Arc<Mutex<UnixStream>>,
+    dst_task: u64,
+    id: u64,
+    code: Rr3StatusCode,
+    msg: &str,
+) -> String {
     rr3_log(&format!("注册被拒（dst={dst_task}）: {msg}"));
-    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, dst_task, &rr3_rpc_build_error(id, code, msg)));
+    rr3_write(
+        out,
+        &rr3_out_frame(
+            Rr3PayloadType::Response,
+            dst_task,
+            &rr3_rpc_build_error(id, code, msg),
+        ),
+    );
     msg.to_string()
 }
 
@@ -158,7 +191,10 @@ fn rr3_handshake(
             reported_task,
             rr3_best_effort_id(&body),
             Rr3StatusCode::Invalid,
-            &format!("首帧 dst_task 必须为 {RR3_TASK_RRD}，收到 {}", frame.header.dst_task),
+            &format!(
+                "首帧 dst_task 必须为 {RR3_TASK_RRD}，收到 {}",
+                frame.header.dst_task
+            ),
         ));
     }
     if ty != Rr3PayloadType::Request {
@@ -193,22 +229,45 @@ fn rr3_handshake(
             reported_task,
             req.id,
             Rr3StatusCode::Invalid,
-            &format!("注册前第一条 RPC 必须是 rr3.register，收到 {}", req.method.as_str()),
+            &format!(
+                "注册前第一条 RPC 必须是 rr3.register，收到 {}",
+                req.method.as_str()
+            ),
         ));
     }
     let text = match rr3_rpc_manifest_param(&req.params) {
         Ok(t) => t,
-        Err((_, msg)) => return Err(rr3_refuse(out, reported_task, req.id, Rr3StatusCode::Invalid, &msg)),
+        Err((_, msg)) => {
+            return Err(rr3_refuse(
+                out,
+                reported_task,
+                req.id,
+                Rr3StatusCode::Invalid,
+                &msg,
+            ))
+        }
     };
     let facts = match rr3_manifest_facts_from_text(&text) {
         Ok(f) => f,
         Err(errs) => {
-            return Err(rr3_refuse(out, reported_task, req.id, Rr3StatusCode::Invalid, &errs.join("; ")))
+            return Err(rr3_refuse(
+                out,
+                reported_task,
+                req.id,
+                Rr3StatusCode::Invalid,
+                &errs.join("; "),
+            ))
         }
     };
     let report = rr3_registry_validate_manifest_text(&text, &ctx.topics);
     if !report.ok() {
-        return Err(rr3_refuse(out, reported_task, req.id, Rr3StatusCode::Invalid, &report.errors.join("; ")));
+        return Err(rr3_refuse(
+            out,
+            reported_task,
+            req.id,
+            Rr3StatusCode::Invalid,
+            &report.errors.join("; "),
+        ));
     }
     // M2 的 manifest 从线上（wire）来，没有"所在目录"可依据 → entry 必须是绝对路径。
     // 在仓的 modules/*/module.toml 是**契约工件**而非注册输入：装机时由安装步骤写入绝对
@@ -252,8 +311,14 @@ fn rr3_handshake(
             &rr3_rpc_build_result(req.id, &json!({"src_task": task})),
         ),
     );
-    let peer = Rr3Peer { task, name: facts.name.clone() };
-    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&rr3_state_frame(&peer.name, "registered", peer.task), RR3_TASK_RRD);
+    let peer = Rr3Peer {
+        task,
+        name: facts.name.clone(),
+    };
+    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
+        &rr3_state_frame(&peer.name, "registered", peer.task),
+        RR3_TASK_RRD,
+    );
     rr3_log(&format!("广播 registered 到 {n} 个连接"));
     // 后到者的状态快照：state 是"当前生命周期"的唯一可见面，只发转移不发快照的话，
     // 按 start_priority 后起的模块永远看不到先起模块上线过（Task 9 的依赖判定就没有输入）。
@@ -263,7 +328,10 @@ fn rr3_handshake(
     let snapshot = rr3_lock(&ctx.shared).rr3_reg_snapshot();
     let mut replayed = 0usize;
     for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != peer.name) {
-        if replay_tx.send(rr3_state_frame(name, phase.as_str(), *t)).is_ok() {
+        if replay_tx
+            .send(rr3_state_frame(name, phase.as_str(), *t))
+            .is_ok()
+        {
             replayed += 1;
         }
     }
@@ -325,14 +393,23 @@ fn rr3_serve_ctl(
             "OTA（含模块级 staging 更新）随 M6 落地，当前拒绝执行".to_string(),
         )),
         // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
-        other => Err((Rr3StatusCode::Invalid, format!("ctl 连接只接受 rr3.ctl.*，收到 {}", other.as_str()))),
+        other => Err((
+            Rr3StatusCode::Invalid,
+            format!("ctl 连接只接受 rr3.ctl.*，收到 {}", other.as_str()),
+        )),
     };
     let payload = match &result {
         Ok(v) => rr3_rpc_build_result(req.id, v),
         Err((code, msg)) => rr3_rpc_build_error(req.id, *code, msg),
     };
-    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, reported_task, &payload));
-    rr3_log(&format!("ctl 查询 {} 已应答（dst={reported_task}），一次性连接收尾", req.method.as_str()));
+    rr3_write(
+        out,
+        &rr3_out_frame(Rr3PayloadType::Response, reported_task, &payload),
+    );
+    rr3_log(&format!(
+        "ctl 查询 {} 已应答（dst={reported_task}），一次性连接收尾",
+        req.method.as_str()
+    ));
     "ctl 查询完成，一次性控制连接按 ADR-0010 收尾".to_string()
 }
 
@@ -344,9 +421,13 @@ fn rr3_serve_frame(
     frame: &Rr3Frame,
 ) -> Result<Rr3Flow, String> {
     if frame.header.dst_task != RR3_TASK_RRD {
-        return Err(format!("上行 dst_task 必须为 {RR3_TASK_RRD}，收到 {}", frame.header.dst_task));
+        return Err(format!(
+            "上行 dst_task 必须为 {RR3_TASK_RRD}，收到 {}",
+            frame.header.dst_task
+        ));
     }
-    let (ty, body) = rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+    let (ty, body) =
+        rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
     if frame.header.src_task != me.task {
         // AOS-STD-IPC-024：src_task 由 rrd 分配，用户态不得自设。
         // 拒这一帧但不断连——一次笔误不该让整个进程掉线（spec §4"rrd 不崩"的连接版）。
@@ -355,7 +436,10 @@ fn rr3_serve_frame(
             me,
             rr3_best_effort_id(&body),
             Rr3StatusCode::Invalid,
-            &format!("src_task 由 rrd 分配，本连接分配值 {}，收到 {}", me.task, frame.header.src_task),
+            &format!(
+                "src_task 由 rrd 分配，本连接分配值 {}，收到 {}",
+                me.task, frame.header.src_task
+            ),
         );
         return Ok(Rr3Flow::Keep);
     }
@@ -413,7 +497,13 @@ fn rr3_publish(
     let topic = match rr3_rpc_topic_param(&parsed) {
         Ok(t) => t,
         Err((_, msg)) => {
-            rr3_reply_err(out, me, rr3_best_effort_id(body), Rr3StatusCode::Invalid, &msg);
+            rr3_reply_err(
+                out,
+                me,
+                rr3_best_effort_id(body),
+                Rr3StatusCode::Invalid,
+                &msg,
+            );
             return Ok(Rr3Flow::Keep);
         }
     };
@@ -472,19 +562,34 @@ fn rr3_serve_request(
     let req = match rr3_rpc_parse_request(body) {
         Ok(r) => r,
         Err((_, msg)) => {
-            rr3_reply_err(out, me, rr3_best_effort_id(body), Rr3StatusCode::Invalid, &msg);
+            rr3_reply_err(
+                out,
+                me,
+                rr3_best_effort_id(body),
+                Rr3StatusCode::Invalid,
+                &msg,
+            );
             return Ok(Rr3Flow::Keep);
         }
     };
     match req.method {
         Rr3RpcMethod::Register => {
-            rr3_reply_err(out, me, req.id, Rr3StatusCode::Invalid, "该连接已注册，拒绝重复 rr3.register");
+            rr3_reply_err(
+                out,
+                me,
+                req.id,
+                Rr3StatusCode::Invalid,
+                "该连接已注册，拒绝重复 rr3.register",
+            );
             Ok(Rr3Flow::Keep)
         }
         // ADR-0010：rr3.ctl.* 只对未注册的控制连接开放（握手分流）；已注册模块连接
         // 上行一律拒——回错误帧不断连，与 src_task 伪造同一口径（一次笔误不掉线）。
         // 显式 OR 臂而非 is_ctl 守卫：带守卫的臂不计入穷尽性，新增方法时这里必须表态。
-        Rr3RpcMethod::CtlStatus | Rr3RpcMethod::CtlHealth | Rr3RpcMethod::CtlLogs | Rr3RpcMethod::CtlOta => {
+        Rr3RpcMethod::CtlStatus
+        | Rr3RpcMethod::CtlHealth
+        | Rr3RpcMethod::CtlLogs
+        | Rr3RpcMethod::CtlOta => {
             rr3_reply_err(
                 out,
                 me,
@@ -499,7 +604,13 @@ fn rr3_serve_request(
             let beat = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
             match beat {
                 Rr3Beat::Rejected => {
-                    rr3_reply_err(out, me, req.id, Rr3StatusCode::TimedOut, "该 task 已过期或不在册，需重新注册");
+                    rr3_reply_err(
+                        out,
+                        me,
+                        req.id,
+                        Rr3StatusCode::TimedOut,
+                        "该 task 已过期或不在册，需重新注册",
+                    );
                 }
                 other => {
                     rr3_reply_ok(out, me, req.id, &json!({"beat": "accepted"}));
@@ -510,8 +621,7 @@ fn rr3_serve_request(
                         // 只在 Promoted 上广播：`Kept` 走的是同一条 `other` 分支，拿"这一支被接受"
                         // 当条件就是每次心跳重发一条 state（spec §5.0 的 state 是**转移**流，
                         // 不是快照流；"恰好一条"这类判据正是靠这一条成立的）。
-                        let frame =
-                            rr3_state_frame(&me.name, Rr3Phase::Running.as_str(), me.task);
+                        let frame = rr3_state_frame(&me.name, Rr3Phase::Running.as_str(), me.task);
                         // E-9：这里的排除项是 `RR3_TASK_RRD`，等于**不排除**——发起者自己也要收到
                         // 关于自己的 running（它是唯一知道自己上线的连接）。supervisor 收尸那一路
                         // 排的是 `crashed.src_task`，两处口径不同是**已知**的第三/第四种口径，
@@ -601,7 +711,10 @@ fn rr3_route_call(
                     },
                     payload,
                 };
-                rr3_log(&format!("rr3.call {topic}: {}(task={}) → {name}(task={task})", me.name, me.task));
+                rr3_log(&format!(
+                    "rr3.call {topic}: {}(task={}) → {name}(task={task})",
+                    me.name, me.task
+                ));
                 Ok(g.rr3_reg_send_to(task, &frame))
             }
         }
@@ -610,7 +723,13 @@ fn rr3_route_call(
         Ok(true) => {}
         // 查表时还活着、投递时收件人没了：对调用方而言就是"这一拍没人接"
         Ok(false) => {
-            rr3_reply_err(out, me, id, Rr3StatusCode::Invalid, &format!("主题 {topic} 的被调方在投递前退场"));
+            rr3_reply_err(
+                out,
+                me,
+                id,
+                Rr3StatusCode::Invalid,
+                &format!("主题 {topic} 的被调方在投递前退场"),
+            );
         }
         Err(msg) => rr3_reply_err(out, me, id, Rr3StatusCode::Invalid, &msg),
     }
@@ -721,7 +840,10 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
                     // 钉在"谁拿到了它"前面，读日志时才不会先看到结果再找原因。
                     ctx.sup.rr3_restart(p);
                 }
-                None => rr3_log(&format!("{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接", me.name)),
+                None => rr3_log(&format!(
+                    "{} 退出（{reason}），无重启，广播 {phase} 到 {n} 个连接",
+                    me.name
+                )),
             }
             // ADR-0009 裁定 3：本路刚记完一条死亡/注销（EOF 或 unregister），若死者
             // 是某能力在 boot 全集里的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
@@ -746,7 +868,9 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
 /// 服务一条连接。返回 `Err` 只描述**这一条**连接的断开原因；守护进程与别的连接不受影响。
 pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String> {
     let out: Arc<Mutex<UnixStream>> = Arc::new(Mutex::new(
-        stream.try_clone().map_err(|e| format!("try_clone 失败: {e}"))?,
+        stream
+            .try_clone()
+            .map_err(|e| format!("try_clone 失败: {e}"))?,
     ));
     let (fan_tx, fan_rx) = mpsc::channel::<Rr3Frame>();
     let writer: JoinHandle<()> = {
@@ -760,7 +884,9 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
 
     // 注册前设读超时：连上却不注册的客户端不能永久占着线程（spec §5.0）
     stream
-        .set_read_timeout(Some(Duration::from_millis(ctx.pre_register_timeout_ms.max(1))))
+        .set_read_timeout(Some(Duration::from_millis(
+            ctx.pre_register_timeout_ms.max(1),
+        )))
         .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
     let mut reader = stream;
     let me = rr3_handshake(&mut reader, &out, &ctx, fan_tx)?;

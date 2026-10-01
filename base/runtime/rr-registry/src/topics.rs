@@ -16,7 +16,11 @@ pub struct Rr3TopicSet {
 }
 
 fn entries<'a>(root: &'a Value, key: &str) -> impl Iterator<Item = &'a toml::Table> {
-    root.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_table)
+    root.get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_table)
 }
 
 /// 解析一份主题文本（`contracts/topics.toml` 与叠加层同构，共用同一解析器，不写第二套）
@@ -31,11 +35,23 @@ pub fn rr3_registry_topic_set_from_text(text: &str) -> Rr3TopicSet {
         }
     }
     for t in entries(&root, "topic") {
-        let Some(name) = t.get("name").and_then(Value::as_str) else { continue };
-        set.topics
-            .insert(name.to_string(), t.get("owner").and_then(Value::as_str).unwrap_or("").to_string());
-        set.kinds
-            .insert(name.to_string(), t.get("kind").and_then(Value::as_str).unwrap_or("").to_string());
+        let Some(name) = t.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        set.topics.insert(
+            name.to_string(),
+            t.get("owner")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        );
+        set.kinds.insert(
+            name.to_string(),
+            t.get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        );
     }
     set.owners.sort();
     set.owners.dedup();
@@ -71,8 +87,12 @@ impl Rr3TopicSet {
 
     /// 叠加合并：撞名即 Err(冲突条目列表)，不改 self
     pub fn rr3_topic_set_merge(&self, overlay: &Rr3TopicSet) -> Result<Rr3TopicSet, Vec<String>> {
-        let mut conflicts: Vec<String> =
-            self.topics.keys().filter(|k| overlay.topics.contains_key(*k)).cloned().collect();
+        let mut conflicts: Vec<String> = self
+            .topics
+            .keys()
+            .filter(|k| overlay.topics.contains_key(*k))
+            .cloned()
+            .collect();
         if !conflicts.is_empty() {
             conflicts.sort();
             return Err(conflicts);
@@ -91,8 +111,8 @@ impl Rr3TopicSet {
         if self.rr3_topic_set_is_empty() {
             return vec!["主题集为空：必须至少登记一个 [[topic]]（ADR-0006）".to_string()];
         }
-        let allowed = crate::schema::rr3_registry_rule_list("topic_allowed_kinds")
-            .unwrap_or_default();
+        let allowed =
+            crate::schema::rr3_registry_rule_list("topic_allowed_kinds").unwrap_or_default();
         let mut errs = Vec::new();
         for (name, owner) in &self.topics {
             errs.extend(crate::validate::rr3_registry_check("topic", name));
@@ -128,8 +148,15 @@ mod tests {
         assert!(!set.rr3_topic_set_is_empty());
         assert!(set.rr3_topic_set_contains("rr3-runtime/module/state"));
         assert!(!set.rr3_topic_set_contains("rr3-sima/ping/state"));
-        assert_eq!(set.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(), Some("rr3-sense"));
-        assert!(set.rr3_topic_set_check().is_empty(), "{:?}", set.rr3_topic_set_check());
+        assert_eq!(
+            set.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(),
+            Some("rr3-sense")
+        );
+        assert!(
+            set.rr3_topic_set_check().is_empty(),
+            "{:?}",
+            set.rr3_topic_set_check()
+        );
     }
 
     /// 坏文本给空集，空集必须报错（fail-open 护栏）
@@ -144,19 +171,38 @@ mod tests {
     #[test]
     fn merge_appends_without_touching_contract_entries() {
         let base = rr3_registry_topic_set_from_text(CONTRACT);
-        let merged = base.rr3_topic_set_merge(&rr3_registry_topic_set_from_text(OVERLAY)).expect("合并");
+        let merged = base
+            .rr3_topic_set_merge(&rr3_registry_topic_set_from_text(OVERLAY))
+            .expect("合并");
         assert_eq!(merged.topics.len(), 24, "21 契约 + 3 夹具");
         assert_eq!(merged.owners.len(), 9);
-        assert_eq!(merged.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(), Some("rr3-sense"));
+        assert_eq!(
+            merged.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(),
+            Some("rr3-sense")
+        );
         // kind 走同一条"只增不改"承诺：契约条目的 kind 必须以契约原值回、叠加层的 kind 必须
         // 带得过来、不在册的必须回 None——rrd 装载处的 kind 复验就建在这三个事实上。
-        assert_eq!(merged.rr3_topic_set_kind("rr3-sense/audio/pcm").as_deref(), Some("stream"));
-        assert_eq!(merged.rr3_topic_set_kind("rr3-sima/ping/state").as_deref(), Some("event"));
-        assert_eq!(merged.rr3_topic_set_kind("rr3-nobody/x/y"), None, "不在册 topic 的 kind 是 None 而非空串");
+        assert_eq!(
+            merged.rr3_topic_set_kind("rr3-sense/audio/pcm").as_deref(),
+            Some("stream")
+        );
+        assert_eq!(
+            merged.rr3_topic_set_kind("rr3-sima/ping/state").as_deref(),
+            Some("event")
+        );
+        assert_eq!(
+            merged.rr3_topic_set_kind("rr3-nobody/x/y"),
+            None,
+            "不在册 topic 的 kind 是 None 而非空串"
+        );
         assert!(merged.rr3_topic_set_contains("rr3-sima/ping/state"));
         // self 未被改动
         assert_eq!(base.topics.len(), 21);
-        assert_eq!(base.rr3_topic_set_kind("rr3-sima/ping/state"), None, "merge 不得把叠加层的 kind 写回 self");
+        assert_eq!(
+            base.rr3_topic_set_kind("rr3-sima/ping/state"),
+            None,
+            "merge 不得把叠加层的 kind 写回 self"
+        );
     }
 
     /// 撞名必须 Err 并点名条目（测试注入不得改写生产契约的 owner/kind）
@@ -200,7 +246,11 @@ owner = "rr3-simb"
     #[test]
     fn committed_overlay_fixture_is_self_consistent() {
         let set = rr3_registry_topic_set_from_text(OVERLAY);
-        assert!(set.rr3_topic_set_check().is_empty(), "{:?}", set.rr3_topic_set_check());
+        assert!(
+            set.rr3_topic_set_check().is_empty(),
+            "{:?}",
+            set.rr3_topic_set_check()
+        );
         assert_eq!(set.topics.len(), 3);
         rr3_registry_topic_set_from_text(CONTRACT)
             .rr3_topic_set_merge(&set)

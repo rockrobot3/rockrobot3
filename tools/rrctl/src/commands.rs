@@ -27,7 +27,9 @@ pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
     if let Some(err) = envelope.get("error") {
         return Err(format!(
             "{cmd} 被拒（code {}）：{}",
-            err.get("code").map(Value::to_string).unwrap_or_else(|| "?".into()),
+            err.get("code")
+                .map(Value::to_string)
+                .unwrap_or_else(|| "?".into()),
             err.get("message").and_then(Value::as_str).unwrap_or("?")
         ));
     }
@@ -79,10 +81,10 @@ fn rr3_ctl_query(bus: &str, method: &str) -> Result<Value, String> {
     // 整帧一次 write_all（rr3_frame_write 的口径），不按字段分次写
     rr3_frame_write(&mut stream, &frame).map_err(|e| format!("写帧失败: {e:?}"))?;
     let _ = std::io::stdout().flush();
-    let reply =
-        rr3_frame_read(&mut stream).map_err(|e| format!("读应答失败（{RR3_CTL_READ_TIMEOUT:?} 内无帧或对端断开）: {e:?}"))?;
-    let (ty, body) = rr3_body_split(&reply.payload)
-        .map_err(|e| format!("应答 payload 前缀非法: {e:?}"))?;
+    let reply = rr3_frame_read(&mut stream)
+        .map_err(|e| format!("读应答失败（{RR3_CTL_READ_TIMEOUT:?} 内无帧或对端断开）: {e:?}"))?;
+    let (ty, body) =
+        rr3_body_split(&reply.payload).map_err(|e| format!("应答 payload 前缀非法: {e:?}"))?;
     if ty != Rr3PayloadType::Response {
         return Err(format!("应答 payload 类型 {ty:?} 不是 Response"));
     }
@@ -124,7 +126,7 @@ fn render_table(header: &[&str], rows: &[Vec<String>]) -> String {
 }
 
 /// 单元格取值：字符串去引号、数字原样、缺字段显式 `?`（两种缺失不混用一种写法）
-fn cell<'a>(v: &'a Value, key: &str) -> String {
+fn cell(v: &Value, key: &str) -> String {
     let v = &v[key];
     if let Some(s) = v.as_str() {
         s.to_string()
@@ -210,7 +212,10 @@ mod tests {
     #[test]
     fn unknown_command_names_the_alternatives() {
         let err = run("reboot", "/tmp/t.sock").unwrap_err();
-        assert!(err.contains("status") && err.contains("ota"), "错误文案没给出可用命令: {err}");
+        assert!(
+            err.contains("status") && err.contains("ota"),
+            "错误文案没给出可用命令: {err}"
+        );
     }
 
     #[test]
@@ -250,11 +255,15 @@ mod tests {
 
     #[test]
     fn logs_are_printed_verbatim_without_json_plumbing() {
-        let env = json!({"result": {"lines": ["rrd: 监听 /tmp/a.sock", "rrd: 注册 rr3-sima task=2"]}});
+        let env =
+            json!({"result": {"lines": ["rrd: 监听 /tmp/a.sock", "rrd: 注册 rr3-sima task=2"]}});
         let out = format_logs(&env).unwrap();
         assert!(out.contains("rrd: 监听 /tmp/a.sock"), "{out}");
         assert!(out.contains("rrd: 注册 rr3-sima task=2"), "{out}");
-        assert!(!out.contains("\"lines\""), "日志输出不得漏出 JSON 结构: {out}");
+        assert!(
+            !out.contains("\"lines\""),
+            "日志输出不得漏出 JSON 结构: {out}"
+        );
     }
 
     #[test]
@@ -303,7 +312,10 @@ mod tests {
                 // 读到一帧即回（帧长 128 头 + payload；测试体远小于 4096）
                 let n = stream.read(&mut buf).expect("读请求失败");
                 assert!(n > 128, "首帧应含 128B 头: {n}");
-                let payload = rr_ipc::rr3_body_encode(rr_ipc::Rr3PayloadType::Response, reply_body.as_bytes());
+                let payload = rr_ipc::rr3_body_encode(
+                    rr_ipc::Rr3PayloadType::Response,
+                    reply_body.as_bytes(),
+                );
                 let frame = rr_ipc::Rr3Frame {
                     header: rr_ipc::Rr3Header {
                         opcode: rr_ipc::opcode::SEND,
@@ -339,7 +351,10 @@ mod tests {
                     .to_string(),
             );
             let err = run("ota", &bus).unwrap_err();
-            assert!(err.contains("M6") && err.contains("-22"), "错误应带码与文案: {err}");
+            assert!(
+                err.contains("M6") && err.contains("-22"),
+                "错误应带码与文案: {err}"
+            );
         }
     }
 }

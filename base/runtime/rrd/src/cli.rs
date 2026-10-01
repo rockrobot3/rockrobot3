@@ -42,7 +42,9 @@ const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--
 pub const RR3_RESTART_BASE_MS_MAX: u64 = u64::MAX / 60;
 
 fn need_value(flag: &str, args: &[String], i: usize) -> Result<String, String> {
-    args.get(i + 1).cloned().ok_or_else(|| format!("{flag} 缺参数\n{USAGE}"))
+    args.get(i + 1)
+        .cloned()
+        .ok_or_else(|| format!("{flag} 缺参数\n{USAGE}"))
 }
 
 /// 路径型开关取值：以 `-` 开头的一律当"下一个开关名"拒掉，不作值。
@@ -51,7 +53,9 @@ fn need_value(flag: &str, args: &[String], i: usize) -> Result<String, String> {
 fn need_path_value(flag: &str, args: &[String], i: usize) -> Result<String, String> {
     let raw = need_value(flag, args, i)?;
     if raw.starts_with('-') {
-        return Err(format!("{flag} 缺参数：收到疑似开关的 {raw}（路径值不得以 - 开头）\n{USAGE}"));
+        return Err(format!(
+            "{flag} 缺参数：收到疑似开关的 {raw}（路径值不得以 - 开头）\n{USAGE}"
+        ));
     }
     Ok(raw)
 }
@@ -103,7 +107,8 @@ pub fn rr3_cli_parse_with_env(
                 i += 2;
             }
             "--manifest" => {
-                cfg.manifests.push(PathBuf::from(need_path_value("--manifest", args, i)?));
+                cfg.manifests
+                    .push(PathBuf::from(need_path_value("--manifest", args, i)?));
                 i += 2;
             }
             "--restart-base-ms" => {
@@ -112,8 +117,10 @@ pub fn rr3_cli_parse_with_env(
                 i += 2;
             }
             "--pre-register-timeout-ms" => {
-                cfg.pre_register_timeout_ms =
-                    parse_ms("--pre-register-timeout-ms", &need_value("--pre-register-timeout-ms", args, i)?)?;
+                cfg.pre_register_timeout_ms = parse_ms(
+                    "--pre-register-timeout-ms",
+                    &need_value("--pre-register-timeout-ms", args, i)?,
+                )?;
                 i += 2;
             }
             "--watchdog-tick-ms" => {
@@ -121,7 +128,8 @@ pub fn rr3_cli_parse_with_env(
                 let n = parse_ms("--watchdog-tick-ms", &raw)?;
                 if n == 0 {
                     return Err(
-                        "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）".to_string(),
+                        "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）"
+                            .to_string(),
                     );
                 }
                 cfg.watchdog_tick_ms = n;
@@ -162,7 +170,8 @@ pub fn rr3_cli_parse_with_env(
 }
 
 fn parse_ms(flag: &str, raw: &str) -> Result<u64, String> {
-    raw.parse::<u64>().map_err(|_| format!("{flag} 需为非负整数毫秒，收到 {raw}"))
+    raw.parse::<u64>()
+        .map_err(|_| format!("{flag} 需为非负整数毫秒，收到 {raw}"))
 }
 
 /// 把 `--socket` 解析成绝对路径：横幅回显与 `UnixListener::bind` 必须共用同一个值。
@@ -218,11 +227,18 @@ mod tests {
         let cfg = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
         // M-6：原来这里还有一行 `assert_eq!(cfg.socket, rr3_default_socket(&env_none))`，
         // 两边同走一个函数、恒真（自证），删掉。真正起锚作用的是下面与契约常量的对账。
-        assert_eq!(rr3_default_socket(&env_none), PathBuf::from(RR3_UDS_PATH_DEFAULT));
+        assert_eq!(
+            rr3_default_socket(&env_none),
+            PathBuf::from(RR3_UDS_PATH_DEFAULT)
+        );
         assert_eq!(cfg.overlay, None);
         assert!(cfg.manifests.is_empty());
         assert_eq!(
-            (cfg.restart_base_ms, cfg.pre_register_timeout_ms, cfg.watchdog_tick_ms),
+            (
+                cfg.restart_base_ms,
+                cfg.pre_register_timeout_ms,
+                cfg.watchdog_tick_ms
+            ),
             (1000, 3000, 200)
         );
     }
@@ -233,11 +249,17 @@ mod tests {
     #[test]
     fn watchdog_tick_is_configurable_and_never_zero() {
         let ok = rr3_cli_parse_with_env(&a(&["--socket", "/tmp/x.sock"]), &env_none).unwrap();
-        assert_eq!(ok.watchdog_tick_ms, 200, "默认 tick 必须与 USAGE/字段文档同口径");
+        assert_eq!(
+            ok.watchdog_tick_ms, 200,
+            "默认 tick 必须与 USAGE/字段文档同口径"
+        );
         let ok = rr3_cli_parse_with_env(&a(&["--watchdog-tick-ms", "20"]), &env_none).unwrap();
         assert_eq!(ok.watchdog_tick_ms, 20);
         let err = rr3_cli_parse_with_env(&a(&["--watchdog-tick-ms", "0"]), &env_none).unwrap_err();
-        assert!(err.contains("忙循环"), "拒 0 的文案必须说清为什么不是夹成 1: {err}");
+        assert!(
+            err.contains("忙循环"),
+            "拒 0 的文案必须说清为什么不是夹成 1: {err}"
+        );
     }
 
     /// `--boot-role`（E-6）：默认 `resident`、**原样透传不解释**、空值必拒。
@@ -248,11 +270,17 @@ mod tests {
     #[test]
     fn boot_role_defaults_to_resident_and_is_pass_through_verbatim() {
         let dflt = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
-        assert_eq!(dflt.boot_role, "resident", "默认必须是 resident（与夹具不传 RR3_SIM_PEER_ROLE 时的回落一致）");
+        assert_eq!(
+            dflt.boot_role, "resident",
+            "默认必须是 resident（与夹具不传 RR3_SIM_PEER_ROLE 时的回落一致）"
+        );
         // 原样透传：不做大小写归一、不裁剪、不映射
         for role in ["abort", "go_silent", "publish_once", "SOME-UNKNOWN-role"] {
             let got = rr3_cli_parse_with_env(&a(&["--boot-role", role]), &env_none).unwrap();
-            assert_eq!(got.boot_role, role, "rrd 不校验 role 取值，必须逐字进 cfg（{role} 被改写就是它在替夹具做主）");
+            assert_eq!(
+                got.boot_role, role,
+                "rrd 不校验 role 取值，必须逐字进 cfg（{role} 被改写就是它在替夹具做主）"
+            );
         }
         // 空值拒，且文案要点名开关与理由
         let e = rr3_cli_parse_with_env(&a(&["--boot-role", ""]), &env_none).unwrap_err();
@@ -262,26 +290,30 @@ mod tests {
         );
         // 缺值走 need_value 的同一条口径（`--boot-role` 是最后一个参数）
         let e = rr3_cli_parse_with_env(&a(&["--boot-role"]), &env_none).unwrap_err();
-        assert!(e.contains("--boot-role 缺参数") && e.contains("用法"), "{e}");
+        assert!(
+            e.contains("--boot-role 缺参数") && e.contains("用法"),
+            "{e}"
+        );
         // 疑似开关的值不当 role 吞下（否则后面那个真开关就被吃了，与 need_path_value 同形）
         let e = rr3_cli_parse_with_env(&a(&["--boot-role", "--socket", "/tmp/x.sock"]), &env_none)
             .unwrap_err();
-        assert!(e.contains("--boot-role 缺参数") && e.contains("--socket"), "必须点名被误当值的开关: {e}");
+        assert!(
+            e.contains("--boot-role 缺参数") && e.contains("--socket"),
+            "必须点名被误当值的开关: {e}"
+        );
     }
 
     /// env 覆盖必须生效（rrd 与模块用同一个 env 键找总线，spec §4）——但覆盖的是**注入的表**：
     /// 本文件里没有任何 `set_var`，进程环境从头到尾没被碰过，因此也不需要串行化锁。
     #[test]
     fn default_socket_follows_bus_env() {
-        let injected = |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-env.sock".to_string());
+        let injected =
+            |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-env.sock".to_string());
         let cfg = rr3_cli_parse_with_env(&a(&[]), &injected).unwrap();
         assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-env.sock"));
         // 命令行显式给值时压过 env
-        let overridden = rr3_cli_parse_with_env(
-            &a(&["--socket", "/tmp/rr3-m2-order.sock"]),
-            &injected,
-        )
-        .unwrap();
+        let overridden =
+            rr3_cli_parse_with_env(&a(&["--socket", "/tmp/rr3-m2-order.sock"]), &injected).unwrap();
         assert_eq!(overridden.socket, PathBuf::from("/tmp/rr3-m2-order.sock"));
     }
 
@@ -289,7 +321,8 @@ mod tests {
     /// 所以它与其它用例并行时既不会污染别人也不会读到别人的值——ENV_LOCK 因此不再需要。
     #[test]
     fn default_socket_comes_from_injected_env() {
-        let injected = |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-inject.sock".to_string());
+        let injected =
+            |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-inject.sock".to_string());
         let cfg = rr3_cli_parse_with_env(&a(&[]), &injected).unwrap();
         assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-inject.sock"));
         // 表里没有这个键 → 回落契约常量（两条分支各自可达，不是一律吞注入值）
@@ -306,7 +339,11 @@ mod tests {
         let from_reader = rr3_cli_parse_with_env(&a(&[]), &|k| std::env::var(k).ok()).unwrap();
         assert_eq!(from_parse, from_reader);
         match std::env::var(RR3_BUS_PATH_ENV) {
-            Ok(v) => assert_eq!(from_parse.socket, PathBuf::from(v), "env 设了值就必须照它来"),
+            Ok(v) => assert_eq!(
+                from_parse.socket,
+                PathBuf::from(v),
+                "env 设了值就必须照它来"
+            ),
             Err(_) => assert_eq!(from_parse.socket, PathBuf::from(RR3_UDS_PATH_DEFAULT)),
         }
     }
@@ -326,13 +363,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.overlay, Some(PathBuf::from("/tmp/sim-topics.toml")));
-        assert_eq!(cfg.manifests, vec![PathBuf::from("/m/b.toml"), PathBuf::from("/m/a.toml")]);
+        assert_eq!(
+            cfg.manifests,
+            vec![PathBuf::from("/m/b.toml"), PathBuf::from("/m/a.toml")]
+        );
     }
 
     /// 数字参数必须真是数字：笔误不许悄悄变成默认值
     #[test]
     fn numeric_flags_reject_garbage() {
-        for args in [a(&["--restart-base-ms", "fast"]), a(&["--pre-register-timeout-ms", "-1"])] {
+        for args in [
+            a(&["--restart-base-ms", "fast"]),
+            a(&["--pre-register-timeout-ms", "-1"]),
+        ] {
             let e = rr3_cli_parse(&args).expect_err("非法数字必须报错");
             assert!(e.contains("需为非负整数毫秒"), "{e}");
         }
@@ -345,7 +388,9 @@ mod tests {
         assert!(rr3_cli_parse(&a(&["--shard", "/tmp/x"]))
             .expect_err("未知选项必须报错")
             .contains("未知选项 --shard"));
-        assert!(rr3_cli_parse(&a(&["--socket", ""])).expect_err("空路径必须报错").contains("不得为空"));
+        assert!(rr3_cli_parse(&a(&["--socket", ""]))
+            .expect_err("空路径必须报错")
+            .contains("不得为空"));
     }
 
     /// 值以 `-` 开头 = 那是下一个开关，不是值。`--socket --topics-overlay` 曾经把
@@ -364,7 +409,9 @@ mod tests {
             );
         }
         // 单横杠同样拦（`-h` 不是路径）
-        assert!(rr3_cli_parse(&a(&["--socket", "-h"])).expect_err("-h 不是路径值").contains("不得以 - 开头"));
+        assert!(rr3_cli_parse(&a(&["--socket", "-h"]))
+            .expect_err("-h 不是路径值")
+            .contains("不得以 - 开头"));
         // 数字型开关的负值仍按原口径报，不是这条规则替它背锅
         let n = rr3_cli_parse(&a(&["--restart-base-ms", "-5"])).expect_err("负数毫秒必须拒");
         assert!(n.contains("需为非负整数毫秒"), "{n}");
@@ -375,10 +422,19 @@ mod tests {
     /// （spec §5.3 的退避表正是为了避免这个）。下界因此是 1，不是"允许 0 当缺省"。
     #[test]
     fn restart_base_ms_floor_is_one() {
-        let e = rr3_cli_parse(&a(&["--restart-base-ms", "0"])).expect_err("0 必须拒：退避恒为 0 = 热重启循环");
-        assert!(e.contains("--restart-base-ms") && e.contains("正整数") && e.contains("用法"), "报错要点名下界: {e}");
+        let e = rr3_cli_parse(&a(&["--restart-base-ms", "0"]))
+            .expect_err("0 必须拒：退避恒为 0 = 热重启循环");
+        assert!(
+            e.contains("--restart-base-ms") && e.contains("正整数") && e.contains("用法"),
+            "报错要点名下界: {e}"
+        );
         // 1 是下界本身，必须收：否则"拒 0"会悄悄变成"拒一切小值"
-        assert_eq!(rr3_cli_parse(&a(&["--restart-base-ms", "1"])).unwrap().restart_base_ms, 1);
+        assert_eq!(
+            rr3_cli_parse(&a(&["--restart-base-ms", "1"]))
+                .unwrap()
+                .restart_base_ms,
+            1
+        );
     }
 
     /// 上界由退避表末档导出：末档 × base 不许溢出 u64。
@@ -395,7 +451,10 @@ mod tests {
         assert_eq!(ok.restart_base_ms, max_ok);
         let e = rr3_cli_parse(&a(&["--restart-base-ms", &(max_ok + 1).to_string()]))
             .expect_err("溢出必须拒，不能饱和成「永不重启」");
-        assert!(e.contains("--restart-base-ms") && e.contains("用法"), "报错要点名开关: {e}");
+        assert!(
+            e.contains("--restart-base-ms") && e.contains("用法"),
+            "报错要点名开关: {e}"
+        );
     }
 
     /// 待创建的套接字路径**不存在**是常态（bind 之前哪来的文件），解析必须照样成功。
@@ -403,10 +462,16 @@ mod tests {
     #[test]
     fn socket_absolute_path_does_not_require_existence() {
         let raw = Path::new("rr3-m2-never-created-check.sock");
-        assert!(!raw.exists(), "夹具必须真的不存在：这条测的就是「不存在也能解析」");
+        assert!(
+            !raw.exists(),
+            "夹具必须真的不存在：这条测的就是「不存在也能解析」"
+        );
         let abs = rr3_socket_absolute_path(raw).expect("待创建路径不该被拒");
         assert!(abs.is_absolute(), "{abs:?} 不是绝对路径");
-        assert_eq!(abs.file_name(), Some(std::ffi::OsStr::new("rr3-m2-never-created-check.sock")));
+        assert_eq!(
+            abs.file_name(),
+            Some(std::ffi::OsStr::new("rr3-m2-never-created-check.sock"))
+        );
     }
 
     /// 已经是绝对路径时原样返回（幂等）：`main.rs` 只解析一次，重复解析不会改值，

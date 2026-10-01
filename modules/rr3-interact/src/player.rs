@@ -27,7 +27,9 @@ const RR3_TTS_SAMPLE_RATE: u32 = 16_000;
 
 /// 占位合成时长：`字符数 × 60ms`，封顶 10s（字符按 Unicode 标量数，不是字节数）
 pub fn rr3_tts_duration_ms(text: &str) -> u64 {
-    (text.chars().count() as u64).saturating_mul(RR3_TTS_MS_PER_CHAR).min(RR3_TTS_MAX_MS)
+    (text.chars().count() as u64)
+        .saturating_mul(RR3_TTS_MS_PER_CHAR)
+        .min(RR3_TTS_MAX_MS)
 }
 
 /// 占位合成的第 i 个采样点：440Hz 正弦、幅度 12000（与 rr-hal sim 源同参数，
@@ -61,7 +63,10 @@ pub fn rr3_tts_play(sink: &dyn Rr3AudioSink, text: &str) -> Result<u64, String> 
     while cursor < frames_total {
         let n = frames_per_block.min(frames_total - cursor);
         let samples: Vec<i16> = (0..n).map(|i| rr3_tts_sample(cursor + i)).collect();
-        let pcm = Rr3PcmStream { cfg: RR3_AUDIO_CFG_16K_MONO16, samples };
+        let pcm = Rr3PcmStream {
+            cfg: RR3_AUDIO_CFG_16K_MONO16,
+            samples,
+        };
         rr_hal::rr3_block_on(sink.write(pcm)).map_err(|e| format!("写播放面失败: {e}"))?;
         cursor += n;
     }
@@ -129,7 +134,8 @@ mod tests {
         assert_eq!(played.len(), 240 * 16);
         for (i, &v) in played.iter().enumerate() {
             let want = (12_000.0f64
-                * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 16_000.0).sin()) as i16;
+                * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 16_000.0).sin())
+                as i16;
             assert_eq!(v, want, "sample #{i}");
         }
     }

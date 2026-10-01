@@ -88,7 +88,12 @@ pub fn rr3_brain_manifests(
                 RR3_BRAIN_WD_MS,
                 "never",
                 &[RR3_BRAIN_TOPIC_INTENT],
-                &["rr3-interact/asr/text", "rr3-connect/net/link", RR3_SENSE_TOPIC_PCM, "rr3-sense/audio/vad_start"],
+                &[
+                    "rr3-interact/asr/text",
+                    "rr3-connect/net/link",
+                    RR3_SENSE_TOPIC_PCM,
+                    "rr3-sense/audio/vad_start",
+                ],
                 &[RR3_BRAIN_TOPIC_COMPLETION],
             ),
         ),
@@ -137,11 +142,20 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     rr3_require_bins_ext(&[
         (&rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
         (&rrctl, "cargo build --manifest-path tools/rrctl/Cargo.toml"),
-        (&sense, "cargo build -p rr3-sense（在 modules/rr3-sense/ 下）"),
-        (&interact, "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）"),
+        (
+            &sense,
+            "cargo build -p rr3-sense（在 modules/rr3-sense/ 下）",
+        ),
+        (
+            &interact,
+            "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
+        ),
     ])?;
     if !brain_pkg.join("rr3_brain").is_dir() {
-        return Err(format!("缺 Python 包 {}", brain_pkg.join("rr3_brain").display()));
+        return Err(format!(
+            "缺 Python 包 {}",
+            brain_pkg.join("rr3_brain").display()
+        ));
     }
     let py = which_python3()?;
 
@@ -177,21 +191,29 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         // ---- 2. 起 rrd：boot spawn rr3-sense（sim 正弦源） ----
         let rrd_log = workdir.join("rrd.log");
         let rrd = Command::new(&rrd)
-            .arg("--socket").arg(&socket)
-            .arg("--manifest").arg(&m_sense)
-            .arg("--boot-role").arg("resident")
+            .arg("--socket")
+            .arg(&socket)
+            .arg("--manifest")
+            .arg(&m_sense)
+            .arg("--boot-role")
+            .arg("resident")
             .args(["--pre-register-timeout-ms", "3000"])
             .env("RR3_HAL_BACKEND", "sim")
             // burst（1s 正弦 + 1s 静音循环）：VAD 周期性发 onset/offset，
             // brain 晚于首个 onset 注册也能赶上下一轮——sine 恒有声只发一次 onset
             .env("RR3_HAL_SIM_WAVE", "burst")
-            .stdout(Stdio::from(std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?))
+            .stdout(Stdio::from(
+                std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
+            ))
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("起 rrd 失败: {e}"))?;
         let rrd_pid = rrd.id();
         children.push(("rrd".into(), rrd));
-        println!("rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}", socket.display());
+        println!(
+            "rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}",
+            socket.display()
+        );
 
         // ---- 2.5 等 rrd bind 完套接字再起外部模块：sense 由 rrd spawn（bind 后），
         //      interact/brain 是外部进程，抢跑会撞 ENOENT（模块按契约快速退，不重试） ----
@@ -203,8 +225,16 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_interact)
             .env("RR3_HAL_BACKEND", "sim")
-            .stdout(Stdio::from(std::fs::File::create(&interact_log).map_err(|e| format!("建 {interact_log:?} 失败: {e}"))?))
-            .stderr(Stdio::from(std::fs::OpenOptions::new().append(true).open(&interact_log).map_err(|e| format!("开 {interact_log:?} 失败: {e}"))?))
+            .stdout(Stdio::from(
+                std::fs::File::create(&interact_log)
+                    .map_err(|e| format!("建 {interact_log:?} 失败: {e}"))?,
+            ))
+            .stderr(Stdio::from(
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&interact_log)
+                    .map_err(|e| format!("开 {interact_log:?} 失败: {e}"))?,
+            ))
             .spawn()
             .map_err(|e| format!("起 rr3-interact 失败: {e}"))?;
         children.push((RR3_SIM_MODULE_B.into(), interact_child));
@@ -212,14 +242,23 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         let brain_log = workdir.join("brain.log");
         let brain_child = Command::new(&py)
             .arg("-u") // 日志落文件不缓冲：轮次完成判据按行可读，进程被杀也不丢现场
-            .arg("-m").arg("rr3_brain")
+            .arg("-m")
+            .arg("rr3_brain")
             .env("PYTHONPATH", &brain_pkg)
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_brain)
             .env("RR3_BRAIN_CLOUD", "mock")
             .env("RR3_BRAIN_CONFIG", &manifest_path)
-            .stdout(Stdio::from(std::fs::File::create(&brain_log).map_err(|e| format!("建 {brain_log:?} 失败: {e}"))?))
-            .stderr(Stdio::from(std::fs::OpenOptions::new().append(true).open(&brain_log).map_err(|e| format!("开 {brain_log:?} 失败: {e}"))?))
+            .stdout(Stdio::from(
+                std::fs::File::create(&brain_log)
+                    .map_err(|e| format!("建 {brain_log:?} 失败: {e}"))?,
+            ))
+            .stderr(Stdio::from(
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&brain_log)
+                    .map_err(|e| format!("开 {brain_log:?} 失败: {e}"))?,
+            ))
             .spawn()
             .map_err(|e| format!("起 rr3-brain 失败: {e}"))?;
         children.push((RR3_SIM_MODULE_BRAIN.into(), brain_child));
@@ -236,19 +275,30 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         )?;
         report.push_str("\n=== 三模块 running ===\n");
         wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, RR3_BRAIN_READY_DEADLINE)?;
-        report.push_str(&format!("brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"));
-        wait_log_contains(&interact_log, RR3_INTERACT_TTS_MARK, RR3_BRAIN_READY_DEADLINE)?;
-        report.push_str(&format!("interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"));
+        report.push_str(&format!(
+            "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
+        ));
+        wait_log_contains(
+            &interact_log,
+            RR3_INTERACT_TTS_MARK,
+            RR3_BRAIN_READY_DEADLINE,
+        )?;
+        report.push_str(&format!(
+            "interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"
+        ));
 
         // ---- 5. rr3-ctl status 巡检：denied_publish = 0 是"事件真被接受"的线上证据 ----
         let out = Command::new(&rrctl)
-            .arg("--bus-path").arg(&socket)
+            .arg("--bus-path")
+            .arg(&socket)
             .arg("status")
             .output()
             .map_err(|e| format!("跑 rr3-ctl status 失败: {e}"))?;
         let status_out = String::from_utf8_lossy(&out.stdout).into_owned();
         if !status_out.contains("denied_publish = 0") {
-            return Err(format!("denied_publish ≠ 0：brain 的发布被 rrd 拒了\n{status_out}"));
+            return Err(format!(
+                "denied_publish ≠ 0：brain 的发布被 rrd 拒了\n{status_out}"
+            ));
         }
         report.push_str("\n=== rr3-ctl status 巡检 ===\n");
         report.push_str(&status_out);
@@ -257,7 +307,11 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
 
     // ---- 6. 收尾：杀全部子进程；--keep 保留现场 ----
     if a.keep {
-        println!("rr3-sim --brain: --keep 保留现场：socket={} workdir={}", socket.display(), workdir.display());
+        println!(
+            "rr3-sim --brain: --keep 保留现场：socket={} workdir={}",
+            socket.display(),
+            workdir.display()
+        );
         println!("rr3-sim --brain: 手动收尾：kill 上述进程；rm -rf {workdir:?}");
         return match outcome {
             Ok(()) => {
@@ -286,7 +340,8 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
 /// 连接失败（rrd 尚未就绪）当空表处理，由 deadline 收口
 fn rr3_ctl_status_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)> {
     Command::new(rrctl)
-        .arg("--bus-path").arg(socket)
+        .arg("--bus-path")
+        .arg(socket)
         .arg("status")
         .output()
         .map(|o| rr3_parse_status(&String::from_utf8_lossy(&o.stdout)))
@@ -302,7 +357,9 @@ fn wait_socket_exists(socket: &Path, deadline: Duration) -> Result<(), String> {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    Err(format!("超时（{deadline:?}）：rrd 未 bind 套接字 {socket:?}"))
+    Err(format!(
+        "超时（{deadline:?}）：rrd 未 bind 套接字 {socket:?}"
+    ))
 }
 
 fn wait_log_contains(path: &Path, needle: &str, deadline: Duration) -> Result<(), String> {
@@ -316,7 +373,16 @@ fn wait_log_contains(path: &Path, needle: &str, deadline: Duration) -> Result<()
         std::thread::sleep(Duration::from_millis(200));
     }
     let tail = std::fs::read_to_string(path)
-        .map(|s| s.lines().rev().take(15).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
+        .map(|s| {
+            s.lines()
+                .rev()
+                .take(15)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .unwrap_or_else(|e| format!("（读日志失败: {e}）"));
     Err(format!(
         "超时（{deadline:?}）：日志 {path:?} 未出现「{needle}」\n日志尾部:\n{tail}"
@@ -385,21 +451,33 @@ mod tests {
         assert_eq!(ms.len(), 3);
         let sense = &ms[0].1;
         assert!(sense.contains("entry = \"/abs/rr3-sense\""), "{sense}");
-        assert!(sense.contains("publishes = [\"rr3-sense/audio/pcm\", \"rr3-sense/audio/vad_start\"]"), "{sense}");
+        assert!(
+            sense.contains("publishes = [\"rr3-sense/audio/pcm\", \"rr3-sense/audio/vad_start\"]"),
+            "{sense}"
+        );
         let brain = &ms[2].1;
         assert!(brain.contains("type = \"brain\""), "{brain}");
         assert!(brain.contains("lang = \"python\""), "{brain}");
-        assert!(brain.contains("exposes = [\"rr3-brain/llm/completion\"]"), "{brain}");
+        assert!(
+            brain.contains("exposes = [\"rr3-brain/llm/completion\"]"),
+            "{brain}"
+        );
     }
 
     #[test]
     fn shim_and_config_shapes() {
         let shim = rr3_brain_shim_script(Path::new("/repo/modules/rr3-brain"));
         assert!(shim.starts_with("#!/bin/sh\n"), "{shim}");
-        assert!(shim.contains("PYTHONPATH=/repo/modules/rr3-brain"), "{shim}");
+        assert!(
+            shim.contains("PYTHONPATH=/repo/modules/rr3-brain"),
+            "{shim}"
+        );
         assert!(shim.contains("exec python3 -m rr3_brain"), "{shim}");
         let cfg = rr3_brain_config_text();
         assert!(cfg.contains("max_utterance_ms = 1500"), "{cfg}");
-        assert!(cfg.contains("base_url = \"http://127.0.0.1:9/v1\""), "{cfg}");
+        assert!(
+            cfg.contains("base_url = \"http://127.0.0.1:9/v1\""),
+            "{cfg}"
+        );
     }
 }

@@ -12,18 +12,18 @@ pub mod slots;
 pub mod topics;
 pub mod validate;
 
-pub use schema::{
-    Rr3FieldSpec, RR3_MANIFEST_SCHEMA_VERSION, rr3_registry_field_specs,
-    rr3_registry_get_by_path, rr3_registry_rule_list,
-};
-pub use topics::{Rr3TopicSet, rr3_registry_topic_set_from_text};
-pub use slots::{Rr3SlotTable, rr3_registry_slot_table_from_text};
 pub use depends::{
-    Rr3BootPlan, Rr3DependsFacts, rr3_registry_depends_facts_from_text, rr3_registry_plan_boot,
-    rr3_registry_resolve_boot_order,
+    rr3_registry_depends_facts_from_text, rr3_registry_plan_boot, rr3_registry_resolve_boot_order,
+    Rr3BootPlan, Rr3DependsFacts,
 };
+pub use schema::{
+    rr3_registry_field_specs, rr3_registry_get_by_path, rr3_registry_rule_list, Rr3FieldSpec,
+    RR3_MANIFEST_SCHEMA_VERSION,
+};
+pub use slots::{rr3_registry_slot_table_from_text, Rr3SlotTable};
+pub use topics::{rr3_registry_topic_set_from_text, Rr3TopicSet};
 pub use validate::{
-    Rr3ValidationReport, rr3_registry_check, rr3_registry_topic_names,
-    rr3_registry_topic_owners, rr3_registry_validate_manifest,
-    rr3_registry_validate_manifest_text, rr3_registry_validate_topics,
+    rr3_registry_check, rr3_registry_topic_names, rr3_registry_topic_owners,
+    rr3_registry_validate_manifest, rr3_registry_validate_manifest_text,
+    rr3_registry_validate_topics, Rr3ValidationReport,
 };

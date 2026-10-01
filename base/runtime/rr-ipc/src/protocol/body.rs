@@ -53,8 +53,16 @@ mod tests {
             (Rr3PayloadType::Notification, [0x05, 0x00]),
         ] {
             let got = rr3_body_encode(ty, b"x");
-            assert_eq!(&got[..RR3_BODY_TYPE_PREFIX_LEN], &want[..], "{ty:?} 前缀字节错");
-            assert_eq!(&got[RR3_BODY_TYPE_PREFIX_LEN..], b"x", "体必须紧跟前缀，不插填充");
+            assert_eq!(
+                &got[..RR3_BODY_TYPE_PREFIX_LEN],
+                &want[..],
+                "{ty:?} 前缀字节错"
+            );
+            assert_eq!(
+                &got[RR3_BODY_TYPE_PREFIX_LEN..],
+                b"x",
+                "体必须紧跟前缀，不插填充"
+            );
         }
     }
 
@@ -86,7 +94,10 @@ mod tests {
 
     #[test]
     fn rejects_truncated_prefix() {
-        assert_eq!(rr3_body_split(&[0x03]), Err(Rr3BodyError::TooShort { got: 1 }));
+        assert_eq!(
+            rr3_body_split(&[0x03]),
+            Err(Rr3BodyError::TooShort { got: 1 })
+        );
         assert_eq!(rr3_body_split(&[]), Err(Rr3BodyError::TooShort { got: 0 }));
     }
 

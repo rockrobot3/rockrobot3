@@ -5,7 +5,7 @@
 
 use std::io::{Read, Write};
 
-use crate::protocol::header::{Rr3Header, Rr3HdrError, RR3_IPC_HDR_SIZE};
+use crate::protocol::header::{Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE};
 
 /// 一帧 = 头 + payload
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +66,10 @@ pub fn rr3_frame_read(mut r: impl Read) -> Result<Rr3Frame, Rr3FrameError> {
     let header = Rr3Header::from_bytes(&head).map_err(Rr3FrameError::Header)?;
     let want = header.payload_len as usize;
     if want == 0 {
-        return Ok(Rr3Frame { header, payload: Vec::new() });
+        return Ok(Rr3Frame {
+            header,
+            payload: Vec::new(),
+        });
     }
     let mut payload = vec![0u8; want];
     match read_fill(&mut r, &mut payload)? {
@@ -93,7 +96,8 @@ pub fn rr3_frame_to_bytes(f: &Rr3Frame) -> Result<Vec<u8>, Rr3FrameError> {
 /// 写一帧
 pub fn rr3_frame_write(w: &mut impl Write, f: &Rr3Frame) -> Result<(), Rr3FrameError> {
     let bytes = rr3_frame_to_bytes(f)?;
-    w.write_all(&bytes).map_err(|e| Rr3FrameError::Io(e.to_string()))?;
+    w.write_all(&bytes)
+        .map_err(|e| Rr3FrameError::Io(e.to_string()))?;
     w.flush().map_err(|e| Rr3FrameError::Io(e.to_string()))
 }
 
@@ -116,8 +120,14 @@ mod tests {
     }
 
     fn golden() -> Vec<u8> {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/golden/event-header-128.hex");
-        let s = std::fs::read_to_string(path).expect("读不到 golden hex").trim().to_string();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../contracts/golden/event-header-128.hex"
+        );
+        let s = std::fs::read_to_string(path)
+            .expect("读不到 golden hex")
+            .trim()
+            .to_string();
         (0..s.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("非法 hex"))
@@ -127,7 +137,10 @@ mod tests {
     /// 往返：写多少字节，读回来就是同一帧
     #[test]
     fn frame_round_trip() {
-        let f = Rr3Frame { header: hdr(5), payload: b"hello"[..].to_vec() };
+        let f = Rr3Frame {
+            header: hdr(5),
+            payload: b"hello"[..].to_vec(),
+        };
         let mut buf = Vec::new();
         rr3_frame_write(&mut buf, &f).expect("写帧应成功");
         assert_eq!(buf.len(), RR3_IPC_HDR_SIZE + 5);
@@ -141,10 +154,17 @@ mod tests {
         let mut body = Vec::new();
         rr3_frame_write(
             &mut body,
-            &Rr3Frame { header: Rr3Header::from_bytes(&g).unwrap(), payload: vec![0xAB; 96] },
+            &Rr3Frame {
+                header: Rr3Header::from_bytes(&g).unwrap(),
+                payload: vec![0xAB; 96],
+            },
         )
         .unwrap();
-        assert_eq!(&body[..RR3_IPC_HDR_SIZE], &g[..], "帧头部与 golden 向量漂移");
+        assert_eq!(
+            &body[..RR3_IPC_HDR_SIZE],
+            &g[..],
+            "帧头部与 golden 向量漂移"
+        );
         assert_eq!(body.len(), 128 + 96);
     }
 
@@ -165,11 +185,19 @@ mod tests {
             "magic 0x41524531 必须小端落在线上"
         );
         assert_eq!(
-            u16::from_le_bytes(bytes[OFF_OPCODE..OFF_OPCODE + LEN_OPCODE].try_into().unwrap()),
+            u16::from_le_bytes(
+                bytes[OFF_OPCODE..OFF_OPCODE + LEN_OPCODE]
+                    .try_into()
+                    .unwrap()
+            ),
             opcode::SEND
         );
         assert_eq!(
-            u64::from_le_bytes(bytes[OFF_TRACE_ID..OFF_TRACE_ID + LEN_TRACE_ID].try_into().unwrap()),
+            u64::from_le_bytes(
+                bytes[OFF_TRACE_ID..OFF_TRACE_ID + LEN_TRACE_ID]
+                    .try_into()
+                    .unwrap()
+            ),
             0x1234_5678
         );
         assert_eq!(
@@ -181,11 +209,19 @@ mod tests {
             100
         );
         assert_eq!(
-            u64::from_le_bytes(bytes[OFF_SRC_TASK..OFF_SRC_TASK + LEN_SRC_TASK].try_into().unwrap()),
+            u64::from_le_bytes(
+                bytes[OFF_SRC_TASK..OFF_SRC_TASK + LEN_SRC_TASK]
+                    .try_into()
+                    .unwrap()
+            ),
             7
         );
         assert_eq!(
-            u64::from_le_bytes(bytes[OFF_DST_TASK..OFF_DST_TASK + LEN_DST_TASK].try_into().unwrap()),
+            u64::from_le_bytes(
+                bytes[OFF_DST_TASK..OFF_DST_TASK + LEN_DST_TASK]
+                    .try_into()
+                    .unwrap()
+            ),
             0,
             "广播：dst_task=0"
         );
@@ -198,7 +234,9 @@ mod tests {
             5
         );
         assert!(
-            bytes[OFF_RESERVED..OFF_RESERVED + LEN_RESERVED].iter().all(|&b| b == 0),
+            bytes[OFF_RESERVED..OFF_RESERVED + LEN_RESERVED]
+                .iter()
+                .all(|&b| b == 0),
             "reserved 必须全 0，否则两侧比的是垃圾位而不是布局"
         );
         let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
@@ -214,7 +252,14 @@ mod tests {
     #[test]
     fn frame_empty_payload_is_allowed() {
         let mut buf = Vec::new();
-        rr3_frame_write(&mut buf, &Rr3Frame { header: hdr(0), payload: vec![] }).unwrap();
+        rr3_frame_write(
+            &mut buf,
+            &Rr3Frame {
+                header: hdr(0),
+                payload: vec![],
+            },
+        )
+        .unwrap();
         let back = rr3_frame_read(Cursor::new(&buf)).unwrap();
         assert_eq!(back.payload.len(), 0);
         assert_eq!(back.header.payload_len, 0);
@@ -224,7 +269,10 @@ mod tests {
     #[test]
     fn frame_read_closed_connection() {
         let empty: [u8; 0] = [];
-        assert_eq!(rr3_frame_read(Cursor::new(&empty[..])), Err(Rr3FrameError::Closed));
+        assert_eq!(
+            rr3_frame_read(Cursor::new(&empty[..])),
+            Err(Rr3FrameError::Closed)
+        );
     }
 
     /// 半帧头（64B 后 EOF）不得被当成新帧起始
@@ -232,7 +280,10 @@ mod tests {
     fn frame_rejects_torn_header() {
         let mut buf = hdr(3).to_bytes().to_vec();
         buf.truncate(64);
-        assert_eq!(rr3_frame_read(Cursor::new(&buf)), Err(Rr3FrameError::TornHeader { got: 64 }));
+        assert_eq!(
+            rr3_frame_read(Cursor::new(&buf)),
+            Err(Rr3FrameError::TornHeader { got: 64 })
+        );
     }
 
     /// 头说 10 字节，payload 只到 3 字节（payload 含 0 也必须如实报 got=3）
@@ -261,11 +312,17 @@ mod tests {
     /// 写侧自校验：长度不符就一个字都不许发出去
     #[test]
     fn frame_write_rejects_length_mismatch() {
-        let f = Rr3Frame { header: hdr(9), payload: b"123"[..].to_vec() };
+        let f = Rr3Frame {
+            header: hdr(9),
+            payload: b"123"[..].to_vec(),
+        };
         let mut buf = Vec::new();
         assert_eq!(
             rr3_frame_write(&mut buf, &f),
-            Err(Rr3FrameError::LengthMismatch { declares: 9, actual: 3 })
+            Err(Rr3FrameError::LengthMismatch {
+                declares: 9,
+                actual: 3
+            })
         );
         assert!(buf.is_empty(), "校验失败时不得有半帧落进流里");
     }
