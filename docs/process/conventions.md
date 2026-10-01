@@ -380,6 +380,14 @@ socket）实跑 2/2 OK，判据：三模块 running + brain 日志「对话轮�
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
+**七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：
+`lint`——rustfmt `--check` 与 clippy `-D warnings` 各自独立失败，覆盖 base/runtime 与
+全部独立工程（④ 同一 find 口径）；绿色基线是 2026-10-01 的 rustfmt 全仓归一 + clippy
+清零提交，此后 fmt/clippy 回退即 CI 红。`brain-unittest`——rr3-brain 26 条 stdlib
+unittest（`python3 -m unittest discover -s tests`），ubuntu + macos 双矩阵；brain 不在
+Rust workspace 里，①b/②b/④ 覆盖不到它，只有这一步跑。四真进程 e2e 仍属本地实跑
+环节（同下节平台条件脚本的理由）。
+
 **七步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
 ADR-0006 后果项）**不在七步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
 塞进门禁等于让无容器环境的机器永远红。它做三件事：①宿主跑 `rr-ipc` 的
