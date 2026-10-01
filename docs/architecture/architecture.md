@@ -94,7 +94,9 @@ rock3/
 ├── .gitignore                     ← 白名单式追踪：`*` 默认忽略，逐目录放开（密钥与再生件永不入库）
 ├── .github/
 │   ├── README.md
-│   └── workflows/ci.yml           ← 与本地同一入口：`bash tools/ci/check.sh`
+│   └── workflows/ci.yml           ← 三 job 拆步：conventions（与本地同一入口
+│                                      `bash tools/ci/check.sh`）· lint（fmt/clippy）·
+│                                      brain-unittest（ubuntu+macos 双矩阵）
 │
 ├── contracts/                     ← [SC] 字节级共享契约（Rust/Python 双方唯一事实源）
 │   ├── README.md                  ← 歧义裁定与"契约只增不改"的演进规则
