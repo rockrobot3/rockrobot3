@@ -169,8 +169,8 @@ entry   = "rr3-sense"
 capabilities = ["audio.capture", "audio.vad"]   # 能力声明：依赖仲裁的唯一依据（ADR-0002）
 
 [depends]
-required = []               # 缺失 → 模块不启动
-optional = ["net.online"]   # 缺席 → 降级运行
+required = []               # 不可满足（无提供者）→ 拒启动本模块（ADR-0009）
+optional = ["net.online"]   # v0.0.1 只作声明：不进启动序、不触发降级（ADR-0009）
 
 [events]
 publishes = ["rr3-sense/audio/vad_start", "rr3-sense/audio/asr_final"]
@@ -192,11 +192,15 @@ watchdog_timeout_ms = 5000
 要点：
 
 - **能力语义的分工**：`provides.capabilities` 是依赖仲裁的**唯一依据**（模块之间只认能力名，
-  不认模块名，见 §2 原则 2）；仲裁这个**动作**归 rrd 的装载/拉起环节，不在校验层做。校验层只保证
-  两条事实：一条**语法**——`capability` 的形状 `^[a-z]+(\.[a-z_]+)+$`（`provides` 与 `depends`
-  两侧同规则）；一条**在册**——`depends.required`/`depends.optional` 的每一项必须命中
-  `module.schema.toml` 的 `base_capabilities` 白名单。后者是"跨模块能力登记面"定型之前的过渡
-  约束，它让依赖声明不至于写成空口白话。仲裁环节做到哪一步属实况，见 [`../status.md`](../status.md)。
+  不认模块名，见 §2 原则 2）。校验分两层（ADR-0009 裁定 1）：校验层只保证**语法**——
+  `capability` 的形状 `^[a-z]+(\.[a-z_]+)+$`（`provides` 与 `depends` 两侧同规则）；**可满足性**
+  归跨 manifest 仲裁（`rr-registry` 的 `depends.rs`，rrd boot 与 CI 全集检查共用）——
+  `depends.required` 的每一项必须命中 `base_capabilities`，或被本次 boot 全集内某个
+  manifest 的 `provides.capabilities` 提供。仲裁的裁定：启动序 = 拓扑序为主键、
+  `start_priority` 降为层内次键；环拒整个 boot，能力不可满足只拒该模块；提供者全灭 →
+  下游置 `Degraded`、任一恢复 → 解除（降级不重启、不吃预算）。裁定全文见
+  [ADR-0009](../process/adr/ADR-0009-依赖仲裁-启动序与降级传播.md)；接线到哪一步属实况，
+  见 [`../status.md`](../status.md)。
 - 事件/RPC 主题必须以 `manifest.name` 为前缀，越权发布一律拒绝；三个校验入口见 §6.3
 - **上面的示例只演示字段形状，其中 `audio/asr_final`、`audio/set_mute` 并未登记**：照抄会被
   契约测试以"未注册主题"拒。`modules/` 下六份真实 manifest 是可直接对照的样板
@@ -467,7 +471,8 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁 →
 
 ①–⑤ 与 ⑥ 的 Unix 分支属于 rrd 的**装配层**职责；目标链条里"加载 manifests → 依赖仲裁 →
 按 `start_priority` 拉起 → 心跳监督"这四环落在 spawn/仲裁/监视环节上，本档不写它们到哪一步
-（见 [`../status.md`](../status.md)）。`--manifest` 传入的路径在拉起时按 `start_priority` 重排；
+（见 [`../status.md`](../status.md)）。`--manifest` 传入的路径在拉起时按依赖拓扑序重排
+（层内按 `start_priority` 升序，[ADR-0009](../process/adr/ADR-0009-依赖仲裁-启动序与降级传播.md) 裁定 2）；
 注册环节本身**只拒语法**——`entry` 的绝对性在握手处查（相对路径即 `Rr3StatusCode::Invalid`，
 映射 `AIRY_EINVAL`，并点名字段），路径的存在性与可执行位留给 spawn 那一刻，在册表不替文件系统猜。
 
