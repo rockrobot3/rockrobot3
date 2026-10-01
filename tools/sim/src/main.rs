@@ -25,6 +25,8 @@ fn main() {
 mod drill;
 #[cfg(unix)]
 mod devices;
+#[cfg(unix)]
+mod brain;
 
 #[cfg(unix)]
 mod run {
@@ -52,6 +54,19 @@ mod run {
                 return 2;
             }
         };
+        // --brain 走 M4 四真进程演练（ADR-0012 裁定 4），与两面演练互斥
+        if a.brain {
+            return match crate::brain::rr3_brain_drill(&a) {
+                Ok(report) => {
+                    println!("{report}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("rr3-sim: {e}");
+                    1
+                }
+            };
+        }
         match rr3_sim_drill(&a) {
             Ok(report) => {
                 println!("{report}");
@@ -283,6 +298,9 @@ mod tests {
         assert!(a.keep);
         assert_eq!(a.socket.unwrap(), std::path::PathBuf::from("/tmp/s.sock"));
         assert_eq!(a.repo.unwrap(), std::path::PathBuf::from("/r"));
+        // --brain 开关
+        let a = rr3_sim_args_parse(&v(&["--brain"])).unwrap();
+        assert!(a.brain);
         // 开关在值的位置收到另一个开关要拒，不许静默吞掉
         let e = rr3_sim_args_parse(&v(&["--socket", "--keep"])).unwrap_err();
         assert!(e.contains("疑似开关"), "{e}");
@@ -318,6 +336,14 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.contains("cargo build"), "报错要给构建指引: {e}");
+        // 扩展版同一真值：自定义 (路径, 指引) 对照查
+        let e = rr3_require_bins_ext(&[
+            (std::path::Path::new("/nope/x"), "cargo build -p x"),
+            (std::path::Path::new("/nope/y"), "cargo build -p y"),
+        ])
+        .unwrap_err();
+        assert!(e.contains("/nope/x") && e.contains("cargo build -p x"), "{e}");
+        assert!(rr3_require_bins_ext(&[]).is_ok());
     }
 
     #[test]

@@ -20,7 +20,8 @@ pub const RR3_BACKEND_PLACEHOLDER: &str = "placeholder";
 /// 取值：`sim` / `linux` / `placeholder`；未设或取值不认 → 走平台默认。
 pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 
-/// sim 源的波形选择键：`sine` / `noise` / `silence`（默认 `sine`，必过 VAD 起音阈值）。
+/// sim 源的波形选择键：`sine` / `noise` / `silence` / `burst`（默认 `sine`，必过 VAD 起音阈值；
+/// `burst` = 1s 正弦 + 1s 静音循环，VAD 周期性发 onset/offset，多轮对话闭环用）。
 pub const RR3_HAL_SIM_WAVE_ENV: &str = "RR3_HAL_SIM_WAVE";
 
 /// linux（ALSA）后端的设备名键：如 `hw:0,0`、`plughw:1,0`；默认 `default`。

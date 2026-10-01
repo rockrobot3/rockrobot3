@@ -1,9 +1,10 @@
 //! sim 音频后端：主机联调与 CI 的虚拟麦克风 / 虚拟扬声器（architecture.md §5）。
 //!
-//! 兑现 `tools/sim` devices.rs "波形注入（正弦/噪声）" 的承诺：三模式
+//! 兑现 `tools/sim` devices.rs "波形注入（正弦/噪声）" 的承诺：四模式
 //! [`Rr3SimWave`]——`Sine`（440Hz、幅度 12000，必过 VAD 起音阈值）、`Noise`
-//! （确定性 xorshift，幅度 ±8000）、`Silence`（全零）。两个后端都是纯计算、
-//! 首拍即完成，是 [`crate::rr3_block_on`] noop-waker 裁定的直接受益者。
+//! （确定性 xorshift，幅度 ±8000）、`Silence`（全零）、`Burst`（1s 正弦 + 1s
+//! 静音循环，VAD 周期性发 onset/offset，供多轮对话闭环联调）。两个后端都是
+//! 纯计算、首拍即完成，是 [`crate::rr3_block_on`] noop-waker 裁定的直接受益者。
 //!
 //! 确定性是硬要求：同一 wave 同一帧序，任何机器任何时刻读出的 PCM 逐点相等——
 //! golden 向量测试与 e2e 都钉在这一点上。
@@ -24,15 +25,20 @@ pub enum Rr3SimWave {
     Noise,
     /// 全零静音
     Silence,
+    /// 1s 正弦 + 1s 静音循环：VAD 周期性发 onset/offset（≈2s 一轮），
+    /// 多轮对话闭环（tools/sim --brain）的驱动源。门控按**绝对采样序号**算
+    /// （`idx/rate` 的偶秒有声），与 Sine 同一确定性纪律
+    Burst,
 }
 
 impl Rr3SimWave {
-    /// 环境变量取值 → 波形（`sine` / `noise` / `silence`，大小写不敏感）
+    /// 环境变量取值 → 波形（`sine` / `noise` / `silence` / `burst`，大小写不敏感）
     pub fn rr3_sim_wave_parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "sine" => Some(Self::Sine),
             "noise" => Some(Self::Noise),
             "silence" => Some(Self::Silence),
+            "burst" => Some(Self::Burst),
             _ => None,
         }
     }
@@ -42,6 +48,7 @@ impl Rr3SimWave {
             Self::Sine => "sine",
             Self::Noise => "noise",
             Self::Silence => "silence",
+            Self::Burst => "burst",
         }
     }
 }
@@ -99,11 +106,21 @@ impl Rr3AudioSource for Rr3SimAudioSource {
         let samples: Vec<i16> = (0..n)
             .map(|i| {
                 let idx = open.cursor + i as u64;
+                let sine = |idx: u64| {
+                    (RR3_SIM_SINE_AMP as f64
+                        * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * idx as f64 / rate).sin())
+                        as i16
+                };
                 match self.wave {
-                    Rr3SimWave::Sine => {
-                        (RR3_SIM_SINE_AMP as f64
-                            * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * idx as f64 / rate).sin())
-                            as i16
+                    Rr3SimWave::Sine => sine(idx),
+                    Rr3SimWave::Burst => {
+                        // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
+                        // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等
+                        if idx / rate as u64 % 2 == 0 {
+                            sine(idx)
+                        } else {
+                            0
+                        }
                     }
                     Rr3SimWave::Noise => {
                         let mut x = RR3_SIM_NOISE_SEED
@@ -196,6 +213,7 @@ mod tests {
             ("SINE", Rr3SimWave::Sine),
             ("noise", Rr3SimWave::Noise),
             ("silence", Rr3SimWave::Silence),
+            ("burst", Rr3SimWave::Burst),
         ] {
             assert_eq!(Rr3SimWave::rr3_sim_wave_parse(s), Some(want), "{s}");
             assert_eq!(want.rr3_sim_wave_as_str(), s.to_ascii_lowercase());
@@ -232,6 +250,23 @@ mod tests {
         let mut joined = half1;
         joined.extend(half2);
         assert_eq!(joined, whole);
+    }
+
+    /// burst：偶秒正弦、奇秒静音；2s 周期恰为 440Hz 整周期数，第 3 秒与第 1 秒逐点相等
+    #[test]
+    fn burst_gates_sine_by_even_seconds_and_stays_deterministic() {
+        let s = source(Rr3SimWave::Burst);
+        rr3_block_on(s.open(RR3_AUDIO_CFG_16K_MONO16)).unwrap();
+        let pcm = rr3_block_on(s.read(3 * 16000)).unwrap().samples;
+        // 第 1 秒有声（远超 VAD 起音阈值），第 2 秒全零，第 3 秒与第 1 秒逐点相等
+        assert!(pcm[..16000].iter().any(|&v| v.abs() > 1500), "第 1 秒必过起音阈值");
+        assert!(pcm[16000..32000].iter().all(|&v| v == 0), "第 2 秒必须全静音");
+        assert_eq!(&pcm[32000..], &pcm[..16000], "第 3 秒复现第 1 秒");
+        // 门控与正弦同源：第 1 秒头部与 Sine 波形的同序号采样逐点相等
+        let sine = source(Rr3SimWave::Sine);
+        rr3_block_on(sine.open(RR3_AUDIO_CFG_16K_MONO16)).unwrap();
+        let head = rr3_block_on(sine.read(16000)).unwrap().samples;
+        assert_eq!(&pcm[..16000], &head[..], "burst 有声段 = Sine 同序号采样");
     }
 
     /// 噪声确定性：同波两源读出逐点相等，且幅度不越 ±8000
