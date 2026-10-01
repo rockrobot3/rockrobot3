@@ -157,6 +157,19 @@ pub struct Rr3RestartPlan {
     pub entry: String,
 }
 
+/// `rr3.ctl.health` 的一行（ADR-0010 裁定 4）：快照行 + 心跳/看门狗配置 + 距上次心跳。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3HealthRow {
+    pub name: String,
+    pub src_task: u64,
+    pub phase: Rr3Phase,
+    pub heartbeat_ms: u64,
+    pub watchdog_ms: u64,
+    /// 判定处回显 `now - last_beat_ms`（与 `Rr3Expiry.elapsed_ms` 同一条理据：
+    /// 表外的人拿不到 `last_beat_ms`，少回显就只能靠掐时间，那是随机红的来源）
+    pub since_beat_ms: u64,
+}
+
 /// 心跳的三态回报（D-6）：11b 要"广播一次 running"，而"一次"必须建立在
 /// "这是注册后被接受的第一颗心跳"上，故 `rr3_reg_beat` 不能只回 bool。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -777,6 +790,25 @@ impl RrdRegistry {
         v
     }
 
+    /// 健康快照：与 `rr3_reg_snapshot` 同一排序（task 升序），每行多带心跳三数。
+    /// 数据全部来自既有条目字段，不新增守护状态（ADR-0010 裁定 4）。
+    pub fn rr3_reg_health_snapshot(&self, now_ms: u64) -> Vec<Rr3HealthRow> {
+        let mut v: Vec<Rr3HealthRow> = self
+            .modules
+            .values()
+            .map(|e| Rr3HealthRow {
+                name: e.name.clone(),
+                src_task: e.src_task,
+                phase: e.phase,
+                heartbeat_ms: e.facts.heartbeat_ms,
+                watchdog_ms: e.facts.watchdog_ms,
+                since_beat_ms: now_ms.saturating_sub(e.last_beat_ms),
+            })
+            .collect();
+        v.sort_by_key(|r| r.src_task);
+        v
+    }
+
     /// 查 `rr3.call` 的被调方（M3 模块间请求路由的路由表读取口）。
     /// 被调条件：**在册且活着**（phase ≠ `Failed` 且 `tx` 存在，与 `rr3_reg_live` 同一判据）
     /// 且 manifest 的 `[rpc].exposes` 里登记了这个 topic——call 的路由表来自被调方
@@ -951,6 +983,35 @@ watchdog_timeout_ms = 500
             vec![("rr3-zeta".into(), z, Rr3Phase::Registered), ("rr3-alpha".into(), a, Rr3Phase::Registered)],
             "名字序（alpha, zeta）与 task 序（zeta, alpha）相反，才能抓出没排序的实现"
         );
+    }
+
+    /// 健康快照（F3 / ADR-0010 裁定 4）：task 升序、回显判定用的三个数——
+    /// `since_beat_ms` 必须是 `now - last_beat`，配置回显条目自己的 heartbeat/watchdog
+    #[test]
+    fn health_snapshot_echoes_the_judgement_inputs_in_task_order() {
+        let mut r = RrdRegistry::new(1000);
+        let z = r.rr3_reg_add(&facts("rr3-zeta", 200, 1000, "always"), chan().0, 0).unwrap();
+        let a = r.rr3_reg_add(&facts("rr3-alpha", 300, 2000, "always"), chan().0, 0).unwrap();
+        let rows = r.rr3_reg_health_snapshot(1500);
+        assert_eq!(
+            rows.iter().map(|x| (x.name.as_str(), x.src_task)).collect::<Vec<_>>(),
+            vec![("rr3-zeta", z), ("rr3-alpha", a)],
+            "与 rr3_reg_snapshot 同一排序口径（task 升序）"
+        );
+        let alpha = rows.iter().find(|x| x.name == "rr3-alpha").unwrap();
+        assert_eq!(alpha.heartbeat_ms, 300);
+        assert_eq!(alpha.watchdog_ms, 2000);
+        assert_eq!(alpha.since_beat_ms, 1500, "注册时刻 0，now=1500 → 距上次心跳 1500");
+        assert_eq!(alpha.phase, Rr3Phase::Registered);
+    }
+
+    /// 健康快照的 `since_beat_ms` 对"now 早于 last_beat"不得回绕：saturating_sub 兜底
+    #[test]
+    fn health_snapshot_since_beat_never_wraps() {
+        let mut r = RrdRegistry::new(1000);
+        r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 1000).unwrap();
+        let rows = r.rr3_reg_health_snapshot(500);
+        assert_eq!(rows[0].since_beat_ms, 0, "now < last_beat 时夹 0，不是 u64 回绕的大数");
     }
 
     /// 四个阶段名与 `as_str()` 一对一：下行状态广播与集成测试按这些字面量比对

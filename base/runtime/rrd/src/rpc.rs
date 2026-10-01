@@ -6,6 +6,8 @@
 //! `rr3.call` 是 M3 定型的模块间请求路由：rrd 按 params.topic 查被调方的
 //! manifest `[rpc].exposes` 后定向转发，应答沿 trace_id 回路返回调用方
 //! （rrd-rpc.md"trace_id 语义"）。
+//! `rr3.ctl.*` 四方法是 F3 定型的控制查询（ADR-0010）：与模块方法同一解析器、
+//! 同一白名单口径，但只对未注册的控制连接开放（分流在 conn 握手处）。
 
 use rr_ipc::Rr3StatusCode;
 use serde_json::Value;
@@ -18,6 +20,12 @@ pub enum Rr3RpcMethod {
     Heartbeat,
     Unregister,
     Call,
+    /// rr3.ctl.* 四方法（ADR-0010）：控制查询，只对**未注册**的控制连接开放
+    /// （conn 握手在方法分流处把 ctl 旁支接走）；已注册模块连接上行一律拒。
+    CtlStatus,
+    CtlHealth,
+    CtlLogs,
+    CtlOta,
 }
 
 impl Rr3RpcMethod {
@@ -28,6 +36,10 @@ impl Rr3RpcMethod {
             Self::Unregister => "rr3.unregister",
             // 方法名的唯一真值点在 rr-bus（模块侧客户端与 rrd 共用一份）
             Self::Call => rr_bus::RR3_METHOD_CALL,
+            Self::CtlStatus => "rr3.ctl.status",
+            Self::CtlHealth => "rr3.ctl.health",
+            Self::CtlLogs => "rr3.ctl.logs",
+            Self::CtlOta => "rr3.ctl.ota",
         }
     }
 
@@ -37,8 +49,19 @@ impl Rr3RpcMethod {
             "rr3.heartbeat" => Some(Self::Heartbeat),
             "rr3.unregister" => Some(Self::Unregister),
             s if s == rr_bus::RR3_METHOD_CALL => Some(Self::Call),
+            "rr3.ctl.status" => Some(Self::CtlStatus),
+            "rr3.ctl.health" => Some(Self::CtlHealth),
+            "rr3.ctl.logs" => Some(Self::CtlLogs),
+            "rr3.ctl.ota" => Some(Self::CtlOta),
             _ => None,
         }
+    }
+
+    /// 是否控制查询方法（ADR-0010 裁定 3 的分流判据）。conn 的握手分流经它；
+    /// 已注册连接的上行拒绝用显式 OR 臂（带守卫的臂不计入穷尽性），两处由
+    /// 编译器共同看护：新增 ctl 变体漏改任何一处都会变红。
+    pub fn is_ctl(&self) -> bool {
+        matches!(self, Self::CtlStatus | Self::CtlHealth | Self::CtlLogs | Self::CtlOta)
     }
 }
 
@@ -217,6 +240,21 @@ mod tests {
         .expect("rr3.call 应能解析");
         assert_eq!(got.method, Rr3RpcMethod::Call);
         assert_eq!(Rr3RpcMethod::Call.as_str(), "rr3.call");
+    }
+
+    /// F3（ADR-0010）：四个 ctl 方法走同一解析器，is_ctl 的判据与方法面一致
+    #[test]
+    fn parses_ctl_methods_and_flags_them() {
+        for m in ["rr3.ctl.status", "rr3.ctl.health", "rr3.ctl.logs", "rr3.ctl.ota"] {
+            let got = rr3_rpc_parse_request(&bytes(json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}})))
+                .unwrap_or_else(|e| panic!("{m} 应能解析: {e:?}"));
+            assert_eq!(got.method.as_str(), m);
+            assert!(got.method.is_ctl(), "{m} 必须被 is_ctl 判为控制方法");
+        }
+        assert!(!Rr3RpcMethod::Register.is_ctl());
+        assert!(!Rr3RpcMethod::Heartbeat.is_ctl());
+        assert!(!Rr3RpcMethod::Unregister.is_ctl());
+        assert!(!Rr3RpcMethod::Call.is_ctl());
     }
 
     /// rr3.call 的参数：topic 必填，args 缺省 Null 且原样透传
