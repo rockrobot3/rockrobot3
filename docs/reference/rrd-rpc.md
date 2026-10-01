@@ -23,11 +23,11 @@
 | 项 | 要求 | 出处 |
 |---|---|---|
 | 承载 | `Rr3Frame`：128B 定长头 + payload（`opcode` = `opcode::SEND`），payload 前 2 字节是 `Rr3PayloadType` 小端前缀 | `rr-ipc/src/protocol/body.rs`、`conn.rs:69-83` |
-| payload 类型 | 上行 `Rr3PayloadType::Request` 走四方法 RPC、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）、`Rr3PayloadType::Response` 走 `rr3.call` 应答回路（见 §8）；注册后其余类型（`Notification` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs:292-305`） | `rpc.rs:3-5`、`conn.rs:292-305` |
+| payload 类型 | 上行 `Rr3PayloadType::Request` 走 RPC（§3：模块四方法 + 控制四方法 `rr3.ctl.*`）、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）、`Rr3PayloadType::Response` 走 `rr3.call` 应答回路（见 §8）；注册后其余类型（`Notification` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs:292-305`） | `rpc.rs:3-7`、`conn.rs:292-305` |
 | `dst_task` | 必须是 `RR3_TASK_RRD`（值 `1`）。注册前违反 → 先回错误帧再断开；注册后违反 → 按协议违规收尾，**走死亡记账** | `conn.rs:148-156`、`conn.rs:263-265` |
 | `src_task` | 由 rrd 分配，用户态**不得自设**（AOS-STD-IPC-024）。注册帧里它还没被分配，rrd 只把对端自报值当作拒答的 `dst_task` 回显用；注册后 `src_task` 必须等于分配值，伪造者**那一帧被拒、连接不断**（应答带回原 `id` + `Invalid`） | `conn.rs:134-135`、`conn.rs:267-278` |
 | 应答寻址 | rrd 的应答是**点对点**：帧头 `dst_task` = 该连接的 task，`src_task` = `RR3_TASK_RRD`；`RR3_BROADCAST_DST_TASK`（值 `0`）只用于 rrd 的下行广播与发布转发 | `conn.rs:68-93`、`daemon.rs:78-100` |
-| 并发形状 | 应答由 reader 线程写、广播由该连接的 writer 线程写，共用一把 `Mutex` 且一帧一次 `write_all` → **整帧原子，相对顺序不保证**。取锁只有一个单点：`lib.rs` 的 `pub(crate) fn rr3_lock`（`conn.rs`/`daemon.rs` 两个 `#[cfg(unix)]` 调用方共用它，非 Unix 下它是 `dead_code`，故定义也带 `#[cfg(unix)]`），毒锁语义照代码自述——"中毒只可能来自 panic 的持锁者，继续用比弃连接/比整个守护停摆好"，`lock()` 的结果经 `unwrap_or_else` 交给 `PoisonError::into_inner()` 继续用；写侧那把 `Mutex<UnixStream>` 与在册表那把 `Mutex<RrdRegistry>` 都走它，所以中毒口径全仓只登记这一处。客户端要按类型/字段挑帧，别按到达序号 | `conn.rs:13-15`、`conn.rs:61-66`、`lib.rs:41-44` |
+| 并发形状 | 应答由 reader 线程写、广播由该连接的 writer 线程写，共用一把 `Mutex` 且一帧一次 `write_all` → **整帧原子，相对顺序不保证**。取锁只有一个单点：`lib.rs` 的 `pub(crate) fn rr3_lock`（`conn.rs`/`daemon.rs`/`supervisor.rs` 与 F3 起的日志环 `rr3_log` 共用它——日志环让 rr3_lock 在平台无关代码里也有了调用方，**原 `#[cfg(unix)]` 已摘除**），毒锁语义照代码自述——"中毒只可能来自 panic 的持锁者，继续用比弃连接/比整个守护停摆好"，`lock()` 的结果经 `unwrap_or_else` 交给 `PoisonError::into_inner()` 继续用；写侧那把 `Mutex<UnixStream>`、在册表那把 `Mutex<RrdRegistry>` 与日志环那把 `Mutex<VecDeque<String>>` 都走它，所以中毒口径全仓只登记这一处。客户端要按类型/字段挑帧，别按到达序号 | `conn.rs:13-15`、`conn.rs:61-66`、`lib.rs`（`rr3_lock`/`rr3_log`/`rr3_log_tail`） |
 
 ## 2 JSON-RPC 信封约束
 
@@ -41,12 +41,12 @@
 | `jsonrpc` 必须**等于字符串** `2.0` | `jsonrpc 必须等于 "2.0"` | `rpc.rs:51-53` |
 | `id` 必须能按无符号整数取出（`as_u64`） | `缺 id（要求无符号整数）` | `rpc.rs:54-56` |
 | `method` 必须是字符串 | `缺 method（要求字符串）` | `rpc.rs:57-59` |
-| `method` 必须在四方法白名单内 | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs:60-62` |
+| `method` 必须在八方法白名单内（模块四 + 控制 `rr3.ctl.*` 四，见 §3） | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs:60-62` |
 | `params` 可缺省 | 缺省时为 `Value::Null`，不是错误；各方法自己校验 | `rpc.rs:63` |
 
-解析产物是 `Rr3RpcRequest { id, method, params }`（`rpc.rs:38-43`）。
-应答构造只有两个出口：`rr3_rpc_build_result`（`rpc.rs:83-86`）与
-`rr3_rpc_build_error`（`rpc.rs:88-95`），形状分别是
+解析产物是 `Rr3RpcRequest { id, method, params }`（`rpc.rs:69-74`）。
+应答构造只有两个出口：`rr3_rpc_build_result`（`rpc.rs:122-125`）与
+`rr3_rpc_build_error`（`rpc.rs:127-130`），形状分别是
 
 ```text
 {"jsonrpc":"2.0","id":<id>,"result":{…}}
@@ -57,7 +57,9 @@
 `rr3_best_effort_id` 尽力取 JSON 的 `id`，取不到用 `0`（`conn.rs:95-101`）——
 **客户端判失败要看 `code`，别只看 `id`**。
 
-## 3 四个方法（白名单 = `Rr3RpcMethod`，`rpc.rs:16-41`）
+## 3 八个方法（白名单 = `Rr3RpcMethod`，`rpc.rs:18-67`）
+
+**模块四方法**（已注册连接；各自语义见 §4/§6/§7/§8）：
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
@@ -65,6 +67,23 @@
 | `rr3.heartbeat` | `Heartbeat` | 无必填 `params`（`json!({})` 即可） | `{"beat":"accepted"}` | `conn.rs:399-402`（成功支；同一分支的失败面见 §5 `TimedOut` 行） |
 | `rr3.unregister` | `Unregister` | 无必填 `params` | `{"removed":<bool>}` | `conn.rs:408-412` |
 | `rr3.call` | `Call` | `params.topic`：非空字符串（被调方须在 manifest `[rpc].exposes` 声明）；`params.args` 可缺省（缺省为 `Null`，被调方自己校验） | **不回 `result` 给调用方**——成功即转发，调用方的应答是被调方沿 trace_id 回路送回的 Response（见 §8） | `rpc.rs:93-97`、`conn.rs:450`、`conn.rs:463-519` |
+
+**控制四方法 `rr3.ctl.*`**（F3 / [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md)，只对**未注册**
+的控制连接开放，`rr3_serve_ctl`，`conn.rs:280-338`）：
+
+| `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
+|---|---|---|---|---|
+| `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致 | `conn.rs:289-303` |
+| `rr3.ctl.health` | `CtlHealth` | 无必填 | `{"modules":[{"name","task","phase","heartbeat_ms","watchdog_ms","since_beat_ms"}]}`——后三数是**判定用的数回显**（条目自己的配置 + `now - last_beat`） | `conn.rs:304-324`、`registry.rs` `rr3_reg_health_snapshot` |
+| `rr3.ctl.logs` | `CtlLogs` | 无必填 | `{"lines":["rrd: …", …]}`——rrd 内存日志环（512 行环形，`rr3_log` 单点落环、不落盘）尾部副本 | `conn.rs:325`、`lib.rs` `rr3_log`/`rr3_log_tail` |
+| `rr3.ctl.ota` | `CtlOta` | 无必填 | **无**——恒拒：`Permission`（-22，`AIRY_EPERM`）+ 文案点 M6（契约状态码是冻结集，不自造 `NotSupported`） | `conn.rs:326-333` |
+
+连接语义与模块四方法不同：ctl 连接**不注册、不进在册表、不受 watchdog 管**，
+一问一答即断（rrd 应答后直接收掉这条连接，握手旁支在 `rr3_handshake` 第 6 步**之前**分流，
+`conn.rs:193-196`）；应答按对端**自报**的 `src_task` 回（与注册期拒答同口径）。已注册模块
+连接上行 `rr3.ctl.*` 一律 `Permission` 拒（`rr3_serve_request` 显式 OR 臂，`conn.rs:479-494`），
+**连接不断**；`rr3.ctl.*` 的畸形（非 Request / 非白名单方法）仍走 §4 既有拒绝门。
+判定依据 `Rr3RpcMethod::is_ctl`（`rpc.rs:63-67`）+ 显式 OR 臂两处共同看护方法面。
 
 取值助手对字符串参数的口径一致（`param_str`，`rpc.rs:66-73`）：非 `str`、空串、
 缺键一律 `Invalid`，文案 `缺 params.{key}（要求非空字符串）`。
@@ -79,9 +98,13 @@ EOF 同样算干净收尾（`conn.rs:408-413`、`conn.rs:470`）。`rr3.register
 
 ## 4 注册握手的额外门禁与错误码
 
-`rr3_handshake`（`conn.rs:123-254`）按下表顺序检查；**每一次拒绝都先回错误帧再断开连接**
+`rr3_handshake`（`conn.rs:130-278`）按下表顺序检查；**每一次拒绝都先回错误帧再断开连接**
 （只断连不回码等于让客户端挂在超时上，`conn.rs:111-122`）。注册前的失败
 **不做死亡记账、也不广播 state**（`conn.rs:458` 对 `rr3_handshake` 结果的 `?` 早返回，绕过 `conn.rs:480` 的 `rr3_conn_finish`）。
+
+> **F3 例外（§3 控制四方法）**：第 6 步之前有一处分流——首帧方法 ∈ `rr3.ctl.*` 时直接进
+> `rr3_serve_ctl`（`conn.rs:193-196`），不注册、即答即断，**不落进本表**。本表 1–5 步
+> （读取 / 前缀 / `dst_task` / 类型 / RPC 信封）对 ctl 帧同样有效。
 
 | 序 | 检查 | 码 | 文案要点 |
 |---|---|---|---|
@@ -90,7 +113,7 @@ EOF 同样算干净收尾（`conn.rs:408-413`、`conn.rs:470`）。`rr3.register
 | 3 | `dst_task` == `RR3_TASK_RRD` | `Invalid` | `首帧 dst_task 必须为 1，收到 {n}` |
 | 4 | 类型是 `Request` | `Invalid` | `首帧 payload 类型必须是 Request，收到 {ty:?}` |
 | 5 | RPC 信封合法（§2） | `Invalid` | `首帧 RPC 畸形: {msg}` |
-| 6 | 方法必须是 `rr3.register` | `Invalid` | `注册前第一条 RPC 必须是 rr3.register，收到 {method}` |
+| 6 | 方法必须是 `rr3.register`（`rr3.ctl.*` 已在更早处分流，见上） | `Invalid` | `注册前第一条 RPC 必须是 rr3.register，收到 {method}` |
 | 7 | `params.manifest` 取值 | `Invalid` | `缺 params.manifest（要求非空字符串）` |
 | 8 | manifest 文本 → `Rr3ManifestFacts` | `Invalid` | 点名字段的校验错，多条以 `; ` 连接（如 `heartbeat_ms`、`restart_policy`） |
 | 9 | `rr3_registry_validate_manifest_text` 对主题集复验 | `Invalid` | 报告里的 `errors` 以 `; ` 连接 |
@@ -110,7 +133,7 @@ EOF 同样算干净收尾（`conn.rs:408-413`、`conn.rs:470`）。`rr3.register
 |---|---|---|---|---|
 | `Invalid` | -2 | `AIRY_EINVAL` | §2 全部、§4 的 2–10 步、`src_task` 伪造、`Event` 之外的非 `Request` 上行、注册后重复 `rr3.register`、`Rr3PublishDeny::NotRegistered`（在册表第三道门，**经映射函数**得出）。发布面的**形状错**是另外两支：帧体非 JSON、体里缺/坏 `topic`——`conn.rs:315-334` 直接回 `Invalid`，**既不套进 `Rr3PublishDeny` 枚举、也不计数**（`rr3_reg_note_denied` 只在归属被拒时调，`conn.rs:338`） | `rpc.rs:97-111`、`conn.rs:387-397` |
 | `Busy` | -16 | `AIRY_EBUSY` | `Rr3RegisterError::Duplicate`、`Rr3RegisterError::Capacity` | `rpc.rs:99` |
-| `Permission` | -22 | `AIRY_EPERM` | `Rr3RegisterError::ReservedName`；`Rr3PublishDeny::ReservedNamespace`、`Rr3PublishDeny::ForeignPrefix` | `rpc.rs:100-110` |
+| `Permission` | -22 | `AIRY_EPERM` | `Rr3RegisterError::ReservedName`；`Rr3PublishDeny::ReservedNamespace`、`Rr3PublishDeny::ForeignPrefix`；**F3 起**：`rr3.ctl.ota` 恒拒（文案点 M6，`conn.rs:326-333`）与已注册连接上行 `rr3.ctl.*`（`conn.rs:479-494`，**不断连**） | `rpc.rs:100-110` |
 | `TimedOut` | -1004 | `AIRY_ETIMEDOUT` | `rr3.heartbeat` 的 task 已过期或不在册：`该 task 已过期或不在册，需重新注册` | `conn.rs:403-404` |
 | `Ok` | 0 | `AIRY_EOK` | 不单独上帧：成功走 `result` 而不是 `error` | `header.rs:104` |
 
