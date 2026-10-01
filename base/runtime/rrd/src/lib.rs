@@ -20,17 +20,40 @@ pub mod daemon;
 #[cfg(unix)]
 pub mod supervisor;
 
-// 只被下面那条 `#[cfg(unix)]` 的 `rr3_lock` 用到，所以两处都必须带 cfg。实测（本轮在 Windows
-// 上跑 `cargo check --all-targets -p rrd`）：import 不加 cfg 是 `unused_imports` 警告，
-// `rr3_lock` 不加 cfg 是 `dead_code` 警告（"never used"，实测 1 条）——而本仓的门禁是零警告。
-// 三个调用方（`conn`/`daemon`/`supervisor`）都是 `#[cfg(unix)]` 模块，所以 cfg 就是它们的编译面。
-#[cfg(unix)]
-use std::sync::{Mutex, MutexGuard};
+use std::collections::VecDeque;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 /// 统一日志出口：stdout、行首 `rrd: `。集成测试的可观察面全靠它。
 /// 走 `println!`：Rust stdout 是行缓冲，管道里也按行 flush，父进程逐行读得到。
+///
+/// ADR-0010 裁定 5：stdout 行为一字不动，同一行**追加**一份进固定容量日志环；
+/// `rr3.ctl.logs` 读环的尾部副本。环在这里单点落——rr3_log 是全 daemon 唯一日志出口，
+/// 在别的调用点各存一份迟早分叉。
 pub fn rr3_log(msg: &str) {
-    println!("rrd: {msg}");
+    let line = format!("rrd: {msg}");
+    println!("{line}");
+    let mut ring = rr3_lock(rr3_log_ring());
+    if ring.len() >= RR3_LOG_RING_CAP {
+        ring.pop_front();
+    }
+    ring.push_back(line);
+}
+
+/// 日志环容量（行数）。512 行对"运维看刚才发生了什么"足够，内存成本有界；
+/// 满了丢最旧（环形语义，不是"到顶即停"）。
+const RR3_LOG_RING_CAP: usize = 512;
+
+static RR3_LOG_RING: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+
+fn rr3_log_ring() -> &'static Mutex<VecDeque<String>> {
+    RR3_LOG_RING.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// 日志环的尾部副本（`rr3.ctl.logs` 的数据源）。只有 `conn`（`#[cfg(unix)]`）读它，
+/// 所以本函数同样 cfg——Windows 侧无人调用，不 cfg 就是 `dead_code` 警告。
+#[cfg(unix)]
+pub fn rr3_log_tail() -> Vec<String> {
+    rr3_lock(rr3_log_ring()).iter().cloned().collect()
 }
 
 /// 锁中毒的唯一处理口径：中毒只可能来自 panic 的持锁者，继续用比弃连接/比整个守护停摆好。
@@ -38,10 +61,8 @@ pub fn rr3_log(msg: &str) {
 /// （收尸与重启）共用同一本在册表锁，三处各写一份"怎么处理中毒"迟早分叉——与 Task 9 抽
 /// `rr3_spawn_line_reader` 是同一条理由。
 ///
-/// `#[cfg(unix)]` 不是多余的装饰而是零警告的前提：它的三个调用方（`conn`/`daemon`/`supervisor`）
-/// 都是 `#[cfg(unix)]` 模块，非 Unix 下无条件定义会立刻变成 `dead_code`（Windows ①b 的门禁是
-/// 零警告）。若将来平台无关代码也要用这把锁，那时候再把这一行去掉。
-#[cfg(unix)]
+/// 原 `#[cfg(unix)]` 已随 F3（ADR-0010 裁定 5）摘除：`rr3_log` 的日志环让本函数在
+/// 平台无关代码里也有了调用方，cfg 反而会在 Windows 上变成 `unused` 警告。
 pub(crate) fn rr3_lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }

@@ -37,10 +37,10 @@ use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Phase, Rr3Death, RrdRegist
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_manifest_param,
     rr3_rpc_parse_request, rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register,
-    rr3_rpc_topic_param, Rr3RpcMethod,
+    rr3_rpc_topic_param, Rr3RpcMethod, Rr3RpcRequest,
 };
 use crate::supervisor::Rr3Supervisor;
-use crate::{rr3_lock, rr3_log};
+use crate::{rr3_lock, rr3_log, rr3_log_tail};
 
 /// 一条已注册连接的身份证
 struct Rr3Peer {
@@ -182,6 +182,11 @@ fn rr3_handshake(
             ))
         }
     };
+    // ADR-0010 裁定 3：首帧是 rr3.ctl.* → 控制旁支，不注册、一问一答即断。
+    // dst / Request 类型两道门在上面已过，模块路径（下方 Register 门）一字不动。
+    if req.method.is_ctl() {
+        return Err(rr3_serve_ctl(out, ctx, reported_task, req));
+    }
     if req.method != Rr3RpcMethod::Register {
         return Err(rr3_refuse(
             out,
@@ -264,6 +269,71 @@ fn rr3_handshake(
     }
     rr3_log(&format!("向 {} 补发在册状态 {replayed} 条", peer.name));
     Ok(peer)
+}
+
+/// 控制旁支（ADR-0010 裁定 2/4）：一次性查询连接，一问一答即断。
+///
+/// 不注册、不进在册表、不受 watchdog 管——在册表是"活的业务模块"的账本，运维探针
+/// 不记账。返回值作为握手 `Err` 的理由交回 `rr3_conn_serve`：握手失败路径不做死亡记账
+/// （`me` 尚不存在），daemon 侧按既有"连接收尾"落一行日志，连接随之关闭。
+/// 应答按对端**自报**的 `src_task` 回（与注册期 `rr3_refuse` 同一口径——rrd 尚未分配 task）。
+fn rr3_serve_ctl(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    reported_task: u64,
+    req: Rr3RpcRequest,
+) -> String {
+    // 先在锁内取数、锁外应答：与握手主路的锁纪律一致（持 shared 锁时不碰 out 锁）
+    let result: Result<Value, (Rr3StatusCode, String)> = match req.method {
+        Rr3RpcMethod::CtlStatus => {
+            let (modules, denied) = {
+                let g = rr3_lock(&ctx.shared);
+                (
+                    g.rr3_reg_snapshot()
+                        .into_iter()
+                        .map(|(name, task, phase)| {
+                            json!({"name": name, "task": task, "phase": phase.as_str()})
+                        })
+                        .collect::<Vec<Value>>(),
+                    g.rr3_reg_denied(),
+                )
+            };
+            Ok(json!({"modules": modules, "denied_publish": denied}))
+        }
+        Rr3RpcMethod::CtlHealth => {
+            let modules = {
+                let g = rr3_lock(&ctx.shared);
+                g.rr3_reg_health_snapshot(ctx.rr3_ctx_now_ms())
+                    .into_iter()
+                    .map(|r| {
+                        json!({
+                            "name": r.name, "task": r.src_task, "phase": r.phase.as_str(),
+                            "heartbeat_ms": r.heartbeat_ms, "watchdog_ms": r.watchdog_ms,
+                            "since_beat_ms": r.since_beat_ms,
+                        })
+                    })
+                    .collect::<Vec<Value>>()
+            };
+            Ok(json!({ "modules": modules }))
+        }
+        Rr3RpcMethod::CtlLogs => Ok(json!({"lines": rr3_log_tail()})),
+        // 恒拒（ADR-0010 裁定 4）：方法名进白名单把协议面定型，语义随 M6；
+        // 契约状态码是冻结的 AIRY_E* 子集，用 Permission 而不是自造 NotSupported，
+        // 与 rr3-ota-ctl switch 的"恒拒 + 文案点 M6"先例同构。
+        Rr3RpcMethod::CtlOta => Err((
+            Rr3StatusCode::Permission,
+            "OTA（含模块级 staging 更新）随 M6 落地，当前拒绝执行".to_string(),
+        )),
+        // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
+        other => Err((Rr3StatusCode::Invalid, format!("ctl 连接只接受 rr3.ctl.*，收到 {}", other.as_str()))),
+    };
+    let payload = match &result {
+        Ok(v) => rr3_rpc_build_result(req.id, v),
+        Err((code, msg)) => rr3_rpc_build_error(req.id, *code, msg),
+    };
+    rr3_write(out, &rr3_out_frame(Rr3PayloadType::Response, reported_task, &payload));
+    rr3_log(&format!("ctl 查询 {} 已应答（dst={reported_task}），一次性连接收尾", req.method.as_str()));
+    "ctl 查询完成，一次性控制连接按 ADR-0010 收尾".to_string()
 }
 
 /// 处理注册后的入站帧。`Err` = 协议违规，该连接按崩溃收尾。
@@ -409,6 +479,19 @@ fn rr3_serve_request(
     match req.method {
         Rr3RpcMethod::Register => {
             rr3_reply_err(out, me, req.id, Rr3StatusCode::Invalid, "该连接已注册，拒绝重复 rr3.register");
+            Ok(Rr3Flow::Keep)
+        }
+        // ADR-0010：rr3.ctl.* 只对未注册的控制连接开放（握手分流）；已注册模块连接
+        // 上行一律拒——回错误帧不断连，与 src_task 伪造同一口径（一次笔误不掉线）。
+        // 显式 OR 臂而非 is_ctl 守卫：带守卫的臂不计入穷尽性，新增方法时这里必须表态。
+        Rr3RpcMethod::CtlStatus | Rr3RpcMethod::CtlHealth | Rr3RpcMethod::CtlLogs | Rr3RpcMethod::CtlOta => {
+            rr3_reply_err(
+                out,
+                me,
+                req.id,
+                Rr3StatusCode::Permission,
+                "rr3.ctl.* 只对未注册的控制连接开放，模块请走 rr3.register / rr3.heartbeat",
+            );
             Ok(Rr3Flow::Keep)
         }
         Rr3RpcMethod::Heartbeat => {
