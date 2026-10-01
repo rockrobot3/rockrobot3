@@ -2,7 +2,8 @@
 # 逐行来源：docs/process/dev/0.0.1版本洛克三号开发方案.md §4（D3 模块四件套之 manifest）
 # 消费方：base/runtime/rr-registry（校验实现）、tools/mkmodule（bin rr3-mkmod，生成自检）、CI（D7②）
 # 演进：只增不改；破坏性变更须升 schema_version 并同步 rr-registry 测试
-# 引用：ADR-0002（能力仲裁）、ADR-0007 决策二（upgrades 字段先就位、实现后置）
+# 引用：ADR-0002（能力仲裁）、ADR-0007 决策二（upgrades 字段先就位、实现后置）、
+#       ADR-0009（依赖仲裁：可满足者 = 本表 ∪ 本次 boot 全集 provides）
 
 schema_version = 1
 
@@ -125,5 +126,7 @@ type = ["module", "brain"]
 lang = ["rust", "python"]
 restart_policy = ["always", "on-failure", "never"]
 topic_allowed_kinds = ["request", "event", "stream", "notification"]
-# v0.0.1 只有 base 内建能力可被依赖；跨模块能力仲裁随 rrd 注册表（M2）落地
+# v0.0.1 的"依赖只许 base 白名单"已由 ADR-0009 定型：可满足者 = 本表 ∪ 本次 boot
+# 全集内各 manifest 的 provides.capabilities；可满足性与环检测在 depends.rs 的
+# 跨 manifest 仲裁（rrd boot 与 CI 全集检查共用），单件校验只保 capability 形状
 base_capabilities = ["bus.publish", "bus.subscribe", "bus.rpc", "net.online", "power.battery"]
