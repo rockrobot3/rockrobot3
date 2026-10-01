@@ -357,7 +357,7 @@ Windows **233**（226 + 核心 7 推算；POSIX 段 cfg 门控不参与编译，
 cfg 边界同口径；无 Windows 目标未实跑）。② 29 / ③ 5 / ②b 5 / ④ 9 个独立工程
 均无变化。依赖预算零增量：POSIX 附着为手写 6 函数 extern 面，不引 libc crate
 （ADR-0011 裁定 5）。
-2026-10-01 M4（rr3-brain 实装与四真进程对话闭环，ADR-0012）同口径：①b rr-hal
+2026-10-01 M4（rr3-brain 实装与四真进程对话闭环，ADR-0014）同口径：①b rr-hal
 sim.rs 7→**8**（burst 波形：解析入取值集 / 偶秒门控确定性 / 第 3 秒复现第 1 秒且
 有声段与 Sine 同序号逐点相等——恒有声的 sine 全程只发一次 onset，晚注册的 brain
 赶不上；burst 1s 说/1s 停让 VAD 周期性发 onset/offset），Unix **291**（290 + 1）/

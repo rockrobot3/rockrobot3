@@ -1,4 +1,4 @@
-"""ASR 适配器（SenseVoice）：整段 WAV 一次上传（ADR-0012 裁定 2；流式是 legacy ESP32
+"""ASR 适配器（SenseVoice）：整段 WAV 一次上传（ADR-0014 裁定 2；流式是 legacy ESP32
 内存约束的产物，本机不复刻——见该 ADR"明确不做"第 3 条）。"""
 
 import json

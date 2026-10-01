@@ -1,6 +1,6 @@
 """rr3_brain：认知层的编排入口（ASR → LLM → TTS，M4 实装）。
 
-结构随 v0.0.1 建立；M4 起：`bus`（stdlib-only 总线客户端，ADR-0012 裁定 1）、
+结构随 v0.0.1 建立；M4 起：`bus`（stdlib-only 总线客户端，ADR-0014 裁定 1）、
 `cloud`（legacy 三家移植 + mock 注入，裁定 2）、`dialog`（utterance 边界状态机，
 裁定 3）进入实装。命名规约见 docs/architecture/naming.md §1：Python 包
 `rr3_<域>`，包级函数 `rr3_<域>_<动作>`。

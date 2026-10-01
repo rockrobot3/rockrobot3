@@ -1,4 +1,4 @@
-"""`python -m rr3_brain` 真入口（M4，ADR-0012）。
+"""`python -m rr3_brain` 真入口（M4，ADR-0014）。
 
 启动序列与 rr3-sense / rr3-interact 同构：读 `RR3_MANIFEST`（rrd spawn 注入）→
 `rr3_bus_connect`（连接/注册/起心跳）→ 事件循环。循环四件事：
@@ -15,7 +15,7 @@
 被调方超时/拒答）折日志弃轮，进程不死；传输失败（发布/应答写不出去、总线断开）
 `eprintln` + `exit(1)`——模块不装"活着"，死交给 supervisor 按 restart_policy 裁定。
 
-云端路径由 `RR3_BRAIN_CLOUD` 选择（real / mock，ADR-0012 裁定 2；mock 是测试
+云端路径由 `RR3_BRAIN_CLOUD` 选择（real / mock，ADR-0014 裁定 2；mock 是测试
 注入点不是产品路径，缺 key 的 real 调用照报缺环境变量，不静默降级）。
 """
 
@@ -156,7 +156,7 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
         print(f"轮次 {trace_seq}: LLM 失败，弃轮（user={user_text!r}，{e}）", flush=True)
         return trace_seq
 
-    # TTS 验证性消费（M4 不接播放面，ADR-0012 裁定 3）：非空 + 时长换算入日志
+    # TTS 验证性消费（M4 不接播放面，ADR-0014 裁定 3）：非空 + 时长换算入日志
     try:
         reply_pcm = tts.synthesize(reply_text)
     except RuntimeError as e:
