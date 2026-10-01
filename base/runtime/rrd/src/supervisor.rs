@@ -14,8 +14,11 @@
 //!    不为其发明第二种语义。
 //! ③ **不持有 `SIGCHLD` 处理、不靠 `waitpid` 阻塞**：收尸靠 `try_wait` + 扫尸节拍（E-5 复用
 //!    `--watchdog-tick-ms`），故"进程已死"到"rrd 知道"之间有**至多一个 sweep 的延迟**（生产 200ms）。
-//! ④ **depends / degraded 两条见 11a 的"不做的事"**：`Rr3Phase::Degraded` 仍是"有 enum 变体、
-//!    无写入方"的死相位，本文件不置位；启动序只按 `start_priority` 升序排，不看 `depends.required`。
+//! ④ **depends / degraded 不在本文件裁定**（原"两条不做"随 F2/ADR-0009 解除，但裁定权不在这）：
+//!    boot 启动序由 `rr3_registry_plan_boot` 在 `daemon.rs` 仲裁后投递（环 / 不可满足都在
+//!    那里拒）；降级传播只在本文件收尸那一路"记账之后"被动触发——置位/解除的账本在
+//!    `registry.rs`（`rr3_reg_degrade_after` / `rr3_reg_undegrade_after`），本文件不判
+//!    "谁该降级"，只把收尸事实交出去。降级不出重启计划、不吃预算（裁定 4）。
 //!
 //! 锁纪律（**违反即同线程重入自死锁**，而 `#[cfg(unix)]` 让 Windows L1 全绿也看不见）：
 //! `rr3_lock(&shared).rr3_reg_*()` 一律先 `let` 绑结果再 `match`，**绝不**写进 `match` 的
@@ -57,7 +60,7 @@ use std::time::{Duration, Instant};
 
 use crate::daemon::{rr3_now_ms, rr3_state_frame};
 use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text, Rr3ManifestFacts};
-use crate::registry::{rr3_phase_for_exit, Rr3ChildExit, Rr3RestartPlan, RrdRegistry};
+use crate::registry::{rr3_phase_for_exit, Rr3ChildExit, Rr3Phase, Rr3RestartPlan, RrdRegistry};
 use crate::{rr3_lock, rr3_log};
 
 /// 一个"我能起谁"的条目（E-1：`jobs` 的全集只由 `--manifest` 填）。
@@ -190,6 +193,21 @@ fn rr3_absorb_exit(
             // 统一成哪一种都没有判据支持。
             let n = rr3_lock(shared).rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task);
             rr3_log(&format!("{name} 子进程退出 status={status} → 广播 {phase} 到 {n} 个连接"));
+            // ADR-0009 裁定 3：本路刚记完收尸账（`rr3_reg_child_exit` 已置 Failed），
+            // 死者若是某能力的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
+            // EarlyExit / Silent 两路不传播：前者从未注册过（没有"离开 Running"的相位
+            // 事件），后者的死亡已由别人记过、传播也归那一拍。
+            let degraded = rr3_lock(shared).rr3_reg_degrade_after(name);
+            for (dep, task) in degraded {
+                // 排除项 `RR3_TASK_RRD`（不排除，E-9 同一理据）：降级要送到依赖者自己耳朵里。
+                let n = rr3_lock(shared).rr3_reg_fanout(
+                    &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+                    rr_bus::RR3_TASK_RRD,
+                );
+                rr3_log(&format!(
+                    "{dep} 依赖断供 → degraded（提供者 {name} 离开 Running）广播到 {n} 个连接"
+                ));
+            }
             plan
         }
         Rr3ChildExit::EarlyExit { plan } => {
