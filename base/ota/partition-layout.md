@@ -5,7 +5,7 @@
 > `RR3_OTA_SLOT_NAMES` / `RR3_OTA_STAGING_PARTITION`），由 `cargo test -p rr-ota`
 > 的用例（含 include_str 把 genimage.cfg 拉进来逐字对拍）钉死；`rr3-ota-ctl slots` 打印的就是那份常量，不再抄一遍。
 > 容量不在本目录冻结（本机无 Buildroot 与板子，凭想象写下的 size 是最贵的那种错误）。
-> genimage.cfg 的**结构与分区标签**已落 `base/os/board/radxa-zero3/genimage.cfg`
+> genimage.cfg 的**结构与分区标签**已落 `base/os/buildroot/board/radxa-zero3/genimage.cfg`
 > （容量一律构建期占位符，`post-image.sh` 注入；标签与本目录上述常量由
 > `rr-ota` 的 include_str 守护用例逐字钉死）；容量定型与实板验证仍属 M6 板上收口。
 

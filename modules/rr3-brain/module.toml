@@ -4,7 +4,7 @@ name = "rr3-brain"
 version = "0.0.1"
 type = "brain"
 lang = "python"
-# 打包时由 base/os/package/rr3-brain 安装同名 shim，实际执行 `python -m rr3_brain`
+# 打包时由 base/os/buildroot/package/rr3-brain 安装同名 shim，实际执行 `python -m rr3_brain`
 # （naming.md §3：目录名 == 进程名 == manifest.name）
 entry = "rr3-brain"
 

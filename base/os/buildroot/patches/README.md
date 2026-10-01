@@ -1,4 +1,4 @@
-# base/os/patches —— 内核 / U-Boot 回移补丁
+# base/os/buildroot/patches —— 内核 / U-Boot 回移补丁
 
 本目录承载 Buildroot 全量构建（Linux/容器侧）所需的内核与 U-Boot 补丁。
 **今天还没有任何补丁文件**——下面登记的是"落补丁前必须先核对"的清单，

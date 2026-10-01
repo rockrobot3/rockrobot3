@@ -24,7 +24,7 @@ pub enum Rr3SlotState {
     Corrupt,
 }
 
-/// A/B 槽位名称（与 base/os/board/radxa-zero3/genimage.cfg 的分区标签一致，
+/// A/B 槽位名称（与 base/os/buildroot/board/radxa-zero3/genimage.cfg 的分区标签一致，
 /// 由下方 include_str 守护用例逐字钉死）
 pub const RR3_OTA_SLOT_NAMES: [&str; 2] = ["rr_a", "rr_b"];
 
@@ -101,7 +101,8 @@ mod tests {
     /// 容量是构建期占位符（post-image.sh 注入），不在本用例关心范围内。
     #[test]
     fn ota_labels_match_genimage_cfg() {
-        const GENIMAGE: &str = include_str!("../../../../base/os/board/radxa-zero3/genimage.cfg");
+        const GENIMAGE: &str =
+            include_str!("../../../../base/os/buildroot/board/radxa-zero3/genimage.cfg");
 
         // 从 cfg 文本里抓出全部 `label = "X"`（逐段扫描，不引正则依赖）
         let mut labels_in_cfg: Vec<&str> = Vec::new();
