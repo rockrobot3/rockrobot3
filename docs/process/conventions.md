@@ -347,6 +347,16 @@ status 表解析跳过非行 / 注入式轮询达成与超时点缺 / 演练身�
 最后一条把"演练用真 owner 名"钉成机器可检查；devices 2 条原样），**base/runtime 不动，
 ①b 条数无变化**；编排（Unix-only）与纯逻辑分居两模块，9 条单测全平台可跑。
 9/9 绿 + 全链路演练实跑 3/3 OK（见 tools/sim/README.md 五步脚本）。
+2026-10-01 F6（shm transport 初版，ADR-0011）同口径：rr-ipc lib 38→**49**
+（shm 11：核心 7——头布局常量自洽 / 单读者逐帧往返含大帧跨环折返 / 落后过半圈
+重同步且 lost 计数 / 超半容量拒发且区域无损 / 多读者独立游标追读与停读分化 /
+阻塞 recv_buf 等到迟到帧 / 坏头如实报 Header 不静默；POSIX 附着 4——cleanup 幂等 /
+`O_EXCL` 未清理重复 bind 拒绝 / bind→accept→writer_conn 经真 `shm_open`+`mmap`
+全链路往返含读者分化 / 附着缺失对象干净报错）。逐目标：Unix **290**（279 + 11）/
+Windows **233**（226 + 核心 7 推算；POSIX 段 cfg 门控不参与编译，与 uds 的
+cfg 边界同口径；无 Windows 目标未实跑）。② 29 / ③ 5 / ②b 5 / ④ 9 个独立工程
+均无变化。依赖预算零增量：POSIX 附着为手写 6 函数 extern 面，不引 libc crate
+（ADR-0011 裁定 5）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
