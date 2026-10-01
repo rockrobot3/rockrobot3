@@ -42,7 +42,10 @@ fn rr3_watched(tag: &str) -> (RrdTest, SimManifest) {
 /// 一个和判死无关的模块扰动。
 fn rr3_bystander(rrd: &RrdTest, name: &str) -> RrdClient {
     let mut c = rrd.rr3_connect();
-    rr3_send(&mut c, &rr3_register_frame(&rr3_manifest(name, 100, 60_000, "never"), name));
+    rr3_send(
+        &mut c,
+        &rr3_register_frame(&rr3_manifest(name, 100, 60_000, "never"), name),
+    );
     rr3_read_state(&mut c, name, "registered");
     c
 }
@@ -66,8 +69,14 @@ fn watchdog_expires_a_silent_peer_and_broadcasts_failed() {
 
     let line = rrd.rr3_wait_log("watchdog 判死 rr3-sima task=");
     let elapsed = rr3_elapsed_from_log(&line);
-    assert!(line.contains("≥ 超时 500ms"), "必须点名该模块自己的 watchdog_ms: {line}");
-    assert!(elapsed >= 500, "elapsed 必须 ≥ manifest 的 watchdog_ms，实际 {elapsed}: {line}");
+    assert!(
+        line.contains("≥ 超时 500ms"),
+        "必须点名该模块自己的 watchdog_ms: {line}"
+    );
+    assert!(
+        elapsed >= 500,
+        "elapsed 必须 ≥ manifest 的 watchdog_ms，实际 {elapsed}: {line}"
+    );
 
     // 唯一的时长断言：判死必须**最终**发生（`rr3_wait_log` 自带 3s 上限即这条"最终"）。
     // 刻意不写"520ms 内判死"那种细上限：它抓不到任何本任务真正关心的缺陷
@@ -133,7 +142,10 @@ fn watchdog_broadcasts_exactly_one_failed_state() {
             _ => false,
         })
         .count();
-    assert_eq!(failed, 1, "`rr3_reg_expire` 跳过 failed，第二拍起不得再回报同一条: {failed} 条");
+    assert_eq!(
+        failed, 1,
+        "`rr3_reg_expire` 跳过 failed，第二拍起不得再回报同一条: {failed} 条"
+    );
 
     // 日志侧同样只能有一条判死行。needle 带到 `task=` 是为了与 W2 的口径一致
     // （点名身份，不点名泛化前缀）。**这条依赖上一行的 `rr3_wait_log` 已经把第一条消费掉**

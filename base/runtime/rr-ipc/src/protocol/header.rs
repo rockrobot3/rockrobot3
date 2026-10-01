@@ -42,14 +42,38 @@ pub const LEN_RESERVED: usize = 84;
 // 这里钉"布局自洽"，那里钉"与契约文件一致"；跨架构等值本身由 `tools/ci/ipct003.sh`
 // 三方对拍（登记于 conventions.md §2，不进七步门）。
 const _: () = assert!(OFF_MAGIC == 0 && LEN_MAGIC == 4, "magic 必须在偏移 0、宽 4");
-const _: () = assert!(OFF_OPCODE == OFF_MAGIC + LEN_MAGIC, "opcode 偏移出现空洞/重叠");
-const _: () = assert!(OFF_FLAGS == OFF_OPCODE + LEN_OPCODE, "flags 偏移出现空洞/重叠");
-const _: () = assert!(OFF_TRACE_ID == OFF_FLAGS + LEN_FLAGS, "trace_id 偏移出现空洞/重叠");
-const _: () = assert!(OFF_TIMESTAMP_NS == OFF_TRACE_ID + LEN_TRACE_ID, "timestamp_ns 偏移出现空洞/重叠");
-const _: () = assert!(OFF_SRC_TASK == OFF_TIMESTAMP_NS + LEN_TIMESTAMP_NS, "src_task 偏移出现空洞/重叠");
-const _: () = assert!(OFF_DST_TASK == OFF_SRC_TASK + LEN_SRC_TASK, "dst_task 偏移出现空洞/重叠");
-const _: () = assert!(OFF_PAYLOAD_LEN == OFF_DST_TASK + LEN_DST_TASK, "payload_len 偏移出现空洞/重叠");
-const _: () = assert!(OFF_RESERVED == OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN, "reserved 偏移出现空洞/重叠");
+const _: () = assert!(
+    OFF_OPCODE == OFF_MAGIC + LEN_MAGIC,
+    "opcode 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_FLAGS == OFF_OPCODE + LEN_OPCODE,
+    "flags 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_TRACE_ID == OFF_FLAGS + LEN_FLAGS,
+    "trace_id 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_TIMESTAMP_NS == OFF_TRACE_ID + LEN_TRACE_ID,
+    "timestamp_ns 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_SRC_TASK == OFF_TIMESTAMP_NS + LEN_TIMESTAMP_NS,
+    "src_task 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_DST_TASK == OFF_SRC_TASK + LEN_SRC_TASK,
+    "dst_task 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_PAYLOAD_LEN == OFF_DST_TASK + LEN_DST_TASK,
+    "payload_len 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_RESERVED == OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN,
+    "reserved 偏移出现空洞/重叠"
+);
 const _: () = assert!(
     OFF_RESERVED + LEN_RESERVED == RR3_IPC_HDR_SIZE,
     "偏移合计必须恰为 128（Layout C）"
@@ -98,14 +122,8 @@ pub mod flags {
     /// `to_bytes`/`from_bytes` 对 `flags` 是**原样透传**——掩码之外的位既不报错也不清零，
     /// 编解码两个方向都保留（见 `header_ignores_unknown_flags`）。标准对发送方"应只置已定义位"
     /// 的期望属调用方自律与 M2 传输层的职责，本 crate 不拦截；接收方忽略未知位正是 IPC-T-010。
-    pub const DEFINED: u16 = NOWAIT
-        | SIGNAL
-        | ZEROCOPY
-        | CAP_CARRY
-        | COMPRESS
-        | ENCRYPT
-        | URGENT
-        | NOREPLY;
+    pub const DEFINED: u16 =
+        NOWAIT | SIGNAL | ZEROCOPY | CAP_CARRY | COMPRESS | ENCRYPT | URGENT | NOREPLY;
 }
 
 /// 5 种 payload 类型，枚举值 L1 永久稳定（AOS-STD-IPC-005）
@@ -228,11 +246,14 @@ impl Rr3Header {
         buf[OFF_MAGIC..OFF_MAGIC + LEN_MAGIC].copy_from_slice(&MAGIC.to_le_bytes());
         buf[OFF_OPCODE..OFF_OPCODE + LEN_OPCODE].copy_from_slice(&self.opcode.to_le_bytes());
         buf[OFF_FLAGS..OFF_FLAGS + LEN_FLAGS].copy_from_slice(&self.flags.to_le_bytes());
-        buf[OFF_TRACE_ID..OFF_TRACE_ID + LEN_TRACE_ID].copy_from_slice(&self.trace_id.to_le_bytes());
+        buf[OFF_TRACE_ID..OFF_TRACE_ID + LEN_TRACE_ID]
+            .copy_from_slice(&self.trace_id.to_le_bytes());
         buf[OFF_TIMESTAMP_NS..OFF_TIMESTAMP_NS + LEN_TIMESTAMP_NS]
             .copy_from_slice(&self.timestamp_ns.to_le_bytes());
-        buf[OFF_SRC_TASK..OFF_SRC_TASK + LEN_SRC_TASK].copy_from_slice(&self.src_task.to_le_bytes());
-        buf[OFF_DST_TASK..OFF_DST_TASK + LEN_DST_TASK].copy_from_slice(&self.dst_task.to_le_bytes());
+        buf[OFF_SRC_TASK..OFF_SRC_TASK + LEN_SRC_TASK]
+            .copy_from_slice(&self.src_task.to_le_bytes());
+        buf[OFF_DST_TASK..OFF_DST_TASK + LEN_DST_TASK]
+            .copy_from_slice(&self.dst_task.to_le_bytes());
         buf[OFF_PAYLOAD_LEN..OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN]
             .copy_from_slice(&self.payload_len.to_le_bytes());
         buf
@@ -244,9 +265,12 @@ mod tests {
     use super::*;
 
     fn schema_json() -> serde_json::Value {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/envelope.schema.json");
-        let raw = std::fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("读不到契约文件 {path}: {e}"));
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../contracts/envelope.schema.json"
+        );
+        let raw =
+            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("读不到契约文件 {path}: {e}"));
         serde_json::from_str(&raw).expect("envelope.schema.json 必须是合法 JSON")
     }
 
@@ -306,10 +330,17 @@ mod tests {
     fn header_rejects_bad_magic() {
         let hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 96);
         let mut bytes = hdr.to_bytes();
-        assert_eq!(&bytes[0..4], &[0x31, 0x45, 0x52, 0x41], "LE 落盘字节应为 31 45 52 41");
+        assert_eq!(
+            &bytes[0..4],
+            &[0x31, 0x45, 0x52, 0x41],
+            "LE 落盘字节应为 31 45 52 41"
+        );
         // 标准 §7.2 注释/'ARE1' 那套字节，在 rock3 裁定下必须被拒
         bytes[0..4].copy_from_slice(&[0x41, 0x52, 0x45, 0x31]);
-        assert_eq!(Rr3Header::from_bytes(&bytes), Err(Rr3HdrError::BadMagic { got: 0x3145_5241 }));
+        assert_eq!(
+            Rr3Header::from_bytes(&bytes),
+            Err(Rr3HdrError::BadMagic { got: 0x3145_5241 })
+        );
     }
 
     /// 与 golden 向量逐字节一致，且 decode→encode 往返无损。
@@ -318,7 +349,10 @@ mod tests {
     /// `x-rock3-v0.0.1-uncovered`，随 M2 落地。
     #[test]
     fn header_matches_golden_vector() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/golden/event-header-128.hex");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../contracts/golden/event-header-128.hex"
+        );
         let text = std::fs::read_to_string(path).expect("读不到 golden hex");
         let golden = hex_to_bytes(text.trim());
         assert_eq!(golden.len(), RR3_IPC_HDR_SIZE);
@@ -331,7 +365,11 @@ mod tests {
         assert_eq!(hdr.src_task, 7);
         assert_eq!(hdr.dst_task, 0);
         assert_eq!(hdr.payload_len, 96);
-        assert_eq!(hdr.to_bytes().to_vec(), golden, "往返编码与 golden 向量不一致");
+        assert_eq!(
+            hdr.to_bytes().to_vec(),
+            golden,
+            "往返编码与 golden 向量不一致"
+        );
     }
 
     /// reserved 非全 0 必须拒绝（ADR-0006：扩展只允许写 reserved 且需 flags 标记）
@@ -340,7 +378,10 @@ mod tests {
         let mut bytes = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 0).to_bytes();
         assert_eq!(bytes[OFF_RESERVED..].len(), 84);
         bytes[OFF_RESERVED + 83] = 0xFF;
-        assert_eq!(Rr3Header::from_bytes(&bytes), Err(Rr3HdrError::ReservedNotZero));
+        assert_eq!(
+            Rr3Header::from_bytes(&bytes),
+            Err(Rr3HdrError::ReservedNotZero)
+        );
     }
 
     /// IPC-T-010：未知 flags 位不得报错（前向兼容）；已定义位组合正常解析
@@ -373,13 +414,18 @@ mod tests {
         h.payload_len = MAX_PAYLOAD_LEN + 1;
         assert_eq!(
             Rr3Header::from_bytes(&h.to_bytes()),
-            Err(Rr3HdrError::PayloadTooLarge { len: MAX_PAYLOAD_LEN + 1 })
+            Err(Rr3HdrError::PayloadTooLarge {
+                len: MAX_PAYLOAD_LEN + 1
+            })
         );
     }
 
     #[test]
     fn header_too_short() {
-        assert_eq!(Rr3Header::from_bytes(&[0u8; 127]), Err(Rr3HdrError::TooShort { got: 127 }));
+        assert_eq!(
+            Rr3Header::from_bytes(&[0u8; 127]),
+            Err(Rr3HdrError::TooShort { got: 127 })
+        );
     }
 
     /// payload 类型枚举值 L1 冻结：改任一值该测试即红
@@ -450,7 +496,9 @@ mod tests {
             MAGIC,
             "magic.hex 解析后与 Rust MAGIC 漂移"
         );
-        let wire = magic["wire_bytes_hex"].as_str().expect("缺 magic wire_bytes_hex");
+        let wire = magic["wire_bytes_hex"]
+            .as_str()
+            .expect("缺 magic wire_bytes_hex");
         assert_eq!(
             hex_to_bytes(wire),
             MAGIC.to_le_bytes().to_vec(),
@@ -476,10 +524,16 @@ mod tests {
         .collect();
         let contract = contract_int_entries(&schema_json()["properties"]["flags"]);
         for name in contract.keys() {
-            assert!(rust.contains_key(name.as_str()), "契约定义了 {name}，Rust flags 缺");
+            assert!(
+                rust.contains_key(name.as_str()),
+                "契约定义了 {name}，Rust flags 缺"
+            );
         }
         for name in rust.keys() {
-            assert!(contract.contains_key(*name), "Rust 定义了 {name}，契约 flags 缺");
+            assert!(
+                contract.contains_key(*name),
+                "Rust 定义了 {name}，契约 flags 缺"
+            );
         }
         let mut mask = 0u16;
         for (name, c_val) in &contract {
@@ -503,14 +557,21 @@ mod tests {
         .collect();
         let contract = contract_int_entries(&schema_json()["properties"]["opcode"]);
         for name in contract.keys() {
-            assert!(rust.contains_key(name.as_str()), "契约定义了 {name}，Rust opcode 缺");
+            assert!(
+                rust.contains_key(name.as_str()),
+                "契约定义了 {name}，Rust opcode 缺"
+            );
         }
         for name in rust.keys() {
-            assert!(contract.contains_key(*name), "Rust 定义了 {name}，契约 opcode 缺");
+            assert!(
+                contract.contains_key(*name),
+                "Rust 定义了 {name}，契约 opcode 缺"
+            );
         }
         for (name, c_val) in &contract {
             assert_eq!(
-                rust[name.as_str()] as i64, *c_val,
+                rust[name.as_str()] as i64,
+                *c_val,
                 "opcode {name} 与契约漂移"
             );
         }
@@ -519,7 +580,10 @@ mod tests {
     /// 传输路径与环境键逐字对齐 ADR-0006 §6 / naming.md
     #[test]
     fn transport_path_matches_adr() {
-        assert_eq!(crate::transport::RR3_UDS_PATH_DEFAULT, "/var/run/rock3-ipc.sock");
+        assert_eq!(
+            crate::transport::RR3_UDS_PATH_DEFAULT,
+            "/var/run/rock3-ipc.sock"
+        );
         assert_eq!(crate::transport::RR3_BUS_PATH_ENV, "RR3_BUS_PATH");
         let t = &schema_json()["properties"]["transport"];
         assert_eq!(t["x-uds-path"].as_str().unwrap(), "/var/run/rock3-ipc.sock");

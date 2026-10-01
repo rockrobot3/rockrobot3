@@ -12,7 +12,9 @@
 
 mod support;
 
-use rr_ipc::{opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3Header, Rr3PayloadType, Rr3StatusCode};
+use rr_ipc::{
+    opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3Header, Rr3PayloadType, Rr3StatusCode,
+};
 use serde_json::{json, Value};
 
 use support::{
@@ -24,7 +26,11 @@ fn manifest_exposes(name: &str, exposes: &[&str]) -> String {
     let rpc = if exposes.is_empty() {
         String::new()
     } else {
-        let list = exposes.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+        let list = exposes
+            .iter()
+            .map(|t| format!("\"{t}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("[rpc]\nexposes = [{list}]\n\n")
     };
     format!(
@@ -55,12 +61,16 @@ fn register(c: &mut RrdClient, manifest: &str, name: &str) -> u64 {
     rr3_send(c, &rr3_register_frame(manifest, name));
     let v = {
         let f = rr3_read_where(c, &format!("注册应答 {name}"), |f| {
-            rr3_body_split(&f.payload).map(|(ty, _)| ty == Rr3PayloadType::Response).unwrap_or(false)
+            rr3_body_split(&f.payload)
+                .map(|(ty, _)| ty == Rr3PayloadType::Response)
+                .unwrap_or(false)
         });
         rr3_json_of(&f)
     };
     assert!(v.get("error").is_none(), "注册 {name} 被拒: {v}");
-    v["result"]["src_task"].as_u64().unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"))
+    v["result"]["src_task"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"))
 }
 
 /// 被调方视角：等转发来的 rr3.call（Request + method=rr3.call），返回 (帧, 体)
@@ -84,7 +94,9 @@ fn read_forwarded_call(c: &mut RrdClient) -> (Rr3Frame, Value) {
 fn send_response(c: &mut RrdClient, trace_id: u64, src: u64, id: u64, result: &Value) {
     let payload = rr3_body_encode(
         Rr3PayloadType::Response,
-        json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string().as_bytes(),
+        json!({"jsonrpc": "2.0", "id": id, "result": result})
+            .to_string()
+            .as_bytes(),
     );
     rr3_send(
         c,
@@ -108,9 +120,17 @@ fn send_response(c: &mut RrdClient, trace_id: u64, src: u64, id: u64, result: &V
 fn call_routes_to_callee_and_response_comes_back() {
     let rrd = RrdTest::rr3_start("mcall-rt");
     let mut callee = rrd.rr3_connect();
-    let task_c = register(&mut callee, &manifest_exposes("rr3-interact", &["rr3-interact/tts/text"]), "rr3-interact");
+    let task_c = register(
+        &mut callee,
+        &manifest_exposes("rr3-interact", &["rr3-interact/tts/text"]),
+        "rr3-interact",
+    );
     let mut caller = rrd.rr3_connect();
-    let task_r = register(&mut caller, &manifest_exposes("rr3-sense", &[]), "rr3-sense");
+    let task_r = register(
+        &mut caller,
+        &manifest_exposes("rr3-sense", &[]),
+        "rr3-sense",
+    );
 
     rr3_send(
         &mut caller,
@@ -123,22 +143,37 @@ fn call_routes_to_callee_and_response_comes_back() {
     );
     // 被调方收到的转发帧：头三处改写 + body 原样（id/params 原封不动）
     let (fwd, v) = read_forwarded_call(&mut callee);
-    assert_eq!(fwd.header.src_task, task_r, "转发帧的 src 必须是调用方 task");
-    assert_eq!(fwd.header.dst_task, task_c, "转发帧的 dst 必须是被调方 task");
-    assert_eq!(fwd.header.trace_id, task_r, "trace_id = 调用方 task（回路的唯一凭据）");
+    assert_eq!(
+        fwd.header.src_task, task_r,
+        "转发帧的 src 必须是调用方 task"
+    );
+    assert_eq!(
+        fwd.header.dst_task, task_c,
+        "转发帧的 dst 必须是被调方 task"
+    );
+    assert_eq!(
+        fwd.header.trace_id, task_r,
+        "trace_id = 调用方 task（回路的唯一凭据）"
+    );
     assert_eq!(v["id"], 42, "body 原样：JSON-RPC id 不许被 rrd 重写");
     assert_eq!(v["params"]["topic"], "rr3-interact/tts/text");
     assert_eq!(v["params"]["args"]["text"], "hi");
 
     // 被调方沿回路应答：trace_id 原样带回
-    send_response(&mut callee, fwd.header.trace_id, task_c, 42, &json!({"echoed": "hi"}));
-    let back = rr3_read_where(&mut caller, " 回程应答 id=42", |f| {
-        match rr3_body_split(&f.payload) {
-            Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
-                .map(|v| v["id"].as_u64() == Some(42))
-                .unwrap_or(false),
-            _ => false,
-        }
+    send_response(
+        &mut callee,
+        fwd.header.trace_id,
+        task_c,
+        42,
+        &json!({"echoed": "hi"}),
+    );
+    let back = rr3_read_where(&mut caller, " 回程应答 id=42", |f| match rr3_body_split(
+        &f.payload,
+    ) {
+        Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
+            .map(|v| v["id"].as_u64() == Some(42))
+            .unwrap_or(false),
+        _ => false,
     });
     let v = rr3_json_of(&back);
     assert_eq!(v["result"]["echoed"], "hi");
@@ -151,26 +186,50 @@ fn call_routes_to_callee_and_response_comes_back() {
 fn call_unknown_topic_is_rejected_and_connection_survives() {
     let rrd = RrdTest::rr3_start("mcall-unknown");
     let mut caller = rrd.rr3_connect();
-    let task_r = register(&mut caller, &manifest_exposes("rr3-sense", &[]), "rr3-sense");
+    let task_r = register(
+        &mut caller,
+        &manifest_exposes("rr3-sense", &[]),
+        "rr3-sense",
+    );
 
     rr3_send(
         &mut caller,
-        &rr3_rpc_frame(rr_bus::RR3_METHOD_CALL, 43, json!({"topic": "rr3-interact/tts/nobody"}), task_r),
+        &rr3_rpc_frame(
+            rr_bus::RR3_METHOD_CALL,
+            43,
+            json!({"topic": "rr3-interact/tts/nobody"}),
+            task_r,
+        ),
     );
-    let f = rr3_read_where(&mut caller, " 无人在册的错误应答", |f| {
-        match rr3_body_split(&f.payload) {
+    let f = rr3_read_where(
+        &mut caller,
+        " 无人在册的错误应答",
+        |f| match rr3_body_split(&f.payload) {
             Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
                 .map(|v| v["id"].as_u64() == Some(43) && v["error"].is_object())
                 .unwrap_or(false),
             _ => false,
-        }
-    });
+        },
+    );
     let v = rr3_json_of(&f);
-    assert_eq!(v["error"]["code"], Rr3StatusCode::Invalid as i32, "无人在册是路由事实，不是忙: {v}");
-    assert!(v["error"]["message"].as_str().unwrap_or("").contains("没有在册模块 exposes"), "{v}");
+    assert_eq!(
+        v["error"]["code"],
+        Rr3StatusCode::Invalid as i32,
+        "无人在册是路由事实，不是忙: {v}"
+    );
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("没有在册模块 exposes"),
+        "{v}"
+    );
 
     // 连接不断：同一连接再发一颗心跳，照常 accepted
-    rr3_send(&mut caller, &rr3_rpc_frame("rr3.heartbeat", 44, json!({}), task_r));
+    rr3_send(
+        &mut caller,
+        &rr3_rpc_frame("rr3.heartbeat", 44, json!({}), task_r),
+    );
     let v = {
         let f = rr3_read_where(&mut caller, " 心跳应答", |f| {
             match rr3_body_split(&f.payload) {
@@ -182,7 +241,10 @@ fn call_unknown_topic_is_rejected_and_connection_survives() {
         });
         rr3_json_of(&f)
     };
-    assert_eq!(v["result"]["beat"], "accepted", "拒帧不断连：被拒后连接必须还能服务");
+    assert_eq!(
+        v["result"]["beat"], "accepted",
+        "拒帧不断连：被拒后连接必须还能服务"
+    );
 }
 
 /// 自呼拒：唯一 exposes 该 topic 的模块就是调用方自己
@@ -190,22 +252,37 @@ fn call_unknown_topic_is_rejected_and_connection_survives() {
 fn call_to_self_is_rejected() {
     let rrd = RrdTest::rr3_start("mcall-self");
     let mut caller = rrd.rr3_connect();
-    let task_r = register(&mut caller, &manifest_exposes("rr3-sense", &["rr3-sense/audio/pcm"]), "rr3-sense");
+    let task_r = register(
+        &mut caller,
+        &manifest_exposes("rr3-sense", &["rr3-sense/audio/pcm"]),
+        "rr3-sense",
+    );
 
     rr3_send(
         &mut caller,
-        &rr3_rpc_frame(rr_bus::RR3_METHOD_CALL, 45, json!({"topic": "rr3-sense/audio/pcm"}), task_r),
+        &rr3_rpc_frame(
+            rr_bus::RR3_METHOD_CALL,
+            45,
+            json!({"topic": "rr3-sense/audio/pcm"}),
+            task_r,
+        ),
     );
-    let f = rr3_read_where(&mut caller, " 自呼的错误应答", |f| {
-        match rr3_body_split(&f.payload) {
-            Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
-                .map(|v| v["id"].as_u64() == Some(45) && v["error"].is_object())
-                .unwrap_or(false),
-            _ => false,
-        }
+    let f = rr3_read_where(&mut caller, " 自呼的错误应答", |f| match rr3_body_split(
+        &f.payload,
+    ) {
+        Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
+            .map(|v| v["id"].as_u64() == Some(45) && v["error"].is_object())
+            .unwrap_or(false),
+        _ => false,
     });
     let v = rr3_json_of(&f);
-    assert!(v["error"]["message"].as_str().unwrap_or("").contains("自呼"), "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("自呼"),
+        "{v}"
+    );
 }
 
 /// trace_id = 0 的上行 Response：没有回路，拒帧不断连
@@ -213,18 +290,28 @@ fn call_to_self_is_rejected() {
 fn response_without_trace_id_is_rejected() {
     let rrd = RrdTest::rr3_start("mcall-trace0");
     let mut callee = rrd.rr3_connect();
-    let task_c = register(&mut callee, &manifest_exposes("rr3-interact", &["rr3-interact/tts/text"]), "rr3-interact");
+    let task_c = register(
+        &mut callee,
+        &manifest_exposes("rr3-interact", &["rr3-interact/tts/text"]),
+        "rr3-interact",
+    );
 
     send_response(&mut callee, 0, task_c, 99, &json!({"orphan": true}));
-    let f = rr3_read_where(&mut callee, " 缺回路的错误应答", |f| {
-        match rr3_body_split(&f.payload) {
-            Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
-                .map(|v| v["id"].as_u64() == Some(99) && v["error"].is_object())
-                .unwrap_or(false),
-            _ => false,
-        }
+    let f = rr3_read_where(&mut callee, " 缺回路的错误应答", |f| match rr3_body_split(
+        &f.payload,
+    ) {
+        Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
+            .map(|v| v["id"].as_u64() == Some(99) && v["error"].is_object())
+            .unwrap_or(false),
+        _ => false,
     });
     let v = rr3_json_of(&f);
     assert_eq!(v["error"]["code"], Rr3StatusCode::Invalid as i32);
-    assert!(v["error"]["message"].as_str().unwrap_or("").contains("trace_id"), "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("trace_id"),
+        "{v}"
+    );
 }

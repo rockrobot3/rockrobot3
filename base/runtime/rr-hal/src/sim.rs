@@ -73,7 +73,10 @@ pub struct Rr3SimAudioSource {
 
 impl Rr3SimAudioSource {
     pub fn rr3_sim_source_new(wave: Rr3SimWave) -> Self {
-        Self { wave, open: Mutex::new(None) }
+        Self {
+            wave,
+            open: Mutex::new(None),
+        }
     }
 
     pub fn rr3_sim_source_wave(&self) -> Rr3SimWave {
@@ -89,8 +92,7 @@ impl Rr3AudioSource for Rr3SimAudioSource {
                 "sim 源要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"
             )));
         }
-        *self.open.lock().unwrap_or_else(|p| p.into_inner()) =
-            Some(Rr3SimOpen { cfg, cursor: 0 });
+        *self.open.lock().unwrap_or_else(|p| p.into_inner()) = Some(Rr3SimOpen { cfg, cursor: 0 });
         Ok(())
     }
 
@@ -123,8 +125,7 @@ impl Rr3AudioSource for Rr3SimAudioSource {
                         }
                     }
                     Rr3SimWave::Noise => {
-                        let mut x = RR3_SIM_NOISE_SEED
-                            ^ idx.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                        let mut x = RR3_SIM_NOISE_SEED ^ idx.wrapping_mul(0x9E37_79B9_7F4A_7C15);
                         x ^= x >> 12;
                         x ^= x << 25;
                         x ^= x >> 27;
@@ -136,7 +137,10 @@ impl Rr3AudioSource for Rr3SimAudioSource {
             })
             .collect();
         open.cursor += n as u64;
-        Ok(Rr3PcmStream { cfg: open.cfg, samples })
+        Ok(Rr3PcmStream {
+            cfg: open.cfg,
+            samples,
+        })
     }
 }
 
@@ -151,12 +155,19 @@ pub struct Rr3SimAudioSink {
 
 impl Rr3SimAudioSink {
     pub fn rr3_sim_sink_new(cap_samples: usize) -> Self {
-        Self { open: Mutex::new(None), played: Mutex::new(Vec::new()), cap: cap_samples }
+        Self {
+            open: Mutex::new(None),
+            played: Mutex::new(Vec::new()),
+            cap: cap_samples,
+        }
     }
 
     /// 回读已"播放"的采样（尾窗内）
     pub fn rr3_sim_sink_played(&self) -> Vec<i16> {
-        self.played.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        self.played
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     pub fn rr3_sim_sink_written_count(&self) -> usize {
@@ -179,7 +190,9 @@ impl Rr3AudioSink for Rr3SimAudioSink {
     async fn write(&self, pcm: Rr3PcmStream) -> Result<(), Rr3HalError> {
         let open = self.open.lock().unwrap_or_else(|p| p.into_inner());
         let Some(cfg) = open.as_ref() else {
-            return Err(Rr3HalError::InvalidParam("sim 扬声器 write 前必须 open".into()));
+            return Err(Rr3HalError::InvalidParam(
+                "sim 扬声器 write 前必须 open".into(),
+            ));
         };
         if pcm.cfg != *cfg {
             return Err(Rr3HalError::InvalidParam(format!(
@@ -200,7 +213,7 @@ impl Rr3AudioSink for Rr3SimAudioSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RR3_AUDIO_CFG_16K_MONO16, rr3_block_on};
+    use crate::{rr3_block_on, RR3_AUDIO_CFG_16K_MONO16};
 
     fn source(wave: Rr3SimWave) -> Rr3SimAudioSource {
         Rr3SimAudioSource::rr3_sim_source_new(wave)
@@ -259,8 +272,14 @@ mod tests {
         rr3_block_on(s.open(RR3_AUDIO_CFG_16K_MONO16)).unwrap();
         let pcm = rr3_block_on(s.read(3 * 16000)).unwrap().samples;
         // 第 1 秒有声（远超 VAD 起音阈值），第 2 秒全零，第 3 秒与第 1 秒逐点相等
-        assert!(pcm[..16000].iter().any(|&v| v.abs() > 1500), "第 1 秒必过起音阈值");
-        assert!(pcm[16000..32000].iter().all(|&v| v == 0), "第 2 秒必须全静音");
+        assert!(
+            pcm[..16000].iter().any(|&v| v.abs() > 1500),
+            "第 1 秒必过起音阈值"
+        );
+        assert!(
+            pcm[16000..32000].iter().all(|&v| v == 0),
+            "第 2 秒必须全静音"
+        );
         assert_eq!(&pcm[32000..], &pcm[..16000], "第 3 秒复现第 1 秒");
         // 门控与正弦同源：第 1 秒头部与 Sine 波形的同序号采样逐点相等
         let sine = source(Rr3SimWave::Sine);
@@ -281,7 +300,9 @@ mod tests {
         assert_eq!(pa, pb);
         assert!(pa.iter().all(|&v| v.abs() <= RR3_SIM_NOISE_AMP));
         // 不是正弦：存在相邻样本跳变超过 2000（440Hz 正弦 16k 下的最大步进约 1900）
-        assert!(pa.windows(2).any(|w| (w[0] as i32 - w[1] as i32).abs() > 2000));
+        assert!(pa
+            .windows(2)
+            .any(|w| (w[0] as i32 - w[1] as i32).abs() > 2000));
     }
 
     #[test]
@@ -298,9 +319,21 @@ mod tests {
     #[test]
     fn open_rejects_zero_rate_and_non_16bit() {
         for bad in [
-            Rr3AudioCfg { sample_rate_hz: 0, channels: 1, bit_depth: 16 },
-            Rr3AudioCfg { sample_rate_hz: 16000, channels: 0, bit_depth: 16 },
-            Rr3AudioCfg { sample_rate_hz: 16000, channels: 1, bit_depth: 24 },
+            Rr3AudioCfg {
+                sample_rate_hz: 0,
+                channels: 1,
+                bit_depth: 16,
+            },
+            Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 0,
+                bit_depth: 16,
+            },
+            Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 1,
+                bit_depth: 24,
+            },
         ] {
             let e = rr3_block_on(source(Rr3SimWave::Sine).open(bad)).unwrap_err();
             assert!(matches!(e, Rr3HalError::InvalidParam(_)), "{bad:?}");
@@ -315,10 +348,21 @@ mod tests {
             samples: vec![1],
         }))
         .unwrap_err();
-        assert!(matches!(e, Rr3HalError::InvalidParam(_)), "write 前必须 open");
+        assert!(
+            matches!(e, Rr3HalError::InvalidParam(_)),
+            "write 前必须 open"
+        );
         rr3_block_on(sink.open(RR3_AUDIO_CFG_16K_MONO16)).unwrap();
-        let other = Rr3AudioCfg { sample_rate_hz: 48000, channels: 1, bit_depth: 16 };
-        let e = rr3_block_on(sink.write(Rr3PcmStream { cfg: other, samples: vec![1] })).unwrap_err();
+        let other = Rr3AudioCfg {
+            sample_rate_hz: 48000,
+            channels: 1,
+            bit_depth: 16,
+        };
+        let e = rr3_block_on(sink.write(Rr3PcmStream {
+            cfg: other,
+            samples: vec![1],
+        }))
+        .unwrap_err();
         assert!(matches!(e, Rr3HalError::InvalidParam(_)), "配置不符必须拒");
         for chunk in 0..7u8 {
             rr3_block_on(sink.write(Rr3PcmStream {

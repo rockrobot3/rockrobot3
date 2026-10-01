@@ -10,22 +10,24 @@ pub mod transport;
 
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{
-    flags, opcode, Rr3Header, Rr3HdrError, Rr3PayloadType, Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN,
+    flags, opcode, Rr3HdrError, Rr3Header, Rr3PayloadType, Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN,
     RR3_IPC_HDR_SIZE,
 };
 pub use transport::buf::{rr3_framebuf_read, Rr3FrameBuf};
 pub use transport::frame::{
     rr3_frame_read, rr3_frame_to_bytes, rr3_frame_write, Rr3Frame, Rr3FrameError,
 };
-pub use transport::shm::{Rr3ShmReaderConn, Rr3ShmWriterConn, RR3_SHM_NAME_DEFAULT, RR3_SHM_NAME_ENV};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use transport::shm::Rr3ShmListener;
+pub use transport::shm::{
+    Rr3ShmReaderConn, Rr3ShmWriterConn, RR3_SHM_NAME_DEFAULT, RR3_SHM_NAME_ENV,
+};
+#[cfg(unix)]
+pub use transport::uds::Rr3UdsListener;
 pub use transport::{
     Rr3TransportConn, Rr3TransportEndpoint, Rr3TransportListener, RR3_BUS_PATH_ENV,
     RR3_UDS_PATH_DEFAULT,
 };
-#[cfg(unix)]
-pub use transport::uds::Rr3UdsListener;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use transport::shm::Rr3ShmListener;
 
 /// 契约 schema 版本（对应 `contracts/envelope.schema.json` 的冻结轮次）
 pub const RR3_CONTRACT_SCHEMA_VERSION: u32 = 1;

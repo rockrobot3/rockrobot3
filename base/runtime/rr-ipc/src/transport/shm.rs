@@ -100,7 +100,10 @@ fn rr3_shm_check_header(magic: u32, version: u32, cap: u64) -> std::io::Result<u
     if version != RR3_SHM_VERSION {
         return Err(Error::new(
             ErrorKind::InvalidData,
-            format!("shm 区域版本不符: {version}（本进程认 {}）", RR3_SHM_VERSION),
+            format!(
+                "shm 区域版本不符: {version}（本进程认 {}）",
+                RR3_SHM_VERSION
+            ),
         ));
     }
     if cap < RR3_SHM_MIN_CAP {
@@ -242,7 +245,12 @@ impl Rr3ShmWriterConn {
     /// 进程内区域构造（测试与同进程编排用；Drop 不解除映射）
     #[cfg(test)]
     pub(crate) fn rr3_from_raw(base: *mut u8, cap: u64) -> Self {
-        Self { base, cap, map_len: 0, owned: false }
+        Self {
+            base,
+            cap,
+            map_len: 0,
+            owned: false,
+        }
     }
 }
 
@@ -288,7 +296,14 @@ impl Rr3ShmReaderConn {
     /// 进程内区域构造（测试与同进程编排用；Drop 不解除映射）
     #[cfg(test)]
     pub(crate) fn rr3_from_raw(base: *mut u8, cap: u64) -> Self {
-        Self { base, cap, map_len: 0, owned: false, cursor: 0, lost: 0 }
+        Self {
+            base,
+            cap,
+            map_len: 0,
+            owned: false,
+            cursor: 0,
+            lost: 0,
+        }
     }
 
     /// 非阻塞读一拍：有完整新帧返回 `Some`，否则 `None`
@@ -436,8 +451,7 @@ mod posix {
         }
         let name = cstring_name(path)?;
         // SAFETY：name 合法；mode 以 c_uint 传（见 extern 声明注释）
-        let fd =
-            unsafe { shm_open(name.as_ptr(), O_RDWR | O_CREAT | O_EXCL, 0o600 as c_uint) };
+        let fd = unsafe { shm_open(name.as_ptr(), O_RDWR | O_CREAT | O_EXCL, 0o600 as c_uint) };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -452,7 +466,9 @@ mod posix {
             let base = unsafe { mmap_region(fd, total as usize, PROT_READ | PROT_WRITE)? };
             unsafe { rr3_shm_init_header(base, cap) };
             unsafe { munmap_raw(base, total as usize) };
-            Ok(Rr3ShmListener { name: path.to_path_buf() })
+            Ok(Rr3ShmListener {
+                name: path.to_path_buf(),
+            })
         })();
         let _ = unsafe { close(fd) };
         result
@@ -465,10 +481,7 @@ mod posix {
     /// 读取会 SIGBUS——同名互踩属配置错误（uds 侧同名的形状是干净报错，这里
     /// 记为本实现已知边界，随 rrd 接线再评估是否加防护）；建区方 open 与
     /// ftruncate 之间的纳秒级窗口同理，附着方在 bind 返回之后附着即可避开。
-    pub(super) fn attach_region(
-        path: &Path,
-        writable: bool,
-    ) -> io::Result<(*mut u8, u64, usize)> {
+    pub(super) fn attach_region(path: &Path, writable: bool) -> io::Result<(*mut u8, u64, usize)> {
         let name = cstring_name(path)?;
         let oflag = if writable { O_RDWR } else { O_RDONLY };
         // SAFETY：name 合法；只读附着不传 mode
@@ -484,7 +497,11 @@ mod posix {
             unsafe { munmap_raw(probe, RR3_SHM_HDR_SIZE) };
             let cap = checked?;
             let total = RR3_SHM_HDR_SIZE + cap as usize;
-            let prot = if writable { PROT_READ | PROT_WRITE } else { PROT_READ };
+            let prot = if writable {
+                PROT_READ | PROT_WRITE
+            } else {
+                PROT_READ
+            };
             // SAFETY：头校验通过说明对象由本模块建区产物 ftruncate 到 total
             let base = unsafe { mmap_region(fd, total, prot)? };
             Ok((base, cap, total))
@@ -540,7 +557,12 @@ mod posix {
         /// 取写者连接（独立映射，指向同一对象）。
         pub fn rr3_writer_conn(&self) -> io::Result<Rr3ShmWriterConn> {
             let (base, cap, total) = attach_region(&self.name, true)?;
-            Ok(Rr3ShmWriterConn { base, cap, map_len: total, owned: true })
+            Ok(Rr3ShmWriterConn {
+                base,
+                cap,
+                map_len: total,
+                owned: true,
+            })
         }
     }
 }
@@ -554,7 +576,14 @@ impl Rr3ShmReaderConn {
     /// 按名打开既有区域并映射为只读视图，游标从头开始追。
     pub fn rr3_attach(path: &std::path::Path) -> std::io::Result<Self> {
         let (base, cap, total) = posix::attach_region(path, false)?;
-        Ok(Self { base, cap, map_len: total, owned: true, cursor: 0, lost: 0 })
+        Ok(Self {
+            base,
+            cap,
+            map_len: total,
+            owned: true,
+            cursor: 0,
+            lost: 0,
+        })
     }
 }
 
@@ -614,7 +643,8 @@ mod tests {
         // 大帧（30KB × 3，共 90KB > 64KB 环）强制写读两个方向都跨折返
         for i in 0..3u64 {
             let payload: Vec<u8> = (0..30_000).map(|k| (k + i) as u8).collect();
-            w.rr3_send_buf(frame(&payload, 1000 + i)).expect("大帧 send");
+            w.rr3_send_buf(frame(&payload, 1000 + i))
+                .expect("大帧 send");
             let got = r.rr3_try_recv_buf().expect("recv").expect("应有帧");
             assert_eq!(got.rr3_payload(), &payload[..], "折返帧字节漂移");
         }
@@ -634,7 +664,10 @@ mod tests {
         assert_eq!(r.rr3_try_recv_buf().expect("重同步拍"), None);
         assert!(r.rr3_lost() >= 1, "重同步必须计入 lost");
         w.rr3_send_buf(frame(b"fresh", 999)).expect("send");
-        let got = r.rr3_try_recv_buf().expect("recv").expect("重同步后应读到新帧");
+        let got = r
+            .rr3_try_recv_buf()
+            .expect("recv")
+            .expect("重同步后应读到新帧");
         assert_eq!(got.rr3_payload(), b"fresh");
     }
 
@@ -646,7 +679,10 @@ mod tests {
         let mut r = Rr3ShmReaderConn::rr3_from_raw(base, cap);
         let big = vec![0u8; 3000];
         let err = w.rr3_send_buf(frame(&big, 1)).unwrap_err();
-        assert!(matches!(err, Rr3FrameError::Io(_)), "超半容量应报 Io: {err:?}");
+        assert!(
+            matches!(err, Rr3FrameError::Io(_)),
+            "超半容量应报 Io: {err:?}"
+        );
         w.rr3_send_buf(frame(b"ok", 2)).expect("拒绝后区域不受影响");
         let got = r.rr3_try_recv_buf().expect("recv").expect("应有帧");
         assert_eq!(got.rr3_payload(), b"ok");
@@ -674,7 +710,10 @@ mod tests {
         assert_eq!(r2.rr3_try_recv_buf().expect("r2 重同步拍"), None);
         assert!(r2.rr3_lost() >= 1, "停读者必须重同步并计数");
         w.rr3_send_buf(frame(b"tail", 99)).expect("send");
-        let got = r2.rr3_try_recv_buf().expect("recv").expect("r2 重同步后应读到");
+        let got = r2
+            .rr3_try_recv_buf()
+            .expect("recv")
+            .expect("r2 重同步后应读到");
         assert_eq!(got.rr3_payload(), b"tail");
     }
 
@@ -702,7 +741,10 @@ mod tests {
         unsafe { (*shm_atomic_u64(base, SHM_OFF_HEAD)).store(256, Ordering::Release) };
         let mut r = Rr3ShmReaderConn::rr3_from_raw(base, cap);
         let err = r.rr3_try_recv_buf().unwrap_err();
-        assert!(matches!(err, Rr3FrameError::Header(_)), "坏头应报 Header: {err:?}");
+        assert!(
+            matches!(err, Rr3FrameError::Header(_)),
+            "坏头应报 Header: {err:?}"
+        );
     }
 
     // ---------------- POSIX 附着段（真 shm_open / mmap） ----------------
@@ -710,9 +752,9 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     mod posix_tests {
         use super::*;
+        use crate::transport::{Rr3TransportEndpoint, Rr3TransportListener};
         use std::path::Path;
         use std::sync::atomic::AtomicU32;
-        use crate::transport::{Rr3TransportEndpoint, Rr3TransportListener};
 
         /// 唯一临时 shm 名（macOS POSIX shm 名上限 31 字节，故取短前缀）
         fn tmp_name(tag: &str) -> String {
@@ -742,7 +784,10 @@ mod tests {
             let name = tmp_name("excl");
             let p = Path::new(&name);
             let _l = Rr3ShmListener::rr3_bind(p).expect("首次 bind 应成功");
-            assert!(Rr3ShmListener::rr3_bind(p).is_err(), "未清理重复 bind 应失败");
+            assert!(
+                Rr3ShmListener::rr3_bind(p).is_err(),
+                "未清理重复 bind 应失败"
+            );
             Rr3ShmListener::rr3_cleanup(p).expect("清理");
         }
 
@@ -773,7 +818,10 @@ mod tests {
             assert_eq!(r2.rr3_try_recv_buf().expect("r2 重同步拍"), None);
             assert!(r2.rr3_lost() >= 1);
             w.rr3_send_buf(frame(b"tail", 99)).expect("send");
-            let got = r2.rr3_try_recv_buf().expect("recv").expect("r2 应读到 tail");
+            let got = r2
+                .rr3_try_recv_buf()
+                .expect("recv")
+                .expect("r2 应读到 tail");
             assert_eq!(got.rr3_payload(), b"tail");
             Rr3ShmListener::rr3_cleanup(p).expect("清理");
         }

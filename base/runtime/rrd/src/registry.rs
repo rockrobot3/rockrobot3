@@ -91,16 +91,24 @@ impl fmt::Display for Rr3RegisterError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rr3PublishDeny {
-    ReservedNamespace { topic: String },
+    ReservedNamespace {
+        topic: String,
+    },
     /// `owner` 回显主题集里登记的 owner；**取不到就回显 `?`**——主题根本不在册、或在册但
     /// 登记文本没写 owner（解析成空串）都算取不到，两条分支同一写法（两处构造点共用
     /// `owner_for_echo`），不留"一会儿空串一会儿 `?`"的两种未知。
     /// 两条都是**终判拒绝**（这一条发布已经被拒了），不是"owner 未知、待定再查"——
     /// 日志读者别把 `owner=?` 读成待办事项。
-    ForeignPrefix { topic: String, owner: String, sender: String },
+    ForeignPrefix {
+        topic: String,
+        owner: String,
+        sender: String,
+    },
     /// "未注册"指的是**主题**不在主题集里（首段与发送方相符、名字却拼错或没登记），
     /// **不是**指发送方那个模块没在册：本函数是关联函数、不碰 `self`，看不见在册表。
-    NotRegistered { topic: String },
+    NotRegistered {
+        topic: String,
+    },
 }
 
 impl fmt::Display for Rr3PublishDeny {
@@ -110,7 +118,11 @@ impl fmt::Display for Rr3PublishDeny {
                 f,
                 "拒绝 {topic}：rr3-runtime/* 是守护进程的下行广播，模块不得冒充"
             ),
-            Self::ForeignPrefix { topic, owner, sender } => {
+            Self::ForeignPrefix {
+                topic,
+                owner,
+                sender,
+            } => {
                 write!(f, "越权发布 {topic}（owner={owner}，发送方={sender}）")
             }
             Self::NotRegistered { topic } => write!(f, "未注册主题 {topic}，拒绝发布"),
@@ -208,7 +220,11 @@ impl Rr3Death {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rr3ChildExit {
     /// 条目还活着：已置 failed 并记账，调用方按 `rr3_phase_for_exit(clean_exit)` 广播
-    Crashed { src_task: u64, clean_exit: bool, plan: Option<Rr3RestartPlan> },
+    Crashed {
+        src_task: u64,
+        clean_exit: bool,
+        plan: Option<Rr3RestartPlan>,
+    },
     /// 从未注册且已 stopped，或条目早已 failed：静默
     Silent,
     /// 子进程在注册成功之前就退出了：没有条目可广播，但已按 name 记过账
@@ -218,7 +234,11 @@ pub enum Rr3ChildExit {
 /// 死因 → 下行 state 相位名的唯一映射（D-7）：conn 收尾与 11b 的 supervisor 两个广播点都必须
 /// 经它。今天这条映射原来只写在 `conn.rs` 的 `if clean_exit` 里，11b 再加一个广播点就是两处真值。
 pub fn rr3_phase_for_exit(clean_exit: bool) -> &'static str {
-    if clean_exit { "unregistered" } else { "failed" }
+    if clean_exit {
+        "unregistered"
+    } else {
+        "failed"
+    }
 }
 
 /// `ForeignPrefix.owner` 的回显唯一写法：在册但登记文本没写 owner 键（解析成空串）与
@@ -226,7 +246,9 @@ pub fn rr3_phase_for_exit(clean_exit: bool) -> &'static str {
 /// 都必须经它——任何一处绕过它就会把"同一种未知"写成两种回显（由
 /// `foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites` 钉住）。
 fn owner_for_echo(registered: Option<String>) -> String {
-    registered.filter(|o| !o.is_empty()).unwrap_or_else(|| "?".to_string())
+    registered
+        .filter(|o| !o.is_empty())
+        .unwrap_or_else(|| "?".to_string())
 }
 
 #[derive(Debug)]
@@ -289,7 +311,9 @@ impl RrdRegistry {
         now_ms: u64,
     ) -> Result<u64, Rr3RegisterError> {
         if facts.name == crate::topics_load::RR3_RESERVED_OWNER {
-            return Err(Rr3RegisterError::ReservedName { name: facts.name.clone() });
+            return Err(Rr3RegisterError::ReservedName {
+                name: facts.name.clone(),
+            });
         }
         // 重启后同身份重注册：旧条目整体替换，旧 task 号作废但不回收。
         // `crash_streak` 是**表级**、按 name 计的账（D-1），不随旧条目一起作废——"连续 5 次"
@@ -311,7 +335,9 @@ impl RrdRegistry {
         // 容量门认 superseded：表满但同名条目是 Failed 时，旧条目即将腾出槽位，
         // 这是合法的 Failed 重注册，不得被容量拒（与移位前的现行行为一致）。
         if superseded.is_none() && self.modules.len() >= RR3_REG_MAX_MODULES {
-            return Err(Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES });
+            return Err(Rr3RegisterError::Capacity {
+                limit: RR3_REG_MAX_MODULES,
+            });
         }
         // 入库前提：watchdog_ms 必须为正，否则 `now_ms - last_beat_ms >= watchdog_ms` 恒成立，
         // 首轮到期扫描就把所有模块秒判死。`rr3_manifest_facts_from_text` 只在**文本**读取期
@@ -366,8 +392,12 @@ impl RrdRegistry {
     /// 把 registry.rs:254-260 那段"非 failed 无条件写 Running"的欠账当场结掉：degraded 落地时
     /// 一颗心跳不许把降级标注抹平。
     pub fn rr3_reg_beat(&mut self, src_task: u64, now_ms: u64) -> Rr3Beat {
-        let Some(name) = self.by_task.get(&src_task).cloned() else { return Rr3Beat::Rejected };
-        let Some(e) = self.modules.get_mut(&name) else { return Rr3Beat::Rejected };
+        let Some(name) = self.by_task.get(&src_task).cloned() else {
+            return Rr3Beat::Rejected;
+        };
+        let Some(e) = self.modules.get_mut(&name) else {
+            return Rr3Beat::Rejected;
+        };
         match e.phase {
             Rr3Phase::Failed => Rr3Beat::Rejected,
             // degraded 只续命不升级（本轮 degraded 尚无 setter，此支为 11b 之后兜底）
@@ -420,7 +450,8 @@ impl RrdRegistry {
                 continue;
             }
             // 段 2：恢复归零——活过一整条自己的窗口 = 上一世的崩溃账到此为止。
-            if phase == Rr3Phase::Running && now_ms.saturating_sub(registered_at_ms) >= watchdog_ms {
+            if phase == Rr3Phase::Running && now_ms.saturating_sub(registered_at_ms) >= watchdog_ms
+            {
                 self.crash_streak.remove(&name);
             }
             // 段 3：判死。saturating_sub：调用方的毫秒读数理论上单调，但真出现倒退时宁可判
@@ -476,7 +507,9 @@ impl RrdRegistry {
         topics: &Rr3TopicSet,
     ) -> Result<(), Rr3PublishDeny> {
         if crate::topics_load::rr3_topics_is_reserved_topic(topic) {
-            return Err(Rr3PublishDeny::ReservedNamespace { topic: topic.to_string() });
+            return Err(Rr3PublishDeny::ReservedNamespace {
+                topic: topic.to_string(),
+            });
         }
         let head = topic.split('/').next().unwrap_or("");
         if head != sender_name {
@@ -487,7 +520,9 @@ impl RrdRegistry {
             });
         }
         if !topics.rr3_topic_set_contains(topic) {
-            return Err(Rr3PublishDeny::NotRegistered { topic: topic.to_string() });
+            return Err(Rr3PublishDeny::NotRegistered {
+                topic: topic.to_string(),
+            });
         }
         // 首段相符只说明主题串"写着是这个命名空间"；在册 owner 是别人就是越权。
         // 取不到 owner（登记表里 owner 缺失 = 没写这个键，解析成空串）同样按越权拒，
@@ -524,7 +559,11 @@ impl RrdRegistry {
             "on-failure" => !clean_exit,
             _ => false, // "never" 与非预期值（校验已在 Task 2 挡住，这里只保证不 panic）
         };
-        let streak = self.crash_streak.get(facts.name.as_str()).copied().unwrap_or(0);
+        let streak = self
+            .crash_streak
+            .get(facts.name.as_str())
+            .copied()
+            .unwrap_or(0);
         if !restart || streak >= RR3_RESTART_FAILURE_CAP {
             return None;
         }
@@ -538,7 +577,7 @@ impl RrdRegistry {
             // （release 的 `*` 会 wrap），封顶到 u64::MAX 让"永远等下去"成为唯一保守解。
             // `restart_base_ms = 0` 的下界语义（→ 立即重启）已由 Task 7 的 CLI 门禁拦住
             // （`cli.rs::parse_restart_base`，提交 f69eda8：拒 0、拒超上界），本表不替它裁定语义。
-            delay_ms: RR3_RESTART_BACKOFF[idx].checked_mul(self.restart_base_ms).unwrap_or(u64::MAX),
+            delay_ms: RR3_RESTART_BACKOFF[idx].saturating_mul(self.restart_base_ms),
             entry: facts.entry.clone(),
         })
     }
@@ -552,11 +591,11 @@ impl RrdRegistry {
     /// 死亡时刻若将来要进日志，那是新增字段的事，不是复用到期基准。
     pub fn rr3_reg_death(&mut self, name: &str, clean_exit: bool, now_ms: u64) -> Rr3Death {
         let _ = now_ms; // 现值：死亡时刻不进基准（原注释保留）
-        // 序不是风格问题，三行各有归属：
-        //   1) 已 failed → 谁都不许再广播、再记账（R-A4 在这一条上结清）
-        //   2) **不在册必须先于 owned 判定**：unregister 已把条目摘掉，此时"等退出码"会让
-        //      `unregistered` 永远没人广播（收尸那一路对不在册的条目走 stopped/Silent，也不会补）
-        //   3) 在册且 owned → 让位给退出码那一路（conn 不改相位、不记账、不广播）
+                        // 序不是风格问题，三行各有归属：
+                        //   1) 已 failed → 谁都不许再广播、再记账（R-A4 在这一条上结清）
+                        //   2) **不在册必须先于 owned 判定**：unregister 已把条目摘掉，此时"等退出码"会让
+                        //      `unregistered` 永远没人广播（收尸那一路对不在册的条目走 stopped/Silent，也不会补）
+                        //   3) 在册且 owned → 让位给退出码那一路（conn 不改相位、不记账、不广播）
         match self.modules.get(name).map(|e| e.phase) {
             Some(Rr3Phase::Failed) => return Rr3Death::Silent,
             None => return Rr3Death::Broadcast { plan: None }, // unregister 之后的收尾：照今天广播 unregistered
@@ -570,7 +609,9 @@ impl RrdRegistry {
         }
         // 两段式借用：`&mut self.modules` 的守卫不能越过 `&mut self` 的方法调用活着
         let facts = self.modules.get(name).expect("刚改过相位").facts.clone();
-        Rr3Death::Broadcast { plan: self.rr3_charge(&facts, clean_exit) }
+        Rr3Death::Broadcast {
+            plan: self.rr3_charge(&facts, clean_exit),
+        }
     }
 
     pub fn rr3_reg_remove(&mut self, name: &str) -> bool {
@@ -646,7 +687,8 @@ impl RrdRegistry {
                 continue;
             }
             for e in self.modules.values_mut() {
-                if e.phase == Rr3Phase::Running && e.facts.depends_required.iter().any(|d| d == &cap)
+                if e.phase == Rr3Phase::Running
+                    && e.facts.depends_required.iter().any(|d| d == &cap)
                 {
                     e.phase = Rr3Phase::Degraded;
                     out.push((e.name.clone(), e.src_task));
@@ -704,9 +746,11 @@ impl RrdRegistry {
     fn rr3_deps_all_satisfied(&self, required: &[String]) -> bool {
         required.iter().all(|cap| match self.providers.get(cap) {
             None => true,
-            Some(names) => names
-                .iter()
-                .any(|n| self.modules.get(n).is_some_and(|e| e.phase == Rr3Phase::Running)),
+            Some(names) => names.iter().any(|n| {
+                self.modules
+                    .get(n)
+                    .is_some_and(|e| e.phase == Rr3Phase::Running)
+            }),
         })
     }
 
@@ -723,7 +767,10 @@ impl RrdRegistry {
         // 收过尸就撤所有权标记：无论走哪条分支，这次退出都已被 supervisor 处理完，
         // 否则同名新实例的 EOF 会永远等一个不再来的退出码（`owned_conn_death...` 钉这一条）。
         self.owned.remove(facts.name.as_str());
-        let present = self.modules.get(facts.name.as_str()).map(|e| (e.phase, e.src_task));
+        let present = self
+            .modules
+            .get(facts.name.as_str())
+            .map(|e| (e.phase, e.src_task));
         match present {
             None => {
                 // 不在册：若被显式 stop 过（D-4），它的退出不是崩溃，不得记账。
@@ -731,14 +778,19 @@ impl RrdRegistry {
                     Rr3ChildExit::Silent
                 } else {
                     // 从没注册过 → 没有条目可广播，但账必须按 name 记（坏 entry 不能空转重起）。
-                    Rr3ChildExit::EarlyExit { plan: self.rr3_charge(facts, clean_exit) }
+                    Rr3ChildExit::EarlyExit {
+                        plan: self.rr3_charge(facts, clean_exit),
+                    }
                 }
             }
             // 已被 watchdog 判死：收尸不得双计（R-A4 的封印）。
             Some((Rr3Phase::Failed, _)) => Rr3ChildExit::Silent,
             // 在册且活着：相位、句柄、账都在这一次到位。
             Some((_, src_task)) => {
-                let e = self.modules.get_mut(facts.name.as_str()).expect("刚确认在册");
+                let e = self
+                    .modules
+                    .get_mut(facts.name.as_str())
+                    .expect("刚确认在册");
                 e.tx = None;
                 e.phase = Rr3Phase::Failed;
                 Rr3ChildExit::Crashed {
@@ -784,8 +836,11 @@ impl RrdRegistry {
     /// 快照按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，
     /// 名字序纯属 `BTreeMap<String,_>` 的顺带结果，故必须显式排。
     pub fn rr3_reg_snapshot(&self) -> Vec<(String, u64, Rr3Phase)> {
-        let mut v: Vec<(String, u64, Rr3Phase)> =
-            self.modules.values().map(|e| (e.name.clone(), e.src_task, e.phase)).collect();
+        let mut v: Vec<(String, u64, Rr3Phase)> = self
+            .modules
+            .values()
+            .map(|e| (e.name.clone(), e.src_task, e.phase))
+            .collect();
         v.sort_by_key(|(_, t, _)| *t);
         v
     }
@@ -829,9 +884,15 @@ impl RrdRegistry {
     /// 冻结不动（它只广播），单播由本函数承担。找不到在册连接（已退场/已过期）或
     /// 对端收件人已 drop 都回 `false`，由调用方决定回什么错。
     pub fn rr3_reg_send_to(&self, task: u64, frame: &Rr3Frame) -> bool {
-        let Some(name) = self.by_task.get(&task) else { return false };
-        let Some(entry) = self.modules.get(name) else { return false };
-        let Some(tx) = entry.tx.as_ref() else { return false };
+        let Some(name) = self.by_task.get(&task) else {
+            return false;
+        };
+        let Some(entry) = self.modules.get(name) else {
+            return false;
+        };
+        let Some(tx) = entry.tx.as_ref() else {
+            return false;
+        };
         tx.send(frame.clone()).is_ok()
     }
 }
@@ -876,7 +937,11 @@ watchdog_timeout_ms = {wd}
         let rpc = if exposes.is_empty() {
             String::new()
         } else {
-            let list = exposes.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ");
+            let list = exposes
+                .iter()
+                .map(|t| format!("\"{t}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("[rpc]\nexposes = [{list}]\n\n")
         };
         let text = format!(
@@ -908,22 +973,42 @@ watchdog_timeout_ms = 500
     fn callee_for_matches_exposes_and_prefers_lowest_task() {
         let mut r = RrdRegistry::new(1000);
         // simb 先注册（task 小），同样 exposes t/a；sima 晚 300ms 注册（判死时刻随之错开）
-        let b = r.rr3_reg_add(&facts_exposes("rr3-simb", &["rr3-x/t/a"]), chan().0, 0).unwrap();
-        let a = r
-            .rr3_reg_add(&facts_exposes("rr3-sima", &["rr3-x/t/a", "rr3-x/t/b"]), chan().0, 300)
+        let b = r
+            .rr3_reg_add(&facts_exposes("rr3-simb", &["rr3-x/t/a"]), chan().0, 0)
             .unwrap();
-        r.rr3_reg_add(&facts_exposes("rr3-silent", &[]), chan().0, 0).unwrap();
+        let a = r
+            .rr3_reg_add(
+                &facts_exposes("rr3-sima", &["rr3-x/t/a", "rr3-x/t/b"]),
+                chan().0,
+                300,
+            )
+            .unwrap();
+        r.rr3_reg_add(&facts_exposes("rr3-silent", &[]), chan().0, 0)
+            .unwrap();
         // 多个 callee：取 src_task 最小的 simb（注册序在前），不随名字序漂
-        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/a"), Some(("rr3-simb".into(), b)));
-        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/b"), Some(("rr3-sima".into(), a)));
+        assert_eq!(
+            r.rr3_reg_callee_for("rr3-x/t/a"),
+            Some(("rr3-simb".into(), b))
+        );
+        assert_eq!(
+            r.rr3_reg_callee_for("rr3-x/t/b"),
+            Some(("rr3-sima".into(), a))
+        );
         // 没人 exposes 的 topic：None
         assert_eq!(r.rr3_reg_callee_for("rr3-x/t/none"), None);
         // 判死后（failed + tx 摘除）不再是被调方：600ms 时 simb（watchdog 500、基准 0）已死，
         // sima（基准 300，300 < 500）还活着
         r.rr3_reg_expire(600);
-        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/a"), Some(("rr3-sima".into(), a)));
+        assert_eq!(
+            r.rr3_reg_callee_for("rr3-x/t/a"),
+            Some(("rr3-sima".into(), a))
+        );
         r.rr3_reg_expire(1200);
-        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/b"), None, "failed 条目必须被路由排除");
+        assert_eq!(
+            r.rr3_reg_callee_for("rr3-x/t/b"),
+            None,
+            "failed 条目必须被路由排除"
+        );
     }
 
     /// 点名投递：在册活连接收得到，未知 task / 已死连接回 false
@@ -932,7 +1017,9 @@ watchdog_timeout_ms = 500
         use rr_ipc::{opcode, rr3_body_encode, Rr3Header, Rr3PayloadType};
         let mut r = RrdRegistry::new(1000);
         let (tx, rx) = chan();
-        let t = r.rr3_reg_add(&facts_exposes("rr3-sima", &["rr3-x/t/a"]), tx, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts_exposes("rr3-sima", &["rr3-x/t/a"]), tx, 0)
+            .unwrap();
         let payload = rr3_body_encode(Rr3PayloadType::Notification, b"hello");
         let frame = Rr3Frame {
             header: Rr3Header {
@@ -948,7 +1035,9 @@ watchdog_timeout_ms = 500
         };
         assert!(r.rr3_reg_send_to(t, &frame));
         assert_eq!(
-            rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap().payload,
+            rx.recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap()
+                .payload,
             frame.payload
         );
         // 未知 task 与非在册号段都不投
@@ -963,11 +1052,21 @@ watchdog_timeout_ms = 500
     #[test]
     fn task_ids_start_at_two_and_increase() {
         let mut r = RrdRegistry::new(1000);
-        let a = r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0).unwrap();
-        let b = r.rr3_reg_add(&facts("rr3-simb", 200, 1000, "always"), chan().0, 0).unwrap();
+        let a = r
+            .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
+            .unwrap();
+        let b = r
+            .rr3_reg_add(&facts("rr3-simb", 200, 1000, "always"), chan().0, 0)
+            .unwrap();
         assert_eq!(a, rr_bus::RR3_TASK_FIRST_MODULE);
         assert_eq!(b, a + 1);
-        assert_eq!(r.rr3_reg_snapshot(), vec![("rr3-sima".into(), 2, Rr3Phase::Registered), ("rr3-simb".into(), 3, Rr3Phase::Registered)]);
+        assert_eq!(
+            r.rr3_reg_snapshot(),
+            vec![
+                ("rr3-sima".into(), 2, Rr3Phase::Registered),
+                ("rr3-simb".into(), 3, Rr3Phase::Registered)
+            ]
+        );
     }
 
     /// 快照的序是 task 升序而非名字升序：先注册 z 再注册 a，顺序必须跟着 task 走
@@ -975,12 +1074,19 @@ watchdog_timeout_ms = 500
     #[test]
     fn snapshot_orders_by_task_not_by_name() {
         let mut r = RrdRegistry::new(1000);
-        let z = r.rr3_reg_add(&facts("rr3-zeta", 200, 1000, "always"), chan().0, 0).unwrap();
-        let a = r.rr3_reg_add(&facts("rr3-alpha", 200, 1000, "always"), chan().0, 0).unwrap();
+        let z = r
+            .rr3_reg_add(&facts("rr3-zeta", 200, 1000, "always"), chan().0, 0)
+            .unwrap();
+        let a = r
+            .rr3_reg_add(&facts("rr3-alpha", 200, 1000, "always"), chan().0, 0)
+            .unwrap();
         assert!(a > z, "后注册的号必须更大");
         assert_eq!(
             r.rr3_reg_snapshot(),
-            vec![("rr3-zeta".into(), z, Rr3Phase::Registered), ("rr3-alpha".into(), a, Rr3Phase::Registered)],
+            vec![
+                ("rr3-zeta".into(), z, Rr3Phase::Registered),
+                ("rr3-alpha".into(), a, Rr3Phase::Registered)
+            ],
             "名字序（alpha, zeta）与 task 序（zeta, alpha）相反，才能抓出没排序的实现"
         );
     }
@@ -990,18 +1096,27 @@ watchdog_timeout_ms = 500
     #[test]
     fn health_snapshot_echoes_the_judgement_inputs_in_task_order() {
         let mut r = RrdRegistry::new(1000);
-        let z = r.rr3_reg_add(&facts("rr3-zeta", 200, 1000, "always"), chan().0, 0).unwrap();
-        let a = r.rr3_reg_add(&facts("rr3-alpha", 300, 2000, "always"), chan().0, 0).unwrap();
+        let z = r
+            .rr3_reg_add(&facts("rr3-zeta", 200, 1000, "always"), chan().0, 0)
+            .unwrap();
+        let a = r
+            .rr3_reg_add(&facts("rr3-alpha", 300, 2000, "always"), chan().0, 0)
+            .unwrap();
         let rows = r.rr3_reg_health_snapshot(1500);
         assert_eq!(
-            rows.iter().map(|x| (x.name.as_str(), x.src_task)).collect::<Vec<_>>(),
+            rows.iter()
+                .map(|x| (x.name.as_str(), x.src_task))
+                .collect::<Vec<_>>(),
             vec![("rr3-zeta", z), ("rr3-alpha", a)],
             "与 rr3_reg_snapshot 同一排序口径（task 升序）"
         );
         let alpha = rows.iter().find(|x| x.name == "rr3-alpha").unwrap();
         assert_eq!(alpha.heartbeat_ms, 300);
         assert_eq!(alpha.watchdog_ms, 2000);
-        assert_eq!(alpha.since_beat_ms, 1500, "注册时刻 0，now=1500 → 距上次心跳 1500");
+        assert_eq!(
+            alpha.since_beat_ms, 1500,
+            "注册时刻 0，now=1500 → 距上次心跳 1500"
+        );
         assert_eq!(alpha.phase, Rr3Phase::Registered);
     }
 
@@ -1009,9 +1124,13 @@ watchdog_timeout_ms = 500
     #[test]
     fn health_snapshot_since_beat_never_wraps() {
         let mut r = RrdRegistry::new(1000);
-        r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 1000).unwrap();
+        r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 1000)
+            .unwrap();
         let rows = r.rr3_reg_health_snapshot(500);
-        assert_eq!(rows[0].since_beat_ms, 0, "now < last_beat 时夹 0，不是 u64 回绕的大数");
+        assert_eq!(
+            rows[0].since_beat_ms, 0,
+            "now < last_beat 时夹 0，不是 u64 回绕的大数"
+        );
     }
 
     /// 四个阶段名与 `as_str()` 一对一：下行状态广播与集成测试按这些字面量比对
@@ -1038,15 +1157,25 @@ watchdog_timeout_ms = 500
     #[test]
     fn register_error_display_is_verbatim() {
         assert_eq!(
-            Rr3RegisterError::Duplicate { name: "rr3-sima".into(), src_task: 7 }.to_string(),
+            Rr3RegisterError::Duplicate {
+                name: "rr3-sima".into(),
+                src_task: 7
+            }
+            .to_string(),
             "模块 rr3-sima 已在册（task=7），拒绝重复注册"
         );
         assert_eq!(
-            Rr3RegisterError::ReservedName { name: "rr3-runtime".into() }.to_string(),
+            Rr3RegisterError::ReservedName {
+                name: "rr3-runtime".into()
+            }
+            .to_string(),
             "模块名 rr3-runtime 属内建命名空间保留号，拒绝注册"
         );
         assert_eq!(
-            Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES }.to_string(),
+            Rr3RegisterError::Capacity {
+                limit: RR3_REG_MAX_MODULES
+            }
+            .to_string(),
             "在册模块已达上限 16，拒绝注册"
         );
     }
@@ -1055,7 +1184,9 @@ watchdog_timeout_ms = 500
     /// 未点名主题点名主题（Task 10 靠这些子串区分被哪一层拒的）
     #[test]
     fn publish_deny_display_distinguishes_the_three_layers() {
-        let d = Rr3PublishDeny::ReservedNamespace { topic: "rr3-runtime/module/state".into() };
+        let d = Rr3PublishDeny::ReservedNamespace {
+            topic: "rr3-runtime/module/state".into(),
+        };
         assert_eq!(
             d.to_string(),
             "拒绝 rr3-runtime/module/state：rr3-runtime/* 是守护进程的下行广播，模块不得冒充"
@@ -1065,9 +1196,15 @@ watchdog_timeout_ms = 500
             owner: "rr3-simb".into(),
             sender: "rr3-sima".into(),
         };
-        assert_eq!(f.to_string(), "越权发布 rr3-simb/pong/state（owner=rr3-simb，发送方=rr3-sima）");
         assert_eq!(
-            Rr3PublishDeny::NotRegistered { topic: "rr3-sima/x/state".into() }.to_string(),
+            f.to_string(),
+            "越权发布 rr3-simb/pong/state（owner=rr3-simb，发送方=rr3-sima）"
+        );
+        assert_eq!(
+            Rr3PublishDeny::NotRegistered {
+                topic: "rr3-sima/x/state".into()
+            }
+            .to_string(),
             "未注册主题 rr3-sima/x/state，拒绝发布"
         );
     }
@@ -1076,15 +1213,29 @@ watchdog_timeout_ms = 500
     #[test]
     fn duplicate_name_is_rejected() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
+            .unwrap();
         let e = r
             .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
             .expect_err("同名在册必须拒");
-        assert_eq!(e, Rr3RegisterError::Duplicate { name: "rr3-sima".into(), src_task: t });
+        assert_eq!(
+            e,
+            Rr3RegisterError::Duplicate {
+                name: "rr3-sima".into(),
+                src_task: t
+            }
+        );
         assert_eq!(r.rr3_reg_snapshot().len(), 1);
-        assert_eq!(e.to_string(), "模块 rr3-sima 已在册（task=2），拒绝重复注册");
+        assert_eq!(
+            e.to_string(),
+            "模块 rr3-sima 已在册（task=2），拒绝重复注册"
+        );
         // 拒重复不许改已在册条目的状态，也不许换掉它的 task 号
-        assert_eq!(r.rr3_reg_snapshot()[0], ("rr3-sima".to_string(), t, Rr3Phase::Registered));
+        assert_eq!(
+            r.rr3_reg_snapshot()[0],
+            ("rr3-sima".to_string(), t, Rr3Phase::Registered)
+        );
         assert_eq!(r.rr3_reg_name_of(t).as_deref(), Some("rr3-sima"));
     }
 
@@ -1094,7 +1245,9 @@ watchdog_timeout_ms = 500
         let mut r = RrdRegistry::new(1000);
         assert_eq!(
             r.rr3_reg_add(&facts("rr3-runtime", 200, 1000, "always"), chan().0, 0),
-            Err(Rr3RegisterError::ReservedName { name: "rr3-runtime".into() })
+            Err(Rr3RegisterError::ReservedName {
+                name: "rr3-runtime".into()
+            })
         );
         assert!(r.rr3_reg_snapshot().is_empty());
     }
@@ -1103,15 +1256,25 @@ watchdog_timeout_ms = 500
     fn capacity_limit_is_enforced() {
         let mut r = RrdRegistry::new(1000);
         for i in 0..RR3_REG_MAX_MODULES {
-            r.rr3_reg_add(&facts(&format!("rr3-m{i}"), 200, 1000, "never"), chan().0, 0).unwrap();
+            r.rr3_reg_add(
+                &facts(&format!("rr3-m{i}"), 200, 1000, "never"),
+                chan().0,
+                0,
+            )
+            .unwrap();
         }
         assert_eq!(
             r.rr3_reg_add(&facts("rr3-over", 200, 1000, "never"), chan().0, 0),
-            Err(Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES })
+            Err(Rr3RegisterError::Capacity {
+                limit: RR3_REG_MAX_MODULES
+            })
         );
         // 超额拒绝不许留下半个条目，也不许消耗一个 task 号
         assert_eq!(r.rr3_reg_snapshot().len(), RR3_REG_MAX_MODULES);
-        assert_eq!(r.rr3_reg_name_of(rr_bus::RR3_TASK_FIRST_MODULE + RR3_REG_MAX_MODULES as u64), None);
+        assert_eq!(
+            r.rr3_reg_name_of(rr_bus::RR3_TASK_FIRST_MODULE + RR3_REG_MAX_MODULES as u64),
+            None
+        );
     }
 
     /// 容量门的那半句 `superseded.is_none() &&` **承重**（Task 7 评审遗留 ②）：表满但其中一个
@@ -1124,36 +1287,68 @@ watchdog_timeout_ms = 500
     fn full_table_still_allows_re_registering_a_failed_module() {
         let mut r = RrdRegistry::new(1000);
         for i in 0..RR3_REG_MAX_MODULES {
-            r.rr3_reg_add(&facts(&format!("rr3-m{i}"), 200, 1000, "never"), chan().0, 0).unwrap();
+            r.rr3_reg_add(
+                &facts(&format!("rr3-m{i}"), 200, 1000, "never"),
+                chan().0,
+                0,
+            )
+            .unwrap();
         }
         // 对照 2：满表上的**新**名字必须仍被容量拒
         assert_eq!(
             r.rr3_reg_add(&facts("rr3-over", 200, 1000, "never"), chan().0, 0),
-            Err(Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES }),
+            Err(Rr3RegisterError::Capacity {
+                limit: RR3_REG_MAX_MODULES
+            }),
             "对照：容量门本身不许被整条删掉"
         );
         // 对照 3：满表上的同名**非 Failed** 条目仍按 Duplicate 拒（三条门的序：在册先于容量）
         assert_eq!(
             r.rr3_reg_add(&facts("rr3-m0", 200, 1000, "never"), chan().0, 0),
-            Err(Rr3RegisterError::Duplicate { name: "rr3-m0".into(), src_task: rr_bus::RR3_TASK_FIRST_MODULE }),
+            Err(Rr3RegisterError::Duplicate {
+                name: "rr3-m0".into(),
+                src_task: rr_bus::RR3_TASK_FIRST_MODULE
+            }),
             "对照：同名在册该回 Duplicate，不是 Capacity"
         );
 
         let old = rr_bus::RR3_TASK_FIRST_MODULE;
-        assert!(r.rr3_reg_death("rr3-m0", true, 10).rr3_plan().is_none(), "never 不给重启计划");
-        assert_eq!(r.rr3_reg_snapshot().len(), RR3_REG_MAX_MODULES, "failed 不出表，槽位数不变");
-        assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed, "用例前提：待替换条目确为 Failed");
+        assert!(
+            r.rr3_reg_death("rr3-m0", true, 10).rr3_plan().is_none(),
+            "never 不给重启计划"
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot().len(),
+            RR3_REG_MAX_MODULES,
+            "failed 不出表，槽位数不变"
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot()[0].2,
+            Rr3Phase::Failed,
+            "用例前提：待替换条目确为 Failed"
+        );
 
         // 本用例的主角：表满 + 同名 Failed → 必须放行换新 task，而不是回 Capacity
         let again = r
             .rr3_reg_add(&facts("rr3-m0", 200, 1000, "never"), chan().0, 20)
             .expect("表满时重注册 Failed 的同名条目必须放行（容量门的 superseded 半句）");
-        assert_eq!(again, old + RR3_REG_MAX_MODULES as u64, "重注册拿下一个新号，旧号作废不回收");
-        assert_eq!(r.rr3_reg_snapshot().len(), RR3_REG_MAX_MODULES, "替换而非追加：槽位数不得增长");
+        assert_eq!(
+            again,
+            old + RR3_REG_MAX_MODULES as u64,
+            "重注册拿下一个新号，旧号作废不回收"
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot().len(),
+            RR3_REG_MAX_MODULES,
+            "替换而非追加：槽位数不得增长"
+        );
         assert_eq!(r.rr3_reg_name_of(old), None, "旧 task 号必须从映射里摘掉");
         assert_eq!(r.rr3_reg_name_of(again).as_deref(), Some("rr3-m0"));
         assert_eq!(
-            r.rr3_reg_snapshot().iter().filter(|(n, _, _)| n == "rr3-m0").count(),
+            r.rr3_reg_snapshot()
+                .iter()
+                .filter(|(n, _, _)| n == "rr3-m0")
+                .count(),
             1,
             "同名条目不得同时存在两条"
         );
@@ -1172,9 +1367,13 @@ watchdog_timeout_ms = 500
         let mut r = RrdRegistry::new(1000);
         let mut f = facts("rr3-sima", 100, 500, "always");
         f.watchdog_ms = 0; // 绕过 manifest.rs 校验的唯一途径：pub 字段直接改
-        let caught =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.rr3_reg_add(&f, chan().0, 0)));
-        assert!(caught.is_err(), "watchdog_ms = 0 必须在入库那一刻被拦下，不能留给到期扫描去判死");
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            r.rr3_reg_add(&f, chan().0, 0)
+        }));
+        assert!(
+            caught.is_err(),
+            "watchdog_ms = 0 必须在入库那一刻被拦下，不能留给到期扫描去判死"
+        );
     }
 
     /// 三条拒绝门必须先于 watchdog 断言：`rr3_reg_add` 的文档序是"保留名 → 同名在册 →
@@ -1187,31 +1386,41 @@ watchdog_timeout_ms = 500
     #[test]
     fn register_gates_run_before_the_watchdog_assertion() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
 
         let mut reserved = facts("rr3-runtime", 100, 500, "always");
         reserved.watchdog_ms = 0;
         assert_eq!(
             r.rr3_reg_add(&reserved, chan().0, 0),
-            Err(Rr3RegisterError::ReservedName { name: "rr3-runtime".into() }),
+            Err(Rr3RegisterError::ReservedName {
+                name: "rr3-runtime".into()
+            }),
             "保留名必须先拒，不能让 watchdog 断言把拒绝变成 panic"
         );
         let mut dup = facts("rr3-sima", 100, 500, "always");
         dup.watchdog_ms = 0;
         assert_eq!(
             r.rr3_reg_add(&dup, chan().0, 0),
-            Err(Rr3RegisterError::Duplicate { name: "rr3-sima".into(), src_task: t }),
+            Err(Rr3RegisterError::Duplicate {
+                name: "rr3-sima".into(),
+                src_task: t
+            }),
             "同名在册必须先拒"
         );
         // 循环补 15 条，加上已有的 rr3-sima 正好占满 16 槽；下面的 over 是第 17 次尝试，必须被容量门拒
         for i in 0..RR3_REG_MAX_MODULES - 1 {
-            r.rr3_reg_add(&facts(&format!("rr3-m{i}"), 100, 500, "never"), chan().0, 0).unwrap();
+            r.rr3_reg_add(&facts(&format!("rr3-m{i}"), 100, 500, "never"), chan().0, 0)
+                .unwrap();
         }
         let mut over = facts("rr3-over", 100, 500, "never");
         over.watchdog_ms = 0;
         assert_eq!(
             r.rr3_reg_add(&over, chan().0, 0),
-            Err(Rr3RegisterError::Capacity { limit: RR3_REG_MAX_MODULES }),
+            Err(Rr3RegisterError::Capacity {
+                limit: RR3_REG_MAX_MODULES
+            }),
             "超额必须先拒"
         );
         assert_eq!(
@@ -1230,40 +1439,64 @@ watchdog_timeout_ms = 500
     #[test]
     fn caught_panic_leaves_the_failed_entry_registered() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "never"), chan().0, 0).unwrap();
-        assert!(r.rr3_reg_death("rr3-sima", true, 600).rr3_plan().is_none(), "never 不给重启计划");
-        assert_eq!(r.rr3_reg_snapshot(), vec![("rr3-sima".into(), t, Rr3Phase::Failed)]);
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "never"), chan().0, 0)
+            .unwrap();
+        assert!(
+            r.rr3_reg_death("rr3-sima", true, 600).rr3_plan().is_none(),
+            "never 不给重启计划"
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot(),
+            vec![("rr3-sima".into(), t, Rr3Phase::Failed)]
+        );
         let mut again = facts("rr3-sima", 100, 500, "never");
         again.watchdog_ms = 0; // 绕过 facts 读取入口，触发入库断言
-        let caught =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.rr3_reg_add(&again, chan().0, 700)));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            r.rr3_reg_add(&again, chan().0, 700)
+        }));
         assert!(caught.is_err(), "watchdog_ms = 0 必须仍被断言拦下");
         assert_eq!(
             r.rr3_reg_snapshot(),
             vec![("rr3-sima".into(), t, Rr3Phase::Failed)],
             "被捕获的 panic 不得改动在册表：Failed 条目与 task 号必须原样留在表里"
         );
-        assert_eq!(r.rr3_reg_name_of(t).as_deref(), Some("rr3-sima"), "task→name 映射同样不许被摘掉");
+        assert_eq!(
+            r.rr3_reg_name_of(t).as_deref(),
+            Some("rr3-sima"),
+            "task→name 映射同样不许被摘掉"
+        );
     }
 
     /// 注册即 registered；收到心跳才 running；未在册 task 的心跳被拒
     #[test]
     fn heartbeat_promotes_registered_to_running() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 0)
+            .unwrap();
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Registered);
         assert_eq!(r.rr3_reg_beat(t, 100), Rr3Beat::Promoted);
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Running);
-        assert_eq!(r.rr3_reg_beat(99, 200), Rr3Beat::Rejected, "未在册 task 的心跳必须拒");
+        assert_eq!(
+            r.rr3_reg_beat(99, 200),
+            Rr3Beat::Rejected,
+            "未在册 task 的心跳必须拒"
+        );
     }
 
     /// 到期完全由显式毫秒驱动：窗口内不判死，超窗口判死转 failed，此后喂狗无效
     #[test]
     fn expire_uses_explicit_monotonic_millis() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
         assert_eq!(r.rr3_reg_beat(t, 400), Rr3Beat::Promoted);
-        assert!(r.rr3_reg_expire(499).is_empty(), "距上次心跳 499-400=99ms < 500ms 不得判死");
+        assert!(
+            r.rr3_reg_expire(499).is_empty(),
+            "距上次心跳 499-400=99ms < 500ms 不得判死"
+        );
         assert_eq!(
             r.rr3_reg_expire(901),
             vec![Rr3Expiry {
@@ -1273,12 +1506,19 @@ watchdog_timeout_ms = 500
                 elapsed_ms: 501,
                 watchdog_ms: 500,
                 restart: Some(Rr3RestartPlan {
-                    name: "rr3-sima".into(), attempt: 1, delay_ms: 1000, entry: "/usr/bin/rr3-sima".into(),
+                    name: "rr3-sima".into(),
+                    attempt: 1,
+                    delay_ms: 1000,
+                    entry: "/usr/bin/rr3-sima".into(),
                 }),
             }]
         );
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
-        assert_eq!(r.rr3_reg_beat(t, 950), Rr3Beat::Rejected, "已 failed 的模块不得靠补心跳复活");
+        assert_eq!(
+            r.rr3_reg_beat(t, 950),
+            Rr3Beat::Rejected,
+            "已 failed 的模块不得靠补心跳复活"
+        );
     }
 
     /// 回报里的两个数必须就是判定本身：`elapsed_ms == now - last_beat`、
@@ -1287,18 +1527,32 @@ watchdog_timeout_ms = 500
     #[test]
     fn expiry_report_carries_the_numbers_that_decided_it() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
-        assert_eq!(r.rr3_reg_beat(t, 400), Rr3Beat::Promoted, "夹具心跳必须先被接受，否则 elapsed 无从谈起");
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
+        assert_eq!(
+            r.rr3_reg_beat(t, 400),
+            Rr3Beat::Promoted,
+            "夹具心跳必须先被接受，否则 elapsed 无从谈起"
+        );
         let e = &r.rr3_reg_expire(1_001)[0];
-        assert_eq!(e.elapsed_ms, 601, "elapsed 必须是 now-last_beat，不是 now-注册时刻");
-        assert_eq!(e.watchdog_ms, 500, "必须回显该模块自己的 watchdog_ms，不是全局常量");
+        assert_eq!(
+            e.elapsed_ms, 601,
+            "elapsed 必须是 now-last_beat，不是 now-注册时刻"
+        );
+        assert_eq!(
+            e.watchdog_ms, 500,
+            "必须回显该模块自己的 watchdog_ms，不是全局常量"
+        );
     }
 
     /// registered（一颗心跳都没拿到）同样受 watchdog 约束
     #[test]
     fn registered_without_any_beat_still_expires() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 300, "always"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 300, "always"), chan().0, 0)
+            .unwrap();
         assert!(r.rr3_reg_expire(299).is_empty());
         assert_eq!(r.rr3_reg_expire(300)[0].src_task, t, "从注册时刻起算");
     }
@@ -1307,25 +1561,44 @@ watchdog_timeout_ms = 500
     #[test]
     fn expire_only_reports_stale_modules() {
         let mut r = RrdRegistry::new(1000);
-        let a = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
-        r.rr3_reg_add(&facts("rr3-simb", 100, 5000, "always"), chan().0, 0).unwrap();
+        let a = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
+        r.rr3_reg_add(&facts("rr3-simb", 100, 5000, "always"), chan().0, 0)
+            .unwrap();
         let _ = r.rr3_reg_beat(a, 1000);
         let e = r.rr3_reg_expire(1400);
         assert_eq!(e.len(), 0, "simb 窗口 5000ms 未到、sima 刚喂过");
         // sima 继续喂狗（它自己的窗口是 500ms，不喂它就该和 simb 一起被报）
         let _ = r.rr3_reg_beat(a, 5900);
         let e2 = r.rr3_reg_expire(6000);
-        assert_eq!(e2.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), vec!["rr3-simb"]);
+        assert_eq!(
+            e2.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(),
+            vec!["rr3-simb"]
+        );
         // 只有 simb 被判死：sima 仍活着且句柄未被牵连
-        assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Running, "健康模块不得被邻居超时改掉状态");
-        assert_eq!(r.rr3_reg_expire(6200).len(), 0, "已 failed 的条目不得重复回报");
+        assert_eq!(
+            r.rr3_reg_snapshot()[0].2,
+            Rr3Phase::Running,
+            "健康模块不得被邻居超时改掉状态"
+        );
+        assert_eq!(
+            r.rr3_reg_expire(6200).len(),
+            0,
+            "已 failed 的条目不得重复回报"
+        );
     }
 
     /// 越权发布：前缀不等于注册名即拒，文案带 owner/sender
     #[test]
     fn publish_rejects_foreign_prefix() {
-        let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima"), ("rr3-simb/pong/state", "rr3-simb")]);
-        assert!(RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set).is_ok());
+        let set = topic_set(&[
+            ("rr3-sima/ping/state", "rr3-sima"),
+            ("rr3-simb/pong/state", "rr3-simb"),
+        ]);
+        assert!(
+            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set).is_ok()
+        );
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-simb/pong/state", &set)
                 .expect_err("越权必须拒"),
@@ -1356,7 +1629,10 @@ owner = "rr3-simb"
 "#,
         );
         // 夹具前提三条：首段就是发送方自己、主题确实在册、owner 登记的却是别人。
-        assert_eq!(set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(), Some("rr3-simb"));
+        assert_eq!(
+            set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(),
+            Some("rr3-simb")
+        );
         assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
         assert!(
             !set.rr3_topic_set_check().is_empty(),
@@ -1384,8 +1660,14 @@ owner = "rr3-simb"
         let set = rr_registry::rr3_registry_topic_set_from_text(
             "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"event\"\n",
         );
-        assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"), "用例前提：主题在册");
-        assert_eq!(set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(), Some(""));
+        assert!(
+            set.rr3_topic_set_contains("rr3-sima/ping/state"),
+            "用例前提：主题在册"
+        );
+        assert_eq!(
+            set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(),
+            Some("")
+        );
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set),
             Err(Rr3PublishDeny::ForeignPrefix {
@@ -1436,7 +1718,10 @@ owner = "rr3-simb"
     /// 主题名少于两段（`rr3-sima` 独占一段）时前缀仍须等于注册名，越权面不因段数缩小
     #[test]
     fn publish_rejects_foreign_prefix_with_single_segment_topic() {
-        let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima"), ("rr3-simb/pong/state", "rr3-simb")]);
+        let set = topic_set(&[
+            ("rr3-sima/ping/state", "rr3-sima"),
+            ("rr3-simb/pong/state", "rr3-simb"),
+        ]);
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-simb", &set),
             Err(Rr3PublishDeny::ForeignPrefix {
@@ -1454,7 +1739,9 @@ owner = "rr3-simb"
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-runtime/module/state", &set)
                 .expect_err("下行广播冒充必须拒"),
-            Rr3PublishDeny::ReservedNamespace { topic: "rr3-runtime/module/state".into() }
+            Rr3PublishDeny::ReservedNamespace {
+                topic: "rr3-runtime/module/state".into()
+            }
         );
         // 该主题既在册、owner 又是 rr3-runtime：若顺序颠倒会先撞上"在册"或"前缀"两层，
         // 得到 Ok / ForeignPrefix 而不是"冒充"这条定性
@@ -1467,11 +1754,15 @@ owner = "rr3-simb"
         let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima")]);
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-runtime/system/heartbeat", &set),
-            Err(Rr3PublishDeny::ReservedNamespace { topic: "rr3-runtime/system/heartbeat".into() })
+            Err(Rr3PublishDeny::ReservedNamespace {
+                topic: "rr3-runtime/system/heartbeat".into()
+            })
         );
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-runtime", &set),
-            Err(Rr3PublishDeny::ReservedNamespace { topic: "rr3-runtime".into() })
+            Err(Rr3PublishDeny::ReservedNamespace {
+                topic: "rr3-runtime".into()
+            })
         );
     }
 
@@ -1481,7 +1772,9 @@ owner = "rr3-simb"
         let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima")]);
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/others", &set),
-            Err(Rr3PublishDeny::NotRegistered { topic: "rr3-sima/ping/others".into() })
+            Err(Rr3PublishDeny::NotRegistered {
+                topic: "rr3-sima/ping/others".into()
+            })
         );
     }
 
@@ -1489,11 +1782,16 @@ owner = "rr3-simb"
     #[test]
     fn denied_publish_is_counted_not_fatal() {
         let mut r = RrdRegistry::new(1000);
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
         r.rr3_reg_note_denied();
         r.rr3_reg_note_denied();
         assert_eq!(r.rr3_reg_denied(), 2);
-        assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Registered, "越权不改生命周期状态");
+        assert_eq!(
+            r.rr3_reg_snapshot()[0].2,
+            Rr3Phase::Registered,
+            "越权不改生命周期状态"
+        );
         assert!(r.rr3_reg_live("rr3-sima"), "越权不得掐掉自己的连接");
         assert_eq!(r.rr3_reg_expire(100).len(), 0, "计数不改动到期基准");
     }
@@ -1502,7 +1800,8 @@ owner = "rr3-simb"
     #[test]
     fn never_policy_never_restarts() {
         let mut r = RrdRegistry::new(1000);
-        r.rr3_reg_add(&facts("rr3-simb", 100, 500, "never"), chan().0, 0).unwrap();
+        r.rr3_reg_add(&facts("rr3-simb", 100, 500, "never"), chan().0, 0)
+            .unwrap();
         assert_eq!(r.rr3_reg_death("rr3-simb", false, 600).rr3_plan(), None);
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
     }
@@ -1515,15 +1814,23 @@ owner = "rr3-simb"
     #[test]
     fn zero_restart_base_ms_currently_yields_zero_delay() {
         let mut r = RrdRegistry::new(0);
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
-        let p = r.rr3_reg_death("rr3-sima", false, 600).rr3_plan().expect("base=0 不改变是否给计划");
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
+        let p = r
+            .rr3_reg_death("rr3-sima", false, 600)
+            .rr3_plan()
+            .expect("base=0 不改变是否给计划");
         assert_eq!((p.attempt, p.delay_ms), (1, 0), "现值：第 1 档 1×0 = 0");
         // 真实崩溃循环里两次死亡之间必隔一次重注册（换 task），这里照此补：
         // 新语义下对同一条 failed 条目连调 death 会被判 Silent，取不到第 2 档。
         r.rr3_reg_remove("rr3-sima");
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 650).unwrap();
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 650)
+            .unwrap();
         assert_eq!(
-            r.rr3_reg_death("rr3-sima", false, 700).rr3_plan().expect("第 2 次仍有计划").delay_ms,
+            r.rr3_reg_death("rr3-sima", false, 700)
+                .rr3_plan()
+                .expect("第 2 次仍有计划")
+                .delay_ms,
             0,
             "现值：第 2 档 2×0 仍是 0（不是被补成 1ms）"
         );
@@ -1535,33 +1842,62 @@ owner = "rr3-simb"
     fn backoff_multiply_saturates_instead_of_wrapping() {
         let base = u64::MAX / 2;
         let mut r = RrdRegistry::new(base);
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
-        assert_eq!(r.rr3_reg_death("rr3-sima", false, 600).rr3_plan().expect("第 1 次有计划").delay_ms, base);
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", false, 600)
+                .rr3_plan()
+                .expect("第 1 次有计划")
+                .delay_ms,
+            base
+        );
         // 三次取档之间各补一次 remove + add（真实循环里每次死亡隔着一次重注册）：
         // 新语义对同一条 failed 条目连调 death 会判 Silent，跨重注册才是本表算术的真实形状。
         r.rr3_reg_remove("rr3-sima");
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 610).unwrap();
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 610)
+            .unwrap();
         // 2×base 仍可表示，必须给出精确值（封顶实现若写成"一律 u64::MAX"在这里就红）
         assert_eq!(
-            r.rr3_reg_death("rr3-sima", false, 620).rr3_plan().expect("第 2 次有计划").delay_ms,
+            r.rr3_reg_death("rr3-sima", false, 620)
+                .rr3_plan()
+                .expect("第 2 次有计划")
+                .delay_ms,
             base.checked_mul(2).expect("前提：2×base 不溢出")
         );
         r.rr3_reg_remove("rr3-sima");
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 630).unwrap();
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 630)
+            .unwrap();
         // 第 3 次是 4×base，溢出 → 封顶（回绕的话会拿到一个很小的数）
-        assert_eq!(r.rr3_reg_death("rr3-sima", false, 640).rr3_plan().expect("第 3 次有计划").delay_ms, u64::MAX);
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", false, 640)
+                .rr3_plan()
+                .expect("第 3 次有计划")
+                .delay_ms,
+            u64::MAX
+        );
     }
 
     /// on-failure：干净退出不重启，非零/crash 才重启
     #[test]
     fn on_failure_only_restarts_unclean_exit() {
         let mut r = RrdRegistry::new(1000);
-        r.rr3_reg_add(&facts("rr3-sense", 100, 500, "on-failure"), chan().0, 0).unwrap();
-        assert!(r.rr3_reg_death("rr3-sense", true, 600).rr3_plan().is_none(), "干净退出不得重启");
+        r.rr3_reg_add(&facts("rr3-sense", 100, 500, "on-failure"), chan().0, 0)
+            .unwrap();
+        assert!(
+            r.rr3_reg_death("rr3-sense", true, 600).rr3_plan().is_none(),
+            "干净退出不得重启"
+        );
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
         assert!(r.rr3_reg_remove("rr3-sense"));
-        r.rr3_reg_add(&facts("rr3-sense", 100, 500, "on-failure"), chan().0, 0).unwrap();
-        assert_eq!(r.rr3_reg_death("rr3-sense", false, 600).rr3_plan().expect("非零退出必须给计划").delay_ms, 1000);
+        r.rr3_reg_add(&facts("rr3-sense", 100, 500, "on-failure"), chan().0, 0)
+            .unwrap();
+        assert_eq!(
+            r.rr3_reg_death("rr3-sense", false, 600)
+                .rr3_plan()
+                .expect("非零退出必须给计划")
+                .delay_ms,
+            1000
+        );
     }
 
     /// 未知策略值不得 panic、也不得擅自重启（校验在 Task 2 已挡，运行期只保证不猜）
@@ -1571,7 +1907,11 @@ owner = "rr3-simb"
         let mut f = facts("rr3-sima", 100, 500, "always");
         f.restart_policy = "ALWAYS".into(); // 大小写错 = 非预期值
         r.rr3_reg_add(&f, chan().0, 0).unwrap();
-        assert_eq!(r.rr3_reg_death("rr3-sima", false, 600).rr3_plan(), None, "非预期值必须按 never 处理");
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", false, 600).rr3_plan(),
+            None,
+            "非预期值必须按 never 处理"
+        );
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
     }
 
@@ -1579,10 +1919,15 @@ owner = "rr3-simb"
     #[test]
     fn death_of_unknown_name_is_none() {
         let mut r = RrdRegistry::new(1000);
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
         assert_eq!(r.rr3_reg_death("rr3-nobody", false, 600).rr3_plan(), None);
         assert_eq!(r.rr3_reg_snapshot().len(), 1);
-        assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Registered, "问错名字不得改掉别人的状态");
+        assert_eq!(
+            r.rr3_reg_snapshot()[0].2,
+            Rr3Phase::Registered,
+            "问错名字不得改掉别人的状态"
+        );
     }
 
     /// 退避表自证：7 档、末档 60、单调不减、无 0
@@ -1598,15 +1943,23 @@ owner = "rr3-simb"
     #[test]
     fn failed_entry_can_be_re_registered_with_new_task() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
         let _ = r.rr3_reg_death("rr3-sima", false, 600);
         assert!(!r.rr3_reg_live("rr3-sima"), "failed 即无活连接");
-        let t2 = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 700).expect("failed 后必须可重注册");
+        let t2 = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 700)
+            .expect("failed 后必须可重注册");
         assert_eq!(t2, t + 1, "重注册必须换新 task 号");
         assert_eq!(r.rr3_reg_snapshot().len(), 1);
         // 旧号作废：迟到的旧心跳既不能喂到新条目身上，也不能改名存实亡的旧条目
         assert_eq!(r.rr3_reg_name_of(t), None, "旧 task 号必须从映射里摘掉");
-        assert_eq!(r.rr3_reg_beat(t, 800), Rr3Beat::Rejected, "旧 task 号不得再被认成在册");
+        assert_eq!(
+            r.rr3_reg_beat(t, 800),
+            Rr3Beat::Rejected,
+            "旧 task 号不得再被认成在册"
+        );
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Registered);
         assert!(r.rr3_reg_live("rr3-sima"));
     }
@@ -1633,8 +1986,11 @@ owner = "rr3-simb"
         let mut r = RrdRegistry::new(1000);
         let (txa, rxa) = chan();
         let (txb, rxb) = chan();
-        let ta = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0).unwrap();
-        r.rr3_reg_add(&facts("rr3-simb", 100, 500, "always"), txb, 0).unwrap();
+        let ta = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0)
+            .unwrap();
+        r.rr3_reg_add(&facts("rr3-simb", 100, 500, "always"), txb, 0)
+            .unwrap();
         let frame = Rr3Frame {
             header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
             payload: vec![],
@@ -1658,8 +2014,11 @@ owner = "rr3-simb"
         let mut r = RrdRegistry::new(1000);
         let (txa, rxa) = chan();
         let (txb, _rxb) = chan();
-        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0).unwrap();
-        let b = r.rr3_reg_add(&facts("rr3-simb", 100, 300, "always"), txb, 0).unwrap();
+        r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0)
+            .unwrap();
+        let b = r
+            .rr3_reg_add(&facts("rr3-simb", 100, 300, "always"), txb, 0)
+            .unwrap();
         r.rr3_reg_expire(400);
         assert_eq!(r.rr3_reg_fanout(&frame_to(b), 0), 1, "只剩 sima 活着");
         assert!(rxa.try_recv().is_ok());
@@ -1670,7 +2029,9 @@ owner = "rr3-simb"
     fn removed_module_leaves_the_table_entirely() {
         let mut r = RrdRegistry::new(1000);
         let (txa, rxa) = chan();
-        let a = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0).unwrap();
+        let a = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), txa, 0)
+            .unwrap();
         assert!(r.rr3_reg_remove("rr3-sima"));
         assert!(!r.rr3_reg_remove("rr3-sima"), "重复移除必须返回 false");
         assert!(!r.rr3_reg_live("rr3-sima"));
@@ -1690,20 +2051,33 @@ owner = "rr3-simb"
         let mut delays = Vec::new();
         for i in 0..RR3_RESTART_FAILURE_CAP {
             let t = r.rr3_reg_add(&f(), chan().0, i as u64 * 10).unwrap();
-            let p = r.rr3_reg_death("rr3-sima", false, i as u64 * 10 + 5).rr3_plan()
+            let p = r
+                .rr3_reg_death("rr3-sima", false, i as u64 * 10 + 5)
+                .rr3_plan()
                 .unwrap_or_else(|| panic!("第 {} 次崩溃应有计划", i + 1));
             assert_eq!(p.attempt, i + 1, "attempt 必须跨重注册连续增长");
             assert_eq!(p.name, "rr3-sima");
             assert_eq!(p.entry, "/usr/bin/rr3-sima");
             delays.push(p.delay_ms);
-            assert!(r.rr3_reg_live("rr3-sima") == false, "判死后不得算活");
+            assert!(!r.rr3_reg_live("rr3-sima"), "判死后不得算活");
             let _ = t;
         }
-        assert_eq!(delays, vec![1000, 2000, 4000, 8000, 16000], "退避必须按表 × base，且序不因重注册被打乱");
+        assert_eq!(
+            delays,
+            vec![1000, 2000, 4000, 8000, 16000],
+            "退避必须按表 × base，且序不因重注册被打乱"
+        );
         let t = r.rr3_reg_add(&f(), chan().0, 99);
-        assert_eq!(r.rr3_reg_death("rr3-sima", false, 100).rr3_plan(), None, "达上限必须停止重启");
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", false, 100).rr3_plan(),
+            None,
+            "达上限必须停止重启"
+        );
         assert!(r.rr3_reg_hit_cap("rr3-sima"));
-        assert!(!r.rr3_reg_hit_cap("rr3-nobody"), "没配过的名字不得误报达上限");
+        assert!(
+            !r.rr3_reg_hit_cap("rr3-nobody"),
+            "没配过的名字不得误报达上限"
+        );
         let _ = t;
     }
 
@@ -1711,12 +2085,22 @@ owner = "rr3-simb"
     #[test]
     fn expiry_charges_once_and_the_later_conn_death_is_silent() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), chan().0, 0)
+            .unwrap();
         let _ = r.rr3_reg_beat(t, 100);
         let e = r.rr3_reg_expire(700).remove(0);
         assert_eq!((e.elapsed_ms, e.watchdog_ms), (600, 500));
-        assert_eq!(e.restart.clone().map(|p| p.attempt), Some(1), "到期必须给出第 1 次重启计划");
-        assert_eq!(r.rr3_reg_death("rr3-sima", true, 800), Rr3Death::Silent, "已判死的条目不得再广播一次终态");
+        assert_eq!(
+            e.restart.clone().map(|p| p.attempt),
+            Some(1),
+            "到期必须给出第 1 次重启计划"
+        );
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", true, 800),
+            Rr3Death::Silent,
+            "已判死的条目不得再广播一次终态"
+        );
         assert_eq!(e.restart.map(|p| p.delay_ms), Some(1000));
         assert_eq!(r.rr3_reg_crash_streak("rr3-sima"), 1, "双路只记一次账");
     }
@@ -1725,7 +2109,9 @@ owner = "rr3-simb"
     #[test]
     fn expiry_of_a_never_module_reports_no_restart() {
         let mut r = RrdRegistry::new(1000);
-        let t = r.rr3_reg_add(&facts("rr3-simb", 100, 500, "never"), chan().0, 0).unwrap();
+        let t = r
+            .rr3_reg_add(&facts("rr3-simb", 100, 500, "never"), chan().0, 0)
+            .unwrap();
         let _ = r.rr3_reg_beat(t, 100);
         assert_eq!(r.rr3_reg_expire(700).remove(0).restart, None);
     }
@@ -1738,31 +2124,57 @@ owner = "rr3-simb"
         let mut r = RrdRegistry::new(1000);
         let f = || facts("rr3-sima", 100, 500, "always");
         let t = r.rr3_reg_add(&f(), chan().0, 0).unwrap();
-        assert_eq!(r.rr3_reg_death("rr3-sima", false, 10).rr3_plan().map(|p| p.attempt), Some(1));
-        assert_eq!(r.rr3_reg_crash_streak("rr3-sima"), 1, "第 1 世崩过，账上记着 1");
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", false, 10)
+                .rr3_plan()
+                .map(|p| p.attempt),
+            Some(1)
+        );
+        assert_eq!(
+            r.rr3_reg_crash_streak("rr3-sima"),
+            1,
+            "第 1 世崩过，账上记着 1"
+        );
 
         let t2 = r.rr3_reg_add(&f(), chan().0, 100).unwrap();
         assert_ne!(t2, t, "重注册必须换新 task，否则本条测的是同一世");
         for at in [120u64, 220, 320, 420, 520] {
             // 只有第一颗是升级；后面四颗必须是"只续命"（D-6 的另一半判据）
-            let want = if at == 120 { Rr3Beat::Promoted } else { Rr3Beat::Kept };
+            let want = if at == 120 {
+                Rr3Beat::Promoted
+            } else {
+                Rr3Beat::Kept
+            };
             assert_eq!(r.rr3_reg_beat(t2, at), want, "第 {at}ms 的心跳相位回报不对");
             assert!(r.rr3_reg_expire(at + 1).is_empty(), "喂狗后 1ms 绝不许判死");
             if at < 520 {
-                assert_eq!(r.rr3_reg_crash_streak("rr3-sima"), 1, "没活满窗口之前不许归零");
+                assert_eq!(
+                    r.rr3_reg_crash_streak("rr3-sima"),
+                    1,
+                    "没活满窗口之前不许归零"
+                );
             }
         }
         // 注册于 100 + watchdog 500 → 归零时刻是 now_ms >= 600；620 那颗心跳之后第一次扫描到点
         assert!(r.rr3_reg_expire(621).is_empty(), "健康模块不该被扫死");
-        assert_eq!(r.rr3_reg_crash_streak("rr3-sima"), 0, "第 2 世已活满 521ms ≥ 500ms 窗口");
+        assert_eq!(
+            r.rr3_reg_crash_streak("rr3-sima"),
+            0,
+            "第 2 世已活满 521ms ≥ 500ms 窗口"
+        );
         // 简报冲突（见实施报告）：第 2 世全程喂狗、健康存活，`rr3_reg_add` 对**在册非 Failed**
         // 的同名条目按 Duplicate 拒（这是既有不变量，`duplicate_name_is_rejected` 钉着，不许为
         // 本条让步）。故 t3 那句"第 3 世"必须先让第 2 世退场——最小忠实实现：insert 一行 remove
         // 把条目摘掉，再重注册。判据的语义（归零后第 3 世从 0 重计）不变。
         let _ = r.rr3_reg_remove("rr3-sima");
         let t3 = r.rr3_reg_add(&f(), chan().0, 700).unwrap();
-        assert_eq!(r.rr3_reg_death("rr3-sima", false, 701).rr3_plan().map(|p| p.attempt), Some(1),
-                   "归零之后第 3 世从零重计（不是从 2 起步 = 4 秒退避）");
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", false, 701)
+                .rr3_plan()
+                .map(|p| p.attempt),
+            Some(1),
+            "归零之后第 3 世从零重计（不是从 2 起步 = 4 秒退避）"
+        );
         let _ = (t, t2, t3);
     }
 
@@ -1774,12 +2186,23 @@ owner = "rr3-simb"
         let t = r.rr3_reg_add(&f, chan().0, 0).unwrap();
         let _ = r.rr3_reg_beat(t, 10);
         r.rr3_reg_own("rr3-sima");
-        assert_eq!(r.rr3_reg_death("rr3-sima", true, 20), Rr3Death::DeferredToExitStatus);
-        assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Running, "deferred 不得改相位");
+        assert_eq!(
+            r.rr3_reg_death("rr3-sima", true, 20),
+            Rr3Death::DeferredToExitStatus
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot()[0].2,
+            Rr3Phase::Running,
+            "deferred 不得改相位"
+        );
         assert_eq!(r.rr3_reg_crash_streak("rr3-sima"), 0, "deferred 不得记账");
         // 收尸路接手：相位、句柄、账都在这一次到位
         match r.rr3_reg_child_exit(&f, false, 25) {
-            Rr3ChildExit::Crashed { src_task, clean_exit, plan } => {
+            Rr3ChildExit::Crashed {
+                src_task,
+                clean_exit,
+                plan,
+            } => {
                 assert_eq!(src_task, t);
                 assert!(!clean_exit);
                 assert_eq!(plan.map(|p| p.attempt), Some(1));
@@ -1790,7 +2213,10 @@ owner = "rr3-simb"
         assert!(!r.rr3_reg_is_owned("rr3-sima"), "收过尸必须撤下所有权标记");
         // 撤标之后，同名新实例的 EOF 回到 conn 那一路（否则第二次崩溃会永远等一个不再来的退出码）
         let _t2 = r.rr3_reg_add(&f, chan().0, 30).unwrap();
-        assert!(matches!(r.rr3_reg_death("rr3-sima", false, 40), Rr3Death::Broadcast { .. }));
+        assert!(matches!(
+            r.rr3_reg_death("rr3-sima", false, 40),
+            Rr3Death::Broadcast { .. }
+        ));
     }
 
     /// 两种到达次序都不许双计：到期先判死 vs conn 先 deferred
@@ -1802,18 +2228,33 @@ owner = "rr3-simb"
         let ta = a.rr3_reg_add(&f(), chan().0, 0).unwrap();
         let _ = a.rr3_reg_beat(ta, 10);
         a.rr3_reg_own("rr3-sima");
-        assert_eq!(a.rr3_reg_expire(600).remove(0).restart.map(|p| p.attempt), Some(1));
-        assert!(matches!(a.rr3_reg_child_exit(&f(), false, 610), Rr3ChildExit::Silent),
-                "已判死的条目被收尸不得再记一次、也不得再广播一次");
+        assert_eq!(
+            a.rr3_reg_expire(600).remove(0).restart.map(|p| p.attempt),
+            Some(1)
+        );
+        assert!(
+            matches!(a.rr3_reg_child_exit(&f(), false, 610), Rr3ChildExit::Silent),
+            "已判死的条目被收尸不得再记一次、也不得再广播一次"
+        );
         assert_eq!(a.rr3_reg_crash_streak("rr3-sima"), 1);
         // (b) conn 先 deferred（什么都不做），收尸后到 → 只有收尸记一次
         let mut b = RrdRegistry::new(1000);
         let tb = b.rr3_reg_add(&f(), chan().0, 0).unwrap();
         let _ = b.rr3_reg_beat(tb, 10);
         b.rr3_reg_own("rr3-sima");
-        assert_eq!(b.rr3_reg_death("rr3-sima", true, 20), Rr3Death::DeferredToExitStatus);
-        assert_eq!(b.rr3_reg_crash_streak("rr3-sima"), 0, "deferred 一路不许先记账");
-        assert!(matches!(b.rr3_reg_child_exit(&f(), false, 25), Rr3ChildExit::Crashed { .. }));
+        assert_eq!(
+            b.rr3_reg_death("rr3-sima", true, 20),
+            Rr3Death::DeferredToExitStatus
+        );
+        assert_eq!(
+            b.rr3_reg_crash_streak("rr3-sima"),
+            0,
+            "deferred 一路不许先记账"
+        );
+        assert!(matches!(
+            b.rr3_reg_child_exit(&f(), false, 25),
+            Rr3ChildExit::Crashed { .. }
+        ));
         assert_eq!(b.rr3_reg_crash_streak("rr3-sima"), 1);
     }
 
@@ -1826,12 +2267,22 @@ owner = "rr3-simb"
         let _ = r.rr3_reg_beat(t, 10);
         r.rr3_reg_own("rr3-sima");
         assert!(r.rr3_reg_remove("rr3-sima"), "unregister 必须真的摘掉条目");
-        assert!(matches!(r.rr3_reg_child_exit(&f, true, 20), Rr3ChildExit::Silent));
-        assert_eq!(r.rr3_reg_crash_streak("rr3-sima"), 0, "我让它停的，不是它崩的");
+        assert!(matches!(
+            r.rr3_reg_child_exit(&f, true, 20),
+            Rr3ChildExit::Silent
+        ));
+        assert_eq!(
+            r.rr3_reg_crash_streak("rr3-sima"),
+            0,
+            "我让它停的，不是它崩的"
+        );
         // 新实例重新登记 → stopped 让位（否则一个名字被 stop 过一次就永远起不来了）
         let t2 = r.rr3_reg_add(&f, chan().0, 30).unwrap();
         let _ = r.rr3_reg_beat(t2, 40);
-        assert!(matches!(r.rr3_reg_death("rr3-sima", false, 50), Rr3Death::Broadcast { plan: Some(_) }));
+        assert!(matches!(
+            r.rr3_reg_death("rr3-sima", false, 50),
+            Rr3Death::Broadcast { plan: Some(_) }
+        ));
     }
 
     /// 从未注册的子进程：没有条目可广播，但账必须记（否则坏 entry 能把机器转着圈地重起）
@@ -1841,12 +2292,17 @@ owner = "rr3-simb"
         let f = facts("rr3-sima", 100, 500, "always");
         for i in 0..RR3_RESTART_FAILURE_CAP {
             match r.rr3_reg_child_exit(&f, false, i as u64 * 10) {
-                Rr3ChildExit::EarlyExit { plan } => assert_eq!(plan.map(|p| p.attempt), Some(i + 1)),
+                Rr3ChildExit::EarlyExit { plan } => {
+                    assert_eq!(plan.map(|p| p.attempt), Some(i + 1))
+                }
                 other => panic!("第 {} 次应为 EarlyExit，实际 {other:?}", i + 1),
             }
             assert_eq!(r.rr3_reg_snapshot().len(), 0, "没注册过就不许凭空造条目");
         }
-        assert!(matches!(r.rr3_reg_child_exit(&f, false, 999), Rr3ChildExit::EarlyExit { plan: None }));
+        assert!(matches!(
+            r.rr3_reg_child_exit(&f, false, 999),
+            Rr3ChildExit::EarlyExit { plan: None }
+        ));
         assert!(r.rr3_reg_hit_cap("rr3-sima"));
     }
 
@@ -1861,7 +2317,11 @@ owner = "rr3-simb"
 
     /// 带 [depends].required 的 facts（wd 取 60s：判死只该发生在被点名的提供者身上）
     fn facts_with_depends(name: &str, deps: &[&str]) -> Rr3ManifestFacts {
-        let list = deps.iter().map(|d| format!("\"{d}\"")).collect::<Vec<_>>().join(", ");
+        let list = deps
+            .iter()
+            .map(|d| format!("\"{d}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         let text = format!(
             r#"[manifest]
 schema_version = 1
@@ -1915,9 +2375,15 @@ watchdog_timeout_ms = 60000
         assert_eq!(r.rr3_reg_beat(dt, 20), Rr3Beat::Promoted);
 
         // 提供者判死前传播必须空转（前置：死亡先落账）
-        assert!(r.rr3_reg_degrade_after("rr3-prov").is_empty(), "死亡未落账时不得误判");
+        assert!(
+            r.rr3_reg_degrade_after("rr3-prov").is_empty(),
+            "死亡未落账时不得误判"
+        );
 
-        assert!(matches!(r.rr3_reg_death("rr3-prov", false, 30), Rr3Death::Broadcast { .. }));
+        assert!(matches!(
+            r.rr3_reg_death("rr3-prov", false, 30),
+            Rr3Death::Broadcast { .. }
+        ));
         assert_eq!(
             r.rr3_reg_degrade_after("rr3-prov"),
             vec![("rr3-dep".to_string(), dt)],
@@ -1925,12 +2391,19 @@ watchdog_timeout_ms = 60000
         );
         let snap = r.rr3_reg_snapshot();
         assert!(
-            snap.iter().any(|(n, t, ph)| n == "rr3-dep" && *t == dt && *ph == Rr3Phase::Degraded),
+            snap.iter()
+                .any(|(n, t, ph)| n == "rr3-dep" && *t == dt && *ph == Rr3Phase::Degraded),
             "{snap:?}"
         );
         // 降级后心跳：Kept（续命不升级），相位不被抹平
         assert_eq!(r.rr3_reg_beat(dt, 40), Rr3Beat::Kept);
-        assert_eq!(r.rr3_reg_snapshot().iter().find(|(n, _, _)| n == "rr3-dep").map(|x| x.2), Some(Rr3Phase::Degraded));
+        assert_eq!(
+            r.rr3_reg_snapshot()
+                .iter()
+                .find(|(n, _, _)| n == "rr3-dep")
+                .map(|x| x.2),
+            Some(Rr3Phase::Degraded)
+        );
     }
 
     /// 多提供者"任一存活即满足"：只死一个不降级；两个全灭才降级
@@ -1942,16 +2415,32 @@ watchdog_timeout_ms = 60000
         let (t1x, _) = chan();
         let (t2x, _) = chan();
         let (dtx, _) = chan();
-        let t1 = r.rr3_reg_add(&facts("rr3-p1", 100, 5000, "always"), t1x, 0).expect("p1 入册");
-        let t2 = r.rr3_reg_add(&facts("rr3-p2", 100, 5000, "always"), t2x, 0).expect("p2 入册");
+        let t1 = r
+            .rr3_reg_add(&facts("rr3-p1", 100, 5000, "always"), t1x, 0)
+            .expect("p1 入册");
+        let t2 = r
+            .rr3_reg_add(&facts("rr3-p2", 100, 5000, "always"), t2x, 0)
+            .expect("p2 入册");
         let dt = r.rr3_reg_add(&d, dtx, 0).expect("dep 入册");
         for t in [t1, t2, dt] {
             assert_eq!(r.rr3_reg_beat(t, 10), Rr3Beat::Promoted);
         }
-        assert!(matches!(r.rr3_reg_death("rr3-p1", false, 20), Rr3Death::Broadcast { .. }));
-        assert!(r.rr3_reg_degrade_after("rr3-p1").is_empty(), "p2 还活着，不降级");
-        assert!(matches!(r.rr3_reg_death("rr3-p2", false, 30), Rr3Death::Broadcast { .. }));
-        assert_eq!(r.rr3_reg_degrade_after("rr3-p2"), vec![("rr3-dep".to_string(), dt)]);
+        assert!(matches!(
+            r.rr3_reg_death("rr3-p1", false, 20),
+            Rr3Death::Broadcast { .. }
+        ));
+        assert!(
+            r.rr3_reg_degrade_after("rr3-p1").is_empty(),
+            "p2 还活着，不降级"
+        );
+        assert!(matches!(
+            r.rr3_reg_death("rr3-p2", false, 30),
+            Rr3Death::Broadcast { .. }
+        ));
+        assert_eq!(
+            r.rr3_reg_degrade_after("rr3-p2"),
+            vec![("rr3-dep".to_string(), dt)]
+        );
     }
 
     /// 解除的判据是"全部 required 就位"：只回来一个提供者不许解除
@@ -1967,7 +2456,9 @@ watchdog_timeout_ms = 60000
         let dt = r.rr3_reg_add(&d, dtx, 0).expect("dep 入册");
         let promote = |r: &mut RrdRegistry, name: &str| -> u64 {
             let (tx, _) = chan();
-            let t = r.rr3_reg_add(&facts(name, 100, 5000, "always"), tx, 0).expect("入册");
+            let t = r
+                .rr3_reg_add(&facts(name, 100, 5000, "always"), tx, 0)
+                .expect("入册");
             assert_eq!(r.rr3_reg_beat(t, 10), Rr3Beat::Promoted);
             t
         };
@@ -1975,24 +2466,54 @@ watchdog_timeout_ms = 60000
         promote(&mut r, "rr3-py");
         assert_eq!(r.rr3_reg_beat(dt, 20), Rr3Beat::Promoted);
 
-        assert!(matches!(r.rr3_reg_death("rr3-px", false, 30), Rr3Death::Broadcast { .. }));
+        assert!(matches!(
+            r.rr3_reg_death("rr3-px", false, 30),
+            Rr3Death::Broadcast { .. }
+        ));
         // 断供即降级（非对称设计的前半）：cap.x 已无任何在位提供者，dep 缺它就跑不了，
         // 不等 cap.y 也断——置位要快，解除才从严
-        assert_eq!(r.rr3_reg_degrade_after("rr3-px"), vec![("rr3-dep".to_string(), dt)]);
-        assert!(matches!(r.rr3_reg_death("rr3-py", false, 40), Rr3Death::Broadcast { .. }));
+        assert_eq!(
+            r.rr3_reg_degrade_after("rr3-px"),
+            vec![("rr3-dep".to_string(), dt)]
+        );
+        assert!(matches!(
+            r.rr3_reg_death("rr3-py", false, 40),
+            Rr3Death::Broadcast { .. }
+        ));
         // 已经 Degraded 的不重复传播（Running 过滤器天然挡住）
-        assert!(r.rr3_reg_degrade_after("rr3-py").is_empty(), "重复置位不是传播");
+        assert!(
+            r.rr3_reg_degrade_after("rr3-py").is_empty(),
+            "重复置位不是传播"
+        );
 
         // px 回来了（新 task 重注册 + Promoted），但 cap.y 还没好 → 不解除
         let px2 = promote(&mut r, "rr3-px");
         assert_ne!(px, px2, "重注册必须换新 task");
-        assert!(r.rr3_reg_undegrade_after("rr3-px").is_empty(), "cap.y 仍无提供者在位");
-        assert_eq!(r.rr3_reg_snapshot().iter().find(|(n, _, _)| n == "rr3-dep").map(|x| x.2), Some(Rr3Phase::Degraded));
+        assert!(
+            r.rr3_reg_undegrade_after("rr3-px").is_empty(),
+            "cap.y 仍无提供者在位"
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot()
+                .iter()
+                .find(|(n, _, _)| n == "rr3-dep")
+                .map(|x| x.2),
+            Some(Rr3Phase::Degraded)
+        );
 
         // py 也回来了 → 全部就位 → 解除回 Running
         promote(&mut r, "rr3-py");
-        assert_eq!(r.rr3_reg_undegrade_after("rr3-py"), vec![("rr3-dep".to_string(), dt)]);
-        assert_eq!(r.rr3_reg_snapshot().iter().find(|(n, _, _)| n == "rr3-dep").map(|x| x.2), Some(Rr3Phase::Running));
+        assert_eq!(
+            r.rr3_reg_undegrade_after("rr3-py"),
+            vec![("rr3-dep".to_string(), dt)]
+        );
+        assert_eq!(
+            r.rr3_reg_snapshot()
+                .iter()
+                .find(|(n, _, _)| n == "rr3-dep")
+                .map(|x| x.2),
+            Some(Rr3Phase::Running)
+        );
     }
 
     /// 小测试辅助：主题集
@@ -2007,16 +2528,25 @@ watchdog_timeout_ms = 60000
             text.push_str(&format!("\n[[owner]]\nname = \"{o}\"\n"));
         }
         for (t, o) in entries {
-            text.push_str(&format!("\n[[topic]]\nname = \"{t}\"\nkind = \"event\"\nowner = \"{o}\"\n"));
+            text.push_str(&format!(
+                "\n[[topic]]\nname = \"{t}\"\nkind = \"event\"\nowner = \"{o}\"\n"
+            ));
         }
         let set = rr_registry::rr3_registry_topic_set_from_text(&text);
-        assert!(set.rr3_topic_set_check().is_empty(), "测试主题集自身必须合法: {:?}", set.rr3_topic_set_check());
+        assert!(
+            set.rr3_topic_set_check().is_empty(),
+            "测试主题集自身必须合法: {:?}",
+            set.rr3_topic_set_check()
+        );
         set
     }
 
     fn frame_to(dst: u64) -> Rr3Frame {
         let mut h = rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0);
         h.dst_task = dst;
-        Rr3Frame { header: h, payload: vec![] }
+        Rr3Frame {
+            header: h,
+            payload: vec![],
+        }
     }
 }

@@ -12,9 +12,7 @@
 use std::path::{Path, PathBuf};
 use toml::Value;
 
-use crate::schema::{
-    rr3_registry_field_specs, rr3_registry_get_by_path, rr3_registry_rule_list,
-};
+use crate::schema::{rr3_registry_field_specs, rr3_registry_get_by_path, rr3_registry_rule_list};
 
 const RR3_TOPIC_HEAD: &str = "rr3-";
 
@@ -53,8 +51,7 @@ fn rr3_registry_topic_shape_ok(name: &str) -> bool {
         return false;
     }
     let stem = &segs[0][RR3_TOPIC_HEAD.len()..];
-    rr3_registry_lower_alpha(stem)
-        && segs[1..].iter().all(|s| rr3_registry_lower_us(s))
+    rr3_registry_lower_alpha(stem) && segs[1..].iter().all(|s| rr3_registry_lower_us(s))
 }
 
 /// 点分数字版本
@@ -62,7 +59,8 @@ fn rr3_registry_semver_ok(s: &str) -> bool {
     s.contains('.')
         && !s.starts_with('.')
         && !s.ends_with('.')
-        && s.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+        && s.split('.')
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// 单条规则检查（上下文无关规则）。`own_topic` 需 manifest.name，由
@@ -98,14 +96,18 @@ pub fn rr3_registry_check(rule: &str, value: &str) -> Vec<String> {
             if rr3_registry_capability_shape(value) {
                 vec![]
             } else {
-                bad(format!("capability 非法: {value}（要求 ^[a-z]+(\\.[a-z_]+)+$）"))
+                bad(format!(
+                    "capability 非法: {value}（要求 ^[a-z]+(\\.[a-z_]+)+$）"
+                ))
             }
         }
         "topic" => {
             if rr3_registry_topic_shape_ok(value) {
                 vec![]
             } else {
-                bad(format!("topic 非法: {value}（要求 rr3-<模块>/<域>/<事件>）"))
+                bad(format!(
+                    "topic 非法: {value}（要求 rr3-<模块>/<域>/<事件>）"
+                ))
             }
         }
         other => bad(format!("未知规则名（schema 与代码不同步）: {other}")),
@@ -131,7 +133,9 @@ pub fn rr3_registry_validate_manifest(path: &Path) -> Rr3ValidationReport {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
-            report.errors.push(format!("无法读取 manifest {}: {e}", path.display()));
+            report
+                .errors
+                .push(format!("无法读取 manifest {}: {e}", path.display()));
             return report;
         }
     };
@@ -168,7 +172,9 @@ pub fn rr3_registry_validate_manifest_text(
 ) -> Rr3ValidationReport {
     let mut report = Rr3ValidationReport::default();
     if topics.rr3_topic_set_is_empty() {
-        report.errors.push("主题集为空：拒绝校验任何 manifest（空注册表不是放行许可证）".to_string());
+        report
+            .errors
+            .push("主题集为空：拒绝校验任何 manifest（空注册表不是放行许可证）".to_string());
         return report;
     }
     report.errors = rr3_registry_validate_inner(text, topics);
@@ -232,9 +238,9 @@ fn rr3_registry_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) 
                             report.errors.extend(rr3_registry_check("topic", s));
                             let want = format!("{self_name}/");
                             if !self_name.is_empty() && !s.starts_with(&want) {
-                                report.errors.push(format!(
-                                    "越权主题 {s}（前缀必须是 {want}）"
-                                ));
+                                report
+                                    .errors
+                                    .push(format!("越权主题 {s}（前缀必须是 {want}）"));
                             }
                             // F2：events.publishes 与 rpc.exposes 都必须在主题集
                             // （contracts/topics.toml，CI 检查③）注册，未注册的 RPC 名不再放行。
@@ -257,28 +263,35 @@ fn rr3_registry_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) 
             other => panic!("schema 未知 kind {other}（契约与代码不同步）"),
         };
         if !kind_ok {
-            report.errors.push(rr3_registry_type_err(&spec.path, &spec.kind, value));
+            report
+                .errors
+                .push(rr3_registry_type_err(&spec.path, &spec.kind, value));
         }
     }
 
     // 2) 跨字段：heartbeat < watchdog（方案 §4 [health] 约束）
     let hb = rr3_registry_get_by_path(&root, "health.heartbeat_ms").and_then(Value::as_integer);
-    let wd = rr3_registry_get_by_path(&root, "health.watchdog_timeout_ms")
-        .and_then(Value::as_integer);
+    let wd =
+        rr3_registry_get_by_path(&root, "health.watchdog_timeout_ms").and_then(Value::as_integer);
     if let (Some(hb), Some(wd)) = (hb, wd) {
         if hb >= wd {
-            report.errors.push(format!("heartbeat_ms({hb}) 必须小于 watchdog_timeout_ms({wd})"));
+            report.errors.push(format!(
+                "heartbeat_ms({hb}) 必须小于 watchdog_timeout_ms({wd})"
+            ));
         }
     }
 
     // 3) subscribes 必须已注册（订阅方不要求前缀归属）
     // F3：空主题集的内核入口已由两个包装 fail-closed——空注册表不得让订阅成员检查被空洞满足。
     // 非字符串项的类型错误已由逐字段循环（rule=topic）报告，这里只做成员检查。
-    if let Some(arr) = rr3_registry_get_by_path(&root, "events.subscribes").and_then(Value::as_array)
+    if let Some(arr) =
+        rr3_registry_get_by_path(&root, "events.subscribes").and_then(Value::as_array)
     {
         for topic in arr.iter().filter_map(Value::as_str) {
             if !topics.rr3_topic_set_contains(topic) {
-                report.errors.push(format!("events.subscribes 引用未注册主题 {topic}"));
+                report
+                    .errors
+                    .push(format!("events.subscribes 引用未注册主题 {topic}"));
             }
         }
     }
@@ -332,7 +345,7 @@ pub fn rr3_registry_validate_topics(text: &str, known_owners: &[String]) -> Vec<
     // F3：注册表为空（0 个 [[topic]]）是契约事故，不是放行许可证。若坐视空表，
     // 下游成员检查（publishes/rpc.exposes/subscribes）会被空洞满足而 fail-open。
     // owner 维度的登记检查保持原样，仅新增这条零主题护栏。
-    if topics.map_or(true, |v| v.is_empty()) {
+    if topics.is_none_or(|v| v.is_empty()) {
         errs.push("主题注册表为空：必须至少登记一个 [[topic]]（ADR-0006）".to_string());
     }
 
@@ -346,8 +359,7 @@ pub fn rr3_registry_validate_topics(text: &str, known_owners: &[String]) -> Vec<
         let kind = t.get("kind").and_then(Value::as_str).unwrap_or("");
 
         errs.extend(rr3_registry_check("topic", name));
-        if !known_owners.iter().any(|o| o == owner) && !declared_owners.iter().any(|o| o == owner)
-        {
+        if !known_owners.iter().any(|o| o == owner) && !declared_owners.iter().any(|o| o == owner) {
             errs.push(format!("topic {name} 的 owner 未登记: {owner}"));
         } else if !name.starts_with(&format!("{owner}/"))
             || name.split('/').next().unwrap_or("") != owner
@@ -405,22 +417,36 @@ watchdog_timeout_ms = {wd}
     #[test]
     fn overlay_topic_passes_only_when_merged() {
         let base = rr3_registry_topic_set_from_text(CONTRACT);
-        let r1 = rr3_registry_validate_manifest_text(&sima("rr3-sima/ping/state", 200, 1000), &base);
-        assert!(r1.errors.iter().any(|e| e.contains("未注册主题")), "{:?}", r1.errors);
+        let r1 =
+            rr3_registry_validate_manifest_text(&sima("rr3-sima/ping/state", 200, 1000), &base);
+        assert!(
+            r1.errors.iter().any(|e| e.contains("未注册主题")),
+            "{:?}",
+            r1.errors
+        );
 
-        let r2 = rr3_registry_validate_manifest_text(&sima("rr3-sima/ping/state", 200, 1000), &merged());
+        let r2 =
+            rr3_registry_validate_manifest_text(&sima("rr3-sima/ping/state", 200, 1000), &merged());
         assert!(r2.ok(), "合并后必须放行: {:?}", r2.errors);
     }
 
     /// 叠加层不放行越权与健康规则（只扩主题名，不放宽判定）
     #[test]
     fn overlay_relaxes_nothing_but_membership() {
-        let r = rr3_registry_validate_manifest_text(&sima("rr3-simb/pong/state", 200, 1000), &merged());
-        assert!(r.errors.iter().any(|e| e.contains("越权主题")), "{:?}", r.errors);
-
-        let r2 = rr3_registry_validate_manifest_text(&sima("rr3-sima/ping/state", 200, 200), &merged());
+        let r =
+            rr3_registry_validate_manifest_text(&sima("rr3-simb/pong/state", 200, 1000), &merged());
         assert!(
-            r2.errors.iter().any(|e| e.contains("heartbeat_ms(200) 必须小于 watchdog_timeout_ms(200)")),
+            r.errors.iter().any(|e| e.contains("越权主题")),
+            "{:?}",
+            r.errors
+        );
+
+        let r2 =
+            rr3_registry_validate_manifest_text(&sima("rr3-sima/ping/state", 200, 200), &merged());
+        assert!(
+            r2.errors
+                .iter()
+                .any(|e| e.contains("heartbeat_ms(200) 必须小于 watchdog_timeout_ms(200)")),
             "{:?}",
             r2.errors
         );
@@ -433,14 +459,17 @@ watchdog_timeout_ms = {wd}
             &sima("rr3-sima/ping/state", 200, 1000),
             &crate::topics::Rr3TopicSet::default(),
         );
-        assert_eq!(r.errors, vec!["主题集为空：拒绝校验任何 manifest（空注册表不是放行许可证）"]);
+        assert_eq!(
+            r.errors,
+            vec!["主题集为空：拒绝校验任何 manifest（空注册表不是放行许可证）"]
+        );
     }
 
     /// 新旧入口对同一份 fixture 必须给出逐字相同的报错（防搬运丢规则）
     #[test]
     fn new_entry_matches_old_entry_on_repo_fixture() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/rr3-sense.toml");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
         let old = rr3_registry_validate_manifest(&path);
         let text = std::fs::read_to_string(&path).unwrap();
         let new =
@@ -453,17 +482,17 @@ watchdog_timeout_ms = {wd}
     #[test]
     fn bad_manifests_name_the_field() {
         let m = merged();
-        let missing = sima("rr3-sima/ping/state", 200, 1000).replace(
-            "restart_policy = \"always\"\n",
-            "",
-        );
+        let missing =
+            sima("rr3-sima/ping/state", 200, 1000).replace("restart_policy = \"always\"\n", "");
         assert!(rr3_registry_validate_manifest_text(&missing, &m)
             .errors
             .iter()
             .any(|e| e.contains("缺少必填字段 resources.restart_policy")));
 
-        let bad_policy = sima("rr3-sima/ping/state", 200, 1000)
-            .replace("restart_policy = \"always\"", "restart_policy = \"sometimes\"");
+        let bad_policy = sima("rr3-sima/ping/state", 200, 1000).replace(
+            "restart_policy = \"always\"",
+            "restart_policy = \"sometimes\"",
+        );
         assert!(rr3_registry_validate_manifest_text(&bad_policy, &m)
             .errors
             .iter()

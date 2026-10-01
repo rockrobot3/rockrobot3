@@ -24,9 +24,9 @@ use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use serde_json::{json, Value};
 
 use support::{
-    rr3_field_from_log, rr3_json_of, rr3_manifest, rr3_read_where,
-    rr3_read_rpc, rr3_register_frame, rr3_rpc_frame, rr3_send, rr3_try_recv, E2E_TICK_MS,
-    RrdClient, RrdTest, SimManifest,
+    rr3_field_from_log, rr3_json_of, rr3_manifest, rr3_read_rpc, rr3_read_where,
+    rr3_register_frame, rr3_rpc_frame, rr3_send, rr3_try_recv, RrdClient, RrdTest, SimManifest,
+    E2E_TICK_MS,
 };
 
 /// 仓根（CARGO_MANIFEST_DIR = base/runtime/rrd，上溯三级）
@@ -52,7 +52,9 @@ fn rr3_build_module_bin(name: &str) -> PathBuf {
         String::from_utf8_lossy(&out.stderr)
     );
     let bin = dir.join("target/debug").join(name);
-    let bin = bin.canonicalize().unwrap_or_else(|e| panic!("编译产物 {} 不存在: {e}", bin.display()));
+    let bin = bin
+        .canonicalize()
+        .unwrap_or_else(|e| panic!("编译产物 {} 不存在: {e}", bin.display()));
     assert!(bin.is_file(), "{} 不是文件", bin.display());
     bin
 }
@@ -61,7 +63,10 @@ fn rr3_build_module_bin(name: &str) -> PathBuf {
 /// 落到 pid+tag 唯一的 /tmp（Global Constraints 8）。替换没命中即 panic：module.toml
 /// 的 entry 形状变了时，静默不改会让 rrd 去spawn 一个不存在的 `rr3-sense` 命令。
 fn rr3_module_manifest(tag: &str, name: &str, bin: &Path) -> SimManifest {
-    let src = rr3_repo_root().join("modules").join(name).join("module.toml");
+    let src = rr3_repo_root()
+        .join("modules")
+        .join(name)
+        .join("module.toml");
     let text = std::fs::read_to_string(&src)
         .unwrap_or_else(|e| panic!("读模块 manifest {} 失败: {e}", src.display()));
     let needle = format!(r#"entry = "{name}""#);
@@ -88,10 +93,15 @@ fn connect_observer(rrd: &mut RrdTest) -> (RrdClient, u64) {
     // 心跳/看门狗窗口放大到用例寿命之外（hb < wd 是校验硬规），判据是"别在用例中途死"。
     rr3_send(
         &mut obs,
-        &rr3_register_frame(&rr3_manifest("rr3-obs", 3_600_000, 3_600_001, "never"), "rr3-obs"),
+        &rr3_register_frame(
+            &rr3_manifest("rr3-obs", 3_600_000, 3_600_001, "never"),
+            "rr3-obs",
+        ),
     );
     let v = rr3_read_rpc(&mut obs);
-    let task = v["result"]["src_task"].as_u64().unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"));
+    let task = v["result"]["src_task"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"));
     (obs, task)
 }
 
@@ -159,10 +169,16 @@ fn audio_chain_sense_to_interact_end_to_end() {
     let vad = rr3_read_where(&mut obs, " vad_start 事件", |f| {
         rr3_json_of(f)["topic"] == "rr3-sense/audio/vad_start"
     });
-    assert_eq!(vad.header.src_task, sense_task, "事件帧 src 必须是发布者的分配值");
+    assert_eq!(
+        vad.header.src_task, sense_task,
+        "事件帧 src 必须是发布者的分配值"
+    );
     let v = rr3_json_of(&vad);
     assert_eq!(v["edge"], "onset", "sim 正弦常幅，首个边沿必是 onset: {v}");
-    assert!(v["rms_peak"].as_i64().unwrap_or(0) > 1500, "rms_peak 必须过起音阈值: {v}");
+    assert!(
+        v["rms_peak"].as_i64().unwrap_or(0) > 1500,
+        "rms_peak 必须过起音阈值: {v}"
+    );
 
     // ---------- ③ STREAM 有序：旁观者视角的连续后缀，seq 逐帧 +1 ----------
     // 顺带钉住事件形状：s16le/16k/mono、20ms 一帧（320 采样）
@@ -176,7 +192,9 @@ fn audio_chain_sense_to_interact_end_to_end() {
         assert_eq!(body["rate"], 16000);
         assert_eq!(body["channels"], 1);
         assert_eq!(body["ms"], 20);
-        let seq = body["seq"].as_u64().unwrap_or_else(|| panic!("pcm 体缺 seq: {body}"));
+        let seq = body["seq"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("pcm 体缺 seq: {body}"));
         if let Some(p) = last {
             assert_eq!(seq, p + 1, "STREAM 必须逐帧递增（旁观者看到连续后缀）");
         }
@@ -195,11 +213,11 @@ fn audio_chain_sense_to_interact_end_to_end() {
         ),
     );
     let v = read_call_reply(&mut obs, 42);
-    assert!(
-        v.get("error").is_none(),
-        "TTS 点名不该被拒: {v}"
+    assert!(v.get("error").is_none(), "TTS 点名不该被拒: {v}");
+    assert_eq!(
+        v["result"]["played_ms"], 120,
+        "60ms/字符的占位时长公式: {v}"
     );
-    assert_eq!(v["result"]["played_ms"], 120, "60ms/字符的占位时长公式: {v}");
     assert_eq!(v["result"]["chars"], 2);
 
     // 表情：五态白名单切换，应答带回切换前后
@@ -214,7 +232,10 @@ fn audio_chain_sense_to_interact_end_to_end() {
     );
     let v = read_call_reply(&mut obs, 43);
     assert_eq!(v["result"]["expression"], "happy", "{v}");
-    assert_eq!(v["result"]["previous"], "idle", "TTS 的 talk 挂起已恢复，切换前是 idle: {v}");
+    assert_eq!(
+        v["result"]["previous"], "idle",
+        "TTS 的 talk 挂起已恢复，切换前是 idle: {v}"
+    );
 
     // 坏参数折成 result.error 应答而不是断链（业务性失败 ≠ 传输性失败的线上分界；
     // rr3_reply_call 走的是 Response.result 槽，JSON-RPC error 槽留给 rrd 的路由拒绝）
@@ -228,7 +249,9 @@ fn audio_chain_sense_to_interact_end_to_end() {
         ),
     );
     let v = read_call_reply(&mut obs, 44);
-    let err = v["result"]["error"].as_str().unwrap_or_else(|| panic!("缺 text 必须回 result.error 字符串: {v}"));
+    let err = v["result"]["error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("缺 text 必须回 result.error 字符串: {v}"));
     assert!(err.contains("text"), "错误信息要点名缺的参数: {err}");
 
     // 回路打完，sense 的流还活着（interact 的 120ms 阻塞没拖垮任何一方）
@@ -236,5 +259,8 @@ fn audio_chain_sense_to_interact_end_to_end() {
         rr3_json_of(f)["topic"] == "rr3-sense/audio/pcm"
     });
     let seq = rr3_json_of(&f)["seq"].as_u64().unwrap_or(0);
-    assert!(seq > last.unwrap_or(0), "回路之后流必须继续推进: {seq} <= {last:?}");
+    assert!(
+        seq > last.unwrap_or(0),
+        "回路之后流必须继续推进: {seq} <= {last:?}"
+    );
 }

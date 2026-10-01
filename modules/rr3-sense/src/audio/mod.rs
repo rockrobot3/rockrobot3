@@ -35,8 +35,16 @@ pub fn rr3_base64_encode(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(RR3_B64_ALPHABET[(n >> 18) as usize & 63] as char);
         out.push(RR3_B64_ALPHABET[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { RR3_B64_ALPHABET[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { RR3_B64_ALPHABET[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            RR3_B64_ALPHABET[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            RR3_B64_ALPHABET[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -64,7 +72,10 @@ pub fn rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value {
 /// （edge / rms_peak / speech_ms），不带任何闭环数据（ADR-0007 §决策一）。
 pub fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge) -> Value {
     match edge {
-        Rr3VadEdge::Onset { rms_peak, speech_ms } => json!({
+        Rr3VadEdge::Onset {
+            rms_peak,
+            speech_ms,
+        } => json!({
             "seq": seq, "edge": "onset", "rms_peak": rms_peak, "speech_ms": speech_ms,
         }),
         Rr3VadEdge::Offset { speech_ms } => json!({
@@ -113,7 +124,11 @@ pub struct Rr3SenseConfig {
 impl Default for Rr3SenseConfig {
     fn default() -> Self {
         Self {
-            audio: Rr3AudioConfig { sample_rate: 16000, channels: 1, frame_ms: 20 },
+            audio: Rr3AudioConfig {
+                sample_rate: 16000,
+                channels: 1,
+                frame_ms: 20,
+            },
             vad: Rr3VadConfig::default(),
         }
     }
@@ -125,8 +140,8 @@ pub fn rr3_sense_config_load() -> Result<Rr3SenseConfig, String> {
     match std::env::var(RR3_SENSE_CONFIG_ENV) {
         Err(_) => Ok(Rr3SenseConfig::default()),
         Ok(path) => {
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| format!("读配置 {path} 失败: {e}"))?;
+            let text =
+                std::fs::read_to_string(&path).map_err(|e| format!("读配置 {path} 失败: {e}"))?;
             rr3_sense_config_parse(&text)
         }
     }
@@ -134,7 +149,9 @@ pub fn rr3_sense_config_load() -> Result<Rr3SenseConfig, String> {
 
 /// 解析配置文本：缺键回落默认，类型错显式报错（不静默吞）。
 fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, String> {
-    let root: toml::Value = text.parse().map_err(|e| format!("配置不是合法 TOML: {e}"))?;
+    let root: toml::Value = text
+        .parse()
+        .map_err(|e| format!("配置不是合法 TOML: {e}"))?;
     let mut cfg = Rr3SenseConfig::default();
     let section = root.get("rr3-sense");
     if let Some(audio) = section.and_then(|s| s.get("audio")) {
@@ -144,8 +161,10 @@ fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, String> {
         rr3_cfg_u64(audio, "sample_rate", &mut rate)?;
         rr3_cfg_u64(audio, "channels", &mut ch)?;
         rr3_cfg_u64(audio, "frame_ms", &mut fms)?;
-        cfg.audio.sample_rate = u32::try_from(rate).map_err(|_| format!("[rr3-sense.audio] sample_rate 越界: {rate}"))?;
-        cfg.audio.channels = u8::try_from(ch).map_err(|_| format!("[rr3-sense.audio] channels 越界: {ch}"))?;
+        cfg.audio.sample_rate = u32::try_from(rate)
+            .map_err(|_| format!("[rr3-sense.audio] sample_rate 越界: {rate}"))?;
+        cfg.audio.channels =
+            u8::try_from(ch).map_err(|_| format!("[rr3-sense.audio] channels 越界: {ch}"))?;
         cfg.audio.frame_ms = fms;
     }
     if let Some(vad) = section.and_then(|s| s.get("vad")) {
@@ -206,7 +225,11 @@ mod tests {
     #[test]
     fn pcm_event_body_round_trips_through_base64() {
         let pcm = Rr3PcmStream {
-            cfg: Rr3AudioCfg { sample_rate_hz: 16000, channels: 1, bit_depth: 16 },
+            cfg: Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 1,
+                bit_depth: 16,
+            },
             samples: vec![1000, -2000, 32767, -32768],
         };
         let body = rr3_pcm_event_body(7, &pcm);
@@ -215,11 +238,20 @@ mod tests {
         assert_eq!(body["rate"], 16000);
         assert_eq!(body["channels"], 1);
         assert_eq!(body["ms"], 0, "4 帧 @16k 不足 1ms");
-        assert_eq!(body.get("topic"), None, "负载不重复放 topic（由客户端并入）");
+        assert_eq!(
+            body.get("topic"),
+            None,
+            "负载不重复放 topic（由客户端并入）"
+        );
         // 解回字节序，逐点核对（含 i16 两个端点值）。测试侧独立解码器：按 `=` 位
         // 决定该组贡献几个数据字节（与编码器的补位规则对称）。
         let b64 = body["pcm_b64"].as_str().unwrap();
-        let alphabet = |c: char| RR3_B64_ALPHABET.iter().position(|&a| a as char == c).unwrap();
+        let alphabet = |c: char| {
+            RR3_B64_ALPHABET
+                .iter()
+                .position(|&a| a as char == c)
+                .unwrap()
+        };
         let mut bytes: Vec<u8> = Vec::new();
         for q in b64.as_bytes().chunks(4) {
             let v = |c: u8| alphabet(c as char) as u32;
@@ -243,7 +275,13 @@ mod tests {
 
     #[test]
     fn vad_event_body_carries_edge_shape() {
-        let on = rr3_vad_event_body(3, Rr3VadEdge::Onset { rms_peak: 4200, speech_ms: 200 });
+        let on = rr3_vad_event_body(
+            3,
+            Rr3VadEdge::Onset {
+                rms_peak: 4200,
+                speech_ms: 200,
+            },
+        );
         assert_eq!(on["edge"], "onset");
         assert_eq!(on["rms_peak"], 4200);
         assert_eq!(on["speech_ms"], 200);
@@ -257,7 +295,10 @@ mod tests {
     #[test]
     fn config_parse_defaults_on_empty_and_fills_partial() {
         // 空文本 = 全默认
-        assert_eq!(rr3_sense_config_parse("").unwrap(), Rr3SenseConfig::default());
+        assert_eq!(
+            rr3_sense_config_parse("").unwrap(),
+            Rr3SenseConfig::default()
+        );
         // 只给部分键：给的生效，缺的回落默认
         let cfg = rr3_sense_config_parse("[rr3-sense.vad]\nrms_start = 900\n").unwrap();
         assert_eq!(cfg.vad.rms_start, 900);

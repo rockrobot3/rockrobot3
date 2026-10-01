@@ -59,7 +59,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::daemon::{rr3_now_ms, rr3_state_frame};
-use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text, Rr3ManifestFacts};
+use crate::manifest::{
+    rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text, Rr3ManifestFacts,
+};
 use crate::registry::{rr3_phase_for_exit, Rr3ChildExit, Rr3Phase, Rr3RestartPlan, RrdRegistry};
 use crate::{rr3_lock, rr3_log};
 
@@ -123,7 +125,10 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
     let text = match std::fs::read_to_string(manifest_path) {
         Ok(t) => t,
         Err(e) => {
-            rr3_log(&format!("拒绝启动：manifest {} 读取失败: {e}", manifest_path.display()));
+            rr3_log(&format!(
+                "拒绝启动：manifest {} 读取失败: {e}",
+                manifest_path.display()
+            ));
             return None;
         }
     };
@@ -145,7 +150,10 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
     let entry = if rr3_manifest_entry_is_absolute(&facts.entry) {
         PathBuf::from(&facts.entry)
     } else {
-        manifest_path.parent().unwrap_or(Path::new("")).join(&facts.entry)
+        manifest_path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join(&facts.entry)
     };
     // E-3 的两项检查。`PermissionsExt::mode()` 在 `std::os::unix::fs` 里，仍是零外部依赖。
     match std::fs::metadata(&entry) {
@@ -159,7 +167,11 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
             return None;
         }
     }
-    Some(Rr3SpawnJob { manifest_path: manifest_path.to_path_buf(), entry, facts })
+    Some(Rr3SpawnJob {
+        manifest_path: manifest_path.to_path_buf(),
+        entry,
+        facts,
+    })
 }
 
 /// 到期表（E-4）：`(起它的时刻, 计划)`。`Instant::now() + Duration::from_millis(delay_ms)` 在
@@ -185,14 +197,21 @@ fn rr3_absorb_exit(
     due: &mut Vec<(Instant, Rr3RestartPlan)>,
 ) {
     let plan = match verdict {
-        Rr3ChildExit::Crashed { src_task, clean_exit, plan } => {
+        Rr3ChildExit::Crashed {
+            src_task,
+            clean_exit,
+            plan,
+        } => {
             let phase = rr3_phase_for_exit(clean_exit);
             // E-9：这里的排除项是 `crashed.src_task`（它的 tx 已是 None，排除属形式，
             // 与 expire 那一路同形）；conn 收尾那一路排的是 `RR3_TASK_RRD`（等于不排除）。
             // 两种口径是**已知**的第三/第四种口径，归 Task 13 的 A-3 文档化，此处不"统一"——
             // 统一成哪一种都没有判据支持。
-            let n = rr3_lock(shared).rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task);
-            rr3_log(&format!("{name} 子进程退出 status={status} → 广播 {phase} 到 {n} 个连接"));
+            let n =
+                rr3_lock(shared).rr3_reg_fanout(&rr3_state_frame(name, phase, src_task), src_task);
+            rr3_log(&format!(
+                "{name} 子进程退出 status={status} → 广播 {phase} 到 {n} 个连接"
+            ));
             // ADR-0009 裁定 3：本路刚记完收尸账（`rr3_reg_child_exit` 已置 Failed），
             // 死者若是某能力的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
             // EarlyExit / Silent 两路不传播：前者从未注册过（没有"离开 Running"的相位
@@ -211,11 +230,15 @@ fn rr3_absorb_exit(
             plan
         }
         Rr3ChildExit::EarlyExit { plan } => {
-            rr3_log(&format!("{name} 未注册即退出 status={status}（无 state 可广播）"));
+            rr3_log(&format!(
+                "{name} 未注册即退出 status={status}（无 state 可广播）"
+            ));
             plan
         }
         Rr3ChildExit::Silent => {
-            rr3_log(&format!("{name} 子进程退出 status={status}，终态已有人记过"));
+            rr3_log(&format!(
+                "{name} 子进程退出 status={status}，终态已有人记过"
+            ));
             None
         }
     };
@@ -226,7 +249,9 @@ fn rr3_absorb_exit(
         None => {
             let capped = rr3_lock(shared).rr3_reg_hit_cap(name);
             if capped {
-                rr3_log(&format!("停止重启 {name}：连续崩溃达上限，运行时降级（spec §5.3）"));
+                rr3_log(&format!(
+                    "停止重启 {name}：连续崩溃达上限，运行时降级（spec §5.3）"
+                ));
             }
         }
     }
@@ -241,6 +266,9 @@ fn rr3_absorb_exit(
 /// **为什么 own 在前**：子进程可能在同一毫秒内注册完并死掉，晚一步 own 会让 conn 那一路
 /// 先看到 EOF 并按"非 owned"处理 → 广播 `unregistered`，把退出码能给出的 `failed` 抢掉。
 /// 这是本设计里唯一一处"次序决定语义"的地方，故测试里有对应判据（S1 的相位断言）。
+// 参数是"启动一次所需的全部现场"（registry/子进程表/到期堆/任务单各司其职），
+// 收拢成结构体只为让 clippy 闭嘴反而增加一层无谓的打包拆包——显式豁免。
+#[allow(clippy::too_many_arguments)]
 fn rr3_boot_spawn(
     shared: &Arc<Mutex<RrdRegistry>>,
     t0: Instant,
@@ -277,8 +305,16 @@ fn rr3_boot_spawn(
             children.insert(name.clone(), child);
             // `attempt>0` 才附尾注：boot 那一次没有"第几次重启"可说
             //（S1 正是靠这个后缀把第一世与第二世分开）。
-            let tail = if attempt > 0 { format!(" attempt={attempt}") } else { String::new() };
-            rr3_log(&format!("spawn {name} pid={pid} entry={}{}", job.entry.display(), tail));
+            let tail = if attempt > 0 {
+                format!(" attempt={attempt}")
+            } else {
+                String::new()
+            };
+            rr3_log(&format!(
+                "spawn {name} pid={pid} entry={}{}",
+                job.entry.display(),
+                tail
+            ));
         }
         Err(e) => {
             // 撤下所有权标记：这一次根本没有进程，conn 那一路无从等退出码；标记留着
@@ -361,7 +397,16 @@ fn rr3_fire_due(
         // 这里不"统一"成"照 plan.entry 硬起"：那要求 rrd 知道该给外来进程注入什么身份（E-2）。
         let job = jobs.get(&plan.name).cloned();
         match job {
-            Some(job) => rr3_boot_spawn(shared, t0, children, due, &job, plan.attempt, bus_path, boot_role),
+            Some(job) => rr3_boot_spawn(
+                shared,
+                t0,
+                children,
+                due,
+                &job,
+                plan.attempt,
+                bus_path,
+                boot_role,
+            ),
             None => rr3_log(&format!("跳过重启 {}：不是本守护起的进程", plan.name)),
         }
     }
@@ -433,7 +478,15 @@ pub fn rr3_spawn_supervisor(
                 }
             }
             rr3_reap(&shared, t0, &jobs, &mut children, &mut due);
-            rr3_fire_due(&shared, t0, &jobs, &mut children, &mut due, &bus_path, &boot_role);
+            rr3_fire_due(
+                &shared,
+                t0,
+                &jobs,
+                &mut children,
+                &mut due,
+                &bus_path,
+                &boot_role,
+            );
             if !keep_running {
                 break;
             }

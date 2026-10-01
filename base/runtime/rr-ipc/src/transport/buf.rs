@@ -27,7 +27,11 @@ impl Rr3FrameBuf {
     /// payload 尚未填写，缓冲未 seal。
     pub fn rr3_new(header: Rr3Header) -> Self {
         let len = RR3_IPC_HDR_SIZE + header.payload_len as usize;
-        Self { hdr: header, bytes: vec![0u8; len], sealed: false }
+        Self {
+            hdr: header,
+            bytes: vec![0u8; len],
+            sealed: false,
+        }
     }
 
     /// 头字段（seal 时据此原地编头）
@@ -69,14 +73,17 @@ impl Rr3FrameBuf {
     /// 拆成值视图（`Rr3Frame`）：不分配，payload 直接搬走
     pub fn rr3_into_frame(mut self) -> Rr3Frame {
         let payload = self.bytes.split_off(RR3_IPC_HDR_SIZE);
-        Rr3Frame { header: self.hdr, payload }
+        Rr3Frame {
+            header: self.hdr,
+            payload,
+        }
     }
 }
 
 impl From<&Rr3Frame> for Rr3FrameBuf {
     /// 值视图 → 缓冲：单块分配，seal 后即可发送
     fn from(f: &Rr3Frame) -> Self {
-        let mut buf = Self::rr3_new(f.header.clone());
+        let mut buf = Self::rr3_new(f.header);
         buf.rr3_payload_mut().copy_from_slice(&f.payload);
         buf.rr3_seal();
         buf
@@ -91,12 +98,15 @@ impl TryFrom<Rr3FrameBuf> for Rr3Frame {
         if !buf.sealed {
             return Err(Rr3FrameError::Unsealed);
         }
-        let header = Rr3Header::from_bytes(&buf.bytes[..RR3_IPC_HDR_SIZE])
-            .map_err(Rr3FrameError::Header)?;
+        let header =
+            Rr3Header::from_bytes(&buf.bytes[..RR3_IPC_HDR_SIZE]).map_err(Rr3FrameError::Header)?;
         // 头以 buf.hdr 为准编出，此处解析回读是防御：两者不一致说明 seal 后缓冲头区被外力改写。
         debug_assert_eq!(header, buf.hdr);
         buf.bytes.drain(..RR3_IPC_HDR_SIZE);
-        Ok(Rr3Frame { header, payload: buf.bytes })
+        Ok(Rr3Frame {
+            header,
+            payload: buf.bytes,
+        })
     }
 }
 
@@ -122,7 +132,11 @@ pub fn rr3_framebuf_read(r: &mut impl Read) -> Result<Rr3FrameBuf, Rr3FrameError
             None => return Err(Rr3FrameError::TornPayload { want, got: 0 }),
         }
     }
-    Ok(Rr3FrameBuf { hdr, bytes, sealed: true })
+    Ok(Rr3FrameBuf {
+        hdr,
+        bytes,
+        sealed: true,
+    })
 }
 
 #[cfg(test)]
@@ -131,7 +145,8 @@ mod tests {
     use std::io::Cursor;
 
     fn hdr(payload_len: u32) -> Rr3Header {
-        let mut h = Rr3Header::rr3_hdr_broadcast(crate::protocol::header::opcode::SEND, payload_len);
+        let mut h =
+            Rr3Header::rr3_hdr_broadcast(crate::protocol::header::opcode::SEND, payload_len);
         h.trace_id = 0x1234_5678;
         h
     }
@@ -142,7 +157,10 @@ mod tests {
         let mut buf = Rr3FrameBuf::rr3_new(hdr(3));
         assert_eq!(buf.bytes.len(), RR3_IPC_HDR_SIZE + 3);
         assert!(!buf.rr3_sealed());
-        assert!(buf.rr3_as_sealed_bytes().is_err(), "未 seal 不得给出可发字节");
+        assert!(
+            buf.rr3_as_sealed_bytes().is_err(),
+            "未 seal 不得给出可发字节"
+        );
         buf.rr3_payload_mut().copy_from_slice(b"abc");
         buf.rr3_seal();
         assert!(buf.rr3_sealed());
@@ -157,7 +175,10 @@ mod tests {
     /// 值视图 ↔ 缓冲 双向往返不丢字段
     #[test]
     fn buf_frame_round_trip() {
-        let f = Rr3Frame { header: hdr(5), payload: b"hello"[..].to_vec() };
+        let f = Rr3Frame {
+            header: hdr(5),
+            payload: b"hello"[..].to_vec(),
+        };
         let buf = Rr3FrameBuf::from(&f);
         assert!(buf.rr3_sealed());
         let back = Rr3Frame::try_from(buf).unwrap();
@@ -188,7 +209,10 @@ mod tests {
     #[test]
     fn framebuf_read_error_semantics() {
         let empty: [u8; 0] = [];
-        assert_eq!(rr3_framebuf_read(&mut Cursor::new(&empty[..])), Err(Rr3FrameError::Closed));
+        assert_eq!(
+            rr3_framebuf_read(&mut Cursor::new(&empty[..])),
+            Err(Rr3FrameError::Closed)
+        );
 
         let mut torn = hdr(3).to_bytes().to_vec();
         torn.truncate(64);

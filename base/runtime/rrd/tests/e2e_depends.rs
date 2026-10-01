@@ -58,11 +58,19 @@ start_priority = {start_priority}
         entry = env!("CARGO_BIN_EXE_sim_peer"),
     );
     if !provides.is_empty() {
-        let caps = provides.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", ");
+        let caps = provides
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         text.push_str(&format!("\n[provides]\ncapabilities = [{caps}]\n"));
     }
     if !requires.is_empty() {
-        let caps = requires.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", ");
+        let caps = requires
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         text.push_str(&format!("\n[depends]\nrequired = [{caps}]\n"));
     }
     text.push_str("\n[health]\nheartbeat_ms = 100\nwatchdog_timeout_ms = 60000\n");
@@ -79,7 +87,10 @@ start_priority = {start_priority}
 /// 那边的理由原文照抄：本轮禁改既有线级用例，就不能把函数搬进 support）。
 fn rr3_observer(rrd: &mut RrdTest, name: &str) -> RrdClient {
     let mut c = rrd.rr3_connect();
-    rr3_send(&mut c, &rr3_register_frame(&rr3_manifest(name, 100, 60_000, "never"), name));
+    rr3_send(
+        &mut c,
+        &rr3_register_frame(&rr3_manifest(name, 100, 60_000, "never"), name),
+    );
     rr3_read_state(&mut c, name, "registered");
     c
 }
@@ -105,13 +116,19 @@ fn rr3_kill_hung_fixture(pid: u64) {
 fn rr3_register_dependent(rrd: &mut RrdTest, name: &str, requires: &[&str]) -> (RrdClient, u64) {
     let m = rr3_dep_manifest("dep-online", name, 100, &[], requires, "never");
     let mut c = rrd.rr3_connect();
-    rr3_send(&mut c, &rr3_register_frame(&std::fs::read_to_string(&m.path).expect("读在线夹具"), name));
+    rr3_send(
+        &mut c,
+        &rr3_register_frame(&std::fs::read_to_string(&m.path).expect("读在线夹具"), name),
+    );
     rr3_read_state(&mut c, name, "registered");
     let reply = rr3_read_rpc(&mut c);
     let task = reply["result"]["src_task"]
         .as_u64()
         .unwrap_or_else(|| panic!("注册应答里没有 src_task: {reply}"));
-    rr3_send(&mut c, &rr3_rpc_frame("rr3.heartbeat", 2, serde_json::json!({}), task));
+    rr3_send(
+        &mut c,
+        &rr3_rpc_frame("rr3.heartbeat", 2, serde_json::json!({}), task),
+    );
     let _ = rr3_read_rpc(&mut c); // 心跳应答
     (c, task)
 }
@@ -160,8 +177,22 @@ fn boot_order_follows_dependency_not_priority() {
 /// `RrdTest` 的"等就绪行"框架用不上（永远等不到监听后的正常运行）。
 #[test]
 fn dependency_cycle_rejects_the_whole_boot() {
-    let a = rr3_dep_manifest("dep-d2", "rr3-loopa", 50, &["cap.loopa"], &["cap.loopb"], "never");
-    let b = rr3_dep_manifest("dep-d2", "rr3-loopb", 50, &["cap.loopb"], &["cap.loopa"], "never");
+    let a = rr3_dep_manifest(
+        "dep-d2",
+        "rr3-loopa",
+        50,
+        &["cap.loopa"],
+        &["cap.loopb"],
+        "never",
+    );
+    let b = rr3_dep_manifest(
+        "dep-d2",
+        "rr3-loopb",
+        50,
+        &["cap.loopb"],
+        &["cap.loopa"],
+        "never",
+    );
     let socket = PathBuf::from(format!("/tmp/rr3-f2-cycle-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&socket);
 
@@ -202,10 +233,19 @@ fn dependency_cycle_rejects_the_whole_boot() {
         }
     }
     let status = child.wait().expect("wait rrd");
-    assert!(!status.success(), "环必须让 boot 非 0 退出（main 的 ExitCode::FAILURE）: {status}");
-    assert!(text.contains("拒绝 boot："), "fatal 先逐条打到 stdout 日志再退出:\n{text}");
+    assert!(
+        !status.success(),
+        "环必须让 boot 非 0 退出（main 的 ExitCode::FAILURE）: {status}"
+    );
+    assert!(
+        text.contains("拒绝 boot："),
+        "fatal 先逐条打到 stdout 日志再退出:\n{text}"
+    );
     assert!(text.contains("依赖环涉及"), "{text}");
-    assert!(text.contains("rr3-loopa") && text.contains("rr3-loopb"), "两个环成员都要点名:\n{text}");
+    assert!(
+        text.contains("rr3-loopa") && text.contains("rr3-loopb"),
+        "两个环成员都要点名:\n{text}"
+    );
     assert!(
         !text.contains("spawn rr3-loopa") && !text.contains("spawn rr3-loopb"),
         "拒 boot 的进程一个子进程都不能起:\n{text}"
@@ -238,9 +278,15 @@ fn provider_death_degrades_dependent_and_recovery_undegrades() {
         .args(["-9", &pid1.to_string()])
         .status()
         .expect("kill 前置失败");
-    assert!(killed.success(), "kill -9 {pid1} 没成功——前置不成立，后面的判据全部作废");
+    assert!(
+        killed.success(),
+        "kill -9 {pid1} 没成功——前置不成立，后面的判据全部作废"
+    );
     let exit1 = rrd.rr3_wait_log("rr3-degp 子进程退出 status=signal: 9");
-    assert!(exit1.contains("→ 广播 failed"), "owned 模块由退出码定性: {exit1}");
+    assert!(
+        exit1.contains("→ 广播 failed"),
+        "owned 模块由退出码定性: {exit1}"
+    );
 
     // 裁定 3 断供半边：依赖者被置 Degraded，广播**不排除依赖者自己**（E-9 理据：
     // 它没有别的途径查自己的相位），旁观者与依赖者各自读一条
@@ -250,7 +296,10 @@ fn provider_death_degrades_dependent_and_recovery_undegrades() {
         "置位必须伴一次广播: {degraded}"
     );
     let on = rr3_read_state(&mut dep_conn, "rr3-degd", "degraded");
-    assert_eq!(on["src_task"], dep_task, "线上那条 degraded 必须指向依赖者自己的 task");
+    assert_eq!(
+        on["src_task"], dep_task,
+        "线上那条 degraded 必须指向依赖者自己的 task"
+    );
     rr3_read_state(&mut b, "rr3-degd", "degraded");
     // 裁定 4：降级不是崩溃——不产重启计划、不经 supervisor（`重启计划` 四字只出现在
     // conn 收尾那一路，是 A-5③ 批准的唯一子串）
@@ -262,7 +311,11 @@ fn provider_death_degrades_dependent_and_recovery_undegrades() {
     assert_ne!(pid1, pid2, "重起的必须是新进程");
     assert!(spawn2.contains("attempt=1"), "{spawn2}");
     let reg2 = rrd.rr3_wait_log("注册 rr3-degp task=");
-    assert_ne!(rr3_field_from_log(&reg2, "task="), task1, "重注册必须换新 task");
+    assert_ne!(
+        rr3_field_from_log(&reg2, "task="),
+        task1,
+        "重注册必须换新 task"
+    );
     rrd.rr3_wait_log("rr3-degp → running（广播到");
 
     // 裁定 3 恢复半边：全部 required 就位 → 解除回 Running（同样不排除依赖者自己）

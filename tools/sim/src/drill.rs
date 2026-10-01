@@ -112,14 +112,14 @@ pub fn rr3_default_bins(repo: &Path) -> (PathBuf, PathBuf, PathBuf) {
 pub fn rr3_require_bins(rrd: &Path, peer: &Path, rrctl: &Path) -> Result<(), String> {
     for (p, build) in [
         (rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
-        (peer, "cargo build -p rrd（在 base/runtime/ 下，sim_peer 同包产出）"),
+        (
+            peer,
+            "cargo build -p rrd（在 base/runtime/ 下，sim_peer 同包产出）",
+        ),
         (rrctl, "cargo build --manifest-path tools/rrctl/Cargo.toml"),
     ] {
         if !p.is_file() {
-            return Err(format!(
-                "缺二进制 {}：先 {build}",
-                p.display()
-            ));
+            return Err(format!("缺二进制 {}：先 {build}", p.display()));
         }
     }
     Ok(())
@@ -177,6 +177,8 @@ watchdog_timeout_ms = {wd_ms}
 /// exposes 三面都可指定，`type` 可标 brain（rr3-brain 是 manifest.type=brain 的
 /// 唯一在册模块）。与 `rr3_manifest_text` 同形但三面显式——既有两面演练继续走
 /// 旧签名，新形状单独可测。
+// 参数逐一对应 manifest 契约字段（wire 形状生成器，不是内部 API）——显式豁免。
+#[allow(clippy::too_many_arguments)]
 pub fn rr3_manifest_text_ext(
     name: &str,
     entry_abs: &Path,
@@ -190,7 +192,10 @@ pub fn rr3_manifest_text_ext(
     exposes: &[&str],
 ) -> String {
     let list = |xs: &[&str]| {
-        xs.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", ")
+        xs.iter()
+            .map(|t| format!("\"{t}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     let mut out = format!(
         r#"[manifest]
@@ -258,7 +263,9 @@ pub fn rr3_wait_modules(
         if t0.elapsed() >= deadline {
             return Err(format!(
                 "超时（{deadline:?}）：仍未达成 {:?}，最后一次快照 {rows:?}",
-                want.iter().map(|(n, p)| format!("{n}/{p}")).collect::<Vec<_>>()
+                want.iter()
+                    .map(|(n, p)| format!("{n}/{p}"))
+                    .collect::<Vec<_>>()
             ));
         }
         std::thread::sleep(Duration::from_millis(150));
