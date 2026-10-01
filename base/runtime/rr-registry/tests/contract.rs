@@ -616,3 +616,206 @@ fn every_module_dependency_set_is_satisfiable_and_acyclic() {
         .expect("六模块依赖面必须可满足且无环");
     assert_eq!(order.len(), 6, "{order:?}");
 }
+
+// ---------- 能力格查册门（ADR-0012 裁定 5②）：manifest 与 profile 双侧对 slots.toml 查册 ----------
+
+fn slots_toml() -> String {
+    std::fs::read_to_string(repo_root().join("contracts/slots.toml"))
+        .expect("contracts/slots.toml 必须存在（ADR-0012 裁定 1 产物）")
+}
+
+/// modules/ 六模块的 (模块名, manifest 根 Value)，按名字升序
+fn module_manifest_values() -> Vec<(String, toml::Value)> {
+    let modules = repo_root().join("modules");
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&modules)
+        .expect("读不到 modules/ 目录")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+    {
+        let m = entry.join("module.toml");
+        if m.is_file() {
+            let v: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&m).unwrap()).expect("module.toml 必须可解析");
+            let name =
+                v.get("manifest").and_then(|m| m.get("name")).and_then(toml::Value::as_str)
+                    .expect("manifest 缺 name")
+                    .to_string();
+            out.push((name, v));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn str_list(v: &toml::Value, path: &str) -> Vec<String> {
+    let Some(node) = path.split('.').fold(Some(v), |acc, seg| acc.and_then(|t| t.get(seg)))
+    else {
+        return vec![];
+    };
+    node.as_array()
+        .map(|a| a.iter().filter_map(toml::Value::as_str).map(String::from).collect())
+        .unwrap_or_default()
+}
+
+/// 基础层 = base_capabilities 的表内化（ADR-0012 裁定 1）：
+/// 两份名单逐条钉死等价——第二份白名单不存在，仲裁与查册共用同一 base 真值。
+#[test]
+fn slots_base_layer_is_pinned_to_base_capabilities() {
+    let mut base = rr_registry::rr3_registry_slot_table_from_text(&slots_toml()).rr3_slot_table_base();
+    base.sort();
+    let mut caps = rr_registry::rr3_registry_rule_list("base_capabilities")
+        .expect("module.schema.toml 必须登记 base_capabilities 规则");
+    caps.sort();
+    assert_eq!(base, caps, "slots 基础层与 base_capabilities 漂移");
+}
+
+/// v0.0.1 格位表的全部 20 条 `(name, layer)`，顺序即 `contracts/slots.toml` 登记顺序。
+/// 与 `registry_shape_is_pinned` 同一钉法：append 合法但必须是有意识的编辑——
+/// 同一次改动里同步更新 `contracts/slots.toml`、本常量与层分布计数、
+/// `profiles/default.toml`（如涉及绑定面），以及把这些数字当事实抄进正文的文档。
+const RR3_PINNED_SLOTS: [(&str, &str); 20] = [
+    ("bus.publish", "base"),
+    ("bus.subscribe", "base"),
+    ("bus.rpc", "base"),
+    ("net.online", "base"),
+    ("power.battery", "base"),
+    ("act.servo", "body"),
+    ("act.led", "body"),
+    ("net.wifi", "body"),
+    ("net.bt", "body"),
+    ("ui.face", "body"),
+    ("audio.playback", "body"),
+    ("audio.capture", "body"),
+    ("audio.vad", "body"),
+    ("sensor.env", "body"),
+    ("sensor.imu", "body"),
+    ("power.charger", "body"),
+    ("cognition.dialog", "cognition"),
+    ("cognition.asr", "cognition"),
+    ("cognition.llm", "cognition"),
+    ("cognition.tts", "cognition"),
+];
+
+#[test]
+fn slots_registry_shape_is_pinned() {
+    use std::collections::BTreeMap;
+
+    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    assert!(table.rr3_slot_table_check().is_empty(), "{:?}", table.rr3_slot_table_check());
+
+    // 1) 20 格、逐条 (name, layer) 在册且不多不少（配合唯一性与等长断言）
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for (name, layer) in RR3_PINNED_SLOTS {
+        assert_eq!(
+            table.rr3_slot_table_layer(name).as_deref(),
+            Some(layer),
+            "格位缺失或层漂移: {name}"
+        );
+        *counts.entry(layer).or_insert(0) += 1;
+    }
+    assert_eq!(table.rr3_slot_table_names().len(), RR3_PINNED_SLOTS.len(), "格位总数漂移");
+
+    // 2) 层分布 5/11/4
+    assert_eq!(counts.get("base"), Some(&5));
+    assert_eq!(counts.get("body"), Some(&11));
+    assert_eq!(counts.get("cognition"), Some(&4));
+}
+
+/// 门禁②（manifest 侧）：provides 与 depends.* 引用的每个能力必须命中格位表。
+/// 单件校验只保语法（ADR-0009 裁定 1），"是否在册"只在全集层判——本用例就是那道全集门。
+#[test]
+fn every_manifest_capability_is_a_registered_slot() {
+    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let manifests = module_manifest_values();
+    assert_eq!(manifests.len(), 6, "modules/ 模块集合漂移");
+    for (name, v) in &manifests {
+        let mut caps = str_list(v, "provides.capabilities");
+        caps.extend(str_list(v, "depends.required"));
+        caps.extend(str_list(v, "depends.optional"));
+        assert!(!caps.is_empty(), "{name} 的能力面为空（provides 或 depends 至少登记一项）");
+        for cap in caps {
+            assert!(
+                table.rr3_slot_table_contains(&cap),
+                "{name} 引用了表外能力 {cap}（新能力先立格再用，ADR-0012 裁定 1）"
+            );
+        }
+    }
+}
+
+/// 门禁②（profile 侧）+ 裁定 3 的装配自洽：default 装配单的 bindings 逐格对表查册、
+/// 绑到真实模块、与该模块的 manifest provides 对账；faces 与 provides 全集相等；
+/// 全部非 base 格位恰好被绑定一次（default 机不留缺格）。
+#[test]
+fn default_profile_binds_module_slots_to_real_modules() {
+    let root = repo_root();
+    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let profiles = root.join("profiles");
+    let mut profile_files: Vec<String> = std::fs::read_dir(&profiles)
+        .expect("profiles/ 目录必须存在（ADR-0012 裁定 3 产物）")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_str().unwrap().to_string())
+        .filter(|n| n.ends_with(".toml"))
+        .collect();
+    profile_files.sort();
+    assert_eq!(profile_files, vec!["default.toml".to_string()], "profiles/ 机型集合漂移");
+
+    let text = std::fs::read_to_string(profiles.join("default.toml")).unwrap();
+    let v: toml::Value = toml::from_str(&text).expect("default.toml 必须可解析");
+
+    // [os] route 双轨取值（ADR-0013）
+    let route = v.get("os").and_then(|o| o.get("route")).and_then(toml::Value::as_str)
+        .expect("profile 缺 [os] route");
+    assert!(route == "distro" || route == "buildroot", "route 越界: {route}");
+
+    let manifests: std::collections::BTreeMap<String, toml::Value> =
+        module_manifest_values().into_iter().collect();
+
+    // [bindings]：格位 → 件
+    let bindings = v.get("bindings").and_then(toml::Value::as_table).expect("缺 [bindings]");
+    let mut bound: Vec<String> = Vec::new();
+    for (slot, provider) in bindings {
+        let provider = provider.as_str().unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
+        assert!(table.rr3_slot_table_contains(slot), "bindings 引用表外格位 {slot}");
+        let layer = table.rr3_slot_table_layer(slot).unwrap();
+        assert_ne!(layer, "base", "基础层格位 {slot} 由基座内建承载，不得绑定模块");
+        let m = manifests
+            .get(provider)
+            .unwrap_or_else(|| panic!("bindings.{slot} 绑到不在册模块 {provider}"));
+        assert!(
+            str_list(m, "provides.capabilities").iter().any(|c| c == slot),
+            "{provider} 的 manifest 未 provides 被绑格位 {slot}"
+        );
+        bound.push(slot.clone());
+    }
+
+    // 全部非 base 格位恰好绑定一次（配合 BTreeMap 键唯一即"不多不少"）
+    bound.sort();
+    let mut unbound: Vec<String> = table
+        .rr3_slot_table_names()
+        .into_iter()
+        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| !bound.iter().any(|b| b == n))
+        .collect();
+    assert!(unbound.is_empty(), "default 机存在缺格（fail-closed，缺格即 Degraded）: {unbound:?}");
+    unbound.clear();
+
+    // [faces]：模块 → 格位集合 == manifest provides 全集
+    let faces = v.get("faces").and_then(toml::Value::as_table).expect("缺 [faces]");
+    let mut face_modules: Vec<&String> = faces.keys().collect();
+    face_modules.sort();
+    let mut manifest_modules: Vec<&String> = manifests.keys().collect();
+    manifest_modules.sort();
+    assert_eq!(face_modules, manifest_modules, "[faces] 覆盖的模块集合与 modules/ 漂移");
+    for (module, face) in faces {
+        let mut slots: Vec<String> =
+            face.as_array().expect("faces 值必须是数组").iter().filter_map(toml::Value::as_str).map(String::from).collect();
+        slots.sort();
+        let mut caps = str_list(&manifests[module], "provides.capabilities");
+        caps.sort();
+        assert_eq!(slots, caps, "{module} 的 [faces] 与 manifest provides 漂移");
+        for s in &slots {
+            assert!(table.rr3_slot_table_contains(s), "[faces] 引用表外格位 {s}");
+        }
+    }
+}

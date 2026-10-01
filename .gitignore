@@ -26,6 +26,8 @@ docs/superpowers/
 !modules/**
 !contracts/
 !contracts/**
+!profiles/
+!profiles/**
 !tools/
 !tools/**
 !legacy/

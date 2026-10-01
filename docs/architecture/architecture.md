@@ -64,7 +64,7 @@ Yocto（后期再评估，双轨不含第三轨）、容器编排层（OCI 只�
 │  rrd 守护进程：事件总线 · 模块注册表 · HAL · 看门狗     │
 │  rr-ipc / rr-bus / rr-registry / rr-hal / rr-ota     │
 │  能力格坐标系 contracts/slots.toml · 装配单 profiles/  │
-│  （ADR-0012，规划落点，见 §3 末注记）                   │
+│  （ADR-0012）                                          │
 ├─────────────────────────────────────────────────────┤
 │  OS 层 Layer 0（ADR-0013 双轨）                       │
 │  快路：Debian / Armbian / Alpine + payload 安装包      │
@@ -100,8 +100,12 @@ rock3/
 │   ├── README.md                  ← 歧义裁定与"契约只增不改"的演进规则
 │   ├── envelope.schema.json       ← A-IPC 128B 消息头 + 5 种 payload 类型契约（ADR-0006）
 │   ├── topics.toml                ← 主题所有权注册表（前缀归属与校验入口见 §6.3）
+│   ├── slots.toml                 ← 能力格坐标系总表（查册门真值，§4.3、ADR-0012 裁定 1）
 │   ├── golden/                    ← event-header-128.hex：一条真实头的 hex 向量（同机字节基准）
 │   └── events/                    ← 各模块事件负载 JSON Schema 的落点（命名与登记规矩在其 README）
+│
+├── profiles/                      ← 机器人装配单（纯数据，一机型一文件，§4.3、ADR-0012 裁定 3）
+│   └── default.toml               ← RK3566 参考机：[os] 轨道 · [bindings] 格位→件 · [faces] 模块→格位
 │
 ├── base/                          ← 基座层（横切关注点，见 §2 原则 1）
 │   ├── os/                        ← OS 双轨（ADR-0001 选型、ADR-0013 分轨）
@@ -177,14 +181,14 @@ rock3/
 本树只画**已存在的结构**：`base/`、`modules/`、`tools/` 与每个 crate、每个模块目录还各有一份
 就地自述的 `README.md`（职责写在那里，进度不写）。
 
-> **规划落点（本树刻意未画）**：以下目录/文件由 [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)
-> 与 [ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md) 定了设计落点，
-> 但**尚未落盘**——按"只画已存在的结构"纪律不进上面的树，实体创建时必须与本节同批补画：
+> **规划落点**：以下落点由 [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)
+> 与 [ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md) 定了设计落点；
+> 已落盘的划线注销（§3 树已同批补画），仍未落盘的按"只画已存在的结构"纪律不进上面的树：
 >
 > | 落点 | 归属 | 语义 |
 > |---|---|---|
-> | `contracts/slots.toml` | ADR-0012 裁定 1 | 能力格坐标系总表（与 topics.toml 同级同纪律：只增不改） |
-> | `profiles/` | ADR-0012 裁定 3 | 机器人装配单（纯数据，一机型一文件） |
+> | ~~`contracts/slots.toml`~~ | ADR-0012 裁定 1 | **已落盘**（2026-10-01，见上方 §3 树；查册门接线于 rr-registry） |
+> | ~~`profiles/`~~ | ADR-0012 裁定 3 | **已落盘**（2026-10-01，`default.toml` RK3566 参考机） |
 > | ~~`base/os/buildroot/` + `base/os/distro/`~~ | ADR-0013 裁定 3 | **已落盘**（2026-10-01，见上方 §3 树） |
 > | payload 打包器 + CI 双矩阵 | ADR-0013 裁定 2/5 | 同一 payload 两轨同批验证 |
 
@@ -295,18 +299,19 @@ Registered ──── rr3_reg_beat（心跳，刷新到期基准）───�
 3. **在册模块上限** `RR3_REG_MAX_MODULES`（值 16）：目标 5+1 模块留余量，超额注册直接拒；
    表满但同名条目是 `Failed` 属合法的替换式重注册，不被容量门拒。
 
-### 4.3 能力格坐标系与装配单（ADR-0012，规划落点）
+### 4.3 能力格坐标系与装配单（ADR-0012）
 
 > 本节是设计语义；裁定全文（含备选否决与不做清单）见
-> [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)。**`contracts/slots.toml` 与
-> `profiles/` 尚未落盘**（§3 末注记），实体不得与本节冲突。
+> [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)。`contracts/slots.toml` 与
+> `profiles/` 已于 2026-10-01 落盘（§3 树），实体不得与本节冲突。
 
 **立格**：能力格（slot）= 一个固定命名的能力位，只描述"这里需要/可以有什么"，不描述
-"谁来填"。总表 `contracts/slots.toml` 分三层——基础层（`bus`/`ipc`/`registry`/`arbitration`/
-`watchdog`/`ota`/`log`/`time`，基座内建永远在位）、身体层（`audio.capture`/`audio.play`/
-`audio.vad`/`motion.servo`/`motion.relay`/`power`/`net`/`sense.imu`/`sense.env`/
-`face.display`）、认知层（`dialog.brain`/`dialog.asr`/`dialog.llm`/`dialog.tts`）。
-格位命名两段式 `<域>.<格>`（基础层单段），与主题命名 `rr3-<模块>/<域>/<事件>`（§6.3）
+"谁来填"。总表 `contracts/slots.toml` 分三层——基础层（`bus.publish`/`bus.subscribe`/
+`bus.rpc`/`net.online`/`power.battery`，即 `base_capabilities` 的表内化，格名随原能力名，
+基座内建永远在位）、身体层（`act.servo`/`act.led`/`net.wifi`/`net.bt`/`ui.face`/
+`audio.playback`/`audio.capture`/`audio.vad`/`sensor.env`/`sensor.imu`/`power.charger`）、
+认知层（`cognition.dialog`/`cognition.asr`/`cognition.llm`/`cognition.tts`）。
+格位命名两段式 `<域>.<格>`，与主题命名 `rr3-<模块>/<域>/<事件>`（§6.3）
 不同轴。**格位成活双达标**：有效扇入 ≥3 + CI 测试接线，缺一不立格；不留空格。
 
 **造件**：模块只含机制（怎么采 PCM、怎么驱动舵机），策略不进模块（§2 原则 4）；

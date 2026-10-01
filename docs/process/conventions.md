@@ -370,6 +370,13 @@ test_dialog 7）。e2e：`rr3-sim --brain` 四真进程全语音对话闭环（r
 rr3-sense(sim burst) + rr3-brain + rr3-interact，云端 mock——唯一假的一跳是云端
 socket）实跑 2/2 OK，判据：三模块 running + brain 日志「对话轮完成」+ interact
 日志「tts:」+ `denied_publish = 0`。
+2026-10-01 T1（能力格坐标系落盘，ADR-0012）同口径：rr-registry lib 23→**26**（slots 3：
+契约解析形状 20 格/层分布 5-11-4 / 坏文本给空表且空表报错 / 形状检查复用 capability
+规则函数抓非法名与非法层），①b Unix **294**（291 + 3）/ Windows **237**（234 + 3
+推算，slots.rs 平台无关；未实跑）。② 29→**33**（查册门 4：基础层与
+`base_capabilities` 钉死等价 / 格位表形状 pin 全部 20 条 `(name, layer)` 在册且层分布
+5/11/4 / manifest provides+depends 双侧查册 / default profile bindings-faces 装配自洽）。
+③ 5 / ②b 5 / ④ 9 个独立工程均无变化。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
