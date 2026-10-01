@@ -293,6 +293,34 @@ rr-hal 9 + rrd lib 5——`registry` 2 / `manifest` 1 / `rpc` 2——+ 线级 Un
 Unix **259**（249 + 10）/ Windows **214**（未实跑，按 204 + 10 推算）。
 ② **29** 条；③/②b/④ 无变化。语义裁定全文见 ADR-0009）。
 
+测试面如实登记（2026-10-01 F2 依赖仲裁实装复测（rrd boot 接仲裁 + Degraded 相位接线，
+语义裁定全文见 ADR-0009）。净增 **10** 条：rr-registry lib 20→23——`depends::tests` 3 条
+（`plan_boot` 三分流：不可满足只拒点名模块、被拒模块的 provides 仍计入可满足性宇宙故
+下游不连坐、环 fatal 不产出半死集合）+ rrd lib 101→105——`manifest::tests` 1 条
+（`[provides].capabilities` 可选段且逐项类型检查）+ `registry::tests` 3 条（提供者全灭才降、
+双提供者死一不降、恢复须**全部** required 就位且重注册换新 task）；线级新目标
+`rrd/tests/e2e_depends.rs` **3** 条（整体 `#![cfg(unix)]`，Unix 独有）：D1 链式启动序
+（dependent 的 `start_priority=10` 故意低于 provider 的 50，拓扑主键压过优先级——旧的全局
+优先级排序此处是反的；spawn 行由唯一 supervisor 线程串行打出，按行内位置断言序，注册序因
+两个子进程并行 exec 不可用作序证据）、D2 环拒 boot（直接 `Command` 起 rrd 读 stdout 到 EOF，
+断言非 0 退出 + `拒绝 boot：`/`依赖环涉及` 点名环成员 + 一个子进程都没起）、D3 降级→恢复
+（提供者被测试侧 SIGKILL——死亡时刻收进测试手里，判据无时间赌注，watchdog 全程静默；
+依赖者线上注册手动喂到 Running → kill → `依赖断供 → degraded` 且**依赖者自己**收到那条
+degraded 帧 + `重启计划` 否定针（裁定 4）→ always 自动重生 attempt=1 → `依赖恢复 → running`）。
+**本轮实跑勘误与语义补裁**：① 实装时发现 `plan_boot` 首版把"剔除后重仲裁"做成 fatal——
+仲裁引擎的可满足性循环没跳过已剔除模块，同一错误第二轮再报、剔除集合零增长走防御分支；
+已修（跳过剔除者），两平台同修、无条数变化。② 降级/解除广播的排除项从依赖者自身 task
+改为 `RR3_TASK_RRD`（不排除，E-9 同一理据：依赖者恰恰是最需要知道"我已降级"的一方，
+且它没有别的途径查自己的相位），三处调用点（daemon/watchdog、supervisor/收尸、conn/解除）
+统一，D3 的线上读帧钉住。③ 既有表级用例 `provider_recovery_undegrades_only_when_all_deps_satisfied`
+首版期望写反（按"全灭才降"写）——降级是**断供即降级**的非对称设计（任一 required 能力
+失去全部提供者即置位，解除才要求全部就位），已按实现与 ADR 改正断言并把"已 Degraded 不重复
+传播"一并钉入。本轮 ①b：Unix **269**（实跑 = F1 的 259 + 10；逐目标：rr-bus 10 + rr-hal 13 +
+rr-ipc lib 38 + `envelope_meta` 4 + rr-ota 5 + rr-registry lib 23 + 契约 29 + rrd lib 105 +
+线级 `e2e_audio_chain` 1 + `e2e_depends` 3 + `e2e_sim_peer` 5 + `e2e_spawn_restart` 5 +
+`e2e_watchdog` 4 + `module_call` 4 + `register_publish` 19 + `socket_banner` 1 = 269）/
+Windows **221**（未实跑，按 214 + 平台无关 7 推算）。② 29 条无变化；③/②b/④ 无变化）。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
