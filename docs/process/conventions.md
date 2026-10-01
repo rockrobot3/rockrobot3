@@ -398,6 +398,11 @@ magic LE 字节 31 45 52 41 / payload 枚举值）随之在该目标求值；③
 `--platform linux/arm64` 容器真跑并与宿主输出逐行 diff。缺环境打 `SKIP` 并明说，
 不静默当作已验证；`--strict` 供有容器环境的一方在 SKIP 时拒绝放行（退 2）。
 双架构真跑结果何时回填，见 [../status.md](../status.md)。
+2026-10-01 T4：`--strict` 模式已接 CI——`.github/workflows/ci.yml` 新增 `ipct003` job
+（ubuntu-latest：x86_64 宿主 + `aarch64-unknown-linux-gnu` 交叉目标 + Docker
+`rust:1-slim` 容器经 QEMU `--platform linux/arm64` 真跑），四步齐备无 SKIP 才绿；
+远端跑绿后把 envelope.schema.json 的 IPC-T-003 移入 coverage 并回填 status.md。
+本机（无 Docker）仍按宽容模式跑 ①②，③SKIP 照登。
 2026-10-01 F5 本机实况：Intel Mac（macOS 13，无 Docker）跑出 ①PASS（宿主 x86_64，
 dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 check 通过，const
 布局断言已在 aarch64 目标求值）③SKIP（本机无容器环境）。三方对拍的第三路真跑待
