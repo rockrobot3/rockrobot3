@@ -24,7 +24,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 204 条（Windows，推算）/249 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 214 条（Windows，推算）/259 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -280,6 +280,18 @@ rr-hal 9 + rrd lib 5——`registry` 2 / `manifest` 1 / `rpc` 2——+ 线级 Un
 本轮两个新测试目标整体挂 `#![cfg(unix)]` 门的 5 条。M3 新增的六个测试模块（`client.rs` / `backend.rs` /
 `sim.rs` / `registry.rs` / `manifest.rs` / `rpc.rs` 的增量）无一挂平台门，Windows 上照常参与编译。
 ②/②b/③/④ 本轮无变化（仍是 ② 24 / ②b 5 / ③ 5 / ④ 9 个独立工程）。
+
+测试面如实登记（2026-10-01 F1 依赖仲裁复测。rr-registry 净增 **10** 条，全部平台无关、
+两平台同加：lib 15→20——`depends::tests` 5 条（事实提取与 `start_priority` 缺省 100、
+缺名与非字符串项逐条点名、同名先行拒绝、层内 `(priority, name)` 确定性次键、
+自环整批拒且无辜者不点名）+ 契约 24→29——`manifest_unknown_dependency_rejected`
+随 ADR-0009 裁定 1 **迁移**为 `manifest_unknown_dependency_moved_to_resolution_layer`
+（单件层放行、仲裁层点名拒"未知能力"，迁移非放宽，条数不变），另新增 5 条：链式
+拓扑序与层内次键、环+环下游整批拒、base 能力无需模块提供者、多提供者全排前、
+`every_module_dependency_set_is_satisfiable_and_acyclic`（CI 全集补位——单件校验
+不再判可满足性后，modules/ 六模块的整体依赖面由这条在 CI 层兜住）。本轮 ①b 推算：
+Unix **259**（249 + 10）/ Windows **214**（未实跑，按 204 + 10 推算）。
+② **29** 条；③/②b/④ 无变化。语义裁定全文见 ADR-0009）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
