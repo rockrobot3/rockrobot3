@@ -1,30 +1,53 @@
 # rock3 总体架构文档
 
-- **状态**：v0.4（只写设计语义：目录树、阶段机、传输层、启动链按代码真实形状订正，
+- **状态**：v0.5（融入能力格坐标系与装配单 [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)、
+  OS 双轨 [ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md)；只写设计语义，
   一切"做到哪"的句子移出本档）
-- **日期**：2026-09-30
+- **日期**：2026-10-01
 - **实况出口**：本档不回答"某能力有没有实现"。凡此类问题一律指向 [`../status.md`](../status.md)；
   本档里出现进度性断言即视为待订正。
-- **关联决策**：[ADR-0001](../process/adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md) · [ADR-0002](../process/adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](../process/adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](../process/adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](../process/adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](../process/adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](../process/adr/ADR-0007-控制面分层与模块级升级.md)
+- **关联决策**：[ADR-0001](../process/adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md)（构建系统主路线已被 ADR-0013 修订） · [ADR-0002](../process/adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](../process/adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](../process/adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](../process/adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](../process/adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](../process/adr/ADR-0007-控制面分层与模块级升级.md) · [ADR-0008](../process/adr/ADR-0008-传输层trait定型与uds实现.md) · [ADR-0009](../process/adr/ADR-0009-依赖仲裁-启动序与降级传播.md) · [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md) · [ADR-0011](../process/adr/ADR-0011-shm传输-单写者多读者环形缓冲.md) · [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md) · [ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md)
 - **命名速查**：[naming.md](../process/naming.md)
 
 ---
 
 ## 1. 定位与目标
 
-RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人项目（体积约束约 0.5L），由 ESP32 固件项目（`legacy/`）演进而来，最终面向具身机器人发展。
+RockRobot3（rock3）是面向 **Linux 6.6 mainline** 的具身机器人底座（起点为 RK3566 桌面陪伴
+形态，体积约束约 0.5L），由 ESP32 固件项目（`legacy/`）演进而来，最终面向具身机器人发展。
+
+**底座 = payload**：rock3 的交付物不是某一块板的镜像，而是一个可安装的**底座 payload**——
+`rrd` + `rr-hal` + `contracts/` + 安装器 + 装配单。板卡与 OS 差异由三层模型消化
+（[ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md)）：
+
+```
+Layer 2  模块层     rr3-sense / rr3-act / … / rr3-brain（OCI 分发，rrd 编排）
+Layer 1  底座 payload（rock3 本体）rrd + rr-hal + contracts + 装配单 + 安装器
+Layer 0  板卡支持   白拿上游发行版（Debian/Armbian/Alpine）；Buildroot 保底轨
+```
+
+**快速部署三步**（换一块板 / 一台机器人的全部动作，不改 rock3 代码）：
+
+1. **Layer 0 就绪**——装一块能跑标准发行版的板；发行版覆盖不到时走保底轨 Buildroot 镜像；
+2. **装 payload**——安装包（deb 主形态）落 rrd、HAL 后端与契约文件；
+3. **写装配单**——`profiles/<机型>.toml` 声明格位绑定（ADR-0012），`rrd` 启动装配链按
+   profile + 硬件探测匹配。
+
+任何"需要改 rock3 代码才能换板"的现状都视为待修的泛化欠账。
 
 **硬性目标**：
 
 | 目标 | 说明 |
 |---|---|
-| 自烧录 OS | 任意开发板不拆机烧录（maskrom 路线），换板不需要烧录器 |
+| 自烧录 / 自更新 OS | 保底轨 maskrom 自烧录（不拆机，Rockchip 路线）；日常自更新由 A/B OTA 承担 |
 | 模块化 5+1 | sense / act / interact / power / connect + brain，进程级隔离 |
 | 基座能力 day-one | 模块注册、看门狗、A/B OTA、工厂恢复 |
 | 待机功耗 | 第一版即含电源管理，待机 <1W |
 | 可演进 | 保留接入 Airymax OS/RT 的目标（运行时层对接，见 ADR-0004） |
 
-**明确不做**：ROS 2（太重）、PyO3 嵌入（改用独立进程）、gRPC（单机 UDS 足够）、Yocto（后期再评估）。
+**明确不做**：ROS 2（太重）、PyO3 嵌入（改用独立进程）、gRPC（单机 UDS 足够）、
+Yocto（后期再评估，双轨不含第三轨）、容器编排层（OCI 只作模块分发格式，`rrd`
+保持模块生命周期的唯一所有者，见 ADR-0013 裁定 4）。
 
 ---
 
@@ -32,25 +55,30 @@ RockRobot3（rock3）是面向 **RK3566 + Linux 6.6** 的桌面陪伴机器人�
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  模块层（5+1，独立进程，崩溃隔离）                      │
+│  模块层 Layer 2（5+1，独立进程，崩溃隔离）              │
 │  rr3-sense  rr3-act  rr3-interact  rr3-power        │
 │  rr3-connect            rr3-brain (Python)          │
+│  分发 = OCI 镜像（打包格式，非编排层，ADR-0013）        │
 ├─────────────────────────────────────────────────────┤
-│  基座层 base/                                        │
+│  底座 payload Layer 1（rock3 本体）                    │
 │  rrd 守护进程：事件总线 · 模块注册表 · HAL · 看门狗     │
-│  rr-ipc / rr-bus / rr-registry / rr-hal / rr-ota    │
+│  rr-ipc / rr-bus / rr-registry / rr-hal / rr-ota     │
+│  能力格坐标系 contracts/slots.toml · 装配单 profiles/  │
+│  （ADR-0012，规划落点，见 §3 末注记）                   │
 ├─────────────────────────────────────────────────────┤
-│  OS 层 base/os/                                      │
-│  Buildroot + Linux 6.6 (Rockchip RK3566)             │
-│  A/B 分区 slotA/slotB/factory · maskrom 自烧录        │
+│  OS 层 Layer 0（ADR-0013 双轨）                       │
+│  快路：Debian / Armbian / Alpine + payload 安装包      │
+│  保底：Buildroot + Linux 6.6（base/os，量产冻结）      │
+│  A/B 分区 slotA/slotB/factory · maskrom 自烧录         │
 └─────────────────────────────────────────────────────┘
 ```
 
 核心原则：
 
 1. **基座承载横切关注点**：安全（急停/限位/低电保护）、日志、时间同步、OTA 全部在 base，不进模块——基座存活则安全兜底存活
-2. **模块间零直连**：一切交互经事件总线/RPC，模块只依赖"能力名"不依赖具体模块名
+2. **模块间零直连**：一切交互经事件总线/RPC，模块只依赖"能力名"不依赖具体模块名；能力名本身有坐标系（§4.3，ADR-0012）
 3. **brain 是唯一编排者**：对话策略只存在于 rr3-brain（承接 legacy main.c 的"薄壳"哲学）
+4. **机制与策略分离**：模块只含机制（怎么采 PCM、怎么驱动舵机）；装配（谁提供哪个格）归装配单、策略（何时说、说什么）归 brain、提供者选择归 rrd 仲裁（ADR-0012）
 
 ---
 
@@ -147,6 +175,17 @@ rock3/
 本树只画**已存在的结构**：`base/`、`modules/`、`tools/` 与每个 crate、每个模块目录还各有一份
 就地自述的 `README.md`（职责写在那里，进度不写）。
 
+> **规划落点（本树刻意未画）**：以下目录/文件由 [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)
+> 与 [ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md) 定了设计落点，
+> 但**尚未落盘**——按"只画已存在的结构"纪律不进上面的树，实体创建时必须与本节同批补画：
+>
+> | 落点 | 归属 | 语义 |
+> |---|---|---|
+> | `contracts/slots.toml` | ADR-0012 裁定 1 | 能力格坐标系总表（与 topics.toml 同级同纪律：只增不改） |
+> | `profiles/` | ADR-0012 裁定 3 | 机器人装配单（纯数据，一机型一文件） |
+> | `base/os/buildroot/` + `base/os/distro/` | ADR-0013 裁定 3 | 现 `base/os/` 拆为保底轨与快路两目录（现内容平移） |
+> | payload 打包器 + CI 双矩阵 | ADR-0013 裁定 2/5 | 同一 payload 两轨同批验证 |
+
 ---
 
 ## 4. 模块模型
@@ -200,7 +239,9 @@ watchdog_timeout_ms = 5000
   `start_priority` 降为层内次键；环拒整个 boot，能力不可满足只拒该模块；提供者全灭 →
   下游置 `Degraded`、任一恢复 → 解除（降级不重启、不吃预算）。裁定全文见
   [ADR-0009](../process/adr/ADR-0009-依赖仲裁-启动序与降级传播.md)；接线到哪一步属实况，
-  见 [`../status.md`](../status.md)。
+  见 [`../status.md`](../status.md)。**能力名的坐标系收敛**：可引用的能力最终收敛到
+  `contracts/slots.toml` 能力格总表（§4.3、ADR-0012 裁定 1/5）——manifest 只许引用表内格位，
+  "未知能力"的查册由 CI 全集层与仲裁共用同一真值实现。
 - 事件/RPC 主题必须以 `manifest.name` 为前缀，越权发布一律拒绝；三个校验入口见 §6.3
 - **上面的示例只演示字段形状，其中 `audio/asr_final`、`audio/set_mute` 并未登记**：照抄会被
   契约测试以"未注册主题"拒。`modules/` 下六份真实 manifest 是可直接对照的样板
@@ -251,6 +292,36 @@ Registered ──── rr3_reg_beat（心跳，刷新到期基准）───�
    巨大差值把健康模块集体判死。
 3. **在册模块上限** `RR3_REG_MAX_MODULES`（值 16）：目标 5+1 模块留余量，超额注册直接拒；
    表满但同名条目是 `Failed` 属合法的替换式重注册，不被容量门拒。
+
+### 4.3 能力格坐标系与装配单（ADR-0012，规划落点）
+
+> 本节是设计语义；裁定全文（含备选否决与不做清单）见
+> [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)。**`contracts/slots.toml` 与
+> `profiles/` 尚未落盘**（§3 末注记），实体不得与本节冲突。
+
+**立格**：能力格（slot）= 一个固定命名的能力位，只描述"这里需要/可以有什么"，不描述
+"谁来填"。总表 `contracts/slots.toml` 分三层——基础层（`bus`/`ipc`/`registry`/`arbitration`/
+`watchdog`/`ota`/`log`/`time`，基座内建永远在位）、身体层（`audio.capture`/`audio.play`/
+`audio.vad`/`motion.servo`/`motion.relay`/`power`/`net`/`sense.imu`/`sense.env`/
+`face.display`）、认知层（`dialog.brain`/`dialog.asr`/`dialog.llm`/`dialog.tts`）。
+格位命名两段式 `<域>.<格>`（基础层单段），与主题命名 `rr3-<模块>/<域>/<事件>`（§6.3）
+不同轴。**格位成活双达标**：有效扇入 ≥3 + CI 测试接线，缺一不立格；不留空格。
+
+**造件**：模块只含机制（怎么采 PCM、怎么驱动舵机），策略不进模块（§2 原则 4）；
+模块对外的身份是"我 provides 哪些格位"。
+
+**装配单**：一台机器人的选型与绑定收敛为一份 `profiles/<机型>.toml` 纯数据文件
+（`[os]` 轨道 / `[bindings]` 格位→件 / `[faces]` 模块→格位集合）。**rrd 启动装配链**：
+读 profile + 硬件探测（`/proc/device-tree`、`/sys`、ALSA 枚举）→ 匹配 → 依赖仲裁
+（§7.1、ADR-0009）→ **缺格置 Degraded**（fail-closed，不新增相位）。profile 只声明
+"什么格位、由谁、给哪个形态"，不写启动序（那是仲裁输出）。
+
+**分界**：⊗装配（跨格位静态绑定，boot 前，profile + rrd）与 ⊙编排（运行期动态协调，
+brain）分立；**F⊗F 非法**——brain 不许运行期决定能力归属，rrd 不许运行期重排装配。
+
+**门禁三项**（fail-closed）：①模块互依赖成环拒整个 boot（ADR-0009）；②格位引用越表拒
+（manifest 与 profile 双侧对 `slots.toml` 查册，与仲裁共用真值）；③机制/策略越界为
+扫描点（模块互不依赖既有纪律 + F⊗F，v0.0.1 评审项 + lint 后置）。
 
 ---
 
@@ -436,11 +507,12 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
 
 ### 7.1 启动链
 
-设计上的完整链条（目标形态，四环由 rrd 的装载/仲裁/spawn/监督环节承担）：
+设计上的完整链条（目标形态；装配环由 rrd 的 profile 装载/探测/匹配环节承担，其余四环由
+装载/仲裁/spawn/监督环节承担；装配环的设计落点见 §4.3 与 ADR-0012 裁定 3，实体尚未落盘）：
 
 ```
-kernel → init → rrd → 加载 manifests → 依赖仲裁 →
-按 start_priority 拉起模块 → 心跳监督 → 事件总线就绪
+kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 Degraded） →
+加载 manifests → 依赖仲裁（能力格坐标系，拓扑序） → 拉起模块 → 心跳监督 → 事件总线就绪
 ```
 
 `rrd` 自己这一段的契约是**定死的顺序**，`base/runtime/rrd/src/main.rs` 与
@@ -562,10 +634,12 @@ kernel → init → rrd → 加载 manifests → 依赖仲裁 →
 
 | # | 风险 | 影响里程碑 | 缓解 |
 |---|---|---|---|
-| R1 | Buildroot + RK3566 DTS/音频补丁工作量超预期 | M1 | 先 Radxa ZERO 3 现成板验证，自绘板后置；必要时 Armbian 临时垫层 |
+| R1 | 保底轨 Buildroot + RK3566 DTS/音频补丁工作量超预期 | M1 / 保底轨 | 快路上线后保底轨冻结在 Radxa ZERO 3 参考板，自绘板后置；新板优先走发行版快路（ADR-0013） |
 | R2 | ALSA 全双工延迟不达标 | M3 | legacy 闭环 2~5s 为基线，Linux 侧硬件换血预期更好；先实测再优化 |
 | R3 | Python brain GIL/冷启动 | M4 | 策略预载；必要时 brain 拆子进程 |
 | R4 | Rust↔Python 契约漂移 | M2+ | `contracts/` 目录 [SC] 唯一事实源；漂移由**三个入口**分层拦：`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表的 `rr3_reg_publish_check`（三者职责与顺序见 §6.3）。前两个在提交前跑，第三个在线上判定；它接到线上流量的哪一段属实况，见 [`../status.md`](../status.md) |
 | R5 | 0.5L 体积散热（RK3566 被动散热） | 硬件 | 选型时评估无风扇功耗档，后期实机温测 |
 | R6 | A-IPC 自实现运行时与标准偏差 | M2 | IPC-T-001~003 必测；半年复查时对照标准版本变更 |
 | R7 | 待机 <1W 需 suspend/电源状态机与 OS 深度协同 | M5 | rr3-power 与 rrd 电源状态机设计前置，模块声明 wake 权限 |
+| R8 | 快路发行版变数（glibc/systemd/内核版本差异）导致 payload 行为漂移 | 双轨 CI | 同一 payload 双矩阵执法（ADR-0013 裁定 5）：契约与冒烟用例两轨同一套，不带病上板 |
+| R9 | OCI 分发引入供应链面（镜像来源、依赖冻结后的漏洞积压） | Layer 2 分发 | 镜像来源白名单 + 版本 pin；编排权仍归 rrd（ADR-0013 裁定 4），容器不扩大故障域 |

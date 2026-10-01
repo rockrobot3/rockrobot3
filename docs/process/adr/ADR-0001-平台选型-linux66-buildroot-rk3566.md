@@ -1,6 +1,6 @@
 # ADR-0001：平台选型 —— Linux 6.6 mainline + Buildroot + RK3566
 
-- **状态**：已接受
+- **状态**：已接受；**构建系统主路线已被 [ADR-0013](ADR-0013-OS双轨-发行版快路与Buildroot保底.md) 修订**（Buildroot 主路线 → 降为保底轨，发行版快路 + 同一 payload 双轨；SoC、内核 6.6 mainline 与 maskrom 自烧录硬性目标不变）
 - **日期**：2026-09-28
 - **关联**：[architecture.md](../../architecture/architecture.md)
 
