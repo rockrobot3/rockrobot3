@@ -4,7 +4,7 @@ OS 双轨的**快路**：不自己构建 OS，用现成发行版（Armbian / Deb
 直接启动，rock3 以 **payload 层**形态安装上去——rrd、rr3-\* 模块二进制、systemd
 单元、配置与 profile，全部按"包"交付，不碰内核与引导链。
 
-与 [`../buildroot/`](../buildroot/README.md) 的关系：
+与 `../buildroot/`（保底轨，见其 patches/README.md）的关系：
 
 | | distro 快路 | buildroot 保底 |
 |---|---|---|
@@ -23,4 +23,4 @@ OS 双轨的**快路**：不自己构建 OS，用现成发行版（Armbian / Deb
   ALSA/UART 可用性），一板一文件
 
 模块层与 OS 层的边界语义见 [ADR-0013](../../../docs/process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md)；
-机型选择（哪些格位、哪个 profile）不落在本层——那是 [`profiles/`](../../../profiles/) 的活。
+机型选择（哪些格位、哪个 profile）不落在本层——那是 `profiles/`（ADR-0012 装配单）的活。

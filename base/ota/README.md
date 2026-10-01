@@ -15,7 +15,7 @@
     # rr_a peer=rr_b / rr_b peer=rr_a / rr_factory peer=rr_factory / rr_staging (模块级暂存，无对侧)
 
 `switch` 一律**拒绝执行**（退出码 1）：对块设备改引导标志属不可逆操作，写侧要与
-`base/os/board/radxa-zero3/genimage.cfg` 一起落地并实板验证——那一步今天有没有做，
+`base/os/buildroot/board/radxa-zero3/genimage.cfg` 一起落地并实板验证——那一步今天有没有做，
 唯一落点是 [`docs/status.md`](../../docs/status.md)。在此之前提供半成品的
 切换命令，等于提供一台可以砖掉的机器。
 

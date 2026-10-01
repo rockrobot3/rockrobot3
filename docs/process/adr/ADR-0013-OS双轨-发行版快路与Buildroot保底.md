@@ -1,6 +1,6 @@
 # ADR-0013：OS 双轨 —— 发行版快路 + Buildroot 保底，同一 payload 双矩阵执法
 
-- **状态**：已接受（OS 层设计裁定；`base/os/{distro,buildroot}` 双目录、payload 打包器与 CI 双矩阵为规划落点，实体归后续批次，实况见 status.md）
+- **状态**：已接受（OS 层设计裁定；`base/os/{distro,buildroot}` 双目录已落盘——2026-10-01 `{board,configs,patches}` 平移 `buildroot/`、`distro/` 骨架就位；payload 打包器与 CI 双矩阵仍归后续批次，实况见 status.md）
 - **日期**：2026-10-01
 - **关联**：[ADR-0001](ADR-0001-平台选型-linux66-buildroot-rk3566.md)（主路线由本文修订，Buildroot 降为保底轨）· [ADR-0012](ADR-0012-能力格坐标系与装配单.md)（硬件探测与装配链）· [ADR-0007](ADR-0007-控制面分层与模块级升级.md)（模块级升级/双轨升级）· [architecture.md](../../architecture/architecture.md)
 
@@ -119,10 +119,10 @@ Layer 0  板卡支持（白拿上游，不自研）
   + 写装配单"；上游内核/固件维护白拿；Buildroot 保底保住量产可复现与 maskrom
   自烧录；brain 依赖漂移随 OCI 格式消解。
 - 负面：CI 从单矩阵变双矩阵（构建时长与维护面增加）；快路接受发行版变数，
-  需双矩阵执法兜底；`base/os/` 目录拆分连带文档/链接一批变更（随实体落盘同批做）。
+  需双矩阵执法兜底；`base/os/` 目录拆分连带文档/链接一批变更（已于 2026-10-01 随目录拆分提交完成）。
 - 修订记录：**ADR-0001 的"Buildroot 主路线"裁定由本文修订**——内核选择
   （Linux 6.6 mainline）、SoC 首选（RK3566）、maskrom 自烧录硬性目标全部不变，
   仅构建系统主次对调。
-- 落点登记：`base/os/{distro,buildroot}` 目录拆分、payload 打包器、CI 双矩阵、
-  OCI 分发的 registry 选型均**未随本 ADR 落盘**，归后续批次（实况唯一落在
+- 落点登记：`base/os/{distro,buildroot}` 目录拆分**已落盘**（2026-10-01）；payload 打包器、CI 双矩阵、
+  OCI 分发的 registry 选型仍**未随本 ADR 落盘**，归后续批次（实况唯一落在
   status.md）；实体不得与本裁定冲突。
