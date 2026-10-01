@@ -3,7 +3,7 @@
 本文件是仓内**唯一**允许回答"某能力在当前 HEAD 有没有实现"的地方。其余文档只写设计语义，
 不写实况；设计文档里出现"已落地/未落地"的字样一律视为待订正（架构文档 §5 就因此整段重写过）。
 
-- **实况锚点**：本快照按锚点提交 `e9f976e`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
+- **实况锚点**：本快照按锚点提交 `540ec0f`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
   本文里的"当前 HEAD"一律指这个锚点提交的那棵树，锚点之外的增量不进本表。
 - **状态只取三值**：`已实装` / `骨架` / `未设计`。限定条件（如"仅 Unix 参与编译""仅单元层"）
   写在证据列，不塞进状态列——否则三值就退化成自由文本，也就失去了可对比性。
@@ -29,8 +29,9 @@
 | 所有权移交整帧缓冲（零拷贝落点） | 已实装 | [`buf.rs`](../base/runtime/rr-ipc/src/transport/buf.rs)：`Rr3FrameBuf` 单块连续内存（`[0..128)` 头预留区 + payload）、`rr3_seal` 原地幂等编头、`rr3_framebuf_read` 读侧同一错误语义；`Rr3Frame` 保留为纯值视图，两形状低成本互转（ADR-0007 裁定 3 / ADR-0008） |
 | `trait Transport` 与 uds / shm / tcp 分层 | 已实装 | **uds 与 shm 都是真实现；tcp 只有线上签名、一行实现都没有**（ADR-0008 裁定 4 的"不写半成品"对 tcp 仍成立）。[`transport/mod.rs`](../base/runtime/rr-ipc/src/transport/mod.rs)：三 trait——`Rr3TransportConn`（`rr3_send_buf` 消费缓冲 / `rr3_recv_buf` 返回所有权缓冲；对一切 `Read + Write + Send` 有 blanket 实现，send 前幂等 seal）、`Rr3TransportListener`、`Rr3TransportEndpoint`（cleanup → bind）；[`uds.rs`](../base/runtime/rr-ipc/src/transport/uds.rs)（`#[cfg(unix)]`）：`Rr3UdsListener`（`type Conn = UnixStream`）与客户端入口 `rr3_connect`；shm 见下一行。**不引 async**（ADR-0008 裁定 1） |
 | shm 传输（单写者多读者环形缓冲，实时控制面） | 已实装 | ADR-0011，[`shm.rs`](../base/runtime/rr-ipc/src/transport/shm.rs)：核心环平台无关——64B 区域头（magic `RR3S` / version / cap / **head 单共享变量**，Release 发布 Acquire 读取）+ 字节环，环内记录 = 一整帧（128B 头 + payload）；seqlock 式复核（拷出后 head 不变才接受）+ 半容量守卫（帧 ≤ cap/2）证明无撕裂；单写者多读者、**丢最旧保最新**——写者永不阻塞永不失败，读者落后过半圈重同步并计 `lost`（不静默）。角色分型 `Rr3ShmWriterConn` / `Rr3ShmReaderConn`（方向不匹配的方法恒报 Io），读者 `rr3_attach` 对位 uds 的 `rr3_connect`，阻塞 `recv_buf` = 200µs 退避轮询（无通知原语）。POSIX 附着段（`cfg(any(target_os = "linux", target_os = "macos"))`）：**手写 6 函数 extern 面**（shm_open / shm_unlink / ftruncate / mmap / munmap / close，不引 libc crate，依赖预算零增量）；macOS 的 shm fd 只支持 mmap（read/pread 报 ENXIO/ESPIPE），附着走"64B 探头映射校验 → 按 cap 全量映射"两步法。默认容量 1MiB（`rr3_bind_with_cap` 可建大区），对象名默认 `/rock3-ipc-shm`、可用 `RR3_SHM_NAME` 环境变量覆盖。11 条测试（核心 7 全平台 + POSIX 4 真 shm 往返）。**不做清单（ADR-0011）**：tcp、rrd 接线（[`conn.rs`](../base/runtime/rrd/src/conn.rs) 仍 UnixStream）、F_ZEROCOPY grant、F_URGENT 行为差异、通知原语、可靠交付、跨进程 e2e |
-| IPC-T-003 跨架构对拍（x86 ↔ aarch64 字节布局一致） | 骨架 | **三方对拍 ①②本机已过、③容器真跑未发生**：①宿主 x86_64（Intel Mac）`ipct003_dump` 输出与 [`golden/event-header-128.hex`](../contracts/golden/event-header-128.hex) 逐字节一致（F5 实跑，登记于 conventions.md §2 平台条件脚本段）；②`aarch64-unknown-linux-gnu` 目标已装，交叉 `cargo check` PASS——header.rs 的编译期 const 断言已在 aarch64 目标求值；③`linux/arm64` 容器真跑 SKIP（本机无 Docker）。[`tools/ci/ipct003.sh`](../tools/ci/ipct003.sh) 缺环境打 `SKIP` 明说、不静默冒充已验证，`--strict` 供有容器环境的一方拒绝放行；换机后补跑一次 `--strict` 全绿即可结项（见"本机无法收口"第 4 条）。登记见 [`envelope.schema.json`](../contracts/envelope.schema.json) 的 `x-rock3-v0.0.1-uncovered` 与 [contracts/README.md](../contracts/README.md) 演进登记 |
+| IPC-T-003 跨架构对拍（x86 ↔ aarch64 字节布局一致） | 骨架 | **三方对拍 ①②本机已过、③容器真跑未发生（已接 CI 平台条件）**：①宿主 x86_64（Intel Mac）`ipct003_dump` 输出与 [`golden/event-header-128.hex`](../contracts/golden/event-header-128.hex) 逐字节一致（F5 实跑，登记于 conventions.md §2 平台条件脚本段）；②`aarch64-unknown-linux-gnu` 目标已装，交叉 `cargo check` PASS——header.rs 的编译期 const 断言已在 aarch64 目标求值；③`linux/arm64` 容器真跑 SKIP（本机无 Docker）。[`tools/ci/ipct003.sh`](../tools/ci/ipct003.sh) 缺环境打 `SKIP` 明说、不静默冒充已验证；`--strict` 已接入远端 CI——ci.yml 的 `ipct003` job（540ec0f：ubuntu runner + QEMU arm64 + 容器真跑，见 [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml)），远端跑绿一次即可把本行与"本机无法收口"第 4 条结项。登记见 [`envelope.schema.json`](../contracts/envelope.schema.json) 的 `x-rock3-v0.0.1-uncovered` 与 [contracts/README.md](../contracts/README.md) 演进登记 |
 | manifest 校验（字段 + 跨字段规则） | 已实装 | [`schema.rs`](../base/runtime/rr-registry/src/schema.rs) + [`validate.rs`](../base/runtime/rr-registry/src/validate.rs)（入口 `rr3_registry_validate_manifest_text`）；契约面在 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs) |
+| 能力格坐标系与装配单（slots.toml / profiles） | 已实装 | ADR-0012。唯一事实源 [`contracts/slots.toml`](../contracts/slots.toml)（20 格 = base 5 + body 11 + cognition 4，schema_version 1；**基础层 5 格随原能力名两段式、与 `base_capabilities` 表钉死等价**）；装配单 [`profiles/default.toml`](../profiles/default.toml) 纯数据——`[bindings]` 15 条 body+cognition 格→模块（基础层不绑模块、由基座内建承载），`[faces]` 6 模块 = 各自 manifest provides 全集。查册门在 [`slots.rs`](../base/runtime/rr-registry/src/slots.rs)（`Rr3SlotTable`：非空护栏 + 复用 capability 校验 + layer 在册）；契约守护 4 条进 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs)（基础层等价 / 20 格形状 pin / manifest 能力词全查册 / default 装配单双侧对表）。**rrd 装配链未接线**（boot 按 slots/profiles 装配属后续批次，ADR-0012 后果段如实登记） |
 | 主题注册表与前缀归属 | 已实装 | [`topics.toml`](../contracts/topics.toml)（内容本身不在此复述）+ [`topics.rs`](../base/runtime/rr-registry/src/topics.rs) 的 `Rr3TopicSet` / `rr3_topic_set_owner`；装载侧规范化与叠加见 [`topics_load.rs`](../base/runtime/rrd/src/topics_load.rs) |
 | 依赖仲裁（boot 启动序 + 降级传播） | 已实装 | ADR-0009。仲裁入口 `rr3_registry_plan_boot`（[`depends.rs`](../base/runtime/rr-registry/src/depends.rs)）：**依赖拓扑为主键、`start_priority` 为层内次键**（dependent 的低优先级压不过拓扑序——旧的全局优先级排序在 D1 场景是反的）；**环 fatal 拒整个 boot**；**不可满足只剔点名模块并重仲裁**（被剔者的 provides 仍计入可满足性宇宙，下游不连坐）。rrd 侧接线：[`daemon.rs`](../base/runtime/rrd/src/daemon.rs) 在投 boot 队列前仲裁（拒绝打 `拒绝 boot：` 并非 0 退出）；降级账本在 [`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `rr3_reg_degrade_after`（**断供即降**：任一 required 能力失去全部提供者即置位）与 `rr3_reg_undegrade_after`（解除须**全部** required 就位），supervisor 收尸 / watchdog 判死 / conn 解除三路触发，广播**不排除依赖者自己**（它最需要知道"我已降级"，且没有别的查询途径）；降级不出重启计划、不吃预算（裁定 4）。线级证据：[`tests/e2e_depends.rs`](../base/runtime/rrd/tests/e2e_depends.rs) 3 条（D1 链式启动序 / D2 环拒 boot / D3 降级 → always 自动重生 → 恢复）。不做清单（ADR-0009）：跨机、动态重仲裁、optional 传播、依赖触发重启、权限仲裁 |
 | rrd 在册表：注册 / 心跳 / 死亡记账 / 扇出 / 快照 | 已实装 | **且被连接层与 supervisor 实际调用**：[`registry.rs`](../base/runtime/rrd/src/registry.rs) 的 `rr3_reg_add` / `rr3_reg_beat` / `rr3_reg_remove` / `rr3_reg_death` / `rr3_reg_child_exit` / `rr3_reg_fanout` / `rr3_reg_snapshot`。心跳回**三态** `Rr3Beat { Rejected, Kept, Promoted }`（`Promoted` = registered → running 的唯一升级，conn 据此广播一次 running 上线）；死亡回**三态** `Rr3Death { DeferredToExitStatus, Silent, Broadcast }`。表级账三件：`crash_streak`（按 name 计、跨重注册成立）、`owned`（"这个进程是我起的"所有权标记）、`stopped`（显式退场标记）。（同文件的 `rr3_reg_name_of` 今天仍**没有**跨文件调用点：已落地的发布分支改用登记期身份 `me.name`，见下文"发布归属判定"一行） |
@@ -50,7 +51,7 @@
 | Buildroot OS 层（defconfig / 分区布局 / 引导链 / 烧录文档） | 骨架 | **结构就绪、构建与实板验证未发生**（硬件未采购）。OS 层已按 ADR-0013 拆双轨（2026-10-01：`{board,configs,patches}` 平移 `buildroot/`，`distro/` 快路骨架就位）。buildroot 轨已落树：[`configs/rock3_zero3_defconfig`](../base/os/buildroot/configs/rock3_zero3_defconfig)（Buildroot + Linux 6.6 + aarch64，BusyBox init，ALSA/Python，post-build/post-image 挂钩）；[`buildroot/board/radxa-zero3/genimage.cfg`](../base/os/buildroot/board/radxa-zero3/genimage.cfg)（boot + `rr_a`/`rr_b`/`rr_factory`/`rr_staging`/data 六分区；**容量一律 `@XXX_SIZE@` 构建期占位符**，由 [`post-image.sh`](../base/os/buildroot/board/radxa-zero3/post-image.sh) 注入并做残留检查——容量不在配置里冻结，见 [`base/ota/README.md`](../base/ota/README.md)）；[`extlinux.conf`](../base/os/buildroot/board/radxa-zero3/extlinux.conf)（root=LABEL=rr_a；bootlimit/altbootcmd 回滚链属 M6 写侧）；[`post-build.sh`](../base/os/buildroot/board/radxa-zero3/post-build.sh)（/var/run tmpfs、rr_data/rr_staging 挂载、S99rrd 自启、产物安装位，缺席只警告）；[`flash-maskrom.md`](../base/os/buildroot/board/radxa-zero3/flash-maskrom.md)（rkdeveloptool 操作序，全条目标注板上核对）；[`buildroot/patches/README.md`](../base/os/buildroot/patches/README.md)（dts/defconfig 核对清单，**无补丁本体**——不虚构来源）。distro 快路轨：[`base/os/distro/README.md`](../base/os/distro/README.md)（payload 打包器/units/boards 笔记**均未落**）。分区标签与代码常量的逐字一致性由 `rr-ota` 的 include_str 守护用例钉死（见上行"A/B OTA 切换"）。缺的手：全量 make 构建（需 Linux/容器）、dts 与 U-Boot defconfig 核对、串口出 shell、maskrom 实烧——均属板上/Linux 侧收口 |
 | `rr3-sense` / `rr3-interact` | 已实装（sim 侧） | [`modules/rr3-sense/src/main.rs`](../modules/rr3-sense/src/main.rs)：注册/心跳 → 按后端开拾音面 → 自 pacing 采集循环（sim read 即时返回、ALSA read 自耗一拍，两种后端同一形状）→ pcm STREAM + VAD 边沿上行 → `capture/dump` 点名应答（14 条模块用例 + golden PCM 向量）；[`modules/rr3-interact/src/main.rs`](../modules/rr3-interact/src/main.rs)：注册/心跳 → 占位 TTS（440Hz burst，60ms/字符封顶 10s）+ 五态表情机（talk 自动挂起/恢复）应答两个 rpc 点名（12 条模块用例）。两者失败语义同一：**业务性失败折 error 应答回话，传输性失败 `exit(1)` 交 supervisor**（不装"活着"）。**板上 ALSA 采集/回放未发生（硬件未采购）**；三真进程整链证据在 [`e2e_audio_chain.rs`](../base/runtime/rrd/tests/e2e_audio_chain.rs) |
 | `rr3-act` / `rr3-connect` / `rr3-power` | 骨架 | [`modules/*/src/main.rs`](../modules/) 三个 Rust 入口仍是十几行自述占位（M5）；各目录 `module.toml` 由 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs) 逐目录读回判合规（`rr3-brain` 那份也在内） |
-| `rr3-brain` | 骨架 | **不是 Rust 模块，没有 `src/main.rs`**：入口是 [`rr3_brain/__main__.py`](../modules/rr3-brain/rr3_brain/__main__.py)，`dialog.py` 与 `cloud/{asr,llm,tts}.py` 均为十几行的自述占位，注释写明"不做任何网络调用：握手/注册随 M2 与 M4 接入"；配置见 [`config.toml`](../modules/rr3-brain/config.toml) |
+| `rr3-brain` | 已实装 | **不是 Rust 模块，是 Python stdlib-only**（ADR-0014，零 pip 依赖）。入口 [`rr3_brain/__main__.py`](../modules/rr3-brain/rr3_brain/__main__.py)（注册 / 心跳 / 事件循环）；[`bus.py`](../modules/rr3-brain/rr3_brain/bus.py)（386 行）——128B 头逐语义镜像 rr-ipc（struct 打包、Layout C 同偏移）、帧读写、注册握手、publish / subscribe / call 客户端；[`cloud/`](../modules/rr3-brain/rr3_brain/cloud/__init__.py) 三家客户端（asr / llm / tts）urllib 真调用 + **`RR3_BRAIN_CLOUD=mock` 确定性后端**（默认 `real`，测试注入点）；[`dialog.py`](../modules/rr3-brain/rr3_brain/dialog.py) 对话状态机（vad_start → 采集 → asr → llm → tts 回路）；配置见 [`config.toml`](../modules/rr3-brain/config.toml)。26 条 stdlib unittest（`python3 -m unittest discover -s tests`）；线级证据：`rr3-sim --brain`（[`tools/sim/src/brain.rs`](../tools/sim/src/brain.rs)）**四真进程**（rrd + brain + sense(sim) + interact(sim)）全语音对话闭环演练实跑通过（5ab029e / 5b55620）。**三家云的真实凭据联调未发生**（无 key 环境，mock 之外的云端路径零实测） |
 | `rr3-ctl` | 已实装 | **限定：查询面只读；ota 恒拒（点 M6）**。rrd 侧（ADR-0010）：`rr3.ctl.*` 四方法——握手在 Register 门前按 `is_ctl` 分流，**ctl 连接不注册、不进在册表、一问一答即断**；status 走在册表快照（`rr3_reg_health_snapshot`，ctl 连接自己不得进快照）；health 回显条目自己的 heartbeat / watchdog / `since_beat_ms` 三数；logs 读 `rr3_log` 单点落的 512 行内存日志环；ota 恒拒 `Permission(-22)`（契约冻结集无 NotSupported，文案点 M6）；已注册连接上行 ctl 被 `Permission` 拒但**同一条连接心跳照常被接受**（拒帧不断连）。rrctl 侧：[`tools/rrctl`](../tools/rrctl/src/commands.rs) 独立工程四子命令真实现（UDS 一次性查询连接、5s 读超时、人读表渲染），12 条独立测试（含 2 条 fake-rrd 真 UDS 往返）不在七步门内。线级证据：[`e2e_ctl.rs`](../base/runtime/rrd/tests/e2e_ctl.rs) 5 条。字面量归 [`reference/rrd-rpc.md`](reference/rrd-rpc.md) §7 §8 |
 | `rr3-sim` | 已实装 | [`tools/sim`](../tools/sim/src/main.rs) 是脚本化全链路演练入口：起 rrd（boot spawn `rr3-sense` resident）→ 轮询 `rr3-ctl status` 等 running → 外部 spawn `sim_peer`（`publish_once`）发布 `rr3-interact/asr/text` → `rr3-ctl` 四命令巡检（`denied_publish=0` 作发布被接受的线上证据；ota 恒拒预期非 0）→ 报告 + 收尾。纯逻辑 [`drill.rs`](../tools/sim/src/drill.rs) 平台无关 7 条 + [`devices.rs`](../tools/sim/src/devices.rs) 2 条（静音帧钉尺寸/时长换算）= 9 条单测全平台可跑；编排（spawn rrd/ctl，Unix-only）与纯逻辑分居两模块。B 退场终相**不作死断言**（`publish_once` 不排空 → FIN 变 RST，unregistered/failed 两可）。五步脚本见 [`tools/sim/README.md`](../tools/sim/README.md) |
 | `contracts/events/*.schema.json` | 已实装（1 个） | [`sense-audio-vad_start.schema.json`](../contracts/events/sense-audio-vad_start.schema.json)：schema_version 1，$schema draft 2020-12，required `["seq","edge","speech_ms"]`，`rms_peak` 仅 onset 携带（`allOf` + `if/then`），`additionalProperties false`；事实源 `rr3_vad_event_body`。**pcm STREAM 的 schema 未落**——属 M5 流控裁定，[contracts/README.md](../contracts/README.md) 演进登记为已知空缺 |
@@ -63,13 +64,13 @@
 架构文档 §10 已收口为一行指向本节（迁入与删原分两步做，是为了让删除那次改动单独可审）。
 **当前实况**一栏是本快照读代码实测的结论，不是对验收标准的复述或期望。
 
-| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`e9f976e` 实测） |
+| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`540ec0f` 实测） |
 |---|---|---|---|
-| M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 | 目录树已落地，ADR 已写到 0011（超出原验收范围），`rr3-mkmod` 的产物被回灌进契约用例 —— **已收口** |
+| M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 | 目录树已落地，ADR 已写到 0014（超出原验收范围），`rr3-mkmod` 的产物被回灌进契约用例 —— **已收口** |
 | M1 | base/os：Buildroot 在 Radxa ZERO 3 跑通 | 串口出 shell；maskrom 自烧录镜像成功 | **结构就绪，未收口（板上敞口）**。defconfig、genimage.cfg（容量=构建期占位符）、extlinux.conf、post-build/post-image、flash-maskrom.md、patches/ 核对清单已全部落树，分区标签守护用例进 rr-ota；缺的是：全量 make 构建（Linux/容器侧）、dts 与 U-Boot defconfig 核对、串口出 shell、maskrom 实烧——目标硬件 Radxa ZERO 3 **未采购**，板上收口项在硬件到位前不 claim（证据见上行能力表"Buildroot OS 层"） |
-| M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **已收口（留一条环境敞口）**。验收标准逐条对照：注册/心跳/崩溃自动重启——**全到位**（注册/心跳/死亡记账/扇出被连接层调用；崩溃自动重启由唯一 supervisor 线程执行：boot spawn、串行收尸、到期重启、按策略退避，线级证据 `e2e_spawn_restart` 5 条）；IPC-T-001/002——同机 golden 往返 + 契约逐字段对齐，全绿；IPC-T-003——三方对拍 **①②本机已过**（F5：宿主 dump==golden 逐字节一致 + aarch64 交叉 check 且 const 布局断言已在该目标求值），**③容器真跑 SKIP**（本机无 Docker，换机后 `--strict` 补跑一次即结，见"本机无法收口"第 4 条），这是 M2 唯一敞口。`trait Transport` 已随 ADR-0008 定型并落地 uds 实现（`conn.rs` 一字未动）；依赖仲裁与 shm 传输为 M2 之后的增量（ADR-0009 / ADR-0011），不计入本里程碑验收 |
+| M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **已收口（留一条环境敞口）**。验收标准逐条对照：注册/心跳/崩溃自动重启——**全到位**（注册/心跳/死亡记账/扇出被连接层调用；崩溃自动重启由唯一 supervisor 线程执行：boot spawn、串行收尸、到期重启、按策略退避，线级证据 `e2e_spawn_restart` 5 条）；IPC-T-001/002——同机 golden 往返 + 契约逐字段对齐，全绿；IPC-T-003——三方对拍 **①②本机已过**（F5：宿主 dump==golden 逐字节一致 + aarch64 交叉 check 且 const 布局断言已在该目标求值），**③容器真跑 SKIP**（本机无 Docker；`--strict` 已接远端 ipct003 job（540ec0f），远端跑绿一次即结，见"本机无法收口"第 4 条），这是 M2 唯一敞口。`trait Transport` 已随 ADR-0008 定型并落地 uds 实现（`conn.rs` 一字未动）；依赖仲裁与 shm 传输为 M2 之后的增量（ADR-0009 / ADR-0011），不计入本里程碑验收 |
 | M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线，音频走 STREAM | **已收口（板上 ALSA 敞口）**。sim 侧证据齐：`rr3-sense` / `rr3-interact` 实装（见能力表两行）、rr-bus 同步客户端、rrd 四方法 RPC 与 rr3.call 路由应答回路、**三真进程** e2e（vad_start 事件上总线、pcm STREAM 有序转发、点名应答回到调用方，`e2e_audio_chain` 绿）、七步门禁 exit=0（M3 收口轮 ①b 实测 249 条，见 conventions §2 台账）；ALSA 后端代码与 feature 门配置就绪，**板上录音回放未发生**——Radxa ZERO 3 未采购，板上证据为零（见"本机无法收口"第 7 条），硬件到位前不 claim |
-| M4 | rr3-brain：移植 asr/llm/tts | 全语音对话闭环（legacy 功能等价） | `rr3-brain` 各 py 文件均为自述占位，注释写明不做任何网络调用 —— **未开工** |
+| M4 | rr3-brain：移植 asr/llm/tts | 全语音对话闭环（legacy 功能等价） | **已收口（云侧联调敞口）**。`rr3-brain` Python 实装（5ab029e，ADR-0014）：py 总线客户端 [`bus.py`](../modules/rr3-brain/rr3_brain/bus.py) 386 行逐语义镜像 rr-ipc、三家云客户端 urllib 实装（`RR3_BRAIN_CLOUD=mock` 是测试注入点）、dialog 状态机串起 vad_start → asr → llm → tts 回路；26 条 stdlib unittest；线级证据 `rr3-sim --brain` 四真进程（rrd + brain + sense + interact）全语音对话闭环演练（5b55620）——详见能力表"`rr3-brain`"行。敞口一条：三家云真实凭据联调未发生（无 key 环境），不阻塞"legacy 功能等价"的 sim 侧验收 |
 | M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 | **部分进展，未收口**。验收里"shm 控制面初版"的 **transport 层已落地**：rr-ipc shm 传输（ADR-0011，单写者多读者环形缓冲 + POSIX 附着，F6）——但 rrd / rr-bus 不接线、通知原语与零拷贝不做（ADR-0011 不做清单），tcp 仍只有线上签名；`rr3-act` / `rr3-connect` / `rr3-power` 三个 Rust 模块入口仍是自述占位 —— **未收口** |
 | M6 | A/B OTA + 恢复出厂 | 断电升级不 brick，坏 slot 自动回滚；genimage 预留模块独立可写分区 | `rr-ota` 只有类型形状 `Rr3Slot`（分区标签守护已实装），`rr3-ota-ctl switch` 恒拒；genimage.cfg 的分区集合（含 rr_staging 独立可写分区）已随 M1 落树，容量定型与写侧实板验证仍属 M6 —— **未收口** |
 
@@ -82,10 +83,10 @@
 
 | # | 无法收口的项 | 缺的证据 | 现状与后果 |
 |---|---|---|---|
-| 1 | GitHub Actions 从未在本 remote 触发过 | 一次真实的 workflow 运行记录 | 仓里的 workflow 面向 GitHub，remote 是 gitcode，它**一次都没有跑过**。门禁实际只靠本地 `bash tools/ci/check.sh`，也就是说：门禁的强度等于"提代码的人记不记得跑它"。步序见 [`process/conventions.md`](process/conventions.md) §2，脚本入口 [`tools/ci/check.sh`](../tools/ci/check.sh) |
+| 1 | 远端 CI 尚无一次真实运行回执 | gitcode 上一次四 job 全绿的运行记录 | remote 已迁 gitcode（见 [`../.github/README.md`](../.github/README.md)），ci.yml 四 job（conventions / lint / brain-unittest 双矩阵 / ipct003）已于 6a7ebf1 + 540ec0f 落盘，但**在这个 remote 上一次都没有跑过**。本地门禁照旧靠 `bash tools/ci/check.sh` 七步全绿才提交；远端首跑回执到手前，"门禁的强度等于提代码的人记不记得跑它"这半句仍然成立。步序见 [`process/conventions.md`](process/conventions.md) §2，脚本入口 [`tools/ci/check.sh`](../tools/ci/check.sh) |
 | 2 | 设备侧 `idf.py build` 的密钥门未验证 | 在装有 ESP-IDF 的机器上的一次成功构建 + 一次无密钥失败的对照 | 本机没有 ESP-IDF，也没有目标设备；`legacy/` 是冻结区，不在本轮改动范围内，但"固件侧改一处配置会不会撞上密钥门"这件事至今无人拿过证据 |
 | 3 | 泄漏 API key 的提供方侧轮换未确认 | 提供方控制台里那把 key 已失效/已替换的凭据 | 仓内曾经出现过的 key 从 git 历史里抹不掉；**从仓库角度能做的都做完了**（移到 `legacy/` 冻结、文档不再复述），但"这把 key 现在还能不能用"只有提供方能回答，这一条不闭环，第 3 项就一直是敞口 |
-| 4 | IPC-T-003 的容器真跑（三方对拍第三路） | 一次 `linux/arm64` 容器里 `ipct003_dump` 与宿主输出的逐字节 diff | **三方对拍前两路已在 F5 本机过**（98d1cc2 登记）：①宿主 x86_64 dump == golden PASS；②`aarch64-unknown-linux-gnu` 交叉 check PASS，const 布局断言已在该目标求值。缺的只剩 Docker 容器一路——本机 macOS 13 跑 Docker 困难，**换新 Mac 后**在其上跑 `bash tools/ci/ipct003.sh --strict`，全绿即可把 [`envelope.schema.json`](../contracts/envelope.schema.json) 里该条移入 coverage 并在本表结项 |
+| 4 | IPC-T-003 的容器真跑（三方对拍第三路） | 一次 `linux/arm64` 容器里 `ipct003_dump` 与宿主输出的逐字节 diff | **三方对拍前两路已在 F5 本机过**（98d1cc2 登记）：①宿主 x86_64 dump == golden PASS；②`aarch64-unknown-linux-gnu` 交叉 check PASS，const 布局断言已在该目标求值。缺的只剩 Docker 容器一路——本机 macOS 无 Docker，**该路已接远端 CI**：ci.yml 的 `ipct003` job（540ec0f，ubuntu runner + QEMU arm64 + `bash tools/ci/ipct003.sh --strict`）远端跑绿一次，即可把 [`envelope.schema.json`](../contracts/envelope.schema.json) 里该条移入 coverage 并在本表结项 |
 | 5 | 登记平台（Windows L1 / WSL2 Linux L2）的一轮 ①b 全绿回执 | 登记平台的一次 ①b 全绿 | F6 收口轮在本机 macOS 实测 ①b **全绿一次**（Unix 290 条，含 F2/F3 的线级新目标 `e2e_depends` 3 条与 `e2e_ctl` 5 条）；Windows **233 条为推算**（POSIX 段 cfg 门控不参与编译，无 Windows 目标未实跑）。conventions §2 的两平台实测仍是唯一权威口径，macOS 单次全绿不替代它 |
 | 6 | M1 的板上收口四件 | 一次全量 make 产出的镜像 + 实板串口出 shell + maskrom 实烧 + 分区容量定型 | 目标硬件 Radxa ZERO 3 **未采购**，且全量 Buildroot 构建需 Linux/容器侧（本机 macOS 无环境）。defconfig 里 `BR2_LINUX_KERNEL_INTREE_DTS_NAME` 与 `BR2_TARGET_UBOOT_BOARD_DEFCONFIG` 两个名字是否命中、genimage 引导裸区偏移是否正确，都**未核对**——核对清单在 [`buildroot/patches/README.md`](../base/os/buildroot/patches/README.md)，逐条回填前结构就绪不等于可跑 |
 | 7 | M3 的板上录音回放 | Radxa ZERO 3 上一次真机采集/回放 + `RR3_HAL_ALSA_DEVICE` 设备名核对 | 硬件未采购（同第 6 条）。ALSA 后端（[`rr-hal/src/linux.rs`](../base/runtime/rr-hal/src/linux.rs)）只有 feature 门内的代码与用例形状，**真机上一行都没跑过**；sim 侧证据（三真进程 e2e + 模块用例）不能替代板上证据 |
@@ -94,27 +95,25 @@
 
 ## 在制品
 
-**本快照只记锚点提交 `e9f976e` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
+**本快照只记锚点提交 `540ec0f` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
 改动，都不进本表，重锚时随锚点一并更新。**
 
-本锚点本身携带 F 系列（依赖仲裁 → 控制通道 → 演练与对拍 → shm 传输）的全部 16 个提交：
+锚点 `e9f976e`（上一版快照）之后进树的提交，全部已按实况计入上文能力表与里程碑表：
 
-- **F1 依赖仲裁**：`7081ccc`（docs(process): ADR-0009——启动序、降级传播与不做清单）、
-  `1d6e5ae`（feat(rr-registry): 跨 manifest 依赖仲裁与单件校验迁移）、
-  `73eb04d`（docs: 架构 §4.1/§7.1 订正、索引、README 与 conventions §2 台账）；
-- **F2 仲裁接线**：`e75bac4`（feat(rr-registry): boot 裁定入口 plan_boot）、
-  `beb8e31`（feat(rrd): 接线依赖仲裁与 Degraded 置位/解除传播）、
-  `60971ca`（docs: ADR-0009 校验项改已落地、conventions §2 台账净增 10 条）；
-- **F3 控制通道**：`caaa895`（docs(adr): ADR-0010）、`05bf7d1`（feat(rrd): rr3.ctl.* 控制查询面）、
-  `45fc9d1`（feat(rrctl): 四子命令真实现）、`15a0688`（docs: rrd-rpc.md 八方法面 + conventions §2）；
-- **F4 演练**：`7f6fa4e`（feat(tools/sim): rr3-sim 完整化——脚本化全链路演练）、
-  `2b5da6f`（docs: conventions §2 F4 登记）；
-- **F5 对拍登记**：`98d1cc2`（docs: conventions §2 F5 登记——ipct003 本机 ①②PASS ③SKIP）；
-- **F6 shm 传输**：`727d9b9`（docs(process): ADR-0011）、
-  `135f994`（feat(rr-ipc): shm transport 初版）、
-  `e9f976e`（docs: conventions §2 F6 登记）。
+- **M4 rr3-brain**：`6cf92f5`（docs: 新增 ADR-0012、ADR-0013，修订架构与文档索引）、
+  `0fdb627`（docs(adr): py 总线客户端 stdlib-only、云客户端 legacy 移植 + mock 注入、对话回路归属 brain、e2e 落 tools/sim）、
+  `5ab029e`（feat(brain): rr3-brain M4 实装——bus.py 386 行 + 三家云客户端 + dialog 状态机 + 26 条单测）、
+  `5b55620`（feat(sim): rr3-sim --brain 四真进程对话闭环演练 + rr-hal burst 波形）、
+  `2a124cf`（docs: conventions §2 M4 登记——Unix 291）；
+- **ADR 撞号订正**：`c9f168d`（docs(adr): brain ADR-0012 重编号为 ADR-0014——与远端新增的能力格坐标系 ADR-0012 撞号）；
+- **T2 OS 双轨**：`685fd14`（chore(base/os): {board,configs,patches} 平移 buildroot/，新建 distro/）、
+  `48cd7e0`（docs(base/os): 双轨拆分内容同步——路径回改、rr-ota include_str、文档树与现状注记）；
+- **T1 能力格坐标系**：`521d0ad`（feat(contracts): slots.toml 20 格 + profiles/default.toml 装配单 + rr-registry 查册门，ADR-0012）；
+- **T3/T4 CI 拆步**：`fd0942c`（style: rustfmt 全仓归一 + clippy 清零——lint job 的绿色基线）、
+  `6a7ebf1`（ci(.github): 工作流拆步三 job——conventions / lint / brain-unittest 双矩阵）、
+  `540ec0f`（ci(.github): IPC-T-003 --strict 接入远端 ipct003 job——跨架构对拍平台条件齐备）。
 
-十六个提交都已按实况计入上文能力表，此处不再单列"在制品"——
+以上提交都已按实况计入上文能力表，此处不再单列"在制品"——
 **锚点树内没有在途的未提交改动**。
 
 **已知偏差（有意保留，不是遗漏）：**
