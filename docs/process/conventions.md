@@ -357,6 +357,19 @@ Windows **233**（226 + 核心 7 推算；POSIX 段 cfg 门控不参与编译，
 cfg 边界同口径；无 Windows 目标未实跑）。② 29 / ③ 5 / ②b 5 / ④ 9 个独立工程
 均无变化。依赖预算零增量：POSIX 附着为手写 6 函数 extern 面，不引 libc crate
 （ADR-0011 裁定 5）。
+2026-10-01 M4（rr3-brain 实装与四真进程对话闭环，ADR-0012）同口径：①b rr-hal
+sim.rs 7→**8**（burst 波形：解析入取值集 / 偶秒门控确定性 / 第 3 秒复现第 1 秒且
+有声段与 Sine 同序号逐点相等——恒有声的 sine 全程只发一次 onset，晚注册的 brain
+赶不上；burst 1s 说/1s 停让 VAD 周期性发 onset/offset），Unix **291**（290 + 1）/
+Windows **234**（233 + 1 推算，sim.rs 平台无关；未实跑）。② 29 / ③ 5 / ②b 5 无变化；
+④ tools/sim 9→**12**（brain 演练 3 条：三份 wire manifest 全量形状与绝对 entry /
+shim 脚本与演练 config 形状 / brain 演练身份与主题在真契约里存在；
+`rr3_require_bins_ext` 并入既有"缺二进制点名构建指引"用例）；rr3-brain（Python
+工程，stdlib unittest，本地实跑）**26** 条（test_bus 10 + test_cloud 9 +
+test_dialog 7）。e2e：`rr3-sim --brain` 四真进程全语音对话闭环（rrd +
+rr3-sense(sim burst) + rr3-brain + rr3-interact，云端 mock——唯一假的一跳是云端
+socket）实跑 2/2 OK，判据：三模块 running + brain 日志「对话轮完成」+ interact
+日志「tts:」+ `denied_publish = 0`。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
