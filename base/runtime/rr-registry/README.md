@@ -7,6 +7,7 @@
 |---|---|
 | `schema.rs` | 加载 `module.schema.toml`，导出 `Rr3FieldSpec`、字段查询与规则列表（`rr3_registry_field_specs` / `rr3_registry_rule_list` / `rr3_registry_get_by_path`）；`RR3_MANIFEST_SCHEMA_VERSION=1`（与信封契约的 `x-schema-version` 是两套键） |
 | `topics.rs` | `Rr3TopicSet`（由 `rr3_registry_topic_set_from_text` 从 topics.toml 文本构造）与其访问器 `rr3_topic_set_contains` / `rr3_topic_set_owner` / `rr3_topic_set_kind` / `rr3_topic_set_names` / `rr3_topic_set_is_empty` / `rr3_topic_set_merge` / `rr3_topic_set_check`（后者强制"主题首段 == 登记的 owner"） |
+| `depends.rs` | 跨 manifest 依赖仲裁（ADR-0009）：`rr3_registry_depends_facts_from_text`（提取 name / provides / depends.required / start_priority）与 `rr3_registry_resolve_boot_order`（可满足性 + Kahn 拓扑序，层内 `start_priority` 升序；环拒整批、能力不可满足逐条点名）。单件校验看不到全集，"未知能力"判定只在这里做 |
 | `validate.rs` | `Rr3ValidationReport` 与入口：`rr3_registry_validate_manifest`（按路径）、`rr3_registry_validate_manifest_text`（按文本，注册握手走这条）、`rr3_registry_validate_topics`（前缀归属：主题首段必须等于某 owner 名）、`rr3_registry_topic_owners` / `rr3_registry_topic_names`、`rr3_registry_check`（单条规则执行） |
 
 调用方实况：`rr3-mkmod` 的生成自检、本 crate `tests/contract.rs`（schema 校验 + 注册表形状 pin），
