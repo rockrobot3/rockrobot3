@@ -73,6 +73,7 @@ version = "0.0.1"
 dependencies = [
  "rr-bus",
  "rr-ipc",
+ "serde_json",
 ]
 
 [[package]]
