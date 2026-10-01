@@ -16,7 +16,10 @@ pub use schema::{
     rr3_registry_get_by_path, rr3_registry_rule_list,
 };
 pub use topics::{Rr3TopicSet, rr3_registry_topic_set_from_text};
-pub use depends::{Rr3DependsFacts, rr3_registry_depends_facts_from_text, rr3_registry_resolve_boot_order};
+pub use depends::{
+    Rr3BootPlan, Rr3DependsFacts, rr3_registry_depends_facts_from_text, rr3_registry_plan_boot,
+    rr3_registry_resolve_boot_order,
+};
 pub use validate::{
     Rr3ValidationReport, rr3_registry_check, rr3_registry_topic_names,
     rr3_registry_topic_owners, rr3_registry_validate_manifest,
