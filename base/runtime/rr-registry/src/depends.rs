@@ -8,11 +8,17 @@
 //!   **全部**提供者建边（多提供者"任一存活即满足"是运行期语义，启动期全排前、保守且确定）。
 //! - 启动序 = Kahn 拓扑序，层内按 `start_priority` 升序、同值按名字典序（确定性裁定）。
 //! - 环（含自环：依赖只有自己 provides 的能力）→ 拒整个 boot；能力不可满足 → 只拒该模块。
+//!   两条分流由 [`rr3_registry_plan_boot`] 一次裁清（rrd boot 的唯一入口）；纯拓扑序
+//!   [`rr3_registry_resolve_boot_order`] 保留给 CI 全集检查与契约用例。
 //! - `depends.optional` 不参与：不进启动序、不触发降级（v0.0.1 文档性声明）。
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use toml::Value;
+
+/// 环拒绝错误行的固定开头（本文件内唯一拼装点，`plan_boot` 靠它把"拒整个 boot"与
+/// "只拒点名模块"分流——rrd 不解析错误文案，第二处前缀字符串就是第二本真值）。
+const RR3_CYCLE_ERROR_HEAD: &str = "依赖环涉及";
 
 use crate::schema::{rr3_registry_get_by_path, rr3_registry_rule_list};
 
@@ -44,6 +50,16 @@ fn string_list(root: &Value, path: &str, errs: &mut Vec<String>) -> Vec<String> 
             out
         }
     }
+}
+
+/// 不可满足错误行（唯一拼装点）：`resolve` 生成、`plan_boot` 按前缀归还给点名模块。
+/// 名字后跟空格再跟"依赖"，所以 "rr3-a" 不会误配 "rr3-ab" 的错误行。
+fn unsatisfiable_error(name: &str, cap: &str) -> String {
+    format!("模块 {name} 依赖了未知能力 {cap}（不在 base_capabilities，也无任何模块 provides）")
+}
+
+fn unsatisfiable_prefix(name: &str) -> String {
+    format!("模块 {name} 依赖了未知能力")
 }
 
 /// 从 manifest 文本提取仲裁事实。`start_priority` 缺省 100（与 rrd 侧
@@ -79,6 +95,16 @@ pub fn rr3_registry_depends_facts_from_text(text: &str) -> Result<Rr3DependsFact
 pub fn rr3_registry_resolve_boot_order(
     facts: &[Rr3DependsFacts],
 ) -> Result<Vec<String>, Vec<String>> {
+    rr3_registry_resolve_boot_order_excluding(facts, &BTreeSet::new())
+}
+
+/// 仲裁引擎：`excluded` 里的名字**不参与启动序**（`plan_boot` 剔除的不可满足者），
+/// 但**留在可满足性宇宙里**——它们的 provides 照样算数（manifest 合法，只是它自己
+/// 起不来），也不作为边目标（不排在它后面等一个永远不会上线的位置）。
+fn rr3_registry_resolve_boot_order_excluding(
+    facts: &[Rr3DependsFacts],
+    excluded: &BTreeSet<String>,
+) -> Result<Vec<String>, Vec<String>> {
     let mut errs = Vec::new();
 
     // 名字唯一是建边前提：同名两份 manifest 的"谁依赖谁"无从谈起
@@ -98,17 +124,19 @@ pub fn rr3_registry_resolve_boot_order(
         .collect();
 
     // 裁定 1：可满足性 = base ∪ 全集 provides。错误逐条点名，全收集。
+    // 被剔除的模块不再报：它反正不起，重仲裁时把同一错误再报一遍会把剔除
+    // 变成 fatal（`plan_boot` 看到剔除集合没增长就走防御分支）。
     for f in facts {
+        if excluded.contains(&f.name) {
+            continue;
+        }
         for cap in &f.depends_required {
             if base.contains(cap) {
                 continue;
             }
             let provided = facts.iter().any(|g| g.provides.iter().any(|p| p == cap));
             if !provided {
-                errs.push(format!(
-                    "模块 {} 依赖了未知能力 {}（不在 base_capabilities，也无任何模块 provides）",
-                    f.name, cap
-                ));
+                errs.push(unsatisfiable_error(&f.name, cap));
             }
         }
     }
@@ -118,14 +146,19 @@ pub fn rr3_registry_resolve_boot_order(
 
     // 裁定 2：消费者 → 全部提供者的边（base 能力无边；提供者含自己 → 自环，落进环拒绝）。
     // 边去重：一个消费者依赖同一提供者的两个能力是两条需求、一条边。
+    // 被剔除的模块两侧都不建边：它不进启动序（没有"排在它后面"），它依赖谁也无关
+    // （它反正不起）。
     let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new(); // (consumer, provider)
     for (ci, f) in facts.iter().enumerate() {
+        if excluded.contains(&f.name) {
+            continue;
+        }
         for cap in &f.depends_required {
             if base.contains(cap) {
                 continue;
             }
             for (pi, g) in facts.iter().enumerate() {
-                if g.provides.iter().any(|p| p == cap) {
+                if !excluded.contains(&g.name) && g.provides.iter().any(|p| p == cap) {
                     edges.insert((ci, pi));
                 }
             }
@@ -142,7 +175,7 @@ pub fn rr3_registry_resolve_boot_order(
     }
     let mut ready: BTreeSet<(i64, &str)> = BTreeSet::new();
     for (idx, f) in facts.iter().enumerate() {
-        if indegree.get(&idx).copied().unwrap_or(0) == 0 {
+        if !excluded.contains(&f.name) && indegree.get(&idx).copied().unwrap_or(0) == 0 {
             ready.insert((f.start_priority, f.name.as_str()));
         }
     }
@@ -163,17 +196,77 @@ pub fn rr3_registry_resolve_boot_order(
         }
     }
 
-    // 环（含自环）与其下游永远进不了就绪集合——整批拒（裁定 2）
-    if order.len() != facts.len() {
+    // 环（含自环）与其下游永远进不了就绪集合——整批拒（裁定 2）。被剔除的模块
+    // 不算"卡住"：它们本来就不在启动序里。
+    let boot_count = facts.iter().filter(|f| !excluded.contains(&f.name)).count();
+    if order.len() != boot_count {
         let stuck: Vec<&str> = facts
             .iter()
             .map(|f| f.name.as_str())
-            .filter(|n| !order.iter().any(|o| o == n))
+            .filter(|n| !excluded.contains(*n) && !order.iter().any(|o| o == n))
             .collect();
-        errs.push(format!("依赖环涉及（含环下游，拒整个 boot）: {}", stuck.join(", ")));
+        errs.push(format!("{RR3_CYCLE_ERROR_HEAD}（含环下游，拒整个 boot）: {}", stuck.join(", ")));
         return Err(errs);
     }
     Ok(order)
+}
+
+/// boot 仲裁的**完整裁定**（ADR-0009 裁定 2，rrd 只执行、不 reimplement）：
+/// - `fatal` 非空 = 环 / 名重复 / 未知的错误形状 → **拒整个 boot**（fail-closed），
+///   此时 `order` 为空、`rejected` 无意义；
+/// - 否则 `order` = 可 boot 模块的启动序，`rejected` = 不可满足被拒的模块名——
+///   它们的 provides **仍计入**可满足性宇宙（依赖它们能力的其余模块照常 boot，
+///   运行期按裁定 3 降级），重仲裁剔除它们不会把下游连坐。
+/// 终止性：每个非 fatal 轮次至少剔除一个名字，`excluded` 有 `facts.len()` 上界。
+pub fn rr3_registry_plan_boot(facts: &[Rr3DependsFacts]) -> Rr3BootPlan {
+    let mut excluded: BTreeSet<String> = BTreeSet::new();
+    loop {
+        match rr3_registry_resolve_boot_order_excluding(facts, &excluded) {
+            Ok(order) => {
+                return Rr3BootPlan {
+                    order,
+                    rejected: excluded.into_iter().collect(),
+                    fatal: Vec::new(),
+                };
+            }
+            Err(errs) => {
+                if errs.iter().any(|e| e.starts_with(RR3_CYCLE_ERROR_HEAD)) {
+                    return Rr3BootPlan {
+                        order: Vec::new(),
+                        rejected: excluded.into_iter().collect(),
+                        fatal: errs,
+                    };
+                }
+                // 不可满足：把错误行点名的消费者剔除后重仲裁。错误行的前缀由本文件
+                // 的 `unsatisfiable_error` 唯一拼装，这里的匹配与它同源。
+                let before = excluded.len();
+                for f in facts {
+                    if excluded.contains(&f.name) {
+                        continue;
+                    }
+                    if errs.iter().any(|e| e.starts_with(&unsatisfiable_prefix(&f.name))) {
+                        excluded.insert(f.name.clone());
+                    }
+                }
+                if excluded.len() == before {
+                    // 防御：不是环、也不点名任何消费者 —— 未知错误形状不当"照常"处理
+                    return Rr3BootPlan {
+                        order: Vec::new(),
+                        rejected: excluded.into_iter().collect(),
+                        fatal: errs,
+                    };
+                }
+            }
+        }
+    }
+}
+
+/// [`rr3_registry_plan_boot`] 的回报。字段语义见该函数文档。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3BootPlan {
+    pub order: Vec<String>,
+    pub rejected: Vec<String>,
+    pub fatal: Vec<String>,
 }
 
 #[cfg(test)]
@@ -262,5 +355,46 @@ start_priority = 40
         assert!(errs[0].contains("依赖环涉及"), "{errs:?}");
         assert!(errs[0].contains("rr3-a"), "{errs:?}");
         assert!(!errs[0].contains("rr3-b"), "无辜模块不得被点名: {errs:?}");
+    }
+
+    /// plan_boot：不可满足只拒点名模块，其余照常按拓扑序成序
+    #[test]
+    fn plan_boot_rejects_only_the_unsatisfiable_and_orders_the_rest() {
+        let plan = rr3_registry_plan_boot(&[
+            facts("rr3-bad", &[], &["cap.ghost"], 10),
+            facts("rr3-c", &[], &["bus.publish"], 50),
+            facts("rr3-b", &[], &[], 50),
+        ]);
+        assert!(plan.fatal.is_empty(), "{plan:?}");
+        assert_eq!(plan.rejected, vec!["rr3-bad".to_string()]);
+        // rr3-bad 被剔除后，剩余两个同 priority=50，按名字典序
+        assert_eq!(plan.order, vec!["rr3-b".to_string(), "rr3-c".to_string()]);
+    }
+
+    /// plan_boot：被拒模块的 provides 仍计入可满足性——依赖它能力的下游不连坐，
+    /// 也不排在"永远不会上线的位置"后面（剔除者不作为边目标）
+    #[test]
+    fn plan_boot_keeps_rejected_module_provides_for_dependents() {
+        let plan = rr3_registry_plan_boot(&[
+            facts("rr3-ghost", &[], &["cap.ghost"], 10),
+            // rr3-ghost 自己不可满足，但它 provides cap.y；rr3-user 依赖 cap.y
+            facts("rr3-ghost2", &["cap.y"], &["cap.ghost"], 20),
+            facts("rr3-user", &[], &["cap.y"], 90),
+        ]);
+        assert!(plan.fatal.is_empty(), "{plan:?}");
+        assert_eq!(plan.rejected, vec!["rr3-ghost".to_string(), "rr3-ghost2".to_string()]);
+        assert_eq!(plan.order, vec!["rr3-user".to_string()]);
+    }
+
+    /// plan_boot：环照旧拒整个 boot（fatal），不产出半死集合
+    #[test]
+    fn plan_boot_fatals_on_cycle() {
+        let plan = rr3_registry_plan_boot(&[
+            facts("rr3-a", &["cap.a"], &["cap.b"], 100),
+            facts("rr3-b", &["cap.b"], &["cap.a"], 100),
+            facts("rr3-c", &[], &[], 100),
+        ]);
+        assert!(plan.fatal.iter().any(|e| e.starts_with("依赖环涉及")), "{plan:?}");
+        assert!(plan.order.is_empty(), "{plan:?}");
     }
 }
