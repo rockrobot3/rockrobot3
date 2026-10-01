@@ -14,7 +14,8 @@
 //!
 //! 规划分层（ADR-0006 §5）：
 //! - `uds`：M2 唯一实现，路径取 [`RR3_UDS_PATH_DEFAULT`]，可被 [`RR3_BUS_PATH_ENV`] 覆盖
-//! - `shm`：实时控制面（100Hz–1kHz 关节状态/力矩/PCM 流），M5
+//! - `shm`：实时控制面（100Hz–1kHz 关节状态/力矩/PCM 流），初版已落地（ADR-0011：
+//!   单写者多读者环形缓冲、丢最旧保最新、POSIX 附着）
 //! - `tcp`：多机协作，预留
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）永远不进总线，见 ADR-0007 §裁定 1。
@@ -23,6 +24,7 @@
 
 pub mod buf;
 pub mod frame;
+pub mod shm;
 #[cfg(unix)]
 pub mod uds;
 
