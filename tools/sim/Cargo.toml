@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.82"
 license = "UNLICENSED"
 publish = false
-description = "x86 全链路联调：mock HAL 设备源 + 假模块（骨架）"
+description = "x86 全链路联调：rrd + 两个真模块 + rr3-ctl 巡检的脚本化演练入口"
 
 # 独立工程：tools/ 不在 base/runtime workspace 内（与 rr3-mkmod/rr3-ctl 同构）
 [workspace]
