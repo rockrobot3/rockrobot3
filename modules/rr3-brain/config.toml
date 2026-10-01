@@ -16,3 +16,6 @@ timeout_s = 20
 # 对话策略：拾音状态机的静默判停阈值，来自 legacy/main.c
 silence_tail_ms = 700
 max_turn_chars = 800
+# 一轮 utterance 的时长上限：连续语音无 offset 边沿时也要有界
+# （继承 legacy asr_begin(max_seconds) 的精神，ADR-0012 裁定 3）
+max_utterance_ms = 8000
