@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.82"
 license = "UNLICENSED"
 publish = false
-description = "总线侧运维 CLI：查在册模块、看健康状态、触发 OTA（骨架）"
+description = "总线侧运维 CLI：查在册模块、看健康状态、取日志、触发 OTA（ota 随 M6）"
 
 # 独立工程：tools/ 不在 base/runtime workspace 内（与 rr3-mkmod 同构）
 [workspace]
@@ -17,3 +17,4 @@ path = "src/main.rs"
 [dependencies]
 rr-bus = { path = "../../base/runtime/rr-bus" }
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
+serde_json = "1"
