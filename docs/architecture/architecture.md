@@ -104,12 +104,14 @@ rock3/
 │   └── events/                    ← 各模块事件负载 JSON Schema 的落点（命名与登记规矩在其 README）
 │
 ├── base/                          ← 基座层（横切关注点，见 §2 原则 1）
-│   ├── os/                        ← Buildroot 层（ADR-0001）
-│   │   ├── configs/               ← rock3_zero3_defconfig（Buildroot+Linux 6.6+aarch64）
-│   │   ├── board/radxa-zero3/     ← genimage.cfg（容量=构建期占位符）· extlinux.conf ·
-│   │   │                             post-build.sh（rrd 自启/fstab/产物安装位）·
-│   │   │                             post-image.sh（容量参数注入）· flash-maskrom.md
-│   │   └── patches/               ← 内核/U-Boot 回移补丁（核对清单见其 README）
+│   ├── os/                        ← OS 双轨（ADR-0001 选型、ADR-0013 分轨）
+│   │   ├── buildroot/             ← 保底轨：configs/（rock3_zero3_defconfig）·
+│   │   │                             board/radxa-zero3/（genimage.cfg 容量=构建期占位符 ·
+│   │   │                             extlinux.conf · post-build.sh（rrd 自启/fstab/产物安装位）·
+│   │   │                             post-image.sh（容量参数注入）· flash-maskrom.md）·
+│   │   │                             patches/（内核/U-Boot 回移补丁，核对清单见其 README）
+│   │   └── distro/                ← 快路轨：payload 打包（.deb/OCI）· systemd units ·
+│   │                                 boards/（发行版实板笔记）
 │   ├── ota/                       ← README.md + partition-layout.md（A/B/factory 布局文档）
 │   │   └── rr3-ota-ctl/           ← 独立 workspace，bin 名 `rr3-ota-ctl`（升级入口 CLI）
 │   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-registry rr-bus rr-hal rr-ota rrd
@@ -183,7 +185,7 @@ rock3/
 > |---|---|---|
 > | `contracts/slots.toml` | ADR-0012 裁定 1 | 能力格坐标系总表（与 topics.toml 同级同纪律：只增不改） |
 > | `profiles/` | ADR-0012 裁定 3 | 机器人装配单（纯数据，一机型一文件） |
-> | `base/os/buildroot/` + `base/os/distro/` | ADR-0013 裁定 3 | 现 `base/os/` 拆为保底轨与快路两目录（现内容平移） |
+> | ~~`base/os/buildroot/` + `base/os/distro/`~~ | ADR-0013 裁定 3 | **已落盘**（2026-10-01，见上方 §3 树） |
 > | payload 打包器 + CI 双矩阵 | ADR-0013 裁定 2/5 | 同一 payload 两轨同批验证 |
 
 ---

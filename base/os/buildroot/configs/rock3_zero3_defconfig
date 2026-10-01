@@ -1,7 +1,7 @@
 # rockrobot3 —— Radxa ZERO 3（RK3566）Buildroot defconfig
 #
 # 架构裁定：ADR-0001（Buildroot 主路线 + Linux 6.6 mainline + Radxa ZERO 3）。
-# 分区布局的事实源：base/os/board/radxa-zero3/genimage.cfg（标签唯一事实源在
+# 分区布局的事实源：base/os/buildroot/board/radxa-zero3/genimage.cfg（标签唯一事实源在
 # base/runtime/rr-ota/src/lib.rs，由 cargo test -p rr-ota 的 include_str 守护钉死）。
 #
 # 档位说明（诚实边界）：本文件是"结构就绪"档——配置逻辑本机可评审，全量 make
