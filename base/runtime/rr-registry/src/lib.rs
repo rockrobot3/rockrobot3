@@ -8,6 +8,7 @@
 
 pub mod depends;
 pub mod schema;
+pub mod slots;
 pub mod topics;
 pub mod validate;
 
@@ -16,6 +17,7 @@ pub use schema::{
     rr3_registry_get_by_path, rr3_registry_rule_list,
 };
 pub use topics::{Rr3TopicSet, rr3_registry_topic_set_from_text};
+pub use slots::{Rr3SlotTable, rr3_registry_slot_table_from_text};
 pub use depends::{
     Rr3BootPlan, Rr3DependsFacts, rr3_registry_depends_facts_from_text, rr3_registry_plan_boot,
     rr3_registry_resolve_boot_order,

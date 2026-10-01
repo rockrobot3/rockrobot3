@@ -11,6 +11,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 | `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举 | L1 |
 | `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001 的**同机**基准；跨架构等值另见下） | L1 |
 | `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_publish_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
+| `slots.toml` | 能力格坐标系总表：`[[slot]]`（name/layer/note），三层 base/body/cognition（查册门真值见下"slots.toml 裁定"） | L2 |
 | `events/*.schema.json` | 各模块事件负载 schema（命名规则与模板见 [`events/README.md`](events/README.md)） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
@@ -56,6 +57,25 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
    `contracts/topics.toml`、该测试的期望值，以及任何把这些数字当事实抄进正文的文档
    （用例条数的唯一登记处是 [docs/process/conventions.md](../docs/process/conventions.md) §2）。
    删主题、改 kind、改 owner 数都会红。
+
+## slots.toml 裁定（ADR-0012）
+
+1. 能力格（slot）= 固定命名的能力位，只描述"这里需要/可以有什么"，不描述"谁来填"（谁填登记在
+   [`profiles/`](../profiles/default.toml) 装配单，纯数据）。总表与 topics.toml 同级同纪律：**只增不改**，
+   破坏性变更升 `schema_version`；**不留空格**——进表的都是有明确供给方或需求的格。
+2. 分三层：**base**（`bus.publish`/`bus.subscribe`/`bus.rpc`/`net.online`/`power.battery`，
+   即 `module.schema.toml` `[rules] base_capabilities` 的表内化，格名随原能力名）·
+   **body**（11 格）· **cognition**（4 格）。layer 只取这三个值；格位命名两段式 `<域>.<格>`，
+   与主题命名（`rr3-<模块>/<域>/<事件>`）不同轴，互不混写。
+3. **查册门**（ADR-0012 裁定 5②，fail-closed）：manifest 的 `provides.capabilities` 与 `depends.*`
+   引用的每个能力、profile `[bindings]`/`[faces]` 引用的每个格位，都必须命中本表。单件校验只保语法，
+   "是否在册"由 `rr-registry` 契约测试在 CI 全集层判；基础层与 `base_capabilities` 被
+   `slots_base_layer_is_pinned_to_base_capabilities` 逐条钉死等价——依赖仲裁（ADR-0009）与格位查册
+   共用同一份 base 真值，第二份白名单不存在。
+4. **上述形状是机器钉住的**：`cargo test -p rr-registry --test contract` 里的
+   `slots_registry_shape_is_pinned` 断言全部 20 条 `(name, layer)` 逐条在册、层分布 5/11/4。
+   新增格位合法，但必须是一次有意识的编辑——同一次改动里同步更新 `contracts/slots.toml`、
+   该测试常量与计数、`profiles/default.toml`（如涉及绑定面），以及把这些数字当事实抄进正文的文档。
 
 ## 演进规则（ADR-0007 决策二）
 
@@ -107,6 +127,12 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   OpenTelemetry 注释是分层关系：字节布局与"不解释即透传"是 L1 冻结面，rock3 的用法语义
   登记在本文件演进记录层，不改偏移、不改字段宽度、不改线上行为。计划中的 OpenTelemetry
   串联（单调递增 + 随机后缀）留具身化阶段，届时如与本条冲突走"只增不改"评审。
+- **2026-10-01 · `contracts/slots.toml` 落盘（ADR-0012 裁定 1，能力格坐标系）**：新增文件（20 格 =
+  base 5 + body 11 + cognition 4），append 不改既有，`topics.toml` 无需变更。同批落盘
+  `profiles/default.toml`（装配单，纯数据）与 rr-registry 查册门（`src/slots.rs` +
+  `tests/contract.rs` 全集层用例：manifest/profile 双侧查册、基础层与 `base_capabilities`
+  钉死等价、格位表形状 pin）。基础层格名随 `base_capabilities` 原名（两段式），ADR-0012
+  正文"基础层单段"的示例记法不采用——两份名单必须逐条相等，这是查册门与仲裁共用真值的前提。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

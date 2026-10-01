@@ -1,0 +1,111 @@
+# RockRobot3 能力格坐标系（[SC] 契约层，单一事实源）
+# 消费方：base/runtime/rr-registry（查册门，CI 全集层与 rrd 装配链共用）、tools/mkmod（生成自检）、docs
+# 约束：slot 名唯一；layer 只取 base | body | cognition；不留空格（进表即有真实供给方或需求方）
+# 基础层 = base_capabilities（module.schema.toml [rules]）的表内化，格名随原能力名（两段式），
+#   查册门把两者钉死等价——第二份白名单不存在
+# 引用：ADR-0012 裁定 1/5、ADR-0009 裁定 1、architecture.md §4.3
+
+schema_version = 1
+
+# ---------- 基础层（基座内建，永远在位，不进 profile [bindings]） ----------
+[[slot]]
+name = "bus.publish"
+layer = "base"
+note = "总线发布（rr-bus 客户端承载，ADR-0003）"
+
+[[slot]]
+name = "bus.subscribe"
+layer = "base"
+note = "总线订阅"
+
+[[slot]]
+name = "bus.rpc"
+layer = "base"
+note = "rr3.call 同步调用（rrd 代理，trace_id 语义见 contracts/README.md）"
+
+[[slot]]
+name = "net.online"
+layer = "base"
+note = "出网就绪通告（connect 链路就绪后才置位）"
+
+[[slot]]
+name = "power.battery"
+layer = "base"
+note = "电池电量摘要；rr3-power 亦 provides 同名能力，运行期任一存活即满足（ADR-0009 裁定 3）"
+
+# ---------- 身体层（模块提供，按装配单绑定） ----------
+[[slot]]
+name = "act.servo"
+layer = "body"
+note = "舵机/关节指令（rr3-act）"
+
+[[slot]]
+name = "act.led"
+layer = "body"
+note = "灯效（rr3-act）"
+
+[[slot]]
+name = "net.wifi"
+layer = "body"
+note = "WiFi 链路管理（rr3-connect）"
+
+[[slot]]
+name = "net.bt"
+layer = "body"
+note = "蓝牙（rr3-connect）"
+
+[[slot]]
+name = "ui.face"
+layer = "body"
+note = "表情屏渲染（rr3-interact）"
+
+[[slot]]
+name = "audio.playback"
+layer = "body"
+note = "扬声器播放（rr3-interact）"
+
+[[slot]]
+name = "audio.capture"
+layer = "body"
+note = "拾音（rr3-sense）"
+
+[[slot]]
+name = "audio.vad"
+layer = "body"
+note = "语音活动检测（rr3-sense）"
+
+[[slot]]
+name = "sensor.env"
+layer = "body"
+note = "环境传感器（rr3-sense）"
+
+[[slot]]
+name = "sensor.imu"
+layer = "body"
+note = "IMU 姿态（rr3-sense，融合在 act 反射环内完成）"
+
+[[slot]]
+name = "power.charger"
+layer = "body"
+note = "充电状态（rr3-power）"
+
+# ---------- 认知层（模块提供，按装配单绑定） ----------
+[[slot]]
+name = "cognition.dialog"
+layer = "cognition"
+note = "对话编排（rr3-brain，⊙编排唯一承担者，ADR-0012 裁定 4）"
+
+[[slot]]
+name = "cognition.asr"
+layer = "cognition"
+note = "语音识别（rr3-brain）"
+
+[[slot]]
+name = "cognition.llm"
+layer = "cognition"
+note = "大模型补全（rr3-brain）"
+
+[[slot]]
+name = "cognition.tts"
+layer = "cognition"
+note = "语音合成（rr3-brain）"
