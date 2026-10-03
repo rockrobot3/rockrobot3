@@ -6,7 +6,7 @@
 - **日期**：2026-10-01
 - **实况出口**：本档不回答"某能力有没有实现"。凡此类问题一律指向 [`../status.md`](../status.md)；
   本档里出现进度性断言即视为待订正。
-- **关联决策**：[ADR-0001](../process/adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md)（构建系统主路线已被 ADR-0013 修订） · [ADR-0002](../process/adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](../process/adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](../process/adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](../process/adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](../process/adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](../process/adr/ADR-0007-控制面分层与模块级升级.md) · [ADR-0008](../process/adr/ADR-0008-传输层trait定型与uds实现.md) · [ADR-0009](../process/adr/ADR-0009-依赖仲裁-启动序与降级传播.md) · [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md) · [ADR-0011](../process/adr/ADR-0011-shm传输-单写者多读者环形缓冲.md) · [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md) · [ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md)
+- **关联决策**：[ADR-0001](../process/adr/ADR-0001-平台选型-linux66-buildroot-rk3566.md)（构建系统主路线已被 ADR-0013 修订） · [ADR-0002](../process/adr/ADR-0002-模块模型-5加1-进程隔离.md) · [ADR-0003](../process/adr/ADR-0003-IPC选型-uds-jsonrpc-事件总线.md) · [ADR-0004](../process/adr/ADR-0004-Airymax接入路径-运行时层对接.md) · [ADR-0005](../process/adr/ADR-0005-命名规约-rr3前缀矩阵.md) · [ADR-0006](../process/adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) · [ADR-0007](../process/adr/ADR-0007-控制面分层与模块级升级.md) · [ADR-0008](../process/adr/ADR-0008-传输层trait定型与uds实现.md) · [ADR-0009](../process/adr/ADR-0009-依赖仲裁-启动序与降级传播.md) · [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md) · [ADR-0011](../process/adr/ADR-0011-shm传输-单写者多读者环形缓冲.md) · [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md) · [ADR-0013](../process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md) · [ADR-0014](../process/adr/ADR-0014-python模块接入与M4对话闭环.md) · [ADR-0015](../process/adr/ADR-0015-板卡策略-rk3566核心板过桥与量产自定制.md)
 - **命名速查**：[naming.md](../process/naming.md)
 
 ---
@@ -124,16 +124,20 @@ rock3/
 │   │   │                             （Cargo.lock 在 workspace 根，每 crate 各有一份 README.md）
 │   │   ├── rr-ipc/                ← A-IPC 协议层 + 帧收发（§6.2）
 │   │   │   ├── src/protocol/      ← header.rs（128B 头编解码）、body.rs（payload 类型前缀）、mod.rs
-│   │   │   ├── src/transport/     ← frame.rs（整帧读写）、mod.rs（传输分层 + 两个路径常量）
+│   │   │   ├── src/transport/     ← frame.rs（整帧读写）、uds.rs（UDS 实现，`#[cfg(unix)]`）·
+│   │   │   │                          shm.rs（单写者多读者环形缓冲）· buf.rs（整帧所有权缓冲）·
+│   │   │   │                          mod.rs（传输分层 + 两个路径常量）
+│   │   │   ├── src/bin/           ← ipct003_dump.rs：IPC-T-003 跨架构对拍的头 hex 转储（CI 平台条件下跑）
 │   │   │   └── tests/             ← envelope_meta.rs：与 envelope.schema.json 逐字段对齐的守护测试
 │   │   ├── rr-bus/                ← 总线常量 + 模块侧同步客户端（client.rs：连接/注册/心跳/发布/rr3.call/收帧）
 │   │   ├── rr-registry/           ← manifest 解析与校验、主题集（§4.1、§6.3）
-│   │   │   ├── src/               ← schema.rs、validate.rs、topics.rs、module.schema.toml（字段字典）
+│   │   │   ├── src/               ← schema.rs、validate.rs、topics.rs、slots.rs（能力格查册门）、
+│   │   │   │                          depends.rs（依赖仲裁）、module.schema.toml（字段字典）
 │   │   │   └── tests/             ← contract.rs（契约面用例）+ fixtures/rr3-sense.toml
 │   │   ├── rr-hal/                ← HAL trait 与数据类型（§5）：lib.rs + backend.rs
 │   │   ├── rr-ota/                ← 升级通道的类型形状（§8、ADR-0007 决策二）
 │   │   ├── rrd/                   ← 主守护进程（装配层）
-│   │   │   ├── src/               ← 十个文件（九个模块文件 + `bin/sim_peer.rs`），逐个职责见下
+│   │   │   ├── src/               ← 十一个文件（十个模块文件 + `bin/sim_peer.rs`），逐个职责见下
 │   │   │   │   ├── cli.rs         ← 命令行与总线路径解析（平台无关）
 │   │   │   │   ├── main.rs        ← 启动序（§7.1）
 │   │   │   │   ├── lib.rs         ← 平台无关模块图 + `#[cfg(unix)]` 门 + 横幅/日志出口
@@ -143,6 +147,7 @@ rock3/
 │   │   │   │   ├── topics_load.rs ← 契约主题表装载 + 仅测试的主题叠加层
 │   │   │   │   ├── conn.rs        ← 单连接服务（reader + writer 线程）——`#[cfg(unix)]`
 │   │   │   │   ├── daemon.rs      ← 监听 / accept / 连接线程编排——`#[cfg(unix)]`
+│   │   │   │   ├── supervisor.rs  ← spawn / 收尸 / 重启执行（全 daemon 唯一执行线程）——`#[cfg(unix)]`
 │   │   │   │   └── bin/
 │   │   │   │       └── sim_peer.rs ← 跨进程 e2e 的对端夹具二进制：第二个真进程，走 rrd 的线上
 │   │   │   │                           入口做注册→心跳→发布→退场；不是产品入口（只在测试里被起）
@@ -174,7 +179,7 @@ rock3/
 │   ├── README.md                  ← 索引：哪类事实只有一个权威落点
 │   ├── architecture/architecture.md ← 本档（唯一架构图）
 │   ├── status.md                  ← 唯一实况快照
-│   └── process/                   ← conventions.md、naming.md、adr/（ADR-0001~0007）、dev/
+│   └── process/                   ← conventions.md、naming.md、adr/（ADR-0001~0015）、dev/
 │
 └── legacy/                        ← 冻结四棵 ESP32 树：core/ + firmware-c/ + firmware-rs/ + rust/
                                      （只读参照，不再演进；组件计数见 legacy/README.md）
@@ -314,7 +319,9 @@ Registered ──── rr3_reg_beat（心跳，刷新到期基准）───�
 `audio.playback`/`audio.capture`/`audio.vad`/`sensor.env`/`sensor.imu`/`power.charger`）、
 认知层（`cognition.dialog`/`cognition.asr`/`cognition.llm`/`cognition.tts`）。
 格位命名两段式 `<域>.<格>`，与主题命名 `rr3-<模块>/<域>/<事件>`（§6.3）
-不同轴。**格位成活双达标**：有效扇入 ≥3 + CI 测试接线，缺一不立格；不留空格。
+不同轴。**格位成活判据**（ADR-0012 裁定 6，2026-10-03 口径修订）：新格立格须**双达标**
+——≥1 个真实依赖者，或评审记录中明确的 ≥3 潜在场景；**CI 只执法"测试接线"那条，扇入数
+不进 CI**（留在 review）；落盘 20 格按落盘日 grandfather 豁免、不回溯执法。不留空格。
 
 **造件**：模块只含机制（怎么采 PCM、怎么驱动舵机），策略不进模块（§2 原则 4）；
 模块对外的身份是"我 provides 哪些格位"。
