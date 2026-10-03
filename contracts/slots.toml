@@ -26,12 +26,12 @@ note = "rr3.call 同步调用（rrd 代理，trace_id 语义见 contracts/README
 [[slot]]
 name = "net.online"
 layer = "base"
-note = "出网就绪通告（connect 链路就绪后才置位）"
+note = "出网就绪通告通道（通道 boot 即在位、恒不降级；在线/离线状态由 connect 运行期发布，反应归策略层——ADR-0012 裁定 1 base 格语义注记）"
 
 [[slot]]
 name = "power.battery"
 layer = "base"
-note = "电池电量摘要；rr3-power 亦 provides 同名能力，运行期任一存活即满足（ADR-0009 裁定 3）"
+note = "电池读数通道（通道 boot 即在位、恒不降级；电量读数由 rr3-power 运行期发布，反应归策略层——ADR-0012 裁定 1 base 格语义注记）"
 
 # ---------- 身体层（模块提供，按装配单绑定） ----------
 [[slot]]

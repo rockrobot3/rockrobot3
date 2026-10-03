@@ -2,7 +2,7 @@
 
 - **状态**：已接受；**构建系统主路线已被 [ADR-0013](ADR-0013-OS双轨-发行版快路与Buildroot保底.md) 修订**（Buildroot 主路线 → 降为保底轨，发行版快路 + 同一 payload 双轨；SoC、内核 6.6 mainline 与 maskrom 自烧录硬性目标不变）
 - **日期**：2026-09-28
-- **关联**：[architecture.md](../../architecture/architecture.md)
+- **关联**：[architecture.md](../../architecture/architecture.md) · [ADR-0015](ADR-0015-板卡策略-rk3566核心板过桥与量产自定制.md)（"自绘板后置"细化为板卡三步走；SoC/内核裁定不变）
 
 ## 背景
 

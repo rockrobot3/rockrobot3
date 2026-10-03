@@ -24,7 +24,7 @@
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
-①b 把 workspace 的 214 条（Windows，推算）/259 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
+①b 把 workspace 的 237 条（Windows，推算）/294 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
@@ -425,10 +425,10 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
 - 模块 crate 之间**不得**互相依赖，只能经 `rr-ipc`/`rr-bus`（一票否决项）
 - 密钥、token 不进仓库：构建期环境变量注入（`SILICONFLOW_API_KEY`，见 `legacy/core/README.md`）
 - 反射环（1k–10kHz 闭环）留在模块进程内，永不进总线（ADR-0007 裁定 1）
-- `contracts/slots.toml` 能力格总表（ADR-0012，**规划落点**，实体落盘后生效）：与 topics.toml
+- `contracts/slots.toml` 能力格总表（ADR-0012）：与 topics.toml
   同级同纪律——只增不改，破坏性变更升 `schema_version`；manifest 的
-  `provides`/`depends` 只许引用表内格位，查册门随实体落盘接入 CI 全集层（与仲裁共用真值）
-- 装配单（ADR-0012，**规划落点**）：`profiles/<机型>.toml` 是纯数据（`[os]` / `[bindings]` /
+  `provides`/`depends` 只许引用表内格位，查册门接入 CI 全集层（与仲裁共用真值）
+- 装配单（ADR-0012）：`profiles/<机型>.toml` 是纯数据（`[os]` / `[bindings]` /
   `[faces]`），不得包含逻辑；新增机型 = 新增文件，不改代码；F⊗F 非法（brain 不许运行期
   决定能力归属，rrd 不许运行期重排装配）
 
@@ -444,3 +444,7 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
 
 - 状态与进度只写 `docs/status.md`；ADR 只在现状注记里记"决策落地到哪一步"的一句话指针；不写散落的周报式文档
 - `docs/architecture/architecture.md` 是唯一架构图；目录树变更必须同步其 §3
+- `docs/reference/` 三件的代码定位一律用**符号名锚定**（如 `registry.rs 的 rr3_reg_beat`、
+  `Rr3Envelope 的 seq 字段`），**不写行号**（行号随代码漂移，是系统性风险源）；函数体内某段用
+  "外层函数名 + 段描述"。`conventions.md` 正文里的历史叙述（如某轮评审点名的 `conn.rs:NNN`）
+  属"当时发生了什么"的实录，不回改。
