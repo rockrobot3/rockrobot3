@@ -18,7 +18,7 @@
 | Python 包级可见全局函数 | `rr3_<域>_<动作>` | `rr3_brain_submit_text()` |
 | C（未来新增；legacy 已冻结） | `rr3_<域>_<动作>` | `rr3_ota_slot_switch()` |
 | 事件 / RPC 主题 | `rr3-<模块>/<域>/<事件>` | `rr3-sense/audio/vad_start` |
-| 能力格（`contracts/slots.toml`，ADR-0012） | `<域>.<格>` 两段式小写（基础层横切设施单段）；与主题命名不同轴，互不混写 | `audio.capture`、`bus` |
+| 能力格（`contracts/slots.toml`，ADR-0012） | `<域>.<格>` 两段式小写（基础层格名随 `base_capabilities` 原名，同为两段式，如 `bus.publish`）；与主题命名不同轴，互不混写 | `audio.capture`、`bus.publish` |
 | 配置键 / 环境变量 | `RR3_` 大写前缀 | `RR3_LOG_LEVEL`、`RR3_BUS_PATH` |
 | systemd 单元 | `rr3-<域>.service` | `rr3-sense.service` |
 | D-Bus 总线名 | `cn.rockrobot.rr3.<域>` | `cn.rockrobot.rr3.connect` |

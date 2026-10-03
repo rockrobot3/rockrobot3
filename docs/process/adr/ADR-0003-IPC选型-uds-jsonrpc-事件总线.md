@@ -1,6 +1,6 @@
 # ADR-0003：IPC 选型 —— UDS + JSON-RPC 2.0 + 定长消息头事件总线
 
-- **状态**：已接受；**线格式部分已被 [ADR-0006](ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) 修订**（自造 32B 头 → Airy IPC 128B 头，UDS 路径定为 `/var/run/rock3-ipc.sock`）
+- **状态**：已接受；**线格式部分已被 [ADR-0006](ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) 修订**（自造 32B 头 → Airy IPC 128B 头，UDS 路径定为 `/var/run/rock3-ipc.sock`）；**"PCM 流不经事件总线、经 HAL 句柄传递"部分已被 [ADR-0007](ADR-0007-控制面分层与模块级升级.md) 裁定 4 修订**（音频流归实时控制面 STREAM；v0.0.1 过渡形态为 PCM 以 Event 承载 `pcm_b64` 走 UDS 事务面，M5 shm 放行 STREAM 上行后收敛，见 ADR-0014 不做清单④）
 - **日期**：2026-09-28
 - **关联**：[architecture.md](../../architecture/architecture.md) · contracts/envelope.schema.json
 
