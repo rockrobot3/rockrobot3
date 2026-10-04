@@ -15,10 +15,13 @@ OS 双轨的**快路**：不自己构建 OS，用现成发行版（Armbian / Deb
 **本目录要交出的文件**（有没有落、算哪一档属实况，唯一落点
 [`docs/status.md`](../../../docs/status.md)，本文件不记进度）：
 
-- `payload/` —— payload 打包器与打包脚本：把 `base/runtime` 交叉产物
-  （rrd、rr3-ctl、`rr3-modules/<name>/{bin,manifest.toml}`）与 systemd 单元
-  打成 .deb（或 OCI image，分发裁定见 ADR-0013）
-- `units/` —— systemd 单元（rrd.service 等）
+- `payload/` —— payload 装配胶水（如需）：打包器实体在
+  [`tools/rr3-pack`](../../../tools/rr3-pack)（0.0.2 T5，Rust 独立工程，staging 装配
+  纯函数本机可单测、真出包调 dpkg-deb）——把 `base/runtime` 交叉产物（rrd、rr3-ctl、
+  `rr3-modules/<name>/{bin,manifest.toml}`）与仓内契约/装配单/systemd 单元打成 .deb
+  （OCI image 属后置批次，分发裁定见 ADR-0013）；CI 真装冒烟走 `distro-smoke` job
+- `units/` —— systemd 单元（[rrd.service](units/rrd.service) 已落，0.0.2 T5，
+  rr3-pack 编译期嵌入 deb）
 - `boards/` —— 各发行版在各板卡上的已验证笔记（镜像来源、内核版本、
   ALSA/UART 可用性），一板一文件
 

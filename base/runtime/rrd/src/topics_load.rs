@@ -22,6 +22,18 @@ pub const RR3_CONTRACT_TOPICS_PATH: &str = concat!(
     "/../../../contracts/topics.toml"
 );
 
+/// 契约目录的运行期落点（0.0.2 T5）：`--contracts` 显式给值时原样用之（topics.toml /
+/// slots.toml 由装载入口各自 join），否则回落编译期仓内路径——deb 装机后编译期路径
+/// 不存在，payload 必须显式指向包内 `/usr/lib/rockrobot3/contracts`。
+pub fn rr3_contracts_dir(contracts: Option<&Path>) -> PathBuf {
+    contracts.map(Path::to_path_buf).unwrap_or_else(|| {
+        Path::new(RR3_CONTRACT_TOPICS_PATH)
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    })
+}
+
 fn read_set(path: &Path, role: &str) -> Result<Rr3TopicSet, Vec<String>> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| vec![format!("读不到{role} {}: {e}", path.display())])?;

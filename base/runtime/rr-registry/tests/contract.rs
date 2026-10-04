@@ -895,7 +895,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
     profile_files.sort();
     assert_eq!(
         profile_files,
-        vec!["default.toml".to_string()],
+        vec!["default.toml".to_string(), "distro.toml".to_string()],
         "profiles/ 机型集合漂移"
     );
 
@@ -962,6 +962,102 @@ fn default_profile_binds_module_slots_to_real_modules() {
     unbound.clear();
 
     // [faces]：模块 → 格位集合 == manifest provides 全集
+    let faces = v
+        .get("faces")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [faces]");
+    let mut face_modules: Vec<&String> = faces.keys().collect();
+    face_modules.sort();
+    let mut manifest_modules: Vec<&String> = manifests.keys().collect();
+    manifest_modules.sort();
+    assert_eq!(
+        face_modules, manifest_modules,
+        "[faces] 覆盖的模块集合与 modules/ 漂移"
+    );
+    for (module, face) in faces {
+        let mut slots: Vec<String> = face
+            .as_array()
+            .expect("faces 值必须是数组")
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .map(String::from)
+            .collect();
+        slots.sort();
+        let mut caps = str_list(&manifests[module], "provides.capabilities");
+        caps.sort();
+        assert_eq!(slots, caps, "{module} 的 [faces] 与 manifest provides 漂移");
+        for s in &slots {
+            assert!(table.rr3_slot_table_contains(s), "[faces] 引用表外格位 {s}");
+        }
+    }
+}
+
+/// 门禁②（profile 侧）+ 0.0.2 T5 的 distro 装配单对账：快路机型的绑定面**恰好是
+/// 身体层**（非 base 未绑格位 == cognition.\* 四格，即 rr3-brain 的 provides 全集），
+/// faces 仍覆盖全部在册模块且与 provides 全集相等——"faces 保留声明、格位不绑定"
+/// 正是快路 payload 缺 Python brain 的诚实表达（P2：缺格点名降级，不拒 boot；
+/// CI distro-smoke 的断言锚点与这份装配单同源）。
+#[test]
+fn distro_profile_binds_exactly_the_body_layer() {
+    let root = repo_root();
+    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let manifests: std::collections::BTreeMap<String, toml::Value> =
+        module_manifest_values().into_iter().collect();
+    let text = std::fs::read_to_string(root.join("profiles/distro.toml")).unwrap();
+    let v: toml::Value = toml::from_str(&text).expect("distro.toml 必须可解析");
+
+    let route = v
+        .get("os")
+        .and_then(|o| o.get("route"))
+        .and_then(toml::Value::as_str)
+        .expect("profile 缺 [os] route");
+    assert_eq!(route, "distro", "distro 机 route 必须是快路");
+
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [bindings]");
+    for (slot, provider) in bindings {
+        let provider = provider
+            .as_str()
+            .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
+        assert!(
+            table.rr3_slot_table_contains(slot),
+            "bindings 引用表外格位 {slot}"
+        );
+        assert_ne!(
+            table.rr3_slot_table_layer(slot).unwrap(),
+            "base",
+            "基础层格位 {slot} 由基座内建承载，不得绑定模块"
+        );
+        let m = manifests
+            .get(provider)
+            .unwrap_or_else(|| panic!("bindings.{slot} 绑到不在册模块 {provider}"));
+        assert!(
+            str_list(m, "provides.capabilities")
+                .iter()
+                .any(|c| c == slot),
+            "{provider} 的 manifest 未 provides 被绑格位 {slot}"
+        );
+    }
+
+    // 未绑定的非 base 格位恰好 = rr3-brain 的 provides 全集（快路缺格的精确边界：
+    // 一格不多——身体层全在位；一格不少——brain 四格全缺）
+    let mut unbound: Vec<String> = table
+        .rr3_slot_table_names()
+        .into_iter()
+        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| !bindings.contains_key(n))
+        .collect();
+    unbound.sort();
+    let mut brain_caps = str_list(&manifests["rr3-brain"], "provides.capabilities");
+    brain_caps.sort();
+    assert_eq!(
+        unbound, brain_caps,
+        "distro 机缺格边界漂移：未绑格位必须恰为 rr3-brain 的 provides 全集"
+    );
+
+    // faces 仍覆盖全部在册模块（含 brain——缺格声明要可点名），且与 provides 全集相等
     let faces = v
         .get("faces")
         .and_then(toml::Value::as_table)

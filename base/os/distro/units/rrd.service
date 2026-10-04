@@ -1,0 +1,16 @@
+# RockRobot3 守护进程 systemd 单元（0.0.2 T5，发行版快路轨）。
+# 实体真值在本文件；rr3-pack include_str! 编译期嵌入 deb。
+# 与保底轨 S99rrd 同一组安装位与套接字（两轨装配各自薄装、注入约定同源，ADR-0013 裁定 5）：
+# 契约与装配单走 --contracts / --profile 运行期入口（T5 新增；编译期仓内路径装机不存在），
+# profile 是装机正门——faces 决定起谁（0.0.2 方案 Q3）。
+[Unit]
+Description=RockRobot3 守护进程（rrd，发行版快路轨）
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/rrd --socket /var/run/rock3-ipc.sock --contracts /usr/lib/rockrobot3/contracts --profile /usr/lib/rockrobot3/profiles/distro.toml
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

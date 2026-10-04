@@ -287,7 +287,7 @@ mod tests {
         // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
         if servo_backend == RR3_BACKEND_SIM {
             assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
-            assert_eq!(rr3_block_on(gpio.level()).unwrap(), false, "sim 通道初始断电");
+            assert!(!rr3_block_on(gpio.level()).unwrap(), "sim 通道初始断电");
         }
     }
 
