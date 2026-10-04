@@ -377,6 +377,24 @@ socket）实跑 2/2 OK，判据：三模块 running + brain 日志「对话轮�
 `base_capabilities` 钉死等价 / 格位表形状 pin 全部 20 条 `(name, layer)` 在册且层分布
 5/11/4 / manifest provides+depends 双侧查册 / default profile bindings-faces 装配自洽）。
 ③ 5 / ②b 5 / ④ 9 个独立工程均无变化。
+2026-10-04 T3（rrd 装配链——`--profile` 装机正门 / faces 决定起谁 / 查册门 / 缺格 fail-closed，
+ADR-0009/0012 与 0.0.2 方案 Q3 裁定）同口径：rrd lib 108→**122**——新模块 `profile.rs` 11 条
+（解析形状错误全收集逐条点名 / 缺段与空 faces / 坏 TOML 单错 / 满配 manifest 按 modules-root
+解析且升序（比对基准用规范化后根目录：macOS `/tmp` 是符号链接，拿原始路径比会红在系统布局上）/
+缺 binding 只缺点名模块不连坐 / binding 被他人认领=不自洽致命 / 基础层进 bindings 致命 /
+faces 引未在册格位致命点名 / 基础层进 faces 只记账不缺格 / 装配单文件不存在的绝对化文案）
++ 新模块 `probe.rs` 1 条（sim 后端对任何格位回在位——缺格只由装配单缺 binding 表达）
++ `cli.rs` 14→16（`--profile` 默认 None 且与叠加层并存 1、与 `--manifest` 两种顺序同给
+都在 parse 处互斥拒 1）。新线级目标 `rrd/tests/e2e_profile.rs` **3** 条（整体 `#![cfg(unix)]`，
+Unix 独有）：P1 满配（装配单凭证行 + 三条 spawn 行回显夹具 entry + ctl.status 轮询三模块全
+running）/ P2 缺格（点名 `拒绝启动 rr3-pb：缺格 sensor.env` + pa/pc 照常 spawn +
+300ms 窗否定断言 `spawn rr3-pb pid=` 不出现——缺格≠拒 boot）/ P3 非法装配单（faces 引
+未在册格位 → bind 之前非 0 退出 + stderr 点名未在册 + 套接字无残迹；直接 `Command` 起 rrd，
+管道收两端）。①b Unix **313**（macOS arm64 实跑；上轮 T1 登记 294，本批净增 17
+（rrd lib 14 + e2e_profile 3），另 2 条为 T1 轮登记的历史口径差——按本轮逐目标复算上轮实数
+应为 296，不追溯改史，以本轮实数为准）/ Windows **251**（237 + 14 推算，本批 lib 用例全部
+平台无关；`e2e_profile` 挂 Unix 门不计入；未实跑）。② 33 / ③ 5 / ②b 5 / ④ 9 个独立工程
+均无变化。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
