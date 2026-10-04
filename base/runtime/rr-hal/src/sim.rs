@@ -333,10 +333,60 @@ impl crate::Rr3Power for Rr3SimBattery {
     }
 }
 
+/// sim 网络链路（虚拟 WiFi 状态源）：up / ssid / rssi 记录在内存。
+///
+/// 分工口径与舵机/电池同一条：sim 是"设备"不是"策略"——漫游/重连决策属模块侧
+/// （rr3-connect），NetworkManager/D-Bus 属板上件（cfg 门骨架，0.0.2 方案 D7），
+/// HAL 只如实报数。断链时 ssid/rssi 强制 `None`：真设备断链后 NM 侧拿不到这些
+/// 读数，设备面如实表现，模块侧不许从"up=false 还带着 ssid"里发明语义。
+pub struct Rr3SimLink {
+    up: std::sync::atomic::AtomicBool,
+    ssid: Mutex<Option<String>>,
+    rssi_dbm: std::sync::atomic::AtomicI8,
+}
+
+impl Rr3SimLink {
+    pub fn rr3_sim_link_new(up: bool, ssid: &str, rssi_dbm: i8) -> Self {
+        Self {
+            up: std::sync::atomic::AtomicBool::new(up),
+            ssid: Mutex::new(Some(ssid.to_string())),
+            rssi_dbm: std::sync::atomic::AtomicI8::new(rssi_dbm),
+        }
+    }
+
+    /// 直接写设备状态（测试与 e2e 驱动用；trait 面只读，驱动必须走构造方持有的引用）
+    pub fn rr3_sim_link_set(&self, up: bool, ssid: &str, rssi_dbm: i8) {
+        self.up.store(up, std::sync::atomic::Ordering::Relaxed);
+        *self.ssid.lock().unwrap_or_else(|p| p.into_inner()) = Some(ssid.to_string());
+        self.rssi_dbm
+            .store(rssi_dbm, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[async_trait]
+impl crate::Rr3Link for Rr3SimLink {
+    async fn state(&self) -> Result<crate::Rr3LinkState, Rr3HalError> {
+        let up = self.up.load(std::sync::atomic::Ordering::Relaxed);
+        let mut ssid = self.ssid.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let mut rssi = Some(self.rssi_dbm.load(std::sync::atomic::Ordering::Relaxed));
+        if !up {
+            ssid = None;
+            rssi = None;
+        }
+        Ok(crate::Rr3LinkState {
+            up,
+            ssid,
+            rssi_dbm: rssi,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{rr3_block_on, Rr3GpioOut, Rr3PwmServo, Rr3Power, RR3_AUDIO_CFG_16K_MONO16};
+    use crate::{
+        rr3_block_on, Rr3GpioOut, Rr3Link, Rr3PwmServo, Rr3Power, RR3_AUDIO_CFG_16K_MONO16,
+    };
 
     fn source(wave: Rr3SimWave) -> Rr3SimAudioSource {
         Rr3SimAudioSource::rr3_sim_source_new(wave)
@@ -554,5 +604,32 @@ mod tests {
         // 特性曲线两端钉死：e2e 的低电断言（5% → 3250 ≤ low_voltage_mv=3300）靠它成立
         assert_eq!(Rr3SimBattery::rr3_sim_battery_voltage_mv(0), 3200);
         assert_eq!(Rr3SimBattery::rr3_sim_battery_voltage_mv(100), 4200);
+    }
+
+    /// sim 链路：async 面（trait state）读回构造/覆写后的三元组；断链时
+    /// ssid/rssi 强制 None——设备面如实表现，模块侧不许从死链里读出网络信息。
+    #[test]
+    fn sim_link_reads_up_ssid_rssi_and_blanks_them_when_down() {
+        let l = Rr3SimLink::rr3_sim_link_new(true, "rock-sim", -50);
+        let st = rr3_block_on(l.state()).unwrap();
+        assert_eq!(
+            (st.up, st.ssid.as_deref(), st.rssi_dbm),
+            (true, Some("rock-sim"), Some(-50)),
+            "初始在线，三元组原样读回"
+        );
+        l.rr3_sim_link_set(false, "rock-sim", -90);
+        let st = rr3_block_on(l.state()).unwrap();
+        assert_eq!(
+            (st.up, st.ssid.as_deref(), st.rssi_dbm),
+            (false, None, None),
+            "断链后 ssid/rssi 必须被设备面抹掉"
+        );
+        l.rr3_sim_link_set(true, "other-net", -40);
+        let st = rr3_block_on(l.state()).unwrap();
+        assert_eq!(
+            (st.up, st.ssid.as_deref(), st.rssi_dbm),
+            (true, Some("other-net"), Some(-40)),
+            "覆写恢复在线后读回新真值"
+        );
     }
 }

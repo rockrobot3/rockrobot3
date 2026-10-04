@@ -445,6 +445,27 @@ check 不跑测，按 rr3-act 先例单独登记）**7** 条：低电边沿 2（
 事件）+ 事件体 3（state 全摘要带自流 seq / low 体恰三字段对齐 schema
 additionalProperties=false / charger state 恰两字段）+ config 解析 2（仓形同构
 可解析 / 缺段缺字段点名）。
+2026-10-05 T4c（rr3-connect 实装——net/link 状态机周期流 + cloud/session 应答面 +
+HAL Rr3Link sim 后端，0.0.2 方案 D7）同口径：rr-hal lib 19→**21**（+2：sim 链路
+三元组读回且断链时设备面强制抹掉 ssid/rssi——模块侧不许从死链里读出网络信息 /
+链路 env 取值裁决纯函数（up 只认 1/0、rssi 只认 -100..=-1，未设缺省在线 / rock-sim /
+-50））；新线级目标 `rrd/tests/e2e_connect.rs` **2** 条（整体 `#![cfg(unix)]`，
+Unix 独有）：装配单正门起**真 rr3-connect** 的两场景对偶——在线（sim 缺省不注入
+UP 键钉缺省语义：net/link 报 up=true / ssid=rock-sim / rssi=-50，seq 严格递增的
+周期流；cloud/session open 回 mock 会话应答回显 ssid——云侧凭据联调范围外，
+`RR3_BRAIN_CLOUD=mock` 注入点维持）与断链（`RR3_HAL_SIM_LINK_UP=0` 注入：net/link
+报 up=false 且 ssid/rssi 为 null——设备面抹掉语义的集成面；session open 折
+result.error 点名"链路"，业务性失败不断链）。sim 后端状态 env 定死、运行期不可
+跨进程翻转，翻转分支只有 wifi.rs 纯函数单测能钉（e2e_power 的时序前提同款分工）。
+①b Unix **326**（macOS arm64 实跑；上轮 T4b 登记 322，本批净增 4（rr-hal 2 +
+e2e_connect 2））/ Windows **260**（258 + 2 推算，rr-hal 新用例平台无关；
+`e2e_connect` 挂 Unix 门不计入；未实跑）。② 33 / ③ 5 / ②b 5 / ④ 9 个独立工程
+均无变化（rr3-connect 由骨架变实装属 ④ 步既有目录，check 口径不变）。rr3-connect
+独立工程单测（④ 步只 check 不跑测，按 rr3-act 先例单独登记）**6** 条：链路状态机 2
+（首拍基线必发-同态不发-翻转必发的主语义链 / 事件体全状态带自流 seq 且断链时
+ssid/rssi 必须是 null）+ 会话面 2（args 只认 action=open 且缺参-类型错-未知值点名 /
+result 跟随链路 up 回 mock 会话、down 折 error 点名判据词）+ config 解析 2（仓形
+同构可解析 / 缺段缺字段点名）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
