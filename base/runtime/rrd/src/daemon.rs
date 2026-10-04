@@ -159,6 +159,33 @@ pub fn rr3_state_frame(name: &str, phase: &str, src_task: u64) -> Rr3Frame {
     }
 }
 
+/// `rr3-runtime/system/power` 下行广播帧：低电兜底点名（0.0.2 方案 Q4 裁定，
+/// D3 随批 append 的内建命名空间主题）。owner 是内建命名空间，只许 rrd 发；
+/// percent/voltage_mv 从触发它的 battery/low 事件体透传（取不到按 0 回缺省）。
+pub fn rr3_system_power_frame(percent: u64, voltage_mv: u64) -> Rr3Frame {
+    let body = json!({
+        "topic": "rr3-runtime/system/power",
+        "reason": "battery-low",
+        "percent": percent,
+        "voltage_mv": voltage_mv,
+    })
+    .to_string()
+    .into_bytes();
+    let payload = rr3_body_encode(rr_ipc::Rr3PayloadType::Notification, &body);
+    Rr3Frame {
+        header: Rr3Header {
+            opcode: opcode::SEND,
+            flags: 0,
+            trace_id: 0,
+            timestamp_ns: rr3_now_ns(),
+            src_task: RR3_TASK_RRD,
+            dst_task: RR3_BROADCAST_DST_TASK,
+            payload_len: payload.len() as u32,
+        },
+        payload,
+    }
+}
+
 /// 守护主循环：永不返回（除非 bind 失败）。集成测试靠父进程 kill 收尾。
 ///
 /// 线程与投递的次序**有意义**，别重排（三件事各不相同）：
@@ -305,5 +332,34 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 rr3_log(&format!("连接收尾: {e}"));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rr_ipc::{rr3_body_split, Rr3PayloadType};
+
+    /// 低电兜底点名帧的形状钉死（0.0.2 Q4）：Notification、src=rrd、dst=广播、
+    /// 体恰四字段（topic/reason/percent/voltage_mv），值从触发事件透传。e2e 的旁观者
+    /// 接入时首拍已过（兜底在模块注册后一拍内触发，e2e_power.rs 文件头的时序前提），
+    /// 帧级形状只有这里能钉——e2e 钉日志侧的触发与拦截，两半拼成完整证据链。
+    #[test]
+    fn system_power_frame_shape_is_pinned() {
+        let f = rr3_system_power_frame(5, 3250);
+        assert_eq!(f.header.src_task, RR3_TASK_RRD, "点名是 rrd 自己发的");
+        assert_eq!(f.header.dst_task, RR3_BROADCAST_DST_TASK, "全量扇出");
+        let (ty, body) = rr3_body_split(&f.payload).expect("前缀合法");
+        assert_eq!(ty, Rr3PayloadType::Notification, "点名走通知不是应答");
+        let v: serde_json::Value = serde_json::from_slice(&body).expect("体是 JSON");
+        assert_eq!(v["topic"], "rr3-runtime/system/power");
+        assert_eq!(v["reason"], "battery-low");
+        assert_eq!(v["percent"], 5, "透传触发事件的 percent");
+        assert_eq!(v["voltage_mv"], 3250, "透传触发事件的 voltage_mv");
+        assert_eq!(
+            v.as_object().map(|o| o.len()),
+            Some(4),
+            "体恰四字段，不得私加: {v}"
+        );
     }
 }

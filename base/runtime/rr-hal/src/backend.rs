@@ -11,7 +11,9 @@
 
 use std::sync::Arc;
 
-use crate::{Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3PwmServo, Rr3UnavailableSource};
+use crate::{
+    Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3PwmServo, Rr3Power, Rr3UnavailableSource,
+};
 
 /// 后端标识（写入日志与诊断主题 `rr3-runtime/module/state`）
 pub const RR3_BACKEND_LINUX: &str = "linux";
@@ -31,6 +33,13 @@ pub const RR3_HAL_ALSA_DEVICE_ENV: &str = "RR3_HAL_ALSA_DEVICE";
 
 /// ALSA 采集/回放的默认设备名
 pub const RR3_HAL_ALSA_DEVICE_DEFAULT: &str = "default";
+
+/// sim 电池的初始电量键（0–100 的十进制整数；未设/取值不认 → 80）。
+/// e2e 注入低电量的正门：真 rr3-power 进程从 rrd 继承环境，按此值起表。
+pub const RR3_HAL_SIM_BATTERY_PERCENT_ENV: &str = "RR3_HAL_SIM_BATTERY_PERCENT";
+
+/// sim 电池的充电态键（`1` 充电 / `0` 未充电；未设/取值不认 → 未充电）。
+pub const RR3_HAL_SIM_BATTERY_CHARGING_ENV: &str = "RR3_HAL_SIM_BATTERY_CHARGING";
 
 /// 平台默认后端：linux + `alsa` feature 编进来了就是 `linux`，否则 `sim`。
 pub const fn rr3_hal_backend_default() -> &'static str {
@@ -141,6 +150,43 @@ pub fn rr3_hal_gpio_out() -> (Arc<dyn Rr3GpioOut>, &'static str) {
     }
 }
 
+/// sim 电量键的取值裁决（0–100 十进制整数）。独立成纯函数：裁决可单测，
+/// 选择函数里只留"读环境 + 裁决 + 缺省"。
+pub fn rr3_sim_battery_percent_parse(s: &str) -> Option<u8> {
+    s.trim().parse::<u8>().ok().filter(|p| *p <= 100)
+}
+
+/// sim 充电态键的取值裁决（只认 `1` / `0`）。
+pub fn rr3_sim_battery_charging_parse(s: &str) -> Option<bool> {
+    match s.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
+/// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无
+/// 电量计后端（板上件）：显式要 `linux` 时返回占位件，使用时以 `Unsupported`
+/// 回错，不静默换 sim——rr3-power 开机探活会按"能力缺失显式回错"退出。
+pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
+    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_SIM => {
+            let percent = std::env::var(RR3_HAL_SIM_BATTERY_PERCENT_ENV)
+                .ok()
+                .and_then(|v| rr3_sim_battery_percent_parse(&v))
+                .unwrap_or(80);
+            let charging = std::env::var(RR3_HAL_SIM_BATTERY_CHARGING_ENV)
+                .ok()
+                .and_then(|v| rr3_sim_battery_charging_parse(&v))
+                .unwrap_or(false);
+            let dev =
+                crate::sim::Rr3SimBattery::rr3_sim_battery_new(percent, charging);
+            (Box::new(dev), RR3_BACKEND_SIM)
+        }
+        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +228,23 @@ mod tests {
         if servo_backend == RR3_BACKEND_SIM {
             assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
             assert_eq!(rr3_block_on(gpio.level()).unwrap(), false, "sim 通道初始断电");
+        }
+    }
+
+    /// sim 电池两个 env 键的取值裁决：合法档、越界/垃圾全点名。e2e 从 rrd 继承
+    /// 环境注入低电量的正门靠这两个裁决，取值不认一律落缺省（80% / 未充电）。
+    #[test]
+    fn sim_battery_env_values_parse_or_default() {
+        assert_eq!(rr3_sim_battery_percent_parse("0"), Some(0));
+        assert_eq!(rr3_sim_battery_percent_parse("100"), Some(100));
+        assert_eq!(rr3_sim_battery_percent_parse(" 5 "), Some(5));
+        assert_eq!(rr3_sim_battery_percent_parse("101"), None, "越界不认");
+        assert_eq!(rr3_sim_battery_percent_parse("-1"), None, "u8 负数不认");
+        assert_eq!(rr3_sim_battery_percent_parse("abc"), None, "垃圾不认");
+        assert_eq!(rr3_sim_battery_charging_parse("1"), Some(true));
+        assert_eq!(rr3_sim_battery_charging_parse("0"), Some(false));
+        for bad in ["", "true", "2", "01x"] {
+            assert_eq!(rr3_sim_battery_charging_parse(bad), None, "{bad}");
         }
     }
 }
