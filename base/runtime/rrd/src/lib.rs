@@ -9,6 +9,8 @@
 
 pub mod cli;
 pub mod manifest;
+pub mod probe;
+pub mod profile;
 pub mod registry;
 pub mod rpc;
 pub mod topics_load;

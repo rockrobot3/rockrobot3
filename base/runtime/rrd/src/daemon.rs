@@ -169,6 +169,24 @@ pub fn rr3_state_frame(name: &str, phase: &str, src_task: u64) -> Rr3Frame {
 /// 3. 投 boot 队列 —— 放在 accept 循环之前，否则第一条消息永远没人取。
 pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String> {
     let t0 = Instant::now();
+    // 装配链（0.0.2 方案 D2，Q3 裁定）：--profile 是装机正门——faces 决定起谁，
+    // 装载/查册/缺格判定/manifest 解析全部在 bind 之前完成（fatal 即非 0 退出，
+    // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
+    // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
+    // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
+    let (boot_manifests, degraded) = match &cfg.profile {
+        Some(p) => {
+            let boot = crate::profile::rr3_profile_boot_inputs(p)?;
+            for (module, slot) in &boot.missing {
+                rr3_log(&format!(
+                    "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
+                ));
+            }
+            let names: BTreeSet<String> = boot.missing.iter().map(|(m, _)| m.clone()).collect();
+            (boot.manifests, names)
+        }
+        None => (cfg.manifests.clone(), BTreeSet::new()),
+    };
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     Rr3UdsListener::rr3_cleanup(&cfg.socket)
@@ -205,7 +223,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // `拒绝启动` 走的是 CLI 顺序、`spawn` 走的是仲裁序，两种序混在日志里就没有可读性
     // 可言（先装载后投递让这两段各自连续）。
     let mut jobs: Vec<Rr3SpawnJob> = Vec::new();
-    for manifest in &cfg.manifests {
+    for manifest in &boot_manifests {
         if let Some(job) = rr3_boot_job_from_manifest(manifest) {
             jobs.push(job);
         }
@@ -257,6 +275,11 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         .map(|j| (j.facts.name.clone(), j))
         .collect();
     for name in &plan.order {
+        // 缺格模块不进 boot 队列（拒绝启动 已由装配链在 bind 前点名）；它的 provides
+        // 仍在上面的 providers 表里——可满足性宇宙完整，下游不连坐（ADR-0009 同款语义）。
+        if degraded.contains(name) {
+            continue;
+        }
         if let Some(job) = by_name.remove(name) {
             sup.rr3_boot(job);
         }
