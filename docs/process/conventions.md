@@ -124,7 +124,7 @@ M2 Task 11a（崩溃记账收口）净增 `registry::tests` 8 条（39→47）�
 "重启计划"日志——一旦打了就当场打死 `e2e_watchdog` 的 W4（判据是观察窗内 stdout 不得出现"重启计划"），
 `supervisor` 派生重启归 11b。**本轮终态的欠账（degraded 死相位）**：degraded 是"有 enum 变体、无写入方"的
 死相位——它的 setter 与 base 能力门（`depends.required` 的 `bus.publish`/`bus.subscribe`/`bus.rpc` 就位判定，
-spec §5.3）都不在 11/11b，一个要新相位上线、一个要给 21 条生产主题建能力字典，均不阻塞 §9 验收；
+spec §5.3）都不在 11/11b，一个要新相位上线、一个要给 24 条生产主题建能力字典，均不阻塞 §9 验收；
 这句话同时写在 `registry.rs` 文件头与本台账，不许被任何"已实现状态机"的措辞盖过去。
 11a 对生产代码的**唯一**非 registry 改动是 `conn.rs` 的 `rr3_reg_beat` 调用点与 `rr3_reg_death` 返回类型适配
 （`Rr3Death` 三态），四个 e2e 文件一条用例未改；`conn.rs`/`daemon.rs` 是 `#[cfg(unix)]`，故 Task 11a 的一处
@@ -251,7 +251,7 @@ watchdog 判死但不广播 → 第一/三条红；广播里的相位写错 → 
 不进 contracts/topics.toml"不受影响；落点偏离的文字同步归 Task 13；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
-硬 pin：7 owner / 21 topic / kind 7-8-3-3 / 21 条三元组；`every_module_manifest_passes_contract`
+硬 pin：7 owner / 24 topic / kind 8-9-3-4 / 24 条三元组；`every_module_manifest_passes_contract`
 钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
 每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
 ②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
@@ -411,6 +411,11 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
 
 ## 3 结构纪律
 
+- **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
+  **功能语义不变**原则渐进迁移为 Rust，不设豁免通道——当前非 Rust 面为
+  `rr3-brain`（Python，ADR-0014）与 CI 胶水脚本（bash，可最后迁）。迁移本身走正常批次
+  （生成器产出、契约校验、七步门禁一样不少），`module.toml` 的 `lang` 字段随迁移改为
+  `rust`，原"Python 语法检查属人工检查点"的面随之收敛为 cargo 检查
 - 新模块一律由生成器产出：`cargo run --manifest-path tools/mkmodule/Cargo.toml --bin rr3-mkmod -- rr3-<名>`
   （模块名形如 `rr3-arm`，第二参数是输出根，默认 `./modules`）。生成器落盘**五个文件**：
   `module.toml`、`config.toml`、`Cargo.toml`、`src/main.rs`、`README.md`——[naming.md](naming.md) §4
