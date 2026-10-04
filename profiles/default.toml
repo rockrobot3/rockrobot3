@@ -11,9 +11,10 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
-# 本节绑定全部身体层与认知层格位（15 格，default 机不留缺格）。
+# 本节绑定全部身体层与认知层格位（16 格，default 机不留缺格）。
 "act.servo" = "rr3-act"
 "act.led" = "rr3-act"
+"act.relay" = "rr3-act"
 "net.wifi" = "rr3-connect"
 "net.bt" = "rr3-connect"
 "ui.face" = "rr3-interact"
@@ -31,7 +32,7 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 [faces]
 # 模块 → 本形态启用的格位集合。default 机各模块启用其 manifest provides 全集；
 # 换机型裁剪模块能力面 = 只改本文件，不改代码。
-rr3-act = ["act.servo", "act.led"]
+rr3-act = ["act.servo", "act.led", "act.relay"]
 rr3-connect = ["net.wifi", "net.bt"]
 rr3-interact = ["ui.face", "audio.playback"]
 rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]

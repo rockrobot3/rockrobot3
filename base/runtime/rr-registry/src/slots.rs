@@ -97,11 +97,11 @@ mod tests {
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/slots.toml");
 
-    /// 契约必须解析成 20 格，三层分布 5/11/4（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 21 格，三层分布 5/12/4（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let table = rr3_registry_slot_table_from_text(CONTRACT);
-        assert_eq!(table.layers.len(), 20, "契约格位数");
+        assert_eq!(table.layers.len(), 21, "契约格位数");
         assert!(!table.rr3_slot_table_is_empty());
         assert_eq!(table.rr3_slot_table_base().len(), 5, "基础层格数");
         assert!(table.rr3_slot_table_contains("audio.capture"));

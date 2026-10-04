@@ -133,6 +133,17 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   `tests/contract.rs` 全集层用例：manifest/profile 双侧查册、基础层与 `base_capabilities`
   钉死等价、格位表形状 pin）。基础层格名随 `base_capabilities` 原名（两段式），ADR-0012
   正文"基础层单段"的示例记法不采用——两份名单必须逐条相等，这是查册门与仲裁共用真值的前提。
+- **2026-10-04 · Q1/Q4 裁定落档 + D3 契约 append（0.0.2 版本开发方案 T2 批次）**：
+  `slots.toml` 20→**21** 格（append `act.relay`，body 层；立格判据真实依赖者 = M5 验收
+  "语音控继电器"，legacy/core/relay 迁移映射在册）；`topics.toml` 21→**24** 条（append
+  `rr3-act/relay/set` request L1、`rr3-power/battery/low` event L1、`rr3-runtime/system/power`
+  notification L2——低电兜底点名广播，Q4 裁定）；新增第二个事件负载 schema
+  `events/power-battery-low.schema.json`（形状最小：seq / percent / voltage_mv；
+  生产者 rr3-power 的 battery 实装落地后为形状唯一事实源）。同批更新 rr-registry 形状 pin
+  （24 条三元组、kind 8-9-3-4、格位 21 / 层分布 5-12-4）、`modules/rr3-act/module.toml`
+  （provides `act.relay` + exposes `rr3-act/relay/set`）、`profiles/default.toml`
+  （bindings 16 条 + faces）。battery/low 定 L1：兜底触发面负载取最小集、不再扩字段，
+  演化走"只增不改"评审。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

@@ -419,9 +419,9 @@ fn topics_registry_zero_topics_is_rejected() {
 
 // ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
 
-/// v0.0.1 注册表的全部 21 条 `(name, owner, kind)` 三元组。
+/// 注册表的全部 24 条 `(name, owner, kind)` 三元组。
 /// 顺序即 `contracts/topics.toml` 的登记顺序。
-const RR3_PINNED_TOPICS: [(&str, &str, &str); 21] = [
+const RR3_PINNED_TOPICS: [(&str, &str, &str); 24] = [
     ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
     ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
     ("rr3-sense/env/temperature", "rr3-sense", "event"),
@@ -447,6 +447,9 @@ const RR3_PINNED_TOPICS: [(&str, &str, &str); 21] = [
     ),
     ("rr3-runtime/module/state", "rr3-runtime", "notification"),
     ("rr3-sense/capture/dump", "rr3-sense", "request"),
+    ("rr3-act/relay/set", "rr3-act", "request"),
+    ("rr3-power/battery/low", "rr3-power", "event"),
+    ("rr3-runtime/system/power", "rr3-runtime", "notification"),
 ];
 
 /// 从 topics.toml 文本解析出的 (name, owner, kind) 三元组
@@ -475,7 +478,7 @@ fn registry_triples(text: &str) -> Vec<(String, String, String)> {
 }
 
 /// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 21 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
+/// 以及全部 24 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
 ///
 /// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
 /// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
@@ -505,25 +508,29 @@ fn registry_shape_is_pinned() {
         "owner 名不得重复登记: {owners:?}"
     );
 
-    // 2) topic 侧：21 条，且不重名（重名会让下面的子集论证失去意义）
+    // 2) topic 侧：24 条，且不重名（重名会让下面的子集论证失去意义）
     let topics = registry_triples(&text);
-    assert_eq!(topics.len(), 21, "v0.0.1 契约固定 21 条主题");
+    assert_eq!(
+        topics.len(),
+        24,
+        "契约固定 24 条主题（2026-10-04 Q1/Q4/D3 批次 21→24）"
+    );
     let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
 
-    // 3) kind 分布：7 request / 8 event / 3 stream / 3 notification
+    // 3) kind 分布：8 request / 9 event / 3 stream / 4 notification
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
-    assert_eq!(count("request"), 7, "kind=request 的分布漂移");
-    assert_eq!(count("event"), 8, "kind=event 的分布漂移");
+    assert_eq!(count("request"), 8, "kind=request 的分布漂移");
+    assert_eq!(count("event"), 9, "kind=event 的分布漂移");
     assert_eq!(count("stream"), 3, "kind=stream 的分布漂移");
-    assert_eq!(count("notification"), 3, "kind=notification 的分布漂移");
+    assert_eq!(count("notification"), 4, "kind=notification 的分布漂移");
     assert_eq!(
         count("request") + count("event") + count("stream") + count("notification"),
         topics.len(),
         "存在四类之外的 kind: {topics:?}"
     );
 
-    // 4) 21 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
+    // 4) 24 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
     for (name, owner, kind) in RR3_PINNED_TOPICS {
         assert!(
             topics
@@ -786,11 +793,11 @@ fn slots_base_layer_is_pinned_to_base_capabilities() {
     assert_eq!(base, caps, "slots 基础层与 base_capabilities 漂移");
 }
 
-/// v0.0.1 格位表的全部 20 条 `(name, layer)`，顺序即 `contracts/slots.toml` 登记顺序。
+/// 格位表的全部 21 条 `(name, layer)`，顺序即 `contracts/slots.toml` 登记顺序。
 /// 与 `registry_shape_is_pinned` 同一钉法：append 合法但必须是有意识的编辑——
 /// 同一次改动里同步更新 `contracts/slots.toml`、本常量与层分布计数、
 /// `profiles/default.toml`（如涉及绑定面），以及把这些数字当事实抄进正文的文档。
-const RR3_PINNED_SLOTS: [(&str, &str); 20] = [
+const RR3_PINNED_SLOTS: [(&str, &str); 21] = [
     ("bus.publish", "base"),
     ("bus.subscribe", "base"),
     ("bus.rpc", "base"),
@@ -798,6 +805,7 @@ const RR3_PINNED_SLOTS: [(&str, &str); 20] = [
     ("power.battery", "base"),
     ("act.servo", "body"),
     ("act.led", "body"),
+    ("act.relay", "body"),
     ("net.wifi", "body"),
     ("net.bt", "body"),
     ("ui.face", "body"),
@@ -824,7 +832,7 @@ fn slots_registry_shape_is_pinned() {
         table.rr3_slot_table_check()
     );
 
-    // 1) 20 格、逐条 (name, layer) 在册且不多不少（配合唯一性与等长断言）
+    // 1) 21 格、逐条 (name, layer) 在册且不多不少（配合唯一性与等长断言）
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for (name, layer) in RR3_PINNED_SLOTS {
         assert_eq!(
@@ -840,9 +848,9 @@ fn slots_registry_shape_is_pinned() {
         "格位总数漂移"
     );
 
-    // 2) 层分布 5/11/4
+    // 2) 层分布 5/12/4
     assert_eq!(counts.get("base"), Some(&5));
-    assert_eq!(counts.get("body"), Some(&11));
+    assert_eq!(counts.get("body"), Some(&12));
     assert_eq!(counts.get("cognition"), Some(&4));
 }
 
