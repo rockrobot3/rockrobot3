@@ -395,6 +395,30 @@ running）/ P2 缺格（点名 `拒绝启动 rr3-pb：缺格 sensor.env` + pa/pc
 应为 296，不追溯改史，以本轮实数为准）/ Windows **251**（237 + 14 推算，本批 lib 用例全部
 平台无关；`e2e_profile` 挂 Unix 门不计入；未实跑）。② 33 / ③ 5 / ②b 5 / ④ 9 个独立工程
 均无变化。
+2026-10-05 T4a（rr3-act 实装——舵机/LED/继电器三事务面 + 进程内反射环宿主，
+ADR-0007/0012 与 0.0.2 方案 Q1 裁定）同口径：rr-hal lib 14→**17**（+3：sim 舵机
+记录末次落角不判行程 / sim 数字输出电平 round-trip / act 设备选择入口回合法后端
+对象）；新线级目标 `rrd/tests/e2e_act.rs` **1** 条（整体 `#![cfg(unix)]`，Unix 独有）：
+装配单正门起**真 rr3-act**——夹具用仓内真 module.toml 渲染绝对 entry 并**同树写
+config.toml**（rr3_config_load 缺省取 manifest 同目录的 config.toml，缺它模块开机
+exit(1)，那是夹具烂不是被测行为），判据链：spawn 行回显绝对 entry → 注册 → running →
+旁观连接 rr3.call 三事务面（servo 合法角应答 angle_deg/move_ms=800（缺 move_ms 取
+config 上限）+ servo/state 限速流 seq=1、src_task=分配值——先读 state 后读应答，
+同 socket 上应答与广播不保序，read_call_reply 不回存队列故顺序不可反；越界 200 /
+缺参 / 非布尔 `{"on":1}` 折 result.error 不断链；led blink 应答 effect/previous；
+relay 吸合回显真值）。真模块夹具 5 函数（repo_root / build_module_bin /
+module_manifest_text / connect_observer / read_call_reply）自 e2e_audio_chain 上收
+`tests/support`，后者断言一字未动仅换 helper 来源。①b Unix **317**（macOS arm64
+实跑；上轮 T3 登记 313，本批净增 4（rr-hal 3 + e2e_act 1））/ Windows **254**
+（251 + 3 推算，rr-hal 新用例平台无关；`e2e_act` 挂 Unix 门不计入；未实跑）。
+② 33 / ③ 5 / ②b 5 无变化；④ 9 个独立工程均无变化。rr3-act 独立工程单测（④ 步
+只 check 不跑测，按 rr3-ctl 先例单独登记）**18** 条：servo 5（参数解析正例含缺
+move_ms 取上限 / 缺参·类型·越界点名 / move_ms 超上限与 0 拒收 / 限速门首放-窗内挡-
+窗外开（now 合成注入）/ state 体 seq+angle）+ led 5（白名单解析含垃圾拒 / 缺参·
+非串点名 / apply 记账 current 与 previous / on·off 即时生效（有界轮询）/
+blink 翻转与 off 停翻（Arc 克隆观察 worker 写面））+ reflex 4（窗计划推导 /
+episode 恰报一次 / need 下界为 1 / 孤立饱和窗不触发）+ relay 2（只认真布尔 /
+apply 落电平且应答回显）+ main config 解析 2（仓形同构可解析 / 缺段缺字段点名）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

@@ -6,6 +6,10 @@ log_level = "info"
 [rr3-act.servo]
 angle_limit_deg = [0, 180]
 move_timeout_ms = 800     # 超时即停，不给堵转留机会
+state_min_interval_ms = 50 # servo/state 限速：两次发布的最小间隔
+
+[rr3-act.led]
+blink_period_ms = 500     # blink 一个亮灭周期，亮/灭各占一半
 
 [rr3-act.reflex]
 loop_hz = 1000            # 闭环频率；永不进总线（ADR-0007 裁定 1）
