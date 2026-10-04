@@ -45,6 +45,11 @@ layer = "body"
 note = "灯效（rr3-act）"
 
 [[slot]]
+name = "act.relay"
+layer = "body"
+note = "继电器通断（rr3-act；2026-10-04 依 0.0.2 方案 Q1 裁定立格——立格判据真实依赖者 = M5 验收\"语音控继电器\"，legacy/core/relay 迁移映射在册；板卡规格书无继电器连接器，default 参考机为 sim 绑定）"
+
+[[slot]]
 name = "net.wifi"
 layer = "body"
 note = "WiFi 链路管理（rr3-connect）"

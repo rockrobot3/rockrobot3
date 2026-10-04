@@ -139,11 +139,11 @@ mod tests {
     // 叠加层夹具落在 workspace 根的 tests/fixtures/（刻意不进 modules/、不进 contracts/）
     const OVERLAY: &str = include_str!("../../tests/fixtures/sim-topics.toml");
 
-    /// 契约必须解析成 7 owner / 21 topic（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 7 owner / 24 topic（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let set = rr3_registry_topic_set_from_text(CONTRACT);
-        assert_eq!(set.topics.len(), 21, "契约 topic 数");
+        assert_eq!(set.topics.len(), 24, "契约 topic 数");
         assert_eq!(set.owners.len(), 7, "契约 owner 数");
         assert!(!set.rr3_topic_set_is_empty());
         assert!(set.rr3_topic_set_contains("rr3-runtime/module/state"));
@@ -174,7 +174,7 @@ mod tests {
         let merged = base
             .rr3_topic_set_merge(&rr3_registry_topic_set_from_text(OVERLAY))
             .expect("合并");
-        assert_eq!(merged.topics.len(), 24, "21 契约 + 3 夹具");
+        assert_eq!(merged.topics.len(), 27, "24 契约 + 3 夹具");
         assert_eq!(merged.owners.len(), 9);
         assert_eq!(
             merged.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(),
@@ -197,7 +197,7 @@ mod tests {
         );
         assert!(merged.rr3_topic_set_contains("rr3-sima/ping/state"));
         // self 未被改动
-        assert_eq!(base.topics.len(), 21);
+        assert_eq!(base.topics.len(), 24);
         assert_eq!(
             base.rr3_topic_set_kind("rr3-sima/ping/state"),
             None,

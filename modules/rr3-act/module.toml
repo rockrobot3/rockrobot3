@@ -7,7 +7,7 @@ lang = "rust"
 entry = "rr3-act"
 
 [provides]
-capabilities = ["act.servo", "act.led"]
+capabilities = ["act.servo", "act.led", "act.relay"]
 
 [depends]
 required = ["bus.publish", "bus.subscribe"]
@@ -20,7 +20,7 @@ publishes = ["rr3-act/servo/state", "rr3-act/motor/reflex"]
 subscribes = ["rr3-brain/intent/result"]
 
 [rpc]
-exposes = ["rr3-act/servo/command", "rr3-act/led/effect"]
+exposes = ["rr3-act/servo/command", "rr3-act/led/effect", "rr3-act/relay/set"]
 
 [resources]
 restart_policy = "always"

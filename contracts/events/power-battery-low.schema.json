@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-power/battery/low",
+  "schema_version": 1,
+  "description": "低电阈值事件（第二个真实事件负载 schema，2026-10-04 随 0.0.2 方案 Q4 裁定落盘）。rr3-power 越过低电阈值时发布一次（同一次低电段不重复发布，恢复并再次越过阈值才再发）；rrd 订阅后执行进程内保护动作（architecture §7.3：置全局低电旗、停止新 spawn、点名广播 rr3-runtime/system/power、日志环），关机与充电策略不在此面（Q4 裁定，归 rr3-power 演进与 M6）。生产者 rr3-power 的 battery 实装（0.0.2 方案 T4b）落地后，其 battery 模块为形状唯一事实源；板上实测阈值只改发布方常量，不改本 schema。",
+  "type": "object",
+  "required": ["seq", "percent", "voltage_mv"],
+  "properties": {
+    "seq": { "type": "integer", "minimum": 0, "description": "rr3-power 事件发布序号（本模块事件流自己的计数）" },
+    "percent": { "type": "integer", "minimum": 0, "maximum": 100, "description": "越过阈值时的电量百分比读数" },
+    "voltage_mv": { "type": "integer", "minimum": 0, "description": "越过阈值时的电池电压（毫伏）" }
+  },
+  "additionalProperties": false
+}
