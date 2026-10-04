@@ -41,6 +41,22 @@ pub const RR3_HAL_SIM_BATTERY_PERCENT_ENV: &str = "RR3_HAL_SIM_BATTERY_PERCENT";
 /// sim 电池的充电态键（`1` 充电 / `0` 未充电；未设/取值不认 → 未充电）。
 pub const RR3_HAL_SIM_BATTERY_CHARGING_ENV: &str = "RR3_HAL_SIM_BATTERY_CHARGING";
 
+/// sim 链路的在线态键（`1` 在线 / `0` 断链；未设/取值不认 → 在线）。
+/// e2e 注入断链场景的正门：真 rr3-connect 进程从 rrd 继承环境，按此值起表。
+pub const RR3_HAL_SIM_LINK_UP_ENV: &str = "RR3_HAL_SIM_LINK_UP";
+
+/// sim 链路的 SSID 键（任意字符串；未设 → `rock-sim`）。断链时设备面抹掉，不在此裁。
+pub const RR3_HAL_SIM_LINK_SSID_ENV: &str = "RR3_HAL_SIM_LINK_SSID";
+
+/// sim 链路的信号强度键（-100..=-1 的十进制整数 dBm；未设/取值不认 → -50）。
+pub const RR3_HAL_SIM_LINK_RSSI_ENV: &str = "RR3_HAL_SIM_LINK_RSSI";
+
+/// sim 链路 SSID 的缺省值（backend.rs 缺省语义，e2e 断言与实现引用同一处）
+pub const RR3_HAL_SIM_LINK_SSID_DEFAULT: &str = "rock-sim";
+
+/// sim 链路信号强度的缺省值（dBm）
+pub const RR3_HAL_SIM_LINK_RSSI_DEFAULT: i8 = -50;
+
 /// 平台默认后端：linux + `alsa` feature 编进来了就是 `linux`，否则 `sim`。
 pub const fn rr3_hal_backend_default() -> &'static str {
     if cfg!(all(target_os = "linux", feature = "alsa")) {
@@ -165,6 +181,24 @@ pub fn rr3_sim_battery_charging_parse(s: &str) -> Option<bool> {
     }
 }
 
+/// sim 链路在线态键的取值裁决（只认 `1` / `0`）。
+pub fn rr3_sim_link_up_parse(s: &str) -> Option<bool> {
+    match s.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
+/// sim 链路信号强度键的取值裁决（-100..=-1 的十进制整数 dBm；0 与正值、
+/// 越界、垃圾一律不认，落缺省 -50）。
+pub fn rr3_sim_link_rssi_parse(s: &str) -> Option<i8> {
+    s.trim()
+        .parse::<i8>()
+        .ok()
+        .filter(|r| (-100..=-1).contains(r))
+}
+
 /// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无
 /// 电量计后端（板上件）：显式要 `linux` 时返回占位件，使用时以 `Unsupported`
 /// 回错，不静默换 sim——rr3-power 开机探活会按"能力缺失显式回错"退出。
@@ -181,6 +215,32 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
                 .unwrap_or(false);
             let dev =
                 crate::sim::Rr3SimBattery::rr3_sim_battery_new(percent, charging);
+            (Box::new(dev), RR3_BACKEND_SIM)
+        }
+        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
+/// 按环境选网络链路读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无
+/// NetworkManager 后端（板上件，0.0.2 方案 D7 cfg 门骨架归属）：显式要 `linux`
+/// 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim——rr3-connect 开机
+/// 探活会按"能力缺失显式回错"退出。
+pub fn rr3_hal_link() -> (Box<dyn crate::Rr3Link>, &'static str) {
+    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_SIM => {
+            let up = std::env::var(RR3_HAL_SIM_LINK_UP_ENV)
+                .ok()
+                .and_then(|v| rr3_sim_link_up_parse(&v))
+                .unwrap_or(true);
+            let ssid = std::env::var(RR3_HAL_SIM_LINK_SSID_ENV)
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| RR3_HAL_SIM_LINK_SSID_DEFAULT.to_string());
+            let rssi = std::env::var(RR3_HAL_SIM_LINK_RSSI_ENV)
+                .ok()
+                .and_then(|v| rr3_sim_link_rssi_parse(&v))
+                .unwrap_or(RR3_HAL_SIM_LINK_RSSI_DEFAULT);
+            let dev = crate::sim::Rr3SimLink::rr3_sim_link_new(up, &ssid, rssi);
             (Box::new(dev), RR3_BACKEND_SIM)
         }
         _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
@@ -246,5 +306,23 @@ mod tests {
         for bad in ["", "true", "2", "01x"] {
             assert_eq!(rr3_sim_battery_charging_parse(bad), None, "{bad}");
         }
+    }
+
+    /// sim 链路两个 env 键的取值裁决：在线态只认 1/0，rssi 只认 -100..=-1；
+    /// 0 与正值、越界、垃圾全点名。e2e 注入断链场景（RR3_HAL_SIM_LINK_UP=0）
+    /// 的正门靠这两个裁决，取值不认一律落缺省（在线 / -50）。
+    #[test]
+    fn sim_link_env_values_parse_or_default() {
+        assert_eq!(rr3_sim_link_up_parse("1"), Some(true));
+        assert_eq!(rr3_sim_link_up_parse(" 0 "), Some(false));
+        for bad in ["", "true", "2", "on"] {
+            assert_eq!(rr3_sim_link_up_parse(bad), None, "{bad}");
+        }
+        assert_eq!(rr3_sim_link_rssi_parse("-50"), Some(-50));
+        assert_eq!(rr3_sim_link_rssi_parse("-100"), Some(-100), "下界在域内");
+        assert_eq!(rr3_sim_link_rssi_parse("-1"), Some(-1), "上界在域内");
+        assert_eq!(rr3_sim_link_rssi_parse("0"), None, "0 dBm 不是合法读数");
+        assert_eq!(rr3_sim_link_rssi_parse("-101"), None, "越下界不认");
+        assert_eq!(rr3_sim_link_rssi_parse("abc"), None, "垃圾不认");
     }
 }
