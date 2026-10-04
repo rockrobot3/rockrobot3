@@ -9,6 +9,10 @@ use rr_ipc::{RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 pub struct RrdConfig {
     pub socket: PathBuf,
     pub overlay: Option<PathBuf>,
+    /// 装配单路径（`--profile`，0.0.2 方案 D2 / Q3 裁定）。装机**正门**：faces 决定起谁。
+    /// 与 `--manifest` **同给当场拒**（Q3 裁定细则：两路径共用 plan_boot 仲裁与 supervisor
+    /// spawn，不双真值——两参数同给即非 0 退出，不留"谁赢"的歧义）。
+    pub profile: Option<PathBuf>,
     /// 待启动模块的 manifest（绝对路径，可重复 `--manifest`）。
     /// **已落地**（Task 11b）：`supervisor` 按 `start_priority` **升序、稳定**排后逐条 boot spawn，
     /// 同优先级保持本 CLI 顺序（`sort_by_key` 是稳定排序）。CLI 序只是"同优先级之间的 tie-break"，
@@ -31,7 +35,11 @@ pub struct RrdConfig {
     pub boot_role: String,
 }
 
-const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]\n说明: --boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。";
+const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--profile <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]\n说明: --boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。--profile 与 --manifest 不得同给（Q3：profile 装机正门，--manifest 调试后门）。";
+
+/// `--profile` 与 `--manifest` 同给当场拒的共用文案（两处分支同一句，不许各说一套）。
+/// 拒绝发生在 parse 处：非 0 退出，没有任何"后给者赢"或"合并两份"的歧义路径（Q3 裁定细则）。
+const PROFILE_MANIFEST_CONFLICT: &str = "--profile 与 --manifest 不得同给：profile 是装机正门（faces 决定起谁），--manifest 是调试后门（0.0.2 方案 Q3 裁定，两路径共用仲裁与 spawn，不双真值）";
 
 /// `--restart-base-ms` 的上界：退避表末档（60）乘上去仍要不溢出 u64。
 /// 为什么在 CLI 就拒、而不是让 `rr3_reg_death` 的饱和乘法默默兜住：饱和成 `u64::MAX`
@@ -89,6 +97,7 @@ pub fn rr3_cli_parse_with_env(
     let mut cfg = RrdConfig {
         socket: rr3_default_socket(env),
         overlay: None,
+        profile: None,
         manifests: Vec::new(),
         restart_base_ms: 1000,
         pre_register_timeout_ms: 3000,
@@ -106,7 +115,17 @@ pub fn rr3_cli_parse_with_env(
                 cfg.overlay = Some(PathBuf::from(need_path_value("--topics-overlay", args, i)?));
                 i += 2;
             }
+            "--profile" => {
+                if !cfg.manifests.is_empty() {
+                    return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
+                }
+                cfg.profile = Some(PathBuf::from(need_path_value("--profile", args, i)?));
+                i += 2;
+            }
             "--manifest" => {
+                if cfg.profile.is_some() {
+                    return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
+                }
                 cfg.manifests
                     .push(PathBuf::from(need_path_value("--manifest", args, i)?));
                 i += 2;
@@ -367,6 +386,67 @@ mod tests {
             cfg.manifests,
             vec![PathBuf::from("/m/b.toml"), PathBuf::from("/m/a.toml")]
         );
+    }
+
+    /// `--profile`（0.0.2 Q3）：默认 None、与叠加层可并存、路径口径与其它路径开关一致
+    #[test]
+    fn profile_is_optional_and_coexists_with_overlay() {
+        let dflt = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        assert_eq!(
+            dflt.profile, None,
+            "不带 --profile 就是后门路径，默认值必须为 None"
+        );
+        let cfg = rr3_cli_parse_with_env(
+            &a(&[
+                "--topics-overlay",
+                "/tmp/sim-topics.toml",
+                "--profile",
+                "/root/profiles/default.toml",
+            ]),
+            &env_none,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.profile,
+            Some(PathBuf::from("/root/profiles/default.toml"))
+        );
+        // 缺值 / 疑似开关的值：路径开关共用同一条口径
+        let e = rr3_cli_parse(&a(&["--profile"])).expect_err("缺参数必须报错");
+        assert!(e.contains("--profile 缺参数") && e.contains("用法"), "{e}");
+        let e = rr3_cli_parse(&a(&["--profile", "--socket", "/tmp/x.sock"]))
+            .expect_err("开关名不当值吞下");
+        assert!(
+            e.contains("--profile 缺参数") && e.contains("--socket"),
+            "{e}"
+        );
+    }
+
+    /// 同给当场拒（Q3 裁定细则）：两参数不管谁先谁后，parse 处即非 0 退出，
+    /// 不留"谁赢"的歧义。文案要点名两个开关与裁定出处。
+    #[test]
+    fn profile_and_manifest_together_are_rejected_at_parse_in_both_orders() {
+        for args in [
+            a(&[
+                "--profile",
+                "/root/profiles/default.toml",
+                "--manifest",
+                "/m/x.toml",
+            ]),
+            a(&[
+                "--manifest",
+                "/m/x.toml",
+                "--profile",
+                "/root/profiles/default.toml",
+            ]),
+        ] {
+            let e = rr3_cli_parse(&args).expect_err("同给必须拒");
+            assert!(
+                e.contains("--profile 与 --manifest 不得同给")
+                    && e.contains("Q3")
+                    && e.contains("用法"),
+                "报错要点名两个开关与裁定出处: {e}"
+            );
+        }
     }
 
     /// 数字参数必须真是数字：笔误不许悄悄变成默认值

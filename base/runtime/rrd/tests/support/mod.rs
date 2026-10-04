@@ -220,6 +220,23 @@ impl RrdTest {
             tick_ms,
             manifests,
             Some(boot_role),
+            None,
+        )
+    }
+
+    /// 装配单正门的起法（0.0.2 D2/T3）：`profile` 原样进 `--profile`。**tick 必传**
+    /// （与 `rr3_start_boot` 同一理由：supervisor 的扫尸节拍复用同一旋钮，boot 用例必须小 tick）。
+    pub fn rr3_start_profile(tag: &str, profile: &Path, tick_ms: u64) -> RrdTest {
+        let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
+        RrdTest::rr3_spawn_inner(
+            &socket,
+            None,
+            &socket,
+            None,
+            tick_ms,
+            &[],
+            None,
+            Some(profile),
         )
     }
 
@@ -266,6 +283,7 @@ impl RrdTest {
             watchdog_tick_ms,
             &[],
             None,
+            None,
         )
     }
 
@@ -273,6 +291,9 @@ impl RrdTest {
     /// `supervisor 启动 sweep={tick}ms`：与 `watchdog 启动 tick=` 同一口径——它证明的是
     /// "那条线程真的跑起来过"，而不是"daemon 走到了 spawn 那一行"，同时钉住
     /// "sweep 复用的就是 `--watchdog-tick-ms`"这条接线（E-5）。
+    /// 8 个参数全是同一条 spawn 命令的零件（每个开关一段），拆结构体只会让九个调用点
+    /// 各造一层壳——allow 而不是重构。
+    #[allow(clippy::too_many_arguments)]
     fn rr3_spawn_inner(
         socket: &Path,
         cwd: Option<&Path>,
@@ -281,12 +302,16 @@ impl RrdTest {
         watchdog_tick_ms: u64,
         boot_manifests: &[&Path],
         boot_role: Option<&str>,
+        boot_profile: Option<&Path>,
     ) -> RrdTest {
         let _ = std::fs::remove_file(socket);
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rrd"));
         cmd.arg("--socket").arg(socket_arg);
         if let Some(ov) = overlay {
             cmd.arg("--topics-overlay").arg(ov);
+        }
+        if let Some(p) = boot_profile {
+            cmd.arg("--profile").arg(p);
         }
         for m in boot_manifests {
             cmd.arg("--manifest").arg(m);

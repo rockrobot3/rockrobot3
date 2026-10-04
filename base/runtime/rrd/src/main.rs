@@ -7,7 +7,7 @@ use std::path::Path;
 
 use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
 use rr_registry::{Rr3TopicSet, RR3_MANIFEST_SCHEMA_VERSION};
-use rrd::{cli, rr3_banner, topics_load};
+use rrd::{cli, profile, rr3_banner, topics_load};
 // 只在非 Unix 分支用得到：Unix 侧这句文案压根不参与编译，不 gate 会有未使用导入告警。
 #[cfg(not(unix))]
 use rrd::RRD_UNSUPPORTED;
@@ -47,6 +47,18 @@ fn main() -> std::process::ExitCode {
         None => None,
     };
 
+    // 装配单路径在这里一次性绝对化（与叠加层同形）：装载与横幅凭证共用同一个解析结果。
+    // 解析失败即致命——装配单**必须已存在**才可装载，canonicalize 的 ENOENT 正是该报的错。
+    if let Some(p) = cfg.profile.as_deref() {
+        match profile::rr3_profile_absolute_path(p) {
+            Ok(abs) => cfg.profile = Some(abs),
+            Err(e) => {
+                eprintln!("rrd: 装配单参数不可用: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+    }
+
     // 装载在两个平台都做：契约坏了要当场看见，而不是"等不到 UDS"
     let (topics, added) = match topics_load::rr3_topics_load(
         Path::new(topics_load::RR3_CONTRACT_TOPICS_PATH),
@@ -76,6 +88,10 @@ fn main() -> std::process::ExitCode {
         for t in &added {
             println!("rrd: 叠加主题 {t}");
         }
+    }
+    if let Some(p) = &cfg.profile {
+        // 装配单的可见凭证：绝对路径（0.0.2 方案 Q3：装机正门），与 CWD 无关
+        println!("rrd: 装配单已加载: {}", p.display());
     }
 
     rr3_run(cfg, topics)
