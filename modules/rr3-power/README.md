@@ -11,9 +11,9 @@ modules/rr3-power/
 ├── config.toml
 ├── Cargo.toml
 └── src/
-    ├── main.rs      ← 入口：打印自述与发布面，未接总线
-    ├── battery.rs   ← 电池采样 + 关断决策（本地）
-    └── charger.rs   ← 充电状态
+    ├── main.rs      ← 入口：总线接入 + 采样/低电/充电三拍主循环（0.0.2 T4b 实装）
+    ├── battery.rs   ← 电池采样 + 低电边沿机（同一次低电段恰发一次）
+    └── charger.rs   ← 充电状态（由电池读数的 charging 位派生）
 ```
 
 ## 总线面
@@ -21,6 +21,7 @@ modules/rr3-power/
 | 方向 | 主题 | kind |
 |---|---|---|
 | publish | `rr3-power/battery/state` | event |
+| publish | `rr3-power/battery/low` | event |
 | publish | `rr3-power/charger/state` | event |
 
 `subscribes` 为空是**设计**：低压关断是本模块的本地决策，不依赖总线、不等 brain

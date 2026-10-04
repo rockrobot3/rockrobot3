@@ -221,12 +221,26 @@ impl RrdTest {
             manifests,
             Some(boot_role),
             None,
+            &[],
         )
     }
 
     /// 装配单正门的起法（0.0.2 D2/T3）：`profile` 原样进 `--profile`。**tick 必传**
     /// （与 `rr3_start_boot` 同一理由：supervisor 的扫尸节拍复用同一旋钮，boot 用例必须小 tick）。
     pub fn rr3_start_profile(tag: &str, profile: &Path, tick_ms: u64) -> RrdTest {
+        RrdTest::rr3_start_profile_env(tag, profile, tick_ms, &[])
+    }
+
+    /// `rr3_start_profile` 的带环境变量版（0.0.2 T4b）：`envs` 原样注入 rrd 进程环境，
+    /// 并经 `Command::spawn` 的继承语义传给 rrd spawn 的**真模块**——sim 后端设备参数
+    /// （如 `RR3_HAL_SIM_BATTERY_PERCENT`）的唯一注入通道。e2e 不用 `std::env::set_var`
+    ///（unsafe 且与并行测试竞态，rr-hal backend.rs 同一条禁令），一律走这里显式传。
+    pub fn rr3_start_profile_env(
+        tag: &str,
+        profile: &Path,
+        tick_ms: u64,
+        envs: &[(&str, &str)],
+    ) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
         RrdTest::rr3_spawn_inner(
             &socket,
@@ -237,6 +251,7 @@ impl RrdTest {
             &[],
             None,
             Some(profile),
+            envs,
         )
     }
 
@@ -284,6 +299,7 @@ impl RrdTest {
             &[],
             None,
             None,
+            &[],
         )
     }
 
@@ -291,7 +307,7 @@ impl RrdTest {
     /// `supervisor 启动 sweep={tick}ms`：与 `watchdog 启动 tick=` 同一口径——它证明的是
     /// "那条线程真的跑起来过"，而不是"daemon 走到了 spawn 那一行"，同时钉住
     /// "sweep 复用的就是 `--watchdog-tick-ms`"这条接线（E-5）。
-    /// 8 个参数全是同一条 spawn 命令的零件（每个开关一段），拆结构体只会让九个调用点
+    /// 9 个参数全是同一条 spawn 命令的零件（每个开关一段），拆结构体只会让九个调用点
     /// 各造一层壳——allow 而不是重构。
     #[allow(clippy::too_many_arguments)]
     fn rr3_spawn_inner(
@@ -303,9 +319,13 @@ impl RrdTest {
         boot_manifests: &[&Path],
         boot_role: Option<&str>,
         boot_profile: Option<&Path>,
+        extra_env: &[(&str, &str)],
     ) -> RrdTest {
         let _ = std::fs::remove_file(socket);
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_rrd"));
+        for (k, v) in extra_env {
+            cmd.env(k, v);
+        }
         cmd.arg("--socket").arg(socket_arg);
         if let Some(ov) = overlay {
             cmd.arg("--topics-overlay").arg(ov);

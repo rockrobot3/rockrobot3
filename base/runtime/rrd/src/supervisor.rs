@@ -280,6 +280,13 @@ fn rr3_boot_spawn(
     boot_role: &str,
 ) {
     let name = job.facts.name.clone();
+    // 低电兜底（0.0.2 方案 Q4 裁定）：全局低电旗生效后**停止一切新 spawn**——boot 与
+    // 重启共用本漏斗（D-7：护栏长在唯一入口上），一问全挡。挂死的旧进程不在此杀：
+    // "杀而不重启"属关机策略，归 rr3-power 演进与 M6；本面只保证不再起新的。
+    if rr3_lock(shared).rr3_reg_low_power_is_set() {
+        rr3_log(&format!("低电兜底：拒绝 spawn {name}（全局低电旗已置位，停止新 spawn）"));
+        return;
+    }
     if let Some(mut old) = children.remove(&name) {
         // 走到这里只有一种形状：到期判死挂住的子进程（conn/收尸那两路都会先把 handle 交出来）。
         // 不杀就是"两份同名进程并存 + 旧 handle 被 insert 覆盖成永久孤儿"——

@@ -273,6 +273,12 @@ pub struct RrdRegistry {
     /// 可满足性宇宙），运行期**不**重排（不做清单 2：动态重仲裁不做）。
     /// 只含非 base 能力：base 内建能力不在表里即"永远在位"（`rr3_deps_all_satisfied`）。
     providers: BTreeMap<String, BTreeSet<String>>,
+    /// 全局低电旗（0.0.2 方案 Q4 裁定的兜底动作面之一）。conn 转发
+    /// `rr3-power/battery/low` 时置位（上升沿恰一次），supervisor 的唯一 spawn
+    /// 漏斗（`rr3_boot_spawn`）读它拒一切新 spawn。本轮只升不降：解除归充电策略
+    /// （rr3-power 演进与 M6），不进本版本。放本表的理由与 `denied_publish` 同款：
+    /// conn 与 supervisor 两路共见的守护级状态，真值只许有一份。
+    low_power: bool,
 }
 
 impl RrdRegistry {
@@ -287,6 +293,7 @@ impl RrdRegistry {
             owned: BTreeSet::new(),
             stopped: BTreeSet::new(),
             providers: BTreeMap::new(),
+            low_power: false,
         }
     }
 
@@ -547,6 +554,19 @@ impl RrdRegistry {
 
     pub fn rr3_reg_denied(&self) -> u32 {
         self.denied_publish
+    }
+
+    /// 置全局低电旗。返回是否为**首次**置位（上升沿）——conn 用它保证同一次低电段
+    /// 只广播一次 `rr3-runtime/system/power`（重复 battery/low 不重复点名）。
+    pub fn rr3_reg_low_power_raise(&mut self) -> bool {
+        let rising = !self.low_power;
+        self.low_power = true;
+        rising
+    }
+
+    /// supervisor 的 spawn 漏斗（`rr3_boot_spawn`）每 spawn 前读这一问。
+    pub fn rr3_reg_low_power_is_set(&self) -> bool {
+        self.low_power
     }
 
     /// 唯一的记账处（D-1）：`rr3_reg_death` / `rr3_reg_expire` / `rr3_reg_child_exit` 三路共用，
@@ -2514,6 +2534,21 @@ watchdog_timeout_ms = 60000
                 .map(|x| x.2),
             Some(Rr3Phase::Running)
         );
+    }
+
+    // ---------- 全局低电旗（0.0.2 方案 Q4 裁定）----------
+
+    /// 上升沿语义：首次 raise 返回 true（conn 据此广播恰好一次 system/power），
+    /// 此后重复 raise 只回 false——同一次低电段不重复点名。旗只升不降：
+    /// 解除归充电策略（rr3-power 演进与 M6），本表不提供下降沿。
+    #[test]
+    fn low_power_flag_rises_once_and_never_lowers() {
+        let mut r = RrdRegistry::new(1000);
+        assert!(!r.rr3_reg_low_power_is_set(), "初始未置位");
+        assert!(r.rr3_reg_low_power_raise(), "首次置位是上升沿");
+        assert!(r.rr3_reg_low_power_is_set());
+        assert!(!r.rr3_reg_low_power_raise(), "重复置位不再是上升沿");
+        assert!(r.rr3_reg_low_power_is_set());
     }
 
     /// 小测试辅助：主题集
