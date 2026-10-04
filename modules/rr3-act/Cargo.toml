@@ -13,6 +13,10 @@ name = "rr3-act"
 path = "src/main.rs"
 
 [dependencies]
-# M2 接入总线时启用（path 依赖，勿用 crates.io 同名包）：
-# rr-ipc = { path = "../../base/runtime/rr-ipc" }
-# rr-bus = { path = "../../base/runtime/rr-bus" }
+# path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
+# 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+rr-bus = { path = "../../base/runtime/rr-bus" }
+rr-hal = { path = "../../base/runtime/rr-hal" }
+serde_json = "1"
+toml = "0.8"

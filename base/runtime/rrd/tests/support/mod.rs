@@ -695,7 +695,108 @@ pub fn rr3_read_state(c: &mut RrdClient, module: &str, phase: &str) -> Value {
     rr3_json_of(&f)
 }
 
-// ---------- 跨进程夹具（sim_peer）----------
+// ---------- 真模块夹具（e2e_audio_chain 起，多个真模块 e2e 共用）----------
+
+/// 仓根（CARGO_MANIFEST_DIR = base/runtime/rrd，上溯三级）
+pub fn rr3_repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+/// 现场编译一个独立工程模块，返回其二进制绝对路径（`modules/<name>/target/debug/<name>`）。
+/// 模块二进制**由测试现场 cargo build**（独立工程，`CARGO_BIN_EXE` 够不着它们）：
+/// 增量编译下缓存命中，代价只在首次全量。编译失败把 cargo 输出原样 panic 出来——
+/// 夹具烂和被测行为红必须分得开。
+pub fn rr3_build_module_bin(name: &str) -> PathBuf {
+    let dir = rr3_repo_root().join("modules").join(name);
+    let manifest = dir.join("Cargo.toml");
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = Command::new(&cargo)
+        .args(["build", "-q", "--manifest-path"])
+        .arg(&manifest)
+        .output()
+        .unwrap_or_else(|e| panic!("起 {cargo} 失败: {e}"));
+    assert!(
+        out.status.success(),
+        "编译 {name} 失败:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bin = dir.join("target/debug").join(name);
+    let bin = bin
+        .canonicalize()
+        .unwrap_or_else(|e| panic!("编译产物 {} 不存在: {e}", bin.display()));
+    assert!(bin.is_file(), "{} 不是文件", bin.display());
+    bin
+}
+
+/// 读真模块的 module.toml（生产契约工件），把 `entry = "<名>"` 换成刚编译出的
+/// 二进制绝对路径，返回渲染后的 manifest 文本。替换没命中即 panic：module.toml
+/// 的 entry 形状变了时，静默不改会让 rrd 去 spawn 一个不存在的 `<名>` 命令。
+/// 落盘由调用方决定（--manifest 直驱落 /tmp 唯一路；profile 正门写进 modules-root 布局）。
+pub fn rr3_module_manifest_text(name: &str, bin: &Path) -> String {
+    let src = rr3_repo_root()
+        .join("modules")
+        .join(name)
+        .join("module.toml");
+    let text = std::fs::read_to_string(&src)
+        .unwrap_or_else(|e| panic!("读模块 manifest {} 失败: {e}", src.display()));
+    let needle = format!(r#"entry = "{name}""#);
+    let rendered = text.replace(&needle, &format!(r#"entry = "{}""#, bin.display()));
+    assert!(
+        rendered != text && rendered.contains(&format!(r#"entry = "{}""#, bin.display())),
+        "module.toml 里没有 {needle:?} 可替换——契约工件形状变了，本夹具前提失效"
+    );
+    rendered
+}
+
+/// 旁观连接：注册一个最小模块身份，专收广播与转发（sim_peer 用例的同一口径）。
+/// 返回 (客户端, 本旁观者分配的 task 号)。
+pub fn rr3_connect_observer(rrd: &mut RrdTest) -> (RrdClient, u64) {
+    let mut obs = rrd.rr3_connect();
+    // 裸测试客户端**不喂狗**（没有心跳线程），而本用例的 rrd 以 E2E_TICK_MS=20ms 扫表：
+    // 默认 100/500ms 的观察者注册后 ~0.5s 就被 watchdog 判死摘册——之后 pcm 广播不再投它、
+    // rr3.call 以"调用方已不在册"被拒，症状是"恰收到 1 帧 registered 通知后永久静默"。
+    // 心跳/看门狗窗口放大到用例寿命之外（hb < wd 是校验硬规），判据是"别在用例中途死"。
+    rr3_send(
+        &mut obs,
+        &rr3_register_frame(
+            &rr3_manifest("rr3-obs", 3_600_000, 3_600_001, "never"),
+            "rr3-obs",
+        ),
+    );
+    let v = rr3_read_rpc(&mut obs);
+    let task = v["result"]["src_task"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"));
+    (obs, task)
+}
+
+/// 在持续广播流里等一条 rr3.call 应答（按 JSON-RPC id 挑）。
+///
+/// 不能用 `rr3_read_where`：它那条"64 帧预算扫不到即夹具 bug"的口径，前提是连接上
+/// **没有持续帧流**。pcm 那类 50fps 广播把队列塞满——前几段读法存回队列的旧帧
+/// 会被应答读法整段重扫，64 帧预算几乎全耗在旧帧上。所以流式环境下的挑选不走
+/// 队列回存：无关广播直接丢弃，Response 按 id 挑；预算 600 帧（12s 流量）只是
+/// 防挂死的上界，应答真的不来会在这里如实 panic，而不是被预算掩盖成"夹具 bug"。
+pub fn rr3_read_call_reply(c: &mut RrdClient, id: u64) -> Value {
+    for _ in 0..600 {
+        match rr3_try_recv(c) {
+            Ok(f) => {
+                let hit = match rr3_body_split(&f.payload) {
+                    Ok((Rr3PayloadType::Response, body)) => serde_json::from_slice::<Value>(&body)
+                        .map(|v| v["id"].as_u64() == Some(id))
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                if hit {
+                    return rr3_json_of(&f);
+                }
+            }
+            Err(e) => panic!("没等到 rr3.call 应答 id={id}（读帧提前结束: {e:?}）"),
+        }
+    }
+    panic!("600 帧内没等到 rr3.call 应答 id={id}——应答没来或晚于 12s 的流量上界");
+}
 
 /// 夹具 manifest 的 entry 占位符（两份 module.toml 顶部注释解释了为什么留占位符）
 pub const RR3_ENTRY_PLACEHOLDER: &str = "@SIM_PEER_ENTRY@";

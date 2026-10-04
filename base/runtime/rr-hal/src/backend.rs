@@ -9,7 +9,9 @@
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）不进这些 trait，留在 `rr3-act` 进程内。
 
-use crate::{Rr3AudioSink, Rr3AudioSource, Rr3UnavailableSource};
+use std::sync::Arc;
+
+use crate::{Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3PwmServo, Rr3UnavailableSource};
 
 /// 后端标识（写入日志与诊断主题 `rr3-runtime/module/state`）
 pub const RR3_BACKEND_LINUX: &str = "linux";
@@ -113,9 +115,36 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
     }
 }
 
+/// 按环境选舵机（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无 PWM 后端：
+/// 显式要 `linux` 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim。
+pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
+    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_SIM => (
+            Box::new(crate::sim::Rr3SimServo::rr3_sim_servo_new(90)),
+            RR3_BACKEND_SIM,
+        ),
+        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
+/// 按环境选一路数字输出（LED / 继电器各调一次，各得一路独立通道）。
+///
+/// 返回 [`Arc`] 而不是 [`Box`]：灯效的 blink 翻转在 worker 线程里写同一通道，
+/// 测试也要从另一线程观察电平——共享属这类设备的常态形状，不是偶发需求。
+pub fn rr3_hal_gpio_out() -> (Arc<dyn Rr3GpioOut>, &'static str) {
+    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_SIM => (
+            Arc::new(crate::sim::Rr3SimGpioOut::rr3_sim_gpio_new(false)),
+            RR3_BACKEND_SIM,
+        ),
+        _ => (Arc::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rr3_block_on;
 
     /// 解析函数的平台默认分支：未设环境变量时回落平台默认（本机 macOS = sim）。
     /// 环境变量支无法在本测试里安全置位（并发测试读同一进程环境，std::env::set_var
@@ -132,6 +161,27 @@ mod tests {
             assert_eq!(resolved, RR3_BACKEND_LINUX);
         } else {
             assert_eq!(resolved, RR3_BACKEND_SIM);
+        }
+    }
+
+    /// 执行面（舵机/数字输出）选择：平台默认下拿到的后端名必须合法，且对象可用
+    /// （sim 上探活读回成功；占位件留给使用时的 Unsupported——选择函数本身不触设备）。
+    #[test]
+    fn act_device_selectors_return_legal_backend_objects() {
+        let (servo, servo_backend) = rr3_hal_servo();
+        assert!(
+            [RR3_BACKEND_SIM, RR3_BACKEND_PLACEHOLDER].contains(&servo_backend),
+            "舵机后端名合法: {servo_backend}"
+        );
+        let (gpio, gpio_backend) = rr3_hal_gpio_out();
+        assert!(
+            [RR3_BACKEND_SIM, RR3_BACKEND_PLACEHOLDER].contains(&gpio_backend),
+            "数字输出后端名合法: {gpio_backend}"
+        );
+        // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
+        if servo_backend == RR3_BACKEND_SIM {
+            assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
+            assert_eq!(rr3_block_on(gpio.level()).unwrap(), false, "sim 通道初始断电");
         }
     }
 }
