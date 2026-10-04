@@ -210,10 +210,76 @@ impl Rr3AudioSink for Rr3SimAudioSink {
     }
 }
 
+/// sim 舵机（虚拟 PWM 舵机）：角度记录在内存，读回即最后一次 set 的值。
+///
+/// 分工口径与音频 sim 同一条：sim 是"设备"不是"策略"——行程越界裁决属模块侧
+/// （angle_limit 来自模块 config），HAL 只如实记录。初始角 90°（中位）。
+pub struct Rr3SimServo {
+    angle: Mutex<u16>,
+}
+
+impl Rr3SimServo {
+    pub fn rr3_sim_servo_new(initial_deg: u16) -> Self {
+        Self {
+            angle: Mutex::new(initial_deg),
+        }
+    }
+
+    /// 同步读角（测试与诊断用；trait 的 `angle` 是 async 面）
+    pub fn rr3_sim_servo_angle(&self) -> u16 {
+        *self.angle.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+#[async_trait]
+impl crate::Rr3PwmServo for Rr3SimServo {
+    async fn set_angle(&self, deg: u16) -> Result<(), Rr3HalError> {
+        *self.angle.lock().unwrap_or_else(|p| p.into_inner()) = deg;
+        Ok(())
+    }
+
+    async fn angle(&self) -> Result<u16, Rr3HalError> {
+        Ok(self.rr3_sim_servo_angle())
+    }
+}
+
+/// sim 数字输出（虚拟 GPIO 通道）：电平记录在内存。LED 与继电器各持一路。
+/// 初始电平由构造方给定（执行件一律从断电态起步）。
+pub struct Rr3SimGpioOut {
+    level: std::sync::atomic::AtomicBool,
+}
+
+impl Rr3SimGpioOut {
+    pub fn rr3_sim_gpio_new(initial: bool) -> Self {
+        Self {
+            level: std::sync::atomic::AtomicBool::new(initial),
+        }
+    }
+
+    /// 同步读电平（测试与诊断用；trait 的 `level` 是 async 面）
+    pub fn rr3_sim_gpio_level(&self) -> bool {
+        self.level
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[async_trait]
+impl crate::Rr3GpioOut for Rr3SimGpioOut {
+    async fn set(&self, level: bool) -> Result<(), Rr3HalError> {
+        self.level
+            .store(level, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn level(&self) -> Result<bool, Rr3HalError> {
+        Ok(self.rr3_sim_gpio_level())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{rr3_block_on, RR3_AUDIO_CFG_16K_MONO16};
+    use crate::{rr3_block_on, Rr3GpioOut, Rr3PwmServo, RR3_AUDIO_CFG_16K_MONO16};
 
     fn source(wave: Rr3SimWave) -> Rr3SimAudioSource {
         Rr3SimAudioSource::rr3_sim_source_new(wave)
@@ -379,5 +445,34 @@ mod tests {
         assert_eq!(&played[20..60], &[5i16; 40]);
         assert_eq!(&played[60..], &[6i16; 40], "最新一块保留");
         assert_eq!(sink.rr3_sim_sink_written_count(), 100);
+    }
+
+    /// sim 舵机：初始角即构造值，set 后读回最后一次的值——设备面只记录不裁决，
+    /// 越界裁决属模块侧（angle_limit 在模块 config），这条用例钉住分工边界。
+    #[test]
+    fn sim_servo_records_last_set_angle_without_judging() {
+        let s = Rr3SimServo::rr3_sim_servo_new(90);
+        assert_eq!(s.rr3_sim_servo_angle(), 90, "初始角 = 中位 90°");
+        assert_eq!(
+            rr3_block_on(s.set_angle(135)).unwrap(),
+            (),
+            "set_angle 如实接受任何 u16——裁决不在这里"
+        );
+        assert_eq!(s.rr3_sim_servo_angle(), 135);
+        rr3_block_on(s.set_angle(0)).unwrap();
+        rr3_block_on(s.set_angle(200)).unwrap();
+        assert_eq!(rr3_block_on(s.angle()).unwrap(), 200, "读回最后一次 set 的值");
+    }
+
+    /// sim 数字输出：电平写读回环 + 覆写。LED/继电器各持一路，行为同一件。
+    #[test]
+    fn sim_gpio_level_roundtrip_and_overwrite() {
+        let g = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        assert!(!g.rr3_sim_gpio_level(), "初始断电态");
+        assert_eq!(rr3_block_on(g.level()).unwrap(), false);
+        rr3_block_on(g.set(true)).unwrap();
+        assert!(g.rr3_sim_gpio_level());
+        rr3_block_on(g.set(false)).unwrap();
+        assert_eq!(rr3_block_on(g.level()).unwrap(), false, "覆写生效");
     }
 }

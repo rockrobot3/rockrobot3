@@ -11,10 +11,11 @@ modules/rr3-act/
 ├── config.toml
 ├── Cargo.toml
 └── src/
-    ├── main.rs      ← 入口：打印自述与发布面，未接总线
-    ├── servo.rs     ← 舵机指令与状态摘要（经 rr-hal trait）
-    ├── led.rs       ← 灯效
-    └── reflex.rs    ← 1k–10kHz 反射环，**进程内闭环**
+    ├── main.rs      ← 入口：总线接入、点名分发、config 解析（0.0.2 T4a 实装）
+    ├── servo.rs     ← 舵机指令与状态摘要（经 rr-hal trait，限速流）
+    ├── led.rs       ← 灯效（on/off/blink，worker 线程驱动翻转）
+    ├── relay.rs     ← 继电器通断（Q1 立格 act.relay）
+    └── reflex.rs    ← 1k–10kHz 反射环宿主，**进程内闭环**
 ```
 
 ## 总线面
@@ -23,6 +24,7 @@ modules/rr3-act/
 |---|---|---|
 | rpc | `rr3-act/servo/command` | request |
 | rpc | `rr3-act/led/effect` | request |
+| rpc | `rr3-act/relay/set` | request |
 | publish | `rr3-act/servo/state` | stream |
 | publish | `rr3-act/motor/reflex` | notification |
 | subscribe | `rr3-brain/intent/result` | event |
