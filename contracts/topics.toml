@@ -177,3 +177,24 @@ kind = "request"
 owner = "rr3-sense"
 stable = "L2"
 note = "sense 抓取转储 RPC（rpc.exposes 事务面，request 语义）"
+
+[[topic]]
+name = "rr3-act/relay/set"
+kind = "request"
+owner = "rr3-act"
+stable = "L1"
+note = "继电器通断指令（0.0.2 方案 Q1 裁定 2026-10-04 立格 act.relay 后 append；legacy/core/relay → rr3-act 迁移映射在册）"
+
+[[topic]]
+name = "rr3-power/battery/low"
+kind = "event"
+owner = "rr3-power"
+stable = "L1"
+note = "低电阈值事件，rrd 进程内兜底触发前置（architecture §7.3）；负载 schema 见 events/power-battery-low.schema.json"
+
+[[topic]]
+name = "rr3-runtime/system/power"
+kind = "notification"
+owner = "rr3-runtime"
+stable = "L2"
+note = "低电兜底点名广播（0.0.2 方案 Q4 裁定：rrd 保护动作面之一，dst_task=0 广播）"

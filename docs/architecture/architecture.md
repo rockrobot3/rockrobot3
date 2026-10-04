@@ -511,10 +511,11 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
 > **`rr3-act` 的对账**：注册表里 `rr3-act` 的**已登记面是舵机与电机**
 > （`rr3-act/servo/command` request、`rr3-act/servo/state` stream、`rr3-act/motor/reflex`
 > notification、`rr3-act/led/effect` request，owner 角色写作"执行：舵机/电机、反射环宿主进程"）。
-> ADR-0002 §1 把 rr3-act 的职责写作"继电器、未来运动控制（gpiod、PWM）"——继电器那一半不在
-> 注册表里：`rr3-act/relay/*`（本节草图与 §7.2 数据流图里的 `relay/set`、`relay/state`）
-> 只是**示意串**，入口 ② 与入口 ③ 都会拒。要落地必须先按"契约只增不改"把它们 **APPEND** 进
-> `contracts/topics.toml`（同批更新 `rr-registry` 的形状 pin），再在 manifest 里引用；
+> ADR-0002 §1 把 rr3-act 的职责写作"继电器、未来运动控制（gpiod、PWM）"——继电器那一半已于
+> 2026-10-04 按 0.0.2 方案 Q1 裁定立格（`act.relay`，立格判据真实依赖者 = M5 验收"语音控继电器"），
+> `rr3-act/relay/set`（request）已同批 **APPEND** 进 `contracts/topics.toml`（形状 pin 同批更新）；
+> 本节草图与 §7.2 数据流图里的 `relay/state` 仍是**示意串**（未登记，入口 ② 与入口 ③ 都会拒），
+> 要落地必须先按"契约只增不改"**APPEND** 进注册表，再在 manifest 里引用；
 > ADR-0002 的决策正文不改（继电器本身没有被本批裁定否定），在册与否只查注册表。
 
 ---
