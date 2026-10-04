@@ -71,3 +71,15 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - name: IPC-T-003 跨架构对拍（--strict）
         run: bash tools/ci/ipct003.sh --strict
+
+  # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
+  # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →
+  # dpkg -i → rrd 装配单正门起 5 模块 + rr3-brain 缺格点名。macOS 本机无法真装
+  # deb（方案 P1），真装只认这个 job 的远端回执。
+  distro-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: deb 装机冒烟（rust:bookworm 容器）
+        run: bash tools/ci/distro-smoke.sh

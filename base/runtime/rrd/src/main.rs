@@ -3,8 +3,6 @@
 //! M2 起：装载所有权表 →（Unix）绑 UDS 监听、注册/心跳/看门狗/重启。
 //! 非 Unix 平台启动即明确报错并以非 0 退出，绝不假称可跑。
 
-use std::path::Path;
-
 use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
 use rr_registry::{Rr3TopicSet, RR3_MANIFEST_SCHEMA_VERSION};
 use rrd::{cli, profile, rr3_banner, topics_load};
@@ -59,9 +57,12 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    // 装载在两个平台都做：契约坏了要当场看见，而不是"等不到 UDS"
+    // 装载在两个平台都做：契约坏了要当场看见，而不是"等不到 UDS"。
+    // 契约目录运行期落点（T5）：--contracts 显式 > 编译期仓内路径；topics/slots
+    // 由装载入口各自 join，路径必须已存在（canonicalize 的 ENOENT 正是该报的错）。
+    let contracts_dir = topics_load::rr3_contracts_dir(cfg.contracts.as_deref());
     let (topics, added) = match topics_load::rr3_topics_load(
-        Path::new(topics_load::RR3_CONTRACT_TOPICS_PATH),
+        &contracts_dir.join("topics.toml"),
         overlay.as_deref(),
     ) {
         Ok(t) => t,

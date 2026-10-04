@@ -144,7 +144,7 @@ fn connect_module_link_up_and_session_open_end_to_end() {
         matches!(
             frame_topic(f),
             Some((Rr3PayloadType::Event, ref t)) if t == "rr3-connect/net/link"
-        ) && rr3_json_of(f)["seq"].as_u64().map_or(false, |s| s > seq1)
+        ) && rr3_json_of(f)["seq"].as_u64().is_some_and(|s| s > seq1)
     });
     assert!(
         rr3_json_of(&l2)["seq"].as_u64().unwrap() > seq1,

@@ -1,0 +1,37 @@
+# RockRobot3 装配单：distro 机型（发行版快路轨，0.0.2 T5 / ADR-0013 裁定 3）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门）。
+# 与 default（RK3566 参考机）的差异只有一处：快路 payload 只含五个 Rust 模块——
+# rr3-brain 是 Python（stdlib-only），不进 0.0.2 快路 deb。它在 faces 里保留声明、
+# 四个 cognition.* 格位不绑定：装配链逐格点名缺格、rr3-brain 不进 boot 队列
+# （方案 P2：缺格只降点名模块，缺格≠拒 boot）。这条点名同时是 CI distro-smoke 的
+# 断言点——"5 模块 spawn + brain 缺格点名"证明 deb 冒烟容忍缺格模块而非假全绿。
+
+schema_version = 1
+
+[os]
+route = "distro" # distro | buildroot（双轨见 ADR-0013）
+
+[bindings]
+# 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
+# 认知层四格缺位 = 快路 payload 边界的诚实表达，不预占。
+"act.servo" = "rr3-act"
+"act.led" = "rr3-act"
+"act.relay" = "rr3-act"
+"net.wifi" = "rr3-connect"
+"net.bt" = "rr3-connect"
+"ui.face" = "rr3-interact"
+"audio.playback" = "rr3-interact"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+"sensor.env" = "rr3-sense"
+"sensor.imu" = "rr3-sense"
+"power.charger" = "rr3-power"
+
+[faces]
+# 模块 → 本形态启用的格位集合。faces 决定起谁（Q3 裁定）。
+rr3-act = ["act.servo", "act.led", "act.relay"]
+rr3-connect = ["net.wifi", "net.bt"]
+rr3-interact = ["ui.face", "audio.playback"]
+rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
+rr3-power = ["power.battery", "power.charger"]
+rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
