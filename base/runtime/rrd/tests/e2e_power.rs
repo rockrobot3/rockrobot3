@@ -159,7 +159,7 @@ fn power_module_low_battery_fallback_end_to_end() {
             Some((Rr3PayloadType::Event, t)) if t == "rr3-power/battery/state"
         ) && rr3_json_of(f)["seq"]
             .as_u64()
-            .map_or(false, |s| s > seq1)
+            .is_some_and(|s| s > seq1)
     });
     assert!(
         rr3_json_of(&st2)["seq"].as_u64().unwrap() > seq1,

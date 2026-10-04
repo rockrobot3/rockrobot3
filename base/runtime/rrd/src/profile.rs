@@ -123,7 +123,12 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
 /// 致命错误（读不到 / 形状不合 / 查册未命中 / 结构不自洽）打包成一条串返回；
 /// 缺格**不是**致命项（P2：缺格只降点名模块，缺格≠拒 boot），进 [`Rr3ProfileBoot::missing`]。
-pub fn rr3_profile_boot_inputs(profile_path: &Path) -> Result<Rr3ProfileBoot, String> {
+/// `slots_path` 由调用方给定（`--contracts` 运行期定位或编译期仓内路径）——
+/// 查册真值仍只有 rr-registry 那一册，这里只管从哪读。
+pub fn rr3_profile_boot_inputs(
+    profile_path: &Path,
+    slots_path: &Path,
+) -> Result<Rr3ProfileBoot, String> {
     let abs = rr3_profile_absolute_path(profile_path)?;
     let text = std::fs::read_to_string(&abs)
         .map_err(|e| format!("读不到装配单 {}: {e}", abs.display()))?;
@@ -135,8 +140,8 @@ pub fn rr3_profile_boot_inputs(profile_path: &Path) -> Result<Rr3ProfileBoot, St
     })?;
 
     // 查册门（裁定 5②）：格位真值只有 rr-registry 那一册，CI 全集层与本入口共用。
-    let slots_abs = std::fs::canonicalize(Path::new(RR3_CONTRACT_SLOTS_PATH))
-        .map_err(|e| format!("读不到格位契约 {}: {e}", RR3_CONTRACT_SLOTS_PATH))?;
+    let slots_abs = std::fs::canonicalize(slots_path)
+        .map_err(|e| format!("读不到格位契约 {}: {e}", slots_path.display()))?;
     let slots_text = std::fs::read_to_string(&slots_abs)
         .map_err(|e| format!("读不到格位契约 {}: {e}", slots_abs.display()))?;
     let table: Rr3SlotTable = rr3_registry_slot_table_from_text(&slots_text);
@@ -338,7 +343,8 @@ rr3-pc = ["cognition.llm"]
     fn full_profile_resolves_manifests_and_finds_no_missing() {
         let root = Root::new("full");
         let p = root.write_profile("full.toml", GOOD);
-        let boot = rr3_profile_boot_inputs(&p).expect("满配装配单应通过");
+        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("满配装配单应通过");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
         assert_eq!(boot.manifests.len(), 3);
         // 比对基准必须是**规范化后**的根目录：boot_inputs 拿到的 manifest 路径派生自
@@ -368,7 +374,8 @@ rr3-pc = ["cognition.llm"]
             "missing.toml",
             &GOOD.replace("\"sensor.env\" = \"rr3-pb\"\n", ""),
         );
-        let boot = rr3_profile_boot_inputs(&p).expect("缺格不是致命项");
+        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("缺格不是致命项");
         assert_eq!(
             boot.missing,
             vec![("rr3-pb".to_string(), "sensor.env".to_string())],
@@ -388,7 +395,8 @@ rr3-pc = ["cognition.llm"]
         let root = Root::new("cross");
         let text = GOOD.replace("\"sensor.env\" = \"rr3-pb\"", "\"sensor.env\" = \"rr3-pc\"");
         let p = root.write_profile("cross.toml", &text);
-        let e = rr3_profile_boot_inputs(&p).expect_err("binding 被他人认领必须致命");
+        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect_err("binding 被他人认领必须致命");
         assert!(e.contains("未被 faces 认领"), "{e}");
     }
 
@@ -398,7 +406,8 @@ rr3-pc = ["cognition.llm"]
         let root = Root::new("base");
         let text = GOOD.replace("[bindings]\n", "[bindings]\n\"bus.publish\" = \"rr3-pa\"\n");
         let p = root.write_profile("base.toml", &text);
-        let e = rr3_profile_boot_inputs(&p).expect_err("基础层 binding 必须致命");
+        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect_err("基础层 binding 必须致命");
         assert!(e.contains("bindings 不得绑定基础层格位 bus.publish"), "{e}");
     }
 
@@ -408,7 +417,8 @@ rr3-pc = ["cognition.llm"]
         let root = Root::new("unknown");
         let text = GOOD.replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = [\"sensor.wifi\"]");
         let p = root.write_profile("unknown.toml", &text);
-        let e = rr3_profile_boot_inputs(&p).expect_err("未在册格位必须致命");
+        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect_err("未在册格位必须致命");
         assert!(
             e.contains("faces 模块 rr3-pc 的格位 sensor.wifi 未在册"),
             "{e}"
@@ -424,15 +434,19 @@ rr3-pc = ["cognition.llm"]
             "rr3-pc = [\"cognition.llm\", \"power.battery\"]",
         );
         let p = root.write_profile("baseface.toml", &text);
-        let boot = rr3_profile_boot_inputs(&p).expect("基础层 face 格位不缺格");
+        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("基础层 face 格位不缺格");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
 
     /// 装配单文件不存在 = 致命，文案是绝对化口径（canonicalize 的 ENOENT）
     #[test]
     fn missing_profile_file_is_fatal() {
-        let e = rr3_profile_boot_inputs(Path::new("/nonexistent/rr3-nope.toml"))
-            .expect_err("读不到装配单必须致命");
+        let e = rr3_profile_boot_inputs(
+            Path::new("/nonexistent/rr3-nope.toml"),
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+        )
+        .expect_err("读不到装配单必须致命");
         assert!(e.contains("无法解析为绝对路径"), "{e}");
     }
 }

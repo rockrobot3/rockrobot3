@@ -576,11 +576,11 @@ mod tests {
     fn sim_gpio_level_roundtrip_and_overwrite() {
         let g = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         assert!(!g.rr3_sim_gpio_level(), "初始断电态");
-        assert_eq!(rr3_block_on(g.level()).unwrap(), false);
+        assert!(!rr3_block_on(g.level()).unwrap());
         rr3_block_on(g.set(true)).unwrap();
         assert!(g.rr3_sim_gpio_level());
         rr3_block_on(g.set(false)).unwrap();
-        assert_eq!(rr3_block_on(g.level()).unwrap(), false, "覆写生效");
+        assert!(!rr3_block_on(g.level()).unwrap(), "覆写生效");
     }
 
     /// sim 电池：async 面（trait battery）读回构造/覆写后的三元组，电压曲线按

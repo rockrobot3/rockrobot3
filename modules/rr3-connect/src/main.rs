@@ -228,7 +228,7 @@ timeout_ms = 20000
 "#;
         let (wifi, session) = rr3_connect_config_parse(text).unwrap();
         assert_eq!(wifi.link_report_period_ms, 5000);
-        assert_eq!(wifi.roam_probe_enabled, false);
+        assert!(!wifi.roam_probe_enabled);
         assert_eq!(session.tls_min_version, "1.3");
         assert_eq!(session.timeout_ms, 20000);
     }

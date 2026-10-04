@@ -33,9 +33,13 @@ pub struct RrdConfig {
     /// **原样透传、rrd 不校验取值**（E-6）：role 的合法集是**夹具**的约定，不是守护进程的契约；
     /// rrd 一旦校验就要跟着夹具新增的脚本改，那是第二处真值。默认 `resident`。
     pub boot_role: String,
+    /// 契约目录（`--contracts`，0.0.2 T5）：运行期定位 `topics.toml` 与 `slots.toml`。
+    /// 默认 None → 编译期常量（仓内开发零变化）；deb 装机后编译期路径不存在，
+    /// payload 由 `--contracts /usr/lib/rockrobot3/contracts` 指向包内真值。
+    pub contracts: Option<PathBuf>,
 }
 
-const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--profile <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]\n说明: --boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。--profile 与 --manifest 不得同给（Q3：profile 装机正门，--manifest 调试后门）。";
+const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--contracts <dir>] [--profile <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]\n说明: --contracts 定位包内契约目录（topics.toml/slots.toml，缺省编译期仓内路径——deb 装机必给）。--boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。--profile 与 --manifest 不得同给（Q3：profile 装机正门，--manifest 调试后门）。";
 
 /// `--profile` 与 `--manifest` 同给当场拒的共用文案（两处分支同一句，不许各说一套）。
 /// 拒绝发生在 parse 处：非 0 退出，没有任何"后给者赢"或"合并两份"的歧义路径（Q3 裁定细则）。
@@ -103,6 +107,7 @@ pub fn rr3_cli_parse_with_env(
         pre_register_timeout_ms: 3000,
         watchdog_tick_ms: 200,
         boot_role: "resident".to_string(),
+        contracts: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -113,6 +118,10 @@ pub fn rr3_cli_parse_with_env(
             }
             "--topics-overlay" => {
                 cfg.overlay = Some(PathBuf::from(need_path_value("--topics-overlay", args, i)?));
+                i += 2;
+            }
+            "--contracts" => {
+                cfg.contracts = Some(PathBuf::from(need_path_value("--contracts", args, i)?));
                 i += 2;
             }
             "--profile" => {
@@ -417,6 +426,38 @@ mod tests {
             .expect_err("开关名不当值吞下");
         assert!(
             e.contains("--profile 缺参数") && e.contains("--socket"),
+            "{e}"
+        );
+    }
+
+    /// `--contracts`（0.0.2 T5）：默认 None（编译期仓内路径）、显式值原样携带、
+    /// 路径口径与其它路径开关同族（缺参数 / `-` 开头值都拒）。
+    #[test]
+    fn contracts_is_optional_with_shared_path_flag_rules() {
+        let dflt = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        assert_eq!(
+            dflt.contracts, None,
+            "不带 --contracts 就是仓内编译期路径，默认值必须为 None"
+        );
+        let cfg = rr3_cli_parse_with_env(
+            &a(&["--contracts", "/usr/lib/rockrobot3/contracts"]),
+            &env_none,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.contracts,
+            Some(PathBuf::from("/usr/lib/rockrobot3/contracts")),
+            "装机口径：包内契约目录"
+        );
+        let e = rr3_cli_parse(&a(&["--contracts"])).expect_err("缺参数必须报错");
+        assert!(
+            e.contains("--contracts 缺参数") && e.contains("用法"),
+            "{e}"
+        );
+        let e = rr3_cli_parse(&a(&["--contracts", "--socket", "/tmp/x.sock"]))
+            .expect_err("开关名不当值吞下");
+        assert!(
+            e.contains("--contracts 缺参数") && e.contains("--socket"),
             "{e}"
         );
     }

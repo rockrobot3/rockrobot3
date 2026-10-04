@@ -466,6 +466,37 @@ e2e_connect 2））/ Windows **260**（258 + 2 推算，rr-hal 新用例平台�
 ssid/rssi 必须是 null）+ 会话面 2（args 只认 action=open 且缺参-类型错-未知值点名 /
 result 跟随链路 up 回 mock 会话、down 折 error 点名判据词）+ config 解析 2（仓形
 同构可解析 / 缺段缺字段点名）。
+2026-10-05 T5（发行版快路轨 deb——tools/rr3-pack 打包器 + units/rrd.service +
+profiles/distro.toml + CI distro-smoke，0.0.2 方案 D8 / ADR-0013 裁定 5 首证）同口径：
+rrd lib 124→**125**（+1：`--contracts` 运行期契约目录入口——deb 装机后编译期仓内路径
+不存在，CLI 缺省 None 保持仓内开发零变化，topics/slots 共用 `rr3_contracts_dir` 解析、
+`rr3_profile_boot_inputs` 签名参数化 slots 路径；parse 门四态：缺省 None / 显式值 /
+缺参数带用法 / `-` 开头值拒）。①b Unix **328**（macOS arm64 实跑；上轮 T4c 登记 326，
+本批净增 2：rrd cli contracts 用例 + rr-registry 契约测试 distro 装配单对账用例）/
+Windows **262**（260 + 2 推算，两条新用例均平台无关——contract.rs 读仓内文件与 cli
+纯解析）。② 33→**34**（+1：`distro_profile_binds_exactly_the_body_layer`——机型集合
+钉住断言同步扩为 default+distro，distro 机对账三条腿：绑定面查册/provides 对账同
+default 门、未绑非 base 格位**恰好等于** rr3-brain provides 全集（缺格边界一格不多
+不少）、faces 仍覆盖全部在册模块含 brain 缺格声明）/ ③ 5 / ②b 5 无变化；④ **9→10** 个独立工程（新增 tools/rr3-pack，依赖 rrd lib 只为 manifest 解析
+——解析真值只有 rrd 运行期那一册，打包器不带第二份读取逻辑）。rr3-pack 独立工程单测
+（④ 步只 check 不跑测，按 rr3-act 先例单独登记）**5** 条：staging 全布局落位 + entry
+装机改写字节级钉死 1（manifest 除 entry 引号内一个值外与注入原件逐字节一致；control /
+postinst / 单元文件 / 装配单 / 契约内容同批断言）+ 注入产物与仓内真值缺件点名 1
+（rrd 缺席 / 模块缺 bin / 无模块 / 缺 distro.toml / 缺 config.toml——模块开机即读
+manifest 同目录 config，缺件必重启环，随包必带）+ entry 不可装机拒 1（绝对路径 /
+`..` 逃逸段）+ 目录名与 manifest.name 不一致拒 1 + CLI parse 1。**entry 装机改写是
+本批关键裁定落地**：线上注册门禁（conn.rs）要求 manifest.entry 绝对路径，而模块开机
+读的就是装机 manifest 原文上报，相对值必被 AIRY_EINVAL 拒——打包器只改 entry 一个值
+（modules/README.md"绝对 entry 由装机环节写入"的实体落点；装配单磁盘装载两侧绝对值
+两头都过）。保底轨 post-build.sh 现状不满足该门（manifest 平铺 /usr/lib/rr3/manifest/
+且零改写、bin 落 modules/<name>/bin 与相对解析错位）——保底轨"脚本就绪、实测=板上"，
+改写留保底轨批次收口，不在本批越界。CI：`distro-smoke` job 新增（ubuntu-latest 单步
+`docker run rust:bookworm`，glibc 自洽、本机产物装本机 deb）——构建→rr3-pack 单测→
+组装注入产物（两轨同源 rr3-modules/<name>/{bin,manifest.toml}）→出 deb→
+`dpkg -i`→装机位断言→rrd 装配单正门冒烟（spawn 5 模块 + rr3-brain 缺格点名（P2/D2
+语义首证：快路 payload 无 Python brain，faces 保留声明、cognition.* 不绑定）+
+0 拒 boot + `rr3-ctl status` denied_publish=0）。macOS 本机无法真装 deb（方案 P1），
+真装只认该 job 远端回执；本地装配演练走 `rr3-pack --stage-only`。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
