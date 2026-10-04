@@ -276,10 +276,67 @@ impl crate::Rr3GpioOut for Rr3SimGpioOut {
     }
 }
 
+/// sim 电池（虚拟电量计）：电量与充电态记录在内存，电压按电量**确定性线性派生**。
+///
+/// 分工口径与舵机/数字输出同一条：sim 是"设备"不是"策略"——低电阈值裁决属模块侧
+/// （low_voltage_mv 来自 rr3-power config），低压关断属 rr3-power 本地决策与 M6，
+/// HAL 只如实报数。电压映射钉死为 `3200mV + 10mV/1%`（0% → 3200、100% → 4200），
+/// 与 golden 向量同一条确定性纪律：同一电量任何机器读出同一电压。
+pub struct Rr3SimBattery {
+    percent: std::sync::atomic::AtomicU8,
+    charging: std::sync::atomic::AtomicBool,
+}
+
+impl Rr3SimBattery {
+    pub fn rr3_sim_battery_new(percent: u8, charging: bool) -> Self {
+        Self {
+            percent: std::sync::atomic::AtomicU8::new(percent),
+            charging: std::sync::atomic::AtomicBool::new(charging),
+        }
+    }
+
+    /// 直接写设备状态（测试与 e2e 驱动用；trait 面只读，驱动必须走构造方持有的引用）
+    pub fn rr3_sim_battery_set(&self, percent: u8, charging: bool) {
+        self.percent
+            .store(percent, std::sync::atomic::Ordering::Relaxed);
+        self.charging
+            .store(charging, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 同步读电量（测试与诊断用；trait 的 `battery` 是 async 面）
+    pub fn rr3_sim_battery_percent(&self) -> u8 {
+        self.percent
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn rr3_sim_battery_charging(&self) -> bool {
+        self.charging
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// 电量 → 电压（毫伏）的唯一映射。放关联函数而不是方法：它是"这颗虚拟电芯的
+    /// 特性曲线"，不随实例状态变——e2e 断言与实现引用同一处，改曲线这里当场红。
+    pub fn rr3_sim_battery_voltage_mv(percent: u8) -> u16 {
+        3200 + percent as u16 * 10
+    }
+}
+
+#[async_trait]
+impl crate::Rr3Power for Rr3SimBattery {
+    async fn battery(&self) -> Result<crate::Rr3BatteryState, Rr3HalError> {
+        let percent = self.rr3_sim_battery_percent();
+        Ok(crate::Rr3BatteryState {
+            voltage_mv: Self::rr3_sim_battery_voltage_mv(percent),
+            percent,
+            charging: self.rr3_sim_battery_charging(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{rr3_block_on, Rr3GpioOut, Rr3PwmServo, RR3_AUDIO_CFG_16K_MONO16};
+    use crate::{rr3_block_on, Rr3GpioOut, Rr3PwmServo, Rr3Power, RR3_AUDIO_CFG_16K_MONO16};
 
     fn source(wave: Rr3SimWave) -> Rr3SimAudioSource {
         Rr3SimAudioSource::rr3_sim_source_new(wave)
@@ -474,5 +531,28 @@ mod tests {
         assert!(g.rr3_sim_gpio_level());
         rr3_block_on(g.set(false)).unwrap();
         assert_eq!(rr3_block_on(g.level()).unwrap(), false, "覆写生效");
+    }
+
+    /// sim 电池：async 面（trait battery）读回构造/覆写后的三元组，电压曲线按
+    /// 钉死的线性映射逐点核对——"设备只报数、策略不在这里"的分工同舵机那条。
+    #[test]
+    fn sim_battery_reads_percent_charging_and_derived_voltage() {
+        let b = Rr3SimBattery::rr3_sim_battery_new(80, false);
+        let st = rr3_block_on(b.battery()).unwrap();
+        assert_eq!(
+            (st.percent, st.charging, st.voltage_mv),
+            (80, false, 4000),
+            "初始 80% 未充电，电压 = 3200 + 80×10"
+        );
+        b.rr3_sim_battery_set(5, true);
+        let st = rr3_block_on(b.battery()).unwrap();
+        assert_eq!(
+            (st.percent, st.charging, st.voltage_mv),
+            (5, true, 3250),
+            "覆写后读回同一真值"
+        );
+        // 特性曲线两端钉死：e2e 的低电断言（5% → 3250 ≤ low_voltage_mv=3300）靠它成立
+        assert_eq!(Rr3SimBattery::rr3_sim_battery_voltage_mv(0), 3200);
+        assert_eq!(Rr3SimBattery::rr3_sim_battery_voltage_mv(100), 4200);
     }
 }

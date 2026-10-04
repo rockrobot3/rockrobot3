@@ -419,6 +419,32 @@ move_ms 取上限 / 缺参·类型·越界点名 / move_ms 超上限与 0 拒收
 blink 翻转与 off 停翻（Arc 克隆观察 worker 写面））+ reflex 4（窗计划推导 /
 episode 恰报一次 / need 下界为 1 / 孤立饱和窗不触发）+ relay 2（只认真布尔 /
 apply 落电平且应答回显）+ main config 解析 2（仓形同构可解析 / 缺段缺字段点名）。
+2026-10-05 T4b（rr3-power 实装——battery/state 周期流 + battery/low 边沿事件 +
+charger/state，rrd 低电兜底四件动作面，0.0.2 方案 Q4 裁定）同口径：rr-hal lib
+17→**19**（+2：sim 电池三元组读回与电压曲线两端钉死（3200mV + 10mV/1%）/ 电池
+env 取值裁决纯函数（percent 0–100、charging 只认 1/0，未设缺省 80/未充电））；rrd
+lib +2：registry 全局低电旗（上升沿恰一次、只升不降——与 denied_publish 同款
+"conn 与 supervisor 两路共见"守护态）+ daemon 低电点名帧形状钉死（Notification /
+src=rrd / dst=广播 / 体恰四字段——e2e 旁观者接入时首拍已过，帧形状只有单测能钉，
+两半拼成完整证据链）；新线级目标 `rrd/tests/e2e_power.rs` **1** 条（整体
+`#![cfg(unix)]`）：装配单正门起**真 rr3-power**，env 经夹具新通道
+`rr3_start_profile_env` 注入（`RR3_HAL_BACKEND=sim` 显式不赌平台默认 +
+`RR3_HAL_SIM_BATTERY_PERCENT=5` → 3250mV ≤ 3300mV 首拍越阈），判据链：兜底触发行
+含透传值与点名广播（服务侧真相，conn.rs 钩子先扇出后打日志，该行即"广播已发"
+界标）→ 旁观者收 battery/state（percent=5 / voltage_mv=3250 / src=分配值 / seq
+严格递增）与 charger/state（charging=false 缺省语义）→ pkill 真模块 →
+`低电兜底：拒绝 spawn` 日志 + 1500ms 窗否定断言 `spawn rr3-power pid=`（拒绝行
+不含 pid= 不误触）→ 末尾破坏性收尾计数：battery/low 与 system/power 各恰 **0** 帧
+新增（"同段恰一次"模块侧边沿机与 rrd 侧上升沿的双重保险，重启真发生了则新实例
+首拍再发、现形于此）。①b Unix **322**（macOS arm64 实跑；上轮 T4a 登记 317，
+本批净增 5（rr-hal 2 + rrd lib 2 + e2e_power 1））/ Windows **258**（254 + 4 推算，
+rr-hal 与 rrd lib 新用例平台无关；`e2e_power` 挂 Unix 门不计入；未实跑）。
+② 33 / ③ 5 / ②b 5 / ④ 9 个独立工程均无变化。rr3-power 独立工程单测（④ 步只
+check 不跑测，按 rr3-act 先例单独登记）**7** 条：低电边沿 2（越阈首拍恰报一次 /
+严格大于才重新武装且武装本身不触发——武装若回 true 就会发出电压高于阈值的"低电"
+事件）+ 事件体 3（state 全摘要带自流 seq / low 体恰三字段对齐 schema
+additionalProperties=false / charger state 恰两字段）+ config 解析 2（仓形同构
+可解析 / 缺段缺字段点名）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
