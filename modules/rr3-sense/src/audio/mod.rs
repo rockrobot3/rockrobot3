@@ -11,7 +11,7 @@
 pub mod capture;
 pub mod vad;
 
-use rr_hal::Rr3PcmStream;
+use rr_hal::{Rr3AudioCfg, Rr3PcmStream};
 use serde_json::{json, Value};
 
 pub use vad::{Rr3VadConfig, Rr3VadEdge, Rr3VadState};
@@ -47,6 +47,42 @@ pub fn rr3_base64_encode(data: &[u8]) -> String {
         });
     }
     out
+}
+
+// ---------- 多通道下混（R14） ----------
+
+/// 多通道 PCM 下混单声道：按帧对各声道取算术平均（i32 累加后整除，不引入饱和偏差），
+/// 输出采样点数 = 帧数。`channels <= 1` 时原样克隆（单麦链路零改动）；尾部不足一帧的
+/// 余数丢弃（采集侧 samples = 帧×声道，恒整除）。
+pub fn rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16> {
+    if channels <= 1 {
+        return samples.to_vec();
+    }
+    let ch = channels as usize;
+    samples
+        .chunks_exact(ch)
+        .map(|frame| {
+            let sum: i32 = frame.iter().map(|&s| s as i32).sum();
+            (sum / ch as i32) as i16
+        })
+        .collect()
+}
+
+/// 把一帧多通道 PCM 下混为单声道流（`cfg.channels` 归 1，rate/bit_depth 不动）。
+/// 总线承载恒 mono（R14：双麦原始多通道只供 sense 内部 DoA，brain 消费面零改动）；
+/// `channels <= 1` 时原样返回（零改动，默认单麦链路逐点等价）。
+pub fn rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream {
+    if pcm.cfg.channels <= 1 {
+        return pcm;
+    }
+    let samples = rr3_pcm_downmix_mono(&pcm.samples, pcm.cfg.channels);
+    Rr3PcmStream {
+        cfg: Rr3AudioCfg {
+            channels: 1,
+            ..pcm.cfg
+        },
+        samples,
+    }
 }
 
 // ---------- 事件体构造 ----------
@@ -220,6 +256,50 @@ mod tests {
         for (input, want) in cases {
             assert_eq!(rr3_base64_encode(input), want, "input={input:?}");
         }
+    }
+
+    /// 多通道下混（R14）：逐帧平均、单声道原样、多声道点数收缩。
+    #[test]
+    fn downmix_mono_averages_channels_per_frame() {
+        // 单声道原样（含负值），零改动
+        assert_eq!(rr3_pcm_downmix_mono(&[1, -2, 3], 1), vec![1, -2, 3]);
+        assert_eq!(rr3_pcm_downmix_mono(&[1, -2, 3], 0), vec![1, -2, 3]);
+        // 双声道：3 帧 × 2 → 3 点；[32767,-32768] 求和 -1、整除得 0（i32 累加不溢出）
+        assert_eq!(
+            rr3_pcm_downmix_mono(&[100, 200, -300, -100, 32767, -32768], 2),
+            vec![150, -200, 0]
+        );
+        // 四声道：2 帧 × 4 → 2 点
+        assert_eq!(
+            rr3_pcm_downmix_mono(&[0, 0, 0, 4, 8, 8, 8, 8], 4),
+            vec![1, 8]
+        );
+    }
+
+    /// 流级下混：channels 归 1、rate 不动、samples 收缩；单麦原样返回（零改动）。
+    #[test]
+    fn downmix_stream_rewrites_cfg_to_mono() {
+        let stereo = Rr3PcmStream {
+            cfg: Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 2,
+                bit_depth: 16,
+            },
+            samples: vec![100, 300, -400, -200],
+        };
+        let mono = rr3_pcm_downmix_stream(stereo);
+        assert_eq!(mono.cfg.channels, 1);
+        assert_eq!(mono.cfg.sample_rate_hz, 16000);
+        assert_eq!(mono.samples, vec![200, -300]);
+        let one = Rr3PcmStream {
+            cfg: Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 1,
+                bit_depth: 16,
+            },
+            samples: vec![7, 8, 9],
+        };
+        assert_eq!(rr3_pcm_downmix_stream(one.clone()), one);
     }
 
     #[test]

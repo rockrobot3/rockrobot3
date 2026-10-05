@@ -1035,6 +1035,34 @@ R11 ③ + §6 DoD 6/7）；③**洞N**（0.0.7 修订版 3）：R16"核实出无
 DoD 2 各补限定句（无 runner 只结"缓解路径"案；本机亦不可用时层① 如实登记受阻态），
 **R16 原文一字不动**。三件均非裁定项，Q1–Q4 / R1–R6 / R7–R12 / R13–R16 裁定文字均不动；
 门禁七步直跑 exit=0 全绿（不经管道）。本批即 T14。
+2026-10-05 0.0.6 批F1（语音采集链承载：python 模块打包 + 多通道下混 mono + 板上构建承载件）
+**代码批**（0.0.6 阶段二首批，依 §4 WBS 批F1；sim 档零硬件依赖）：四件落库——
+①[rr3-pack](../../tools/rr3-pack/src/main.rs) 支持 `lang = "python"` 模块 entry 装机：
+python 模块注入格式 `rr3-modules/<name>/{pkg/,manifest.toml}`（`pkg/` 为包树），打包器
+递归落位 + **生成 shim**（`#!/bin/sh` + `PYTHONPATH=<装机绝对包树> exec python3 -m <包名>`，
+包名 = 目录名连字符转下划线，与模拟演练侧 `rr3_brain_shim_script` 同构）+ chmod 755，
+entry 改写仍走原三道门，pkg 树含非普通文件点名拒绝。**为何 shim 由打包器生成**：
+`PYTHONPATH` 必须是**装机绝对**（staging 在宿主出、板上 `dpkg -i` 才落
+`/usr/lib/rockrobot3`），只有打包器知道 `RR3_INSTALL_ROOT`；rust 模块 `bin` 约定不变。
+distro.toml 缺格点名语义不动——本批只落**打包能力**（raspi 功能链装配单与 rr3-pack
+`--profile` 参数化归后续批）；②[rr3-sense](../../modules/rr3-sense/src/main.rs) 采集按
+config 真值开（`channels>1` 即双麦期；默认 1 声道与旧硬编码逐点等价）+ **多通道下混 mono
+入总线**（[audio/mod.rs](../../modules/rr3-sense/src/audio/mod.rs) 新增
+`rr3_pcm_downmix_mono` / `rr3_pcm_downmix_stream`，依 R14：双麦原始多通道只供 sense 内部
+DoA，总线承载恒 mono、brain 消费面零改动）；③[rr3-sense](../../modules/rr3-sense/Cargo.toml)
+与 [rr3-interact](../../modules/rr3-interact/Cargo.toml) 新增 `alsa` feature 透传
+`rr-hal/alsa`——补上 R13 "板上 `--features alsa`" 的接线缺口（原两 crate 无 feature，
+板上构建无从透传；宿主 musl 交叉不带、板上默认 sim）；④新增
+[build-onboard.sh](../../tools/deploy/build-onboard.sh)（洞 L 承载件：板上依赖门
+（rustc ≥1.82 + `libasound2-dev`/`pkg-config`）→ rsync 源码排除 `target/` → 板上
+`cargo fetch`（无外网则 vendor）→ 板上 `cargo build --features alsa --release` → 产物
+归位 `payload/rr3-modules/<name>/bin` → 断言动态 ELF aarch64 + `ldd` 含 libasound；只覆盖
+sense/interact 两件，宿主 musl 静态件仍走 pack-arm64.sh）。新增单测：rr3-pack 2 条
+（python 装机 + shim 形状/可执行 + 缺 pkg 点名）、rr3-sense audio 2 条（逐帧下混/流级），
+rr3-pack 7/7、rr3-sense 16/16 全绿；两 crate `--features alsa` 本机 check（macOS no-op）
+exit=0；`alsa` 已进两 lock（板上 `--locked --features alsa` 可复现）；门禁七步直跑
+exit=0 全绿（不经管道，16 项 PASS）。真麦档（板上 alsa 构建 + 真麦采集）与 raspi 装配单
+待硬件到位/后续批。本批即批F1。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
