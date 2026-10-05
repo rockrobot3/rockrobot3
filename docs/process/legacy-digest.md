@@ -16,7 +16,7 @@
 
 | legacy 组件 | 语义摘要 | 分类 | 去向 / 证据 |
 |---|---|---|---|
-| `core/audio` | I2S 全双工采集+播放；单采样 IIR 去直流+增益、峰值输出（VAD 用）；16kHz/256 帧契约；提示音 | **已融合** | 采集+VAD → `modules/rr3-sense`（vad_start 事件与 PCM 流，事件 schema [`contracts/events/sense-audio-vad_start.schema.json`](../contracts/events/sense-audio-vad_start.schema.json)）；播放 → `modules/rr3-interact`（`rr3-interact/tts/text` 事务面）；IIR/增益/峰值语义随 sense 实装；HAL 换 ALSA（板上件，cfg 门，status.md M3 行）。M3 收口 |
+| `core/audio` | I2S 全双工采集+播放；单采样 IIR 去直流+增益、峰值输出（VAD 用）；16kHz/256 帧契约；提示音 | **已融合** | 采集+VAD → `modules/rr3-sense`（vad_start 事件与 PCM 流，事件 schema [`contracts/events/sense-audio-vad_start.schema.json`](../../contracts/events/sense-audio-vad_start.schema.json)）；播放 → `modules/rr3-interact`（`rr3-interact/tts/text` 事务面）；IIR/增益/峰值语义随 sense 实装；HAL 换 ALSA（板上件，cfg 门，status.md M3 行）。M3 收口 |
 | `core/asr` · `core/llm` · `core/tts` | 三家云 HTTP 客户端（含 Content-Length 等踩坑） | **已融合** | `modules/rr3-brain/rr3_brain/cloud/`（urllib real + `RR3_BRAIN_CLOUD=mock` 注入点，ADR-0014）；M4 收口 |
 | `core/relay` | 继电器通断（`relay_set(bool)`，默认断开，GPIO21） | **已融合** | `modules/rr3-act/src/relay.rs` 的 `rr3_relay_parse_args` / `rr3_relay_apply`（只认真布尔）；格位 `act.relay`（0.0.2 Q1 裁定 append，[`contracts/slots.toml`](../../contracts/slots.toml)）+ 主题 `rr3-act/relay/set`（[`contracts/topics.toml`](../../contracts/topics.toml)）。其"语音开灯/关灯"触发语义 → 0.0.3 T3 brain 意图规则面（本版本收口，见 [0.0.3 方案](dev/0.0.3版本洛克三号收口方案.md) D3） |
 | `core/applog` | RAM 环形日志（200 条）+ JSON 导出（新的在前）+ 逐条转发回调 | **已融合** | rrd 固定容量日志环 512 行（`base/runtime/rrd/src/lib.rs` 的 `RR3_LOG_RING_CAP`，ADR-0010 裁定 5：stdout 行为一字不动、追加进环）+ `rr3.ctl.logs` 读面（`conn.rs`）；容量 200→512 是有意的增强，非漂移 |
