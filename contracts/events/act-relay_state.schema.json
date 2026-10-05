@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-act/relay/state",
+  "schema_version": 1,
+  "description": "继电器通断状态摘要（0.0.3 T3 随意图执行面落地）。变化即发：RPC rr3-act/relay/set 成功与 intent actions 驱动的执行，两者共用同一条状态流（与 servo/state 同款'状态流是摘要不是逐拍镜像'定位，但继电器动作频率低，不做限速门）。seq 是本模块 relay 状态流自己的计数。生产者 modules/rr3-act/src/relay.rs 的 rr3_relay_state_body 是形状唯一事实源。",
+  "type": "object",
+  "required": ["seq", "on"],
+  "properties": {
+    "seq": { "type": "integer", "minimum": 0, "description": "rr3-act relay 状态流自己的发布序号（与 servo/state 的 seq 各自独立）" },
+    "on": { "type": "boolean", "description": "生效后的通断：true=吸合(通电)，false=断开——通断语义没有第三态" }
+  },
+  "additionalProperties": false
+}

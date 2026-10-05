@@ -14,9 +14,10 @@ required = ["bus.publish", "bus.subscribe"]
 optional = []
 
 # 反射环（1k–10kHz 闭环）留在本进程内，永不进总线（ADR-0007 裁定 1）：
-# 这里只发布 servo/state 摘要与 motor/reflex 异常通告。
+# 这里发布 servo/state 摘要、relay/state 通断摘要（0.0.3 T3，RPC 与 intent
+# 两条驱动路共用）与 motor/reflex 异常通告。
 [events]
-publishes = ["rr3-act/servo/state", "rr3-act/motor/reflex"]
+publishes = ["rr3-act/servo/state", "rr3-act/relay/state", "rr3-act/motor/reflex"]
 subscribes = ["rr3-brain/intent/result"]
 
 [rpc]

@@ -144,6 +144,15 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   （provides `act.relay` + exposes `rr3-act/relay/set`）、`profiles/default.toml`
   （bindings 16 条 + faces）。battery/low 定 L1：兜底触发面负载取最小集、不再扩字段，
   演化走"只增不改"评审。
+- **2026-10-05 · 0.0.3 批C 契约 append（0.0.3 版本收口方案 T3，Q1 裁定 + T3 补裁定）**：
+  `topics.toml` 24→**25** 条（append `rr3-act/relay/state` event L2——继电器通断状态摘要、
+  变化即发；0.0.2 Q1"relay/state 留真实需要时再 append"的真实需要此刻成立：意图执行效果的
+  可观测面，e2e 证据链需要状态回读）；新增两个事件负载 schema：
+  `events/brain-intent-result.schema.json`（intent/result 载荷 pin——对话记录四字段 +
+  `actions` 结构化动作清单，元素 `{topic, args}`，词汇即契约主题零新造）与
+  `events/act-relay_state.schema.json`（seq / on 两字段最小面）。同批更新 rr-registry
+  形状 pin（25 条三元组、kind 8-10-3-4）、`modules/rr3-act/module.toml`（publishes
+  + `rr3-act/relay/state`）。topics.toml 只增不改维持；schema_version 均为 1（新文件）。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 
