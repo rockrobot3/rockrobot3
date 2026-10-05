@@ -279,6 +279,11 @@ pub struct RrdRegistry {
     /// （rr3-power 演进与 M6），不进本版本。放本表的理由与 `denied_publish` 同款：
     /// conn 与 supervisor 两路共见的守护级状态，真值只许有一份。
     low_power: bool,
+    /// 运维计数聚合表（0.0.4 批B，Q1/Q2 裁定）：键 = `模块名/键`（模块自报经心跳
+    /// `counters` 字段归并）或 `boots`（rrd 自有，启动自增不走心跳）。write-through
+    /// 持久化的内存真值，落盘点在 daemon 启动与本表心跳归并后的调用方（conn）。
+    /// 与 `crash_streak`（崩溃重启账）分开：这里是业务运维账，"机器慢先看数字"。
+    counters: BTreeMap<String, u64>,
 }
 
 impl RrdRegistry {
@@ -294,7 +299,46 @@ impl RrdRegistry {
             stopped: BTreeSet::new(),
             providers: BTreeMap::new(),
             low_power: false,
+            counters: BTreeMap::new(),
         }
+    }
+
+    /// 运维计数：启动时注入持久化加载的全表（daemon 启动点），或整体替换。
+    /// 运行期归并走 [`rr3_reg_counters_merge`]，不走这里——这条只服务启动装载。
+    pub fn rr3_reg_counters_replace(&mut self, table: BTreeMap<String, u64>) {
+        self.counters = table;
+    }
+
+    /// 运维计数：单键累加（rrd 自有键的唯一写法，`boots` 自增即它）
+    pub fn rr3_reg_counters_bump(&mut self, key: &str, by: u64) {
+        *self.counters.entry(key.to_string()).or_insert(0) += by;
+    }
+
+    /// 运维计数：把模块自报的一拍 counters 归并进聚合表——键加模块名前缀
+    /// `module/key`（同名键不同模块互不覆盖，聚合表是全局命名空间），同键累加。
+    /// 返回是否产生了变化（调用方据此决定要不要 write-through 落盘，空拍不写盘）。
+    pub fn rr3_reg_counters_merge(
+        &mut self,
+        module: &str,
+        counters: &BTreeMap<String, u64>,
+    ) -> bool {
+        if counters.is_empty() {
+            return false;
+        }
+        let mut changed = false;
+        for (k, v) in counters {
+            let key = format!("{module}/{k}");
+            let slot = self.counters.entry(key).or_insert(0);
+            let before = *slot;
+            *slot = before.saturating_add(*v);
+            changed |= *slot != before;
+        }
+        changed
+    }
+
+    /// 运维计数：全表只读快照（`rr3.ctl.counters` 的读面与持久化写盘共用）
+    pub fn rr3_reg_counters_snapshot(&self) -> BTreeMap<String, u64> {
+        self.counters.clone()
     }
 
     /// 写入能力 → 提供者表（boot 一次，见字段文档）。空表 = 无跨模块能力（全 base），
@@ -1824,6 +1868,38 @@ owner = "rr3-simb"
             .unwrap();
         assert_eq!(r.rr3_reg_death("rr3-simb", false, 600).rr3_plan(), None);
         assert_eq!(r.rr3_reg_snapshot()[0].2, Rr3Phase::Failed);
+    }
+
+    /// 运维计数聚合（0.0.4 批B）：模块前缀归并、同键累加、空拍不算变化
+    #[test]
+    fn counters_merge_prefixes_and_accumulates() {
+        use std::collections::BTreeMap;
+        let mut r = RrdRegistry::new(1000);
+        let mut beat = BTreeMap::new();
+        beat.insert("asr_ok".to_string(), 2u64);
+        beat.insert("asr_fail".to_string(), 1u64);
+        assert!(r.rr3_reg_counters_merge("rr3-brain", &beat), "首拍即变化");
+        // 同模块同键累加；另一模块同名键不互踩
+        let mut beat2 = BTreeMap::new();
+        beat2.insert("asr_ok".to_string(), 3u64);
+        assert!(r.rr3_reg_counters_merge("rr3-brain", &beat2));
+        assert!(r.rr3_reg_counters_merge("rr3-brain", &beat2));
+        let mut beat3 = BTreeMap::new();
+        beat3.insert("relay_on".to_string(), 1u64);
+        assert!(r.rr3_reg_counters_merge("rr3-act", &beat3));
+        let t = r.rr3_reg_counters_snapshot();
+        assert_eq!(t["rr3-brain/asr_ok"], 8, "2+3+3 同键累加");
+        assert_eq!(t["rr3-brain/asr_fail"], 1);
+        assert_eq!(t["rr3-act/relay_on"], 1, "模块前缀隔离");
+        // 空拍不算变化（调用方不落盘）
+        assert!(!r.rr3_reg_counters_merge("rr3-brain", &BTreeMap::new()));
+        // rrd 自有键（boots）不走前缀
+        r.rr3_reg_counters_bump("boots", 1);
+        r.rr3_reg_counters_replace(BTreeMap::new());
+        assert!(
+            r.rr3_reg_counters_snapshot().is_empty(),
+            "replace 是启动装载入口，整体替换"
+        );
     }
 
     /// `--restart-base-ms 0` 的**现值**是 `delay_ms = 0`（第 1 档 1×0、第 2 档 2×0 都是 0，

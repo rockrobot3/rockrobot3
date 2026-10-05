@@ -184,6 +184,24 @@ impl RrdTest {
         RrdTest::rr3_spawn_with_overlay(&socket, None, &socket, None, RR3_QUIET_WATCHDOG_TICK_MS)
     }
 
+    /// `rr3_start_no_overlay` 的带环境变量版（0.0.4 批B）：计数持久化用例经它给
+    /// rrd 进程注入 `RR3_DATA_DIR`。不 `std::env::set_var`（与 `rr3_start_profile_env`
+    /// 同一纪律：测试进程的 env 是共享的，改自己会串别的用例）。
+    pub fn rr3_start_env(tag: &str, envs: &[(&str, &str)]) -> RrdTest {
+        let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
+        RrdTest::rr3_spawn_inner(
+            &socket,
+            None,
+            &socket,
+            None,
+            RR3_QUIET_WATCHDOG_TICK_MS,
+            &[],
+            None,
+            None,
+            envs,
+        )
+    }
+
     /// watchdog 线级用例的唯一入口。**没有默认值**是刻意的：到期判死必须是用例自己声明的
     /// 条件，不能是"忘了传参数"传出来的。
     pub fn rr3_start_with_tick(tag: &str, tick_ms: u64) -> RrdTest {

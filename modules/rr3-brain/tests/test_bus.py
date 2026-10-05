@@ -174,6 +174,20 @@ class TestClientAgainstFakeRrd(unittest.TestCase):
         self.assertEqual(reply["beat"], "accepted")
         client._shutdown()
 
+    def test_heartbeat_params_carry_counters_only_after_bump(self):
+        """0.0.4 批B 双端镜像（client.rs heartbeat_carries_counters_only_after_bump）：
+        无上报的拍 params 维持 {}；bump 后带非空 counters，同键累加、异键并存。"""
+        client = self._connect()
+        self.assertEqual(client._heartbeat_params(), {}, "空表不带 counters 字段")
+        client.rr3_counter_bump("asr_ok", 2)
+        client.rr3_counter_bump("asr_ok")
+        client.rr3_counter_bump("chat_rounds")
+        self.assertEqual(
+            client._heartbeat_params(),
+            {"counters": {"asr_ok": 3, "chat_rounds": 1}},
+        )
+        client._shutdown()
+
     def test_publish_reaches_bus(self):
         client = self._connect()
         client.rr3_publish("rr3-brain/intent/result", {"trace": 1})
