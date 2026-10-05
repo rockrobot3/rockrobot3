@@ -863,6 +863,12 @@ umask，other 无 w 位）非 root 运维连接被拒——CI distro-smoke 全 r
 本批 sudo 巡检完成验收，修复（bind 后 fchmod 或 service 运行时目录权限声明）
 归独立小批，不塞本批。boards/raspberry-pi-64.md §6 回填 + 状态行改"已实测
 收口"。①a–⑤ 全绿重跑。
+批D 门禁留痕（流程失误订正）：批D 提交命令把 check.sh 接了 `| tail -3` 管道
+再 `&&` 提交——管道退出码取 tail（恒 0），当时一次 e2e 时序测试偶发 FAIL 的
+非零退出码被吞、明细被截断，提交仍继续执行（efd224f），违反"全绿才提交"。
+订正：提交后三次全量复跑全绿（16 步全 PASS，含 ①b；"Broken pipe"为 e2e 进程
+退出噪音非失败），FAIL 性质判定为时序 flaky、与本批文档内容无关；教训入册——
+**门禁命令必须直接执行看完整输出（或 `set -o pipefail`），退出码不得经管道中转**。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
