@@ -846,6 +846,23 @@ distro-smoke.sh 产物文件名。本机 stage 演练全绿：staging 布局断�
 不设、真硬件批次归属、brain 不在包内）逐条诚实标注；§6 实测回填表留空待批D
 填写（未测项不预填）。distro/README 的 boards 条目加指针。零代码改动，纯文档批。
 ①a–⑤ 全绿重跑。
+2026-10-05 0.0.6 批D（板上部署演练——真板六判据全过，跨平台判据成立）
+真板（pi@192.168.124.52，主机名 spharx，Pi aarch64 / Debian 13 trixie /
+内核 6.12.47+rpt-rpi-v8）实测：宿主 `pack-arm64.sh` 出 staging（23 文件 / 12MB，
+musl 静态产物零 glibc 依赖——板上 OS 比 §0 预期 Bookworm 新一个大版本，静态
+二进制跨版本无影响，A-0013 裁定 2 兑现）→ 传板 → 板上 `dpkg-deb --build` +
+`dpkg -i` 成功（版本 0.0.6，postinst 自动 enable）→ `systemctl start` 五模块
+全 running、`denied_publish = 0`、cognition 四格缺格点名 + brain manifest 读取
+失败双诚实边界（缺格点名条数按 faces 保留 brain 声明口径为四条，手册 §5.2
+原写"dialog 恰一条"随实测订正）→ `rr3-ctl status/health/counters` 三查实值
+（心跳 1000/2000ms 在窗、`rrd/boots = 1`）→ `reboot` 自恢复全绿。**判据 5
+成立：本批零产品代码改动，产品树 diff 仅本文档与手册回填——"同一 payload、
+不改一行产品代码，装进 Layer 0 完全不同的板"实测成立，0.0.6 主题命题闭环**。
+真板首发现登记：`/var/run/rock3-ipc.sock = srwxr-xr-x root:root`（rrd root
+umask，other 无 w 位）非 root 运维连接被拒——CI distro-smoke 全 root 掩盖；
+本批 sudo 巡检完成验收，修复（bind 后 fchmod 或 service 运行时目录权限声明）
+归独立小批，不塞本批。boards/raspberry-pi-64.md §6 回填 + 状态行改"已实测
+收口"。①a–⑤ 全绿重跑。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

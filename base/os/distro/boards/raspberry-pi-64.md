@@ -1,6 +1,7 @@
 # 实测笔记：树莓派 64-bit（Pi 4B / Pi 5 · Raspberry Pi OS Bookworm）
 
-- **状态**：步骤已立（批C）；§6 实测回填区待批D 板上演练后填写
+- **状态**：已实测收口（批D 2026-10-05，六条判据全过，§6 已回填；socket 权限
+  修复敞口见 §6 备注）
 - **板卡**：Pi 4B / Pi 5（0.0.6 方案 Q2 裁定：手头已有、型号不锁——payload 对
   Layer 0 无感正是验证目标）
 - **OS**：Raspberry Pi OS Bookworm 64-bit（Debian 12 系，与 CI distro-smoke 的
@@ -78,14 +79,16 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 - **`rr3-brain` 不在包内**：distro.toml 认知层四格缺位是快路 payload 边界的
   诚实表达（boot 日志缺格点名同批是断言点，不是故障）。
 
-## 6. 实测回填（批D 填写，未测项留空不预填）
+## 6. 实测回填（批D 2026-10-05 实测）
 
 | 项 | 实测 |
 |---|---|
-| 部署日期 / 板型 | （批D） |
-| OS 与内核版本 | `uname -a`： |
-| deb 出包与安装 | `dpkg -i` 退出码 / 版本： |
-| boot 巡检 | spawn 五模块 / 缺格点名 / denied： |
-| rrctl 三查 | status / health / counters 摘录： |
-| 重启恢复 | reboot 后 status 回显： |
-| 偏离与备注 | （无偏离则写"无"） |
+| 部署日期 / 板型 | 2026-10-05 / 树莓派（aarch64，内核 `rpi-v8`，Pi 4B/5 手头板） |
+| OS 与内核版本 | **Debian 13 (trixie)**（比 §0 预期 Bookworm 新一个大版本）；`6.12.47+rpt-rpi-v8`——musl 静态产物零 glibc 依赖，跨版本无影响 |
+| deb 出包与安装 | 宿主 `pack-arm64.sh` staging（23 文件 / 12MB）→ 传板 → 板上 `dpkg-deb --build` + `dpkg -i` 成功，版本 0.0.6，postinst 自动 enable（multi-user.target.wants symlink） |
+| boot 巡检 | 五模块全 `running`（sense/power/act/connect/interact），`denied_publish = 0`；缺格点名 **四条**（`cognition.dialog/asr/llm/tts`——§5.2 原预期"dialog 恰一条"改为四格全点名，faces 保留 brain 声明故四格全缺，语义一致）+ brain manifest 读取失败一条（包内无 brain，诚实边界双现） |
+| rrctl 三查 | status/health：五模块 running、心跳 1000/2000ms 全在窗口内；counters：`rrd/boots = 1` |
+| 重启恢复 | `sudo reboot` 后 rrd 自启 active，五模块全新 running（task 重编号），denied_publish = 0 |
+| 偏离与备注 | **socket 权限缺陷（真板首发现）**：`/var/run/rock3-ipc.sock = srwxr-xr-x root:root`（rrd root umask 022 所致，other 无 w 位），非 root 运维连接报 Permission denied——CI distro-smoke 全 root 跑掩盖了这一面；本批以 `sudo rr3-ctl` 完成验收不改产品代码（保判据 5），修复（rrd bind 后 fchmod 或 service 声明运行时目录权限）归独立小批。另：巡检用户为 `pi`（Imager 预配），主机名 `spharx` |
+
+**验收判据 §4 六条：全过**（判据 3 经 sudo 路径；判据 2 缺格点名条数按上表口径修正）。
