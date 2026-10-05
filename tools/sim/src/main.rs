@@ -11,6 +11,9 @@
 //!    health、logs、ota（恒拒随 M6，预期非 0 退出）；
 //! 5. 报告 + 收尾（`--keep` 保留现场）。
 //!
+//! 另有两个互斥模式：`--brain`（M4 全语音对话闭环，`brain.rs`）与 `--profile`
+//! （D9 装配演练：装配单驱动 boot + 全模块真进程巡检，`assemble.rs`）。
+//!
 //! sim 设备源（`devices.rs`，rr-hal 的 sim 后端消费方）保留：报告里带一段
 //! 静音流的时长换算，证明"sim 与 linux 后端交出同一种流"这条不变量仍有落点。
 
@@ -22,6 +25,8 @@ fn main() {
 
 // 演练编排依赖 UDS 与真进程（Unix）；drill 是纯逻辑（参数/路径/解析），全平台参与编译，
 // 它的单测因此 Windows 上也能跑到（④ 步的编译面与 ④ 之外的本地测试都受益）。
+#[cfg(unix)]
+mod assemble;
 #[cfg(unix)]
 mod brain;
 #[cfg(unix)]
@@ -57,6 +62,19 @@ mod run {
         // --brain 走 M4 四真进程演练（ADR-0014 裁定 4），与两面演练互斥
         if a.brain {
             return match crate::brain::rr3_brain_drill(&a) {
+                Ok(report) => {
+                    println!("{report}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("rr3-sim: {e}");
+                    1
+                }
+            };
+        }
+        // --profile 走 D9 装配演练（装配单驱动 boot + 全模块真进程巡检），与前两者互斥
+        if a.profile.is_some() {
+            return match crate::assemble::rr3_assemble_drill(&a) {
                 Ok(report) => {
                     println!("{report}");
                     0
