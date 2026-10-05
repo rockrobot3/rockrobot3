@@ -23,7 +23,7 @@
 | `core/data` | NVS 持久化运行计数（boots / chat_rounds / asr_ok·asr_fail / llm_fail / tts_fail / relay_on·relay_off / errors），"机器慢先看数字"的运维语义 | **待融合** | 已覆盖面：设备稳定性账在 rrd 在册表（`crash_streak` 等，`registry.rs`）+ `rr3.ctl.snapshot`；未落面：业务计数（对话轮/云调用成败/继电器动作）与**断电持久化**语义。排期 **0.0.4 消化批**：计数面落点 = brain 轮次记录（`Rr3DialogTurn` 已有底子）扩展自报 + rrd 运维面汇总；持久化载体归 `rr_data` 分区（genimage 已预留），不学 NVS 细节只留"断电不丢"语义 |
 | `core/panel` | Web 操作面板（内置 HTTP + 单文件内嵌页）：状态页 / WiFi 扫描连接页 / 硬件控制页（继电器、测试音、自检）/ 系统页（重启、恢复出厂 WiFi）；HTTP API 同功能 | **待融合** | 面板宿主归 `rr3-interact`（architecture §8 映射在册"HTML 资产直接搬入"）；WiFi 扫描连接页与 AP 热点模式语义与 `rr3-connect` 配网面合流。排期 **0.0.4 消化批**。**注意区分**：面板的"恢复出厂 WiFi"（只清凭据）≠ M6 的恢复出厂（整槽回滚切 `rr_factory`，见 [partition-layout.md](../../base/ota/partition-layout.md)）——融合时两语义不合并、不混用 |
 | `core/link/wifi` | WiFi STA + AP 热点（esp_wifi / nvs_flash） | **已融合**（sim 侧） | `modules/rr3-connect`：`net/link` 状态机 + `cloud/session`（0.0.2 D7）；HAL `Rr3SimLink`（sim 后端）；NetworkManager 属板上件（cfg 门骨架）。AP 配网模式语义随 panel 配网页排期（0.0.4）。板上证据未 claim（硬件未采购） |
-| `core/link/btctl` | 经典蓝牙 SPP 串口控制台（日志回放 / 远程命令） | **待融合**（低优先级） | 语义大半已被承接：日志回放 → rrd 日志环 + `rr3.ctl.logs`；远程命令 → `rr3-ctl` 总线运维面。真正未接的只剩"蓝牙作为一条链路"（`net.bt` 格位在册、`rr3-connect` 未接线，BlueZ 属板上件）。排期：随板上 BlueZ 批次（0.0.4 立骨架，实装依赖硬件） |
+| `core/link/btctl` | 经典蓝牙 SPP 串口控制台（日志回放 / 远程命令） | **已收敛**（0.0.4 批E） | 日志回放 → rrd 日志环 + `rr3.ctl.logs`（实装在案）；远程命令 → `rr3-ctl` 总线运维面（实装在案）；"蓝牙作为一条链路" → `net.bt` 格位（在册）+ [`rr3-connect` 状态机骨架](../../modules/rr3-connect/src/bt.rs)（0.0.4 批E，`Rr3BtState` 三态纯函数转移单测钉死）。**退役声明（Q5 裁定）**：btctl 组件语义至此全部承接/立骨架完毕——BlueZ 真射频链路属板上件（cfg 门骨架不 claim），实装随硬件采购后置板上 BlueZ 批次，`legacy/core/link/btctl` 随退役批整树移除（本目录只有 README+CMakeLists，无 .c 源文件，无代码可迁） |
 | `core/link/eth` | 以太网（接口预留，未接 PHY） | **退役** | 零实现语义；按"不预先占位"纪律，新架构在真有 PHY 的板上批次再议，不迁代码 |
 | `core/link/nearlink` | 星闪 NearLink（接口预留，本硬件无射频） | **退役** | 零实现语义；同上 |
 | `firmware-c/main` | main.c 对话编排（薄壳哲学）+ config.h 对话策略参数 | **已融合** | 编排 → `modules/rr3-brain/rr3_brain/dialog.py` 状态机 + `__main__.py` 主循环（M4，ADR-0014"brain 是唯一编排者"，architecture §2 原则 3）；参数 → `modules/rr3-brain/config.toml`（`[rr3-brain.dialog]`） |
@@ -38,7 +38,7 @@
 | 分类 | 项 | 收敛条件 |
 |---|---|---|
 | 已融合 | audio、asr/llm/tts、relay、applog、link/wifi、firmware-c main+config 语义、密钥注入纪律（7 项） | ——（relay 的语音触发语义随 0.0.3 T3 收口） |
-| 待融合 | data（业务计数+持久化）、panel（Web 面板+WiFi 配网+AP 模式）、link/btctl（蓝牙链路）（3 项） | 0.0.4 消化批实装或裁定退役；btctl 可后置至板上 BlueZ 批次 |
+| 待融合 | data（业务计数+持久化）、panel（Web 面板+WiFi 配网+AP 模式）（2 项；link/btctl 已随 0.0.4 批E 收敛——日志回放/远程命令已承接、蓝牙链路骨架已立 + Q5 退役声明在案，整表清零归退役批） | 0.0.4 消化批实装或裁定退役 |
 | 退役 | firmware-c 宿主、firmware-rs、rust、link/eth、link/nearlink（5 项） | 无条件（随退役批整树移除） |
 
 ## 三、退役触发条件（三阶段 ② → ③）

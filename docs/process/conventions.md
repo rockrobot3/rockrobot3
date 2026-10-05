@@ -696,6 +696,23 @@ interact 测试 17 条（路由用例更新为十二端点逐一点名）。文�
 演进登记（25→28）、connect/interact 两 README、architecture §6.3/§7.2 对账注记。
 ①b/②/②b/③/④ 全绿（rr-registry lib 26 条、契约 34 条、connect 10 条、
 interact 17 条），fmt/clippy 清零。
+2026-10-05 0.0.4 批E（btctl 骨架——connect 蓝牙链路状态机 + 退役声明，D5/Q5 裁定落地）：
+`bt.rs` 从 3 行占位升级为状态机骨架——`Rr3BtPhase` 三态（Off/Discoverable/Connected）
++ `Rr3BtState` 转移函数（power_on/link_up/link_down/power_off，非法转移返回 false
+且状态不动，转移本体与后端无关、纯函数单测 `bt_phase_roundtrips_full_chain` /
+`bt_illegal_transitions_are_rejected_without_moving` 钉死）+ sim 后端开机初值
+env 注入（`RR3_HAL_SIM_BT_UP=1` 开机即上电进 Discoverable，缺省关=出厂不自动开，
+取值不认一律按关——env 是 sim 注入口不是配置面）；BlueZ 真后端板上后置（cfg 门，
+方案 §1.3，本骨架不 claim 真射频链路）。**主题不登记**（方案 D5 显式裁定）：
+btctl 的日志回放/远程命令语义已被 rrd 日志环 + `rr3.ctl.logs` 与 rr3-ctl 承接
+（digest btctl 行在案），蓝牙链路暂无可发布事件——按"不预先占位"纪律（§3），
+启用事件面前须先改契约。`main.rs` 开机 sim 初值接入 + 相位自述打印（蓝牙面
+phase=off|discoverable）；`net.bt` 格位绑定核对在册（default.toml / distro.toml
+两装配单 [bindings]/[faces] 均已绑定，本批零改）。digest btctl 行"待融合（低
+优先级）"→"已收敛（0.0.4 批E）"+ Q5 退役声明（BlueZ 真射频随硬件采购后置板上
+批次；data/panel 两行不动，三分类表清零归退役批 D6）；connect README bt 段落
+同步。契约与形状 pin 不动（28 条）。①b/②/②b/③/④ 全绿（connect 12 条），
+fmt/clippy 清零。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
