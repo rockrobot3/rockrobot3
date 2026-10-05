@@ -568,6 +568,13 @@ legacy 盘点三交付，WBS T1–T5）；[§5](#5-文档纪律) 增补 legacy �
 （只读消化 → 融合完成 → 退役，替代旧"冻结区不动它"；`docs/process/legacy-digest.md`
 在 T2 落档时此处挂链）；docs/README.md 索引切换（0.0.2 行退历史存档、0.0.3 行
 为当前版本，两处表同批）。①b / ② / ②b / ③ / ④ 全不变；⑤ 因新增文档与互链重跑全绿。
+2026-10-05 0.0.3 批B（D2 legacy 语义盘点落档，Q4 裁定的台账面）**零代码改动，纯文档批**：
+新增 [legacy-digest.md](legacy-digest.md)——legacy/core 九组件 + 三棵试验树逐项三分类
+（已融合 7 / 待融合 3：data 计数、panel 面板、btctl 蓝牙链路，去向与排期 0.0.4 消化批 /
+退役 5：firmware-c 宿主、firmware-rs、rust、link/eth、link/nearlink），每行带证据路径；
+退役触发条件与退役批四件收尾（⑤ 门排除撤除、architecture §8 标注、status 已知偏差注销、
+本表归零）在册。同批：§5 挂真链（替换批A 的占位句）、architecture §8 尾注挂链、
+docs/README.md 两处表挂导航。①b / ② / ②b / ③ / ④ 全不变；⑤ 因新增文档与互链重跑全绿。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
@@ -640,7 +647,7 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
 
 - **legacy/ 处置三阶段（2026-10-05 用户裁定落规约，替代旧"冻结区不动它"口径）**：
   ①**只读消化期**——从 legacy 提语义进新架构（迁移映射见 architecture §8、逐组件盘点与
-  排期唯一落点为 `docs/process/legacy-digest.md`，0.0.3 T2 落档时此处挂链），**不回写
+  排期唯一落点 [legacy-digest.md](legacy-digest.md)），**不回写
   legacy/ 内任何文件**（含其 README 已知断链——退役批才注销）；②**融合完成期**——盘点
   三分类中"待融合"清零，全部收敛为已融合/退役两类；③**退役期**——整树删除 + ⑤ 门
   legacy 排除条款撤除 + architecture §8 标注消化完成 + status 已知偏差注销，删除动作由
