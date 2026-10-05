@@ -42,8 +42,8 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   ARCH=$(dpkg --print-architecture)
   /tmp/rr3-target/release/rr3-pack \
     --payload "$PAY" --repo /work --arch "$ARCH" \
-    --out "/tmp/rockrobot3_0.0.2_${ARCH}.deb"
-  dpkg -i "/tmp/rockrobot3_0.0.2_${ARCH}.deb"
+    --out "/tmp/rockrobot3_0.0.6_${ARCH}.deb"
+  dpkg -i "/tmp/rockrobot3_0.0.6_${ARCH}.deb"
 
   echo "== ⑤ 装机位断言（rrd.service 同一组路径）=="
   test -x /usr/bin/rrd
