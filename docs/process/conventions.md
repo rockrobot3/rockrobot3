@@ -905,9 +905,13 @@ boots 每次开机重置为 1——真板批D 实测）；②rr3-pack `rr3_posti
 （boots 自增已回写）"逐字 + counters.json 在位 + 含 `"boots"` 键）。counters 持久化
 本体不动（0.0.4 批B 已实装，缺陷纯部署面）。R6 补录：boards/raspberry-pi-64.md
 新增 §7"已知现状：ctl socket 权限"（socket 0755 语义 / 运维 sudo 口径 / 影响
-面仅运维链 / 修复归阶段二收尾件，本批不修）；§6 偏离行同步指向。真板复验
-（boots 跨重启 1→2）因板失联（ping 100% 丢包）登记为批E' 待办，板恢复后补跑
-回填。rr3-pack 单测 5 条全过；七步门禁直跑 exit=0 全绿（16 步全 PASS）。
+面仅运维链 / 修复归阶段二收尾件，本批不修）；§6 偏离行同步指向。**真板复验
+（板恢复后补跑，批E' 待办结清）**：staging 树验证含新 unit（RR3_DATA_DIR）与
+postinst（mkdir）→ 传板升级安装（Setting up rockrobot3 0.0.6，postinst 建目录
+`/var/lib/rockrobot3` root:root 755）→ daemon-reload + restart 后 counters.json
+落盘 `{"boots":1}`（修复当场生效）→ reboot 自恢复后 `{"boots":2}` **跨重启累积
+成立**，`rr3-ctl counters` 回显 `rrd/boots = 2`、denied_publish = 0，实测回填
+boards §6。rr3-pack 单测 5 条全过；七步门禁直跑 exit=0 全绿（16 步全 PASS）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

@@ -89,7 +89,7 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 | boot 巡检 | 五模块全 `running`（sense/power/act/connect/interact），`denied_publish = 0`；缺格点名 **四条**（`cognition.dialog/asr/llm/tts`——§5.2 原预期"dialog 恰一条"改为四格全点名，faces 保留 brain 声明故四格全缺，语义一致）+ brain manifest 读取失败一条（包内无 brain，诚实边界双现） |
 | rrctl 三查 | status/health：五模块 running、心跳 1000/2000ms 全在窗口内；counters：`rrd/boots = 1` |
 | 重启恢复 | `sudo reboot` 后 rrd 自启 active，五模块全新 running（task 重编号），denied_publish = 0 |
-| 偏离与备注 | boots 缺陷已随 0.0.6 批E' 修复（unit 注 `RR3_DATA_DIR` + postinst 建目录）；socket 权限现状补录见 §7。巡检用户 `pi`（Imager 预配），主机名 `spharx` |
+| 偏离与备注 | boots 缺陷已随 0.0.6 批E' 修复并**真板复验通过**（unit 注 `RR3_DATA_DIR` + postinst 建目录：升级安装 restart 后 `/var/lib/rockrobot3/counters.json` 落盘 `{"boots":1}`，reboot 自恢复后 `{"boots":2}` 跨重启累积，`rr3-ctl counters` 回显 `rrd/boots = 2`）；socket 权限现状补录见 §7。巡检用户 `pi`（Imager 预配），主机名 `spharx` |
 
 **验收判据 §4 六条：全过**（判据 3 经 sudo 路径；判据 2 缺格点名条数按上表口径修正）。
 
