@@ -136,6 +136,26 @@ fn ctl_ota_is_always_refused_with_permission() {
     rr3_assert_ctl_closed(&mut ctl);
 }
 
+/// 系统重启（0.0.4 批C，Q3 裁定）：方法面在白名单（协议面定型），执行面
+/// 双重门（cfg(linux) + RR3_REBOOT_OK=1）缺省关闭——不注入 env 的 rrd 恒拒，
+/// 与 ota 的"方法面定型、执行面恒拒"同构。解锁路径不测（真重启），其存在性
+/// 由 conn.rs 的 `rr3_reboot_unlocked` 单点承载。
+#[test]
+fn ctl_reboot_is_refused_by_default_double_gate() {
+    let t = RrdTest::rr3_start_no_overlay("ctl-reboot");
+    let mut ctl = t.rr3_connect();
+    let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.reboot", 7);
+    let err = &v["error"];
+    assert!(err.is_object(), "缺省必须以错误信封拒: {v}");
+    assert_eq!(err["code"], Rr3StatusCode::Permission as i64, "{v}");
+    let msg = err["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("RR3_REBOOT_OK"),
+        "拒因必须点名解锁旋钮，运维一眼可辨: {v}"
+    );
+    rr3_assert_ctl_closed(&mut ctl);
+}
+
 #[test]
 fn registered_module_uplink_ctl_is_refused_but_connection_survives() {
     let t = RrdTest::rr3_start_no_overlay("ctl-uplink-deny");

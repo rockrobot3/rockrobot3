@@ -15,9 +15,10 @@ optional = []
 
 # asr/text 与 dialog/turn 是面向其它模块的呈现事件（owner 即命名空间归属，
 # 生产者可以是 brain，见 contracts/topics.toml 的 owner 字段语义）
+# net/link 是面板状态页的链路卡片数据源（0.0.4 批C 订阅，发布方 rr3-connect 批D 上线）
 [events]
 publishes = ["rr3-interact/asr/text", "rr3-interact/dialog/turn"]
-subscribes = ["rr3-brain/intent/result"]
+subscribes = ["rr3-brain/intent/result", "rr3-connect/net/link"]
 
 [rpc]
 exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text"]

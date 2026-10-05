@@ -345,6 +345,21 @@ fn rr3_handshake(
     Ok(peer)
 }
 
+/// reboot 执行面的解锁判定（0.0.4 批C）：`Some(解锁口径)` = cfg(linux) 且 env
+/// `RR3_REBOOT_OK=1`；`None` = 缺省恒拒。口径文案只进日志——运维在 rrd 日志环
+/// 里能看到"是谁解锁的"。为什么是双重门而不是单 cfg：ubuntu CI 的 e2e 也编译
+/// linux 面，单 cfg 门会让测试进程拿到真重启能力；解锁旋钮留给装机环境
+/// （rrd.service 注入 RR3_REBOOT_OK=1）。
+fn rr3_reboot_unlocked() -> Option<&'static str> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    match std::env::var("RR3_REBOOT_OK").as_deref() {
+        Ok("1") => Some("cfg(linux) + RR3_REBOOT_OK=1"),
+        _ => None,
+    }
+}
+
 /// 控制旁支（ADR-0010 裁定 2/4）：一次性查询连接，一问一答即断。
 ///
 /// 不注册、不进在册表、不受 watchdog 管——在册表是"活的业务模块"的账本，运维探针
@@ -405,6 +420,30 @@ fn rr3_serve_ctl(
             Rr3StatusCode::Permission,
             "OTA（含模块级 staging 更新）随 M6 落地，当前拒绝执行".to_string(),
         )),
+        // 系统重启（0.0.4 批C，Q3 裁定）：执行面带**双重门**——cfg(linux) 且
+        // env `RR3_REBOOT_OK=1`（发行版服务单元注入）才真跑 `systemctl reboot`；
+        // 其余一律 Permission 拒 + 日志点名。为什么加 env 门：cfg(linux) 单独
+        // 解锁会让 CI 的 ubuntu runner 在 e2e 里真重启——e2e 可测性要求缺省路径
+        // 恒拒，解锁面留装机环境（rrd.service 设 RR3_REBOOT_OK=1）。
+        Rr3RpcMethod::CtlReboot => match rr3_reboot_unlocked() {
+            Some(how) => {
+                rr3_log(&format!("ctl.reboot 执行面已解锁（{how}），发起系统重启"));
+                match std::process::Command::new("systemctl")
+                    .arg("reboot")
+                    .status()
+                {
+                    Ok(st) if st.success() => Ok(json!({"reboot": true})),
+                    other => Err((
+                        Rr3StatusCode::Permission,
+                        format!("systemctl reboot 执行失败: {other:?}"),
+                    )),
+                }
+            }
+            None => Err((
+                Rr3StatusCode::Permission,
+                "reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）".to_string(),
+            )),
+        },
         // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
         other => Err((
             Rr3StatusCode::Invalid,
@@ -628,7 +667,8 @@ fn rr3_serve_request(
         | Rr3RpcMethod::CtlHealth
         | Rr3RpcMethod::CtlLogs
         | Rr3RpcMethod::CtlOta
-        | Rr3RpcMethod::CtlCounters => {
+        | Rr3RpcMethod::CtlCounters
+        | Rr3RpcMethod::CtlReboot => {
             rr3_reply_err(
                 out,
                 me,

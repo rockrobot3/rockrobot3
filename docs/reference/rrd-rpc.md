@@ -26,7 +26,7 @@
 | 项 | 要求 | 出处 |
 |---|---|---|
 | 承载 | `Rr3Frame`：128B 定长头 + payload（`opcode` = `opcode::SEND`），payload 前 2 字节是 `Rr3PayloadType` 小端前缀 | `rr-ipc/src/protocol/body.rs`、`conn.rs` 的 `rr3_out_frame` |
-| payload 类型 | 上行 `Rr3PayloadType::Request` 走 RPC（§3：模块四方法 + 控制五方法 `rr3.ctl.*`）、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）、`Rr3PayloadType::Response` 走 `rr3.call` 应答回路（见 §8）；注册后其余类型（`Notification` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs` 的 `rr3_serve_frame`） | `rpc.rs` 模块头注、`conn.rs` 的 `rr3_serve_frame` |
+| payload 类型 | 上行 `Rr3PayloadType::Request` 走 RPC（§3：模块四方法 + 控制六方法 `rr3.ctl.*`）、`Rr3PayloadType::Event` 走发布面（`rr3_publish`，见 §7）、`Rr3PayloadType::Response` 走 `rr3.call` 应答回路（见 §8）；注册后其余类型（`Notification` 冒充上行）才回 `Rr3StatusCode::Invalid` **且连接不断**（`conn.rs` 的 `rr3_serve_frame`） | `rpc.rs` 模块头注、`conn.rs` 的 `rr3_serve_frame` |
 | `dst_task` | 必须是 `RR3_TASK_RRD`（值 `1`）。注册前违反 → 先回错误帧再断开；注册后违反 → 按协议违规收尾，**走死亡记账** | `conn.rs` 的 `rr3_handshake`、`conn.rs` 的 `rr3_serve_frame` |
 | `src_task` | 由 rrd 分配，用户态**不得自设**（AOS-STD-IPC-024）。注册帧里它还没被分配，rrd 只把对端自报值当作拒答的 `dst_task` 回显用；注册后 `src_task` 必须等于分配值，伪造者**那一帧被拒、连接不断**（应答带回原 `id` + `Invalid`） | `conn.rs` 的 `rr3_handshake`、`conn.rs` 的 `rr3_serve_frame` |
 | 应答寻址 | rrd 的应答是**点对点**：帧头 `dst_task` = 该连接的 task，`src_task` = `RR3_TASK_RRD`；`RR3_BROADCAST_DST_TASK`（值 `0`）只用于 rrd 的下行广播与发布转发 | `conn.rs` 的 `rr3_out_frame`、`daemon.rs` 的 `rr3_state_frame` |
@@ -44,7 +44,7 @@
 | `jsonrpc` 必须**等于字符串** `2.0` | `jsonrpc 必须等于 "2.0"` | `rpc.rs` 的 `rr3_rpc_parse_request` |
 | `id` 必须能按无符号整数取出（`as_u64`） | `缺 id（要求无符号整数）` | `rpc.rs` 的 `rr3_rpc_parse_request` |
 | `method` 必须是字符串 | `缺 method（要求字符串）` | `rpc.rs` 的 `rr3_rpc_parse_request` |
-| `method` 必须在九方法白名单内（模块四 + 控制 `rr3.ctl.*` 五，见 §3） | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs` 的 `rr3_rpc_parse_request` |
+| `method` 必须在十方法白名单内（模块四 + 控制 `rr3.ctl.*` 六，见 §3） | `未知方法 {method_str}`（**不许当 no-op 放行**） | `rpc.rs` 的 `rr3_rpc_parse_request` |
 | `params` 可缺省 | 缺省时为 `Value::Null`，不是错误；各方法自己校验 | `rpc.rs` 的 `rr3_rpc_parse_request` |
 
 解析产物是 `Rr3RpcRequest { id, method, params }`（`rpc.rs`）。
@@ -60,7 +60,7 @@
 `rr3_best_effort_id` 尽力取 JSON 的 `id`，取不到用 `0`（`conn.rs`）——
 **客户端判失败要看 `code`，别只看 `id`**。
 
-## 3 九个方法（白名单 = `rpc.rs` 的 `Rr3RpcMethod` 枚举）
+## 3 十个方法（白名单 = `rpc.rs` 的 `Rr3RpcMethod` 枚举）
 
 **模块四方法**（已注册连接；各自语义见 §4/§6/§7/§8）：
 
@@ -71,7 +71,7 @@
 | `rr3.unregister` | `Unregister` | 无必填 `params` | `{"removed":<bool>}` | `conn.rs` 的 `rr3_serve_request` |
 | `rr3.call` | `Call` | `params.topic`：非空字符串（被调方须在 manifest `[rpc].exposes` 声明）；`params.args` 可缺省（缺省为 `Null`，被调方自己校验） | **不回 `result` 给调用方**——成功即转发，调用方的应答是被调方沿 trace_id 回路送回的 Response（见 §8） | `rpc.rs` 的 `rr3_rpc_call_params`、`conn.rs` 的 `rr3_serve_request`、`conn.rs` 的 `rr3_route_call` |
 
-**控制五方法 `rr3.ctl.*`**（F3 / [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md)，只对**未注册**
+**控制六方法 `rr3.ctl.*`**（F3 / [ADR-0010](../process/adr/ADR-0010-控制通道与查询面.md)，只对**未注册**
 的控制连接开放，`conn.rs` 的 `rr3_serve_ctl`）：
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
@@ -81,6 +81,7 @@
 | `rr3.ctl.logs` | `CtlLogs` | 无必填 | `{"lines":["rrd: …", …]}`——rrd 内存日志环（512 行环形，`rr3_log` 单点落环、不落盘）尾部副本 | `conn.rs` 的 `rr3_serve_ctl`、`lib.rs` 的 `rr3_log`/`rr3_log_tail` |
 | `rr3.ctl.ota` | `CtlOta` | 无必填 | **无**——恒拒：`Permission`（-22，`AIRY_EPERM`）+ 文案点 M6（契约状态码是冻结集，不自造 `NotSupported`） | `conn.rs` 的 `rr3_serve_ctl` |
 | `rr3.ctl.counters` | `CtlCounters` | 无必填 | `{"counters":{"<模块名>/<键>":<u64>, …, "boots":<u64>}}`——运维计数聚合快照（0.0.4 批B，Q1/Q2 裁定）：心跳可选 `counters` 按 `模块名/键` 前缀归并进在册表（`rr3_reg_counters_merge`，饱和加法），`boots` 是 rrd 自有裸键（每次启动自增，不走心跳）；持久化路径与语义见 [`rrd-cli.md`](rrd-cli.md) 的 `RR3_DATA_DIR`。**聚合与落盘在心跳 Rejected 之后也做**——运维账不跟判活走 | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_counters_*` 三方法、`counters.rs` |
+| `rr3.ctl.reboot` | `CtlReboot` | 无必填 | `{"reboot":true}`（`systemctl reboot` 已发起）——0.0.4 批C（Q3 裁定）：执行面**双重门**，`cfg(target_os = "linux")` **且** env `RR3_REBOOT_OK=1` 同时成立才真跑 `Command::new("systemctl").arg("reboot")`（解锁旋钮由 rr3.service 注入）；任一不成立 → `Permission`（-22）+ 文案 `reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）`——恒拒路径可测（单测钉拒绝面），解锁面留装机环境，CI 拿不到真重启能力 | `conn.rs` 的 `rr3_reboot_unlocked`/`rr3_serve_ctl` |
 
 连接语义与模块四方法不同：ctl 连接**不注册、不进在册表、不受 watchdog 管**，
 一问一答即断（rrd 应答后直接收掉这条连接，握手旁支在 `rr3_handshake` 第 6 步**之前**分流，
@@ -106,7 +107,7 @@ EOF 同样算干净收尾（`conn.rs` 的 `rr3_serve_request`、`conn.rs` 的 `r
 （只断连不回码等于让客户端挂在超时上，`conn.rs` 的 `rr3_handshake` 自述）。注册前的失败
 **不做死亡记账、也不广播 state**（`conn.rs` 的 `rr3_conn_serve` 对 `rr3_handshake` 结果的 `?` 早返回，绕过 `rr3_conn_finish`）。
 
-> **F3 例外（§3 控制五方法）**：第 6 步之前有一处分流——首帧方法 ∈ `rr3.ctl.*` 时直接进
+> **F3 例外（§3 控制六方法）**：第 6 步之前有一处分流——首帧方法 ∈ `rr3.ctl.*` 时直接进
 > `rr3_serve_ctl`（`conn.rs` 的 `rr3_handshake`），不注册、即答即断，**不落进本表**。本表 1–5 步
 > （读取 / 前缀 / `dst_task` / 类型 / RPC 信封）对 ctl 帧同样有效。
 
@@ -137,7 +138,7 @@ EOF 同样算干净收尾（`conn.rs` 的 `rr3_serve_request`、`conn.rs` 的 `r
 |---|---|---|---|---|
 | `Invalid` | -2 | `AIRY_EINVAL` | §2 全部、§4 的 2–10 步、`src_task` 伪造、`Event` 之外的非 `Request` 上行、注册后重复 `rr3.register`、`Rr3PublishDeny::NotRegistered`（在册表第三道门，**经映射函数**得出）。发布面的**形状错**是另外两支：帧体非 JSON、体里缺/坏 `topic`——`conn.rs` 的 `rr3_publish` 直接回 `Invalid`，**既不套进 `Rr3PublishDeny` 枚举、也不计数**（`rr3_reg_note_denied` 只在归属被拒时调，`conn.rs` 的 `rr3_publish`） | `rpc.rs` 的 `rr3_rpc_status_for_register` / `rr3_rpc_status_for_publish_deny`、`conn.rs` 的 `rr3_serve_frame` |
 | `Busy` | -16 | `AIRY_EBUSY` | `Rr3RegisterError::Duplicate`、`Rr3RegisterError::Capacity` | `rpc.rs` 的 `rr3_rpc_status_for_register` |
-| `Permission` | -22 | `AIRY_EPERM` | `Rr3RegisterError::ReservedName`；`Rr3PublishDeny::ReservedNamespace`、`Rr3PublishDeny::ForeignPrefix`；**F3 起**：`rr3.ctl.ota` 恒拒（文案点 M6，`conn.rs` 的 `rr3_serve_ctl`）与已注册连接上行 `rr3.ctl.*`（`conn.rs` 的 `rr3_serve_request`，**不断连**） | `rpc.rs` 的 `rr3_rpc_status_for_register` / `rr3_rpc_status_for_publish_deny` |
+| `Permission` | -22 | `AIRY_EPERM` | `Rr3RegisterError::ReservedName`；`Rr3PublishDeny::ReservedNamespace`、`Rr3PublishDeny::ForeignPrefix`；**F3 起**：`rr3.ctl.ota` 恒拒（文案点 M6，`conn.rs` 的 `rr3_serve_ctl`）与已注册连接上行 `rr3.ctl.*`（`conn.rs` 的 `rr3_serve_request`，**不断连**）；**0.0.4 批C 起**：`rr3.ctl.reboot` 执行面未解锁（双重门，见 §3 该行） | `rpc.rs` 的 `rr3_rpc_status_for_register` / `rr3_rpc_status_for_publish_deny` |
 | `TimedOut` | -1004 | `AIRY_ETIMEDOUT` | `rr3.heartbeat` 的 task 已过期或不在册：`该 task 已过期或不在册，需重新注册` | `conn.rs` 的 `rr3_serve_request` |
 | `Ok` | 0 | `AIRY_EOK` | 不单独上帧：成功走 `result` 而不是 `error` | `header.rs` 的 `Rr3StatusCode::Ok` 变体 |
 
