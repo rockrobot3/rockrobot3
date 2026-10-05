@@ -194,8 +194,5 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
     }
 
     std::fs::rename(&staging, &target)?;
-    Ok(files
-        .iter()
-        .map(|(rel, _)| target.join(rel))
-        .collect())
+    Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
 }

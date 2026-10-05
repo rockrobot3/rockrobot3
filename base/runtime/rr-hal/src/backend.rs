@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use crate::{
-    Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3PwmServo, Rr3Power, Rr3UnavailableSource,
+    Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3Power, Rr3PwmServo, Rr3UnavailableSource,
 };
 
 /// 后端标识（写入日志与诊断主题 `rr3-runtime/module/state`）
@@ -213,8 +213,7 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
                 .ok()
                 .and_then(|v| rr3_sim_battery_charging_parse(&v))
                 .unwrap_or(false);
-            let dev =
-                crate::sim::Rr3SimBattery::rr3_sim_battery_new(percent, charging);
+            let dev = crate::sim::Rr3SimBattery::rr3_sim_battery_new(percent, charging);
             (Box::new(dev), RR3_BACKEND_SIM)
         }
         _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),

@@ -258,8 +258,7 @@ impl Rr3SimGpioOut {
 
     /// 同步读电平（测试与诊断用；trait 的 `level` 是 async 面）
     pub fn rr3_sim_gpio_level(&self) -> bool {
-        self.level
-            .load(std::sync::atomic::Ordering::Relaxed)
+        self.level.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -305,13 +304,11 @@ impl Rr3SimBattery {
 
     /// 同步读电量（测试与诊断用；trait 的 `battery` 是 async 面）
     pub fn rr3_sim_battery_percent(&self) -> u8 {
-        self.percent
-            .load(std::sync::atomic::Ordering::Relaxed)
+        self.percent.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn rr3_sim_battery_charging(&self) -> bool {
-        self.charging
-            .load(std::sync::atomic::Ordering::Relaxed)
+        self.charging.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// 电量 → 电压（毫伏）的唯一映射。放关联函数而不是方法：它是"这颗虚拟电芯的
@@ -385,7 +382,7 @@ impl crate::Rr3Link for Rr3SimLink {
 mod tests {
     use super::*;
     use crate::{
-        rr3_block_on, Rr3GpioOut, Rr3Link, Rr3PwmServo, Rr3Power, RR3_AUDIO_CFG_16K_MONO16,
+        rr3_block_on, Rr3GpioOut, Rr3Link, Rr3Power, Rr3PwmServo, RR3_AUDIO_CFG_16K_MONO16,
     };
 
     fn source(wave: Rr3SimWave) -> Rr3SimAudioSource {
@@ -568,7 +565,11 @@ mod tests {
         assert_eq!(s.rr3_sim_servo_angle(), 135);
         rr3_block_on(s.set_angle(0)).unwrap();
         rr3_block_on(s.set_angle(200)).unwrap();
-        assert_eq!(rr3_block_on(s.angle()).unwrap(), 200, "读回最后一次 set 的值");
+        assert_eq!(
+            rr3_block_on(s.angle()).unwrap(),
+            200,
+            "读回最后一次 set 的值"
+        );
     }
 
     /// sim 数字输出：电平写读回环 + 覆写。LED/继电器各持一路，行为同一件。

@@ -90,15 +90,12 @@ fn rr3_run() -> Result<(), String> {
     let (servo_dev, servo_backend) = rr3_hal_servo();
     let (led_gpio, led_backend) = rr3_hal_gpio_out();
     let (relay_gpio, relay_backend) = rr3_hal_gpio_out();
-    rr3_block_on(servo_dev.angle())
-        .map_err(|e| format!("舵机面探活失败({servo_backend}): {e}"))?;
+    rr3_block_on(servo_dev.angle()).map_err(|e| format!("舵机面探活失败({servo_backend}): {e}"))?;
     rr3_block_on(led_gpio.as_ref().level())
         .map_err(|e| format!("LED 面探活失败({led_backend}): {e}"))?;
     rr3_block_on(relay_gpio.as_ref().level())
         .map_err(|e| format!("继电器面探活失败({relay_backend}): {e}"))?;
-    println!(
-        "执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}"
-    );
+    println!("执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}");
 
     let mut led_ctrl = Rr3Led::rr3_led_new(led_gpio.clone(), cfg.led.blink_period_ms);
 
@@ -234,10 +231,17 @@ fn rr3_handle_servo(
 }
 
 /// led/effect 点名：效果裁决 → worker 落电平 → 回 (应答体含生效/前效果, servo/relay 无)
-fn rr3_handle_led(led: &mut Rr3Led, args: &Value) -> Result<(Value, Option<u16>, Option<bool>), String> {
+fn rr3_handle_led(
+    led: &mut Rr3Led,
+    args: &Value,
+) -> Result<(Value, Option<u16>, Option<bool>), String> {
     let effect = led::rr3_led_parse_args(args)?;
     let (applied, previous) = led.rr3_led_apply(effect)?;
-    println!("led: {}（前态 {}）", applied.rr3_led_effect_as_str(), previous.rr3_led_effect_as_str());
+    println!(
+        "led: {}（前态 {}）",
+        applied.rr3_led_effect_as_str(),
+        previous.rr3_led_effect_as_str()
+    );
     Ok((
         json!({
             "effect": applied.rr3_led_effect_as_str(),
@@ -299,12 +303,19 @@ fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
         .get("angle_limit_deg")
         .and_then(toml::Value::as_array)
         .ok_or_else(|| "config [rr3-act.servo] 缺 angle_limit_deg（[min, max]）".to_string())?;
-    let bad_range = || "config [rr3-act.servo] angle_limit_deg 必须是 [min, max] 两个非负整数".to_string();
+    let bad_range =
+        || "config [rr3-act.servo] angle_limit_deg 必须是 [min, max] 两个非负整数".to_string();
     if range.len() != 2 {
         return Err(bad_range());
     }
-    let angle_min_deg = range[0].as_integer().filter(|n| *n >= 0).ok_or_else(bad_range)? as u64;
-    let angle_max_deg = range[1].as_integer().filter(|n| *n >= 0).ok_or_else(bad_range)? as u64;
+    let angle_min_deg = range[0]
+        .as_integer()
+        .filter(|n| *n >= 0)
+        .ok_or_else(bad_range)? as u64;
+    let angle_max_deg = range[1]
+        .as_integer()
+        .filter(|n| *n >= 0)
+        .ok_or_else(bad_range)? as u64;
     Ok(Rr3ActCfg {
         servo: Rr3ServoCfg {
             angle_min_deg: u16::try_from(angle_min_deg).map_err(|_| bad_range())?,

@@ -54,7 +54,11 @@ fn main() {
 fn rr3_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
     println!("rr3-power 0.0.1 (0.0.2 T4b 实装)");
-    for line in battery::SURFACE.iter().copied().chain(charger::SURFACE.iter().copied()) {
+    for line in battery::SURFACE
+        .iter()
+        .copied()
+        .chain(charger::SURFACE.iter().copied())
+    {
         println!("  {line}");
     }
 
@@ -79,7 +83,8 @@ fn rr3_run() -> Result<(), String> {
     // HAL 电源面选择 + 开机探活：Unsupported 即致命——显式回错不静默退化
     // （rr-hal 占位件的契约），也不给"没有电池读数还常驻"的假活
     let (dev, backend) = rr3_hal_power();
-    let first = rr3_block_on(dev.battery()).map_err(|e| format!("电源面探活失败({backend}): {e}"))?;
+    let first =
+        rr3_block_on(dev.battery()).map_err(|e| format!("电源面探活失败({backend}): {e}"))?;
     println!(
         "电源面就绪: {backend} 电量 {}% {}mV charging={}",
         first.percent, first.voltage_mv, first.charging
@@ -117,8 +122,14 @@ fn rr3_run() -> Result<(), String> {
             )?;
             if low_edge.rr3_low_edge_cross(st.voltage_mv) {
                 low_seq += 1;
-                bus.rr3_publish(RR3_BATTERY_LOW_TOPIC, battery::rr3_battery_low_body(low_seq, st))?;
-                println!("battery/low: {}% {}mV（越阈首拍，段内不重发）", st.percent, st.voltage_mv);
+                bus.rr3_publish(
+                    RR3_BATTERY_LOW_TOPIC,
+                    battery::rr3_battery_low_body(low_seq, st),
+                )?;
+                println!(
+                    "battery/low: {}% {}mV（越阈首拍，段内不重发）",
+                    st.percent, st.voltage_mv
+                );
             }
             last = Some(st);
             next_battery = now + Duration::from_millis(cfg.battery.sample_period_ms);
