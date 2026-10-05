@@ -21,7 +21,7 @@ Discussions and contributions are welcome — Issues are the front door.
 | [docs/process/naming.md](docs/process/naming.md) | Single naming authority |
 | [contracts/README.md](contracts/README.md) | Byte-level contract and ambiguity rulings |
 | [docs/process/adr/](docs/process/adr/) | Decision records ADR-0001 ~ ADR-0015 |
-| [legacy/README.md](legacy/README.md) | ESP32 firmware in progress (frozen zone) |
+| [docs/process/legacy-digest.md](docs/process/legacy-digest.md) | Legacy ESP32 firmware digest ledger (archived: tree retired in 0.0.4) |
 | [README_zh.md](README_zh.md) | Chinese (Simplified) edition of this entry point |
 
 ## License

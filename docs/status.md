@@ -115,10 +115,11 @@
 
 **已知偏差（有意保留，不是遗漏）：**
 
-- [`legacy/README.md`](../legacy/README.md) 第 3 行仍指向 `docs/architecture.md`，该路径在四档
-  迁移后已不存在（现为 [`architecture/architecture.md`](architecture/architecture.md)）。
-  `legacy/` 处于只读消化阶段（conventions §5 三阶段口径：只读消化 → 融合完成 → 退役），
-  本阶段不改 legacy 本体文件，所以这条断链**暂不修**，留待退役批收尾时随目录一并处置。
+- ~~`legacy/README.md` 第 3 行仍指向 `docs/architecture.md`~~
+  **已随 0.0.4 批F 退役批注销**：`legacy/` 整树删除（digest 三分类表归零归档），
+  断链与"冻结区只读不改"的约束一并完成使命；legacy 语义去向见
+  [`process/legacy-digest.md`](process/legacy-digest.md)（归档台账）与
+  [architecture §8](architecture/architecture.md#8-legacy-迁移映射)。
 - 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的
   "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
   读文档时别把它们对齐；这些注释不属于本任务订正范围。
