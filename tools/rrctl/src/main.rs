@@ -1,8 +1,10 @@
 //! rr3-ctl —— 总线侧运维 CLI。
 //!
-//! 规划能力（architecture.md §3）：查在册模块与健康状态、取日志、触发 OTA。
-//! F3（ADR-0010）起四个子命令经 UDS 真连 rrd 的事务面：一次性控制连接，
-//! 一问一答即断；`ota` 随 M6，rrd 侧恒拒。命令实现不得绕过 rrd 的鉴权语义。
+//! 规划能力（architecture.md §3）：查在册模块与健康状态、取日志、触发 OTA、
+//! 读运维计数、系统重启。F3（ADR-0010）起子命令经 UDS 真连 rrd 的事务面
+//! （0.0.4 批B 起 CLI 六子命令与 ctl 白名单对齐）：一次性控制连接，一问一答
+//! 即断；`ota` 随 M6，rrd 侧恒拒；`reboot` 缺省恒拒，解锁面在装机环境
+//! （rrd 执行面双重门），CLI 不加本地门。命令实现不得绕过 rrd 的鉴权语义。
 
 mod commands;
 
@@ -11,7 +13,8 @@ use rr_ipc::{RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 fn usage() -> ! {
     eprintln!("用法: rr3-ctl [--bus-path <path>] <命令>");
     eprintln!(
-        "命令: {}（status/health/logs 实查 rrd；ota 恒拒随 M6）",
+        "命令: {}（status/health/logs/counters 实查 rrd；ota 恒拒随 M6；\
+         reboot 缺省恒拒，解锁面在装机环境）",
         commands::COMMANDS.join(" | ")
     );
     std::process::exit(2)
