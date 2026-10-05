@@ -1,6 +1,207 @@
 <!doctype html>
-<!-- rr3-interact 面板静态页占位：状态展示随 M5 接入总线后填充。 -->
+<!-- 洛克三号面板（0.0.4 批C）：单文件静态页，无外部资源，vanilla JS。
+     数据面九端点：状态页签 = /api/status；硬件页签 = relay/beep/face/selftest；
+     系统页签 = /api/data + /api/logs + reboot；WiFi 页签随批D 配网上线。 -->
+<html lang="zh-CN">
+<head>
 <meta charset="utf-8">
-<title>rr3-interact 面板</title>
-<h1>rr3-interact</h1>
-<p>骨架页面。运行状态、表情与播放控制随 M5 经 rr-bus 接入。</p>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>洛克三号面板</title>
+<style>
+  :root { --bg:#10151c; --card:#1b232e; --line:#2c3a4a; --fg:#d8e2ee; --dim:#8aa0b6; --ok:#5ad29b; --bad:#f27979; --acc:#6cb6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header { padding:14px 18px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:12px; }
+  header h1 { font-size:17px; margin:0; }
+  header small { color:var(--dim); }
+  nav { display:flex; gap:4px; padding:8px 18px 0; border-bottom:1px solid var(--line); }
+  nav button { background:none; border:1px solid transparent; border-bottom:none; color:var(--dim); padding:8px 16px; font-size:14px; cursor:pointer; border-radius:6px 6px 0 0; }
+  nav button.on { color:var(--acc); border-color:var(--line); background:var(--card); }
+  main { padding:16px 18px; max-width:860px; }
+  section { display:none; }
+  section.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:14px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--dim); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; }
+  tr:last-child td { border-bottom:none; }
+  .btn { background:var(--acc); color:#0b1016; border:none; border-radius:6px; padding:8px 18px; font-size:14px; cursor:pointer; margin:4px 8px 4px 0; }
+  .btn.warn { background:var(--bad); color:#1c0d0d; }
+  .btn.off { background:var(--line); color:var(--fg); }
+  select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 10px; font-size:14px; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:320px; font-size:12px; margin:0; white-space:pre-wrap; word-break:break-all; }
+  .msg { color:var(--dim); min-height:20px; margin-top:6px; font-size:13px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .ph { color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>洛克三号面板</h1>
+  <small>rr3-interact · 局域网可信面 · 控制全走 RPC 归属门</small>
+</header>
+<nav>
+  <button data-tab="status" class="on">状态</button>
+  <button data-tab="hw">硬件</button>
+  <button data-tab="sys">系统</button>
+  <button data-tab="wifi">WiFi</button>
+</nav>
+<main>
+
+<section id="tab-status" class="on">
+  <div class="card">
+    <h2>模块健康（ctl.health，2s 刷新）</h2>
+    <table id="health"><thead><tr><th>模块</th><th>task</th><th>相位</th><th>心跳间隔</th><th>距上次心跳</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="health-msg"></div>
+  </div>
+  <div class="card">
+    <h2>网络链路（rr3-connect/net/link 订阅缓存）</h2>
+    <div id="link" class="ph">暂无链路事件（发布方随批D 配网上线）</div>
+  </div>
+</section>
+
+<section id="tab-hw">
+  <div class="card">
+    <h2>继电器（rr3.call → rr3-act/relay/set）</h2>
+    <button class="btn" onclick="relay(true)">吸合</button>
+    <button class="btn off" onclick="relay(false)">断开</button>
+    <div class="msg" id="relay-msg"></div>
+  </div>
+  <div class="card">
+    <h2>喇叭（进程内测试音）</h2>
+    <button class="btn" onclick="beep()">响一声</button>
+    <div class="msg" id="beep-msg"></div>
+  </div>
+  <div class="card">
+    <h2>表情（进程内表情机）</h2>
+    <select id="face-sel">
+      <option>idle</option><option>blink</option><option>think</option><option>happy</option>
+    </select>
+    <button class="btn" onclick="face()">切换</button>
+    <div class="msg" id="face-msg"></div>
+  </div>
+  <div class="card">
+    <h2>自检（并列三调，各答各展示）</h2>
+    <button class="btn" onclick="selftest()">开始自检</button>
+    <pre id="selftest-out">喇叭 + 继电器 + 表情 依次各做一次，单项失败不连锁。</pre>
+  </div>
+</section>
+
+<section id="tab-sys">
+  <div class="card">
+    <h2>运维计数（ctl.counters）</h2>
+    <table id="counters"><thead><tr><th>键</th><th>值</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="counters-msg"></div>
+  </div>
+  <div class="card">
+    <h2>rrd 日志环（ctl.logs 尾部）</h2>
+    <pre id="logs">（空）</pre>
+  </div>
+  <div class="card">
+    <h2>重启（rr3.ctl.reboot，双重门缺省恒拒）</h2>
+    <button class="btn warn" onclick="reboot()">重启整机</button>
+    <div class="msg" id="reboot-msg">需 rrd 执行面解锁：cfg(linux) 且 env RR3_REBOOT_OK=1（由 rr3.service 注入）。</div>
+  </div>
+</section>
+
+<section id="tab-wifi">
+  <div class="card">
+    <h2>WiFi 配网</h2>
+    <p class="ph">配网面（扫描 / 连接 / 忘记）随 0.0.4 批D 上线：rr3-connect 三 RPC
+    就位后本页签接管 legacy 面板的 /api/wifi/* 语义。</p>
+  </div>
+</section>
+
+</main>
+<script>
+"use strict";
+// ---- 骨架 ----
+const $ = (id) => document.getElementById(id);
+function setMsg(id, text, ok) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "msg " + (ok === undefined ? "" : ok ? "ok" : "bad");
+}
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  const v = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(v.error || ("HTTP " + r.status));
+  return v;
+}
+// 页签切换
+for (const b of document.querySelectorAll("nav button")) {
+  b.onclick = () => {
+    document.querySelectorAll("nav button, main section").forEach((el) => el.classList.remove("on"));
+    b.classList.add("on");
+    $("tab-" + b.dataset.tab).classList.add("on");
+  };
+}
+// ---- 状态页签 ----
+async function refreshStatus() {
+  try {
+    const v = await api("/api/status");
+    const tb = $("health").tBodies[0];
+    tb.innerHTML = "";
+    for (const m of (v.health && v.health.modules) || []) {
+      const tr = tb.insertRow();
+      [m.name, m.task, m.phase, m.heartbeat_ms + "ms", m.since_beat_ms + "ms"]
+        .forEach((t) => tr.insertCell().textContent = t);
+    }
+    setMsg("health-msg", tb.rows.length ? "" : "总线上暂无在册模块");
+    $("link").textContent = v.link ? JSON.stringify(v.link, null, 2) : "暂无链路事件（发布方随批D 配网上线）";
+    $("link").className = v.link ? "" : "ph";
+  } catch (e) { setMsg("health-msg", "状态拉取失败：" + e.message, false); }
+}
+setInterval(refreshStatus, 2000);
+refreshStatus();
+// ---- 硬件页签 ----
+async function relay(on) {
+  try { const v = await api("/api/relay", { on }); setMsg("relay-msg", "已" + (on ? "吸合" : "断开") + "（" + JSON.stringify(v.result) + "）", true); }
+  catch (e) { setMsg("relay-msg", "失败：" + e.message, false); }
+}
+async function beep() {
+  try { const v = await api("/api/beep", {}); setMsg("beep-msg", "播放 " + v.result.played_ms + "ms", true); }
+  catch (e) { setMsg("beep-msg", "失败：" + e.message, false); }
+}
+async function face() {
+  try {
+    const expression = $("face-sel").value;
+    const v = await api("/api/face", { expression });
+    setMsg("face-msg", expression + "（前一态：" + v.result.previous + "）", true);
+  } catch (e) { setMsg("face-msg", "失败：" + e.message, false); }
+}
+async function selftest() {
+  $("selftest-out").textContent = "自检中……";
+  try { $("selftest-out").textContent = JSON.stringify(await api("/api/selftest", {}), null, 2); }
+  catch (e) { $("selftest-out").textContent = "自检失败：" + e.message; }
+}
+// ---- 系统页签 ----
+async function refreshSys() {
+  if (!$("tab-sys").classList.contains("on")) return;
+  try {
+    const d = await api("/api/data");
+    const tb = $("counters").tBodies[0];
+    tb.innerHTML = "";
+    const counters = (d && d.counters) || {};
+    for (const k of Object.keys(counters)) {
+      const tr = tb.insertRow();
+      tr.insertCell().textContent = k;
+      tr.insertCell().textContent = counters[k];
+    }
+    setMsg("counters-msg", tb.rows.length ? "" : "暂无计数");
+    const l = await api("/api/logs");
+    $("logs").textContent = (l.lines || []).join("\n") || "（空）";
+    $("logs").scrollTop = $("logs").scrollHeight;
+  } catch (e) { setMsg("counters-msg", "拉取失败：" + e.message, false); }
+}
+setInterval(refreshSys, 2000);
+async function reboot() {
+  if (!confirm("确认重启整机？")) return;
+  try { const v = await api("/api/reboot", {}); setMsg("reboot-msg", "重启指令已受理：" + JSON.stringify(v), true); }
+  catch (e) { setMsg("reboot-msg", "被拒：" + e.message, false); }
+}
+</script>
+</body>
+</html>

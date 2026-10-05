@@ -6,9 +6,10 @@
 //! `rr3.call` 是 M3 定型的模块间请求路由：rrd 按 params.topic 查被调方的
 //! manifest `[rpc].exposes` 后定向转发，应答沿 trace_id 回路返回调用方
 //! （rrd-rpc.md"trace_id 语义"）。
-//! `rr3.ctl.*` 五方法是 F3 定型的控制查询（ADR-0010）：与模块方法同一解析器、
+//! `rr3.ctl.*` 六方法是 F3 定型的控制查询（ADR-0010）：与模块方法同一解析器、
 //! 同一白名单口径，但只对未注册的控制连接开放（分流在 conn 握手处）；
-//! 0.0.4 批B append `rr3.ctl.counters`（运维计数读面，与 health 的心跳健康语义分开）。
+//! 0.0.4 批B append `rr3.ctl.counters`（运维计数读面，与 health 的心跳健康语义分开）、
+//! `rr3.ctl.reboot`（系统重启，执行面带 cfg(linux)+env 双重门，缺省恒拒）。
 
 use rr_ipc::Rr3StatusCode;
 use serde_json::Value;
@@ -22,14 +23,15 @@ pub enum Rr3RpcMethod {
     Heartbeat,
     Unregister,
     Call,
-    /// rr3.ctl.* 五方法（ADR-0010；0.0.4 批B 增 `rr3.ctl.counters`）：控制查询，
-    /// 只对**未注册**的控制连接开放（conn 握手在方法分流处把 ctl 旁支接走）；
+    /// rr3.ctl.* 六方法（ADR-0010；0.0.4 批B 增 `rr3.ctl.counters`/`rr3.ctl.reboot`）：
+    /// 控制查询，只对**未注册**的控制连接开放（conn 握手在方法分流处把 ctl 旁支接走）；
     /// 已注册模块连接上行一律拒。
     CtlStatus,
     CtlHealth,
     CtlLogs,
     CtlOta,
     CtlCounters,
+    CtlReboot,
 }
 
 impl Rr3RpcMethod {
@@ -45,6 +47,7 @@ impl Rr3RpcMethod {
             Self::CtlLogs => "rr3.ctl.logs",
             Self::CtlOta => "rr3.ctl.ota",
             Self::CtlCounters => "rr3.ctl.counters",
+            Self::CtlReboot => "rr3.ctl.reboot",
         }
     }
 
@@ -59,6 +62,7 @@ impl Rr3RpcMethod {
             "rr3.ctl.logs" => Some(Self::CtlLogs),
             "rr3.ctl.ota" => Some(Self::CtlOta),
             "rr3.ctl.counters" => Some(Self::CtlCounters),
+            "rr3.ctl.reboot" => Some(Self::CtlReboot),
             _ => None,
         }
     }
@@ -69,7 +73,12 @@ impl Rr3RpcMethod {
     pub fn is_ctl(&self) -> bool {
         matches!(
             self,
-            Self::CtlStatus | Self::CtlHealth | Self::CtlLogs | Self::CtlOta | Self::CtlCounters
+            Self::CtlStatus
+                | Self::CtlHealth
+                | Self::CtlLogs
+                | Self::CtlOta
+                | Self::CtlCounters
+                | Self::CtlReboot
         )
     }
 }
@@ -322,7 +331,7 @@ mod tests {
     }
 
     /// F3（ADR-0010）：ctl 方法走同一解析器，is_ctl 的判据与方法面一致
-    /// （0.0.4 批B 起 `rr3.ctl.counters` 入列，白名单五 ctl）
+    /// （0.0.4 批B 起 `rr3.ctl.counters`/`rr3.ctl.reboot` 入列，白名单六 ctl）
     #[test]
     fn parses_ctl_methods_and_flags_them() {
         for m in [
@@ -331,6 +340,7 @@ mod tests {
             "rr3.ctl.logs",
             "rr3.ctl.ota",
             "rr3.ctl.counters",
+            "rr3.ctl.reboot",
         ] {
             let got = rr3_rpc_parse_request(&bytes(
                 json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}}),

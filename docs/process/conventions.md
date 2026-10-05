@@ -652,6 +652,27 @@ ctl.counters 行）、rrd-cli.md §2.1（RR3_DATA_DIR）、brain/act README 计�
 ①b/②/②b/③/④ 全绿重跑（e2e_ctl 7 条含新 2 条：聚合与跨重启持久化）；brain Python 本机
 3.9 无 tomllib 起不了（既有现状，CI brain-unittest job 覆盖），py_compile 语法验证过。
 
+2026-10-05 0.0.4 批C（panel 本体——interact std 手写 HTTP 九端点 + 单文件静态页 +
+`rr3.ctl.reboot`，Q3 裁定落地）**rrd 侧新增 `CtlReboot` 变体**（`rpc.rs`，**十方法
+白名单**：控制五→六；`is_ctl` + 显式 OR 臂两处共同看护不变），`conn.rs` 服务臂执行面
+**双重门**（`cfg(target_os = "linux")` 且 env `RR3_REBOOT_OK=1` 才真跑 `systemctl reboot`，
+缺省恒拒）——e2e 只钉拒绝路径（`ctl_reboot_is_refused_by_default_double_gate`），
+解锁面留装机环境由 rr3.service 注入，ubuntu CI 编译 linux 面也拿不到真重启能力；
+e2e_ctl 7→8 条。interact 侧：`panel/server.rs` std 手写 HTTP/1.1 子集（GET/POST +
+Content-Length，**零新 crates.io 依赖**），九端点路由纯函数 + `Rr3PanelDispatch`
+**无 Publish 变体**（面板不当发布者的类型面形态，单测
+`hardware_control_is_bus_call_only_never_publish` 钉死）+ ctl 裸 UDS 短连（src=0 与
+运维探针同权）+ HTTP 读面（半包/超时折 Err，头区 8KB / body 4KB 上界）+ 连接上限
+8（超限 503）+ 监听面 env `RR3_PANEL_ADDR` 优先缺省回环（Q3）；beep/face 经 mpsc
+动作通道由主循环串行代执行（sink/face 所有权不出主循环，与 TTS 点名天然互斥无锁），
+selftest 并列三调各答各展示（无状态机不算编排，ADR-0007）；静态页 `include_str!`
+内嵌四页签单文件（状态/硬件/系统/WiFi 批D 占位），`main.rs` 面板线程 + net/link
+事件缓存，`module.toml` subscribes 加 `rr3-connect/net/link`（发布方批D 上线）。
+interact 测试 12→17 条（九端点路由、越权静态断言、404/405/400、全量/半包读、
+ctl 回路+错误信封）。文档：interact README（九端点表、监听面、局域网可信面声明）、
+rrd-rpc.md（§1/§2/§3/§4 九→十方法口径、ctl.reboot 行、Permission 行）。
+①b/②/②b/③/④ 全绿（rrd lib 15 条、e2e_ctl 8 条、interact 17 条），fmt/clippy 清零。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：
