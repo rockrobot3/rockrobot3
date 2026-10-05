@@ -23,7 +23,8 @@ OS 双轨的**快路**：不自己构建 OS，用现成发行版（Armbian / Deb
 - `units/` —— systemd 单元（[rrd.service](units/rrd.service) 已落，0.0.2 T5，
   rr3-pack 编译期嵌入 deb）
 - `boards/` —— 各发行版在各板卡上的已验证笔记（镜像来源、内核版本、
-  ALSA/UART 可用性），一板一文件
+  ALSA/UART 可用性），一板一文件（如 [boards/raspberry-pi-64.md](boards/raspberry-pi-64.md)——树莓派 64-bit，
+  0.0.6 真板验证批）
 
 模块层与 OS 层的边界语义见 [ADR-0013](../../../docs/process/adr/ADR-0013-OS双轨-发行版快路与Buildroot保底.md)；
 机型选择（哪些格位、哪个 profile）不落在本层——那是 `profiles/`（ADR-0012 装配单）的活。
