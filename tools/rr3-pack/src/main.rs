@@ -361,7 +361,11 @@ fn rr3_control_text(arch: &str) -> String {
 /// postinst：systemd 在位才 enable——容器冒烟里 dpkg -i 时没有 systemd，不得因此失败。
 /// enable 不带 --now：启动时机归 systemd 策略，装机脚本不擅自拉起守护。
 fn rr3_postinst_text() -> &'static str {
-    "#!/bin/sh\n# RockRobot3 deb 后置脚本（rr3-pack 生成）\nif [ -d /run/systemd/system ]; then\n    systemctl enable rrd.service\nfi\n"
+    "#!/bin/sh\n# RockRobot3 deb 后置脚本（rr3-pack 生成）\n\
+     # 运维计数持久化目录（RR3_DATA_DIR，0.0.6 批E' R3：unit 注入同名环境变量，\n\
+     # 缺目录时 rrd 回写建 tmp 失败、boots 每次开机重置）\n\
+     mkdir -p /var/lib/rockrobot3\nchmod 755 /var/lib/rockrobot3\nchown root:root /var/lib/rockrobot3\n\
+     if [ -d /run/systemd/system ]; then\n    systemctl enable rrd.service\nfi\n"
 }
 
 /// postinst 必须可执行否则 dpkg 不跑它。staging 在 Unix 上落，权限语义也只对 Unix 有意义。
@@ -527,6 +531,9 @@ mod tests {
         let postinst = fs::read_to_string(stage.join("DEBIAN/postinst")).unwrap();
         assert!(postinst.starts_with("#!/bin/sh"));
         assert!(postinst.contains("systemctl enable rrd.service"));
+        // 计数持久化目录（0.0.6 批E' R3）：postinst 建目录，与 unit 的 RR3_DATA_DIR 同路径
+        assert!(postinst.contains("mkdir -p /var/lib/rockrobot3"));
+        assert!(postinst.contains("chown root:root /var/lib/rockrobot3"));
         // 模块位：entry 改写为装机绝对路径，其余字节零差异；bin 按 entry 落位；config 随包
         let staged_manifest = fs::read_to_string(root.join("modules/rr3-act/module.toml")).unwrap();
         let facts = rr3_manifest_facts_from_text(&staged_manifest).unwrap();

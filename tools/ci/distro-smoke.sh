@@ -49,6 +49,7 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   test -x /usr/bin/rrd
   test -x /usr/bin/rr3-ctl
   test -f /usr/lib/systemd/system/rrd.service
+  test -d /var/lib/rockrobot3 # postinst 建目录（RR3_DATA_DIR，0.0.6 批E' R3）
   test -f /usr/lib/rockrobot3/profiles/distro.toml
   test -f /usr/lib/rockrobot3/contracts/topics.toml
   test -f /usr/lib/rockrobot3/contracts/slots.toml
@@ -60,9 +61,9 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   grep -q "/usr/lib/rockrobot3/modules/rr3-act/rr3-act" \
     /usr/lib/rockrobot3/modules/rr3-act/module.toml # entry 已装机绝对化
 
-  echo "== ⑥ rrd 装配单正门冒烟（参数与 rrd.service 的 ExecStart 一致，仅套接字换测试位）=="
+  echo "== ⑥ rrd 装配单正门冒烟（参数与 rrd.service 的 ExecStart 一致，仅套接字换测试位；RR3_DATA_DIR 同 unit Environment）=="
   SOCK=/tmp/smoke-ipc.sock
-  /usr/bin/rrd --socket "$SOCK" \
+  RR3_DATA_DIR=/var/lib/rockrobot3 /usr/bin/rrd --socket "$SOCK" \
     --contracts /usr/lib/rockrobot3/contracts \
     --profile /usr/lib/rockrobot3/profiles/distro.toml >/tmp/rrd-smoke.log 2>&1 &
   RRDPID=$!
@@ -91,5 +92,10 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   fi
   /usr/bin/rr3-ctl --bus-path "$SOCK" status | grep -q "denied_publish = 0"
 
-  echo "distro-smoke 绿：deb 装机 → rrd 正门起 5 模块，缺格点名生效"
+  echo "== ⑧ counters 回写断言（0.0.6 批E' R3：持久化启用 + boots 落盘）=="
+  grep -q "counters 持久化已启用: /var/lib/rockrobot3/counters.json（boots 自增已回写）" /tmp/rrd-smoke.log
+  test -f /var/lib/rockrobot3/counters.json
+  grep -q '"boots"' /var/lib/rockrobot3/counters.json
+
+  echo "distro-smoke 绿：deb 装机 → rrd 正门起 5 模块，缺格点名生效，counters 回写落盘"
 '
