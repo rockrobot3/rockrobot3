@@ -89,6 +89,19 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 | boot 巡检 | 五模块全 `running`（sense/power/act/connect/interact），`denied_publish = 0`；缺格点名 **四条**（`cognition.dialog/asr/llm/tts`——§5.2 原预期"dialog 恰一条"改为四格全点名，faces 保留 brain 声明故四格全缺，语义一致）+ brain manifest 读取失败一条（包内无 brain，诚实边界双现） |
 | rrctl 三查 | status/health：五模块 running、心跳 1000/2000ms 全在窗口内；counters：`rrd/boots = 1` |
 | 重启恢复 | `sudo reboot` 后 rrd 自启 active，五模块全新 running（task 重编号），denied_publish = 0 |
-| 偏离与备注 | **socket 权限缺陷（真板首发现）**：`/var/run/rock3-ipc.sock = srwxr-xr-x root:root`（rrd root umask 022 所致，other 无 w 位），非 root 运维连接报 Permission denied——CI distro-smoke 全 root 跑掩盖了这一面；本批以 `sudo rr3-ctl` 完成验收不改产品代码（保判据 5），修复（rrd bind 后 fchmod 或 service 声明运行时目录权限）归独立小批。另：巡检用户为 `pi`（Imager 预配），主机名 `spharx` |
+| 偏离与备注 | boots 缺陷已随 0.0.6 批E' 修复（unit 注 `RR3_DATA_DIR` + postinst 建目录）；socket 权限现状补录见 §7。巡检用户 `pi`（Imager 预配），主机名 `spharx` |
 
 **验收判据 §4 六条：全过**（判据 3 经 sudo 路径；判据 2 缺格点名条数按上表口径修正）。
+
+## 7. 已知现状：ctl socket 权限（R6 补录，0.0.6 批E'）
+
+- **现状**：`/var/run/rock3-ipc.sock = srwxr-xr-x root:root`——rrd 以 root 跑
+  （systemd 系统服务），bind() 继承 root umask `022`，other 无 w 位；UDS connect
+  需要写权限，故非 root 用户的 `rr3-ctl` 连接报 Permission denied。
+- **运维口径（修复前）**：板上巡检走 `sudo rr3-ctl …`（root 可连）；本板批D 六判据
+  即按此完成。
+- **影响面**：仅运维面（rr3-ctl / 直连总线的调试客户端）；rrd ↔ 模块链路不受影响
+  （模块由 rrd spawn、经 `RR3_BUS_PATH` 以 root 同权连接）。
+- **归属**：修复（rrd bind 后 fchmod 放开组写，或 service 声明运行时目录权限，
+  配套 unit 加 `SupplementaryGroups` / 专用组）归后续独立小批（阶段二收尾件）；
+  本节只补录现状不修复（0.0.5 方案 R6 裁定）。
