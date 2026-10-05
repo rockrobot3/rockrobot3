@@ -27,6 +27,10 @@ pub struct Rr3SimArgs {
     pub keep: bool,
     /// 走 --brain 演练（rrd + rr3-sense(sim) + rr3-brain + rr3-interact 四真进程）
     pub brain: bool,
+    /// 走装配演练（D9）：`--profile <装配单>`——装配单驱动 rrd 装配链 boot 全部
+    /// face 模块（仓源 manifest 原文仅 entry 绝对化 + config 同目录），六模块真进程
+    /// 巡检 `denied_publish = 0`。与 --brain 互斥（parse 处同给即拒，Q3 同款）。
+    pub profile: Option<PathBuf>,
     /// 各二进制的显式覆盖（缺省按仓内 target/debug 布局推）
     pub rrd: Option<PathBuf>,
     pub sim_peer: Option<PathBuf>,
@@ -42,6 +46,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         repo: None,
         keep: false,
         brain: false,
+        profile: None,
         rrd: None,
         sim_peer: None,
         rrctl: None,
@@ -54,7 +59,8 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         match flag {
             "--keep" => a.keep = true,
             "--brain" => a.brain = true,
-            "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense" | "--interact" => {
+            "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense" | "--interact"
+            | "--profile" => {
                 let v = args
                     .get(i + 1)
                     .ok_or_else(|| format!("{flag} 缺参数"))?
@@ -70,17 +76,23 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
                     "--sim-peer" => a.sim_peer = Some(p),
                     "--sense" => a.sense = Some(p),
                     "--interact" => a.interact = Some(p),
+                    "--profile" => a.profile = Some(p),
                     _ => a.rrctl = Some(p),
                 }
                 i += 1;
             }
             other => {
                 return Err(format!(
-                    "未知参数 {other}（可用：--socket --repo --keep --brain --rrd --sim-peer --rrctl --sense --interact）"
+                    "未知参数 {other}（可用：--socket --repo --keep --brain --profile --rrd --sim-peer --rrctl --sense --interact）"
                 ))
             }
         }
         i += 1;
+    }
+    if a.brain && a.profile.is_some() {
+        return Err(
+            "--brain 与 --profile 同给：对话闭环演练与装配演练互斥（各证一面，不合并）".to_string(),
+        );
     }
     Ok(a)
 }

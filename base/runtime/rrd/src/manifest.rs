@@ -14,6 +14,10 @@ pub struct Rr3ManifestFacts {
     pub watchdog_ms: u64,
     pub restart_policy: String,
     pub entry: String,
+    /// `[manifest].lang`：rust | python。运行期不分支语言（spawn 只看 entry 可执行），
+    /// 进 facts 是因为演练/打包侧的产物路径推导要它（python 模块产物 = shim 脚本），
+    /// 解析真值保持一册——不逼调用方自己再开一份 TOML 读取。
+    pub lang: String,
     pub start_priority: i64,
     pub depends_required: Vec<String>,
     /// `[provides].capabilities`：本模块向 boot 全集声明提供的能力（ADR-0009 裁定 1）。
@@ -82,6 +86,7 @@ pub fn rr3_manifest_facts_from_text(text: &str) -> Result<Rr3ManifestFacts, Vec<
     let mut errs = Vec::new();
     let name = req_str(&root, "manifest.name", &mut errs);
     let entry = req_str(&root, "manifest.entry", &mut errs);
+    let lang = req_str(&root, "manifest.lang", &mut errs);
     let restart_policy = req_str(&root, "resources.restart_policy", &mut errs);
     let heartbeat_ms = req_int(&root, "health.heartbeat_ms", &mut errs);
     let watchdog_ms = req_int(&root, "health.watchdog_timeout_ms", &mut errs);
@@ -150,6 +155,7 @@ pub fn rr3_manifest_facts_from_text(text: &str) -> Result<Rr3ManifestFacts, Vec<
         watchdog_ms,
         restart_policy,
         entry,
+        lang,
         start_priority: lookup(&root, "resources.start_priority")
             .and_then(Value::as_integer)
             .unwrap_or(100),
