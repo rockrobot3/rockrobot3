@@ -18,8 +18,9 @@
 //! restart_policy=always 重启，不装"活着"。订阅面为空是**设计**（module.toml
 //! 同条注）：本模块没有可订阅的命令流，广播帧只排空。
 //!
-//! net.bt 格位由本模块 provide，但蓝牙主题尚未登记（骨架 bt.rs 原样保留）：
-//! 落地前须先改 contracts/topics.toml（bt.rs 同条注），不预先占位。
+//! net.bt 格位由本模块 provide：蓝牙链路状态机骨架在 bt.rs（0.0.4 批E，D5/Q5）
+//! ——转移纯函数单测钉死，sim 初值 env 注入；主题不登记（btctl 语义已被
+//! 日志环 + rr3-ctl 承接），启用事件面前须先改 contracts/topics.toml。
 
 mod bt;
 mod session;
@@ -107,6 +108,18 @@ fn rr3_run() -> Result<(), String> {
     let mut prov = wifi::Rr3Provision::rr3_provision_new();
     let mut link_seq: u64 = 0;
     let mut next_report = Instant::now();
+
+    // 蓝牙骨架（0.0.4 批E）：sim 初值由 env 定死（缺省关，出厂不自动开）；
+    // Off → Discoverable 在出厂态必成功。本进程暂无蓝牙事件面（主题不登记），
+    // 相位只进开机自述——真后端（BlueZ cfg 门）接 Phase 时才有可发布语义。
+    let mut bt_state = bt::Rr3BtState::rr3_bt_state_new();
+    if bt::rr3_bt_backend_up_default() {
+        bt_state.rr3_bt_power_on();
+    }
+    println!(
+        "蓝牙面: phase={}（骨架，BlueZ 板上后置）",
+        bt_state.rr3_bt_phase().rr3_bt_phase_name()
+    );
 
     loop {
         // 总线死亡探针：断开后 poll_wait 立即返回空 Vec，与"暂时没帧"不可区分——

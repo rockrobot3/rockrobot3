@@ -16,7 +16,8 @@ modules/rr3-connect/
     ├── wifi.rs    ← net/link 状态机（Rr3LinkEdge：首拍基线 + 翻转必发）+ 事件体（mode 配网态）
     │                + 配网面（Rr3Provision 状态机 + 三 RPC 参数/结果裁决，0.0.4 批D）
     ├── session.rs ← cloud/session 应答面（action=open，链路就绪才应答；sim 回 mock）
-    └── bt.rs      ← 蓝牙（BlueZ）：配网备选通道，主题未登记，落地前先改契约
+    └── bt.rs      ← 蓝牙链路状态机骨架（Rr3BtState 三态转移，0.0.4 批E）；
+                     主题不登记，BlueZ 真后端板上后置（cfg 门）
 ```
 
 ## 总线面
@@ -39,8 +40,14 @@ modules/rr3-connect/
 真凭据持久化（wpa_supplicant/NVS）与 NetworkManager 真扫描属板上件
 cfg 门后置——如实声明，不 claim。
 
-蓝牙（`net.bt` 格位）由本模块 provide，但主题尚未登记——落地前须先改
-[`topics.toml`](../../contracts/topics.toml)（守"不预先占位"）。
+蓝牙（`net.bt` 格位）由本模块 provide：链路状态机骨架已立（0.0.4 批E，
+`Rr3BtState` Off/Discoverable/Connected 三态纯函数转移，非法转移拒绝且
+状态不动，单测钉死；sim 初值 env `RR3_HAL_SIM_BT_UP=1` 开机即上电，缺省
+关）。**主题不登记**（0.0.4 方案 D5：btctl 的日志回放/远程命令语义已被
+rrd 日志环 + `rr3.ctl.logs` 与 rr3-ctl 承接，蓝牙链路暂无可发布事件）——
+启用事件面前须先改 [`topics.toml`](../../contracts/topics.toml)（守
+"不预先占位"）；BlueZ 真后端属板上件（cfg 门，实装依赖硬件，后置板上
+BlueZ 批次），本骨架不 claim 真射频链路。
 
 ## 本地自检
 
