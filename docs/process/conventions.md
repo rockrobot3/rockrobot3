@@ -599,6 +599,29 @@ D9 已登记门槛非本批引入），CI brain-unittest 钉 3.12 跑全量 23 �
 （24≠25）即为该钉子咬合，同批结清；批B 遗留断链一处（legacy-digest.md 的
 vad_start schema 链少一级 `../`）以独立 docs fix 提交先于本批落库。①a–⑤ 全绿重跑；
 brain-unittest 与 lint 归 CI 侧。
+2026-10-05 0.0.3 批D（D4 M6 OTA 写侧主机面，Q3 裁定落地）：
+**rr-ota 增 `bootconf` 模块**（可测逻辑归 base/runtime workspace 随 ③ 全量跑测试；
+CLI 薄壳）——`switch`/`factory` 判定与改写（只动生效行 root=LABEL 标签、注释与其余
+字节一字不动；同槽幂等拒 / rr_factory 目标拒走 factory / 缺·歧义·杂牌 token 报形状
+漂移拒）、原子落盘（读 → 改写 → 同目录临时文件 → rename）、cmdline 当前槽解析
+（只认 `root=LABEL=rr_`，裸设备形态报"板上核对项"不覆盖）；`Rr3Slot::rr3_slot_from_label`
+反查 + roundtrip 测试；真工件 `include_str` 字节级对拍（extlinux.conf 可逆律 / 对合律 /
+长度差恰为标签差），单测 8 条新增、crate 13 条全绿。**首跑红两处即钉子咬合同批结清**：
+①rr3_root_spans 初版把 extlinux.conf 注释行里的 `root=LABEL=rr_a` 也扫进来（2 处→歧义
+拒）——改为逐行扫并跳过 `#` 注释行，span 收窄为标签字节区间（rewrite 不再重造
+`root=LABEL=` 前缀，初版丢前缀缺陷一并消除）；②两条测试断言同步"注释一字不动"语义。
+**rr3-ota-ctl 重写**（恒拒骨架 → 实装）：slots / switch / factory 三子命令，
+`--bootconf` 必传不缺省碰任何路径，退出码 0 成功 / 1 业务拒 / 2 用法错；恒拒用例
+`switch_is_always_refused_until_m6` 改写为实装语义三件（slot_arg 在册映射+杂牌拒、
+CLI 壳临时文件端到端+同槽业务拒不落盘、bootconf_arg 硬门槛），4 条全绿；CLI 实跑冒烟
+（slots / switch 落盘 / 同槽拒 / factory 目标拒 / factory 落盘 / 缺参拒 / 临时文件零残留）
+逐项对。**文档三件同批**：partition-layout.md 增补"切换与回滚链"段（切换语义、U-Boot
+bootcount/bootlimit/altbootcmd/upgrade_available 标准语义表、断电安全序七步、板上核对项
+清单七条——首条即 vfat rename 原子性弱于 unix 文件系统的诚实敞口）；extlinux.conf 注释
+订正（"由 rr3-ota-ctl 改 U-Boot 环境变量"→实装口径"改写本文件 append 行标签"）；
+base/ota/README.md switch 恒拒段改实装口径 + 边界声明（本批交付切槽"翻标志"一步；
+槽位镜像写入随升级下载链另批；回滚链与块设备探测属板上件不 claim）；rr3-ota-ctl
+Cargo.toml description 同步。①a–⑤ 全绿重跑。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

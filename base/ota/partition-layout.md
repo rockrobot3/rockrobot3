@@ -33,3 +33,66 @@
 - `rr_factory` 任何代码路径不得写入
 - `rr_staging` 内容在落位前必须过 `rr-registry` 的 manifest 契约（同一套规则，
   不因来源是 OTA 而放宽）
+
+## 0.0.3 批D 增补：切换与回滚链（主机面已实装，板上件待验）
+
+### 切换语义（已实装，主机可测）
+
+`rr3-ota-ctl` 写侧的判定与改写逻辑在 `rr-ota::bootconf`（base/runtime
+workspace 内，字节级单测钉死，含 extlinux.conf 真工件对拍）：
+
+- **`switch <rr_a|rr_b> --bootconf P`**：改写 boot 分区
+  `/extlinux/extlinux.conf` 的 `append root=LABEL=rr_X` 标签做**持久**切换。
+  同槽幂等拒；rr_factory 目标拒（走 factory 子命令）。只动生效行那一个标签，
+  注释与其余字节一字不动；落盘走"读 → 改写 → 同目录临时文件 → rename"。
+- **`factory --bootconf P`**：把 `root=LABEL` 切到 `rr_factory` 做**一次性**
+  出厂引导。rr_factory 分区本体任何代码路径不得写入（上方只读约束不破）。
+  "一次性"的回切职责在 rr_factory 镜像自带的恢复流程（见下方回滚链第 7 条）。
+- 退出码：0 成功 / 1 业务拒 / 2 用法错。`--bootconf` 必传，CLI 不缺省碰任何路径。
+- 运行槽的权威判定来源是**内核 cmdline**（`/proc/cmdline`），不是
+  extlinux.conf 文本——后者只是引导配置，真正生效的是启动时注入的命令行。
+  `rr-ota::bootconf::rr3_cmdline_current_slot` 只认 `root=LABEL=rr_` 形态，
+  裸设备形态（root=/dev/…）明确不覆盖、报"板上核对项"。
+
+### 回滚链（U-Boot 标准语义；本版本未实装，属板上件）
+
+A/B 切换的断电安全不靠"翻标志不失败"，靠**失败可回**。U-Boot 的标准机制：
+
+| 变量 | 语义 |
+|---|---|
+| `bootcmd` | 正常启动命令（distro boot 扫 extlinux.conf 属于此链） |
+| `bootlimit` | 启动次数上限；`bootcount` 达限后 U-Boot 自动转走 `altbootcmd` |
+| `altbootcmd` | 备援启动命令——回滚的落点（切回原槽） |
+| `upgrade_available` | 置 1 时 bootcount 才计数；新槽启动成功后清零，回滚链解除 |
+
+标准断电安全序（板上实装时不得违反，与上方"断电安全约束"同源）：
+
+1. 写对侧槽镜像（任意时刻断电，原槽完好）；
+2. 校验对侧（hash + manifest 契约）；
+3. 翻引导标志——本批已实装的 extlinux 标签改写即此步；
+4. `fw_setenv upgrade_available=1 bootcount=0 bootlimit=N altbootcmd=<回原槽>`；
+5. 重启进新槽；
+6. 启动成功（健康判定点）→ `bootcount=0 upgrade_available=0`，回滚链解除；
+7. 启动失败 → bootcount 达 bootlimit → U-Boot 自动走 `altbootcmd` 回原槽；
+   恢复出厂场景则由 rr_factory 镜像内恢复流程把标签切回（最近好槽或 rr_a）。
+
+### 板上核对项清单（硬件未采购，以下全部未实测）
+
+1. **boot 分区是 vfat**（genimage.cfg `image boot.vfat`）：vfat 无日志，
+   rename 的原子性弱于 unix 文件系统，断电窗口最坏留下双目录项或零目录项。
+   临时文件名 `.extlinux.conf.rr3-ota-tmp` 不在 U-Boot distro boot 的固定
+   搜索路径上，不会被误读；最坏情形 = extlinux.conf 缺失，U-Boot 落回默认
+   bootcmd 或需 maskrom 人工恢复。板上需实测 rename 行为，必要时改
+   "写副本 + 验读 + 原位覆盖"序。
+2. `rr3_bootconf_write_atomic` 落盘后补 **fsync（文件与目录）**——主机面
+   未做，板上加固项。
+3. U-Boot defconfig 是否启用 `CONFIG_BOOTCOUNT_LIMIT` 及其计数载体
+   （env / RTC / I2C EEPROM）；无载体则 altbootcmd 链不生效，回滚退化为人工。
+4. Buildroot 是否打包 `fw_setenv`/`fw_printenv`（`BR2_PACKAGE_UBOOT_TOOLS`），
+   `/etc/fw_env.config` 的 env 存储偏移是否命中本板 U-Boot 布局。
+5. `/proc/cmdline` 实际形态：确认 root 是 `LABEL=rr_X` 而非裸设备。
+6. boot 分区挂载点与读写权限（`/boot` 或独立挂载），以及 rr3-ota-ctl 的
+   运行身份与最小权限面。
+7. rr_factory 镜像内的恢复流程：进厂环境后由谁把 extlinux 标签切回
+   （rr_a 或最近好槽），是否叠加 bootcount 兜底——`rr3-ota-ctl factory`
+   只保证"进得去"，"回得来"的职责在 rr_factory 镜像自带逻辑。
