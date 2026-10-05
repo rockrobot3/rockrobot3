@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.82"
 license = "UNLICENSED"
 publish = false
-description = "OTA 槽位查看/切换 CLI（骨架：只读侧先落地，写侧随 M6）"
+description = "OTA 槽位查看/切换 CLI（0.0.3 批D：switch/factory 引导配置改写实装；回滚链属板上件）"
 
 # 独立工程：base/ota 不在 base/runtime workspace 内
 [workspace]
