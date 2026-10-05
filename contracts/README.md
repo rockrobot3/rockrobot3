@@ -162,6 +162,14 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   `modules/rr3-connect/module.toml`（exposes + 三条）。`rr3-connect/net/link` 事件体以
   `mode` 字段（ap|station）增补配网态——负载只增不改，无 schema 文件（net/link 负载
   schema 本就未落，见 status.md 已知空缺）。topics.toml 只增不改维持。
+- **2026-10-05 · 0.0.5 Q3 裁定落档（pcm STREAM schema 维持已知空缺，零契约改动）**：
+  `rr3-sense/audio/pcm` 的 STREAM 负载 schema **维持空缺不冻结**，并把 2026-09-30
+  条目"冻结时机属 M5 shm 迁移裁定"的原表述升级为——**schema 冻结与 rrd shm 接线
+  绑定同一份后续 ADR**。裁定依据：[ADR-0008](../docs/process/adr/ADR-0008-传输层trait定型与uds实现.md)
+  裁定 4"不写半成品"——pcm_b64 JSON 是 UDS 承载期的编码，shm 零拷贝接线后大概率改
+  环形直读，给注定换承载的形状写冻结件即半成品（冻结一次、返工一次不如一次冻结到位）。
+  本条只登记裁定口径，不新增、不修改任何契约文件；接线的实施（conn.rs / sense / brain
+  多模块工程批）届时另立专项方案，冻结动作在专项内完成。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

@@ -789,6 +789,15 @@ rr-bus 复用零协议代码，次件 cloud 三家，末件对话状态机；迁
 0.0.5 只落设计裁定，本裁定不等于实施解锁）。conventions §3 主语言条目加 0016
 指针；docs/README.md 两处 ADR 区间 0001~0015 → 0001~0016（标题表补 brain 迁移
 路线）。①a–⑤ 全绿重跑。
+2026-10-05 0.0.5 批D（T4 pcm 传输裁定登记——contracts 演进段口径钉死，Q3 裁定落地）
+**零代码改动，零契约改动，纯文档批**：`contracts/README.md` 演进登记 append
+2026-10-05 条目——`rr3-sense/audio/pcm` 的 STREAM 负载 schema **维持空缺不冻结**，
+原"冻结时机属 M5 shm 迁移裁定"表述升级为 **"schema 冻结与 rrd shm 接线绑定同一份
+后续 ADR"**（依据 ADR-0008 裁定 4"不写半成品"：pcm_b64 JSON 是 UDS 承载期编码，
+shm 零拷贝后大概率改环形直读，给注定换承载的形状写冻结件即半成品）。topics.toml /
+events schema / slots.toml 一字未动（只增不改维持）；接线实施属多模块工程批届时
+另立专项，冻结动作在专项内完成。status.md 能力表末行口径同步归 T5 重锚批（收口时
+整篇重写，批内不动 status.md）。①a–⑤ 全绿重跑。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
