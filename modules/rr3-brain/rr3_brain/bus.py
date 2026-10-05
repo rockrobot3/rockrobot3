@@ -211,6 +211,11 @@ class Rr3BusClient:
         self._inbox: queue.Queue = queue.Queue()
         self._next_id = 0
         self._id_lock = threading.Lock()
+        # 运维计数表（0.0.4 批B，Q1 裁定，逐语义镜像 client.rs）：业务线程经
+        # rr3_counter_bump 累加，心跳线程每拍快照——非空则心跳 params 带
+        # {"counters": {...}}，空则维持 {}（旧 rrd 兼容）。
+        self._counters: dict[str, int] = {}
+        self._counters_lock = threading.Lock()
 
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.connect(path)
@@ -244,6 +249,13 @@ class Rr3BusClient:
     def rr3_connected(self) -> bool:
         """死亡探针：reader 在 = 活。轮询型主循环每圈探一次，假了走退出语义。"""
         return not self._stop.is_set()
+
+    def rr3_counter_bump(self, key: str, by: int = 1) -> None:
+        """运维计数自报（镜像 client.rs 同名方法）：给键累加 by，心跳线程每拍把
+        全表快照塞进 rr3.heartbeat 的可选 counters 字段。键是模块内部运维词汇，
+        归属表落各模块 README；无上报的模块字段缺省，rrd 侧未知字段忽略。"""
+        with self._counters_lock:
+            self._counters[key] = self._counters.get(key, 0) + by
 
     # -- 上行 RPC（一次一答；心跳线程也走这里） --
 
@@ -359,10 +371,18 @@ class Rr3BusClient:
             for box in pending:
                 box.put(RuntimeError("总线已断开"))
 
+    def _heartbeat_params(self) -> dict:
+        """心跳载荷构造（镜像 client.rs 心跳线程的快照取数）：计数表非空才带
+        counters 字段，空则维持 {}（与无上报模块同一条线上形状）。独立成方法
+        供镜像测试直调——测试 manifest 的 heartbeat_ms 是 3600000，等不来真拍。"""
+        with self._counters_lock:
+            snap = dict(self._counters)
+        return {"counters": snap} if snap else {}
+
     def _heartbeat_loop(self, interval_s: float) -> None:
         while not self._stop.wait(interval_s):
             try:
-                self.rr3_call("rr3.heartbeat", {}, 5.0)
+                self.rr3_call("rr3.heartbeat", self._heartbeat_params(), 5.0)
             except (RuntimeError, OSError):
                 if not self._stop.is_set():
                     print("rr3-bus: 心跳失败，退出（supervisor 按 restart_policy 裁定）", file=sys.stderr)

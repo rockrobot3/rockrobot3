@@ -6,11 +6,13 @@
 //! `rr3.call` 是 M3 定型的模块间请求路由：rrd 按 params.topic 查被调方的
 //! manifest `[rpc].exposes` 后定向转发，应答沿 trace_id 回路返回调用方
 //! （rrd-rpc.md"trace_id 语义"）。
-//! `rr3.ctl.*` 四方法是 F3 定型的控制查询（ADR-0010）：与模块方法同一解析器、
-//! 同一白名单口径，但只对未注册的控制连接开放（分流在 conn 握手处）。
+//! `rr3.ctl.*` 五方法是 F3 定型的控制查询（ADR-0010）：与模块方法同一解析器、
+//! 同一白名单口径，但只对未注册的控制连接开放（分流在 conn 握手处）；
+//! 0.0.4 批B append `rr3.ctl.counters`（运维计数读面，与 health 的心跳健康语义分开）。
 
 use rr_ipc::Rr3StatusCode;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 use crate::registry::{Rr3PublishDeny, Rr3RegisterError};
 
@@ -20,12 +22,14 @@ pub enum Rr3RpcMethod {
     Heartbeat,
     Unregister,
     Call,
-    /// rr3.ctl.* 四方法（ADR-0010）：控制查询，只对**未注册**的控制连接开放
-    /// （conn 握手在方法分流处把 ctl 旁支接走）；已注册模块连接上行一律拒。
+    /// rr3.ctl.* 五方法（ADR-0010；0.0.4 批B 增 `rr3.ctl.counters`）：控制查询，
+    /// 只对**未注册**的控制连接开放（conn 握手在方法分流处把 ctl 旁支接走）；
+    /// 已注册模块连接上行一律拒。
     CtlStatus,
     CtlHealth,
     CtlLogs,
     CtlOta,
+    CtlCounters,
 }
 
 impl Rr3RpcMethod {
@@ -40,6 +44,7 @@ impl Rr3RpcMethod {
             Self::CtlHealth => "rr3.ctl.health",
             Self::CtlLogs => "rr3.ctl.logs",
             Self::CtlOta => "rr3.ctl.ota",
+            Self::CtlCounters => "rr3.ctl.counters",
         }
     }
 
@@ -53,6 +58,7 @@ impl Rr3RpcMethod {
             "rr3.ctl.health" => Some(Self::CtlHealth),
             "rr3.ctl.logs" => Some(Self::CtlLogs),
             "rr3.ctl.ota" => Some(Self::CtlOta),
+            "rr3.ctl.counters" => Some(Self::CtlCounters),
             _ => None,
         }
     }
@@ -63,7 +69,7 @@ impl Rr3RpcMethod {
     pub fn is_ctl(&self) -> bool {
         matches!(
             self,
-            Self::CtlStatus | Self::CtlHealth | Self::CtlLogs | Self::CtlOta
+            Self::CtlStatus | Self::CtlHealth | Self::CtlLogs | Self::CtlOta | Self::CtlCounters
         )
     }
 }
@@ -149,6 +155,30 @@ pub fn rr3_rpc_call_params(params: &Value) -> Result<(String, Value), (i32, Stri
     let topic = rr3_rpc_topic_param(params)?;
     let args = params.get("args").cloned().unwrap_or(Value::Null);
     Ok((topic, args))
+}
+
+/// `rr3.heartbeat` 的可选 `counters` 字段（0.0.4 批B，Q1 裁定）：`{string: u64}` 映射，
+/// 模块自报的运维计数。取值口径：
+/// - 字段缺省 / 非对象 / 空对象 → `None`（无上报，旧模块兼容，线上形状 `{}`）；
+/// - 合法键值（非空字符串键 + `as_u64`）逐对收；**非法值静默跳过**——计数是运维账，
+///   脏键值不值得让一拍心跳折错误（心跳失败 = 模块 exit，客户端侧语义太重）。
+///   聚合与键归属归 conn/registry，这里只做形状拆包。
+pub fn rr3_rpc_heartbeat_counters(params: &Value) -> Option<BTreeMap<String, u64>> {
+    let obj = params.get("counters")?.as_object()?;
+    let mut out = BTreeMap::new();
+    for (k, v) in obj {
+        if k.is_empty() {
+            continue;
+        }
+        if let Some(n) = v.as_u64() {
+            out.insert(k.clone(), n);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 pub fn rr3_rpc_build_result(id: u64, result: &Value) -> Vec<u8> {
@@ -291,7 +321,8 @@ mod tests {
         assert_eq!(Rr3RpcMethod::Call.as_str(), "rr3.call");
     }
 
-    /// F3（ADR-0010）：四个 ctl 方法走同一解析器，is_ctl 的判据与方法面一致
+    /// F3（ADR-0010）：ctl 方法走同一解析器，is_ctl 的判据与方法面一致
+    /// （0.0.4 批B 起 `rr3.ctl.counters` 入列，白名单五 ctl）
     #[test]
     fn parses_ctl_methods_and_flags_them() {
         for m in [
@@ -299,6 +330,7 @@ mod tests {
             "rr3.ctl.health",
             "rr3.ctl.logs",
             "rr3.ctl.ota",
+            "rr3.ctl.counters",
         ] {
             let got = rr3_rpc_parse_request(&bytes(
                 json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}}),
@@ -311,6 +343,33 @@ mod tests {
         assert!(!Rr3RpcMethod::Heartbeat.is_ctl());
         assert!(!Rr3RpcMethod::Unregister.is_ctl());
         assert!(!Rr3RpcMethod::Call.is_ctl());
+    }
+
+    /// 心跳可选 counters 字段的形状拆包（0.0.4 批B）：缺省/非对象/空 → None；
+    /// 合法键值逐对收；非法值与空键静默跳过（脏拍不折心跳错误）
+    #[test]
+    fn heartbeat_counters_param_is_optional_and_lenient() {
+        assert!(rr3_rpc_heartbeat_counters(&json!({})).is_none(), "缺省字段");
+        assert!(
+            rr3_rpc_heartbeat_counters(&json!({"counters": {}})).is_none(),
+            "空映射等价无上报"
+        );
+        assert!(
+            rr3_rpc_heartbeat_counters(&json!({"counters": 3})).is_none(),
+            "非对象忽略"
+        );
+        let got = rr3_rpc_heartbeat_counters(&json!({
+            "counters": {"asr_ok": 2, "asr_fail": 0}
+        }))
+        .expect("合法映射应拆出");
+        assert_eq!(got["asr_ok"], 2);
+        assert_eq!(got["asr_fail"], 0, "0 也是合法计数值");
+        let got = rr3_rpc_heartbeat_counters(&json!({
+            "counters": {"ok": 1, "bad": "x", "": 5, "neg": -3}
+        }))
+        .expect("有合法键值即拆出");
+        assert_eq!(got.len(), 1, "非法键值静默跳过");
+        assert_eq!(got["ok"], 1);
     }
 
     /// rr3.call 的参数：topic 必填，args 缺省 Null 且原样透传

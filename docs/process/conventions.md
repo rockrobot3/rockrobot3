@@ -635,6 +635,22 @@ M6 行改"主机面已实装，板上件与升级链未做"；A/B OTA 行骨架 
 计数/持久化、D3 panel 本体、D4 配网面、D5 btctl 骨架、D6 整树退役删除（Q6 显式裁定前置）、
 D7 收口；WBS T1–T7 与版本 DoD 随文）；docs/README.md 索引切换（0.0.3 行退历史存档、
 0.0.4 行进当前）。①a–⑤ 全绿重跑。
+2026-10-05 0.0.4 批B（data 消化——心跳 counters 双端镜像 + rrd 聚合持久化 + `rr3.ctl.counters`，
+Q1/Q2 裁定落地）**新增 5 条单测 + 2 条 e2e**：rr-bus client（`client.rs`）心跳每拍快照
+`rr3_counters_snapshot`、`rr3_counter_bump` 记账，非空才带 `counters`（新用例
+`heartbeat_carries_counters_only_after_bump`，lib 实测 11 条含新用例）；rrd 新模块 `counters.rs`
+（路径三态 + 原子写序 tmp→fsync→rename，5 单测）、`registry.rs` 加
+`rr3_reg_counters_replace/bump/merge/snapshot` 四方法
+（merge 按 `模块名/键` 前缀归并、饱和加法）、`rpc.rs` 加 `CtlCounters` 变体 +
+`rr3_rpc_heartbeat_counters`（脏值逐对静默跳过）——**九方法白名单**（控制四→五）；
+`conn.rs` 心跳分支聚合+write-through（锁内归并锁外写盘，Rejected 之后也聚合），
+`daemon.rs` 启动装载 + boots 自增回写（`RR3_DATA_DIR` 优先 → linux 缺省 `/data/rr3` →
+皆无不持久化只点名）；brain `bus.py` 逐语义镜像（`_heartbeat_params` 独立成法供测试直调，
+manifest 1h 心跳拍等不来真拍）+ `__main__.py` 四计数点，act `relay.rs` 键名唯一落点 +
+`main.rs` 两条驱动路记账。文档：rrd-rpc.md（§1/§2/§3 九方法口径、心跳 counters 可选字段、
+ctl.counters 行）、rrd-cli.md §2.1（RR3_DATA_DIR）、brain/act README 计数键归属表。
+①b/②/②b/③/④ 全绿重跑（e2e_ctl 7 条含新 2 条：聚合与跨重启持久化）；brain Python 本机
+3.9 无 tomllib 起不了（既有现状，CI brain-unittest job 覆盖），py_compile 语法验证过。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

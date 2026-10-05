@@ -35,9 +35,9 @@ use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
 use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry};
 use crate::rpc::{
-    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_manifest_param,
-    rr3_rpc_parse_request, rr3_rpc_status_for_publish_deny, rr3_rpc_status_for_register,
-    rr3_rpc_topic_param, Rr3RpcMethod, Rr3RpcRequest,
+    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_heartbeat_counters,
+    rr3_rpc_manifest_param, rr3_rpc_parse_request, rr3_rpc_status_for_publish_deny,
+    rr3_rpc_status_for_register, rr3_rpc_topic_param, Rr3RpcMethod, Rr3RpcRequest,
 };
 use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log, rr3_log_tail};
@@ -60,6 +60,9 @@ pub struct Rr3ConnCtx {
     /// 重启计划的**唯一去路**（`supervisor.rs`）。conn 只负责"要不要投"，
     /// "起不起得来"由 supervisor 按所有权裁定（E-1）——收尾这一路绝不自己 `Command::spawn`。
     pub sup: Rr3Supervisor,
+    /// 运维计数持久化路径（0.0.4 批B，Q2 裁定）：daemon 启动判定一次，`None` =
+    /// 不持久化（心跳聚合照常进内存账，只是断电不保）。conn 心跳归并后 write-through。
+    pub counters_path: Option<std::path::PathBuf>,
 }
 
 impl Rr3ConnCtx {
@@ -388,6 +391,13 @@ fn rr3_serve_ctl(
             Ok(json!({ "modules": modules }))
         }
         Rr3RpcMethod::CtlLogs => Ok(json!({"lines": rr3_log_tail()})),
+        // 运维计数读面（0.0.4 批B，Q1 裁定）：与 CtlHealth 分开——health 是心跳健康
+        // 语义（watchdog 判活的输入），counters 是业务运维账（"机器慢先看数字"）。
+        // 键 = `模块名/键`（模块自报归并）或 `boots`（rrd 自有）；未持久化时只有内存账。
+        Rr3RpcMethod::CtlCounters => {
+            let counters = rr3_lock(&ctx.shared).rr3_reg_counters_snapshot();
+            Ok(json!({ "counters": counters }))
+        }
         // 恒拒（ADR-0010 裁定 4）：方法名进白名单把协议面定型，语义随 M6；
         // 契约状态码是冻结的 AIRY_E* 子集，用 Permission 而不是自造 NotSupported，
         // 与 rr3-ota-ctl switch 的"恒拒 + 文案点 M6"先例同构。
@@ -561,7 +571,10 @@ fn rr3_publish(
         let rising = rr3_lock(&ctx.shared).rr3_reg_low_power_raise();
         if rising {
             let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
-            let voltage_mv = parsed.get("voltage_mv").and_then(Value::as_u64).unwrap_or(0);
+            let voltage_mv = parsed
+                .get("voltage_mv")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
             let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
                 &crate::daemon::rr3_system_power_frame(percent, voltage_mv),
                 rr_bus::RR3_TASK_RRD,
@@ -614,7 +627,8 @@ fn rr3_serve_request(
         Rr3RpcMethod::CtlStatus
         | Rr3RpcMethod::CtlHealth
         | Rr3RpcMethod::CtlLogs
-        | Rr3RpcMethod::CtlOta => {
+        | Rr3RpcMethod::CtlOta
+        | Rr3RpcMethod::CtlCounters => {
             rr3_reply_err(
                 out,
                 me,
@@ -669,6 +683,29 @@ fn rr3_serve_request(
                                 me.name
                             ));
                         }
+                    }
+                }
+            }
+            // 运维计数聚合（0.0.4 批B，Q1 裁定）：心跳可选 `counters` 字段，模块自报
+            // → 按 `模块名/键` 归并进聚合表。锁内归并、锁外写盘（write-through，Q2；
+            // 无变化不写盘，路径 None 只进内存账）。聚合在 Rejected 之后也做：计数是
+            // 运维账，不跟着判活走。
+            if let Some(counters) = rr3_rpc_heartbeat_counters(&req.params) {
+                let (changed, snap) = {
+                    let mut g = rr3_lock(&ctx.shared);
+                    let changed = g.rr3_reg_counters_merge(&me.name, &counters);
+                    let snap = if changed {
+                        Some(g.rr3_reg_counters_snapshot())
+                    } else {
+                        None
+                    };
+                    (changed, snap)
+                };
+                if let (true, Some(snap), Some(path)) =
+                    (changed, snap, ctx.counters_path.as_deref())
+                {
+                    if let Err(e) = crate::counters::rr3_counters_store(path, &snap) {
+                        rr3_log(&format!("counters 落盘失败（下一拍自然重试）: {e}"));
                     }
                 }
             }

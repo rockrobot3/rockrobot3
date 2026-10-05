@@ -166,6 +166,7 @@ fn rr3_run() -> Result<(), String> {
                         // relay/state 变化即发：RPC 与 intent 两条驱动路共用同一条状态流
                         if let Some(on) = relay_applied {
                             relay_seq += 1;
+                            bus.rr3_counter_bump(relay::rr3_relay_counter_key(on), 1);
                             bus.rr3_publish(
                                 relay::RR3_RELAY_STATE_TOPIC,
                                 relay::rr3_relay_state_body(relay_seq, on),
@@ -196,6 +197,7 @@ fn rr3_run() -> Result<(), String> {
                             match r {
                                 Ok(on) => {
                                     relay_seq += 1;
+                                    bus.rr3_counter_bump(relay::rr3_relay_counter_key(on), 1);
                                     bus.rr3_publish(
                                         relay::RR3_RELAY_STATE_TOPIC,
                                         relay::rr3_relay_state_body(relay_seq, on),

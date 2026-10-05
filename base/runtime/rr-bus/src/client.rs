@@ -17,7 +17,7 @@
 //! 语义：0 = 非代理；代理请求的 trace_id = 调用方 task，见 contracts/README.md
 //! 演进登记）——被调模块用 [`Rr3BusClient::rr3_reply_call`] 顺原路回话。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -107,6 +107,10 @@ struct Rr3Inner {
     pending: Mutex<HashMap<u64, SyncSender<Result<Value, String>>>>,
     /// 非应答帧（Event / Notification / 点名 Request）的去处；`Arc` 使 poll 取 &self
     inbox: Mutex<Receiver<Rr3Frame>>,
+    /// 运维计数表（0.0.4 批B，Q1 裁定）：模块业务线程经 [`Rr3BusClient::rr3_counter_bump`]
+    /// 自愿累加，心跳线程每拍快照——非空则心跳 params 带 `{"counters": {...}}`，
+    /// 空则维持 `{}`（旧 rrd 兼容）。键是模块内部运维词汇，归属表落各模块 README。
+    counters: Mutex<BTreeMap<String, u64>>,
     next_id: AtomicU64,
     stop: AtomicBool,
 }
@@ -171,6 +175,14 @@ impl Rr3Inner {
         self.next_id.fetch_add(1, Ordering::Relaxed) + 1
     }
 
+    /// 计数快照（心跳线程每拍调用）：克隆全表，锁内即放
+    fn rr3_counters_snapshot(&self) -> BTreeMap<String, u64> {
+        self.counters
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
     fn rr3_task(&self) -> u64 {
         self.task.load(Ordering::Relaxed)
     }
@@ -218,6 +230,7 @@ impl Rr3BusClient {
             sock: Mutex::new(writer),
             pending: Mutex::new(HashMap::new()),
             inbox: Mutex::new(rx),
+            counters: Mutex::new(BTreeMap::new()),
             next_id: AtomicU64::new(0),
             stop: AtomicBool::new(false),
         });
@@ -261,7 +274,9 @@ impl Rr3BusClient {
         };
         inner.task.store(task, Ordering::Relaxed);
 
-        // 心跳线程：按 manifest 间隔喂狗；被拒/超时 = 进程退出，交给 supervisor 裁定
+        // 心跳线程：按 manifest 间隔喂狗；被拒/超时 = 进程退出，交给 supervisor 裁定。
+        // 每拍先取计数快照：非空才带 `counters` 字段（可选 append，旧 rrd 忽略未知字段，
+        // 双向兼容；空映射不带，保持与无上报模块同一条线上形状）。
         let hb_inner = inner.clone();
         let hb_ms = identity.heartbeat_ms.max(1);
         std::thread::Builder::new()
@@ -271,11 +286,17 @@ impl Rr3BusClient {
                 if hb_inner.stop.load(Ordering::Relaxed) {
                     return;
                 }
+                let snap = hb_inner.rr3_counters_snapshot();
+                let params = if snap.is_empty() {
+                    json!({})
+                } else {
+                    json!({ "counters": snap })
+                };
                 if hb_inner
                     .rr3_call_inner(
                         hb_inner.rr3_task(),
                         "rr3.heartbeat",
-                        json!({}),
+                        params,
                         Duration::from_secs(5),
                     )
                     .is_err()
@@ -293,6 +314,19 @@ impl Rr3BusClient {
     /// rrd 分配的本模块 task 号
     pub fn rr3_task(&self) -> u64 {
         self.inner.rr3_task()
+    }
+
+    /// 运维计数自报（0.0.4 批B，Q1 裁定）：给键累加 `by`，心跳线程每拍把全表
+    /// 快照塞进 `rr3.heartbeat` 的可选 `counters` 字段。键是模块内部运维词汇
+    /// （不逐键 pin，归属表落各模块 README）；无上报的模块字段缺省，rrd 侧
+    /// 未知字段忽略——旧端 / 新端双向兼容。
+    pub fn rr3_counter_bump(&self, key: &str, by: u64) {
+        let mut t = self
+            .inner
+            .counters
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        *t.entry(key.to_string()).or_insert(0) += by;
     }
 
     /// 总线还活着吗（reader 线程在 = 活；reader 断开 = 死）。轮询型主循环的死亡探针：
@@ -663,6 +697,56 @@ mod tests {
             .expect("发布应到达假 rrd");
         assert_eq!(pubed.1["topic"], "rr3-t/pcm");
         assert_eq!(pubed.1["seq"], 1);
+        drop(client);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 计数自报 → 心跳载荷（0.0.4 批B，Q1 裁定的双端兼容面）：
+    /// 无上报的拍 params 维持 `{}`；bump 后的拍 params 带非空 `counters`，
+    /// 值是累加结果。有界轮询不猜时刻（hb=50ms，2s 上界足够）。
+    #[test]
+    fn heartbeat_carries_counters_only_after_bump() {
+        use std::time::Instant;
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (client, path) = connect_on("cnt", log.clone());
+        // 第一段：等一个不带 counters 的心跳（空表 → params = {}）
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let has_empty = log
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(m, p)| m == "rr3.heartbeat" && p.get("counters").is_none());
+            assert!(
+                has_empty || Instant::now() < deadline,
+                "bump 前应出现过 params={{}} 的心跳"
+            );
+            if has_empty {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // bump 两次同键（累加）+ 一次异键
+        client.rr3_counter_bump("relay_on", 2);
+        client.rr3_counter_bump("relay_on", 1);
+        client.rr3_counter_bump("chat_rounds", 1);
+        // 第二段：等带 counters 的心跳，值逐键核对
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let hit = {
+                let log = log.lock().unwrap();
+                log.iter()
+                    .find(|(m, p)| m == "rr3.heartbeat" && p.get("counters").is_some())
+                    .map(|(_, p)| p["counters"].clone())
+            };
+            if let Some(c) = hit {
+                assert_eq!(c["relay_on"], 3, "同键累加");
+                assert_eq!(c["chat_rounds"], 1);
+                break;
+            }
+            assert!(Instant::now() < deadline, "bump 后应出现带 counters 的心跳");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         drop(client);
         let _ = std::fs::remove_file(&path);
     }

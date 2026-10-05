@@ -228,6 +228,34 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     let shared = Arc::new(Mutex::new(RrdRegistry::new(cfg.restart_base_ms)));
     let topics = Arc::new(topics);
 
+    // 运维计数持久化（0.0.4 批B，Q1/Q2 裁定）：启动加载全表 → `boots` 自增（rrd 自有键，
+    // 不走心跳）→ 立即回写一次。路径判定一处（counters.rs）：env RR3_DATA_DIR 优先，
+    // cfg(linux) 缺省 /data/rr3，皆无 = 不持久化（日志一行点名，不报错——sim 直跑就是
+    // 没有数据分区的，运维账只在内存里也照常用）。
+    let counters_path = crate::counters::rr3_counters_path();
+    match &counters_path {
+        Some(path) => {
+            let (mut table, note) = crate::counters::rr3_counters_load(path);
+            if let Some(n) = note {
+                rr3_log(&format!("counters 启动加载按空表起账: {n}"));
+            }
+            *table
+                .entry(crate::counters::RR3_COUNTERS_BOOTS_KEY.to_string())
+                .or_insert(0) += 1;
+            rr3_lock(&shared).rr3_reg_counters_replace(table.clone());
+            match crate::counters::rr3_counters_store(path, &table) {
+                Ok(()) => rr3_log(&format!(
+                    "counters 持久化已启用: {}（boots 自增已回写）",
+                    path.display()
+                )),
+                Err(e) => rr3_log(&format!("counters 回写失败（心跳拍会自然重试）: {e}")),
+            }
+        }
+        None => rr3_log(
+            "counters 不持久化（无 RR3_DATA_DIR 且非 linux 缺省面）: 计数仅内存账，断电不保",
+        ),
+    }
+
     // `Rr3Supervisor` 是 `Sender` 的一层薄壳（可 clone）：一份进 conn 收尾、一份进 watchdog，
     // 两条路交出的重启计划在这里汇成一条队列。
     let (sup_tx, sup_rx) = mpsc::channel::<Rr3SuperMsg>();
@@ -329,6 +357,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             t0,
             pre_register_timeout_ms: cfg.pre_register_timeout_ms,
             sup: sup.clone(),
+            counters_path: counters_path.clone(),
         };
         thread::spawn(move || {
             if let Err(e) = rr3_conn_serve(stream, ctx) {

@@ -145,8 +145,10 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
     try:
         user_text = asr.transcribe(pcm)
     except RuntimeError as e:
+        bus.rr3_counter_bump("asr_fail")
         print(f"轮次 {trace_seq}: ASR 失败，弃轮（{e}）", flush=True)
         return trace_seq
+    bus.rr3_counter_bump("asr_ok")
     if not user_text.strip():
         print(f"轮次 {trace_seq}: 识别为空文本，弃轮", flush=True)
         return trace_seq
@@ -154,6 +156,7 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
     try:
         reply_text = llm.complete(user_text)
     except RuntimeError as e:
+        bus.rr3_counter_bump("llm_fail")
         print(f"轮次 {trace_seq}: LLM 失败，弃轮（user={user_text!r}，{e}）", flush=True)
         return trace_seq
 
@@ -161,6 +164,7 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
     try:
         reply_pcm = tts.synthesize(reply_text)
     except RuntimeError as e:
+        bus.rr3_counter_bump("tts_fail")
         print(f"轮次 {trace_seq}: TTS 失败，弃轮（{e}）", flush=True)
         return trace_seq
     if len(reply_pcm) % 2:
@@ -187,6 +191,8 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
         "actions": actions,
     })
     dialog.rr3_record(Rr3DialogTurn(user_text=user_text, reply_text=reply_text, trace_id=trace_seq))
+    # 完成一轮才记账（计数点 = rr3_record 成功，方案 §4 归属表）
+    bus.rr3_counter_bump("chat_rounds")
     print(
         f"对话轮完成: trace={trace_seq} user={user_text!r} reply={reply_text!r}"
         f" tts_pcm_ms={tts_ms}{played} actions={len(actions)}",
