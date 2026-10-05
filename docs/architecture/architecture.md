@@ -508,14 +508,16 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
 各模块其余主题随里程碑逐条 append，不预先占位。登记之前，任何 manifest 的
 `events.publishes`/`rpc.exposes` 引用未注册主题都会被入口 ② 拒绝。
 
-> **`rr3-act` 的对账**：注册表里 `rr3-act` 的**已登记面是舵机与电机**
+> **`rr3-act` 的对账**：注册表里 `rr3-act` 的**已登记面是舵机、电机与继电器**
 > （`rr3-act/servo/command` request、`rr3-act/servo/state` stream、`rr3-act/motor/reflex`
-> notification、`rr3-act/led/effect` request，owner 角色写作"执行：舵机/电机、反射环宿主进程"）。
+> notification、`rr3-act/led/effect` request、`rr3-act/relay/set` request、
+> `rr3-act/relay/state` event，owner 角色写作"执行：舵机/电机、反射环宿主进程"）。
 > ADR-0002 §1 把 rr3-act 的职责写作"继电器、未来运动控制（gpiod、PWM）"——继电器那一半已于
 > 2026-10-04 按 0.0.2 方案 Q1 裁定立格（`act.relay`，立格判据真实依赖者 = M5 验收"语音控继电器"），
 > `rr3-act/relay/set`（request）已同批 **APPEND** 进 `contracts/topics.toml`（形状 pin 同批更新）；
-> 本节草图与 §7.2 数据流图里的 `relay/state` 仍是**示意串**（未登记，入口 ② 与入口 ③ 都会拒），
-> 要落地必须先按"契约只增不改"**APPEND** 进注册表，再在 manifest 里引用；
+> 2026-10-05 又按 0.0.3 方案 T3 补裁定 **APPEND** `rr3-act/relay/state`（event，L2）——意图执行
+> 效果的可观测面，RPC 与 intent actions 两条驱动路共用同一条状态流，本节草图与 §7.2 数据流图
+> 里的 `relay/state` 已是在册主题（不再走"先 append 再引用"的待办）。
 > ADR-0002 的决策正文不改（继电器本身没有被本批裁定否定），在册与否只查注册表。
 
 ---
@@ -568,8 +570,9 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 ### 7.2 对话主闭环（legacy main.c 对话策略的分布式版）
 
 > **草图（示意）**：下图只表达数据流向。其中的主题串**以 `contracts/topics.toml` 为准**——
-> `rr3-act/relay/state`、`rr3-brain/dialog/response`、`rr3-connect/wifi/state`、
-> `rr3-power/battery/low` 等**均未登记**（对账见 §6.3 的 `rr3-act` 注记），使用前须先 append 契约。
+> `rr3-act/relay/state`、`rr3-power/battery/low` 已登记（前者 0.0.3 方案 T3 补裁定 append），
+> `rr3-brain/dialog/response`、`rr3-connect/wifi/state` 仍**未登记**（对账见 §6.3 的
+> `rr3-act` 注记），使用前须先 append 契约。
 
 ```
                     ┌─────────────── rrd 事件总线 (UDS) ───────────────┐

@@ -1,15 +1,22 @@
 //! 继电器通断（`rr3-act/relay/set`，0.0.2 方案 Q1 裁定立格 `act.relay`）。
 //!
-//! 最小面：`{"on": bool}` 写一路 `Rr3GpioOut`。`relay/state` 摘要主题未登记
-//! （守"不预先占位"），使用前须先按"契约只增不改" APPEND 再引用。
+//! 最小面：`{"on": bool}` 写一路 `Rr3GpioOut`；通断状态摘要 `rr3-act/relay/state`
+//! 变化即发（0.0.3 T3 补裁定 append，意图执行效果的可观测面——RPC 与 intent
+//! actions 两条驱动路共用同一条状态流）。
 
 use rr_hal::{rr3_block_on, Rr3GpioOut};
 use serde_json::{json, Value};
 
 pub const RR3_RELAY_SET_TOPIC: &str = "rr3-act/relay/set";
 
+/// 通断状态摘要主题（0.0.3 T3 append，contracts/topics.toml 25 条之一）
+pub const RR3_RELAY_STATE_TOPIC: &str = "rr3-act/relay/state";
+
 /// 启动自述：本子模块的总线面一行说明
-pub const SURFACE: &[&str] = &["relay: rpc rr3-act/relay/set (request)"];
+pub const SURFACE: &[&str] = &[
+    "relay: rpc rr3-act/relay/set (request)",
+    "relay: pub rr3-act/relay/state (event, 变化即发)",
+];
 
 /// relay/set 参数裁决：只认真布尔——`{"on": 1}`、`{"on": "true"}` 都拒，
 /// 通断没有"近似真"。
@@ -24,6 +31,12 @@ pub fn rr3_relay_parse_args(args: &Value) -> Result<bool, String> {
 /// relay/set 应答体：回显生效后的通断
 pub fn rr3_relay_result(on: bool) -> Value {
     json!({ "on": on })
+}
+
+/// relay/state 摘要体：变化即发，seq 是本状态流自己的计数
+/// （contracts/events/act-relay_state.schema.json 的形状事实源）
+pub fn rr3_relay_state_body(seq: u64, on: bool) -> Value {
+    json!({ "seq": seq, "on": on })
 }
 
 /// 应用通断并落电平。HAL 写失败按业务性失败折 error（同 interact 的后端写失败口径）
@@ -62,5 +75,18 @@ mod tests {
         assert_eq!(rr3_relay_result(true)["on"], true);
         assert!(!rr3_relay_apply(&gpio, false).unwrap());
         assert!(!gpio.rr3_sim_gpio_level(), "断开落电平");
+    }
+
+    /// state 摘要体逐字对齐契约 schema（seq / on 两键，additionalProperties false）
+    #[test]
+    fn state_body_matches_contract_shape() {
+        let v = rr3_relay_state_body(3, true);
+        assert_eq!(v["seq"], 3);
+        assert_eq!(v["on"], true);
+        assert_eq!(
+            v.as_object().map(|m| m.len()),
+            Some(2),
+            "schema 钉死两键，多键即漂移: {v}"
+        );
     }
 }

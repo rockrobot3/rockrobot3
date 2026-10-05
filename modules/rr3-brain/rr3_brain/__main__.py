@@ -38,6 +38,7 @@ from rr3_brain.cloud.asr import Rr3AsrClient
 from rr3_brain.cloud.llm import Rr3LlmClient
 from rr3_brain.cloud.tts import Rr3TtsClient
 from rr3_brain.dialog import Rr3Dialog, Rr3DialogTurn
+from rr3_brain.intent import rr3_extract_actions
 
 MANIFEST_NAME = "rr3-brain"
 PUBLISHES = ["rr3-brain/intent/result"]
@@ -175,16 +176,20 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
     except RuntimeError as e:
         print(f"轮次 {trace_seq}: interact 播放点名失败（{e}）", flush=True)
 
+    # 意图→动作映射在 brain（策略层唯一归属，0.0.3 Q1 裁定）：结构化 actions
+    # 随 intent/result 广播，执行器按 exposes 归属门各自认领（brain 不单播不等待）
+    actions = rr3_extract_actions(user_text)
     bus.rr3_publish(TOPIC_INTENT, {
         "trace": trace_seq,
         "user_text": user_text,
         "reply_text": reply_text,
         "tts_ms": tts_ms,
+        "actions": actions,
     })
     dialog.rr3_record(Rr3DialogTurn(user_text=user_text, reply_text=reply_text, trace_id=trace_seq))
     print(
         f"对话轮完成: trace={trace_seq} user={user_text!r} reply={reply_text!r}"
-        f" tts_pcm_ms={tts_ms}{played}",
+        f" tts_pcm_ms={tts_ms}{played} actions={len(actions)}",
         flush=True,
     )
     return trace_seq

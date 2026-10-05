@@ -251,7 +251,8 @@ watchdog 判死但不广播 → 第一/三条红；广播里的相位写错 → 
 不进 contracts/topics.toml"不受影响；落点偏离的文字同步归 Task 13；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
-硬 pin：7 owner / 24 topic / kind 8-9-3-4 / 24 条三元组；`every_module_manifest_passes_contract`
+硬 pin：7 owner / 25 topic / kind 8-10-3-4 / 25 条三元组——0.0.3 批C 随 `rr3-act/relay/state`
+append 同步；`every_module_manifest_passes_contract`
 钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
 每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
 ②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
@@ -575,6 +576,29 @@ legacy 盘点三交付，WBS T1–T5）；[§5](#5-文档纪律) 增补 legacy �
 退役触发条件与退役批四件收尾（⑤ 门排除撤除、architecture §8 标注、status 已知偏差注销、
 本表归零）在册。同批：§5 挂真链（替换批A 的占位句）、architecture §8 尾注挂链、
 docs/README.md 两处表挂导航。①b / ② / ②b / ③ / ④ 全不变；⑤ 因新增文档与互链重跑全绿。
+2026-10-05 0.0.3 批C（D3 M5 最后一跳，T3 补裁定随方案 §2 落档）：
+**契约 append 三件**（`contracts/topics.toml` 第 25 条 `rr3-act/relay/state` event L2——
+0.0.2 Q1 "留真实需要时再 append" 的真实需要此刻成立：模块 stdout 接 `Stdio::null()`，无状态
+主题则意图执行效果在 e2e 层不可观测；`events/brain-intent-result.schema.json`；
+`events/act-relay_state.schema.json`），形状 pin 三处同批（registry `tests/contract.rs`
+25 条三元组 / kind 8-10-3-4、registry `src/topics.rs` 25、rrd `src/topics_load.rs` 25+28）；
+**brain 侧**：新增 `rr3_brain/intent.py`（user_text → actions[]，精确词表 + 两字符否定护栏，
+3.9 兼容语法）+ `tests/test_intent.py` 6 条，`__main__.py` 发布载荷并 `actions`；本机
+python 3.9.6 实测 23 条中 22 过（`test_bus` 一条 import error：tomllib 需 py≥3.11，
+D9 已登记门槛非本批引入），CI brain-unittest 钉 3.12 跑全量 23 条；**act 侧**：新增
+`src/intent.rs`（两道归属门：exposes 归属 + 意图面开放，拒执行折日志不断链）5 条单测、
+`relay.rs` 增 state 主题常量与摘要体（形状对齐 schema）1 条单测、`main.rs` RPC 与 intent
+两条驱动路接线共用 `relay_seq` 流序、`module.toml` publishes 增 `rr3-act/relay/state`——
+模块单测 24 条全绿（增 6）；**e2e**：`rrd/tests/e2e_act.rs` 扩 RPC 路状态回读（先读 state
+后读应答，`rr3_read_call_reply` 不回存）+ brain 在册身份发 intent 事件 → relay 落电平 →
+`relay/state` 回读（seq 跨两路连贯）+ 越权动作有界窗口否定断言；同批文档：方案三处回改
+（§1.2 D3 行、§4 契约句"零改动"→"一条 append"、§6 DoD）、architecture §6.3 对账注记与
+§7.2 草图注订正（relay/state 已在册）、act/brain README 目录树与总线面表同步。
+**本批门禁增量钉子**：registry lib 单测与 rrd lib 单测各含一份与 `tests/contract.rs`
+独立的形状 pin（`include_str!` 直读契约），append 主题必须三处同批改——批C 首跑红两条
+（24≠25）即为该钉子咬合，同批结清；批B 遗留断链一处（legacy-digest.md 的
+vad_start schema 链少一级 `../`）以独立 docs fix 提交先于本批落库。①a–⑤ 全绿重跑；
+brain-unittest 与 lint 归 CI 侧。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

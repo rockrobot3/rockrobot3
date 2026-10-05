@@ -10,12 +10,14 @@ modules/rr3-brain/
 ├── module.toml          ← manifest（type = "brain", lang = "python"）
 ├── config.toml          ← 运行参数；密钥不落盘
 ├── pyproject.toml       ← 零第三方依赖（stdlib-only）；console script `rr3-brain` → rr3_brain.__main__:main
-├── tests/               ← stdlib unittest（test_bus / test_cloud / test_dialog）
+├── tests/               ← stdlib unittest（test_bus / test_cloud / test_dialog / test_intent）
 └── rr3_brain/
     ├── __init__.py      ← 包级 API：rr3_brain_submit_text()
     ├── __main__.py      ← python -m rr3_brain 入口：连总线 → 事件循环 → 整轮对话
     ├── bus.py           ← 模块侧同步总线客户端（128B 头逐语义镜像 rr-bus client.rs，ADR-0014 裁定 1）
     ├── dialog.py        ← Rr3Dialog / Rr3DialogTurn 对话状态机（onset 起轮 / offset+时长双判停）
+    ├── intent.py        ← 意图规则面（0.0.3 T3：user_text → actions[]，精确词表 + 否定护栏，
+    │                       形状见 contracts/events/brain-intent-result.schema.json）
     └── cloud/
         ├── __init__.py  ← 密钥只从 SILICONFLOW_API_KEY 读；RR3_BRAIN_CLOUD 选 real / mock
         ├── asr.py       ← Rr3AsrClient（SiliconFlow /v1/audio/transcriptions）
