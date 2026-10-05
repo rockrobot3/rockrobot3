@@ -12,6 +12,12 @@ publish = false
 name = "rr3-sense"
 path = "src/main.rs"
 
+[features]
+# 板上原生构建开关（0.0.6 批F1，R13）：透传 rr-hal 的 ALSA 后端。宿主 musl 交叉**不带**
+# （musl 全静态与 alsa 结构性互斥）→ 板上默认 sim；板上 `--features alsa` 构建带真后端
+# （须先装 libasound2-dev + pkg-config）。非 linux 平台开此 feature 是 no-op（rr-hal 依赖门）。
+alsa = ["rr-hal/alsa"]
+
 [dependencies]
 # path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
 # 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承

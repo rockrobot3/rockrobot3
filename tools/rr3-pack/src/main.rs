@@ -2,7 +2,9 @@
 //!
 //! 输入两份真值，装配各自薄装（保底轨 post-build.sh 读同一注入格式，两轨不互抄装配）：
 //! - `--payload` 注入产物（两轨同源约定，与 buildroot post-build.sh 同一口径）：
-//!   `rrd`、`rr3-ctl`、`rr3-modules/<name>/{bin,manifest.toml}`；
+//!   `rrd`、`rr3-ctl`；rust 模块 `rr3-modules/<name>/{bin,manifest.toml}`；
+//!   python 模块 `rr3-modules/<name>/{pkg/,manifest.toml}`（`pkg/` = 包树，
+//!   如 `rr3_brain/`；entry 装机产物是打包器生成的 shim，见下）；
 //! - `--repo` 仓根：`profiles/distro.toml`、`contracts/{topics,slots}.toml`、
 //!   `modules/<name>/config.toml`（config 是源真值，不是构建产物，不进注入格式）。
 //!
@@ -15,6 +17,13 @@
 //! 线上注册门禁（rrd conn.rs）要求 manifest.entry 绝对路径——模块开机读的就是装机里
 //! 这份 manifest 原文上报，相对值必被 `AIRY_EINVAL` 拒；装配单磁盘装载那侧绝对/相对
 //! 皆可，改写成绝对两头都过。错行不改、少行不改：除 entry 引号内一个值外零差异。
+//!
+//! **python 模块的 entry 装机**（`lang = "python"`，批F1）：产物不是 ELF 而是 shim 脚本，
+//! 且 shim 里的 `PYTHONPATH` 必须是**装机绝对路径**（只有打包器知道 `RR3_INSTALL_ROOT`），
+//! 故 shim 由打包器生成而非注入（`bin` 那个位置对 python 模块换成 `pkg/` 包树）。
+//! shim 形状与模拟演练侧 `rr3_brain_shim_script` 同构：
+//! `#!/bin/sh\nPYTHONPATH=<装机包树> exec python3 -m <包名>\n`（包名 = 目录名连字符转下划线）。
+//! 运行期语言不分支（rrd 只看 entry 可执行），`lang` 只在本打包器与演练侧做产物路径推导。
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -45,7 +54,7 @@ pub struct Rr3PackConfig {
 }
 
 fn usage() -> String {
-    "用法: rr3-pack --payload <dir> --repo <dir> --out <file.deb> [--arch <arch>] [--stage-only]\n说明: --payload 是两轨同源的注入产物目录（rrd、rr3-ctl、rr3-modules/<name>/{bin,manifest.toml}）；--repo 是仓根（读 profiles/distro.toml、contracts/{topics,slots}.toml、modules/<name>/config.toml）。--arch 缺省 arm64（出厂目标），容器冒烟传本机 dpkg 架构。--stage-only 只落 staging 树不调 dpkg-deb（macOS 本机无 dpkg，装配单测/演练用）。".to_string()
+    "用法: rr3-pack --payload <dir> --repo <dir> --out <file.deb> [--arch <arch>] [--stage-only]\n说明: --payload 是两轨同源的注入产物目录（rrd、rr3-ctl；rust 模块 rr3-modules/<name>/{bin,manifest.toml}，python 模块 rr3-modules/<name>/{pkg/,manifest.toml}）；--repo 是仓根（读 profiles/distro.toml、contracts/{topics,slots}.toml、modules/<name>/config.toml）。--arch 缺省 arm64（出厂目标），容器冒烟传本机 dpkg 架构。--stage-only 只落 staging 树不调 dpkg-deb（macOS 本机无 dpkg，装配单测/演练用）。".to_string()
 }
 
 fn rr3_need(args: &[String], i: usize, flag: &str) -> Result<String, String> {
@@ -114,6 +123,42 @@ fn rr3_entry_is_installable(entry: &str, module: &str) -> Result<(), String> {
         if !matches!(c, Component::Normal(_)) {
             return Err(format!(
                 "模块 {module} 的 entry {entry} 含 . 或 .. 段（装机路径逃逸，打包拒绝）"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// python 模块的 entry 装机产物：shim 脚本（与模拟演练侧 `rr3_brain_shim_script` 同构）。
+/// `pkg_dir` 是**装机绝对**包树目录（其下含 `<py_module>/` 包），
+/// 包名 = 目录名连字符转下划线（`rr3-brain` → `rr3_brain`）。
+fn rr3_python_shim_text(pkg_dir: &Path, py_module: &str) -> String {
+    format!(
+        "#!/bin/sh\nPYTHONPATH={} exec python3 -m {py_module}\n",
+        pkg_dir.display()
+    )
+}
+
+/// 递归拷贝目录树（python pkg 落位用）。只处理普通文件与目录；符号链接/特殊文件
+/// 一律点名拒绝——注入产物是仓内包的纯副本，出现链接是装配契约事故，不静默跟随。
+fn rr3_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("建目录 {} 失败: {e}", dst.display()))?;
+    let entries = fs::read_dir(src).map_err(|e| format!("读目录 {} 失败: {e}", src.display()))?;
+    for e in entries {
+        let e = e.map_err(|err| format!("读目录 {} 失败: {err}", src.display()))?;
+        let from = e.path();
+        let to = dst.join(e.file_name());
+        let ft = e
+            .file_type()
+            .map_err(|err| format!("取 {} 类型失败: {err}", from.display()))?;
+        if ft.is_dir() {
+            rr3_copy_dir(&from, &to)?;
+        } else if ft.is_file() {
+            fs::copy(&from, &to).map_err(|err| format!("复制 {} 失败: {err}", from.display()))?;
+        } else {
+            return Err(format!(
+                "python pkg 树含非普通文件（{}）——注入产物须是仓内包目录的纯副本，打包拒绝",
+                from.display()
             ));
         }
     }
@@ -295,18 +340,15 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         .map_err(|e| format!("复制 topics.toml 失败: {e}"))?;
     fs::copy(&slots_src, root.join("contracts/slots.toml"))
         .map_err(|e| format!("复制 slots.toml 失败: {e}"))?;
-    // ---- 逐模块：manifest（entry 改写）+ bin（按 entry 落位）+ config（仓内源真值）----
+    // ---- 逐模块：manifest（entry 改写）+ 产物（rust bin / python pkg+shim）+ config（仓内源真值）----
     for name in &names {
         let mod_src = cfg.payload.join("rr3-modules").join(name);
         let manifest_src = mod_src.join("manifest.toml");
-        let bin_src = mod_src.join("bin");
-        for p in [&manifest_src, &bin_src] {
-            if !p.is_file() {
-                return Err(format!(
-                    "模块 {name} 注入产物不完整: {} 缺席（约定 rr3-modules/<name>/{{bin,manifest.toml}}）",
-                    p.display()
-                ));
-            }
+        if !manifest_src.is_file() {
+            return Err(format!(
+                "模块 {name} 注入产物不完整: {} 缺席（约定 rr3-modules/<name>/manifest.toml）",
+                manifest_src.display()
+            ));
         }
         let text = fs::read_to_string(&manifest_src)
             .map_err(|e| format!("读 {} 失败: {e}", manifest_src.display()))?;
@@ -337,7 +379,38 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
         }
-        fs::copy(&bin_src, &entry_path).map_err(|e| format!("复制 {name} bin 失败: {e}"))?;
+        // 产物按 lang 分型（批F1）：rust = 注入 bin 按 entry 落位；python = pkg 树落位 +
+        // 打包器生成 shim（PYTHONPATH 须装机绝对，只有打包器知道 RR3_INSTALL_ROOT）。
+        if facts.lang == "python" {
+            let pkg_src = mod_src.join("pkg");
+            if !pkg_src.is_dir() {
+                return Err(format!(
+                    "模块 {name}（lang=python）注入产物不完整: {} 缺席（python 模块约定 rr3-modules/<name>/{{pkg/,manifest.toml}}）",
+                    pkg_src.display()
+                ));
+            }
+            let pkg_dst = staged.join("pkg");
+            rr3_copy_dir(&pkg_src, &pkg_dst).map_err(|e| format!("复制 {name} pkg 树失败: {e}"))?;
+            let py_module = name.replace('-', "_");
+            // shim 里的 PYTHONPATH 必须是**装机绝对**（不是 staging 临时路径——staging 在
+            // 宿主出、板上 dpkg -i 才落 /usr/lib/rockrobot3，写 staging 路径装完即指向虚处）
+            let pkg_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/pkg");
+            fs::write(
+                &entry_path,
+                rr3_python_shim_text(Path::new(&pkg_installed), &py_module),
+            )
+            .map_err(|e| format!("写 {name} shim 失败: {e}"))?;
+            rr3_make_executable(&entry_path);
+        } else {
+            let bin_src = mod_src.join("bin");
+            if !bin_src.is_file() {
+                return Err(format!(
+                    "模块 {name} 注入产物不完整: {} 缺席（rust 模块约定 rr3-modules/<name>/{{bin,manifest.toml}}）",
+                    bin_src.display()
+                ));
+            }
+            fs::copy(&bin_src, &entry_path).map_err(|e| format!("复制 {name} bin 失败: {e}"))?;
+        }
         let config_src = cfg.repo.join("modules").join(name).join("config.toml");
         if !config_src.is_file() {
             return Err(format!(
@@ -474,6 +547,23 @@ mod tests {
             .unwrap();
             fs::write(repo.join(format!("modules/{m}/config.toml")), "[x]\n").unwrap();
         }
+        // python 模块（批F1）：pkg 树 + manifest（lang=python），无 bin——
+        // entry 装机产物是打包器生成的 shim（PYTHONPATH 须装机绝对）
+        fs::create_dir_all(payload.join("rr3-modules/rr3-brain/pkg/rr3_brain")).unwrap();
+        fs::create_dir_all(repo.join("modules/rr3-brain")).unwrap();
+        fs::write(
+            payload.join("rr3-modules/rr3-brain/manifest.toml"),
+            manifest
+                .replace("rr3-act", "rr3-brain")
+                .replace("lang = \"rust\"", "lang = \"python\""),
+        )
+        .unwrap();
+        fs::write(
+            payload.join("rr3-modules/rr3-brain/pkg/rr3_brain/__init__.py"),
+            "__version__ = \"0.0.1\"\n",
+        )
+        .unwrap();
+        fs::write(repo.join("modules/rr3-brain/config.toml"), "[rr3-brain]\n").unwrap();
         fs::write(repo.join("profiles/distro.toml"), "# distro 装配单\n").unwrap();
         fs::write(repo.join("contracts/topics.toml"), "# topics\n").unwrap();
         fs::write(repo.join("contracts/slots.toml"), "# slots\n").unwrap();
@@ -565,10 +655,11 @@ mod tests {
         let (cfg, _) = cfg_of(&payload, &repo);
         let e = rr3_stage(&cfg).unwrap_err();
         assert!(e.contains("rr3-act") && e.contains("bin"), "{e}");
-        // 无模块
+        // 无模块（三个注入目录全清，含 python 的 rr3-brain）
         let (payload, repo) = fixture();
-        fs::remove_dir_all(payload.join("rr3-modules/rr3-act")).unwrap();
-        fs::remove_dir_all(payload.join("rr3-modules/rr3-connect")).unwrap();
+        for m in ["rr3-act", "rr3-connect", "rr3-brain"] {
+            fs::remove_dir_all(payload.join(format!("rr3-modules/{m}"))).unwrap();
+        }
         let (cfg, _) = cfg_of(&payload, &repo);
         let e = rr3_stage(&cfg).unwrap_err();
         assert!(e.contains("无模块"), "{e}");
@@ -626,6 +717,55 @@ mod tests {
         let (cfg, _) = cfg_of(&payload, &repo);
         let e = rr3_stage(&cfg).unwrap_err();
         assert!(e.contains("rr3-actx") && e.contains("不一致"), "{e}");
+    }
+
+    /// python 模块（批F1）：entry 装机产物 = 打包器生成的 shim（PYTHONPATH 装机绝对），
+    /// pkg 树落位、entry 改写为装机绝对路径、config 随包、shim 可执行。
+    #[test]
+    fn python_module_stages_generated_shim_and_pkg_tree() {
+        let (payload, repo) = fixture();
+        let (cfg, _) = cfg_of(&payload, &repo);
+        let stage = rr3_stage(&cfg).unwrap();
+        let dir = stage.join("usr/lib/rockrobot3/modules/rr3-brain");
+        // pkg 树落位（逐文件，非空目录即过）
+        assert_eq!(
+            fs::read_to_string(dir.join("pkg/rr3_brain/__init__.py")).unwrap(),
+            "__version__ = \"0.0.1\"\n"
+        );
+        // entry 改写为装机绝对路径，lang 事实保留
+        let facts =
+            rr3_manifest_facts_from_text(&fs::read_to_string(dir.join("module.toml")).unwrap())
+                .unwrap();
+        assert_eq!(facts.lang, "python");
+        assert_eq!(
+            facts.entry,
+            "/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain"
+        );
+        // shim 形状：PYTHONPATH 装机绝对 + python3 -m rr3_brain（目录名连字符转下划线）
+        assert_eq!(
+            fs::read_to_string(dir.join("rr3-brain")).unwrap(),
+            "#!/bin/sh\nPYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg exec python3 -m rr3_brain\n"
+        );
+        assert!(dir.join("config.toml").is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.join("rr3-brain"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_ne!(mode & 0o111, 0, "shim 必须可执行（rrd 直接 exec entry）");
+        }
+    }
+
+    /// python 模块缺 pkg 树 → 点名拒绝（不是含糊的 "bin 缺席"）
+    #[test]
+    fn python_module_without_pkg_is_rejected_by_name() {
+        let (payload, repo) = fixture();
+        fs::remove_dir_all(payload.join("rr3-modules/rr3-brain/pkg")).unwrap();
+        let (cfg, _) = cfg_of(&payload, &repo);
+        let e = rr3_stage(&cfg).unwrap_err();
+        assert!(e.contains("rr3-brain") && e.contains("pkg"), "{e}");
     }
 
     #[test]
