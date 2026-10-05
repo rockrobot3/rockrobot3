@@ -81,8 +81,13 @@ impl Rr3Led {
 
     /// 应用效果：命令交 worker，返回 (生效效果, 前一效果)。
     /// worker 已死（send 失败）按业务性失败折 error——进程本身没坏。
-    pub fn rr3_led_apply(&mut self, e: Rr3LedEffect) -> Result<(Rr3LedEffect, Rr3LedEffect), String> {
-        self.tx.send(e).map_err(|_| "灯效 worker 已退出".to_string())?;
+    pub fn rr3_led_apply(
+        &mut self,
+        e: Rr3LedEffect,
+    ) -> Result<(Rr3LedEffect, Rr3LedEffect), String> {
+        self.tx
+            .send(e)
+            .map_err(|_| "灯效 worker 已退出".to_string())?;
         let previous = self.current;
         self.current = e;
         Ok((e, previous))
@@ -126,7 +131,11 @@ mod tests {
 
     #[test]
     fn effect_parse_covers_whitelist_and_rejects_garbage() {
-        for (s, want) in [("on", Rr3LedEffect::On), ("off", Rr3LedEffect::Off), ("blink", Rr3LedEffect::Blink)] {
+        for (s, want) in [
+            ("on", Rr3LedEffect::On),
+            ("off", Rr3LedEffect::Off),
+            ("blink", Rr3LedEffect::Blink),
+        ] {
             assert_eq!(Rr3LedEffect::rr3_led_effect_parse(s), Some(want));
             assert_eq!(want.rr3_led_effect_as_str(), s);
         }
@@ -149,10 +158,7 @@ mod tests {
     /// 首次 apply 的 previous 断言钉住）
     #[test]
     fn apply_tracks_current_and_previous() {
-        let mut led = Rr3Led::rr3_led_new(
-            Arc::new(Rr3SimGpioOut::rr3_sim_gpio_new(false)),
-            500,
-        );
+        let mut led = Rr3Led::rr3_led_new(Arc::new(Rr3SimGpioOut::rr3_sim_gpio_new(false)), 500);
         let (applied, previous) = led.rr3_led_apply(Rr3LedEffect::On).unwrap();
         assert_eq!((applied, previous), (Rr3LedEffect::On, Rr3LedEffect::Off));
         let (applied, previous) = led.rr3_led_apply(Rr3LedEffect::Blink).unwrap();
@@ -180,7 +186,10 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(seen.0 && seen.1, "600ms 内 blink 必须翻出两种电平: {seen:?}");
+        assert!(
+            seen.0 && seen.1,
+            "600ms 内 blink 必须翻出两种电平: {seen:?}"
+        );
 
         led.rr3_led_apply(Rr3LedEffect::Off).unwrap();
         std::thread::sleep(Duration::from_millis(120));
@@ -197,12 +206,18 @@ mod tests {
         let mut led = Rr3Led::rr3_led_new(gpio.clone(), 500);
         led.rr3_led_apply(Rr3LedEffect::On).unwrap();
         assert!(
-            rr3_wait_until(|| rr3_block_on(gpio.level()).unwrap(), Duration::from_millis(500)),
+            rr3_wait_until(
+                || rr3_block_on(gpio.level()).unwrap(),
+                Duration::from_millis(500)
+            ),
             "on 必须落亮"
         );
         led.rr3_led_apply(Rr3LedEffect::Off).unwrap();
         assert!(
-            rr3_wait_until(|| !rr3_block_on(gpio.level()).unwrap(), Duration::from_millis(500)),
+            rr3_wait_until(
+                || !rr3_block_on(gpio.level()).unwrap(),
+                Duration::from_millis(500)
+            ),
             "off 必须落灭"
         );
     }

@@ -25,11 +25,12 @@ const EXPOSED: [&str; 3] = [
 /// 处理 intent 载荷的 `actions` 字段：逐条两道门 + relay 执行。
 /// 返回每条的处置结果（Ok = 生效后的通断；Err = 拒因），由调用方逐条落日志——
 /// 纯函数不碰总线，sim GPIO 可直接断言落电平。
-pub fn rr3_intent_actions_handle(actions: &Value, gpio: &dyn rr_hal::Rr3GpioOut) -> Vec<Result<bool, String>> {
+pub fn rr3_intent_actions_handle(
+    actions: &Value,
+    gpio: &dyn rr_hal::Rr3GpioOut,
+) -> Vec<Result<bool, String>> {
     let Some(list) = actions.as_array() else {
-        return vec![Err(format!(
-            "actions 必须是数组，收到 {actions}"
-        ))];
+        return vec![Err(format!("actions 必须是数组，收到 {actions}"))];
     };
     list.iter()
         .map(|item| rr3_intent_action_handle(item, gpio))
@@ -116,10 +117,7 @@ mod tests {
         // 元素缺 topic / 缺 args
         let out = rr3_intent_actions_handle(&json!([{"args": {}}]), &gpio);
         assert!(out[0].as_ref().unwrap_err().contains("topic"));
-        let out = rr3_intent_actions_handle(
-            &json!([{"topic": "rr3-act/relay/set"}]),
-            &gpio,
-        );
+        let out = rr3_intent_actions_handle(&json!([{"topic": "rr3-act/relay/set"}]), &gpio);
         assert!(out[0].as_ref().unwrap_err().contains("args"));
         // 参数裁决照常把门（非真布尔）
         let out = rr3_intent_actions_handle(

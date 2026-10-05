@@ -180,12 +180,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("extlinux.conf");
-        std::fs::write(&path, "label rockrobot3\n    append root=LABEL=rr_a rootwait\n").unwrap();
+        std::fs::write(
+            &path,
+            "label rockrobot3\n    append root=LABEL=rr_a rootwait\n",
+        )
+        .unwrap();
 
         let msg = rr3_cmd_switch(Rr3Slot::SlotB, &path).unwrap();
         assert!(msg.contains("rr_b"), "成功文案须点名新槽: {msg}");
         assert!(
-            std::fs::read_to_string(&path).unwrap().contains("root=LABEL=rr_b"),
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("root=LABEL=rr_b"),
             "文件必须真的落了新标签"
         );
 
@@ -194,7 +200,9 @@ mod tests {
         assert_eq!(err.1, ExitCode::from(1), "业务拒退出码是 1");
         assert!(err.0.contains("拒绝切换"), "拒因须点名: {}", err.0);
         assert!(
-            std::fs::read_to_string(&path).unwrap().contains("root=LABEL=rr_b"),
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("root=LABEL=rr_b"),
             "被拒的请求不得改动文件"
         );
 
@@ -207,8 +215,16 @@ mod tests {
         let args: Vec<String> = vec!["switch".into(), "rr_b".into()];
         assert!(rr3_bootconf_arg(&args).is_err(), "缺 --bootconf 必须拒");
         let args: Vec<String> = vec!["switch".into(), "rr_b".into(), "--bootconf".into()];
-        assert!(rr3_bootconf_arg(&args).is_err(), "--bootconf 缺路径值必须拒");
-        let args: Vec<String> = vec!["switch".into(), "rr_b".into(), "--bootconf".into(), "/tmp/x.conf".into()];
+        assert!(
+            rr3_bootconf_arg(&args).is_err(),
+            "--bootconf 缺路径值必须拒"
+        );
+        let args: Vec<String> = vec![
+            "switch".into(),
+            "rr_b".into(),
+            "--bootconf".into(),
+            "/tmp/x.conf".into(),
+        ];
         assert_eq!(
             rr3_bootconf_arg(&args).unwrap(),
             PathBuf::from("/tmp/x.conf")

@@ -68,7 +68,10 @@ mod tests {
         const BAND: std::ops::RangeInclusive<u32> = 0..=139; // 常量文档声明的占位带
         const {
             // const 上下文不允许 format!：字面值见上方两个常量本体，此处只钉关系
-            assert!(RR3_PRIORITY_MIN < RR3_PRIORITY_MAX, "占位窗口为空（MIN >= MAX）");
+            assert!(
+                RR3_PRIORITY_MIN < RR3_PRIORITY_MAX,
+                "占位窗口为空（MIN >= MAX）"
+            );
         }
         assert!(
             BAND.contains(&RR3_PRIORITY_MIN) && BAND.contains(&RR3_PRIORITY_MAX),

@@ -284,7 +284,9 @@ fn rr3_boot_spawn(
     // 重启共用本漏斗（D-7：护栏长在唯一入口上），一问全挡。挂死的旧进程不在此杀：
     // "杀而不重启"属关机策略，归 rr3-power 演进与 M6；本面只保证不再起新的。
     if rr3_lock(shared).rr3_reg_low_power_is_set() {
-        rr3_log(&format!("低电兜底：拒绝 spawn {name}（全局低电旗已置位，停止新 spawn）"));
+        rr3_log(&format!(
+            "低电兜底：拒绝 spawn {name}（全局低电旗已置位，停止新 spawn）"
+        ));
         return;
     }
     if let Some(mut old) = children.remove(&name) {
