@@ -23,7 +23,7 @@
 
 | 项 | 事实 | 出处 |
 |---|---|---|
-| 类型 | `RrdRegistry`，字段 `modules`（`BTreeMap` 名→条目）、`by_task`（task→名）、`next_task`、`restart_base_ms`、`denied_publish`、`crash_streak`（`BTreeMap` 名→崩溃连击数）、`owned`（`BTreeSet` 名）、`stopped`（`BTreeSet` 名）、`providers`（能力→提供者名集合，**boot 仲裁产物**、只含非 base 能力；写入方 `rr3_reg_set_providers`，运行期不重排） | `registry.rs` 的 `RrdRegistry` 结构体 |
+| 类型 | `RrdRegistry`，字段 `modules`（`BTreeMap` 名→条目）、`by_task`（task→名）、`next_task`、`restart_base_ms`、`denied_publish`、`crash_streak`（`BTreeMap` 名→崩溃连击数）、`owned`（`BTreeSet` 名）、`stopped`（`BTreeSet` 名）、`providers`（能力→提供者名集合，**boot 仲裁产物**、只含非 base 能力；写入方 `rr3_reg_set_providers`，运行期不重排）、`low_power`（全局低电旗，T4b：conn 转发 `rr3-power/battery/low` 时置位、supervisor 的 spawn 漏斗读它拒新 spawn——与 `denied_publish` 同款 conn 与 supervisor 两路共见守护态，**只升不降**，见 §10 末行） | `registry.rs` 的 `RrdRegistry` 结构体 |
 | 构造 | `RrdRegistry::new(restart_base_ms)`，`next_task` 起点 = `RR3_TASK_FIRST_MODULE`，其余账全部为空 | `registry.rs` 的 `RrdRegistry::new` |
 | 条目 | `Entry { name, src_task, phase, facts, last_beat_ms, registered_at_ms, tx }`——**两颗时间基准**：判死看 `last_beat_ms`（多久没喂狗）、恢复归零看 `registered_at_ms`（这一世活了多久），不许混用 | `registry.rs` 的 `Entry` 结构体 |
 | 平台 | 平台无关：只碰 `BTreeMap` / `mpsc` / `u64` 单调毫秒；UDS 与进程派生在 `conn.rs` / `daemon.rs`（整体 `#[cfg(unix)]`） | `registry.rs` 的模块级文档注释 |
@@ -355,6 +355,7 @@ rrd 在注册时收下并分配的在册身份（`rr3_handshake` 的 `rr3_reg_ad
 | `rr3_reg_snapshot() -> Vec<(String, u64, Rr3Phase)>` | — | 按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，名字序只是 `BTreeMap` 的顺带结果，故显式排序。后到连接补发快照用的就是它（`rr3_handshake` 的快照补发段，排除自己同名条目） | `registry.rs` 的 `rr3_reg_snapshot` |
 | `rr3_reg_callee_for(topic) -> Option<(String, u64)>` | (名， task) | M3 `rr3.call` 的被调方查找：在**相位非 `Failed` 且句柄在**、`[rpc].exposes` 含该主题的在册条目里取 **task 最小**者（同主题多提供方时的确定性裁定）；无人匹配回 `None`。唯一生产调用点 `rr3_route_call`（`conn.rs` 的 `rr3_route_call`，[`rrd-rpc.md`](rrd-rpc.md) §8） | `registry.rs` 的 `rr3_reg_callee_for` |
 | `rr3_reg_send_to(task, frame) -> bool` | 是否成功入队 | M3 点名**单播**：按 `by_task` 找到那条连接的 `Sender` 投一帧（`rr3_reg_fanout` 签名冻结不动，单播由本函数承担）。不在册 / 句柄已 drop / 收件人已 drop 都回 `false`，由调用方决定回什么错。两个生产调用点都在 conn 层的 `rr3.call` 面上：转发请求（`rr3_route_call` 的投递段）与应答回路改道（`conn.rs` 的 `rr3_route_response`） | `registry.rs` 的 `rr3_reg_send_to` |
+| `rr3_reg_low_power_raise() -> bool` / `rr3_reg_low_power_is_set() -> bool` | 是否上升沿 / 旗现状 | T4b 全局低电旗（0.0.2 方案 Q4 裁定）：`raise` 在**上升沿**回 `true`——调用方（conn 转发点）据此点名广播一次 `rr3-runtime/system/power`（Notification / src=rrd / dst=广播 / 体恰四字段；帧构造在 `daemon.rs` 的 `rr3_system_power_frame`，钩子序见 [`rrd-rpc.md`](rrd-rpc.md) §7）；重复 `battery/low` 只打"已生效"日志不重复广播。**只升不降**：不提供解除口——解除归充电策略（rr3-power 演进与 M6）。`is_set` 的唯一消费者是 supervisor 的 spawn 漏斗（`rr3_boot_spawn` 拒一切新 spawn：boot 与重启一问全挡；杀而不重启属关机策略，不在这里） | `registry.rs` 的 `rr3_reg_low_power_raise` / `rr3_reg_low_power_is_set`、`conn.rs` 的低电兜底段、`supervisor.rs` 的 `rr3_boot_spawn` |
 
 ## 11 相关文档
 

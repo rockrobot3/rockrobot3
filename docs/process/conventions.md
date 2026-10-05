@@ -540,6 +540,27 @@ brain 门槛处 fail-fast 点名；六模块真进程判据与 P1 同理（distr
 一半红）；rrd 无新增用例（lang 是 facts 解析面的自然扩展，既有 manifest::tests /
 registry::tests 的文本夹具全带 lang 字段照过）。①b Unix **328** / Windows **262**
 不变；② 34 / ③ 5 / ②b 5 / ④ 10 个独立工程不变（tools/sim 加依赖不改工程数）。
+2026-10-05 D10 文档收口批（0.0.2 T6 后半——status.md 重锚 + reference 三件与代码同批，
+方案 P4"只汇总重锚、不补账"）**零 Rust 改动**：①b / ② / ②b / ③ / ④ 全不变；⑤ 因新增
+互链重跑全绿。两件事：
+① [status.md](../status.md) 整篇重写（锚点 `540ec0f` → `363e4ed`）——T3 装配链接线、
+T4a/b/c 三模块实装、T4b 低电兜底、T5 deb 打包链、保底轨修复批、D9 装配演练全部按锚点树
+实况计入能力表（"能力格坐标系"行并入装配链 e2e 三条、"Buildroot OS 层"行改写 post-build.sh
+装机布局、新增"发行版快路轨 deb 打包链"与"rrd 低电兜底"两行）；M5 行按 Q2 口径如实改写
+（shm transport 达成、三模块 sim 侧实装、"语音控继电器"最后一跳 = 意图→动作映射属策略层
+未做 + 板上证据零 = 未收口两条敞口）；"本机无法收口"表第 1/5 条随双远端与 0.0.2 条数更新、
+新增第 8 条（deb 真装只认 distro-smoke 回执）与第 9 条（六模块真进程只认 sim-assemble 回执
+——本机 python3 3.9 不过 tomllib 门）；在制品段枚举 `540ec0f..363e4ed` 全部 12 提交。
+② reference 三件同批：[rrd-cli.md](../reference/rrd-cli.md) 补 `--contracts` 四处
+（§1 USAGE 逐字含说明句 / §2 参数表新行 + `RrdConfig` 字段列 / §4 路径绝对化分工新增
+"例外面"行——目录不单独规范化、存在性由 join 出的 topics/slots 各自 canonicalize 把关 /
+§5 启动序第 5 步契约定位与第 7 步致命面补"格位契约读不到"）；
+[rrd-registry.md](../reference/rrd-registry.md) §1 `RrdRegistry` 字段列补 `low_power`、
+§10 补 `rr3_reg_low_power_raise` / `rr3_reg_low_power_is_set` 行（上升沿恰一次、只升不降
+不设解除口、spawn 漏斗唯一消费者）；[rrd-rpc.md](../reference/rrd-rpc.md) §7 发布处理序
+补低电兜底钩子段（挂转发点之后、兜底是额外动作不截断事件流、两段日志逐字）。
+同批订正 [.github/README.md](../../.github/README.md) 的实况漂移（四 job → 七 job 清单、
+"主远端已迁 gitcode" → 双远端口径）——T5/保底轨/D9 三批挂 job 时该文件漏同步，此处结清。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

@@ -210,6 +210,13 @@ payload 类型 `Notification`（`daemon.rs` 的 `rr3_state_frame`），`src_task
 头改写成发布者 task + `RR3_BROADCAST_DST_TASK`，`rr3_reg_fanout(&frame, me.task)` 排除发布者自己
 （`conn.rs` 的 `rr3_publish`）。
 
+**低电兜底钩子（T4b，0.0.2 方案 Q4 裁定）挂在转发点之后**：原帧已照常扇出后，若 `topic == rr3-power/battery/low`
+（`conn.rs` 的 `RR3_BATTERY_LOW_TOPIC` 常量），调 `rr3_reg_low_power_raise`（[`rrd-registry.md`](rrd-registry.md) §10）——
+上升沿则取已解析体里的 `percent` / `voltage_mv` 透传构造 `rr3-runtime/system/power` 帧（`daemon.rs` 的
+`rr3_system_power_frame`，缺键按 0），以 `src = RR3_TASK_RRD` 再扇出一次并打 `低电兜底触发：battery/low percent=… voltage_mv=… → 置全局低电旗、停止新 spawn，广播 rr3-runtime/system/power 到 {n} 个连接`；
+非上升沿只打 `低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）`。**兜底是额外动作，
+不截断事件流**——battery/low 本身在上一步已作为普通事件转发；旗只升不降，supervisor 的 spawn 漏斗据它拒新 spawn。
+
 一条由 `conn.rs` 承担的调用方义务：`sender_name` 取的是**这条连接注册时确立的在册身份**
 `me.name`（`Rr3Peer` 随握手成功才构造，`conn.rs` 的 `rr3_handshake`），转发前帧上的 `src_task` 已被强制等于
 `me.task`（`conn.rs` 的 `rr3_serve_frame`），所以它既**不取自帧体、也不取自注册报文里自称的 `name` 字段**——
