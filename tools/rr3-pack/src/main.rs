@@ -22,9 +22,9 @@ use std::process::Command;
 
 use rrd::manifest::rr3_manifest_facts_from_text;
 
-/// deb 包名/版本/装机根。版本跟方案批次走（0.0.2），升级批次时改这一处。
+/// deb 包名/版本/装机根。版本跟方案批次走（0.0.6），升级批次时改这一处。
 const RR3_DEB_PACKAGE: &str = "rockrobot3";
-const RR3_DEB_VERSION: &str = "0.0.2";
+const RR3_DEB_VERSION: &str = "0.0.6";
 const RR3_INSTALL_ROOT: &str = "/usr/lib/rockrobot3";
 
 /// systemd 单元实体在 base/os/distro/units/rrd.service，include_str! 编译期嵌入：
@@ -522,7 +522,7 @@ mod tests {
         // control / postinst
         let control = fs::read_to_string(stage.join("DEBIAN/control")).unwrap();
         assert!(control.contains("Package: rockrobot3"));
-        assert!(control.contains("Version: 0.0.2"));
+        assert!(control.contains("Version: 0.0.6"));
         assert!(control.contains("Architecture: arm64"));
         let postinst = fs::read_to_string(stage.join("DEBIAN/postinst")).unwrap();
         assert!(postinst.starts_with("#!/bin/sh"));
