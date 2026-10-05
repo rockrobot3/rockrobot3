@@ -19,7 +19,8 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档（M5 主战场，已收口；同目录 v0.0.1 是 M0 骨架存档） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档（M5 最后一跳 + M6 OTA 写侧，已收口） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 历史存档（legacy 待融合三项 + 退役批，已收口） | 收口对账已由 status.md 锚点承接 |
-| [`process/dev/0.0.5版本洛克三号对齐与裁定方案.md`](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | 当前版本对齐与裁定方案与 Definition of Done（rrctl 运维面对齐 + brain 迁移 / pcm 传输两大裁定） | 收口评审按此逐条对账 |
+| [`process/dev/0.0.5版本洛克三号对齐与裁定方案.md`](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | 历史存档（rrctl 运维面对齐 + brain 迁移 / pcm 传输两大裁定，已收口） | 收口对账已由 status.md 锚点承接 |
+| [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本方案与 Definition of Done（树莓派验证跨平台快速部署可行性；0.0.7 ESP32 / 0.0.8 brain 专项排期已钉） | 收口评审按此逐条对账 |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy/ 逐组件消化盘点（已归档）：三分类台账、证据路径 | 查"某 legacy 语义在新架构哪"（`legacy/` 整树已随 0.0.4 退役批删除） |
 | [`status.md`](status.md) | 唯一实况快照：能力 × 状态 × 证据路径、里程碑进度（M0–M6 当前实况）、本机无法收口的项、在制品 | 收口时整篇重写，不做增量修补；**测试条数一律不抄进来**（见其开篇规矩） |
 
@@ -51,7 +52,8 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档：上一版本（M5 主战场）交付了什么 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档：上一版本（M5 最后一跳 + M6 OTA 写侧）交付了什么 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 历史存档：上一版本（legacy 消化 + 退役批）交付了什么 |
-| [`process/dev/0.0.5版本洛克三号对齐与裁定方案.md`](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | 当前版本交付什么、怎么算完成（rrctl 运维面对齐 + 两大演进裁定） |
+| [`process/dev/0.0.5版本洛克三号对齐与裁定方案.md`](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | 历史存档：上一版本（rrctl 运维面对齐 + 两大演进裁定）交付了什么 |
+| [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本交付什么、怎么算完成（树莓派真板部署验证跨平台快速部署） |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy（ESP32 冻结区）逐组件消化到哪了（已归档：0.0.4 退役批整树删除，待融合清零） |
 
 ### contracts/ · base/ · modules/ · tools/ · .github/
