@@ -100,10 +100,11 @@ pub fn rr3_brain_manifests(
     ]
 }
 
-/// brain 演练现场生成的 shim 脚本（装机时由安装步骤写绝对 entry 的开发等价物）
-pub fn rr3_brain_shim_script(brain_pkg_dir: &Path) -> String {
+/// brain 演练现场生成的 shim 脚本（装机时由安装步骤写绝对 entry 的开发等价物）。
+/// `py_module` 是 `python3 -m` 的包名（目录名连字符转下划线，如 rr3-brain → rr3_brain）。
+pub fn rr3_brain_shim_script(brain_pkg_dir: &Path, py_module: &str) -> String {
     format!(
-        "#!/bin/sh\nPYTHONPATH={} exec python3 -m rr3_brain\n",
+        "#!/bin/sh\nPYTHONPATH={} exec python3 -m {py_module}\n",
         brain_pkg_dir.display()
     )
 }
@@ -170,7 +171,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
 
     // brain 的 wire entry：workdir 里的 shim（exec python3 -m rr3_brain，PYTHONPATH 指仓内包）
     let shim_path = workdir.join("rr3-brain");
-    std::fs::write(&shim_path, rr3_brain_shim_script(&brain_pkg))
+    std::fs::write(&shim_path, rr3_brain_shim_script(&brain_pkg, "rr3_brain"))
         .map_err(|e| format!("写 shim 失败: {e}"))?;
     make_executable(&shim_path)?;
     let manifest_path = workdir.join("config.toml");
@@ -349,7 +350,7 @@ fn rr3_ctl_status_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)
 }
 
 /// 有界等套接字文件出现（rrd bind 的时序闸门；超时是 drill 自身故障）
-fn wait_socket_exists(socket: &Path, deadline: Duration) -> Result<(), String> {
+pub(crate) fn wait_socket_exists(socket: &Path, deadline: Duration) -> Result<(), String> {
     let t0 = Instant::now();
     while t0.elapsed() < deadline {
         if socket.exists() {
@@ -389,17 +390,32 @@ fn wait_log_contains(path: &Path, needle: &str, deadline: Duration) -> Result<()
     ))
 }
 
-fn which_python3() -> Result<PathBuf, String> {
+pub(crate) fn which_python3() -> Result<PathBuf, String> {
+    let mut tried: Vec<PathBuf> = Vec::new();
     for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
         let p = dir.join("python3");
         if p.is_file() {
-            return Ok(p);
+            // 能力验证而非版本号比对：rr3-brain 的运行门槛是 stdlib tomllib（≥3.11）。
+            // 版本字符串解析脆弱（"Python 3.9.6" / "3.12.4" 形状各异），import 成败
+            // 是门槛本身的直接证据。不满足的候选继续向后找，全不满足才报错。
+            let ok = Command::new(&p)
+                .arg("-c")
+                .arg("import tomllib")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if ok {
+                return Ok(p);
+            }
+            tried.push(p);
         }
     }
-    Err("缺 python3（brain 是 Python 工程，PATH 里找不到）".into())
+    Err(format!(
+        "PATH 里的 python3 都不满足 rr3-brain 运行门槛（stdlib tomllib，Python ≥3.11）：试过 {tried:?}。请把 3.11+ 的 python3 放进 PATH 前列（brain 工程的 pyproject 要求 3.12；远端 CI ubuntu runner 自带满足）"
+    ))
 }
 
-fn make_executable(path: &Path) -> Result<(), String> {
+pub(crate) fn make_executable(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -466,7 +482,7 @@ mod tests {
 
     #[test]
     fn shim_and_config_shapes() {
-        let shim = rr3_brain_shim_script(Path::new("/repo/modules/rr3-brain"));
+        let shim = rr3_brain_shim_script(Path::new("/repo/modules/rr3-brain"), "rr3_brain");
         assert!(shim.starts_with("#!/bin/sh\n"), "{shim}");
         assert!(
             shim.contains("PYTHONPATH=/repo/modules/rr3-brain"),

@@ -516,6 +516,30 @@ config 必撞同名文件，且 bin 的相对 entry 解析到 manifest 所在目
 除 entry 行外与仓源逐字节一致 / bin 落 entry 名可执行 / config 与仓源一致 /
 旧平铺位不存在 / S99rrd 新 glob / 两类坏模块（缺 bin、无 entry 行）警告且整模块未装。
 本批零 Rust 改动：①b / ② / ②b / ③ / ④ 全不变。
+2026-10-05 D9 装配演练批（0.0.2 T6 前半——rr3-sim `--profile` 装配演练模式）：
+`tools/sim` 新增 `assemble.rs`，装配单驱动 rrd 装配链正门（`--profile` + `--contracts`，
+与 rrd.service 的 ExecStart 同形）boot 全部 face 模块，演练 modules-root 是**装机布局**——
+仓源 manifest 原文只把 entry 改写为产物绝对路径（rr3-pack `rr3_manifest_install_rewrite`
+同语义同三道门：装机值可装机 / entry 行恰一条 / 旧值与 facts 交叉核验 / 改写后重解析
+复核，"entry 在仓相对、装机绝对"的第三面）+ config 同目录就位（Rust 模块仓源 config，
+brain 用 M4 先例 mock 演练 config）；python 模块产物 = shim（`python3 -m`，包名 = 目录名
+连字符转下划线）。配套：① rrd `Rr3ManifestFacts` 加 `lang` 字段（演练产物推导要它，
+解析真值保持一册——不逼调用方另开 TOML 读取；req_str 缺失即点名）；② `which_python3`
+从"PATH 第一个"改为**能力验证**（`import tomllib` 成败 = brain 运行门槛的直接证据，
+不满足的候选继续向后找、全不满足才报错点名——macOS 本机 3.9 从"60s 超时红"变
+"当场点名红"，--brain 同益）；③ sim 依赖 rrd（path，借两处解析真值，rr3-pack 同款先例）；
+④ `--brain` 与 `--profile` 同给即拒（Q3 同款）。CI：`sim-assemble` job 新增
+（`tools/ci/sim-assemble.sh` 构建 + 运行同一脚本）——**D9 六模块判据（含 brain）归
+该 job 远端回执**：macOS 本机 python3 3.9 不过 tomllib 门（无 brew / uv / pyenv 可装），
+本机实跑记录：无 brain 子集装配单（5 Rust 模块）装配演练全链绿（装配 boot → 全
+running → `denied_publish = 0` → 四命令巡检 ota 预期拒，exit 0）+ default 满配单在
+brain 门槛处 fail-fast 点名；六模块真进程判据与 P1 同理（distro-smoke 先例）不据本机
+声称。测试面：sim 独立工程单测 12→**16**（+4：entry 改写钉字节 + 三道门拒绝形状 +
+夹具布局装配 + **仓内 default faces 装配就绪对账**（六模块 manifest 可解析 / name ==
+目录名 / entry 仓相对无 `..` / config 在——装配单↔模块目录漂移让单测红，不等演练跑
+一半红）；rrd 无新增用例（lang 是 facts 解析面的自然扩展，既有 manifest::tests /
+registry::tests 的文本夹具全带 lang 字段照过）。①b Unix **328** / Windows **262**
+不变；② 34 / ③ 5 / ②b 5 / ④ 10 个独立工程不变（tools/sim 加依赖不改工程数）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
