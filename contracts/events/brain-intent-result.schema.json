@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-brain/intent/result",
+  "schema_version": 1,
+  "description": "brain 对话轮完成事件（0.0.3 T3 随意图规则面落地；主题 2026-10-03 已在册）。每轮对话判停后发布一条：对话记录四字段恒在，actions 是本轮抽出的结构化动作清单（空数组 = 纯对话轮，无动作）。执行器按 Q1 裁定广播认领：actions 元素的 topic 必须在执行模块自己的 exposes 内才被执行（不越权）。生产者 modules/rr3-brain/rr3_brain/__main__.py 的 rr3_finish_turn 与 rr3_brain/intent.py 的 rr3_extract_actions 是形状唯一事实源。",
+  "type": "object",
+  "required": ["trace", "user_text", "reply_text", "tts_ms", "actions"],
+  "properties": {
+    "trace": { "type": "integer", "minimum": 1, "description": "对话轮序号（brain 侧 trace_seq，从 1 起）" },
+    "user_text": { "type": "string", "description": "ASR 识别文本——意图规则的唯一输入（机器人自己的 reply_text 不参与匹配）" },
+    "reply_text": { "type": "string", "description": "LLM 回复文本（已由 interact 播放或播放失败弃轮）" },
+    "tts_ms": { "type": "integer", "minimum": 0, "description": "TTS 合成 PCM 的时长（毫秒）" },
+    "actions": {
+      "type": "array",
+      "description": "本轮结构化动作清单（策略层在 brain 的产出，0.0.3 方案 Q1 裁定）；空数组 = 纯对话轮",
+      "items": {
+        "type": "object",
+        "required": ["topic", "args"],
+        "additionalProperties": false,
+        "properties": {
+          "topic": { "type": "string", "description": "动作主题 = 契约主题（词汇即注册表，零新造）；执行侧归属门：必须 ∈ 执行模块 exposes" },
+          "args": { "type": "object", "description": "该主题 request 的参数对象，原样交给执行侧的参数裁决（如 relay/set 的 {\"on\": bool}）" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

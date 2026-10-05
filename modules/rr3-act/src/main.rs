@@ -1,4 +1,5 @@
-//! rr3-act 真入口（0.0.2 T4a）：总线注册/心跳 + 舵机/LED/继电器三事务面 + 反射环宿主。
+//! rr3-act 真入口（0.0.2 T4a 实装事务面；0.0.3 T3 订阅执行面）：
+//! 总线注册/心跳 + 舵机/LED/继电器三事务面 + 反射环宿主。
 //!
 //! 启动序列与 rr3-sense/rr3-interact 同构：读 `RR3_MANIFEST`（rrd spawn 注入的
 //! manifest 绝对路径，supervisor.rs）→ [`Rr3BusClient::rr3_connect`] → 读 config.toml
@@ -6,14 +7,17 @@
 //! exit(1)：能力缺失显式回错，不静默带病常驻）→ 起反射环宿主线程 → 主循环收帧。
 //! 主循环只做两件事：
 //! 1. 应答本模块 exposes 的三个点名（servo/command、led/effect、relay/set）；
-//! 2. 排空订阅面：`rr3-brain/intent/result` 到达记一行日志（意图→动作的映射属
-//!    策略层，随 brain 演进定义；本模块先保住"订阅的命令流存在"）。
+//! 2. 订阅面：`rr3-brain/intent/result` 到达 → `actions` 结构化动作走两道归属门
+//!    （exposes 归属 + 意图面开放）逐条执行 relay，状态变化发 `relay/state`
+//!    摘要（0.0.3 T3，Q1 裁定"brain 产出意图、执行器广播认领"）；无 actions
+//!    字段即纯对话轮，记一行日志。
 //!
 //! servo/state 限速流：状态变化必发，两次至少隔 state_min_interval_ms（Rr3RateGate）。
 //! 业务性失败（缺参数/越界/HAL 写失败）折 error 应答回话；传输性失败（发布/应答
 //! 写不出去）`eprintln` + `exit(1)`——模块不装"活着"，死交给 supervisor 按
 //! restart_policy=always 重启（rrd 的进程语义）。
 
+mod intent;
 mod led;
 mod reflex;
 mod relay;
@@ -50,7 +54,7 @@ fn main() {
 
 fn rr3_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    println!("rr3-act 0.0.1 (0.0.2 T4a 实装)");
+    println!("rr3-act 0.0.1 (0.0.2 T4a 实装，0.0.3 T3 意图执行)");
     for line in servo::SURFACE
         .iter()
         .copied()
@@ -107,6 +111,7 @@ fn rr3_run() -> Result<(), String> {
 
     // 主循环状态：限速门 + 流序
     let mut servo_seq: u64 = 0;
+    let mut relay_seq: u64 = 0;
     let mut servo_gate = servo::Rr3RateGate::rr3_gate_new(cfg.servo.state_min_interval_ms);
 
     loop {
@@ -137,7 +142,7 @@ fn rr3_run() -> Result<(), String> {
                     led::RR3_LED_EFFECT_TOPIC => rr3_handle_led(&mut led_ctrl, &args),
                     relay::RR3_RELAY_SET_TOPIC => relay::rr3_relay_parse_args(&args)
                         .and_then(|on| relay::rr3_relay_apply(relay_gpio.as_ref(), on))
-                        .map(|on| (relay::rr3_relay_result(on), None)),
+                        .map(|on| (relay::rr3_relay_result(on), None, Some(on))),
                     other => Err(format!(
                         "rr3-act 只 exposes {}/{}/{}，收到 {other}",
                         servo::RR3_SERVO_COMMAND_TOPIC,
@@ -146,7 +151,7 @@ fn rr3_run() -> Result<(), String> {
                     )),
                 };
                 let reply = match outcome {
-                    Ok((reply, state_angle)) => {
+                    Ok((reply, state_angle, relay_applied)) => {
                         // servo/state 限速流先于应答上路：被限速挡掉的发布不补发，
                         // 下一次命令自然携带最新角度（流是摘要不是逐拍镜像）
                         if let Some(angle) = state_angle {
@@ -158,6 +163,14 @@ fn rr3_run() -> Result<(), String> {
                                 )?;
                             }
                         }
+                        // relay/state 变化即发：RPC 与 intent 两条驱动路共用同一条状态流
+                        if let Some(on) = relay_applied {
+                            relay_seq += 1;
+                            bus.rr3_publish(
+                                relay::RR3_RELAY_STATE_TOPIC,
+                                relay::rr3_relay_state_body(relay_seq, on),
+                            )?;
+                        }
                         reply
                     }
                     Err(e) => json!({ "error": e }),
@@ -165,35 +178,61 @@ fn rr3_run() -> Result<(), String> {
                 bus.rr3_reply_call(frame.header.trace_id, id, reply)?; // 传输性失败 → exit(1)
                 continue;
             }
-            // 订阅面：广播（Event/Notification/Stream）只认 intent/result 记一行日志；
-            // 意图→动作映射属策略层，随 brain 演进定义
+            // 订阅面：广播帧只认 `rr3-brain/intent/result`（Q1 裁定：brain 产出意图、
+            // 执行器广播认领）。actions 结构化动作经 intent.rs 两道归属门逐条执行，
+            // 生效即发 relay/state 摘要；拒执行/非法载荷点名折日志（业务性失败）；
+            // 无 actions 字段即纯对话轮，记一行日志。
             if let Ok((_, body)) = Rr3BusClient::rr3_frame_body(&frame) {
-                if body.get("topic").and_then(Value::as_str) == Some(RR3_INTENT_TOPIC) {
-                    println!(
-                        "intent: trace={}（订阅面到达；映射属策略层，本模块不动作）",
-                        body.get("trace").and_then(Value::as_u64).unwrap_or(0)
-                    );
+                if body.get("topic").and_then(Value::as_str) != Some(RR3_INTENT_TOPIC) {
+                    continue;
+                }
+                let trace = body.get("trace").and_then(Value::as_u64).unwrap_or(0);
+                match body.get("actions") {
+                    None | Some(Value::Null) => {
+                        println!("intent: trace={trace}（纯对话轮，无动作）");
+                    }
+                    Some(actions) => {
+                        for r in intent::rr3_intent_actions_handle(actions, relay_gpio.as_ref()) {
+                            match r {
+                                Ok(on) => {
+                                    relay_seq += 1;
+                                    bus.rr3_publish(
+                                        relay::RR3_RELAY_STATE_TOPIC,
+                                        relay::rr3_relay_state_body(relay_seq, on),
+                                    )?;
+                                    println!(
+                                        "intent: trace={trace} relay on={on}，state#{relay_seq} 已发"
+                                    );
+                                }
+                                Err(e) => println!("intent: trace={trace} 拒执行: {e}"),
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/// servo/command 点名：参数裁决 → HAL 落角 → 回 (应答体, 待发的 state 角度)
+/// servo/command 点名：参数裁决 → HAL 落角 → 回 (应答体, 待发的 state 角度, relay 无)
 fn rr3_handle_servo(
     servo: &dyn Rr3PwmServo,
     cfg: &Rr3ServoCfg,
     args: &Value,
-) -> Result<(Value, Option<u16>), String> {
+) -> Result<(Value, Option<u16>, Option<bool>), String> {
     let (angle, move_ms) = servo::rr3_servo_parse_args(args, cfg)?;
     // HAL 写失败按业务性失败折 error（同 interact 的后端写失败口径）
     rr3_block_on(servo.set_angle(angle)).map_err(|e| format!("舵机写入失败: {e}"))?;
     println!("servo: angle={angle} move_ms={move_ms}（sim 即时到位；实机按时限走反射环闭环）");
-    Ok((json!({ "angle_deg": angle, "move_ms": move_ms }), Some(angle)))
+    Ok((
+        json!({ "angle_deg": angle, "move_ms": move_ms }),
+        Some(angle),
+        None,
+    ))
 }
 
-/// led/effect 点名：效果裁决 → worker 落电平 → 回 (生效, 前一效果)
-fn rr3_handle_led(led: &mut Rr3Led, args: &Value) -> Result<(Value, Option<u16>), String> {
+/// led/effect 点名：效果裁决 → worker 落电平 → 回 (应答体含生效/前效果, servo/relay 无)
+fn rr3_handle_led(led: &mut Rr3Led, args: &Value) -> Result<(Value, Option<u16>, Option<bool>), String> {
     let effect = led::rr3_led_parse_args(args)?;
     let (applied, previous) = led.rr3_led_apply(effect)?;
     println!("led: {}（前态 {}）", applied.rr3_led_effect_as_str(), previous.rr3_led_effect_as_str());
@@ -202,6 +241,7 @@ fn rr3_handle_led(led: &mut Rr3Led, args: &Value) -> Result<(Value, Option<u16>)
             "effect": applied.rr3_led_effect_as_str(),
             "previous": previous.rr3_led_effect_as_str(),
         }),
+        None,
         None,
     ))
 }

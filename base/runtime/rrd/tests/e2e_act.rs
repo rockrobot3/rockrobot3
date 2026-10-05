@@ -1,12 +1,16 @@
 #![cfg(unix)]
-//! rr3-act 真模块的装配单正门端到端（0.0.2 T4a；ADR-0007/0012；Q1 裁定）。
+//! rr3-act 真模块的装配单正门端到端（0.0.2 T4a；0.0.3 T3 意图执行面；
+//! ADR-0007/0012；Q1 裁定）。
 //!
 //! 与 `e2e_audio_chain.rs` 的分工：那条走 `--manifest` 直驱 boot 钉音频链；这条走
 //! `--profile` 装配单正门（装机布局，与 T5 deb 同树）起**真 rr3-act**，钉 T4a 的
 //! 验收面（方案 §3）：装配单驱动 e2e 中 rr3-act 在册 running、servo 点名应答——
 //! 三事务面（servo/led/relay）的 rr3.call 回路穿过真进程，业务性失败折
 //! result.error 不断链，servo/state 限速流上总线被旁观连接真实收到（rr-bus
-//! 广播全量扇出、不按订阅过滤，conn.rs 的既证事实）。
+//! 广播全量扇出、不按订阅过滤，conn.rs 的既证事实）。0.0.3 T3 起再加意图执行面：
+//! brain 身份连接广播 intent 事件，actions 经两道归属门（exposes 归属 + 意图面
+//! 开放）驱动 relay，执行效果以 relay/state 广播回读——RPC 与 intent 两条驱动路
+//! 共用同一条状态流（流序连贯），越权动作被拒后不产生状态。
 //!
 //! 关键夹具差异（相对 e2e_profile 的 sim_peer 模板）：module.toml 用**仓内真契约
 //! 工件**渲染 entry（`rr3_module_manifest_text`），且必须同树写 config.toml——
@@ -16,7 +20,10 @@
 mod support;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
+use rr_bus::RR3_TASK_RRD;
+use rr_ipc::Rr3PayloadType;
 use serde_json::json;
 
 use support::*;
@@ -203,6 +210,19 @@ fn act_module_full_face_end_to_end() {
             obs_task,
         ),
     );
+    // 先读 state 后读应答（② 同一条纪律：read_call_reply 不回存，反序会把先到的
+    // state 帧丢掉）。RPC 驱动路同样出 relay/state（0.0.3 T3：变化即发，RPC 与
+    // intent 两条驱动路共用同一条状态流）。
+    let st = rr3_read_where(&mut obs, " relay/state 流（RPC 路）", |f| {
+        rr3_json_of(f)["topic"] == "rr3-act/relay/state"
+    });
+    assert_eq!(
+        st.header.src_task, act_task,
+        "state 帧 src 必须是 rr3-act 的分配值"
+    );
+    let sv = rr3_json_of(&st);
+    assert_eq!(sv["seq"], 1, "RPC 路首条 relay/state 从 1 起: {sv}");
+    assert_eq!(sv["on"], true, "RPC 吸合的状态回读: {sv}");
     let v = rr3_read_call_reply(&mut obs, 105);
     assert_eq!(v["result"]["on"], true, "吸合应答回显同一真值: {v}");
 
@@ -220,4 +240,76 @@ fn act_module_full_face_end_to_end() {
         .as_str()
         .unwrap_or_else(|| panic!("非布尔必须回 result.error 字符串: {v}"));
     assert!(err.contains("布尔"), "类型不符要点名: {err}");
+
+    // ---------- ⑤ intent actions 过真进程：brain 身份连接 + 合法动作落电平 ----------
+    // 以 rr3-brain 在册身份另开连接广播 intent 事件（发布归属门按在册名判，
+    // manifest 的 publishes 列表不参与）。act 订阅面经两道归属门执行 relay，
+    // 断电平的效果以 relay/state 广播回读——e2e 证据链需要状态回读（补裁定的
+    // 由来：模块 stdout 接 Stdio::null()，无状态流则意图执行效果不可观测）。
+    // seq=2 延续 ④ 的 RPC 路（seq=1），钉"两条驱动路共用一条状态流"。
+    let mut brain = rrd.rr3_connect();
+    rr3_send(
+        &mut brain,
+        &rr3_register_frame(
+            &rr3_manifest("rr3-brain", 3_600_000, 3_600_001, "never"),
+            "rr3-brain",
+        ),
+    );
+    let v = rr3_read_rpc(&mut brain);
+    let brain_task = v["result"]["src_task"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("brain 注册应答缺 src_task: {v}"));
+
+    rr3_send(
+        &mut brain,
+        &rr3_json_frame(
+            Rr3PayloadType::Event,
+            &json!({
+                "topic": "rr3-brain/intent/result",
+                "trace": 72,
+                "user_text": "开灯",
+                "actions": [{"topic": "rr3-act/relay/set", "args": {"on": false}}],
+            }),
+            brain_task,
+            RR3_TASK_RRD,
+        ),
+    );
+    let st = rr3_read_where(&mut obs, " relay/state 流（intent 路）", |f| {
+        rr3_json_of(f)["topic"] == "rr3-act/relay/state"
+    });
+    assert_eq!(
+        st.header.src_task, act_task,
+        "intent 路的 state 帧同样出自 rr3-act"
+    );
+    let sv = rr3_json_of(&st);
+    assert_eq!(sv["seq"], 2, "两条驱动路共用一条状态流，流序连贯: {sv}");
+    assert_eq!(sv["on"], false, "intent 动作断开继电器: {sv}");
+
+    // ---------- ⑥ 越权动作：归属门拒，有界窗口内不得再有 relay/state ----------
+    // 拒执行是 act 进程内的日志面（模块 stdout 接 Stdio::null()），e2e 侧唯一
+    // 可观测面是"没有状态发布"。collect 是破坏性读法，按 support 纪律只放用例末尾。
+    rr3_send(
+        &mut brain,
+        &rr3_json_frame(
+            Rr3PayloadType::Event,
+            &json!({
+                "topic": "rr3-brain/intent/result",
+                "trace": 73,
+                "user_text": "把别人家的电通上",
+                "actions": [{"topic": "rr3-power/battery/state", "args": {"on": true}}],
+            }),
+            brain_task,
+            RR3_TASK_RRD,
+        ),
+    );
+    let drained = rr3_collect_within(&mut obs, Duration::from_millis(250));
+    let stray: Vec<String> = drained
+        .iter()
+        .filter(|f| rr3_json_of(f)["topic"] == "rr3-act/relay/state")
+        .map(|f| rr3_json_of(f).to_string())
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "越权动作被归属门拒后不得产生 relay/state: {stray:?}"
+    );
 }
