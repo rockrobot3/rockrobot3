@@ -474,6 +474,11 @@ rr3-connect/wifi/state         rr3-connect/bt/state
 rr3-runtime/module/state       rr3-runtime/system/heartbeat
 ```
 
+> **§6.3 对账注记（0.0.4 批D）**：上图 `rr3-connect/wifi/state` 仍属**示意**——
+> 配网面实际登记为 `rr3-connect/wifi/scan|connect|forget` 三 request 主题，
+> 配网态经 `net/link` 事件体的 `mode` 字段（ap|station）发布；`wifi/state` 单名
+> 与 `rr3-connect/bt/state` 均未登记，使用前须先 append（§7.2 同注）。
+
 > **裁定**：base 运行时主题命名空间用 `rr3-runtime/`（如 `rr3-runtime/module/state`、
 > `rr3-runtime/system/heartbeat`），不用 `base/` 前缀——契约要求每段主题首段等于某个
 > `[manifest].name`，而模块名规则是 `^rr3-[a-z]+$`。`rr3-runtime/*` 因此是**内建命名空间**：
@@ -572,7 +577,9 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 > **草图（示意）**：下图只表达数据流向。其中的主题串**以 `contracts/topics.toml` 为准**——
 > `rr3-act/relay/state`、`rr3-power/battery/low` 已登记（前者 0.0.3 方案 T3 补裁定 append），
 > `rr3-brain/dialog/response`、`rr3-connect/wifi/state` 仍**未登记**（对账见 §6.3 的
-> `rr3-act` 注记），使用前须先 append 契约。
+> `rr3-act` 注记），使用前须先 append 契约。注：0.0.4 批D 起配网面以
+> `rr3-connect/wifi/scan|connect|forget` 三 RPC + `net/link` 事件体的 `mode` 字段
+> （ap|station）承接，`wifi/state` 这个单名依旧不在册（登记与否以 topics.toml 为准）。
 
 ```
                     ┌─────────────── rrd 事件总线 (UDS) ───────────────┐

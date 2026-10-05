@@ -153,6 +153,15 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   `events/act-relay_state.schema.json`（seq / on 两字段最小面）。同批更新 rr-registry
   形状 pin（25 条三元组、kind 8-10-3-4）、`modules/rr3-act/module.toml`（publishes
   + `rr3-act/relay/state`）。topics.toml 只增不改维持；schema_version 均为 1（新文件）。
+- **2026-10-05 · 0.0.4 批D 契约 append（0.0.4 版本洛克三号消化方案 D4，Q3 裁定）**：
+  `topics.toml` 25→**28** 条（append `rr3-connect/wifi/scan` · `wifi/connect` ·
+  `wifi/forget` request L1——legacy/core/panel 配网面迁移承接：scan 回 sim 模拟列表带
+  `backend:"sim"` 诚实标注、connect 沿用 legacy `ssid`+`pass` 字段名与密码≥8 位语义、
+  forget 承接 `/api/factory_reset` 的 WiFi 语义且 ≠ M6 整机恢复出厂；板上 NetworkManager
+  cfg 门后置，方案 P4）。同批更新 rr-registry 形状 pin（28 条三元组、kind 11-10-3-4）、
+  `modules/rr3-connect/module.toml`（exposes + 三条）。`rr3-connect/net/link` 事件体以
+  `mode` 字段（ap|station）增补配网态——负载只增不改，无 schema 文件（net/link 负载
+  schema 本就未落，见 status.md 已知空缺）。topics.toml 只增不改维持。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 
