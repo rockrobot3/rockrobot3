@@ -1,7 +1,10 @@
-//! rr-ota —— 升级通道骨架（architecture.md §8、ADR-0007 决策二）。
+//! rr-ota —— 升级通道（architecture.md §8、ADR-0007 决策二）。
 //!
-//! v0.0.1 只冻结"双轨"的类型形状：整镜像 A/B（M6）与模块级 staging（M6+）。
-//! 具体 slot 切换/断电安全实现随 Buildroot 镜像一起落地。
+//! v0.0.1 冻结"双轨"的类型形状：整镜像 A/B（M6）与模块级 staging（M6+）。
+//! 0.0.3 批D 增加引导配置改写面（[`bootconf`]）：switch/factory 的判定与
+//! 原子落盘逻辑主机可测；U-Boot 环境变量写侧与块设备探测属板上件，不 claim。
+
+pub mod bootconf;
 
 /// 整镜像 A/B 与出厂槽位
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +51,16 @@ impl Rr3Slot {
             Self::Factory => "rr_factory",
         }
     }
+
+    /// 分区标签反查槽位（bootconf/cmdline 解析入口；不在册标签返回 None）
+    pub fn rr3_slot_from_label(label: &str) -> Option<Self> {
+        match label {
+            "rr_a" => Some(Self::SlotA),
+            "rr_b" => Some(Self::SlotB),
+            "rr_factory" => Some(Self::Factory),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +98,17 @@ mod tests {
             );
         }
         assert_eq!(Rr3Slot::Factory.rr3_slot_peer(), Rr3Slot::Factory);
+    }
+
+    #[test]
+    fn ota_slot_from_label_roundtrip() {
+        // slot → label → slot 全槽 roundtrip；杂牌与空串必须 None
+        for s in [Rr3Slot::SlotA, Rr3Slot::SlotB, Rr3Slot::Factory] {
+            assert_eq!(Rr3Slot::rr3_slot_from_label(s.rr3_slot_label()), Some(s));
+        }
+        assert_eq!(Rr3Slot::rr3_slot_from_label("rr_x"), None);
+        assert_eq!(Rr3Slot::rr3_slot_from_label("rr_A"), None);
+        assert_eq!(Rr3Slot::rr3_slot_from_label(""), None);
     }
 
     #[test]
