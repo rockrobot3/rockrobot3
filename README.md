@@ -16,7 +16,7 @@ Discussions and contributions are welcome — Issues are the front door.
 | [docs/architecture/architecture.md](docs/architecture/architecture.md) | Architecture (design): layering, module model, HAL, IPC, data flows, risk register |
 | [docs/status.md](docs/status.md) | Single live-status snapshot: what exists at HEAD, milestone progress, open unknowns |
 | [docs/reference/](docs/reference/) | Copy-ready runtime interfaces: rrd CLI / upstream RPC / registry rules |
-| [docs/process/dev/0.0.2版本洛克三号开发方案.md](docs/process/dev/0.0.2版本洛克三号开发方案.md) | Current release plan and Definition of Done |
+| [docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md](docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | Current release plan (alignment & rulings) and Definition of Done |
 | [docs/process/conventions.md](docs/process/conventions.md) | Development conventions (branching/commits/CI seven steps/DoD) |
 | [docs/process/naming.md](docs/process/naming.md) | Single naming authority |
 | [contracts/README.md](contracts/README.md) | Byte-level contract and ambiguity rulings |
