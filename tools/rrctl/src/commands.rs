@@ -1,4 +1,5 @@
-//! 子命令实现（F3 / ADR-0010）：四个 `rr3.ctl.*` 查询经 UDS 送达 rrd 的事务面。
+//! 子命令实现（F3 / ADR-0010；0.0.4 批B 起 CLI 六子命令与 ctl 白名单对齐）：
+//! 六个 `rr3.ctl.*` 查询经 UDS 送达 rrd 的事务面。
 //!
 //! 每个子命令是一次**一次性控制连接**（ADR-0010 裁定 2）：连接 → 发一帧 `Request`
 //! （dst=rrd、方法 `rr3.ctl.*`、src_task 按契约填 0）→ 收一帧 `Response` → 渲染成人读
@@ -6,10 +7,15 @@
 //!
 //! JSON 形状是 rrd ↔ rr3-ctl 的内部协议契约，**不**作为 CLI 的输出格式承诺
 //! （ADR-0010 裁定 6）：`format_*` 系列把应答渲染成对齐的文本表，是人读的。
+//!
+//! `reboot` 是六方法里唯一的写侧：CLI **不加本地门**——rrd 执行面的双重门
+//! （cfg(linux) 且 env `RR3_REBOOT_OK=1`）是唯一真值点，CLI 加门即第二真值；
+//! 被拒时回显 rrd 文案并以非 0 退出（错误信封统一走 `Err`）。
 
 use serde_json::{json, Value};
 
-pub const COMMANDS: [&str; 4] = ["status", "health", "logs", "ota"];
+/// 命令面与 rrd 的 ctl 白名单六方法逐一同名对齐（`rr3.ctl.<cmd>`）
+pub const COMMANDS: [&str; 6] = ["status", "health", "logs", "ota", "counters", "reboot"];
 
 /// 一次查询的读超时：rrd 不回就报错退出，不挂死运维的 shell
 const RR3_CTL_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -22,8 +28,8 @@ pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
         return Err(format!("未知命令 {cmd}，可用：{}", COMMANDS.join(" | ")));
     }
     let envelope = rr3_ctl_query(bus, &format!("rr3.ctl.{cmd}"))?;
-    // 错误信封统一走 Err：ota 的恒拒（rrd 回 AIRY_EPERM，文案点 M6）落在这一条上，
-    // main 会把它打到 stderr 并以非 0 退出
+    // 错误信封统一走 Err：ota 的恒拒（rrd 回 AIRY_EPERM，文案点 M6）与 reboot 的
+    // 缺省恒拒（文案点双重门）都落在这一条上，main 会把它打到 stderr 并以非 0 退出
     if let Some(err) = envelope.get("error") {
         return Err(format!(
             "{cmd} 被拒（code {}）：{}",
@@ -37,7 +43,9 @@ pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
         "status" => format_status(&envelope),
         "health" => format_health(&envelope),
         "logs" => format_logs(&envelope),
-        // COMMANDS 白名单已把 cmd 限定在四者之内；ota 到这里必有 result（不会发生）
+        "counters" => format_counters(&envelope),
+        "reboot" => format_reboot(&envelope),
+        // COMMANDS 白名单已把 cmd 限定在六者之内；其余到这里必有 result（不会发生）
         _ => Err(format!("{cmd}: 应答形状意外（无 result 也无 error）")),
     }
 }
@@ -196,6 +204,49 @@ fn format_logs(envelope: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+/// `counters` 运维计数读面（0.0.4 批B append，与 health 分开）：health 是心跳
+/// 健康语义，counters 是业务运维账。全表键 = `模块名/键`（模块自报归并）或
+/// rrd 自有键（如 `boots`，无前缀）——渲染按模块名前缀分组成人读表，
+/// 自有键归 `rrd` 组；空表打"无计数"。
+fn format_counters(envelope: &Value) -> Result<String, String> {
+    let counters = envelope
+        .get("result")
+        .and_then(|r| r.get("counters"))
+        .and_then(Value::as_object)
+        .ok_or("应答缺 result.counters")?;
+    if counters.is_empty() {
+        return Ok("（无计数）".to_string());
+    }
+    let mut rows: Vec<(String, String, u64)> = Vec::with_capacity(counters.len());
+    for (k, v) in counters {
+        let n = v
+            .as_u64()
+            .ok_or_else(|| format!("计数 {k} 的值不是 u64: {v}"))?;
+        let (module, key) = match k.split_once('/') {
+            Some((m, rest)) => (m.to_string(), rest.to_string()),
+            None => ("rrd".to_string(), k.clone()),
+        };
+        rows.push((module, key, n));
+    }
+    // 不依赖 JSON 对象的迭代序（serde_json feature 可换底层 Map）：显式排序定渲染
+    rows.sort();
+    let rows = rows
+        .into_iter()
+        .map(|(m, k, n)| vec![m, k, n.to_string()])
+        .collect::<Vec<_>>();
+    Ok(render_table(&["MODULE", "KEY", "VALUE"], &rows))
+}
+
+/// `reboot` 系统重启（0.0.4 批C append）：CLI 不加本地门（见模块头注释），
+/// rrd 执行面已解锁时回执 `{"reboot": true}`，这里只渲染一行确认。
+fn format_reboot(envelope: &Value) -> Result<String, String> {
+    let result = envelope.get("result").ok_or("应答缺 result")?;
+    match result.get("reboot").and_then(Value::as_bool) {
+        Some(true) => Ok("系统重启已发起（rrd 侧 systemctl reboot 已执行）".to_string()),
+        _ => Err("reboot 应答缺 result.reboot 或非 true".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,10 +262,19 @@ mod tests {
 
     #[test]
     fn unknown_command_names_the_alternatives() {
-        let err = run("reboot", "/tmp/t.sock").unwrap_err();
+        let err = run("nope", "/tmp/t.sock").unwrap_err();
         assert!(
-            err.contains("status") && err.contains("ota"),
+            err.contains("status") && err.contains("reboot"),
             "错误文案没给出可用命令: {err}"
+        );
+    }
+
+    #[test]
+    fn command_list_matches_the_rrd_ctl_whitelist() {
+        // 六方法同名对齐是本批的裁定（ADR-0010 裁定 2/4/6）：方法名漂移在此变红
+        assert_eq!(
+            COMMANDS,
+            ["status", "health", "logs", "ota", "counters", "reboot"]
         );
     }
 
@@ -279,6 +339,59 @@ mod tests {
         assert!(format_status(&json!({})).is_err());
         assert!(format_health(&json!({"result": {}})).is_err());
         assert!(format_logs(&json!({"result": {"lines": 3}})).is_err());
+        assert!(format_counters(&json!({})).is_err());
+        assert!(format_counters(&json!({"result": {"counters": 3}})).is_err());
+        assert!(format_reboot(&json!({"result": {}})).is_err());
+        assert!(format_reboot(&json!({"result": {"reboot": false}})).is_err());
+    }
+
+    #[test]
+    fn counters_group_by_module_prefix_and_render_sorted() {
+        let env = json!({"result": {"counters": {
+            "rr3-brain/asr_fail": 1, "rr3-brain/asr_ok": 8,
+            "rr3-act/relay_on": 1, "boots": 2
+        }}});
+        let out = format_counters(&env).unwrap();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 5, "{out}");
+        assert!(lines[0].starts_with("MODULE"), "{out}");
+        // 字节序：rr3-* 组在前，rrd 自有键（boots）的 rrd 组在后；组内按键名序
+        assert!(
+            lines[1].starts_with("rr3-act") && lines[1].contains("relay_on"),
+            "{out}"
+        );
+        assert!(
+            lines[2].starts_with("rr3-brain") && lines[2].contains("asr_fail"),
+            "{out}"
+        );
+        assert!(
+            lines[3].starts_with("rr3-brain") && lines[3].contains("asr_ok"),
+            "{out}"
+        );
+        assert!(
+            lines[4].starts_with("rrd") && lines[4].contains("boots"),
+            "{out}"
+        );
+        assert!(out.contains(" 8"), "计数 8 应渲染: {out}");
+    }
+
+    #[test]
+    fn counters_empty_table_says_no_counters() {
+        let env = json!({"result": {"counters": {}}});
+        assert_eq!(format_counters(&env).unwrap(), "（无计数）");
+    }
+
+    #[test]
+    fn counters_non_u64_value_is_an_error_not_a_question_mark() {
+        // 与 status 的 cell 不同：计数是 u64 全表，形状坏了报错而不是渲染 ?
+        assert!(format_counters(&json!({"result": {"counters": {"boots": "x"}}})).is_err());
+    }
+
+    #[test]
+    fn reboot_success_renders_acknowledgement() {
+        let env = json!({"result": {"reboot": true}});
+        let out = format_reboot(&env).unwrap();
+        assert!(out.contains("重启"), "{out}");
     }
 
     /// 真往返：起一个假的"最小 rrd"（accept → 读一帧 → 回 canned 应答），
@@ -354,6 +467,32 @@ mod tests {
             assert!(
                 err.contains("M6") && err.contains("-22"),
                 "错误应带码与文案: {err}"
+            );
+        }
+
+        #[test]
+        fn counters_roundtrip_renders_the_fake_rrds_reply() {
+            let bus = spawn_fake_rrd(
+                json!({"result": {"counters": {"rr3-sima/beat_ok": 3, "boots": 1}}}).to_string(),
+            );
+            let out = run("counters", &bus).expect("往返应成功");
+            assert!(
+                out.contains("rr3-sima") && out.contains("beat_ok") && out.contains("3"),
+                "{out}"
+            );
+            assert!(out.contains("boots"), "rrd 自有键应入表: {out}");
+        }
+
+        #[test]
+        fn reboot_rejection_from_rrd_becomes_a_cli_error() {
+            let bus = spawn_fake_rrd(
+                json!({"error": {"code": -22, "message": "reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）"}})
+                    .to_string(),
+            );
+            let err = run("reboot", &bus).unwrap_err();
+            assert!(
+                err.contains("-22") && err.contains("RR3_REBOOT_OK"),
+                "拒绝应带码与文案: {err}"
             );
         }
     }
