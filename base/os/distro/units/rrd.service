@@ -8,6 +8,9 @@ Description=RockRobot3 守护进程（rrd，发行版快路轨）
 After=network.target
 
 [Service]
+# 运维计数持久化目录（0.0.4 批B 的 RR3_DATA_DIR 优先路径；0.0.6 批E' R3 修复——
+# 真板实测缺注入时回写建 tmp 失败、boots 每次开机重置为 1；目录由 postinst 创建）
+Environment=RR3_DATA_DIR=/var/lib/rockrobot3
 ExecStart=/usr/bin/rrd --socket /var/run/rock3-ipc.sock --contracts /usr/lib/rockrobot3/contracts --profile /usr/lib/rockrobot3/profiles/distro.toml
 Restart=on-failure
 RestartSec=1

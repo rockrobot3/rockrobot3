@@ -893,6 +893,21 @@ boots 修复 + boards 补录 ctl socket 现状）、阶段二 = 真机功能链�
 敞口；在制品列 0.0.5 批E + 0.0.6 批A–D 六提交与本重裁轮批；docs/README 两处索引（0.0.5 行
 补重裁轮标注、0.0.6 行补修订版 2 两阶段口径、0.0.7 行进四档落点表与库地图）。
 ①a–⑤ 全绿重跑。
+2026-10-05 0.0.6 批E'（阶段一收尾件——boots 修复三件 + boards 补录，R3/R6 裁定落地）
+R3 三件：①[`base/os/distro/units/rrd.service`](../../base/os/distro/units/rrd.service) `[Service]` 注入
+`Environment=RR3_DATA_DIR=/var/lib/rockrobot3`（附注释：缺注入时回写建 tmp 失败、
+boots 每次开机重置为 1——真板批D 实测）；②rr3-pack `rr3_postinst_text()` 增
+`mkdir -p /var/lib/rockrobot3` + `chmod 755` + `chown root:root`（建目录置属主，
+升级幂等），其 staging 单测同步补两条断言（postinst 含 mkdir 与 chown 同路径）；
+③[`tools/ci/distro-smoke.sh`](../../tools/ci/distro-smoke.sh) 断言链三处补强——⑤ 补
+`test -d /var/lib/rockrobot3`、⑥ 冒烟注入 `RR3_DATA_DIR`（与 unit Environment 同
+路径）、新增 ⑧ counters 回写断言（日志含"counters 持久化已启用: …/counters.json
+（boots 自增已回写）"逐字 + counters.json 在位 + 含 `"boots"` 键）。counters 持久化
+本体不动（0.0.4 批B 已实装，缺陷纯部署面）。R6 补录：boards/raspberry-pi-64.md
+新增 §7"已知现状：ctl socket 权限"（socket 0755 语义 / 运维 sudo 口径 / 影响
+面仅运维链 / 修复归阶段二收尾件，本批不修）；§6 偏离行同步指向。真板复验
+（boots 跨重启 1→2）因板失联（ping 100% 丢包）登记为批E' 待办，板恢复后补跑
+回填。rr3-pack 单测 5 条全过；七步门禁直跑 exit=0 全绿（16 步全 PASS）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
