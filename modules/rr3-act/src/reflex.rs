@@ -112,13 +112,22 @@ mod tests {
     #[test]
     fn window_plan_derives_window_need_and_expect() {
         // 常规：1kHz × 500ms notice → 250ms 窗、连续 2 窗、窗内期望 250 拍
-        let cfg = Rr3ReflexCfg { loop_hz: 1000, saturate_notice_ms: 500 };
+        let cfg = Rr3ReflexCfg {
+            loop_hz: 1000,
+            saturate_notice_ms: 500,
+        };
         assert_eq!(rr3_reflex_window_plan(&cfg), (250, 2, 250));
         // notice 小于窗粒度：窗压到与 notice 同宽，need 恒 1
-        let cfg = Rr3ReflexCfg { loop_hz: 1000, saturate_notice_ms: 100 };
+        let cfg = Rr3ReflexCfg {
+            loop_hz: 1000,
+            saturate_notice_ms: 100,
+        };
         assert_eq!(rr3_reflex_window_plan(&cfg), (100, 1, 100));
         // 低速率：窗内期望按比例折算且不低于 1
-        let cfg = Rr3ReflexCfg { loop_hz: 100, saturate_notice_ms: 500 };
+        let cfg = Rr3ReflexCfg {
+            loop_hz: 100,
+            saturate_notice_ms: 500,
+        };
         assert_eq!(rr3_reflex_window_plan(&cfg), (250, 2, 25));
     }
 
@@ -128,7 +137,10 @@ mod tests {
     fn detector_fires_once_per_saturation_episode() {
         let mut det = Rr3SaturationDetector::rr3_detector_new(2);
         assert!(!det.rr3_detector_feed(true), "第 1 个饱和窗：还在积累");
-        assert!(det.rr3_detector_feed(true), "第 2 个连续饱和窗：episode 首报");
+        assert!(
+            det.rr3_detector_feed(true),
+            "第 2 个连续饱和窗：episode 首报"
+        );
         assert!(!det.rr3_detector_feed(true), "episode 内不重复");
         assert!(!det.rr3_detector_feed(true), "episode 内不重复（继续）");
         assert!(!det.rr3_detector_feed(false), "恢复窗复位且不发");

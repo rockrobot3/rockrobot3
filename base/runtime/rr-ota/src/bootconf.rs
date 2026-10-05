@@ -64,7 +64,9 @@ fn rr3_root_span_unique(text: &str) -> Result<Rr3RootSpan, String> {
     match spans.len() {
         1 => Ok(spans.into_iter().next().expect("len==1 已断言")),
         0 => Err("引导配置没有 root=LABEL=rr_ token（append 行缺失或形状漂移）".into()),
-        n => Err(format!("引导配置有 {n} 处 root=LABEL=rr_ token——形状歧义，拒改写")),
+        n => Err(format!(
+            "引导配置有 {n} 处 root=LABEL=rr_ token——形状歧义，拒改写"
+        )),
     }
 }
 
@@ -151,9 +153,8 @@ pub fn rr3_cmdline_current_slot(text: &str) -> Result<Rr3Slot, String> {
         let Some(rest) = tok.strip_prefix(RR3_ROOT_TOKEN) else {
             continue;
         };
-        let slot = Rr3Slot::rr3_slot_from_label(rest).ok_or_else(|| {
-            format!("cmdline root=LABEL={rest} 不在在册标签——形状漂移，拒判定")
-        })?;
+        let slot = Rr3Slot::rr3_slot_from_label(rest)
+            .ok_or_else(|| format!("cmdline root=LABEL={rest} 不在在册标签——形状漂移，拒判定"))?;
         if found.is_some() {
             return Err("cmdline 有多处 root=LABEL=rr_ token——形状歧义，拒判定".into());
         }
@@ -184,10 +185,8 @@ mod tests {
 
     impl TmpDir {
         fn new(tag: &str) -> TmpDir {
-            let dir = std::env::temp_dir().join(format!(
-                "rr3-ota-bootconf-{}-{tag}",
-                std::process::id()
-            ));
+            let dir =
+                std::env::temp_dir().join(format!("rr3-ota-bootconf-{}-{tag}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).expect("建临时目录");
             TmpDir(dir)
@@ -238,7 +237,10 @@ mod tests {
         let e = rr3_bootconf_switch(REAL, Rr3Slot::SlotA).unwrap_err();
         assert!(e.contains("同槽幂等拒"), "同槽拒因要点名: {e}");
         let e = rr3_bootconf_switch(REAL, Rr3Slot::Factory).unwrap_err();
-        assert!(e.contains("factory 子命令"), "factory 目标要点名正确入口: {e}");
+        assert!(
+            e.contains("factory 子命令"),
+            "factory 目标要点名正确入口: {e}"
+        );
     }
 
     #[test]
@@ -279,8 +281,8 @@ mod tests {
         let tmp = TmpDir::new("atomic");
         let path = tmp.0.join("extlinux.conf");
         fs::write(&path, "root=LABEL=rr_a").expect("写初版");
-        let text = rr3_bootconf_switch(&fs::read_to_string(&path).unwrap(), Rr3Slot::SlotB)
-            .expect("改写");
+        let text =
+            rr3_bootconf_switch(&fs::read_to_string(&path).unwrap(), Rr3Slot::SlotB).expect("改写");
         rr3_bootconf_write_atomic(&path, &text).expect("原子落盘");
         assert_eq!(fs::read_to_string(&path).unwrap(), "root=LABEL=rr_b");
         let leftovers: Vec<_> = fs::read_dir(&tmp.0)
@@ -288,15 +290,17 @@ mod tests {
             .filter_map(Result::ok)
             .filter(|e| e.file_name().to_string_lossy().contains("rr3-ota-tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "临时文件必须被 rename 消耗: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "临时文件必须被 rename 消耗: {leftovers:?}"
+        );
     }
 
     #[test]
     fn cmdline_parse_covers_label_form_and_names_the_gap() {
-        let slot = rr3_cmdline_current_slot(
-            "console=ttyS2,1500000 root=LABEL=rr_b rootwait rw quiet\n",
-        )
-        .unwrap();
+        let slot =
+            rr3_cmdline_current_slot("console=ttyS2,1500000 root=LABEL=rr_b rootwait rw quiet\n")
+                .unwrap();
         assert_eq!(slot, Rr3Slot::SlotB);
         let e = rr3_cmdline_current_slot("root=/dev/mmcblk0p3 rootwait\n").unwrap_err();
         assert!(e.contains("板上核对项"), "裸设备形态要点名不覆盖: {e}");

@@ -10,9 +10,8 @@ pub const RR3_SERVO_COMMAND_TOPIC: &str = "rr3-act/servo/command";
 pub const RR3_SERVO_STATE_TOPIC: &str = "rr3-act/servo/state";
 
 /// 启动自述：本子模块的总线面一行说明
-pub const SURFACE: &[&str] = &[
-    "servo: rpc rr3-act/servo/command (request) | publish rr3-act/servo/state (stream，限速)",
-];
+pub const SURFACE: &[&str] =
+    &["servo: rpc rr3-act/servo/command (request) | publish rr3-act/servo/state (stream，限速)"];
 
 /// config `[rr3-act.servo]` 的形状（解析与裁决的唯一依据）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,8 +34,7 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
     let angle = angle
         .as_u64()
         .ok_or_else(|| format!("angle_deg 必须是非负整数，收到 {angle}"))?;
-    let angle = u16::try_from(angle)
-        .map_err(|_| format!("angle_deg 超出 u16 范围: {angle}"))?;
+    let angle = u16::try_from(angle).map_err(|_| format!("angle_deg 超出 u16 范围: {angle}"))?;
     if !(cfg.angle_min_deg..=cfg.angle_max_deg).contains(&angle) {
         return Err(format!(
             "angle_deg={angle} 超出行程 [{}, {}]",
@@ -153,8 +151,7 @@ mod tests {
         let e =
             rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": 801}), &cfg()).unwrap_err();
         assert!(e.contains("时限上限"), "超上限拒收: {e}");
-        let e =
-            rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": 0}), &cfg()).unwrap_err();
+        let e = rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": 0}), &cfg()).unwrap_err();
         assert!(e.contains("大于 0"), "零时限拒收: {e}");
         let e =
             rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": "x"}), &cfg()).unwrap_err();
@@ -169,9 +166,15 @@ mod tests {
         assert!(gate.rr3_gate_allow(t0), "首拍必放");
         assert!(!gate.rr3_gate_allow(t0 + Duration::from_millis(10)));
         assert!(!gate.rr3_gate_allow(t0 + Duration::from_millis(49)));
-        assert!(gate.rr3_gate_allow(t0 + Duration::from_millis(50)), "恰好到窗放行");
+        assert!(
+            gate.rr3_gate_allow(t0 + Duration::from_millis(50)),
+            "恰好到窗放行"
+        );
         assert!(!gate.rr3_gate_allow(t0 + Duration::from_millis(60)));
-        assert!(gate.rr3_gate_allow(t0 + Duration::from_millis(110)), "窗从上次放行起算");
+        assert!(
+            gate.rr3_gate_allow(t0 + Duration::from_millis(110)),
+            "窗从上次放行起算"
+        );
     }
 
     #[test]

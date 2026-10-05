@@ -62,8 +62,7 @@ struct Root {
 
 impl Root {
     fn new(tag: &str) -> Root {
-        let dir =
-            std::env::temp_dir().join(format!("rr3-power-e2e-{}-{tag}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rr3-power-e2e-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir); // pid 复用留下的上次残根不许干扰本次
         std::fs::create_dir_all(dir.join("profiles")).expect("建 profiles 目录");
         Root { dir }
@@ -151,15 +150,18 @@ fn power_module_low_battery_fallback_end_to_end() {
     );
     let v = rr3_json_of(&st1);
     assert_eq!(v["percent"], 5, "env 注入的起表电量必须原样上总线: {v}");
-    assert_eq!(v["voltage_mv"], 3250, "电压曲线 3200mV + 10mV/1% 的派生值: {v}");
-    let seq1 = v["seq"].as_u64().unwrap_or_else(|| panic!("state 带 seq: {v}"));
+    assert_eq!(
+        v["voltage_mv"], 3250,
+        "电压曲线 3200mV + 10mV/1% 的派生值: {v}"
+    );
+    let seq1 = v["seq"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("state 带 seq: {v}"));
     let st2 = rr3_read_where(&mut obs, " battery/state 序列推进", |f| {
         matches!(
             frame_topic(f),
             Some((Rr3PayloadType::Event, t)) if t == "rr3-power/battery/state"
-        ) && rr3_json_of(f)["seq"]
-            .as_u64()
-            .is_some_and(|s| s > seq1)
+        ) && rr3_json_of(f)["seq"].as_u64().is_some_and(|s| s > seq1)
     });
     assert!(
         rr3_json_of(&st2)["seq"].as_u64().unwrap() > seq1,
@@ -174,7 +176,8 @@ fn power_module_low_battery_fallback_end_to_end() {
     });
     assert_eq!(ch.header.src_task, power_task);
     assert_eq!(
-        rr3_json_of(&ch)["charging"], false,
+        rr3_json_of(&ch)["charging"],
+        false,
         "未注入充电键，默认未充电（backend.rs 的缺省语义）"
     );
 
@@ -185,7 +188,10 @@ fn power_module_low_battery_fallback_end_to_end() {
         .args(["-f", &bin.display().to_string()])
         .status()
         .expect("起 pkill");
-    assert!(status.success(), "pkill 没匹配到模块进程（{bin:?}）——夹具错");
+    assert!(
+        status.success(),
+        "pkill 没匹配到模块进程（{bin:?}）——夹具错"
+    );
     rrd.rr3_wait_log("低电兜底：拒绝 spawn rr3-power");
     // 否定断言窗口：不得出现**真的** spawn 行。拒绝行是"拒绝 spawn rr3-power（全局…"，
     // 不含 " pid="，不会误触；真重启了必在这里现形。
@@ -198,16 +204,15 @@ fn power_module_low_battery_fallback_end_to_end() {
     let tail = rr3_collect_within(&mut obs, Duration::from_millis(500));
     let lows = tail
         .iter()
-        .filter(|f| {
-            matches!(frame_topic(f), Some((_, ref t)) if t == "rr3-power/battery/low")
-        })
+        .filter(|f| matches!(frame_topic(f), Some((_, ref t)) if t == "rr3-power/battery/low"))
         .count();
-    assert_eq!(lows, 0, "同一次低电段内 battery/low 不得重发；收尾帧: {tail:?}");
+    assert_eq!(
+        lows, 0,
+        "同一次低电段内 battery/low 不得重发；收尾帧: {tail:?}"
+    );
     let powers = tail
         .iter()
-        .filter(|f| {
-            matches!(frame_topic(f), Some((_, ref t)) if t == "rr3-runtime/system/power")
-        })
+        .filter(|f| matches!(frame_topic(f), Some((_, ref t)) if t == "rr3-runtime/system/power"))
         .count();
     assert_eq!(powers, 0, "rrd 侧上升沿恰一次，system/power 不得重复点名");
 }
