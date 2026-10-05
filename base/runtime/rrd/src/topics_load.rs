@@ -237,11 +237,11 @@ mod tests {
         (!out.as_os_str().is_empty()).then_some(out)
     }
 
-    /// 不带叠加层 = 生产面，25 条主题一个不多
+    /// 不带叠加层 = 生产面，28 条主题一个不多
     #[test]
     fn contract_only_load_is_the_production_surface() {
         let (set, added) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
-        assert_eq!(set.rr3_topic_set_names().len(), 25);
+        assert_eq!(set.rr3_topic_set_names().len(), 28);
         assert!(added.is_empty(), "没传叠加层就不该有新增条目");
         assert!(set.rr3_topic_set_contains("rr3-runtime/system/heartbeat"));
     }
@@ -250,7 +250,11 @@ mod tests {
     fn overlay_adds_fixture_topics_and_lists_them() {
         let (set, added) =
             rr3_topics_load(&contract(), Some(&fixture_overlay())).expect("夹具应能合并");
-        assert_eq!(set.rr3_topic_set_names().len(), 28, "25 契约 + 3 夹具");
+        assert_eq!(
+            set.rr3_topic_set_names().len(),
+            31,
+            "28 契约 + 3 夹具（0.0.4 批D 契约 25→28）"
+        );
         assert_eq!(added.len(), 3);
         assert!(added.contains(&"rr3-sima/ping/state".to_string()));
         assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
@@ -542,7 +546,11 @@ owner = "rr3-sima"
         );
 
         let (set, added) = rr3_topics_load(&contract(), Some(&rel)).expect("相对路径必须能装载");
-        assert_eq!(set.rr3_topic_set_names().len(), 28, "25 契约 + 3 夹具");
+        assert_eq!(
+            set.rr3_topic_set_names().len(),
+            31,
+            "28 契约 + 3 夹具（0.0.4 批D 契约 25→28）"
+        );
         assert_eq!(added.len(), 3);
     }
 

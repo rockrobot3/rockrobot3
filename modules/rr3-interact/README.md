@@ -26,7 +26,7 @@ std 手写 HTTP/1.1 子集（GET/POST + Content-Length，**零新 crates.io 依�
 env `RR3_PANEL_ADDR` 可改（板上 `0.0.0.0` 随装配单注入）——本面板是**局域网可信面**
 的调试工具，不承诺公网暴露，无鉴权是有意为之的边界声明。
 
-端点九个（legacy 面板四页签语义逐项承接；WiFi 配网页随批D 挂上）：
+端点十二个（legacy 面板四页签语义逐项承接；WiFi 配网页随 0.0.4 批D 挂上）：
 
 | 方法 | 路径 | 数据面 | 承接 legacy |
 |---|---|---|---|
@@ -39,6 +39,9 @@ env `RR3_PANEL_ADDR` 可改（板上 `0.0.0.0` 随装配单注入）——本面
 | POST | `/api/face` | 进程内动作通道（主循环代执行） | `/api/face` |
 | POST | `/api/selftest` | 并列三调（beep+relay+face），各答各展示，无依赖链**不算编排** | `/api/selftest` |
 | POST | `/api/reboot` | `rr3.ctl.reboot`（rrd 双重门缺省恒拒，面板如实转达拒因） | `/api/reboot` |
+| GET | `/api/wifi/scan` | `rr3.call` → `rr3-connect/wifi/scan`（sim 后端，`backend:"sim"` 诚实标注） | `/api/wifi/scan` |
+| POST | `/api/wifi/connect` | `rr3.call` → `rr3-connect/wifi/connect`（`ssid`/`pass` body 原样透传，参数裁决在 owner 模块） | `/api/wifi/connect` |
+| POST | `/api/wifi/forget` | `rr3.call` → `rr3-connect/wifi/forget`（系统页"恢复出厂 WiFi"同调此端点） | `/api/factory_reset`（WiFi 语义） |
 
 架构边界（`server.rs` 的 [`Rr3PanelDispatch`] 类型面钉死）：
 
@@ -60,7 +63,7 @@ env `RR3_PANEL_ADDR` 可改（板上 `0.0.0.0` 随装配单注入）——本面
 | publish | `rr3-interact/asr/text` | event |
 | publish | `rr3-interact/dialog/turn` | event |
 | subscribe | `rr3-brain/intent/result` | event |
-| subscribe | `rr3-connect/net/link` | event（面板状态页链路卡片数据源，0.0.4 批C 订阅；发布方 rr3-connect 随批D 上线） |
+| subscribe | `rr3-connect/net/link` | event（面板状态页链路卡片数据源，0.0.4 批C 订阅；0.0.4 批D 起负载带 `mode` 配网态字段，WiFi 页同源自此） |
 
 面板**不是第二条控制面**：它经 rr-bus 收发、与模块同权，不得绕过 rrd 的注册与
 前缀归属检查（ADR-0006 §裁定 3）。
