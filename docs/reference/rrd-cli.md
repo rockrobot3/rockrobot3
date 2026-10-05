@@ -27,8 +27,8 @@
 `cli.rs` 的 `USAGE` 常量是所有报错的尾巴，逐字如下（换行 = `\n`）：
 
 ```text
-用法: rrd [--socket <path>] [--topics-overlay <path>] [--profile <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]
-说明: --boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。--profile 与 --manifest 不得同给（Q3：profile 装机正门，--manifest 调试后门）。
+用法: rrd [--socket <path>] [--topics-overlay <path>] [--contracts <dir>] [--profile <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]
+说明: --contracts 定位包内契约目录（topics.toml/slots.toml，缺省编译期仓内路径——deb 装机必给）。--boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。--profile 与 --manifest 不得同给（Q3：profile 装机正门，--manifest 调试后门）。
 ```
 
 `-h` / `--help` 打印的就是这一串（`rr3_cli_parse_with_env` 的 `-h`/`--help` 分支）。多数参数错误也在文案第二段拼上它
@@ -47,6 +47,7 @@
 |---|---|---|---|---|
 | `--socket` | 路径 | `rr3_default_socket`：环境键 `RR3_BUS_PATH`（常量 `RR3_BUS_PATH_ENV`）优先，缺省回落 `RR3_UDS_PATH_DEFAULT`（值 `/var/run/rock3-ipc.sock`） | UDS 绑定路径；进横幅与 `UnixListener::bind` 前被绝对化 | `cli.rs 的 rr3_default_socket`、`rr3_cli_parse_with_env` 的 `RrdConfig` 初始化、`transport/mod.rs 的 RR3_UDS_PATH_DEFAULT 常量` |
 | `--topics-overlay` | 路径 | `None`（不加载） | 主题叠加层，**仅测试用**；`main.rs` 与装载入口各规范化一次（横幅凭证取 `main.rs` 那次、致命文案取装载入口那次，见 §4） | `rr3_cli_parse_with_env` 的 `--topics-overlay` 分支、`main` 的叠加层绝对化段、`topics_load.rs 的 rr3_overlay_resolved` |
+| `--contracts` | 目录 | `None`（编译期常量：仓内 `contracts/`，由 `CARGO_MANIFEST_DIR` 拼出） | 契约目录的**运行期落点**（0.0.2 T5）：topics 与 slots 共用 `rr3_contracts_dir` 解析——显式给值时原样使用，缺省回落编译期仓内路径（仓内开发零变化）；deb 装机后编译期路径不存在，payload 必须显式指向包内 `/usr/lib/rockrobot3/contracts`。显式值**不单独规范化、无横幅凭证行**——存在性检查落在 join 出的 `topics.toml` / `slots.toml` 上，由装载入口各自 canonicalize（见 §4） | `rr3_cli_parse_with_env` 的 `--contracts` 分支、`RrdConfig 的 contracts 字段`、`topics_load.rs 的 rr3_contracts_dir`、`profile.rs 的 rr3_profile_boot_inputs`（`slots_path` 参数） |
 | `--profile` | 路径 | `None`（不装载） | **装配单**（0.0.2 Q3 的装机**正门**）：`[bindings]`/`[faces]` 决定起谁，装载/查册/缺格判定/manifest 解析全部在 bind 之前完成；缺格只逐条点名"拒绝启动"降级该模块，**不是**致命项。与 `--manifest` 同给当场拒（§3） | `rr3_cli_parse_with_env` 的 `--profile` 分支、`main` 的装配单绝对化段、`profile.rs 的 rr3_profile_boot_inputs` |
 | `--manifest` | 路径，**可重复** | 空表，顺序原样保留 | 待启动模块的 manifest（调试**后门**，Q3）；约定为绝对路径 | `rr3_cli_parse_with_env` 的 `--manifest` 分支 |
 | `--restart-base-ms` | 整数毫秒 | `1000` | 重启退避基数：`delay_ms` = 表值 × base；下界 1、上界 `RR3_RESTART_BASE_MS_MAX` | `rr3_cli_parse_with_env` 的 `--restart-base-ms` 分支、`cli.rs 的 RR3_RESTART_BASE_MS_MAX 常量` |
@@ -55,7 +56,7 @@
 | `--boot-role` | 字符串 | `resident` | **原样透传、rrd 不校验取值**（E-6）：值进 boot 子进程的环境键 `RR3_SIM_PEER_ROLE`，合法集是**夹具**（`sim_peer`）的约定，不是守护进程的契约——rrd 一旦校验就要跟着夹具新增的脚本改，那是第二处真值；真设备模块根本不读这个变量。空值与疑似开关的值在 parse 处当场拒（见 §3） | `rr3_cli_parse_with_env` 的 `--boot-role` 分支、`RrdConfig 的 boot_role 字段`、`rr3_cli_parse_with_env` 的 `RrdConfig` 初始化 |
 | `-h` / `--help` | 无值 | — | 向 stdout 打印 `USAGE`，**然后继续解析并继续启动**：解析器没有短路分支，退出码不由这条决定 | `rr3_cli_parse_with_env` 的 `-h`/`--help` 分支 |
 
-`RrdConfig` 的字段名（供调用库版本的读者）：`socket`、`overlay`、`profile`、`manifests`、
+`RrdConfig` 的字段名（供调用库版本的读者）：`socket`、`overlay`、`contracts`、`profile`、`manifests`、
 `restart_base_ms`、`pre_register_timeout_ms`、`watchdog_tick_ms`、`boot_role`（`cli.rs 的 RrdConfig 结构体`）。
 `watchdog_tick_ms` 有两个消费者：watchdog 线程的 `tick_ms` 与 supervisor 的扫尸节拍
 （E-5 复用同一值，`daemon.rs` 的 `rr3_daemon_run` → `rr3_spawn_watchdog` / `rr3_spawn_supervisor`）；
@@ -120,9 +121,10 @@ Q3 裁定"两路径共用仲裁与 spawn，不双真值"指的就是这里。进
 | `--socket` | `rr3_socket_absolute_path` → `std::path::absolute`（`cli.rs 的 rr3_socket_absolute_path`） | `bind` 之前套接字文件**必然还不存在**，`canonicalize` 会以 ENOENT 拒掉一个完全合法的待创建路径；代价是不解析符号链接 | `套接字路径 {path} 无法解析为绝对路径: {e}`，`main.rs` 打印时前缀 `rrd: ` |
 | `--topics-overlay` | `rr3_topics_absolute_path` → `std::fs::canonicalize`（`topics_load.rs 的 rr3_topics_absolute_path`） | 叠加层必须**已经存在**才可装载；横幅那行是"叠加层已生效"的可见凭证，按 CLI 原词回显会让凭证内容依赖 CWD。**注意 `2f3453a` 起分两次规范化**：`main.rs` 这次只给横幅凭证，装载入口 `rr3_overlay_resolved`（`topics_load.rs 的 rr3_overlay_resolved`）**独立**再 canonicalize 一次给致命文案——同工具、同结果，但**不是共用同一个返回值**（详见 [`../status.md`](../status.md)） | `路径 {path} 无法解析为绝对路径: {e}`，`main.rs` 前缀为 `rrd: 主题叠加层参数不可用: ` |
 | `--profile` | `rr3_profile_absolute_path` → `std::fs::canonicalize`（`profile.rs 的 rr3_profile_absolute_path`） | 装配单必须**已经存在**才可装载（与主题契约/叠加层同一理据）；`main.rs` 那次给横幅凭证，装载入口 `rr3_profile_boot_inputs` **独立**再 canonicalize 一次给致命文案——与叠加层同形（同工具、同结果、不是同一份返回值）；modules-root 的定位也派生自这份规范化结果 | `路径 {path} 无法解析为绝对路径: {e}`，`main.rs` 前缀为 `rrd: 装配单参数不可用: ` |
+| `--contracts` | 无独立函数——显式值**原样使用**（`topics_load.rs 的 rr3_contracts_dir`：`Some` 原样 / `None` 回编译期常量） | 目录只是 topics/slots 的**前缀**，真正的存在性检查落在 join 出的文件上、由装载入口各自 canonicalize——目录不存在时 ENOENT 由 join 后那一份报，报错文案自带完整路径，前缀单独规范化是多余的一手 | topics：`读不到主题契约 {path}: {e}`（`rr3_contract_resolved`）；slots：`读不到格位契约 {path}: {e}`（`rr3_profile_boot_inputs` 的 `slots_path` 段） |
 | 契约主题路径 | `rr3_contract_resolved` → `std::fs::canonicalize`（`topics_load.rs 的 rr3_contract_resolved`） | `RR3_CONTRACT_TOPICS_PATH` 由 `CARGO_MANIFEST_DIR` 拼出、字面就带 `..`；不规范化则致命文案里漏出 `..`，运维按**自己**的 CWD 展开会查错文件 | `读不到主题契约 {path}: {e}`，`main.rs` 前缀为 `rrd: 主题装载失败: ` |
 
-四处都不静默回落原词（`cli.rs 的 rr3_socket_absolute_path`、`topics_load.rs 的 rr3_topics_absolute_path`、`profile.rs 的 rr3_profile_absolute_path`、`topics_load.rs 的 rr3_contract_resolved`）；叠加层与装配单都在横幅凭证与装载入口各规范化一次（`topics_load.rs 的 rr3_overlay_resolved`、`profile.rs 的 rr3_profile_boot_inputs`），工具与结果一致，只是不是同一份返回值。
+四处都不静默回落原词（`cli.rs 的 rr3_socket_absolute_path`、`topics_load.rs 的 rr3_topics_absolute_path`、`profile.rs 的 rr3_profile_absolute_path`、`topics_load.rs 的 rr3_contract_resolved`）；叠加层与装配单都在横幅凭证与装载入口各规范化一次（`topics_load.rs 的 rr3_overlay_resolved`、`profile.rs 的 rr3_profile_boot_inputs`），工具与结果一致，只是不是同一份返回值。`--contracts` 是唯一的例外面：目录本身不规范化（上表），存在性由 join 出的 topics/slots 各自把关。
 
 ## 5 启动序列、输出流与退出码
 
@@ -134,9 +136,9 @@ Q3 裁定"两路径共用仲裁与 spawn，不双真值"指的就是这里。进
 | 2 | 套接字路径绝对化（**在横幅之前**） | `rrd: ` + 文案，退码 1 | stderr（`main` 的套接字绝对化段） |
 | 3 | 叠加层路径绝对化（若给了） | `rrd: 主题叠加层参数不可用: ` + 文案，退码 1 | stderr（`main` 的叠加层绝对化段） |
 | 4 | 装配单路径绝对化（若给了） | `rrd: 装配单参数不可用: ` + 文案，退码 1 | stderr（`main` 的装配单绝对化段） |
-| 5 | `rr3_topics_load`：契约 →（可选）叠加层合并 | 每条装载错误一行 `rrd: 主题装载失败: {e}`，退码 1。**两个平台都装**：契约坏了要当场看见，而不是"等不到 UDS" | stderr（`main` 的 `rr3_topics_load` 调用段） |
+| 5 | `rr3_topics_load`：契约（由 `--contracts` 目录定位，缺省编译期仓内路径）→（可选）叠加层合并 | 每条装载错误一行 `rrd: 主题装载失败: {e}`，退码 1。**两个平台都装**：契约坏了要当场看见，而不是"等不到 UDS" | stderr（`main` 的 `rr3_topics_load` 调用段） |
 | 6 | 打印横幅（+ 叠加层凭证行、+ 装配单凭证行） | — | stdout（`main` 的横幅打印段） |
-| 7 | `rr3_run`：Unix 交 `rr3_daemon_run`；非 Unix 打 `RRD_UNSUPPORTED` 退 1 | bind 失败、boot 仲裁 fatal 与装配链致命（装配单读不到 / 形状不合 / 查册未命中 / 结构不自洽；**缺格不是致命项**，只逐条点名）文案上 stderr，退码 1 | — |
+| 7 | `rr3_run`：Unix 交 `rr3_daemon_run`；非 Unix 打 `RRD_UNSUPPORTED` 退 1 | bind 失败、boot 仲裁 fatal 与装配链致命（装配单读不到 / **格位契约（slots.toml）读不到** / 形状不合 / 查册未命中 / 结构不自洽；**缺格不是致命项**，只逐条点名）文案上 stderr，退码 1 | — |
 
 运行期日志走 `rr3_log`：**stdout**、行首固定 `rrd: `（`lib.rs 的 rr3_log`）。集成侧的可观察面
 全靠这一行首前缀，别把它当噪声。
