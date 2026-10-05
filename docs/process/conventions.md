@@ -727,6 +727,21 @@ fmt/clippy 清零。
 文案在册）。断链面同批清理：根 README 双语的 legacy 行改指 digest 归档台账、
 docs/README 库地图三处描述更新。①b/②/②b/③/④ 全绿（测试条数全不变），⑤ 门以
 删除后的 md 全集重跑；fmt/clippy 不涉及。
+2026-10-05 0.0.4 批G（status.md 重锚 `68d0da9` + conventions 汇总收口，D7）**零代码
+改动，纯文档重锚批**：status.md 按"收口时整篇重写"规矩重锚——锚点行 `68220e4`→`68d0da9`；
+RPC 行"四方法"→"十方法（模块四 + 控制六）"（批B `rr3.ctl.counters` / 批C `rr3.ctl.reboot`
+append）；主题注册表行补批D 25→28 append；**新增"运维计数面"行**（批B 全证据链：
+client.rs 心跳镜像 + bus.py 同语义镜像 + rpc.rs 形状裁决 + registry.rs 聚合 +
+counters.rs 原子写持久化）；sense/interact 行补面板证据（批C+D 十二端点 + 四页签）；
+connect 行补配网面三 RPC（批D）与蓝牙骨架（批E，主题不登记理由在册）；rr3-ctl 行
+改六方法口径（reboot 双重门 cfg(linux)+`RR3_REBOOT_OK=1`、rrctl CLI 子命令面仍四条
+如实标注——两新方法的读写面走面板透传）；里程碑表头锚点随改 + M5 行补批D 配网面
+收口；在制品段列 0.0.3 批E 与 0.0.4 批A–F 八提交（标题逐一照 git log 抄录）；
+无法收口表：第 1 条指针随重锚更新、第 2 条 idf.py 密钥门**随 legacy 删除注销**
+（验证对象不在工作树，固件线复活再重开）、第 3 条 key 轮换措辞订正（批F 只清
+工作树，历史提交对象里 key 依旧在，提供方侧敞口不闭）。contracts/README 演进登记
+批G 零契约改动（25→28 已随批D 登记），无需新改。①b/②/②b/③/④ 全绿（测试条数
+全不变），⑤ 门全仓 md 全集重跑；fmt/clippy 不涉及。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
