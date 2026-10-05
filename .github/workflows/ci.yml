@@ -83,3 +83,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: deb 装机冒烟（rust:bookworm 容器）
         run: bash tools/ci/distro-smoke.sh
+
+  # 保底轨装配冒烟（0.0.2 修复批）：post-build.sh 装机布局 / entry 绝对化 /
+  # config 随装 / 坏模块警告不阻断。纯 bash + 系统工具，夹具侧模拟 Buildroot
+  # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
+  buildroot-assembly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 保底轨装配冒烟（post-build.sh）
+        run: bash tools/ci/buildroot-assembly-smoke.sh

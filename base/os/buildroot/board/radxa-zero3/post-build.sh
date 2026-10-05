@@ -8,7 +8,9 @@
 #   2. /var/run tmpfs（rrd 默认 UDS 路径 /var/run/rock3-ipc.sock 落在易失区，
 #      避免残留旧 socket 文件跨重启干扰 bind）；
 #   3. data / rr_staging 挂载点（分区标签见 genimage.cfg，rr-ota 守护用例钉死）；
-#   4. rrd 与模块产物安装位（交叉编译产物经 $BINARIES_DIR 注入，不在 Buildroot 里编译）。
+#   4. rrd 与模块产物安装位（交叉编译产物经 $BINARIES_DIR 注入，不在 Buildroot 里编译；
+#      manifest 归位 /usr/lib/rr3/modules/<name>/module.toml，entry 改写为装机绝对路径，
+#      config 从仓源随装——线上注册门禁拒绝相对 entry，模块开机即读同目录 config）。
 
 set -eu
 TARGET="${TARGET_DIR:?post-build.sh 需要 TARGET_DIR（Buildroot 提供）}"
@@ -16,7 +18,6 @@ TARGET="${TARGET_DIR:?post-build.sh 需要 TARGET_DIR（Buildroot 提供）}"
 # ---- 4. 产物安装位与目录骨架 -------------------------------------------------
 install -d -m 0755 \
 	"$TARGET/usr/bin" \
-	"$TARGET/usr/lib/rr3/manifest" \
 	"$TARGET/usr/lib/rr3/modules" \
 	"$TARGET/var/lib/rr3/staging" \
 	"$TARGET/data" \
@@ -32,15 +33,80 @@ for bin in rrd rr3-ctl; do
 		echo "post-build.sh: 警告：$BINARIES_DIR/$bin 缺席，跳过安装（产物注入未完成）" >&2
 	fi
 done
+
+# 模块注入：$BINARIES_DIR/rr3-modules/<name>/{bin,manifest.toml}（两轨同源注入格式，
+# 快路轨 rr3-pack 读同一格式，两轨不互抄装配）。装机布局对齐装配单语义：
+#   /usr/lib/rr3/modules/<name>/{module.toml,<entry>,config.toml}
+# 三处与旧版不同（0.0.2 保底轨修复，与快路轨 rr3-pack 同一套裁定）：
+#   a. manifest 不再平铺 /usr/lib/rr3/manifest/<name>.toml——模块 rr3_config_load 读
+#      manifest 同目录 config.toml，平铺下各模块 config 全部撞同一文件名，且 bin 的
+#      相对 entry 解析到 manifest 所在目录必错位；
+#   b. entry 改写为装机绝对路径（rr3-pack rr3_manifest_install_rewrite 同语义）：
+#      模块开机读装机 manifest 原文上报，线上注册门禁拒绝相对值；
+#   c. config 源真值从仓 modules/<name>/config.toml 随装（不是构建产物，不进注入格式；
+#      仓根定位可用环境变量 RR3_REPO_ROOT 覆盖，缺省按脚本位置上溯五级）。
+# 缺件 / entry 不可装机 = 警告 + 整模块跳过，与上面 rrd/rr3-ctl 缺席同口径：
+# 镜像结构仍应可构建，产物齐装是板上收口项；但缺件还装 manifest 的话，rrd 会
+# spawn 一个必退出的模块（重启环），故缺件时 manifest 一并不装。
+REPO_ROOT="${RR3_REPO_ROOT:-}"
+if [ -z "$REPO_ROOT" ]; then
+	REPO_ROOT="$(cd "$(dirname "$0")/../../../../.." 2>/dev/null && pwd || true)"
+fi
 if [ -d "$BINARIES_DIR/rr3-modules" ]; then
-	# 约定：$BINARIES_DIR/rr3-modules/<name>/{bin,manifest.toml}，逐模块就位
 	for mod_dir in "$BINARIES_DIR"/rr3-modules/*/; do
 		name="$(basename "$mod_dir")"
-		install -d "$TARGET/usr/lib/rr3/modules/$name"
-		[ -f "$mod_dir/manifest.toml" ] && \
-			install -m 0644 "$mod_dir/manifest.toml" "$TARGET/usr/lib/rr3/manifest/$name.toml"
-		[ -f "$mod_dir/bin" ] && \
-			install -m 0755 "$mod_dir/bin" "$TARGET/usr/lib/rr3/modules/$name/bin"
+		mod_dst="$TARGET/usr/lib/rr3/modules/$name"
+		if [ ! -f "$mod_dir/manifest.toml" ]; then
+			echo "post-build.sh: 警告：模块 $name 缺 manifest.toml，整模块跳过" >&2
+			continue
+		fi
+		if [ ! -f "$mod_dir/bin" ]; then
+			echo "post-build.sh: 警告：模块 $name 缺 bin，整模块跳过（缺 bin 还装 manifest 必重启环）" >&2
+			continue
+		fi
+		# entry 行必须恰一条（rr3-pack 同门）：多行语义不明，零行不可装配
+		entry_n="$(grep -c '^entry[[:space:]]*=' "$mod_dir/manifest.toml" || true)"
+		if [ "$entry_n" != "1" ]; then
+			echo "post-build.sh: 警告：模块 $name 的 manifest 有 $entry_n 条 entry 行（须恰一条），整模块跳过" >&2
+			continue
+		fi
+		entry_rel="$(sed -n 's/^entry[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$mod_dir/manifest.toml" | head -n 1)"
+		if [ -z "$entry_rel" ]; then
+			echo "post-build.sh: 警告：模块 $name 的 entry 行不可解析（须双引号值），整模块跳过" >&2
+			continue
+		fi
+		# entry 必须可装机：仓相对、不含 . / .. 段；且不含 sed 分隔符 |（改写安全）
+		case "$entry_rel" in
+			/*|.|..|./*|../*|*/.|*/..|*/./*|*/../*|*\|*)
+				echo "post-build.sh: 警告：模块 $name entry 不可装机（$entry_rel：绝对路径 / . 与 .. 段 / 含 |），整模块跳过" >&2
+				continue
+				;;
+		esac
+		entry_dir="$(dirname "$entry_rel")"
+		if [ "$entry_dir" = "." ]; then
+			install -d "$mod_dst"
+		else
+			install -d "$mod_dst/$entry_dir"
+		fi
+		# bin 按入口落位：注入格式的固定名 bin 装到 entry 指向的装机相对路径
+		install -m 0755 "$mod_dir/bin" "$mod_dst/$entry_rel"
+		# entry 绝对化：仅引号内的值换成装机绝对路径，其余字节原样
+		sed "s|entry\([[:space:]]*=[[:space:]]*\)\"[^\"]*\"|entry\1\"/usr/lib/rr3/modules/$name/$entry_rel\"|" \
+			"$mod_dir/manifest.toml" > "$mod_dst/module.toml.tmp"
+		chmod 0644 "$mod_dst/module.toml.tmp"
+		mv "$mod_dst/module.toml.tmp" "$mod_dst/module.toml"
+		# 改写复核：装机 manifest 的 entry 必须恰为新绝对路径（防同型错位回归）
+		check="$(sed -n 's/^entry[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$mod_dst/module.toml" | head -n 1)"
+		if [ "$check" != "/usr/lib/rr3/modules/$name/$entry_rel" ]; then
+			echo "post-build.sh: 警告：模块 $name entry 改写复核不一致（得 $check），整模块跳过" >&2
+			rm -rf "$mod_dst"
+			continue
+		fi
+		if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/modules/$name/config.toml" ]; then
+			install -m 0644 "$REPO_ROOT/modules/$name/config.toml" "$mod_dst/config.toml"
+		else
+			echo "post-build.sh: 警告：模块 $name 的 config.toml 未随装（RR3_REPO_ROOT=$REPO_ROOT 下 modules/$name/config.toml 缺席）——模块开机即读 manifest 同目录 config，缺件必重启环" >&2
+		fi
 	done
 fi
 
@@ -68,7 +134,7 @@ case "$1" in
 	start)
 		[ -x /usr/bin/rrd ] || exit 0
 		ARGS=""
-		for m in /usr/lib/rr3/manifest/*.toml; do
+		for m in /usr/lib/rr3/modules/*/module.toml; do
 			[ -e "$m" ] && ARGS="$ARGS --manifest $m"
 		done
 		start-stop-daemon -S -b -m -p /var/run/rrd.pid \
