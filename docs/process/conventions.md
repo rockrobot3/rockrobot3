@@ -837,6 +837,15 @@ distro-smoke.sh 产物文件名。本机 stage 演练全绿：staging 布局断�
 "aarch64 静态 ELF 体检"与"entry 已装机绝对化"两条新断言；真装（scp 传板 →
 板上 dpkg-deb --build + dpkg -i → 巡检）归批D，手册批C 落。rr3-pack 单测 5 条
 全过、七步门禁全绿。
+2026-10-05 0.0.6 批C（部署手册 boards/raspberry-pi-64.md——真板操作规程与实测
+回填骨架）新增 `base/os/distro/boards/raspberry-pi-64.md`（boards/"一板一文件"
+纪律首件）：镜像烧写（Imager + Bookworm Lite 64-bit、SSH 预配）→ 宿主出包
+（pack-arm64.sh）→ 传板真装（板上 dpkg-deb --build + dpkg -i）→ 起链与巡检
+（systemctl / rr3-ctl 三查 / reboot 自恢复）四段操作规程；§4 验收判据逐条引用
+0.0.6 方案 §5.2（六条）；§5 已知边界（probe sim 未接线、RR3_HAL_BACKEND 板上
+不设、真硬件批次归属、brain 不在包内）逐条诚实标注；§6 实测回填表留空待批D
+填写（未测项不预填）。distro/README 的 boards 条目加指针。零代码改动，纯文档批。
+①a–⑤ 全绿重跑。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
