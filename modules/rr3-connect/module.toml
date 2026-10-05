@@ -17,9 +17,14 @@ optional = ["net.online"]
 publishes = ["rr3-connect/net/link"]
 subscribes = []
 
-# 云端会话是请求/应答事务面，不是事件
+# 云端会话与配网面都是请求/应答事务面，不是事件
 [rpc]
-exposes = ["rr3-connect/cloud/session"]
+exposes = [
+    "rr3-connect/cloud/session",
+    "rr3-connect/wifi/scan",
+    "rr3-connect/wifi/connect",
+    "rr3-connect/wifi/forget",
+]
 
 [resources]
 restart_policy = "always"

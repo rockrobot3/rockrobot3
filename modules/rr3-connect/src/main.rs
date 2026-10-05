@@ -1,13 +1,17 @@
-//! rr3-connect 真入口（0.0.2 T4c）：net/link 状态机周期流 + cloud/session 应答面。
+//! rr3-connect 真入口（0.0.2 T4c + 0.0.4 批D 配网面）：net/link 状态机周期流 +
+//! cloud/session 应答面 + wifi/scan|connect|forget 三 RPC。
 //!
 //! 启动序列与 rr3-act/rr3-power 同构：读 `RR3_MANIFEST`（rrd spawn 注入的
 //! manifest 绝对路径，supervisor.rs）→ [`Rr3BusClient::rr3_connect`] → 读
 //! config.toml → 选 HAL 链路面并**开机探活**（Unsupported 即 exit(1)：能力缺失
 //! 显式回错，不静默带病常驻）→ 主循环。主循环做两件事：
-//! 1. 应答本模块 exposes 的唯一点名 `cloud/session`（action=open；链路未就绪折
-//!    error 应答回话，业务性失败不断链）；
+//! 1. 应答本模块 exposes 的四个点名：`cloud/session`（action=open；链路未就绪
+//!    折 error 应答回话）与配网面三 RPC（0.0.4 批D：scan 回 sim 模拟列表、
+//!    connect/forget 改 [`wifi::Rr3Provision`] 状态机与内存凭据——业务性失败折
+//!    error 应答回话，请求-应答语义不当致命错误）；
 //! 2. 链路拍：每圈读一次 HAL 链路状态——翻转（`Rr3LinkEdge`）立即发
-//!    `net/link` 不等周期；同态到点才发（周期保底，流是摘要不是逐拍镜像）。
+//!    `net/link` 不等周期；同态到点才发（周期保底，流是摘要不是逐拍镜像）；
+//!    事件体带 `mode` 字段（配网态 ap|station，随流发布）。
 //!
 //! 失败语义与 sense/interact/act/power 同一口径：HAL 读数失败、发布/应答写不
 //! 出去都是传输性/设备级，`eprintln` + `exit(1)` 交 supervisor 按
@@ -37,8 +41,13 @@ const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
 /// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
 const RR3_CONNECT_CONFIG_ENV: &str = "RR3_CONNECT_CONFIG";
 
-/// 事务面唯一主题（module.toml [rpc].exposes 同源；topics.toml owner=rr3-connect）
+/// 会话点名（module.toml [rpc].exposes 同源；topics.toml owner=rr3-connect）
 const RR3_SESSION_TOPIC: &str = "rr3-connect/cloud/session";
+
+/// 配网面三主题（0.0.4 批D：topics.toml/manifest/pin 三处同批改）
+const RR3_WIFI_SCAN_TOPIC: &str = "rr3-connect/wifi/scan";
+const RR3_WIFI_CONNECT_TOPIC: &str = "rr3-connect/wifi/connect";
+const RR3_WIFI_FORGET_TOPIC: &str = "rr3-connect/wifi/forget";
 
 /// 发布面唯一主题（module.toml [events].publishes 同源）
 const RR3_LINK_TOPIC: &str = "rr3-connect/net/link";
@@ -93,7 +102,9 @@ fn rr3_run() -> Result<(), String> {
     );
 
     // 主循环状态：状态机 + 流序 + 周期拍点（首拍由状态机的基线分支保证必发）
+    // + 配网状态机（凭据内存态，net/link 的 mode 词汇随流发布）
     let mut edge = wifi::Rr3LinkEdge::rr3_link_edge_new();
+    let mut prov = wifi::Rr3Provision::rr3_provision_new();
     let mut link_seq: u64 = 0;
     let mut next_report = Instant::now();
 
@@ -118,11 +129,16 @@ fn rr3_run() -> Result<(), String> {
                 let args = params.get("args").cloned().unwrap_or(Value::Null);
 
                 // 业务性失败折 error 应答（请求-应答语义），不当致命错误；
-                // HAL 读数失败也按业务性折 error（会话建立本来就是问"现在能不能"）
+                // HAL 读数失败也按业务性折 error（会话/配网本来就是问"现在能不能"）
                 let reply = match topic {
                     RR3_SESSION_TOPIC => rr3_handle_session(dev.as_ref(), &args),
+                    RR3_WIFI_SCAN_TOPIC => rr3_handle_wifi_scan(&args),
+                    RR3_WIFI_CONNECT_TOPIC => {
+                        rr3_handle_wifi_connect(dev.as_ref(), &mut prov, &args)
+                    }
+                    RR3_WIFI_FORGET_TOPIC => rr3_handle_wifi_forget(&mut prov, &args),
                     other => Err(format!(
-                        "rr3-connect 只 exposes {RR3_SESSION_TOPIC}，收到 {other}"
+                        "rr3-connect 只 exposes {RR3_SESSION_TOPIC} 与 wifi/scan|connect|forget，收到 {other}"
                     )),
                 };
                 let reply = reply.unwrap_or_else(|e| json!({ "error": e }));
@@ -139,7 +155,8 @@ fn rr3_run() -> Result<(), String> {
             rr3_block_on(dev.state()).map_err(|e| format!("链路读数失败（{backend}）: {e}"))?;
         if edge.rr3_link_edge_cross(st.up) || now >= next_report {
             link_seq += 1;
-            bus.rr3_publish(RR3_LINK_TOPIC, wifi::rr3_link_body(link_seq, &st))?;
+            let mode = prov.rr3_provision_mode();
+            bus.rr3_publish(RR3_LINK_TOPIC, wifi::rr3_link_body(link_seq, &st, mode))?;
             next_report = now + Duration::from_millis(cfg.0.link_report_period_ms);
         }
     }
@@ -152,6 +169,34 @@ fn rr3_handle_session(dev: &dyn rr_hal::Rr3Link, args: &Value) -> Result<Value, 
     let v = session::rr3_session_result(&st)?;
     println!("session: opened ssid={:?}", v["ssid"]);
     Ok(v)
+}
+
+/// wifi/scan 点名：无参裁决 → sim 模拟列表（backend=sim 诚实标注）
+fn rr3_handle_wifi_scan(args: &Value) -> Result<Value, String> {
+    wifi::rr3_wifi_scan_parse_args(args)?;
+    Ok(wifi::rr3_wifi_scan_result())
+}
+
+/// wifi/connect 点名：参数裁决（legacy 语义）→ 存凭据转 station →
+/// connected 如实取链路读数回执
+fn rr3_handle_wifi_connect(
+    dev: &dyn rr_hal::Rr3Link,
+    prov: &mut wifi::Rr3Provision,
+    args: &Value,
+) -> Result<Value, String> {
+    let (ssid, pass) = wifi::rr3_wifi_connect_parse_args(args)?;
+    let st = rr3_block_on(dev.state()).map_err(|e| format!("链路读数失败: {e}"))?;
+    prov.rr3_provision_connect(ssid.clone(), pass);
+    println!("wifi: connect ssid={ssid} mode=station（凭据内存不落盘）");
+    Ok(wifi::rr3_wifi_connect_result(&st, &ssid))
+}
+
+/// wifi/forget 点名：无参裁决 → 清凭据回 ap（恢复出厂 WiFi ≠ M6 整机恢复出厂）
+fn rr3_handle_wifi_forget(prov: &mut wifi::Rr3Provision, args: &Value) -> Result<Value, String> {
+    wifi::rr3_wifi_forget_parse_args(args)?;
+    prov.rr3_provision_forget();
+    println!("wifi: forget mode=ap");
+    Ok(wifi::rr3_wifi_forget_result())
 }
 
 /// config.toml 解析：env 覆盖优先，缺省 manifest 同目录。

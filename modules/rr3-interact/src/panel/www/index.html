@@ -1,7 +1,8 @@
 <!doctype html>
-<!-- 洛克三号面板（0.0.4 批C）：单文件静态页，无外部资源，vanilla JS。
-     数据面九端点：状态页签 = /api/status；硬件页签 = relay/beep/face/selftest；
-     系统页签 = /api/data + /api/logs + reboot；WiFi 页签随批D 配网上线。 -->
+<!-- 洛克三号面板（0.0.4 批C + 批D）：单文件静态页，无外部资源，vanilla JS。
+     数据面十二端点：状态页签 = /api/status；硬件页签 = relay/beep/face/selftest；
+     系统页签 = /api/data + /api/logs + reboot + 恢复出厂 WiFi（/api/wifi/forget）；
+     WiFi 页签 = /api/wifi/scan|connect|forget（rr3-connect 三 RPC，0.0.4 批D 上线）。 -->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -30,6 +31,7 @@
   .btn.warn { background:var(--bad); color:#1c0d0d; }
   .btn.off { background:var(--line); color:var(--fg); }
   select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 10px; font-size:14px; }
+  input { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 10px; font-size:14px; width:200px; margin-right:8px; }
   pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:320px; font-size:12px; margin:0; white-space:pre-wrap; word-break:break-all; }
   .msg { color:var(--dim); min-height:20px; margin-top:6px; font-size:13px; }
   .ok { color:var(--ok); } .bad { color:var(--bad); }
@@ -103,13 +105,30 @@
     <button class="btn warn" onclick="reboot()">重启整机</button>
     <div class="msg" id="reboot-msg">需 rrd 执行面解锁：cfg(linux) 且 env RR3_REBOOT_OK=1（由 rr3.service 注入）。</div>
   </div>
+  <div class="card">
+    <h2>恢复出厂 WiFi（rr3.call → rr3-connect/wifi/forget）</h2>
+    <button class="btn warn" onclick="wifiForget()">清除 WiFi 凭据</button>
+    <div class="msg" id="wifi-reset-msg">仅清配网凭据回 AP 态；≠ 整机恢复出厂（M6 分区回滚，两语义不合并）。</div>
+  </div>
 </section>
 
 <section id="tab-wifi">
   <div class="card">
-    <h2>WiFi 配网</h2>
-    <p class="ph">配网面（扫描 / 连接 / 忘记）随 0.0.4 批D 上线：rr3-connect 三 RPC
-    就位后本页签接管 legacy 面板的 /api/wifi/* 语义。</p>
+    <h2>扫描（rr3.call → rr3-connect/wifi/scan，sim 后端）</h2>
+    <button class="btn" onclick="wifiScan()">扫描</button>
+    <table id="wifi-list"><thead><tr><th>SSID</th><th>信号</th><th>加密</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="wifi-scan-msg"></div>
+  </div>
+  <div class="card">
+    <h2>连接（rr3.call → rr3-connect/wifi/connect）</h2>
+    <p class="ph">SSID <input id="wifi-ssid" placeholder="家庭 WiFi 名称"> 密码 <input id="wifi-pass" type="password" placeholder="至少 8 位"></p>
+    <button class="btn" onclick="wifiConnect()">连接</button>
+    <div class="msg" id="wifi-connect-msg">sim 后端凭据不落盘（重启即忘），真持久化随板上批次。</div>
+  </div>
+  <div class="card">
+    <h2>忘记网络（rr3.call → rr3-connect/wifi/forget）</h2>
+    <button class="btn off" onclick="wifiForget()">忘记当前网络</button>
+    <div class="msg" id="wifi-forget-msg"></div>
   </div>
 </section>
 
@@ -150,7 +169,7 @@ async function refreshStatus() {
         .forEach((t) => tr.insertCell().textContent = t);
     }
     setMsg("health-msg", tb.rows.length ? "" : "总线上暂无在册模块");
-    $("link").textContent = v.link ? JSON.stringify(v.link, null, 2) : "暂无链路事件（发布方随批D 配网上线）";
+    $("link").textContent = v.link ? JSON.stringify(v.link, null, 2) : "暂无链路事件";
     $("link").className = v.link ? "" : "ph";
   } catch (e) { setMsg("health-msg", "状态拉取失败：" + e.message, false); }
 }
@@ -201,6 +220,38 @@ async function reboot() {
   if (!confirm("确认重启整机？")) return;
   try { const v = await api("/api/reboot", {}); setMsg("reboot-msg", "重启指令已受理：" + JSON.stringify(v), true); }
   catch (e) { setMsg("reboot-msg", "被拒：" + e.message, false); }
+}
+// ---- WiFi 页签（0.0.4 批D：connect 三 RPC，参数裁决在 owner 模块） ----
+async function wifiScan() {
+  setMsg("wifi-scan-msg", "扫描中……");
+  try {
+    const v = await api("/api/wifi/scan");
+    const tb = $("wifi-list").tBodies[0];
+    tb.innerHTML = "";
+    for (const it of v.result.items || []) {
+      const tr = tb.insertRow();
+      tr.insertCell().textContent = it.ssid;
+      tr.insertCell().textContent = it.rssi + " dBm";
+      tr.insertCell().textContent = it.auth ? "是" : "开放";
+    }
+    setMsg("wifi-scan-msg", (v.result.items || []).length + " 个网络（backend=" + v.result.backend + "）", true);
+  } catch (e) { setMsg("wifi-scan-msg", "扫描失败：" + e.message, false); }
+}
+async function wifiConnect() {
+  const ssid = $("wifi-ssid").value.trim();
+  const pass = $("wifi-pass").value;
+  try {
+    const v = await api("/api/wifi/connect", { ssid, pass });
+    setMsg("wifi-connect-msg",
+      "已转入 station 态（ssid=" + v.result.ssid + "，链路读数 connected=" + v.result.connected + "）", true);
+  } catch (e) { setMsg("wifi-connect-msg", "失败：" + e.message, false); }
+}
+async function wifiForget() {
+  try {
+    const v = await api("/api/wifi/forget", {});
+    setMsg("wifi-forget-msg", "已清除凭据，mode=" + v.result.mode, true);
+    setMsg("wifi-reset-msg", "已清除凭据，mode=" + v.result.mode, true);
+  } catch (e) { setMsg("wifi-forget-msg", "失败：" + e.message, false); }
 }
 </script>
 </body>

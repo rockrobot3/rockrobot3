@@ -12,12 +12,14 @@
 //! - **beep/face 不出进程**——播放面与表情机归主循环所有，面板经动作通道
 //!   （mpsc）请求主循环代执行，串行无锁，与 TTS 点名天然互斥。
 //!
-//! 端点九个（legacy 四页签语义搬入，"面板：状态与版本/硬件自检/实时交互流/
+//! 端点十二个（legacy 四页签语义搬入，"面板：状态与版本/硬件自检/实时交互流/
 //! 运行数据/重启"逐项有承接；WiFi 配网页随 0.0.4 批D 挂上）：
 //! `GET /`（静态页）、`GET /api/status`（health+link 缓存）、`GET /api/data`
 //! （counters）、`GET /api/logs`（rrd 日志环）、`POST /api/relay`（act RPC）、
 //! `POST /api/beep`（进程内）、`POST /api/face`（进程内）、`POST /api/selftest`
-//! （并列三调，各答各展示）、`POST /api/reboot`（ctl.reboot，双重门缺省拒）。
+//! （并列三调，各答各展示）、`POST /api/reboot`（ctl.reboot，双重门缺省拒）、
+//! `GET /api/wifi/scan` + `POST /api/wifi/connect` + `POST /api/wifi/forget`
+//! （0.0.4 批D：BusCall 透传 connect 三 RPC，参数裁决在 owner 模块）。
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -51,7 +53,7 @@ const RR3_PANEL_BODY_LIMIT: usize = 4 * 1024;
 /// 模块间 RPC 的应答耐心：relay 经 rrd 路由到 act，正常毫秒级，5s 是 10 倍余量
 const RR3_PANEL_CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub const SURFACE: &[&str] = &["panel: http 九端点（缺省 127.0.0.1:8080，RR3_PANEL_ADDR 可改）"];
+pub const SURFACE: &[&str] = &["panel: http 十二端点（缺省 127.0.0.1:8080，RR3_PANEL_ADDR 可改）"];
 
 /// 主循环代执行的面板动作（beep/face），HTTP 线程经 mpsc 递给主循环。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,7 +196,7 @@ fn rr3_panel_body_json(body: &[u8]) -> Result<Value, String> {
     serde_json::from_str(text).map_err(|e| format!("body 不是合法 JSON: {e}"))
 }
 
-/// 路由纯函数：方法 + 路径 + body → 分派。**九端点白名单**，未知路径 404、
+/// 路由纯函数：方法 + 路径 + body → 分派。**十二端点白名单**，未知路径 404、
 /// 方法不对 405、body 坏 400——面板不是攻击面兜底者，一切都显式。
 pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatch {
     match path {
@@ -257,6 +259,36 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         },
         "/api/reboot" => match method {
             "POST" => Rr3PanelDispatch::Reboot,
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        // 配网面（0.0.4 批D）：三端点全部 BusCall 透传 connect 三 RPC——
+        // 参数裁决在 owner（connect 模块 parse_args 点名拒），面板只解析 JSON；
+        // connect 的 body 原样透传（ssid/pass legacy 字段名，零翻译）
+        "/api/wifi/scan" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/wifi/scan".to_string(),
+                args: json!({}),
+            },
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/wifi/connect" => {
+            if method != "POST" {
+                return Rr3PanelDispatch::MethodNotAllowed;
+            }
+            let args = match rr3_panel_body_json(body) {
+                Ok(v) => v,
+                Err(e) => return Rr3PanelDispatch::BadRequest(e),
+            };
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/wifi/connect".to_string(),
+                args,
+            }
+        }
+        "/api/wifi/forget" => match method {
+            "POST" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/wifi/forget".to_string(),
+                args: json!({}),
+            },
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         _ => Rr3PanelDispatch::NotFound,
@@ -573,8 +605,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn route_covers_nine_endpoints() {
-        // 九端点逐一点名：GET 三查一页 + POST 五动作
+    fn route_covers_twelve_endpoints() {
+        // 十二端点逐一点名：GET 四查一页 + POST 七动作
         assert_eq!(rr3_panel_route("GET", "/", b""), Rr3PanelDispatch::Html);
         assert_eq!(
             rr3_panel_route("GET", "/api/status", b""),
@@ -612,6 +644,32 @@ mod tests {
         assert_eq!(
             rr3_panel_route("POST", "/api/reboot", b""),
             Rr3PanelDispatch::Reboot
+        );
+        // 配网三端点（0.0.4 批D）：scan/forget 无参 BusCall，connect body 透传
+        assert_eq!(
+            rr3_panel_route("GET", "/api/wifi/scan", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/wifi/scan".into(),
+                args: json!({})
+            }
+        );
+        assert_eq!(
+            rr3_panel_route(
+                "POST",
+                "/api/wifi/connect",
+                br#"{"ssid":"home","pass":"password8"}"#
+            ),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/wifi/connect".into(),
+                args: json!({ "ssid": "home", "pass": "password8" })
+            }
+        );
+        assert_eq!(
+            rr3_panel_route("POST", "/api/wifi/forget", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/wifi/forget".into(),
+                args: json!({})
+            }
         );
     }
 

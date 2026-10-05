@@ -251,8 +251,8 @@ watchdog 判死但不广播 → 第一/三条红；广播里的相位写错 → 
 不进 contracts/topics.toml"不受影响；落点偏离的文字同步归 Task 13；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
-硬 pin：7 owner / 25 topic / kind 8-10-3-4 / 25 条三元组——0.0.3 批C 随 `rr3-act/relay/state`
-append 同步；`every_module_manifest_passes_contract`
+硬 pin：7 owner / 28 topic / kind 11-10-3-4 / 28 条三元组——0.0.4 批D 随 connect
+wifi/scan|connect|forget append 同步（0.0.3 批C 曾随 `rr3-act/relay/state`）；`every_module_manifest_passes_contract`
 钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
 每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
 ②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
@@ -672,6 +672,30 @@ interact 测试 12→17 条（九端点路由、越权静态断言、404/405/400
 ctl 回路+错误信封）。文档：interact README（九端点表、监听面、局域网可信面声明）、
 rrd-rpc.md（§1/§2/§3/§4 九→十方法口径、ctl.reboot 行、Permission 行）。
 ①b/②/②b/③/④ 全绿（rrd lib 15 条、e2e_ctl 8 条、interact 17 条），fmt/clippy 清零。
+
+2026-10-05 0.0.4 批D（配网面——connect 三 RPC + AP 配网状态机 + 面板 WiFi 页，
+D4/Q3 裁定落地）**契约 append 25→28 条**（`rr3-connect/wifi/scan` · `wifi/connect` ·
+`wifi/forget` request L1，legacy/core/panel 配网面迁移承接：scan sim 模拟列表 +
+`backend:"sim"` 诚实标注、connect 沿用 legacy `ssid`/`pass` 字段名与密码≥8 位语义、
+forget 承接 `/api/factory_reset` 的 WiFi 语义且 ≠ M6 整机恢复出厂），topics.toml /
+`module.toml` exposes / rr-registry 形状 pin（28 条三元组、kind 11-10-3-4）三处同批改
+咬合（契约 34 条含 pin 门全绿；同批订正 rr-registry lib `topics.rs` 2 处与 rrd
+`topics_load.rs` 3 处的同源计数断言——两档测试直读契约，25 的旧数字一处不改就红）；
+`net/link` 事件体 append `mode` 字段（ap|station，
+负载只增不改）。connect 侧：`wifi.rs` 新增 `Rr3Provision` 配网状态机（凭据内存
+`Option<(ssid,pass)>`，无凭据=ap 有凭据=station，**模块内策略不进 HAL**——sim 是
+设备不是策略，up/ssid/rssi 仍 HAL 如实报数；真凭据持久化板上后置重启即忘，
+D4 判据如实标注）+ 三 RPC 参数/结果裁决（session.rs parse_args/result 分离范式，
+"AP 态可模拟进出"由纯函数单测 `provision_roundtrips_ap_station` 钉死），
+`rr3_link_body` 加 mode 参数；`main.rs` 三常量 + match 四臂（session + 三 wifi），
+业务性失败折 error 应答不变。interact 侧：`server.rs` route 三臂（GET scan /
+POST connect / POST forget，全部 BusCall 透传——参数裁决在 owner 模块，connect
+body 原样透传零翻译），九→十二端点；静态页 WiFi 页签实装（扫描表 + 连接表单 +
+忘记卡）+ 系统页"恢复出厂 WiFi"卡（两语义不合并文案点名）；connect 测试 6→10 条、
+interact 测试 17 条（路由用例更新为十二端点逐一点名）。文档：contracts/README.md
+演进登记（25→28）、connect/interact 两 README、architecture §6.3/§7.2 对账注记。
+①b/②/②b/③/④ 全绿（rr-registry lib 26 条、契约 34 条、connect 10 条、
+interact 17 条），fmt/clippy 清零。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

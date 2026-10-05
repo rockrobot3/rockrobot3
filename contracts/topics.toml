@@ -205,3 +205,24 @@ kind = "event"
 owner = "rr3-act"
 stable = "L2"
 note = "继电器通断状态摘要，变化即发（0.0.3 方案 T3 补裁定：意图执行效果的可观测面；0.0.2 Q1 '留真实需要时再 append' 的真实需要此刻成立——e2e 证据链需要状态回读）。负载 schema 见 events/act-relay_state.schema.json"
+
+[[topic]]
+name = "rr3-connect/wifi/scan"
+kind = "request"
+owner = "rr3-connect"
+stable = "L1"
+note = "WiFi 扫描（0.0.4 方案 D4/Q3 裁定：legacy/core/panel /api/wifi/scan 迁移承接）；sim 后端模拟列表 + backend=sim 诚实标注，板上 NetworkManager cfg 门后置"
+
+[[topic]]
+name = "rr3-connect/wifi/connect"
+kind = "request"
+owner = "rr3-connect"
+stable = "L1"
+note = "WiFi 配网连接（0.0.4 方案 D4/Q3 裁定：legacy /api/wifi/connect 迁移承接，ssid+pass 密码≥8 位 legacy 语义）；AP 配网状态机 ap→station，凭据内存不落盘，真持久化板上后置"
+
+[[topic]]
+name = "rr3-connect/wifi/forget"
+kind = "request"
+owner = "rr3-connect"
+stable = "L1"
+note = "忘记网络/恢复出厂 WiFi（0.0.4 方案 D4/Q3 裁定：legacy /api/factory_reset 的 WiFi 语义承接）；station→ap，≠ M6 整机恢复出厂（partition-layout 两语义不合并）"
