@@ -8,6 +8,7 @@
 //! cfg 边界未破，`conn.rs`/`daemon.rs`/`supervisor.rs` 的每一行都要靠 Unix 侧（L2/L3）才有证据。
 
 pub mod cli;
+pub mod counters;
 pub mod manifest;
 pub mod probe;
 pub mod profile;

@@ -73,6 +73,23 @@
 Q3 裁定"两路径共用仲裁与 spawn，不双真值"指的就是这里。进度归
 [`../status.md`](../status.md)。
 
+### 2.1 环境变量 `RR3_DATA_DIR`（运维计数持久化，0.0.4 批B / Q2 裁定）
+
+rrd 读两个环境变量：`RR3_BUS_PATH`（只作 `--socket` 的缺省来源，见 §2）与本节的
+`RR3_DATA_DIR`。设置后
+rrd 在 `<RR3_DATA_DIR>/counters.json` 维护**心跳计数聚合账**（`rr3.ctl.counters` 的数据源，
+线形状见 [`rrd-rpc.md`](rrd-rpc.md) §3）：
+
+- **启动序**（`daemon.rs` 启动段）：路径判定（`counters.rs 的 rr3_counters_path`）→ 装载
+  （`rr3_counters_load`：文件不存在=首启静默；坏文件=空表起账 + 一条日志，**不致命**）→
+  `boots` 自增 → `rr3_reg_counters_replace` → 立即回写一次（日志 `counters 持久化已启用: {path}（boots 自增已回写）`）。
+- **运行期 write-through**（`conn.rs` 心跳分支）：每拍心跳带 `counters` 且归并**有变化**才落盘——
+  锁内归并、锁外写盘；写序 tmp 全量 → fsync → rename（OTA 同款断电安全序，`counters.rs 的 rr3_counters_store`），
+  失败删 tmp 并打 `counters 落盘失败（下一拍自然重试）: {e}`。
+- **缺省路径**：`RR3_DATA_DIR` 优先（空串视同未设置）；未设置时 `cfg(linux)` 回落 `/data/rr3`；
+  两者皆无 → **不持久化**，启动打 `counters 不持久化（无 RR3_DATA_DIR 且非 linux 缺省面）: 计数仅内存账，断电不保`——
+  点名策略结论但不报错退出。
+
 ## 3 fail-closed 门禁（错误文案逐字）
 
 规则是"要么照你说的做，要么当场报错退出"，**没有任何一条会静默回落默认值**。

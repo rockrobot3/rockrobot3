@@ -34,6 +34,16 @@ modules/rr3-act/
 **反射环永不进总线**（ADR-0007 裁定 1）：`reflex.rs` 只允许在异常/饱和时发通告，
 闭环数据本身不过 IPC。舵机指令走 <100Hz 事务面，不走事件面。
 
+## 心跳自报计数（0.0.4 批B，Q1 裁定）
+
+`bus.rr3_counter_bump` 记账，随 `rr3.heartbeat` 的可选 `counters` 字段上行，rrd 按
+`rr3-act/<键>` 归并（`rr3.ctl.counters` 可查）。本模块的键：
+
+| 键 | 记账点 |
+|---|---|
+| `relay_on` / `relay_off` | `relay.rs 的 rr3_relay_counter_key`（字面量唯一落点）；`main.rs` 两条驱动路（RPC / intent）在 publish 之前各记一次 |
+| `errors` | 通用可选键（各模块共用词表），异常路径按需自报 |
+
 ## 本地自检
 
 ```bash

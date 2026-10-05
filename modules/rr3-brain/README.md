@@ -36,6 +36,18 @@ modules/rr3-brain/
 
 主题均已在 [`contracts/topics.toml`](../../contracts/topics.toml) 登记；新增主题要先改契约。
 
+## 心跳自报计数（0.0.4 批B，Q1 裁定）
+
+`bus.py` 的 `rr3_counter_bump(key, by)` 记账，心跳线程每拍随 `rr3.heartbeat` 的可选
+`counters` 字段上行，rrd 按 `rr3-brain/<键>` 归并（`rr3.ctl.counters` 可查）。本模块的键：
+
+| 键 | 记账点 |
+|---|---|
+| `chat_rounds` | `__main__.py` 的 `rr3_finish_turn`：`dialog.rr3_record` 之后（完成一轮才记账） |
+| `asr_ok` / `asr_fail` | 同上：ASR 成功 / 异常各一 |
+| `llm_fail` / `tts_fail` | 同上：LLM / TTS 失败各一 |
+| `errors` | 通用可选键（各模块共用词表），异常路径按需自报 |
+
 ## 本地自检
 
 ```bash

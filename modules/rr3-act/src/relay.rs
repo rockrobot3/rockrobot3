@@ -33,6 +33,16 @@ pub fn rr3_relay_result(on: bool) -> Value {
     json!({ "on": on })
 }
 
+/// 运维计数键（0.0.4 批B，方案 §4 归属表）：`rr3_relay_apply` 成功后按目标电平
+/// 经 bus client 的 counters 通道自报，字面量只在这一个函数
+pub fn rr3_relay_counter_key(on: bool) -> &'static str {
+    if on {
+        "relay_on"
+    } else {
+        "relay_off"
+    }
+}
+
 /// relay/state 摘要体：变化即发，seq 是本状态流自己的计数
 /// （contracts/events/act-relay_state.schema.json 的形状事实源）
 pub fn rr3_relay_state_body(seq: u64, on: bool) -> Value {
@@ -75,6 +85,13 @@ mod tests {
         assert_eq!(rr3_relay_result(true)["on"], true);
         assert!(!rr3_relay_apply(&gpio, false).unwrap());
         assert!(!gpio.rr3_sim_gpio_level(), "断开落电平");
+    }
+
+    /// 计数键两态钉死（0.0.4 批B）：键是模块内部运维词汇，字面量唯一落点
+    #[test]
+    fn counter_key_distinguishes_on_off() {
+        assert_eq!(rr3_relay_counter_key(true), "relay_on");
+        assert_eq!(rr3_relay_counter_key(false), "relay_off");
     }
 
     /// state 摘要体逐字对齐契约 schema（seq / on 两键，additionalProperties false）
