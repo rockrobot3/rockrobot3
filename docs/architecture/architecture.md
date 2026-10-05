@@ -637,9 +637,10 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 | `legacy/firmware-c/main/main.c` | rr3-brain/dialog.py | 编排逻辑移植 |
 
 > 路径以迁移后（`e98a3d1`）的真实位置为准：`core/`、`firmware-c/` 已整体位于 `legacy/` 下。
-> 逐组件的消化实况（已融合 / 待融合 / 退役三分类、证据路径与退役排期）见
-> [`../process/legacy-digest.md`](../process/legacy-digest.md)——本表只写"去向"设计语义，
-> 不写消化进度。
+> **消化已完成（2026-10-05 0.0.4 批F）**：逐组件语义全部收敛（panel/data 批C/B 实装、
+> btctl 批E 骨架+退役声明，证据见 [`../process/legacy-digest.md`](../process/legacy-digest.md)），
+> `legacy/` 整树随退役批删除（git 历史 + tag `v0-pre-legacy` 双锚点可回溯）。
+> 本表保留"去向"设计语义，不随目录消失失效；行内 `legacy/...` 路径自此指 git 历史位置。
 
 ---
 

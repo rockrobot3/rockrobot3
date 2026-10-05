@@ -1,5 +1,0 @@
-## asr 组件依赖：解析识别结果的 JSON
-dependencies:
-  idf:
-    version: '>=4.1.0'
-  espressif/cjson: '*'

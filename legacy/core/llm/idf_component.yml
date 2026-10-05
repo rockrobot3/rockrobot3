@@ -1,5 +1,0 @@
-## llm 组件依赖：JSON 解析/构造
-dependencies:
-  idf:
-    version: '>=4.1.0'
-  espressif/cjson: '*'

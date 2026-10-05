@@ -713,6 +713,20 @@ phase=off|discoverable）；`net.bt` 格位绑定核对在册（default.toml / d
 批次；data/panel 两行不动，三分类表清零归退役批 D6）；connect README bt 段落
 同步。契约与形状 pin 不动（28 条）。①b/②/②b/③/④ 全绿（connect 12 条），
 fmt/clippy 清零。
+2026-10-05 0.0.4 批F（legacy 退役批——整树删除 + 四件收尾，D6/Q6 裁定落地）**零代码
+改动，纯退役批**：`legacy/`（ESP32 冻结区，100 文件）整树删除——待融合清零确认在案
+（panel 0.0.4 批C+D 实装、data 批B 实装、btctl 批E 骨架+Q5 退役声明；digest 三分类表
+归零归档：已融合 10 / 待融合 0 / 退役 5）；删除前提满足（批E 提交 `586641d` 双远端
+`ls-remote` 核对一致在案；git 历史 + tag `v0-pre-legacy` 双锚点回溯）。四件收尾同批：
+① ⑤ 门 legacy 排除条款撤除（`check_docs` 的 `grep -v '^legacy/'` 与"为什么排除"注释
+段——冻结区不存在后全集进门）；② architecture §8 标注消化完成（表尾注记改写，
+行内 `legacy/...` 路径自此指 git 历史位置）；③ status.md"已知偏差"注销 legacy/README
+断链条目；④ digest 头部/只读约束/汇总表/退役触发条件/消费指引归档化 + data/panel
+两行补证据转"已融合"（data：批B 心跳 counters 双端镜像 + rrd 持久化原子写 +
+`rr3.ctl.counters` 读面；panel：批C std 手写 HTTP 面板 + 批D 配网合流，两语义不合并
+文案在册）。断链面同批清理：根 README 双语的 legacy 行改指 digest 归档台账、
+docs/README 库地图三处描述更新。①b/②/②b/③/④ 全绿（测试条数全不变），⑤ 门以
+删除后的 md 全集重跑；fmt/clippy 不涉及。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

@@ -19,7 +19,7 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档（M5 主战场，已收口；同目录 v0.0.1 是 M0 骨架存档） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档（M5 最后一跳 + M6 OTA 写侧，已收口） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 当前版本消化方案与 Definition of Done（legacy 待融合三项 + 退役批） | 收口评审按此逐条对账 |
-| [`process/legacy-digest.md`](process/legacy-digest.md) | legacy/ 逐组件消化盘点：三分类台账、证据路径、退役排期 | 处置 `legacy/` 或查"某语义在新架构哪"之前 |
+| [`process/legacy-digest.md`](process/legacy-digest.md) | legacy/ 逐组件消化盘点（已归档）：三分类台账、证据路径 | 查"某 legacy 语义在新架构哪"（`legacy/` 整树已随 0.0.4 退役批删除） |
 | [`status.md`](status.md) | 唯一实况快照：能力 × 状态 × 证据路径、里程碑进度（M0–M6 当前实况）、本机无法收口的项、在制品 | 收口时整篇重写，不做增量修补；**测试条数一律不抄进来**（见其开篇规矩） |
 
 ## 库地图（按目录）
@@ -50,7 +50,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档：上一版本（M5 主战场）交付了什么 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档：上一版本（M5 最后一跳 + M6 OTA 写侧）交付了什么 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 当前版本交付什么、怎么算完成（legacy 消化 + 退役批） |
-| [`process/legacy-digest.md`](process/legacy-digest.md) | legacy（ESP32 冻结区）逐组件消化到哪了、退役什么时候发生 |
+| [`process/legacy-digest.md`](process/legacy-digest.md) | legacy（ESP32 冻结区）逐组件消化到哪了（已归档：0.0.4 退役批整树删除，待融合清零） |
 
 ### contracts/ · base/ · modules/ · tools/ · .github/
 
@@ -104,7 +104,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | 选核心板 / 画底板 / 整机硬件询价与验收 | [`architecture/板卡设计规格书.md`](architecture/板卡设计规格书.md)（决策依据在 [`process/adr/ADR-0015`](process/adr/ADR-0015-板卡策略-rk3566核心板过桥与量产自定制.md)） |
 | 动 OTA 槽位与双轨 | [`../base/ota/README.md`](../base/ota/README.md) + [`../base/runtime/rr-ota/README.md`](../base/runtime/rr-ota/README.md) |
 | 无硬件跑通整条链路 | [`../tools/sim/README.md`](../tools/sim/README.md) |
-| 对照 legacy ESP32 固件 | [`../legacy/README.md`](../legacy/README.md) + [`architecture/architecture.md`](architecture/architecture.md) §8 |
+| 对照 legacy ESP32 固件 | [`process/legacy-digest.md`](process/legacy-digest.md)（归档台账）+ [`architecture/architecture.md`](architecture/architecture.md) §8（`legacy/` 整树已随 0.0.4 退役批删除，源码在 git 历史） |
 
 ## 事实归属（改文档前先对这张表）
 
