@@ -775,6 +775,20 @@ reboot 回执，fake-rrd 真 UDS 往返 2——counters 实答渲染、reboot �
 "单测含四条真 UDS 往返用例"）。rrctl 独立工程不在七步门 ①/①b 作用域，④ 步
 `cargo check` 覆盖编译；本地实跑 `cargo test --manifest-path tools/rrctl/Cargo.toml`
 19 全绿 + fmt/clippy 清零（conventions §2 备注）后提交；七步 ①a–⑤ 全绿。
+2026-10-05 0.0.5 批C（T3 brain 迁移设计裁定落档——新立 ADR-0016，Q2 裁定落地）**零代码
+改动，纯文档批**：新立 [docs/process/adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md](adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md)
+（**不增补 0014**——决策不可变、新决策新编号；0016 引用并收缩 0014 适用范围：
+裁定 1 的 bus.py 逐语义镜像纪律随首件迁移退役，裁定 2/3/4 的云 API 形状 / 对话
+回路归属 / e2e 编排语义继续有效）。四裁定：①切分 = 语义件渐进（首件 bus.py →
+rr-bus 复用零协议代码，次件 cloud 三家，末件对话状态机；迁移件与 Python 对应物
+同批一进一退，仓库任何时刻不存在双语言真值）；②功能语义不变量四条（对话闭环
+与 mock 注入点 / 失败语义同契约 / 门禁契约校验不减 / config 键值不变形）；
+③部署形态目标 = payload 去 python3 运行时（`lang=rust`、≥3.11 门槛消失、
+`which_python3` 与 brain-unittest 随最后一件退役、OCI 分发格式裁定 0013 裁定 4
+维持不动）；④实施归 **0.0.6 专项**（打包链/装配单/CI 三面联动属独立版本体量，
+0.0.5 只落设计裁定，本裁定不等于实施解锁）。conventions §3 主语言条目加 0016
+指针；docs/README.md 两处 ADR 区间 0001~0015 → 0001~0016（标题表补 brain 迁移
+路线）。①a–⑤ 全绿重跑。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
@@ -811,7 +825,9 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
   **功能语义不变**原则渐进迁移为 Rust，不设豁免通道——当前非 Rust 面为
-  `rr3-brain`（Python，ADR-0014）与 CI 胶水脚本（bash，可最后迁）。迁移本身走正常批次
+  `rr3-brain`（Python，ADR-0014）与 CI 胶水脚本（bash，可最后迁）。brain 的迁移
+  路线已由 [ADR-0016](adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md)
+  落设计裁定（首件 bus.py → rr-bus 复用、实施归 0.0.6 专项）；迁移本身走正常批次
   （生成器产出、契约校验、七步门禁一样不少），`module.toml` 的 `lang` 字段随迁移改为
   `rust`，原"Python 语法检查属人工检查点"的面随之收敛为 cargo 检查
 - 新模块一律由生成器产出：`cargo run --manifest-path tools/mkmodule/Cargo.toml --bin rr3-mkmod -- rr3-<名>`
