@@ -18,7 +18,7 @@ mod imu;
 use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_audio_source, rr3_block_on, RR3_AUDIO_CFG_16K_MONO16};
+use rr_hal::{backend::rr3_hal_audio_source, rr3_block_on, Rr3AudioCfg};
 use rr_ipc::{opcode, Rr3PayloadType};
 use serde_json::{json, Value};
 
@@ -58,8 +58,13 @@ fn rr3_run() -> Result<(), String> {
 
     let cfg = audio::rr3_sense_config_load()?;
     let (source, backend) = rr3_hal_audio_source();
-    rr3_block_on(source.open(RR3_AUDIO_CFG_16K_MONO16))
-        .map_err(|e| format!("打开音频源({backend})失败: {e}"))?;
+    // 采集配置按 config 真值开（R14：channels>1 即双麦期；默认 1 声道与旧硬编码逐点等价）
+    let open_cfg = Rr3AudioCfg {
+        sample_rate_hz: cfg.audio.sample_rate,
+        channels: cfg.audio.channels,
+        bit_depth: 16,
+    };
+    rr3_block_on(source.open(open_cfg)).map_err(|e| format!("打开音频源({backend})失败: {e}"))?;
     println!(
         "音频源就绪: backend={backend} rate={} ch={} frame_ms={}",
         cfg.audio.sample_rate, cfg.audio.channels, cfg.audio.frame_ms
@@ -76,6 +81,9 @@ fn rr3_run() -> Result<(), String> {
 
         let pcm = rr3_block_on(source.read(frames_per_tick))
             .map_err(|e| format!("读帧失败({backend}): {e}"))?;
+        // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
+        // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
+        let pcm = audio::rr3_pcm_downmix_stream(pcm);
         seq += 1;
         bus.rr3_publish("rr3-sense/audio/pcm", audio::rr3_pcm_event_body(seq, &pcm))?;
 
