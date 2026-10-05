@@ -759,6 +759,22 @@ schema 维持空缺不冻结，冻结与 rrd shm 接线绑定同一份后续 ADR
 半成品"）；Q4 按建议——远端 CI 宿主核实是用户侧唯一悬项，0.0.5 不排批，回执到手后立
 结项批。`docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md` §2 裁定记录段落档。
 ①a–⑤ 全绿重跑。裁定后 T2–T5 依序解锁。
+2026-10-05 0.0.5 批B（T2 rrctl 补 `counters`/`reboot` 两子命令——CLI 四→六与 rrd ctl
+白名单对齐，Q1 裁定落地）**纯 rrctl 面改动**：`tools/rrctl/src/commands.rs` COMMANDS
+4→6（`counters`/`reboot` append，与 `rr3.ctl.*` 白名单六方法逐一同名对齐，配套单测
+钉死方法名不漂移）；`format_counters` 按模块前缀分组成 MODULE/KEY/VALUE 人读表
+（`模块名/键` 拆前缀，rrd 自有键如 `boots` 无前缀归 `rrd` 组，空表打"无计数"，
+计数非 u64 报错不渲染 `?`——与 status 的 cell 容错口径有意分开）；`format_reboot`
+回执一行确认；**CLI 不加本地门**——reboot 的 rrd 执行面双重门（cfg(linux) +
+`RR3_REBOOT_OK=1`）是唯一真值点，CLI 加门即第二真值，拒绝文案经错误信封统一
+回显非 0 退出；`main.rs` 用法文案与模块头注释同步六命令口径。单测 12→19（新增
+7 条：纯函数 5——方法名白名单钉死 / counters 分组渲染 / 空表 / 非 u64 报错 /
+reboot 回执，fake-rrd 真 UDS 往返 2——counters 实答渲染、reboot 恒拒回显；往返
+共 4 条含既有 status/ota）；
+`tools/rrctl/README.md` 命令面与代码逐字对齐（六子命令 + counters/reboot 语义 +
+"单测含四条真 UDS 往返用例"）。rrctl 独立工程不在七步门 ①/①b 作用域，④ 步
+`cargo check` 覆盖编译；本地实跑 `cargo test --manifest-path tools/rrctl/Cargo.toml`
+19 全绿 + fmt/clippy 清零（conventions §2 备注）后提交；七步 ①a–⑤ 全绿。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
