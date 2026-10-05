@@ -823,6 +823,20 @@ Q4——`profiles/distro.toml` 直用零代码改动；Q5——Radxa ZERO 3 采�
 + deb 版本 0.0.6 / C 部署手册 boards/raspberry-pi-64.md / D 板上部署演练 /
 E 收口重锚。docs/README 索引同步（0.0.5 行转历史存档、0.0.6 行入四档落点表与
 库地图两处）。落档不等于实施解锁，批B 起逐批过门禁。①a–⑤ 全绿重跑。
+2026-10-05 0.0.6 批B（aarch64 交叉出包链 + deb 版本 0.0.6——Q3 裁定落地）
+新增 `tools/deploy/pack-arm64.sh`（真板部署出包链，三步：交叉编译 → 注入产物
+装配 → rr3-pack --stage-only + staging 布局断言）：交叉目标用
+**aarch64-unknown-linux-musl 静态 + rust-lld**——零外部工具链（方案 §5.1 原写
+gnu 目标，实施核实时发现 macos host 无 aarch64 glibc sysroot、`link-self-contained`
+在 linux-gnu 目标不支持、brew Tier 3 无 bottle 装 GNU 工具链须源码编译，musl std
+自带完整 libc 是唯一零安装路；产物全静态即 ADR-0013 裁定 2"静态二进制集"精神，
+Bookworm 板上零依赖直跑，方案文字以本登记为准）。注入装配与 CI distro-smoke ③
+同一两轨同源约定，不互抄装配；rr3-pack 本机宿主架构跑。deb 版本 0.0.2→0.6
+三处：rr3-pack `RR3_DEB_VERSION` 常量（注释同步）、其单测 control 断言、
+distro-smoke.sh 产物文件名。本机 stage 演练全绿：staging 布局断言含
+"aarch64 静态 ELF 体检"与"entry 已装机绝对化"两条新断言；真装（scp 传板 →
+板上 dpkg-deb --build + dpkg -i → 巡检）归批D，手册批C 落。rr3-pack 单测 5 条
+全过、七步门禁全绿。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
