@@ -912,6 +912,22 @@ postinst（mkdir）→ 传板升级安装（Setting up rockrobot3 0.0.6，postin
 落盘 `{"boots":1}`（修复当场生效）→ reboot 自恢复后 `{"boots":2}` **跨重启累积
 成立**，`rr3-ctl counters` 回显 `rrd/boots = 2`、denied_publish = 0，实测回填
 boards §6。rr3-pack 单测 5 条全过；七步门禁直跑 exit=0 全绿（16 步全 PASS）。
+2026-10-05 0.0.6 批E（阶段一收口批——status.md 重锚 f2597d5）
+整篇重锚：锚点 `c2beba8` → `f2597d5`；能力实况表三行随批E' 实况更新（运维计数
+面补 unit 注入口径、deb 打包链行改"boots 已修复并真板复验通过 + socket 现状
+补录 §7"、rr3-ctl 行 reboot 双重门**实况订正**——distro unit 现未注入
+`RR3_REBOOT_OK`，conn.rs 注释"rrd.service 注入"与 unit 实况的漂移收口核对时
+核出，板上 ctl.reboot 亦缺省恒拒，unit 补注入归阶段二小批、与 socket 放行
+同收）；里程碑表头换锚；无法收口第 1 条指针换 `f2597d5`、第 5 条批次口径
+补"0.0.6 批A–E'"、第 8 条补 distro-smoke 断言链批E' ⑧；在制品段重锚
+（99c90d6 / a5b3093 / f2597d5 三提交，标题照 git log 逐字抄录）+ R1–R6 段
+批E' 条目划线结清（含真板复验实测）。**本批即 0.0.6 阶段一收口汇报**：
+阶段一批次链 = 批A（方案+裁定 b99409f）→ 批B（出包链 5ecaa8d）→ 批C（手册
+fb292ce）→ 批D（真板六判据 efd224f + 留痕 c2beba8）→ 重裁轮（99c90d6）→
+批E'（boots 修复 a5b3093 + 复验 f2597d5）→ 本批（重锚），主题命题"树莓派
+验证跨平台快速部署"阶段一半闭（代码零改动装 BCM 板实测成立；阶段二 = 真机
+功能链四件 + brain 上板，硬件/云凭据敞口已在案）。双远端指针一致随本批推送
+核对。①a–⑤ 全绿重跑。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
