@@ -15,7 +15,7 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | [`reference/rrd-cli.md`](reference/rrd-cli.md) · [`reference/rrd-rpc.md`](reference/rrd-rpc.md) · [`reference/rrd-registry.md`](reference/rrd-registry.md) | 运行期接口的可照抄事实：启动参数与默认值、RPC 方法与错误映射、在册表阶段与退避上限 | 与代码同批变更；引用须与代码逐字一致；代码定位一律用**符号名锚定**（如 `registry.rs 的 rr3_reg_beat`），不写行号（行号随代码漂移） |
 | [`process/conventions.md`](process/conventions.md) | 开发规约：分支 / 提交 / CI 门禁 / DoD | 门禁唯一入口 `bash tools/ci/check.sh`（其 ⑤ 文档门对仓内每个已跟踪 md 兜底：不得为空、相对链接不得断；仓内每份 README 还必须出现在下文库地图里，漏链即红。本索引自身也在覆盖内）；**步序与条数只登记在其 §2**，本索引不抄数字 |
 | [`process/naming.md`](process/naming.md) | 命名唯一权威（`rr3-` 前缀矩阵、模块目录四件套的四类结构角色） | `rr3-mkmod` 生成自检 + `rr-registry` 契约测试强制，不靠人记 |
-| [`process/adr/`](process/adr/) | 决策记录 ADR-0001 ~ ADR-0015（平台选型 / 模块模型 / IPC 选型 / Airymax 接入 / 命名规约 / AiryIPC 线格式 / 控制面分层 / 传输层 trait / 依赖仲裁 / 控制通道与查询面 / shm 传输 / 能力格坐标系与装配单 / OS 双轨 / Python 模块接入与 M4 对话闭环 / 板卡策略） | 架构文档每节顶部回链对应 ADR |
+| [`process/adr/`](process/adr/) | 决策记录 ADR-0001 ~ ADR-0016（平台选型 / 模块模型 / IPC 选型 / Airymax 接入 / 命名规约 / AiryIPC 线格式 / 控制面分层 / 传输层 trait / 依赖仲裁 / 控制通道与查询面 / shm 传输 / 能力格坐标系与装配单 / OS 双轨 / Python 模块接入与 M4 对话闭环 / 板卡策略 / brain 迁移路线） | 架构文档每节顶部回链对应 ADR |
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档（M5 主战场，已收口；同目录 v0.0.1 是 M0 骨架存档） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档（M5 最后一跳 + M6 OTA 写侧，已收口） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 历史存档（legacy 待融合三项 + 退役批，已收口） | 收口对账已由 status.md 锚点承接 |
@@ -47,7 +47,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`reference/rrd-cli.md`](reference/rrd-cli.md) | §1 用法串 · §2 参数表 · §3 fail-closed 门禁文案 · §4 两条路径绝对化的分工 · §5 启动序列、输出流与退出码 |
 | [`reference/rrd-rpc.md`](reference/rrd-rpc.md) | §1 帧层前提 · §2 JSON-RPC 信封约束 · §3 方法白名单 · §4 握手额外门禁 · **§5 错误码映射表** · §6 心跳方向 · §7 发布面 |
 | [`reference/rrd-registry.md`](reference/rrd-registry.md) | §1 类型与共享方式 · §2 常量表 · §3 阶段与活边 · §4 时钟约定 · **§5 `rr3_reg_add` 门序** · §6 心跳与到期 · §7 判死与重启计划 · §8 发布归属四道门 · §9 fanout · §10 其余入口 |
-| [`process/adr/`](process/adr/) | 决策原文 ADR-0001 ~ ADR-0015；动架构或线格式前先读对应那篇 |
+| [`process/adr/`](process/adr/) | 决策原文 ADR-0001 ~ ADR-0016；动架构或线格式前先读对应那篇 |
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档：上一版本（M5 主战场）交付了什么 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档：上一版本（M5 最后一跳 + M6 OTA 写侧）交付了什么 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 历史存档：上一版本（legacy 消化 + 退役批）交付了什么 |
