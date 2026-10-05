@@ -497,6 +497,25 @@ manifest 同目录 config，缺件必重启环，随包必带）+ entry 不可�
 语义首证：快路 payload 无 Python brain，faces 保留声明、cognition.* 不绑定）+
 0 拒 boot + `rr3-ctl status` denied_publish=0）。macOS 本机无法真装 deb（方案 P1），
 真装只认该 job 远端回执；本地装配演练走 `rr3-pack --stage-only`。
+2026-10-05 保底轨修复批（T5 段点名的保底轨缺口收口——entry 装机改写同一裁定落到
+buildroot 轨，ADR-0013 裁定 5 两轨同源的第二面）改 `base/os/buildroot/board/radxa-zero3/post-build.sh`：
+① manifest 不再平铺 `/usr/lib/rr3/manifest/<name>.toml`——归位
+`/usr/lib/rr3/modules/<name>/module.toml`（旧布局下模块 rr3_config_load 读 manifest 同目录
+config 必撞同名文件，且 bin 的相对 entry 解析到 manifest 所在目录必错位）；② entry 装机
+绝对化（与 rr3-pack `rr3_manifest_install_rewrite` 同语义同三道门：entry 行恰一条
+`grep -c`、值可装机 `case` 拒绝对路径 / `.` 与 `..` 段 / 含 `|` 分隔符、改写后 sed 重提
+复核）——只改引号内一个值，其余字节原样；③ config 从仓源 `modules/<name>/config.toml`
+随装（env `RR3_REPO_ROOT` 可覆盖仓根，缺省按脚本位置上溯五级）；bin 改按 entry 落位
+（注入格式固定名 `bin` → entry 指向的装机相对路径）；S99rrd 的 manifest glob 同步改
+`/usr/lib/rr3/modules/*/module.toml`。**缺件口径收紧一处**：缺 bin / 缺 manifest / entry
+不可装机 = 警告 + **整模块跳过**（manifest 一并不装）——"缺席只警告不阻断"仍指镜像结构
+可构建，但缺件还装 manifest 会让 rrd spawn 一个必退出的模块（重启环）；跳过的是模块，
+不是镜像。config 缺席仍只警告（镜像可构建，板上收口）。CI：`buildroot-assembly` job 新增
+（ubuntu-latest 单步，纯 bash + 系统工具，夹具侧模拟 Buildroot 目标根的 etc/init.d，
+不需要 Docker）——`tools/ci/buildroot-assembly-smoke.sh` 断言装机布局 / entry 绝对化且
+除 entry 行外与仓源逐字节一致 / bin 落 entry 名可执行 / config 与仓源一致 /
+旧平铺位不存在 / S99rrd 新 glob / 两类坏模块（缺 bin、无 entry 行）警告且整模块未装。
+本批零 Rust 改动：①b / ② / ②b / ③ / ④ 全不变。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
