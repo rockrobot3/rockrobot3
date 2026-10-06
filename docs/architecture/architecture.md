@@ -14,7 +14,8 @@
 ## 1. 定位与目标
 
 RockRobot3（rock3）是面向 **Linux 6.6 mainline** 的具身机器人底座（起点为 RK3566 桌面陪伴
-形态，体积约束约 0.5L），由 ESP32 固件项目（`legacy/`）演进而来，最终面向具身机器人发展。
+形态，体积约束约 0.5L），由 ESP32 固件项目（`legacy/`，已退役——git 历史 + tag
+`v0-pre-legacy` 可回溯）演进而来，最终面向具身机器人发展。
 
 **底座 = payload**：rock3 的交付物不是某一块板的镜像，而是一个可安装的**底座 payload**——
 `rrd` + `rr-hal` + `contracts/` + 安装器 + 装配单。板卡与 OS 差异由三层模型消化
@@ -78,7 +79,7 @@ Yocto（后期再评估，双轨不含第三轨）、容器编排层（OCI 只�
 1. **基座承载横切关注点**：安全（急停/限位/低电保护）、日志、时间同步、OTA 全部在 base，不进模块——基座存活则安全兜底存活
 2. **模块间零直连**：一切交互经事件总线/RPC，模块只依赖"能力名"不依赖具体模块名；能力名本身有坐标系（§4.3，ADR-0012）
 3. **brain 是唯一编排者**：对话策略只存在于 rr3-brain（承接 legacy main.c 的"薄壳"哲学）
-4. **机制与策略分离**：模块只含机制（怎么采 PCM、怎么驱动舵机）；装配（谁提供哪个格）归装配单、策略（何时说、说什么）归 brain、提供者选择归 rrd 仲裁（ADR-0012）
+4. **机制与策略分离**：模块只含机制（怎么采 PCM、怎么驱动舵机）；装配（谁提供哪个格）归装配单、策略（何时说、说什么）归 brain、提供者选择归 rrd 仲裁（ADR-0012）。该原则在模块**内部结构**的落实见 [ADR-0017](../process/adr/ADR-0017-模块内部分层-机制与策略分离.md)：公共骨架 crate `rr3mod` 收敛五模块同构启动序列，main.rs 只装配、boot.rs 接入、rpc.rs 协议分发，策略不进模块（实施批归 0.0.8）
 
 ---
 
@@ -175,14 +176,11 @@ rock3/
 │   ├── rrctl/                     ← bin: rr3-ctl，status / health / logs / ota 四个子命令
 │   └── sim/                       ← bin: rr3-sim，虚拟设备与 PCM 形状，主机联调
 │
-├── docs/                          ← 四档结构与"事实归属"表见其 README.md
-│   ├── README.md                  ← 索引：哪类事实只有一个权威落点
-│   ├── architecture/architecture.md ← 本档（唯一架构图）
-│   ├── status.md                  ← 唯一实况快照
-│   └── process/                   ← conventions.md、naming.md、adr/（ADR-0001~0015）、dev/
-│
-└── legacy/                        ← 冻结四棵 ESP32 树：core/ + firmware-c/ + firmware-rs/ + rust/
-                                     （只读参照，不再演进；组件计数见 legacy/README.md）
+└── docs/                          ← 四档结构与"事实归属"表见其 README.md
+    ├── README.md                  ← 索引：哪类事实只有一个权威落点
+    ├── architecture/architecture.md ← 本档（唯一架构图）
+    ├── status.md                  ← 唯一实况快照
+    └── process/                   ← conventions.md、naming.md、adr/（ADR-0001~0015）、dev/
 ```
 
 本树只画**已存在的结构**：`base/`、`modules/`、`tools/` 与每个 crate、每个模块目录还各有一份

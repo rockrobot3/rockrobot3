@@ -30,20 +30,9 @@ docs/superpowers/
 !profiles/**
 !tools/
 !tools/**
-!legacy/
-!legacy/**
 
-# ---- 永不入库：再生件与本地密钥 ----
-# sdkconfig 由 idf.py 从 sdkconfig.defaults 每次 configure 再生成，含本机绝对路径与本地配置，绝不入库
-# （sdkconfig.defaults 是权威输入，保持追踪；编译期 -D 注入的密钥不会落进 sdkconfig，只会进 build/ 产物）
-**/sdkconfig
-**/sdkconfig.local
 **/target/
 **/build/
 # rr3-brain 是 Python 包：编译产物随 build 再生，不入库（modules/** 白名单覆盖过宽）
 **/__pycache__/
 **/*.py[cod]
-# ESP-IDF 组件缓存与配置备份：idf.py reconfigure 自动再生，不入库
-**/managed_components/
-**/dependencies.lock
-**/sdkconfig.old
