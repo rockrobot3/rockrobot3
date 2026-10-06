@@ -8,9 +8,10 @@
 //! 主循环只做两件事：
 //! 1. 应答本模块 exposes 的三个点名（servo/command、led/effect、relay/set）；
 //! 2. 订阅面：`rr3-brain/intent/result` 到达 → `actions` 结构化动作走两道归属门
-//!    （exposes 归属 + 意图面开放）逐条执行 relay，状态变化发 `relay/state`
-//!    摘要（0.0.3 T3，Q1 裁定"brain 产出意图、执行器广播认领"）；无 actions
-//!    字段即纯对话轮，记一行日志。
+//!    （exposes 归属 + 意图面开放）逐条执行 relay/servo（0.0.3 T3，Q1 裁定
+//!    "brain 产出意图、执行器广播认领"；servo 批F2 随判向-转向编排开放——判据 8），
+//!    状态变化发对应 `relay/state` / `servo/state` 摘要；无 actions 字段即纯对话
+//!    轮，记一行日志。
 //!
 //! servo/state 限速流：状态变化必发，两次至少隔 state_min_interval_ms（Rr3RateGate）。
 //! 业务性失败（缺参数/越界/HAL 写失败）折 error 应答回话；传输性失败（发布/应答
@@ -190,9 +191,14 @@ fn rr3_run() -> Result<(), String> {
                         println!("intent: trace={trace}（纯对话轮，无动作）");
                     }
                     Some(actions) => {
-                        for r in intent::rr3_intent_actions_handle(actions, relay_gpio.as_ref()) {
+                        for r in intent::rr3_intent_actions_handle(
+                            actions,
+                            relay_gpio.as_ref(),
+                            servo_dev.as_ref(),
+                            &cfg.servo,
+                        ) {
                             match r {
-                                Ok(on) => {
+                                Ok(intent::Rr3IntentOutcome::Relay(on)) => {
                                     relay_seq += 1;
                                     bus.rr3_counter_bump(relay::rr3_relay_counter_key(on), 1);
                                     bus.rr3_publish(
@@ -202,6 +208,24 @@ fn rr3_run() -> Result<(), String> {
                                     println!(
                                         "intent: trace={trace} relay on={on}，state#{relay_seq} 已发"
                                     );
+                                }
+                                Ok(intent::Rr3IntentOutcome::Servo(angle)) => {
+                                    // servo/state 限速门同 RPC 路（两条驱动路共用一条状态流）；
+                                    // 被限速挡掉的发布不补发，下一次动作自然携带最新角度
+                                    if servo_gate.rr3_gate_allow(Instant::now()) {
+                                        servo_seq += 1;
+                                        bus.rr3_publish(
+                                            servo::RR3_SERVO_STATE_TOPIC,
+                                            servo::rr3_servo_state_body(servo_seq, angle),
+                                        )?;
+                                        println!(
+                                            "intent: trace={trace} servo angle={angle}，state#{servo_seq} 已发"
+                                        );
+                                    } else {
+                                        println!(
+                                            "intent: trace={trace} servo angle={angle}（state 被限速挡下）"
+                                        );
+                                    }
                                 }
                                 Err(e) => println!("intent: trace={trace} 拒执行: {e}"),
                             }

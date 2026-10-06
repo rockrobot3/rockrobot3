@@ -2,6 +2,7 @@
 内存约束的产物，本机不复刻——见该 ADR"明确不做"第 3 条）。"""
 
 import json
+import os
 import uuid
 
 from rr3_brain.cloud import (
@@ -14,6 +15,11 @@ from rr3_brain.cloud import (
 
 MOCK_TEXT = "你好，今天天气怎么样"
 
+# mock ASR 的文本注入键（批F2）：判向-转向闭环 e2e 用它注入"向左/向右"类
+# 识别文本驱动意图面。取值不设/置空回落 MOCK_TEXT——mock 是测试注入点，
+# 真云路径永不读它（与 rr3_brain_cloud_mode 的注入点分工同一纪律）。
+MOCK_TEXT_ENV = "RR3_BRAIN_MOCK_ASR_TEXT"
+
 
 class Rr3AsrClient:
     def __init__(self, base_url: str, model: str, timeout_s: float):
@@ -24,7 +30,7 @@ class Rr3AsrClient:
     def transcribe(self, pcm: bytes, sample_rate: int = 16000) -> str:
         """PCM（s16le 单声道）→ 识别文本。云端失败/非 200 抛 RuntimeError（业务失败）。"""
         if rr3_brain_cloud_mode() == CLOUD_MODE_MOCK:
-            return MOCK_TEXT
+            return os.environ.get(MOCK_TEXT_ENV, "").strip() or MOCK_TEXT
         key = rr3_brain_cloud_api_key()
         wav = rr3_brain_wav_header(sample_rate, len(pcm)) + pcm
         boundary = uuid.uuid4().hex
