@@ -1,8 +1,14 @@
-//! 表情渲染：idle / blink / talk / think / happy（`rr3-interact/face/expression`）。
+//! 表情渲染：idle / blink / talk / think / happy / listen / turn
+//! （`rr3-interact/face/expression`）。
 //!
 //! v0.0.1 的"渲染"只是状态机本身（真屏随硬件里程碑），但状态转移是现在就要
-//! 钉死的契约面：五态白名单、`talk` 由 TTS 播放期间自动挂起并恢复——这保证
+//! 钉死的契约面：七态白名单、`talk` 由 TTS 播放期间自动挂起并恢复——这保证
 //! "说话时表情在 talk"不依赖调用方自觉。
+//!
+//! 批F3 sim 档：每态配 8x8 点阵帧序列（[`Rr3FaceFrame`]），blink/talk 双帧、
+//! 其余单帧；[`Rr3Face::rr3_face_tick`] 一拍报当前帧并推进（到尾回卷），
+//! 切换表情 / talk 挂起恢复都归零指针从首帧重播。显示件（LED 点阵/OLED）
+//! 随批F5a 显示 trait 实装，本档只钉"状态→帧"映射与推进语义。
 
 use serde_json::{json, Value};
 
@@ -11,11 +17,91 @@ pub const SURFACE: &[&str] = &["face: rpc rr3-interact/face/expression (request)
 /// 本模块 exposes 的表情主题（module.toml [rpc].exposes 同源）
 pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 
-/// 合法表情白名单（contracts/topics.toml 的 note 同源）
-pub const RR3_FACE_EXPRESSIONS: [&str; 5] = ["idle", "blink", "talk", "think", "happy"];
+/// 合法表情白名单（contracts/topics.toml 的 note 同源；批F3 增 listen/turn——
+/// 判据 9 点名的听取/转向两态）
+pub const RR3_FACE_EXPRESSIONS: [&str; 7] =
+    ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
 
 /// TTS 播放期间的临时表情（模块内自动切换，不接受点名）
 pub const RR3_FACE_TALK: &str = "talk";
+
+/// 8x8 点阵单帧：行主序 8 字节，每字节 bit7 为该行最左点（MAX7219 行寄存器
+/// 直排，修订版 6 定件；sim 档只存位图不驱动真件）
+pub type Rr3FaceFrame = [u8; 8];
+
+/// idle：睁眼 + 平嘴（单帧）
+const RR3_FRAMES_IDLE: [Rr3FaceFrame; 1] = [[
+    0b0000_0000, 0b0110_0110, 0b0110_0110, 0b0000_0000, //
+    0b0000_0000, 0b0011_1100, 0b0000_0000, 0b0000_0000,
+]];
+
+/// blink：睁眼（同 idle 首帧）→ 闭眼横线，双帧循环
+const RR3_FRAMES_BLINK: [Rr3FaceFrame; 2] = [
+    [
+        0b0000_0000, 0b0110_0110, 0b0110_0110, 0b0000_0000, //
+        0b0000_0000, 0b0011_1100, 0b0000_0000, 0b0000_0000,
+    ],
+    [
+        0b0000_0000, 0b0000_0000, 0b0110_0110, 0b0000_0000, //
+        0b0000_0000, 0b0011_1100, 0b0000_0000, 0b0000_0000,
+    ],
+];
+
+/// talk：张口 / 闭口交替（口型），双帧循环
+const RR3_FRAMES_TALK: [Rr3FaceFrame; 2] = [
+    [
+        0b0000_0000, 0b0110_0110, 0b0110_0110, 0b0000_0000, //
+        0b0011_1100, 0b0011_1100, 0b0000_0000, 0b0000_0000,
+    ],
+    [
+        0b0000_0000, 0b0110_0110, 0b0110_0110, 0b0000_0000, //
+        0b0000_0000, 0b0001_1000, 0b0000_0000, 0b0000_0000,
+    ],
+];
+
+/// think：眼上挑 + 小嘴（单帧）
+const RR3_FRAMES_THINK: [Rr3FaceFrame; 1] = [[
+    0b0110_0110, 0b0110_0110, 0b0000_0000, 0b0000_0000, //
+    0b0000_0000, 0b0001_1000, 0b0000_0000, 0b0000_0000,
+]];
+
+/// happy：笑眼 + 大笑嘴（单帧）
+const RR3_FRAMES_HAPPY: [Rr3FaceFrame; 1] = [[
+    0b0000_0000, 0b0110_0110, 0b0110_0110, 0b0000_0000, //
+    0b0100_0010, 0b0011_1100, 0b0000_0000, 0b0000_0000,
+]];
+
+/// listen：大睁眼（三行高）+ 小圆嘴（单帧）——"瞪眼听"
+const RR3_FRAMES_LISTEN: [Rr3FaceFrame; 1] = [[
+    0b0110_0110, 0b0110_0110, 0b0110_0110, 0b0000_0000, //
+    0b0000_0000, 0b0001_1000, 0b0000_0000, 0b0000_0000,
+]];
+
+/// turn：双眼右移一格（看向转向侧）+ 平嘴（单帧）
+const RR3_FRAMES_TURN: [Rr3FaceFrame; 1] = [[
+    0b0000_0000, 0b0011_0011, 0b0011_0011, 0b0000_0000, //
+    0b0000_0000, 0b0011_1100, 0b0000_0000, 0b0000_0000,
+]];
+
+/// 白名单序 → 帧序列表（与 RR3_FACE_EXPRESSIONS 下标对齐；blink/talk 双帧其余单帧）
+const RR3_FACE_FRAME_TABLE: [&[Rr3FaceFrame]; 7] = [
+    &RR3_FRAMES_IDLE,
+    &RR3_FRAMES_BLINK,
+    &RR3_FRAMES_TALK,
+    &RR3_FRAMES_THINK,
+    &RR3_FRAMES_HAPPY,
+    &RR3_FRAMES_LISTEN,
+    &RR3_FRAMES_TURN,
+];
+
+/// 表情名 → 帧序列。未知表情回退 idle 帧（调用方已过白名单，此为兜底）。
+pub fn rr3_face_frames(expr: &str) -> &'static [Rr3FaceFrame] {
+    let ix = RR3_FACE_EXPRESSIONS
+        .iter()
+        .position(|&e| e == expr)
+        .unwrap_or(0);
+    RR3_FACE_FRAME_TABLE[ix]
+}
 
 /// 最小表情机：持有当前表情；`talk` 是唯一的瞬态——播放开始挂起（记住被打断
 /// 的表情），播放结束恢复。单线程主循环内使用，无并发面。
@@ -24,6 +110,8 @@ pub struct Rr3Face {
     current: &'static str,
     /// talk 挂起前的表情（end_talk 恢复的去处）
     suspended: Option<&'static str>,
+    /// 当前表情帧序列内的指针（rr3_face_tick 推进；入态归零从首帧重播）
+    frame_ix: usize,
 }
 
 impl Default for Rr3Face {
@@ -31,6 +119,7 @@ impl Default for Rr3Face {
         Self {
             current: "idle",
             suspended: None,
+            frame_ix: 0,
         }
     }
 }
@@ -55,6 +144,7 @@ impl Rr3Face {
         }
         let prev = std::mem::replace(&mut self.current, expr);
         self.suspended = None; // 显式指令打断 talk 挂起态
+        self.frame_ix = 0; // 切换即从首帧重播
         Ok((expr, prev))
     }
 
@@ -65,6 +155,7 @@ impl Rr3Face {
         }
         let prev = std::mem::replace(&mut self.current, RR3_FACE_TALK);
         self.suspended = Some(prev);
+        self.frame_ix = 0; // 进 talk 从首帧（张口帧）播起
         prev
     }
 
@@ -73,13 +164,24 @@ impl Rr3Face {
         match self.suspended.take() {
             Some(prev) => {
                 self.current = prev;
+                self.frame_ix = 0;
                 prev
             }
             None => {
                 self.current = "idle";
+                self.frame_ix = 0;
                 "idle"
             }
         }
+    }
+
+    /// 帧动画一拍：报 `(当前表情, 本拍帧序号)` 并把指针推向下一帧（到尾回卷）。
+    /// 先报后推——入态后的首拍报帧 0，调用方按返回值取帧渲染（真件随批F5a
+    /// 显示 trait 接线；sim 档主循环按 ~250ms 节拍空推）。单帧态恒报 0。
+    pub fn rr3_face_tick(&mut self) -> (&'static str, usize) {
+        let ix = self.frame_ix;
+        self.frame_ix = (self.frame_ix + 1) % rr3_face_frames(self.current).len();
+        (self.current, ix)
     }
 }
 
@@ -103,13 +205,85 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn whitelist_covers_five_expressions() {
+    fn whitelist_covers_seven_expressions() {
         assert_eq!(
             RR3_FACE_EXPRESSIONS,
-            ["idle", "blink", "talk", "think", "happy"]
+            ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
         );
         // 初始态 idle：首次切换的"切换前"就是它
         assert_eq!(Rr3Face::default().rr3_face_set("blink").unwrap().1, "idle");
+    }
+
+    #[test]
+    fn new_states_are_point_namable() {
+        let mut f = Rr3Face::default();
+        assert_eq!(f.rr3_face_set("listen").unwrap(), ("listen", "idle"));
+        assert_eq!(f.rr3_face_set("turn").unwrap(), ("turn", "listen"));
+    }
+
+    #[test]
+    fn single_frame_state_ticks_in_place() {
+        let mut f = Rr3Face::default();
+        for _ in 0..3 {
+            assert_eq!(f.rr3_face_tick(), ("idle", 0), "单帧态恒报帧 0");
+        }
+    }
+
+    #[test]
+    fn multi_frame_state_cycles() {
+        let mut f = Rr3Face::default();
+        f.rr3_face_set("blink").unwrap();
+        assert_eq!(f.rr3_face_tick(), ("blink", 0));
+        assert_eq!(f.rr3_face_tick(), ("blink", 1));
+        assert_eq!(f.rr3_face_tick(), ("blink", 0), "到尾回卷");
+        assert_eq!(f.rr3_face_tick(), ("blink", 1));
+    }
+
+    #[test]
+    fn switch_resets_frame_pointer() {
+        let mut f = Rr3Face::default();
+        f.rr3_face_set("blink").unwrap();
+        f.rr3_face_tick(); // 指针已推到 1
+        f.rr3_face_set("think").unwrap();
+        assert_eq!(f.rr3_face_tick(), ("think", 0), "切换后从首帧重播");
+    }
+
+    #[test]
+    fn talk_window_ticks_talk_frames() {
+        let mut f = Rr3Face::default();
+        f.rr3_face_set("happy").unwrap();
+        f.rr3_face_begin_talk();
+        assert_eq!(f.rr3_face_tick(), ("talk", 0));
+        assert_eq!(f.rr3_face_tick(), ("talk", 1), "挂起期间走 talk 帧表");
+        assert_eq!(f.rr3_face_end_talk(), "happy");
+        assert_eq!(f.rr3_face_tick(), ("happy", 0), "恢复后指针归零");
+    }
+
+    #[test]
+    fn frame_table_shape_is_sound() {
+        assert_eq!(RR3_FACE_EXPRESSIONS.len(), RR3_FACE_FRAME_TABLE.len());
+        // 双帧态帧间互异（有动画可言）；全表序列两两互异（状态→帧映射无歧义）
+        assert_ne!(RR3_FRAMES_BLINK[0], RR3_FRAMES_BLINK[1]);
+        assert_ne!(RR3_FRAMES_TALK[0], RR3_FRAMES_TALK[1]);
+        for i in 0..RR3_FACE_FRAME_TABLE.len() {
+            assert!(!rr3_face_frames(RR3_FACE_EXPRESSIONS[i]).is_empty());
+            for j in 0..i {
+                assert_ne!(
+                    RR3_FACE_FRAME_TABLE[i], RR3_FACE_FRAME_TABLE[j],
+                    "表情 {} 与 {} 的帧序列必须互异",
+                    RR3_FACE_EXPRESSIONS[i], RR3_FACE_EXPRESSIONS[j]
+                );
+            }
+        }
+        // 白名单名逐个查得回对应表项；未知名兜底回 idle 帧
+        assert_eq!(rr3_face_frames("idle"), RR3_FRAMES_IDLE.as_slice());
+        assert_eq!(rr3_face_frames("blink"), RR3_FRAMES_BLINK.as_slice());
+        assert_eq!(rr3_face_frames("talk"), RR3_FRAMES_TALK.as_slice());
+        assert_eq!(rr3_face_frames("think"), RR3_FRAMES_THINK.as_slice());
+        assert_eq!(rr3_face_frames("happy"), RR3_FRAMES_HAPPY.as_slice());
+        assert_eq!(rr3_face_frames("listen"), RR3_FRAMES_LISTEN.as_slice());
+        assert_eq!(rr3_face_frames("turn"), RR3_FRAMES_TURN.as_slice());
+        assert_eq!(rr3_face_frames("nope"), rr3_face_frames("idle"));
     }
 
     #[test]
