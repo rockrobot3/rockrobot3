@@ -26,8 +26,9 @@ pub enum Rr3SimWave {
     /// 全零静音
     Silence,
     /// 1s 正弦 + 1s 静音循环：VAD 周期性发 onset/offset（≈2s 一轮），
-    /// 多轮对话闭环（tools/sim --brain）的驱动源。门控按**绝对采样序号**算
-    /// （`idx/rate` 的偶秒有声），与 Sine 同一确定性纪律
+    /// 多轮对话闭环（tools/sim --brain）的驱动源。门控按**绝对帧序号**
+    /// （`idx/声道数/rate` 的偶秒有声——帧才是音频时间，交错样点序号会在
+    /// 多通道下把窗口折半，批F4 真板实测教训），与 Sine 同一确定性纪律
     Burst,
 }
 
@@ -197,8 +198,11 @@ impl Rr3AudioSource for Rr3SimAudioSource {
                     Rr3SimWave::Burst => {
                         // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
                         // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等；
-                        // 门控按绝对序号（不随通道相移走），有声路内才带 ITD 偏移
-                        if idx / rate as u64 % 2 == 0 {
+                        // 门控按绝对**帧**序号（idx/声道数，0.0.6 批F4 真板实测：按
+                        // 交错样点序号算会在多通道下把窗口折半成 500ms，短于 VAD
+                        // 判停尾静音 700ms，offset 永不触发）；有声路内才带 ITD 偏移
+                        let frame_idx = idx / ch_n as u64;
+                        if frame_idx / rate as u64 % 2 == 0 {
                             sine_at(t + t_shift)
                         } else {
                             0.0
@@ -700,6 +704,34 @@ mod tests {
                 "deg={deg}: RMS 反演 k={k_est:.4} 必须贴合注入 sinθ={k_want:.4}"
             );
         }
+    }
+
+    /// 批F4 真板实测回归：burst 门控按**帧**序号——双通道下仍保证"1s 有声 +
+    /// 1s 静音"的音频时间语义。交错样点序号口径会把窗口折半成 500ms，短于
+    /// sense VAD 的 silence_tail_ms=700ms，offset 永不触发（--chain 演练
+    /// 60s 只见一次 onset 的根因）。
+    #[test]
+    fn burst_gate_counts_frames_so_stereo_keeps_one_second_windows() {
+        let s = Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+            Rr3SimWave::Burst,
+            Rr3SimDoa::rr3_sim_doa_new(-60.0),
+        );
+        rr3_block_on(s.open(Rr3AudioCfg {
+            sample_rate_hz: 16000,
+            channels: 2,
+            bit_depth: 16,
+        }))
+        .unwrap();
+        // 第 1 秒（16000 帧）有声
+        let loud = rr3_block_on(s.read(16000)).unwrap();
+        assert_eq!(loud.samples.len(), 32000);
+        assert!(loud.samples.iter().any(|&v| v != 0), "第 1 秒必须有声");
+        // 第 2 秒全零（交错序号口径下这里是第 2 个"有声 500ms 窗"，修前必红）
+        let silent = rr3_block_on(s.read(16000)).unwrap();
+        assert!(silent.samples.iter().all(|&v| v == 0), "第 2 秒必须全静音");
+        // 第 3 秒与第 1 秒逐点相等（440Hz 整周期 + 门控按帧，确定性）
+        let again = rr3_block_on(s.read(16000)).unwrap();
+        assert_eq!(again.samples, loud.samples, "burst 第 3 秒须复刻第 1 秒");
     }
 
     /// 确定性：同角两源读出逐点相等；单声道链路不受方位注入影响（逐点等价）。
