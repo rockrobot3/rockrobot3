@@ -9,15 +9,21 @@
 //!    缺省用登记值；缺键回落默认，类型错显式报错。
 
 pub mod capture;
+pub mod doa;
 pub mod vad;
 
 use rr_hal::{Rr3AudioCfg, Rr3PcmStream};
 use serde_json::{json, Value};
 
+pub use doa::Rr3DoaFix;
 pub use vad::{Rr3VadConfig, Rr3VadEdge, Rr3VadState};
 
 pub fn surface() -> impl Iterator<Item = &'static str> {
-    capture::SURFACE.iter().chain(vad::SURFACE.iter()).copied()
+    capture::SURFACE
+        .iter()
+        .chain(doa::SURFACE.iter())
+        .chain(vad::SURFACE.iter())
+        .copied()
 }
 
 // ---------- base64（RFC 4648 标准字母表 + 填充） ----------
@@ -106,8 +112,11 @@ pub fn rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value {
 
 /// `rr3-sense/audio/vad_start` 的事件体（event）。边沿负载只带摘要
 /// （edge / rms_peak / speech_ms），不带任何闭环数据（ADR-0007 §决策一）。
-pub fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge) -> Value {
-    match edge {
+/// `doa` 是批F2 的负载扩展（append 兼容，schema_version 仍 1）：判向结果由
+/// sense 侧音频格位承载（零新契约），仅 onset 且判出（多通道非静音帧）时携带，
+/// offset 不带——与 rms_peak 同一形状纪律。
+pub fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge, doa: Option<Rr3DoaFix>) -> Value {
+    let mut body = match edge {
         Rr3VadEdge::Onset {
             rms_peak,
             speech_ms,
@@ -117,7 +126,11 @@ pub fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge) -> Value {
         Rr3VadEdge::Offset { speech_ms } => json!({
             "seq": seq, "edge": "offset", "speech_ms": speech_ms,
         }),
+    };
+    if let (Rr3VadEdge::Onset { .. }, Some(d)) = (&edge, doa) {
+        body["doa"] = json!({ "deg": d.deg, "bin": d.bin.rr3_doa_bin_as_str() });
     }
+    body
 }
 
 /// `rr3-sense/capture/dump`（rpc.exposes 的事务面）的应答体：
@@ -361,15 +374,45 @@ mod tests {
                 rms_peak: 4200,
                 speech_ms: 200,
             },
+            None,
         );
         assert_eq!(on["edge"], "onset");
         assert_eq!(on["rms_peak"], 4200);
         assert_eq!(on["speech_ms"], 200);
         assert_eq!(on["seq"], 3);
-        let off = rr3_vad_event_body(4, Rr3VadEdge::Offset { speech_ms: 900 });
+        assert!(
+            on.get("doa").is_none(),
+            "无判向结果的 onset 不带 doa 字段"
+        );
+        let off = rr3_vad_event_body(4, Rr3VadEdge::Offset { speech_ms: 900 }, None);
         assert_eq!(off["edge"], "offset");
         assert_eq!(off["speech_ms"], 900);
         assert_eq!(off.get("rms_peak"), None, "offset 不带 rms_peak");
+    }
+
+    /// doa 字段（批F2 负载扩展）：onset 携带判向档（deg+bin），offset 即使传了
+    /// 也丢弃——静音帧无方向可判，形状纪律与 rms_peak 同一条。
+    #[test]
+    fn vad_event_body_carries_doa_on_onset_only() {
+        let fix = Rr3DoaFix {
+            deg: -60,
+            bin: doa::Rr3DoaBin::Left,
+        };
+        let on = rr3_vad_event_body(
+            5,
+            Rr3VadEdge::Onset {
+                rms_peak: 4200,
+                speech_ms: 200,
+            },
+            Some(fix),
+        );
+        assert_eq!(on["doa"]["deg"], -60);
+        assert_eq!(on["doa"]["bin"], "left");
+        let off = rr3_vad_event_body(6, Rr3VadEdge::Offset { speech_ms: 900 }, Some(fix));
+        assert!(
+            off.get("doa").is_none(),
+            "offset 不得携带 doa: {off}"
+        );
     }
 
     #[test]

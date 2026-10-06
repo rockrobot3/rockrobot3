@@ -229,6 +229,19 @@ impl RrdTest {
         boot_role: &str,
         tick_ms: u64,
     ) -> RrdTest {
+        RrdTest::rr3_start_boot_env(tag, manifests, boot_role, tick_ms, &[])
+    }
+
+    /// `rr3_start_boot` 的带环境变量版（0.0.6 批F2）：`envs` 原样注入 rrd 进程环境，
+    /// 经 spawn 继承传给 `--manifest` 直驱 boot 的**真模块**——判向 e2e 用它给
+    /// rr3-sense 注入 `RR3_HAL_SIM_DOA_DEG`（与 `rr3_start_profile_env` 同一条纪律）。
+    pub fn rr3_start_boot_env(
+        tag: &str,
+        manifests: &[&Path],
+        boot_role: &str,
+        tick_ms: u64,
+        envs: &[(&str, &str)],
+    ) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
         RrdTest::rr3_spawn_inner(
             &socket,
@@ -239,7 +252,7 @@ impl RrdTest {
             manifests,
             Some(boot_role),
             None,
-            &[],
+            envs,
         )
     }
 

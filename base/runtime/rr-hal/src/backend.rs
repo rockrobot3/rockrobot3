@@ -28,6 +28,11 @@ pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 /// `burst` = 1s 正弦 + 1s 静音循环，VAD 周期性发 onset/offset，多轮对话闭环用）。
 pub const RR3_HAL_SIM_WAVE_ENV: &str = "RR3_HAL_SIM_WAVE";
 
+/// sim 源的声源方位角键（度，-90..=90 的十进制小数，负=左/正=右；未设/取值不认 → 不注入）。
+/// 双麦方位模型见 [`crate::sim::Rr3SimDoa`]：批F2 sim 判向的正门注入点，
+/// 多通道采集 + 本键才生效（单声道链路无方向语义，注入被设备面忽略）。
+pub const RR3_HAL_SIM_DOA_DEG_ENV: &str = "RR3_HAL_SIM_DOA_DEG";
+
 /// linux（ALSA）后端的设备名键：如 `hw:0,0`、`plughw:1,0`；默认 `default`。
 pub const RR3_HAL_ALSA_DEVICE_ENV: &str = "RR3_HAL_ALSA_DEVICE";
 
@@ -97,6 +102,15 @@ fn rr3_hal_sim_wave() -> crate::sim::Rr3SimWave {
         .unwrap_or(crate::sim::Rr3SimWave::Sine)
 }
 
+/// sim 方位角键的取值裁决（-90..=90 的有限十进制小数）。独立成纯函数：裁决可单测，
+/// 选择函数里只留"读环境 + 裁决 + 缺省"。
+pub fn rr3_sim_doa_deg_parse(s: &str) -> Option<f64> {
+    s.trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|d| d.is_finite() && (-90.0..=90.0).contains(d))
+}
+
 /// 按环境选音频源。解析失败（环境变量取值不认）或显式 `placeholder` 时返回
 /// 占位后端——它会在使用处以 `Unsupported` 显式回错，**不静默换后端**。
 pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
@@ -111,12 +125,19 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
             unreachable!("上面 guard 已保证只在本分支编译")
         }
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
-        _ => (
-            Box::new(crate::sim::Rr3SimAudioSource::rr3_sim_source_new(
-                rr3_hal_sim_wave(),
-            )),
-            RR3_BACKEND_SIM,
-        ),
+        _ => {
+            let doa = std::env::var(RR3_HAL_SIM_DOA_DEG_ENV)
+                .ok()
+                .and_then(|v| rr3_sim_doa_deg_parse(&v))
+                .and_then(crate::sim::Rr3SimDoa::rr3_sim_doa_new);
+            (
+                Box::new(crate::sim::Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+                    rr3_hal_sim_wave(),
+                    doa,
+                )),
+                RR3_BACKEND_SIM,
+            )
+        }
     }
 }
 
@@ -323,5 +344,22 @@ mod tests {
         assert_eq!(rr3_sim_link_rssi_parse("0"), None, "0 dBm 不是合法读数");
         assert_eq!(rr3_sim_link_rssi_parse("-101"), None, "越下界不认");
         assert_eq!(rr3_sim_link_rssi_parse("abc"), None, "垃圾不认");
+    }
+
+    /// sim 方位角 env 键的取值裁决：±90 闭区间内的有限小数才收，越界/垃圾不认
+    /// （落"不注入"）。批F2 判向 e2e（RR3_HAL_SIM_DOA_DEG=-60）的正门靠它。
+    #[test]
+    fn sim_doa_deg_env_values_parse_or_default() {
+        assert_eq!(rr3_sim_doa_deg_parse("-60"), Some(-60.0));
+        assert_eq!(rr3_sim_doa_deg_parse(" 45.5 "), Some(45.5));
+        assert_eq!(rr3_sim_doa_deg_parse("-90"), Some(-90.0), "下界在域内");
+        assert_eq!(rr3_sim_doa_deg_parse("90"), Some(90.0), "上界在域内");
+        assert_eq!(rr3_sim_doa_deg_parse("0"), Some(0.0));
+        assert_eq!(rr3_sim_doa_deg_parse("90.1"), None, "越上界不认");
+        assert_eq!(rr3_sim_doa_deg_parse("-90.5"), None, "越下界不认");
+        assert_eq!(rr3_sim_doa_deg_parse("abc"), None, "垃圾不认");
+        assert_eq!(rr3_sim_doa_deg_parse(""), None, "空串不认");
+        assert_eq!(rr3_sim_doa_deg_parse("nan"), None, "NaN 不认");
+        assert_eq!(rr3_sim_doa_deg_parse("inf"), None, "inf 不认");
     }
 }
