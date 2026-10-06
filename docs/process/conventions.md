@@ -1139,6 +1139,19 @@ sim 档诚实标注）。
 主循环 ~250ms 墙钟节拍推帧（帧速率不随总线流量漂移）；契约面零改动
 （topics.toml face/expression note 同源追加两态措辞）；显示 trait 与真件适配
 随批F5a，本批仅 sim 回归。
+2026-10-07 0.0.6 批F4 sim 档全链闭环演练（`379e6de`）**代码批 + docs**（ADR-0007/
+0014/0017）：`rr3-sim --chain` 新模式——六真进程全链（rrd boot spawn sense 双麦
+burst+DOA 注入 -60° + 外部 interact/brain（mock 云）/act + 演练自带裸 UDS 观察者
+**先于外部模块注册**取证 vad_start/servo/state，servo/state 一次性广播晚注册漏收），
+无人工干预跑通"采集→意图→判向→转向→表情"一轮以上；判定三段日志留痕（brain
+`actions=1` / interact「talk 挂起」/ act `servo angle=45`）+ `denied_publish = 0`；
+CI 增 sim-chain job（tools/ci/sim-chain.sh，python ≥3.11 门槛，演练回执远端口径）。
+板上首次实跑揪出并结清缺陷两件：①rr-hal sim burst 门控按交错样点序号算偶秒——
+多通道下窗口折半 500ms < silence_tail 700ms，offset 永不触发（修：门控按帧序号
+idx/声道数，mono 逐点不变 + 双通道回归测试钉住）；②演练实例面板 8080 与板上 deb
+系统实例冲突（--brain 同款中招，CI 无系统实例故未暴露；演练统一注入
+`RR3_PANEL_ADDR=127.0.0.1:18080` 共享常量）。boards §9 回填 + 方案判据 10/11 内联
+标注：R9 **采购前档**，不充当真件收口证据。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
