@@ -1,10 +1,9 @@
 # RockRobot3 装配单：distro 机型（发行版快路轨，0.0.2 T5 / ADR-0013 裁定 3）
 # 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门）。
-# 与 default（RK3566 参考机）的差异只有一处：快路 payload 只含五个 Rust 模块——
-# rr3-brain 是 Python（stdlib-only），不进 0.0.2 快路 deb。它在 faces 里保留声明、
-# 四个 cognition.* 格位不绑定：装配链逐格点名缺格、rr3-brain 不进 boot 队列
-# （方案 P2：缺格只降点名模块，缺格≠拒 boot）。这条点名同时是 CI distro-smoke 的
-# 断言点——"5 模块 spawn + brain 缺格点名"证明 deb 冒烟容忍缺格模块而非假全绿。
+# 快路 payload 含五个 Rust 模块 + Python brain（0.0.6 批F1 起：brain stdlib-only，
+# 打包器按 lang=python 生成 shim 装机，判据"brain 随 deb 装机"）。0.0.2 时代四格
+# 不绑定、brain 不进 boot 队列（缺格点名冒烟）——批F1 兑现后 cognition.* 绑定
+# rr3-brain，随装配单进 boot 队列（CI distro-smoke 同步改断"六模块 spawn"）。
 
 schema_version = 1
 
@@ -13,7 +12,7 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
-# 认知层四格缺位 = 快路 payload 边界的诚实表达，不预占。
+# 认知层四格绑定 rr3-brain（0.0.6 批F1：brain 随 deb 装机、经装配单进 boot）。
 "act.servo" = "rr3-act"
 "act.led" = "rr3-act"
 "act.relay" = "rr3-act"
@@ -26,6 +25,10 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 "sensor.env" = "rr3-sense"
 "sensor.imu" = "rr3-sense"
 "power.charger" = "rr3-power"
+"cognition.dialog" = "rr3-brain"
+"cognition.asr" = "rr3-brain"
+"cognition.llm" = "rr3-brain"
+"cognition.tts" = "rr3-brain"
 
 [faces]
 # 模块 → 本形态启用的格位集合。faces 决定起谁（Q3 裁定）。
