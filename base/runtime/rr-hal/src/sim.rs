@@ -59,22 +59,74 @@ const RR3_SIM_NOISE_AMP: i16 = 8000;
 /// 噪声种子（xorshift64*）：任何机器同一帧序同一波形，确定性是 golden 向量的前提
 const RR3_SIM_NOISE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
+/// 双麦方位模型的基线（米）：sim 阵列的虚拟麦距，量级取 USB 麦阵列常见值
+/// （R14 定案 USB 阵列；真件换装 F5a 按实际阵列几何替换，sim 模型只求可复现）。
+const RR3_SIM_MIC_BASELINE_M: f64 = 0.06;
+/// 声速（m/s，20 °C 空气）：ITD（到达时间差）换算用
+const RR3_SIM_SOUND_SPEED_MPS: f64 = 343.0;
+
 struct Rr3SimOpen {
     cfg: Rr3AudioCfg,
     /// 已读出的**采样点**数（不是帧数）：正弦相位与噪声序号都按它推进
     cursor: u64,
 }
 
-/// sim 音频源（虚拟麦克风）
+/// sim 音频源（虚拟麦克风）。多通道 + [`Rr3SimDoa`] 时按双麦方位模型出各路增益与
+/// 音频相位差（ILD/ITD），单声道链路逐点等价于无方位注入（golden 向量不动）。
 pub struct Rr3SimAudioSource {
     wave: Rr3SimWave,
+    doa: Option<Rr3SimDoa>,
     open: Mutex<Option<Rr3SimOpen>>,
+}
+
+/// 双麦方位注入（批F2 sim 先行，方案 §5.3 判向-转向编排 / R14）：声源方位角
+/// `-90..=90`（负=左、0=正前、正=右）。物理模型：
+/// - **ILD（幅度差）**：`g_l = 1 - sin θ`、`g_r = 1 + sin θ`——θ=0 两路同幅，
+///   θ=±90° 单侧 2 倍另侧归零；sense 侧 DoA 按同一模型反演（可逆、确定性）；
+/// - **ITD（相位差）**：有声路按基线时差 `Δt = d·sinθ/c` 做音调相位偏移——
+///   噪声无分数延迟不可相移，只吃增益（粗判向走 ILD，ITD 是保真项不是判据）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rr3SimDoa {
+    deg: f64,
+}
+
+impl Rr3SimDoa {
+    /// 方位角构造：越界（|deg| > 90）不认——方位角域就是 ±90°，越界属调用方 bug。
+    pub fn rr3_sim_doa_new(deg: f64) -> Option<Self> {
+        (-90.0..=90.0)
+            .contains(&deg)
+            .then_some(Self { deg })
+    }
+
+    pub fn rr3_sim_doa_deg(&self) -> f64 {
+        self.deg
+    }
+
+    /// `sin θ`（ILD/ITD 共用的方位系数，`k`）
+    fn rr3_sim_doa_sin(&self) -> f64 {
+        self.deg.to_radians().sin()
+    }
+
+    /// ITD（秒）：基线时差，有声路的音调相位按 ±Δt/2 偏移
+    fn rr3_sim_doa_itd_s(&self) -> f64 {
+        RR3_SIM_MIC_BASELINE_M * self.rr3_sim_doa_sin() / RR3_SIM_SOUND_SPEED_MPS
+    }
 }
 
 impl Rr3SimAudioSource {
     pub fn rr3_sim_source_new(wave: Rr3SimWave) -> Self {
         Self {
             wave,
+            doa: None,
+            open: Mutex::new(None),
+        }
+    }
+
+    /// 带方位注入的构造（`doa` 为 `None` 等价 [`Self::rr3_sim_source_new`]）
+    pub fn rr3_sim_source_new_with_doa(wave: Rr3SimWave, doa: Option<Rr3SimDoa>) -> Self {
+        Self {
+            wave,
+            doa,
             open: Mutex::new(None),
         }
     }
@@ -101,27 +153,55 @@ impl Rr3AudioSource for Rr3SimAudioSource {
         let Some(open) = guard.as_mut() else {
             return Err(Rr3HalError::InvalidParam("sim 源 read 前必须 open".into()));
         };
-        let n = frames * open.cfg.channels as usize;
+        let ch_n = open.cfg.channels as usize;
+        let n = frames * ch_n;
         // 每采样点的值一律由绝对序号（cursor + i）确定性派生：
         // 同一波形任何机器任何时刻逐点相等，golden 向量与 e2e 都钉在这一点上
         let rate = open.cfg.sample_rate_hz.max(1) as f64;
+        // 方位模型参数（无注入或单声道时全 None——mono 链路没有方向语义，
+        // 逐采样路径与旧实现逐点等价，golden 向量不因 DoA 注入而动）
+        let (k, itd) = match self.doa.filter(|_| ch_n >= 2) {
+            Some(d) => (Some(d.rr3_sim_doa_sin()), Some(d.rr3_sim_doa_itd_s())),
+            None => (None, None),
+        };
+        let sine_at = |t_s: f64| -> f64 {
+            RR3_SIM_SINE_AMP as f64
+                * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
+        };
         let samples: Vec<i16> = (0..n)
             .map(|i| {
                 let idx = open.cursor + i as u64;
-                let sine = |idx: u64| {
-                    (RR3_SIM_SINE_AMP as f64
-                        * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * idx as f64 / rate).sin())
-                        as i16
+                let t = idx as f64 / rate;
+                // 通道归属：交错排布，i % 声道数。方位注入只进前两路（L/R 对），
+                // 更多路输出静音（真件换装 F5a 按阵列实际通道序重排，sim 不发明通道语义）
+                let ch = i % ch_n;
+                // 各路形状：增益（ILD）与音调相位偏移（ITD，仅音调波）
+                let (gain, t_shift) = match (k, itd) {
+                    (Some(k), itd) => {
+                        let g = match ch {
+                            0 => 1.0 - k,
+                            1 => 1.0 + k,
+                            _ => 0.0,
+                        };
+                        let dt = match (ch, itd) {
+                            (0, Some(itd)) => -itd / 2.0,
+                            (1, Some(itd)) => itd / 2.0,
+                            _ => 0.0,
+                        };
+                        (g, dt)
+                    }
+                    _ => (1.0, 0.0),
                 };
-                match self.wave {
-                    Rr3SimWave::Sine => sine(idx),
+                let v = match self.wave {
+                    Rr3SimWave::Sine => sine_at(t + t_shift),
                     Rr3SimWave::Burst => {
                         // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
-                        // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等
+                        // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等；
+                        // 门控按绝对序号（不随通道相移走），有声路内才带 ITD 偏移
                         if idx / rate as u64 % 2 == 0 {
-                            sine(idx)
+                            sine_at(t + t_shift)
                         } else {
-                            0
+                            0.0
                         }
                     }
                     Rr3SimWave::Noise => {
@@ -130,10 +210,11 @@ impl Rr3AudioSource for Rr3SimAudioSource {
                         x ^= x << 25;
                         x ^= x >> 27;
                         let v = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as i64;
-                        (v % (RR3_SIM_NOISE_AMP as i64)) as i16
+                        (v % (RR3_SIM_NOISE_AMP as i64)) as f64
                     }
-                    Rr3SimWave::Silence => 0,
-                }
+                    Rr3SimWave::Silence => 0.0,
+                };
+                (v * gain) as i16
             })
             .collect();
         open.cursor += n as u64;
@@ -569,6 +650,89 @@ mod tests {
             rr3_block_on(s.angle()).unwrap(),
             200,
             "读回最后一次 set 的值"
+        );
+    }
+
+    /// 方位角构造的值域门：±90 闭区间收，越界与 NaN 不认。
+    #[test]
+    fn sim_doa_ctor_accepts_only_pm90() {
+        for deg in [-90.0, -60.0, 0.0, 45.0, 90.0] {
+            let d = Rr3SimDoa::rr3_sim_doa_new(deg).unwrap_or_else(|| panic!("{deg} 应收"));
+            assert_eq!(d.rr3_sim_doa_deg(), deg);
+        }
+        for bad in [-90.5, 90.1, 180.0, f64::NAN] {
+            assert!(
+                Rr3SimDoa::rr3_sim_doa_new(bad).is_none(),
+                "{bad} 越域必须不认"
+            );
+        }
+    }
+
+    /// 双麦 ILD 模型的可逆性：按注入角读双通道帧，逐通道 RMS 反演出 sinθ，
+    /// 必须与注入角自洽（sense 侧 DoA 的正门前提——注入与反演同一模型）。
+    #[test]
+    fn sim_doa_stereo_ild_matches_injected_direction() {
+        for deg in [-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0] {
+            let s = Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+                Rr3SimWave::Sine,
+                Rr3SimDoa::rr3_sim_doa_new(deg),
+            );
+            rr3_block_on(s.open(Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 2,
+                bit_depth: 16,
+            }))
+            .unwrap();
+            // 读 16000 帧（1 秒）：ITD 相移对 1s 整周期数平均后不扰 RMS 比值
+            let pcm = rr3_block_on(s.read(16000)).unwrap();
+            assert_eq!(pcm.samples.len(), 32000);
+            let (mut e0, mut e1) = (0i64, 0i64);
+            for f in pcm.samples.chunks_exact(2) {
+                e0 += f[0] as i64 * f[0] as i64;
+                e1 += f[1] as i64 * f[1] as i64;
+            }
+            // sinθ 的 RMS 反演 = (r_r - r_l)/(r_r + r_l)；注入模型 g_l=1-sinθ、g_r=1+sinθ
+            let (r0, r1) = ((e0 as f64).sqrt(), (e1 as f64).sqrt());
+            let k_est = (r1 - r0) / (r1 + r0);
+            let k_want = deg.to_radians().sin();
+            assert!(
+                (k_est - k_want).abs() < 0.01,
+                "deg={deg}: RMS 反演 k={k_est:.4} 必须贴合注入 sinθ={k_want:.4}"
+            );
+        }
+    }
+
+    /// 确定性：同角两源读出逐点相等；单声道链路不受方位注入影响（逐点等价）。
+    #[test]
+    fn sim_doa_is_deterministic_and_mono_is_invariant() {
+        let mk = || {
+            Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+                Rr3SimWave::Sine,
+                Rr3SimDoa::rr3_sim_doa_new(-60.0),
+            )
+        };
+        let (a, b) = (mk(), mk());
+        let cfg2 = Rr3AudioCfg {
+            sample_rate_hz: 16000,
+            channels: 2,
+            bit_depth: 16,
+        };
+        rr3_block_on(a.open(cfg2)).unwrap();
+        rr3_block_on(b.open(cfg2)).unwrap();
+        assert_eq!(
+            rr3_block_on(a.read(160)).unwrap().samples,
+            rr3_block_on(b.read(160)).unwrap().samples,
+            "同角同帧序逐点相等"
+        );
+        // 单声道：带注入与不带注入逐点相等（mono 无方向语义）
+        let (m1, m2) = (mk(), Rr3SimAudioSource::rr3_sim_source_new(Rr3SimWave::Sine));
+        let cfg1 = RR3_AUDIO_CFG_16K_MONO16;
+        rr3_block_on(m1.open(cfg1)).unwrap();
+        rr3_block_on(m2.open(cfg1)).unwrap();
+        assert_eq!(
+            rr3_block_on(m1.read(160)).unwrap().samples,
+            rr3_block_on(m2.read(160)).unwrap().samples,
+            "mono + DoA 注入必须逐点等价无注入"
         );
     }
 

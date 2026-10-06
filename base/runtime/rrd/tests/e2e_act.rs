@@ -9,8 +9,10 @@
 //! result.error 不断链，servo/state 限速流上总线被旁观连接真实收到（rr-bus
 //! 广播全量扇出、不按订阅过滤，conn.rs 的既证事实）。0.0.3 T3 起再加意图执行面：
 //! brain 身份连接广播 intent 事件，actions 经两道归属门（exposes 归属 + 意图面
-//! 开放）驱动 relay，执行效果以 relay/state 广播回读——RPC 与 intent 两条驱动路
-//! 共用同一条状态流（流序连贯），越权动作被拒后不产生状态。
+//! 开放）驱动 relay，断电平的效果以 relay/state 广播回读——RPC 与 intent 两条驱动路
+//! 共用同一条状态流（流序连贯）。0.0.6 批F2 起意图面再开放转向：
+//! `rr3-act/servo/command` 过同样的两道门落角，servo/state 同流序回读——
+//! 判据 8"注入向左/向右类意图后舵机转到对应档位"的 sim 侧证据。越权动作被拒后不产生状态。
 //!
 //! 关键夹具差异（相对 e2e_profile 的 sim_peer 模板）：module.toml 用**仓内真契约
 //! 工件**渲染 entry（`rr3_module_manifest_text`），且必须同树写 config.toml——
@@ -285,7 +287,40 @@ fn act_module_full_face_end_to_end() {
     assert_eq!(sv["seq"], 2, "两条驱动路共用一条状态流，流序连贯: {sv}");
     assert_eq!(sv["on"], false, "intent 动作断开继电器: {sv}");
 
-    // ---------- ⑥ 越权动作：归属门拒，有界窗口内不得再有 relay/state ----------
+    // ---------- ⑥ intent 转向动作（批F2）：servo/command 过同两道门落 servo/state ----------
+    // "向左看"类词表意图由 brain 广播 actions 落 rr3-act/servo/command（45°=左档，
+    // brain 侧词表→角度映射由 python 单测覆盖，e2e 在 act 边界钉总线契约——判据 8
+    // 的 sim 侧证据）。seq=2 延续 ② 的 RPC 路（seq=1）：②的 RPC servo 已在限速门
+    // 记账，窗内（50ms）连发被拒且不补发（流是摘要不是逐拍镜像，设计行为）——UDS
+    // 本地链路快到 act 处理 ⑥ 距 ② 的记账只有十几毫秒，所以等窗必须放在**广播前**
+    // （act 收帧即裁决，测试侧发完再睡拦不住 act 的 gate 判定）。取 100ms 留裕度。
+    std::thread::sleep(Duration::from_millis(100));
+    rr3_send(
+        &mut brain,
+        &rr3_json_frame(
+            Rr3PayloadType::Event,
+            &json!({
+                "topic": "rr3-brain/intent/result",
+                "trace": 73,
+                "user_text": "向左看",
+                "actions": [{"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}}],
+            }),
+            brain_task,
+            RR3_TASK_RRD,
+        ),
+    );
+    let st = rr3_read_where(&mut obs, " servo/state 流（intent 路）", |f| {
+        rr3_json_of(f)["topic"] == "rr3-act/servo/state"
+    });
+    assert_eq!(
+        st.header.src_task, act_task,
+        "intent 路的 state 帧同样出自 rr3-act"
+    );
+    let sv = rr3_json_of(&st);
+    assert_eq!(sv["seq"], 2, "两条驱动路共用一条 servo 状态流，流序连贯: {sv}");
+    assert_eq!(sv["angle_deg"], 45, "左档转向落角: {sv}");
+
+    // ---------- ⑦ 越权动作：归属门拒，有界窗口内不得再有 relay/state ----------
     // 拒执行是 act 进程内的日志面（模块 stdout 接 Stdio::null()），e2e 侧唯一
     // 可观测面是"没有状态发布"。collect 是破坏性读法，按 support 纪律只放用例末尾。
     rr3_send(
@@ -294,7 +329,7 @@ fn act_module_full_face_end_to_end() {
             Rr3PayloadType::Event,
             &json!({
                 "topic": "rr3-brain/intent/result",
-                "trace": 73,
+                "trace": 74,
                 "user_text": "把别人家的电通上",
                 "actions": [{"topic": "rr3-power/battery/state", "args": {"on": true}}],
             }),

@@ -81,6 +81,9 @@ fn rr3_run() -> Result<(), String> {
 
         let pcm = rr3_block_on(source.read(frames_per_tick))
             .map_err(|e| format!("读帧失败({backend}): {e}"))?;
+        // DoA 粗判向（批F2）：多通道帧在下混**前**判向（双麦原始通道只在此一用），
+        // 最新一档随下一次 onset 边沿上路；单声道/静音帧恒 None，事件体不带 doa
+        let doa = audio::doa::rr3_doa_fix(&pcm.samples, pcm.cfg.channels);
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
         let pcm = audio::rr3_pcm_downmix_stream(pcm);
@@ -90,7 +93,7 @@ fn rr3_run() -> Result<(), String> {
         if let Some(edge) = vad.rr3_vad_feed(&pcm.samples) {
             bus.rr3_publish(
                 "rr3-sense/audio/vad_start",
-                audio::rr3_vad_event_body(seq, edge),
+                audio::rr3_vad_event_body(seq, edge, doa),
             )?;
         }
 
