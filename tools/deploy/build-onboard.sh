@@ -58,11 +58,15 @@ rsync -a --delete \
   ./ "$HOST:$RMT_SRC/"
 
 echo "== ③ 依赖通道（板上有外网则直连 crates.io；无外网则预置 vendor）=="
-if ! rrun "cd $RMT_SRC && cargo fetch --locked"; then
-  echo "cargo fetch 失败：板无外网时在宿主 \`cargo vendor --versioned-dirs <vendor_dir>\`，" >&2
-  echo "把 vendor/ 与指向它的 .cargo/config.toml 一并同步上板，或改用有网环境后重跑。" >&2
-  exit 1
-fi
+# 仓库根无 Cargo.toml（分立 workspace 布局：base/runtime、modules/*、tools/* 各自独立，
+# 首跑真板踩实）——对本脚本 ④ 实际构建的两个 manifest 各自 fetch
+for m in sense interact; do
+  if ! rrun "cd $RMT_SRC/modules/rr3-$m && cargo fetch --locked"; then
+    echo "cargo fetch 失败（rr3-$m）：板无外网时在宿主 \`cargo vendor --versioned-dirs <vendor_dir>\`，" >&2
+    echo "把 vendor/ 与指向它的 .cargo/config.toml 一并同步上板，或改用有网环境后重跑。" >&2
+    exit 1
+  fi
+done
 
 echo "== ④ 板上原生构建（音频两件带 alsa feature，release）=="
 for m in sense interact; do
