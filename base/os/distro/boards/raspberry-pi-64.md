@@ -111,7 +111,7 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 
 | 项 | 实测 |
 |---|---|
-| 板联网 | 房间 WiFi（NetworkManager keyfile 首启注入：initramfs 前置 cpio 段 + `rdinit=/wifi-hook.sh` 写 keyfile 后 `exec /init` 交还正常启动——USB RNDIS/CDC 路线在 macOS 端驱动废 + 串口无 getty，均判死弃用）；bootfs 临时改动（initramfs 钩子段 / cmdline `rdinit=` 等 / config.txt `dtoverlay=dwc2`）属注入脚手架，验证后清理复验（§8 遗留） |
+| 板联网 | 房间 WiFi（NetworkManager keyfile 首启注入：initramfs 前置 cpio 段 + `rdinit=/wifi-hook.sh` 写 keyfile 后 `exec /init` 交还正常启动——USB RNDIS/CDC 路线在 macOS 端驱动废 + 串口无 getty，均判死弃用）；bootfs 注入脚手架**已于 2026-10-07 拆除并复验**：config/cmdline 还原备份、initramfs 剥钩子段（cmp 一致）→ 冷启动**无脚手架自主联网**（WXYYBG wlan0 activated，keyfile 持久化生效）+ 六模块 running + boots 15→16 累积 |
 | 验证① counters/重启回归 | 含 brain 新 deb 装机 → counters 跨 rrd 重启自增（11→14）→ `sudo reboot` 后 `{"boots":15}` **跨整机重启累积**（批E' 修复健康复验）；`rrd.service` enabled，冷启动六模块全新 running |
 | 验证② brain 随 deb 进 boot | `profiles/distro.toml` cognition 四格绑定 + payload 补 pkg 树后：六模块全 `running`（`rr3-brain` task=7，`python3 -m rr3_brain` 真进程，shim `RR3_BRAIN_CONFIG`/`PYTHONPATH` 双装机绝对注入）；`denied_publish = 0`；reboot 冷启动复验同绿 |
 | 验证③ build-onboard.sh 实测 | 全链 exit 0：①板上依赖门（apt `rustc 1.85.1` ≥1.82 门过 + `libasound2-dev` 1.2.14 + pkg-config）→ ②rsync 源码同步 → ③`cargo fetch --locked`（crates.io 直连，sense/interact 各自 manifest）→ ④板上 release 构建 `--features alsa` 两件（1m58s）→ ⑤产物归位 payload → ⑥动态 ELF aarch64 + ldd 含 libasound 断言。音频件换装验收仍归批F5a（洞 M，修订版 6 拆分），本批只证构建能力 |
