@@ -317,7 +317,10 @@ fn act_module_full_face_end_to_end() {
         "intent 路的 state 帧同样出自 rr3-act"
     );
     let sv = rr3_json_of(&st);
-    assert_eq!(sv["seq"], 2, "两条驱动路共用一条 servo 状态流，流序连贯: {sv}");
+    assert_eq!(
+        sv["seq"], 2,
+        "两条驱动路共用一条 servo 状态流，流序连贯: {sv}"
+    );
     assert_eq!(sv["angle_deg"], 45, "左档转向落角: {sv}");
 
     // ---------- ⑦ 越权动作：归属门拒，有界窗口内不得再有 relay/state ----------

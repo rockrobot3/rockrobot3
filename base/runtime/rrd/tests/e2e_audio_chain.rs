@@ -206,8 +206,7 @@ fn audio_chain_doa_stereo_env_injection_end_to_end() {
     // ---------- 夹具：真二进制 + 真 manifest + 双麦 config + DOA env ----------
     let sense_bin = rr3_build_module_bin("rr3-sense");
     let m_sense = rr3_module_manifest("doa", "rr3-sense", &sense_bin);
-    let cfg_path =
-        std::env::temp_dir().join(format!("rr3-m3-doa-cfg-{}.toml", std::process::id()));
+    let cfg_path = std::env::temp_dir().join(format!("rr3-m3-doa-cfg-{}.toml", std::process::id()));
     std::fs::write(&cfg_path, DOA_CONFIG).expect("写双麦 config");
     let cfg_arg = cfg_path
         .to_str()
