@@ -1090,6 +1090,20 @@ F5b（运维链四项）+ 真件矩阵扩八行 + §5.4 采购 BOM 八行定案 
 F5a/F5b、0.0.7 Q1–Q6 已裁、BOM 定案、legacy 除名）+ 本节 T15–T20 登记 + docs/README
 dev 索引行更新；本轮六批合计实测改动：9 文件（8 改 + ADR-0017 新建），零 `.rs`/
 module.toml/契约文件改动，linkcheck 全绿
+2026-10-07 0.0.6 纪律小批（rrd 心跳顺序倒置修复——先归并后应答）**代码批**：
+批F1 收口期实证 `ctl_counters_aggregates_heartbeat_counters` 负载敏感竞态（单跑
+稳定绿、全量并行时"期望 5 实得 2"）——[conn.rs](../../base/runtime/rrd/src/conn.rs)
+心跳分支旧序"应答先回（D-6 分支内 reply_ok）→ 计数归并在后"，对端收到应答即读
+`rr3.ctl.counters` 会抢在归并前读到上一拍的账。本批把归并块整体移到心跳分支最前
+（**先归并后应答**），D-6 三态语义与 Q1 聚合语义零改动（计数仍不跟判活走，
+Rejected 也照归并；两把锁各自成段不嵌套）；[e2e_ctl.rs](../../base/runtime/rrd/tests/e2e_ctl.rs)
+同用例 doc comment 补"顺序契约"三句，把"应答返回时本拍必已进账"钉成观测面。
+**不随批做的事**：counters 落盘节流——查实 write-through 逐次刷是 0.0.4 批B Q2
+显式裁定（[counters.rs](../../base/runtime/rrd/src/counters.rs) 头注"周期刷被 Q2
+显式否决：断电丢尾部"），节流（时间窗跳写）即周期刷变体，改裁定须经裁定不走
+暗改；eMMC 磨损顾虑（高频计数变化 × 每次全量 fsync）登记为待裁定问题，归后续
+版本方案征集。e2e_ctl 8/8、clippy -D warnings exit=0、门禁七步直跑 exit=0
+（16 项 PASS）。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

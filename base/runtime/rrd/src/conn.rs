@@ -679,6 +679,33 @@ fn rr3_serve_request(
             Ok(Rr3Flow::Keep)
         }
         Rr3RpcMethod::Heartbeat => {
+            // 运维计数聚合（0.0.4 批B，Q1 裁定）：心跳可选 `counters` 字段，模块自报
+            // → 按 `模块名/键` 归并进聚合表。锁内归并、锁外写盘（write-through，Q2；
+            // 无变化不写盘，路径 None 只进内存账）。计数是运维账，不跟着判活走
+            // （Rejected 也照归并），但**必须先于应答落账**（2026-10-07 顺序倒置修复）：
+            // 旧序"应答先回、归并在后"下，对端收到应答即读 `rr3.ctl.counters` 会抢在
+            // 归并前读到上一拍的账（e2e ctl_counters_aggregates_heartbeat_counters 在
+            // 机器繁忙时实证：期望 5 实得 2）。归并块放最前不改变 D-6 三态语义，
+            // 两把锁各自成段不嵌套。
+            if let Some(counters) = rr3_rpc_heartbeat_counters(&req.params) {
+                let (changed, snap) = {
+                    let mut g = rr3_lock(&ctx.shared);
+                    let changed = g.rr3_reg_counters_merge(&me.name, &counters);
+                    let snap = if changed {
+                        Some(g.rr3_reg_counters_snapshot())
+                    } else {
+                        None
+                    };
+                    (changed, snap)
+                };
+                if let (true, Some(snap), Some(path)) =
+                    (changed, snap, ctx.counters_path.as_deref())
+                {
+                    if let Err(e) = crate::counters::rr3_counters_store(path, &snap) {
+                        rr3_log(&format!("counters 落盘失败（下一拍自然重试）: {e}"));
+                    }
+                }
+            }
             // D-6：三态回报。Rejected 回错误帧；Kept/Promoted 都回 OK（合法心跳都得续命）。
             let beat = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
             match beat {
@@ -723,29 +750,6 @@ fn rr3_serve_request(
                                 me.name
                             ));
                         }
-                    }
-                }
-            }
-            // 运维计数聚合（0.0.4 批B，Q1 裁定）：心跳可选 `counters` 字段，模块自报
-            // → 按 `模块名/键` 归并进聚合表。锁内归并、锁外写盘（write-through，Q2；
-            // 无变化不写盘，路径 None 只进内存账）。聚合在 Rejected 之后也做：计数是
-            // 运维账，不跟着判活走。
-            if let Some(counters) = rr3_rpc_heartbeat_counters(&req.params) {
-                let (changed, snap) = {
-                    let mut g = rr3_lock(&ctx.shared);
-                    let changed = g.rr3_reg_counters_merge(&me.name, &counters);
-                    let snap = if changed {
-                        Some(g.rr3_reg_counters_snapshot())
-                    } else {
-                        None
-                    };
-                    (changed, snap)
-                };
-                if let (true, Some(snap), Some(path)) =
-                    (changed, snap, ctx.counters_path.as_deref())
-                {
-                    if let Err(e) = crate::counters::rr3_counters_store(path, &snap) {
-                        rr3_log(&format!("counters 落盘失败（下一拍自然重试）: {e}"));
                     }
                 }
             }
