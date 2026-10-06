@@ -226,6 +226,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_interact)
             .env("RR3_HAL_BACKEND", "sim")
+            .env("RR3_PANEL_ADDR", crate::drill::RR3_SIM_PANEL_ADDR)
             .stdout(Stdio::from(
                 std::fs::File::create(&interact_log)
                     .map_err(|e| format!("建 {interact_log:?} 失败: {e}"))?,
@@ -363,28 +364,32 @@ pub(crate) fn wait_socket_exists(socket: &Path, deadline: Duration) -> Result<()
     ))
 }
 
-fn wait_log_contains(path: &Path, needle: &str, deadline: Duration) -> Result<(), String> {
+/// 有界等日志出现 needle（--brain 与 --chain 演练共用：等轮次完成/播放/转向留痕）
+pub(crate) fn wait_log_contains(
+    path: &Path,
+    needle: &str,
+    deadline: Duration,
+) -> Result<String, String> {
     let t0 = Instant::now();
+    let mut seen = String::new();
     while t0.elapsed() < deadline {
         if let Ok(s) = std::fs::read_to_string(path) {
-            if s.contains(needle) {
-                return Ok(());
+            if let Some(line) = s.lines().find(|l| l.contains(needle)) {
+                return Ok(line.to_string());
             }
+            seen = s;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    let tail = std::fs::read_to_string(path)
-        .map(|s| {
-            s.lines()
-                .rev()
-                .take(15)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_else(|e| format!("（读日志失败: {e}）"));
+    let tail: String = seen
+        .lines()
+        .rev()
+        .take(15)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
     Err(format!(
         "超时（{deadline:?}）：日志 {path:?} 未出现「{needle}」\n日志尾部:\n{tail}"
     ))

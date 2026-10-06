@@ -15,6 +15,9 @@ pub const RR3_SIM_MODULE_B: &str = "rr3-interact";
 pub const RR3_SIM_B_TOPIC: &str = "rr3-interact/asr/text";
 /// --brain 演练（M4）里的第三个真模块：Python 认知层
 pub const RR3_SIM_MODULE_BRAIN: &str = "rr3-brain";
+/// 演练实例面板地址：板上常驻系统实例（deb 装机）的 rr3-interact 占缺省
+/// 127.0.0.1:8080，演练必须换端口否则面板绑定失败拖垮模块（批F4 真板实测缺陷）
+pub const RR3_SIM_PANEL_ADDR: &str = "127.0.0.1:18080";
 
 /// 演练参数（全部有默认值：在仓内任意目录直接 `rr3-sim` 即可跑）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,12 +34,17 @@ pub struct Rr3SimArgs {
     /// face 模块（仓源 manifest 原文仅 entry 绝对化 + config 同目录），六模块真进程
     /// 巡检 `denied_publish = 0`。与 --brain 互斥（parse 处同给即拒，Q3 同款）。
     pub profile: Option<PathBuf>,
+    /// 走全链演练（0.0.6 批F4 sim 档，判据 10）：采集→意图→判向→转向→表情
+    /// 六真进程 mock 闭环。与 --brain/--profile 互斥（各证一面，不合并）。
+    pub chain: bool,
     /// 各二进制的显式覆盖（缺省按仓内 target/debug 布局推）
     pub rrd: Option<PathBuf>,
     pub sim_peer: Option<PathBuf>,
     pub rrctl: Option<PathBuf>,
     pub sense: Option<PathBuf>,
     pub interact: Option<PathBuf>,
+    /// --chain 专用：rr3-act 的显式覆盖
+    pub act: Option<PathBuf>,
 }
 
 /// 解析 `rr3-sim` 参数。未知参数即错（脚本工具的第一错法是静默忽略拼写错误）。
@@ -47,11 +55,13 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         keep: false,
         brain: false,
         profile: None,
+        chain: false,
         rrd: None,
         sim_peer: None,
         rrctl: None,
         sense: None,
         interact: None,
+        act: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -59,8 +69,9 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         match flag {
             "--keep" => a.keep = true,
             "--brain" => a.brain = true,
+            "--chain" => a.chain = true,
             "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense" | "--interact"
-            | "--profile" => {
+            | "--act" | "--profile" => {
                 let v = args
                     .get(i + 1)
                     .ok_or_else(|| format!("{flag} 缺参数"))?
@@ -76,6 +87,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
                     "--sim-peer" => a.sim_peer = Some(p),
                     "--sense" => a.sense = Some(p),
                     "--interact" => a.interact = Some(p),
+                    "--act" => a.act = Some(p),
                     "--profile" => a.profile = Some(p),
                     _ => a.rrctl = Some(p),
                 }
@@ -83,11 +95,17 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
             }
             other => {
                 return Err(format!(
-                    "未知参数 {other}（可用：--socket --repo --keep --brain --profile --rrd --sim-peer --rrctl --sense --interact）"
+                    "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act）"
                 ))
             }
         }
         i += 1;
+    }
+    if (a.brain || a.profile.is_some()) && a.chain {
+        return Err(
+            "--chain 与 --brain/--profile 同给：全链闭环、对话闭环与装配演练互斥（各证一面，不合并）"
+                .to_string(),
+        );
     }
     if a.brain && a.profile.is_some() {
         return Err(
