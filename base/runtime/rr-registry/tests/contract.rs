@@ -1045,23 +1045,22 @@ fn distro_profile_binds_exactly_the_body_layer() {
         );
     }
 
-    // 未绑定的非 base 格位恰好 = rr3-brain 的 provides 全集（快路缺格的精确边界：
-    // 一格不多——身体层全在位；一格不少——brain 四格全缺）
-    let mut unbound: Vec<String> = table
+    // 未绑定的非 base 格位必须为空（0.0.6 批F1：brain 随 deb 装机、cognition 四格
+    // 绑定兑现——0.0.2 快路"缺格恰为 brain provides 全集"的边界钉随绑定落位退役；
+    // 快路满配 = 身体层 + 认知层一格不缺。将来新增格位而 distro 不绑时，此钉强制
+    // 显式重审，不许装配单静默漂移）
+    let unbound: Vec<String> = table
         .rr3_slot_table_names()
         .into_iter()
         .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
         .filter(|n| !bindings.contains_key(n))
         .collect();
-    unbound.sort();
-    let mut brain_caps = str_list(&manifests["rr3-brain"], "provides.capabilities");
-    brain_caps.sort();
-    assert_eq!(
-        unbound, brain_caps,
-        "distro 机缺格边界漂移：未绑格位必须恰为 rr3-brain 的 provides 全集"
+    assert!(
+        unbound.is_empty(),
+        "distro 机快路满配后仍有未绑格位 {unbound:?}（装配单漂移，须显式绑定或重审边界）"
     );
 
-    // faces 仍覆盖全部在册模块（含 brain——缺格声明要可点名），且与 provides 全集相等
+    // faces 仍覆盖全部在册模块（含 brain——faces 决定起谁，brain 现在实际进 boot 队列），且与 provides 全集相等
     let faces = v
         .get("faces")
         .and_then(toml::Value::as_table)
