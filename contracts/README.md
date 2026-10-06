@@ -179,6 +179,12 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   `rr3-sense/src/audio/mod.rs` 的 `rr3_vad_event_body` 为形状唯一事实源。舵机转向
   指令复用在册 request `rr3-act/servo/command` 与事件 `rr3-act/servo/state`，词表意图
   经 `brain-intent-result` 的 `actions` 元素落 topic，均零改动。
+- **2026-10-07 · 0.0.6 批F3 契约面复核（表情扩展 sim 档，方案判据 9，零契约改动）**：
+  `rr3-interact/face/expression` 白名单 5→**7** 态（增 `listen`/`turn`——判据 9 点名的
+  听取/转向两态；`talk` 仍由 TTS 播放自动驱动、不可点名）。**零 schema 改动**：主题
+  在册 request L1 不动，仅 `topics.toml` 该条 note 追加两态措辞（白名单逐条列举语义
+  的同源更新，非载荷/枚举变更）；帧序列（8x8 点阵位图，blink/talk 双帧）是模块内
+  实现面，进契约须随批F5a 显示 trait 立格时一并裁定，本批不冻结。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 
