@@ -1104,6 +1104,41 @@ Rejected 也照归并；两把锁各自成段不嵌套）；[e2e_ctl.rs](../../b
 暗改；eMMC 磨损顾虑（高频计数变化 × 每次全量 fsync）登记为待裁定问题，归后续
 版本方案征集。e2e_ctl 8/8、clippy -D warnings exit=0、门禁七步直跑 exit=0
 （16 项 PASS）。
+2026-10-07 conventions §2 补录（本条所在批）：批F1 板上收口至批F3 sim 段三个
+代码批实施在先、登记漏记，本条按提交实况补齐（内容回填下方三行；补录本身
+零代码改动，不影响任何判定）。
+2026-10-06 0.0.6 批F1 板上验证收口（`79be827` + 口径对齐 `1d8955e` + 脚手架拆除
+复验 `d6059e5`）**代码批 + docs**：真板四项全过——①含 brain 新 deb 装机后
+counters 跨整机重启累积（boots 14→15）+ rrd.service 冷启动自恢复；②brain
+（python shim）经 distro.toml cognition 四格绑定进 boot 队列，**六模块全
+running**（denied_publish = 0）+ reboot 冷启动复验同绿；③build-onboard.sh 全链
+exit 0（apt rustc 1.85.1 过 ≥1.82 门 + libasound2-dev → rsync → 板上
+`--features alsa` 构建 sense/interact → 归位 + 动态 ELF/libasound 断言；音频件
+换装验收仍归批F5a，洞 M）；④真麦未采购诚实标注（R22 定案措辞：USB 麦阵列，
+I2S HAT 存档备选）。随批结清真板暴露缺陷四件：pack-arm64/distro-smoke 的
+`cp -R` BSD 语义摊平 brain pkg 包树（改"dst 已存在 + 尾斜杠"）；rr3-pack shim 补
+`RR3_BRAIN_CONFIG` 装机绝对注入（pkg 多一层致 config 回退指虚位）；build-onboard
+改对两 manifest 各自 fetch（仓库根无 Cargo.toml）；rr-hal linux.rs
+`alsa::Error::errno()` 裸 i32 解构（alsa-gated 代码首次真编译暴露）。配套
+distro-smoke 改六模块 spawn 断言 + rr-registry contract 0.0.2 缺格边界随满配
+退役；bootfs 注入脚手架拆除后冷启动复验：NetworkManager keyfile 持久化、
+wlan0 自主连网、六模块 running、boots 15→16 跨重启累积（无脚手架自主联网）。
+2026-10-07 0.0.6 批F2 sim 段判向-转向编排（`e4ccbaf`）**代码批**（ADR-0007/
+0017/0014）：rr-hal sim 源双麦方位注入（`RR3_HAL_SIM_DOA_DEG`，ILD 增益模型
+g=1∓sinθ）+ backend 选择接线；rr3-sense 新增 audio/doa.rs——下混**前** ILD 反演
+±90° 分三档（|deg|≤30=center），vad_start onset 负载携 doa{deg,bin}（schema
+append 零新契约，R14：双麦下混 mono 前判向）；rr3-act 意图执行面开放
+servo/command（两道归属门）落 rr3-act/servo/state（限速流）；brain 词表
+"向左/向右"→servo 动作 + mock ASR 文本注入 env。e2e 双件：判向（-60° 注入→
+bin=left + mono 下混）与转向（intent→servo/state seq=2 angle=45）+ 限速窗纪律
+钉（广播前等过 50ms 窗，被挡不补发）；linux PWM 真后端归批F5a（R9 矩阵口径，
+sim 档诚实标注）。
+2026-10-07 0.0.6 批F3 sim 段表情扩展（`444c764`）**代码批**（ADR-0017）：五态机
+扩**七态**（增 listen/turn 入白名单，talk 仍 TTS 自动驱动不可点名）+ 每态 8x8
+帧序列（blink/talk 双帧循环；切换与 talk 挂起恢复均归零帧指针从首帧重播）+
+主循环 ~250ms 墙钟节拍推帧（帧速率不随总线流量漂移）；契约面零改动
+（topics.toml face/expression note 同源追加两态措辞）；显示 trait 与真件适配
+随批F5a，本批仅 sim 回归。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
