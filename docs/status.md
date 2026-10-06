@@ -117,21 +117,15 @@
 **重裁轮落库后的在制品与新增敞口（0.0.5 R1–R6 登记，详见 [0.0.5 方案 §2.1](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) 与 [0.0.6 方案修订版 2](process/dev/0.0.6版本洛克三号树莓派验证方案.md)）**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；
-- **0.0.6 阶段二（批F1–F4）**：真机功能链四件（语音采集 / DoA 判向 / 舵机转向 / 表情
-  扩展）+ brain 上板打包链——硬件三件未采购期间 sim 注入口先行（R2），云联调
+- **0.0.6 阶段二（批F1–F4 + 批F5a/F5b，修订版 6 重排）**：真机功能链四件（语音采集 / DoA 判向 / 舵机转向 / 表情
+  扩展）+ brain 上板打包链 + **R18 扩围**（power 真电池链、connect 真 wifi 链入真件矩阵，矩阵扩至八行）+ **运维链（批F5b）**（R12 两件实装 + 看门狗判死重启 + 断电恢复 + 真 reboot）——BOM 已按 R22 定案（见下），硬件到位前 sim 注入口先行（R2），云联调
   `RR3_BRAIN_CLOUD=mock` 先行、真 key 另批（R4），brain Python 直跑（trixie ≥3.11
-  实测过 tomllib 门）；
-- **0.0.7 方案 Q1–Q6 待裁**（[ESP32 系统级验证方案](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)已立四层验证梯子，评审裁定前不动手开发）；
-- **采购敞口（R2 建议选型，到位前不 claim 真硬件证据）**：麦克风 ReSpeaker 2-Mic HAT /
-  舵机 SG90 + 独立 5V 供电 / 显示 LED 点阵或 OLED。
+  实测过 tomllib 门）；板上执行规程唯一落点 [0.0.6 方案 §5.5](process/dev/0.0.6版本洛克三号树莓派验证方案.md)；
+- **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
+- **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）；八行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)，到位前不 claim 真硬件证据。
 
 **已知偏差（有意保留，不是遗漏）：**
 
-- ~~`legacy/README.md` 第 3 行仍指向 `docs/architecture.md`~~
-  **已随 0.0.4 批F 退役批注销**：`legacy/` 整树删除（digest 三分类表归零归档），
-  断链与"冻结区只读不改"的约束一并完成使命；legacy 语义去向见
-  [`process/legacy-digest.md`](process/legacy-digest.md)（归档台账）与
-  [architecture §8](architecture/architecture.md#8-legacy-迁移映射)。
 - 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的
   "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
   读文档时别把它们对齐；这些注释不属于本任务订正范围。

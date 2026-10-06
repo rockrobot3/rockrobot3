@@ -15,13 +15,13 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | [`reference/rrd-cli.md`](reference/rrd-cli.md) · [`reference/rrd-rpc.md`](reference/rrd-rpc.md) · [`reference/rrd-registry.md`](reference/rrd-registry.md) | 运行期接口的可照抄事实：启动参数与默认值、RPC 方法与错误映射、在册表阶段与退避上限 | 与代码同批变更；引用须与代码逐字一致；代码定位一律用**符号名锚定**（如 `registry.rs 的 rr3_reg_beat`），不写行号（行号随代码漂移） |
 | [`process/conventions.md`](process/conventions.md) | 开发规约：分支 / 提交 / CI 门禁 / DoD | 门禁唯一入口 `bash tools/ci/check.sh`（其 ⑤ 文档门对仓内每个已跟踪 md 兜底：不得为空、相对链接不得断；仓内每份 README 还必须出现在下文库地图里，漏链即红。本索引自身也在覆盖内）；**步序与条数只登记在其 §2**，本索引不抄数字 |
 | [`process/naming.md`](process/naming.md) | 命名唯一权威（`rr3-` 前缀矩阵、模块目录四件套的四类结构角色） | `rr3-mkmod` 生成自检 + `rr-registry` 契约测试强制，不靠人记 |
-| [`process/adr/`](process/adr/) | 决策记录 ADR-0001 ~ ADR-0016（平台选型 / 模块模型 / IPC 选型 / Airymax 接入 / 命名规约 / AiryIPC 线格式 / 控制面分层 / 传输层 trait / 依赖仲裁 / 控制通道与查询面 / shm 传输 / 能力格坐标系与装配单 / OS 双轨 / Python 模块接入与 M4 对话闭环 / 板卡策略 / brain 迁移路线） | 架构文档每节顶部回链对应 ADR |
+| [`process/adr/`](process/adr/) | 决策记录 ADR-0001 ~ ADR-0017（平台选型 / 模块模型 / IPC 选型 / Airymax 接入 / 命名规约 / AiryIPC 线格式 / 控制面分层 / 传输层 trait / 依赖仲裁 / 控制通道与查询面 / shm 传输 / 能力格坐标系与装配单 / OS 双轨 / Python 模块接入与 M4 对话闭环 / 板卡策略 / brain 迁移路线 / 模块内部分层） | 架构文档每节顶部回链对应 ADR |
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档（M5 主战场，已收口；同目录 v0.0.1 是 M0 骨架存档） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档（M5 最后一跳 + M6 OTA 写侧，已收口） | 收口对账已由 status.md 锚点承接 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 历史存档（legacy 待融合三项 + 退役批，已收口） | 收口对账已由 status.md 锚点承接 |
-| [`process/dev/0.0.5版本洛克三号对齐与裁定方案.md`](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | 历史存档（rrctl 运维面对齐 + brain 迁移 / pcm 传输两大裁定，已收口；重裁轮 §2.1 R1–R6 已裁定——两板验证前置裁定批） | 收口对账已由 status.md 锚点承接 |
-| [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本方案与 Definition of Done（修订版 2 两阶段：阶段一部署语义收尾 + 阶段二真机功能链——语音/判向/舵机/表情；0.0.7 ESP32 / 0.0.8 brain 专项排期已钉） | 收口评审按此逐条对账 |
-| [`process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md`](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) | 已立项待评审（ESP32 系统级验证四层验证梯子：契约 parity → 传输第三实现 → 模块层 → 系统桥接；层③④按实测内存裁） | 评审按 Q1–Q6 逐题裁定，裁定前不动手开发 |
+| [`process/dev/0.0.5版本洛克三号对齐与裁定方案.md`](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | 历史存档（rrctl 运维面对齐 + brain 迁移 / pcm 传输两大裁定，已收口；重裁轮 §2.1 R1–R6、增补轮 §2.2 R7–R12、增补轮二 §2.3 R13–R16、增补轮三 §2.4 R17–R22 已裁定） | 收口对账已由 status.md 锚点承接 |
+| [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本方案与 Definition of Done（修订版 6：两阶段 + 批F5a/F5b 重排 + 真件矩阵八行 + §5.4 BOM 定案 + §5.5 板上工程执行手册；0.0.7 ESP32 / 0.0.8 brain 专项排期已钉） | 收口评审按此逐条对账 |
+| [`process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md`](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) | 已立项已裁定（修订版 4：Q1–Q6 已随 R20 裁定回填；层③④升必达（R19），批D1/D2 + §9 四层真板执行手册） | 按修订版 4 WBS 依序执行，执行细则见 §9 |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy/ 逐组件消化盘点（已归档）：三分类台账、证据路径 | 查"某 legacy 语义在新架构哪"（`legacy/` 整树已随 0.0.4 退役批删除） |
 | [`status.md`](status.md) | 唯一实况快照：能力 × 状态 × 证据路径、里程碑进度（M0–M6 当前实况）、本机无法收口的项、在制品 | 收口时整篇重写，不做增量修补；**测试条数一律不抄进来**（见其开篇规矩） |
 
@@ -31,8 +31,9 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 [`architecture/architecture.md`](architecture/architecture.md) §3 为准，模块名册以
 [`../modules/README.md`](../modules/README.md) 为准，crate 职责以
 [`../base/runtime/README.md`](../base/runtime/README.md) 为准。下表只回答"这个目录下有哪份
-README、什么时候该点开它"；小节名以文档自身为准，本表只作导航。`legacy/` 是冻结区，不进本表，
-⑤ 门也不要求它出现在导航里（下文动作索引留了一条对照入口，那是有意的）。新增 README 不写进
+README、什么时候该点开它"；小节名以文档自身为准，本表只作导航。`legacy/` 已退役
+（0.0.5 §2.4 R21——git 历史 + tag `v0-pre-legacy` 可回溯），不进本表，⑤ 门同样
+不要求它出现在导航里（下文动作索引留了一条对照入口，那是有意的）。新增 README 不写进
 本表即判红。
 
 ### 仓根 · docs/
@@ -49,13 +50,13 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`reference/rrd-cli.md`](reference/rrd-cli.md) | §1 用法串 · §2 参数表 · §3 fail-closed 门禁文案 · §4 两条路径绝对化的分工 · §5 启动序列、输出流与退出码 |
 | [`reference/rrd-rpc.md`](reference/rrd-rpc.md) | §1 帧层前提 · §2 JSON-RPC 信封约束 · §3 方法白名单 · §4 握手额外门禁 · **§5 错误码映射表** · §6 心跳方向 · §7 发布面 |
 | [`reference/rrd-registry.md`](reference/rrd-registry.md) | §1 类型与共享方式 · §2 常量表 · §3 阶段与活边 · §4 时钟约定 · **§5 `rr3_reg_add` 门序** · §6 心跳与到期 · §7 判死与重启计划 · §8 发布归属四道门 · §9 fanout · §10 其余入口 |
-| [`process/adr/`](process/adr/) | 决策原文 ADR-0001 ~ ADR-0016；动架构或线格式前先读对应那篇 |
+| [`process/adr/`](process/adr/) | 决策原文 ADR-0001 ~ ADR-0017；动架构或线格式前先读对应那篇 |
 | [`process/dev/0.0.2版本洛克三号开发方案.md`](process/dev/0.0.2版本洛克三号开发方案.md) | 历史存档：上一版本（M5 主战场）交付了什么 |
 | [`process/dev/0.0.3版本洛克三号收口方案.md`](process/dev/0.0.3版本洛克三号收口方案.md) | 历史存档：上一版本（M5 最后一跳 + M6 OTA 写侧）交付了什么 |
 | [`process/dev/0.0.4版本洛克三号消化方案.md`](process/dev/0.0.4版本洛克三号消化方案.md) | 历史存档：上一版本（legacy 消化 + 退役批）交付了什么 |
 | [`process/dev/0.0.5版本洛克三号对齐与裁定方案.md`](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | 历史存档：上一版本（rrctl 运维面对齐 + 两大演进裁定 + 重裁轮 R1–R6）交付了什么 |
-| [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本交付什么、怎么算完成（树莓派两阶段：部署语义收尾 + 真机功能链） |
-| [`process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md`](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) | 下一版本方案：ESP32 系统级验证四层验证梯子（待评审，Q1–Q6 待裁） |
+| [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本交付什么、怎么算完成（修订版 6：树莓派两阶段 + 真件矩阵八行 + BOM 定案 + 板上工程执行手册 §5.5） |
+| [`process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md`](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) | 下一版本方案：ESP32 系统级验证四层验证梯子（修订版 4：Q1–Q6 已裁，层③④必达，执行手册 §9） |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy（ESP32 冻结区）逐组件消化到哪了（已归档：0.0.4 退役批整树删除，待融合清零） |
 
 ### contracts/ · base/ · modules/ · tools/ · .github/
