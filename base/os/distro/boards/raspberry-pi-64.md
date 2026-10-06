@@ -114,8 +114,8 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 | 板联网 | 房间 WiFi（NetworkManager keyfile 首启注入：initramfs 前置 cpio 段 + `rdinit=/wifi-hook.sh` 写 keyfile 后 `exec /init` 交还正常启动——USB RNDIS/CDC 路线在 macOS 端驱动废 + 串口无 getty，均判死弃用）；bootfs 临时改动（initramfs 钩子段 / cmdline `rdinit=` 等 / config.txt `dtoverlay=dwc2`）属注入脚手架，验证后清理复验（§8 遗留） |
 | 验证① counters/重启回归 | 含 brain 新 deb 装机 → counters 跨 rrd 重启自增（11→14）→ `sudo reboot` 后 `{"boots":15}` **跨整机重启累积**（批E' 修复健康复验）；`rrd.service` enabled，冷启动六模块全新 running |
 | 验证② brain 随 deb 进 boot | `profiles/distro.toml` cognition 四格绑定 + payload 补 pkg 树后：六模块全 `running`（`rr3-brain` task=7，`python3 -m rr3_brain` 真进程，shim `RR3_BRAIN_CONFIG`/`PYTHONPATH` 双装机绝对注入）；`denied_publish = 0`；reboot 冷启动复验同绿 |
-| 验证③ build-onboard.sh 实测 | 全链 exit 0：①板上依赖门（apt `rustc 1.85.1` ≥1.82 门过 + `libasound2-dev` 1.2.14 + pkg-config）→ ②rsync 源码同步 → ③`cargo fetch --locked`（crates.io 直连，sense/interact 各自 manifest）→ ④板上 release 构建 `--features alsa` 两件（1m58s）→ ⑤产物归位 payload → ⑥动态 ELF aarch64 + ldd 含 libasound 断言。音频件换装验收仍归批F5（洞 M），本批只证构建能力 |
-| 验证④ 麦克风 | **2-Mic HAT 未采购**——真麦采集/DoA/换装验收按 R14 口径诚实标注：sense 板上运行仍是 sim 音源，双麦期 `pcm_b64` 下混 mono 的真件验收归批F4/F5 |
+| 验证③ build-onboard.sh 实测 | 全链 exit 0：①板上依赖门（apt `rustc 1.85.1` ≥1.82 门过 + `libasound2-dev` 1.2.14 + pkg-config）→ ②rsync 源码同步 → ③`cargo fetch --locked`（crates.io 直连，sense/interact 各自 manifest）→ ④板上 release 构建 `--features alsa` 两件（1m58s）→ ⑤产物归位 payload → ⑥动态 ELF aarch64 + ldd 含 libasound 断言。音频件换装验收仍归批F5a（洞 M，修订版 6 拆分），本批只证构建能力 |
+| 验证④ 麦克风 | **USB 麦阵列未采购**（R22 修订版 6 定案：PS3 Eye 或同级 ≥2 麦多通道 UAC 阵列；I2S HAT 存档备选）——真麦采集/DoA/换装验收按 R14 口径诚实标注：sense 板上运行仍是 sim 音源，多通道下混 mono 的真件验收归批F4/F5a |
 | 真板暴露缺陷（同批结清） | ①`cp -R src dst`（dst 不存在）BSD 下摊平包树——brain pkg 装机层级丢一截，两组装脚本改"dst 已存在 + 尾斜杠"；②shim 缺 `RR3_BRAIN_CONFIG` 注入——装机布局多一层 `pkg/`，brain config 回退按"包上一级"指到虚位，rr3-pack shim 补 config 位注入 + 单测同步；③build-onboard.sh ③ 段在仓库根 `cargo fetch`——分立 workspace 无根 manifest，改对两个构建 manifest 各自 fetch；④rr-hal `linux.rs` `errno()` 按 Option 解构（alsa-gated 代码从未被宿主编译踩过，R13 musl×alsa 互斥），改裸 i32 |
 | 环境备注 | 板上 apt 源 deb.debian.org 直连 ≈57KB/s 且 HTTP method 空转卡死、TUNA pool 403，切 USTC 后正常；rustup 官方通道同慢不可用，apt rustc 1.85.1 达板上构建门 |
 
