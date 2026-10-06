@@ -121,3 +121,41 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 
 **批F1 四项验证：全过**（③ 的构建门依赖板上装 rustc/libasound2-dev，与 §0 "板上
 不装工具链"的批D 口径不同——那是纯安装轨；板上构建轨的依赖门由脚本 ① 点名）。
+
+## 9. 实测回填：批F4 板上功能链闭环演练（2026-10-07）
+
+**演练载体**：`rr3-sim --chain`（批F4 新增模式，方案 §5.2 判据 10 sim 档）——六真
+进程全链（rrd boot spawn rr3-sense + 外部 rr3-interact/rr3-brain/rr3-act + 演练自带
+总线观察者 rr3-obs），mock 云（R4）下无人工干预跑通"采集→意图→判向→转向→表情"
+一轮以上。前置：板上 debug 构建六件（rrd / rr3-ctl / rr3-sim / act / sense /
+interact；**板上首次构建 rrd**，aarch64 原生约数分钟），系统实例（§8 deb 装机六模块
+running）不停机并存——演练用独立 socket，仅面板端口需让位（见缺陷②）。
+
+**回执摘录（判据 10 全要素）**：
+
+```
+=== 总线取证（判向 → 转向） ===
+doa=-60°/left（注入 -60° ±2° 容差内）→ servo=45°（词表左档）
+=== 全链留痕（进程内日志） ===
+brain: 对话轮完成: trace=1 user='向左看' reply='（mock 回复）向左看' tts_pcm_ms=960 played_ms=720 actions=1
+interact: tts: 12 字符播了 720ms（talk 挂起 idle）（表情机 talk 自动挂起，sim 档无显示件）
+act: intent: trace=1 servo angle=45，state#1 已发
+=== rr3-ctl status 巡检 ===
+六模块全 running（sense/obs/interact/act/brain）+ denied_publish = 0
+```
+
+**真板暴露缺陷（同批结清）**：
+
+1. **rr-hal sim burst 门控多通道折半**（产品缺陷）：门控按交错样点序号 `idx/rate`
+   算偶秒——双通道下 1s 音频 = 32000 交错样点，窗口折半成 500ms 有声/500ms 静音，
+   短于 sense VAD `silence_tail_ms=700ms` → **offset 永不触发**（演练 60s 只见一次
+   onset，brain 起不了轮）。单测只钉过 mono（ch=1 时帧序号 == 交错序号，碰巧正确）、
+   e2e 只验过 sine+DOA，多通道 burst 首次上板即暴露。修：门控改按**帧序号**
+   `idx/声道数/rate`（mono 逐点不变，golden 向量安全）+ 双通道 burst 回归测试钉住。
+2. **演练实例面板端口冲突**：板上 deb 系统实例的 rr3-interact 占缺省 127.0.0.1:8080，
+   演练实例面板绑定失败拖垮全链（--brain 演练同款中招，CI 上无系统实例故未暴露）。
+   修：演练统一注入 `RR3_PANEL_ADDR=127.0.0.1:18080`（--brain/--chain 共享常量）。
+
+**R9 档位诚实标注**：本演练全链 sim/mock（采集=sim burst 注入口、意图=mock 云、
+判向=sim 方位注入、转向=sim 舵机、表情=sim 状态机）——**采购前档，不充当真件收口
+证据**；真件档（真麦 DoA / 真舵机 / MAX7219）随采购到位后批验收。
