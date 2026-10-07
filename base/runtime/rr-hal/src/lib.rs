@@ -21,6 +21,10 @@ pub mod linux_pwm;
 /// （musl 静态零额外 C 依赖），同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]
 pub mod linux_gpio;
+/// linux I2C 电池读数后端（R18，INA219@0x40）：libc 仅做 ioctl/read/write/close
+/// 声明壳，同为单重平台门，不挂 alsa feature。
+#[cfg(target_os = "linux")]
+pub mod linux_power;
 pub mod sim;
 
 /// 无操作 waker 的 vtable（`Waker::noop` 要 1.85，workspace 锁 1.82，故手写同语义版本）。
