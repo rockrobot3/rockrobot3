@@ -17,6 +17,7 @@
 //! - `shm`：实时控制面（100Hz–1kHz 关节状态/力矩/PCM 流），初版已落地（ADR-0011：
 //!   单写者多读者环形缓冲、丢最旧保最新、POSIX 附着）
 //! - `tcp`：多机协作，预留
+//! - `uart`：跨机点对点（ESP32 ↔ 宿主，0.0.7 批C），conn 面经 blanket impl 同源帧语义
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）永远不进总线，见 ADR-0007 §裁定 1。
 //! rrd 服务侧（conn.rs）在 M2 仍持有 `UnixStream` 具体类型走 socket 专有门（读超时/shutdown），
@@ -27,6 +28,10 @@ pub mod frame;
 pub mod shm;
 #[cfg(unix)]
 pub mod uds;
+// UART 第三实现位（0.0.7 批C，ADR-0008）：宿主侧 raw termios；点对点无监听语义，
+// 只落 conn 面（经 Read+Write blanket impl），endpoint/listener 两 trait 不适用
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod uart;
 
 use std::io::{Read, Write};
 // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
