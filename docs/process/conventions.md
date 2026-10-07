@@ -1209,6 +1209,26 @@ trait（`draw(&frame)` 整帧替换 + `frame()` 读回探活/对账）+ 占位�
 trait 对象安全；宿主门禁七步全绿 + aarch64 musl 交叉 check 全绿；板上补跑同①
 口径欠账；真件档验收（MAX7219 出帧实测）留外设到位随批F5a 真件档
 
+2026-10-07 0.0.6 批F5a 第四件：rr-hal linux I2C INA219 电池后端
+（`8f4d928`）**代码批**（R18，ADR-0007）：判据 12 的 HAL 承载面（电压字段
+原样报真读数；两点标定偏差 ≤2% 属真件档验收，留外设到位）。`linux_power.rs`
+单门 `target_os = "linux"`（libc 声明壳 musl 静态，R13，同②③样式）。接口面
+I2C chardev UAPI：`I2C_SLAVE`（0x0703）设从地址——**libc 0.2 的 musl 面
+不导出 I2C 常量组**，照② GPIO 批先例自定义常量硬编码 i2c-dev.h 定值并单测
+钉死；寄存器读是原生大端（写 1 字节寄存器号 + 读 2 字节），与 `i2cget w`
+SMBus 小端序字不同，真件档对拍先字节交换。换算面：bus voltage bits[15:3]
+13-bit LSB 4mV（单测钉死）；percent 与 sim 后端电压曲线**同一条线**
+（3200–4200mV ↔ 0–100%，反演恒等有测），越界 clamp；**charging 诚实恒
+false**——INA219 calibration 默认 0 时电流寄存器读回恒 0，如实报数不编造，
+方向语义随真件档接线定案。backend.rs 新增 `RR3_HAL_I2C_BUS`（缺省 1，树莓派
+硬件 I2C）与 `RR3_HAL_INA219_ADDR`（缺省 0x40，**只认 `0x` 前缀**——裸写
+有十进制歧义（"40" 是 0x28 还是 40？），裁决收窄有测）两键 +
+`rr3_hal_power()` linux 分支；ensure 延迟初始化同②③（构造不触设备，errno
+在 File drop 前取出）。单测：换算/反演 + ioctl 号 + temp 树假设备 ENOTTY
+错误路径 + Drop no-op + addr 裁决；宿主门禁七步全绿 + aarch64 musl 交叉
+check 全绿；板上补跑同①口径欠账；真件档验收（i2cget 对拍 + 万用表两点
+标定）留外设到位随批F5a 真件档
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：
