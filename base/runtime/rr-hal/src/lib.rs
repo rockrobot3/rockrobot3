@@ -17,6 +17,10 @@ pub mod linux;
 /// 不挂 alsa feature——音频可用性与舵机可用性是两回事，各能力面各判各的。
 #[cfg(target_os = "linux")]
 pub mod linux_pwm;
+/// linux chardev GPIO 数字输出后端（R11②）：libc 仅做 ioctl/close 声明
+/// （musl 静态零额外 C 依赖），同为单重平台门，不挂 alsa feature。
+#[cfg(target_os = "linux")]
+pub mod linux_gpio;
 pub mod sim;
 
 /// 无操作 waker 的 vtable（`Waker::noop` 要 1.85，workspace 锁 1.82，故手写同语义版本）。

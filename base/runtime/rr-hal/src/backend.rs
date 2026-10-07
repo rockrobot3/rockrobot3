@@ -4,6 +4,7 @@
 //! |---|---|---|
 //! | `linux` | M3（`linux.rs`，`alsa` feature + `target_os = "linux"` 双门） | Buildroot 根文件系统内的 ALSA 采集/回放 |
 //! | `linux`（舵机） | 批F5a（`linux_pwm.rs`，仅 `target_os = "linux"` 单门，纯 std） | 树莓派 sysfs PWM 驱动 SG90（R11①/R22 定案档，GPIO12/13） |
+//! | `linux`（GPIO） | 批F5a（`linux_gpio.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | 树莓派 chardev GPIO 数字输出：LED / 继电器（R11②，R8 预算表 GPIO4/17 软件路行） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
@@ -47,6 +48,34 @@ pub const RR3_HAL_PWM_CHIP_ENV: &str = "RR3_HAL_PWM_CHIP";
 
 /// linux sysfs PWM 的通道号键（十进制非负整数；未设/取值不认 → 0 = GPIO12）。
 pub const RR3_HAL_PWM_CHANNEL_ENV: &str = "RR3_HAL_PWM_CHANNEL";
+
+/// linux chardev GPIO 的芯片号键（十进制非负整数；未设/取值不认 → 0）。
+/// LED 与继电器两路共挂一个芯片（`/dev/gpiochipN`），线偏移按角色分键。
+pub const RR3_HAL_GPIO_CHIP_ENV: &str = "RR3_HAL_GPIO_CHIP";
+
+/// 角色对应的线偏移环境变量键（`led` → `RR3_HAL_GPIO_LED_LINE`、
+/// `relay` → `RR3_HAL_GPIO_RELAY_LINE`）。取值十进制非负整数；role 仅认
+/// 非空 ASCII 字母数字（防拼出怪键），不认返回 `None`。缺省值见
+/// [`rr3_gpio_line_default`]。独立成纯函数：键拼装可单测，选择函数里只留
+/// "读环境 + 裁决 + 缺省"。
+pub fn rr3_gpio_line_env_key(role: &str) -> Option<String> {
+    if role.is_empty() || !role.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(format!("RR3_HAL_GPIO_{}_LINE", role.to_ascii_uppercase()))
+}
+
+/// 角色 → 线偏移缺省值（BCM 编号）：`led` → 4、`relay` → 17——R8 引脚预算表
+/// "GPIO4/17… 软件路可用"行（与 I2S/I2C 不冲突）；接线手册未单列 LED/继电器
+/// 行，真件档装配单如改脚位走 env 覆写，代码缺省不动。白名单外的 role 无
+/// 缺省（`None`）：env 也没给时落必败线偏移，ensure 时显式回错，不静默选脚。
+pub fn rr3_gpio_line_default(role: &str) -> Option<u32> {
+    match role {
+        "led" => Some(4),
+        "relay" => Some(17),
+        _ => None,
+    }
+}
 
 /// sim 电池的初始电量键（0–100 的十进制整数；未设/取值不认 → 80）。
 /// e2e 注入低电量的正门：真 rr3-power 进程从 rrd 继承环境，按此值起表。
@@ -203,12 +232,27 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
     }
 }
 
-/// 按环境选一路数字输出（LED / 继电器各调一次，各得一路独立通道）。
+/// 按环境选一路数字输出（`role` 白名单 `led` / `relay`——各调一次、各传各的
+/// 角色，各得一路独立线偏移；带参而不靠调用顺序配键是刻意的：顺序耦合在
+/// 半夜改代码时是隐形地雷）。
 ///
 /// 返回 [`Arc`] 而不是 [`Box`]：灯效的 blink 翻转在 worker 线程里写同一通道，
 /// 测试也要从另一线程观察电平——共享属这类设备的常态形状，不是偶发需求。
-pub fn rr3_hal_gpio_out() -> (Arc<dyn Rr3GpioOut>, &'static str) {
+pub fn rr3_hal_gpio_out(
+    // 非 linux 平台 linux 分支被剔除、sim 分支不按角色分键——参数在那些平台
+    // 编译面上未使用是结构性的，不是疏漏（linux 上它决定线偏移 env 键）
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] role: &str,
+) -> (Arc<dyn Rr3GpioOut>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
+            #[cfg(target_os = "linux")]
+            return (
+                Arc::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_linux_gpio_out_default(role)),
+                RR3_BACKEND_LINUX,
+            );
+            #[cfg(not(target_os = "linux"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
         RR3_BACKEND_SIM => (
             Arc::new(crate::sim::Rr3SimGpioOut::rr3_sim_gpio_new(false)),
             RR3_BACKEND_SIM,
@@ -340,7 +384,7 @@ mod tests {
             legal.contains(&servo_backend),
             "舵机后端名合法: {servo_backend}"
         );
-        let (gpio, gpio_backend) = rr3_hal_gpio_out();
+        let (gpio, gpio_backend) = rr3_hal_gpio_out("led");
         assert!(
             legal.contains(&gpio_backend),
             "数字输出后端名合法: {gpio_backend}"
@@ -350,6 +394,25 @@ mod tests {
             assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
             assert!(!rr3_block_on(gpio.level()).unwrap(), "sim 通道初始断电");
         }
+    }
+
+    /// GPIO 角色 → env 键拼装与缺省线偏移（R8 预算表 GPIO4/17 软件路行）：
+    /// 白名单两角色键/缺省逐字钉死，空串/怪字符不拼键，白名单外无缺省。
+    #[test]
+    fn gpio_role_env_key_and_line_default_match_whitelist() {
+        assert_eq!(
+            rr3_gpio_line_env_key("led").as_deref(),
+            Some("RR3_HAL_GPIO_LED_LINE")
+        );
+        assert_eq!(
+            rr3_gpio_line_env_key("relay").as_deref(),
+            Some("RR3_HAL_GPIO_RELAY_LINE")
+        );
+        assert_eq!(rr3_gpio_line_env_key(""), None, "空串不拼键");
+        assert_eq!(rr3_gpio_line_env_key("led-1"), None, "怪字符不拼键");
+        assert_eq!(rr3_gpio_line_default("led"), Some(4));
+        assert_eq!(rr3_gpio_line_default("relay"), Some(17));
+        assert_eq!(rr3_gpio_line_default("fan"), None, "白名单外无缺省，必败线偏移显式回错");
     }
 
     /// linux PWM 芯片/通道号键的取值裁决：十进制非负整数才收，负数/垃圾/空不认
