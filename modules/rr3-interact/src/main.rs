@@ -27,11 +27,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_audio_sink, rr3_block_on, RR3_AUDIO_CFG_16K_MONO16};
+use rr_hal::{backend::rr3_hal_audio_sink, backend::rr3_hal_display, rr3_block_on, RR3_AUDIO_CFG_16K_MONO16};
 use rr_ipc::{opcode, Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 use serde_json::{json, Value};
 
-use face::Rr3Face;
+use face::{rr3_face_frames, Rr3Face};
 use panel::server::{rr3_panel_serve, Rr3PanelAction, Rr3PanelShared};
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
@@ -82,6 +82,14 @@ fn rr3_run() -> Result<(), String> {
 
     let mut face = Rr3Face::default();
     let mut face_tick_at = std::time::Instant::now();
+
+    // 显示面选择 + 开机探活：读回当前帧，Unsupported 即致命——显式回错不静默
+    // 退化（真件档板显式 linux 时 MAX7219 后端未实装，探活 exit(1) 是预期语义，
+    // R11③）；sim 档走虚拟点阵内存记录，主循环出帧全链可见
+    let (display, display_backend) = rr3_hal_display();
+    rr3_block_on(display.frame())
+        .map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
+    println!("显示面就绪: backend={display_backend} 8x8");
 
     // 面板（0.0.4 批C，Q3 裁定）：独立 HTTP 线程 + 动作通道。link 缓存是状态页
     // 卡片的数据源——面板线程只读、主循环只写；总线句柄 clone 是同一连接的另一
@@ -165,10 +173,15 @@ fn rr3_run() -> Result<(), String> {
             let _ = tx.send(result);
         }
         // 表情帧动画一拍（批F3 sim 档）：~250ms 节拍推进帧指针，多帧态
-        // （blink/talk）由此循环；sim 档无显示件，真件随批F5a 显示 trait 接线
+        // （blink/talk）由此循环；批F5a③ 接显示 trait——出帧交 HAL 渲染
+        // （sim 后端内存记录，真件档 MAX7219 SPI 换后端零编排改动）。显示是
+        // 妆面件，draw 失败只 eprintln 不退出（同 led worker 口径）
         if face_tick_at.elapsed() >= RR3_FACE_TICK {
             face_tick_at = std::time::Instant::now();
-            face.rr3_face_tick();
+            let (expr, ix) = face.rr3_face_tick();
+            let frame = rr3_face_frames(expr)[ix];
+            rr3_block_on(display.draw(&frame))
+                .unwrap_or_else(|e| eprintln!("rr3-interact-face: 出帧失败: {e}"));
         }
     }
 }

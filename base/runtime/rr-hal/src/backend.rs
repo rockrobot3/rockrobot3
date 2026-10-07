@@ -5,6 +5,7 @@
 //! | `linux` | M3（`linux.rs`，`alsa` feature + `target_os = "linux"` 双门） | Buildroot 根文件系统内的 ALSA 采集/回放 |
 //! | `linux`（舵机） | 批F5a（`linux_pwm.rs`，仅 `target_os = "linux"` 单门，纯 std） | 树莓派 sysfs PWM 驱动 SG90（R11①/R22 定案档，GPIO12/13） |
 //! | `linux`（GPIO） | 批F5a（`linux_gpio.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | 树莓派 chardev GPIO 数字输出：LED / 继电器（R11②，R8 预算表 GPIO4/17 软件路行） |
+//! | `linux`（显示） | 真件档（MAX7219 SPI 后端未实装，R11③） | 显式要 `linux` 时落占位显式回错（interact 探活 exit(1)——真件未到位语义） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
@@ -299,6 +300,20 @@ pub fn rr3_pwm_index_parse(s: &str) -> Option<u32> {
     s.trim().parse::<u32>().ok()
 }
 
+/// 按环境选显示面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无显示
+/// 真件后端（MAX7219 SPI 归批F5a 真件档，R11③——trait 已立、后端待真件到位）：
+/// 显式要 `linux` 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim——
+/// rr3-interact 开机探活会按"能力缺失显式回错"退出。
+pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
+    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_SIM => (
+            Box::new(crate::sim::Rr3SimDisplay::rr3_sim_display_new([0; 8])),
+            RR3_BACKEND_SIM,
+        ),
+        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
 /// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无
 /// 电量计后端（板上件）：显式要 `linux` 时返回占位件，使用时以 `Unsupported`
 /// 回错，不静默换 sim——rr3-power 开机探活会按"能力缺失显式回错"退出。
@@ -389,10 +404,18 @@ mod tests {
             legal.contains(&gpio_backend),
             "数字输出后端名合法: {gpio_backend}"
         );
+        let (display, display_backend) = rr3_hal_display();
+        assert!(
+            legal.contains(&display_backend),
+            "显示后端名合法: {display_backend}"
+        );
         // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
         if servo_backend == RR3_BACKEND_SIM {
             assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
             assert!(!rr3_block_on(gpio.level()).unwrap(), "sim 通道初始断电");
+        }
+        if display_backend == RR3_BACKEND_SIM {
+            assert_eq!(rr3_block_on(display.frame()).unwrap(), [0; 8], "sim 点阵初始黑屏");
         }
     }
 

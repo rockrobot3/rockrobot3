@@ -167,9 +167,29 @@ pub trait Rr3Link: Send + Sync {
     async fn state(&self) -> Result<Rr3LinkState, Rr3HalError>;
 }
 
+/// 8x8 点阵单帧（R11③ 定案档，0.0.6 方案 §5.4/R22 接线 4）：行主序 8 字节，
+/// 每字节 bit7 为该行最左点（MAX7219 行寄存器直排）。类型在 HAL 定义是刻意的：
+/// 它是 [`Rr3Display`] trait 签名的事实源，模块面（rr3-interact 表情机）只
+/// 引用不复制定义——形状漂移在 trait 签名处先暴露。
+pub type Rr3FaceFrame = [u8; 8];
+
+/// 显示面（8x8 点阵帧渲染，R11③——批F5a③ 评审裁定：单 trait 帧面）。
+///
+/// "状态→帧"映射与表情白名单是模块面策略（同 led 灯效白名单先例，不进 HAL）：
+/// 表情机出帧、显示件收帧，HAL 只搬运已定的位图。`draw` 语义是整帧替换
+/// （MAX7219 是 8 个行寄存器的一次全刷），没有局部改写。
+#[async_trait]
+pub trait Rr3Display: Send + Sync {
+    /// 渲染一帧（整帧替换，阻塞至行寄存器落定——事件级慢速面，无帧队列）
+    async fn draw(&self, frame: &Rr3FaceFrame) -> Result<(), Rr3HalError>;
+    /// 读回当前帧（开机探活与对账：读回 == 上次 draw 的帧）
+    async fn frame(&self) -> Result<Rr3FaceFrame, Rr3HalError>;
+}
+
 /// 占位后端：所有能力返回 `Unsupported`。它承载的是"能力缺失必须显式回错，不许静默退化"
 /// 的设计裁定，不是一时代替后端的临时件。音频两路（source/sink）已由 `backend::sim` /
-/// `backend::linux` 承担（M3）；gpio/pwm/power/link 仍由本占位回错，直到 M5 的三模块实装。
+/// `backend::linux` 承担（M3）；gpio/pwm 已有 linux 后端（批F5a①②），power/link/display
+/// 仍由本占位回错，直到对应 linux 后端实装（display 真件档 MAX7219 SPI，R11③）。
 pub struct Rr3UnavailableSource;
 
 #[async_trait]
@@ -226,6 +246,16 @@ impl Rr3Link for Rr3UnavailableSource {
     }
 }
 
+#[async_trait]
+impl Rr3Display for Rr3UnavailableSource {
+    async fn draw(&self, _frame: &Rr3FaceFrame) -> Result<(), Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/display"))
+    }
+    async fn frame(&self) -> Result<Rr3FaceFrame, Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/display"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +287,7 @@ mod tests {
         let _: Box<dyn Rr3Power + Send + Sync> = Box::new(Rr3UnavailableSource);
         let _: Box<dyn Rr3Link + Send + Sync> = Box::new(Rr3UnavailableSource);
         let _: Box<dyn Rr3PwmServo + Send + Sync> = Box::new(Rr3UnavailableSource);
+        let _: Box<dyn Rr3Display + Send + Sync> = Box::new(Rr3UnavailableSource);
         let _ = boxed;
     }
 

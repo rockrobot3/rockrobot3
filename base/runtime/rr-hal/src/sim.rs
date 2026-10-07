@@ -360,6 +360,43 @@ impl crate::Rr3GpioOut for Rr3SimGpioOut {
     }
 }
 
+/// sim 显示件（虚拟 8x8 点阵）：当前帧记录在内存，`draw` 即替换、`frame` 读回。
+/// 与 sim gpio 同口径：位图内存记录，不做任何"渲染"（真渲染属真件后端）；
+/// 初始帧由构造给定（模块面探活前的黑屏用全 0）。线程面用 `Mutex` 不用原子：
+/// 帧是 8 字节组合量，拆原子要字节序换算，可读性不值。
+pub struct Rr3SimDisplay {
+    frame: Mutex<crate::Rr3FaceFrame>,
+}
+
+impl Rr3SimDisplay {
+    /// 指定初始帧构造（模块面尚未出帧的黑屏态传全 0）
+    pub fn rr3_sim_display_new(initial: crate::Rr3FaceFrame) -> Self {
+        Self {
+            frame: Mutex::new(initial),
+        }
+    }
+
+    /// 同步读当前帧（测试与诊断用；trait 的 `frame` 是 async 面）
+    pub fn rr3_sim_display_frame(&self) -> crate::Rr3FaceFrame {
+        *self
+            .frame
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+#[async_trait]
+impl crate::Rr3Display for Rr3SimDisplay {
+    async fn draw(&self, frame: &crate::Rr3FaceFrame) -> Result<(), Rr3HalError> {
+        *self.frame.lock().unwrap_or_else(|p| p.into_inner()) = *frame;
+        Ok(())
+    }
+
+    async fn frame(&self) -> Result<crate::Rr3FaceFrame, Rr3HalError> {
+        Ok(self.rr3_sim_display_frame())
+    }
+}
+
 /// sim 电池（虚拟电量计）：电量与充电态记录在内存，电压按电量**确定性线性派生**。
 ///
 /// 分工口径与舵机/数字输出同一条：sim 是"设备"不是"策略"——低电阈值裁决属模块侧
@@ -466,6 +503,7 @@ impl crate::Rr3Link for Rr3SimLink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Rr3Display;
     use crate::{
         rr3_block_on, Rr3GpioOut, Rr3Link, Rr3Power, Rr3PwmServo, RR3_AUDIO_CFG_16K_MONO16,
     };
@@ -778,6 +816,27 @@ mod tests {
         assert!(g.rr3_sim_gpio_level());
         rr3_block_on(g.set(false)).unwrap();
         assert!(!rr3_block_on(g.level()).unwrap(), "覆写生效");
+    }
+
+    /// sim 显示件：整帧替换 + 读回一致 + 跨线程写读（Send+Sync 面——将来
+    /// blink worker 形状的共享也是这个通道）。draw 全帧替换无局部改写。
+    #[test]
+    fn sim_display_draws_and_reads_back() {
+        let d = Rr3SimDisplay::rr3_sim_display_new([0; 8]);
+        assert_eq!(d.rr3_sim_display_frame(), [0; 8], "构造初始黑屏");
+        rr3_block_on(d.draw(&[0b1111_1111, 0, 0, 0, 0, 0, 0, 0b1010_1010])).unwrap();
+        assert_eq!(
+            d.rr3_sim_display_frame(),
+            [0b1111_1111, 0, 0, 0, 0, 0, 0, 0b1010_1010],
+            "draw 即整帧替换"
+        );
+        let d = std::sync::Arc::new(d);
+        let h = {
+            let d = d.clone();
+            std::thread::spawn(move || rr3_block_on(d.draw(&[1; 8])).unwrap())
+        };
+        h.join().unwrap();
+        assert_eq!(d.rr3_sim_display_frame(), [1; 8], "跨线程写读一致");
     }
 
     /// sim 电池：async 面（trait battery）读回构造/覆写后的三元组，电压曲线按
