@@ -89,8 +89,8 @@ fn rr3_run() -> Result<(), String> {
     // HAL 执行面选择 + 开机探活：三面各读回一次，Unsupported 即致命——
     // 显式回错不静默退化（rr-hal 占位件的契约），也不给"半个执行器"的假活
     let (servo_dev, servo_backend) = rr3_hal_servo();
-    let (led_gpio, led_backend) = rr3_hal_gpio_out();
-    let (relay_gpio, relay_backend) = rr3_hal_gpio_out();
+    let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
+    let (relay_gpio, relay_backend) = rr3_hal_gpio_out("relay");
     rr3_block_on(servo_dev.angle()).map_err(|e| format!("舵机面探活失败({servo_backend}): {e}"))?;
     rr3_block_on(led_gpio.as_ref().level())
         .map_err(|e| format!("LED 面探活失败({led_backend}): {e}"))?;
