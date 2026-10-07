@@ -6,6 +6,7 @@
 //! | `linux`（舵机） | 批F5a（`linux_pwm.rs`，仅 `target_os = "linux"` 单门，纯 std） | 树莓派 sysfs PWM 驱动 SG90（R11①/R22 定案档，GPIO12/13） |
 //! | `linux`（GPIO） | 批F5a（`linux_gpio.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | 树莓派 chardev GPIO 数字输出：LED / 继电器（R11②，R8 预算表 GPIO4/17 软件路行） |
 //! | `linux`（显示） | 真件档（MAX7219 SPI 后端未实装，R11③） | 显式要 `linux` 时落占位显式回错（interact 探活 exit(1)——真件未到位语义） |
+//! | `linux`（电源） | 批F5a（`linux_power.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | INA219@0x40 I2C 总线电压读数（R18，判据 12；charging 判定随真件档校准） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
@@ -53,6 +54,24 @@ pub const RR3_HAL_PWM_CHANNEL_ENV: &str = "RR3_HAL_PWM_CHANNEL";
 /// linux chardev GPIO 的芯片号键（十进制非负整数；未设/取值不认 → 0）。
 /// LED 与继电器两路共挂一个芯片（`/dev/gpiochipN`），线偏移按角色分键。
 pub const RR3_HAL_GPIO_CHIP_ENV: &str = "RR3_HAL_GPIO_CHIP";
+
+/// linux I2C 电池读数的总线号键（十进制非负整数；未设/取值不认 → 1——
+/// 树莓派硬件 I2C = GPIO2/3 = i2c1，接线 3）。
+pub const RR3_HAL_I2C_BUS_ENV: &str = "RR3_HAL_I2C_BUS";
+
+/// linux I2C 电池读数的 INA219 从地址键（`0x` 前缀或纯十六进制；未设/取值
+/// 不认 → 0x40，BOM #5 定案档）。
+pub const RR3_HAL_INA219_ADDR_ENV: &str = "RR3_HAL_INA219_ADDR";
+
+/// INA219 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义
+/// （"40" 是 0x28 还是 40？），不收；7-bit 可寻址域 0x08..=0x77 外不认）。
+pub fn rr3_ina219_addr_parse(s: &str) -> Option<u8> {
+    let s = s.trim();
+    let v = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))?;
+    u8::from_str_radix(v, 16)
+        .ok()
+        .filter(|a| (0x08..=0x77).contains(a))
+}
 
 /// 角色对应的线偏移环境变量键（`led` → `RR3_HAL_GPIO_LED_LINE`、
 /// `relay` → `RR3_HAL_GPIO_RELAY_LINE`）。取值十进制非负整数；role 仅认
@@ -314,11 +333,22 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
     }
 }
 
-/// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无
-/// 电量计后端（板上件）：显式要 `linux` 时返回占位件，使用时以 `Unsupported`
-/// 回错，不静默换 sim——rr3-power 开机探活会按"能力缺失显式回错"退出。
+/// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 走
+/// INA219 I2C 后端（[`crate::linux_power`]，R18：总线/地址经
+/// `RR3_HAL_I2C_BUS` / `RR3_HAL_INA219_ADDR` 选）；非 linux 平台显式要 `linux`
+/// 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim——rr3-power 开机
+/// 探活会按"能力缺失显式回错"退出。
 pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
+            #[cfg(target_os = "linux")]
+            return (
+                Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_default()),
+                RR3_BACKEND_LINUX,
+            );
+            #[cfg(not(target_os = "linux"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
         RR3_BACKEND_SIM => {
             let percent = std::env::var(RR3_HAL_SIM_BATTERY_PERCENT_ENV)
                 .ok()
@@ -447,6 +477,19 @@ mod tests {
         assert_eq!(rr3_pwm_index_parse(" 2 "), Some(2));
         for bad in ["", "-1", "3.5", "abc"] {
             assert_eq!(rr3_pwm_index_parse(bad), None, "{bad}");
+        }
+    }
+
+    /// INA219 从地址键的取值裁决：只认 `0x` 前缀十六进制（裸写有十进制歧义
+    /// 不收），7-bit 可寻址域 0x08..=0x77 外（含 0x00 广播、0x78+ 保留段）与
+    /// 垃圾不认。
+    #[test]
+    fn ina219_addr_parse_accepts_hex_within_7bit() {
+        assert_eq!(rr3_ina219_addr_parse("0x40"), Some(0x40), "BOM #5 定案档");
+        assert_eq!(rr3_ina219_addr_parse("0X48"), Some(0x48), "大写前缀");
+        assert_eq!(rr3_ina219_addr_parse(" 0x48 "), Some(0x48), "trim");
+        for bad in ["0x00", "0x07", "0x78", "0xFF", "16", "40", "", "zz"] {
+            assert_eq!(rr3_ina219_addr_parse(bad), None, "{bad}");
         }
     }
 
