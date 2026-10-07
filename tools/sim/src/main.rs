@@ -11,8 +11,10 @@
 //!    health、logs、ota（恒拒随 M6，预期非 0 退出）；
 //! 5. 报告 + 收尾（`--keep` 保留现场）。
 //!
-//! 另有两个互斥模式：`--brain`（M4 全语音对话闭环，`brain.rs`）与 `--profile`
-//! （D9 装配演练：装配单驱动 boot + 全模块真进程巡检，`assemble.rs`）。
+//! 另有三个互斥模式：`--brain`（M4 全语音对话闭环，`brain.rs`）、`--profile`
+//! （D9 装配演练：装配单驱动 boot + 全模块真进程巡检，`assemble.rs`）与
+//! `--chain`（0.0.6 批F4 sim 档：采集→意图→判向→转向→表情六真进程全链 mock
+//! 闭环 + 总线观察者取证，`chain.rs`）。
 //!
 //! sim 设备源（`devices.rs`，rr-hal 的 sim 后端消费方）保留：报告里带一段
 //! 静音流的时长换算，证明"sim 与 linux 后端交出同一种流"这条不变量仍有落点。
@@ -29,6 +31,8 @@ fn main() {
 mod assemble;
 #[cfg(unix)]
 mod brain;
+#[cfg(unix)]
+mod chain;
 #[cfg(unix)]
 mod devices;
 mod drill;
@@ -59,6 +63,19 @@ mod run {
                 return 2;
             }
         };
+        // --chain 走批F4 全链闭环演练（判据 10 的 sim 档），与前两者互斥
+        if a.chain {
+            return match crate::chain::rr3_chain_drill(&a) {
+                Ok(report) => {
+                    println!("{report}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("rr3-sim: {e}");
+                    1
+                }
+            };
+        }
         // --brain 走 M4 四真进程演练（ADR-0014 裁定 4），与两面演练互斥
         if a.brain {
             return match crate::brain::rr3_brain_drill(&a) {

@@ -63,10 +63,11 @@ fn rr3_alsa_open(
 /// 运行期 IO 错误：先按 errno 尝试 recover（underrun/overrun）， recover 不了才上抛。
 /// 返回 Ok(true) 表示已恢复、调用方应重试本次搬运。
 fn rr3_alsa_io_recover(pcm: &alsa::pcm::PCM, e: &alsa::Error) -> bool {
-    if let Some(err) = e.errno() {
-        if err == -EPIPE || err == EPIPE {
-            return pcm.recover(err, true).is_ok();
-        }
+    // alsa::Error::errno() 返回裸 i32（alsa-gated 代码只能板上 alsa 构建验证——
+    // musl 交叉路径结构性互斥 R13，此分支从未被宿主编译踩过，0.0.6 批F1 真板首检）
+    let err = e.errno();
+    if err == -EPIPE || err == EPIPE {
+        return pcm.recover(err, true).is_ok();
     }
     false
 }

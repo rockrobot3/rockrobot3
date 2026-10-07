@@ -170,6 +170,21 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   环形直读，给注定换承载的形状写冻结件即半成品（冻结一次、返工一次不如一次冻结到位）。
   本条只登记裁定口径，不新增、不修改任何契约文件；接线的实施（conn.rs / sense / brain
   多模块工程批）届时另立专项方案，冻结动作在专项内完成。
+- **2026-10-07 · 0.0.6 批F2 契约 append（判向-转向编排 sim 段，方案判据 4/8）**：
+  `events/sense-audio-vad_start.schema.json` 的 onset 负载**增可选 `doa` 字段**——
+  `{deg: -90..90 整数, bin: left|center|right}`，双麦 ILD 粗判向的落档格位（±90° 三档
+  分档由 sense 内部 `rr3_doa_fix` 产出，sim 注入正门 `RR3_HAL_SIM_DOA_DEG`）。
+  **零新契约**：vad_start 事件已在册、schema_version 仍 1（append 兼容扩展——offset
+  边沿不带 doa，与 `rms_peak` 同形状纪律，`allOf`+`if/then` 表达）；生产者
+  `rr3-sense/src/audio/mod.rs` 的 `rr3_vad_event_body` 为形状唯一事实源。舵机转向
+  指令复用在册 request `rr3-act/servo/command` 与事件 `rr3-act/servo/state`，词表意图
+  经 `brain-intent-result` 的 `actions` 元素落 topic，均零改动。
+- **2026-10-07 · 0.0.6 批F3 契约面复核（表情扩展 sim 档，方案判据 9，零契约改动）**：
+  `rr3-interact/face/expression` 白名单 5→**7** 态（增 `listen`/`turn`——判据 9 点名的
+  听取/转向两态；`talk` 仍由 TTS 播放自动驱动、不可点名）。**零 schema 改动**：主题
+  在册 request L1 不动，仅 `topics.toml` 该条 note 追加两态措辞（白名单逐条列举语义
+  的同源更新，非载荷/枚举变更）；帧序列（8x8 点阵位图，blink/talk 双帧）是模块内
+  实现面，进契约须随批F5a 显示 trait 立格时一并裁定，本批不冻结。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

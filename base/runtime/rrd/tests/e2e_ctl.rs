@@ -198,6 +198,9 @@ fn registered_module_uplink_ctl_is_refused_but_connection_survives() {
 /// 运维计数聚合（0.0.4 批B，Q1 裁定）：心跳可选 `counters` 字段 → rrd 按
 /// `模块名/键` 归并 → `rr3.ctl.counters` 读回。兼容面同批钉住：不带 counters
 /// 的心跳照常 accepted（旧模块形状 `{}`）。
+/// 顺序契约（2026-10-07 倒置修复）：rrd **先归并后应答**——心跳应答返回时，
+/// 本拍 counters 必已进聚合表；本用例"应答一收到就读 ctl"正是该契约的观测面
+/// （旧序在机器繁忙时会读到上一拍的账，曾以"期望 5 实得 2"实证）。
 #[test]
 fn ctl_counters_aggregates_heartbeat_counters() {
     let t = RrdTest::rr3_start_no_overlay("ctl-counters");

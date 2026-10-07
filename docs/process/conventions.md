@@ -1090,7 +1090,69 @@ F5b（运维链四项）+ 真件矩阵扩八行 + §5.4 采购 BOM 八行定案 
 F5a/F5b、0.0.7 Q1–Q6 已裁、BOM 定案、legacy 除名）+ 本节 T15–T20 登记 + docs/README
 dev 索引行更新；本轮六批合计实测改动：9 文件（8 改 + ADR-0017 新建），零 `.rs`/
 module.toml/契约文件改动，linkcheck 全绿
-2026-10-06 0.0.8 模块分层立项批（纯文档，0.0.5 §2.4 R17"各模块拆分清单"细化）：新建
+2026-10-07 0.0.6 纪律小批（rrd 心跳顺序倒置修复——先归并后应答）**代码批**：
+批F1 收口期实证 `ctl_counters_aggregates_heartbeat_counters` 负载敏感竞态（单跑
+稳定绿、全量并行时"期望 5 实得 2"）——[conn.rs](../../base/runtime/rrd/src/conn.rs)
+心跳分支旧序"应答先回（D-6 分支内 reply_ok）→ 计数归并在后"，对端收到应答即读
+`rr3.ctl.counters` 会抢在归并前读到上一拍的账。本批把归并块整体移到心跳分支最前
+（**先归并后应答**），D-6 三态语义与 Q1 聚合语义零改动（计数仍不跟判活走，
+Rejected 也照归并；两把锁各自成段不嵌套）；[e2e_ctl.rs](../../base/runtime/rrd/tests/e2e_ctl.rs)
+同用例 doc comment 补"顺序契约"三句，把"应答返回时本拍必已进账"钉成观测面。
+**不随批做的事**：counters 落盘节流——查实 write-through 逐次刷是 0.0.4 批B Q2
+显式裁定（[counters.rs](../../base/runtime/rrd/src/counters.rs) 头注"周期刷被 Q2
+显式否决：断电丢尾部"），节流（时间窗跳写）即周期刷变体，改裁定须经裁定不走
+暗改；eMMC 磨损顾虑（高频计数变化 × 每次全量 fsync）登记为待裁定问题，归后续
+版本方案征集。e2e_ctl 8/8、clippy -D warnings exit=0、门禁七步直跑 exit=0
+（16 项 PASS）。
+2026-10-07 conventions §2 补录（本条所在批）：批F1 板上收口至批F3 sim 段三个
+代码批实施在先、登记漏记，本条按提交实况补齐（内容回填下方三行；补录本身
+零代码改动，不影响任何判定）。
+2026-10-06 0.0.6 批F1 板上验证收口（`79be827` + 口径对齐 `1d8955e` + 脚手架拆除
+复验 `d6059e5`）**代码批 + docs**：真板四项全过——①含 brain 新 deb 装机后
+counters 跨整机重启累积（boots 14→15）+ rrd.service 冷启动自恢复；②brain
+（python shim）经 distro.toml cognition 四格绑定进 boot 队列，**六模块全
+running**（denied_publish = 0）+ reboot 冷启动复验同绿；③build-onboard.sh 全链
+exit 0（apt rustc 1.85.1 过 ≥1.82 门 + libasound2-dev → rsync → 板上
+`--features alsa` 构建 sense/interact → 归位 + 动态 ELF/libasound 断言；音频件
+换装验收仍归批F5a，洞 M）；④真麦未采购诚实标注（R22 定案措辞：USB 麦阵列，
+I2S HAT 存档备选）。随批结清真板暴露缺陷四件：pack-arm64/distro-smoke 的
+`cp -R` BSD 语义摊平 brain pkg 包树（改"dst 已存在 + 尾斜杠"）；rr3-pack shim 补
+`RR3_BRAIN_CONFIG` 装机绝对注入（pkg 多一层致 config 回退指虚位）；build-onboard
+改对两 manifest 各自 fetch（仓库根无 Cargo.toml）；rr-hal linux.rs
+`alsa::Error::errno()` 裸 i32 解构（alsa-gated 代码首次真编译暴露）。配套
+distro-smoke 改六模块 spawn 断言 + rr-registry contract 0.0.2 缺格边界随满配
+退役；bootfs 注入脚手架拆除后冷启动复验：NetworkManager keyfile 持久化、
+wlan0 自主连网、六模块 running、boots 15→16 跨重启累积（无脚手架自主联网）。
+2026-10-07 0.0.6 批F2 sim 段判向-转向编排（`e4ccbaf`）**代码批**（ADR-0007/
+0017/0014）：rr-hal sim 源双麦方位注入（`RR3_HAL_SIM_DOA_DEG`，ILD 增益模型
+g=1∓sinθ）+ backend 选择接线；rr3-sense 新增 audio/doa.rs——下混**前** ILD 反演
+±90° 分三档（|deg|≤30=center），vad_start onset 负载携 doa{deg,bin}（schema
+append 零新契约，R14：双麦下混 mono 前判向）；rr3-act 意图执行面开放
+servo/command（两道归属门）落 rr3-act/servo/state（限速流）；brain 词表
+"向左/向右"→servo 动作 + mock ASR 文本注入 env。e2e 双件：判向（-60° 注入→
+bin=left + mono 下混）与转向（intent→servo/state seq=2 angle=45）+ 限速窗纪律
+钉（广播前等过 50ms 窗，被挡不补发）；linux PWM 真后端归批F5a（R9 矩阵口径，
+sim 档诚实标注）。
+2026-10-07 0.0.6 批F3 sim 段表情扩展（`444c764`）**代码批**（ADR-0017）：五态机
+扩**七态**（增 listen/turn 入白名单，talk 仍 TTS 自动驱动不可点名）+ 每态 8x8
+帧序列（blink/talk 双帧循环；切换与 talk 挂起恢复均归零帧指针从首帧重播）+
+主循环 ~250ms 墙钟节拍推帧（帧速率不随总线流量漂移）；契约面零改动
+（topics.toml face/expression note 同源追加两态措辞）；显示 trait 与真件适配
+随批F5a，本批仅 sim 回归。
+2026-10-07 0.0.6 批F4 sim 档全链闭环演练（`379e6de`）**代码批 + docs**（ADR-0007/
+0014/0017）：`rr3-sim --chain` 新模式——六真进程全链（rrd boot spawn sense 双麦
+burst+DOA 注入 -60° + 外部 interact/brain（mock 云）/act + 演练自带裸 UDS 观察者
+**先于外部模块注册**取证 vad_start/servo/state，servo/state 一次性广播晚注册漏收），
+无人工干预跑通"采集→意图→判向→转向→表情"一轮以上；判定三段日志留痕（brain
+`actions=1` / interact「talk 挂起」/ act `servo angle=45`）+ `denied_publish = 0`；
+CI 增 sim-chain job（tools/ci/sim-chain.sh，python ≥3.11 门槛，演练回执远端口径）。
+板上首次实跑揪出并结清缺陷两件：①rr-hal sim burst 门控按交错样点序号算偶秒——
+多通道下窗口折半 500ms < silence_tail 700ms，offset 永不触发（修：门控按帧序号
+idx/声道数，mono 逐点不变 + 双通道回归测试钉住）；②演练实例面板 8080 与板上 deb
+系统实例冲突（--brain 同款中招，CI 无系统实例故未暴露；演练统一注入
+`RR3_PANEL_ADDR=127.0.0.1:18080` 共享常量）。boards §9 回填 + 方案判据 10/11 内联
+标注：R9 **采购前档**，不充当真件收口证据。
+2026-10-07 0.0.8 模块分层立项批（纯文档，0.0.5 §2.4 R17"各模块拆分清单"细化）：新建
 [0.0.8 方案](dev/0.0.8版本洛克三号模块内部分层实施方案.md)（rr3mod 签名级规格 §2 +
 五模块目标目录树与迁移映射 §4 + 批0–批6 序列 §5 + 每批验收四件套 §6，含 rr3-sense
 config 路径语义分叉的如实登记与批3 前置核对件）+ ADR-0017 关联段增补回链（裁定原文
