@@ -1158,6 +1158,22 @@ idx/声道数，mono 逐点不变 + 双通道回归测试钉住）；②演练�
 config 路径语义分叉的如实登记与批3 前置核对件）+ ADR-0017 关联段增补回链（裁定原文
 不动）+ docs/README dev 索引两处 + status.md 在制品登记；零 `.rs`/module.toml/契约
 文件改动，linkcheck 全绿
+2026-10-07 0.0.6 批F5a 第一件：linux sysfs PWM 舵机后端（`acc548e`）**代码批**
+（R11①，ADR-0007）：新增 [linux_pwm.rs](../../base/runtime/rr-hal/src/linux_pwm.rs)
+（单门 `target_os = "linux"` 纯 std，无 feature 门/外部依赖）——sysfs pwmchip 导出
+与全量配置落定（50Hz + 中位 90° 脉宽 + 使能，与 sim 后端初始角同观测，R11 换装
+编排零改动）+ set_angle 落占空比 + angle 反演回读（域外显式回错不编角）+ Drop
+停发脉冲并归还自导出通道；SG90 定案参数 50Hz / 0.5–2.5ms 线性映射 0–180°（R22，
+方案 §5.5.2 接线 1），芯片/通道经 `RR3_HAL_PWM_CHIP`/`RR3_HAL_PWM_CHANNEL` 选
+（缺省 pwmchip0/pwm0=GPIO12）。backend.rs 订正 resolve 平台门：linux 可用性由
+alsa feature 门改判 `target_os`（音频/舵机各能力面各判各的——原门错位会致真件档
+板上显式 linux 落 placeholder、act 探活 exit(1) 起不来），音频 alsa 未编进时落
+placeholder 显式回错不静默落 sim；`rr3_hal_servo` 补 linux 分支。单测：脉宽映射
+边界 / 全域反演往返恒等 / 假 sysfs 树（临时目录确定性，不触真硬件）导出-配置-
+回读-Drop 归还；宿主门禁七步全绿 + aarch64 musl 交叉 check（R13 路径编入本文件
+及其测试）。**板上 `cargo test -p rr-hal` 留板上线后补跑**（板当前离线，rsync
+口径同批F1）；真件档验收（真舵机脉宽/抖动实测）留外设到位随批F5a 真件档，
+R9 舵机行诚实标注不变
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
