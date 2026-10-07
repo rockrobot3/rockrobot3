@@ -25,6 +25,10 @@ pub mod linux_gpio;
 /// 声明壳，同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]
 pub mod linux_power;
+/// linux NetworkManager 链路读数后端（R18，判据 13）：nmcli 子进程承载（std
+/// Command 零新依赖），同为单重平台门，不挂 alsa feature。
+#[cfg(target_os = "linux")]
+pub mod linux_link;
 pub mod sim;
 
 /// 无操作 waker 的 vtable（`Waker::noop` 要 1.85，workspace 锁 1.82，故手写同语义版本）。

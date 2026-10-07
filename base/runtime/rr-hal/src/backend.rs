@@ -7,6 +7,7 @@
 //! | `linux`（GPIO） | 批F5a（`linux_gpio.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | 树莓派 chardev GPIO 数字输出：LED / 继电器（R11②，R8 预算表 GPIO4/17 软件路行） |
 //! | `linux`（显示） | 真件档（MAX7219 SPI 后端未实装，R11③） | 显式要 `linux` 时落占位显式回错（interact 探活 exit(1)——真件未到位语义） |
 //! | `linux`（电源） | 批F5a（`linux_power.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | INA219@0x40 I2C 总线电压读数（R18，判据 12；charging 判定随真件档校准） |
+//! | `linux`（链路） | 批F5a（`linux_link.rs`，仅 `target_os = "linux"` 单门，nmcli 子进程） | NetworkManager 链路状态读数（R18，判据 13；配网/断链重连是 NM 自身行为，HAL 只如实报数） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
@@ -62,6 +63,10 @@ pub const RR3_HAL_I2C_BUS_ENV: &str = "RR3_HAL_I2C_BUS";
 /// linux I2C 电池读数的 INA219 从地址键（`0x` 前缀或纯十六进制；未设/取值
 /// 不认 → 0x40，BOM #5 定案档）。
 pub const RR3_HAL_INA219_ADDR_ENV: &str = "RR3_HAL_INA219_ADDR";
+
+/// linux（NetworkManager）链路读数的接口名键（任意非空串；未设/空 →
+/// `wlan0`——树莓派板载 WiFi 常见名，runbook 件 4 口径）。
+pub const RR3_HAL_LINK_IFNAME_ENV: &str = "RR3_HAL_LINK_IFNAME";
 
 /// INA219 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义
 /// （"40" 是 0x28 还是 40？），不收；7-bit 可寻址域 0x08..=0x77 外不认）。
@@ -365,12 +370,21 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
     }
 }
 
-/// 按环境选网络链路读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无
-/// NetworkManager 后端（板上件，0.0.2 方案 D7 cfg 门骨架归属）：显式要 `linux`
-/// 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim——rr3-connect 开机
-/// 探活会按"能力缺失显式回错"退出。
+/// 按环境选网络链路读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux
+/// 分支走 NetworkManager 后端（批F5a⑤，`linux_link.rs` nmcli 子进程承载；
+/// 配网/断链重连是 NM 自身行为，HAL 只如实报数）；显式 `linux` 但非 linux
+/// 平台时落占位件，使用时以 `Unsupported` 回错，不静默换 sim。
 pub fn rr3_hal_link() -> (Box<dyn crate::Rr3Link>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
+            #[cfg(target_os = "linux")]
+            return (
+                Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_default()),
+                RR3_BACKEND_LINUX,
+            );
+            #[cfg(not(target_os = "linux"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
         RR3_BACKEND_SIM => {
             let up = std::env::var(RR3_HAL_SIM_LINK_UP_ENV)
                 .ok()
@@ -439,6 +453,11 @@ mod tests {
             legal.contains(&display_backend),
             "显示后端名合法: {display_backend}"
         );
+        let (link, link_backend) = rr3_hal_link();
+        assert!(
+            legal.contains(&link_backend),
+            "链路后端名合法: {link_backend}"
+        );
         // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
         if servo_backend == RR3_BACKEND_SIM {
             assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
@@ -446,6 +465,14 @@ mod tests {
         }
         if display_backend == RR3_BACKEND_SIM {
             assert_eq!(rr3_block_on(display.frame()).unwrap(), [0; 8], "sim 点阵初始黑屏");
+        }
+        if link_backend == RR3_BACKEND_SIM {
+            let st = rr3_block_on(link.state()).unwrap();
+            if st.up {
+                assert!(st.ssid.is_some() && st.rssi_dbm.is_some(), "sim 在链必带 SSID/RSSI");
+            } else {
+                assert!(st.ssid.is_none() && st.rssi_dbm.is_none(), "sim 断链必无 SSID/RSSI");
+            }
         }
     }
 
