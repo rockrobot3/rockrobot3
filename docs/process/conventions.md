@@ -1229,6 +1229,28 @@ false**——INA219 calibration 默认 0 时电流寄存器读回恒 0，如实�
 check 全绿；板上补跑同①口径欠账；真件档验收（i2cget 对拍 + 万用表两点
 标定）留外设到位随批F5a 真件档
 
+2026-10-07 0.0.6 批F5a 第五件：rr-hal linux NetworkManager 链路后端
+（`faf01be`）**代码批**（R18，ADR-0007）：判据 13 的 HAL 承载面——**配网/
+断链重连是 NM 自身 autoconnect 行为，模块侧只读翻转上报，HAL 只如实报数**
+（sim.rs 分工口径同条）。`linux_link.rs` 单门 `target_os = "linux"`；承载选
+**nmcli 子进程轮询**而非 D-Bus 直连——runbook 件 4 既定口径就是 nmcli 全套
+命令，std Command 零新依赖不破 musl 静态纪律（D-Bus 需 zbus 级大库且 async
+耦合）；轮询节拍由 connect `link_report_period_ms` 控制，HAL 每次 state()
+现读现报，不持 fd 无 ensure（进程面不是设备面）。一轮两调用：`dev show`
+（STATE==100 即在链 + CONNECTION 回落 + TYPE 区分 wifi/有线）→ up 且 wifi
+再 `dev wifi list --rescan no`（只读缓存不触发秒级扫描；取 IN-USE `*` 行
+真广播名 + 信号质量）。**SIGNAL 是 0–100 质量百分比不是 dBm**，经验线性
+dBm ≈ q/2 − 100 折算注释钉死，q=0 → None 不报假 −100；terse 模式值转义
+（`\:`/`\\`）反转义与 SSID 含冒号行两端夹逼解析有测；断链语义对齐 sim：
+`up=false` 时 ssid/rssi 强制 None，模块侧不许从"down 还带着 ssid"发明
+语义。backend.rs 新增 `RR3_HAL_LINK_IFNAME` 键（缺省 wlan0，runbook 件 4
+口径）+ `rr3_hal_link()` linux 分支 + 过期 doc 订正；选择器测试补 link 行
+（sim 在链必带 SSID/RSSI、断链必无）。单测：解析全套 + 假 nmcli 脚本
+编排（构造传程序路径，零 PATH 全局污染）+ 非零退出显式回错；宿主门禁
+七步全绿 + aarch64 musl 交叉 check 全绿；板上补跑同①口径欠账；判据 13
+三断言（配网一次成功/断网 30s 自恢复/翻转经总线可查）属真机验收，
+随批F5a 真件档实跑（runbook §5.5.4 链⑥）
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：
