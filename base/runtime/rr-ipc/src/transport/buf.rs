@@ -10,6 +10,9 @@
 //! 两个方向都提供与它的低成本互转。本文件平台无关：测试只用 `std::io::Cursor`。
 
 use std::io::Read;
+// no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+use std::vec;
+use std::vec::Vec;
 
 use crate::protocol::header::{Rr3Header, RR3_IPC_HDR_SIZE};
 use crate::transport::frame::{read_fill, Rr3Frame, Rr3FrameError};

@@ -1303,6 +1303,21 @@ build-std 构建依赖（gimli v0.32.0 等）crates.io CDN 本机会僵死 → �
 espup/ldproxy 未装成（ldproxy 属批D1 esp-idf-sys 构建依赖，届时重试）；
 落档明细见 0.0.7 方案 §4 批A' 记录
 
+2026-10-07 0.0.7 批B：层① 契约 parity 绿（ADR-0008/0006）——rr-ipc no_std 化：
+`#![no_std]` + 条件 `extern crate std`，协议层纯 core+alloc（body.rs 取
+`alloc::vec::Vec`，std 目标同一类型零行为变化），transport 层按
+`not(target_os = "none")` 门控（std::io 面只属 OS 语境，espidf unix 系照常），
+std prelude 隐式注入的 vec!/format!/Vec/String/ToString 各模块显式导入；
+`to_bytes` const 化（put_le 手写小端，不依赖 copy_from_slice 的 const 版本）+
+golden 头 `const _` 编译期对拍（bytes_eq 手写——数组 `==` 在 const 求值是
+nightly 面），任意目标编译 rr-ipc 即求值，xtensa 编译器证明编码器与 golden
+逐字节一致；ipct003.sh 四路化：[4/4] `cargo +esp check -p rr-ipc --lib
+--target xtensa-esp32-none-elf -Z build-std=alloc,core --offline`（rsproxy
+镜像注入可 env 关，crates.io CDN 僵死规避沿批A' 口径），四路实况 = 宿主
+PASS / aarch64 PASS / arm64 容器 SKIP（Docker 缺位既定）/ **xtensa PASS**；
+xtensa 运行期 dump 归批C UART 夹具（第二重证据）；宿主 49+4 tests 全绿 +
+七步门禁 16 PASS 随批；落档明细见 0.0.7 方案 §4 批B 记录
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：

@@ -29,6 +29,8 @@ pub mod shm;
 pub mod uds;
 
 use std::io::{Read, Write};
+// no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+use std::string::ToString;
 
 use crate::transport::buf::{rr3_framebuf_read, Rr3FrameBuf};
 use crate::transport::frame::Rr3FrameError;
