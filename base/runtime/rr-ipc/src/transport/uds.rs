@@ -62,6 +62,7 @@ mod tests {
 
     /// 唯一临时路径：进程号 + 自增计数，免引外部依赖
     fn tmp_sock(tag: &str) -> std::path::PathBuf {
+        use std::format;
         use std::sync::atomic::{AtomicU32, Ordering};
         static N: AtomicU32 = AtomicU32::new(0);
         std::env::temp_dir().join(format!(

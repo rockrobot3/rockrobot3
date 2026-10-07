@@ -22,6 +22,9 @@
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
+// no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+use std::format;
+use std::vec;
 
 use crate::protocol::header::{Rr3Header, RR3_IPC_HDR_SIZE};
 use crate::transport::buf::{rr3_framebuf_read, Rr3FrameBuf};
@@ -351,6 +354,7 @@ impl Rr3TransportConn for Rr3ShmReaderConn {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod posix {
     use std::ffi::CString;
+    use std::format;
     use std::io::{self, ErrorKind};
     use std::os::raw::{c_char, c_int, c_long, c_uint, c_void};
     use std::path::{Path, PathBuf};
@@ -590,6 +594,9 @@ impl Rr3ShmReaderConn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+    use std::string::String;
+    use std::vec::Vec;
     use crate::protocol::header::opcode;
 
     /// 进程内对齐区域（8 字节对齐满足头内 u64 原子量）；leak 到测试进程结束
