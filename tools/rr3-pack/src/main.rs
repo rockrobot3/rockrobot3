@@ -450,6 +450,9 @@ fn rr3_postinst_text() -> &'static str {
      # 运维计数持久化目录（RR3_DATA_DIR，0.0.6 批E' R3：unit 注入同名环境变量，\n\
      # 缺目录时 rrd 回写建 tmp 失败、boots 每次开机重置）\n\
      mkdir -p /var/lib/rockrobot3\nchmod 755 /var/lib/rockrobot3\nchown root:root /var/lib/rockrobot3\n\
+     # ctl socket 属主组（0.0.6 批F5b R12，ADR-0010 权限模型增补）：rrd bind 后\n\
+     # chmod 0o660 + chgrp 到本组，运维用户装机现场入组（deb 不动用户）\n\
+     addgroup --system rockrobot3 2>/dev/null || true\n\
      if [ -d /run/systemd/system ]; then\n    systemctl enable rrd.service\nfi\n"
 }
 
@@ -636,6 +639,9 @@ mod tests {
         // 计数持久化目录（0.0.6 批E' R3）：postinst 建目录，与 unit 的 RR3_DATA_DIR 同路径
         assert!(postinst.contains("mkdir -p /var/lib/rockrobot3"));
         assert!(postinst.contains("chown root:root /var/lib/rockrobot3"));
+        // ctl socket 属主组（0.0.6 批F5b R12）：幂等建组（组在位不报错），与
+        // rrd daemon 的 chgrp 组名同字面
+        assert!(postinst.contains("addgroup --system rockrobot3 2>/dev/null || true"));
         // 模块位：entry 改写为装机绝对路径，其余字节零差异；bin 按 entry 落位；config 随包
         let staged_manifest = fs::read_to_string(root.join("modules/rr3-act/module.toml")).unwrap();
         let facts = rr3_manifest_facts_from_text(&staged_manifest).unwrap();

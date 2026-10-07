@@ -11,9 +11,14 @@ After=network.target
 # 运维计数持久化目录（0.0.4 批B 的 RR3_DATA_DIR 优先路径；0.0.6 批E' R3 修复——
 # 真板实测缺注入时回写建 tmp 失败、boots 每次开机重置为 1；目录由 postinst 创建）
 Environment=RR3_DATA_DIR=/var/lib/rockrobot3
+# 真 reboot 解锁面（0.0.6 批F5b R12）：conn.rs 双重门（cfg(linux) + 本变量）缺省恒拒，
+# 发行版装机注入即解锁——sim/容器直跑无此变量仍恒拒，运维面不随包裸奔
+Environment=RR3_REBOOT_OK=1
 ExecStart=/usr/bin/rrd --socket /var/run/rock3-ipc.sock --contracts /usr/lib/rockrobot3/contracts --profile /usr/lib/rockrobot3/profiles/distro.toml
-Restart=on-failure
-RestartSec=1
+# always（0.0.6 批F5b R12 与方案目标形态同批落）：reboot 自身退出也拉起；判死重启
+# 退避由 rrd 内层 watchdog/supervisor 管，systemd 这层只兜底，2s 足够
+Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
