@@ -17,6 +17,9 @@ path = "src/main.rs"
 [dependencies]
 rr-hal = { path = "../../base/runtime/rr-hal" }
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# --chain 总线观察者：注册帧 dst=RR3_TASK_RRD（rr-bus 单一真值，本地不抄数）
+rr-bus = { path = "../../base/runtime/rr-bus" }
+serde_json = "1"
 # 装配演练（D9）只借 rrd 的两处解析真值（rr3_manifest_facts_from_text /
 # rr3_profile_from_text）——解析真值只有运行期那一册，演练不带第二份读取逻辑
 # （rr3-pack 依赖 rrd 的同款先例）

@@ -170,3 +170,95 @@ fn audio_chain_sense_to_interact_end_to_end() {
         "回路之后流必须继续推进: {seq} <= {last:?}"
     );
 }
+
+/// 双麦判向 e2e 的 config 守卫：channels=2 的 sense 配置落 /tmp（pid 唯一路），Drop 清理
+/// ——断言失败会 panic，自己删的那一行跑不到（SimManifest 同一条教训）。
+struct CfgGuard {
+    path: PathBuf,
+}
+
+impl Drop for CfgGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// 双麦 config 夹具：与仓内 `modules/rr3-sense/config.toml` 同形状，唯 channels=2——
+/// DoA 注入只在 ch_n>=2 时被 sim 源采纳（backend.rs 同一纪律），单麦链路无方向语义。
+/// VAD 在下混后的 mono 上判，阈值与仓内 config 同值。
+const DOA_CONFIG: &str = r#"
+[rr3-sense]
+log_level = "info"
+
+[rr3-sense.audio]
+sample_rate = 16000
+channels = 2
+frame_ms = 20
+
+[rr3-sense.vad]
+rms_start = 1500        # 起音阈值
+silence_tail_ms = 700   # 判停尾静音
+min_speech_ms = 200
+"#;
+
+#[test]
+fn audio_chain_doa_stereo_env_injection_end_to_end() {
+    // ---------- 夹具：真二进制 + 真 manifest + 双麦 config + DOA env ----------
+    let sense_bin = rr3_build_module_bin("rr3-sense");
+    let m_sense = rr3_module_manifest("doa", "rr3-sense", &sense_bin);
+    let cfg_path = std::env::temp_dir().join(format!("rr3-m3-doa-cfg-{}.toml", std::process::id()));
+    std::fs::write(&cfg_path, DOA_CONFIG).expect("写双麦 config");
+    let cfg_arg = cfg_path
+        .to_str()
+        .expect("config 路径必须是 UTF-8")
+        .to_string();
+    let _cfg = CfgGuard { path: cfg_path };
+
+    // ---------- ① boot：env 三件套经 rrd 进程继承传给真 rr3-sense ----------
+    // DOA_DEG=-60（左）：sim 源按 ILD 模型给双通道加增益（g_l=1-sinθ, g_r=1+sinθ），
+    // sense 侧在下混前反演——注入的方位经总线回到观察者手里必须仍是 -60° 档
+    // （判据 4 的 sim 侧证据：DoA 在 sense 内部落档，零新契约）。
+    let mut rrd = RrdTest::rr3_start_boot_env(
+        "e2e-doa",
+        &[m_sense.path.as_path()],
+        "doa",
+        E2E_TICK_MS,
+        &[
+            ("RR3_HAL_SIM_WAVE", "sine"),
+            ("RR3_HAL_SIM_DOA_DEG", "-60"),
+            ("RR3_SENSE_CONFIG", cfg_arg.as_str()),
+        ],
+    );
+
+    // 旁观连接先就位（与既有用例同一条纪律：onset 是一次性边沿，广播只发给在册连接）
+    let (mut obs, _obs_task) = rr3_connect_observer(&mut rrd);
+    let sense_line = rrd.rr3_wait_log("注册 rr3-sense task=");
+    let sense_task = rr3_field_from_log(&sense_line, "task=");
+    rrd.rr3_wait_log("rr3-sense → running");
+
+    // ---------- ② vad onset 带 doa：sense 内部反演 + ±30° 分档 ----------
+    let vad = rr3_read_where(&mut obs, " vad_start 事件（doa）", |f| {
+        rr3_json_of(f)["topic"] == "rr3-sense/audio/vad_start"
+    });
+    assert_eq!(
+        vad.header.src_task, sense_task,
+        "事件帧 src 必须是发布者的分配值"
+    );
+    let v = rr3_json_of(&vad);
+    assert_eq!(v["edge"], "onset", "sim 正弦常幅，首个边沿必是 onset: {v}");
+    let deg = v["doa"]["deg"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("双麦 onset 必须带 doa 字段: {v}"));
+    assert!(
+        (-62..=-58).contains(&deg),
+        "注入 -60° 的 ILD 反演必须落 ±2° 容差: {v}"
+    );
+    assert_eq!(v["doa"]["bin"], "left", "|deg| > 30 落左档: {v}");
+
+    // ---------- ③ pcm 总线恒 mono（R14）：双麦原始通道只供 sense 内部判向 ----------
+    let f = rr3_read_where(&mut obs, " pcm 帧", |f| {
+        rr3_json_of(f)["topic"] == "rr3-sense/audio/pcm"
+    });
+    let body = rr3_json_of(&f);
+    assert_eq!(body["channels"], 1, "下混后总线承载恒 mono: {body}");
+}

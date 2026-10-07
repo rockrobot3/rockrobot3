@@ -106,3 +106,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 装配演练（构建 + rr3-sim --profile）
         run: bash tools/ci/sim-assemble.sh
+
+  # 批F4 全链闭环演练（§5.2 判据 10 sim 档）：采集→意图→判向→转向→表情六真
+  # 进程 mock 闭环 + 总线观察者取证。runner 的 python3 ≥3.11 满足 brain 的
+  # tomllib 门（macOS 本机 3.9 起不了 brain，远端回执口径与 sim-assemble 同理）。
+  sim-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 全链闭环演练（构建 + rr3-sim --chain）
+        run: bash tools/ci/sim-chain.sh

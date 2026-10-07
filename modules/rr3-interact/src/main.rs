@@ -9,7 +9,9 @@
 //!   `rr3-interact/face/expression`（表情机切换，回 `{"expression","previous"}`）；
 //!   订阅的 `rr3-connect/net/link` 事件快照进缓存（面板状态页数据源）；
 //! - 排空面板动作通道：beep/face 由主循环串行代执行（面板 HTTP 线程不碰
-//!   sink/face 所有权，与 TTS 点名天然互斥，无锁）。
+//!   sink/face 所有权，与 TTS 点名天然互斥，无锁）；
+//! - 表情帧动画节拍（批F3 sim 档）：~250ms 一拍推一帧，显示件随批F5a
+//!   显示 trait 实装，sim 档只推帧指针。
 //!
 //! rr3.call 转发帧的 trace_id=调用方 task（rrd 路由语义），顺原路应答。
 //! 业务性失败（缺参数、不认的表情、后端写失败）折成 error 应答回话；传输性
@@ -40,6 +42,10 @@ const RR3_NET_LINK_TOPIC: &str = "rr3-connect/net/link";
 
 /// 收帧等待上界：无点名时空转一圈的代价，值不敏感（心跳在独立线程）
 const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
+
+/// 表情帧动画节拍：~250ms 一帧（批F3 sim 档；多帧态 blink/talk 由此循环）。
+/// 按墙上时钟节拍推进，帧速率不随总线流量漂移。
+const RR3_FACE_TICK: Duration = Duration::from_millis(250);
 
 fn main() {
     if let Err(e) = rr3_run() {
@@ -75,6 +81,7 @@ fn rr3_run() -> Result<(), String> {
     println!("播放面就绪: backend={backend} rate=16000 ch=1");
 
     let mut face = Rr3Face::default();
+    let mut face_tick_at = std::time::Instant::now();
 
     // 面板（0.0.4 批C，Q3 裁定）：独立 HTTP 线程 + 动作通道。link 缓存是状态页
     // 卡片的数据源——面板线程只读、主循环只写；总线句柄 clone 是同一连接的另一
@@ -156,6 +163,12 @@ fn rr3_run() -> Result<(), String> {
                     .map(|(c, p)| face::rr3_face_result(c, p)),
             };
             let _ = tx.send(result);
+        }
+        // 表情帧动画一拍（批F3 sim 档）：~250ms 节拍推进帧指针，多帧态
+        // （blink/talk）由此循环；sim 档无显示件，真件随批F5a 显示 trait 接线
+        if face_tick_at.elapsed() >= RR3_FACE_TICK {
+            face_tick_at = std::time::Instant::now();
+            face.rr3_face_tick();
         }
     }
 }

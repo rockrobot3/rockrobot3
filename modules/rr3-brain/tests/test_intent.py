@@ -3,7 +3,11 @@
 
 import unittest
 
-from rr3_brain.intent import TOPIC_RELAY_SET, rr3_extract_actions
+from rr3_brain.intent import (
+    TOPIC_RELAY_SET,
+    TOPIC_SERVO_COMMAND,
+    rr3_extract_actions,
+)
 
 
 def relay_actions(text):
@@ -42,9 +46,37 @@ class Rr3IntentExtractTest(unittest.TestCase):
 
     def test_action_shape_matches_contract(self):
         # 载荷 schema（contracts/events/brain-intent-result.schema.json）钉的两键形状
-        for action in relay_actions("开灯"):
+        for action in relay_actions("开灯") + relay_actions("向左"):
             self.assertEqual(set(action.keys()), {"topic", "args"})
             self.assertIsInstance(action["args"], dict)
+
+    def test_turn_words_yield_servo_commands(self):
+        # 批F2 判据 8：向左/向右/回中 → servo/command 三档（45/135/90）
+        cases = (
+            (("向左", "往左看", "左转一下", "看左边"), 45),
+            (("向右", "往右看", "右转一下", "看右边"), 135),
+            (("回中", "看前面", "看中间", "回中间"), 90),
+        )
+        for words, angle in cases:
+            for text in words:
+                actions = relay_actions(text)
+                self.assertEqual(len(actions), 1, f"{text!r} 应恰产一条动作: {actions}")
+                self.assertEqual(actions[0]["topic"], TOPIC_SERVO_COMMAND)
+                self.assertEqual(actions[0]["args"], {"angle_deg": angle})
+
+    def test_turn_negative_guard_rejects(self):
+        # 否定护栏同样管转向："别向左"不得转头
+        for text in ("别向左", "不要向右", "先别回中"):
+            self.assertEqual(relay_actions(text), [], f"{text!r} 不得触发转向")
+
+    def test_relay_and_turn_in_one_sentence_yield_in_order(self):
+        # 两族动作同句共存：relay 在前、servo 在后，按序执行
+        actions = relay_actions("开灯，然后向左")
+        self.assertEqual(len(actions), 2, f"开灯+向左产两条按序动作: {actions}")
+        self.assertEqual(actions[0]["topic"], TOPIC_RELAY_SET)
+        self.assertEqual(actions[0]["args"], {"on": True})
+        self.assertEqual(actions[1]["topic"], TOPIC_SERVO_COMMAND)
+        self.assertEqual(actions[1]["args"], {"angle_deg": 45})
 
 
 if __name__ == "__main__":
