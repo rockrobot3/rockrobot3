@@ -16,11 +16,13 @@ Discussions and contributions are welcome — Issues are the front door.
 | [docs/architecture/architecture.md](docs/architecture/architecture.md) | Architecture (design): layering, module model, HAL, IPC, data flows, risk register |
 | [docs/status.md](docs/status.md) | Single live-status snapshot: what exists at HEAD, milestone progress, open unknowns |
 | [docs/reference/](docs/reference/) | Copy-ready runtime interfaces: rrd CLI / upstream RPC / registry rules |
-| [docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md](docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | Current release plan (alignment & rulings) and Definition of Done |
+| [docs/process/dev/0.0.6版本洛克三号树莓派验证方案.md](docs/process/dev/0.0.6版本洛克三号树莓派验证方案.md) | Current release plan (Raspberry Pi two-phase verification) and Definition of Done (rev 6) |
+| [docs/process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md](docs/process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) | ESP32 system-level verification, four-layer ladder (ruled, in execution — rev 4) |
+| [docs/process/dev/0.0.8版本洛克三号模块内部分层实施方案.md](docs/process/dev/0.0.8版本洛克三号模块内部分层实施方案.md) | Approved, pending implementation: rr3mod module-internal layering plan |
 | [docs/process/conventions.md](docs/process/conventions.md) | Development conventions (branching/commits/CI seven steps/DoD) |
 | [docs/process/naming.md](docs/process/naming.md) | Single naming authority |
 | [contracts/README.md](contracts/README.md) | Byte-level contract and ambiguity rulings |
-| [docs/process/adr/](docs/process/adr/) | Decision records ADR-0001 ~ ADR-0015 |
+| [docs/process/adr/](docs/process/adr/) | Decision records ADR-0001 ~ ADR-0017 |
 | [docs/process/legacy-digest.md](docs/process/legacy-digest.md) | Legacy ESP32 firmware digest ledger (archived: tree retired in 0.0.4) |
 | [README_zh.md](README_zh.md) | Chinese (Simplified) edition of this entry point |
 
