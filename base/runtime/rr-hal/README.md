@@ -11,7 +11,8 @@
 | 占位后端 `Rr3UnavailableSource`（所有方法返回 `Unsupported`），object-safety 由 `src/lib.rs` 的单元测试在 `cargo test` 时机器校验 | `src/lib.rs` |
 | sim 音频后端（`Rr3SimWave` 三模式：440Hz 正弦 / 确定性噪声 / 静音；虚拟麦克风 `Rr3SimAudioSource` + 尾窗虚拟扬声器 `Rr3SimAudioSink`） | `src/sim.rs` |
 | linux（ALSA）音频后端（`Rr3AlsaAudioSource` / `Rr3AlsaAudioSink`，`alsa` feature + `target_os = "linux"` 双门，依赖 `alsa = "0.9"`） | `src/linux.rs` |
-| 后端名常量与环境变量选择入口（`RR3_HAL_BACKEND` / `RR3_HAL_SIM_WAVE` / `RR3_HAL_ALSA_DEVICE`）：`rr3_hal_backend_resolve`、`rr3_hal_audio_source`、`rr3_hal_audio_sink` | `src/backend.rs` |
+| linux sysfs PWM 舵机后端（`Rr3LinuxPwmServo`，仅 `target_os = "linux"` 单门纯 std；SG90 50Hz/0.5–2.5ms 定案参数，导出/中位落定/Drop 停脉冲，单测走临时目录假 sysfs 树） | `src/linux_pwm.rs` |
+| 后端名常量与环境变量选择入口（`RR3_HAL_BACKEND` / `RR3_HAL_SIM_WAVE` / `RR3_HAL_ALSA_DEVICE` / `RR3_HAL_PWM_CHIP` / `RR3_HAL_PWM_CHANNEL`）：`rr3_hal_backend_resolve`、`rr3_hal_audio_source`、`rr3_hal_audio_sink`、`rr3_hal_servo` | `src/backend.rs` |
 
 具名后端有哪几路、各自由什么承载，逐条见 `src/backend.rs` 顶部那张后端表（本文件不复述用词）。
 TTS 文本到 PCM 的合成属模块侧（rr3-interact），不进 HAL。各后端今天能不能过真机验证、缺哪一手，
