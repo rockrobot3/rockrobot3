@@ -1192,6 +1192,22 @@ LED/继电器行，真件档装配单如改脚位走 env 覆写）；libc 0.2 �
 musl 交叉 check 全绿（glibc/musl 的 ioctl request 参数类型差异经 `as _` 平台推断）。
 **板上 `cargo test -p rr-hal` 同①口径留板上线后补跑**；真件档验收（真 LED/继电器
 电平实测）留外设到位随批F5a 真件档
+2026-10-07 0.0.6 批F5a 第三件：rr-hal 显示 trait `Rr3Display`（`bcc4de2`）**代码批**
+（R11③，ADR-0007）：**形状经评审裁定——单 trait 帧面**（方案原文"Rr3Display/
+Rr3Face"两名的"Rr3Face"解释为帧类型名，不立同名 trait：show(expression) 实现方
+必须自带帧表，而"状态→帧"映射与表情白名单是模块面策略，rr-hal 不能反向依赖模块，
+立了即死插槽；同 led 灯效白名单先例"效果清单不进 HAL"）。lib.rs 新增
+`Rr3FaceFrame = [u8; 8]`（行主序 bit7=最左点，MAX7219 行寄存器直排；类型事实源
+归 HAL——trait 签名需要，interact face.rs 改 re-export 保模块内名）+ `Rr3Display`
+trait（`draw(&frame)` 整帧替换 + `frame()` 读回探活/对账）+ 占位件补
+`placeholder/display`。sim.rs 新增 `Rr3SimDisplay`（内存记录位图，构造带初始帧
+黑屏，Mutex 不拆原子）；backend.rs 新增 `rr3_hal_display()`（sim 分支；linux 分支
+落占位——MAX7219 SPI 后端归真件档，显式 linux 探活 exit(1) 是"真件未到位"预期
+语义）。interact 接线：开机探活读 `frame()`（Unsupported 即致命）+ 主循环
+~250ms 拍出帧交 `draw`（妆面件失败只 eprintln，同 led worker 口径）——换装只动
+后端实现，编排零改动。单测：sim 点阵 draw/读回/跨线程写读 + 选择函数 sim 黑屏 +
+trait 对象安全；宿主门禁七步全绿 + aarch64 musl 交叉 check 全绿；板上补跑同①
+口径欠账；真件档验收（MAX7219 出帧实测）留外设到位随批F5a 真件档
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
