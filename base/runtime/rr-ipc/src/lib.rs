@@ -39,6 +39,8 @@ pub use transport::shm::{
 };
 #[cfg(unix)]
 pub use transport::uds::Rr3UdsListener;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use transport::uart::{rr3_uart_baud_speed, Rr3UartConn, RR3_UART_BAUD_DEFAULT};
 #[cfg(not(target_os = "none"))]
 pub use transport::{
     Rr3TransportConn, Rr3TransportEndpoint, Rr3TransportListener, RR3_BUS_PATH_ENV,

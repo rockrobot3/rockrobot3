@@ -1,0 +1,20 @@
+# xtensa-esp32-none-elf：esp-rs fork 工具链（批A' 落档：~/.rustup/toolchains/esp-1.90.0.0
+# + rustup toolchain link esp）。裸金属 no_std：core/alloc 由 build-std 现编。
+# 链接走官方 ldproxy + Xtensa esp-gcc（批C 落档）：rust-lld 对 Xtensa 不可行——
+# xtensa-lx-rt 的 exception.x 向量表用 `. = 0x0` location counter 回退，GNU ld
+# 支持、lld 是硬限制（报 "unable to move location counter backward"），故必须
+# esp-gcc 的 bfd ld。ldproxy 在 ~/.cargo/bin，gcc 在 ~/.espressif/xtensa-esp-elf/bin。
+[build]
+target = "xtensa-esp32-none-elf"
+
+[target.xtensa-esp32-none-elf]
+linker = "ldproxy"
+rustflags = [
+  # ldproxy 0.3.x 必需：经 link-arg 注入真实链接器（PATH 解析 xtensa-esp32-elf-gcc）
+  "-C", "link-arg=--ldproxy-linker=xtensa-esp32-elf-gcc",
+  "-C", "link-arg=-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+]
+
+[unstable]
+build-std = ["alloc", "core"]

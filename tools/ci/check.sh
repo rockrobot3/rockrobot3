@@ -11,6 +11,9 @@
 # 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；
 # 退出码仍是首要信号（编译错误、错误 --test 目标名照样红）。① 不跑测试，只看得退出码。
 # ④ 是独立工程编译步（不是测试步）：modules/、tools/、base/ota 各自成 workspace，①/①b 覆盖不到。
+#    例外：tools/esp32-uart-echo 是 ESP32 固件工程（xtensa-esp32-none-elf 目标），编译需 esp fork
+#    工具链（cargo +esp）+ Xtensa esp-gcc，宿主工具链 check 必红——它由专用门
+#    tools/ci/esp-uart-echo-check.sh 覆盖（工具链缺位时 SKIP 明说，编译成功还断言 ELF 出树）。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内，规约门拒绝执行。" >&2
@@ -88,7 +91,7 @@ while IFS= read -r -d '' manifest; do
     fail=1
   fi
 done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
-                    -not -path "base/runtime/*" -print0 | sort -z)
+                    -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" -print0 | sort -z)
 if [ "$found" -eq 0 ]; then
   printf 'FAIL  ④ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
   fail=1

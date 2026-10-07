@@ -1,0 +1,24 @@
+[package]
+name = "esp32-uart-echo"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "0.0.7 批C 层② UART 板级 round-trip 夹具（ESP32 裸金属 echo，独立 workspace）"
+
+# 独立 workspace：xtensa 目标 + build-std 标志与 base/runtime 主 workspace 互斥，
+# 门禁 ④ 的宿主 check 不扫本目录（check.sh 显式排除，xtensa 编译走
+# tools/ci/esp-uart-echo-check.sh），rot 由该脚本按 ipct003 同款 SKIP 纪律盯防。
+[workspace]
+
+[dependencies]
+# 契约字节面单源：编解码（Rr3Header/to_bytes + body 前缀）直接复用 rr-ipc——
+# "同一份编解码源码在两侧编译，不存在 ESP32 版协议"（0.0.7 方案 §5）
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# 版本对表 fork 1.90（批A' 落档）：esp-hal 1.2+ MSRV 1.95 不可达；1.1.2（MSRV 1.88）
+# 为 fork 兼容的最新稳定线。esp-alloc 0.11 同因 1.95 不可达，取 0.10。
+# 精确 pin：cargo 会取 semver 兼容的最高版（1.1.2 → 1.2.2 直接 MSRV 红）。
+esp-alloc = { version = "=0.10.0", features = ["esp32"] }
+# unstable 特性：UartTx/UartRx 拆分件与 read_buffered（静默超时轮询所需）在该门后
+esp-hal = { version = "=1.1.2", features = ["esp32", "unstable"] }
