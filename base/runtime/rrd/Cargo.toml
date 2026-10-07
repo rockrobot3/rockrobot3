@@ -26,5 +26,7 @@ path = "src/bin/sim_peer.rs"
 rr-ipc = { path = "../rr-ipc" }
 rr-registry = { path = "../rr-registry" }
 rr-bus = { path = "../rr-bus" }
+# unix 门内的 socket 放行声明壳（chmod/getgrnam/chown，批F5b R12）——musl 静态零额外 C 依赖
+libc = "0.2"
 toml = { workspace = true }
 serde_json = { workspace = true }

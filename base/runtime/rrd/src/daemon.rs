@@ -223,6 +223,9 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         .map_err(|e| format!("清理残留套接字 {}: {e}", cfg.socket.display()))?;
     let listener = Rr3UdsListener::rr3_bind(&cfg.socket)
         .map_err(|e| format!("绑定 {} 失败: {e}", cfg.socket.display()))?;
+    // 访问控制放行（批F5b R12，ADR-0010 增补）：chmod 0o660 + chgrp 属主组，
+    // 尽力而为不拒启——详见函数 doc
+    rr3_socket_acl_grant(&cfg.socket);
     rr3_log(&format!("监听 {}", cfg.socket.display()));
 
     let shared = Arc::new(Mutex::new(RrdRegistry::new(cfg.restart_base_ms)));
@@ -367,6 +370,57 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     }
 }
 
+/// ctl socket 的属主组（0.0.6 批F5b R12）：postinst 建系统组，运维用户由
+/// 装机现场入组（deb 不该动用户）——socket 权限位因此成为 ADR-0010 裁定 2
+/// "套接字文件权限就是访问控制"的落地值。
+const RR3_CTL_SOCKET_GROUP: &str = "rockrobot3";
+
+/// ctl socket 访问控制放行（0.0.6 批F5b R12，ADR-0010 权限模型增补）：bind 后
+/// `chmod 0o660`（owner + 属主组可读写，other 无份——修真板首发现敞口
+/// `srwxr-xr-x root:root` 非组用户连不上）+ `chgrp rockrobot3`（组不存在时
+/// 留痕跳过，chmod 位仍生效——紧权限的敞口比守护起不来轻得多，**失败不拒启**）。
+/// 放行是尽力而为的部署面语义：sim 直跑/CI 全 root 无感（root 恒可连）。
+///
+/// libc 仅声明壳（`chmod`/`getgrnam`/`chown`，musl 静态零额外 C 依赖，R13）；
+/// errno 逐调用取出（连续调用互不覆盖）。
+fn rr3_socket_acl_grant(path: &std::path::Path) {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(cpath) = CString::new(path.as_os_str().as_bytes()) else {
+        rr3_log("socket 放行跳过：路径含 NUL（不可能的缺省值）");
+        return;
+    };
+    // 1) chmod 0o660：other 位清掉，属主组位落上
+    let rc = unsafe { libc::chmod(cpath.as_ptr(), 0o660) };
+    if rc != 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        rr3_log(&format!(
+            "socket 放行 chmod 失败（errno {errno}，保留 umask 权限如旧）"
+        ));
+        return; // chgrp 无从谈起，权限面交回调用方日志
+    }
+    // 2) chgrp 到属主组：组不在位（装机未建组/开发机）→ 留痕跳过不视为错
+    let Ok(cgroup) = CString::new(RR3_CTL_SOCKET_GROUP) else {
+        return;
+    };
+    let gr = unsafe { libc::getgrnam(cgroup.as_ptr()) };
+    if gr.is_null() {
+        rr3_log(&format!(
+            "socket 属主组 {RR3_CTL_SOCKET_GROUP} 不在位（postinst 未跑/开发机），保留 root:root——组内用户暂连不上"
+        ));
+        return;
+    }
+    let gid = unsafe { (*gr).gr_gid };
+    let uid = libc::uid_t::MAX; // chown 不改属主（uid_t 无符号，MAX 即 POSIX 的 (uid_t)-1）
+    let rc = unsafe { libc::chown(cpath.as_ptr(), uid, gid) };
+    if rc != 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        rr3_log(&format!(
+            "socket 放行 chgrp 失败（errno {errno}，chmod 0o660 已生效）"
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,5 +447,24 @@ mod tests {
             Some(4),
             "体恰四字段，不得私加: {v}"
         );
+    }
+
+    /// socket 放行落位（批F5b R12）：temp 树真 bind 一个 uds → grant → 权限位
+    /// 0o660 断言。chgrp 面：开发机/CI 无 rockrobot3 组 → 走"组不在位留痕"路径
+    /// （属主不动），chmod 位仍成立——两环境测试都绿；板上组在位时 chown 生效，
+    /// 属主组断言归板上 cargo test 面，此处不断言 gid 以免开发机红。
+    #[test]
+    fn socket_acl_grant_sets_group_rw_mode() {
+        let dir = std::env::temp_dir().join(format!("rr3-rrd-acl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("acl.sock");
+        let _ = std::fs::remove_file(&sock);
+        let listener = Rr3UdsListener::rr3_bind(&sock).unwrap();
+        rr3_socket_acl_grant(&sock);
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&sock).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o660, "chmod 0o660 落位（组在位与否不影响 mode 位）");
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
