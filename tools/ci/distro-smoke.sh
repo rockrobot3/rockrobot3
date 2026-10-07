@@ -2,7 +2,8 @@
 # distro-smoke —— 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）。
 #
 # 单步容器（rust:bookworm，glibc 自洽）内完成：构建 → 打包器单测 → 组装注入产物 →
-# rr3-pack 出 deb → dpkg -i → rrd 装配单正门冒烟（5 模块 spawn + rr3-brain 缺格点名）。
+# rr3-pack 出 deb → dpkg -i → rrd 装配单正门冒烟（六模块 spawn，含 Python brain——
+# 0.0.6 批F1 起 brain 随 deb 装机进 boot 队列，distro.toml 四格绑定兑现）。
 # macOS 本机无法真装 deb（0.0.2 方案 P1）——打包器装配单测本机跑，真装只认这里（远端回执才算数）。
 #
 # 仅 CI 调用（需 docker）；本地想单跑装配逻辑用 rr3-pack --stage-only。
@@ -28,6 +29,8 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   cargo test -q --locked --manifest-path tools/rr3-pack/Cargo.toml
 
   echo "== ③ 组装注入产物（两轨同源约定：rr3-modules/<name>/{bin,manifest.toml}）=="
+  # brain shim 需要 python3 跑起来——rust:bookworm 不保证自带，缺就补（容器 root，一次性）
+  command -v python3 >/dev/null || { apt-get update -qq && apt-get install -y -qq python3 >/dev/null; }
   PAY=/tmp/rr3-payload
   rm -rf "$PAY"
   mkdir -p "$PAY/rr3-modules"
@@ -37,6 +40,12 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
     cp "$REL/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
     cp "modules/rr3-$m/module.toml" "$PAY/rr3-modules/rr3-$m/manifest.toml"
   done
+  # brain（lang=python，批F1）：payload = pkg 包树 + manifest，无 bin——shim 由 rr3-pack 生成
+  # cp 落位"dst 已存在 + 尾斜杠"（BSD/GNU 一致落成 pkg/rr3_brain/，见 pack-arm64.sh 注）
+  mkdir -p "$PAY/rr3-modules/rr3-brain/pkg"
+  cp -R modules/rr3-brain/rr3_brain "$PAY/rr3-modules/rr3-brain/pkg/"
+  find "$PAY/rr3-modules/rr3-brain/pkg" -name '__pycache__' -type d -exec rm -rf {} +
+  cp modules/rr3-brain/module.toml "$PAY/rr3-modules/rr3-brain/manifest.toml"
 
   echo "== ④ rr3-pack 出 deb 并安装 =="
   ARCH=$(dpkg --print-architecture)
@@ -58,6 +67,15 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
     test -f "/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
     test -f "/usr/lib/rockrobot3/modules/rr3-$m/config.toml"
   done
+  # brain（lang=python）装机面：entry = 打包器 shim（可执行），pkg 树 + config 随包
+  test -x /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain
+  test -f /usr/lib/rockrobot3/modules/rr3-brain/module.toml
+  test -f /usr/lib/rockrobot3/modules/rr3-brain/config.toml
+  test -f /usr/lib/rockrobot3/modules/rr3-brain/pkg/rr3_brain/__main__.py
+  grep -q "PYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg" \
+    /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain # shim PYTHONPATH 装机绝对
+  grep -q "RR3_BRAIN_CONFIG=/usr/lib/rockrobot3/modules/rr3-brain/config.toml" \
+    /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain # shim config 注入（pkg/ 嵌套布局修正）
   grep -q "/usr/lib/rockrobot3/modules/rr3-act/rr3-act" \
     /usr/lib/rockrobot3/modules/rr3-act/module.toml # entry 已装机绝对化
 
@@ -69,14 +87,14 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   RRDPID=$!
   trap "kill $RRDPID 2>/dev/null || true" EXIT
 
-  echo "== ⑦ 冒烟断言：5 模块 spawn + rr3-brain 缺格点名 + 0 拒 boot + 0 denied =="
+  echo "== ⑦ 冒烟断言：六模块 spawn（含 Python brain）+ 0 拒 boot + 0 denied =="
   ok=""
   for _ in $(seq 1 30); do
     n=0
-    for m in act connect interact sense power; do
+    for m in act connect interact sense power brain; do
       grep -q "spawn rr3-$m pid=" /tmp/rrd-smoke.log && n=$((n + 1))
     done
-    if [ "$n" -eq 5 ]; then ok=1; break; fi
+    if [ "$n" -eq 6 ]; then ok=1; break; fi
     sleep 1
   done
   if [ -z "$ok" ]; then
@@ -84,7 +102,6 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
     cat /tmp/rrd-smoke.log
     exit 1
   fi
-  grep -q "拒绝启动 rr3-brain：缺格 cognition.dialog" /tmp/rrd-smoke.log # P2 缺格点名，D2 语义首证
   if grep -q "拒绝 boot" /tmp/rrd-smoke.log; then
     echo "--- rrd 日志（出现 拒绝 boot）---"
     cat /tmp/rrd-smoke.log
@@ -97,5 +114,5 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   test -f /var/lib/rockrobot3/counters.json
   grep -q '"boots"' /var/lib/rockrobot3/counters.json
 
-  echo "distro-smoke 绿：deb 装机 → rrd 正门起 5 模块，缺格点名生效，counters 回写落盘"
+  echo "distro-smoke 绿：deb 装机 → rrd 正门起六模块（含 Python brain），counters 回写落盘"
 '

@@ -100,7 +100,7 @@ name = "rr3-interact/face/expression"
 kind = "request"
 owner = "rr3-interact"
 stable = "L1"
-note = "表情切换（idle/blink/talk/think/happy）"
+note = "表情切换（idle/blink/talk/think/happy；批F3 增 listen/turn，talk 由 TTS 播放自动驱动）"
 
 [[topic]]
 name = "rr3-interact/tts/text"

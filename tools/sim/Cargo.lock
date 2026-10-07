@@ -96,9 +96,11 @@ dependencies = [
 name = "rr3-sim"
 version = "0.0.1"
 dependencies = [
+ "rr-bus",
  "rr-hal",
  "rr-ipc",
  "rrd",
+ "serde_json",
 ]
 
 [[package]]

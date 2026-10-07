@@ -19,10 +19,13 @@
 //! 皆可，改写成绝对两头都过。错行不改、少行不改：除 entry 引号内一个值外零差异。
 //!
 //! **python 模块的 entry 装机**（`lang = "python"`，批F1）：产物不是 ELF 而是 shim 脚本，
-//! 且 shim 里的 `PYTHONPATH` 必须是**装机绝对路径**（只有打包器知道 `RR3_INSTALL_ROOT`），
-//! 故 shim 由打包器生成而非注入（`bin` 那个位置对 python 模块换成 `pkg/` 包树）。
-//! shim 形状与模拟演练侧 `rr3_brain_shim_script` 同构：
-//! `#!/bin/sh\nPYTHONPATH=<装机包树> exec python3 -m <包名>\n`（包名 = 目录名连字符转下划线）。
+//! 且 shim 里的 `PYTHONPATH`/`RR3_BRAIN_CONFIG` 必须是**装机绝对路径**（只有打包器知道
+//! `RR3_INSTALL_ROOT`），故 shim 由打包器生成而非注入（`bin` 那个位置对 python 模块换成
+//! `pkg/` 包树）。shim 形状与模拟演练侧 `rr3_brain_shim_script` 同构（演练侧布局 = 仓内
+//! 布局，config 回退自洽，不注 config env）：
+//! `#!/bin/sh\nRR3_BRAIN_CONFIG=<装机 config> PYTHONPATH=<装机包树> exec python3 -m <包名>\n`
+//! （包名 = 目录名连字符转下划线；config env 走 brain `rr3_config_load` 的文档化优先口，
+//! python 模块 config 契约当前即 brain 契约）。
 //! 运行期语言不分支（rrd 只看 entry 可执行），`lang` 只在本打包器与演练侧做产物路径推导。
 
 use std::fs;
@@ -129,12 +132,16 @@ fn rr3_entry_is_installable(entry: &str, module: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// python 模块的 entry 装机产物：shim 脚本（与模拟演练侧 `rr3_brain_shim_script` 同构）。
+/// python 模块的 entry 装机产物：shim 脚本（与模拟演练侧 `rr3_brain_shim_script` 同构，
+/// 演练侧布局 = 仓内布局故不注 config——装机布局多一层 `pkg/`，config 位只有打包器知道）。
 /// `pkg_dir` 是**装机绝对**包树目录（其下含 `<py_module>/` 包），
-/// 包名 = 目录名连字符转下划线（`rr3-brain` → `rr3_brain`）。
-fn rr3_python_shim_text(pkg_dir: &Path, py_module: &str) -> String {
+/// 包名 = 目录名连字符转下划线（`rr3-brain` → `rr3_brain`）；`config_path` 是装机绝对
+/// config 位，经 `RR3_BRAIN_CONFIG` 注入（brain rr3_config_load 的文档化优先口，
+/// 0.0.6 批F1：python 模块 config 契约当前即 brain 契约）。
+fn rr3_python_shim_text(pkg_dir: &Path, py_module: &str, config_path: &Path) -> String {
     format!(
-        "#!/bin/sh\nPYTHONPATH={} exec python3 -m {py_module}\n",
+        "#!/bin/sh\nRR3_BRAIN_CONFIG={} PYTHONPATH={} exec python3 -m {py_module}\n",
+        config_path.display(),
         pkg_dir.display()
     )
 }
@@ -395,9 +402,14 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
             // shim 里的 PYTHONPATH 必须是**装机绝对**（不是 staging 临时路径——staging 在
             // 宿主出、板上 dpkg -i 才落 /usr/lib/rockrobot3，写 staging 路径装完即指向虚处）
             let pkg_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/pkg");
+            let config_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/config.toml");
             fs::write(
                 &entry_path,
-                rr3_python_shim_text(Path::new(&pkg_installed), &py_module),
+                rr3_python_shim_text(
+                    Path::new(&pkg_installed),
+                    &py_module,
+                    Path::new(&config_installed),
+                ),
             )
             .map_err(|e| format!("写 {name} shim 失败: {e}"))?;
             rr3_make_executable(&entry_path);
@@ -741,10 +753,13 @@ mod tests {
             facts.entry,
             "/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain"
         );
-        // shim 形状：PYTHONPATH 装机绝对 + python3 -m rr3_brain（目录名连字符转下划线）
+        // shim 形状：RR3_BRAIN_CONFIG + PYTHONPATH 装机绝对 + python3 -m rr3_brain
+        // （目录名连字符转下划线；config 注入是装机布局修正——brain 回退按"包上一级"
+        // 寻址，pkg/ 嵌套下会指到 pkg/config.toml 虚位，见批F1 真板验证）
         assert_eq!(
             fs::read_to_string(dir.join("rr3-brain")).unwrap(),
-            "#!/bin/sh\nPYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg exec python3 -m rr3_brain\n"
+            "#!/bin/sh\nRR3_BRAIN_CONFIG=/usr/lib/rockrobot3/modules/rr3-brain/config.toml \
+             PYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg exec python3 -m rr3_brain\n"
         );
         assert!(dir.join("config.toml").is_file());
         #[cfg(unix)]

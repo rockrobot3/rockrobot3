@@ -41,6 +41,15 @@ for m in act connect interact sense power; do
   cp "$REL/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
   cp "modules/rr3-$m/module.toml" "$PAY/rr3-modules/rr3-$m/manifest.toml"
 done
+# brain（lang=python，批F1）：payload = pkg 包树 + manifest，无 bin——entry 装机产物
+# 是 rr3-pack 生成的 shim（PYTHONPATH 装机绝对，只有打包器知道 RR3_INSTALL_ROOT）。
+# 包树须纯净副本（符号链接打包器拒绝；__pycache__ 是宿主残渣，出包前清掉）。
+# cp 落位用"dst 已存在 + 尾斜杠"形式：BSD/GNU 一致落成 pkg/rr3_brain/——
+# `cp -R src dst`（dst 不存在）在 BSD 下会把 src 内容摊平成 dst/，层级丢一截。
+mkdir -p "$PAY/rr3-modules/rr3-brain/pkg"
+cp -R modules/rr3-brain/rr3_brain "$PAY/rr3-modules/rr3-brain/pkg/"
+find "$PAY/rr3-modules/rr3-brain/pkg" -name '__pycache__' -type d -exec rm -rf {} +
+cp modules/rr3-brain/module.toml "$PAY/rr3-modules/rr3-brain/manifest.toml"
 
 echo "== ③ rr3-pack --stage-only（staging deb 布局树）=="
 mkdir -p "$OUT"
@@ -60,6 +69,17 @@ for m in act connect interact sense power; do
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/config.toml"
 done
+# brain（lang=python）装机面：entry = 打包器 shim（可执行），pkg 树 + config 随包
+test -x "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain"
+test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/module.toml"
+test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/config.toml"
+test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/pkg/rr3_brain/__main__.py"
+grep -q "PYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg" \
+  "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain" # shim PYTHONPATH 装机绝对
+grep -q "RR3_BRAIN_CONFIG=/usr/lib/rockrobot3/modules/rr3-brain/config.toml" \
+  "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain" # shim config 注入（pkg/ 嵌套布局修正）
+grep -q "entry = \"/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain\"" \
+  "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/module.toml" # entry 已装机绝对化
 grep -q "/usr/lib/rockrobot3/modules/rr3-act/rr3-act" \
   "$STAGE/usr/lib/rockrobot3/modules/rr3-act/module.toml" # entry 已装机绝对化
 file "$STAGE/usr/bin/rrd" | grep -q "ELF 64-bit.*ARM aarch64.*statically linked" # 真板产物体检
