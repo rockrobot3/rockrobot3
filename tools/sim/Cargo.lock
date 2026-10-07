@@ -114,6 +114,7 @@ dependencies = [
 name = "rrd"
 version = "0.0.1"
 dependencies = [
+ "libc",
  "rr-bus",
  "rr-ipc",
  "rr-registry",
