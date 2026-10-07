@@ -1251,6 +1251,24 @@ dBm ≈ q/2 − 100 折算注释钉死，q=0 → None 不报假 −100；terse �
 三断言（配网一次成功/断网 30s 自恢复/翻转经总线可查）属真机验收，
 随批F5a 真件档实跑（runbook §5.5.4 链⑥）
 
+2026-10-07 0.0.6 批F5b：阶段二运维链 R12 两件实装（`fab7b6c`）**代码批**
+（ADR-0007 + ADR-0010 修订 1 随批落）：①**unit 注入 `RR3_REBOOT_OK=1`**——
+conn.rs 双重门（cfg(linux) + env）缺省恒拒的解锁面兑现，sim/容器直跑无此
+变量仍恒拒；`Restart=on-failure→always` + `RestartSec=1→2` 与方案目标形态
+同批落（reboot 自身退出也拉起，判死退避归 rrd 内层，systemd 只兜底）。
+②**ctl socket 加组放行**——真板批D 首发现敞口（`srwxr-xr-x root:root` 非
+root 连不上）修复：rrd daemon bind 后 `rr3_socket_acl_grant`（libc 声明壳
+chmod/getgrnam/chown 三函数，errno 逐调用取出）`chmod 0o660` + `chgrp
+rockrobot3`（postinst 幂等建组，运维用户装机现场入组，deb 不动用户）；
+**路线经用户裁定**走方案 §5.5.3 注记二选一的后项（socket 建后 chgrp/chmod，
+不挪路径）——一处代码 systemd/S99rrd 两轨共用，RuntimeDirectory 三行不落
+库，裁定全文见 ADR-0010 修订 1；组不在位留痕跳过不拒启（紧权限敞口比守护
+起不来轻），root 恒可连。单测：socket 真_bind + mode 位 0o660 断言（chgrp
+属主组断言归板上）、postinst addgroup 幂等断言；宿主门禁七步全绿 +
+aarch64 musl check 全绿 + rr3-pack 7 测试过。**真机三项验收（判据 14 看门狗
+SIGSTOP+SIGKILL 两路判死 / 判据 15 断电恢复 boots 累积 + 真 reboot 两档）
+与 socket 放行真机复验全部留板上线**（板离线敞口，同板上 cargo test 口径）
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：

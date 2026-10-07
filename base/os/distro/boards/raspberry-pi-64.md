@@ -106,6 +106,12 @@ sudo reboot                             # 判据 6：重启自恢复（systemd e
 - **归属**：修复（rrd bind 后 fchmod 放开组写，或 service 声明运行时目录权限，
   配套 unit 加 `SupplementaryGroups` / 专用组）归后续独立小批（阶段二收尾件）；
   本节只补录现状不修复（0.0.5 方案 R6 裁定）。
+- **修复状态（2026-10-07 批F5b，ADR-0010 修订 1）**：已实装"socket 建后
+  chgrp/chmod 属主组"路线——rrd bind 后 `chmod 0o660` + `chgrp rockrobot3`
+  （postinst 幂等建组，运维用户装机现场 `sudo usermod -aG rockrobot3 pi` 入组；
+  组不在位留痕跳过不拒启）。**真机复验留板上线**：非 root `rr3-ctl status`
+  直连不再 Permission denied，随判据 14/15 运维链验收同跑；复验通过前板上
+  巡检仍按 `sudo rr3-ctl …` 口径。
 
 ## 8. 实测回填：批F1 板上验证（2026-10-06）
 
