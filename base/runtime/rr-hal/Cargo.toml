@@ -23,3 +23,6 @@ async-trait = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 alsa = { version = "0.9", optional = true }
+# chardev GPIO 的 ioctl/close 声明（linux_gpio.rs，R11②）：纯 Rust 壳，
+# musl 静态链接零额外 C 库依赖（R13）；锁内已有 0.2.189（alsa 传递依赖）。
+libc = "0.2"
