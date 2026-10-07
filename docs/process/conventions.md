@@ -1174,6 +1174,24 @@ placeholder 显式回错不静默落 sim；`rr3_hal_servo` 补 linux 分支。�
 及其测试）。**板上 `cargo test -p rr-hal` 留板上线后补跑**（板当前离线，rsync
 口径同批F1）；真件档验收（真舵机脉宽/抖动实测）留外设到位随批F5a 真件档，
 R9 舵机行诚实标注不变
+2026-10-07 0.0.6 批F5a 第二件：linux chardev GPIO 数字输出后端（`da52e7f`）**代码批**
+（R11②，ADR-0007）：新增 [linux_gpio.rs](../../base/runtime/rr-hal/src/linux_gpio.rs)
+（单门 `target_os = "linux"`，libc 仅取 ioctl/close 声明壳，musl 静态零额外 C 依赖，
+R13）——GPIO chardev UAPI v1（`/dev/gpiochipN`，6.12 内核现役；sysfs gpio 已弃用不采）
+请求 `GPIO_GET_LINEHANDLE_IOCTL` 取 OUTPUT 句柄（v1 独占 line）+ SET/GET_LINE_VALUES
+写读电平；ioctl 号与 `#[repr(C)]` 布局单测对齐内核头文件硬编码值钉死；ensure 语义同
+PWM：选择函数构造不触设备，首次 trait 调用请求句柄落初值 0（与 sim 初始 false 同观测，
+R11 换装编排零改动），Drop close 句柄即释放 line；line 被占（EBUSY）回 `Busy`、其余
+`InvalidParam` 带点名。backend.rs：`rr3_hal_gpio_out` **改带 role 参数**（`led`/`relay`
+白名单——main.rs 连调两次原靠调用顺序配键是顺序耦合，带参显式化）+ 补 linux 分支 +
+`RR3_HAL_GPIO_CHIP` 键与角色线偏移键 `RR3_HAL_GPIO_LED_LINE`/`RR3_HAL_GPIO_RELAY_LINE`
+（键拼装/缺省值纯函数可单测；缺省 4/17 = R8 预算表 GPIO4/17 软件路行，接线手册未单列
+LED/继电器行，真件档装配单如改脚位走 env 覆写）；libc 0.2 直依赖进 linux target 表
+（锁内已有 0.2.189 传播各独立工程 Cargo.lock）。单测：ioctl 号/布局断言 + temp 树
+普通文件冒充 chip 的错误传播路径 + 白名单键/缺省裁决；宿主门禁七步全绿 + aarch64
+musl 交叉 check 全绿（glibc/musl 的 ioctl request 参数类型差异经 `as _` 平台推断）。
+**板上 `cargo test -p rr-hal` 同①口径留板上线后补跑**；真件档验收（真 LED/继电器
+电平实测）留外设到位随批F5a 真件档
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
