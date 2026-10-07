@@ -1289,6 +1289,20 @@ merge `5044ca8` + 批F5a 五对 + 批F5b 两提交（本快照新锚）全部按
 0.0.4 批F 注销（status.md 敞口表第 2 条），版本与获取方式随批D1 实测落档；
 docs/README 索引状态行同步
 
+2026-10-07 0.0.7 批A'：xtensa 工具链前置绿**零仓内代码改动，纯环境 + 落档**
+（ADR-0008）——esp-rs fork rust 自 v1.91.1.0 起停止 Intel Mac 构建（30 个
+release 资产矩阵实测），本机落最后带官方构建的 v1.90.0.0（fork 构建矩阵边界
+非本机能力问题，批B/批D1 依赖 MSRV 对表 1.90）；github.com 主站直连超时 →
+tarball 经镜像手动安装（`~/.rustup/toolchains/esp-1.90.0.0` + rust-src 入
+sysroot + `rustup toolchain link esp`）；冒烟证据：空 `#![no_std]` lib
+`cargo +esp build --target xtensa-esp32-none-elf -Z build-std=core` 过（EXIT=0），
+rlib 内目标文件 `file` 实证 **Tensilica Xtensa ELF**——真出码非空转；
+build-std 构建依赖（gimli v0.32.0 等）crates.io CDN 本机会僵死 → 每次调用级
+`--config` 挂 rsproxy sparse 镜像解决，不动全局 cargo 配置；none-elf 裸金属
+无 std 属架构必然（std-on-xtensa 走 `xtensa-esp32-espidf` target 归批D1）；
+espup/ldproxy 未装成（ldproxy 属批D1 esp-idf-sys 构建依赖，届时重试）；
+落档明细见 0.0.7 方案 §4 批A' 记录
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：
