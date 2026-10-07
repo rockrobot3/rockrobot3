@@ -1,6 +1,7 @@
 //! rr-hal —— 硬件抽象层 trait 定义（architecture.md §5）。
 //!
-//! trait 与数据类型 + sim / linux 两个音频后端与后端选择入口，见 `backend.rs`。
+//! trait 与数据类型 + sim 后端与 linux 后端（音频 alsa 双门 `linux.rs`、舵机
+//! sysfs PWM 单门 `linux_pwm.rs`），后端选择入口见 `backend.rs`。
 //! 慢速事件级接口优先：1kHz 以上闭环属模块进程内的反射环，永不进 HAL trait
 //! （ADR-0007 裁定 1）。
 
@@ -12,6 +13,10 @@ use async_trait::async_trait;
 pub mod backend;
 #[cfg(all(target_os = "linux", feature = "alsa"))]
 pub mod linux;
+/// linux sysfs PWM 舵机后端：纯 std 无外部依赖，只按平台门编译（R11①），
+/// 不挂 alsa feature——音频可用性与舵机可用性是两回事，各能力面各判各的。
+#[cfg(target_os = "linux")]
+pub mod linux_pwm;
 pub mod sim;
 
 /// 无操作 waker 的 vtable（`Waker::noop` 要 1.85，workspace 锁 1.82，故手写同语义版本）。

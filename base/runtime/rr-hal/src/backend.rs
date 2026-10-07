@@ -3,6 +3,7 @@
 //! | 后端 | 落地 | 承载 |
 //! |---|---|---|
 //! | `linux` | M3（`linux.rs`，`alsa` feature + `target_os = "linux"` 双门） | Buildroot 根文件系统内的 ALSA 采集/回放 |
+//! | `linux`（舵机） | 批F5a（`linux_pwm.rs`，仅 `target_os = "linux"` 单门，纯 std） | 树莓派 sysfs PWM 驱动 SG90（R11①/R22 定案档，GPIO12/13） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
@@ -39,6 +40,14 @@ pub const RR3_HAL_ALSA_DEVICE_ENV: &str = "RR3_HAL_ALSA_DEVICE";
 /// ALSA 采集/回放的默认设备名
 pub const RR3_HAL_ALSA_DEVICE_DEFAULT: &str = "default";
 
+/// linux sysfs PWM 的芯片号键（十进制非负整数；未设/取值不认 → 0）。
+/// 树莓派 BCM2835 硬件 PWM：pwmchip0 的 pwm0=GPIO12、pwm1=GPIO13（R22 定案档，
+/// `dtoverlay=pwm-2chan` 开双通道，方案 §5.5.2 接线 1）。
+pub const RR3_HAL_PWM_CHIP_ENV: &str = "RR3_HAL_PWM_CHIP";
+
+/// linux sysfs PWM 的通道号键（十进制非负整数；未设/取值不认 → 0 = GPIO12）。
+pub const RR3_HAL_PWM_CHANNEL_ENV: &str = "RR3_HAL_PWM_CHANNEL";
+
 /// sim 电池的初始电量键（0–100 的十进制整数；未设/取值不认 → 80）。
 /// e2e 注入低电量的正门：真 rr3-power 进程从 rrd 继承环境，按此值起表。
 pub const RR3_HAL_SIM_BATTERY_PERCENT_ENV: &str = "RR3_HAL_SIM_BATTERY_PERCENT";
@@ -72,7 +81,11 @@ pub const fn rr3_hal_backend_default() -> &'static str {
 }
 
 /// 解析生效的后端名：`RR3_HAL_BACKEND` 显式取值优先（取值不认则回落平台默认并返回
-/// `Err` 点名），否则平台默认。`linux` 只在编译进 alsa 后端时可用，否则回落
+/// `Err` 点名），否则平台默认。`linux` 表示"linux 平台在位"（批F5a 订正：原按 alsa
+/// feature 门判可用性，与舵机/GPIO 等无 alsa 依赖的 linux 后端错位——真件档板上
+/// 显式 `RR3_HAL_BACKEND=linux` 会被误落 placeholder，act 探活 exit(1) 起不来）；
+/// 各能力面是否编进了对应 linux 后端由各选择函数自判（音频按 `alsa` feature，
+/// 舵机按 sysfs PWM 模块编译门），选了 `linux` 但该能力后端没编进 → 选择函数落
 /// `placeholder`（使用时以 `Unsupported` 显式回错，不静默换 sim）。
 pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
     let Some(v) = std::env::var_os(RR3_HAL_BACKEND_ENV) else {
@@ -83,7 +96,7 @@ pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
         RR3_BACKEND_SIM => Ok(RR3_BACKEND_SIM),
         RR3_BACKEND_PLACEHOLDER => Ok(RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_LINUX => {
-            if cfg!(all(target_os = "linux", feature = "alsa")) {
+            if cfg!(target_os = "linux") {
                 Ok(RR3_BACKEND_LINUX)
             } else {
                 Ok(RR3_BACKEND_PLACEHOLDER) // 使用时回 Unsupported，不静默降级
@@ -124,6 +137,9 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
+        // 显式 linux 但 alsa 后端没编进（无 alsa 的板上构建）：占位显式回错，
+        // 不静默落 sim（resolve 订正为平台门后此分支结构上可达）
+        RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         _ => {
             let doa = std::env::var(RR3_HAL_SIM_DOA_DEG_ENV)
@@ -153,6 +169,8 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
+        // 同 audio_source：显式 linux 但 alsa 没编进 → 占位显式回错，不静默落 sim
+        RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         _ => (
             Box::new(crate::sim::Rr3SimAudioSink::rr3_sim_sink_new(16000 * 10)),
@@ -161,10 +179,22 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
     }
 }
 
-/// 按环境选舵机（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无 PWM 后端：
+/// 按环境选舵机（与 [`rr3_hal_audio_source`] 同一套规则）。linux 平台走 sysfs PWM
+/// 后端（[`crate::linux_pwm`]，R11①/R22 定案档：pwmchip0/pwm0 = GPIO12 硬件 PWM，
+/// 芯片/通道可经 `RR3_HAL_PWM_CHIP` / `RR3_HAL_PWM_CHANNEL` 选）；非 linux 平台
 /// 显式要 `linux` 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim。
 pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
+            #[cfg(target_os = "linux")]
+            return (
+                Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_linux_pwm_servo_default()),
+                RR3_BACKEND_LINUX,
+            );
+            #[cfg(not(target_os = "linux"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
+        RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimServo::rr3_sim_servo_new(90)),
             RR3_BACKEND_SIM,
@@ -218,6 +248,11 @@ pub fn rr3_sim_link_rssi_parse(s: &str) -> Option<i8> {
         .parse::<i8>()
         .ok()
         .filter(|r| (-100..=-1).contains(r))
+}
+
+/// linux PWM 芯片/通道号键的取值裁决（十进制非负整数，trim 后解析）。
+pub fn rr3_pwm_index_parse(s: &str) -> Option<u32> {
+    s.trim().parse::<u32>().ok()
 }
 
 /// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无
@@ -294,20 +329,38 @@ mod tests {
     /// （sim 上探活读回成功；占位件留给使用时的 Unsupported——选择函数本身不触设备）。
     #[test]
     fn act_device_selectors_return_legal_backend_objects() {
+        // linux 平台默认档：无 alsa feature 构建落 sim，带 alsa 构建落 linux
+        // （舵机面在 linux 平台也可得 sysfs PWM 后端——构造不触设备，此处不探活）
+        let mut legal = vec![RR3_BACKEND_SIM, RR3_BACKEND_PLACEHOLDER];
+        if cfg!(target_os = "linux") {
+            legal.push(RR3_BACKEND_LINUX);
+        }
         let (servo, servo_backend) = rr3_hal_servo();
         assert!(
-            [RR3_BACKEND_SIM, RR3_BACKEND_PLACEHOLDER].contains(&servo_backend),
+            legal.contains(&servo_backend),
             "舵机后端名合法: {servo_backend}"
         );
         let (gpio, gpio_backend) = rr3_hal_gpio_out();
         assert!(
-            [RR3_BACKEND_SIM, RR3_BACKEND_PLACEHOLDER].contains(&gpio_backend),
+            legal.contains(&gpio_backend),
             "数字输出后端名合法: {gpio_backend}"
         );
         // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
         if servo_backend == RR3_BACKEND_SIM {
             assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
             assert!(!rr3_block_on(gpio.level()).unwrap(), "sim 通道初始断电");
+        }
+    }
+
+    /// linux PWM 芯片/通道号键的取值裁决：十进制非负整数才收，负数/垃圾/空不认
+    /// （落缺省 pwmchip0/pwm0 = GPIO12）。
+    #[test]
+    fn pwm_index_env_values_parse_or_default() {
+        assert_eq!(rr3_pwm_index_parse("0"), Some(0));
+        assert_eq!(rr3_pwm_index_parse("1"), Some(1));
+        assert_eq!(rr3_pwm_index_parse(" 2 "), Some(2));
+        for bad in ["", "-1", "3.5", "abc"] {
+            assert_eq!(rr3_pwm_index_parse(bad), None, "{bad}");
         }
     }
 
