@@ -240,29 +240,108 @@ impl Rr3Header {
         })
     }
 
-    /// 编码为 128 字节（reserved 自动全 0）。
-    pub fn to_bytes(&self) -> [u8; RR3_IPC_HDR_SIZE] {
+    /// 编码为 128 字节（reserved 自动全 0）。const：`cargo check` 任意目标即求值，
+    /// golden 对拍（本文件末尾 `const _`）因此在每个目标编译期成立——0.0.7 批B 第④路。
+    pub const fn to_bytes(&self) -> [u8; RR3_IPC_HDR_SIZE] {
         let mut buf = [0u8; RR3_IPC_HDR_SIZE];
-        buf[OFF_MAGIC..OFF_MAGIC + LEN_MAGIC].copy_from_slice(&MAGIC.to_le_bytes());
-        buf[OFF_OPCODE..OFF_OPCODE + LEN_OPCODE].copy_from_slice(&self.opcode.to_le_bytes());
-        buf[OFF_FLAGS..OFF_FLAGS + LEN_FLAGS].copy_from_slice(&self.flags.to_le_bytes());
-        buf[OFF_TRACE_ID..OFF_TRACE_ID + LEN_TRACE_ID]
-            .copy_from_slice(&self.trace_id.to_le_bytes());
-        buf[OFF_TIMESTAMP_NS..OFF_TIMESTAMP_NS + LEN_TIMESTAMP_NS]
-            .copy_from_slice(&self.timestamp_ns.to_le_bytes());
-        buf[OFF_SRC_TASK..OFF_SRC_TASK + LEN_SRC_TASK]
-            .copy_from_slice(&self.src_task.to_le_bytes());
-        buf[OFF_DST_TASK..OFF_DST_TASK + LEN_DST_TASK]
-            .copy_from_slice(&self.dst_task.to_le_bytes());
-        buf[OFF_PAYLOAD_LEN..OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN]
-            .copy_from_slice(&self.payload_len.to_le_bytes());
+        put_le(&mut buf, OFF_MAGIC, MAGIC as u64, LEN_MAGIC);
+        put_le(&mut buf, OFF_OPCODE, self.opcode as u64, LEN_OPCODE);
+        put_le(&mut buf, OFF_FLAGS, self.flags as u64, LEN_FLAGS);
+        put_le(&mut buf, OFF_TRACE_ID, self.trace_id, LEN_TRACE_ID);
+        put_le(&mut buf, OFF_TIMESTAMP_NS, self.timestamp_ns, LEN_TIMESTAMP_NS);
+        put_le(&mut buf, OFF_SRC_TASK, self.src_task, LEN_SRC_TASK);
+        put_le(&mut buf, OFF_DST_TASK, self.dst_task, LEN_DST_TASK);
+        put_le(
+            &mut buf,
+            OFF_PAYLOAD_LEN,
+            self.payload_len as u64,
+            LEN_PAYLOAD_LEN,
+        );
         buf
     }
 }
 
+/// 小端写 `len` 字节进 `buf[off..]`（const fn：不依赖 `copy_from_slice` 的 const 稳定版本，
+/// MSRV 面保持干净）。
+const fn put_le(buf: &mut [u8], off: usize, v: u64, len: usize) {
+    let mut i = 0;
+    while i < len {
+        buf[off + i] = (v >> (8 * i)) as u8;
+        i += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IPC-T-003 第④路（0.0.7 批B）：golden 头编译期对拍。
+//
+// 编码器 `to_bytes` 已 const 化：`cargo +esp check --target xtensa-esp32-none-elf`
+// 等**任意目标**编译 rr-ipc 时，下面的 `const _` 都会在该目标的编译器里重新求值——
+// 求值通过即"该目标编译出的编码器产出与 golden 文件逐字节一致"，无需运行任何代码。
+// 运行期 dump 对拍（x86 / aarch64 / arm64 容器）由 `tools/ci/ipct003.sh` 承担，
+// xtensa 真机运行期 dump 归批C UART 夹具（同一判据的第二重证据）。
+const GOLDEN_HEADER_HEX: &str = include_str!("../../../../../contracts/golden/event-header-128.hex");
+
+/// golden 文件前 256 hex 字符（文件 257 字节含尾换行，运行期测试另有全文校验）。
+const fn golden_header_hex_first_256() -> [u8; 256] {
+    let raw: &[u8] = GOLDEN_HEADER_HEX.as_bytes();
+    let mut out = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        out[i] = raw[i];
+        i += 1;
+    }
+    out
+}
+
+/// 与 `ipct003_dump` 的 `header` 行同一条头（payload_len=96）。
+const fn golden_header_bytes() -> [u8; 256] {
+    let hdr = Rr3Header {
+        opcode: opcode::SEND,
+        flags: 0,
+        trace_id: 0x1234_5678,
+        timestamp_ns: 100,
+        src_task: 7,
+        dst_task: 0,
+        payload_len: 96,
+    };
+    let bytes = hdr.to_bytes();
+    let mut out = [0u8; 256];
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut i = 0;
+    while i < bytes.len() {
+        out[i * 2] = HEX[(bytes[i] >> 4) as usize];
+        out[i * 2 + 1] = HEX[(bytes[i] & 0x0f) as usize];
+        i += 1;
+    }
+    out
+}
+
+/// const 可用的逐字节相等（数组 `==` 在 const 求值里是 nightly 面，手写保持稳定版可编译）。
+const fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const _: () = assert!(
+    bytes_eq(&golden_header_bytes(), &golden_header_hex_first_256()),
+    "rr-ipc 编码器输出与 contracts/golden/event-header-128.hex 不一致——契约字节冻结被破坏（改动编码器或头布局必须同步重出 golden）"
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+    use std::string::{String, ToString};
+    use std::vec::Vec;
 
     fn schema_json() -> serde_json::Value {
         let path = concat!(

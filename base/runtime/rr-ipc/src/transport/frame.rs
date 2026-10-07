@@ -4,6 +4,10 @@
 //! 单元测试用 `std::io::Cursor` 就能在本机（含 Windows）跑满。
 
 use std::io::{Read, Write};
+// no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+use std::string::{String, ToString};
+use std::vec;
+use std::vec::Vec;
 
 use crate::protocol::header::{Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE};
 
@@ -104,6 +108,10 @@ pub fn rr3_frame_write(w: &mut impl Write, f: &Rr3Frame) -> Result<(), Rr3FrameE
 #[cfg(test)]
 mod tests {
     use super::*;
+    // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+    use std::format;
+    use std::println;
+    use std::string::String;
     use crate::protocol::header::{
         opcode, LEN_DST_TASK, LEN_MAGIC, LEN_OPCODE, LEN_PAYLOAD_LEN, LEN_RESERVED, LEN_SRC_TASK,
         LEN_TIMESTAMP_NS, LEN_TRACE_ID, OFF_DST_TASK, OFF_MAGIC, OFF_OPCODE, OFF_PAYLOAD_LEN,

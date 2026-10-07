@@ -4,13 +4,19 @@
 # **不在七步门内**（check.sh 不调它）：它依赖平台条件（Docker / aarch64 交叉目标），
 # 塞进门禁等于让无容器环境的机器永远红。登记与步序见 docs/process/conventions.md §2。
 #
-# 做三件事：
+# 做四件事：
 #   1. 宿主跑 `ipct003_dump`，header 行对 `contracts/golden/event-header-128.hex`；
 #   2. 已装 `aarch64-unknown-linux-gnu` 目标则交叉 `cargo check`——header.rs 的编译期
 #      const 断言随之在 aarch64 目标上求值（不需要链接器）；
 #   3. 有 Docker 则 `--platform linux/arm64` 容器真跑 dump，与宿主输出逐行 diff
 #      （三方对拍的第三方就是本 golden，第 1 步已对）。没有则 SKIP 并明说——
-#      "脚本就绪、双架构真跑待容器环境"，绝不静默当作已验证。
+#      "脚本就绪、双架构真跑待容器环境"，绝不静默当作已验证；
+#   4. 已链 esp 工具链（0.0.7 批A'）则 `cargo +esp check --target xtensa-esp32-none-elf
+#      -Z build-std=alloc,core`——golden 头 const 对拍（rr-ipc 协议层编译期求值）在该
+#      目标成立，即 IPC-T-003 第④路；xtensa 真机运行期 dump 归 0.0.7 批C UART 夹具。
+#      未装则 SKIP 并明说。`--offline` 固定加：build-std 构建依赖（gimli 等）走
+#      crates.io CDN 在本网络会连接僵死（0.0.7 方案 §4 批A' 记录），缓存已齐后
+#      离线求值确定可达；若报缺包，按批A' 记录用镜像刷新一次缓存再跑。
 #
 # 用法：bash tools/ci/ipct003.sh [--strict]
 #   --strict：缺 Docker/跨架构环境时不放行（退 2）。供有容器环境的一方使用；
@@ -33,7 +39,7 @@ fail=0
 skip=0
 
 # 宿主（当前架构）dump
-echo "=== [1/3] 宿主 dump ==="
+echo "=== [1/4] 宿主 dump ==="
 if ! cargo run -q --manifest-path "$manifest" -p rr-ipc --bin ipct003_dump > "$tmp/host.txt"; then
   echo "FAIL  宿主 ipct003_dump 运行失败"
   exit 1
@@ -50,7 +56,7 @@ else
 fi
 
 # aarch64 交叉编译（const 断言求值；无需链接器）
-echo "=== [2/3] aarch64 交叉编译（编译期 const 断言） ==="
+echo "=== [2/4] aarch64 交叉编译（编译期 const 断言） ==="
 if rustup target list --installed 2>/dev/null | grep -q '^aarch64-unknown-linux-gnu$'; then
   if cargo check -q --manifest-path "$manifest" -p rr-ipc \
       --target aarch64-unknown-linux-gnu; then
@@ -65,7 +71,7 @@ else
 fi
 
 # linux/arm64 容器真跑 + 逐行 diff
-echo "=== [3/3] linux/arm64 容器真跑 ==="
+echo "=== [3/4] linux/arm64 容器真跑 ==="
 if command -v docker > /dev/null 2>&1; then
   # CARGO_TARGET_DIR 指到容器内临时目录：aarch64 产物不落回宿主 target，权限也不串
   if docker run --rm --platform linux/arm64 \
@@ -85,6 +91,28 @@ if command -v docker > /dev/null 2>&1; then
   fi
 else
   echo "SKIP  本机未装 Docker——双架构真跑待容器环境（docker run --platform linux/arm64 …）"
+  skip=1
+fi
+
+# xtensa 编译期 golden 对拍（0.0.7 层① 第④路；esp 工具链安装见 0.0.7 方案 §4 批A' 记录）
+# 默认经 rsproxy 拉补 build-std 构建依赖（crates.io CDN 本网络会僵死，批A' 记录）；
+# 其他网络环境 export IPCT003_CARGO_NO_MIRROR=1 可关。
+echo "=== [4/4] xtensa 编译期 golden 对拍（esp 工具链） ==="
+if rustup toolchain list 2>/dev/null | grep -q '^esp'; then
+  mirror_cfg=(
+    --config 'source.crates-io.replace-with="rsproxy-sparse"'
+    --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
+  )
+  [ -n "${IPCT003_CARGO_NO_MIRROR:-}" ] && mirror_cfg=()
+  if cargo +esp check -q --manifest-path "$manifest" -p rr-ipc --lib \
+      --target xtensa-esp32-none-elf -Z build-std=alloc,core --offline "${mirror_cfg[@]}"; then
+    echo "PASS  rr-ipc 在 xtensa-esp32-none-elf 编译通过——golden 头 const 对拍已在该目标编译期求值（IPC-T-003 第④路）"
+  else
+    echo "FAIL  rr-ipc 在 xtensa 目标编译失败——层① 契约 parity 破裂"
+    fail=1
+  fi
+else
+  echo "SKIP  未安装 esp 工具链（rustup toolchain link esp <dir>，见 0.0.7 方案 §4 批A' 记录）——xtensa 编译期对拍未跑"
   skip=1
 fi
 

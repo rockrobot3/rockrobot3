@@ -7,6 +7,14 @@
 
 use crate::protocol::header::Rr3PayloadType;
 
+// 0.0.7 批B：Vec 取自 alloc 而非 std——std 目标上两者是同一类型（std::vec::Vec
+// 就是 alloc::vec::Vec 的 re-export），零行为差异；xtensa 等裸金属目标配
+// `-Z build-std=alloc,core` 即可编译本模块（transport 层在 none 目标整体门控，
+// 见 lib.rs）。
+extern crate alloc;
+
+use alloc::vec::Vec;
+
 /// 类型前缀宽度（字节）。冻结为 2：够放 u16 枚举值，且 2 字节对齐不留空洞
 pub const RR3_BODY_TYPE_PREFIX_LEN: usize = 2;
 
