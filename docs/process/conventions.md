@@ -1278,6 +1278,17 @@ merge `5044ca8` + 批F5a 五对 + 批F5b 两提交（本快照新锚）全部按
 `cargo test -p rr-hal` 补跑留板上线敞口（板当前离线，rsync 口径同批F1）；
 双远端 `ls-remote` 三端核对随本批推送执行（ADR-0007/0010）
 
+2026-10-07 0.0.7 批A：0.0.7 方案落档**纯文档批，零 `.rs` 改动**
+（ADR-0008）——方案状态改"已评审通过、执行中"（2026-10-07 用户裁定通过）；
+**Q4 宿主核实结案（R16 显式前置）**：无可用远端 runner——ci.yml 落
+`.github/workflows/`（GitHub Actions schema）而 atomgit 原生引擎 AtomGit Action
+只拾取 `.gitcode/workflows/`（官方文档实证），0.0.2 起远端回执零取得（敞口
+第 1/4/9 条悬置至今——与拾取路径不符的解释一致）→ **层①②收口=本机直跑**，批A' 受阻时
+层① 按 R10/洞 N 登记受阻态；ci.yml 迁移 `.gitcode/workflows/` 登记为后续可选
+（留用户裁定另立小批）；**Q5 密钥门清理**：ESP-IDF 外置不进仓 + 密钥门沿用
+0.0.4 批F 注销（status.md 敞口表第 2 条），版本与获取方式随批D1 实测落档；
+docs/README 索引状态行同步
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：
