@@ -26,8 +26,9 @@ pub const RR3_FACE_EXPRESSIONS: [&str; 7] =
 pub const RR3_FACE_TALK: &str = "talk";
 
 /// 8x8 点阵单帧：行主序 8 字节，每字节 bit7 为该行最左点（MAX7219 行寄存器
-/// 直排，修订版 6 定件；sim 档只存位图不驱动真件）
-pub type Rr3FaceFrame = [u8; 8];
+/// 直排，修订版 6 定件；sim 档只存位图不驱动真件）。类型事实源在 rr-hal 的
+/// `Rr3Display` trait 签名（批F5a③），此处 re-export 保模块内名。
+pub use rr_hal::Rr3FaceFrame;
 
 /// idle：睁眼 + 平嘴（单帧）
 const RR3_FRAMES_IDLE: [Rr3FaceFrame; 1] = [[
