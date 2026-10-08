@@ -1400,6 +1400,17 @@ sim_peer 作总线对端 / 树莓派档批F4 口径 RR3_SIM_PANEL_ADDR 注入 +
 denied_publish=0）；§9.3 ① target 订正 none-elf→espidf（批W1 实证）+ 版本
 组合回链批W1 钉死登记；docs/README 两处修订版 5 同步
 
+2026-10-08 0.0.5 增补轮四 批W7：本轮收口（T27，全案 §6 DoD 兑现——技术点
+零悬空）——A3 全部 RR3_HAL_* env 键位总表落 base/os/distro/README.md
+（后端选择 1 键 + linux 档 9 键 + sim 档 7 键 + role 泛化注记，每键与
+backend.rs 符号逐字一致，I2C 设备根常量与显示件占位归注记）；A4 板上线
+触发件清单四件套落 boards/raspberry-pi-64.md §10（板上 cargo test -p rr-hal
+补跑 / socket 放行真机复验 / 部署链回归演练，板上线即照单执行）；0.0.6
+修订版 7 落档（R25 只登记实况：F5a 五件收官提交号 + W4a/W4b 作废确认 +
+批W5/W7 落点指针，批次结构零改动）；0.0.5 §2.5 补增补轮四执行对账 +
+全案状态行改收官态；敞口余量两项登记：批W2 八 job 首跑回执待网页核对、
+板上三项欠账与真件档维持触发态
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四

@@ -165,3 +165,40 @@ act: intent: trace=1 servo angle=45，state#1 已发
 **R9 档位诚实标注**：本演练全链 sim/mock（采集=sim burst 注入口、意图=mock 云、
 判向=sim 方位注入、转向=sim 舵机、表情=sim 状态机）——**采购前档，不充当真件收口
 证据**；真件档（真麦 DoA / 真舵机 / MAX7219）随采购到位后批验收。
+
+## 10. 板上线触发件清单（0.0.5 增补轮四 批W7 A4 显式化——板上三项欠账，板上线即照单执行）
+
+> 三项均为**本机无法收口的板上件**（status.md 敞口表在案），欠账本体不变，本节只
+> 把"上线后怎么跑、跑成什么样算过"显式化；执行顺序 ①→②→③（② 独立可并行）。
+
+**① 板上 `cargo test -p rr-hal` 补跑**（批F5a 五件 linux 后端 + sim 后端全用例）：
+
+- 操作步骤：板联网（ssh spharx 可达）→ rsync 源码同步（口径同批F1 验证③
+  build-onboard.sh 第②段，排除 `target/`）→ `cd base/runtime && cargo test -p rr-hal`
+  （板上 rustc 1.85.1 过 ≥1.82 构建门，apt 源 USTC）。
+- 预期输出：全用例绿（宿主同数）+ 零 warning（`--all-targets` 同款口径）。
+- 判定标准：`test result: ok` 全部目标 + 退出码 0；flaky 按判例复跑两次再定性。
+- 失败处置：板上 rustc 与宿主 MSRV 差异致编译红 → 如实登记差异行（不降宿主
+  测试面凑绿）；chardev/I2C/sysfs 权限类失败 → 走 `sudo` 口径区分权限问题与
+  代码问题（真件 env 键位见 [distro README](../README.md) HAL env 总表）。
+
+**② socket 放行真机复验**（批F5b 实装的 chmod 0o660 + chgrp rockrobot3 路线）：
+
+- 操作步骤：`sudo usermod -aG rockrobot3 pi` → 重新登录（或 `sudo reboot`）→
+  `id -nG` 回显含 `rockrobot3` → **不带 sudo** 跑 `rr3-ctl status` / `rr3-ctl health`。
+- 预期输出：两条命令正常回显六模块快照，无 `Permission denied`。
+- 判定标准：非 root 直连成功 = §7 修复状态段的"真机复验留板上线"结清，随
+  0.0.6 判据 14/15 运维链验收同跑；复验通过前板上巡检仍按 `sudo rr3-ctl …`。
+- 失败处置：组不在位（postinst 建组留痕跳过路径）→ 手工 `sudo groupadd -f
+  rockrobot3` + 重启 rrd（`systemctl restart rrd`）再验；仍拒 → 查 sock 实际
+  mode/group（`ls -l /var/run/rock3-ipc.sock`）对照修复实装差异，如实登记。
+
+**③ 部署链回归演练**（deb 重装 + reboot 自恢复全链）：
+
+- 操作步骤：宿主 `bash tools/deploy/pack-arm64.sh` 出包 → 传板 `dpkg -i` →
+  六模块 running 巡检（`sudo rr3-ctl status`）→ `sudo reboot` → 冷启动复验
+  `{"boots":<n+1>}` 累积 + 六模块全新 running。
+- 预期输出：同批D §4 六判据 + 批F1 验证① 口径（counters/boots 跨重启累积）。
+- 判定标准：全链 exit 0 + 巡检 `denied_publish = 0`。
+- 失败处置：同批F1 真板缺陷四条的既有处置（cp 摊平/shim 注入/fetch 位置/
+  errno 解构均已修）；新缺陷同批结清并登记。
