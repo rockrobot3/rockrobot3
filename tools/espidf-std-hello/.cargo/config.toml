@@ -1,0 +1,27 @@
+# xtensa-esp32-espidf：esp fork 工具链（批A' 落档：~/.rustup/toolchains/esp-1.90.0.0
+# + rustup toolchain link esp）。std 由 build-std 从捆绑 rust-src 现编（工具链无预装
+# espidf 目标，这正是 std 路与 none-elf 路的分歧点）。链接走官方 ldproxy（~/.cargo/bin）
+# + Xtensa esp-gcc——esp-idf-sys 的 cargo driver 自 CMake 链接组取编译器并自动注入
+# --ldproxy-linker（force_ldproxy），本文件无需手写 rustflags（区别于 esp32-uart-echo
+# 的裸金属 none-elf 路，那里 esp-hal 无构建脚本代劳）。
+#
+# 版本钉死（批W1 登记，外置不进仓 Q5）：ESP-IDF v5.2.2（IDF_PATH=~/.espressif/
+# frameworks/esp-idf-v5.2.2，jihulab 镜像克隆）+ esp-idf-sys 0.35.0 + esp-gcc
+# esp-14.2.0_20241119 + ldproxy 0.3.5 + cmake/ninja（~/Library/Python/3.9/bin，
+# 腾讯镜像 pip --user）。
+[build]
+target = "xtensa-esp32-espidf"
+
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+# esp-idf-sys BUILD-OPTIONS：IDF 5.0+ 必设（libc time_t 64 位面与 C 头对齐）
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+build-std-features = ["panic_immediate_abort"]
+
+# MCU 必须显式（esp-idf-sys 据此选 IDF 工具链与目标；espidf target 自动探测亦应
+# 得 esp32，写死为的是与登记口径逐字一致）。
+[env]
+MCU = "esp32"
