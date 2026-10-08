@@ -456,9 +456,8 @@ fn sigterm_forces_flush_of_pending_counters() {
         status.success(),
         "SIGTERM 后必须以 0 退出（flush 完自己退）；信号死 = 处理器没装上: {status}"
     );
-    let stored: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
-            .expect("关停 flush 后 counters.json 必须可解析");
+    let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+        .expect("关停 flush 后 counters.json 必须可解析");
     assert_eq!(stored["boots"], 1, "{stored}");
     assert_eq!(
         stored["rr3-sima/term_flush"], 10,

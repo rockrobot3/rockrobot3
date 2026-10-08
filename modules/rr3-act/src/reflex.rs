@@ -80,7 +80,10 @@ mod tests {
             "节拍方案（rr-core 判定）"
         );
         let mut det = Rr3SaturationDetector::rr3_detector_new(need);
-        assert!(!det.rr3_detector_feed(true), "第 1 个饱和窗：还在积累（rr-core 判定）");
+        assert!(
+            !det.rr3_detector_feed(true),
+            "第 1 个饱和窗：还在积累（rr-core 判定）"
+        );
         assert!(
             det.rr3_detector_feed(true),
             "第 2 个连续饱和窗：episode 首报（rr-core 判定）"

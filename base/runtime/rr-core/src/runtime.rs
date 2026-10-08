@@ -213,10 +213,22 @@ mod tests {
     /// 分发分类表：Response → 等待者路由；其余四类 → inbox
     #[test]
     fn dispatch_class_routes_only_response_to_pending() {
-        assert_eq!(rr3_dispatch_class(Rr3PayloadType::Response), Rr3Dispatch::Pending);
-        assert_eq!(rr3_dispatch_class(Rr3PayloadType::Request), Rr3Dispatch::Inbox);
-        assert_eq!(rr3_dispatch_class(Rr3PayloadType::Event), Rr3Dispatch::Inbox);
-        assert_eq!(rr3_dispatch_class(Rr3PayloadType::Stream), Rr3Dispatch::Inbox);
+        assert_eq!(
+            rr3_dispatch_class(Rr3PayloadType::Response),
+            Rr3Dispatch::Pending
+        );
+        assert_eq!(
+            rr3_dispatch_class(Rr3PayloadType::Request),
+            Rr3Dispatch::Inbox
+        );
+        assert_eq!(
+            rr3_dispatch_class(Rr3PayloadType::Event),
+            Rr3Dispatch::Inbox
+        );
+        assert_eq!(
+            rr3_dispatch_class(Rr3PayloadType::Stream),
+            Rr3Dispatch::Inbox
+        );
         assert_eq!(
             rr3_dispatch_class(Rr3PayloadType::Notification),
             Rr3Dispatch::Inbox

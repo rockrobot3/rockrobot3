@@ -31,6 +31,5 @@ pub struct Rr3AudioConfig {
 }
 
 pub use mech::{
-    rr3_doa_field, rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_downmix_mono, rr3_pcm_downmix_stream,
-    rr3_pcm_event_body, Rr3DoaBin, Rr3DoaFix, RR3_DOA_BIN_THRESHOLD_DEG,
+    rr3_doa_field, rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_downmix_stream, rr3_pcm_event_body,
 };

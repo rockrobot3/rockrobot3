@@ -76,9 +76,8 @@ fn servo_angle_of_duty(duty: u64) -> Result<u16, Rr3HalError> {
 }
 
 fn pwm_read_u64(path: &Path) -> Result<u64, Rr3HalError> {
-    let s = std::fs::read_to_string(path).map_err(|e| {
-        Rr3HalError::InvalidParam(format!("pwm 读 {:?} 失败: {e}", path.display()))
-    })?;
+    let s = std::fs::read_to_string(path)
+        .map_err(|e| Rr3HalError::InvalidParam(format!("pwm 读 {:?} 失败: {e}", path.display())))?;
     s.trim().parse::<u64>().map_err(|e| {
         Rr3HalError::InvalidParam(format!(
             "pwm {:?} 内容 {:?} 不是合法读数: {e}",
@@ -295,7 +294,10 @@ mod tests {
             90,
             "探活读回中位——sim/linux 两后端同观测"
         );
-        assert_eq!(read_u64(&pwm_dir.join("period")), RR3_SERVO_PERIOD_NS as u64);
+        assert_eq!(
+            read_u64(&pwm_dir.join("period")),
+            RR3_SERVO_PERIOD_NS as u64
+        );
         assert_eq!(read_u64(&pwm_dir.join("duty_cycle")), 1_500_000);
         assert_eq!(read_u64(&pwm_dir.join("enable")), 1);
         assert_eq!(
@@ -368,7 +370,9 @@ mod tests {
         assert_eq!(crate::rr3_block_on(dev.angle()).unwrap(), 90);
         watcher.join().unwrap();
         assert_eq!(
-            std::fs::read_to_string(chip_dir.join("export")).unwrap().trim(),
+            std::fs::read_to_string(chip_dir.join("export"))
+                .unwrap()
+                .trim(),
             "0"
         );
         drop(dev);

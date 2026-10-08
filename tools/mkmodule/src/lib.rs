@@ -366,8 +366,7 @@ mod tests {
             assert!(root.join(rel).is_file(), "缺 {rel}");
         }
         // 生成物独立再过一遍校验器（回灌发生在 staging 期，rename 后幂等）
-        let errs =
-            rr_registry::rr3_registry_validate_atom(&root.join("sample_atom/atom.toml"));
+        let errs = rr_registry::rr3_registry_validate_atom(&root.join("sample_atom/atom.toml"));
         assert!(errs.is_empty(), "{errs:?}");
     }
 
@@ -388,7 +387,10 @@ mod tests {
         let Rr3MkmodError::Manifest(errs) = e else {
             panic!("未登记格位必须由回灌拒绝")
         };
-        assert!(errs.iter().any(|e| e.contains("未登记格位 power.solar")), "{errs:?}");
+        assert!(
+            errs.iter().any(|e| e.contains("未登记格位 power.solar")),
+            "{errs:?}"
+        );
         // 失败不留半成品
         assert!(!root.join(".staging-nosuch").exists());
         assert!(!root.join("nosuch").exists());

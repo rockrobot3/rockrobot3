@@ -19,8 +19,8 @@
 use serde_json::Value;
 
 use super::relay::{self, RR3_RELAY_SET_TOPIC};
+use super::servo::{self, Rr3ServoCfg, RR3_SERVO_COMMAND_TOPIC};
 use rr_hal::rr3_block_on;
-use super::servo::{self, RR3_SERVO_COMMAND_TOPIC, Rr3ServoCfg};
 
 /// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值）
 const EXPOSED: [&str; 3] = [
@@ -166,12 +166,7 @@ mod tests {
             json!({"topic": "rr3-act/servo/command", "args": {"angle_deg": "45"}}),
             json!({"topic": "rr3-act/servo/command", "args": {}}),
         ] {
-            let out = rr3_intent_actions_handle(
-                &json!([bad]),
-                &gpio,
-                &servo,
-                &servo_cfg(),
-            );
+            let out = rr3_intent_actions_handle(&json!([bad]), &gpio, &servo, &servo_cfg());
             assert!(out[0].is_err(), "非法 servo 动作必须拒: {out:?}");
         }
         assert_eq!(servo.rr3_sim_servo_angle(), 90, "全部被拒，舵机不得动");
@@ -206,7 +201,10 @@ mod tests {
             &servo_cfg(),
         );
         let err = out[0].as_ref().unwrap_err();
-        assert!(err.contains("未开放"), "归属但在册未开放的动作要由开放门拒: {err}");
+        assert!(
+            err.contains("未开放"),
+            "归属但在册未开放的动作要由开放门拒: {err}"
+        );
         assert!(err.contains("relay/set"), "拒因点名当前开放集: {err}");
     }
 
@@ -220,8 +218,12 @@ mod tests {
         // 元素缺 topic / 缺 args
         let out = rr3_intent_actions_handle(&json!([{"args": {}}]), &gpio, &servo, &servo_cfg());
         assert!(out[0].as_ref().unwrap_err().contains("topic"));
-        let out =
-            rr3_intent_actions_handle(&json!([{"topic": "rr3-act/relay/set"}]), &gpio, &servo, &servo_cfg());
+        let out = rr3_intent_actions_handle(
+            &json!([{"topic": "rr3-act/relay/set"}]),
+            &gpio,
+            &servo,
+            &servo_cfg(),
+        );
         assert!(out[0].as_ref().unwrap_err().contains("args"));
         // 参数裁决照常把门（非真布尔）
         let out = rr3_intent_actions_handle(

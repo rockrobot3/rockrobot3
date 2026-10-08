@@ -438,23 +438,32 @@ fn rr3_install_term_counters_flush(shared: Arc<Mutex<RrdRegistry>>, path: Option
     let (tx, rx) = match std::os::unix::net::UnixStream::pair() {
         Ok(pair) => pair,
         Err(e) => {
-            rr3_log(&format!("counters 关停 flush 未装上（self-pipe 失败）: {e}"));
+            rr3_log(&format!(
+                "counters 关停 flush 未装上（self-pipe 失败）: {e}"
+            ));
             return;
         }
     };
     // 发送端交给处理器：取裸 fd 后刻意不 close（进程生命期一根管，泄漏即设计）
     RR3_TERM_PIPE_FD.store(tx.into_raw_fd(), Ordering::Relaxed);
     unsafe {
-        signal(RR3_SIGTERM, rr3_term_pipe_wake as extern "C" fn(i32) as usize);
-        signal(RR3_SIGINT, rr3_term_pipe_wake as extern "C" fn(i32) as usize);
+        signal(
+            RR3_SIGTERM,
+            rr3_term_pipe_wake as extern "C" fn(i32) as usize,
+        );
+        signal(
+            RR3_SIGINT,
+            rr3_term_pipe_wake as extern "C" fn(i32) as usize,
+        );
     }
     let spawned = thread::Builder::new()
         .name("counters-term-flush".into())
         .spawn(move || {
             let mut rx = rx;
             let mut one = [0u8; 1];
-            // 平时睡在 read；醒来一次 = 一个 TERM/INT。EOF = 发送端随进程没了
-            while matches!(rx.read(&mut one), Ok(1)) {
+            // 平时睡在 read；醒来一次 = 一个 TERM/INT，flush 后即关停（exit 不返回，
+            // 故不是循环——clippy never_loop）。EOF = 发送端随进程没了，线程自然收场
+            if matches!(rx.read(&mut one), Ok(1)) {
                 let snap = rr3_lock(&shared).rr3_reg_counters_snapshot();
                 match path
                     .as_deref()
@@ -560,7 +569,11 @@ mod tests {
         rr3_socket_acl_grant(&sock);
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&sock).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o660, "chmod 0o660 落位（组在位与否不影响 mode 位）");
+        assert_eq!(
+            mode & 0o777,
+            0o660,
+            "chmod 0o660 落位（组在位与否不影响 mode 位）"
+        );
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
     }

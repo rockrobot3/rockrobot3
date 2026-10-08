@@ -19,12 +19,12 @@
 
 #[path = "../atoms/capture/capture.rs"]
 mod capture;
-#[path = "../atoms/vad/vad.rs"]
-mod vad;
 #[path = "../atoms/env/env.rs"]
 mod env;
 #[path = "../atoms/imu/imu.rs"]
 mod imu;
+#[path = "../atoms/vad/vad.rs"]
+mod vad;
 
 use std::time::{Duration, Instant};
 
@@ -79,8 +79,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
         cfg.audio.sample_rate, cfg.audio.channels, cfg.audio.frame_ms
     );
 
-    let frames_per_tick =
-        capture::rr3_frames_per_tick(cfg.audio.sample_rate, cfg.audio.frame_ms);
+    let frames_per_tick = capture::rr3_frames_per_tick(cfg.audio.sample_rate, cfg.audio.frame_ms);
     let mut vad_state = Rr3VadState::rr3_vad_new(cfg.vad, cfg.audio.frame_ms);
     let tick = Duration::from_millis(cfg.audio.frame_ms);
     let mut seq: u64 = 0;

@@ -178,7 +178,12 @@ impl Rr3LinuxGpioOut {
 
     /// 对在位句柄发 GET/SET 电平 ioctl（ensure 已过，fd 必在位）。
     /// errno 同样在无中间 libc 调用的窗口内取出。
-    fn line_values(&self, ioctl: u32, data: &mut Rr3GpioHandleData, what: &str) -> Result<(), Rr3HalError> {
+    fn line_values(
+        &self,
+        ioctl: u32,
+        data: &mut Rr3GpioHandleData,
+        what: &str,
+    ) -> Result<(), Rr3HalError> {
         let fd = self
             .handle_fd
             .lock()
@@ -219,7 +224,11 @@ impl Rr3GpioOut for Rr3LinuxGpioOut {
         drop(guard);
         let mut data = Rr3GpioHandleData { values: [0; 64] };
         data.values[0] = level as u8;
-        self.line_values(GPIOHANDLE_SET_LINE_VALUES_IOCTL, &mut data, "gpio 写电平失败")
+        self.line_values(
+            GPIOHANDLE_SET_LINE_VALUES_IOCTL,
+            &mut data,
+            "gpio 写电平失败",
+        )
     }
 
     async fn level(&self) -> Result<bool, Rr3HalError> {
@@ -227,7 +236,11 @@ impl Rr3GpioOut for Rr3LinuxGpioOut {
         self.ensure(&mut guard)?;
         drop(guard);
         let mut data = Rr3GpioHandleData { values: [0; 64] };
-        self.line_values(GPIOHANDLE_GET_LINE_VALUES_IOCTL, &mut data, "gpio 读电平失败")?;
+        self.line_values(
+            GPIOHANDLE_GET_LINE_VALUES_IOCTL,
+            &mut data,
+            "gpio 读电平失败",
+        )?;
         Ok(data.values[0] != 0)
     }
 }
