@@ -1,0 +1,14 @@
+# rr3-brain 组合件装配清单（三层 manifest 的 Composite 层，0.0.5 批C⑤ 原子重铺）
+# 方案 §9：Composite 声明"装配了哪些原子件（⊗ 链）+ 落为哪种执行单元"。
+# 机器校验 schema 归批E 门禁接线；本文件先以数据形状落位。
+# owner 级契约 module.toml 功能守恒不动（architecture.md §4.1 注记）。
+# Python 面（ADR-0014）：执行单元 = `python3 -m rr3_brain`（module.toml entry 的
+# 装机 shim 同款），装配 = 执行单元内 import + 函数调用。
+schema_version = 1
+
+[composite]
+name = "rr3-brain"
+unit = "process"
+
+[assemble]
+atoms = ["dialog", "asr", "llm", "tts"]   # dialog ⊗ asr ⊗ llm ⊗ tts（⊗=装配期、执行单元内函数调用，ADR-0019 裁定 2）；bus 总线壳留组合件机制壳（0.0.5 方案 §12.2），Rust 迁移随 ADR-0016 线

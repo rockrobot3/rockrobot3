@@ -1,0 +1,19 @@
+# dialog 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C⑤ 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+# Python 面：机制本体 rr3_brain/dialog.py 原位（单文件即机制+入口合一，
+# Rust 五件套拆分随 ADR-0016 迁移收敛）
+schema_version = 1
+
+[atom]
+name = "dialog"
+version = "0.0.1"
+
+[provides]
+slots = ["cognition.dialog"]   # 对话编排（utterance 边界状态机；⊙编排唯一承担者，ADR-0012 裁定 4）
+
+[uses]
+slots = []   # pcm/vad 流经总线订阅由组合件馈入（base 格 bus.subscribe，不占 uses）
+
+[events]
+publishes = []   # intent/result 由组合件轮次编排发布（module.toml [events].publishes owner 级）；状态机本体无事件流
+subscribes = []

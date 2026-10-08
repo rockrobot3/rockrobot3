@@ -378,4 +378,19 @@ slots = ["audio.vad"]
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
+
+    /// 批C⑤ 重铺件钉死：rr3-brain（Python 面）的四份 atom.toml 必须过契约 + 查册门
+    /// + 板无关断言（机制本体 .py 原位——Python 单文件即机制+入口合一，Rust 五件套
+    /// 拆分随 ADR-0016 迁移收敛；重铺件漂移当场红）
+    #[test]
+    fn brain_relaid_atoms_stay_compliant() {
+        let dialog = include_str!("../../../../modules/rr3-brain/atoms/dialog/atom.toml");
+        let asr = include_str!("../../../../modules/rr3-brain/atoms/asr/atom.toml");
+        let llm = include_str!("../../../../modules/rr3-brain/atoms/llm/atom.toml");
+        let tts = include_str!("../../../../modules/rr3-brain/atoms/tts/atom.toml");
+        for (name, text) in [("dialog", dialog), ("asr", asr), ("llm", llm), ("tts", tts)] {
+            let errs = rr3_registry_validate_atom_text(text, &slots());
+            assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
+        }
+    }
 }
