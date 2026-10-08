@@ -1,0 +1,17 @@
+# player 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C③ 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "player"
+version = "0.0.1"
+
+[provides]
+slots = ["audio.playback"]   # 扬声器播放：TTS 占位合成（正弦 burst 走真链路，真合成随里程碑换内部）
+
+[uses]
+slots = []   # 播放面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
+
+[events]
+publishes = []   # player 无事件发布（rpc 面 rr3-interact/tts/text 在 module.toml [rpc].exposes，owner 级）
+subscribes = []

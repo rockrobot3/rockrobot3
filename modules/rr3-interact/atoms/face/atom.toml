@@ -1,0 +1,17 @@
+# face 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C③ 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "face"
+version = "0.0.1"
+
+[provides]
+slots = ["ui.face"]   # 表情屏渲染：七态白名单状态机 + 点阵帧表（真屏随显示 trait 实装）
+
+[uses]
+slots = []   # 显示面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
+
+[events]
+publishes = []   # face 无事件发布（rpc 面 rr3-interact/face/expression 在 module.toml [rpc].exposes，owner 级）
+subscribes = []

@@ -1,20 +1,14 @@
-//! 播放：TTS 音频出话（`rr3-interact/tts/text`，request）。
+//! player 原子件机制主体（五件套③，自原 src/player.rs 逐字迁入，逻辑零改动）。
 //!
-//! M3 的 v0.0.1 播放面 = 正弦 burst 占位合成：`60ms/字符`，封顶 10s。这不是
-//! 真音频，但走的是**真链路**——rr3.call 点名进（trace_id=调用方 task）→
-//! `Rr3AudioSink` 写块 → `rr3_reply_call` 回 `{"played_ms"}`。真 TTS 合成随
-//! 后续里程碑换进 [`rr3_tts_play`] 内部，请求/应答形状不变。
-//!
+//! 占位合成：`60ms/字符`，封顶 10s，440Hz 正弦、幅度 12000（与 rr-hal sim 源
+//! 同参数，但独立实现——播放面不依赖"读麦克风"，波形只借参数）。
 //! 写块粒度 20ms：与采集侧（rr3-sense）的 frame_ms 同拍，sim 后端 write 即时
 //! 返回（无时钟），实时后端（ALSA）write 本身就耗一个节拍——两种后端同一形状。
 
 use rr_hal::{Rr3AudioSink, Rr3PcmStream, RR3_AUDIO_CFG_16K_MONO16};
 use serde_json::{json, Value};
 
-pub const SURFACE: &[&str] = &["player: rpc rr3-interact/tts/text (request)"];
-
-/// 本模块 exposes 的 TTS 主题（module.toml [rpc].exposes 同源）
-pub const RR3_TTS_TOPIC: &str = "rr3-interact/tts/text";
+use super::RR3_TTS_TOPIC;
 
 /// 占位合成的节奏参数：60ms/字符（legacy 语音链路的口播节奏估计）
 const RR3_TTS_MS_PER_CHAR: u64 = 60;

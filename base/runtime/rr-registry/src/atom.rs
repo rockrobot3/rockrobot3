@@ -354,4 +354,16 @@ slots = ["audio.vad"]
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
+
+    /// 批C③ 重铺件钉死：rr3-interact 的两份 atom.toml 必须过契约 + 查册门 + 板无关断言
+    /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
+    #[test]
+    fn interact_relaid_atoms_stay_compliant() {
+        let face = include_str!("../../../../modules/rr3-interact/atoms/face/atom.toml");
+        let player = include_str!("../../../../modules/rr3-interact/atoms/player/atom.toml");
+        for (name, text) in [("face", face), ("player", player)] {
+            let errs = rr3_registry_validate_atom_text(text, &slots());
+            assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
+        }
+    }
 }
