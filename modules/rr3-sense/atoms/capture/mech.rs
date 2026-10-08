@@ -164,8 +164,7 @@ mod tests {
     use super::*;
 
     /// RFC 4648 标准字母表（测试侧独立解码器用，与实现侧各持一份）
-    const B64: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     #[test]
     fn frame_conversion_covers_registered_and_odd_rates() {
@@ -248,11 +247,7 @@ mod tests {
         // 解回字节序，逐点核对（含 i16 两个端点值）。测试侧独立解码器：按 `=` 位
         // 决定该组贡献几个数据字节（与编码器的补位规则对称）。
         let b64 = body["pcm_b64"].as_str().unwrap();
-        let alphabet = |c: char| {
-            B64.iter()
-                .position(|&a| a as char == c)
-                .unwrap()
-        };
+        let alphabet = |c: char| B64.iter().position(|&a| a as char == c).unwrap();
         let mut bytes: Vec<u8> = Vec::new();
         for q in b64.as_bytes().chunks(4) {
             let v = |c: u8| alphabet(c as char) as u32;
@@ -281,7 +276,10 @@ mod tests {
         (0..frames)
             .flat_map(|i| {
                 let v = (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 16000.0).sin();
-                [((1.0 - k) * v * 12000.0) as i16, ((1.0 + k) * v * 12000.0) as i16]
+                [
+                    ((1.0 - k) * v * 12000.0) as i16,
+                    ((1.0 + k) * v * 12000.0) as i16,
+                ]
             })
             .collect()
     }
@@ -335,7 +333,9 @@ mod tests {
         let stereo = stereo_frame(-60.0, 400);
         // 三通道：前两路同 stereo，第三路塞满任意噪声值
         let three: Vec<i16> = stereo
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|f| [f[0], f[1], -777])
             .collect();
         let a = rr3_doa_fix(&stereo, 2).unwrap();

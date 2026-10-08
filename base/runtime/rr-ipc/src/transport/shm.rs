@@ -595,9 +595,9 @@ impl Rr3ShmReaderConn {
 mod tests {
     use super::*;
     // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
+    use crate::protocol::header::opcode;
     use std::string::String;
     use std::vec::Vec;
-    use crate::protocol::header::opcode;
 
     /// 进程内对齐区域（8 字节对齐满足头内 u64 原子量）；leak 到测试进程结束
     /// （测试进程退出即回收，不引清理复杂度）。

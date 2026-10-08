@@ -24,8 +24,8 @@
 //! 主承载层（std 客户端：UDS、线程、serde_json）不在这里——那是 `rr-bus` 的事；
 //! 本 crate 是它在裸金属目标上可复用的语义内核。
 //!
-//! 零策略载荷：不得出现厂商名 / 产品名 / 业务阈值 / `if (vendor == …)`
-//! （architecture §13 门禁，批E 接线）。
+//! 零策略载荷：不得出现厂商名 / 产品名 / 业务阈值 / `if (厂商 == …)`
+//! （architecture §13 门禁，批E 接线——门禁 grep 自身禁词，本行以中文表述自指）。
 
 #![no_std]
 
@@ -135,11 +135,7 @@ pub fn rr3_frame_compose(
 
 /// 组装一条上行 SEND 的 Event 发布帧（[`RR3_METHOD_CALL`] 之外的总线出站原语族
 /// 共用此形状：topic 在 body 内，归属判定是 rrd 的事）。
-pub fn rr3_event_compose(
-    timestamp_ns: u64,
-    src_task: u64,
-    payload: Vec<u8>,
-) -> Rr3Frame {
+pub fn rr3_event_compose(timestamp_ns: u64, src_task: u64, payload: Vec<u8>) -> Rr3Frame {
     rr3_frame_compose(
         opcode::SEND,
         0,
@@ -256,10 +252,7 @@ mod tests {
     /// 形状逐字段一致（客户端改造后由同一函数产出，此用例钉形状守恒）
     #[test]
     fn event_compose_matches_client_wire_shape() {
-        let payload = rr3_body_encode(
-            Rr3PayloadType::Event,
-            b"{\"topic\":\"rr3-t/x\"}",
-        );
+        let payload = rr3_body_encode(Rr3PayloadType::Event, b"{\"topic\":\"rr3-t/x\"}");
         let f = rr3_event_compose(77, 9, payload);
         assert_eq!(f.header.opcode, opcode::SEND);
         assert_eq!(f.header.flags, 0);

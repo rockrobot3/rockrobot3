@@ -100,7 +100,10 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         None => errs.push("缺少 [enabled_slots]（模块 → 本形态启用的格位集合）".to_string()),
         Some(t) => {
             if t.is_empty() {
-                errs.push("[enabled_slots] 为空：enabled_slots 决定起谁，空装配单没有可起模块".to_string());
+                errs.push(
+                    "[enabled_slots] 为空：enabled_slots 决定起谁，空装配单没有可起模块"
+                        .to_string(),
+                );
             }
             for (module, v) in t {
                 match v.as_array() {
@@ -150,7 +153,11 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
     if !errs.is_empty() {
         return Err(errs);
     }
-    Ok(Rr3Profile { bindings, enabled_slots, hardware })
+    Ok(Rr3Profile {
+        bindings,
+        enabled_slots,
+        hardware,
+    })
 }
 
 /// [hardware] 段序列化成注入文本：每行 `键 = "值"`（值已字符串化，TOML 基本
@@ -278,7 +285,11 @@ pub fn rr3_profile_boot_inputs(
         .map(|m| root.join("modules").join(m).join("module.toml"))
         .collect();
     let hal_bindings = rr3_hardware_bindings_text(&profile.hardware);
-    Ok(Rr3ProfileBoot { manifests, missing, hal_bindings })
+    Ok(Rr3ProfileBoot {
+        manifests,
+        missing,
+        hal_bindings,
+    })
 }
 
 #[cfg(test)]
@@ -355,7 +366,8 @@ rr3-pc = ["cognition.llm"]
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains("enabled_slots.rr3-pb 的每一项")),
+            errs.iter()
+                .any(|e| e.contains("enabled_slots.rr3-pb 的每一项")),
             "{errs:?}"
         );
         assert!(
@@ -372,11 +384,17 @@ rr3-pc = ["cognition.llm"]
             errs.iter().any(|e| e.contains("缺少 [bindings]")),
             "{errs:?}"
         );
-        assert!(errs.iter().any(|e| e.contains("缺少 [enabled_slots]")), "{errs:?}");
+        assert!(
+            errs.iter().any(|e| e.contains("缺少 [enabled_slots]")),
+            "{errs:?}"
+        );
 
         let errs = rr3_profile_from_text("schema_version = 1\n[bindings]\n\n[enabled_slots]\n")
             .expect_err("空 enabled_slots 必须报错");
-        assert!(errs.iter().any(|e| e.contains("[enabled_slots] 为空")), "{errs:?}");
+        assert!(
+            errs.iter().any(|e| e.contains("[enabled_slots] 为空")),
+            "{errs:?}"
+        );
     }
 
     #[test]
@@ -498,7 +516,10 @@ rr3-pc = ["cognition.llm"]
         let text = format!("{GOOD}\n[hardware]\npwm_chip = 0\nlink_ifname = \"wlan0\"\n");
         let p = rr3_profile_from_text(&text).expect("标量 [hardware] 必须合法");
         assert_eq!(p.hardware.get("pwm_chip").map(String::as_str), Some("0"));
-        assert_eq!(p.hardware.get("link_ifname").map(String::as_str), Some("wlan0"));
+        assert_eq!(
+            p.hardware.get("link_ifname").map(String::as_str),
+            Some("wlan0")
+        );
 
         // 布尔/浮点/数组/表逐条点名，一次全收集
         let text = format!(
@@ -522,15 +543,18 @@ rr3-pc = ["cognition.llm"]
     /// [hardware] → 注入文本：BTreeMap 升序确定性、整数已是字符串形状、空表空串。
     #[test]
     fn hardware_bindings_text_is_sorted_and_escaped() {
-        assert_eq!(rr3_hardware_bindings_text(&BTreeMap::new()), "", "空表 → 空串");
+        assert_eq!(
+            rr3_hardware_bindings_text(&BTreeMap::new()),
+            "",
+            "空表 → 空串"
+        );
         let mut hw = BTreeMap::new();
         hw.insert("pwm_chip".to_string(), "0".to_string());
         hw.insert("link_ifname".to_string(), "wl\"x\\".to_string());
         let text = rr3_hardware_bindings_text(&hw);
         // BTreeMap 升序：link_ifname < pwm_chip
         assert_eq!(
-            text,
-            "link_ifname = \"wl\\\"x\\\\\"\npwm_chip = \"0\"\n",
+            text, "link_ifname = \"wl\\\"x\\\\\"\npwm_chip = \"0\"\n",
             "升序 + 转义（双引号/反斜杠）"
         );
     }
@@ -545,8 +569,7 @@ rr3-pc = ["cognition.llm"]
         let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
             .expect("满配装配单应通过");
         assert_eq!(
-            boot.hal_bindings,
-            "link_ifname = \"wlan0\"\npwm_chip = \"0\"\n",
+            boot.hal_bindings, "link_ifname = \"wlan0\"\npwm_chip = \"0\"\n",
             "注入文本升序、整数已字符串化"
         );
     }

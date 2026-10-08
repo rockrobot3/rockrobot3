@@ -1562,6 +1562,40 @@ rr-core runtime 拍点/状态机（批D②），层④ bridge 经 transport trai
 （ADR-0008 接缝定型）——机制核切片即 0.0.7 两层要复用的语义面，不重复开线。
 architecture §12.6 点验矩阵首件机械点验注记与本条同批
 
+2026-10-09 0.0.5 第 II 轮 批E §13 静态执法子集接进 check.sh（ADR-0018 裁定 1/3/5、
+ADR-0019 裁定 1/5、architecture §13 表，方案 §8 批E 行；七步门禁扩为**九步**——
+①/①b/②/②b/③/④/⑤ 原序不变，⑤ 文档门后新增 ⑥⑦；直跑 GATE_EXIT=0，25 PASS
+＝①1 ①b1 ②1 ②b1 ③1 ④10 ⑤1 ⑥5 ⑦4，三端指针核对一致）——**新 ⑥ 模块测试
+接线**："每格一件·双达标（有 tests 接 CI）"的 CI 侧执法：`find modules -name
+Cargo.toml` 逐工程 `cargo test -q`，打空即 FAIL（门禁失效不放行）；brain 无
+Cargo.toml 自然跳过（其 26 条 unittest 由 CI brain-unittest job 覆盖，非 SKIP）。
+**新 ⑦ 静态断言四件**（全 fail-closed）：⑦-a 零策略载荷——机制核面（rr-core 全部 +
+rr-ipc protocol/ + transport/mod.rs，即 no_std 可达面）grep **外部**板卡厂商/产品/
+芯片/器件名与 `if.*(vendor|product)` 条件分支，命中即红；自家产品标识（rock3/洛克）
+**不在禁词**——rock3-ipc.sock 契约冻结路径是机制自身的运行时身份，不是策略载荷；
+⑦-b F⊗F 非法——逐 `composite.toml` 提 `atoms` 数组，逐成员验 `atoms/<名>/atom.toml`
+存在，数组缺失即红；⑦-c 五件套计数——Rust 原子件逐目录断言五件（atom.toml/`<名>`.rs/
+mech.rs/assemble.toml/private.rs），brain 两件式属批C⑤ 已登记的**豁免**（非 SKIP），
+组合件实体 Rust 断言 `main.rs`+`composite.rs`、brain 断言 `__main__.py`+`composite.py`；
+⑦-d 入口体量——modules 各 `main.rs` 与 brain 入口 `wc -l` ≤80。**每格一件反向断言**
+不进 check.sh 抄第二份：落 rr-registry 仓扫描测试
+`repo_atoms_compliant_and_every_slot_uniquely_covered`（查册真值处执法，② 步覆盖）——
+扫 `modules/*/atoms/*/atom.toml` 逐份过契约+查册+板无关门，21 格逐格反查唯一归属、
+覆盖账不平即红；内建豁免集 `BUILTIN_NO_ATOM` 钉死四格（bus.publish/bus.subscribe/
+bus.rpc/net.online——基座内建或机制核切片承载，不立件；power.battery 虽 base 层但由
+battery 原子承担，不在豁免集），仓内新增件不钉即红。业务阈值字面量无可靠静态判据
+（注释版本号同为点分数值），执法面＝atom 板无关门 + 描述符/ops 注入纪律 + 评审
+（§13"判不了 semantic 的留评审"），已在 ⑦ 段注释与 tools/ci/README.md 登记。
+随批 lint 归一（CI lint job 绿色基线延续）：rustfmt 全仓归一（批B/C/D 遗留漂移——
+rr-registry atom.rs/contract.rs、rr-core control.rs 六处 bool 断言、rrd daemon.rs
+never_loop（while 体必 exit 改 if）、rr-bus、模块面 unused imports、sim chain.rs
+match→if let 与 needless borrow）+ clippy `-D warnings` 全仓清零复验；CI lint job
+clippy 步骤对 `tools/esp32-uart-echo`/`tools/espidf-std-hello` 两平台条件工程排除
+（与七步门 ④ 同口径——xtensa/espidf 专用工具链工程宿主 stable 必红，编译执法在专用门
+SKIP 纪律；fmt 步不编译照跑）；机制核注释去板名化三处（lib.rs 厂商表述、header.rs
+目标名改指专用门、transport/mod.rs 对端表述），⑦-a 静态门自指解除。rr-registry
+39（lib）+34（contract）测试绿
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四

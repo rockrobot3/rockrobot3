@@ -24,17 +24,19 @@
 
 #[path = "../atoms/face/face.rs"]
 mod face;
-#[path = "../atoms/player/player.rs"]
-mod player;
 #[path = "panel/mod.rs"]
 mod panel;
+#[path = "../atoms/player/player.rs"]
+mod player;
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_audio_sink, backend::rr3_hal_display, rr3_block_on, RR3_AUDIO_CFG_16K_MONO16};
+use rr_hal::{
+    backend::rr3_hal_audio_sink, backend::rr3_hal_display, rr3_block_on, RR3_AUDIO_CFG_16K_MONO16,
+};
 use rr_ipc::{opcode, Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 use serde_json::{json, Value};
 
@@ -88,8 +90,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
     // 退化（真件档板显式 linux 时 MAX7219 后端未实装，探活 exit(1) 是预期语义，
     // R11③）；sim 档走虚拟点阵内存记录，主循环出帧全链可见
     let (display, display_backend) = rr3_hal_display();
-    rr3_block_on(display.frame())
-        .map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
+    rr3_block_on(display.frame()).map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
     println!("显示面就绪: backend={display_backend} 8x8");
 
     // 面板（0.0.4 批C，Q3 裁定）：独立 HTTP 线程 + 动作通道。link 缓存是状态页

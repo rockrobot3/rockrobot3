@@ -465,9 +465,7 @@ impl RrdTest {
             .arg(pid.to_string())
             .status()
             .expect("kill -TERM 起不来");
-        self.child
-            .wait()
-            .expect("rrd 进程必须能被 wait 收尸")
+        self.child.wait().expect("rrd 进程必须能被 wait 收尸")
     }
 }
 

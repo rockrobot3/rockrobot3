@@ -229,7 +229,10 @@ mod tests {
     fn detector_fires_once_per_saturation_episode() {
         let mut det = Rr3SaturationDetector::rr3_detector_new(2);
         assert!(!det.rr3_detector_feed(true), "第 1 个饱和窗：还在积累");
-        assert!(det.rr3_detector_feed(true), "第 2 个连续饱和窗：episode 首报");
+        assert!(
+            det.rr3_detector_feed(true),
+            "第 2 个连续饱和窗：episode 首报"
+        );
         assert!(!det.rr3_detector_feed(true), "episode 内不重复");
         assert!(!det.rr3_detector_feed(true), "episode 内不重复（继续）");
         assert!(!det.rr3_detector_feed(false), "恢复窗复位且不发");
@@ -300,11 +303,11 @@ mod tests {
         assert_eq!(a, b, "同一图同一输入必须逐拍一致");
         // 图本身的行为抽查：限速 50ms/拍 10ms → 每 5 拍放 1 次；低电 3290 首报、
         // 3310（>3300）重新武装、3200 再报
-        assert_eq!(a[0].2, true);
-        assert_eq!(a[1].2, false);
-        assert_eq!(a[5].2, true, "1_050 距 1_000 恰 50ms，放行");
-        assert_eq!(a[1].3, true, "3290 越阈首报");
-        assert_eq!(a[2].3, false, "3310 重新武装但不是事件");
-        assert_eq!(a[3].3, true, "3200 再次越阈再报");
+        assert!(a[0].2);
+        assert!(!a[1].2);
+        assert!(a[5].2, "1_050 距 1_000 恰 50ms，放行");
+        assert!(a[1].3, "3290 越阈首报");
+        assert!(!a[2].3, "3310 重新武装但不是事件");
+        assert!(a[3].3, "3200 再次越阈再报");
     }
 }

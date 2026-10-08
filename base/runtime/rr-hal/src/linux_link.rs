@@ -57,7 +57,8 @@ fn rr3_nm_unescape(s: &str) -> String {
 /// terse 输出里取一个字段值：逐行找 `key:` 前缀，冒号后整段返回
 /// （值内可能有转义冒号，不能再 split；取值后调用方自行反转义）。
 fn rr3_nm_field<'a>(out: &'a str, key: &str) -> Option<&'a str> {
-    out.lines().find_map(|l| l.strip_prefix(key)?.strip_prefix(':'))
+    out.lines()
+        .find_map(|l| l.strip_prefix(key)?.strip_prefix(':'))
 }
 
 /// GENERAL.STATE 值 → 在链：取首个空格前的数字段 == 100（NM terse 形如
@@ -188,11 +189,7 @@ impl Rr3Link for Rr3LinuxNmLink {
                 }
             }
         }
-        Ok(Rr3LinkState {
-            up,
-            ssid,
-            rssi_dbm,
-        })
+        Ok(Rr3LinkState { up, ssid, rssi_dbm })
     }
 }
 
@@ -245,7 +242,10 @@ mod tests {
     #[test]
     fn nm_wifi_row_picks_star_line_only() {
         assert_eq!(rr3_nm_wifi_row("*:Home:87"), Some(("Home".into(), 87)));
-        assert_eq!(rr3_nm_wifi_row("*:Home\\:5G:72"), Some(("Home:5G".into(), 72)));
+        assert_eq!(
+            rr3_nm_wifi_row("*:Home\\:5G:72"),
+            Some(("Home:5G".into(), 72))
+        );
         assert_eq!(rr3_nm_wifi_row(":Neighbour:40"), None, "非 `*` 行不选");
         assert_eq!(rr3_nm_wifi_row("*:NoSig:0"), Some(("NoSig".into(), 0)));
         assert_eq!(rr3_nm_wifi_row("*:Garbage:x"), None, "SIGNAL 非数字不认");

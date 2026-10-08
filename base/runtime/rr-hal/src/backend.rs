@@ -526,14 +526,24 @@ mod tests {
             assert!(!rr3_block_on(gpio.level()).unwrap(), "sim 通道初始断电");
         }
         if display_backend == RR3_BACKEND_SIM {
-            assert_eq!(rr3_block_on(display.frame()).unwrap(), [0; 8], "sim 点阵初始黑屏");
+            assert_eq!(
+                rr3_block_on(display.frame()).unwrap(),
+                [0; 8],
+                "sim 点阵初始黑屏"
+            );
         }
         if link_backend == RR3_BACKEND_SIM {
             let st = rr3_block_on(link.state()).unwrap();
             if st.up {
-                assert!(st.ssid.is_some() && st.rssi_dbm.is_some(), "sim 在链必带 SSID/RSSI");
+                assert!(
+                    st.ssid.is_some() && st.rssi_dbm.is_some(),
+                    "sim 在链必带 SSID/RSSI"
+                );
             } else {
-                assert!(st.ssid.is_none() && st.rssi_dbm.is_none(), "sim 断链必无 SSID/RSSI");
+                assert!(
+                    st.ssid.is_none() && st.rssi_dbm.is_none(),
+                    "sim 断链必无 SSID/RSSI"
+                );
             }
         }
     }
