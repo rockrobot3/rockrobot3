@@ -1342,9 +1342,18 @@ NM，2026-10-07）——前置主张自然满足，批W4a/W4b 作废、0.0.6 修
 W5 真件装配与标定手册 → W6 桥设计/e2e/S3 预案（0.0.7 修订版 5）→
 W7 env 总表 + 触发清单 + 收口（0.0.6 修订版 7）
 
+2026-10-08 0.0.5 增补轮四 批W2：CI 单真源迁移 + 八 job 首跑（R27/W5 裁定，
+ADR-0007）——`git mv .github/workflows/ci.yml .gitcode/workflows/ci.yml`
+（atomgit 原生引擎只拾取 `.gitcode/workflows/`，批A' 实证；gitcode 同路径共用，
+双份维护必漂移），`.github/workflows/ci.yml` 收为指路存根（仅注释）；
+八 job（conventions / lint / brain-unittest×2 / ipct003 / distro-smoke /
+buildroot-assembly / sim-assemble / sim-chain）随推送首跑，回执或逐 job 缺口
+据实登记（R16 纪律：不以 SKIP 冒充绿）；tools/ci/README 与 status.md 指路行同步
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
-**七步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job，不进七步门，本地可跑）：
+**七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
+批W2 起 CI 单真源迁此，R27 裁定；不进七步门，本地可跑）：
 `lint`——rustfmt `--check` 与 clippy `-D warnings` 各自独立失败，覆盖 base/runtime 与
 全部独立工程（④ 同一 find 口径）；绿色基线是 2026-10-01 的 rustfmt 全仓归一 + clippy
 清零提交，此后 fmt/clippy 回退即 CI 红。`brain-unittest`——rr3-brain 26 条 stdlib
