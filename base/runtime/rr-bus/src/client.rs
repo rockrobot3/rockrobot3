@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rr_core::runtime::{rr3_dispatch_class, Rr3Dispatch, Rr3ModuleRuntime};
 use rr_core::{rr3_frame_compose, RR3_TRACE_ID_DIRECT};
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
@@ -96,6 +97,16 @@ fn rr3_now_ns() -> u64 {
         .unwrap_or(0)
 }
 
+/// 心跳拍点时基（ms）：机制核 [`Rr3ModuleRuntime`] 的注入时钟在 std 驱动器
+/// 侧的供给（ADR-0018 裁定 3 的"单调时基"——墙钟 ms 在本 crate 的用途只有
+/// 拍点间隔度量，与 rrd 侧 watchdog 的 ms 语义同构）。
+fn rr3_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 struct Rr3Inner {
     task: AtomicU64,
     name: String,
@@ -109,6 +120,10 @@ struct Rr3Inner {
     /// 自愿累加，心跳线程每拍快照——非空则心跳 params 带 `{"counters": {...}}`，
     /// 空则维持 `{}`（旧 rrd 兼容）。键是模块内部运维词汇，归属表落各模块 README。
     counters: Mutex<BTreeMap<String, u64>>,
+    /// 机制核运行时状态机（批D₂）：心跳拍点真值——std 驱动器只做平台事
+    /// （sleep 等拍点、socket 收发），连接→注册→心跳→分发→节拍的决策在
+    /// rr-core（ADR-0018 裁定 1/3）。锁内即放，无嵌套锁。
+    rt: Mutex<Rr3ModuleRuntime>,
     next_id: AtomicU64,
     stop: AtomicBool,
 }
@@ -226,6 +241,7 @@ impl Rr3BusClient {
             pending: Mutex::new(HashMap::new()),
             inbox: Mutex::new(rx),
             counters: Mutex::new(BTreeMap::new()),
+            rt: Mutex::new(Rr3ModuleRuntime::rr3_runtime_new(identity.heartbeat_ms)),
             next_id: AtomicU64::new(0),
             stop: AtomicBool::new(false),
         });
@@ -268,18 +284,42 @@ impl Rr3BusClient {
             }
         };
         inner.task.store(task, Ordering::Relaxed);
+        // 机制核状态机转移 Registering → Online，首拍 = 此刻 + heartbeat_ms
+        inner
+            .rt
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .rr3_mark_registered(task, rr3_now_ms());
 
-        // 心跳线程：按 manifest 间隔喂狗；被拒/超时 = 进程退出，交给 supervisor 裁定。
-        // 每拍先取计数快照：非空才带 `counters` 字段（可选 append，旧 rrd 忽略未知字段，
-        // 双向兼容；空映射不带，保持与无上报模块同一条线上形状）。
+        // 心跳线程：拍点真值在机制核状态机（相对节拍，逐拍 +hb）；std 驱动器
+        // 只做平台事——sleep 等拍点、组装/发帧。被拒/超时 = 进程退出，交给
+        // supervisor 裁定。每拍先取计数快照：非空才带 `counters` 字段（可选
+        // append，旧 rrd 忽略未知字段，双向兼容；空映射不带，保持与无上报
+        // 模块同一条线上形状）。
         let hb_inner = inner.clone();
-        let hb_ms = identity.heartbeat_ms.max(1);
         std::thread::Builder::new()
             .name("rr3-bus-heartbeat".into())
             .spawn(move || loop {
-                std::thread::sleep(Duration::from_millis(hb_ms));
+                let Some(wait_ms) = hb_inner
+                    .rt
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .rr3_next_beat_wait_ms(rr3_now_ms())
+                else {
+                    return; // 断开（Down）即停拍——"不装活着"同一裁定
+                };
+                std::thread::sleep(Duration::from_millis(wait_ms));
                 if hb_inner.stop.load(Ordering::Relaxed) {
                     return;
+                }
+                let now_ms = rr3_now_ms();
+                let due = hb_inner
+                    .rt
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .rr3_heartbeat_due(now_ms);
+                if !due {
+                    continue; // 提前醒（信号打断等），回睡
                 }
                 let snap = hb_inner.rr3_counters_snapshot();
                 let params = if snap.is_empty() {
@@ -300,6 +340,11 @@ impl Rr3BusClient {
                     eprintln!("rr3-bus: 心跳失败，退出（supervisor 按 restart_policy 裁定）");
                     std::process::exit(1);
                 }
+                hb_inner
+                    .rt
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .rr3_heartbeat_sent(now_ms);
             })
             .map_err(|e| format!("起心跳线程失败: {e}"))?;
 
@@ -462,33 +507,36 @@ fn rr3_reader_loop(sock: &mut UnixStream, inner: Arc<Rr3Inner>, inbox_tx: mpsc::
             Ok(v) => v,
             Err(_) => break,
         };
-        if ty == Rr3PayloadType::Response {
-            // 按 JSON-RPC id 挑自己的应答（序不可依赖的同一条事实，读侧的答案）
-            let v: Value = match serde_json::from_slice(&body) {
-                Ok(v) => v,
-                Err(_) => break,
-            };
-            let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
-            let sender = inner
-                .pending
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .remove(&id);
-            if let Some(tx) = sender {
-                let payload = match v.get("result") {
-                    Some(r) => Ok(r.clone()),
-                    None => Err(format!(
-                        "RPC 被拒: {}",
-                        v.get("error").cloned().unwrap_or(Value::Null)
-                    )),
+        match rr3_dispatch_class(ty) {
+            Rr3Dispatch::Pending => {
+                // 按 JSON-RPC id 挑自己的应答（序不可依赖的同一条事实，读侧的答案）
+                let v: Value = match serde_json::from_slice(&body) {
+                    Ok(v) => v,
+                    Err(_) => break,
                 };
-                let _ = tx.send(payload);
+                let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
+                let sender = inner
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&id);
+                if let Some(tx) = sender {
+                    let payload = match v.get("result") {
+                        Some(r) => Ok(r.clone()),
+                        None => Err(format!(
+                            "RPC 被拒: {}",
+                            v.get("error").cloned().unwrap_or(Value::Null)
+                        )),
+                    };
+                    let _ = tx.send(payload);
+                }
+                // 无主应答：超时已被调用方记账，静默丢弃
             }
-            // 无主应答：超时已被调用方记账，静默丢弃
-            continue;
-        }
-        if inbox_tx.send(frame).is_err() {
-            break; // inbox 没了：客户端已死
+            Rr3Dispatch::Inbox => {
+                if inbox_tx.send(frame).is_err() {
+                    break; // inbox 没了：客户端已死
+                }
+            }
         }
     }
     // 收尾：唤醒所有还在等应答的调用方，让它们拿到确定性错误而不是吃满超时
