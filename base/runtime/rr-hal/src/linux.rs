@@ -18,11 +18,6 @@ use crate::{Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3HalError, Rr3PcmStream
 /// ALSA underrun/overrun 的 errno（EPIPE）
 const EPIPE: i32 = 32;
 
-fn rr3_alsa_device() -> String {
-    std::env::var(crate::backend::RR3_HAL_ALSA_DEVICE_ENV)
-        .unwrap_or_else(|_| crate::backend::RR3_HAL_ALSA_DEVICE_DEFAULT.to_string())
-}
-
 /// open 参数门禁：与 sim 后端同一套要求（16bit 采样且 rate/channels 非零）
 fn rr3_alsa_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
     if cfg.sample_rate_hz == 0 || cfg.channels == 0 || cfg.bit_depth != 16 {
@@ -84,10 +79,11 @@ pub struct Rr3AlsaAudioSource {
 }
 
 impl Rr3AlsaAudioSource {
-    /// 设备名取 `RR3_HAL_ALSA_DEVICE`（未设则 `default`），见 backend.rs
-    pub fn rr3_alsa_source_default() -> Self {
+    /// 指定设备名构造（选择函数从生效物理绑定取 `alsa_device`，批D④
+    /// fail-closed——设备名没有代码缺省，描述符/env 都没给就在选择面点名）
+    pub fn rr3_alsa_source_new(device: &str) -> Self {
         Self {
-            device: rr3_alsa_device(),
+            device: device.to_string(),
             open: Mutex::new(None),
         }
     }
@@ -135,10 +131,10 @@ pub struct Rr3AlsaAudioSink {
 }
 
 impl Rr3AlsaAudioSink {
-    /// 设备名取 `RR3_HAL_ALSA_DEVICE`（未设则 `default`），见 backend.rs
-    pub fn rr3_alsa_sink_default() -> Self {
+    /// 指定设备名构造（同 [`Rr3AlsaAudioSource::rr3_alsa_source_new`]，批D④）
+    pub fn rr3_alsa_sink_new(device: &str) -> Self {
         Self {
-            device: rr3_alsa_device(),
+            device: device.to_string(),
             open: Mutex::new(None),
         }
     }

@@ -135,6 +135,7 @@ dependencies = [
  "alsa",
  "async-trait",
  "libc",
+ "toml",
 ]
 
 [[package]]

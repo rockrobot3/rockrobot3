@@ -206,7 +206,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
     // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
     // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
-    let (boot_manifests, degraded) = match &cfg.profile {
+    let (boot_manifests, degraded, hal_bindings) = match &cfg.profile {
         Some(p) => {
             // 格位契约与主题契约同目录（--contracts 运行期落点，T5）
             let slots =
@@ -218,9 +218,9 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 ));
             }
             let names: BTreeSet<String> = boot.missing.iter().map(|(m, _)| m.clone()).collect();
-            (boot.manifests, names)
+            (boot.manifests, names, boot.hal_bindings)
         }
-        None => (cfg.manifests.clone(), BTreeSet::new()),
+        None => (cfg.manifests.clone(), BTreeSet::new(), String::new()),
     };
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
@@ -299,7 +299,11 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 可言（先装载后投递让这两段各自连续）。
     let mut jobs: Vec<Rr3SpawnJob> = Vec::new();
     for manifest in &boot_manifests {
-        if let Some(job) = rr3_boot_job_from_manifest(manifest) {
+        if let Some(mut job) = rr3_boot_job_from_manifest(manifest) {
+            // 物理绑定描述符（ADR-0018 裁定 4、批D④）：装配链解析出的 [hardware]
+            // 文本随每个 job 透传，supervisor spawn 时注入 RR3_HAL_BINDINGS；
+            // --manifest 调试后门无装配单 → 空串（不注入，fail-closed + 应急 env）。
+            job.hal_bindings = hal_bindings.clone();
             jobs.push(job);
         }
     }
