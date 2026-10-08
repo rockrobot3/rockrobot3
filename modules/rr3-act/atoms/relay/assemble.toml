@@ -1,0 +1,7 @@
+# relay 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
+# 原子件只见 ops 指针与描述符给的绑定句柄）。
+schema_version = 1
+
+[assemble]
+handles = []   # 通断面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
+ops = []       # 通断真值随请求给出，无配置项

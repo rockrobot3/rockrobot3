@@ -1,28 +1,14 @@
-//! 舵机控制：接收 `rr3-act/servo/command`（角度/时限，<100Hz 事务面），
-//! 摘要发布 `rr3-act/servo/state`（限速流）。驱动经 rr-hal trait（`Rr3PwmServo`），
-//! 不直接碰 /sys；行程与时限裁决在这里（限值来自 config.toml），HAL 只执行。
+//! servo 原子件机制主体（五件套③，自原 src/servo.rs 逐字迁入，逻辑零改动）。
+//!
+//! servo/command 参数裁决（行程/时限）与 servo/state 限速门：状态变化必发布，
+//! 但两次发布至少隔 min_interval——被限掉的这一次不缓存不补发，流是摘要不是
+//! 逐拍镜像（命令面本就 <100Hz，限速只挡突发连发）。
 
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-pub const RR3_SERVO_COMMAND_TOPIC: &str = "rr3-act/servo/command";
-pub const RR3_SERVO_STATE_TOPIC: &str = "rr3-act/servo/state";
-
-/// 启动自述：本子模块的总线面一行说明
-pub const SURFACE: &[&str] =
-    &["servo: rpc rr3-act/servo/command (request) | publish rr3-act/servo/state (stream，限速)"];
-
-/// config `[rr3-act.servo]` 的形状（解析与裁决的唯一依据）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rr3ServoCfg {
-    pub angle_min_deg: u16,
-    pub angle_max_deg: u16,
-    /// 指令时限上限：超过它拒收——"超时即停，不给堵转留机会"
-    pub move_timeout_ms: u64,
-    /// servo/state 两次发布的最小间隔（限速流的"限速"）
-    pub state_min_interval_ms: u64,
-}
+use super::Rr3ServoCfg;
 
 /// servo/command 参数裁决：`{"angle_deg": int, "move_ms"?: int}`。
 /// 业务性失败（缺参数/类型不符/越界）一律 `Err` 点名缘由，由调用方折成 result.error；

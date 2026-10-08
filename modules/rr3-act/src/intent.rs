@@ -11,13 +11,16 @@
 //!
 //! 执行失败（参数裁决拒 / HAL 写失败）是**业务性失败**，逐条折日志继续收下一帧
 //! （事件语义无应答回路）；传输性失败（发布 relay/state、servo/state 写不出去）
-//! 由调用方按 `exit(1)` 口径收口（main.rs 的发布 `?`）。
+//! 由调用方按 `exit(1)` 口径收口（组合件主循环的发布 `?`）。
+//!
+//! 归属（0.0.5 批C② 原子重铺，0.0.5 方案 §12.1）：本文件是总线接入编排面
+//! （两道门 + 执行编排），**留组合件**；裁决与执行机制在 servo/led/relay 原子件。
 
 use serde_json::Value;
 
-use crate::relay::{self, RR3_RELAY_SET_TOPIC};
-use crate::rr3_block_on;
-use crate::servo::{self, RR3_SERVO_COMMAND_TOPIC, Rr3ServoCfg};
+use super::relay::{self, RR3_RELAY_SET_TOPIC};
+use rr_hal::rr3_block_on;
+use super::servo::{self, RR3_SERVO_COMMAND_TOPIC, Rr3ServoCfg};
 
 /// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值）
 const EXPOSED: [&str; 3] = [

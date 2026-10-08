@@ -1,22 +1,9 @@
-//! 继电器通断（`rr3-act/relay/set`，0.0.2 方案 Q1 裁定立格 `act.relay`）。
+//! relay 原子件机制主体（五件套③，自原 src/relay.rs 逐字迁入，逻辑零改动）。
 //!
-//! 最小面：`{"on": bool}` 写一路 `Rr3GpioOut`；通断状态摘要 `rr3-act/relay/state`
-//! 变化即发（0.0.3 T3 补裁定 append，意图执行效果的可观测面——RPC 与 intent
-//! actions 两条驱动路共用同一条状态流）。
+//! 参数裁决（只认真布尔）+ 通断应用 + 摘要体 + 运维计数键。
 
 use rr_hal::{rr3_block_on, Rr3GpioOut};
 use serde_json::{json, Value};
-
-pub const RR3_RELAY_SET_TOPIC: &str = "rr3-act/relay/set";
-
-/// 通断状态摘要主题（0.0.3 T3 append，contracts/topics.toml 25 条之一）
-pub const RR3_RELAY_STATE_TOPIC: &str = "rr3-act/relay/state";
-
-/// 启动自述：本子模块的总线面一行说明
-pub const SURFACE: &[&str] = &[
-    "relay: rpc rr3-act/relay/set (request)",
-    "relay: pub rr3-act/relay/state (event, 变化即发)",
-];
 
 /// relay/set 参数裁决：只认真布尔——`{"on": 1}`、`{"on": "true"}` 都拒，
 /// 通断没有"近似真"。
