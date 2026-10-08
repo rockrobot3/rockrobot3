@@ -134,7 +134,7 @@ pub fn rr3_assemble_layout(
         .map_err(|e| format!("写 {profile_dst:?} 失败: {e}"))?;
 
     let mut entries = Vec::new();
-    for module in profile.faces.keys() {
+    for module in profile.enabled_slots.keys() {
         let src_dir = repo.join("modules").join(module);
         let src_manifest = src_dir.join("module.toml");
         let text = std::fs::read_to_string(&src_manifest).map_err(|e| {
@@ -514,7 +514,7 @@ watchdog_timeout_ms = 5000\n";
         std::fs::write(
             repo.join("profiles/default.toml"),
             "schema_version = 1\n\n[bindings]\n\"a.b\" = \"rr3-pa\"\n\n\
-             [faces]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n",
+             [enabled_slots]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n",
         )
         .unwrap();
 
@@ -562,12 +562,12 @@ watchdog_timeout_ms = 5000\n";
     /// 装配演练的仓内前提：default 机型 face 的每个模块，仓源 manifest 可解析、
     /// entry 可装机（仓相对）、config 在——契约/目录漂移让单测红，不是演练跑一半红
     #[test]
-    fn repo_default_faces_are_assembly_ready() {
+    fn repo_default_enabled_slots_are_assembly_ready() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let profile_text = std::fs::read_to_string(repo.join("profiles/default.toml")).unwrap();
         let profile = rr3_profile_from_text(&profile_text).expect("default 装配单可解析");
-        assert_eq!(profile.faces.len(), 6, "default 机六模块满配");
-        for module in profile.faces.keys() {
+        assert_eq!(profile.enabled_slots.len(), 6, "default 机六模块满配");
+        for module in profile.enabled_slots.keys() {
             let dir = repo.join("modules").join(module);
             let text = std::fs::read_to_string(dir.join("module.toml"))
                 .unwrap_or_else(|e| panic!("读 {module} manifest: {e}"));

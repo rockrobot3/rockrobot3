@@ -1411,6 +1411,20 @@ backend.rs 符号逐字一致，I2C 设备根常量与显示件占位归注记�
 全案状态行改收官态；敞口余量两项登记：批W2 八 job 首跑回执待网页核对、
 板上三项欠账与真件档维持触发态
 
+2026-10-08 0.0.5 第 II 轮 批A：坐标系对齐（ADR-0019 裁定 1 / R16，全案 §7）——
+批A① 二十一格原子归属清单落 0.0.5 方案 §12（12.1 逐格 layer/唯一归属原子件/
+现落点/备注，net.online 基座内建、占位件 env/imu/charger 诚实标注；12.2 无格件
+三问预分类；12.3 塌缩归一候选）。批A② `[faces]`→`[enabled_slots]` 消歧改名
+（避免与职责面 Facade 撞名）：profiles 两份、rrd/profile.rs（struct 字段/解析/
+报错文案/测试全量）、rrd cli.rs（PROFILE_MANIFEST_CONFLICT 文案逐字同步）与
+daemon.rs 注释、rrd e2e 四件、rr-registry 查册门两段、sim/assemble.rs、
+profiles/default.toml 与 distro.toml、architecture.md（目录树 + §4.3 注记改
+已落口径）、ADR-0012（状态注记改已执行 + 裁定 3 sketch/裁定注记/对表三处）、
+rrd-cli.md（开关表/常量引文/设计裁定三处）、本节 §3 装配单纪律行；
+§2 历史条目与 ADR-0019 决策原文不改写；代码侧 `grep -rn 'faces'`（排除
+enabled_slots）归零，`cargo check -p rrd -p rr-registry --all-targets` 与
+sim `cargo check --all-targets` 全绿
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
@@ -1470,7 +1484,8 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
   同级同纪律——只增不改，破坏性变更升 `schema_version`；manifest 的
   `provides`/`depends` 只许引用表内格位，查册门接入 CI 全集层（与仲裁共用真值）
 - 装配单（ADR-0012）：`profiles/<机型>.toml` 是纯数据（`[os]` / `[bindings]` /
-  `[faces]`），不得包含逻辑；新增机型 = 新增文件，不改代码；F⊗F 非法（brain 不许运行期
+  `[enabled_slots]`，2026-10-08 批A② 由 `[faces]` 消歧改名，避免与职责面 Facade 撞名），
+  不得包含逻辑；新增机型 = 新增文件，不改代码；F⊗F 非法（brain 不许运行期
   决定能力归属，rrd 不许运行期重排装配）
 
 ## 4 Definition of Done

@@ -161,7 +161,7 @@ rock3/
 │   └── events/                    ← 各模块事件负载 JSON Schema 的落点（命名与登记规矩在其 README）
 │
 ├── profiles/                      ← 机器人装配单（纯数据，一机型一文件，§4.3、ADR-0012 裁定 3）
-│   └── default.toml               ← RK3566 参考机：[os] 轨道 · [bindings] 格位→件 · [faces] 模块→格位
+│   └── default.toml               ← RK3566 参考机：[os] 轨道 · [bindings] 格位→件 · [enabled_slots] 模块→格位
 │
 ├── base/                          ← 基座层（横切关注点，见 §2 原则 1）
 │   ├── os/                        ← OS 双轨（ADR-0001 选型、ADR-0013 分轨）
@@ -452,9 +452,9 @@ Registered ──── rr3_reg_beat（心跳，刷新到期基准）───�
 
 **装配单**：一台机器人的选型与绑定收敛为一份 `profiles/<机型>.toml` 纯数据文件
 （`[os]` 轨道 / `[bindings]` 格位→件 / `[enabled_slots]` 模块→本形态启用的格位集合）。
-**注**：该字段原名 `[faces]`，为避免与 §4.0.2 的"职责面 Facade"撞名，**目标态改名 `[enabled_slots]`**——
-它表达的是"启用哪些格"，不是职责面。当前 `profiles/*.toml` 与 §3 目录树仍写作 `[faces]`（实况见 status.md）；
-改名连同 ADR-0012 裁定 3、`rr-registry` 查册门字段、既有 dev 方案引用，归 0.0.5 同批执行（R16），非本轮已落。**rrd 启动装配链**：
+**注**：该字段原名 `[faces]`，为避免与 §4.0.2 的"职责面 Facade"撞名，**已随批A 改名 `[enabled_slots]`**（2026-10-08）——
+它表达的是"启用哪些格"，不是职责面。`profiles/*.toml`、§3 目录树、`rr-registry` 查册门字段、
+`rrd` 解析与既有引用已同批连带更新（ADR-0019 裁定 1 消歧、R16 兑现）；`[faces]` 仅存于历史存档节（不改写）。**rrd 启动装配链**：
 读 profile + 硬件探测（`/proc/device-tree`、`/sys`、ALSA 枚举）→ 匹配 → 依赖仲裁
 （§7.1、ADR-0009）→ **缺格置 Degraded**（fail-closed，不新增相位）。profile 只声明
 "什么格位、由谁、给哪个形态"，不写启动序（那是仲裁输出）。

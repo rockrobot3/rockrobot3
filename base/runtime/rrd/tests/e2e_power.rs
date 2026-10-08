@@ -35,7 +35,7 @@ route = "distro"
 [bindings]
 "power.charger" = "rr3-power"
 
-[faces]
+[enabled_slots]
 rr3-power = ["power.charger"]
 "#;
 

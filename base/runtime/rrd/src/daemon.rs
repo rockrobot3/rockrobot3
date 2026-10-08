@@ -201,7 +201,7 @@ pub fn rr3_system_power_frame(percent: u64, voltage_mv: u64) -> Rr3Frame {
 /// 3. 投 boot 队列 —— 放在 accept 循环之前，否则第一条消息永远没人取。
 pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String> {
     let t0 = Instant::now();
-    // 装配链（0.0.2 方案 D2，Q3 裁定）：--profile 是装机正门——faces 决定起谁，
+    // 装配链（0.0.2 方案 D2，Q3 裁定）：--profile 是装机正门——enabled_slots 决定起谁，
     // 装载/查册/缺格判定/manifest 解析全部在 bind 之前完成（fatal 即非 0 退出，
     // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
     // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
