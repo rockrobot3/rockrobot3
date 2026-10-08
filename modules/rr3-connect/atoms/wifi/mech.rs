@@ -1,3 +1,5 @@
+//! wifi 原子件机制主体（五件套③，自原 src/wifi.rs 逐字迁入，逻辑零改动）。
+//!
 //! WiFi 链路：`rr3-connect/net/link` 状态机与周期流 + 配网面三 RPC（0.0.4 批D）。
 //!
 //! HAL 读数（`Rr3LinkState`）→ 状态机裁决（翻转必发 + 周期保底）→ 事件体上路。
@@ -15,19 +17,6 @@
 
 use rr_hal::Rr3LinkState;
 use serde_json::{json, Value};
-
-pub const SURFACE: &[&str] = &[
-    "wifi: NetworkManager/D-Bus（板上件）-> rr3-connect/net/link (event)；sim 后端 env 注入",
-    "wifi: 状态翻转必发 + 周期保底重发（流是摘要不是逐拍镜像）；mode=ap|station 随流发布",
-    "wifi: rpc wifi/scan|wifi/connect|wifi/forget（0.0.4 批D）；凭据内存不落盘重启即忘，真持久化板上后置",
-];
-
-/// config `[rr3-connect.wifi]` 的形状（上报周期 + 漫游探针开关）
-#[derive(Debug, Clone, Copy)]
-pub struct Rr3LinkCfg {
-    pub link_report_period_ms: u64,
-    pub roam_probe_enabled: bool,
-}
 
 /// net/link 状态机：跟踪上一次的 up 值。首拍与**翻转**返回 true（立即发，
 /// 不等周期）；同态返回 false（交给主循环的周期拍点保底）。状态只有这一位。

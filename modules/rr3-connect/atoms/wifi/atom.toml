@@ -1,0 +1,17 @@
+# wifi 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C④ 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "wifi"
+version = "0.0.1"
+
+[provides]
+slots = ["net.wifi"]   # 链路状态流 + 配网面三 RPC（scan/connect/forget，0.0.4 批D）
+
+[uses]
+slots = []   # 链路读数经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
+
+[events]
+publishes = ["rr3-connect/net/link"]   # 链路摘要流（翻转必发 + 周期保底）；mode 配网态随流发布；rpc 面在 module.toml [rpc].exposes（owner 级）
+subscribes = []
