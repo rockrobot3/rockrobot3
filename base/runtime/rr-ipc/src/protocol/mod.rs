@@ -3,3 +3,4 @@
 pub mod b64;
 pub mod body;
 pub mod header;
+pub mod wire;

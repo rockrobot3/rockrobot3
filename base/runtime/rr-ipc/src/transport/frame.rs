@@ -2,46 +2,19 @@
 //!
 //! 只做"读满一帧 / 整帧一次提交"，不含任何 socket 语义，因此平台无关：
 //! 单元测试用 `std::io::Cursor` 就能在本机（含 Windows）跑满。
+//!
+//! 帧的**数据形状**与整帧字节化（`Rr3Frame` / `Rr3FrameError` / `rr3_frame_to_bytes`）
+//! 批D₁ 起落 `protocol::wire`（no_std 可达，机制核切片共用）；本模块 re-export
+//! 保持 `crate::transport::frame::…` 与 lib 顶层两条既有路径逐字不变。
 
 use std::io::{Read, Write};
 // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
-use std::string::{String, ToString};
+use std::string::ToString;
 use std::vec;
 use std::vec::Vec;
 
-use crate::protocol::header::{Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE};
-
-/// 一帧 = 头 + payload
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Rr3Frame {
-    pub header: Rr3Header,
-    pub payload: Vec<u8>,
-}
-
-/// 帧层错误
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Rr3FrameError {
-    /// 读到任何字节之前对端干净关闭
-    Closed,
-    /// 头只读了一半就 EOF（半帧不得当新帧起始）
-    TornHeader { got: usize },
-    /// payload 比头声明的短
-    TornPayload { want: usize, got: usize },
-    /// 头本身非法（magic / reserved / 超长）
-    Header(Rr3HdrError),
-    /// 写侧：头声明的 payload_len 与实际 payload 长度不符
-    LengthMismatch { declares: u32, actual: usize },
-    /// 缓冲未 seal 就要取整帧字节（头区还是全 0，发出去是对端眼里的坏 magic）
-    Unsealed,
-    /// 其它 IO 错误（文案只带 os 原因，不带对端数据）
-    Io(String),
-}
-
-impl From<Rr3HdrError> for Rr3FrameError {
-    fn from(e: Rr3HdrError) -> Self {
-        Self::Header(e)
-    }
-}
+pub use crate::protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
+use crate::protocol::header::{Rr3Header, RR3_IPC_HDR_SIZE};
 
 /// 读满 `buf`。返回 `Ok(Some(已读字节数))`；`Ok(None)` = 第一个字节都没读到（对端关闭）。
 /// 已读字节数必须由计数给出：payload 本身可以含任意 0 字节。
@@ -83,20 +56,6 @@ pub fn rr3_frame_read(mut r: impl Read) -> Result<Rr3Frame, Rr3FrameError> {
     }
 }
 
-/// 头 + payload 拼一整块：单次 write 提交，读侧不可能看到两半
-pub fn rr3_frame_to_bytes(f: &Rr3Frame) -> Result<Vec<u8>, Rr3FrameError> {
-    if f.header.payload_len as usize != f.payload.len() {
-        return Err(Rr3FrameError::LengthMismatch {
-            declares: f.header.payload_len,
-            actual: f.payload.len(),
-        });
-    }
-    let mut out = Vec::with_capacity(RR3_IPC_HDR_SIZE + f.payload.len());
-    out.extend_from_slice(&f.header.to_bytes());
-    out.extend_from_slice(&f.payload);
-    Ok(out)
-}
-
 /// 写一帧
 pub fn rr3_frame_write(w: &mut impl Write, f: &Rr3Frame) -> Result<(), Rr3FrameError> {
     let bytes = rr3_frame_to_bytes(f)?;
@@ -113,9 +72,9 @@ mod tests {
     use std::println;
     use std::string::String;
     use crate::protocol::header::{
-        opcode, LEN_DST_TASK, LEN_MAGIC, LEN_OPCODE, LEN_PAYLOAD_LEN, LEN_RESERVED, LEN_SRC_TASK,
-        LEN_TIMESTAMP_NS, LEN_TRACE_ID, OFF_DST_TASK, OFF_MAGIC, OFF_OPCODE, OFF_PAYLOAD_LEN,
-        OFF_RESERVED, OFF_SRC_TASK, OFF_TIMESTAMP_NS, OFF_TRACE_ID,
+        opcode, Rr3HdrError, LEN_DST_TASK, LEN_MAGIC, LEN_OPCODE, LEN_PAYLOAD_LEN, LEN_RESERVED,
+        LEN_SRC_TASK, LEN_TIMESTAMP_NS, LEN_TRACE_ID, OFF_DST_TASK, OFF_MAGIC, OFF_OPCODE,
+        OFF_PAYLOAD_LEN, OFF_RESERVED, OFF_SRC_TASK, OFF_TIMESTAMP_NS, OFF_TRACE_ID,
     };
     use std::io::Cursor;
 

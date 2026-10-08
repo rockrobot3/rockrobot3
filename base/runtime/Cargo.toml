@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["rr-ipc", "rr-registry", "rr-bus", "rr-hal", "rr-ota", "rrd"]
+members = ["rr-ipc", "rr-core", "rr-registry", "rr-bus", "rr-hal", "rr-ota", "rrd"]
 
 [workspace.package]
 version = "0.0.1"

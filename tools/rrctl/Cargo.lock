@@ -58,9 +58,17 @@ dependencies = [
 name = "rr-bus"
 version = "0.0.1"
 dependencies = [
+ "rr-core",
  "rr-ipc",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "rr-core"
+version = "0.0.1"
+dependencies = [
+ "rr-ipc",
 ]
 
 [[package]]
