@@ -24,6 +24,7 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本方案与 Definition of Done（修订版 6：两阶段 + 批F5a/F5b 重排 + 真件矩阵八行 + §5.4 BOM 定案 + §5.5 板上工程执行手册；0.0.7 ESP32 / 0.0.8 brain 专项排期已钉） | 收口评审按此逐条对账 |
 | [`process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md`](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) | 已裁定执行中（修订版 4：Q1–Q6 已随 R20 裁定回填；层③④升必达（R19），批D1/D2 + §9 四层真板执行手册；批A 落档 + 批A' 工具链绿 + 批B 层① 绿（2026-10-07——xtensa 编译期 golden 对拍第④路 PASS），批C 解禁） | 按修订版 4 WBS 依序执行，执行细则见 §9 |
 | [`process/dev/0.0.8版本洛克三号模块内部分层实施方案.md`](process/dev/0.0.8版本洛克三号模块内部分层实施方案.md) | 已立项待实施（0.0.5 §2.4 R17"各模块拆分清单"的细化：rr3mod 签名级规格 §2 + 五模块目标目录树与迁移映射 §4 + 批0–批6 实施序列 §5 与每批验收四件套 §6；与 brain 迁移同窗，与 0.0.6/0.0.7 真件批不混排） | 实施批开工按 §5 依序执行、按 §6 四件套留痕 |
+| [`process/dev/真件装配与标定手册.md`](process/dev/真件装配与标定手册.md) | 真件到货桌面级验收、装配与标定 runbook（0.0.5 增补轮四 批W5：USB 麦 UAC / SG90+UBEC / MAX7219 / TP4056+保护板 / INA219 两点标定 / ESP32 UART2，每件四件套；型号权威=0.0.6 §5.4 BOM 定案，接线权威=§5.5.2） | 器件到货即照单执行；型号差异先改手册与 BOM 表再装配 |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy/ 逐组件消化盘点（已归档）：三分类台账、证据路径 | 查"某 legacy 语义在新架构哪"（`legacy/` 整树已随 0.0.4 退役批删除） |
 | [`status.md`](status.md) | 唯一实况快照：能力 × 状态 × 证据路径、里程碑进度（M0–M6 当前实况）、本机无法收口的项、在制品 | 收口时整篇重写，不做增量修补；**测试条数一律不抄进来**（见其开篇规矩） |
 
@@ -61,6 +62,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) | 当前版本交付什么、怎么算完成（修订版 6：树莓派两阶段 + 真件矩阵八行 + BOM 定案 + 板上工程执行手册 §5.5） |
 | [`process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md`](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) | 下一版本方案：ESP32 系统级验证四层验证梯子（修订版 4：Q1–Q6 已裁，层③④必达，执行手册 §9） |
 | [`process/dev/0.0.8版本洛克三号模块内部分层实施方案.md`](process/dev/0.0.8版本洛克三号模块内部分层实施方案.md) | 已立项待实施方案：rr3mod 公共骨架与五模块拆分施工档（签名级规格 / 迁移映射 / 批序列 / 验收四件套） |
+| [`process/dev/真件装配与标定手册.md`](process/dev/真件装配与标定手册.md) | 真件到货做验收、装配与标定时照单执行（批W5 每件四件套 + 到货差异登记表） |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy（ESP32 冻结区）逐组件消化到哪了（已归档：0.0.4 退役批整树删除，待融合清零） |
 
 ### contracts/ · base/ · modules/ · tools/ · .github/
@@ -116,6 +118,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | 选核心板 / 画底板 / 整机硬件询价与验收 | [`architecture/板卡设计规格书.md`](architecture/板卡设计规格书.md)（决策依据在 [`process/adr/ADR-0015`](process/adr/ADR-0015-板卡策略-rk3566核心板过桥与量产自定制.md)） |
 | 动 OTA 槽位与双轨 | [`../base/ota/README.md`](../base/ota/README.md) + [`../base/runtime/rr-ota/README.md`](../base/runtime/rr-ota/README.md) |
 | 无硬件跑通整条链路 | [`../tools/sim/README.md`](../tools/sim/README.md) |
+| 器件到货做验收 / 装配 / 标定 | [`process/dev/真件装配与标定手册.md`](process/dev/真件装配与标定手册.md)（接线对照 [`process/dev/0.0.6版本洛克三号树莓派验证方案.md`](process/dev/0.0.6版本洛克三号树莓派验证方案.md) §5.5.2） |
 | 对照 legacy ESP32 固件 | [`process/legacy-digest.md`](process/legacy-digest.md)（归档台账）+ [`architecture/architecture.md`](architecture/architecture.md) §8（`legacy/` 整树已随 0.0.4 退役批删除，源码在 git 历史） |
 
 ## 事实归属（改文档前先对这张表）
