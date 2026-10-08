@@ -3,12 +3,15 @@
 //! servo/command 参数裁决（行程/时限）与 servo/state 限速门：状态变化必发布，
 //! 但两次发布至少隔 min_interval——被限掉的这一次不缓存不补发，流是摘要不是
 //! 逐拍镜像（命令面本就 <100Hz，限速只挡突发连发）。
-
-use std::time::{Duration, Instant};
+//!
+//! `Rr3RateGate` 真值在 rr-core `control`（批D₃，ADR-0018 裁定 5：机制核纯
+//! 函数 + 注入时钟）——本文件 re-export 保既有路径，时钟由调用方给 ms。
 
 use serde_json::{json, Value};
 
 use super::Rr3ServoCfg;
+
+pub use rr_core::control::Rr3RateGate;
 
 /// servo/command 参数裁决：`{"angle_deg": int, "move_ms"?: int}`。
 /// 业务性失败（缺参数/类型不符/越界）一律 `Err` 点名缘由，由调用方折成 result.error；
@@ -46,35 +49,6 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
         }
     };
     Ok((angle, move_ms))
-}
-
-/// servo/state 限速门：状态变化必发布，但两次发布至少隔 min_interval。
-/// 被限掉的这一次**不缓存不补发**——下一次发布自然携带最新角度：流是摘要，
-/// 不是逐拍镜像（命令面本就 <100Hz，限速只挡突发连发）。
-pub struct Rr3RateGate {
-    min_interval: Duration,
-    last: Option<Instant>,
-}
-
-impl Rr3RateGate {
-    pub fn rr3_gate_new(min_interval_ms: u64) -> Self {
-        Self {
-            min_interval: Duration::from_millis(min_interval_ms),
-            last: None,
-        }
-    }
-
-    /// `now` 注入而非内部取时钟：测试用合成时刻，不打真实时钟。
-    /// 放行即记账（返回 true 的同时刷新 last）。
-    pub fn rr3_gate_allow(&mut self, now: Instant) -> bool {
-        if let Some(t) = self.last {
-            if now.duration_since(t) < self.min_interval {
-                return false;
-            }
-        }
-        self.last = Some(now);
-        true
-    }
 }
 
 /// servo/state 体：seq 逐条 +1（流序），angle_deg 是当前角
@@ -144,23 +118,13 @@ mod tests {
         assert!(e.contains("move_ms"), "类型不符点名: {e}");
     }
 
-    /// 限速门：首拍必放；窗内连发被限；窗外恢复放行。now 全部合成注入。
+    /// 限速门判定真值随批D₃ 迁 rr-core `control`（逐拍/窗口用例随迁）——
+    /// 本地只钉"re-export 可用"：同一构造 + 一次注入调用走通 rr-core 面。
     #[test]
-    fn rate_gate_admits_first_blocks_within_window_reopens_after() {
+    fn rate_gate_is_rr_core_reexport() {
         let mut gate = Rr3RateGate::rr3_gate_new(50);
-        let t0 = Instant::now();
-        assert!(gate.rr3_gate_allow(t0), "首拍必放");
-        assert!(!gate.rr3_gate_allow(t0 + Duration::from_millis(10)));
-        assert!(!gate.rr3_gate_allow(t0 + Duration::from_millis(49)));
-        assert!(
-            gate.rr3_gate_allow(t0 + Duration::from_millis(50)),
-            "恰好到窗放行"
-        );
-        assert!(!gate.rr3_gate_allow(t0 + Duration::from_millis(60)));
-        assert!(
-            gate.rr3_gate_allow(t0 + Duration::from_millis(110)),
-            "窗从上次放行起算"
-        );
+        assert!(gate.rr3_gate_allow(1_000));
+        assert!(!gate.rr3_gate_allow(1_010), "窗内连发被限（rr-core 判定）");
     }
 
     #[test]
