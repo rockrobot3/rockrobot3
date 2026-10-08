@@ -79,6 +79,12 @@ fn rr3_intent_action_handle(
         }
         RR3_SERVO_COMMAND_TOPIC => {
             let (angle, _move_ms) = servo::rr3_servo_parse_args(args, servo_cfg)?;
+            // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
+            let angle = rr_core::control::rr3_travel_clamp(
+                angle,
+                servo_cfg.angle_min_deg,
+                servo_cfg.angle_max_deg,
+            );
             // HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）
             rr3_block_on(servo.set_angle(angle))
                 .map_err(|e| format!("舵机写入失败: {e}"))?;

@@ -18,6 +18,8 @@
 //! [`runtime`] 模块（批D₂）：执行环（连接→注册→心跳→分发→节拍）的连接态
 //! 语义 [`runtime::Rr3LinkState`] / 心跳拍点调度 [`runtime::Rr3ModuleRuntime`] /
 //! 收帧分发分类 [`runtime::rr3_dispatch_class`]；常量与寻址先行落位（批D₁）。
+//! 控制原语与安全核切片落 [`control`] 模块（批D₃）：限速门 / 低电边沿 / 饱和
+//! 检测 / 限位钳位，纯函数 + 注入时钟（裁定 5）。
 //!
 //! 主承载层（std 客户端：UDS、线程、serde_json）不在这里——那是 `rr-bus` 的事；
 //! 本 crate 是它在裸金属目标上可复用的语义内核。
@@ -34,6 +36,7 @@ use alloc::vec::Vec;
 use rr_ipc::opcode;
 use rr_ipc::{Rr3Frame, Rr3Header, Rr3PayloadType, RR3_CONTRACT_SCHEMA_VERSION};
 
+pub mod control;
 pub mod runtime;
 
 // ---------------------------------------------------------------------------
