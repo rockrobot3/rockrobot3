@@ -1488,6 +1488,23 @@ rr-ipc 58+4 测试全绿零波及。`rr-bus` 改消费 rr-core：常量真值迁
 `cargo +esp check -Zbuild-std=core,alloc --target xtensa-esp32-none-elf`
 （rr-core 全量 + rr-ipc `--lib` 跳过需 std 的 ipct003_dump bin）双绿
 
+2026-10-09 0.0.5 第 II 轮 批D② 模块运行时执行环下沉（ADR-0018 裁定 1/3，全案 §8 批D
+行；机制核四层下沉的第三层，七步门禁直跑 GATE_EXIT=0 十六 PASS、三端指针核对一致）——
+`rr-core` 新增 `runtime` 模块（no_std，纯函数 + 时钟注入）：执行环（连接→注册→心跳→
+分发→节拍）的平台无关决策——`Rr3ModuleRuntime` 连接态转移（`Rr3LinkState`：
+Registering/Online/Down，**net.online 格机制核切片** = `rr3_link_online`）+ 心跳拍点
+调度（相对节拍逐拍 +hb，drift 语义与 std 心跳线程既有行为逐拍一致；间隔保底 ≥1ms
+即原 `hb_ms.max(1)` 规则进机制核）+ `rr3_dispatch_class` 收帧分发分类（Response 路由
+等待者、其余进 inbox）；7 测试（状态转移、拍点等距序列、断开终态幂等、分发分类表）。
+`rr-bus` client 变 std 驱动器：心跳线程拍点真值改由状态机给出（`next_beat_wait_ms`/
+`heartbeat_due`/`heartbeat_sent`，驱动器只做 sleep 等拍与 socket 收发——平台供给面），
+reader 循环分发判定改走 `rr3_dispatch_class`；线上字节与拍点序列逐字不变，
+12 测试零波及守恒（功能守恒红线：client 全用例 + rrd e2e 全绿）。
+xtensa no_std 线复验：`cargo +esp check -Zbuild-std=core,alloc --target
+xtensa-esp32-none-elf -p rr-core` 绿（runtime 随 lib 入 no_std 面）。同批结清一处
+批D① 漏检：`rr-core/README.md` 随批D① 入库时未被 git 跟踪、⑤ 文档门的导航检查
+（`git ls-files` 口径）未覆盖，docs/README.md 导航漏链——批D② 门禁红出即补挂
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四

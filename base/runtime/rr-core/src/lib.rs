@@ -14,9 +14,10 @@
 //!   全部由调用方注入，本 crate 不读任何时钟、不睡眠、不碰 io（ADR-0018 裁定 5 的
 //!   机制侧前提）；payload 类型前缀复用 `rr-ipc` 的 body 编解码。
 //!
-//! `net.online` 格（contracts/slots.toml base 层）的机制核切片落位于此 crate 的
-//! 执行环部分（连接→注册→心跳存活的连接态语义）；常量与寻址先行落位（批D₁），
-//! 执行环切片随批D₂ 进 `runtime` 模块。
+//! `net.online` 格（contracts/slots.toml base 层）的机制核切片落位于
+//! [`runtime`] 模块（批D₂）：执行环（连接→注册→心跳→分发→节拍）的连接态
+//! 语义 [`runtime::Rr3LinkState`] / 心跳拍点调度 [`runtime::Rr3ModuleRuntime`] /
+//! 收帧分发分类 [`runtime::rr3_dispatch_class`]；常量与寻址先行落位（批D₁）。
 //!
 //! 主承载层（std 客户端：UDS、线程、serde_json）不在这里——那是 `rr-bus` 的事；
 //! 本 crate 是它在裸金属目标上可复用的语义内核。
@@ -32,6 +33,8 @@ use alloc::vec::Vec;
 
 use rr_ipc::opcode;
 use rr_ipc::{Rr3Frame, Rr3Header, Rr3PayloadType, RR3_CONTRACT_SCHEMA_VERSION};
+
+pub mod runtime;
 
 // ---------------------------------------------------------------------------
 // 常量层（批D₁ 自 rr-bus 迁入；rr-bus re-export 保持对外路径不变）
