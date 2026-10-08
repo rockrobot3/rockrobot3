@@ -1389,6 +1389,17 @@ UBEC 1S 输入档与单点共地、MAX7219 SPI 出帧与 Rr3FaceFrame=[u8;8] 帧
 （RR3_HAL_I2C_BUS/RR3_HAL_INA219_ADDR，8f4d928 收官面）；docs/README
 三处登记（四档落点/库地图/动作索引）
 
+2026-10-08 0.0.5 增补轮四 批W6：0.0.7 修订版 5 落档（全案 §3.3 C2/C3/C4
+前置技术点）——§5.1 桥件形状钉死八条（连接模型 UART↔UDS 1:1、字节透传
+零解析、帧级握手实证（rr3_handshake 门序无连接级 creds 门，桥对握手不可见）、
+寿命管理三态循环（UDS 未就绪丢弃+计数自愈依据 rrd-rpc §5 TimedOut 语义）、
+下行带宽核算、socket 权限注记、零策略断言四条，R15/R20 复核零冲突无裁定点
+回上游）；§9.3 ⑥ S3 切换预案四件套（触发=剩余堆<20% 或 std 不可起、target
+差异点三处、到货验收单四项、S3 无二级降级）；§9.4 ⑤ e2e 双档判据（macOS 档
+sim_peer 作总线对端 / 树莓派档批F4 口径 RR3_SIM_PANEL_ADDR 注入 +
+denied_publish=0）；§9.3 ① target 订正 none-elf→espidf（批W1 实证）+ 版本
+组合回链批W1 钉死登记；docs/README 两处修订版 5 同步
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
