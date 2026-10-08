@@ -7,7 +7,7 @@
 项目处于早期阶段，架构（设计）见 [docs/architecture/architecture.md](docs/architecture/architecture.md)，
 "代码今天到哪一步"见 [docs/status.md](docs/status.md)
 
-欢迎讨论与共建，Issue 是第一入口。
+欢迎讨论与共建
 
 ## 文档索引
 
