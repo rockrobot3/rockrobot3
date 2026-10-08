@@ -1,0 +1,17 @@
+# servo 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C② 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "servo"
+version = "0.0.1"
+
+[provides]
+slots = ["act.servo"]   # 舵机/关节指令：行程/时限裁决 + state 限速流
+
+[uses]
+slots = []   # 执行面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
+
+[events]
+publishes = ["rr3-act/servo/state"]   # 指令面 rr3-act/servo/command 在 module.toml [rpc].exposes（owner 级），atom 层不重述
+subscribes = []

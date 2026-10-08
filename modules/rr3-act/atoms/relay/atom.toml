@@ -1,0 +1,17 @@
+# relay 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C② 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "relay"
+version = "0.0.1"
+
+[provides]
+slots = ["act.relay"]   # 继电器通断（2026-10-04 依 0.0.2 方案 Q1 裁定立格）
+
+[uses]
+slots = []   # 通断面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
+
+[events]
+publishes = ["rr3-act/relay/state"]   # 通断摘要变化即发；rpc 面 rr3-act/relay/set 在 module.toml [rpc].exposes（owner 级）
+subscribes = []
