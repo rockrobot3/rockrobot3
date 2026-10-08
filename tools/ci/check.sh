@@ -14,6 +14,9 @@
 #    例外：tools/esp32-uart-echo 是 ESP32 固件工程（xtensa-esp32-none-elf 目标），编译需 esp fork
 #    工具链（cargo +esp）+ Xtensa esp-gcc，宿主工具链 check 必红——它由专用门
 #    tools/ci/esp-uart-echo-check.sh 覆盖（工具链缺位时 SKIP 明说，编译成功还断言 ELF 出树）。
+#    同例：tools/espidf-std-hello（0.0.5 增补轮四 批W1，xtensa-esp32-espidf 目标 + build-std +
+#    esp-idf-sys，还须 ESP-IDF 克隆与乐鑫 esp-clang）——专用门 tools/ci/espidf-std-check.sh，
+#    SKIP 纪律同上。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内，规约门拒绝执行。" >&2
@@ -91,7 +94,8 @@ while IFS= read -r -d '' manifest; do
     fail=1
   fi
 done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
-                    -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" -print0 | sort -z)
+                    -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
+                    -not -path "tools/espidf-std-hello/*" -print0 | sort -z)
 if [ "$found" -eq 0 ]; then
   printf 'FAIL  ④ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
   fail=1

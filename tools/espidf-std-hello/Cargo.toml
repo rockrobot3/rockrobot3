@@ -1,0 +1,27 @@
+[package]
+name = "espidf-std-hello"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "0.0.5 增补轮四 批W1 espidf std 构建链冒烟件（ESP-IDF std hello，独立 workspace）"
+
+# 独立 workspace：xtensa-esp32-espidf 目标 + build-std 与 base/runtime 主 workspace 互斥，
+# 门禁 ④ 的宿主 check 不扫本目录（check.sh 显式排除；编译走
+# tools/ci/espidf-std-check.sh，工具链缺位 SKIP 纪律同 esp-uart-echo-check.sh）。
+[workspace]
+
+[dependencies]
+# std 冒烟只走绑定面：binstart 入口 + 两枚 IDF C API 调用（版本串/空闲堆）即证明
+# "rustc build-std + esp-idf-sys 绑定 + IDF C 库编译 + xtensa 链接"整链通。
+# 版本对表（批W1 登记钉死）：0.35.0（2024-06 发布）与本地 ESP-IDF v5.2.2 同代；
+# 0.36+ 起 changelog 弃 5.1/5.2.x（0.36 推荐线抬到 5.2.3），不再取更高版。
+esp-idf-sys = { version = "=0.35.0", features = ["binstart"] }
+
+[build-dependencies]
+# 链接参数接力：cargo:rustc-link-arg 只作用于发射包自身的 bins/ctest 面，
+# esp-idf-sys 是 lib 故其发射全部被丢弃——根 crate 必须经 links 元数据
+# （DEP_ESP_IDF_EMBUILD_LINK_ARGS）自行取回并转发（官方 esp-idf-template 同款）。
+# 精确 pin 对齐 esp-idf-sys 0.35.0 自身依赖（其 Cargo.toml.orig 声明 embuild "0.32"）。
+embuild = "=0.32.0"

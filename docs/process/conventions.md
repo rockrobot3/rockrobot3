@@ -1362,6 +1362,22 @@ extern 壳不引依赖，同 rr-ipc shm 六函数先例）；数据面零改动�
 e2e 双判据（节流本体：第二拍后 300ms 盘面不变；关停完整性：SIGTERM 退 0 +
 尾差落盘 + 无 tmp 残留）随既有单测全绿
 
+2026-10-08 0.0.5 增补轮四 批W1：espidf std 构建链冒烟（R28，全案 §3.3 C1，
+ELF Tensilica Xtensa 32-bit 静态链接出树实证整链通）——`cargo +esp build`
+（xtensa-esp32-espidf + build-std std/panic_abort）+ esp-idf-sys 0.35.0 ↔
+ESP-IDF v5.2.2 版本对表钉死（0.36+ 弃 5.1/5.2.x，不再取更高版）；三坑登记：
+①bindgen 的 libclang 须乐鑫 LLVM fork（上游含 CLT 的均无 Xtensa 后端，报
+unknown target triple 'xtensa'）——esp-clang 的 clang 与 libs 两资产合并解包
+（后者才含 libclang.dylib，espup 两件都装）+ `~/.espup/esp-clang` symlink，
+esp-idf-sys `setup_clang_env` 自动设 LIBCLANG_PATH；②`cargo:rustc-link-arg`
+只作用于发射包自身 bins 面，esp-idf-sys 是 lib 发射全丢——根 crate build.rs
+经 `links="esp_idf"` 元数据接力（`LinkArgs::output_propagated`，官方模板同款），
+缺位症状 ldproxy panic `Cannot locate argument '--ldproxy-linker'`；
+③`--cfg espidf_time64` rustflags 必设（IDF 5.x time_t 64 位面）；新门
+tools/ci/espidf-std-check.sh（SKIP 纪律同 esp32-uart-echo 门，另带 venv
+dist-info 改名兜底与 pip/GitHub 镜像注入），check.sh ④ 显式排除本工程；
+版本钉死登记落 tools/espidf-std-hello/README.md
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
