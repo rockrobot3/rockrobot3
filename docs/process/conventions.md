@@ -1378,6 +1378,17 @@ tools/ci/espidf-std-check.sh（SKIP 纪律同 esp32-uart-echo 门，另带 venv
 dist-info 改名兜底与 pip/GitHub 镜像注入），check.sh ④ 显式排除本工程；
 版本钉死登记落 tools/espidf-std-hello/README.md
 
+2026-10-08 0.0.5 增补轮四 批W5：真件装配与标定手册落档（全案 D9/B2）——
+docs/process/dev/真件装配与标定手册.md，六件到货桌面级验收/装配/标定 runbook
+（USB 麦 UAC≥2ch 免驱+非全零抓样、SG90 三点行程 0.5/1.5/2.5ms↔0/90/180°+
+UBEC 1S 输入档与单点共地、MAX7219 SPI 出帧与 Rr3FaceFrame=[u8;8] 帧面逐行
+对齐、TP4056 三保护核对（过充 4.20V/过放 ~2.45V/短路断出）、INA219 万用表
+两点标定偏差 ≤2%、ESP32 UART2 四件套 3.3V TTL 严禁 5V），每件四件套+
+到货差异登记表；权威边界引用不複述（型号=0.0.6 §5.4 BOM 定案、接线=§5.5.2、
+配置=§5.5.3、逐链=§5.5.4），HAL 键位锚定 rr-hal 代码实况
+（RR3_HAL_I2C_BUS/RR3_HAL_INA219_ADDR，8f4d928 收官面）；docs/README
+三处登记（四档落点/库地图/动作索引）
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
