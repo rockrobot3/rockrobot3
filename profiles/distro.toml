@@ -30,6 +30,19 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 "cognition.llm" = "rr3-brain"
 "cognition.tts" = "rr3-brain"
 
+[hardware]
+# 物理绑定（ADR-0018 裁定 4、批D④ 收口）：键位与取值同 profiles/default.toml
+# 注释（R22/R8/接线 3/BOM #5/runbook 件 4）；换板 = 只改本段，不改代码。
+alsa_device = "default"
+pwm_chip = 0
+pwm_channel = 0
+gpio_chip = 0
+gpio_led_line = 4
+gpio_relay_line = 17
+i2c_bus = 1
+ina219_addr = "0x40"
+link_ifname = "wlan0"
+
 [enabled_slots]
 # 模块 → 本形态启用的格位集合。enabled_slots 决定起谁（Q3 裁定）。
 rr3-act = ["act.servo", "act.led", "act.relay"]

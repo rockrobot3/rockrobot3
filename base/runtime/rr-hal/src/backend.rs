@@ -29,6 +29,12 @@ pub const RR3_BACKEND_PLACEHOLDER: &str = "placeholder";
 /// 取值：`sim` / `linux` / `placeholder`；未设或取值不认 → 走平台默认。
 pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 
+// —— 以下 `RR3_HAL_*` 键全部是**应急覆盖**（批D④ 收口，ADR-0018 裁定 4）：
+// 物理绑定的真值来自描述符（`profiles/<机>.toml` [hardware] → `RR3_HAL_BINDINGS`
+// 注入，见 [`crate::descriptor`]）；本组 env 同键覆盖描述符，供现场救场。描述符
+// 与 env 都没给的键，对应能力面落占位后端显式回错——代码缺省 fail-closed，不回落
+// 任何一块具体板的引脚。键位语义/取值域的裁决纯函数留在本模块（compose 共用）。
+
 /// sim 源的波形选择键：`sine` / `noise` / `silence` / `burst`（默认 `sine`，必过 VAD 起音阈值；
 /// `burst` = 1s 正弦 + 1s 静音循环，VAD 周期性发 onset/offset，多轮对话闭环用）。
 pub const RR3_HAL_SIM_WAVE_ENV: &str = "RR3_HAL_SIM_WAVE";
@@ -38,34 +44,35 @@ pub const RR3_HAL_SIM_WAVE_ENV: &str = "RR3_HAL_SIM_WAVE";
 /// 多通道采集 + 本键才生效（单声道链路无方向语义，注入被设备面忽略）。
 pub const RR3_HAL_SIM_DOA_DEG_ENV: &str = "RR3_HAL_SIM_DOA_DEG";
 
-/// linux（ALSA）后端的设备名键：如 `hw:0,0`、`plughw:1,0`；默认 `default`。
+/// linux（ALSA）后端的设备名键：如 `hw:0,0`、`plughw:1,0`。应急覆盖：描述符键
+/// `alsa_device` 同域；都没给 → 音频面占位显式回错（fail-closed）。
 pub const RR3_HAL_ALSA_DEVICE_ENV: &str = "RR3_HAL_ALSA_DEVICE";
 
-/// ALSA 采集/回放的默认设备名
-pub const RR3_HAL_ALSA_DEVICE_DEFAULT: &str = "default";
-
-/// linux sysfs PWM 的芯片号键（十进制非负整数；未设/取值不认 → 0）。
-/// 树莓派 BCM2835 硬件 PWM：pwmchip0 的 pwm0=GPIO12、pwm1=GPIO13（R22 定案档，
-/// `dtoverlay=pwm-2chan` 开双通道，方案 §5.5.2 接线 1）。
+/// linux sysfs PWM 的芯片号键（十进制非负整数）。应急覆盖：描述符键 `pwm_chip`
+/// 同域；都没给 → 舵机面占位显式回错（fail-closed，参考机真值 pwmchip0 在
+/// profiles [hardware]，R22 定案档）。
 pub const RR3_HAL_PWM_CHIP_ENV: &str = "RR3_HAL_PWM_CHIP";
 
-/// linux sysfs PWM 的通道号键（十进制非负整数；未设/取值不认 → 0 = GPIO12）。
+/// linux sysfs PWM 的通道号键（十进制非负整数）。应急覆盖：描述符键 `pwm_channel`
+/// 同域；都没给 → 舵机面占位显式回错（fail-closed，参考机 pwm0 = GPIO12）。
 pub const RR3_HAL_PWM_CHANNEL_ENV: &str = "RR3_HAL_PWM_CHANNEL";
 
-/// linux chardev GPIO 的芯片号键（十进制非负整数；未设/取值不认 → 0）。
-/// LED 与继电器两路共挂一个芯片（`/dev/gpiochipN`），线偏移按角色分键。
+/// linux chardev GPIO 的芯片号键（十进制非负整数）。应急覆盖：描述符键
+/// `gpio_chip` 同域；都没给 → 数字输出面占位显式回错（fail-closed）。
 pub const RR3_HAL_GPIO_CHIP_ENV: &str = "RR3_HAL_GPIO_CHIP";
 
-/// linux I2C 电池读数的总线号键（十进制非负整数；未设/取值不认 → 1——
-/// 树莓派硬件 I2C = GPIO2/3 = i2c1，接线 3）。
+/// linux I2C 电池读数的总线号键（十进制非负整数）。应急覆盖：描述符键 `i2c_bus`
+/// 同域；都没给 → 电源面占位显式回错（fail-closed，参考机 i2c1 在 profiles）。
 pub const RR3_HAL_I2C_BUS_ENV: &str = "RR3_HAL_I2C_BUS";
 
-/// linux I2C 电池读数的 INA219 从地址键（`0x` 前缀或纯十六进制；未设/取值
-/// 不认 → 0x40，BOM #5 定案档）。
+/// linux I2C 电池读数的 INA219 从地址键（`0x` 前缀或纯十六进制）。应急覆盖：
+/// 描述符键 `ina219_addr` 同域；都没给 → 电源面占位显式回错（fail-closed，
+/// BOM #5 定案档 0x40 在 profiles）。
 pub const RR3_HAL_INA219_ADDR_ENV: &str = "RR3_HAL_INA219_ADDR";
 
-/// linux（NetworkManager）链路读数的接口名键（任意非空串；未设/空 →
-/// `wlan0`——树莓派板载 WiFi 常见名，runbook 件 4 口径）。
+/// linux（NetworkManager）链路读数的接口名键（任意非空串）。应急覆盖：描述符键
+/// `link_ifname` 同域；都没给 → 链路面占位显式回错（fail-closed，runbook 件 4
+/// 参考机 wlan0 在 profiles）。
 pub const RR3_HAL_LINK_IFNAME_ENV: &str = "RR3_HAL_LINK_IFNAME";
 
 /// INA219 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义
@@ -78,28 +85,18 @@ pub fn rr3_ina219_addr_parse(s: &str) -> Option<u8> {
         .filter(|a| (0x08..=0x77).contains(a))
 }
 
-/// 角色对应的线偏移环境变量键（`led` → `RR3_HAL_GPIO_LED_LINE`、
+/// 角色对应的线偏移应急 env 键（`led` → `RR3_HAL_GPIO_LED_LINE`、
 /// `relay` → `RR3_HAL_GPIO_RELAY_LINE`）。取值十进制非负整数；role 仅认
-/// 非空 ASCII 字母数字（防拼出怪键），不认返回 `None`。缺省值见
-/// [`rr3_gpio_line_default`]。独立成纯函数：键拼装可单测，选择函数里只留
-/// "读环境 + 裁决 + 缺省"。
+/// 非空 ASCII 字母数字（防拼出怪键），不认返回 `None`。线偏移的**真值**在描述符
+/// （`profiles/<机>.toml` [hardware] 的 `gpio_led_line`/`gpio_relay_line`，
+/// R8 预算表参考机 GPIO4/17）——本组 env 只是应急覆盖，两处都没给时数字输出面
+/// 落占位显式回错（fail-closed，批D④ 收口，不再有代码缺省）。白名单外的 role
+/// 无键无绑定（`None`）。独立成纯函数：键拼装可单测，选择函数里只留合成与选路。
 pub fn rr3_gpio_line_env_key(role: &str) -> Option<String> {
     if role.is_empty() || !role.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return None;
     }
     Some(format!("RR3_HAL_GPIO_{}_LINE", role.to_ascii_uppercase()))
-}
-
-/// 角色 → 线偏移缺省值（BCM 编号）：`led` → 4、`relay` → 17——R8 引脚预算表
-/// "GPIO4/17… 软件路可用"行（与 I2S/I2C 不冲突）；接线手册未单列 LED/继电器
-/// 行，真件档装配单如改脚位走 env 覆写，代码缺省不动。白名单外的 role 无
-/// 缺省（`None`）：env 也没给时落必败线偏移，ensure 时显式回错，不静默选脚。
-pub fn rr3_gpio_line_default(role: &str) -> Option<u32> {
-    match role {
-        "led" => Some(4),
-        "relay" => Some(17),
-        _ => None,
-    }
 }
 
 /// sim 电池的初始电量键（0–100 的十进制整数；未设/取值不认 → 80）。
@@ -180,14 +177,24 @@ pub fn rr3_sim_doa_deg_parse(s: &str) -> Option<f64> {
 
 /// 按环境选音频源。解析失败（环境变量取值不认）或显式 `placeholder` 时返回
 /// 占位后端——它会在使用处以 `Unsupported` 显式回错，**不静默换后端**。
+/// linux 档的设备名来自生效绑定（[`crate::descriptor::rr3_hal_bindings_effective`]：
+/// 描述符为底、env 应急覆盖）；键缺失/合成失败 → 占位显式回错（fail-closed，批D④）。
 pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return (
-                Box::new(crate::linux::Rr3AlsaAudioSource::rr3_alsa_source_default()),
-                RR3_BACKEND_LINUX,
-            );
+            return crate::descriptor::rr3_hal_bindings_effective()
+                .ok()
+                .and_then(|b| {
+                    b.alsa_device.map(|dev| {
+                        (
+                            Box::new(crate::linux::Rr3AlsaAudioSource::rr3_alsa_source_new(&dev))
+                                as Box<dyn Rr3AudioSource>,
+                            RR3_BACKEND_LINUX,
+                        )
+                    })
+                })
+                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
@@ -216,10 +223,18 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return (
-                Box::new(crate::linux::Rr3AlsaAudioSink::rr3_alsa_sink_default()),
-                RR3_BACKEND_LINUX,
-            );
+            return crate::descriptor::rr3_hal_bindings_effective()
+                .ok()
+                .and_then(|b| {
+                    b.alsa_device.map(|dev| {
+                        (
+                            Box::new(crate::linux::Rr3AlsaAudioSink::rr3_alsa_sink_new(&dev))
+                                as Box<dyn Rr3AudioSink>,
+                            RR3_BACKEND_LINUX,
+                        )
+                    })
+                })
+                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
@@ -234,17 +249,27 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
 }
 
 /// 按环境选舵机（与 [`rr3_hal_audio_source`] 同一套规则）。linux 平台走 sysfs PWM
-/// 后端（[`crate::linux_pwm`]，R11①/R22 定案档：pwmchip0/pwm0 = GPIO12 硬件 PWM，
-/// 芯片/通道可经 `RR3_HAL_PWM_CHIP` / `RR3_HAL_PWM_CHANNEL` 选）；非 linux 平台
-/// 显式要 `linux` 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim。
+/// 后端（[`crate::linux_pwm`]，R11①/R22 定案档），芯片/通道来自生效绑定
+/// （描述符 `pwm_chip`/`pwm_channel`，`RR3_HAL_PWM_*` env 应急覆盖）；键缺失或
+/// 合成失败 → 占位件使用时以 `Unsupported` 回错（fail-closed，不回落参考机引脚），
+/// 非 linux 平台显式要 `linux` 时同落占位件，不静默换 sim。
 pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return (
-                Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_linux_pwm_servo_default()),
-                RR3_BACKEND_LINUX,
-            );
+            return crate::descriptor::rr3_hal_bindings_effective()
+                .ok()
+                .and_then(|b| {
+                    Some((
+                        Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(
+                            std::path::Path::new(crate::linux_pwm::RR3_PWM_SYSFS_ROOT_DEFAULT),
+                            b.pwm_chip?,
+                            b.pwm_channel?,
+                        )) as Box<dyn Rr3PwmServo>,
+                        RR3_BACKEND_LINUX,
+                    ))
+                })
+                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(target_os = "linux"))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
@@ -259,22 +284,40 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
 
 /// 按环境选一路数字输出（`role` 白名单 `led` / `relay`——各调一次、各传各的
 /// 角色，各得一路独立线偏移；带参而不靠调用顺序配键是刻意的：顺序耦合在
-/// 半夜改代码时是隐形地雷）。
+/// 半夜改代码时是隐形地雷）。linux 档的芯片号/线偏移来自生效绑定（描述符
+/// `gpio_chip` + `gpio_<role>_line`，`RR3_HAL_*` env 应急覆盖）；role 白名单外
+/// 或键缺失/合成失败 → 占位件使用时以 `Unsupported` 回错（fail-closed，批D④
+/// 收口——不再有"必败线偏移 ensure 时才炸"的代码缺省，缺数据在选择面就点名）。
 ///
 /// 返回 [`Arc`] 而不是 [`Box`]：灯效的 blink 翻转在 worker 线程里写同一通道，
 /// 测试也要从另一线程观察电平——共享属这类设备的常态形状，不是偶发需求。
 pub fn rr3_hal_gpio_out(
     // 非 linux 平台 linux 分支被剔除、sim 分支不按角色分键——参数在那些平台
-    // 编译面上未使用是结构性的，不是疏漏（linux 上它决定线偏移 env 键）
+    // 编译面上未使用是结构性的，不是疏漏（linux 上它决定线偏移绑定键）
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] role: &str,
 ) -> (Arc<dyn Rr3GpioOut>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return (
-                Arc::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_linux_gpio_out_default(role)),
-                RR3_BACKEND_LINUX,
-            );
+            return crate::descriptor::rr3_hal_bindings_effective()
+                .ok()
+                .and_then(|b| {
+                    let line = match role {
+                        "led" => b.gpio_led_line,
+                        "relay" => b.gpio_relay_line,
+                        _ => None, // 白名单外：无键无绑定，fail-closed
+                    };
+                    Some((
+                        Arc::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_linux_gpio_out_new(
+                            std::path::Path::new(crate::linux_gpio::RR3_GPIO_DEV_ROOT_DEFAULT),
+                            b.gpio_chip?,
+                            line?,
+                            role,
+                        )) as Arc<dyn Rr3GpioOut>,
+                        RR3_BACKEND_LINUX,
+                    ))
+                })
+                .unwrap_or((Arc::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(target_os = "linux"))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
@@ -339,18 +382,27 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
 }
 
 /// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 走
-/// INA219 I2C 后端（[`crate::linux_power`]，R18：总线/地址经
-/// `RR3_HAL_I2C_BUS` / `RR3_HAL_INA219_ADDR` 选）；非 linux 平台显式要 `linux`
-/// 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim——rr3-power 开机
-/// 探活会按"能力缺失显式回错"退出。
+/// INA219 I2C 后端（[`crate::linux_power`]，R18），总线/地址来自生效绑定
+/// （描述符 `i2c_bus`/`ina219_addr`，`RR3_HAL_*` env 应急覆盖）；键缺失或合成
+/// 失败 → 占位件使用时以 `Unsupported` 回错（fail-closed）——rr3-power 开机
+/// 探活会按"能力缺失显式回错"退出，不静默换 sim。
 pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return (
-                Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_default()),
-                RR3_BACKEND_LINUX,
-            );
+            return crate::descriptor::rr3_hal_bindings_effective()
+                .ok()
+                .and_then(|b| {
+                    Some((
+                        Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_new(
+                            std::path::Path::new(crate::linux_power::RR3_I2C_DEV_ROOT_DEFAULT),
+                            b.i2c_bus?,
+                            b.ina219_addr?,
+                        )) as Box<dyn Rr3Power>,
+                        RR3_BACKEND_LINUX,
+                    ))
+                })
+                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(target_os = "linux"))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
@@ -372,16 +424,26 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
 
 /// 按环境选网络链路读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux
 /// 分支走 NetworkManager 后端（批F5a⑤，`linux_link.rs` nmcli 子进程承载；
-/// 配网/断链重连是 NM 自身行为，HAL 只如实报数）；显式 `linux` 但非 linux
-/// 平台时落占位件，使用时以 `Unsupported` 回错，不静默换 sim。
+/// 配网/断链重连是 NM 自身行为，HAL 只如实报数），接口名来自生效绑定（描述符
+/// `link_ifname`，`RR3_HAL_LINK_IFNAME` env 应急覆盖）；键缺失或合成失败 →
+/// 占位件使用时以 `Unsupported` 回错（fail-closed）；显式 `linux` 但非 linux
+/// 平台时同落占位件，不静默换 sim。
 pub fn rr3_hal_link() -> (Box<dyn crate::Rr3Link>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return (
-                Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_default()),
-                RR3_BACKEND_LINUX,
-            );
+            return crate::descriptor::rr3_hal_bindings_effective()
+                .ok()
+                .and_then(|b| {
+                    Some((
+                        Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_new(
+                            b.link_ifname?,
+                            "nmcli",
+                        )) as Box<dyn crate::Rr3Link>,
+                        RR3_BACKEND_LINUX,
+                    ))
+                })
+                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(target_os = "linux"))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
@@ -476,10 +538,12 @@ mod tests {
         }
     }
 
-    /// GPIO 角色 → env 键拼装与缺省线偏移（R8 预算表 GPIO4/17 软件路行）：
-    /// 白名单两角色键/缺省逐字钉死，空串/怪字符不拼键，白名单外无缺省。
+    /// GPIO 角色 → 应急 env 键拼装（R8 预算表 GPIO4/17 真值已迁 profiles
+    /// [hardware]，批D④ 后无代码缺省）：键拼装是通用机制（任意字母数字 role
+    /// 都拼得出键），**绑定白名单在选择面**（rr3_hal_gpio_out 只认 led/relay，
+    /// 白名单外 fail-closed 显式回错）；空串/怪字符不拼键。
     #[test]
-    fn gpio_role_env_key_and_line_default_match_whitelist() {
+    fn gpio_role_env_key_matches_whitelist() {
         assert_eq!(
             rr3_gpio_line_env_key("led").as_deref(),
             Some("RR3_HAL_GPIO_LED_LINE")
@@ -490,13 +554,16 @@ mod tests {
         );
         assert_eq!(rr3_gpio_line_env_key(""), None, "空串不拼键");
         assert_eq!(rr3_gpio_line_env_key("led-1"), None, "怪字符不拼键");
-        assert_eq!(rr3_gpio_line_default("led"), Some(4));
-        assert_eq!(rr3_gpio_line_default("relay"), Some(17));
-        assert_eq!(rr3_gpio_line_default("fan"), None, "白名单外无缺省，必败线偏移显式回错");
+        assert_eq!(
+            rr3_gpio_line_env_key("fan").as_deref(),
+            Some("RR3_HAL_GPIO_FAN_LINE"),
+            "键拼装通用；fan 不在选择面白名单，无绑定 fail-closed"
+        );
     }
 
-    /// linux PWM 芯片/通道号键的取值裁决：十进制非负整数才收，负数/垃圾/空不认
-    /// （落缺省 pwmchip0/pwm0 = GPIO12）。
+    /// linux PWM 芯片/通道号键的取值裁决（应急覆盖与描述符共用）：十进制非负
+    /// 整数才收，负数/垃圾/空不认（真值 pwmchip0/pwm0 = GPIO12 在 profiles
+    /// [hardware]，批D④ 后代码不再持有缺省）。
     #[test]
     fn pwm_index_env_values_parse_or_default() {
         assert_eq!(rr3_pwm_index_parse("0"), Some(0));

@@ -111,21 +111,9 @@ pub struct Rr3LinuxPwmServo {
 }
 
 impl Rr3LinuxPwmServo {
-    /// 板上缺省构造：根 [`RR3_PWM_SYSFS_ROOT_DEFAULT`]，芯片/通道取
-    /// `RR3_HAL_PWM_CHIP` / `RR3_HAL_PWM_CHANNEL`（缺省 pwmchip0/pwm0 = GPIO12）
-    pub fn rr3_linux_pwm_servo_default() -> Self {
-        let chip = std::env::var(crate::backend::RR3_HAL_PWM_CHIP_ENV)
-            .ok()
-            .and_then(|v| crate::backend::rr3_pwm_index_parse(&v))
-            .unwrap_or(0);
-        let channel = std::env::var(crate::backend::RR3_HAL_PWM_CHANNEL_ENV)
-            .ok()
-            .and_then(|v| crate::backend::rr3_pwm_index_parse(&v))
-            .unwrap_or(0);
-        Self::rr3_linux_pwm_servo_new(Path::new(RR3_PWM_SYSFS_ROOT_DEFAULT), chip, channel)
-    }
-
-    /// 指定根/芯片/通道构造（测试用假 sysfs 树走这里，不触真硬件）
+    /// 指定根/芯片/通道构造（选择函数从生效物理绑定取 `pwm_chip`/`pwm_channel`，
+    /// 批D④ fail-closed——芯片/通道没有代码缺省，描述符/env 都没给就在选择面
+    /// 点名；测试用假 sysfs 树也走这里，不触真硬件）
     pub fn rr3_linux_pwm_servo_new(root: &Path, chip: u32, channel: u32) -> Self {
         Self {
             root: root.to_path_buf(),

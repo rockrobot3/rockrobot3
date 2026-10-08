@@ -1524,6 +1524,25 @@ servo/mech.rs、battery/mech.rs、reflex.rs 真值迁出（越阈/episode/节拍
 最近端点。xtensa no_std 线复验绿（control 随 lib 入 no_std 面）。rr-core 24 测试
 （批D① 8 + 批D② 7 + control 9）、rr3-act 24、rr3-power 6 全绿。
 
+2026-10-09 0.0.5 第 II 轮 批D④ 板特定缺省收口进描述符（ADR-0018 裁定 4，R2-D4 /
+Q-P5 缓解序；七步门禁直跑 GATE_EXIT=0 十六 PASS、xtensa 线复验绿）——三段数据链
+闭环：① `profiles/default.toml` + `distro.toml` 新增 `[hardware]` 物理绑定段（九键
+真值 = 原代码缺省的数据化迁移：alsa_device/pwm_chip/pwm_channel/gpio_chip/
+gpio_led_line/gpio_relay_line/i2c_bus/ina219_addr/link_ifname，R22/R8/接线 3/
+BOM #5/runbook 件 4 口径，"换板 = 只改本段"）；② rrd 装配链解析 `[hardware]`
+（可选段、标量字符串化、坏类型/空键逐条点名）并经 `Rr3SpawnJob.hal_bindings` 于
+spawn 注入 `RR3_HAL_BINDINGS`（空值不注入；`--manifest` 调试后门无装配单 = 无描
+述符，fail-closed + 应急 env 可救）；③ rr-hal 新增 `descriptor` 模块（`Rr3HalBindings`
+九字段 + `from_text`/`compose`/`effective`）：描述符为底、`RR3_HAL_*` env 降应急
+覆盖（同键覆盖赢、坏值/未知键 Err 点名）、**代码缺省全部删除**——五个选择函数
+（audio_source/audio_sink/servo/gpio_out/power/link）linux 分支改从生效绑定取参调
+`*_new`，键缺失/合成失败/白名单外 role 落占位后端使用时显式回错，不再回落树莓派
+引脚（`RR3_HAL_ALSA_DEVICE_DEFAULT`、`rr3_gpio_line_default`、各后端 `*_default()`
+构造一并退役；sim 系缺省非板特定保留）。`rr-hal` 新增 toml workspace 依赖（描述符
+文本解析同版）。"板 = 数据"自此成立（architecture §12.3 注记、§3 落点表划线、方案
+§12.3 采集环配置行同线注记同批）。rr-hal 35 测试（descriptor 4 新增）、rrd 138 单
+测 + e2e 全绿，模块面与线上字节零改动。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四

@@ -117,17 +117,9 @@ pub struct Rr3LinuxNmLink {
 }
 
 impl Rr3LinuxNmLink {
-    /// 板上缺省构造：接口取 `RR3_HAL_LINK_IFNAME`（缺省 `wlan0`——树莓派
-    /// 板载 WiFi 常见名，runbook 件 4 口径），nmcli 程序 = `nmcli`（PATH）。
-    pub fn rr3_linux_link_default() -> Self {
-        let ifname = std::env::var(crate::backend::RR3_HAL_LINK_IFNAME_ENV)
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "wlan0".to_string());
-        Self::rr3_linux_link_new(ifname, "nmcli")
-    }
-
-    /// 指定接口与 nmcli 程序路径构造（测试传假脚本走这里）
+    /// 指定接口与 nmcli 程序路径构造（选择函数从生效物理绑定取 `link_ifname`，
+    /// 批D④ fail-closed——接口名没有代码缺省，描述符/env 都没给就在选择面点名；
+    /// 测试传假脚本绝对路径注入编排，零全局环境污染）
     pub fn rr3_linux_link_new(ifname: impl Into<String>, nmcli: impl Into<PathBuf>) -> Self {
         Self {
             ifname: ifname.into(),

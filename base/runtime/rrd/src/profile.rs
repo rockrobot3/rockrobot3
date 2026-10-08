@@ -1,7 +1,9 @@
 //! 装配单装载（ADR-0012 裁定 3/5②，0.0.2 方案 D2 / Q3 裁定）。
 //!
 //! `profiles/<机型>.toml` 是**纯数据**装配单：`[bindings]` 格位→件、`[enabled_slots]` 模块→本形态
-//! 启用的格位集合。本模块只做四件事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
+//! 启用的格位集合、`[hardware]` 物理绑定（ADR-0018 裁定 4：引脚/控制器编号/总线/设备名的唯一
+//! 数据事实源，批D④ 收口——可选段，缺了它 linux 硬件面按 fail-closed 显式回错，应急 env 可救）。
+//! 本模块只做四件事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
 //! 运行期不重排，F⊗F 非法）：
 //! 1. 解析装配单文本（fail-closed：形状不合逐条点名，一条不静默放行）；
 //! 2. 查册门（裁定 5②）：bindings/enabled_slots 引用的每个格位必须命中
@@ -39,6 +41,9 @@ pub struct Rr3Profile {
     pub bindings: BTreeMap<String, String>,
     /// [enabled_slots]：模块名 → 本形态启用的格位集合
     pub enabled_slots: BTreeMap<String, Vec<String>>,
+    /// [hardware]：物理绑定键值（键位语义与取值域由 rr-hal 描述符解析裁，
+    /// rrd 只管装配形状——标量字符串化，注入时不解释）
+    pub hardware: BTreeMap<String, String>,
 }
 
 /// 装配链交给 daemon 的 boot 输入
@@ -48,6 +53,8 @@ pub struct Rr3ProfileBoot {
     pub manifests: Vec<PathBuf>,
     /// 缺格 (模块, 格位)：enabled_slots 声明但无有效 binding（或探测不到）→ 该模块不 spawn
     pub missing: Vec<(String, String)>,
+    /// [hardware] 序列化文本（spawn 时注入 `RR3_HAL_BINDINGS`；空 = 未给物理绑定）
+    pub hal_bindings: String,
 }
 
 /// 装配单路径解析成绝对路径：装载与横幅凭证共用同一个解析结果。
@@ -114,10 +121,50 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
+    // [hardware]：可选段（纯 sim/无硬件格形态可以不给）。每键非空、值必须是
+    // 字符串或整数标量（整数按十进制字符串化——rr-hal 描述符解析端全按字符串
+    // 收）；布尔/浮点/数组/表逐条点名，一条不静默放行。
+    let mut hardware = BTreeMap::new();
+    match root.get("hardware").and_then(toml::Value::as_table) {
+        None => {}
+        Some(t) => {
+            for (k, v) in t {
+                if k.is_empty() {
+                    errs.push("[hardware] 键不得为空串".to_string());
+                    continue;
+                }
+                match v {
+                    toml::Value::String(s) => {
+                        hardware.insert(k.clone(), s.clone());
+                    }
+                    toml::Value::Integer(i) => {
+                        hardware.insert(k.clone(), i.to_string());
+                    }
+                    other => errs.push(format!(
+                        "hardware.{k} 应为字符串或整数标量（物理绑定值），收到 {other:?}"
+                    )),
+                }
+            }
+        }
+    }
     if !errs.is_empty() {
         return Err(errs);
     }
-    Ok(Rr3Profile { bindings, enabled_slots })
+    Ok(Rr3Profile { bindings, enabled_slots, hardware })
+}
+
+/// [hardware] 段序列化成注入文本：每行 `键 = "值"`（值已字符串化，TOML 基本
+/// 字符串转义只涉及反斜杠与双引号）。BTreeMap 升序 = 确定性；空表 → 空串
+/// （调用方见空不注入，模块侧维持"无描述符"状态）。
+fn rr3_hardware_bindings_text(hardware: &BTreeMap<String, String>) -> String {
+    let mut out = String::new();
+    for (k, v) in hardware {
+        out.push_str(&format!(
+            "{k} = \"{}\"\n",
+            v.replace('\\', "\\\\").replace('"', "\\\"")
+        ));
+    }
+    out
 }
 
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
@@ -230,7 +277,8 @@ pub fn rr3_profile_boot_inputs(
         .keys()
         .map(|m| root.join("modules").join(m).join("module.toml"))
         .collect();
-    Ok(Rr3ProfileBoot { manifests, missing })
+    let hal_bindings = rr3_hardware_bindings_text(&profile.hardware);
+    Ok(Rr3ProfileBoot { manifests, missing, hal_bindings })
 }
 
 #[cfg(test)]
@@ -437,6 +485,70 @@ rr3-pc = ["cognition.llm"]
         let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
             .expect("基础层 enabled_slots 格位不缺格");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
+    }
+
+    /// [hardware] 段：字符串/整数标量收、整数字符串化、缺段可选；坏类型逐条点名。
+    #[test]
+    fn hardware_section_is_optional_scalars_stringified() {
+        // 缺段：合法（纯 sim/无硬件格形态），hal_bindings 为空文本
+        let p = rr3_profile_from_text(GOOD).expect("缺 [hardware] 段必须合法");
+        assert!(p.hardware.is_empty(), "{:?}", p.hardware);
+
+        // 字符串 + 整数混合：整数按十进制字符串化
+        let text = format!("{GOOD}\n[hardware]\npwm_chip = 0\nlink_ifname = \"wlan0\"\n");
+        let p = rr3_profile_from_text(&text).expect("标量 [hardware] 必须合法");
+        assert_eq!(p.hardware.get("pwm_chip").map(String::as_str), Some("0"));
+        assert_eq!(p.hardware.get("link_ifname").map(String::as_str), Some("wlan0"));
+
+        // 布尔/浮点/数组/表逐条点名，一次全收集
+        let text = format!(
+            "{GOOD}\n[hardware]\nflag = true\nratio = 0.5\nlines = [4]\nsub = {{ k = 1 }}\n"
+        );
+        let errs = rr3_profile_from_text(&text).expect_err("坏类型必须报错");
+        assert_eq!(errs.len(), 4, "{errs:?}");
+        for key in ["flag", "ratio", "lines", "sub"] {
+            assert!(
+                errs.iter().any(|e| e.contains(&format!("hardware.{key} "))),
+                "{errs:?}"
+            );
+        }
+
+        // 空键点名
+        let text = format!("{GOOD}\n[hardware]\n\"\" = 1\n");
+        let errs = rr3_profile_from_text(&text).expect_err("空键必须报错");
+        assert!(errs.iter().any(|e| e.contains("键不得为空串")), "{errs:?}");
+    }
+
+    /// [hardware] → 注入文本：BTreeMap 升序确定性、整数已是字符串形状、空表空串。
+    #[test]
+    fn hardware_bindings_text_is_sorted_and_escaped() {
+        assert_eq!(rr3_hardware_bindings_text(&BTreeMap::new()), "", "空表 → 空串");
+        let mut hw = BTreeMap::new();
+        hw.insert("pwm_chip".to_string(), "0".to_string());
+        hw.insert("link_ifname".to_string(), "wl\"x\\".to_string());
+        let text = rr3_hardware_bindings_text(&hw);
+        // BTreeMap 升序：link_ifname < pwm_chip
+        assert_eq!(
+            text,
+            "link_ifname = \"wl\\\"x\\\\\"\npwm_chip = \"0\"\n",
+            "升序 + 转义（双引号/反斜杠）"
+        );
+    }
+
+    /// boot_inputs 带出 [hardware] 文本：满配装配单的物理绑定进 hal_bindings，
+    /// spawn 注入通道的端到端形状（daemon 只透传，不解释）。
+    #[test]
+    fn boot_inputs_carries_hardware_bindings_text() {
+        let root = Root::new("hardware");
+        let text = format!("{GOOD}\n[hardware]\npwm_chip = 0\nlink_ifname = \"wlan0\"\n");
+        let p = root.write_profile("hardware.toml", &text);
+        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("满配装配单应通过");
+        assert_eq!(
+            boot.hal_bindings,
+            "link_ifname = \"wlan0\"\npwm_chip = \"0\"\n",
+            "注入文本升序、整数已字符串化"
+        );
     }
 
     /// 装配单文件不存在 = 致命，文案是绝对化口径（canonicalize 的 ENOENT）

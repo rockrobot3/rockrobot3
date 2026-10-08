@@ -104,23 +104,9 @@ pub struct Rr3LinuxGpioOut {
 }
 
 impl Rr3LinuxGpioOut {
-    /// 板上缺省构造：根 [`RR3_GPIO_DEV_ROOT_DEFAULT`]，芯片取 `RR3_HAL_GPIO_CHIP`
-    /// （缺省 0），线偏移按角色取 `RR3_HAL_GPIO_{ROLE}_LINE`（缺省见
-    /// [`crate::backend::rr3_gpio_line_default`]；role 白名单 led/relay）
-    pub fn rr3_linux_gpio_out_default(role: &str) -> Self {
-        let chip = std::env::var(crate::backend::RR3_HAL_GPIO_CHIP_ENV)
-            .ok()
-            .and_then(|v| crate::backend::rr3_pwm_index_parse(&v))
-            .unwrap_or(0);
-        let line = std::env::var(crate::backend::rr3_gpio_line_env_key(role).unwrap_or_default())
-            .ok()
-            .and_then(|v| crate::backend::rr3_pwm_index_parse(&v))
-            .or_else(|| crate::backend::rr3_gpio_line_default(role))
-            .unwrap_or(u32::MAX); // 不认的 role：线偏移必败值，ensure 时显式回错
-        Self::rr3_linux_gpio_out_new(Path::new(RR3_GPIO_DEV_ROOT_DEFAULT), chip, line, role)
-    }
-
-    /// 指定根/芯片/线/角色构造（测试用 temp 树走这里，不触真硬件）
+    /// 指定根/芯片/线/角色构造（选择函数从生效物理绑定取 `gpio_chip` 与该角色的
+    /// `gpio_<role>_line`，批D④ fail-closed——芯片/线偏移没有代码缺省，描述符/
+    /// env 都没给就在选择面点名；测试用 temp 树也走这里，不触真硬件）
     pub fn rr3_linux_gpio_out_new(dev_root: &Path, chip: u32, line: u32, role: &str) -> Self {
         Self {
             dev_root: dev_root.to_path_buf(),
