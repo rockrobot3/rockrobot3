@@ -1,21 +1,21 @@
 //! 装配单装载（ADR-0012 裁定 3/5②，0.0.2 方案 D2 / Q3 裁定）。
 //!
-//! `profiles/<机型>.toml` 是**纯数据**装配单：`[bindings]` 格位→件、`[faces]` 模块→本形态
+//! `profiles/<机型>.toml` 是**纯数据**装配单：`[bindings]` 格位→件、`[enabled_slots]` 模块→本形态
 //! 启用的格位集合。本模块只做四件事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
 //! 运行期不重排，F⊗F 非法）：
 //! 1. 解析装配单文本（fail-closed：形状不合逐条点名，一条不静默放行）；
-//! 2. 查册门（裁定 5②）：bindings/faces 引用的每个格位必须命中
+//! 2. 查册门（裁定 5②）：bindings/enabled_slots 引用的每个格位必须命中
 //!    [`contracts/slots.toml`](../../../contracts/slots.toml)——查册真值是
 //!    `rr-registry::Rr3SlotTable`，与 CI 全集层共用同一份，不写第二套；
-//! 3. 缺格判定：faces 声明的格位若非基础层、又没有 binding 指向本模块（或探测不到，
+//! 3. 缺格判定：enabled_slots 声明的格位若非基础层、又没有 binding 指向本模块（或探测不到，
 //!    见 [`crate::probe`]）→ (模块, 格位) 进缺格清单，由 daemon 点名 `拒绝启动`——
 //!    绝不带病起，provides 仍留在可满足性宇宙（下游不连坐，ADR-0009 同款语义）；
-//! 4. 把 face 模块名解析成 manifest 路径：`<modules-root>/profiles/<机>.toml` 的上两级即
+//! 4. 把 enabled_slots 模块名解析成 manifest 路径：`<modules-root>/profiles/<机>.toml` 的上两级即
 //!    modules-root，manifest 在 `<modules-root>/modules/<名>/module.toml`——装机布局由
 //!    打包步骤保证（modules/README.md 装机约定 + 0.0.2 T5 deb 打包同一布局）。
 //!
 //! 基础层格位（`net.online` / `power.battery`）**恒在位**（slots.toml 2026-10-03 注记）：
-//! 不进 bindings、不进缺格判定，faces 里声明它们只是"本形态用到"的记账。
+//! 不进 bindings、不进缺格判定，enabled_slots 里声明它们只是"本形态用到"的记账。
 //! `[os].route` 运行期不读（ADR-0012 裁定 3 B3 注记），解析时无视该段。
 
 use std::collections::BTreeMap;
@@ -37,16 +37,16 @@ const RR3_PROFILE_SCHEMA_VERSION: i64 = 1;
 pub struct Rr3Profile {
     /// [bindings]：格位 → 模块名（只允许 body/cognition 层格位）
     pub bindings: BTreeMap<String, String>,
-    /// [faces]：模块名 → 本形态启用的格位集合
-    pub faces: BTreeMap<String, Vec<String>>,
+    /// [enabled_slots]：模块名 → 本形态启用的格位集合
+    pub enabled_slots: BTreeMap<String, Vec<String>>,
 }
 
 /// 装配链交给 daemon 的 boot 输入
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rr3ProfileBoot {
-    /// face 模块的 manifest 路径（模块名升序，确定性）
+    /// enabled_slots 模块的 manifest 路径（模块名升序，确定性）
     pub manifests: Vec<PathBuf>,
-    /// 缺格 (模块, 格位)：faces 声明但无有效 binding（或探测不到）→ 该模块不 spawn
+    /// 缺格 (模块, 格位)：enabled_slots 声明但无有效 binding（或探测不到）→ 该模块不 spawn
     pub missing: Vec<(String, String)>,
 }
 
@@ -87,13 +87,13 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
-    // [faces]：非空表、每值非空字符串数组。faces 决定起谁（Q3 裁定），空表 = 无可起模块。
-    let mut faces = BTreeMap::new();
-    match root.get("faces").and_then(toml::Value::as_table) {
-        None => errs.push("缺少 [faces]（模块 → 本形态启用的格位集合）".to_string()),
+    // [enabled_slots]：非空表、每值非空字符串数组。enabled_slots 决定起谁（Q3 裁定），空表 = 无可起模块。
+    let mut enabled_slots = BTreeMap::new();
+    match root.get("enabled_slots").and_then(toml::Value::as_table) {
+        None => errs.push("缺少 [enabled_slots]（模块 → 本形态启用的格位集合）".to_string()),
         Some(t) => {
             if t.is_empty() {
-                errs.push("[faces] 为空：faces 决定起谁，空装配单没有可起模块".to_string());
+                errs.push("[enabled_slots] 为空：enabled_slots 决定起谁，空装配单没有可起模块".to_string());
             }
             for (module, v) in t {
                 match v.as_array() {
@@ -103,13 +103,13 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                             match item.as_str() {
                                 Some(s) if !s.is_empty() => slots.push(s.to_string()),
                                 _ => errs.push(format!(
-                                    "faces.{module} 的每一项都必须是非空字符串（格位名）"
+                                    "enabled_slots.{module} 的每一项都必须是非空字符串（格位名）"
                                 )),
                             }
                         }
-                        faces.insert(module.clone(), slots);
+                        enabled_slots.insert(module.clone(), slots);
                     }
-                    None => errs.push(format!("faces.{module} 应为字符串数组")),
+                    None => errs.push(format!("enabled_slots.{module} 应为字符串数组")),
                 }
             }
         }
@@ -117,7 +117,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
     if !errs.is_empty() {
         return Err(errs);
     }
-    Ok(Rr3Profile { bindings, faces })
+    Ok(Rr3Profile { bindings, enabled_slots })
 }
 
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
@@ -165,26 +165,26 @@ pub fn rr3_profile_boot_inputs(
             ));
         }
     }
-    // faces 的格位必须查册命中（基础层允许——恒在位，只记账不绑定）
-    for (module, slots) in &profile.faces {
+    // enabled_slots 的格位必须查册命中（基础层允许——恒在位，只记账不绑定）
+    for (module, slots) in &profile.enabled_slots {
         for slot in slots {
             if !table.rr3_slot_table_contains(slot) {
                 errs.push(format!(
-                    "faces 模块 {module} 的格位 {slot} 未在册（contracts/slots.toml 无此格）"
+                    "enabled_slots 模块 {module} 的格位 {slot} 未在册（contracts/slots.toml 无此格）"
                 ));
             }
         }
     }
-    // 结构自洽：每条 binding 都必须被 faces 认领（faces[M] 含该格位）——
-    // 否则它是死数据：绑了没人用，装配单与 faces 各说一套。
+    // 结构自洽：每条 binding 都必须被 enabled_slots 认领（enabled_slots[M] 含该格位）——
+    // 否则它是死数据：绑了没人用，装配单与 enabled_slots 各说一套。
     for (slot, module) in &profile.bindings {
         let claimed = profile
-            .faces
+            .enabled_slots
             .get(module)
             .is_some_and(|slots| slots.contains(slot));
         if !claimed {
             errs.push(format!(
-                "bindings 条目 {slot}={module} 未被 faces 认领（模块 {module} 不在 faces，或其 faces 不含 {slot}）"
+                "bindings 条目 {slot}={module} 未被 enabled_slots 认领（模块 {module} 不在 enabled_slots，或其 enabled_slots 不含 {slot}）"
             ));
         }
     }
@@ -192,7 +192,7 @@ pub fn rr3_profile_boot_inputs(
         return Err(errs.join("; "));
     }
 
-    // 缺格判定：faces 声明的非基础层格位没有指向本模块的有效 binding（或探测不到）。
+    // 缺格判定：enabled_slots 声明的非基础层格位没有指向本模块的有效 binding（或探测不到）。
     // 基础层恒在位，跳过（slots.toml 注记：net.online / power.battery boot 即在位、恒不降级）。
     let probe = crate::probe::rr3_probe_default();
     let mut missing: Vec<(String, String)> = Vec::new();
@@ -203,7 +203,7 @@ pub fn rr3_profile_boot_inputs(
             missing.push((module.clone(), slot.clone()));
         }
     }
-    for (module, slots) in &profile.faces {
+    for (module, slots) in &profile.enabled_slots {
         for slot in slots {
             let base = table.rr3_slot_table_layer(slot).as_deref() == Some("base");
             if base {
@@ -226,7 +226,7 @@ pub fn rr3_profile_boot_inputs(
         )
     })?;
     let manifests: Vec<PathBuf> = profile
-        .faces
+        .enabled_slots
         .keys()
         .map(|m| root.join("modules").join(m).join("module.toml"))
         .collect();
@@ -253,7 +253,7 @@ route = "distro"
 "sensor.env" = "rr3-pb"
 "cognition.llm" = "rr3-pc"
 
-[faces]
+[enabled_slots]
 rr3-pa = ["act.servo"]
 rr3-pb = ["sensor.env"]
 rr3-pc = ["cognition.llm"]
@@ -284,8 +284,8 @@ rr3-pc = ["cognition.llm"]
     fn good_profile_parses() {
         let p = rr3_profile_from_text(GOOD).expect("应能解析");
         assert_eq!(p.bindings.len(), 3);
-        assert_eq!(p.faces.len(), 3);
-        assert_eq!(p.faces["rr3-pa"], vec!["act.servo".to_string()]);
+        assert_eq!(p.enabled_slots.len(), 3);
+        assert_eq!(p.enabled_slots["rr3-pa"], vec!["act.servo".to_string()]);
         // [os].route 被无视（运行期不读），但它的存在不构成错误
     }
 
@@ -307,28 +307,28 @@ rr3-pc = ["cognition.llm"]
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains("faces.rr3-pb 的每一项")),
+            errs.iter().any(|e| e.contains("enabled_slots.rr3-pb 的每一项")),
             "{errs:?}"
         );
         assert!(
             errs.iter()
-                .any(|e| e.contains("faces.rr3-pc 应为字符串数组")),
+                .any(|e| e.contains("enabled_slots.rr3-pc 应为字符串数组")),
             "{errs:?}"
         );
     }
 
     #[test]
-    fn missing_sections_and_empty_faces_are_errors() {
+    fn missing_sections_and_empty_enabled_slots_are_errors() {
         let errs = rr3_profile_from_text("schema_version = 1\n").expect_err("缺段必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [bindings]")),
             "{errs:?}"
         );
-        assert!(errs.iter().any(|e| e.contains("缺少 [faces]")), "{errs:?}");
+        assert!(errs.iter().any(|e| e.contains("缺少 [enabled_slots]")), "{errs:?}");
 
-        let errs = rr3_profile_from_text("schema_version = 1\n[bindings]\n\n[faces]\n")
-            .expect_err("空 faces 必须报错");
-        assert!(errs.iter().any(|e| e.contains("[faces] 为空")), "{errs:?}");
+        let errs = rr3_profile_from_text("schema_version = 1\n[bindings]\n\n[enabled_slots]\n")
+            .expect_err("空 enabled_slots 必须报错");
+        assert!(errs.iter().any(|e| e.contains("[enabled_slots] 为空")), "{errs:?}");
     }
 
     #[test]
@@ -388,7 +388,7 @@ rr3-pc = ["cognition.llm"]
         );
     }
 
-    /// faces 声明了格位但 binding 指向别的模块：对点名模块算缺格，同时构成"binding 未被认领"
+    /// enabled_slots 声明了格位但 binding 指向别的模块：对点名模块算缺格，同时构成"binding 未被认领"
     /// 的结构不自洽 → 致命（fail-closed，装配单各说一套必须当场听见）
     #[test]
     fn binding_claimed_by_another_module_is_fatal() {
@@ -397,7 +397,7 @@ rr3-pc = ["cognition.llm"]
         let p = root.write_profile("cross.toml", &text);
         let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
             .expect_err("binding 被他人认领必须致命");
-        assert!(e.contains("未被 faces 认领"), "{e}");
+        assert!(e.contains("未被 enabled_slots 认领"), "{e}");
     }
 
     /// 基础层格位进 bindings = 违反"基础层由基座内建承载"（slots.toml 注记）→ 致命
@@ -411,7 +411,7 @@ rr3-pc = ["cognition.llm"]
         assert!(e.contains("bindings 不得绑定基础层格位 bus.publish"), "{e}");
     }
 
-    /// 查册门：faces/bindings 引用未在册格位 → 致命并点名（真契约上跑）
+    /// 查册门：enabled_slots/bindings 引用未在册格位 → 致命并点名（真契约上跑）
     #[test]
     fn unknown_slot_is_fatal_and_named() {
         let root = Root::new("unknown");
@@ -420,22 +420,22 @@ rr3-pc = ["cognition.llm"]
         let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
             .expect_err("未在册格位必须致命");
         assert!(
-            e.contains("faces 模块 rr3-pc 的格位 sensor.wifi 未在册"),
+            e.contains("enabled_slots 模块 rr3-pc 的格位 sensor.wifi 未在册"),
             "{e}"
         );
     }
 
-    /// 基础层格位进 faces 只记账、不算缺格（power.battery 恒在位，default 机同款形状）
+    /// 基础层格位进 enabled_slots 只记账、不算缺格（power.battery 恒在位，default 机同款形状）
     #[test]
-    fn base_layer_face_slot_is_never_missing() {
-        let root = Root::new("baseface");
+    fn base_layer_enabled_slot_is_never_missing() {
+        let root = Root::new("baseslot");
         let text = GOOD.replace(
             "rr3-pc = [\"cognition.llm\"]",
             "rr3-pc = [\"cognition.llm\", \"power.battery\"]",
         );
-        let p = root.write_profile("baseface.toml", &text);
+        let p = root.write_profile("baseslot.toml", &text);
         let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("基础层 face 格位不缺格");
+            .expect("基础层 enabled_slots 格位不缺格");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
 

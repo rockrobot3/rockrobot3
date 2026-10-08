@@ -9,7 +9,7 @@ use rr_ipc::{RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 pub struct RrdConfig {
     pub socket: PathBuf,
     pub overlay: Option<PathBuf>,
-    /// 装配单路径（`--profile`，0.0.2 方案 D2 / Q3 裁定）。装机**正门**：faces 决定起谁。
+    /// 装配单路径（`--profile`，0.0.2 方案 D2 / Q3 裁定）。装机**正门**：enabled_slots 决定起谁。
     /// 与 `--manifest` **同给当场拒**（Q3 裁定细则：两路径共用 plan_boot 仲裁与 supervisor
     /// spawn，不双真值——两参数同给即非 0 退出，不留"谁赢"的歧义）。
     pub profile: Option<PathBuf>,
@@ -43,7 +43,7 @@ const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--
 
 /// `--profile` 与 `--manifest` 同给当场拒的共用文案（两处分支同一句，不许各说一套）。
 /// 拒绝发生在 parse 处：非 0 退出，没有任何"后给者赢"或"合并两份"的歧义路径（Q3 裁定细则）。
-const PROFILE_MANIFEST_CONFLICT: &str = "--profile 与 --manifest 不得同给：profile 是装机正门（faces 决定起谁），--manifest 是调试后门（0.0.2 方案 Q3 裁定，两路径共用仲裁与 spawn，不双真值）";
+const PROFILE_MANIFEST_CONFLICT: &str = "--profile 与 --manifest 不得同给：profile 是装机正门（enabled_slots 决定起谁），--manifest 是调试后门（0.0.2 方案 Q3 裁定，两路径共用仲裁与 spawn，不双真值）";
 
 /// `--restart-base-ms` 的上界：退避表末档（60）乘上去仍要不溢出 u64。
 /// 为什么在 CLI 就拒、而不是让 `rr3_reg_death` 的饱和乘法默默兜住：饱和成 `u64::MAX`

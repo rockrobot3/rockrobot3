@@ -5,7 +5,7 @@
 //! （真 contracts/slots.toml + 夹具文本，库层不 spawn）；这里起**真 rrd 子进程**走
 //! 完整装配链 → plan_boot 仲裁 → supervisor spawn，钉的是"环节接起来之后线上
 //! 看得见的三件事"：
-//! - P1 满配：faces 决定起谁——三条 spawn 行 + ctl.status 轮询到全 running；
+//! - P1 满配：enabled_slots 决定起谁——三条 spawn 行 + ctl.status 轮询到全 running；
 //! - P2 缺格：缺格模块逐条点名"拒绝启动"、不 spawn，其余模块照常（缺格≠拒 boot，
 //!   ADR-0009 同款"provides 留在可满足性宇宙、下游不连坐"语义）；
 //! - P3 非法装配单：查册未命中 → bind 之前 fatal，非 0 退出、套接字无残迹。
@@ -29,7 +29,7 @@ use serde_json::json;
 
 use support::*;
 
-/// 满配装配单（P1/P2/P3 的底稿）：三个格位各绑一件、bindings 与 faces 互认领。
+/// 满配装配单（P1/P2/P3 的底稿）：三个格位各绑一件、bindings 与 enabled_slots 互认领。
 /// 格位名取自真 `contracts/slots.toml`（act.servo / sensor.env / cognition.llm）——
 /// 查册真值与 CI 全集层同源，夹具不得自造格位。`[os]` 段运行期不读（ADR-0012 裁定 3），
 /// 放在这里恰恰是为了证明"带着它也能过"。
@@ -44,7 +44,7 @@ route = "distro"
 "sensor.env" = "rr3-pb"
 "cognition.llm" = "rr3-pc"
 
-[faces]
+[enabled_slots]
 rr3-pa = ["act.servo"]
 rr3-pb = ["sensor.env"]
 rr3-pc = ["cognition.llm"]
@@ -146,7 +146,7 @@ fn rr3_status(rrd: &RrdTest) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// P1 — 满配：faces 决定起谁。三个格位各有一件、bindings 与 faces 互认领 →
+/// P1 — 满配：enabled_slots 决定起谁。三个格位各有一件、bindings 与 enabled_slots 互认领 →
 /// 三条 spawn 行 + ctl.status 轮询到三个全 running。
 #[test]
 fn full_profile_spawns_every_face_module_and_all_reach_running() {
@@ -161,7 +161,7 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
     // 不是"给了 --profile 却按 --manifest 空表静默起了一个空 daemon"。
     rrd.rr3_wait_log("rrd: 装配单已加载: ");
 
-    // 三条 spawn 行：模块名来自 faces，entry 回显夹具里的 sim_peer 绝对路径——
+    // 三条 spawn 行：模块名来自 enabled_slots，entry 回显夹具里的 sim_peer 绝对路径——
     // 证明"profile 解析出的 manifest 真的被装载、真按它起了进程"，不是碰巧的同名者。
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         let spawn = rrd.rr3_wait_log(&format!("spawn {name} pid="));
@@ -189,7 +189,7 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
     );
 }
 
-/// P2 — 缺格：faces 声明的 sensor.env 没有指向 rr3-pb 的 binding → 逐条点名
+/// P2 — 缺格：enabled_slots 声明的 sensor.env 没有指向 rr3-pb 的 binding → 逐条点名
 /// "拒绝启动"、boot 队列跳过；pa/pc 照常起（缺格≠拒 boot，不连坐）。
 #[test]
 fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
@@ -197,8 +197,8 @@ fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         root.write_module(name);
     }
-    // 只删 bindings 里的 sensor.env 一行：faces 的 rr3-pb 声明还在 → 缺格判定命中它。
-    // （删 faces 侧则是另一条路径：binding 未被认领 = 结构不自洽 = 致命，库层单测已钉。）
+    // 只删 bindings 里的 sensor.env 一行：enabled_slots 的 rr3-pb 声明还在 → 缺格判定命中它。
+    // （删 enabled_slots 侧则是另一条路径：binding 未被认领 = 结构不自洽 = 致命，库层单测已钉。）
     let profile = root.write_profile(&GOOD.replace("\"sensor.env\" = \"rr3-pb\"\n", ""));
     let mut rrd = RrdTest::rr3_start_profile("prof-missing", &profile, E2E_TICK_MS);
 
@@ -214,14 +214,14 @@ fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
     rrd.rr3_assert_no_log("spawn rr3-pb pid=", Duration::from_millis(300));
 }
 
-/// P3 — 非法装配单：faces 引用未在册格位（sensor.wifi 不在 contracts/slots.toml，
+/// P3 — 非法装配单：enabled_slots 引用未在册格位（sensor.wifi 不在 contracts/slots.toml，
 /// 在册的是 net.wifi——差一个字符，恰好证明查册不是前缀匹配）→ 查册门在 bind 之前
 /// 致命，非 0 退出、套接字无残迹。直接 Command 起 rrd：这一路连监听行都不会有，
 /// `RrdTest` 的就绪等待根本等不到，管道收两端才是对的读法。
 #[test]
-fn unregistered_slot_in_faces_is_fatal_before_bind_with_no_socket_residue() {
+fn unregistered_slot_in_enabled_slots_is_fatal_before_bind_with_no_socket_residue() {
     let root = Root::new("unknown");
-    // 只往 rr3-pc 的 faces 里**加**一个未在册格位：bindings 三条仍全部被认领，
+    // 只往 rr3-pc 的 enabled_slots 里**加**一个未在册格位：bindings 三条仍全部被认领，
     // 致命原因单一（未在册），不混入"binding 未被认领"的第二种错误。
     let profile = root.write_profile(&GOOD.replace(
         "rr3-pc = [\"cognition.llm\"]",
@@ -250,7 +250,7 @@ fn unregistered_slot_in_faces_is_fatal_before_bind_with_no_socket_residue() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("faces 模块 rr3-pc 的格位 sensor.wifi 未在册"),
+        stderr.contains("enabled_slots 模块 rr3-pc 的格位 sensor.wifi 未在册"),
         "致命文案必须点名未在册的格位: {stderr}"
     );
     assert!(

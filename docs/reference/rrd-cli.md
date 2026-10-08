@@ -48,7 +48,7 @@
 | `--socket` | 路径 | `rr3_default_socket`：环境键 `RR3_BUS_PATH`（常量 `RR3_BUS_PATH_ENV`）优先，缺省回落 `RR3_UDS_PATH_DEFAULT`（值 `/var/run/rock3-ipc.sock`） | UDS 绑定路径；进横幅与 `UnixListener::bind` 前被绝对化 | `cli.rs 的 rr3_default_socket`、`rr3_cli_parse_with_env` 的 `RrdConfig` 初始化、`transport/mod.rs 的 RR3_UDS_PATH_DEFAULT 常量` |
 | `--topics-overlay` | 路径 | `None`（不加载） | 主题叠加层，**仅测试用**；`main.rs` 与装载入口各规范化一次（横幅凭证取 `main.rs` 那次、致命文案取装载入口那次，见 §4） | `rr3_cli_parse_with_env` 的 `--topics-overlay` 分支、`main` 的叠加层绝对化段、`topics_load.rs 的 rr3_overlay_resolved` |
 | `--contracts` | 目录 | `None`（编译期常量：仓内 `contracts/`，由 `CARGO_MANIFEST_DIR` 拼出） | 契约目录的**运行期落点**（0.0.2 T5）：topics 与 slots 共用 `rr3_contracts_dir` 解析——显式给值时原样使用，缺省回落编译期仓内路径（仓内开发零变化）；deb 装机后编译期路径不存在，payload 必须显式指向包内 `/usr/lib/rockrobot3/contracts`。显式值**不单独规范化、无横幅凭证行**——存在性检查落在 join 出的 `topics.toml` / `slots.toml` 上，由装载入口各自 canonicalize（见 §4） | `rr3_cli_parse_with_env` 的 `--contracts` 分支、`RrdConfig 的 contracts 字段`、`topics_load.rs 的 rr3_contracts_dir`、`profile.rs 的 rr3_profile_boot_inputs`（`slots_path` 参数） |
-| `--profile` | 路径 | `None`（不装载） | **装配单**（0.0.2 Q3 的装机**正门**）：`[bindings]`/`[faces]` 决定起谁，装载/查册/缺格判定/manifest 解析全部在 bind 之前完成；缺格只逐条点名"拒绝启动"降级该模块，**不是**致命项。与 `--manifest` 同给当场拒（§3） | `rr3_cli_parse_with_env` 的 `--profile` 分支、`main` 的装配单绝对化段、`profile.rs 的 rr3_profile_boot_inputs` |
+| `--profile` | 路径 | `None`（不装载） | **装配单**（0.0.2 Q3 的装机**正门**）：`[bindings]`/`[enabled_slots]` 决定起谁，装载/查册/缺格判定/manifest 解析全部在 bind 之前完成；缺格只逐条点名"拒绝启动"降级该模块，**不是**致命项。与 `--manifest` 同给当场拒（§3） | `rr3_cli_parse_with_env` 的 `--profile` 分支、`main` 的装配单绝对化段、`profile.rs 的 rr3_profile_boot_inputs` |
 | `--manifest` | 路径，**可重复** | 空表，顺序原样保留 | 待启动模块的 manifest（调试**后门**，Q3）；约定为绝对路径 | `rr3_cli_parse_with_env` 的 `--manifest` 分支 |
 | `--restart-base-ms` | 整数毫秒 | `1000` | 重启退避基数：`delay_ms` = 表值 × base；下界 1、上界 `RR3_RESTART_BASE_MS_MAX` | `rr3_cli_parse_with_env` 的 `--restart-base-ms` 分支、`cli.rs 的 RR3_RESTART_BASE_MS_MAX 常量` |
 | `--pre-register-timeout-ms` | 整数毫秒 | `3000` | 连接 accept 后多久没完成注册判为失败；`conn.rs` 侧按 `.max(1)` 用作读超时 | `rr3_cli_parse_with_env` 的 `--pre-register-timeout-ms` 分支、`conn.rs 的 rr3_conn_serve` |
@@ -115,12 +115,12 @@ rrd 在 `<RR3_DATA_DIR>/counters.json` 维护**心跳计数聚合账**（`rr3.ct
 | `--boot-role` 的值以 `-` 开头（含 `--socket` 这类真开关） | `--boot-role 缺参数：收到疑似开关的 {raw}（role 不得以 - 开头）` + 换行 + `USAGE`。否则 `--boot-role --socket` 会把 `--socket` 当 role 吞下、下一个真开关丢失——与 `need_path_value` 同一形状的 fail-open 缝 | `rr3_cli_parse_with_env` 的 `--boot-role` 疑似开关分支 |
 | `--restart-base-ms 0` | `--restart-base-ms 需为正整数毫秒：0 会让重启退避恒为 0（热重启循环，spec §5.3）` + 换行 + `USAGE` | `cli.rs 的 parse_restart_base` |
 | `--restart-base-ms` 超上界 | `--restart-base-ms {v} 过大：退避末档乘上它会溢出 u64（饱和 = 永不重启），最大 {RR3_RESTART_BASE_MS_MAX}` + 换行 + `USAGE` | `cli.rs 的 parse_restart_base` |
-| `--profile` 与 `--manifest` 同给（**两种顺序都拒**） | `--profile 与 --manifest 不得同给：profile 是装机正门（faces 决定起谁），--manifest 是调试后门（0.0.2 方案 Q3 裁定，两路径共用仲裁与 spawn，不双真值）` + 换行 + `USAGE` | `rr3_cli_parse_with_env` 的 `--profile`/`--manifest` 互斥分支（`cli.rs 的 PROFILE_MANIFEST_CONFLICT 常量`，两处分支共用同一句） |
+| `--profile` 与 `--manifest` 同给（**两种顺序都拒**） | `--profile 与 --manifest 不得同给：profile 是装机正门（enabled_slots 决定起谁），--manifest 是调试后门（0.0.2 方案 Q3 裁定，两路径共用仲裁与 spawn，不双真值）` + 换行 + `USAGE` | `rr3_cli_parse_with_env` 的 `--profile`/`--manifest` 互斥分支（`cli.rs 的 PROFILE_MANIFEST_CONFLICT 常量`，两处分支共用同一句） |
 
 四条设计裁定，改门禁前必读：
 
 - **`--profile` 与 `--manifest` 在 parse 处互斥、当场拒**（`rr3_cli_parse_with_env` 的互斥分支）：
-  不拒的后果不是报错晚，而是**双真值**——同一次 boot 里"faces 决定起谁"与"CLI 列表决定起谁"
+  不拒的后果不是报错晚，而是**双真值**——同一次 boot 里"enabled_slots 决定起谁"与"CLI 列表决定起谁"
   各说一套，装配单就失去了"装机正门"的资格。两条 boot 入口共用其后的仲裁与 spawn（§2），
   入口却必须唯一；这条与 `--watchdog-tick-ms` 拒 0 同一口径：**策略结论必须在启动时让运维听到**。
 
