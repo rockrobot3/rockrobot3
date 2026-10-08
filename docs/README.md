@@ -92,6 +92,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../tools/README.md`](../tools/README.md) | 主机侧工具名册：目录 × bin × 用途 |
 | [`../tools/ci/README.md`](../tools/ci/README.md) | `check.sh` 每步跑什么、为什么这么跑 |
 | [`../tools/mkmodule/README.md`](../tools/mkmodule/README.md) | 用 `rr3-mkmod` 生成模块骨架时 |
+| [`../tools/espidf-std-hello/README.md`](../tools/espidf-std-hello/README.md) | espidf std 构建链冒烟件（批W1）：版本钉死登记对表（ESP-IDF/esp-idf-sys/esp-clang/ldproxy）与三坑复现必读 |
 | [`../tools/sim/README.md`](../tools/sim/README.md) | 没有板子要跑全链路时（`rr3-sim`） |
 | [`../tools/rrctl/README.md`](../tools/rrctl/README.md) | 总线侧运维 CLI 的命令面（`rr3-ctl`） |
 | [`../.github/README.md`](../.github/README.md) | GitHub 侧工作流声明与它的实际地位 |
