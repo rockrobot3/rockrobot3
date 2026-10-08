@@ -1,0 +1,51 @@
+# 原子件 manifest（atoms/<名>/atom.toml）的字段契约（0.0.5 批B①，ADR-0019）
+# 逐行来源：docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md §8 批B 行、§9 设计要点
+# 消费方：base/runtime/rr-registry/src/atom.rs（校验实现）、tools/mkmodule（原子五件套生成自检）
+# 演进：只增不改；破坏性变更须升 schema_version 并同步 rr-registry 测试
+# 引用：ADR-0019 裁定 1（Atom=填一个格、不可再分、只含机制、板无关）、
+#       ADR-0019 裁定 5（L3 注入：原子件只见 ops 指针与描述符绑定句柄）、
+#       ADR-0012 裁定 5②（查册门真值唯一：provides/uses 查 contracts/slots.toml 同一张表）
+# 与 module.schema.toml 的关系：module.toml 是组合件/owner 级契约（功能守恒不动），
+#   本文件是 Atom 层新增契约——三层 manifest 的字段切分见 0.0.5 方案 §9。
+
+schema_version = 1
+
+# ---------- [atom] ----------
+[[field]]
+path = "atom.name"
+kind = "string"
+required = true
+rule = "atom_name"
+
+[[field]]
+path = "atom.version"
+kind = "string"
+required = true
+rule = "semver"
+
+# ---------- [provides]（每格一件：恰一格，跨字段规则在 atom.rs 实现） ----------
+[[field]]
+path = "provides.slots"
+kind = "list"
+required = true
+rule = "capability"
+
+# ---------- [uses]（装配期依赖的其他格，描述符注入） ----------
+[[field]]
+path = "uses.slots"
+kind = "list"
+required = false
+rule = "capability"
+
+# ---------- [events]（topic 形状校验；owner 级注册归属由 module.toml 保证，此处不重复） ----------
+[[field]]
+path = "events.publishes"
+kind = "list"
+required = false
+rule = "topic"
+
+[[field]]
+path = "events.subscribes"
+kind = "list"
+required = false
+rule = "topic"

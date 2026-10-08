@@ -101,6 +101,14 @@ pub fn rr3_registry_check(rule: &str, value: &str) -> Vec<String> {
                 ))
             }
         }
+        // 原子件名（atom.schema.toml，0.0.5 批B①）：^[a-z][a-z_]*$，复用 capability 段规则
+        "atom_name" => {
+            if rr3_registry_lower_us(value) {
+                vec![]
+            } else {
+                bad(format!("atom.name 非法: {value}（要求 ^[a-z][a-z_]*$）"))
+            }
+        }
         "topic" => {
             if rr3_registry_topic_shape_ok(value) {
                 vec![]
