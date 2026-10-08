@@ -1,0 +1,19 @@
+# llm 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C⑤ 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+# Python 面：机制本体 rr3_brain/cloud/llm.py 原位（单文件即机制+入口合一，
+# Rust 五件套拆分随 ADR-0016 迁移收敛）
+schema_version = 1
+
+[atom]
+name = "llm"
+version = "0.0.1"
+
+[provides]
+slots = ["cognition.llm"]   # 大模型补全（DeepSeek-V3 via SiliconFlow；多轮历史记忆）
+
+[uses]
+slots = []   # 云端端点/凭据走环境变量注入（conventions §3），不占描述符句柄
+
+[events]
+publishes = []   # 云端 HTTP 客户端无总线事件流；llm/completion 点名在 module.toml [rpc].exposes（owner 级）
+subscribes = []
