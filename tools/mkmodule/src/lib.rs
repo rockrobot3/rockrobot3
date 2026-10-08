@@ -2,6 +2,12 @@
 //!
 //! 生成 `modules/rr3-<名>/` 骨架：manifest + config + 空 Rust 程序 + README。
 //! 生成物当场用 `rr-registry` 的契约校验，不合规即中止（architecture.md §7）。
+//!
+//! 0.0.5 批B② 扩产（ADR-0019）：原子件五件套生成（`rr3_mkmod_generate_atom`）——
+//! ① `atom.toml`（Atom manifest，契约=`rr-registry/src/atom.schema.toml`）
+//! ② 入口（`<名>.rs`，只声明公开面）· ③ 实现（`mech.rs`，机制主体）
+//! ④ 装配清单（`assemble.toml`，注入面声明）· ⑤ 唯一私有头（`private.rs`）。
+//! 产物当场回灌 `rr3_registry_validate_atom`（字段契约 + slots 查册门 + 板无关断言）。
 
 use std::path::{Path, PathBuf};
 
@@ -24,7 +30,7 @@ impl std::fmt::Display for Rr3MkmodError {
         match self {
             Self::InvalidName(n) => write!(
                 f,
-                "模块名非法: {n}（要求 rr3-[a-z]+，词干 2..=24 个小写字母）"
+                "名字非法: {n}（模块要求 rr3-[a-z]+，词干 2..=24 个小写字母；原子要求 ^[a-z][a-z_]*$，2..=24 字符）"
             ),
             Self::AlreadyExists(p) => write!(f, "目录已存在: {}", p.display()),
             Self::Io(e) => write!(f, "IO 失败: {e}"),
@@ -195,4 +201,196 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
 
     std::fs::rename(&staging, &target)?;
     Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+}
+
+/// 原子件名：`^[a-z][a-z_]*$`，2..=24 字符（atom.schema.toml 的 atom_name 规则同款）
+fn rr3_mkmod_atom_stem(name: &str) -> Result<String, Rr3MkmodError> {
+    let ok = name.len() >= 2
+        && name.len() <= 24
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c == '_');
+    if !ok {
+        return Err(Rr3MkmodError::InvalidName(name.to_string()));
+    }
+    Ok(name.to_string())
+}
+
+fn atom_manifest_toml(name: &str, slot: &str) -> String {
+    format!(
+        r#"# {name} 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "{name}"
+version = "0.0.1"
+
+[provides]
+slots = ["{slot}"]   # 占哪个格——每格一件（ADR-0019 裁定 1：恰一格、不可再分）
+
+[uses]
+slots = []           # 装配期依赖的其他格（描述符注入，不见厂商/引脚）
+
+[events]
+publishes = []
+subscribes = []
+"#
+    )
+}
+
+fn atom_entry_rs(name: &str, slot: &str) -> String {
+    format!(
+        r#"//! {name} 原子件入口（五件套②）：只声明公开面，机制在 mech.rs。
+//! 占格 {slot}（atom.toml）。组合件以 `#[path]` 引本文件为 mod；
+//! 跨域只准 use 本文件 pub 项（五件套⑤纪律，内部共享落 private.rs，永不 re-export）。
+
+#[path = "mech.rs"]
+mod mech;
+#[path = "private.rs"]
+mod private;
+
+pub use mech::*;
+"#
+    )
+}
+
+fn atom_mech_rs(name: &str) -> String {
+    format!(
+        r#"//! {name} 机制主体（五件套③）：零策略载荷（ADR-0019 裁定 5——厂商名/产品名/
+//! 业务阈值不进机制件，策略经 ops 函数表 + manifest/config 数据化注入）。
+
+#[cfg(test)]
+mod tests {{
+    /// 骨架自检：机制件可编译、可测。真实现落位后替换本测试。
+    #[test]
+    fn skeleton_compiles() {{
+        assert_eq!(1 + 1, 2);
+    }}
+}}
+"#
+    )
+}
+
+fn atom_assemble_toml(name: &str) -> String {
+    format!(
+        r#"# {name} 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
+# 原子件只见 ops 指针与描述符给的绑定句柄）。
+schema_version = 1
+
+[assemble]
+handles = []   # 描述符句柄名（HAL 绑定经 rr-hal 描述符注入，不直连板级拓扑）
+ops = []       # ops 函数表键（策略注入点）
+"#
+    )
+}
+
+fn atom_private_rs(name: &str) -> String {
+    format!(
+        r#"//! {name} 唯一私有头（五件套⑤）：原子件内部共享的类型与常量。
+//! 私有性纪律：本文件项不进入口 re-export，跨域不可见（architecture.md §4.0.4）。
+"#
+    )
+}
+
+/// 在 `out_root` 下生成原子件 `atoms 形状` 的 `<name>/` 五件套；返回生成的文件列表。
+///
+/// `out_root` 语义 = 原子根目录（惯例 `modules/<组合件>/atoms`），产物落
+/// `<out_root>/<name>/`。生成后当场回灌 `rr3_registry_validate_atom`（字段契约 +
+/// slots 查册门 + 板无关断言）：`out_root` 须位于仓内以向上定位 `contracts/slots.toml`，
+/// 校验不过即整体丢弃（staging→rename，不留半成品）。
+pub fn rr3_mkmod_generate_atom(
+    name: &str,
+    slot: &str,
+    out_root: &Path,
+) -> Result<Vec<PathBuf>, Rr3MkmodError> {
+    let stem = rr3_mkmod_atom_stem(name)?;
+    let target = out_root.join(&stem);
+    if target.exists() {
+        return Err(Rr3MkmodError::AlreadyExists(target));
+    }
+
+    let staging = out_root.join(format!(".staging-{stem}"));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging)?;
+
+    let files: Vec<(String, String)> = vec![
+        ("atom.toml".into(), atom_manifest_toml(&stem, slot)),
+        (format!("{stem}.rs"), atom_entry_rs(&stem, slot)),
+        ("mech.rs".into(), atom_mech_rs(&stem)),
+        ("assemble.toml".into(), atom_assemble_toml(&stem)),
+        ("private.rs".into(), atom_private_rs(&stem)),
+    ];
+    for (rel, body) in &files {
+        std::fs::write(staging.join(rel), body)?;
+    }
+
+    // 回灌三合一校验（②b 同款纪律）：manifest 生成即自检，不合规即中止
+    let errs = rr_registry::rr3_registry_validate_atom(&staging.join("atom.toml"));
+    if !errs.is_empty() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(Rr3MkmodError::Manifest(errs));
+    }
+
+    std::fs::rename(&staging, &target)?;
+    Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 仓内临时根（target/ 不入库且向上可定位 contracts/slots.toml，回灌门可走通）
+    fn scratch_root(tag: &str) -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/mkmod-test")
+            .join(tag);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 原子五件套：五文件齐全 + atom.toml 回灌过查册门与板无关断言
+    #[test]
+    fn atom_generation_passes_registry_validation() {
+        let root = scratch_root("ok");
+        let files = rr3_mkmod_generate_atom("sample_atom", "power.battery", &root)
+            .expect("合法生成必须成功");
+        assert_eq!(files.len(), 5, "五件套缺一不可");
+        for rel in [
+            "sample_atom/atom.toml",
+            "sample_atom/sample_atom.rs",
+            "sample_atom/mech.rs",
+            "sample_atom/assemble.toml",
+            "sample_atom/private.rs",
+        ] {
+            assert!(root.join(rel).is_file(), "缺 {rel}");
+        }
+        // 生成物独立再过一遍校验器（回灌发生在 staging 期，rename 后幂等）
+        let errs =
+            rr_registry::rr3_registry_validate_atom(&root.join("sample_atom/atom.toml"));
+        assert!(errs.is_empty(), "{errs:?}");
+    }
+
+    /// 非法输入三类：坏原子名、已存在目录、未登记格位（查册门回灌拒绝）
+    #[test]
+    fn atom_generation_rejects_bad_inputs() {
+        let root = scratch_root("bad");
+        assert!(matches!(
+            rr3_mkmod_generate_atom("Bad-Atom", "power.battery", &root),
+            Err(Rr3MkmodError::InvalidName(_))
+        ));
+        rr3_mkmod_generate_atom("dupe", "power.battery", &root).unwrap();
+        assert!(matches!(
+            rr3_mkmod_generate_atom("dupe", "power.battery", &root),
+            Err(Rr3MkmodError::AlreadyExists(_))
+        ));
+        let e = rr3_mkmod_generate_atom("nosuch", "power.solar", &root).unwrap_err();
+        let Rr3MkmodError::Manifest(errs) = e else {
+            panic!("未登记格位必须由回灌拒绝")
+        };
+        assert!(errs.iter().any(|e| e.contains("未登记格位 power.solar")), "{errs:?}");
+        // 失败不留半成品
+        assert!(!root.join(".staging-nosuch").exists());
+        assert!(!root.join("nosuch").exists());
+    }
 }

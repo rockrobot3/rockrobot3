@@ -1425,6 +1425,28 @@ rrd-cli.md（开关表/常量引文/设计裁定三处）、本节 §3 装配单
 enabled_slots）归零，`cargo check -p rrd -p rr-registry --all-targets` 与
 sim `cargo check --all-targets` 全绿
 
+2026-10-09 0.0.5 第 II 轮 批B：原子件契约（ADR-0019 裁定 1/5/8，全案 §8 批B 行）——
+批B① Atom manifest 契约定形：`rr-registry/src/atom.schema.toml`（六字段：atom.name/
+atom.version/provides.slots/uses.slots/events.publishes/events.subscribes，与
+module.schema.toml 同构 `[[field]]` 数组）+ `atom.rs` 三入口
+（`rr3_registry_validate_atom_text` / `rr3_registry_validate_atom` /
+`rr3_registry_board_free_assert`）：查册门共用 slots 表真值（空表 fail-closed）、
+provides.slots 跨字段钉"每格一件恰一项"（裁定 1）、板无关断言 rock3 自有禁词表
+（引脚/总线/厂商/产品 token 子串命中即拒，裁定 5 硬规 2 的 manifest 侧）；
+`validate.rs` 的 `rr3_registry_check` 增 `atom_name` 规则分支（只增不改）。
+批B② `rr3-mkmod` 扩产 `rr3_mkmod_generate_atom`：原子五件套
+（atom.toml + 入口 `<名>.rs` + `mech.rs` + `assemble.toml` + `private.rs`），
+staging→`rr3_registry_validate_atom` 回灌→rename，bin 增 `--atom <名> <格位>` 子命令。
+批B③ `rr3-power` 打样重铺（先打样验骨架，方案 §8）：`atoms/battery`、`atoms/charger`
+各五件（atom.toml + 入口 + mech + assemble.toml + private.rs）；`composite.toml`
+（Composite 层：⊗ 链 battery ⊗ charger、unit=process，机器校验 schema 归批E）；
+`src/composite.rs` 组合件实现（原 main.rs `rr3_run`/config 解析/两单测逐字迁入）；
+`main.rs` 248→17 行（≤80 门，组合件五件套②）；SURFACE 字符串与启动打印序列逐字
+冻结，module.toml/config.toml/Cargo.toml 零改动，原 `src/battery.rs`/`charger.rs`
+删除（逻辑零改动迁入原子目录）；rr-registry 契约测试钉死两份打样 atom.toml
+（漂移当场红）。判据达成：④ 独立工程 7 测试绿、mkmod 回灌 7 测试绿、
+rr-registry 33+34 全绿、七步门禁直跑 GATE_EXIT=0
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
