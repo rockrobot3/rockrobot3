@@ -1350,6 +1350,18 @@ ADR-0007）——`git mv .github/workflows/ci.yml .gitcode/workflows/ci.yml`
 buildroot-assembly / sim-assemble / sim-chain）随推送首跑，回执或逐 job 缺口
 据实登记（R16 纪律：不以 SKIP 冒充绿）；tools/ci/README 与 status.md 指路行同步
 
+2026-10-08 0.0.5 增补轮四 批W3：counters 落盘节流改判心跳合并写 + 关停
+强制 flush（R26 改判，ADR-0010，Q2 旧裁定原文不覆盖、演进在案）——
+闸门形状 = 首拍即刷（冷启动第一笔变化不等窗口）+ M 毫秒窗口至多一次
+（env `RR3_COUNTERS_FLUSH_MS` 缺省 10_000）+ N 拍兜底（env
+`RR3_COUNTERS_FLUSH_MAX` 缺省 64）+ 失败不记账下一拍自然重试；SIGTERM/
+SIGINT 优雅关停强制 flush（self-pipe 信号模式：处理器内只 write 一字节，
+快照/写盘/日志落 `counters-term-flush` 线程；手写 libc `signal`/`write`
+extern 壳不引依赖，同 rr-ipc shm 六函数先例）；数据面零改动（归并/快照/
+原子写序原样），eMMC 写频次 1s 心跳拍下 1000 拍 1000 次 → 100 次（10× 削减）；
+e2e 双判据（节流本体：第二拍后 300ms 盘面不变；关停完整性：SIGTERM 退 0 +
+尾差落盘 + 无 tmp 残留）随既有单测全绿
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
