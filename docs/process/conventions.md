@@ -1048,8 +1048,10 @@ entry 改写仍走原三道门，pkg 树含非普通文件点名拒绝。**为�
 distro.toml 缺格点名语义不动——本批只落**打包能力**（raspi 功能链装配单与 rr3-pack
 `--profile` 参数化归后续批）；②[rr3-sense](../../modules/rr3-sense/src/main.rs) 采集按
 config 真值开（`channels>1` 即双麦期；默认 1 声道与旧硬编码逐点等价）+ **多通道下混 mono
-入总线**（[audio/mod.rs](../../modules/rr3-sense/src/audio/mod.rs) 新增
-`rr3_pcm_downmix_mono` / `rr3_pcm_downmix_stream`，依 R14：双麦原始多通道只供 sense 内部
+入总线**（`rr3_pcm_downmix_mono` / `rr3_pcm_downmix_stream`，批F 时落 audio/mod.rs，
+0.0.5 批C① 重铺后现居
+[atoms/capture/mech.rs](../../modules/rr3-sense/atoms/capture/mech.rs)；
+依 R14：双麦原始多通道只供 sense 内部
 DoA，总线承载恒 mono、brain 消费面零改动）；③[rr3-sense](../../modules/rr3-sense/Cargo.toml)
 与 [rr3-interact](../../modules/rr3-interact/Cargo.toml) 新增 `alsa` feature 透传
 `rr-hal/alsa`——补上 R13 "板上 `--features alsa`" 的接线缺口（原两 crate 无 feature，

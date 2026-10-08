@@ -327,4 +327,18 @@ slots = ["audio.vad"]
         let errs = rr3_registry_validate_atom_text(charger, &slots());
         assert!(errs.is_empty(), "charger 打样件漂移: {errs:?}");
     }
+
+    /// 批C① 重铺件钉死：rr3-sense 的四份 atom.toml 必须过契约 + 查册门 + 板无关断言
+    /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
+    #[test]
+    fn sense_relaid_atoms_stay_compliant() {
+        let capture = include_str!("../../../../modules/rr3-sense/atoms/capture/atom.toml");
+        let vad = include_str!("../../../../modules/rr3-sense/atoms/vad/atom.toml");
+        let env = include_str!("../../../../modules/rr3-sense/atoms/env/atom.toml");
+        let imu = include_str!("../../../../modules/rr3-sense/atoms/imu/atom.toml");
+        for (name, text) in [("capture", capture), ("vad", vad), ("env", env), ("imu", imu)] {
+            let errs = rr3_registry_validate_atom_text(text, &slots());
+            assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
+        }
+    }
 }
