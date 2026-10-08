@@ -20,6 +20,7 @@ pub mod protocol;
 #[cfg(not(target_os = "none"))]
 pub mod transport;
 
+pub use protocol::b64::rr3_base64_encode;
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{
     flags, opcode, Rr3HdrError, Rr3Header, Rr3PayloadType, Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN,
