@@ -1,0 +1,123 @@
+# CI 单一事实源（0.0.5 增补轮四 批W2，R27 裁定）：atomgit 原生引擎只拾取
+# .gitcode/workflows/（0.0.7 批A' 实证），gitcode 侧同路径共用——改 CI 只改本文件，
+# .github/workflows/ci.yml 已收为指路存根。
+name: ci
+on:
+  push:
+    branches: [main, "dev/**"]
+  pull_request:
+
+jobs:
+  # 七步规约：本地与 CI 同一入口（docs/process/conventions.md §2）。
+  conventions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 规约七步检查
+        run: bash tools/ci/check.sh
+
+  # 七步之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
+  # 失败归因不用翻混合日志。绿色基线 = 提交 fd0942c（rustfmt 全仓归一 + clippy 清零）。
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt --check（base/runtime + 全部独立工程）
+        run: |
+          cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check
+          while IFS= read -r -d '' m; do
+            cargo fmt --manifest-path "$m" -- --check
+          done < <(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
+      - name: clippy -D warnings（base/runtime + 全部独立工程）
+        run: |
+          cargo clippy -q --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings
+          while IFS= read -r -d '' m; do
+            cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings
+          done < <(find modules tools base/ota -name Cargo.toml \
+                     -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
+
+  # rr3-brain（Python，stdlib-only）：双矩阵单测。步②b/④只覆盖 Rust 工程，
+  # brain 的 26 条 unittest 只有这一步跑（tools/sim --brain 的四真进程 e2e 依赖
+  # 构建产物，仍属本地实跑环节，见 docs/process/conventions.md §2）。
+  brain-unittest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: rr3-brain unittest
+        working-directory: modules/rr3-brain
+        run: python3 -m unittest discover -s tests
+
+  # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进七步门，
+  # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
+  # Docker）。--strict：任何一步 SKIP 即不放行（退 2）。
+  # QEMU 仿真下容器内 cargo 构建较慢属预期；rust-cache 与 conventions/lint 共享加速。
+  ipct003:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - uses: docker/setup-qemu-action@v3
+      - name: IPC-T-003 跨架构对拍（--strict）
+        run: bash tools/ci/ipct003.sh --strict
+
+  # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
+  # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →
+  # dpkg -i → rrd 装配单正门起 5 模块 + rr3-brain 缺格点名。macOS 本机无法真装
+  # deb（方案 P1），真装只认这个 job 的远端回执。
+  distro-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: deb 装机冒烟（rust:bookworm 容器）
+        run: bash tools/ci/distro-smoke.sh
+
+  # 保底轨装配冒烟（0.0.2 修复批）：post-build.sh 装机布局 / entry 绝对化 /
+  # config 随装 / 坏模块警告不阻断。纯 bash + 系统工具，夹具侧模拟 Buildroot
+  # 目标根（TARGET_DIR），不需要 Docker 或 Buildroot 全量构建。
+  buildroot-assembly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 保底轨装配冒烟（post-build.sh）
+        run: bash tools/ci/buildroot-assembly-smoke.sh
+
+  # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六模块真进程（5 Rust + Python
+  # brain），判据六模块全 running + denied_publish = 0。runner 的 python3 ≥3.11
+  # 满足 brain 的 stdlib tomllib 门（macOS 本机 3.9 起不了 brain，六模块判据
+  # 归本 job 远端回执，P1 与 distro-smoke 同理）。
+  sim-assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 装配演练（构建 + rr3-sim --profile）
+        run: bash tools/ci/sim-assemble.sh
+
+  # 批F4 全链闭环演练（§5.2 判据 10 sim 档）：采集→意图→判向→转向→表情六真
+  # 进程 mock 闭环 + 总线观察者取证。runner 的 python3 ≥3.11 满足 brain 的
+  # tomllib 门（macOS 本机 3.9 起不了 brain，远端回执口径与 sim-assemble 同理）。
+  sim-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 全链闭环演练（构建 + rr3-sim --chain）
+        run: bash tools/ci/sim-chain.sh
