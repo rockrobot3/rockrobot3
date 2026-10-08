@@ -16,7 +16,7 @@ __version__ = "0.1.0"
 def rr3_brain_submit_text(dialog: Rr3Dialog, llm, user_text: str) -> str:
     """把识别文本交给对话状态机与 LLM 客户端，返回待朗读回复。
 
-    主循环（__main__.rr3_finish_turn）的直通路径；独立成函数供点名词用方
+    主循环（composite.rr3_finish_turn）的直通路径；独立成函数供点名词用方
     与单测对齐接口。云端失败抛 RuntimeError（业务失败，由调用方折应答）。
     """
     reply = llm.complete(user_text)

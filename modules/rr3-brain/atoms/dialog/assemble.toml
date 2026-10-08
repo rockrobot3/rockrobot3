@@ -1,0 +1,7 @@
+# dialog 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
+# 原子件只见 ops 指针与描述符给的绑定句柄）。
+schema_version = 1
+
+[assemble]
+handles = []   # 状态机无注入面（纯内存状态机，组合件构造即用）
+ops = []       # max_utterance_ms 经 config 数据化注入（config.toml [rr3-brain.dialog]）
