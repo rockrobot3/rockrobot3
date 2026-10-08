@@ -26,16 +26,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rr_core::{rr3_frame_compose, RR3_TRACE_ID_DIRECT};
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame, Rr3Header,
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
     Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT,
 };
 use serde_json::{json, Value};
 
-use crate::RR3_TASK_RRD;
-
-/// 模块间请求路由的上行 RPC 方法名（rr-bus 是唯一真值点，rrd 的 rpc.rs 引用它）
-pub const RR3_METHOD_CALL: &str = "rr3.call";
+use crate::{RR3_METHOD_CALL, RR3_TASK_RRD};
 
 /// 注册应答等待上界：注册是连接的第一件事，卡死在这里没有观察价值
 const RR3_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -140,18 +138,15 @@ impl Rr3Inner {
             .unwrap_or_else(|p| p.into_inner())
             .insert(id, tx);
         let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        let frame = Rr3Frame {
-            header: Rr3Header {
-                opcode: opcode::SEND,
-                flags: 0,
-                trace_id: 0,
-                timestamp_ns: rr3_now_ns(),
-                src_task,
-                dst_task: RR3_TASK_RRD,
-                payload_len: 0,
-            },
-            payload: rr3_body_encode(Rr3PayloadType::Request, body.to_string().as_bytes()),
-        };
+        let frame = rr3_frame_compose(
+            opcode::SEND,
+            0,
+            RR3_TRACE_ID_DIRECT,
+            rr3_now_ns(),
+            src_task,
+            RR3_TASK_RRD,
+            rr3_body_encode(Rr3PayloadType::Request, body.to_string().as_bytes()),
+        );
         if let Err(e) = self.rr3_write_frame(frame) {
             self.pending
                 .lock()
@@ -376,18 +371,11 @@ impl Rr3BusClient {
         };
         body["topic"] = json!(topic);
         self.inner
-            .rr3_write_frame(Rr3Frame {
-                header: Rr3Header {
-                    opcode: opcode::SEND,
-                    flags: 0,
-                    trace_id: 0,
-                    timestamp_ns: rr3_now_ns(),
-                    src_task: self.inner.rr3_task(),
-                    dst_task: RR3_TASK_RRD,
-                    payload_len: 0,
-                },
-                payload: rr3_body_encode(Rr3PayloadType::Event, body.to_string().as_bytes()),
-            })
+            .rr3_write_frame(rr_core::rr3_event_compose(
+                rr3_now_ns(),
+                self.inner.rr3_task(),
+                rr3_body_encode(Rr3PayloadType::Event, body.to_string().as_bytes()),
+            ))
             .map_err(|e| format!("发布 {topic} 失败: {e}"))
     }
 
@@ -400,18 +388,15 @@ impl Rr3BusClient {
         }
         let body = json!({"jsonrpc": "2.0", "id": id, "result": result});
         self.inner
-            .rr3_write_frame(Rr3Frame {
-                header: Rr3Header {
-                    opcode: opcode::SEND,
-                    flags: 0,
-                    trace_id,
-                    timestamp_ns: rr3_now_ns(),
-                    src_task: self.inner.rr3_task(),
-                    dst_task: RR3_TASK_RRD,
-                    payload_len: 0,
-                },
-                payload: rr3_body_encode(Rr3PayloadType::Response, body.to_string().as_bytes()),
-            })
+            .rr3_write_frame(rr3_frame_compose(
+                opcode::SEND,
+                0,
+                trace_id,
+                rr3_now_ns(),
+                self.inner.rr3_task(),
+                RR3_TASK_RRD,
+                rr3_body_encode(Rr3PayloadType::Response, body.to_string().as_bytes()),
+            ))
             .map_err(|e| format!("应答 rr3.call 失败: {e}"))
     }
 
@@ -517,6 +502,7 @@ fn rr3_reader_loop(sock: &mut UnixStream, inner: Arc<Rr3Inner>, inbox_tx: mpsc::
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use rr_ipc::Rr3Header;
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
 

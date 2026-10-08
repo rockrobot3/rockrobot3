@@ -1470,6 +1470,24 @@ Cargo.toml（brain 为 pyproject.toml）零改动、线上字节零改动、策�
 fail-closed、sim assemble 六模块编排不变）逐批复核；15 份 atom.toml 全数钉进 rr-registry
 契约测试（契约 + 查册门 + 板无关断言，累计 17 份含批B 两份）
 
+2026-10-09 0.0.5 第 II 轮 批D① 总线语义下沉（ADR-0018 裁定 1/5，全案 §8 批D₁ 行；
+机制核四层下沉的第二层，七步门禁直跑 GATE_EXIT=0 十六 PASS、三端指针核对一致）——
+机制核切片 crate `rr-core` 落地（`base/runtime/rr-core`，`#![no_std]` + core+alloc）：
+常量层（task 空间 `RR3_TASK_RRD`/`RR3_TASK_FIRST_MODULE`/广播 0、优先级带 0–139、
+`RR3_METHOD_CALL`、`RR3_TRACE_ID_DIRECT`、总线契约版本）+ 寻址规则（`Rr3TaskKind` +
+`rr3_task_kind` 纯函数）+ 帧组装（`rr3_frame_compose`/`rr3_event_compose` 时钟注入
+纯函数，timestamp_ns 显式入参）；12 测试（task 空间不重叠、优先级占位带、trace_id
+直连、Event 线上形状、golden 头区对拍）。配套 `rr-ipc` 帧数据形状下沉：`Rr3Frame`/
+`Rr3FrameError`/`rr3_frame_to_bytes` 从 `transport/frame.rs` 迁 `protocol/wire.rs`
+（no_std 可达），transport 保留 io 半边（read/write）并 re-export 维持路径兼容；lib.rs
+re-export 门控拆分（数据形状无条件导出、io 半边保持 `cfg(not(target_os="none"))`），
+rr-ipc 58+4 测试全绿零波及。`rr-bus` 改消费 rr-core：常量真值迁出，lib.rs re-export
+保对外路径不变，client.rs 三处帧组装（Request/Event/Response）改走 compose——线上
+字节逐字不变（`event_compose_matches_client_wire_shape` 钉形状），8+1 测试
+（`reexports_match_rr_core_truth` 对拍 rr-core 真值）。xtensa no_std 线验证：
+`cargo +esp check -Zbuild-std=core,alloc --target xtensa-esp32-none-elf`
+（rr-core 全量 + rr-ipc `--lib` 跳过需 std 的 ipct003_dump bin）双绿
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
