@@ -1,4 +1,5 @@
 //! 电池采样与低电边沿（`rr3-power/battery/state` 周期流 + `rr3-power/battery/low`）。
+//! 原子件机制主体（五件套③，自原 src/battery.rs 逐字迁入，逻辑零改动）。
 //!
 //! 关断决策在本地完成，不等总线、不等 brain（architecture §7.3 安全兜底）；
 //! `battery/state` 只是摘要上报。低电事件的**边沿语义**（schema 的同一句话）：
@@ -8,19 +9,6 @@
 
 use rr_hal::Rr3BatteryState;
 use serde_json::{json, Value};
-
-pub const SURFACE: &[&str] = &[
-    "battery: 电压/电量/温度摘要 -> rr3-power/battery/state (event)，关断为本地决策",
-    "battery: 低电越阈 -> rr3-power/battery/low (event)，同一次低电段恰发一次",
-];
-
-/// config `[rr3-power.battery]` 的形状（采样周期 + 两级阈值）
-#[derive(Debug, Clone, Copy)]
-pub struct Rr3BatteryCfg {
-    pub sample_period_ms: u64,
-    pub low_voltage_mv: u16,
-    pub cutoff_voltage_mv: u16,
-}
 
 /// 低电边沿机：armed 时电压跌破阈值 → 报一次并解除武装；电压回到阈值**之上**
 /// （严格大于，恰好等于阈值仍算低电段内）→ 重新武装。状态只有这一位。

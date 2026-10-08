@@ -1,0 +1,7 @@
+# charger 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
+# 原子件只见 ops 指针与描述符给的绑定句柄）。
+schema_version = 1
+
+[assemble]
+handles = []   # 充电位由 battery 原子读数派生（⊗ 组合内取数），无独立句柄
+ops = []       # 拍点周期经 config 数据化注入（config.toml [rr3-power.charger]）

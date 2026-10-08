@@ -1,0 +1,17 @@
+# charger 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批B③ 打样）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "charger"
+version = "0.0.1"
+
+[provides]
+slots = ["power.charger"]   # 充电状态格（body 层，按装配单绑定）
+
+[uses]
+slots = []           # 充电位由最近一次电池读数派生（同执行单元内函数调用，不跨格）
+
+[events]
+publishes = ["rr3-power/charger/state"]
+subscribes = []
