@@ -1,34 +1,13 @@
-//! 表情渲染：idle / blink / talk / think / happy / listen / turn
-//! （`rr3-interact/face/expression`）。
+//! face 原子件机制主体（五件套③，自原 src/face.rs 逐字迁入，逻辑零改动）。
 //!
-//! v0.0.1 的"渲染"只是状态机本身（真屏随硬件里程碑），但状态转移是现在就要
-//! 钉死的契约面：七态白名单、`talk` 由 TTS 播放期间自动挂起并恢复——这保证
-//! "说话时表情在 talk"不依赖调用方自觉。
-//!
-//! 批F3 sim 档：每态配 8x8 点阵帧序列（[`Rr3FaceFrame`]），blink/talk 双帧、
-//! 其余单帧；[`Rr3Face::rr3_face_tick`] 一拍报当前帧并推进（到尾回卷），
-//! 切换表情 / talk 挂起恢复都归零指针从首帧重播。显示件（LED 点阵/OLED）
-//! 随批F5a 显示 trait 实装，本档只钉"状态→帧"映射与推进语义。
+//! 每态配 8x8 点阵帧序列（blink/talk 双帧、其余单帧）；[`Rr3Face::rr3_face_tick`]
+//! 一拍报当前帧并推进（到尾回卷），切换表情 / talk 挂起恢复都归零指针从首帧
+//! 重播。最小表情机：持有当前表情；`talk` 是唯一的瞬态——播放开始挂起（记住
+//! 被打断的表情），播放结束恢复。单线程主循环内使用，无并发面。
 
 use serde_json::{json, Value};
 
-pub const SURFACE: &[&str] = &["face: rpc rr3-interact/face/expression (request)"];
-
-/// 本模块 exposes 的表情主题（module.toml [rpc].exposes 同源）
-pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
-
-/// 合法表情白名单（contracts/topics.toml 的 note 同源；批F3 增 listen/turn——
-/// 判据 9 点名的听取/转向两态）
-pub const RR3_FACE_EXPRESSIONS: [&str; 7] =
-    ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
-
-/// TTS 播放期间的临时表情（模块内自动切换，不接受点名）
-pub const RR3_FACE_TALK: &str = "talk";
-
-/// 8x8 点阵单帧：行主序 8 字节，每字节 bit7 为该行最左点（MAX7219 行寄存器
-/// 直排，修订版 6 定件；sim 档只存位图不驱动真件）。类型事实源在 rr-hal 的
-/// `Rr3Display` trait 签名（批F5a③），此处 re-export 保模块内名。
-pub use rr_hal::Rr3FaceFrame;
+use super::{RR3_FACE_EXPRESSIONS, RR3_FACE_TALK, RR3_FACE_TOPIC, Rr3FaceFrame};
 
 /// idle：睁眼 + 平嘴（单帧）
 const RR3_FRAMES_IDLE: [Rr3FaceFrame; 1] = [[
