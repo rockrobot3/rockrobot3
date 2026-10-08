@@ -79,6 +79,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../base/ota/README.md`](../base/ota/README.md) | OTA 布局文档与槽位 CLI（不写实际槽位写入） |
 | [`../base/runtime/README.md`](../base/runtime/README.md) | 基座 Rust workspace 的 crate 职责表与依赖预算 |
 | [`../base/runtime/rr-ipc/README.md`](../base/runtime/rr-ipc/README.md) | 协议层 + 传输层：帧读写、契约版本再导出 |
+| [`../base/runtime/rr-core/README.md`](../base/runtime/rr-core/README.md) | 机制核切片：总线语义 + 模块运行时执行环状态机（no_std） |
 | [`../base/runtime/rr-bus/README.md`](../base/runtime/rr-bus/README.md) | 总线常量层，及订阅/QoS/回压的落点位置 |
 | [`../base/runtime/rr-registry/README.md`](../base/runtime/rr-registry/README.md) | manifest 字段字典与主题注册表校验器 |
 | [`../base/runtime/rr-hal/README.md`](../base/runtime/rr-hal/README.md) | HAL 的 trait 面、数据类型与后端规划 |

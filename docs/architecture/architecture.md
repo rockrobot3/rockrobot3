@@ -184,8 +184,9 @@ rock3/
 │   │   │   │                          mod.rs（传输分层 + 两个路径常量）
 │   │   │   ├── src/bin/           ← ipct003_dump.rs：IPC-T-003 跨架构对拍的头 hex 转储（CI 平台条件下跑）
 │   │   │   └── tests/             ← envelope_meta.rs：与 envelope.schema.json 逐字段对齐的守护测试
-│   │   ├── rr-core/               ← 机制核切片（ADR-0018）：总线语义（常量/寻址/帧组装，
-│   │   │                             no_std，时钟注入纯函数）；后续批次叠模块运行时与控制原语
+│   │   ├── rr-core/               ← 机制核切片（ADR-0018）：总线语义（常量/寻址/帧组装）
+│   │   │                             + 模块运行时执行环状态机（runtime：连接态/心跳拍点/
+│   │   │                             分发分类，时钟注入纯函数，no_std）
 │   │   ├── rr-bus/                ← 总线常量真值在 rr-core（本 crate re-export）+ 模块侧同步客户端
 │   │   │                             （client.rs：连接/注册/心跳/发布/rr3.call/收帧）
 │   │   ├── rr-registry/           ← manifest 解析与校验、主题集（§4.1、§6.3）
@@ -254,7 +255,8 @@ rock3/
 > | ~~`base/os/buildroot/` + `base/os/distro/`~~ | ADR-0013 裁定 3 | **已落盘**（2026-10-01，见上方 §3 树） |
 > | payload 打包器 + CI 双矩阵 | ADR-0013 裁定 2/5 | 同一 payload 两轨同批验证 |
 > | ~~机制核 `no_std` 下沉——总线语义~~ | ADR-0018 裁定 1/5 | **已落盘**（2026-10-09，`rr-core`：常量/寻址/帧组装；帧形状下沉 `rr-ipc` protocol::wire；见上方 §3 树） |
-> | 机制核 `no_std` 下沉——模块运行时 / 控制与安全核 | ADR-0018 裁定 1/5 | 设计落点；随批D₂/D₃ 落 `rr-core` 同批补画 |
+> | ~~机制核 `no_std` 下沉——模块运行时~~ | ADR-0018 裁定 1/3 | **已落盘**（2026-10-09，`rr-core` runtime：执行环状态机 + 心跳拍点 + 分发分类，`rr-bus` client 改 std 驱动器消费；net.online 格机制核切片 = `Rr3LinkState`） |
+> | 机制核 `no_std` 下沉——控制与安全核 | ADR-0018 裁定 1/5 | 设计落点；随批D₃ 落 `rr-core` 同批补画 |
 > | 平台 port 接口（时基 / 内存 / 事件循环 / 传输） | ADR-0018 裁定 3 | 设计落点；具体 crate 划分随实施批进本树同批补画 |
 > | 描述符扩展硬件物理绑定 + `rr-hal` 板特定缺省收口 | ADR-0018 裁定 4 | 设计落点；现散在 env 与代码缺省，收进 `profiles/<机型>.toml` |
 
