@@ -1449,6 +1449,27 @@ staging→`rr3_registry_validate_atom` 回灌→rename，bin 增 `--atom <名> <
 （漂移当场红）。判据达成：④ 独立工程 7 测试绿、mkmod 回灌 7 测试绿、
 rr-registry 33+34 全绿、七步门禁直跑 GATE_EXIT=0
 
+2026-10-09 0.0.5 第 II 轮 批C：组合件与四面逐模块重铺（ADR-0019 裁定 2/8，全案 §8 批C 行；
+逐模块一提交、每批七步门禁直跑 GATE_EXIT=0 十六 PASS、三端指针核对一致）——
+批C① sense：塌缩先行 `4002303`（base64 编码收编 `rr-ipc/protocol/b64.rs`，方案 §12.3
+候选第一件，§10 权威向量测试随迁）+ 重铺 `a82d8b6`（capture/vad/env/imu 四原子五件套 +
+composite.toml ⊗ 链，main.rs 133→16 行，旧 src/audio 树退役，rrd e2e 音频链真二进制复证；
+rr3-sense 22 测试）；批C② act `e17974b`（servo/led/relay 三原子，intent/reflex 留组合件
+——§12.2 接入/守护面成分，main.rs 405→16 行；rr3-act 27 测试）；批C③ interact
+`a1723b5`（face/player 两原子，panel 状态面留组合件且 panel/ 目录零改动，main.rs 213→16
+行；rr3-interact 23 测试）；批C④ connect `708e5ad`（wifi/bt 两原子，session 会话事务面
+留组合件、`RR3_SESSION_TOPIC` 常量随 session.rs，main.rs 306→17 行；rr3-connect 12 测试）；
+批C⑤ brain `b3aafa2`（dialog/asr/llm/tts 四原子**两件式** manifest——Python 面只落
+atom.toml + assemble.toml，机制本体 .py 原位，Rust 五件套拆分归 ADR-0016 线；
+`__main__.py` 组合件分装吸收改 17 行瘦入口、机制主体迁 `rr3_brain/composite.py`，
+pyproject console script 面零波及；brain 本地 unittest 25 过 + 1 条 tomllib 门槛 error
+= 既有 py3.9 平台差额，CI brain-unittest 3.12 覆盖全量）。批C⑥ 收官（本条目）：方案
+§12 落点列对账至重铺后实况（21 格全表 + §12.2 终裁两行已落 + §12.3 三候选两落一留）。
+共性判据：SURFACE 字符串与启动打印序逐字冻结；六红线（module.toml/config.toml/
+Cargo.toml（brain 为 pyproject.toml）零改动、线上字节零改动、策略不进件、F⊗F
+fail-closed、sim assemble 六模块编排不变）逐批复核；15 份 atom.toml 全数钉进 rr-registry
+契约测试（契约 + 查册门 + 板无关断言，累计 17 份含批B 两份）
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
