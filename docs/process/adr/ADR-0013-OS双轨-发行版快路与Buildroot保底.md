@@ -1,6 +1,6 @@
 # ADR-0013：OS 双轨 —— 发行版快路 + Buildroot 保底，同一 payload 双矩阵执法
 
-- **状态**：已接受（OS 层设计裁定；`base/os/{distro,buildroot}` 双目录已落盘——2026-10-01 `{board,configs,patches}` 平移 `buildroot/`、`distro/` 骨架就位；payload 打包器与 CI 双矩阵仍归后续批次，实况见 status.md）
+- **状态**：已接受（OS 层设计裁定；`base/os/{distro,buildroot}` 双目录已落盘——2026-10-01 `{board,configs,patches}` 平移 `buildroot/`、`distro/` 骨架就位；payload 打包器与 CI 双矩阵仍归后续批次，实况见 status.md）· **2026-10-08 边界重述**：本 ADR 的 "Layer 1 = Linux 起来之后的一切" 默认"有操作系统"；[ADR-0018](ADR-0018-跨操作系统移植-机制核与主承载层分离.md) 把它重述为"具备操作系统的平台才叠加的**主承载层**"，不带 Linux 的板改跑与之无关的**机制核**切片（见 architecture.md §12）；双轨本身不改，跨 OS 那一刀归 ADR-0018
 - **日期**：2026-10-01
 - **关联**：[ADR-0001](ADR-0001-平台选型-linux66-buildroot-rk3566.md)（主路线由本文修订，Buildroot 降为保底轨）· [ADR-0012](ADR-0012-能力格坐标系与装配单.md)（硬件探测与装配链）· [ADR-0007](ADR-0007-控制面分层与模块级升级.md)（模块级升级/双轨升级）· [architecture.md](../../architecture/architecture.md)
 
