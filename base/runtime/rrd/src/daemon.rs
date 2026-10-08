@@ -2,7 +2,10 @@
 //!
 //! Task 10 加了**唯一的** watchdog 线程（`rr3_spawn_watchdog`）；Task 11b 加了**唯一的**
 //! supervisor 线程（`supervisor::rr3_spawn_supervisor`）与 boot 序。除这两条外本文件不养
-//! 其它常驻线程——收尸、退避、重启全部串行在那一条上（E-5）。
+//! 其它常驻线程——收尸、退避、重启全部串行在那一条上（E-5）。例外（0.0.5 增补轮四
+//! 批W3，R26）：`counters-term-flush` 一条——SIGTERM/SIGINT 强制 flush 的 sleep-and-wake
+//! 线程（self-pipe，见 [`rr3_install_term_counters_flush`]），平时不醒，不算常驻负载，
+//! 进程账按 +1 线程 +1 fd 记。
 //! 本任务做的：清残留套接字 → bind → 起 supervisor → 起监视线程 → 投 boot 队列 → accept 循环。
 //! 连接账（M-1）：每连接 **2 条线程 + 2 个 fd**，不是一条——accept 处 spawn 的 reader 线程，
 //! 加上 `conn.rs` 里为同一条连接 spawn 的 writer 线程与它那份 `try_clone`（评审资源探针实测
@@ -10,6 +13,8 @@
 //! 单次 accept 失败只记日志不带走守护进程；协议错误只结束那一条连接。
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -259,6 +264,15 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         ),
     }
 
+    // R26 心跳合并写闸门（0.0.5 增补轮四 批W3）：env 解析一次，全连接共享一份；
+    // SIGTERM/SIGINT 强制 flush 在此一并装上——合并写窗口内未落盘的尾部计数
+    // 靠关停路径兜底，缺了它 R26 的"最多丢 M 秒"只在断电时成立、正常关停会白丢。
+    let counters_gate = Arc::new(Mutex::new(crate::counters::Rr3CountersGate::rr3_new(
+        crate::counters::rr3_counters_flush_interval_ms(),
+        crate::counters::rr3_counters_flush_max_pending(),
+    )));
+    rr3_install_term_counters_flush(shared.clone(), counters_path.clone());
+
     // `Rr3Supervisor` 是 `Sender` 的一层薄壳（可 clone）：一份进 conn 收尾、一份进 watchdog，
     // 两条路交出的重启计划在这里汇成一条队列。
     let (sup_tx, sup_rx) = mpsc::channel::<Rr3SuperMsg>();
@@ -361,6 +375,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             pre_register_timeout_ms: cfg.pre_register_timeout_ms,
             sup: sup.clone(),
             counters_path: counters_path.clone(),
+            counters_gate: counters_gate.clone(),
         };
         thread::spawn(move || {
             if let Err(e) = rr3_conn_serve(stream, ctx) {
@@ -374,6 +389,84 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
 /// 装机现场入组（deb 不该动用户）——socket 权限位因此成为 ADR-0010 裁定 2
 /// "套接字文件权限就是访问控制"的落地值。
 const RR3_CTL_SOCKET_GROUP: &str = "rockrobot3";
+
+// ── R26 关停强制 flush（0.0.5 增补轮四 批W3）────────────────────────────────
+//
+// self-pipe 信号面：`signal(2)` 的处理器里只做 async-signal-safe 的一件事——
+// 往管道写一个字节；快照 / 写盘 / 日志全部落在 `counters-term-flush` 普通线程
+// （信号处理器里碰 Mutex/File 都是未定义行为，不能省这一层）。两个 libc 函数
+// 手写 extern 壳不引依赖（同 rr-ipc shm 六函数、rr-hal chmod/getgrnam 先例）。
+
+extern "C" {
+    fn signal(signum: i32, handler: usize) -> usize;
+    // buf 用 POSIX 原型 `const void *`（c_void）：与 std 运行时同名符号签名一致，
+    // 否则触发 rustc suspicious_runtime_symbol_definitions 警告（CI -D warnings 红）
+    fn write(fd: i32, buf: *const std::ffi::c_void, count: usize) -> isize;
+}
+
+/// POSIX 标准信号号：SIGINT=2、SIGTERM=15
+const RR3_SIGINT: i32 = 2;
+const RR3_SIGTERM: i32 = 15;
+
+/// self-pipe 发送端裸 fd（处理器读的唯一状态；-1 = 未安装）
+static RR3_TERM_PIPE_FD: AtomicI32 = AtomicI32::new(-1);
+
+/// 信号处理器：写一字节即返回。 errno 不保存（best-effort 唤醒，失手也只影响
+/// 这一拍 flush，进程随后的默认退出路径照走）。
+extern "C" fn rr3_term_pipe_wake(_sig: i32) {
+    let fd = RR3_TERM_PIPE_FD.load(Ordering::Relaxed);
+    if fd >= 0 {
+        let one: u8 = 1;
+        unsafe {
+            write(fd, &one as *const u8 as *const std::ffi::c_void, 1);
+        }
+    }
+}
+
+/// 安装 SIGTERM/SIGINT 强制 flush（R26）：合并写窗口内未落盘的尾部计数在关停
+/// 路径一次性写全（systemctl stop / reboot 的 cgroup SIGTERM、Ctrl-C 都走这里）。
+/// flush 完成 `exit(0)`——装了处理器信号就不再杀进程，必须自己退；flush 失败
+/// 只落日志不挡关停（运维账不许挡产品路，与启动装载同一口径）。未装上（pipe
+/// 失败/线程起不来）留痕跳过，SIGTERM 回落默认杀进程语义，不致命。
+fn rr3_install_term_counters_flush(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
+    use std::io::Read;
+    use std::os::unix::io::IntoRawFd;
+    let (tx, rx) = match std::os::unix::net::UnixStream::pair() {
+        Ok(pair) => pair,
+        Err(e) => {
+            rr3_log(&format!("counters 关停 flush 未装上（self-pipe 失败）: {e}"));
+            return;
+        }
+    };
+    // 发送端交给处理器：取裸 fd 后刻意不 close（进程生命期一根管，泄漏即设计）
+    RR3_TERM_PIPE_FD.store(tx.into_raw_fd(), Ordering::Relaxed);
+    unsafe {
+        signal(RR3_SIGTERM, rr3_term_pipe_wake as extern "C" fn(i32) as usize);
+        signal(RR3_SIGINT, rr3_term_pipe_wake as extern "C" fn(i32) as usize);
+    }
+    let spawned = thread::Builder::new()
+        .name("counters-term-flush".into())
+        .spawn(move || {
+            let mut rx = rx;
+            let mut one = [0u8; 1];
+            // 平时睡在 read；醒来一次 = 一个 TERM/INT。EOF = 发送端随进程没了
+            while matches!(rx.read(&mut one), Ok(1)) {
+                let snap = rr3_lock(&shared).rr3_reg_counters_snapshot();
+                match path
+                    .as_deref()
+                    .map(|p| crate::counters::rr3_counters_store(p, &snap))
+                {
+                    Some(Ok(())) => rr3_log("counters 关停 flush 已落盘（SIGTERM/SIGINT）"),
+                    Some(Err(e)) => rr3_log(&format!("counters 关停 flush 失败（不挡关停）: {e}")),
+                    None => rr3_log("counters 关停 flush 跳过（未启用持久化）"),
+                }
+                std::process::exit(0);
+            }
+        });
+    if let Err(e) = spawned {
+        rr3_log(&format!("counters 关停 flush 未装上（线程起不来）: {e}"));
+    }
+}
 
 /// ctl socket 访问控制放行（0.0.6 批F5b R12，ADR-0010 权限模型增补）：bind 后
 /// `chmod 0o660`（owner + 属主组可读写，other 无份——修真板首发现敞口

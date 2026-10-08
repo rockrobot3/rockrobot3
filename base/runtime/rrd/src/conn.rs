@@ -61,8 +61,12 @@ pub struct Rr3ConnCtx {
     /// "起不起得来"由 supervisor 按所有权裁定（E-1）——收尾这一路绝不自己 `Command::spawn`。
     pub sup: Rr3Supervisor,
     /// 运维计数持久化路径（0.0.4 批B，Q2 裁定）：daemon 启动判定一次，`None` =
-    /// 不持久化（心跳聚合照常进内存账，只是断电不保）。conn 心跳归并后 write-through。
+    /// 不持久化（心跳聚合照常进内存账，只是断电不保）。conn 心跳归并后按
+    /// R26 合并写节流落盘（0.0.5 增补轮四 批W3 改判，闸门在 counters.rs）。
     pub counters_path: Option<std::path::PathBuf>,
+    /// 运维计数合并写闸门（R26，批W3）：daemon 造一份、全连接共享（`Arc`）——
+    /// 每条连接各持一份等于把 M 窗口放大 N 连接倍。
+    pub counters_gate: Arc<Mutex<crate::counters::Rr3CountersGate>>,
 }
 
 impl Rr3ConnCtx {
@@ -680,29 +684,34 @@ fn rr3_serve_request(
         }
         Rr3RpcMethod::Heartbeat => {
             // 运维计数聚合（0.0.4 批B，Q1 裁定）：心跳可选 `counters` 字段，模块自报
-            // → 按 `模块名/键` 归并进聚合表。锁内归并、锁外写盘（write-through，Q2；
-            // 无变化不写盘，路径 None 只进内存账）。计数是运维账，不跟着判活走
-            // （Rejected 也照归并），但**必须先于应答落账**（2026-10-07 顺序倒置修复）：
-            // 旧序"应答先回、归并在后"下，对端收到应答即读 `rr3.ctl.counters` 会抢在
-            // 归并前读到上一拍的账（e2e ctl_counters_aggregates_heartbeat_counters 在
-            // 机器繁忙时实证：期望 5 实得 2）。归并块放最前不改变 D-6 三态语义，
-            // 两把锁各自成段不嵌套。
+            // → 按 `模块名/键` 归并进聚合表。锁内归并、锁外落盘；无变化不落盘，路径
+            // None 只进内存账。计数是运维账，不跟着判活走（Rejected 也照归并），
+            // 但**必须先于应答落账**（2026-10-07 顺序倒置修复）：旧序"应答先回、
+            // 归并在后"下，对端收到应答即读 `rr3.ctl.counters` 会抢在归并前读到
+            // 上一拍的账（e2e ctl_counters_aggregates_heartbeat_counters 在机器繁忙
+            // 时实证：期望 5 实得 2）。归并块放最前不改变 D-6 三态语义，两把锁各自
+            // 成段不嵌套。
             if let Some(counters) = rr3_rpc_heartbeat_counters(&req.params) {
-                let (changed, snap) = {
-                    let mut g = rr3_lock(&ctx.shared);
-                    let changed = g.rr3_reg_counters_merge(&me.name, &counters);
-                    let snap = if changed {
-                        Some(g.rr3_reg_counters_snapshot())
-                    } else {
-                        None
-                    };
-                    (changed, snap)
-                };
-                if let (true, Some(snap), Some(path)) =
-                    (changed, snap, ctx.counters_path.as_deref())
-                {
-                    if let Err(e) = crate::counters::rr3_counters_store(path, &snap) {
-                        rr3_log(&format!("counters 落盘失败（下一拍自然重试）: {e}"));
+                let changed = rr3_lock(&ctx.shared).rr3_reg_counters_merge(&me.name, &counters);
+                // R26 心跳合并写（0.0.5 增补轮四 批W3 改判，0.0.4 Q2 逐拍
+                // write-through → M 毫秒窗口至多一次 + N 拍兜底；SIGTERM 强制
+                // flush 归 daemon 的 term 路径）：变化先过共享闸门，判到 flush
+                // 才取快照写盘。落盘失败不记账，窗口判据下一拍仍成立自然重试。
+                if changed && ctx.counters_path.is_some() {
+                    let flush = rr3_lock(&ctx.counters_gate).rr3_on_change(ctx.rr3_ctx_now_ms());
+                    if flush {
+                        let snap = rr3_lock(&ctx.shared).rr3_reg_counters_snapshot();
+                        if let Some(path) = ctx.counters_path.as_deref() {
+                            match crate::counters::rr3_counters_store(path, &snap) {
+                                Ok(()) => {
+                                    rr3_lock(&ctx.counters_gate)
+                                        .rr3_on_flushed(ctx.rr3_ctx_now_ms());
+                                }
+                                Err(e) => rr3_log(&format!(
+                                    "counters 落盘失败（下一拍窗口到自然重试）: {e}"
+                                )),
+                            }
+                        }
                     }
                 }
             }

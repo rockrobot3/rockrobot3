@@ -454,6 +454,21 @@ impl RrdTest {
             "不该出现 {needle:?}；实际日志:\n{logs}"
         );
     }
+
+    /// 对 rrd 发 SIGTERM 并等它退出（0.0.5 增补轮四 批W3，R26 关停强制 flush 的
+    /// e2e 用）。`/bin/kill` 与 `rr3_pid_alive` 同一先例（std 不暴露 kill）；发送
+    /// 后 `child.wait()` 收尸——之后 Drop 的 kill/wait 对已收尸进程是 Err，无害。
+    pub fn rr3_sigterm_and_wait(&mut self) -> std::process::ExitStatus {
+        let pid = self.child.id();
+        Command::new("/bin/kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .status()
+            .expect("kill -TERM 起不来");
+        self.child
+            .wait()
+            .expect("rrd 进程必须能被 wait 收尸")
+    }
 }
 
 impl Drop for RrdTest {

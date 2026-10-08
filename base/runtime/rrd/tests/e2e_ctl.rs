@@ -300,7 +300,7 @@ fn counters_persist_across_restart_and_boots_accumulate() {
             ),
         );
         rr3_read_rpc(&mut a);
-        // write-through 是逐拍的：读到盘上出现模块键为止，不猜时刻
+        // 首拍即刷（R26 闸门 last=None）：读到盘上出现模块键为止，不猜时刻
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let text = std::fs::read_to_string(&path).unwrap_or_default();
@@ -365,5 +365,108 @@ fn counters_persist_across_restart_and_boots_accumulate() {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// R26 心跳合并写 + 关停强制 flush（0.0.5 增补轮四 批W3）。两个判据一条用例钉死：
+/// ①**节流本体**——首拍即刷（闸门 last=None）之后，窗口 M 内的后续变化**不得**
+/// 提前落盘（M 拉到 10 分钟，测试时长内窗口判据不可能成立，盘上若出现新值即节流失效）；
+/// ②**关停完整性**——SIGTERM 后重读计数与内存一致（窗口内的尾部变化由关停路径
+/// 一次性写全），且进程以 0 退出（处理器已装、flush 完自己退，信号死=没装上）。
+#[test]
+fn sigterm_forces_flush_of_pending_counters() {
+    let dir = std::env::temp_dir().join(format!(
+        "rrd-counters-term-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("counters.json");
+    let envs = [
+        ("RR3_DATA_DIR", dir.to_str().unwrap()),
+        ("RR3_COUNTERS_FLUSH_MS", "600000"),
+    ];
+
+    let mut t = RrdTest::rr3_start_env("counters-term", &envs);
+    let line = t.rr3_wait_log("counters 持久化已启用");
+    assert!(line.contains("boots 自增已回写"), "{line}");
+
+    let mut a = t.rr3_connect();
+    rr3_send(
+        &mut a,
+        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
+    );
+    let task = rr3_read_rpc(&mut a)["result"]["src_task"]
+        .as_u64()
+        .expect("注册应答带 src_task");
+
+    // 第一拍（首拍即刷）：盘上出现 term_flush=9
+    rr3_send(
+        &mut a,
+        &rr3_rpc_frame(
+            "rr3.heartbeat",
+            2,
+            serde_json::json!({"counters": {"term_flush": 9}}),
+            task,
+        ),
+    );
+    rr3_read_rpc(&mut a);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let ok = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .map(|v| v["rr3-sima/term_flush"] == 9)
+            .unwrap_or(false);
+        if ok {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "首拍即刷（last=None）落盘没发生: {path:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // 第二拍（窗口内）：应答回来 = 账已进内存（顺序契约），但盘必须仍是 9
+    rr3_send(
+        &mut a,
+        &rr3_rpc_frame(
+            "rr3.heartbeat",
+            3,
+            serde_json::json!({"counters": {"term_flush": 1}}),
+            task,
+        ),
+    );
+    rr3_read_rpc(&mut a);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+        .expect("counters.json 必须仍是合法 JSON");
+    assert_eq!(
+        stored["rr3-sima/term_flush"], 9,
+        "窗口 M=600s 内第二拍变化不得提前落盘（节流失效）: {stored}"
+    );
+
+    // SIGTERM：关停强制 flush 补上尾部 → 盘 == 内存（10），进程退 0
+    let status = t.rr3_sigterm_and_wait();
+    assert!(
+        status.success(),
+        "SIGTERM 后必须以 0 退出（flush 完自己退）；信号死 = 处理器没装上: {status}"
+    );
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+            .expect("关停 flush 后 counters.json 必须可解析");
+    assert_eq!(stored["boots"], 1, "{stored}");
+    assert_eq!(
+        stored["rr3-sima/term_flush"], 10,
+        "关停 flush 必须把窗口内尾部变化（9+1）写全: {stored}"
+    );
+    assert!(
+        !dir.join("counters.json.tmp").exists(),
+        "原子写序走完不得留 tmp 残留"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
