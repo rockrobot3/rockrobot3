@@ -1,0 +1,7 @@
+# bt 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
+# 原子件只见 ops 指针与描述符给的绑定句柄）。
+schema_version = 1
+
+[assemble]
+handles = []   # 骨架期无注入面；真后端（BlueZ cfg 门）接线归板上批次
+ops = []       # sim 开机初值走 env 注入口（RR3_HAL_SIM_BT_UP），不占 config 面

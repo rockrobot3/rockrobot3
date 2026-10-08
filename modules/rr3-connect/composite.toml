@@ -1,0 +1,12 @@
+# rr3-connect 组合件装配清单（三层 manifest 的 Composite 层，0.0.5 批C④ 原子重铺）
+# 方案 §9：Composite 声明"装配了哪些原子件（⊗ 链）+ 落为哪种执行单元"。
+# 机器校验 schema 归批E 门禁接线；本文件先以数据形状落位。
+# owner 级契约 module.toml 功能守恒不动（architecture.md §4.1 注记）。
+schema_version = 1
+
+[composite]
+name = "rr3-connect"
+unit = "process"   # 执行单元：独立进程（module.toml entry=rr3-connect）
+
+[assemble]
+atoms = ["wifi", "bt"]   # wifi ⊗ bt（⊗=装配期、执行单元内函数调用，ADR-0019 裁定 2）；session 云会话事务面留组合件（方案 §12.2）
