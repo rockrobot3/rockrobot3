@@ -1,11 +1,10 @@
 //! 采集域：麦克风阵列 PCM 抓取 + 本地 VAD 边沿检测。
 //!
-//! 本文件承载三件与传输形状有关的事：
-//! 1. [`rr3_base64_encode`]——手写 RFC 4648（带填充），PCM 二进制进 JSON 的唯一通道；
-//!    不引第三方编解码依赖，golden 向量钉死正确性。
-//! 2. 事件体构造器（[`rr3_pcm_event_body`] / [`rr3_vad_event_body`]）——负载里
+//! 本文件承载两件与传输形状有关的事（0.0.5 批C①：base64 编码已塌缩进 rr-ipc
+//! 线格式层，方案 §12.3——PCM 二进制进 JSON 的通道归 `rr_ipc::rr3_base64_encode`）：
+//! 1. 事件体构造器（[`rr3_pcm_event_body`] / [`rr3_vad_event_body`]）——负载里
 //!    **不含 topic**（topic 由 rr-bus 客户端并入，见 client.rs 的 rr3_publish）。
-//! 3. 配置加载（[`rr3_sense_config_load`]）——`RR3_SENSE_CONFIG` 指路径，
+//! 2. 配置加载（[`rr3_sense_config_load`]）——`RR3_SENSE_CONFIG` 指路径，
 //!    缺省用登记值；缺键回落默认，类型错显式报错。
 
 pub mod capture;
@@ -13,6 +12,7 @@ pub mod doa;
 pub mod vad;
 
 use rr_hal::{Rr3AudioCfg, Rr3PcmStream};
+use rr_ipc::rr3_base64_encode;
 use serde_json::{json, Value};
 
 pub use doa::Rr3DoaFix;
@@ -24,35 +24,6 @@ pub fn surface() -> impl Iterator<Item = &'static str> {
         .chain(doa::SURFACE.iter())
         .chain(vad::SURFACE.iter())
         .copied()
-}
-
-// ---------- base64（RFC 4648 标准字母表 + 填充） ----------
-
-const RR3_B64_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// base64 编码（带填充）。每组 3 字节 → 4 字符；尾部不足 3 字节以 `=` 补位。
-pub fn rr3_base64_encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
-        let n = (b0 << 16) | (b1 << 8) | b2;
-        out.push(RR3_B64_ALPHABET[(n >> 18) as usize & 63] as char);
-        out.push(RR3_B64_ALPHABET[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            RR3_B64_ALPHABET[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            RR3_B64_ALPHABET[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
 }
 
 // ---------- 多通道下混（R14） ----------
@@ -254,22 +225,9 @@ mod tests {
     use super::*;
     use rr_hal::Rr3AudioCfg;
 
-    /// RFC 4648 §10 的测试向量（权威字面量，不是实现回抄）
-    #[test]
-    fn base64_matches_rfc4648_vectors() {
-        let cases: [(&[u8], &str); 7] = [
-            (b"", ""),
-            (b"f", "Zg=="),
-            (b"fo", "Zm8="),
-            (b"foo", "Zm9v"),
-            (b"foob", "Zm9vYg=="),
-            (b"fooba", "Zm9vYmE="),
-            (b"foobar", "Zm9vYmFy"),
-        ];
-        for (input, want) in cases {
-            assert_eq!(rr3_base64_encode(input), want, "input={input:?}");
-        }
-    }
+    /// RFC 4648 标准字母表（测试侧独立解码器用，与实现侧各持一份）
+    const B64: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     /// 多通道下混（R14）：逐帧平均、单声道原样、多声道点数收缩。
     #[test]
@@ -340,8 +298,7 @@ mod tests {
         // 决定该组贡献几个数据字节（与编码器的补位规则对称）。
         let b64 = body["pcm_b64"].as_str().unwrap();
         let alphabet = |c: char| {
-            RR3_B64_ALPHABET
-                .iter()
+            B64.iter()
                 .position(|&a| a as char == c)
                 .unwrap()
         };
