@@ -883,7 +883,7 @@ fn every_manifest_capability_is_a_registered_slot() {
 }
 
 /// 门禁②（profile 侧）+ 裁定 3 的装配自洽：default 装配单的 bindings 逐格对表查册、
-/// 绑到真实模块、与该模块的 manifest provides 对账；faces 与 provides 全集相等；
+/// 绑到真实模块、与该模块的 manifest provides 对账；enabled_slots 与 provides 全集相等；
 /// 全部非 base 格位恰好被绑定一次（default 机不留缺格）。
 #[test]
 fn default_profile_binds_module_slots_to_real_modules() {
@@ -965,23 +965,23 @@ fn default_profile_binds_module_slots_to_real_modules() {
     );
     unbound.clear();
 
-    // [faces]：模块 → 格位集合 == manifest provides 全集
-    let faces = v
-        .get("faces")
+    // [enabled_slots]：模块 → 格位集合 == manifest provides 全集
+    let enabled_slots = v
+        .get("enabled_slots")
         .and_then(toml::Value::as_table)
-        .expect("缺 [faces]");
-    let mut face_modules: Vec<&String> = faces.keys().collect();
+        .expect("缺 [enabled_slots]");
+    let mut face_modules: Vec<&String> = enabled_slots.keys().collect();
     face_modules.sort();
     let mut manifest_modules: Vec<&String> = manifests.keys().collect();
     manifest_modules.sort();
     assert_eq!(
         face_modules, manifest_modules,
-        "[faces] 覆盖的模块集合与 modules/ 漂移"
+        "[enabled_slots] 覆盖的模块集合与 modules/ 漂移"
     );
-    for (module, face) in faces {
+    for (module, face) in enabled_slots {
         let mut slots: Vec<String> = face
             .as_array()
-            .expect("faces 值必须是数组")
+            .expect("enabled_slots 值必须是数组")
             .iter()
             .filter_map(toml::Value::as_str)
             .map(String::from)
@@ -989,16 +989,16 @@ fn default_profile_binds_module_slots_to_real_modules() {
         slots.sort();
         let mut caps = str_list(&manifests[module], "provides.capabilities");
         caps.sort();
-        assert_eq!(slots, caps, "{module} 的 [faces] 与 manifest provides 漂移");
+        assert_eq!(slots, caps, "{module} 的 [enabled_slots] 与 manifest provides 漂移");
         for s in &slots {
-            assert!(table.rr3_slot_table_contains(s), "[faces] 引用表外格位 {s}");
+            assert!(table.rr3_slot_table_contains(s), "[enabled_slots] 引用表外格位 {s}");
         }
     }
 }
 
 /// 门禁②（profile 侧）+ 0.0.2 T5 的 distro 装配单对账：快路机型的绑定面**恰好是
 /// 身体层**（非 base 未绑格位 == cognition.\* 四格，即 rr3-brain 的 provides 全集），
-/// faces 仍覆盖全部在册模块且与 provides 全集相等——"faces 保留声明、格位不绑定"
+/// enabled_slots 仍覆盖全部在册模块且与 provides 全集相等——"enabled_slots 保留声明、格位不绑定"
 /// 正是快路 payload 缺 Python brain 的诚实表达（P2：缺格点名降级，不拒 boot；
 /// CI distro-smoke 的断言锚点与这份装配单同源）。
 #[test]
@@ -1060,23 +1060,23 @@ fn distro_profile_binds_exactly_the_body_layer() {
         "distro 机快路满配后仍有未绑格位 {unbound:?}（装配单漂移，须显式绑定或重审边界）"
     );
 
-    // faces 仍覆盖全部在册模块（含 brain——faces 决定起谁，brain 现在实际进 boot 队列），且与 provides 全集相等
-    let faces = v
-        .get("faces")
+    // enabled_slots 仍覆盖全部在册模块（含 brain——enabled_slots 决定起谁，brain 现在实际进 boot 队列），且与 provides 全集相等
+    let enabled_slots = v
+        .get("enabled_slots")
         .and_then(toml::Value::as_table)
-        .expect("缺 [faces]");
-    let mut face_modules: Vec<&String> = faces.keys().collect();
+        .expect("缺 [enabled_slots]");
+    let mut face_modules: Vec<&String> = enabled_slots.keys().collect();
     face_modules.sort();
     let mut manifest_modules: Vec<&String> = manifests.keys().collect();
     manifest_modules.sort();
     assert_eq!(
         face_modules, manifest_modules,
-        "[faces] 覆盖的模块集合与 modules/ 漂移"
+        "[enabled_slots] 覆盖的模块集合与 modules/ 漂移"
     );
-    for (module, face) in faces {
+    for (module, face) in enabled_slots {
         let mut slots: Vec<String> = face
             .as_array()
-            .expect("faces 值必须是数组")
+            .expect("enabled_slots 值必须是数组")
             .iter()
             .filter_map(toml::Value::as_str)
             .map(String::from)
@@ -1084,9 +1084,9 @@ fn distro_profile_binds_exactly_the_body_layer() {
         slots.sort();
         let mut caps = str_list(&manifests[module], "provides.capabilities");
         caps.sort();
-        assert_eq!(slots, caps, "{module} 的 [faces] 与 manifest provides 漂移");
+        assert_eq!(slots, caps, "{module} 的 [enabled_slots] 与 manifest provides 漂移");
         for s in &slots {
-            assert!(table.rr3_slot_table_contains(s), "[faces] 引用表外格位 {s}");
+            assert!(table.rr3_slot_table_contains(s), "[enabled_slots] 引用表外格位 {s}");
         }
     }
 }

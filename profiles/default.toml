@@ -1,7 +1,7 @@
 # RockRobot3 装配单：default 机型（RK3566 参考机，ADR-0012 裁定 3）
 # 纯数据、零逻辑：rrd 启动装配链读它 + 硬件探测做匹配（缺格置 Degraded），
 # 不写启动序（那是 ADR-0009 拓扑仲裁的输出），不写"怎么启动"（那是 rrd 的机制）。
-# 门禁（ADR-0012 裁定 5②）：[bindings]/[faces] 引用的格位必须命中 contracts/slots.toml，
+# 门禁（ADR-0012 裁定 5②）：[bindings]/[enabled_slots] 引用的格位必须命中 contracts/slots.toml，
 # 绑定的件必须是 modules/ 在册模块——由 rr-registry 契约测试在 CI 全集层判。
 
 schema_version = 1
@@ -29,7 +29,7 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 "cognition.llm" = "rr3-brain"
 "cognition.tts" = "rr3-brain"
 
-[faces]
+[enabled_slots]
 # 模块 → 本形态启用的格位集合。default 机各模块启用其 manifest provides 全集；
 # 换机型裁剪模块能力面 = 只改本文件，不改代码。
 rr3-act = ["act.servo", "act.led", "act.relay"]

@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use support::*;
 
-/// 装配单：connect 两格位各绑 rr3-connect、faces 与 bindings 互认领。
+/// 装配单：connect 两格位各绑 rr3-connect、enabled_slots 与 bindings 互认领。
 /// 格位名取自真 `contracts/slots.toml`（net.online 是基础层 base 格，绑它致命，
 /// e2e_profile 钉过——这里只绑身体层两格）。
 const PROFILE: &str = r#"
@@ -35,7 +35,7 @@ route = "distro"
 "net.wifi" = "rr3-connect"
 "net.bt" = "rr3-connect"
 
-[faces]
+[enabled_slots]
 rr3-connect = ["net.wifi", "net.bt"]
 "#;
 

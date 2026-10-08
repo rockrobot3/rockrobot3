@@ -30,8 +30,8 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 "cognition.llm" = "rr3-brain"
 "cognition.tts" = "rr3-brain"
 
-[faces]
-# 模块 → 本形态启用的格位集合。faces 决定起谁（Q3 裁定）。
+[enabled_slots]
+# 模块 → 本形态启用的格位集合。enabled_slots 决定起谁（Q3 裁定）。
 rr3-act = ["act.servo", "act.led", "act.relay"]
 rr3-connect = ["net.wifi", "net.bt"]
 rr3-interact = ["ui.face", "audio.playback"]

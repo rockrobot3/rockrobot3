@@ -30,7 +30,7 @@ use serde_json::json;
 
 use support::*;
 
-/// 满配装配单：act 三格位各绑 rr3-act、faces 与 bindings 互认领。
+/// 满配装配单：act 三格位各绑 rr3-act、enabled_slots 与 bindings 互认领。
 /// 格位名取自真 `contracts/slots.toml`（Q1 裁定立格 act.relay 后三格齐备）。
 const PROFILE: &str = r#"
 schema_version = 1
@@ -43,7 +43,7 @@ route = "distro"
 "act.led" = "rr3-act"
 "act.relay" = "rr3-act"
 
-[faces]
+[enabled_slots]
 rr3-act = ["act.servo", "act.led", "act.relay"]
 "#;
 
