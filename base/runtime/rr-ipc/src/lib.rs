@@ -28,10 +28,11 @@ pub use protocol::header::{
 };
 #[cfg(not(target_os = "none"))]
 pub use transport::buf::{rr3_framebuf_read, Rr3FrameBuf};
+// 帧数据形状（Rr3Frame / 编码）住 protocol::wire，no_std 可达——无条件导出；
+// io 半边（读写）依赖 std::io，随 transport 层门控。
+pub use protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
 #[cfg(not(target_os = "none"))]
-pub use transport::frame::{
-    rr3_frame_read, rr3_frame_to_bytes, rr3_frame_write, Rr3Frame, Rr3FrameError,
-};
+pub use transport::frame::{rr3_frame_read, rr3_frame_write};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use transport::shm::Rr3ShmListener;
 #[cfg(not(target_os = "none"))]

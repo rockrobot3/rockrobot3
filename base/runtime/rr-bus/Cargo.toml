@@ -12,6 +12,7 @@ name = "rr_bus"
 path = "src/lib.rs"
 
 [dependencies]
+rr-core = { path = "../rr-core" }
 rr-ipc = { path = "../rr-ipc" }
 toml = { workspace = true }
 serde_json = { workspace = true }

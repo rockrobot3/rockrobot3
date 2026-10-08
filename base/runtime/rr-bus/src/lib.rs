@@ -1,41 +1,29 @@
 //! # rr-bus
 //!
-//! 总线常量层 + 模块侧同步 UDS 客户端（architecture.md §6，M3 落地）。
-//! 客户端见 [`client`]：连接 → 注册（entry 绝对化）→ 心跳线程 → 发布 / `rr3.call`
-//! / 收帧，是模块与 rrd 之间唯一的标准说话方式。
+//! 总线**std 承载层**（模块侧同步 UDS 客户端，architecture.md §6，M3 落地）：
+//! 连接 → 注册（entry 绝对化）→ 心跳线程 → 发布 / `rr3.call` / 收帧，是模块与
+//! rrd 之间唯一的标准说话方式。客户端见 [`client`]。
+//!
+//! **总线语义层已下沉 `rr-core`（0.0.5 第 II 轮批D₁，ADR-0018 裁定 1）**：常量、
+//! 寻址规则与帧组装的 no_std 切片在 `rr-core`；本 crate re-export 保持既有
+//! import 路径逐字不变（`rrd` 的 rpc.rs 与六模块的 `use rr_bus::…` 零波及）。
 
 pub mod client;
 #[cfg(unix)]
 pub use client::{
     rr3_manifest_entry_absolutize, rr3_manifest_identity, Rr3BusClient, Rr3BusIdentity,
-    RR3_METHOD_CALL,
 };
 
-use rr_ipc::RR3_CONTRACT_SCHEMA_VERSION;
+// ---------------------------------------------------------------------------
+// 总线语义层：真值在 rr-core，这里只 re-export（批D₁ 下沉，对外路径不变）
+// ---------------------------------------------------------------------------
 
-/// 广播目标（A-IPC 标准：dst_task = 0 表示广播）
-pub const RR3_BROADCAST_DST_TASK: u64 = 0;
-
-/// `rrd` 自身的 task 号：0 已被广播占用，守护进程固定 1（spec §5.0）
-pub const RR3_TASK_RRD: u64 = 1;
-
-/// 模块 `src_task` 分配池的起点（0=广播、1=rrd 均保留）
-pub const RR3_TASK_FIRST_MODULE: u64 = 2;
-
-/// EVENT 优先级下界。
-///
-/// **占位值**：v0.0.1 没有任何契约/ADR/文档定义过优先级区间，这两个数只是给
-/// `rr-ota`/`rrd` 留出的常量位；调度类与优先级语义随 M2 的调度 ADR 定稿后替换。
-pub const RR3_PRIORITY_MIN: u32 = 0;
-
-/// EVENT 优先级上界（同上：M2 调度 ADR 前的占位值，非对齐 Airy IPC 或 Linux 调度类）
-pub const RR3_PRIORITY_MAX: u32 = 139;
-
-/// 主题分隔符
-pub const RR3_TOPIC_SEP: char = '/';
-
-/// 契约 schema 版本透传（rr-bus 侧的再导出；rrd 握手回显属 M2 待落地）
-pub const RR3_BUS_CONTRACT_VERSION: u32 = RR3_CONTRACT_SCHEMA_VERSION;
+pub use rr_core::{
+    rr3_event_compose, rr3_frame_compose, rr3_task_kind, Rr3TaskKind, RR3_BROADCAST_DST_TASK,
+    RR3_BUS_CONTRACT_VERSION, RR3_METHOD_CALL, RR3_PAYLOAD_EVENT, RR3_PAYLOAD_REQUEST,
+    RR3_PAYLOAD_RESPONSE, RR3_PRIORITY_MAX, RR3_PRIORITY_MIN, RR3_TASK_FIRST_MODULE,
+    RR3_TASK_RRD, RR3_TOPIC_SEP, RR3_TRACE_ID_DIRECT,
+};
 
 #[cfg(test)]
 mod tests {
@@ -84,5 +72,13 @@ mod tests {
     #[test]
     fn bus_reexports_contract_version() {
         assert_eq!(RR3_BUS_CONTRACT_VERSION, 1);
+    }
+
+    /// re-export 与 rr-core 真值一致（下沉后防两册漂移）
+    #[test]
+    fn reexports_match_rr_core_truth() {
+        assert_eq!(rr_core::RR3_TASK_RRD, RR3_TASK_RRD);
+        assert_eq!(rr_core::RR3_METHOD_CALL, RR3_METHOD_CALL);
+        assert_eq!(rr_core::RR3_TOPIC_SEP, RR3_TOPIC_SEP);
     }
 }

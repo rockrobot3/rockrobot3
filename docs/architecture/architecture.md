@@ -174,16 +174,20 @@ rock3/
 │   │                                 boards/（发行版实板笔记）
 │   ├── ota/                       ← README.md + partition-layout.md（A/B/factory 布局文档）
 │   │   └── rr3-ota-ctl/           ← 独立 workspace，bin 名 `rr3-ota-ctl`（升级入口 CLI）
-│   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-registry rr-bus rr-hal rr-ota rrd
+│   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-core rr-registry rr-bus rr-hal rr-ota rrd
 │   │   │                             （Cargo.lock 在 workspace 根，每 crate 各有一份 README.md）
-│   │   ├── rr-ipc/                ← A-IPC 协议层 + 帧收发（§6.2）
-│   │   │   ├── src/protocol/      ← header.rs（128B 头编解码）、body.rs（payload 类型前缀）、mod.rs
+│   │   ├── rr-ipc/                ← A-IPC 协议层 + 帧收发（§6.2）；协议层纯 core+alloc（no_std 可达）
+│   │   │   ├── src/protocol/      ← header.rs（128B 头编解码）、body.rs（payload 类型前缀）、
+│   │   │   │                          wire.rs（帧数据形状：Rr3Frame/编码，no_std 可达）、mod.rs
 │   │   │   ├── src/transport/     ← frame.rs（整帧读写）、uds.rs（UDS 实现，`#[cfg(unix)]`）·
 │   │   │   │                          shm.rs（单写者多读者环形缓冲）· buf.rs（整帧所有权缓冲）·
 │   │   │   │                          mod.rs（传输分层 + 两个路径常量）
 │   │   │   ├── src/bin/           ← ipct003_dump.rs：IPC-T-003 跨架构对拍的头 hex 转储（CI 平台条件下跑）
 │   │   │   └── tests/             ← envelope_meta.rs：与 envelope.schema.json 逐字段对齐的守护测试
-│   │   ├── rr-bus/                ← 总线常量 + 模块侧同步客户端（client.rs：连接/注册/心跳/发布/rr3.call/收帧）
+│   │   ├── rr-core/               ← 机制核切片（ADR-0018）：总线语义（常量/寻址/帧组装，
+│   │   │                             no_std，时钟注入纯函数）；后续批次叠模块运行时与控制原语
+│   │   ├── rr-bus/                ← 总线常量真值在 rr-core（本 crate re-export）+ 模块侧同步客户端
+│   │   │                             （client.rs：连接/注册/心跳/发布/rr3.call/收帧）
 │   │   ├── rr-registry/           ← manifest 解析与校验、主题集（§4.1、§6.3）
 │   │   │   ├── src/               ← schema.rs、validate.rs、topics.rs、slots.rs（能力格查册门）、
 │   │   │   │                          depends.rs（依赖仲裁）、module.schema.toml（字段字典）
@@ -249,7 +253,8 @@ rock3/
 > | ~~`profiles/`~~ | ADR-0012 裁定 3 | **已落盘**（2026-10-01，`default.toml` RK3566 参考机） |
 > | ~~`base/os/buildroot/` + `base/os/distro/`~~ | ADR-0013 裁定 3 | **已落盘**（2026-10-01，见上方 §3 树） |
 > | payload 打包器 + CI 双矩阵 | ADR-0013 裁定 2/5 | 同一 payload 两轨同批验证 |
-> | 机制核 `no_std` 下沉（总线语义 / 模块运行时 / 控制与安全核） | ADR-0018 裁定 1/5 | 设计落点；字节协议层已下沉（`rr-ipc`，0.0.7 批B），以上三层待划 `no_std` 线 |
+> | ~~机制核 `no_std` 下沉——总线语义~~ | ADR-0018 裁定 1/5 | **已落盘**（2026-10-09，`rr-core`：常量/寻址/帧组装；帧形状下沉 `rr-ipc` protocol::wire；见上方 §3 树） |
+> | 机制核 `no_std` 下沉——模块运行时 / 控制与安全核 | ADR-0018 裁定 1/5 | 设计落点；随批D₂/D₃ 落 `rr-core` 同批补画 |
 > | 平台 port 接口（时基 / 内存 / 事件循环 / 传输） | ADR-0018 裁定 3 | 设计落点；具体 crate 划分随实施批进本树同批补画 |
 > | 描述符扩展硬件物理绑定 + `rr-hal` 板特定缺省收口 | ADR-0018 裁定 4 | 设计落点；现散在 env 与代码缺省，收进 `profiles/<机型>.toml` |
 

@@ -1,0 +1,18 @@
+[package]
+name = "rr-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "机制核切片：总线语义（常量 / 寻址 / 帧组装，ADR-0018 裁定 1 批D₁）"
+
+[lib]
+name = "rr_core"
+path = "src/lib.rs"
+
+[dependencies]
+rr-ipc = { path = "../rr-ipc" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
