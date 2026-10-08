@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "rr3-sense/audio/vad_start",
   "schema_version": 1,
-  "description": "VAD 边沿事件（首个真实事件负载 schema，2026-09-30 随 M3 落地）。同主题承载起音（onset）与静音（offset）两种边沿（contracts/topics.toml 在册的 event 主题）。topic 字符串在帧外层由 rr-bus 承载，payload 内不重复（events/README.md 约定）。边沿负载只带摘要、不带任何闭环数据（ADR-0007 §决策一）；生产者 rr3-sense/src/audio/mod.rs 的 rr3_vad_event_body 是形状唯一事实源。2026-10-07 批F2 负载扩展（append 兼容，schema_version 仍 1）：onset 增可选 doa 字段（双麦 ILD 粗判向的 ±90° 分档，sense 侧音频格位承载、零新契约），仅 onset 且判出时携带，offset 不带——与 rms_peak 同一形状纪律。",
+  "description": "VAD 边沿事件（首个真实事件负载 schema，2026-09-30 随 M3 落地）。同主题承载起音（onset）与静音（offset）两种边沿（contracts/topics.toml 在册的 event 主题）。topic 字符串在帧外层由 rr-bus 承载，payload 内不重复（events/README.md 约定）。边沿负载只带摘要、不带任何闭环数据（ADR-0007 §决策一）；生产者 rr3-sense/atoms/vad/mech.rs 的 rr3_vad_event_body 是形状唯一事实源（0.0.5 批C① 原子重铺前落点为 rr3-sense/src/audio/mod.rs）。2026-10-07 批F2 负载扩展（append 兼容，schema_version 仍 1）：onset 增可选 doa 字段（双麦 ILD 粗判向的 ±90° 分档，sense 侧音频格位承载、零新契约），仅 onset 且判出时携带，offset 不带——与 rms_peak 同一形状纪律。",
   "type": "object",
   "required": ["seq", "edge", "speech_ms"],
   "properties": {
