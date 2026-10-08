@@ -1,3 +1,5 @@
+//! bt 原子件机制主体（五件套③，自原 src/bt.rs 逐字迁入，逻辑零改动）。
+//!
 //! 蓝牙（BlueZ）：配网备选通道的链路状态机骨架（0.0.4 方案 D5/Q5）。
 //!
 //! legacy btctl 的日志回放与远程命令语义已被 rrd 日志环 + `rr3.ctl.logs` 与
@@ -6,20 +8,8 @@
 //! （纯函数，单测钉死），sim 后端开机初值由 env 注入（缺省关，出厂不自动
 //! 开蓝牙）；BlueZ 真后端属板上件（cfg 门，0.0.4 方案 §1.3——实装依赖硬件
 //! 采购，后置板上 BlueZ 批次），本骨架不 claim 真射频链路。
-//!
-//! **主题不登记**（方案 D5 显式裁定）：btctl 的日志回放/远程命令语义已被
-//! 承接，蓝牙链路暂无可发布事件——按"不预先占位"纪律（conventions §3），
-//! 启用事件面前须先改 contracts/topics.toml。
 
-pub const SURFACE: &[&str] = &[
-    "bt: 链路状态机骨架（0.0.4 批E）——Off/Discoverable/Connected 三态纯函数转移，BlueZ 真后端板上后置（cfg 门）",
-    "bt: sim 后端 env 注入（RR3_HAL_SIM_BT_UP=1 开机即上电，缺省关）；主题不登记（语义已被日志环+rr3-ctl 承接），启用前先改契约",
-];
-
-/// sim 后端蓝牙开机初值键（`1` 上电进 Discoverable / `0` 或未设 → Off，
-/// 出厂不自动开蓝牙）。取值不认一律按关——env 是 sim 注入口不是配置面，
-/// 宽容解析反而藏错；`1`/`0` 词汇与 `RR3_HAL_SIM_LINK_UP` 同款。
-pub const RR3_HAL_SIM_BT_UP_ENV: &str = "RR3_HAL_SIM_BT_UP";
+use super::RR3_HAL_SIM_BT_UP_ENV;
 
 /// 蓝牙链路相位（三态）：关机 / 可发现（配网备选通道在开）/ 已连（对端在链）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,8 +33,10 @@ impl Rr3BtPhase {
     }
 }
 
-/// 蓝牙链路状态机（模块内策略，HAL 不知情——与 wifi 的 [`super::wifi::Rr3Provision`]
-/// 同层）。合法转移矩阵：Off --power_on--> Discoverable --link_up--> Connected，
+/// 蓝牙链路状态机（模块内策略，HAL 不知情——与 wifi 原子的配网状态机
+/// `Rr3Provision` 同层，跨原子零类型依赖只过 serde_json::Value）。
+/// 合法转移矩阵：
+/// Off --power_on--> Discoverable --link_up--> Connected，
 /// Connected --link_down--> Discoverable --power_off--> Off。
 /// 非法转移返回 `false` 且状态不动。
 ///

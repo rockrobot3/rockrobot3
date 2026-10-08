@@ -9,6 +9,9 @@
 use rr_hal::Rr3LinkState;
 use serde_json::{json, Value};
 
+/// 会话点名（module.toml [rpc].exposes 同源；topics.toml owner=rr3-connect）
+pub const RR3_SESSION_TOPIC: &str = "rr3-connect/cloud/session";
+
 pub const SURFACE: &[&str] = &[
     "session: rpc rr3-connect/cloud/session (request)；action=open，链路就绪才应答",
     "session: sim 回 mock 会话（真 TLS 属云侧联调范围外）；凭据不落盘",

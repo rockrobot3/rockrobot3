@@ -366,4 +366,16 @@ slots = ["audio.vad"]
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
+
+    /// 批C④ 重铺件钉死：rr3-connect 的两份 atom.toml 必须过契约 + 查册门 + 板无关断言
+    /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
+    #[test]
+    fn connect_relaid_atoms_stay_compliant() {
+        let wifi = include_str!("../../../../modules/rr3-connect/atoms/wifi/atom.toml");
+        let bt = include_str!("../../../../modules/rr3-connect/atoms/bt/atom.toml");
+        for (name, text) in [("wifi", wifi), ("bt", bt)] {
+            let errs = rr3_registry_validate_atom_text(text, &slots());
+            assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
+        }
+    }
 }
