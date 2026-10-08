@@ -1,0 +1,17 @@
+# vad 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C① 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "vad"
+version = "0.0.1"
+
+[provides]
+slots = ["audio.vad"]   # 语音活动检测格（只发边沿 + 置信度摘要，不发闭环数据）
+
+[uses]
+slots = []
+
+[events]
+publishes = ["rr3-sense/audio/vad_start"]   # onset 的 doa 字段体由 capture 原子产出、组合件桥接
+subscribes = []

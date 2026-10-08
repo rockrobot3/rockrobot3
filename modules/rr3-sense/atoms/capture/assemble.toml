@@ -1,0 +1,7 @@
+# capture 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
+# 原子件只见 ops 指针与描述符给的绑定句柄）。
+schema_version = 1
+
+[assemble]
+handles = []   # 音频源经 rr-hal 后端面直取；描述符句柄化归批D/批E 对表
+ops = []       # 采样率/声道/节拍等策略经 config 数据化注入（config.toml [rr3-sense.audio]）

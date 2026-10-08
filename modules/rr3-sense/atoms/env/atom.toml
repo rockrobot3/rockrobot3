@@ -1,0 +1,17 @@
+# env 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C① 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "env"
+version = "0.0.1"
+
+[provides]
+slots = ["sensor.env"]   # 环境传感器格（占位件：SURFACE 摘要落位，真件后端随采购批填实）
+
+[uses]
+slots = []
+
+[events]
+publishes = ["rr3-sense/env/temperature"]
+subscribes = []
