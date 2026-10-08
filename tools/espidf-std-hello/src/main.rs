@@ -19,7 +19,5 @@ fn main() {
         .to_string_lossy()
         .into_owned();
     let free_heap = unsafe { esp_get_free_heap_size() };
-    println!(
-        "[espidf-std-hello] IDF={idf_ver} free_heap={free_heap}B std-println-OK"
-    );
+    println!("[espidf-std-hello] IDF={idf_ver} free_heap={free_heap}B std-println-OK");
 }

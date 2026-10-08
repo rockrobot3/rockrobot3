@@ -94,9 +94,7 @@ pub struct Rr3SimDoa {
 impl Rr3SimDoa {
     /// 方位角构造：越界（|deg| > 90）不认——方位角域就是 ±90°，越界属调用方 bug。
     pub fn rr3_sim_doa_new(deg: f64) -> Option<Self> {
-        (-90.0..=90.0)
-            .contains(&deg)
-            .then_some(Self { deg })
+        (-90.0..=90.0).contains(&deg).then_some(Self { deg })
     }
 
     pub fn rr3_sim_doa_deg(&self) -> f64 {
@@ -166,8 +164,7 @@ impl Rr3AudioSource for Rr3SimAudioSource {
             None => (None, None),
         };
         let sine_at = |t_s: f64| -> f64 {
-            RR3_SIM_SINE_AMP as f64
-                * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
+            RR3_SIM_SINE_AMP as f64 * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
         };
         let samples: Vec<i16> = (0..n)
             .map(|i| {
@@ -378,10 +375,7 @@ impl Rr3SimDisplay {
 
     /// 同步读当前帧（测试与诊断用；trait 的 `frame` 是 async 面）
     pub fn rr3_sim_display_frame(&self) -> crate::Rr3FaceFrame {
-        *self
-            .frame
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        *self.frame.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -795,7 +789,10 @@ mod tests {
             "同角同帧序逐点相等"
         );
         // 单声道：带注入与不带注入逐点相等（mono 无方向语义）
-        let (m1, m2) = (mk(), Rr3SimAudioSource::rr3_sim_source_new(Rr3SimWave::Sine));
+        let (m1, m2) = (
+            mk(),
+            Rr3SimAudioSource::rr3_sim_source_new(Rr3SimWave::Sine),
+        );
         let cfg1 = RR3_AUDIO_CFG_16K_MONO16;
         rr3_block_on(m1.open(cfg1)).unwrap();
         rr3_block_on(m2.open(cfg1)).unwrap();

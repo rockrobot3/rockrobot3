@@ -7,7 +7,7 @@
 #    覆盖，门里就没有任何力量行 contracts/README 所称"契约的执行入口"。
 #    逐步实测条数只登记在 docs/process/conventions.md §2，本文件不抄数字：
 #    测试集每加一条就要改一处注释，抄第二次必然失真。
-# 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
+# 测试步（①b/②/②b/③/⑥）除退出码外还断言"至少一个测试真实通过"：cargo 对打空的过滤器
 # 仍以 0 退出（fail-open），只看退出码会在过滤器笔误/测试集改名时静默放行；
 # 退出码仍是首要信号（编译错误、错误 --test 目标名照样红）。① 不跑测试，只看得退出码。
 # ④ 是独立工程编译步（不是测试步）：modules/、tools/、base/ota 各自成 workspace，①/①b 覆盖不到。
@@ -151,6 +151,122 @@ check_docs() {
 }
 step "⑤ 文档门（已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航）"
 run check_docs
+
+# ⑥ 格格双达标·接线 CI（architecture §13，0.0.5 批E）：每格落点件的 tests 必须真跑在
+#    门禁里，"有测试未接线 = 未达标"。modules/* 独立工程此前只有 ④ 的 check（不编译
+#    测试目标更不跑测试）——本步补测试面，≥1 通过断言与 ①b 同口径。brain 是 Python
+#    （无 Cargo.toml，find 自然跳过）：其 tests/ 由 CI brain-unittest job 覆盖（R27 单
+#    真源 .gitcode/workflows/ci.yml），接线事实登记于 conventions §2，不以本步 SKIP 充数。
+step "⑥ 格格双达标·模块测试接线（每格落点件 tests 真跑 ≥1，§13）"
+found_mod=0
+while IFS= read -r -d '' manifest; do
+  found_mod=1
+  run_tests sh -c "cargo test -q --manifest-path '$manifest'"
+done < <(find modules -name Cargo.toml -not -path "*/target/*" -print0 | sort -z)
+if [ "$found_mod" -eq 0 ]; then
+  printf 'FAIL  ⑥ modules/ 下未发现任何 Rust 工程（find 打空属门禁失效，不放行）\n'
+  fail=1
+fi
+
+# ⑦ §13 静态断言（0.0.5 批E：零策略载荷 / F⊗F / 五件套 / 入口体量；全 fail-closed，
+#    逐条点名后整步 FAIL）。"每格一件·不留空格"的反向断言在 rr-registry 契约测试
+#    （② 步仓扫描 repo_atoms_compliant_and_every_slot_uniquely_covered）——查册真值处
+#    执法，本步不抄第二份。业务阈值字面量无可靠静态判据（注释里的版本号同为点分数值），
+#    执法面 = atom 板无关门 + 描述符/ops 注入纪律 + 评审（§13"判不了 semantic 的留评审"）。
+step "⑦ §13 静态断言（零策略载荷/F⊗F/五件套/入口体量）"
+static_fail=0
+# ⑦-a 机制核零策略载荷：厂商/产品/芯片/器件名与 vendor/product 条件分支命中即红。
+#     机制核目录 = no_std 可达面：rr-core 全部 + rr-ipc 字节契约层 protocol/ + 传输抽象
+#     transport/mod.rs；具体传输实现（uds/shm/tcp/uart）是平台供给，不在载荷面。
+#     行注释先剥离（`// …` 含 `//!`）再查：文档注释常需表述门禁规则自身，自指不违例。
+#     禁词是 rock3 自有清单（同 atom.rs 板无关门的厂商/产品段，另加中文板名），不搬外部模板。
+#     自家产品标识（rock3/洛克/RR3_ 前缀）不进禁词——机制自身的运行时身份（如
+#     rock3-ipc.sock 契约冻结路径）不是策略载荷，门禁禁的是**外部**板卡厂商与器件。
+policy_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+for f in base/runtime/rr-core/src/*.rs base/runtime/rr-ipc/src/protocol/*.rs \
+         base/runtime/rr-ipc/src/transport/mod.rs; do
+  sed 's://.*$::' "$f" \
+    | grep -inE 'rockchip|raspberry|broadcom|espressif|allwinner|sunxi|amlogic|rk35|rk33|rv11|cm4|esp32|ina219|max7219|tp4056|es8388|sg90|cp2102|mpu6050|树莓派|if.*(vendor|product)' \
+    | sed "s|^|$f:|" >> "$policy_hits"
+done
+if [ -s "$policy_hits" ]; then
+  cat "$policy_hits"
+  printf 'FAIL  ⑦-a 机制核零策略载荷命中（厂商/产品名或 vendor 条件分支，见上行号）\n'
+  static_fail=1
+else
+  printf 'PASS  ⑦-a 机制核零策略载荷（rr-core + rr-ipc 契约层/传输抽象，禁词零命中）\n'
+fi
+# ⑦-b F⊗F 非法 + 禁薄胶水存在性：composite.toml [assemble].atoms 的每个成员必须解析到
+#     本模块 atoms/<名>/atom.toml——⊗ 链只能装原子件，把组合件/面当被装配方（F⊗F/C⊗C）
+#     或写不存在的名即红（§13：面间只 ⊙）。atoms 行缺失/形状畸形同红（fail-closed）。
+for c in modules/*/composite.toml; do
+  mod_dir="$(dirname "$c")"; mod="$(basename "$mod_dir")"
+  line="$(grep -E '^atoms *= *\[' "$c" || true)"
+  if [ -z "$line" ]; then
+    printf 'FAIL  ⑦-b F⊗F/装配成员: %s 缺 [assemble] atoms 行（fail-closed，不猜形状）\n' "$c"
+    static_fail=1; continue
+  fi
+  members="$(printf '%s\n' "$line" | grep -oE '"[^"]+"' | tr -d '"' || true)"
+  if [ -z "$members" ]; then
+    printf 'FAIL  ⑦-b F⊗F/装配成员: %s atoms 行无可解析成员\n' "$c"
+    static_fail=1; continue
+  fi
+  for name in $members; do
+    if [ ! -f "$mod_dir/atoms/$name/atom.toml" ]; then
+      printf 'FAIL  ⑦-b F⊗F/装配成员: %s 成员 "%s" 不是本模块原子件（atoms/%s/atom.toml 不在）——⊗ 链只装原子件，面间只 ⊙\n' "$c" "$name" "$name"
+      static_fail=1
+    fi
+  done
+done
+[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-b F⊗F/装配成员存在性（全部 composite.toml 的 ⊗ 链成员皆本模块原子件）\n'
+# ⑦-c 五件套齐全（§13 计数断言，承 ②b mkmod 产物形状）：Rust 原子件五件 = atom.toml +
+#     <名>.rs（入口）+ mech.rs（实现）+ assemble.toml（装配清单）+ private.rs（唯一私有头）；
+#     brain 为 Python 两件式（atom.toml + assemble.toml，机制本体 .py 原位——conventions
+#     §2 批C⑤ 在案，属登记豁免非 SKIP）。组合件实体 = composite.toml + 入口 + 实现
+#     （禁薄胶水存在性：散落转发无组合件实体在此红）。
+for d in modules/*/atoms/*/; do
+  mod="$(basename "$(dirname "$(dirname "$d")")")"; name="$(basename "$d")"
+  if [ "$mod" = "rr3-brain" ]; then
+    five="atom.toml assemble.toml"
+  else
+    five="atom.toml assemble.toml private.rs mech.rs $name.rs"
+  fi
+  for f in $five; do
+    if [ ! -f "$d$f" ]; then
+      printf 'FAIL  ⑦-c 五件套: %s 缺 %s\n' "$d" "$f"
+      static_fail=1
+    fi
+  done
+done
+for c in modules/*/composite.toml; do
+  mod_dir="$(dirname "$c")"; mod="$(basename "$mod_dir")"
+  if [ "$mod" = "rr3-brain" ]; then
+    req="rr3_brain/__main__.py rr3_brain/composite.py"
+  else
+    req="src/main.rs src/composite.rs"
+  fi
+  for f in $req; do
+    if [ ! -f "$mod_dir/$f" ]; then
+      printf 'FAIL  ⑦-c 五件套(组合件): %s 缺 %s\n' "$c" "$f"
+      static_fail=1
+    fi
+  done
+done
+[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-c 五件套齐全（全部原子件与组合件实体逐件计数过）\n'
+# ⑦-d 入口体量（§13：装配入口 ≤80 行；批E 起 fail-closed——六入口现况 16–18 行）。
+for e in modules/*/src/main.rs modules/rr3-brain/rr3_brain/__main__.py; do
+  [ -f "$e" ] || continue
+  lines="$(wc -l < "$e" | tr -d ' ')"
+  if [ "$lines" -gt 80 ]; then
+    printf 'FAIL  ⑦-d 入口体量: %s %s 行 > 80（瘦入口纪律，逻辑下沉组合件/原子件）\n' "$e" "$lines"
+    static_fail=1
+  fi
+done
+[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-d 入口体量（全部装配入口 ≤80 行）\n'
+rm -f "$policy_hits"
+if [ "$static_fail" -ne 0 ]; then
+  fail=1
+fi
 
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then

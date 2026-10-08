@@ -37,4 +37,4 @@ impl Default for Rr3VadConfig {
     }
 }
 
-pub use mech::{rr3_vad_event_body, Rr3VadEdge, Rr3VadState};
+pub use mech::{rr3_vad_event_body, Rr3VadState};

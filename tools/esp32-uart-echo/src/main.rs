@@ -25,7 +25,10 @@ extern crate alloc;
 
 use esp_hal::{time::Duration, time::Instant, uart::UartTx, Blocking};
 
-use rr_ipc::{opcode, rr3_body_encode, Rr3Header, Rr3PayloadType, RR3_IPC_HDR_SIZE, RR3_CONTRACT_SCHEMA_VERSION};
+use rr_ipc::{
+    opcode, rr3_body_encode, Rr3Header, Rr3PayloadType, RR3_CONTRACT_SCHEMA_VERSION,
+    RR3_IPC_HDR_SIZE,
+};
 
 /// 夹具 payload 回发上限：先验头后分配，防 64 MiB 声明值吃穿 64 KiB 堆
 /// （超限按契约头层合法帧处理：排空线路保持对齐，不回发不崩溃）。
@@ -132,7 +135,10 @@ fn frame_bytes(ty: Rr3PayloadType, body: &[u8]) -> alloc::vec::Vec<u8> {
 }
 
 fn boot_dump(mut console: &mut UartTx<'_, Blocking>) {
-    log!(&mut console, "esp32-uart-echo ready (uart2 gpio16/17 115200) — xtensa runtime dump follows");
+    log!(
+        &mut console,
+        "esp32-uart-echo ready (uart2 gpio16/17 115200) — xtensa runtime dump follows"
+    );
     // [1] header：与 golden 同一条头（payload_len=96，不带 payload）
     log!(&mut console, "header {}", Hex(&golden_hdr().to_bytes()));
     // [2-6] 五种 payload 类型各一整帧——体为定长定值字节（字面量，无任何运行期来源）
@@ -203,12 +209,10 @@ fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     // UART0 = 控制台（GPIO1=TX / GPIO3=RX，devkit USB 板载 CP2102）；夹具只写不读
-    let mut console: UartTx<'_, Blocking> = esp_hal::uart::UartTx::new(
-        peripherals.UART0,
-        esp_hal::uart::Config::default(),
-    )
-    .expect("uart0 init")
-    .with_tx(peripherals.GPIO1);
+    let mut console: UartTx<'_, Blocking> =
+        esp_hal::uart::UartTx::new(peripherals.UART0, esp_hal::uart::Config::default())
+            .expect("uart0 init")
+            .with_tx(peripherals.GPIO1);
     // UART2 = 链路（GPIO17=TX2 / GPIO16=RX2，方案 §9.2 ① 接线表；115200）。
     // 收发拆分：echo 状态机从 rx 轮询、往 tx 回发。
     let link = esp_hal::uart::Uart::new(peripherals.UART2, esp_hal::uart::Config::default())
@@ -274,7 +278,10 @@ fn main() -> ! {
                                     match rx.read_buffered(&mut one) {
                                         Ok(0) => {
                                             if last_rx.elapsed() > IDLE_TIMEOUT {
-                                                log!(&mut console, "reject: drain timeout — resync");
+                                                log!(
+                                                    &mut console,
+                                                    "reject: drain timeout — resync"
+                                                );
                                                 break;
                                             }
                                         }

@@ -3,7 +3,9 @@ use std::path::PathBuf;
 fn usage() -> ! {
     eprintln!("用法:");
     eprintln!("  rr3-mkmod <模块名> [输出根目录，默认 ./modules]        —— 生成模块骨架五件");
-    eprintln!("  rr3-mkmod --atom <原子名> <格位> [原子根目录]          —— 生成原子件五件套（ADR-0019）");
+    eprintln!(
+        "  rr3-mkmod --atom <原子名> <格位> [原子根目录]          —— 生成原子件五件套（ADR-0019）"
+    );
     eprintln!("示例:");
     eprintln!("  rr3-mkmod rr3-arm");
     eprintln!("  rr3-mkmod --atom battery power.battery modules/rr3-power/atoms");

@@ -248,7 +248,12 @@ impl Rr3Header {
         put_le(&mut buf, OFF_OPCODE, self.opcode as u64, LEN_OPCODE);
         put_le(&mut buf, OFF_FLAGS, self.flags as u64, LEN_FLAGS);
         put_le(&mut buf, OFF_TRACE_ID, self.trace_id, LEN_TRACE_ID);
-        put_le(&mut buf, OFF_TIMESTAMP_NS, self.timestamp_ns, LEN_TIMESTAMP_NS);
+        put_le(
+            &mut buf,
+            OFF_TIMESTAMP_NS,
+            self.timestamp_ns,
+            LEN_TIMESTAMP_NS,
+        );
         put_le(&mut buf, OFF_SRC_TASK, self.src_task, LEN_SRC_TASK);
         put_le(&mut buf, OFF_DST_TASK, self.dst_task, LEN_DST_TASK);
         put_le(
@@ -274,12 +279,14 @@ const fn put_le(buf: &mut [u8], off: usize, v: u64, len: usize) {
 // ---------------------------------------------------------------------------
 // IPC-T-003 第④路（0.0.7 批B）：golden 头编译期对拍。
 //
-// 编码器 `to_bytes` 已 const 化：`cargo +esp check --target xtensa-esp32-none-elf`
+// 编码器 `to_bytes` 已 const 化：`cargo +esp check`（xtensa 裸机 none-elf 目标，
+// 具体写法见 tools/ci/rr-core-xtensa-check.sh——机制核源码不写板级目标名，批E 零策略门）
 // 等**任意目标**编译 rr-ipc 时，下面的 `const _` 都会在该目标的编译器里重新求值——
 // 求值通过即"该目标编译出的编码器产出与 golden 文件逐字节一致"，无需运行任何代码。
 // 运行期 dump 对拍（x86 / aarch64 / arm64 容器）由 `tools/ci/ipct003.sh` 承担，
 // xtensa 真机运行期 dump 归批C UART 夹具（同一判据的第二重证据）。
-const GOLDEN_HEADER_HEX: &str = include_str!("../../../../../contracts/golden/event-header-128.hex");
+const GOLDEN_HEADER_HEX: &str =
+    include_str!("../../../../../contracts/golden/event-header-128.hex");
 
 /// golden 文件前 256 hex 字符（文件 257 字节含尾换行，运行期测试另有全文校验）。
 const fn golden_header_hex_first_256() -> [u8; 256] {

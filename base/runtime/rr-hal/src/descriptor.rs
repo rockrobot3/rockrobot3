@@ -88,9 +88,7 @@ pub fn rr3_hal_bindings_from_text(text: &str) -> Result<Rr3HalBindings, Vec<Stri
         Err(e) => return Err(vec![format!("描述符 TOML 解析失败: {e}")]),
     };
     let Some(t) = v.as_table() else {
-        return Err(vec![format!(
-            "描述符顶层必须是 TOML 表，收到 {v:?}"
-        )]);
+        return Err(vec![format!("描述符顶层必须是 TOML 表，收到 {v:?}")]);
     };
     let mut b = Rr3HalBindings::default();
     let mut errs = Vec::new();
@@ -140,15 +138,31 @@ pub fn rr3_hal_env_override_map() -> BTreeMap<String, String> {
         }
     }
     let mut m = BTreeMap::new();
-    put(&mut m, "alsa_device", crate::backend::RR3_HAL_ALSA_DEVICE_ENV);
+    put(
+        &mut m,
+        "alsa_device",
+        crate::backend::RR3_HAL_ALSA_DEVICE_ENV,
+    );
     put(&mut m, "pwm_chip", crate::backend::RR3_HAL_PWM_CHIP_ENV);
-    put(&mut m, "pwm_channel", crate::backend::RR3_HAL_PWM_CHANNEL_ENV);
+    put(
+        &mut m,
+        "pwm_channel",
+        crate::backend::RR3_HAL_PWM_CHANNEL_ENV,
+    );
     put(&mut m, "gpio_chip", crate::backend::RR3_HAL_GPIO_CHIP_ENV);
     put(&mut m, "gpio_led_line", "RR3_HAL_GPIO_LED_LINE");
     put(&mut m, "gpio_relay_line", "RR3_HAL_GPIO_RELAY_LINE");
     put(&mut m, "i2c_bus", crate::backend::RR3_HAL_I2C_BUS_ENV);
-    put(&mut m, "ina219_addr", crate::backend::RR3_HAL_INA219_ADDR_ENV);
-    put(&mut m, "link_ifname", crate::backend::RR3_HAL_LINK_IFNAME_ENV);
+    put(
+        &mut m,
+        "ina219_addr",
+        crate::backend::RR3_HAL_INA219_ADDR_ENV,
+    );
+    put(
+        &mut m,
+        "link_ifname",
+        crate::backend::RR3_HAL_LINK_IFNAME_ENV,
+    );
     m
 }
 
@@ -212,12 +226,31 @@ mod tests {
         );
         let errs = rr3_hal_bindings_from_text(text).expect_err("坏值必须报错");
         assert_eq!(errs.len(), 6, "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("pwm_chip 取值不认")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("i2c_bus 取值不认")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("ina219_addr 取值不认")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("alsa_device 取值不认")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("mystery_key 未在册")), "{errs:?}");
-        assert!(errs.iter().any(|e| e.contains("link_ifname 应为字符串标量")), "{errs:?}");
+        assert!(
+            errs.iter().any(|e| e.contains("pwm_chip 取值不认")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("i2c_bus 取值不认")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("ina219_addr 取值不认")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("alsa_device 取值不认")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("mystery_key 未在册")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("link_ifname 应为字符串标量")),
+            "{errs:?}"
+        );
     }
 
     /// compose 分层：描述符为底、overrides 同键覆盖赢、overrides 也能补描述符没给的键。
@@ -230,7 +263,11 @@ mod tests {
         let b = rr3_hal_bindings_compose(Some(desc), &ov).expect("合成必须成功");
         assert_eq!(b.pwm_chip, Some(1), "同键应急覆盖赢");
         assert_eq!(b.gpio_led_line, Some(4), "描述符未被覆盖的键原样保留");
-        assert_eq!(b.link_ifname.as_deref(), Some("mlan0"), "覆盖可补描述符缺键");
+        assert_eq!(
+            b.link_ifname.as_deref(),
+            Some("mlan0"),
+            "覆盖可补描述符缺键"
+        );
     }
 
     /// compose fail-closed：坏描述符合并成一条 Err；overrides 未知键/坏值点名；
@@ -239,19 +276,32 @@ mod tests {
     fn compose_fails_closed_and_names_the_cause() {
         let e = rr3_hal_bindings_compose(Some("pwm_chip = \"x\"\n"), &BTreeMap::new())
             .expect_err("坏描述符必须败");
-        assert!(e.contains("描述符解析失败") && e.contains("pwm_chip"), "{e}");
+        assert!(
+            e.contains("描述符解析失败") && e.contains("pwm_chip"),
+            "{e}"
+        );
 
         let mut ov = BTreeMap::new();
         ov.insert("nope".to_string(), "1".to_string());
         let e = rr3_hal_bindings_compose(None, &ov).expect_err("未知覆盖键必须败");
-        assert!(e.contains("应急覆盖无效") && e.contains("nope 未在册"), "{e}");
+        assert!(
+            e.contains("应急覆盖无效") && e.contains("nope 未在册"),
+            "{e}"
+        );
 
         let mut ov = BTreeMap::new();
         ov.insert("pwm_chip".to_string(), "1.5".to_string());
         let e = rr3_hal_bindings_compose(None, &ov).expect_err("坏覆盖值必须败");
-        assert!(e.contains("应急覆盖无效") && e.contains("pwm_chip 取值不认"), "{e}");
+        assert!(
+            e.contains("应急覆盖无效") && e.contains("pwm_chip 取值不认"),
+            "{e}"
+        );
 
         let b = rr3_hal_bindings_compose(None, &BTreeMap::new()).expect("空合成必须合法");
-        assert_eq!(b, Rr3HalBindings::default(), "无描述符无覆盖 = 空绑定（fail-closed 不回落某板）");
+        assert_eq!(
+            b,
+            Rr3HalBindings::default(),
+            "无描述符无覆盖 = 空绑定（fail-closed 不回落某板）"
+        );
     }
 }

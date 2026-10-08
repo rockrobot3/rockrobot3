@@ -178,8 +178,7 @@ impl Rr3CountersGate {
         match self.last_flush_ms {
             None => true,
             Some(last) => {
-                now_ms.saturating_sub(last) >= self.interval_ms
-                    || self.pending >= self.max_pending
+                now_ms.saturating_sub(last) >= self.interval_ms || self.pending >= self.max_pending
             }
         }
     }
@@ -333,7 +332,10 @@ mod tests {
         // 模拟 store 失败：不调 rr3_on_flushed → 下一拍仍在窗口内也照刷
         assert!(g.rr3_on_change(100), "失败后下一拍重试");
         g.rr3_on_flushed(100); // 这次成功
-        assert!(!g.rr3_on_change(10_099), "窗口内不刷（last=100，窗口到 10_100）");
+        assert!(
+            !g.rr3_on_change(10_099),
+            "窗口内不刷（last=100，窗口到 10_100）"
+        );
         assert!(g.rr3_on_change(10_100), "窗口到照刷");
         g.rr3_on_flushed(10_100);
         assert!(!g.rr3_on_change(20_099), "第二个窗口内不刷");

@@ -296,19 +296,17 @@ fn rr3_obs_collect(stream: &mut UnixStream, deadline: Duration) -> Result<Rr3Cha
                 obs.doa_deg, obs.servo_angle
             ));
         }
-        match rr3_frame_read(&mut *stream) {
-            Ok(frame) => {
-                let Ok((ty, raw)) = rr3_body_split(&frame.payload) else {
-                    continue;
-                };
-                if ty != Rr3PayloadType::Event {
-                    continue;
-                }
-                if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
-                    rr3_obs_feed(&mut obs, &v);
-                }
+        // 读侧 Err（读超时 250ms 一拍）不进 if：到 deadline 统一收口
+        if let Ok(frame) = rr3_frame_read(&mut *stream) {
+            let Ok((ty, raw)) = rr3_body_split(&frame.payload) else {
+                continue;
+            };
+            if ty != Rr3PayloadType::Event {
+                continue;
             }
-            Err(_) => {} // 读超时（250ms 一拍）：到 deadline 统一收口
+            if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
+                rr3_obs_feed(&mut obs, &v);
+            }
         }
     }
     Ok(obs)
@@ -397,7 +395,7 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         ("act-config.toml", rr3_chain_act_config_text()),
         ("rr3-obs.toml", rr3_chain_obs_manifest(&act)),
     ] {
-        let p = workdir.join(&name);
+        let p = workdir.join(name);
         std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
     }
     let brain_cfg = workdir.join("brain-config.toml");

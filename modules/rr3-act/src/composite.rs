@@ -24,16 +24,16 @@
 //! 写不出去）`eprintln` + `exit(1)`——模块不装"活着"，死交给 supervisor 按
 //! restart_policy=always 重启（rrd 的进程语义）。
 
-#[path = "../atoms/servo/servo.rs"]
-mod servo;
-#[path = "../atoms/led/led.rs"]
-mod led;
-#[path = "../atoms/relay/relay.rs"]
-mod relay;
 #[path = "intent.rs"]
 mod intent;
+#[path = "../atoms/led/led.rs"]
+mod led;
 #[path = "reflex.rs"]
 mod reflex;
+#[path = "../atoms/relay/relay.rs"]
+mod relay;
+#[path = "../atoms/servo/servo.rs"]
+mod servo;
 
 use std::time::Duration;
 

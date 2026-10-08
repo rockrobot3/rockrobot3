@@ -13,8 +13,8 @@ use std::string::ToString;
 use std::vec;
 use std::vec::Vec;
 
-pub use crate::protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
 use crate::protocol::header::{Rr3Header, RR3_IPC_HDR_SIZE};
+pub use crate::protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
 
 /// 读满 `buf`。返回 `Ok(Some(已读字节数))`；`Ok(None)` = 第一个字节都没读到（对端关闭）。
 /// 已读字节数必须由计数给出：payload 本身可以含任意 0 字节。
@@ -68,15 +68,15 @@ pub fn rr3_frame_write(w: &mut impl Write, f: &Rr3Frame) -> Result<(), Rr3FrameE
 mod tests {
     use super::*;
     // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
-    use std::format;
-    use std::println;
-    use std::string::String;
     use crate::protocol::header::{
         opcode, Rr3HdrError, LEN_DST_TASK, LEN_MAGIC, LEN_OPCODE, LEN_PAYLOAD_LEN, LEN_RESERVED,
         LEN_SRC_TASK, LEN_TIMESTAMP_NS, LEN_TRACE_ID, OFF_DST_TASK, OFF_MAGIC, OFF_OPCODE,
         OFF_PAYLOAD_LEN, OFF_RESERVED, OFF_SRC_TASK, OFF_TIMESTAMP_NS, OFF_TRACE_ID,
     };
+    use std::format;
     use std::io::Cursor;
+    use std::println;
+    use std::string::String;
 
     fn hdr(payload_len: u32) -> Rr3Header {
         let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload_len);

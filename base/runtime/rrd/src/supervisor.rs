@@ -316,10 +316,7 @@ fn rr3_boot_spawn(
         cmd.env("RR3_HAL_BINDINGS", &job.hal_bindings);
     }
     // 见文件头的 stdout 纪律：子进程输出绝不进 rrd 自己那条管道。
-    let spawned = cmd
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn();
+    let spawned = cmd.stdout(Stdio::null()).stderr(Stdio::inherit()).spawn();
     match spawned {
         Ok(child) => {
             let pid = child.id();

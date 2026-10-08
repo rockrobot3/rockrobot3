@@ -34,7 +34,7 @@ pub struct Rr3LinkCfg {
 }
 
 pub use mech::{
-    rr3_link_body, rr3_wifi_connect_parse_args, rr3_wifi_connect_result, rr3_wifi_forget_parse_args,
-    rr3_wifi_forget_result, rr3_wifi_scan_parse_args, rr3_wifi_scan_result, Rr3LinkEdge,
-    Rr3Provision,
+    rr3_link_body, rr3_wifi_connect_parse_args, rr3_wifi_connect_result,
+    rr3_wifi_forget_parse_args, rr3_wifi_forget_result, rr3_wifi_scan_parse_args,
+    rr3_wifi_scan_result, Rr3LinkEdge, Rr3Provision,
 };

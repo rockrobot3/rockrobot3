@@ -30,12 +30,12 @@
 //! D5/Q5）——转移纯函数单测钉死，sim 初值 env 注入；主题不登记（btctl 语义
 //! 已被日志环 + rr3-ctl 承接），启用事件面前须先改 contracts/topics.toml。
 
-#[path = "../atoms/wifi/wifi.rs"]
-mod wifi;
 #[path = "../atoms/bt/bt.rs"]
 mod bt;
 #[path = "session.rs"]
 mod session;
+#[path = "../atoms/wifi/wifi.rs"]
+mod wifi;
 
 use std::time::{Duration, Instant};
 
@@ -164,7 +164,10 @@ pub fn rr3_connect_run() -> Result<(), String> {
         if edge.rr3_link_edge_cross(st.up) || now >= next_report {
             link_seq += 1;
             let mode = prov.rr3_provision_mode();
-            bus.rr3_publish(wifi::RR3_LINK_TOPIC, wifi::rr3_link_body(link_seq, &st, mode))?;
+            bus.rr3_publish(
+                wifi::RR3_LINK_TOPIC,
+                wifi::rr3_link_body(link_seq, &st, mode),
+            )?;
             next_report = now + Duration::from_millis(cfg.0.link_report_period_ms);
         }
     }

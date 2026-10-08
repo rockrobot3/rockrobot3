@@ -989,9 +989,15 @@ fn default_profile_binds_module_slots_to_real_modules() {
         slots.sort();
         let mut caps = str_list(&manifests[module], "provides.capabilities");
         caps.sort();
-        assert_eq!(slots, caps, "{module} 的 [enabled_slots] 与 manifest provides 漂移");
+        assert_eq!(
+            slots, caps,
+            "{module} 的 [enabled_slots] 与 manifest provides 漂移"
+        );
         for s in &slots {
-            assert!(table.rr3_slot_table_contains(s), "[enabled_slots] 引用表外格位 {s}");
+            assert!(
+                table.rr3_slot_table_contains(s),
+                "[enabled_slots] 引用表外格位 {s}"
+            );
         }
     }
 }
@@ -1084,9 +1090,15 @@ fn distro_profile_binds_exactly_the_body_layer() {
         slots.sort();
         let mut caps = str_list(&manifests[module], "provides.capabilities");
         caps.sort();
-        assert_eq!(slots, caps, "{module} 的 [enabled_slots] 与 manifest provides 漂移");
+        assert_eq!(
+            slots, caps,
+            "{module} 的 [enabled_slots] 与 manifest provides 漂移"
+        );
         for s in &slots {
-            assert!(table.rr3_slot_table_contains(s), "[enabled_slots] 引用表外格位 {s}");
+            assert!(
+                table.rr3_slot_table_contains(s),
+                "[enabled_slots] 引用表外格位 {s}"
+            );
         }
     }
 }

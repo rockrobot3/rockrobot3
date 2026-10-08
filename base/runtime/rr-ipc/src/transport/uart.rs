@@ -230,7 +230,8 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
     t.c_cc[VMIN] = 1;
     t.c_cc[VTIME] = 0;
     // SAFETY：合法指针。
-    if unsafe { c_cfsetispeed(&mut t, speed) } != 0 || unsafe { c_cfsetospeed(&mut t, speed) } != 0 {
+    if unsafe { c_cfsetispeed(&mut t, speed) } != 0 || unsafe { c_cfsetospeed(&mut t, speed) } != 0
+    {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY：合法指针；TCSANOW 立即生效。
@@ -244,7 +245,13 @@ impl Read for Rr3UartConn {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         loop {
             // SAFETY：buf 活到调用返回，fd 属 self。
-            let n = unsafe { c_read(self.fd, buf.as_mut_ptr() as *mut std::ffi::c_void, buf.len()) };
+            let n = unsafe {
+                c_read(
+                    self.fd,
+                    buf.as_mut_ptr() as *mut std::ffi::c_void,
+                    buf.len(),
+                )
+            };
             if n < 0 {
                 let e = std::io::Error::last_os_error();
                 if e.kind() == std::io::ErrorKind::Interrupted {
@@ -285,12 +292,12 @@ impl Drop for Rr3UartConn {
 mod tests {
     use super::*;
     // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
-    use std::vec;
     use crate::protocol::header::{opcode, Rr3HdrError, Rr3Header};
     use crate::transport::buf::Rr3FrameBuf;
     use crate::transport::frame::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
     use crate::transport::Rr3TransportConn;
     use std::os::unix::io::FromRawFd;
+    use std::vec;
 
     extern "C" {
         /// pty 对（测试伪串口）。glibc ≥2.34 并入 libc，musl/macOS 原生就有。
@@ -317,7 +324,15 @@ mod tests {
         let mut master = 0i32;
         let mut slave = 0i32;
         // SAFETY：两个出参都是本栈 i32，其余按 NULL 传。
-        let rc = unsafe { openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), std::ptr::null()) };
+        let rc = unsafe {
+            openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
         assert_eq!(rc, 0, "openpty 失败：{}", std::io::Error::last_os_error());
         let conn = Rr3UartConn::from_fd(slave, baud).expect("slave termios 配置失败");
         // SAFETY：master 是 openpty 刚出的合法 fd，File 接管并负责 close。

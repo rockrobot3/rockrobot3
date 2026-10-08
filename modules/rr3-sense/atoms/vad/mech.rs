@@ -333,10 +333,7 @@ mod tests {
         assert_eq!(on["speech_ms"], 200);
         assert_eq!(on["seq"], 3);
         assert_eq!(on.get("topic"), None, "负载不重复放 topic（由客户端并入）");
-        assert!(
-            on.get("doa").is_none(),
-            "无判向结果的 onset 不带 doa 字段"
-        );
+        assert!(on.get("doa").is_none(), "无判向结果的 onset 不带 doa 字段");
         let off = rr3_vad_event_body(4, Rr3VadEdge::Offset { speech_ms: 900 }, None);
         assert_eq!(off["edge"], "offset");
         assert_eq!(off["speech_ms"], 900);
@@ -363,9 +360,6 @@ mod tests {
             Rr3VadEdge::Offset { speech_ms: 900 },
             Some(json!({ "deg": 0, "bin": "center" })),
         );
-        assert!(
-            off.get("doa").is_none(),
-            "offset 不得携带 doa: {off}"
-        );
+        assert!(off.get("doa").is_none(), "offset 不得携带 doa: {off}");
     }
 }
