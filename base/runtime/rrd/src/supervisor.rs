@@ -73,6 +73,10 @@ pub struct Rr3SpawnJob {
     /// 已按 manifest 所在目录解析成绝对路径，且 E-3 的存在性 + 可执行位已查过
     pub entry: PathBuf,
     pub facts: Rr3ManifestFacts,
+    /// 物理绑定描述符文本（ADR-0018 裁定 4、批D④）：装配单 [hardware] 的序列化
+    /// 文本，daemon 组装时从装配链透传（`--manifest` 直起路径为空串 = 无描述符）。
+    /// spawn 时空值不注入——模块侧 rr-hal 维持"无描述符"fail-closed 状态。
+    pub hal_bindings: String,
 }
 
 /// supervisor 的两种请求。`Boot` 来自 daemon 的启动序（E-7），`Restart` 来自
@@ -171,6 +175,8 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
         manifest_path: manifest_path.to_path_buf(),
         entry,
         facts,
+        // `--manifest` 直起路径没有装配单，描述符由 daemon 组装时统一透传
+        hal_bindings: String::new(),
     })
 }
 
@@ -298,13 +304,19 @@ fn rr3_boot_spawn(
         rr3_log(&format!("杀掉挂死的 {name} pid={}", old.id()));
     }
     rr3_lock(shared).rr3_reg_own(&name);
-    let spawned = Command::new(&job.entry)
-        // E-6 的三件环境：连哪儿（rrd 自己的 socket 绝对路径）、是谁（该 job 的 manifest
-        // 绝对路径，每次重启重读）、做什么（`--boot-role` 的值，原样透传、rrd 不解释）。
-        .env("RR3_BUS_PATH", bus_path)
+    // E-6 的三件环境：连哪儿（rrd 自己的 socket 绝对路径）、是谁（该 job 的 manifest
+    // 绝对路径，每次重启重读）、做什么（`--boot-role` 的值，原样透传、rrd 不解释）。
+    // 物理绑定描述符（批D④）只在非空时追加注入：空 = 装配单未给 [hardware]（或
+    // --manifest 直起），模块侧 rr-hal 维持"无描述符"fail-closed，应急 env 可救。
+    let mut cmd = Command::new(&job.entry);
+    cmd.env("RR3_BUS_PATH", bus_path)
         .env("RR3_MANIFEST", &job.manifest_path)
-        .env("RR3_SIM_PEER_ROLE", boot_role)
-        // 见文件头的 stdout 纪律：子进程输出绝不进 rrd 自己那条管道。
+        .env("RR3_SIM_PEER_ROLE", boot_role);
+    if !job.hal_bindings.is_empty() {
+        cmd.env("RR3_HAL_BINDINGS", &job.hal_bindings);
+    }
+    // 见文件头的 stdout 纪律：子进程输出绝不进 rrd 自己那条管道。
+    let spawned = cmd
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn();

@@ -82,21 +82,9 @@ pub struct Rr3LinuxIna219 {
 }
 
 impl Rr3LinuxIna219 {
-    /// 板上缺省构造：根 [`RR3_I2C_DEV_ROOT_DEFAULT`]，总线取 `RR3_HAL_I2C_BUS`
-    /// （缺省 1），地址取 `RR3_HAL_INA219_ADDR`（缺省 0x40）
-    pub fn rr3_linux_power_default() -> Self {
-        let bus = std::env::var(crate::backend::RR3_HAL_I2C_BUS_ENV)
-            .ok()
-            .and_then(|v| crate::backend::rr3_pwm_index_parse(&v))
-            .unwrap_or(1);
-        let addr = std::env::var(crate::backend::RR3_HAL_INA219_ADDR_ENV)
-            .ok()
-            .and_then(|v| crate::backend::rr3_ina219_addr_parse(&v))
-            .unwrap_or(0x40);
-        Self::rr3_linux_power_new(Path::new(RR3_I2C_DEV_ROOT_DEFAULT), bus, addr)
-    }
-
-    /// 指定根/总线/地址构造（测试用 temp 树走这里，不触真硬件）
+    /// 指定根/总线/地址构造（选择函数从生效物理绑定取 `i2c_bus`/`ina219_addr`，
+    /// 批D④ fail-closed——总线/地址没有代码缺省，描述符/env 都没给就在选择面
+    /// 点名；测试用 temp 树也走这里，不触真硬件）
     pub fn rr3_linux_power_new(dev_root: &Path, bus: u32, addr: u8) -> Self {
         Self {
             dev_root: dev_root.to_path_buf(),

@@ -20,6 +20,9 @@ alsa = ["dep:alsa"]
 
 [dependencies]
 async-trait = { workspace = true }
+# 物理绑定描述符解析（descriptor.rs，批D④/ADR-0018 裁定 4）：rrd 注入的
+# [hardware] 序列化文本是 TOML 平表，与 rrd/rr-registry 共用 workspace 同版 toml。
+toml = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 alsa = { version = "0.9", optional = true }

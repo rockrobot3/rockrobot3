@@ -11,6 +11,9 @@ use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use async_trait::async_trait;
 
 pub mod backend;
+/// 物理绑定描述符（ADR-0018 裁定 4、批D④）：引脚/总线/设备的唯一数据事实源，
+/// 描述符为底、env 应急覆盖、代码缺省 fail-closed。
+pub mod descriptor;
 #[cfg(all(target_os = "linux", feature = "alsa"))]
 pub mod linux;
 /// linux sysfs PWM 舵机后端：纯 std 无外部依赖，只按平台门编译（R11①），
