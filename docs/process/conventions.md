@@ -1543,6 +1543,25 @@ spawn 注入 `RR3_HAL_BINDINGS`（空值不注入；`--manifest` 调试后门无
 §12.3 采集环配置行同线注记同批）。rr-hal 35 测试（descriptor 4 新增）、rrd 138 单
 测 + e2e 全绿，模块面与线上字节零改动。
 
+2026-10-09 0.0.5 第 II 轮 批D⑤ xtensa 对拍门 + 无 OS 启动形态点验（ADR-0018 裁定
+1/3/5，全案 §8 批D 行 R2-D5 判据；机制核四层下沉收官后把三条验证判据从批次内人工
+复验升级为可复跑专用门，七步门禁直跑 GATE_EXIT=0 十六 PASS、三端指针核对一致）——
+新增 `tools/ci/rr-core-xtensa-check.sh`（不进七步门：esp fork 工具链属平台条件依赖；
+纪律同 espidf-std-check.sh——工具链缺位 SKIP 明说、在位编译失败 FAIL；rr-ipc 零外部
+依赖、rr-core 仅依赖 rr-ipc，全程无网络）：①机制核 tripwire——rr-core 源 grep
+`global_allocator`/`extern crate std` 命中即红（裁定 3"内存策略属平台四类供给、
+机制核不得假设全局分配器"与 no_std 面不失真的静态 tripwire）；②裸机面对拍——
+`cargo +esp check -Zbuild-std=core,alloc -p rr-core --target xtensa-esp32-none-elf`，
+总线语义/模块运行时/控制/安全核全切片在无 OS 目标编译成立即无 OS 启动形态点验
+（fork/exec/socket/线程/墙上时钟任何 OS 假设在该目标必红），rr-ipc golden 头
+`const _` 断言随依赖链在该目标编译期重求值即 xtensa 编译期 golden 对拍（0.0.7 层①
+同一资产）；③宿主面对拍——`cargo test -p rr-core` 真跑（24 测试含 golden 形状/
+控制图逐拍一致判据），0 通过判门禁失效（同 check.sh run_tests 口径）。与 0.0.7
+层③④对表结论随批登记：层③ 哨兵（注册/心跳/回应答）要对齐的最小语义子集真值即
+rr-core runtime 拍点/状态机（批D②），层④ bridge 经 transport trait 接总线
+（ADR-0008 接缝定型）——机制核切片即 0.0.7 两层要复用的语义面，不重复开线。
+architecture §12.6 点验矩阵首件机械点验注记与本条同批
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
