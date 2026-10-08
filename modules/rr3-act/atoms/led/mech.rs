@@ -1,8 +1,8 @@
-//! LED / 灯效执行（`rr3-act/led/effect`）。表情渲染属 rr3-interact，不在此处。
+//! led 原子件机制主体（五件套③，自原 src/led.rs 逐字迁入，逻辑零改动）。
 //!
-//! 灯效经一路 `Rr3GpioOut`：on/off 即写电平；blink 由 worker 线程按周期翻转
-//! （亮/灭各占周期一半）。效果白名单：`on` / `off` / `blink`——效果清单是
-//! 模块面的策略，不进 HAL trait；表情到灯效的映射属 rr3-interact。
+//! 参数裁决 + 灯效执行体：worker 线程独占 gpio 写面，主循环经 channel 下发
+//! 效果、本地记账当前效果（应答 previous 用，单线程主循环内无竞争）。
+//! on/off 即写电平；blink 由 worker 线程按周期翻转（亮/灭各占周期一半）。
 
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -11,37 +11,7 @@ use std::time::Duration;
 use rr_hal::{rr3_block_on, Rr3GpioOut};
 use serde_json::Value;
 
-pub const RR3_LED_EFFECT_TOPIC: &str = "rr3-act/led/effect";
-
-/// 启动自述：本子模块的总线面一行说明
-pub const SURFACE: &[&str] = &["led: rpc rr3-act/led/effect (request，白名单 on/off/blink)"];
-
-/// 灯效白名单（请求体 `{"effect": ...}` 的取值集）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Rr3LedEffect {
-    On,
-    Off,
-    Blink,
-}
-
-impl Rr3LedEffect {
-    pub fn rr3_led_effect_parse(s: &str) -> Option<Self> {
-        match s {
-            "on" => Some(Self::On),
-            "off" => Some(Self::Off),
-            "blink" => Some(Self::Blink),
-            _ => None,
-        }
-    }
-
-    pub fn rr3_led_effect_as_str(&self) -> &'static str {
-        match self {
-            Self::On => "on",
-            Self::Off => "off",
-            Self::Blink => "blink",
-        }
-    }
-}
+use super::Rr3LedEffect;
 
 /// led/effect 参数裁决：缺/非串/不认一律 `Err` 点名白名单
 pub fn rr3_led_parse_args(args: &Value) -> Result<Rr3LedEffect, String> {

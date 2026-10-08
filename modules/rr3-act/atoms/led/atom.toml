@@ -1,0 +1,17 @@
+# led 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C② 原子重铺）
+# 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
+schema_version = 1
+
+[atom]
+name = "led"
+version = "0.0.1"
+
+[provides]
+slots = ["act.led"]   # 灯效执行（白名单 on/off/blink）；表情渲染属 rr3-interact
+
+[uses]
+slots = []   # 灯面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
+
+[events]
+publishes = []   # led 无状态流（妆面件，电平面即真值）；rpc 面在 module.toml [rpc].exposes（owner 级）
+subscribes = []

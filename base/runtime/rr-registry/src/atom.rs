@@ -341,4 +341,17 @@ slots = ["audio.vad"]
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
+
+    /// 批C② 重铺件钉死：rr3-act 的三份 atom.toml 必须过契约 + 查册门 + 板无关断言
+    /// （重铺件漂移当场红；每格一件由校验器跨字段规则把守）
+    #[test]
+    fn act_relaid_atoms_stay_compliant() {
+        let servo = include_str!("../../../../modules/rr3-act/atoms/servo/atom.toml");
+        let led = include_str!("../../../../modules/rr3-act/atoms/led/atom.toml");
+        let relay = include_str!("../../../../modules/rr3-act/atoms/relay/atom.toml");
+        for (name, text) in [("servo", servo), ("led", led), ("relay", relay)] {
+            let errs = rr3_registry_validate_atom_text(text, &slots());
+            assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
+        }
+    }
 }
