@@ -35,7 +35,7 @@ mod intent;
 #[path = "reflex.rs"]
 mod reflex;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rr_bus::Rr3BusClient;
 use rr_hal::{backend::rr3_hal_gpio_out, backend::rr3_hal_servo, rr3_block_on, Rr3PwmServo};
@@ -56,6 +56,15 @@ const RR3_INTENT_TOPIC: &str = "rr3-brain/intent/result";
 
 /// 收帧等待上界：无帧时空转一圈的代价，值不敏感（心跳在独立线程）
 const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
+
+/// 机制核注入时钟的 std 供给（批D₃，口径同 rr-bus 的 rr3_now_ms）：限速门
+/// 只看间隔不看绝对值，墙钟 ms 即可（裸机面由平台定时器注入同形 u64 ms）。
+fn rr3_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_act_run() -> Result<(), String> {
@@ -158,7 +167,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                         // servo/state 限速流先于应答上路：被限速挡掉的发布不补发，
                         // 下一次命令自然携带最新角度（流是摘要不是逐拍镜像）
                         if let Some(angle) = state_angle {
-                            if servo_gate.rr3_gate_allow(Instant::now()) {
+                            if servo_gate.rr3_gate_allow(rr3_now_ms()) {
                                 servo_seq += 1;
                                 bus.rr3_publish(
                                     servo::RR3_SERVO_STATE_TOPIC,
@@ -217,7 +226,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                                 Ok(intent::Rr3IntentOutcome::Servo(angle)) => {
                                     // servo/state 限速门同 RPC 路（两条驱动路共用一条状态流）；
                                     // 被限速挡掉的发布不补发，下一次动作自然携带最新角度
-                                    if servo_gate.rr3_gate_allow(Instant::now()) {
+                                    if servo_gate.rr3_gate_allow(rr3_now_ms()) {
                                         servo_seq += 1;
                                         bus.rr3_publish(
                                             servo::RR3_SERVO_STATE_TOPIC,
@@ -249,6 +258,9 @@ fn rr3_handle_servo(
     args: &Value,
 ) -> Result<(Value, Option<u16>, Option<bool>), String> {
     let (angle, move_ms) = servo::rr3_servo_parse_args(args, cfg)?;
+    // 安全核钳位最后包一道（批D₃ 裁定 5：安全核永远包住控制图）——上游裁决
+    // 被绕过时输出也不越行程；输入合法时恒等，行为守恒
+    let angle = rr_core::control::rr3_travel_clamp(angle, cfg.angle_min_deg, cfg.angle_max_deg);
     // HAL 写失败按业务性失败折 error（同 interact 的后端写失败口径）
     rr3_block_on(servo.set_angle(angle)).map_err(|e| format!("舵机写入失败: {e}"))?;
     println!("servo: angle={angle} move_ms={move_ms}（sim 即时到位；实机按时限走反射环闭环）");

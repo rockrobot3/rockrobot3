@@ -4,39 +4,14 @@
 //! 关断决策在本地完成，不等总线、不等 brain（architecture §7.3 安全兜底）；
 //! `battery/state` 只是摘要上报。低电事件的**边沿语义**（schema 的同一句话）：
 //! 同一次低电段只发一次，恢复到阈值之上后再次越过才再发——`Rr3LowEdge` 是它的
-//! 唯一真值。cutoff 电压阈值本轮只解析不动作（0.0.2 方案 Q4：关机与充电策略
-//! 归 rr3-power 演进与 M6），装配时回显进启动日志，不装"已实现"。
+//! 唯一真值（批D₃ 起真值在 rr-core `control`，ADR-0018 裁定 5：安全核纯函数，
+//! 本文件 re-export 保既有路径）。cutoff 电压阈值本轮只解析不动作（0.0.2 方案
+//! Q4：关机与充电策略归 rr3-power 演进与 M6），装配时回显进启动日志，不装"已实现"。
 
 use rr_hal::Rr3BatteryState;
 use serde_json::{json, Value};
 
-/// 低电边沿机：armed 时电压跌破阈值 → 报一次并解除武装；电压回到阈值**之上**
-/// （严格大于，恰好等于阈值仍算低电段内）→ 重新武装。状态只有这一位。
-pub struct Rr3LowEdge {
-    low_voltage_mv: u16,
-    armed: bool,
-}
-
-impl Rr3LowEdge {
-    pub fn rr3_low_edge_new(low_voltage_mv: u16) -> Self {
-        Self {
-            low_voltage_mv,
-            armed: true,
-        }
-    }
-
-    /// 每拍采样喂一次电压。返回 true = 此刻应发布 battery/low（本次低电段的首拍）。
-    pub fn rr3_low_edge_cross(&mut self, voltage_mv: u16) -> bool {
-        if self.armed && voltage_mv <= self.low_voltage_mv {
-            self.armed = false;
-            return true;
-        }
-        if voltage_mv > self.low_voltage_mv {
-            self.armed = true;
-        }
-        false
-    }
-}
+pub use rr_core::control::Rr3LowEdge;
 
 /// battery/state 流体：seq 是本流自己的计数（envelope 惯例，从 1 起）
 pub fn rr3_battery_state_body(seq: u64, st: Rr3BatteryState) -> Value {
@@ -70,34 +45,13 @@ mod tests {
         }
     }
 
-    /// 边沿机主语义：越阈第一拍恰报一次，段内后续拍不再报——schema 的
-    /// "同一次低电段不重复发布"钉在这里。
+    /// 低电边沿真值批D₃ 迁 rr-core `control`（越阈/段内/再武装用例随迁）——
+    /// 本地只钉"re-export 可用"：同一构造 + 一次注入调用走通 rr-core 面。
     #[test]
-    fn low_edge_fires_once_per_episode() {
+    fn low_edge_is_rr_core_reexport() {
         let mut e = Rr3LowEdge::rr3_low_edge_new(3300);
-        assert!(!e.rr3_low_edge_cross(3900), "高电平不触发");
-        assert!(e.rr3_low_edge_cross(3300), "恰好等于阈值算越阈（≤）");
-        assert!(!e.rr3_low_edge_cross(3250), "段内第二拍不再报");
-        assert!(!e.rr3_low_edge_cross(3200), "段内继续跌也不再报");
-    }
-
-    /// 恢复再武装：电压回到阈值之上才重新武装；恢复后再次越阈再报一次。
-    /// "回到 3300 整"仍是低电段内（严格大于才武装），抖动在阈值上不抖报。
-    /// 注意武装本身**不是**事件：cross 返回 true 的唯一含义是"发布 battery/low"，
-    /// 若在 3301 这种高电压拍返回 true，就会发出一段电压高于阈值的"低电"事件——
-    /// 所以重新武装是静默的状态转换，下一次越阈（3200）才再次报。
-    #[test]
-    fn low_edge_rearms_only_above_threshold() {
-        let mut e = Rr3LowEdge::rr3_low_edge_new(3300);
-        assert!(e.rr3_low_edge_cross(3290));
-        assert!(!e.rr3_low_edge_cross(3300), "等于阈值不恢复");
-        assert!(
-            !e.rr3_low_edge_cross(3301),
-            "严格大于才重新武装——武装本身不触发，否则发出高电压的'低电'事件"
-        );
-        assert!(!e.rr3_low_edge_cross(3301), "武装后高电平拍照旧不触发");
-        assert!(e.rr3_low_edge_cross(3200), "重新武装已生效：再次越阈再报");
-        assert!(!e.rr3_low_edge_cross(3200));
+        assert!(e.rr3_low_edge_cross(3290), "越阈触发（rr-core 判定）");
+        assert!(!e.rr3_low_edge_cross(3295), "段内不重复报（rr-core 判定）");
     }
 
     #[test]

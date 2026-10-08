@@ -1505,6 +1505,25 @@ xtensa-esp32-none-elf -p rr-core` 绿（runtime 随 lib 入 no_std 面）。同�
 批D① 漏检：`rr-core/README.md` 随批D① 入库时未被 git 跟踪、⑤ 文档门的导航检查
 （`git ls-files` 口径）未覆盖，docs/README.md 导航漏链——批D② 门禁红出即补挂
 
+2026-10-09 0.0.5 第 II 轮 批D③ 控制原语+安全核下沉（ADR-0018 裁定 5，全案 §8 批D
+行；机制核四层下沉的第四层，七步门禁直跑 GATE_EXIT=0 十六 PASS、三端指针核对一致）——
+`rr-core` 新增 `control` 模块（no_std，纯函数 + `u64` 毫秒注入时钟）：四件原语真值
+自模块面迁入——`Rr3RateGate`（rr3-act servo/state 限速门，Instant→注入 ms）、
+`Rr3LowEdge`（rr3-power battery/low 边沿机）、饱和检测三件（`Rr3ReflexCfg`/
+`rr3_reflex_window_plan`/`Rr3SaturationDetector`，另拆 `rr3_reflex_window_saturated`/
+`rr3_reflex_rate_hz` 两纯函数供 std 主循环窗结算调用）+ 安全核新原语
+`rr3_travel_clamp`（限位钳位：上游裁决被绕过也不越行程，行程端点颠倒收敛到有效
+区间、绝不 panic）。9 测试含逐拍一致性判据 `same_control_graph_beat_for_beat_
+identical`（同一控制图喂两遍同一合成时钟序列输出逐拍相等——裁定 5 "同一张控制图
+Linux 实时环与裸机定时器逐拍一致"的机械判据）。模块侧 re-export 保既有路径零波及：
+servo/mech.rs、battery/mech.rs、reflex.rs 真值迁出（越阈/episode/节拍方案等全量用例
+随真值迁 rr-core，本地测试薄化为 re-export 检查）；composite.rs 两处限速门调用改
+`rr3_now_ms()` 注入（口径同 rr-bus）+ RPC/intent 两路落角前接安全核钳位（输入合法时
+恒等=行为守恒）。同批结清 control 面两处测试/实现不一致：rate_hz 零窗从 `max(1)`
+虚报改报 0（畸形输入往"不触发动作"方向收敛）、travel_clamp 颠倒行程超界断言订正为
+最近端点。xtensa no_std 线复验绿（control 随 lib 入 no_std 面）。rr-core 24 测试
+（批D① 8 + 批D② 7 + control 9）、rr3-act 24、rr3-power 6 全绿。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
