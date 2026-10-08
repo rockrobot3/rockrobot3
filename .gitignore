@@ -13,6 +13,9 @@
 # 项目仓直属模块（非 submodule，需完整追踪）
 !.github/
 !.github/**
+# CI 单真源（0.0.5 增补轮四 批W2，R27）：atomgit 原生引擎只拾取 .gitcode/workflows/
+!.gitcode/
+!.gitcode/**
 !docs/
 !docs/**
 # Agent 工作产物不入库：实施计划/账本属会话副产物，不是项目交付物
