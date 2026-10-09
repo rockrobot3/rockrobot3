@@ -1,4 +1,4 @@
-# rr3-power 模块设计（框架 v1.1）
+# rr3-power 模块设计（框架 v1.2）
 
 ## §0 单元身份证
 
@@ -106,6 +106,8 @@
 | P-4 | 件载荷去 `serde_json`（L0 迁移清单在册） | 后续批 | C7 |
 | P-5 | **改判**：`charger` 不需要独立句柄——`charging` 已由 `Rr3Power` 读数的电流符号派生（INA219 侧），再立一个句柄就是第二真值点。要标定的不是充电位而是 `percent` 的**电压→容量曲线**（两点或多点），随真件批做 | 真件批（0.0.6） | 采购 |
 | P-6 | `config.toml` 的 `[rr3-power] log_level` 是孤儿键（解析函数不读、全仓无读者）：**被读或删除**，不许第三种状态（与 interact I-1 同纪律） | 批I | — |
+| P-7 | **载荷组装上移承载层**：`rr3_battery_state_body` / `rr3_battery_low_body` / `rr3_charger_state_body` 的 `json!` 生产移到 `src/composite.rs`，件面只交 `Rr3BatteryState` 与 `bool`（依据 = ADR-0019 修订 4）。**做完本单元两件即 `core`-only**，是"件级 no_std 可达"的第一个样板；验收 = 三主题载荷字节逐字不变（schema 用例继续绿） | 批I | — |
+| P-8 | 描述符 `[supplies]` 补**平台看门狗**位（bare 档挂死无主承载层可救，只能靠平台 WDT；四类供给今天不含它，是真缺口不是笔误——见索引 §11 审计 L-2）：本册负责给出"低电边沿在 bare 档的本地兜底动作"需求（与 cutoff 未实装同条链） | 批J | C15 |
 
 ## §11 待证与敞口
 
@@ -113,3 +115,37 @@
 2. 边沿在**掉电重启后**即新段——设计意图如此，但没有跨重启的用例证据。
 3. 要标定的是 `percent` 的**电压→容量曲线**（形状未定义，随真件批）；`charging` 的电流符号判定虽有代码，
    **从未在真硬件上验过**——INA219 未采购，今天只有 sim 注入与交叉编译两条证据。
+
+## §12 跨档动作（host / rtos / bare 逐件）
+
+发布权判定：`battery/state`、`battery/low`、`charger/state` 都由本单元**主动发布**——但自足 bare 形态不宣称
+发布主题（ADR-0018 修订 2 ①），所以那一档里本单元的件只跑**本地低电边沿**（安全核同族），不发帧。
+**本单元是 13 件里跨档代价最低的一处**：`Rr3BatteryState` 已是 `Copy`、`Rr3LowEdge` 已在 `rr-core::control`，
+件面除 `json!` 之外零 std/零 alloc/零 dyn——载荷上移一做完，`battery`/`charger` 就是 `core`-only。
+
+| 件 | host（今天） | rtos（esp-rs std + FreeRTOS） | bare（no_std 自足） | 卡住它的**具体那一行依赖** → 动作 |
+|---|---|---|---|---|
+| battery | ✅（sim 与 INA219 两后端） | ⚠️ 只差 HAL 形状 | ⚠️ 只差 HAL 形状 | ① `rr_hal::Rr3Power::battery()` 是 `#[async_trait] + Send + Sync`，件不碰它（调用在 `composite.rs`），但件签名里的 `Rr3BatteryState` 来自 `rr_hal` → 批I F1 把值类型挪进 `rr-hal-api`；② `rr3_battery_state_body` / `rr3_battery_low_body` 的 `json!` → **上移承载层**（P-7），件面即可去 `serde_json`；③ `Rr3LowEdge` 已 re-export 保路径 ✅ |
+| charger | ✅ | ✅ 同 battery | ✅ 同 battery | 一处：`rr3_charger_state_body(seq, charging) -> Value` 上移（P-7）。件内除 `json!` 外无任何平台面——**它是"件应当长什么样"的样板** |
+| 组合件（`rr3_power_run`） | ✅ | ✅ 逻辑不变 | ⚠️ 形态差异全在这里 | 三档差异**不该**下进件层：host 由 rrd 监督（注册/心跳/重启）；rtos 由平台 task 承载（描述符静态分配 task 号，ADR-0018 修订 2 ①）；bare 无监督面，**挂死只能靠平台看门狗**——本仓四类供给里没有"看门狗"位，这是真实缺口（ADR-0018 修订 4 ② 补 `[supplies]` 平台看门狗位）。低电边沿在 bare 档仍然跑（它是件+机制核），但**没人收帧**：兜底动作必须本地化（关断/降速由本地安全核执行，不等总线），今天 cutoff 无读者 = 这条链在 bare 档直接断，见 §11 审计 L-5 |
+
+**动作序**：批I F1 → P-7（载荷上移）→ 单元即可标"rtos/bare 可达"。
+**微型形态里的本单元**：`power.battery` 是 base 层"恒在位"格，与"纯 USB 供电的微型形态"直接冲突（索引 D3 待裁）——
+本册 §10 P-1 是这一档最该先裁的一条，否则 rtos/bare 形态的依赖仲裁里永远挂着一个不可能满足的格。
+
+## §13 策略字面量清单
+
+| 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
+|---|---|---|---|---|
+| `src/composite.rs : rr3_power_config_parse` | 缺段/缺键一律 `Err("config 缺 [rr3-power.{name}] 段" / "缺 {key}（0–65535 整数）")`；**无任何数值缺省**；仅 `.max(1)` | 配置面 fail-closed | 有 | **本仓正面样板**：策略全在 `config.toml`，代码不藏缺省值。其余五册都该收敛到这个形状（sense 的 `default()` 三份重复就是反例） |
+| `src/composite.rs` + `battery.rs : Rr3BatteryCfg.cutoff_voltage_mv` | config `3150` | 关断阈值 | **无读者**：只在 `println!("…cutoff={}mV")` 回显，模块注释自认"只解析不动作" | 保留 config 键、动作归 M6；**今天必须在 §11 与格状态位上标"声明未生效"**，不能让运维以为它关得了机（索引审计 L-5 的实证） |
+| `composite.rs : low_voltage_mv` | config `3300` → `Rr3LowEdge::rr3_low_edge_new` | 低电阈值 | 有（**本单元唯一有后果的阈值**） | ✅ 已合规（policy 在 config，判据在机制核） |
+| `composite.rs : sample_period_ms` / `state_period_ms` | `5000` / `2000` | 拍点 | 有 | ✅ 已合规；`.max(1)` 钳位补留痕（P-2） |
+| `composite.rs : RR3_POLL_WAIT` | `100ms` | 收帧空转代价 | 有 | ops/config 键（与五册 POLL_WAIT 同批归一） |
+| `composite.rs : RR3_POWER_CONFIG` / `RR3_MANIFEST` | env 键名 | 配置入口 / 接入 | 未设 `RR3_POWER_CONFIG` → 回落 manifest 同目录 `config.toml`（**静默换源**，文件缺失才 `Err`）；`RR3_MANIFEST` 未设 → `exit(1)` ✅ | 静默换源要在日志里写明"配置来源 = X"，否则运维改了包内 config 却不知加载的是哪一份 |
+| `atoms/battery/mech.rs : rr3_battery_state_body / rr3_battery_low_body` | 键名 `seq/voltage_mv/percent/charging`、`seq/percent/voltage_mv` | 载荷契约 | 有（schema `additionalProperties=false`） | **契约字面量—不许动**；上移承载层后仍逐字保留（P-7 的验收 = 载荷字节零改动） |
+| `atoms/charger/mech.rs : rr3_charger_state_body` | `seq`/`charging` | 载荷契约 | 有 | 同上 |
+| `rr-hal` sim 后端 | `RR3_HAL_SIM_BATTERY_CHARGING`（缺省 false） | sim 充电位 | 有 | ✅ 落位正确（假数据在 sim 后端，不在件里） |
+| `rr-hal/src/linux_power.rs` | `charging: current_raw < 0` | 判定式 | 有 | 判定归后端；符号约定（正=放电）要写进 `rr-hal-api` 的文档面，否则换一片电流检测芯片就要重读代码 |
+| `config.toml [rr3-power] log_level` | `"info"` | 日志级 | **无读者** | 被读或删除（P-6） |
+| `atoms/{battery,charger}/assemble.toml` | `handles = []` / `ops = []` | 注入面申报 | **零申报** | 本单元策略虽已大体在 config，但 `handles` 空意味着批J 的注入校验门在这里**无内容可校验**——落地时先补 `power` 句柄申报（`i2c_bus`/`ina219_addr` → 描述符键），把它做成校验门的第一个真值样本 |

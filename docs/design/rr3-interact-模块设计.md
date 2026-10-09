@@ -1,4 +1,4 @@
-# rr3-interact 模块设计（框架 v1.1）
+# rr3-interact 模块设计（框架 v1.2）
 
 ## §0 单元身份证
 
@@ -109,6 +109,11 @@
 | I-5 | `asr/text`、`dialog/turn` 处置（retired 首例，与 C14 同批） | **待裁** | — |
 | I-6 | 面板是否进 rtos/bare 档定案（本册建议：host 档专属） | **待裁** | — |
 | I-7 | `intent/result` 的申报订阅面处置：要么补上真实消费者（表情随意图联动），要么按 ADR-0019 修订 2 的 retired 机制把这条订阅义务解除（与索引 §2 的 `asr/text`/`dialog/turn` 同批走 C14）。停在"在册但无人读"是最坏状态——依赖仲裁会当它是活边 | 契约评审（批J 前） | C14 |
+| I-8 | **载荷组装上移承载层**：`rr3_face_result` / `rr3_tts_result` 的 `Value` 生产移出件面（依据 = ADR-0019 修订 4）；件只交 `(current, previous)` 结构体与 `played_ms` | 批I | — |
+| I-9 | 面板自述矛盾收口：`SURFACE` 的"十二端点"与 `serve` 打印的"九端点"归一为**一处真值**（端点表由常量数组长度推导，不在文案里手写数字） | 批K | — |
+| I-10 | player 跨档化：占位波形 `sin`/`PI`/`AMP`/`HZ` 改 32 项查表并移入 sim 后端；每拍 `Vec<i16>` 改静态 320 样点缓冲或调用方借用 | 批I | C5 |
+| I-11 | "不可点名表情"规则（`talk`）从件内 `if` 改 ops 槽 `non_pointable`；白名单值本身仍是契约面，只把**规则**外移 | 批J | C1 |
+| I-12 | 面板端点串"后端 + 页面"双写消解：由 `/api/meta` 下发或生成器产页（不改端点字面量，只去第二真值点） | 批K | — |
 
 ## §11 待证与敞口
 
@@ -120,3 +125,36 @@
 5. RPC 载荷**没有 schema 真值点**：`contracts/events/` 只覆盖 event 主题，`face/expression` 与 `tts/text`
    的应答形状今天由件实现 + 面板取键方式共同"习惯性"锁定。补 RPC 载荷 schema 是契约级动作（与 C4 同批），
    在它落地前 §8 的"腿二"无处引值——这是本册 §8 唯一标"期望值来源不足"的原因。
+
+## §12 跨档动作（host / rtos / bare 逐件）
+
+发布权判定：本单元两件都**只被点名、不自主发主题**（`face/expression`、`tts/text` 是 RPC；申报发布的
+`asr/text`/`dialog/turn` 走 retired，见索引 §9 R-3）。**被点名方需要的编码面比发布方更薄**——应答体可以
+由承载层组装，件面只交结构体。panel 是 host 档专属组件（rtos/bare 无面板：D6 建议已在本册 §10 I-6 挂待裁）。
+
+| 件 | host（今天） | rtos（esp-rs std + FreeRTOS） | bare（no_std 自足） | 卡住它的**具体那一行依赖** → 动作 |
+|---|---|---|---|---|
+| face | ✅ | ⚠️ 只差 HAL 与载荷面 | ⚠️ 三处 std/alloc 形状 | ① `use std::mem::replace`（全限定调用）→ `core::mem::replace`，一行；② `rr3_face_parse_args -> Result<String, String>` 与 `rr3_face_set -> Result<(&'static str, &'static str), String>` 的 `String` 错型 → `Rr3FaceErr` 枚举 / `&'static str`（bare 档无堆时的错型面）；③ 错误文案里 `RR3_FACE_EXPRESSIONS.join("/")` 产 `String` → 白名单串改常量（值本就固定，`join` 是白白分配）；④ `rr3_face_result -> Value` 载荷上移承载层（I-8）；⑤ `Rr3Display::draw` 是 `#[async_trait]` 句柄，批I F1 后同步化 |
+| player | ✅ | ⚠️ 分配与数学面 | ❌ 需两处改造 | ① 每 20 ms 一块 `Vec<i16>` + `collect` → 静态 320 样点缓冲（16k/20ms 恰为 320）或调用方给 `&mut [i16]`；② `rr3_tts_sample` 用 `std::f64::consts::PI` 与 `sin` → 查表 32 项正弦 + 整型插值（占位波形，精度不敏感，误差预算：听感等价即可）；③ `&dyn Rr3AudioSink` bare 禁 trait 对象 → 泛型；④ `rr3_block_on` 清零；⑤ `rr3_tts_result -> Value` 上移（I-8） |
+| panel（组合件成分，非件） | ✅ | **不适用**：rtos 档无面板（能力面清单里就不该出现） | **不适用** | 跨档动作只有一条：`panel` 的存在与否由描述符 `[enabled_slots]` + 承载档决定，**不得**在件或组合件里用 `#[cfg(target_os)]` 自我裁剪（那是把形态选择权焊回代码）。另记一处对外自述矛盾：`SURFACE` 写"十二端点"、`serve` 打印"九端点"，同一事实两处真值（I-9） |
+
+**动作序**：批I F1 → I-3（句柄同步化）→ I-8（载荷上移）→ player 查表化（I-10）。
+**微型形态里的本单元**：`ui.face` 若进 rtos（MAX7219 那类 8×8 件），face 是**最适合先跨档的件**——
+状态机已是 `&'static str` + `[u8;8]`，唯一硬点是错型 `String` 与 `join`；player 反而最重（波形生成 + 缓冲）。
+
+## §13 策略字面量清单
+
+| 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
+|---|---|---|---|---|
+| `atoms/face/face.rs : RR3_FACE_EXPRESSIONS` | `["idle","blink","talk","think","happy","listen","turn"]` | 表情白名单 | 有（`rr3_face_set`/`rr3_face_frames`） | **契约字面量—不许动**（面板下拉框与 schema 都在读；集合扩容走契约评审） |
+| `atoms/face/face.rs : RR3_FACE_TALK` | `"talk"` | "不可点名"的排除项 | 有 | 契约字面量 + 规则本身（"播放态不可点名"）属策略 → ops 槽 `non_pointable: ["talk"]`（I-11，让形态可选择放开） |
+| `atoms/face/mech.rs : Default / begin_talk / end_talk` | `"idle"` ×3 | 默认表情兜底 | 有 | ops 槽 `default_expression`（config 里同名键**今天无读者**——见下一行） |
+| `config.toml [rr3-interact]` | `prebuffer_ms=500`、`volume_pct=70`、`default_expression="idle"`、`bind="127.0.0.1"`、`port=8080` | 五键配置 | **全为死字**：crate 无 `toml` 依赖、无 `RR3_INTERACT_CONFIG`、无任何读取路径 | 运维改 `config.toml` **静默无效**——I-1 的最严重形态。去处：要么接（bind/port 归 panel，default_expression 归 ops），要么删；`prebuffer_ms`/`volume_pct` 对应的行为**根本没实装**（§11 已记），不许留成"看着生效"的面 |
+| `atoms/player/mech.rs` | `RR3_TTS_MS_PER_CHAR=60`、`RR3_TTS_MAX_MS=10_000`、`RR3_TTS_FRAME_MS=20`、`RR3_TTS_SAMPLE_RATE=16_000`、`AMP=12_000.0`、`HZ=440.0` | 时长公式与占位波形 | 有 | 时长两项 = **ops 槽**（策略）；`FRAME_MS/SAMPLE_RATE` = 与 sense/线格式同源的**契约字面量**（双写记债：应引同一真值）；`AMP/HZ` = sim 后端参数（注释自认"只借 rr-hal sim 参数"→ 移后端，I-10） |
+| `src/composite.rs` | `RR3_POLL_WAIT=250ms`、`RR3_FACE_TICK=250ms`、`"beep"`、`rate=16000 ch=1`、`8x8` 文本 | 节拍 / 自检词汇 / 回显 | 有 | 两项节拍 = ops 槽（与 act/sense/power/connect 的 POLL_WAIT 同批）；`"beep"` = 契约字面量（面板读它） |
+| `src/panel/server.rs` | `RR3_PANEL_ADDR_DEFAULT="127.0.0.1:8080"`、`RR3_PANEL_MAX_CONNS=8`、`RR3_PANEL_READ_TIMEOUT/CALL_TIMEOUT=5s`、`HEADER_LIMIT=8*1024`、`BODY_LIMIT=4*1024` | 监听面与防护上界 | 有 | 并发/超时/上界 = **ops 槽**（安全相关的上界可留件内，但必须登记）；地址缺省 = config `[panel] bind/port` 的正解，今天两处真值 |
+| `src/panel/server.rs` 路由 + `src/panel/www/index.html` | 11 条 `/api/*` + `/`、三枚透传主题、四枚 `rr3.ctl.*` 方法、id 1/2/3/4、body 键 `on`/`expression`；页面**逐字复读**这些串并读 `result.played_ms/previous/ssid/connected` | 端点白名单 = 对外可观测面 | 有 | **契约字面量—不许动**；但"后端一份、页面一份"的**双写是债**（改一端必漂移）→ 由 `/api/meta` 下发或生成器产页（I-12） |
+| `atoms/face/mech.rs : rr3_face_set` 报错文案 | `"由 TTS 播放自动驱动，不接受点名"`、`"不认表情 {expr:?}（允许 …）"` | 应答文案 | 有 | **契约字面量—不许动** |
+| `atoms/face/mech.rs : RR3_FRAMES_*` | 11 帧 `0b0110_0110` 一类 8×8 位模式 | 渲染**数据**（不是阈值） | 有 | 不是策略，但也不该焊在 `mech.rs`：随批F5a 显示 trait 落 sim 后端 / 描述符数据面（帧表 = 板面事实） |
+| `src/panel/server.rs : SelfTest` | `"happy"` | 自检用表情 | 有 | ops 槽（自检期望不该硬编码） |
+| `atoms/{face,player}/assemble.toml` | `handles = []` / `ops = []` | 注入面申报 | **零申报** | 上面全部策略字面量今天都没有申报位；且 `[hardware]` 连显示键都没有（I-2 的前置 C4）——本单元是"配置面最空、config 最假"的一册，批J 落地时应优先拿它做样板 |

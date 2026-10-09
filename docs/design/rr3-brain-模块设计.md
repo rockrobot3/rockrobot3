@@ -1,4 +1,4 @@
-# rr3-brain 模块设计（框架 v1.1）
+# rr3-brain 模块设计（框架 v1.2）
 
 ## §0 单元身份证
 
@@ -115,7 +115,9 @@
 | B-3 | 云总预算与 `max_utterance_ms` 的关系定案（轮次超时是否覆盖云 RTT） | **待裁** | — |
 | B-4 | Python 测试接进门禁（现在只登记 conventions，不进 `check.sh`；本机 Python 3.9 不过 3.11 门） | 批K + 宿主 | C11 |
 | B-5 | 起轮/云失败 counters（健康面可见性） | 批K | C9 |
-| B-6 | Rust 化随 ADR-0016（届时两腿对拍与闭包门才适用） | ADR-0016 | — |
+| B-6 | Rust 化随 ADR-0016（届时两腿对拍与闭包门才适用；`dialog` 件按 §12 是唯一可能跨档的认知件，`asr`/`llm`/`tts` 按发布权判据在 rtos/bare 档**不启用**而非"改造后可用"） | ADR-0016 | — |
+| B-9 | `RR3_CALL_TIMEOUT_S = 30.0` 从 `composite.py` 常量改 ops/config 槽——它是"一轮最坏 ≈90 s"的组成项，调它却要改码违背数据面原则；与 B-3 同批裁 | 批I | — |
+| B-10 | 凭据键名 `SILICONFLOW_API_KEY` 把云供应商焊进代码。改通用键（`RR3_CLOUD_API_KEY`）+ 供应商写 config，或在 §11 明确记"换云供应商需改一处代码"为已知欠账（这是"换芯片不改码"原则在云侧的同型问题） | 批I | — |
 
 ## §11 待证与敞口
 
@@ -123,3 +125,33 @@
 2. 本册 §8 的用例存在性依据是 conventions 登记的 brain-unittest 双矩阵 job —— **该 job 在远端从未执行过**，
    所以"有测试"与"测试跑过"是两件事（与全仓敞口第 1 条同源）。
 3. `intent.py` / `bus.py` 未登件（本册 §0 已写明它们是壳）——避免被误读为"漏登记的五件套"。
+
+## §12 跨档动作（host / rtos / bare 逐件）
+
+单元级判定先行：**brain 属于主承载层**（ADR-0018 裁定 3/修订 1——认知与云是"有 OS 才叠加"的那一层）。
+所以本册的跨档表不写"怎么把 Python 塞进 MCU"，而写**三档里 brain 的位置怎么摆**：
+
+| 档 | brain 在哪 | 本单元件跨档动作 | 理由与代价 |
+|---|---|---|---|
+| host 全承载 | 本机进程（今天） | 不适用（豁免登记，见 §1） | 认知四格跑 std Python，两腿对拍门与闭包门本就不适用 |
+| rtos 轻承载（ESP32 类微型形态经桥） | **仍在 host 侧**，板只经桥把 pcm/vad 上灌、把 intent 下领 | 板侧**没有 brain 件**；跨档动作全在桥的语义面（`⊙` 经桥拓扑，architecture §12.7） | 代价 = 云 RTT 进对话闭环（本册 §4 的一轮最坏 ≈90 s 就是这个代价的形状）；收益 = 一枚 MCU 不必装下认知层 |
+| bare 无承载（自足微型） | **不存在** | 无。该形态"不起对话轮"是设计事实，不是降级 | 索引 §10 的 F-C 形态据此成立；别在描述符里给它挂 `cognition.*` 格——挂了就是要求一个不可能满足的依赖（与 D3 同类错误） |
+
+**Rust 化后（ADR-0016）本节的改写预告**：`dialog` 是唯一可能要跨档的认知件（它只吃时间戳与边沿，
+纯 `core` 可达），`asr`/`llm`/`tts` 三件永远绑云 ⇒ 它们的依赖闭包里 `reqwest`/TLS 是**主承载层专属**，
+按 ADR-0019 修订 4 的发布权判据，这三件在 rtos/bare 档直接不启用，而不是"改造后可用"。
+
+## §13 策略字面量清单
+
+| 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
+|---|---|---|---|---|
+| `rr3_brain/intent.py` | `_SERVO_ANGLE_LEFT/CENTER/RIGHT = 45/90/135` + 关键词表 | 意图映射=**策略** | 有 | ✅ 落位正确（L4 就该在 brain）；但三个角值与 act 的行程钳位是**同一物理事实的两处表达** → 角值应由描述符/ops 供，或至少在 §9 断言"三者必落在 `[angle_min, angle_max]` 内"（现在靠人记） |
+| `rr3_brain/cloud/llm.py` | `SYSTEM_PROMPT`、`LLM_MAX_TOKENS=150`、`LLM_HISTORY_ROUNDS=4` | 人格与预算=**策略** | 有 | ✅ 落位正确；`SYSTEM_PROMPT` 的出处已在 §11 登记为 legacy 移植值 |
+| `config.toml [rr3-brain.cloud]` | `base_url`、`asr_model`、`llm_model`、`tts_model`、`timeout_s=20` | 云面 | 有（`composite.py` 读 config，**不是 env**） | ✅ 合规；§3 旧版"env 注入"的说法已订正 |
+| `composite.py : RR3_CALL_TIMEOUT_S` | `30.0` | 点名 interact 的等待上界 | 有 | **硬编码在代码里、不在 config** → ops 槽（B-9）：它是"一轮最坏时长"的组成部分，调它要改码就违背数据面原则 |
+| `config.toml` | `max_utterance_ms=8000` 有读者；`silence_tail_ms=700`、`max_turn_chars=800` **无读者** | 轮次面 | 部分 | 两个死键分别走 B-2（删或接）与 B-8；**"假活配置面"在 brain 有两处**，与 interact 五键、connect 三项同批清 |
+| `composite.py : SUBSCRIBES` / `TOPIC_PCM` / `TOPIC_VAD` | `"rr3-interact/asr/text"`、`"rr3-connect/net/link"`、`"rr3-sense/audio/pcm"`、`"…/audio/vad_start"` | 订阅面与实然面**两套字面量** | 有（实然那份真在用，申报那份只 `net/link` 被读、且读了不处理） | 契约面修正走 C14/B-1；**双写债在此最典型**：申报面与实现面各写一遍主题串，改一处就漂 |
+| `rr3_brain/cloud/*.py` | 路径串 `v1/audio/transcriptions`、`v1/chat/completions`、`v1/audio/speech` | 云 API 形状 | 有 | 契约面（OpenAI 兼容形状）；换云供应商时**必须改代码的地方不止这里**——见下一行 |
+| env 面 | `SILICONFLOW_API_KEY`（**供应商名进代码/配置面**） | 凭据键名 | 有 | 凭据不落盘 ✅；但键名把厂商焊死：换云要改代码。去处 = 通用键名（如 `RR3_CLOUD_API_KEY`）+ 厂商写在 config/descriptor，或至少在 §11 记"跨供应商需改一处代码"为已知欠账（B-10） |
+| `session/测试面` | `RR3_BRAIN_CLOUD=mock`、`tests/` 内假响应 | 注入点 | 有 | ✅ 正确（mock 在测试注入位）；§6 已钉"mock 不是在位证据" |
+| 硬编码在件里的形态参数 | 心跳 2000 ms 拍点、`poll` 超时等 | 机制参数 | 有 | 与五册同纪律：进 ops/config，别停在 `.py` 常量 |

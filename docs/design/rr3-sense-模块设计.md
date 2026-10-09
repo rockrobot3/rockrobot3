@@ -1,4 +1,4 @@
-# rr3-sense 模块设计（框架 v1.1）
+# rr3-sense 模块设计（框架 v1.2）
 
 ## §0 单元身份证
 
@@ -110,6 +110,8 @@
 | S-4 | `env`/`imu` 取向定案：填实 or retired（连带两条在册主题的处置） | **待裁** | — |
 | S-5 | DoA 阈值从件内迁 ops | 批J | C5 |
 | S-6 | **件面导出面收口**：`rr3_pcm_downmix_mono`、`rr3_frame_rms`、`Rr3DoaBin`(+`rr3_doa_bin_as_str`)、`RR3_DOA_BIN_THRESHOLD_DEG`、`Rr3VadEdge` 五个 `mech` 内 `pub` 符号今天不出件入口——要么进 `capture.rs`/`vad.rs` 的 re-export（成为契约面，S-5 的阈值注入就必须带着它），要么降为 `pub(crate)`。不许停在"内松外紧"的中间态 | 批I | C5 |
+| S-7 | **载荷组装上移承载层**：`rr3_pcm_event_body` / `rr3_vad_event_body` 的 `json!` 生产移到 `src/composite.rs`，件面只交 `Rr3PcmStream`/`Rr3VadEdge` 结构（依据 = ADR-0019 修订 4）。验收 = `audio/pcm`、`audio/vad_start` 字节逐字不变（mono golden 与 schema 用例继续绿）；做完本单元两件去 `serde_json` | 批I | — |
+| S-8 | DoA 数学面整型化：`rr3_doa_fix` 去 `f64::{sqrt,asin,to_degrees,round}`，改整数时延 + 定点 `asin` 查表（表进 sim 后端/描述符数据面），误差预算 ±1°；复用 `vad` 的 `rr3_isqrt` 整型开方先例 | 批I | — |
 
 ## §11 待证与敞口
 
@@ -117,3 +119,35 @@
 2. "说完 → brain 判停"的端到端时延是**推算**（700 ms + 一拍），无实测。
 3. 板上 ALSA 打开失败的确切行为（探活退不退）本册不下结论，属待证。
 4. 契约申报与实现不一致（brain 未申报 pcm/vad 订阅）——见索引 §2，需契约评审。
+
+## §12 跨档动作（host / rtos / bare 逐件）
+
+发布权判定先行：`capture` 发 `audio/pcm`、`vad` 发 `audio/vad_start` —— **两件的载荷只在"自己发主题"的档里才需要**；
+自足 bare 形态不宣称发布主题（ADR-0018 修订 2 ①），故那档里两件只提供机制函数，不碰序列化面。
+
+| 件 | host（今天） | rtos（esp-rs std + FreeRTOS，0.0.7 Q2 档） | bare（no_std 自足） | 卡住它的**具体那一行依赖** → 动作 |
+|---|---|---|---|---|
+| capture | ✅ 跑（sim 与 ALSA 两后端） | ⚠️ 不能，等 `rr-hal-api` | ⚠️ 不能，另加数学面 | ① `rr_hal::Rr3PcmStream{ cfg, samples: Vec<i16> }` 把 alloc 焊进件签名 → 批I F1 改借用形状（`&[i16]` + 调用方缓冲）；② `Rr3AudioSource::open/read` 是 `#[async_trait] + Send + Sync`，件侧经 `rr3_block_on`（`std::thread::yield_now` 自旋）→ 同上；③ **`rr3_doa_fix` 用 `f64::{sqrt, asin, to_degrees, round}`** → 改整型：交叉相关取整数时延 + 定点 `asin` 256 项查表（表随 sim 后端/描述符数据面走），误差预算 ±1°（三档分类只需 30° 边界不糊）；`vad` 已有 `rr3_isqrt` 二分整型开方可直接复用为先例 |
+| vad | ✅ 跑 | ✅ **只差载荷面**（std 在，HAL 不进件签名？不：`Rr3VadConfig` 是件内类型） | ✅ 机制本体已是 core-only | 无 `use std::`、无 `rr_hal::`、手搓整型开方——**13 件里最接近 L0 的一件**。唯一动作：`rr3_vad_event_body` 的 `json!` + `Option<Value>` 参数按 §12 通则上移到承载层，件面只留 `rr3_vad_feed -> Option<Rr3VadEdge>` |
+| env / imu | ⚠️ 格在位但**无机制本体**（`mech.rs` 各 2 行注释，入口只导出 `SURFACE`） | 同左 | 同左 | 跨档表这一行不写"改造动作"，写"**待填件**"。纪律：这两格在 rtos/bare 档只能靠 `contracts/slots.toml` 的三态标记记"占位"（C9），**不许**用 manifest 假装有件来过"每格一件"门——那会把分母做成假的 |
+| 载荷面通则 | `rr3_pcm_event_body` / `rr3_vad_event_body` 今天返回 `Value`，全仓每一处 body 都由 `serde_json` 造（`rr-bus::rr3_publish` 收 `Value`） | 同 host | 不需要 | **裁定落 ADR-0019 修订 4**：`*_body` 组装上移到承载层（本单元 `src/composite.rs`），件只交结构体。于是 11 件的 `serde_json` 依赖是**落位错误**，不是跨档障碍；bare 档连"无堆编码器"都不需要 |
+
+**动作序**：批I F1（`rr-hal-api` 同步形状 + 去 alloc 签名）→ 本册 S-2 → 载荷上移（新工单 S-7）→ DoA 整型化（S-8）。
+前两步不做，件在 rtos 档一行都编译不过；后两步不做，件在 bare 档编译不过。
+
+## §13 策略字面量清单
+
+| 文件 : 符号 | 字面量 | 语义 | 今天有没有读者 | 去处 |
+|---|---|---|---|---|
+| `atoms/capture/mech.rs : RR3_DOA_BIN_THRESHOLD_DEG` | `30`（±30°） | DoA 三档边界=**业务策略** | 无 config/env；读者只有 `rr3_doa_fix` 与用例 `doa_bin_str_and_threshold_are_pinned` | ops 槽 `doa_bin_threshold_deg`（S-5） |
+| `atoms/capture/mech.rs : rr3_doa_fix` | `channels < 2`、`frame[0]`=L / `frame[1]`=R | 阵列几何与通道序 | 无声明 | 描述符 `[hardware]`（几何是板事实，不是件常识） |
+| `src/composite.rs : open_cfg` | `bit_depth: 16` | s16 位深 | config 无该键 | 契约字面量（线格式 `s16le`）——**标豁免**，但要与 `rr3_pcm_event_body` 的 `"format":"s16le"` 同处登记，避免两处真值 |
+| `src/composite.rs : Rr3SenseConfig::default()` | `16000 / 1 / 20` | 采集缺省 | 有读者，但**与 `config.toml` 逐字重复**，`tools/sim/src/chain.rs` 还有第三份 | **双写即债**：缺省值单点归 `config.toml`（或归描述符 `[supplies]` 旁的音频面），代码侧不保留副本；sim 那一份改读同一真值 |
+| `atoms/vad/vad.rs : Rr3VadConfig::default()` | `1500 / 700 / 200` | 对话阈值=**策略** | 同上，三份重复 | 同上（且 brain 侧 `silence_tail_ms` 已判死参数，B-2） |
+| `atoms/capture/mech.rs : rr3_doa_bin_as_str` | `"left"/"center"/"right"` | 事件词汇 | 在册：`contracts/events/sense-audio-vad_start.schema.json` 的 enum | **契约字面量—不许动** |
+| `atoms/capture/mech.rs : rr3_pcm_event_body` | `"format": "s16le"` 及键名 `seq/rate/channels/ms/pcm_b64` | 线格式与载荷键 | 在册 schema | **契约字面量—不许动** |
+| `src/composite.rs : RR3_DUMP_TOPIC` | `"rr3-sense/capture/dump"` | RPC 面 | 与 `module.toml [rpc].exposes` 双写 | 契约字面量；双写记为债（与 act 的 `EXPOSED` 内联同类） |
+| `capture.rs/vad.rs/env.rs/imu.rs : SURFACE` | `"rr3-sense 0.0.1 (M3 实装)"` 等逐行自述 | 面板逐行取用 | 有读者 | **契约字面量—不许动** |
+| `src/composite.rs : RR3_SENSE_CONFIG` / `RR3_MANIFEST` | env 键名 | 配置入口 / 接入契约 | `RR3_MANIFEST` 未设 → `Err` → `exit(1)`（fail-closed，**正面样板**）；`RR3_SENSE_CONFIG` 未设 → **静默用代码缺省，config.toml 整份不生效** | 静默回落点，S-1 处置：改为默认读 manifest 同目录 `config.toml`（与 power/connect 同口径），并在日志里写明配置来源 |
+| `config.toml [rr3-sense] log_level` | `"info"` | 日志级 | **全仓无读者** | 被读或删除（S-1 同批，与 P-6/N-6/I-1/B-8 同纪律） |
+| `atoms/*/assemble.toml` | `handles = []` / `ops = []`（四份皆空） | 注入面申报 | **零申报**：上面每一条策略都没有申报位 | 批J G4 之前，本册 §3 的 ops 槽全是纸面——这正是索引 §11 审计项 L-3 的实证 |
