@@ -1,67 +1,111 @@
-# rr3-power 模块设计
+# rr3-power 模块设计（框架 v1）
 
-> 证据：`modules/rr3-power/module.toml`、`atoms/{battery,charger}/`、`src/composite.rs`、`config.toml`、
-> `rr-core/src/control.rs`（低电边沿真值）、`rr-hal` 的 `rr3_hal_power`。
+## §0 单元身份证
 
-## 1 职责
+| 项 | 值 | 来源 |
+|---|---|---|
+| 执行单元 | 独立进程（host 档）；`[resources].start_priority = 10`（全系统最早起）、`mem_limit_mb = 16`、`restart_policy = "always"` | `module.toml` |
+| 格 | `power.battery`（base 层，恒在位）· `power.charger`（body 层） | `contracts/slots.toml`、`atoms/*/atom.toml` |
+| 件 | `battery` · `charger`（各五件套） | `atoms/` |
+| 主题 | 发布 `battery/state`、`battery/low`、`charger/state`；**订阅面为空**；**无 RPC** | `module.toml [events]/[rpc]` |
+| 句柄 | `rr3_hal_power()` → `dyn Rr3Power`（`battery()`） | `src/composite.rs` |
+| 参数 | `sample_period_ms=5000`、`state_period_ms=2000`、`low_voltage_mv=3300`、`cutoff_voltage_mv=3150` | `config.toml`，经 `RR3_POWER_CONFIG` 读 |
+| 健康 | 心跳 2000 / 看门狗 10000 ms | `module.toml [health]` |
 
-**唯一能在基座失能时独立兜底的单元**：电池读数、低电边沿、充电态。关断决策在本地完成，
-不等总线、不等 brain（`architecture §7.3`）。格账：`power.battery`（base 层，恒在位）+
-`power.charger`（body 层）。
+## §1 件契约表
 
-## 2 事实面
+| 件 | 公开符号（现状签名） | 输入 → 输出 | 状态 | 失败语义 |
+|---|---|---|---|---|
+| battery | `rr3_battery_state_body(seq: u64, st: Rr3BatteryState) -> Value` | 序号 + 读数 → state 载荷（`seq/voltage_mv/percent/charging`） | 无 | 不可能失败 |
+| battery | `rr3_battery_low_body(seq: u64, st: Rr3BatteryState) -> Value` | 同上 → low 载荷（`seq/percent/voltage_mv` 三必填，`additionalProperties=false`） | 无 | 不可能失败 |
+| battery | `pub use rr_core::control::Rr3LowEdge`（真值在机制核） | `rr3_low_edge_cross(voltage_mv: u16) -> bool` | `armed: bool` + 阈值 | — |
+| battery | **目标** `→ fn(state: &Rr3BatteryState) -> Vec<u8>`（走 `rr3_body_encode`） | 去 `serde_json` | — | — |
+| charger | `rr3_charger_state_body(seq: u64, charging: bool) -> Value` | 充电位 → 载荷 | 无 | 不可能失败 |
+| 组合件 | `rr3_power_run()`（`src/composite.rs`） | manifest env → 主循环 | 两路到期时刻 | 见 §6 |
 
-| 件 | 格 | 发布 | 机制 |
+## §2 状态机（`Rr3LowEdge`，真值 `rr-core::control`）
+
+不变式：**一次低电段恰报一次**；`voltage_mv <= low_voltage_mv` 算越阈（等号在内）；
+**严格大于**阈值才重新武装；**武装本身不是事件**（`cross()` 返回 true 的唯一含义是"该发 battery/low"）。
+非法输入收敛方向：读数不合法（`Unsupported`）→ 不喂边沿、不报低电（宁漏不误报）。
+
+| 当前 armed | 读数 | 返回 | 次态 |
 |---|---|---|---|
-| `battery` | `power.battery` | `battery/state`（周期流，首拍即采）· `battery/low`（边沿事件） | 边沿语义真值在 `rr-core::control::Rr3LowEdge`（件 re-export）：**越阈第一拍恰报一次、严格大于阈值才重新武装、武装本身不是事件** |
-| `charger` | `power.charger` | `charger/state` | `rr3_charger_state_body(seq, charging)`——充电位由**最近一次电池读数**派生，首拍在电池之前不发 |
+| true | `<= low` | **true**（发事件） | false |
+| false | `<= low` | false | false |
+| any | `> low` | false | true |
 
-参数面：`sample_period_ms = 5000`、`state_period_ms = 2000`、`low_voltage_mv = 3300`、
-`cutoff_voltage_mv = 3150`（**只解析回显、不动作**，关机与充电策略归 M6）；
-`[rpc].exposes` 为空（订阅面为空是设计：兜底不依赖请求）；健康 2000 / 10000 ms；
-`start_priority = 10`（最早起）、`mem_limit_mb = 16`。sim 电压曲线钉死 `3200 mV + 10 mV/%`，
-linux INA219 侧 `charging` **诚实恒 false**（待两点标定）。
+## §3 注入面
 
-## 3 件级切分与闭包（设计目标）
+| 件 | `handles` | `ops` 槽 | 来源 | 默认 | 非法收敛 |
+|---|---|---|---|---|---|
+| battery | `dyn Rr3Power` ← `[slots].present:power.battery` + `[hardware].i2c_bus`、`ina219_addr` | `low_voltage_mv: u16` | config | 3300 | 越界 → 拒 boot（fail-closed） |
+| battery | — | `sample_period_ms: u64` | config | 5000 | `0` → 收敛为 1 并留痕（**现状未做**，§10） |
+| charger | **现状：无独立句柄**，充电位由最近一次 battery 读数派生 | `state_period_ms: u64` | config | 2000 | 同上 |
+| 全体 | `cutoff_voltage_mv: u16` = 3150 **只解析回显、不动作**（关机归 M6） | — | config | — | — |
 
-- 两件的公开面已是纯函数（吃 `Rr3BatteryState` 出 JSON），改造点只有一个：值类型进 `rr-hal-api`
-  并把边沿件的时钟从"调用方注入 ms"这条既有纪律保持住（勿回退成读钟）。
-- `charger` 的"从电池读数派生"是**权宜而非设计**：真件到位后充电位应来自充电器自己的句柄
-  （TP4056 类硬件面），届时要新增句柄而不是继续派生——这条要写进注入面 `handles` 的演进注记。
-- `cutoff_voltage_mv` 的动作化（关断）是**守护面**的扩展，不是 battery 件的私有事：设计定为
-  安全核动作（与 act 的限位同级），落点在机制核，触发方在本单元。归 M6 批，本册不声称已有。
+## §4 主循环与时序预算
 
-## 4 职责四面
+真实常量（`src/composite.rs`）：`RR3_POLL_WAIT = 100 ms`；`next_battery` / `next_charger` **初值 = now
+（首拍即采，兜底链路不等第一个周期）**；到期后 `next = now + period`（相对节拍，与 `rr-core::runtime` 同纪律）。
 
-| 面 | 落点 |
-|---|---|
-| 接入 | 电源句柄（无 RPC、无订阅——**故意如此**：兜底链不能依赖请求） |
-| 运行 | 5 s 采样 + 2 s 状态流 |
-| 状态 | 两流 + boot 回显四个参数（回显是"配置真的生效了"的唯一证据面） |
-| 守护 | 低电边沿（本单元的核心价值）；关断待 M6 |
+| 输出 | 名义周期 | 最坏延迟路径（低电事件从越阈到总线可见） | 与心跳关系 |
+|---|---|---|---|
+| `battery/state` | 5000 ms | 采样点错位 + 1 拍 | 独立 |
+| `battery/low` | 边沿触发 | **≤ 采样周期 5000 ms + 一次 publish**（须实测，非推算） | 心跳 2000 ms 不同线程 |
+| `charger/state` | 2000 ms | 首拍在电池之前**不发** | 独立 |
+饿死可见性：主循环若卡在 `battery()`（ioctl/i2c 阻塞），心跳线程仍续命 → **"活着但不报低电"漏检**。
+设计要求：把"最近一次成功采样时刻"计入 counters，由 rrd 侧做**数据新鲜度**判据（不新增相位）。
 
-## 5 时序设计
+## §5 主题面契约
 
-采样 5000 ms / 上报 2000 ms / 心跳 2000 ms / 看门狗 10000 ms。三个待给量：低电事件从**越过阈值**
-到**总线上可见**的最坏延迟（现状 = 采样周期 + 一拍心跳，须实测确认而不是推算）、边沿在重启后的
-重新武装语义（掉电重启即新段，设计需明确"新执行单元 = 新边沿段"）、INA219 读数抖动对边沿的影响
-（未标定期望区间，标定时一并给）。
+| 主题 | kind | seq 规则 | 触发 | 必填 | 失败映射 |
+|---|---|---|---|---|---|
+| `battery/state` | stream | 本流自增（从 1） | 每采样拍 | 三字段 + seq | 句柄错 → 不发布并记 counters |
+| `battery/low` | event | 与本流连贯 | 边沿（§2） | `seq/percent/voltage_mv` | 同上 |
+| `charger/state` | event | 自增 | 周期，**派生位** | seq + charging | 同上 |
 
-## 6 降级与缺格语义
+## §6 降级矩阵
 
-- `power.battery` 是 base 层——**恒在位、恒不降级**（`contracts/slots.toml` 注记）。这意味着
-  "无电池的板"在本契约体系里不成立；若真出现（纯 USB 供电的微型形态），要么给它一个假在位的
-  battery 件（**反对：撒谎**），要么立一次 retired 评审（推荐，ADR-0019 修订 2 ②）。
-- `power.charger` 缺 → 只停 `charger/state`，不影响 battery 与兜底。
-- 读数失败（句柄在、读不出）→ 显式 `Unsupported`，**不得**沿用上一次读数继续发流（假新鲜）。
+| 格 | 缺格 | 句柄缺 | 句柄值错 | 后端未实装 | 参数非法 |
+|---|---|---|---|---|---|
+| `power.battery` | **base 层不允许缺**（恒在位）——无电池板的表达见 §10 工单 P-1 | `rr3_hal_power` 落 placeholder → 开机探活 `Unsupported` → **`exit(1)`** | 描述符键拼错 → 现状整份描述符作废且**静默**（`.ok()` 吞错）→ 首次调用才错 | linux 后端在（INA219）；sim 恒在位 | 周期 0 → 现状允许（§10 工单） |
+| `power.charger` | 只停本流，不影响兜底 | 同上不独立存在（派生） | 同 battery | 真充电检测**未实装**（`charging` 诚实恒 false） | — |
 
-## 7 红线
+## §7 安全核接入
 
-两主题名与载荷形状（`battery/low` 的 schema `additionalProperties = false`，三字段必填）、
-边沿语义的四条判据、首拍即采、`charging` 未标定前恒 false、无 RPC 面。
+低电兜底是本单元唯一的守护动作：**边沿判定在机制核**（`Rr3LowEdge`），本单元只提供读数与发布，
+**不能**被策略绕过（brain 停机也不影响 battery/low 上报）；**关断动作未实装**（cutoff 只回显），
+归 M6——设计定：关断落点在机制核安全核段，触发方在本单元，与 act 限位同级。
 
-## 8 待证与敞口
+## §8 两腿对拍用例设计
 
-1. 真电池读数从未发生（INA219 未采购）；板上 `charging` 恒 false 是设计不是缺陷，但**必须有标定批收口**。
-2. base 层电池格在"无电池板"上的表达（§6）待裁。
-3. 关断动作（M6）与两点标定（真件批）都在本单元之外，本册只占位不声称。
+| 件 | 输入序列 | 期望值来源 | 边界集 | 现状测试 |
+|---|---|---|---|---|
+| battery（边沿） | `[3900, 3300, 3250, 3200, 3301, 3301, 3200]` | `Rr3LowEdge` 裁定语义（等号算低、严格大于才武装、武装不返 true） | 等号 / 刚过 / 连续低 | ✅ `low_edge_fires_once_per_episode`、`low_edge_rearms_only_above_threshold`（在 rr-core，件面 re-export） |
+| battery（载荷） | `st(3300, 8)` 连喂 3 拍，seq 递增 | `contracts/events/power-battery-low.schema.json` 逐字段 + `additionalProperties=false` | seq 起点、字段缺失 | ⚠️ 需补：件面加一条"载荷 = schema 实例"断言 |
+| charger | `charging` 恒 false 的 3 拍 + 1 拍 true | 载荷两字段形状 | 首拍在电池之前不发 | 有 `cfg(test)`，缺 seq 断言（§10） |
+
+## §9 不变量与红线断言
+
+- 断言：一次低电段 `battery/low` 恰发 1 次（用例级）。
+- 断言：首拍即采——boot 后第一个 `state_period` 内必见一次 `battery/state`。
+- 断言：`charging` 在两点标定完成前恒 false（防假充电态）。
+- 断言：本单元**无 RPC、无订阅**——任何新增请求面都破坏"兜底不依赖总线"这一设计前提。
+- 断言：三主题名与载荷字段零改动（`contracts/topics.toml` 对表）。
+
+## §10 改造工单
+
+| # | 动作 | 归属 | 前置 |
+|---|---|---|---|
+| P-1 | `power.battery` 在"无电池板"上的表达：base 层恒在位与之冲突，需一次 ADR 级评审（retired 或改层） | 待裁 | — |
+| P-2 | 周期参数下界钳制（`0 → 1` + 留痕）；采样失败计入 counters（数据新鲜度） | 批I | C7 |
+| P-3 | 描述符错误在 boot 期可见（`rr-hal` 四选择函数不再 `.ok()` 吞） | 批J | — |
+| P-4 | 件载荷去 `serde_json`（L0 迁移清单在册） | 后续批 | C7 |
+| P-5 | `charger` 的真句柄（TP4056 类）替换派生位；届时 `handles` 增一行 | 真件批（0.0.6） | 采购 |
+
+## §11 待证与敞口
+
+1. 真电池读数从未发生（INA219 未采购）→ §4 的"最坏延迟 ≤5 s + 一拍"是**推算**，须板上直方图证实。
+2. 边沿在**掉电重启后**即新段——设计意图如此，但没有跨重启的用例证据。
+3. `charging` 恒 false 的标定接口（两点标定）尚未定义形状。

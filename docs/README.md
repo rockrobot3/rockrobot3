@@ -12,7 +12,7 @@ docs/ 按**变更频率与读者动作**分四档：`architecture/` 半年一变
 | 档 / 路径 | 内容 | 谁在它上面兜底 |
 |---|---|---|
 | [`architecture/architecture.md`](architecture/architecture.md) | 唯一架构图：定位、分层、目录树、原子功能模块模型（格/件/组合件/面）、HAL、IPC、数据流、迁移映射、风险登记、跨操作系统移植与部署（§12，含 v0.8 三档承载与 §12.8 三处窄缝）、门禁与验收（§13）、速查（§14）（§10 只留一行指向 `status.md`，本档不写进度） | 目录树变更必须同步其 §3（`process/conventions.md` §5 文档纪律） |
-| [`design/`](design/模块设计索引.md) | **模块级细化设计集**（architecture 的下一层）：索引（系统切分 / 实然契约图 / 三缝落点 / 对话实然序 / 待裁清单）+ 六单元各一册（职责 · 事实面 · 件级闭包 · 四面 · 时序 · 降级 · 红线 · 敞口）。规矩：现状断言一律以符号名回指文件，未取证的写"待证 / 无实测"，设计与事实分节不混排 | 设计评审；与 architecture / ADR 冲突时以上者为准并回改本集 |
+| [`design/`](design/模块设计索引.md) | **模块级细化设计集**（architecture 的下一层）：[框架 v1](design/模块设计框架.md)（十二节固定模板：身份证 / 件契约表 / 状态机 / 注入面 / 时序预算 / 主题契约 / 降级矩阵 / 安全核接入 / 两腿对拍用例设计 / 不变量断言 / 改造工单 / 敞口）+ 索引（系统切分 / 实然契约图 / 三缝落点 / 对话实然序 / 待裁汇总 D1–D9）+ 六单元各一册（职责 · 事实面 · 件级闭包 · 四面 · 时序 · 降级 · 红线 · 敞口）。规矩：现状断言一律以符号名回指文件，未取证的写"待证 / 无实测"，设计与事实分节不混排 | 设计评审；与 architecture / ADR 冲突时以上者为准并回改本集 |
 | [`reference/rrd-cli.md`](reference/rrd-cli.md) · [`reference/rrd-rpc.md`](reference/rrd-rpc.md) · [`reference/rrd-registry.md`](reference/rrd-registry.md) | 运行期接口的可照抄事实：启动参数与默认值、RPC 方法与错误映射、在册表阶段与退避上限 | 与代码同批变更；引用须与代码逐字一致；代码定位一律用**符号名锚定**（如 `registry.rs 的 rr3_reg_beat`），不写行号（行号随代码漂移） |
 | [`process/conventions.md`](process/conventions.md) | 开发规约：分支 / 提交 / CI 门禁 / DoD | 门禁唯一入口 `bash tools/ci/check.sh`（其 ⑤ 文档门对仓内每个已跟踪 md 兜底：不得为空、相对链接不得断；仓内每份 README 还必须出现在下文库地图里，漏链即红。本索引自身也在覆盖内）；**步序与条数只登记在其 §2**，本索引不抄数字 |
 | [`process/naming.md`](process/naming.md) | 命名唯一权威（`rr3-` 前缀矩阵、模块目录四件套的四类结构角色） | `rr3-mkmod` 生成自检 + `rr-registry` 契约测试强制，不靠人记 |
