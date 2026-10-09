@@ -20,7 +20,7 @@
 | ②b | mkmod 输出即契约用例（方案 P3） | `cargo test --manifest-path tools/mkmodule/Cargo.toml` |
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
 | ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`） |
-| ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（**排除 `legacy/`**：那是冻结区，其内 README 允许残留 1 处已知旧路径，见 `docs/status.md`；不排除只会逼人改冻结区或加豁免名单），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
+| ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（`legacy/` 排除条款已随 0.0.4 批F 整树退役撤除，**今天 `check.sh` 没有任何排除**，全集进门），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
 | ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与两个 esp 条件工程）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
 | ⑦ | **§13 静态断言四件**（全 fail-closed，逐条点名） | ⑦-a 机制核零策略载荷（禁词扫 `rr-core/src/*.rs` + `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（Rust 五件 / brain 两件式豁免 / 组合件实体 `src/main.rs`+`src/composite.rs`）· ⑦-d 入口体量 ≤80 行。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
 
@@ -1622,8 +1622,8 @@ rr-registry 40（lib）+34（contract）测试绿。CI 回执核对（批W2 敞�
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
-**七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
-批W2 起 CI 单真源迁此，R27 裁定；不进七步门，本地可跑）：
+**九步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
+批W2 起 CI 单真源迁此，R27 裁定；不进九步门，本地可跑）：
 `lint`——rustfmt `--check` 与 clippy `-D warnings` 各自独立失败，覆盖 base/runtime 与
 全部独立工程（④ 同一 find 口径）；绿色基线是 2026-10-01 的 rustfmt 全仓归一 + clippy
 清零提交，此后 fmt/clippy 回退即 CI 红。`brain-unittest`——rr3-brain 26 条 stdlib
@@ -1631,8 +1631,8 @@ unittest（`python3 -m unittest discover -s tests`），ubuntu + macos 双矩阵
 Rust workspace 里，①b/②b/④ 覆盖不到它，只有这一步跑。四真进程 e2e 仍属本地实跑
 环节（同下节平台条件脚本的理由）。
 
-**七步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
-ADR-0006 后果项）**不在七步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
+**九步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
+ADR-0006 后果项）**不在九步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
 塞进门禁等于让无容器环境的机器永远红。它做三件事：①宿主跑 `rr-ipc` 的
 `src/bin/ipct003_dump.rs`（golden 头 + 五种 payload 类型各一整帧的 hex，全部编译期字面量），
 header 行对 `contracts/golden/event-header-128.hex`；②已装 `aarch64-unknown-linux-gnu`
@@ -1659,7 +1659,7 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
   `rr3-brain`（Python，ADR-0014）与 CI 胶水脚本（bash，可最后迁）。brain 的迁移
   路线已由 [ADR-0016](adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md)
   落设计裁定（首件 bus.py → rr-bus 复用、实施归 0.0.6 专项）；迁移本身走正常批次
-  （生成器产出、契约校验、七步门禁一样不少），`module.toml` 的 `lang` 字段随迁移改为
+  （生成器产出、契约校验、九步门禁一样不少），`module.toml` 的 `lang` 字段随迁移改为
   `rust`，原"Python 语法检查属人工检查点"的面随之收敛为 cargo 检查
 - 新模块一律由生成器产出：`cargo run --manifest-path tools/mkmodule/Cargo.toml --bin rr3-mkmod -- rr3-<名>`
   （模块名形如 `rr3-arm`，第二参数是输出根，默认 `./modules`）。生成器落盘**五个文件**：
