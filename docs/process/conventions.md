@@ -10,7 +10,7 @@
 - 涉及架构决策的提交 body **必须**引用 ADR 编号（`引用：ADR-0006`）
 - 一次提交只做一件事；`git mv` 类纯移动不得混入内容改动
 
-## 2 机器可检查项（CI 七步，见 `tools/ci/check.sh`）
+## 2 机器可检查项（CI 九步，见 `tools/ci/check.sh`）
 
 | 步 | 检查 | 命令 |
 |---|---|---|
@@ -21,8 +21,11 @@
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
 | ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`） |
 | ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（**排除 `legacy/`**：那是冻结区，其内 README 允许残留 1 处已知旧路径，见 `docs/status.md`；不排除只会逼人改冻结区或加豁免名单），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
+| ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与两个 esp 条件工程）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
+| ⑦ | **§13 静态断言四件**（全 fail-closed，逐条点名） | ⑦-a 机制核零策略载荷（禁词扫 `rr-core/src/*.rs` + `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（Rust 五件 / brain 两件式豁免 / 组合件实体 `src/main.rs`+`src/composite.rs`）· ⑦-d 入口体量 ≤80 行。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
 
-入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**七步**：
+入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**九步**
+（⑥/⑦ 两步随 0.0.5 批E 接入，`check.sh` 由七步扩九步；步序与 PASS 条数的逐批台账见本文件下方登记条目）：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
 ①b 把 workspace 的 237 条（Windows，推算）/294 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
