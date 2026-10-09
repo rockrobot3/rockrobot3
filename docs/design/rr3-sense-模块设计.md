@@ -8,7 +8,7 @@
 | 格 | `audio.capture` · `audio.vad` · `sensor.env`（占位）· `sensor.imu`（占位） | `contracts/slots.toml`、`atoms/*/atom.toml` |
 | 件 | `capture` · `vad` · `env` · `imu`；组合件成分：采集主循环 + 配置解析（`src/composite.rs`） | `atoms/` |
 | 主题 | 发布 `audio/pcm`(stream)、`audio/vad_start`(event)、`env/temperature`、`imu/state`（后两条**无生产者**）；RPC `capture/dump`；订阅面为空 | `module.toml` |
-| 句柄 | `rr3_hal_audio_source()` → `dyn Rr3AudioSource`（`open(cfg)` / `read(frames)`） | `src/composite.rs` |
+| 句柄 | `rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str)`（第二元是**后端名**，是诚实面，载荷/日志都要带） | `src/composite.rs`、`rr-hal/src/backend.rs` |
 | 参数 | `sample_rate=16000`、`channels=1`、`frame_ms=20`、`rms_start=1500`、`silence_tail_ms=700`、`min_speech_ms=200` | `config.toml`，**仅当 `RR3_SENSE_CONFIG` 已设时才读** |
 | 健康 | 心跳 1000 / 看门狗 5000 ms | `[health]` |
 
@@ -17,20 +17,21 @@
 | 件 | 公开符号（现状） | 输入 → 输出 | 状态 | 失败语义 |
 |---|---|---|---|---|
 | capture | `rr3_frames_per_tick(sample_rate_hz: u32, frame_ms: u64) -> usize` | 率 + 拍长 → 每拍帧数 | 无 | `rate=0` 或 `frame_ms=0` → 0 帧（**语义未定**，§6） |
-| capture | `rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16>` | 多声道样点 → 单声道 | 无 | 非整除交错 → 现状截断（历史缺陷已修，见 mono golden） |
+| capture | `rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16>`〔**未导出**：只在 `mech` 内 `pub`，件入口 `capture.rs` 的 re-export 白名单里没有它——见 §10 S-6〕 | 多声道样点 → 单声道 | 无 | 非整除交错 → 现状截断（历史缺陷已修，见 mono golden） |
 | capture | `rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream` | 同上（含 cfg） | 无 | — |
-| capture | `rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value` | 序号 + 流 → 载荷（`pcm_b64` + `ms`） | 无 | — |
-| capture | `rr3_doa_fix(samples, channels) -> Option<Rr3DoaFix>` · `rr3_doa_field(&Rr3DoaFix) -> Value` · `Rr3DoaBin` · `RR3_DOA_BIN_THRESHOLD_DEG: i32 = 30` | 双麦样点 → 方位与三档 | 无 | 单声道/能量不足 → `None`（不发 doa 字段） |
-| vad | `rr3_frame_rms(samples: &[i16]) -> i64` | 一帧 → 能量 | 无 | — |
+| capture | `rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value` | 序号 + 流 → 载荷（**六键**：`seq, format, rate, channels, ms, pcm_b64`） | 无 | — |
+| capture | `rr3_doa_fix(samples: &[i16], channels: u8) -> Option<Rr3DoaFix>` · `rr3_doa_field(d: &Rr3DoaFix) -> Value`（两者**已导出**） · `Rr3DoaBin` · `rr3_doa_bin_as_str()` · `RR3_DOA_BIN_THRESHOLD_DEG: i32 = 30`（三者**未导出**） | 双麦样点 → 方位与三档 | 无 | 单声道/能量不足 → `None`（不发 doa 字段） |
+| vad | `rr3_frame_rms(samples: &[i16]) -> i64`〔**未导出**〕 | 一帧 → 能量 | 无 | — |
 | vad | `Rr3VadState::rr3_vad_new(cfg: Rr3VadConfig, frame_ms: u64) -> Self` | 阈值组 + 拍长 → 状态机 | 见 §2 | — |
-| vad | `rr3_vad_feed(&mut self, samples: &[i16]) -> Option<Rr3VadEdge>` | 每拍一样点 → 边沿（只发边沿） | `Rr3VadEdge{Start, End}` | — |
+| vad | `rr3_vad_feed(&mut self, samples: &[i16]) -> Option<Rr3VadEdge>` | 每拍一样点 → 边沿（只发边沿） | `Rr3VadEdge::Onset{rms_peak: i64, speech_ms: u64}` / `Offset{speech_ms: u64}`〔枚举本身未导出，件面只出 `Rr3VadState` + `rr3_vad_event_body`〕 | — |
 | vad | `rr3_vad_event_body(seq: u64, edge: Rr3VadEdge, doa: Option<Value>) -> Value` | 序号 + 边沿 + 可选 doa → 载荷 | 无 | — |
+| **件面导出总账** | `capture.rs` 导出 5 个：`rr3_frames_per_tick`、`rr3_pcm_downmix_stream`、`rr3_pcm_event_body`、`rr3_doa_fix`、`rr3_doa_field`；`vad.rs` 导出 2 个：`Rr3VadState`、`rr3_vad_event_body` | — | — | 框架 §1 的"缺任一 `pub` 即未完成"按**件面导出**算；上表标注的 6 个 `mech` 内 `pub` 符号要进导出面，须先定它们是不是契约面（§10 S-6） |
 | env / imu | **无公开机制面**（`mech.rs` 各 2 行注释；入口只导出 `SURFACE`） | — | — | — |
 | 目标签名 | 全部 `Value` → `Vec<u8>`（走 `rr3_body_encode`）；`Vec<i16>` → `&[i16]` 借用；`Rr3PcmStream`/`Rr3AudioCfg` → `rr-hal-api` | | | |
 
 ## §2 状态机（VAD，`Rr3VadState`）
 
-不变式：**只发边沿**（`Start`/`End`），持续高电平期间不续发；起音需连续满足 `rms_start` 达
+不变式：**只发边沿**（`Onset` / `Offset`），持续高电平期间不续发；起音需连续满足 `rms_start` 达
 `min_speech_ms`；判停需连续静音 `silence_tail_ms`；所有窗长以 `frame_ms` 为粒度换算成拍数。
 非法输入收敛方向：`rms` 读数异常（帧空）→ 不改变状态、不发边沿。
 `DoaBin` 三档：`θ < -30` = 左、`-30 ≤ θ ≤ 30` = 中、`θ > 30` = 右（阈值是**策略**，见 §3）。
@@ -61,8 +62,8 @@
 
 | 主题 | kind | seq | 触发 | 载荷必填 | 现状与申报差 |
 |---|---|---|---|---|---|
-| `audio/pcm` | stream | 自增 | 每拍 | `seq, pcm_b64, ms` | 一致（brain 真实消费但未申报） |
-| `audio/vad_start` | event | 自增 | 边沿 | `seq, edge`（+ 可选 `doa`） | 一致 |
+| `audio/pcm` | stream | 自增 | 每拍 | `seq, format, rate, channels, ms, pcm_b64`（六键恒发） | 一致（brain 真实消费但未申报） |
+| `audio/vad_start` | event | 自增 | 边沿 | `seq, edge`；`speech_ms` **每次必发**，`Onset` 另带 `rms_peak`；`doa` 可选 append | 一致 |
 | `env/temperature` | event | — | 应为周期 | schema 在册 | **无生产者**（占位件） |
 | `imu/state` | stream | — | 应为周期 | 在册 | **无生产者**（占位件） |
 | `capture/dump` | RPC | — | 点名 | 帧缓冲摘要 | 一致 |
@@ -108,6 +109,7 @@
 | S-3 | 采集新鲜度 counters（治"活着但不动"） | 批K | C9 |
 | S-4 | `env`/`imu` 取向定案：填实 or retired（连带两条在册主题的处置） | **待裁** | — |
 | S-5 | DoA 阈值从件内迁 ops | 批J | C5 |
+| S-6 | **件面导出面收口**：`rr3_pcm_downmix_mono`、`rr3_frame_rms`、`Rr3DoaBin`(+`rr3_doa_bin_as_str`)、`RR3_DOA_BIN_THRESHOLD_DEG`、`Rr3VadEdge` 五个 `mech` 内 `pub` 符号今天不出件入口——要么进 `capture.rs`/`vad.rs` 的 re-export（成为契约面，S-5 的阈值注入就必须带着它），要么降为 `pub(crate)`。不许停在"内松外紧"的中间态 | 批I | C5 |
 
 ## §11 待证与敞口
 

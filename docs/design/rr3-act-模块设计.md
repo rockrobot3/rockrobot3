@@ -94,7 +94,7 @@
 |---|---|---|---|---|
 | servo 参数裁决 | `angle ∈ {0, 45, 180, 200, -?}` + cfg(45,135) | 裁定语义（钳位、端点颠倒收敛） | 端点内/外/等号/颠倒 | ✅ rr-core `travel_clamps_into_range_and_survives_inverted_range` + 件面 parse 用例 |
 | servo 限速门 | now = 1000 + 10k，k∈0..24 | 裁定语义"每 5 拍放 1 次" | 窗起 / 窗末等号 / 迟到拍 | ✅ 机制核 `same_control_graph_beat_for_beat_identical`（件面需引它做期望值） |
-| led | 效果序列 `[On, Blink, Off, Blink]` + 半周期序列 | **期望 = 翻转序列白名单**（不得由件自己产出） | 半周期=1、worker 已死 | ⚠️ 只有解析用例；**电平翻转序列无用例**（批K 前必修，A-1） |
+| led | 效果序列 `[On, Blink, Off, Blink]` + 半周期序列 | **期望 = 翻转序列白名单**（不得由件自己产出） | 半周期=1、worker 已死 | ✅ **已有三条**：`blink_toggles_level_and_off_stops_it`（翻转序列）、`on_and_off_take_effect_immediately`（立即落电平）、`apply_tracks_current_and_previous`（前后态）。⚠️ 缺的不是用例而是**合成时钟**——这三条用 `rr3_wait_until` 真等半周期，节拍来自 worker 线程自睡；A-1 去线程后期望序列必须由注入的 `now_ms` 产出，否则回归面在改线程模型时无人守护 |
 | relay | `on` 序列 `[true,false,false,true]` | 载荷 + `relay_seq` 连贯（e2e 断言） | 重复同态不发 | ⚠️ 需补"同态不发"边界用例 |
 | reflex | tick 密度 `[250,125,124,0]`/窗 | 半拍线判定 + episode 恰一次 | 恰半拍 / 低于半拍 / 孤立饱和窗 | ✅ 机制核三条；件面需补"环饿死 → 通告仍发得出"一条 |
 
