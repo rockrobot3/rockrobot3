@@ -156,6 +156,14 @@ pub fn rr3_registry_validate_atom_text(
     // 0) 板无关断言（对 manifest 全文本，含注释——注释也是 manifest 的载荷面）
     errs.extend(rr3_registry_board_free_assert(text));
 
+    // 0b) 未知字段反向断言（收口批 E'，fail-closed，与 module 侧共用同一实现）：
+    //     契约外的键（typo 如 uses.slost）不报错即静默丢依赖
+    errs.extend(crate::validate::rr3_registry_unknown_fields_assert(
+        &root,
+        &rr3_registry_atom_field_specs(),
+        "atom manifest",
+    ));
+
     // 1) 逐字段：存在性 + 类型 + 规则（与 validate.rs 逐字段循环同构，字段集来自 atom.schema.toml）
     for spec in rr3_registry_atom_field_specs() {
         let Some(value) = rr3_registry_get_by_path(&root, &spec.path) else {
@@ -203,6 +211,11 @@ pub fn rr3_registry_validate_atom_text(
                     spec.path
                 )),
             },
+            "int" => {
+                if value.as_integer().is_none() {
+                    errs.push(format!("字段 {} 类型应为 int，实际为 {value:?}", spec.path));
+                }
+            }
             other => panic!("atom schema 未知 kind {other}（契约与代码不同步）"),
         }
     }
@@ -270,7 +283,7 @@ subscribes = []
         seen.sort_unstable();
         seen.dedup();
         assert_eq!(seen.len(), before, "字段路径不得重复");
-        assert_eq!(specs.len(), 6);
+        assert_eq!(specs.len(), 7);
     }
 
     /// 查册门：未登记格位拒绝；空格位表 fail-closed
@@ -436,6 +449,35 @@ slots = ["audio.vad"]
         }
     }
 
+    /// 收口批 E'：未知字段反向断言（rr3_registry_unknown_fields_assert）——
+    /// typo 键（uses.slost）与未登记段双路红，合法 manifest 零命中（fail-closed 自证）
+    #[test]
+    fn unknown_fields_assert_flags_typo_keys() {
+        let specs = rr3_registry_atom_field_specs();
+        let bad: Value = toml::from_str(
+            "[atom]\nname = \"x\"\nversion = \"0.1.0\"\n[provides]\nslots = [\"ui.face\"]\n[uses]\nslost = [\"audio.playback\"]\n[bogus]\ny = 2\n",
+        )
+        .expect("样例可解析");
+        let errs =
+            crate::validate::rr3_registry_unknown_fields_assert(&bad, &specs, "atom manifest");
+        assert!(
+            errs.iter().any(|e| e.contains("uses.slost")),
+            "typo 键必须点名: {errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("[bogus]")),
+            "未登记段必须点名: {errs:?}"
+        );
+        let ok: Value = toml::from_str(
+            "[atom]\nname = \"x\"\nversion = \"0.1.0\"\n[provides]\nslots = [\"ui.face\"]\n",
+        )
+        .expect("合法样例可解析");
+        assert!(
+            crate::validate::rr3_registry_unknown_fields_assert(&ok, &specs, "atom manifest")
+                .is_empty()
+        );
+    }
+
     /// 批E 门禁接线（architecture §13"每格一件·不留空格"反向断言，查册真值处执法）：
     /// 仓扫描全部 `modules/*/atoms/*/atom.toml`——①每份过契约+查册门+板无关
     /// （新增件**不钉即红**，堵住上面 include_str! 逐份钉法"漏钉不红"的缺口）；
@@ -472,6 +514,18 @@ slots = ["audio.vad"]
                 let errs = rr3_registry_validate_atom_text(&text, &slots);
                 assert!(errs.is_empty(), "{} 漂移: {errs:?}", manifest.display());
                 let v: Value = toml::from_str(&text).expect("atom.toml 已过 TOML 解析");
+                // 批E'：目录名 = atom.name 唯一对应——⑦-b/⑦-c 门按目录名执法、
+                // 契约按 atom.name，两名漂移即"合同与户口本不符"（件名两个真源）
+                let dir_name = manifest
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .expect("atom.toml 必有父目录名")
+                    .to_string_lossy();
+                let atom_name = v["atom"]["name"].as_str().expect("atom.name 已过必填校验");
+                assert_eq!(
+                    atom_name, dir_name,
+                    "{dir_name}：atom.name 与目录名不一致（件名两个真源）"
+                );
                 let slot = v["provides"]["slots"][0]
                     .as_str()
                     .expect("provides.slots 恰一项且为字符串（validate 已断）")

@@ -126,6 +126,60 @@ fn rr3_registry_type_err(path: &str, kind: &str, v: &Value) -> String {
     format!("字段 {path} 类型应为 {kind}，实际为 {v:?}")
 }
 
+/// manifest 未知字段反向断言（0.0.5 收口批 E'，fail-closed）：schema 正向遍历只查
+/// "必填在位、类型与规则合法"，manifest 里多出来的键（typo 如 `uses.slost`）无人看，
+/// 静默放行等于契约外私开载荷面、依赖静默丢失。本函数从字段规格重建允许键树
+/// （path 一律两段式：段 → 键集，schema 测试已钉首段形状），对 manifest 逐层对账——
+/// 顶层段集、段内键集双对账，多一个键即红。atom 与 module 两侧共用，不建第二份实现。
+pub fn rr3_registry_unknown_fields_assert(
+    root: &Value,
+    specs: &[crate::schema::Rr3FieldSpec],
+    what: &str,
+) -> Vec<String> {
+    let mut errs = Vec::new();
+    let mut allow: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+        Default::default();
+    // 一段式 path = 顶层标量键（如 atom manifest 的 schema_version），不进段树单独放行
+    let mut top_scalars: std::collections::BTreeSet<&str> = Default::default();
+    for s in specs {
+        match s.path.split_once('.') {
+            Some((section, key)) => {
+                allow.entry(section).or_default().insert(key);
+            }
+            None => {
+                top_scalars.insert(s.path.as_str());
+            }
+        }
+    }
+    let Some(table) = root.as_table() else {
+        errs.push(format!("{what} 顶层必须是表（[段] 结构），实际为 {root:?}"));
+        return errs;
+    };
+    for (name, value) in table {
+        if !allow.contains_key(name.as_str()) {
+            if top_scalars.contains(name.as_str()) {
+                continue; // 顶层标量键（契约登记在案），不做段内对账
+            }
+            errs.push(format!(
+                "{what} 含未登记段 [{name}]（schema_version 契约无此段——typo 或契约未演进）"
+            ));
+            continue;
+        }
+        let Some(section) = value.as_table() else {
+            errs.push(format!("{what} 段 [{name}] 必须是表，实际为 {value:?}"));
+            continue;
+        };
+        for k in section.keys() {
+            if !allow[name.as_str()].contains(k.as_str()) {
+                errs.push(format!(
+                    "{what} 含未登记字段 {name}.{k}（typo 或契约未演进——未知字段不报错即静默丢语义）"
+                ));
+            }
+        }
+    }
+    errs
+}
+
 /// 从 manifest 路径向上定位 `contracts/topics.toml`
 fn rr3_registry_contract_path(manifest: &Path) -> PathBuf {
     manifest
@@ -206,6 +260,13 @@ fn rr3_registry_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) 
     let self_name = rr3_registry_get_by_path(&root, "manifest.name")
         .and_then(Value::as_str)
         .unwrap_or("");
+
+    // 0) 未知字段反向断言（收口批 E'，fail-closed）——先于逐字段：契约外的键不进任何正路
+    report.errors.extend(rr3_registry_unknown_fields_assert(
+        &root,
+        &rr3_registry_field_specs(),
+        "module manifest",
+    ));
 
     // 1) 逐字段：存在性 + 类型 + 规则
     for spec in rr3_registry_field_specs() {
