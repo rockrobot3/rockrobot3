@@ -1,4 +1,4 @@
-# rr3-act 模块设计（框架 v1.1）
+# rr3-act 模块设计（框架 v1.2）
 
 ## §0 单元身份证
 
@@ -118,6 +118,10 @@
 | A-4 | servo/relay 句柄面换 `rr-hal-api` 同步签名（去 `rr3_block_on`） | 批I | C5 |
 | A-5 | "低电禁动"语义定义（power 边沿 → act 闸门，落点在机制核安全核段） | 待裁（M6 关联） | — |
 | A-6 | 环 tick 计入 counters（健康面可观测"活着但不动"） | 批K | C9 |
+| A-8 | **载荷组装上移承载层**：`rr3_servo_state_body` / `rr3_led_*` / `rr3_relay_result` 之类 `-> Value` 的函数从件面移到 `src/composite.rs`，件只交结构体与判定（依据 = ADR-0019 修订 4；做完 `serde_json` 从件面清零） | 批I | — |
+| A-9 | 意图开放门与灯效白名单从硬编码 `match` 改 ops 槽注入（`intent_open_topics`、`led_effects`），使"某形态不开 led"成为改数据不改码 | 批J | C1 |
+| A-10 | `intent.rs : EXPOSED` 内联 `"rr3-act/led/effect"` 改引 `led::RR3_LED_EFFECT_TOPIC`（消第二真值点） | 批I | — |
+| A-11 | `config.toml [rr3-act] log_level` 孤儿键：被读或删除（与 P-6/N-6/I-1/B-8 同批） | 批I | — |
 | A-7 | `relay/state` 补变化判定：`rr3_relay_apply` 已有 `(生效, 前一)` 形状可判，只在 `Some(on)` 且电平真变时续 `relay_seq` 并发布；同时补同态抑制用例。**注意守恒**：`tools/sim/chain.rs` 与 legacy 面板按"每命令一帧"数过这条流，改语义要同批改它们的期望，不能只改件 | 批I | — |
 
 ## §11 待证与敞口
@@ -125,3 +129,36 @@
 1. 真舵机/真继电器动作证据未取（外设未采购）；sysfs PWM 与 chardev GPIO 只有代码 + 交叉编译证据。
 2. 1 kHz 环的实时性从未在目标上量过——"1000 Hz"目前只是 config 里的一个数。
 3. LED 写失败不退出的例外是否推广到其它妆面件（如 face），待定规则。
+
+## §12 跨档动作（host / rtos / bare 逐件）
+
+发布权判定：`servo` 发 `servo/state`(stream)、`relay` 发 `relay/state`(event)、`reflex` 发 `motor/reflex` ——
+三者在**自己发主题**的档里才需要载荷面；bare 自足形态只跑本地反射环与安全核，**不发主题**（ADR-0018 修订 2 ①），
+那里的件面不需要序列化。控制环与 `⊙` 永不同路（ADR-0007 裁定 1），所以反射环天生跨档，载荷面反而不跨档。
+
+| 件 | host（今天） | rtos（esp-rs std + FreeRTOS） | bare（no_std 自足） | 卡住它的**具体那一行依赖** → 动作 |
+|---|---|---|---|---|
+| servo | ✅（`rr3_servo_*` + `Rr3RateGate` 已复用 `rr-core::control`） | ⚠️ 不能 | ⚠️ 不能 | ① `rr3_servo_parse_args(&Value, …) -> Result<_, String>`：`Value` 是 serde 类型、`String` 是 alloc 错型 → 改 `Rr3ServoCmd { angle_deg: u16, move_ms: u64 }` + `Rr3ServoErr` 枚举（错型面与 `Rr3HalError` 同族）；② 舵机句柄今天从 `rr3_hal_servo()` 拿 `Box<dyn>`（在 `composite.rs`），件签名里的 `Rr3PwmServo` 是 `#[async_trait]` + `Send + Sync`，落角经 `rr3_block_on` → 批I F1 换 `rr-hal-api` 同步 trait；③ 载荷 `rr3_servo_state_body -> Value` 上移承载层（A-8） |
+| led | ✅（但**件内自持 worker 线程 + mpsc**） | ⚠️ 不能按现形状（`std::sync::mpsc` + `thread::Builder::spawn`；FreeRTOS 下要换队列） | ❌ 最重的一件 | ① 去线程：`rr3_led_tick(now_ms, state) -> Option<bool>`，节拍归组合件（A-1，且**先**把三条真等用例改合成时钟——R-4）；② `Arc<dyn Rr3GpioOut>` → bare 档禁 trait 对象（ADR-0018 修订 2 ②）→ 泛型 `<G: Rr3GpioOut>` 或由承载层持有；③ `recv_timeout(Duration::from_secs(3600))` 的"长眠"语义消失后，非 blink 态必须显式表示（件内 `mode/level/next_toggle_ms` 三字段），不许用超时兜；④ `rr3_block_on` 清零 |
+| relay | ✅ | ⚠️ 只差 HAL 形状 | ⚠️ 只差 HAL 形状 + dyn | ① `rr3_relay_apply(&dyn Rr3GpioOut, on)` → bare 禁 `dyn` → 泛型；② 同样去 `rr3_block_on`；③ `&Value` 解析 → `bool`/结构体；④ `rr3_relay_counter_key(on) -> "relay_on"/"relay_off"` 是**运维词汇**，留在件面但进 §13 豁免清单（counters 面按这两个字符串聚合） |
+| reflex（组合件成分，非件） | ✅ | ✅ 纯 `rr-core::control` + 注入 `now_ms` | ✅ 同左（这是全项目**唯一今天就能 bare 跑的回路**，也是"微型形态仍有限位/饱和守护"的依据） | 无跨档障碍；只两条小动作：`loop_hz` 的 `as u32` 裸截断 → `try_from` + 拒 boot（A-3）、`1_000_000` µs 换算常数进 `rr-core::runtime` 的时基面 |
+
+**动作序**：批I F1（`rr-hal-api`）→ A-4（servo/relay 同步句柄）→ A-1（led 去线程，先建合成时钟护栏）→ A-8（载荷上移，新工单）。
+其中 A-8 覆盖全仓 11 件，是"件级 no_std"的真正总开关：**它做完，`serde_json` 从件面消失，bare 件的闭包降到 `core`**。
+
+## §13 策略字面量清单
+
+| 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
+|---|---|---|---|---|
+| `src/composite.rs : rr3_act_run` | `rr3_hal_gpio_out("led")` / `("relay")` | **GPIO role token**（白名单在 `rr-hal/backend.rs` 的 `match role`，白名单外 `None` → fail-closed） | 有 | role 词留在件/组合件是对的（它是格位语义），但 `gpio_led_line`/`gpio_relay_line` 的**引脚**必须在描述符 `[hardware]`（批D④ 已落，此处只登记不重做） |
+| `src/intent.rs : rr3_intent_action_handle` 的 `match` | 只放 `relay/set` + `servo/command`；其余走 `"已归属但意图执行面未开放 {other}"` | **意图开放门 = 纯业务策略**（led 故意不开放） | 有，且被单测逐字断言 | ops 槽 `intent_open_topics: [..]`（A-9）——今天它是硬编码 `match`，换形态要改码，违背"裁剪=改数据" |
+| `src/intent.rs : EXPOSED` | 内联 `"rr3-act/led/effect"` 字面量（同文件另有两枚引常量） | 归属门白名单 | 有 | **双写即债**：改引 `led::RR3_LED_EFFECT_TOPIC` 单点（A-10） |
+| `src/composite.rs : RR3_POLL_WAIT` | `250ms` | 收帧空转代价 | **无键无读者**（代码常量） | ops/config 键（与 sense/interact/power/connect 的 `POLL_WAIT` 同批处理，避免五册各说各话） |
+| `src/reflex.rs : rr3_reflex_loop` | `1_000_000`（µs/s）、`cfg.loop_hz.max(1)`、`"saturate"`、topic `"rr3-act/motor/reflex"`、线程名 `"rr3-act-reflex"` | 环换算 / reason 词 / 主题 | `loop_hz` 有 config；`"saturate"` 是对外词汇 | `1_000_000` 与换算归 `rr-core::runtime` 时基面；**`"saturate"` = 契约字面量—不许动**（订阅方与面板按它分派）；线程名留 host 档 |
+| `atoms/led/led.rs : Rr3LedEffect::{parse,as_str}` | `"on"/"off"/"blink"` | 灯效白名单 | 有；`atom.toml` 只在**注释**里提，不是机器字段 | ops 槽（白名单）+ 契约字面量双身份：值不许改，集合可注入（A-9 同批） |
+| `atoms/led/mech.rs` | `(blink_period_ms / 2).max(1)`、初始 `current = Off` / `level = false`、`"灯效 worker 已退出"` | 半周期推导 / 灭态缺省 | 有 | 半周期推导是机制（留件）；`.max(1)` 是策略钳位 → ops 校验；`Off` 缺省留件（执行器安全态，属安全核同族，**不许注入**） |
+| `atoms/servo/mech.rs : rr3_servo_parse_args` | `"缺 angle_deg（int，行程内角度）"`、`"angle_deg 必须是非负整数"`、`"超出行程 [{}, {}]"`、`"move_ms 必须大于 0"`、`"超出时限上限 {}（不给堵转留机会）"`；缺 `move_ms` → 回落 `cfg.move_timeout_ms` | 裁决文案 + 缺省时限 | 文案被单测逐字断言 | **契约字面量—不许动**（面板与 legacy 依赖字面）；时限回落来源 config ✅ 合规 |
+| `src/composite.rs : rr3_act_config_parse` | `.max(1)`（`blink_period_ms`、`loop_hz`）、`range.len() != 2`、`u16::try_from`、缺键即 `Err("config [rr3-act.{sect}] 缺 {key}")` | 校验与钳位 | 有 | 校验规则进 config schema（批J G4 的 ops 校验位）；**缺键硬报错 = fail-closed，正面样板**，与本仓"静默回落 sim"对照 |
+| `src/composite.rs` / `module.toml` | `RR3_INTENT_TOPIC="rr3-brain/intent/result"`（与 `[events].subscribes` 双写）、`RR3_ACT_CONFIG`、`RR3_MANIFEST` | 订阅面/env | 有 | 主题名 = 契约字面量；`RR3_MANIFEST` 未设 → `exit(1)` fail-closed ✅ |
+| `config.toml [rr3-act] log_level` | `"info"` | 日志级 | **无读者** | 被读或删除（P-6/N-6/I-1/B-8 同纪律，A-11） |
+| `atoms/{servo,led,relay}/assemble.toml` | `handles = []` / `ops = []` | 注入面申报 | **零申报** | 上面 9 条策略今天**都没有申报位**——批J G4 落地时必须把它们填进去，否则 §12/§13 只是两张清单 |

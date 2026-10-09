@@ -1,4 +1,4 @@
-# rr3-connect 模块设计（框架 v1.1）
+# rr3-connect 模块设计（框架 v1.2）
 
 ## §0 单元身份证
 
@@ -113,9 +113,45 @@
 | N-4 | AP 态与 `up` 的语义定案并写进 schema 注记 | **待裁** | — |
 | N-5 | 真链路（wpa_supplicant 持久化 / BlueZ）随板上批 | 0.0.6 后续 | 采购 |
 | N-6 | 三个无读者的声明项（`roam_probe_enabled` / `tls_min_version` / `timeout_ms` 的语义归一）：**实装、或删除、或改为 ops 槽并写清生效点**，不许停在"回显即当作已实现"。与 interact I-1、power P-6 同纪律，同批做以免三份册子各说各话 | 批I | — |
+| N-7 | **载荷组装上移承载层**：`rr3_link_body` 与三枚 `*_result` 的 `json!` 移到 `src/composite.rs`/`session.rs`，件只交 `Rr3LinkState` + `mode` + 判定（依据 = ADR-0019 修订 4）；验收 = `net/link` 与三 RPC 应答字节逐字不变 | 批I | — |
+| N-8 | 对外自述里的栈名（`BlueZ`、`NetworkManager`/`D-Bus`）从 SURFACE 与 println 撤出，改由 `rr3_hal_backend_resolve` 交后端名——**换协议栈不该要求改代码**，这是本单元最直白的"换芯片不改码"检验点 | 批I | — |
+| N-9 | sim 假 AP 表（三条 SSID/RSSI/auth）整表从 `atoms/wifi/mech.rs` 迁 `rr-hal` sim 后端，与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流成一处真值 | 批I | — |
 
 ## §11 待证与敞口
 
 1. 真链路全链未证（今天只有 sim 与 nmcli 代码路径）。
 2. `net/link` 最坏延迟是推算（5 s + 一拍），需要板上直方图。
 3. 云侧联调在范围外（凭据/M6）。
+
+## §12 跨档动作（host / rtos / bare 逐件）
+
+发布权判定：`net/link` 由本单元**自主发布**，且它同时是全系统降级判断的粒度源——所以"要不要序列化面"在
+本单元不是理论问题：**凡启用 `net.wifi` 的档就必须能发 JSON 字节**。推论是形态层面的硬约束：
+`bare` 档**不启用** `net.wifi`/`net.bt`（没有链路后端，也就没有链路可报），链路由经桥的 host 侧代报。
+
+| 件 | host（今天） | rtos（esp-rs std + FreeRTOS） | bare（no_std 自足） | 卡住它的**具体那一行依赖** → 动作 |
+|---|---|---|---|---|
+| wifi | ✅（sim 与 nmcli 两后端） | ⚠️ HAL 形状 + 载荷面 | ❌ 两处硬点 | ① `Rr3LinkState.ssid: Option<String>` 把 alloc 焊进值类型 → 批I F1 改"定长 + 长度"（`⊙` 跨片形状，N-3）；② `rr3_provision_connect(ssid: String, pass: String)` 与凭据字段 `Option<(String,String)>` → bare 档若真要本地存凭据，改固定槽 `[u8; N]` + 长度（N 由契约定，不是随手 32）；③ `rr3_link_body -> Value`（`json!` 五处）→ P-7 同法上移承载层（N-7）；④ `&dyn`/`rr3_block_on` 清零 |
+| bt | ✅（骨架，BlueZ 后端未建） | ✅ **13 件里最干净的一件** | ✅ 同左 | 唯一硬点：`rr3_bt_backend_up_default()` 里 `std::env::var` —— **全仓 13 件里唯一非 test 面的 env 读**。动作：删该函数，初值由描述符/ops 传 `up: bool` 注入（N-1 已列，此处标它是跨档单点门槛）。状态机三态与矩阵本身零依赖，`#[allow(dead_code)]` 只说明主题面未登记（D5），不构成跨档障碍 |
+| session（组合件成分，非件） | ✅ mock 云 | **不适用**：云会话属主承载层能力 | **不适用** | `tls_min_version`/`timeout_ms` 零读者在这里最刺眼：它属于"主承载层的对外承诺"，却写在 bare 档根本不会编译的代码里。去处 = 随 ADR-0016 Rust 化时落进真 HTTP 客户端配置，今天标"声明未生效"（N-6） |
+
+**动作序**：批I F1 → N-3（`ssid` 去 String）→ N-7（载荷上移）→ bt 去 env（N-1）。
+**微型形态里的本单元**：`esp32-mini` 那类经桥形态**不该**带 `net.wifi` 格——桥就是它的链路（architecture §12.7
+"经桥接"拓扑）。把 `net.wifi` 塞进微型形态是常见的裁剪误解，索引 §10 的三个形态里我把它显式排除并写了理由。
+
+## §13 策略字面量清单
+
+| 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
+|---|---|---|---|---|
+| `atoms/wifi/mech.rs : rr3_wifi_connect_parse_args` | `8` + `Err("密码至少 8 位（legacy 配网语义）")` | 口令规则 | 有；面板 `placeholder="至少 8 位"` **逐字复读** | 值 = ops 槽 `min_pass_len`；**文案 = 契约字面量—不许动**（legacy 依赖）。两处字面重复是债：页面该由 `/api/meta` 拿 |
+| `atoms/wifi/mech.rs : rr3_wifi_scan_result` | 三条假 AP：`rock-sim/-42/true`、`rock-sim-guest/-58/true`、`neighbour-2g/-71/false`、`"backend":"sim"` | **sim 假数据** | 有（scan 点名直回） | 最该搬走的一条：假 AP 表在**件**里，`RR3_HAL_SIM_LINK_SSID_DEFAULT` 已是同类落点的正解 → 整表迁 `rr-hal` sim 后端（N-1）。件里留假数据 = bare 档要么带上它要么删码，两坏 |
+| `atoms/wifi/mech.rs : rr3_provision_mode` | `"ap"` / `"station"` | `net/link.mode` 词汇 | 有 | **契约字面量—不许动** |
+| `atoms/wifi/mech.rs : rr3_link_body` / `*_result` | 键 `seq/up/ssid/rssi_dbm/mode`、`ok/connected/ssid`、`{ok:true,mode:"ap"}` | 载荷契约 | 有（面板逐字读 `connected`、`ssid`） | **契约字面量—不许动**；上移后逐字保留（N-7 验收） |
+| `wifi.rs` | `"rr3-connect/net/link"`、`wifi/scan|connect|forget`、`Rr3LinkCfg{link_report_period_ms, roam_probe_enabled}` | 主题与 cfg 形状 | 主题有读者 | 主题 = 契约字面量（与 `module.toml` 双写记债） |
+| `src/composite.rs : Rr3LinkCfg.roam_probe_enabled` | config `false` | 漫游探针开关 | **无读者**（只 `println`；mech 注释自认） | 标"声明未生效"或删除（N-6） |
+| `src/session.rs : Rr3SessionCfg` | `tls_min_version:"1.3"`、`timeout_ms:20000` | 云侧下限与超时 | **无读者**（注释自认"与 cutoff 同款口径"；真超时另有 HTTP 值） | 同上（N-6）；本册 §7 已把"TLS 下限"从守护语义里降级，**不再声称三条守护** |
+| `src/session.rs : rr3_session_parse_args/result` | 只认 `action="open"`；`"未知 action: {action}（只认 \"open\"）"`；`"链路未就绪（net/link up=false），云端会话拒绝建立"`；`session:"opened"`、`endpoint:"mock"` | 会话契约 | 有 | **契约字面量—不许动**；`endpoint:"mock"` 是诚实面，不得删（R4 口径） |
+| `atoms/bt/bt.rs : RR3_HAL_SIM_BT_UP_ENV` + `mech.rs : rr3_bt_backend_up_default` | `"RR3_HAL_SIM_BT_UP"`，`matches!(.., Ok("1"))`——**只有 `"1"` 算上**，`0`/未设/杂值一律 Off | 出厂不开蓝牙（显式拒绝宽容解析） | 有 | ✅ 落位正确（env 注入口在件内是过渡形态，N-1 改 ops）；**方向值得作为范本**：对照 `base/os/distro/README.md` 记的 `RR3_HAL_SIM_LINK_UP` 缺省 `1`＝"未设即在线"，两处 opt-in/opt-out 方向相反（索引审计 L-4） |
+| `atoms/bt/bt.rs : SURFACE`、`mech.rs`、`src/composite.rs : println!` | `"BlueZ"`（**运行期打印**，非仅注释） | 后端自述 | 有 | 换芯片/换栈时这些串要跟着改 = **违背"换板不改代码"**。去处：后端名由 `rr3_hal_backend_resolve` 交上来，SURFACE 行只写"bt 面（后端=动态）"（N-8）。同类：`wifi.rs : SURFACE` 的 `"NetworkManager/D-Bus"` |
+| `atoms/wifi/mech.rs`、`atoms/bt/mech.rs` | `NetworkManager`/`D-Bus`/`wpa_supplicant`/`NVS`/`BlueZ` 注释 | 厂商/栈名出现在件声明面 | — | ⑦-a 禁词表（`rr-registry/src/atom.rs::RR3_BOARD_TOKENS`）**只扫 `rr-core`/`rr-ipc::protocol`/`transport/mod.rs`，不扫 module mech** → 今天不红。但 ADR-0018 修订 3 ③ 定的"禁词作用件声明面"与这里冲突：注释里的栈名会随 SURFACE/println 出到对外面。**处置见索引 §11 审计 L-6**：禁词作用域要分"代码常量/运行期输出/纯注释"三档，别一刀切 |
+| `atoms/{wifi,bt}/assemble.toml` | `handles = []` / `ops = []`（bt 那份注释写"sim 初值走 env 注入口，不占 config 面"） | 注入面申报 | **零申报** | 注释即声明是散文不是数据——批J G4 落地时这条注释必须变成 `ops` 里的一行，否则校验门无内容 |
