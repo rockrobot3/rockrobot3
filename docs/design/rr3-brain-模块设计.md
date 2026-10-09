@@ -52,9 +52,10 @@
 
 ## 5 时序设计
 
-云面 `timeout_s = 20`、`max_utterance_ms = 8000`、`silence_tail_ms = 700`、`min_speech_ms = 200`
-（与 sense 的 `silence_tail_ms` 是**同一个物理量的两处声明**——这是设计缺陷：一份事实两个真值点，
-待 ops 统一）。整轮对话的端到端时延今天没有任何实测数（mock 云不代表时延），列为敞口。
+云面 `timeout_s = 20`；轮次与判停三个参数：`max_turn_chars = 800`（上下文长度上限）、
+`max_utterance_ms = 8000`（整轮上限）、`silence_tail_ms = 700`（判停尾静音）。
+**`silence_tail_ms = 700` 与 sense 的同名参数是同一个物理量的两处声明**——一份事实两个真值点，
+属设计缺陷（§8 给归一方案）。整轮对话的端到端时延今天没有任何实测数（mock 云不代表时延），列为敞口。
 
 ## 6 降级与缺格语义
 
