@@ -1596,6 +1596,27 @@ SKIP 纪律；fmt 步不编译照跑）；机制核注释去板名化三处（li
 目标名改指专用门、transport/mod.rs 对端表述），⑦-a 静态门自指解除。rr-registry
 39（lib）+34（contract）测试绿
 
+2026-10-09 0.0.5 第 II 轮 收口批 E' 收官深挖结清（批E 落库后对 0.0.5 交付面做漏洞
+深挖，三实锤同批结清；九步门禁直跑 GATE_EXIT=0，PASS 25→30，三端指针核对一致）——
+**① sim 测试死角封死**：批E 深挖发现 tools/sim 的 23 条 #[test] 处于"④ 只 check
+（--all-targets 编译测试目标不跑）+ ⑥ 只扫 modules + CI sim-chain/sim-assemble 只跑
+e2e 命令"的三不管死角（②b 只覆盖 mkmodule），重铺五版恰动其钉面而断言零执行；
+⑥ 步 find 自 `modules` 扩为与 ④ 同口径（`modules tools base` 全部独立 Rust 工程，
+esp 两工程排除同 ④），0 测试工程即红——sim 23 条真跑全绿（重铺与机制核下沉无行为
+漂移的实证），门禁 PASS 25→30。**② manifest 未知字段反向断言**：atom/module 两侧
+校验此前只正向遍历 schema 字段，manifest 里多出来的键（typo 如 `uses.slost`）静默
+放行、依赖静默丢失（fail-open）；新增共用实现
+`rr3_registry_unknown_fields_assert`（validate.rs——从字段规格重建允许键树，顶层段
+集与段内键集双对账，一段式顶层标量键单独放行），atom 侧（atom.rs 0b 步）与 module
+侧（validate_inner 0 步）接线，不建第二份实现。上线即抓出活案例：17 份 atom.toml
+实况一直携带顶层 `schema_version = 1` 自报契约版本而 atom.schema.toml **漏登记**该
+字段——补登记（kind=int required=true，atom 校验 kind 分派同步补 int 分支，字段数
+pin 6→7），三修后 17 份全绿。**③ atom.name == 目录名钉死**：⑦-b/⑦-c 按目录名执法、
+契约按 atom.name，两名漂移无红；② 步仓扫描测试补断言（件名两个真源当场红）。
+rr-registry 40（lib）+34（contract）测试绿。CI 回执核对（批W2 敞口第 1 条）与
+⑦-a 禁词表双份维护（check.sh 硬编码与 atom.rs RR3_BOARD_TOKENS 同步靠纪律）两项
+登记敞口未结，见 status.md
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **七步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四

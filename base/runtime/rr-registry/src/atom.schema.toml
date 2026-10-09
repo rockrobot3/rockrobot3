@@ -10,6 +10,13 @@
 
 schema_version = 1
 
+# ---------- 顶层：manifest 自报契约版本（收口批 E' 补登记——17 份 atom.toml 实况
+# 一直携带此键，schema 此前漏登记，未知字段反向断言上线即当场抓出） ----------
+[[field]]
+path = "schema_version"
+kind = "int"
+required = true
+
 # ---------- [atom] ----------
 [[field]]
 path = "atom.name"
