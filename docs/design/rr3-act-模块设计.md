@@ -1,75 +1,125 @@
-# rr3-act 模块设计
+# rr3-act 模块设计（框架 v1）
 
-> 证据：`modules/rr3-act/module.toml`、`atoms/{servo,led,relay}/`、`src/{composite,intent,reflex}.rs`、
-> `config.toml`、`rr-core/src/control.rs`、`rr-hal` 的 `rr3_hal_servo` / `rr3_hal_gpio_out(role)`。
+## §0 单元身份证
 
-## 1 职责
+| 项 | 值 | 来源 |
+|---|---|---|
+| 执行单元 | 独立进程（host）；`start_priority = 40`、`mem_limit_mb = 48`、`restart_policy = "always"` | `module.toml` |
+| 格 | `act.servo` · `act.led` · `act.relay`（全 body 层） | `contracts/slots.toml` |
+| 件 | `servo` · `led` · `relay`；非件成分 `intent.rs`（接入面）、`reflex.rs`（守护面宿主） | `atoms/`、`src/` |
+| 主题 | RPC `servo/command`、`led/effect`、`relay/set`；发布 `servo/state`(stream)、`relay/state`(event)、`motor/reflex`(notification)；订阅 `rr3-brain/intent/result` | `module.toml`、各 `atom.toml` |
+| 句柄 | `rr3_hal_servo()` → `dyn Rr3PwmServo`；`rr3_hal_gpio_out(role)`（role 白名单 `led`/`relay`）→ `dyn Rr3GpioOut` | `src/composite.rs`、`atoms/{led,relay}/mech.rs` |
+| 参数 | `angle_limit_deg=[0,180]`、`move_timeout_ms=800`、`state_min_interval_ms=50`、`blink_period_ms=500`、`loop_hz=1000`、`saturate_notice_ms=500` | `config.toml`（`RR3_ACT_CONFIG`） |
+| 健康 | 心跳 1000 / 看门狗 5000 ms | `[health]` |
 
-把角度 / 电平 / 通断三类**执行指令**落成动作，并把动作结果摘要上报；同时是**反射环的进程内宿主**
-（1 kHz 闭环永不进总线，ADR-0007 裁定 1）。格账：`act.servo` + `act.led` + `act.relay`。
+## §1 件契约表
 
-## 2 事实面
+| 件 | 公开符号 | 输入 → 输出 | 状态 | 失败语义 |
+|---|---|---|---|---|
+| servo | `rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64), String>` | 点名参数 + 行程/时限配置 → `(角度, 时限ms)` | 无 | 业务 error（缺参/类型错/越界逐条点名） |
+| servo | `rr3_servo_state_body(seq: u64, angle_deg: u16) -> Value` | 序号 + 落角 → 流载荷 | 无 | — |
+| servo | `Rr3ServoCfg { angle_min_deg, angle_max_deg, move_timeout_ms, state_min_interval_ms }`（件入口声明，config 形状） | — | — | — |
+| servo | 借用机制核：`rr_core::control::Rr3RateGate`（re-export 保路径） | `rr3_gate_allow(now_ms) -> bool` | `last_ms` | — |
+| led | `rr3_led_parse_args(args: &Value) -> Result<Rr3LedEffect, String>`（白名单 on/off/blink） | → 枚举 | 无 | 业务 error |
+| led | `Rr3Led::rr3_led_new(gpio: Arc<dyn Rr3GpioOut>, blink_period_ms: u64) -> Self` | 句柄 + 周期 → 控件 | **自持 worker 线程** + `current` | `spawn` 失败 → **`expect` panic** |
+| led | `Rr3Led::rr3_led_apply(e: Rr3LedEffect) -> Result<(Rr3LedEffect, Rr3LedEffect), String>` | 效果 → `(生效, 前一)` | `current` | worker 已退 → 业务 error（进程不亡） |
+| relay | `rr3_relay_parse_args(args) -> Result<bool,_>` · `rr3_relay_apply(gpio: &dyn Rr3GpioOut, on) -> Result<bool,_>` · `rr3_relay_result` · `rr3_relay_counter_key(on)` · `rr3_relay_state_body(seq, on)` | 参数 → 落电平 → 应答 / 计数键 / 流载荷 | 无（`relay_seq` 在组合件） | 业务 error |
+| 共同目标签名 | `use rr_hal::…` **全部 → `rr_hal_api`（同步、无 `Arc<dyn>`、无 `rr3_block_on`）**；led → `rr3_led_tick(now_ms, state) -> Option<bool>`（线程上收到组合件） | | | |
 
-| 件 / 成分 | 格 / 面 | 机制公开面 | 现状平台耦合 |
+## §2 状态机
+
+- **`Rr3LedEffect`**：`Off | On | Blink`（无隐式态）；不变式：`apply` 立即落目标电平，blink 从**亮相**起步，不等下一半拍。
+- **`Rr3RateGate`**（机制核）：不变式"状态变化必发布，两次发布至少隔 `min_interval_ms`"；被限掉的这次**不缓存不补发**（流是摘要不是逐拍镜像）。
+- **饱和检测 `Rr3SaturationDetector`**（机制核）：`run >= need` 且 episode 首报恰一次；任一非饱和窗清零复位。`Rr3ReflexCfg{loop_hz, saturate_notice_ms}` → `rr3_reflex_window_plan` 出 `(window_ms=250, need, expect_ticks)`；窗内实跑 tick `< expect/2` 才算饱和（sleep 粒度的系统性超期不算）。
+- 非法输入收敛方向：角度越界 → **钳到端点**（不是拒绝），因为执行器已在动；参数缺/错 → 拒绝且不落电平。
+
+## §3 注入面
+
+| 件 | `handles` | `ops` 槽（名 / 类型 / 来源 / 默认） | 非法收敛 |
 |---|---|---|---|
-| `servo` | `act.servo` | `rr3_servo_parse_args(args, cfg)` · `rr3_servo_state_body(seq, angle)` · 限速门真值在 `rr-core::control`（re-export） | `serde_json` |
-| `led` | `act.led` | `rr3_led_parse_args`（白名单 on/off/blink）· `Rr3Led::rr3_led_new/apply` | **自持 `thread` + `mpsc` + `recv_timeout(3600s)`** + `rr3_block_on` + `Arc<dyn Rr3GpioOut>` |
-| `relay` | `act.relay` | 通断裁决 + `relay/state` 变化即发（不做限速门） | `rr3_block_on` + `Arc<dyn Rr3GpioOut>` |
-| `intent`（组合件成分） | — | 订阅 `rr3-brain/intent/result`，**两道归属门**（exposes 归属 + 意图面开放），越权拒执行折日志不断链 | — |
-| `reflex`（组合件成分） | — | 1 kHz 环宿主 + 饱和窗（窗方案与检测器真值已迁 `rr-core::control`），发 `motor/reflex` 通告 | `Instant` |
+| servo | `dyn Rr3PwmServo` ← `[hardware].pwm_chip`、`pwm_channel` | `angle_min_deg`/`angle_max_deg` ← `angle_limit_deg`；`move_timeout_ms`；`state_min_interval_ms` | 端点颠倒 → 取小者为下界并钳到最保守端（`rr3_travel_clamp` 用例已钉） |
+| led | `dyn Rr3GpioOut(role="led")` ← `gpio_chip`、`gpio_led_line` | `blink_period_ms`（默认 500，代码再 `.max(1)`） | 写失败 → `eprintln` 不退（妆面件，**例外需在此点名**） |
+| relay | `dyn Rr3GpioOut(role="relay")` ← `gpio_relay_line` | 无（无常量） | 写失败 → 业务 error |
+| reflex | 无（读 act 自身状态） | `loop_hz`、`saturate_notice_ms` | `loop_hz` 现状 `as u32` 裸截断 → 改为 `try_from` + 拒 boot（§10 A-3） |
+| 策略位点 | — | `motor/reflex` 的通告节流属机制；**"什么算异常"属策略**（现无） | — |
 
-参数面（`config.toml`）：`angle_limit_deg = [0, 180]`、`move_timeout_ms = 800`、
-`state_min_interval_ms = 50`、`blink_period_ms = 500`、`loop_hz = 1000`、`saturate_notice_ms = 500`。
-健康：心跳 1000 / 看门狗 5000 ms；`start_priority = 40`，`mem_limit_mb = 48`。
-安全核接入：RPC 与 intent **两路落角前都过 `rr-core::control::rr3_travel_clamp`**。
+## §4 主循环与时序预算
 
-**必须记账的三条实况**：① 限速门的时基取 `SystemTime` 墙钟（`composite.rs` 的 `rr3_now_ms`，
-与 `rr-bus` 同口径），墙钟回拨会让 `servo/state` 在回拨时长内不再发布；② `loop_hz` 从 `u64`
-截断成 `u32` 用裸 `as`，越界不报错；③ LED 的 blink 由件内线程翻转，不是被组合件节拍驱动。
+| 常量 | 值 | 位置 |
+|---|---|---|
+| `RR3_POLL_WAIT` | 250 ms | `src/composite.rs` |
+| 反射环名义 | `loop_hz = 1000` → 1 ms/拍，窗 250 ms、通告 500 ms | `reflex.rs` + `rr3_reflex_window_plan` |
+| 心跳 | 1000 ms（`rr-bus` 独立线程，`SystemTime` 喂拍点） | client |
+| 看门狗 | 5000 ms | `[health]` |
 
-## 3 件级切分与闭包（设计目标）
+**关键时序断言（现状问题都在这里）**：
+1. `servo/state` 的门用**墙钟**（`composite.rs` 的 `rr3_now_ms` 取 `SystemTime`）→ 回拨 N ms 则该流停 N ms；
+   设计要求：改 `Rr3TimeBase`，且回拨不得造成静默（换单调后此问题类别消失）。
+2. RPC 端到端落角时延 = 点名应答（同步路径） + PWM 生效；**未实测**。
+3. 环与心跳**不同线程**：环饿死时心跳仍续 → `rr3.ctl.health` 看不出"不动了"。设计：环tick 计入 counters，作为第 4 个健康量。
+4. intent 路与 RPC 路共用 `relay_seq`/`servo` 流序 → 断言 seq 跨路连贯（e2e 已钉 RPC=1 → intent=2）。
 
-- `servo` 已近 L0（纯函数 + cfg 形参）：行程/时限/限速三参数就是 ops 槽的第一个真实样本。
-- `led` 改造为**被节拍的纯状态机**：件出 `rr3_led_tick(now_ms, current) → Option<level>`，
-  线程与 sleep 归组合件（rtos 档归任务、bare 档归定时器）。这是 ADR-0018 修订 1 ③ 接缝一的样板件。
-- `relay` 去 `rr3_block_on`：句柄换 `rr-hal-api` 同步签名后即可下沉。
-- 灯效白名单（on/off/blink）与"哪个效果对应哪种情绪"是**策略**：白名单是件的输入契约（可留），
-  情绪映射不得进本单元（现状在 interact/brain，正确）。
+## §5 主题面契约
 
-## 4 职责四面
+| 主题 | kind | seq | 触发 | 载荷必填 | 失败映射 |
+|---|---|---|---|---|---|
+| `servo/command` | RPC | — | 点名 | `{angle_deg, timeout_ms?}` | 越界→钳位后成功；缺/错→error 点名 |
+| `servo/state` | stream | 自增 | 变化 + 50 ms 限速 | `seq, angle_deg` | — |
+| `led/effect` | RPC | — | 点名 | `{effect}` 白名单 | 不认点名白名单 |
+| `relay/set` | RPC | — | 点名 | `{on}` | 写失败 error |
+| `relay/state` | event | 自增 | **变化即发**（不做限速） | `seq, on` | — |
+| `motor/reflex` | notification | — | episode 首报 | 饱和窗数据 | 订阅者缺席也必须能发 |
+| `intent/result`（订） | event | — | 消费 | `actions[]: {topic,args}` | 越权→拒执行折日志不断链 |
 
-| 面 | 落点 |
-|---|---|
-| 接入 | 三 RPC（`servo/command`、`led/effect`、`relay/set`）+ `intent/result` 订阅 |
-| 运行 | 落角 / 落电平 / 通断；反射环（本地，永不 `⊙`） |
-| 状态 | `servo/state`（限速流）、`relay/state`（变化即发，RPC 与 intent 两路共用 `relay_seq` 序） |
-| 守护 | **本单元是全项目安全核最密处**：限位钳位 + 时限（"超时即停，不给堵转留机会"）+ 饱和通告 |
+## §6 降级矩阵
 
-## 5 时序设计（本单元是全项目唯一有硬实时诉求的）
+| 格 | 缺格 | 句柄缺 | 句柄值错 | 后端未实装 | 参数非法 |
+|---|---|---|---|---|---|
+| `act.servo` | 本单元仍在（led/relay 独立），但"能动"形态不成立 | placeholder → 开机探活 `Unsupported` → **`exit(1)`** | 描述符作废且静默（批J 修） | — | 行程/时限非法 → 拒 boot（`bad_range()` 已有） |
+| `act.led` | 只停灯效 | 同上 | 同上 | — | `blink_period_ms=0` → 代码 `.max(1)` 已兜 |
+| `act.relay` | 只停继电器 + intent 路该动作拒执行 | 同上 | 同上 | — | — |
 
-| 量 | 设计值 / 状态 |
-|---|---|
-| 反射环名义周期 | `1000 Hz`（`loop_hz`），窗粒度 250 ms、饱和通告 500 ms（真值在 `rr-core::control`） |
-| 心跳 / 看门狗 | 1000 / 5000 ms（申报面），与环**不同线程**——环饿死不影响心跳，故"活着但不动"可被漏检 |
-| 待给而未给的量 | 环最坏执行时间、连续饱和判定的抖动预算、**安全动作端到端延迟上界**（从感知边沿到落角）。这三项是矩阵第⑦列的主要对象，本机无实测 |
-| 时基 | 设计定为单调时基（心跳与限速都不该看墙上钟），现状为墙钟——列改造项 |
+## §7 安全核接入（本单元是全项目最密处）
 
-## 6 降级与缺格语义
+三条，全部落点在机制核、参数由本单元注入、**策略不可绕过**：
+1. **限位**：`rr3_travel_clamp(angle, min, max)` 在 **RPC 与 intent 两路落角前**各调一次——
+   不能绕过，因为钳位在"角度进执行器之前"这一唯一出口上（两路都走它，用例已钉）。
+2. **时限**：`move_timeout_ms = 800`（超时即停，不给堵转留机会）——参数可注入，语义不可改。
+3. **饱和通告**：`Rr3SaturationDetector`（机制核），episode 首报恰一次。
+低电兜底不在本单元（在 power），但"低电时禁动"这条**尚未定义**——列入工单 A-5。
 
-- `act.servo` 缺 → 本单元仍可跑（led/relay 独立），但"能动的形态"不成立：装配单应把该形态的
-  `present` 写清，而不是起一个动不了的 act。
-- 句柄给了但值错（描述符键名拼错）→ 现状静默落占位后端、首次指令才回 `Unsupported`，
-  设计要求改为 boot 期点名（批J）。
-- `motor/reflex` 通告是**观察者面**，不参与仲裁：订阅者缺席也必须能发（notification 语义）。
+## §8 两腿对拍用例设计
 
-## 7 红线
+| 件 | 输入序列 | 期望值来源 | 边界集 | 现状 |
+|---|---|---|---|---|
+| servo 参数裁决 | `angle ∈ {0, 45, 180, 200, -?}` + cfg(45,135) | 裁定语义（钳位、端点颠倒收敛） | 端点内/外/等号/颠倒 | ✅ rr-core `travel_clamps_into_range_and_survives_inverted_range` + 件面 parse 用例 |
+| servo 限速门 | now = 1000 + 10k，k∈0..24 | 裁定语义"每 5 拍放 1 次" | 窗起 / 窗末等号 / 迟到拍 | ✅ 机制核 `same_control_graph_beat_for_beat_identical`（件面需引它做期望值） |
+| led | 效果序列 `[On, Blink, Off, Blink]` + 半周期序列 | **期望 = 翻转序列白名单**（不得由件自己产出） | 半周期=1、worker 已死 | ⚠️ 只有解析用例；**电平翻转序列无用例**（批K 前必修，A-1） |
+| relay | `on` 序列 `[true,false,false,true]` | 载荷 + `relay_seq` 连贯（e2e 断言） | 重复同态不发 | ⚠️ 需补"同态不发"边界用例 |
+| reflex | tick 密度 `[250,125,124,0]`/窗 | 半拍线判定 + episode 恰一次 | 恰半拍 / 低于半拍 / 孤立饱和窗 | ✅ 机制核三条；件面需补"环饿死 → 通告仍发得出"一条 |
 
-三 RPC 名与参数裁决文案（点名缺失字段是契约行为）、`servo/state` 的 seq 连贯（e2e 断言 RPC 路 seq=1 →
-intent 路 seq=2）、`relay/state` 变化即发不做限速、SURFACE 自述、反射环永不进总线。
-限位/时限/饱和三件的**语义**不可被策略改写（参数可注入，判据不可）。
+## §9 不变量与红线断言
 
-## 8 待证与敞口
+- 断言：任何进入 `Rr3PwmServo::set_angle` 的角度都满足 `min ≤ a ≤ max`（钳位后）。
+- 断言：`servo/state` 两次发布间隔 ≥ `state_min_interval_ms`；`relay/state` 不受限速门管辖。
+- 断言：`relay_seq` 跨 RPC/intent 两路连贯（已有 e2e）。
+- 断言：反射环永不发总线帧、永不经 `⊙`（ADR-0007 裁定 1）。
+- 断言：越权 intent 动作**只拒执行**，不断链、不改状态。
+- 断言：三 RPC 名/参数裁决文案（点名缺哪个字段）零改动——面板与 legacy 依赖字面。
 
-1. 真舵机 / 真继电器的动作证据未取（外设未采购）；sysfs PWM 与 chardev GPIO 只有代码 + 交叉编译证据。
-2. 环的实时性从未在目标上量过——现在写"1 kHz"只是 config 里的一个数。
-3. 墙钟时基与 `as u32` 两处修法属代码改动，本册只定方向与时机（批I）。
+## §10 改造工单
+
+| # | 动作 | 归属 | 前置 |
+|---|---|---|---|
+| A-1 | led 去线程/去 mpsc → `rr3_led_tick(now_ms, state)`，节拍归组合件；补翻转序列用例 | 批I | C7 |
+| A-2 | 时基改 `Rr3TimeBase`（含 `rr-bus` 心跳），去掉 `SystemTime` 单调性误称 | 批I | — |
+| A-3 | `loop_hz` 用 `try_from<u64> for u32` + 越界拒 boot | 批I | — |
+| A-4 | servo/relay 句柄面换 `rr-hal-api` 同步签名（去 `rr3_block_on`） | 批I | C5 |
+| A-5 | "低电禁动"语义定义（power 边沿 → act 闸门，落点在机制核安全核段） | 待裁（M6 关联） | — |
+| A-6 | 环 tick 计入 counters（健康面可观测"活着但不动"） | 批K | C9 |
+
+## §11 待证与敞口
+
+1. 真舵机/真继电器动作证据未取（外设未采购）；sysfs PWM 与 chardev GPIO 只有代码 + 交叉编译证据。
+2. 1 kHz 环的实时性从未在目标上量过——"1000 Hz"目前只是 config 里的一个数。
+3. LED 写失败不退出的例外是否推广到其它妆面件（如 face），待定规则。

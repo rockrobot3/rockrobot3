@@ -1,80 +1,117 @@
-# rr3-sense 模块设计
+# rr3-sense 模块设计（框架 v1）
 
-> 证据：`modules/rr3-sense/module.toml`、`atoms/{capture,vad,env,imu}/`、`src/composite.rs`、
-> `config.toml`、`contracts/{slots,topics}.toml`、`rr-hal` 的 `rr3_hal_audio_source`。
-> 规矩：**§1–§2 是现状事实，§3–§6 是设计意图，§8 是未证项**——三段不得互相引用为"已实现"。
+## §0 单元身份证
 
-## 1 职责（一句话）
+| 项 | 值 | 来源 |
+|---|---|---|
+| 执行单元 | 独立进程（host）；`restart_policy = "always"`、`mem_limit_mb = 64` | `module.toml` |
+| 格 | `audio.capture` · `audio.vad` · `sensor.env`（占位）· `sensor.imu`（占位） | `contracts/slots.toml`、`atoms/*/atom.toml` |
+| 件 | `capture` · `vad` · `env` · `imu`；组合件成分：采集主循环 + 配置解析（`src/composite.rs`） | `atoms/` |
+| 主题 | 发布 `audio/pcm`(stream)、`audio/vad_start`(event)、`env/temperature`、`imu/state`（后两条**无生产者**）；RPC `capture/dump`；订阅面为空 | `module.toml` |
+| 句柄 | `rr3_hal_audio_source()` → `dyn Rr3AudioSource`（`open(cfg)` / `read(frames)`） | `src/composite.rs` |
+| 参数 | `sample_rate=16000`、`channels=1`、`frame_ms=20`、`rms_start=1500`、`silence_tail_ms=700`、`min_speech_ms=200` | `config.toml`，**仅当 `RR3_SENSE_CONFIG` 已设时才读** |
+| 健康 | 心跳 1000 / 看门狗 5000 ms | `[health]` |
 
-把麦克风字节变成**时间有序的音频流与语音活动边沿**，交给认知层；本单元不含对话策略、不含 VAD 之外的
-判停逻辑、不含任何"听懂了什么"的语义。格账：`audio.capture` + `audio.vad`（body 层）、
-`sensor.env` + `sensor.imu`（body 层占位）。
+## §1 件契约表
 
-## 2 事实面
-
-| 件 | 格 | 发布 | 机制公开面 | 平台耦合（现状） |
+| 件 | 公开符号（现状） | 输入 → 输出 | 状态 | 失败语义 |
 |---|---|---|---|---|
-| `capture` | `audio.capture` | `rr3-sense/audio/pcm` | `rr3_frames_per_tick` · `rr3_pcm_downmix_mono/stream` · `rr3_pcm_event_body` · DoA 三件（`Rr3DoaFix`、`rr3_doa_fix`、`RR3_DOA_BIN_THRESHOLD_DEG`） | `rr_hal::{Rr3AudioCfg, Rr3PcmStream}` + `rr_ipc::rr3_base64_encode` + `serde_json` |
-| `vad` | `audio.vad` | `rr3-sense/audio/vad_start` | 边沿状态机（起音阈值 / 判停尾静音 / 最短语音），只发边沿不发续音 | `serde_json` |
-| `env` | `sensor.env` | `rr3-sense/env/temperature`（申报） | **无机制**（`mech.rs` 仅 2 行注释） | 无 |
-| `imu` | `sensor.imu` | `rr3-sense/imu/state`（申报） | 同上 | 无 |
+| capture | `rr3_frames_per_tick(sample_rate_hz: u32, frame_ms: u64) -> usize` | 率 + 拍长 → 每拍帧数 | 无 | `rate=0` 或 `frame_ms=0` → 0 帧（**语义未定**，§6） |
+| capture | `rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16>` | 多声道样点 → 单声道 | 无 | 非整除交错 → 现状截断（历史缺陷已修，见 mono golden） |
+| capture | `rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream` | 同上（含 cfg） | 无 | — |
+| capture | `rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value` | 序号 + 流 → 载荷（`pcm_b64` + `ms`） | 无 | — |
+| capture | `rr3_doa_fix(samples, channels) -> Option<Rr3DoaFix>` · `rr3_doa_field(&Rr3DoaFix) -> Value` · `Rr3DoaBin` · `RR3_DOA_BIN_THRESHOLD_DEG: i32 = 30` | 双麦样点 → 方位与三档 | 无 | 单声道/能量不足 → `None`（不发 doa 字段） |
+| vad | `rr3_frame_rms(samples: &[i16]) -> i64` | 一帧 → 能量 | 无 | — |
+| vad | `Rr3VadState::rr3_vad_new(cfg: Rr3VadConfig, frame_ms: u64) -> Self` | 阈值组 + 拍长 → 状态机 | 见 §2 | — |
+| vad | `rr3_vad_feed(&mut self, samples: &[i16]) -> Option<Rr3VadEdge>` | 每拍一样点 → 边沿（只发边沿） | `Rr3VadEdge{Start, End}` | — |
+| vad | `rr3_vad_event_body(seq: u64, edge: Rr3VadEdge, doa: Option<Value>) -> Value` | 序号 + 边沿 + 可选 doa → 载荷 | 无 | — |
+| env / imu | **无公开机制面**（`mech.rs` 各 2 行注释；入口只导出 `SURFACE`） | — | — | — |
+| 目标签名 | 全部 `Value` → `Vec<u8>`（走 `rr3_body_encode`）；`Vec<i16>` → `&[i16]` 借用；`Rr3PcmStream`/`Rr3AudioCfg` → `rr-hal-api` | | | |
 
-组合件 `src/composite.rs`：开机打印 SURFACE（四件的自述逐字冻结）→ 读 manifest（`RR3_MANIFEST`）→
-`rr3_hal_audio_source()` 开拾音 → 自 pacing 主循环 → `rr3_publish` 两路 + `capture/dump` 点名应答。
-参数面：`sample_rate = 16000`、`channels = 1`、`frame_ms = 20`、`rms_start = 1500`、
-`silence_tail_ms = 700`、`min_speech_ms = 200`；健康：心跳 1000 ms / 看门狗 5000 ms；
-`[depends].required = ["bus.publish"]`。
+## §2 状态机（VAD，`Rr3VadState`）
 
-**两条实况必须先记账**：① 配置只在 `RR3_SENSE_CONFIG` 被设置时才读（未设即静默用代码默认），
-所以仓内 `config.toml` 的六个值在裸跑路径上不是真值来源；② `frame_ms` 解析无下界钳制
-（同文件其他参数有），`0` 是合法值——拍长 0 会让主循环按 `Duration::from_millis(0)` 全速空转。
+不变式：**只发边沿**（`Start`/`End`），持续高电平期间不续发；起音需连续满足 `rms_start` 达
+`min_speech_ms`；判停需连续静音 `silence_tail_ms`；所有窗长以 `frame_ms` 为粒度换算成拍数。
+非法输入收敛方向：`rms` 读数异常（帧空）→ 不改变状态、不发边沿。
+`DoaBin` 三档：`θ < -30` = 左、`-30 ≤ θ ≤ 30` = 中、`θ > 30` = 右（阈值是**策略**，见 §3）。
+`env`/`imu` 无状态机——**无机制可写**，此事实必须显式留在表里而不是省掉。
 
-## 3 件级切分与依赖闭包（设计目标）
+## §3 注入面
 
-- `capture`/`vad` 已是**函数型件**（输入切片 → 输出摘要/边沿），是最接近 L0 可达的两件。改造点：
-  值类型换成能力面契约 `rr-hal-api` 的定长/借用形状（`Rr3PcmStream.samples: Vec<i16>` → `&[i16]` 视图），
-  事件体构造从 `serde_json::Value` 改产 `rr-ipc` body 字节（L1→L0 迁移清单，批I/后续批）。
-- `env`/`imu` 的取向二选一（**不可长期停在"有主题无机制"**）：真件到位即按 §2 的机制形状填实；
-  若某形态确实不需要这两格，按 ADR-0019 修订 2 ② 走 retired（号位保留、义务解除、随件处理）。
-  格标记位今天应先落"占位"。
-- DoA 的 30° 分档阈值是**策略**（与机型麦克风几何绑定），设计定为 ops 槽：
-  `rr3_doa_fix` 保留为机制，阈值与"几麦 / 何种阵列"由注入给。
+| 件 | `handles` | `ops` 槽（名 / 类型 / 来源 / 默认） | 非法收敛（目标） |
+|---|---|---|---|
+| capture | `dyn Rr3AudioSource` ← `[hardware].alsa_device` | `sample_rate: u32`=16000；`channels: u8`=1；`frame_ms: u64`=20 | `frame_ms < 1` → 收敛为 20 并留痕（**现状：允许 0**） |
+| vad | 无（吃 capture 输出） | `rms_start: i64`=1500；`silence_tail_ms: u64`=700；`min_speech_ms: u64`=200 | 阈值 ≤0 → 拒 boot |
+| capture（DoA） | 阵列几何（`channels ≥ 2`） | `doa_bin_threshold_deg: i32` **=30 现状硬编码在件内** → 迁 ops | 几何不足 → 不发 doa |
+| env / imu | 真件句柄（`[hardware]` 尚无对应键） | 待定（随真件批） | — |
 
-## 4 职责四面
+## §4 主循环与时序预算
 
-| 面 | 本单元落点 |
-|---|---|
-| 接入 | 拾音句柄（唯一硬件入口）；`capture/dump` 点名 |
-| 运行 | 采集拍（`frames_per_tick` × `frame_ms`）+ 下混 + DoA + VAD 边沿 |
-| 状态 | `audio/pcm`(stream) 与 `audio/vad_start`(event) 两流；启动 SURFACE 自述 |
-| 守护 | 音频源打开失败即 `exit(1)`（能力缺失不装活着，交监督复位）；**无本地安全核** |
+`let tick = Duration::from_millis(cfg.audio.frame_ms)`；每拍以 `Instant::now()` 计时（**单调，正确**）。
+两种后端同一形状：sim 的 `read` 即时返回、ALSA 自耗一拍 → **pacing 由本单元自持**。
 
-## 5 时序设计
+| 输出 | 名义周期 | 最坏延迟 | 备注 |
+|---|---|---|---|
+| `audio/pcm` | 每拍（20 ms） | 一拍 + 一次 publish | 与 brain 的消费速率耦合（brain 判停也用 20 ms 粒度） |
+| `audio/vad_start` | 边沿 | 起音判定 = `min_speech_ms`；判停 = `silence_tail_ms` | 端到端"说完 → brain 知道"≈ 700 ms + 一拍（推算，未实测） |
+| `capture/dump` | 点名 | 同步 | — |
+| 饿死可见性 | 采集阻塞（ALSA 卡）则 pcm 停而心跳仍续 → **同 act 的"活着但不动"问题**；s-3 工单补 counters | | |
 
-- 名义节拍 `frame_ms = 20 ms`（16 kHz / 单声道 = 每拍 320 帧）；VAD 的判停尾与最短语音都以 20 ms 为粒度。
-- 两种后端同一形状：sim 源的 `read` 即时返回（不等一拍），ALSA 自耗一拍——**所以 pacing 必须由本单元
-  自己负责**，这一点在 rtos/bare 档同样成立（拍长由 `[supplies]` 时基决定）。
-- 待给而未给的量（矩阵⑦列）：单拍最坏耗时、丢拍判定线、`frame_ms` 合法域（设计定为 `≥ 1`，
-  与"畸形输入往不触发动作方向收敛"同一条安全纪律）。
+## §5 主题面契约
 
-## 6 降级与缺格语义
+| 主题 | kind | seq | 触发 | 载荷必填 | 现状与申报差 |
+|---|---|---|---|---|---|
+| `audio/pcm` | stream | 自增 | 每拍 | `seq, pcm_b64, ms` | 一致（brain 真实消费但未申报） |
+| `audio/vad_start` | event | 自增 | 边沿 | `seq, edge`（+ 可选 `doa`） | 一致 |
+| `env/temperature` | event | — | 应为周期 | schema 在册 | **无生产者**（占位件） |
+| `imu/state` | stream | — | 应为周期 | 在册 | **无生产者**（占位件） |
+| `capture/dump` | RPC | — | 点名 | 帧缓冲摘要 | 一致 |
 
-| 情形 | 设计行为 |
-|---|---|
-| 无 `audio.capture` 句柄（板上无麦） | 该格 `Degraded`；`audio/pcm` 与 `vad_start` 不再产生，下游（brain）按依赖环降级 |
-| `audio.vad` 在而 capture 缺 | 不可能成立（vad 的输入就是 capture 的产出）——**设计约束：两格同源，缺一即两缺**，注入面校验时应一起报 |
-| env/imu 缺（真件未到） | 记"占位/不适用"，**不得**让 `contracts/topics.toml` 的在册主题显得"有生产者" |
-| 畸形 `frame_ms` | 收敛到最小合法拍长并留痕（现状未做，列入 §8） |
+## §6 降级矩阵
 
-## 7 红线（不得动的东西）
+| 格 | 缺格 | 句柄缺 | 句柄值错 | 后端未实装 | 参数非法 |
+|---|---|---|---|---|---|
+| `audio.capture` | 语音链整体不成立，下游（brain 的 asr）应 `Degraded` | placeholder → 使用时 `Unsupported` 显式回错（不静默落 sim） | 描述符作废且静默（批J 修） | 板上 ALSA 路径未实测 | `frame_ms=0` → 全速空转（缺陷，工单 S-1） |
+| `audio.vad` | pcm 有而边沿无 → brain 只能靠时长上限判停（`max_utterance_ms` 兜底仍在） | 无独立句柄 | — | — | 阈值 ≤0 |
+| `sensor.env` / `sensor.imu` | 只停本流 | — | — | 真件未到 | — |
+| 同源约束 | capture 缺则 vad 必缺（vad 的输入就是 capture 的产出）——**注入校验要一起报，不得分开** | | | | |
 
-对外四主题名与载荷形状（pcm 的 `pcm_b64` + `ms`、vad_start 的可选 `doa` 字段）；SURFACE 自述字符串；
-`capture/dump` 的应答形状；128B 线上字节；`module.toml` 的 provides/exposes/subscribes。
-下混、DoA、VAD 三条都是**机制**：它们的参数可被注入，语义不可被策略改写。
+## §7 安全核接入
 
-## 8 待证与敞口
+**无安全核**：本单元的失效不会造成机械/电气危险（与 act/power 不同）。唯一可主张的守护语义是
+"读不到就不发"（不发假帧、不发假边沿），它由 §2 的收敛方向承担，**不新立 trait、不改机制核**。
 
-1. 真麦采集与回放从未发生（USB 麦阵列未采购，见 status 敞口）；板上 ALSA 路径只有构建证据。
-2. 申报拓扑缺口：本单元真实消费者是 brain，但 **brain 的 `subscribes` 未列 pcm/vad_start**
-   （索引 §2）——契约面与代码面不是同一张图，属批J 前要结清的债。
-3. `frame_ms` 下界、config 必达性（不依赖 env 也能读到仓内 config）两处设计缺陷的修法待批I/J 落。
+## §8 两腿对拍用例设计
+
+| 件 | 输入序列 | 期望值来源 | 边界集 | 现状 |
+|---|---|---|---|---|
+| capture 帧数 | `(16000,20) (48000,10) (16000,0) (0,20)` | 公式 `rate×ms/1000` + "零值不得产 0 帧循环"的新裁定 | 0 拍长、0 率 | ✅ 有正例；⚠️ 零值无断言 |
+| capture 下混 | 交错样点 `[L,R,L,R…]` 长度非整除 | mono golden 向量（`contracts/golden/`）+ 逐字节 pcm 事件体 | 奇数样点、单声道直通 | ✅（含历史缺陷回归） |
+| vad | rms 序列 `[0,1600,1600,1600,0,0,0,0]`，frame_ms=20 | §2 裁定语义（起音需 `min_speech_ms`、判停需 `silence_tail_ms`、只发边沿） | 恰达阈 / 差 1 / 连续高电平 100 拍只发 1 边沿 | ✅ 件内有边沿用例；⚠️ 需补"持续高电平只发一次"的长序列断言 |
+| DoA | 左/中/右三组样点 + 单声道 | 三档边界 `-30/30` 等号归属 | 等号、None | ⚠️ 需补等号边界（30° 恰好落哪档） |
+| env/imu | — | — | — | **不适用**（格标记位 = 占位，ADR-0019 修订 2 ③） |
+
+## §9 不变量与红线断言
+
+- 断言：`vad_start` 只发边沿——任意持续语音段内事件数 = 1。
+- 断言：pcm 与 vad 共用同一 seq 空间且各自连贯（跨拍不重号）。
+- 断言：mono golden 逐字节不变（下混与事件体是契约面）。
+- 断言：不向总线发"上一拍的重复帧"（读不到 → 不发）。
+- 断言：DoA 字段是**可选 append**，不得成为必填（schema 只增纪律）。
+
+## §10 改造工单
+
+| # | 动作 | 归属 | 前置 |
+|---|---|---|---|
+| S-1 | `frame_ms` 下界钳制 + 合法域声明；配置读取去 env 依赖（默认读 manifest 同目录 `config.toml`） | 批I | — |
+| S-2 | capture/vad 句柄与值类型换 `rr-hal-api`（`&[i16]` 借用、去 `Vec`/`String`） | 批I | C5 |
+| S-3 | 采集新鲜度 counters（治"活着但不动"） | 批K | C9 |
+| S-4 | `env`/`imu` 取向定案：填实 or retired（连带两条在册主题的处置） | **待裁** | — |
+| S-5 | DoA 阈值从件内迁 ops | 批J | C5 |
+
+## §11 待证与敞口
+
+1. 真麦采集从未发生；sim 与 ALSA 两后端的"同一形状"只在 sim 上验证过。
+2. "说完 → brain 判停"的端到端时延是**推算**（700 ms + 一拍），无实测。
+3. 板上 ALSA 打开失败的确切行为（探活退不退）本册不下结论，属待证。
+4. 契约申报与实现不一致（brain 未申报 pcm/vad 订阅）——见索引 §2，需契约评审。
