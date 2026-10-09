@@ -1,4 +1,4 @@
-# rr3-interact 模块设计（框架 v1）
+# rr3-interact 模块设计（框架 v1.1）
 
 ## §0 单元身份证
 
