@@ -152,19 +152,24 @@ check_docs() {
 step "⑤ 文档门（已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航）"
 run check_docs
 
-# ⑥ 格格双达标·接线 CI（architecture §13，0.0.5 批E）：每格落点件的 tests 必须真跑在
-#    门禁里，"有测试未接线 = 未达标"。modules/* 独立工程此前只有 ④ 的 check（不编译
-#    测试目标更不跑测试）——本步补测试面，≥1 通过断言与 ①b 同口径。brain 是 Python
-#    （无 Cargo.toml，find 自然跳过）：其 tests/ 由 CI brain-unittest job 覆盖（R27 单
+# ⑥ 格格双达标·接线 CI（architecture §13，0.0.5 批E；收口批 E' 扩全量）："双达标"
+#    之 tests 侧必须真跑在门禁里，"有测试未接线 = 未达标"。批E 只扫 modules/——
+#    深挖发现 tools/sim 的 23 条 #[test] 处于"④ 只 check 编译测试目标、无任何步骤
+#    真跑"的死角（重铺五版恰好动了它们钉的面），批E' 起 find 扩为与 ④ 同口径
+#    （modules + tools + base 全部独立工程，esp 两工程排除同 ④）；≥1 通过断言与
+#    ①b 同口径，0 测试工程在此红（不许"接线了但没测"）。brain 是 Python（无
+#    Cargo.toml，find 自然跳过）：其 tests/ 由 CI brain-unittest job 覆盖（R27 单
 #    真源 .gitcode/workflows/ci.yml），接线事实登记于 conventions §2，不以本步 SKIP 充数。
-step "⑥ 格格双达标·模块测试接线（每格落点件 tests 真跑 ≥1，§13）"
+step "⑥ 格格双达标·独立工程测试接线（每件 tests 真跑 ≥1，§13）"
 found_mod=0
 while IFS= read -r -d '' manifest; do
   found_mod=1
   run_tests sh -c "cargo test -q --manifest-path '$manifest'"
-done < <(find modules -name Cargo.toml -not -path "*/target/*" -print0 | sort -z)
+done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
+                    -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
+                    -not -path "tools/espidf-std-hello/*" -print0 | sort -z)
 if [ "$found_mod" -eq 0 ]; then
-  printf 'FAIL  ⑥ modules/ 下未发现任何 Rust 工程（find 打空属门禁失效，不放行）\n'
+  printf 'FAIL  ⑥ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
   fail=1
 fi
 
