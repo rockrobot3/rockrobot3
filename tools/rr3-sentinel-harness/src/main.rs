@@ -29,14 +29,25 @@ const HEARTBEAT_STALL_FAIL_MS: u128 = 5_000;
 /// harness 分配给哨兵的 task 号（模块池起点，rr-core::RR3_TASK_FIRST_MODULE）。
 const HARNESS_TASK: u64 = 2;
 
-/// 组一帧 rrd 位形的下行帧（src=RR3_TASK_RRD、SEND、直连 trace、时间戳入参注入）。
-fn bus_frame(ty: Rr3PayloadType, dst_task: u64, body: Value, now_ns: u64) -> Rr3Frame {
+/// 组一帧 rrd 位形的下行帧（SEND、直连 trace、时间戳入参注入）。src 由调用方给：
+/// rrd 自答的应答帧（注册/心跳）src=rrd；`rr3.call` 转发帧按 M3 语义 src=调用方
+/// task（conn.rs rr3_route_call：转发时改写 src=调用方、trace_id=调用方）——
+/// harness 扮 rrd 就得扮全，下行点名 src=本 harness 的 task，哨兵应答若错把
+/// dst 写成调用方 task，本件的 dst 门（parse_upstream）当场点名——E6 彩排实锤
+/// 的盲区（原 src 恒为 1，reply dst=1 恰好蒙混过门）由此变红。
+fn bus_frame(
+    ty: Rr3PayloadType,
+    src_task: u64,
+    dst_task: u64,
+    body: Value,
+    now_ns: u64,
+) -> Rr3Frame {
     rr3_frame_compose(
         opcode::SEND,
         0,
         RR3_TRACE_ID_DIRECT,
         now_ns,
-        RR3_TASK_RRD,
+        src_task,
         dst_task,
         rr3_body_encode(ty, body.to_string().as_bytes()),
     )
@@ -75,6 +86,7 @@ fn parse_upstream(
 fn register_reply(id: u64, task: u64, now_ns: u64) -> Rr3Frame {
     bus_frame(
         Rr3PayloadType::Response,
+        RR3_TASK_RRD,
         task,
         json!({"jsonrpc": "2.0", "id": id, "result": {"src_task": task}}),
         now_ns,
@@ -85,6 +97,7 @@ fn register_reply(id: u64, task: u64, now_ns: u64) -> Rr3Frame {
 fn heartbeat_reply(id: u64, task: u64, now_ns: u64) -> Rr3Frame {
     bus_frame(
         Rr3PayloadType::Response,
+        RR3_TASK_RRD,
         task,
         json!({"jsonrpc": "2.0", "id": id, "result": {"beat": "accepted"}}),
         now_ns,
@@ -95,6 +108,7 @@ fn heartbeat_reply(id: u64, task: u64, now_ns: u64) -> Rr3Frame {
 fn round_trip_request(task: u64, now_ns: u64) -> Rr3Frame {
     bus_frame(
         Rr3PayloadType::Request,
+        HARNESS_TASK,
         task,
         json!({"jsonrpc": "2.0", "id": ROUND_TRIP_ID, "method": "rr3.call",
                "params": {"topic": "rr3-sentinel/diag/probe", "args": {"ping": "pong"}}}),
@@ -436,7 +450,9 @@ mod tests {
     fn round_trip_request_shape() {
         let f = round_trip_request(2, 9);
         assert_eq!(f.header.dst_task, 2);
-        assert_eq!(f.header.src_task, RR3_TASK_RRD);
+        // M3 忠实形状：转发帧 src=调用方 task（conn.rs rr3_route_call 实锤：
+        // trace_id=src=调用方、dst=被调方）——调用方即本 harness，非 rrd
+        assert_eq!(f.header.src_task, HARNESS_TASK);
         let (ty, body) = rr3_body_split(&f.payload).unwrap();
         assert_eq!(ty, Rr3PayloadType::Request);
         let v: Value = serde_json::from_slice(&body).unwrap();
