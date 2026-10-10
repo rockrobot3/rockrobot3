@@ -13,11 +13,18 @@
 //! `/usr/bin/{rrd,rr3-ctl}` + `/usr/lib/rockrobot3/{profiles,contracts,modules}` +
 //! `/usr/lib/systemd/system/rrd.service` + `DEBIAN/{control,postinst}`。
 //!
-//! **entry 装机改写**是本打包器唯一一处内容改写（modules/README.md："entry 在仓相对、
-//! 装机绝对"）：manifest 只把 entry 的值换成装机绝对路径，其余字节原样。为什么必须改：
-//! 线上注册门禁（rrd conn.rs）要求 manifest.entry 绝对路径——模块开机读的就是装机里
-//! 这份 manifest 原文上报，相对值必被 `AIRY_EINVAL` 拒；装配单磁盘装载那侧绝对/相对
-//! 皆可，改写成绝对两头都过。错行不改、少行不改：除 entry 引号内一个值外零差异。
+//! **内容改写只有两处**（除此外字节零差异）：①entry 装机改写（modules/README.md：
+//! "entry 在仓相对、装机绝对"）：manifest 只把 entry 的值换成装机绝对路径，其余字节
+//! 原样。为什么必须改：线上注册门禁（rrd conn.rs）要求 manifest.entry 绝对路径——模块
+//! 开机读的就是装机里这份 manifest 原文上报，相对值必被 `AIRY_EINVAL` 拒；装配单磁盘
+//! 装载那侧绝对/相对皆可，改写成绝对两头都过。错行不改、少行不改：除 entry 引号内
+//! 一个值外零差异。
+//!
+//! ②rrd.service 的 --profile 装机位改写（0.0.5 批K 深挖收口）：单元模板 ExecStart
+//! 锚定缺省机型 distro.toml 的装机位，而非 distro 机型出包若照抄，systemd 拉起的 rrd
+//! 找不到装配单必败——装机位 profiles/<name>.toml 只装 --profile 指的那一份，故
+//! ExecStart 的 profile 路径随 --profile 同步改写。缺省 distro 恒等改写字节零差异；
+//! 模板锚点缺席即报错（fail-closed），不静默照抄。
 //!
 //! **python 模块的 entry 装机**（`lang = "python"`，批F1）：产物不是 ELF 而是 shim 脚本，
 //! 且 shim 里的 `PYTHONPATH`/`RR3_BRAIN_CONFIG` 必须是**装机绝对路径**（只有打包器知道
@@ -57,6 +64,7 @@ pub struct Rr3PackConfig {
     /// 装机装配单名（不带 .toml）。缺省 distro 不破坏既有调用方（CI distro-smoke、
     /// pack-arm64.sh）；换机型 = `--profile <name>`，staging 装机位 profiles/<name>.toml
     /// 零改写落位——出包链不再只认 distro 一份（H4/C2，0.0.5 批K）。
+    /// rrd.service ExecStart 的装机位随名同步改写（缺省 distro 恒等，见模块头注②）。
     profile: String,
     stage_only: bool,
 }
@@ -347,9 +355,21 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     let postinst = stage.join("DEBIAN/postinst");
     fs::write(&postinst, rr3_postinst_text()).map_err(|e| format!("写 postinst 失败: {e}"))?;
     rr3_make_executable(&postinst);
+    // ExecStart 的 --profile 装机位随 --profile 改写（内容改写②，见模块头注）：模板
+    // 锚定缺省机型 distro.toml，非 distro 机型照抄则 systemd 拉起的 rrd 找不到装配单。
+    // 锚点缺席先报错（对表 base/os/distro/units/rrd.service），不静默照抄。
+    const SERVICE_PROFILE_ANCHOR: &str = "/usr/lib/rockrobot3/profiles/distro.toml";
+    if !RR3_SERVICE_UNIT.contains(SERVICE_PROFILE_ANCHOR) {
+        return Err(format!(
+            "rrd.service 模板缺 --profile 装机位锚点 {SERVICE_PROFILE_ANCHOR}——对表 base/os/distro/units/rrd.service 后再出包"
+        ));
+    }
     fs::write(
         stage.join("usr/lib/systemd/system/rrd.service"),
-        RR3_SERVICE_UNIT,
+        RR3_SERVICE_UNIT.replace(
+            SERVICE_PROFILE_ANCHOR,
+            &format!("{RR3_INSTALL_ROOT}/profiles/{profile_name}"),
+        ),
     )
     .map_err(|e| format!("写 rrd.service 失败: {e}"))?;
     fs::copy(&profile_src, root.join("profiles").join(&profile_name))
@@ -888,6 +908,18 @@ mod tests {
         assert!(!stage
             .join("usr/lib/rockrobot3/profiles/distro.toml")
             .exists());
+        // rrd.service ExecStart 的装机位随 --profile 同步改写（深挖收口 P1）：
+        // 非 distro 机型出包，单元不得再指向包里不存在的 distro.toml
+        let staged_unit =
+            fs::read_to_string(stage.join("usr/lib/systemd/system/rrd.service")).unwrap();
+        assert!(
+            staged_unit.contains("--profile /usr/lib/rockrobot3/profiles/esp32-mini.toml"),
+            "ExecStart 装机位须随 --profile 改写"
+        );
+        assert!(
+            !staged_unit.contains("profiles/distro.toml"),
+            "非 distro 机型的单元不得残留 distro 装机位"
+        );
         // 反例：指定机型缺席 → 点名到具体文件
         let (payload, repo) = fixture();
         let (mut cfg, _) = cfg_of(&payload, &repo);

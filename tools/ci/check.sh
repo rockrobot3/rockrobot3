@@ -19,8 +19,8 @@
 #    SKIP 纪律同上。
 # ⑧ 件级判据三门（0.0.5 批K H2）：⑧-a 两腿对拍计数门（slots.toml status 三态 join
 #    atom.toml provides，normal 格须 fn parity_leg1_+parity_leg2_ 各 ≥1，C10 stub 反例
-#    自证内置）；⑧-b 依赖闭包 grep 门（L0=use std::/extern crate std、L1=+serde_json，
-#    非 test 面）；⑧-c 注入面校验门（contract injection 用例显式过滤器封 fail-open）。
+#    自证内置）；⑧-b 依赖闭包 grep 门（L0=std::（含 use/extern crate/全限定内联）、
+#    L1=+serde_json，非 test 面）；⑧-c 注入面校验门（contract injection 用例显式过滤器封 fail-open）。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内，规约门拒绝执行。" >&2
@@ -295,7 +295,9 @@ fi
 #     必须拦下——拦不住则门本身 FAIL（对拍门若放行空件就只是仪式）。
 # ⑧-b 件级依赖闭包 grep 门（C7 分级执法）：扫 modules/*/atoms/*/*.rs 的**非 test 面**
 #     ——行注释先剥（文档注释要表述门禁规则自身）、#[cfg(test)] 块整块剥（花括号深度
-#     剥离；假后端 sim 夹具合法）。L0 = `use std::` / `extern crate std`（std 面禁入）；
+#     剥离；假后端 sim 夹具合法）。L0 = `std::`（含 `use std::` / `extern crate std` /
+#     全限定内联三态——L0 与 L1 同为全限定面，仅匹配声明面会被 `std::mem::replace`
+#     这类内联路径绕过，活体见批K 深挖收口）；
 #     L1 = L0 + `serde_json`（承载面禁入，批I F5 已上移清零——退场迁移清单在册，门认
 #     已清零的现状）。`rr_hal::` 引用不进本门执法面（trait 注入与 sim 假后端是批I 定形
 #     的合法形状；承载类型违例无 grep 可靠判据，归 §4.0.3 评审条款，收口案例批I 已清）。
@@ -430,11 +432,11 @@ else
       next
     }
     line ~ /^[[:space:]]*#\[cfg\(test\)\]/ { strip = 1; depth = 0; next }
-    line ~ /use std::|extern crate std|use serde_json|serde_json::/ { print FILENAME ":" FNR ":" $0 }
+    line ~ /std::|extern crate std|use serde_json|serde_json::/ { print FILENAME ":" FNR ":" $0 }
   ' modules/*/atoms/*/*.rs >> "$closure_hits"
   if [ -s "$closure_hits" ]; then
     cat "$closure_hits"
-    printf 'FAIL  ⑧-b 依赖闭包命中（L0=use std::/extern crate std；L1=+serde_json；非 test 面，见上行号）\n'
+    printf 'FAIL  ⑧-b 依赖闭包命中（L0=std::（含声明与全限定内联）；L1=+serde_json；非 test 面，见上行号）\n'
     gate_fail=1
   else
     printf 'PASS  ⑧-b 件级依赖闭包（%s 份 atom 源非 test 面，L0/L1 禁词零命中）\n' "$atom_rs"

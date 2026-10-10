@@ -210,7 +210,7 @@ mod tests {
         let k = deg.to_radians().sin();
         (0..frames)
             .flat_map(|i| {
-                let v = (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 16000.0).sin();
+                let v = (2.0 * core::f64::consts::PI * 440.0 * i as f64 / 16000.0).sin();
                 [
                     ((1.0 - k) * v * 12000.0) as i16,
                     ((1.0 + k) * v * 12000.0) as i16,
