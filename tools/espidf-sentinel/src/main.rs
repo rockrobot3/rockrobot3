@@ -58,8 +58,9 @@ const HEARTBEAT_MS: u64 = 200;
 /// 线上 manifest（rr3.register 的 params.manifest）：entry 绝对路径是 rrd 门禁
 /// 硬项——哨兵是 ESP32 固件、不被 rrd spawn，entry 仅过"绝对路径"门，真实执行体
 /// 是本固件；restart_policy = "never"（进程面监督对本模块不适用，watchdog 判死
-/// 走在册表记账）。
-const MANIFEST_TEXT: &str = "[manifest]\nschema_version = 1\nname = \"rr3-espidf-sentinel\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/opt/rr3/bin/rr3-espidf-sentinel\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[resources]\nrestart_policy = \"never\"\n\n[health]\nheartbeat_ms = 200\nwatchdog_timeout_ms = 2000\n";
+/// 走在册表记账）。`[rpc].exposes` 是 M3 `rr3.call` 的路由表来源（0.0.7 §9.4 ⑤
+/// e2e round-trip：sim_peer 点名 probe 主题 → 本哨兵应答），不声明 = 不接点名。
+const MANIFEST_TEXT: &str = "[manifest]\nschema_version = 1\nname = \"rr3-espidf-sentinel\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/opt/rr3/bin/rr3-espidf-sentinel\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[resources]\nrestart_policy = \"never\"\n\n[health]\nheartbeat_ms = 200\nwatchdog_timeout_ms = 2000\n\n[rpc]\nexposes = [\"rr3-espidf-sentinel/probe\"]\n";
 
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -490,10 +491,14 @@ fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
         return;
     };
     let reply = json!({"jsonrpc": "2.0", "id": id, "result": {"echo": v.get("params").cloned().unwrap_or(Value::Null)}});
+    // trace_id 带回路（M3 应答回路的唯一凭据）：原样带回 Request 头上的
+    // trace_id（= 调用方 task）——rrd 的 rr3_route_response 按它投递，0 无从
+    // 投递会被拒（Invalid）。直发应答（RR3_TRACE_ID_DIRECT）只对 rrd 直接
+    // 应答合法，点名回路必须用调用方 task。
     let out = rr3_frame_compose(
         opcode::SEND,
         0,
-        RR3_TRACE_ID_DIRECT,
+        frame.header.trace_id,
         sh.now_ns(),
         sh.task(),
         frame.header.src_task,
