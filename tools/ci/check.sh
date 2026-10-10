@@ -16,7 +16,10 @@
 #    tools/ci/esp-uart-echo-check.sh 覆盖（工具链缺位时 SKIP 明说，编译成功还断言 ELF 出树）。
 #    同例：tools/espidf-std-hello（0.0.5 增补轮四 批W1，xtensa-esp32-espidf 目标 + build-std +
 #    esp-idf-sys，还须 ESP-IDF 克隆与乐鑫 esp-clang）——专用门 tools/ci/espidf-std-check.sh，
-#    SKIP 纪律同上。
+#    SKIP 纪律同上。同例：tools/espidf-sentinel（0.0.7 批D1 层③ 哨兵，同款 espidf 工具链
+#    + 主仓 rr-core/rr-ipc path 依赖）——专用门 tools/ci/espidf-sentinel-check.sh（甲面
+#    xtensa 构建 = 双证之①），SKIP 纪律同上；其宿主对手件是普通独立工程
+#    tools/rr3-sentinel-harness（不在哨兵目录内的原因见其 Cargo.toml 注记），照常进 ④/⑥。
 # ⑧ 件级判据三门（0.0.5 批K H2）：⑧-a 两腿对拍计数门（slots.toml status 三态 join
 #    atom.toml provides，normal 格须 fn parity_leg1_+parity_leg2_ 各 ≥1，C10 stub 反例
 #    自证内置）；⑧-b 依赖闭包 grep 门（L0=std::（含 use/extern crate/全限定内联）、
@@ -99,7 +102,8 @@ while IFS= read -r -d '' manifest; do
   fi
 done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
                     -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
-                    -not -path "tools/espidf-std-hello/*" -print0 | sort -z)
+                    -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
+                    -print0 | sort -z)
 if [ "$found" -eq 0 ]; then
   printf 'FAIL  ④ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
   fail=1
@@ -171,7 +175,8 @@ while IFS= read -r -d '' manifest; do
   run_tests sh -c "cargo test -q --manifest-path '$manifest'"
 done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
                     -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
-                    -not -path "tools/espidf-std-hello/*" -print0 | sort -z)
+                    -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
+                    -print0 | sort -z)
 if [ "$found_mod" -eq 0 ]; then
   printf 'FAIL  ⑥ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
   fail=1
