@@ -1,0 +1,19 @@
+[package]
+name = "rr3-sentinel-harness"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "0.0.7 批D1 层③ 哨兵的宿主对手件（扮总线侧：收注册回 task / 收心跳回 ACK / 发 round-trip）"
+
+# 独立宿主 crate（哨兵 espidf-sentinel 的伴生对手件）：**不落哨兵目录内**——cargo
+# 配置发现沿 CWD 向上拾取，落子目录会继承哨兵 .cargo/config.toml 钉死的
+# xtensa-esp32-espidf target + build-std，宿主构建必炸（批D1 实爆）。落 tools/ 顶层
+# 即普通宿主 crate：check.sh ④/⑥ 与 CI lint 按独立工程口径全覆盖，无需专用门。
+[workspace]
+
+[dependencies]
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+rr-core = { path = "../../base/runtime/rr-core" }
+serde_json = "1"

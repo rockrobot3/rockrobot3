@@ -41,7 +41,9 @@ pub use transport::bytestream::Rr3ByteStream;
 pub use transport::frame::{rr3_frame_read, rr3_frame_write};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use transport::shm::Rr3ShmListener;
-#[cfg(not(target_os = "none"))]
+// 门与 transport::shm 模块自身同径（批D1 修正）：espidf（unix 但非 linux/macos）
+// 上 `not(target_os = "none")` 放行而模块缺席 → E0432，xtensa-espidf 编译面实爆。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use transport::shm::{
     Rr3ShmReaderConn, Rr3ShmWriterConn, RR3_SHM_NAME_DEFAULT, RR3_SHM_NAME_ENV,
 };

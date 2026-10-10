@@ -1,0 +1,4 @@
+# 0.0.7 方案 §9.3 ① 全文钉死（批D2/S3 迁移追加 CONFIG_SPIRAM=y 系，按 esp-idf
+# 实装对表——本文件只落 D1 经典 ESP32 口径）。
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
