@@ -44,8 +44,12 @@ fn bus_frame(ty: Rr3PayloadType, dst_task: u64, body: Value, now_ns: u64) -> Rr3
 
 /// 拆上行帧 → (payload 类型, JSON-RPC id, method, params, 完整体)。
 /// 形状不符即点名（rrd 握手门序同款：dst 门 / 前缀门 / jsonrpc 门 / id 门）。
+/// method 为 `None`：Response 帧合法无 method（round-trip 应答即此形状）；
+/// Request 必有——调用方按 ty 各自断言（批D1 板上实测修正：原强制门误杀 Response）。
 #[allow(clippy::type_complexity)]
-fn parse_upstream(frame: Rr3Frame) -> Result<(Rr3PayloadType, u64, String, Value, Value), String> {
+fn parse_upstream(
+    frame: Rr3Frame,
+) -> Result<(Rr3PayloadType, u64, Option<String>, Value, Value), String> {
     if frame.header.dst_task != RR3_TASK_RRD {
         return Err(format!(
             "dst_task 必须为 {RR3_TASK_RRD}（rrd），收到 {}",
@@ -62,11 +66,7 @@ fn parse_upstream(frame: Rr3Frame) -> Result<(Rr3PayloadType, u64, String, Value
         .get("id")
         .and_then(Value::as_u64)
         .ok_or("缺 id（要求无符号整数）")?;
-    let method = v
-        .get("method")
-        .and_then(Value::as_str)
-        .ok_or("缺 method（要求字符串）")?
-        .to_string();
+    let method = v.get("method").and_then(Value::as_str).map(str::to_string);
     let params = v.get("params").cloned().unwrap_or(Value::Null);
     Ok((ty, id, method, params, v))
 }
@@ -148,7 +148,9 @@ fn main() {
     let (reg_name, hb_ms) = match conn.rr3_recv_buf() {
         Ok(buf) => match Rr3Frame::try_from(buf) {
             Ok(f) => match parse_upstream(f) {
-                Ok((Rr3PayloadType::Request, id, m, params, _)) if m == "rr3.register" => {
+                Ok((Rr3PayloadType::Request, id, m, params, _))
+                    if m.as_deref() == Some("rr3.register") =>
+                {
                     let manifest = params
                         .get("manifest")
                         .and_then(Value::as_str)
@@ -180,7 +182,10 @@ fn main() {
                     (name, hb)
                 }
                 Ok((ty, _, m, _, _)) => {
-                    eprintln!("FAIL  首帧必须是 Request/rr3.register，收到 {ty:?}/{m}");
+                    eprintln!(
+                        "FAIL  首帧必须是 Request/rr3.register，收到 {ty:?}/{}",
+                        m.as_deref().unwrap_or("-")
+                    );
                     std::process::exit(1);
                 }
                 Err(e) => {
@@ -234,7 +239,7 @@ fn main() {
         let dt = now.duration_since(last).as_millis();
         last = now;
         match parse_upstream(frame) {
-            Ok((Rr3PayloadType::Request, id, m, _, _)) if m == "rr3.heartbeat" => {
+            Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => {
                 if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&heartbeat_reply(
                     id,
                     HARNESS_TASK,
@@ -247,7 +252,11 @@ fn main() {
                 intervals.push(dt);
             }
             Ok((ty, _, m, _, _)) => {
-                eprintln!("FAIL  第{}拍应为 rr3.heartbeat，收到 {ty:?}/{m}", i + 1);
+                eprintln!(
+                    "FAIL  第{}拍应为 rr3.heartbeat，收到 {ty:?}/{}",
+                    i + 1,
+                    m.as_deref().unwrap_or("-")
+                );
                 std::process::exit(1);
             }
             Err(e) => {
@@ -313,7 +322,10 @@ fn main() {
             }
             Ok((Rr3PayloadType::Request, _, _, _, _)) => continue, // 心跳并发到达，跳过再等
             Ok((ty, id, m, _, _)) => {
-                eprintln!("FAIL  round-trip 应答形状错: {ty:?}/id={id}/{m}");
+                eprintln!(
+                    "FAIL  round-trip 应答形状错: {ty:?}/id={id}/{}",
+                    m.as_deref().unwrap_or("-")
+                );
                 break;
             }
             Err(e) => {
@@ -399,7 +411,7 @@ mod tests {
         let (ty, id, method, params, _) = parse_upstream(f).unwrap();
         assert_eq!(ty, Rr3PayloadType::Request);
         assert_eq!(id, 1);
-        assert_eq!(method, "rr3.register");
+        assert_eq!(method.as_deref(), Some("rr3.register"));
         assert_eq!(params["name"], "rr3-espidf-sentinel");
         assert!(params["manifest"]
             .as_str()
