@@ -1748,6 +1748,22 @@ method 门改 Option<String>（Response 帧合法无 method，强制门误杀 ro
 流开口帧同步（CP2102 缓冲残留 + `Rr3UartConn::open` 不 tcflush，复跑先复位+清缓冲
 组合时序）——批E rr3-bridge 同题，登记 status.md
 
+2026-10-11 0.0.7 批E 层④ 收官——0.0.7 四层梯子全收官（0.0.7 方案状态行 + §9.4 ⑥
+实装对表（修订版 12）+ status.md 随批；哨兵 dst 修复件 `870cfe6` 十步门禁直跑
+GATE_EXIT=0（PASS 54）+ xtensa 专用门绿，本落档提交双远端三端核对一致）——E6 本机
+彩排（假哨兵对拍 PASS=18）揪出 harness 盲区：对拍件地址字段恒等真值（src 恒 1）静默
+遮蔽 rrd 上行 dst 门缺陷，哨兵应答 dst 改钉 `RR3_TASK_RRD`、harness bus_frame 补
+src_task 入参变回归网——**对手件字段须可注入，对拍件恒真值不算覆盖**。E7 真板 e2e
+（§9.4 ⑤ macOS 档）PASS=16 FAIL=0：顺序 A/B 双序列、心跳三态、正/负路径点名、
+`denied_publish = 0` 全程、断链自愈真拔 USB 双半段实锤。E7 排障四实锤落 §9.4 ⑥：
+macOS 串口须用 `cu.*` callout（`tty.*` callin open EBUSY 与占用无关）；stty 配置
+close 即丢、串口参数须与读写同 fd 生效（cat 直听见 magic `31 45 52 41` 即物理层通）；
+macOS 允许重复 open 同一节点、残留旧桥静默截走数据（清场须 `ps` 核 0 残留，"桥进程
+存活"须与 `uart link up` 同验）；桥 open CP2102 的 DTR/RTS 翻转复位 ESP32、哨兵 10s
+注册窗口要求 rrd socket 先于任何复位点就绪。批D1 开口帧同步敞口随批E 实证关闭
+（E7 全程无 BadMagic 复发——`Rr3UartConn::open` configure 末尾 tcflush(TCIFLUSH) 在案）。
+树莓派档 e2e（§9.4 ⑤ 右列）板上线即补，不冒领
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
