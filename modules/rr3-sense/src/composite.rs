@@ -107,7 +107,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
         let doa = capture::rr3_doa_fix(&raw.samples, raw.cfg.channels);
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
-        let pcm = capture::rr3_pcm_downmix_stream(raw);
+        let pcm = rr3_pcm_downmix_stream(raw);
         seq += 1;
         bus.rr3_publish(capture::RR3_PCM_TOPIC, rr3_pcm_event_body(seq, &pcm))?;
 
@@ -158,6 +158,24 @@ pub fn rr3_sense_run() -> Result<(), String> {
 // capture/vad 两件的 `*_body`/`*_field` 自原子面整体上移至此（代码与文档注释
 // 逐字迁入，线上字节不变）：件面只留纯机制（结构体+判定函数），serde_json 清零；
 // 载荷组装集中组合件一处，用例随迁（原子测"输入→机制"，本层测"输入→字节"）。
+
+/// 流级下混（R14）：`cfg.channels` 归 1、rate/bit_depth 不动、samples 收缩；
+/// `channels <= 1` 时原样返回（零改动，默认单麦链路逐点等价）。自 capture/mech.rs
+/// 迁入（0.0.5 批I 深挖收口：`Rr3PcmStream` 是承载层数据类型，件面只留纯切片
+/// 机制——C7 白名单外件面不得引用 rr_hal 具体类型）；纯切片下混
+/// [`capture::rr3_pcm_downmix_mono`] 仍在件内。
+fn rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream {
+    if pcm.cfg.channels <= 1 {
+        return pcm;
+    }
+    Rr3PcmStream {
+        cfg: Rr3AudioCfg {
+            channels: 1,
+            ..pcm.cfg
+        },
+        samples: capture::rr3_pcm_downmix_mono(&pcm.samples, pcm.cfg.channels),
+    }
+}
 
 /// `rr3-sense/audio/pcm` 的事件体（stream）。PCM 按 s16le 小端打包后 base64；
 /// 320 帧 @16k/mono ≈ 856 字符，20ms 一帧对 UDS 无压力（shm 零拷贝随 M5）。
@@ -395,6 +413,33 @@ mod tests {
     }
 
     // ---------- 载荷组装用例（随 S-7 自原子面随迁） ----------
+
+    /// 流级下混：channels 归 1、rate 不动、samples 收缩；单麦原样返回（零改动）。
+    /// 随下混函数自 capture/mech.rs 迁入（0.0.5 批I 深挖收口）。
+    #[test]
+    fn downmix_stream_rewrites_cfg_to_mono() {
+        let stereo = Rr3PcmStream {
+            cfg: Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 2,
+                bit_depth: 16,
+            },
+            samples: vec![100, 300, -400, -200],
+        };
+        let mono = rr3_pcm_downmix_stream(stereo);
+        assert_eq!(mono.cfg.channels, 1);
+        assert_eq!(mono.cfg.sample_rate_hz, 16000);
+        assert_eq!(mono.samples, vec![200, -300]);
+        let one = Rr3PcmStream {
+            cfg: Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 1,
+                bit_depth: 16,
+            },
+            samples: vec![7, 8, 9],
+        };
+        assert_eq!(rr3_pcm_downmix_stream(one.clone()), one);
+    }
 
     /// RFC 4648 标准字母表（测试侧独立解码器用，与实现侧各持一份）
     const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
