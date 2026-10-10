@@ -493,17 +493,18 @@ fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
         return;
     };
     let reply = json!({"jsonrpc": "2.0", "id": id, "result": {"echo": v.get("params").cloned().unwrap_or(Value::Null)}});
-    // trace_id 带回路（M3 应答回路的唯一凭据）：原样带回 Request 头上的
-    // trace_id（= 调用方 task）——rrd 的 rr3_route_response 按它投递，0 无从
-    // 投递会被拒（Invalid）。直发应答（RR3_TRACE_ID_DIRECT）只对 rrd 直接
-    // 应答合法，点名回路必须用调用方 task。
+    // 回路凭据与投递方向（M3 应答线形状，E6 彩排实锤修正）：trace_id 原样带回
+    // Request 头上的调用方 task——rrd 的 rr3_route_response 按它改道并**自组**下行帧
+    // （src=被调方 task、dst=调用方 task），0 无从投递会被拒（Invalid）；上行帧的
+    // dst 一律为 rrd（conn.rs 上行门：dst≠1 直接按崩溃收尾）——dst=调用方 task 的
+    // 写法过不了这道门（D1 未暴露：harness 扮 rrd 发点名 src=1，reply dst 恰好同值）。
     let out = rr3_frame_compose(
         opcode::SEND,
         0,
         frame.header.trace_id,
         sh.now_ns(),
         sh.task(),
-        frame.header.src_task,
+        RR3_TASK_RRD,
         rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes()),
     );
     let sent = sh
