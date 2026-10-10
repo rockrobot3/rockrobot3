@@ -17,4 +17,4 @@ pub const SURFACE: &[&str] = &["player: rpc rr3-interact/tts/text (request)"];
 /// 本模块 exposes 的 TTS 主题（module.toml [rpc].exposes 同源；原子层不重述 rpc 契约）
 pub const RR3_TTS_TOPIC: &str = "rr3-interact/tts/text";
 
-pub use mech::{rr3_tts_parse_args, rr3_tts_play, rr3_tts_result};
+pub use mech::rr3_tts_play;

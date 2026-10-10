@@ -11,15 +11,11 @@ mod mech;
 #[path = "private.rs"]
 mod private;
 
-/// 启动自述（字符串逐字冻结——原 src/bt.rs SURFACE 常量，契约面零改动）
+/// 启动自述（0.0.5 批I N-1/N-8 修订：env 注入退役改 config 数据化注入、
+/// 栈名撤出由后端动态交——修订后的行重新冻结）
 pub const SURFACE: &[&str] = &[
-    "bt: 链路状态机骨架（0.0.4 批E）——Off/Discoverable/Connected 三态纯函数转移，BlueZ 真后端板上后置（cfg 门）",
-    "bt: sim 后端 env 注入（RR3_HAL_SIM_BT_UP=1 开机即上电，缺省关）；主题不登记（语义已被日志环+rr3-ctl 承接），启用前先改契约",
+    "bt: 链路状态机骨架（0.0.4 批E）——Off/Discoverable/Connected 三态纯函数转移，真后端板上后置（cfg 门）",
+    "bt: 开机初值经 config [rr3-connect.bt] up 注入（缺省关，出厂不自动开）；主题不登记（语义已被日志环+rr3-ctl 承接），启用前先改契约",
 ];
 
-/// sim 后端蓝牙开机初值键（`1` 上电进 Discoverable / `0` 或未设 → Off，
-/// 出厂不自动开蓝牙）。取值不认一律按关——env 是 sim 注入口不是配置面，
-/// 宽容解析反而藏错；`1`/`0` 词汇与 `RR3_HAL_SIM_LINK_UP` 同款。
-pub const RR3_HAL_SIM_BT_UP_ENV: &str = "RR3_HAL_SIM_BT_UP";
-
-pub use mech::{rr3_bt_backend_up_default, Rr3BtState};
+pub use mech::Rr3BtState;

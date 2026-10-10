@@ -31,7 +31,8 @@ mod charger;
 use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_power, rr3_block_on};
+use rr_hal::{backend::rr3_hal_power, Rr3BatteryState};
+use serde_json::{json, Value};
 
 use battery::{Rr3BatteryCfg, Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_STATE_TOPIC};
 use charger::{Rr3ChargerCfg, RR3_CHARGER_STATE_TOPIC};
@@ -79,8 +80,9 @@ pub fn rr3_power_run() -> Result<(), String> {
     // HAL 电源面选择 + 开机探活：Unsupported 即致命——显式回错不静默退化
     // （rr-hal 占位件的契约），也不给"没有电池读数还常驻"的假活
     let (dev, backend) = rr3_hal_power();
-    let first =
-        rr3_block_on(dev.battery()).map_err(|e| format!("电源面探活失败({backend}): {e}"))?;
+    let first = dev
+        .battery()
+        .map_err(|e| format!("电源面探活失败({backend}): {e}"))?;
     println!(
         "电源面就绪: {backend} 电量 {}% {}mV charging={}",
         first.percent, first.voltage_mv, first.charging
@@ -106,22 +108,25 @@ pub fn rr3_power_run() -> Result<(), String> {
             let _ = frame;
         }
 
-        // battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，exit(1)。
+        // battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，exit(1)；
+        // 失败先计入 counters（0.0.5 批I P-2：数据新鲜度可观测），再走退出语义。
         let now = Instant::now();
         if now >= next_battery {
-            let st = rr3_block_on(dev.battery())
-                .map_err(|e| format!("电池读数失败（{backend}）: {e}"))?;
+            let st = match dev.battery() {
+                Ok(st) => st,
+                Err(e) => {
+                    bus.rr3_counter_bump("battery_read_fail", 1);
+                    return Err(format!("电池读数失败（{backend}）: {e}"));
+                }
+            };
             battery_seq += 1;
             bus.rr3_publish(
                 RR3_BATTERY_STATE_TOPIC,
-                battery::rr3_battery_state_body(battery_seq, st),
+                rr3_battery_state_body(battery_seq, st),
             )?;
             if low_edge.rr3_low_edge_cross(st.voltage_mv) {
                 low_seq += 1;
-                bus.rr3_publish(
-                    RR3_BATTERY_LOW_TOPIC,
-                    battery::rr3_battery_low_body(low_seq, st),
-                )?;
+                bus.rr3_publish(RR3_BATTERY_LOW_TOPIC, rr3_battery_low_body(low_seq, st))?;
                 println!(
                     "battery/low: {}% {}mV（越阈首拍，段内不重发）",
                     st.percent, st.voltage_mv
@@ -137,12 +142,41 @@ pub fn rr3_power_run() -> Result<(), String> {
                 charger_seq += 1;
                 bus.rr3_publish(
                     RR3_CHARGER_STATE_TOPIC,
-                    charger::rr3_charger_state_body(charger_seq, st.charging),
+                    rr3_charger_state_body(charger_seq, st.charging),
                 )?;
             }
             next_charger = now + Duration::from_millis(cfg.charger.state_period_ms);
         }
     }
+}
+
+// ---------- 载荷组装面（0.0.5 批I P-7：上移承载层，ADR-0019 修订 4） ----------
+// 件的对外契约面 = 结构体 + 判定函数；`*_body` 的 json! 组装归本文件，
+// 线上字节逐字不变（schema/golden 用例随迁到本文件，继续守字节面）。
+
+/// battery/state 流体：seq 是本流自己的计数（envelope 惯例，从 1 起）
+fn rr3_battery_state_body(seq: u64, st: Rr3BatteryState) -> Value {
+    json!({
+        "seq": seq,
+        "voltage_mv": st.voltage_mv,
+        "percent": st.percent,
+        "charging": st.charging,
+    })
+}
+
+/// battery/low 事件体：形状钉在 contracts/events/power-battery-low.schema.json
+/// （seq/percent/voltage_mv 三必填，additionalProperties=false——不加多余字段）。
+fn rr3_battery_low_body(seq: u64, st: Rr3BatteryState) -> Value {
+    json!({
+        "seq": seq,
+        "percent": st.percent,
+        "voltage_mv": st.voltage_mv,
+    })
+}
+
+/// charger/state 流体：charging 是最近一次 battery 读数的派生值
+fn rr3_charger_state_body(seq: u64, charging: bool) -> Value {
+    json!({ "seq": seq, "charging": charging })
 }
 
 /// config.toml 解析：env 覆盖优先，缺省 manifest 同目录。
@@ -191,14 +225,25 @@ fn rr3_power_config_parse(text: &str) -> Result<Rr3PowerCfg, String> {
     };
     let battery_sect = sect("battery")?.clone();
     let charger_sect = sect("charger")?.clone();
+    // 周期键钳制留痕（0.0.5 批I P-2）：0 无节拍意义，收敛 1ms 并打一行
+    // （哪个键、原值、钳后值）——钳位不再静默
+    let period_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
+        let raw = u64_of(sect, key, sect_name)?;
+        if raw < 1 {
+            eprintln!("config [rr3-power.{sect_name}] {key}={raw} 无节拍意义，钳到 1ms");
+            Ok(1)
+        } else {
+            Ok(raw)
+        }
+    };
     Ok(Rr3PowerCfg {
         battery: Rr3BatteryCfg {
-            sample_period_ms: u64_of(&battery_sect, "sample_period_ms", "battery")?.max(1),
+            sample_period_ms: period_of(&battery_sect, "sample_period_ms", "battery")?,
             low_voltage_mv: u16_of(&battery_sect, "low_voltage_mv", "battery")?,
             cutoff_voltage_mv: u16_of(&battery_sect, "cutoff_voltage_mv", "battery")?,
         },
         charger: Rr3ChargerCfg {
-            state_period_ms: u64_of(&charger_sect, "state_period_ms", "charger")?.max(1),
+            state_period_ms: period_of(&charger_sect, "state_period_ms", "charger")?,
         },
     })
 }
@@ -206,6 +251,46 @@ fn rr3_power_config_parse(text: &str) -> Result<Rr3PowerCfg, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn st(mv: u16, percent: u8) -> Rr3BatteryState {
+        Rr3BatteryState {
+            voltage_mv: mv,
+            percent,
+            charging: false,
+        }
+    }
+
+    #[test]
+    fn state_body_carries_full_summary_with_own_seq() {
+        let v = rr3_battery_state_body(7, st(3700, 50));
+        assert_eq!(v["seq"], 7);
+        assert_eq!(v["voltage_mv"], 3700);
+        assert_eq!(v["percent"], 50);
+        assert_eq!(v["charging"], false);
+    }
+
+    /// battery/low 体与 schema 逐字段对齐：三必填，且**没有**多余字段
+    /// （additionalProperties=false，多带 charging 会直接违反契约）。
+    #[test]
+    fn low_body_matches_schema_exactly() {
+        let v = rr3_battery_low_body(1, st(3250, 5));
+        assert_eq!(v["seq"], 1);
+        assert_eq!(v["percent"], 5);
+        assert_eq!(v["voltage_mv"], 3250);
+        assert_eq!(
+            v.as_object().unwrap().len(),
+            3,
+            "schema additionalProperties=false，字段超集即违约: {v}"
+        );
+    }
+
+    #[test]
+    fn charger_body_carries_own_seq_and_charging() {
+        let v = rr3_charger_state_body(3, true);
+        assert_eq!(v["seq"], 3);
+        assert_eq!(v["charging"], true);
+        assert_eq!(v.as_object().unwrap().len(), 2, "两字段，不加戏: {v}");
+    }
 
     /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
     #[test]
@@ -240,5 +325,23 @@ state_period_ms = 2000
         assert!(e.contains("cutoff_voltage_mv"), "缺字段点名: {e}");
         let e = rr3_power_config_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
+    }
+
+    /// 钳制留痕（0.0.5 批I P-2）：0 周期收敛 1 不拒 boot——采样拍不能自毁；
+    /// eprintln 留痕在解析期打（键名/原值/钳后值），此处钉收敛结果
+    #[test]
+    fn config_parse_clamps_zero_period_to_one() {
+        let text = r#"
+[rr3-power.battery]
+sample_period_ms = 0
+low_voltage_mv = 3300
+cutoff_voltage_mv = 3150
+
+[rr3-power.charger]
+state_period_ms = 0
+"#;
+        let cfg = rr3_power_config_parse(text).unwrap();
+        assert_eq!(cfg.battery.sample_period_ms, 1, "0 周期钳到 1ms");
+        assert_eq!(cfg.charger.state_period_ms, 1, "0 周期钳到 1ms");
     }
 }

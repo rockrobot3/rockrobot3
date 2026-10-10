@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "硬件抽象层（HAL）trait 定义：gpio/pwm/audio/power/link，后端随 M2/M5 落地"
+description = "硬件抽象层（HAL）实现层：Linux/sim 后端实现 rr-hal-api 契约（契约层 no_std，ADR-0018 修订 1 ③）"
 
 [lib]
 name = "rr_hal"
@@ -19,7 +19,9 @@ path = "src/lib.rs"
 alsa = ["dep:alsa"]
 
 [dependencies]
-async-trait = { workspace = true }
+# 能力面契约（0.0.5 批I F1）：7 trait 同步签名 + 值类型 + 错型在本 crate re-export，
+# 契约名与路径不变；本 crate 是它的 Linux/sim 实现层（ADR-0018 修订 1 ③）。
+rr-hal-api = { path = "../rr-hal-api" }
 # 物理绑定描述符解析（descriptor.rs，批D④/ADR-0018 裁定 4）：rrd 注入的
 # [hardware] 序列化文本是 TOML 平表，与 rrd/rr-registry 共用 workspace 同版 toml。
 toml = { workspace = true }

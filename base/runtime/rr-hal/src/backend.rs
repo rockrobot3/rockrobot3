@@ -14,8 +14,6 @@
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）不进这些 trait，留在 `rr3-act` 进程内。
 
-use std::sync::Arc;
-
 use crate::{
     Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3Power, Rr3PwmServo, Rr3UnavailableSource,
 };
@@ -289,13 +287,13 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
 /// 或键缺失/合成失败 → 占位件使用时以 `Unsupported` 回错（fail-closed，批D④
 /// 收口——不再有"必败线偏移 ensure 时才炸"的代码缺省，缺数据在选择面就点名）。
 ///
-/// 返回 [`Arc`] 而不是 [`Box`]：灯效的 blink 翻转在 worker 线程里写同一通道，
-/// 测试也要从另一线程观察电平——共享属这类设备的常态形状，不是偶发需求。
+/// 返回 [`Box`]：批I F3 拆掉灯效 worker 线程后无跨线程共享（blink 节拍上收
+/// 组合件单线程驱动），写面 `&mut self` 单一所有者即可，Arc 形状随之退役。
 pub fn rr3_hal_gpio_out(
     // 非 linux 平台 linux 分支被剔除、sim 分支不按角色分键——参数在那些平台
     // 编译面上未使用是结构性的，不是疏漏（linux 上它决定线偏移绑定键）
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] role: &str,
-) -> (Arc<dyn Rr3GpioOut>, &'static str) {
+) -> (Box<dyn Rr3GpioOut>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
@@ -308,24 +306,24 @@ pub fn rr3_hal_gpio_out(
                         _ => None, // 白名单外：无键无绑定，fail-closed
                     };
                     Some((
-                        Arc::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_linux_gpio_out_new(
+                        Box::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_linux_gpio_out_new(
                             std::path::Path::new(crate::linux_gpio::RR3_GPIO_DEV_ROOT_DEFAULT),
                             b.gpio_chip?,
                             line?,
                             role,
-                        )) as Arc<dyn Rr3GpioOut>,
+                        )) as Box<dyn Rr3GpioOut>,
                         RR3_BACKEND_LINUX,
                     ))
                 })
-                .unwrap_or((Arc::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
+                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
             #[cfg(not(target_os = "linux"))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
         RR3_BACKEND_SIM => (
-            Arc::new(crate::sim::Rr3SimGpioOut::rr3_sim_gpio_new(false)),
+            Box::new(crate::sim::Rr3SimGpioOut::rr3_sim_gpio_new(false)),
             RR3_BACKEND_SIM,
         ),
-        _ => (Arc::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
     }
 }
 
@@ -428,7 +426,17 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
 /// `link_ifname`，`RR3_HAL_LINK_IFNAME` env 应急覆盖）；键缺失或合成失败 →
 /// 占位件使用时以 `Unsupported` 回错（fail-closed）；显式 `linux` 但非 linux
 /// 平台时同落占位件，不静默换 sim。
-pub fn rr3_hal_link() -> (Box<dyn crate::Rr3Link>, &'static str) {
+///
+/// `nmcli_timeout`（0.0.5 批I N-2）：nmcli 子进程超时，由模块 config 的
+/// `timeout_ms` 传入——没有代码缺省（同 `link_ifname` 的 fail-closed 口径），
+/// sim/placeholder 分支忽略该值。最坏翻转延迟自此由配置管住，不再由子进程
+/// 自由决定。
+pub fn rr3_hal_link(
+    // 非 linux 平台 linux 分支被剔除、sim/placeholder 分支不消费超时——参数在
+    // 那些平台编译面上未使用是结构性的，不是疏漏（linux 上它进子进程守护）
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+    nmcli_timeout: std::time::Duration,
+) -> (Box<dyn crate::Rr3Link>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
@@ -439,6 +447,7 @@ pub fn rr3_hal_link() -> (Box<dyn crate::Rr3Link>, &'static str) {
                         Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_new(
                             b.link_ifname?,
                             "nmcli",
+                            nmcli_timeout,
                         )) as Box<dyn crate::Rr3Link>,
                         RR3_BACKEND_LINUX,
                     ))
@@ -470,7 +479,6 @@ pub fn rr3_hal_link() -> (Box<dyn crate::Rr3Link>, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rr3_block_on;
 
     /// 解析函数的平台默认分支：未设环境变量时回落平台默认（本机 macOS = sim）。
     /// 环境变量支无法在本测试里安全置位（并发测试读同一进程环境，std::env::set_var
@@ -515,25 +523,22 @@ mod tests {
             legal.contains(&display_backend),
             "显示后端名合法: {display_backend}"
         );
-        let (link, link_backend) = rr3_hal_link();
+        let (link, link_backend) = rr3_hal_link(std::time::Duration::from_secs(5));
         assert!(
             legal.contains(&link_backend),
             "链路后端名合法: {link_backend}"
         );
         // sim 档（本机 macOS 默认）下探活必须成功——执行件从断电态起步
+        // （探活全是读面 &self，无需可变绑定；写面 &mut self 的使用在模块侧）
         if servo_backend == RR3_BACKEND_SIM {
-            assert_eq!(rr3_block_on(servo.angle()).unwrap(), 90, "sim 舵机初始中位");
-            assert!(!rr3_block_on(gpio.level()).unwrap(), "sim 通道初始断电");
+            assert_eq!(servo.angle().unwrap(), 90, "sim 舵机初始中位");
+            assert!(!gpio.level().unwrap(), "sim 通道初始断电");
         }
         if display_backend == RR3_BACKEND_SIM {
-            assert_eq!(
-                rr3_block_on(display.frame()).unwrap(),
-                [0; 8],
-                "sim 点阵初始黑屏"
-            );
+            assert_eq!(display.frame().unwrap(), [0; 8], "sim 点阵初始黑屏");
         }
         if link_backend == RR3_BACKEND_SIM {
-            let st = rr3_block_on(link.state()).unwrap();
+            let st = link.state().unwrap();
             if st.up {
                 assert!(
                     st.ssid.is_some() && st.rssi_dbm.is_some(),

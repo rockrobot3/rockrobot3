@@ -42,12 +42,13 @@ cfg 门后置——如实声明，不 claim。
 
 蓝牙（`net.bt` 格位）由本模块 provide：链路状态机骨架已立（0.0.4 批E，
 `Rr3BtState` Off/Discoverable/Connected 三态纯函数转移，非法转移拒绝且
-状态不动，单测钉死；sim 初值 env `RR3_HAL_SIM_BT_UP=1` 开机即上电，缺省
-关）。**主题不登记**（0.0.4 方案 D5：btctl 的日志回放/远程命令语义已被
+状态不动，单测钉死；开机初值经 config `[rr3-connect.bt]` up 数据化注入
+（0.0.5 批I N-1：env 注入口退役），缺省关）。**主题不登记**（0.0.4 方案
+D5：btctl 的日志回放/远程命令语义已被
 rrd 日志环 + `rr3.ctl.logs` 与 rr3-ctl 承接，蓝牙链路暂无可发布事件）——
 启用事件面前须先改 [`topics.toml`](../../contracts/topics.toml)（守
-"不预先占位"）；BlueZ 真后端属板上件（cfg 门，实装依赖硬件，后置板上
-BlueZ 批次），本骨架不 claim 真射频链路。
+"不预先占位"）；真后端属板上件（cfg 门，实装依赖硬件，后置板上
+批次），本骨架不 claim 真射频链路。
 
 ## 本地自检
 

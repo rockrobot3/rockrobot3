@@ -19,5 +19,3 @@ pub const RR3_CHARGER_STATE_TOPIC: &str = "rr3-power/charger/state";
 pub struct Rr3ChargerCfg {
     pub state_period_ms: u64,
 }
-
-pub use mech::rr3_charger_state_body;

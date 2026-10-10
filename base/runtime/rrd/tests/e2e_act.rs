@@ -287,6 +287,34 @@ fn act_module_full_face_end_to_end() {
     assert_eq!(sv["seq"], 2, "两条驱动路共用一条状态流，流序连贯: {sv}");
     assert_eq!(sv["on"], false, "intent 动作断开继电器: {sv}");
 
+    // ---------- ⑤b 同态抑制（0.0.5 批I A-7 修好后进 e2e，act 册 §9 不变量）----------
+    // 继电器已断再发断开：同态命令不得产生新 relay/state。有界窗口收集
+    // （破坏性读法，⑦ 同款纪律），窗口内混入的 servo/心跳等帧不在断言域。
+    rr3_send(
+        &mut brain,
+        &rr3_json_frame(
+            Rr3PayloadType::Event,
+            &json!({
+                "topic": "rr3-brain/intent/result",
+                "trace": 73,
+                "user_text": "再关一次灯",
+                "actions": [{"topic": "rr3-act/relay/set", "args": {"on": false}}],
+            }),
+            brain_task,
+            RR3_TASK_RRD,
+        ),
+    );
+    let drained = rr3_collect_within(&mut obs, Duration::from_millis(250));
+    let stray: Vec<String> = drained
+        .iter()
+        .filter(|f| rr3_json_of(f)["topic"] == "rr3-act/relay/state")
+        .map(|f| rr3_json_of(f).to_string())
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "同态 relay 命令不得产生 relay/state: {stray:?}"
+    );
+
     // ---------- ⑥ intent 转向动作（批F2）：servo/command 过同两道门落 servo/state ----------
     // "向左看"类词表意图由 brain 广播 actions 落 rr3-act/servo/command（45°=左档，
     // brain 侧词表→角度映射由 python 单测覆盖，e2e 在 act 边界钉总线契约——判据 8

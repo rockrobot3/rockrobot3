@@ -1,5 +1,6 @@
-//! vad 原子件机制主体（五件套③，自原 src/audio/vad.rs 的状态机与 src/audio/mod.rs 的
-//! vad 事件体构造逐字迁入，逻辑零改动）。
+//! vad 原子件机制主体（五件套③，自原 src/audio/vad.rs 的状态机逐字迁入，逻辑零改动）。
+//! vad 事件体构造随 0.0.5 批I S-7 上移组合件（ADR-0019 修订 4：件面只留纯机制，
+//! 零 serde_json），用例随迁。
 //!
 //! 本地 VAD：静音/起音**边沿**检测。只发边沿 + 置信度摘要，不发闭环数据
 //! （ADR-0007 §决策一）。判停阈值与 legacy/main.c 的对话策略一致，参数落
@@ -13,8 +14,6 @@
 //! （未在语音中）rms ≥ rms_start 连续 ≥ min_speech_ms ──→ Onset{rms_peak, speech_ms}
 //! （在语音中）rms <  rms_start 连续 ≥ silence_tail_ms ──→ Offset{speech_ms}
 //! ```
-
-use serde_json::{json, Value};
 
 use super::Rr3VadConfig;
 
@@ -62,7 +61,8 @@ fn rr3_isqrt(x: u64) -> u64 {
 }
 
 /// 帧 RMS（整数）：空帧按 0 处理
-pub fn rr3_frame_rms(samples: &[i16]) -> i64 {
+/// 0.0.5 批I S-6：无件外读者（状态机内部判定用），降 pub(crate) 不进契约面。
+pub(crate) fn rr3_frame_rms(samples: &[i16]) -> i64 {
     if samples.is_empty() {
         return 0;
     }
@@ -128,30 +128,6 @@ impl Rr3VadState {
         }
         None
     }
-}
-
-/// `rr3-sense/audio/vad_start` 的事件体（event）。边沿负载只带摘要
-/// （edge / rms_peak / speech_ms），不带任何闭环数据（ADR-0007 §决策一）。
-/// 负载里**不含 topic**（topic 由 rr-bus 客户端并入，见 client.rs 的 rr3_publish）。
-/// `doa` 字段体由 capture 原子产出（deg + bin 两键）、组合件桥接进 onset——
-/// 批F2 的负载扩展（append 兼容，schema_version 仍 1）：仅 onset 且判出
-/// （多通道非静音帧）时携带，offset 不带——与 rms_peak 同一形状纪律。
-pub fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge, doa: Option<Value>) -> Value {
-    let mut body = match edge {
-        Rr3VadEdge::Onset {
-            rms_peak,
-            speech_ms,
-        } => json!({
-            "seq": seq, "edge": "onset", "rms_peak": rms_peak, "speech_ms": speech_ms,
-        }),
-        Rr3VadEdge::Offset { speech_ms } => json!({
-            "seq": seq, "edge": "offset", "speech_ms": speech_ms,
-        }),
-    };
-    if let (Rr3VadEdge::Onset { .. }, Some(d)) = (&edge, doa) {
-        body["doa"] = d;
-    }
-    body
 }
 
 #[cfg(test)]
@@ -316,50 +292,5 @@ mod tests {
             vad.rr3_vad_feed(&frame(0)),
             Some(Rr3VadEdge::Offset { speech_ms: 400 })
         );
-    }
-
-    #[test]
-    fn vad_event_body_carries_edge_shape() {
-        let on = rr3_vad_event_body(
-            3,
-            Rr3VadEdge::Onset {
-                rms_peak: 4200,
-                speech_ms: 200,
-            },
-            None,
-        );
-        assert_eq!(on["edge"], "onset");
-        assert_eq!(on["rms_peak"], 4200);
-        assert_eq!(on["speech_ms"], 200);
-        assert_eq!(on["seq"], 3);
-        assert_eq!(on.get("topic"), None, "负载不重复放 topic（由客户端并入）");
-        assert!(on.get("doa").is_none(), "无判向结果的 onset 不带 doa 字段");
-        let off = rr3_vad_event_body(4, Rr3VadEdge::Offset { speech_ms: 900 }, None);
-        assert_eq!(off["edge"], "offset");
-        assert_eq!(off["speech_ms"], 900);
-        assert_eq!(off.get("rms_peak"), None, "offset 不带 rms_peak");
-    }
-
-    /// doa 字段（批F2 负载扩展）：onset 携带判向档（deg+bin），offset 即使传了
-    /// 也丢弃——静音帧无方向可判，形状纪律与 rms_peak 同一条。
-    /// 字段体由 capture 原子产出（deg+bin 两键），此处只钉桥接形状。
-    #[test]
-    fn vad_event_body_carries_doa_on_onset_only() {
-        let on = rr3_vad_event_body(
-            5,
-            Rr3VadEdge::Onset {
-                rms_peak: 4200,
-                speech_ms: 200,
-            },
-            Some(json!({ "deg": -60, "bin": "left" })),
-        );
-        assert_eq!(on["doa"]["deg"], -60);
-        assert_eq!(on["doa"]["bin"], "left");
-        let off = rr3_vad_event_body(
-            6,
-            Rr3VadEdge::Offset { speech_ms: 900 },
-            Some(json!({ "deg": 0, "bin": "center" })),
-        );
-        assert!(off.get("doa").is_none(), "offset 不得携带 doa: {off}");
     }
 }

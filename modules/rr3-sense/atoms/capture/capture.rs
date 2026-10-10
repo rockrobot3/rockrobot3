@@ -3,9 +3,10 @@
 //! 占格 `audio.capture`（atom.toml）。SURFACE 是启动自述（组合件 rr3_sense_run 开头
 //! 逐字打印，契约面零改动红线）；`Rr3AudioConfig` 是装配注入的 config 数据形状
 //! （config.toml `[rr3-sense.audio]`，机制件零策略载荷，ADR-0019 裁定 5 L3）。
-//! DoA 粗判向随本原子落档（多通道原始帧只在此一用，下混前判向）；vad_start
-//! onset 的 `doa` 字段体（rr3_doa_field）也在此产出，组合件桥接进 vad 事件体
-//! （跨原子零类型依赖，只过 serde_json::Value）。
+//! DoA 粗判向随本原子落档（多通道原始帧只在此一用，下混前判向；0.0.5 批I S-8
+//! 整型化：isqrt + Q15 定点 + 256 格 asin 查表）；vad_start onset 的 `doa` 字段体
+//! 组装（rr3_doa_field）随 0.0.5 批I S-7 上移组合件——判向机制仍在件内，组合件
+//! 只组装字节（跨原子零类型依赖，只过 serde_json::Value）。
 
 #[path = "mech.rs"]
 mod mech;
@@ -30,6 +31,11 @@ pub struct Rr3AudioConfig {
     pub frame_ms: u64,
 }
 
-pub use mech::{
-    rr3_doa_field, rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_downmix_stream, rr3_pcm_event_body,
-};
+/// `Rr3DoaBin` 仅被 composite 测试按名构造（bin 目标面无读者，pub use 在 bin 编译
+/// 单元会吃 unused_imports）——测试面专用导出。
+#[cfg(test)]
+pub use mech::Rr3DoaBin;
+/// 公开面（0.0.5 批I S-6 收口）：节拍换算/流下混/判向与判向结果是件契约面；
+/// `rr3_pcm_event_body`/`rr3_doa_field` 已上移组合件（S-7），
+/// `rr3_pcm_downmix_mono`/阈值常数降 pub(crate)（无件外读者）
+pub use mech::{rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_downmix_stream, Rr3DoaFix};

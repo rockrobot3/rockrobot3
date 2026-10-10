@@ -5,11 +5,10 @@
 //! legacy btctl 的日志回放与远程命令语义已被 rrd 日志环 + `rr3.ctl.logs` 与
 //! rr3-ctl 总线运维面承接（legacy-digest btctl 行在案），真正剩下的只有
 //! "蓝牙作为一条链路"。本文件立**链路状态机骨架**：转移本体与后端无关
-//! （纯函数，单测钉死），sim 后端开机初值由 env 注入（缺省关，出厂不自动
-//! 开蓝牙）；BlueZ 真后端属板上件（cfg 门，0.0.4 方案 §1.3——实装依赖硬件
-//! 采购，后置板上 BlueZ 批次），本骨架不 claim 真射频链路。
-
-use super::RR3_HAL_SIM_BT_UP_ENV;
+//! （纯函数，单测钉死），开机初值由 ops/描述符注入（N-1：env 读出件，
+//! 当前经 config `[rr3-connect.bt]` up 数据化注入，批J G4 落 ops 槽时
+//! 迁移；缺省关，出厂不自动开蓝牙）；真后端属板上件（cfg 门，0.0.4 方案
+//! §1.3——实装依赖硬件采购，后置板上批次），本骨架不 claim 真射频链路。
 
 /// 蓝牙链路相位（三态）：关机 / 可发现（配网备选通道在开）/ 已连（对端在链）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,9 +49,16 @@ pub struct Rr3BtState {
 
 #[allow(dead_code)]
 impl Rr3BtState {
-    pub fn rr3_bt_state_new() -> Self {
+    /// 开机初值注入（N-1）：`up=true` 构造即上电进 Discoverable，false = Off
+    /// （出厂不自动开蓝牙）。初值是装配期注入不走转移矩阵——件内不再有
+    /// env 读（全仓 13 件里唯一非 test 面的 env 读，批I 拔除）。
+    pub fn rr3_bt_state_new(up: bool) -> Self {
         Self {
-            phase: Rr3BtPhase::Off,
+            phase: if up {
+                Rr3BtPhase::Discoverable
+            } else {
+                Rr3BtPhase::Off
+            },
         }
     }
 
@@ -98,22 +104,26 @@ impl Rr3BtState {
     }
 }
 
-/// sim 后端开机初值：`RR3_HAL_SIM_BT_UP=1` → 开机即上电进 Discoverable；
-/// `0` / 未设 / 取值不认 → Off（出厂不自动开蓝牙）。
-pub fn rr3_bt_backend_up_default() -> bool {
-    matches!(std::env::var(RR3_HAL_SIM_BT_UP_ENV).as_deref(), Ok("1"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 开机初值注入（N-1）：up=true 构造即 Discoverable，false = Off
+    /// （出厂不自动开蓝牙）——注入语义钉在纯函数单测。
+    #[test]
+    fn bt_state_new_takes_up_injection() {
+        let s = Rr3BtState::rr3_bt_state_new(true);
+        assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Discoverable, "注入 up 即上电");
+        let s = Rr3BtState::rr3_bt_state_new(false);
+        assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Off, "缺省关=出厂不自动开");
+    }
 
     /// 转移矩阵主链（方案 D5 判据"骨架单测绿"钉在这里）：出厂 Off →
     /// power_on → Discoverable → link_up → Connected → link_down →
     /// Discoverable → power_off → Off，全程合法转移必成。
     #[test]
     fn bt_phase_roundtrips_full_chain() {
-        let mut s = Rr3BtState::rr3_bt_state_new();
+        let mut s = Rr3BtState::rr3_bt_state_new(false);
         assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Off, "出厂关机");
         assert!(s.rr3_bt_power_on());
         assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Discoverable, "上电即可发现");
@@ -134,7 +144,7 @@ mod tests {
     /// 不能直接断电（须先 link_down——不 fake"连着还能静默关"）。
     #[test]
     fn bt_illegal_transitions_are_rejected_without_moving() {
-        let mut s = Rr3BtState::rr3_bt_state_new();
+        let mut s = Rr3BtState::rr3_bt_state_new(false);
         assert!(!s.rr3_bt_link_up(), "Off 不能直接入链");
         assert!(!s.rr3_bt_link_down(), "Off 不能离链");
         assert!(!s.rr3_bt_power_off(), "Off 不能再断电");

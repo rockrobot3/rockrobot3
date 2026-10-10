@@ -1,13 +1,13 @@
 # rr3-sense 运行期配置（由模块自己读取；secret 一律走环境变量，不落盘）
 # 阈值继承 legacy/main.c 的对话策略，改参数不碰源码（naming.md §4）。
-
-[rr3-sense]
-log_level = "info"
+# 0.0.5 批I S-1：[rr3-sense] log_level 删除（全仓无读者——被读或删除，选删除，
+# 与 P-6/N-6/I-1/B-8 同纪律）；本文件改为缺省装载（env 覆盖优先，与 power/connect
+# 同口径），生效来源随启动日志写明。
 
 [rr3-sense.audio]
 sample_rate = 16000
 channels = 1
-frame_ms = 20
+frame_ms = 20        # <1 无节拍意义，模块侧收敛 20 并留痕
 
 [rr3-sense.vad]
 rms_start = 1500        # 起音阈值

@@ -1,103 +1,76 @@
-//! led 原子件机制主体（五件套③，自原 src/led.rs 逐字迁入，逻辑零改动）。
+//! led 原子件机制主体（五件套③，批I F3/A-1 重构：去线程去 mpsc → 纯状态机）。
 //!
-//! 参数裁决 + 灯效执行体：worker 线程独占 gpio 写面，主循环经 channel 下发
-//! 效果、本地记账当前效果（应答 previous 用，单线程主循环内无竞争）。
-//! on/off 即写电平；blink 由 worker 线程按周期翻转（亮/灭各占周期一半）。
-
-use std::sync::mpsc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use rr_hal::{rr3_block_on, Rr3GpioOut};
-use serde_json::Value;
+//! 状态机不持 gpio、不自持节拍：[`rr3_led_tick`]（自由函数，`now_ms` 注入）
+//! 由组合件每圈驱动（节拍归组合件，A-1），返回 `Some(level)` 表示目标电平
+//! 变化，组合件落写 gpio。非 blink 态显式表示在 `mode` 字段（不再用"长眠
+//! 超时"兜）；`Off` 缺省留在件内（执行器安全态，属安全核同族，不许注入）。
+//! 写失败折日志不退——LED 是妆面件（A-12 分类），落写失败由组合件 `eprintln`。
+//!
+//! 参数下钻（缺/非串文案的 Value 面）已上移承载层（0.0.5 批I A-8，ADR-0019
+//! 修订 4）：白名单判定留件（`Rr3LedEffect::rr3_led_effect_parse`），件面
+//! serde_json 清零。
 
 use super::Rr3LedEffect;
 
-/// led/effect 参数裁决：缺/非串/不认一律 `Err` 点名白名单
-pub fn rr3_led_parse_args(args: &Value) -> Result<Rr3LedEffect, String> {
-    let Some(e) = args.get("effect") else {
-        return Err("缺 effect（on/off/blink）".into());
-    };
-    let Some(s) = e.as_str() else {
-        return Err(format!("effect 必须是字符串，收到 {e}"));
-    };
-    Rr3LedEffect::rr3_led_effect_parse(s)
-        .ok_or_else(|| format!("不认的灯效 {s:?}（白名单 on/off/blink）"))
-}
-
-/// 灯效执行体：worker 线程独占 gpio 写面，主循环经 channel 下发效果、
-/// 本地记账当前效果（应答 previous 用，单线程主循环内无竞争）。
+/// led 状态机（mode/level/next_toggle_ms 三状态字段 + 装配期定死的周期）。
+/// `current` 记账随 `rr3_led_apply` 推进（应答 previous 用，主循环单线程无竞争）。
 pub struct Rr3Led {
-    tx: mpsc::Sender<Rr3LedEffect>,
-    current: Rr3LedEffect,
+    mode: Rr3LedEffect,
+    level: bool,
+    next_toggle_ms: u64,
+    blink_period_ms: u64,
 }
 
 impl Rr3Led {
-    /// 起 worker：收效果命令并落电平；blink 模式下每半周期翻转一次。
-    /// gpio 失败只 `eprintln` 不退出——LED 是妆面件，写失败不当致命
-    /// （与总线传输性失败的处置不同层）。
-    pub fn rr3_led_new(gpio: Arc<dyn Rr3GpioOut>, blink_period_ms: u64) -> Self {
-        let (tx, rx) = mpsc::channel();
-        let half = Duration::from_millis((blink_period_ms / 2).max(1));
-        std::thread::Builder::new()
-            .name("rr3-act-led".into())
-            .spawn(move || rr3_led_worker(gpio, rx, half))
-            .expect("起灯效 worker 线程失败");
+    /// 建状态机：Off / 灭 / 翻转点 0（执行器安全态缺省，不许注入）
+    pub fn rr3_led_new(blink_period_ms: u64) -> Self {
         Self {
-            tx,
-            current: Rr3LedEffect::Off,
+            mode: Rr3LedEffect::Off,
+            level: false,
+            next_toggle_ms: 0,
+            blink_period_ms,
         }
     }
 
-    /// 应用效果：命令交 worker，返回 (生效效果, 前一效果)。
-    /// worker 已死（send 失败）按业务性失败折 error——进程本身没坏。
+    /// 半周期推导（机制，留件）：blink 亮/灭各占周期一半，至少 1ms
+    fn rr3_led_half_ms(&self) -> u64 {
+        (self.blink_period_ms / 2).max(1)
+    }
+
+    /// 应用效果：立即落目标电平（blink 从**亮相**起步，不等下一半拍），
+    /// 返回 (生效, 前一, 目标电平)。目标电平由组合件落写 gpio。
     pub fn rr3_led_apply(
         &mut self,
+        now_ms: u64,
         e: Rr3LedEffect,
-    ) -> Result<(Rr3LedEffect, Rr3LedEffect), String> {
-        self.tx
-            .send(e)
-            .map_err(|_| "灯效 worker 已退出".to_string())?;
-        let previous = self.current;
-        self.current = e;
-        Ok((e, previous))
+    ) -> (Rr3LedEffect, Rr3LedEffect, bool) {
+        let previous = self.mode;
+        self.mode = e;
+        self.level = e != Rr3LedEffect::Off;
+        if e == Rr3LedEffect::Blink {
+            self.next_toggle_ms = now_ms + self.rr3_led_half_ms();
+        }
+        (e, previous, self.level)
     }
 }
 
-/// worker 主循环：非 blink 长眠等命令；blink 每半周期醒一次翻电平。
-/// 切效果即落目标电平（blink 从亮相起步），不等下一个半拍。
-fn rr3_led_worker(gpio: Arc<dyn Rr3GpioOut>, rx: mpsc::Receiver<Rr3LedEffect>, half: Duration) {
-    let mut mode = Rr3LedEffect::Off;
-    let mut level = false;
-    rr3_block_on(gpio.set(level)).unwrap_or_else(|e| eprintln!("rr3-act-led: 初始写电平失败: {e}"));
-    loop {
-        let wait = match mode {
-            Rr3LedEffect::Blink => half,
-            _ => Duration::from_secs(3600),
-        };
-        match rx.recv_timeout(wait) {
-            Ok(new) => {
-                mode = new;
-                level = new != Rr3LedEffect::Off;
-                rr3_block_on(gpio.set(level))
-                    .unwrap_or_else(|e| eprintln!("rr3-act-led: 写电平失败: {e}"));
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                level = !level;
-                rr3_block_on(gpio.set(level))
-                    .unwrap_or_else(|e| eprintln!("rr3-act-led: 翻转写电平失败: {e}"));
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
-        }
+/// 节拍推进（A-1，组合件每圈调用）：blink 到点半周期翻转一次并按当前时刻
+/// 重锚；非 blink 恒 `None`（不空转）。返回 `Some(level)` = 目标电平，组合件
+/// 落写 gpio。
+pub fn rr3_led_tick(now_ms: u64, led: &mut Rr3Led) -> Option<bool> {
+    if led.mode != Rr3LedEffect::Blink || now_ms < led.next_toggle_ms {
+        return None;
     }
+    led.level = !led.level;
+    led.next_toggle_ms = now_ms + led.rr3_led_half_ms();
+    Some(led.level)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rr_hal::sim::Rr3SimGpioOut;
-    use serde_json::json;
-    use std::time::Instant;
+    use rr_hal::Rr3GpioOut as _;
 
     #[test]
     fn effect_parse_covers_whitelist_and_rejects_garbage() {
@@ -114,95 +87,70 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parse_args_rejects_missing_non_string_and_unknown() {
-        let e = rr3_led_parse_args(&json!({})).unwrap_err();
-        assert!(e.contains("effect"), "缺参数要点名: {e}");
-        let e = rr3_led_parse_args(&json!({"effect": 3})).unwrap_err();
-        assert!(e.contains("字符串"), "类型不符要点名: {e}");
-        let e = rr3_led_parse_args(&json!({"effect": "strobe"})).unwrap_err();
-        assert!(e.contains("白名单"), "不认的值点名白名单: {e}");
-    }
-
     /// apply 的记账面：current 随切换推进，previous 是切换前的值（初始 off 由
-    /// 首次 apply 的 previous 断言钉住）
+    /// 首次 apply 的 previous 断言钉住）；目标电平同步返回（合成时钟，零等待）
     #[test]
     fn apply_tracks_current_and_previous() {
-        let mut led = Rr3Led::rr3_led_new(Arc::new(Rr3SimGpioOut::rr3_sim_gpio_new(false)), 500);
-        let (applied, previous) = led.rr3_led_apply(Rr3LedEffect::On).unwrap();
+        let mut led = Rr3Led::rr3_led_new(500);
+        assert!(!led.level, "初始安全态=灭");
+        let (applied, previous, level) = led.rr3_led_apply(1000, Rr3LedEffect::On);
         assert_eq!((applied, previous), (Rr3LedEffect::On, Rr3LedEffect::Off));
-        let (applied, previous) = led.rr3_led_apply(Rr3LedEffect::Blink).unwrap();
+        assert!(level, "on 立即出目标电平（亮相不等拍）");
+        let (applied, previous, level) = led.rr3_led_apply(1000, Rr3LedEffect::Blink);
         assert_eq!((applied, previous), (Rr3LedEffect::Blink, Rr3LedEffect::On));
+        assert!(level, "blink 从亮相起步");
     }
 
-    /// blink 真的在翻电平：短周期下采样窗口内必须见过两种电平；
-    /// 切回 off 后电平归零并稳定。观察走 Arc 的另一份克隆（worker 独占写面）。
+    /// blink 真的在翻电平（合成时钟，A-1/R-4：真等半周期 → 注入 now_ms 逐拍
+    /// 推）；切回 off 后电平归零并稳定（半周期×3 内 tick 不再翻转）。
+    /// 行为序列与原真等用例逐字同构，只是时钟由注入给定。
     #[test]
     fn blink_toggles_level_and_off_stops_it() {
-        let gpio: Arc<dyn Rr3GpioOut> = Arc::new(Rr3SimGpioOut::rr3_sim_gpio_new(false));
-        let mut led = Rr3Led::rr3_led_new(gpio.clone(), 40);
-        led.rr3_led_apply(Rr3LedEffect::Blink).unwrap();
-        let started = Instant::now();
-        let mut seen = (false, false);
-        while started.elapsed() < Duration::from_millis(600) {
-            let lv = rr3_block_on(gpio.level()).unwrap();
-            if lv {
-                seen.0 = true;
-            } else {
-                seen.1 = true;
-            }
-            if seen.0 && seen.1 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert!(
-            seen.0 && seen.1,
-            "600ms 内 blink 必须翻出两种电平: {seen:?}"
-        );
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut led = Rr3Led::rr3_led_new(40); // 半周期 20ms
+        let (_, _, level) = led.rr3_led_apply(1000, Rr3LedEffect::Blink);
+        gpio.set(level).unwrap();
+        assert!(gpio.rr3_sim_gpio_level(), "blink 亮相即亮");
 
-        led.rr3_led_apply(Rr3LedEffect::Off).unwrap();
-        std::thread::sleep(Duration::from_millis(120));
-        assert!(
-            !rr3_block_on(gpio.level()).unwrap(),
-            "切 off 后电平归零且稳定（半周期×3 内不再翻转）"
-        );
+        // 逐拍推 10 个半周期：必翻出两种电平
+        let mut seen_low = false;
+        let mut t = 1000;
+        for _ in 1..=10 {
+            t += 20;
+            if let Some(level) = rr3_led_tick(t, &mut led) {
+                gpio.set(level).unwrap();
+            }
+            if !gpio.rr3_sim_gpio_level() {
+                seen_low = true;
+            }
+        }
+        assert!(seen_low, "10 个半周期内 blink 必须翻出灭态");
+
+        // 半周期中点不翻（早于到点 tick 恒 None）
+        t += 10;
+        assert!(rr3_led_tick(t, &mut led).is_none(), "未到半周期不翻");
+
+        let (_, _, level) = led.rr3_led_apply(t, Rr3LedEffect::Off);
+        gpio.set(level).unwrap();
+        assert!(!gpio.rr3_sim_gpio_level(), "切 off 立即归零");
+        for _ in 0..3 {
+            t += 20;
+            assert!(rr3_led_tick(t, &mut led).is_none(), "off 后 tick 不翻");
+            assert!(!gpio.rr3_sim_gpio_level(), "切 off 后电平稳定");
+        }
     }
 
-    /// on/off 落电平：worker 异步生效，断言走有界轮询（判据是"成真"，不是时延）
+    /// on/off 落电平：apply 同步返回目标电平，组合件落写后 gpio 即见——
+    /// 判据是"成真"，不再是时延（原真等轮询改合成时钟同构）
     #[test]
     fn on_and_off_take_effect_immediately() {
-        let gpio: Arc<dyn Rr3GpioOut> = Arc::new(Rr3SimGpioOut::rr3_sim_gpio_new(false));
-        let mut led = Rr3Led::rr3_led_new(gpio.clone(), 500);
-        led.rr3_led_apply(Rr3LedEffect::On).unwrap();
-        assert!(
-            rr3_wait_until(
-                || rr3_block_on(gpio.level()).unwrap(),
-                Duration::from_millis(500)
-            ),
-            "on 必须落亮"
-        );
-        led.rr3_led_apply(Rr3LedEffect::Off).unwrap();
-        assert!(
-            rr3_wait_until(
-                || !rr3_block_on(gpio.level()).unwrap(),
-                Duration::from_millis(500)
-            ),
-            "off 必须落灭"
-        );
-    }
-
-    /// 有界轮询：每 5ms 求值一次，期限内成真即过——与 e2e 侧 rr3_wait_until 同一口径
-    fn rr3_wait_until<F: FnMut() -> bool>(mut pred: F, dur: Duration) -> bool {
-        let started = Instant::now();
-        loop {
-            if pred() {
-                return true;
-            }
-            if started.elapsed() >= dur {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut led = Rr3Led::rr3_led_new(500);
+        let (_, _, level) = led.rr3_led_apply(0, Rr3LedEffect::On);
+        gpio.set(level).unwrap();
+        assert!(gpio.rr3_sim_gpio_level(), "on 必须落亮");
+        let (_, _, level) = led.rr3_led_apply(0, Rr3LedEffect::Off);
+        gpio.set(level).unwrap();
+        assert!(!gpio.rr3_sim_gpio_level(), "off 必须落灭");
     }
 }

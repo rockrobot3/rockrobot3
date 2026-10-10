@@ -4,8 +4,10 @@
 //! 一拍报当前帧并推进（到尾回卷），切换表情 / talk 挂起恢复都归零指针从首帧
 //! 重播。最小表情机：持有当前表情；`talk` 是唯一的瞬态——播放开始挂起（记住
 //! 被打断的表情），播放结束恢复。单线程主循环内使用，无并发面。
-
-use serde_json::{json, Value};
+//!
+//! 载荷组装（`rr3_face_result` 的 json!）与点名下钻（`rr3_face_parse_args`）
+//! 已上移承载层（0.0.5 批I I-8，ADR-0019 修订 4）：件面只交状态机
+//! （结构体 + 判定），组装归 `src/composite.rs`，线上字节逐字不变。
 
 use super::{Rr3FaceFrame, RR3_FACE_EXPRESSIONS, RR3_FACE_TALK, RR3_FACE_TOPIC};
 
@@ -219,24 +221,9 @@ impl Rr3Face {
     }
 }
 
-/// 从 rr3.call 的 `params.args` 里取表情请求参数：`expression` 必填。
-/// 合法性交给 [`Rr3Face::rr3_face_set`]（错误信息里带白名单，这里不做两遍）。
-pub fn rr3_face_parse_args(args: &Value) -> Result<String, String> {
-    args.get("expression")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| format!("{RR3_FACE_TOPIC} 缺 string 参数 expression"))
-}
-
-/// `rr3-interact/face/expression` 的应答体：切换后的表情与切换前的表情。
-pub fn rr3_face_result(current: &str, previous: &str) -> Value {
-    json!({ "expression": current, "previous": previous })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn whitelist_covers_seven_expressions() {
@@ -383,19 +370,5 @@ mod tests {
         assert_eq!((cur, prev), ("happy", "talk"));
         assert_eq!(f.rr3_face_end_talk(), "idle", "挂起态已被显式指令打断");
         assert_eq!(f.rr3_face_set("blink").unwrap(), ("blink", "idle"));
-    }
-
-    #[test]
-    fn args_and_result_shapes() {
-        assert_eq!(
-            rr3_face_parse_args(&json!({ "expression": "blink" })).unwrap(),
-            "blink"
-        );
-        assert!(rr3_face_parse_args(&json!({})).is_err());
-        assert!(rr3_face_parse_args(&json!({ "expression": 1 })).is_err());
-        let r = rr3_face_result("talk", "idle");
-        assert_eq!(r["expression"], "talk");
-        assert_eq!(r["previous"], "idle");
-        assert_eq!(r.get("topic"), None, "应答体不带 topic");
     }
 }
