@@ -103,6 +103,33 @@ mod peer {
                 println!("sim-peer: 已发布 {topic}");
                 rr3_beat(&mut stream, task, 10)
             }
+            // e2e 点名发起方（0.0.7 §9.4 ⑤ macOS 档）：注册后发一次 `rr3.call`，
+            // 等被调方沿 Response 回路（trace_id = 本 task）送回的应答，result
+            // 原样打行作 round-trip 物证，喂一颗心跳后退场。点名对象与参数由
+            // 环境给（topic 必填、args 可选 JSON）——夹具不持业务主题知识。
+            // error 应答即 Err（非零退出）：e2e 的"点名被拒"负向判据就靠它。
+            "call_once" => {
+                let topic = env::var("RR3_SIM_PEER_CALL_TOPIC")
+                    .map_err(|_| "call_once 需要 RR3_SIM_PEER_CALL_TOPIC".to_string())?;
+                let args: Value = match env::var("RR3_SIM_PEER_CALL_ARGS") {
+                    Ok(s) => serde_json::from_str(&s)
+                        .map_err(|e| format!("RR3_SIM_PEER_CALL_ARGS 不是合法 JSON: {e}"))?,
+                    Err(_) => Value::Null,
+                };
+                rr3_send(
+                    &mut stream,
+                    Rr3PayloadType::Request,
+                    task,
+                    &json!({"jsonrpc": "2.0", "id": 2, "method": "rr3.call",
+                            "params": {"topic": topic, "args": args}}),
+                )?;
+                let reply = rr3_wait_reply(&mut stream, 2)?;
+                if reply["error"].is_object() {
+                    return Err(format!("call 被拒: {}", reply["error"]));
+                }
+                println!("sim-peer: call {topic} 回路 result={}", reply["result"]);
+                rr3_beat(&mut stream, task, 10)
+            }
             "exit_clean" => {
                 rr3_send(
                     &mut stream,
