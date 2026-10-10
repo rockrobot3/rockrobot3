@@ -63,8 +63,11 @@ const MANIFEST_TEXT: &str = "[manifest]\nschema_version = 1\nname = \"rr3-espidf
 
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
-/// reader/心跳线程的栈面（IDF pthread 缺省栈偏小，serde_json 递归 + 帧缓冲留余量）。
-const THREAD_STACK: usize = 8192;
+/// reader/心跳线程的栈面（板上实测实锤：8KB 不够 serde_json 解析 + json! 构造 +
+/// FrameBuf 的峰值——溢出踩坏堆 → Arc 指针踩成垃圾 → std Mutex 惰性 pthread 初始化
+/// 崩溃（EXCVADDR=0xb）；16KB 后板上三点实测全程无崩溃。IDF pthread 缺省栈偏小，
+/// 此值即运行下限，勿再调低）
+const THREAD_STACK: usize = 16384;
 /// 断开后的复位延迟（让 monitor 把日志冲完再 restart，避免紧复位刷屏）。
 const RESTART_DELAY: Duration = Duration::from_secs(3);
 
