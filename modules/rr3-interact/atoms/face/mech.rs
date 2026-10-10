@@ -178,7 +178,7 @@ impl Rr3Face {
         if expr == RR3_FACE_TALK {
             return Err(format!("{RR3_FACE_TALK} 由 TTS 播放自动驱动，不接受点名"));
         }
-        let prev = std::mem::replace(&mut self.current, expr);
+        let prev = core::mem::replace(&mut self.current, expr);
         self.suspended = None; // 显式指令打断 talk 挂起态
         self.frame_ix = 0; // 切换即从首帧重播
         Ok((expr, prev))
@@ -189,7 +189,7 @@ impl Rr3Face {
         if self.current == RR3_FACE_TALK {
             return self.suspended.unwrap_or("idle");
         }
-        let prev = std::mem::replace(&mut self.current, RR3_FACE_TALK);
+        let prev = core::mem::replace(&mut self.current, RR3_FACE_TALK);
         self.suspended = Some(prev);
         self.frame_ix = 0; // 进 talk 从首帧（张口帧）播起
         prev

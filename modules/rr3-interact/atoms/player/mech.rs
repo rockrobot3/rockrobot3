@@ -90,7 +90,7 @@ mod tests {
         assert_eq!(played.len(), 240 * 16);
         for (i, &v) in played.iter().enumerate() {
             let want = (12_000.0f64
-                * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 16_000.0).sin())
+                * (2.0 * core::f64::consts::PI * 440.0 * i as f64 / 16_000.0).sin())
                 as i64;
             assert!((v as i64 - want).abs() <= 100, "sample #{i}: {v} vs {want}");
         }
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(played.len(), 120 * 16);
         for (i, &v) in played.iter().enumerate() {
             let want = (12_000.0f64
-                * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 16_000.0).sin())
+                * (2.0 * core::f64::consts::PI * 440.0 * i as f64 / 16_000.0).sin())
                 as i64;
             assert!((v as i64 - want).abs() <= 100, "sample #{i}: {v} vs {want}");
         }
