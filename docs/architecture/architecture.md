@@ -1145,9 +1145,15 @@ provides / subscribes / exposes、能力格绑定、§6 的消息语义）**不�
 且默认退 0（只有 `--strict` 才拦），所以矩阵里不许写"① 已过"，只能写"实跑 N/4 路 + 其余 SKIP 原因"。
 
 **承载体（v0.9 写实，原先无主语）**：矩阵假定"能真正执行的跨架构流水线"承载它，但远端 atomgit 的
-Actions 从不运行（敞口见 status.md）。故规定：矩阵的**默认承载体是本地 runner**（WSL2 + qemu + 交叉
-工具链，入口 `tools/ci/matrix.sh`，随批K 建），远端流水线是第二承载体而非前置条件；`matrix.sh` 必须以
-`--strict` 口径出数——**SKIP 记为未跑，不记为通过**。
+Actions 从不运行（敞口见 status.md）。故规定：矩阵的**默认承载体是一组钉死版本的标准化环境，不是某台机器**（v0.9 同日四轮改判，D4 裁定，定形表见
+[0.0.5 方案 §13.2](../process/dev/0.0.5版本洛克三号对齐与裁定方案.md)）：E1 host-x86_64（`rust:*-bookworm`
++ musl/arm64 target + qemu-user + docker）、E2 xtensa-none-elf（esp-rs fork v1.90.0.0 镜像，
+`build-std=core,alloc`）、E3 espidf-std（`espressif/idf` + esp-clang）三个容器出 ①②③④⑤⑥ 六列，
+本地 WSL2 与 GitHub-hosted runner 只是同一环境的两种载体；入口仍是 `tools/ci/matrix.sh`（随批K 建），
+必须以 `--strict` 口径出数——**SKIP 记为未跑，不记为通过**。**两条硬限制写在这里防冒领**：
+⑦ 时序达标的真值**只能来自 E4 真板**（云 runner 是共享 x86、qemu-user 是指令级模拟，两者的时间都不是
+硬件时间）；E2/E3 出的是**编译面证据**，不能折算成"目标上跑过"。矩阵每行还必须带**环境指纹**
+（镜像 digest + `rustc -Vv` + 目标三元组），指纹缺失或换代而不重跑的行按"无载体"计，不作 PASS。——**SKIP 记为未跑，不记为通过**。
 
 **承载三档各交一行实录**：全承载档首行 = 树莓派（0.0.6 真板批，已发生的事按本表重新登记）；轻承载档
 首行 = ESP32（0.0.7，四件供给 + ①②③⑤ 为硬项）；无承载档留空行，触发条件 = 一块真无 OS 的板。
