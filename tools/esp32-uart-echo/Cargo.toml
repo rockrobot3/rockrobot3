@@ -22,3 +22,9 @@ rr-ipc = { path = "../../base/runtime/rr-ipc" }
 esp-alloc = { version = "=0.10.0", features = ["esp32"] }
 # unstable 特性：UartTx/UartRx 拆分件与 read_buffered（静默超时轮询所需）在该门后
 esp-hal = { version = "=1.1.2", features = ["esp32", "unstable"] }
+# ESP-IDF app descriptor（批C④ 板级烧录现场补）：espflash 4.x 构镜像时硬校验
+# ELF 内 descriptor（IDF 二级引导运行期也验），缺它镜像被拒。仅引入类型面
+# EspAppDesc——0.1/0.2 宏段名（.rodata_desc.appdesc）与本仓 esp-hal 1.1.2 的
+# KEEP 段名（.flash.appdesc）错代，宏产物必被 gc-sections 丢弃，descriptor
+# 由 main.rs 按对表段名手挂（详见 main.rs 注释）
+esp-bootloader-esp-idf = "=0.1.0"
