@@ -51,8 +51,10 @@ use rr_core::{rr3_frame_compose, RR3_TASK_RRD, RR3_TRACE_ID_DIRECT};
 use rr_ipc::transport::Rr3TransportConn;
 use rr_ipc::{opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3FrameBuf, Rr3PayloadType};
 
-/// 模块名（manifest.name 唯一真值——线上注册面）。
-const NAME: &str = "rr3-espidf-sentinel";
+/// 模块名（manifest.name 唯一真值——线上注册面）。词干纯小写是命名契约硬规则
+/// （^rr3-[a-z]+$，module.schema.toml rule=module_name）；工程名/目录名
+/// espidf-sentinel 是 crate 名非总线身份，不受此约束。
+const NAME: &str = "rr3-sentinel";
 /// 心跳间隔（manifest [health].heartbeat_ms 同值；机制核保底 ≥1ms 的输入）。
 const HEARTBEAT_MS: u64 = 200;
 /// 线上 manifest（rr3.register 的 params.manifest）：entry 绝对路径是 rrd 门禁
@@ -60,7 +62,7 @@ const HEARTBEAT_MS: u64 = 200;
 /// 是本固件；restart_policy = "never"（进程面监督对本模块不适用，watchdog 判死
 /// 走在册表记账）。`[rpc].exposes` 是 M3 `rr3.call` 的路由表来源（0.0.7 §9.4 ⑤
 /// e2e round-trip：sim_peer 点名 probe 主题 → 本哨兵应答），不声明 = 不接点名。
-const MANIFEST_TEXT: &str = "[manifest]\nschema_version = 1\nname = \"rr3-espidf-sentinel\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/opt/rr3/bin/rr3-espidf-sentinel\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[resources]\nrestart_policy = \"never\"\n\n[health]\nheartbeat_ms = 200\nwatchdog_timeout_ms = 2000\n\n[rpc]\nexposes = [\"rr3-espidf-sentinel/probe\"]\n";
+const MANIFEST_TEXT: &str = "[manifest]\nschema_version = 1\nname = \"rr3-sentinel\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/opt/rr3/bin/rr3-espidf-sentinel\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[resources]\nrestart_policy = \"never\"\n\n[health]\nheartbeat_ms = 200\nwatchdog_timeout_ms = 2000\n\n[rpc]\nexposes = [\"rr3-sentinel/diag/probe\"]\n";
 
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
