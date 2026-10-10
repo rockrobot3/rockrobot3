@@ -35,7 +35,9 @@ pub struct Rr3AudioConfig {
 /// 单元会吃 unused_imports）——测试面专用导出。
 #[cfg(test)]
 pub use mech::Rr3DoaBin;
-/// 公开面（0.0.5 批I S-6 收口）：节拍换算/流下混/判向与判向结果是件契约面；
-/// `rr3_pcm_event_body`/`rr3_doa_field` 已上移组合件（S-7），
-/// `rr3_pcm_downmix_mono`/阈值常数降 pub(crate)（无件外读者）
-pub use mech::{rr3_doa_fix, rr3_frames_per_tick, rr3_pcm_downmix_stream, Rr3DoaFix};
+/// 公开面（0.0.5 批I S-6 收口；深挖收口再修）：节拍换算/判向与判向结果是件契约面；
+/// `rr3_pcm_event_body`/`rr3_doa_field` 已上移组合件（S-7），stream 级下混亦随
+/// 深挖收口上移组合件（`Rr3PcmStream` 是承载层数据类型，C7 白名单外）——
+/// `rr3_pcm_downmix_mono`/阈值常数 pub(crate)（唯一读者是组合件承载层）
+pub use mech::{rr3_doa_fix, rr3_frames_per_tick, Rr3DoaFix};
+pub(crate) use mech::rr3_pcm_downmix_mono;
