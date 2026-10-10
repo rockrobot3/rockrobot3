@@ -1,0 +1,21 @@
+[package]
+name = "rr3-bridge"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "0.0.7 批E 层④ 桥件：UART↔UDS transport 级字节中继（R15 连接多路器，零策略零解析）"
+
+# 独立宿主 crate（tools/ 顶层惯例，与 rr3-sentinel-harness 同构——落独立目录即普通
+# 宿主工程，check.sh ④/⑥ 按独立工程口径自动覆盖，无需专用门）。
+[workspace]
+
+[dependencies]
+# 依赖闭包 L0（std + rr-ipc）：桥不解析帧、不改写字节，serde_json 等一概不进。
+# rr-ipc 只为 Rr3UartConn（raw termios 串口句柄，开口即净）。
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+
+[[bin]]
+name = "rr3-bridge"
+path = "src/main.rs"
