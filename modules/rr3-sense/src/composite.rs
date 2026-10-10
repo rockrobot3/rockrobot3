@@ -3,7 +3,9 @@
 //! 组合件 = capture ⊗ vad ⊗ env ⊗ imu（composite.toml 的 ⊗ 链；⊗=装配期、
 //! 执行单元内函数调用，ADR-0019 裁定 2）。本文件承载装配与运行机制：config
 //! 解析（阈值等策略经 config 数据化注入，机制件零策略载荷）、事务面
-//! `rr3-sense/capture/dump` 的点名应答、主循环。
+//! `rr3-sense/capture/dump` 的点名应答、主循环。载荷组装与参数下钻面同在此处
+//! （0.0.5 批I S-7，ADR-0019 修订 4：capture/vad 两件的 `*_body`/`*_field`
+//! 上移，件面 serde_json 清零，用例随迁）。
 //!
 //! 启动序列（自原入口 rr3_run 逐字迁入，语义零改动）：读 `RR3_MANIFEST`
 //! （rrd spawn 注入的 manifest 绝对路径，supervisor.rs）→ [`Rr3BusClient::rr3_connect`]
@@ -29,12 +31,12 @@ mod vad;
 use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_audio_source, rr3_block_on, Rr3AudioCfg};
-use rr_ipc::{opcode, Rr3PayloadType};
+use rr_hal::{backend::rr3_hal_audio_source, Rr3AudioCfg, Rr3PcmStream};
+use rr_ipc::{opcode, rr3_base64_encode, Rr3PayloadType};
 use serde_json::{json, Value};
 
-use capture::Rr3AudioConfig;
-use vad::{Rr3VadConfig, Rr3VadState};
+use capture::{Rr3AudioConfig, Rr3DoaFix};
+use vad::{Rr3VadConfig, Rr3VadEdge, Rr3VadState};
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
 const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
@@ -65,15 +67,17 @@ pub fn rr3_sense_run() -> Result<(), String> {
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
     println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
-    let cfg = rr3_sense_config_load()?;
-    let (source, backend) = rr3_hal_audio_source();
+    let cfg = rr3_sense_config_load(&manifest_path)?;
+    let (mut source, backend) = rr3_hal_audio_source();
     // 采集配置按 config 真值开（R14：channels>1 即双麦期；默认 1 声道与旧硬编码逐点等价）
     let open_cfg = Rr3AudioCfg {
         sample_rate_hz: cfg.audio.sample_rate,
         channels: cfg.audio.channels,
         bit_depth: 16,
     };
-    rr3_block_on(source.open(open_cfg)).map_err(|e| format!("打开音频源({backend})失败: {e}"))?;
+    source
+        .open(open_cfg)
+        .map_err(|e| format!("打开音频源({backend})失败: {e}"))?;
     println!(
         "音频源就绪: backend={backend} rate={} ch={} frame_ms={}",
         cfg.audio.sample_rate, cfg.audio.channels, cfg.audio.frame_ms
@@ -87,24 +91,30 @@ pub fn rr3_sense_run() -> Result<(), String> {
     loop {
         let start = Instant::now();
 
-        let pcm = rr3_block_on(source.read(frames_per_tick))
+        // 读一拍：buf 按"帧×声道"分配采样点数（F1 定形 read 收采样点 buf，
+        // 返回实填采样点数，欠载按实数截断）
+        let mut buf = vec![0i16; frames_per_tick * cfg.audio.channels as usize];
+        let done = source
+            .read(&mut buf)
             .map_err(|e| format!("读帧失败({backend}): {e}"))?;
+        buf.truncate(done);
+        let raw = Rr3PcmStream {
+            cfg: open_cfg,
+            samples: buf,
+        };
         // DoA 粗判向（批F2）：多通道帧在下混**前**判向（双麦原始通道只在此一用），
         // 最新一档随下一次 onset 边沿上路；单声道/静音帧恒 None，事件体不带 doa
-        let doa = capture::rr3_doa_fix(&pcm.samples, pcm.cfg.channels);
+        let doa = capture::rr3_doa_fix(&raw.samples, raw.cfg.channels);
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
-        let pcm = capture::rr3_pcm_downmix_stream(pcm);
+        let pcm = capture::rr3_pcm_downmix_stream(raw);
         seq += 1;
-        bus.rr3_publish(
-            capture::RR3_PCM_TOPIC,
-            capture::rr3_pcm_event_body(seq, &pcm),
-        )?;
+        bus.rr3_publish(capture::RR3_PCM_TOPIC, rr3_pcm_event_body(seq, &pcm))?;
 
         if let Some(edge) = vad_state.rr3_vad_feed(&pcm.samples) {
             bus.rr3_publish(
                 vad::RR3_VAD_START_TOPIC,
-                vad::rr3_vad_event_body(seq, edge, doa.map(|d| capture::rr3_doa_field(&d))),
+                rr3_vad_event_body(seq, edge, doa.map(|d| rr3_doa_field(&d))),
             )?;
         }
 
@@ -143,6 +153,61 @@ pub fn rr3_sense_run() -> Result<(), String> {
     }
 }
 
+// ---------- 载荷组装与参数下钻面（0.0.5 批I S-7，ADR-0019 修订 4） ----------
+//
+// capture/vad 两件的 `*_body`/`*_field` 自原子面整体上移至此（代码与文档注释
+// 逐字迁入，线上字节不变）：件面只留纯机制（结构体+判定函数），serde_json 清零；
+// 载荷组装集中组合件一处，用例随迁（原子测"输入→机制"，本层测"输入→字节"）。
+
+/// `rr3-sense/audio/pcm` 的事件体（stream）。PCM 按 s16le 小端打包后 base64；
+/// 320 帧 @16k/mono ≈ 856 字符，20ms 一帧对 UDS 无压力（shm 零拷贝随 M5）。
+/// 负载里**不含 topic**（topic 由 rr-bus 客户端并入，见 client.rs 的 rr3_publish）。
+fn rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value {
+    let mut bytes = Vec::with_capacity(pcm.samples.len() * 2);
+    for s in &pcm.samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    json!({
+        "seq": seq,
+        "format": "s16le",
+        "rate": pcm.cfg.sample_rate_hz,
+        "channels": pcm.cfg.channels,
+        "ms": pcm.rr3_pcm_duration_ms(),
+        "pcm_b64": rr3_base64_encode(&bytes),
+    })
+}
+
+/// vad_start onset 的 `doa` 字段体（schema：deg + bin 两键，additionalProperties=false）。
+/// 判向机制在 capture 原子（原始帧下混前判定），字段组装在此（S-7 上移）——
+/// 判向结果经 [`rr3_doa_fix`] 的返回值上行，跨原子零类型依赖，只过 serde_json::Value。
+fn rr3_doa_field(d: &Rr3DoaFix) -> Value {
+    json!({ "deg": d.deg, "bin": d.bin.rr3_doa_bin_as_str() })
+}
+
+/// `rr3-sense/audio/vad_start` 的事件体（event）。边沿负载只带摘要
+/// （edge / rms_peak / speech_ms），不带任何闭环数据（ADR-0007 §决策一）。
+/// 负载里**不含 topic**（topic 由 rr-bus 客户端并入，见 client.rs 的 rr3_publish）。
+/// `doa` 字段体由 capture 原子判出（deg + bin 两键）、此处组装并桥接进 onset——
+/// 批F2 的负载扩展（append 兼容，schema_version 仍 1）：仅 onset 且判出
+/// （多通道非静音帧）时携带，offset 不带——与 rms_peak 同一形状纪律。
+fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge, doa: Option<Value>) -> Value {
+    let mut body = match edge {
+        Rr3VadEdge::Onset {
+            rms_peak,
+            speech_ms,
+        } => json!({
+            "seq": seq, "edge": "onset", "rms_peak": rms_peak, "speech_ms": speech_ms,
+        }),
+        Rr3VadEdge::Offset { speech_ms } => json!({
+            "seq": seq, "edge": "offset", "speech_ms": speech_ms,
+        }),
+    };
+    if let (Rr3VadEdge::Onset { .. }, Some(d)) = (&edge, doa) {
+        body["doa"] = d;
+    }
+    body
+}
+
 // ---------- 事务面应答体 ----------
 
 /// `rr3-sense/capture/dump`（rpc.exposes 的事务面）的应答体：
@@ -164,8 +229,8 @@ fn rr3_dump_result(seq: u64, backend: &str, cfg: &Rr3SenseConfig) -> Value {
 
 // ---------- 配置加载（装配期注入，原 audio/mod.rs 配置段逐字迁入） ----------
 
-/// 配置文件路径的环境变量键；未设 = 用登记默认值（config.toml 的值即默认值的登记处）
-pub const RR3_SENSE_CONFIG_ENV: &str = "RR3_SENSE_CONFIG";
+/// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
+const RR3_SENSE_CONFIG_ENV: &str = "RR3_SENSE_CONFIG";
 
 /// 模块全量运行期配置
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,17 +252,24 @@ impl Default for Rr3SenseConfig {
     }
 }
 
-/// 读配置：`RR3_SENSE_CONFIG` 指向 TOML 文件；未设/读不到路径变量时用默认值。
-/// 文件存在但非法 = 显式报错退出（半读到的配置比没有更危险）。
-fn rr3_sense_config_load() -> Result<Rr3SenseConfig, String> {
-    match std::env::var(RR3_SENSE_CONFIG_ENV) {
-        Err(_) => Ok(Rr3SenseConfig::default()),
-        Ok(path) => {
-            let text =
-                std::fs::read_to_string(&path).map_err(|e| format!("读配置 {path} 失败: {e}"))?;
-            rr3_sense_config_parse(&text)
-        }
-    }
+/// 读配置：`RR3_SENSE_CONFIG` 覆盖优先，缺省读 manifest 同目录的 config.toml
+/// （0.0.5 批I S-1：与 power/connect 同口径——原"未设 env 则整份 config.toml
+/// 不生效、静默用代码缺省"的分叉消灭；代码侧 `Default` 仍是文件缺键的回落）。
+/// 文件读不到/非法 = 显式报错退出（半读到的配置比没有更危险）。
+/// 生效来源随启动日志写明。
+fn rr3_sense_config_load(manifest_path: &str) -> Result<Rr3SenseConfig, String> {
+    let path = std::env::var(RR3_SENSE_CONFIG_ENV).unwrap_or_else(|_| {
+        std::path::Path::new(manifest_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("config.toml")
+            .to_string_lossy()
+            .into_owned()
+    });
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读 config {path} 失败: {e}"))?;
+    let cfg = rr3_sense_config_parse(&text)?;
+    println!("config 就绪: 来源={path}");
+    Ok(cfg)
 }
 
 /// 解析配置文本：缺键回落默认，类型错显式报错（不静默吞）。
@@ -214,6 +286,12 @@ fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, String> {
         rr3_cfg_u64(audio, "sample_rate", &mut rate)?;
         rr3_cfg_u64(audio, "channels", &mut ch)?;
         rr3_cfg_u64(audio, "frame_ms", &mut fms)?;
+        // 0.0.5 批I S-1：frame_ms < 1（u64 域即 0）无节拍意义（0 帧 → read 空
+        // → 全速刷总线），收敛到登记默认 20ms 并留痕——半有效的配置比报错更隐蔽
+        if fms < 1 {
+            eprintln!("config [rr3-sense.audio] frame_ms={fms} 无节拍意义，收敛 20ms");
+            fms = 20;
+        }
         cfg.audio.sample_rate = u32::try_from(rate)
             .map_err(|_| format!("[rr3-sense.audio] sample_rate 越界: {rate}"))?;
         cfg.audio.channels =
@@ -256,6 +334,7 @@ fn rr3_cfg_i64(table: &toml::Value, key: &str, slot: &mut i64) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use capture::Rr3DoaBin;
 
     #[test]
     fn config_parse_defaults_on_empty_and_fills_partial() {
@@ -304,5 +383,122 @@ mod tests {
         assert_eq!(v["vad"]["rms_start"], 1500);
         assert_eq!(v["vad"]["silence_tail_ms"], 700);
         assert_eq!(v["vad"]["min_speech_ms"], 200);
+    }
+
+    /// 0.0.5 批I S-1：frame_ms=0 无节拍意义，收敛 20 留痕（eprintln 进测试输出无害）；
+    /// 负值仍被 rr3_cfg_u64 显式拒收，不参与收敛。
+    #[test]
+    fn config_parse_clamps_zero_frame_ms_to_registered_20() {
+        let cfg = rr3_sense_config_parse("[rr3-sense.audio]\nframe_ms = 0\n").unwrap();
+        assert_eq!(cfg.audio.frame_ms, 20);
+        assert!(rr3_sense_config_parse("[rr3-sense.audio]\nframe_ms = -5\n").is_err());
+    }
+
+    // ---------- 载荷组装用例（随 S-7 自原子面随迁） ----------
+
+    /// RFC 4648 标准字母表（测试侧独立解码器用，与实现侧各持一份）
+    const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    #[test]
+    fn pcm_event_body_round_trips_through_base64() {
+        let pcm = Rr3PcmStream {
+            cfg: Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 1,
+                bit_depth: 16,
+            },
+            samples: vec![1000, -2000, 32767, -32768],
+        };
+        let body = rr3_pcm_event_body(7, &pcm);
+        assert_eq!(body["seq"], 7);
+        assert_eq!(body["format"], "s16le");
+        assert_eq!(body["rate"], 16000);
+        assert_eq!(body["channels"], 1);
+        assert_eq!(body["ms"], 0, "4 帧 @16k 不足 1ms");
+        assert_eq!(
+            body.get("topic"),
+            None,
+            "负载不重复放 topic（由客户端并入）"
+        );
+        // 解回字节序，逐点核对（含 i16 两个端点值）。测试侧独立解码器：按 `=` 位
+        // 决定该组贡献几个数据字节（与编码器的补位规则对称）。
+        let b64 = body["pcm_b64"].as_str().unwrap();
+        let alphabet = |c: char| B64.iter().position(|&a| a as char == c).unwrap();
+        let mut bytes: Vec<u8> = Vec::new();
+        for q in b64.as_bytes().chunks(4) {
+            let v = |c: u8| alphabet(c as char) as u32;
+            let n = (v(q[0]) << 18)
+                | (v(q[1]) << 12)
+                | (if q[2] == b'=' { 0 } else { v(q[2]) << 6 })
+                | (if q[3] == b'=' { 0 } else { v(q[3]) });
+            bytes.push((n >> 16) as u8);
+            if q[2] != b'=' {
+                bytes.push((n >> 8) as u8);
+            }
+            if q[3] != b'=' {
+                bytes.push(n as u8);
+            }
+        }
+        assert_eq!(bytes.len(), 8);
+        for (i, s) in pcm.samples.iter().enumerate() {
+            assert_eq!(i16::from_le_bytes([bytes[i * 2], bytes[i * 2 + 1]]), *s);
+        }
+    }
+
+    /// doa 字段体形状：deg + bin 两键（schema additionalProperties=false，多带即违约）。
+    #[test]
+    fn doa_field_carries_deg_and_bin_only() {
+        let v = rr3_doa_field(&Rr3DoaFix {
+            deg: -60,
+            bin: Rr3DoaBin::Left,
+        });
+        assert_eq!(v["deg"], -60);
+        assert_eq!(v["bin"], "left");
+        assert_eq!(v.as_object().unwrap().len(), 2, "字段超集即违约: {v}");
+    }
+
+    #[test]
+    fn vad_event_body_carries_edge_shape() {
+        let on = rr3_vad_event_body(
+            3,
+            Rr3VadEdge::Onset {
+                rms_peak: 4200,
+                speech_ms: 200,
+            },
+            None,
+        );
+        assert_eq!(on["edge"], "onset");
+        assert_eq!(on["rms_peak"], 4200);
+        assert_eq!(on["speech_ms"], 200);
+        assert_eq!(on["seq"], 3);
+        assert_eq!(on.get("topic"), None, "负载不重复放 topic（由客户端并入）");
+        assert!(on.get("doa").is_none(), "无判向结果的 onset 不带 doa 字段");
+        let off = rr3_vad_event_body(4, Rr3VadEdge::Offset { speech_ms: 900 }, None);
+        assert_eq!(off["edge"], "offset");
+        assert_eq!(off["speech_ms"], 900);
+        assert_eq!(off.get("rms_peak"), None, "offset 不带 rms_peak");
+    }
+
+    /// doa 字段（批F2 负载扩展）：onset 携带判向档（deg+bin），offset 即使传了
+    /// 也丢弃——静音帧无方向可判，形状纪律与 rms_peak 同一条。
+    /// 字段体由 capture 原子产出（deg+bin 两键），此处只钉桥接形状。
+    #[test]
+    fn vad_event_body_carries_doa_on_onset_only() {
+        let on = rr3_vad_event_body(
+            5,
+            Rr3VadEdge::Onset {
+                rms_peak: 4200,
+                speech_ms: 200,
+            },
+            Some(json!({ "deg": -60, "bin": "left" })),
+        );
+        assert_eq!(on["doa"]["deg"], -60);
+        assert_eq!(on["doa"]["bin"], "left");
+        let off = rr3_vad_event_body(
+            6,
+            Rr3VadEdge::Offset { speech_ms: 900 },
+            Some(json!({ "deg": 0, "bin": "center" })),
+        );
+        assert!(off.get("doa").is_none(), "offset 不得携带 doa: {off}");
     }
 }

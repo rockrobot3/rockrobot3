@@ -1,0 +1,12 @@
+[package]
+name = "rr-hal-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "能力面契约（no_std）：7 trait 同步签名 + 值类型 + 错型（ADR-0018 修订 1 ③，0.0.5 批I F1）"
+
+[lib]
+name = "rr_hal_api"
+path = "src/lib.rs"

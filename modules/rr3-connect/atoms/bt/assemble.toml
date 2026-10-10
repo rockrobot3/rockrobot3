@@ -3,5 +3,5 @@
 schema_version = 1
 
 [assemble]
-handles = []   # 骨架期无注入面；真后端（BlueZ cfg 门）接线归板上批次
-ops = []       # sim 开机初值走 env 注入口（RR3_HAL_SIM_BT_UP），不占 config 面
+handles = []   # 骨架期无注入面；真后端（cfg 门）接线归板上批次
+ops = []       # 开机初值经 config [rr3-connect.bt] up 数据化注入（N-1：env 注入口已退役）；ops 槽批J G4 定形时迁移

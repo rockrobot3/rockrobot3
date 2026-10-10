@@ -42,17 +42,15 @@ rr3-connect = ["net.wifi", "net.bt"]
 /// config 夹具：与仓内 `modules/rr3-connect/config.toml` 同形状（main.rs 的
 /// `config_parse_covers_repo_shape` 钉过同形状解析，漂移当场红）。周期压短让
 /// 观察者在用例寿命内拿到多拍周期流（seq 严格递增的判据靠它）。
+/// 0.0.5 批I N-2/N-6 对齐：timeout_ms 在 wifi 段（必填），session 段与
+/// roam_probe_enabled/log_level 已随孤儿参数清零删除。
 const CONFIG: &str = r#"
-[rr3-connect]
-log_level = "info"
-
 [rr3-connect.wifi]
 link_report_period_ms = 200
-roam_probe_enabled = false
-
-[rr3-connect.session]
-tls_min_version = "1.3"
 timeout_ms = 20000
+
+[rr3-connect.bt]
+up = false
 "#;
 
 /// 装机布局夹具（e2e_act/e2e_power 同款）：Drop 清整树——断言 panic 后 /tmp

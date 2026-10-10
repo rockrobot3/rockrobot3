@@ -13,9 +13,9 @@ tts_model = "FunAudioLLM/CosyVoice2-0.5B"
 timeout_s = 20
 
 [rr3-brain.dialog]
-# 对话策略：拾音状态机的静默判停阈值，来自 legacy/main.c
-silence_tail_ms = 700
-max_turn_chars = 800
+# 0.0.5 批I B-2：silence_tail_ms 删除（死参数——dialog.py 从不读它，判停完全
+# 依赖 sense 的 Offset 边沿；留键会让人以为它在生效）。
+# 0.0.5 批I B-8：max_turn_chars 删除（在册无读者；实装截断随真用例回归）。
 # 一轮 utterance 的时长上限：连续语音无 offset 边沿时也要有界
 # （继承 legacy asr_begin(max_seconds) 的精神，ADR-0014 裁定 3）
 max_utterance_ms = 8000

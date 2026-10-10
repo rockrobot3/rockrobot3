@@ -43,4 +43,4 @@ impl Rr3LedEffect {
     }
 }
 
-pub use mech::{rr3_led_parse_args, Rr3Led};
+pub use mech::{rr3_led_tick, Rr3Led};

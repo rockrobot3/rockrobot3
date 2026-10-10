@@ -18,22 +18,25 @@
 
 use serde_json::Value;
 
+use super::led::RR3_LED_EFFECT_TOPIC;
 use super::relay::{self, RR3_RELAY_SET_TOPIC};
-use super::servo::{self, Rr3ServoCfg, RR3_SERVO_COMMAND_TOPIC};
-use rr_hal::rr3_block_on;
+use super::servo::{Rr3ServoCfg, RR3_SERVO_COMMAND_TOPIC};
+use super::{rr3_relay_parse_args, rr3_servo_parse_args};
 
-/// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值）
+/// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值；
+/// 字面量零内联，主题事实源在各自原子件的常量）
 const EXPOSED: [&str; 3] = [
     RR3_SERVO_COMMAND_TOPIC,
-    "rr3-act/led/effect",
+    RR3_LED_EFFECT_TOPIC,
     RR3_RELAY_SET_TOPIC,
 ];
 
 /// 单条动作的执行结果：relay 落通断、servo 落角度——调用方按变体发对应的
-/// state 流（两条驱动路 RPC/intent 共用同一条状态流的口径不变）。
+/// state 流（两条驱动路 RPC/intent 共用同一条状态流的口径不变）。relay 变体
+/// 携带 `(生效, 前一)`（0.0.5 批I A-7：组合件据此做同态抑制）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rr3IntentOutcome {
-    Relay(bool),
+    Relay(bool, bool),
     Servo(u16),
 }
 
@@ -42,8 +45,8 @@ pub enum Rr3IntentOutcome {
 /// 纯函数不碰总线，sim 设备可直接断言落效。
 pub fn rr3_intent_actions_handle(
     actions: &Value,
-    gpio: &dyn rr_hal::Rr3GpioOut,
-    servo: &dyn rr_hal::Rr3PwmServo,
+    gpio: &mut dyn rr_hal::Rr3GpioOut,
+    servo: &mut dyn rr_hal::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
 ) -> Vec<Result<Rr3IntentOutcome, String>> {
     let Some(list) = actions.as_array() else {
@@ -57,8 +60,8 @@ pub fn rr3_intent_actions_handle(
 /// 单条动作：形状裁决 → 两道门 → 执行
 fn rr3_intent_action_handle(
     item: &Value,
-    gpio: &dyn rr_hal::Rr3GpioOut,
-    servo: &dyn rr_hal::Rr3PwmServo,
+    gpio: &mut dyn rr_hal::Rr3GpioOut,
+    servo: &mut dyn rr_hal::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
 ) -> Result<Rr3IntentOutcome, String> {
     let topic = item
@@ -73,12 +76,12 @@ fn rr3_intent_action_handle(
     }
     match topic {
         RR3_RELAY_SET_TOPIC => {
-            let on = relay::rr3_relay_parse_args(args)?;
-            relay::rr3_relay_apply(gpio, on)?;
-            Ok(Rr3IntentOutcome::Relay(on))
+            let on = rr3_relay_parse_args(args)?;
+            let (on, prev) = relay::rr3_relay_apply(gpio, on)?;
+            Ok(Rr3IntentOutcome::Relay(on, prev))
         }
         RR3_SERVO_COMMAND_TOPIC => {
-            let (angle, _move_ms) = servo::rr3_servo_parse_args(args, servo_cfg)?;
+            let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
             // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
             let angle = rr_core::control::rr3_travel_clamp(
                 angle,
@@ -86,7 +89,8 @@ fn rr3_intent_action_handle(
                 servo_cfg.angle_max_deg,
             );
             // HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）
-            rr3_block_on(servo.set_angle(angle))
+            servo
+                .set_angle(angle)
                 .map_err(|e| format!("舵机写入失败: {e}"))?;
             Ok(Rr3IntentOutcome::Servo(angle))
         }
@@ -113,32 +117,36 @@ mod tests {
 
     #[test]
     fn valid_relay_action_drives_gpio() {
-        let gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         let out = rr3_intent_actions_handle(
             &json!([{"topic": "rr3-act/relay/set", "args": {"on": true}}]),
-            &gpio,
-            &servo,
+            &mut gpio,
+            &mut servo,
             &servo_cfg(),
         );
-        assert_eq!(out, vec![Ok(Rr3IntentOutcome::Relay(true))], "{out:?}");
+        assert_eq!(
+            out,
+            vec![Ok(Rr3IntentOutcome::Relay(true, false))],
+            "{out:?}"
+        );
         assert!(gpio.rr3_sim_gpio_level(), "吸合必须落到 GPIO 电平");
 
         let out = rr3_intent_actions_handle(
             &json!([{"topic": "rr3-act/relay/set", "args": {"on": false}}]),
-            &gpio,
-            &servo,
+            &mut gpio,
+            &mut servo,
             &servo_cfg(),
         );
-        assert_eq!(out, vec![Ok(Rr3IntentOutcome::Relay(false))]);
+        assert_eq!(out, vec![Ok(Rr3IntentOutcome::Relay(false, true))]);
         assert!(!gpio.rr3_sim_gpio_level(), "断开必须落到 GPIO 电平");
     }
 
     /// 批F2 开放面：servo/command 动作经行程裁决落到 sim 舵机，结果是角度变体。
     #[test]
     fn valid_servo_action_drives_sim_servo() {
-        let gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         for (deg, want) in [
             (45u64, Rr3IntentOutcome::Servo(45)),
             (90, Rr3IntentOutcome::Servo(90)),
@@ -146,8 +154,8 @@ mod tests {
         ] {
             let out = rr3_intent_actions_handle(
                 &json!([{"topic": "rr3-act/servo/command", "args": {"angle_deg": deg}}]),
-                &gpio,
-                &servo,
+                &mut gpio,
+                &mut servo,
                 &servo_cfg(),
             );
             assert_eq!(out, vec![Ok(want)], "deg={deg}");
@@ -159,14 +167,14 @@ mod tests {
     /// servo 动作同样吃行程/类型裁决（同一 parse 函数）：越界折拒因不落角。
     #[test]
     fn servo_action_is_judged_by_travel_and_type() {
-        let gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         for bad in [
             json!({"topic": "rr3-act/servo/command", "args": {"angle_deg": 200}}),
             json!({"topic": "rr3-act/servo/command", "args": {"angle_deg": "45"}}),
             json!({"topic": "rr3-act/servo/command", "args": {}}),
         ] {
-            let out = rr3_intent_actions_handle(&json!([bad]), &gpio, &servo, &servo_cfg());
+            let out = rr3_intent_actions_handle(&json!([bad]), &mut gpio, &mut servo, &servo_cfg());
             assert!(out[0].is_err(), "非法 servo 动作必须拒: {out:?}");
         }
         assert_eq!(servo.rr3_sim_servo_angle(), 90, "全部被拒，舵机不得动");
@@ -174,12 +182,12 @@ mod tests {
 
     #[test]
     fn foreign_topic_is_rejected_by_exposes_gate() {
-        let gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         let out = rr3_intent_actions_handle(
             &json!([{"topic": "rr3-power/battery/state", "args": {}}]),
-            &gpio,
-            &servo,
+            &mut gpio,
+            &mut servo,
             &servo_cfg(),
         );
         let err = out[0].as_ref().unwrap_err();
@@ -191,13 +199,13 @@ mod tests {
 
     #[test]
     fn exposed_but_closed_topic_is_rejected_by_open_gate() {
-        let gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         // led/effect 仍封闭（扩面随真实需要 append）；relay/servo 已开放
         let out = rr3_intent_actions_handle(
             &json!([{ "topic": "rr3-act/led/effect", "args": {} }]),
-            &gpio,
-            &servo,
+            &mut gpio,
+            &mut servo,
             &servo_cfg(),
         );
         let err = out[0].as_ref().unwrap_err();
@@ -210,26 +218,27 @@ mod tests {
 
     #[test]
     fn malformed_actions_are_named_not_fatal() {
-        let gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         // actions 不是数组
-        let out = rr3_intent_actions_handle(&json!("开灯"), &gpio, &servo, &servo_cfg());
+        let out = rr3_intent_actions_handle(&json!("开灯"), &mut gpio, &mut servo, &servo_cfg());
         assert!(out[0].as_ref().unwrap_err().contains("数组"));
         // 元素缺 topic / 缺 args
-        let out = rr3_intent_actions_handle(&json!([{"args": {}}]), &gpio, &servo, &servo_cfg());
+        let out =
+            rr3_intent_actions_handle(&json!([{"args": {}}]), &mut gpio, &mut servo, &servo_cfg());
         assert!(out[0].as_ref().unwrap_err().contains("topic"));
         let out = rr3_intent_actions_handle(
             &json!([{"topic": "rr3-act/relay/set"}]),
-            &gpio,
-            &servo,
+            &mut gpio,
+            &mut servo,
             &servo_cfg(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("args"));
         // 参数裁决照常把门（非真布尔）
         let out = rr3_intent_actions_handle(
             &json!([{"topic": "rr3-act/relay/set", "args": {"on": 1}}]),
-            &gpio,
-            &servo,
+            &mut gpio,
+            &mut servo,
             &servo_cfg(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("布尔"));
@@ -239,22 +248,22 @@ mod tests {
 
     #[test]
     fn multiple_actions_execute_in_order() {
-        let gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
-        let servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         let out = rr3_intent_actions_handle(
             &json!([
                 {"topic": "rr3-act/relay/set", "args": {"on": true}},
                 {"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}},
                 {"topic": "rr3-act/relay/set", "args": {"on": false}},
             ]),
-            &gpio,
-            &servo,
+            &mut gpio,
+            &mut servo,
             &servo_cfg(),
         );
         assert_eq!(out.len(), 3);
-        assert_eq!(out[0], Ok(Rr3IntentOutcome::Relay(true)));
+        assert_eq!(out[0], Ok(Rr3IntentOutcome::Relay(true, false)));
         assert_eq!(out[1], Ok(Rr3IntentOutcome::Servo(45)));
-        assert_eq!(out[2], Ok(Rr3IntentOutcome::Relay(false)));
+        assert_eq!(out[2], Ok(Rr3IntentOutcome::Relay(false, true)));
         assert_eq!(servo.rr3_sim_servo_angle(), 45, "舵机动作按序落效");
         assert!(!gpio.rr3_sim_gpio_level(), "按序执行后最终态=最后一条");
     }

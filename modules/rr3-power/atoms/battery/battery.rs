@@ -28,4 +28,4 @@ pub struct Rr3BatteryCfg {
     pub cutoff_voltage_mv: u16,
 }
 
-pub use mech::{rr3_battery_low_body, rr3_battery_state_body, Rr3LowEdge};
+pub use mech::Rr3LowEdge;

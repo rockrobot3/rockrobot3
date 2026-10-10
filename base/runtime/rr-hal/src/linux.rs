@@ -8,12 +8,12 @@
 //! [`crate::Rr3AudioCfg`] 一一对应），之后 `readi`/`writei` 阻塞搬运。运行期
 //! underrun/overrun（errno EPIPE = -32）走 `recover` 后重试一次——这是 ALSA 回放
 //! 的常规存活手段；设备名取 `RR3_HAL_ALSA_DEVICE`（默认 `default`，见 backend.rs）。
+//! 签名同步化（批I F1，契约层 rr-hal-api）：`read` 写调用方缓冲返回样点数、
+//! `write` 借用切片；配置不符在 `open` 一处把关，write 不再重复校验。
 
 use std::sync::Mutex;
 
-use async_trait::async_trait;
-
-use crate::{Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3HalError, Rr3PcmStream};
+use crate::{Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3ErrText, Rr3HalError};
 
 /// ALSA underrun/overrun 的 errno（EPIPE）
 const EPIPE: i32 = 32;
@@ -21,8 +21,8 @@ const EPIPE: i32 = 32;
 /// open 参数门禁：与 sim 后端同一套要求（16bit 采样且 rate/channels 非零）
 fn rr3_alsa_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
     if cfg.sample_rate_hz == 0 || cfg.channels == 0 || cfg.bit_depth != 16 {
-        return Err(Rr3HalError::InvalidParam(format!(
-            "alsa 后端要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"
+        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+            &format!("alsa 后端要求 16bit 采样且 rate/channels 非零，收到 {cfg:?}"),
         )));
     }
     Ok(())
@@ -33,24 +33,46 @@ fn rr3_alsa_open(
     dir: alsa::Direction,
     device: &str,
 ) -> Result<alsa::pcm::PCM, Rr3HalError> {
-    let pcm = alsa::pcm::PCM::new(device, dir, false)
-        .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 打开设备 {device:?} 失败: {e}")))?;
+    let pcm = alsa::pcm::PCM::new(device, dir, false).map_err(|e| {
+        Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+            "alsa 打开设备 {device:?} 失败: {e}"
+        )))
+    })?;
     {
-        let hwp = alsa::pcm::HwParams::any(&pcm)
-            .map_err(|e| Rr3HalError::InvalidParam(format!("alsa hw_params 起步失败: {e}")))?;
+        let hwp = alsa::pcm::HwParams::any(&pcm).map_err(|e| {
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                "alsa hw_params 起步失败: {e}"
+            )))
+        })?;
         hwp.set_access(alsa::pcm::Access::RWInterleaved)
-            .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 设 access 失败: {e}")))?;
-        hwp.set_format(alsa::pcm::Format::s16())
-            .map_err(|e| Rr3HalError::InvalidParam(format!("alsa 设 s16 格式失败: {e}")))?;
+            .map_err(|e| {
+                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                    "alsa 设 access 失败: {e}"
+                )))
+            })?;
+        hwp.set_format(alsa::pcm::Format::s16()).map_err(|e| {
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                "alsa 设 s16 格式失败: {e}"
+            )))
+        })?;
         hwp.set_channels(cfg.channels as u32).map_err(|e| {
-            Rr3HalError::InvalidParam(format!("alsa 设声道 {} 失败: {e}", cfg.channels))
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                "alsa 设声道 {} 失败: {e}",
+                cfg.channels
+            )))
         })?;
         hwp.set_rate(cfg.sample_rate_hz, alsa::ValueOr::Nearest)
             .map_err(|e| {
-                Rr3HalError::InvalidParam(format!("alsa 设采样率 {} 失败: {e}", cfg.sample_rate_hz))
+                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                    "alsa 设采样率 {} 失败: {e}",
+                    cfg.sample_rate_hz
+                )))
             })?;
-        pcm.hw_params(&hwp)
-            .map_err(|e| Rr3HalError::InvalidParam(format!("alsa hw_params 提交失败: {e}")))?;
+        pcm.hw_params(&hwp).map_err(|e| {
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                "alsa hw_params 提交失败: {e}"
+            )))
+        })?;
     }
     Ok(pcm)
 }
@@ -89,38 +111,34 @@ impl Rr3AlsaAudioSource {
     }
 }
 
-#[async_trait]
 impl Rr3AudioSource for Rr3AlsaAudioSource {
-    async fn open(&self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
+    fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
         rr3_alsa_cfg_check(cfg)?;
         let pcm = rr3_alsa_open(cfg, alsa::Direction::Capture, &self.device)?;
         *self.open.lock().unwrap_or_else(|p| p.into_inner()) = Some(Rr3AlsaOpen { cfg, pcm });
         Ok(())
     }
 
-    async fn read(&self, frames: usize) -> Result<Rr3PcmStream, Rr3HalError> {
+    fn read(&mut self, buf: &mut [i16]) -> Result<usize, Rr3HalError> {
         let mut guard = self.open.lock().unwrap_or_else(|p| p.into_inner());
         let Some(open) = guard.as_mut() else {
-            return Err(Rr3HalError::InvalidParam("alsa 源 read 前必须 open".into()));
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                "alsa 源 read 前必须 open",
+            )));
         };
         let ch = open.cfg.channels as usize;
-        let mut buf = vec![0i16; frames * ch];
-        {
-            let mut io = open.pcm.io_i16().map_err(|e| Rr3HalError::Busy)?;
-            let mut done = 0usize;
-            while done < frames {
-                match io.readi(&mut buf[done * ch..]) {
-                    Ok(n) if n > 0 => done += n,
-                    Ok(_) => continue,
-                    Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => continue,
-                    Err(e) => return Err(Rr3HalError::Busy),
-                }
+        let frames = buf.len() / ch;
+        let mut io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
+        let mut done = 0usize;
+        while done < frames {
+            match io.readi(&mut buf[done * ch..]) {
+                Ok(n) if n > 0 => done += n,
+                Ok(_) => continue,
+                Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => continue,
+                Err(_e) => return Err(Rr3HalError::Busy),
             }
         }
-        Ok(Rr3PcmStream {
-            cfg: open.cfg,
-            samples: buf,
-        })
+        Ok(done * ch)
     }
 }
 
@@ -140,34 +158,27 @@ impl Rr3AlsaAudioSink {
     }
 }
 
-#[async_trait]
 impl Rr3AudioSink for Rr3AlsaAudioSink {
-    async fn open(&self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
+    fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
         rr3_alsa_cfg_check(cfg)?;
         let pcm = rr3_alsa_open(cfg, alsa::Direction::Playback, &self.device)?;
         *self.open.lock().unwrap_or_else(|p| p.into_inner()) = Some(Rr3AlsaOpen { cfg, pcm });
         Ok(())
     }
 
-    async fn write(&self, pcm_in: Rr3PcmStream) -> Result<(), Rr3HalError> {
+    fn write(&mut self, samples: &[i16]) -> Result<(), Rr3HalError> {
         let mut guard = self.open.lock().unwrap_or_else(|p| p.into_inner());
         let Some(open) = guard.as_mut() else {
-            return Err(Rr3HalError::InvalidParam(
-                "alsa 扬声器 write 前必须 open".into(),
-            ));
-        };
-        if pcm_in.cfg != open.cfg {
-            return Err(Rr3HalError::InvalidParam(format!(
-                "alsa 扬声器已按 {:?} 打开，write 的配置是 {:?}",
-                open.cfg, pcm_in.cfg
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                "alsa 扬声器 write 前必须 open",
             )));
-        }
+        };
         let ch = open.cfg.channels as usize;
-        let total_frames = pcm_in.samples.len() / ch;
-        let mut io = open.pcm.io_i16().map_err(|e| Rr3HalError::Busy)?;
+        let total_frames = samples.len() / ch;
+        let mut io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
         let mut done = 0usize;
         while done < total_frames {
-            match io.writei(&pcm_in.samples[done * ch..]) {
+            match io.writei(&samples[done * ch..]) {
                 Ok(n) if n > 0 => done += n,
                 Ok(_) => continue,
                 Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => continue,

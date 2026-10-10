@@ -21,8 +21,8 @@
 | wifi | `Rr3Provision::{rr3_provision_new, rr3_provision_mode() -> &'static str, rr3_provision_connect(ssid: String, pass: String), rr3_provision_forget()}` | 配网事务 | `mode: ap\|station` | 不落盘、重启即忘 |
 | wifi | `rr3_wifi_{scan,connect,forget}_parse_args(...) -> Result<…,_>` + 三个 `*_result(...) -> Value` | 点名参数/应答 | 无 | 参数错 → 业务 error |
 | bt | `Rr3BtPhase`（`off`/`discoverable`/`connected`）+ `rr3_bt_phase_name` | — | — | — |
-| bt | `rr3_bt_state_new() -> Self`、`rr3_bt_phase(&self) -> Rr3BtPhase`（这两个**不返 bool**）+ `rr3_bt_power_on/link_up/link_down/power_off -> bool`（四个转移事件才返"是否发生转移"） | 事件 → 是否发生转移 | `phase` | 非法转移 → `false` 且**状态不动** |
-| bt | `rr3_bt_backend_up_default() -> bool`（**件内读 `RR3_HAL_SIM_BT_UP`**） | env → 初值 | 无 | 非 `"1"` 一律按关 |
+| bt | `rr3_bt_phase(&self) -> Rr3BtPhase`（**不返 bool**）+ `rr3_bt_power_on/link_up/link_down/power_off -> bool`（四个转移事件才返"是否发生转移"） | 事件 → 是否发生转移 | `phase` | 非法转移 → `false` 且**状态不动** |
+| bt | `rr3_bt_state_new(up: bool) -> Self`（初值经 config `[rr3-connect.bt]` up 数据化注入，缺省关——0.0.5 批I N-1：原 `rr3_bt_backend_up_default()` 的 `RR3_HAL_SIM_BT_UP` env 读已删，13 件唯一非 test 面 env 读清零） | config → 初值 | 无 | — |
 | 目标签名 | `Rr3LinkState.ssid: Option<String>` → 定长 + 长度；`connect(ssid: String, pass: String)` → 借用；bt 初值 → `ops` 注入 | | | |
 
 ## §2 状态机
@@ -132,7 +132,7 @@
 | 件 | host（今天） | rtos（esp-rs std + FreeRTOS） | bare（no_std 自足） | 卡住它的**具体那一行依赖** → 动作 |
 |---|---|---|---|---|
 | wifi | ✅（sim 与 nmcli 两后端） | ⚠️ HAL 形状 + 载荷面 | ❌ 两处硬点 | ① `Rr3LinkState.ssid: Option<String>` 把 alloc 焊进值类型 → 批I F1 改"定长 + 长度"（`⊙` 跨片形状，N-3）；② `rr3_provision_connect(ssid: String, pass: String)` 与凭据字段 `Option<(String,String)>` → bare 档若真要本地存凭据，改固定槽 `[u8; N]` + 长度（N 由契约定，不是随手 32）；③ `rr3_link_body -> Value`（`json!` 五处）→ P-7 同法上移承载层（N-7）；④ `&dyn`/`rr3_block_on` 清零 |
-| bt | ✅（骨架，BlueZ 后端未建） | ✅ **13 件里最干净的一件** | ✅ 同左 | 唯一硬点：`rr3_bt_backend_up_default()` 里 `std::env::var` —— **全仓 13 件里唯一非 test 面的 env 读**。动作：删该函数，初值由描述符/ops 传 `up: bool` 注入（N-1 已列，此处标它是跨档单点门槛）。状态机三态与矩阵本身零依赖，`#[allow(dead_code)]` 只说明主题面未登记（D5），不构成跨档障碍 |
+| bt | ✅（骨架，BlueZ 后端未建） | ✅ **13 件里最干净的一件** | ✅ 同左 | 原唯一硬点 `rr3_bt_backend_up_default()` 里的 `std::env::var` **已随 0.0.5 批I N-1 清零**（函数删除，初值经 config `[rr3-connect.bt]` up 数据化注入——全仓 13 件唯一非 test 面 env 读自此不存在；批J G4 落 ops 槽时再迁数据载体）。状态机三态与矩阵本身零依赖，`#[allow(dead_code)]` 只说明主题面未登记（D5），不构成跨档障碍 |
 | session（组合件成分，非件） | ✅ mock 云 | **不适用**：云会话属主承载层能力 | **不适用** | `tls_min_version`/`timeout_ms` 零读者在这里最刺眼：它属于"主承载层的对外承诺"，却写在 bare 档根本不会编译的代码里。去处 = 随 ADR-0016 Rust 化时落进真 HTTP 客户端配置，今天标"声明未生效"（N-6） |
 
 **动作序**：批I F1 → N-3（`ssid` 去 String）→ N-7（载荷上移）→ bt 去 env（N-1）。

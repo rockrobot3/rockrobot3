@@ -1,16 +1,9 @@
 # rr3-interact 运行期配置（secret 一律走环境变量，不落盘）
-# 预缓冲数值来自 legacy 语音链路调优（提交 0cf029e）：抗抖动而不增加可听延迟。
-
-[rr3-interact]
-log_level = "info"
-
-[rr3-interact.player]
-prebuffer_ms = 500
-volume_pct = 70
-
-[rr3-interact.face]
-default_expression = "idle"
-
-[rr3-interact.panel]
-bind = "127.0.0.1"        # 随 M5 决定是否对外；默认只绑回环
-port = 8080
+# 0.0.5 批I I-1（孤儿参数清零，六键全删——被读或删除，本模块今天不装载
+# config.toml，六键全无读者）：
+# - log_level / default_expression：删除，无读者；
+# - volume_pct / prebuffer_ms：删除（对应播放行为未实装，随真件批实装时
+#   按"音量/预缓冲进 ops 槽"回归，不提前占键）；
+# - panel bind/port：删除（真值 = panel/server.rs 的 RR3_PANEL_ADDR_DEFAULT
+#   常量 "127.0.0.1:8080"，env RR3_PANEL_ADDR 可改——键与常量是第二真值点）。
+# 本文件保留空壳：rr3-pack 随包必带 config.toml（缺件必重启环）。

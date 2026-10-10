@@ -17,14 +17,6 @@ pub const SURFACE: &[&str] = &[
     "session: sim 回 mock 会话（真 TLS 属云侧联调范围外）；凭据不落盘",
 ];
 
-/// config `[rr3-connect.session]` 的形状（TLS 下限 + 超时）。本轮只解析回显，
-/// 不动作——真会话建立属云侧联调（0.0.2 方案 1.3 范围外），与 cutoff 同款口径。
-#[derive(Debug, Clone)]
-pub struct Rr3SessionCfg {
-    pub tls_min_version: String,
-    pub timeout_ms: u64,
-}
-
 /// session 点名参数裁决：只认 `action="open"`。缺参/类型错/未知值点名拒。
 pub fn rr3_session_parse_args(args: &Value) -> Result<(), String> {
     let action = args
@@ -39,6 +31,8 @@ pub fn rr3_session_parse_args(args: &Value) -> Result<(), String> {
 
 /// 会话结果裁决：链路 up → mock 会话应答（回显当前链路 ssid）；down → 业务性
 /// 失败（折 result.error，不断链）。"链路"是判据词，e2e 靠它点名。
+/// ssid 序列化面：契约值类型 `Rr3SsidText` 出定长缓冲取 &str（serde_json 不
+/// 进契约类型，F1 定形）。
 pub fn rr3_session_result(st: &Rr3LinkState) -> Result<Value, String> {
     if !st.up {
         return Err("链路未就绪（net/link up=false），云端会话拒绝建立".into());
@@ -46,18 +40,19 @@ pub fn rr3_session_result(st: &Rr3LinkState) -> Result<Value, String> {
     Ok(json!({
         "session": "opened",
         "endpoint": "mock",
-        "ssid": st.ssid,
+        "ssid": st.ssid.as_ref().map(|s| s.rr3_ssid_text_as_str()),
     }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rr_hal::Rr3SsidText;
 
     fn st(up: bool) -> Rr3LinkState {
         Rr3LinkState {
             up,
-            ssid: up.then(|| "rock-sim".to_string()),
+            ssid: up.then(|| Rr3SsidText::rr3_ssid_text_new("rock-sim")),
             rssi_dbm: up.then_some(-50),
         }
     }

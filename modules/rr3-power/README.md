@@ -28,6 +28,16 @@ modules/rr3-power/
 （[`architecture.md`](../../docs/architecture/architecture.md) §7.3 安全兜底、
 [`contracts/topics.toml`](../../contracts/topics.toml) 同条 note）。总线路径故障不得影响关断。
 
+## 心跳自报计数（0.0.4 批B，Q1 裁定）
+
+`bus.rr3_counter_bump` 记账，随 `rr3.heartbeat` 的可选 `counters` 字段上行，rrd 按
+`rr3-power/<键>` 归并（`rr3.ctl.counters` 可查）。本模块的键：
+
+| 键 | 记账点 |
+|---|---|
+| `battery_read_fail` | 主循环 battery 拍 HAL 读数失败（0.0.5 批I P-2，数据新鲜度）；随后按"不装活着"exit(1) |
+| `errors` | 通用可选键（各模块共用词表），异常路径按需自报 |
+
 ## 本地自检
 
 ```bash

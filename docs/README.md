@@ -83,6 +83,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../base/runtime/rr-core/README.md`](../base/runtime/rr-core/README.md) | 机制核切片：总线语义 + 模块运行时执行环状态机（no_std） |
 | [`../base/runtime/rr-bus/README.md`](../base/runtime/rr-bus/README.md) | 总线常量层，及订阅/QoS/回压的落点位置 |
 | [`../base/runtime/rr-registry/README.md`](../base/runtime/rr-registry/README.md) | manifest 字段字典与主题注册表校验器 |
+| [`../base/runtime/rr-hal-api/README.md`](../base/runtime/rr-hal-api/README.md) | 能力面契约层：7 trait 同步签名 + 值类型（no_std，rr-hal 的实现底座，0.0.5 批I） |
 | [`../base/runtime/rr-hal/README.md`](../base/runtime/rr-hal/README.md) | HAL 的 trait 面、数据类型与后端规划 |
 | [`../base/runtime/rr-ota/README.md`](../base/runtime/rr-ota/README.md) | 升级"双轨"的类型形状 |
 | [`../base/runtime/rrd/README.md`](../base/runtime/rrd/README.md) | 守护进程装配层：supervisor / health / config / 在册表宿主 |
