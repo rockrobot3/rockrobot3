@@ -20,7 +20,9 @@ macOS/Linux 直跑扮总线侧；**不落本目录内**——cargo 配置发现�
 ## 版本钉死登记（对表 tools/espidf-std-hello/README.md，升级需重验整链）
 
 esp-idf-sys =0.35.0 ↔ ESP-IDF v5.2.2（`~/.espressif/frameworks/esp-idf-v5.2.2`）↔
-esp-idf-hal =0.44.1（与 sys 0.35 同代，UART2 半分体 UartTx/UartRx）↔ embuild =0.32.0
+esp-idf-hal =0.44.1（与 sys 0.35 同代，UART2 半分体走 `UartDriver::new` 整装 +
+`Box::leak` + `split()`——半体独立 `new` 会对同口二次 `uart_driver_install` 必败，
+板上实测留痕）↔ embuild =0.32.0
 ↔ ldproxy 0.3.5 ↔ esp-clang 19.1.2 ↔ rustup 工具链 alias `esp`。
 
 ## 构建与烧录（本机）
@@ -49,6 +51,10 @@ cargo +esp run      # 烧录 + monitor（runner=espflash，退出键 Ctrl+]）
    判据逐条 PASS：① 注册（Request/rr3.register + manifest 在场）→ 回
    `{"src_task": 2}`；② 心跳 N 拍全收全应（间隔 ≈ 200ms，停摆 >5s 即 FAIL）；
    ③ round-trip（下行 rr3.call → Response id 回显 + result.echo 原样回带）。
+
+   复跑注意：开口前先复位板子并清 CP2102 输入缓冲——驱动缓冲残留上轮帧字节，
+   `Rr3UartConn::open` 不 tcflush，直接开读必 BadMagic（批D1 实爆留痕）；pyserial
+   EN 脉冲复位 + `reset_input_buffer` 组合时序实测一次过。
 3. **三点堆采样**（monitor 侧）：`point=1-boot` / `point=2-registered` /
    `point=3-roundtrip` 各一行 `free=…B min_free=…B`；`min_free` 即运行峰值剩余堆
    水位，**< 20% 总堆（经典 ESP32 ≈104KB）或 std 不可起 → 触发批D2（S3）**
@@ -56,13 +62,27 @@ cargo +esp run      # 烧录 + monitor（runner=espflash，退出键 Ctrl+]）
 4. 本地守护行：`RR3G boot registering` → `RR3G boot online task=2` →
    `RR3G feed seq=k`（rr-core::runtime H6 行文法的真板消费者证据）。
 
-## 实测报告（板上跑完回填本节）
+## 实测报告（2026-10-10 批D1 板上回填）
+
+环境：ESP32 devkit rev v3.1 / 4MB flash / MAC 48:9d:31:01:16:d4；固件 785,456B
+（19.02%），espflash 4.6.0 烧录；bootloader 报 `ESP-IDF v6.1-beta1-497-g…`
+（backtrace 路径实为 esp-idf-v5.2.2——环境指纹按实登记）。
+
+harness 对跑：`HARNESS_EXIT=0`（14 PASS / 0 FAIL）——①注册 ②8 拍心跳（间隔
+195–204ms，无停摆）③round-trip id=9001 回显 + result.echo 逐字对拍。附带实证：
+harness 退场后板侧心跳 5s 超时 → mark_down → `esp_restart` → 重新注册，Down
+转移路径真板跑通。
 
 | 点 | free | min_free（峰值剩余） | 判定（<104KB？） |
 |---|---|---|---|
-| 1-boot | — | — | — |
-| 2-registered | — | — | — |
-| 3-roundtrip | — | — | — |
+| 1-boot | 295672B | 295672B | 否（100%） |
+| 2-registered | 272524B | 269476B | 否（≈启动堆 91%） |
+| 3-roundtrip | 251400B | 250620B | 否（≈启动堆 85% >> 20% 阈值——**D1→D2 不触发**） |
+
+线程栈教训（根因实锤）：8KB 栈不够 serde_json 解析 + json! 构造 + FrameBuf 峰值
+——溢出踩坏堆 → Arc 指针踩成垃圾 → std Mutex 惰性 pthread 初始化崩
+（`Guru Meditation LoadProhibited`，EXCVADDR=0xb）；`THREAD_STACK` 16KB 为运行
+下限，勿再调低。
 
 ## 门禁
 
