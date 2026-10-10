@@ -122,6 +122,7 @@
 | A-9 | 意图开放门与灯效白名单从硬编码 `match` 改 ops 槽注入（`intent_open_topics`、`led_effects`），使"某形态不开 led"成为改数据不改码 | 批J | C1 |
 | A-10 | `intent.rs : EXPOSED` 内联 `"rr3-act/led/effect"` 改引 `led::RR3_LED_EFFECT_TOPIC`（消第二真值点） | 批I | — |
 | A-11 | `config.toml [rr3-act] log_level` 孤儿键：被读或删除（与 P-6/N-6/I-1/B-8 同批） | 批I | — |
+| A-12 | **件失败语义分类表**（D8 本轮立单，此前索引挂着无工单）：`led`/`face` 属妆面（写失败折日志不退）、`servo`/`relay`/`player` 属执行与回放（传输性失败 `exit(1)` 交监督）——分类落**一处数据**，框架通用约定 1 引该表，各册不再各写各的例外。与 interact I-13 同一张表，谁先做谁负责 | 批I（表）+ 契约评审（范围含 player 与 D8） | C17 |
 | A-7 | `relay/state` 补变化判定：`rr3_relay_apply` 已有 `(生效, 前一)` 形状可判，只在 `Some(on)` 且电平真变时续 `relay_seq` 并发布；同时补同态抑制用例。**注意守恒**：`tools/sim/chain.rs` 与 legacy 面板按"每命令一帧"数过这条流，改语义要同批改它们的期望，不能只改件 | 批I | — |
 
 ## §11 待证与敞口
