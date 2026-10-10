@@ -1,0 +1,28 @@
+# 与 tools/espidf-std-hello/.cargo/config.toml 同款（批W1 钉死登记，版本对表见
+# tools/espidf-std-hello/README.md）：xtensa-esp32-espidf std 目标 + build-std +
+# ldproxy + espidf_time64 + MCU=esp32。
+#
+# runner = espflash（0.0.7 方案 §9.3 ① 的 runner=espflash 口径）：`cargo +esp run`
+# = 烧录 + monitor（退出键 Ctrl+]）。espflash 4.x 与 espidf std 镜像兼容——std 路
+# 经 ESP-IDF 构建自带 app descriptor（批C④ 的 esp-hal 裸金属缺 appdesc 补丁不适用
+# 本工程）。
+[build]
+target = "xtensa-esp32-espidf"
+
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+# runner = espflash（0.0.7 方案 §9.3 ① 的 runner=espflash 口径）：`cargo +esp run`
+# = 烧录 + monitor（退出键 Ctrl+]）。espflash 4.x 与 espidf std 镜像兼容——std 路
+# 经 ESP-IDF 构建自带 app descriptor（批C④ 的 esp-hal 裸金属缺 appdesc 补丁不适用
+# 本工程）。runner 必须挂 target 级（[build] runner 在本 cargo 下报 unused key）。
+runner = "espflash flash --monitor"
+# esp-idf-sys BUILD-OPTIONS：IDF 5.0+ 必设（libc time_t 64 位面与 C 头对齐）
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+build-std-features = ["panic_immediate_abort"]
+
+# MCU 必须显式（esp-idf-sys 据此选 IDF 工具链与目标）。
+[env]
+MCU = "esp32"

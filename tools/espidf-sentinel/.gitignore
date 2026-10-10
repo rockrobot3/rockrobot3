@@ -1,0 +1,5 @@
+# 构建产物与 IDF 构建现场不进仓（外置不进仓，Q5 纪律；同 espidf-std-hello）
+/target
+/.embuild
+/sdkconfig
+/sdkconfig.old
