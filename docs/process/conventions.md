@@ -1707,6 +1707,19 @@ rr3-sense=[audio.capture,audio.vad] + rr3-act=[act.servo]，不启用 net.*/cogn
 power 4 / sense 4）+ rr3-pack 19 + rrctl 23 + mkmodule 9 + rr-registry contract 38 + rrd profile 24
 测试绿
 
+2026-10-11 0.0.7 两板收口批——批C④⑤ 板级收官落档（0.0.7 方案状态行；十步门禁直跑
+GATE_EXIT=0，PASS 50 全绿）——CP2102 到位，ESP32 devkit 按 0.0.7 §9.2 runbook 板级实测：
+④ 判据过（128B 头 + payload 完整收发，cmp 逐字节一致）、⑤ 判据过（半帧截断与坏 magic 两类
+注入均拒收、注入后不进死锁、正常帧收发不受影响）——**层② 必达全绿、批C 整批收官**；现场实测
+由用户口述确认，串口日志摘要未留档如实注记（R2 纪律），boards 回填时补。随批现场补丁 `6d3a1ee`
+（esp32-uart-echo 独立条件工程，不在十步门 workspace 面）：espflash 4.x 构镜像硬校验 ELF 内
+ESP-IDF app descriptor（IDF 二级引导运行期亦验），esp-bootloader-esp-idf 0.1 宏段名
+`.rodata_desc.appdesc` 与 esp-hal 1.1.2 rodata.x KEEP 段名 `.flash.appdesc` 错代、宏产物被
+gc-sections 丢弃——按对表段名手挂 `#[used]` 静态量修复（专用门
+`tools/ci/esp-uart-echo-check.sh` 直跑绿 + ELF 物证三要素核验齐：节 0x100 字节在册 / magic
+0xABCD5432 / project_name 与 Cargo 元数据一致）。0.0.6 §5.4 BOM 第 9 行 CP2102 翻"已到位"；
+C12 首条手测行不冒领（⑦ 列证据三样未留档），敞口维持待按供给自证表模板补采
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
