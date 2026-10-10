@@ -97,7 +97,7 @@ fn round_trip_request(task: u64, now_ns: u64) -> Rr3Frame {
         Rr3PayloadType::Request,
         task,
         json!({"jsonrpc": "2.0", "id": ROUND_TRIP_ID, "method": "rr3.call",
-               "params": {"topic": "rr3-espidf-sentinel/probe", "args": {"ping": "pong"}}}),
+               "params": {"topic": "rr3-sentinel/diag/probe", "args": {"ping": "pong"}}}),
         now_ns,
     )
 }
@@ -317,7 +317,7 @@ fn main() {
                 rt_echo_ok = v.pointer("/result/echo/args/ping").and_then(Value::as_str)
                     == Some("pong")
                     && v.pointer("/result/echo/topic").and_then(Value::as_str)
-                        == Some("rr3-espidf-sentinel/probe");
+                        == Some("rr3-sentinel/diag/probe");
                 break;
             }
             Ok((Rr3PayloadType::Request, _, _, _, _)) => continue, // 心跳并发到达，跳过再等
@@ -392,7 +392,7 @@ mod tests {
     /// 逐字段还原；dst_task 非法被点名（rrd 握手 dst 门同口径）。
     #[test]
     fn parse_upstream_round_trip_register() {
-        let manifest = "[manifest]\nname = \"rr3-espidf-sentinel\"\n[health]\nheartbeat_ms = 200\n";
+        let manifest = "[manifest]\nname = \"rr3-sentinel\"\n[health]\nheartbeat_ms = 200\n";
         let f = rr3_frame_compose(
             opcode::SEND,
             0,
@@ -403,7 +403,7 @@ mod tests {
             rr3_body_encode(
                 Rr3PayloadType::Request,
                 json!({"jsonrpc": "2.0", "id": 1, "method": "rr3.register",
-                       "params": {"name": "rr3-espidf-sentinel", "manifest": manifest}})
+                       "params": {"name": "rr3-sentinel", "manifest": manifest}})
                 .to_string()
                 .as_bytes(),
             ),
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(ty, Rr3PayloadType::Request);
         assert_eq!(id, 1);
         assert_eq!(method.as_deref(), Some("rr3.register"));
-        assert_eq!(params["name"], "rr3-espidf-sentinel");
+        assert_eq!(params["name"], "rr3-sentinel");
         assert!(params["manifest"]
             .as_str()
             .unwrap()
