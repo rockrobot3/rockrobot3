@@ -23,7 +23,7 @@
 | ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（全集进门，无任何排除），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
 | ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与两个 esp 条件工程）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
 | ⑦ | **§13 静态断言四件**（全 fail-closed，逐条点名） | ⑦-a 机制核零策略载荷（禁词扫 `rr-core/src/*.rs` + `rr-hal-api/src/*.rs`（0.0.5 批I C8 起）+ `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（Rust 五件 / brain 两件式豁免 / 组合件实体 `src/main.rs`+`src/composite.rs`）· ⑦-d 入口体量 ≤80 行。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
-| ⑧ | **件级判据三门**（0.0.5 批K H2 接入；全 fail-closed，上线即全绿） | ⑧-a 两腿对拍计数门：格三态读 `contracts/slots.toml` 的 `status` 标记位（C9 门只读这一处）——normal 格落点件须 mech.rs + 模块 composite.rs 两腿各 ≥1（腿一 `fn parity_leg1_*`、腿二 `fn parity_leg2_*`，命名即机器锚），只有腿一记未达标；placeholder 记"不适用"、retired 退出分母、Python 两件式记不适用；C10 stub 反例自证内置（拦不住空件则门自身 FAIL）· ⑧-b 依赖闭包 grep 门（C7 分级执法）：扫 `modules/*/atoms/*/*.rs` 非 test 面（行注释与 `#[cfg(test)]` 块先剥）——L0 = `use std::`/`extern crate std`，L1 = L0 + `serde_json` · ⑧-c 注入面校验门：rr-registry contract 的 injection 用例**显式过滤器**，打空即红（run_tests ≥1 断言），封"用例被改名/删除"的 fail-open |
+| ⑧ | **件级判据三门**（0.0.5 批K H2 接入；全 fail-closed，上线即全绿） | ⑧-a 两腿对拍计数门：格三态读 `contracts/slots.toml` 的 `status` 标记位（C9 门只读这一处）——normal 格落点件须 mech.rs + 模块 composite.rs 两腿各 ≥1（腿一 `fn parity_leg1_*`、腿二 `fn parity_leg2_*`，命名即机器锚），只有腿一记未达标；placeholder 记"不适用"、retired 退出分母、Python 两件式记不适用；C10 stub 反例自证内置（拦不住空件则门自身 FAIL）· ⑧-b 依赖闭包 grep 门（C7 分级执法）：扫 `modules/*/atoms/*/*.rs` 非 test 面（行注释与 `#[cfg(test)]` 块先剥）——L0 = `std::`（含 `use std::`/`extern crate std`/全限定内联），L1 = L0 + `serde_json` · ⑧-c 注入面校验门：rr-registry contract 的 injection 用例**显式过滤器**，打空即红（run_tests ≥1 断言），封"用例被改名/删除"的 fail-open |
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**十步**
 （⑥/⑦ 两步随 0.0.5 批E 接入、⑧ 三门随 0.0.5 批K 接入，`check.sh` 由七步经九步扩十步；
@@ -1707,7 +1707,7 @@ rr3-sense=[audio.capture,audio.vad] + rr3-act=[act.servo]，不启用 net.*/cogn
 power 4 / sense 4）+ rr3-pack 19 + rrctl 23 + mkmodule 9 + rr-registry contract 38 + rrd profile 24
 测试绿
 
-2026-10-11 0.0.7 两板收口批——批C④⑤ 板级收官落档（0.0.7 方案状态行；十步门禁直跑
+2026-10-10 0.0.7 两板收口批——批C④⑤ 板级收官落档（0.0.7 方案状态行；十步门禁直跑
 GATE_EXIT=0，PASS 50 全绿）——CP2102 到位，ESP32 devkit 按 0.0.7 §9.2 runbook 板级实测：
 ④ 判据过（128B 头 + payload 完整收发，cmp 逐字节一致）、⑤ 判据过（半帧截断与坏 magic 两类
 注入均拒收、注入后不进死锁、正常帧收发不受影响）——**层② 必达全绿、批C 整批收官**；现场实测
@@ -1719,6 +1719,19 @@ gc-sections 丢弃——按对表段名手挂 `#[used]` 静态量修复（专用
 `tools/ci/esp-uart-echo-check.sh` 直跑绿 + ELF 物证三要素核验齐：节 0x100 字节在册 / magic
 0xABCD5432 / project_name 与 Cargo 元数据一致）。0.0.6 §5.4 BOM 第 9 行 CP2102 翻"已到位"；
 C12 首条手测行不冒领（⑦ 列证据三样未留档），敞口维持待按供给自证表模板补采
+
+2026-10-10 批K/两板收口批深挖收口（两独立代理对拍 + 人工复核）——P1 一处同批结清：
+`base/os/distro/units/rrd.service` ExecStart 硬编码 distro.toml 装机位与批K H4 `--profile`
+参数化矛盾（非 distro 机型出包 deb 内无 distro.toml、systemd 拉起即败）——rr3-pack 补
+第二处内容改写：ExecStart 装机位随 `--profile` 同步改写（缺省 distro 恒等字节零差异；
+模板锚点缺席 fail-closed；反例断言钉死不残留 distro 位）。⑧-b L0 门拓全限定内联与 L1
+对称（`std::` 单 token），同批清退三份 atom mech 五处内联活体（face mem::replace ×2 /
+player PI ×2 / capture PI ×1 → `core::` 等价替换，语义零变化）；活文档口径同步（§2 ⑧ 行、
+architecture §13 表、tools/ci/README）；`.github/README.md` 订正（指路存根 + 八 job + 十步）；
+五处 "2026-10-11" 落档日期订正为提交时间戳在案的 2026-10-10。P2 四笔登记 status.md 敞口：
+⑧-c 过滤器按用例名子串绑定（空壳可顶替）、matrix.sh 三小项（①列 4/4 硬编码 / --manual
+仅标记词 / `{{` 转义剥离失衡风险）、esp-bootloader-esp-idf 默认特性未关、ELF 三要素核验
+未自动化 + 上游 idf_ver 误读 MMU 页配置键注记（装饰性，无参宏同源字段一致）
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
