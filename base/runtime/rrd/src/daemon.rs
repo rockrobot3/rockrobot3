@@ -206,7 +206,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
     // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
     // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
-    let (boot_manifests, degraded, hal_bindings) = match &cfg.profile {
+    let (boot_manifests, degraded, hal_bindings, predegraded) = match &cfg.profile {
         Some(p) => {
             // 格位契约与主题契约同目录（--contracts 运行期落点，T5）
             let slots =
@@ -217,10 +217,26 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                     "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
                 ));
             }
+            // G4（ADR-0019 修订 1 ③）：装配缺项点名到件，模块照常 spawn 但在册即 Degraded
+            for (module, msg) in &boot.assemble_broken {
+                rr3_log(&format!(
+                    "装配缺项 {module}：{msg}（该模块在册即 Degraded，不致命——修数据后重启 rrd 解除）"
+                ));
+            }
             let names: BTreeSet<String> = boot.missing.iter().map(|(m, _)| m.clone()).collect();
-            (boot.manifests, names, boot.hal_bindings)
+            let predegraded: BTreeSet<String> = boot
+                .assemble_broken
+                .iter()
+                .map(|(m, _)| m.clone())
+                .collect();
+            (boot.manifests, names, boot.hal_bindings, predegraded)
         }
-        None => (cfg.manifests.clone(), BTreeSet::new(), String::new()),
+        None => (
+            cfg.manifests.clone(),
+            BTreeSet::new(),
+            String::new(),
+            BTreeSet::new(),
+        ),
     };
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
@@ -234,6 +250,13 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     rr3_log(&format!("监听 {}", cfg.socket.display()));
 
     let shared = Arc::new(Mutex::new(RrdRegistry::new(cfg.restart_base_ms)));
+    // G4：装配缺项的模块预降级——注册入表即 Degraded，且不被解除传播捞回
+    if !predegraded.is_empty() {
+        shared
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .rr3_reg_predegrade_mark(predegraded);
+    }
     let topics = Arc::new(topics);
 
     // 运维计数持久化（0.0.4 批B，Q1/Q2 裁定）：启动加载全表 → `boots` 自增（rrd 自有键，

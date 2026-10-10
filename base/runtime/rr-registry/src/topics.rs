@@ -1,18 +1,26 @@
-//! 主题集：owner + topic 名 + kind 的集合视图。
+//! 主题集：owner + topic 名 + kind + status 的集合视图。
 //!
 //! 生产真相只有 `contracts/topics.toml`。`rr3_topic_set_merge` 只服务**测试叠加层**
 //! （spec §6 / R6）：叠加层不得覆盖生产条目，topic 名撞车即整册作废并点名冲突。
 //! 空主题集是契约事故，不是放行许可证。
+//!
+//! `status`（0.0.5 批J C14 首例退役）：可省字段，缺省 = 未标记（语义"正常"）；
+//! 显式 `retired` = 号位保留、义务解除——申报面（publishes/rpc.exposes/subscribes）
+//! 引用即拒，门在 `validate.rs`（ADR-0019 修订 2 ②）。status 值域与 slots.toml 同一三态。
 
 use std::collections::BTreeMap;
 use toml::Value;
 
+/// 合法主题状态（与 slots.toml 三态同轴；缺省未标记 = 正常语义）
+const RR3_TOPIC_STATUS: [&str; 3] = ["normal", "placeholder", "retired"];
+
 /// 一册主题集（不可变快照）
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Rr3TopicSet {
-    topics: BTreeMap<String, String>, // topic -> owner
-    kinds: BTreeMap<String, String>,  // topic -> kind
-    owners: Vec<String>,              // 升序去重
+    topics: BTreeMap<String, String>,   // topic -> owner
+    kinds: BTreeMap<String, String>,    // topic -> kind
+    statuses: BTreeMap<String, String>, // topic -> status（只收显式标记）
+    owners: Vec<String>,                // 升序去重
 }
 
 fn entries<'a>(root: &'a Value, key: &str) -> impl Iterator<Item = &'a toml::Table> {
@@ -52,6 +60,11 @@ pub fn rr3_registry_topic_set_from_text(text: &str) -> Rr3TopicSet {
                 .unwrap_or("")
                 .to_string(),
         );
+        if let Some(st) = t.get("status").and_then(Value::as_str) {
+            if !st.is_empty() {
+                set.statuses.insert(name.to_string(), st.to_string());
+            }
+        }
     }
     set.owners.sort();
     set.owners.dedup();
@@ -81,6 +94,12 @@ impl Rr3TopicSet {
         self.kinds.get(topic).cloned()
     }
 
+    /// 该 topic 的显式状态标记（不在册或未标记 = None）。
+    /// 消费方：validate.rs 的申报门（retired 主题不得被申报发布/订阅/暴露）。
+    pub fn rr3_topic_set_status(&self, topic: &str) -> Option<String> {
+        self.statuses.get(topic).cloned()
+    }
+
     pub fn rr3_topic_set_names(&self) -> Vec<String> {
         self.topics.keys().cloned().collect()
     }
@@ -100,13 +119,15 @@ impl Rr3TopicSet {
         let mut merged = self.clone();
         merged.topics.extend(overlay.topics.clone());
         merged.kinds.extend(overlay.kinds.clone());
+        merged.statuses.extend(overlay.statuses.clone());
         merged.owners.extend(overlay.owners.iter().cloned());
         merged.owners.sort();
         merged.owners.dedup();
         Ok(merged)
     }
 
-    /// 自身形状检查：复用 `rr3_registry_check("topic", …)` 与 `[rules] topic_allowed_kinds`
+    /// 自身形状检查：复用 `rr3_registry_check("topic", …)` 与 `[rules] topic_allowed_kinds`；
+    /// status 显式标记时值域必须合法（与 slots.toml 同一三态）
     pub fn rr3_topic_set_check(&self) -> Vec<String> {
         if self.rr3_topic_set_is_empty() {
             return vec!["主题集为空：必须至少登记一个 [[topic]]（ADR-0006）".to_string()];
@@ -124,6 +145,13 @@ impl Rr3TopicSet {
             }
             if !allowed.iter().any(|k| k == &kind) {
                 errs.push(format!("topic {name} 的 kind 非法: {kind}"));
+            }
+        }
+        for (name, status) in &self.statuses {
+            if !RR3_TOPIC_STATUS.contains(&status.as_str()) {
+                errs.push(format!(
+                    "topic {name} 的 status 非法: {status}（只允许 {RR3_TOPIC_STATUS:?}）"
+                ));
             }
         }
         errs
@@ -244,6 +272,65 @@ owner = "rr3-simb"
         let errs = bad.rr3_topic_set_check();
         assert!(errs.iter().any(|e| e.contains("owner 未登记")), "{errs:?}");
         assert!(errs.iter().any(|e| e.contains("kind 非法")), "{errs:?}");
+    }
+
+    /// C14 首例退役（0.0.5 批J）：asr/text 与 dialog/turn 显式 status="retired"，
+    /// 号位保留、义务解除；其余 26 条无显式标记。status 随 merge 带得过来。
+    #[test]
+    fn contract_pins_two_retired_topics() {
+        let set = rr3_registry_topic_set_from_text(CONTRACT);
+        assert_eq!(
+            set.rr3_topic_set_status("rr3-interact/asr/text").as_deref(),
+            Some("retired"),
+            "asr/text 必须显式 retired（号位保留、义务解除）"
+        );
+        assert_eq!(
+            set.rr3_topic_set_status("rr3-interact/dialog/turn")
+                .as_deref(),
+            Some("retired")
+        );
+        assert_eq!(
+            set.rr3_topic_set_status("rr3-sense/audio/pcm"),
+            None,
+            "未标记主题 = None（正常语义），不是空串"
+        );
+        assert!(
+            set.rr3_topic_set_check().is_empty(),
+            "{:?}",
+            set.rr3_topic_set_check()
+        );
+
+        let merged = set
+            .rr3_topic_set_merge(&rr3_registry_topic_set_from_text(OVERLAY))
+            .expect("合并");
+        assert_eq!(
+            merged
+                .rr3_topic_set_status("rr3-interact/asr/text")
+                .as_deref(),
+            Some("retired"),
+            "retired 标记必须随 merge 带过来（申报门在合并后的表上执法）"
+        );
+    }
+
+    /// 非法 status 值必须被形状检查点名
+    #[test]
+    fn bad_topic_status_is_named() {
+        let bad = rr3_registry_topic_set_from_text(
+            r#"
+[[owner]]
+name = "rr3-sima"
+[[topic]]
+name = "rr3-sima/ping/state"
+kind = "event"
+owner = "rr3-sima"
+status = "archived"
+"#,
+        );
+        let errs = bad.rr3_topic_set_check();
+        assert!(
+            errs.iter().any(|e| e.contains("status 非法: archived")),
+            "{errs:?}"
+        );
     }
 
     /// 随仓库提交的夹具叠加层必须自检通过且与契约零撞名

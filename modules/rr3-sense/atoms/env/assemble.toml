@@ -1,6 +1,7 @@
-# env 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
-# 原子件只见 ops 指针与描述符给的绑定句柄）。
-schema_version = 1
+# env 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
 
 [assemble]
 handles = []   # 占位件：真件后端随采购批填实

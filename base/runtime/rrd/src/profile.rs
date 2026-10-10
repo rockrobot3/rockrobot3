@@ -1,18 +1,26 @@
 //! 装配单装载（ADR-0012 裁定 3/5②，0.0.2 方案 D2 / Q3 裁定）。
 //!
-//! `profiles/<机型>.toml` 是**纯数据**装配单：`[bindings]` 格位→件、`[enabled_slots]` 模块→本形态
+//! `profiles/<机型>.toml` 是**纯数据**装配单，schema_version=2 起按 ADR-0018 修订 1 ④
+//! 的描述符七段定形：`[os]`（运行期不读）+ `[platform]`（tier 三档 host/rtos/bare）+
+//! `[supplies]`（看门狗三键 + 时序预算位三键，修订 4 ② / 修订 2 ③）+ `[slots]`
+//! （present = 本板物理在位集）+ `[bindings]` 格位→件、`[enabled_slots]` 模块→本形态
 //! 启用的格位集合、`[hardware]` 物理绑定（ADR-0018 裁定 4：引脚/控制器编号/总线/设备名的唯一
 //! 数据事实源，批D④ 收口——可选段，缺了它 linux 硬件面按 fail-closed 显式回错，应急 env 可救）。
-//! 本模块只做四件事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
+//! 本模块只做五件事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
 //! 运行期不重排，F⊗F 非法）：
-//! 1. 解析装配单文本（fail-closed：形状不合逐条点名，一条不静默放行）；
-//! 2. 查册门（裁定 5②）：bindings/enabled_slots 引用的每个格位必须命中
-//!    [`contracts/slots.toml`](../../../contracts/slots.toml)——查册真值是
+//! 1. 解析装配单文本（fail-closed：形状不合逐条点名，一条不静默放行）——
+//!    schema_version=2 起 [platform]/[supplies]/[slots] 三段必填；
+//! 2. 查册门（裁定 5②）：bindings/enabled_slots/[slots].present 引用的每个格位必须命中
+//!    [`contracts/slots.toml`](../../../contracts/slots.toml)（present 另拒基础层格位——
+//!    基础层恒在位，进 present 属自相矛盾）——查册真值是
 //!    `rr-registry::Rr3SlotTable`，与 CI 全集层共用同一份，不写第二套；
-//! 3. 缺格判定：enabled_slots 声明的格位若非基础层、又没有 binding 指向本模块（或探测不到，
-//!    见 [`crate::probe`]）→ (模块, 格位) 进缺格清单，由 daemon 点名 `拒绝启动`——
+//! 3. 缺格判定（三源合一，方案 §15）：[slots].present 声明缺（第一源）、enabled_slots
+//!    声明的格位若非基础层、又没有 binding 指向本模块（注入缺，j5）、或探测不到
+//!    （实测缺，见 [`crate::probe`]）→ (模块, 格位) 进缺格清单，由 daemon 点名 `拒绝启动`——
 //!    绝不带病起，provides 仍留在可满足性宇宙（下游不连坐，ADR-0009 同款语义）；
-//! 4. 把 enabled_slots 模块名解析成 manifest 路径：`<modules-root>/profiles/<机>.toml` 的上两级即
+//! 4. 档位一致性（ADR-0018 修订 1：无看门狗的板不允许归 bare 档）：tier=bare 而
+//!    [supplies].watchdog_present=false 的装配单自相矛盾 → 拒 boot；
+//! 5. 把 enabled_slots 模块名解析成 manifest 路径：`<modules-root>/profiles/<机>.toml` 的上两级即
 //!    modules-root，manifest 在 `<modules-root>/modules/<名>/module.toml`——装机布局由
 //!    打包步骤保证（modules/README.md 装机约定 + 0.0.2 T5 deb 打包同一布局）。
 //!
@@ -30,17 +38,57 @@ use rr_registry::{rr3_registry_slot_table_from_text, Rr3SlotTable};
 pub const RR3_CONTRACT_SLOTS_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/slots.toml");
 
-/// 只认 schema_version = 1（与 slots.toml / profiles 同步演进；不匹配 = 契约事故，拒启动）
-const RR3_PROFILE_SCHEMA_VERSION: i64 = 1;
+/// 只认 schema_version = 2（1→2 为破坏性变更：新增 [platform]/[supplies]/[slots]
+/// 三必填段，描述符七段定形，ADR-0018 修订 1 ④；不匹配 = 契约事故，拒启动）
+const RR3_PROFILE_SCHEMA_VERSION: i64 = 2;
+
+/// [supplies] 六键（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）——
+/// 未知键点名与解析白名单共用
+const RR3_SUPPLIES_KEYS: [&str; 6] = [
+    "watchdog_present",
+    "watchdog_timeout_ms",
+    "watchdog_feeder",
+    "tick_period_ms",
+    "tick_jitter_ms",
+    "safety_core_interval_ms",
+];
+
+/// [platform] tier 三档（ADR-0018 修订 1：承载二分 → 三档）
+const RR3_PLATFORM_TIERS: [&str; 3] = ["host", "rtos", "bare"];
+
+/// [supplies]：平台供给声明（不可变快照）。看门狗三键 = 有无 / 超时上界 / 由哪一路喂
+/// （修订 4 ②）；时序三键 = 机制核节拍周期 / 节拍抖动预算 / 安全核最小复核间隔的
+/// **声明预算位**（修订 2 ③）——声明值与生产真值的对账归 0.0.6 点验矩阵，这里只管收。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rr3Supplies {
+    /// 平台看门狗有无（要素一）
+    pub watchdog_present: bool,
+    /// 看门狗超时上界 ms（要素二；应宽于模块级 health.watchdog_timeout_ms）
+    pub watchdog_timeout_ms: i64,
+    /// 由哪一路喂（要素三：如 "rrd" = rrd tick 环）
+    pub watchdog_feeder: String,
+    /// 机制核节拍周期声明 ms
+    pub tick_period_ms: i64,
+    /// 节拍抖动预算声明 ms
+    pub tick_jitter_ms: i64,
+    /// 安全核最小复核间隔声明 ms
+    pub safety_core_interval_ms: i64,
+}
 
 /// 一份装配单（不可变快照）。BTreeMap 让"模块序/格位序"确定化为升序——
 /// spawn 序由 `plan_boot` 仲裁裁，这里不携带任何顺序语义。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Rr3Profile {
+    /// [platform].tier：本机档位（host / rtos / bare，ADR-0018 修订 1 三档）
+    pub platform_tier: String,
     /// [bindings]：格位 → 模块名（只允许 body/cognition 层格位）
     pub bindings: BTreeMap<String, String>,
     /// [enabled_slots]：模块名 → 本形态启用的格位集合
     pub enabled_slots: BTreeMap<String, Vec<String>>,
+    /// [slots].present：本板物理在位格位声明（缺格三源合一第一源——声明缺）
+    pub slots_present: Vec<String>,
+    /// [supplies]：平台供给声明（看门狗三键 + 时序预算位三键）
+    pub supplies: Rr3Supplies,
     /// [hardware]：物理绑定键值（键位语义与取值域由 rr-hal 描述符解析裁，
     /// rrd 只管装配形状——标量字符串化，注入时不解释）
     pub hardware: BTreeMap<String, String>,
@@ -51,10 +99,14 @@ pub struct Rr3Profile {
 pub struct Rr3ProfileBoot {
     /// enabled_slots 模块的 manifest 路径（模块名升序，确定性）
     pub manifests: Vec<PathBuf>,
-    /// 缺格 (模块, 格位)：enabled_slots 声明但无有效 binding（或探测不到）→ 该模块不 spawn
+    /// 缺格 (模块, 格位)：present 声明缺 / enabled_slots 声明但无有效 binding（或
+    /// 探测不到）→ 该模块不 spawn
     pub missing: Vec<(String, String)>,
     /// [hardware] 序列化文本（spawn 时注入 `RR3_HAL_BINDINGS`；空 = 未给物理绑定）
     pub hal_bindings: String,
+    /// 装配缺项 (模块名, 点名文案)（G4/ADR-0019 修订 1 ③）：atoms/*/assemble.toml
+    /// 缺文件/坏形/ops 注入缺 → 模块照常 spawn 但在册即 Degraded（不 fatal，点名到件）
+    pub assemble_broken: Vec<(String, String)>,
 }
 
 /// 装配单路径解析成绝对路径：装载与横幅凭证共用同一个解析结果。
@@ -150,14 +202,116 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
+    // [platform]：必填段、单键 tier（ADR-0018 修订 1 ④ 七段之一）。tier 取值域
+    // host/rtos/bare 三档，未知键逐条点名。
+    let mut platform_tier = String::new();
+    match root.get("platform").and_then(toml::Value::as_table) {
+        None => errs
+            .push("缺少 [platform]（tier = host/rtos/bare；schema_version=2 起必填）".to_string()),
+        Some(t) => match t.get("tier") {
+            None => errs.push("[platform] 缺 tier（host/rtos/bare）".to_string()),
+            Some(v) => match v.as_str() {
+                Some(s) if RR3_PLATFORM_TIERS.contains(&s) => platform_tier = s.to_string(),
+                other => errs.push(format!(
+                    "platform.tier 必须是 host/rtos/bare 之一，收到 {other:?}"
+                )),
+            },
+        },
+    }
+    if let Some(t) = root.get("platform").and_then(toml::Value::as_table) {
+        for k in t.keys() {
+            if k != "tier" {
+                errs.push(format!("[platform] 未知键 {k}（只认 tier）"));
+            }
+        }
+    }
+    // [supplies]：必填段（看门狗三键 + 时序预算位三键，六键全必填、类型逐键检查、
+    // 未知键点名）——这是 G6 档位一致性校验与 0.0.6 点验矩阵的输入事实。
+    let mut supplies = Rr3Supplies::default();
+    match root.get("supplies").and_then(toml::Value::as_table) {
+        None => errs.push(
+            "缺少 [supplies]（平台看门狗与时序预算声明；schema_version=2 起必填）".to_string(),
+        ),
+        Some(t) => {
+            match t.get("watchdog_present").and_then(toml::Value::as_bool) {
+                Some(b) => supplies.watchdog_present = b,
+                None => errs.push("supplies.watchdog_present 缺失或不是布尔".to_string()),
+            }
+            for key in [
+                "watchdog_timeout_ms",
+                "tick_period_ms",
+                "tick_jitter_ms",
+                "safety_core_interval_ms",
+            ] {
+                match supplies_int(t.get(key), key) {
+                    Ok(v) => match key {
+                        "watchdog_timeout_ms" => supplies.watchdog_timeout_ms = v,
+                        "tick_period_ms" => supplies.tick_period_ms = v,
+                        "tick_jitter_ms" => supplies.tick_jitter_ms = v,
+                        _ => supplies.safety_core_interval_ms = v,
+                    },
+                    Err(e) => errs.push(e),
+                }
+            }
+            match t.get("watchdog_feeder").and_then(toml::Value::as_str) {
+                Some(s) if !s.is_empty() => supplies.watchdog_feeder = s.to_string(),
+                _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
+            }
+            for k in t.keys() {
+                if !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
+                    errs.push(format!(
+                        "[supplies] 未知键 {k}（只认 {}）",
+                        RR3_SUPPLIES_KEYS.join("/")
+                    ));
+                }
+            }
+        }
+    }
+    // [slots]：必填段、present = 本板物理在位格位声明（缺格三源合一第一源）。
+    // 每项非空字符串；未知键点名。空数组合法——板可以什么都不在位（全 Degraded）。
+    let mut slots_present: Vec<String> = Vec::new();
+    match root.get("slots").and_then(toml::Value::as_table) {
+        None => errs.push(
+            "缺少 [slots]（present = 本板物理在位格位声明；schema_version=2 起必填）".to_string(),
+        ),
+        Some(t) => {
+            match t.get("present").and_then(toml::Value::as_array) {
+                Some(items) => {
+                    for item in items {
+                        match item.as_str() {
+                            Some(s) if !s.is_empty() => slots_present.push(s.to_string()),
+                            _ => errs.push(
+                                "[slots].present 的每一项都必须是非空字符串（格位名）".to_string(),
+                            ),
+                        }
+                    }
+                }
+                None => errs.push("[slots] 缺 present（本板物理在位格位数组）".to_string()),
+            }
+            for k in t.keys() {
+                if k != "present" {
+                    errs.push(format!("[slots] 未知键 {k}（只认 present）"));
+                }
+            }
+        }
+    }
     if !errs.is_empty() {
         return Err(errs);
     }
     Ok(Rr3Profile {
+        platform_tier,
         bindings,
         enabled_slots,
+        slots_present,
+        supplies,
         hardware,
     })
+}
+
+/// [supplies] 的整数键读取：缺失或类型不合同一条错误点名（运维一次改对）
+fn supplies_int(v: Option<&toml::Value>, key: &str) -> Result<i64, String> {
+    v.and_then(toml::Value::as_integer)
+        .ok_or_else(|| format!("supplies.{key} 缺失或不是整数"))
 }
 
 /// [hardware] 段序列化成注入文本：每行 `键 = "值"`（值已字符串化，TOML 基本
@@ -229,6 +383,27 @@ pub fn rr3_profile_boot_inputs(
             }
         }
     }
+    // [slots].present 查册门：声明集同样只认 rr-registry 那一册；基础层格位恒在位
+    // （slots.toml 注记），进 present 属自相矛盾 → 点名拒。
+    for slot in &profile.slots_present {
+        if !table.rr3_slot_table_contains(slot) {
+            errs.push(format!(
+                "[slots].present 格位 {slot} 未在册（contracts/slots.toml 无此格）"
+            ));
+        } else if table.rr3_slot_table_layer(slot).as_deref() == Some("base") {
+            errs.push(format!(
+                "[slots].present 不得声明基础层格位 {slot}（基础层由基座内建承载，恒在位）"
+            ));
+        }
+    }
+    // G6 档位一致性（ADR-0018 修订 1：无看门狗的板不允许归 bare 档）：
+    // tier=bare 而 watchdog_present=false 的装配单自相矛盾 → 拒 boot。
+    if profile.platform_tier == "bare" && !profile.supplies.watchdog_present {
+        errs.push(
+            "档位一致性校验失败：tier = bare 但 supplies.watchdog_present = false——无看门狗的板不允许归 bare 档（ADR-0018 修订 1），拒绝启动"
+                .to_string(),
+        );
+    }
     // 结构自洽：每条 binding 都必须被 enabled_slots 认领（enabled_slots[M] 含该格位）——
     // 否则它是死数据：绑了没人用，装配单与 enabled_slots 各说一套。
     for (slot, module) in &profile.bindings {
@@ -263,6 +438,14 @@ pub fn rr3_profile_boot_inputs(
             if base {
                 continue;
             }
+            // 缺格三源合一第一源（方案 §15）：本板声明缺（[slots].present 不含）→ 缺格，
+            // 不再看 binding 与探测——板说没有，装配单绑了也白绑。
+            if !profile.slots_present.contains(slot) {
+                if !missing.contains(&(module.clone(), slot.clone())) {
+                    missing.push((module.clone(), slot.clone()));
+                }
+                continue;
+            }
             if profile.bindings.get(slot) != Some(module)
                 && !missing.contains(&(module.clone(), slot.clone()))
             {
@@ -285,11 +468,74 @@ pub fn rr3_profile_boot_inputs(
         .map(|m| root.join("modules").join(m).join("module.toml"))
         .collect();
     let hal_bindings = rr3_hardware_bindings_text(&profile.hardware);
+
+    // G4 装配段校验（ADR-0019 修订 1 ③）：enabled_slots 的每个模块扫
+    // atoms/*/assemble.toml——缺文件/坏形/ops 注入缺逐条点名，该模块 boot 入
+    // Degraded（不 fatal；修数据 + 重启是唯一解除路）。
+    let mut assemble_broken: Vec<(String, String)> = Vec::new();
+    for m in profile.enabled_slots.keys() {
+        for msg in rr3_assemble_scan(&root.join("modules").join(m)) {
+            assemble_broken.push((m.clone(), msg));
+        }
+    }
+
     Ok(Rr3ProfileBoot {
         manifests,
         missing,
         hal_bindings,
+        assemble_broken,
     })
+}
+
+/// 扫描单个模块目录的装配清单（G4/ADR-0019 修订 1 ③）：`atoms/<件>/` 必有
+/// assemble.toml（五件套④），形状校验走 rr-registry 共用真值；ops 非空时对模块
+/// config.toml 做注入缺点路径游走。无 atoms/ 目录的模块（夹具树/两件式形态）返回空。
+fn rr3_assemble_scan(module_dir: &Path) -> Vec<String> {
+    let atoms_dir = module_dir.join("atoms");
+    let Ok(entries) = std::fs::read_dir(&atoms_dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .collect();
+    names.sort();
+    let mut out = Vec::new();
+    for atom in names {
+        let path = atoms_dir.join(&atom).join("assemble.toml");
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(_) => {
+                out.push(format!("件 {atom} 缺 assemble.toml（五件套④，装配段点名）"));
+                continue;
+            }
+        };
+        let facts = match rr_registry::rr3_registry_assemble_from_text(&text) {
+            Ok(f) => f,
+            Err(errs) => {
+                for e in errs {
+                    out.push(format!("件 {atom} 装配清单坏形: {e}"));
+                }
+                continue;
+            }
+        };
+        if facts.ops.is_empty() {
+            continue;
+        }
+        // 注入缺：ops 声明的参数槽必须能从模块 config.toml 按点路径取到
+        match std::fs::read_to_string(module_dir.join("config.toml")) {
+            Ok(cfg) => {
+                for gap in rr_registry::rr3_registry_assemble_injection_gaps(&facts, &cfg) {
+                    out.push(format!("件 {atom} {gap}"));
+                }
+            }
+            Err(e) => out.push(format!(
+                "件 {atom} 参数槽来源不可证：config.toml 读不到 ({e})"
+            )),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -302,10 +548,21 @@ mod tests {
     }
 
     const GOOD: &str = r#"
-schema_version = 1
+schema_version = 2
 
 [os]
 route = "distro"
+
+[platform]
+tier = "host"
+
+[supplies]
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
 
 [bindings]
 "act.servo" = "rr3-pa"
@@ -316,6 +573,9 @@ route = "distro"
 rr3-pa = ["act.servo"]
 rr3-pb = ["sensor.env"]
 rr3-pc = ["cognition.llm"]
+
+[slots]
+present = ["act.servo", "cognition.llm", "sensor.env"]
 "#;
 
     impl Root {
@@ -339,19 +599,85 @@ rr3-pc = ["cognition.llm"]
         }
     }
 
+    /// G4 装配段扫描直测（ADR-0019 修订 1 ③）：缺文件/坏形/注入缺逐条点名，
+    /// 无 atoms 目录与合法空数组不产生缺口
+    #[test]
+    fn assemble_scan_names_missing_broken_and_injection_gaps() {
+        let root = Root::new("assemble-scan");
+        // 无 atoms/ 目录 → 空（夹具树/两件式形态）
+        assert!(rr3_assemble_scan(&root.dir.join("no-atoms")).is_empty());
+
+        // 合法空声明（v2）→ 空
+        let ok = root.dir.join("ok");
+        std::fs::create_dir_all(ok.join("atoms/led")).unwrap();
+        std::fs::write(
+            ok.join("atoms/led/assemble.toml"),
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
+        )
+        .unwrap();
+        assert!(rr3_assemble_scan(&ok).is_empty(), "合法空声明不得报缺");
+
+        // 缺文件 / 坏形 / 注入缺 三路点名，互不遮蔽
+        let bad = root.dir.join("bad");
+        std::fs::create_dir_all(bad.join("atoms/nofile")).unwrap();
+        std::fs::create_dir_all(bad.join("atoms/broken")).unwrap();
+        // 只缺 ops 一键 → 恰一条点名（schema=1 那种坏法会连出两条，不便数总数）
+        std::fs::write(
+            bad.join("atoms/broken/assemble.toml"),
+            "schema_version = 2\n\n[assemble]\nhandles = []\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(bad.join("atoms/gap")).unwrap();
+        std::fs::write(
+            bad.join("atoms/gap/assemble.toml"),
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = [ { slot = \"s\", src_key = \"x.y.z\" } ]\n",
+        )
+        .unwrap();
+        std::fs::write(bad.join("config.toml"), "[x.y]\nw = 1\n").unwrap();
+        let out = rr3_assemble_scan(&bad);
+        assert_eq!(out.len(), 3, "{out:?}");
+        assert!(
+            out.iter()
+                .any(|m| m.contains("nofile") && m.contains("缺 assemble.toml")),
+            "{out:?}"
+        );
+        assert!(
+            out.iter()
+                .any(|m| m.contains("broken") && m.contains("坏形")),
+            "{out:?}"
+        );
+        assert!(
+            out.iter()
+                .any(|m| m.contains("gap") && m.contains("注入缺") && m.contains("x.y.z")),
+            "{out:?}"
+        );
+    }
+
     #[test]
     fn good_profile_parses() {
         let p = rr3_profile_from_text(GOOD).expect("应能解析");
         assert_eq!(p.bindings.len(), 3);
         assert_eq!(p.enabled_slots.len(), 3);
         assert_eq!(p.enabled_slots["rr3-pa"], vec!["act.servo".to_string()]);
+        // 描述符七段（schema_version=2）：[platform]/[supplies]/[slots] 逐字段收齐
+        assert_eq!(p.platform_tier, "host");
+        assert!(p.supplies.watchdog_present);
+        assert_eq!(p.supplies.watchdog_timeout_ms, 15000);
+        assert_eq!(p.supplies.watchdog_feeder, "rrd");
+        assert_eq!(p.supplies.tick_period_ms, 200);
+        assert_eq!(p.supplies.tick_jitter_ms, 100);
+        assert_eq!(p.supplies.safety_core_interval_ms, 1000);
+        assert_eq!(
+            p.slots_present,
+            ["act.servo", "cognition.llm", "sensor.env"]
+        );
         // [os].route 被无视（运行期不读），但它的存在不构成错误
     }
 
     #[test]
     fn parse_errors_are_all_collected_and_named() {
         let text = GOOD
-            .replace("schema_version = 1", "schema_version = 2")
+            .replace("schema_version = 2", "schema_version = 3")
             .replace("\"act.servo\" = \"rr3-pa\"", "\"act.servo\" = \"\"")
             .replace("rr3-pb = [\"sensor.env\"]", "rr3-pb = [\"\"]")
             .replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = 3");
@@ -379,7 +705,7 @@ rr3-pc = ["cognition.llm"]
 
     #[test]
     fn missing_sections_and_empty_enabled_slots_are_errors() {
-        let errs = rr3_profile_from_text("schema_version = 1\n").expect_err("缺段必须报错");
+        let errs = rr3_profile_from_text("schema_version = 2\n").expect_err("缺段必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [bindings]")),
             "{errs:?}"
@@ -389,7 +715,7 @@ rr3-pc = ["cognition.llm"]
             "{errs:?}"
         );
 
-        let errs = rr3_profile_from_text("schema_version = 1\n[bindings]\n\n[enabled_slots]\n")
+        let errs = rr3_profile_from_text("schema_version = 2\n[bindings]\n\n[enabled_slots]\n")
             .expect_err("空 enabled_slots 必须报错");
         assert!(
             errs.iter().any(|e| e.contains("[enabled_slots] 为空")),
@@ -572,6 +898,123 @@ rr3-pc = ["cognition.llm"]
             boot.hal_bindings, "link_ifname = \"wlan0\"\npwm_chip = \"0\"\n",
             "注入文本升序、整数已字符串化"
         );
+    }
+
+    /// schema_version=2 三新段必填：缺段逐条点名（fail-closed，一次收集完）
+    #[test]
+    fn new_sections_are_required_and_named() {
+        let errs = rr3_profile_from_text("schema_version = 2\n").expect_err("缺新段必须报错");
+        for want in [
+            "缺少 [platform]",
+            "缺少 [supplies]",
+            "缺少 [slots]",
+            "缺少 [bindings]",
+            "缺少 [enabled_slots]",
+        ] {
+            assert!(errs.iter().any(|e| e.contains(want)), "缺 {want}: {errs:?}");
+        }
+    }
+
+    /// [platform]/[supplies] 形状：tier 值域、类型逐键检查，坏值一次全收集
+    #[test]
+    fn platform_and_supplies_shape_errors_are_named() {
+        let text = GOOD
+            .replace("tier = \"host\"", "tier = \"nano\"")
+            .replace("watchdog_present = true", "watchdog_present = 1")
+            .replace(
+                "watchdog_timeout_ms = 15000",
+                "watchdog_timeout_ms = \"15s\"",
+            )
+            .replace("watchdog_feeder = \"rrd\"", "watchdog_feeder = \"\"");
+        let errs = rr3_profile_from_text(&text).expect_err("形状不合必须报错");
+        assert_eq!(errs.len(), 4, "{errs:?}");
+        for want in [
+            "platform.tier",
+            "supplies.watchdog_present",
+            "supplies.watchdog_timeout_ms",
+            "supplies.watchdog_feeder",
+        ] {
+            assert!(errs.iter().any(|e| e.contains(want)), "缺 {want}: {errs:?}");
+        }
+    }
+
+    /// 三新段未知键逐条点名（一条不静默放行）
+    #[test]
+    fn new_sections_unknown_keys_are_named() {
+        let text = GOOD
+            .replace("tier = \"host\"", "tier = \"host\"\nfoo = 1")
+            .replace(
+                "watchdog_present = true",
+                "watchdog_present = true\nbar = 1",
+            )
+            .replace("[slots]\n", "[slots]\nbaz = []\n");
+        let errs = rr3_profile_from_text(&text).expect_err("未知键必须报错");
+        assert_eq!(errs.len(), 3, "{errs:?}");
+        for want in [
+            "[platform] 未知键 foo",
+            "[supplies] 未知键 bar",
+            "[slots] 未知键 baz",
+        ] {
+            assert!(errs.iter().any(|e| e.contains(want)), "缺 {want}: {errs:?}");
+        }
+    }
+
+    /// G6 档位一致性（ADR-0018 修订 1）：tier=bare 且无看门狗 → 致命点名；
+    /// bare + 看门狗在场 → 一致，放行。
+    #[test]
+    fn bare_tier_without_watchdog_is_fatal() {
+        let root = Root::new("g6");
+        let bad = GOOD
+            .replace("tier = \"host\"", "tier = \"bare\"")
+            .replace("watchdog_present = true", "watchdog_present = false");
+        let p = root.write_profile("bare-nowd.toml", &bad);
+        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect_err("无看门狗的 bare 档必须被拒");
+        assert!(e.contains("无看门狗的板不允许归 bare 档"), "{e}");
+
+        let ok = GOOD.replace("tier = \"host\"", "tier = \"bare\"");
+        let p = root.write_profile("bare-wd.toml", &ok);
+        rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("bare 档 + 看门狗在场应放行");
+    }
+
+    /// [slots].present 声明缺是缺格三源合一第一源：present 移除某格 →
+    /// (模块, 格位) 进缺格清单（缺格不是致命项，其余模块不牵连）
+    #[test]
+    fn absent_slot_declaration_is_missing_source() {
+        let root = Root::new("present");
+        let text = GOOD.replace(", \"sensor.env\"", "");
+        let p = root.write_profile("absent.toml", &text);
+        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("声明缺不是致命项");
+        assert_eq!(
+            boot.missing,
+            vec![("rr3-pb".to_string(), "sensor.env".to_string())],
+            "present 声明缺的格位对点名模块记缺格"
+        );
+    }
+
+    /// [slots].present 查册门：未在册格位、基础层格位 → 致命点名
+    #[test]
+    fn present_registry_gate_rejects_unknown_and_base_slots() {
+        let root = Root::new("presentgate");
+        let unknown = GOOD.replace(
+            "present = [\"act.servo\"",
+            "present = [\"sensor.wifi\", \"act.servo\"",
+        );
+        let p = root.write_profile("present-unknown.toml", &unknown);
+        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect_err("present 未在册格位必须致命");
+        assert!(e.contains("格位 sensor.wifi 未在册"), "{e}");
+
+        let base = GOOD.replace(
+            "present = [\"act.servo\"",
+            "present = [\"bus.publish\", \"act.servo\"",
+        );
+        let p = root.write_profile("present-base.toml", &base);
+        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect_err("present 声明基础层格位必须致命");
+        assert!(e.contains("不得声明基础层格位 bus.publish"), "{e}");
     }
 
     /// 装配单文件不存在 = 致命，文案是绝对化口径（canonicalize 的 ENOENT）

@@ -24,12 +24,27 @@ use support::*;
 
 /// 装配单：connect 两格位各绑 rr3-connect、enabled_slots 与 bindings 互认领。
 /// 格位名取自真 `contracts/slots.toml`（net.online 是基础层 base 格，绑它致命，
-/// e2e_profile 钉过——这里只绑身体层两格）。
+/// e2e_profile 钉过——这里只绑身体层两格）。schema_version=2 起三新段必填
+///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）。
 const PROFILE: &str = r#"
-schema_version = 1
+schema_version = 2
 
 [os]
 route = "distro"
+
+[platform]
+tier = "host"
+
+[supplies]
+watchdog_present = false
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[slots]
+present = ["net.wifi", "net.bt"]
 
 [bindings]
 "net.wifi" = "rr3-connect"

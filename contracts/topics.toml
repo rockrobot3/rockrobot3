@@ -113,12 +113,16 @@ name = "rr3-interact/asr/text"
 kind = "event"
 owner = "rr3-interact"
 stable = "L1"
+status = "retired"
+note = "0.0.5 批J C14 首例退役（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：号位保留、义务解除——全仓唯一发布点是 sim 演练，随批换至 rr3-sense/audio/vad_start；申报面引用本主题即被 rr-registry 门拒"
 
 [[topic]]
 name = "rr3-interact/dialog/turn"
 kind = "event"
 owner = "rr3-interact"
 stable = "L2"
+status = "retired"
+note = "0.0.5 批J C14 同批退役（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：号位保留、义务解除——全仓零生产点（连演练都不产）；申报面引用本主题即被 rr-registry 门拒"
 
 [[topic]]
 name = "rr3-power/battery/state"

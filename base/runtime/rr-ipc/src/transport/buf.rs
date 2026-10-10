@@ -6,16 +6,18 @@
 //! 消费整个缓冲、单次 write 提交。recv 侧由 [`rr3_framebuf_read`] 产出同一形状。
 //! uds 实现整块读写；M5 的 shm 在**同一签名**下把"拷贝"降为环形缓冲 grant，不改接口。
 //!
-//! [`Rr3Frame`](crate::transport::frame::Rr3Frame) 保留为纯值视图（测试与既有代码不动）；
-//! 两个方向都提供与它的低成本互转。本文件平台无关：测试只用 `std::io::Cursor`。
+//! [`Rr3Frame`](crate::protocol::wire::Rr3Frame) 保留为纯值视图（测试与既有代码不动）；
+//! 两个方向都提供与它的低成本互转。本文件批J G1 起为 **no_std 可达**（core+alloc）：
+//! 计数读走窄缝的 [`rr3_stream_read_fill`](crate::transport::bytestream)，不再碰
+//! std::io——裸金属目标上 conn blanket impl 的载体由此编译可得。
 
-use std::io::Read;
-// no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
-use std::vec;
-use std::vec::Vec;
+// no_std 显式化（0.0.7 批B 口径）：alloc 载体显式引入，std 目标上与 std::vec 同一实现
+use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::protocol::header::{Rr3Header, RR3_IPC_HDR_SIZE};
-use crate::transport::frame::{read_fill, Rr3Frame, Rr3FrameError};
+use crate::protocol::wire::{Rr3Frame, Rr3FrameError};
+use crate::transport::bytestream::{rr3_stream_read_fill, Rr3ByteStream};
 
 /// 整帧缓冲：`bytes` 的长度恒为 `RR3_IPC_HDR_SIZE + payload_len`。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,12 +115,14 @@ impl TryFrom<Rr3FrameBuf> for Rr3Frame {
     }
 }
 
-/// 读一帧进单块缓冲（阻塞至读满，或 EOF/坏帧报错）。错误语义与
+/// 读一帧进单块缓冲（阻塞至读满，或 EOF/坏帧报错）。计数走窄缝
+/// [`Rr3ByteStream`](crate::transport::bytestream::Rr3ByteStream)（std 类型经
+/// 单向 adapter 进缝，Cursor 等测试载体照旧）。错误语义与
 /// [`rr3_frame_read`](crate::transport::frame::rr3_frame_read) 完全一致：
 /// `Closed` / `TornHeader` / `TornPayload` / `Header(..)`。
-pub fn rr3_framebuf_read(r: &mut impl Read) -> Result<Rr3FrameBuf, Rr3FrameError> {
+pub fn rr3_framebuf_read<S: Rr3ByteStream>(s: &mut S) -> Result<Rr3FrameBuf, Rr3FrameError> {
     let mut bytes = vec![0u8; RR3_IPC_HDR_SIZE];
-    match read_fill(r, &mut bytes)? {
+    match rr3_stream_read_fill(s, &mut bytes)? {
         None => return Err(Rr3FrameError::Closed),
         Some(got) if got < RR3_IPC_HDR_SIZE => {
             return Err(Rr3FrameError::TornHeader { got });
@@ -129,7 +133,7 @@ pub fn rr3_framebuf_read(r: &mut impl Read) -> Result<Rr3FrameBuf, Rr3FrameError
     let want = hdr.payload_len as usize;
     if want > 0 {
         bytes.resize(RR3_IPC_HDR_SIZE + want, 0);
-        match read_fill(r, &mut bytes[RR3_IPC_HDR_SIZE..])? {
+        match rr3_stream_read_fill(s, &mut bytes[RR3_IPC_HDR_SIZE..])? {
             Some(got) if got == want => {}
             Some(got) => return Err(Rr3FrameError::TornPayload { want, got }),
             None => return Err(Rr3FrameError::TornPayload { want, got: 0 }),
@@ -202,7 +206,8 @@ mod tests {
         buf.rr3_payload_mut().copy_from_slice(b"wxyz");
         buf.rr3_seal();
         let sent = buf.rr3_as_sealed_bytes().unwrap().to_vec();
-        let back = rr3_framebuf_read(&mut Cursor::new(&sent)).unwrap();
+        // Cursor<Vec<u8>>（Read+Write 双全，经 adapter 进缝；Cursor<&[u8]> 无 Write）
+        let back = rr3_framebuf_read(&mut Cursor::new(sent.clone())).unwrap();
         assert!(back.rr3_sealed());
         assert_eq!(back.rr3_payload(), b"wxyz");
         assert_eq!(*back.rr3_header(), hdr(4));
@@ -211,23 +216,22 @@ mod tests {
     /// 读侧错误语义与帧层一致：干净关闭 / 半帧头 / 短 payload
     #[test]
     fn framebuf_read_error_semantics() {
-        let empty: [u8; 0] = [];
         assert_eq!(
-            rr3_framebuf_read(&mut Cursor::new(&empty[..])),
+            rr3_framebuf_read(&mut Cursor::new(Vec::new())),
             Err(Rr3FrameError::Closed)
         );
 
         let mut torn = hdr(3).to_bytes().to_vec();
         torn.truncate(64);
         assert_eq!(
-            rr3_framebuf_read(&mut Cursor::new(&torn)),
+            rr3_framebuf_read(&mut Cursor::new(torn.clone())),
             Err(Rr3FrameError::TornHeader { got: 64 })
         );
 
         let mut short = hdr(10).to_bytes().to_vec();
         short.extend_from_slice(b"abc");
         assert_eq!(
-            rr3_framebuf_read(&mut Cursor::new(&short)),
+            rr3_framebuf_read(&mut Cursor::new(short.clone())),
             Err(Rr3FrameError::TornPayload { want: 10, got: 3 })
         );
     }
@@ -238,7 +242,7 @@ mod tests {
         let mut buf = Rr3FrameBuf::rr3_new(hdr(0));
         buf.rr3_seal();
         let sent = buf.rr3_as_sealed_bytes().unwrap().to_vec();
-        let back = rr3_framebuf_read(&mut Cursor::new(&sent)).unwrap();
+        let back = rr3_framebuf_read(&mut Cursor::new(sent.clone())).unwrap();
         assert!(back.rr3_payload().is_empty());
     }
 }

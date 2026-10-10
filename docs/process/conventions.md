@@ -1648,6 +1648,33 @@ result_large_err 阈值——契约形状不让步，crate 级带注豁免（不
 bin 面 unused 导出改 `#[cfg(test)]`、act 死代码删除 + 复杂类型别名 `Rr3CallOutcome`、
 interact 未用导入移测试面，修后全绿
 
+2026-10-10 0.0.5 第 III 轮 批J `⊙` 通路 + 描述符七段 + 注入面收官（方案 §14 批J 行，ADR-0018 修订 1 /
+ADR-0019 修订 1 ③·修订 2 ②；九步门禁直跑 GATE_EXIT=0，PASS 30 全绿）——**G1/G2 字节流窄缝**：
+`rr-ipc/src/transport/bytestream.rs` 落 `Rr3ByteStream` 两方法 trait，`Rr3TransportConn` blanket impl
+换底、std 单向 adapter，uds/shm/uart 线上字节零改动（golden + 线级用例为证），transport 层
+`cfg(not(target_os = "none"))` 门解除、no_std 板侧 conn 形状用例随 xtensa 门真绿（C6）；**G3+C17 三段
+schema**：`contracts/slots.toml` schema_version=2 增 `status`（正常/占位/retired 三态唯一真值点）与
+`tier_scope`（档位适用分族）两字段（C17 裁定 (a)，21 格数据同批），`rr-registry` slots 解析与查册门
+同步、`profiles/*.toml` 扩 `[platform]`/`[supplies]`/`[slots].present` 三段（含 C15 平台看门狗位）、
+G6 档位↔watchdog 一致性校验落描述符装载门（tier=bare 无 watchdog 拒 boot 并点名）；**G4 注入面定形**：
+`rr-registry/src/assemble.rs` 落装配校验真值单点（形状级：schema v2/未知字段点名/trait∈七表/
+desc_key∈九表/点路径合法；注入级：ops src_key 对模块 config.toml 点路径游走），七 trait × 九键在册表
+另立副本 + 契约测试钉死（扩面/扩键走契约级评审两处同批，副本滞后 fail-closed）；rrd 装配段扫描缺项
+（缺文件/坏形/注入缺）逐条点名到件 → 模块照常 spawn 但注册入表即 `Rr3Phase::Degraded`、心跳 Kept
+不升级、`rr3_reg_undegrade_after` 不捞回（唯一解除路 = 修数据 + 重启 rrd）；17 份 assemble.toml 同批升
+v2——battery 真值样板（handles 引 i2c_bus+ina219_addr、ops 三槽引 Rr3BatteryCfg 同源键）、bt 兑现
+迁移承诺（ops 声明 `rr3-connect.bt.up`）、其余 14 份如实空声明；`rr3-pack` staging 扩整树
+（composite.toml + atoms/ 随包，C1 裁定"随包附可校验件声明"）；mkmod 模板升 v2 并回灌装配校验
+（C3，新件直过 ⑥/⑦）；**G5 描述符错误收口**：rr-hal 六选择函数（audio/sink/servo/gpio/power/link）
+`.ok()` 吞错改 `eprintln!` 点名（文案纯函数独立可单测，cfg(linux) 门 + test 门两全，R3-D3）；**C14
+首批 retired 走通**：`asr/text`/`dialog/turn` 置位 retired（理由与替代者入 topics.toml status/note
+数据面）、brain `net/link` 与 interact `intent/result` 订阅撤申报、brain 订阅面只增补
+`audio/pcm`+`audio/vad_start`、sim 演练主题换 `rr3-sense/audio/vad_start`（主题计数 28 条不变、128B
+线上字节零改动、module.toml 申报面变更有裁定在册）；**C4 落档**：[hardware] 不扩键（九键维持）裁定
+记录落 descriptor.rs 头注释。clippy 全仓清零复验（backend.rs 文案函数 cfg(any(linux, test)) 门 +
+rr-ipc j4 遗留未用变量清除）；rr-registry 48（lib）+37（contract）、rrd 146（lib）、mkmodule 5、
+rr3-pack 8 测试绿
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **九步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四

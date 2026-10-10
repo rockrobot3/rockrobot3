@@ -8,6 +8,10 @@
 //! - `topic`：`rr3-<模块>/<域>/<事件>`
 //! - `own_topic`：先过 `topic`，再要求前缀等于本 manifest 的 `manifest.name`
 //! - `none`：放行
+//!
+//! 申报面退役门（0.0.5 批J C14 首例，ADR-0019 修订 2 ②）：`contracts/topics.toml`
+//! 显式 `status = "retired"` 的主题——号位保留、义务解除——不得被 publishes /
+//! rpc.exposes / subscribes 申报引用，引用即拒并点名。
 
 use std::path::{Path, PathBuf};
 use toml::Value;
@@ -320,6 +324,16 @@ fn rr3_registry_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) 
                             if check_registered && !topics.rr3_topic_set_contains(s) {
                                 report.errors.push(format!("未注册主题 {s}"));
                             }
+                            // C14 门改判（0.0.5 批J）：retired 主题 = 号位保留、义务解除，
+                            // 申报发布/暴露即拒（ADR-0019 修订 2 ②）。
+                            if check_registered
+                                && topics.rr3_topic_set_contains(s)
+                                && topics.rr3_topic_set_status(s).as_deref() == Some("retired")
+                            {
+                                report.errors.push(format!(
+                                    "retired 主题 {s} 不得被申报（发布/暴露）——号位保留、义务解除（ADR-0019 修订 2 ②）"
+                                ));
+                            }
                         } else {
                             report.errors.extend(rr3_registry_check(rule, s));
                         }
@@ -353,6 +367,7 @@ fn rr3_registry_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) 
     // 3) subscribes 必须已注册（订阅方不要求前缀归属）
     // F3：空主题集的内核入口已由两个包装 fail-closed——空注册表不得让订阅成员检查被空洞满足。
     // 非字符串项的类型错误已由逐字段循环（rule=topic）报告，这里只做成员检查。
+    // C14 门改判（0.0.5 批J）：retired 主题不得被申报订阅（号位保留、义务解除）。
     if let Some(arr) =
         rr3_registry_get_by_path(&root, "events.subscribes").and_then(Value::as_array)
     {
@@ -361,6 +376,10 @@ fn rr3_registry_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) 
                 report
                     .errors
                     .push(format!("events.subscribes 引用未注册主题 {topic}"));
+            } else if topics.rr3_topic_set_status(topic).as_deref() == Some("retired") {
+                report.errors.push(format!(
+                    "events.subscribes 引用 retired 主题 {topic}——号位保留、义务解除（ADR-0019 修订 2 ②）"
+                ));
             }
         }
     }
@@ -519,6 +538,70 @@ watchdog_timeout_ms = {wd}
             "{:?}",
             r2.errors
         );
+    }
+
+    /// C14 申报面退役门（0.0.5 批J）：retired 主题不得被 publishes/rpc.exposes/subscribes
+    /// 申报引用；正常主题不受影响（contract 真值上跑，asr/text 与 dialog/turn 已显式 retired）
+    #[test]
+    fn retired_topics_cannot_be_declared() {
+        let set = rr3_registry_topic_set_from_text(CONTRACT);
+        let manifest = |publishes: &str, subscribes: &str| {
+            format!(
+                r#"[manifest]
+schema_version = 1
+name = "rr3-interact"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "/usr/bin/rr3-interact"
+
+[events]
+publishes = [{publishes}]
+subscribes = [{subscribes}]
+
+[resources]
+restart_policy = "always"
+
+[health]
+heartbeat_ms = 200
+watchdog_timeout_ms = 1000
+"#
+            )
+        };
+
+        // 发布申报 → 拒并点名
+        let r =
+            rr3_registry_validate_manifest_text(&manifest("\"rr3-interact/asr/text\"", ""), &set);
+        assert!(
+            r.errors
+                .iter()
+                .any(|e| e.contains("retired 主题 rr3-interact/asr/text 不得被申报")),
+            "{:?}",
+            r.errors
+        );
+
+        // RPC 暴露申报（retired 主题不能过 rpc.exposes——用同一点名门）与订阅申报 → 拒
+        let r = rr3_registry_validate_manifest_text(
+            &manifest("", "\"rr3-interact/dialog/turn\""),
+            &set,
+        );
+        assert!(
+            r.errors
+                .iter()
+                .any(|e| e.contains("events.subscribes 引用 retired 主题 rr3-interact/dialog/turn")),
+            "{:?}",
+            r.errors
+        );
+
+        // 正常主题申报不受退役门影响（号位保留语义：非 retired 的在册主题照常放行）
+        let r = rr3_registry_validate_manifest_text(
+            &manifest(
+                "\"rr3-interact/face/expression\"",
+                "\"rr3-runtime/module/state\"",
+            ),
+            &set,
+        );
+        assert!(r.ok(), "正常主题不得被误伤: {:?}", r.errors);
     }
 
     /// 空主题集 = 一条错误，不做后续校验

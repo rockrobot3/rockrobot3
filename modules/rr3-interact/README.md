@@ -60,10 +60,11 @@ env `RR3_PANEL_ADDR` 可改（板上 `0.0.0.0` 随装配单注入）——本面
 |---|---|---|
 | rpc | `rr3-interact/face/expression` | request |
 | rpc | `rr3-interact/tts/text` | request |
-| publish | `rr3-interact/asr/text` | event |
-| publish | `rr3-interact/dialog/turn` | event |
-| subscribe | `rr3-brain/intent/result` | event |
 | subscribe | `rr3-connect/net/link` | event（面板状态页链路卡片数据源，0.0.4 批C 订阅；0.0.4 批D 起负载带 `mode` 配网态字段，WiFi 页同源自此） |
+
+C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：原申报发布的 `asr/text` 与 `dialog/turn`
+走 **retired** 撤除（号位保留、义务解除，本模块全仓零发布点）；原申报订阅的
+`rr3-brain/intent/result` 同批撤申报（不补实现）。主题仍在册，申报面不得再引用。
 
 面板**不是第二条控制面**：它经 rr-bus 收发、与模块同权，不得绕过 rrd 的注册与
 前缀归属检查（ADR-0006 §裁定 3）。

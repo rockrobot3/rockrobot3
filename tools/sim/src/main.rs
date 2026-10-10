@@ -3,10 +3,11 @@
 //! 规划（architecture.md §3）：mock HAL + 假模块，让整条链路在无板设备上跑起来。
 //! 本入口**脚本化**走一遍真实链路（全部真进程、真套接字、真契约）：
 //!
-//! 1. 起 rrd，`--manifest` 带 **rr3-sense**（boot spawn，resident 常驻喂狗）；
-//! 2. 等 rr3-sense 到 `running`（轮询 `rr3-ctl status`，一次性 ctl 连接）；
-//! 3. **外部**起第二个真模块 **rr3-interact**（sim_peer + `publish_once`），
-//!    发布 `rr3-interact/asr/text` 后退场——事件真的流过一次总线；
+//! 1. 起 rrd，`--manifest` 带 **rr3-interact**（boot spawn，resident 常驻喂狗）；
+//! 2. 等 rr3-interact 到 `running`（轮询 `rr3-ctl status`，一次性 ctl 连接）；
+//! 3. **外部**起第二个真模块 **rr3-sense**（sim_peer + `publish_once`），
+//!    发布 `rr3-sense/audio/vad_start` 后退场——事件真的流过一次总线
+//!    （C14①：asr/text 走 retired 后演练主题换 vad_start，发布方身份随之换位）；
 //! 4. `rr3-ctl` 四命令巡检：status（断言 `denied_publish = 0`——发布被拒会在这里现形）、
 //!    health、logs、ota（恒拒随 M6，预期非 0 退出）；
 //! 5. 报告 + 收尾（`--keep` 保留现场）。
@@ -45,8 +46,8 @@ mod run {
 
     use crate::drill::{
         rr3_default_bins, rr3_find_repo_root, rr3_manifest_text, rr3_parse_status,
-        rr3_require_bins, rr3_section, rr3_wait_modules, RR3_SIM_B_TOPIC, RR3_SIM_MODULE_A,
-        RR3_SIM_MODULE_B,
+        rr3_require_bins, rr3_section, rr3_wait_modules, RR3_DRILL_PUBLISHER, RR3_DRILL_RESIDENT,
+        RR3_SIM_B_TOPIC,
     };
 
     /// 巡检轮询的上界：冷启动（首次加载契约 + 起子进程）在慢机器上也要够用
@@ -129,7 +130,9 @@ mod run {
         let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
         rr3_require_bins(&rrd, &peer, &rrctl)?;
 
-        // ---- 1. 夹具：套接字 + 两份 manifest（entry 用 sim_peer 的绝对路径） ----
+        // ---- 1. 夹具：套接字 + 两份 manifest（entry 用 sim_peer 的绝对路径）。
+        // C14① 换位：resident = rr3-interact（不发布），外部发布者 = rr3-sense
+        //（演练主题 vad_start 的 owner 前缀归属要求发布方叫 rr3-sense）。 ----
         let workdir = match &a.socket {
             Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
             None => std::env::temp_dir().join(format!("rr3-sim-{}", std::process::id())),
@@ -137,12 +140,12 @@ mod run {
         std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
         let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
         let _ = std::fs::remove_file(&socket);
-        let m_a = workdir.join(format!("{RR3_SIM_MODULE_A}.toml"));
-        let m_b = workdir.join(format!("{RR3_SIM_MODULE_B}.toml"));
+        let m_a = workdir.join(format!("{RR3_DRILL_RESIDENT}.toml"));
+        let m_b = workdir.join(format!("{RR3_DRILL_PUBLISHER}.toml"));
         std::fs::write(
             &m_a,
             rr3_manifest_text(
-                RR3_SIM_MODULE_A,
+                RR3_DRILL_RESIDENT,
                 &peer,
                 RR3_SIM_HB_MS,
                 RR3_SIM_WD_MS,
@@ -154,7 +157,7 @@ mod run {
         std::fs::write(
             &m_b,
             rr3_manifest_text(
-                RR3_SIM_MODULE_B,
+                RR3_DRILL_PUBLISHER,
                 &peer,
                 RR3_SIM_HB_MS,
                 RR3_SIM_WD_MS,
@@ -192,16 +195,16 @@ mod run {
 
         let mut report = String::new();
         let outcome = (|| -> Result<(), String> {
-            // ---- 3. 轮询等 A 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试） ----
+            // ---- 3. 轮询等 resident 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试） ----
             rr3_wait_modules(
                 || rr3_ctl_rows(&rrctl, &socket),
-                &[(RR3_SIM_MODULE_A, "running")],
+                &[(RR3_DRILL_RESIDENT, "running")],
                 RR3_READY_DEADLINE,
             )
             .map_err(|e| rr3_with_log_tail(&e, &log_path))?;
             report.push_str(rr3_section("模块 A（boot spawn → running）已就绪").as_str());
 
-            // ---- 4. 外部起模块 B（publish_once：发布一条真事件后退场） ----
+            // ---- 4. 外部起发布者（publish_once：发布一条真事件后退场） ----
             let st = Command::new(&peer)
                 .env("RR3_BUS_PATH", &socket)
                 .env("RR3_MANIFEST", &m_b)
@@ -209,14 +212,14 @@ mod run {
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .status()
-                .map_err(|e| format!("起 {RR3_SIM_MODULE_B} 失败: {e}"))?;
+                .map_err(|e| format!("起 {RR3_DRILL_PUBLISHER} 失败: {e}"))?;
             if !st.success() {
                 return Err(format!(
-                    "{RR3_SIM_MODULE_B} 退出码 {st}（详见上方输出与 {log_path:?}）"
+                    "{RR3_DRILL_PUBLISHER} 退出码 {st}（详见上方输出与 {log_path:?}）"
                 ));
             }
             report.push_str(&format!(
-                "{RR3_SIM_MODULE_B} 已发布 {RR3_SIM_B_TOPIC} 并退场（exit {st}）\n"
+                "{RR3_DRILL_PUBLISHER} 已发布 {RR3_SIM_B_TOPIC} 并退场（exit {st}）\n"
             ));
 
             // ---- 5. rr3-ctl 四命令巡检 ----
@@ -232,16 +235,16 @@ mod run {
             }
             if !rows
                 .iter()
-                .any(|(n, _, p)| n == RR3_SIM_MODULE_A && p == "running")
+                .any(|(n, _, p)| n == RR3_DRILL_RESIDENT && p == "running")
             {
                 return Err(format!(
-                    "{RR3_SIM_MODULE_A} 不在 running（巡检期间掉线？）：{rows:?}"
+                    "{RR3_DRILL_RESIDENT} 不在 running（巡检期间掉线？）：{rows:?}"
                 ));
             }
-            // B 退场后的终相**不作死断言**：sim_peer 的 publish_once 退场不排空接收队列，
+            // 发布者退场后的终相**不作死断言**：sim_peer 的 publish_once 退场不排空接收队列，
             // 未读广播帧会让对端把 FIN 变 RST（sim_peer.rs 的 abort 支注释记了同一形状），
             // 终相随收尾路径在 unregistered/failed 两可—— rr3-sim 只断言"不在 running 了"。
-            if let Some((n, _, p)) = rows.iter().find(|(n, _, _)| n == RR3_SIM_MODULE_B) {
+            if let Some((n, _, p)) = rows.iter().find(|(n, _, _)| n == RR3_DRILL_PUBLISHER) {
                 if p == "running" {
                     return Err(format!("{n} 退场后仍 running（EOF 没被记账？）：{rows:?}"));
                 }
@@ -446,8 +449,9 @@ mod tests {
 
     #[test]
     fn manifest_text_has_absolute_entry_and_real_topic() {
+        // C14① 后演练主题 vad_start 的 owner 是 rr3-sense——名字与主题前缀同侧
         let t = rr3_manifest_text(
-            "rr3-interact",
+            "rr3-sense",
             std::path::Path::new("/abs/target/debug/sim_peer"),
             200,
             1000,
@@ -459,7 +463,7 @@ mod tests {
             t.contains(&format!("publishes = [\"{RR3_SIM_B_TOPIC}\"]")),
             "{t}"
         );
-        assert!(t.contains("name = \"rr3-interact\""));
+        assert!(t.contains("name = \"rr3-sense\""));
         assert!(t.contains("watchdog_timeout_ms = 1000"));
         // publishes 为空时是空数组而不是残缺语法
         let t = rr3_manifest_text(

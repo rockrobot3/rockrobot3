@@ -268,6 +268,11 @@ pub struct RrdRegistry {
     /// 显式退场标记（D-4）：`rr3_reg_remove`（unregister RPC）记进这里，`rr3_reg_add` 移出。
     /// 作用只有一个：已显式停掉的模块，其子进程后来退出时不得再被记账成一次崩溃。
     stopped: BTreeSet<String>,
+    /// 装配缺项预降级集（G4/ADR-0019 修订 1 ③）：boot 装配段校验缺项的模块**照常
+    /// spawn**（件没病，重启治不了装配数据），但在册即 `Degraded`、且不被解除传播
+    /// 捞回——装配声明是盘上静态数据，修数据 + 重启 rrd 是唯一解除路。
+    /// daemon 在投 boot 队列前一次性写入（`rr3_reg_predegrade_mark`）。
+    pre_degraded: BTreeSet<String>,
     /// 能力 → 提供者名字集合（ADR-0009 裁定 1/3）。**boot 仲裁的产物**：daemon 在
     /// 投 boot 队列前一次性写入（含被仲裁拒绝的模块——它们的 provides 仍计入
     /// 可满足性宇宙），运行期**不**重排（不做清单 2：动态重仲裁不做）。
@@ -297,6 +302,7 @@ impl RrdRegistry {
             crash_streak: BTreeMap::new(),
             owned: BTreeSet::new(),
             stopped: BTreeSet::new(),
+            pre_degraded: BTreeSet::new(),
             providers: BTreeMap::new(),
             low_power: false,
             counters: BTreeMap::new(),
@@ -307,6 +313,13 @@ impl RrdRegistry {
     /// 运行期归并走 [`rr3_reg_counters_merge`]，不走这里——这条只服务启动装载。
     pub fn rr3_reg_counters_replace(&mut self, table: BTreeMap<String, u64>) {
         self.counters = table;
+    }
+
+    /// 装配缺项预降级标记（G4）：daemon 在投 boot 队列前写入的名字集。命中者
+    /// 注册入表即 `Degraded`（见 `rr3_reg_register` 的插入相位），且不被
+    /// [`rr3_reg_undegrade_after`] 捞回。
+    pub fn rr3_reg_predegrade_mark(&mut self, names: impl IntoIterator<Item = String>) {
+        self.pre_degraded.extend(names);
     }
 
     /// 运维计数：单键累加（rrd 自有键的唯一写法，`boots` 自增即它）
@@ -427,7 +440,12 @@ impl RrdRegistry {
             Entry {
                 name: facts.name.clone(),
                 src_task: task,
-                phase: Rr3Phase::Registered,
+                // G4：装配缺项的模块在册即 Degraded（rr3_reg_predegrade_mark 的对面）
+                phase: if self.pre_degraded.contains(facts.name.as_str()) {
+                    Rr3Phase::Degraded
+                } else {
+                    Rr3Phase::Registered
+                },
                 facts: facts.clone(),
                 last_beat_ms: now_ms,
                 registered_at_ms: now_ms,
@@ -783,6 +801,8 @@ impl RrdRegistry {
                 .values()
                 .filter(|e| {
                     e.phase == Rr3Phase::Degraded
+                        // G4：装配缺项的预降级不归能力传播管，解除路只有修数据 + 重启
+                        && !self.pre_degraded.contains(e.name.as_str())
                         && e.facts.depends_required.iter().any(|d| d == &cap)
                 })
                 .map(|e| e.name.clone())
@@ -2493,6 +2513,46 @@ watchdog_timeout_ms = 60000
         );
         // 降级后心跳：Kept（续命不升级），相位不被抹平
         assert_eq!(r.rr3_reg_beat(dt, 40), Rr3Beat::Kept);
+        assert_eq!(
+            r.rr3_reg_snapshot()
+                .iter()
+                .find(|(n, _, _)| n == "rr3-dep")
+                .map(|x| x.2),
+            Some(Rr3Phase::Degraded)
+        );
+    }
+
+    /// G4：装配缺项的预降级——注册入表即 Degraded、心跳只续命（Kept）、
+    /// 能力传播解除不捞回（修数据 + 重启 rrd 是唯一解除路）
+    #[test]
+    fn predegraded_module_registers_degraded_and_is_not_rescued() {
+        let mut r = RrdRegistry::new(20);
+        r.rr3_reg_predegrade_mark(["rr3-dep".to_string()]);
+        r.rr3_reg_set_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
+        let (dtx, _) = chan();
+        let dt = r
+            .rr3_reg_add(&facts_with_depends("rr3-dep", &["cap.x"]), dtx, 0)
+            .expect("入册");
+        let (ptx, _) = chan();
+        let pt = r
+            .rr3_reg_add(&facts("rr3-prov", 100, 5000, "always"), ptx, 0)
+            .expect("入册");
+        // 注册即 Degraded；心跳 Kept 不升级
+        assert_eq!(
+            r.rr3_reg_snapshot()
+                .iter()
+                .find(|(n, _, _)| n == "rr3-dep")
+                .map(|x| x.2),
+            Some(Rr3Phase::Degraded),
+            "装配缺项模块在册即 Degraded"
+        );
+        assert_eq!(r.rr3_reg_beat(dt, 10), Rr3Beat::Kept);
+        // 提供者回 Running 触发解除传播：预降级不捞回
+        assert_eq!(r.rr3_reg_beat(pt, 20), Rr3Beat::Promoted);
+        assert!(
+            r.rr3_reg_undegrade_after("rr3-prov").is_empty(),
+            "能力全就位也不得把装配缺项的预降级捞回 Running"
+        );
         assert_eq!(
             r.rr3_reg_snapshot()
                 .iter()

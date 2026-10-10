@@ -13,12 +13,13 @@ capabilities = ["ui.face", "audio.playback"]
 required = ["bus.publish", "bus.subscribe"]
 optional = []
 
-# asr/text 与 dialog/turn 是面向其它模块的呈现事件（owner 即命名空间归属，
-# 生产者可以是 brain，见 contracts/topics.toml 的 owner 字段语义）
+# C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：asr/text 与 dialog/turn 两条
+# 发布申报走 retired 撤除（号位保留、义务解除，contracts/topics.toml status="retired"，
+# 本模块全仓零发布点）；intent/result 订阅同批撤申报（不补实现）。
 # net/link 是面板状态页的链路卡片数据源（0.0.4 批C 订阅，发布方 rr3-connect 批D 上线）
 [events]
-publishes = ["rr3-interact/asr/text", "rr3-interact/dialog/turn"]
-subscribes = ["rr3-brain/intent/result", "rr3-connect/net/link"]
+publishes = []
+subscribes = ["rr3-connect/net/link"]
 
 [rpc]
 exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text"]

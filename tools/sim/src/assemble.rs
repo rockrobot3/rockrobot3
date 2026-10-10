@@ -513,8 +513,15 @@ watchdog_timeout_ms = 5000\n";
         std::fs::create_dir_all(repo.join("profiles")).unwrap();
         std::fs::write(
             repo.join("profiles/default.toml"),
-            "schema_version = 1\n\n[bindings]\n\"a.b\" = \"rr3-pa\"\n\n\
-             [enabled_slots]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n",
+            // schema_version=2 形状（与 rrd 描述符七段解析器同口径）："a.b" 是夹具
+            // 自造格位，本函数只走形状解析（rr3_profile_from_text），不查册。
+            "schema_version = 2\n\n[platform]\ntier = \"host\"\n\n\
+             [supplies]\nwatchdog_present = false\nwatchdog_timeout_ms = 15000\n\
+             watchdog_feeder = \"none\"\ntick_period_ms = 200\ntick_jitter_ms = 100\n\
+             safety_core_interval_ms = 1000\n\n\
+             [bindings]\n\"a.b\" = \"rr3-pa\"\n\n\
+             [enabled_slots]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n\n\
+             [slots]\npresent = [\"a.b\"]\n",
         )
         .unwrap();
 

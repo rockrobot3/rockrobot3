@@ -273,13 +273,14 @@ mod tests {{
 
 fn atom_assemble_toml(name: &str) -> String {
     format!(
-        r#"# {name} 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
-# 原子件只见 ops 指针与描述符给的绑定句柄）。
-schema_version = 1
+        r#"# {name} 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
 
 [assemble]
-handles = []   # 描述符句柄名（HAL 绑定经 rr-hal 描述符注入，不直连板级拓扑）
-ops = []       # ops 函数表键（策略注入点）
+handles = []   # 每条 {{ trait = "能力面", desc_key = "描述符键" }}（在册表见 rr-registry assemble.rs）
+ops = []       # 每条 {{ slot = "参数槽", src_key = "config 点路径" }}，填实随真件批次
 "#
     )
 }
@@ -324,8 +325,17 @@ pub fn rr3_mkmod_generate_atom(
         std::fs::write(staging.join(rel), body)?;
     }
 
-    // 回灌三合一校验（②b 同款纪律）：manifest 生成即自检，不合规即中止
-    let errs = rr_registry::rr3_registry_validate_atom(&staging.join("atom.toml"));
+    // 回灌校验（②b 同款纪律）：manifest + 装配清单生成即自检，不合规即中止。
+    // G4：装配清单走 rr-registry 形状级真值（模板空数组必过；填实后坏形当场听见）。
+    let mut errs = rr_registry::rr3_registry_validate_atom(&staging.join("atom.toml"));
+    let assemble_body = files
+        .iter()
+        .find(|(rel, _)| rel == "assemble.toml")
+        .map(|(_, body)| body.as_str())
+        .expect("五件套必含 assemble.toml");
+    if let Err(asm_errs) = rr_registry::rr3_registry_assemble_from_text(assemble_body) {
+        errs.extend(asm_errs);
+    }
     if !errs.is_empty() {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(Rr3MkmodError::Manifest(errs));
