@@ -1733,6 +1733,20 @@ architecture §13 表、tools/ci/README）；`.github/README.md` 订正（指路
 仅标记词 / `{{` 转义剥离失衡风险）、esp-bootloader-esp-idf 默认特性未关、ELF 三要素核验
 未自动化 + 上游 idf_ver 误读 MMU 页配置键注记（装饰性，无参宏同源字段一致）
 
+2026-10-10 0.0.7 批D1 层③ 板上实测收官（哨兵 README 实测报告回填；十步门禁直跑
+GATE_EXIT=0，PASS 52 全绿 + 专用门 espidf-sentinel-check.sh 绿）——两修正随批：
+①哨兵 reader/心跳线程栈 8KB→16KB 根因实锤（serde_json + json! + FrameBuf 峰值溢出
+踩堆 → Arc 指针踩成垃圾 → std Mutex 惰性 pthread 初始化崩 EXCVADDR=0xb；
+addr2line 定位 + 插桩复跑取证后清理，16KB 钉为运行下限）；②harness parse_upstream
+method 门改 Option<String>（Response 帧合法无 method，强制门误杀 round-trip 应答）。
+板上对跑 HARNESS_EXIT=0（14 PASS/0 FAIL）+ 三点 RAM（roundtrip min_free=250620B
+≈ 启动堆 85% >> 20% 阈值，D1→D2 不触发）+ Down→esp_restart→重注册转移路径附实证。
+运维教训两笔：遗留串口采集进程与 espflash 抢同一 USB 串口致同步应答缺字节烧录连败
+（lsof 定位——烧录前先清持有者）；zsh 下 `ps | grep foo[g]` 未加引号被 glob 展开成
+"no matches found"、进程存在性检查静默失效（方括号模式须引号包裹）。敞口：UART 持续
+流开口帧同步（CP2102 缓冲残留 + `Rr3UartConn::open` 不 tcflush，复跑先复位+清缓冲
+组合时序）——批E rr3-bridge 同题，登记 status.md
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
