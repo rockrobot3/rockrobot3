@@ -188,6 +188,20 @@ fork 工具链在位，专用门三查全绿——上文"批I 现在可开工（
 （30 PASS）；clippy 全仓清零复验（rr-hal-api result_large_err 契约形状带注豁免 + 五处 lint 修）；
 e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内缺省档、connect 的 timeout_ms
 迁 wifi 段）。conventions §2 批I 条目同批落库
+- **批J `⊙` 通路 + 描述符七段 + 注入面已落库**（2026-10-10，方案 §14 批J 行 + C1/C3/C4/C5/C6/C9/
+  C14/C15/C17 结清，ADR-0018 修订 1 / ADR-0019 修订 1 ③·修订 2 ②）：G1/G2 `Rr3ByteStream` 两方法
+  trait 落 bytestream.rs、conn blanket impl 换底 + std 单向 adapter，uds/shm/uart 线上字节零改动，
+  transport 层门解除、xtensa 门真绿（C6）；G3+C17 slots.toml schema v2 增 status/tier_scope 两字段
+  （C17 裁定 (a)）+ profiles 扩 [platform]/[supplies]/[slots].present 三段（C15 看门狗位）+ G6 档位
+  ↔watchdog 一致性拒 boot；G4 装配校验真值单点（rr-registry assemble.rs，七 trait × 九键在册表副本 +
+  契约测试钉死）+ rrd 缺项逐条点名到件、模块在册即 `Degraded` 不被解除传播捞回 + 17 份 assemble.toml
+  升 v2（battery 真值样板 / bt 兑现迁移承诺 / 其余如实空）+ rr3-pack staging 扩整树（C1）+ mkmod 模板
+  升 v2 回灌校验（C3）；G5 六选择函数 `.ok()` 吞错改 eprintln 点名（R3-D3）；C14 首批 retired 走通
+  （asr/text / dialog/turn 置位 retired + 两订阅撤申报 + brain 只增补 pcm/vad_start + sim 演练换主题；
+  主题计数 28 与 128B 线上字节零改动）；C4 不扩键裁定落 descriptor.rs 头注释。九步门禁直跑
+  GATE_EXIT=0（30 PASS）；rustfmt 全仓 + clippy 全仓清零复验。方案 §17 勾点（R3-D2/D3、C14、前置
+  清单批J 五条 + 三条注记）与 conventions §2 批J 条目同批落库；**第 III 轮余批K**（H1–H6：对拍用例、
+  三门接 check.sh、点验矩阵、第二形态、文档收口、守护输出）
 - **下一在制品**：0.0.7（ESP32）方案拟稿——Q1–Q6 已裁、修订版 4 已落 §9，拟稿即把已裁口径收拢为可开工执行方案；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）；八行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)，到位前不 claim 真硬件证据。采购实况（2026-10-07）：ESP32 硬件已齐、树莓派外设采购中。

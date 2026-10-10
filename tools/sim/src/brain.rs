@@ -88,12 +88,9 @@ pub fn rr3_brain_manifests(
                 RR3_BRAIN_WD_MS,
                 "never",
                 &[RR3_BRAIN_TOPIC_INTENT],
-                &[
-                    "rr3-interact/asr/text",
-                    "rr3-connect/net/link",
-                    RR3_SENSE_TOPIC_PCM,
-                    "rr3-sense/audio/vad_start",
-                ],
+                // C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：asr/text retired 撤申报、
+                // net/link 撤申报（不补实现）；订阅面对齐实然面 = pcm + vad_start（B-1 补齐）
+                &[RR3_SENSE_TOPIC_PCM, "rr3-sense/audio/vad_start"],
                 &[RR3_BRAIN_TOPIC_COMPLETION],
             ),
         ),

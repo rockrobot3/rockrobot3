@@ -432,6 +432,21 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         }
         fs::copy(&config_src, staged.join("config.toml"))
             .map_err(|e| format!("复制 {name} config.toml 失败: {e}"))?;
+        // G4/C1（ADR-0019 修订 1 ③ + 批J C1 裁定）：staging 扩整树——组合件编排声明
+        // composite.toml 与原子件声明树 atoms/（五件套含 assemble.toml）随包进 deb，
+        // 装机后板上 rrd 装配段（--profile 正门）才能扫到件级注入声明。两者可选
+        // （无原子件/无编排的模块形态允许缺省），在位即纯副本（pkg 同款纪律）。
+        let repo_mod = cfg.repo.join("modules").join(name);
+        let composite_src = repo_mod.join("composite.toml");
+        if composite_src.is_file() {
+            fs::copy(&composite_src, staged.join("composite.toml"))
+                .map_err(|e| format!("复制 {name} composite.toml 失败: {e}"))?;
+        }
+        let atoms_src = repo_mod.join("atoms");
+        if atoms_src.is_dir() {
+            rr3_copy_dir(&atoms_src, &staged.join("atoms"))
+                .map_err(|e| format!("复制 {name} atoms 树失败: {e}"))?;
+        }
     }
     Ok(stage)
 }
@@ -658,6 +673,54 @@ mod tests {
         );
         assert!(root.join("modules/rr3-act/config.toml").is_file());
         assert!(root.join("modules/rr3-connect/rr3-connect").is_file());
+    }
+
+    #[test]
+    fn stage_copies_whole_declaration_tree_for_g4() {
+        let (payload, repo) = fixture();
+        // rr3-act 给齐声明树：组合件编排 + 两原子件（含子文件，证递归纯副本）
+        let repo_act = repo.join("modules/rr3-act");
+        fs::write(
+            repo_act.join("composite.toml"),
+            "[assemble]\natoms = [\"led\", \"servo\"]\n",
+        )
+        .unwrap();
+        fs::create_dir_all(repo_act.join("atoms/servo")).unwrap();
+        fs::create_dir_all(repo_act.join("atoms/led")).unwrap();
+        fs::write(
+            repo_act.join("atoms/servo/assemble.toml"),
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
+        )
+        .unwrap();
+        fs::write(repo_act.join("atoms/servo/servo.rs"), "// mech\n").unwrap();
+        fs::write(
+            repo_act.join("atoms/led/assemble.toml"),
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
+        )
+        .unwrap();
+        let (cfg, _) = cfg_of(&payload, &repo);
+        let stage = rr3_stage(&cfg).unwrap();
+        let root = stage.join("usr/lib/rockrobot3");
+        assert_eq!(
+            fs::read_to_string(root.join("modules/rr3-act/composite.toml")).unwrap(),
+            "[assemble]\natoms = [\"led\", \"servo\"]\n",
+            "组合件编排声明随包"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("modules/rr3-act/atoms/servo/assemble.toml")).unwrap(),
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("modules/rr3-act/atoms/servo/servo.rs")).unwrap(),
+            "// mech\n",
+            "atoms 子树递归纯副本"
+        );
+        assert!(root
+            .join("modules/rr3-act/atoms/led/assemble.toml")
+            .is_file());
+        // 未给声明树的模块不造假数据
+        assert!(!root.join("modules/rr3-connect/atoms").exists());
+        assert!(!root.join("modules/rr3-connect/composite.toml").exists());
     }
 
     #[test]

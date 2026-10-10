@@ -49,7 +49,9 @@ from rr3_brain.intent import rr3_extract_actions
 
 MANIFEST_NAME = "rr3-brain"
 PUBLISHES = ["rr3-brain/intent/result"]
-SUBSCRIBES = ["rr3-interact/asr/text", "rr3-connect/net/link"]
+# 申报订阅面（与 module.toml 同源双写）：C14（ADR-0019 修订 2 ②）后对齐实然面——
+# asr/text 走 retired 撤申报、net/link 撤申报（不补实现）；实际消费入口 = pcm + vad_start
+SUBSCRIBES = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
 RPC_EXPOSES = ["rr3-brain/llm/completion"]
 
 TOPIC_PCM = "rr3-sense/audio/pcm"

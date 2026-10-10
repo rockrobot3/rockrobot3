@@ -9,6 +9,10 @@
 //! 本模块是运行期消费端——解析注入文本、合成生效绑定，键位语义与取值域在这里裁。
 //! 键集与白名单闭合（R11）：`led`/`relay` 两角色，扩 role 走契约级评审，届时同步
 //! 本处、`rr3_hal_env_override_map` 与 profiles 键位。
+//! 键集冻结裁定（0.0.5 方案 §13.1 C4，评审已批J 在册）：[hardware] **不扩键**，
+//! 九键维持现状——后续扩键/扩 role 同走契约级评审，届时本处与
+//! rr-registry `RR3_ASSEMBLE_DESC_KEYS` 在册表**两处同批**（副本滞后 = fail-closed
+//! 拒绝，见 rr-registry assemble 模块契约测试）。
 
 use std::collections::BTreeMap;
 

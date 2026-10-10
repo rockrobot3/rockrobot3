@@ -1,7 +1,12 @@
-# charger 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
-# 原子件只见 ops 指针与描述符给的绑定句柄）。
-schema_version = 1
+# charger 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
 
 [assemble]
-handles = []   # 充电位由 battery 原子读数派生（⊗ 组合内取数），无独立句柄
-ops = []       # 拍点周期经 config 数据化注入（config.toml [rr3-power.charger]）
+# 充电位由 battery 原子读数派生（⊗ 组合内取数），无独立句柄
+handles = []
+# 参数槽 ← config.toml [rr3-power.charger] 一键
+ops = [
+  { slot = "state_period_ms", src_key = "rr3-power.charger.state_period_ms" },
+]

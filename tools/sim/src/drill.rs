@@ -7,12 +7,19 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// 演练里两个真模块的身份与行为（名字必须真实存在于 contracts/topics.toml 的
-/// owner 集：rr3-interact 要发布 `rr3-interact/asr/text`，前缀归属按名字首段判）
+/// 演练里两个真模块的身份（名字必须真实存在于 contracts/topics.toml 的 owner 集）。
+/// brain/chain 演练里 A=sense（发布 pcm/vad_start，前缀归属按名字首段判）、B=interact。
 pub const RR3_SIM_MODULE_A: &str = "rr3-sense";
 pub const RR3_SIM_MODULE_B: &str = "rr3-interact";
-/// B 发布的主题（契约 event，owner=rr3-interact）
-pub const RR3_SIM_B_TOPIC: &str = "rr3-interact/asr/text";
+/// 两面演练（drill）的主题（契约 event，owner=rr3-sense；C14① 2026-10-10 评审裁定：
+/// asr/text 走 retired 后演练主题换成 vad_start，发布方身份随之换位——见下两常量）
+pub const RR3_SIM_B_TOPIC: &str = "rr3-sense/audio/vad_start";
+/// 两面演练（drill）的 boot resident 身份：RR3_SIM_B_TOPIC 的 owner 是 rr3-sense，
+/// 前缀归属要求发布方叫 rr3-sense，而 resident 侧不发布——故 resident 用 rr3-interact、
+/// 外部 publish_once 用 rr3-sense（C14① 同批换位，A/B 常量保持 brain/chain 语义不动）
+pub const RR3_DRILL_RESIDENT: &str = RR3_SIM_MODULE_B;
+/// 两面演练的外部发布者身份（publish_once：发布 [`RR3_SIM_B_TOPIC`] 后退场）
+pub const RR3_DRILL_PUBLISHER: &str = RR3_SIM_MODULE_A;
 /// --brain 演练（M4）里的第三个真模块：Python 认知层
 pub const RR3_SIM_MODULE_BRAIN: &str = "rr3-brain";
 /// 演练实例面板地址：板上常驻系统实例（deb 装机）的 rr3-interact 占缺省

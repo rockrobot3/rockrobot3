@@ -1,0 +1,415 @@
+//! 装配清单（`atoms/<名>/assemble.toml`，五件套④）的形状契约与注入缺校验
+//! （ADR-0019 修订 1 ③：L3 注入面从口号变成被校验的数据，0.0.5 批J G4）。
+//!
+//! 定形（与方案 §14 G4 行同文）：`[assemble.handles]` 声明件用哪个能力面 trait
+//! ← 绑描述符哪个键、`[assemble.ops]` 声明件暴露哪些参数槽 ← 取哪个 config 键。
+//! 数据形状（schema_version = 2）：
+//!
+//! ```toml
+//! schema_version = 2
+//!
+//! [assemble]
+//! handles = [
+//!   { trait = "Rr3Power", desc_key = "i2c_bus" },
+//! ]
+//! ops = [
+//!   { slot = "low_voltage_mv", src_key = "rr3-power.battery.low_voltage_mv" },
+//! ]
+//! ```
+//!
+//! 两级真值、两处消费（`rrd` 与裸机装配段共用本模块，不各说一套）：
+//! - **形状级**（[`rr3_registry_assemble_from_text`]）：schema 版本、未知字段点名、
+//!   trait ∈ 七能力面在册表、desc_key ∈ 九描述符键在册表、参数槽与来源键非空点路径。
+//!   空数组**合法**——件可以不占任何句柄/参数槽（17 份现况的大多数如实如此）。
+//! - **注入缺级**（[`rr3_registry_assemble_injection_gaps`]）：ops 的 `src_key`
+//!   解析域 = 模块 `config.toml`（点路径游走），取不到 = 注入缺。handles 的
+//!   desc_key 存在性**不在本模块判**——描述符注入是 spawn 时 `RR3_HAL_BINDINGS`
+//!   env 的事，存在性归探测面（实测缺），与 rr-hal 后端选择的 fail-closed 同一路。
+//!
+//! 装配段对缺项的处置（ADR-0019 修订 1 ③）：**该格 `Degraded`、点名到件，不 fatal**
+//! ——件没病，装配声明坏了重启治不了；修数据 + 重启 rrd 是唯一解除路。
+//!
+//! 在册表与真值源的关系：七 trait 真值源 = `rr-hal-api`（能力面契约），九键真值源 =
+//! `rr-hal` `descriptor.rs`（`[hardware]` 键集，C4 裁定**不扩键**）。两表在此按
+//! 契约层纪律另立一份并由契约测试钉死——扩 trait/键都走契约级评审，届时两处同批；
+//! 本表滞后 = 新 trait/键被装配校验拒绝（fail-closed 方向，不会带病放行）。
+
+use toml::Value;
+
+/// 装配清单 schema 版本（本文件定形即 2：handles/ops 从字符串数组升为结构化条目）
+pub const RR3_ASSEMBLE_SCHEMA_VERSION: u32 = 2;
+
+/// 七能力面 trait 在册表（真值源 rr-hal-api；handles[].trait 只认这七个名字）
+pub const RR3_ASSEMBLE_HANDLE_TRAITS: &[&str] = &[
+    "Rr3GpioOut",
+    "Rr3PwmServo",
+    "Rr3AudioSource",
+    "Rr3AudioSink",
+    "Rr3Power",
+    "Rr3Link",
+    "Rr3Display",
+];
+
+/// 九描述符键在册表（真值源 rr-hal descriptor.rs `[hardware]` 键集；C4 批J 裁定不扩键）
+pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
+    "alsa_device",
+    "pwm_chip",
+    "pwm_channel",
+    "gpio_chip",
+    "gpio_led_line",
+    "gpio_relay_line",
+    "i2c_bus",
+    "ina219_addr",
+    "link_ifname",
+];
+
+/// 一条句柄声明：件用 `trait_name` 能力面，绑描述符 `desc_key` 键
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3AssembleHandle {
+    pub trait_name: String,
+    pub desc_key: String,
+}
+
+/// 一条参数槽声明：件暴露 `slot` 槽，取值来自 config 的 `src_key` 点路径
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3AssembleOp {
+    pub slot: String,
+    pub src_key: String,
+}
+
+/// 一份装配清单的解析产物（空数组合法）
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Rr3AssembleFacts {
+    pub handles: Vec<Rr3AssembleHandle>,
+    pub ops: Vec<Rr3AssembleOp>,
+}
+
+/// 点路径合法性：按 `.` 切分后每段非空（空串/首尾点/连续点都不认）
+fn rr3_dotted_key_ok(s: &str) -> bool {
+    !s.is_empty() && s.split('.').all(|seg| !seg.is_empty())
+}
+
+/// 解析 + 形状级校验一份装配清单文本。fail-closed：一条不静默放行，全部错误
+/// 逐条点名（与 manifest/描述符校验同一口径）。空 `[assemble]` 数组合法。
+pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
+    let root: Value = match toml::from_str(text) {
+        Ok(v) => v,
+        Err(e) => return Err(vec![format!("装配清单 TOML 解析失败: {e}")]),
+    };
+    let Some(t) = root.as_table() else {
+        return Err(vec![format!("装配清单顶层必须是 TOML 表，收到 {root:?}")]);
+    };
+
+    let mut errs: Vec<String> = Vec::new();
+    // schema_version：必须为 2（v1 是"无代码读它"时代的死数据形状，直接点名不迁就）
+    match t.get("schema_version") {
+        Some(Value::Integer(v)) if *v == RR3_ASSEMBLE_SCHEMA_VERSION as i64 => {}
+        Some(Value::Integer(v)) => errs.push(format!(
+            "装配清单 schema_version 必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}，收到 {v}"
+        )),
+        Some(other) => errs.push(format!("装配清单 schema_version 应为整数，收到 {other:?}")),
+        None => errs.push(format!(
+            "装配清单缺 schema_version（必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}）"
+        )),
+    }
+    // 顶层未知键点名（只认 schema_version + assemble）
+    for k in t.keys() {
+        if k != "schema_version" && k != "assemble" {
+            errs.push(format!(
+                "装配清单顶层未知键 {k}（只认 schema_version / assemble）"
+            ));
+        }
+    }
+
+    let Some(asm) = t.get("assemble").and_then(Value::as_table) else {
+        errs.push("装配清单缺 [assemble] 表（handles / ops 两键都必填，空数组合法）".into());
+        return if errs.is_empty() {
+            Ok(Rr3AssembleFacts::default())
+        } else {
+            Err(errs)
+        };
+    };
+    // [assemble] 未知键点名
+    for k in asm.keys() {
+        if k != "handles" && k != "ops" {
+            errs.push(format!("[assemble] 未知键 {k}（只认 handles / ops）"));
+        }
+    }
+
+    let mut facts = Rr3AssembleFacts::default();
+
+    // handles：数组，每条 = { trait, desc_key }，两键都在册表内
+    match asm.get("handles") {
+        Some(Value::Array(items)) => {
+            for (i, item) in items.iter().enumerate() {
+                let Some(h) = item.as_table() else {
+                    errs.push(format!("handles[{i}] 应为内联表 {{ trait, desc_key }}"));
+                    continue;
+                };
+                for k in h.keys() {
+                    if k != "trait" && k != "desc_key" {
+                        errs.push(format!("handles[{i}] 未知键 {k}（只认 trait / desc_key）"));
+                    }
+                }
+                let trait_name = h.get("trait").and_then(Value::as_str);
+                let desc_key = h.get("desc_key").and_then(Value::as_str);
+                match trait_name {
+                    Some(tr) if RR3_ASSEMBLE_HANDLE_TRAITS.contains(&tr) => {}
+                    Some(tr) => errs.push(format!(
+                        "handles[{i}].trait \"{tr}\" 未在册（七能力面表见 assemble.rs，扩面走契约级评审）"
+                    )),
+                    None => errs.push(format!("handles[{i}].trait 应为字符串")),
+                }
+                match desc_key {
+                    Some(dk) if RR3_ASSEMBLE_DESC_KEYS.contains(&dk) => {}
+                    Some(dk) => errs.push(format!(
+                        "handles[{i}].desc_key \"{dk}\" 未在册（九键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
+                    )),
+                    None => errs.push(format!("handles[{i}].desc_key 应为字符串")),
+                }
+                if let (Some(tr), Some(dk)) = (trait_name, desc_key) {
+                    facts.handles.push(Rr3AssembleHandle {
+                        trait_name: tr.into(),
+                        desc_key: dk.into(),
+                    });
+                }
+            }
+        }
+        Some(other) => errs.push(format!("[assemble].handles 应为数组，收到 {other:?}")),
+        None => errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into()),
+    }
+
+    // ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径
+    match asm.get("ops") {
+        Some(Value::Array(items)) => {
+            for (i, item) in items.iter().enumerate() {
+                let Some(o) = item.as_table() else {
+                    errs.push(format!("ops[{i}] 应为内联表 {{ slot, src_key }}"));
+                    continue;
+                };
+                for k in o.keys() {
+                    if k != "slot" && k != "src_key" {
+                        errs.push(format!("ops[{i}] 未知键 {k}（只认 slot / src_key）"));
+                    }
+                }
+                let slot = o.get("slot").and_then(Value::as_str);
+                let src_key = o.get("src_key").and_then(Value::as_str);
+                match slot {
+                    Some(s) if !s.trim().is_empty() => {}
+                    Some(_) => errs.push(format!("ops[{i}].slot 不得为空")),
+                    None => errs.push(format!("ops[{i}].slot 应为字符串")),
+                }
+                match src_key {
+                    Some(k) if rr3_dotted_key_ok(k) => {}
+                    Some(k) => errs.push(format!(
+                        "ops[{i}].src_key \"{k}\" 不是合法点路径（按 . 切分后每段须非空）"
+                    )),
+                    None => errs.push(format!("ops[{i}].src_key 应为字符串")),
+                }
+                if let (Some(s), Some(k)) = (slot, src_key) {
+                    facts.ops.push(Rr3AssembleOp {
+                        slot: s.into(),
+                        src_key: k.into(),
+                    });
+                }
+            }
+        }
+        Some(other) => errs.push(format!("[assemble].ops 应为数组，收到 {other:?}")),
+        None => errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into()),
+    }
+
+    if errs.is_empty() {
+        Ok(facts)
+    } else {
+        Err(errs)
+    }
+}
+
+/// 注入缺校验：ops 的每条 `src_key` 必须能在 `config_text`（模块 config.toml）上
+/// 按点路径取到值；取不到 = 注入缺，逐条点名（参数槽 + 来源键）。config 文本
+/// 解析失败 = 全部来源键不可证，逐条点同名缺口。handles 不在此判（见模块头注）。
+/// 返回空 = 无缺口。
+pub fn rr3_registry_assemble_injection_gaps(
+    facts: &Rr3AssembleFacts,
+    config_text: &str,
+) -> Vec<String> {
+    let cfg: Value = match toml::from_str(config_text) {
+        Ok(v) => v,
+        Err(e) => {
+            return facts
+                .ops
+                .iter()
+                .map(|o| {
+                    format!(
+                        "参数槽 {} 的来源键 {} 不可证：config 文本解析失败 ({e})",
+                        o.slot, o.src_key
+                    )
+                })
+                .collect();
+        }
+    };
+    facts
+        .ops
+        .iter()
+        .filter(|o| {
+            let mut cur = &cfg;
+            for seg in o.src_key.split('.') {
+                match cur.get(seg) {
+                    Some(v) => cur = v,
+                    None => return true,
+                }
+            }
+            false
+        })
+        .map(|o| {
+            format!(
+                "参数槽 {} 的来源键 {} 在 config 中取不到（注入缺）",
+                o.slot, o.src_key
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OK_SAMPLE: &str = r#"
+schema_version = 2
+
+[assemble]
+handles = [
+  { trait = "Rr3Power", desc_key = "i2c_bus" },
+  { trait = "Rr3Power", desc_key = "ina219_addr" },
+]
+ops = [
+  { slot = "low_voltage_mv", src_key = "rr3-power.battery.low_voltage_mv" },
+]
+"#;
+
+    #[test]
+    fn sample_and_empty_arrays_parse() {
+        let f = rr3_registry_assemble_from_text(OK_SAMPLE).expect("正例必须过");
+        assert_eq!(f.handles.len(), 2);
+        assert_eq!(f.handles[0].trait_name, "Rr3Power");
+        assert_eq!(f.handles[0].desc_key, "i2c_bus");
+        assert_eq!(f.ops.len(), 1);
+        assert_eq!(f.ops[0].slot, "low_voltage_mv");
+
+        // 空数组合法（17 份现况的大多数形状）
+        let f = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
+        )
+        .expect("空数组必须合法");
+        assert!(f.handles.is_empty() && f.ops.is_empty());
+    }
+
+    #[test]
+    fn bad_shapes_are_all_named() {
+        let text = concat!(
+            "schema_version = 1\n", // 版本不认
+            "mystery = 1\n",        // 顶层未知键
+            "\n[assemble]\n",
+            "extra = 1\n",   // [assemble] 未知键
+            "handles = [\n", // 条目两处不在册
+            "  { trait = \"Rr3Nope\", desc_key = \"nope_key\" },\n",
+            "  \"bare-string\",\n", // 非表条目
+            "]\n",
+            "ops = [\n",
+            "  { slot = \"\", src_key = \"a..b\" },\n", // 空槽 + 坏点路径
+            "  { slot = \"s\", src_key = 3 },\n",       // 非字符串
+            "]\n",
+        );
+        let errs = rr3_registry_assemble_from_text(text).expect_err("坏形必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("schema_version 必须为 2")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("顶层未知键 mystery")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("[assemble] 未知键 extra")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("trait \"Rr3Nope\" 未在册")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("desc_key \"nope_key\" 未在册")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("handles[1] 应为内联表")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("ops[0].slot 不得为空")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("src_key \"a..b\" 不是合法点路径")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("ops[1].src_key 应为字符串")),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn missing_required_keys_are_named() {
+        // 缺 schema_version / 缺 [assemble] / 缺两键
+        let errs = rr3_registry_assemble_from_text("[assemble]\nhandles = []\nops = []\n")
+            .expect_err("缺版本必须点名");
+        assert!(errs[0].contains("缺 schema_version"), "{errs:?}");
+
+        let errs = rr3_registry_assemble_from_text("schema_version = 2\n")
+            .expect_err("缺 [assemble] 必须点名");
+        assert!(
+            errs.iter().any(|e| e.contains("缺 [assemble] 表")),
+            "{errs:?}"
+        );
+
+        let errs = rr3_registry_assemble_from_text("schema_version = 2\n[assemble]\n")
+            .expect_err("缺 handles/ops 必须点名");
+        assert!(errs.iter().any(|e| e.contains("缺 handles 键")), "{errs:?}");
+        assert!(errs.iter().any(|e| e.contains("缺 ops 键")), "{errs:?}");
+    }
+
+    #[test]
+    fn injection_gaps_walk_config_paths() {
+        let facts = rr3_registry_assemble_from_text(OK_SAMPLE).expect("正例必须过");
+        let cfg = "[rr3-power.battery]\nlow_voltage_mv = 3300\n";
+        // i2c 句柄不参与注入缺；ops 的一条在、一条缺 → 恰一条缺口
+        let gaps = rr3_registry_assemble_injection_gaps(&facts, cfg);
+        assert_eq!(gaps.len(), 0, "{gaps:?}");
+
+        let facts2 = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = [\n  { slot = \"a\", src_key = \"rr3-power.battery.low_voltage_mv\" },\n  { slot = \"b\", src_key = \"rr3-power.battery.missing_key\" },\n  { slot = \"c\", src_key = \"no.such.path\" },\n]\n",
+        )
+        .expect("必须过形状级");
+        let gaps = rr3_registry_assemble_injection_gaps(&facts2, cfg);
+        assert_eq!(gaps.len(), 2, "{gaps:?}");
+        assert!(
+            gaps[0].contains("missing_key") && gaps[0].contains("注入缺"),
+            "{gaps:?}"
+        );
+
+        // config 解析失败 = 全部来源键不可证
+        let gaps = rr3_registry_assemble_injection_gaps(&facts, "garbage =\n");
+        assert_eq!(gaps.len(), 1, "{gaps:?}");
+        assert!(gaps[0].contains("解析失败"), "{gaps:?}");
+
+        // ops 为空 → 永无缺口（config 坏也不点名）
+        let empty = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
+        )
+        .unwrap();
+        assert!(rr3_registry_assemble_injection_gaps(&empty, "garbage =\n").is_empty());
+    }
+}

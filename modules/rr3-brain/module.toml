@@ -17,9 +17,12 @@ optional = ["power.battery"]
 
 # brain 只走事务面与意图事件：ASR/LLM/TTS 编排是云端往返，不进反射路径
 # （ADR-0007 控制面三级分层）。密钥一律构建期环境变量注入，不落盘、不入库。
+# C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：订阅面对齐实然面——
+# asr/text 走 retired（号位保留、义务解除）、net/link 撤申报（不补实现）；
+# pcm + vad_start 是 composite.py 实际消费的语音主链入口（B-1 只增补齐）。
 [events]
 publishes = ["rr3-brain/intent/result"]
-subscribes = ["rr3-interact/asr/text", "rr3-connect/net/link"]
+subscribes = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
 
 [rpc]
 exposes = ["rr3-brain/llm/completion"]

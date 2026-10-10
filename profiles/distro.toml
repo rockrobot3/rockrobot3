@@ -4,11 +4,28 @@
 # 打包器按 lang=python 生成 shim 装机，判据"brain 随 deb 装机"）。0.0.2 时代四格
 # 不绑定、brain 不进 boot 队列（缺格点名冒烟）——批F1 兑现后 cognition.* 绑定
 # rr3-brain，随装配单进 boot 队列（CI distro-smoke 同步改断"六模块 spawn"）。
+# schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：三新段与
+# default 同板同供给（[platform]/[supplies]/[slots] 逐值一致）。
 
-schema_version = 1
+schema_version = 2
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
+
+[platform]
+# 平台档位（ADR-0018 修订 1）：与 default 同一块参考机 = host。取值依据同 default 注释。
+tier = "host"
+
+[supplies]
+# 平台供给声明：与 profiles/default.toml 同板同值（注释见 default——
+# watchdog_timeout_ms 平台兜底、tick_period_ms 对齐 rrd tick 生产真值、
+# 时序两位为声明预算位，对账归 0.0.6 点验矩阵）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
@@ -51,3 +68,24 @@ rr3-interact = ["ui.face", "audio.playback"]
 rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
 rr3-power = ["power.battery", "power.charger"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[slots]
+# 本板物理在位格位声明：与 default 同一块板 = 16 格全在位，升序排列（注释见 default）。
+present = [
+    "act.servo",
+    "act.led",
+    "act.relay",
+    "audio.capture",
+    "audio.playback",
+    "audio.vad",
+    "cognition.asr",
+    "cognition.dialog",
+    "cognition.llm",
+    "cognition.tts",
+    "net.bt",
+    "net.wifi",
+    "power.charger",
+    "sensor.env",
+    "sensor.imu",
+    "ui.face",
+]

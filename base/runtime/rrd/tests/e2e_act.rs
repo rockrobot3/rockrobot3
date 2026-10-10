@@ -32,11 +32,27 @@ use support::*;
 
 /// 满配装配单：act 三格位各绑 rr3-act、enabled_slots 与 bindings 互认领。
 /// 格位名取自真 `contracts/slots.toml`（Q1 裁定立格 act.relay 后三格齐备）。
+/// schema_version=2 起三新段必填（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；
+/// present 只声明 bindings 用到的非 base 格位（base 格在册恒在，声明即致命）。
 const PROFILE: &str = r#"
-schema_version = 1
+schema_version = 2
 
 [os]
 route = "distro"
+
+[platform]
+tier = "host"
+
+[supplies]
+watchdog_present = false
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[slots]
+present = ["act.servo", "act.led", "act.relay"]
 
 [bindings]
 "act.servo" = "rr3-act"

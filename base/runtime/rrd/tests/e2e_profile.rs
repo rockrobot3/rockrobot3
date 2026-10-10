@@ -32,12 +32,28 @@ use support::*;
 /// 满配装配单（P1/P2/P3 的底稿）：三个格位各绑一件、bindings 与 enabled_slots 互认领。
 /// 格位名取自真 `contracts/slots.toml`（act.servo / sensor.env / cognition.llm）——
 /// 查册真值与 CI 全集层同源，夹具不得自造格位。`[os]` 段运行期不读（ADR-0012 裁定 3），
-/// 放在这里恰恰是为了证明"带着它也能过"。
+/// 放在这里恰恰是为了证明"带着它也能过"。schema_version=2 起三新段必填
+///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；present 只声明 bindings 用的
+/// 非 base 格位——P2 删 binding 行后 sensor.env 仍 declared present，缺格判定照走注入缺。
 const GOOD: &str = r#"
-schema_version = 1
+schema_version = 2
 
 [os]
 route = "distro"
+
+[platform]
+tier = "host"
+
+[supplies]
+watchdog_present = false
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[slots]
+present = ["act.servo", "sensor.env", "cognition.llm"]
 
 [bindings]
 "act.servo" = "rr3-pa"

@@ -1,7 +1,17 @@
-# battery 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
-# 原子件只见 ops 指针与描述符给的绑定句柄）。
-schema_version = 1
+# battery 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
 
 [assemble]
-handles = []   # 电池读数当前经 rr-hal 电源面直取；描述符句柄化归批D/批E 对表
-ops = []       # 阈值等策略经 config 数据化注入（config.toml [rr3-power.battery]）
+# battery 读数经 rr-hal 电源面（rr3_hal_power → INA219）直取，绑 i2c_bus + ina219_addr 两键
+handles = [
+  { trait = "Rr3Power", desc_key = "i2c_bus" },
+  { trait = "Rr3Power", desc_key = "ina219_addr" },
+]
+# 参数槽 ← config.toml [rr3-power.battery] 三键（Rr3BatteryCfg 字段同源）
+ops = [
+  { slot = "sample_period_ms", src_key = "rr3-power.battery.sample_period_ms" },
+  { slot = "low_voltage_mv", src_key = "rr3-power.battery.low_voltage_mv" },
+  { slot = "cutoff_voltage_mv", src_key = "rr3-power.battery.cutoff_voltage_mv" },
+]
