@@ -23,6 +23,27 @@
 
 extern crate alloc;
 
+// ESP-IDF app descriptor（espflash 4.x 构镜像硬校验 + IDF 二级引导运行期校验）。
+// 段名对表：esp-bootloader-esp-idf 0.1/0.2 宏发 `.rodata_desc.appdesc`（配对更新
+// 代 esp-hal 的 rodata.x），而 esp-hal 1.1.2 的 rodata.x 只 KEEP `.flash.appdesc`——
+// 直接用宏，产物会被 gc-sections 整段丢弃（批C④ 现场实证：ELF 无该段、espflash
+// 拒烧）。故按 1.1.2 的段名手挂静态量：#[used] 防 codegen 削除，字段值与无参宏
+// 完全一致（new_internal 为 pub const，Cargo.toml 依赖注释同步此因果）。
+#[used]
+#[link_section = ".flash.appdesc"]
+#[export_name = "esp_app_desc"]
+static ESP_APP_DESC: esp_bootloader_esp_idf::EspAppDesc =
+    esp_bootloader_esp_idf::EspAppDesc::new_internal(
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_NAME"),
+        esp_bootloader_esp_idf::BUILD_TIME,
+        esp_bootloader_esp_idf::BUILD_DATE,
+        esp_bootloader_esp_idf::ESP_IDF_COMPATIBLE_VERSION,
+        0,
+        u16::MAX,
+        esp_bootloader_esp_idf::MMU_PAGE_SIZE,
+    );
+
 use esp_hal::{time::Duration, time::Instant, uart::UartTx, Blocking};
 
 use rr_ipc::{
