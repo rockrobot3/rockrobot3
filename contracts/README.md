@@ -186,6 +186,14 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   在册 request L1 不动，仅 `topics.toml` 该条 note 追加两态措辞（白名单逐条列举语义
   的同源更新，非载荷/枚举变更）；帧序列（8x8 点阵位图，blink/talk 双帧）是模块内
   实现面，进契约须随批F5a 显示 trait 立格时一并裁定，本批不冻结。
+- **2026-10-11 · 0.0.7 批E 契约 append（跨芯片 e2e round-trip 点名对，0.0.7 批E 契约裁定）**：
+  `topics.toml` 28→**29** 条（append `rr3-sentinel/diag/probe` request L2——跨芯片哨兵的
+  探针点名主题：rr-registry F2 门要求 `[rpc].exposes` 主题在册，e2e round-trip 判据即
+  sim_peer 点名、哨兵 `result.echo` 原样回带）。同批新增 owner `rr3-sentinel`
+  （path `tools/espidf-sentinel`）——哨兵**总线身份**同批由 `rr3-espidf-sentinel` 改名合规
+  （词干纯小写是 `^rr3-[a-z]+$` 硬规则，module.schema.toml `module_name` 门；工程名/目录名
+  espidf-sentinel 是 crate 名非总线身份，不变）。同批更新 rr-registry 形状 pin（29 条三元组、
+  owner 8、kind 12-10-3-4）。topics.toml 只增不改维持。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

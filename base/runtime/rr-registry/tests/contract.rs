@@ -74,7 +74,11 @@ kind = "event"
 #[test]
 fn topics_prefix_contract_self_consistency() {
     let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    assert_eq!(owners.len(), 7, "v0.0.1 固定 7 个 owner（5+1 模块 + rrd）");
+    assert_eq!(
+        owners.len(),
+        8,
+        "契约 8 个 owner（5+1 模块 + rrd + rr3-sentinel，0.0.7 批E append）"
+    );
     let errs = rr_registry::rr3_registry_validate_topics(&topics_toml(), &owners);
     assert!(
         errs.is_empty(),
@@ -375,9 +379,9 @@ fn manifest_fixture_rpc_exposes_still_accepted() {
 
 #[test]
 fn topics_registry_zero_topics_is_rejected() {
-    // F3：7 owner / 0 topic 的空注册表必须被拒——空表不是放行许可证
+    // F3：8 owner / 0 topic 的空注册表必须被拒——空表不是放行许可证
     let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    assert_eq!(owners.len(), 7);
+    assert_eq!(owners.len(), 8);
     let owners_only: String = topics_toml()
         .lines()
         .take_while(|l| !l.trim_start().starts_with("[[topic]]"))
@@ -419,9 +423,9 @@ fn topics_registry_zero_topics_is_rejected() {
 
 // ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
 
-/// 注册表的全部 28 条 `(name, owner, kind)` 三元组。
+/// 注册表的全部 29 条 `(name, owner, kind)` 三元组。
 /// 顺序即 `contracts/topics.toml` 的登记顺序。
-const RR3_PINNED_TOPICS: [(&str, &str, &str); 28] = [
+const RR3_PINNED_TOPICS: [(&str, &str, &str); 29] = [
     ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
     ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
     ("rr3-sense/env/temperature", "rr3-sense", "event"),
@@ -454,6 +458,7 @@ const RR3_PINNED_TOPICS: [(&str, &str, &str); 28] = [
     ("rr3-connect/wifi/scan", "rr3-connect", "request"),
     ("rr3-connect/wifi/connect", "rr3-connect", "request"),
     ("rr3-connect/wifi/forget", "rr3-connect", "request"),
+    ("rr3-sentinel/diag/probe", "rr3-sentinel", "request"),
 ];
 
 /// 从 topics.toml 文本解析出的 (name, owner, kind) 三元组
@@ -482,7 +487,7 @@ fn registry_triples(text: &str) -> Vec<(String, String, String)> {
 }
 
 /// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 28 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
+/// 以及全部 29 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
 ///
 /// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
 /// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
@@ -498,12 +503,12 @@ fn registry_shape_is_pinned() {
 
     let text = topics_toml();
 
-    // 1) owner 侧：7 个，且不重名
+    // 1) owner 侧：8 个，且不重名
     let owners = rr_registry::rr3_registry_topic_owners(&text);
     assert_eq!(
         owners.len(),
-        7,
-        "v0.0.1 契约固定 7 个 owner（5+1 模块 + rrd）"
+        8,
+        "契约 8 个 owner（5+1 模块 + rrd + rr3-sentinel，2026-10-11 0.0.7 批E append）"
     );
     let unique_owners: HashSet<&String> = owners.iter().collect();
     assert_eq!(
@@ -512,19 +517,19 @@ fn registry_shape_is_pinned() {
         "owner 名不得重复登记: {owners:?}"
     );
 
-    // 2) topic 侧：28 条，且不重名（重名会让下面的子集论证失去意义）
+    // 2) topic 侧：29 条，且不重名（重名会让下面的子集论证失去意义）
     let topics = registry_triples(&text);
     assert_eq!(
         topics.len(),
-        28,
-        "契约固定 28 条主题（2026-10-05 0.0.4 批D 25→28：append connect wifi/scan|connect|forget）"
+        29,
+        "契约 29 条主题（2026-10-11 0.0.7 批E 28→29：append sentinel/diag/probe，F2 门要求 rpc.exposes 主题在册）"
     );
     let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
 
-    // 3) kind 分布：11 request / 10 event / 3 stream / 4 notification
+    // 3) kind 分布：12 request / 10 event / 3 stream / 4 notification
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
-    assert_eq!(count("request"), 11, "kind=request 的分布漂移");
+    assert_eq!(count("request"), 12, "kind=request 的分布漂移");
     assert_eq!(count("event"), 10, "kind=event 的分布漂移");
     assert_eq!(count("stream"), 3, "kind=stream 的分布漂移");
     assert_eq!(count("notification"), 4, "kind=notification 的分布漂移");
@@ -534,7 +539,7 @@ fn registry_shape_is_pinned() {
         "存在四类之外的 kind: {topics:?}"
     );
 
-    // 4) 28 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
+    // 4) 29 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
     for (name, owner, kind) in RR3_PINNED_TOPICS {
         assert!(
             topics
@@ -644,7 +649,7 @@ fn every_owner_path_exists() {
         .expect("缺 [[owner]] 数组");
     assert_eq!(
         owners.len(),
-        7,
+        8,
         "owner 计数漂移（注册表形状 pin 之外的交叉检查）"
     );
     for o in owners {

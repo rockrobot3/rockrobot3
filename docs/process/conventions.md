@@ -256,8 +256,9 @@ watchdog 判死但不广播 → 第一/三条红；广播里的相位写错 → 
 不进 contracts/topics.toml"不受影响；落点偏离的文字同步归 Task 13；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
-硬 pin：7 owner / 28 topic / kind 11-10-3-4 / 28 条三元组——0.0.4 批D 随 connect
-wifi/scan|connect|forget append 同步（0.0.3 批C 曾随 `rr3-act/relay/state`）；`every_module_manifest_passes_contract`
+硬 pin：8 owner / 29 topic / kind 12-10-3-4 / 29 条三元组——0.0.4 批D 随 connect
+wifi/scan|connect|forget append 同步（0.0.3 批C 曾随 `rr3-act/relay/state`；0.0.7 批E
+随 `rr3-sentinel/diag/probe` append 再同步，28→29）；`every_module_manifest_passes_contract`
 钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
 每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
 ②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
