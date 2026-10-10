@@ -1,4 +1,4 @@
-# rr3-connect 模块设计（框架 v1.2）
+# rr3-connect 模块设计（框架 v1.3）
 
 ## §0 单元身份证
 
@@ -155,3 +155,15 @@
 | `atoms/bt/bt.rs : SURFACE`、`mech.rs`、`src/composite.rs : println!` | `"BlueZ"`（**运行期打印**，非仅注释） | 后端自述 | 有 | 换芯片/换栈时这些串要跟着改 = **违背"换板不改代码"**。去处：后端名由 `rr3_hal_backend_resolve` 交上来，SURFACE 行只写"bt 面（后端=动态）"（N-8）。同类：`wifi.rs : SURFACE` 的 `"NetworkManager/D-Bus"` |
 | `atoms/wifi/mech.rs`、`atoms/bt/mech.rs` | `NetworkManager`/`D-Bus`/`wpa_supplicant`/`NVS`/`BlueZ` 注释 | 厂商/栈名出现在件声明面 | — | ⑦-a 禁词表（`rr-registry/src/atom.rs::RR3_BOARD_TOKENS`）**只扫 `rr-core`/`rr-ipc::protocol`/`transport/mod.rs`，不扫 module mech** → 今天不红。但 ADR-0018 修订 3 ③ 定的"禁词作用件声明面"与这里冲突：注释里的栈名会随 SURFACE/println 出到对外面。**处置见索引 §11 审计 L-6**：禁词作用域要分"代码常量/运行期输出/纯注释"三档，别一刀切 |
 | `atoms/{wifi,bt}/assemble.toml` | `handles = []` / `ops = []`（bt 那份注释写"sim 初值走 env 注入口，不占 config 面"） | 注入面申报 | **零申报** | 注释即声明是散文不是数据——批J G4 落地时这条注释必须变成 `ops` 里的一行，否则校验门无内容 |
+
+## §14 基线对表（代码 `22783ea`，2026-10-10；本节是本册唯一"现在时"）
+
+| 本册旧断言 | 现在的事实（符号为证） | 判定 |
+|---|---|---|
+| §12 "bt 唯一硬点是件内 `std::env::var`（N-1）" | 函数与 env 键双双退役，件面改 `rr3_bt_state_new(up: bool)`，初值经 **ops 申报**注入（`atoms/bt/assemble.toml`：`up` ← `rr3-connect.bt.up`） | **N-1 已结**，且 bt 从"零申报"变成**已申报的三件之一** |
+| §12/§13 wifi 凭据 `String`（N-3） | `Rr3LinkState.ssid` 改 `Option<Rr3SsidText { bytes: [u8; 32], len: u8 }`（契约面）；**件内 `rr3_provision_connect(&mut self, ssid: String, pass: String)` 与 `credentials: Option<(String, String)>` 仍是堆类型** | **部分结**：值类型侧结、凭据侧未结 → 批L **L-3** |
+| §12 "`&dyn`/`rr3_block_on` 清零（I-3/N-3 同族）" | 契约面同步、`rr3_block_on` 不存在；本册件面不持句柄（调用在 `composite.rs`） | 已结 |
+| §0/§13 三个零读者配置项（N-6/N-2） | `roam_probe_enabled` 与 `tls_min_version` **删除**；`timeout_ms` **实装为 nmcli 子进程超时**并迁入 wifi 段 | **N-2、N-6 已结**（三选一的"实装/删除"两条各用一次） |
+| §13 sim 假 AP 表在件里（N-9） | `rr3_wifi_scan_result` 的三条假 AP **仍在 `atoms/wifi/mech.rs`** | **N-9 未结** → 批L **L-9**（整表迁 sim 后端，与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流） |
+| §13 栈名出现在 SURFACE/println（N-8） | 未见改动：`wifi.rs`/`bt.rs` 的 `SURFACE` 与 `composite.rs` 的蓝牙行仍打 `BlueZ`/`NetworkManager`/`D-Bus`；**而 ⑦-a 现在会扫 `modules/*/atoms/*/*.rs`**（剥行注释后 grep 器件/厂商禁词，重跑 0 命中——说明这些串不在禁词表内，不在扫到的文件内，或两者皆非） | **N-8 未结**；并登记敞口：**禁词表与运行期自述之间仍有缝**（表里没有 `BlueZ`/`NetworkManager`）→ 批L **L-10**（禁词表补栈名或改由后端名下发） |
+| §3/§13 `handles`/`ops` 申报 | `atoms/{wifi}/assemble.toml` 仍全空（bt 已填） | **未结** → 批L **L-5** |

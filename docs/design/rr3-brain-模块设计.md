@@ -1,4 +1,4 @@
-# rr3-brain 模块设计（框架 v1.2）
+# rr3-brain 模块设计（框架 v1.3）
 
 ## §0 单元身份证
 
@@ -155,3 +155,16 @@
 | env 面 | `SILICONFLOW_API_KEY`（**供应商名进代码/配置面**） | 凭据键名 | 有 | 凭据不落盘 ✅；但键名把厂商焊死：换云要改代码。去处 = 通用键名（如 `RR3_CLOUD_API_KEY`）+ 厂商写在 config/descriptor，或至少在 §11 记"跨供应商需改一处代码"为已知欠账（B-10） |
 | `session/测试面` | `RR3_BRAIN_CLOUD=mock`、`tests/` 内假响应 | 注入点 | 有 | ✅ 正确（mock 在测试注入位）；§6 已钉"mock 不是在位证据" |
 | 硬编码在件里的形态参数 | 心跳 2000 ms 拍点、`poll` 超时等 | 机制参数 | 有 | 与五册同纪律：进 ops/config，别停在 `.py` 常量 |
+
+## §14 基线对表（代码 `22783ea`，2026-10-10）
+
+- **契约面（B-1 / R-3）已结**：`rr3-brain/module.toml` 现 `subscribes = ["rr3-sense/audio/pcm",
+  "rr3-sense/audio/vad_start"]`、`publishes = ["rr3-brain/intent/result"]`——申报面第一次等于实现面。
+- **B-2 已结**（`silence_tail_ms` 退役，判停在 sense 的 `Offset`）；**B-8 未结**（`max_turn_chars` 仍零读者）。
+- **B-7 已结（以一种我没写过的合法方式）**：`net/link` 订阅申报被**撤下**而不是补实现——
+  按 R-3 的"补实现或撤申报二选一"，实现侧选了后者。本册 §2 那句"链路 down 不起新轮"从此**不再是待实现项**，
+  而是被撤销的主张；若将来要恢复，须重走申报面变更 + C14 类评审。
+- **门禁口径**：brain 的 26 条 stdlib unittest 仍**不在 `check.sh` 十步内**，但 `.gitcode/workflows/ci.yml`
+  的 `brain-unittest` 双矩阵 job 是真的（远端从不执行 → 只算"清单在册未执行"，不折算达标）。
+- **§12 的三档表不受影响**：brain 属主承载层，rtos/bare 档不启用认知格——`esp32-mini.toml` 的
+  `[enabled_slots]` 不列 `cognition.*`，正是本册 §12 那行的实现证据。

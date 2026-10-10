@@ -1,4 +1,4 @@
-# rr3-interact 模块设计（框架 v1.2）
+# rr3-interact 模块设计（框架 v1.3）
 
 ## §0 单元身份证
 
@@ -159,3 +159,18 @@
 | `atoms/face/mech.rs : RR3_FRAMES_*` | 11 帧 `0b0110_0110` 一类 8×8 位模式 | 渲染**数据**（不是阈值） | 有 | 不是策略，但也不该焊在 `mech.rs`：随批F5a 显示 trait 落 sim 后端 / 描述符数据面（帧表 = 板面事实） |
 | `src/panel/server.rs : SelfTest` | `"happy"` | 自检用表情 | 有 | ops 槽（自检期望不该硬编码） |
 | `atoms/{face,player}/assemble.toml` | `handles = []` / `ops = []` | 注入面申报 | **零申报** | 上面全部策略字面量今天都没有申报位；且 `[hardware]` 连显示键都没有（I-2 的前置 C4）——本单元是"配置面最空、config 最假"的一册，批J 落地时应优先拿它做样板 |
+
+## §14 基线对表（代码 `22783ea`，2026-10-10；本节是本册唯一"现在时"）
+
+| 本册旧断言 | 现在的事实（符号为证） | 判定 |
+|---|---|---|
+| §12 player 卡在"每拍 `Vec<i16>` + `std` `sin`"（I-10） | 改栈上 `[i16; RR3_TTS_BLOCK_SAMPLES = 320]`，波形走 `rr_hal::sim::rr3_sim_tts_block`（32 项 LUT）；`sin` 只在测试夹具 | **I-10 已结** |
+| §1/§10 载荷上移（I-8） | `rr3_face_result`/`rr3_tts_result`/两个 `*_parse_args` 在 `src/composite.rs`；件面 `json!` 零命中 | **I-8 已结** |
+| §5 "`asr/text`、`dialog/turn` 申报发布却零发布（I-5 待执行）" | `contracts/topics.toml` 两条置 `status="retired"`；`rr3-interact/module.toml` 现 `publishes = []`、`subscribes = ["rr3-connect/net/link"]`（`intent/result` 订阅申报已撤） | **I-5、I-7 已结**（R-3 落地） |
+| §13 五个死配置键（I-1） | `config.toml` 头注逐键写明删除理由，`log_level`/`default_expression`/`prebuffer_ms`/`volume_pct`/`bind`/`port` 不再挂"看着生效"的面 | **I-1 已结**；**新查出 5 个同类**（`[rr3-sense.audio].bit_depth`、player 两键、panel `bind`/`port`）已并回 0.0.5 §17 孤儿参数条 |
+| §12 face 三处 std/alloc 形状 | **未结**：`RR3_FACE_EXPRESSIONS.join("/")` 仍产堆、`rr3_face_set -> Result<(_, _), String>` 仍是 `String` 错型、`std::mem::replace` 未改 `core::`（另：`mech.rs` 内 f64 仅测试面） | 批L **L-3** |
+| §3/§12 显示句柄 `[hardware]` 无键（I-2） | **本轮裁定为"不扩键"**：`descriptor.rs` 九键闭合表原样，`rr3_hal_display` 只有 sim/placeholder 两分支（真屏未实装）。扩键评审（C4）以"不扩"结案，真屏到位时再走一次 append | **I-2 关闭**（判定改，不是实现改） |
+| §12/§13 `handles`/`ops` 申报 | `atoms/{face,player}/assemble.toml` 仍全空 | 批L **L-5** |
+| §4 panel `live` 计数与 accept 循环（R-5 改判的可达缺陷） | 未见代码改动（仍 `?` 退 accept） | **I-4 未结**（批K 内） |
+
+**本册新净余数**：批L **L-3**、**L-5**。**面板端点双写（I-12）与 SURFACE/serve 端点数不一致（I-9）** 保持未结。

@@ -1,4 +1,4 @@
-# rr3-act 模块设计（框架 v1.2）
+# rr3-act 模块设计（框架 v1.3）
 
 ## §0 单元身份证
 
@@ -163,3 +163,20 @@
 | `src/composite.rs` / `module.toml` | `RR3_INTENT_TOPIC="rr3-brain/intent/result"`（与 `[events].subscribes` 双写）、`RR3_ACT_CONFIG`、`RR3_MANIFEST` | 订阅面/env | 有 | 主题名 = 契约字面量；`RR3_MANIFEST` 未设 → `exit(1)` fail-closed ✅ |
 | `config.toml [rr3-act] log_level` | `"info"` | 日志级 | **无读者** | 被读或删除（P-6/N-6/I-1/B-8 同纪律，A-11） |
 | `atoms/{servo,led,relay}/assemble.toml` | `handles = []` / `ops = []` | 注入面申报 | **零申报** | 上面 9 条策略今天**都没有申报位**——批J G4 落地时必须把它们填进去，否则 §12/§13 只是两张清单 |
+
+## §14 基线对表（代码 `22783ea`，2026-10-10；本节是本册唯一"现在时"）
+
+| 本册旧断言 | 现在的事实（符号为证） | 判定 |
+|---|---|---|
+| §1/§12 "`Rr3Led` 自持 worker 线程 + `mpsc` + `recv_timeout(3600s)`，A-1 待拆"；R-4"先建合成时钟再拆" | 线程与 mpsc **已删**：件面为 `rr3_led_new(u64)` + `rr3_led_apply(&mut self, u64, Rr3LedEffect)` + **`rr3_led_tick(now_ms: u64, &mut Rr3Led) -> Option<bool>`**，节拍由 `src/composite.rs` 每圈驱动 → 时钟天然为注入值 | **A-1、R-4 已结**（合成时钟不再是前置，而是既有形状） |
+| §5 "`relay/state` 实况每令必发，与申报的变化即发不符（A-7）" | 件面新增 **`rr3_relay_state_due(bool, bool) -> bool`**，变化判定进机制、发布受其门控 | **A-7 已结**（`relay.rs`/`mech.rs` 在册，e2e 需补同态不续发一条 → 转 **批L L-6**） |
+| §1 目标签名"载荷上移承载层（A-8）" | `rr3_servo_state_body`、`rr3_relay_result`、`rr3_led_parse_args`、`rr3_relay_parse_args` 全在 `src/composite.rs`；件面 `serde_json` 零命中 | **A-8 已结** |
+| §1 "`use rr_hal::` → `rr_hal_api`（A-4）" | 契约面已同步化；件内 import 源为 `rr_hal_api`（经 re-export 保路径），`rr3_block_on` 不存在 | **A-4 已结** |
+| §12 bare 档"`Arc<dyn Rr3GpioOut>` 需改泛型（禁 trait 对象）" | `led` 已无 `Arc`；**`rr3_relay_apply(&mut dyn Rr3GpioOut, bool)` 与 `rr3_tts_play(&mut dyn …)` 仍是 `&mut dyn`** | **未结** → 批L **L-3** |
+| §1 错型面 | `rr3_servo_check_travel` / `rr3_servo_check_timeout` / `rr3_relay_apply` 返回 `Result<_, String>` | **未结** → 批L **L-3**（`Rr3HalError`/件枚举错型收敛） |
+| §13 "`intent.rs : EXPOSED` 内联 led 主题串（A-10 双写）" | `const EXPOSED: [&str; 3]` 与 `"已归属但意图执行面未开放 …"` 仍在，led 通路仍封闭（注释写明"扩面随真实需要 append"） | **未结** → 批L **L-7**（串值单点），封闭本身按 R-3 不变 |
+| §13 策略申报位 | `atoms/{servo,led,relay}/assemble.toml` 仍 `handles = []` / `ops = []`（`battery` 那类真值样本本册没抄走） | **未结** → 批L **L-5** |
+| §11/框架通用约定 1 "妆面件失败语义例外" | 代码未变（led 写失败仍 `eprintln` 不退） | **A-12 未结**（D8 范围仍待你定） |
+
+**本册新净余数**：批L **L-3**（`&mut dyn` + `String` 错型）、**L-5**（三件 `handles`/`ops` 申报）、
+**L-6**（同态不续发用例）、**L-7**（主题串单点）。**A-2/A-3** 由 `rr3_led_tick(now_ms)` 与 ⑧-b 门一起收口。
