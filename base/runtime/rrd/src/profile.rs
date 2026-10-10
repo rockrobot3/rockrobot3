@@ -359,6 +359,17 @@ pub fn rr3_profile_boot_inputs(
             slots_abs.display()
         ));
     }
+    // 形状门（0.0.5 批J 深挖收口；与 topics 装载的 rr3_topic_set_check 同构——
+    // CI 契约测试钉 21 格是全集层门，这里是运行期门，两轴缺一即带病）：
+    // 格名规则、层名、status/tier_scope 白名单逐条点名。
+    let slot_errs = table.rr3_slot_table_check();
+    if !slot_errs.is_empty() {
+        return Err(format!(
+            "格位契约 {} 形状不合，拒绝启动: {}",
+            slots_abs.display(),
+            slot_errs.join("; ")
+        ));
+    }
 
     let mut errs: Vec<String> = Vec::new();
     // bindings 的格位必须查册命中，且不得是基础层（基础层由基座内建承载，slots.toml 注记）
@@ -898,6 +909,30 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
             boot.hal_bindings, "link_ifname = \"wlan0\"\npwm_chip = \"0\"\n",
             "注入文本升序、整数已字符串化"
         );
+    }
+
+    /// 格位契约形状门进运行期装载（0.0.5 批J 深挖收口）：status/tier_scope 越界的
+    /// slots.toml 在 boot 即拒并点名——不能只靠 CI 契约测试兜底（装机现场改坏的
+    /// 契约同样不得带病起）。
+    #[test]
+    fn boot_inputs_rejects_out_of_whitelist_slot_contract() {
+        let root = Root::new("slot-shape");
+        let bad_slots = root.dir.join("slots-bad.toml");
+        std::fs::write(
+            &bad_slots,
+            r#"
+[[slot]]
+name = "act.servo"
+layer = "body"
+status = "deprecated"
+tier_scope = ["quantum"]
+"#,
+        )
+        .unwrap();
+        let p = root.write_profile("ok.toml", GOOD);
+        let errs = rr3_profile_boot_inputs(&p, &bad_slots).expect_err("越界契约必须拒");
+        assert!(errs.contains("status 非法"), "{errs}");
+        assert!(errs.contains("tier_scope 含非法档 quantum"), "{errs}");
     }
 
     /// schema_version=2 三新段必填：缺段逐条点名（fail-closed，一次收集完）
