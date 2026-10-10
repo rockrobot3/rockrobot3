@@ -293,4 +293,59 @@ mod tests {
             Some(Rr3VadEdge::Offset { speech_ms: 400 })
         );
     }
+
+    // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
+
+    #[test]
+    fn parity_leg1_vad_edge_train_is_deterministic() {
+        // 腿一·确定性：同一帧序列（20 帧声 / 20 帧静交替共 120 帧）两跑，
+        // 边沿输出逐帧相等
+        fn run() -> Vec<Option<Rr3VadEdge>> {
+            let mut vad = state();
+            (0..120)
+                .map(|i| {
+                    let amp = if (i / 20) % 2 == 0 { 3000 } else { 0 };
+                    vad.rr3_vad_feed(&frame(amp))
+                })
+                .collect()
+        }
+        assert_eq!(run(), run(), "同输入序列两跑逐帧相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_vad_fires_edge_only_once_per_segment() {
+        // 腿二·正确性：100 拍连续高电平只发 1 个 Onset（边沿语义非电平语义）；
+        // 等号边界：rms == rms_start 算有声（≥ 判据含等号）
+        let mut vad = state();
+        let mut onsets = 0;
+        for i in 0..100 {
+            if let Some(e) = vad.rr3_vad_feed(&frame(3000)) {
+                onsets += 1;
+                assert!(
+                    matches!(
+                        e,
+                        Rr3VadEdge::Onset {
+                            rms_peak: 3000,
+                            speech_ms: 200
+                        }
+                    ),
+                    "第 {i} 拍的边沿形状"
+                );
+            }
+        }
+        assert_eq!(onsets, 1, "100 拍高电平只发 1 个 Onset，不重复报");
+        // 等号：常幅帧 RMS 恰等于 rms_start=1500 也攒得起音窗
+        let mut vad = state();
+        for _ in 0..9 {
+            assert_eq!(vad.rr3_vad_feed(&frame(1500)), None);
+        }
+        assert_eq!(
+            vad.rr3_vad_feed(&frame(1500)),
+            Some(Rr3VadEdge::Onset {
+                rms_peak: 1500,
+                speech_ms: 200
+            }),
+            "rms == rms_start 算有声（等号归中）"
+        );
+    }
 }

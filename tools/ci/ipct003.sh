@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # IPC-T-003 跨架构对拍：x86 与 aarch64 字节布局一致（ADR-0006 后果项）。
 #
-# **不在七步门内**（check.sh 不调它）：它依赖平台条件（Docker / aarch64 交叉目标），
+# **不在门禁步序内**（check.sh 不调它）：它依赖平台条件（Docker / aarch64 交叉目标），
 # 塞进门禁等于让无容器环境的机器永远红。登记与步序见 docs/process/conventions.md §2。
 #
 # 做四件事：

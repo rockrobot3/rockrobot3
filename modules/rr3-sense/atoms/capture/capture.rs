@@ -31,6 +31,7 @@ pub struct Rr3AudioConfig {
     pub frame_ms: u64,
 }
 
+pub(crate) use mech::rr3_pcm_downmix_mono;
 /// `Rr3DoaBin` 仅被 composite 测试按名构造（bin 目标面无读者，pub use 在 bin 编译
 /// 单元会吃 unused_imports）——测试面专用导出。
 #[cfg(test)]
@@ -40,4 +41,3 @@ pub use mech::Rr3DoaBin;
 /// 深挖收口上移组合件（`Rr3PcmStream` 是承载层数据类型，C7 白名单外）——
 /// `rr3_pcm_downmix_mono`/阈值常数 pub(crate)（唯一读者是组合件承载层）
 pub use mech::{rr3_doa_fix, rr3_frames_per_tick, Rr3DoaFix};
-pub(crate) use mech::rr3_pcm_downmix_mono;

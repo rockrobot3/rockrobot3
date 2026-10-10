@@ -85,4 +85,84 @@ mod tests {
         assert!(gate.rr3_gate_allow(1_000));
         assert!(!gate.rr3_gate_allow(1_010), "窗内连发被限（rr-core 判定）");
     }
+
+    // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
+    // 腿一·确定性：同一 (角度, 时限, 拍点) 序列喂两套判定（行程/时限/限速门），
+    // 判定轨迹逐拍相等。腿二·正确性：期望值引自裁定语义（act 册 §8 servo 行：
+    // 端点等号合法、越界点名区间、时限零值/超上限拒收、限速窗起放行/窗内被限/
+    // 窗末等号放行），不由件自产。
+
+    /// 对拍快照：((行程判定, 行程文案), (时限判定, 时限文案), 限速门放行)
+    type ServoParitySnap = ((bool, String), (bool, String), bool);
+
+    /// 腿一：§8 设计行序列（端点/越界/零时限/超上限 + now 每 10ms 一拍）两跑相等
+    #[test]
+    fn parity_leg1_servo_judgement_train_is_deterministic() {
+        fn run() -> Vec<ServoParitySnap> {
+            let mut gate = Rr3RateGate::rr3_gate_new(50);
+            let mut out = Vec::new();
+            let mut now = 1_000u64;
+            for (angle, ms) in [
+                (0u16, None),
+                (180, Some(800)),
+                (181, Some(200)),
+                (90, Some(0)),
+                (45, Some(801)),
+            ] {
+                let travel = rr3_servo_check_travel(angle, &cfg());
+                let timeout = rr3_servo_check_timeout(ms, &cfg());
+                out.push((
+                    (travel.is_ok(), travel.err().unwrap_or_default()),
+                    (timeout.is_ok(), timeout.err().unwrap_or_default()),
+                    gate.rr3_gate_allow(now),
+                ));
+                now += 10;
+            }
+            out
+        }
+        assert_eq!(run(), run(), "同输入两跑逐拍相等（腿一·确定性）");
+    }
+
+    /// 腿二：裁定语义逐点断言（含文案点名区间/上限——面板与 legacy 依赖字面）
+    #[test]
+    fn parity_leg2_servo_matches_ruling_semantics() {
+        assert!(
+            rr3_servo_check_travel(0, &cfg()).is_ok(),
+            "行程下界等号合法"
+        );
+        assert!(
+            rr3_servo_check_travel(180, &cfg()).is_ok(),
+            "行程上界等号合法"
+        );
+        assert!(rr3_servo_check_travel(181, &cfg()).is_err(), "越界拒收");
+        assert!(
+            rr3_servo_check_travel(181, &cfg())
+                .unwrap_err()
+                .contains("[0, 180]"),
+            "越界点名行程区间"
+        );
+        assert_eq!(
+            rr3_servo_check_timeout(None, &cfg()).unwrap(),
+            800,
+            "缺 move_ms 回落 config 上限（裁定）"
+        );
+        assert!(
+            rr3_servo_check_timeout(Some(0), &cfg()).is_err(),
+            "零时限拒收（超时即停）"
+        );
+        assert!(
+            rr3_servo_check_timeout(Some(801), &cfg()).is_err(),
+            "超上限拒收（不给堵转留机会）"
+        );
+        assert_eq!(
+            rr3_servo_check_timeout(Some(800), &cfg()).unwrap(),
+            800,
+            "上限等号合法"
+        );
+        // 限速门（rr-core 裁定）：窗起放行、窗末前一 ms 被限、窗末等号放行
+        let mut gate = Rr3RateGate::rr3_gate_new(50);
+        assert!(gate.rr3_gate_allow(1_000), "窗起放行");
+        assert!(!gate.rr3_gate_allow(1_049), "窗内被限");
+        assert!(gate.rr3_gate_allow(1_050), "窗末等号放行");
+    }
 }

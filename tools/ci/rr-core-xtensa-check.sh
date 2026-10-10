@@ -4,7 +4,7 @@
 # 测试面由 check.sh ①/①b 覆盖；本门补**无 OS 裸机面**——在 xtensa-esp32-none-elf（无
 # 操作系统目标）上，fork/exec/socket/线程/墙上时钟任何 OS 假设都编译不过，编译成立即
 # "机制核可进裸机固件"（无 OS 启动形态）的机械点验。esp fork 工具链（cargo +esp +
-# build-std）是平台条件依赖，不进七步门，单独覆盖（同 espidf-std-check.sh 先例）。
+# build-std）是平台条件依赖，不进门禁步序，单独覆盖（同 espidf-std-check.sh 先例）。
 # 对拍语义：同一份源两个面同判——
 #   裸机面：xtensa 编译过，且 rr-ipc golden 头 `const _` 断言随依赖链在该目标编译期
 #           重求值（0.0.7 层① 免费资产，批D① 起 rr-core 依赖 rr-ipc 同链生效）；

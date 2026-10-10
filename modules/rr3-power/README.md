@@ -9,11 +9,14 @@
 modules/rr3-power/
 ├── module.toml
 ├── config.toml
+├── composite.toml   ← 组合件装配清单（⊗ 链：battery ⊗ charger）
 ├── Cargo.toml
+├── atoms/           ← 原子件（每格一件，五件套：atom.toml + 入口 + mech + assemble.toml + private.rs）
+│   ├── battery/     ← power.battery：电池采样 + 低电边沿机（同一次低电段恰发一次）
+│   └── charger/     ← power.charger：充电状态（由电池读数的 charging 位派生）
 └── src/
-    ├── main.rs      ← 入口：总线接入 + 采样/低电/充电三拍主循环（0.0.2 T4b 实装）
-    ├── battery.rs   ← 电池采样 + 低电边沿机（同一次低电段恰发一次）
-    └── charger.rs   ← 充电状态（由电池读数的 charging 位派生）
+    ├── main.rs      ← 入口：只装配与启动（≤80 行）
+    └── composite.rs ← 组合件：config 解析 + HAL 电源面探活 + 采样/低电/充电三拍主循环
 ```
 
 ## 总线面

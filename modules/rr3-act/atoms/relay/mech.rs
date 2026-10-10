@@ -71,4 +71,47 @@ mod tests {
         assert_eq!(rr3_relay_counter_key(true), "relay_on");
         assert_eq!(rr3_relay_counter_key(false), "relay_off");
     }
+
+    // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
+    // 腿一·确定性：§8 设计行输入序列 [true,false,false,true] 喂两套（件 + sim
+    // gpio），(生效, 前一, 变化判定, 落地电平) 轨迹逐拍相等。腿二·正确性：
+    // 期望轨迹引自裁定语义（act 册 §9：state 只在电平实际变化时发布——重复
+    // 同态不得续发），不由件自产。
+
+    /// 腿一：同序列两跑轨迹相等
+    #[test]
+    fn parity_leg1_relay_output_train_is_deterministic() {
+        fn run() -> Vec<(bool, bool, bool, bool)> {
+            let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+            let mut out = Vec::new();
+            for on in [true, false, false, true] {
+                let (applied, prev) = rr3_relay_apply(&mut gpio, on).unwrap();
+                let due = rr3_relay_state_due(prev, applied);
+                out.push((applied, prev, due, gpio.rr3_sim_gpio_level()));
+            }
+            out
+        }
+        assert_eq!(run(), run(), "同输入两跑逐拍相等（腿一·确定性）");
+    }
+
+    /// 腿二：due 序列 = [真, 真, 假, 真]——第三拍 F→F 同态不续发（裁定语义，
+    /// A-7 缺陷的回归锚）；前一电平按写前真值显式跟踪钉住
+    #[test]
+    fn parity_leg2_relay_due_only_on_change() {
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut due_seq = Vec::new();
+        let mut expect_prev = false; // sim gpio 初值 = 灭
+        for on in [true, false, false, true] {
+            let (applied, prev) = rr3_relay_apply(&mut gpio, on).unwrap();
+            assert_eq!(applied, on, "生效 = 命令值（执行件，不是妆面件）");
+            assert_eq!(prev, expect_prev, "前一 = 写前电平（先读回后写）");
+            expect_prev = on;
+            due_seq.push(rr3_relay_state_due(prev, applied));
+        }
+        assert_eq!(
+            due_seq,
+            vec![true, true, false, true],
+            "裁定：重复同态不得续发（第三拍 F→F 判假）"
+        );
+    }
 }

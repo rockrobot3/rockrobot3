@@ -24,8 +24,11 @@
 [`docs/status.md`](../docs/status.md)。
 
 **目录里有什么**：六个模块位都已建好 —— rr3-sense / rr3-act / rr3-interact /
-rr3-power / rr3-connect（Rust，`rr3-mkmod` 生成的五件结构）+ rr3-brain（Python 包，`rr3_brain/`，
-故无 `Cargo.toml`，其"源码半边"是 `pyproject.toml`）。每个模块的 `src/` 内构目录见各自
+rr3-power / rr3-connect（Rust）+ rr3-brain（Python 包，`rr3_brain/`，
+故无 `Cargo.toml`，其"源码半边"是 `pyproject.toml`）。0.0.5 原子重铺（批B/C）后，
+五个 Rust 模块在五件基础之上另带 `atoms/<名>/`（原子件五件套：`atom.toml` + 入口 +
+`mech.rs` + `assemble.toml` + `private.rs`）与 `composite.toml`（⊗ 装配清单），
+组合件入口瘦身只装配与启动——每个模块的内构目录见各自
 README 与 [`architecture.md`](../docs/architecture/architecture.md) §3。
 
 机器把关：② 步校验六份 `module.toml` 并钉住模块集合，④ 步编译五个 Rust crate。

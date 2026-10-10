@@ -28,7 +28,7 @@
 //! 不进 bindings、不进缺格判定，enabled_slots 里声明它们只是"本形态用到"的记账。
 //! `[os].route` 运行期不读（ADR-0012 裁定 3 B3 注记），解析时无视该段。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rr_registry::{rr3_registry_slot_table_from_text, Rr3SlotTable};
@@ -414,6 +414,29 @@ pub fn rr3_profile_boot_inputs(
             "档位一致性校验失败：tier = bare 但 supplies.watchdog_present = false——无看门狗的板不允许归 bare 档（ADR-0018 修订 1），拒绝启动"
                 .to_string(),
         );
+    }
+    // L-10 tier↔tier_scope 交叉校验（ADR-0012 增补注记 base-supply/base-bus 分族的
+    // 装配侧执法，0.0.5 批K）：tier_scope 说"这档要不要这张格"——tier 档引用
+    // scope 外的格 = 自相矛盾（如 bare 自足档无总线，引用 bus.* 即假账）→ 拒 boot
+    // 点名。三处引用（bindings / enabled_slots / [slots].present）合并去重逐格查；
+    // 未在册格由上面三处查册门点名，此处只对在册格判 scope，不重复报。
+    let mut referenced: BTreeSet<String> = BTreeSet::new();
+    referenced.extend(profile.bindings.keys().cloned());
+    for slots in profile.enabled_slots.values() {
+        referenced.extend(slots.iter().cloned());
+    }
+    referenced.extend(profile.slots_present.iter().cloned());
+    for slot in &referenced {
+        if !table.rr3_slot_table_contains(slot) {
+            continue;
+        }
+        let scope = table.rr3_slot_table_tier_scope(slot).unwrap_or_default();
+        if !scope.iter().any(|t| t == &profile.platform_tier) {
+            errs.push(format!(
+                "tier↔tier_scope 交叉校验失败：装配档 {tier} 引用格 {slot}，其 tier_scope = {scope:?} 不含 {tier}（该档不适用此格，ADR-0012 增补注记分族），拒绝启动",
+                tier = profile.platform_tier
+            ));
+        }
     }
     // 结构自洽：每条 binding 都必须被 enabled_slots 认领（enabled_slots[M] 含该格位）——
     // 否则它是死数据：绑了没人用，装配单与 enabled_slots 各说一套。
@@ -1011,6 +1034,79 @@ tier_scope = ["quantum"]
         let p = root.write_profile("bare-wd.toml", &ok);
         rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
             .expect("bare 档 + 看门狗在场应放行");
+    }
+
+    /// L-10 tier↔tier_scope 交叉校验（0.0.5 批K，ADR-0012 增补注记分族的装配侧
+    /// 执法）：bare 档引用 bus.publish（tier_scope = host/rtos）→ 拒 boot 点名；
+    /// 引用 scope 全档的 power.battery → 放行。enabled_slots 是唯一允许基础层
+    /// 格位的引用面，反例经它构造。
+    #[test]
+    fn tier_outside_slot_tier_scope_is_fatal() {
+        let root = Root::new("l10");
+        let bad = GOOD.replace("tier = \"host\"", "tier = \"bare\"").replace(
+            "rr3-pa = [\"act.servo\"]",
+            "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"bus.publish\"]",
+        );
+        let p = root.write_profile("bare-bus.toml", &bad);
+        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect_err("bare 档引用 bus 格必须被拒");
+        assert!(
+            e.contains("tier↔tier_scope 交叉校验失败") && e.contains("bus.publish"),
+            "{e}"
+        );
+
+        let ok = GOOD.replace("tier = \"host\"", "tier = \"bare\"").replace(
+            "rr3-pa = [\"act.servo\"]",
+            "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"power.battery\"]",
+        );
+        let p = root.write_profile("bare-battery.toml", &ok);
+        rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("bare 档引用 scope 全档的 power.battery 应放行");
+    }
+
+    /// F-B 桥接微型形态装配演练（0.0.5 批K H4/R3-D6）：对仓内真件
+    /// `profiles/esp32-mini.toml` + 真 contracts/slots.toml 走完整 boot 输入装配——
+    /// 查册/形状门、G6 档位一致性、L-10 tier↔tier_scope 全过；三格自洽
+    /// （missing 空 = present/bindings/enabled_slots 三源一致）、装配段扫描零缺口、
+    /// boot 队列恰为两模块、[hardware] 缺省不注入。真板侧运行（限位/时限/饱和
+    /// 通告、桥断仍守护）触发条件 = 0.0.7 轻承载档真板，本测试只证装配链层
+    /// "裁剪 = 改数据"（CI 全集层形状 pin 在 rr-registry contract.rs）。
+    #[test]
+    fn esp32_mini_profile_boot_inputs_drill() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let p = repo.join("profiles/esp32-mini.toml");
+        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
+            .expect("esp32-mini 装配单必须过完整装载门（rtos 档）");
+        let mods: Vec<String> = boot
+            .manifests
+            .iter()
+            .map(|m| {
+                m.parent()
+                    .and_then(Path::file_name)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(
+            mods,
+            vec!["rr3-act", "rr3-sense"],
+            "boot 队列恰为 F-B 两模块（enabled_slots 升序，BTreeMap 确定性）"
+        );
+        assert!(
+            boot.missing.is_empty(),
+            "三格自洽（present/bindings/enabled_slots 三源一致）: {:?}",
+            boot.missing
+        );
+        assert!(
+            boot.assemble_broken.is_empty(),
+            "真件装配段扫描零缺口: {:?}",
+            boot.assemble_broken
+        );
+        assert!(
+            boot.hal_bindings.is_empty(),
+            "[hardware] 缺省 → 不注入物理绑定（板侧描述符归 0.0.7）"
+        );
     }
 
     /// [slots].present 声明缺是缺格三源合一第一源：present 移除某格 →

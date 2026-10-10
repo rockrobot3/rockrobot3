@@ -86,7 +86,7 @@
 
 | # | 无法收口的项 | 缺的证据 | 现状与后果 |
 |---|---|---|---|
-| 1 | 远端 CI 尚无一次真实运行回执 | 任一 remote 上一份全绿（或如实红的）运行记录 | 双远端：origin = atomgit（`git@atomgit.com:rockrobot/rockrobot3.git`）+ gitcode（`git@gitcode.com:rockrobot/rockrobot3.git`），`dev/hubs-01` 指针同为 `95d37ef`（0.0.6 批F5b 登记；0.0.5 各批、增补轮与 0.0.6 批A–F5b 推送时 `git ls-remote` **三端**核对一致——本收口批推送后随新锚再核对）。ci.yml 八 job（conventions / lint / brain-unittest 双矩阵 / ipct003 / distro-smoke / buildroot-assembly / sim-assemble / sim-chain）已全部落盘（540ec0f 起 4 个，a95eda7 / 28c629a / 363e4ed / 379e6de 增至 8 个），但**两个 remote 上一次都没有跑过**。本地门禁照旧靠 `bash tools/ci/check.sh` 七步全绿才提交；远端首跑回执到手前，"门禁的强度等于提代码的人记不记得跑它"这半句仍然成立。**2026-10-08 批W2 迁移注记（0.0.5 增补轮四，e5a8c22）**：八 job ci.yml 已 `git mv` 至 `.gitcode/workflows/` 单真源（atomgit 只拾取该路径——0.0.5 批A' 实证；`.github/` 侧留说明行指向），**迁移后八 job 首跑回执待网页核对**——本条敞口不变，随首跑一并取数。**2026-10-09 收口批 E' 深挖注记**：九步门禁的 CI 侧执法（conventions job）与 sim 全链 e2e（sim-chain job）取证都押在本条上——第 II 轮重铺与机制核下沉五版期间，tools/sim 的 23 条 #[test] 处于零执行死角（批E' ⑥ 扩口径已封死、真跑全绿），而全链 `--chain` 本机不可复验（本机 python3 3.9 不过 brain 3.11 门）——首跑回执的核对优先级进一步上升。步序见 [`process/conventions.md`](process/conventions.md) §2，脚本入口 [`tools/ci/check.sh`](../tools/ci/check.sh) |
+| 1 | 远端 CI 尚无一次真实运行回执 | 任一 remote 上一份全绿（或如实红的）运行记录 | 双远端：origin = atomgit（`git@atomgit.com:rockrobot/rockrobot3.git`）+ gitcode（`git@gitcode.com:rockrobot/rockrobot3.git`），`dev/hubs-01` 指针同为 `95d37ef`（0.0.6 批F5b 登记；0.0.5 各批、增补轮与 0.0.6 批A–F5b 推送时 `git ls-remote` **三端**核对一致——本收口批推送后随新锚再核对）。ci.yml 八 job（conventions / lint / brain-unittest 双矩阵 / ipct003 / distro-smoke / buildroot-assembly / sim-assemble / sim-chain）已全部落盘（540ec0f 起 4 个，a95eda7 / 28c629a / 363e4ed / 379e6de 增至 8 个），但**两个 remote 上一次都没有跑过**。本地门禁照旧靠 `bash tools/ci/check.sh` 门禁全绿才提交；远端首跑回执到手前，"门禁的强度等于提代码的人记不记得跑它"这半句仍然成立。**2026-10-08 批W2 迁移注记（0.0.5 增补轮四，e5a8c22）**：八 job ci.yml 已 `git mv` 至 `.gitcode/workflows/` 单真源（atomgit 只拾取该路径——0.0.5 批A' 实证；`.github/` 侧留说明行指向），**迁移后八 job 首跑回执待网页核对**——本条敞口不变，随首跑一并取数。**2026-10-09 收口批 E' 深挖注记**：九步门禁的 CI 侧执法（conventions job）与 sim 全链 e2e（sim-chain job）取证都押在本条上——第 II 轮重铺与机制核下沉五版期间，tools/sim 的 23 条 #[test] 处于零执行死角（批E' ⑥ 扩口径已封死、真跑全绿），而全链 `--chain` 本机不可复验（本机 python3 3.9 不过 brain 3.11 门）——首跑回执的核对优先级进一步上升。步序见 [`process/conventions.md`](process/conventions.md) §2，脚本入口 [`tools/ci/check.sh`](../tools/ci/check.sh) |
 | 2 | 设备侧 `idf.py build` 的密钥门未验证 | 在装有 ESP-IDF 的机器上的一次成功构建 + 一次无密钥失败的对照 | **已随验证对象消失注销（0.0.4 批F）**：`legacy/` ESP32 固件整树删除后，仓内工作树已无 `idf.py` 可构建的对象，"固件侧改一处配置会不会撞上密钥门"这条问题不再有仓内落点；固件源码仍在 git 历史（digest 归档台账在案），若未来复活固件线再重开此条并按当时的密钥口径取证 |
 | 3 | 泄漏 API key 的提供方侧轮换未确认 | 提供方控制台里那把 key 已失效/已替换的凭据 | 仓内曾经出现过的 key 从 git 历史里抹不掉（0.0.4 批F 删除 `legacy/` 整树只清工作树，历史提交对象里 key 依旧在）；**从仓库角度能做的都做完了**（工作树已无 key 文件、文档不再复述），但"这把 key 现在还能不能用"只有提供方能回答，这一条不闭环，第 3 项就一直是敞口 |
 | 4 | IPC-T-003 的容器真跑（三方对拍第三路） | 一次 `linux/arm64` 容器里 `ipct003_dump` 与宿主输出的逐字节 diff | **三方对拍前两路已在 F5 本机过**（98d1cc2 登记）：①宿主 x86_64 dump == golden PASS；②`aarch64-unknown-linux-gnu` 交叉 check PASS，const 布局断言已在该目标求值。缺的只剩 Docker 容器一路——本机 macOS 无 Docker，**该路已接远端 CI**：ci.yml 的 `ipct003` job（540ec0f，ubuntu runner + QEMU arm64 + `bash tools/ci/ipct003.sh --strict`）远端跑绿一次，即可把 [`envelope.schema.json`](../contracts/envelope.schema.json) 里该条移入 coverage 并在本表结项 |
@@ -210,9 +210,31 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   led tick 重锚停滞期差异（妆面件）、SSID 32-octet 截断对超长注入串的字节差异（802.11 语义正确）、
   read() 契约注释 0 语义两侧未兑现（归 USB 麦真件换装批）。门禁 GATE_EXIT=0（30 PASS）+ clippy 清零。
   批K H2 件级依赖闭包 grep 门落地后 C7 约束转由门执法
+- **批K 判据上门 + 点验矩阵 + 第二形态已落库**（2026-10-10，方案 §14 批K 行 + C2/C10/C11/C12 结清，
+  ADR-0018 / ADR-0019）：**H1** 11 件两腿对拍补齐（led/relay/servo/bt/wifi/face/player/battery/charger/
+  capture/vad——腿一确定性 + 腿二裁定语义期望；env/imu 两占位格 + cognition 四件 Python 两件式记
+  不适用，不冒领 PASS）；**H2** 三门接 check.sh ⑧（⑧-a 对拍计数门含 C10 stub 反例自证、⑧-b 依赖闭包
+  grep 门 L0/L1——39 份 atom 源非 test 面零命中、⑧-c 注入面校验门显式过滤器；⑦-a 扫面扩
+  modules/*/atoms/*/）；**H3** `tools/ci/matrix.sh` 七列出数入口（FAIL=1/--strict 未跑列=2/默认如实=0；
+  `--manual --evidence` 回填契约：证据三样齐才收、不覆盖自动 FAIL 格）+ 供给自证表模板落
+  [docs/reference/供给自证表模板.md](reference/供给自证表模板.md)；**H4+C2** `rr3-pack --profile` 参数化
+  + 机型集 pin 同批 + `profiles/esp32-mini.toml` 第二形态（F-B 三格微型：capture/vad/servo，件码与
+  slots.toml 零改动）+ rrd 装载正例与 contract 形状 pin 装配演练；**H6** rr-core::runtime 本地守护
+  "起动态+喂拍+安全核触发/拒动原因"行格式定形 + 对拍用例（architecture §12.4）；**H5** 文档口径收口
+  （architecture §3 树补 rr-hal-api + 落点表四行翻已落盘、ci.yml job 步骤名改十步、tools/ci/README ⑤
+  行撤除 legacy/ 语 + ⑧ 三门补录、六份模块 README 目录树对齐、全仓复扫）。门禁直跑 GATE_EXIT=0
+  （**50 PASS**——⑧ 三门上线即全绿，十步口径）+ rustfmt/clippy 全仓清零复验。**点验矩阵首跑回执**
+  （E1 形态行；行指纹：本机直跑无容器镜像 ｜ Darwin 21.6.0 x86_64 ｜ rustc 1.99.0 ｜
+  x86_64-apple-darwin）：② xtensa 三查、③ rrd profile 24、④ rr-registry contract 38、⑤ 五 crate 两腿
+  对拍 22 条（act 6/connect 4/interact 4/power 4/sense 4）四列 PASS；① 3/4 路（本机无 Docker，归上表
+  第 4 条）、⑥ python3 3.9.6<3.11（归上表第 9 条）、⑦ E4 真板专属（归上表第 7/11 条真件敞口）三列
+  如实记未跑，FAIL=0。方案 §17 勾点（前置清单七条硬开工门、C10/C12/L-10、对拍与三门、矩阵、第二
+  形态、指纹、文档收口）与 conventions §2 批K 条目同批落库。**第 III 轮（批I→批J→批K）收官，停等**
+  ——批K 新增敞口仅两笔：C12 首条手测行待 E4 真板（⑦ 手测回填契约定形、证据模板在 docs/reference/）；
+  CP2102 进 0.0.6 §5.4 BOM 第 9 行（C11），到货前置 0.0.7 批C④⑤ 板级 round-trip
 - **下一在制品**：0.0.7（ESP32）方案拟稿——Q1–Q6 已裁、修订版 4 已落 §9，拟稿即把已裁口径收拢为可开工执行方案；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
-- **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）；八行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)，到位前不 claim 真硬件证据。采购实况（2026-10-07）：ESP32 硬件已齐、树莓派外设采购中。
+- **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；九行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)，到位前不 claim 真硬件证据。采购实况（2026-10-07）：ESP32 硬件已齐、树莓派外设采购中。
 - **0.0.8 模块内部分层立项已落档（0.0.5 §2.4 R17，2026-10-06）**：立项件
   [0.0.8 方案](process/dev/0.0.8版本洛克三号模块内部分层实施方案.md)——rr3mod
   公共骨架签名级规格（§2）+ 五模块目标目录树与迁移映射（§4）+ 批0–批6 实施序列

@@ -12,7 +12,7 @@
 | `transport/mod.rs` | trait 三件（ADR-0008）：连接侧 `Rr3TransportConn`（`rr3_send_buf` 消费缓冲、幂等 seal 后单次 `write_all`；`rr3_recv_buf` 返回所有权缓冲；对一切 `Read + Write + Send` 有统一 blanket 实现）、监听侧 `Rr3TransportListener`、端点 `Rr3TransportEndpoint`（清理残留 → bind）；两个路径常量 `RR3_UDS_PATH_DEFAULT`（`/var/run/rock3-ipc.sock`）与 `RR3_BUS_PATH_ENV`（`RR3_BUS_PATH`）。**不引 async**（裁定 1：同步线程模型，async 只进模块侧）；shm（M5）/tcp（预留）在同一签名下落地，不写半成品 |
 | `transport/uds.rs`（`#[cfg(unix)]`） | M2 唯一实现：`Rr3UdsListener`（Endpoint + Listener，`type Conn = UnixStream`——服务侧继续走 socket 专有门）与客户端入口 `rr3_connect` |
 | `lib.rs` | 对外再导出上面这些类型，并定义契约版本常量 `RR3_CONTRACT_SCHEMA_VERSION`（rr-bus 再导出它） |
-| `src/bin/ipct003_dump.rs` | IPC-T-003 跨架构对拍夹具：打印 golden 头与五种 payload 类型各一整帧的 hex（全部编译期字面量，无时钟/随机/环境依赖），末行带 `RR3_CONTRACT_SCHEMA_VERSION`；对拍入口 `tools/ci/ipct003.sh`（不进九步门，登记于 conventions.md §2） |
+| `src/bin/ipct003_dump.rs` | IPC-T-003 跨架构对拍夹具：打印 golden 头与五种 payload 类型各一整帧的 hex（全部编译期字面量，无时钟/随机/环境依赖），末行带 `RR3_CONTRACT_SCHEMA_VERSION`；对拍入口 `tools/ci/ipct003.sh`（不进门禁步序，登记于 conventions.md §2） |
 
 守护测试：`cargo test -p rr-ipc`——含 envelope 契约对齐用例、golden 向量比对，以及
 `tests/envelope_meta.rs` 那组**读 JSON 契约键**的元数据守护（128B 头长、偏移表合计、

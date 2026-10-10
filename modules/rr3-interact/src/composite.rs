@@ -278,10 +278,16 @@ mod tests {
         let r = rr3_tts_result("你好", 120);
         assert_eq!(r["played_ms"], 120);
         assert_eq!(r["chars"], 2);
+        assert_eq!(r.as_object().unwrap().len(), 2, "tts 应答两字段无加戏: {r}");
         assert_eq!(r.get("topic"), None, "应答体不带 topic");
         let r = rr3_face_result("talk", "idle");
         assert_eq!(r["expression"], "talk");
         assert_eq!(r["previous"], "idle");
+        assert_eq!(
+            r.as_object().unwrap().len(),
+            2,
+            "face 应答两字段无加戏: {r}"
+        );
         assert_eq!(r.get("topic"), None, "应答体不带 topic");
     }
 }

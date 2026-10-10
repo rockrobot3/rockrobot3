@@ -1,0 +1,61 @@
+# RockRobot3 装配单：esp32-mini 机型（F-B 桥接微型形态，0.0.5 批K R3-D6 第二形态样例）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
+# 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin，C2 判据）。
+# 形态语义（docs/design/模块设计索引.md §10 F-B 行，理由以该行为准）：三格微型形态，
+# 经桥上灌——只启用 audio.capture / audio.vad（rr3-sense）与 act.servo（rr3-act）；
+# 不启用 net.*（桥就是它的链路）、cognition.*（认知在 host）、ui.face/audio.playback
+# （无屏无喇叭）。证明的命题："裁剪 = 改数据"——本文件只加数据，件码、对外主题、
+# contracts/slots.toml 一律零改动（功能守恒红线）。
+# 板侧必须自己守住：限位 / 时限 / 饱和通告在板侧跑（桥断仍守护——"经桥不等于把安全
+# 托付给网络"的硬判据，见模块设计索引 §10）。板侧真跑的触发条件 = 0.0.7 轻承载档
+# 真板（ESP32-S3 硬件已齐，0.0.6 §5.4 BOM），本版只做装配演练
+# （rrd profile.rs 的 rr3_profile_boot_inputs 正例 + contract.rs 形状 pin）。
+
+schema_version = 2
+
+# [os] 段缺省：route 轴（distro | buildroot）是 Linux 底座镜像路线，rtos 档不适用
+# （rrd 装载对 [os] 只收不读，architecture.md §4.3 注记）。
+
+[platform]
+# 平台档位（ADR-0018 修订 1 三档）：ESP32 跑 RTOS 底座、经桥上主承载层 = rtos。
+tier = "rtos"
+
+[supplies]
+# 平台供给声明（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）。
+# watchdog_feeder = "rr-core"：板侧无 rrd，平台看门狗由 rr-core::runtime 运行环喂
+# （本地守护输出格式 = 批K H6）。watchdog_timeout_ms 平台兜底宽于模块级
+# health.watchdog_timeout_ms = 10000；时序三位为**声明预算位**，与 0.0.7 板侧
+# 生产真值的对账归点验矩阵轻承载档行（architecture §12.6 / tools/ci/matrix.sh）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rr-core"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[bindings]
+# 格位 → 件。三格微型形态恰好三绑定；基础层由基座内建承载，不在此绑定。
+"act.servo" = "rr3-act"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+
+# [hardware] 段缺省：九键描述符是宿主 Linux 侧语义（alsa 设备名 / gpio 控制器号 /
+# 网络接口名，rr-hal descriptor.rs C4 闭合表），板侧物理绑定归 0.0.7 批G/批D1 的
+# 描述符装载——进位时同批改 contract.rs 的 esp32-mini pin 与 0.0.7 判据。
+
+[enabled_slots]
+# 模块 → 本形态启用的格位集合。裁剪自检三问（模块设计索引 §10）逐条在案：
+# ① 被裁格里无人依赖（net.* 桥即链路、cognition.* 认知在 host、ui/audio.playback 无屏无喇叭）；
+# ② 被裁主题的申报面批J C14 已收（asr/text、dialog/turn 置 retired，订阅撤申报）；
+# ③ 安全核仍在板侧（act 反射环 rr-core::control 可达，不托付桥）。
+rr3-act = ["act.servo"]
+rr3-sense = ["audio.capture", "audio.vad"]
+
+[slots]
+# 本板物理在位格位声明（缺格三源合一第一源）。三格全在位，升序排列；
+# 基础层恒在位，不进本声明。
+present = [
+    "act.servo",
+    "audio.capture",
+    "audio.vad",
+]

@@ -18,6 +18,8 @@
 //! [`runtime`] 模块（批D₂）：执行环（连接→注册→心跳→分发→节拍）的连接态
 //! 语义 [`runtime::Rr3LinkState`] / 心跳拍点调度 [`runtime::Rr3ModuleRuntime`] /
 //! 收帧分发分类 [`runtime::rr3_dispatch_class`]；常量与寻址先行落位（批D₁）。
+//! 自足档本地守护输出行（起动态/喂拍/安全核触发-拒动，UART/RTT 行文法）落
+//! [`runtime::Rr3GuardBuf`]（0.0.5 批K H6）。
 //! 控制原语与安全核切片落 [`control`] 模块（批D₃）：限速门 / 低电边沿 / 饱和
 //! 检测 / 限位钳位，纯函数 + 注入时钟（裁定 5）。
 //!

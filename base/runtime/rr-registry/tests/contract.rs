@@ -942,8 +942,12 @@ fn default_profile_binds_module_slots_to_real_modules() {
     profile_files.sort();
     assert_eq!(
         profile_files,
-        vec!["default.toml".to_string(), "distro.toml".to_string()],
-        "profiles/ 机型集合漂移"
+        vec![
+            "default.toml".to_string(),
+            "distro.toml".to_string(),
+            "esp32-mini.toml".to_string(),
+        ],
+        "profiles/ 机型集合漂移（新增机型须同批改本 pin 与该机型的形状测试，C2 批K）"
     );
 
     let text = std::fs::read_to_string(profiles.join("default.toml")).unwrap();
@@ -1252,6 +1256,196 @@ fn distro_profile_binds_exactly_the_body_layer() {
                 "[enabled_slots] 引用表外格位 {s}"
             );
         }
+    }
+}
+
+/// F-B 桥接微型形态（0.0.5 批K R3-D6 / H4+C2）：`profiles/esp32-mini.toml` 第二形态
+/// 装配自洽 pin。证命题："裁剪 = 改数据"——件码、对外主题、slots.toml 零改动，本文件只加数据。
+/// 三格微型形态：恰好 audio.capture/audio.vad → rr3-sense、act.servo → rr3-act；
+/// 不启用 net.*（桥即链路）与 cognition.*（认知在 host，理由 = 模块设计索引 §10 F-B 行）；
+/// tier = rtos 且全部引用格的 tier_scope 含 rtos（L-10 的 CI 全集层同判，rrd 装载门为运行期侧）；
+/// [slots].present 升序且恰为三格；[hardware] 缺省（九键是宿主侧语义，板侧描述符归
+/// 0.0.7 批G/批D1，进位同批改本断言）；看门狗在板且由板侧运行环喂（桥断仍守护）。
+#[test]
+fn esp32_mini_profile_binds_bridged_minimal_shape() {
+    let root = repo_root();
+    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let manifests: std::collections::BTreeMap<String, toml::Value> =
+        module_manifest_values().into_iter().collect();
+    let text = std::fs::read_to_string(root.join("profiles/esp32-mini.toml")).unwrap();
+    let v: toml::Value = toml::from_str(&text).expect("esp32-mini.toml 必须可解析");
+
+    assert_eq!(
+        v.get("schema_version").and_then(toml::Value::as_integer),
+        Some(2),
+        "esp32-mini schema_version 漂移"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some("rtos"),
+        "esp32-mini 档位漂移（F-B = rtos 经桥档）"
+    );
+    // 板侧必须自己守住（模块设计索引 §10 F-B 行）：看门狗在板、由板侧运行环喂——
+    // "经桥不等于把安全托付给网络"的硬判据落在装配单数据上
+    let supplies = v
+        .get("supplies")
+        .and_then(toml::Value::as_table)
+        .expect("esp32-mini 缺 [supplies]");
+    assert_eq!(
+        supplies
+            .get("watchdog_present")
+            .and_then(toml::Value::as_bool),
+        Some(true),
+        "F-B 看门狗必须在板（桥断仍守护）"
+    );
+    assert_eq!(
+        supplies
+            .get("watchdog_feeder")
+            .and_then(toml::Value::as_str),
+        Some("rr-core"),
+        "F-B 看门狗由板侧运行环（rr-core::runtime）喂，不是 rrd"
+    );
+    assert!(
+        v.get("hardware").is_none(),
+        "esp32-mini 出现 [hardware] 段（板侧描述符进位须同批改本 pin 与 0.0.7 判据）"
+    );
+
+    // [bindings] 恰好三格——微型形态的"裁剪"是显式集合，多绑少绑都算漂移
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [bindings]");
+    let mut bound: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for (slot, provider) in bindings {
+        let provider = provider
+            .as_str()
+            .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
+        assert!(
+            table.rr3_slot_table_contains(slot),
+            "bindings 引用表外格位 {slot}"
+        );
+        assert_ne!(
+            table.rr3_slot_table_layer(slot).unwrap(),
+            "base",
+            "基础层格位 {slot} 由基座内建承载，不得绑定模块"
+        );
+        let m = manifests
+            .get(provider)
+            .unwrap_or_else(|| panic!("bindings.{slot} 绑到不在册模块 {provider}"));
+        assert!(
+            str_list(m, "provides.capabilities")
+                .iter()
+                .any(|c| c == slot),
+            "{provider} 的 manifest 未 provides 被绑格位 {slot}"
+        );
+        bound.insert(slot.as_str(), provider);
+    }
+    assert_eq!(
+        bound,
+        std::collections::BTreeMap::from([
+            ("act.servo", "rr3-act"),
+            ("audio.capture", "rr3-sense"),
+            ("audio.vad", "rr3-sense"),
+        ]),
+        "F-B 三格绑定面漂移（裁剪是显式集合，模块设计索引 §10）"
+    );
+
+    // [enabled_slots]：恰两模块、格位是 provides 的子集（裁剪只能收窄不能自造）、
+    // 不启用 net.*/cognition.*
+    let enabled_slots = v
+        .get("enabled_slots")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [enabled_slots]");
+    assert_eq!(
+        enabled_slots.keys().map(|k| k.as_str()).collect::<Vec<_>>(),
+        vec!["rr3-act", "rr3-sense"],
+        "F-B 启用模块面漂移（不启用 connect/interact/power/brain）"
+    );
+    for (module, face) in enabled_slots {
+        let slots: Vec<String> = face
+            .as_array()
+            .expect("enabled_slots 值必须是数组")
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .map(String::from)
+            .collect();
+        assert!(!slots.is_empty(), "{module} enabled_slots 不应为空");
+        let caps = str_list(&manifests[module.as_str()], "provides.capabilities");
+        for s in &slots {
+            assert!(
+                caps.iter().any(|c| c == s),
+                "{module} enabled_slots 格位 {s} 不在其 manifest provides（裁剪只能收窄，不能自造）"
+            );
+            assert!(
+                table.rr3_slot_table_contains(s),
+                "[enabled_slots] 引用表外格位 {s}"
+            );
+            assert!(
+                !s.starts_with("net.") && !s.starts_with("cognition."),
+                "F-B 不启用 {s}（net.* 桥即链路、cognition.* 认知在 host——模块设计索引 §10）"
+            );
+        }
+    }
+    // 每条 binding 都被 enabled_slots 认领（装配单结构自洽，与 rrd 装载门同判）
+    for (slot, module) in &bound {
+        let claimed = enabled_slots
+            .get(*module)
+            .and_then(toml::Value::as_array)
+            .is_some_and(|a| a.iter().filter_map(toml::Value::as_str).any(|s| s == *slot));
+        assert!(claimed, "binding {slot}={module} 未被 enabled_slots 认领");
+    }
+
+    // [slots].present：恰为三格、升序（确定性）、全部在册非 base
+    let present: Vec<String> = v
+        .get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("缺 [slots].present")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .map(String::from)
+        .collect();
+    assert_eq!(
+        present,
+        vec![
+            "act.servo".to_string(),
+            "audio.capture".to_string(),
+            "audio.vad".to_string(),
+        ],
+        "F-B 在位声明漂移（恰三格、升序）"
+    );
+    for s in &present {
+        assert!(
+            table.rr3_slot_table_contains(s)
+                && table.rr3_slot_table_layer(s).as_deref() != Some("base"),
+            "[slots].present 格位 {s} 必须在册且非 base"
+        );
+    }
+
+    // L-10 tier↔tier_scope（CI 全集层同判）：F-B 引用的每一格其 tier_scope 必须含 rtos。
+    // 三处引用（bindings / enabled_slots / present）合并去重，与 rrd 装载门同口径。
+    let mut referenced: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for s in bound.keys() {
+        referenced.insert((*s).to_string());
+    }
+    for face in enabled_slots.values() {
+        let slots = face.as_array().expect("enabled_slots 值必须是数组");
+        referenced.extend(
+            slots
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(String::from),
+        );
+    }
+    referenced.extend(present.iter().cloned());
+    for slot in &referenced {
+        let scope = table.rr3_slot_table_tier_scope(slot).unwrap_or_default();
+        assert!(
+            scope.iter().any(|t| t == "rtos"),
+            "esp32-mini（rtos 档）引用格 {slot} 的 tier_scope = {scope:?} 不含 rtos（L-10 交叉校验）"
+        );
     }
 }
 
