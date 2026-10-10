@@ -276,10 +276,24 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   （validation→md-5 拉入，类型面用不到——下次触碰该工程同批处理）；ELF appdesc 三要素核验
   未自动化进 esp-uart-echo-check.sh + 上游 0.1/0.2 idf_ver 误读 MMU 页配置键（装饰性，
   无参宏同源字段一致）
+- **批D1 层③ 板上实测收官**（2026-10-10，提交 `f72c0d4`，双远端三端核对一致；
+  十步门禁直跑 GATE_EXIT=0（52 PASS）+ 专用门绿）：哨兵定稿两修正——reader/心跳
+  线程栈 8KB→16KB 根因实锤（serde_json + json! + FrameBuf 峰值溢出踩堆 → std Mutex
+  惰性 pthread 初始化崩，EXCVADDR=0xb；16KB 钉为运行下限）+ harness parse_upstream
+  method 门改 Option<String>（Response 帧合法无 method，原强制门误杀 round-trip
+  应答）+ 4 行诊断插桩清理。板上对跑 HARNESS_EXIT=0（14 PASS / 0 FAIL：①注册
+  ②8 拍心跳 195–204ms 无停摆 ③round-trip id=9001 回显 echo 逐字对拍）；三点 RAM：
+  boot free=295672B / registered min_free=269476B / roundtrip min_free=250620B ≈
+  启动堆 85% >> 20% 阈值——**D1→D2 不触发，层③ 必达全绿**（实测报告回填
+  [tools/espidf-sentinel/README.md](../tools/espidf-sentinel/README.md)）；附实证
+  harness 退场后心跳 5s 超时 → mark_down → esp_restart → 重注册，Down 转移路径
+  真板跑通。敞口一笔：UART 持续流开口帧同步（CP2102 驱动输入缓冲残留上轮帧字节 +
+  `Rr3UartConn::open` 不 tcflush → harness 开口 BadMagic，复跑需复位+清缓冲组合
+  时序）——**批E rr3-bridge 同题**，桥件开口路径按此处置
 - **下一在制品**：0.0.7（ESP32）执行中——批A' 工具链绿（2026-10-07）→ 批B 层① 绿（rr-ipc
   no_std 化 + ipct003 四路）→ 批C 宿主侧（`46edb3c`）→ 批C④⑤ 板级收官（`6d3a1ee`，层② 必达
-  全绿）；余批D1/D2 哨兵模块（rr-core::runtime 上板 + RAM 实测数必记，经典 ESP32 不可达即批D2
-  采购 S3 移植续做）与批E rr3-bridge 中继 + 跨芯片 e2e（§9.3/§9.4 runbook 在案）；
+  全绿）→ 批D1 层③ 板上实测收官（`f72c0d4`，HARNESS_EXIT=0 + 三点 RAM 实测，D1→D2 不触发）；
+  余批E rr3-bridge 中继 + 跨芯片 e2e（§9.4 runbook 在案；开口帧同步敞口见上批D1 bullet）；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；九行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)，到位前不 claim 真硬件证据。采购实况（2026-10-07；2026-10-10 增补）：ESP32 硬件已齐——CP2102 已到位并已用于批C④⑤ 板级
 实测（见上两板收口批 bullet）；树莓派外设采购中。
