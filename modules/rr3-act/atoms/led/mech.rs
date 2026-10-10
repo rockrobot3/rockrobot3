@@ -153,4 +153,81 @@ mod tests {
         gpio.set(level).unwrap();
         assert!(!gpio.rr3_sim_gpio_level(), "off 必须落灭");
     }
+
+    // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
+    // 腿一·确定性：同一效果/时钟序列喂两台新状态机，输出序列逐拍相等（无
+    // 时钟、无线程，范式 = rr-core `same_control_graph_beat_for_beat_identical`）。
+    // 腿二·正确性：期望值引自裁定语义（act 册 §8 led 行：翻转序列白名单、
+    // 半周期收敛 1、off 停翻），不由件自产。
+
+    /// 腿一：效果序列 [Blink, On, Off] + 逐 ms 时钟推两台新状态机，电平轨迹逐拍相等
+    #[test]
+    fn parity_leg1_led_output_train_is_deterministic() {
+        fn run() -> Vec<Option<bool>> {
+            let mut led = Rr3Led::rr3_led_new(40); // 半周期 20ms
+            let mut out = Vec::new();
+            let (_, _, level) = led.rr3_led_apply(1_000, Rr3LedEffect::Blink);
+            out.push(Some(level));
+            for k in 1..=6u32 {
+                out.push(rr3_led_tick(1_000 + 20 * u64::from(k), &mut led));
+            }
+            let (_, _, level) = led.rr3_led_apply(1_200, Rr3LedEffect::On);
+            out.push(Some(level));
+            for k in 1..=3u32 {
+                out.push(rr3_led_tick(1_200 + 20 * u64::from(k), &mut led));
+            }
+            let (_, _, level) = led.rr3_led_apply(1_260, Rr3LedEffect::Off);
+            out.push(Some(level));
+            out.push(rr3_led_tick(1_280, &mut led));
+            out
+        }
+        assert_eq!(run(), run(), "同输入两跑逐拍相等（腿一·确定性）");
+    }
+
+    /// 腿二：期望序列按裁定白名单逐点断言——亮相起步、整点翻、早到不翻、
+    /// 半周期收敛 1、off 停翻
+    #[test]
+    fn parity_leg2_led_matches_ruling_semantics() {
+        // 半周期收敛：period=1 → half=1；period=3 → 3/2=1（整数除再保底）
+        let mut led = Rr3Led::rr3_led_new(1);
+        let (_, _, level) = led.rr3_led_apply(0, Rr3LedEffect::Blink);
+        assert!(level, "裁定：blink 从亮相起步，不等下一半拍");
+        assert_eq!(
+            rr3_led_tick(1, &mut led),
+            Some(false),
+            "半周期=1：下一 ms 整点即翻灭"
+        );
+        let mut led = Rr3Led::rr3_led_new(3);
+        let _ = led.rr3_led_apply(10, Rr3LedEffect::Blink);
+        assert_eq!(
+            rr3_led_tick(11, &mut led),
+            Some(false),
+            "半周期收敛 1（3/2=1）"
+        );
+        // 白名单序列：亮相亮 → 半周期整点灭 → 再半周期亮；早到恒不翻
+        let mut led = Rr3Led::rr3_led_new(40); // half=20
+        let (_, _, level) = led.rr3_led_apply(100, Rr3LedEffect::Blink);
+        assert!(level, "亮相亮（白名单第 0 拍）");
+        assert_eq!(rr3_led_tick(119, &mut led), None, "未到半周期不翻");
+        assert_eq!(
+            rr3_led_tick(120, &mut led),
+            Some(false),
+            "整点翻灭（白名单第 1 拍）"
+        );
+        assert_eq!(
+            rr3_led_tick(140, &mut led),
+            Some(true),
+            "再半周期翻亮（白名单第 2 拍）"
+        );
+        // off 停翻：切 off 后 tick 恒 None、电平归灭
+        let (_, _, level) = led.rr3_led_apply(140, Rr3LedEffect::Off);
+        assert!(!level, "off 立即落灭");
+        for t in [141u64, 160, 161] {
+            assert_eq!(
+                rr3_led_tick(t, &mut led),
+                None,
+                "off 后 tick 恒 None（t={t}）"
+            );
+        }
+    }
 }

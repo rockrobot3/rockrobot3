@@ -344,4 +344,88 @@ state_period_ms = 0
         assert_eq!(cfg.battery.sample_period_ms, 1, "0 周期钳到 1ms");
         assert_eq!(cfg.charger.state_period_ms, 1, "0 周期钳到 1ms");
     }
+
+    // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
+    // battery/charger 的载荷 body fn 是 composite 私有（批I P-7 上移承载层），
+    // 对拍用例随载荷落本文件（对拍计数门扫 atom mech.rs + 模块 composite.rs 两处）。
+
+    #[test]
+    fn parity_leg1_battery_output_train_is_deterministic() {
+        // 腿一·确定性：同一电压序列喂两跑，(state 体, low 触发) 输出轨迹逐拍相等
+        fn run() -> Vec<(Value, bool)> {
+            let mut edge = Rr3LowEdge::rr3_low_edge_new(3300);
+            [3700u16, 3310, 3300, 3290, 3295, 3400, 3299]
+                .iter()
+                .map(|&mv| {
+                    let st = Rr3BatteryState {
+                        voltage_mv: mv,
+                        percent: 50,
+                        charging: false,
+                    };
+                    let low = edge.rr3_low_edge_cross(mv);
+                    (rr3_battery_state_body(1, st), low)
+                })
+                .collect()
+        }
+        assert_eq!(run(), run(), "同输入序列两跑逐拍相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_battery_matches_ruling_semantics() {
+        // 腿二·正确性：低电边沿裁定语义独立重写（真值 = rr-core Rr3LowEdge）
+        let mut e = Rr3LowEdge::rr3_low_edge_new(3300);
+        assert!(!e.rr3_low_edge_cross(3301), "严格大于阈值：不触发");
+        assert!(e.rr3_low_edge_cross(3300), "等号算低：v == threshold 触发");
+        assert!(!e.rr3_low_edge_cross(3290), "段内不重发（武装已解除）");
+        assert!(!e.rr3_low_edge_cross(3300), "段内等号也不重发");
+        assert!(!e.rr3_low_edge_cross(3310), "回充不返回 true（只是再武装）");
+        assert!(e.rr3_low_edge_cross(3299), "再武装后再次越阈才再发");
+        // state 体四字段、low 体三必填无加戏（schema additionalProperties=false）
+        let v = rr3_battery_state_body(9, st(3700, 50));
+        assert_eq!(v["seq"], 9);
+        assert_eq!(v["voltage_mv"], 3700);
+        assert_eq!(v["percent"], 50);
+        assert_eq!(v["charging"], false);
+        assert_eq!(v.as_object().unwrap().len(), 4, "state 四字段: {v}");
+        let low = rr3_battery_low_body(1, st(3300, 10));
+        assert_eq!(low["percent"], 10);
+        assert_eq!(low["voltage_mv"], 3300);
+        assert_eq!(low.as_object().unwrap().len(), 3, "low 三必填无加戏: {low}");
+    }
+
+    #[test]
+    fn parity_leg1_charger_output_train_is_deterministic() {
+        // 腿一·确定性：同一 charging 派生序列两跑，(seq, charging) 流逐拍相等
+        fn run() -> Vec<(u64, bool)> {
+            let mut seq = 0;
+            [true, true, false, false, true]
+                .iter()
+                .map(|&charging| {
+                    seq += 1;
+                    (
+                        seq,
+                        rr3_charger_state_body(seq, charging)["charging"]
+                            .as_bool()
+                            .unwrap(),
+                    )
+                })
+                .collect()
+        }
+        assert_eq!(run(), run(), "同输入序列两跑逐拍相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_charger_matches_ruling_semantics() {
+        // 腿二·正确性：seq 本流自计数（与 battery/state 的 seq 独立）+ 两字段体
+        // + 派生语义（charging 位来自最近一次 battery 读数，body 原样透传）
+        let v = rr3_charger_state_body(3, true);
+        assert_eq!(v["seq"], 3);
+        assert_eq!(v["charging"], true, "charging 位是 battery 读数的派生透传");
+        assert_eq!(v.as_object().unwrap().len(), 2, "两字段不加戏: {v}");
+        assert_ne!(
+            rr3_charger_state_body(1, false)["charging"],
+            rr3_charger_state_body(2, true)["charging"],
+            "派生值随读数变，不受 seq 影响"
+        );
+    }
 }

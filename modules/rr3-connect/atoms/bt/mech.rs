@@ -167,4 +167,50 @@ mod tests {
         assert!(s.rr3_bt_power_off());
         assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Off, "非法拒绝后合法链路仍通");
     }
+
+    // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
+    // 腿一·确定性：§8 设计行"八种事件序列（含 connected 直接断电）"喂两台新
+    // 状态机，(转移结果, 相位) 轨迹逐拍相等。腿二·正确性：期望值引自 connect
+    // 册 §2 转移矩阵裁定（合法转移必成、非法拒绝且状态不动、同态重复转移拒绝）。
+
+    /// 腿一：八事件序列（power_on/power_on/link_up/link_up/link_down/link_down/
+    /// power_off/同态断电）两跑轨迹相等
+    #[test]
+    fn parity_leg1_bt_transition_train_is_deterministic() {
+        fn run() -> Vec<(bool, Rr3BtPhase)> {
+            let mut s = Rr3BtState::rr3_bt_state_new(false);
+            // tuple 元素按书写顺序求值：先转移、后读相位
+            let out = vec![
+                (s.rr3_bt_power_on(), s.rr3_bt_phase()),
+                (s.rr3_bt_power_on(), s.rr3_bt_phase()),
+                (s.rr3_bt_link_up(), s.rr3_bt_phase()),
+                (s.rr3_bt_link_up(), s.rr3_bt_phase()),
+                (s.rr3_bt_link_down(), s.rr3_bt_phase()),
+                (s.rr3_bt_link_down(), s.rr3_bt_phase()),
+                (s.rr3_bt_power_off(), s.rr3_bt_phase()),
+                (s.rr3_bt_power_off(), s.rr3_bt_phase()),
+            ];
+            out
+        }
+        assert_eq!(run(), run(), "同输入两跑逐拍相等（腿一·确定性）");
+    }
+
+    /// 腿二：转移矩阵裁定逐点断言——同态重复拒绝、connected 直接断电拒绝
+    /// （须先 link_down，不 fake"连着还能静默关"）
+    #[test]
+    fn parity_leg2_bt_matches_transition_matrix() {
+        let mut s = Rr3BtState::rr3_bt_state_new(false);
+        assert!(s.rr3_bt_power_on(), "Off→Discoverable 合法");
+        assert!(!s.rr3_bt_power_on(), "同态重复上电拒绝");
+        assert!(s.rr3_bt_link_up(), "Discoverable→Connected 合法");
+        assert!(
+            !s.rr3_bt_power_off(),
+            "connected 直接断电拒绝（§8 设计行边界：须先 link_down）"
+        );
+        assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Connected, "拒绝后状态不动");
+        assert!(s.rr3_bt_link_down(), "Connected→Discoverable 合法");
+        assert!(!s.rr3_bt_link_down(), "同态重复离链拒绝");
+        assert!(s.rr3_bt_power_off(), "Discoverable→Off 合法");
+        assert_eq!(s.rr3_bt_phase(), Rr3BtPhase::Off);
+    }
 }

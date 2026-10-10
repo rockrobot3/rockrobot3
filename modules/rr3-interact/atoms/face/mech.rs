@@ -371,4 +371,63 @@ mod tests {
         assert_eq!(f.rr3_face_end_talk(), "idle", "挂起态已被显式指令打断");
         assert_eq!(f.rr3_face_set("blink").unwrap(), ("blink", "idle"));
     }
+
+    // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
+    // 腿一·确定性：§8 设计行"set → begin_talk → set(listen) → end_talk"权威序
+    // 序列喂两台新表情机，(调用结果, 相位, 帧指针轨迹) 逐拍相等。腿二·正确性：
+    // 期望值引自裁定语义（interact 册 §2 权威序：挂起期被显式点名则挂起作废、
+    // end_talk 回默认态、连续 begin 幂等）+ §5 载荷腿（应答体两字段，
+    // additionalProperties=false 口径——形状断言在承载层 args_and_result_shapes，
+    // 此处钉机制侧的转移与帧轨迹）。
+
+    /// 腿一：权威序序列两跑轨迹相等
+    #[test]
+    fn parity_leg1_face_authority_order_train_is_deterministic() {
+        fn run() -> Vec<(&'static str, &'static str, usize)> {
+            let mut f = Rr3Face::default();
+            let mut out = Vec::new();
+            let (cur, prev) = f.rr3_face_set("happy").unwrap();
+            out.push((cur, prev, f.rr3_face_tick().1));
+            out.push((f.rr3_face_begin_talk(), "", f.rr3_face_tick().1));
+            let (cur, prev) = f.rr3_face_set("listen").unwrap();
+            out.push((cur, prev, f.rr3_face_tick().1));
+            let back = f.rr3_face_end_talk();
+            out.push((back, "", f.rr3_face_tick().1));
+            out
+        }
+        assert_eq!(run(), run(), "同输入两跑逐拍相等（腿一·确定性）");
+    }
+
+    /// 腿二：权威序裁定逐点断言——显式点名打断挂起、end_talk 回 idle、
+    /// 嵌套 begin 幂等、未 begin 就 end 回 idle（§8 边界集）
+    #[test]
+    fn parity_leg2_face_matches_authority_order() {
+        // 挂起期被显式点名 → 挂起作废 → end_talk 回默认态 idle
+        let mut f = Rr3Face::default();
+        f.rr3_face_set("happy").unwrap();
+        f.rr3_face_begin_talk();
+        f.rr3_face_set("listen").unwrap();
+        assert_eq!(
+            f.rr3_face_end_talk(),
+            "idle",
+            "裁定：挂起被点名打断后回默认态"
+        );
+        // 连续两次 begin（幂等）：不覆盖挂起态
+        let mut g = Rr3Face::default();
+        g.rr3_face_set("think").unwrap();
+        assert_eq!(g.rr3_face_begin_talk(), "think");
+        assert_eq!(g.rr3_face_begin_talk(), "think", "嵌套 begin 幂等");
+        assert_eq!(g.rr3_face_end_talk(), "think", "挂起态未被嵌套覆盖");
+        // 未 begin 就 end：回 idle 且无 panic（§8 边界）
+        let mut h = Rr3Face::default();
+        assert_eq!(h.rr3_face_end_talk(), "idle", "未 begin 就 end 回 idle");
+        // 双帧态回绕 + 换态归零（§8 帧推进行）
+        let mut k = Rr3Face::default();
+        k.rr3_face_set("blink").unwrap();
+        assert_eq!(k.rr3_face_tick().1, 0);
+        assert_eq!(k.rr3_face_tick().1, 1);
+        assert_eq!(k.rr3_face_tick().1, 0, "双帧态到尾回卷");
+        k.rr3_face_set("turn").unwrap();
+        assert_eq!(k.rr3_face_tick().1, 0, "换态归零");
+    }
 }

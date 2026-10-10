@@ -93,7 +93,7 @@
 
 | 面 | 输入序列 | 期望值来源 | 边界集 | 现状 |
 |---|---|---|---|---|
-| dialog 轮次 | vad/pcm 时间戳序列（起音→静音→超时） | 裁定语义（**判停归 sense**、8000 ms 封轮、一轮一流水） | 封轮 / 尾长差 1 拍 / 连续两轮 / 云 RTT 与封轮的关系 | ⚠️ 实况打折：`tests/test_dialog.py` 有 7 条，但封轮那条把 `max_utterance_ms` **设成 0** 来触发（没有测 8000 这个名义边界）；无尾长差 1 拍用例；"连续两轮"只测了缓冲重置；云 RTT 与封轮的关系**零覆盖**（B-3）。且这些用例**在九步门外**——`check.sh` 不含 Python，`.gitcode/workflows/ci.yml` 虽有 `brain-unittest` 双矩阵 job，atomgit 的 Actions 从不执行 |
+| dialog 轮次 | vad/pcm 时间戳序列（起音→静音→超时） | 裁定语义（**判停归 sense**、8000 ms 封轮、一轮一流水） | 封轮 / 尾长差 1 拍 / 连续两轮 / 云 RTT 与封轮的关系 | ⚠️ 实况打折：`tests/test_dialog.py` 有 7 条，但封轮那条把 `max_utterance_ms` **设成 0** 来触发（没有测 8000 这个名义边界）；无尾长差 1 拍用例；"连续两轮"只测了缓冲重置；云 RTT 与封轮的关系**零覆盖**（B-3）。且这些用例**在门禁步序外**——`check.sh` 不含 Python，`.gitcode/workflows/ci.yml` 虽有 `brain-unittest` 双矩阵 job，atomgit 的 Actions 从不执行 |
 | intent 映射 | 关键词集 + 空文本 | 舵机角常量表（45/90/135） | 不匹配 / 多关键词 | 有 |
 | 载荷两腿 | `intent/result` 构造 | `contracts/topics.toml` + act 侧执行器对 `actions[]` 的接受形状 | 越权 topic（act 必须拒） | ⚠️ 跨单元断言缺 |
 

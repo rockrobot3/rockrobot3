@@ -5,7 +5,8 @@
 //!   `rrd`、`rr3-ctl`；rust 模块 `rr3-modules/<name>/{bin,manifest.toml}`；
 //!   python 模块 `rr3-modules/<name>/{pkg/,manifest.toml}`（`pkg/` = 包树，
 //!   如 `rr3_brain/`；entry 装机产物是打包器生成的 shim，见下）；
-//! - `--repo` 仓根：`profiles/distro.toml`、`contracts/{topics,slots}.toml`、
+//! - `--repo` 仓根：`profiles/<name>.toml`（`--profile` 选机型，缺省 distro——H4/C2 批K
+//!   参数化，出包链不再只认一份装配单）、`contracts/{topics,slots}.toml`、
 //!   `modules/<name>/config.toml`（config 是源真值，不是构建产物，不进注入格式）。
 //!
 //! staging 装配是纯 Rust（macOS 可跑可单测），deb 布局：
@@ -53,11 +54,15 @@ pub struct Rr3PackConfig {
     /// deb Architecture 字段。缺省 arm64（出厂目标 aarch64）；CI 容器冒烟按
     /// `dpkg --print-architecture` 传 amd64——架构跟着真产物走，不硬编码。
     arch: String,
+    /// 装机装配单名（不带 .toml）。缺省 distro 不破坏既有调用方（CI distro-smoke、
+    /// pack-arm64.sh）；换机型 = `--profile <name>`，staging 装机位 profiles/<name>.toml
+    /// 零改写落位——出包链不再只认 distro 一份（H4/C2，0.0.5 批K）。
+    profile: String,
     stage_only: bool,
 }
 
 fn usage() -> String {
-    "用法: rr3-pack --payload <dir> --repo <dir> --out <file.deb> [--arch <arch>] [--stage-only]\n说明: --payload 是两轨同源的注入产物目录（rrd、rr3-ctl；rust 模块 rr3-modules/<name>/{bin,manifest.toml}，python 模块 rr3-modules/<name>/{pkg/,manifest.toml}）；--repo 是仓根（读 profiles/distro.toml、contracts/{topics,slots}.toml、modules/<name>/config.toml）。--arch 缺省 arm64（出厂目标），容器冒烟传本机 dpkg 架构。--stage-only 只落 staging 树不调 dpkg-deb（macOS 本机无 dpkg，装配单测/演练用）。".to_string()
+    "用法: rr3-pack --payload <dir> --repo <dir> --out <file.deb> [--profile <name>] [--arch <arch>] [--stage-only]\n说明: --payload 是两轨同源的注入产物目录（rrd、rr3-ctl；rust 模块 rr3-modules/<name>/{bin,manifest.toml}，python 模块 rr3-modules/<name>/{pkg/,manifest.toml}）；--repo 是仓根（读 profiles/<name>.toml、contracts/{topics,slots}.toml、modules/<name>/config.toml）。--profile 选装机装配单（缺省 distro 不破坏既有调用方；H4/C2 批K：出包链不再只认一份装配单，换板只改装配单）。--arch 缺省 arm64（出厂目标），容器冒烟传本机 dpkg 架构。--stage-only 只落 staging 树不调 dpkg-deb（macOS 本机无 dpkg，装配单测/演练用）。".to_string()
 }
 
 fn rr3_need(args: &[String], i: usize, flag: &str) -> Result<String, String> {
@@ -74,6 +79,7 @@ pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
         repo: PathBuf::new(),
         out: PathBuf::new(),
         arch: "arm64".to_string(),
+        profile: "distro".to_string(),
         stage_only: false,
     };
     let mut i = 0;
@@ -89,6 +95,10 @@ pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
             }
             "--out" => {
                 cfg.out = PathBuf::from(rr3_need(args, i, "--out")?);
+                i += 2;
+            }
+            "--profile" => {
+                cfg.profile = rr3_need(args, i, "--profile")?;
                 i += 2;
             }
             "--arch" => {
@@ -298,13 +308,14 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     }
     let names = rr3_module_names(&cfg.payload)?;
     // ---- 仓内数据真值（缺席点名）----
-    let profile_src = cfg.repo.join("profiles").join("distro.toml");
+    let profile_name = format!("{}.toml", cfg.profile);
+    let profile_src = cfg.repo.join("profiles").join(&profile_name);
     let topics_src = cfg.repo.join("contracts").join("topics.toml");
     let slots_src = cfg.repo.join("contracts").join("slots.toml");
     for p in [&profile_src, &topics_src, &slots_src] {
         if !p.is_file() {
             return Err(format!(
-                "仓内文件缺席: {}（--repo 须指向仓根：profiles/distro.toml 与 contracts/{{topics,slots}}.toml 是装机正门的真值）",
+                "仓内文件缺席: {}（--repo 须指向仓根：profiles/{profile_name} 与 contracts/{{topics,slots}}.toml 是装机正门的真值）",
                 p.display()
             ));
         }
@@ -341,8 +352,8 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         RR3_SERVICE_UNIT,
     )
     .map_err(|e| format!("写 rrd.service 失败: {e}"))?;
-    fs::copy(&profile_src, root.join("profiles/distro.toml"))
-        .map_err(|e| format!("复制 distro.toml 失败: {e}"))?;
+    fs::copy(&profile_src, root.join("profiles").join(&profile_name))
+        .map_err(|e| format!("复制 {profile_name} 失败: {e}"))?;
     fs::copy(&topics_src, root.join("contracts/topics.toml"))
         .map_err(|e| format!("复制 topics.toml 失败: {e}"))?;
     fs::copy(&slots_src, root.join("contracts/slots.toml"))
@@ -608,6 +619,7 @@ mod tests {
                 repo: repo.to_path_buf(),
                 out: out.clone(),
                 arch: "arm64".to_string(),
+                profile: "distro".to_string(),
                 stage_only: true,
             },
             out,
@@ -852,6 +864,38 @@ mod tests {
         assert!(e.contains("rr3-brain") && e.contains("pkg"), "{e}");
     }
 
+    /// H4/C2（0.0.5 批K）：--profile 参数化——出包链不再只认 distro 一份装配单，
+    /// "换板只改装配单"在装机路径真走通（staging 按 --profile 名零改写落位；
+    /// 缺席点名到具体机型文件，不静默回落 distro）。
+    #[test]
+    fn profile_flag_stages_named_profile_and_names_it_when_absent() {
+        // 正例：--profile esp32-mini → 装机位 profiles/esp32-mini.toml，字节零改写
+        let (payload, repo) = fixture();
+        fs::write(
+            repo.join("profiles/esp32-mini.toml"),
+            "# esp32-mini 装配单\n",
+        )
+        .unwrap();
+        let (mut cfg, _) = cfg_of(&payload, &repo);
+        cfg.profile = "esp32-mini".to_string();
+        let stage = rr3_stage(&cfg).unwrap();
+        assert_eq!(
+            fs::read_to_string(stage.join("usr/lib/rockrobot3/profiles/esp32-mini.toml")).unwrap(),
+            "# esp32-mini 装配单\n",
+            "指定机型装配单零改写落位"
+        );
+        // deb 只装 --profile 指的那一份装配单，不顺手带上 distro
+        assert!(!stage
+            .join("usr/lib/rockrobot3/profiles/distro.toml")
+            .exists());
+        // 反例：指定机型缺席 → 点名到具体文件
+        let (payload, repo) = fixture();
+        let (mut cfg, _) = cfg_of(&payload, &repo);
+        cfg.profile = "esp32-mini".to_string();
+        let e = rr3_stage(&cfg).unwrap_err();
+        assert!(e.contains("esp32-mini.toml"), "{e}");
+    }
+
     #[test]
     fn parse_requires_flags_and_knows_stage_only() {
         assert!(rr3_pack_parse(&[]).is_err());
@@ -868,6 +912,22 @@ mod tests {
         .unwrap();
         assert!(cfg.stage_only);
         assert_eq!(cfg.arch, "arm64");
+        assert_eq!(
+            cfg.profile, "distro",
+            "缺省机型 = distro（既有调用方零改动）"
+        );
+        let cfg = rr3_pack_parse(&v(&[
+            "--payload",
+            "p",
+            "--repo",
+            "r",
+            "--out",
+            "o.deb",
+            "--profile",
+            "esp32-mini",
+        ]))
+        .unwrap();
+        assert_eq!(cfg.profile, "esp32-mini");
         assert!(rr3_pack_parse(&v(&["--payload", "p"])).is_err());
         assert!(rr3_pack_parse(&v(&["--payload", "p", "--repo", "r"])).is_err());
         assert!(rr3_pack_parse(&v(&["--bogus"])).is_err());

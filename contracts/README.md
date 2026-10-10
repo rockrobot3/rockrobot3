@@ -86,11 +86,12 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
    `topics.toml` 与 `base/runtime/rr-registry/src/module.schema.toml` 各自另有同名整型键
    `schema_version`（当前同为 1），三者不要混写
 3. 消息头扩展**只允许写 reserved 区**并经 `flags` 标记启用（保持与 A-IPC 标准逐字节兼容）
-4. 九步检查以 `bash tools/ci/check.sh` 为**唯一入口**（本地与 CI 同一命令，命名沿用方案 D7 的"三检查"；
+4. 门禁检查以 `bash tools/ci/check.sh` 为**唯一入口**（本地与 CI 同一命令，命名沿用方案 D7 的"三检查"；
    远程在 atomgit，平台自动触发待确认，见方案 §7 遗留项）：
    ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试 /
    ② manifest schema 校验 + 注册表形状 pin / ②b mkmod 输出即契约用例 / ③ 主题前缀归属 /
-   ④ 仓内所有独立 Rust 工程编译 / ⑤ 文档门（已跟踪 md 不得为空、相对链接不得断）
+   ④ 仓内所有独立 Rust 工程编译 / ⑤ 文档门（已跟踪 md 不得为空、相对链接不得断）/
+   ⑥ 独立工程测试接线 / ⑦ §13 静态断言四件 / ⑧ 件级判据三门（对拍计数·依赖闭包·注入面校验）
    （步序、命令与每步条数的权威表见 [docs/process/conventions.md](../docs/process/conventions.md) §2，
    本文件不抄数字）
 
@@ -107,7 +108,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 - **2026-09-30 · IPC-T-003 就绪登记（仍是"关于测试的陈述"更正，非契约变更）**：
   `x-rock3-v0.0.1-uncovered` 里 IPC-T-003 的描述更新为"夹具与脚本就绪、双架构真跑待容器环境"。
   新增三件：`rr-ipc/src/bin/ipct003_dump.rs`（golden 头 + 五种 payload 类型各一帧的 hex 夹具）、
-  `tools/ci/ipct003.sh`（宿主 / linux-arm64 容器 / golden 三方对拍；**不进九步门**，
+  `tools/ci/ipct003.sh`（宿主 / linux-arm64 容器 / golden 三方对拍；**不进门禁步序**，
   登记于 conventions.md §2 的平台条件脚本）、header.rs 的编译期 const 断言（偏移连续、
   头长 128、magic LE 字节、payload 枚举值，随任意目标编译求值）。偏移、枚举、magic、
   golden 向量与线上行为一字未动；Docker 装好后容器真跑，跑成即可把该条移入 coverage。

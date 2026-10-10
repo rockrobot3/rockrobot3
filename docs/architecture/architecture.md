@@ -223,7 +223,7 @@ rock3/
 │   │                                 boards/（发行版实板笔记）
 │   ├── ota/                       ← README.md + partition-layout.md（A/B/factory 布局文档）
 │   │   └── rr3-ota-ctl/           ← 独立 workspace，bin 名 `rr3-ota-ctl`（升级入口 CLI）
-│   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-core rr-registry rr-bus rr-hal rr-ota rrd
+│   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-core rr-registry rr-bus rr-hal rr-hal-api rr-ota rrd
 │   │   │                             （Cargo.lock 在 workspace 根，每 crate 各有一份 README.md）
 │   │   ├── rr-ipc/                ← A-IPC 协议层 + 帧收发（§6.2）；协议层纯 core+alloc（no_std 可达）
 │   │   │   ├── src/protocol/      ← header.rs（128B 头编解码）、body.rs（payload 类型前缀）、
@@ -244,7 +244,10 @@ rock3/
 │   │   │   ├── src/               ← schema.rs、validate.rs、topics.rs、slots.rs（能力格查册门）、
 │   │   │   │                          depends.rs（依赖仲裁）、module.schema.toml（字段字典）
 │   │   │   └── tests/             ← contract.rs（契约面用例）+ fixtures/rr3-sense.toml
-│   │   ├── rr-hal/                ← HAL trait 与数据类型（§5）：lib.rs + backend.rs
+│   │   ├── rr-hal/                ← HAL 后端实现层（§5）：lib.rs + backend.rs——能力面契约的
+│   │   │                             Linux/sim 实现，对外路径 re-export 保持（批I 起）
+│   │   ├── rr-hal-api/            ← 能力面契约 no_std 契约层（§12.8 接缝一，批I 落地）：
+│   │   │                             lib.rs（7 trait 同步签名 + 值类型 + Rr3HalError）
 │   │   ├── rr-ota/                ← 升级通道的类型形状（§8、ADR-0007 决策二）
 │   │   ├── rrd/                   ← 主守护进程（装配层）
 │   │   │   ├── src/               ← 十一个文件（十个模块文件 + `bin/sim_peer.rs`），逐个职责见下
@@ -308,10 +311,10 @@ rock3/
 > | ~~机制核 `no_std` 下沉——总线语义~~ | ADR-0018 裁定 1/5 | **已落盘**（2026-10-09，`rr-core`：常量/寻址/帧组装；帧形状下沉 `rr-ipc` protocol::wire；见上方 §3 树） |
 > | ~~机制核 `no_std` 下沉——模块运行时~~ | ADR-0018 裁定 1/3 | **已落盘**（2026-10-09，`rr-core` runtime：执行环状态机 + 心跳拍点 + 分发分类，`rr-bus` client 改 std 驱动器消费；net.online 格机制核切片 = `Rr3LinkState`） |
 > | ~~机制核 `no_std` 下沉——控制与安全核~~ | ADR-0018 裁定 1/5 | **已落盘**（2026-10-09，`rr-core` control：限速门/低电边沿/饱和检测三件自模块面迁入 + 限位钳位新原语，rr3-act/rr3-power re-export 保路径、RPC/intent 两路落角接安全核钳位；xtensa 双绿；见上方 §3 树） |
-> | `base/runtime/rr-hal-api/`（能力面契约，no_std） | ADR-0018 修订 1 ③ 接缝一 · §12.8 | **待建**（0.0.5 第 III 轮批I）：7 trait + 值类型 + `Rr3HalError` 自 `rr-hal` 提出，同步签名 / 去 `Send + Sync` / 去 `String`；`rr-hal` 退成其 Linux/sim 实现层，对外路径 re-export 不变 |
-> | `Rr3ByteStream`（总线字节流窄缝） | ADR-0018 修订 1 ③ 接缝二 · §12.8 | **待定形**（批J）：机制核内两方法缝，`Rr3TransportConn` 在其上 blanket impl，`std::io` 走 adapter——落点在 `rr-ipc`（传输抽象的家）；解开 `⊙` 在 rtos/bare 两档的可达性 |
-> | 描述符 `[platform]` / `[supplies]` / `[slots].present` 三段 | ADR-0018 修订 1 ④ · §4.3 | **待建**（批J）：`contracts/` 不动，扩 `profiles/*.toml` schema + `rr-registry` 查册门 + 装配段校验 |
-> | 注入面 `assemble.handles` / `assemble.ops` 被装配段读 | ADR-0019 修订 1 ③ · §12.8 接缝三 | **待建**（批J）：现为 17 份全空、无读者的声明；定形后同时成为缺格降级的判据来源 |
+> | ~~`base/runtime/rr-hal-api/`（能力面契约，no_std）~~ | ADR-0018 修订 1 ③ 接缝一 · §12.8 | **已落盘**（2026-10-10，批I）：7 trait + 值类型 + `Rr3HalError` 自 `rr-hal` 提出，同步签名 / 去 `Send + Sync` / 去 `String`；`rr-hal` 退成其 Linux/sim 实现层，对外路径 re-export 不变（见上方 §3 树） |
+> | ~~`Rr3ByteStream`（总线字节流窄缝）~~ | ADR-0018 修订 1 ③ 接缝二 · §12.8 | **已落盘**（2026-10-10，批J）：两方法 trait 落 `rr-core` bytestream.rs，`Rr3TransportConn` blanket impl 换底，`std::io` 单向 adapter；transport 层 cfg 门解除、xtensa 门真绿——`⊙` 在 rtos/bare 两档可达 |
+> | ~~描述符 `[platform]` / `[supplies]` / `[slots].present` 三段~~ | ADR-0018 修订 1 ④ · §4.3 | **已落盘**（2026-10-10，批J）：profiles schema v2 + `slots.toml` status/tier_scope 两字段 + rr-registry 查册门接线运行期装载 + 17 份 assemble.toml 升 v2 |
+> | ~~注入面 `assemble.handles` / `assemble.ops` 被装配段读~~ | ADR-0019 修订 1 ③ · §12.8 接缝三 | **已落盘**（2026-10-10，批J）：装配校验真值单点（rr-registry）+ rrd 预降级（在册即 Degraded、undegrade_after 不捞回），handles/ops 成为缺格降级的判据来源 |
 > | 平台 port 接口（时基 / 内存 / 事件循环 / 传输） | ADR-0018 裁定 3 | 设计落点；具体 crate 划分随实施批进本树同批补画 |
 > | ~~描述符扩展硬件物理绑定 + `rr-hal` 板特定缺省收口~~ | ADR-0018 裁定 4 | **已落盘**（2026-10-09，批D④：`profiles/<机型>.toml` 新增 `[hardware]` 物理绑定段两份、rrd 装配链解析后 spawn 注入 `RR3_HAL_BINDINGS`、rr-hal `descriptor` 模块合成生效绑定——描述符为底/env 应急覆盖/无则 fail-closed；五选择函数接绑定、板缺省常量与构造删除，见 §12.3 注记） |
 
@@ -382,7 +385,7 @@ rock3/
 
 - **每格一件**：每个能力格落一个原子件，同类件塌缩归一；格是架构承诺，**不留空格**（空格 = 该能力靠各处私搭维持）。
 - **格格双达标**（v0.8 承 ADR-0019 修订 1 改判）：
-  ① 落点件**有 tests 且接线 CI**（承 `conventions.md` §2 九步门，"有测试未接线 = 未达标"）；
+  ① 落点件**有 tests 且接线 CI**（承 `conventions.md` §2 门禁步序，"有测试未接线 = 未达标"）；
   ② 落点件**写得出件级对拍用例，且用例有两条腿**（v0.9 承 ADR-0019 修订 2）：
      **腿一·确定性**——给定合成输入序列与注入时钟，件的公开面产出确定输出序列，无 IO、无线程、无墙上
      时钟，同输入两跑逐拍相等（范式已立在 `rr-core/src/control.rs` 的
@@ -397,7 +400,7 @@ rock3/
   **写不出对拍用例的件，必然是里面藏了时钟、线程或平台形状**——正是 `atoms/led`（自持线程 + `mpsc` +
   `recv_timeout`）与 `atoms/bt`（件内读 env）这两件的病。扇入降为评审项，仍用于准入三问第③问。
 - **依赖闭包**（与判据②同批执法）：件的外部依赖 ⊆ {`core`, `alloc`, `rr-ipc` protocol, `rr-core`,
-  `rr-hal-api`（§12.8 待建）}；出现 `use std::` / `use rr_hal::` 即红。这是"件 = 机制"在源码上的可扫形式。
+  `rr-hal-api`（§12.8 接缝一，批I 落地）}；出现 `use std::` / `use rr_hal::` 即红。这是"件 = 机制"在源码上的可扫形式。
 - **扇入分档**（rock3 化，非全盘 ≥3）：`N ≥ 3` 是**新建/收编跨形态复用机制原子**的准入杠杆；单消费者的能力格
   （如 `power.battery`、`sensor.imu` 在某形态只一处用）沿用 [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)
   裁定 6 的成格判据（≥1 真实依赖者），两档不互覆盖。
@@ -579,12 +582,13 @@ Registered ──── rr3_reg_beat（心跳，刷新到期基准）───�
 `[bindings]` / `[enabled_slots]` / `[hardware]` 四段**，`[platform]` `[supplies]` `[slots].present`
 三段随 §12.8 注入接缝一起在第 III 轮批J 落（进度见 status.md）。
 
-**机型集是钉死的（v0.9 写实，防止批K 撞门）**：查册门测试 `rr-registry/tests/contract.rs` 断言
-`profiles/` 目录的 `.toml` 集合恰为 `[default.toml, distro.toml]`（"profiles/ 机型集合漂移"即红）。
-所以新增任何机型文件（含第二形态样例 `esp32-mini.toml`）**必须同批改这条 pin**——它不是"数据新增"，
-它是契约面变更。同理，`rrd/src/profile.rs` 的段类型校验与 `tools/rr3-pack` 的装机注入
-（今天硬编码只读 `profiles/distro.toml`，无 `--profile` 参数）都在连带面内：**"换板只改装配单"这句话
-今天还立不住**，因为出包链只认一份装配单。这一处列为批J 前置（方案 §13.1 C2）。
+**机型集是钉死的（v0.9 写实，防漂移）**：查册门测试 `rr-registry/tests/contract.rs` 断言
+`profiles/` 目录的 `.toml` 集合恰为 `[default.toml, distro.toml, esp32-mini.toml]`（"profiles/ 机型集合漂移"即红）。
+所以新增任何机型文件**必须同批改这条 pin**——它不是"数据新增"，它是契约面变更。
+`tools/rr3-pack` 已随批K C2 参数化（`--profile <name>`，缺省 distro 不破坏既有调用方），出包链
+不再只认一份装配单；第二形态样例 `profiles/esp32-mini.toml`（F-B 桥接微型形态，模块设计索引 §10）
+随批K 落地并做装配演练（`rrd` `rr3_profile_boot_inputs` 真件正例 + contract.rs 形状 pin 双侧）——
+**"换板只改装配单"自此在装机路径立住**（板侧真跑触发条件 = 0.0.7 轻承载档真板，敞口在册）。
 
 **参数真值的落点与合并规则（v0.9 新立）**：件与组合件的参数分落两文件——`modules/<mod>/config.toml`
 （设备行为手感）与 `profiles/<机型>.toml`（板与形态事实）。注入面定形后 ops 槽会同时指向两处，冲突
@@ -626,9 +630,9 @@ brain）分立；**F⊗F 非法**——brain 不许运行期决定能力归属�
 
 > **两层形状要分清（v0.8 承 ADR-0018 修订 1）**：下面这份 `#[async_trait]` + `Send + Sync` 的签名是
 > **承载层实现形状**（Linux 侧要并发、要跨线程移交句柄，async 在 ADR-0008 裁定 1 里本来只许进模块侧，
-> 这里就是模块侧）。机制核侧另有一张**能力面契约** `rr-hal-api`（§12.8 接缝一，待建）：同步签名、
+> 这里就是模块侧）。机制核侧另有一张**能力面契约** `rr-hal-api`（§12.8 接缝一，批I 落地）：同步签名、
 > 去 `Send + Sync`、值类型去 `String`。原子件与无承载档只认后者——**件不许把 std 的调度形状当成机制**。
-> 现况是原子件仍在直接消费本节的 async trait（`rr3_block_on` 自旋），这一层分离随第 III 轮批I 收口。
+> 这一层分离已随批I 收口（件面经 re-export 消费同步 trait，`rr3_block_on` 在件面清零）。
 
 ```rust
 // [IND] 独立层：模块只见 trait，不见 Linux 细节。
@@ -988,7 +992,7 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 
 | 层 | 组件（crate 级外延，v0.8 定名） | 属性 | 稳定性 |
 |---|---|---|---|
-| **机制核** | 字节契约 `rr-ipc::protocol`（128B 头 + payload 类型）· 消息语义与模块运行时 `rr-core`（topic / 寻址 / task 号 / trace_id + 连接→注册→心跳→分发→节拍环）· 控制与安全核 `rr-core::control` · 能力面契约 **`rr-hal-api`（待建，§12.8 接缝一）** · 传输抽象（transport trait，其无 std 窄面见 §12.8 接缝二） | 与 OS 无关，`no_std`（**core + alloc**）可达 | 契约级冻结，所有平台共享 |
+| **机制核** | 字节契约 `rr-ipc::protocol`（128B 头 + payload 类型）· 消息语义与模块运行时 `rr-core`（topic / 寻址 / task 号 / trace_id + 连接→注册→心跳→分发→节拍环）· 控制与安全核 `rr-core::control` · 能力面契约 **`rr-hal-api`（§12.8 接缝一，批I 落地）** · 传输抽象（transport trait，其无 std 窄面见 §12.8 接缝二） | 与 OS 无关，`no_std`（**core + alloc**）可达 | 契约级冻结，所有平台共享 |
 | **主承载层** | `rrd` 跨进程监听与扇出 · 进程监督/重启/退避 · 完整 HAL 实现（ALSA / sysfs / chardev）· cloud brain · deb/OCI 打包 · OTA 写侧 | 有操作系统才叠加 | 有则叠加，非依赖 |
 
 三条读法上的硬口径：
@@ -1029,7 +1033,7 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 而四类供给里从来没供给过"复位"这项能力——**结论引用的能力不在前提里**，这是前提集不闭合。现定：
 `[supplies]` 增 `watchdog`（有无 / 超时上界 / 由哪一路喂），进点验矩阵 ③ 供给自证表与 ⑦ 时序达标；
 **无看门狗的板不得归 bare 档**（只能归 rtos 且必须有外部监督）。配套第二条：自足档必须交**本地守护输出**
-（UART/RTT 行日志：起动态、喂拍、安全核触发与拒动原因，格式由 `rr-core::runtime` 定形，随批K 定）——
+（UART/RTT 行日志：起动态、喂拍、安全核触发与拒动原因，格式已由 `rr-core::runtime` 定形——批K H6，见 §12.4 守护行段）——
 一个"错了没人知道"的形态不是被裁剪过的机器人，是赌运气的固件（索引 §11 审计 L-1）。
 
 **四类供给的可实现接口（v0.9 补——此前只有自然语言清单，移植者无从下手）**：一个 port 交付的是
@@ -1105,6 +1109,13 @@ provides / subscribes / exposes、能力格绑定、§6 的消息语义）**不�
 状态机的退化用法**（装配段直接预置 `Online` 与静态 task），机制核不另建第二套状态机；
 ③ **`Down` 的处置随承载档而变**——有基座交监督重启，无基座交平台复位（这是裁定 2 "裸机面 = 运行环复位"
 的应有含义，与 §4.2 的生命周期表对齐）。
+
+**自足档本地守护输出行格式（v0.9 批K H6 定形，C15）**：自足形态没有 rrd 日志面，观察走 UART/RTT 原始行。
+行格式唯一真源 = `rr-core::runtime`（`Rr3GuardEvent` → `Rr3GuardBuf` 定容缓冲纯函数，无格式化宏、
+不读墙上时钟、零策略载荷），三类行型：`RR3G boot <registering|online task=N|down>`（起动态，
+退化用法预置 Online 同走此行）/ `RR3G feed seq=N`（喂拍）/ `RR3G safe <trip|deny> <travel-clamp|low-edge|saturation|rate-denied>`（安全核触发/拒动，原因码封闭枚举）。喂拍序号与安全核动作的
+**产生策略随 port**，行格式是机制；时戳前缀是发落面（写出方）的事。行文法两腿对拍用例钉死
+（训练确定性 + 逐字节契约），0.0.7 轻承载档真板按此行观察。
 
 ### 12.5 控制与安全核：纯函数 + 注入时钟，控制即组合策略
 
@@ -1267,21 +1278,21 @@ pub trait Rr3ByteStream {
 
 | 门 | 断言 | 形态 | 处置 |
 |---|---|---|---|
-| 机制核零策略载荷 | 机制核面（`rr-core` 全部 + `rr-ipc` protocol + 传输抽象 + 待建 `rr-hal-api`）源码 grep 外部板卡厂商名 / 产品名 / 器件名 / `if (vendor == …)` 命中即红（自家标识不在禁词，见 §13 注） | 静态断言（`check.sh` ⑦-a，已接） | **fail-closed** |
+| 机制核零策略载荷 | 机制核面（`rr-core` 全部 + `rr-ipc` protocol + 传输抽象 + `rr-hal-api` + **原子件面 `modules/*/atoms/*/*.rs`**——SURFACE 常量与 println 同在载荷面，批K H2/L-6 扩）源码 grep 外部板卡厂商名 / 产品名 / 器件名 / `if (vendor == …)` 命中即红（自家标识不在禁词，见 §13 注） | 静态断言（`check.sh` ⑦-a，已接） | **fail-closed** |
 | 件内字面阈值位点 | 原子件里的业务阈值与厂商/产品**注释**逐条列位点清单，随批迁出到 ops/config/描述符。**不宣称 grep 命中即红**——阈值字面量无可靠静态判据（注释里的版本号同为点分数值），v0.8 把这条从"静态门"降为"清单 + 评审"，免得文档口径高于门的实际断言 | 位点清单 + 评审 | 清单登记，评审收口 |
-| 件级依赖闭包 | **分两级执法**（v0.9）：L0 机制核可达集 {`core`, `alloc`, `rr-ipc` protocol, `rr-core`, `rr-hal-api`}；L1 承载层机制件集 = L0 + `serde_json`（线格式载体，属承载层形状）。`modules/**/atoms/**` 的**非 test 面**出现 `use std::` / `use rr_hal::` 即红；`#[cfg(test)]` 面不扫（假后端夹具合法，归属由批I 定形）。`serde_json` 退场另列 L0 迁移清单，不在门里假装它已在机制核 | 静态断言（批I 新门） | **fail-closed** |
-| 件级逐拍对拍 | 每件**两条腿**：① 确定性（合成输入序列 → 输出序列，无 IO / 无线程 / 无墙上时钟，同输入两跑逐拍相等，范式同 `rr-core::control` 的 `same_control_graph_beat_for_beat_identical`）；② 正确性（期望值引自 `contracts/events/*.schema.json` / `contracts/golden/` / 裁定写死的语义，并覆盖下界/上界/等号/零值/畸形）。**只有腿一记未达标**，门另需一条"恒输出 0 的件被拦下"的自证反例 | 计数断言（批K 新门，⑥/⑦ 接线） | **fail-closed** |
-| 格状态标记 | 正常 / 占位 / retired 三态读 `contracts/slots.toml` 的格标记位（**该标记位今天还不存在**——文件只有 `name`/`layer`/`note` 三字段，`Rr3SlotTable` 只解析 name→layer；数据载体的契约评审 = 0.0.5 **C17**，未结则本门只能硬编码）——**豁免一律数据化**，门内不许有硬编码 `if`；占位件记"不适用"而非"通过"，retired 格退出"每格一件"分母 | 查册门 + 数据面校验（批J/K） | **fail-closed** |
+| 件级依赖闭包 | **分两级执法**（v0.9，0.0.5 批K 接线）：L0 机制核可达集 {`core`, `alloc`, `rr-ipc` protocol, `rr-core`, `rr-hal-api`}；L1 承载层机制件集 = L0 + `serde_json`（线格式载体，属承载层形状）。`modules/**/atoms/**` 的**非 test 面**（行注释与 `#[cfg(test)]` 块先剥）出现 `use std::` / `extern crate std` / `serde_json` 即红。`rr_hal::` 引用**不进本门 grep 执法面**（trait 注入与 sim 假后端是批I F2/I-10 定形的合法形状；承载类型违例无 grep 可靠判据，归评审条款——批I 深挖收口清退 capture 承载类型为在册案例） | 静态断言（`check.sh` ⑧-b，已接） | **fail-closed** |
+| 件级逐拍对拍 | 每件**两条腿**：① 确定性（合成输入序列 → 输出序列，无 IO / 无线程 / 无墙上时钟，同输入两跑逐拍相等，范式同 `rr-core::control` 的 `same_control_graph_beat_for_beat_identical`）；② 正确性（期望值引自 `contracts/events/*.schema.json` / `contracts/golden/` / 裁定写死的语义，并覆盖下界/上界/等号/零值/畸形）。**只有腿一记未达标**。门按 `fn parity_leg1_<件名>_*` / `fn parity_leg2_<件名>_*` 命名锚计数（slots.toml `status` join atom.toml `provides`：normal 格两腿各 ≥1，placeholder 记不适用、retired 退出分母），门内置"恒输出 0 + 只有腿一"的 stub 反例自证（C10，拦不住则门本身红） | 计数断言（`check.sh` ⑧-a，已接） | **fail-closed** |
+| 格状态标记 | 正常 / 占位 / retired 三态读 `contracts/slots.toml` 的格标记位（0.0.5 批J **C17** 已落：schema_version=2 每格带 `status`/`tier_scope`，运行期形状门在 rrd 装载接线、CI 契约测试钉 21 格全集）——**豁免一律数据化**，门内不许有硬编码 `if`；占位件记"不适用"而非"通过"，retired 格退出"每格一件"分母（⑧-a 对拍门即读此标记位） | 查册门 + 数据面校验（`check.sh` ⑧-a / rrd 装载，已接） | **fail-closed** |
 | **档位判定校验**（v0.9 同日五轮新立，此前只有散文规则） | 声明 `tier=bare` 而 `[supplies].watchdog` 缺位即拒 boot 并点名缺哪一位；无 WDT 的板只能归 rtos + 外部监督 | 描述符装载门（0.0.5 批J **G6**，承 C15） | **fail-closed** |
 | **⑦ 时序证据回填**（v0.9 同日五轮新立） | ⑦ 列只认 E4 真板证据：`matrix.sh --manual ⑦ --evidence <路径>`，证据文件必须带环境指纹 + 采样窗口与样本数 + 原始数据，缺一判"证据不足"不判 PASS；手测行与自动行分色 | `tools/ci/matrix.sh`（0.0.5 批K **H3/C12**） | **fail-closed** |
 | 门禁清单同步 | 新建机制核面 crate 必须**同批**出现在两处清单：`check.sh` ⑦-a 的禁词扫面枚举、`tools/ci/rr-core-xtensa-check.sh` 的目标 crate 列表。缺任一处即红——防止"§13 宣称有门、门实际没扫" | 静态断言（自指：门查门） | **fail-closed** |
 | 每格一件 · 不留空格 | manifest/profile 引用的格必须命中 `slots.toml`；`enabled_slots` 声明的格有对应原子件；占位件登记显式豁免、不折算达标 | 查册门 + 仓扫描（§4.3 门禁②扩，已接） | **fail-closed** |
-| 注入面校验 | `assemble.toml` 的 `handles`/`ops` 与描述符对表：件要的句柄/参数槽未给 → 该格 `Degraded` 并点名到件与键 | 数据面校验（批J 新门） | **fail-closed** |
+| 注入面校验 | `assemble.toml` 的 `handles`/`ops` 与描述符对表：件要的句柄/参数槽未给 → 该格 `Degraded` 并点名到件与键 | 数据面校验（rr-registry contract；`check.sh` ⑧-c 显式过滤器封用例改名/删除的 fail-open，已接） | **fail-closed** |
 | `F⊗F` 非法 | 面不得作为被装配方出现在装配清单里（面间只 `⊙`）；`composite.toml` 的 `⊗` 链成员必须是本模块原子件 | 静态断言（`check.sh` ⑦-b，已接） | **fail-closed** |
 | 禁薄胶水 | 跨原子件的串联必须有组合件实体（`composite.toml` + 入口 + 实现），散落转发直连原子即红 | 静态（存在性，已接）+ 评审（"散落"判定） | fail-closed（存在性）|
 | 五件套齐全 | 每个**组合件** ①`.manifest`+②入口+③实现+④装配清单+⑤唯一私有头 五件缺一即红（`rr3-mkmod` 产物回灌契约，承 ②b）。**面不计**——面是视图，无独立声明物（§4.0 读法注记） | 计数断言（⑦-c，已接） | **fail-closed** |
 | 入口体量 | 装配入口（`main.rs`/生成入口）≤ 80 行 | 计数断言（`wc -l`，⑦-d，已接） | **fail-closed** |
-| 格格双达标·运行 | 每格落点件有 tests 且接线 CI；"有测试未接线 = 未达标" | 承 check.sh 九步门的 ⑥（已接） | **fail-closed** |
+| 格格双达标·运行 | 每格落点件有 tests 且接线 CI；"有测试未接线 = 未达标" | 承 check.sh ⑥（已接） | **fail-closed** |
 | 契约冻结 | 128B 头/payload 枚举对 `envelope.schema.json` + golden 逐字节；主题/格只增不改 | `envelope_meta` + 形状 pin（§6、§4.3） | **fail-closed** |
 | 层界单向 | 依赖只从上层指向下层，无反向、无模块 crate 互依赖 | 链接图断言（承 §2 原则、ADR-0002） | **fail-closed** |
 | 准入三问留痕 | 新建/收编原子件的三问结论登记录（评审项，非静态门）；第①问的可答法见 §4.0.3 | 评审 | 记录留痕 |
@@ -1312,7 +1323,7 @@ pub trait Rr3ByteStream {
 四层      格 Slot ← 件 Atom ← 组合件 Composite ← 面 Facade（面=组合件的职责视图，无第四份 manifest）
 组合      ⊗ 装配（装配期 · 执行单元内 · 函数调用）· ⊙ 编排（运行期 · 跨单元经字节流窄缝）· F⊗F 非法
 面        固定职责四面 接入/运行/状态/守护；组合件跨四面不可拆；能力域降为组合件分组
-机制核    `rr-ipc::protocol` + `rr-core`（消息语义·运行时·控制·安全核）+ `rr-hal-api`（待建）—— core+alloc 可达、零策略载荷、冻结；无堆=敞口
+机制核    `rr-ipc::protocol` + `rr-core`（消息语义·运行时·控制·安全核）+ `rr-hal-api`（批I 落地）—— core+alloc 可达、零策略载荷、冻结；无堆=敞口
 承载分层  原子件与组合件 = 机制在承载层内的物理组织（不是机制核本体）；主承载层 = rrd 监督 · 全 HAL · brain · 打包 · OTA 写侧
 三处窄缝  §12.8：① 能力面契约（去 async/去 Send+Sync/去 String）② 总线字节流 `Rr3ByteStream`（⊙ 的 no_std 通路）③ 注入面 `handles`/`ops` 被装配段校验
 描述符    [platform] [supplies] [slots] [bindings] [enabled_slots] [hardware]——芯片平台与底板走线分开，裁剪只改数据

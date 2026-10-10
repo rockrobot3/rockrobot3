@@ -281,4 +281,45 @@ mod tests {
         let b = rr3_doa_fix(&three, 3).unwrap();
         assert_eq!(a, b, "第三路不得影响 L/R 对的判向");
     }
+
+    // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
+
+    #[test]
+    fn parity_leg1_capture_output_train_is_deterministic() {
+        // 腿一·确定性：同一多通道样本序列两跑，(下混流, 判向序列) 逐帧相等
+        fn run() -> (Vec<i16>, Vec<Option<Rr3DoaFix>>) {
+            let seq: Vec<Vec<i16>> = [(-60.0f64, 400), (0.0, 400), (45.0, 400)]
+                .iter()
+                .map(|&(deg, n)| stereo_frame(deg, n))
+                .collect();
+            let mixed: Vec<i16> = seq
+                .iter()
+                .flat_map(|s| rr3_pcm_downmix_mono(s, 2))
+                .collect();
+            let fixes: Vec<Option<Rr3DoaFix>> = seq.iter().map(|s| rr3_doa_fix(s, 2)).collect();
+            (mixed, fixes)
+        }
+        assert_eq!(run(), run(), "同输入序列两跑逐帧相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_capture_matches_ruling_semantics() {
+        // 腿二·正确性：分档等号边界独立重写——|θ| ≤ 30° 落中档（含等号），
+        // 严格出界才落左/右；零值输入不产帧循环（0 帧换算、空样本安全返回）
+        for (deg, want_bin) in [
+            (-30.0, Rr3DoaBin::Center),
+            (30.0, Rr3DoaBin::Center),
+            (-31.0, Rr3DoaBin::Left),
+            (31.0, Rr3DoaBin::Right),
+        ] {
+            let fix = rr3_doa_fix(&stereo_frame(deg, 1600), 2).unwrap();
+            assert_eq!(fix.bin, want_bin, "deg={deg} 等号边界档位");
+        }
+        // 零值：0ms 节拍与 0Hz 采样都换算出 0 帧（调用方不得拿 0 帧当 buf 死循环）
+        assert_eq!(rr3_frames_per_tick(16000, 0), 0, "(16000, 0) → 0 帧");
+        assert_eq!(rr3_frames_per_tick(0, 20), 0, "(0, 20) → 0 帧");
+        // 零样本下混/判向安全返回（空进空出，不 panic 不产帧）
+        assert!(rr3_pcm_downmix_mono(&[], 2).is_empty());
+        assert_eq!(rr3_doa_fix(&[], 2), None, "空帧无方向可判");
+    }
 }

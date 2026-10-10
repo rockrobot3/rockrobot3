@@ -10,7 +10,7 @@
 - 涉及架构决策的提交 body **必须**引用 ADR 编号（`引用：ADR-0006`）
 - 一次提交只做一件事；`git mv` 类纯移动不得混入内容改动
 
-## 2 机器可检查项（CI 九步，见 `tools/ci/check.sh`）
+## 2 机器可检查项（CI 门禁十步，见 `tools/ci/check.sh`）
 
 | 步 | 检查 | 命令 |
 |---|---|---|
@@ -20,20 +20,21 @@
 | ②b | mkmod 输出即契约用例（方案 P3） | `cargo test --manifest-path tools/mkmodule/Cargo.toml` |
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
 | ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`） |
-| ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（`legacy/` 排除条款已随 0.0.4 批F 整树退役撤除，**今天 `check.sh` 没有任何排除**，全集进门），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
+| ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（全集进门，无任何排除），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
 | ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与两个 esp 条件工程）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
 | ⑦ | **§13 静态断言四件**（全 fail-closed，逐条点名） | ⑦-a 机制核零策略载荷（禁词扫 `rr-core/src/*.rs` + `rr-hal-api/src/*.rs`（0.0.5 批I C8 起）+ `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（Rust 五件 / brain 两件式豁免 / 组合件实体 `src/main.rs`+`src/composite.rs`）· ⑦-d 入口体量 ≤80 行。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
+| ⑧ | **件级判据三门**（0.0.5 批K H2 接入；全 fail-closed，上线即全绿） | ⑧-a 两腿对拍计数门：格三态读 `contracts/slots.toml` 的 `status` 标记位（C9 门只读这一处）——normal 格落点件须 mech.rs + 模块 composite.rs 两腿各 ≥1（腿一 `fn parity_leg1_*`、腿二 `fn parity_leg2_*`，命名即机器锚），只有腿一记未达标；placeholder 记"不适用"、retired 退出分母、Python 两件式记不适用；C10 stub 反例自证内置（拦不住空件则门自身 FAIL）· ⑧-b 依赖闭包 grep 门（C7 分级执法）：扫 `modules/*/atoms/*/*.rs` 非 test 面（行注释与 `#[cfg(test)]` 块先剥）——L0 = `use std::`/`extern crate std`，L1 = L0 + `serde_json` · ⑧-c 注入面校验门：rr-registry contract 的 injection 用例**显式过滤器**，打空即红（run_tests ≥1 断言），封"用例被改名/删除"的 fail-open |
 
-入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**九步**
-（⑥/⑦ 两步随 0.0.5 批E 接入，`check.sh` 由七步扩九步；步序与 PASS 条数的逐批台账见本文件下方登记条目）：
+入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**十步**
+（⑥/⑦ 两步随 0.0.5 批E 接入、⑧ 三门随 0.0.5 批K 接入，`check.sh` 由七步经九步扩十步；
+步序与 PASS 条数的逐批台账见本文件下方登记条目）：
 ②b 是 ② 的姊妹步，把生成器的产物喂回同一份 manifest 契约，防 mkmod 与 CI 漂移；
 ①b 把 workspace 的 237 条（Windows，推算）/294 条（Unix）测试全部跑一遍，②/③ 只是其中被点名两批的定点诊断；
 ④ 覆盖仓内**所有独立 Rust 工程**（`modules/` 五个 + `tools/mkmodule`、`tools/rrctl`、
 `tools/sim`、`base/ota/rr3-ota-ctl`）——它们各自是独立 workspace，①/①b 打不到，
 没有 ④ 的话这些目录烂掉无人知晓（无 `Cargo.toml` 的目录如 Python 的 rr3-brain 自然跳过；
 `base/runtime/*` 由 ①/①b 负责，④ 显式排除以免重复）。
-⑤ 是文档门（空 md、断链与导航漏链），三条判据写在上表那一行（原 `legacy/` 排除
-条款已随 0.0.5 §2.4 R21 退役批摘除——legacy/ 不复存在，无需排除）。
+⑤ 是文档门（空 md、断链与导航漏链），三条判据写在上表那一行（`legacy/` 已整树退役，全集进门）。
 测试步（①b/②/②b/③）除退出码外还断言"至少一个测试真实通过"——cargo 对打空的过滤器仍以 0
 退出，只看退出码会在过滤器笔误或测试集改名时静默放行。
 
@@ -1675,10 +1676,41 @@ v2——battery 真值样板（handles 引 i2c_bus+ina219_addr、ops 三槽引 R
 rr-ipc j4 遗留未用变量清除）；rr-registry 48（lib）+37（contract）、rrd 146（lib）、mkmodule 5、
 rr3-pack 8 测试绿
 
+2026-10-10 0.0.5 第 III 轮 批K 判据上门 + 点验矩阵 + 第二形态收官（方案 §14 批K 行，ADR-0018 /
+ADR-0019；门禁直跑 GATE_EXIT=0，PASS 50 全绿——⑧ 三门**上线即全绿**，既有步零 FAIL 变 SKIP）——
+**H1 件级两腿对拍补齐**：11 件（led/relay/servo/bt/wifi/face/player/battery/charger/capture/vad）各落
+腿一确定性（§8 设计行序列同输入两跑轨迹逐拍相等）+ 腿二期望值引自裁定语义与契约（行程/时限/限速门、
+转移矩阵、状态机与文案点名，**不由件自产**）；sensor.env / sensor.imu 两占位格 + cognition 四件
+（asr/dialog/llm/tts，Python 两件式无 mech.rs）记**不适用**——不适用 ≠ 通过，占位格触发条件登记
+status.md。**H2 三门接 check.sh ⑧**（步序与条数登记本节 §2 ⑧ 行）：⑧-a 两腿对拍计数门（slots.toml
+status 三态 join atom.toml provides，normal 格腿一+腿二各 ≥1；C10 stub 反例自证内置——恒输出 0 +
+只有腿一的门先红，门自证拦得住空件）、⑧-b 件级依赖闭包 grep 门（L0=`use std::`/`extern crate std`、
+L1=+serde_json，扫 modules/*/atoms/*/*.rs 非 test 面，39 份源零命中——C7 约束自批K 起由门执法）、
+⑧-c 注入面校验门（rr-registry contract injection 用例**显式过滤器**封改名/删除 fail-open）；⑦-a 扫面
+同步扩 modules/*/atoms/*/（SURFACE 常量与 println 进禁词扫面）。**H3 点验矩阵出数入口**
+`tools/ci/matrix.sh`（architecture §12.6 七列：FAIL exit 1、--strict 未跑列不放行 exit 2、默认如实
+出数 exit 0；`--manual <列> --evidence <仓内证据>` 手测回填契约——证据三样齐才收、不覆盖自动 FAIL
+格）+ 供给自证表模板落 docs/reference/。**H4 第二形态 + C2**：`rr3-pack --profile` 参数化 + 机型集
+pin 同批改（contract.rs），`profiles/esp32-mini.toml` 落描述符（F-B 桥接微型形态三格：
+rr3-sense=[audio.capture,audio.vad] + rr3-act=[act.servo]，不启用 net.*/cognition.*，理由随文件落档；
+件码/对外主题/slots.toml 零改动）+ rrd 装载正例与 contract 形状 pin 的装配演练真跑。**H6 守护输出
+定形**：rr-core::runtime 本地守护"起动态 + 喂拍 + 安全核触发/拒动原因"行格式落档 + 对拍用例钉死
+（architecture §12.4 口径同批）。**H5 文档口径收口**：architecture §3 树补画 rr-hal-api + 落点表四行
+翻已落盘 + §12.4/§13 口径，ci.yml job 步骤名改"十步"（上一轮唯一未结项结清），tools/ci/README ⑤ 行
+撤除不存在的 `legacy/` 排除条款 + ⑧ 三门全文补录，本节 §2 步序登记（七步经 0.0.5 批E 接 ⑥⑦ 成九步、
+批K 接 ⑧ 扩**十步**），六份模块 README 目录树对齐重铺实况（atoms/ 五件套 + composite.toml ⊗ 链 +
+瘦入口），全仓"六段/六列/七步"口径复扫——活文档全部对齐十步/七列；历史台账（本节登记条目、方案批行
+原文、ADR 存档、status 台账行）按 0.0.7 方案"台账原文不改写"纪律保留。clippy 全仓清零复验（两处新
+用例错：servo 复杂返回类型抽 `ServoParitySnap` 别名、bt `vec_init_then_push` 改 `vec![]` 宏）；矩阵
+首跑回执 PASS=4 / 未跑=3 / FAIL=0（① Docker 缺 3/4 路、⑥ python3 3.9.6<3.11、⑦ E4 真板专属——
+无载体如实记，指纹三件套随行落 status.md）；⑤ 逐 crate 对拍 22 条（act 6 / connect 4 / interact 4 /
+power 4 / sense 4）+ rr3-pack 19 + rrctl 23 + mkmodule 9 + rr-registry contract 38 + rrd profile 24
+测试绿
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
-**九步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
-批W2 起 CI 单真源迁此，R27 裁定；不进九步门，本地可跑）：
+**十步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
+批W2 起 CI 单真源迁此，R27 裁定；不进十步门，本地可跑）：
 `lint`——rustfmt `--check` 与 clippy `-D warnings` 各自独立失败，覆盖 base/runtime 与
 全部独立工程（④ 同一 find 口径）；绿色基线是 2026-10-01 的 rustfmt 全仓归一 + clippy
 清零提交，此后 fmt/clippy 回退即 CI 红。`brain-unittest`——rr3-brain 26 条 stdlib
@@ -1686,8 +1718,8 @@ unittest（`python3 -m unittest discover -s tests`），ubuntu + macos 双矩阵
 Rust workspace 里，①b/②b/④ 覆盖不到它，只有这一步跑。四真进程 e2e 仍属本地实跑
 环节（同下节平台条件脚本的理由）。
 
-**九步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
-ADR-0006 后果项）**不在九步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
+**十步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
+ADR-0006 后果项）**不在十步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
 塞进门禁等于让无容器环境的机器永远红。它做三件事：①宿主跑 `rr-ipc` 的
 `src/bin/ipct003_dump.rs`（golden 头 + 五种 payload 类型各一整帧的 hex，全部编译期字面量），
 header 行对 `contracts/golden/event-header-128.hex`；②已装 `aarch64-unknown-linux-gnu`
@@ -1714,7 +1746,7 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
   `rr3-brain`（Python，ADR-0014）与 CI 胶水脚本（bash，可最后迁）。brain 的迁移
   路线已由 [ADR-0016](adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md)
   落设计裁定（首件 bus.py → rr-bus 复用、实施归 0.0.6 专项）；迁移本身走正常批次
-  （生成器产出、契约校验、九步门禁一样不少），`module.toml` 的 `lang` 字段随迁移改为
+  （生成器产出、契约校验、十步门禁一样不少），`module.toml` 的 `lang` 字段随迁移改为
   `rust`，原"Python 语法检查属人工检查点"的面随之收敛为 cargo 检查
 - 新模块一律由生成器产出：`cargo run --manifest-path tools/mkmodule/Cargo.toml --bin rr3-mkmod -- rr3-<名>`
   （模块名形如 `rr3-arm`，第二参数是输出根，默认 `./modules`）。生成器落盘**五个文件**：

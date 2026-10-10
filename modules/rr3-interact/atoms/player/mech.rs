@@ -95,4 +95,47 @@ mod tests {
             assert!((v as i64 - want).abs() <= 100, "sample #{i}: {v} vs {want}");
         }
     }
+
+    // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
+
+    #[test]
+    fn parity_leg1_player_output_train_is_deterministic() {
+        // 腿一·确定性：同一段文本两跑，应答时长与写出样本流逐样本相等
+        fn run() -> (u64, Vec<i16>) {
+            let mut sink = Rr3SimAudioSink::rr3_sim_sink_new(16000 * 10);
+            sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
+            let played = rr3_tts_play(&mut sink, "对拍文本abc").unwrap();
+            (played, sink.rr3_sim_sink_played().to_vec())
+        }
+        assert_eq!(run(), run(), "同输入两跑逐样本相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_player_matches_ruling_semantics() {
+        // 腿二·正确性：时长语义独立重写——60ms/字符按 Unicode 标量计数、10s 封顶
+        assert_eq!(rr3_tts_duration_ms(""), 0, "零值：空文本 0ms");
+        assert_eq!(rr3_tts_duration_ms("你"), 60, "下界：1 字符");
+        assert_eq!(
+            rr3_tts_duration_ms(&"a".repeat(166)),
+            9_960,
+            "上界内：166×60 不触顶"
+        );
+        assert_eq!(
+            rr3_tts_duration_ms(&"a".repeat(167)),
+            10_000,
+            "等号边界：167×60=10020 封顶回 10s"
+        );
+        // 波形语义独立重写（非实现回抄）：120ms=1920 样本=6 整块，块边界相位连续
+        let mut sink = Rr3SimAudioSink::rr3_sim_sink_new(16000 * 10);
+        sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
+        rr3_tts_play(&mut sink, "ab").unwrap();
+        let played = sink.rr3_sim_sink_played();
+        assert_eq!(played.len(), 120 * 16);
+        for (i, &v) in played.iter().enumerate() {
+            let want = (12_000.0f64
+                * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 16_000.0).sin())
+                as i64;
+            assert!((v as i64 - want).abs() <= 100, "sample #{i}: {v} vs {want}");
+        }
+    }
 }
