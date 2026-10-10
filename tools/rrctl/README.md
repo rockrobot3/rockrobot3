@@ -31,4 +31,4 @@ CLI 回显文案并以非 0 退出——reboot 的解锁面在装机环境（rrd
 
 编译由 `tools/ci/check.sh` 第 ④ 步覆盖（独立 workspace 不在 ①/①b 的作用域内）；
 单测含四条真 UDS 往返用例（fake rrd：status/counters 实答渲染、ota/reboot 恒拒
-回显），**不在九步门内**，收口时按 conventions §2 备注本地跑。
+回显），**不在门禁步序内**，收口时按 conventions §2 备注本地跑。

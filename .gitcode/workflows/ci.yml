@@ -8,15 +8,15 @@ on:
   pull_request:
 
 jobs:
-  # 七步规约：本地与 CI 同一入口（docs/process/conventions.md §2）。
+  # 规约门禁（十步）：本地与 CI 同一入口（docs/process/conventions.md §2）。
   conventions:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 规约七步检查
+      - name: 规约门禁检查（十步）
         run: bash tools/ci/check.sh
 
-  # 七步之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
+  # 门禁之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
   # 失败归因不用翻混合日志。绿色基线 = 提交 fd0942c（rustfmt 全仓归一 + clippy 清零）。
   lint:
     runs-on: ubuntu-latest
@@ -42,7 +42,7 @@ jobs:
                      -not -path "*/target/*" -not -path "base/runtime/*" \
                      -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
                      -print0 | sort -z)
-        # 两个 esp 工程的排除与七步门 ④ 同口径：xtensa/espidf 专用工具链工程，宿主 stable
+        # 两个 esp 工程的排除与门禁 ④ 同口径：xtensa/espidf 专用工具链工程，宿主 stable
         # clippy 必红，编译执法在专用门（esp-uart-echo-check.sh / espidf-std-check.sh，SKIP
         # 纪律）；fmt 步不编译，对它们照跑。
 
@@ -64,7 +64,7 @@ jobs:
         working-directory: modules/rr3-brain
         run: python3 -m unittest discover -s tests
 
-  # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进七步门，
+  # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
   # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
   # Docker）。--strict：任何一步 SKIP 即不放行（退 2）。
   # QEMU 仿真下容器内 cargo 构建较慢属预期；rust-cache 与 conventions/lint 共享加速。

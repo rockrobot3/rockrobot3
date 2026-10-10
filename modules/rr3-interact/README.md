@@ -9,14 +9,17 @@
 modules/rr3-interact/
 ├── module.toml
 ├── config.toml
+├── composite.toml       ← 组合件装配清单（⊗ 链：face ⊗ player）
 ├── Cargo.toml           ← 独立 workspace；path 依赖 rr-ipc / rr-bus / rr-hal
+├── atoms/               ← 原子件（每格一件，五件套：atom.toml + 入口 + mech + assemble.toml + private.rs）
+│   ├── face/            ← ui.face：最小表情机（五态白名单；talk 自动挂起/恢复，显式指令可打断）
+│   └── player/          ← audio.playback：占位 TTS：440Hz 正弦 burst，60ms/字符封顶 10s（真 TTS 随 M4 云面）
 └── src/
-    ├── main.rs          ← 真入口：RR3_MANIFEST → rr3_connect（注册/心跳）→ 收帧循环应答两个点名 + 面板动作代执行
-    ├── face.rs          ← 最小表情机（五态白名单；talk 自动挂起/恢复，显式指令可打断）
-    ├── player.rs        ← 占位 TTS：440Hz 正弦 burst，60ms/字符封顶 10s（真 TTS 随 M4 云面）
-    ├── panel/mod.rs      ← 面板总览（静态页 include_str! 内嵌）
-    ├── panel/server.rs   ← HTTP 服务（std 手写 HTTP/1.1 子集，零新依赖）
-    └── panel/www/        ← 静态页（单文件 index.html，四页签）
+    ├── main.rs          ← 入口：只装配与启动（≤80 行）
+    ├── composite.rs     ← 组合件：总线注册/心跳 + TTS 播放 + 表情机 + 面板动作代执行
+    ├── panel/mod.rs     ← 面板总览（静态页 include_str! 内嵌）
+    ├── panel/server.rs  ← HTTP 服务（std 手写 HTTP/1.1 子集，零新依赖）
+    └── panel/www/       ← 静态页（单文件 index.html，四页签）
 ```
 
 ## Web 面板（0.0.4 批C）

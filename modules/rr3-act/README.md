@@ -9,12 +9,15 @@
 modules/rr3-act/
 ├── module.toml
 ├── config.toml
+├── composite.toml   ← 组合件装配清单（⊗ 链：servo ⊗ led ⊗ relay）
 ├── Cargo.toml
+├── atoms/           ← 原子件（每格一件，五件套：atom.toml + 入口 + mech + assemble.toml + private.rs）
+│   ├── servo/       ← act.servo：舵机指令与状态摘要（经 rr-hal 同步 trait，限速流）
+│   ├── led/         ← act.led：灯效（on/off/blink；组合件节拍驱动的 rr3_led_tick 状态机——批I 去线程）
+│   └── relay/       ← act.relay：继电器通断（Q1 立格 act.relay）与通断状态摘要
 └── src/
-    ├── main.rs      ← 入口：总线接入、点名分发、intent 订阅执行、config 解析
-    ├── servo.rs     ← 舵机指令与状态摘要（经 rr-hal trait，限速流）
-    ├── led.rs       ← 灯效（on/off/blink，worker 线程驱动翻转）
-    ├── relay.rs     ← 继电器通断（Q1 立格 act.relay）与通断状态摘要
+    ├── main.rs      ← 入口：只装配与启动（≤80 行）
+    ├── composite.rs ← 组合件：config 解析 + HAL 三面探活 + 点名分发 + intent 接入编排
     ├── intent.rs    ← intent/result 订阅执行面（0.0.3 T3：两道归属门 + relay 执行）
     └── reflex.rs    ← 1k–10kHz 反射环宿主，**进程内闭环**
 ```

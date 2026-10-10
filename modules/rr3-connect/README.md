@@ -9,15 +9,18 @@
 modules/rr3-connect/
 ├── module.toml
 ├── config.toml
+├── composite.toml ← 组合件装配清单（⊗ 链：wifi ⊗ bt）
 ├── Cargo.toml
+├── atoms/         ← 原子件（每格一件，五件套：atom.toml + 入口 + mech + assemble.toml + private.rs）
+│   ├── wifi/      ← net.wifi：net/link 状态机（Rr3LinkEdge：首拍基线 + 翻转必发）+ 事件体（mode 配网态）
+│   │               + 配网面（Rr3Provision 状态机 + wifi/scan|connect|forget 三 RPC，0.0.4 批D）
+│   └── bt/        ← net.bt：蓝牙链路状态机骨架（Rr3BtState 三态转移，0.0.4 批E）；
+│                    主题不登记，BlueZ 真后端板上后置（cfg 门）
 └── src/
-    ├── main.rs    ← 入口：总线接入 + 链路拍（翻转必发/周期保底）+ session 应答（0.0.2 T4c）
-    │                + wifi/scan|connect|forget 三 RPC（0.0.4 批D）
-    ├── wifi.rs    ← net/link 状态机（Rr3LinkEdge：首拍基线 + 翻转必发）+ 事件体（mode 配网态）
-    │                + 配网面（Rr3Provision 状态机 + 三 RPC 参数/结果裁决，0.0.4 批D）
-    ├── session.rs ← cloud/session 应答面（action=open，链路就绪才应答；sim 回 mock）
-    └── bt.rs      ← 蓝牙链路状态机骨架（Rr3BtState 三态转移，0.0.4 批E）；
-                     主题不登记，BlueZ 真后端板上后置（cfg 门）
+    ├── main.rs    ← 入口：只装配与启动（≤80 行）
+    ├── composite.rs ← 组合件：config 解析 + HAL 链路面探活 + 链路拍（翻转必发/周期保底）
+    │                + 事务面四 exposes 的点名分发
+    └── session.rs ← cloud/session 应答面（action=open，链路就绪才应答；sim 回 mock）
 ```
 
 ## 总线面

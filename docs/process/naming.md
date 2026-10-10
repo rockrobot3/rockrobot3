@@ -38,7 +38,7 @@
   （跨进程 e2e 的对端，落点见 [../architecture/architecture.md](../architecture/architecture.md) §3）。
   两者只作既成例外登记，**不外扩为新规则**：新起的包、bin、模块目录仍须按矩阵取名。矩阵将来若要
   收紧或给这两个名字改名，须先出 ADR 再动 `base/runtime` 的包名与 bin 名
-- 该边界的**主题/crate/manifest 名**部分由 CI 七步（`tools/ci/check.sh`，见
+- 该边界的**主题/crate/manifest 名**部分由 CI 门禁（`tools/ci/check.sh`，见
   [conventions.md](conventions.md) §2）兜底；**Rust 符号前缀**在 v0.0.1 没有 lint
   （方案 D7 只冻结三条语义检查），靠评审——将来可在 `tools/` 补脚本，但需与上一条裁定一并收口
 

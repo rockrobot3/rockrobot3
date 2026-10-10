@@ -115,4 +115,55 @@ mod tests {
         p.rr3_provision_forget();
         assert_eq!(p.rr3_provision_mode(), "ap", "forget 清凭据即回 ap");
     }
+
+    // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
+    // 腿一·确定性：§8 设计行 up 序列（首读无基线 + [true,true,false,false,true]）
+    // 喂两台新边沿机，发射轨迹逐拍相等。腿二·正确性：期望值引自裁定语义
+    // （connect 册 §8 link 行：首拍基线必发、翻转必发、同态不发；配网行：
+    // 未连先忘幂等回 ap；connect 应答不置真——链路真值单点 = HAL 读数）。
+
+    /// 腿一：边沿发射轨迹两跑相等
+    #[test]
+    fn parity_leg1_wifi_link_train_is_deterministic() {
+        fn run() -> Vec<bool> {
+            let mut e = Rr3LinkEdge::rr3_link_edge_new();
+            [true, true, false, false, true]
+                .iter()
+                .map(|&up| e.rr3_link_edge_cross(up))
+                .collect()
+        }
+        assert_eq!(run(), run(), "同输入两跑逐拍相等（腿一·确定性）");
+    }
+
+    /// 腿二：发射模式 = [真, 假, 真, 假, 真]（首拍基线 + 翻转必发 + 同态不发）；
+    /// 未连先忘幂等回 ap（§8 边界）；配网转移不动链路真值（connect 应答
+    /// "永不因请求成功而置真"的结构锚——边沿机无凭据入口）
+    #[test]
+    fn parity_leg2_wifi_matches_ruling_semantics() {
+        let mut e = Rr3LinkEdge::rr3_link_edge_new();
+        let fired: Vec<bool> = [true, true, false, false, true]
+            .iter()
+            .map(|&up| e.rr3_link_edge_cross(up))
+            .collect();
+        assert_eq!(
+            fired,
+            vec![true, false, true, false, true],
+            "裁定：首拍基线必发、翻转必发、同态不发"
+        );
+        // 未连先忘：出厂即 forget 幂等，mode 恒 ap 不报错
+        let mut p = Rr3Provision::rr3_provision_new();
+        p.rr3_provision_forget();
+        assert_eq!(
+            p.rr3_provision_mode(),
+            "ap",
+            "未连先忘 = 幂等回 ap（§8 边界）"
+        );
+        // connect 成功不置真：配网转移后链路边沿机的发射语义原样（真值单点 = HAL 读数）
+        p.rr3_provision_connect("home".into(), "password8".into());
+        assert_eq!(p.rr3_provision_mode(), "station");
+        assert!(
+            !e.rr3_link_edge_cross(true),
+            "链路真值不受配网转移影响（同态仍不发）"
+        );
+    }
 }

@@ -17,6 +17,10 @@
 #    同例：tools/espidf-std-hello（0.0.5 增补轮四 批W1，xtensa-esp32-espidf 目标 + build-std +
 #    esp-idf-sys，还须 ESP-IDF 克隆与乐鑫 esp-clang）——专用门 tools/ci/espidf-std-check.sh，
 #    SKIP 纪律同上。
+# ⑧ 件级判据三门（0.0.5 批K H2）：⑧-a 两腿对拍计数门（slots.toml status 三态 join
+#    atom.toml provides，normal 格须 fn parity_leg1_+parity_leg2_ 各 ≥1，C10 stub 反例
+#    自证内置）；⑧-b 依赖闭包 grep 门（L0=use std::/extern crate std、L1=+serde_json，
+#    非 test 面）；⑧-c 注入面校验门（contract injection 用例显式过滤器封 fail-open）。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内，规约门拒绝执行。" >&2
@@ -183,7 +187,9 @@ static_fail=0
 # ⑦-a 机制核零策略载荷：厂商/产品/芯片/器件名与 vendor/product 条件分支命中即红。
 #     机制核目录 = no_std 可达面：rr-core 全部 + rr-hal-api 能力面契约层全部
 #     （0.0.5 批I C8：新机制核面同批进本扫面，门查门）+ rr-ipc 字节契约层 protocol/
-#     + 传输抽象 transport/mod.rs；具体传输实现（uds/shm/tcp/uart）是平台供给，不在载荷面。
+#     + 传输抽象 transport/mod.rs + 原子件面 modules/*/atoms/*/*.rs（批K H2/L-6：
+#     SURFACE 常量与 println 同在载荷面——件自述串是线上字节，板名藏进去即违约）；
+#     具体传输实现（uds/shm/tcp/uart）是平台供给，不在载荷面。
 #     行注释先剥离（`// …` 含 `//!`）再查：文档注释常需表述门禁规则自身，自指不违例。
 #     禁词是 rock3 自有清单（同 atom.rs 板无关门的厂商/产品段，另加中文板名），不搬外部模板。
 #     自家产品标识（rock3/洛克/RR3_ 前缀）不进禁词——机制自身的运行时身份（如
@@ -191,7 +197,9 @@ static_fail=0
 policy_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 for f in base/runtime/rr-core/src/*.rs base/runtime/rr-hal-api/src/*.rs \
          base/runtime/rr-ipc/src/protocol/*.rs \
-         base/runtime/rr-ipc/src/transport/mod.rs; do
+         base/runtime/rr-ipc/src/transport/mod.rs \
+         modules/*/atoms/*/*.rs; do
+  [ -f "$f" ] || continue
   sed 's://.*$::' "$f" \
     | grep -inE 'rockchip|raspberry|broadcom|espressif|allwinner|sunxi|amlogic|rk35|rk33|rv11|cm4|esp32|ina219|max7219|tp4056|es8388|sg90|cp2102|mpu6050|树莓派|if.*(vendor|product)' \
     | sed "s|^|$f:|" >> "$policy_hits"
@@ -201,7 +209,7 @@ if [ -s "$policy_hits" ]; then
   printf 'FAIL  ⑦-a 机制核零策略载荷命中（厂商/产品名或 vendor 条件分支，见上行号）\n'
   static_fail=1
 else
-  printf 'PASS  ⑦-a 机制核零策略载荷（rr-core + rr-hal-api + rr-ipc 契约层/传输抽象，禁词零命中）\n'
+  printf 'PASS  ⑦-a 机制核零策略载荷（rr-core + rr-hal-api + rr-ipc 契约层/传输抽象 + atoms 件面，禁词零命中）\n'
 fi
 # ⑦-b F⊗F 非法 + 禁薄胶水存在性：composite.toml [assemble].atoms 的每个成员必须解析到
 #     本模块 atoms/<名>/atom.toml——⊗ 链只能装原子件，把组合件/面当被装配方（F⊗F/C⊗C）
@@ -274,6 +282,171 @@ rm -f "$policy_hits"
 if [ "$static_fail" -ne 0 ]; then
   fail=1
 fi
+
+# ⑧ 件级判据三门（0.0.5 批K H2，architecture §4.0.3 判据② + §13 表；全 fail-closed，
+#    上线即全绿——既有步序不得由 FAIL 变 SKIP，新门同理）。步序与条数登记 conventions §2。
+# ⑧-a 件级两腿对拍计数门：格三态读 contracts/slots.toml 的 status 标记位（C9：豁免
+#     数据化，门内无硬编码 if）——normal 格的落点件须 mech.rs + 模块 composite.rs
+#     两腿各 ≥1（腿一 fn parity_leg1_*、腿二 fn parity_leg2_*，命名即机器锚）；只有
+#     腿一记未达标（§4.0.3：否则恒输出 0 的空件照样过门）；placeholder 记"不适用"
+#     （占位 ≠ 通过）、retired 退出分母；brain 是 Python 件（无 atoms/*.rs 扫描面），
+#     其 cognition 四格不属本门分母（H1 口径 11 件 = Rust 真件）。
+# ⑧-a C10 反例自证：门内建 stub fixture（恒输出 0 的件 + 只有腿一），同一计数函数
+#     必须拦下——拦不住则门本身 FAIL（对拍门若放行空件就只是仪式）。
+# ⑧-b 件级依赖闭包 grep 门（C7 分级执法）：扫 modules/*/atoms/*/*.rs 的**非 test 面**
+#     ——行注释先剥（文档注释要表述门禁规则自身）、#[cfg(test)] 块整块剥（花括号深度
+#     剥离；假后端 sim 夹具合法）。L0 = `use std::` / `extern crate std`（std 面禁入）；
+#     L1 = L0 + `serde_json`（承载面禁入，批I F5 已上移清零——退场迁移清单在册，门认
+#     已清零的现状）。`rr_hal::` 引用不进本门执法面（trait 注入与 sim 假后端是批I 定形
+#     的合法形状；承载类型违例无 grep 可靠判据，归 §4.0.3 评审条款，收口案例批I 已清）。
+# ⑧-c 注入面校验门：rr-registry contract 的 injection 用例**显式过滤器**——② 跑全量
+#     对"用例被改名/删除"是 fail-open（还有别的测试兜着），此步封死：过滤器打空即红
+#     （run_tests 的 ≥1 断言），注入面校验永远有真值单点在门里。
+step "⑧ 件级判据三门（对拍计数门/依赖闭包门/注入面校验门，批K H2）"
+gate_fail=0
+
+# —— 两腿对拍计数函数（参数：<slots.toml> <modules根目录>；抽成函数供 C10 fixture
+#    复用——自证跑的必须是同一份逻辑，另抄一份就失去了自证意义）。返回 0=全过、
+#    1=有 FAIL、2=门自身失效（枚举打空等）。
+parity_gate() {
+  local slots_toml="$1" mods_root="$2" atom_tomls rc=0
+  atom_tomls="$(find "$mods_root" -path '*/atoms/*/atom.toml' -not -path '*/target/*' 2>/dev/null | sort)"
+  if [ -z "$atom_tomls" ]; then
+    echo "ERROR: parity_gate atom.toml 枚举打空（门禁失效，不放行）" >&2
+    return 2
+  fi
+  local atom_toml atom_dir atom_name mod_dir slot status leg1 leg2
+  while IFS= read -r atom_toml; do
+    atom_dir="$(dirname "$atom_toml")"
+    atom_name="$(basename "$atom_dir")"
+    mod_dir="$(dirname "$(dirname "$atom_dir")")"
+    # [provides] 段内的格名（段边界内取引号串；形状畸形归 atom.schema 门，此处不猜）
+    for slot in $(awk '/^\[provides\]/{p=1;next} /^\[/{p=0} p' "$atom_toml" \
+                    | grep -oE '"[a-z][a-z0-9.]*"' | tr -d '"'); do
+      status="$(awk -v want="$slot" '
+        /^\[\[slot\]\]/  { in_s = 1; cur = "" }
+        in_s && $1 == "name"   { v = $3; gsub(/[",]/, "", v); cur = v }
+        in_s && $1 == "status" { v = $3; gsub(/[",]/, "", v); if (cur == want) { print v; exit } }
+      ' "$slots_toml")"
+      if [ -z "$status" ]; then
+        printf 'FAIL  ⑧-a %s→%s: 提供格在 slots.toml 无 status 记录（格表缺失即红，C9 门只读这一处）\n' "$atom_name" "$slot"
+        rc=1
+        continue
+      fi
+      if [ "$status" = "retired" ]; then
+        printf 'PASS  ⑧-a %s→%s: retired 退出分母（号位保留、义务解除）\n' "$atom_name" "$slot"
+        continue
+      fi
+      if [ "$status" = "placeholder" ]; then
+        printf 'PASS  ⑧-a %s→%s: placeholder 记不适用（占位 ≠ 通过，登记填实触发条件）\n' "$atom_name" "$slot"
+        continue
+      fi
+      if [ ! -f "$atom_dir/mech.rs" ]; then
+        # Python 两件式件（brain：atom.toml + assemble.toml，机制本体 .py 原位）——
+        # 无 Rust 扫描面，记不适用（⑦-c 的五件套形状判同源，非 mod 名硬编码）
+        printf 'PASS  ⑧-a %s→%s: normal 格但非 Rust 件（无 mech.rs，Python 两件式）记不适用\n' "$atom_name" "$slot"
+        continue
+      fi
+      # 件级精确归属：对拍函数名须带本件名前缀（fn parity_leg1_<件名>_*）——
+      # 模块级粗扫会让同模块异件互充数（battery 没写、charger 写了也能过），
+      # 与 C10"不许空件充数"同理。atom.name 与目录名一致性已由批E 断言钉死。
+      leg1="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" 2>/dev/null \
+                | grep -cE "fn parity_leg1_${atom_name}_[a-z0-9_]+" || true)"
+      leg2="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" 2>/dev/null \
+                | grep -cE "fn parity_leg2_${atom_name}_[a-z0-9_]+" || true)"
+      leg1="${leg1:-0}"; leg2="${leg2:-0}"
+      if [ "$leg1" -ge 1 ] && [ "$leg2" -ge 1 ]; then
+        printf 'PASS  ⑧-a %s→%s: 两腿齐（leg1=%s leg2=%s，扫描 mech.rs + composite.rs）\n' "$atom_name" "$slot" "$leg1" "$leg2"
+      else
+        printf 'FAIL  ⑧-a %s→%s: normal 格两腿不齐（leg1=%s leg2=%s）——只有腿一记未达标（§4.0.3 判据②）\n' "$atom_name" "$slot" "$leg1" "$leg2"
+        rc=1
+      fi
+    done
+  done <<< "$atom_tomls"
+  return $rc
+}
+
+# —— ⑧-a C10 反例自证（先于正仓跑：门先证明自己拦得住空件）
+c10_dir="$(mktemp -d)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+mkdir -p "$c10_dir/contracts" "$c10_dir/modules/rr3-stub/atoms/stub" "$c10_dir/modules/rr3-stub/src"
+cat > "$c10_dir/contracts/slots.toml" <<'EOF'
+schema_version = 2
+[[slot]]
+name = "stub.slot"
+layer = "body"
+status = "normal"
+EOF
+cat > "$c10_dir/modules/rr3-stub/atoms/stub/atom.toml" <<'EOF'
+schema_version = 1
+
+[atom]
+name = "stub"
+version = "0.0.1"
+
+[provides]
+slots = ["stub.slot"]
+
+[uses]
+slots = []
+EOF
+cat > "$c10_dir/modules/rr3-stub/atoms/stub/mech.rs" <<'EOF'
+//! stub 反例件（C10 fixture）：恒输出 0 的机制 + 只有腿一的对拍。
+fn rr3_stub_body() -> u64 {
+    0
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parity_leg1_stub_is_deterministic() {
+        assert_eq!(super::rr3_stub_body(), 0);
+    }
+}
+EOF
+: > "$c10_dir/modules/rr3-stub/src/composite.rs"
+if parity_gate "$c10_dir/contracts/slots.toml" "$c10_dir/modules" >/dev/null 2>&1; then
+  printf 'FAIL  ⑧-a C10 反例自证: stub 件（恒输出0+只有腿一）未被拦下——门对空件发奖即门禁失效\n'
+  gate_fail=1
+else
+  printf 'PASS  ⑧-a C10 反例自证: stub 反例被拦（恒输出0+只有腿一 → 门红）\n'
+fi
+rm -rf "$c10_dir"
+# —— ⑧-a 正仓计数
+parity_gate contracts/slots.toml modules || gate_fail=1
+
+# —— ⑧-b 件级依赖闭包 grep 门（L0/L1，C7 分级）
+atom_rs=0
+for f in modules/*/atoms/*/*.rs; do [ -f "$f" ] && atom_rs=$((atom_rs + 1)); done
+if [ "$atom_rs" -eq 0 ]; then
+  printf 'FAIL  ⑧-b atom 源文件枚举打空（门禁失效，不放行）\n'
+  gate_fail=1
+else
+  closure_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+  awk '
+    { line = $0; sub(/\/\/.*$/, "", line) }
+    strip {
+      n = gsub(/{/, "{", line); m = gsub(/}/, "}", line); depth += n - m
+      if (depth <= 0 && n + m > 0) strip = 0
+      next
+    }
+    line ~ /^[[:space:]]*#\[cfg\(test\)\]/ { strip = 1; depth = 0; next }
+    line ~ /use std::|extern crate std|use serde_json|serde_json::/ { print FILENAME ":" FNR ":" $0 }
+  ' modules/*/atoms/*/*.rs >> "$closure_hits"
+  if [ -s "$closure_hits" ]; then
+    cat "$closure_hits"
+    printf 'FAIL  ⑧-b 依赖闭包命中（L0=use std::/extern crate std；L1=+serde_json；非 test 面，见上行号）\n'
+    gate_fail=1
+  else
+    printf 'PASS  ⑧-b 件级依赖闭包（%s 份 atom 源非 test 面，L0/L1 禁词零命中）\n' "$atom_rs"
+  fi
+  rm -f "$closure_hits"
+fi
+
+# —— ⑧-c 注入面校验门（显式过滤器封改名/删除 fail-open；run_tests 内部已置全局 fail）
+if [ "$gate_fail" -ne 0 ]; then
+  fail=1
+fi
+run_tests sh -c 'cd base/runtime && cargo test -p rr-registry --test contract injection'
 
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
