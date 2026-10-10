@@ -29,4 +29,4 @@ pub const RR3_FACE_TALK: &str = "talk";
 /// 此处 re-export 保模块内名。
 pub use rr_hal::Rr3FaceFrame;
 
-pub use mech::{rr3_face_frames, rr3_face_parse_args, rr3_face_result, Rr3Face};
+pub use mech::{rr3_face_frames, Rr3Face};

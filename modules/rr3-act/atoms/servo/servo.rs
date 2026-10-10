@@ -32,4 +32,4 @@ pub struct Rr3ServoCfg {
     pub state_min_interval_ms: u64,
 }
 
-pub use mech::{rr3_servo_parse_args, rr3_servo_state_body, Rr3RateGate};
+pub use mech::{rr3_servo_check_timeout, rr3_servo_check_travel, Rr3RateGate};

@@ -28,9 +28,7 @@ use std::os::fd::{AsRawFd, IntoRawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use async_trait::async_trait;
-
-use crate::{Rr3BatteryState, Rr3HalError, Rr3Power};
+use crate::{Rr3BatteryState, Rr3ErrText, Rr3HalError, Rr3Power};
 
 /// I2C chardev 设备根（构造参数是测试/夹具的根目录接缝；真实路径 = `{root}/i2c{N}`）
 pub const RR3_I2C_DEV_ROOT_DEFAULT: &str = "/dev";
@@ -105,10 +103,10 @@ impl Rr3LinuxIna219 {
             return Ok(());
         }
         let file = std::fs::File::open(self.bus_dev_path()).map_err(|e| {
-            Rr3HalError::InvalidParam(format!(
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
                 "i2c 打开 {:?} 失败: {e}（总线不在位或权限不足——raspi-config 需开 I2C）",
                 self.bus_dev_path().display()
-            ))
+            )))
         })?;
         let fd = file.as_raw_fd();
         // SAFETY：fd 合法，I2C_SLAVE 是 i2c-dev.h 定值 ioctl（0x0703），参数
@@ -121,9 +119,11 @@ impl Rr3LinuxIna219 {
         };
         if ret < 0 {
             let detail = std::io::Error::from_raw_os_error(errno);
-            return Err(Rr3HalError::InvalidParam(format!(
-                "i2c 设从地址 {:#04x} 失败: {detail}（errno {errno}）",
-                self.addr
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                &format!(
+                    "i2c 设从地址 {:#04x} 失败: {detail}（errno {errno}）",
+                    self.addr
+                ),
             )));
         }
         *slot = Some(file.into_raw_fd()); // fd 所有权移交 self，Drop close
@@ -139,8 +139,8 @@ impl Rr3LinuxIna219 {
         let wr = unsafe { libc::write(fd, &reg as *const u8 as *const libc::c_void, 1) };
         if wr != 1 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            return Err(Rr3HalError::InvalidParam(format!(
-                "i2c 写寄存器号 {reg:#04x} 失败（errno {errno}）"
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                &format!("i2c 写寄存器号 {reg:#04x} 失败（errno {errno}）"),
             )));
         }
         let mut buf = [0u8; 2];
@@ -148,8 +148,10 @@ impl Rr3LinuxIna219 {
         let rd = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 2) };
         if rd != 2 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            return Err(Rr3HalError::InvalidParam(format!(
-                "i2c 读寄存器 {reg:#04x} 失败（{rd}/2 字节，errno {errno}——地址无应答或 NACK）"
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                &format!(
+                    "i2c 读寄存器 {reg:#04x} 失败（{rd}/2 字节，errno {errno}——地址无应答或 NACK）"
+                ),
             )));
         }
         Ok(u16::from_be_bytes(buf))
@@ -171,9 +173,8 @@ impl Drop for Rr3LinuxIna219 {
     }
 }
 
-#[async_trait]
 impl Rr3Power for Rr3LinuxIna219 {
-    async fn battery(&self) -> Result<Rr3BatteryState, Rr3HalError> {
+    fn battery(&self) -> Result<Rr3BatteryState, Rr3HalError> {
         let mut guard = self.bus_fd.lock().unwrap_or_else(|p| p.into_inner());
         self.ensure(&mut guard)?;
         drop(guard);
@@ -192,7 +193,6 @@ impl Rr3Power for Rr3LinuxIna219 {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use crate::rr3_block_on;
 
     /// I2C_SLAVE ioctl 号钉死 i2c-dev.h 定值 `_IO(0x07, 0x03)` = 0x0703
     /// （libc 0.2 musl 面不导出，自定义常量的 ABI 参考锚）
@@ -241,9 +241,10 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("i2c1"), "").unwrap();
         let dev = Rr3LinuxIna219::rr3_linux_power_new(&root, 1, 0x40);
-        let err = rr3_block_on(dev.battery()).unwrap_err();
+        let err = dev.battery().unwrap_err();
         assert!(
-            matches!(err, Rr3HalError::InvalidParam(ref m) if m.contains("i2c1")),
+            matches!(err, Rr3HalError::InvalidParam(ref m)
+                if m.rr3_err_text_as_str().contains("i2c1")),
             "错误要点名总线路径: {err}"
         );
         let _ = std::fs::remove_dir_all(&root);

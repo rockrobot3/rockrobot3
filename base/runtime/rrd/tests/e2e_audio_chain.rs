@@ -23,8 +23,8 @@ use serde_json::json;
 
 use support::{
     rr3_build_module_bin, rr3_connect_observer, rr3_field_from_log, rr3_json_of,
-    rr3_module_manifest_text, rr3_read_call_reply, rr3_read_where, rr3_rpc_frame, rr3_send,
-    RrdTest, SimManifest, E2E_TICK_MS,
+    rr3_module_manifest_text, rr3_read_call_reply, rr3_read_where, rr3_repo_root, rr3_rpc_frame,
+    rr3_send, RrdTest, SimManifest, E2E_TICK_MS,
 };
 
 /// --manifest 直驱的落盘薄封装：渲染文本来自 support 的 [`rr3_module_manifest_text`]，
@@ -42,19 +42,30 @@ fn rr3_module_manifest(tag: &str, name: &str, bin: &Path) -> SimManifest {
 
 #[test]
 fn audio_chain_sense_to_interact_end_to_end() {
-    // ---------- 夹具：真二进制 + 真 manifest ----------
+    // ---------- 夹具：真二进制 + 真 manifest + 缺省 config ----------
     let sense_bin = rr3_build_module_bin("rr3-sense");
     let interact_bin = rr3_build_module_bin("rr3-interact");
     let m_sense = rr3_module_manifest("chain", "rr3-sense", &sense_bin);
     let m_inter = rr3_module_manifest("chain", "rr3-interact", &interact_bin);
+    // S-1（0.0.5 批I）起 sense config 必读：缺省取 manifest 同目录 config.toml，
+    // 缺文件开机即退（探活失败不是被测行为，是夹具烂——e2e_act 同一条纪律）。
+    // 夹具 manifest 平铺在 /tmp（pid+tag 唯一文件名，Global Constraints 8 不许
+    // 再落一个全局 /tmp/config.toml），故 env 显式指向仓内缺省档：单麦形状恰是
+    // 本链被测形状，且与随版 config 零漂移。DOA 用例同模式（env 覆盖优先）。
+    let cfg_arg = rr3_repo_root()
+        .join("modules/rr3-sense/config.toml")
+        .to_str()
+        .expect("config 路径必须是 UTF-8")
+        .to_string();
 
     // ---------- ① boot spawn → 注册 → running ----------
     // boot 用例必须传小 tick（support 注释：sweep 复用同一旋钮，安静 tick 会让收尸永不发生）
-    let mut rrd = RrdTest::rr3_start_boot(
+    let mut rrd = RrdTest::rr3_start_boot_env(
         "e2e-chain",
         &[m_sense.path.as_path(), m_inter.path.as_path()],
         "chain",
         E2E_TICK_MS,
+        &[("RR3_SENSE_CONFIG", cfg_arg.as_str())],
     );
 
     // ---------- ① 旁观连接先就位，再看模块起不起来 ----------

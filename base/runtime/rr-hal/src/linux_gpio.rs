@@ -28,9 +28,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use async_trait::async_trait;
-
-use crate::{Rr3GpioOut, Rr3HalError};
+use crate::{Rr3ErrText, Rr3GpioOut, Rr3HalError};
 
 /// GPIO chardev 设备根（构造参数是测试/夹具的根目录接缝，不另设环境变量；
 /// 真实路径 = `{root}/gpiochip{N}`）
@@ -84,7 +82,9 @@ fn rr3_gpio_ioctl_err(context: &str, errno: libc::c_int) -> Rr3HalError {
         Rr3HalError::Busy
     } else {
         let detail = std::io::Error::from_raw_os_error(errno);
-        Rr3HalError::InvalidParam(format!("{context}: {detail}（errno {errno}）"))
+        Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+            "{context}: {detail}（errno {errno}）"
+        )))
     }
 }
 
@@ -130,10 +130,10 @@ impl Rr3LinuxGpioOut {
         // open 走 std::fs::File（Rust 面管关闭）；句柄 fd 是内核另行分配的
         // 新 fd（request.fd 回填），chip 的 fd 用完即随 File drop 关闭。
         let chip_file = std::fs::File::open(self.chip_dev_path()).map_err(|e| {
-            Rr3HalError::InvalidParam(format!(
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
                 "gpio 打开 {:?} 失败: {e}（芯片不在位或权限不足）",
                 self.chip_dev_path().display()
-            ))
+            )))
         })?;
         let mut req = Rr3GpioHandleRequest {
             lineoffsets: [0; 64],
@@ -216,9 +216,8 @@ impl Drop for Rr3LinuxGpioOut {
     }
 }
 
-#[async_trait]
 impl Rr3GpioOut for Rr3LinuxGpioOut {
-    async fn set(&self, level: bool) -> Result<(), Rr3HalError> {
+    fn set(&mut self, level: bool) -> Result<(), Rr3HalError> {
         let mut guard = self.handle_fd.lock().unwrap_or_else(|p| p.into_inner());
         self.ensure(&mut guard)?;
         drop(guard);
@@ -231,7 +230,7 @@ impl Rr3GpioOut for Rr3LinuxGpioOut {
         )
     }
 
-    async fn level(&self) -> Result<bool, Rr3HalError> {
+    fn level(&self) -> Result<bool, Rr3HalError> {
         let mut guard = self.handle_fd.lock().unwrap_or_else(|p| p.into_inner());
         self.ensure(&mut guard)?;
         drop(guard);
@@ -248,7 +247,6 @@ impl Rr3GpioOut for Rr3LinuxGpioOut {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use crate::rr3_block_on;
 
     /// ioctl 号与内核 linux/gpio.h 常量硬编码对齐（aarch64/x86_64 generic-abi）：
     /// _IOWR(0xB4, 0x03, 364) 等——布局漂移或编码式写错在此最先暴露
@@ -278,14 +276,16 @@ mod tests {
         let root = std::env::temp_dir().join(format!("rr3-hal-gpio-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("gpiochip0"), "").unwrap();
-        let out = Rr3LinuxGpioOut::rr3_linux_gpio_out_new(&root, 0, 4, "led");
-        let err = rr3_block_on(out.level()).unwrap_err();
+        let mut out = Rr3LinuxGpioOut::rr3_linux_gpio_out_new(&root, 0, 4, "led");
+        // 探活读面 &self；写面 set 是 &mut self，绑定取 mut
+        let err = out.level().unwrap_err();
         assert!(
-            matches!(err, Rr3HalError::InvalidParam(ref m) if m.contains("gpiochip0")),
+            matches!(err, Rr3HalError::InvalidParam(ref m)
+                if m.rr3_err_text_as_str().contains("gpiochip0")),
             "错误要点名芯片路径: {err}"
         );
         // set 同路径：同一实例第二次调用仍在 ensure 处回错（句柄未建立）
-        let err = rr3_block_on(out.set(true)).unwrap_err();
+        let err = out.set(true).unwrap_err();
         assert!(matches!(err, Rr3HalError::InvalidParam(_)));
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -370,6 +370,25 @@ mod tests {
         assert!(errs.is_empty(), "{errs:?}");
     }
 
+    /// C16 件面形状 × C3 模板成对（0.0.5 批I）：生成五件套不得出现 serde_json——
+    /// 件面只留纯机制（结构体+判定函数），载荷组装归组合件承载层（ADR-0019 修订 4）。
+    /// 模板漂移反向断言（模块设计索引 X-5 教训：模板不改，新件一生成就违规）。
+    #[test]
+    fn generated_atom_face_carries_no_serde_json() {
+        let root = scratch_root("closure");
+        rr3_mkmod_generate_atom("sample_atom", "power.battery", &root).unwrap();
+        for rel in [
+            "sample_atom/atom.toml",
+            "sample_atom/sample_atom.rs",
+            "sample_atom/mech.rs",
+            "sample_atom/assemble.toml",
+            "sample_atom/private.rs",
+        ] {
+            let text = std::fs::read_to_string(root.join(rel)).unwrap();
+            assert!(!text.contains("serde_json"), "{rel} 不得出现 serde_json");
+        }
+    }
+
     /// 非法输入三类：坏原子名、已存在目录、未登记格位（查册门回灌拒绝）
     #[test]
     fn atom_generation_rejects_bad_inputs() {

@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rr_core::runtime::{rr3_dispatch_class, Rr3Dispatch, Rr3ModuleRuntime};
 use rr_core::{rr3_frame_compose, RR3_TRACE_ID_DIRECT};
@@ -97,14 +97,28 @@ fn rr3_now_ns() -> u64 {
         .unwrap_or(0)
 }
 
-/// 心跳拍点时基（ms）：机制核 [`Rr3ModuleRuntime`] 的注入时钟在 std 驱动器
-/// 侧的供给（ADR-0018 裁定 3 的"单调时基"——墙钟 ms 在本 crate 的用途只有
-/// 拍点间隔度量，与 rrd 侧 watchdog 的 ms 语义同构）。
-fn rr3_now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+/// 单调时基（0.0.5 批I A-2）：ADR-0018 裁定 3"单调时基"的 **std 驱动器侧供给**
+/// ——`Instant` 锚点起的相对毫秒，墙钟回拨/跳变不影响拍点判定。旧实现用
+/// `SystemTime` 却自称"单调"是误称，本型纠正；与 rrd 侧 watchdog 的 ms 语义
+/// 同构（rrd 同样是进程内单调毫秒）。`rr3.heartbeat` 的 `timestamp_ns` 仍走
+/// 墙钟（契约规定 CLOCK_REALTIME，见 [`rr3_now_ns`]）。
+pub struct Rr3TimeBase {
+    anchor: Instant,
+}
+
+impl Rr3TimeBase {
+    /// 以当下为锚点新建
+    pub fn rr3_time_base_new() -> Self {
+        Self {
+            anchor: Instant::now(),
+        }
+    }
+
+    /// 锚点起的单调毫秒（机制核 [`Rr3ModuleRuntime`] 注入时钟的 std 供给；
+    /// 模块业务线程的限速门/节拍同用此型，只看间隔不看绝对值）
+    pub fn rr3_now_ms(&self) -> u64 {
+        self.anchor.elapsed().as_millis() as u64
+    }
 }
 
 struct Rr3Inner {
@@ -284,12 +298,15 @@ impl Rr3BusClient {
             }
         };
         inner.task.store(task, Ordering::Relaxed);
+        // 单调时基（批I A-2）：拍点全链（注册首拍 + 心跳判定）同一 Instant 锚点，
+        // 墙钟回拨不再能扰动心跳节拍
+        let tb = Rr3TimeBase::rr3_time_base_new();
         // 机制核状态机转移 Registering → Online，首拍 = 此刻 + heartbeat_ms
         inner
             .rt
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .rr3_mark_registered(task, rr3_now_ms());
+            .rr3_mark_registered(task, tb.rr3_now_ms());
 
         // 心跳线程：拍点真值在机制核状态机（相对节拍，逐拍 +hb）；std 驱动器
         // 只做平台事——sleep 等拍点、组装/发帧。被拒/超时 = 进程退出，交给
@@ -304,7 +321,7 @@ impl Rr3BusClient {
                     .rt
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
-                    .rr3_next_beat_wait_ms(rr3_now_ms())
+                    .rr3_next_beat_wait_ms(tb.rr3_now_ms())
                 else {
                     return; // 断开（Down）即停拍——"不装活着"同一裁定
                 };
@@ -312,7 +329,7 @@ impl Rr3BusClient {
                 if hb_inner.stop.load(Ordering::Relaxed) {
                     return;
                 }
-                let now_ms = rr3_now_ms();
+                let now_ms = tb.rr3_now_ms();
                 let due = hb_inner
                     .rt
                     .lock()

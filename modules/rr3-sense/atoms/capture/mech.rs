@@ -1,17 +1,18 @@
 //! capture 原子件机制主体（五件套③，自原 src/audio/{capture.rs, mod.rs, doa.rs} 逐字迁入，
 //! 逻辑零改动）。
 //!
-//! 三段：帧节拍换算 + 多通道下混（R14）｜pcm 事件体构造｜DoA 粗判向（批F2）。
-//! base64 编码归 rr-ipc 线格式层（0.0.5 批C① 塌缩，方案 §12.3），本原子只消费。
+//! 两段：帧节拍换算 + 多通道下混（R14）｜DoA 粗判向（批F2；0.0.5 批I S-8 整型化）。
+//! base64 编码归 rr-ipc 线格式层（0.0.5 批C① 塌缩，方案 §12.3），本原子只消费；
+//! pcm 事件体构造随 0.0.5 批I S-7 上移组合件（ADR-0019 修订 4：件面只留纯机制，
+//! 零 serde_json），用例随迁。
 
 use rr_hal::{Rr3AudioCfg, Rr3PcmStream};
-use rr_ipc::rr3_base64_encode;
-use serde_json::{json, Value};
 
 // ---------- 帧节拍换算 ----------
 
 /// 一次采集节拍读多少帧：`rate × frame_ms / 1000`（16000×20 = 320 帧）。
-/// 采样点=帧×声道；HAL 的 `read(frames)` 按**帧**计数，换算只在这一处。
+/// HAL 的 `read(buf)`（F1 定形）收采样点 buf（帧×声道交错）、返回实填采样
+/// 点数——帧数→采样点数的换算只在组合件组装 buf 这一处。
 pub fn rr3_frames_per_tick(sample_rate_hz: u32, frame_ms: u64) -> usize {
     (sample_rate_hz as u64 * frame_ms / 1000) as usize
 }
@@ -21,7 +22,9 @@ pub fn rr3_frames_per_tick(sample_rate_hz: u32, frame_ms: u64) -> usize {
 /// 多通道 PCM 下混单声道：按帧对各声道取算术平均（i32 累加后整除，不引入饱和偏差），
 /// 输出采样点数 = 帧数。`channels <= 1` 时原样克隆（单麦链路零改动）；尾部不足一帧的
 /// 余数丢弃（采集侧 samples = 帧×声道，恒整除）。
-pub fn rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16> {
+/// 0.0.5 批I S-6：无件外读者（stream 级下混经 [`rr3_pcm_downmix_stream`] 独占），
+/// 降 pub(crate) 不进契约面。
+pub(crate) fn rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16> {
     if channels <= 1 {
         return samples.to_vec();
     }
@@ -52,26 +55,6 @@ pub fn rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream {
     }
 }
 
-// ---------- pcm 事件体构造 ----------
-
-/// `rr3-sense/audio/pcm` 的事件体（stream）。PCM 按 s16le 小端打包后 base64；
-/// 320 帧 @16k/mono ≈ 856 字符，20ms 一帧对 UDS 无压力（shm 零拷贝随 M5）。
-/// 负载里**不含 topic**（topic 由 rr-bus 客户端并入，见 client.rs 的 rr3_publish）。
-pub fn rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value {
-    let mut bytes = Vec::with_capacity(pcm.samples.len() * 2);
-    for s in &pcm.samples {
-        bytes.extend_from_slice(&s.to_le_bytes());
-    }
-    json!({
-        "seq": seq,
-        "format": "s16le",
-        "rate": pcm.cfg.sample_rate_hz,
-        "channels": pcm.cfg.channels,
-        "ms": pcm.rr3_pcm_duration_ms(),
-        "pcm_b64": rr3_base64_encode(&bytes),
-    })
-}
-
 // ---------- DoA 粗判向（批F2，方案 §5.3 判向-转向编排 / R14） ----------
 //
 // 双麦**幅度差（ILD）**粗判向：逐通道 RMS 的线性比值直接反演 `sin θ`
@@ -80,14 +63,43 @@ pub fn rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value {
 // 相位差（ITD）在 sim 源里是保真项不是判据：粗判向 ±90° 分档走幅度差，
 // 真件换装（批F5a，USB 麦阵列）按实测阵列特性再评估是否升级互相关测向。
 //
+// S-8 整型化（0.0.5 批I）：与 vad 原子同一条 golden 纪律——任何机器逐位一致，
+// 浮点 sqrt/asin 无此保证。三步全整数流水线：
+// ① 逐通道 RMS 走 [`rr3_isqrt`]（与 vad/mech.rs 各持一份，原子间不交叉依赖）；
+// ② 比值 k = (r_r − r_l)/(r_r + r_l) 定点成 Q15 整数（[-32768, 32767]）；
+// ③ k 经 256 格 asin 查表（[`RR3_ASIN_DEG_LUT`]）反演成整度，下标 =
+//    round((k_Q15 + 32768) / 256)——舍入除法，±90° 端点干净落位（k=±1 → ±90°；
+//    截断除法会把 +90° 落到 86°，故必须舍入）。误差预算 |θ| ≤ 75° 内 ≤ 1°
+//    （Q15 量化与查表舍入的叠加上界）；75° 外落在左/右档深处，分档无歧义即达
+//    目的。分档边界（±29°/±31°）在单测钉死不糊。
+//
 // 落档口径（零新契约）：结果只随在册主题 `rr3-sense/audio/vad_start` 的
 // **onset** 边沿上路（`doa` 字段）——offset 静音帧无方向可判，不带 doa
 // （与 rms_peak 同一形状纪律）。
 
+/// 256 格 asin 查表（度）：`RR3_ASIN_DEG_LUT[i] = round(asin((i − 128) / 128))`，
+/// i ∈ [0, 256] 覆盖 sinθ ∈ [−1, 1] 全值域。生成式一次性钉死（python3 生成后
+/// 原文抄录），运行期零浮点；两端点（−90/90）与零点在单测钉死。
+const RR3_ASIN_DEG_LUT: [i32; 257] = [
+    -90, -83, -80, -78, -76, -74, -72, -71, -70, -68, -67, -66, -65, -64, -63, -62, -61, -60, -59,
+    -58, -58, -57, -56, -55, -54, -54, -53, -52, -51, -51, -50, -49, -49, -48, -47, -47, -46, -45,
+    -45, -44, -43, -43, -42, -42, -41, -40, -40, -39, -39, -38, -38, -37, -36, -36, -35, -35, -34,
+    -34, -33, -33, -32, -32, -31, -31, -30, -29, -29, -28, -28, -27, -27, -26, -26, -25, -25, -24,
+    -24, -23, -23, -23, -22, -22, -21, -21, -20, -20, -19, -19, -18, -18, -17, -17, -16, -16, -15,
+    -15, -14, -14, -14, -13, -13, -12, -12, -11, -11, -10, -10, -9, -9, -9, -8, -8, -7, -7, -6, -6,
+    -5, -5, -4, -4, -4, -3, -3, -2, -2, -1, -1, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7,
+    7, 8, 8, 9, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 14, 15, 15, 16, 16, 17, 17, 18, 18,
+    19, 19, 20, 20, 21, 21, 22, 22, 23, 23, 23, 24, 24, 25, 25, 26, 26, 27, 27, 28, 28, 29, 29, 30,
+    31, 31, 32, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 38, 38, 39, 39, 40, 40, 41, 42, 42, 43, 43,
+    44, 45, 45, 46, 47, 47, 48, 49, 49, 50, 51, 51, 52, 53, 54, 54, 55, 56, 57, 58, 58, 59, 60, 61,
+    62, 63, 64, 65, 66, 67, 68, 70, 71, 72, 74, 76, 78, 80, 83, 90,
+];
+
 /// 分档阈值的绝对值（度）：|θ| ≤ 30° 落中档，否则左/右档。
 /// 粗判向三档（左/中/右）的边界——±90° 值域对半砍出的常用档位，不进 config
 /// （判据只钉"±90° 分档"这个口径，阈值细化随真件换装实测再裁）。
-pub const RR3_DOA_BIN_THRESHOLD_DEG: i32 = 30;
+/// 0.0.5 批I S-6：mech 内私有常数，无件外读者，降 pub(crate)。
+pub(crate) const RR3_DOA_BIN_THRESHOLD_DEG: i32 = 30;
 
 /// DoA 分档（±90° 值域的三档离散）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,11 +129,24 @@ pub struct Rr3DoaFix {
     pub bin: Rr3DoaBin,
 }
 
-/// vad_start onset 的 `doa` 字段体（schema：deg + bin 两键，additionalProperties=false）。
-/// 判向机制在本原子（原始帧下混前判定），字段形状随承载事件落 vad 原子——组合件
-/// 桥接两原子时以此值为载荷（跨原子零类型依赖，只过 serde_json::Value）。
-pub fn rr3_doa_field(d: &Rr3DoaFix) -> Value {
-    json!({ "deg": d.deg, "bin": d.bin.rr3_doa_bin_as_str() })
+/// 整数平方根（牛顿二分）：`isqrt(x)` = ⌊√x⌋。通道平方和最大约
+/// 320 × 32767² ≈ 3.4e11，u64 绰绰有余；`mid <= x / mid` 的写法避免 mid*mid 溢出。
+/// 与 vad 原子的 rr3_isqrt 各持一份（原子间不交叉依赖，0.0.5 批C① 同款纪律）。
+fn rr3_isqrt(x: u64) -> u64 {
+    if x < 2 {
+        return x;
+    }
+    let (mut lo, mut hi, mut ans) = (1u64, x, 1u64);
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        if mid <= x / mid {
+            ans = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    ans
 }
 
 /// 一帧多通道 PCM 的粗判向。返回 `None` 的三种情形：
@@ -145,10 +170,13 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8) -> Option<Rr3DoaFix> {
     if sq_l + sq_r == 0 {
         return None;
     }
-    let (r_l, r_r) = ((sq_l as f64).sqrt(), (sq_r as f64).sqrt());
-    let k = ((r_r - r_l) / (r_r + r_l)).clamp(-1.0, 1.0);
-    // ±90° 值域内的连续角：asin 值域恰是 [-90°, +90°]，舍入到整度
-    let deg = (k.asin().to_degrees()).round() as i32;
+    let (r_l, r_r) = (rr3_isqrt(sq_l as u64), rr3_isqrt(sq_r as u64));
+    // Q15 定点比值：k ∈ [−1, 1] → 整数 [−32768, 32767]（+1 端点饱和到 32767）
+    let k_q15 =
+        (((r_r as i64 - r_l as i64) * 32768 / (r_l + r_r) as i64) as i32).clamp(-32768, 32767);
+    // 256 格查表下标：round((k_Q15 + 32768) / 256)，值域 [0, 256]
+    let idx = (((k_q15 + 32768) * 256 + 32768) >> 16) as usize;
+    let deg = RR3_ASIN_DEG_LUT[idx];
     let bin = if deg < -RR3_DOA_BIN_THRESHOLD_DEG {
         Rr3DoaBin::Left
     } else if deg > RR3_DOA_BIN_THRESHOLD_DEG {
@@ -162,9 +190,6 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8) -> Option<Rr3DoaFix> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// RFC 4648 标准字母表（测试侧独立解码器用，与实现侧各持一份）
-    const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     #[test]
     fn frame_conversion_covers_registered_and_odd_rates() {
@@ -223,52 +248,6 @@ mod tests {
         assert_eq!(rr3_pcm_downmix_stream(one.clone()), one);
     }
 
-    #[test]
-    fn pcm_event_body_round_trips_through_base64() {
-        let pcm = Rr3PcmStream {
-            cfg: Rr3AudioCfg {
-                sample_rate_hz: 16000,
-                channels: 1,
-                bit_depth: 16,
-            },
-            samples: vec![1000, -2000, 32767, -32768],
-        };
-        let body = rr3_pcm_event_body(7, &pcm);
-        assert_eq!(body["seq"], 7);
-        assert_eq!(body["format"], "s16le");
-        assert_eq!(body["rate"], 16000);
-        assert_eq!(body["channels"], 1);
-        assert_eq!(body["ms"], 0, "4 帧 @16k 不足 1ms");
-        assert_eq!(
-            body.get("topic"),
-            None,
-            "负载不重复放 topic（由客户端并入）"
-        );
-        // 解回字节序，逐点核对（含 i16 两个端点值）。测试侧独立解码器：按 `=` 位
-        // 决定该组贡献几个数据字节（与编码器的补位规则对称）。
-        let b64 = body["pcm_b64"].as_str().unwrap();
-        let alphabet = |c: char| B64.iter().position(|&a| a as char == c).unwrap();
-        let mut bytes: Vec<u8> = Vec::new();
-        for q in b64.as_bytes().chunks(4) {
-            let v = |c: u8| alphabet(c as char) as u32;
-            let n = (v(q[0]) << 18)
-                | (v(q[1]) << 12)
-                | (if q[2] == b'=' { 0 } else { v(q[2]) << 6 })
-                | (if q[3] == b'=' { 0 } else { v(q[3]) });
-            bytes.push((n >> 16) as u8);
-            if q[2] != b'=' {
-                bytes.push((n >> 8) as u8);
-            }
-            if q[3] != b'=' {
-                bytes.push(n as u8);
-            }
-        }
-        assert_eq!(bytes.len(), 8);
-        for (i, s) in pcm.samples.iter().enumerate() {
-            assert_eq!(i16::from_le_bytes([bytes[i * 2], bytes[i * 2 + 1]]), *s);
-        }
-    }
-
     /// 用注入模型造一帧双通道样本：`g_l = 1 - sinθ`、`g_r = 1 + sinθ` 的整幅正弦
     /// （与 rr-hal sim 源同一形状，独立小实现——判向正确性不依赖被测源头）。
     fn stereo_frame(deg: f64, frames: usize) -> Vec<i16> {
@@ -292,7 +271,8 @@ mod tests {
         assert_eq!(rr3_doa_fix(&[], 2), None, "空帧无方向");
     }
 
-    /// 注入角 → 反演角逐点贴合（±2° 容差吸收整型截断），三档边界两侧各验一档。
+    /// 注入角 → 反演角逐点贴合（±1° 容差：S-8 整型化后的预算——Q15 量化与查表
+    /// 舍入的叠加），三档边界两侧各验一档；±90° 端点经舍入除法干净落位。
     #[test]
     fn doa_inverts_ild_model_and_bins_pm90() {
         for (deg, want_bin) in [
@@ -309,7 +289,7 @@ mod tests {
             let samples = stereo_frame(deg, 1600);
             let fix = rr3_doa_fix(&samples, 2).unwrap_or_else(|| panic!("{deg} 应判出"));
             assert!(
-                (fix.deg as f64 - deg).abs() <= 2.0,
+                (fix.deg as f64 - deg).abs() <= 1.0,
                 "deg={deg}: 反演角 {} 超容差",
                 fix.deg
             );
@@ -318,13 +298,16 @@ mod tests {
     }
 
     /// 分档阈值常数钉死 30°：档位语义（左/中/右）与 as_str 字面量一起 pin——
-    /// 事件消费方按字面量分派，漂移当场红。
+    /// 事件消费方按字面量分派，漂移当场红。查表端点与零点一并 pin。
     #[test]
     fn doa_bin_str_and_threshold_are_pinned() {
         assert_eq!(RR3_DOA_BIN_THRESHOLD_DEG, 30);
         assert_eq!(Rr3DoaBin::Left.rr3_doa_bin_as_str(), "left");
         assert_eq!(Rr3DoaBin::Center.rr3_doa_bin_as_str(), "center");
         assert_eq!(Rr3DoaBin::Right.rr3_doa_bin_as_str(), "right");
+        assert_eq!(RR3_ASIN_DEG_LUT[0], -90);
+        assert_eq!(RR3_ASIN_DEG_LUT[128], 0);
+        assert_eq!(RR3_ASIN_DEG_LUT[256], 90);
     }
 
     /// 多通道（>2）取前两路 L/R 对：第三路起的内容不影响判向结果。
@@ -341,17 +324,5 @@ mod tests {
         let a = rr3_doa_fix(&stereo, 2).unwrap();
         let b = rr3_doa_fix(&three, 3).unwrap();
         assert_eq!(a, b, "第三路不得影响 L/R 对的判向");
-    }
-
-    /// doa 字段体形状：deg + bin 两键（schema additionalProperties=false，多带即违约）。
-    #[test]
-    fn doa_field_carries_deg_and_bin_only() {
-        let v = rr3_doa_field(&Rr3DoaFix {
-            deg: -60,
-            bin: Rr3DoaBin::Left,
-        });
-        assert_eq!(v["deg"], -60);
-        assert_eq!(v["bin"], "left");
-        assert_eq!(v.as_object().unwrap().len(), 2, "字段超集即违约: {v}");
     }
 }

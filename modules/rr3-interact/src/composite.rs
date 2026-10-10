@@ -34,9 +34,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{
-    backend::rr3_hal_audio_sink, backend::rr3_hal_display, rr3_block_on, RR3_AUDIO_CFG_16K_MONO16,
-};
+use rr_hal::{backend::rr3_hal_audio_sink, backend::rr3_hal_display, RR3_AUDIO_CFG_16K_MONO16};
 use rr_ipc::{opcode, Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 use serde_json::{json, Value};
 
@@ -78,8 +76,8 @@ pub fn rr3_interact_run() -> Result<(), String> {
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
     println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
-    let (sink, backend) = rr3_hal_audio_sink();
-    rr3_block_on(sink.open(RR3_AUDIO_CFG_16K_MONO16))
+    let (mut sink, backend) = rr3_hal_audio_sink();
+    sink.open(RR3_AUDIO_CFG_16K_MONO16)
         .map_err(|e| format!("打开播放面({backend})失败: {e}"))?;
     println!("播放面就绪: backend={backend} rate=16000 ch=1");
 
@@ -89,8 +87,10 @@ pub fn rr3_interact_run() -> Result<(), String> {
     // 显示面选择 + 开机探活：读回当前帧，Unsupported 即致命——显式回错不静默
     // 退化（真件档板显式 linux 时 MAX7219 后端未实装，探活 exit(1) 是预期语义，
     // R11③）；sim 档走虚拟点阵内存记录，主循环出帧全链可见
-    let (display, display_backend) = rr3_hal_display();
-    rr3_block_on(display.frame()).map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
+    let (mut display, display_backend) = rr3_hal_display();
+    display
+        .frame()
+        .map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
     println!("显示面就绪: backend={display_backend} 8x8");
 
     // 面板（0.0.4 批C，Q3 裁定）：独立 HTTP 线程 + 动作通道。link 缓存是状态页
@@ -147,7 +147,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
                     // 业务性失败折成 error 应答（请求-应答语义），不当致命错误
                     let result = match topic {
                         player::RR3_TTS_TOPIC => {
-                            rr3_handle_tts(&bus, sink.as_ref(), &mut face, &args)
+                            rr3_handle_tts(&bus, sink.as_mut(), &mut face, &args)
                         }
                         face::RR3_FACE_TOPIC => rr3_handle_face(&mut face, &args),
                         other => Err(format!(
@@ -166,11 +166,11 @@ pub fn rr3_interact_run() -> Result<(), String> {
         while let Ok((action, tx)) = act_rx.try_recv() {
             let result = match action {
                 Rr3PanelAction::Beep => {
-                    player::rr3_tts_play(sink.as_ref(), "beep").map(|ms| json!({ "played_ms": ms }))
+                    player::rr3_tts_play(sink.as_mut(), "beep").map(|ms| json!({ "played_ms": ms }))
                 }
                 Rr3PanelAction::Face { expression } => face
                     .rr3_face_set(&expression)
-                    .map(|(c, p)| face::rr3_face_result(c, p)),
+                    .map(|(c, p)| rr3_face_result(c, p)),
             };
             let _ = tx.send(result);
         }
@@ -182,7 +182,8 @@ pub fn rr3_interact_run() -> Result<(), String> {
             face_tick_at = std::time::Instant::now();
             let (expr, ix) = face.rr3_face_tick();
             let frame = rr3_face_frames(expr)[ix];
-            rr3_block_on(display.draw(&frame))
+            display
+                .draw(&frame)
                 .unwrap_or_else(|e| eprintln!("rr3-interact-face: 出帧失败: {e}"));
         }
     }
@@ -191,11 +192,11 @@ pub fn rr3_interact_run() -> Result<(), String> {
 /// TTS 点名：校验参数 → 表情切 talk → 播放 → 恢复表情 → 回 played_ms。
 fn rr3_handle_tts(
     _bus: &Rr3BusClient,
-    sink: &dyn rr_hal::Rr3AudioSink,
+    sink: &mut dyn rr_hal::Rr3AudioSink,
     face: &mut Rr3Face,
     args: &Value,
 ) -> Result<Value, String> {
-    let text = player::rr3_tts_parse_args(args)?;
+    let text = rr3_tts_parse_args(args)?;
     let suspended = face.rr3_face_begin_talk();
     let played = player::rr3_tts_play(sink, &text);
     face.rr3_face_end_talk();
@@ -204,12 +205,83 @@ fn rr3_handle_tts(
         "tts: {} 字符播了 {played_ms}ms（talk 挂起 {suspended}）",
         text.chars().count()
     );
-    Ok(player::rr3_tts_result(&text, played_ms))
+    Ok(rr3_tts_result(&text, played_ms))
 }
 
 /// 表情点名：校验并切换，回 `{"expression","previous"}`。
 fn rr3_handle_face(face: &mut Rr3Face, args: &Value) -> Result<Value, String> {
-    let expr = face::rr3_face_parse_args(args)?;
+    let expr = rr3_face_parse_args(args)?;
     let (current, previous) = face.rr3_face_set(&expr)?;
-    Ok(face::rr3_face_result(current, previous))
+    Ok(rr3_face_result(current, previous))
+}
+
+// ---------- 载荷组装面（0.0.5 批I I-8：上移承载层，ADR-0019 修订 4） ----------
+// 件的对外契约面 = 结构体 + 判定函数；点名下钻（parse_args）与应答体（result）
+// 的 Value 生产归本文件，线上字节逐字不变（用例随迁继续守字节面）。
+
+/// TTS 点名下钻：`text` 必填且须非空字符串。校验失败返回 `Err`，由调用方折成
+/// error 应答（请求-应答语义，不当致命错误）。
+fn rr3_tts_parse_args(args: &Value) -> Result<String, String> {
+    let text = args
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{} 缺 string 参数 text", player::RR3_TTS_TOPIC))?;
+    if text.is_empty() {
+        return Err(format!("{} 的 text 不能为空", player::RR3_TTS_TOPIC));
+    }
+    Ok(text.to_string())
+}
+
+/// `rr3-interact/tts/text` 的应答体：实际播出的毫秒数与计费字符数
+/// （封顶后 played_ms < chars×60 时两者对不上，一并回给调用方对表）。
+fn rr3_tts_result(text: &str, played_ms: u64) -> Value {
+    json!({ "played_ms": played_ms, "chars": text.chars().count() })
+}
+
+/// 表情点名下钻：`expression` 必填。合法性交给 [`face::Rr3Face::rr3_face_set`]
+/// （错误信息里带白名单，这里不做两遍）。
+fn rr3_face_parse_args(args: &Value) -> Result<String, String> {
+    args.get("expression")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("{} 缺 string 参数 expression", face::RR3_FACE_TOPIC))
+}
+
+/// `rr3-interact/face/expression` 的应答体：切换后的表情与切换前的表情。
+fn rr3_face_result(current: &str, previous: &str) -> Value {
+    json!({ "expression": current, "previous": previous })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 点名下钻与应答体形状（用例自件面随迁，I-8：承载层守字节面）。
+    #[test]
+    fn args_and_result_shapes() {
+        assert_eq!(rr3_tts_parse_args(&json!({ "text": "hi" })).unwrap(), "hi");
+        for bad in [
+            json!({}),
+            json!({ "text": 3 }),
+            json!({ "text": "" }),
+            json!({ "text": null }),
+        ] {
+            assert!(rr3_tts_parse_args(&bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            rr3_face_parse_args(&json!({ "expression": "blink" })).unwrap(),
+            "blink"
+        );
+        assert!(rr3_face_parse_args(&json!({})).is_err());
+        assert!(rr3_face_parse_args(&json!({ "expression": 1 })).is_err());
+
+        let r = rr3_tts_result("你好", 120);
+        assert_eq!(r["played_ms"], 120);
+        assert_eq!(r["chars"], 2);
+        assert_eq!(r.get("topic"), None, "应答体不带 topic");
+        let r = rr3_face_result("talk", "idle");
+        assert_eq!(r["expression"], "talk");
+        assert_eq!(r["previous"], "idle");
+        assert_eq!(r.get("topic"), None, "应答体不带 topic");
+    }
 }

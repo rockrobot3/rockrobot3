@@ -181,14 +181,16 @@ fi
 step "⑦ §13 静态断言（零策略载荷/F⊗F/五件套/入口体量）"
 static_fail=0
 # ⑦-a 机制核零策略载荷：厂商/产品/芯片/器件名与 vendor/product 条件分支命中即红。
-#     机制核目录 = no_std 可达面：rr-core 全部 + rr-ipc 字节契约层 protocol/ + 传输抽象
-#     transport/mod.rs；具体传输实现（uds/shm/tcp/uart）是平台供给，不在载荷面。
+#     机制核目录 = no_std 可达面：rr-core 全部 + rr-hal-api 能力面契约层全部
+#     （0.0.5 批I C8：新机制核面同批进本扫面，门查门）+ rr-ipc 字节契约层 protocol/
+#     + 传输抽象 transport/mod.rs；具体传输实现（uds/shm/tcp/uart）是平台供给，不在载荷面。
 #     行注释先剥离（`// …` 含 `//!`）再查：文档注释常需表述门禁规则自身，自指不违例。
 #     禁词是 rock3 自有清单（同 atom.rs 板无关门的厂商/产品段，另加中文板名），不搬外部模板。
 #     自家产品标识（rock3/洛克/RR3_ 前缀）不进禁词——机制自身的运行时身份（如
 #     rock3-ipc.sock 契约冻结路径）不是策略载荷，门禁禁的是**外部**板卡厂商与器件。
 policy_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-for f in base/runtime/rr-core/src/*.rs base/runtime/rr-ipc/src/protocol/*.rs \
+for f in base/runtime/rr-core/src/*.rs base/runtime/rr-hal-api/src/*.rs \
+         base/runtime/rr-ipc/src/protocol/*.rs \
          base/runtime/rr-ipc/src/transport/mod.rs; do
   sed 's://.*$::' "$f" \
     | grep -inE 'rockchip|raspberry|broadcom|espressif|allwinner|sunxi|amlogic|rk35|rk33|rv11|cm4|esp32|ina219|max7219|tp4056|es8388|sg90|cp2102|mpu6050|树莓派|if.*(vendor|product)' \
@@ -199,7 +201,7 @@ if [ -s "$policy_hits" ]; then
   printf 'FAIL  ⑦-a 机制核零策略载荷命中（厂商/产品名或 vendor 条件分支，见上行号）\n'
   static_fail=1
 else
-  printf 'PASS  ⑦-a 机制核零策略载荷（rr-core + rr-ipc 契约层/传输抽象，禁词零命中）\n'
+  printf 'PASS  ⑦-a 机制核零策略载荷（rr-core + rr-hal-api + rr-ipc 契约层/传输抽象，禁词零命中）\n'
 fi
 # ⑦-b F⊗F 非法 + 禁薄胶水存在性：composite.toml [assemble].atoms 的每个成员必须解析到
 #     本模块 atoms/<名>/atom.toml——⊗ 链只能装原子件，把组合件/面当被装配方（F⊗F/C⊗C）

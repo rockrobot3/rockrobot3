@@ -25,9 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
-
-use crate::{Rr3HalError, Rr3PwmServo};
+use crate::{Rr3ErrText, Rr3HalError, Rr3PwmServo};
 
 /// 内核 pwm sysfs 挂载点（构造参数是测试/夹具的根目录接缝，不另设环境变量）
 pub const RR3_PWM_SYSFS_ROOT_DEFAULT: &str = "/sys/class/pwm";
@@ -53,9 +51,9 @@ const PWM_EXPORT_POLL: Duration = Duration::from_millis(10);
 /// 越域回 [`Rr3HalError::InvalidParam`] 点名，不静默 clamp。
 fn servo_duty_ns(deg: u16) -> Result<u32, Rr3HalError> {
     if deg > RR3_SERVO_ANGLE_MAX_DEG {
-        return Err(Rr3HalError::InvalidParam(format!(
+        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
             "SG90 角域 0..={RR3_SERVO_ANGLE_MAX_DEG}，收到 {deg}°——越域显式回错不静默 clamp（行程裁决在模块 config angle_limit_deg）"
-        )));
+        ))));
     }
     let span = RR3_SERVO_PULSE_MAX_NS - RR3_SERVO_PULSE_MIN_NS;
     Ok(RR3_SERVO_PULSE_MIN_NS + (deg as u32 * span) / RR3_SERVO_ANGLE_MAX_DEG as u32)
@@ -68,31 +66,35 @@ fn servo_angle_of_duty(duty: u64) -> Result<u16, Rr3HalError> {
     let span = (RR3_SERVO_PULSE_MAX_NS - RR3_SERVO_PULSE_MIN_NS) as u64;
     let min = RR3_SERVO_PULSE_MIN_NS as u64;
     if !(min..=min + span).contains(&duty) {
-        return Err(Rr3HalError::InvalidParam(format!(
+        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
             "pwm 占空比 {duty}ns 不在 SG90 脉宽映射域 [{RR3_SERVO_PULSE_MIN_NS}, {RR3_SERVO_PULSE_MAX_NS}]ns——通道被外部改写或尚未配置"
-        )));
+        ))));
     }
     Ok((((duty - min) * RR3_SERVO_ANGLE_MAX_DEG as u64 + span / 2) / span) as u16)
 }
 
 fn pwm_read_u64(path: &Path) -> Result<u64, Rr3HalError> {
-    let s = std::fs::read_to_string(path)
-        .map_err(|e| Rr3HalError::InvalidParam(format!("pwm 读 {:?} 失败: {e}", path.display())))?;
+    let s = std::fs::read_to_string(path).map_err(|e| {
+        Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+            "pwm 读 {:?} 失败: {e}",
+            path.display()
+        )))
+    })?;
     s.trim().parse::<u64>().map_err(|e| {
-        Rr3HalError::InvalidParam(format!(
+        Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
             "pwm {:?} 内容 {:?} 不是合法读数: {e}",
             path.display(),
             s.trim()
-        ))
+        )))
     })
 }
 
 fn pwm_write(path: &Path, val: impl std::fmt::Display) -> Result<(), Rr3HalError> {
     std::fs::write(path, format!("{val}\n")).map_err(|e| {
-        Rr3HalError::InvalidParam(format!(
+        Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
             "pwm 写 {val} 到 {:?} 失败: {e}（权限不足或通道不在位）",
             path.display()
-        ))
+        )))
     })
 }
 
@@ -141,19 +143,21 @@ impl Rr3LinuxPwmServo {
         if we_exported {
             let export_path = self.chip_dir().join("export");
             std::fs::write(&export_path, format!("{}\n", self.channel)).map_err(|e| {
-                Rr3HalError::InvalidParam(format!(
+                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
                     "pwm 导出通道 {} 写 {:?} 失败: {e}（芯片不在位——dtoverlay=pwm-2chan 未开，或权限不足）",
                     self.channel,
                     export_path.display()
-                ))
+                )))
             })?;
             let t0 = Instant::now();
             while !dir.exists() {
                 if t0.elapsed() >= PWM_EXPORT_TIMEOUT {
-                    return Err(Rr3HalError::InvalidParam(format!(
-                        "pwm 导出后 {:?} 未在 {}ms 内出现（内核 sysfs 异常）",
-                        dir.display(),
-                        PWM_EXPORT_TIMEOUT.as_millis()
+                    return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                        &format!(
+                            "pwm 导出后 {:?} 未在 {}ms 内出现（内核 sysfs 异常）",
+                            dir.display(),
+                            PWM_EXPORT_TIMEOUT.as_millis()
+                        ),
                     )));
                 }
                 std::thread::sleep(PWM_EXPORT_POLL);
@@ -194,16 +198,15 @@ impl Drop for Rr3LinuxPwmServo {
     }
 }
 
-#[async_trait]
 impl Rr3PwmServo for Rr3LinuxPwmServo {
-    async fn set_angle(&self, deg: u16) -> Result<(), Rr3HalError> {
+    fn set_angle(&mut self, deg: u16) -> Result<(), Rr3HalError> {
         let duty = servo_duty_ns(deg)?;
         let mut guard = self.ensured.lock().unwrap_or_else(|p| p.into_inner());
         self.ensure(&mut guard)?;
         pwm_write(&self.pwm_dir().join("duty_cycle"), duty)
     }
 
-    async fn angle(&self) -> Result<u16, Rr3HalError> {
+    fn angle(&self) -> Result<u16, Rr3HalError> {
         let mut guard = self.ensured.lock().unwrap_or_else(|p| p.into_inner());
         self.ensure(&mut guard)?;
         let duty = pwm_read_u64(&self.pwm_dir().join("duty_cycle"))?;
@@ -256,7 +259,8 @@ mod tests {
         for bad in [181u16, 200, 360, u16::MAX] {
             let e = servo_duty_ns(bad).unwrap_err();
             assert!(
-                matches!(e, Rr3HalError::InvalidParam(ref s) if s.contains("180")),
+                matches!(e, Rr3HalError::InvalidParam(ref s)
+                    if s.rr3_err_text_as_str().contains("180")),
                 "越域角 {bad} 要点名物理域: {e}"
             );
         }
@@ -276,7 +280,8 @@ mod tests {
         for bad in [0u64, 499_999, 2_500_001, RR3_SERVO_PERIOD_NS as u64] {
             let e = servo_angle_of_duty(bad).unwrap_err();
             assert!(
-                matches!(e, Rr3HalError::InvalidParam(ref s) if s.contains("脉宽映射域")),
+                matches!(e, Rr3HalError::InvalidParam(ref s)
+                    if s.rr3_err_text_as_str().contains("脉宽映射域")),
                 "域外占空比 {bad} 要点名: {e}"
             );
         }
@@ -290,7 +295,7 @@ mod tests {
         let pwm_dir = fake_chip_in_place(&root, 0, 0);
         let dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 0, 0);
         assert_eq!(
-            crate::rr3_block_on(dev.angle()).unwrap(),
+            dev.angle().unwrap(),
             90,
             "探活读回中位——sim/linux 两后端同观测"
         );
@@ -320,16 +325,16 @@ mod tests {
     fn set_angle_writes_duty_and_reads_back() {
         let root = temp_root("set");
         let pwm_dir = fake_chip_in_place(&root, 0, 1);
-        let dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 0, 1);
-        crate::rr3_block_on(dev.set_angle(45)).unwrap();
+        let mut dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 0, 1);
+        dev.set_angle(45).unwrap();
         assert_eq!(read_u64(&pwm_dir.join("duty_cycle")), 1_000_000);
-        assert_eq!(crate::rr3_block_on(dev.angle()).unwrap(), 45);
+        assert_eq!(dev.angle().unwrap(), 45);
         assert_eq!(
             read_u64(&pwm_dir.join("period")),
             RR3_SERVO_PERIOD_NS as u64,
             "set_angle 不重写周期（ensure 已落定）"
         );
-        let e = crate::rr3_block_on(dev.set_angle(181)).unwrap_err();
+        let e = dev.set_angle(181).unwrap_err();
         assert!(matches!(e, Rr3HalError::InvalidParam(_)), "{e}");
         assert_eq!(
             read_u64(&pwm_dir.join("duty_cycle")),
@@ -367,7 +372,7 @@ mod tests {
             panic!("看护线程: export 未被写入");
         });
         let dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 0, 0);
-        assert_eq!(crate::rr3_block_on(dev.angle()).unwrap(), 90);
+        assert_eq!(dev.angle().unwrap(), 90);
         watcher.join().unwrap();
         assert_eq!(
             std::fs::read_to_string(chip_dir.join("export"))

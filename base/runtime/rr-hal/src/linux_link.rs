@@ -24,13 +24,21 @@
 //! （autoconnect 是 NM 自身行为），模块侧只读翻转上报；HAL 只如实报数。
 //! 断链语义对齐 sim：`up=false` 时 ssid/rssi 强制 `None`——真设备断链后
 //! 拿不到这些读数，模块侧不许从"down 还带着 ssid"里发明语义。
+//!
+//! 子进程超时（0.0.5 批I N-2）：每次调用由模块 config 的 `timeout_ms` 管
+//! 住——spawn 后轮询 `try_wait`，到点 kill 并显式回错。此前 `.output()` 阻塞
+//! 等到底，最坏翻转延迟由 nmcli 自由决定（工单 N-2 的真问题：`dev show` 平时
+//! 毫秒级，但 NM 卡顿时可拖到秒级以上，且周期拍里没有别的超时兜底）。
 
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
+use crate::{Rr3ErrText, Rr3HalError, Rr3Link, Rr3LinkState, Rr3SsidText};
 
-use crate::{Rr3HalError, Rr3Link, Rr3LinkState};
+/// 子进程存活轮询间隔：超时判定的分辨率。nmcli 正常毫秒级返回，10 ms 轮询
+/// 的空转代价可忽略；比它粗会让超时迟到，比它细纯烧 CPU。
+const RR3_NM_POLL: Duration = Duration::from_millis(10);
 
 /// terse 值的反转义：NM terse 模式把值里的 `:` 与 `\` 分别转义成 `\:`
 /// 与 `\\`（否则冒号分隔表无法承载含冒号的 SSID）。
@@ -108,47 +116,107 @@ fn rr3_nm_signal_to_dbm(q: u8) -> Option<i8> {
 
 /// linux NetworkManager 链路读数（[`crate::Rr3Link`] 的 linux 后端）。
 ///
-/// 选择函数（[`crate::backend::rr3_hal_link`]）不触设备：构造只记接口名与
-/// nmcli 程序路径，首次 `state()` 才起子进程（构造零副作用同 pwm/gpio/power
-/// 后端口径）。`nmcli` 程序路径是构造参数：缺省 `nmcli` 走 PATH，测试传假
-/// 脚本绝对路径注入编排，零全局环境污染。
+/// 选择函数（[`crate::backend::rr3_hal_link`]）不触设备：构造只记接口名、
+/// nmcli 程序路径与子进程超时，首次 `state()` 才起子进程（构造零副作用同
+/// pwm/gpio/power 后端口径）。`nmcli` 程序路径与超时都是构造参数：缺省路径
+/// `nmcli` 走 PATH，超时由模块 config 的 `timeout_ms` 传入（N-2 生效点），
+/// 测试传假脚本绝对路径注入编排，零全局环境污染。
 pub struct Rr3LinuxNmLink {
     ifname: String,
     nmcli: PathBuf,
+    nmcli_timeout: Duration,
 }
 
 impl Rr3LinuxNmLink {
-    /// 指定接口与 nmcli 程序路径构造（选择函数从生效物理绑定取 `link_ifname`，
-    /// 批D④ fail-closed——接口名没有代码缺省，描述符/env 都没给就在选择面点名；
+    /// 指定接口、nmcli 程序路径与子进程超时构造（选择函数从生效物理绑定取
+    /// `link_ifname`，批D④ fail-closed——接口名没有代码缺省，描述符/env 都没
+    /// 给就在选择面点名；超时也没有代码缺省，模块 config `timeout_ms` 传入。
     /// 测试传假脚本绝对路径注入编排，零全局环境污染）
-    pub fn rr3_linux_link_new(ifname: impl Into<String>, nmcli: impl Into<PathBuf>) -> Self {
+    pub fn rr3_linux_link_new(
+        ifname: impl Into<String>,
+        nmcli: impl Into<PathBuf>,
+        nmcli_timeout: Duration,
+    ) -> Self {
         Self {
             ifname: ifname.into(),
             nmcli: nmcli.into(),
+            nmcli_timeout,
         }
     }
 
-    /// 起一次 nmcli 子进程（terse 模式固定），非零退出/不可执行显式回错。
+    /// 起一次 nmcli 子进程（terse 模式固定），带 [`Self::nmcli_timeout`] 超时
+    /// 守护：spawn 后轮询 `try_wait`，到点 kill 并显式回错（N-2）。子进程已
+    /// 退出（含被 kill）后才读管道，读不阻塞；若子进程自身因管道写满卡死，
+    /// 同样落在超时分支被终止——超时兜底覆盖一切挂法。
     fn nm(&self, args: &[&str]) -> Result<String, Rr3HalError> {
-        let out = Command::new(&self.nmcli).args(args).output().map_err(|e| {
-            Rr3HalError::InvalidParam(format!(
-                "起 nmcli 失败: {e}（NetworkManager/nmcli 不在位？）"
-            ))
-        })?;
-        if !out.status.success() {
-            return Err(Rr3HalError::InvalidParam(format!(
-                "nmcli 退出非零（{:?}）: {}",
-                args,
-                String::from_utf8_lossy(&out.stderr).trim()
+        use std::io::Read;
+        let mut child = Command::new(&self.nmcli)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                    "起 nmcli 失败: {e}（NetworkManager/nmcli 不在位？）"
+                )))
+            })?;
+        let deadline = Instant::now() + self.nmcli_timeout;
+        let mut timed_out = false;
+        let mut status: Option<std::process::ExitStatus> = None;
+        loop {
+            match child.try_wait() {
+                Ok(Some(st)) => {
+                    status = Some(st);
+                    break;
+                }
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        timed_out = true;
+                        break;
+                    }
+                    std::thread::sleep(RR3_NM_POLL);
+                }
+                Err(e) => {
+                    return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                        &format!("nmcli 等待失败: {e}"),
+                    )))
+                }
+            }
+        }
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        if let Some(mut s) = child.stdout.take() {
+            let _ = s.read_to_end(&mut stdout);
+        }
+        if let Some(mut s) = child.stderr.take() {
+            let _ = s.read_to_end(&mut stderr);
+        }
+        if timed_out {
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                &format!(
+                    "nmcli 超时（>{}ms）被终止: {}",
+                    self.nmcli_timeout.as_millis(),
+                    args.join(" "),
+                ),
             )));
         }
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        if !status.map(|s| s.success()).unwrap_or(false) {
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                &format!(
+                    "nmcli 退出非零（{:?}）: {}",
+                    args,
+                    String::from_utf8_lossy(&stderr).trim()
+                ),
+            )));
+        }
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
     }
 }
 
-#[async_trait]
 impl Rr3Link for Rr3LinuxNmLink {
-    async fn state(&self) -> Result<Rr3LinkState, Rr3HalError> {
+    fn state(&self) -> Result<Rr3LinkState, Rr3HalError> {
         let show = self.nm(&[
             "-t",
             "-f",
@@ -160,9 +228,13 @@ impl Rr3Link for Rr3LinuxNmLink {
         let up = rr3_nm_field(&show, "GENERAL.STATE")
             .map(rr3_nm_state_up)
             .unwrap_or(false);
-        // 断链强制 None（同 sim 断链语义）；非 wifi 设备无 SSID/RSSI 词汇
+        // 断链强制 None（同 sim 断链语义）；非 wifi 设备无 SSID/RSSI 词汇。
+        // 契约面 SSID 是定长 Rr3SsidText（批I F1），nmcli 读出的 String 收编入
+        // 32 octets 缓冲（超长截断——SSID 域本身 ≤32 octets，截断是防御面）
         let mut ssid = if up {
-            rr3_nm_field(&show, "GENERAL.CONNECTION").and_then(rr3_nm_ssid_opt)
+            rr3_nm_field(&show, "GENERAL.CONNECTION")
+                .and_then(rr3_nm_ssid_opt)
+                .map(|s| Rr3SsidText::rr3_ssid_text_new(&s))
         } else {
             None
         };
@@ -184,7 +256,7 @@ impl Rr3Link for Rr3LinuxNmLink {
                 "no",
             ]) {
                 if let Some((pick_ssid, q)) = list.lines().find_map(rr3_nm_wifi_row) {
-                    ssid = Some(pick_ssid);
+                    ssid = Some(Rr3SsidText::rr3_ssid_text_new(&pick_ssid));
                     rssi_dbm = rr3_nm_signal_to_dbm(q);
                 }
             }
@@ -196,7 +268,6 @@ impl Rr3Link for Rr3LinuxNmLink {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use crate::rr3_block_on;
 
     /// terse 反转义：`\:`→`:`、`\\`→`\`、无转义原样、孤立反斜杠吞掉不炸
     #[test]
@@ -285,10 +356,14 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script);
-        let st = rr3_block_on(dev.state()).unwrap();
+        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_secs(5));
+        let st = dev.state().unwrap();
         assert!(st.up);
-        assert_eq!(st.ssid.as_deref(), Some("Home:5G"), "SSID 取 IN-USE 行真名");
+        assert_eq!(
+            st.ssid.as_ref().map(|s| s.rr3_ssid_text_as_str()),
+            Some("Home:5G"),
+            "SSID 取 IN-USE 行真名"
+        );
         assert_eq!(st.rssi_dbm, Some(-56));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -303,11 +378,38 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script);
-        let err = rr3_block_on(dev.state()).unwrap_err();
+        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_secs(5));
+        let err = dev.state().unwrap_err();
         assert!(
-            matches!(err, Rr3HalError::InvalidParam(ref m) if m.contains("nmcli")),
+            matches!(err, Rr3HalError::InvalidParam(ref m)
+                if m.rr3_err_text_as_str().contains("nmcli")),
             "错误要点名 nmcli: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 超时守护（N-2）：假 nmcli 睡 3 s，超时 100 ms——到点被 kill 且显式回错
+    /// 点名超时值，不许无限等子进程（最坏翻转延迟不再由子进程自由决定）
+    #[test]
+    fn nmcli_timeout_kills_slow_child() {
+        let dir = std::env::temp_dir().join(format!("rr3-hal-link-{}-tmo", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-nmcli-slow");
+        std::fs::write(&script, "#!/bin/sh\nsleep 3\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_millis(100));
+        let started = std::time::Instant::now();
+        let err = dev.state().unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "超时必须提前杀掉，不许等满子进程时长"
+        );
+        assert!(
+            matches!(err, Rr3HalError::InvalidParam(ref m)
+                if m.rr3_err_text_as_str().contains("超时") && m.rr3_err_text_as_str().contains("100ms")),
+            "错误要点名超时: {err}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

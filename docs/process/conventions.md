@@ -22,7 +22,7 @@
 | ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`） |
 | ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（`legacy/` 排除条款已随 0.0.4 批F 整树退役撤除，**今天 `check.sh` 没有任何排除**，全集进门），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
 | ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与两个 esp 条件工程）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
-| ⑦ | **§13 静态断言四件**（全 fail-closed，逐条点名） | ⑦-a 机制核零策略载荷（禁词扫 `rr-core/src/*.rs` + `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（Rust 五件 / brain 两件式豁免 / 组合件实体 `src/main.rs`+`src/composite.rs`）· ⑦-d 入口体量 ≤80 行。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
+| ⑦ | **§13 静态断言四件**（全 fail-closed，逐条点名） | ⑦-a 机制核零策略载荷（禁词扫 `rr-core/src/*.rs` + `rr-hal-api/src/*.rs`（0.0.5 批I C8 起）+ `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（Rust 五件 / brain 两件式豁免 / 组合件实体 `src/main.rs`+`src/composite.rs`）· ⑦-d 入口体量 ≤80 行。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
 
 入口脚本的标题写作"规约三检查"（沿用方案 D7 的三条语义命名），实际执行的是**九步**
 （⑥/⑦ 两步随 0.0.5 批E 接入，`check.sh` 由七步扩九步；步序与 PASS 条数的逐批台账见本文件下方登记条目）：
@@ -706,7 +706,8 @@ interact 17 条），fmt/clippy 清零。
 且状态不动，转移本体与后端无关、纯函数单测 `bt_phase_roundtrips_full_chain` /
 `bt_illegal_transitions_are_rejected_without_moving` 钉死）+ sim 后端开机初值
 env 注入（`RR3_HAL_SIM_BT_UP=1` 开机即上电进 Discoverable，缺省关=出厂不自动开，
-取值不认一律按关——env 是 sim 注入口不是配置面）；BlueZ 真后端板上后置（cfg 门，
+取值不认一律按关——env 是 sim 注入口不是配置面；**【0.0.5 批I N-1 起退役：env 读已删，
+初值改 config `[rr3-connect.bt]` up 数据化注入，缺省语义不变】**）；BlueZ 真后端板上后置（cfg 门，
 方案 §1.3，本骨架不 claim 真射频链路）。**主题不登记**（方案 D5 显式裁定）：
 btctl 的日志回放/远程命令语义已被 rrd 日志环 + `rr3.ctl.logs` 与 rr3-ctl 承接
 （digest btctl 行在案），蓝牙链路暂无可发布事件——按"不预先占位"纪律（§3），
@@ -1619,6 +1620,33 @@ pin 6→7），三修后 17 份全绿。**③ atom.name == 目录名钉死**：�
 rr-registry 40（lib）+34（contract）测试绿。CI 回执核对（批W2 敞口第 1 条）与
 ⑦-a 禁词表双份维护（check.sh 硬编码与 atom.rs RR3_BOARD_TOKENS 同步靠纪律）两项
 登记敞口未结，见 status.md
+
+2026-10-10 0.0.5 第 III 轮 批I 能力面契约下沉收官（方案 §14 批I 行，ADR-0018 修订 1 /
+ADR-0019 修订 3·4；九步门禁直跑 GATE_EXIT=0，PASS 30 全绿）——**F1 契约层立库**：
+`base/runtime/rr-hal-api` no_std crate 落地（7 trait 同步签名去 `Send + Sync`、
+`#[async_trait]` 退役；值类型去 String/Vec：`Rr3SsidText` 定长 32 octets、`Rr3ErrText`
+定长 128 octets 按 char 边界截断、`Rr3AudioSource::read` 改调用方缓冲写返回实填数、
+`Rr3PcmStream` 降承载层数据留 rr-hal；`Rr3UnavailableSource` 占位后端随迁 no_std 可达）。
+**F2 实现层退位**：rr-hal 改 Linux/sim 实现层 re-export 保对外路径，全仓调用点同步化，
+`rr3_block_on` 件面清零。**F3 两处形状违规解掉**：led 先按 R-4 把三条真实等待用例改合成
+时钟注入、再拆 worker 线程与 mpsc，`rr3_led_tick(now_ms, …)` 状态机由组合件节拍驱动，
+blink 行为序列不变；bt 初值去 env 改 config `[rr3-connect.bt] up` 数据化注入（N-1，缺省
+false 语义不变，缺段回落等价旧 env 未设）。**F4 xtensa 有载体真跑**：本机 esp fork 工具链
+（0.0.7 批A' 装，esp-1.90.0.0）在位，`rr-core-xtensa-check.sh` 三查真绿（tripwire 扩
+rr-hal-api + xtensa none-elf 裸机面编译 + 宿主面 rr-core 24 + rr-hal-api 6 测试对拍）——
+Q-R5 预判的"工具链缺位记无载体"未发生，方案 §17 如实改记"有载体"。**F5 载荷组装上移
+承载层**（C16）：五册 `*_body`/`*_field`/`*_result` 迁各 `src/composite.rs`（S-7/A-8/
+I-8/P-7/N-7 等），件面 serde_json 11 件→0 清零且线上字节逐字不变；I-10 sim 波形查表迁
+rr-hal sim 后端（件面去 std 数学，偏差预算 ±100）；S-6 整型化，框架 v1.1 违例清零（预算
+±100 内）。**配套结清**：C7 依赖闭包口径钉死（L1 执法面 = L0 + serde_json，禁 `use std::`
+/`use rr_hal::` 非 test 面；测试面假后端放行；件面 rr_hal:: 现状 = 契约名 re-export +
+I-10 数据面）；C8 门查门（rr-hal-api 同批进 ⑦-a 文件枚举与 xtensa 门三处点位，门查门
+机制首次自用）；C5 维持批J（本批未触碰禁词执法面）；S-1 sense config 与 power/connect
+同口径（env 覆盖优先，缺省 manifest 同目录 config.toml，缺文件显式报错）；N-9 connect
+假 AP 表迁 HAL sim 后端真值单点。**clippy 全仓清零复验**：rr-hal-api 契约 Result 体积顶
+result_large_err 阈值——契约形状不让步，crate 级带注豁免（不留无解释 allow）；sense
+bin 面 unused 导出改 `#[cfg(test)]`、act 死代码删除 + 复杂类型别名 `Rr3CallOutcome`、
+interact 未用导入移测试面，修后全绿
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

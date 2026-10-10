@@ -41,7 +41,7 @@ modules/rr3-act/
 
 | 键 | 记账点 |
 |---|---|
-| `relay_on` / `relay_off` | `relay.rs 的 rr3_relay_counter_key`（字面量唯一落点）；`main.rs` 两条驱动路（RPC / intent）在 publish 之前各记一次 |
+| `relay_on` / `relay_off` | `relay.rs 的 rr3_relay_counter_key`（字面量唯一落点）；两条驱动路（RPC / intent）在电平**真变**（`rr3_relay_state_due` 判定，0.0.5 批I A-7）且 publish 之前各记一次——同态命令不发布也不计数，键值 = 实际翻转数 |
 | `errors` | 通用可选键（各模块共用词表），异常路径按需自报 |
 
 ## 本地自检

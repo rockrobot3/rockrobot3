@@ -11,7 +11,7 @@
 pub mod client;
 #[cfg(unix)]
 pub use client::{
-    rr3_manifest_entry_absolutize, rr3_manifest_identity, Rr3BusClient, Rr3BusIdentity,
+    rr3_manifest_entry_absolutize, rr3_manifest_identity, Rr3BusClient, Rr3BusIdentity, Rr3TimeBase,
 };
 
 // ---------------------------------------------------------------------------

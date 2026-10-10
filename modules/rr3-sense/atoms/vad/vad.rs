@@ -37,4 +37,6 @@ impl Default for Rr3VadConfig {
     }
 }
 
-pub use mech::{rr3_vad_event_body, Rr3VadState};
+/// 公开面（0.0.5 批I S-6 收口）：状态机与边沿类型是件契约面；
+/// 事件体构造已上移组合件（S-7），`rr3_frame_rms` 降 pub(crate)（无件外读者）
+pub use mech::{Rr3VadEdge, Rr3VadState};
