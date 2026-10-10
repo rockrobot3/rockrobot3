@@ -157,6 +157,30 @@ pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
     }
 }
 
+/// 描述符失败点名文案（R3-D3/0.0.5 批J G5）：裁决纯函数独立可单测。
+/// 生产消费方只有 cfg(linux) 的 [`rr3_hal_bindings_effective_named`]，故生产门
+/// 收 linux；test 门留给文案形状单测（macOS 主机也要跑）。
+#[cfg(any(target_os = "linux", test))]
+fn rr3_hal_bindings_failure_note(facet: &str, err: &str) -> String {
+    format!("rr-hal: 描述符解析失败，{facet}落占位（使用时以 Unsupported 回错）: {err}")
+}
+
+/// 生效绑定获取（R3-D3/批J G5 收口）：各选择函数 linux 分支此前以 `.ok()` 取
+/// 绑定，描述符解析失败（[hardware] 键名拼错/取值不认/应急 env 无效）被静默
+/// 吞掉、只落占位，板上排障无从下手。改为失败当场 `eprintln!` 点名（rrd 系统
+/// 实例 stderr 进 journal），随后照旧落占位——失败语义不变，只补"错误当场可见"。
+/// 仅 linux 分支调用（非 linux 平台无人消费），故 cfg 门收进本平台。
+#[cfg(target_os = "linux")]
+fn rr3_hal_bindings_effective_named(facet: &str) -> Option<crate::descriptor::Rr3HalBindings> {
+    match crate::descriptor::rr3_hal_bindings_effective() {
+        Ok(b) => Some(b),
+        Err(e) => {
+            eprintln!("{}", rr3_hal_bindings_failure_note(facet, &e));
+            None
+        }
+    }
+}
+
 fn rr3_hal_sim_wave() -> crate::sim::Rr3SimWave {
     std::env::var(RR3_HAL_SIM_WAVE_ENV)
         .ok()
@@ -181,8 +205,7 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return crate::descriptor::rr3_hal_bindings_effective()
-                .ok()
+            return rr3_hal_bindings_effective_named("音频采集")
                 .and_then(|b| {
                     b.alsa_device.map(|dev| {
                         (
@@ -221,8 +244,7 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return crate::descriptor::rr3_hal_bindings_effective()
-                .ok()
+            return rr3_hal_bindings_effective_named("音频回放")
                 .and_then(|b| {
                     b.alsa_device.map(|dev| {
                         (
@@ -255,8 +277,7 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return crate::descriptor::rr3_hal_bindings_effective()
-                .ok()
+            return rr3_hal_bindings_effective_named("舵机")
                 .and_then(|b| {
                     Some((
                         Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(
@@ -297,8 +318,7 @@ pub fn rr3_hal_gpio_out(
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return crate::descriptor::rr3_hal_bindings_effective()
-                .ok()
+            return rr3_hal_bindings_effective_named("数字输出")
                 .and_then(|b| {
                     let line = match role {
                         "led" => b.gpio_led_line,
@@ -388,8 +408,7 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return crate::descriptor::rr3_hal_bindings_effective()
-                .ok()
+            return rr3_hal_bindings_effective_named("电源读数")
                 .and_then(|b| {
                     Some((
                         Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_new(
@@ -440,8 +459,7 @@ pub fn rr3_hal_link(
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return crate::descriptor::rr3_hal_bindings_effective()
-                .ok()
+            return rr3_hal_bindings_effective_named("链路读数")
                 .and_then(|b| {
                     Some((
                         Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_new(
@@ -496,6 +514,20 @@ mod tests {
         } else {
             assert_eq!(resolved, RR3_BACKEND_SIM);
         }
+    }
+
+    /// G5 收口（R3-D3）：描述符失败点名文案含面名与原因原文——"错误当场可见"
+    /// 的形状钉死（文案改动此处即红，防止退回无声吞错）。
+    #[test]
+    fn descriptor_failure_note_names_facet_and_reason() {
+        let note = rr3_hal_bindings_failure_note(
+            "音频采集",
+            "描述符解析失败: 描述符键 gpio_led_line 取值不认: \"four\"",
+        );
+        assert!(note.contains("rr-hal:"), "{note}");
+        assert!(note.contains("音频采集"), "{note}");
+        assert!(note.contains("gpio_led_line"), "{note}");
+        assert!(note.contains("Unsupported"), "{note}");
     }
 
     /// 执行面（舵机/数字输出）选择：平台默认下拿到的后端名必须合法，且对象可用

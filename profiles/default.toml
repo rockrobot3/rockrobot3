@@ -1,13 +1,32 @@
 # RockRobot3 装配单：default 机型（RK3566 参考机，ADR-0012 裁定 3）
 # 纯数据、零逻辑：rrd 启动装配链读它 + 硬件探测做匹配（缺格置 Degraded），
 # 不写启动序（那是 ADR-0009 拓扑仲裁的输出），不写"怎么启动"（那是 rrd 的机制）。
-# 门禁（ADR-0012 裁定 5②）：[bindings]/[enabled_slots] 引用的格位必须命中 contracts/slots.toml，
-# 绑定的件必须是 modules/ 在册模块——由 rr-registry 契约测试在 CI 全集层判。
+# 门禁（ADR-0012 裁定 5②）：[bindings]/[enabled_slots]/[slots].present 引用的格位必须命中
+# contracts/slots.toml，绑定的件必须是 modules/ 在册模块——由 rr-registry 契约测试在 CI 全集层判。
+# schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：新增
+# [platform]/[supplies]/[slots] 三必填段，1→2 为破坏性变更。
 
-schema_version = 1
+schema_version = 2
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
+
+[platform]
+# 平台档位（ADR-0018 修订 1：host / rtos / bare 三档）。参考机跑完整 Linux 底座 = host。
+tier = "host"
+
+[supplies]
+# 平台供给声明（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）。
+# watchdog_timeout_ms = 15000 > 模块级 health.watchdog_timeout_ms = 10000（平台兜底更宽）；
+# tick_period_ms = 200 与 rrd watchdog tick 生产真值同源（rrd tick 环 200ms）；
+# tick_jitter_ms / safety_core_interval_ms 为**声明预算位**（修订 2 ③）——
+# 声明值与生产真值的对账归 0.0.6 点验矩阵，此处先按预算登记。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
@@ -55,3 +74,25 @@ rr3-interact = ["ui.face", "audio.playback"]
 rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
 rr3-power = ["power.battery", "power.charger"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[slots]
+# 本板物理在位格位声明（ADR-0018 修订 1 ④ 七段之一；缺格三源合一第一源——声明缺）。
+# 基础层由基座内建承载、恒在位，不进本声明；参考机 16 格全在位，升序排列。
+present = [
+    "act.servo",
+    "act.led",
+    "act.relay",
+    "audio.capture",
+    "audio.playback",
+    "audio.vad",
+    "cognition.asr",
+    "cognition.dialog",
+    "cognition.llm",
+    "cognition.tts",
+    "net.bt",
+    "net.wifi",
+    "power.charger",
+    "sensor.env",
+    "sensor.imu",
+    "ui.face",
+]

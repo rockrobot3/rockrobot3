@@ -30,11 +30,14 @@ modules/rr3-brain/
 | 方向 | 主题 | 说明 |
 |---|---|---|
 | publish | `rr3-brain/intent/result` | 意图结论，供 act / interact 消费 |
-| subscribe | `rr3-interact/asr/text` | 识别文本上行后的呈现事件 |
-| subscribe | `rr3-connect/net/link` | 链路状态；离线时降级为本地提示 |
+| subscribe | `rr3-sense/audio/pcm` | 语音主链音频流（composite.py `TOPIC_PCM` 实际消费） |
+| subscribe | `rr3-sense/audio/vad_start` | 语音起点事件（`TOPIC_VAD` 实际消费） |
 | rpc | `rr3-brain/llm/completion` | 事务面补全请求 |
 
 主题均已在 [`contracts/topics.toml`](../../contracts/topics.toml) 登记；新增主题要先改契约。
+C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：原申报的 `rr3-interact/asr/text` 走
+**retired**（号位保留、义务解除）、`rr3-connect/net/link` 订阅撤申报（不补实现），
+订阅面对齐实然面（B-1）。
 
 ## 心跳自报计数（0.0.4 批B，Q1 裁定）
 

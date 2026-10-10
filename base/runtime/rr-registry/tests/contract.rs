@@ -550,6 +550,49 @@ fn registry_shape_is_pinned() {
     }
 }
 
+/// C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：retired 主题**号位保留、义务解除**——
+/// asr/text 与 dialog/turn 仍在册（pin 住号位），但申报面（publishes/rpc.exposes/subscribes）
+/// 引用它们必被拒；未标记状态的主题 = None（正常语义）。
+#[test]
+fn retired_topics_are_pinned_and_undeclarable() {
+    // ① 号位保留：两条 retired 主题仍在册；普通主题未标记 = None
+    let set = rr_registry::rr3_registry_topic_set_from_text(&topics_toml());
+    assert_eq!(
+        set.rr3_topic_set_status("rr3-interact/asr/text").as_deref(),
+        Some("retired"),
+        "asr/text 的 retired 标记漂移"
+    );
+    assert_eq!(
+        set.rr3_topic_set_status("rr3-interact/dialog/turn")
+            .as_deref(),
+        Some("retired"),
+        "dialog/turn 的 retired 标记漂移"
+    );
+    assert_eq!(
+        set.rr3_topic_set_status("rr3-sense/audio/pcm"),
+        None,
+        "未标记主题必须读出 None（正常语义）"
+    );
+
+    // ② 申报门 CI 层反例：rr3-interact 发布 asr/text（前缀归属合法）但主题已
+    // retired → 逐条点名拒。申报撤除（批J C14③④）后任何人不得再挂回。
+    let m = staged(
+        "retired",
+        fixture_text()
+            .replace("name = \"rr3-sense\"", "name = \"rr3-interact\"")
+            .replace(
+                "publishes = [\"rr3-sense/audio/vad_start\", \"rr3-sense/env/temperature\"]",
+                "publishes = [\"rr3-interact/asr/text\"]",
+            ),
+    );
+    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    assert!(
+        report.errors.iter().any(|e| e.contains("retired 主题")),
+        "发布 retired 主题必须被拒: {:?}",
+        report.errors
+    );
+}
+
 /// modules/ 下每个模块的 module.toml 都必须过同一份 manifest 契约。
 /// 骨架可以没有实现，manifest 不可以不合契约——否则要等 rrd 上线才暴露拒注册。
 #[test]
@@ -917,6 +960,65 @@ fn default_profile_binds_module_slots_to_real_modules() {
         "route 越界: {route}"
     );
 
+    // schema_version=2 三新段（描述符七段，ADR-0018 修订 1 ④）：[platform]/[supplies]/
+    // [slots].present 逐键 pin——两份机型与 rrd 解析器同口径演进，漂移即红。
+    assert_eq!(
+        v.get("schema_version").and_then(toml::Value::as_integer),
+        Some(2),
+        "profile schema_version 漂移（三新段随 2 落地）"
+    );
+    let tier = v
+        .get("platform")
+        .and_then(|p| p.get("tier"))
+        .and_then(toml::Value::as_str)
+        .expect("profile 缺 [platform] tier");
+    assert!(
+        ["host", "rtos", "bare"].contains(&tier),
+        "tier 越界: {tier}"
+    );
+    let supplies = v
+        .get("supplies")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies]");
+    for k in [
+        "watchdog_present",
+        "watchdog_timeout_ms",
+        "watchdog_feeder",
+        "tick_period_ms",
+        "tick_jitter_ms",
+        "safety_core_interval_ms",
+    ] {
+        assert!(supplies.contains_key(k), "缺 [supplies].{k}");
+    }
+    assert_eq!(
+        supplies
+            .get("watchdog_present")
+            .and_then(toml::Value::as_bool),
+        Some(true),
+        "host 档看门狗在场声明漂移"
+    );
+    let present: Vec<String> = v
+        .get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("缺 [slots].present")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .map(String::from)
+        .collect();
+    let mut expected_present: Vec<String> = table
+        .rr3_slot_table_names()
+        .into_iter()
+        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .collect();
+    expected_present.sort();
+    let mut present_sorted = present.clone();
+    present_sorted.sort();
+    assert_eq!(
+        present_sorted, expected_present,
+        "[slots].present 与非 base 格位全集漂移（参考机 16 格全在位）"
+    );
+
     let manifests: std::collections::BTreeMap<String, toml::Value> =
         module_manifest_values().into_iter().collect();
 
@@ -1023,6 +1125,56 @@ fn distro_profile_binds_exactly_the_body_layer() {
         .expect("profile 缺 [os] route");
     assert_eq!(route, "distro", "distro 机 route 必须是快路");
 
+    // schema_version=2 三新段：与 default 同一块参考机，[platform]/[supplies]/[slots]
+    // 逐值一致（present 仍为 16 格全集——distro 缺格是"不绑定"，不是"物理缺"）。
+    assert_eq!(
+        v.get("schema_version").and_then(toml::Value::as_integer),
+        Some(2),
+        "profile schema_version 漂移"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some("host"),
+        "distro 机档位漂移"
+    );
+    let supplies = v
+        .get("supplies")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies]");
+    for k in [
+        "watchdog_present",
+        "watchdog_timeout_ms",
+        "watchdog_feeder",
+        "tick_period_ms",
+        "tick_jitter_ms",
+        "safety_core_interval_ms",
+    ] {
+        assert!(supplies.contains_key(k), "缺 [supplies].{k}");
+    }
+    let present: Vec<String> = v
+        .get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("缺 [slots].present")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .map(String::from)
+        .collect();
+    let mut expected_present: Vec<String> = table
+        .rr3_slot_table_names()
+        .into_iter()
+        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .collect();
+    expected_present.sort();
+    let mut present_sorted = present;
+    present_sorted.sort();
+    assert_eq!(
+        present_sorted, expected_present,
+        "[slots].present 与非 base 格位全集漂移"
+    );
+
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
@@ -1101,4 +1253,91 @@ fn distro_profile_binds_exactly_the_body_layer() {
             );
         }
     }
+}
+
+/// G4 在册表钉死（ADR-0019 修订 1 ③，批J）：七能力面 trait × 九描述符键逐项点名。
+/// 两表真值源 = rr-hal-api（trait 面）/ rr-hal descriptor.rs（[hardware] 键集，
+/// C4 裁定不扩键）；本测试钉的是装配校验在 rr-registry 的这份副本——扩 trait/
+/// 扩键都走契约级评审，届时两处同批改，单改一处此测试当场红。
+#[test]
+fn assemble_registry_tables_are_pinned() {
+    assert_eq!(
+        rr_registry::RR3_ASSEMBLE_HANDLE_TRAITS,
+        &[
+            "Rr3GpioOut",
+            "Rr3PwmServo",
+            "Rr3AudioSource",
+            "Rr3AudioSink",
+            "Rr3Power",
+            "Rr3Link",
+            "Rr3Display",
+        ]
+    );
+    assert_eq!(
+        rr_registry::RR3_ASSEMBLE_DESC_KEYS,
+        &[
+            "alsa_device",
+            "pwm_chip",
+            "pwm_channel",
+            "gpio_chip",
+            "gpio_led_line",
+            "gpio_relay_line",
+            "i2c_bus",
+            "ina219_addr",
+            "link_ifname",
+        ]
+    );
+}
+
+/// G4 仓扫描（ADR-0019 修订 1 ③，批J）：modules/ 下每个 atoms/*/assemble.toml
+/// 都必须过形状级真值（schema v2 / 在册表 / 未知字段点名），且 ops 声明在模块
+/// config.toml 上无注入缺——真值数据（battery/charger/bt 三份）与 config 漂移
+/// 由此测试当场拦下。数量钉 17：新增件须走 rr3-mkmod 五件套，删除须走 ADR。
+#[test]
+fn repo_assemble_manifests_validate_and_injection_complete() {
+    let modules = repo_root().join("modules");
+    let mut mnames: Vec<PathBuf> = std::fs::read_dir(&modules)
+        .expect("读不到 modules/ 目录")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    mnames.sort();
+    let mut count = 0usize;
+    for m in &mnames {
+        let atoms = m.join("atoms");
+        let Ok(entries) = std::fs::read_dir(&atoms) else {
+            continue; // 无原子件目录的模块形态（两件式豁免同款边界）
+        };
+        let mut anames: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        anames.sort();
+        for atom in &anames {
+            let path = atom.join("assemble.toml");
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{} 读不到: {e}（五件套④缺件）", path.display()));
+            let facts = rr_registry::rr3_registry_assemble_from_text(&text)
+                .unwrap_or_else(|errs| panic!("{} 坏形: {errs:?}", path.display()));
+            let cfg = std::fs::read_to_string(m.join("config.toml")).unwrap_or_else(|e| {
+                panic!(
+                    "{} 缺 config.toml: {e}（模块开机即读，随包必带）",
+                    m.display()
+                )
+            });
+            let gaps = rr_registry::rr3_registry_assemble_injection_gaps(&facts, &cfg);
+            assert!(
+                gaps.is_empty(),
+                "{} 注入缺: {gaps:?}（config 键与装配声明漂移）",
+                path.display()
+            );
+            count += 1;
+        }
+    }
+    assert_eq!(
+        count, 17,
+        "装配清单数量漂移：新增须走 rr3-mkmod 五件套，删除须走 ADR"
+    );
 }

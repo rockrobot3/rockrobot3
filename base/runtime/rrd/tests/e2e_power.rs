@@ -26,11 +26,26 @@ use support::*;
 
 /// 装配单：power.charger 绑 rr3-power。power.battery 是基础层恒在位格，绑它致命
 /// （profile.rs 的 `base 层 binding 必须致命` 钉过），可绑格只有 charger。
+/// schema_version=2 起三新段必填（[platform]/[supplies]/[slots]，ADR-0018 修订 1）。
 const PROFILE: &str = r#"
-schema_version = 1
+schema_version = 2
 
 [os]
 route = "distro"
+
+[platform]
+tier = "host"
+
+[supplies]
+watchdog_present = false
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[slots]
+present = ["power.charger"]
 
 [bindings]
 "power.charger" = "rr3-power"

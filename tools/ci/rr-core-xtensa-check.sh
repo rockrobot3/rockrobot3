@@ -56,9 +56,11 @@ else
 fi
 
 # ③ 裸机面对拍：xtensa-esp32-none-elf 编译 = 无 OS 启动形态点验；rr-ipc golden 头
-#    const 断言随依赖链在该目标编译期重求值 = xtensa 编译期 golden 对拍（0.0.7 第④路机制）
+#    const 断言随依赖链在该目标编译期重求值 = xtensa 编译期 golden 对拍（0.0.7 第④路机制）。
+#    0.0.5 批J G1/C6：transport 拆门后 rr-ipc 的总线窄缝 Rr3ByteStream + 帧缓冲
+#    Rr3FrameBuf + conn blanket impl 随依赖链同面编译——"窄缝在 none 目标可编译"在此出数。
 if cargo +esp check -q -Zbuild-std=core,alloc -p rr-core -p rr-hal-api --target xtensa-esp32-none-elf; then
-  echo "PASS  机制核切片（总线语义/运行时/控制/安全核 + 能力面契约 rr-hal-api）在 xtensa-esp32-none-elf 编译成立；rr-ipc golden 头 const 断言已在该目标重求值"
+  echo "PASS  机制核切片（总线语义/运行时/控制/安全核 + 能力面契约 rr-hal-api）在 xtensa-esp32-none-elf 编译成立；rr-ipc 总线窄缝 Rr3ByteStream + 帧缓冲 + conn blanket 同面编译，golden 头 const 断言已在该目标重求值"
 else
   echo "FAIL  机制核面（rr-core/rr-hal-api）xtensa-esp32-none-elf 编译失败（no_std 面被破坏）" >&2
   fail=1

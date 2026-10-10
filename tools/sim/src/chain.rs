@@ -118,12 +118,9 @@ pub fn rr3_chain_manifests(
                 RR3_CHAIN_WD_MS,
                 "never",
                 &["rr3-brain/intent/result"],
-                &[
-                    "rr3-interact/asr/text",
-                    "rr3-connect/net/link",
-                    "rr3-sense/audio/pcm",
-                    RR3_SENSE_TOPIC_VAD,
-                ],
+                // C14（ADR-0019 修订 2 ②）：asr/text retired 撤申报、net/link 撤申报
+                //（不补实现）；订阅面对齐实然面 = pcm + vad_start（B-1 补齐）
+                &["rr3-sense/audio/pcm", RR3_SENSE_TOPIC_VAD],
                 &["rr3-brain/llm/completion"],
             ),
         ),

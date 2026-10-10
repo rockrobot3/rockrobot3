@@ -1,9 +1,14 @@
 //! UART 传输（0.0.7 批C，ADR-0008 第三实现位；Q1 裁定：线上帧格式不变）。
 //!
 //! 点对点字节流：宿主侧按 raw termios 打开串口设备（`/dev/ttyUSB*` /
-//! `/dev/tty.usbserial*`），帧语义由 `Read + Write` 上的 blanket impl
-//! [`Rr3TransportConn`](crate::transport::Rr3TransportConn) 免费覆盖——半帧/坏
-//! magic/长度不符的拒收路径与 uds 完全同源，不写第二份帧层。
+//! `/dev/tty.usbserial*`），帧语义由 blanket impl
+//! [`Rr3TransportConn`](crate::transport::Rr3TransportConn) 免费覆盖——批J G1 换底后
+//! 下底是窄缝 [`Rr3ByteStream`](crate::transport::bytestream::Rr3ByteStream)（本模块
+//! 的 Read+Write 实现经 std 单向 adapter 进缝），半帧/坏 magic/长度不符的拒收路径
+//! 与 uds 完全同源，不写第二份帧层。
+//!
+//! 板侧（0.0.7 层②）另写：宿主侧这个实现是"开 `/dev/ttyUSB` 的"不是板侧实现；
+//! 板侧接总线只需直接实现两个 `usize` 方法（形状用例见 `transport/mod.rs` tests）。
 //!
 //! 接缝纪律（0.0.7 方案 §5）：只落 conn 面，**不改 trait 签名、不新增关联类型**。
 //! UART 无"监听/accept"语义（点对点，无连接洪泛），[`Rr3TransportEndpoint`] 与
@@ -175,8 +180,10 @@ pub fn rr3_uart_baud_speed(baud: u32) -> std::io::Result<SpeedT> {
 
 /// UART 连接：raw termios 串口 fd 的所有权包装。
 ///
-/// 帧语义免费：实现 [`Read`] + [`Write`] 后由 transport 的 blanket impl 覆盖
-/// [`Rr3TransportConn`](crate::transport::Rr3TransportConn)，半帧/坏帧拒收与 uds 同源。
+/// 帧语义免费：实现 [`Read`] + [`Write`] 后经 std 单向 adapter 进窄缝
+/// [`Rr3ByteStream`](crate::transport::bytestream::Rr3ByteStream)，再由 transport 的
+/// blanket impl 覆盖 [`Rr3TransportConn`](crate::transport::Rr3TransportConn)，
+/// 半帧/坏帧拒收与 uds 同源。
 pub struct Rr3UartConn {
     fd: i32,
 }

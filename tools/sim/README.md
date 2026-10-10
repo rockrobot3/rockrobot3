@@ -11,10 +11,11 @@ F4 起本入口是**脚本化全链路演练**：全部真进程、真套接字�
 
 演练脚本五步：
 
-1. **起 rrd**：`--manifest` 带 `rr3-sense`（boot spawn，`resident` 常驻喂狗）；
-2. **等就绪**：轮询 `rr3-ctl status`，直到 rr3-sense 到 `running`；
-3. **事件流转**：外部起第二个真模块 `rr3-interact`（sim_peer + `publish_once`），
-   发布契约主题 `rr3-interact/asr/text` 后退场；
+1. **起 rrd**：`--manifest` 带 `rr3-interact`（boot spawn，`resident` 常驻喂狗）；
+2. **等就绪**：轮询 `rr3-ctl status`，直到 rr3-interact 到 `running`；
+3. **事件流转**：外部起第二个真模块 `rr3-sense`（sim_peer + `publish_once`），
+   发布契约主题 `rr3-sense/audio/vad_start` 后退场（C14①：asr/text 走 retired 后
+   演练主题换 vad_start，发布方身份随之换位——owner 前缀归属要求发布方叫 rr3-sense）；
 4. **rr3-ctl 四命令巡检**：status（断言 `denied_publish = 0`——发布被拒在此现形）、
    health、logs（rrd 日志环）、ota（恒拒随 M6，预期非 0 退出）；
 5. **报告 + 收尾**：杀 rrd（resident 喂狗失败自退）；`--keep` 保留现场人工排查。

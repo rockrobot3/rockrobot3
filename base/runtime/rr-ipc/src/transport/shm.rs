@@ -208,7 +208,9 @@ unsafe fn rr3_shm_try_recv(
         return Ok(None);
     }
     *cursor += size;
-    let mut cur = Cursor::new(bytes.as_slice());
+    // Cursor<&mut [u8]>：Read+Write 双全，经 std 单向 adapter 进缝（Cursor<&[u8]>
+    // 在当前工具链上无 Write，进不了 rr3_framebuf_read 的 Rr3ByteStream 门）
+    let mut cur = Cursor::new(bytes.as_mut_slice());
     Ok(Some(rr3_framebuf_read(&mut cur)?))
 }
 

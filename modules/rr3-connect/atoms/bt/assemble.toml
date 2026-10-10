@@ -1,7 +1,10 @@
-# bt 装配清单（五件套④）：装配期注入面声明（ADR-0019 裁定 5 L3——
-# 原子件只见 ops 指针与描述符给的绑定句柄）。
-schema_version = 1
+# bt 装配清单（五件套④）：装配期注入面声明（ADR-0019 修订 1 ③——
+# [assemble.handles] 声明件用哪个能力面 trait ← 绑描述符哪个键、[assemble.ops]
+# 声明件暴露哪些参数槽 ← 取哪个 config 键；装配段校验缺项即该格 Degraded）。
+schema_version = 2
 
 [assemble]
 handles = []   # 骨架期无注入面；真后端（cfg 门）接线归板上批次
-ops = []       # 开机初值经 config [rr3-connect.bt] up 数据化注入（N-1：env 注入口已退役）；ops 槽批J G4 定形时迁移
+ops = [
+  { slot = "up", src_key = "rr3-connect.bt.up" },   # 开机蓝牙初值（N-1：env 注入口已退役，批J G4 兑现迁移）
+]
