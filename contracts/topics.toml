@@ -41,6 +41,11 @@ name = "rr3-runtime"
 path = "base/runtime/rrd"
 role = "base 守护进程：注册、健康、系统广播"
 
+[[owner]]
+name = "rr3-sentinel"
+path = "tools/espidf-sentinel"
+role = "跨芯片哨兵：ESP32 固件经 rr3-bridge 进城（0.0.7 层③④；总线身份 rr3-sentinel，工程名 espidf-sentinel 不变）"
+
 # ---------- 主题 ----------
 [[topic]]
 name = "rr3-sense/audio/pcm"
@@ -230,3 +235,10 @@ kind = "request"
 owner = "rr3-connect"
 stable = "L1"
 note = "忘记网络/恢复出厂 WiFi（0.0.4 方案 D4/Q3 裁定：legacy /api/factory_reset 的 WiFi 语义承接）；station→ap，≠ M6 整机恢复出厂（partition-layout 两语义不合并）"
+
+[[topic]]
+name = "rr3-sentinel/diag/probe"
+kind = "request"
+owner = "rr3-sentinel"
+stable = "L2"
+note = "哨兵探针点名（0.0.7 批E 契约 append 裁定 2026-10-11：F2 门要求 rpc.exposes 主题在册；e2e round-trip 点名对，result.echo 原样回带）"
