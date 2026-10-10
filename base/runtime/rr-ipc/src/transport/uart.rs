@@ -16,8 +16,8 @@
 //! ——uds 的 endpoint trait 面是"端点可洪泛"形状的产物，硬套点对点等于撒谎。
 //!
 //! 系统调用面：手写 `extern "C"` 声明壳（open/close/read/write/tcgetattr/
-//! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed），**不引 libc crate**——shm 裁定 5
-//! 同款仓内纪律，rr-ipc 依赖表保持为空。termios 结构与常量 Linux/macOS 分
+//! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed/tcflush），**不引 libc crate**——
+//! shm 裁定 5 同款仓内纪律，rr-ipc 依赖表保持为空。termios 结构与常量 Linux/macOS 分
 //! `cfg` 各钉一份（数值互不相同：Linux B115200 = `0o10002`，macOS 直接用字面
 //! 波特率；O_NOCTTY、VMIN/VTIME 下标、结构布局均异）——每一份都以各自平台
 //! 头文件为准，并用 `const _` 断言结构尺寸，编译期先拦 ABI 漂移。
@@ -56,6 +56,8 @@ mod imp {
     pub const NCCS: usize = 20;
     pub const VMIN: usize = 16;
     pub const VTIME: usize = 17;
+    /// SDK sys/termios.h：`#define TCIFLUSH 1`（BSD 与 Linux 数值不同，不得混用）
+    pub const TCIFLUSH: i32 = 1;
 
     /// BSD `struct termios`：4×u64 flags + c_cc[20] + 2×u64 speed。
     /// 尺寸 72 = 32 + 20 + (4 对齐填充) + 16；`const _` 断言在编译期钉死。
@@ -102,6 +104,8 @@ mod imp {
     pub const NCCS: usize = 32;
     pub const VMIN: usize = 6;
     pub const VTIME: usize = 5;
+    /// Linux uapi asm-generic/termbits.h：`#define TCIFLUSH 0`（与 macOS=1 不同值）
+    pub const TCIFLUSH: i32 = 0;
 
     /// glibc/musl `struct termios`：4×u32 flags + c_line + c_cc[32] + 2×u32 speed。
     /// 尺寸 60 = 16 + 1 + 32 + 8（对齐到 4）；`const _` 断言在编译期钉死。
@@ -136,7 +140,7 @@ mod imp {
     }
 }
 
-use imp::{SpeedT, Termios, B115200, B9600, O_NOCTTY, O_RDWR, VMIN, VTIME};
+use imp::{SpeedT, Termios, B115200, B9600, O_NOCTTY, O_RDWR, TCIFLUSH, VMIN, VTIME};
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
 use std::format;
@@ -157,6 +161,8 @@ extern "C" {
     fn c_tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
     #[link_name = "tcsetattr"]
     fn c_tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
+    #[link_name = "tcflush"]
+    fn c_tcflush(fd: i32, queue_selector: i32) -> i32;
     #[link_name = "cfmakeraw"]
     fn c_cfmakeraw(termios_p: *mut Termios);
     #[link_name = "cfsetispeed"]
@@ -225,7 +231,13 @@ impl Rr3UartConn {
 }
 
 /// raw 模式配置：取当前 termios → cfmakeraw → 显式 VMIN=1/VTIME=0（阻塞读满语义，
-/// 不靠 cfmakeraw 之后残留的寄存器初值）→ 收发波特率 → TCSANOW 生效。
+/// 不靠 cfmakeraw 之后残留的寄存器初值）→ 收发波特率 → TCSANOW 生效 →
+/// `tcflush(TCIFLUSH)` 净化输入队列。
+///
+/// 开口即净（0.0.7 批D1 敞口的正式处置，批E 落地）：USB 串口驱动输入缓冲会残留
+/// 上轮会话的字节（CP2102 实证），不冲掉则开口首读必是垃圾（BadMagic）。这里
+/// 冲的是**开口时刻之前**积压的队列——对线上语义零改写：开口后的字节一概不碰，
+/// 帧层拒收路径照旧兜底。
 fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
     let mut t = Termios::zeroed();
     // SAFETY：t 是本栈上的合法 termios，tcgetattr 只写它。
@@ -243,6 +255,10 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
     }
     // SAFETY：合法指针；TCSANOW 立即生效。
     if unsafe { c_tcsetattr(fd, TCSANOW, &t) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY：合法指针；冲掉开口前积压的输入队列（TCIFLUSH 只冲收不冲发）。
+    if unsafe { c_tcflush(fd, TCIFLUSH) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
@@ -304,6 +320,8 @@ mod tests {
     use crate::transport::frame::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
     use crate::transport::Rr3TransportConn;
     use std::os::unix::io::FromRawFd;
+    // no_std 显式化：String 不在 no_std prelude 里，测试面按 std 路径显式引入
+    use std::string::String;
     use std::vec;
 
     extern "C" {
@@ -344,6 +362,34 @@ mod tests {
         let conn = Rr3UartConn::from_fd(slave, baud).expect("slave termios 配置失败");
         // SAFETY：master 是 openpty 刚出的合法 fd，File 接管并负责 close。
         (unsafe { std::fs::File::from_raw_fd(master) }, conn)
+    }
+
+    /// 伪串口对（带 slave 设备路径）：openpty 的 `name` 出参给出 slave 路径
+    /// （macOS /dev/ttysNNN、Linux /dev/pts/N），供"按路径 open"的用例走真实
+    /// `open()` 入口（含 configure 全链：termios + 开口净化）。返回的 slave File
+    /// 由调用方持有保活（不参与收发，仅保证 slave 端在线——openpty 的出参 fd
+    /// 不归还就会丢，测试进程短命，随进程回收）。
+    #[cfg(test)]
+    fn pty_pair_with_path() -> (std::fs::File, std::fs::File, std::path::PathBuf) {
+        let mut master = 0i32;
+        let mut slave = 0i32;
+        let mut name = [0 as CChar; 128];
+        // SAFETY：三个出参都是本栈合法内存，其余按 NULL 传。
+        let rc = unsafe {
+            openpty(
+                &mut master,
+                &mut slave,
+                name.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        assert_eq!(rc, 0, "openpty 失败：{}", std::io::Error::last_os_error());
+        let len = name.iter().position(|&c| c == 0).expect("openpty name 未 NUL 结尾");
+        let path: std::vec::Vec<u8> = name[..len].iter().map(|&c| c as u8).collect();
+        let path = String::from_utf8(path).expect("pty 路径非 UTF-8");
+        // SAFETY：master/slave 都是 openpty 刚出的合法 fd，各自 File 接管并负责 close。
+        unsafe { (std::fs::File::from_raw_fd(master), std::fs::File::from_raw_fd(slave), std::path::PathBuf::from(path)) }
     }
 
     /// 半帧用例需要"读超时"而不是阻塞：把读侧切到 VMIN=0/VTIME=1（100ms 静默即返回 0）。
@@ -448,6 +494,35 @@ mod tests {
     #[test]
     fn uart_open_rejects_missing_device() {
         assert!(Rr3UartConn::open(Path::new("/nonexistent/rr3-uart-test")).is_err());
+    }
+
+    /// 开口即净（批D1 敞口处置的守门用例）：开口**之前**积压在输入队列的垃圾
+    /// （坏 magic 头字节，CP2102 残留同形）必须被 configure 的 tcflush 冲掉——
+    /// 随后开口写入的完整帧整帧读回，垃圾不得混入。走真实 open(path) 入口。
+    #[test]
+    fn uart_open_flushes_stale_input() {
+        let (mut master, _slave_keepalive, slave_path) = pty_pair_with_path();
+        use std::io::Write as _;
+        // 残留字节：一条坏 magic 头 + 尾巴（若不被冲掉，开口首读必 BadMagic）
+        let mut stale = hdr(4).to_bytes().to_vec();
+        stale[0..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        stale.extend_from_slice(b"leftover");
+        master.write_all(&stale).unwrap();
+        // 开口（configure 末尾 tcflush(TCIFLUSH) 冲队列）
+        let mut conn = Rr3UartConn::open_with_baud(&slave_path, RR3_UART_BAUD_DEFAULT)
+            .expect("按路径 open pty slave 失败");
+        // 开口后的新帧必须整帧读回（残留不得当帧前缀混入）
+        let f = Rr3Frame {
+            header: hdr(5),
+            payload: b"fresh"[..].to_vec(),
+        };
+        master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
+        let got = conn.rr3_recv_buf().expect("开口后首帧必须完整读回");
+        assert_eq!(
+            Rr3Frame::try_from(got).unwrap(),
+            f,
+            "开口前积压字节必须被 tcflush 净化，开口后字节零改写"
+        );
     }
 
     /// 波特率档位表：两档内放行，档位外拒绝（静默换档是线路事故）。
