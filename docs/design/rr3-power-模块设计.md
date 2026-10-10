@@ -1,4 +1,4 @@
-# rr3-power 模块设计（框架 v1.2）
+# rr3-power 模块设计（框架 v1.3）
 
 ## §0 单元身份证
 
@@ -149,3 +149,17 @@
 | `rr-hal/src/linux_power.rs` | `charging: current_raw < 0` | 判定式 | 有 | 判定归后端；符号约定（正=放电）要写进 `rr-hal-api` 的文档面，否则换一片电流检测芯片就要重读代码 |
 | `config.toml [rr3-power] log_level` | `"info"` | 日志级 | **无读者** | 被读或删除（P-6） |
 | `atoms/{battery,charger}/assemble.toml` | `handles = []` / `ops = []` | 注入面申报 | **零申报** | 本单元策略虽已大体在 config，但 `handles` 空意味着批J 的注入校验门在这里**无内容可校验**——落地时先补 `power` 句柄申报（`i2c_bus`/`ina219_addr` → 描述符键），把它做成校验门的第一个真值样本 |
+
+## §14 基线对表（代码 `22783ea`，2026-10-10；本节是本册唯一"现在时"）
+
+| 本册旧断言 | 现在的事实（符号为证） | 判定 |
+|---|---|---|
+| §13 末行"本单元策略全无申报位，§3 的 ops 槽是纸面" | **本册成了全仓第一个真值样板**：`atoms/battery/assemble.toml` 填 `handles = [{trait="Rr3Power", desc_key="i2c_bus"}, {trait="Rr3Power", desc_key="ina219_addr"}]` + 3 条 `ops`（`sample_period_ms`/`low_voltage_mv`/`cutoff_voltage_mv` ← `rr3-power.battery.*`），`charger` 填 1 条 `ops`（`state_period_ms`）；读者确实存在（`rrd` `rr3_assemble_scan` + `rr-registry` 注入面用例） | **索引 L-3 的破环法被采纳**（门与数据同批、以 power 为样板） |
+| §3 句柄来源写 `[slots].present:power.battery`（当时是幻影） | 现在 `[slots].present` 真存在（`profiles/*.toml` `schema_version = 2`，`esp32-mini.toml` 有三格升序声明），且 `rrd` `rr3_profile_boot_inputs` 真校验；但电源句柄的实际取值键仍是 `[hardware].i2c_bus`/`ina219_addr`（经 `assemble.handles.desc_key` 申报） | 幻影断言作废，按上句新事实读 |
+| §12 "载荷上移后即 core-only"（P-7） | 件面 `rr3_battery_state_body`/`rr3_battery_low_body`/`rr3_charger_state_body` 已移到 `src/composite.rs`；`battery`/`charger` 件面除类型 import 外零 `json!` | **P-7 已结** |
+| §1 "`Rr3Power::battery()` 是 `#[async_trait] + Send + Sync`" | 契约面 `rr-hal-api::Rr3Power` 同步、`Rr3BatteryState { voltage_mv: u16, percent: u8, charging: bool }` 为 `Copy` 且已在 `rr-hal-api` | §12 该行作废 |
+| §6/§10 R-2："不立独立 charger 句柄、标定对象是 percent 曲线" | 实现采纳（charger `handles = []`，charging 由读数派生） | **R-2 一致** |
+| §10 P-6 孤儿 `log_level` | 已删（`config.toml` 头注写明"解析函数不读、全仓无读者"） | **P-6 已结** |
+| §10 P-2 钳制留痕 | `.max(1)` 仍在；未复验是否补了留痕日志 | **P-2 部分**（保持未结） |
+| §10 P-3 描述符吞错 | 已改：`rr-hal` 选择器不再 `.ok()`，`descriptor.rs` `rr3_binding_set` 打"描述符键 {key} 取值不认 / 未在册"，`rr-hal` 的 linux/sim/… 六处 `.ok()` 吞错收口 | **P-3 已结** |
+| §10 P-8 / 索引 L-5：bare 档本地兜底 | 装载门已判 `tier=bare` 必须有 watchdog（G6）；**"低电禁动"本身仍无实现、无落点**，cutoff 仍只解析 | **未结**，且**必须与 A-5 合并成一个动作**（两册分头挂单等于没挂）→ 批L **L-8** |

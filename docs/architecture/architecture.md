@@ -400,7 +400,10 @@ rock3/
   **写不出对拍用例的件，必然是里面藏了时钟、线程或平台形状**——正是 `atoms/led`（自持线程 + `mpsc` +
   `recv_timeout`）与 `atoms/bt`（件内读 env）这两件的病。扇入降为评审项，仍用于准入三问第③问。
 - **依赖闭包**（与判据②同批执法）：件的外部依赖 ⊆ {`core`, `alloc`, `rr-ipc` protocol, `rr-core`,
-  `rr-hal-api`（§12.8 接缝一，批I 落地）}；出现 `use std::` / `use rr_hal::` 即红。这是"件 = 机制"在源码上的可扫形式。
+  `rr-hal-api`（§12.8 接缝一，批I 落地）}。**执法边界如实写**：`check.sh` ⑧-b 在件的非 test 面扫
+  `use std::`、`extern crate std`、`serde_json` 三类，**不扫 `rr_hal::`**——件对 `rr-hal` 的 import 清退靠
+  批I F1 的 re-export 策略与评审，不靠这条门；门与宣称不一致时改门或改宣称，不许两者各说各话。
+  这是"件 = 机制"在源码上的可扫形式。
 - **扇入分档**（rock3 化，非全盘 ≥3）：`N ≥ 3` 是**新建/收编跨形态复用机制原子**的准入杠杆；单消费者的能力格
   （如 `power.battery`、`sensor.imu` 在某形态只一处用）沿用 [ADR-0012](../process/adr/ADR-0012-能力格坐标系与装配单.md)
   裁定 6 的成格判据（≥1 真实依赖者），两档不互覆盖。
@@ -628,9 +631,11 @@ brain）分立；**F⊗F 非法**——brain 不许运行期决定能力归属�
 后端标识常量与"哪个后端承载什么"的表在 `base/runtime/rr-hal/src/backend.rs`；
 两者之外的任何"某后端已经有实现/还没有实现"都不属于本节，见 [`../status.md`](../status.md)。
 
-> **两层形状要分清（v0.8 承 ADR-0018 修订 1）**：下面这份 `#[async_trait]` + `Send + Sync` 的签名是
-> **承载层实现形状**（Linux 侧要并发、要跨线程移交句柄，async 在 ADR-0008 裁定 1 里本来只许进模块侧，
-> 这里就是模块侧）。机制核侧另有一张**能力面契约** `rr-hal-api`（§12.8 接缝一，批I 落地）：同步签名、
+> **本节签名是改造前存档（2026-10-10 订正）**：下面这份 `#[async_trait]` + `Send + Sync` 的签名描述的
+> 是**批I 之前的两层共同形状**，今天**两侧都已是同步实现**——`async_trait`/`async fn` 在 `rr-hal` 已零命中、
+> `rr3_block_on` 全仓不存在。当时"async 只许进模块侧"的论证（ADR-0008 裁定 1）不再成立，
+> 所以本块只作历史读，**代码真相以 `base/runtime/rr-hal-api/src/lib.rs`（契约面）与
+> `base/runtime/rr-hal/src/backend.rs`（std 实现层）为准**。机制核侧的能力面契约见 §12.8 接缝一（已落地）：同步签名、
 > 去 `Send + Sync`、值类型去 `String`。原子件与无承载档只认后者——**件不许把 std 的调度形状当成机制**。
 > 这一层分离已随批I 收口（件面经 re-export 消费同步 trait，`rr3_block_on` 在件面清零）。
 
@@ -1021,6 +1026,8 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 | 2. **内存策略** | 有堆用堆、无堆用静态/定长区；机制核不得假设全局分配器 | 系统堆 | 系统堆 | **敞口（§12.1）** |
 | 3. **事件循环** | 驱动"收帧→分发→节拍"的调度形态，由机制核运行环消费 | 线程 + 阻塞 socket | FreeRTOS 任务 + 队列 | 主循环 + 中断 |
 | 4. **传输实现** | §12.8 接缝二那条窄缝的一个实现，落到该板物理链路 | UDS（+ shm） | UART | UART/SPI |
+| 5. **时序预算**（v0.9 第三位补写，此前只在正文里当"第五供给位"） | 名义周期与允许偏差、安全核调用间隔上界；`[supplies]` 三键在册 | `tick_period_ms` / `tick_jitter_ms` / `safety_core_interval_ms` | 同（esp32-mini：200/100/1000 ms） | 同（预算值须 ≥ 平台 tick 粒度，见 §12.5） |
+| 6. **平台看门狗**（ADR-0018 修订 4 ②，此前只在正文里当"第六供给位"） | `[supplies]` 三键 `watchdog_present` / `watchdog_timeout_ms` / `watchdog_feeder`；**`present=false` 且 `tier=bare` 由 `rrd` 装载门直接拒 boot**（批J G6 已执法） | 由 rrd/`systemd` 侧监督，模块级 `health.watchdog_timeout_ms` 走软看门狗 | `true`，喂拍者 = `rr-core::runtime` 的 `RR3G feed seq=…` 节拍 | 必须 `true`，否则不成立（无 WDT 的板不得归本档） |
 
 四类供给的**取值**写进描述符 `[supplies]` 段（§4.3、§12.3），由 port 交一份供给自证表核对。
 **v0.9 补第五个供给位：时序预算**——名义周期与允许偏差、安全核调用间隔上界。理由很直白：裁定 5 用
@@ -1210,11 +1217,14 @@ tripwire + rr-ipc golden 头编译期断言在该目标重求值），工具链�
 §12.2 说"平台只需提供四类供给"，但按现有签名，平台**提供不了**——三条接缝的接口形状都是 std 的。
 本节把这三条窄缝定形；它们是"跨操作系统"从设计变成可施工的全部内容，其余改动都是它们的收口。
 
-**接缝一 能力面契约 `rr-hal-api`（件 ↔ 硬件）** · 批I
-现况：`rr-hal` 七个 trait 全挂 `#[async_trait]` + `Send + Sync`，件侧经 `rr3_block_on`
+**接缝一 能力面契约 `rr-hal-api`（件 ↔ 硬件）** · 批I（**已落地**）
+**改造前**形状（下面描述的是历史，代码里已不存在）：`rr-hal` 七个 trait 全挂 `#[async_trait]` + `Send + Sync`，件侧经 `rr3_block_on`
 （`std::thread::yield_now()` 自旋）驱动。一次件内调用 = 一个装箱 future + 一个 std 调度假设；
+**现在的形状**：`base/runtime/rr-hal-api/src/lib.rs` 七个**同步** trait（无 `async_trait`、无 `Send + Sync`、
+签名里无 `String`/`Vec`/`Box`/`dyn`），`rr3_block_on` 在全仓代码中已不存在。
 `Rr3LinkState.ssid: Option<String>`、`Rr3PcmStream.samples: Vec<i16>` 这类值形状又把平台 crate
-焊进了件的签名。
+焊进了件的签名。**这两处现已各自归位**：契约面改 `Rr3SsidText { bytes: [u8; 32], len: u8 }`（定容 + 长度），
+`Rr3PcmStream` 整块留在 std 侧的 `rr-hal`（`{ cfg, samples: Vec<i16> }`），**不再是能力面契约的类型**。
 定形：把 7 trait + 值类型 + `Rr3HalError` 提进 no_std crate `rr-hal-api`，做三处去形状——
 **同步签名**（`fn set(&mut self, level: bool) -> Result<(), Rr3HalError>`，async 留模块侧，与
 ADR-0008 裁定 1 同线）、**去 `Send + Sync`**（单核内联不需要；有 OS 侧由承载层包一层）、
@@ -1282,10 +1292,12 @@ pub trait Rr3ByteStream {
 | 件内字面阈值位点 | 原子件里的业务阈值与厂商/产品**注释**逐条列位点清单，随批迁出到 ops/config/描述符。**不宣称 grep 命中即红**——阈值字面量无可靠静态判据（注释里的版本号同为点分数值），v0.8 把这条从"静态门"降为"清单 + 评审"，免得文档口径高于门的实际断言 | 位点清单 + 评审 | 清单登记，评审收口 |
 | 件级依赖闭包 | **分两级执法**（v0.9，0.0.5 批K 接线）：L0 机制核可达集 {`core`, `alloc`, `rr-ipc` protocol, `rr-core`, `rr-hal-api`}；L1 承载层机制件集 = L0 + `serde_json`（线格式载体，属承载层形状）。`modules/**/atoms/**` 的**非 test 面**（行注释与 `#[cfg(test)]` 块先剥）出现 `std::`（含 `use std::` / `extern crate std` / 全限定内联三态）或 `serde_json` 即红。`rr_hal::` 引用**不进本门 grep 执法面**（trait 注入与 sim 假后端是批I F2/I-10 定形的合法形状；承载类型违例无 grep 可靠判据，归评审条款——批I 深挖收口清退 capture 承载类型为在册案例） | 静态断言（`check.sh` ⑧-b，已接） | **fail-closed** |
 | 件级逐拍对拍 | 每件**两条腿**：① 确定性（合成输入序列 → 输出序列，无 IO / 无线程 / 无墙上时钟，同输入两跑逐拍相等，范式同 `rr-core::control` 的 `same_control_graph_beat_for_beat_identical`）；② 正确性（期望值引自 `contracts/events/*.schema.json` / `contracts/golden/` / 裁定写死的语义，并覆盖下界/上界/等号/零值/畸形）。**只有腿一记未达标**。门按 `fn parity_leg1_<件名>_*` / `fn parity_leg2_<件名>_*` 命名锚计数（slots.toml `status` join atom.toml `provides`：normal 格两腿各 ≥1，placeholder 记不适用、retired 退出分母），门内置"恒输出 0 + 只有腿一"的 stub 反例自证（C10，拦不住则门本身红） | 计数断言（`check.sh` ⑧-a，已接） | **fail-closed** |
-| 格状态标记 | 正常 / 占位 / retired 三态读 `contracts/slots.toml` 的格标记位（0.0.5 批J **C17** 已落：schema_version=2 每格带 `status`/`tier_scope`，运行期形状门在 rrd 装载接线、CI 契约测试钉 21 格全集）——**豁免一律数据化**，门内不许有硬编码 `if`；占位件记"不适用"而非"通过"，retired 格退出"每格一件"分母（⑧-a 对拍门即读此标记位） | 查册门 + 数据面校验（`check.sh` ⑧-a / rrd 装载，已接） | **fail-closed** |
+| 格状态标记 | 正常 / 占位 / retired 三态读 `contracts/slots.toml` 的格标记位（0.0.5 批J **C17** 已落：schema_version=2 每格带 `status`/`tier_scope`，运行期形状门在 rrd 装载接线、CI 契约测试钉 21 格全集）——**豁免数据化目前只对 ⑧-a 成立**：⑧-a 读 `status` 判分母（占位记"不适用"、retired 退分母），
+  而 **`tier_scope` 门禁不读**（读者只有运行期 `rrd` 装载与 CI 契约测试，补齐归 0.0.5 批L L-2）、
+  **⑦-c 仍留两处脚本内 `if [ "$mod" = "rr3-brain" ]`**（"门内不许有硬编码 if"这句宣称对此步不成立，收编同归 L-2）；占位件记"不适用"而非"通过"，retired 格退出"每格一件"分母（⑧-a 对拍门即读此标记位） | 查册门 + 数据面校验（`check.sh` ⑧-a / rrd 装载，已接） | **fail-closed** |
 | **档位判定校验**（v0.9 同日五轮新立，此前只有散文规则） | 声明 `tier=bare` 而 `[supplies].watchdog` 缺位即拒 boot 并点名缺哪一位；无 WDT 的板只能归 rtos + 外部监督 | 描述符装载门（0.0.5 批J **G6**，承 C15） | **fail-closed** |
 | **⑦ 时序证据回填**（v0.9 同日五轮新立） | ⑦ 列只认 E4 真板证据：`matrix.sh --manual ⑦ --evidence <路径>`，证据文件必须带环境指纹 + 采样窗口与样本数 + 原始数据，缺一判"证据不足"不判 PASS；手测行与自动行分色 | `tools/ci/matrix.sh`（0.0.5 批K **H3/C12**） | **fail-closed** |
-| 门禁清单同步 | 新建机制核面 crate 必须**同批**出现在两处清单：`check.sh` ⑦-a 的禁词扫面枚举、`tools/ci/rr-core-xtensa-check.sh` 的目标 crate 列表。缺任一处即红——防止"§13 宣称有门、门实际没扫" | 静态断言（自指：门查门） | **fail-closed** |
+| 门禁清单同步 | 新建机制核面 crate 必须**同批**出现在**三处**清单：`check.sh` ⑦-a 的禁词扫面枚举、`tools/ci/rr-core-xtensa-check.sh` 的目标 crate 列表、以及步序说明（`conventions.md` §2 与本节 §13）。实况：前两处 2026-10-10 复验一致（`rr-hal-api` 三处点位全在，C8 结清），**第三处已漂**——⑦-a 自批K 起也扫 `modules/*/atoms/*/*.rs`，但 `conventions.md` §2 ⑦ 行与 `tools/ci/README.md` ⑦-a 格仍只列机制核三处。防止"§13 宣称有门、门实际没扫"的门，自己也得被扫：**三处一致由脚本判等（批L L-4），在此之前本行按"纪律同步"读，不按 fail-closed 读** | 静态断言（自指：门查门；对说明面尚未执法） | fail-closed（仅前两处） |
 | 每格一件 · 不留空格 | manifest/profile 引用的格必须命中 `slots.toml`；`enabled_slots` 声明的格有对应原子件；占位件登记显式豁免、不折算达标 | 查册门 + 仓扫描（§4.3 门禁②扩，已接） | **fail-closed** |
 | 注入面校验 | `assemble.toml` 的 `handles`/`ops` 与描述符对表：件要的句柄/参数槽未给 → 该格 `Degraded` 并点名到件与键 | 数据面校验（rr-registry contract；`check.sh` ⑧-c 显式过滤器封用例改名/删除的 fail-open，已接） | **fail-closed** |
 | `F⊗F` 非法 | 面不得作为被装配方出现在装配清单里（面间只 `⊙`）；`composite.toml` 的 `⊗` 链成员必须是本模块原子件 | 静态断言（`check.sh` ⑦-b，已接） | **fail-closed** |

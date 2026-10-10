@@ -1,4 +1,4 @@
-# rr3-sense 模块设计（框架 v1.2）
+# rr3-sense 模块设计（框架 v1.3）
 
 ## §0 单元身份证
 
@@ -151,3 +151,22 @@
 | `src/composite.rs : RR3_SENSE_CONFIG` / `RR3_MANIFEST` | env 键名 | 配置入口 / 接入契约 | `RR3_MANIFEST` 未设 → `Err` → `exit(1)`（fail-closed，**正面样板**）；`RR3_SENSE_CONFIG` 未设 → **静默用代码缺省，config.toml 整份不生效** | 静默回落点，S-1 处置：改为默认读 manifest 同目录 `config.toml`（与 power/connect 同口径），并在日志里写明配置来源 |
 | `config.toml [rr3-sense] log_level` | `"info"` | 日志级 | **全仓无读者** | 被读或删除（S-1 同批，与 P-6/N-6/I-1/B-8 同纪律） |
 | `atoms/*/assemble.toml` | `handles = []` / `ops = []`（四份皆空） | 注入面申报 | **零申报**：上面每一条策略都没有申报位 | 批J G4 之前，本册 §3 的 ops 槽全是纸面——这正是索引 §11 审计项 L-3 的实证 |
+
+## §14 基线对表（代码 `22783ea`，2026-10-10；本节是本册唯一"现在时"）
+
+本册 §0–§13 写于批I–K 开工前，其中"待做/现状卡点"类断言已随批I/批J/批K 收口而**部分作废**；
+按存档纪律不回改正文，作废关系只在本节点名（承 [模块设计索引 §13](模块设计索引.md)）。
+
+| 本册旧断言 | 现在的事实（符号为证） | 判定 |
+|---|---|---|
+| §1 目标签名"`rr3_pcm_*`/`rr3_vad_*` 的 `Value` → 待上移"；工单 S-7 | 件面 `serde_json`/`json!` **零命中**，`rr3_pcm_event_body`、`rr3_vad_event_body`、`rr3_doa_field`、`rr3_pcm_downmix_stream` 全在 `src/composite.rs` | **S-7 已结** |
+| §1 "内松外紧"五个符号未导出（S-6） | `rr3_pcm_downmix_mono`、`rr3_frame_rms` 改 **`pub(crate)`**；载荷类符号随 S-7 离件，导出面自然收窄 | **S-6 已结** |
+| §12 DoA 卡在 `f64::{sqrt,asin,to_degrees,round}`（S-8） | 改 **`RR3_ASIN_DEG_LUT: [i32; 257]` + isqrt/Q15** 整型；`f64`/`sin` 只在 `#[cfg(test)]` 内 | **S-8 已结**；`f64::sqrt` 仍在测试夹具里（不影响 bare 编译面） |
+| §1 `Rr3AudioSource::read` 是 `#[async_trait]` + `Send + Sync`，件侧经 `rr3_block_on` | 契约面 `rr-hal-api::Rr3AudioSource` 为同步且改**借用缓冲**：`read(&mut self, buf: &mut [i16]) -> Result<usize, Rr3HalError>`（返回 0 = 无新数据）；`rr3_block_on` 全仓不存在 | §12 该行作废 |
+| §12 "件签名里 `Vec<i16>` 待改借用" | `rr3_pcm_downmix_mono(&[i16], u8) -> Vec<i16>` **仍产堆**（现为 `pub(crate)`，件内部使用） | **未结** → 批L L-3（改调用方缓冲或降 `pub(crate)` 后豁免） |
+| §3/§13 "`sample_rate/channels/frame_ms` 待进 ops，DoA 阈值待进 ops（S-5）" | `atoms/{capture,vad}/assemble.toml` 仍 **`handles = []` / `ops = []`**；注入校验门已存在（`rr-registry` `assemble.rs` + `rrd` `rr3_assemble_scan`），但**本单元无内容可校验** | **未结** → S-5 转 **批L L-5**（句柄与 ops 申报补齐；门在等数据） |
+| §13 `bit_depth: 16` 无 config 键 | 实况未变，但**本轮判定归位**：s16le 是线格式契约，不是策略 → 从"孤儿参数"改记**契约字面量豁免**（0.0.5 §17 同批订正） | 判定改，动作撤 |
+| §13 DoA 查表：`RR3_ASIN_DEG_LUT` 257 项常量在件内 | **本轮裁定**：数学常量表属**机制**（跨板同值、不随硬件变），与 `RR3_FRAMES_*`（板面渲染数据）不同类 → 允许留在 `mech.rs`，不必外提到描述符 | 新裁定 R-12（见索引 §13.3 同源） |
+
+**本册新净余数**：批L **L-3**（`downmix_mono` 去堆）、**L-5**（capture/vad 的 `handles`/`ops` 申报补齐，
+句柄今天仍由 `composite.rs` 走 `rr3_hal_audio_source()` 直取）。
