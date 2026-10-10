@@ -103,7 +103,7 @@
 | P-1 | `power.battery` 在"无电池板"上的表达：base 层恒在位与之冲突，需一次 ADR 级评审（retired 或改层） | 待裁 | — |
 | P-2 | 钳制**已存在**（`u64_of(..)?.max(1)`），本单收窄为：钳制时打一行留痕（哪个键、原值、钳后值）；采样失败计入 counters（数据新鲜度） | 批I | C7 |
 | P-3 | 描述符错误在 boot 期可见（`rr-hal` 四选择函数不再 `.ok()` 吞） | 批J | — |
-| P-4 | 件载荷去 `serde_json`（L0 迁移清单在册） | 后续批 | C7 |
+| P-4 | ~~件载荷去 `serde_json`（后续批）~~ **并入 P-7**（同一依据 = ADR-0019 修订 4；两条各挂一批是本轮审查查出的 M-1 口径互斥，现统一由 P-7 承担） | 批I（随 P-7） | — |
 | P-5 | **改判**：`charger` 不需要独立句柄——`charging` 已由 `Rr3Power` 读数的电流符号派生（INA219 侧），再立一个句柄就是第二真值点。要标定的不是充电位而是 `percent` 的**电压→容量曲线**（两点或多点），随真件批做 | 真件批（0.0.6） | 采购 |
 | P-6 | `config.toml` 的 `[rr3-power] log_level` 是孤儿键（解析函数不读、全仓无读者）：**被读或删除**，不许第三种状态（与 interact I-1 同纪律） | 批I | — |
 | P-7 | **载荷组装上移承载层**：`rr3_battery_state_body` / `rr3_battery_low_body` / `rr3_charger_state_body` 的 `json!` 生产移到 `src/composite.rs`，件面只交 `Rr3BatteryState` 与 `bool`（依据 = ADR-0019 修订 4）。**做完本单元两件即 `core`-only**，是"件级 no_std 可达"的第一个样板；验收 = 三主题载荷字节逐字不变（schema 用例继续绿） | 批I | — |
