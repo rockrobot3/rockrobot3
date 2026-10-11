@@ -27,6 +27,8 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
       - name: rustfmt --check（base/runtime + 全部独立工程）
         run: |
           cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check
@@ -78,6 +80,8 @@ jobs:
         with:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
       - uses: docker/setup-qemu-action@v3
       - name: IPC-T-003 跨架构对拍（--strict）
         run: bash tools/ci/ipct003.sh --strict
@@ -91,6 +95,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
       - name: deb 装机冒烟（rust:bookworm 容器）
         run: bash tools/ci/distro-smoke.sh
 
