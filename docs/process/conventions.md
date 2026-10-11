@@ -1816,6 +1816,25 @@ test 退 1 的静默假象，deb 装机内容自始无恙）；`'__pycache__'` �
 第 8 条（distro-smoke 真装回执）/ 第 9 条（sim-assemble 六模块巡检回执）四条
 同批结项。十步门禁直跑 GATE_EXIT=0 全绿；三远端 `ls-remote` 四端核对随本批推送执行
 
+2026-10-11 批H5 审查修复批（0.0.7 收官后审查循环，ADR-0008/0013）——对六提交
+（e0a8bad..e0cb31a）执行 TRAE-code-review 审查出 4 问题（1 major + 3 minor），
+用户裁定全修：① `b2c28da` rr-hal linux_link 三测试 temp 目录 pid→pid+纳秒
+后缀（`rr3_test_link_dir`）+ state() 套 ETXTBSY 瞬态重试（`rr3_test_txtbsy_retry`，
+最多 2 次间隔 100ms，只认 "Text file busy" 字串、其余错误透传）——run#7
+attempt1 实锤 ETXTBSY flake（fs::write 假脚本后立刻 spawn，ubuntu runner 偶发
+os error 26，同代码 5 连绿 1 红），处置先例同 rrd supervisor 已知边界②（spawn
+瞬态 Err）；同提交 nm() 正常退出后读管道改 `rr3_read_to_end_capped`（fd 置
+O_NONBLOCK 轮询读到 EOF 或 deadline，各读独立一档 nmcli_timeout）——kill 只收
+直子进程，幸存孙进程持写端时阻塞 read_to_end 会拖到孙退出，超时兜底被旁路
+架空；② `749f7ba` ci.yml espup 安装 releases/latest → 钉 v0.17.1（latest
+漂移破工具链可重现性，与 esp-idf-sys 0.35.0 / ESP-IDF v5.2.2 / ldproxy 0.3.5
+钉版纪律对齐）+ distro-smoke ⑧ `grep -q boots` 恢复 JSON 键精确匹配
+（`"\"boots\""`，双引号在外层单引号串内安全、无撇号截断，批H1 的子串降级面
+回正）；③ 本条目 + status.md 在制品随 docs 落档提交。教训：CI 复跑即绿的
+flake 须登记并等裁定，勿当场吞掉——本批即裁定后的加固落地。linux 门内代码
+本机 macOS 不编译，用 aarch64-unknown-linux-gnu 交叉 check 做语法核验；十步
+门禁直跑 GATE_EXIT=0 全绿 ×3（一提交一跑）。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
