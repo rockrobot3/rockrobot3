@@ -111,13 +111,14 @@
 | B-1 | **申报订阅面补齐**（pcm + vad_start，只增）；`asr/text` 走 retired | 契约评审（批J 前） | C14 |
 | B-2 | **改判**：`silence_tail_ms` 在 brain 侧不是"重复声明"而是**死参数**（`dialog.py` 从不读它，判停完全依赖 sense 的 `Offset` 边沿）。处置 = 从 brain 的 `config.toml` 删除，或把它接成真的兜底尾长；不许留着让人以为它在生效 | 批I | — |
 | B-7 | `net/link` 申报消费但无处理：要么补"链路 down 不起新轮"的实现（含一条用例），要么把这条订阅从 `subscribes` 撤下（撤 = 契约面变更，走 C14 的 retired 评审） | 契约评审（批J 前） | C14 |
-| B-8 | `max_turn_chars` 无读者：实装截断或删键（与 power P-6、connect N-6、interact I-1 同批同纪律） | 批I | — |
+| B-8 | `max_turn_chars` 无读者：实装截断或删键（与 power P-6、connect N-6、interact I-1 同批同纪律）——**2026-10-12 对表结案**：键已随批I 从 `config.toml` **删除**（文件第 18 行注记自陈"在册无读者；实装截断随真用例回归"），本条按"删除"分支结清；截断行为若将来要回，须连同真回归用例一起立单，不保留静默键 | **已结（批I）** | — |
 | B-3 | 云总预算与 `max_utterance_ms` 的关系定案（轮次超时是否覆盖云 RTT） | **待裁** | — |
 | B-4 | Python 测试接进门禁（现在只登记 conventions，不进 `check.sh`；本机 Python 3.9 不过 3.11 门） | 批K + 宿主 | C11 |
 | B-5 | 起轮/云失败 counters（健康面可见性） | 批K | C9 |
 | B-6 | Rust 化随 ADR-0016（届时两腿对拍与闭包门才适用；`dialog` 件按 §12 是唯一可能跨档的认知件，`asr`/`llm`/`tts` 按发布权判据在 rtos/bare 档**不启用**而非"改造后可用"） | ADR-0016 | — |
 | B-9 | `RR3_CALL_TIMEOUT_S = 30.0` 从 `composite.py` 常量改 ops/config 槽——它是"一轮最坏 ≈90 s"的组成项，调它却要改码违背数据面原则；与 B-3 同批裁 | 批I | — |
-| B-10 | 凭据键名 `SILICONFLOW_API_KEY` 把云供应商焊进代码。改通用键（`RR3_CLOUD_API_KEY`）+ 供应商写 config，或在 §11 明确记"换云供应商需改一处代码"为已知欠账（这是"换芯片不改码"原则在云侧的同型问题） | 批I | — |
+| B-10 | 凭据键名 `SILICONFLOW_API_KEY` 把云供应商焊进代码（2026-10-12 复验：键名未改，本条**未结**）。改通用键（`RR3_CLOUD_API_KEY`）+ 供应商写 config，或在 §11 明确记"换云供应商需改一处代码"为已知欠账（这是"换芯片不改码"原则在云侧的同型问题） | **0.0.5 批M MC-8** | — |
+| B-11 | **把已合成的 PCM 送上总线**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 背景表 #1）：`composite.py` 的 `rr3_finish_turn` 今天取到 `reply_pcm = tts.synthesize(reply_text)` 后只算 `tts_ms` 入日志，再 `rr3_call_topic(TOPIC_TTS, {"text": reply_text})`——**云侧真人声从未有可能出声**。本单 = 按 MCP-1 的分帧把 `reply_pcm` 发布到新主题 `rr3-brain/audio/tts_pcm`，`tts/text` 点名保留作"该不该播"的事务判据；`seq` 单调、`ms` 由样点数导出 | **0.0.5 批M MC-1**（前置 MCP-1 契约 append 评审；消费侧对号 interact I-14） | MCP-1 |
 
 ## §11 待证与敞口
 
