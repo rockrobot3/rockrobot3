@@ -324,13 +324,14 @@ mod tests {
     /// 后立刻 spawn，ubuntu runner 偶发 `Text file busy (os error 26)`——同代码
     /// 5 连绿后 1 红；rrd supervisor 对 spawn 瞬态同款处置见其已知边界②）。
     /// 最多重试 2 次、间隔 100ms，只对这一瞬态字符串重试，其余错误原样透传。
+    /// 文本取自 Display（InvalidParam 透传定长文案，与断言面 {err} 同源）。
     fn rr3_test_txtbsy_retry<T>(
         mut f: impl FnMut() -> Result<T, Rr3HalError>,
     ) -> Result<T, Rr3HalError> {
         let mut attempts = 0;
         loop {
             match f() {
-                Err(e) if attempts < 2 && e.rr3_err_text_as_str().contains("Text file busy") => {
+                Err(e) if attempts < 2 && e.to_string().contains("Text file busy") => {
                     attempts += 1;
                     std::thread::sleep(Duration::from_millis(100));
                 }
