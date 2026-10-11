@@ -20,6 +20,9 @@
 #    + 主仓 rr-core/rr-ipc path 依赖）——专用门 tools/ci/espidf-sentinel-check.sh（甲面
 #    xtensa 构建 = 双证之①），SKIP 纪律同上；其宿主对手件是普通独立工程
 #    tools/rr3-sentinel-harness（不在哨兵目录内的原因见其 Cargo.toml 注记），照常进 ④/⑥。
+#    同例：tools/esp32-periph-base（0.0.5 增补轮五 批B 外设底座档，同款 espidf
+#    工具链，OLED/舵机/UART2 指令面）——专用门 tools/ci/esp32-periph-base-check.sh，
+#    SKIP 纪律同上。
 # ⑧ 件级判据三门（0.0.5 批K H2）：⑧-a 两腿对拍计数门（slots.toml status 三态 join
 #    atom.toml provides，normal 格须 fn parity_leg1_+parity_leg2_ 各 ≥1，C10 stub 反例
 #    自证内置）；⑧-b 依赖闭包 grep 门（L0=std::（含 use/extern crate/全限定内联）、
@@ -103,6 +106,7 @@ while IFS= read -r -d '' manifest; do
 done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
                     -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
                     -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
+                    -not -path "tools/esp32-periph-base/*" \
                     -print0 | sort -z)
 if [ "$found" -eq 0 ]; then
   printf 'FAIL  ④ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
@@ -177,6 +181,7 @@ while IFS= read -r -d '' manifest; do
 done < <(find modules tools base -name Cargo.toml -not -path "*/target/*" \
                     -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
                     -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
+                    -not -path "tools/esp32-periph-base/*" \
                     -print0 | sort -z)
 if [ "$found_mod" -eq 0 ]; then
   printf 'FAIL  ⑥ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
