@@ -3,7 +3,7 @@
 本文件是仓内**唯一**允许回答"某能力在当前 HEAD 有没有实现"的地方。其余文档只写设计语义，
 不写实况；设计文档里出现"已落地/未落地"的字样一律视为待订正（架构文档 §5 就因此整段重写过）。
 
-- **实况锚点**：本快照按锚点提交 `95d37ef`（分支 `dev/hubs-01`）逐条读代码写成，不是按规划推断；
+- **实况锚点**：本快照按锚点提交 `dc3a1d6`（分支 `dev/hubs-01`，0.0.7 批G 落档树）逐条读代码写成，不是按规划推断；
   本文里的"当前 HEAD"一律指这个锚点提交的那棵树，锚点之外的增量不进本表。
 - **状态只取三值**：`已实装` / `骨架` / `未设计`。限定条件（如"仅 Unix 参与编译""仅单元层"）
   写在证据列，不塞进状态列——否则三值就退化成自由文本，也就失去了可对比性。
@@ -29,7 +29,8 @@
 | 所有权移交整帧缓冲（零拷贝落点） | 已实装 | [`buf.rs`](../base/runtime/rr-ipc/src/transport/buf.rs)：`Rr3FrameBuf` 单块连续内存（`[0..128)` 头预留区 + payload）、`rr3_seal` 原地幂等编头、`rr3_framebuf_read` 读侧同一错误语义；`Rr3Frame` 保留为纯值视图，两形状低成本互转（ADR-0007 裁定 3 / ADR-0008） |
 | `trait Transport` 与 uds / shm / tcp 分层 | 已实装 | **uds 与 shm 都是真实现；tcp 只有线上签名、一行实现都没有**（ADR-0008 裁定 4 的"不写半成品"对 tcp 仍成立）。[`transport/mod.rs`](../base/runtime/rr-ipc/src/transport/mod.rs)：三 trait——`Rr3TransportConn`（`rr3_send_buf` 消费缓冲 / `rr3_recv_buf` 返回所有权缓冲；对一切 `Read + Write + Send` 有 blanket 实现，send 前幂等 seal）、`Rr3TransportListener`、`Rr3TransportEndpoint`（cleanup → bind）；[`uds.rs`](../base/runtime/rr-ipc/src/transport/uds.rs)（`#[cfg(unix)]`）：`Rr3UdsListener`（`type Conn = UnixStream`）与客户端入口 `rr3_connect`；shm 见下一行。**不引 async**（ADR-0008 裁定 1） |
 | shm 传输（单写者多读者环形缓冲，实时控制面） | 已实装 | ADR-0011，[`shm.rs`](../base/runtime/rr-ipc/src/transport/shm.rs)：核心环平台无关——64B 区域头（magic `RR3S` / version / cap / **head 单共享变量**，Release 发布 Acquire 读取）+ 字节环，环内记录 = 一整帧（128B 头 + payload）；seqlock 式复核（拷出后 head 不变才接受）+ 半容量守卫（帧 ≤ cap/2）证明无撕裂；单写者多读者、**丢最旧保最新**——写者永不阻塞永不失败，读者落后过半圈重同步并计 `lost`（不静默）。角色分型 `Rr3ShmWriterConn` / `Rr3ShmReaderConn`（方向不匹配的方法恒报 Io），读者 `rr3_attach` 对位 uds 的 `rr3_connect`，阻塞 `recv_buf` = 200µs 退避轮询（无通知原语）。POSIX 附着段（`cfg(any(target_os = "linux", target_os = "macos"))`）：**手写 6 函数 extern 面**（shm_open / shm_unlink / ftruncate / mmap / munmap / close，不引 libc crate，依赖预算零增量）；macOS 的 shm fd 只支持 mmap（read/pread 报 ENXIO/ESPIPE），附着走"64B 探头映射校验 → 按 cap 全量映射"两步法。默认容量 1MiB（`rr3_bind_with_cap` 可建大区），对象名默认 `/rock3-ipc-shm`、可用 `RR3_SHM_NAME` 环境变量覆盖。**不做清单（ADR-0011）**：tcp、rrd 接线（[`conn.rs`](../base/runtime/rrd/src/conn.rs) 仍 UnixStream）、F_ZEROCOPY grant、F_URGENT 行为差异、通知原语、可靠交付、跨进程 e2e |
-| IPC-T-003 跨架构对拍（x86 ↔ aarch64 字节布局一致） | 骨架 | **三方对拍 ①②本机已过、③容器真跑未发生（已接 CI 平台条件）**：①宿主 x86_64（Intel Mac）`ipct003_dump` 输出与 [`golden/event-header-128.hex`](../contracts/golden/event-header-128.hex) 逐字节一致（F5 实跑，登记于 conventions.md §2 平台条件脚本段）；②`aarch64-unknown-linux-gnu` 目标已装，交叉 `cargo check` PASS——header.rs 的编译期 const 断言已在 aarch64 目标求值；③`linux/arm64` 容器真跑 SKIP（本机无 Docker）。[`tools/ci/ipct003.sh`](../tools/ci/ipct003.sh) 缺环境打 `SKIP` 明说、不静默冒充已验证；`--strict` 已接入远端 CI——ci.yml 的 `ipct003` job（540ec0f：ubuntu runner + QEMU arm64 + 容器真跑，见 [`../.gitcode/workflows/ci.yml`](../.gitcode/workflows/ci.yml)），远端跑绿一次即可把本行与"本机无法收口"第 4 条结项。登记见 [`envelope.schema.json`](../contracts/envelope.schema.json) 的 `x-rock3-v0.0.1-uncovered` 与 [contracts/README.md](../contracts/README.md) 演进登记 |
+| IPC-T-003 跨架构对拍（x86 ↔ aarch64 字节布局一致） | 骨架 | **三方对拍 ①②本机已过、③容器真跑未发生（已接 CI 平台条件）**：①宿主 x86_64（Intel Mac）`ipct003_dump` 输出与 [`golden/event-header-128.hex`](../contracts/golden/event-header-128.hex) 逐字节一致（F5 实跑，登记于 conventions.md §2 平台条件脚本段）；②`aarch64-unknown-linux-gnu` 目标已装，交叉 `cargo check` PASS——header.rs 的编译期 const 断言已在 aarch64 目标求值；③`linux/arm64` 容器真跑 SKIP（本机无 Docker）。[`tools/ci/ipct003.sh`](../tools/ci/ipct003.sh) 缺环境打 `SKIP` 明说、不静默冒充已验证；`--strict` 已接入远端 CI——ci.yml 的 `ipct003` job（540ec0f：ubuntu runner + QEMU arm64 + 容器真跑，见 [`../.gitcode/workflows/ci.yml`](../.gitcode/workflows/ci.yml)），远端跑绿一次即可把本行与"本机无法收口"第 4 条结项。登记见 [`envelope.schema.json`](../contracts/envelope.schema.json) 的 `x-rock3-v0.0.1-uncovered` 与 [contracts/README.md](../contracts/README.md) 演进登记。0.0.7 批B 起 `ipct003.sh` 扩**四路**（xtensa 编译期对拍路 PASS），见下行 |
+| 非 Linux 主控契约 parity（ESP32/xtensa，0.0.7 四层梯子） | 已实装（ESP32 档） | 0.0.7 四层全真板收官（R19，2026-10-11）——**层① 字节契约**：rr-ipc no_std 化（`#![no_std]` + 条件 `extern crate std`，协议层纯 core+alloc，批B `a860405`），`ipct003.sh` 四路化、xtensa 编译期 golden 对拍 PASS（实跑 3/4：宿主 PASS / aarch64 PASS / xtensa PASS / arm64 容器 SKIP 本机无 Docker）；机制核 rr-core（常量/寻址/帧组装 0.0.5 批D①、runtime 执行环 批D②、控制原语+安全核 批D③）xtensa 双线编译绿（none-elf 裸金属 + espidf std）。**层② UART 载体**：rr-ipc `transport/uart.rs`（宿主侧 raw termios）+ esp32-uart-echo 裸金属 echo 夹具（批C `46edb3c`），板级实测 128B 头 + payload 完整收发、半帧/坏 magic 双拒不进死锁（批C④⑤ `6d3a1ee`，espflash 4.x app descriptor 现场补）。**层③ 机制核真板消费者**：espidf-sentinel 内跑 `rr-core::runtime`（批D1 `22783ea`/`f72c0d4`）——harness 14 PASS（注册 / 8 拍心跳 195–204ms / round-trip 对拍），三点堆采样 roundtrip min_free=250620B ≈ 启动堆 85%（D1→D2 不触发），线程栈 16KB 钉运行下限。**层④ 桥接 e2e**：rr3-bridge UART↔UDS 中继（`955ef14`）+ 真板 e2e PASS=16 FAIL=0（批E `870cfe6`）——顺序 A/B 双序列、心跳三态、正/负路径点名、断链自愈真拔 USB 双半段实锤。**点验矩阵 esp32-mini 行七格收口（批G `dc3a1d6`）**：⑤ 安全核逐拍板上腿 bit-for-bit（[`rr-core::control::parity`](../base/runtime/rr-core/src/control.rs) 八组原语，LX6 双腿汇合宿主 harness）+ ⑦ 200 拍 min=198/avg=200/max=299ms 全落判据窗——[供给自证表](reference/供给自证表-esp32-mini.md) + [G4 时序证据](reference/G4时序证据-esp32-mini-20261011.md)（C12 证据四样）。平台形状实锤：Xtensa LX6 无 64 位原子（计数/发号 AtomicU32 域）、esp-idf-hal 半体驱动 `unsafe Send` 补齐、UART 开口 flock 排他账本（`707611b`）。余敞口：树莓派档 e2e 板上线即补、容器路真跑、watchdog/安全核周期两键板上标定 |
 | manifest 校验（字段 + 跨字段规则） | 已实装 | [`schema.rs`](../base/runtime/rr-registry/src/schema.rs) + [`validate.rs`](../base/runtime/rr-registry/src/validate.rs)（入口 `rr3_registry_validate_manifest_text`）；契约面在 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs)。运行期 facts 解析（[`rrd/src/manifest.rs`](../base/runtime/rrd/src/manifest.rs)）随 D9 加 `lang` 字段（演练/打包侧产物路径推导要它，`req_str` 缺失即点名；解析真值保持一册，不逼调用方另开 TOML 读取） |
 | 能力格坐标系与装配单（slots.toml / profiles） | 已实装 | ADR-0012。唯一事实源 [`contracts/slots.toml`](../contracts/slots.toml)（21 格 = base 5 + body 12 + cognition 4，2026-10-04 Q1 裁定 append `act.relay`，schema_version 1；基础层 5 格随原能力名两段式、与 `base_capabilities` 表钉死等价，`power.battery` 属基础层通道格）。装配单两份：[`profiles/default.toml`](../profiles/default.toml)（RK3566 参考机，bindings 16 条 = body 12 + cognition 4 全绑 + faces 6 模块）与 [`profiles/distro.toml`](../profiles/distro.toml)（快路机型，bindings 只绑 body 12——cognition 4 格缺位恰好等于 `rr3-brain` provides 全集，faces 保留 brain 声明）。查册门在 [`slots.rs`](../base/runtime/rr-registry/src/slots.rs)；契约守护进 [`tests/contract.rs`](../base/runtime/rr-registry/tests/contract.rs)（基础层等价 / 格位形状 pin / manifest 能力词全查册 / default 与 distro 双装配单对账——distro 机三条腿：绑定面查册与 provides 对账同 default 门、未绑非 base 格位恰好等于 brain provides、faces 覆盖全部在册模块）。**rrd 装配链已接线（T3，`60fcab9`，0.0.2 方案 Q3 裁定）**：[`profile.rs`](../base/runtime/rrd/src/profile.rs) + [`probe.rs`](../base/runtime/rrd/src/probe.rs)——`--profile` 装机正门（与 `--manifest` 两种顺序同给都在 parse 处互斥拒），**faces 决定起谁**；bindings 缺格逐格点名 `拒绝启动 <模块>：缺格 <格位>`（**fail-closed 绝不带病起，缺格 ≠ 拒 boot**——被剔者不进 boot 队列、provides 仍计入可满足性宇宙，下游不连坐）；binding 被他人认领 / 基础层进 bindings / faces 引未在册格位 = 致命拒 boot；基础层进 faces 只记账不缺格（`rr3-power` faces 里的 `power.battery` 属此例）；probe 的 sim 后端对任何格位回在位——缺格只由装配单缺 binding 表达。线级证据 [`tests/e2e_profile.rs`](../base/runtime/rrd/tests/e2e_profile.rs) 3 条（P1 满配三模块全 running / P2 缺格点名且其余照常 spawn / P3 非法装配单 bind 前非 0 退出）。T5 再补 `--contracts` 运行期契约目录入口（deb 装机后编译期仓内路径不存在；缺省 None 保持仓内开发零变化，topics/slots 共用解析） |
 | 主题注册表与前缀归属 | 已实装 | [`topics.toml`](../contracts/topics.toml)（内容本身不在此复述）+ [`topics.rs`](../base/runtime/rr-registry/src/topics.rs) 的 `Rr3TopicSet` / `rr3_topic_set_owner`；装载侧规范化与叠加见 [`topics_load.rs`](../base/runtime/rrd/src/topics_load.rs)。0.0.2 T2 批（`46cf28d`，Q1/Q4 裁定）、0.0.3 批C（`rr3-act/relay/state`，T3 补裁定）与 0.0.4 批D（`3682bfe`，connect `wifi/scan|connect|forget` 三 request，25→28 条 / kind 11-10-3-4）各有 append，形状 pin 三处同批（registry 集成测试 + registry lib + rrd lib 各一份独立 pin，两档同源计数断言同批订正） |
@@ -67,11 +68,11 @@
 架构文档 §10 已收口为一行指向本节（迁入与删原分两步做，是为了让删除那次改动单独可审）。
 **当前实况**一栏是本快照读代码实测的结论，不是对验收标准的复述或期望。
 
-| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`95d37ef` 实测） |
+| 里程碑 | 内容（原 §10 抄录） | 验收标准（原 §10 抄录） | 当前实况（`dc3a1d6` 实测） |
 |---|---|---|---|
 | M0 | 仓库骨架 + ADR-0001~0005 + legacy 冻结 | 目录树落地，rr3-mkmod 能生成合规模块 | 目录树已落地，ADR 已写到 0016（e6b13c9 板卡策略、5f67008 brain 迁移路线，均超出原验收范围），`rr3-mkmod` 的产物被回灌进契约用例 —— **已收口** |
 | M1 | base/os：Buildroot 在 Radxa ZERO 3 跑通 | 串口出 shell；maskrom 自烧录镜像成功 | **结构就绪，未收口（板上敞口）**。defconfig、genimage.cfg（容量=构建期占位符）、extlinux.conf、post-image、flash-maskrom.md、patches/ 核对清单已全部落树，分区标签守护用例进 rr-ota；post-build.sh 装机布局已收口（28c629a：manifest 归位 + entry 绝对化 + config 随装，装配冒烟进 CI `buildroot-assembly` job）；缺的是：全量 make 构建（Linux/容器侧）、dts 与 U-Boot defconfig 核对、串口出 shell、maskrom 实烧——目标硬件 Radxa ZERO 3 **未采购**，板上收口项在硬件到位前不 claim（证据见能力表"Buildroot OS 层"行） |
-| M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **已收口（留一条环境敞口）**。验收标准逐条对照：注册/心跳/崩溃自动重启——**全到位**（注册/心跳/死亡记账/扇出被连接层调用；崩溃自动重启由唯一 supervisor 线程执行：boot spawn、串行收尸、到期重启、按策略退避，线级证据 `e2e_spawn_restart` 5 条）；IPC-T-001/002——同机 golden 往返 + 契约逐字段对齐，全绿；IPC-T-003——三方对拍 **①②本机已过**（F5：宿主 dump==golden 逐字节一致 + aarch64 交叉 check 且 const 布局断言已在该目标求值），**③容器真跑 SKIP**（本机无 Docker；`--strict` 已接远端 ipct003 job（540ec0f），远端跑绿一次即结，见"本机无法收口"第 4 条），这是 M2 唯一敞口。`trait Transport` 已随 ADR-0008 定型并落地 uds 实现；依赖仲裁与 shm 传输为 M2 之后的增量（ADR-0009 / ADR-0011），不计入本里程碑验收 |
+| M2 | rrd MVP：A-IPC 协议层 + uds transport + registry + sim 双假模块 | 注册/心跳/崩溃自动重启；IPC-T-001/002/003 通过 | **已收口（留一条环境敞口）**。验收标准逐条对照：注册/心跳/崩溃自动重启——**全到位**（注册/心跳/死亡记账/扇出被连接层调用；崩溃自动重启由唯一 supervisor 线程执行：boot spawn、串行收尸、到期重启、按策略退避，线级证据 `e2e_spawn_restart` 5 条）；IPC-T-001/002——同机 golden 往返 + 契约逐字段对齐，全绿；IPC-T-003——三方对拍 **①②本机已过**（F5：宿主 dump==golden 逐字节一致 + aarch64 交叉 check 且 const 布局断言已在该目标求值），**③容器真跑 SKIP**（本机无 Docker；`--strict` 已接远端 ipct003 job（540ec0f），远端跑绿一次即结，见"本机无法收口"第 4 条），这是 M2 唯一敞口。0.0.7 批B 起 `ipct003.sh` 扩**四路**、xtensa 编译期对拍路 PASS（能力表"非 Linux 主控契约 parity"行），容器路敞口不变。`trait Transport` 已随 ADR-0008 定型并落地 uds 实现；依赖仲裁与 shm 传输为 M2 之后的增量（ADR-0009 / ADR-0011），不计入本里程碑验收 |
 | M3 | rr3-sense + rr3-interact：ALSA 采集与播放 | 板上录音回放，VAD 事件上总线，音频走 STREAM | **已收口（真麦板上证据敞口）**。sim 侧证据齐：`rr3-sense` / `rr3-interact` 实装（见能力表两行）、rr-bus 同步客户端、rrd 四方法 RPC 与 rr3.call 路由应答回路、**三真进程** e2e（vad_start 事件上总线、pcm STREAM 有序转发、点名应答回到调用方，`e2e_audio_chain` 绿）、七步门禁全绿（conventions §2 台账）；ALSA 后端代码与 feature 门配置就绪。**板上进展（0.0.6 批F1/F4）**：板上 release `--features alsa` 两件构建链实测过（动态 ELF + libasound 断言，boards §8）、板上 `rr3-sim --chain` sim 音源全链闭环（boards §9）——**真麦录音回放仍未发生**：USB 麦阵列未采购（R22 定案 PS3 Eye 或同级 ≥2 麦 UAC），板上载体已是树莓派（0.0.6 批D 起），见"本机无法收口"第 7 条，真件到位前不 claim |
 | M4 | rr3-brain：移植 asr/llm/tts | 全语音对话闭环（legacy 功能等价） | **已收口（云侧联调敞口）**。`rr3-brain` Python 实装（5ab029e，ADR-0014）：py 总线客户端 bus.py 386 行逐语义镜像 rr-ipc、三家云客户端 urllib 实装（`RR3_BRAIN_CLOUD=mock` 是测试注入点）、dialog 状态机串起 vad_start → asr → llm → tts 回路；线级证据 `rr3-sim --brain` 四真进程全语音对话闭环演练（5b55620）；批F4 `--chain` 六真进程 mock 云把对话轮扩到全链（判向→转向→表情，真板实测 boards §9）——详见能力表"`rr3-brain`"行。敞口一条：三家云真实凭据联调未发生（无 key 环境），不阻塞"legacy 功能等价"的 sim 侧验收 |
 | M5 | rr3-act / rr3-connect / rr3-power | 语音控继电器 + WiFi 配网 + 电量上报；shm 控制面初版 | **已收口（sim 侧；板上敞口同 M3）**。逐条对照验收标准：①"语音控继电器"——**sim 侧闭环已证（0.0.3 批C，`be19982`）**：意图→动作映射落 brain（`intent.py` 精确词表 + 否定护栏，Q1 裁定策略层唯一归属）、act 订阅执行面两道归属门（exposes 归属 + 意图面开放）执行 `actions[]`、`relay/state` 状态流 append 在册（T3 补裁定）且 e2e 断言 RPC 路 seq=1 → intent 路 seq=2 跨路连贯——语音进 → brain 抽动作 → act 执行 → 状态回读，整链在 `e2e_act` 线级绿；②WiFi 配网——T4c（`2b08994`）net/link 状态机 + cloud/session 应答面（`e2e_connect` 两场景对偶绿）；**0.0.4 批D（`3682bfe`）配网面收口（sim 侧）**：wifi/scan|connect|forget 三 RPC + `Rr3Provision` AP 配网状态机（ap|station 两态纯函数）+ net/link 流 `mode` 字段随发 + 面板 WiFi 页三端点透传（裁决面钉在 connect 模块单测，`e2e_connect` 既有两场景不动）；③电量上报——T4b（`e87a284`）battery/state 周期流 + battery/low 边沿 + rrd 低电兜底四件动作面（`e2e_power` 绿）；④"shm 控制面初版"——Q2 口径（2026-10-04）已达成：ADR-0011 transport 层落地（单写者多读者环形缓冲 + POSIX 附着），rrd 接线不纳入 M5 验收（如需纳入须立新 ADR）。**0.0.6 批F5a 进展**：HAL linux 真后端五件落地（GPIO led/relay、PWM 舵机、link nmcli、battery INA219——代码与 musl 交叉 check 就位，板上单测欠账）；批F4 `--chain` 板上 sim 侧全链闭环（boards §9）。敞口 = 真硬件动作证据（继电器/配网/电池读数，随外设采购 + 板上线，同 M3 口径）；意图词表的产品化扩展属 brain 演进，不在 M5 验收内 |
@@ -102,22 +103,19 @@
 
 ## 在制品
 
-**本快照只记锚点提交 `95d37ef` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
+**本快照只记锚点提交 `dc3a1d6` 那一棵树的实况；锚点之后新进的提交、以及以未提交状态存在的在途
 改动，都不进本表，重锚时随锚点一并更新。**
 
-锚点 `f2597d5`（上一版快照，0.0.6 阶段一收口，载体提交 `0be189c`）之后进树的提交，全部已按实况计入上文能力表与里程碑表：
+锚点 `95d37ef`（上一版快照，0.0.6 全版本收口，载体提交 `405bef3`）之后进树的提交（60+），按批分组全部已按实况计入上文能力表与下方批次全景段：
 
-- **0.0.5 增补轮（docs 面，九提交）**：`4d5e3e5`（R7–R12 落档与下游修订解锁）/ `1f921de`（0.0.6 修订版 3）/ `f3fe266`（0.0.7 修订版 1，R10 工具链前置批）/ `973a024`（命名口径收束）/ `10d9f02`（增补轮二 R13–R16）/ `3984a83`（0.0.6 修订版 4）/ `d902677`（0.0.7 修订版 2）/ `194265f`（执行准备订正，洞 L/M/N）/ `96e6c22`（增补轮三 R17–R22 + 全案深化收口）；
-- **0.0.6 批F1 板上验证（四提交）**：`af9bc73`（语音采集链承载）/ `79be827`（板上验证收口，boards §8 回填）/ `1d8955e` + `d6059e5`（docs 两条）；
-- **0.0.6 纪律小批**：`b81c986`（心跳先归并后应答——修 ctl.counters 顺序倒置竞态；counters 落盘节流不随批，0.0.4 批B Q2 显式裁定保护项，登记待裁定）；
-- **0.0.6 批F2/F3 sim 段（四提交）**：`e4ccbaf`（双麦 DoA 注入反演 + intent 面 servo/command + brain 转向词表）/ `444c764`（表情五态扩七态 + 8x8 帧序列）/ `1f919b8`（conventions §2 补录）/ `755ac1e`（rustfmt 归一）；
-- **0.0.6 批F4 板上全链闭环（两提交）**：`379e6de`（`rr3-sim --chain` 六真进程 mock 闭环 + sim burst 门控修帧序号）/ `85ea4ec`（boards §9 回填，判据 10 sim 档过）；
-- **0.0.8 立项落档**：`ce07f43`（rr3mod 签名级规格 + 批序列与验收四件套）+ merge `5044ca8`；
-- **0.0.6 批F5a HAL linux 真后端五件（各一代码批 + 一 docs 登记批）**：PWM `acc548e`/`895771e`、GPIO `da52e7f`/`4c0204a`、显示 trait `bcc4de2`/`4abe754`、battery INA219 `8f4d928`/`bdfa059`、link nmcli `faf01be`/`de16194`；
-- **0.0.6 批F5b 运维链（两提交）**：`fab7b6c`（unit 注 RR3_REBOOT_OK + Restart=always + ctl socket 加组放行，ADR-0010 修订 1）/ `95d37ef`（docs 登记）——本快照新锚。
+- **0.0.5 增补轮四（批W0–W7，2026-10-08 收官）**：`55b0234`（R23–R29 落档）/ `a0d83d4`（两方案承接）/ `e5a8c22`（CI 单真源迁 `.gitcode/workflows/`）/ `9f2abba`（counters 节流）/ `48e047d`+`a1dd7d7`（espidf std 构建链冒烟）/ `020be7b`（真件装配与标定手册）/ `db72f79`（0.0.7 修订版 5）/ `65ed883`（批W7 收官）；
+- **0.0.5 第 II 轮原子重铺（批A–E'，ADR-0018/0019）**：`b211b95`（两 ADR 落档）/ `4c97ac8`+`14f1972`（批A）/ `7a3c277`（批B）/ 批C 五重铺 `4002303`/`a82d8b6`/`e17974b`/`a1723b5`/`708e5ad`/`b3aafa2` + `793e98f`（批C⑥ 对账）/ 批D①–⑤ `d09c382`/`f635fcd`/`a767ab9`/`2925847`/`ff1024b` / 批E `2bd1a80`（七步扩九步）/ 批E' `9ae8889` / 设计 docs 十件（`72c688d`/`face127`/`b61c845`/`d4c6c83`/`f298e7a`/`00d719a`/`a9fb167`/`fcd8672`/`8989e9b`/`1510cb9`）；
+- **0.0.5 第 III 轮（批I/J/K，2026-10-09/10）**：`d21839a`（批I rr-hal-api no_std 契约层）/ `4216d7f`（批J ⊙通路+七段描述符+retired 首例）/ `f397329`+`d61011c`（深挖收口）/ `5962084`（批K 收口，第 III 轮收官）；
+- **0.0.6 深挖收口批**：`35c3338`+`d1a0d54`（rrd.service 装机位随 `--profile` 改写 + ⑧-b L0 门拓全限定内联）；
+- **0.0.7 ESP32 四层梯子（批A–G，2026-10-07/11）**：批A `8285677`（方案落档+Q4/Q5）/ 批A' `942d486`（xtensa 工具链前置）/ 批B `a860405`（层① no_std parity）/ 批C `46edb3c`（层② UART 传输+echo 夹具，另 `baf67a6`/`4511641` 两 docs）/ 两板收口批 `6d3a1ee`+`3c467c2`（批C④⑤ 板级收官）/ 批D1 `22783ea`+`f72c0d4`+`c6e3a9c`（层③ 上板，另设计对表 `4895d1d`）/ 批E 七件 `7147890`/`955ef14`/`bab64f5`/`73547a9`/`d30d4eb`/`df914ea`/`870cfe6` + `567c832`（层④ bridge e2e）/ 批G 六件 `707611b`/`dfb55ff`/`bf20d15`+`5c16b15`/`7122cee`/`2372299`/`9fcbb67`+`dc3a1d6`（矩阵行七格收口）——以上各批均在 conventions §2 逐批登记在案。
 
-以上提交都已按实况计入上文能力表；**锚点树内在途的未提交改动只有本收口批（0.0.6 批E''）的文档面**
-（本文件重锚 / conventions §2 批E'' 汇总条），随本批落库。
+以上提交都已按实况计入上文能力表与下方批次全景段；**锚点树内在途的未提交改动只有本收口批（0.0.7 批F）的文档面**
+（本文件重锚 / conventions §2 批F 汇总条），随本批落库。
 
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
@@ -321,12 +319,19 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   排障三实锤落修订版 13：ESP-IDF Compile time 系 C 组件宏缓存 Rust-only 重编不刷新（判别固件
   用 ELF SHA256）；cargo "Finished"≠重编（勘误后 touch 强制重编核 mtime）；板↔宿双向全断
   头号嫌疑 GND 未共地。供给自证表 tick_period_ms/tick_jitter_ms 升级真板实测（≤6ms 抖动）。
-- **下一在制品**：0.0.7（ESP32）四层梯子 + 点验矩阵 esp32-mini 行全收官（2026-10-11）——批A'
-  工具链绿（2026-10-07）→ 批B 层① 绿 → 批C 宿主侧（`46edb3c`）→ 批C④⑤ 板级收官（`6d3a1ee`）→
-  批D1 层③ 板上实测收官（`f72c0d4`）→ 批E 层④ 收官（`870cfe6`）→ 批G 矩阵行七格收口（本落档）；
-  余敞口：树莓派档 e2e 板上线即补（档位注记维持）、①列容器路真跑（无 Docker）、
-  `watchdog_timeout_ms`/`safety_core_interval_ms` 板上标定（触发条件在册）；**余批F（版本收口：
-  status.md 重锚 + conventions §2 汇总 + Q5 密钥门敞口注销 + CI 首跑回执核对）后 0.0.7 收官停等**；
+- **0.0.7 收官（批F 版本收口，2026-10-11，本落档）**：四层梯子 + 点验矩阵 esp32-mini 行全收官——
+  批A' 工具链绿（2026-10-07）→ 批B 层① 绿（`a860405`）→ 批C 宿主侧（`46edb3c`）→ 批C④⑤ 板级收官（`6d3a1ee`）→
+  批D1 层③ 板上实测收官（`f72c0d4`）→ 批E 层④ 收官（`870cfe6`）→ 批G 矩阵行七格收口（`dc3a1d6`）→
+  批F 收口重锚（本落档）。**0.0.7 收官停等（R19 达成：四层全真板验收无受阻态）**。余敞口移交：
+  树莓派档 e2e 板上线即补（档位注记维持）、①列容器路真跑（无 Docker）、
+  `watchdog_timeout_ms`/`safety_core_interval_ms` 板上标定（触发条件在册）、
+  CI 八 job 首跑回执网页核对（敞口表第 1 条统收）、ESP32 板卡独立笔记未建
+  （Q5 版本组合已落 [0.0.7 方案](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md) 批W1 登记——
+  esp-idf-sys 0.35.0 ↔ ESP-IDF v5.2.2 ↔ esp-clang 19.1.2 ↔ ldproxy 0.3.5 + rsproxy 获取方式，
+  批A"随批D1 新建 ESP32 笔记"的载体演变为此登记，欠账如实注记不阻塞收口）；
+- **下一在制品**：0.0.8 模块内部分层（立项已落档，[0.0.8 方案](process/dev/0.0.8版本洛克三号模块内部分层实施方案.md)
+  批0–批6 待用户排期；与 brain 迁移 [ADR-0016](process/adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md)
+  同窗）——0.0.7 已收官，停等中；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；九行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)，到位前不 claim 真硬件证据。采购实况（2026-10-07；2026-10-10 增补）：ESP32 硬件已齐——CP2102 已到位并已用于批C④⑤ 板级
 实测（见上两板收口批 bullet）；树莓派外设采购中。
