@@ -14,6 +14,14 @@
 //! 双证之二（板上真跑）：注册→心跳→round-trip + 三点堆采样（README runbook）。
 //! D1→D2 触发判据：实测运行峰值剩余堆 < 20% 总堆（§9.3 ④）。
 //!
+//! 批G 扩面（⑤ 列安全核逐拍用例的板上腿，载体裁定=扩本哨兵不另立 crate）：
+//! manifest exposes 增 `rr3-sentinel/diag/parity`，点名应答跑
+//! `rr_core::control::parity::rr3_parity_run()` 的**真实原语**（限速门/低电
+//! 边沿/饱和检测/节拍方案/窗结算/速率折算/钳位），输出经 serde_json 手工展开
+//! 回带——**不回显 RR3_PARITY_EXPECTED**（对拍的有效性前提：板上输出与期望
+//! 向量相互独立，两腿汇合在宿主 harness）。输入序列与语义出处全部单源在
+//! rr-core::control::parity，本文件零向量复制。
+//!
 //! 板侧接线（批C 载体同款硬约束）：UART2 = GPIO17→适配器 RXD / GPIO16←适配器
 //! TXD，115200，3.3V TTL，共地；UART0 = 控制台（monitor 观测面）。
 //!
@@ -44,6 +52,7 @@ use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches};
 use serde_json::{json, Value};
 
+use rr_core::control::parity::{rr3_parity_run, RR3_PARITY_VERSION};
 use rr_core::runtime::{
     rr3_dispatch_class, Rr3Dispatch, Rr3GuardBuf, Rr3GuardEvent, Rr3ModuleRuntime,
 };
@@ -62,7 +71,7 @@ const HEARTBEAT_MS: u64 = 200;
 /// 是本固件；restart_policy = "never"（进程面监督对本模块不适用，watchdog 判死
 /// 走在册表记账）。`[rpc].exposes` 是 M3 `rr3.call` 的路由表来源（0.0.7 §9.4 ⑤
 /// e2e round-trip：sim_peer 点名 probe 主题 → 本哨兵应答），不声明 = 不接点名。
-const MANIFEST_TEXT: &str = "[manifest]\nschema_version = 1\nname = \"rr3-sentinel\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/opt/rr3/bin/rr3-espidf-sentinel\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[resources]\nrestart_policy = \"never\"\n\n[health]\nheartbeat_ms = 200\nwatchdog_timeout_ms = 2000\n\n[rpc]\nexposes = [\"rr3-sentinel/diag/probe\"]\n";
+const MANIFEST_TEXT: &str = "[manifest]\nschema_version = 1\nname = \"rr3-sentinel\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/opt/rr3/bin/rr3-espidf-sentinel\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[resources]\nrestart_policy = \"never\"\n\n[health]\nheartbeat_ms = 200\nwatchdog_timeout_ms = 2000\n\n[rpc]\nexposes = [\"rr3-sentinel/diag/probe\", \"rr3-sentinel/diag/parity\"]\n";
 
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -478,8 +487,26 @@ fn reader_loop(mut rx: UartRxHalf, sh: Arc<Shared>) {
     }
 }
 
+/// diag/parity 点名（批G ⑤ 列板上腿）：跑真实原语回 JSON，**不回显期望向量**。
+/// 定长数组 serde_json 有 ≤32 元定长数组/元组的 Serialize impl，json! 直接展开；
+/// 机制核本身零 serde，序列化只落在本 crate（依赖闭包 L1 档位同 rr-bus）。
+fn parity_result_json() -> Value {
+    let o = rr3_parity_run();
+    json!({
+        "v": RR3_PARITY_VERSION,
+        "rate": o.rate,
+        "low": o.low,
+        "sat": o.sat,
+        "plan": o.plan,
+        "wsat": o.wsat,
+        "rhz": o.rhz,
+        "clamp": o.clamp,
+    })
+}
+
 /// 点名 Request 的 round-trip 应答（层③ 判据第三腿）：Response + id 回显 +
-/// result 原样回带 params。首次应答触发堆采样③。
+/// result 原样回带 params；method == `rr3-sentinel/diag/parity` 时回安全核
+/// 逐拍向量（批G ⑤）。首次应答触发堆采样③。
 fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
     let v: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
@@ -492,7 +519,13 @@ fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
         eprintln!("[sentinel] 请求缺 id，不应答（不猜）");
         return;
     };
-    let reply = json!({"jsonrpc": "2.0", "id": id, "result": {"echo": v.get("params").cloned().unwrap_or(Value::Null)}});
+    let method = v.get("method").and_then(Value::as_str);
+    let result = if method == Some("rr3-sentinel/diag/parity") {
+        parity_result_json()
+    } else {
+        json!({"echo": v.get("params").cloned().unwrap_or(Value::Null)})
+    };
+    let reply = json!({"jsonrpc": "2.0", "id": id, "result": result});
     // 回路凭据与投递方向（M3 应答线形状，E6 彩排实锤修正）：trace_id 原样带回
     // Request 头上的调用方 task——rrd 的 rr3_route_response 按它改道并**自组**下行帧
     // （src=被调方 task、dst=调用方 task），0 无从投递会被拒（Invalid）；上行帧的
