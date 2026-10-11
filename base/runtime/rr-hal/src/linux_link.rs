@@ -29,7 +29,12 @@
 //! 住——spawn 后轮询 `try_wait`，到点 kill 并显式回错。此前 `.output()` 阻塞
 //! 等到底，最坏翻转延迟由 nmcli 自由决定（工单 N-2 的真问题：`dev show` 平时
 //! 毫秒级，但 NM 卡顿时可拖到秒级以上，且周期拍里没有别的超时兜底）。
+//! 批H5 审查补档：正常退出后的管道读也套同一档 timeout 做 deadline——kill
+//! 只收直子进程，幸存孙进程仍持写端时阻塞读会拖到孙退出，超时兜底被这条
+//! 旁路架空（`rr3_read_to_end_capped`）。
 
+use std::io::Read;
+use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -114,6 +119,35 @@ fn rr3_nm_signal_to_dbm(q: u8) -> Option<i8> {
     Some(dbm.clamp(-100, -1) as i8)
 }
 
+/// 带 deadline 的管道读尽：fd 置非阻塞后轮询读，EOF 或到点为止，到点返回
+/// 已读内容（调用方拿残缺输出走各自的报错/回落路径，不无限等）。为什么
+/// 不用阻塞版 `read_to_end`：kill 只收直子进程，幸存孙进程仍持写端时会
+/// 一直等到孙退出——`nmcli_timeout` 对管道面就设不了防（批H5 审查补档）。
+/// 非阻塞位不切回去也无妨：fd 随 ChildStdout 丢弃即销毁，无跨调用状态。
+fn rr3_read_to_end_capped(s: &mut (impl Read + AsRawFd), deadline: Instant) -> Vec<u8> {
+    let flags = unsafe { libc::fcntl(s.as_raw_fd(), libc::F_GETFL) };
+    if flags >= 0 {
+        unsafe { libc::fcntl(s.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) };
+    }
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        if Instant::now() >= deadline {
+            break;
+        }
+        match s.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(RR3_NM_POLL);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => break,
+        }
+    }
+    out
+}
+
 /// linux NetworkManager 链路读数（[`crate::Rr3Link`] 的 linux 后端）。
 ///
 /// 选择函数（[`crate::backend::rr3_hal_link`]）不触设备：构造只记接口名、
@@ -148,9 +182,10 @@ impl Rr3LinuxNmLink {
     /// 守护：spawn 后轮询 `try_wait`，到点 kill 并显式回错（N-2）。超时分支
     /// **回错在前、不读管道**——kill 只收直子进程，其孙进程（如 shell fork 的
     /// sleep）仍持管道写端，read_to_end 会等到孙退出才返回，超时兜底反被拖垮；
-    /// 超时回错本就不需要输出。正常退出时子进程已终，读不阻塞。
+    /// 超时回错本就不需要输出。正常退出后读管道也套同一档 deadline（见
+    /// [`rr3_read_to_end_capped`]）：真 nmcli 不 fork 幸存孙进程，读立即到
+    /// EOF，守护只对"假脚本 fork 出幸存孙进程"一类旁路兜底。
     fn nm(&self, args: &[&str]) -> Result<String, Rr3HalError> {
-        use std::io::Read;
         let mut child = Command::new(&self.nmcli)
             .args(args)
             .stdout(Stdio::piped())
@@ -195,15 +230,19 @@ impl Rr3LinuxNmLink {
                 ),
             )));
         }
-        // 超时路径已在上面回错——这里只在正常退出后走到，孙进程不持写端，读不阻塞
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        if let Some(mut s) = child.stdout.take() {
-            let _ = s.read_to_end(&mut stdout);
-        }
-        if let Some(mut s) = child.stderr.take() {
-            let _ = s.read_to_end(&mut stderr);
-        }
+        // 超时路径已在上面回错——这里只在正常退出后走到。读管道各挂一档
+        // deadline（rr3_read_to_end_capped）：真 nmcli 毫秒级 EOF，守护只对
+        // "脚本被替换成 fork 幸存孙进程的假件"一类旁路兜底，不让周期拍被拖住
+        let stdout = child
+            .stdout
+            .take()
+            .map(|mut s| rr3_read_to_end_capped(&mut s, Instant::now() + self.nmcli_timeout))
+            .unwrap_or_default();
+        let stderr = child
+            .stderr
+            .take()
+            .map(|mut s| rr3_read_to_end_capped(&mut s, Instant::now() + self.nmcli_timeout))
+            .unwrap_or_default();
         if !status.map(|s| s.success()).unwrap_or(false) {
             return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
                 &format!(
@@ -270,6 +309,35 @@ impl Rr3Link for Rr3LinuxNmLink {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    /// 唯一 temp 目录名：进程 id + 纳秒后缀。只用 pid 时，并发轮/复用 pid 的
+    /// runner 上会撞上上一轮遗留目录；纳秒唯一化让每轮各用各的目录互不踩。
+    fn rr3_test_link_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("rr3-hal-link-{}-{nanos}-{tag}", std::process::id()))
+    }
+
+    /// ETXTBSY 瞬态重试（GitHub Actions run#7 attempt1 实锤：fs::write 假脚本
+    /// 后立刻 spawn，ubuntu runner 偶发 `Text file busy (os error 26)`——同代码
+    /// 5 连绿后 1 红；rrd supervisor 对 spawn 瞬态同款处置见其已知边界②）。
+    /// 最多重试 2 次、间隔 100ms，只对这一瞬态字符串重试，其余错误原样透传。
+    fn rr3_test_txtbsy_retry<T>(
+        mut f: impl FnMut() -> Result<T, Rr3HalError>,
+    ) -> Result<T, Rr3HalError> {
+        let mut attempts = 0;
+        loop {
+            match f() {
+                Err(e) if attempts < 2 && e.rr3_err_text_as_str().contains("Text file busy") => {
+                    attempts += 1;
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                other => return other,
+            }
+        }
+    }
 
     /// terse 反转义：`\:`→`:`、`\\`→`\`、无转义原样、孤立反斜杠吞掉不炸
     #[test]
@@ -341,7 +409,7 @@ mod tests {
     /// RSSI 换算落位
     #[test]
     fn state_assembles_from_two_nmcli_calls() {
-        let dir = std::env::temp_dir().join(format!("rr3-hal-link-{}-ok", std::process::id()));
+        let dir = rr3_test_link_dir("ok");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-nmcli");
         std::fs::write(
@@ -359,7 +427,7 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_secs(5));
-        let st = dev.state().unwrap();
+        let st = rr3_test_txtbsy_retry(|| dev.state()).unwrap();
         assert!(st.up);
         assert_eq!(
             st.ssid.as_ref().map(|s| s.rr3_ssid_text_as_str()),
@@ -373,7 +441,7 @@ mod tests {
     /// 假 nmcli 退出非零：显式回错点名参数，不静默编造状态
     #[test]
     fn nmcli_nonzero_exit_fails_loudly() {
-        let dir = std::env::temp_dir().join(format!("rr3-hal-link-{}-err", std::process::id()));
+        let dir = rr3_test_link_dir("err");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-nmcli-fail");
         std::fs::write(&script, "#!/bin/sh\necho no wifi dev >&2\nexit 4\n").unwrap();
@@ -381,7 +449,7 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_secs(5));
-        let err = dev.state().unwrap_err();
+        let err = rr3_test_txtbsy_retry(|| dev.state()).unwrap_err();
         assert!(
             matches!(err, Rr3HalError::InvalidParam(ref m)
                 if m.rr3_err_text_as_str().contains("nmcli")),
@@ -391,10 +459,12 @@ mod tests {
     }
 
     /// 超时守护（N-2）：假 nmcli 睡 3 s，超时 100 ms——到点被 kill 且显式回错
-    /// 点名超时值，不许无限等子进程（最坏翻转延迟不再由子进程自由决定）
+    /// 点名超时值，不许无限等子进程（最坏翻转延迟不再由子进程自由决定）。
+    /// spawn 包一层 ETXTBSY 瞬态重试（run#7 attempt1 实锤，见
+    /// [`rr3_test_txtbsy_retry`]；重试最坏 ~200ms 不影响 <2s 判据）。
     #[test]
     fn nmcli_timeout_kills_slow_child() {
-        let dir = std::env::temp_dir().join(format!("rr3-hal-link-{}-tmo", std::process::id()));
+        let dir = rr3_test_link_dir("tmo");
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-nmcli-slow");
         std::fs::write(&script, "#!/bin/sh\nsleep 3\n").unwrap();
@@ -403,7 +473,7 @@ mod tests {
 
         let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_millis(100));
         let started = std::time::Instant::now();
-        let err = dev.state().unwrap_err();
+        let err = rr3_test_txtbsy_retry(|| dev.state()).unwrap_err();
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "超时必须提前杀掉，不许等满子进程时长"
