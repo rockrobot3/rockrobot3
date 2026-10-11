@@ -519,8 +519,13 @@ fn handle_request(frame: &Rr3Frame, body: &[u8], sh: &Shared) {
         eprintln!("[sentinel] 请求缺 id，不应答（不猜）");
         return;
     };
-    let method = v.get("method").and_then(Value::as_str);
-    let result = if method == Some("rr3-sentinel/diag/parity") {
+    // 分发判定（形状实锤 conn.rs rr3_route_call L779/L816：rrd 转发是"原始 body
+    // 原样"——模块收到的 method 仍是 "rr3.call"，点名主题在 params.topic，不存在
+    // "主题提为 method" 的改写。按 method==主题名 分发会在真实链路漏接）。
+    let is_parity = v.get("method").and_then(Value::as_str) == Some("rr3.call")
+        && v.pointer("/params/topic").and_then(Value::as_str)
+            == Some("rr3-sentinel/diag/parity");
+    let result = if is_parity {
         parity_result_json()
     } else {
         json!({"echo": v.get("params").cloned().unwrap_or(Value::Null)})
