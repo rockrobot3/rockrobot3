@@ -32,9 +32,9 @@
    在输出里同时出现行首的 `running N tests`（N≥1）与 `test result: ok. N passed`（N≥1）
    才判 PASS，封死"过滤器笔误/测试集改名"造成的静默放行。
 
-CI 单一事实源在 [`.gitcode/workflows/ci.yml`](../../.gitcode/workflows/ci.yml)
-（0.0.5 增补轮四 批W2，R27 裁定：atomgit 原生引擎只拾取 `.gitcode/workflows/`，
-批A' 实证；`.github/workflows/ci.yml` 仅存指路存根），本脚本才是实际门禁。
+CI 单一事实源在 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+（R30 裁定，2026-10-11：atomgit 无流水线功能，CI 改走 GitHub Actions；R27 时代
+`.gitcode/workflows/` 路径作废，`.gitcode/` 已删除），本脚本才是实际门禁。
 **合入前必须本地跑绿**，退出码非 0 即不合入。
 
 ## 点验矩阵出数入口：`matrix.sh`
