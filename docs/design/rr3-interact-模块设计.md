@@ -115,7 +115,7 @@
 | I-11 | "不可点名表情"规则（`talk`）从件内 `if` 改 ops 槽 `non_pointable`；白名单值本身仍是契约面，只把**规则**外移 | 批J | C1 |
 | I-12 | 面板端点串"后端 + 页面"双写消解：由 `/api/meta` 下发或生成器产页（不改端点字面量，只去第二真值点） | 批K | — |
 | I-13 | **妆面件失败语义规则表落地**（D8 本轮立单，此前索引挂着却无任何工单）：把"哪些件属妆面（写失败只 `eprintln` 不退）、哪些绝不属（执行器与播放路径必须 `exit(1)` 交监督复位）"写成一处数据（`contracts/` 或 ops 侧的件分类表），框架通用约定 1 引它而不是各册自说。建议范围：led / face 属妆面，**player 待 D8 定**（interact §6 已定"意图与声音解耦"，倾向属妆面但不含 sink 写失败以外的路径） | 批I（表）+ 契约评审（范围） | C17 |
-| I-14 | **播真 PCM 而非占位波形**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 裁定 1）：`player` 收 `rr3-brain/audio/tts_pcm` 流（MCP-1 新增主题，载荷体复用上行 `rr3_pcm_event_body` 的 `{seq, format, rate, channels, ms, pcm_b64}` 形状）→ 解 `pcm_b64` → 写 `Rr3AudioSink`；时长由**样点数**导出，`RR3_TTS_MS_PER_CHAR = 60` 与 440 Hz 查表波形退役（站替台账台-2）；`volume_pct`/`prebuffer_ms` 的行为随本单实装并按"进 ops 槽"回归 | **0.0.5 批M MC-1 + MC-2**（前置 MCP-1 契约 append 评审） | MCP-1 |
+| I-14 | **播真 PCM 而非占位波形**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 裁定 1）：`player` 收 `rr3-brain/audio/tts_pcm` 流（MCP-1 已落 `8d05590`：新增主题在册，载荷体复用上行 `rr3_pcm_event_body` 的 `{seq, format, rate, channels, ms, pcm_b64}` 形状）→ 解 `pcm_b64` → 写 `Rr3AudioSink`；时长由**样点数**导出，`RR3_TTS_MS_PER_CHAR = 60` 与 440 Hz 查表波形退役（站替台账台-2）；`volume_pct`/`prebuffer_ms` 的行为随本单实装并按"进 ops 槽"回归 | **0.0.5 批M MC-1 + MC-2**（前置 MCP-1 契约 append 已落 `8d05590`） | MCP-1 |
 
 ## §11 待证与敞口
 
