@@ -409,6 +409,13 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   修复批扩 32B + init 诊断面非 panic 化（Err 明细 + 100k 档 5×2s 重试点名 + 终败继续跑指令面）；
   LEDC 中位 90° duty 1229/16384、RAM 三点 free=294256/290996B 无异常。判据③④（舵机五点
   回读/堵转 UBEC≥4.7V）待舵机接线；教训登记见 [conventions §2](process/conventions.md)；
+- **0.0.5 增补轮五 批B 增量批——OLED 4 行扩行 + Mac 实时数据演示（2026-10-12，提交 `81b30f1`）**：
+  用户裁定"固件扩 4 行"路 B：`OLED_ROWS` 2→4（文本 3 行 ≤63 字符 21 列硬切 + 角度行移
+  row3，`OLED <text>` 命令形状不变向后兼容，可见 ASCII 过滤前置防 char boundary 劈裂）；
+  boot 画面 4 行全出真板目视确认；配套演示件 [scripts/mac_monitor.py](../tools/esp32-periph-base/scripts/mac_monitor.py)
+  （Mac CPU 温度/内存/IP/时间 1Hz 上屏，真板连发全 OK 回执 + 目视确认实时跳动）；
+  开口帧同步教训登记 [conventions §2](process/conventions.md)（UART2 open 后首行指令被
+  boot RX 毛刺残行污染，宿主脚本空行冲行规避）；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；十行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)（第 10 行 USB 声卡+喇叭为 R31 增补——增补轮五 批E 前置），到位前不 claim 真硬件证据。采购实况（2026-10-07；2026-10-10 增补）：ESP32 硬件已齐——CP2102 已到位并已用于批C④⑤ 板级
 实测（见上两板收口批 bullet）；树莓派外设采购中。
