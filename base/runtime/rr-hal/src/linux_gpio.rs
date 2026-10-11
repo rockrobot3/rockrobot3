@@ -166,8 +166,9 @@ impl Rr3LinuxGpioOut {
         if ret < 0 {
             return Err(rr3_gpio_ioctl_err(
                 &format!(
-                    "gpio 请求 chip{} line{} 输出句柄失败（line 被占或越界）",
-                    self.chip, self.line
+                    "gpio 请求 {:?} line{} 输出句柄失败（line 被占或越界）",
+                    self.chip_dev_path().display(),
+                    self.line
                 ),
                 errno,
             ));

@@ -10,6 +10,12 @@
 //! 形状（`read` 写调用方缓冲、`write` 借用切片），`Vec` 形状只在 std 承载层（载荷
 //! 组装、件间传递）使用，不再出现在契约签名里。
 
+// 错型尺寸是契约决定的，不是缺陷：Rr3HalError（rr-hal-api no_std 契约错误面，
+// InvalidParam(Rr3ErrText) 内联 128B 定长文案缓冲）按值传约 136B，超 clippy
+// `result_large_err` 的 128B 缺省阈值。装箱（Box）破坏 no_std 契约面、缩容
+// 动契约常量（Rr3ErrText 定长 128B）——两个"修法"都比 lint 本身更伤，crate 级豁免。
+#![allow(clippy::result_large_err)]
+
 pub use rr_hal_api::{
     Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3BatteryState, Rr3Display, Rr3ErrText,
     Rr3FaceFrame, Rr3GpioOut, Rr3HalError, Rr3Link, Rr3LinkState, Rr3Power, Rr3PwmServo,
