@@ -54,29 +54,60 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
     --out "/tmp/rockrobot3_0.0.6_${ARCH}.deb"
   dpkg -i "/tmp/rockrobot3_0.0.6_${ARCH}.deb"
 
-  echo "== ⑤ 装机位断言（rrd.service 同一组路径）=="
-  test -x /usr/bin/rrd
-  test -x /usr/bin/rr3-ctl
-  test -f /usr/lib/systemd/system/rrd.service
-  test -d /var/lib/rockrobot3 # postinst 建目录（RR3_DATA_DIR，0.0.6 批E' R3）
-  test -f /usr/lib/rockrobot3/profiles/distro.toml
-  test -f /usr/lib/rockrobot3/contracts/topics.toml
-  test -f /usr/lib/rockrobot3/contracts/slots.toml
+  echo "== ⑤ 装机位断言（rrd.service 同一组路径；点名式——败即报缺席路径与装机实况，不再裸退）=="
+  # 点名断言 helper：失败打印缺席路径 + 父目录 ls + deb 清单/校验比对（装机里到底
+  # 有没有）。断言集与断言语义不变——只把"哪条败了、为什么"从猜变成报。
+  must_file() {
+    test -f "$1" && return 0
+    echo "FAIL ⑤: 缺普通文件 $1"
+    ls -la "$(dirname "$1")" 2>&1 || true
+    echo "--- dpkg -L 同名项（deb 数据包清单）---"
+    dpkg -L rockrobot3 2>/dev/null | grep -F "$(basename "$1")" || echo "  （清单无 $(basename "$1")——deb 未含此路径）"
+    echo "--- dpkg -V 校验（仅异常项）---"
+    dpkg -V rockrobot3 2>&1 || true
+    exit 1
+  }
+  must_exec() {
+    test -x "$1" && return 0
+    if test -e "$1"; then echo "FAIL ⑤: $1 存在但无可执行位"; ls -la "$1"; else echo "FAIL ⑤: 缺可执行 $1"; ls -la "$(dirname "$1")" 2>&1 || true; fi
+    echo "--- dpkg -L 同名项（deb 数据包清单）---"
+    dpkg -L rockrobot3 2>/dev/null | grep -F "$(basename "$1")" || echo "  （清单无 $(basename "$1")——deb 未含此路径）"
+    exit 1
+  }
+  must_dir() {
+    test -d "$1" && return 0
+    echo "FAIL ⑤: 缺目录 $1"
+    ls -la "$(dirname "$1")" 2>&1 || true
+    exit 1
+  }
+  must_grep() {
+    grep -qF "$1" "$2" && return 0
+    echo "FAIL ⑤: $2 不含 [$1]（文件实况如下）"
+    cat "$2" 2>&1 || true
+    exit 1
+  }
+  must_exec /usr/bin/rrd
+  must_exec /usr/bin/rr3-ctl
+  must_file /usr/lib/systemd/system/rrd.service
+  must_dir /var/lib/rockrobot3 # postinst 建目录（RR3_DATA_DIR，0.0.6 批E' R3）
+  must_file /usr/lib/rockrobot3/profiles/distro.toml
+  must_file /usr/lib/rockrobot3/contracts/topics.toml
+  must_file /usr/lib/rockrobot3/contracts/slots.toml
   for m in act connect interact sense power; do
-    test -x "/usr/lib/rockrobot3/modules/rr3-$m/rr3-$m"
-    test -f "/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
-    test -f "/usr/lib/rockrobot3/modules/rr3-$m/config.toml"
+    must_exec "/usr/lib/rockrobot3/modules/rr3-$m/rr3-$m"
+    must_file "/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
+    must_file "/usr/lib/rockrobot3/modules/rr3-$m/config.toml"
   done
   # brain（lang=python）装机面：entry = 打包器 shim（可执行），pkg 树 + config 随包
-  test -x /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain
-  test -f /usr/lib/rockrobot3/modules/rr3-brain/module.toml
-  test -f /usr/lib/rockrobot3/modules/rr3-brain/config.toml
-  test -f /usr/lib/rockrobot3/modules/rr3-brain/pkg/rr3_brain/__main__.py
-  grep -q "PYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg" \
+  must_exec /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain
+  must_file /usr/lib/rockrobot3/modules/rr3-brain/module.toml
+  must_file /usr/lib/rockrobot3/modules/rr3-brain/config.toml
+  must_file /usr/lib/rockrobot3/modules/rr3-brain/pkg/rr3_brain/__main__.py
+  must_grep "PYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg" \
     /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain # shim PYTHONPATH 装机绝对
-  grep -q "RR3_BRAIN_CONFIG=/usr/lib/rockrobot3/modules/rr3-brain/config.toml" \
+  must_grep "RR3_BRAIN_CONFIG=/usr/lib/rockrobot3/modules/rr3-brain/config.toml" \
     /usr/lib/rockrobot3/modules/rr3-brain/rr3-brain # shim config 注入（pkg/ 嵌套布局修正）
-  grep -q "/usr/lib/rockrobot3/modules/rr3-act/rr3-act" \
+  must_grep "/usr/lib/rockrobot3/modules/rr3-act/rr3-act" \
     /usr/lib/rockrobot3/modules/rr3-act/module.toml # entry 已装机绝对化
 
   echo "== ⑥ rrd 装配单正门冒烟（参数与 rrd.service 的 ExecStart 一致，仅套接字换测试位；RR3_DATA_DIR 同 unit Environment）=="
