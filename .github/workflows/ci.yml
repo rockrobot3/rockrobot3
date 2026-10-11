@@ -86,8 +86,10 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - name: 安装 esp 工具链（espup 预编译直下 → +esp，第④路 xtensa 对拍）
         run: |
+          # 钉版 v0.17.1（2026-04-17 发布）——latest 漂移会破工具链可重现性；
+          # 升级方式：核对 esp-rs/espup release 资产名后改此处版本号
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL https://github.com/esp-rs/espup/releases/latest/download/espup-x86_64-unknown-linux-gnu \
+          curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
             -o "$HOME/.local/bin/espup"
           chmod +x "$HOME/.local/bin/espup"
           "$HOME/.local/bin/espup" install --targets esp32
