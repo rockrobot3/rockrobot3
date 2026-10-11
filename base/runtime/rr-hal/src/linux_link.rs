@@ -145,9 +145,10 @@ impl Rr3LinuxNmLink {
     }
 
     /// 起一次 nmcli 子进程（terse 模式固定），带 [`Self::nmcli_timeout`] 超时
-    /// 守护：spawn 后轮询 `try_wait`，到点 kill 并显式回错（N-2）。子进程已
-    /// 退出（含被 kill）后才读管道，读不阻塞；若子进程自身因管道写满卡死，
-    /// 同样落在超时分支被终止——超时兜底覆盖一切挂法。
+    /// 守护：spawn 后轮询 `try_wait`，到点 kill 并显式回错（N-2）。超时分支
+    /// **回错在前、不读管道**——kill 只收直子进程，其孙进程（如 shell fork 的
+    /// sleep）仍持管道写端，read_to_end 会等到孙退出才返回，超时兜底反被拖垮；
+    /// 超时回错本就不需要输出。正常退出时子进程已终，读不阻塞。
     fn nm(&self, args: &[&str]) -> Result<String, Rr3HalError> {
         use std::io::Read;
         let mut child = Command::new(&self.nmcli)
@@ -185,14 +186,6 @@ impl Rr3LinuxNmLink {
                 }
             }
         }
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        if let Some(mut s) = child.stdout.take() {
-            let _ = s.read_to_end(&mut stdout);
-        }
-        if let Some(mut s) = child.stderr.take() {
-            let _ = s.read_to_end(&mut stderr);
-        }
         if timed_out {
             return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
                 &format!(
@@ -201,6 +194,15 @@ impl Rr3LinuxNmLink {
                     args.join(" "),
                 ),
             )));
+        }
+        // 超时路径已在上面回错——这里只在正常退出后走到，孙进程不持写端，读不阻塞
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        if let Some(mut s) = child.stdout.take() {
+            let _ = s.read_to_end(&mut stdout);
+        }
+        if let Some(mut s) = child.stderr.take() {
+            let _ = s.read_to_end(&mut stderr);
         }
         if !status.map(|s| s.success()).unwrap_or(false) {
             return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
@@ -329,7 +331,7 @@ mod tests {
     fn nm_signal_dbm_zero_means_unknown() {
         assert_eq!(rr3_nm_signal_to_dbm(0), None);
         assert_eq!(rr3_nm_signal_to_dbm(100), Some(-50));
-        assert_eq!(rr3_nm_signal_to_dbm(87), Some(-56));
+        assert_eq!(rr3_nm_signal_to_dbm(87), Some(-57), "87/2-100=-57（截断）");
         assert_eq!(rr3_nm_signal_to_dbm(1), Some(-100));
         assert_eq!(rr3_nm_signal_to_dbm(255), Some(-1), "u8 上界 clamp 锚");
     }
@@ -364,7 +366,7 @@ mod tests {
             Some("Home:5G"),
             "SSID 取 IN-USE 行真名"
         );
-        assert_eq!(st.rssi_dbm, Some(-56));
+        assert_eq!(st.rssi_dbm, Some(-57), "SIGNAL 87 经 q/2-100 换算");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
