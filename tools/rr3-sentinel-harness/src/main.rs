@@ -7,14 +7,26 @@
 //! result.echo 原样回带。判据输出 PASS/FAIL 逐条点名，退出码 0/1（2 = 环境性
 //! 失败：设备打不开 / 看门狗到点）。D1 层③ 板上判据的宿主半边。
 //!
-//! 用法：`cargo run -p rr3-sentinel-harness -- <串口设备> [拍数，缺省 8]`
+//! 批G 扩面（④⑦ 列）：④ 安全核逐拍对拍——下行 `rr3.call` 点名
+//! `rr3-sentinel/diag/parity`（rrd 转发实锤形状：method 不改写、topic 在
+//! params，conn.rs rr3_route_call），板回向量与**宿主同一 runner**
+//! `rr_core::control::parity::rr3_parity_run()` 的输出（确定性腿）及
+//! `RR3_PARITY_EXPECTED`（契约期望腿）三方两腿对拍；⑦ 时序达标——心跳间隔
+//! 直方图与 `[supplies]` 名义值对表（tick_period_ms=heartbeat_ms /
+//! tick_jitter_ms=100 出自 profiles/esp32-mini.toml），可留证据文件（C12 三样
+//! 契约：环境指纹/采样窗口/样本数/原始数据，rustc -Vv 由操作面追记）。
+//!
+//! 用法：`cargo run -p rr3-sentinel-harness -- <串口设备> [拍数，缺省 8] [证据文件路径]`
 //! （macOS：/dev/tty.usbserial-*；树莓派：/dev/ttyUSB0。板侧 monitor 先行，
-//! 再跑本件；全程 60s 看门狗。）
+//! 再跑本件；看门狗随拍数动态放宽。）
 
 use std::env;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rr_core::control::parity::{
+    rr3_parity_run, Rr3ParityOutputs, RR3_PARITY_EXPECTED, RR3_PARITY_VERSION,
+};
 use rr_core::{rr3_frame_compose, RR3_TASK_RRD, RR3_TRACE_ID_DIRECT};
 use rr_ipc::transport::uart::{Rr3UartConn, RR3_UART_BAUD_DEFAULT};
 use rr_ipc::transport::Rr3TransportConn;
@@ -22,8 +34,18 @@ use rr_ipc::{opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3FrameBuf, Rr3
 use serde_json::{json, Value};
 
 const ROUND_TRIP_ID: u64 = 9001;
-/// 全程看门狗：任一步卡死（板侧复位/线松）即 FAIL 退出，不挂死操作面。
-const WATCHDOG: Duration = Duration::from_secs(60);
+/// parity 点名的 JSON-RPC id（与 ③ probe 的 9001 区分，两段可独立点名）。
+const PARITY_CALL_ID: u64 = 9002;
+/// 全程看门狗基数：在拍数动态项之外的基础开销（注册 + round-trip + parity 对拍）。
+const WATCHDOG_BASE_SECS: u64 = 30;
+/// 每拍看门狗预算（hb 名义 + 传输/调度余量的宽松上界）。
+const WATCHDOG_PER_BEAT_MS: u64 = 1_000;
+/// ⑦ 对表判据（profiles/esp32-mini.toml `[supplies]` 声明：tick_period_ms=200
+/// 即 heartbeat_ms、tick_jitter_ms=100）：单拍间隔允许窗 = [period-50, period+jitter]；
+/// 均值窗 = [period-20, period+50]。下限防"拍点漂移早发"，上限就是声明的抖动预算。
+const BEAT_FLOOR_SLACK_MS: i64 = 50;
+const BEAT_AVG_FLOOR_SLACK_MS: i64 = 20;
+const BEAT_AVG_CEIL_SLACK_MS: i64 = 50;
 /// 心跳停摆判据（单拍间隔上界；200ms 名义值的数量级护栏，抖动不误伤）。
 const HEARTBEAT_STALL_FAIL_MS: u128 = 5_000;
 /// harness 分配给哨兵的 task 号（模块池起点，rr-core::RR3_TASK_FIRST_MODULE）。
@@ -116,6 +138,121 @@ fn round_trip_request(task: u64, now_ns: u64) -> Rr3Frame {
     )
 }
 
+/// parity 下行请求（批G ④）：同款 rr3.call 形状点名 diag/parity——method 不改写
+/// 是 rrd 转发的实锤形状（conn.rs rr3_route_call 原样 body），不是"method=主题名"。
+fn parity_request(task: u64, now_ns: u64) -> Rr3Frame {
+    bus_frame(
+        Rr3PayloadType::Request,
+        HARNESS_TASK,
+        task,
+        json!({"jsonrpc": "2.0", "id": PARITY_CALL_ID, "method": "rr3.call",
+               "params": {"topic": "rr3-sentinel/diag/parity", "args": {}}}),
+        now_ns,
+    )
+}
+
+/// parity 输出 → 板侧同形状 JSON（哨兵 parity_result_json 的宿主镜像，逐字段
+/// 同名同型——两端的比较基准就是"同一形状下的逐值相等"）。
+fn parity_expect_json(o: &Rr3ParityOutputs) -> Value {
+    json!({
+        "v": RR3_PARITY_VERSION,
+        "rate": o.rate,
+        "low": o.low,
+        "sat": o.sat,
+        "plan": o.plan,
+        "wsat": o.wsat,
+        "rhz": o.rhz,
+        "clamp": o.clamp,
+    })
+}
+
+/// 板回 JSON 逐字段点名差分：返回首个不匹配/缺字段的说明（全等则 None）。
+fn parity_first_diff(board: &Value, expect: &Value) -> Option<String> {
+    for key in ["v", "rate", "low", "sat", "plan", "wsat", "rhz", "clamp"] {
+        let b = board.get(key);
+        let e = expect.get(key);
+        match (b, e) {
+            (Some(b), Some(e)) if b == e => {}
+            (Some(b), Some(e)) => {
+                return Some(format!("字段 {key} 不一致：板={b} 期望/宿主={e}"));
+            }
+            (None, _) => return Some(format!("板回缺字段 {key}")),
+            (_, None) => return Some(format!("期望侧缺字段 {key}（形状漂移？）")),
+        }
+    }
+    None
+}
+
+/// ⑦ 直方图（10ms 桶）紧凑串：`[200-209ms)=12` 按桶升序空格连接。
+fn histogram_text(intervals: &[u128]) -> String {
+    let mut buckets: std::collections::BTreeMap<u128, usize> = Default::default();
+    for &ms in intervals {
+        *buckets.entry(ms / 10).or_insert(0) += 1;
+    }
+    let parts: Vec<String> = buckets
+        .iter()
+        .map(|(k, n)| format!("[{}-{}ms)={n}", k * 10, k * 10 + 9))
+        .collect();
+    parts.join(" ")
+}
+
+/// 目标三元组（host 侧拼装；与 matrix.sh C12 证据门的正则同口径）。
+fn target_triple() -> String {
+    match std::env::consts::OS {
+        "macos" => format!("{}-apple-darwin", std::env::consts::ARCH),
+        "linux" => format!("{}-unknown-linux-gnu", std::env::consts::ARCH),
+        other => format!("{}-unknown-{other}", std::env::consts::ARCH),
+    }
+}
+
+/// C12 证据文件（三样契约：环境指纹/采样窗口/样本数/原始数据，四标记词逐一
+/// 在文；目标三元组正则由 target_triple 满足）。rustc -Vv 由操作面追记——
+/// harness 不做进程外调用。
+fn write_evidence(
+    path: &str,
+    device: &str,
+    intervals: &[u128],
+    hist: &str,
+    parity_board: Option<&Value>,
+    t0_unix: u64,
+    t1_unix: u64,
+) -> std::io::Result<()> {
+    let mut text = String::new();
+    text.push_str("=== 环境指纹 ===\n");
+    text.push_str(&format!(
+        "harness 编译目标: {}（{} / {}）\n",
+        target_triple(),
+        std::env::consts::ARCH,
+        std::env::consts::OS
+    ));
+    text.push_str(&format!("串口设备: {device}\n"));
+    text.push_str("对端固件: rr3-sentinel（xtensa-esp32-espidf，espidf-sentinel crate）\n");
+    text.push_str("rustc -Vv: 由操作面在本文件追记（harness 不做进程外调用）\n");
+    text.push_str("=== 采样窗口 ===\n");
+    text.push_str(&format!(
+        "UNIX 起止: {t0_unix} .. {t1_unix}（{}s）\n",
+        t1_unix.saturating_sub(t0_unix)
+    ));
+    text.push_str("对表名义: heartbeat_ms（注册 manifest 在场值）/ tick_jitter_ms=100（profiles/esp32-mini.toml）\n");
+    text.push_str("=== 样本数 ===\n");
+    text.push_str(&format!(
+        "心跳间隔 {} 拍；parity 逐拍对拍 1 次（{} 八组原语）\n",
+        intervals.len(),
+        if parity_board.is_some() {
+            "板回向量"
+        } else {
+            "未完成——证据无效"
+        }
+    ));
+    text.push_str("=== 原始数据 ===\n");
+    text.push_str(&format!("逐拍间隔 ms: {intervals:?}\n"));
+    text.push_str(&format!("直方图(10ms桶): {hist}\n"));
+    if let Some(p) = parity_board {
+        text.push_str(&format!("板回 parity 向量: {p}\n"));
+    }
+    std::fs::write(path, text)
+}
+
 /// 判据输出：PASS/FAIL 逐条点名，返回 ok 供调用方累计。
 fn verdict(ok: bool, label: &str) -> bool {
     if ok {
@@ -128,20 +265,31 @@ fn verdict(ok: bool, label: &str) -> bool {
 
 fn main() {
     let t0 = Instant::now();
+    let t0_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("用法: rr3-sentinel-harness <串口设备> [拍数，缺省 8]");
+        eprintln!(
+            "用法: rr3-sentinel-harness <串口设备> [拍数，缺省 8] [证据文件路径（C12 三样）]"
+        );
         std::process::exit(2);
     }
     let device = args[1].clone();
     let beats: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(8);
-    // 全程看门狗：到点 FAIL 退出（exit 2 = 环境性失败，与判据 FAIL 的 1 分开）
+    let evidence_path = args.get(3).cloned();
+    // 全程看门狗：到点 FAIL 退出（exit 2 = 环境性失败，与判据 FAIL 的 1 分开）。
+    // 预算随拍数放宽（base + 每拍 1s 宽松上界）——⑦ 列 200 拍 ≈ 40s 实跑，固定
+    // 60s 会把合法长采样误杀成环境失败。
     {
+        let wd_budget =
+            Duration::from_secs(WATCHDOG_BASE_SECS + beats as u64 * WATCHDOG_PER_BEAT_MS / 1000);
         let wd_start = t0;
         thread::spawn(move || loop {
             thread::sleep(Duration::from_millis(200));
-            if wd_start.elapsed() > WATCHDOG {
-                eprintln!("FAIL  harness 全程 {WATCHDOG:?} 看门狗到点（板侧在跑吗？线松了吗？）");
+            if wd_start.elapsed() > wd_budget {
+                eprintln!("FAIL  harness 全程 {wd_budget:?} 看门狗到点（板侧在跑吗？线松了吗？）");
                 std::process::exit(2);
             }
         });
@@ -299,6 +447,32 @@ fn main() {
     ) {
         fail += 1;
     }
+    // ⑦ 时序达标对表（批G；判据窗出处见 BEAT_* 常量注记）：名义值 = 注册
+    // manifest 的 heartbeat_ms，抖动预算 = profiles/esp32-mini.toml
+    // tick_jitter_ms=100。真值只认真板直方图（architecture §12.6 ⑦ 列）。
+    let hist = histogram_text(&intervals);
+    println!("② 直方图(10ms桶): {hist}");
+    let hb = hb_ms as i64;
+    let floor_ms = hb - BEAT_FLOOR_SLACK_MS;
+    let ceil_ms = hb + 100;
+    let avg_floor = hb - BEAT_AVG_FLOOR_SLACK_MS;
+    let avg_ceil = hb + BEAT_AVG_CEIL_SLACK_MS;
+    let min_i = intervals.iter().copied().min().unwrap_or(0) as i64;
+    let max_i = max_dt as i64;
+    let avg_i = avg_dt as i64;
+    if !verdict(
+        !intervals.is_empty()
+            && min_i >= floor_ms
+            && max_i <= ceil_ms
+            && avg_i >= avg_floor
+            && avg_i <= avg_ceil,
+        &format!(
+            "⑦ 间隔对表（[{floor_ms},{ceil_ms}]ms 均值[{avg_floor},{avg_ceil}]ms；\
+             实测 min={min_i} avg={avg_i} max={max_i}，名义 hb={hb}ms）"
+        ),
+    ) {
+        fail += 1;
+    }
 
     // ③ round-trip：下行 rr3.call → Response id 回显 + result.echo 原样回带
     let req = round_trip_request(HARNESS_TASK, now_ns());
@@ -359,6 +533,109 @@ fn main() {
     }
     if !verdict(rt_echo_ok, "③ result.echo 原样回带（params→echo 逐字对拍）") {
         fail += 1;
+    }
+
+    // ④ parity 对拍（批G ⑤列板上腿）：下行 rr3.call 点名 diag/parity——板回
+    // 向量、宿主同一 runner（确定性腿）、契约期望向量（契约腿）三方两腿。板侧
+    // 跑真实原语、不回显期望（哨兵 bf20d15/勘误），两腿在宿主汇合才算对拍。
+    let req = parity_request(HARNESS_TASK, now_ns());
+    if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
+        eprintln!("FAIL  parity 请求写出失败: {e:?}");
+        std::process::exit(1);
+    }
+    let parity_start = Instant::now();
+    let mut board_parity: Option<Value> = None;
+    loop {
+        let buf = match conn.rr3_recv_buf() {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("FAIL  parity 应答读取失败: {e:?}");
+                break;
+            }
+        };
+        let frame = match Rr3Frame::try_from(buf) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("FAIL  parity 应答还原失败: {e:?}");
+                break;
+            }
+        };
+        match parse_upstream(frame) {
+            Ok((Rr3PayloadType::Response, id, _, _, v)) if id == PARITY_CALL_ID => {
+                board_parity = v.get("result").cloned();
+                break;
+            }
+            Ok((Rr3PayloadType::Request, _, _, _, _)) => continue, // 心跳并发到达，跳过再等
+            Ok((ty, id, m, _, _)) => {
+                eprintln!(
+                    "FAIL  parity 应答形状错: {ty:?}/id={id}/{}",
+                    m.as_deref().unwrap_or("-")
+                );
+                break;
+            }
+            Err(e) => {
+                eprintln!("FAIL  parity 应答畸形: {e}");
+                break;
+            }
+        }
+    }
+    match &board_parity {
+        Some(bv) => {
+            if !verdict(
+                bv.get("v").and_then(Value::as_u64) == Some(RR3_PARITY_VERSION as u64),
+                &format!(
+                    "④ 板回 parity 向量在册（v={}，耗时 {}ms）",
+                    RR3_PARITY_VERSION,
+                    parity_start.elapsed().as_millis()
+                ),
+            ) {
+                fail += 1;
+            }
+            // 契约腿（宿主自证）：runner 与期望向量的一致性漂移在宿主先红。
+            let host = parity_expect_json(&rr3_parity_run());
+            let expected = parity_expect_json(&RR3_PARITY_EXPECTED);
+            if !verdict(
+                host == expected,
+                "④ 契约腿：宿主 runner == RR3_PARITY_EXPECTED（手推期望守门）",
+            ) {
+                fail += 1;
+            }
+            // 确定性腿：板输出 == 宿主 runner（同 runner 同输入，bit-for-bit）。
+            let diff = parity_first_diff(bv, &host);
+            if !verdict(
+                diff.is_none(),
+                &format!(
+                    "④ 确定性腿：板 == 宿主 runner（xtensa LX6 bit-for-bit）{}",
+                    diff.map(|d| format!("——{d}")).unwrap_or_default()
+                ),
+            ) {
+                fail += 1;
+            }
+        }
+        None => {
+            eprintln!("FAIL  ④ 板回 parity 应答未收到（点名 diag/parity 无应答）");
+            fail += 1;
+        }
+    }
+
+    // C12 证据文件（三样契约；rustc -Vv 由操作面追记）——fail 也写，原始数据留痕。
+    if let Some(ep) = &evidence_path {
+        let t1_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        match write_evidence(
+            ep,
+            &device,
+            &intervals,
+            &hist,
+            board_parity.as_ref(),
+            t0_unix,
+            t1_unix,
+        ) {
+            Ok(_) => println!("OK    证据文件已写: {ep}"),
+            Err(e) => eprintln!("FAIL  证据文件写出失败: {e}"),
+        }
     }
 
     println!("---- D1 harness 判据汇总: {fail} 项 FAIL ----");
@@ -459,5 +736,51 @@ mod tests {
         assert_eq!(v["id"], ROUND_TRIP_ID);
         assert_eq!(v["method"], "rr3.call");
         assert_eq!(v["params"]["args"]["ping"], "pong");
+    }
+
+    /// parity 下行请求形状（批G ④）：同款 rr3.call 形状，topic=diag/parity，
+    /// id=9002 与 probe 区分。method 不改写是 rrd 转发实锤（conn.rs L779/L816）。
+    #[test]
+    fn parity_request_shape() {
+        let f = parity_request(2, 9);
+        assert_eq!(f.header.dst_task, 2);
+        assert_eq!(f.header.src_task, HARNESS_TASK);
+        let (ty, body) = rr3_body_split(&f.payload).unwrap();
+        assert_eq!(ty, Rr3PayloadType::Request);
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["id"], PARITY_CALL_ID);
+        assert_eq!(v["method"], "rr3.call");
+        assert_eq!(v["params"]["topic"], "rr3-sentinel/diag/parity");
+    }
+
+    /// 期望形状函数与差分函数的自证：宿主 runner == 契约期望（契约腿在测试面
+    /// 也钉一道）；差分函数对逐字段篡改逐个点名。
+    #[test]
+    fn parity_expect_json_and_diff() {
+        let host = parity_expect_json(&rr3_parity_run());
+        let expected = parity_expect_json(&RR3_PARITY_EXPECTED);
+        assert_eq!(host, expected, "runner 与期望向量漂移（契约腿红）");
+        assert_eq!(host["v"], RR3_PARITY_VERSION);
+        assert_eq!(host["rate"].as_array().map(Vec::len), Some(8));
+        assert_eq!(host["plan"].as_array().map(Vec::len), Some(3));
+
+        assert_eq!(parity_first_diff(&host, &expected), None);
+        let mut bad = host.clone();
+        bad["clamp"] = json!([0, 0, 0, 0, 0]);
+        let d = parity_first_diff(&bad, &expected).unwrap();
+        assert!(d.contains("clamp") && d.contains("不一致"), "{d}");
+        let mut missing = host.clone();
+        missing.as_object_mut().unwrap().remove("sat");
+        let d = parity_first_diff(&missing, &expected).unwrap();
+        assert!(d.contains("sat") && d.contains("缺"), "{d}");
+    }
+
+    /// ⑦ 直方图分桶标签：10ms 粒度、桶区间首尾正确（[190-199ms) 形状）。
+    #[test]
+    fn histogram_buckets_are_labeled_by_ms_range() {
+        let text = histogram_text(&[195, 200, 205, 205, 310]);
+        assert!(text.contains("[190-199ms)=1"), "{text}");
+        assert!(text.contains("[200-209ms)=3"), "{text}");
+        assert!(text.contains("[310-319ms)=1"), "{text}");
     }
 }
