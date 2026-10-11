@@ -52,7 +52,7 @@ SKIP 纪律同 espidf-sentinel-check.sh（esp 工具链/ldproxy/ESP-IDF v5.2.2/e
 
 | 指令 | 效果 |
 |---|---|
-| `OLED <text>` | 两行显示（≤42 字符，自动 21 列/行），第二行为实时角度 |
+| `OLED <text>` | 三行显示（≤63 字符，21 列/行硬切 3 行），第 4 行为实时角度 |
 | `PAN <deg>` / `TILT <deg>` | 单轴 0–180（超范围 ERR，fail-closed） |
 | `SERVO <pan> <tilt>` | 双轴同设 |
 | `SCAN` | 两轴各 0/45/90/135/180 五点扫描（每点 600ms，逐点回读） |
@@ -61,3 +61,18 @@ SKIP 纪律同 espidf-sentinel-check.sh（esp 工具链/ldproxy/ESP-IDF v5.2.2/e
 | `HELP` | 指令表 |
 
 未知指令一律 `ERR`（不猜不拖）。
+
+## Mac 实时数据演示（scripts/mac_monitor.py，批B 增量批）
+
+OLED 4 行扩行（2→4）的指令面真件验证配套：Mac 侧 1Hz 采集 CPU 温度
+（`osx-cpu-temp`）/内存占用（`memory_pressure -Q`）/IP（`ipconfig getifaddr`）/
+系统时间，拼 63 字符一条 `OLED` 命令上屏（row3 角度行固件自管）：
+
+```bash
+brew install osx-cpu-temp && pip3 install pyserial
+python3 scripts/mac_monitor.py /dev/cu.usbserial-0001   # CP2102 设备号以实际为准
+```
+
+开口帧同步已内置（open 后先发空行冲掉 boot 期 RX 毛刺残行——真板探针实锤：
+首行指令会被噪声前缀污染回 `ERR unknown cmd`）。脚本为演示件，不进十步门禁
+扫面（crate 目录整体在 ④/⑥ 排除清单内）。
