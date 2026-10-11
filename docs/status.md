@@ -349,6 +349,13 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   敞口表第 1/4/8/9 条同批结项（第 4 条含 IPC-T-003 移入 envelope.schema.json
   coverage，活引用三处同步：contracts/README、golden/README、rr-ipc header.rs
   测试注释）；
+- **批H5 审查修复批（2026-10-11，`b2c28da` + `749f7ba`）**：对六提交
+  （e0a8bad..e0cb31a）执行 TRAE-code-review 审查出 4 问题（1 major + 3 minor），
+  用户裁定全修——rr-hal linux_link 三测试 ETXTBSY 加固（temp 目录 pid+纳秒
+  唯一后缀 + 瞬态重试，run#7 attempt1 flake 的裁定落地）+ nm() 读管道 deadline
+  守护（O_NONBLOCK 轮询，堵"幸存孙进程持写端拖垮超时兜底"旁路）；ci.yml espup
+  钉 v0.17.1（latest 漂移破可重现性）+ distro-smoke ⑧ grep 恢复 JSON 键精确
+  匹配；登记随 docs 落档提交；
 - **下一在制品**：0.0.8 模块内部分层（立项已落档，[0.0.8 方案](process/dev/0.0.8版本洛克三号模块内部分层实施方案.md)
   批0–批6 待用户排期；与 brain 迁移 [ADR-0016](process/adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md)
   同窗）——0.0.7 已收官，停等中；
