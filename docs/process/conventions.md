@@ -256,9 +256,10 @@ watchdog 判死但不广播 → 第一/三条红；广播里的相位写错 → 
 不进 contracts/topics.toml"不受影响；落点偏离的文字同步归 Task 13；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
-硬 pin：8 owner / 29 topic / kind 12-10-3-4 / 29 条三元组——0.0.4 批D 随 connect
+硬 pin：8 owner / 30 topic / kind 12-10-4-4 / 30 条三元组——0.0.4 批D 随 connect
 wifi/scan|connect|forget append 同步（0.0.3 批C 曾随 `rr3-act/relay/state`；0.0.7 批E
-随 `rr3-sentinel/diag/probe` append 再同步，28→29）；`every_module_manifest_passes_contract`
+随 `rr3-sentinel/diag/probe` append 再同步，28→29；0.0.5 第 IV 轮 MCP-0 随
+`rr3-brain/audio/tts_pcm` append 再同步，29→30）；`every_module_manifest_passes_contract`
 钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
 每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
 ②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
@@ -1874,6 +1875,24 @@ Mac 实时数据演示件（CPU 温度/内存/IP/时间 1Hz 上屏，真板连�
 跳动）。开口帧同步教训一条：**UART2 指令面 open 后首行指令会被 boot 期 RX 毛刺残行
 污染**（探针实锤回 `ERR unknown cmd` 带噪声前缀）——宿主脚本 open 后先发空行冲残行再
 发正式命令（与批E"复位板子+清输入缓冲"组合时序同源，宿主侧轻量替代）。
+
+2026-10-12 0.0.5 第 IV 轮 MCP-0 契约级评审批（MC-0 合并件，开工门兑现）——**MCP-1**
+`contracts/topics.toml` 29→30：append `rr3-brain/audio/tts_pcm`（stream L2，brain 侧 TTS
+PCM 下行流，F-4 真人声通路的契约半边；载荷体**逐字段复用** `rr3-sense/audio/pcm` 已定形状
+`{seq, format, rate, channels, ms, pcm_b64}`，`rr3_pcm_event_body` 为形状事实源；对 TTS
+引擎中立——云 CosyVoice2 / 本地 Piper 同一份通路；上行 audio/pcm 与 audio/vad_start 字节
+零改动，envelope.schema.json 与 128B 头不动）。与批C/批D **合成一次改表**（§18.4 防重规则
+①）：批C 的 display/servo 与批D 的音频上行全部复用在册主题（face/expression、
+servo/command|state、sense/audio/pcm），零新增登记——全轮仅此一次 topics.toml 变更。
+**MCP-2 作废登记**：`[hardware]` SPI 扩键评审需求随 R31 Q2（SSD1306 由 ESP32 协处理器
+I2C 承载）消失，Pi 侧不再新增 SPI 键位——作废留痕，别让"没做"读成"漏做"。**MCP-3**：
+`rr3-act` module.toml 申报面变更（`[events].subscribes` 增 `rr3-runtime/system/power`），
+低电禁动闸门消费点（MC-5 施工件），走 C14/R-3 同一评审程序。同批同步形状 pin 四处
+（rr-registry topics.rs / contract.rs 的 30 条三元组 + kind 12-10-4-4 + merge 33、
+rrd topics_load 两处 33=30+3）；评审记录唯一落点 contracts/README.md 演进段；0.0.5 方案
+§2.7 尾注记 + status.md 在制品同步。教训复验一条：**形状 pin 是故意的硬断言**——计数
+改动必须同批点齐全部 pin 位（含 merge 33 与注释文案），漏一处即红，这正是 pin 的设计
+意图；rr-registry 38 条先单跑快验再进全量门禁，反馈环从分钟级缩到秒级。
 
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 

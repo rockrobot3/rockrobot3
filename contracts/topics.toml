@@ -242,3 +242,10 @@ kind = "request"
 owner = "rr3-sentinel"
 stable = "L2"
 note = "哨兵探针点名（0.0.7 批E 契约 append 裁定 2026-10-11：F2 门要求 rpc.exposes 主题在册；e2e round-trip 点名对，result.echo 原样回带）"
+
+[[topic]]
+name = "rr3-brain/audio/tts_pcm"
+kind = "stream"
+owner = "rr3-brain"
+stable = "L2"
+note = "TTS PCM 下行流（0.0.5 第 IV 轮 MCP-1 契约评审 2026-10-12，承 0.0.5 方案 §20 第 1 条选 (a)）：brain 把 TTS 产出 PCM 分帧下发 interact player，播放面从'文本点名+占位波形'升级为真声流（F-4）。载荷体逐字段复用 rr3-sense/audio/pcm 已定形状 {seq, format:'s16le', rate, channels, ms, pcm_b64}（rr3-sense composite.rs 的 rr3_pcm_event_body 为形状事实源），对 TTS 引擎中立——云 CosyVoice2 与本地 Piper（R31 Q3）走同一份通路；上行 audio/pcm 与 audio/vad_start 字节零改动"
