@@ -145,7 +145,7 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   echo "== ⑧ counters 回写断言（0.0.6 批E-R3：持久化启用 + boots 落盘）=="
   grep -q "counters 持久化已启用: /var/lib/rockrobot3/counters.json（boots 自增已回写）" /tmp/rrd-smoke.log
   test -f /var/lib/rockrobot3/counters.json
-  grep -q boots /var/lib/rockrobot3/counters.json
+  grep -q "\"boots\"" /var/lib/rockrobot3/counters.json
 
   echo "distro-smoke 绿：deb 装机 → rrd 正门起六模块（含 Python brain），counters 回写落盘"
 '
