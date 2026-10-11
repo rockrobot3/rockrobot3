@@ -70,7 +70,8 @@ jobs:
 
   # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
   # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
-  # Docker）。--strict：任何一步 SKIP 即不放行（退 2）。
+  # Docker + espup 装的 esp 工具链（第④路 xtensa 对拍））。--strict：任何
+  # 一步 SKIP 即不放行（退 2）。
   # QEMU 仿真下容器内 cargo 构建较慢属预期；rust-cache 与 conventions/lint 共享加速。
   ipct003:
     runs-on: ubuntu-latest
@@ -83,8 +84,19 @@ jobs:
         with:
           workspaces: base/runtime
       - uses: docker/setup-qemu-action@v3
+      - name: 安装 esp 工具链（espup 预编译直下 → +esp，第④路 xtensa 对拍）
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/esp-rs/espup/releases/latest/download/espup-x86_64-unknown-linux-gnu \
+            -o "$HOME/.local/bin/espup"
+          chmod +x "$HOME/.local/bin/espup"
+          "$HOME/.local/bin/espup" install --targets esp32
       - name: IPC-T-003 跨架构对拍（--strict）
-        run: bash tools/ci/ipct003.sh --strict
+        run: |
+          # espup 生成的环境导出（LIBCLANG_PATH 等）供 +esp 工具链取用
+          # shellcheck disable=SC1091
+          [ -f "$HOME/export-esp.sh" ] && . "$HOME/export-esp.sh"
+          bash tools/ci/ipct003.sh --strict
 
   # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
   # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →
