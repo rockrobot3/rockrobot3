@@ -1,0 +1,5 @@
+# 批B 外设底座档（0.0.5 增补轮五）：main 线程只做 init+println（哨兵同款安全
+# 画像——默认 3584B 装不下 println 缓冲），指令循环在自起 16KB 线程；两项与
+# 哨兵 sdkconfig.defaults 同口径。
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

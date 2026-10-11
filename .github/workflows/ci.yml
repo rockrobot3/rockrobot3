@@ -44,11 +44,12 @@ jobs:
           done < <(find modules tools base/ota -name Cargo.toml \
                      -not -path "*/target/*" -not -path "base/runtime/*" \
                      -not -path "tools/esp32-uart-echo/*" -not -path "tools/espidf-std-hello/*" \
-                     -not -path "tools/espidf-sentinel/*" \
+                     -not -path "tools/espidf-sentinel/*" -not -path "tools/esp32-periph-base/*" \
                      -print0 | sort -z)
         # esp 工程的排除与门禁 ④ 同口径：xtensa/espidf 专用工具链工程，宿主 stable
         # clippy 必红，编译执法在专用门（esp-uart-echo-check.sh / espidf-std-check.sh /
-        # espidf-sentinel-check.sh，SKIP 纪律）；fmt 步不编译，对它们照跑。
+        # espidf-sentinel-check.sh / esp32-periph-base-check.sh，SKIP 纪律）；fmt 步不
+        # 编译，对它们照跑。
 
   # rr3-brain（Python，stdlib-only）：双矩阵单测。步②b/④只覆盖 Rust 工程，
   # brain 的 26 条 unittest 只有这一步跑（tools/sim --brain 的四真进程 e2e 依赖
