@@ -89,7 +89,9 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   must_exec /usr/bin/rrd
   must_exec /usr/bin/rr3-ctl
   must_file /usr/lib/systemd/system/rrd.service
-  must_dir /var/lib/rockrobot3 # postinst 建目录（RR3_DATA_DIR，0.0.6 批E' R3）
+  must_dir /var/lib/rockrobot3 # postinst 建目录（RR3_DATA_DIR，0.0.6 批E-R3）
+  # 注：本文件 ⑤-⑧ 整体在 docker bash -c 单引号串内，注释/文案禁用 ASCII 撇号
+  # （撇号曾把 -c 串提前闭合，L93 起溢出到宿主执行——run#1-5 五连败根因）
   must_file /usr/lib/rockrobot3/profiles/distro.toml
   must_file /usr/lib/rockrobot3/contracts/topics.toml
   must_file /usr/lib/rockrobot3/contracts/slots.toml
@@ -140,10 +142,10 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   fi
   /usr/bin/rr3-ctl --bus-path "$SOCK" status | grep -q "denied_publish = 0"
 
-  echo "== ⑧ counters 回写断言（0.0.6 批E' R3：持久化启用 + boots 落盘）=="
+  echo "== ⑧ counters 回写断言（0.0.6 批E-R3：持久化启用 + boots 落盘）=="
   grep -q "counters 持久化已启用: /var/lib/rockrobot3/counters.json（boots 自增已回写）" /tmp/rrd-smoke.log
   test -f /var/lib/rockrobot3/counters.json
-  grep -q '"boots"' /var/lib/rockrobot3/counters.json
+  grep -q boots /var/lib/rockrobot3/counters.json
 
   echo "distro-smoke 绿：deb 装机 → rrd 正门起六模块（含 Python brain），counters 回写落盘"
 '
