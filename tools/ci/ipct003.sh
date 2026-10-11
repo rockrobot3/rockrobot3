@@ -14,9 +14,10 @@
 #   4. 已链 esp 工具链（0.0.7 批A'）则 `cargo +esp check --target xtensa-esp32-none-elf
 #      -Z build-std=alloc,core`——golden 头 const 对拍（rr-ipc 协议层编译期求值）在该
 #      目标成立，即 IPC-T-003 第④路；xtensa 真机运行期 dump 归 0.0.7 批C UART 夹具。
-#      未装则 SKIP 并明说。`--offline` 固定加：build-std 构建依赖（gimli 等）走
-#      crates.io CDN 在本网络会连接僵死（0.0.7 方案 §4 批A' 记录），缓存已齐后
-#      离线求值确定可达；若报缺包，按批A' 记录用镜像刷新一次缓存再跑。
+#      未装则 SKIP 并明说。默认在线直连 crates.io（CI 网络正常，build-std 构建依赖
+#      现拉即得）；本网络 crates.io CDN 会僵死（0.0.7 方案 §4 批A' 记录），本机跑
+#      第④路 export IPCT003_CARGO_OFFLINE=1（缓存已齐后离线求值，缺包先按批A'
+#      记录用镜像刷一次缓存）与 IPCT003_CARGO_MIRROR=1（构建依赖走 rsproxy）恢复旧行为。
 #
 # 用法：bash tools/ci/ipct003.sh [--strict]
 #   --strict：缺 Docker/跨架构环境时不放行（退 2）。供有容器环境的一方使用；
@@ -95,17 +96,21 @@ else
 fi
 
 # xtensa 编译期 golden 对拍（0.0.7 层① 第④路；esp 工具链安装见 0.0.7 方案 §4 批A' 记录）
-# 默认经 rsproxy 拉补 build-std 构建依赖（crates.io CDN 本网络会僵死，批A' 记录）；
-# 其他网络环境 export IPCT003_CARGO_NO_MIRROR=1 可关。
+# 默认在线直连 crates.io；本网络 CDN 僵死时本机跑第④路 export
+# IPCT003_CARGO_OFFLINE=1 / IPCT003_CARGO_MIRROR=1 恢复离线+镜像旧行为。
 echo "=== [4/4] xtensa 编译期 golden 对拍（esp 工具链） ==="
 if rustup toolchain list 2>/dev/null | grep -q '^esp'; then
-  mirror_cfg=(
-    --config 'source.crates-io.replace-with="rsproxy-sparse"'
-    --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
-  )
-  [ -n "${IPCT003_CARGO_NO_MIRROR:-}" ] && mirror_cfg=()
+  extra_cfg=()
+  [ -n "${IPCT003_CARGO_OFFLINE:-}" ] && extra_cfg+=(--offline)
+  if [ -n "${IPCT003_CARGO_MIRROR:-}" ]; then
+    extra_cfg+=(
+      --config 'source.crates-io.replace-with="rsproxy-sparse"'
+      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
+    )
+  fi
   if cargo +esp check -q --manifest-path "$manifest" -p rr-ipc --lib \
-      --target xtensa-esp32-none-elf -Z build-std=alloc,core --offline "${mirror_cfg[@]}"; then
+      --target xtensa-esp32-none-elf -Z build-std=alloc,core \
+      ${extra_cfg[@]+"${extra_cfg[@]}"}; then
     echo "PASS  rr-ipc 在 xtensa-esp32-none-elf 编译通过——golden 头 const 对拍已在该目标编译期求值（IPC-T-003 第④路）"
   else
     echo "FAIL  rr-ipc 在 xtensa 目标编译失败——层① 契约 parity 破裂"
