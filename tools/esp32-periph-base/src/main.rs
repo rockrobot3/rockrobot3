@@ -202,11 +202,13 @@ fn glyph(c: u8) -> [u8; 5] {
 // SSD1306 原语驱动（命令流 0x00 控制字节 / 数据流 0x40 控制字节；页寻址模式）
 // ---------------------------------------------------------------------------
 
-/// 发命令（控制字节 0x00 + 命令字节序列）。
+/// 发命令（控制字节 0x00 + 命令字节序列）。SSD1306 控制字节 Co=0/D/C#=0 表示
+/// 其后全部为命令——流式命令面单笔 I2C 写合法（数据手册 §8.1.5.1；init 全序列
+/// 25B 一笔发，b7 真板实锤：8B 缓冲护栏误拒 init 致"命令序列超长"假故障）。
 fn oled_cmd(i2c: &mut I2cDriver, cmds: &[u8]) -> Result<(), String> {
-    let mut buf = [0u8; 8];
+    let mut buf = [0u8; 32];
     buf[0] = 0x00;
-    if cmds.len() > 7 {
+    if cmds.len() > 31 {
         return Err("命令序列超长".into());
     }
     buf[1..=cmds.len()].copy_from_slice(cmds);
@@ -590,16 +592,45 @@ fn main() {
     // 14bit 值域内 400/400 对称占空）——外设 token 单次 move 语义下同 token 无法
     // 二次 move 重装驱动（E0382 实录），且 IDF param_config 与 driver_install
     // 解耦，已装驱动运行中改周期合法（IDF v5.2.2 driver/i2c.h L465 在案）。
-    let oled_ok = oled_init(&mut i2c).is_ok();
-    if !oled_ok {
-        println!("[periph] 400k init 失败，降 100k 重试（失败处置链）");
-        esp_idf_sys::esp!(unsafe { esp_idf_sys::i2c_set_period(0, 400, 400) })
-            .expect("i2c_set_period 降频失败");
+    // 真板诊断面（b7 实录）：init 失败打印 Err 明细不 panic——panic_abort 下
+    // expect 无消息直接 Guru 复位循环，排障拿不到证据；终败继续跑指令面。
+    let mut oled_ok = false;
+    match oled_init(&mut i2c) {
+        Ok(()) => {
+            oled_ok = true;
+            println!("[periph] OLED init ✓（400k 档一次过）");
+        }
+        Err(e) => {
+            println!("[periph] OLED 400k init 失败: {e}");
+            println!("[periph] 降 100k 重试（失败处置链）");
+            if let Err(e) = esp_idf_sys::esp!(unsafe { esp_idf_sys::i2c_set_period(0, 400, 400) }) {
+                println!("[periph] i2c_set_period 降频失败: {e:?}");
+            }
+            for attempt in 1..=5u32 {
+                thread::sleep(Duration::from_secs(2));
+                match oled_init(&mut i2c) {
+                    Ok(()) => {
+                        oled_ok = true;
+                        println!("[periph] OLED init ✓（100k 档第 {attempt} 次重试过）");
+                        break;
+                    }
+                    Err(e) => println!("[periph] OLED 100k 重试 {attempt}/5 失败: {e}"),
+                }
+            }
+        }
     }
-    oled_init(&mut i2c).expect("SSD1306 初始化失败（400k/100k 双档均黑屏——查上拉/接线）");
-    oled_text(&mut i2c, 0, b"ROCK3 PERIPH BASE").expect("boot 画面写失败");
-    oled_text(&mut i2c, 1, b"P:090 T:090").expect("boot 角度行写失败");
-    println!("[periph] OLED init ✓ boot 画面已出");
+    if oled_ok {
+        let r0 = oled_text(&mut i2c, 0, b"ROCK3 PERIPH BASE");
+        let r1 = oled_text(&mut i2c, 1, b"P:090 T:090");
+        match (r0, r1) {
+            (Ok(()), Ok(())) => println!("[periph] OLED ✓ boot 画面已出"),
+            (r0, r1) => println!("[periph] boot 画面写失败: 行0={r0:?} 行1={r1:?}"),
+        }
+    } else {
+        println!(
+            "[periph] OLED init 终败（400k/100k 双档）——不 panic 继续跑指令面（查上拉/接线/供电）"
+        );
+    }
 
     // ---- LEDC timer0 50Hz 14bit：channel0→GPIO32 pan / channel1→GPIO33 tilt ----
     let timer_config = TimerConfig::new()
