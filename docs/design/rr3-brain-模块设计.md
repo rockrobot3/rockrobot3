@@ -93,7 +93,7 @@
 
 | 面 | 输入序列 | 期望值来源 | 边界集 | 现状 |
 |---|---|---|---|---|
-| dialog 轮次 | vad/pcm 时间戳序列（起音→静音→超时） | 裁定语义（**判停归 sense**、8000 ms 封轮、一轮一流水） | 封轮 / 尾长差 1 拍 / 连续两轮 / 云 RTT 与封轮的关系 | ⚠️ 实况打折：`tests/test_dialog.py` 有 7 条，但封轮那条把 `max_utterance_ms` **设成 0** 来触发（没有测 8000 这个名义边界）；无尾长差 1 拍用例；"连续两轮"只测了缓冲重置；云 RTT 与封轮的关系**零覆盖**（B-3）。且这些用例**在门禁步序外**——`check.sh` 不含 Python，`.gitcode/workflows/ci.yml` 虽有 `brain-unittest` 双矩阵 job，atomgit 的 Actions 从不执行 |
+| dialog 轮次 | vad/pcm 时间戳序列（起音→静音→超时） | 裁定语义（**判停归 sense**、8000 ms 封轮、一轮一流水） | 封轮 / 尾长差 1 拍 / 连续两轮 / 云 RTT 与封轮的关系 | ⚠️ 实况打折：`tests/test_dialog.py` 有 7 条，但封轮那条把 `max_utterance_ms` **设成 0** 来触发（没有测 8000 这个名义边界）；无尾长差 1 拍用例；"连续两轮"只测了缓冲重置；云 RTT 与封轮的关系**零覆盖**（B-3）。且这些用例**在门禁步序外**——`check.sh` 不含 Python，`.github/workflows/ci.yml` 虽有 `brain-unittest` 双矩阵 job，远端首跑回执待取（R30：atomgit 无流水线功能，CI 改走 GitHub Actions，GitHub 仓库待建） |
 | intent 映射 | 关键词集 + 空文本 | 舵机角常量表（45/90/135） | 不匹配 / 多关键词 | 有 |
 | 载荷两腿 | `intent/result` 构造 | `contracts/topics.toml` + act 侧执行器对 `actions[]` 的接受形状 | 越权 topic（act 必须拒） | ⚠️ 跨单元断言缺 |
 
@@ -164,7 +164,7 @@
 - **B-7 已结（以一种我没写过的合法方式）**：`net/link` 订阅申报被**撤下**而不是补实现——
   按 R-3 的"补实现或撤申报二选一"，实现侧选了后者。本册 §2 那句"链路 down 不起新轮"从此**不再是待实现项**，
   而是被撤销的主张；若将来要恢复，须重走申报面变更 + C14 类评审。
-- **门禁口径**：brain 的 26 条 stdlib unittest 仍**不在 `check.sh` 十步内**，但 `.gitcode/workflows/ci.yml`
-  的 `brain-unittest` 双矩阵 job 是真的（远端从不执行 → 只算"清单在册未执行"，不折算达标）。
+- **门禁口径**：brain 的 26 条 stdlib unittest 仍**不在 `check.sh` 十步内**，但 `.github/workflows/ci.yml`
+  的 `brain-unittest` 双矩阵 job 是真的（远端首跑回执待取——R30 起押 GitHub Actions → 只算"清单在册未执行"，不折算达标）。
 - **§12 的三档表不受影响**：brain 属主承载层，rtos/bare 档不启用认知格——`esp32-mini.toml` 的
   `[enabled_slots]` 不列 `cognition.*`，正是本册 §12 那行的实现证据。

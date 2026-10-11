@@ -1779,10 +1779,22 @@ esp-clang 19.1.2 ↔ ldproxy 0.3.5）与 rsproxy 获取方式已随批W1/批D1 �
 十步门禁直跑 GATE_EXIT=0（PASS 54）全绿；双远端 `ls-remote` 三端核对随本批
 推送执行。**0.0.7 收官停等，下一版 0.0.8（立项在案 R17）待用户排期**
 
+2026-10-11 CI 真源迁移小批（R30 裁定，0.0.7 收官后工程基础面，ADR-0008/0018）——
+用户裁定"atomgit 没有流水线功能，改用 GitHub 的流水线"：R27 时代的
+`.gitcode/workflows/` 单真源路径作废（atomgit 远端永不执行，八 job 首跑回执零取得），
+`.gitcode/` 整目录删除，真源 `git mv` 回 `.github/workflows/ci.yml`（八 job 定义零改动，
+头注释 R27→R30 口径订正）；`.github/README.md` 改写单真源文档（三远端口径：
+atomgit/gitcode 推远端 + GitHub Actions 流水线）；活引用同步（tools/ci/README、
+check.sh ⑥ 注释、本节 CI 侧步骤引言、brain 模块设计门禁口径、status.md 敞口表第 1 条
+与 IPC-T-003 行链接、.gitignore）；R30 登记 0.0.5 方案 §2.4。八 job 首跑回执改押
+GitHub：仓库待建+SSH key 待配，推送后网页核对归 status.md 敞口表第 1 条结项。
+十步门禁直跑 GATE_EXIT=0 全绿；双远端 `ls-remote` 三端核对随本批推送执行
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
-**十步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
-批W2 起 CI 单真源迁此，R27 裁定；不进十步门，本地可跑）：
+**十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
+批W2 落八 job，R30 裁定（2026-10-11：atomgit 无流水线功能，CI 改走 GitHub Actions）
+起 CI 单真源迁此；不进十步门，本地可跑）：
 `lint`——rustfmt `--check` 与 clippy `-D warnings` 各自独立失败，覆盖 base/runtime 与
 全部独立工程（④ 同一 find 口径）；绿色基线是 2026-10-01 的 rustfmt 全仓归一 + clippy
 清零提交，此后 fmt/clippy 回退即 CI 红。`brain-unittest`——rr3-brain 26 条 stdlib

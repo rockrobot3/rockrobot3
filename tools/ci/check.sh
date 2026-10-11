@@ -166,8 +166,9 @@ run check_docs
 #    真跑"的死角（重铺五版恰好动了它们钉的面），批E' 起 find 扩为与 ④ 同口径
 #    （modules + tools + base 全部独立工程，esp 两工程排除同 ④）；≥1 通过断言与
 #    ①b 同口径，0 测试工程在此红（不许"接线了但没测"）。brain 是 Python（无
-#    Cargo.toml，find 自然跳过）：其 tests/ 由 CI brain-unittest job 覆盖（R27 单
-#    真源 .gitcode/workflows/ci.yml），接线事实登记于 conventions §2，不以本步 SKIP 充数。
+#    Cargo.toml，find 自然跳过）：其 tests/ 由 CI brain-unittest job 覆盖（R30 单
+#    真源 .github/workflows/ci.yml——atomgit 无流水线功能，CI 改走 GitHub Actions），
+#    接线事实登记于 conventions §2，不以本步 SKIP 充数。
 step "⑥ 格格双达标·独立工程测试接线（每件 tests 真跑 ≥1，§13）"
 found_mod=0
 while IFS= read -r -d '' manifest; do
