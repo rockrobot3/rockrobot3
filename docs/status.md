@@ -306,11 +306,27 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   复位 ESP32、哨兵 10s 注册窗口要求 rrd socket 先于任何复位点就绪。批D1 开口帧同步敞口随批E
   实证关闭（E7 全程无 BadMagic 复发——`Rr3UartConn::open` configure 末尾 tcflush(TCIFLUSH) 在案）。
   **层④ 必达全绿（层①②③④ 全收官）；树莓派档 e2e（§9.4 ⑤ 右列）板上线即补，不冒领**
-- **下一在制品**：0.0.7（ESP32）四层梯子全收官（2026-10-11）——批A' 工具链绿（2026-10-07）→ 批B
-  层① 绿（rr-ipc no_std 化 + ipct003 四路）→ 批C 宿主侧（`46edb3c`）→ 批C④⑤ 板级收官（`6d3a1ee`，
-  层② 必达全绿）→ 批D1 层③ 板上实测收官（`f72c0d4`，D1→D2 不触发）→ 批E 层④ 收官（`870cfe6` +
-  本落档，PASS=16 FAIL=0 + 断链自愈）；余敞口：树莓派档 e2e 板上线即补（档位注记维持）、批G
-  点验矩阵轻承载档行收口待其 0.0.5 §12 ④列前置就位；按纪律一批一收官一停，**停等用户开工指令**；
+- **批G 点验矩阵轻承载档行收官——esp32-mini 七格收口**（2026-10-11，代码面 G0 `707611b` /
+  G1 `dfb55ff` / G2 `bf20d15`+勘误 `5c16b15` / G3 `7122cee` 四独立提交 + 本落档提交，双远端
+  三端核对一致；方案修订版 13）：⑤ 列板上载体经裁定扩 espidf-sentinel（否决独立固件 crate）。
+  G1 机制核 `rr-core::control::parity`（真实原语 runner + 契约期望向量 + 守门测试，宿主/xtensa
+  同源）；G2 哨兵扩 `diag/parity` 点名——**勘误实锤：rrd 转发不改写 method、点名主题在
+  params.topic**（conn.rs `rr3_route_call`），初版分发形状必漏接已修；G3 harness ④ 两腿对拍 +
+  ⑦ 直方图对表 + C12 证据写出；G0 UART 开口 flock 排他账本（E7"重复 open 静默截流"实锤变机制
+  门）。**G4 板上实测全绿**：④ 板回 parity 向量与宿主 runner bit-for-bit（LX6，八组原语，契约/
+  确定性双腿过）；⑦ 200 拍 54s 窗口 min=198/avg=200/max=299ms 全落 [150,300] 判据窗（首拍
+  299ms 注册对齐点）；C12 证据四样落仓
+  [G4时序证据](reference/G4时序证据-esp32-mini-20261011.md)（rustc -Vv 操作面追记）；
+  matrix.sh ⑦ PASS[手测] + ⑤ 注记核验过。矩阵七格终态：①skip(实跑3/4) ②③④⑤⑥⑦ pass。
+  排障三实锤落修订版 13：ESP-IDF Compile time 系 C 组件宏缓存 Rust-only 重编不刷新（判别固件
+  用 ELF SHA256）；cargo "Finished"≠重编（勘误后 touch 强制重编核 mtime）；板↔宿双向全断
+  头号嫌疑 GND 未共地。供给自证表 tick_period_ms/tick_jitter_ms 升级真板实测（≤6ms 抖动）。
+- **下一在制品**：0.0.7（ESP32）四层梯子 + 点验矩阵 esp32-mini 行全收官（2026-10-11）——批A'
+  工具链绿（2026-10-07）→ 批B 层① 绿 → 批C 宿主侧（`46edb3c`）→ 批C④⑤ 板级收官（`6d3a1ee`）→
+  批D1 层③ 板上实测收官（`f72c0d4`）→ 批E 层④ 收官（`870cfe6`）→ 批G 矩阵行七格收口（本落档）；
+  余敞口：树莓派档 e2e 板上线即补（档位注记维持）、①列容器路真跑（无 Docker）、
+  `watchdog_timeout_ms`/`safety_core_interval_ms` 板上标定（触发条件在册）；**余批F（版本收口：
+  status.md 重锚 + conventions §2 汇总 + Q5 密钥门敞口注销 + CI 首跑回执核对）后 0.0.7 收官停等**；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；九行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)，到位前不 claim 真硬件证据。采购实况（2026-10-07；2026-10-10 增补）：ESP32 硬件已齐——CP2102 已到位并已用于批C④⑤ 板级
 实测（见上两板收口批 bullet）；树莓派外设采购中。
