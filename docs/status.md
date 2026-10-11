@@ -416,6 +416,15 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   （Mac CPU 温度/内存/IP/时间 1Hz 上屏，真板连发全 OK 回执 + 目视确认实时跳动）；
   开口帧同步教训登记 [conventions §2](process/conventions.md)（UART2 open 后首行指令被
   boot RX 毛刺残行污染，宿主脚本空行冲行规避）；
+- **0.0.5 第 IV 轮 MCP-0 契约级评审批（2026-10-12）**：P1 评审批开工门兑现——MCP-1
+  `topics.toml` 29→30（append `rr3-brain/audio/tts_pcm` stream L2，载荷体逐字段复用
+  `rr3-sense/audio/pcm` 已定形状，F-4 下行通路契约半边；与批C/批D 合成一次改表，批C/批D
+  复用在册主题零新增登记）；MCP-2 SPI 扩键评审随 R31 Q2 作废留痕；MCP-3 `rr3-act` 申报面
+  增订阅 `rr3-runtime/system/power`（MC-5 消费点，C14/R-3 同程序）。同批同步 rr-registry
+  形状 pin（30 条三元组 / kind 12-10-4-4）、rrd topics_load 计数（33=30+3）、
+  [contracts/README](../contracts/README.md) 演进段 / [conventions §2](process/conventions.md) /
+  [0.0.5 方案 §2.7](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) 裁定登记；
+  MC-1 / MC-5 解锁施工；评审记录唯一落点 contracts/README 演进段；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；十行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)（第 10 行 USB 声卡+喇叭为 R31 增补——增补轮五 批E 前置），到位前不 claim 真硬件证据。采购实况（2026-10-07；2026-10-10 增补）：ESP32 硬件已齐——CP2102 已到位并已用于批C④⑤ 板级
 实测（见上两板收口批 bullet）；树莓派外设采购中。
