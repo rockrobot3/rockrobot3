@@ -16,11 +16,29 @@
 //! ——uds 的 endpoint trait 面是"端点可洪泛"形状的产物，硬套点对点等于撒谎。
 //!
 //! 系统调用面：手写 `extern "C"` 声明壳（open/close/read/write/tcgetattr/
-//! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed/tcflush），**不引 libc crate**——
+//! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl），**不引 libc crate**——
 //! shm 裁定 5 同款仓内纪律，rr-ipc 依赖表保持为空。termios 结构与常量 Linux/macOS 分
 //! `cfg` 各钉一份（数值互不相同：Linux B115200 = `0o10002`，macOS 直接用字面
 //! 波特率；O_NOCTTY、VMIN/VTIME 下标、结构布局均异）——每一份都以各自平台
 //! 头文件为准，并用 `const _` 断言结构尺寸，编译期先拦 ABI 漂移。
+//!
+//! 排他开口（0.0.7 批G，批E E7 排障实锤处置）：**按 (进程, 路径) 的 flock 登记
+//! 账本**。每路径在本进程内的首个 open 开一支长寿命 guard fd（O_NONBLOCK 防
+//! carrier 阻塞）并对它 `flock(LOCK_EX|LOCK_NB)`；同进程后续 open 只记账重入
+//! （桥 rx/tx 对同一节点双开是仓内合法形状，`open_uart_pair`）；账退到零关
+//! guard 放锁。跨进程的第二个 opener 在 guard 的 flock 上当场被拒（EWOULDBLOCK
+//! → ResourceBusy 点名）——E7 的雷（macOS 允许重复 open 同一 USB 串口节点，
+//! 残留旧桥/旧 harness 静默截走数据）正是跨进程形状，拦住即结案。
+//!
+//! 为什么不用 TIOCEXCL：Linux 内核对同节点**一切**后续 open 硬拦（不分进程），
+//! 会把桥自家 rx/tx 双开一起拦死；macOS（xnu）的 TS_XCLUDE 只拦"tty 已挂
+//! controlling session 且 opener 非其 leader"，本模块 O_NOCTTY 开口无 session，
+//! pty 探针实测（2026-10-11）TIOCEXCL 后二次 open 仍成功——两头都不成立，弃用。
+//! flock 是 advisory，但仓内全部串口消费者（桥/harness/运维脚本）都经
+//! [`Rr3UartConn::open`] 这一个咽喉，同一把锁即对全体自家人硬约束；外部进程
+//! （espflash/monitor）不守 flock，与旧状同，须按 runbook 先清场再操作。
+//! 精度注记：账本按**路径字符串**记账，同一节点的别名路径（symlink）不记账
+//! ——本仓所有消费方都用同一固定路径写法，别名逃逸留 runbook 纪律兜底。
 //!
 //! 波特率只收 [`rr3_uart_baud_speed`] 认识的两档（115200 默认 / 9600）：9600 是
 //! 0.0.7 方案 P3 的合法降速处置，不预设更大的波特率动物园。
@@ -58,6 +76,8 @@ mod imp {
     pub const VTIME: usize = 17;
     /// SDK sys/termios.h：`#define TCIFLUSH 1`（BSD 与 Linux 数值不同，不得混用）
     pub const TCIFLUSH: i32 = 1;
+    /// SDK sys/fcntl.h：`#define O_NONBLOCK 0x0004`（与 Linux 数值不同，不得混用）
+    pub const O_NONBLOCK: i32 = 0x0004;
 
     /// BSD `struct termios`：4×u64 flags + c_cc[20] + 2×u64 speed。
     /// 尺寸 72 = 32 + 20 + (4 对齐填充) + 16；`const _` 断言在编译期钉死。
@@ -106,6 +126,9 @@ mod imp {
     pub const VTIME: usize = 5;
     /// Linux uapi asm-generic/termbits.h：`#define TCIFLUSH 0`（与 macOS=1 不同值）
     pub const TCIFLUSH: i32 = 0;
+    /// Linux uapi asm-generic/fcntl.h：`#define O_NONBLOCK 04000`（八进制，与
+    /// macOS 数值不同，不得混用）
+    pub const O_NONBLOCK: i32 = 0o4000;
 
     /// glibc/musl `struct termios`：4×u32 flags + c_line + c_cc[32] + 2×u32 speed。
     /// 尺寸 60 = 16 + 1 + 32 + 8（对齐到 4）；`const _` 断言在编译期钉死。
@@ -140,12 +163,18 @@ mod imp {
     }
 }
 
-use imp::{SpeedT, Termios, B115200, B9600, O_NOCTTY, O_RDWR, TCIFLUSH, VMIN, VTIME};
+use imp::{SpeedT, Termios, B115200, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, TCIFLUSH, VMIN, VTIME};
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
+use std::collections::HashMap;
 use std::format;
+use std::string::String;
+use std::sync::{Mutex, OnceLock};
 
 const TCSANOW: i32 = 0;
+/// `flock(2)` 操作码（sys/file.h，macOS 与 Linux 同值）：排他锁 + 非阻塞。
+const LOCK_EX: i32 = 2;
+const LOCK_NB: i32 = 4;
 
 extern "C" {
     /// `open(2)` 是变参：这里只用两参形状（path, oflag）
@@ -163,6 +192,9 @@ extern "C" {
     fn c_tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
     #[link_name = "tcflush"]
     fn c_tcflush(fd: i32, queue_selector: i32) -> i32;
+    /// `flock(2)`：open file description 级排他锁（排他账本的锁面，见模块注记）。
+    #[link_name = "flock"]
+    fn c_flock(fd: i32, operation: i32) -> i32;
     #[link_name = "cfmakeraw"]
     fn c_cfmakeraw(termios_p: *mut Termios);
     #[link_name = "cfsetispeed"]
@@ -184,6 +216,78 @@ pub fn rr3_uart_baud_speed(baud: u32) -> std::io::Result<SpeedT> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 排他登记账本（flock 的同进程重入豁免）：键 = 设备路径字符串，值 = guard fd
+// + 引用数。桥 rx/tx 同节点双开（open_uart_pair）在同进程内合法重入；跨进程
+// 的第二个 opener 撞 guard 的 flock 当场被拒。
+// ---------------------------------------------------------------------------
+
+/// 一条路径的排他 guard：fd 长寿命（保住 flock 直到本进程最后一个 conn 退场），
+/// refs = 本进程内以该路径 open 的 conn 数。
+struct ExclGuard {
+    fd: i32,
+    refs: u32,
+}
+
+static EXCL: OnceLock<Mutex<HashMap<String, ExclGuard>>> = OnceLock::new();
+
+fn excl_map() -> &'static Mutex<HashMap<String, ExclGuard>> {
+    EXCL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 登记入账：该路径首次出现则开 guard fd（O_NONBLOCK 防 carrier 阻塞）取
+/// flock；取不到即 ResourceBusy 点名（E7 "残留旧进程静默截流" 的现场）。
+fn excl_enter(path: &str) -> std::io::Result<()> {
+    let mut m = excl_map().lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(g) = m.get_mut(path) {
+        g.refs += 1;
+        return Ok(());
+    }
+    let mut cpath = path.as_bytes().to_vec();
+    cpath.push(0);
+    // SAFETY：cpath 以 NUL 结尾，open 只读它；guard fd 不收发数据，O_NONBLOCK
+    // 只为 open(2) 自身不在 carrier 上悬住。
+    let fd = unsafe {
+        c_open(
+            cpath.as_ptr() as *const CChar,
+            O_RDWR | O_NOCTTY | O_NONBLOCK,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY：合法 fd；LOCK_EX|LOCK_NB 非阻塞取锁，被占即 EWOULDBLOCK。
+    if unsafe { c_flock(fd, LOCK_EX | LOCK_NB) } != 0 {
+        let e = std::io::Error::last_os_error();
+        // SAFETY：合法 fd，锁失败则归还。
+        unsafe { c_close(fd) };
+        return if e.kind() == std::io::ErrorKind::WouldBlock {
+            // EWOULDBLOCK（macOS=35/Linux=11 同 kind）：节点被另一个进程锁着。
+            // （ErrorKind::ResourceBusy 1.83 才 stable，MSRV 1.82 用 Other + 文案点名）
+            Err(std::io::Error::other(format!(
+                "串口已被其他进程占用（flock 排他）：{e}"
+            )))
+        } else {
+            Err(e)
+        };
+    }
+    m.insert(String::from(path), ExclGuard { fd, refs: 1 });
+    Ok(())
+}
+
+/// 退账：refs 减到零关 guard fd（flock 随最后一次 close 释放），并移除账目。
+fn excl_exit(path: &str) {
+    let mut m = excl_map().lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(g) = m.get_mut(path) {
+        g.refs -= 1;
+        if g.refs == 0 {
+            // SAFETY：guard fd 是 excl_enter 开出的合法描述符，账退尽即归还。
+            unsafe { c_close(g.fd) };
+            m.remove(path);
+        }
+    }
+}
+
 /// UART 连接：raw termios 串口 fd 的所有权包装。
 ///
 /// 帧语义免费：实现 [`Read`] + [`Write`] 后经 std 单向 adapter 进窄缝
@@ -192,10 +296,14 @@ pub fn rr3_uart_baud_speed(baud: u32) -> std::io::Result<SpeedT> {
 /// 半帧/坏帧拒收与 uds 同源。
 pub struct Rr3UartConn {
     fd: i32,
+    /// 排他账本键（open 路径）；`from_fd` 测试注入路径不记账，为 None。
+    excl_path: Option<String>,
 }
 
 impl Rr3UartConn {
-    /// 打开串口设备并配 raw 模式（默认 115200）。
+    /// 打开串口设备并配 raw 模式（默认 115200）。开口即排他登记（见模块注记
+    /// "排他开口"）：同进程重入放行（桥 rx/tx 双开形状），跨进程第二个 opener
+    /// 当场被拒。
     pub fn open(path: &Path) -> std::io::Result<Self> {
         Self::open_with_baud(path, RR3_UART_BAUD_DEFAULT)
     }
@@ -203,30 +311,43 @@ impl Rr3UartConn {
     /// 打开串口设备并配 raw 模式，波特率显式给定（只收 115200/9600）。
     pub fn open_with_baud(path: &Path, baud: u32) -> std::io::Result<Self> {
         let speed = rr3_uart_baud_speed(baud)?;
+        // 排他登记先行：guard 拿不到就不开数据 fd，报错点名叫人（fail-closed）。
+        let key = path.to_string_lossy().into_owned();
+        excl_enter(&key)?;
         use std::os::unix::ffi::OsStrExt;
         let mut cpath = path.as_os_str().as_bytes().to_vec();
         cpath.push(0);
         // SAFETY：cpath 以 NUL 结尾，open 只读它；两参形状与 open(2) 变参声明一致。
         let fd = unsafe { c_open(cpath.as_ptr() as *const CChar, O_RDWR | O_NOCTTY) };
         if fd < 0 {
-            return Err(std::io::Error::last_os_error());
+            let e = std::io::Error::last_os_error();
+            excl_exit(&key);
+            return Err(e);
         }
         match configure(fd, speed) {
-            Ok(()) => Ok(Self { fd }),
+            Ok(()) => Ok(Self {
+                fd,
+                excl_path: Some(key),
+            }),
             Err(e) => {
                 // SAFETY：fd 是刚 open 成功的合法描述符，配置失败则归还。
                 unsafe { c_close(fd) };
+                excl_exit(&key);
                 Err(e)
             }
         }
     }
 
     /// 从已打开的 fd 建连接并配 raw 模式（单测经 pty 注入用；**取得 fd 所有权**）。
+    /// 不参与排他账本（fd 非本模块 open 所出，guard 无从挂靠）。
     #[cfg(test)]
     pub(crate) fn from_fd(fd: i32, baud: u32) -> std::io::Result<Self> {
         let speed = rr3_uart_baud_speed(baud)?;
         configure(fd, speed)?;
-        Ok(Self { fd })
+        Ok(Self {
+            fd,
+            excl_path: None,
+        })
     }
 }
 
@@ -308,6 +429,10 @@ impl Drop for Rr3UartConn {
     fn drop(&mut self) {
         // SAFETY：fd 是 open/from_fd 取得的合法描述符，close 一次即归还。
         unsafe { c_close(self.fd) };
+        // 参与排他账本的（open 路径出身的）退账；refs 归零即放锁。
+        if let Some(p) = &self.excl_path {
+            excl_exit(p);
+        }
     }
 }
 
@@ -385,11 +510,20 @@ mod tests {
             )
         };
         assert_eq!(rc, 0, "openpty 失败：{}", std::io::Error::last_os_error());
-        let len = name.iter().position(|&c| c == 0).expect("openpty name 未 NUL 结尾");
+        let len = name
+            .iter()
+            .position(|&c| c == 0)
+            .expect("openpty name 未 NUL 结尾");
         let path: std::vec::Vec<u8> = name[..len].iter().map(|&c| c as u8).collect();
         let path = String::from_utf8(path).expect("pty 路径非 UTF-8");
         // SAFETY：master/slave 都是 openpty 刚出的合法 fd，各自 File 接管并负责 close。
-        unsafe { (std::fs::File::from_raw_fd(master), std::fs::File::from_raw_fd(slave), std::path::PathBuf::from(path)) }
+        unsafe {
+            (
+                std::fs::File::from_raw_fd(master),
+                std::fs::File::from_raw_fd(slave),
+                std::path::PathBuf::from(path),
+            )
+        }
     }
 
     /// 半帧用例需要"读超时"而不是阻塞：把读侧切到 VMIN=0/VTIME=1（100ms 静默即返回 0）。
@@ -532,5 +666,92 @@ mod tests {
         assert!(rr3_uart_baud_speed(9600).is_ok());
         assert!(rr3_uart_baud_speed(921600).is_err());
         assert!(rr3_uart_baud_speed(0).is_err());
+    }
+
+    /// 排他开口·同进程重入（批G G0 守门用例）：同一节点同进程两次 open 都放行
+    /// ——桥 rx/tx 双开（open_uart_pair）是仓内合法形状，flock 账本只对跨进程
+    /// 生效。走真实 open(path) 入口。
+    #[test]
+    fn uart_open_same_process_pair_reentrant() {
+        let (_master, _slave_keepalive, slave_path) = pty_pair_with_path();
+        let _rx = Rr3UartConn::open(&slave_path).expect("首次 open 必须成功");
+        let _tx = Rr3UartConn::open(&slave_path).expect("同进程双开（桥 rx/tx 形状）必须放行");
+        // 双双 drop 退账到零，随后第三次 open 仍须成功（账目可复用，无泄漏）。
+        drop(_rx);
+        drop(_tx);
+        let _again = Rr3UartConn::open(&slave_path).expect("账退尽后重开必须成功");
+    }
+
+    /// 排他开口·跨进程被拒（批G G0 守门用例，批E E7 实锤）：另一进程持锁时本
+    /// 进程 open 必须以文案点名拒绝——E7 "残留旧桥静默截流" 的现场形状。
+    /// 子进程探针：复用本测试二进制，holder 模式下按父进程传入的 pty 路径 open，
+    /// 就绪文件握手（harness 自身的 stdout 输出不可作握手信道），父进程关 stdin
+    /// 即收兵。
+    #[test]
+    fn uart_excl_cross_process_second_process_rejected() {
+        let (_master, _slave_keepalive, slave_path) = pty_pair_with_path();
+        if std::env::var("RR3_UART_EXCL_PROBE").as_deref() == Ok("holder") {
+            let path = std::env::var("RR3_UART_EXCL_PATH").expect("holder 必须拿到 pty 路径");
+            let conn =
+                Rr3UartConn::open(std::path::Path::new(&path)).expect("holder open 必须成功");
+            let ready = std::env::var("RR3_UART_EXCL_READY").expect("holder 必须拿到就绪文件路径");
+            std::fs::write(&ready, b"R").expect("holder 写就绪文件失败");
+            let mut b = [0u8; 1];
+            let _ = std::io::stdin().read(&mut b); // 父进程关 stdin 即收兵
+            drop(conn);
+            return;
+        }
+        let ready = std::env::temp_dir().join(format!("rr3-excl-probe-{}.r", std::process::id()));
+        let _ = std::fs::remove_file(&ready);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "transport::uart::tests::uart_excl_cross_process_second_process_rejected",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("RR3_UART_EXCL_PROBE", "holder")
+            .env("RR3_UART_EXCL_PATH", &slave_path)
+            .env("RR3_UART_EXCL_READY", &ready)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn 自身测试二进制失败");
+        // 等就绪文件（holder 持锁成功的信号），10s 上限。
+        let mut ready_seen = false;
+        for _ in 0..200 {
+            if ready.exists() {
+                ready_seen = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if matches!(child.try_wait(), Ok(Some(_))) || !ready_seen {
+            let _ = std::fs::remove_file(&ready);
+            panic!("holder 子进程 10s 内未就绪（pty 路径：{slave_path:?}）");
+        }
+        match Rr3UartConn::open(&slave_path) {
+            Ok(_) => {
+                drop(child.stdin.take());
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&ready);
+                panic!("跨进程二次 open 必须被拒（flock 排他）");
+            }
+            Err(err) => {
+                let msg = format!("{err}");
+                assert_eq!(
+                    err.kind(),
+                    std::io::ErrorKind::Other,
+                    "跨进程被拒必须 Other+文案点名（实得 {msg}）"
+                );
+                assert!(
+                    msg.contains("flock 排他"),
+                    "错误文案必须点名 flock 排他：{msg}"
+                );
+            }
+        }
+        drop(child.stdin.take()); // 关 stdin 收兵
+        let _ = child.wait();
+        let _ = std::fs::remove_file(&ready);
     }
 }
