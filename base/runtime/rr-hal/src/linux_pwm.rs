@@ -240,7 +240,15 @@ mod tests {
     }
 
     fn read_u64(p: &Path) -> u64 {
-        std::fs::read_to_string(p).unwrap().trim().parse().unwrap()
+        // 空文件记 0："没碰过"验证路径（drop 不写 enable）文件零字节，
+        // trim 后空串 parse 会 panic——语义上空 = 从未写 = 0
+        let s = std::fs::read_to_string(p).unwrap();
+        let t = s.trim();
+        if t.is_empty() {
+            0
+        } else {
+            t.parse().unwrap()
+        }
     }
 
     #[test]

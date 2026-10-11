@@ -121,7 +121,8 @@ impl Rr3LinuxIna219 {
             let detail = std::io::Error::from_raw_os_error(errno);
             return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
                 &format!(
-                    "i2c 设从地址 {:#04x} 失败: {detail}（errno {errno}）",
+                    "i2c {:?} 设从地址 {:#04x} 失败: {detail}（errno {errno}）",
+                    self.bus_dev_path().display(),
                     self.addr
                 ),
             )));
@@ -209,9 +210,13 @@ mod tests {
     fn bus_mv_decodes_13bit_lsb4mv() {
         assert_eq!(ina219_bus_mv(0x0000), 0);
         assert_eq!(ina219_bus_mv(0x0008), 4, "LSB 4mV");
-        assert_eq!(ina219_bus_mv(0x07D0), 4000, "0x07D0>>3=250 → 1000mV");
-        // 4.0V 单芯典型态：raw = 4000/4 << 3 = 0x7D0<<3 = 0x3E80
-        assert_eq!(ina219_bus_mv(0x3E80), 4000);
+        assert_eq!(
+            ina219_bus_mv(0x07D0),
+            1000,
+            "0x07D0>>3=250 → 250×4mV=1000mV"
+        );
+        // 4.0V 单芯典型态：raw = (4000mV/4mV)<<3 = 1000<<3 = 0x1F40
+        assert_eq!(ina219_bus_mv(0x1F40), 4000);
         // 满量程 32V：0xFFFF>>3 = 8191 → 32764mV
         assert_eq!(ina219_bus_mv(0xFFFF), 32764);
     }

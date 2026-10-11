@@ -424,6 +424,9 @@ mod tests {
 
     /// pty 对 + slave 设备路径（macOS /dev/ttysNNN）。master 返给测试做"对端写手"，
     /// slave 保活 fd 由测试持有（bridge 会按路径 open 它自己的两个句柄）。
+    // c_char 平台差异：aarch64-linux 上是 u8（`c as u8` 冗余），x86_64-linux/macOS
+    // 上是 i8（cast 必要）——不能裸删，target 无关写法只能保留 cast 抑制该 lint。
+    #[allow(clippy::unnecessary_cast)]
     fn pty_with_path() -> (std::fs::File, std::fs::File, PathBuf) {
         let mut master = 0i32;
         let mut slave = 0i32;
