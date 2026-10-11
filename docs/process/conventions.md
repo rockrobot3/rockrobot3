@@ -1764,6 +1764,21 @@ macOS 允许重复 open 同一节点、残留旧桥静默截走数据（清场�
 （E7 全程无 BadMagic 复发——`Rr3UartConn::open` configure 末尾 tcflush(TCIFLUSH) 在案）。
 树莓派档 e2e（§9.4 ⑤ 右列）板上线即补，不冒领
 
+2026-10-11 0.0.7 批F 版本收口**纯文档批，零 `.rs` 改动**（ADR-0008/0018）——
+status.md 重锚 `95d37ef`→`dc3a1d6`（0.0.7 批G 落档树）：锚点后的 60+ 提交
+（0.0.5 增补轮四批W0–W7、第 II 轮批A–E'、第 III 轮批I–K、0.0.6 深挖收口批、
+0.0.7 批A–G）按批分组计入在制品段；能力表新增**"非 Linux 主控契约 parity
+（ESP32/xtensa，0.0.7 四层梯子）"行**——层① rr-ipc no_std + xtensa 编译期
+golden 对拍（实跑 3/4 路）/ 层② UART 载体板级 128B 头+payload / 层③ espidf-
+sentinel 上板三点堆 85% / 层④ rr3-bridge e2e 16 PASS + 矩阵行七格（⑤
+bit-for-bit + ⑦ 200 拍判据窗），IPC-T-003 行补四路化注记、里程碑 M2 行同步；
+**Q5 密钥门注销核对**：ESP-IDF 版本组合（esp-idf-sys 0.35.0 ↔ ESP-IDF v5.2.2 ↔
+esp-clang 19.1.2 ↔ ldproxy 0.3.5）与 rsproxy 获取方式已随批W1/批D1 落 0.0.7
+方案登记——批A"随批D1 新建 ESP32 笔记"的载体演变为此登记，独立笔记载体欠账
+如实注记不阻塞；CI 八 job 首跑回执网页核对敞口维持（status.md 敞口表第 1 条）。
+十步门禁直跑 GATE_EXIT=0（PASS 54）全绿；双远端 `ls-remote` 三端核对随本批
+推送执行。**0.0.7 收官停等，下一版 0.0.8（立项在案 R17）待用户排期**
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.gitcode/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
