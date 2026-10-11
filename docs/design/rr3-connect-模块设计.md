@@ -111,7 +111,7 @@
 | N-2 | nmcli 子进程必须有自己的超时并被 `timeout_ms` 管：今天该值无读者，最坏翻转延迟由子进程自由决定 | 批I | — |
 | N-3 | `Rr3LinkState.ssid` 去 `String`（`⊙` 跨片形状） | 批I | C5 |
 | N-4 | AP 态与 `up` 的语义定案并写进 schema 注记 | **待裁** | — |
-| N-5 | 真链路（wpa_supplicant 持久化 / BlueZ）随板上批 | 0.0.6 后续 | 采购 |
+| N-5 | 真链路（wpa_supplicant 持久化 / BlueZ）**按 2026-10-12 版本边界改判拆成两半**：① **凭据持久化 = 开发项**，搬入 0.0.5 批M **MC-6**（linux 侧由 NetworkManager 承载持久化、`forget` 真删除，主机侧可用临时 `NMCONF_HOME` 夹具测）；② **BlueZ 真后端 = 不在 F 清单内**，本轮不写码——按 **MC-9** 处置 `net.bt` 的状态位（建议改记 `placeholder` 并写明触发条件），"骨架却记 normal"属承诺 > 事实（索引 R-16） | **MC-6**（持久化）/ **MC-9**（bt 三态） | 采购（仅影响验证半边） |
 | N-6 | 三个无读者的声明项（`roam_probe_enabled` / `tls_min_version` / `timeout_ms` 的语义归一）：**实装、或删除、或改为 ops 槽并写清生效点**，不许停在"回显即当作已实现"。与 interact I-1、power P-6 同纪律，同批做以免三份册子各说各话 | 批I | — |
 | N-7 | **载荷组装上移承载层**：`rr3_link_body` 与三枚 `*_result` 的 `json!` 移到 `src/composite.rs`/`session.rs`，件只交 `Rr3LinkState` + `mode` + 判定（依据 = ADR-0019 修订 4）；验收 = `net/link` 与三 RPC 应答字节逐字不变 | 批I | — |
 | N-8 | 对外自述里的栈名（`BlueZ`、`NetworkManager`/`D-Bus`）从 SURFACE 与 println 撤出，改由 `rr3_hal_backend_resolve` 交后端名——**换协议栈不该要求改代码**，这是本单元最直白的"换芯片不改码"检验点 | 批I | — |

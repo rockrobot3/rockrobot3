@@ -116,7 +116,7 @@
 | A-2 | 时基改 `Rr3TimeBase`（含 `rr-bus` 心跳），去掉 `SystemTime` 单调性误称 | 批I | — |
 | A-3 | `loop_hz` 用 `try_from<u64> for u32` + 越界拒 boot | 批I | — |
 | A-4 | servo/relay 句柄面换 `rr-hal-api` 同步签名（去 `rr3_block_on`） | 批I | C5 |
-| A-5 | "低电禁动"语义定义（power 边沿 → act 闸门，落点在机制核安全核段） | 待裁（M6 关联） | — |
+| A-5 | "低电禁动"语义定义（power 边沿 → act 闸门，落点在机制核安全核段）——**2026-10-12 由索引 §13.3 裁定 R-15 结案**（四条语义：触发源唯一 = rrd 的 `rr3-runtime/system/power` 广播；禁执行面、不禁妆面；回阈 + 迟滞解禁且不自动重放被拒的令；bare 档由安全核段自判 `Rr3LowEdge` 出 `RR3G` 行），详见 [0.0.5 §20 第 2 条](../process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | **0.0.5 批M MC-5**（前置 MCP-3 申报面评审；与 P-8 / 批L L-8 合并成一个动作） | MCP-3 |
 | A-6 | 环 tick 计入 counters（健康面可观测"活着但不动"） | 批K | C9 |
 | A-8 | **载荷组装上移承载层**：`rr3_servo_state_body` / `rr3_led_*` / `rr3_relay_result` 之类 `-> Value` 的函数从件面移到 `src/composite.rs`，件只交结构体与判定（依据 = ADR-0019 修订 4；做完 `serde_json` 从件面清零） | 批I | — |
 | A-9 | 意图开放门与灯效白名单从硬编码 `match` 改 ops 槽注入（`intent_open_topics`、`led_effects`），使"某形态不开 led"成为改数据不改码 | 批J | C1 |
