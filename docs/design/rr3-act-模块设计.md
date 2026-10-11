@@ -180,3 +180,15 @@
 
 **本册新净余数**：批L **L-3**（`&mut dyn` + `String` 错型）、**L-5**（三件 `handles`/`ops` 申报）、
 **L-6**（同态不续发用例）、**L-7**（主题串单点）。**A-2/A-3** 由 `rr3_led_tick(now_ms)` 与 ⑧-b 门一起收口。
+
+### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
+
+| 项 | 复验实况（符号） | 判定 / 新落点 |
+|---|---|---|
+| A-2 时基改 `Rr3TimeBase` | `rr-bus/src/client.rs` 已立 `Rr3TimeBase`（`anchor: Instant::now()`），注释自陈"`SystemTime` 自称单调是误称，本型纠正" | **结**（旧正文不回改） |
+| A-3 `loop_hz` 越界拒 boot | `rr3-act/src/composite.rs` 的 `u32::try_from(loop_hz_raw)` + 越界回"拒 boot"文案（注释点名 A-3） | **结** |
+| A-10 / 批L L-7 内联主题串 | `intent.rs : EXPOSED` 现引 `RR3_SERVO_COMMAND_TOPIC`/`RR3_LED_EFFECT_TOPIC`/`RR3_RELAY_SET_TOPIC` 三常量 | **结**（从批L 与 MC-11 同时摘账） |
+| A-5 低电禁动 | 语义由索引 **R-15** 结案（四条），原挂"待裁"栏 | **裁定已下 → 施工落 0.0.5 MC-5**（前置 MCP-3；与 power P-8 / 批L L-8 合并成一个动作） |
+| A-6 环 tick 计入 counters | `src/reflex.rs` 全无 `rr3_counter_*` 调用 | **未结 → MC-11**（与 S-3 / P-2 后半同族"活着但不动"） |
+| A-9 开放门与灯效白名单 ops 化 | led/relay/servo 三份 `assemble.toml` 的 `ops = []` 仍全空，开放门仍是件内 `match` | **未结 → MC-10**（与 I-11/S-5/L-5 同批动 `assemble.toml` 形状） |
+| F-1 舵机承载路径 | R31 **Q2** 已裁舵机挂 ESP32 协处理器（LEDC）；Pi 侧 `linux_pwm.rs` 保留 | 施工落**增补轮五批B/批C**；`linux_pwm.rs` 不注销，降为无协处理器形态的兜底路径（本册 §12 跨档表按两条路径读） |
