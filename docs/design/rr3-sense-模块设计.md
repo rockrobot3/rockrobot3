@@ -107,7 +107,7 @@
 | S-1 | `frame_ms` 下界钳制 + 合法域声明；配置读取去 env 依赖（默认读 manifest 同目录 `config.toml`） | 批I | — |
 | S-2 | capture/vad 句柄与值类型换 `rr-hal-api`（`&[i16]` 借用、去 `Vec`/`String`） | 批I | C5 |
 | S-3 | 采集新鲜度 counters（治"活着但不动"） | 批K | C9 |
-| S-4 | `env`/`imu` 取向定案：填实 or retired（连带两条在册主题的处置） | **待裁** | — |
+| S-4 | `env`/`imu` 取向定案：填实 or retired（连带两条在册主题的处置）——**归属写明（2026-10-12，索引 §14.5）**：待裁期间挂"用户裁定窗"，**不塞进 0.0.5 批M**（批M 只收 F 清单内的功能码，温湿度/IMU 不在其列）；若裁"填实"，则新开一条 MC 并先解决前置——**器件不在 0.0.6 §5.4 BOM 任何一行**，两格今天已如实记 `placeholder`（承诺 ≤ 事实已守，不是欠账伪装成计划） | **待裁**（不卡批M 其余工单） | D9 |
 | S-5 | DoA 阈值从件内迁 ops | 批J | C5 |
 | S-6 | **件面导出面收口**：`rr3_pcm_downmix_mono`、`rr3_frame_rms`、`Rr3DoaBin`(+`rr3_doa_bin_as_str`)、`RR3_DOA_BIN_THRESHOLD_DEG`、`Rr3VadEdge` 五个 `mech` 内 `pub` 符号今天不出件入口——要么进 `capture.rs`/`vad.rs` 的 re-export（成为契约面，S-5 的阈值注入就必须带着它），要么降为 `pub(crate)`。不许停在"内松外紧"的中间态 | 批I | C5 |
 | S-7 | **载荷组装上移承载层**：`rr3_pcm_event_body` / `rr3_vad_event_body` 的 `json!` 生产移到 `src/composite.rs`，件面只交 `Rr3PcmStream`/`Rr3VadEdge` 结构（依据 = ADR-0019 修订 4）。验收 = `audio/pcm`、`audio/vad_start` 字节逐字不变（mono golden 与 schema 用例继续绿）；做完本单元两件去 `serde_json` | 批I | — |
