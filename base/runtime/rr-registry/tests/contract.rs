@@ -423,9 +423,9 @@ fn topics_registry_zero_topics_is_rejected() {
 
 // ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
 
-/// 注册表的全部 29 条 `(name, owner, kind)` 三元组。
+/// 注册表的全部 30 条 `(name, owner, kind)` 三元组。
 /// 顺序即 `contracts/topics.toml` 的登记顺序。
-const RR3_PINNED_TOPICS: [(&str, &str, &str); 29] = [
+const RR3_PINNED_TOPICS: [(&str, &str, &str); 30] = [
     ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
     ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
     ("rr3-sense/env/temperature", "rr3-sense", "event"),
@@ -444,6 +444,7 @@ const RR3_PINNED_TOPICS: [(&str, &str, &str); 29] = [
     ("rr3-connect/cloud/session", "rr3-connect", "request"),
     ("rr3-brain/llm/completion", "rr3-brain", "request"),
     ("rr3-brain/intent/result", "rr3-brain", "event"),
+    ("rr3-brain/audio/tts_pcm", "rr3-brain", "stream"),
     (
         "rr3-runtime/system/heartbeat",
         "rr3-runtime",
@@ -487,7 +488,7 @@ fn registry_triples(text: &str) -> Vec<(String, String, String)> {
 }
 
 /// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 29 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
+/// 以及全部 30 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
 ///
 /// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
 /// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
@@ -517,21 +518,21 @@ fn registry_shape_is_pinned() {
         "owner 名不得重复登记: {owners:?}"
     );
 
-    // 2) topic 侧：29 条，且不重名（重名会让下面的子集论证失去意义）
+    // 2) topic 侧：30 条，且不重名（重名会让下面的子集论证失去意义）
     let topics = registry_triples(&text);
     assert_eq!(
         topics.len(),
-        29,
-        "契约 29 条主题（2026-10-11 0.0.7 批E 28→29：append sentinel/diag/probe，F2 门要求 rpc.exposes 主题在册）"
+        30,
+        "契约 30 条主题（0.0.5 第 IV 轮 MCP-0 2026-10-12 29→30：append brain/audio/tts_pcm 下行流，F-4 通路契约；与批C/批D 同一张改表纪律 §18.4 防重规则①）"
     );
     let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
 
-    // 3) kind 分布：12 request / 10 event / 3 stream / 4 notification
+    // 3) kind 分布：12 request / 10 event / 4 stream / 4 notification
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
     assert_eq!(count("request"), 12, "kind=request 的分布漂移");
     assert_eq!(count("event"), 10, "kind=event 的分布漂移");
-    assert_eq!(count("stream"), 3, "kind=stream 的分布漂移");
+    assert_eq!(count("stream"), 4, "kind=stream 的分布漂移");
     assert_eq!(count("notification"), 4, "kind=notification 的分布漂移");
     assert_eq!(
         count("request") + count("event") + count("stream") + count("notification"),
@@ -539,7 +540,7 @@ fn registry_shape_is_pinned() {
         "存在四类之外的 kind: {topics:?}"
     );
 
-    // 4) 29 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
+    // 4) 30 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
     for (name, owner, kind) in RR3_PINNED_TOPICS {
         assert!(
             topics

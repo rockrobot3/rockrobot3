@@ -195,6 +195,21 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   （词干纯小写是 `^rr3-[a-z]+$` 硬规则，module.schema.toml `module_name` 门；工程名/目录名
   espidf-sentinel 是 crate 名非总线身份，不变）。同批更新 rr-registry 形状 pin（29 条三元组、
   owner 8、kind 12-10-3-4）。topics.toml 只增不改维持。
+- **2026-10-12 · 0.0.5 第 IV 轮 MCP-0 契约级评审（MC-0 合并件：MCP-1 + MCP-2 作废登记 + MCP-3，承
+  [0.0.5 方案 §19 MC-0 / §18.4 防重规则①](../docs/process/dev/0.0.5版本洛克三号对齐与裁定方案.md)）**：
+  ① **MCP-1**：`topics.toml` 29→**30** 条（append `rr3-brain/audio/tts_pcm` stream L2——brain 侧
+  TTS PCM 下行流，F-4 真人声通路的契约半边；载荷体**逐字段复用** `rr3-sense/audio/pcm` 已定形状
+  `{seq, format, rate, channels, ms, pcm_b64}`（`rr3-sense` composite.rs `rr3_pcm_event_body`
+  为形状事实源），对 TTS 引擎中立（云 CosyVoice2 / 本地 Piper 同一份通路，R31 Q3）；上行
+  `audio/pcm` 与 `audio/vad_start` 字节零改动；envelope.schema.json 与 128B 头不动）。本条与
+  增补轮五批C（display/servo 帧进城）与批D（音频上行）**合成一次改表**——批C/批D 复用在册主题
+  `rr3-interact/face/expression`、`rr3-act/servo/command|state`、`rr3-sense/audio/pcm`，零新增
+  登记，全轮仅此一次 `topics.toml` 变更。② **MCP-2 作废登记**：`[hardware]` SPI 扩键评审需求随
+  R31 Q2（显示件由 ESP32 协处理器以 I2C 承载 SSD1306）消失，Pi 侧不再新增 SPI 键位，九键闭合表
+  维持原样——作废留痕，别让"没做"读成"漏做"。③ **MCP-3**：`rr3-act` `module.toml` 申报面变更
+  （`[events].subscribes` 增 `rr3-runtime/system/power`）——低电禁动闸门消费点（MC-5 施工件），
+  走 C14/R-3 同一评审程序；其余申报面零改动。同批更新 rr-registry 形状 pin（30 条三元组、
+  owner 8 不变、kind 12-10-4-4）与 `rrd` topics_load 测试计数（33 = 30+3）。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

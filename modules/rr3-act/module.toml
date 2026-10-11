@@ -16,9 +16,11 @@ optional = []
 # 反射环（1k–10kHz 闭环）留在本进程内，永不进总线（ADR-0007 裁定 1）：
 # 这里发布 servo/state 摘要、relay/state 通断摘要（0.0.3 T3，RPC 与 intent
 # 两条驱动路共用）与 motor/reflex 异常通告。
+# 订阅 rr3-runtime/system/power：低电禁动闸门消费点（0.0.5 第 IV 轮 MCP-3 申报面
+# 变更评审 2026-10-12，走 C14/R-3 同一评审程序；MC-5 施工——执行面拒动、妆面不禁）。
 [events]
 publishes = ["rr3-act/servo/state", "rr3-act/relay/state", "rr3-act/motor/reflex"]
-subscribes = ["rr3-brain/intent/result"]
+subscribes = ["rr3-brain/intent/result", "rr3-runtime/system/power"]
 
 [rpc]
 exposes = ["rr3-act/servo/command", "rr3-act/led/effect", "rr3-act/relay/set"]
