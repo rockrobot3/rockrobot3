@@ -61,8 +61,10 @@ const I2C_TIMEOUT: TickType_t = u32::MAX;
 const OLED_ADDR: u8 = 0x3C;
 /// OLED 每行字符数：5px 字模 + 1px 间隔 = 6px/字符，128px/6 = 21.3 → 21 列。
 const OLED_COLS: usize = 21;
-/// OLED 文本行数（页 0 与页 2 各一行，页 1/3 留空隙；其余页清屏）。
-const OLED_ROWS: usize = 2;
+/// OLED 文本行数：4 行 = 文本 3 行（页 0/2/4，`OLED` 命令按 21 列硬切）+ 固定
+/// 角度行（页 6，P/T 随舵机命令刷新）——Mac 实时数据面（温度/内存/IP/时间）
+/// 同屏三行布局，批B 增量批裁定（2→4 扩行，`OLED <text>` 形状不变向后兼容）。
+const OLED_ROWS: usize = 4;
 /// 指令行缓冲上限（超出整行丢弃回 ERR，fail-closed 不截半执行）。
 const LINE_CAP: usize = 128;
 /// 指令/心跳类线程的栈面（板上实测实锤 16KB 运行下限，哨兵同款，勿再调低）。
@@ -327,11 +329,33 @@ impl Periph {
         Ok(deg)
     }
 
-    /// OLED 文本行 + 角度行两行刷新。
+    /// OLED 文本 3 行（21 列硬切）+ 角度行（row 3）刷新。
     fn oled_show(&mut self, text: &str, pan_deg: u32, tilt_deg: u32) -> Result<(), String> {
-        oled_text(&mut self.i2c, 0, text.as_bytes())?;
+        // 先过滤成可见 ASCII（其余转空格，与 glyph 行为一致）再按 21 列硬切
+        // 3 行——字节切片不劈多字节字符（char boundary 安全），行对齐不漂移。
+        let ascii: String = text
+            .chars()
+            .map(|c| {
+                if (0x20..=0x7E).contains(&(c as u32)) {
+                    c
+                } else {
+                    ' '
+                }
+            })
+            .collect();
+        let bytes = ascii.as_bytes();
+        for row in 0..(OLED_ROWS - 1) {
+            let start = row * OLED_COLS;
+            let chunk = if start < bytes.len() {
+                let end = (start + OLED_COLS).min(bytes.len());
+                &bytes[start..end]
+            } else {
+                b"" as &[u8]
+            };
+            oled_text(&mut self.i2c, row, chunk)?;
+        }
         let angle_line = format!("P:{pan_deg:03} T:{tilt_deg:03}");
-        oled_text(&mut self.i2c, 1, angle_line.as_bytes())
+        oled_text(&mut self.i2c, OLED_ROWS - 1, angle_line.as_bytes())
     }
 }
 
@@ -411,12 +435,15 @@ fn cmd_loop(mut ph: Periph) {
                     .into(),
             ),
             "OLED" => {
-                // 参数取原始行去指令头，保留内嵌空格（≤42 字符 = 2 行 × 21 列）
+                // 参数取原始行去指令头，保留内嵌空格（≤63 字符 = 3 行 × 21 列，row3 角度行）
                 let rest = line[head.len()..].trim_start();
                 if rest.is_empty() {
                     Err("OLED 缺文本参数".into())
-                } else if rest.len() > OLED_COLS * OLED_ROWS {
-                    Err(format!("OLED 文本超长（≤{} 字符）", OLED_COLS * OLED_ROWS))
+                } else if rest.len() > OLED_COLS * (OLED_ROWS - 1) {
+                    Err(format!(
+                        "OLED 文本超长（≤{} 字符 = 3 行 × 21 列，第 4 行为角度行）",
+                        OLED_COLS * (OLED_ROWS - 1)
+                    ))
                 } else {
                     let owned = rest.to_string();
                     match ph.oled_show(&owned, pan_deg, tilt_deg) {
@@ -620,11 +647,23 @@ fn main() {
         }
     }
     if oled_ok {
-        let r0 = oled_text(&mut i2c, 0, b"ROCK3 PERIPH BASE");
-        let r1 = oled_text(&mut i2c, 1, b"P:090 T:090");
-        match (r0, r1) {
-            (Ok(()), Ok(())) => println!("[periph] OLED ✓ boot 画面已出"),
-            (r0, r1) => println!("[periph] boot 画面写失败: 行0={r0:?} 行1={r1:?}"),
+        // boot 画面 4 行全出（4 行扩行能力的 boot 直证；row3 由 oled_show 常刷，
+        // boot 期先摆初始角度占位）
+        let boot_rows: [(&[u8], &str); 4] = [
+            (b"ROCK3 PERIPH BASE", "boot 行0写失败"),
+            (b"4-ROW OLED READY", "boot 行1写失败"),
+            (b"UART2 CMD @115200", "boot 行2写失败"),
+            (b"P:090 T:090", "boot 角度行写失败"),
+        ];
+        let mut boot_ok = true;
+        for (row, (text, msg)) in boot_rows.iter().enumerate() {
+            if let Err(e) = oled_text(&mut i2c, row, text) {
+                println!("[periph] {msg}: {e}");
+                boot_ok = false;
+            }
+        }
+        if boot_ok {
+            println!("[periph] OLED ✓ boot 画面已出（4 行）");
         }
     } else {
         println!(
