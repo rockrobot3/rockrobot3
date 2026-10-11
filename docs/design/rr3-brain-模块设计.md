@@ -118,7 +118,7 @@
 | B-6 | Rust 化随 ADR-0016（届时两腿对拍与闭包门才适用；`dialog` 件按 §12 是唯一可能跨档的认知件，`asr`/`llm`/`tts` 按发布权判据在 rtos/bare 档**不启用**而非"改造后可用"） | ADR-0016 | — |
 | B-9 | `RR3_CALL_TIMEOUT_S = 30.0` 从 `composite.py` 常量改 ops/config 槽——它是"一轮最坏 ≈90 s"的组成项，调它却要改码违背数据面原则；与 B-3 同批裁 | 批I | — |
 | B-10 | 凭据键名 `SILICONFLOW_API_KEY` 把云供应商焊进代码（2026-10-12 复验：键名未改，本条**未结**）。改通用键（`RR3_CLOUD_API_KEY`）+ 供应商写 config，或在 §11 明确记"换云供应商需改一处代码"为已知欠账（这是"换芯片不改码"原则在云侧的同型问题） | **0.0.5 批M MC-8** | — |
-| B-11 | **把已合成的 PCM 送上总线**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 背景表 #1）：`composite.py` 的 `rr3_finish_turn` 今天取到 `reply_pcm = tts.synthesize(reply_text)` 后只算 `tts_ms` 入日志，再 `rr3_call_topic(TOPIC_TTS, {"text": reply_text})`——**云侧真人声从未有可能出声**。本单 = 按 MCP-1 的分帧把 `reply_pcm` 发布到新主题 `rr3-brain/audio/tts_pcm`，`tts/text` 点名保留作"该不该播"的事务判据；`seq` 单调、`ms` 由样点数导出 | **0.0.5 批M MC-1**（前置 MCP-1 契约 append 评审；消费侧对号 interact I-14） | MCP-1 |
+| B-11 | **把已合成的 PCM 送上总线**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 背景表 #1）：`composite.py` 的 `rr3_finish_turn` 今天取到 `reply_pcm = tts.synthesize(reply_text)` 后只算 `tts_ms` 入日志，再 `rr3_call_topic(TOPIC_TTS, {"text": reply_text})`——**云侧真人声从未有可能出声**。本单 = 按 MCP-1 的分帧把 `reply_pcm` 发布到新主题 `rr3-brain/audio/tts_pcm`，`tts/text` 点名保留作"该不该播"的事务判据；`seq` 单调、`ms` 由样点数导出 | **0.0.5 批M MC-1**（前置 MCP-1 契约 append 已落 `8d05590`；消费侧对号 interact I-14） | MCP-1 |
 
 ## §11 待证与敞口
 
