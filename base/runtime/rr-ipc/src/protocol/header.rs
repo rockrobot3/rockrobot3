@@ -431,8 +431,8 @@ mod tests {
 
     /// 与 golden 向量逐字节一致，且 decode→encode 往返无损。
     /// 这是**同机**字节基准（IPC-T-001 侧）；IPC-T-003 要求的 x86↔aarch64 交叉编译等值
-    /// 测试当前 HEAD 没有，已记在 `contracts/envelope.schema.json` 的
-    /// `x-rock3-v0.0.1-uncovered`，随 M2 落地。
+    /// 由契约外对拍脚本 `tools/ci/ipct003.sh` 承载（CI ipct003 job `--strict` 四路全绿，
+    /// 2026-10-11 起 IPC-T-003 已移入 `contracts/envelope.schema.json` 的 coverage）。
     #[test]
     fn header_matches_golden_vector() {
         let path = concat!(

@@ -1790,6 +1790,32 @@ check.sh ⑥ 注释、本节 CI 侧步骤引言、brain 模块设计门禁口径
 GitHub：仓库待建+SSH key 待配，推送后网页核对归 status.md 敞口表第 1 条结项。
 十步门禁直跑 GATE_EXIT=0 全绿；双远端 `ls-remote` 三端核对随本批推送执行
 
+2026-10-11 CI 八 job 首跑修复批（H1–H4，0.0.7 收官后工程基础面，ADR-0008/0018）——
+GitHub 仓 rockrobot3/rockrobot3 建成转公开 + SSH key 配好后 e0a8bad 触发首跑
+5 绿 4 红（lint / conventions / ipct003 / distro-smoke 四红），五轮迭代修复至
+run#6（38146782224）八 job 9/9 全绿：批H1 `484a13c` espidf-sentinel fmt 归一 +
+rust-cache 工作区 pin；批H2 `f640234` rr-hal linux 单测七败真修复（GPIO context
+点名、I2C 13-bit 换算测试正钉、nmcli 超时分支回错在前不读管道、PWM 空文件读零——
+四后端确定性缺陷逐条纠正）+ lint 余项清零（rr-hal `result_large_err` 契约级豁免：
+错型约 136B 系 Rr3ErrText 128B 定长文案契约面，装箱破 no_std、缩容动契约常量；
+rr3-bridge c_char 平台 cast fn 级豁免：aarch64=u8 冗余 / x86_64·macOS=i8 必要，
+不能裸删）；批H3 `adf3d16` ci.yml ipct003 job 插 espup 预编译装机步
+（export-esp.sh 供 LIBCLANG_PATH）+ ipct003.sh 第④路默认在线直连 crates.io
+（本机网络 workaround 收进 `IPCT003_CARGO_OFFLINE=1` / `IPCT003_CARGO_MIRROR=1`
+环境开关，bash 3.2 空数组安全展开 `${extra_cfg[@]+…}`）；批H4 `8f33071`
+distro-smoke ⑤ 点名断言（must_file/must_exec/must_dir/must_grep，败即报缺席路径 +
+父目录 ls + dpkg -L 清单比对 + dpkg -V 异常项，断言集不变）→ `1c3cf41` 根因清除。
+**撇号截断教训（run#5 点名回执实锤）**：distro-smoke.sh 的 ⑤-⑧ 整体在 docker
+`bash -c '<串>'` 单引号串内——串内 ASCII 撇号后随空白即把 -c 串提前闭合
+（`批E' R3` 注释实锤），余下脚本行溢出到宿主机执行（run#1-5 五连败根因：宿主裸
+test 退 1 的静默假象，deb 装机内容自始无恙）；`'__pycache__'` 这类两侧无空格相邻
+的引号对是"同词内闭合-重开"、文本留在同一 argv 元素内无害。判别实证法：bash
+函数 stub 包一层 docker 打印真实 argv（ARGC=13 破口 / 12 修复）。修复后该文件
+注释/文案一律禁用 ASCII 撇号（警示注释在案）。status.md 敞口表第 1 条（远端 CI
+回执）/ 第 4 条（IPC-T-003 容器真跑，同批移入 envelope.schema.json coverage）/
+第 8 条（distro-smoke 真装回执）/ 第 9 条（sim-assemble 六模块巡检回执）四条
+同批结项。十步门禁直跑 GATE_EXIT=0 全绿；三远端 `ls-remote` 四端核对随本批推送执行
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
@@ -1804,12 +1830,17 @@ Rust workspace 里，①b/②b/④ 覆盖不到它，只有这一步跑。四真
 
 **十步之外的平台条件脚本**：`bash tools/ci/ipct003.sh [--strict]`（IPC-T-003 跨架构对拍，
 ADR-0006 后果项）**不在十步门内**——它依赖平台条件（Docker / aarch64 交叉目标），
-塞进门禁等于让无容器环境的机器永远红。它做三件事：①宿主跑 `rr-ipc` 的
+塞进门禁等于让无容器环境的机器永远红。它做四件事：①宿主跑 `rr-ipc` 的
 `src/bin/ipct003_dump.rs`（golden 头 + 五种 payload 类型各一整帧的 hex，全部编译期字面量），
 header 行对 `contracts/golden/event-header-128.hex`；②已装 `aarch64-unknown-linux-gnu`
 目标则交叉 `cargo check`，header.rs 的编译期 const 断言（偏移连续 / 头长 128 /
 magic LE 字节 31 45 52 41 / payload 枚举值）随之在该目标求值；③有 Docker 则
-`--platform linux/arm64` 容器真跑并与宿主输出逐行 diff。缺环境打 `SKIP` 并明说，
+`--platform linux/arm64` 容器真跑并与宿主输出逐行 diff；④已链 esp 工具链（espup
+装机，CI 侧装机步见 ci.yml 的 ipct003 job）则 `cargo +esp check` 在
+xtensa-esp32-none-elf 目标编译——golden 头 const 对拍在该目标编译期求值
+（IPC-T-003 第④路，0.0.7 批A' 接入；cargo 默认在线直连 crates.io，本机网络 CDN
+僵死时 export `IPCT003_CARGO_OFFLINE=1` / `IPCT003_CARGO_MIRROR=1` 恢复离线+镜像
+旧行为）。缺环境打 `SKIP` 并明说，
 不静默当作已验证；`--strict` 供有容器环境的一方在 SKIP 时拒绝放行（退 2）。
 双架构真跑结果何时回填，见 [../status.md](../status.md)。
 2026-10-01 T4：`--strict` 模式已接 CI——`.github/workflows/ci.yml` 新增 `ipct003` job

@@ -15,9 +15,10 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 | `events/*.schema.json` | 各模块事件负载 schema（命名规则与模板见 [`events/README.md`](events/README.md)） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
-> 跨架构（x86 与 aarch64 布局一致，即 IPC-T-003）的等值证明需要交叉编译两端对拍，那属**契约外**的
-> 验证环节、本契约未覆盖它，故 IPC-T-003 记在 `envelope.schema.json` 的 `x-rock3-v0.0.1-uncovered` 里；
-> 它何时补上属实况，见 [docs/status.md](../docs/status.md)。
+> 跨架构（x86 与 aarch64 布局一致，即 IPC-T-003）的等值证明由**契约外**的对拍脚本
+> `tools/ci/ipct003.sh` 承载（宿主 / linux-arm64 容器 / xtensa 编译期 const / 本 golden 多路
+> 对拍）——2026-10-11 CI ipct003 job `--strict` 四路全绿回执在案，IPC-T-003 已移入
+> `envelope.schema.json` 的 `x-rock3-v0.0.1-coverage`；实况见 [docs/status.md](../docs/status.md)。
 
 > **`envelope.schema.json` 是"给人读、给测试对照"的数据契约，不是喂校验器的 schema**：它该读、
 > 该对照，但**不该**喂给 JSON Schema 校验器——文件里的 `"$schema": ".../draft/2020-12/schema"` 键
