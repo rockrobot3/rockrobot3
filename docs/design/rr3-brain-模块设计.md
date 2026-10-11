@@ -169,3 +169,15 @@
   的 `brain-unittest` 双矩阵 job 是真的（远端首跑回执待取——R30 起押 GitHub Actions → 只算"清单在册未执行"，不折算达标）。
 - **§12 的三档表不受影响**：brain 属主承载层，rtos/bare 档不启用认知格——`esp32-mini.toml` 的
   `[enabled_slots]` 不列 `cognition.*`，正是本册 §12 那行的实现证据。
+
+### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
+
+| 项 | 复验实况（符号） | 判定 / 新落点 |
+|---|---|---|
+| B-4 Python 测试进门禁 | `.github/workflows/ci.yml` 的 `brain-unittest` job（`setup-python 3.12` + `python3 -m unittest discover -s tests`），八 job 首跑全绿已随 0.0.7 批H 落档 | **结**（本机仍无载体：Windows `python` 坏——按"远端执行 / 本地无载体"分档，不折算成本机绿） |
+| B-5 起轮/云失败 counters | `composite.py` 的 `rr3_counter_bump("asr_ok"/"asr_fail"/"llm_fail"/"tts_fail")` | **结** |
+| B-8 `max_turn_chars` | 键已从 `config.toml` 删除（文件注记自陈"在册无读者；实装截断随真用例回归"） | **结（走"删"分支）**；截断行为将来要回须连同回归用例立单 |
+| B-9 `RR3_CALL_TIMEOUT_S = 30.0` | 仍是 `composite.py` 常量（注释里它是"一轮最坏 ≈90 s"的组成项） | **未结 → 0.0.5 MC-10**（ops/config 槽，与 A-9/I-11/S-5 同族"策略出件"） |
+| B-10 `SILICONFLOW_API_KEY` | `cloud/__init__.py : API_KEY_ENV` 未改，供应商名仍在代码里 | **未结 → MC-8**（改通用键 + 供应商进 config，或显式记为已知欠账） |
+| B-11（本册新立）TTS PCM 上线 | `rr3_finish_turn` 已取得 `reply_pcm` 却只 `rr3_call_topic(TOPIC_TTS, {"text": …})` | **MC-1**（通路对**引擎中立**）；对话闭环施工在**增补轮五批E** |
+| R31 **Q3** 对本册的改判 | ASR/TTS 首发为**本地 vosk + Piper**，brain 侧立 adapter 缝，**云后端实现位留空不写半成品**（ADR-0008 裁定 4 口径） | 本册 §0/§5 的"三家云客户端"读作**现状**（存量实现），不再读作目标形态；"云真 key 联调"敞口**不再是 F-3/F-4 的阻塞项**——这条订正同时收回本册与 0.0.5 §17 里"欠真 key"的写法 |

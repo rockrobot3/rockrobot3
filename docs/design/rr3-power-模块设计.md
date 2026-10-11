@@ -160,6 +160,16 @@
 | §1 "`Rr3Power::battery()` 是 `#[async_trait] + Send + Sync`" | 契约面 `rr-hal-api::Rr3Power` 同步、`Rr3BatteryState { voltage_mv: u16, percent: u8, charging: bool }` 为 `Copy` 且已在 `rr-hal-api` | §12 该行作废 |
 | §6/§10 R-2："不立独立 charger 句柄、标定对象是 percent 曲线" | 实现采纳（charger `handles = []`，charging 由读数派生） | **R-2 一致** |
 | §10 P-6 孤儿 `log_level` | 已删（`config.toml` 头注写明"解析函数不读、全仓无读者"） | **P-6 已结** |
-| §10 P-2 钳制留痕 | `.max(1)` 仍在；未复验是否补了留痕日志 | **P-2 部分**（保持未结） |
+| §10 P-2 钳制留痕 | `.max(1)` 仍在；未复验是否补了留痕日志 | **P-2 部分**（当时判语，现由 §14.1 判结——不回改） |
 | §10 P-3 描述符吞错 | 已改：`rr-hal` 选择器不再 `.ok()`，`descriptor.rs` `rr3_binding_set` 打"描述符键 {key} 取值不认 / 未在册"，`rr-hal` 的 linux/sim/… 六处 `.ok()` 吞错收口 | **P-3 已结** |
 | §10 P-8 / 索引 L-5：bare 档本地兜底 | 装载门已判 `tier=bare` 必须有 watchdog（G6）；**"低电禁动"本身仍无实现、无落点**，cutoff 仍只解析 | **未结**，且**必须与 A-5 合并成一个动作**（两册分头挂单等于没挂）→ 批L **L-8** |
+
+### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
+
+| 项 | 复验实况（符号） | 判定 / 新落点 |
+|---|---|---|
+| P-2 钳制留痕 + 采样失败计数 | `src/composite.rs` 解析期 `eprintln` 打"键名/原值/钳后值" + 用例钉 0→1ms 收敛；`composite.rs:118` 的 `rr3_counter_bump("battery_read_fail", 1)` 把采样失败计入 counters | **结（整条）** |
+| P-2 后半（上一条已并入） | 上一版本册 §14 写"仍无 `rr3_counter_*`"系我 grep 漏了带下划线的键名，实况有 `battery_read_fail` | **收回，随 P-2 整条结**；"活着但不动"族仍欠的是 sense S-3 与 act A-6 两处 |
+| P-8 / A-5 / 批L L-8 三单 | 语义由索引 **R-15** 结案（触发源唯一 = rrd 的 `rr3-runtime/system/power` 广播；禁执行面不禁妆面；回阈 + 迟滞解禁；bare 档安全核段自判 `Rr3LowEdge` 出 `RR3G` 行） | **一个动作 → MC-5**（前置 MCP-3 申报面评审）；本册不再单独挂"本地兜底"账 |
+| `cutoff_voltage_mv` | 有解析、有 `println` 回显、**无动作**（注释自陈"本轮只解析不动作"） | **未结 → MC-8**，按"实装关断 / 删键 / 改 ops 槽并写明不关断的理由"三选一；**回显不算读者** |
+| P-5 电压→容量曲线标定 | 需两点以上真读数 | 留 **0.0.6 真件档**（载体依赖，不进开发窗） |
