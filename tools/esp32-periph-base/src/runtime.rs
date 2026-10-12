@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::board::{
     axis_scan_points, duty_to_deg, Axis, AXIS_SETTLE_MS, RUNTIME_TICK_MS, SCAN_POINT_MS,
 };
-use crate::oled::{i2c_bus_recover, oled_frame};
+use crate::oled::i2c_bus_recover;
 use crate::periph::RtPeriph;
 use crate::state::{lock_bus, outbox_push, Bus, Job};
 
@@ -88,7 +88,7 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
             }
         }
         Job::RenderFrame(frame) => {
-            if let Err(e) = oled_frame(&mut ph.i2c, &frame) {
+            if let Err(e) = ph.render_frame(&frame) {
                 eprintln!("[periph] 点阵渲染失败: {e}");
             }
         }
