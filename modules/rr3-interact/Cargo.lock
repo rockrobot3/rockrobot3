@@ -124,6 +124,8 @@ dependencies = [
  "alsa",
  "libc",
  "rr-hal-api",
+ "rr-ipc",
+ "serde_json",
  "toml",
 ]
 

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-act/servo/command",
+  "schema_version": 1,
+  "description": "舵机逐度转向指令（request L1；本仓首个 request 类负载 schema——顶层钉请求 args 形状，应答 result 形状钉在 $defs.response/$defs.response_error）。双面承载：模块面 modules/rr3-act/src/composite.rs 的 rr3_servo_parse_args + servo 应答体（json!({angle_deg, move_ms})），与板侧帧执行面 tools/esp32-periph-base/src/main.rs 的 frame_handle_servo（0.0.5 增补轮五 批C 路线二：板上不进城，宿主 rr-hal::esp32_uart 桥后端经 rr3.call 帧 direct 点名）共用同形状——schema 是两实现的共同 pin。axis 是板侧帧面扩展键（宿主单轴 Rr3PwmServo trait ↔ 板上双轴云台的映射面；模块面无此键）。业务性失败两实现同款折 result.error 点名。",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/write" },
+    { "$ref": "#/$defs/read" }
+  ],
+  "$defs": {
+    "axis": {
+      "type": "string",
+      "enum": ["pan", "tilt"],
+      "description": "板侧帧面扩展：轴选择，缺省 pan（宿主 RR3_HAL_PERIPH_AXIS env 与本参数两级映射，模块面不受理本键）"
+    },
+    "write": {
+      "description": "写变体：转角执行（模块面/板侧帧面共用）",
+      "type": "object",
+      "required": ["angle_deg"],
+      "properties": {
+        "angle_deg": { "type": "integer", "minimum": 0, "maximum": 180, "description": "目标角度（度）；行程上下限由 rr3-act config 面收窄（越程点名），板侧帧面按 SG90 全程受理" },
+        "move_ms": { "type": "integer", "minimum": 1, "description": "可选运动时限（毫秒）；模块面缺省取 config 上限、0 拒收，板侧帧面受理但忽略（LEDC 直达无时限闭环）" },
+        "axis": { "$ref": "#/$defs/axis" }
+      },
+      "additionalProperties": false
+    },
+    "read": {
+      "description": "读变体：当前角回读（板侧帧面扩展——无 angle_deg 即读；模块面不支持读变体，缺 angle_deg 点名报错）",
+      "type": "object",
+      "properties": {
+        "axis": { "$ref": "#/$defs/axis" }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "description": "应答 result 形状（写/读同形）：angle_deg=生效角（写=回显设定角逐度一致，宿主桥后端按此校验 round-trip；读=LEDC 寄存器 duty 回读换算）；move_ms=运动时限（模块面=生效时限 ≥1，板侧帧面恒 0——直达无时限）",
+      "type": "object",
+      "required": ["angle_deg", "move_ms"],
+      "properties": {
+        "angle_deg": { "type": "integer", "minimum": 0, "maximum": 180 },
+        "move_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "response_error": {
+      "description": "业务性失败折形状（两实现同款）：缺参/类型错/越程/轴名非法在此点名，成功形状见 $defs.response",
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

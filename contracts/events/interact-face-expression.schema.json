@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-interact/face/expression",
+  "schema_version": 1,
+  "description": "表情机切换/点阵渲染指令（request L1；request 类负载 schema——顶层钉请求 args 形状，应答 result 形状钉在 $defs.response/$defs.response_error）。双面承载：模块面 modules/rr3-interact/atoms/face/mech.rs 的 rr3_face_set（7 态白名单 RR3_FACE_EXPRESSIONS）+ composite.rs 应答体 {expression, previous}，与板侧帧执行面 tools/esp32-periph-base/src/main.rs 的 frame_handle_face（0.0.5 增补轮五 批C 路线二：宿主 rr-hal::esp32_uart 桥后端经 rr3.call 帧 direct 点名）共用同形状。frame 变体是板侧帧面扩展（HAL 渲染变体：8x8 点阵整帧 → OLED 中央 64x64 放大，位图契约 rr-hal-api Rr3FaceFrame——行主序 8 字节、每字节 bit7 为该行最左点）；模块面只受理 expression 变体。业务性失败两实现同款折 result.error 点名。",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/expression" },
+    { "$ref": "#/$defs/frame" }
+  ],
+  "$defs": {
+    "expression": {
+      "description": "expression 变体：表情切换（模块面/板侧帧面共用，白名单同源 7 态）",
+      "type": "object",
+      "required": ["expression"],
+      "properties": {
+        "expression": {
+          "type": "string",
+          "enum": ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "frame": {
+      "description": "frame 变体：8x8 点阵位图整帧渲染（板侧帧面扩展，模块面不支持）",
+      "type": "object",
+      "required": ["frame"],
+      "properties": {
+        "frame": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "description": "行主序 8 字节位图，每字节 bit7 为该行最左点（MAX7219 行寄存器直排）"
+        }
+      },
+      "additionalProperties": false
+    },
+    "response_expression": {
+      "description": "expression 变体应答 result：切换后的表情与切换前的表情（板侧帧面开机未出过表情时 previous 为 none）",
+      "type": "object",
+      "required": ["expression", "previous"],
+      "properties": {
+        "expression": {
+          "type": "string",
+          "enum": ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
+        },
+        "previous": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "response_frame": {
+      "description": "frame 变体应答 result：整帧落屏确认（恒 true；失败走 result.error 折形状不落本形状）",
+      "type": "object",
+      "required": ["applied"],
+      "properties": {
+        "applied": { "const": true }
+      },
+      "additionalProperties": false
+    },
+    "response_error": {
+      "description": "业务性失败折形状（两实现同款）：白名单外表情/非法位图/缺变体在此点名，成功形状见 response_expression/response_frame",
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}
