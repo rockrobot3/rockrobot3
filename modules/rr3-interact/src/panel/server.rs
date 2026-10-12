@@ -412,12 +412,9 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
         "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
         RR3_PANEL_ROUTES.len()
     );
-    rr3_panel_accept_loop(
-        listener,
-        shared,
-        Arc::new(AtomicUsize::new(0)),
-        || std::thread::Builder::new().name("rr3-panel-conn".into()),
-    )
+    rr3_panel_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
+        std::thread::Builder::new().name("rr3-panel-conn".into())
+    })
 }
 
 /// accept 循环本体（批M M-β I-4 抽缝）：listener、槽位账与线程工厂显式注入——
@@ -448,10 +445,10 @@ fn rr3_panel_accept_loop(
         let slot = Rr3ConnSlot::rr3_acquire(&live);
         let shared = shared.clone();
         let shared_bump = shared.clone(); // Err 分支记账用（闭包 move 走主句柄）
-        // spawn 失败（批M M-β I-4）：闭包（连同 stream 与守卫）被丢弃——守卫
-        // Drop 归还槽位、连接自然关闭。**不退循环**：面板是运维的最后一扇门，
-        // 一条连接起不来不能把整个面板带走（工单判据"起不来一个连接后面板仍
-        // 可访问"）；点账 counters + stderr 点名，服务继续。
+                                          // spawn 失败（批M M-β I-4）：闭包（连同 stream 与守卫）被丢弃——守卫
+                                          // Drop 归还槽位、连接自然关闭。**不退循环**：面板是运维的最后一扇门，
+                                          // 一条连接起不来不能把整个面板带走（工单判据"起不来一个连接后面板仍
+                                          // 可访问"）；点账 counters + stderr 点名，服务继续。
         if let Err(e) = make_builder().spawn(move || {
             rr3_panel_handle(&mut stream, &shared);
             drop(slot); // RAII 守卫：正常返回或 panic 展开都在此归还槽位
@@ -907,9 +904,15 @@ mod tests {
         while let Ok((mut stream, _)) = listener.accept() {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
             loop {
-                let Some(frame) = rr3_frame_read(&mut stream).ok() else { break };
-                let Ok((ty, body)) = rr3_body_split_of(&frame) else { break };
-                let Ok(v) = serde_json::from_slice::<Value>(&body) else { break };
+                let Some(frame) = rr3_frame_read(&mut stream).ok() else {
+                    break;
+                };
+                let Ok((ty, body)) = rr3_body_split_of(&frame) else {
+                    break;
+                };
+                let Ok(v) = serde_json::from_slice::<Value>(&body) else {
+                    break;
+                };
                 if ty != Rr3PayloadType::Request {
                     continue;
                 }
@@ -1052,11 +1055,22 @@ mod tests {
             "spawn 失败后面板必须仍可访问: {head:?}"
         );
 
-        // 槽位账平：失败连接（闭包连守卫被丢）与正常连接（守卫 Drop）都归还
-        assert_eq!(
-            live.load(Ordering::Relaxed),
-            0,
-            "失败与正常连接都必须归还槽位（RAII 账平）"
+        // 槽位账平：失败连接（闭包连守卫被丢）与正常连接（守卫 Drop）都归还。
+        // c2 的 handler 线程写完应答到 Drop 归还槽位之间无同步点——读到 200
+        // 不等于线程已退出（门禁全量并行下撞过一回调度窗），故有界等待账平
+        // （1s 上界；RAII 保证终会归还，此处不等调度器）。
+        let settled = (0..100).any(|_| {
+            if live.load(Ordering::Relaxed) == 0 {
+                true
+            } else {
+                std::thread::sleep(Duration::from_millis(10));
+                false
+            }
+        });
+        assert!(
+            settled,
+            "失败与正常连接都必须归还槽位（RAII 账平）: live={}",
+            live.load(Ordering::Relaxed)
         );
 
         // counters 记账：假 rrd 收到的心跳 params.counters 带上 panel_spawn_fail
