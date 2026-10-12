@@ -257,14 +257,14 @@ pub(crate) fn oled_cmd(i2c: &mut I2cDriver, cmds: &[u8]) -> Result<(), String> {
 
 /// 写一页 GDDRAM（128 列）。**分块写**：每笔 ≤33 字节（1 控制字节 + 32 数据），
 /// 真板实录——129B 单笔在跳线/弱上拉面连重试 3 次仍 ESP_FAIL，而短命令笔（≤26B）
-/// 恒过：ESP32 老 I2C 驱动的硬件 FIFO 即 32B，长事务是其边际路径。SSD1306 页寻址
+/// 恒过：本板 I2C 是上升沿边际，**事务越短越易过**。SSD1306 页寻址
 /// 下列指针跨事务自动递增（数据手册 §8.1.5.2 连续数据模式），分块续写等价于单笔。
 ///
 /// **整页重试**（外层）：任一块失败 → [`i2c_write_retry`] 内部已解卡，但丢拍后从机
 /// 列指针已错位，故本层**把整页（页地址 + 128B）从确定性起点重写**，至多
 /// [`I2C_PAGE_ATTEMPTS`] 次；块间留 [`I2C_CHUNK_GAP_MS`]。
 fn oled_page(i2c: &mut I2cDriver, page: u8, data: &[u8; 128]) -> Result<(), String> {
-    /// 单笔数据字节上限（= 硬件 FIFO 32B，留控制字节外的整块）。
+    /// 单笔数据字节上限（32B 为实测经验值：128B 单笔恒 NACK，32B 分块时过时挂）。
     const CHUNK: usize = 32;
     let mut last = String::from("未知");
     for _ in 0..I2C_PAGE_ATTEMPTS {
