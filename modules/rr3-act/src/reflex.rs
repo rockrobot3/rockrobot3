@@ -23,6 +23,11 @@ pub use rr_core::control::{
 
 pub const RR3_REFLEX_NOTICE_TOPIC: &str = "rr3-act/motor/reflex";
 
+/// 反射环 tick 运维计数键（批M M-β A-6）：每速率窗结算一次，值 = 窗内实际
+/// 节拍数。1kHz 闭环的"宿主位真实存在"由此从日志宣言升级为可点验的记账线
+/// （经心跳自报 rrd 归并，`rr3.ctl.counters` 读面键 `rr3-act/reflex_ticks`）。
+pub const RR3_REFLEX_TICKS_KEY: &str = "reflex_ticks";
+
 /// 启动自述：本子模块的面一行说明（闭环本体在进程内，总线只见异常通告）
 pub const SURFACE: &[&str] =
     &["reflex: 1k-10kHz 闭环宿主（进程内，永不进总线）| 饱和通告 -> rr3-act/motor/reflex"];
@@ -54,6 +59,9 @@ pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: Rr3BusClient) {
                     json!({ "seq": seq, "reason": "saturate", "rate_hz": rate_hz }),
                 );
             }
+            // 窗结算记账（批M M-β A-6）：值 = 窗内实跑节拍数，重置前落账；
+            // bump 失败不进总线发布面（异常通告语义），静默容忍——计数是运维账
+            bus.rr3_counter_bump(RR3_REFLEX_TICKS_KEY, ticks);
             ticks = 0;
             window_start = now;
         }

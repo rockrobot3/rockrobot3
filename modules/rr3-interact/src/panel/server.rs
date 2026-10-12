@@ -53,6 +53,31 @@ const RR3_PANEL_BODY_LIMIT: usize = 4 * 1024;
 /// 模块间 RPC 的应答耐心：relay 经 rrd 路由到 act，正常毫秒级，5s 是 10 倍余量
 const RR3_PANEL_CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// 连接线程 spawn 失败的运维计数键（批M M-β I-4）：失败点账后续连，
+/// `rr3.ctl.counters` 读面键 `rr3-interact/panel_spawn_fail`。
+const RR3_PANEL_SPAWN_FAIL_KEY: &str = "panel_spawn_fail";
+
+/// 并发槽位 RAII 守卫（批M M-β I-4）：acquire 即 +1、Drop 即 -1——连接线程
+/// 正常返回与 panic 展开都归还槽位；spawn 失败时闭包（连同守卫）被丢弃，
+/// 走同一 Drop 路径归还。旧实现 fetch_add 在 spawn 前、归还只在闭包尾手动
+/// fetch_sub，panic/失败双路泄漏。
+struct Rr3ConnSlot {
+    live: Arc<AtomicUsize>,
+}
+
+impl Rr3ConnSlot {
+    fn rr3_acquire(live: &Arc<AtomicUsize>) -> Self {
+        live.fetch_add(1, Ordering::Relaxed);
+        Self { live: live.clone() }
+    }
+}
+
+impl Drop for Rr3ConnSlot {
+    fn drop(&mut self) {
+        self.live.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// 端点总表（I-9/I-12 唯一真值，0.0.5 批M MC-8③）：`(方法, 路径)` 二元组，
 /// 自述文案与 serve 行的端点数由本表长度推导（文案不手写数字），match 分派与
 /// 本表的漂移由 `route_table_matches_dispatch` 单测钉死——新增端点 = 加表 +
@@ -387,7 +412,26 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
         "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
         RR3_PANEL_ROUTES.len()
     );
-    let live = Arc::new(AtomicUsize::new(0));
+    rr3_panel_accept_loop(
+        listener,
+        shared,
+        Arc::new(AtomicUsize::new(0)),
+        || std::thread::Builder::new().name("rr3-panel-conn".into()),
+    )
+}
+
+/// accept 循环本体（批M M-β I-4 抽缝）：listener、槽位账与线程工厂显式注入——
+/// 测试用 `make_builder` 第一次返回必败 builder（`stack_size(usize::MAX)`
+/// 触发 pthread_attr_setstacksize EINVAL，实测确定性；小值如 1 会被 macOS
+/// 静默 clamp 成功，不可作注入）注入 spawn 失败，钉"起不来一个连接后面板
+/// 仍可访问"（工单回归判据）。生产路径工厂返回普通 builder，行为与旧 serve
+/// 零漂移。
+fn rr3_panel_accept_loop(
+    listener: TcpListener,
+    shared: Arc<Rr3PanelShared>,
+    live: Arc<AtomicUsize>,
+    mut make_builder: impl FnMut() -> std::thread::Builder,
+) -> Result<(), String> {
     loop {
         let (mut stream, _) = listener.accept().map_err(|e| format!("accept 失败: {e}"))?;
         if live.load(Ordering::Relaxed) >= RR3_PANEL_MAX_CONNS {
@@ -401,16 +445,22 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
             );
             continue;
         }
-        live.fetch_add(1, Ordering::Relaxed);
+        let slot = Rr3ConnSlot::rr3_acquire(&live);
         let shared = shared.clone();
-        let live = live.clone();
-        std::thread::Builder::new()
-            .name("rr3-panel-conn".into())
-            .spawn(move || {
-                rr3_panel_handle(&mut stream, &shared);
-                live.fetch_sub(1, Ordering::Relaxed);
-            })
-            .map_err(|e| format!("起连接线程失败: {e}"))?;
+        let shared_bump = shared.clone(); // Err 分支记账用（闭包 move 走主句柄）
+        // spawn 失败（批M M-β I-4）：闭包（连同 stream 与守卫）被丢弃——守卫
+        // Drop 归还槽位、连接自然关闭。**不退循环**：面板是运维的最后一扇门，
+        // 一条连接起不来不能把整个面板带走（工单判据"起不来一个连接后面板仍
+        // 可访问"）；点账 counters + stderr 点名，服务继续。
+        if let Err(e) = make_builder().spawn(move || {
+            rr3_panel_handle(&mut stream, &shared);
+            drop(slot); // RAII 守卫：正常返回或 panic 展开都在此归还槽位
+        }) {
+            shared_bump
+                .bus
+                .rr3_counter_bump(RR3_PANEL_SPAWN_FAIL_KEY, 1);
+            eprintln!("面板连接线程起失败（连接弃置，服务继续）: {e}");
+        }
     }
 }
 
@@ -844,5 +894,193 @@ mod tests {
             "拒因原文要在错误里（面板如实转达 rrd 文案）"
         );
         jh2.join().unwrap();
+    }
+
+    // ---------- 批M M-β I-4：spawn 失败不退 accept 循环 + 槽位 RAII ----------
+
+    /// 假 rrd（I-4 夹具）：注册回 src_task=7、心跳回 accepted，并把每拍心跳
+    /// params 原样记账——测试轮询 params.counters 断言 panel_spawn_fail 上报。
+    const I4_MANIFEST: &str = "[manifest]\nschema_version = 1\nname = \"rr3-interact\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/bin/true\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 50\n";
+
+    #[cfg(test)]
+    fn rr3_i4_fake_rrd(listener: std::os::unix::net::UnixListener, beats: Arc<Mutex<Vec<Value>>>) {
+        while let Ok((mut stream, _)) = listener.accept() {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            loop {
+                let Some(frame) = rr3_frame_read(&mut stream).ok() else { break };
+                let Ok((ty, body)) = rr3_body_split_of(&frame) else { break };
+                let Ok(v) = serde_json::from_slice::<Value>(&body) else { break };
+                if ty != Rr3PayloadType::Request {
+                    continue;
+                }
+                let method = v["method"].as_str().unwrap_or("");
+                let result = match method {
+                    "rr3.register" => json!({ "src_task": 7 }),
+                    "rr3.heartbeat" => {
+                        beats.lock().unwrap().push(v["params"].clone());
+                        json!({ "beat": "accepted" })
+                    }
+                    _ => json!({ "noop": true }),
+                };
+                let id = v["id"].as_u64().unwrap_or(0);
+                let payload = rr3_body_encode(
+                    Rr3PayloadType::Response,
+                    json!({"jsonrpc": "2.0", "id": id, "result": result})
+                        .to_string()
+                        .as_bytes(),
+                );
+                let out = Rr3Frame {
+                    header: Rr3Header {
+                        opcode: opcode::SEND,
+                        flags: 0,
+                        trace_id: 0,
+                        timestamp_ns: rr3_now_ns(),
+                        src_task: rr_bus::RR3_TASK_RRD,
+                        dst_task: 7,
+                        payload_len: payload.len() as u32,
+                    },
+                    payload,
+                };
+                if rr3_frame_write(&mut stream, &out).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// rr3_body_split 的 Result 化薄封装（夹具内让 `let Ok(..) .. else` 可用）
+    #[cfg(test)]
+    fn rr3_body_split_of(frame: &Rr3Frame) -> Result<(Rr3PayloadType, Vec<u8>), ()> {
+        rr_ipc::rr3_body_split(&frame.payload).map_err(|_| ())
+    }
+
+    /// RAII 守卫的 panic 路径：连接线程 panic 展开时槽位必须归还（旧实现
+    /// fetch_sub 在闭包尾，panic 即泄漏）。
+    #[test]
+    fn conn_slot_guard_releases_on_panic_unwind() {
+        let live = Arc::new(AtomicUsize::new(0));
+        let r = std::panic::catch_unwind(|| {
+            let _slot = Rr3ConnSlot::rr3_acquire(&live);
+            assert_eq!(live.load(Ordering::Relaxed), 1, "acquire 记 +1");
+            panic!("boom（展开即走 Drop 归还）");
+        });
+        assert!(r.is_err(), "panic 应被 catch_unwind 捕获");
+        assert_eq!(
+            live.load(Ordering::Relaxed),
+            0,
+            "panic 展开必须归还槽位（守卫 Drop）"
+        );
+    }
+
+    /// 工单回归判据：起不来一个连接后面板仍可访问。spawn 必败注入
+    /// （stack_size(usize::MAX)）打头一条连接，后续连接照常 200；槽位账平；
+    /// 失败进 counters（panel_spawn_fail 随心跳自报）。
+    #[test]
+    fn panel_survives_spawn_failure_and_bumps_counter() {
+        // 前置自证：stack_size(usize::MAX) 的 spawn 在本平台确定性失败
+        //（attr_setstacksize EINVAL；实测小值如 1 会被 macOS 静默 clamp，
+        // 不可作注入，故取上溢值）
+        assert!(
+            std::thread::Builder::new()
+                .stack_size(usize::MAX)
+                .spawn(|| {})
+                .is_err(),
+            "stack_size(usize::MAX) 必须起不来线程（注入有效性自证）"
+        );
+
+        // 假 rrd + 真总线客户端（RR3_BUS_PATH 注入，连上即撤 env）
+        let dir = std::env::temp_dir().join(format!("panel-i4-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bus_path = dir.join("i4.sock");
+        let beats: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
+        {
+            let beats = beats.clone();
+            std::thread::spawn(move || rr3_i4_fake_rrd(listener, beats));
+        }
+        std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
+        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
+
+        let (actions_tx, _rx) = mpsc::channel();
+        let shared = Arc::new(Rr3PanelShared {
+            bus,
+            bus_path: bus_path.to_string_lossy().into_owned(),
+            actions: actions_tx,
+            link: Arc::new(Mutex::new(None)),
+        });
+
+        let live = Arc::new(AtomicUsize::new(0));
+        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = tcp.local_addr().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls2 = calls.clone();
+        let shared2 = shared.clone();
+        let live2 = live.clone();
+        let loop_jh = std::thread::spawn(move || {
+            rr3_panel_accept_loop(tcp, shared2, live2, move || {
+                if calls2.fetch_add(1, Ordering::Relaxed) == 0 {
+                    std::thread::Builder::new().stack_size(usize::MAX) // 第 1 次：必败注入
+                } else {
+                    std::thread::Builder::new().name("rr3-panel-conn".into())
+                }
+            })
+        });
+
+        // 第 1 条连接：spawn 失败 → 连接被弃置（无应答；服务端未读请求即关，
+        // 客户端按平台收到 RST 或 FIN——两态共同点是**没有任何应答字节**）
+        let mut c1 = TcpStream::connect(addr).unwrap();
+        c1.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
+        let _ = c1.shutdown(std::net::Shutdown::Write);
+        let mut dropped = Vec::new();
+        let _ = c1.read_to_end(&mut dropped);
+        assert!(
+            dropped.is_empty(),
+            "spawn 失败的连接必须被弃置（无应答）: {dropped:?}"
+        );
+
+        // 第 2 条连接：正常 builder → 200 OK（工单判据：面板仍可访问）
+        let mut c2 = TcpStream::connect(addr).unwrap();
+        let _ = c2.set_read_timeout(Some(Duration::from_secs(5)));
+        c2.write_all(b"GET / HTTP/1.1\r\nHost: t\r\n\r\n").unwrap();
+        let mut rbuf = [0u8; 64];
+        let n = c2.read(&mut rbuf).expect("spawn 失败后面板必须仍有应答");
+        let head = String::from_utf8_lossy(&rbuf[..n]).to_string();
+        assert!(
+            head.starts_with("HTTP/1.1 200"),
+            "spawn 失败后面板必须仍可访问: {head:?}"
+        );
+
+        // 槽位账平：失败连接（闭包连守卫被丢）与正常连接（守卫 Drop）都归还
+        assert_eq!(
+            live.load(Ordering::Relaxed),
+            0,
+            "失败与正常连接都必须归还槽位（RAII 账平）"
+        );
+
+        // counters 记账：假 rrd 收到的心跳 params.counters 带上 panel_spawn_fail
+        //（心跳快照是累计值，多拍取 max；心跳周期 50ms，4s 窗口足量）
+        let mut seen = 0u64;
+        for _ in 0..40 {
+            seen = beats
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|p| p.get("counters"))
+                .filter_map(|c| c.get(RR3_PANEL_SPAWN_FAIL_KEY))
+                .filter_map(Value::as_u64)
+                .max()
+                .unwrap_or(0);
+            if seen >= 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(
+            seen >= 1,
+            "spawn 失败必须进 counters 心跳自报（panel_spawn_fail）: {seen}"
+        );
+        drop(loop_jh); // accept 循环不退出（判据本身），随测试进程收尾
     }
 }

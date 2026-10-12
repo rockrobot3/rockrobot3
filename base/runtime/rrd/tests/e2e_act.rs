@@ -25,10 +25,22 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use rr_bus::RR3_TASK_RRD;
-use rr_ipc::Rr3PayloadType;
+use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use serde_json::json;
 
 use support::*;
+
+/// 发一帧 ctl 请求（src 按契约填 0），收回第一条 Response 体——e2e_ctl 同款帮手
+/// 的本地副本（ctl 一问一答即断，用例内逐拍新开裸连接，搬 support 反增耦合面）
+fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
+    rr3_send(c, &rr3_rpc_frame(method, id, json!({}), 0));
+    let f = rr3_read_where(c, &format!("{method} 的应答"), |f| {
+        rr3_body_split(&f.payload)
+            .map(|(ty, _)| ty == Rr3PayloadType::Response)
+            .unwrap_or(false)
+    });
+    rr3_json_of(&f)
+}
 
 /// 满配装配单：act 三格位各绑 rr3-act、enabled_slots 与 bindings 互认领。
 /// 格位名取自真 `contracts/slots.toml`（Q1 裁定立格 act.relay 后三格齐备）。
@@ -259,6 +271,32 @@ fn act_module_full_face_end_to_end() {
         .unwrap_or_else(|| panic!("非布尔必须回 result.error 字符串: {v}"));
     assert!(err.contains("布尔"), "类型不符要点名: {err}");
 
+    // ---------- ④b RPC 路同态抑制（批M M-β L-6；⑤b 只盖 intent 路，索引 §13.4 L-6 缺口）----------
+    // 继电器已吸合（④ seq=1 on=true）再发同态吸合：两条驱动路共用同一抑制判定
+    // （composite.rs RPC 路与 intent 路都调 rr3_relay_state_due，act 册 §9 不变量
+    // "已实装行为有护栏"）。有界窗口收集（破坏性读法，⑤b/⑦ 同款纪律），窗口内
+    // 混入的心跳等帧不在断言域；id=107 的应答不单独断言（同形状 result.on 已被
+    // 105 钉过），被本窗口读走即弃。
+    rr3_send(
+        &mut obs,
+        &rr3_rpc_frame(
+            rr_bus::RR3_METHOD_CALL,
+            107,
+            json!({"topic": "rr3-act/relay/set", "args": {"on": true}}),
+            obs_task,
+        ),
+    );
+    let drained = rr3_collect_within(&mut obs, Duration::from_millis(250));
+    let stray: Vec<String> = drained
+        .iter()
+        .filter(|f| rr3_json_of(f)["topic"] == "rr3-act/relay/state")
+        .map(|f| rr3_json_of(f).to_string())
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "RPC 同态 relay 命令不得产生 relay/state: {stray:?}"
+    );
+
     // ---------- ⑤ intent actions 过真进程：brain 身份连接 + 合法动作落电平 ----------
     // 以 rr3-brain 在册身份另开连接广播 intent 事件（发布归属门按在册名判，
     // manifest 的 publishes 列表不参与）。act 订阅面经两道归属门执行 relay，
@@ -393,5 +431,28 @@ fn act_module_full_face_end_to_end() {
     assert!(
         stray.is_empty(),
         "越权动作被归属门拒后不得产生 relay/state: {stray:?}"
+    );
+
+    // ---------- ⑧ 反射环 tick 记账（批M M-β A-6）：ctl.counters 有界轮询 ----------
+    // reflex 环按 loop_hz 节拍空转、每速率窗（250ms，rr-core 节拍方案）结算一次，
+    // 窗内 tick 数经 rr3_counter_bump 进模块自报面、心跳带上 rrd 归并——
+    // "1kHz 闭环的宿主位真实存在"从日志宣言升级为**可点验的记账**（MC-11 判据：
+    // 卡死与静默停摆看得见）。ctl 只对未注册连接开放（ADR-0010），逐拍新开裸
+    // 连接一问一答；心跳拍上报存在延迟，有界轮询（12 拍 × 250ms = 3s 上界）。
+    let mut ticks = 0u64;
+    for attempt in 0..12u64 {
+        std::thread::sleep(Duration::from_millis(250));
+        let mut ctl = rrd.rr3_connect();
+        let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.counters", 500 + attempt);
+        ticks = v["result"]["counters"]["rr3-act/reflex_ticks"]
+            .as_u64()
+            .unwrap_or(0);
+        if ticks >= 1 {
+            break;
+        }
+    }
+    assert!(
+        ticks >= 1,
+        "反射环跑满数秒后 rr3-act/reflex_ticks 必须非零（1kHz 闭环宿主位的记账线）: {ticks}"
     );
 }
