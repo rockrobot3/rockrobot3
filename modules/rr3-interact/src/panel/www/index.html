@@ -124,7 +124,7 @@
     <h2>连接（rr3.call → rr3-connect/wifi/connect）</h2>
     <p class="ph">SSID <input id="wifi-ssid" placeholder="家庭 WiFi 名称"> 密码 <input id="wifi-pass" type="password" placeholder="至少 8 位"></p>
     <button class="btn" onclick="wifiConnect()">连接</button>
-    <div class="msg" id="wifi-connect-msg">sim 后端凭据不落盘（重启即忘），真持久化随板上批次。</div>
+    <div class="msg" id="wifi-connect-msg">凭据由后端承载持久化（linux = NetworkManager 连接配置），重启后仍在册。</div>
   </div>
   <div class="card">
     <h2>忘记网络（rr3.call → rr3-connect/wifi/forget）</h2>

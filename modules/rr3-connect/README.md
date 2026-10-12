@@ -39,9 +39,10 @@ modules/rr3-connect/
 
 配网面（0.0.4 批D）：AP 配网状态机归本模块（`Rr3Provision`，凭据内存
 `Option<(ssid, pass)>`，无凭据 = `mode:"ap"`、有凭据 = `mode:"station"`），
-`mode` 随 `net/link` 事件体发布；**凭据不落盘**（conventions §3，重启即忘），
-真凭据持久化（wpa_supplicant/NVS）与 NetworkManager 真扫描属板上件
-cfg 门后置——如实声明，不 claim。
+`mode` 随 `net/link` 事件体发布；**件内不写文件**，凭据持久化由**后端承载**
+（MC-6 已结 `084d081`：linux = NetworkManager 连接配置，`forget` 真删除，
+connect/forget 先过 store 再转状态机 fail-closed），重启恢复 station；
+NetworkManager 真扫描属板上件 cfg 门后置——如实声明，不 claim。
 
 蓝牙（`net.bt` 格位）由本模块 provide：链路状态机骨架已立（0.0.4 批E，
 `Rr3BtState` Off/Discoverable/Connected 三态纯函数转移，非法转移拒绝且

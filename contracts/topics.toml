@@ -227,7 +227,7 @@ name = "rr3-connect/wifi/connect"
 kind = "request"
 owner = "rr3-connect"
 stable = "L1"
-note = "WiFi 配网连接（0.0.4 方案 D4/Q3 裁定：legacy /api/wifi/connect 迁移承接，ssid+pass 密码≥8 位 legacy 语义）；AP 配网状态机 ap→station，凭据内存不落盘，真持久化板上后置"
+note = "WiFi 配网连接（0.0.4 方案 D4/Q3 裁定：legacy /api/wifi/connect 迁移承接，ssid+pass 密码≥8 位 legacy 语义）；AP 配网状态机 ap→station，凭据由后端承载持久化（MC-6，linux=NetworkManager 连接配置），件内不写文件"
 
 [[topic]]
 name = "rr3-connect/wifi/forget"
