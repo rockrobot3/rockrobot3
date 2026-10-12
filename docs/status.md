@@ -469,6 +469,26 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   十步门禁直跑 GATE_EXIT=0（54 PASS）全绿，推三远端四端核对一致。
   [索引 §13.4](design/模块设计索引.md)/设计册判定列对账同批落档；教训登记 [conventions §2](process/conventions.md)。
   余批：M-ζ（MC-5 + MC-8① + MC-10）最后；
+- **0.0.5 现场处置 方案C——真板云台故障的软件面收口（2026-10-12，提交 `f6e92d6` / `8f750b2`，
+  计划外修正非批M 工单）**：真板实测云台舵机卡死不动 + 发烫（SG90 堵转 ~700mA/只持续流动），
+  5V 取自板载 USB/5V 排针经拓展坞直供 → 5V 轨跌落 → **BOD 复位循环**（`Brownout detector
+  was triggered`）→ 串口节点与 OLED 反复掉线；软件加剧因素 = 板侧 WANDER 全行程 0–180 折返 +
+  SCAN 五点 0/45/90/135/180 把舵机推过机械死点并持续施力。**落点（板侧固件为主 + 宿主 config
+  同步）**：① 板侧 `main.rs` 立**分轴行程**（`AXIS_CENTER_DEG=90` / `PAN_LIMIT_DEG=20` /
+  `TILT_LIMIT_DEG=10` + `Axis::range` + `axis_scan_points`），`servo_set` 越程**点名拒收**
+  （fail-closed，不静默钳位）；WANDER/SCAN 端点一律取自 `Axis::range`（pan[70,110]/
+  tilt[80,100]）；INFO 增 `lim=` 字段、HELP 加行程区间；② 宿主 `modules/rr3-act/config.toml`
+  `angle_limit_deg [0,180]→[70,110]` + composite 夹具 + brain 词表(45/135/90→70/110/90) +
+  `--chain`(45→70) + `e2e_act`([0,180]→[70,110]) 必要连带；③ **同批修正**（`8f750b2`）：
+  `TILT_LIMIT_DEG 5→10`，tilt 行程放宽 [85,95]→[80,100]，纳现场所需俯仰上抬 98°（原值会被
+  fail-closed 拒收）；连带补 0.0.5 方案C 批漏改的 `README.md` 指令表与验收判据（旧文仍写
+  「单轴 0–180」与五点 0/45/90/135/180）。xtensa 专用门 PASS（真编译 25.78s）+ 十步门禁直跑
+  `GATE_EXIT=0` 全绿，推三远端四端核对一致，板上已烧录（460800），HELP 回读证实「行程
+  pan 70-110 / tilt 80-100」。**敞口**：板载 USB-UART 在复位/欠压瞬间掉出 USB 总线需物理重插；
+  UART2 指令面（外部 CP2102）双向字节污染（非固件 bug，自查清单已出）；板载 USB 掉总线时
+  OLED 第 4 行实时角度行为唯一可靠读数。**方案 A**（整板电压监测 + 分轴限幅）另行立项评审，
+  与本处置并行。[0.0.5 §19](process/dev/0.0.5版本洛克三号对齐与裁定方案.md) /
+  [conventions §2](process/conventions.md) / rr3-act 设计册判定列同批落档。
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；十行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)（第 10 行 USB 声卡+喇叭为 R31 增补——增补轮五 批E 前置），到位前不 claim 真硬件证据。采购实况（2026-10-07；2026-10-10 增补）：ESP32 硬件已齐——CP2102 已到位并已用于批C④⑤ 板级
 实测（见上两板收口批 bullet）；树莓派外设采购中。

@@ -9,7 +9,7 @@
 | 件 | `servo` · `led` · `relay`；非件成分 `intent.rs`（接入面）、`reflex.rs`（守护面宿主） | `atoms/`、`src/` |
 | 主题 | RPC `servo/command`、`led/effect`、`relay/set`；发布 `servo/state`(stream)、`relay/state`(event)、`motor/reflex`(notification)；订阅 `rr3-brain/intent/result` | `module.toml`、各 `atom.toml` |
 | 句柄 | `rr3_hal_servo()` → `dyn Rr3PwmServo`；`rr3_hal_gpio_out(role)`（role 白名单 `led`/`relay`）→ `dyn Rr3GpioOut` | `src/composite.rs`、`atoms/{led,relay}/mech.rs` |
-| 参数 | `angle_limit_deg=[0,180]`、`move_timeout_ms=800`、`state_min_interval_ms=50`、`blink_period_ms=500`、`loop_hz=1000`、`saturate_notice_ms=500` | `config.toml`（`RR3_ACT_CONFIG`） |
+| 参数 | `angle_limit_deg=[70,110]`（分轴：本面默认轴 pan，板侧按轴各自裁决 pan[70,110]/tilt[80,100]，见 §3）、`move_timeout_ms=800`、`state_min_interval_ms=50`、`blink_period_ms=500`、`loop_hz=1000`、`saturate_notice_ms=500` | `config.toml`（`RR3_ACT_CONFIG`） |
 | 健康 | 心跳 1000 / 看门狗 5000 ms | `[health]` |
 
 ## §1 件契约表
@@ -31,13 +31,13 @@
 - **`Rr3LedEffect`**：`Off | On | Blink`（无隐式态）；不变式：`apply` 立即落目标电平，blink 从**亮相**起步，不等下一半拍。
 - **`Rr3RateGate`**（机制核）：不变式"状态变化必发布，两次发布至少隔 `min_interval_ms`"；被限掉的这次**不缓存不补发**（流是摘要不是逐拍镜像）。
 - **饱和检测 `Rr3SaturationDetector`**（机制核）：`run >= need` 且 episode 首报恰一次；任一非饱和窗清零复位。`Rr3ReflexCfg{loop_hz, saturate_notice_ms}` → `rr3_reflex_window_plan` 出 `(window_ms=250, need, expect_ticks)`；窗内实跑 tick `< expect/2` 才算饱和（sleep 粒度的系统性超期不算）。
-- 非法输入收敛方向：角度越界 → **钳到端点**（不是拒绝），因为执行器已在动；参数缺/错 → 拒绝且不落电平。
+- 非法输入收敛方向：角度越程 → **点名拒收**（件面 `rr3_servo_check_travel` 出 error、不落角；与板侧 `servo_set` 同口径 fail-closed）——安全核 `rr3_travel_clamp` 只是裁决被绕过时的兜底（合法输入恒等，不是 RPC 语义）；参数缺/类型错 → 拒绝且不落电平。
 
 ## §3 注入面
 
 | 件 | `handles` | `ops` 槽（名 / 类型 / 来源 / 默认） | 非法收敛 |
 |---|---|---|---|
-| servo | `dyn Rr3PwmServo` ← `[hardware].pwm_chip`、`pwm_channel` | `angle_min_deg`/`angle_max_deg` ← `angle_limit_deg`；`move_timeout_ms`；`state_min_interval_ms` | 端点颠倒 → 取小者为下界并钳到最保守端（`rr3_travel_clamp` 用例已钉） |
+| servo | `dyn Rr3PwmServo` ← `[hardware].pwm_chip`、`pwm_channel` | `angle_min_deg`/`angle_max_deg` ← `angle_limit_deg`（**单区间**：本面默认轴 pan [70,110]，轴由 `RR3_HAL_PERIPH_AXIS` 选，改 `tilt` 须同步 config [80,100]——板侧按轴各自裁决）；`move_timeout_ms`；`state_min_interval_ms` | 端点颠倒 → 取小者为下界并钳到最保守端（`rr3_travel_clamp` 用例已钉） |
 | led | `dyn Rr3GpioOut(role="led")` ← `gpio_chip`、`gpio_led_line` | `blink_period_ms`（默认 500，代码再 `.max(1)`） | 写失败 → `eprintln` 不退（妆面件，**例外需在此点名**） |
 | relay | `dyn Rr3GpioOut(role="relay")` ← `gpio_relay_line` | 无（无常量） | 写失败 → 业务 error |
 | reflex | 无（读 act 自身状态） | `loop_hz`、`saturate_notice_ms` | `loop_hz` 现状 `as u32` 裸截断 → 改为 `try_from` + 拒 boot（§10 A-3） |
@@ -63,7 +63,7 @@
 
 | 主题 | kind | seq | 触发 | 载荷必填 | 失败映射 |
 |---|---|---|---|---|---|
-| `servo/command` | RPC | — | 点名 | `{angle_deg, timeout_ms?}` | 越界→钳位后成功；缺/错→error 点名 |
+| `servo/command` | RPC | — | 点名 | `{angle_deg, move_ms?}` | 越程→**error 点名拒收**（件面 `rr3_servo_check_travel`，与板侧 `servo_set` 同口径 fail-closed）；缺/类型错/越 u16→error 点名。安全核 `rr3_travel_clamp` 只在裁决被绕过时兜底（合法输入恒等，非 RPC 语义） |
 | `servo/state` | stream | 自增 | 变化 + 50 ms 限速 | `seq, angle_deg` | — |
 | `led/effect` | RPC | — | 点名 | `{effect}` 白名单 | 不认点名白名单 |
 | `relay/set` | RPC | — | 点名 | `{on}` | 写失败 error |
