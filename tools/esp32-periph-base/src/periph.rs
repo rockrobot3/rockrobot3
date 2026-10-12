@@ -6,10 +6,10 @@ use esp_idf_hal::ledc::LedcDriver;
 use esp_idf_hal::uart::UartDriver;
 
 use crate::board::{
-    axis_check, deg_to_duty, Axis, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_ROWS,
-    SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
+    axis_check, deg_to_duty, Axis, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_RENDER_ATTEMPTS,
+    OLED_ROWS, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
 };
-use crate::oled::{oled_capsules, oled_cmd, oled_text};
+use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
 
 // ---------------------------------------------------------------------------
 // 外设面（控制面/运行面分离）：控制面独占 UART2，运行面独占 I2C0 + LEDC
@@ -88,19 +88,49 @@ impl RtPeriph {
         true
     }
 
-    /// 渲染胶囊眼（**带整板电压降级**）：整屏渲染失败即降一档亮度重来，到地板仍败
-    /// 才回 Err。真板主故障（大面亮点 → 轨压/地弹 → I2C 丢拍）由此闭环自愈。
-    pub(crate) fn capsules_degrading(&mut self, open: u32, dx: i16, dy: i16) -> Result<(), String> {
-        loop {
-            match oled_capsules(&mut self.i2c, open, dx, dy) {
+    /// OLED 渲染通用恢复环（**降亮阶梯 + 模块 latch 重初始化**）：闭包 `f` 执行一次
+    /// 完整渲染，失败即降一档亮度重试；到亮度地板仍败则重走 [`oled_init`] 复位 SSD1306
+    /// 状态机**一次**、再试一次即收手（真板实锤 2026-10-13：大面亮点页丢拍会把模块
+    /// latch 成"此后连 2 字节命令都恒 NACK"，降亮与总线自愈都救不回，重初始化只作最后
+    /// 手段、并非稳过）。**本环只治"拍丢/latch"子症状，不治根因**——根因是大面亮点帧拉
+    /// 塌轨压触发 ESP32 BOD 复位，归"电源/负载均衡"机制。`OLED_RENDER_ATTEMPTS` 为轮数
+    /// 上限（防死循环）。
+    fn render_with_recovery<F>(&mut self, mut f: F) -> Result<(), String>
+    where
+        F: FnMut(&mut I2cDriver<'static>) -> Result<(), String>,
+    {
+        // **机制与策略分离**：本函数只是"失败 → 按策略降亮/重初始化 → 再试"的骨架，
+        // 轮数与档数等策略量全在 [`crate::board`]。**每轮至多一次模块重初始化**：落到
+        // 亮度地板就 `oled_init` 一次 + 再试一次即收手（返回其结果，不再回降亮循环）。
+        // 真板实锤（2026-10-13）：旧版隐式计数会在一拍内触发两次 `oled_init`、30s 内
+        // 56 次重初始化风暴——既救不回 latch 又白烧轨压（见 `OLED_RENDER_ATTEMPTS`）。
+        let mut last = String::new();
+        for _ in 0..OLED_RENDER_ATTEMPTS {
+            match f(&mut self.i2c) {
                 Ok(()) => return Ok(()),
-                Err(e) => {
-                    if !self.degrade_contrast() {
-                        return Err(e);
-                    }
-                }
+                Err(e) => last = e,
             }
+            if self.degrade_contrast() {
+                continue; // 还有更暗的档：下一轮直接用新档重试
+            }
+            // 已到亮度地板：重初始化复位模块一次，再试一次即收手
+            eprintln!("[periph] OLED 渲染到亮度地板仍败 → 重走 oled_init 复位模块（每轮至多一次）");
+            let _ = oled_init(&mut self.i2c);
+            self.contrast_idx = 0;
+            return f(&mut self.i2c);
         }
+        Err(last)
+    }
+
+    /// 渲染胶囊眼（**带恢复环**：降亮阶梯 + 模块 latch 重初始化）。
+    pub(crate) fn capsules_degrading(&mut self, open: u32, dx: i16, dy: i16) -> Result<(), String> {
+        self.render_with_recovery(|i2c| oled_capsules(i2c, open, dx, dy))
+    }
+
+    /// 渲染 8x8 点阵全屏放大（**带恢复环**）。
+    pub(crate) fn render_frame(&mut self, frame: &[u8; 8]) -> Result<(), String> {
+        let frame = *frame;
+        self.render_with_recovery(|i2c| oled_frame(i2c, &frame))
     }
 
     /// 舵机让位（**供电分时仲裁**）：板载 5V 轨上 SSD1306 电荷泵与舵机保持电流
@@ -114,32 +144,29 @@ impl RtPeriph {
         let _ = self.tilt.set_duty(0);
     }
 
-    /// OLED 文本 3 行（21 列硬切）+ 角度行（row 3）刷新。
+    /// OLED 文本 3 行（21 列硬切）+ 角度行（row 3）刷新（**带恢复环**）。
     pub(crate) fn oled_show(&mut self, text: &str, pan_deg: u32, tilt_deg: u32) -> Result<(), String> {
         // 先过滤成可见 ASCII（其余转空格，与 glyph 行为一致）再按 21 列硬切
         // 3 行——字节切片不劈多字节字符（char boundary 安全），行对齐不漂移。
-        let ascii: String = text
+        let ascii: Vec<u8> = text
             .chars()
-            .map(|c| {
-                if (0x20..=0x7E).contains(&(c as u32)) {
-                    c
-                } else {
-                    ' '
-                }
-            })
+            .map(|c| if (0x20..=0x7E).contains(&(c as u32)) { c as u8 } else { b' ' })
             .collect();
-        let bytes = ascii.as_bytes();
+        let mut lines: Vec<Vec<u8>> = Vec::with_capacity(OLED_ROWS);
         for row in 0..(OLED_ROWS - 1) {
             let start = row * OLED_COLS;
-            let chunk = if start < bytes.len() {
-                let end = (start + OLED_COLS).min(bytes.len());
-                &bytes[start..end]
+            lines.push(if start < ascii.len() {
+                ascii[start..(start + OLED_COLS).min(ascii.len())].to_vec()
             } else {
-                b"" as &[u8]
-            };
-            oled_text(&mut self.i2c, row, chunk)?;
+                Vec::new()
+            });
         }
-        let angle_line = format!("P:{pan_deg:03} T:{tilt_deg:03}");
-        oled_text(&mut self.i2c, OLED_ROWS - 1, angle_line.as_bytes())
+        lines.push(format!("P:{pan_deg:03} T:{tilt_deg:03}").into_bytes());
+        self.render_with_recovery(|i2c| {
+            for (row, line) in lines.iter().enumerate() {
+                oled_text(i2c, row, line)?;
+            }
+            Ok(())
+        })
     }
 }

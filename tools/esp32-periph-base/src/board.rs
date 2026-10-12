@@ -28,6 +28,15 @@ pub(crate) const I2C_PAGE_ATTEMPTS: u32 = 2;
 /// 起恒 `ESP_FAIL`，且此后整屏恒败";降到 0x2F 后胶囊眼 8 页全过、微动作连跑零失败。
 /// 初始取中档，I2C 反复失败即逐级下调保通信——"极限电源下宁暗不瞎"。
 pub(crate) const OLED_CONTRAST_LEVELS: [u8; 4] = [0x4F, 0x3F, 0x2F, 0x1F];
+/// 单次渲染的**恢复环轮数上限**（机制护栏；策略量集中在本文件）。本值须
+/// `>= OLED_CONTRAST_LEVELS.len()`：前若干轮逐级降亮，落到亮度地板那轮触发
+/// **一次**模块重初始化 + 一次再试即收手（见 [`RtPeriph::render_with_recovery`]）。
+/// 真板实锤（2026-10-13）：大面亮点帧丢拍会把 SSD1306 latch 成"连 2 字节命令都恒
+/// NACK"，降亮与总线自愈都救不回；但旧版**隐式计数**会在一拍内触发 2 次重初始化、
+/// 30s 内 56 次重初始化风暴——既救不回 latch 又白烧 I2C 与轨压。故显式收敛为
+/// "每轮至多一次"。**注**：本恢复环只治"拍丢/latch"这一子症状，不治根因
+/// （大面亮点帧拉塌轨压 → ESP32 BOD 复位），根因归"电源/负载均衡"机制。
+pub(crate) const OLED_RENDER_ATTEMPTS: u32 = 4;
 /// SSD1306 I2C 从机地址（0.96" 128x64 模块缺省）。
 pub(crate) const OLED_ADDR: u8 = 0x3C;
 /// OLED 每行字符数：5px 字模 + 1px 间隔 = 6px/字符，128px/6 = 21.3 → 21 列。
