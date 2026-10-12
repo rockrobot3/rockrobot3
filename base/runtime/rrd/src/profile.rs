@@ -337,6 +337,19 @@ pub fn rr3_profile_boot_inputs(
     profile_path: &Path,
     slots_path: &Path,
 ) -> Result<Rr3ProfileBoot, String> {
+    let probe = crate::probe::rr3_probe_default();
+    rr3_profile_boot_inputs_with_probe(profile_path, slots_path, probe.as_ref())
+}
+
+/// 同 [`rr3_profile_boot_inputs`]，但探测件由调用方注入（MC-4 接缝）：生产走
+/// [`crate::probe::rr3_probe_default`]（非 test 面按目标分流），门禁用例注入
+/// 恒缺/假根探针钉"缺格 → Degraded 点名件与键"。探测是纯读面、无状态，注入
+/// 不改变 boot 前的单次消费语义（ADR-0012 裁定 4）。
+pub fn rr3_profile_boot_inputs_with_probe(
+    profile_path: &Path,
+    slots_path: &Path,
+    probe: &dyn crate::probe::Rr3Probe,
+) -> Result<Rr3ProfileBoot, String> {
     let abs = rr3_profile_absolute_path(profile_path)?;
     let text = std::fs::read_to_string(&abs)
         .map_err(|e| format!("读不到装配单 {}: {e}", abs.display()))?;
@@ -457,10 +470,10 @@ pub fn rr3_profile_boot_inputs(
 
     // 缺格判定：enabled_slots 声明的非基础层格位没有指向本模块的有效 binding（或探测不到）。
     // 基础层恒在位，跳过（slots.toml 注记：net.online / power.battery boot 即在位、恒不降级）。
-    let probe = crate::probe::rr3_probe_default();
     let mut missing: Vec<(String, String)> = Vec::new();
-    // 探测先行：bindings 声明的格位逐格探测（sim 后端全在位；探测自身故障按"探测不到"处理，
-    // 方案 §4）。0.0.2 缺格只由装配单缺 binding 表达，这条环是板上探测批次的接缝。
+    // 探测先行：bindings 声明的格位逐格探测（MC-4：linux 走五面真值探测，非 linux
+    // 生产面恒缺，test 面/显式注入走注入件）。探测自身故障按"探测不到"处理
+    // （fail-closed，方案 §4）；缺格三源合一的"实测缺"这一源即出自本环。
     for (slot, module) in &profile.bindings {
         if !probe.rr3_probe_slot(slot) {
             missing.push((module.clone(), slot.clone()));
@@ -790,6 +803,57 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
                 "manifest 路径必须按 modules-root 解析且升序"
             );
         }
+    }
+
+    /// MC-4 门禁用例①：注入非 linux 生产探针（有硬件面的格位恒缺）→ 这些格位进缺格
+    /// 清单，且**点名到件与键**（(模块, 格位) 成对，模块不错配到别的格）——这条钉的
+    /// 是"缺格 → Degraded 点名件与键"的检出真值（探测拿不到答案不当作在位的下游）。
+    /// 无硬件面可反证的格位（cognition.llm）不在缺格清单：那是"没有反证"不是"拿不到答案"。
+    #[test]
+    fn injected_absent_probe_names_missing_module_and_slot() {
+        let root = Root::new("probe-absent");
+        let p = root.write_profile("absent.toml", GOOD);
+        let boot = rr3_profile_boot_inputs_with_probe(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            &crate::probe::Rr3AbsentProbe,
+        )
+        .expect("缺格不是致命项，boot 输入必须成功返回");
+        assert_eq!(
+            boot.missing,
+            vec![
+                ("rr3-pa".to_string(), "act.servo".to_string()),
+                ("rr3-pb".to_string(), "sensor.env".to_string()),
+            ],
+            "有硬件面的格位必须点名件与键、升序去重（软件格 cognition.llm 不在内）: {:?}",
+            boot.missing
+        );
+    }
+
+    /// MC-4 门禁用例②：探测件只对一格报缺 → 只有那一格的点名模块进缺格，
+    /// 其余同在位——证明缺格判定确实**逐格读探测结果**，不是整单连坐。
+    #[test]
+    fn injected_selective_probe_marks_only_its_slot() {
+        struct OnlyServoAbsent;
+        impl crate::probe::Rr3Probe for OnlyServoAbsent {
+            fn rr3_probe_slot(&self, slot: &str) -> bool {
+                slot != "act.servo"
+            }
+        }
+        let root = Root::new("probe-selective");
+        let p = root.write_profile("selective.toml", GOOD);
+        let boot = rr3_profile_boot_inputs_with_probe(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            &OnlyServoAbsent,
+        )
+        .expect("部分缺格不致命");
+        assert_eq!(
+            boot.missing,
+            vec![("rr3-pa".to_string(), "act.servo".to_string())],
+            "只有探到缺的那一格点名件与键: {:?}",
+            boot.missing
+        );
     }
 
     /// 缺格：bindings 移除任一格 → (模块, 格位) 进缺格清单，其余不受牵连

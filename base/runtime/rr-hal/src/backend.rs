@@ -17,6 +17,7 @@
 
 use crate::{
     Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3Power, Rr3PwmServo, Rr3UnavailableSource,
+    provision_store::Rr3WifiStore,
 };
 
 /// 后端标识（写入日志与诊断主题 `rr3-runtime/module/state`）
@@ -545,6 +546,44 @@ pub fn rr3_hal_link(
             (Box::new(dev), RR3_BACKEND_SIM)
         }
         _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
+/// 按环境选配网凭据存储面（0.0.5 批M M-γ，MC-6：凭据由后端承载持久化）。
+/// linux 分支走 NetworkManager 连接配置后端（[`crate::provision_store::
+/// Rr3NmWifiStore`]，nmcli 子进程承载），子进程超时由模块 config 的
+/// `timeout_ms` 传入（与链路读数后端同一档，无代码缺省）；sim 分支内存档
+/// （进程内存态即"在册"，sim 无"重启仍在"语义）；其余落占位（使用时以
+/// `Unsupported` 回错，fail-closed 不静默换）。
+///
+/// 构造不触设备（选择函数口径）；凭据落盘策略归 NM 本身，件内不自写文件
+/// ——`Rr3Provision` 只管态不管存（工单 MC-6 红线）。
+pub fn rr3_hal_wifi_store(
+    // 非 linux 平台 linux 分支被剔除、sim/placeholder 分支不消费超时——参数在
+    // 那些平台编译面上未使用是结构性的，不是疏漏（linux 上它进子进程守护）
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] store_timeout: std::time::Duration,
+) -> (Box<dyn Rr3WifiStore>, &'static str) {
+    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
+            #[cfg(target_os = "linux")]
+            return (
+                Box::new(crate::provision_store::Rr3NmWifiStore::rr3_nm_wifi_store_new(
+                    "nmcli",
+                    store_timeout,
+                )),
+                RR3_BACKEND_LINUX,
+            );
+            #[cfg(not(target_os = "linux"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
+        RR3_BACKEND_SIM => (
+            Box::new(crate::provision_store::Rr3SimWifiStore::default()),
+            RR3_BACKEND_SIM,
+        ),
+        _ => (
+            Box::new(crate::provision_store::Rr3WifiStoreUnavailable),
+            RR3_BACKEND_PLACEHOLDER,
+        ),
     }
 }
 
