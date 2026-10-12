@@ -1966,6 +1966,29 @@ A-7 守恒核清：`tools/sim/chain.rs` 观察者只收 vad/servo、legacy 面�
 重开两条已知时序 flake，均复跑两连绿定性）——"handler 写完应答"与"线程退出归还槽位"
 之间无同步点，读到 200 不等于账已平，断言改 1s 上界有界等待（`91b473c`，产品语义零改）。
 
+2026-10-12 0.0.5 增补轮五 批M M-γ 收官（MC-6 配网凭据持久化 + MC-4 探测真值接线）——
+编码面 `084d081`（14 files，+1224/−193），十步门禁直跑 GATE_EXIT=0（54 PASS）全绿，
+推三远端 ls-remote 四端指针核对一致。**MC-6**：配网凭据由**后端承载持久化**（件内不写
+文件、不出现落盘路径字面量）——`rr-hal` 新增 `nmcli_support`（自 `linux_link` 抽出公共
+nmcli 机制：`rr3_nm_unescape`/`rr3_nm_field`/超时守护 `rr3_nm_run`/capped read，全平台
+编译）+ `provision_store`（`Rr3WifiStore` trait 三后端 Nm/Sim/Unavailable + 选择函数
+`rr3_hal_wifi_store`）；`rr3-connect` 的 connect/forget handler 先过 store 再转状态机
+（fail-closed），`Rr3Provision` 只管态不管存，新增 `rr3_provision_restored` 重启恢复
+station（psk 不回读——NM 私有面）；主判据 `nm_store_persists_across_reconstruct`（临时
+`NMCONF_HOME` 假 nmcli 夹具，主机可测）。**MC-4**：`Rr3LinuxProbe` 五面在位性实装
+（sysfs `pwmchip*`/`gpiochip*`、`/dev/i2c-*`、`/dev/spidev*`、`/proc/asound/cards` 非空），
+去 cfg 门 + 探测根可注入（生产 `/`、单测假根）；格位→面映射（有硬件面者按面探，软件格
+`cognition.*`/运行期格 `net.*`/基础层回"无硬件面可反证 → 在位"）；`rr3_probe_default`
+新增 `RR3_PROBE`（`sim`/`linux`/`absent`）**显式优先**（取值不认当场 `eprintln!` 点名后
+回落），否则按目标分流（test→sim / linux→真探测 / 其余生产面→恒缺）——**sim 探针不再
+当缺省构造**（台-1 清零）；`profile.rs` 加注入缝 `rr3_profile_boot_inputs_with_probe`
++ 2 条"缺格 → 点名件与键"门禁用例。教训两条：① `Rr3AbsentProbe` 须**按面判**——非 linux
+生产面无硬件探测面，但有硬件面的格位恒缺（不冒充在位）、**无硬件面可反证的格位（`net.wifi`
+等）与真值探测同判在位**（"没有反证"≠"拿不到答案"），否则 e2e_connect 的纯软件格位被
+连坐判缺；② e2e 走**真 rrd 子进程**（非 test 编译面），开发机（macOS）与 CI runner 的
+硬件格位会被 fail-closed 判缺——`e2e_act`/`e2e_profile`/`e2e_power` 与 `tools/sim` 装配
+演练一律**显式** `RR3_PROBE=sim`（与既有 `RR3_HAL_BACKEND=sim` 同一纪律：不赌平台默认）。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
