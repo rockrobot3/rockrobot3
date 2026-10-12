@@ -349,6 +349,18 @@ impl Rr3UartConn {
             excl_path: None,
         })
     }
+
+    /// 冲掉**当前**输入队列（TCIFLUSH 只冲收不冲发）。开口即净只覆盖开口时刻
+    /// 之前的积压——开口本身触发的复位（CP2102 DTR/RTS 翻转 → ESP32 EN）会让
+    /// 板端开机 banner 在开口 flush **之后**才陆续进队，宿主发首帧前须再冲一次
+    /// （批C 真板 e2e 实证：1.2s settle 后 banner 残留致首读 BadMagic）。
+    pub fn rr3_flush_input(&self) -> std::io::Result<()> {
+        // SAFETY：fd 属 self，是 open/from_fd 配置过的合法描述符。
+        if unsafe { c_tcflush(self.fd, TCIFLUSH) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
 }
 
 /// raw 模式配置：取当前 termios → cfmakeraw → 显式 VMIN=1/VTIME=0（阻塞读满语义，
