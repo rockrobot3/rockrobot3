@@ -3,7 +3,7 @@
 [rr3-act.servo]
 # 分轴行程（0.0.5 方案 C 裁定 2026-10-12）：本面默认轴 = pan（RR3_HAL_PERIPH_AXIS
 # 缺省 "pan"），相对中位 90° ±20° → [70, 110]；若改 RR3_HAL_PERIPH_AXIS=tilt，
-# 须同步改 [85, 95]（板侧帧面按轴各自裁决：pan[70,110] / tilt[85,95]，
+# 须同步改 [80, 100]（板侧帧面按轴各自裁决：pan[70,110] / tilt[80,100]，
 # tools/esp32-periph-base/src/main.rs）。越程**拒收点名**（不静默钳位）。
 angle_limit_deg = [70, 110]
 move_timeout_ms = 800     # 超时即停，不给堵转留机会
