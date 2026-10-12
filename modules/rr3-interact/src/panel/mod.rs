@@ -13,6 +13,10 @@ pub const RR3_PANEL_INDEX_HTML: &str = include_str!("www/index.html");
 
 pub const SURFACE: &[&str] = &["panel: www 静态页（经总线，随 M5）"];
 
-pub fn surface() -> impl Iterator<Item = &'static str> {
-    SURFACE.iter().chain(server::SURFACE.iter()).copied()
+pub fn surface() -> Vec<String> {
+    SURFACE
+        .iter()
+        .map(|s| (*s).to_string())
+        .chain(server::rr3_panel_surface())
+        .collect()
 }

@@ -19,7 +19,7 @@ modules/rr3-brain/
     ├── intent.py        ← 意图规则面（0.0.3 T3：user_text → actions[]，精确词表 + 否定护栏，
     │                       形状见 contracts/events/brain-intent-result.schema.json）
     └── cloud/
-        ├── __init__.py  ← 密钥只从 SILICONFLOW_API_KEY 读；RR3_BRAIN_CLOUD 选 real / mock
+        ├── __init__.py  ← 密钥只从 RR3_CLOUD_API_KEY 读（通用键名，MC-8②；供应商由 config.toml 承载）；RR3_BRAIN_CLOUD 选 real / mock
         ├── asr.py       ← Rr3AsrClient（SiliconFlow /v1/audio/transcriptions）
         ├── llm.py       ← Rr3LlmClient（SiliconFlow /v1/chat/completions）
         └── tts.py       ← Rr3TtsClient（SiliconFlow /v1/audio/speech，PCM 回包）
@@ -61,5 +61,5 @@ cargo run --manifest-path tools/sim/Cargo.toml --bin rr3-sim -- --brain
 ```
 
 M4 交付面（ADR-0014）：云端链路 ASR / LLM / TTS 已按 legacy 移植实装（urllib，零第三方），
-`RR3_BRAIN_CLOUD=mock` 是测试注入点不是产品路径；缺 `SILICONFLOW_API_KEY` 的 real 调用
+`RR3_BRAIN_CLOUD=mock` 是测试注入点不是产品路径；缺 `RR3_CLOUD_API_KEY` 的 real 调用
 照报缺环境变量，不静默降级。失败语义：业务失败折日志弃轮，传输失败 exit(1) 交 supervisor。

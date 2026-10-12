@@ -12,8 +12,8 @@
 //! - **beep/face 不出进程**——播放面与表情机归主循环所有，面板经动作通道
 //!   （mpsc）请求主循环代执行，串行无锁，与 TTS 点名天然互斥。
 //!
-//! 端点十二个（legacy 四页签语义搬入，"面板：状态与版本/硬件自检/实时交互流/
-//! 运行数据/重启"逐项有承接；WiFi 配网页随 0.0.4 批D 挂上）：
+//! 端点白名单见 [`RR3_PANEL_ROUTES`]（legacy 四页签语义搬入，"面板：状态与版本/
+//! 硬件自检/实时交互流/运行数据/重启"逐项有承接；WiFi 配网页随 0.0.4 批D 挂上）：
 //! `GET /`（静态页）、`GET /api/status`（health+link 缓存）、`GET /api/data`
 //! （counters）、`GET /api/logs`（rrd 日志环）、`POST /api/relay`（act RPC）、
 //! `POST /api/beep`（进程内）、`POST /api/face`（进程内）、`POST /api/selftest`
@@ -53,7 +53,32 @@ const RR3_PANEL_BODY_LIMIT: usize = 4 * 1024;
 /// 模块间 RPC 的应答耐心：relay 经 rrd 路由到 act，正常毫秒级，5s 是 10 倍余量
 const RR3_PANEL_CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub const SURFACE: &[&str] = &["panel: http 十二端点（缺省 127.0.0.1:8080，RR3_PANEL_ADDR 可改）"];
+/// 端点总表（I-9/I-12 唯一真值，0.0.5 批M MC-8③）：`(方法, 路径)` 二元组，
+/// 自述文案与 serve 行的端点数由本表长度推导（文案不手写数字），match 分派与
+/// 本表的漂移由 `route_table_matches_dispatch` 单测钉死——新增端点 = 加表 +
+/// 过漂移门，不再改第三处文案。
+pub const RR3_PANEL_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/"),
+    ("GET", "/api/status"),
+    ("GET", "/api/data"),
+    ("GET", "/api/logs"),
+    ("POST", "/api/relay"),
+    ("POST", "/api/beep"),
+    ("POST", "/api/face"),
+    ("POST", "/api/selftest"),
+    ("POST", "/api/reboot"),
+    ("GET", "/api/wifi/scan"),
+    ("POST", "/api/wifi/connect"),
+    ("POST", "/api/wifi/forget"),
+];
+
+/// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
+pub fn rr3_panel_surface() -> Vec<String> {
+    vec![format!(
+        "panel: http {}端点（缺省 127.0.0.1:8080，RR3_PANEL_ADDR 可改）",
+        RR3_PANEL_ROUTES.len()
+    )]
+}
 
 /// 主循环代执行的面板动作（beep/face），HTTP 线程经 mpsc 递给主循环。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,8 +221,8 @@ fn rr3_panel_body_json(body: &[u8]) -> Result<Value, String> {
     serde_json::from_str(text).map_err(|e| format!("body 不是合法 JSON: {e}"))
 }
 
-/// 路由纯函数：方法 + 路径 + body → 分派。**十二端点白名单**，未知路径 404、
-/// 方法不对 405、body 坏 400——面板不是攻击面兜底者，一切都显式。
+/// 路由纯函数：方法 + 路径 + body → 分派。**端点白名单 = [`RR3_PANEL_ROUTES`]**，
+/// 未知路径 404、方法不对 405、body 坏 400——面板不是攻击面兜底者，一切都显式。
 pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatch {
     match path {
         "/" => match method {
@@ -358,7 +383,10 @@ pub struct Rr3PanelShared {
 pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     let addr = rr3_panel_addr();
     let listener = TcpListener::bind(&addr).map_err(|e| format!("绑面板 {addr} 失败: {e}"))?;
-    println!("面板就绪: http://{addr}（九端点，控制全走 RPC 归属门）");
+    println!(
+        "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
+        RR3_PANEL_ROUTES.len()
+    );
     let live = Arc::new(AtomicUsize::new(0));
     loop {
         let (mut stream, _) = listener.accept().map_err(|e| format!("accept 失败: {e}"))?;
@@ -605,8 +633,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn route_covers_twelve_endpoints() {
-        // 十二端点逐一点名：GET 四查一页 + POST 七动作
+    fn route_covers_all_table_entries() {
+        // 端点逐一点名（全集 = RR3_PANEL_ROUTES，表↔分派漂移由下一条门钉）：
         assert_eq!(rr3_panel_route("GET", "/", b""), Rr3PanelDispatch::Html);
         assert_eq!(
             rr3_panel_route("GET", "/api/status", b""),
@@ -671,6 +699,39 @@ mod tests {
                 args: json!({})
             }
         );
+    }
+
+    /// 端点表 ↔ 路由分派漂移门（MC-8③/I-9）：表内每条必须分派成功（不是
+    /// 404/405），表长 pin 与自述文案同源（端点数由 len() 推导）——新增端点 =
+    /// 加表 + 改本 pin + 过本门，文案零改动。
+    #[test]
+    fn route_table_matches_dispatch() {
+        assert_eq!(
+            RR3_PANEL_ROUTES.len(),
+            12,
+            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径"
+        );
+        for (method, path) in RR3_PANEL_ROUTES {
+            let body: &[u8] = match (*method, *path) {
+                ("POST", "/api/relay") => br#"{"on":true}"#,
+                ("POST", "/api/face") => br#"{"expression":"happy"}"#,
+                ("POST", "/api/wifi/connect") => br#"{"ssid":"s","pass":"password8"}"#,
+                _ => b"",
+            };
+            let d = rr3_panel_route(method, path, body);
+            assert!(
+                !matches!(
+                    &d,
+                    Rr3PanelDispatch::NotFound | Rr3PanelDispatch::MethodNotAllowed
+                ),
+                "{method} {path} 在端点表内但路由拒绝: {d:?}"
+            );
+        }
+        // 反向：表外路径一律 404，不因加表而放开
+        assert!(matches!(
+            rr3_panel_route("GET", "/api/not-in-table", b""),
+            Rr3PanelDispatch::NotFound
+        ));
     }
 
     /// 越权拒的静态形态：路由器里没有"发布"这种产物——relay 只能以

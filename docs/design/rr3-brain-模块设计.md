@@ -39,7 +39,7 @@
 | 面 | 内容 |
 |---|---|
 | `handles` | 无能力面句柄（HTTP + 总线） |
-| `ops`（策略，落位正确） | 模型名与 `base_url`（**读自 `config.toml` 的 `[rr3-brain.cloud]`**，不是 env；只有 `SILICONFLOW_API_KEY` 走 env）、`SYSTEM_PROMPT`、`LLM_MAX_TOKENS=150`、`LLM_HISTORY_ROUNDS=4`、`timeout_s`、`max_utterance_ms`、舵机角 45/90/135、关键词表；⚠️ `max_turn_chars` 在 `config.toml` 里在册但**无读者**（B-8：实装或删除）；⚠️ `silence_tail_ms` 同为无读者的死参数（B-2） |
+| `ops`（策略，落位正确） | 模型名与 `base_url`（**读自 `config.toml` 的 `[rr3-brain.cloud]`**，不是 env；只有 `RR3_CLOUD_API_KEY` 走 env——通用键名，MC-8② 已结）、`SYSTEM_PROMPT`、`LLM_MAX_TOKENS=150`、`LLM_HISTORY_ROUNDS=4`、`timeout_s`、`max_utterance_ms`、舵机角 45/90/135、关键词表；⚠️ `max_turn_chars` 在 `config.toml` 里在册但**无读者**（B-8：实装或删除）；⚠️ `silence_tail_ms` 同为无读者的死参数（B-2） |
 | 契约面（本册要改的） | `subscribes` 必须**只增**补齐为实然集（`sense/audio/pcm`、`sense/audio/vad_start`），`interact/asr/text` 走 retired |
 
 **为什么策略在这里是对的**：ADR-0019 裁定 5 的 L4 就是 brain；把这些外移反而违反分层。本单元唯一
@@ -117,7 +117,7 @@
 | B-5 | 起轮/云失败 counters（健康面可见性） | 批K | C9 |
 | B-6 | Rust 化随 ADR-0016（届时两腿对拍与闭包门才适用；`dialog` 件按 §12 是唯一可能跨档的认知件，`asr`/`llm`/`tts` 按发布权判据在 rtos/bare 档**不启用**而非"改造后可用"） | ADR-0016 | — |
 | B-9 | `RR3_CALL_TIMEOUT_S = 30.0` 从 `composite.py` 常量改 ops/config 槽——它是"一轮最坏 ≈90 s"的组成项，调它却要改码违背数据面原则；与 B-3 同批裁 | 批I | — |
-| B-10 | 凭据键名 `SILICONFLOW_API_KEY` 把云供应商焊进代码（2026-10-12 复验：键名未改，本条**未结**）。改通用键（`RR3_CLOUD_API_KEY`）+ 供应商写 config，或在 §11 明确记"换云供应商需改一处代码"为已知欠账（这是"换芯片不改码"原则在云侧的同型问题） | **0.0.5 批M MC-8** | — |
+| B-10 | 凭据键名把云供应商焊进代码——**已结（0.0.5 批M MC-8②，2026-10-12）**：改通用键 `RR3_CLOUD_API_KEY`（原 `SILICONFLOW_API_KEY`），供应商由 config `[rr3-brain.cloud]` 的 `base_url`/模型名承载，换云只改配置不改码；测试随 `API_KEY_ENV` 常量注入 | 已结 | — |
 | B-11 | **把已合成的 PCM 送上总线**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 背景表 #1）：`composite.py` 的 `rr3_finish_turn` 今天取到 `reply_pcm = tts.synthesize(reply_text)` 后只算 `tts_ms` 入日志，再 `rr3_call_topic(TOPIC_TTS, {"text": reply_text})`——**云侧真人声从未有可能出声**。本单 = 按 MCP-1 的分帧把 `reply_pcm` 发布到新主题 `rr3-brain/audio/tts_pcm`，`tts/text` 点名保留作"该不该播"的事务判据；`seq` 单调、`ms` 由样点数导出 | **0.0.5 批M MC-1**（前置 MCP-1 契约 append 已落 `8d05590`；消费侧对号 interact I-14） | MCP-1 |
 
 ## §11 待证与敞口
@@ -153,7 +153,7 @@
 | `config.toml` | `max_utterance_ms=8000` 有读者；`silence_tail_ms=700`、`max_turn_chars=800` **无读者** | 轮次面 | 部分 | 两个死键分别走 B-2（删或接）与 B-8；**"假活配置面"在 brain 有两处**，与 interact 五键、connect 三项同批清 |
 | `composite.py : SUBSCRIBES` / `TOPIC_PCM` / `TOPIC_VAD` | `"rr3-interact/asr/text"`、`"rr3-connect/net/link"`、`"rr3-sense/audio/pcm"`、`"…/audio/vad_start"` | 订阅面与实然面**两套字面量** | 有（实然那份真在用，申报那份只 `net/link` 被读、且读了不处理） | 契约面修正走 C14/B-1；**双写债在此最典型**：申报面与实现面各写一遍主题串，改一处就漂 |
 | `rr3_brain/cloud/*.py` | 路径串 `v1/audio/transcriptions`、`v1/chat/completions`、`v1/audio/speech` | 云 API 形状 | 有 | 契约面（OpenAI 兼容形状）；换云供应商时**必须改代码的地方不止这里**——见下一行 |
-| env 面 | `SILICONFLOW_API_KEY`（**供应商名进代码/配置面**） | 凭据键名 | 有 | 凭据不落盘 ✅；但键名把厂商焊死：换云要改代码。去处 = 通用键名（如 `RR3_CLOUD_API_KEY`）+ 厂商写在 config/descriptor，或至少在 §11 记"跨供应商需改一处代码"为已知欠账（B-10） |
+| env 面 | `RR3_CLOUD_API_KEY`（**通用键名**，MC-8② 已结） | 凭据键名 | 有 | 凭据不落盘 ✅；键名不再焊厂商：供应商由 config `[rr3-brain.cloud]` 承载，换云只改配置不改码（原 `SILICONFLOW_API_KEY` 已退役） |
 | `session/测试面` | `RR3_BRAIN_CLOUD=mock`、`tests/` 内假响应 | 注入点 | 有 | ✅ 正确（mock 在测试注入位）；§6 已钉"mock 不是在位证据" |
 | 硬编码在件里的形态参数 | 心跳 2000 ms 拍点、`poll` 超时等 | 机制参数 | 有 | 与五册同纪律：进 ops/config，别停在 `.py` 常量 |
 
@@ -178,6 +178,6 @@
 | B-5 起轮/云失败 counters | `composite.py` 的 `rr3_counter_bump("asr_ok"/"asr_fail"/"llm_fail"/"tts_fail")` | **结** |
 | B-8 `max_turn_chars` | 键已从 `config.toml` 删除（文件注记自陈"在册无读者；实装截断随真用例回归"） | **结（走"删"分支）**；截断行为将来要回须连同回归用例立单 |
 | B-9 `RR3_CALL_TIMEOUT_S = 30.0` | 仍是 `composite.py` 常量（注释里它是"一轮最坏 ≈90 s"的组成项） | **未结 → 0.0.5 MC-10**（ops/config 槽，与 A-9/I-11/S-5 同族"策略出件"） |
-| B-10 `SILICONFLOW_API_KEY` | `cloud/__init__.py : API_KEY_ENV` 未改，供应商名仍在代码里 | **未结 → MC-8**（改通用键 + 供应商进 config，或显式记为已知欠账） |
+| B-10 `SILICONFLOW_API_KEY` | **已结（批M MC-8②）**：`cloud/__init__.py : API_KEY_ENV` 改 `RR3_CLOUD_API_KEY`，供应商归 config（换云只改配置不改码） | **结** |
 | B-11（本册新立）TTS PCM 上线 | `rr3_finish_turn` 已取得 `reply_pcm` 却只 `rr3_call_topic(TOPIC_TTS, {"text": …})` | **MC-1**（通路对**引擎中立**）；对话闭环施工在**增补轮五批E** |
 | R31 **Q3** 对本册的改判 | ASR/TTS 首发为**本地 vosk + Piper**，brain 侧立 adapter 缝，**云后端实现位留空不写半成品**（ADR-0008 裁定 4 口径） | 本册 §0/§5 的"三家云客户端"读作**现状**（存量实现），不再读作目标形态；"云真 key 联调"敞口**不再是 F-3/F-4 的阻塞项**——这条订正同时收回本册与 0.0.5 §17 里"欠真 key"的写法 |

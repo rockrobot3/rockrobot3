@@ -7,7 +7,7 @@ name = "bt"
 version = "0.0.1"
 
 [provides]
-slots = ["net.bt"]   # 蓝牙链路状态机骨架（0.0.4 批E，D5/Q5）；BlueZ 真后端板上后置（cfg 门）
+slots = ["net.bt"]   # 蓝牙链路状态机骨架（0.0.4 批E，D5/Q5）；格记 placeholder（MC-9），BlueZ 真后端板上后置（cfg 门）
 
 [uses]
 slots = []   # 骨架期无注入面；真后端（BlueZ cfg 门）接线归板上批次

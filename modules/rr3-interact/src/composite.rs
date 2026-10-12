@@ -62,8 +62,11 @@ pub fn rr3_interact_run() -> Result<(), String> {
         .iter()
         .copied()
         .chain(player::SURFACE.iter().copied())
-        .chain(panel::surface())
     {
+        println!("  {line}");
+    }
+    // panel 自述是推导文案（端点数由 RR3_PANEL_ROUTES 推导，MC-8③），String 面单独成段
+    for line in panel::surface() {
         println!("  {line}");
     }
 
