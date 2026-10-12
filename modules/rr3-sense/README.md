@@ -34,6 +34,16 @@ modules/rr3-sense/
 
 PCM 与 IMU 属实时控制面摘要；shm 零拷贝传输的裁定见 ADR-0007 §裁定 3。
 
+## 心跳自报计数（0.0.5 批M M-β S-3）
+
+`bus.rr3_counter_bump` 记账，随 `rr3.heartbeat` 的可选 `counters` 字段上行，rrd 按
+`rr3-sense/<键>` 归并（`rr3.ctl.counters` 可查）。本模块的键：
+
+| 键 | 记账点 |
+|---|---|
+| `pcm_frames` | `composite.rs 的 RR3_PCM_FRAMES_KEY`（字面量唯一落点）；每**实际发布成功**一帧 pcm +1——采集新鲜度记账线，采集卡死/静默停摆即零增长（MC-11 判据"看得见"） |
+| `pcm_empty_frames` | 同上落点；读回欠载空帧（read 实填 0 采样）另账——"活着但不动"的饿死信号，正常 sim/实时源恒 0 |
+
 ## 本地自检
 
 ```bash

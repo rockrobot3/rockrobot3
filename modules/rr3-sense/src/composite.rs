@@ -44,6 +44,13 @@ const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
 /// 本模块 exposes 的唯一事务面主题（module.toml [rpc].exposes 同源）
 const RR3_DUMP_TOPIC: &str = "rr3-sense/capture/dump";
 
+/// 采集新鲜度运维计数键（批M M-β S-3）：`pcm_frames` 每实际上总线一帧 +1；
+/// `pcm_empty_frames` 读回欠载空帧（read 实填 0 采样——"活着但不动"的饿死
+/// 信号，MC-11 判据：卡死与静默停摆看得见）另账。经心跳自报 rrd 归并，
+/// `rr3.ctl.counters` 读面键 `rr3-sense/pcm_frames` / `rr3-sense/pcm_empty_frames`。
+const RR3_PCM_FRAMES_KEY: &str = "pcm_frames";
+const RR3_PCM_EMPTY_FRAMES_KEY: &str = "pcm_empty_frames";
+
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_sense_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
@@ -108,8 +115,14 @@ pub fn rr3_sense_run() -> Result<(), String> {
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
         let pcm = rr3_pcm_downmix_stream(raw);
+        // 采集新鲜度记账（批M M-β S-3）：空帧另账（欠载饿死信号），帧账在发布
+        // 成功后 +1——记账 = 真上了总线的帧数（发布失败即 exit，临死一帧不入账）
+        if done == 0 {
+            bus.rr3_counter_bump(RR3_PCM_EMPTY_FRAMES_KEY, 1);
+        }
         seq += 1;
         bus.rr3_publish(capture::RR3_PCM_TOPIC, rr3_pcm_event_body(seq, &pcm))?;
+        bus.rr3_counter_bump(RR3_PCM_FRAMES_KEY, 1);
 
         if let Some(edge) = vad_state.rr3_vad_feed(&pcm.samples) {
             bus.rr3_publish(
