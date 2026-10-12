@@ -58,8 +58,8 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::uart::{UartConfig, UartDriver};
 use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{
-    esp_get_free_heap_size, esp_get_minimum_free_heap_size, esp_timer_get_time, link_patches,
-    TickType_t,
+    esp_get_free_heap_size, esp_get_minimum_free_heap_size, esp_random, esp_timer_get_time,
+    link_patches, TickType_t,
 };
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_body_split, Rr3ByteStream, Rr3Frame, Rr3FrameBuf, Rr3Header,
@@ -504,19 +504,94 @@ struct PeriphState {
     /// 最近一次表情（帧面 expression 应答的 previous 字段；开机未出过表情=none）
     prev_expr: String,
     /// 显示模式：true=帧面 64x64 点阵位图占全屏（舵机角度行不刷，不凿位图）；
-    /// 行面 OLED 命令 / 帧面 expression 出字复位 false（文本模式）。
+    /// 行面 OLED 命令 / 帧面 expression 复位 false。
     frame_mode: bool,
+    /// 表情模式：true=胶囊眼 + 生命感微动作（帧面 expression 专有）；位图占屏
+    /// 与行面文本模式复位 false（动画只在此模式跑）。
+    expr_mode: bool,
+    /// 表情基态（expr_eye_base 预设）：眼开合% + 水平/垂直扫视偏移
+    base_open: u32,
+    base_dx: i16,
+    base_dy: i16,
+    /// 微动作时钟（esp_timer ms）：眨眼/扫视的下一触发点与进行中截止点 +
+    /// 上次渲染合成参数（变化才重绘，省 I2C）。
+    next_blink_ms: u64,
+    blink_until_ms: u64,
+    next_glance_ms: u64,
+    glance_until_ms: u64,
+    glance_dx: i16,
+    glance_dy: i16,
+    drawn: (u32, i16, i16),
 }
 
 impl PeriphState {
-    /// 角度行刷新：文本模式全 4 行重绘（批B 行为不变）；帧模式跳过——位图占
-    /// 全部 8 页，页 6 是位图底部，刷角度行会凿穿位图。
+    /// 角度行刷新：文本模式全 4 行重绘（批B 行为不变）；帧模式/表情模式跳过
+    /// ——两者都占满 8 页，刷角度行会凿穿画面。
     fn refresh_angle_row(&self, ph: &mut Periph) {
-        if self.frame_mode {
+        if self.frame_mode || self.expr_mode {
             return;
         }
         if let Err(e) = ph.oled_show(&self.last_text, self.pan_deg, self.tilt_deg) {
             eprintln!("[periph] 角度行刷新失败: {e}");
+        }
+    }
+
+    /// 表情切换时重置微动作时钟：立即显基态，眨眼/扫视各按随机间隔推迟。
+    fn anim_reset(&mut self) {
+        let now = now_ms();
+        self.blink_until_ms = 0;
+        self.glance_until_ms = 0;
+        self.next_blink_ms = now + 2800 + (esp_random_u32() % 2400) as u64;
+        self.next_glance_ms = now + 4000 + (esp_random_u32() % 4000) as u64;
+    }
+
+    /// 表情微动作一拍（cmd_loop 窥视空档驱动，10ms 一拍）：自动眨眼（2.8–5.2s
+    /// 随机间隔，闭 130ms）+ 随机微扫视（4–8s 间隔，水平 ±6px、垂直 ±2 行，
+    /// 500–900ms 回位）。合成参数与上次一致则不重绘（I2C 重绘有成本）；
+    /// 非表情模式一拍即回。
+    fn anim_tick(&mut self, ph: &mut Periph) {
+        if !self.expr_mode {
+            return;
+        }
+        let now = now_ms();
+        if self.blink_until_ms == 0 {
+            if now >= self.next_blink_ms {
+                self.blink_until_ms = now + 130;
+                self.next_blink_ms = now + 2800 + (esp_random_u32() % 2400) as u64;
+            }
+        } else if now >= self.blink_until_ms {
+            self.blink_until_ms = 0;
+        }
+        let open = if self.blink_until_ms != 0 {
+            4
+        } else {
+            self.base_open
+        };
+        let mut dx = self.base_dx;
+        let mut dy = self.base_dy;
+        if self.glance_until_ms == 0 {
+            if now >= self.next_glance_ms {
+                self.glance_dx = (esp_random_u32() % 13) as i16 - 6;
+                self.glance_dy = match esp_random_u32() % 3 {
+                    0 => -2,
+                    1 => 2,
+                    _ => 0,
+                };
+                self.glance_until_ms = now + 500 + (esp_random_u32() % 400) as u64;
+                self.next_glance_ms = now + 4000 + (esp_random_u32() % 4000) as u64;
+            }
+        } else if now >= self.glance_until_ms {
+            self.glance_until_ms = 0;
+        } else {
+            dx += self.glance_dx;
+            dy += self.glance_dy;
+        }
+        let key = (open, dx, dy);
+        if key != self.drawn {
+            self.drawn = key;
+            if let Err(e) = oled_capsules(&mut ph.i2c, open, dx, dy) {
+                eprintln!("[periph] 表情微动作渲染失败: {e}");
+            }
         }
     }
 }
@@ -538,9 +613,7 @@ struct FrameReq {
 /// 帧级不可信的请求不作确定性应答；宿主侧重开连接即恢复）。半帧失败后流上可能
 /// 残留尾巴字节——下一轮 magic 窥视大概率落行面 ERR，自愈路径在案。
 fn frame_recv(io: &mut UartIo) -> Result<FrameReq, String> {
-    let buf = io
-        .rr3_recv_buf()
-        .map_err(|e| format!("收帧失败: {e:?}"))?;
+    let buf = io.rr3_recv_buf().map_err(|e| format!("收帧失败: {e:?}"))?;
     let frame = Rr3Frame::try_from(buf).map_err(|e| format!("帧还原失败: {e:?}"))?;
     if frame.header.dst_task != RR3_PERIPH_TASK {
         return Err(format!(
@@ -562,7 +635,10 @@ fn frame_recv(io: &mut UartIo) -> Result<FrameReq, String> {
         .to_string();
     let (topic, args) = match v.get("params") {
         Some(p) => (
-            p.get("topic").and_then(Value::as_str).unwrap_or("").to_string(),
+            p.get("topic")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
             p.get("args").cloned().unwrap_or(Value::Null),
         ),
         None => (String::new(), Value::Null),
@@ -632,14 +708,11 @@ fn frame_handle_servo(
     }
 }
 
-/// 表情执行（rr3-interact/face/expression）：expression 变体出字（文本模式），
-/// frame 变体 8x8 点阵 → OLED 中央 64x64 放大渲染（HAL 渲染变体，rr-hal-api
-/// Rr3FaceFrame 契约：行主序 8 字节、每字节 bit7 为该行最左点）。
-fn frame_handle_face(
-    ph: &mut Periph,
-    st: &mut PeriphState,
-    args: &Value,
-) -> Result<Value, String> {
+/// 表情执行（rr3-interact/face/expression）：expression 变体出胶囊眼（基态
+/// 预设 + 微动作动画，rr-hal-api Rr3FaceFrame 契约之外的表情名面），
+/// frame 变体 8x8 点阵 → OLED 中央 64x64 放大渲染（HAL 渲染变体：行主序
+/// 8 字节、每字节 bit7 为该行最左点）。
+fn frame_handle_face(ph: &mut Periph, st: &mut PeriphState, args: &Value) -> Result<Value, String> {
     if let Some(v) = args.get("expression") {
         let expr = v
             .as_str()
@@ -647,20 +720,30 @@ fn frame_handle_face(
         if !RR3_FACE_EXPRS.contains(&expr) {
             return Err(format!("expression 不在白名单: \"{expr}\""));
         }
-        let text = format!("EXPR {expr}");
-        ph.oled_show(&text, st.pan_deg, st.tilt_deg)?;
-        let previous = std::mem::replace(&mut st.prev_expr, expr.to_string());
-        st.last_text = text;
+        let (base_open, base_dx, base_dy) = expr_eye_base(expr);
+        st.expr_mode = true;
         st.frame_mode = false;
+        st.base_open = base_open;
+        st.base_dx = base_dx;
+        st.base_dy = base_dy;
+        let previous = std::mem::replace(&mut st.prev_expr, expr.to_string());
+        st.last_text = format!("EXPR {expr}");
+        st.anim_reset();
+        oled_capsules(&mut ph.i2c, base_open, base_dx, base_dy)?;
+        st.drawn = (base_open, base_dx, base_dy);
         Ok(json!({ "expression": expr, "previous": previous }))
     } else if let Some(v) = args.get("frame") {
-        let arr = v.as_array().ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
+        let arr = v
+            .as_array()
+            .ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
         if arr.len() != 8 {
             return Err(format!("frame 长度非法: {}（须 8）", arr.len()));
         }
         let mut f = [0u8; 8];
         for (i, item) in arr.iter().enumerate() {
-            let b = item.as_u64().ok_or_else(|| format!("frame[{i}] 非法: {item}"))?;
+            let b = item
+                .as_u64()
+                .ok_or_else(|| format!("frame[{i}] 非法: {item}"))?;
             if b > 255 {
                 return Err(format!("frame[{i}] 超 u8: {b}"));
             }
@@ -668,6 +751,7 @@ fn frame_handle_face(
         }
         oled_frame(&mut ph.i2c, &f)?;
         st.frame_mode = true;
+        st.expr_mode = false;
         Ok(json!({ "applied": true }))
     } else {
         Err("缺 expression/frame 之一".into())
@@ -689,6 +773,73 @@ fn oled_frame(i2c: &mut I2cDriver, frame: &[u8; 8]) -> Result<(), String> {
         oled_page(i2c, page, &buf)?;
     }
     Ok(())
+}
+
+/// esp_timer 毫秒（单调时基，微动作时钟源；u64 毫秒 58 万年不回绕）。
+fn now_ms() -> u64 {
+    (unsafe { esp_timer_get_time() }).unsigned_abs() / 1000
+}
+
+/// 硬件 RNG（WIFI/蓝牙未启也能用——ESP32 硬件熵源独立于无线栈）。
+fn esp_random_u32() -> u32 {
+    unsafe { esp_random() }
+}
+
+/// 胶囊眼渲染（表情模式画面）：两只竖直胶囊眼，开合 open_pct% 与扫视偏移
+/// (dx,dy) 由表情基态 + 微动作动画合成。形状=圆角竖矩形（圆角半径取
+/// min(半宽, 半高)：满高 26px 时即纯胶囊，眯缝低压扁成 18px 宽横缝不退化成
+/// 圆盘）；行内实心段解析求宽（直段区全宽、圆角区 sqrt 余量），逐页写
+/// GDDRAM。扫视出界自然裁剪（0..127 列钳制）不回卷。
+fn oled_capsules(i2c: &mut I2cDriver, open_pct: u32, dx: i16, dy: i16) -> Result<(), String> {
+    const W2: i32 = 9; // 眼半宽（眼宽 18px）
+    const H_FULL: i32 = 26; // 满开眼高
+    const CY: i32 = 32; // 眼中心行（64 行画布居中）
+    const EYES: [i32; 2] = [42, 86]; // 眼中心列（128 列画布左右分置）
+    let h = ((H_FULL * open_pct.clamp(4, 100) as i32) / 100).max(4);
+    let half_h = h / 2;
+    let rc = W2.min(half_h); // 圆角半径
+    let straight = half_h - rc; // 垂直直段半长
+    for page in 0u8..8 {
+        let mut buf = [0u8; 128];
+        let y0 = page as i32 * 8;
+        for y in y0..y0 + 8 {
+            let py = (y - (CY + dy as i32)).abs();
+            if py > half_h {
+                continue;
+            }
+            for &ecx in &EYES {
+                let cx = ecx + dx as i32;
+                let hw = if py <= straight {
+                    W2
+                } else {
+                    let rem = rc * rc - (py - straight) * (py - straight);
+                    if rem <= 0 {
+                        continue;
+                    }
+                    (W2 - rc + (rem as f32).sqrt() as i32).min(W2)
+                };
+                for x in (cx - hw).max(0)..=(cx + hw).min(127) {
+                    buf[x as usize] |= 1 << (y % 8);
+                }
+            }
+        }
+        oled_page(i2c, page, &buf)?;
+    }
+    Ok(())
+}
+
+/// 表情→胶囊眼基态预设（开合% / 水平扫视 / 垂直扫视）：七态白名单各有面目，
+/// 微动作动画在此基态上叠加（眨眼/扫视见 anim_tick）。
+fn expr_eye_base(expr: &str) -> (u32, i16, i16) {
+    match expr {
+        "blink" => (4, 0, 0),     // 眯缝
+        "happy" => (55, 0, 2),    // 眯眼微垂
+        "talk" => (70, 0, 0),     // 说话态半开
+        "think" => (100, 6, -3),  // 抬眼右上
+        "listen" => (100, -6, 0), // 侧耳向左
+        "turn" => (100, 8, 0),    // 回望右方
+        _ => (100, 0, 0),         // idle 与兜底：正目全开
+    }
 }
 
 /// Response 回帧：result 在位（业务失败折 {"error": 文案}——宿主解析契约），
@@ -758,20 +909,39 @@ fn cmd_loop(mut ph: Periph) {
         tilt_deg: 90,
         prev_expr: String::from("none"),
         frame_mode: false,
+        expr_mode: false,
+        base_open: 100,
+        base_dx: 0,
+        base_dy: 0,
+        next_blink_ms: 0,
+        blink_until_ms: 0,
+        next_glance_ms: 0,
+        glance_until_ms: 0,
+        glance_dx: 0,
+        glance_dy: 0,
+        drawn: (100, 0, 0),
     };
     reply(
         &mut ph.uart,
-        "READY periph-base v0.2.0 line+frame (type HELP for commands)",
+        "READY periph-base v0.3.0 line+frame+anim (type HELP for commands)",
     );
     loop {
         let mut first = [0u8; 1];
-        match ph.uart.read(&mut first, u32::MAX) {
-            Ok(0) | Err(_) => {
+        // 窥视带 1-tick（10ms）超时：空口返回 Ok(0) 驱动表情微动作一拍——
+        // 指令线程单线程独占 I2C/OLED，动画只能搭窥视空档执行；有字节
+        // （Ok(n≥1)）照旧双面分流，帧/行路径的后续读仍 portMAX_DELAY 阻塞
+        // 不受影响。Err 才是真读失败，退避重试。
+        match ph.uart.read(&mut first, 1) {
+            Ok(0) => {
+                st.anim_tick(&mut ph);
+                continue;
+            }
+            Ok(_) => {}
+            Err(_) => {
                 eprintln!("[periph] UART 读失败，退避后重试");
                 thread::sleep(Duration::from_millis(100));
                 continue;
             }
-            Ok(_) => {}
         }
         if first[0] == RR3_MAGIC_FIRST {
             frame_round(&mut ph, &mut st, first[0]);
@@ -811,6 +981,7 @@ fn cmd_loop(mut ph: Periph) {
                         Ok(()) => {
                             st.last_text = owned;
                             st.frame_mode = false;
+                            st.expr_mode = false;
                             Ok(format!("OK oled \"{}\"", st.last_text))
                         }
                         Err(e) => Err(e),
