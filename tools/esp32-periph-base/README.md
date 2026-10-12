@@ -32,7 +32,7 @@ SKIP 纪律同 espidf-sentinel-check.sh（esp 工具链/ldproxy/ESP-IDF v5.2.2/e
 
 | 机制 | 落点 | 作用 |
 |---|---|---|
-| 舵机让位 | `RtPeriph::servo_release()`，在 [runtime_loop](src/main.rs) 每次动作收尾调用 | 除"正在移动/扫描"外**一律 duty=0**，把 5V 轨整段让给 OLED |
+| 舵机让位 | [`RtPeriph::servo_release()`](src/periph.rs)，在 [`runtime_loop`](src/runtime.rs) 每次动作收尾调用 | 除"正在移动/扫描"外**一律 duty=0**，把 5V 轨整段让给 OLED |
 | I2C 强制重同步 | `i2c_bus_recover(true)`，紧随让位 | 无条件打 9 SCL 时钟 + STOP——舵机电机换向噪声会在**空闲期**把从机 I2C 状态机顶进半途态（此时 SDA 仍高，"只在 SDA 低时打时钟"的条件版救不回来） |
 | 亮度降级阶梯 | `OLED_CONTRAST_LEVELS` = 0x4F→0x3F→0x2F→0x1F | 整屏渲染失败即降一档重来（boot 首帧通常会自降一档到 0x3F，之后稳定） |
 | 整页重写 + 分块 | `oled_page`：≤32B/笔（硬件 FIFO），整页重来 2 次 | 丢拍后从机列指针会错位，必须从确定性起点重写整页 |
