@@ -90,10 +90,10 @@ const RR3_PERIPH_TASK: u64 = 2;
 /// 集全为字母（HELP/OLED/PAN/...），与 0x31 无交集，分流无歧义。
 const RR3_MAGIC_FIRST: u8 = 0x31;
 /// 舵机点名主题（在册 request L1；形状事实源
-/// contracts/events/act-servo_command.schema.json，与 topics.toml 同串）。
+/// contracts/events/act-servo-command.schema.json，与 topics.toml 同串）。
 const RR3_SERVO_TOPIC: &str = "rr3-act/servo/command";
 /// 表情点名主题（在册 request L1；形状事实源
-/// contracts/events/interact-face_expression.schema.json，与 topics.toml 同串）。
+/// contracts/events/interact-face-expression.schema.json，与 topics.toml 同串）。
 const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 /// 表情白名单（rr3-interact 模块面同款 7 态；帧面执行面同步执行该裁定）。
 const RR3_FACE_EXPRS: [&str; 7] = ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
