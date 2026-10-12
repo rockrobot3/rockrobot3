@@ -9,6 +9,7 @@
 //! | `linux`（电源） | 批F5a（`linux_power.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | INA219@0x40 I2C 总线电压读数（R18，判据 12；charging 判定随真件档校准） |
 //! | `linux`（链路） | 批F5a（`linux_link.rs`，仅 `target_os = "linux"` 单门，nmcli 子进程） | NetworkManager 链路状态读数（R18，判据 13；配网/断链重连是 NM 自身行为，HAL 只如实报数） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
+//! | `esp32` | 批C（`esp32_uart.rs`，`RR3_HAL_PERIPH_UART` 指定设备路径） | ESP32 外设桥：舵机/显示两能力面的 UART 能力帧承载——板不进城，宿主直连；跨进程 flock 排他即单消费者 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
 //!
@@ -21,10 +22,11 @@ use crate::{
 /// 后端标识（写入日志与诊断主题 `rr3-runtime/module/state`）
 pub const RR3_BACKEND_LINUX: &str = "linux";
 pub const RR3_BACKEND_SIM: &str = "sim";
+pub const RR3_BACKEND_ESP32: &str = "esp32";
 pub const RR3_BACKEND_PLACEHOLDER: &str = "placeholder";
 
 /// 后端选择的环境变量键（naming.md：`RR3_` 大写前缀）。
-/// 取值：`sim` / `linux` / `placeholder`；未设或取值不认 → 走平台默认。
+/// 取值：`sim` / `linux` / `esp32` / `placeholder`；未设或取值不认 → 走平台默认。
 pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 
 // —— 以下 `RR3_HAL_*` 键全部是**应急覆盖**（批D④ 收口，ADR-0018 裁定 4）：
@@ -144,6 +146,7 @@ pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
     match v.as_str() {
         RR3_BACKEND_SIM => Ok(RR3_BACKEND_SIM),
         RR3_BACKEND_PLACEHOLDER => Ok(RR3_BACKEND_PLACEHOLDER),
+        RR3_BACKEND_ESP32 => Ok(RR3_BACKEND_ESP32),
         RR3_BACKEND_LINUX => {
             if cfg!(target_os = "linux") {
                 Ok(RR3_BACKEND_LINUX)
@@ -152,7 +155,7 @@ pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
             }
         }
         other => Err(format!(
-            "环境变量 {RR3_HAL_BACKEND_ENV} 取值不认: {other}（允许 sim/linux/placeholder）"
+            "环境变量 {RR3_HAL_BACKEND_ENV} 取值不认: {other}（允许 sim/linux/esp32/placeholder）"
         )),
     }
 }
@@ -293,6 +296,34 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
             unreachable!("上面 guard 已保证只在本分支编译")
         }
         RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        // ESP32 外设桥（批C）：设备路径来自应急 env（描述符键 periph_uart 随真件
+        // 装配批补入 profiles）；键缺失 → 占位显式回错（fail-closed，不猜设备）。
+        RR3_BACKEND_ESP32 => {
+            match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
+                .map(|p| p.trim().to_string())
+            {
+                Ok(p) if !p.is_empty() => {
+                    let axis = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_AXIS_ENV)
+                        .ok()
+                        .and_then(|v| crate::esp32_uart::rr3_periph_axis_parse(&v))
+                        .unwrap_or("pan");
+                    (
+                        Box::new(crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_uart_servo_new(
+                            std::path::PathBuf::from(p),
+                            axis,
+                        )) as Box<dyn Rr3PwmServo>,
+                        RR3_BACKEND_ESP32,
+                    )
+                }
+                _ => {
+                    eprintln!(
+                        "rr-hal: esp32 档缺环境变量 {}，舵机面落占位（使用时以 Unsupported 回错）",
+                        crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
+                    );
+                    (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+                }
+            }
+        }
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimServo::rr3_sim_servo_new(90)),
             RR3_BACKEND_SIM,
@@ -395,6 +426,29 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
             Box::new(crate::sim::Rr3SimDisplay::rr3_sim_display_new([0; 8])),
             RR3_BACKEND_SIM,
         ),
+        // ESP32 外设桥（批C）：OLED 出帧链路的宿主承载（帧面 rr3.call，板侧
+        // 8x8→64x64 放大渲染）。设备路径同舵机面的应急 env；缺 → 占位显式回错。
+        RR3_BACKEND_ESP32 => {
+            match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
+                .map(|p| p.trim().to_string())
+            {
+                Ok(p) if !p.is_empty() => (
+                    Box::new(
+                        crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_uart_display_new(
+                            std::path::PathBuf::from(p),
+                        ),
+                    ) as Box<dyn crate::Rr3Display>,
+                    RR3_BACKEND_ESP32,
+                ),
+                _ => {
+                    eprintln!(
+                        "rr-hal: esp32 档缺环境变量 {}，显示面落占位（使用时以 Unsupported 回错）",
+                        crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
+                    );
+                    (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+                }
+            }
+        }
         _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
     }
 }

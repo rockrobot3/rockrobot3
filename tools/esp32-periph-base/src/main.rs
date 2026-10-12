@@ -1,9 +1,15 @@
-//! esp32-periph-base —— 0.0.5 增补轮五 批B 外设底座档（espidf std，不依赖桥）。
+//! esp32-periph-base —— 0.0.5 增补轮五 批B 外设底座档 + 批C 帧执行面（espidf std，不依赖桥）。
 //!
-//! 职责（全案 §4 批B）：**SSD1306 I2C 驱动出字 + LEDC PWM 云台两轴逐度转向 +
-//! 行指令解析面**。批B 是独立固件档（指令面走 UART2 行协议，不进城）；批C 在
-//! 本 crate 上加哨兵面（rr-core::runtime + rr-ipc）换能力帧，批D 加 I2S——
-//! 同一固件 crate 分批合入（全案 §5 板上固件形态）。
+//! 职责（全案 §4 批B + 批C）：**SSD1306 I2C 驱动出字 + LEDC PWM 云台两轴逐度转向 +
+//! UART2 双面指令接入**。批B 是独立固件档（行协议面）；批C 在本 crate 上加**帧
+//! 执行面**（rr-ipc 能力帧，不进城——路线二裁定：板不注册总线身份，宿主 HAL 桥
+//! 后端 rr-hal::esp32_uart 直连发 `rr3.call` 帧，本固件只是被点名的执行面）；
+//! 批D 加 I2S——同一固件 crate 分批合入（全案 §5 板上固件形态）。
+//!
+//! 双面分流（批C）：指令循环逐字节收，首字节 = `0x31`（帧头 magic "1ERA" 的 LE
+//! 首字节）走帧面（`rr3_framebuf_read` 整帧收 → rr3.call 分发 → Response 应答）；
+//! 其余走批B 行面（调试与舵机五点 SCAN 判据沿用）。行面首字节集全为字母，
+//! 分流无歧义。
 //!
 //! 引脚预算（全案 §5 约束面，与 0.0.7 实测接线零冲突）：
 //! - UART2 = GPIO17→TX / GPIO16←RX（115200，CP2102 指令面；批B 行协议临时面，
@@ -52,8 +58,14 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::uart::{UartConfig, UartDriver};
 use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{
-    esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches, TickType_t,
+    esp_get_free_heap_size, esp_get_minimum_free_heap_size, esp_timer_get_time, link_patches,
+    TickType_t,
 };
+use rr_ipc::{
+    opcode, rr3_body_encode, rr3_body_split, Rr3ByteStream, Rr3Frame, Rr3FrameBuf, Rr3Header,
+    Rr3PayloadType, Rr3TransportConn,
+};
+use serde_json::{json, Value};
 
 /// I2C 事务超时（TickType_t；portMAX_DELAY 同义 u32::MAX——阻塞至传输完成）。
 const I2C_TIMEOUT: TickType_t = u32::MAX;
@@ -69,6 +81,22 @@ const OLED_ROWS: usize = 4;
 const LINE_CAP: usize = 128;
 /// 指令/心跳类线程的栈面（板上实测实锤 16KB 运行下限，哨兵同款，勿再调低）。
 const THREAD_STACK: usize = 16384;
+
+/// 帧面本板 task 位形（帧头 dst 门）：外设执行面占首模块池位形 2——与宿主
+/// rr-hal::esp32_uart::RR3_PERIPH_TASK 同值（本 crate 不依赖 rr-core，此位形是
+/// 两端帧头约定，宿主侧有同值锚定测试防静默分叉）。
+const RR3_PERIPH_TASK: u64 = 2;
+/// 帧头 magic "1ERA" 的 LE 首字节（0x31='1'）——双面分流窥视判据。行面首字节
+/// 集全为字母（HELP/OLED/PAN/...），与 0x31 无交集，分流无歧义。
+const RR3_MAGIC_FIRST: u8 = 0x31;
+/// 舵机点名主题（在册 request L1；形状事实源
+/// contracts/events/act-servo_command.schema.json，与 topics.toml 同串）。
+const RR3_SERVO_TOPIC: &str = "rr3-act/servo/command";
+/// 表情点名主题（在册 request L1；形状事实源
+/// contracts/events/interact-face_expression.schema.json，与 topics.toml 同串）。
+const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
+/// 表情白名单（rr3-interact 模块面同款 7 态；帧面执行面同步执行该裁定）。
+const RR3_FACE_EXPRS: [&str; 7] = ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
 
 // ---------------------------------------------------------------------------
 // 舵机换算（50Hz / 14bit：1 tick = 20ms / 16384 = 1.2207µs）
@@ -374,8 +402,14 @@ fn reply(uart: &mut UartDriver, line: &str) {
 }
 
 /// 收一行（阻塞逐字节读直到 '\n'；'\r' 剥离；超 [LINE_CAP] 丢弃整行回 Err）。
-fn read_line(uart: &mut UartDriver) -> Result<String, &'static str> {
+/// `first` 是 cmd_loop 双面分流时已消耗的首字节（非 0x31 的行面回流字节）。
+fn read_line(uart: &mut UartDriver, first: u8) -> Result<String, &'static str> {
     let mut buf = Vec::new();
+    if first == b'\n' {
+        // 空行保持批B 行为：静默空串（cmd_loop trim 后跳过）
+        return Ok(String::new());
+    }
+    buf.push(first);
     let mut byte = [0u8; 1];
     loop {
         let n = uart
@@ -402,21 +436,348 @@ fn read_line(uart: &mut UartDriver) -> Result<String, &'static str> {
 }
 
 // ---------------------------------------------------------------------------
-// 指令循环（批B 行协议临时面；批C 换能力帧时本段整体退役）
+// 帧面（批C）：rr3.call 能力帧执行——宿主 rr-hal::esp32_uart 桥后端直连点名
 // ---------------------------------------------------------------------------
 
-/// 指令线程主循环：收行 → 解析 → 执行 → 应答。未知指令 ERR（fail-closed，
-/// 不猜不拖——全案批B 指令解析面判据）。
+/// UART2 的帧面 io 窄缝：驱动可变借用 + cmd_loop 已窥视消耗的首字节。实现
+/// rr-ipc [`Rr3ByteStream`] 两 `usize` 方法（板侧接帧语义的全部——transport
+/// mod.rs 形状用例为证），经 blanket impl 免费获得 rr3_send_buf/rr3_recv_buf
+/// ——与宿主/桥/哨兵同源帧语义，零第二份帧层。行面继续直用 UartDriver 固有
+/// 方法（逐字节语义），两面互不侵扰。
+struct UartIo<'a> {
+    uart: &'a mut UartDriver<'static>,
+    /// 窥视消耗的帧 magic 首字节（0x31）：Read 首次先吐它，128B 头的 magic
+    /// 窗口才完整；发 Response 时此位恒 None（无窥视）。
+    pre: Option<u8>,
+}
+
+impl Rr3ByteStream for UartIo<'_> {
+    fn rr3_read_into(&mut self, buf: &mut [u8]) -> usize {
+        if let Some(b) = self.pre.take() {
+            if !buf.is_empty() {
+                buf[0] = b;
+                return 1;
+            }
+            return 0;
+        }
+        // 固有 read（阻塞，delay = portMAX_DELAY）；错误折叠为 0（缝上无错误
+        // 通道，Closed 形状）——细节 eprintln 当场可见（批J G5 口径）。
+        match self.uart.read(buf, u32::MAX) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("[periph] UART 读失败: {e:?}");
+                0
+            }
+        }
+    }
+
+    fn rr3_write_all_bytes(&mut self, buf: &[u8]) -> usize {
+        let mut done = 0usize;
+        while done < buf.len() {
+            match self.uart.write(&buf[done..]) {
+                Ok(0) => break, // 无进展（WriteZero 形状）
+                Ok(n) => done += n,
+                Err(e) => {
+                    eprintln!("[periph] UART 写失败: {e:?}");
+                    break;
+                }
+            }
+        }
+        // 等移位完成再返回（reply 同款"应答发完再返回"语义）
+        let _ = self.uart.wait_tx_done(u32::MAX);
+        done
+    }
+}
+
+/// 帧头 timestamp（esp_timer 单调时基 µs→ns；epoch 无关——时间戳只作诊断参考
+/// 不参与校验，板侧取不到 epoch 墙钟，与宿主 rr3_now_ns 各自独立合法）。
+fn rr3_frame_now_ns() -> u64 {
+    (unsafe { esp_timer_get_time() }).unsigned_abs() * 1000
+}
+
+/// 双面共享状态：行面/帧面同一份文本与角度记账，指令线程单线程独占无锁。
+struct PeriphState {
+    /// 最近一次 OLED 文本（行面 OLED 命令 / 帧面 expression 出字）
+    last_text: String,
+    pan_deg: u32,
+    tilt_deg: u32,
+    /// 最近一次表情（帧面 expression 应答的 previous 字段；开机未出过表情=none）
+    prev_expr: String,
+    /// 显示模式：true=帧面 64x64 点阵位图占全屏（舵机角度行不刷，不凿位图）；
+    /// 行面 OLED 命令 / 帧面 expression 出字复位 false（文本模式）。
+    frame_mode: bool,
+}
+
+impl PeriphState {
+    /// 角度行刷新：文本模式全 4 行重绘（批B 行为不变）；帧模式跳过——位图占
+    /// 全部 8 页，页 6 是位图底部，刷角度行会凿穿位图。
+    fn refresh_angle_row(&self, ph: &mut Periph) {
+        if self.frame_mode {
+            return;
+        }
+        if let Err(e) = ph.oled_show(&self.last_text, self.pan_deg, self.tilt_deg) {
+            eprintln!("[periph] 角度行刷新失败: {e}");
+        }
+    }
+}
+
+/// 帧面请求（协议门全过后的视图）：id/method/params 摘出，帧头位形随行携带
+/// （应答回带 trace_id / dst=src_task 用）。
+struct FrameReq {
+    id: u64,
+    method: String,
+    topic: String,
+    args: Value,
+    src_task: u64,
+    trace_id: u64,
+}
+
+/// 收帧 + 协议门（全过才返回 Ok）：`rr3_framebuf_read` 整帧收 → 帧还原（magic/
+/// 长度校验在 rr-ipc）→ dst 门（非本板位形丢弃）→ payload 前缀门（非 Request
+/// 丢弃）→ JSON 门 → id 门。任一门失败回 Err = **丢弃不回帧**（fail-closed：
+/// 帧级不可信的请求不作确定性应答；宿主侧重开连接即恢复）。半帧失败后流上可能
+/// 残留尾巴字节——下一轮 magic 窥视大概率落行面 ERR，自愈路径在案。
+fn frame_recv(io: &mut UartIo) -> Result<FrameReq, String> {
+    let buf = io
+        .rr3_recv_buf()
+        .map_err(|e| format!("收帧失败: {e:?}"))?;
+    let frame = Rr3Frame::try_from(buf).map_err(|e| format!("帧还原失败: {e:?}"))?;
+    if frame.header.dst_task != RR3_PERIPH_TASK {
+        return Err(format!(
+            "dst_task={} 非本板位形 {RR3_PERIPH_TASK}",
+            frame.header.dst_task
+        ));
+    }
+    let (ty, body) =
+        rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+    if ty != Rr3PayloadType::Request {
+        return Err(format!("payload 类型非 Request: {ty:?}"));
+    }
+    let v: Value = serde_json::from_slice(&body).map_err(|e| format!("请求体非 JSON: {e}"))?;
+    let id = v.get("id").and_then(Value::as_u64).ok_or("请求缺 id")?;
+    let method = v
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let (topic, args) = match v.get("params") {
+        Some(p) => (
+            p.get("topic").and_then(Value::as_str).unwrap_or("").to_string(),
+            p.get("args").cloned().unwrap_or(Value::Null),
+        ),
+        None => (String::new(), Value::Null),
+    };
+    Ok(FrameReq {
+        id,
+        method,
+        topic,
+        args,
+        src_task: frame.header.src_task,
+        trace_id: frame.header.trace_id,
+    })
+}
+
+/// 主题分发：method 恒 rr3.call（rrd 转发形状，宿主桥同款）；主题只认两条在册
+/// 能力面。method/主题/args 层面的失败是**业务性失败**——折 result.error 点名
+/// 回帧（模块面同款形状，宿主 rr3_bridge_parse_response 的解析契约）。
+fn frame_dispatch(ph: &mut Periph, st: &mut PeriphState, req: &FrameReq) -> Result<Value, String> {
+    if req.method != "rr3.call" {
+        return Err(format!("method 非法: \"{}\"（恒 rr3.call）", req.method));
+    }
+    match req.topic.as_str() {
+        RR3_SERVO_TOPIC => frame_handle_servo(ph, st, &req.args),
+        RR3_FACE_TOPIC => frame_handle_face(ph, st, &req.args),
+        other => Err(format!("未知主题: \"{other}\"")),
+    }
+}
+
+/// 舵机执行（rr3-act/servo/command）：args 带 angle_deg = 写（执行 + 生效角回
+/// 显），不带 = 读（LEDC 寄存器 duty 回读换算）。axis 可选缺省 pan（宿主单轴
+/// trait ↔ 板上双轴的映射面，RR3_HAL_PERIPH_AXIS env + 本参数两级）；写路径
+/// 状态记账 + 角度行刷新（帧模式跳过，不凿位图）。
+fn frame_handle_servo(
+    ph: &mut Periph,
+    st: &mut PeriphState,
+    args: &Value,
+) -> Result<Value, String> {
+    let axis = match args.get("axis") {
+        None | Some(Value::Null) => Axis::Pan,
+        Some(v) => match v.as_str() {
+            Some("pan") => Axis::Pan,
+            Some("tilt") => Axis::Tilt,
+            _ => return Err(format!("axis 非法: {v}（pan|tilt）")),
+        },
+    };
+    match args.get("angle_deg") {
+        None | Some(Value::Null) => {
+            let duty = match axis {
+                Axis::Pan => ph.pan.get_duty(),
+                Axis::Tilt => ph.tilt.get_duty(),
+            };
+            Ok(json!({ "angle_deg": duty_to_deg(duty), "move_ms": 0 }))
+        }
+        Some(v) => {
+            let deg = v.as_u64().ok_or_else(|| format!("angle_deg 非法: {v}"))?;
+            if deg > 180 {
+                return Err(format!("角度超范围 0-180: {deg}"));
+            }
+            let d = ph.servo_set(axis, deg as u32)?;
+            match axis {
+                Axis::Pan => st.pan_deg = d,
+                Axis::Tilt => st.tilt_deg = d,
+            }
+            st.refresh_angle_row(ph);
+            Ok(json!({ "angle_deg": d, "move_ms": 0 }))
+        }
+    }
+}
+
+/// 表情执行（rr3-interact/face/expression）：expression 变体出字（文本模式），
+/// frame 变体 8x8 点阵 → OLED 中央 64x64 放大渲染（HAL 渲染变体，rr-hal-api
+/// Rr3FaceFrame 契约：行主序 8 字节、每字节 bit7 为该行最左点）。
+fn frame_handle_face(
+    ph: &mut Periph,
+    st: &mut PeriphState,
+    args: &Value,
+) -> Result<Value, String> {
+    if let Some(v) = args.get("expression") {
+        let expr = v
+            .as_str()
+            .ok_or_else(|| format!("expression 非法: {v}（须字符串）"))?;
+        if !RR3_FACE_EXPRS.contains(&expr) {
+            return Err(format!("expression 不在白名单: \"{expr}\""));
+        }
+        let text = format!("EXPR {expr}");
+        ph.oled_show(&text, st.pan_deg, st.tilt_deg)?;
+        let previous = std::mem::replace(&mut st.prev_expr, expr.to_string());
+        st.last_text = text;
+        st.frame_mode = false;
+        Ok(json!({ "expression": expr, "previous": previous }))
+    } else if let Some(v) = args.get("frame") {
+        let arr = v.as_array().ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
+        if arr.len() != 8 {
+            return Err(format!("frame 长度非法: {}（须 8）", arr.len()));
+        }
+        let mut f = [0u8; 8];
+        for (i, item) in arr.iter().enumerate() {
+            let b = item.as_u64().ok_or_else(|| format!("frame[{i}] 非法: {item}"))?;
+            if b > 255 {
+                return Err(format!("frame[{i}] 超 u8: {b}"));
+            }
+            f[i] = b as u8;
+        }
+        oled_frame(&mut ph.i2c, &f)?;
+        st.frame_mode = true;
+        Ok(json!({ "applied": true }))
+    } else {
+        Err("缺 expression/frame 之一".into())
+    }
+}
+
+/// 8x8 点阵帧 → OLED 中央 64x64 放大渲染：源帧每像素横向铺 8 列、纵向铺 8 行，
+/// 落在列 32..96 × 全 8 页；页 p 全部 8 个位行同显源行 p（sy = (p*8+by)/8 = p）。
+/// 位序映射：MAX7219 字节 bit7=行最左 ↔ 目标列 x=32 处（c=0 取 bit7）——方向
+/// 不镜像；SSD1306 页内列字节 bit0=页顶。两侧留白清零（居中不残影）。
+fn oled_frame(i2c: &mut I2cDriver, frame: &[u8; 8]) -> Result<(), String> {
+    for page in 0u8..8 {
+        let src = frame[page as usize];
+        let mut buf = [0u8; 128];
+        for (x, cell) in buf.iter_mut().enumerate().skip(32).take(64) {
+            let c = (x - 32) / 8;
+            *cell = if (src >> (7 - c)) & 1 == 1 { 0xFF } else { 0 };
+        }
+        oled_page(i2c, page, &buf)?;
+    }
+    Ok(())
+}
+
+/// Response 回帧：result 在位（业务失败折 {"error": 文案}——宿主解析契约），
+/// trace_id 原样回带、src=本板位形 2、dst=调用方、timestamp 单调时基。发送失败
+/// eprintln 点名不重试（宿主 io 失败自会重开连接重发）。
+fn frame_send_response(io: &mut UartIo, req: &FrameReq, result: Result<Value, String>) {
+    let result = match result {
+        Ok(v) => v,
+        Err(e) => json!({ "error": e }),
+    };
+    let body = json!({ "jsonrpc": "2.0", "id": req.id, "result": result });
+    let payload = rr3_body_encode(Rr3PayloadType::Response, body.to_string().as_bytes());
+    let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
+    hdr.trace_id = req.trace_id;
+    hdr.timestamp_ns = rr3_frame_now_ns();
+    hdr.src_task = RR3_PERIPH_TASK;
+    hdr.dst_task = req.src_task;
+    let resp = Rr3Frame {
+        header: hdr,
+        payload,
+    };
+    if let Err(e) = io.rr3_send_buf(Rr3FrameBuf::from(&resp)) {
+        eprintln!("[periph] Response 发送失败: {e:?}");
+    }
+}
+
+/// 帧面一轮（cmd_loop 双面分流的 0x31 分支）：收帧+协议门（失败丢弃不回）→
+/// 分发执行（io 已还，独占驱动面）→ Response 回帧。三段式借用：UartIo 只在
+/// 收/发两段活着，执行段 ph.i2c/pan/tilt 自由可用。
+fn frame_round(ph: &mut Periph, st: &mut PeriphState, first: u8) {
+    let req = {
+        let mut io = UartIo {
+            uart: &mut ph.uart,
+            pre: Some(first),
+        };
+        match frame_recv(&mut io) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[periph] 帧面丢弃: {e}");
+                return;
+            }
+        }
+    };
+    println!("[periph] 帧面 id={} topic=\"{}\"", req.id, req.topic);
+    let result = frame_dispatch(ph, st, &req);
+    if let Err(e) = &result {
+        eprintln!("[periph] 帧面业务失败 id={}: {e}", req.id);
+    }
+    let mut io = UartIo {
+        uart: &mut ph.uart,
+        pre: None,
+    };
+    frame_send_response(&mut io, &req, result);
+}
+
+// ---------------------------------------------------------------------------
+// 指令循环（批B 行面 + 批C 帧面双面并存：行面保留调试与舵机五点 SCAN 判据）
+// ---------------------------------------------------------------------------
+
+/// 指令线程主循环（批C 双面）：逐字节窥视首字节——0x31（帧 magic LE 首字节）
+/// 走帧面 round（收帧 → rr3.call 分发 → Response 应答），其余作行首字节继续收
+/// 行走批B 行面。未知指令 ERR（fail-closed，不猜不拖——全案批B 指令解析面判据）。
 fn cmd_loop(mut ph: Periph) {
-    let mut last_text = String::from("(boot)");
-    let mut pan_deg = 90u32;
-    let mut tilt_deg = 90u32;
+    let mut st = PeriphState {
+        last_text: String::from("(boot)"),
+        pan_deg: 90,
+        tilt_deg: 90,
+        prev_expr: String::from("none"),
+        frame_mode: false,
+    };
     reply(
         &mut ph.uart,
-        "READY periph-base v0.1.0 (type HELP for commands)",
+        "READY periph-base v0.2.0 line+frame (type HELP for commands)",
     );
     loop {
-        let line = match read_line(&mut ph.uart) {
+        let mut first = [0u8; 1];
+        match ph.uart.read(&mut first, u32::MAX) {
+            Ok(0) | Err(_) => {
+                eprintln!("[periph] UART 读失败，退避后重试");
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Ok(_) => {}
+        }
+        if first[0] == RR3_MAGIC_FIRST {
+            frame_round(&mut ph, &mut st, first[0]);
+            continue;
+        }
+        let line = match read_line(&mut ph.uart, first[0]) {
             Ok(l) => l,
             Err(why) => {
                 eprintln!("[periph] 收行失败: {why}");
@@ -446,10 +807,11 @@ fn cmd_loop(mut ph: Periph) {
                     ))
                 } else {
                     let owned = rest.to_string();
-                    match ph.oled_show(&owned, pan_deg, tilt_deg) {
+                    match ph.oled_show(&owned, st.pan_deg, st.tilt_deg) {
                         Ok(()) => {
-                            last_text = owned;
-                            Ok(format!("OK oled \"{last_text}\""))
+                            st.last_text = owned;
+                            st.frame_mode = false;
+                            Ok(format!("OK oled \"{}\"", st.last_text))
                         }
                         Err(e) => Err(e),
                     }
@@ -457,20 +819,16 @@ fn cmd_loop(mut ph: Periph) {
             }
             "PAN" => parse_deg(parts.next()).and_then(|deg| match ph.servo_set(Axis::Pan, deg) {
                 Ok(d) => {
-                    pan_deg = d;
-                    if let Err(e) = ph.oled_show(&last_text, pan_deg, tilt_deg) {
-                        eprintln!("[periph] 角度行刷新失败: {e}");
-                    }
+                    st.pan_deg = d;
+                    st.refresh_angle_row(&mut ph);
                     Ok(format!("OK pan={d}"))
                 }
                 Err(e) => Err(e),
             }),
             "TILT" => parse_deg(parts.next()).and_then(|deg| match ph.servo_set(Axis::Tilt, deg) {
                 Ok(d) => {
-                    tilt_deg = d;
-                    if let Err(e) = ph.oled_show(&last_text, pan_deg, tilt_deg) {
-                        eprintln!("[periph] 角度行刷新失败: {e}");
-                    }
+                    st.tilt_deg = d;
+                    st.refresh_angle_row(&mut ph);
                     Ok(format!("OK tilt={d}"))
                 }
                 Err(e) => Err(e),
@@ -481,11 +839,9 @@ fn cmd_loop(mut ph: Periph) {
                     ph.servo_set(Axis::Tilt, t),
                 ) {
                     (Ok(p), Ok(t)) => {
-                        pan_deg = p;
-                        tilt_deg = t;
-                        if let Err(e) = ph.oled_show(&last_text, pan_deg, tilt_deg) {
-                            eprintln!("[periph] 角度行刷新失败: {e}");
-                        }
+                        st.pan_deg = p;
+                        st.tilt_deg = t;
+                        st.refresh_angle_row(&mut ph);
                         Ok(format!("OK pan={p} tilt={t}"))
                     }
                     (Err(e), _) | (_, Err(e)) => Err(e),
@@ -500,8 +856,8 @@ fn cmd_loop(mut ph: Periph) {
                     let t = ph.servo_set(Axis::Tilt, deg);
                     match (p, t) {
                         (Ok(p), Ok(t)) => {
-                            pan_deg = p;
-                            tilt_deg = t;
+                            st.pan_deg = p;
+                            st.tilt_deg = t;
                             // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），
                             // 与设定角并打——判据②"目视+串口回读一致"的硬件侧证据
                             let pr = duty_to_deg(ph.pan.get_duty());
@@ -512,7 +868,7 @@ fn cmd_loop(mut ph: Periph) {
                                 p,
                                 t
                             );
-                            let _ = ph.oled_show(&last_text, pan_deg, tilt_deg);
+                            st.refresh_angle_row(&mut ph);
                             reply(
                                 &mut ph.uart,
                                 &format!("SCAN point={} pan={p} read={pr} tilt={t} read={tr}", i + 1),
@@ -533,7 +889,10 @@ fn cmd_loop(mut ph: Periph) {
                 }
             }
             "INFO" => Ok(format!(
-                "INFO pan={pan_deg} tilt={tilt_deg} oled_last=\"{last_text}\" free={}B min_free={}B",
+                "INFO pan={} tilt={} oled_last=\"{}\" free={}B min_free={}B",
+                st.pan_deg,
+                st.tilt_deg,
+                st.last_text,
                 unsafe { esp_get_free_heap_size() },
                 unsafe { esp_get_minimum_free_heap_size() }
             )),
@@ -585,7 +944,7 @@ fn main() {
     link_patches();
 
     println!(
-        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 cmd=uart2@115200"
+        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 cmd=uart2@115200 line+frame"
     );
     ram_point("1-boot");
 

@@ -25,6 +25,12 @@ rr-hal-api = { path = "../rr-hal-api" }
 # 物理绑定描述符解析（descriptor.rs，批D④/ADR-0018 裁定 4）：rrd 注入的
 # [hardware] 序列化文本是 TOML 平表，与 rrd/rr-registry 共用 workspace 同版 toml。
 toml = { workspace = true }
+# ESP32 外设桥后端（批C）：UART 能力帧承载——帧构造/收发经 rr-ipc 传输窄缝与
+# blanket conn（Rr3UartConn 排他开口/开口即净语义同源复用，不写第二份帧层）。
+rr-ipc = { path = "../rr-ipc" }
+# 桥 payload 的 JSON-RPC 体组包/拆包（rr3.call 请求体与 Response 应答体；
+# 依赖闭包 L1 档位，与 rr-bus/哨兵同口径）。
+serde_json = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 alsa = { version = "0.9", optional = true }

@@ -511,11 +511,13 @@ dependencies = [
 
 [[package]]
 name = "esp32-periph-base"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "embuild",
  "esp-idf-hal",
  "esp-idf-sys",
+ "rr-ipc",
+ "serde_json",
 ]
 
 [[package]]
@@ -974,6 +976,10 @@ dependencies = [
  "normpath",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "rr-ipc"
+version = "0.0.1"
 
 [[package]]
 name = "rustc-hash"

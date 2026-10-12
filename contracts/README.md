@@ -210,6 +210,17 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   （`[events].subscribes` 增 `rr3-runtime/system/power`）——低电禁动闸门消费点（MC-5 施工件），
   走 C14/R-3 同一评审程序；其余申报面零改动。同批更新 rr-registry 形状 pin（30 条三元组、
   owner 8 不变、kind 12-10-4-4）与 `rrd` topics_load 测试计数（33 = 30+3）。
+- **2026-10-12 · 0.0.5 增补轮五 批C 负载 schema 落档（路线二：板上不进城，宿主 HAL 桥后端
+  直连，零 topics.toml 改动）**：新增两份 **request 类**负载 schema（本目录首批 request 类——
+  顶层钉请求 args 形状、应答 result 形状钉 `$defs`）：`events/act-servo-command.schema.json`
+  （`rr3-act/servo/command`——写变体 `{angle_deg, move_ms?, axis?}` / 读变体 `{axis?}`（板侧
+  扩展）双形状；应答 `{angle_deg, move_ms}`；axis 为板侧帧面扩展键）与
+  `events/interact-face-expression.schema.json`（`rr3-interact/face/expression`——expression
+  变体（7 态白名单）/ frame 变体（板侧扩展 HAL 渲染，8x8 点阵 → OLED 64x64）双形状；应答
+  `{expression, previous}` / `{applied}`）。双面承载共同 pin：模块面 rr3-act composite.rs /
+  rr3-interact face mech.rs，板侧帧执行面 tools/esp32-periph-base/src/main.rs 的
+  frame_handle_servo/frame_handle_face。两条主题均在册 request L1 不动——批C 复用在册主题
+  零新增登记（MCP-1 防重规则①口径），topics.toml 全轮冻结维持。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 
