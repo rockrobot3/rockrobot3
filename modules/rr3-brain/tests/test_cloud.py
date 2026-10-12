@@ -12,6 +12,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from rr3_brain.cloud import (
+    API_KEY_ENV,
     CLOUD_MODE_ENV,
     LLM_HISTORY_ROUNDS,
     rr3_brain_cloud_mode,
@@ -104,11 +105,11 @@ class TestRealPathAgainstFakeEndpoint(unittest.TestCase):
         self.srv = FakeSiliconFlow()
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
-        os.environ["SILICONFLOW_API_KEY"] = "test-key"
+        os.environ[API_KEY_ENV] = "test-key"
 
     def tearDown(self):
         self.srv.shutdown()
-        os.environ.pop("SILICONFLOW_API_KEY", None)
+        os.environ.pop(API_KEY_ENV, None)
         os.environ.pop(CLOUD_MODE_ENV, None)
 
     def test_asr_sends_multipart_with_model_and_wav(self):
@@ -161,7 +162,7 @@ class TestMockPath(unittest.TestCase):
     def setUp(self):
         os.environ[CLOUD_MODE_ENV] = "mock"
         # mock 路径不要求 key：显式清掉，证明不静默取 key
-        os.environ.pop("SILICONFLOW_API_KEY", None)
+        os.environ.pop(API_KEY_ENV, None)
 
     def tearDown(self):
         os.environ.pop(CLOUD_MODE_ENV, None)

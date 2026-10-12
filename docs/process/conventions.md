@@ -1992,7 +1992,9 @@ dump == golden）②PASS（`aarch64-unknown-linux-gnu` 目标已装，交叉 che
   architecture §12.6）。批次归属的唯一落点表 = [模块设计索引](../design/模块设计索引.md) §14，
   一个余数只挂一个版本
 - 模块 crate 之间**不得**互相依赖，只能经 `rr-ipc`/`rr-bus`（一票否决项）
-- 密钥、token 不进仓库：构建期环境变量注入（`SILICONFLOW_API_KEY`，见 `legacy/core/README.md`）
+- 密钥、token 不进仓库：构建期环境变量注入（通用键名 `RR3_CLOUD_API_KEY`，
+  0.0.5 批M MC-8②：原 `SILICONFLOW_API_KEY` 把云供应商焊进代码，供应商由
+  brain `config.toml` `[rr3-brain.cloud]` 承载；源起 `legacy/core/README.md`）
 - 反射环（1k–10kHz 闭环）留在模块进程内，永不进总线（ADR-0007 裁定 1）
 - `contracts/slots.toml` 能力格总表（ADR-0012）：与 topics.toml
   同级同纪律——只增不改，破坏性变更升 `schema_version`；manifest 的
