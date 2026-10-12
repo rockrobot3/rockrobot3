@@ -108,7 +108,8 @@ const DUTY_MIN: u32 = 410;
 const DUTY_MAX: u32 = 2048;
 
 // ---------------------------------------------------------------------------
-// 分轴行程（0.0.5 方案 C 裁定 2026-10-12：pan 相对中位 ±20°、tilt 相对中位 ±5°）
+// 分轴行程（0.0.5 方案 C 裁定 2026-10-12：pan 相对中位 ±20°、tilt 相对中位 ±10°
+// ——tilt 由 ±5° 放宽，纳现场实测所需的上抬 98°，行程 [80,100]）
 // ---------------------------------------------------------------------------
 //
 // 真板实锤（批C v0.3.2 与现场排障）：云台机械行程远小于 SG90 全程 0–180°——
@@ -123,7 +124,7 @@ const AXIS_CENTER_DEG: u32 = 90;
 /// pan（水平轴）相对中位的最大摆幅。
 const PAN_LIMIT_DEG: u32 = 20;
 /// tilt（俯仰轴）相对中位的最大摆幅。
-const TILT_LIMIT_DEG: u32 = 5;
+const TILT_LIMIT_DEG: u32 = 10;
 
 /// 角度 → duty ticks（线性 0–180 ↦ 410–2048；入参已由调用方 clamp 0–180）。
 fn deg_to_duty(deg: u32) -> u32 {
@@ -673,7 +674,7 @@ impl PeriphState {
     /// 2°（≈16.7°/s，本轴行程 40° 宽 → 单程约 2.4s）、tilt 每 4 拍走 3°
     /// （≈12.5°/s，本轴行程 10° 宽 → 单程约 1s），端点折返持续不停——两轴
     /// 节奏错开避免机械同步感。**端点 = 本轴行程边界**（[`Axis::range`]，方案 C
-    /// 分轴限幅：pan 中位±20° / tilt 中位±5°）——旧版折返点在 0/180，会把舵机
+    /// 分轴限幅：pan 中位±20° / tilt 中位±10°）——旧版折返点在 0/180，会把舵机
     /// 推过机械死点并持续施力（真板表现为卡死 + 发烫）。步幅下限实测定标：
     /// 2° 对轻载 pan 够用，但 tilt 托整个云台上部（重载），2°/300ms 部分落
     /// 死区/静摩擦里视觉近乎不动——tilt 用 3°（≈27 duty ticks）可见。外部命令
@@ -1102,7 +1103,7 @@ fn cmd_loop(mut ph: Periph) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 70-110 / tilt 85-95，中位 90)"
+                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 70-110 / tilt 80-100，中位 90)"
                     .into(),
             ),
             "OLED" => {
@@ -1182,7 +1183,7 @@ fn cmd_loop(mut ph: Periph) {
             },
             "SCAN" => {
                 // 判据②：两轴各按**本轴行程**五等分点扫描（pan 70/80/90/100/110、
-                // tilt 85/87/90/92/95——旧版写死的 0/45/90/135/180 越出机械行程，
+                // tilt 80/85/90/95/100——旧版写死的 0/45/90/135/180 越出机械行程，
                 // 推死点持续施力正是堵转来源），逐点串口回读设定角
                 let mut ok = true;
                 st.wander_on = false; // 判据测试不被自主扫摆扰动
