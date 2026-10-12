@@ -450,6 +450,18 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   1-tick 窥视空档驱动，esp_random 硬件熵），真板 idle/think/idle 三轮 round-trip 应答全对 +
   OLED 目视确认，固件 v0.2.0→v0.3.0；专用门 + 十步门禁 GATE_EXIT=0 全绿；敞口：判据④
   （堵转 UBEC≥4.7V/板子不复位）待舵机接线窗口，读侧阻塞无超时归批E 桥面统一收口；
+- **0.0.5 增补轮五 批M 推进——P1 评审批 / M-α / M-β 收官（2026-10-12，提交 `8d05590a` / `ba90367`+`1958ce8` / `3bc30f1`+`91b473c`）**：
+  P1 评审批（MCP-0）落 `topics.toml` 29→30（tts_pcm）与 MCP-3 申报面，M-α（MC-9 台账诚实化 +
+  MC-8②③ 回显型参数与端点真值）；**M-β（MC-11 四件，判据"已实装行为有护栏、卡死与静默停摆看得见"）**：
+  L-6 relay/state 同态抑制 RPC 路 e2e 断言（`e2e_act` ④b，破坏性验证证牙齿；intent 路 ⑤b 批I 已有）+
+  A-6 `reflex_ticks` / S-3 `pcm_frames`·`pcm_empty_frames` 心跳自报记账（e2e 经 `rr3.ctl.counters`
+  有界轮询点验）+ I-4 面板 spawn 失败改弃连点账继续服务（`Rr3ConnSlot` RAII 守卫防 panic 泄漏，
+  必败注入 `stack_size(usize::MAX)`——macOS 对 `stack_size(1)` 静默 clamp 使 spawn 成功）；
+  四件全按"先跑红再接门"纪律闭环；十步门禁直跑 GATE_EXIT=0（54 PASS）全绿，推三远端四端核对一致；
+  A-7 守恒核清：`tools/sim/chain.rs` 与 legacy 面板均不按帧数 relay/state，零改落档注记。
+  三册工单判定列（act/interact/sense）与[索引 §13.4](design/模块设计索引.md) 对账同批落档；
+  教训登记 [conventions §2](process/conventions.md)。余批：M-γ（MC-6 + MC-4）待用户解锁，M-ζ
+  （MC-5 + MC-8① + MC-10）最后；
 - **0.0.7 方案 Q1–Q6 已裁（0.0.5 §2.4 R20，2026-10-06）**：Q1=UART / Q2=esp-rs std / Q3=按 R19 / Q4=transport 级连接多路器（R15 订正口径成立）/ Q5=ESP-IDF 外置 + 密钥门注销 / Q6=macOS+树莓派双档；**层③④升必达（R19）**——经典 ESP32 实测不可达即批D2 采购 ESP32-S3 移植续做，四层全真板验收无受阻态；修订版 4 已落 [§9 四层真板执行手册](process/dev/0.0.7版本洛克三号ESP32系统级验证方案.md)；
 - **采购 BOM 已定案（0.0.5 §2.4 R22，2026-10-06）**：USB 麦克风阵列（≥2 麦 UAC——I2S HAT 存档备选，R8/R14 互斥消失）+ SG90×2（硬件 PWM GPIO12/13）+ 独立 5V UBEC + 显示件（MAX7219 SPI / SSD1306 I2C 定一）+ 锂电池组 + ADC 分压板 + PCA9685（备选）+ ESP32-S3 devkit（R19/批D2 备料）+ CP2102 USB-UART 适配器（0.0.5 批K C11 补进，0.0.7 批C④⑤ 前置）；十行明细唯一落点 [0.0.6 方案 §5.4](process/dev/0.0.6版本洛克三号树莓派验证方案.md)（第 10 行 USB 声卡+喇叭为 R31 增补——增补轮五 批E 前置），到位前不 claim 真硬件证据。采购实况（2026-10-07；2026-10-10 增补）：ESP32 硬件已齐——CP2102 已到位并已用于批C④⑤ 板级
 实测（见上两板收口批 bullet）；树莓派外设采购中。

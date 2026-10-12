@@ -172,7 +172,7 @@
 | §12 face 三处 std/alloc 形状 | **未结**：`RR3_FACE_EXPRESSIONS.join("/")` 仍产堆、`rr3_face_set -> Result<(_, _), String>` 仍是 `String` 错型、`std::mem::replace` 未改 `core::`（另：`mech.rs` 内 f64 仅测试面） | 批L **L-3** |
 | §3/§12 显示句柄 `[hardware]` 无键（I-2） | **本轮裁定为"不扩键"**：`descriptor.rs` 九键闭合表原样，`rr3_hal_display` 只有 sim/placeholder 两分支（真屏未实装）。扩键评审（C4）以"不扩"结案，真屏到位时再走一次 append | **I-2 关闭**（判定改，不是实现改） |
 | §12/§13 `handles`/`ops` 申报 | `atoms/{face,player}/assemble.toml` 仍全空 | 批L **L-5** |
-| §4 panel `live` 计数与 accept 循环（R-5 改判的可达缺陷） | 未见代码改动（仍 `?` 退 accept） | **I-4 未结**（批K 内） |
+| §4 panel `live` 计数与 accept 循环（R-5 改判的可达缺陷） | `rr3_panel_accept_loop` 抽缝落地：spawn 失败弃置该连接并 `panel_spawn_fail` 点账，accept 循环继续服务；`Rr3ConnSlot` RAII 守卫管 `live` 计数（Drop 归还，panic 展开不泄漏） | **I-4 已结**（批M M-β 3bc30f1，2026-10-12） |
 
 **本册新净余数**：批L **L-3**、**L-5**。**面板端点双写（I-12）与 SURFACE/serve 端点数不一致（I-9）** 保持未结。
 
@@ -183,7 +183,7 @@
 | I-1 孤儿参数 | `config.toml` 现为**空壳**，头注逐键写明六键全删的理由（含 `volume_pct`/`prebuffer_ms`"行为未实装不提前占键"） | **结**；行为实装随 **MC-1/MC-2** 回归并按"进 ops 槽"落 |
 | I-2 显示 `[hardware]` 扩键 | R31 **Q2** 已裁显示件 = SSD1306 I2C **挂 ESP32 协处理器** | **作废登记**（Pi 侧 SPI 扩键需求消失，批J C4"不扩键"结案不需重开）；清零判据留 **MC-3** |
 | I-3 件面同步签名 | 随批I `rr-hal-api` 落地，件面 `rr3_block_on` 零命中 | **结** |
-| I-4 `spawn` 失败退出 accept 循环 | `src/panel/server.rs` 仍 `.spawn(…).map_err(…)?;`（R-5 判可达的那条） | **未结 → MC-11** |
+| I-4 `spawn` 失败退出 accept 循环 | **已结（批M M-β 3bc30f1，2026-10-12）**：spawn 失败改弃连点账（`RR3_PANEL_SPAWN_FAIL_KEY`，心跳自报可见）继续服务；`Rr3ConnSlot` RAII 守卫防 panic 泄漏。用例先红后绿：必败注入 `stack_size(usize::MAX)`（实测 macOS 对 `stack_size(1)` 静默 clamp 使 spawn 成功，`usize::MAX` 才 EINVAL 确定性失败） | 已结 |
 | I-9 / I-12 端点数与双写 | **已结（批M MC-8③，2026-10-12）**：端点唯一真值 = `RR3_PANEL_ROUTES` 常量表，文案由表长推导；页面注释撤手写计数指向该表 | 已结 |
 | I-10 player 跨档化（占位波形） | `atoms/player/mech.rs` 仍是 32 项查表产 440 Hz 波形 + `RR3_TTS_MS_PER_CHAR = 60` | **并入库 §18.2 台-2 与 MC-1/MC-2**（占位波形整体退役即本单终点，不再单独挂账） |
 | I-11 `talk` 不可点名规则 | 件内 `if` 仍在，`non_pointable` ops 槽全仓零命中 | **未结 → MC-10**（与 A-9/S-5 同批动形状） |

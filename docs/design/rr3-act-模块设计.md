@@ -169,7 +169,7 @@
 | 本册旧断言 | 现在的事实（符号为证） | 判定 |
 |---|---|---|
 | §1/§12 "`Rr3Led` 自持 worker 线程 + `mpsc` + `recv_timeout(3600s)`，A-1 待拆"；R-4"先建合成时钟再拆" | 线程与 mpsc **已删**：件面为 `rr3_led_new(u64)` + `rr3_led_apply(&mut self, u64, Rr3LedEffect)` + **`rr3_led_tick(now_ms: u64, &mut Rr3Led) -> Option<bool>`**，节拍由 `src/composite.rs` 每圈驱动 → 时钟天然为注入值 | **A-1、R-4 已结**（合成时钟不再是前置，而是既有形状） |
-| §5 "`relay/state` 实况每令必发，与申报的变化即发不符（A-7）" | 件面新增 **`rr3_relay_state_due(bool, bool) -> bool`**，变化判定进机制、发布受其门控 | **A-7 已结**（`relay.rs`/`mech.rs` 在册，e2e 需补同态不续发一条 → 转 **批L L-6**） |
+| §5 "`relay/state` 实况每令必发，与申报的变化即发不符（A-7）" | 件面新增 **`rr3_relay_state_due(bool, bool) -> bool`**，变化判定进机制、发布受其门控 | A-7 已结（`relay.rs`/`mech.rs` 在册；同态不续发 e2e 断言已补——intent 路 ⑤b（批I d21839a）+ RPC 路 ④b（批M M-β 3bc30f1），破坏性验证证牙齿） |
 | §1 目标签名"载荷上移承载层（A-8）" | `rr3_servo_state_body`、`rr3_relay_result`、`rr3_led_parse_args`、`rr3_relay_parse_args` 全在 `src/composite.rs`；件面 `serde_json` 零命中 | **A-8 已结** |
 | §1 "`use rr_hal::` → `rr_hal_api`（A-4）" | 契约面已同步化；件内 import 源为 `rr_hal_api`（经 re-export 保路径），`rr3_block_on` 不存在 | **A-4 已结** |
 | §12 bare 档"`Arc<dyn Rr3GpioOut>` 需改泛型（禁 trait 对象）" | `led` 已无 `Arc`；**`rr3_relay_apply(&mut dyn Rr3GpioOut, bool)` 与 `rr3_tts_play(&mut dyn …)` 仍是 `&mut dyn`** | **未结** → 批L **L-3** |
@@ -179,7 +179,8 @@
 | §11/框架通用约定 1 "妆面件失败语义例外" | 代码未变（led 写失败仍 `eprintln` 不退） | **A-12 未结**（D8 范围仍待你定） |
 
 **本册新净余数**：批L **L-3**（`&mut dyn` + `String` 错型）、**L-5**（三件 `handles`/`ops` 申报）、
-**L-6**（同态不续发用例）、**L-7**（主题串单点）。**A-2/A-3** 由 `rr3_led_tick(now_ms)` 与 ⑧-b 门一起收口。
+**L-7**（主题串单点）。**A-2/A-3** 由 `rr3_led_tick(now_ms)` 与 ⑧-b 门一起收口。
+**L-6 已随批M M-β 摘账**（2026-10-12：RPC 路同态断言落 e2e_act ④b，intent 路 ⑤b 原有）。
 
 ### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
 
@@ -189,6 +190,6 @@
 | A-3 `loop_hz` 越界拒 boot | `rr3-act/src/composite.rs` 的 `u32::try_from(loop_hz_raw)` + 越界回"拒 boot"文案（注释点名 A-3） | **结** |
 | A-10 / 批L L-7 内联主题串 | `intent.rs : EXPOSED` 现引 `RR3_SERVO_COMMAND_TOPIC`/`RR3_LED_EFFECT_TOPIC`/`RR3_RELAY_SET_TOPIC` 三常量 | **结**（从批L 与 MC-11 同时摘账） |
 | A-5 低电禁动 | 语义由索引 **R-15** 结案（四条），原挂"待裁"栏 | **裁定已下 → 施工落 0.0.5 MC-5**（前置 MCP-3；与 power P-8 / 批L L-8 合并成一个动作） |
-| A-6 环 tick 计入 counters | `src/reflex.rs` 全无 `rr3_counter_*` 调用 | **未结 → MC-11**（与 S-3 / P-2 后半同族"活着但不动"） |
+| A-6 环 tick 计入 counters | `src/reflex.rs` 立常量 `RR3_REFLEX_TICKS_KEY`（字面量唯一落点），速率窗结算点 bump（值 = 窗内实跑节拍数），README 计数归属表加行 | **已结（批M M-β 3bc30f1，2026-10-12）**：e2e_act ⑧ 经 `rr3.ctl.counters` 有界轮询点验 `rr3-act/reflex_ticks` 非零（先红后绿） |
 | A-9 开放门与灯效白名单 ops 化 | led/relay/servo 三份 `assemble.toml` 的 `ops = []` 仍全空，开放门仍是件内 `match` | **未结 → MC-10**（与 I-11/S-5/L-5 同批动 `assemble.toml` 形状） |
 | F-1 舵机承载路径 | R31 **Q2** 已裁舵机挂 ESP32 协处理器（LEDC）；Pi 侧 `linux_pwm.rs` 保留 | 施工落**增补轮五批B/批C**；`linux_pwm.rs` 不注销，降为无协处理器形态的兜底路径（本册 §12 跨档表按两条路径读） |

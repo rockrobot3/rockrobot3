@@ -177,6 +177,6 @@
 |---|---|---|
 | S-6 件面导出面收口 | `atoms/capture/capture.rs` 已把 `rr3_pcm_downmix_mono` 收为 `pub(crate)`，`Rr3DoaBin` 注明"仅测试按名构造" | **结**（"内松外紧"消除；阈值注入的余数转 S-5） |
 | S-5 DoA 阈值迁 ops | `atoms/capture/mech.rs : RR3_DOA_BIN_THRESHOLD_DEG = 30` 仍是件内常量，ops 侧零命中 | **未结 → 0.0.5 MC-10**（与 A-9/I-11/L-5 同批动 `assemble.toml` 形状） |
-| S-3 采集新鲜度 counters | `src/composite.rs` 全无 `rr3_counter_*` 调用 | **未结 → MC-11**（与 act A-6 / power P-2 后半同族） |
+| S-3 采集新鲜度 counters | **已结（批M M-β 3bc30f1，2026-10-12）**：`composite.rs` 主循环 `pcm_frames`（发布成功一帧 +1）/ `pcm_empty_frames`（空帧另账）两键落账，e2e_audio_chain ⑤ 经 `rr3.ctl.counters` 有界轮询点验非零（先红后绿） | 已结 |
 | S-1 缺项：`bit_depth` 不是配置键 | 本册曾把 `[rr3-sense.audio].bit_depth` 记为"在册无读者"——**实况不存在**：`config.toml` 只有 `sample_rate`/`channels`/`frame_ms`，`bit_depth: 16` 是 `composite.rs` 的代码常量（`linux.rs` 用它做 ALSA 校验） | **收回该宣称**；位深若将来要可配，须连同读者与用例一起立单，不留静默常量当配置 |
 | F-3 采集承载路径 | R31 **Q1/Q2** 增第二条路径：INMP441 ×2 → I2S → UART 921600 过桥，DoA/ASR 在宿主算（施工 = 增补轮五批D）；Pi 侧 ALSA 保留 | 本册 §12 跨档表按两条路径读；"缺麦不降级"的清零判据留 **MC-4** |
