@@ -153,6 +153,12 @@ impl Rr3BridgeConn {
         match Rr3UartConn::open_with_baud(&self.path, RR3_BRIDGE_BAUD) {
             Ok(c) => {
                 std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
+                // settle 后补冲：开口触发的 DTR/RTS 复位让板端 banner 在开口
+                // flush 之后才进队（批C e2e 实证 BadMagic），首帧前必须净化。
+                if let Err(e) = c.rr3_flush_input() {
+                    eprintln!("rr-hal-esp32: 开口净化失败 {}: {e}", self.path.display());
+                    return Err(Rr3HalError::Busy);
+                }
                 self.conn = Some(c);
                 Ok(())
             }
@@ -314,13 +320,16 @@ impl Rr3Display for Rr3Esp32UartDisplay {
             return Err(Rr3HalError::Busy);
         }
         *lock(&self.last) = *frame;
+        // draw 成功 = 链路已证（四道应答门真 round-trip），frame() 不必再探活
+        // ——探活帧是全黑位图，板侧当真渲染会擦掉屏上现帧（批C e2e 实证）。
+        *lock(&self.probed) = true;
         Ok(())
     }
 
-    /// 读回当前帧（HAL 契约：读回 == 上次 draw 的帧）。探活语义：链路未建立时
-    /// 先发一条全黑帧 round-trip（rr3-interact 开机探活的真验证——板不在位则
-    /// Busy 显式回错，探活 exit(1) 是预期语义，R11③ 口径），之后恒返回缓存
-    /// （节拍 250ms 的 draw 持续真发，链路活性由 draw 面兜底）。
+    /// 读回当前帧（HAL 契约：读回 == 上次 draw 的帧）。探活语义：链路未建立
+    /// （从未 draw 过）时先发一条全黑帧 round-trip（rr3-interact 开机探活的真
+    /// 验证——板不在位则 Busy 显式回错，探活 exit(1) 是预期语义，R11③ 口径），
+    /// 之后恒返回缓存（节拍 250ms 的 draw 持续真发，链路活性由 draw 面兜底）。
     fn frame(&self) -> Result<Rr3FaceFrame, Rr3HalError> {
         let need_probe = !*lock(&self.probed);
         if need_probe {
