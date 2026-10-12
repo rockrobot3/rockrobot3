@@ -14,7 +14,8 @@
 //! 引脚预算（全案 §5 约束面，与 0.0.7 实测接线零冲突）：
 //! - UART2 = GPIO17→TX / GPIO16←RX（115200，CP2102 指令面；批B 行协议临时面，
 //!   批C 换能力帧——接线与波特率不变，为进城铺路）
-//! - I2C0  = GPIO21 SDA / GPIO22 SCL（400kHz，SSD1306 0x3C）
+//! - I2C0  = GPIO21 SDA / GPIO22 SCL（100kHz，SSD1306 0x3C；400k 在跳线面时序边际，
+//!   真板实录页写 ESP_FAIL，降 100k 稳过——见 init 段注）
 //! - LEDC  = GPIO32 水平轴（pan）/ GPIO33 俯仰轴（tilt）——避开 strapping 面
 //!   （0/2/5/12/15）、UART2（16/17）、I2C（21/22）、I2S 候选（25/26/27，批D）、
 //!   VSPI 缺省组（18/19/23，点阵预留不占用不使能）
@@ -35,19 +36,34 @@
 //!   LEDC 源 80MHz 分频 97.66 → 实际 ≈50.0Hz（±0.3%），SG90 容差内。
 //!   peripherals.ledc 的 timer0–3/channel0–7 为低速组（L625），Bits14 上限
 //!   同样适用。
-//! - I2cDriver/LedcDriver 上游均未标 `Send`（grep 0.44.1 全源无 unsafe impl
-//!   Send for I2cDriver/LedcDriver）——本文件以 [`Periph`] 单 wrapper 手补
-//!   （安全性论证见其注记），与哨兵 UartTxInner/UartRxHalf 同款纪律。
+//! - I2cDriver/LedcDriver/UartDriver 上游 0.44.1 **均已标 `Send`**（vendored 实证：
+//!   i2c.rs L393 / ledc.rs L334 / uart.rs L653），故两平面 wrapper（[`CtlUart`]/
+//!   [`RtPeriph`]）自动 Send、**无需手补 unsafe impl**（旧单 wrapper 的手补系误判，
+//!   同批删除并订正）。
 //! - UART2 整装 `UartDriver::new(uart, tx, rx, cts, rts, config)`（cts/rts 传
 //!   None；同口二次 install 必败的教训，哨兵 API 对表实录在案，照抄不赘）。
-//!   不 split：指令线程单线程读写同驱动，owned move 即可。
-//! - xtensa LX6 无 64 位原子——本档状态面由指令线程单线程独占，角度用 u32
-//!   直传，无需原子。
+//!   不 split：控制面单线程读写同驱动，owned move 即可。
+//! - xtensa LX6 无 64 位原子；状态面（[`PeriphState`]）以 `Arc<Mutex<..>>` 护，
+//!   角度用 u32 直传，无需原子。
 //!
-//! 线程模型（哨兵同构纪律）：main 线程只做初始化（默认栈 3584B，println 少量，
-//! 哨兵同款安全），指令循环放自起 16KB 线程（8KB→16KB 运行下限钉死的教训在案，
-//! 勿再调低）；I2C/LEDC/UART 驱动 move 进指令线程独占，无并发访问面。
+//! 线程模型（0.0.5 现场处置续批 2026-10-12：**控制面/运行面分离**）：main 只做初始化
+//! （默认栈 3584B，println 少量，哨兵同款安全），随后起**两个** 16KB 线程（8KB→16KB
+//! 运行下限钉死的教训在案，勿再调低）：
+//! - **控制面** [`cmd_loop`]（独占 UART2）：逐字节收、双面分流、解析、校验、**改状态**、
+//!   回包——**不碰 I2C/LEDC**，慢外设一律不阻塞命令吞吐（消"卡顿"）；
+//! - **运行面** [`runtime_loop`]（独占 I2C0 + LEDC）：取控制面推送的硬件作业 [`Job`]
+//!   执行（OLED 出字 / 舵机移动 / 五点扫描），并跑自主节拍（表情微动作 / 云台扫摆）。
+//! 两面经 `Arc<Mutex<Bus>>` 通信（哨兵 Arc<Mutex> 纪律同款，xtensa 面已被其背书）：
+//! `Bus { jobs, outbox, st }`——控制面推作业 + 改 `st`，运行面取作业执行 + 回推 outbox
+//! 行。**锁只护状态读写，绝不跨 I2C 持有**（运行面"决策段持锁纯算，渲染段脱锁慢跑"）。
+//!
+//! 舵机**串行降级**（同批，用户明文裁定）：板载 5V 直供、无 UBEC 时两轴并行驱动的峰值
+//! 电流叠加会拉塌轨压（真板 BOD / 舵机发烫实录），故复合动作一律**先 pan 到位 → 整定
+//! [`AXIS_SETTLE_MS`] → 再 tilt**（任一时刻只驱动一轴，削峰值）；单轴命令直动。
+//! SCAN 同守此律（每点 pan/tilt 两段），WANDER 扫摆**同拍只动一轴**（pan/tilt 错拍）。
 
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -69,6 +85,14 @@ use serde_json::{json, Value};
 
 /// I2C 事务超时（TickType_t；portMAX_DELAY 同义 u32::MAX——阻塞至传输完成）。
 const I2C_TIMEOUT: TickType_t = u32::MAX;
+/// I2C 写重试次数（**有限电源优化**：板载 5V 直供下舵机转动/保持的电流尖峰拉塌轨压、
+/// 或总线噪声，会让 SSD1306 事务瞬态失败 ESP_FAIL/NACK——真板实录"角度行刷新失败:
+/// I2C 命令写失败 ESP_FAIL"即此。失败事务末尾 STOP 已发、总线已释放，重发安全；
+/// 重试覆盖瞬态，不碰硬件、不阻塞控制面。6 次 × 5ms 退避 ≈ 30ms 窗，
+/// 覆盖真板实测的"单页 4 连败"短暂坏窗）。
+const I2C_RETRY: u32 = 6;
+/// I2C 重试间隔（给轨压/总线一点恢复时间，勿紧逼重发再撞失败）。
+const I2C_RETRY_DELAY_MS: u64 = 5;
 /// SSD1306 I2C 从机地址（0.96" 128x64 模块缺省）。
 const OLED_ADDR: u8 = 0x3C;
 /// OLED 每行字符数：5px 字模 + 1px 间隔 = 6px/字符，128px/6 = 21.3 → 21 列。
@@ -81,6 +105,13 @@ const OLED_ROWS: usize = 4;
 const LINE_CAP: usize = 128;
 /// 指令/心跳类线程的栈面（板上实测实锤 16KB 运行下限，哨兵同款，勿再调低）。
 const THREAD_STACK: usize = 16384;
+/// 轴间整定（**串行降级**：先 pan 到位 → 等这么久 → 再 tilt）。SG90 空载约
+/// 0.1s/60°，本轴最大行程 40° 约 67ms，200ms 留裕量（含负载迟滞与死区）。
+const AXIS_SETTLE_MS: u64 = 200;
+/// SCAN 每轴每点驻留（判据② 逐点回读；串行后单点 = pan 段 + tilt 段各一次）。
+const SCAN_POINT_MS: u64 = 600;
+/// 运行面自主节拍（表情微动作 + 云台扫摆；无作业时空转一拍）。
+const RUNTIME_TICK_MS: u64 = 10;
 
 /// 帧面本板 task 位形（帧头 dst 门）：外设执行面占首模块池位形 2——与宿主
 /// rr-hal::esp32_uart::RR3_PERIPH_TASK 同值（本 crate 不依赖 rr-core，此位形是
@@ -251,6 +282,26 @@ fn glyph(c: u8) -> [u8; 5] {
 // SSD1306 原语驱动（命令流 0x00 控制字节 / 数据流 0x40 控制字节；页寻址模式）
 // ---------------------------------------------------------------------------
 
+/// 带重试的 I2C 写（**运行面慢 I2C 的电源扰动兜底**）：瞬态失败重试 [`I2C_RETRY`]
+/// 次、每次隔 [`I2C_RETRY_DELAY_MS`]。失败事务末尾 STOP 已发、总线已释放，重发安全
+/// （SSD1306 每笔 START-addr-bytes-STOP 独立）。成功即返回；全败才回 Err（文案带
+/// 重试次数与末次错因，便于 monitor 判因）。
+fn i2c_write_retry(i2c: &mut I2cDriver, addr: u8, bytes: &[u8]) -> Result<(), String> {
+    let mut last = String::new();
+    for attempt in 0..=I2C_RETRY {
+        match i2c.write(addr, bytes, I2C_TIMEOUT) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = format!("{e:?}");
+                if attempt < I2C_RETRY {
+                    thread::sleep(Duration::from_millis(I2C_RETRY_DELAY_MS));
+                }
+            }
+        }
+    }
+    Err(format!("（重试 {I2C_RETRY} 次后）{last}"))
+}
+
 /// 发命令（控制字节 0x00 + 命令字节序列）。SSD1306 控制字节 Co=0/D/C#=0 表示
 /// 其后全部为命令——流式命令面单笔 I2C 写合法（数据手册 §8.1.5.1；init 全序列
 /// 25B 一笔发，b7 真板实锤：8B 缓冲护栏误拒 init 致"命令序列超长"假故障）。
@@ -261,18 +312,29 @@ fn oled_cmd(i2c: &mut I2cDriver, cmds: &[u8]) -> Result<(), String> {
         return Err("命令序列超长".into());
     }
     buf[1..=cmds.len()].copy_from_slice(cmds);
-    i2c.write(OLED_ADDR, &buf[..=cmds.len()], I2C_TIMEOUT)
-        .map_err(|e| format!("I2C 命令写失败: {e:?}"))
+    i2c_write_retry(i2c, OLED_ADDR, &buf[..=cmds.len()])
+        .map_err(|e| format!("I2C 命令写失败: {e}"))
 }
 
-/// 写一页 GDDRAM（128 列；控制字节 0x40 + 128 数据字节一次传输）。
+/// 写一页 GDDRAM（128 列）。**分块写**：每笔 ≤33 字节（1 控制字节 + 32 数据），
+/// 真板实录——129B 单笔在跳线/弱上拉面连重试 3 次仍 ESP_FAIL，而短命令笔（≤26B）
+/// 恒过：ESP32 老 I2C 驱动的硬件 FIFO 即 32B，长事务是其边际路径。SSD1306 页寻址
+/// 下列指针跨事务自动递增（数据手册 §8.1.5.2 连续数据模式），分块续写等价于单笔。
 fn oled_page(i2c: &mut I2cDriver, page: u8, data: &[u8; 128]) -> Result<(), String> {
-    let mut buf = [0u8; 129];
-    buf[0] = 0x40;
-    buf[1..].copy_from_slice(data);
+    /// 单笔数据字节上限（= 硬件 FIFO 32B，留控制字节外的整块）。
+    const CHUNK: usize = 32;
     oled_cmd(i2c, &[0xB0 | page, 0x00, 0x10])?;
-    i2c.write(OLED_ADDR, &buf, I2C_TIMEOUT)
-        .map_err(|e| format!("I2C 页数据写失败: {e:?}"))
+    let mut buf = [0u8; 33];
+    buf[0] = 0x40;
+    let mut off = 0usize;
+    while off < data.len() {
+        let n = CHUNK.min(data.len() - off);
+        buf[1..1 + n].copy_from_slice(&data[off..off + n]);
+        i2c_write_retry(i2c, OLED_ADDR, &buf[..1 + n])
+            .map_err(|e| format!("I2C 页数据写失败: {e}"))?;
+        off += n;
+    }
+    Ok(())
 }
 
 /// 初始化（页寻址模式 + 电荷泵开 + 全清屏；序列为 SSD1306 数据手册标准序）。
@@ -340,44 +402,49 @@ fn i2c_scan(i2c: &mut I2cDriver) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// 外设底座 wrapper（move 进指令线程独占）
+// 外设面（控制面/运行面分离）：控制面独占 UART2，运行面独占 I2C0 + LEDC
 // ---------------------------------------------------------------------------
 
-/// 指令线程独占的外设面：I2C（OLED）+ 两轴 LEDC 舵机 + UART2 整装。
+/// 控制面独占的 UART2（指令面 io：行面直用固有方法，帧面经 [`UartIo`] 窄缝）。
 /// 驱动 'static（外设 token 即 'static 无借用绑定；move 进线程后 esp_restart
-/// 前永不 drop）。
-struct Periph {
-    i2c: I2cDriver<'static>,
-    pan: LedcDriver<'static>,
-    tilt: LedcDriver<'static>,
+/// 前永不 drop）。UartDriver 上游已标 `Send`，本结构自动 Send。
+struct CtlUart {
     uart: UartDriver<'static>,
 }
 
-// SAFETY：esp-idf-hal 0.44.1 未给 I2cDriver/LedcDriver 标 Send（上游保守留白，
-// 全源 grep 无 unsafe impl Send for 二者；哨兵 UartTxInner 同款先例论证）。
-// IDF 契约面：i2c_master_write_to_device / ledc_set_duty+ledc_update_duty /
-// uart_write_bytes+uart_read_bytes 均为驱动内部加锁或无共享可变状态的线程安全
-// 调用；本仓的全部访问在 move 后由指令线程**单线程独占**（无任何并发面），
-// `Send` 主张与上游已标 Send 的 UartDriver 同据。
-unsafe impl Send for Periph {}
+/// 运行面独占的外设面：I2C（OLED）+ 两轴 LEDC 舵机。**全部硬件慢动作在此面执行**
+/// ——慢 I2C 与舵机整定都不阻塞控制面的命令吞吐。驱动 'static 同上；
+/// I2cDriver/LedcDriver 上游已标 `Send`，本结构自动 Send（无需 unsafe impl）。
+struct RtPeriph {
+    i2c: I2cDriver<'static>,
+    pan: LedcDriver<'static>,
+    tilt: LedcDriver<'static>,
+}
 
-impl Periph {
+/// 轴行程校验（**控制面纯函数**：只算不碰硬件，故控制面能在下发作业前即时拒）。
+/// 与运行面 [`RtPeriph::servo_set`] 共用同一判据、同一文案（"一处真值、两个检查点
+/// 复用同一判定"——两面都调本函数，杜绝控制/运行口径漂移）。
+fn axis_check(axis: Axis, deg: u32) -> Result<u32, String> {
+    if deg > 180 {
+        return Err(format!("角度超范围 0-180: {deg}"));
+    }
+    let (lo, hi) = axis.range();
+    if !(lo..=hi).contains(&deg) {
+        return Err(format!(
+            "{} 轴超出行程 [{lo}, {hi}]（中位 {AXIS_CENTER_DEG}° ±{}°）: {deg}",
+            axis.name(),
+            axis.limit_deg()
+        ));
+    }
+    Ok(deg)
+}
+
+impl RtPeriph {
     /// 舵机转角（先过本轴行程裁决 → duty → set+update；返回实际设定角）。
     /// 协议级 0–180 之外的角先被拒；轴行程（中位 ± 摆幅）之外**点名拒收**，
     /// 不静默钳位——见文件头"分轴行程"段。
     fn servo_set(&mut self, axis: Axis, deg: u32) -> Result<u32, String> {
-        if deg > 180 {
-            return Err(format!("角度超范围 0-180: {deg}"));
-        }
-        let (lo, hi) = axis.range();
-        if !(lo..=hi).contains(&deg) {
-            return Err(format!(
-                "{} 轴超出行程 [{lo}, {hi}]（中位 {AXIS_CENTER_DEG}° ±{}°）: {deg}",
-                axis.name(),
-                axis.limit_deg()
-            ));
-        }
-        let deg = deg.clamp(0, 180);
+        let deg = axis_check(axis, deg)?;
         let duty = deg_to_duty(deg);
         let driver = match axis {
             Axis::Pan => &mut self.pan,
@@ -562,14 +629,15 @@ fn rr3_frame_now_ns() -> u64 {
     (unsafe { esp_timer_get_time() }).unsigned_abs() * 1000
 }
 
-/// 双面共享状态：行面/帧面同一份文本与角度记账，指令线程单线程独占无锁。
+/// 控制面/运行面共享状态（[`Bus`] 内，`Arc<Mutex<..>>` 护）：行面/帧面的文本与
+/// 角度记账 + 自主行为（表情/扫摆）时钟。**不含任何硬件句柄**（故自动 Send）——
+/// 控制面改策略字段，运行面读之执行 + 回写自主推进的角度/拍号。帧面 expression
+/// 应答的 previous 字段不在本结构（命令由控制面串行化，记账在 [`CtlState`]）。
 struct PeriphState {
     /// 最近一次 OLED 文本（行面 OLED 命令 / 帧面 expression 出字）
     last_text: String,
     pan_deg: u32,
     tilt_deg: u32,
-    /// 最近一次表情（帧面 expression 应答的 previous 字段；开机未出过表情=none）
-    prev_expr: String,
     /// 显示模式：true=帧面 64x64 点阵位图占全屏（舵机角度行不刷，不凿位图）；
     /// 行面 OLED 命令 / 帧面 expression 复位 false。
     frame_mode: bool,
@@ -600,15 +668,35 @@ struct PeriphState {
 }
 
 impl PeriphState {
-    /// 角度行刷新：文本模式全 4 行重绘（批B 行为不变）；帧模式/表情模式跳过
-    /// ——两者都占满 8 页，刷角度行会凿穿画面。
-    fn refresh_angle_row(&self, ph: &mut Periph) {
-        if self.frame_mode || self.expr_mode {
-            return;
+    /// 开机初值（中位 90 / 文本 "(boot)" / 无表情无扫摆）。
+    fn boot() -> Self {
+        Self {
+            last_text: String::from("(boot)"),
+            pan_deg: AXIS_CENTER_DEG,
+            tilt_deg: AXIS_CENTER_DEG,
+            frame_mode: false,
+            expr_mode: false,
+            base_open: 100,
+            base_dx: 0,
+            base_dy: 0,
+            next_blink_ms: 0,
+            blink_until_ms: 0,
+            next_glance_ms: 0,
+            glance_until_ms: 0,
+            glance_dx: 0,
+            glance_dy: 0,
+            drawn: (100, 0, 0),
+            wander_on: false,
+            wander_pan_dir: 0,
+            wander_tilt_dir: 0,
+            wander_phase: 0,
+            next_wander_ms: 0,
         }
-        if let Err(e) = ph.oled_show(&self.last_text, self.pan_deg, self.tilt_deg) {
-            eprintln!("[periph] 角度行刷新失败: {e}");
-        }
+    }
+
+    /// 角度行是否该刷：帧模式/表情模式占满 8 页，刷角度行会凿穿画面（跳过）。
+    fn angle_row_visible(&self) -> bool {
+        !(self.frame_mode || self.expr_mode)
     }
 
     /// 表情切换时重置微动作时钟：立即显基态，眨眼/扫视各按随机间隔推迟。
@@ -620,13 +708,13 @@ impl PeriphState {
         self.next_glance_ms = now + 4000 + (esp_random_u32() % 4000) as u64;
     }
 
-    /// 表情微动作一拍（cmd_loop 窥视空档驱动，10ms 一拍）：自动眨眼（2.8–5.2s
-    /// 随机间隔，闭 130ms）+ 随机微扫视（4–8s 间隔，水平 ±6px、垂直 ±2 行，
-    /// 500–900ms 回位）。合成参数与上次一致则不重绘（I2C 重绘有成本）；
-    /// 非表情模式一拍即回。
-    fn anim_tick(&mut self, ph: &mut Periph) {
+    /// 表情微动作决策（**纯计算，不碰硬件**——运行面决策段持锁调用）：自动眨眼
+    /// （2.8–5.2s 随机间隔，闭 130ms）+ 随机微扫视（4–8s 间隔，水平 ±6px、垂直
+    /// ±2 行，500–900ms 回位）。返回需要重绘的合成参数（None = 与上次一致，
+    /// 省 I2C 不重绘）；非表情模式恒 None。渲染由运行面脱锁执行。
+    fn anim_decide(&mut self) -> Option<(u32, i16, i16)> {
         if !self.expr_mode {
-            return;
+            return None;
         }
         let now = now_ms();
         if self.blink_until_ms == 0 {
@@ -664,53 +752,49 @@ impl PeriphState {
         let key = (open, dx, dy);
         if key != self.drawn {
             self.drawn = key;
-            if let Err(e) = oled_capsules(&mut ph.i2c, open, dx, dy) {
-                eprintln!("[periph] 表情微动作渲染失败: {e}");
-            }
+            Some(key)
+        } else {
+            None
         }
     }
 
-    /// 云台自主扫摆一拍（cmd_loop 窥视空档驱动，60ms 一拍）：pan 每 2 拍走
-    /// 2°（≈16.7°/s，本轴行程 40° 宽 → 单程约 2.4s）、tilt 每 4 拍走 3°
-    /// （≈12.5°/s，本轴行程 10° 宽 → 单程约 1s），端点折返持续不停——两轴
-    /// 节奏错开避免机械同步感。**端点 = 本轴行程边界**（[`Axis::range`]，方案 C
-    /// 分轴限幅：pan 中位±20° / tilt 中位±10°）——旧版折返点在 0/180，会把舵机
-    /// 推过机械死点并持续施力（真板表现为卡死 + 发烫）。步幅下限实测定标：
-    /// 2° 对轻载 pan 够用，但 tilt 托整个云台上部（重载），2°/300ms 部分落
-    /// 死区/静摩擦里视觉近乎不动——tilt 用 3°（≈27 duty ticks）可见。外部命令
-    /// 到达即 wander_on=false，本函数一拍即回。角度行每 10 步刷一次（600ms，省
-    /// I2C；expr/frame 模式由 refresh_angle_row 守卫跳过）。
-    fn servo_tick(&mut self, ph: &mut Periph) {
+    /// 云台自主扫摆决策（**纯计算**，60ms 一拍）：pan 每 2 拍走 2°（≈16.7°/s，
+    /// 行程 40° 单程约 2.4s）、tilt 每 4 拍走 3°（≈12.5°/s，行程 10° 单程约 1s），
+    /// 端点折返持续不停。**端点 = 本轴行程边界**（[`Axis::range`]，方案 C 分轴限幅：
+    /// pan 中位±20° / tilt 中位±10°）——旧版折返点在 0/180，会把舵机推过机械死点
+    /// 并持续施力（真板表现为卡死 + 发烫）。步幅下限实测定标：tilt 托整个云台上部
+    /// （重载），2°/300ms 部分落死区里视觉近乎不动——tilt 用 3°（≈27 ticks）可见。
+    /// **串行降级：同一拍只驱动一轴**（tilt 拍占位时该拍跳过 pan）——两轴错拍，
+    /// 削并行峰值电流（适配板载 5V 直供）。返回本拍要点名的单轴动作（None=不动）
+    /// + 是否刷角度行（每 20 拍 = 1.2s 一次，省 I2C；模式守卫在刷新处再判）。
+    fn wander_decide(&mut self) -> (Option<(Axis, u32)>, bool) {
         if !self.wander_on || now_ms() < self.next_wander_ms {
-            return;
+            return (None, false);
         }
         self.next_wander_ms = now_ms() + 60;
         self.wander_phase = self.wander_phase.wrapping_add(1);
-        if self.wander_phase % 2 == 0 {
-            let next = wander_step(
-                self.pan_deg,
-                &mut self.wander_pan_dir,
-                2,
-                Axis::Pan.range(),
-            );
-            if let Ok(d) = ph.servo_set(Axis::Pan, next) {
-                self.pan_deg = d;
-            }
-        }
-        if self.wander_phase % 4 == 0 {
+        let mv = if self.wander_phase % 4 == 0 {
             let next = wander_step(
                 self.tilt_deg,
                 &mut self.wander_tilt_dir,
                 3,
                 Axis::Tilt.range(),
             );
-            if let Ok(d) = ph.servo_set(Axis::Tilt, next) {
-                self.tilt_deg = d;
-            }
-        }
-        if self.wander_phase % 20 == 0 {
-            self.refresh_angle_row(ph);
-        }
+            self.tilt_deg = next;
+            Some((Axis::Tilt, next))
+        } else if self.wander_phase % 2 == 0 {
+            let next = wander_step(
+                self.pan_deg,
+                &mut self.wander_pan_dir,
+                2,
+                Axis::Pan.range(),
+            );
+            self.pan_deg = next;
+            Some((Axis::Pan, next))
+        } else {
+            None
+        };
+        (mv, self.wander_phase % 20 == 0)
     }
 }
 
@@ -787,29 +871,31 @@ fn frame_recv(io: &mut UartIo) -> Result<FrameReq, String> {
     })
 }
 
-/// 主题分发：method 恒 rr3.call（rrd 转发形状，宿主桥同款）；主题只认两条在册
-/// 能力面。method/主题/args 层面的失败是**业务性失败**——折 result.error 点名
-/// 回帧（模块面同款形状，宿主 rr3_bridge_parse_response 的解析契约）。
-fn frame_dispatch(ph: &mut Periph, st: &mut PeriphState, req: &FrameReq) -> Result<Value, String> {
+/// 主题分发（**控制面**：只解析/校验/改状态/推作业，不碰硬件）：method 恒
+/// rr3.call（rrd 转发形状，宿主桥同款）；主题只认两条在册能力面。method/主题/
+/// args 层面的失败是**业务性失败**——折 result.error 点名回帧（模块面同款形状，
+/// 宿主 rr3_bridge_parse_response 的解析契约）。
+fn frame_dispatch(
+    bus: &Arc<Mutex<Bus>>,
+    ctl: &mut CtlState,
+    req: &FrameReq,
+) -> Result<Value, String> {
     if req.method != "rr3.call" {
         return Err(format!("method 非法: \"{}\"（恒 rr3.call）", req.method));
     }
     match req.topic.as_str() {
-        RR3_SERVO_TOPIC => frame_handle_servo(ph, st, &req.args),
-        RR3_FACE_TOPIC => frame_handle_face(ph, st, &req.args),
+        RR3_SERVO_TOPIC => frame_handle_servo(bus, &req.args),
+        RR3_FACE_TOPIC => frame_handle_face(bus, ctl, &req.args),
         other => Err(format!("未知主题: \"{other}\"")),
     }
 }
 
-/// 舵机执行（rr3-act/servo/command）：args 带 angle_deg = 写（执行 + 生效角回
-/// 显），不带 = 读（LEDC 寄存器 duty 回读换算）。axis 可选缺省 pan（宿主单轴
-/// trait ↔ 板上双轴的映射面，RR3_HAL_PERIPH_AXIS env + 本参数两级）；写路径
-/// 状态记账 + 角度行刷新（帧模式跳过，不凿位图）。
-fn frame_handle_servo(
-    ph: &mut Periph,
-    st: &mut PeriphState,
-    args: &Value,
-) -> Result<Value, String> {
+/// 舵机执行（rr3-act/servo/command，**控制面**）：args 带 angle_deg = 写（校验 +
+/// 状态记账 + 推 `Job::Move` 作业给运行面执行 + 生效角回显），不带 = 读（回状态
+/// 记账角——LEDC 只由运行面本面作业改动，状态即真值、±10ms 内一致）。axis 可选
+/// 缺省 pan（宿主单轴 trait ↔ 板上双轴的映射面，RR3_HAL_PERIPH_AXIS env + 本参数
+/// 两级）。写路径推 `Job::RedrawOled` 令角度行随动（运行面按模式守卫决定刷否）。
+fn frame_handle_servo(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, String> {
     let axis = match args.get("axis") {
         None | Some(Value::Null) => Axis::Pan,
         Some(v) => match v.as_str() {
@@ -820,34 +906,55 @@ fn frame_handle_servo(
     };
     match args.get("angle_deg") {
         None | Some(Value::Null) => {
-            let duty = match axis {
-                Axis::Pan => ph.pan.get_duty(),
-                Axis::Tilt => ph.tilt.get_duty(),
+            let deg = {
+                let b = lock_bus(bus);
+                match axis {
+                    Axis::Pan => b.st.pan_deg,
+                    Axis::Tilt => b.st.tilt_deg,
+                }
             };
-            Ok(json!({ "angle_deg": duty_to_deg(duty), "move_ms": 0 }))
+            Ok(json!({ "angle_deg": deg, "move_ms": 0 }))
         }
         Some(v) => {
-            let deg = v.as_u64().ok_or_else(|| format!("angle_deg 非法: {v}"))?;
-            if deg > 180 {
-                return Err(format!("角度超范围 0-180: {deg}"));
+            let deg = v.as_u64().ok_or_else(|| format!("angle_deg 非法: {v}"))? as u32;
+            let d = axis_check(axis, deg)?;
+            {
+                let mut b = lock_bus(bus);
+                b.st.wander_on = false; // 外部点名优先，自主扫摆让位
+                match axis {
+                    Axis::Pan => b.st.pan_deg = d,
+                    Axis::Tilt => b.st.tilt_deg = d,
+                }
             }
-            let d = ph.servo_set(axis, deg as u32)?;
-            st.wander_on = false; // 外部点名优先，自主扫摆让位
-            match axis {
-                Axis::Pan => st.pan_deg = d,
-                Axis::Tilt => st.tilt_deg = d,
-            }
-            st.refresh_angle_row(ph);
+            push_job(
+                bus,
+                match axis {
+                    Axis::Pan => Job::Move {
+                        pan: Some(d),
+                        tilt: None,
+                    },
+                    Axis::Tilt => Job::Move {
+                        pan: None,
+                        tilt: Some(d),
+                    },
+                },
+            );
+            push_job(bus, Job::RedrawOled);
             Ok(json!({ "angle_deg": d, "move_ms": 0 }))
         }
     }
 }
 
-/// 表情执行（rr3-interact/face/expression）：expression 变体出胶囊眼（基态
-/// 预设 + 微动作动画，rr-hal-api Rr3FaceFrame 契约之外的表情名面），
-/// frame 变体 8x8 点阵 → OLED 中央 64x64 放大渲染（HAL 渲染变体：行主序
-/// 8 字节、每字节 bit7 为该行最左点）。
-fn frame_handle_face(ph: &mut Periph, st: &mut PeriphState, args: &Value) -> Result<Value, String> {
+/// 表情执行（rr3-interact/face/expression，**控制面**）：expression 变体出胶囊眼
+/// （基态预设 + 微动作动画，rr-hal-api Rr3FaceFrame 契约之外的表情名面）——控制面
+/// 改状态（模式/基态/时钟）+ 推 `Job::RenderCapsules`，previous 记账在 [`CtlState`]；
+/// frame 变体 8x8 点阵 → OLED 中央 64x64 放大渲染（HAL 渲染变体：行主序 8 字节、
+/// 每字节 bit7 为该行最左点）——推 `Job::RenderFrame`。
+fn frame_handle_face(
+    bus: &Arc<Mutex<Bus>>,
+    ctl: &mut CtlState,
+    args: &Value,
+) -> Result<Value, String> {
     if let Some(v) = args.get("expression") {
         let expr = v
             .as_str()
@@ -856,16 +963,19 @@ fn frame_handle_face(ph: &mut Periph, st: &mut PeriphState, args: &Value) -> Res
             return Err(format!("expression 不在白名单: \"{expr}\""));
         }
         let (base_open, base_dx, base_dy) = expr_eye_base(expr);
-        st.expr_mode = true;
-        st.frame_mode = false;
-        st.base_open = base_open;
-        st.base_dx = base_dx;
-        st.base_dy = base_dy;
-        let previous = std::mem::replace(&mut st.prev_expr, expr.to_string());
-        st.last_text = format!("EXPR {expr}");
-        st.anim_reset();
-        oled_capsules(&mut ph.i2c, base_open, base_dx, base_dy)?;
-        st.drawn = (base_open, base_dx, base_dy);
+        let previous = std::mem::replace(&mut ctl.prev_expr, expr.to_string());
+        {
+            let mut b = lock_bus(bus);
+            b.st.expr_mode = true;
+            b.st.frame_mode = false;
+            b.st.base_open = base_open;
+            b.st.base_dx = base_dx;
+            b.st.base_dy = base_dy;
+            b.st.last_text = format!("EXPR {expr}");
+            b.st.anim_reset();
+            b.st.drawn = (base_open, base_dx, base_dy);
+        }
+        push_job(bus, Job::RenderCapsules);
         Ok(json!({ "expression": expr, "previous": previous }))
     } else if let Some(v) = args.get("frame") {
         let arr = v
@@ -884,9 +994,12 @@ fn frame_handle_face(ph: &mut Periph, st: &mut PeriphState, args: &Value) -> Res
             }
             f[i] = b as u8;
         }
-        oled_frame(&mut ph.i2c, &f)?;
-        st.frame_mode = true;
-        st.expr_mode = false;
+        {
+            let mut b = lock_bus(bus);
+            b.st.frame_mode = true;
+            b.st.expr_mode = false;
+        }
+        push_job(bus, Job::RenderFrame(f));
         Ok(json!({ "applied": true }))
     } else {
         Err("缺 expression/frame 之一".into())
@@ -964,7 +1077,7 @@ fn oled_capsules(i2c: &mut I2cDriver, open_pct: u32, dx: i16, dy: i16) -> Result
 }
 
 /// 表情→胶囊眼基态预设（开合% / 水平扫视 / 垂直扫视）：七态白名单各有面目，
-/// 微动作动画在此基态上叠加（眨眼/扫视见 anim_tick）。
+/// 微动作动画在此基态上叠加（眨眼/扫视见 [`PeriphState::anim_decide`]）。
 fn expr_eye_base(expr: &str) -> (u32, i16, i16) {
     match expr {
         "blink" => (4, 0, 0),     // 眯缝
@@ -1001,16 +1114,253 @@ fn frame_send_response(io: &mut UartIo, req: &FrameReq, result: Result<Value, St
     }
 }
 
-/// 帧面一轮（cmd_loop 双面分流的 0x31 分支）：收帧+协议门（失败丢弃不回）→
-/// 分发执行（io 已还，独占驱动面）→ Response 回帧。三段式借用：UartIo 只在
-/// 收/发两段活着，执行段 ph.i2c/pan/tilt 自由可用。
-fn frame_round(ph: &mut Periph, st: &mut PeriphState, first: u8) {
+// ---------------------------------------------------------------------------
+// 控制面 ↔ 运行面共享总线（Arc<Mutex>；作业/回包队列 + 共享状态）
+// ---------------------------------------------------------------------------
+
+/// 控制面 ↔ 运行面共享总线（哨兵 `Arc<Mutex>` 纪律同款）：`jobs` = 控制→运行的
+/// 硬件作业队列，`outbox` = 运行→控制的异步回包行队列（SCAN 逐点），`st` = 双面
+/// 共享状态。**锁只护读写，绝不跨 I2C 持有**（运行面"决策段持锁纯算，渲染段脱锁"）。
+struct Bus {
+    jobs: VecDeque<Job>,
+    outbox: VecDeque<String>,
+    st: PeriphState,
+}
+
+/// 控制面 → 运行面的硬件作业（**控制面只推作业，不碰硬件**；运行面取之执行）。
+enum Job {
+    /// 依 `st` 重绘文本 3 行 + 角度行（OLED 命令 / 舵机命令后角度行随动；模式守卫）。
+    RedrawOled,
+    /// 舵机移动（**串行降级**：双轴 = 先 pan 到位 → 整定 → 再 tilt；单轴直动）。
+    Move { pan: Option<u32>, tilt: Option<u32> },
+    /// 五点串行扫描（判据②；逐点异步回包走 outbox）。
+    Scan,
+    /// 依 `st` 基态渲染胶囊眼（表情切换/初态；后续微动作走自主节拍）。
+    RenderCapsules,
+    /// 渲染 8x8 点阵全屏放大。
+    RenderFrame([u8; 8]),
+}
+
+/// 控制面私有状态（不跨线程）：帧面 expression 应答的 previous 字段——命令由控制面
+/// 串行化，故 previous 记账在控制面即真值（无需随 `st` 跨线程）。
+struct CtlState {
+    prev_expr: String,
+}
+
+/// 取总线锁（中毒不失效：std 惰性 pthread 面，哨兵同款 `into_inner` 纪律）。
+fn lock_bus(bus: &Arc<Mutex<Bus>>) -> std::sync::MutexGuard<'_, Bus> {
+    bus.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// 控制面推一件作业（唤醒运行面；运行面每轮取队列头执行）。
+fn push_job(bus: &Arc<Mutex<Bus>>, job: Job) {
+    lock_bus(bus).jobs.push_back(job);
+}
+
+/// 运行面 → 控制面的异步回包行（SCAN 逐点等；控制面每轮取空）。
+fn outbox_push(bus: &Arc<Mutex<Bus>>, line: String) {
+    lock_bus(bus).outbox.push_back(line);
+}
+
+/// 取空 outbox 并回写 UART2（控制面每轮首步；异步回包不阻塞命令吞吐）。
+fn drain_outbox(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>) {
+    loop {
+        let line = lock_bus(bus).outbox.pop_front();
+        match line {
+            Some(l) => reply(uart, &l),
+            None => break,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 运行面（独占 I2C0 + LEDC）：执行硬件作业 + 自主节拍（表情微动作 / 云台扫摆）
+// ---------------------------------------------------------------------------
+
+/// 运行面主循环：有作业即取之执行（硬件慢动作全在此），无作业走自主节拍（10ms
+/// 一拍）。**慢 I2C / 舵机整定都停在本线程**——控制面命令吞吐不受其阻塞（这是
+/// "控制面/运行面分离"的落点，消"卡顿"）。
+fn runtime_loop(mut ph: RtPeriph, bus: Arc<Mutex<Bus>>) {
+    loop {
+        let job = lock_bus(&bus).jobs.pop_front();
+        match job {
+            Some(job) => exec_job(&mut ph, &bus, job),
+            None => {
+                autonomous_tick(&mut ph, &bus);
+                thread::sleep(Duration::from_millis(RUNTIME_TICK_MS));
+            }
+        }
+    }
+}
+
+/// 执行一件硬件作业（脱锁慢跑阶段——只在需要读状态时短暂持锁取快照）。
+fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
+    match job {
+        Job::RedrawOled => {
+            let (text, pan, tilt, visible) = {
+                let b = lock_bus(bus);
+                (
+                    b.st.last_text.clone(),
+                    b.st.pan_deg,
+                    b.st.tilt_deg,
+                    b.st.angle_row_visible(),
+                )
+            };
+            if visible {
+                if let Err(e) = ph.oled_show(&text, pan, tilt) {
+                    eprintln!("[periph] 角度行刷新失败: {e}");
+                }
+            }
+        }
+        Job::Move { pan, tilt } => rt_move(ph, pan, tilt),
+        Job::Scan => rt_scan(ph, bus),
+        Job::RenderCapsules => {
+            let (open, dx, dy) = {
+                let b = lock_bus(bus);
+                (b.st.base_open, b.st.base_dx, b.st.base_dy)
+            };
+            if let Err(e) = oled_capsules(&mut ph.i2c, open, dx, dy) {
+                eprintln!("[periph] 胶囊眼渲染失败: {e}");
+            }
+        }
+        Job::RenderFrame(frame) => {
+            if let Err(e) = oled_frame(&mut ph.i2c, &frame) {
+                eprintln!("[periph] 点阵渲染失败: {e}");
+            }
+        }
+    }
+}
+
+/// 舵机移动（**串行降级核心**）：单轴直动；双轴**先 pan 到位 → 整定
+/// [`AXIS_SETTLE_MS`] → 再 tilt**——任一时刻只驱动一轴，把两轴并行的峰值电流摊开
+/// （适配板载 5V 直供、无 UBEC 场景）。pan 失败则不动 tilt（fail-closed，绝不留
+/// 两轴同时拉电）。
+fn rt_move(ph: &mut RtPeriph, pan: Option<u32>, tilt: Option<u32>) {
+    if let Some(p) = pan {
+        if let Err(e) = ph.servo_set(Axis::Pan, p) {
+            eprintln!("[periph] pan 移动失败: {e}");
+            return;
+        }
+    }
+    if let Some(t) = tilt {
+        if pan.is_some() {
+            thread::sleep(Duration::from_millis(AXIS_SETTLE_MS)); // 先左右到位再俯仰
+        }
+        if let Err(e) = ph.servo_set(Axis::Tilt, t) {
+            eprintln!("[periph] tilt 移动失败: {e}");
+        }
+    }
+}
+
+/// SCAN 判据②（运行面执行）：两轴各按本轴行程五等分点**串行**扫描——每点先 pan
+/// 到位、驻留，再 tilt 到位、驻留（任一时刻只驱动一轴），逐点 LEDC 寄存器回读
+/// 换算并 outbox 回包。旧版两轴并行 + 写死 0/45/135/180 越程，正是堵转来源。
+fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    let pan_pts = axis_scan_points(Axis::Pan);
+    let tilt_pts = axis_scan_points(Axis::Tilt);
+    let mut ok = true;
+    for (i, (dp, dt)) in pan_pts.iter().zip(tilt_pts.iter()).enumerate() {
+        let p = match ph.servo_set(Axis::Pan, *dp) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[periph] SCAN pan 失败: {e}");
+                ok = false;
+                break;
+            }
+        };
+        thread::sleep(Duration::from_millis(SCAN_POINT_MS));
+        let t = match ph.servo_set(Axis::Tilt, *dt) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[periph] SCAN tilt 失败: {e}");
+                ok = false;
+                break;
+            }
+        };
+        thread::sleep(Duration::from_millis(SCAN_POINT_MS));
+        // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），与设定角并打
+        // ——判据②"目视 + 串口回读一致"的硬件侧证据
+        let (pr, tr) = (duty_to_deg(ph.pan.get_duty()), duty_to_deg(ph.tilt.get_duty()));
+        {
+            let mut b = lock_bus(bus);
+            b.st.wander_on = false;
+            b.st.pan_deg = p;
+            b.st.tilt_deg = t;
+        }
+        println!(
+            "[periph] SCAN point={} pan={}(read {pr}) tilt={}(read {tr})",
+            i + 1,
+            p,
+            t
+        );
+        outbox_push(
+            bus,
+            format!("SCAN point={} pan={p} read={pr} tilt={t} read={tr}", i + 1),
+        );
+    }
+    outbox_push(
+        bus,
+        if ok {
+            "OK scan done".into()
+        } else {
+            "ERR SCAN 中途失败（见 monitor 日志）".into()
+        },
+    );
+}
+
+/// 运行面自主节拍（无作业时 10ms 一拍）：**决策段持锁纯算，渲染/驱动段脱锁慢跑**
+/// ——慢 I2C 不阻塞控制面命令吞吐。
+fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    let (render, mv, refresh) = {
+        let mut b = lock_bus(bus);
+        let st = &mut b.st;
+        let render = st.anim_decide();
+        let (mv, refresh) = st.wander_decide();
+        (render, mv, refresh)
+    };
+    if let Some((open, dx, dy)) = render {
+        if let Err(e) = oled_capsules(&mut ph.i2c, open, dx, dy) {
+            eprintln!("[periph] 表情微动作渲染失败: {e}");
+        }
+    }
+    if let Some((axis, deg)) = mv {
+        if let Err(e) = ph.servo_set(axis, deg) {
+            eprintln!("[periph] 扫摆驱动失败: {e}");
+        }
+    }
+    if refresh {
+        // 刷前重读（含本拍刚走的角度）；帧/表情模式由 angle_row_visible 守卫跳过
+        let (text, pan, tilt, visible) = {
+            let b = lock_bus(bus);
+            (
+                b.st.last_text.clone(),
+                b.st.pan_deg,
+                b.st.tilt_deg,
+                b.st.angle_row_visible(),
+            )
+        };
+        if visible {
+            if let Err(e) = ph.oled_show(&text, pan, tilt) {
+                eprintln!("[periph] 角度行刷新失败: {e}");
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 指令循环（批B 行面 + 批C 帧面双面并存：行面保留调试与舵机五点 SCAN 判据）
+// ---------------------------------------------------------------------------
+
+/// 帧面一轮（控制面双面分流的 0x31 分支）：收帧 + 协议门（失败丢弃不回）→ 分发
+/// （校验/改状态/推作业）→ Response 回帧。UartIo 只在收/发两段活着；执行段无硬件
+/// 借用（作业已推给运行面），控制面保持轻。
+fn frame_round(io: &mut CtlUart, bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, first: u8) {
     let req = {
-        let mut io = UartIo {
-            uart: &mut ph.uart,
+        let mut uio = UartIo {
+            uart: &mut io.uart,
             pre: Some(first),
         };
-        match frame_recv(&mut io) {
+        match frame_recv(&mut uio) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("[periph] 帧面丢弃: {e}");
@@ -1019,64 +1369,38 @@ fn frame_round(ph: &mut Periph, st: &mut PeriphState, first: u8) {
         }
     };
     println!("[periph] 帧面 id={} topic=\"{}\"", req.id, req.topic);
-    let result = frame_dispatch(ph, st, &req);
+    let result = frame_dispatch(bus, ctl, &req);
     if let Err(e) = &result {
         eprintln!("[periph] 帧面业务失败 id={}: {e}", req.id);
     }
-    let mut io = UartIo {
-        uart: &mut ph.uart,
+    let mut uio = UartIo {
+        uart: &mut io.uart,
         pre: None,
     };
-    frame_send_response(&mut io, &req, result);
+    frame_send_response(&mut uio, &req, result);
 }
 
-// ---------------------------------------------------------------------------
-// 指令循环（批B 行面 + 批C 帧面双面并存：行面保留调试与舵机五点 SCAN 判据）
-// ---------------------------------------------------------------------------
-
-/// 指令线程主循环（批C 双面）：逐字节窥视首字节——0x31（帧 magic LE 首字节）
-/// 走帧面 round（收帧 → rr3.call 分发 → Response 应答），其余作行首字节继续收
-/// 行走批B 行面。未知指令 ERR（fail-closed，不猜不拖——全案批B 指令解析面判据）。
-fn cmd_loop(mut ph: Periph) {
-    let mut st = PeriphState {
-        last_text: String::from("(boot)"),
-        pan_deg: 90,
-        tilt_deg: 90,
+/// 控制面主循环（**独占 UART2，不碰 I2C/LEDC**）：逐字节窥视首字节——0x31（帧
+/// magic LE 首字节）走帧面 round，其余作行首字节继续收行走批B 行面。行面的硬件
+/// 动作一律折成作业推给运行面；本循环只做解析/校验/改状态/回包，故慢外设不阻塞
+/// 命令吞吐。未知指令 ERR（fail-closed，不猜不拖）。
+fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
+    let mut ctl = CtlState {
         prev_expr: String::from("none"),
-        frame_mode: false,
-        expr_mode: false,
-        base_open: 100,
-        base_dx: 0,
-        base_dy: 0,
-        next_blink_ms: 0,
-        blink_until_ms: 0,
-        next_glance_ms: 0,
-        glance_until_ms: 0,
-        glance_dx: 0,
-        glance_dy: 0,
-        drawn: (100, 0, 0),
-        wander_on: false,
-        wander_pan_dir: 0,
-        wander_tilt_dir: 0,
-        wander_phase: 0,
-        next_wander_ms: 0,
     };
     reply(
-        &mut ph.uart,
-        "READY periph-base v0.3.2 line+frame+anim+wander (type HELP for commands)",
+        &mut io.uart,
+        "READY periph-base v0.3.3 ctrl/runtime split + serial-servo (type HELP for commands)",
     );
     loop {
+        // 先清 outbox（运行面异步回包：SCAN 逐点等），再窥视下一字节
+        drain_outbox(&mut io.uart, &bus);
         let mut first = [0u8; 1];
-        // 窥视带 1-tick（10ms）超时：空口返回 Ok(0) 驱动表情微动作一拍——
-        // 指令线程单线程独占 I2C/OLED，动画只能搭窥视空档执行；有字节
-        // （Ok(n≥1)）照旧双面分流，帧/行路径的后续读仍 portMAX_DELAY 阻塞
-        // 不受影响。Err 才是真读失败，退避重试。
-        match ph.uart.read(&mut first, 1) {
-            Ok(0) => {
-                st.anim_tick(&mut ph);
-                st.servo_tick(&mut ph);
-                continue;
-            }
+        // 窥视带 1-tick（10ms）超时：空口返回 Ok(0) 即回到轮首（转手清 outbox +
+        // 让出 CPU，自主行为在运行面跑，不再占用控制面）；有字节（Ok(n≥1)）照旧
+        // 双面分流（帧/行路径的后续读仍 portMAX_DELAY 阻塞）。Err 才是真读失败。
+        match io.uart.read(&mut first, 1) {
+            Ok(0) => continue,
             Ok(_) => {}
             Err(_) => {
                 eprintln!("[periph] UART 读失败，退避后重试");
@@ -1085,10 +1409,10 @@ fn cmd_loop(mut ph: Periph) {
             }
         }
         if first[0] == RR3_MAGIC_FIRST {
-            frame_round(&mut ph, &mut st, first[0]);
+            frame_round(&mut io, &bus, &mut ctl, first[0]);
             continue;
         }
-        let line = match read_line(&mut ph.uart, first[0]) {
+        let line = match read_line(&mut io.uart, first[0]) {
             Ok(l) => l,
             Err(why) => {
                 eprintln!("[periph] 收行失败: {why}");
@@ -1103,7 +1427,7 @@ fn cmd_loop(mut ph: Periph) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 70-110 / tilt 80-100，中位 90)"
+                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 70-110 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰)"
                     .into(),
             ),
             "OLED" => {
@@ -1117,46 +1441,69 @@ fn cmd_loop(mut ph: Periph) {
                         OLED_COLS * (OLED_ROWS - 1)
                     ))
                 } else {
-                    let owned = rest.to_string();
-                    match ph.oled_show(&owned, st.pan_deg, st.tilt_deg) {
-                        Ok(()) => {
-                            st.last_text = owned;
-                            st.frame_mode = false;
-                            st.expr_mode = false;
-                            Ok(format!("OK oled \"{}\"", st.last_text))
-                        }
-                        Err(e) => Err(e),
+                    // 控制面记账 + 排队，运行面出字（慢 I2C 不在控制面）
+                    {
+                        let mut b = lock_bus(&bus);
+                        b.st.last_text = rest.to_string();
+                        b.st.frame_mode = false;
+                        b.st.expr_mode = false;
                     }
+                    push_job(&bus, Job::RedrawOled);
+                    Ok(format!("OK oled \"{rest}\""))
                 }
             }
-            "PAN" => parse_deg(parts.next()).and_then(|deg| match ph.servo_set(Axis::Pan, deg) {
-                Ok(d) => {
-                    st.wander_on = false; // 外部点名优先，自主扫摆让位
-                    st.pan_deg = d;
-                    st.refresh_angle_row(&mut ph);
-                    Ok(format!("OK pan={d}"))
+            "PAN" => parse_deg(parts.next()).and_then(|deg| {
+                let d = axis_check(Axis::Pan, deg)?;
+                {
+                    let mut b = lock_bus(&bus);
+                    b.st.wander_on = false; // 外部点名优先，自主扫摆让位
+                    b.st.pan_deg = d;
                 }
-                Err(e) => Err(e),
+                push_job(
+                    &bus,
+                    Job::Move {
+                        pan: Some(d),
+                        tilt: None,
+                    },
+                );
+                push_job(&bus, Job::RedrawOled);
+                Ok(format!("OK pan={d}"))
             }),
-            "TILT" => parse_deg(parts.next()).and_then(|deg| match ph.servo_set(Axis::Tilt, deg) {
-                Ok(d) => {
-                    st.wander_on = false;
-                    st.tilt_deg = d;
-                    st.refresh_angle_row(&mut ph);
-                    Ok(format!("OK tilt={d}"))
+            "TILT" => parse_deg(parts.next()).and_then(|deg| {
+                let d = axis_check(Axis::Tilt, deg)?;
+                {
+                    let mut b = lock_bus(&bus);
+                    b.st.wander_on = false;
+                    b.st.tilt_deg = d;
                 }
-                Err(e) => Err(e),
+                push_job(
+                    &bus,
+                    Job::Move {
+                        pan: None,
+                        tilt: Some(d),
+                    },
+                );
+                push_job(&bus, Job::RedrawOled);
+                Ok(format!("OK tilt={d}"))
             }),
             "SERVO" => match (parse_deg(parts.next()), parse_deg(parts.next())) {
-                (Ok(p), Ok(t)) => match (
-                    ph.servo_set(Axis::Pan, p),
-                    ph.servo_set(Axis::Tilt, t),
-                ) {
+                (Ok(p), Ok(t)) => match (axis_check(Axis::Pan, p), axis_check(Axis::Tilt, t)) {
                     (Ok(p), Ok(t)) => {
-                        st.wander_on = false;
-                        st.pan_deg = p;
-                        st.tilt_deg = t;
-                        st.refresh_angle_row(&mut ph);
+                        {
+                            let mut b = lock_bus(&bus);
+                            b.st.wander_on = false;
+                            b.st.pan_deg = p;
+                            b.st.tilt_deg = t;
+                        }
+                        // 串行降级：运行面先 pan 到位 → 整定 → 再 tilt（削峰值电流）
+                        push_job(
+                            &bus,
+                            Job::Move {
+                                pan: Some(p),
+                                tilt: Some(t),
+                            },
+                        );
+                        push_job(&bus, Job::RedrawOled);
                         Ok(format!("OK pan={p} tilt={t}"))
                     }
                     (Err(e), _) | (_, Err(e)) => Err(e),
@@ -1165,77 +1512,55 @@ fn cmd_loop(mut ph: Periph) {
             },
             "WANDER" => match parts.next() {
                 Some("STOP") => {
-                    st.wander_on = false;
-                    Ok(format!("OK wander off pan={} tilt={}", st.pan_deg, st.tilt_deg))
+                    lock_bus(&bus).st.wander_on = false;
+                    let (p, t) = {
+                        let b = lock_bus(&bus);
+                        (b.st.pan_deg, b.st.tilt_deg)
+                    };
+                    Ok(format!("OK wander off pan={p} tilt={t}"))
                 }
                 None => {
-                    st.wander_on = true;
-                    // 两轴方向独立随机起步，立即起摆
-                    st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
-                    st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
-                    st.next_wander_ms = 0;
-                    Ok(format!(
-                        "OK wander on pan={} tilt={}",
-                        st.pan_deg, st.tilt_deg
-                    ))
+                    {
+                        let mut b = lock_bus(&bus);
+                        b.st.wander_on = true;
+                        // 两轴方向独立随机起步，立即起摆
+                        b.st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                        b.st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                        b.st.next_wander_ms = 0;
+                    }
+                    let (p, t) = {
+                        let b = lock_bus(&bus);
+                        (b.st.pan_deg, b.st.tilt_deg)
+                    };
+                    Ok(format!("OK wander on pan={p} tilt={t}"))
                 }
                 Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
             },
             "SCAN" => {
-                // 判据②：两轴各按**本轴行程**五等分点扫描（pan 70/80/90/100/110、
-                // tilt 80/85/90/95/100——旧版写死的 0/45/90/135/180 越出机械行程，
-                // 推死点持续施力正是堵转来源），逐点串口回读设定角
-                let mut ok = true;
-                st.wander_on = false; // 判据测试不被自主扫摆扰动
-                let pan_pts = axis_scan_points(Axis::Pan);
-                let tilt_pts = axis_scan_points(Axis::Tilt);
-                for (i, (deg_p, deg_t)) in pan_pts.iter().zip(tilt_pts.iter()).enumerate() {
-                    let p = ph.servo_set(Axis::Pan, *deg_p);
-                    let t = ph.servo_set(Axis::Tilt, *deg_t);
-                    match (p, t) {
-                        (Ok(p), Ok(t)) => {
-                            st.pan_deg = p;
-                            st.tilt_deg = t;
-                            // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），
-                            // 与设定角并打——判据②"目视+串口回读一致"的硬件侧证据
-                            let pr = duty_to_deg(ph.pan.get_duty());
-                            let tr = duty_to_deg(ph.tilt.get_duty());
-                            println!(
-                                "[periph] SCAN point={} pan={}(read {pr}) tilt={}(read {tr})",
-                                i + 1,
-                                p,
-                                t
-                            );
-                            st.refresh_angle_row(&mut ph);
-                            reply(
-                                &mut ph.uart,
-                                &format!("SCAN point={} pan={p} read={pr} tilt={t} read={tr}", i + 1),
-                            );
-                            thread::sleep(Duration::from_millis(600));
-                        }
-                        (Err(e), _) | (_, Err(e)) => {
-                            ok = false;
-                            eprintln!("[periph] SCAN 失败: {e}");
-                            break;
-                        }
-                    }
-                }
-                if ok {
-                    Ok("OK scan done".into())
-                } else {
-                    Err("SCAN 中途失败（见 monitor 日志）".into())
-                }
+                // 判据②（**串行**）：运行面按本轴行程五等分点逐点扫描（pan
+                // 70/80/90/100/110、tilt 80/85/90/95/100），每点先 pan 到位再 tilt
+                // 到位，逐点 outbox 回包。控制面只置位 + 排队并即刻 ack——不被 ~6s
+                // 的扫描阻塞（旧版在命令线程里跑，是"卡顿"来源之一）。
+                lock_bus(&bus).st.wander_on = false; // 判据测试不被自主扫摆扰动
+                push_job(&bus, Job::Scan);
+                Ok("OK scan queued (串行 pan→tilt，逐点回包)".into())
             }
             "INFO" => {
                 let (plo, phi) = Axis::Pan.range();
                 let (tlo, thi) = Axis::Tilt.range();
+                let (pan, tilt, wander, phase, last_text) = {
+                    let b = lock_bus(&bus);
+                    (
+                        b.st.pan_deg,
+                        b.st.tilt_deg,
+                        b.st.wander_on,
+                        b.st.wander_phase,
+                        b.st.last_text.clone(),
+                    )
+                };
                 Ok(format!(
-                    "INFO pan={} tilt={} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={} oled_last=\"{}\" free={}B min_free={}B",
-                    st.pan_deg,
-                    st.tilt_deg,
-                    if st.wander_on { "on" } else { "off" },
-                    st.wander_phase,
-                    st.last_text,
+                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} oled_last=\"{last_text}\" free={}B min_free={}B",
+                    if wander { "on" } else { "off" },
                     unsafe { esp_get_free_heap_size() },
                     unsafe { esp_get_minimum_free_heap_size() }
                 ))
@@ -1256,8 +1581,8 @@ fn cmd_loop(mut ph: Periph) {
             other => Err(format!("unknown cmd \"{other}\"（HELP 看指令表）")),
         };
         match result {
-            Ok(line) => reply(&mut ph.uart, &line),
-            Err(e) => reply(&mut ph.uart, &format!("ERR {e}")),
+            Ok(line) => reply(&mut io.uart, &line),
+            Err(e) => reply(&mut io.uart, &format!("ERR {e}")),
         }
     }
 }
@@ -1288,15 +1613,19 @@ fn main() {
     link_patches();
 
     println!(
-        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 cmd=uart2@115200 line+frame"
+        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 cmd=uart2@115200 line+frame planes=ctrl+runtime serial-servo"
     );
     ram_point("1-boot");
 
     let peripherals = Peripherals::take().unwrap();
 
-    // ---- I2C0 @ GPIO21/22 400kHz（判据①：扫描 0x3C 应答）----
+    // ---- I2C0 @ GPIO21/22 100kHz（判据①：扫描 0x3C 应答）----
+    // 频率档由 400k 降到 100k：真板实证 400k 在长跳线 + 模块弱上拉下**时序边际**
+    // ——init/清屏偶过，随后的页写（row3 页 6）连重试 3 次仍 ESP_FAIL（舵机此时
+    // 未动，非电源塌陷，纯总线时序）。100k 是 SSD1306 标准档、跳线面稳过，页写
+    // ~11.5ms/页，对 4 行文本与 130ms 眨眼动画够用（可靠性优先于速率）。
     let i2c_config = I2cConfig::new()
-        .baudrate(Hertz(400_000))
+        .baudrate(Hertz(100_000))
         .sda_enable_pullup(true)
         .scl_enable_pullup(true);
     let mut i2c = I2cDriver::new(
@@ -1317,35 +1646,20 @@ fn main() {
             "[periph] I2C 扫描应答: {found:02X?} —— 0x{OLED_ADDR:02X} 不在列 ✗（查接线/上拉）"
         );
     }
-    // 判据①失败处置链第一步：换 I2C 频率档（100k）重试 init（全案 §4 批B ①）。
-    // 实现走 i2c_set_period 运行中重配 SCL 分频（APB 80MHz/(high+low=800)=100kHz，
-    // 14bit 值域内 400/400 对称占空）——外设 token 单次 move 语义下同 token 无法
-    // 二次 move 重装驱动（E0382 实录），且 IDF param_config 与 driver_install
-    // 解耦，已装驱动运行中改周期合法（IDF v5.2.2 driver/i2c.h L465 在案）。
     // 真板诊断面（b7 实录）：init 失败打印 Err 明细不 panic——panic_abort 下
     // expect 无消息直接 Guru 复位循环，排障拿不到证据；终败继续跑指令面。
+    // 100k 档 init 偶发瞬态失败（上电电荷泵未稳）——重试 5 次（每次 1s）兜底。
     let mut oled_ok = false;
-    match oled_init(&mut i2c) {
-        Ok(()) => {
-            oled_ok = true;
-            println!("[periph] OLED init ✓（400k 档一次过）");
-        }
-        Err(e) => {
-            println!("[periph] OLED 400k init 失败: {e}");
-            println!("[periph] 降 100k 重试（失败处置链）");
-            if let Err(e) = esp_idf_sys::esp!(unsafe { esp_idf_sys::i2c_set_period(0, 400, 400) }) {
-                println!("[periph] i2c_set_period 降频失败: {e:?}");
+    for attempt in 1..=5u32 {
+        match oled_init(&mut i2c) {
+            Ok(()) => {
+                oled_ok = true;
+                println!("[periph] OLED init ✓（100k 档第 {attempt} 次过）");
+                break;
             }
-            for attempt in 1..=5u32 {
-                thread::sleep(Duration::from_secs(2));
-                match oled_init(&mut i2c) {
-                    Ok(()) => {
-                        oled_ok = true;
-                        println!("[periph] OLED init ✓（100k 档第 {attempt} 次重试过）");
-                        break;
-                    }
-                    Err(e) => println!("[periph] OLED 100k 重试 {attempt}/5 失败: {e}"),
-                }
+            Err(e) => {
+                println!("[periph] OLED 100k init 第 {attempt}/5 次失败: {e}");
+                thread::sleep(Duration::from_secs(1));
             }
         }
     }
@@ -1406,19 +1720,30 @@ fn main() {
     )
     .expect("UART2 驱动安装失败");
 
-    // 外设 'static 化 + move 进指令线程（16KB 运行下限，哨兵纪律）
-    let ph = Periph {
-        i2c,
-        pan,
-        tilt,
-        uart,
-    };
+    // 外设 'static 化 + 分发两平面（16KB 运行下限，哨兵纪律）：UART2 → 控制面，
+    // I2C/LEDC → 运行面；共享 Bus（Arc<Mutex>）连通两面。
+    let rt = RtPeriph { i2c, pan, tilt };
+    let ctl = CtlUart { uart };
+    let bus = Arc::new(Mutex::new(Bus {
+        jobs: VecDeque::new(),
+        outbox: VecDeque::new(),
+        st: PeriphState::boot(),
+    }));
     ram_point("2-periph-ready");
+    // 运行面先起（boot 后即可接作业 + 跑自主节拍），再起控制面
+    {
+        let bus = bus.clone();
+        thread::Builder::new()
+            .name("periph-runtime".into())
+            .stack_size(THREAD_STACK)
+            .spawn(move || runtime_loop(rt, bus))
+            .expect("起运行面线程失败");
+    }
     thread::Builder::new()
-        .name("periph-cmd".into())
+        .name("periph-ctl".into())
         .stack_size(THREAD_STACK)
-        .spawn(move || cmd_loop(ph))
-        .expect("起指令线程失败");
+        .spawn(move || cmd_loop(ctl, bus))
+        .expect("起控制面线程失败");
 
     // main 循环：周期状态行（观测面）
     loop {
