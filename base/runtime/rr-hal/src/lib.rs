@@ -23,6 +23,9 @@ pub use rr_hal_api::{
 };
 
 pub mod backend;
+/// ESP32 外设桥后端（批C）：舵机/显示两能力面的 UART 能力帧承载——板上外设
+/// 不进城（不注册总线身份），宿主直连 UART 发在册主题形状的 `rr3.call` 帧。
+pub mod esp32_uart;
 /// 物理绑定描述符（ADR-0018 裁定 4、批D④）：引脚/总线/设备的唯一数据事实源，
 /// 描述符为底、env 应急覆盖、代码缺省 fail-closed。
 pub mod descriptor;
