@@ -1894,6 +1894,35 @@ rrd topics_load 两处 33=30+3）；评审记录唯一落点 contracts/README.md
 改动必须同批点齐全部 pin 位（含 merge 33 与注释文案），漏一处即红，这正是 pin 的设计
 意图；rr-registry 38 条先单跑快验再进全量门禁，反馈环从分钟级缩到秒级。
 
+2026-10-12 0.0.5 增补轮五 批C 收官（能力帧进城 + 宿主格位 + e2e）——编码面 `60a8b81` +
+e2e 现场修复批 `bbc60e4` + 胶囊眼增量 `ff9de83`，三提交四端核对一致。路线二裁定落地：板
+不进城不注册总线身份，宿主 HAL 桥后端 rr-hal::esp32_uart 长连接直发 `rr3.call`（src=1/dst=2
+帧头约定，RR3_PERIPH_TASK=2 两端本地锚定 + 同值锚定测试防分叉），板上 esp32-periph-base
+双面分流（首字节 0x31 走帧面 rr3_framebuf_read → rr3.call 分发 → Response 应答；字母首字节
+走批B 行面，分流无歧义）。**帧面"失步"正式破案结项**：此前全部失步证据（`ERR unknown cmd`
+带噪声前缀、line too long）根因是 pyserial 排障脚本组帧 bug——`hdr[44:44+len(payload)] =
+payload` 把 payload 写进 128B 头保留区（44..128 须恒 0），Python bytearray 越界**静默扩容**
+不报错；板侧判得完全正确（Header(ReservedNotZero) 拒帧 → payload 尾巴留 RX 环 → 落行面）。
+教训钉死：**组帧 payload 必须追加在 128B 头之后**（`bytes(hdr) + payload`）；宿主 Rust
+`to_bytes()` 起手 `[0u8;128]` 自动零填充从未有此问题，FrameBuf/UART 驱动/RX 环全部无辜。
+真驱动 e2e 两连全绿：判据① display.draw(idle) applied=true、判据② frame() 读回一致、
+判据③ servo round-trip 90/45/135/90 逐度一致，console 八帧零丢弃。修复批两件：rr-ipc 新增
+`rr3_flush_input`（TCIFLUSH 只冲收不冲发）+ `rr3_ensure` settle 后补冲（开口 DTR/RTS 复位
+让板端 banner 在开口 flush 之后才进队，批C e2e 实证 BadMagic）；draw() 成功即置 probed=true
+订正 frame() 探活擦屏（冷启动全零位图探活帧会把屏上现帧擦掉——探活语义保留给冷启动先
+frame() 后 draw 的路径）。**胶囊眼增量**（用户裁定"有生命感"）：OLED 表情改圆角竖矩形
+胶囊眼（圆角半径 = min(半宽,半高)，满高 26px 纯胶囊、眯缝压扁不退化成圆盘——行内实心段
+解析求宽逐页写 GDDRAM）；cmd_loop 窥视读改 1-tick（10ms）超时，空口 Ok(0) 驱动 anim_tick
+自主微动作（眨眼 130ms / 2.8–5.2s 随机间隔、扫视 dx±6px 500–900ms 回位，esp_random 硬件熵；
+指令线程单线程独占 I2C/OLED，动画只能搭窥视空档）；七态表情基态预设；固件 v0.2.0→v0.3.0，
+真板 idle/think/idle 三轮 round-trip 应答全对 + OLED 目视确认。教训两条：rr3.call 请求体
+args 在 **params 内**（`{"params":{"topic":...,"args":{...}}}`——args 放顶层报"缺
+expression/frame 之一"）；专用门 IDF_PATH 无条件 export v5.2.2 盖外部环境——切换 IDF_PATH
+必须先清 esp-idf-sys-* 的 CMake cache 目录再重建（cache 源路径不匹配即翻烙饼），且
+sentinel 真身在 esp-idf/v5.2.1/ 子目录（传父目录被判 not a git repository）。专用门 +
+十步门禁 GATE_EXIT=0 全绿；敞口：判据④（堵转 UBEC≥4.7V/板子不复位）待舵机接线窗口，
+读侧阻塞无超时归批E 桥面统一收口。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
