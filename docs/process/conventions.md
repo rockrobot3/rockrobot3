@@ -2022,6 +2022,26 @@ HELP 文案 / SCAN 五等分点注释（tilt 80/85/90/95/100）/ wander 分轴�
 （外部 CP2102）双向字节污染（非固件 bug，自查清单已给用户：共地 / DTR-RTS 勿误接 EN-BOOT /
 逻辑电平须 3.3V / 短线）。**方案 A**（整板电压监测 + 分轴限幅）另行立项评审，与本处置并行。
 
+2026-10-12 0.0.5 现场处置 板侧验收 + 方案A 裁定——真板验收取证（板载 1410 控制台 / UART0 + 外部
+CP2102 0001 UART2，pyserial 持 DTR/RTS 去断言开 1410 硬复位抓 boot）：①控制台状态行 `[periph]
+surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 cmd=uart2@115200
+line+frame` + boot 全档（新镜像 ELF SHA256 `1e330dd12…`、编译 `Oct 12 2026 10:51:03`、`rst:0x1
+POWERON_RESET`）；②I2C 扫描 `[3C]`（OLED 在列）、OLED 400k init 失败 → 降 100k 第 2 次重试过 →
+`boot 画面已出（4 行）`（硬件通、信号边际）；③LEDC `pan=GPIO32 tilt=GPIO33 中位90° duty
+pan=1229 tilt=1229 (max=16384)`；④**UART2 INFO 限幅字段取证 `lim=pan[70,110]/tilt[80,100]`**
+（新固件 tilt 80-100 板上落实）+ `wander=off phase=0 oled_last="(boot)"`；⑤UART2 双向字节污染仍在
+（我发 `INFO`/`HELP` 有一行到达即被污染 → 板回 `ERR unknown cmd`；非固件 bug）。**用户两症状软件侧
+定位（均非固件 bug）**：①OLED 无"胶囊眼" = `oled_last="(boot)"`（自 boot 起未收 face/expression；
+胶囊眼是帧面 `rr3-interact/face/expression` 专有，走 `frame_handle_face`→`oled_capsules`），OLED
+本体完好；②舵机发烫/未到位 = `pan=tilt=90`、`wander=off`（板侧未驱动），"未转向" = 命令经 UART2
+上行被污染 → 板收不到 → 停 90，发烫属物理/供电/装配（头号嫌疑：舵机未走 UBEC 独立 5V 轨，0.0.6
+BOM #3 记待采购）。**方案A 裁定**：用户 2026-10-12 授权"详细研究后按最优方案裁决" → Q1–Q6 逐条
+采纳建议（Q1 采点 = 5V UBEC 轨·ESP32 ADC1 空闲通道 GPIO34–39·与既有验收判据④「堵转 UBEC≥4.7V」
+共用同一测点 / Q2 双阈值 + 迟滞·复用 `Rr3LowEdge` 判定核 / Q3 板侧为主 + 宿主留同语义位 / Q4 config
+升 pan/tilt 双区间〔形状变更，须契约级评审前置〕 / Q5 先占位阈值 + 真板两点标定回填 / Q6 并入 0.0.5
+现场处置续批并与 M-ζ MC-5 合并为一个动作）。施工未开工（Q4 契约评审前置）。详见
+[方案A §8/§9](dev/方案A——整板电压监测与分轴限幅立项评审.md)。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
