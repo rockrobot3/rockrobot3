@@ -15,7 +15,7 @@ modules/rr3-connect/
 │   ├── wifi/      ← net.wifi：net/link 状态机（Rr3LinkEdge：首拍基线 + 翻转必发）+ 事件体（mode 配网态）
 │   │               + 配网面（Rr3Provision 状态机 + wifi/scan|connect|forget 三 RPC，0.0.4 批D）
 │   └── bt/        ← net.bt：蓝牙链路状态机骨架（Rr3BtState 三态转移，0.0.4 批E）；
-│                    主题不登记，BlueZ 真后端板上后置（cfg 门）
+│                    格记 placeholder（0.0.5 MC-9），主题不登记，BlueZ 真后端板上后置（cfg 门）
 └── src/
     ├── main.rs    ← 入口：只装配与启动（≤80 行）
     ├── composite.rs ← 组合件：config 解析 + HAL 链路面探活 + 链路拍（翻转必发/周期保底）
@@ -51,7 +51,10 @@ D5：btctl 的日志回放/远程命令语义已被
 rrd 日志环 + `rr3.ctl.logs` 与 rr3-ctl 承接，蓝牙链路暂无可发布事件）——
 启用事件面前须先改 [`topics.toml`](../../contracts/topics.toml)（守
 "不预先占位"）；真后端属板上件（cfg 门，实装依赖硬件，后置板上
-批次），本骨架不 claim 真射频链路。
+批次），本骨架不 claim 真射频链路——`net.bt` 格因此记 `placeholder`
+（0.0.5 批M MC-9 裁定 (a)：承诺 ≤ 事实；触发条件 = 配网备选通道立项 /
+BlueZ 真后端批，⑧-a 门只读 [`slots.toml`](../../contracts/slots.toml)
+的 status 数据位）。
 
 ## 本地自检
 

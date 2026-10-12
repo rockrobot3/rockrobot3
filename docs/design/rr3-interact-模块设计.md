@@ -64,7 +64,7 @@
 | `intent/result`（订） | event | **申报订阅但本单元无消费者**——`composite.rs` 的 Event 分支只匹配 `RR3_NET_LINK_TOPIC`，intent 帧收下即弃 | `actions[]` | **申报超前**：意图执行在 act 一侧，interact 订它却没有代码读它（工单 I-7） |
 | `net/link`（订） | event | 消费（面板展示 + 表情线索） | up/ssid/rssi/mode | 一致 |
 | `asr/text`、`dialog/turn` | event 申报发布 | — | 在册 schema | **零发布**（`tools/sim` 才发）→ retired 候选 |
-| panel 十二端点 | HTTP | GET/POST | 状态/硬件/系统九 + scan/connect/forget 透传 | 不是总线契约面，但属**对外可观测面**（要留在册） |
+| panel 端点（全集 = server.rs `RR3_PANEL_ROUTES`） | HTTP | GET/POST | 状态/硬件/系统九 + scan/connect/forget 透传 | 不是总线契约面，但属**对外可观测面**（要留在册） |
 
 ## §6 降级矩阵
 
@@ -110,10 +110,10 @@
 | I-6 | 面板是否进 rtos/bare 档定案（本册建议：host 档专属） | **待裁** | — |
 | I-7 | `intent/result` 的申报订阅面处置：要么补上真实消费者（表情随意图联动），要么按 ADR-0019 修订 2 的 retired 机制把这条订阅义务解除（与索引 §2 的 `asr/text`/`dialog/turn` 同批走 C14）。停在"在册但无人读"是最坏状态——依赖仲裁会当它是活边 | 契约评审（批J 前） | C14 |
 | I-8 | **载荷组装上移承载层**：`rr3_face_result` / `rr3_tts_result` 的 `Value` 生产移出件面（依据 = ADR-0019 修订 4）；件只交 `(current, previous)` 结构体与 `played_ms` | 批I | — |
-| I-9 | 面板自述矛盾收口：`SURFACE` 的"十二端点"与 `serve` 打印的"九端点"归一为**一处真值**（端点表由常量数组长度推导，不在文案里手写数字） | 批K | — |
+| I-9 | 面板自述矛盾收口——**已结（0.0.5 批M MC-8③）**：端点唯一真值 = `RR3_PANEL_ROUTES` 常量表，`SURFACE` 与 `serve` 行的端点数由表长推导（文案不手写数字），表↔分派漂移由 `route_table_matches_dispatch` 单测钉死 | 已结 | — |
 | I-10 | player 跨档化：占位波形 `sin`/`PI`/`AMP`/`HZ` 改 32 项查表并移入 sim 后端；每拍 `Vec<i16>` 改静态 320 样点缓冲或调用方借用 | 批I | C5 |
 | I-11 | "不可点名表情"规则（`talk`）从件内 `if` 改 ops 槽 `non_pointable`；白名单值本身仍是契约面，只把**规则**外移 | 批J | C1 |
-| I-12 | 面板端点串"后端 + 页面"双写消解：由 `/api/meta` 下发或生成器产页（不改端点字面量，只去第二真值点） | 批K | — |
+| I-12 | 面板端点串"后端 + 页面"双写消解——**已结（0.0.5 批M MC-8③）**：页面注释撤手写计数、指向后端 `RR3_PANEL_ROUTES` 唯一真值；页面内的端点字面量是功能调用（fetch 目标）非文案，保留 | 已结 | — |
 | I-13 | **妆面件失败语义规则表落地**（D8 本轮立单，此前索引挂着却无任何工单）：把"哪些件属妆面（写失败只 `eprintln` 不退）、哪些绝不属（执行器与播放路径必须 `exit(1)` 交监督复位）"写成一处数据（`contracts/` 或 ops 侧的件分类表），框架通用约定 1 引它而不是各册自说。建议范围：led / face 属妆面，**player 待 D8 定**（interact §6 已定"意图与声音解耦"，倾向属妆面但不含 sink 写失败以外的路径） | 批I（表）+ 契约评审（范围） | C17 |
 | I-14 | **播真 PCM 而非占位波形**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 裁定 1）：`player` 收 `rr3-brain/audio/tts_pcm` 流（MCP-1 已落 `8d05590`：新增主题在册，载荷体复用上行 `rr3_pcm_event_body` 的 `{seq, format, rate, channels, ms, pcm_b64}` 形状）→ 解 `pcm_b64` → 写 `Rr3AudioSink`；时长由**样点数**导出，`RR3_TTS_MS_PER_CHAR = 60` 与 440 Hz 查表波形退役（站替台账台-2）；`volume_pct`/`prebuffer_ms` 的行为随本单实装并按"进 ops 槽"回归 | **0.0.5 批M MC-1 + MC-2**（前置 MCP-1 契约 append 已落 `8d05590`） | MCP-1 |
 
@@ -138,7 +138,7 @@
 |---|---|---|---|---|
 | face | ✅ | ⚠️ 只差 HAL 与载荷面 | ⚠️ 三处 std/alloc 形状 | ① `use std::mem::replace`（全限定调用）→ `core::mem::replace`，一行；② `rr3_face_parse_args -> Result<String, String>` 与 `rr3_face_set -> Result<(&'static str, &'static str), String>` 的 `String` 错型 → `Rr3FaceErr` 枚举 / `&'static str`（bare 档无堆时的错型面）；③ 错误文案里 `RR3_FACE_EXPRESSIONS.join("/")` 产 `String` → 白名单串改常量（值本就固定，`join` 是白白分配）；④ `rr3_face_result -> Value` 载荷上移承载层（I-8）；⑤ `Rr3Display::draw` 是 `#[async_trait]` 句柄，批I F1 后同步化 |
 | player | ✅ | ⚠️ 分配与数学面 | ❌ 需两处改造 | ① 每 20 ms 一块 `Vec<i16>` + `collect` → 静态 320 样点缓冲（16k/20ms 恰为 320）或调用方给 `&mut [i16]`；② `rr3_tts_sample` 用 `std::f64::consts::PI` 与 `sin` → 查表 32 项正弦 + 整型插值（占位波形，精度不敏感，误差预算：听感等价即可）；③ `&dyn Rr3AudioSink` bare 禁 trait 对象 → 泛型；④ `rr3_block_on` 清零；⑤ `rr3_tts_result -> Value` 上移（I-8） |
-| panel（组合件成分，非件） | ✅ | **不适用**：rtos 档无面板（能力面清单里就不该出现） | **不适用** | 跨档动作只有一条：`panel` 的存在与否由描述符 `[enabled_slots]` + 承载档决定，**不得**在件或组合件里用 `#[cfg(target_os)]` 自我裁剪（那是把形态选择权焊回代码）。另记一处对外自述矛盾：`SURFACE` 写"十二端点"、`serve` 打印"九端点"，同一事实两处真值（I-9） |
+| panel（组合件成分，非件） | ✅ | **不适用**：rtos 档无面板（能力面清单里就不该出现） | **不适用** | 跨档动作只有一条：`panel` 的存在与否由描述符 `[enabled_slots]` + 承载档决定，**不得**在件或组合件里用 `#[cfg(target_os)]` 自我裁剪（那是把形态选择权焊回代码）。对外自述矛盾（I-9）已随批M MC-8③ 收口：端点真值归 `RR3_PANEL_ROUTES` 一处。 |
 
 **动作序**：批I F1 → I-3（句柄同步化）→ I-8（载荷上移）→ player 查表化（I-10）。
 **微型形态里的本单元**：`ui.face` 若进 rtos（MAX7219 那类 8×8 件），face 是**最适合先跨档的件**——
@@ -184,7 +184,7 @@
 | I-2 显示 `[hardware]` 扩键 | R31 **Q2** 已裁显示件 = SSD1306 I2C **挂 ESP32 协处理器** | **作废登记**（Pi 侧 SPI 扩键需求消失，批J C4"不扩键"结案不需重开）；清零判据留 **MC-3** |
 | I-3 件面同步签名 | 随批I `rr-hal-api` 落地，件面 `rr3_block_on` 零命中 | **结** |
 | I-4 `spawn` 失败退出 accept 循环 | `src/panel/server.rs` 仍 `.spawn(…).map_err(…)?;`（R-5 判可达的那条） | **未结 → MC-11** |
-| I-9 / I-12 端点数与双写 | 同一文件 `SURFACE` 打"十二端点"、`serve` 打"九端点"；端点字面量在后端路由与页面 HTML 各一份 | **未结 → MC-8** |
+| I-9 / I-12 端点数与双写 | **已结（批M MC-8③，2026-10-12）**：端点唯一真值 = `RR3_PANEL_ROUTES` 常量表，文案由表长推导；页面注释撤手写计数指向该表 | 已结 |
 | I-10 player 跨档化（占位波形） | `atoms/player/mech.rs` 仍是 32 项查表产 440 Hz 波形 + `RR3_TTS_MS_PER_CHAR = 60` | **并入库 §18.2 台-2 与 MC-1/MC-2**（占位波形整体退役即本单终点，不再单独挂账） |
 | I-11 `talk` 不可点名规则 | 件内 `if` 仍在，`non_pointable` ops 槽全仓零命中 | **未结 → MC-10**（与 A-9/S-5 同批动形状） |
 | I-14（本册新立） | 真 PCM 播放通路，见 §10 表 | **MC-1 + 增补轮五批E** |

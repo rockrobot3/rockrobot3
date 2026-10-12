@@ -5,8 +5,11 @@
 - LLM  POST {base}/v1/chat/completions       {model, messages, max_tokens} → choices[0].message.content
 - TTS  POST {base}/v1/audio/speech           {model, input, voice, response_format, sample_rate} → 原始 PCM
 
-密钥**只**从环境变量 `SILICONFLOW_API_KEY` 读入（legacy/core/*/src/*_config.h 里
-曾硬编码，那串值已视为泄露并在提供方轮换）。任何日志、异常文案都不得带出密钥值。
+密钥**只**从环境变量 `RR3_CLOUD_API_KEY` 读入——键名通用（0.0.5 批M MC-8②：
+原 `SILICONFLOW_API_KEY` 把云供应商焊进代码，改通用键；供应商由 config
+`[rr3-brain.cloud]` 的 `base_url`/模型名承载，换云只改配置不改码）。legacy
+`core/*/src/*_config.h` 里曾硬编码，那串值已视为泄露并在提供方轮换。
+任何日志、异常文案都不得带出密钥值。
 
 mock 后端：环境变量 `RR3_BRAIN_CLOUD=mock`（默认 `real`）时三家换确定性行为——
 测试注入点，不是产品路径；缺 key 不静默降级，真云调用照报缺环境变量。
@@ -21,7 +24,7 @@ import struct
 import urllib.error
 import urllib.request
 
-API_KEY_ENV = "SILICONFLOW_API_KEY"
+API_KEY_ENV = "RR3_CLOUD_API_KEY"
 CLOUD_MODE_ENV = "RR3_BRAIN_CLOUD"
 CLOUD_MODE_REAL = "real"
 CLOUD_MODE_MOCK = "mock"

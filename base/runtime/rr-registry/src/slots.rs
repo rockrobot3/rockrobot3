@@ -182,13 +182,18 @@ mod tests {
             table.rr3_slot_table_layer("cognition.dialog").as_deref(),
             Some("cognition")
         );
-        // C17 三态轴：占位格显式标记，其余 19 格 normal
+        // C17 三态轴：占位格显式标记，其余 18 格 normal
         assert_eq!(
             table.rr3_slot_table_status("sensor.env").as_deref(),
             Some("placeholder")
         );
         assert_eq!(
             table.rr3_slot_table_status("sensor.imu").as_deref(),
+            Some("placeholder")
+        );
+        // MC-9 裁定 (a)：bt 骨架不 claim 射频，格台账同步记占位（数据位，非脚本豁免）
+        assert_eq!(
+            table.rr3_slot_table_status("net.bt").as_deref(),
             Some("placeholder")
         );
         assert_eq!(

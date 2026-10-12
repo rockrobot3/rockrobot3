@@ -1,5 +1,6 @@
 # rr3-brain 运行期配置
-# 铁律：密钥 / token 一律走环境变量（SILICONFLOW_API_KEY），本文件不落任何凭据。
+# 铁律：密钥 / token 一律走环境变量（RR3_CLOUD_API_KEY，通用键名——供应商由本段
+# base_url/模型名承载，0.0.5 批M MC-8②），本文件不落任何凭据。
 # 逐行来源：legacy/core/{asr,llm,tts}/src/*_config.h 中曾硬编码密钥，迁移时改为读环境。
 
 [rr3-brain]

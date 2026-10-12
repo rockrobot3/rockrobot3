@@ -87,9 +87,9 @@ note = "WiFi 链路管理（rr3-connect）"
 [[slot]]
 name = "net.bt"
 layer = "body"
-status = "normal"
+status = "placeholder"
 tier_scope = ["host", "rtos", "bare"]
-note = "蓝牙（rr3-connect）"
+note = "蓝牙（rr3-connect；骨架占位——配网备选通道立项 / BlueZ 真后端批填实，占位 ≠ 通过，0.0.5 方案 §19 MC-9）"
 
 [[slot]]
 name = "ui.face"

@@ -29,7 +29,9 @@ std 手写 HTTP/1.1 子集（GET/POST + Content-Length，**零新 crates.io 依�
 env `RR3_PANEL_ADDR` 可改（板上 `0.0.0.0` 随装配单注入）——本面板是**局域网可信面**
 的调试工具，不承诺公网暴露，无鉴权是有意为之的边界声明。
 
-端点十二个（legacy 面板四页签语义逐项承接；WiFi 配网页随 0.0.4 批D 挂上）：
+端点白名单见 `src/panel/server.rs` 的 `RR3_PANEL_ROUTES` 常量表（唯一真值，
+MC-8③/I-9：端点数由表长推导，文档不手写计数；legacy 面板四页签语义逐项承接，
+WiFi 配网页随 0.0.4 批D 挂上）：
 
 | 方法 | 路径 | 数据面 | 承接 legacy |
 |---|---|---|---|
