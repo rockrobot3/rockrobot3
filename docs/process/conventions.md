@@ -1989,6 +1989,39 @@ station（psk 不回读——NM 私有面）；主判据 `nm_store_persists_acro
 硬件格位会被 fail-closed 判缺——`e2e_act`/`e2e_profile`/`e2e_power` 与 `tools/sim` 装配
 演练一律**显式** `RR3_PROBE=sim`（与既有 `RR3_HAL_BACKEND=sim` 同一纪律：不赌平台默认）。
 
+2026-10-12 0.0.5 现场处置 方案C（分轴限幅——真板云台撞机械死点/BOD 复位故障的软件面收口，
+计划外修正非批M 工单）——编码面 `f6e92d6`（7 files，+150/−55），xtensa 专用门 PASS（真编译
+29.42s）+ 十步门禁直跑 GATE_EXIT=0 全绿，推三远端四端核对一致。**故障链（真板实测）**：云台
+舵机卡死不动 + 发烫（SG90 堵转 ~700mA/只持续流动），5V 取自板载 USB/5V 排针经拓展坞直供 →
+5V 轨跌落 → **BOD 复位循环**（`Brownout detector was triggered`）→ 串口节点与 OLED 反复掉线；
+软件加剧因素 = 板侧 WANDER 全行程 0–180 折返 + SCAN 五点 0/45/90/135/180 把舵机推过机械死点
+并持续施力。**落点（板侧固件为主 + 宿主 config 同步）**：① 板侧 `main.rs` 立**分轴行程**
+（`AXIS_CENTER_DEG=90` / `PAN_LIMIT_DEG=20` / `TILT_LIMIT_DEG` + `Axis::{name,limit_deg,range}`
++ `axis_scan_points` 区间五等分判据点），`Periph::servo_set` 加本轴行程裁决、越程**点名拒收**
+（fail-closed，不静默钳位）；WANDER 端点折返与 SCAN 判据点一律取自 `Axis::range`
+（pan[70,110]/tilt[85,95]）；INFO 增 `lim=pan[..]/tilt[..]`、HELP 加行程区间。② 宿主
+`modules/rr3-act/config.toml` `angle_limit_deg [0,180]→[70,110]`（本面默认轴 pan；改
+`RR3_HAL_PERIPH_AXIS=tilt` 须同步）+ composite 仓形状夹具（漂移当场红）。③ 必要连带（不改则
+"向左/向右"被新行程拒收）：brain 词表转向三档 45/135/90 → 70/110/90 + `test_intent` 单测；
+`--chain` 演练 `RR3_CHAIN_LEFT_ANGLE 45→70` + config 文案/断言；`e2e_act` 夹具 [0,180]→
+[70,110] + 左档落角 45→70。**核并改**：板侧既有语义是**「点名拒收」不是「钳位」**——与
+rr3-act 设计册 §5 主题面旧文「越界→钳位后成功」对不上（件面 `rr3_servo_check_travel` 实为
+拒收，`rr3_travel_clamp` 只是安全核被绕过时的兜底、合法输入恒等），设计册同批核改。教训：
+"全行程折返"类演示动作必须与执行器机械死点解耦——行程上下界由**数据**（分轴常量/config）决定，
+不许硬编码 0–180。
+
+2026-10-12 0.0.5 现场处置 方案C 修正（tilt 限幅 ±5°→±10°）——编码面 `8f750b2`（3 files，
++11/−10），xtensa 专用门 PASS（真编译 25.78s）+ 十步门禁 `TEN_GATE_EXIT=0`，板上已烧录
+（460800），HELP 回读证实「行程 pan 70-110 / tilt 80-100」。**板侧** `TILT_LIMIT_DEG 5→10`，
+tilt 行程 [85,95]→[80,100]（保住现场所需俯仰上抬 98°——原值会被 fail-closed 点名拒收），连带
+HELP 文案 / SCAN 五等分点注释（tilt 80/85/90/95/100）/ wander 分轴限幅注释。**补方案C 批漏改**
+（`8f750b2` 同批）：`modules/rr3-act/config.toml` tilt 注记 [85,95]→[80,100]、
+`tools/esp32-periph-base/README.md` 指令表与验收判据（旧文仍写「单轴 0–180」与五点
+0/45/90/135/180，与主落点不一致）。裁定：用户放宽 tilt 对称限幅以纳 98°（pan 保持 ±20° 不变）。
+**敞口（未闭环）**：板载 USB-UART 在复位/欠压瞬间掉出 USB 总线，只能物理重插恢复；UART2 指令面
+（外部 CP2102）双向字节污染（非固件 bug，自查清单已给用户：共地 / DTR-RTS 勿误接 EN-BOOT /
+逻辑电平须 3.3V / 短线）。**方案 A**（整板电压监测 + 分轴限幅）另行立项评审，与本处置并行。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
