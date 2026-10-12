@@ -107,6 +107,24 @@ const DUTY_MIN: u32 = 410;
 /// 180° 对应 duty ticks（2.5ms = 2048）。
 const DUTY_MAX: u32 = 2048;
 
+// ---------------------------------------------------------------------------
+// 分轴行程（0.0.5 方案 C 裁定 2026-10-12：pan 相对中位 ±20°、tilt 相对中位 ±5°）
+// ---------------------------------------------------------------------------
+//
+// 真板实锤（批C v0.3.2 与现场排障）：云台机械行程远小于 SG90 全程 0–180°——
+// 旧版 WANDER 全行程扫摆 / SCAN 五点（0/45/90/135/180）会把舵机推到机械死点
+// 并**持续施力**，表现为"卡住不动 + 舵机发烫"（堵转电流 ~700mA/只持续流动），
+// 叠加板载 USB 5V 直供时触发欠压复位与 USB 链路反复掉线。故本轴行程以中位为
+// 基准收窄，越界**拒收点名**（fail-closed：静默钳到边界会让调用方误以为按给值
+// 生效），WANDER/SCAN 的端点与判据点一律收进区间内。
+
+/// 云台中位绝对角（两轴共用刻度中点；boot 置位与角度行基准）。
+const AXIS_CENTER_DEG: u32 = 90;
+/// pan（水平轴）相对中位的最大摆幅。
+const PAN_LIMIT_DEG: u32 = 20;
+/// tilt（俯仰轴）相对中位的最大摆幅。
+const TILT_LIMIT_DEG: u32 = 5;
+
 /// 角度 → duty ticks（线性 0–180 ↦ 410–2048；入参已由调用方 clamp 0–180）。
 fn deg_to_duty(deg: u32) -> u32 {
     DUTY_MIN + (deg * (DUTY_MAX - DUTY_MIN)) / 180
@@ -343,8 +361,21 @@ struct Periph {
 unsafe impl Send for Periph {}
 
 impl Periph {
-    /// 舵机转角（clamp 0–180 → duty → set+update；返回实际设定角）。
+    /// 舵机转角（先过本轴行程裁决 → duty → set+update；返回实际设定角）。
+    /// 协议级 0–180 之外的角先被拒；轴行程（中位 ± 摆幅）之外**点名拒收**，
+    /// 不静默钳位——见文件头"分轴行程"段。
     fn servo_set(&mut self, axis: Axis, deg: u32) -> Result<u32, String> {
+        if deg > 180 {
+            return Err(format!("角度超范围 0-180: {deg}"));
+        }
+        let (lo, hi) = axis.range();
+        if !(lo..=hi).contains(&deg) {
+            return Err(format!(
+                "{} 轴超出行程 [{lo}, {hi}]（中位 {AXIS_CENTER_DEG}° ±{}°）: {deg}",
+                axis.name(),
+                axis.limit_deg()
+            ));
+        }
         let deg = deg.clamp(0, 180);
         let duty = deg_to_duty(deg);
         let driver = match axis {
@@ -391,6 +422,41 @@ impl Periph {
 enum Axis {
     Pan,
     Tilt,
+}
+
+impl Axis {
+    /// 轴名（点名文案用，与帧面 `axis` 键取值同串）。
+    fn name(self) -> &'static str {
+        match self {
+            Axis::Pan => "pan",
+            Axis::Tilt => "tilt",
+        }
+    }
+
+    /// 本轴相对中位的最大摆幅。
+    fn limit_deg(self) -> u32 {
+        match self {
+            Axis::Pan => PAN_LIMIT_DEG,
+            Axis::Tilt => TILT_LIMIT_DEG,
+        }
+    }
+
+    /// 本轴绝对行程区间 `[lo, hi]` = 中位 ± 摆幅（WANDER 端点与 SCAN 判据点
+    /// 都从这里取，机制不另写字面量）。
+    fn range(self) -> (u32, u32) {
+        (
+            AXIS_CENTER_DEG - self.limit_deg(),
+            AXIS_CENTER_DEG + self.limit_deg(),
+        )
+    }
+}
+
+/// 轴行程五等分判据点（SCAN 判据：端点 + 三分点，全部落在本轴行程内——
+/// 旧版写死的 0/45/135/180 越出机械行程，正是堵转来源）。
+fn axis_scan_points(axis: Axis) -> [u32; 5] {
+    let (lo, hi) = axis.range();
+    let span = hi - lo;
+    [lo, lo + span / 4, lo + span / 2, lo + span * 3 / 4, hi]
 }
 
 /// 应答行回写（UART2；\r\n 结尾，终端与 pyserial 同读友好）。
@@ -604,12 +670,14 @@ impl PeriphState {
     }
 
     /// 云台自主扫摆一拍（cmd_loop 窥视空档驱动，60ms 一拍）：pan 每 2 拍走
-    /// 2°（≈16.7°/s，全程 10.8s）、tilt 每 4 拍走 3°（≈12.5°/s，全程 14.4s），
-    /// 端点折返持续不停——两轴节奏错开避免机械同步感。步幅下限实测定标：
+    /// 2°（≈16.7°/s，本轴行程 40° 宽 → 单程约 2.4s）、tilt 每 4 拍走 3°
+    /// （≈12.5°/s，本轴行程 10° 宽 → 单程约 1s），端点折返持续不停——两轴
+    /// 节奏错开避免机械同步感。**端点 = 本轴行程边界**（[`Axis::range`]，方案 C
+    /// 分轴限幅：pan 中位±20° / tilt 中位±5°）——旧版折返点在 0/180，会把舵机
+    /// 推过机械死点并持续施力（真板表现为卡死 + 发烫）。步幅下限实测定标：
     /// 2° 对轻载 pan 够用，但 tilt 托整个云台上部（重载），2°/300ms 部分落
-    /// 死区/静摩擦里视觉近乎不动（真板实测 tilt 数值漂移而舵机不动）——tilt
-    /// 提到 3°（≈27 duty ticks）+ 240ms 拍距肉眼可见。外部命令到达即
-    /// wander_on=false，本函数一拍即回。角度行每 10 步刷一次（600ms，省
+    /// 死区/静摩擦里视觉近乎不动——tilt 用 3°（≈27 duty ticks）可见。外部命令
+    /// 到达即 wander_on=false，本函数一拍即回。角度行每 10 步刷一次（600ms，省
     /// I2C；expr/frame 模式由 refresh_angle_row 守卫跳过）。
     fn servo_tick(&mut self, ph: &mut Periph) {
         if !self.wander_on || now_ms() < self.next_wander_ms {
@@ -618,13 +686,23 @@ impl PeriphState {
         self.next_wander_ms = now_ms() + 60;
         self.wander_phase = self.wander_phase.wrapping_add(1);
         if self.wander_phase % 2 == 0 {
-            let next = wander_step(self.pan_deg, &mut self.wander_pan_dir, 2);
+            let next = wander_step(
+                self.pan_deg,
+                &mut self.wander_pan_dir,
+                2,
+                Axis::Pan.range(),
+            );
             if let Ok(d) = ph.servo_set(Axis::Pan, next) {
                 self.pan_deg = d;
             }
         }
         if self.wander_phase % 4 == 0 {
-            let next = wander_step(self.tilt_deg, &mut self.wander_tilt_dir, 3);
+            let next = wander_step(
+                self.tilt_deg,
+                &mut self.wander_tilt_dir,
+                3,
+                Axis::Tilt.range(),
+            );
             if let Ok(d) = ph.servo_set(Axis::Tilt, next) {
                 self.tilt_deg = d;
             }
@@ -635,15 +713,17 @@ impl PeriphState {
     }
 }
 
-/// 扫摆步进：deg ± step，端点（0/180）折返方向后返回新角度。dir 应为 ±1
+/// 扫摆步进：deg ± step，轴行程端点折返后返回新角度。dir 应为 ±1
 /// （WANDER 开关随机起步；0 防御上不会出现——0 时原地不动）。
-fn wander_step(deg: u32, dir: &mut i8, step: i32) -> u32 {
+/// `bounds` 由 [`Axis::range`] 给出，端点即机械安全边界。
+fn wander_step(deg: u32, dir: &mut i8, step: i32, bounds: (u32, u32)) -> u32 {
+    let (lo, hi) = bounds;
     let mut next = deg as i32 + *dir as i32 * step;
-    if next >= 180 {
-        next = 180;
+    if next >= hi as i32 {
+        next = hi as i32;
         *dir = -1;
-    } else if next <= 0 {
-        next = 0;
+    } else if next <= lo as i32 {
+        next = lo as i32;
         *dir = 1;
     }
     next as u32
@@ -1022,7 +1102,7 @@ fn cmd_loop(mut ph: Periph) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP"
+                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 70-110 / tilt 85-95，中位 90)"
                     .into(),
             ),
             "OLED" => {
@@ -1101,12 +1181,16 @@ fn cmd_loop(mut ph: Periph) {
                 Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
             },
             "SCAN" => {
-                // 判据②：两轴各 0/45/90/135/180 五点，逐点串口回读设定角
+                // 判据②：两轴各按**本轴行程**五等分点扫描（pan 70/80/90/100/110、
+                // tilt 85/87/90/92/95——旧版写死的 0/45/90/135/180 越出机械行程，
+                // 推死点持续施力正是堵转来源），逐点串口回读设定角
                 let mut ok = true;
                 st.wander_on = false; // 判据测试不被自主扫摆扰动
-                for (i, deg) in [0u32, 45, 90, 135, 180].into_iter().enumerate() {
-                    let p = ph.servo_set(Axis::Pan, deg);
-                    let t = ph.servo_set(Axis::Tilt, deg);
+                let pan_pts = axis_scan_points(Axis::Pan);
+                let tilt_pts = axis_scan_points(Axis::Tilt);
+                for (i, (deg_p, deg_t)) in pan_pts.iter().zip(tilt_pts.iter()).enumerate() {
+                    let p = ph.servo_set(Axis::Pan, *deg_p);
+                    let t = ph.servo_set(Axis::Tilt, *deg_t);
                     match (p, t) {
                         (Ok(p), Ok(t)) => {
                             st.pan_deg = p;
@@ -1141,16 +1225,20 @@ fn cmd_loop(mut ph: Periph) {
                     Err("SCAN 中途失败（见 monitor 日志）".into())
                 }
             }
-            "INFO" => Ok(format!(
-                "INFO pan={} tilt={} wander={} phase={} oled_last=\"{}\" free={}B min_free={}B",
-                st.pan_deg,
-                st.tilt_deg,
-                if st.wander_on { "on" } else { "off" },
-                st.wander_phase,
-                st.last_text,
-                unsafe { esp_get_free_heap_size() },
-                unsafe { esp_get_minimum_free_heap_size() }
-            )),
+            "INFO" => {
+                let (plo, phi) = Axis::Pan.range();
+                let (tlo, thi) = Axis::Tilt.range();
+                Ok(format!(
+                    "INFO pan={} tilt={} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={} oled_last=\"{}\" free={}B min_free={}B",
+                    st.pan_deg,
+                    st.tilt_deg,
+                    if st.wander_on { "on" } else { "off" },
+                    st.wander_phase,
+                    st.last_text,
+                    unsafe { esp_get_free_heap_size() },
+                    unsafe { esp_get_minimum_free_heap_size() }
+                ))
+            }
             "FONT" => {
                 // 字模自检护栏：打印 "ABC123" 的 5x7 字模 hex，供人工比对
                 let hex: Vec<String> = "ABC123"
