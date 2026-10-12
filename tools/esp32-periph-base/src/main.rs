@@ -604,11 +604,13 @@ impl PeriphState {
     }
 
     /// 云台自主扫摆一拍（cmd_loop 窥视空档驱动，60ms 一拍）：pan 每 2 拍走
-    /// 2°（≈16.7°/s，全程 10.8s）、tilt 每 5 拍走 2°（≈6.7°/s，全程 27s），
-    /// 端点折返持续不停——两轴节奏错开避免机械同步感。2° 步进越过 SG90 死区
-    /// （脉宽 ~5µs ≈ 4 duty ticks，1° ≈ 9.1 ticks 在死区边缘可能静默不动）。
-    /// 外部命令到达即 wander_on=false，本函数一拍即回。角度行每 10 步刷一次
-    /// （600ms，省 I2C；expr/frame 模式由 refresh_angle_row 守卫跳过）。
+    /// 2°（≈16.7°/s，全程 10.8s）、tilt 每 4 拍走 3°（≈12.5°/s，全程 14.4s），
+    /// 端点折返持续不停——两轴节奏错开避免机械同步感。步幅下限实测定标：
+    /// 2° 对轻载 pan 够用，但 tilt 托整个云台上部（重载），2°/300ms 部分落
+    /// 死区/静摩擦里视觉近乎不动（真板实测 tilt 数值漂移而舵机不动）——tilt
+    /// 提到 3°（≈27 duty ticks）+ 240ms 拍距肉眼可见。外部命令到达即
+    /// wander_on=false，本函数一拍即回。角度行每 10 步刷一次（600ms，省
+    /// I2C；expr/frame 模式由 refresh_angle_row 守卫跳过）。
     fn servo_tick(&mut self, ph: &mut Periph) {
         if !self.wander_on || now_ms() < self.next_wander_ms {
             return;
@@ -616,13 +618,13 @@ impl PeriphState {
         self.next_wander_ms = now_ms() + 60;
         self.wander_phase = self.wander_phase.wrapping_add(1);
         if self.wander_phase % 2 == 0 {
-            let next = wander_step(self.pan_deg, &mut self.wander_pan_dir);
+            let next = wander_step(self.pan_deg, &mut self.wander_pan_dir, 2);
             if let Ok(d) = ph.servo_set(Axis::Pan, next) {
                 self.pan_deg = d;
             }
         }
-        if self.wander_phase % 5 == 0 {
-            let next = wander_step(self.tilt_deg, &mut self.wander_tilt_dir);
+        if self.wander_phase % 4 == 0 {
+            let next = wander_step(self.tilt_deg, &mut self.wander_tilt_dir, 3);
             if let Ok(d) = ph.servo_set(Axis::Tilt, next) {
                 self.tilt_deg = d;
             }
@@ -633,10 +635,10 @@ impl PeriphState {
     }
 }
 
-/// 扫摆步进：deg ± 2°，端点（0/180）折返方向后返回新角度。dir 应为 ±1
+/// 扫摆步进：deg ± step，端点（0/180）折返方向后返回新角度。dir 应为 ±1
 /// （WANDER 开关随机起步；0 防御上不会出现——0 时原地不动）。
-fn wander_step(deg: u32, dir: &mut i8) -> u32 {
-    let mut next = deg as i32 + *dir as i32 * 2;
+fn wander_step(deg: u32, dir: &mut i8, step: i32) -> u32 {
+    let mut next = deg as i32 + *dir as i32 * step;
     if next >= 180 {
         next = 180;
         *dir = -1;
@@ -980,7 +982,7 @@ fn cmd_loop(mut ph: Periph) {
     };
     reply(
         &mut ph.uart,
-        "READY periph-base v0.3.1 line+frame+anim+wander (type HELP for commands)",
+        "READY periph-base v0.3.2 line+frame+anim+wander (type HELP for commands)",
     );
     loop {
         let mut first = [0u8; 1];
@@ -1140,9 +1142,11 @@ fn cmd_loop(mut ph: Periph) {
                 }
             }
             "INFO" => Ok(format!(
-                "INFO pan={} tilt={} oled_last=\"{}\" free={}B min_free={}B",
+                "INFO pan={} tilt={} wander={} phase={} oled_last=\"{}\" free={}B min_free={}B",
                 st.pan_deg,
                 st.tilt_deg,
+                if st.wander_on { "on" } else { "off" },
+                st.wander_phase,
                 st.last_text,
                 unsafe { esp_get_free_heap_size() },
                 unsafe { esp_get_minimum_free_heap_size() }
