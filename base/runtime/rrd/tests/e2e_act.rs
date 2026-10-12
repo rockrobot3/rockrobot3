@@ -82,7 +82,7 @@ const CONFIG: &str = r#"
 log_level = "info"
 
 [rr3-act.servo]
-angle_limit_deg = [0, 180]
+angle_limit_deg = [70, 110]
 move_timeout_ms = 800
 state_min_interval_ms = 50
 
@@ -378,7 +378,7 @@ fn act_module_full_face_end_to_end() {
     );
 
     // ---------- ⑥ intent 转向动作（批F2）：servo/command 过同两道门落 servo/state ----------
-    // "向左看"类词表意图由 brain 广播 actions 落 rr3-act/servo/command（45°=左档，
+    // "向左看"类词表意图由 brain 广播 actions 落 rr3-act/servo/command（70°=左档，
     // brain 侧词表→角度映射由 python 单测覆盖，e2e 在 act 边界钉总线契约——判据 8
     // 的 sim 侧证据）。seq=2 延续 ② 的 RPC 路（seq=1）：②的 RPC servo 已在限速门
     // 记账，窗内（50ms）连发被拒且不补发（流是摘要不是逐拍镜像，设计行为）——UDS
@@ -393,7 +393,7 @@ fn act_module_full_face_end_to_end() {
                 "topic": "rr3-brain/intent/result",
                 "trace": 73,
                 "user_text": "向左看",
-                "actions": [{"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}}],
+                "actions": [{"topic": "rr3-act/servo/command", "args": {"angle_deg": 70}}],
             }),
             brain_task,
             RR3_TASK_RRD,
@@ -411,7 +411,7 @@ fn act_module_full_face_end_to_end() {
         sv["seq"], 2,
         "两条驱动路共用一条 servo 状态流，流序连贯: {sv}"
     );
-    assert_eq!(sv["angle_deg"], 45, "左档转向落角: {sv}");
+    assert_eq!(sv["angle_deg"], 70, "左档转向落角: {sv}");
 
     // ---------- ⑦ 越权动作：归属门拒，有界窗口内不得再有 relay/state ----------
     // 拒执行是 act 进程内的日志面（模块 stdout 接 Stdio::null()），e2e 侧唯一

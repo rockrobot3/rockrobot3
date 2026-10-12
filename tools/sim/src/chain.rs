@@ -10,7 +10,7 @@
 //!   `doa{deg,bin}` 上 `rr3-sense/audio/vad_start`——观察者现场收帧取证；
 //! - **意图**：brain 走 mock 云（`RR3_BRAIN_CLOUD=mock`）+ mock ASR 文本"向左看"
 //!   （`RR3_BRAIN_MOCK_ASR_TEXT` 批F2 注入键），`对话轮完成` 行携 `actions=1`；
-//! - **转向**：brain 词表把左档意图映射成 `rr3-act/servo/command`(45°)（策略层
+//! - **转向**：brain 词表把左档意图映射成 `rr3-act/servo/command`(70°)（策略层
 //!   唯一归属，0.0.3 Q1），act 的 sim 舵机落角并发 `rr3-act/servo/state`——
 //!   观察者同时取证落角；
 //! - **表情**：TTS 播放期间 interact 表情机自动挂起 talk（批F3 语义，不依赖
@@ -51,8 +51,8 @@ pub const RR3_SIM_MODULE_ACT: &str = "rr3-act";
 pub const RR3_CHAIN_OBS: &str = "rr3-obs";
 /// 判向注入档（左档）：与批F2 判向 e2e 同值，ILD 反演 ±2° 容差同口径
 pub const RR3_CHAIN_DOA_DEG: i32 = -60;
-/// 词表左档角（brain intent.py：向左 → 45°）
-pub const RR3_CHAIN_LEFT_ANGLE: i64 = 45;
+/// 词表左档角（brain intent.py：向左 → 70°，落 pan 轴行程 [70,110]）
+pub const RR3_CHAIN_LEFT_ANGLE: i64 = 70;
 
 /// 全链取证主题：判向（sense onset 负载扩展，批F2）
 pub const RR3_SENSE_TOPIC_VAD: &str = "rr3-sense/audio/vad_start";
@@ -176,7 +176,7 @@ pub fn rr3_chain_sense_config_text() -> String {
 
 /// act 演练 config（与 e2e_act 夹具同形状，漂移当场由 main.rs 的形状解析红）
 pub fn rr3_chain_act_config_text() -> String {
-    "[rr3-act]\nlog_level = \"info\"\n\n[rr3-act.servo]\nangle_limit_deg = [0, 180]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n\n[rr3-act.led]\nblink_period_ms = 500\n\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
+    "[rr3-act]\nlog_level = \"info\"\n\n[rr3-act.servo]\nangle_limit_deg = [70, 110]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n\n[rr3-act.led]\nblink_period_ms = 500\n\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
         .to_string()
 }
 
@@ -212,7 +212,7 @@ pub fn rr3_obs_feed(obs: &mut Rr3ChainObs, body: &Value) {
     }
 }
 
-/// 取证判定（纯函数）：判向档落注入值的 ±2° 容差且分左档；落角 = 词表左档 45°。
+/// 取证判定（纯函数）：判向档落注入值的 ±2° 容差且分左档；落角 = 词表左档 70°。
 /// 收集循环只等 presence，档位对不对在这里裁——证据与判定分离，tests 可直测。
 pub fn rr3_chain_judge(obs: &Rr3ChainObs) -> Result<String, String> {
     let deg = obs
@@ -668,7 +668,7 @@ mod tests {
         assert!(sense.contains("channels = 2"), "{sense}");
         assert!(sense.contains("rms_start = 1500"), "{sense}");
         let act = rr3_chain_act_config_text();
-        assert!(act.contains("angle_limit_deg = [0, 180]"), "{act}");
+        assert!(act.contains("angle_limit_deg = [70, 110]"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
     }
 
@@ -694,9 +694,9 @@ mod tests {
         rr3_obs_feed(&mut obs, &json!({"topic": "rr3-sense/audio/pcm"}));
         rr3_obs_feed(
             &mut obs,
-            &json!({"topic": RR3_ACT_TOPIC_SERVO_STATE, "seq": 2, "angle_deg": 45}),
+            &json!({"topic": RR3_ACT_TOPIC_SERVO_STATE, "seq": 2, "angle_deg": 70}),
         );
-        assert_eq!(obs.servo_angle, Some(45));
+        assert_eq!(obs.servo_angle, Some(70));
         assert!(obs.rr3_obs_ready());
     }
 
@@ -705,7 +705,7 @@ mod tests {
         let ok = Rr3ChainObs {
             doa_deg: Some(-59),
             doa_bin: Some("left".into()),
-            servo_angle: Some(45),
+            servo_angle: Some(70),
         };
         assert!(rr3_chain_judge(&ok).is_ok());
         // 反演出容差
@@ -726,7 +726,7 @@ mod tests {
             servo_angle: Some(90),
             ..ok.clone()
         };
-        assert!(rr3_chain_judge(&angle).unwrap_err().contains("45°"));
+        assert!(rr3_chain_judge(&angle).unwrap_err().contains("70°"));
         // 证据缺一面
         let half = Rr3ChainObs {
             doa_deg: None,
