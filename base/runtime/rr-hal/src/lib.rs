@@ -39,6 +39,15 @@ pub mod linux_gpio;
 /// Command 零新依赖），同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]
 pub mod linux_link;
+/// nmcli 子进程承载的公共机制层（M-γ 抽共享）：terse 转义/字段提取与
+/// "spawn + 超时守护 + 管道读"，链路读数（linux_link）与配网凭据存储
+/// （provision_store，MC-6）两后端共用一份真值。全平台编译（非阻塞读的
+/// libc 依赖按平台 cfg 分叉，守护本体是纯 std）。
+pub mod nmcli_support;
+/// 配网凭据存储后端（0.0.5 批M M-γ，MC-6）：凭据由后端承载持久化（linux =
+/// NetworkManager 连接配置，nmcli 子进程；sim = 内存档），件内不自写文件。
+/// 全平台编译——"connect → 重启 → 仍在册"用 NMCONF_HOME 假脚本夹具主机可测。
+pub mod provision_store;
 /// linux I2C 电池读数后端（R18，INA219@0x40）：libc 仅做 ioctl/read/write/close
 /// 声明壳，同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]

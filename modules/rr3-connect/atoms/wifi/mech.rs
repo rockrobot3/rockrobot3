@@ -12,8 +12,9 @@
 //! 配网面（0.0.4 方案 D4/Q3）：AP 配网状态机是**模块内策略**，不进 HAL——sim
 //! 是"设备"不是"策略"，HAL 只如实报数（up/ssid/rssi），凭据态归
 //! [`Rr3Provision`]，net/link 体以 `mode` 字段随流发布（契约只增不改，0.0.4
-//! 批D append）。connect/forget 只改状态机与内存凭据：凭据不落盘（conventions
-//! §3），真凭据持久化（wpa_supplicant/NVS）板上后置——重启即忘，如实声明。
+//! 批D append）。connect/forget 只改状态机与凭据态：**凭据持久化由后端承载**
+//! （MC-6：linux = NetworkManager 连接配置，经 `Rr3WifiStore` 注入），件内
+//! 不自写文件、不出现落盘路径字面量——[`Rr3Provision`] 只管态不管存。
 //! scan 回 sim 模拟列表（`backend:"sim"` 诚实标注），板上换 NetworkManager。
 //!
 //! 载荷组装与参数下钻面（0.0.5 批I N-7，ADR-0019 修订 4）：`rr3_link_body`、
@@ -49,10 +50,12 @@ impl Rr3LinkEdge {
 
 // ---------- 配网面（0.0.4 批D）：AP 配网状态机 ----------
 
-/// AP 配网状态机（模块内策略，HAL 不知情）：内存凭据有 → `station`（客户端
+/// AP 配网状态机（模块内策略，HAL 不知情）：凭据态有 → `station`（客户端
 /// 模式），没有 → `ap`（配网热点在开）。connect 存凭据、forget 清凭据，
 /// 就这两步转移——"AP 态可模拟进出"由纯函数单测钉死（方案 D4 判据）。
-/// 真凭据持久化（wpa_supplicant/NVS）板上后置，重启即忘，不 claim。
+/// 凭据本体由后端承载持久化（MC-6：`Rr3WifiStore`，linux = NM 连接配置），
+/// 本状态机只管态不管存；重启后由承载层查在册、经
+/// [`Self::rr3_provision_restored`] 恢复 station。
 pub struct Rr3Provision {
     credentials: Option<(String, String)>,
 }
@@ -60,6 +63,15 @@ pub struct Rr3Provision {
 impl Rr3Provision {
     pub fn rr3_provision_new() -> Self {
         Self { credentials: None }
+    }
+
+    /// 重启恢复：承载层查得在册 SSID 时以它起态（直接 `station`；psk 不回读
+    /// ——NM 配置里的 psk 是 NM 私有面，模块不靠它做任何判定，见 MC-6"只管态
+    /// 不管存"）。凭据本体仍在后端承载，本状态机只记 SSID 以出 `mode`。
+    pub fn rr3_provision_restored(ssid: String) -> Self {
+        Self {
+            credentials: Some((ssid, String::new())),
+        }
     }
 
     /// 当前配网模式：`"ap"` | `"station"`（net/link 的 mode 字段词汇，只有两值）。
@@ -114,6 +126,19 @@ mod tests {
         );
         p.rr3_provision_forget();
         assert_eq!(p.rr3_provision_mode(), "ap", "forget 清凭据即回 ap");
+    }
+
+    /// MC-6 重启恢复：承载层查得在册 SSID → 直起 `station`（psk 不回读，
+    /// 模块只记 SSID 出 mode）。这条钉的是"重启仍在册"里**模块侧**的一半
+    /// ——另一半（凭据真落盘承载）在 `rr-hal::provision_store` 的用例钉。
+    #[test]
+    fn provision_restored_starts_in_station() {
+        let p = Rr3Provision::rr3_provision_restored("home".into());
+        assert_eq!(
+            p.rr3_provision_mode(),
+            "station",
+            "在册 SSID 起态即 station（重启仍在册）"
+        );
     }
 
     // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------

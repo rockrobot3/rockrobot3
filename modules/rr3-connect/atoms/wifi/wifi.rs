@@ -4,7 +4,8 @@
 //! 逐字打印，契约面零改动红线）；`Rr3LinkCfg` 是 config `[rr3-connect.wifi]` 的
 //! 形状（上报周期 + nmcli 子进程超时，config 数据化注入，机制件零策略载荷）；
 //! 链路读数经 rr-hal trait（`Rr3Link`）由组合件注入，原子不直接碰 NetworkManager。
-//! 配网凭据只存内存（conventions §3），真持久化（wpa_supplicant/NVS）板上后置。
+//! 配网凭据由后端承载持久化（MC-6：linux = NetworkManager 连接配置，经
+//! `Rr3WifiStore` 注入），件内不自写文件——重启后仍在册。
 
 #[path = "mech.rs"]
 mod mech;
@@ -16,7 +17,7 @@ mod private;
 pub const SURFACE: &[&str] = &[
     "wifi: 链路面（后端=动态，由 HAL 选择面交名）-> rr3-connect/net/link (event)；sim 后端 env 注入",
     "wifi: 状态翻转必发 + 周期保底重发（流是摘要不是逐拍镜像）；mode=ap|station 随流发布",
-    "wifi: rpc wifi/scan|wifi/connect|wifi/forget（0.0.4 批D）；凭据内存不落盘重启即忘，真持久化板上后置",
+    "wifi: rpc wifi/scan|wifi/connect|wifi/forget（0.0.4 批D）；凭据由后端持久化（MC-6：linux=NM 连接配置），重启仍在册",
 ];
 
 /// 发布面唯一主题（module.toml [events].publishes 同源）
