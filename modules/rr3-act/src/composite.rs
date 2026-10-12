@@ -500,7 +500,7 @@ mod tests {
     fn config_parse_covers_repo_shape() {
         let text = r#"
 [rr3-act.servo]
-angle_limit_deg = [0, 180]
+angle_limit_deg = [70, 110]
 move_timeout_ms = 800
 state_min_interval_ms = 50
 
@@ -512,8 +512,8 @@ loop_hz = 1000
 saturate_notice_ms = 500
 "#;
         let cfg = rr3_act_config_parse(text).unwrap();
-        assert_eq!(cfg.servo.angle_min_deg, 0);
-        assert_eq!(cfg.servo.angle_max_deg, 180);
+        assert_eq!(cfg.servo.angle_min_deg, 70);
+        assert_eq!(cfg.servo.angle_max_deg, 110);
         assert_eq!(cfg.servo.move_timeout_ms, 800);
         assert_eq!(cfg.servo.state_min_interval_ms, 50);
         assert_eq!(cfg.led.blink_period_ms, 500);

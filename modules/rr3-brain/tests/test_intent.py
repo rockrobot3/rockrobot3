@@ -51,10 +51,11 @@ class Rr3IntentExtractTest(unittest.TestCase):
             self.assertIsInstance(action["args"], dict)
 
     def test_turn_words_yield_servo_commands(self):
-        # 批F2 判据 8：向左/向右/回中 → servo/command 三档（45/135/90）
+        # 批F2 判据 8：向左/向右/回中 → servo/command 三档（70/110/90，落 pan
+        # 轴行程 [70,110]——方案 C 分轴限幅后左右档必须收进行程内）
         cases = (
-            (("向左", "往左看", "左转一下", "看左边"), 45),
-            (("向右", "往右看", "右转一下", "看右边"), 135),
+            (("向左", "往左看", "左转一下", "看左边"), 70),
+            (("向右", "往右看", "右转一下", "看右边"), 110),
             (("回中", "看前面", "看中间", "回中间"), 90),
         )
         for words, angle in cases:
@@ -76,7 +77,7 @@ class Rr3IntentExtractTest(unittest.TestCase):
         self.assertEqual(actions[0]["topic"], TOPIC_RELAY_SET)
         self.assertEqual(actions[0]["args"], {"on": True})
         self.assertEqual(actions[1]["topic"], TOPIC_SERVO_COMMAND)
-        self.assertEqual(actions[1]["args"], {"angle_deg": 45})
+        self.assertEqual(actions[1]["args"], {"angle_deg": 70})
 
 
 if __name__ == "__main__":
