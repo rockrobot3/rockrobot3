@@ -522,6 +522,14 @@ struct PeriphState {
     glance_dx: i16,
     glance_dy: i16,
     drawn: (u32, i16, i16),
+    /// 云台自主扫摆（WANDER 行面开关）：pan/tilt 缓速连续摆动不停顿。外部
+    /// PAN/TILT/SERVO/SCAN 或帧面 servo 写到达即关（外部点名优先）。
+    wander_on: bool,
+    wander_pan_dir: i8,
+    wander_tilt_dir: i8,
+    /// 扫摆节拍：60ms 一拍的拍号（u8 回绕无妨，只用模数）+ 下拍时间。
+    wander_phase: u8,
+    next_wander_ms: u64,
 }
 
 impl PeriphState {
@@ -594,6 +602,49 @@ impl PeriphState {
             }
         }
     }
+
+    /// 云台自主扫摆一拍（cmd_loop 窥视空档驱动，60ms 一拍）：pan 每 2 拍走
+    /// 2°（≈16.7°/s，全程 10.8s）、tilt 每 5 拍走 2°（≈6.7°/s，全程 27s），
+    /// 端点折返持续不停——两轴节奏错开避免机械同步感。2° 步进越过 SG90 死区
+    /// （脉宽 ~5µs ≈ 4 duty ticks，1° ≈ 9.1 ticks 在死区边缘可能静默不动）。
+    /// 外部命令到达即 wander_on=false，本函数一拍即回。角度行每 10 步刷一次
+    /// （600ms，省 I2C；expr/frame 模式由 refresh_angle_row 守卫跳过）。
+    fn servo_tick(&mut self, ph: &mut Periph) {
+        if !self.wander_on || now_ms() < self.next_wander_ms {
+            return;
+        }
+        self.next_wander_ms = now_ms() + 60;
+        self.wander_phase = self.wander_phase.wrapping_add(1);
+        if self.wander_phase % 2 == 0 {
+            let next = wander_step(self.pan_deg, &mut self.wander_pan_dir);
+            if let Ok(d) = ph.servo_set(Axis::Pan, next) {
+                self.pan_deg = d;
+            }
+        }
+        if self.wander_phase % 5 == 0 {
+            let next = wander_step(self.tilt_deg, &mut self.wander_tilt_dir);
+            if let Ok(d) = ph.servo_set(Axis::Tilt, next) {
+                self.tilt_deg = d;
+            }
+        }
+        if self.wander_phase % 20 == 0 {
+            self.refresh_angle_row(ph);
+        }
+    }
+}
+
+/// 扫摆步进：deg ± 2°，端点（0/180）折返方向后返回新角度。dir 应为 ±1
+/// （WANDER 开关随机起步；0 防御上不会出现——0 时原地不动）。
+fn wander_step(deg: u32, dir: &mut i8) -> u32 {
+    let mut next = deg as i32 + *dir as i32 * 2;
+    if next >= 180 {
+        next = 180;
+        *dir = -1;
+    } else if next <= 0 {
+        next = 0;
+        *dir = 1;
+    }
+    next as u32
 }
 
 /// 帧面请求（协议门全过后的视图）：id/method/params 摘出，帧头位形随行携带
@@ -698,6 +749,7 @@ fn frame_handle_servo(
                 return Err(format!("角度超范围 0-180: {deg}"));
             }
             let d = ph.servo_set(axis, deg as u32)?;
+            st.wander_on = false; // 外部点名优先，自主扫摆让位
             match axis {
                 Axis::Pan => st.pan_deg = d,
                 Axis::Tilt => st.tilt_deg = d,
@@ -920,10 +972,15 @@ fn cmd_loop(mut ph: Periph) {
         glance_dx: 0,
         glance_dy: 0,
         drawn: (100, 0, 0),
+        wander_on: false,
+        wander_pan_dir: 0,
+        wander_tilt_dir: 0,
+        wander_phase: 0,
+        next_wander_ms: 0,
     };
     reply(
         &mut ph.uart,
-        "READY periph-base v0.3.0 line+frame+anim (type HELP for commands)",
+        "READY periph-base v0.3.1 line+frame+anim+wander (type HELP for commands)",
     );
     loop {
         let mut first = [0u8; 1];
@@ -934,6 +991,7 @@ fn cmd_loop(mut ph: Periph) {
         match ph.uart.read(&mut first, 1) {
             Ok(0) => {
                 st.anim_tick(&mut ph);
+                st.servo_tick(&mut ph);
                 continue;
             }
             Ok(_) => {}
@@ -962,7 +1020,7 @@ fn cmd_loop(mut ph: Periph) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | INFO | HELP"
+                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP"
                     .into(),
             ),
             "OLED" => {
@@ -990,6 +1048,7 @@ fn cmd_loop(mut ph: Periph) {
             }
             "PAN" => parse_deg(parts.next()).and_then(|deg| match ph.servo_set(Axis::Pan, deg) {
                 Ok(d) => {
+                    st.wander_on = false; // 外部点名优先，自主扫摆让位
                     st.pan_deg = d;
                     st.refresh_angle_row(&mut ph);
                     Ok(format!("OK pan={d}"))
@@ -998,6 +1057,7 @@ fn cmd_loop(mut ph: Periph) {
             }),
             "TILT" => parse_deg(parts.next()).and_then(|deg| match ph.servo_set(Axis::Tilt, deg) {
                 Ok(d) => {
+                    st.wander_on = false;
                     st.tilt_deg = d;
                     st.refresh_angle_row(&mut ph);
                     Ok(format!("OK tilt={d}"))
@@ -1010,6 +1070,7 @@ fn cmd_loop(mut ph: Periph) {
                     ph.servo_set(Axis::Tilt, t),
                 ) {
                     (Ok(p), Ok(t)) => {
+                        st.wander_on = false;
                         st.pan_deg = p;
                         st.tilt_deg = t;
                         st.refresh_angle_row(&mut ph);
@@ -1019,9 +1080,28 @@ fn cmd_loop(mut ph: Periph) {
                 },
                 _ => Err("SERVO 需两个 0-180 角度参数".into()),
             },
+            "WANDER" => match parts.next() {
+                Some("STOP") => {
+                    st.wander_on = false;
+                    Ok(format!("OK wander off pan={} tilt={}", st.pan_deg, st.tilt_deg))
+                }
+                None => {
+                    st.wander_on = true;
+                    // 两轴方向独立随机起步，立即起摆
+                    st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                    st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                    st.next_wander_ms = 0;
+                    Ok(format!(
+                        "OK wander on pan={} tilt={}",
+                        st.pan_deg, st.tilt_deg
+                    ))
+                }
+                Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
+            },
             "SCAN" => {
                 // 判据②：两轴各 0/45/90/135/180 五点，逐点串口回读设定角
                 let mut ok = true;
+                st.wander_on = false; // 判据测试不被自主扫摆扰动
                 for (i, deg) in [0u32, 45, 90, 135, 180].into_iter().enumerate() {
                     let p = ph.servo_set(Axis::Pan, deg);
                     let t = ph.servo_set(Axis::Tilt, deg);
