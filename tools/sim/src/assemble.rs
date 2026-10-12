@@ -255,8 +255,11 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
             .arg("--profile")
             .arg(&profile_dst)
             // mock 注入走 rrd env，boot spawn 的子模块全部继承：
-            // HAL 后端全落 sim；burst 波形让 VAD 周期发边沿；brain 云端走 mock
+            // HAL 后端全落 sim；sim 探针（MC-4：非 test 面不再默认 sim——开发机/CI
+            // 无 linux sysfs 硬件面，不显式选 sim 会被 fail-closed 判缺格、模块拒绝起）；
+            // burst 波形让 VAD 周期发边沿；brain 云端走 mock
             .env("RR3_HAL_BACKEND", "sim")
+            .env("RR3_PROBE", "sim")
             .env("RR3_HAL_SIM_WAVE", "burst")
             .env("RR3_BRAIN_CLOUD", "mock")
             .stdout(Stdio::from(

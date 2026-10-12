@@ -138,7 +138,15 @@ fn act_module_full_face_end_to_end() {
     // ---------- ① 装配单正门 boot：spawn 行回显真 entry → 注册 → running ----------
     // tick 必传小值（E2E_TICK_MS）：supervisor 扫尸节拍复用同一旋钮，安静 tick 会让
     // running 的收尸/广播永不发生（e2e_profile/e2e_spawn_restart 同一条纪律）。
-    let mut rrd = RrdTest::rr3_start_profile("e2e-act", &profile, E2E_TICK_MS);
+    // env 显式钉 sim 探针（MC-4：非 test 面不再默认 sim）：act 三格位归 PWM/GPIO
+    // 硬件面，开发机（macOS）与 CI runner 无这些 linux sysfs 设备，不显式选 sim
+    // 会被 fail-closed 判缺格、模块不 spawn（被测行为之外的夹具前提）。
+    let mut rrd = RrdTest::rr3_start_profile_env(
+        "e2e-act",
+        &profile,
+        E2E_TICK_MS,
+        &[("RR3_PROBE", "sim")],
+    );
     rrd.rr3_wait_log("rrd: 装配单已加载: ");
     let spawn = rrd.rr3_wait_log("spawn rr3-act pid=");
     assert!(

@@ -171,7 +171,15 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
         root.write_module(name);
     }
     let profile = root.write_profile(GOOD);
-    let mut rrd = RrdTest::rr3_start_profile("prof-full", &profile, E2E_TICK_MS);
+    // env 显式钉 sim 探针（MC-4：非 test 面不再默认 sim）：act.servo/sensor.env 归
+    // PWM/I2C 硬件面，开发机与 CI runner 无这些 linux sysfs 设备，不显式选 sim 会被
+    // fail-closed 判缺格、模块不 spawn（被测行为之外的夹具前提）。
+    let mut rrd = RrdTest::rr3_start_profile_env(
+        "prof-full",
+        &profile,
+        E2E_TICK_MS,
+        &[("RR3_PROBE", "sim")],
+    );
 
     // 装配单凭证行（横幅之后、监听行之前的 stdout 事实）：证明这条 boot 走的是正门，
     // 不是"给了 --profile 却按 --manifest 空表静默起了一个空 daemon"。
@@ -216,7 +224,14 @@ fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
     // 只删 bindings 里的 sensor.env 一行：enabled_slots 的 rr3-pb 声明还在 → 缺格判定命中它。
     // （删 enabled_slots 侧则是另一条路径：binding 未被认领 = 结构不自洽 = 致命，库层单测已钉。）
     let profile = root.write_profile(&GOOD.replace("\"sensor.env\" = \"rr3-pb\"\n", ""));
-    let mut rrd = RrdTest::rr3_start_profile("prof-missing", &profile, E2E_TICK_MS);
+    // env 显式钉 sim 探针（同 prof-full：缺格来自被删的 binding，不由探测缺引入——
+    // 若默认恒缺会把 pa/pc 也一起判缺，用例语义被污染）。
+    let mut rrd = RrdTest::rr3_start_profile_env(
+        "prof-missing",
+        &profile,
+        E2E_TICK_MS,
+        &[("RR3_PROBE", "sim")],
+    );
 
     // 缺格点名在 bind 之前（装配链先于监听行），到达序与 spawn 行无关——内容判据。
     rrd.rr3_wait_log("拒绝启动 rr3-pb：缺格 sensor.env");

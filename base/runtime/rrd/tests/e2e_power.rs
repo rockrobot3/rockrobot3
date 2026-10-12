@@ -121,14 +121,17 @@ fn power_module_low_battery_fallback_end_to_end() {
     let profile = root.write_profile(PROFILE);
 
     // ---------- ① 正门 boot：spawn → 注册 → running → 兜底触发 ----------
-    // env 显式钉 sim 后端（不赌平台默认）+ 5% 起表。tick 必传小值（E2E_TICK_MS）：
-    // supervisor 扫尸节拍复用同一旋钮，安静 tick 会让 ③ 的拒绝永不发生。
+    // env 显式钉 sim 后端（不赌平台默认）+ sim 探针（MC-4：非 test 面不再默认 sim，
+    // power.charger 归 I2C 面、开发机/CI 无该设备，必须显式选 sim 才不被判缺格）+
+    // 5% 起表。tick 必传小值（E2E_TICK_MS）：supervisor 扫尸节拍复用同一旋钮，
+    // 安静 tick 会让 ③ 的拒绝永不发生。
     let mut rrd = RrdTest::rr3_start_profile_env(
         "e2e-power",
         &profile,
         E2E_TICK_MS,
         &[
             ("RR3_HAL_BACKEND", "sim"),
+            ("RR3_PROBE", "sim"),
             ("RR3_HAL_SIM_BATTERY_PERCENT", "5"),
         ],
     );
