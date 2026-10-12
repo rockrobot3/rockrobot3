@@ -19,12 +19,13 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
+use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use serde_json::json;
 
 use support::{
     rr3_build_module_bin, rr3_connect_observer, rr3_field_from_log, rr3_json_of,
     rr3_module_manifest_text, rr3_read_call_reply, rr3_read_where, rr3_repo_root, rr3_rpc_frame,
-    rr3_send, RrdTest, SimManifest, E2E_TICK_MS,
+    rr3_send, RrdClient, RrdTest, SimManifest, E2E_TICK_MS,
 };
 
 /// --manifest 直驱的落盘薄封装：渲染文本来自 support 的 [`rr3_module_manifest_text`]，
@@ -38,6 +39,18 @@ fn rr3_module_manifest(tag: &str, name: &str, bin: &Path) -> SimManifest {
     std::fs::write(&path, rendered)
         .unwrap_or_else(|e| panic!("写夹具 manifest {} 失败: {e}", path.display()));
     SimManifest { path }
+}
+
+/// 发一帧 ctl 请求（src 按契约填 0），收回第一条 Response 体——e2e_act/e2e_ctl
+/// 同款帮手的本地副本（ctl 一问一答即断，逐拍新开裸连接）
+fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
+    rr3_send(c, &rr3_rpc_frame(method, id, json!({}), 0));
+    let f = rr3_read_where(c, &format!("{method} 的应答"), |f| {
+        rr3_body_split(&f.payload)
+            .map(|(ty, _)| ty == Rr3PayloadType::Response)
+            .unwrap_or(false)
+    });
+    rr3_json_of(&f)
 }
 
 #[test]
@@ -179,6 +192,29 @@ fn audio_chain_sense_to_interact_end_to_end() {
     assert!(
         seq > last.unwrap_or(0),
         "回路之后流必须继续推进: {seq} <= {last:?}"
+    );
+
+    // ---------- ⑤ 采集新鲜度记账（批M M-β S-3）：ctl.counters 有界轮询 ----------
+    // sense 每发布一帧 pcm 记一笔 pcm_frames、读回欠载空帧（done==0，"活着但
+    // 不动"的饿死信号）另账 pcm_empty_frames——采集链是否真在出数从 e2e 的
+    // "旁观者收到过帧"升级为**可点验的运维账**（MC-11 判据：卡死与静默停摆
+    // 看得见）。ctl 只对未注册连接开放（ADR-0010），逐拍新开裸连接一问一答；
+    // 心跳拍上报有延迟，有界轮询（12 拍 × 250ms = 3s 上界）。
+    let mut frames = 0u64;
+    for attempt in 0..12u64 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let mut ctl = rrd.rr3_connect();
+        let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.counters", 500 + attempt);
+        frames = v["result"]["counters"]["rr3-sense/pcm_frames"]
+            .as_u64()
+            .unwrap_or(0);
+        if frames >= 1 {
+            break;
+        }
+    }
+    assert!(
+        frames >= 1,
+        "sim 源跑满数秒后 rr3-sense/pcm_frames 必须非零（采集新鲜度的记账线）: {frames}"
     );
 }
 

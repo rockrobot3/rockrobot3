@@ -74,6 +74,15 @@ C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：原申报发布的 `a
 面板**不是第二条控制面**：它经 rr-bus 收发、与模块同权，不得绕过 rrd 的注册与
 前缀归属检查（ADR-0006 §裁定 3）。
 
+## 心跳自报计数（0.0.5 批M M-β I-4）
+
+`bus.rr3_counter_bump` 记账，随 `rr3.heartbeat` 的可选 `counters` 字段上行，rrd 按
+`rr3-interact/<键>` 归并（`rr3.ctl.counters` 可查）。本模块的键：
+
+| 键 | 记账点 |
+|---|---|
+| `panel_spawn_fail` | `panel/server.rs 的 RR3_PANEL_SPAWN_FAIL_KEY`（字面量唯一落点）；连接线程 spawn 失败时点账并弃置该连接，accept 循环继续服务（I-4：面板是运维的最后一扇门，一条连接起不来不退循环） |
+
 ## 本地自检
 
 ```bash
