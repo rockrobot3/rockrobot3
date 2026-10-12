@@ -1945,6 +1945,27 @@ fetch 端点字面量是功能调用非文案，保留）。教训三条：① `
 索引 §1 切分表/§8 待裁表、brain/interact 设计册、三份 README），漏一处就被断链门或下轮
 对表抓。敞口：MC-8① `cutoff_voltage_mv` 归 M-ζ 与 MC-5 低电禁动同批联动实装（Q2 裁定）。
 
+2026-10-12 0.0.5 增补轮五 批M M-β 收官（MC-11 四件：L-6 / A-6 / S-3 / I-4，判据
+"已实装行为有护栏、卡死与静默停摆看得见"）——编码面 `3bc30f1`（8 files，+388/−12），
+十步门禁直跑 GATE_EXIT=0（54 PASS）全绿，推三远端 ls-remote 四端指针核对一致。四件
+交付：**L-6**——relay/state 同态抑制 RPC 路 e2e 断言补进 `e2e_act` ④b（intent 路 ⑤b
+批I 已有；先红后绿走破坏性验证：临时解除 RPC 路抑制→红→恢复→绿，证断言真有牙齿）。
+**A-6**——`reflex.rs` 窗结算 `reflex_ticks` 落账（值 = 窗内实跑节拍数），`e2e_act` ⑧
+经 `rr3.ctl.counters` 有界轮询点验（先红后绿）。**S-3**——`rr3-sense/composite.rs`
+`pcm_frames`（发布成功一帧 +1）/ `pcm_empty_frames`（空帧另账）两键，`e2e_audio_chain`
+⑤ 同法点验（先红后绿）。**I-4**——panel spawn 失败改"弃置该连接 + `panel_spawn_fail`
+点账，accept 循环继续服务"（旧语义 `?` 上抛使面板静默消失），`rr3_panel_accept_loop`
+抽缝 + `Rr3ConnSlot` RAII 守卫管 `live` 计数（Drop 归还，panic 展开不泄漏）。教训五条：
+① macOS 对 `thread::Builder::stack_size(1)` **静默 clamp 使 spawn 成功**（线程带极小栈
+一跑即溢出 SIGABRT），确定性必败注入须 `stack_size(usize::MAX)`（EINVAL）；② `matches!`
+/闭包 move 后 Err 分支再用原值报 E0382——spawn 前另 clone 一份给记账分支；③
+`rr3_body_split` 返回 `Result` 非 `Option`，`.map_err(|_| ())` 而非 `.ok_or(())`；④
+A-7 守恒核清：`tools/sim/chain.rs` 观察者只收 vad/servo、legacy 面板 relay 按钮只调
+`/api/relay`，两处均不按帧数 relay/state——零改，落档注记即可；⑤ I-4 账平断言在门禁
+全量并行下撞过一回调度窗（53 PASS 单红，同日另撞 `e2e_spawn_restart` 与 rr-ipc uart
+重开两条已知时序 flake，均复跑两连绿定性）——"handler 写完应答"与"线程退出归还槽位"
+之间无同步点，读到 200 不等于账已平，断言改 1s 上界有界等待（`91b473c`，产品语义零改）。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
