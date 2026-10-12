@@ -1923,6 +1923,28 @@ sentinel 真身在 esp-idf/v5.2.1/ 子目录（传父目录被判 not a git repo
 十步门禁 GATE_EXIT=0 全绿；敞口：判据④（堵转 UBEC≥4.7V/板子不复位）待舵机接线窗口，
 读侧阻塞无超时归批E 桥面统一收口。
 
+2026-10-12 0.0.5 增补轮五 批M M-α 收官（MC-9 + MC-8②③：台账诚实化 + 回显型参数与自述
+一致）——编码面 `ba90367`（20 files，+132/−43），十步门禁直跑 GATE_EXIT=0（54 PASS）全绿，
+推三远端 ls-remote 四端指针核对一致。三件交付：**MC-9 判 (a)**——`contracts/slots.toml`
+`net.bt` 格 `normal`→`placeholder`（note 写明触发条件 = 配网备选通道立项 / BlueZ 真后端批，
+承诺 ≤ 事实），bt 件 SURFACE 与三处注释同批写明"骨架，不 claim 射频"，`rr-registry` 契约
+测试补 status 数据位断言并钉"其余 18 格 normal"——21 格 = 18 normal + 3 placeholder
+（sensor.env/sensor.imu/net.bt）；⑧-a 门只读数据位、脚本零改（"门不许 if 件名"的判据天然
+成立，sensor.env/imu 先例同构）。**MC-8②（B-10）**——brain `API_KEY_ENV` 改通用键
+`RR3_CLOUD_API_KEY`（原 `SILICONFLOW_API_KEY` 把云供应商焊进代码），供应商归 config
+`[rr3-brain.cloud]` 的 `base_url`/模型名（换云只改配置不改码），测试三处 + config 头注 +
+brain README 两行 + conventions 密钥条目同批换名。**MC-8③（I-9/I-12）**——interact panel
+立 `RR3_PANEL_ROUTES: &[(&str, &str)]` 端点总表为唯一真值：启动自述与 serve 行的端点数由
+`RR3_PANEL_ROUTES.len()` 推导（手写数字消解），表↔分派漂移由 `route_table_matches_dispatch`
+单测钉死（表内逐条路由可分派 + 表外 NotFound 反例 + 计数 pin）；SURFACE 由 `&[&str]` 常量
+改 `rr3_panel_surface() -> Vec<String>`（const 上下文不能 `format!`，推导数字必须运行期
+组装），composite.rs 启动自述打印拆两段循环保序；静态页头注释撤计数改指向后端表（页面
+fetch 端点字面量是功能调用非文案，保留）。教训三条：① `matches!(d, …)` 会 move，后续
+`"{d:?}"` 报 borrow of moved value——借引用匹配 `matches!(&d, …)`；② 仓根无 workspace
+清单，fmt 需按 crate `cargo fmt --manifest-path` 跑；③ 文档计数 pin 位同批点齐（模块设计
+索引 §1 切分表/§8 待裁表、brain/interact 设计册、三份 README），漏一处就被断链门或下轮
+对表抓。敞口：MC-8① `cutoff_voltage_mv` 归 M-ζ 与 MC-5 低电禁动同批联动实装（Q2 裁定）。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
