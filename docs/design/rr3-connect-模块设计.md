@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | wifi | `Rr3LinkEdge::rr3_link_edge_new()` / `rr3_link_edge_cross(&mut self, up: bool) -> bool` | 链路读数 → 翻转判定 | `last: Option<bool>`（**不是** `last_up: bool`）——首读无基线，`None` 时**第一次读数即算一次翻转**返回 true，用例喂的序列也带这一拍 | — |
 | wifi | `rr3_link_body(seq: u64, st: &Rr3LinkState, mode: &str) -> Value` | 读数 + 配网态 → 流载荷 | 无 | — |
-| wifi | `Rr3Provision::{rr3_provision_new, rr3_provision_mode() -> &'static str, rr3_provision_connect(ssid: String, pass: String), rr3_provision_forget()}` | 配网事务 | `mode: ap\|station` | 不落盘、重启即忘 |
+| wifi | `Rr3Provision::{rr3_provision_new, rr3_provision_mode() -> &'static str, rr3_provision_connect(ssid: String, pass: String), rr3_provision_forget()}` | 配网事务 | `mode: ap\|station` | 件内不写文件；凭据由后端承载持久化（MC-6） |
 | wifi | `rr3_wifi_{scan,connect,forget}_parse_args(...) -> Result<…,_>` + 三个 `*_result(...) -> Value` | 点名参数/应答 | 无 | 参数错 → 业务 error |
 | bt | `Rr3BtPhase`（`off`/`discoverable`/`connected`）+ `rr3_bt_phase_name` | — | — | — |
 | bt | `rr3_bt_phase(&self) -> Rr3BtPhase`（**不返 bool**）+ `rr3_bt_power_on/link_up/link_down/power_off -> bool`（四个转移事件才返"是否发生转移"） | 事件 → 是否发生转移 | `phase` | 非法转移 → `false` 且**状态不动** |
@@ -81,7 +81,7 @@
 
 ## §7 安全核接入
 
-无机械安全核。守护语义**两条成立**（断链抹身份防假新鲜、凭据不落盘），**一条只是声明**：
+无机械安全核。守护语义**两条成立**（断链抹身份防假新鲜、凭据由后端承载持久化且件内不写文件——MC-6 已结 `084d081`），**一条只是声明**：
 `tls_min_version="1.3"` 今天没有任何读者，把它写成"下限"是给未实装的能力提前记账（§10 N-6 处置）；
 另有**面板→本单元的转发不含裁决**（裁决在 owner，即本件的 `*_parse_args`）。
 
@@ -101,7 +101,7 @@
 - 断言：`connect` 的 `connected` 只取读数，**永不**因请求成功而置真。
 - 断言：配网三点名的字段名与文案（`pass`、"密码至少 8 位"）是 legacy 面板依赖的契约字面量。
 - 断言：bt 不登记主题（新增即契约变更，需评审）。
-- 断言：凭据不落盘（`Provision` 无文件写路径）。
+- 断言：件内不写文件（`Provision` 无文件写路径；持久化由后端承载——MC-6）。
 
 ## §10 改造工单
 
