@@ -87,12 +87,29 @@ use serde_json::{json, Value};
 const I2C_TIMEOUT: TickType_t = u32::MAX;
 /// I2C 写重试次数（**有限电源优化**：板载 5V 直供下舵机转动/保持的电流尖峰拉塌轨压、
 /// 或总线噪声，会让 SSD1306 事务瞬态失败 ESP_FAIL/NACK——真板实录"角度行刷新失败:
-/// I2C 命令写失败 ESP_FAIL"即此。失败事务末尾 STOP 已发、总线已释放，重发安全；
-/// 重试覆盖瞬态，不碰硬件、不阻塞控制面。6 次 × 5ms 退避 ≈ 30ms 窗，
-/// 覆盖真板实测的"单页 4 连败"短暂坏窗）。
-const I2C_RETRY: u32 = 6;
+/// I2C 命令写失败 ESP_FAIL"即此）。**每笔失败先走 [`i2c_bus_recover`] 总线自愈**
+/// （见其注：丢拍会把从机锁进"等时钟"态，此后重发恒不复——这是真板 8 页胶囊眼
+/// 恒败的真因），故 3 次已足（恢复+重发≈必过），无需长窗死磕）。
+const I2C_RETRY: u32 = 3;
 /// I2C 重试间隔（给轨压/总线一点恢复时间，勿紧逼重发再撞失败）。
 const I2C_RETRY_DELAY_MS: u64 = 5;
+/// I2C 总线频率（SSD1306 标准档）。**真板实锤：必须 100k，不能降到 50k**——50k 档
+/// 下连 init 的清屏页写（33B 数据笔）都恒 `ESP_FAIL`（命令笔 ≤4B 恒过），比 100k 更
+/// 差；老 I2C 驱动的低速档时序是反直觉的坏档。100k 是 SSD1306 标准档、真板实测
+/// init/boot 文本恒过（唯有背靠背 8 页密集写会丢拍），靠 [`i2c_bus_recover`] 自愈兜底。
+const I2C_BAUD_HZ: u32 = 100_000;
+/// 分块间短延时：给模块电荷泵与总线电平留一拍（边际失败集中在背靠背事务）。
+const I2C_CHUNK_GAP_MS: u64 = 1;
+/// 单页整页重试上限：失败 → 总线恢复 → **从页首重写整页**（一笔数据丢拍后从机的
+/// 列指针已错位，只重发该块会写歪；整页重发把指针拉回确定性起点）。外层还有
+/// [`RtPeriph::capsules_degrading`] 的降亮重来，故本层不必死磕。
+const I2C_PAGE_ATTEMPTS: u32 = 2;
+/// OLED 亮度阶梯（**整板电压降级**，本轮真板实锤的主修复）：SSD1306 满亮（0xCF）下
+/// 大面亮点会把模块升压电路电流顶高、抬高地弹/轨压噪声，反噬 I2C 通信——真板实录
+/// "空白页 8 页恒过、boot 文本小面积恒过、8 页胶囊眼在**页 3（大面亮点开始上屏）**
+/// 起恒 `ESP_FAIL`，且此后整屏恒败";降到 0x2F 后胶囊眼 8 页全过、微动作连跑零失败。
+/// 初始取中档，I2C 反复失败即逐级下调保通信——"极限电源下宁暗不瞎"。
+const OLED_CONTRAST_LEVELS: [u8; 4] = [0x4F, 0x3F, 0x2F, 0x1F];
 /// SSD1306 I2C 从机地址（0.96" 128x64 模块缺省）。
 const OLED_ADDR: u8 = 0x3C;
 /// OLED 每行字符数：5px 字模 + 1px 间隔 = 6px/字符，128px/6 = 21.3 → 21 列。
@@ -108,6 +125,12 @@ const THREAD_STACK: usize = 16384;
 /// 轴间整定（**串行降级**：先 pan 到位 → 等这么久 → 再 tilt）。SG90 空载约
 /// 0.1s/60°，本轴最大行程 40° 约 67ms，200ms 留裕量（含负载迟滞与死区）。
 const AXIS_SETTLE_MS: u64 = 200;
+/// 舵机缓速步进（**极限电源下的软启动**）：每次只挪 [`SERVO_SLEW_STEP_DEG`] 度、
+/// 每步歇 [`SERVO_SLEW_STEP_MS`]——把"整段跳变"的启动/换向电流尖峰摊成涓流，
+/// 避免板载 5V 直供被单次大电流拉塌（真板 BOD 复位实录）。2°/20ms = 100°/s，
+/// pan 满行程 60° 约 600ms、tilt 20° 约 200ms，慢于 SG90 空载能力但最省轨压。
+const SERVO_SLEW_STEP_DEG: u32 = 2;
+const SERVO_SLEW_STEP_MS: u64 = 20;
 /// SCAN 每轴每点驻留（判据② 逐点回读；串行后单点 = pan 段 + tilt 段各一次）。
 const SCAN_POINT_MS: u64 = 600;
 /// 运行面自主节拍（表情微动作 + 云台扫摆；无作业时空转一拍）。
@@ -139,8 +162,9 @@ const DUTY_MIN: u32 = 410;
 const DUTY_MAX: u32 = 2048;
 
 // ---------------------------------------------------------------------------
-// 分轴行程（0.0.5 方案 C 裁定 2026-10-12：pan 相对中位 ±20°、tilt 相对中位 ±10°
-// ——tilt 由 ±5° 放宽，纳现场实测所需的上抬 98°，行程 [80,100]）
+// 分轴行程（方案 C 裁定 2026-10-12；现场续批再裁：pan 由 ±20° 放宽到 ±30°）
+// ——pan 相对中位 ±30°、tilt 相对中位 ±10°（tilt 由 ±5° 放宽，纳现场实测所需的
+// 上抬 98°，行程 [80,100]）
 // ---------------------------------------------------------------------------
 //
 // 真板实锤（批C v0.3.2 与现场排障）：云台机械行程远小于 SG90 全程 0–180°——
@@ -149,13 +173,18 @@ const DUTY_MAX: u32 = 2048;
 // 叠加板载 USB 5V 直供时触发欠压复位与 USB 链路反复掉线。故本轴行程以中位为
 // 基准收窄，越界**拒收点名**（fail-closed：静默钳到边界会让调用方误以为按给值
 // 生效），WANDER/SCAN 的端点与判据点一律收进区间内。
+// **pan ±30°（用户 2026-10-12 现场裁定，纳"左转 30°"所需）**：放宽后若机械到不了
+// 边界会持续堵转——现场须目视，一旦卡住即断电（见 README 现场注记）。
 
 /// 云台中位绝对角（两轴共用刻度中点；boot 置位与角度行基准）。
 const AXIS_CENTER_DEG: u32 = 90;
 /// pan（水平轴）相对中位的最大摆幅。
-const PAN_LIMIT_DEG: u32 = 20;
+const PAN_LIMIT_DEG: u32 = 30;
 /// tilt（俯仰轴）相对中位的最大摆幅。
 const TILT_LIMIT_DEG: u32 = 10;
+/// 开机默认姿态（用户现场裁定）：pan 左转 30°（中位 −30）、tilt 上抬 8°（中位 +8）。
+const BOOT_PAN_DEG: u32 = AXIS_CENTER_DEG - 30;
+const BOOT_TILT_DEG: u32 = AXIS_CENTER_DEG + 8;
 
 /// 角度 → duty ticks（线性 0–180 ↦ 410–2048；入参已由调用方 clamp 0–180）。
 fn deg_to_duty(deg: u32) -> u32 {
@@ -282,10 +311,10 @@ fn glyph(c: u8) -> [u8; 5] {
 // SSD1306 原语驱动（命令流 0x00 控制字节 / 数据流 0x40 控制字节；页寻址模式）
 // ---------------------------------------------------------------------------
 
-/// 带重试的 I2C 写（**运行面慢 I2C 的电源扰动兜底**）：瞬态失败重试 [`I2C_RETRY`]
-/// 次、每次隔 [`I2C_RETRY_DELAY_MS`]。失败事务末尾 STOP 已发、总线已释放，重发安全
-/// （SSD1306 每笔 START-addr-bytes-STOP 独立）。成功即返回；全败才回 Err（文案带
-/// 重试次数与末次错因，便于 monitor 判因）。
+/// 带重试的 I2C 写（**总线自愈 + 瞬态兜底**）：失败先 [`i2c_bus_recover`] 解卡再重发，
+/// 至多 [`I2C_RETRY`] 次、每次隔 [`I2C_RETRY_DELAY_MS`]。SSD1306 每笔
+/// START-addr-bytes-STOP 独立，重发安全。成功即返回；全败才回 Err（文案带重试次数
+/// 与末次错因，便于 monitor 判因）。
 fn i2c_write_retry(i2c: &mut I2cDriver, addr: u8, bytes: &[u8]) -> Result<(), String> {
     let mut last = String::new();
     for attempt in 0..=I2C_RETRY {
@@ -294,12 +323,73 @@ fn i2c_write_retry(i2c: &mut I2cDriver, addr: u8, bytes: &[u8]) -> Result<(), St
             Err(e) => {
                 last = format!("{e:?}");
                 if attempt < I2C_RETRY {
+                    // 失败即先自愈总线再退避重发（丢拍锁死是本工程主故障模式）
+                    i2c_bus_recover(false);
                     thread::sleep(Duration::from_millis(I2C_RETRY_DELAY_MS));
                 }
             }
         }
     }
     Err(format!("（重试 {I2C_RETRY} 次后）{last}"))
+}
+
+/// I2C 总线自愈（**运行期恢复，与启动期 [`i2c_bus_unstick`] 同机理**）：SSD1306 在
+/// 某笔事务中途丢拍（总线噪声/轨压瞬降）时会把自己锁在"等后续时钟"状态——此后主机
+/// 每次 START 它一律不应答（真板实录：8 页胶囊眼密集页写中一笔数据段失败后，其后
+/// **所有**事务恒 `ESP_FAIL`，重试 6 次 × 5ms 不复、锁死到复位；而短命令笔与 boot
+/// 4 页因未撞上丢拍恒过）。恢复动作三步：
+/// 1) 把 SDA/SCL 抢回 GPIO（IOMUX 由 I2C 切到 GPIO 功能）；
+/// 2) 若 SDA 被从机拉住 → 手动打 9 个 SCL 时钟走完其位计数器，再补 STOP 释放；
+/// 3) `i2c_set_pin` 把两脚**交还 I2C 外设**（否则位置留在 GPIO 功能，后续事务全废）。
+/// 与启动期版本唯一差别就是第 3 步（启动期驱动尚未装，不需要交还）。
+///
+/// `force` 参数：**无条件**打 9 时钟 + STOP。真板实锤（2026-10-12 第二批）：舵机电机
+/// 换向噪声会在**空闲期**（两笔事务之间）把 SSD1306 的 I2C 状态机顶进"半途态"——此后
+/// 恒 NACK，而**此刻 SDA 是高电平**（不是被拉低的"锁死"），故条件版（只在 SDA 低时打
+/// 时钟）根本不触发、救不回来。故在每次动作收尾（尤其舵机动作后）**强制**重同步一次。
+fn i2c_bus_recover(force: bool) {
+    use esp_idf_sys as sys;
+    const SDA: i32 = 21;
+    const SCL: i32 = 22;
+    unsafe {
+        sys::gpio_set_direction(SDA, sys::gpio_mode_t_GPIO_MODE_INPUT);
+        sys::gpio_set_pull_mode(SDA, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
+        sys::gpio_set_direction(SCL, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+        sys::gpio_set_pull_mode(SCL, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
+        sys::gpio_set_level(SCL, 1);
+        sys::esp_rom_delay_us(5);
+        let stuck = sys::gpio_get_level(SDA) == 0;
+        if force || stuck {
+            // SDA 被从机拉低 = 丢拍锁死：9 个时钟走完从机位计数器 + STOP 释放。
+            // force 但 SDA 高 = 半途态：同样打 9 时钟 + STOP 把从机推回 idle。
+            if stuck {
+                println!("[periph] I2C 自愈：SDA 被从机拉低（丢拍锁死），打 9 时钟 + STOP");
+            }
+            for _ in 0..9 {
+                sys::gpio_set_level(SCL, 0);
+                sys::esp_rom_delay_us(5);
+                sys::gpio_set_level(SCL, 1);
+                sys::esp_rom_delay_us(5);
+            }
+            sys::gpio_set_direction(SDA, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+            sys::gpio_set_level(SDA, 0);
+            sys::esp_rom_delay_us(5);
+            sys::gpio_set_level(SCL, 1);
+            sys::esp_rom_delay_us(5);
+            sys::gpio_set_level(SDA, 1);
+            sys::esp_rom_delay_us(5);
+            sys::gpio_set_direction(SDA, sys::gpio_mode_t_GPIO_MODE_INPUT);
+        }
+        // 交还 I2C 外设（IOMUX 复位为 I2C 功能 + 内部上拉），驱动内部状态不受影响
+        sys::i2c_set_pin(
+            sys::i2c_port_t_I2C_NUM_0,
+            SDA,
+            SCL,
+            true,
+            true,
+            sys::i2c_mode_t_I2C_MODE_MASTER,
+        );
+    }
 }
 
 /// 发命令（控制字节 0x00 + 命令字节序列）。SSD1306 控制字节 Co=0/D/C#=0 表示
@@ -320,19 +410,43 @@ fn oled_cmd(i2c: &mut I2cDriver, cmds: &[u8]) -> Result<(), String> {
 /// 真板实录——129B 单笔在跳线/弱上拉面连重试 3 次仍 ESP_FAIL，而短命令笔（≤26B）
 /// 恒过：ESP32 老 I2C 驱动的硬件 FIFO 即 32B，长事务是其边际路径。SSD1306 页寻址
 /// 下列指针跨事务自动递增（数据手册 §8.1.5.2 连续数据模式），分块续写等价于单笔。
+///
+/// **整页重试**（外层）：任一块失败 → [`i2c_write_retry`] 内部已解卡，但丢拍后从机
+/// 列指针已错位，故本层**把整页（页地址 + 128B）从确定性起点重写**，至多
+/// [`I2C_PAGE_ATTEMPTS`] 次；块间留 [`I2C_CHUNK_GAP_MS`]。
 fn oled_page(i2c: &mut I2cDriver, page: u8, data: &[u8; 128]) -> Result<(), String> {
     /// 单笔数据字节上限（= 硬件 FIFO 32B，留控制字节外的整块）。
     const CHUNK: usize = 32;
+    let mut last = String::from("未知");
+    for _ in 0..I2C_PAGE_ATTEMPTS {
+        match oled_page_once(i2c, page, data, CHUNK) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = e,
+        }
+    }
+    Err(format!("（整页重写 {I2C_PAGE_ATTEMPTS} 次后）{last}"))
+}
+
+/// 单页单趟写（页地址命令 + 分块数据）。失败即返回，由 [`oled_page`] 决定整页重写。
+fn oled_page_once(
+    i2c: &mut I2cDriver,
+    page: u8,
+    data: &[u8; 128],
+    chunk: usize,
+) -> Result<(), String> {
     oled_cmd(i2c, &[0xB0 | page, 0x00, 0x10])?;
     let mut buf = [0u8; 33];
     buf[0] = 0x40;
     let mut off = 0usize;
     while off < data.len() {
-        let n = CHUNK.min(data.len() - off);
+        let n = chunk.min(data.len() - off);
         buf[1..1 + n].copy_from_slice(&data[off..off + n]);
         i2c_write_retry(i2c, OLED_ADDR, &buf[..1 + n])
-            .map_err(|e| format!("I2C 页数据写失败: {e}"))?;
+            .map_err(|e| format!("I2C 页数据写失败 page={page} off={off} n={n}: {e}"))?;
         off += n;
+        if off < data.len() {
+            thread::sleep(Duration::from_millis(I2C_CHUNK_GAP_MS));
+        }
     }
     Ok(())
 }
@@ -352,7 +466,9 @@ fn oled_init(i2c: &mut I2cDriver) -> Result<(), String> {
             0xA1, // segment remap
             0xC8, // COM scan dec
             0xDA, 0x12, // COM pins
-            0x81, 0xCF, // contrast
+            0x81, OLED_CONTRAST_LEVELS[0], // contrast（**初始中档**；见 OLED_CONTRAST_LEVELS
+                         // ——满亮 0xCF 会在胶囊眼大面亮点上屏时反噬 I2C，故起点即已调低，
+                         // 失败再逐级往下走）
             0xD9, 0xF1, // precharge
             0xDB, 0x40, // VCOM detect
             0xA4, // resume from RAM
@@ -419,6 +535,12 @@ struct RtPeriph {
     i2c: I2cDriver<'static>,
     pan: LedcDriver<'static>,
     tilt: LedcDriver<'static>,
+    /// 各轴**记账角**（缓速步进的起点：只有本面驱动舵机，故本面记账即真值；duty=0
+    /// 未激磁期以中位起算，避免首帧从 0° 起跳的假行程）。
+    pan_deg: u32,
+    tilt_deg: u32,
+    /// 当前 OLED 亮度档下标（整板电压降级用；见 [`OLED_CONTRAST_LEVELS`]）。
+    contrast_idx: usize,
 }
 
 /// 轴行程校验（**控制面纯函数**：只算不碰硬件，故控制面能在下发作业前即时拒）。
@@ -440,20 +562,80 @@ fn axis_check(axis: Axis, deg: u32) -> Result<u32, String> {
 }
 
 impl RtPeriph {
-    /// 舵机转角（先过本轴行程裁决 → duty → set+update；返回实际设定角）。
+    /// 舵机转角（先过本轴行程裁决 → **缓速步进**逼近 → 返回实际设定角）。
     /// 协议级 0–180 之外的角先被拒；轴行程（中位 ± 摆幅）之外**点名拒收**，
-    /// 不静默钳位——见文件头"分轴行程"段。
+    /// 不静默钳位——见文件头"分轴行程"段。缓速步进见 [`SERVO_SLEW_STEP_DEG`]
+    /// （极限电源下的软启动：把整段跳变的电流尖峰摊成涓流）。
     fn servo_set(&mut self, axis: Axis, deg: u32) -> Result<u32, String> {
         let deg = axis_check(axis, deg)?;
-        let duty = deg_to_duty(deg);
-        let driver = match axis {
-            Axis::Pan => &mut self.pan,
-            Axis::Tilt => &mut self.tilt,
+        let cur = match axis {
+            Axis::Pan => self.pan_deg,
+            Axis::Tilt => self.tilt_deg,
         };
-        driver
-            .set_duty(duty)
-            .map_err(|e| format!("LEDC set_duty 失败: {e:?}"))?;
+        let mut step = cur;
+        while step != deg {
+            step = if deg > step {
+                (step + SERVO_SLEW_STEP_DEG).min(deg)
+            } else {
+                step.saturating_sub(SERVO_SLEW_STEP_DEG).max(deg)
+            };
+            let driver = match axis {
+                Axis::Pan => &mut self.pan,
+                Axis::Tilt => &mut self.tilt,
+            };
+            driver
+                .set_duty(deg_to_duty(step))
+                .map_err(|e| format!("LEDC set_duty 失败: {e:?}"))?;
+            if step != deg {
+                thread::sleep(Duration::from_millis(SERVO_SLEW_STEP_MS));
+            }
+        }
+        match axis {
+            Axis::Pan => self.pan_deg = deg,
+            Axis::Tilt => self.tilt_deg = deg,
+        }
         Ok(deg)
+    }
+
+    /// 下调一档 OLED 亮度（**整板电压降级**：见 [`OLED_CONTRAST_LEVELS`]）。已到地板
+    /// 返回 false（调用方据此收手）；未到则写新档并返回 true。
+    fn degrade_contrast(&mut self) -> bool {
+        if self.contrast_idx + 1 >= OLED_CONTRAST_LEVELS.len() {
+            return false;
+        }
+        self.contrast_idx += 1;
+        let lv = OLED_CONTRAST_LEVELS[self.contrast_idx];
+        match oled_cmd(&mut self.i2c, &[0x81, lv]) {
+            Ok(()) => println!("[periph] OLED 降亮 → 0x{lv:02X}（轨压降级第 {} 档）", self.contrast_idx),
+            Err(e) => eprintln!("[periph] 降亮写失败: {e}"),
+        }
+        true
+    }
+
+    /// 渲染胶囊眼（**带整板电压降级**）：整屏渲染失败即降一档亮度重来，到地板仍败
+    /// 才回 Err。真板主故障（大面亮点 → 轨压/地弹 → I2C 丢拍）由此闭环自愈。
+    fn capsules_degrading(&mut self, open: u32, dx: i16, dy: i16) -> Result<(), String> {
+        loop {
+            match oled_capsules(&mut self.i2c, open, dx, dy) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    if !self.degrade_contrast() {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 舵机让位（**供电分时仲裁**）：板载 5V 轨上 SSD1306 电荷泵与舵机保持电流
+    /// **不能共存**——真板实锤（2026-10-12）：两轴激磁时 OLED 页写/命令笔恒
+    /// `ESP_FAIL`（地址单笔因弱上拉假 ACK 仍"通过"，具欺骗性），而**掉 duty 后同一笔
+    /// 立刻 Ok**；且激磁越久越顽固（一度到掉 duty 也不复、需重走 init）。
+    /// 故除"正在移动"外一律释放两轴：把 5V 轨整段让给 OLED。运行面单线程、渲染与
+    /// 移动在时间上本就串行，故本函数在**每次动作收尾**调用即可保证两者零重叠。
+    fn servo_release(&mut self) {
+        let _ = self.pan.set_duty(0);
+        let _ = self.tilt.set_duty(0);
     }
 
     /// OLED 文本 3 行（21 列硬切）+ 角度行（row 3）刷新。
@@ -761,7 +943,7 @@ impl PeriphState {
     /// 云台自主扫摆决策（**纯计算**，60ms 一拍）：pan 每 2 拍走 2°（≈16.7°/s，
     /// 行程 40° 单程约 2.4s）、tilt 每 4 拍走 3°（≈12.5°/s，行程 10° 单程约 1s），
     /// 端点折返持续不停。**端点 = 本轴行程边界**（[`Axis::range`]，方案 C 分轴限幅：
-    /// pan 中位±20° / tilt 中位±10°）——旧版折返点在 0/180，会把舵机推过机械死点
+    /// pan 中位±30° / tilt 中位±10°）——旧版折返点在 0/180，会把舵机推过机械死点
     /// 并持续施力（真板表现为卡死 + 发烫）。步幅下限实测定标：tilt 托整个云台上部
     /// （重载），2°/300ms 部分落死区里视觉近乎不动——tilt 用 3°（≈27 ticks）可见。
     /// **串行降级：同一拍只驱动一轴**（tilt 拍占位时该拍跳过 pan）——两轴错拍，
@@ -1177,10 +1359,48 @@ fn drain_outbox(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>) {
 // 运行面（独占 I2C0 + LEDC）：执行硬件作业 + 自主节拍（表情微动作 / 云台扫摆）
 // ---------------------------------------------------------------------------
 
+/// I2C 总线解卡（**欠压复位后的自愈**）：ESP32 在 SSD1306 事务中途被 BOD 复位时，
+/// 从机常保持 SDA 低电平（半个字节未收完），此后主机每次 START 都撞"总线忙"→
+/// 全部事务 NACK/超时（真板实录：复位后 boot 扫描恒 `[]`、init 5 连败）。IC 上电
+/// 前先用 GPIO 手动发 9 个 SCL 时钟把从机的位计数器走完、再补一个 STOP，SDA 即
+/// 释放。裸寄存器操作（不进 HAL 驱动状态机），随后 I2cDriver::new 会重配这两脚。
+unsafe fn i2c_bus_unstick() {
+    use esp_idf_sys as sys;
+    let sda = 21i32;
+    let scl = 22i32;
+    // SDA 输入上拉（读电平）、SCL 开漏输出上拉
+    sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
+    sys::gpio_set_pull_mode(sda, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
+    sys::gpio_set_direction(scl, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+    sys::gpio_set_pull_mode(scl, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
+    sys::gpio_set_level(scl, 1);
+    sys::esp_rom_delay_us(5);
+    if sys::gpio_get_level(sda) == 0 {
+        // SDA 被从机拉低 = 卡死：走 9 个时钟
+        for _ in 0..9 {
+            sys::gpio_set_level(scl, 0);
+            sys::esp_rom_delay_us(5);
+            sys::gpio_set_level(scl, 1);
+            sys::esp_rom_delay_us(5);
+        }
+        // 补一个 STOP：SCL 高时 SDA 由低→高
+        sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+        sys::gpio_set_level(sda, 0);
+        sys::esp_rom_delay_us(5);
+        sys::gpio_set_level(scl, 1);
+        sys::esp_rom_delay_us(5);
+        sys::gpio_set_level(sda, 1);
+        sys::esp_rom_delay_us(5);
+        sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
+        println!("[periph] I2C 总线解卡：SDA 曾被拉低，已发 9 时钟 + STOP");
+    }
+}
+
 /// 运行面主循环：有作业即取之执行（硬件慢动作全在此），无作业走自主节拍（10ms
 /// 一拍）。**慢 I2C / 舵机整定都停在本线程**——控制面命令吞吐不受其阻塞（这是
 /// "控制面/运行面分离"的落点，消"卡顿"）。
 fn runtime_loop(mut ph: RtPeriph, bus: Arc<Mutex<Bus>>) {
+    println!("[periph] 运行面线程起（独占 I2C0 + LEDC；表情/舵机/扫描全在此面）");
     loop {
         let job = lock_bus(&bus).jobs.pop_front();
         match job {
@@ -1190,6 +1410,14 @@ fn runtime_loop(mut ph: RtPeriph, bus: Arc<Mutex<Bus>>) {
                 thread::sleep(Duration::from_millis(RUNTIME_TICK_MS));
             }
         }
+        // 供电分时仲裁收尾：每次动作（作业/自主节拍）结束即释放舵机，把 5V 轨整段
+        // 让给 OLED——见 [`RtPeriph::servo_release`]。这一步是"OLED 表情稳定"的根因
+        // 修复点：舵机只在"正在移动/扫描"的窗口里激磁，其余时间不占轨。
+        ph.servo_release();
+        // 紧接着**强制重同步** I2C 从机：舵机电机换向噪声会在空闲期把 SSD1306 的
+        // I2C 状态机顶进半途态（此后恒 NACK 且 SDA 仍高，条件版自愈不触发）——
+        // 见 [`i2c_bus_recover`] 的 `force` 说明。每拍一次 9 时钟 + STOP，代价 ~100µs。
+        i2c_bus_recover(true);
     }
 }
 
@@ -1212,14 +1440,33 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
                 }
             }
         }
-        Job::Move { pan, tilt } => rt_move(ph, pan, tilt),
+        Job::Move { pan, tilt } => {
+            if rt_move(ph, pan, tilt) {
+                // 姿态到位回读（**硬件侧证据**：直接读 LEDC 寄存器换算，不听记账角；
+                // 只回读本次请求的轴——未动的轴 duty 可能为 0，换算无意义）。
+                let rd = |axis: Axis| duty_to_deg(match axis {
+                    Axis::Pan => ph.pan.get_duty(),
+                    Axis::Tilt => ph.tilt.get_duty(),
+                });
+                let want = |v: Option<u32>| v.map_or_else(|| "-".into(), |d| d.to_string());
+                println!(
+                    "[periph] 姿态到位 pan={} tilt={}（LEDC 回读 pan={}° tilt={}°，记账 {}°/{}°）",
+                    want(pan),
+                    want(tilt),
+                    rd(Axis::Pan),
+                    rd(Axis::Tilt),
+                    ph.pan_deg,
+                    ph.tilt_deg
+                );
+            }
+        }
         Job::Scan => rt_scan(ph, bus),
         Job::RenderCapsules => {
             let (open, dx, dy) = {
                 let b = lock_bus(bus);
                 (b.st.base_open, b.st.base_dx, b.st.base_dy)
             };
-            if let Err(e) = oled_capsules(&mut ph.i2c, open, dx, dy) {
+            if let Err(e) = ph.capsules_degrading(open, dx, dy) {
                 eprintln!("[periph] 胶囊眼渲染失败: {e}");
             }
         }
@@ -1235,11 +1482,11 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
 /// [`AXIS_SETTLE_MS`] → 再 tilt**——任一时刻只驱动一轴，把两轴并行的峰值电流摊开
 /// （适配板载 5V 直供、无 UBEC 场景）。pan 失败则不动 tilt（fail-closed，绝不留
 /// 两轴同时拉电）。
-fn rt_move(ph: &mut RtPeriph, pan: Option<u32>, tilt: Option<u32>) {
+fn rt_move(ph: &mut RtPeriph, pan: Option<u32>, tilt: Option<u32>) -> bool {
     if let Some(p) = pan {
         if let Err(e) = ph.servo_set(Axis::Pan, p) {
             eprintln!("[periph] pan 移动失败: {e}");
-            return;
+            return false;
         }
     }
     if let Some(t) = tilt {
@@ -1248,8 +1495,10 @@ fn rt_move(ph: &mut RtPeriph, pan: Option<u32>, tilt: Option<u32>) {
         }
         if let Err(e) = ph.servo_set(Axis::Tilt, t) {
             eprintln!("[periph] tilt 移动失败: {e}");
+            return false;
         }
     }
+    true
 }
 
 /// SCAN 判据②（运行面执行）：两轴各按本轴行程五等分点**串行**扫描——每点先 pan
@@ -1319,7 +1568,7 @@ fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
         (render, mv, refresh)
     };
     if let Some((open, dx, dy)) = render {
-        if let Err(e) = oled_capsules(&mut ph.i2c, open, dx, dy) {
+        if let Err(e) = ph.capsules_degrading(open, dx, dy) {
             eprintln!("[periph] 表情微动作渲染失败: {e}");
         }
     }
@@ -1427,7 +1676,7 @@ fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 70-110 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰)"
+                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；开机默认表情 idle + 姿态 P060 T098)"
                     .into(),
             ),
             "OLED" => {
@@ -1509,6 +1758,36 @@ fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                     (Err(e), _) | (_, Err(e)) => Err(e),
                 },
                 _ => Err("SERVO 需两个 0-180 角度参数".into()),
+            },
+            // 表情（行面）：控制面改状态 + 推 Job::RenderCapsules（慢 I2C 在运行面），
+            // 与帧面 expression 同一套基态预设/微动作（expr_eye_base + anim_reset）。
+            // 补此命令的原因：表情原只走帧面（需 UART2 帧链路），现场该链路劣化时
+            // 表情无路可触发——行面直命令是可达性兜底。
+            "FACE" => match parts.next() {
+                Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
+                    let (open, dx, dy) = expr_eye_base(expr);
+                    {
+                        let mut b = lock_bus(&bus);
+                        b.st.expr_mode = true;
+                        b.st.frame_mode = false;
+                        b.st.base_open = open;
+                        b.st.base_dx = dx;
+                        b.st.base_dy = dy;
+                        b.st.last_text = format!("EXPR {expr}");
+                        b.st.anim_reset();
+                        b.st.drawn = (open, dx, dy);
+                    }
+                    push_job(&bus, Job::RenderCapsules);
+                    Ok(format!("OK face={expr}"))
+                }
+                Some(other) => Err(format!(
+                    "expression 不在白名单: \"{other}\"（可选: {}）",
+                    RR3_FACE_EXPRS.join("/")
+                )),
+                None => Err(format!(
+                    "FACE 需表情参数（可选: {}）",
+                    RR3_FACE_EXPRS.join("/")
+                )),
             },
             "WANDER" => match parts.next() {
                 Some("STOP") => {
@@ -1619,15 +1898,34 @@ fn main() {
 
     let peripherals = Peripherals::take().unwrap();
 
-    // ---- I2C0 @ GPIO21/22 100kHz（判据①：扫描 0x3C 应答）----
-    // 频率档由 400k 降到 100k：真板实证 400k 在长跳线 + 模块弱上拉下**时序边际**
-    // ——init/清屏偶过，随后的页写（row3 页 6）连重试 3 次仍 ESP_FAIL（舵机此时
-    // 未动，非电源塌陷，纯总线时序）。100k 是 SSD1306 标准档、跳线面稳过，页写
-    // ~11.5ms/页，对 4 行文本与 130ms 眨眼动画够用（可靠性优先于速率）。
+    // ---- UART2 指令面 @ GPIO18(TX)/GPIO19(RX) 115200 ----
+    // **引脚定案（真板实锤 2026-10-12）**：GPIO16/17（UART2 的 IOMUX 缺省组）在本板
+    // 上**装驱动即把 I2C0（21/22）打死**——先装/后装、换序均复现全黑；换到 18/19 后
+    // I2C 全绿（扫描 0x3C / init / boot 文本 / 页写全过）。故本板弃用 16/17（疑与
+    // 底板走线桥接或模块 PSRAM 脚冲突），钉 18/19。接线表见 README；19 与点阵 VSPI
+    // 预留同脚，点阵立项时需再迁（已在案）。
+    let uart_config = UartConfig::new().baudrate(Hertz(115_200));
+    let uart = UartDriver::new(
+        peripherals.uart2,
+        peripherals.pins.gpio18,
+        peripherals.pins.gpio19,
+        None::<AnyInputPin>,
+        None::<AnyOutputPin>,
+        &uart_config,
+    )
+    .expect("UART2 驱动安装失败");
+    println!("[periph] UART2 ✓ 指令面 115200 @ GPIO18(TX)/GPIO19(RX)");
+
+    // ---- I2C0 @ GPIO21/22（判据①：扫描 0x3C 应答）----
+    // 频率档 400k → 100k → **50k**：真板实证 400k/100k 在长跳线 + 模块弱上拉下**时序
+    // 边际**——背靠背密集页写（8 页胶囊眼）在数据段丢拍，且丢拍一次即锁死总线
+    // （机理见 [`i2c_bus_recover`]）。50k 上升裕量翻倍 + 失败自愈 + 整页重写三者叠加。
     let i2c_config = I2cConfig::new()
-        .baudrate(Hertz(100_000))
+        .baudrate(Hertz(I2C_BAUD_HZ))
         .sda_enable_pullup(true)
         .scl_enable_pullup(true);
+    // 欠压复位后 SSD1306 常抱死 SDA→总线全黑；装驱动前先解卡（见 i2c_bus_unstick）。
+    unsafe { i2c_bus_unstick() };
     let mut i2c = I2cDriver::new(
         peripherals.i2c0,
         peripherals.pins.gpio21,
@@ -1670,7 +1968,7 @@ fn main() {
             (b"ROCK3 PERIPH BASE", "boot 行0写失败"),
             (b"4-ROW OLED READY", "boot 行1写失败"),
             (b"UART2 CMD @115200", "boot 行2写失败"),
-            (b"P:090 T:090", "boot 角度行写失败"),
+            (b"P:060 T:098", "boot 角度行写失败"),
         ];
         let mut boot_ok = true;
         for (row, (text, msg)) in boot_rows.iter().enumerate() {
@@ -1698,37 +1996,60 @@ fn main() {
         .expect("LEDC channel0(PAN, GPIO32) 安装失败");
     let mut tilt = LedcDriver::new(peripherals.ledc.channel1, &timer, peripherals.pins.gpio33)
         .expect("LEDC channel1(TILT, GPIO33) 安装失败");
-    // 上电先置中位 90°（0.5–2.5ms 量程中点），避免初始化期停在 0 duty
-    pan.set_duty(deg_to_duty(90)).expect("pan 中位设定失败");
-    tilt.set_duty(deg_to_duty(90)).expect("tilt 中位设定失败");
+    // **舵机暂不激磁**：LEDC 装好后 duty=0（无脉冲=舵机松脱），待运行面把开机表情
+    // 画完再走 `Move` 激磁——板上 5V 直供下舵机一动即拉塌轨压触发 BOD 复位（真板
+    // 实录：boot 画面出后 ~0.1s 即 `Brownout detector was triggered`），"先表情上屏
+    // 再动舵机"是可见性优先的排序。
+    pan.set_duty(0).expect("pan 归零失败");
+    tilt.set_duty(0).expect("tilt 归零失败");
     println!(
-        "[periph] LEDC ✓ pan=GPIO32 tilt=GPIO33 中位90° duty pan={} tilt={}（max={})",
-        pan.get_duty(),
-        tilt.get_duty(),
+        "[periph] LEDC ✓ pan=GPIO32 tilt=GPIO33 duty=0（待表情上屏后激磁）max={}",
         pan.get_max_duty()
     );
-
-    // ---- UART2 @ 115200（指令面；整装 UartDriver::new 不 split，单线程读写）----
-    let uart_config = UartConfig::new().baudrate(Hertz(115_200));
-    let uart = UartDriver::new(
-        peripherals.uart2,
-        peripherals.pins.gpio17,
-        peripherals.pins.gpio16,
-        None::<AnyInputPin>,
-        None::<AnyOutputPin>,
-        &uart_config,
-    )
-    .expect("UART2 驱动安装失败");
-
     // 外设 'static 化 + 分发两平面（16KB 运行下限，哨兵纪律）：UART2 → 控制面，
     // I2C/LEDC → 运行面；共享 Bus（Arc<Mutex>）连通两面。
-    let rt = RtPeriph { i2c, pan, tilt };
+    let rt = RtPeriph {
+        i2c,
+        pan,
+        tilt,
+        pan_deg: AXIS_CENTER_DEG,
+        tilt_deg: AXIS_CENTER_DEG,
+        contrast_idx: 0,
+    };
     let ctl = CtlUart { uart };
     let bus = Arc::new(Mutex::new(Bus {
         jobs: VecDeque::new(),
         outbox: VecDeque::new(),
         st: PeriphState::boot(),
     }));
+    // 开机默认进入表情（idle 胶囊眼）+ 走一遍指定姿态（pan 左转 30°、tilt 上抬 8°，
+    // 串行降级）——UART2 指令链路现场劣化时的"可见性"兜底（用户现场裁定）。排队
+    // RenderCapsules + Move，由运行面线程接管；姿态经 axis_check 已在本轴行程内。
+    {
+        let (open, dx, dy) = expr_eye_base("idle");
+        let mut b = lock_bus(&bus);
+        b.st.expr_mode = true;
+        b.st.frame_mode = false;
+        b.st.base_open = open;
+        b.st.base_dx = dx;
+        b.st.base_dy = dy;
+        b.st.last_text = String::from("EXPR idle");
+        b.st.anim_reset();
+        b.st.drawn = (open, dx, dy);
+        b.st.pan_deg = BOOT_PAN_DEG;
+        b.st.tilt_deg = BOOT_TILT_DEG;
+    }
+    // 表情**先上屏**（可见性优先：板载 5V 直供下舵机启动是全板最大电流事件，万一
+    // 触发 BOD 也要保住已出的表情），随后由运行面走姿态 Move——串行降级（先 pan 后
+    // tilt）+ 缓速软启动（[`SERVO_SLEW_STEP_DEG`]）把两轴电流尖峰摊开摊薄。
+    push_job(&bus, Job::RenderCapsules);
+    push_job(
+        &bus,
+        Job::Move {
+            pan: Some(BOOT_PAN_DEG),
+            tilt: Some(BOOT_TILT_DEG),
+        },
+    );
     ram_point("2-periph-ready");
     // 运行面先起（boot 后即可接作业 + 跑自主节拍），再起控制面
     {
