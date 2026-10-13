@@ -1,11 +1,11 @@
 [package]
 name = "esp32-periph-base"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.82"
 license = "UNLICENSED"
 publish = false
-description = "0.0.5 增补轮五 批B 外设底座档 + 批C 帧执行面（espidf std：SSD1306 OLED + LEDC 双轴舵机 + UART2 行/帧双面指令）"
+description = "0.0.5 增补轮五 批B 外设底座档 + 批C 帧执行面 + 批D I2S/音频（espidf std：SSD1306 OLED + LEDC 双轴舵机 + UART2 行/帧双面指令 @921600）"
 
 # 独立 workspace：xtensa-esp32-espidf 目标 + build-std 与 base/runtime 主 workspace 互斥，
 # 门禁 ④/⑥ 的宿主 check/test 不扫本目录（check.sh 显式排除；编译走

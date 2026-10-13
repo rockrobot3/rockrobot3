@@ -78,7 +78,8 @@ pub(crate) const RR3_SERVO_TOPIC: &str = "rr3-act/servo/command";
 /// contracts/events/interact-face-expression.schema.json，与 topics.toml 同串）。
 pub(crate) const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 /// 表情白名单（rr3-interact 模块面同款 7 态；帧面执行面同步执行该裁定）。
-pub(crate) const RR3_FACE_EXPRS: [&str; 7] = ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
+pub(crate) const RR3_FACE_EXPRS: [&str; 7] =
+    ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
 
 // ---------------------------------------------------------------------------
 // 舵机换算（50Hz / 14bit：1 tick = 20ms / 16384 = 1.2207µs）
@@ -116,7 +117,7 @@ pub(crate) const BOOT_TILT_DEG: u32 = AXIS_CENTER_DEG + 8;
 
 // ---------------------------------------------------------------------------
 // 引脚真值（board 层单一真值点）——接线总表：
-//   UART2 = GPIO18→TX / GPIO19←RX（115200；GPIO16/17 一装 UART2 驱动即把 I2C0
+//   UART2 = GPIO18→TX / GPIO19←RX（921600 批D②；GPIO16/17 一装 UART2 驱动即把 I2C0
 //           打死，弃用；19 与点阵 VSPI 预留同脚，点阵立项时需再迁，已在案）
 //   I2C0  = GPIO21 SDA / GPIO22 SCL（SSD1306 0x3C）
 //   LEDC  = GPIO32 pan / GPIO33 tilt（50Hz 14bit）
@@ -132,8 +133,10 @@ pub(crate) const BOOT_TILT_DEG: u32 = AXIS_CENTER_DEG + 8;
 pub(crate) const PIN_I2C_SDA: i32 = 21;
 /// I2C0（SSD1306）SCL（裸寄存器自愈路径用）。
 pub(crate) const PIN_I2C_SCL: i32 = 22;
-/// UART2 指令面波特率。
-pub(crate) const UART2_BAUD_HZ: u32 = 115_200;
+/// UART2 指令面波特率（批D② 落板 921600——Q1=(a) 带宽账裁定：音频上行双通道
+/// 16kHz×16bit ≈ 512kbps，115200 载不动；烧录即 deliberate。宿主侧缺省仍
+/// 115200，会话须以 RR3_HAL_PERIPH_BAUD=921600 或 `_with_baud` 构造显式同档）。
+pub(crate) const UART2_BAUD_HZ: u32 = 921_600;
 /// LEDC 定时器频率（SG90 50Hz）。
 pub(crate) const LEDC_FREQ_HZ: u32 = 50;
 /// LEDC 分辨率（50Hz×2^14=819200Hz，源 80MHz 分频 97.66 → 实际 ≈50.0Hz）。
