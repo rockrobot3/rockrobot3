@@ -12,9 +12,11 @@
 # 纪律：工具链缺位 = SKIP（退出 0 并明说，同 espidf-std-check.sh 口径）；
 #       工具链在位但编译失败 = FAIL；tripwire（全局分配器 / std 逃逸）命中 = FAIL；
 #       宿主测试 0 通过 = FAIL（fail-open 封死，同 check.sh run_tests 口径）。
-# rr-ipc 零外部依赖、rr-core 仅依赖 rr-ipc，本门全程无网络。
+# rr-mech 零外部依赖、rr-ipc 零外部依赖、rr-core 仅依赖 rr-mech + rr-ipc，本门全程无网络。
 # 0.0.5 批I C8（门查门）：新机制核面 rr-hal-api 同批进本门三处点位（tripwire 扫面 +
 # xtensa 裸机面 + 宿主面对拍）——门清单不与新面同步即门禁失效。
+# 0.0.5 批M：控制原语叶子件 rr-mech 同批进本门同三处点位（自 rr-core 下沉后，控制图
+# 用例随件迁入 rr-mech，宿主面须点名 rr-mech 才真跑；裸机面须点名才点验）。
 set -uo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "ERROR: git rev-parse --show-toplevel 失败——当前目录不在 git 仓库内。" >&2
@@ -48,7 +50,7 @@ tripwire=0
 while IFS= read -r hit; do
   printf 'FAIL  机制核 tripwire 命中: %s\n' "$hit"
   tripwire=1
-done < <(grep -RnE 'global_allocator|extern crate std' rr-core/src rr-hal-api/src --include='*.rs')
+done < <(grep -RnE 'global_allocator|extern crate std' rr-mech/src rr-core/src rr-hal-api/src --include='*.rs')
 if [ "$tripwire" -eq 0 ]; then
   echo "PASS  机制核 tripwire：无全局分配器假设、无 std 逃逸（裁定 3/5 静态面）"
 else
@@ -59,7 +61,7 @@ fi
 #    const 断言随依赖链在该目标编译期重求值 = xtensa 编译期 golden 对拍（0.0.7 第④路机制）。
 #    0.0.5 批J G1/C6：transport 拆门后 rr-ipc 的总线窄缝 Rr3ByteStream + 帧缓冲
 #    Rr3FrameBuf + conn blanket impl 随依赖链同面编译——"窄缝在 none 目标可编译"在此出数。
-if cargo +esp check -q -Zbuild-std=core,alloc -p rr-core -p rr-hal-api --target xtensa-esp32-none-elf; then
+if cargo +esp check -q -Zbuild-std=core,alloc -p rr-mech -p rr-core -p rr-hal-api --target xtensa-esp32-none-elf; then
   echo "PASS  机制核切片（总线语义/运行时/控制/安全核 + 能力面契约 rr-hal-api）在 xtensa-esp32-none-elf 编译成立；rr-ipc 总线窄缝 Rr3ByteStream + 帧缓冲 + conn blanket 同面编译，golden 头 const 断言已在该目标重求值"
 else
   echo "FAIL  机制核面（rr-core/rr-hal-api）xtensa-esp32-none-elf 编译失败（no_std 面被破坏）" >&2
@@ -69,10 +71,10 @@ fi
 # ④ 宿主面对拍：同一份源的 std 测试面真跑（golden 形状 / 逐拍一致），≥1 通过才算数
 hostout="$(mktemp)" || { echo "ERROR: mktemp 失败，无法捕获宿主面输出。" >&2; exit 1; }
 trap 'rm -f "$hostout"' EXIT
-if cargo test -p rr-core -p rr-hal-api 2>&1 | tee "$hostout"; then
+if cargo test -p rr-mech -p rr-core -p rr-hal-api 2>&1 | tee "$hostout"; then
   if grep -qE '^running [1-9][0-9]* tests?' "$hostout" \
      && grep -qE '^test result: ok\. [1-9][0-9]* passed' "$hostout"; then
-    echo "PASS  机制核宿主面对拍（rr-core + rr-hal-api）：golden 形状 / 控制图逐拍一致用例全绿"
+    echo "PASS  机制核宿主面对拍（rr-mech + rr-core + rr-hal-api）：golden 形状 / 控制图逐拍一致用例全绿"
   else
     echo "FAIL  机制核宿主测试 0 通过（过滤器打空或测试集丢失），视为门禁失效" >&2
     fail=1

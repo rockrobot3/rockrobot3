@@ -115,6 +115,7 @@ name = "rr-core"
 version = "0.0.1"
 dependencies = [
  "rr-ipc",
+ "rr-mech",
 ]
 
 [[package]]
@@ -135,6 +136,10 @@ version = "0.0.1"
 
 [[package]]
 name = "rr-ipc"
+version = "0.0.1"
+
+[[package]]
+name = "rr-mech"
 version = "0.0.1"
 
 [[package]]

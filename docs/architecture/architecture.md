@@ -233,7 +233,7 @@ rock3/
 │   │                                 boards/（发行版实板笔记）
 │   ├── ota/                       ← README.md + partition-layout.md（A/B/factory 布局文档）
 │   │   └── rr3-ota-ctl/           ← 独立 workspace，bin 名 `rr3-ota-ctl`（升级入口 CLI）
-│   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-core rr-registry rr-bus rr-hal rr-hal-api rr-ota rrd
+│   ├── runtime/                   ← Rust workspace：members = rr-ipc rr-mech rr-core rr-registry rr-bus rr-hal rr-hal-api rr-ota rrd
 │   │   │                             （Cargo.lock 在 workspace 根，每 crate 各有一份 README.md）
 │   │   ├── rr-ipc/                ← A-IPC 协议层 + 帧收发（§6.2）；协议层纯 core+alloc（no_std 可达）
 │   │   │   ├── src/protocol/      ← header.rs（128B 头编解码）、body.rs（payload 类型前缀）、
@@ -243,11 +243,14 @@ rock3/
 │   │   │   │                          mod.rs（传输分层 + 两个路径常量）
 │   │   │   ├── src/bin/           ← ipct003_dump.rs：IPC-T-003 跨架构对拍的头 hex 转储（CI 平台条件下跑）
 │   │   │   └── tests/             ← envelope_meta.rs：与 envelope.schema.json 逐字段对齐的守护测试
+│   │   ├── rr-mech/               ← 机制核叶子件（批M，ADR-0018 裁定 5）：控制原语与安全核
+│   │   │                             （control：限速门/低电边沿/饱和检测/限位钳位，纯函数 +
+│   │   │                             注入时钟，零依赖 no_std）——rr-core 以 re-export 保路径不变
+│   │   │   ├── src/               ← lib.rs（no_std 壳）+ control.rs（原语真值）
 │   │   ├── rr-core/               ← 机制核切片（ADR-0018）：总线语义（常量/寻址/帧组装）
 │   │   │                             + 模块运行时执行环状态机（runtime：连接态/心跳拍点/
 │   │   │                             分发分类，时钟注入纯函数，no_std）
-│   │   │                             + 控制原语与安全核（control：限速门/低电边沿/饱和
-│   │   │                             检测/限位钳位，纯函数 + 注入时钟，no_std）
+│   │   │                             + re-export rr-mech::control（控制原语与安全核路径逐字不变）
 │   │   ├── rr-bus/                ← 总线常量真值在 rr-core（本 crate re-export）+ 模块侧同步客户端
 │   │   │                             （client.rs：连接/注册/心跳/发布/rr3.call/收帧）
 │   │   ├── rr-registry/           ← manifest 解析与校验、主题集（§4.1、§6.3）

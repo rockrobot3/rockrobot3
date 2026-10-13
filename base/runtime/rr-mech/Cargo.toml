@@ -1,0 +1,14 @@
+[package]
+name = "rr-mech"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "机制核切片：控制原语与安全核（no_std 纯计算，ADR-0018 裁定 5；自 rr-core::control 下沉）"
+
+[lib]
+name = "rr_mech"
+path = "src/lib.rs"
+
+[dependencies]
