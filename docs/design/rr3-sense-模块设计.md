@@ -20,7 +20,7 @@
 | capture | `rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16>`〔**未导出**：只在 `mech` 内 `pub`，件入口 `capture.rs` 的 re-export 白名单里没有它——见 §10 S-6〕 | 多声道样点 → 单声道 | 无 | 非整除交错 → 现状截断（历史缺陷已修，见 mono golden） |
 | capture | `rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream` | 同上（含 cfg） | 无 | — |
 | capture | `rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value` | 序号 + 流 → 载荷（**六键**：`seq, format, rate, channels, ms, pcm_b64`） | 无 | — |
-| capture | `rr3_doa_fix(samples: &[i16], channels: u8) -> Option<Rr3DoaFix>` · `rr3_doa_field(d: &Rr3DoaFix) -> Value`（两者**已导出**） · `Rr3DoaBin` · `rr3_doa_bin_as_str()` · `RR3_DOA_BIN_THRESHOLD_DEG: i32 = 30`（三者**未导出**） | 双麦样点 → 方位与三档 | 无 | 单声道/能量不足 → `None`（不发 doa 字段） |
+| capture | `rr3_doa_fix(samples: &[i16], channels: u8, threshold_deg: i32) -> Option<Rr3DoaFix>` · `rr3_doa_field(d: &Rr3DoaFix) -> Value`（两者**已导出**） · `Rr3DoaBin` · `rr3_doa_bin_as_str()`（两者**未导出**） | 双麦样点 + 分档边界 → 方位与三档 | 档界经 `Threshold` 注入（S-5） | 单声道/能量不足 → `None`（不发 doa 字段） |
 | vad | `rr3_frame_rms(samples: &[i16]) -> i64`〔**未导出**〕 | 一帧 → 能量 | 无 | — |
 | vad | `Rr3VadState::rr3_vad_new(cfg: Rr3VadConfig, frame_ms: u64) -> Self` | 阈值组 + 拍长 → 状态机 | 见 §2 | — |
 | vad | `rr3_vad_feed(&mut self, samples: &[i16]) -> Option<Rr3VadEdge>` | 每拍一样点 → 边沿（只发边沿） | `Rr3VadEdge::Onset{rms_peak: i64, speech_ms: u64}` / `Offset{speech_ms: u64}`〔枚举本身未导出，件面只出 `Rr3VadState` + `rr3_vad_event_body`〕 | — |
@@ -34,7 +34,7 @@
 不变式：**只发边沿**（`Onset` / `Offset`），持续高电平期间不续发；起音需连续满足 `rms_start` 达
 `min_speech_ms`；判停需连续静音 `silence_tail_ms`；所有窗长以 `frame_ms` 为粒度换算成拍数。
 非法输入收敛方向：`rms` 读数异常（帧空）→ 不改变状态、不发边沿。
-`DoaBin` 三档：`θ < -30` = 左、`-30 ≤ θ ≤ 30` = 中、`θ > 30` = 右（阈值是**策略**，见 §3）。
+`DoaBin` 三档：`θ < -t` = 左、`-t ≤ θ ≤ t` = 中、`θ > t` = 右（阈值 `t` 是**策略**，S-5 已迁 ops 槽 `doa_bin_threshold_deg`，见 §3）。
 `env`/`imu` 无状态机——**无机制可写**，此事实必须显式留在表里而不是省掉。
 
 ## §3 注入面
@@ -43,7 +43,7 @@
 |---|---|---|---|
 | capture | `dyn Rr3AudioSource` ← `[hardware].alsa_device` | `sample_rate: u32`=16000；`channels: u8`=1；`frame_ms: u64`=20 | `frame_ms < 1` → 收敛为 20 并留痕（**现状：允许 0**） |
 | vad | 无（吃 capture 输出） | `rms_start: i64`=1500；`silence_tail_ms: u64`=700；`min_speech_ms: u64`=200 | 阈值 ≤0 → 拒 boot |
-| capture（DoA） | 阵列几何（`channels ≥ 2`） | `doa_bin_threshold_deg: i32` **=30 现状硬编码在件内** → 迁 ops | 几何不足 → 不发 doa |
+| capture（DoA） | 阵列几何（`channels ≥ 2`） | `doa_bin_threshold_deg: i32` =30（S-5：已从件内常量迁此槽，来源 config `[rr3-sense.doa].bin_threshold_deg`） | 几何不足 → 不发 doa |
 | env / imu | 真件句柄（`[hardware]` 尚无对应键） | 待定（随真件批） | — |
 
 ## §4 主循环与时序预算
@@ -108,8 +108,8 @@
 | S-2 | capture/vad 句柄与值类型换 `rr-hal-api`（`&[i16]` 借用、去 `Vec`/`String`） | 批I | C5 |
 | S-3 | 采集新鲜度 counters（治"活着但不动"） | 批K | C9 |
 | S-4 | `env`/`imu` 取向定案：填实 or retired（连带两条在册主题的处置）——**归属写明（2026-10-12，索引 §14.5）**：待裁期间挂"用户裁定窗"，**不塞进 0.0.5 批M**（批M 只收 F 清单内的功能码，温湿度/IMU 不在其列）；若裁"填实"，则新开一条 MC 并先解决前置——**器件不在 0.0.6 §5.4 BOM 任何一行**，两格今天已如实记 `placeholder`（承诺 ≤ 事实已守，不是欠账伪装成计划） | **待裁**（不卡批M 其余工单） | D9 |
-| S-5 | DoA 阈值从件内迁 ops | 批J | C5 |
-| S-6 | **件面导出面收口**：`rr3_pcm_downmix_mono`、`rr3_frame_rms`、`Rr3DoaBin`(+`rr3_doa_bin_as_str`)、`RR3_DOA_BIN_THRESHOLD_DEG`、`Rr3VadEdge` 五个 `mech` 内 `pub` 符号今天不出件入口——要么进 `capture.rs`/`vad.rs` 的 re-export（成为契约面，S-5 的阈值注入就必须带着它），要么降为 `pub(crate)`。不许停在"内松外紧"的中间态 | 批I | C5 |
+| S-5 | DoA 阈值从件内迁 ops —— **已结（0.0.5 MC-10 S-5）**：`RR3_DOA_BIN_THRESHOLD_DEG` 件内常量删除，档界作 `rr3_doa_fix(samples, channels, threshold_deg)` 第三参注入；ops 槽 `doa_bin_threshold_deg` ← `[rr3-sense.doa].bin_threshold_deg`（缺键回落默认 30，组合件解析 `Rr3DoaConfig`） | 批J→**已结** | C5 |
+| S-6 | **件面导出面收口**：`rr3_pcm_downmix_mono`、`rr3_frame_rms`、`Rr3DoaBin`(+`rr3_doa_bin_as_str`)、`Rr3VadEdge` 四个 `mech` 内 `pub` 符号今天不出件入口——要么进 `capture.rs`/`vad.rs` 的 re-export（成为契约面），要么降 `pub(crate)`。不许停在"内松外紧"的中间态。**已结**：`rr3_pcm_downmix_mono` 降 `pub(crate)`；`Rr3DoaBin` 转 `#[cfg(test)]` 测试面专用导出（原 `RR3_DOA_BIN_THRESHOLD_DEG` 随 S-5 件内删除） | 批I→**已结** | C5 |
 | S-7 | **载荷组装上移承载层**：`rr3_pcm_event_body` / `rr3_vad_event_body` 的 `json!` 生产移到 `src/composite.rs`，件面只交 `Rr3PcmStream`/`Rr3VadEdge` 结构（依据 = ADR-0019 修订 4）。验收 = `audio/pcm`、`audio/vad_start` 字节逐字不变（mono golden 与 schema 用例继续绿）；做完本单元两件去 `serde_json` | 批I | — |
 | S-8 | DoA 数学面整型化：`rr3_doa_fix` 去 `f64::{sqrt,asin,to_degrees,round}`，改整数时延 + 定点 `asin` 查表（表进 sim 后端/描述符数据面），误差预算 ±1°；复用 `vad` 的 `rr3_isqrt` 整型开方先例 | 批I | — |
 
@@ -139,10 +139,10 @@
 
 | 文件 : 符号 | 字面量 | 语义 | 今天有没有读者 | 去处 |
 |---|---|---|---|---|
-| `atoms/capture/mech.rs : RR3_DOA_BIN_THRESHOLD_DEG` | `30`（±30°） | DoA 三档边界=**业务策略** | 无 config/env；读者只有 `rr3_doa_fix` 与用例 `doa_bin_str_and_threshold_are_pinned` | ops 槽 `doa_bin_threshold_deg`（S-5） |
+| ~~`atoms/capture/mech.rs : RR3_DOA_BIN_THRESHOLD_DEG`~~（S-5 已删） | ~~`30`（±30°）~~ | DoA 三档边界=**业务策略** | **已结**：件内无此常量；档界由 `rr3_doa_fix` 第三参 `threshold_deg` 注入，读者 = 组合件（从 config 取） | ~~ops 槽 `doa_bin_threshold_deg`（S-5）~~ → 已落：ops 槽 `doa_bin_threshold_deg` ← `[rr3-sense.doa].bin_threshold_deg` |
 | `atoms/capture/mech.rs : rr3_doa_fix` | `channels < 2`、`frame[0]`=L / `frame[1]`=R | 阵列几何与通道序 | 无声明 | 描述符 `[hardware]`（几何是板事实，不是件常识） |
 | `src/composite.rs : open_cfg` | `bit_depth: 16` | s16 位深 | config 无该键 | 契约字面量（线格式 `s16le`）——**标豁免**，但要与 `rr3_pcm_event_body` 的 `"format":"s16le"` 同处登记，避免两处真值 |
-| `src/composite.rs : Rr3SenseConfig::default()` | `16000 / 1 / 20` | 采集缺省 | 有读者，但**与 `config.toml` 逐字重复**，`tools/sim/src/chain.rs` 还有第三份 | **双写即债**：缺省值单点归 `config.toml`（或归描述符 `[supplies]` 旁的音频面），代码侧不保留副本；sim 那一份改读同一真值 |
+| `src/composite.rs : Rr3SenseConfig::default()` | `16000 / 1 / 20`（audio）+ `30`（doa.bin_threshold_deg） | 采集与 DoA 缺省 | 有读者，但**与 `config.toml` 逐字重复**，`tools/sim/src/chain.rs` 还有第三份 | **双写即债**：缺省值单点归 `config.toml`（或归描述符 `[supplies]` 旁的音频面），代码侧不保留副本；sim 那一份改读同一真值（doa 阈值同此债，S-5 落点即此模式） |
 | `atoms/vad/vad.rs : Rr3VadConfig::default()` | `1500 / 700 / 200` | 对话阈值=**策略** | 同上，三份重复 | 同上（且 brain 侧 `silence_tail_ms` 已判死参数，B-2） |
 | `atoms/capture/mech.rs : rr3_doa_bin_as_str` | `"left"/"center"/"right"` | 事件词汇 | 在册：`contracts/events/sense-audio-vad_start.schema.json` 的 enum | **契约字面量—不许动** |
 | `atoms/capture/mech.rs : rr3_pcm_event_body` | `"format": "s16le"` 及键名 `seq/rate/channels/ms/pcm_b64` | 线格式与载荷键 | 在册 schema | **契约字面量—不许动** |
@@ -175,7 +175,7 @@
 | 项 | 复验实况（符号） | 判定 / 新落点 |
 |---|---|---|
 | S-6 件面导出面收口 | `atoms/capture/capture.rs` 已把 `rr3_pcm_downmix_mono` 收为 `pub(crate)`，`Rr3DoaBin` 注明"仅测试按名构造" | **结**（"内松外紧"消除；阈值注入的余数转 S-5） |
-| S-5 DoA 阈值迁 ops | `atoms/capture/mech.rs : RR3_DOA_BIN_THRESHOLD_DEG = 30` 仍是件内常量，ops 侧零命中 | **未结 → 0.0.5 MC-10**（L-5 数据面已落，S-5 续加阈值 ops 槽） |
+| S-5 DoA 阈值迁 ops | **已结（0.0.5 MC-10 S-5）**：`RR3_DOA_BIN_THRESHOLD_DEG` 件内常量删；`rr3_doa_fix` 增第三参 `threshold_deg`；ops 槽 `doa_bin_threshold_deg` ← `[rr3-sense.doa].bin_threshold_deg`（缺键回落默认 30）；组合件 `Rr3DoaConfig` 解析 + 透传 | 已结 |
 | S-3 采集新鲜度 counters | **已结（批M M-β 3bc30f1，2026-10-12）**：`composite.rs` 主循环 `pcm_frames`（发布成功一帧 +1）/ `pcm_empty_frames`（空帧另账）两键落账，e2e_audio_chain ⑤ 经 `rr3.ctl.counters` 有界轮询点验非零（先红后绿） | 已结 |
 | S-1 缺项：`bit_depth` 不是配置键 | 本册曾把 `[rr3-sense.audio].bit_depth` 记为"在册无读者"——**实况不存在**：`config.toml` 只有 `sample_rate`/`channels`/`frame_ms`，`bit_depth: 16` 是 `composite.rs` 的代码常量（`linux.rs` 用它做 ALSA 校验） | **收回该宣称**；位深若将来要可配，须连同读者与用例一起立单，不留静默常量当配置 |
 | F-3 采集承载路径 | R31 **Q1/Q2** 增第二条路径：INMP441 ×2 → I2S → UART 921600 过桥，DoA/ASR 在宿主算（施工 = 增补轮五批D）；Pi 侧 ALSA 保留 | 本册 §12 跨档表按两条路径读；"缺麦不降级"的清零判据留 **MC-4** |

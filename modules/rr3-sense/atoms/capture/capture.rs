@@ -39,5 +39,6 @@ pub use mech::Rr3DoaBin;
 /// 公开面（0.0.5 批I S-6 收口；深挖收口再修）：节拍换算/判向与判向结果是件契约面；
 /// `rr3_pcm_event_body`/`rr3_doa_field` 已上移组合件（S-7），stream 级下混亦随
 /// 深挖收口上移组合件（`Rr3PcmStream` 是承载层数据类型，C7 白名单外）——
-/// `rr3_pcm_downmix_mono`/阈值常数 pub(crate)（唯一读者是组合件承载层）
+/// `rr3_pcm_downmix_mono` pub(crate)（唯一读者是组合件承载层）；DoA 分档阈值
+/// 已随 MC-10 S-5 彻底出件（件内无一常量，档界经 `rr3_doa_fix` 第三参注入）。
 pub use mech::{rr3_doa_fix, rr3_frames_per_tick, Rr3DoaFix};
