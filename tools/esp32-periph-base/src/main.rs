@@ -263,6 +263,7 @@ fn main() {
     let bus = Arc::new(Mutex::new(Bus {
         jobs: VecDeque::new(),
         outbox: VecDeque::new(),
+        audio_q: VecDeque::new(),
         st: PeriphState::boot(),
     }));
     // 开机默认进入表情（idle 胶囊眼）+ 走一遍指定姿态（pan 左转 30°、tilt 上抬 8°，
@@ -294,6 +295,8 @@ fn main() {
         },
     );
     ram_point("2-periph-ready");
+    // mic 线与控制面共享 bus（audio_q 产者/消费者；clone 须在 cmd_loop move 前）
+    let mic_bus = bus.clone();
     // 运行面先起（boot 后即可接作业 + 跑自主节拍），再起控制面
     {
         let bus = bus.clone();
@@ -309,8 +312,9 @@ fn main() {
         .spawn(move || cmd_loop(ctl, bus))
         .expect("起控制面线程失败");
 
-    // ---- 批D 采集冒烟：INMP441 双麦 @ I2S0（GPIO25 BCLK / GPIO27 SD / GPIO26 WS）----
+    // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（GPIO25 BCLK / GPIO27 SD / GPIO26 WS）----
     mic::spawn_mic_smoke(
+        mic_bus,
         peripherals.i2s0,
         peripherals.pins.gpio25,
         peripherals.pins.gpio27,
