@@ -207,10 +207,17 @@ static_fail=0
 #     自家产品标识（rock3/洛克/RR3_ 前缀）不进禁词——机制自身的运行时身份（如
 #     rock3-ipc.sock 契约冻结路径）不是策略载荷，门禁禁的是**外部**板卡厂商与器件。
 policy_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-for f in base/runtime/rr-mech/src/*.rs base/runtime/rr-core/src/*.rs base/runtime/rr-hal-api/src/*.rs \
-         base/runtime/rr-ipc/src/protocol/*.rs \
-         base/runtime/rr-ipc/src/transport/mod.rs \
-         modules/*/atoms/*/*.rs; do
+# 扫描面唯一真值（0.0.5 批M MC-10 L-4）：⑦-a 执法与 ⑦-e 自指判等共用此数组；文档两处口径
+# （conventions §2 ⑦ 行、tools/ci/README.md ⑦ 行）向它看齐——改面只改这里一处，⑦-e 拦住漏同步。
+mech_surfaces=(
+  base/runtime/rr-mech/src/*.rs
+  base/runtime/rr-core/src/*.rs
+  base/runtime/rr-hal-api/src/*.rs
+  base/runtime/rr-ipc/src/protocol/*.rs
+  base/runtime/rr-ipc/src/transport/mod.rs
+  modules/*/atoms/*/*.rs
+)
+for f in ${mech_surfaces[@]}; do
   [ -f "$f" ] || continue
   sed 's://.*$::' "$f" \
     | grep -inE 'rockchip|raspberry|broadcom|espressif|allwinner|sunxi|amlogic|rk35|rk33|rv11|cm4|esp32|ina219|max7219|tp4056|es8388|sg90|cp2102|mpu6050|树莓派|if.*(vendor|product)' \
@@ -315,6 +322,55 @@ for mt in modules/*/module.toml; do
   fi
 done
 [ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-d 入口体量（全部装配入口 ≤80 行）\n'
+# ⑦-e 门禁清单自指判等（0.0.5 批M MC-10 L-4，architecture §13"门禁清单同步"行）：
+#     ⑦-a 扫面在代码里有一个真值（上面的 mech_surfaces 数组）；文档另有 conventions §2 ⑦ 行
+#     与 tools/ci/README.md ⑦ 行两处抄写。抄写靠人记得同步必然漂移——实测批M 起 `rr-mech` 进了
+#     扫面，两处文档行均未列（"文档宣称有门、门实际没扫"的制度自己也得被扫）。本件从数组归一
+#     出面名集 A（`base/runtime/<crate>/…` → `<crate>`；`modules/*/atoms/…` → `atoms`），逐名
+#     在两份文档的 `^| ⑦ |` 行里查找，缺任一即 FAIL 点名；并断言 rr-core-xtensa-check.sh 的
+#     `-p rr-*` 目标集 ⊆ A（机制核 crate 面与静态扫面同步）。方向单向：代码是唯一真值，
+#     文档向代码看齐，门不由代码迁就文档。
+mech_surfaces_names=""
+for s in "${mech_surfaces[@]}"; do
+  case "$s" in
+    base/runtime/*)    n="$(printf '%s' "$s" | awk -F/ '{print $3}')" ;;
+    modules/*/atoms/*) n="atoms" ;;
+    *) printf 'FAIL  ⑦-e 自指判等: 扫面条目 %s 无归属规则（fail-closed，不猜）\n' "$s"; static_fail=1; continue ;;
+  esac
+  case " $mech_surfaces_names " in
+    *" $n "*) ;;
+    *) mech_surfaces_names="${mech_surfaces_names:+$mech_surfaces_names }$n" ;;
+  esac
+done
+if [ -z "$mech_surfaces_names" ]; then
+  printf 'FAIL  ⑦-e 自指判等: 扫面名集归一出空（门禁失效，不放行）\n'
+  static_fail=1
+fi
+conv_row="$(grep -m1 -E '^\| ⑦ \|' docs/process/conventions.md || true)"
+ci_row="$(grep -m1 -E '^\| ⑦ \|' tools/ci/README.md || true)"
+if [ -z "$conv_row" ] || [ -z "$ci_row" ]; then
+  printf 'FAIL  ⑦-e 自指判等: 文档 ⑦ 行读不到（conventions=%s README=%s；门禁失效，不放行）\n' \
+         "$([ -n "$conv_row" ] && printf 有 || printf 空)" "$([ -n "$ci_row" ] && printf 有 || printf 空)"
+  static_fail=1
+else
+  for n in $mech_surfaces_names; do
+    case "$conv_row" in *"$n"*) ;; *) printf 'FAIL  ⑦-e 自指判等: conventions §2 ⑦ 行未列扫面名 "%s"（文档向代码看齐）\n' "$n"; static_fail=1 ;; esac
+    case "$ci_row"   in *"$n"*) ;; *) printf 'FAIL  ⑦-e 自指判等: tools/ci/README.md ⑦ 行未列扫面名 "%s"（文档向代码看齐）\n' "$n"; static_fail=1 ;; esac
+  done
+fi
+xtensa_targets="$(grep -oE '\-p rr-[a-z-]+' tools/ci/rr-core-xtensa-check.sh | awk '{print $2}' | sort -u)"
+if [ -z "$xtensa_targets" ]; then
+  printf 'FAIL  ⑦-e 自指判等: rr-core-xtensa-check.sh 的 -p rr-* 目标集打空（门禁失效，不放行）\n'
+  static_fail=1
+else
+  for t in $xtensa_targets; do
+    case " $mech_surfaces_names " in
+      *" $t "*) ;;
+      *) printf 'FAIL  ⑦-e 自指判等: xtensa 门目标 "%s" 不在静态扫面集 A（机制核面不同步）\n' "$t"; static_fail=1 ;;
+    esac
+  done
+fi
+[ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-e 门禁清单自指判等（扫面名集 A 逐名在 conventions §2 与 tools/ci/README.md ⑦ 行齐 + xtensa 门目标集 ⊆ A）\n'
 rm -f "$policy_hits"
 if [ "$static_fail" -ne 0 ]; then
   fail=1
