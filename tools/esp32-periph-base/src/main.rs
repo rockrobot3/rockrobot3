@@ -69,6 +69,7 @@ mod frame;
 mod link;
 mod oled;
 mod periph;
+mod power;
 mod runtime;
 mod state;
 
@@ -87,11 +88,12 @@ use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_p
 
 use crate::board::{
     AXIS_CENTER_DEG, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS,
-    OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ,
+    ADC_RAIL_PIN, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ,
 };
 use crate::commands::cmd_loop;
 use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
 use crate::periph::{CtlUart, RtPeriph};
+use crate::power::RailMonitor;
 use crate::runtime::runtime_loop;
 use crate::state::{lock_bus, push_job, Bus, Job, PeriphState};
 
@@ -109,7 +111,7 @@ fn main() {
     link_patches();
 
     println!(
-        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 cmd=uart2@115200 line+frame planes=ctrl+runtime serial-servo"
+        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 rail=adc1@34 cmd=uart2@115200 line+frame planes=ctrl+runtime serial-servo"
     );
     ram_point("1-boot");
 
@@ -203,6 +205,24 @@ fn main() {
         );
     }
 
+    // ---- ADC1_CH6 @ GPIO34：5V 轨电压监测（方案A Q1）----
+    // 根因链（真板实锤）：OLED 大面亮点帧 + 舵机保持电流抢同一条 5V 轨 → 轨压跌落
+    // → ESP32 BOD 复位。这条轨此前**无任何观测手段**；本装 ADC1 CH6 周期采样轨压。
+    // 失败不 panic（照 OLED init 纪律）：缺测点/ADC 组件未启用时其余外设面照跑，采样
+    // 路径回 Err（**不冒领读数**）。占位分压 1:1 **待真板标定**（接线后与万用表对拍）。
+    let rail = match RailMonitor::new(peripherals.adc1, peripherals.pins.gpio34) {
+        Ok(r) => {
+            println!(
+                "[periph] 5V 轨监测 ✓ ADC1 @ GPIO{ADC_RAIL_PIN}（占位分压 1:1 待标定；RAIL 命令采一次）"
+            );
+            Some(r)
+        }
+        Err(e) => {
+            println!("[periph] 5V 轨监测装配失败（不 panic 继续跑指令面）: {e:?}");
+            None
+        }
+    };
+
     // ---- LEDC timer0 50Hz 14bit：channel0→GPIO32 pan / channel1→GPIO33 tilt ----
     let timer_config = TimerConfig::new()
         .frequency(Hertz(LEDC_FREQ_HZ))
@@ -232,6 +252,8 @@ fn main() {
         pan_deg: AXIS_CENTER_DEG,
         tilt_deg: AXIS_CENTER_DEG,
         contrast_idx: 0,
+        rail,
+        next_rail_ms: 0,
     };
     let ctl = CtlUart { uart };
     let bus = Arc::new(Mutex::new(Bus {

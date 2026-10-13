@@ -10,6 +10,7 @@ use crate::board::{
     OLED_ROWS, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
 };
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
+use crate::power::RailMonitor;
 
 // ---------------------------------------------------------------------------
 // 外设面（控制面/运行面分离）：控制面独占 UART2，运行面独占 I2C0 + LEDC
@@ -22,8 +23,8 @@ pub(crate) struct CtlUart {
     pub(crate) uart: UartDriver<'static>,
 }
 
-/// 运行面独占的外设面：I2C（OLED）+ 两轴 LEDC 舵机。**全部硬件慢动作在此面执行**
-/// ——慢 I2C 与舵机整定都不阻塞控制面的命令吞吐。驱动 'static 同上；
+/// 运行面独占的外设面：I2C（OLED）+ 两轴 LEDC 舵机 + 5V 轨 ADC。**全部硬件慢动作在
+/// 此面执行**——慢 I2C 与舵机整定都不阻塞控制面的命令吞吐。驱动 'static 同上；
 /// I2cDriver/LedcDriver 上游已标 `Send`，本结构自动 Send（无需 unsafe impl）。
 pub(crate) struct RtPeriph {
     pub(crate) i2c: I2cDriver<'static>,
@@ -35,6 +36,11 @@ pub(crate) struct RtPeriph {
     pub(crate) tilt_deg: u32,
     /// 当前 OLED 亮度档下标（整板电压降级用；见 [`OLED_CONTRAST_LEVELS`]）。
     pub(crate) contrast_idx: usize,
+    /// 5V 轨采样器（方案A Q1）：装配失败为 `None`——按"打印不 panic"纪律不拖垮其余
+    /// 外设面；采样路径据此回 Err（不冒领读数）。
+    pub(crate) rail: Option<RailMonitor>,
+    /// 下次 5V 轨周期采样时刻（运行面自主节拍；esp_timer ms，初值 0 = 首拍即采）。
+    pub(crate) next_rail_ms: u64,
 }
 
 impl RtPeriph {
@@ -142,6 +148,15 @@ impl RtPeriph {
     pub(crate) fn servo_release(&mut self) {
         let _ = self.pan.set_duty(0);
         let _ = self.tilt.set_duty(0);
+    }
+
+    /// 采样一次 5V 轨（**机制面**，方案A Q1）：返回 `(轨压 mV, 引脚 raw)`；未装配
+    /// （ADC init 失败）返回 Err 文案（**不冒领读数**）。纯机制——不判阈值、不决策。
+    pub(crate) fn rail_sample(&mut self) -> Result<(u16, u16), String> {
+        match self.rail.as_mut() {
+            Some(r) => r.sample().map_err(|e| format!("ADC 读失败: {e:?}")),
+            None => Err("5V 轨监测未装配（查 ADC 组件/GPIO34 接线）".into()),
+        }
     }
 
     /// OLED 文本 3 行（21 列硬切）+ 角度行（row 3）刷新（**带恢复环**）。

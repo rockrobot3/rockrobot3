@@ -91,7 +91,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；开机默认表情 idle + 姿态 P060 T098)"
+                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；开机默认表情 idle + 姿态 P060 T098)"
                     .into(),
             ),
             "OLED" => {
@@ -239,10 +239,17 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                 push_job(&bus, Job::Scan);
                 Ok("OK scan queued (串行 pan→tilt，逐点回包)".into())
             }
+            // 5V 轨单次采样（方案A Q1 观测面）：控制面不碰 ADC（ADC 在运行面），推作业
+            // 由运行面采一次、经 outbox 异步回包（读一次打轨压 mV 与引脚 raw——真板
+            // 分压测点接线后与万用表对拍标定用）。
+            "RAIL" => {
+                push_job(&bus, Job::SampleRail);
+                Ok("OK rail sample queued".into())
+            }
             "INFO" => {
                 let (plo, phi) = Axis::Pan.range();
                 let (tlo, thi) = Axis::Tilt.range();
-                let (pan, tilt, wander, phase, last_text) = {
+                let (pan, tilt, wander, phase, last_text, rail_mv, rail_raw) = {
                     let b = lock_bus(&bus);
                     (
                         b.st.pan_deg,
@@ -250,10 +257,12 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         b.st.wander_on,
                         b.st.wander_phase,
                         b.st.last_text.clone(),
+                        b.st.rail_mv,
+                        b.st.rail_raw,
                     )
                 };
                 Ok(format!(
-                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} oled_last=\"{last_text}\" free={}B min_free={}B",
+                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} oled_last=\"{last_text}\" free={}B min_free={}B",
                     if wander { "on" } else { "off" },
                     unsafe { esp_get_free_heap_size() },
                     unsafe { esp_get_minimum_free_heap_size() }
