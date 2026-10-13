@@ -175,6 +175,9 @@ impl Rr3Link for Rr3LinuxNmLink {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+    // 非计时用例的夹具超时档（生产 config 同档），见 nmcli_support 常量 doc——
+    // 逻辑用例不因 spawn 负载抖动而假红；100 ms 档由超时守护用例自带
+    use crate::nmcli_support::RR3_TEST_NM_TIMEOUT;
 
     /// 唯一 temp 目录名：进程 id + 纳秒后缀。只用 pid 时，并发轮/复用 pid 的
     /// runner 上会撞上上一轮遗留目录；纳秒唯一化让每轮各用各的目录互不踩。
@@ -293,7 +296,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_secs(5));
+        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, RR3_TEST_NM_TIMEOUT);
         let st = rr3_test_txtbsy_retry(|| dev.state()).unwrap();
         assert!(st.up);
         assert_eq!(
@@ -315,7 +318,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, Duration::from_secs(5));
+        let dev = Rr3LinuxNmLink::rr3_linux_link_new("wlan0", &script, RR3_TEST_NM_TIMEOUT);
         let err = rr3_test_txtbsy_retry(|| dev.state()).unwrap_err();
         assert!(
             matches!(err, Rr3HalError::InvalidParam(ref m)
