@@ -115,6 +115,7 @@ name = "rr-core"
 version = "0.0.1"
 dependencies = [
  "rr-ipc",
+ "rr-mech",
  "serde_json",
 ]
 
@@ -140,6 +141,10 @@ version = "0.0.1"
 dependencies = [
  "serde_json",
 ]
+
+[[package]]
+name = "rr-mech"
+version = "0.0.1"
 
 [[package]]
 name = "rr-ota"

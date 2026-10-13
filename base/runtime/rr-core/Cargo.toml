@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 rr-ipc = { path = "../rr-ipc" }
+rr-mech = { path = "../rr-mech" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
