@@ -4,9 +4,13 @@
 schema_version = 2
 
 [assemble]
-# 显示面句柄待立：描述符九键无显示键（C4 裁定不扩键），且 config.toml 为空壳
-# （批I I-1 六键全删）——本件现无可用注入面，明写 no_injection（L-5）；
-# 真屏件与显示键落地时删本行，补 Rr3Display 句柄与 default_expression 槽
+# 显示面句柄待立：描述符九键无显示键（C4 裁定不扩键），本件暂无 Rr3Display 句柄
+# → handles 仍空；但 ops 已非空（I-11），故不写 no_injection（该键只允许两数组
+# 都空，rr-registry 形状级规则）。真屏件与显示键落地时补 Rr3Display 句柄与
+# default_expression 槽。
 handles = []
-ops = []
-no_injection = true
+ops = [
+  # 不可点名集 ← config.toml [rr3-interact.face] non_pointable（I-11：规则从件内
+  # if 迁出——值本身是契约字面量不许改，可注入的是集合，"某形态放开 talk"= 改数据）
+  { slot = "non_pointable", src_key = "rr3-interact.face.non_pointable" },
+]
