@@ -58,6 +58,8 @@ pub const RR3_CHAIN_LEFT_ANGLE: i64 = 70;
 pub const RR3_SENSE_TOPIC_VAD: &str = "rr3-sense/audio/vad_start";
 /// 全链取证主题：转向落角（act 状态摘要流）
 pub const RR3_ACT_TOPIC_SERVO_STATE: &str = "rr3-act/servo/state";
+/// TTS 下行流主题（MC-1）：brain 发布、interact 订阅
+pub const RR3_BRAIN_TOPIC_TTS_PCM: &str = "rr3-brain/audio/tts_pcm";
 
 /// 就绪上界：冷启动 + 首轮对话（burst 2s 周期 + 判停尾静音）也要够用
 const RR3_CHAIN_READY_DEADLINE: Duration = Duration::from_secs(60);
@@ -103,7 +105,7 @@ pub fn rr3_chain_manifests(
                 RR3_CHAIN_WD_MS,
                 "never",
                 &[],
-                &["rr3-runtime/module/state"],
+                &["rr3-runtime/module/state", RR3_BRAIN_TOPIC_TTS_PCM],
                 &["rr3-interact/tts/text", "rr3-interact/face/expression"],
             ),
         ),
@@ -117,7 +119,7 @@ pub fn rr3_chain_manifests(
                 RR3_CHAIN_HB_MS,
                 RR3_CHAIN_WD_MS,
                 "never",
-                &["rr3-brain/intent/result"],
+                &["rr3-brain/intent/result", RR3_BRAIN_TOPIC_TTS_PCM],
                 // C14（ADR-0019 修订 2 ②）：asr/text retired 撤申报、net/link 撤申报
                 //（不补实现）；订阅面对齐实然面 = pcm + vad_start（B-1 补齐）
                 &["rr3-sense/audio/pcm", RR3_SENSE_TOPIC_VAD],
@@ -779,6 +781,7 @@ mod tests {
             RR3_ACT_TOPIC_SERVO_STATE,
             "rr3-act/servo/command",
             "rr3-brain/intent/result",
+            RR3_BRAIN_TOPIC_TTS_PCM,
             "rr3-interact/face/expression",
         ] {
             assert!(text.contains(needle), "契约缺 {needle}");

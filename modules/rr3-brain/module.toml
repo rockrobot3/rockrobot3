@@ -20,8 +20,10 @@ optional = ["power.battery"]
 # C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：订阅面对齐实然面——
 # asr/text 走 retired（号位保留、义务解除）、net/link 撤申报（不补实现）；
 # pcm + vad_start 是 composite.py 实际消费的语音主链入口（B-1 只增补齐）。
+# MC-1（TTS 下行通路）：新增发布面 rr3-brain/audio/tts_pcm（stream）——brain 把
+# TTS 合成结果按 20ms 块分帧广播；rr3-interact 订阅消费后经事务面点名播放。
 [events]
-publishes = ["rr3-brain/intent/result"]
+publishes = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"]
 subscribes = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
 
 [rpc]
