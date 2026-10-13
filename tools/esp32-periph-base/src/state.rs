@@ -53,6 +53,10 @@ pub(crate) struct PeriphState {
     /// 扫摆节拍：60ms 一拍的拍号（u8 回绕无妨，只用模数）+ 下拍时间。
     pub(crate) wander_phase: u8,
     pub(crate) next_wander_ms: u64,
+    /// 5V 轨最近一次采样（方案A Q1 观测面，由**运行面**写入）：轨压 mV + 引脚 raw。
+    /// `0` = 尚未采样（boot 初值/未装配）。纯观测；阈值判定在批M 步3。
+    pub(crate) rail_mv: u16,
+    pub(crate) rail_raw: u16,
 }
 
 impl PeriphState {
@@ -79,6 +83,8 @@ impl PeriphState {
             wander_tilt_dir: 0,
             wander_phase: 0,
             next_wander_ms: 0,
+            rail_mv: 0,
+            rail_raw: 0,
         }
     }
 
@@ -211,6 +217,8 @@ pub(crate) enum Job {
     RenderCapsules,
     /// 渲染 8x8 点阵全屏放大。
     RenderFrame([u8; 8]),
+    /// 采样一次 5V 轨（RAIL 行命令点名；跑在运行面，结果走 outbox 异步回包）。
+    SampleRail,
 }
 
 /// 控制面私有状态（不跨线程）：帧面 expression 应答的 previous 字段——命令由控制面

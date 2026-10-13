@@ -1,3 +1,4 @@
+use esp_idf_hal::adc::{attenuation, Resolution as AdcResolution};
 use esp_idf_hal::ledc::Resolution;
 use esp_idf_sys::TickType_t;
 
@@ -137,6 +138,35 @@ pub(crate) const UART2_BAUD_HZ: u32 = 115_200;
 pub(crate) const LEDC_FREQ_HZ: u32 = 50;
 /// LEDC 分辨率（50Hz×2^14=819200Hz，源 80MHz 分频 97.66 → 实际 ≈50.0Hz）。
 pub(crate) const LEDC_RES_BITS: Resolution = Resolution::Bits14;
+
+// ---------------------------------------------------------------------------
+// 5V 轨电压监测（方案A Q1/Q2）——**策略量集中处**（机制在 [`crate::power`]）
+// ---------------------------------------------------------------------------
+//
+// 根因链（真板实锤）：OLED 大面亮点帧 + 舵机保持电流抢同一条 5V 轨 → 轨压跌落
+// → ESP32 BOD 复位。此前这条轨**无任何观测手段**——欠压既看不见、也响应不了。
+// 本组常量是板侧唯一策略面（引脚/分压比/采样节拍/ADC 档位）；机制（读 ADC 一次 +
+// 按分压比换算回轨压 mV）在 [`crate::power`]，阈值判定核见同批步3。**机制与策略
+// 分离**：换板只动本文件，power.rs 零板名。分压测点接线后与万用表对拍（≤2%）再
+// 回填标定——**无真板证据前不 claim**。
+
+/// 5V 轨分压测点引脚（ADC1_CH6，input-only 档，见文件头引脚预算）。**数字真值**
+/// 只作观测打印与接线表锚点；驱动装配用 `peripherals.pins.gpio34`（具名类型，
+/// 与 LEDC/UART 同例——见上文引脚真值段注记，不另立重复真值）。
+pub(crate) const ADC_RAIL_PIN: i32 = 34;
+/// 5V 轨采样节拍（运行面自主节拍周期采样；占位值 **待真板标定**）。
+pub(crate) const RAIL_SAMPLE_PERIOD_MS: u64 = 500;
+/// 分压比分子：轨压 mV = 引脚 mV × NUM / DEN。**占位 1:1 待标定**——真板装上
+/// 分压网络（如 5V→≤3.3V 的 2:1 分压）后按实测比值回填。
+pub(crate) const ADC_RAIL_DIVIDER_NUM: u32 = 1;
+/// 分压比分母（见 [`ADC_RAIL_DIVIDER_NUM`]）。
+pub(crate) const ADC_RAIL_DIVIDER_DEN: u32 = 1;
+/// ADC 衰减档（11dB：量程约 0–3.1V，配分压后覆盖 5V 轨）。
+pub(crate) const ADC_ATTEN: attenuation::adc_atten_t = attenuation::DB_11;
+/// ADC 分辨率（12bit；ESP32 支持档）。
+pub(crate) const ADC_RESOLUTION: AdcResolution = AdcResolution::Resolution12Bit;
+/// ADC 标定开关（true：`read()` 直接回 mV，免手算 raw→mV 曲线）。
+pub(crate) const ADC_CALIBRATION: bool = true;
 
 /// 角度 → duty ticks（线性 0–180 ↦ 410–2048；入参已由调用方 clamp 0–180）。
 pub(crate) fn deg_to_duty(deg: u32) -> u32 {
