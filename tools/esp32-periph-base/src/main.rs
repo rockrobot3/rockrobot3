@@ -89,7 +89,7 @@ use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_p
 
 use crate::board::{
     ADC_RAIL_PIN, AXIS_CENTER_DEG, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ,
-    LEDC_RES_BITS, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ,
+    LEDC_RES_BITS, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ, UART2_TX_RING,
 };
 use crate::commands::cmd_loop;
 use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
@@ -124,7 +124,12 @@ fn main() {
     // I2C 全绿（扫描 0x3C / init / boot 文本 / 页写全过）。故本板弃用 16/17（疑与
     // 底板走线桥接或模块 PSRAM 脚冲突），钉 18/19。接线表见 README；19 与点阵 VSPI
     // 预留同脚，点阵立项时需再迁（已在案）。
-    let uart_config = UartConfig::new().baudrate(Hertz(UART2_BAUD_HZ));
+    // TX 环 = UART2_TX_RING（board 策略面）：缺省 256B 下整帧写 11.4KB 同步等线速
+    // 排空 ~120ms（921600），mic 组帧线程被写调用饿死 → I2S DMA 环溢出丢数（真板
+    // 实录 [mic] 采样率崩塌）。TX 环 ≥ 单帧后 write 降为 memcpy 入环、异步排水。
+    let uart_config = UartConfig::new()
+        .baudrate(Hertz(UART2_BAUD_HZ))
+        .tx_fifo_size(UART2_TX_RING);
     let uart = UartDriver::new(
         peripherals.uart2,
         peripherals.pins.gpio18,

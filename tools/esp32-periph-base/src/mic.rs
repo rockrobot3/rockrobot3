@@ -153,6 +153,11 @@ pub fn spawn_mic_smoke(
             let mut equal = 0u64;
             let mut t0 = Instant::now();
             let mut dump_count = 0u32;
+            // 组帧计时窗累计（排障定案面）：本窗各分片 audio_chunk_to_frame 耗时
+            // 微秒和 + 次数，统计行 build= 均值——"组帧慢" vs "整帧写同步排水饿死"
+            // 两论一测定案（b64/JSON 已被对表排除为 ms 级，此处真板实测收口）。
+            let mut build_us = 0u64;
+            let mut build_n = 0u32;
             // 批D③ 分片累积（交错 L,R 原始 24bit；堆上，16KB——栈 16KB 只放 buf 4KB）
             let mut chunk: Vec<i32> = Vec::with_capacity(AUDIO_CHUNK_FRAMES * 2);
             loop {
@@ -209,7 +214,11 @@ pub fn spawn_mic_smoke(
                                         b.st.audio_seq = b.st.audio_seq.wrapping_add(1);
                                         s
                                     };
-                                    if let Some(bytes) = audio_chunk_to_frame(&chunk, seq) {
+                                    let t_build = Instant::now();
+                                    let frame = audio_chunk_to_frame(&chunk, seq);
+                                    build_us += t_build.elapsed().as_micros() as u64;
+                                    build_n += 1;
+                                    if let Some(bytes) = frame {
                                         let mut b = lock_bus(&bus);
                                         if b.audio_q.len() >= AUDIO_Q_CAP {
                                             b.audio_q.pop_front();
@@ -230,8 +239,13 @@ pub fn spawn_mic_smoke(
                             let l_rms = ((l_sum as f64) / n_total).sqrt() as i32;
                             let r_rms = ((r_sum as f64) / n_total).sqrt() as i32;
                             let eq_pct = (equal * 100 / frames.max(1)) as u64;
+                            let build_ms = if build_n > 0 {
+                                build_us as f64 / build_n as f64 / 1000.0
+                            } else {
+                                0.0
+                            };
                             println!(
-                                "[mic] {rate}Hz L rms={l_rms} peak={l_peak} | R rms={r_rms} peak={r_peak} | L==R {eq_pct}%"
+                                "[mic] {rate}Hz L rms={l_rms} peak={l_peak} | R rms={r_rms} peak={r_peak} | L==R {eq_pct}% | build={build_ms:.1}ms×{build_n}"
                             );
                             reads = 0;
                             frames = 0;
@@ -240,6 +254,8 @@ pub fn spawn_mic_smoke(
                             l_peak = 0;
                             r_peak = 0;
                             equal = 0;
+                            build_us = 0;
+                            build_n = 0;
                             t0 = Instant::now();
                         }
                     }
