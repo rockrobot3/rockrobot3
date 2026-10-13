@@ -246,18 +246,29 @@ for c in modules/*/composite.toml; do
   done
 done
 [ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-b F⊗F/装配成员存在性（全部 composite.toml 的 ⊗ 链成员皆本模块原子件）\n'
+# —— 模块语言数据源（读 module.toml `manifest.lang`；schema 必填 + 枚举 rust|python，
+#    contract 钉死 schema.rs）。⑦-c 件形与 ⑧-a 豁免的**唯一判据数据源**——门内零零件名
+#    硬编码（0.0.5 批M MC-10 L-2，承 R-8：architecture §13"⑦-c 仍留两处 if rr3-brain"
+#    收编；参数 = module.toml 路径，供 ⑦-c/$mod 与 ⑧-a/$mod_dir 两处共用同一真值）。
+mod_lang() {
+  grep -m1 -E '^lang[[:space:]]*=' "$1" 2>/dev/null | sed -E 's/.*"([^"]*)".*/\1/'
+}
 # ⑦-c 五件套齐全（§13 计数断言，承 ②b mkmod 产物形状）：Rust 原子件五件 = atom.toml +
 #     <名>.rs（入口）+ mech.rs（实现）+ assemble.toml（装配清单）+ private.rs（唯一私有头）；
-#     brain 为 Python 两件式（atom.toml + assemble.toml，机制本体 .py 原位——conventions
-#     §2 批C⑤ 在案，属登记豁免非 SKIP）。组合件实体 = composite.toml + 入口 + 实现
-#     （禁薄胶水存在性：散落转发无组合件实体在此红）。
+#     Python 件为两件式（atom.toml + assemble.toml，机制本体 .py 原位——conventions
+#     §2 批C⑤ 在案，属登记豁免非 SKIP）。件形由 module.toml `lang` 数据位选（不再按
+#     零件名 `if` 猜）。组合件实体 = composite.toml + 入口 + 实现（禁薄胶水存在性）。
 for d in modules/*/atoms/*/; do
   mod="$(basename "$(dirname "$(dirname "$d")")")"; name="$(basename "$d")"
-  if [ "$mod" = "rr3-brain" ]; then
-    five="atom.toml assemble.toml"
-  else
-    five="atom.toml assemble.toml private.rs mech.rs $name.rs"
-  fi
+  lang="$(mod_lang "modules/$mod/module.toml")"
+  case "$lang" in
+    rust)   five="atom.toml assemble.toml private.rs mech.rs $name.rs" ;;
+    python) five="atom.toml assemble.toml" ;;
+    *)
+      printf 'FAIL  ⑦-c 五件套: %s 模块 %s 的 lang=%s（module.toml manifest.lang 白名单 rust|python，缺/非法即 fail-closed）\n' "$d" "$mod" "${lang:-<空>}"
+      static_fail=1; continue
+      ;;
+  esac
   for f in $five; do
     if [ ! -f "$d$f" ]; then
       printf 'FAIL  ⑦-c 五件套: %s 缺 %s\n' "$d" "$f"
@@ -267,11 +278,17 @@ for d in modules/*/atoms/*/; do
 done
 for c in modules/*/composite.toml; do
   mod_dir="$(dirname "$c")"; mod="$(basename "$mod_dir")"
-  if [ "$mod" = "rr3-brain" ]; then
-    req="rr3_brain/__main__.py rr3_brain/composite.py"
-  else
-    req="src/main.rs src/composite.rs"
-  fi
+  lang="$(mod_lang "$mod_dir/module.toml")"
+  case "$lang" in
+    rust)   req="src/main.rs src/composite.rs" ;;
+    # Python 组合件实体：包目录 = 模块名破折号转下划线（naming.md §3 目录名 == 进程名 ==
+    # manifest.name；pyproject `packages.find` include `"<包>*"` 同源），不硬编码零件名。
+    python) pkg="$(printf '%s' "$mod" | tr '-' '_')"; req="$pkg/__main__.py $pkg/composite.py" ;;
+    *)
+      printf 'FAIL  ⑦-c 五件套(组合件): %s 模块 %s 的 lang=%s（缺/非法即 fail-closed）\n' "$c" "$mod" "${lang:-<空>}"
+      static_fail=1; continue
+      ;;
+  esac
   for f in $req; do
     if [ ! -f "$mod_dir/$f" ]; then
       printf 'FAIL  ⑦-c 五件套(组合件): %s 缺 %s\n' "$c" "$f"
@@ -281,7 +298,15 @@ for c in modules/*/composite.toml; do
 done
 [ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-c 五件套齐全（全部原子件与组合件实体逐件计数过）\n'
 # ⑦-d 入口体量（§13：装配入口 ≤80 行；批E 起 fail-closed——六入口现况 16–18 行）。
-for e in modules/*/src/main.rs modules/rr3-brain/rr3_brain/__main__.py; do
+#     入口路径按 module.toml `lang` 数据位推导（L-2：此前硬编码 modules/rr3-brain/…）。
+for mt in modules/*/module.toml; do
+  mod_dir="$(dirname "$mt")"; mod="$(basename "$mod_dir")"
+  lang="$(mod_lang "$mt")"
+  case "$lang" in
+    rust)   e="$mod_dir/src/main.rs" ;;
+    python) pkg="$(printf '%s' "$mod" | tr '-' '_')"; e="$mod_dir/$pkg/__main__.py" ;;
+    *) continue ;;  # lang 缺/非法已由 ⑦-c 逐件点名，此处不重复扰民
+  esac
   [ -f "$e" ] || continue
   lines="$(wc -l < "$e" | tr -d ' ')"
   if [ "$lines" -gt 80 ]; then
@@ -297,12 +322,15 @@ fi
 
 # ⑧ 件级判据三门（0.0.5 批K H2，architecture §4.0.3 判据② + §13 表；全 fail-closed，
 #    上线即全绿——既有步序不得由 FAIL 变 SKIP，新门同理）。步序与条数登记 conventions §2。
-# ⑧-a 件级两腿对拍计数门：格三态读 contracts/slots.toml 的 status 标记位（C9：豁免
-#     数据化，门内无硬编码 if）——normal 格的落点件须 mech.rs + 模块 composite.rs
-#     两腿各 ≥1（腿一 fn parity_leg1_*、腿二 fn parity_leg2_*，命名即机器锚）；只有
-#     腿一记未达标（§4.0.3：否则恒输出 0 的空件照样过门）；placeholder 记"不适用"
-#     （占位 ≠ 通过）、retired 退出分母；brain 是 Python 件（无 atoms/*.rs 扫描面），
-#     其 cognition 四格不属本门分母（H1 口径 11 件 = Rust 真件）。
+# ⑧-a 件级两腿对拍计数门：格两轴读 contracts/slots.toml（C9/C17：豁免数据化，门内无
+#     硬编码 if）——`status` 判分母（normal / placeholder / retired 三态），`tier_scope`
+#     记档位适用（非空且为 host|rtos|bare 子集，缺/非法即 fail-closed；0.0.5 批M
+#     MC-10 L-2 扩读，收 R-8——此前只读 status、tier_scope 门禁不读）。normal 格的落点
+#     件须 mech.rs + 模块 composite.rs 两腿各 ≥1（腿一 fn parity_leg1_*、腿二
+#     fn parity_leg2_*，命名即机器锚）；只有腿一记未达标（§4.0.3：否则恒输出 0 的空件
+#     照样过门）。件形由 module.toml `lang` 数据位判（rust|python，缺/非法即 fail-closed，
+#     不再用 `[ ! -f mech.rs ]` 存在性启发式猜）——lang=python 两件式件（无 atoms/*.rs
+#     扫描面）记"不适用"；其 cognition 四格不属本门分母（H1 口径 11 件 = Rust 真件）。
 # ⑧-a C10 反例自证：门内建 stub fixture（恒输出 0 的件 + 只有腿一），同一计数函数
 #     必须拦下——拦不住则门本身 FAIL（对拍门若放行空件就只是仪式）。
 # ⑧-b 件级依赖闭包 grep 门（C7 分级执法）：扫 modules/*/atoms/*/*.rs 的**非 test 面**
@@ -329,7 +357,7 @@ parity_gate() {
     echo "ERROR: parity_gate atom.toml 枚举打空（门禁失效，不放行）" >&2
     return 2
   fi
-  local atom_toml atom_dir atom_name mod_dir slot status leg1 leg2
+  local atom_toml atom_dir atom_name mod_dir slot status tier_scope lang t leg1 leg2
   while IFS= read -r atom_toml; do
     atom_dir="$(dirname "$atom_toml")"
     atom_name="$(basename "$atom_dir")"
@@ -347,18 +375,47 @@ parity_gate() {
         rc=1
         continue
       fi
+      # 第二轴 tier_scope（L-2 扩读）：非空 + 档名在 host|rtos|bare 白名单内，缺/非法即红。
+      tier_scope="$(awk -v want="$slot" '
+        /^\[\[slot\]\]/  { in_s = 1; cur = "" }
+        in_s && $1 == "name"       { v = $3; gsub(/[",]/, "", v); cur = v }
+        in_s && $1 == "tier_scope" {
+          if (cur == want) {
+            v = $0; out = ""
+            while (match(v, /"[^"]+"/)) { out = out substr(v, RSTART + 1, RLENGTH - 2) " "; v = substr(v, RSTART + RLENGTH) }
+            print out; exit
+          }
+        }
+      ' "$slots_toml")"
+      if [ -z "$tier_scope" ]; then
+        printf 'FAIL  ⑧-a %s→%s: 提供格在 slots.toml 缺 tier_scope 登记（两轴其一缺失即红，L-2 扩读）\n' "$atom_name" "$slot"
+        rc=1
+        continue
+      fi
+      for t in $tier_scope; do
+        case "$t" in
+          host|rtos|bare) ;;
+          *) printf 'FAIL  ⑧-a %s→%s: tier_scope 含非法档 "%s"（白名单 host|rtos|bare）\n' "$atom_name" "$slot" "$t"; rc=1 ;;
+        esac
+      done
       if [ "$status" = "retired" ]; then
-        printf 'PASS  ⑧-a %s→%s: retired 退出分母（号位保留、义务解除）\n' "$atom_name" "$slot"
+        printf 'PASS  ⑧-a %s→%s: retired 退出分母（号位保留、义务解除；tier_scope=%s）\n' "$atom_name" "$slot" "$tier_scope"
         continue
       fi
       if [ "$status" = "placeholder" ]; then
-        printf 'PASS  ⑧-a %s→%s: placeholder 记不适用（占位 ≠ 通过，登记填实触发条件）\n' "$atom_name" "$slot"
+        printf 'PASS  ⑧-a %s→%s: placeholder 记不适用（占位 ≠ 通过，登记填实触发条件；tier_scope=%s）\n' "$atom_name" "$slot" "$tier_scope"
         continue
       fi
-      if [ ! -f "$atom_dir/mech.rs" ]; then
-        # Python 两件式件（brain：atom.toml + assemble.toml，机制本体 .py 原位）——
-        # 无 Rust 扫描面，记不适用（⑦-c 的五件套形状判同源，非 mod 名硬编码）
-        printf 'PASS  ⑧-a %s→%s: normal 格但非 Rust 件（无 mech.rs，Python 两件式）记不适用\n' "$atom_name" "$slot"
+      lang="$(mod_lang "$mod_dir/module.toml")"
+      if [ "$lang" = "python" ]; then
+        # Python 两件式件（lang=python：atom.toml + assemble.toml，机制本体 .py 原位）——
+        # 无 Rust 扫描面，记不适用（判据 = module.toml 数据位，非 `[ ! -f mech.rs ]` 启发式）
+        printf 'PASS  ⑧-a %s→%s: normal 格但 lang=python 两件式件，记不适用（tier_scope=%s）\n' "$atom_name" "$slot" "$tier_scope"
+        continue
+      fi
+      if [ "$lang" != "rust" ]; then
+        printf 'FAIL  ⑧-a %s→%s: module.toml lang=%s（白名单 rust|python，缺/非法即 fail-closed）\n' "$atom_name" "$slot" "${lang:-<空>}"
+        rc=1
         continue
       fi
       # 件级精确归属：对拍函数名须带本件名前缀（fn parity_leg1_<件名>_*）——
@@ -370,9 +427,9 @@ parity_gate() {
                 | grep -cE "fn parity_leg2_${atom_name}_[a-z0-9_]+" || true)"
       leg1="${leg1:-0}"; leg2="${leg2:-0}"
       if [ "$leg1" -ge 1 ] && [ "$leg2" -ge 1 ]; then
-        printf 'PASS  ⑧-a %s→%s: 两腿齐（leg1=%s leg2=%s，扫描 mech.rs + composite.rs）\n' "$atom_name" "$slot" "$leg1" "$leg2"
+        printf 'PASS  ⑧-a %s→%s: 两腿齐（leg1=%s leg2=%s，扫描 mech.rs + composite.rs；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
       else
-        printf 'FAIL  ⑧-a %s→%s: normal 格两腿不齐（leg1=%s leg2=%s）——只有腿一记未达标（§4.0.3 判据②）\n' "$atom_name" "$slot" "$leg1" "$leg2"
+        printf 'FAIL  ⑧-a %s→%s: normal 格两腿不齐（leg1=%s leg2=%s）——只有腿一记未达标（§4.0.3 判据②；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
         rc=1
       fi
     done
@@ -389,6 +446,14 @@ schema_version = 2
 name = "stub.slot"
 layer = "body"
 status = "normal"
+tier_scope = ["host", "rtos", "bare"]
+EOF
+# 件形判据是 module.toml `lang`（L-2）：fixture 须给数据位，否则会先被 lang 门（而非
+# 对拍计数）拦下——自证要证明的是"对拍计数拦得住空件"，不能让旁门替它挡刀。
+cat > "$c10_dir/modules/rr3-stub/module.toml" <<'EOF'
+[manifest]
+name = "rr3-stub"
+lang = "rust"
 EOF
 cat > "$c10_dir/modules/rr3-stub/atoms/stub/atom.toml" <<'EOF'
 schema_version = 1
@@ -418,11 +483,15 @@ mod tests {
 }
 EOF
 : > "$c10_dir/modules/rr3-stub/src/composite.rs"
-if parity_gate "$c10_dir/contracts/slots.toml" "$c10_dir/modules" >/dev/null 2>&1; then
-  printf 'FAIL  ⑧-a C10 反例自证: stub 件（恒输出0+只有腿一）未被拦下——门对空件发奖即门禁失效\n'
+c10_out="$(parity_gate "$c10_dir/contracts/slots.toml" "$c10_dir/modules" 2>&1)" && c10_rc=0 || c10_rc=$?
+# 自证判据不止"退非零"：必须是**对拍计数**（两腿不齐）拦下的，不能被 lang/tier_scope/
+# status 等旁门替它挡刀——否则门红归因失真，自证就失去了意义。
+if [ "$c10_rc" -eq 0 ] || ! printf '%s' "$c10_out" | grep -q 'normal 格两腿不齐'; then
+  printf 'FAIL  ⑧-a C10 反例自证: stub 件（恒输出0+只有腿一）未被**对拍计数**拦下（rc=%s）——门对空件发奖即门禁失效\n' "$c10_rc"
+  printf '%s\n' "$c10_out"
   gate_fail=1
 else
-  printf 'PASS  ⑧-a C10 反例自证: stub 反例被拦（恒输出0+只有腿一 → 门红）\n'
+  printf 'PASS  ⑧-a C10 反例自证: stub 反例被拦（恒输出0+只有腿一 → 对拍计数记未达标，门红）\n'
 fi
 rm -rf "$c10_dir"
 # —— ⑧-a 正仓计数
