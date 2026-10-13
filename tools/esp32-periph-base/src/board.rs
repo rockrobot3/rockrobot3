@@ -97,6 +97,12 @@ pub(crate) const AUDIO_CHUNK_FRAMES: usize = 2048;
 /// `audio_dropped`（判据② 背压观测前哨，与 recorder 端 seq 断档互为对账）。
 /// 4 分片 ≈ 45KB 堆 + 单分片传输 ~120ms，吸收宿主 ~0.5s 级收流抖动。
 pub(crate) const AUDIO_Q_CAP: usize = 4;
+/// UART2 发送环形缓冲字节数（tx_fifo_size，策略量集中本文件）。**真板实锤
+/// （2026-10-13 D③ 验收）**：缺省 TX 环仅 256B，整帧写 11.4KB 只能同步等线速
+/// 排空（921600 下 ~120ms/帧），mic 组帧线程被写调用拖住 → I2S DMA 环溢出丢数
+/// （[mic] 采样率 16.5kHz → 4.5kHz 崩塌实录）。16KB ≥ 单分片整帧 ≈11.4KB：
+/// write 降为 memcpy 入环、ISR/驱动任务异步排水，组帧线程不被线速拖住。
+pub(crate) const UART2_TX_RING: usize = 16384;
 
 // ---------------------------------------------------------------------------
 // 舵机换算（50Hz / 14bit：1 tick = 20ms / 16384 = 1.2207µs）

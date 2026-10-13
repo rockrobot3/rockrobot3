@@ -16,6 +16,16 @@ description = "0.0.5 增补轮五 批B 外设底座档 + 批C 帧执行面 + 批
 # 身份——路线二裁定：宿主 HAL 桥后端直连，本固件只是被点名的执行面）。
 [workspace]
 
+# 批D③ 真板实锤（2026-10-13）：dev 缺省 opt-level=0 下 mic 线程的逐元素堆写
+# （extend_from_slice / String::push / serde_json 序列化）慢两个数量级——组帧
+# 分段实测 pcm≈280ms / b64≈200ms / json≈150ms / memcpy 面（body/frame）≈2ms，
+# 合计 ~680ms/片 → 组帧期间 I2S DMA 环溢出丢数（[mic] 16.5kHz→2.8kHz 崩塌，
+# 与 128ms 音频 + 680ms 组帧 = 2.5kHz 自洽）。此前"b64/JSON ms 级"的排除按
+# -O3 直觉估算，-O0 全不成立。真板性能验收必须走优化码：dev profile 全域提到
+# opt-level=2，门禁构建与烧录产物同位形，根治"-O0 不代表真板性能"失真。
+[profile.dev]
+opt-level = 2
+
 [dependencies]
 # 版本组合对表批W1 钉死登记（tools/espidf-std-hello/README.md）：
 # esp-idf-sys =0.35.0 ↔ ESP-IDF v5.2.2 ↔ embuild =0.32.0 ↔ ldproxy 0.3.5。
