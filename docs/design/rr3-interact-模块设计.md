@@ -42,7 +42,7 @@
 | 件 | `handles` | `ops` 槽（现状 vs 目标） | 非法收敛 |
 |---|---|---|---|
 | face | `dyn Rr3Display` ← `[hardware]` **无显示键**（现只有 ALSA/PWM/GPIO/I2C/link 九键） → 需扩键（走 C4 契约评审） | `non_pointable ← [rr3-interact.face] non_pointable`（**I-11 已落**：不可点名集；`default_expression: string` 现仍无人读）；帧推进周期 250 ms（代码常量） | 无屏 → 格缺，不调帧机 |
-| player | `dyn Rr3AudioSink` ← `[hardware].alsa_device` | `prebuffer_ms`=500、`volume_pct`=70（**现无人读**——MC-2 余量）；字符估时长已随 MC-1 删（播放时长由样点数导出，20ms 分块 = 契约字面量 `RR3_TTS_BLOCK_SAMPLES=320`/`RR3_TTS_SAMPLE_RATE=16_000`） | 无 sink / 缓冲对账不过 → `tts/text` 回拒因 + 计数，**不得静默吞文本** |
+| player | `dyn Rr3AudioSink` ← `[hardware].alsa_device` | `prebuffer_ms=500`、`volume_pct=70`（**MC-2 已落**：config `[rr3-interact.player]` 键回归 + `atoms/player/assemble.toml` ops 槽两条，组合件读入透传——缺键回落默认、类型错/负数/增益越界 0..=1000 逐键拒 boot；机制面 `rr3_tts_apply_gain` i64 中间量整型饱和、`rr3_tts_prebuffer_ready` 起播水位 legacy `0cf029e` 语义）；字符估时长已随 MC-1 删（播放时长由样点数导出，20ms 分块 = 契约字面量 `RR3_TTS_BLOCK_SAMPLES=320`/`RR3_TTS_SAMPLE_RATE=16_000`） | 无 sink / 缓冲对账不过 → `tts/text` 回拒因 + 计数，**不得静默吞文本** |
 | panel | 无句柄（TCP） | `RR3_PANEL_ADDR` env；`bind`/`port` 在 config 里但**未被读** → 二者取一（删或读） | 地址非法 → 起不来即 `exit(1)` |
 
 ## §4 主循环与时序预算
@@ -53,7 +53,7 @@
 | 输出/动作 | 名义周期 | 最坏延迟 | 备注 |
 |---|---|---|---|
 | 表情帧推进 | 250 ms | 一拍 + 一次 display 写 | 帧长由帧表决定 |
-| TTS 播放 | 事件驱动（`tts/text` 点名对账过才播） | 流时长 = 样点数 × 1000 / 16000 ms（20ms 分块写 sink） | 与 `prebuffer_ms` 无关（后者仍未实现，MC-2） |
+| TTS 播放 | 事件驱动（`tts/text` 点名对账过才播） | 流时长 = 样点数 × 1000 / 16000 ms（20ms 分块写 sink） | 起播先过 `prebuffer_ms` 水位门（MC-2 落，legacy 0cf029e 语义：流完整未攒满也播——批量架构下对账蕴含水位，fail-closed 显式在场）；增益 `volume_pct` 整型饱和缩放后写 sink |
 | panel 应答 | 每连接一线程 | HTTP 一次往返 | 并发上限 `RR3_PANEL_MAX_CONNS`。`live` 计数是 fetch_add→handle→fetch_sub、**无 RAII 守卫**——机制上确有泄漏；但 `rr3_panel_handle/execute` 全链走 `map_err`/`unwrap_or_else`，**无可达 panic 点**，所以"累计到上限永久 503"只是可达性未证的敞口（§11）。**真正可达的是另一条**：`spawn` 失败走 `?` 会让 accept 循环整体退出 = 面板静默消失（工单 I-4 改立这一条） |
 | 与心跳 | 独立线程 | — | 主循环卡死 → 心跳仍续（同 sense/act 的漏检类别） |
 
@@ -105,7 +105,7 @@
 
 | # | 动作 | 归属 | 前置 |
 |---|---|---|---|
-| I-1 | `config.toml` 六参数：**被读或删除**（不允许第三种状态）——**2026-10-12 对表结案**：六键已随批I **全删**（`modules/rr3-interact/config.toml` 现为空壳，文件头逐键写明删除理由：`log_level`/`default_expression` 无读者、`volume_pct`/`prebuffer_ms` 行为未实装不提前占键、`panel.bind`/`port` 与 `RR3_PANEL_ADDR_DEFAULT` 常量是第二真值点）。**余下的不是孤儿参数而是功能缺项**：音量与预缓冲的行为随 MC-1 真 PCM 通路落地时按"进 ops 槽"回归 | **本条已结**；行为实装 → **0.0.5 批M MC-2** | C5 |
+| I-1 | `config.toml` 六参数：**被读或删除**（不允许第三种状态）——**2026-10-12 对表结案**：六键已随批I **全删**（`modules/rr3-interact/config.toml` 现为空壳，文件头逐键写明删除理由：`log_level`/`default_expression` 无读者、`volume_pct`/`prebuffer_ms` 行为未实装不提前占键、`panel.bind`/`port` 与 `RR3_PANEL_ADDR_DEFAULT` 常量是第二真值点）。**余下的不是孤儿参数而是功能缺项**：音量与预缓冲的行为随 MC-1 真 PCM 通路落地时按"进 ops 槽"回归——**2026-10-13 随批M MC-2 兑现**：两键回归 config `[rr3-interact.player]` + `atoms/player/assemble.toml` ops 槽，行为实装（见 §14.1 I-14 行） | **本条已结**；行为实装 → **0.0.5 批M MC-2（已结）** | C5 |
 | I-2 | 显示句柄的 `[hardware]` 键扩位（走契约评审）——**2026-10-12 随 R31 Q2 作废登记**：显示件改由 **ESP32 协处理器以 I2C 承载 SSD1306**，Pi 侧不再新增 SPI 键位，九键闭合表维持原样（**批J C4"不扩键"结案因此不需重开**）；本册保留的是清零判据（见 0.0.5 §18.4 与 MC-3） | **作废登记**；施工 = 增补轮五批B/批C，判据 = **0.0.5 批M MC-3** | C4 |
 | I-3 | 件面句柄换 `rr-hal-api` 同步签名 | 批I | C5 |
 | I-4 | **改立可达的那条**：`spawn` 失败不得用 `?` 退出 accept 循环（单连接起不来只丢该连接并计数，面板必须继续服务）；`live` 计数顺带加 RAII 守卫，防未来新增 panic 点时变成静默泄漏。回归 = 起不来一个连接后面板仍可访问 | 批K | — |
@@ -118,12 +118,12 @@
 | I-11 | "不可点名表情"规则（`talk`）从件内 `if` 改 ops 槽 `non_pointable`；白名单值本身仍是契约面，只把**规则**外移——**2026-10-13 由 0.0.5 批M MC-10 落**：值落 config `[rr3-interact.face] non_pointable`（config 键 + `atoms/face/assemble.toml` ops 槽 `non_pointable ← rr3-interact.face.non_pointable`），interact 自此**装载 config**（`toml` 依赖入本 crate），组合件读入透传 `rr3_face_set`。白名单对账（非在册名拒 boot）、空数组合法（放开全部点名） | 批M MC-10（已结） | C1 |
 | I-12 | 面板端点串"后端 + 页面"双写消解——**已结（0.0.5 批M MC-8③）**：页面注释撤手写计数、指向后端 `RR3_PANEL_ROUTES` 唯一真值；页面内的端点字面量是功能调用（fetch 目标）非文案，保留 | 已结 | — |
 | I-13 | **妆面件失败语义规则表落地**（D8 本轮立单，此前索引挂着却无任何工单）：把"哪些件属妆面（写失败只 `eprintln` 不退）、哪些绝不属（执行器与播放路径必须 `exit(1)` 交监督复位）"写成一处数据（`contracts/` 或 ops 侧的件分类表），框架通用约定 1 引它而不是各册自说。建议范围：led / face 属妆面，**player 待 D8 定**（interact §6 已定"意图与声音解耦"，倾向属妆面但不含 sink 写失败以外的路径） | 批I（表）+ 契约评审（范围） | C17 |
-| I-14 | **播真 PCM 而非占位波形**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 裁定 1）：`player` 收 `rr3-brain/audio/tts_pcm` 流（MCP-1 已落 `8d05590`：新增主题在册，载荷体复用上行 `rr3_pcm_event_body` 的 `{seq, format, rate, channels, ms, pcm_b64}` 形状）→ 解 `pcm_b64` → 写 `Rr3AudioSink`；时长由**样点数**导出，`RR3_TTS_MS_PER_CHAR = 60` 与 440 Hz 查表波形退役（站替台账台-2）；`volume_pct`/`prebuffer_ms` 的行为随本单实装并按"进 ops 槽"回归 | **0.0.5 批M MC-1 + MC-2**（前置 MCP-1 契约 append 已落 `8d05590`） | MCP-1 |
+| I-14 | **播真 PCM 而非占位波形**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 裁定 1）：`player` 收 `rr3-brain/audio/tts_pcm` 流（MCP-1 已落 `8d05590`：新增主题在册，载荷体复用上行 `rr3_pcm_event_body` 的 `{seq, format, rate, channels, ms, pcm_b64}` 形状）→ 解 `pcm_b64` → 写 `Rr3AudioSink`；时长由**样点数**导出，`RR3_TTS_MS_PER_CHAR = 60` 与 440 Hz 查表波形退役（站替台账台-2）；`volume_pct`/`prebuffer_ms` 的行为随本单实装并按"进 ops 槽"回归——**2026-10-13 全兑现（MC-1 + MC-2）**：通路半边随 MC-1 结；两参数随 MC-2 实装（`rr3_tts_apply_gain` 整型饱和增益 + `rr3_tts_prebuffer_ready` 起播水位，legacy `0cf029e` 语义） | **0.0.5 批M MC-1 + MC-2（均已结）**（前置 MCP-1 契约 append 已落 `8d05590`） | MCP-1 |
 
 ## §11 待证与敞口
 
 1. 真屏与真回放从未发生（显示真后端未实装、喇叭/麦未采购）。
-2. `volume_pct` / `prebuffer_ms` 对应的行为**未实装**，不是"配了没读"那么轻——播放路径里没有缓冲与音量控制。
+2. ~~`volume_pct` / `prebuffer_ms` 对应的行为未实装~~——**已随 0.0.5 批M MC-2 结清（2026-10-13）**：增益与水位落 mech.rs 机制纯函数 + config `[rr3-interact.player]` 注入（§3/§13 已同批更新）；真回放（喇叭）仍敞口。
 3. 面板鉴权模型 = 单机可信 + 只绑回环；对外暴露的决策随 M5 定，本册不预设。
 4. `live` 计数泄漏的**可达性未证**：今天找不到能让连接线程 panic 的路径，所以"累计到上限 → 永久 503"
    只能作敞口登记（触发条件 = 面板转发链里第一次引入 `unwrap`/`expect`）。别把它写成现状缺陷。
@@ -154,15 +154,15 @@
 | `atoms/face/face.rs : RR3_FACE_EXPRESSIONS` | `["idle","blink","talk","think","happy","listen","turn"]` | 表情白名单 | 有（`rr3_face_set`/`rr3_face_frames`） | **契约字面量—不许动**（面板下拉框与 schema 都在读；集合扩容走契约评审） |
 | `atoms/face/face.rs : RR3_FACE_TALK` | `"talk"` | "不可点名"的排除项 | 有 | 契约字面量；**规则本身（"播放态不可点名"）已外移** → config `[rr3-interact.face] non_pointable` + ops 槽 `non_pointable`（**I-11 已落**，让形态可选择放开——空集全放） |
 | `atoms/face/mech.rs : Default / begin_talk / end_talk` | `"idle"` ×3 | 默认表情兜底 | 有 | ops 槽 `default_expression`（config 里同名键**今天无读者**——见下一行） |
-| `config.toml [rr3-interact]` | `[rr3-interact.face] non_pointable = ["talk"]` | 不可点名集（策略数据） | 有（组合件 `rr3_interact_config_parse`；**I-11 起装载**，env `RR3_INTERACT_CONFIG` 可覆盖） | 死键六项已随 I-1 删；本键是 I-11 落点（**可注入的是集合，"某形态放开 talk"= 改数据**）。`prebuffer_ms`/`volume_pct` 的行为随 I-14 实装后回归 |
-| `atoms/player/mech.rs` | `RR3_TTS_BLOCK_SAMPLES=320`、`RR3_TTS_SAMPLE_RATE=16_000`（`RR3_TTS_MS_PER_CHAR`/`RR3_TTS_MAX_MS`/`AMP`/`HZ` 已随 MC-1 删除） | 20ms 分块与采样率（透传播放的分块基准） | 有 | 两项 = 与 sense/线格式同源的**契约字面量**（双写记债：应引同一真值）；估时长公式与占位波形已随 MC-1 退役（台-2 清零），播放时长由样点数导出 |
+| `config.toml [rr3-interact]` | `[rr3-interact.face] non_pointable = ["talk"]`、`[rr3-interact.player] prebuffer_ms = 500 / volume_pct = 70` | 不可点名集 + 起播水位/播放增益（策略数据） | 有（组合件 `rr3_interact_config_parse`；**I-11 起装载**，env `RR3_INTERACT_CONFIG` 可覆盖） | 死键六项已随 I-1 删；face 键是 I-11 落点（**可注入的是集合，"某形态放开 talk"= 改数据**）。player 两键**已随 MC-2 实装回归**（缺键回落默认 500/70，类型错/负数/越界拒 boot） |
+| `atoms/player/mech.rs` | `RR3_TTS_BLOCK_SAMPLES=320`、`RR3_TTS_SAMPLE_RATE=16_000`（`RR3_TTS_MS_PER_CHAR`/`RR3_TTS_MAX_MS`/`AMP`/`HZ` 已随 MC-1 删除） | 20ms 分块与采样率（透传播放的分块基准）+ **MC-2 增益/水位纯函数**（`rr3_tts_apply_gain` i64 中间量饱和夹断、`rr3_tts_prebuffer_ready` min 水位） | 有 | 两项 = 与 sense/线格式同源的**契约字面量**（双写记债：应引同一真值）；估时长公式与占位波形已随 MC-1 退役（台-2 清零），播放时长由样点数导出；增益/水位的**策略值走 config 注入**（MC-2），函数只承载机制 |
 | `src/composite.rs` | `RR3_POLL_WAIT=250ms`、`RR3_FACE_TICK=250ms`、`"beep"`、`rate=16000 ch=1`、`8x8` 文本 | 节拍 / 自检词汇 / 回显 | 有 | 两项节拍 = ops 槽（与 act/sense/power/connect 的 POLL_WAIT 同批）；`"beep"` = 契约字面量（面板读它） |
 | `src/panel/server.rs` | `RR3_PANEL_ADDR_DEFAULT="127.0.0.1:8080"`、`RR3_PANEL_MAX_CONNS=8`、`RR3_PANEL_READ_TIMEOUT/CALL_TIMEOUT=5s`、`HEADER_LIMIT=8*1024`、`BODY_LIMIT=4*1024` | 监听面与防护上界 | 有 | 并发/超时/上界 = **ops 槽**（安全相关的上界可留件内，但必须登记）；地址缺省 = config `[panel] bind/port` 的正解，今天两处真值 |
 | `src/panel/server.rs` 路由 + `src/panel/www/index.html` | 11 条 `/api/*` + `/`、三枚透传主题、四枚 `rr3.ctl.*` 方法、id 1/2/3/4、body 键 `on`/`expression`；页面**逐字复读**这些串并读 `result.played_ms/previous/ssid/connected` | 端点白名单 = 对外可观测面 | 有 | **契约字面量—不许动**；但"后端一份、页面一份"的**双写是债**（改一端必漂移）→ 由 `/api/meta` 下发或生成器产页（I-12） |
 | `atoms/face/mech.rs : rr3_face_set` 报错文案 | `"不可被点名（本形态不可点名集 talk）"`、`"不认表情 {expr:?}（允许 …）"` | 应答文案 | 有 | **契约字面量—不许动**（I-11 后"不可点名"拒因由注入集渲染，空集显示 `(空)`） |
 | `atoms/face/mech.rs : RR3_FRAMES_*` | 11 帧 `0b0110_0110` 一类 8×8 位模式 | 渲染**数据**（不是阈值） | 有 | 不是策略，但也不该焊在 `mech.rs`：随批F5a 显示 trait 落 sim 后端 / 描述符数据面（帧表 = 板面事实） |
 | `src/panel/server.rs : SelfTest` | `"happy"` | 自检用表情 | 有 | ops 槽（自检期望不该硬编码） |
-| `atoms/face/assemble.toml` | `handles = []`、`ops = [{slot="non_pointable" ← rr3-interact.face.non_pointable}]`；player 件 `handles = [{Rr3AudioSink ← alsa_device}]` | 注入面申报 | **face 报 ops（I-11）/ player 报 handle（L-5）** | face 无可用显示句柄（`[hardware]` 连显示键都没有，I-2 前置 C4）→ `handles` 仍空，但 ops 非空故不写 `no_injection`（rr-registry 形状级规则：该键只允许两数组都空）。`default_expression` 槽待显示键落地时补 |
+| `atoms/face/assemble.toml` | `handles = []`、`ops = [{slot="non_pointable" ← rr3-interact.face.non_pointable}]`；player 件 `handles = [{Rr3AudioSink ← alsa_device}]`、`ops = [{prebuffer_ms ← rr3-interact.player.prebuffer_ms}、{volume_pct ← rr3-interact.player.volume_pct}]`（**MC-2 落**） | 注入面申报 | **face 报 ops（I-11）/ player 报 handle + ops（L-5/MC-2）** | face 无可用显示句柄（`[hardware]` 连显示键都没有，I-2 前置 C4）→ `handles` 仍空，但 ops 非空故不写 `no_injection`（rr-registry 形状级规则：该键只允许两数组都空）。`default_expression` 槽待显示键落地时补 |
 
 ## §14 基线对表（代码 `22783ea`，2026-10-10；本节是本册唯一"现在时"）
 
@@ -183,12 +183,12 @@
 
 | 项 | 复验实况（符号） | 判定 / 新落点 |
 |---|---|---|
-| I-1 孤儿参数 | `config.toml` 现为**空壳**，头注逐键写明六键全删的理由（含 `volume_pct`/`prebuffer_ms`"行为未实装不提前占键"） | **结**；行为实装随 **MC-1/MC-2** 回归并按"进 ops 槽"落 |
+| I-1 孤儿参数 | `config.toml` 现为**空壳**，头注逐键写明六键全删的理由（含 `volume_pct`/`prebuffer_ms`"行为未实装不提前占键"） | **结**；行为实装随 **MC-1/MC-2** 回归并按"进 ops 槽"落——**MC-2 已落（2026-10-13）**：两键回归 `[rr3-interact.player]` + ops 槽，行为实装 |
 | I-2 显示 `[hardware]` 扩键 | R31 **Q2** 已裁显示件 = SSD1306 I2C **挂 ESP32 协处理器** | **作废登记**（Pi 侧 SPI 扩键需求消失，批J C4"不扩键"结案不需重开）；清零判据留 **MC-3** |
 | I-3 件面同步签名 | 随批I `rr-hal-api` 落地，件面 `rr3_block_on` 零命中 | **结** |
 | I-4 `spawn` 失败退出 accept 循环 | **已结（批M M-β 3bc30f1，2026-10-12）**：spawn 失败改弃连点账（`RR3_PANEL_SPAWN_FAIL_KEY`，心跳自报可见）继续服务；`Rr3ConnSlot` RAII 守卫防 panic 泄漏。用例先红后绿：必败注入 `stack_size(usize::MAX)`（实测 macOS 对 `stack_size(1)` 静默 clamp 使 spawn 成功，`usize::MAX` 才 EINVAL 确定性失败） | 已结 |
 | I-9 / I-12 端点数与双写 | **已结（批M MC-8③，2026-10-12）**：端点唯一真值 = `RR3_PANEL_ROUTES` 常量表，文案由表长推导；页面注释撤手写计数指向该表 | 已结 |
-| I-10 player 跨档化（占位波形） | **已结（批M MC-1②，2026-10-13 `f959e3a`）**：占位正弦与估时长删除，`rr3_tts_play` 透传 `&[i16]` 按 320 样点/20ms 分块写 sink，时长由样点数导出；台-2 随此清零 | **已结**（`volume_pct`/`prebuffer_ms` 参数余 MC-2） |
+| I-10 player 跨档化（占位波形） | **已结（批M MC-1②，2026-10-13 `f959e3a`）**：占位正弦与估时长删除，`rr3_tts_play` 透传 `&[i16]` 按 320 样点/20ms 分块写 sink，时长由样点数导出；台-2 随此清零 | **已结**（`volume_pct`/`prebuffer_ms` 参数已随 MC-2 实装，见下行） |
 | I-11 `talk` 不可点名规则 | **已结（批M MC-10 I-11，2026-10-13）**：件内 `if` 去硬编码 → config `[rr3-interact.face] non_pointable = ["talk"]` + `atoms/face/assemble.toml` ops 槽 `non_pointable`；interact 重开 config 装载面（`toml` 入依赖），组合件读入透传；空集全放（改数据不改码） | 已结 |
-| I-14（本册新立） | 真 PCM 播放通路——**通路半边已结（MC-1，2026-10-13）**：收流解码 + 点名对账排空 + 透传写面（§1/§4/§5 已同批更新）；引擎侧（本地 Piper 产流）归增补轮五批E | **通路已结；闭环余批E + MC-2** |
+| I-14（本册新立） | 真 PCM 播放通路——**通路半边已结（MC-1，2026-10-13）**：收流解码 + 点名对账排空 + 透传写面（§1/§4/§5 已同批更新）；**参数半边已结（MC-2，2026-10-13）**：`rr3_tts_apply_gain`（整型饱和增益）+ `rr3_tts_prebuffer_ready`（起播水位，legacy `0cf029e` 语义）落 mech.rs 纯函数，config `[rr3-interact.player]` 缺键回落默认、类型错/负数/越界拒 boot，ops 槽两条同批；引擎侧（本地 Piper 产流）归增补轮五批E | **已结**；闭环余批E |
 | F-2 显示面（本册职责边界） | 施工落点在**增补轮五批B/批C**（R31 Q2），本册只持"真后端名可自述 + fail-closed 报缺"的清零判据 | 与 0.0.5 §18.4 分账一致，勿在本册找 SPI 驱动工单 |
