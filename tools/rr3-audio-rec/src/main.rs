@@ -25,10 +25,12 @@
 //!   在载荷里撞上即"合法幻影帧头"+ 天文 payload_len。连续 [`ERR_STREAK_RESYNC`]
 //!   次收帧失败即 magic 扫描对齐续收；连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s
 //!   静默）= 线上断流，扫描救不了，转 ③。
-//!   ③ 断流重连——重开口 settle + AUDIO ON 续收（开口翻转复位板子 → seq 重走
-//!   → `restarts` 记账）。
+//!   ③ 断流重连——重开口 settle + AUDIO ON 续收（seq 重走/续走都如实记账：
+//!   板复位 `restarts`，续走空洞入 `gaps`）；握手 [`HANDSHAKE_TRIES`] 次重试、
+//!   每轮重开 fd（d4 run#2 实锤：宿主侧 USB RX 冻结 ~11s，重开 fd 是唯一捅法，
+//!   骑行期看门狗解武装）。
 //!   看门狗（逐片增量落盘 + 武装后 [`STALL`] 无新分片字节 → 补 wav 恢复头
-//!   exit(3)）是最外层兜底；重连周期盖得住 [`STALL`] 不误触发。
+//!   exit(3)）是最外层兜底；只管武装后的收流期，重连/重同步期解武装不误触发。
 //!
 //! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
 //! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=921600（板面批D② 落板档；
@@ -62,9 +64,10 @@ const RR3_PERIPH_TASK: u64 = 2;
 const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 开口 settle（CP2102 DTR/RTS 翻转复位板子的既定时序，批C 实锤）。
 const SETTLE: Duration = Duration::from_millis(1200);
-/// 停滞死线（看门狗）：武装后无新分片字节即判停滞。分片节拍 128ms/片，
-/// 10s ≈ 78 片空窗——正常流不可达；重连周期（settle 1.2s + 握手 ≤4.2s）与
-/// 重同步窗口（1.6s）都盖得住不误触发，触发即实锤重连后仍无流。
+/// 停滞死线（看门狗）：**武装后的收流期**内无新分片字节即判停滞。分片节拍
+/// 128ms/片，10s ≈ 78 片空窗——正常流不可达；重连握手重试期（≈26s 骑行窗，
+/// d4 run#2 补定）与重同步窗口（1.6s）看门狗解武装不计停滞，否则长骑行必被
+/// 误杀；触发即实锤"武装收流中，分片字节 10s 未落盘"。
 const STALL: Duration = Duration::from_secs(10);
 /// 帧头 magic 小端线上字节（contracts/README.md 歧义裁定：字段值 0x41524531
 /// 小端存储 = 31 45 52 41 = "1ERA"——与 rr-ipc protocol::header 同值锚定，
@@ -86,6 +89,14 @@ const REPLY_TIMEOUT_MS: i32 = 3000;
 /// （线上断流），resync 返回 None 交主循环重连。数据在流时 256B 块 ~10ms 即满，
 /// 零读必然是真静默（连续计数，数据一恢复即清零续扫）。
 const RESYNC_ZERO_BAIL: u32 = 8;
+/// 重连握手重试次数（d4 run#2 实锤定案）：宿主侧 USB RX 路径冻结 ~11s——板→宿主
+/// 字节全无而宿主→板命令畅通（板面 seq=sent=460/drop=0 全程无辜，OFF/ON/OFF 三
+/// 接命令照单全收）；单次握手 2×3s 应答窗必挂。逐次**重开 fd** 是宿主侧唯一能
+/// 捅 USB 冻结的手段：3 次 ×（settle 1.2s + 2×3s）+ 2×2s 歇口 ≈ 26s 骑行窗；
+/// 骑行期看门狗解武装不计停滞（否则 STALL=10s 会误杀重试）。
+const HANDSHAKE_TRIES: u32 = 3;
+/// 两次握手尝试之间的歇口（给宿主 USB 栈缓冲；每轮都重新 close/open fd）。
+const HANDSHAKE_RETRY_PAUSE: Duration = Duration::from_secs(2);
 
 // ---------------------------------------------------------------------------
 
@@ -483,7 +494,12 @@ fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
     if let Err(e) = conn.write_all(b"AUDIO OFF\n") {
         return Err(format!("发防御 AUDIO OFF 失败: {e}"));
     }
-    let _ = read_reply_line(conn);
+    // OFF 应答读了即弃，但**超时可见**（d4 run#2 排障教训：`let _ =` 静默丢弃
+    // 害排查——宿主侧 USB RX 冻结时这条读无声超时，故障面全靠 seq 对账反推）
+    match read_reply_line(conn) {
+        Ok(l) => eprintln!("[rec] 防御 OFF 应答: {l:?}"),
+        Err(e) => eprintln!("[rec] 防御 OFF 应答未收到（残流/宿主侧静默，继续）: {e}"),
+    }
     conn.rr3_flush_input()
         .map_err(|e| format!("二次 flush 失败: {e}"))?;
     conn.write_all(b"AUDIO ON\n")
@@ -721,22 +737,47 @@ fn main() {
                     reconnects += 1;
                     drop(fs); // 还 conn 可变借用
                     eprintln!("[rec] 重同步 1.6s 连续静默 → 断流重连 #{reconnects}");
-                    match Rr3UartConn::open_with_baud(
-                        std::path::Path::new(&args.device),
-                        args.baud,
-                    ) {
-                        Ok(c) => conn = c,
-                        Err(e) => {
-                            eprintln!("[rec] 重连开口失败: {e}");
-                            bail_with_recovery(&out_path, total_bytes, &watch);
+                    // 握手重试（HANDSHAKE_TRIES 次，每轮重新 close/open fd——宿主
+                    // USB RX 冻结唯一捅法；骑行期看门狗解武装不计停滞）
+                    watch.armed.store(false, Ordering::Release);
+                    let mut hs_err: Option<String> = None;
+                    for attempt in 1..=HANDSHAKE_TRIES {
+                        if attempt > 1 {
+                            eprintln!(
+                                "[rec] 重连握手重试 {attempt}/{HANDSHAKE_TRIES}（歇 {}s 后重开口…）",
+                                HANDSHAKE_RETRY_PAUSE.as_secs()
+                            );
+                            std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
+                        }
+                        match Rr3UartConn::open_with_baud(
+                            std::path::Path::new(&args.device),
+                            args.baud,
+                        ) {
+                            Ok(c) => conn = c,
+                            Err(e) => {
+                                eprintln!("[rec] 重连开口失败（第 {attempt} 次）: {e}");
+                                hs_err = Some(format!("开口失败: {e}"));
+                                continue;
+                            }
+                        }
+                        match handshake(&mut conn) {
+                            Ok(_) => {
+                                hs_err = None;
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("[rec] 重连握手失败（第 {attempt} 次）: {e}");
+                                hs_err = Some(e);
+                                // 尽力停板面流（下一轮重开还会再发防御 OFF；板死则无效）
+                                let _ = conn.write_all(b"AUDIO OFF\n");
+                            }
                         }
                     }
-                    if let Err(e) = handshake(&mut conn) {
-                        eprintln!("[rec] 重连握手失败: {e}");
-                        // 尽力停板面流（板死则无效；INFO 探针前仍须先 OFF 兜底）
-                        let _ = conn.write_all(b"AUDIO OFF\n");
+                    if let Some(e) = hs_err {
+                        eprintln!("[rec] 重连握手 {HANDSHAKE_TRIES} 次全败: {e}");
                         bail_with_recovery(&out_path, total_bytes, &watch);
                     }
+                    watch.armed.store(true, Ordering::Release);
                     fs = FrameStream::new(&mut conn);
                     err_streak = 0;
                     need_reanchor = true;
