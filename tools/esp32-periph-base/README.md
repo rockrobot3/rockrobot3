@@ -43,6 +43,22 @@ SKIP 纪律同 espidf-sentinel-check.sh（esp 工具链/ldproxy/ESP-IDF v5.2.2/e
 UBEC 5V 轨，或至少在 OLED 模块 VCC/GND 就近并一颗 ≥100µF 电解 + 0.1µF 陶瓷。
 判据见 0.0.5 §4 批B 四件套 ④（堵转时 UBEC ≥4.7V）。
 
+## 5V 轨电压监测（方案A Q1，批M 步2）
+
+BOD 根因链的**观测手段**：这条 5V 轨此前无任何采样，欠压既看不见也响应不了。本档加
+ADC1_CH6 @ GPIO34 采样轨压，按「**机制与策略分离**」落两处：
+
+| 面 | 落点 | 内容 |
+|---|---|---|
+| 策略 | [`board.rs`](src/board.rs) `ADC_*` / `RAIL_*` 常量区 | 引脚 / 分压比（**占位 1:1 待标定**）/ 采样节拍 / ADC 衰减·分辨率·标定 |
+| 机制 | [`power.rs`](src/power.rs) `RailMonitor` | 读 ADC 一次 + 按分压比换算回轨压 mV，**不含阈值判定** |
+
+运行面自主节拍每 `RAIL_SAMPLE_PERIOD_MS` 周期采一次并写 `PeriphState.rail_mv/rail_raw`
+（`INFO` 观测）；`RAIL` 命令另可点名**即刻**采一次。**装配失败不 panic**（照 OLED init
+纪律）——`RtPeriph.rail = None` 时采样路径回 Err，不冒领读数。**真板读数待分压测点接线**
+（与万用表对拍 ≤2% 后回填 `board.rs` 分压比）；阈值判定核（双阈值迟滞 → 串行降级/拒动）
+见同批步3。**无真板证据前不 claim**。
+
 ## 接线（与 0.0.7 实测接线零冲突）
 
 | 外设 | 引脚 | 备注 |
@@ -51,6 +67,7 @@ UBEC 5V 轨，或至少在 OLED 模块 VCC/GND 就近并一颗 ≥100µF 电解 
 | 舵机 pan（水平） | 信号→GPIO32 · 电源→**板载 5V（现场档）** · GND→共地 | 正式装机应改 UBEC 独立 5V 轨（堵转 ~700mA/只），见上节代价 |
 | 舵机 tilt（俯仰） | 信号→GPIO33 · 电源→**板载 5V（现场档）** · GND→共地 | UBEC/板/舵机单点共地（铁律） |
 | UART2 指令面 | GPIO18→CP2102 RXD · GPIO19←CP2102 TXD · GND→共地 | 115200，3.3V TTL（严禁 5V）。**引脚定案（2026-10-12 真板实锤）：GPIO16/17 一装 UART2 驱动即把 I2C0 打死（换序/前后装均复现），故改 18/19**；19 与未来点阵 VSPI 预留同脚，已记为技术债 |
+| 5V 轨分压测点（方案A Q1） | GPIO34 ← 5V 轨经分压网络（5V→≤3.3V） · GND→单点共地 | ADC1_CH6（input-only 档）；分压比在 `board.rs` 策略面（**占位 1:1 待标定**，接线后对拍回填），属观测面，非必接线 |
 | 板载 USB（cu.usbserial-1410） | 烧录 + monitor | `cargo +esp run`，Ctrl+] 退出 |
 
 ## 烧录与验收 runbook
@@ -93,7 +110,8 @@ UBEC 5V 轨，或至少在 OLED 模块 VCC/GND 就近并一颗 ≥100µF 电解 
 | `SERVO <pan> <tilt>` | 双轴设定，**串行降级**：先 pan 到位 → 整定 200ms → 再 tilt（削峰值电流）；两轴均按 2°/20ms 缓速逼近 |
 | `WANDER` / `WANDER STOP` | 开/停自主扫摆；开时两轴**错拍单动**（同拍只驱动一轴），端点=本轴行程边界 |
 | `SCAN` | 两轴各自按本轴行程五等分点**串行**扫描（每点 pan→600ms→tilt→600ms，逐点回读）；控制面即刻 ack，逐点在运行面异步回包 |
-| `INFO` | 回读当前角度 / 限幅区间 / OLED 最近文本 / 堆水位 |
+| `RAIL` | 采一次 5V 轨压（方案A Q1 观测面）：控制面即刻 ack，运行面采一次经 outbox 异步回包 `RAIL rail=<mV> raw=<raw>`（真板分压测点接线后对拍标定用） |
+| `INFO` | 回读当前角度 / 限幅区间 / **5V 轨最近采样（rail/raw）** / OLED 最近文本 / 堆水位 |
 | `FONT` | "ABC123" 字模 hex 自检护栏 |
 | `HELP` | 指令表 |
 

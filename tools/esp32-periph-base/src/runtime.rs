@@ -3,11 +3,12 @@ use std::thread;
 use std::time::Duration;
 
 use crate::board::{
-    axis_scan_points, duty_to_deg, Axis, AXIS_SETTLE_MS, RUNTIME_TICK_MS, SCAN_POINT_MS,
+    axis_scan_points, duty_to_deg, Axis, AXIS_SETTLE_MS, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS,
+    SCAN_POINT_MS,
 };
 use crate::oled::i2c_bus_recover;
 use crate::periph::RtPeriph;
-use crate::state::{lock_bus, outbox_push, Bus, Job};
+use crate::state::{lock_bus, now_ms, outbox_push, Bus, Job};
 
 // ---------------------------------------------------------------------------
 // 运行面（独占 I2C0 + LEDC）：执行硬件作业 + 自主节拍（表情微动作 / 云台扫摆）
@@ -92,7 +93,30 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
                 eprintln!("[periph] 点阵渲染失败: {e}");
             }
         }
+        Job::SampleRail => match sample_rail(ph, bus) {
+            Ok((mv, raw)) => {
+                println!("[periph] RAIL 采样 rail={mv}mV pin_raw={raw}");
+                outbox_push(bus, format!("RAIL rail={mv}mV raw={raw}"));
+            }
+            Err(e) => {
+                eprintln!("[periph] RAIL 采样失败: {e}");
+                outbox_push(bus, format!("ERR RAIL 采样失败: {e}"));
+            }
+        },
     }
+}
+
+/// 采样一次 5V 轨并写共享状态（**机制面**，方案A Q1）：成功即更新 `st.rail_mv/rail_raw`
+/// 并回 `(轨压 mV, 引脚 raw)`；失败只回 Err（**不改状态**——stale 旧值不冒充新鲜读数）。
+/// 纯机制：不判阈值、不决策（欠压档位/拒动在批M 步3）。
+fn sample_rail(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) -> Result<(u16, u16), String> {
+    let (mv, raw) = ph.rail_sample()?;
+    {
+        let mut b = lock_bus(bus);
+        b.st.rail_mv = mv;
+        b.st.rail_raw = raw;
+    }
+    Ok((mv, raw))
 }
 
 /// 舵机移动（**串行降级核心**）：单轴直动；双轴**先 pan 到位 → 整定
@@ -177,6 +201,14 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
 /// 运行面自主节拍（无作业时 10ms 一拍）：**决策段持锁纯算，渲染/驱动段脱锁慢跑**
 /// ——慢 I2C 不阻塞控制面命令吞吐。
 fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    // 5V 轨周期采样（**机制面**，方案A Q1）：到点采一次并写入共享状态（`INFO` 观测面；
+    // 批M 步3 的欠压判定核在此读数之上接入）。失败只打站不 panic——读不到不拖垮节拍。
+    if now_ms() >= ph.next_rail_ms {
+        ph.next_rail_ms = now_ms() + RAIL_SAMPLE_PERIOD_MS;
+        if let Err(e) = sample_rail(ph, bus) {
+            eprintln!("[periph] 轨压周期采样失败: {e}");
+        }
+    }
     let (render, mv, refresh) = {
         let mut b = lock_bus(bus);
         let st = &mut b.st;
