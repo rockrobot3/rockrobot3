@@ -74,6 +74,54 @@ impl Rr3LowEdge {
         }
         false
     }
+
+    /// 读出当前是否处于低电段（`armed` 的反面；回阈 + 迟滞语义与
+    /// [`Rr3LowEdge::rr3_low_edge_cross`] 同源，本方法只加**读出面**不改判定——
+    /// `rr3_low_edge_cross` 仍是唯一写入点）。供消费点（低电禁动闸门的 bare
+    /// 本地兜底 / 观测）读状态，不新增第二个边沿判定点（0.0.5 §20 ② ①）。
+    pub fn rr3_low_edge_is_low(&self) -> bool {
+        !self.armed
+    }
+}
+
+/// 低电禁动闸门（安全核原语，0.0.5 批M MC-5；方案 §20 第 2 条裁定 A-5/P-8/L-8 三单合一）。
+///
+/// **一位状态，零判定载荷**：本型不读电压、不持阈值——判定来源由承载层注入，
+/// 一个事实一个真值点：
+/// - **host 档**：承载层消费 rrd 的 `rr3-runtime/system/power` 低电旗广播（触发源
+///   唯一，件内不再判定电压），低电 → [`Rr3LowGate::rr3_low_gate_trip`]；
+/// - **bare 档**：安全核段本地采样过 [`Rr3LowEdge`]（回阈 + 迟滞），越阈 → trip、
+///   回阈 → [`Rr3LowGate::rr3_low_gate_release`]，并出 `RR3G` 守护行。
+///
+/// 解禁**不自动重放**被拒的令（拒因回显，由上层决定是否重发）：闸门只是一位
+/// 状态，不缓存不重放。妆面（led/face）不受辖——禁动它们只增加卡死面积。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rr3LowGate {
+    blocked: bool,
+}
+
+impl Rr3LowGate {
+    pub fn rr3_low_gate_new() -> Self {
+        Self { blocked: false }
+    }
+
+    /// 闭锁执行面。返回是否发生翻转（false→true 才是真边沿，供日志/计数去抖）。
+    pub fn rr3_low_gate_trip(&mut self) -> bool {
+        let flip = !self.blocked;
+        self.blocked = true;
+        flip
+    }
+
+    /// 解禁执行面（回阈 + 迟滞解禁的落点）。返回是否发生翻转（true→false）。
+    pub fn rr3_low_gate_release(&mut self) -> bool {
+        let flip = self.blocked;
+        self.blocked = false;
+        flip
+    }
+
+    pub fn rr3_low_gate_is_blocked(&self) -> bool {
+        self.blocked
+    }
 }
 
 /// 反射环 config `[rr3-act.reflex]` 的形状（机制核只认参数不认来源）。
@@ -201,6 +249,57 @@ mod tests {
         assert!(!e.rr3_low_edge_cross(3301), "武装后高电平拍照旧不触发");
         assert!(e.rr3_low_edge_cross(3200), "重新武装已生效：再次越阈再报");
         assert!(!e.rr3_low_edge_cross(3200));
+    }
+
+    /// 读出面不改判定（MC-5）：`is_low` = `armed` 反相，与 `cross` 同拍一致；
+    /// 严格大于阈值才解禁（回阈），恰等阈值仍在低电段内。
+    #[test]
+    fn low_edge_is_low_readout_matches_cross() {
+        let mut e = Rr3LowEdge::rr3_low_edge_new(3300);
+        assert!(!e.rr3_low_edge_is_low(), "初态未低电");
+        assert!(e.rr3_low_edge_cross(3300), "恰等阈值：越阈");
+        assert!(e.rr3_low_edge_is_low(), "越阈后读出低电");
+        assert!(!e.rr3_low_edge_cross(3300));
+        assert!(e.rr3_low_edge_is_low(), "段内仍低");
+        assert!(!e.rr3_low_edge_cross(3301), "严格大于才再武装");
+        assert!(!e.rr3_low_edge_is_low(), "回阈后解禁读出");
+    }
+
+    /// 低电禁动闸门（MC-5）：闭锁/解禁各恰一次翻转，重复同态不再翻转（去抖）；
+    /// 初态开（未低电不禁动）。
+    #[test]
+    fn low_gate_trips_and_releases_with_single_flip() {
+        let mut g = Rr3LowGate::rr3_low_gate_new();
+        assert!(!g.rr3_low_gate_is_blocked(), "初态开");
+        assert!(g.rr3_low_gate_trip(), "首次闭锁是真边沿");
+        assert!(g.rr3_low_gate_is_blocked());
+        assert!(!g.rr3_low_gate_trip(), "重复闭锁不再翻转");
+        assert!(g.rr3_low_gate_release(), "解禁是真边沿");
+        assert!(!g.rr3_low_gate_is_blocked());
+        assert!(!g.rr3_low_gate_release(), "重复解禁不再翻转");
+    }
+
+    /// bare 本地兜底合成（MC-5 ④）：安全核段本地采样 → `Rr3LowEdge` 回阈 + 迟滞
+    /// 判定 → 闸门闭锁/解禁。判定纯函数、无时钟、无总线（裁定 5），
+    /// 与 host 档"消费广播置位"共用同一个 `Rr3LowGate`（一位状态，一个真值点）。
+    #[test]
+    fn low_gate_composes_with_edge_for_bare_local_fallback() {
+        let mut edge = Rr3LowEdge::rr3_low_edge_new(3300);
+        let mut gate = Rr3LowGate::rr3_low_gate_new();
+        // 安全核每一拍：feed 电压 → 把边沿状态镜像进闸门
+        let mut feed = |mv: u16| {
+            edge.rr3_low_edge_cross(mv);
+            if edge.rr3_low_edge_is_low() {
+                gate.rr3_low_gate_trip();
+            } else {
+                gate.rr3_low_gate_release();
+            }
+            gate.rr3_low_gate_is_blocked()
+        };
+        assert!(!feed(3900), "高电压：开");
+        assert!(feed(3300), "越阈：闭锁（拒动）");
+        assert!(feed(3250), "段内继续跌落：仍闭锁");
+        assert!(!feed(3301), "回阈（严格大于）：解禁");
     }
 
     /// 节拍方案三例（原 rr3-act reflex 用例语义随迁）
