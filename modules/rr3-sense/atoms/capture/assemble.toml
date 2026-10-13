@@ -8,9 +8,11 @@ schema_version = 2
 handles = [
   { trait = "Rr3AudioSource", desc_key = "alsa_device" },
 ]
-# 采样率/声道/节拍 ← config.toml [rr3-sense.audio]（§3 逐槽落位，L-5 补齐）
+# 采样率/声道/节拍 ← config.toml [rr3-sense.audio]（§3 逐槽落位，L-5 补齐）；
+# DoA 分档边界 ← [rr3-sense.doa]（S-5：阈值从件内常量迁出，"某形态换档口径"= 改数据）
 ops = [
   { slot = "sample_rate", src_key = "rr3-sense.audio.sample_rate" },
   { slot = "channels", src_key = "rr3-sense.audio.channels" },
   { slot = "frame_ms", src_key = "rr3-sense.audio.frame_ms" },
+  { slot = "doa_bin_threshold_deg", src_key = "rr3-sense.doa.bin_threshold_deg" },
 ]

@@ -257,6 +257,9 @@ frame_ms = 20
 rms_start = 1500        # 起音阈值
 silence_tail_ms = 700   # 判停尾静音
 min_speech_ms = 200
+
+[rr3-sense.doa]
+bin_threshold_deg = 30  # DoA 三档边界（S-5 注入面形状 pin）
 "#;
 
 #[test]

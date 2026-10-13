@@ -170,7 +170,7 @@ pub fn rr3_chain_obs_manifest(entry_abs: &Path) -> String {
 /// sense 双麦 config（与批F2 判向 e2e 的 DOA_CONFIG 同形状：channels=2，
 /// VAD 阈值与仓内 config 同值；判向只认 ch_n>=2，单麦链路无方向语义）
 pub fn rr3_chain_sense_config_text() -> String {
-    "[rr3-sense]\nlog_level = \"info\"\n\n[rr3-sense.audio]\nsample_rate = 16000\nchannels = 2\nframe_ms = 20\n\n[rr3-sense.vad]\nrms_start = 1500\nsilence_tail_ms = 700\nmin_speech_ms = 200\n"
+    "[rr3-sense]\nlog_level = \"info\"\n\n[rr3-sense.audio]\nsample_rate = 16000\nchannels = 2\nframe_ms = 20\n\n[rr3-sense.vad]\nrms_start = 1500\nsilence_tail_ms = 700\nmin_speech_ms = 200\n\n[rr3-sense.doa]\nbin_threshold_deg = 30\n"
         .to_string()
 }
 
@@ -677,6 +677,7 @@ mod tests {
         let sense = rr3_chain_sense_config_text();
         assert!(sense.contains("channels = 2"), "{sense}");
         assert!(sense.contains("rms_start = 1500"), "{sense}");
+        assert!(sense.contains("bin_threshold_deg = 30"), "{sense}");
         let act = rr3_chain_act_config_text();
         assert!(act.contains("angle_limit_deg = [70, 110]"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
