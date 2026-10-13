@@ -504,6 +504,46 @@ mod tests {
         assert!(rr3_pcm_bytes_to_samples(&[0x01]).is_empty());
     }
 
+    /// 跨语言一致性（MC-1③）：`contracts/golden/tts-pcm-frames.json` 是 Python
+    /// 腿（rr3-brain 分帧）与本腿共读的同一份基准——把 golden 帧列逐帧解码入
+    /// 收流缓冲，拼接流必须逐字节还原基准 PCM，seq/ms 同拍（两侧各自的单测钉
+    /// 语义，这条钉"同一份字节基准两侧对得上"）。
+    #[test]
+    fn tts_pcm_buf_matches_shared_golden_vector() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../contracts/golden/tts-pcm-frames.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("读 golden {}: {e}", path.display()));
+        let g: Value = serde_json::from_str(&text).expect("golden JSON 解析");
+
+        fn hex_decode(s: &str) -> Vec<u8> {
+            s.as_bytes()
+                .chunks_exact(2)
+                .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
+                .collect()
+        }
+
+        let mut buf = Rr3TtsPcmBuf::default();
+        let mut seqs: Vec<u64> = Vec::new();
+        let mut mss: Vec<u64> = Vec::new();
+        for f in g["frames"].as_array().expect("golden frames 数组") {
+            seqs.push(f["seq"].as_u64().expect("帧缺 seq"));
+            mss.push(f["ms"].as_u64().expect("帧缺 ms"));
+            buf.rr3_tts_buf_push(f["pcm_b64"].as_str().expect("帧缺 pcm_b64"))
+                .expect("golden 帧 base64 必须合法");
+        }
+        assert_eq!(seqs, vec![1, 2, 3], "seq 从水位 0 起逐帧 +1");
+        assert_eq!(mss, vec![20, 20, 10], "整块 20ms、尾块按实算");
+
+        let want = hex_decode(g["pcm_hex"].as_str().expect("缺 pcm_hex"));
+        assert_eq!(buf.rr3_tts_buf_len(), want.len(), "收流字节数 == 基准 PCM");
+        assert_eq!(buf.rr3_tts_buf_take(), want, "收流拼接逐字节还原基准 PCM");
+        // 1600 字节 = 800 样点 = 50ms（20ms×2 + 10ms）：解码产物可直接喂播放面
+        let samples = rr3_pcm_bytes_to_samples(&want);
+        assert_eq!(samples.len(), 800);
+        assert_eq!(samples.len() as u64 * 1000 / 16000, 50);
+    }
+
     /// 仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
     #[test]
     fn config_parse_covers_repo_shape() {
