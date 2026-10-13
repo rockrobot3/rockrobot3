@@ -24,7 +24,12 @@ pub const RR3_BATTERY_LOW_TOPIC: &str = "rr3-power/battery/low";
 #[derive(Debug, Clone, Copy)]
 pub struct Rr3BatteryCfg {
     pub sample_period_ms: u64,
+    /// 低电阈值：本轮唯一有后果的阈值——越过即发 `battery/low`，rrd 置低电旗
+    /// → MC-5 低电禁动（执行面拒动）。
     pub low_voltage_mv: u16,
+    /// 关断阈值：**声明未生效**（0.0.5 批M MC-8① 裁定 (c)）——0.0.5 **不关断**
+    /// （关断动作归 M6 关机链，需 T1/T2 物理断电硬件）。本字段保留为策略数据，
+    /// 机器读者 = 注入门（`assemble.toml` ops 槽，⑧-c 门强制）；不构成"已实现关断"。
     pub cutoff_voltage_mv: u16,
 }
 
