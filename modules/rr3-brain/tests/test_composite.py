@@ -6,12 +6,17 @@
 """
 
 import base64
+import json
+import os
 import unittest
 
 from rr3_brain import composite
 
 FRAME = composite.RR3_TTS_PCM_FRAME_BYTES
 RATE = composite.RR3_TTS_SAMPLE_RATE
+
+REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+GOLDEN = os.path.join(REPO, "contracts", "golden", "tts-pcm-frames.json")
 
 
 def pcm(nbytes: int) -> bytes:
@@ -54,6 +59,25 @@ class TestTtsPcmFrames(unittest.TestCase):
         frames, seq = composite.rr3_tts_pcm_frames(pcm(FRAME * 2), seq)
         self.assertEqual([f["seq"] for f in frames], [7, 8])
         self.assertEqual(seq, 8)
+
+
+class TestGoldenCrossLanguage(unittest.TestCase):
+    """MC-1③ 跨语言一致性：分帧输出与 contracts/golden 共享基准逐字段一致。
+
+    同一份 `tts-pcm-frames.json` 由 Rust 腿（rr3-interact 收流解码）同读对拍——
+    两侧各自的单测钉语义，这条钉的是"同一份字节基准两侧对得上"。
+    """
+
+    def test_frames_match_shared_golden_vector(self):
+        with open(GOLDEN, encoding="utf-8") as f:
+            golden = json.load(f)
+        raw = bytes.fromhex(golden["pcm_hex"])
+        frames, seq = composite.rr3_tts_pcm_frames(raw, 0)
+        self.assertEqual(frames, golden["frames"], "分帧输出与共享基准逐字段一致")
+        self.assertEqual(seq, len(golden["frames"]))
+        # 拼回无损：帧列 b64 拼接 == 基准 PCM（Rust 腿按同一判据对拍）
+        joined = b"".join(base64.b64decode(f["pcm_b64"]) for f in frames)
+        self.assertEqual(joined, raw)
 
 
 if __name__ == "__main__":
