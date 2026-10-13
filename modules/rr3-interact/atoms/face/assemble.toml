@@ -4,5 +4,9 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 显示面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
-ops = []       # 默认表情经 config 数据化注入（config.toml [rr3-interact.face]）
+# 显示面句柄待立：描述符九键无显示键（C4 裁定不扩键），且 config.toml 为空壳
+# （批I I-1 六键全删）——本件现无可用注入面，明写 no_injection（L-5）；
+# 真屏件与显示键落地时删本行，补 Rr3Display 句柄与 default_expression 槽
+handles = []
+ops = []
+no_injection = true

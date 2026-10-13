@@ -166,7 +166,7 @@
 | §0/§13 三个零读者配置项（N-6/N-2） | `roam_probe_enabled` 与 `tls_min_version` **删除**；`timeout_ms` **实装为 nmcli 子进程超时**并迁入 wifi 段 | **N-2、N-6 已结**（三选一的"实装/删除"两条各用一次） |
 | §13 sim 假 AP 表在件里（N-9） | `rr3_wifi_scan_result` 的三条假 AP **仍在 `atoms/wifi/mech.rs`** | **N-9 未结** → 批L **L-9**（整表迁 sim 后端，与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流） |
 | §13 栈名出现在 SURFACE/println（N-8） | 未见改动：`wifi.rs`/`bt.rs` 的 `SURFACE` 与 `composite.rs` 的蓝牙行仍打 `BlueZ`/`NetworkManager`/`D-Bus`；**而 ⑦-a 现在会扫 `modules/*/atoms/*/*.rs`**（剥行注释后 grep 器件/厂商禁词，重跑 0 命中——说明这些串不在禁词表内，不在扫到的文件内，或两者皆非） | **N-8 未结**；并登记敞口：**禁词表与运行期自述之间仍有缝**（表里没有 `BlueZ`/`NetworkManager`）→ 批L **L-10**（禁词表补栈名或改由后端名下发） |
-| §3/§13 `handles`/`ops` 申报 | `atoms/{wifi}/assemble.toml` 仍全空（bt 已填） | **未结** → 批L **L-5** |
+| §3/§13 `handles`/`ops` 申报 | `atoms/wifi/assemble.toml` **已填**（批M MC-10 L-5，2026-10-13）：报 `Rr3Link`←`link_ifname` 句柄 + `link_report_period_ms`/`timeout_ms` ops；bt 早填为样板 | **L-5 已结** |
 
 ### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
 

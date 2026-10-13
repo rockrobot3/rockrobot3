@@ -4,5 +4,11 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 状态机纯软件件，无外设句柄
-ops = []       # 阈值等策略经 config 数据化注入（config.toml [rr3-sense.vad]）
+# 纯软件状态机件（吃 capture 输出），不占外设句柄
+handles = []
+# 起音/判停/最短语音阈值 ← config.toml [rr3-sense.vad]（§3 逐槽落位，L-5 补齐）
+ops = [
+  { slot = "rms_start", src_key = "rr3-sense.vad.rms_start" },
+  { slot = "silence_tail_ms", src_key = "rr3-sense.vad.silence_tail_ms" },
+  { slot = "min_speech_ms", src_key = "rr3-sense.vad.min_speech_ms" },
+]

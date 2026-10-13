@@ -4,5 +4,11 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 云端端点/凭据走环境变量注入（conventions §3），不占描述符句柄
-ops = []       # 模型名/超时经 config 数据化注入（config.toml [rr3-brain.cloud]）
+# 云端端点/凭据走环境变量注入（conventions §3），不占描述符句柄
+handles = []
+# 模型名/端点/超时 ← config.toml [rr3-brain.cloud]（§3）
+ops = [
+  { slot = "tts_model", src_key = "rr3-brain.cloud.tts_model" },
+  { slot = "base_url", src_key = "rr3-brain.cloud.base_url" },
+  { slot = "timeout_s", src_key = "rr3-brain.cloud.timeout_s" },
+]

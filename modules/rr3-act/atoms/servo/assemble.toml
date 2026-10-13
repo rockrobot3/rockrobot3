@@ -4,5 +4,16 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 舵机执行面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
-ops = []       # 行程/时限/限速经 config 数据化注入（config.toml [rr3-act.servo]）
+# 舵机执行面经能力面 Rr3PwmServo，绑描述符 pwm_chip + pwm_channel 两键（§3 注入面）
+handles = [
+  { trait = "Rr3PwmServo", desc_key = "pwm_chip" },
+  { trait = "Rr3PwmServo", desc_key = "pwm_channel" },
+]
+# 行程/时限/限速 ← config.toml [rr3-act.servo]（§3 逐槽落位，L-5 补齐；
+# 单区间 [angle_limit_deg] 拆上下界两槽，轴由 RR3_HAL_PERIPH_AXIS 选）
+ops = [
+  { slot = "angle_min_deg", src_key = "rr3-act.servo.angle_limit_deg" },
+  { slot = "angle_max_deg", src_key = "rr3-act.servo.angle_limit_deg" },
+  { slot = "move_timeout_ms", src_key = "rr3-act.servo.move_timeout_ms" },
+  { slot = "state_min_interval_ms", src_key = "rr3-act.servo.state_min_interval_ms" },
+]

@@ -20,7 +20,8 @@
 //! 两级真值、两处消费（`rrd` 与裸机装配段共用本模块，不各说一套）：
 //! - **形状级**（[`rr3_registry_assemble_from_text`]）：schema 版本、未知字段点名、
 //!   trait ∈ 七能力面在册表、desc_key ∈ 九描述符键在册表、参数槽与来源键非空点路径。
-//!   空数组**合法**——件可以不占任何句柄/参数槽（17 份现况的大多数如实如此）。
+//!   空数组**合法**，但**两数组均空时须明写 `no_injection = true`**（0.0.5 批M MC-10 L-5：
+//!   把"漏填"与"本件确无注入面"分开——否则空申报与漏填不可区分，门里无内容可校验）。
 //! - **注入缺级**（[`rr3_registry_assemble_injection_gaps`]）：ops 的 `src_key`
 //!   解析域 = 模块 `config.toml`（点路径游走），取不到 = 注入缺。handles 的
 //!   desc_key 存在性**不在本模块判**——描述符注入是 spawn 时 `RR3_HAL_BINDINGS`
@@ -77,11 +78,14 @@ pub struct Rr3AssembleOp {
     pub src_key: String,
 }
 
-/// 一份装配清单的解析产物（空数组合法）
+/// 一份装配清单的解析产物（空数组合法，但空面须明写 no_injection，见下）
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Rr3AssembleFacts {
     pub handles: Vec<Rr3AssembleHandle>,
     pub ops: Vec<Rr3AssembleOp>,
+    /// `no_injection = true`：件明写"本件不需注入面"（0.0.5 批M MC-10 L-5）。
+    /// `handles`/`ops` 两数组**均空**时此键必填——否则与"漏填"不可区分，一律判红。
+    pub no_injection: bool,
 }
 
 /// 点路径合法性：按 `.` 切分后每段非空（空串/首尾点/连续点都不认）
@@ -131,16 +135,35 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
     };
     // [assemble] 未知键点名
     for k in asm.keys() {
-        if k != "handles" && k != "ops" {
-            errs.push(format!("[assemble] 未知键 {k}（只认 handles / ops）"));
+        if k != "handles" && k != "ops" && k != "no_injection" {
+            errs.push(format!(
+                "[assemble] 未知键 {k}（只认 handles / ops / no_injection）"
+            ));
         }
     }
 
     let mut facts = Rr3AssembleFacts::default();
+    // 两数组"已在文本中出现"（供空面规则判"漏填 vs 明写不需"）：缺键与形状坏另有其错，
+    // 不能替本规则挡刀，也不能被本规则牵连出第二遍点名。
+    let mut handles_present = false;
+    let mut handles_empty = false;
+    let mut ops_present = false;
+    let mut ops_empty = false;
+    // no_injection = true 是"本件不需注入面"的显式声明（L-5）：只认布尔 true。
+    match asm.get("no_injection") {
+        Some(Value::Boolean(true)) => facts.no_injection = true,
+        Some(Value::Boolean(false)) => {
+            errs.push("no_injection 只认 true（本件不需注入面时明写；非空面不得写此键）".into())
+        }
+        Some(other) => errs.push(format!("no_injection 应为布尔 true，收到 {other:?}")),
+        None => {}
+    }
 
     // handles：数组，每条 = { trait, desc_key }，两键都在册表内
     match asm.get("handles") {
         Some(Value::Array(items)) => {
+            handles_present = true;
+            handles_empty = items.is_empty();
             for (i, item) in items.iter().enumerate() {
                 let Some(h) = item.as_table() else {
                     errs.push(format!("handles[{i}] 应为内联表 {{ trait, desc_key }}"));
@@ -182,6 +205,8 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
     // ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径
     match asm.get("ops") {
         Some(Value::Array(items)) => {
+            ops_present = true;
+            ops_empty = items.is_empty();
             for (i, item) in items.iter().enumerate() {
                 let Some(o) = item.as_table() else {
                     errs.push(format!("ops[{i}] 应为内联表 {{ slot, src_key }}"));
@@ -216,6 +241,19 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
         }
         Some(other) => errs.push(format!("[assemble].ops 应为数组，收到 {other:?}")),
         None => errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into()),
+    }
+
+    // 空面规则（L-5）：两数组均在文本中出现且均为空 ⇒ 必须明写 no_injection = true；
+    // 反之，明写 no_injection 时两数组必须都空。这条把"漏填"与"本件确无注入面"分开——
+    // 光看空数组分不清，于是此前 14 份空申报在门里无内容可校验（方案 §12.4 C3）。
+    if handles_present && handles_empty && ops_present && ops_empty && !facts.no_injection {
+        errs.push(
+            "注入面两数组均空却未明写 no_injection = true（L-5：或补齐 handles/ops，或明写该件不需注入面）"
+                .into(),
+        );
+    }
+    if facts.no_injection && !(handles_present && handles_empty && ops_present && ops_empty) {
+        errs.push("no_injection = true 只允许与空的 handles/ops 并存（该声明与注入面互斥）".into());
     }
 
     if errs.is_empty() {
@@ -296,12 +334,43 @@ ops = [
         assert_eq!(f.ops.len(), 1);
         assert_eq!(f.ops[0].slot, "low_voltage_mv");
 
-        // 空数组合法（17 份现况的大多数形状）
+        // 空数组合法，但须明写 no_injection（L-5）
         let f = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\n",
+        )
+        .expect("明写不需注入面的空数组必须合法");
+        assert!(f.handles.is_empty() && f.ops.is_empty() && f.no_injection);
+    }
+
+    /// L-5 空面规则：两数组均空而漏写 no_injection ⇒ 红；no_injection 与非空面并存 ⇒ 红。
+    #[test]
+    fn empty_surface_requires_no_injection_marker() {
+        // 漏写 → 点名"未明写 no_injection"
+        let errs = rr3_registry_assemble_from_text(
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
         )
-        .expect("空数组必须合法");
-        assert!(f.handles.is_empty() && f.ops.is_empty());
+        .expect_err("空面漏写声明必须红");
+        assert!(
+            errs.iter().any(|e| e.contains("未明写 no_injection")),
+            "{errs:?}"
+        );
+
+        // 写了 no_injection 却又给了 handles → 互斥，红
+        let errs = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nno_injection = true\nhandles = [ { trait = \"Rr3Power\", desc_key = \"i2c_bus\" } ]\nops = []\n",
+        )
+        .expect_err("声明与注入面并存必须红");
+        assert!(
+            errs.iter().any(|e| e.contains("只允许与空的 handles/ops 并存")),
+            "{errs:?}"
+        );
+
+        // no_injection = false 不认（只认 true）
+        let errs = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = false\n",
+        )
+        .expect_err("no_injection=false 必须红");
+        assert!(errs.iter().any(|e| e.contains("只认 true")), "{errs:?}");
     }
 
     #[test]
@@ -405,9 +474,9 @@ ops = [
         assert_eq!(gaps.len(), 1, "{gaps:?}");
         assert!(gaps[0].contains("解析失败"), "{gaps:?}");
 
-        // ops 为空 → 永无缺口（config 坏也不点名）
+        // ops 为空 → 永无缺口（config 坏也不点名）；空面须明写 no_injection（L-5）
         let empty = rr3_registry_assemble_from_text(
-            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .unwrap();
         assert!(rr3_registry_assemble_injection_gaps(&empty, "garbage =\n").is_empty());

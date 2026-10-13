@@ -654,12 +654,12 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
         // 无 atoms/ 目录 → 空（夹具树/两件式形态）
         assert!(rr3_assemble_scan(&root.dir.join("no-atoms")).is_empty());
 
-        // 合法空声明（v2）→ 空
+        // 合法空声明（v2，明写不需注入面）→ 空
         let ok = root.dir.join("ok");
         std::fs::create_dir_all(ok.join("atoms/led")).unwrap();
         std::fs::write(
             ok.join("atoms/led/assemble.toml"),
-            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .unwrap();
         assert!(rr3_assemble_scan(&ok).is_empty(), "合法空声明不得报缺");

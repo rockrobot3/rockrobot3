@@ -4,5 +4,9 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 状态机无注入面（纯内存状态机，组合件构造即用）
-ops = []       # max_utterance_ms 经 config 数据化注入（config.toml [rr3-brain.dialog]）
+# 纯内存状态机（组合件构造即用），无接入句柄
+handles = []
+# 一轮 utterance 时长上限 ← config.toml [rr3-brain.dialog]（§3）
+ops = [
+  { slot = "max_utterance_ms", src_key = "rr3-brain.dialog.max_utterance_ms" },
+]
