@@ -11,8 +11,9 @@
 //! - 载荷形状事实源 modules/rr3-sense composite::`rr3_pcm_event_body`（seq/format/
 //!   rate/channels/ms/pcm_b64），topic 键并入体（rr-bus `rr3_publish` 同形——板无
 //!   rr-bus 客户端，按 `body["topic"]` 形状自行并入）；
-//! - 开口 settle 纪律（批C 实锤）：CP2102 DTR/RTS 翻转会复位板子，open 后停 1.2s
-//!   再 `rr3_flush_input` 净化复位 banner 残留，然后才发 `AUDIO ON`；
+//! - 开口 settle 纪律（批C 实锤）：open 后停 1.2s 让开口翻转的板复位走完，再
+//!   `rr3_flush_input` 净化残留；握手先发**防御 AUDIO OFF**（上一会话看门狗/
+//!   异常退出的板面残流会抢在 OK 应答前进线，d4 重跑实锤），停流冲净才 AUDIO ON。
 //! - seq 连续性记账（wrapping u32）：断档即板侧背压丢片（`INFO` 的 `drop` 互为
 //!   对账）；大步进（≥ 0x8000_0000）= 板侧重启记 `restarts`，不按 wrapping 补
 //!   天文 gap。收流端只对账不补救（fail-honest：wav 是真实收到的流）。
@@ -467,11 +468,24 @@ fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error> {
 }
 
 /// 开口握手（首连/重连同款，批C settle 纪律）：停 1.2s 让开口翻转的板复位走完
-/// → 冲残留 → `AUDIO ON` → 核验应答。Ok(应答行)；板面拒收/IO 失败 Err 点名。
+/// → 冲残留 → **防御停流** → 再冲一次 → `AUDIO ON` → 核验应答。
+///
+/// 防御停流实锤（d4 重跑）：上一会话看门狗 exit(3) 不发 AUDIO OFF（conn 被帧层
+/// 借用），板面 audio_on 残留开态续流——残流字节抢在 OK 应答之前进线，读到的
+/// "应答行"是 b64 音频载荷，握手必挂。先发 OFF（幂等）并吞掉应答行（残流混行
+/// 不解析），流停后冲净，AUDIO ON 的应答才是干净行首。板本来就没流时 OFF 照
+/// 常应答，路径不变。
 fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
     std::thread::sleep(SETTLE);
     conn.rr3_flush_input()
         .map_err(|e| format!("flush 失败: {e}"))?;
+    // 防御停流：残流开着也停、没流也幂等；应答行（可能混残流）读了即弃
+    if let Err(e) = conn.write_all(b"AUDIO OFF\n") {
+        return Err(format!("发防御 AUDIO OFF 失败: {e}"));
+    }
+    let _ = read_reply_line(conn);
+    conn.rr3_flush_input()
+        .map_err(|e| format!("二次 flush 失败: {e}"))?;
     conn.write_all(b"AUDIO ON\n")
         .map_err(|e| format!("发 AUDIO ON 失败: {e}"))?;
     let reply = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
