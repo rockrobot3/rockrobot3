@@ -64,13 +64,13 @@ def main() -> None:
     if len(sys.argv) < 2:
         sys.exit(f"用法: {sys.argv[0]} /dev/cu.usbserial-XXXX")
     port = sys.argv[1]
-    s = serial.Serial(port, 115200, timeout=1)
+    s = serial.Serial(port, 921600, timeout=1)
     time.sleep(0.3)
     s.reset_input_buffer()
     s.write(b"\n")  # 开口帧同步：冲掉 boot 毛刺残行
     time.sleep(0.2)
     s.reset_input_buffer()
-    print(f"[mac_monitor] {port} @115200, 1Hz 刷新, Ctrl+C 退出")
+    print(f"[mac_monitor] {port} @921600, 1Hz 刷新, Ctrl+C 退出")
     while True:
         line0 = f"CPU {cpu_temp()} MEM {mem_used_pct()}%"
         line1 = f"IP {ip_addr()}"

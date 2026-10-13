@@ -31,8 +31,8 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3FrameBuf, Rr3Header, Rr3PayloadType,
-    Rr3TransportConn, Rr3UartConn, RR3_UART_BAUD_DEFAULT,
+    opcode, rr3_body_encode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf,
+    Rr3Header, Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_UART_BAUD_DEFAULT,
 };
 use serde_json::{json, Value};
 
@@ -49,8 +49,10 @@ const RR3_TASK_HOST: u64 = 1;
 /// 直连 trace（与 rr-core::RR3_TRACE_ID_DIRECT 同值 0——桥后端不经 rrd 路由）。
 const RR3_TRACE_DIRECT: u64 = 0;
 
-/// 桥后端波特率：与板固件 UART2 同档（115200；rr-ipc 只认 115200/9600 两档，
-/// 本档不设旋钮——固件也是 115200 唯一值）。
+/// 桥后端**缺省**波特率：保持 115200（Q1=(a) 裁定——宿主缺省不变，高速档只
+/// 显式选择）。板固件自批D② 起钉 921600（带宽账：音频上行需 >512kbps），会话
+/// 须以 [`RR3_HAL_PERIPH_BAUD_ENV`] 或 `_with_baud` 构造显式同档；两侧档位不
+/// 一致即线路乱码（fail-visible：帧层 BadMagic 当场点名，不静默）。
 pub const RR3_BRIDGE_BAUD: u32 = RR3_UART_BAUD_DEFAULT;
 
 /// open 后的启动窗口：DTR/RTS 翻转复位板子（E7），ESP32 上电到帧面就绪的
@@ -60,6 +62,10 @@ const RR3_OPEN_SETTLE_MS: u64 = 1200;
 /// ESP32 档设备路径 env 键（应急覆盖口径与 [`crate::backend`] 其余键一致；
 /// 描述符键 `periph_uart` 随真件装配批补入 profiles——本档先落 env 正门）。
 pub const RR3_HAL_PERIPH_UART_ENV: &str = "RR3_HAL_PERIPH_UART";
+
+/// ESP32 档波特率 env 键（批D②）：取值白名单见 [`rr3_periph_baud_parse`]，缺省
+/// [`RR3_BRIDGE_BAUD`]（115200）。板固件已钉 921600，会话须显式给 921600。
+pub const RR3_HAL_PERIPH_BAUD_ENV: &str = "RR3_HAL_PERIPH_BAUD";
 
 /// ESP32 档舵机轴 env 键：`pan` / `tilt`（板上双轴云台 ↔ 宿主单轴 trait 的
 /// 映射面，缺省 `pan`；板侧帧面另有 `axis` 参数可逐调用覆盖）。
@@ -80,6 +86,14 @@ pub fn rr3_periph_axis_parse(s: &str) -> Option<&'static str> {
         "tilt" => Some("tilt"),
         _ => None,
     }
+}
+
+/// 波特率 env 取值裁决（批D②）：十进制解析后过 rr-ipc 档位表
+/// （[`rr3_uart_baud_speed`]）——档位真值单点在 rr-ipc，本侧不抄第二份白名单。
+pub fn rr3_periph_baud_parse(s: &str) -> Option<u32> {
+    let baud = s.trim().parse::<u32>().ok()?;
+    rr3_uart_baud_speed(baud).ok()?;
+    Some(baud)
 }
 
 /// 墙钟纳秒（帧头 timestamp；取不到 epoch 时落 0——时间戳不参与校验，只作
@@ -131,14 +145,22 @@ fn rr3_bridge_parse_response(
 /// UART 长连接 + 请求 id 计数（servo/display 两实例面共用的连接盒）。
 struct Rr3BridgeConn {
     path: PathBuf,
+    /// 开口波特率（批D②：构造时定档，[`RR3_BRIDGE_BAUD`] 为缺省）。
+    baud: u32,
     conn: Option<Rr3UartConn>,
     next_id: u64,
 }
 
 impl Rr3BridgeConn {
     fn rr3_bridge_conn_new(path: PathBuf) -> Self {
+        Self::rr3_bridge_conn_new_with_baud(path, RR3_BRIDGE_BAUD)
+    }
+
+    /// 波特率显式档（批D②）：板固件 921600 时经 env/构造参数同档传入。
+    fn rr3_bridge_conn_new_with_baud(path: PathBuf, baud: u32) -> Self {
         Self {
             path,
+            baud,
             conn: None,
             next_id: 1,
         }
@@ -150,7 +172,7 @@ impl Rr3BridgeConn {
         if self.conn.is_some() {
             return Ok(());
         }
-        match Rr3UartConn::open_with_baud(&self.path, RR3_BRIDGE_BAUD) {
+        match Rr3UartConn::open_with_baud(&self.path, self.baud) {
             Ok(c) => {
                 std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
                 // settle 后补冲：开口触发的 DTR/RTS 复位让板端 banner 在开口
@@ -252,8 +274,17 @@ pub struct Rr3Esp32UartServo {
 
 impl Rr3Esp32UartServo {
     pub fn rr3_esp32_uart_servo_new(path: PathBuf, axis: &'static str) -> Self {
+        Self::rr3_esp32_uart_servo_new_with_baud(path, axis, RR3_BRIDGE_BAUD)
+    }
+
+    /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
+    pub fn rr3_esp32_uart_servo_new_with_baud(
+        path: PathBuf,
+        axis: &'static str,
+        baud: u32,
+    ) -> Self {
         Self {
-            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new(path)),
+            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new_with_baud(path, baud)),
             axis,
         }
     }
@@ -304,8 +335,13 @@ pub struct Rr3Esp32UartDisplay {
 
 impl Rr3Esp32UartDisplay {
     pub fn rr3_esp32_uart_display_new(path: PathBuf) -> Self {
+        Self::rr3_esp32_uart_display_new_with_baud(path, RR3_BRIDGE_BAUD)
+    }
+
+    /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
+    pub fn rr3_esp32_uart_display_new_with_baud(path: PathBuf, baud: u32) -> Self {
         Self {
-            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new(path)),
+            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new_with_baud(path, baud)),
             last: Mutex::new([0; 8]),
             probed: Mutex::new(false),
         }
@@ -353,6 +389,18 @@ mod tests {
         assert_eq!(rr3_periph_axis_parse(" pan "), Some("pan"));
         for bad in ["", "PAN", "roll", "yaw", "1"] {
             assert_eq!(rr3_periph_axis_parse(bad), None, "{bad}");
+        }
+    }
+
+    /// 波特率 env 取值裁决（批D②）：三档内放行、trim 宽容；档位外/垃圾全拒
+    /// （真值单点在 rr-ipc 档位表，本侧只做解析）。
+    #[test]
+    fn periph_baud_parse_accepts_whitelist_only() {
+        assert_eq!(rr3_periph_baud_parse("115200"), Some(115200));
+        assert_eq!(rr3_periph_baud_parse(" 921600 "), Some(921600));
+        assert_eq!(rr3_periph_baud_parse("9600"), Some(9600));
+        for bad in ["", "0", "230400", "921600x", "-1"] {
+            assert_eq!(rr3_periph_baud_parse(bad), None, "{bad}");
         }
     }
 
@@ -405,6 +453,6 @@ mod tests {
         assert_eq!(RR3_TASK_HOST, 1, "宿主位形=rrd（rr-core::RR3_TASK_RRD）");
         assert_eq!(RR3_TRACE_DIRECT, 0, "直连 trace（rr-core::RR3_TRACE_ID_DIRECT）");
         assert_eq!(RR3_PERIPH_TASK, 2, "板上执行面占首模块池位形");
-        assert_eq!(RR3_BRIDGE_BAUD, 115200, "与板固件 UART2 同档");
+        assert_eq!(RR3_BRIDGE_BAUD, 115200, "缺省档保持 115200（Q1=(a)：宿主缺省不变）");
     }
 }

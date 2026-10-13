@@ -12,8 +12,8 @@
 //! 分流无歧义。
 //!
 //! 引脚预算（全案 §5 约束面，与 0.0.7 实测接线零冲突）：
-//! - UART2 = GPIO18→TX / GPIO19←RX（115200，CP2102 指令面；批B 行协议临时面，
-//!   批C 换能力帧——接线与波特率不变，为进城铺路）——**订正**：原记 17→TX/16←RX
+//! - UART2 = GPIO18→TX / GPIO19←RX（921600，CP2102 指令面；批B 行协议临时面，
+//!   批C 换能力帧——接线不变；批D② 升 921600 音频带宽档，Q1=(a) 带宽账裁定）——**订正**：原记 17→TX/16←RX
 //!   已过时，GPIO16/17 一装 UART2 驱动即把 I2C0（21/22）打死，故弃用，真板钉 18/19。
 //! - I2C0  = GPIO21 SDA / GPIO22 SCL（100kHz，SSD1306 0x3C；400k 在跳线面时序边际，
 //!   真板实录页写 ESP_FAIL，降 100k 稳过——见 init 段注）
@@ -112,13 +112,13 @@ fn main() {
     link_patches();
 
     println!(
-        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 rail=adc1@34 cmd=uart2@115200 line+frame planes=ctrl+runtime serial-servo"
+        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 rail=adc1@34 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo"
     );
     ram_point("1-boot");
 
     let peripherals = Peripherals::take().unwrap();
 
-    // ---- UART2 指令面 @ GPIO18(TX)/GPIO19(RX) 115200 ----
+    // ---- UART2 指令面 @ GPIO18(TX)/GPIO19(RX) 921600（批D②）----
     // **引脚定案（真板实锤 2026-10-12）**：GPIO16/17（UART2 的 IOMUX 缺省组）在本板
     // 上**装驱动即把 I2C0（21/22）打死**——先装/后装、换序均复现全黑；换到 18/19 后
     // I2C 全绿（扫描 0x3C / init / boot 文本 / 页写全过）。故本板弃用 16/17（疑与
@@ -134,7 +134,7 @@ fn main() {
         &uart_config,
     )
     .expect("UART2 驱动安装失败");
-    println!("[periph] UART2 ✓ 指令面 115200 @ GPIO18(TX)/GPIO19(RX)");
+    println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO18(TX)/GPIO19(RX)");
 
     // ---- I2C0 @ GPIO21/22（判据①：扫描 0x3C 应答）----
     // 频率档 400k → 100k → **50k**：真板实证 400k/100k 在长跳线 + 模块弱上拉下**时序
@@ -184,15 +184,16 @@ fn main() {
     if oled_ok {
         // boot 画面 4 行全出（4 行扩行能力的 boot 直证；row3 由 oled_show 常刷，
         // boot 期先摆初始角度占位）
-        let boot_rows: [(&[u8], &str); 4] = [
-            (b"ROCK3 PERIPH BASE", "boot 行0写失败"),
-            (b"4-ROW OLED READY", "boot 行1写失败"),
-            (b"UART2 CMD @115200", "boot 行2写失败"),
-            (b"P:060 T:098", "boot 角度行写失败"),
+        // 行2 波特率从 board 真值拼出（批D② 起 921600，防字面量漂移）
+        let boot_rows: [(String, &str); 4] = [
+            ("ROCK3 PERIPH BASE".into(), "boot 行0写失败"),
+            ("4-ROW OLED READY".into(), "boot 行1写失败"),
+            (format!("UART2 CMD @{UART2_BAUD_HZ}"), "boot 行2写失败"),
+            ("P:060 T:098".into(), "boot 角度行写失败"),
         ];
         let mut boot_ok = true;
         for (row, (text, msg)) in boot_rows.iter().enumerate() {
-            if let Err(e) = oled_text(&mut i2c, row, text) {
+            if let Err(e) = oled_text(&mut i2c, row, text.as_bytes()) {
                 println!("[periph] {msg}: {e}");
                 boot_ok = false;
             }

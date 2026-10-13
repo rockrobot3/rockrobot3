@@ -308,11 +308,20 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_periph_axis_parse(&v))
                         .unwrap_or("pan");
+                    // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
+                    // 已钉 921600，会话须显式同档）
+                    let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
+                        .ok()
+                        .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
+                        .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
                     (
-                        Box::new(crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_uart_servo_new(
-                            std::path::PathBuf::from(p),
-                            axis,
-                        )) as Box<dyn Rr3PwmServo>,
+                        Box::new(
+                            crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_uart_servo_new_with_baud(
+                                std::path::PathBuf::from(p),
+                                axis,
+                                baud,
+                            ),
+                        ) as Box<dyn Rr3PwmServo>,
                         RR3_BACKEND_ESP32,
                     )
                 }
@@ -433,14 +442,23 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
             match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
                 .map(|p| p.trim().to_string())
             {
-                Ok(p) if !p.is_empty() => (
-                    Box::new(
-                        crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_uart_display_new(
-                            std::path::PathBuf::from(p),
-                        ),
-                    ) as Box<dyn crate::Rr3Display>,
-                    RR3_BACKEND_ESP32,
-                ),
+                Ok(p) if !p.is_empty() => {
+                    // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
+                    // 已钉 921600，会话须显式同档）
+                    let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
+                        .ok()
+                        .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
+                        .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+                    (
+                        Box::new(
+                            crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_uart_display_new_with_baud(
+                                std::path::PathBuf::from(p),
+                                baud,
+                            ),
+                        ) as Box<dyn crate::Rr3Display>,
+                        RR3_BACKEND_ESP32,
+                    )
+                }
                 _ => {
                     eprintln!(
                         "rr-hal: esp32 档缺环境变量 {}，显示面落占位（使用时以 Unsupported 回错）",

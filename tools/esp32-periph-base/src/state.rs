@@ -185,12 +185,7 @@ impl PeriphState {
             self.tilt_deg = next;
             Some((Axis::Tilt, next))
         } else if self.wander_phase % 2 == 0 {
-            let next = wander_step(
-                self.pan_deg,
-                &mut self.wander_pan_dir,
-                2,
-                Axis::Pan.range(),
-            );
+            let next = wander_step(self.pan_deg, &mut self.wander_pan_dir, 2, Axis::Pan.range());
             self.pan_deg = next;
             Some((Axis::Pan, next))
         } else {
