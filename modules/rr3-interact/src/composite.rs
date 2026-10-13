@@ -118,8 +118,10 @@ pub fn rr3_interact_run() -> Result<(), String> {
     let cfg = rr3_config_load(&manifest_path)?;
     // 注入的策略面在启动自述里可见（I-11：改数据即改行为，日志是第一证据）
     println!(
-        "config 就绪: face non_pointable={}",
-        rr3_face_non_pointable_join(&cfg.face.non_pointable)
+        "config 就绪: face non_pointable={} player prebuffer_ms={} volume_pct={}",
+        rr3_face_non_pointable_join(&cfg.face.non_pointable),
+        cfg.player.prebuffer_ms,
+        cfg.player.volume_pct
     );
 
     let (mut sink, backend) = rr3_hal_audio_sink();
@@ -208,7 +210,14 @@ pub fn rr3_interact_run() -> Result<(), String> {
                     // 业务性失败折成 error 应答（请求-应答语义），不当致命错误
                     let result = match topic {
                         player::RR3_TTS_TOPIC => {
-                            rr3_handle_tts(&bus, sink.as_mut(), &mut face, &mut tts_pcm, &args)
+                            rr3_handle_tts(
+                                &bus,
+                                sink.as_mut(),
+                                &mut face,
+                                &mut tts_pcm,
+                                &args,
+                                &cfg.player,
+                            )
                         }
                         face::RR3_FACE_TOPIC => {
                             rr3_handle_face(&mut face, &args, &cfg.face.non_pointable)
@@ -253,15 +262,18 @@ pub fn rr3_interact_run() -> Result<(), String> {
     }
 }
 
-/// TTS 点名（MC-1 重铺）：参数校验 → PCM 缓冲对账（半流/残留皆拒，拒因路径
-/// 同样清缓冲）→ 表情切 talk → 排空缓冲播放 → 恢复表情 → 回 played_ms。
+/// TTS 点名（MC-1 重铺 / MC-2 播放面参数）：参数校验 → PCM 缓冲对账（半流/
+/// 残留皆拒，拒因路径同样清缓冲）→ 起播水位判定（fail-closed）→ 表情切 talk
+/// → 样点增益 → 排空缓冲播放 → 恢复表情 → 回 played_ms。
 /// 记账：拒 `tts_play_reject`、播成 `tts_play_ok`（收流帧另有 `tts_pcm_frames`）。
+#[allow(clippy::too_many_arguments)]
 fn rr3_handle_tts(
     bus: &Rr3BusClient,
     sink: &mut dyn rr_hal::Rr3AudioSink,
     face: &mut Rr3Face,
     tts_pcm: &mut Rr3TtsPcmBuf,
     args: &Value,
+    player: &Rr3PlayerCfg,
 ) -> Result<Value, String> {
     let (text, pcm_bytes) = rr3_tts_parse_args(args)?;
     if let Err(e) = rr3_tts_pcm_integrity(pcm_bytes, tts_pcm.rr3_tts_buf_len()) {
@@ -269,15 +281,31 @@ fn rr3_handle_tts(
         tts_pcm.rr3_tts_buf_take();
         return Err(e);
     }
-    let samples = rr3_pcm_bytes_to_samples(&tts_pcm.rr3_tts_buf_take());
+    let mut samples = rr3_pcm_bytes_to_samples(&tts_pcm.rr3_tts_buf_take());
+    // 起播水位（MC-2）：对账通过即缓冲完整——`buffered == total` 是对账蕴含的
+    // 架构事实，两处如实传同一值。判据显式在场（legacy 0cf029e 语义：达水位
+    // 才起播、流完整未攒满也播）；流式化（增补轮五批E）后 buffered < total 的
+    // 真分支接管起播时机。fail-closed：不过即拒（拒因点名水位）。
+    let total_ms = samples.len() as u64 * 1000 / player::RR3_TTS_SAMPLE_RATE as u64;
+    if !player::rr3_tts_prebuffer_ready(total_ms, total_ms, player.prebuffer_ms) {
+        bus.rr3_counter_bump("tts_play_reject", 1);
+        return Err(format!(
+            "起播水位未达：缓冲 {total_ms}ms < 水位 {}ms（prebuffer_ms），弃播",
+            player.prebuffer_ms
+        ));
+    }
+    // 播放增益（MC-2）：config 注入的 volume_pct 整型饱和缩放，播放前就地生效
+    player::rr3_tts_apply_gain(&mut samples, player.volume_pct);
     let suspended = face.rr3_face_begin_talk();
     let played = player::rr3_tts_play(sink, &samples);
     face.rr3_face_end_talk();
     let played_ms = played?;
     bus.rr3_counter_bump("tts_play_ok", 1);
     println!(
-        "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，talk 挂起 {suspended}）",
-        text.chars().count()
+        "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，gain {}%，水位 {}ms，talk 挂起 {suspended}）",
+        text.chars().count(),
+        player.volume_pct,
+        player.prebuffer_ms
     );
     Ok(rr3_tts_result(&text, played_ms))
 }
@@ -381,7 +409,28 @@ fn rr3_config_load(manifest_path: &str) -> Result<Rr3InteractCfg, String> {
 /// 本模块 config 的汇总形状
 #[derive(Debug, Clone)]
 struct Rr3InteractCfg {
+    player: Rr3PlayerCfg,
     face: Rr3FaceCfg,
+}
+
+/// config `[rr3-interact.player]` 的形状（MC-2）：起播水位与播放增益。
+/// 缺键/缺段回落默认（同 sense S-5 口径：代码默认是文件缺键的回落）；
+/// 类型错/负数/越界显式拒（fail-closed，不静默吞）。
+#[derive(Debug, Clone)]
+struct Rr3PlayerCfg {
+    prebuffer_ms: u64,
+    volume_pct: u32,
+}
+
+impl Default for Rr3PlayerCfg {
+    fn default() -> Self {
+        // legacy 0cf029e 调优值（0.5s 预缓冲抗抖动、70% 音量）——一个事实
+        // 一个真值点：默认值只在此处与 config.toml 注释对表
+        Self {
+            prebuffer_ms: 500,
+            volume_pct: 70,
+        }
+    }
 }
 
 /// config `[rr3-interact.face]` 的形状（`non_pointable` = 本形态不可点名集，I-11）。
@@ -395,6 +444,21 @@ struct Rr3FaceCfg {
 /// 点名缺字段的文案比派生宏的默认报错可读。
 fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
+    // player 段（MC-2）：段/键缺省回落默认（S-5 口径）；类型错或越界逐键点名
+    // 拒 boot（fail-closed）。volume_pct 值域 0..=1000（10 倍封顶防呆，>100
+    // 为放大、样点饱和由机制面夹断）。
+    let mut player = Rr3PlayerCfg::default();
+    if let Some(p) = v.get("rr3-interact").and_then(|s| s.get("player")) {
+        let mut t = player.prebuffer_ms;
+        rr3_cfg_u64(p, "prebuffer_ms", &mut t)?;
+        player.prebuffer_ms = t;
+        let mut t = player.volume_pct as u64;
+        rr3_cfg_u64(p, "volume_pct", &mut t)?;
+        player.volume_pct = u32::try_from(t)
+            .ok()
+            .filter(|pct| *pct <= 1000)
+            .ok_or_else(|| format!("[rr3-interact.player] volume_pct 越界（值域 0..=1000）: {t}"))?;
+    }
     let face_sect = v
         .get("rr3-interact")
         .and_then(|s| s.get("face"))
@@ -421,8 +485,23 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
         non_pointable.push(expr);
     }
     Ok(Rr3InteractCfg {
+        player,
         face: Rr3FaceCfg { non_pointable },
     })
+}
+
+/// config 键的 u64 下钻（S-5 同款口径）：键缺省不动 `out`（回落调用方给的
+/// 默认）；类型错（非整数/负数）显式点名拒 boot，不静默吞。
+fn rr3_cfg_u64(sect: &toml::Value, key: &str, out: &mut u64) -> Result<(), String> {
+    let Some(v) = sect.get(key) else {
+        return Ok(());
+    };
+    let t = v
+        .as_integer()
+        .ok_or_else(|| format!("[rr3-interact.player] {key} 必须是整数，收到 {v}"))?;
+    *out = u64::try_from(t)
+        .map_err(|_| format!("[rr3-interact.player] {key} 不得为负: {t}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -548,11 +627,58 @@ mod tests {
     #[test]
     fn config_parse_covers_repo_shape() {
         let text = r#"
+[rr3-interact.player]
+prebuffer_ms = 500
+volume_pct = 70
+
 [rr3-interact.face]
 non_pointable = ["talk"]
 "#;
         let cfg = rr3_interact_config_parse(text).unwrap();
         assert_eq!(cfg.face.non_pointable, vec!["talk"], "不可点名集注入");
+        assert_eq!(cfg.player.prebuffer_ms, 500, "起播水位注入（MC-2）");
+        assert_eq!(cfg.player.volume_pct, 70, "播放增益注入（MC-2）");
+    }
+
+    /// player 两键（MC-2）：键/段缺省回落默认；类型错、负数、越界逐键点名拒
+    #[test]
+    fn player_keys_fall_back_to_defaults_and_reject_bad_values() {
+        // 整段缺省（I-11 最小形状）→ 回落 legacy 默认 500/70
+        let cfg = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = []\n").unwrap();
+        assert_eq!(cfg.player.prebuffer_ms, 500, "缺段回落默认水位");
+        assert_eq!(cfg.player.volume_pct, 70, "缺段回落默认增益");
+        // 段在键缺 → 同样回落
+        let cfg = rr3_interact_config_parse(
+            "[rr3-interact.player]\n[rr3-interact.face]\nnon_pointable = []\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.player.prebuffer_ms, 500);
+        assert_eq!(cfg.player.volume_pct, 70);
+        // 越界策略值合法读入：水位 0（无预缓冲）与增益 1000（封顶）
+        let cfg = rr3_interact_config_parse(
+            "[rr3-interact.player]\nprebuffer_ms = 0\nvolume_pct = 1000\n[rr3-interact.face]\nnon_pointable = []\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.player.prebuffer_ms, 0);
+        assert_eq!(cfg.player.volume_pct, 1000);
+        // 类型错拒：字符串进整数键
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.player]\nprebuffer_ms = \"soon\"\n[rr3-interact.face]\nnon_pointable = []\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("prebuffer_ms"), "类型错点名: {e}");
+        // 负数拒：水位不得为负
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.player]\nprebuffer_ms = -1\n[rr3-interact.face]\nnon_pointable = []\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("不得为负"), "负数点名: {e}");
+        // 增益越界拒：值域 0..=1000
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.player]\nvolume_pct = 1001\n[rr3-interact.face]\nnon_pointable = []\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("volume_pct 越界"), "增益越界点名: {e}");
     }
 
     #[test]

@@ -2,14 +2,25 @@
 # 0.0.5 批I I-1（孤儿参数清零，六键全删——被读或删除，本模块今天不装载
 # config.toml，六键全无读者）：
 # - log_level / default_expression：删除，无读者；
-# - volume_pct / prebuffer_ms：删除（对应播放行为未实装，随真件批实装时
-#   按"音量/预缓冲进 ops 槽"回归，不提前占键）；
+# - volume_pct / prebuffer_ms：曾随 I-1 删除（行为未实装不提前占键），**0.0.5
+#   批M MC-2 实装回归**（legacy 0cf029e 语义：起播水位抗抖动、样点整型增益
+#   饱和）——键回归本表，ops 槽落 atoms/player/assemble.toml；
 # - panel bind/port：删除（真值 = panel/server.rs 的 RR3_PANEL_ADDR_DEFAULT
 #   常量 "127.0.0.1:8080"，env RR3_PANEL_ADDR 可改——键与常量是第二真值点）。
 # 本文件保留空壳：rr3-pack 随包必带 config.toml（缺件必重启环）。
 #
 # 0.0.5 批M MC-10 I-11（重开装载面）：不可点名规则从件内 if 数据化——本模块
 # 自此**装载 config.toml**（缺文件开机即退，fail-closed，同 act/sense 口径）。
+
+[rr3-interact.player]
+# 起播水位与播放增益（MC-2，legacy 0cf029e 语义回归）：
+# - prebuffer_ms：起播前缓冲水位——缓冲达水位才起播（抗网络抖动），流已完整
+#   则未攒满也播（短回答不卡水位）。0 = 无预缓冲（对账过即播）。
+# - volume_pct：播放增益（百分比整型）——样点 i64 中间量乘除、饱和夹断不回卷
+#   （不上浮 f32）；>100 为放大，值域 0..=1000（10 倍封顶防呆），越界拒 boot。
+# 缺键回落默认（同 sense S-5 口径：代码侧默认仍是文件缺键的回落）。
+prebuffer_ms = 500
+volume_pct = 70
 
 [rr3-interact.face]
 # 不可点名集（I-11）：talk 由 TTS 播放自动驱动、不接受点名——规则从件内 if
