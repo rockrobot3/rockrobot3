@@ -158,7 +158,8 @@ rr-mech 安全核 `Rr3LowEdge` **两实例**（一核两条线）产——"越�
 | `WANDER` / `WANDER STOP` | 开/停自主扫摆；开时两轴**错拍单动**（同拍只驱动一轴），端点=本轴行程边界 |
 | `SCAN` | 两轴各自按本轴行程五等分点**串行**扫描（每点 pan→600ms→tilt→600ms，逐点回读）；控制面即刻 ack，逐点在运行面异步回包 |
 | `RAIL` | 采一次 5V 轨压（方案A Q1 观测面）：控制面即刻 ack，运行面采一次经 outbox 异步回包 `RAIL rail=<mV> raw=<raw>`（真板分压测点接线后对拍标定用） |
-| `INFO` | 回读当前角度 / 限幅区间 / **5V 轨最近采样（rail/raw/tier/low_events）** / OLED 最近文本 / 堆水位 |
+| `AUDIO ON` / `AUDIO OFF` | 开/停双麦音频上行（批D③）：ON 后 mic 线每 2048 帧（128ms @16k）组一条 `rr3-sense/audio/pcm` Event 帧整帧发 UART2（921600 档；有界队列 4 深，满丢最旧，`INFO` 可见 `audio/seq/sent/drop/q`）；OFF 即停攒新片、余片发完 |
+| `INFO` | 回读当前角度 / 限幅区间 / **5V 轨最近采样（rail/raw/tier/low_events）** / **音频上行（audio/seq/sent/drop/q）** / OLED 最近文本 / 堆水位 |
 | `FONT` | "ABC123" 字模 hex 自检护栏 |
 | `HELP` | 指令表 |
 
@@ -183,6 +184,22 @@ python3 scripts/mac_monitor.py /dev/cu.usbserial-0001   # CP2102 设备号以实
 开口帧同步已内置（open 后先发空行冲掉 boot 期 RX 毛刺残行——真板探针实锤：
 首行指令会被噪声前缀污染回 `ERR unknown cmd`）。脚本为演示件，不进十步门禁
 扫面（crate 目录整体在 ④/⑥ 排除清单内）。
+
+## 音频上行收流（tools/rr3-audio-rec，批D③ 判据①）
+
+板面 `AUDIO ON` 起 `rr3-sense/audio/pcm` Event 分片流（2048 帧/片 = 128ms，s16le
+双通道 b64），宿主 rr3-audio-rec 收流解码落 wav（**wav 头按实测采样率写**——板面
+I2S 实际率 ~16.6kHz 与标称 16k 有差，按实测写回放音高才对）：
+
+```bash
+cd tools/rr3-audio-rec && cargo run --release -- /dev/cu.usbserial-0001 --secs 20
+# 缺省 out=rr3-audio-<unix秒>.wav baud=921600；拍手/说话后听感核对（判据①：
+# 宿主录得双通道 wav 可回放），进度行可见 chunk/seq/gaps（gaps>0 = 板面背压丢片，
+# 与板面 `INFO` 的 drop 互为对账）
+```
+
+先烧录后收流（同指令面纪律：烧录的 DTR/RTS 翻转会复位板子）；recorder 开口自带
+1.2s settle + flush（复位 banner 净化后才发 `AUDIO ON`）。
 
 ## 现场注记（0.0.5 现场处置续批，2026-10-12 真板实测）
 

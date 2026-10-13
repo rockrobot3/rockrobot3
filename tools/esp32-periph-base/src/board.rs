@@ -80,6 +80,23 @@ pub(crate) const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 /// 表情白名单（rr3-interact 模块面同款 7 态；帧面执行面同步执行该裁定）。
 pub(crate) const RR3_FACE_EXPRS: [&str; 7] =
     ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
+/// 音频上行宿主 task 位形（帧头 dst 门）：宿主侧占位形 1——与宿主 rr-hal
+/// esp32_uart 桥后端同值帧头约定（板不依赖 rr-core，与 [`RR3_PERIPH_TASK`]
+/// 同一"两端常量自证"纪律）。Event 帧只发宿主（dst=1），trace_id=0（direct）。
+pub(crate) const RR3_HOST_TASK: u64 = 1;
+/// 音频 PCM 上行主题（在册 stream L1：contracts/topics.toml `rr3-sense/audio/pcm`；
+/// 载荷形状事实源 modules/rr3-sense composite::rr3_pcm_event_body——seq/format/
+/// rate/channels/ms/pcm_b64 + topic 并入体。板无 rr-bus 客户端，topic 键由本板
+/// 按 rr-bus `rr3_publish` 的 `body["topic"]` 形状自行并入事件体）。
+pub(crate) const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
+/// 音频上行分片（每通道帧数）：2048 帧 = 128ms @16kHz = 8192B PCM/分片——b64+
+/// JSON+帧头开销摊薄后单分片上行 ≈11.1KB，7.8 分片/s ≈ 87KB/s，落 921600 有效
+/// 92.16KB/s 内（Q1=(a) 带宽账）。分片过短开销占比暴涨、过长背压延迟变大。
+pub(crate) const AUDIO_CHUNK_FRAMES: usize = 2048;
+/// 板侧 audio_q 深度（有界背压）：mic 线产满即丢**最旧**分片并计
+/// `audio_dropped`（判据② 背压观测前哨，与 recorder 端 seq 断档互为对账）。
+/// 4 分片 ≈ 45KB 堆 + 单分片传输 ~120ms，吸收宿主 ~0.5s 级收流抖动。
+pub(crate) const AUDIO_Q_CAP: usize = 4;
 
 // ---------------------------------------------------------------------------
 // 舵机换算（50Hz / 14bit：1 tick = 20ms / 16384 = 1.2207µs）

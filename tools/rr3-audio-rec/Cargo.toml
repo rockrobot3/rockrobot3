@@ -1,0 +1,22 @@
+[package]
+name = "rr3-audio-rec"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "0.0.5 增补轮五 批D③ 音频上行收流端：板面 rr3-sense/audio/pcm Event 帧 → wav 落盘（判据①）"
+
+# 独立宿主 crate（tools/ 顶层惯例，与 rr3-bridge 同构——落独立目录即普通
+# 宿主工程，check.sh ④/⑥ 按独立工程口径自动覆盖，无需专用门）。
+[workspace]
+
+[dependencies]
+# 依赖闭包（std + rr-ipc + serde_json）：串口/帧语义/b64 全部 rr-ipc 单点，
+# 零第二份帧层；事件体 JSON 解析用 serde_json。
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+serde_json = "1"
+
+[[bin]]
+name = "rr3-audio-rec"
+path = "src/main.rs"
