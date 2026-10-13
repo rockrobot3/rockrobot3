@@ -249,7 +249,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
             "INFO" => {
                 let (plo, phi) = Axis::Pan.range();
                 let (tlo, thi) = Axis::Tilt.range();
-                let (pan, tilt, wander, phase, last_text, rail_mv, rail_raw) = {
+                let (pan, tilt, wander, phase, last_text, rail_mv, rail_raw, rail_tier, rail_low) = {
                     let b = lock_bus(&bus);
                     (
                         b.st.pan_deg,
@@ -259,11 +259,14 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         b.st.last_text.clone(),
                         b.st.rail_mv,
                         b.st.rail_raw,
+                        b.st.rail_tier,
+                        b.st.rail_low_events,
                     )
                 };
                 Ok(format!(
-                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} oled_last=\"{last_text}\" free={}B min_free={}B",
+                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} oled_last=\"{last_text}\" free={}B min_free={}B",
                     if wander { "on" } else { "off" },
+                    rail_tier.name(),
                     unsafe { esp_get_free_heap_size() },
                     unsafe { esp_get_minimum_free_heap_size() }
                 ))

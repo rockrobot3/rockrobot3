@@ -26,6 +26,10 @@ esp-idf-hal = "=0.44.1"
 # 批C 帧执行面：128B 头 + payload 前缀 + Rr3FrameBuf 缓冲（rr3_framebuf_read
 # 收帧 / rr3_send_buf 发帧，blanket conn 免费覆盖——UartIo wrapper 见 main.rs）。
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# 判定核（方案A Q2）：欠压迟滞边沿 `Rr3LowEdge` 取用 rr-mech 安全核下沉件——板档
+# 直接消费判定核（安全核离线仍须成立），rr-mech 是零依赖 no_std 叶子（不牵总线栈，
+# 故不违反本 crate"不依赖 rr-core"的裁线）。
+rr-mech = { path = "../../base/runtime/rr-mech" }
 # 帧体 JSON-RPC 组包/拆包（method 恒 rr3.call、主题在 params.topic；哨兵同款）。
 serde_json = "1"
 

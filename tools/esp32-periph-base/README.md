@@ -43,21 +43,32 @@ SKIP 纪律同 espidf-sentinel-check.sh（esp 工具链/ldproxy/ESP-IDF v5.2.2/e
 UBEC 5V 轨，或至少在 OLED 模块 VCC/GND 就近并一颗 ≥100µF 电解 + 0.1µF 陶瓷。
 判据见 0.0.5 §4 批B 四件套 ④（堵转时 UBEC ≥4.7V）。
 
-## 5V 轨电压监测（方案A Q1，批M 步2）
+## 5V 轨电压监测与欠压判定（方案A Q1+Q2，批M 步2/步3）
 
-BOD 根因链的**观测手段**：这条 5V 轨此前无任何采样，欠压既看不见也响应不了。本档加
+BOD 根因链的**观测 + 响应手段**：这条 5V 轨此前无任何采样，欠压既看不见也响应不了。本档加
 ADC1_CH6 @ GPIO34 采样轨压，按「**机制与策略分离**」落两处：
 
 | 面 | 落点 | 内容 |
 |---|---|---|
-| 策略 | [`board.rs`](src/board.rs) `ADC_*` / `RAIL_*` 常量区 | 引脚 / 分压比（**占位 1:1 待标定**）/ 采样节拍 / ADC 衰减·分辨率·标定 |
-| 机制 | [`power.rs`](src/power.rs) `RailMonitor` | 读 ADC 一次 + 按分压比换算回轨压 mV，**不含阈值判定** |
+| 策略 | [`board.rs`](src/board.rs) `ADC_*` / `RAIL_*` 常量区 | 引脚 / 分压比（**占位 1:1 待标定**）/ 采样节拍 / ADC 衰减·分辨率·标定 / 双阈值（`RAIL_MILD_MV`/`RAIL_SEVERE_MV`，**占位待标定**）/ 接闸（`RAIL_GATE_ARMED`） |
+| 机制 | [`power.rs`](src/power.rs) | `RailMonitor` 读 ADC 一次 + 按分压比换算回轨压 mV；`tier_of` 双阈值电平分类；`RailJudge` 一核两条线（rr-mech `Rr3LowEdge` ×2）产越阈事件 |
 
-运行面自主节拍每 `RAIL_SAMPLE_PERIOD_MS` 周期采一次并写 `PeriphState.rail_mv/rail_raw`
-（`INFO` 观测）；`RAIL` 命令另可点名**即刻**采一次。**装配失败不 panic**（照 OLED init
-纪律）——`RtPeriph.rail = None` 时采样路径回 Err，不冒领读数。**真板读数待分压测点接线**
-（与万用表对拍 ≤2% 后回填 `board.rs` 分压比）；阈值判定核（双阈值迟滞 → 串行降级/拒动）
-见同批步3。**无真板证据前不 claim**。
+运行面自主节拍每 `RAIL_SAMPLE_PERIOD_MS` 周期采一次：喂判定核 → 写
+`PeriphState.rail_mv/rail_raw/rail_tier`（`INFO` 观测），越阈（**向下档变**）打站并累加
+`rail_low_events`；`RAIL` 命令另可点名**即刻**采一次。**装配失败不 panic**（照 OLED init
+纪律）——`RtPeriph.rail = None` 时采样路径回 Err，不冒领读数。
+
+**判定核（步3）**：双阈值 `RAIL_SEVERE_MV < RAIL_MILD_MV`。**重度欠压 → 执行面拒动**
+（MC-5 语义：`servo_set` 点名拒收、**妆面 OLED 不禁**、**回阈解禁不自动重放**）；**轻度
+欠压 → 维持既有串行降级**（pan→整定→tilt，本就常开）；**正常 → 直通**。越阈事件用
+rr-mech 安全核 `Rr3LowEdge` **两实例**（一核两条线）产——"越阈一次一段、严格回阈才重新
+武装"的语义钉死在安全核内，调用方只能喂电压不能改语义。
+
+**接闸纪律（`RAIL_GATE_ARMED=false` 默认）**：分压比与阈值仍是**占位待标定**，且 GPIO34
+测点**非必接线**——浮空/未标定下 ADC 可能读到近 0 的**伪欠压**，若直接接闸会把正常运动
+误判打死（把能跑的板变砖）。故**未标定时只观测、不接闸**（档位照算照看、越阈照打站）；
+真板接分压测点、与万用表对拍（≤2%）回填分压比与阈值后，置 `true` 接闸。**无真板证据前
+不接闸、不 claim**。真板欠压注入验收（判据④堵转 UBEC≥4.7V）**待硬件**。
 
 ## 接线（与 0.0.7 实测接线零冲突）
 
@@ -67,7 +78,7 @@ ADC1_CH6 @ GPIO34 采样轨压，按「**机制与策略分离**」落两处：
 | 舵机 pan（水平） | 信号→GPIO32 · 电源→**板载 5V（现场档）** · GND→共地 | 正式装机应改 UBEC 独立 5V 轨（堵转 ~700mA/只），见上节代价 |
 | 舵机 tilt（俯仰） | 信号→GPIO33 · 电源→**板载 5V（现场档）** · GND→共地 | UBEC/板/舵机单点共地（铁律） |
 | UART2 指令面 | GPIO18→CP2102 RXD · GPIO19←CP2102 TXD · GND→共地 | 115200，3.3V TTL（严禁 5V）。**引脚定案（2026-10-12 真板实锤）：GPIO16/17 一装 UART2 驱动即把 I2C0 打死（换序/前后装均复现），故改 18/19**；19 与未来点阵 VSPI 预留同脚，已记为技术债 |
-| 5V 轨分压测点（方案A Q1） | GPIO34 ← 5V 轨经分压网络（5V→≤3.3V） · GND→单点共地 | ADC1_CH6（input-only 档）；分压比在 `board.rs` 策略面（**占位 1:1 待标定**，接线后对拍回填），属观测面，非必接线 |
+| 5V 轨分压测点（方案A Q1/Q2） | GPIO34 ← 5V 轨经分压网络（5V→≤3.3V） · GND→单点共地 | ADC1_CH6（input-only 档）；分压比/阈值在 `board.rs` 策略面（**占位待标定**，接线后对拍回填）。属观测面、**非必接线**——未接线时浮空读数**不接闸**（`RAIL_GATE_ARMED=false`），只观测不拒动 |
 | 板载 USB（cu.usbserial-1410） | 烧录 + monitor | `cargo +esp run`，Ctrl+] 退出 |
 
 ## 烧录与验收 runbook
@@ -111,7 +122,7 @@ ADC1_CH6 @ GPIO34 采样轨压，按「**机制与策略分离**」落两处：
 | `WANDER` / `WANDER STOP` | 开/停自主扫摆；开时两轴**错拍单动**（同拍只驱动一轴），端点=本轴行程边界 |
 | `SCAN` | 两轴各自按本轴行程五等分点**串行**扫描（每点 pan→600ms→tilt→600ms，逐点回读）；控制面即刻 ack，逐点在运行面异步回包 |
 | `RAIL` | 采一次 5V 轨压（方案A Q1 观测面）：控制面即刻 ack，运行面采一次经 outbox 异步回包 `RAIL rail=<mV> raw=<raw>`（真板分压测点接线后对拍标定用） |
-| `INFO` | 回读当前角度 / 限幅区间 / **5V 轨最近采样（rail/raw）** / OLED 最近文本 / 堆水位 |
+| `INFO` | 回读当前角度 / 限幅区间 / **5V 轨最近采样（rail/raw/tier/low_events）** / OLED 最近文本 / 堆水位 |
 | `FONT` | "ABC123" 字模 hex 自检护栏 |
 | `HELP` | 指令表 |
 
