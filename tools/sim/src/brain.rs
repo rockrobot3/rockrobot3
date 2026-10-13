@@ -174,6 +174,12 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let manifest_path = workdir.join("config.toml");
     std::fs::write(&manifest_path, rr3_brain_config_text())
         .map_err(|e| format!("写演练 config 失败: {e}"))?;
+    // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
+    // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
+    // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
+    let interact_cfg = workdir.join("interact-config.toml");
+    std::fs::write(&interact_cfg, crate::chain::rr3_chain_interact_config_text())
+        .map_err(|e| format!("写 interact config 失败: {e}"))?;
 
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
@@ -224,6 +230,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             .env("RR3_MANIFEST", &m_interact)
             .env("RR3_HAL_BACKEND", "sim")
             .env("RR3_PANEL_ADDR", crate::drill::RR3_SIM_PANEL_ADDR)
+            .env("RR3_INTERACT_CONFIG", &interact_cfg)
             .stdout(Stdio::from(
                 std::fs::File::create(&interact_log)
                     .map_err(|e| format!("建 {interact_log:?} 失败: {e}"))?,

@@ -180,6 +180,13 @@ pub fn rr3_chain_act_config_text() -> String {
         .to_string()
 }
 
+/// interact 演练 config（I-11 起 interact 必读 config：不可点名集注入；与仓内
+/// `modules/rr3-interact/config.toml` 同形状，缺键/在册外值由 main.rs 解析红）
+pub fn rr3_chain_interact_config_text() -> String {
+    "[rr3-interact]\nlog_level = \"info\"\n\n[rr3-interact.face]\nnon_pointable = [\"talk\"]\n"
+        .to_string()
+}
+
 /// 观察者取证袋：判向档（deg/bin）与转向落角。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Rr3ChainObs {
@@ -389,6 +396,7 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     for (name, text) in [
         ("brain-config.toml", rr3_brain_config_text()),
         ("sense-config.toml", rr3_chain_sense_config_text()),
+        ("interact-config.toml", rr3_chain_interact_config_text()),
         ("act-config.toml", rr3_chain_act_config_text()),
         ("rr3-obs.toml", rr3_chain_obs_manifest(&act)),
     ] {
@@ -397,6 +405,7 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     }
     let brain_cfg = workdir.join("brain-config.toml");
     let sense_cfg = workdir.join("sense-config.toml");
+    let interact_cfg = workdir.join("interact-config.toml");
     let act_cfg = workdir.join("act-config.toml");
     let obs_manifest = workdir.join(format!("{RR3_CHAIN_OBS}.toml"));
 
@@ -451,7 +460,8 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             {
                 let mut c = Command::new(&interact);
                 c.env("RR3_HAL_BACKEND", "sim")
-                    .env("RR3_PANEL_ADDR", RR3_SIM_PANEL_ADDR);
+                    .env("RR3_PANEL_ADDR", RR3_SIM_PANEL_ADDR)
+                    .env("RR3_INTERACT_CONFIG", &interact_cfg);
                 (RR3_SIM_MODULE_B, c)
             },
             {
@@ -670,6 +680,8 @@ mod tests {
         let act = rr3_chain_act_config_text();
         assert!(act.contains("angle_limit_deg = [70, 110]"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
+        let interact = rr3_chain_interact_config_text();
+        assert!(interact.contains("non_pointable = [\"talk\"]"), "{interact}");
     }
 
     #[test]
