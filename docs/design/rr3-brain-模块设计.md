@@ -7,7 +7,7 @@
 | 执行单元 | 独立进程，`type = brain`、`lang = python`（装机 shim 语义，ADR-0014）；`start_priority = 80`、`mem_limit_mb = 256`、`restart_policy = "on-failure"` | `module.toml` |
 | 格 | `cognition.dialog` · `cognition.asr` · `cognition.llm` · `cognition.tts` | `contracts/slots.toml` |
 | 件 | 四件为**两件式 manifest**（`atom.toml` + `assemble.toml`），机制本体 `.py` 原位；**`intent.py` / `bus.py` 不是件**，属组合件机制壳 | `atoms/*/`、`rr3_brain/` |
-| 主题 | 发布 `intent/result`；**申报订阅** `interact/asr/text` + `connect/net/link`；**实际订阅** `sense/audio/pcm` + `audio/vad_start`（未申报）；RPC `llm/completion` | `module.toml` 与 `composite.py`（`TOPIC_PCM`/`TOPIC_VAD`） |
+| 主题 | 发布 `intent/result` + `rr3-brain/audio/tts_pcm`（MC-1 下行载荷流，2026-10-13 申报随实现补齐）；订阅 `sense/audio/pcm` + `sense/audio/vad_start`（B-1 已申报）；RPC `llm/completion` | `module.toml` 与 `composite.py`（`TOPIC_PCM`/`TOPIC_VAD`/`TOPIC_TTS_PCM`） |
 | 句柄 | 无能力面句柄（云 HTTP；**配置读自 `config.toml` 的 `[rr3-brain.cloud]`，只有 API key 走 env**） | `cloud/*.py`、`composite.py` |
 | 参数 | `base_url`、`asr_model`、`llm_model`、`tts_model`、`timeout_s=20`、`max_utterance_ms=8000` **有读者**；`silence_tail_ms=700`、`max_turn_chars=800` **在册无读者**（B-2/B-8）；另有一个不在 config 里的硬编码上界 `RR3_CALL_TIMEOUT_S = 30`（点名 interact 的等待） | `config.toml`、`composite.py` |
 | 健康 | 心跳 2000 / 看门狗 10000 ms；`[depends].required = [bus.subscribe, bus.rpc, net.online]`，`optional = [power.battery]` | `module.toml` |
@@ -47,8 +47,7 @@
 
 ## §4 主循环与时序预算
 
-单循环：`poll` 收帧 → pcm/vad 喂 dialog → 起轮后**串行**跑 asr→llm→tts → 调 `interact/tts/text`（点名）
-→ 发 `intent/result`。真实量：云 `timeout_s = 20`/段，三段 = 60 s，**再加一段同轮内的点名等待**
+单循环：`poll` 收帧 → pcm/vad 喂 dialog → 起轮后**串行**跑 asr→llm→tts → `rr3_finish_turn` 把 TTS 产出的 PCM 按 20ms/640B 分帧发布 `rr3-brain/audio/tts_pcm`（seq 模块级单调不随轮次复位、`ms` 由样点数导出，MC-1）→ 调 `interact/tts/text`（点名，args 携 `text` + `pcm_bytes` 字节总数作收流完整性判据）→ 发 `intent/result`。真实量：云 `timeout_s = 20`/段，三段 = 60 s，**再加一段同轮内的点名等待**
 `RR3_CALL_TIMEOUT_S = 30`（调 `interact/tts/text`）→ 一轮最坏 **≈ 90 s**（旧版写 60 s 漏了这段），
 而 `max_utterance_ms = 8000` 只管"起轮到封轮"的采集段，管不到云段——两者关系仍无人定义（工单 B-3）；
 心跳 2000 ms 独立线程，故"卡在云上 90 s"期间心跳仍续 →
@@ -64,13 +63,14 @@
 
 | 主题 | kind | 触发 | 载荷 | 申报与实现 |
 |---|---|---|---|---|
-| `audio/pcm` | stream | 消费 | `seq, pcm_b64, ms` | **未申报**（实然消费） |
-| `audio/vad_start` | event | 消费 | `seq, edge, doa?` | **未申报** |
+| `audio/pcm` | stream | 消费 | `seq, pcm_b64, ms` | **已申报**（B-1 只增补齐） |
+| `audio/vad_start` | event | 消费 | `seq, edge, doa?` | **已申报**（B-1） |
 | `net/link` | event | **申报消费、代码无处理**（`SUBSCRIBES` 里有，事件分支里没有） | up/ssid/rssi_dbm/mode | **申报超前**（B-7） |
 | `asr/text` | event | 申报消费 | 在册 | 生产侧不存在 → retired |
 | `intent/result` | event | 发布 | `actions[]: {topic,args}` | 一致 |
+| `rr3-brain/audio/tts_pcm`（发） | event stream | 发布（MC-1，每轮 TTS 完成后） | `{seq, format:"s16le", rate:16000, channels:1, ms, pcm_b64}`，20ms/640B 分帧，seq 模块级单调 | 申报随实现落地（2026-10-13）；逐字段复用上行 `rr3-sense/audio/pcm` 形状（MCP-1） |
 | `llm/completion` | RPC | 点名 | 文本 → 回复 | 一致 |
-| `interact/tts/text` | RPC（调用方） | 点名 | `{text}` | 不占订阅面（点名形状） |
+| `interact/tts/text` | RPC（调用方） | 点名 | `{text, pcm_bytes}`（MC-1：字节总数 = 收流完整性唯一判据） | 不占订阅面（点名形状） |
 
 ## §6 降级矩阵
 
@@ -161,6 +161,8 @@
 
 - **契约面（B-1 / R-3）已结**：`rr3-brain/module.toml` 现 `subscribes = ["rr3-sense/audio/pcm",
   "rr3-sense/audio/vad_start"]`、`publishes = ["rr3-brain/intent/result"]`——申报面第一次等于实现面。
+  （**MC-1 增补（2026-10-13）**：`publishes` 增 `"rr3-brain/audio/tts_pcm"`——走"补实现"合法形式，
+  主题本体在 MCP-1 评审时已在 `topics.toml` 在册，计数 30 未动；见 0.0.5 方案 §20 第 5 条。）
 - **B-2 已结**（`silence_tail_ms` 退役，判停在 sense 的 `Offset`）；**B-8 未结**（`max_turn_chars` 仍零读者）。
 - **B-7 已结（以一种我没写过的合法方式）**：`net/link` 订阅申报被**撤下**而不是补实现——
   按 R-3 的"补实现或撤申报二选一"，实现侧选了后者。本册 §2 那句"链路 down 不起新轮"从此**不再是待实现项**，
@@ -179,5 +181,5 @@
 | B-8 `max_turn_chars` | 键已从 `config.toml` 删除（文件注记自陈"在册无读者；实装截断随真用例回归"） | **结（走"删"分支）**；截断行为将来要回须连同回归用例立单 |
 | B-9 `RR3_CALL_TIMEOUT_S = 30.0` | 仍是 `composite.py` 常量（注释里它是"一轮最坏 ≈90 s"的组成项） | **未结 → 0.0.5 MC-10**（ops/config 槽，与 A-9/I-11/S-5 同族"策略出件"） |
 | B-10 `SILICONFLOW_API_KEY` | **已结（批M MC-8②）**：`cloud/__init__.py : API_KEY_ENV` 改 `RR3_CLOUD_API_KEY`，供应商归 config（换云只改配置不改码） | **结** |
-| B-11（本册新立）TTS PCM 上线 | `rr3_finish_turn` 已取得 `reply_pcm` 却只 `rr3_call_topic(TOPIC_TTS, {"text": …})` | **MC-1**（通路对**引擎中立**）；对话闭环施工在**增补轮五批E** |
+| B-11（本册新立）TTS PCM 上线 | **已结（批M MC-1，2026-10-13）**：`rr3_finish_turn` 已把 `reply_pcm` 按 20ms/640B 分帧发布 `rr3-brain/audio/tts_pcm`（seq 模块级单调、`ms` 由样点数导出），`tts/text` 点名 args 增 `pcm_bytes` 作收流完整性唯一判据；跨语言 golden（`contracts/golden/tts-pcm-frames.json`）两腿对拍 | **MC-1 已结**（通路对**引擎中立**；对话闭环施工仍在**增补轮五批E**） |
 | R31 **Q3** 对本册的改判 | ASR/TTS 首发为**本地 vosk + Piper**，brain 侧立 adapter 缝，**云后端实现位留空不写半成品**（ADR-0008 裁定 4 口径） | 本册 §0/§5 的"三家云客户端"读作**现状**（存量实现），不再读作目标形态；"云真 key 联调"敞口**不再是 F-3/F-4 的阻塞项**——这条订正同时收回本册与 0.0.5 §17 里"欠真 key"的写法 |
