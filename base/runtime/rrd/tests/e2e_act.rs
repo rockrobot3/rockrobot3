@@ -88,6 +88,10 @@ state_min_interval_ms = 50
 
 [rr3-act.led]
 blink_period_ms = 500
+effects = ["on", "off", "blink"]
+
+[rr3-act.intent]
+open_topics = ["rr3-act/relay/set", "rr3-act/servo/command"]
 
 [rr3-act.reflex]
 loop_hz = 1000

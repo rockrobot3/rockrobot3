@@ -176,7 +176,7 @@ pub fn rr3_chain_sense_config_text() -> String {
 
 /// act 演练 config（与 e2e_act 夹具同形状，漂移当场由 main.rs 的形状解析红）
 pub fn rr3_chain_act_config_text() -> String {
-    "[rr3-act]\nlog_level = \"info\"\n\n[rr3-act.servo]\nangle_limit_deg = [70, 110]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n\n[rr3-act.led]\nblink_period_ms = 500\n\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
+    "[rr3-act]\nlog_level = \"info\"\n\n[rr3-act.servo]\nangle_limit_deg = [70, 110]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\", \"off\", \"blink\"]\n\n[rr3-act.intent]\nopen_topics = [\"rr3-act/relay/set\", \"rr3-act/servo/command\"]\n\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
         .to_string()
 }
 

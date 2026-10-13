@@ -43,7 +43,7 @@ use rr_hal::{backend::rr3_hal_gpio_out, backend::rr3_hal_servo, Rr3GpioOut, Rr3P
 use rr_ipc::{opcode, Rr3PayloadType};
 use serde_json::{json, Value};
 
-use led::{Rr3Led, Rr3LedEffect};
+use led::{rr3_led_effects_join, Rr3Led, Rr3LedEffect, RR3_LED_EFFECT_VALUES};
 use servo::Rr3ServoCfg;
 
 /// 低电禁动拒因（MC-5，§20 ② ③）：点名是哪条执行令被闸门拒了、解禁口径、
@@ -99,13 +99,20 @@ pub fn rr3_act_run() -> Result<(), String> {
     let tb = Rr3TimeBase::rr3_time_base_new();
 
     let cfg = rr3_config_load(&manifest_path)?;
+    // 注入的策略面在启动自述里可见（A-9：改数据即改行为，日志是第一证据）
+    let intent_open = if cfg.intent.open_topics.is_empty() {
+        "(空)".to_string()
+    } else {
+        cfg.intent.open_topics.join("/")
+    };
     println!(
-        "config 就绪: servo [{}, {}]/{}ms state>={}ms blink={}ms reflex {}Hz",
+        "config 就绪: servo [{}, {}]/{}ms state>={}ms blink={}ms led_effects={} intent_open={intent_open} reflex {}Hz",
         cfg.servo.angle_min_deg,
         cfg.servo.angle_max_deg,
         cfg.servo.move_timeout_ms,
         cfg.servo.state_min_interval_ms,
         cfg.led.blink_period_ms,
+        led::rr3_led_effects_join(&cfg.led.effects),
         cfg.reflex.loop_hz
     );
 
@@ -180,9 +187,13 @@ pub fn rr3_act_run() -> Result<(), String> {
                     servo::RR3_SERVO_COMMAND_TOPIC => {
                         rr3_handle_servo(&mut *servo_dev, &cfg.servo, &args, blocked)
                     }
-                    led::RR3_LED_EFFECT_TOPIC => {
-                        rr3_handle_led(&mut led_ctrl, &mut *led_gpio, &args, tb.rr3_now_ms())
-                    }
+                    led::RR3_LED_EFFECT_TOPIC => rr3_handle_led(
+                        &mut led_ctrl,
+                        &mut *led_gpio,
+                        &args,
+                        tb.rr3_now_ms(),
+                        &cfg.led.effects,
+                    ),
                     relay::RR3_RELAY_SET_TOPIC => {
                         if blocked {
                             Err(rr3_low_power_reject(relay::RR3_RELAY_SET_TOPIC))
@@ -264,6 +275,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                             &mut *servo_dev,
                             &cfg.servo,
                             low_gate.rr3_low_gate_is_blocked(),
+                            &cfg.intent.open_topics,
                         ) {
                             match r {
                                 Ok(intent::Rr3IntentOutcome::Relay(on, prev)) => {
@@ -345,14 +357,16 @@ fn rr3_handle_servo(
 }
 
 /// led/effect 点名：效果裁决 → 状态机切换 + 同步落电平（批I A-1：写失败折日志
-/// 不退——妆面件；时基由组合件单调时钟注入，批I A-2）→ 回 (应答体含生效/前效果, servo/relay 无)
+/// 不退——妆面件；时基由组合件单调时钟注入，批I A-2）→ 回 (应答体含生效/前效果, servo/relay 无)。
+/// `effects` = 本形态白名单子集（A-9：config 注入，非内联）。
 fn rr3_handle_led(
     led: &mut Rr3Led,
     gpio: &mut dyn Rr3GpioOut,
     args: &Value,
     now_ms: u64,
+    effects: &[Rr3LedEffect],
 ) -> Rr3CallOutcome {
-    let effect = rr3_led_parse_args(args)?;
+    let effect = rr3_led_parse_args(args, effects)?;
     let (applied, previous, level) = led.rr3_led_apply(now_ms, effect);
     gpio.set(level)
         .unwrap_or_else(|e| eprintln!("rr3-act-led: 写电平失败: {e}"));
@@ -423,20 +437,27 @@ pub fn rr3_servo_state_body(seq: u64, angle_deg: u16) -> Value {
     json!({ "seq": seq, "angle_deg": angle_deg })
 }
 
-/// led/effect 参数下钻：缺/非串在这里点名，白名单判定留件
-/// （`Rr3LedEffect::rr3_led_effect_parse`）。
-pub fn rr3_led_parse_args(args: &Value) -> Result<Rr3LedEffect, String> {
+/// led/effect 参数下钻：缺/非串在这里点名；契约值→枚举的映射留件
+/// （`Rr3LedEffect::rr3_led_effect_parse`），本形态子集判定用注入的 `effects`
+/// （A-9：白名单是数据，不再内联 on/off/blink）。
+pub fn rr3_led_parse_args(args: &Value, effects: &[Rr3LedEffect]) -> Result<Rr3LedEffect, String> {
     let Some(e) = args.get("effect") else {
-        return Err("缺 effect（on/off/blink）".into());
+        return Err(format!("缺 effect（{}）", rr3_led_effects_join(effects)));
     };
     let Some(s) = e.as_str() else {
         return Err(format!("effect 必须是字符串，收到 {e}"));
     };
     Rr3LedEffect::rr3_led_effect_parse(s)
-        .ok_or_else(|| format!("不认的灯效 {s:?}（白名单 on/off/blink）"))
+        .filter(|eff| effects.contains(eff))
+        .ok_or_else(|| {
+            format!(
+                "不认的灯效 {s:?}（本形态白名单 {}）",
+                rr3_led_effects_join(effects)
+            )
+        })
 }
 
-/// config.toml 解析：env 覆盖优先，缺省 manifest 同目录。三段各自点名缺字段。
+/// config.toml 解析：env 覆盖优先，缺省 manifest 同目录。四段各自点名缺字段。
 fn rr3_config_load(manifest_path: &str) -> Result<Rr3ActCfg, String> {
     let path = std::env::var(RR3_ACT_CONFIG_ENV).unwrap_or_else(|_| {
         std::path::Path::new(manifest_path)
@@ -450,18 +471,28 @@ fn rr3_config_load(manifest_path: &str) -> Result<Rr3ActCfg, String> {
     rr3_act_config_parse(&text)
 }
 
-/// 本模块 config 的汇总形状
-#[derive(Debug, Clone, Copy)]
+/// 本模块 config 的汇总形状（led/intent 带注入集合 → 去 Copy）
+#[derive(Debug, Clone)]
 struct Rr3ActCfg {
     servo: Rr3ServoCfg,
     led: Rr3LedCfg,
+    intent: Rr3IntentCfg,
     reflex: reflex::Rr3ReflexCfg,
 }
 
-/// config `[rr3-act.led]` 的形状
-#[derive(Debug, Clone, Copy)]
+/// config `[rr3-act.led]` 的形状（`effects` = 本形态灯效白名单子集，A-9）
+#[derive(Debug, Clone)]
 struct Rr3LedCfg {
     blink_period_ms: u64,
+    effects: Vec<Rr3LedEffect>,
+}
+
+/// config `[rr3-act.intent]` 的形状（`open_topics` = 意图执行面开放集，A-9）。
+/// 组合件读入后透传给 `intent.rs`——组合件层无 ops 校验机制（⑧-c 只扫
+/// `atoms/*/assemble.toml`），故本策略落 config 键而非装配清单 ops 槽。
+#[derive(Debug, Clone)]
+struct Rr3IntentCfg {
+    open_topics: Vec<String>,
 }
 
 /// TOML 文本 → Rr3ActCfg。手工下钻不引 serde derive：字段个位数，
@@ -482,6 +513,7 @@ fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     };
     let servo_sect = sect("servo")?.clone();
     let led_sect = sect("led")?.clone();
+    let intent_sect = sect("intent")?.clone();
     let reflex_sect = sect("reflex")?.clone();
     let range = servo_sect
         .get("angle_limit_deg")
@@ -506,6 +538,45 @@ fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     let loop_hz = u32::try_from(loop_hz_raw).map_err(|_| {
         format!("config [rr3-act.reflex] loop_hz={loop_hz_raw} 超出 u32 范围，拒 boot")
     })?;
+    // 灯效白名单子集（A-9）：数组逐元素必须是**在册契约值**，非在册值或非字符串
+    // 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态一条点名都不认（合法）
+    let effects_arr = led_sect
+        .get("effects")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "config [rr3-act.led] 缺 effects（灯效白名单数组）".to_string())?;
+    let mut effects = Vec::with_capacity(effects_arr.len());
+    for (i, e) in effects_arr.iter().enumerate() {
+        let s = e
+            .as_str()
+            .ok_or_else(|| format!("config [rr3-act.led] effects[{i}] 必须是字符串，收到 {e}"))?;
+        let eff = Rr3LedEffect::rr3_led_effect_parse(s).ok_or_else(|| {
+            format!(
+                "config [rr3-act.led] effects[{i}] 非在册灯效 {s:?}（在册值 {}）",
+                RR3_LED_EFFECT_VALUES.join("/")
+            )
+        })?;
+        effects.push(eff);
+    }
+    // 意图执行面开放集（A-9）：只认本模块**有执行臂**的在册意图主题
+    // （relay/set、servo/command），越界值逐条点名拒 boot（fail-closed）；空集合法
+    let open_arr = intent_sect
+        .get("open_topics")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "config [rr3-act.intent] 缺 open_topics（意图开放主题数组）".to_string())?;
+    let mut open_topics = Vec::with_capacity(open_arr.len());
+    for (i, t) in open_arr.iter().enumerate() {
+        let s = t.as_str().ok_or_else(|| {
+            format!("config [rr3-act.intent] open_topics[{i}] 必须是字符串，收到 {t}")
+        })?;
+        if s != servo::RR3_SERVO_COMMAND_TOPIC && s != relay::RR3_RELAY_SET_TOPIC {
+            return Err(format!(
+                "config [rr3-act.intent] open_topics[{i}] 非本模块可执行的意图主题 {s:?}（只认 {}/{}）",
+                relay::RR3_RELAY_SET_TOPIC,
+                servo::RR3_SERVO_COMMAND_TOPIC
+            ));
+        }
+        open_topics.push(s.to_string());
+    }
     Ok(Rr3ActCfg {
         servo: Rr3ServoCfg {
             angle_min_deg: u16::try_from(angle_min_deg).map_err(|_| bad_range())?,
@@ -515,7 +586,9 @@ fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
         },
         led: Rr3LedCfg {
             blink_period_ms: u64_of(&led_sect, "blink_period_ms", "led")?.max(1),
+            effects,
         },
+        intent: Rr3IntentCfg { open_topics },
         reflex: reflex::Rr3ReflexCfg {
             loop_hz,
             saturate_notice_ms: u64_of(&reflex_sect, "saturate_notice_ms", "reflex")?,
@@ -536,6 +609,11 @@ mod tests {
         }
     }
 
+    /// 仓内默认灯效白名单全集（三值）——下钻用例的统一实参基线
+    fn led_effects_all() -> Vec<Rr3LedEffect> {
+        vec![Rr3LedEffect::On, Rr3LedEffect::Off, Rr3LedEffect::Blink]
+    }
+
     /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
     #[test]
     fn config_parse_covers_repo_shape() {
@@ -547,6 +625,10 @@ state_min_interval_ms = 50
 
 [rr3-act.led]
 blink_period_ms = 500
+effects = ["on", "off", "blink"]
+
+[rr3-act.intent]
+open_topics = ["rr3-act/relay/set", "rr3-act/servo/command"]
 
 [rr3-act.reflex]
 loop_hz = 1000
@@ -558,6 +640,15 @@ saturate_notice_ms = 500
         assert_eq!(cfg.servo.move_timeout_ms, 800);
         assert_eq!(cfg.servo.state_min_interval_ms, 50);
         assert_eq!(cfg.led.blink_period_ms, 500);
+        assert_eq!(cfg.led.effects, led_effects_all(), "灯效白名单子集注入");
+        assert_eq!(
+            cfg.intent.open_topics,
+            vec![
+                "rr3-act/relay/set".to_string(),
+                "rr3-act/servo/command".to_string()
+            ],
+            "意图开放集注入"
+        );
         assert_eq!(cfg.reflex.loop_hz, 1000);
         assert_eq!(cfg.reflex.saturate_notice_ms, 500);
     }
@@ -567,7 +658,7 @@ saturate_notice_ms = 500
         let e = rr3_act_config_parse("").unwrap_err();
         assert!(e.contains("[rr3-act.servo]"), "缺段点名: {e}");
         let e = rr3_act_config_parse(
-            "[rr3-act.servo]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n",
+            "[rr3-act.servo]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\"]\n[rr3-act.intent]\nopen_topics = []\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n",
         )
         .unwrap_err();
         assert!(e.contains("angle_limit_deg"), "缺字段点名: {e}");
@@ -587,6 +678,10 @@ state_min_interval_ms = 50
 
 [rr3-act.led]
 blink_period_ms = 500
+effects = ["on"]
+
+[rr3-act.intent]
+open_topics = []
 
 [rr3-act.reflex]
 loop_hz = 5000000000
@@ -594,6 +689,52 @@ saturate_notice_ms = 500
 "#;
         let e = rr3_act_config_parse(text).unwrap_err();
         assert!(e.contains("loop_hz"), "越界点名: {e}");
+    }
+
+    /// A-9 fail-closed：灯效白名单子集与意图开放集逐条点名——缺键/类型错/
+    /// 越界值都拒 boot（空数组合法，另行覆盖）
+    #[test]
+    fn config_parse_rejects_bad_effects_and_open_topics() {
+        // 基座（四段齐备），按需替换 led.effects / intent.open_topics 行
+        let base = |led: &str, top: &str| {
+            format!(
+                "[rr3-act.servo]\nangle_limit_deg = [0, 180]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\n{led}\n[rr3-act.intent]\n{top}\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
+            )
+        };
+        // 缺 effects 键
+        let e = rr3_act_config_parse(&base("", "open_topics = []")).unwrap_err();
+        assert!(e.contains("effects"), "缺键点名: {e}");
+        // 非数组
+        let e = rr3_act_config_parse(&base("effects = 1", "open_topics = []")).unwrap_err();
+        assert!(e.contains("effects"), "非数组点名: {e}");
+        // 元素非字符串
+        let e = rr3_act_config_parse(&base("effects = [1]", "open_topics = []")).unwrap_err();
+        assert!(e.contains("effects[0]"), "元素类型点名: {e}");
+        // 越在册值
+        let e = rr3_act_config_parse(&base("effects = [\"pulse\"]", "open_topics = []")).unwrap_err();
+        assert!(e.contains("非在册灯效"), "越界值点名在册值: {e}");
+        // 缺 intent 段
+        let e = rr3_act_config_parse(
+            "[rr3-act.servo]\nangle_limit_deg = [0, 180]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\"]\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("[rr3-act.intent]"), "缺段点名: {e}");
+        // 缺 open_topics 键
+        let e = rr3_act_config_parse(&base("effects = [\"on\"]", "")).unwrap_err();
+        assert!(e.contains("open_topics"), "缺键点名: {e}");
+        // 非数组
+        let e = rr3_act_config_parse(&base("effects = [\"on\"]", "open_topics = 1")).unwrap_err();
+        assert!(e.contains("open_topics"), "非数组点名: {e}");
+        // 元素非字符串
+        let e = rr3_act_config_parse(&base("effects = [\"on\"]", "open_topics = [1]")).unwrap_err();
+        assert!(e.contains("open_topics[0]"), "元素类型点名: {e}");
+        // 越界主题（不在本模块执行臂内）
+        let e = rr3_act_config_parse(&base(
+            "effects = [\"on\"]",
+            "open_topics = [\"rr3-act/led/effect\"]",
+        ))
+        .unwrap_err();
+        assert!(e.contains("非本模块可执行"), "越界主题点名: {e}");
     }
 
     // ── 载荷组装与下钻用例（随 A-8 自件面迁入：件测"输入→结构体/判定"，
@@ -685,14 +826,32 @@ saturate_notice_ms = 500
         assert_eq!(v["angle_deg"], 135);
     }
 
-    /// led/effect 下钻：缺/非串/不认逐条点名（白名单判定在件面另有用例）
+    /// led/effect 下钻：缺/非串/不认逐条点名（A-9：白名单子集由注入实参给）
     #[test]
     fn led_parse_args_rejects_missing_non_string_and_unknown() {
-        let e = rr3_led_parse_args(&json!({})).unwrap_err();
+        let all = led_effects_all();
+        let e = rr3_led_parse_args(&json!({}), &all).unwrap_err();
         assert!(e.contains("effect"), "缺参数要点名: {e}");
-        let e = rr3_led_parse_args(&json!({"effect": 3})).unwrap_err();
+        let e = rr3_led_parse_args(&json!({"effect": 3}), &all).unwrap_err();
         assert!(e.contains("字符串"), "类型不符要点名: {e}");
-        let e = rr3_led_parse_args(&json!({"effect": "strobe"})).unwrap_err();
+        let e = rr3_led_parse_args(&json!({"effect": "strobe"}), &all).unwrap_err();
         assert!(e.contains("白名单"), "不认的值点名白名单: {e}");
+    }
+
+    /// A-9：注入子集收窄即行为改变——在册但不在子集内的值被拒，报本形态白名单
+    #[test]
+    fn led_parse_args_narrows_by_injected_subset() {
+        let only_on = [Rr3LedEffect::On];
+        assert_eq!(
+            rr3_led_parse_args(&json!({"effect": "on"}), &only_on).unwrap(),
+            Rr3LedEffect::On,
+            "子集内合法"
+        );
+        let e = rr3_led_parse_args(&json!({"effect": "blink"}), &only_on).unwrap_err();
+        assert!(e.contains("blink"), "被拒的值要点名: {e}");
+        assert!(e.contains("on"), "拒因要点名本形态白名单: {e}");
+        // 空子集：一条点名都不认（合法数据，运行期全拒）
+        let e = rr3_led_parse_args(&json!({"effect": "on"}), &[]).unwrap_err();
+        assert!(e.contains("(空)"), "空白名单点名为空: {e}");
     }
 }
