@@ -21,7 +21,8 @@
 //! 自足档本地守护输出行（起动态/喂拍/安全核触发-拒动，UART/RTT 行文法）落
 //! [`runtime::Rr3GuardBuf`]（0.0.5 批K H6）。
 //! 控制原语与安全核切片落 [`control`] 模块（批D₃）：限速门 / 低电边沿 / 饱和
-//! 检测 / 限位钳位，纯函数 + 注入时钟（裁定 5）。
+//! 检测 / 限位钳位，纯函数 + 注入时钟（裁定 5）。该切片已再下沉为叶子件 `rr-mech`
+//! （0.0.5 批M），本 crate 以 re-export 保持本路径逐字可用。
 //!
 //! 主承载层（std 客户端：UDS、线程、serde_json）不在这里——那是 `rr-bus` 的事；
 //! 本 crate 是它在裸金属目标上可复用的语义内核。
@@ -38,7 +39,10 @@ use alloc::vec::Vec;
 use rr_ipc::opcode;
 use rr_ipc::{Rr3Frame, Rr3Header, Rr3PayloadType, RR3_CONTRACT_SCHEMA_VERSION};
 
-pub mod control;
+// 控制原语与安全核已下沉为叶子件 rr-mech（0.0.5 批M 机制核再切片）：本 crate
+// 以 re-export 保 [`control`] 路径逐字不变，消费面（`rr_core::control::*`）零波及。
+// 下沉动机：板档固件须直接消费判定核而免于牵引总线栈（rr-core 依赖 rr-ipc）。
+pub use rr_mech::control;
 pub mod runtime;
 
 // ---------------------------------------------------------------------------

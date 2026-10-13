@@ -8,7 +8,7 @@
 | 对象 | 规则 | 示例 |
 |---|---|---|
 | 模块目录 / crate / 进程 / bin | `rr3-<域>` | `rr3-sense`、`rr3-brain`、`rr3-ctl`、`rr3-mkmod`、`rr3-sim`、`rr3-ota-ctl` |
-| 基座内部 crate（workspace 成员） | `rr-<设施名>`（无 3） | `rr-ipc`、`rr-bus`、`rr-hal`、`rr-registry`、`rr-ota` |
+| 基座内部 crate（workspace 成员） | `rr-<设施名>`（无 3） | `rr-ipc`、`rr-mech`、`rr-bus`、`rr-hal`、`rr-registry`、`rr-ota` |
 | Rust lib target（crate 真名） | 连字符转下划线 | `rr3_sense` |
 | Rust 跨 crate 导出自由函数 | `rr3_<域>_<动作>` | `rr3_frame_read()`、`rr3_body_encode()`（`rr-ipc` 导出，`rrd/src/conn.rs` 实际消费） |
 | Rust 导出类型 | `Rr3` 前缀 | `Rr3Header`、`Rr3StatusCode`（`rr-ipc/src/protocol/header.rs`）、`Rr3Frame`（`rr-ipc/src/transport/frame.rs`） |
