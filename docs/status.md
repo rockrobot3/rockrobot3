@@ -428,6 +428,16 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   （Mac CPU 温度/内存/IP/时间 1Hz 上屏，真板连发全 OK 回执 + 目视确认实时跳动）；
   开口帧同步教训登记 [conventions §2](process/conventions.md)（UART2 open 后首行指令被
   boot RX 毛刺残行污染，宿主脚本空行冲行规避）；
+- **0.0.5 增补轮五 批D 采集冒烟已过（2026-10-13，真板）**：INMP441 ×2 双麦 @ I2S0
+  （BCLK=25/WS=26/SD=27，L/R 时隙复用——甲 GND 乙 3V3）接入 [src/mic.rs](../tools/esp32-periph-base/src/mic.rs)
+  冒烟面（philips 16kHz 32bit stereo，16KB 线程纪律）。真板实录：实测 ~16.6kHz（I2S
+  时钟分频精度面，wav 头按实测写）；静音 rms 本底 ~34k/24bit，拍手+说话 A/B 分段
+  rms 抬至 45–68k、peak 冲 123k——幅度响应实锤；L==R ≤1%（双通道独立）。两处排障
+  实录在案：**`rx_enable()` 必须显式调**（esp-idf-hal 0.44.1 i2s.rs L803，驱动 new 后
+  不自动 enable，缺它 read() 永挂无 Err 无统计行）；外设 token/引脚 cross-thread move
+  需显式 `+ Send` bound（编译器实爆驱动补，非 unsafe impl）。余口：peak 低位 0x…0FF
+  结构化触顶疑 1bit 时隙错位（留 wav 真录音判据核）；921600 参数化 + 音频主题上行 +
+  宿主 wav 落盘 + DoA 出角 = 批D 后续小步。接线表落 [README 批D 节](../tools/esp32-periph-base/README.md)。
 - **0.0.5 第 IV 轮 MCP-0 契约级评审批（2026-10-12）**：P1 评审批开工门兑现——MCP-1
   `topics.toml` 29→30（append `rr3-brain/audio/tts_pcm` stream L2，载荷体逐字段复用
   `rr3-sense/audio/pcm` 已定形状，F-4 下行通路契约半边；与批C/批D 合成一次改表，批C/批D
