@@ -27,10 +27,11 @@
 //!   静默）= 线上断流，扫描救不了，转 ③。
 //!   ③ 断流重连——重开口 settle + AUDIO ON 续收（seq 重走/续走都如实记账：
 //!   板复位 `restarts`，续走空洞入 `gaps`）；握手 [`HANDSHAKE_TRIES`] 次重试、
-//!   每轮重开 fd（d4 run#2 实锤：宿主侧 USB RX 冻结 ~11s，重开 fd 是唯一捅法，
-//!   骑行期看门狗解武装）。
-//!   看门狗（逐片增量落盘 + 武装后 [`STALL`] 无新分片字节 → 补 wav 恢复头
-//!   exit(3)）是最外层兜底；只管武装后的收流期，重连/重同步期解武装不误触发。
+//!   每轮重开 fd（宿主侧 CP2102 RX 冻结数分钟内自愈、板面四轮洗冤，重开 fd
+//!   是宿主侧唯一捅法，骑行期看门狗解武装）。
+//!   落盘走写线程（读循环零磁盘 I/O，/dev/null 实验定案：逐片同步写刷是冻结
+//!   放大器）；看门狗（武装后 [`STALL`] 无新分片字节 → 补 wav 恢复头 exit(3)）
+//!   是最外层兜底；只管武装后的收流期，重连/重同步期解武装不误触发。
 //!
 //! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
 //! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=921600（板面批D② 落板档；
@@ -39,10 +40,11 @@
 //! （3/4 都先补恢复头保住已落盘数据再退）。
 
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Seek, SeekFrom, Write as _};
+use std::io::{BufWriter, Write as _};
+use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use rr_ipc::{
@@ -65,9 +67,9 @@ const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 开口 settle（CP2102 DTR/RTS 翻转复位板子的既定时序，批C 实锤）。
 const SETTLE: Duration = Duration::from_millis(1200);
 /// 停滞死线（看门狗）：**武装后的收流期**内无新分片字节即判停滞。分片节拍
-/// 128ms/片，10s ≈ 78 片空窗——正常流不可达；重连握手重试期（≈26s 骑行窗，
-/// d4 run#2 补定）与重同步窗口（1.6s）看门狗解武装不计停滞，否则长骑行必被
-/// 误杀；触发即实锤"武装收流中，分片字节 10s 未落盘"。
+/// 128ms/片，10s ≈ 78 片空窗——正常流不可达；重连握手重试期（≈90s 骑行窗）
+/// 与重同步窗口（1.6s）看门狗解武装不计停滞，否则长骑行必被误杀；触发即实锤
+/// "武装收流中，分片字节 10s 未确认入队"。
 const STALL: Duration = Duration::from_secs(10);
 /// 帧头 magic 小端线上字节（contracts/README.md 歧义裁定：字段值 0x41524531
 /// 小端存储 = 31 45 52 41 = "1ERA"——与 rr-ipc protocol::header 同值锚定，
@@ -89,12 +91,15 @@ const REPLY_TIMEOUT_MS: i32 = 3000;
 /// （线上断流），resync 返回 None 交主循环重连。数据在流时 256B 块 ~10ms 即满，
 /// 零读必然是真静默（连续计数，数据一恢复即清零续扫）。
 const RESYNC_ZERO_BAIL: u32 = 8;
-/// 重连握手重试次数（d4 run#2 实锤定案）：宿主侧 USB RX 路径冻结 ~11s——板→宿主
-/// 字节全无而宿主→板命令畅通（板面 seq=sent=460/drop=0 全程无辜，OFF/ON/OFF 三
-/// 接命令照单全收）；单次握手 2×3s 应答窗必挂。逐次**重开 fd** 是宿主侧唯一能
-/// 捅 USB 冻结的手段：3 次 ×（settle 1.2s + 2×3s）+ 2×2s 歇口 ≈ 26s 骑行窗；
-/// 骑行期看门狗解武装不计停滞（否则 STALL=10s 会误杀重试）。
-const HANDSHAKE_TRIES: u32 = 3;
+/// 重连握手重试次数（d4 系列实锤定案）：宿主侧 CP2102 RX 路径冻结——板→宿主字节
+/// 全无而宿主→板命令畅通（板面 seq=sent/drop=0 四轮洗冤）；/dev/null 决定性实验
+/// 证伪"落盘 flush 触发"根因论（零磁盘 I/O 仍 369s 冻结；磁盘 I/O 只是放大器：
+/// 有之 38/51s 即冻、无之 369s），自愈在宿主软件之外，逐次**重开 fd** 是唯一
+/// 捅法。run#3/nulltest 3 次重试（~26s 骑行窗）全败，自愈时长上限未知（run#3
+/// 冻结 ~01:05 → 次轮 ~01:15 起流已自愈，∈(26s, 11min]）——预算加码到 10 次
+/// ×（settle 1.2s + OFF/ON 应答 2×3s）+ 9×2s 歇口 ≈ 90s：窗内自愈则续收（冻结
+/// 空洞由 seq 对账如实记账，判据不虚报），仍不愈则 fail-honest exit(4)。
+const HANDSHAKE_TRIES: u32 = 10;
 /// 两次握手尝试之间的歇口（给宿主 USB 栈缓冲；每轮都重新 close/open fd）。
 const HANDSHAKE_RETRY_PAUSE: Duration = Duration::from_secs(2);
 
@@ -513,24 +518,34 @@ fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
 }
 
 /// fail-honest 退出（重连失败路径）：已落盘数据补恢复头保住，exit(4) 点名。
+/// data_len 用盘侧真相 [`WatchState::disk_bytes`]（写线程只在实际写透后推进，
+/// 进程即退时 BufWriter 未刷尾不虚计）；`FileExt::write_at` 位置写不动游标、
+/// 与写线程 payload 写无交叠（44B 头 @0 vs ≥44 偏移的数据），活线程下也安全。
 /// （看门狗 exit(3) 同款恢复头逻辑——两路独立小段，不抽象共享。）
-fn bail_with_recovery(out_path: &std::path::Path, total_bytes: u64, watch: &WatchState) -> ! {
-    let data_len = total_bytes as u32;
+fn bail_with_recovery(out_path: &std::path::Path, watch: &WatchState) -> ! {
+    let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
     let rate = watch.rate.load(Ordering::Acquire);
-    if let Err(e) = OpenOptions::new().write(true).open(out_path).and_then(|mut f| {
-        f.seek(SeekFrom::Start(0))?;
-        f.write_all(&wav_header(data_len, 2, rate, 16))
-    }) {
+    let head = wav_header(data_len, 2, rate, 16);
+    if let Err(e) = OpenOptions::new()
+        .write(true)
+        .open(out_path)
+        .and_then(|f| f.write_all_at(&head, 0))
+    {
         eprintln!("[rec] 恢复头补写失败 {}: {e}", out_path.display());
     }
     std::process::exit(4);
 }
 
-/// 看门狗共享账（主线程逐片推进，看门狗线程只读）：停滞判据 = 已落盘字节不再
-/// 增长（原始字节到达≠有分片——失步垃圾流也算死流，只认可落盘的分片）。
+/// 看门狗共享账（读线程推进 `ingested`/`rate`，写线程推进 `disk_bytes`，看门狗
+/// 线程只读）：停滞判据 = 已确认入队字节不再增长（原始字节到达≠有分片——失步
+/// 垃圾流也算死流，只认过了事件门的分片）。落盘线程化（d4 /dev/null 实验定案：
+/// 读循环零磁盘 I/O）后账拆**流侧/盘侧**双真相——`ingested` 给看门狗判停滞，
+/// `disk_bytes` 给恢复头报实际写透字节数（写线程 flush 后推进，未刷尾不虚计）。
 struct WatchState {
-    /// 已落盘 PCM 字节（逐片 flush 后如实推进）。
-    bytes: AtomicU64,
+    /// 读线程已确认交给写线程的 PCM 字节（流侧真相；看门狗停滞判据）。
+    ingested: AtomicU64,
+    /// 写线程已写透落盘的 PCM 字节（盘侧真相；恢复头 data_len 事实源）。
+    disk_bytes: AtomicU64,
     /// 实测采样率（逐片刷新：frames/elapsed；不足 0.5s 测时标称）。
     rate: AtomicU32,
     /// AUDIO ON 应答后武装（武装前不计时——开口 settle/复位 banner 阶段静默合法）。
@@ -539,17 +554,17 @@ struct WatchState {
 
 /// 长流楔死看门狗（收流端策略面，d4 600s 实锤的修复）。
 ///
-/// 机理：rr-ipc uart 读 VMIN=1/VTIME=0 纯阻塞，宿主/CP2102 驱动层丢字节后
-/// 帧层等幻影帧尾永不返回（第一轮 600s 稳态跑：板面 seq=9182 sent=9182
-/// drop=0 全程健康，宿主 `rr3_recv_buf` 楔死 8 分钟无退出）。本线程每 500ms
-/// 查推进：武装后 [`STALL`] 无新分片字节 → 补 wav 恢复头（data_len=已落盘
-/// 字节）→ exit(3)。fail-honest：已收数据保得住，停滞事实打得响。
+/// 机理：宿主/CP2102 驱动层丢字节后帧层等幻影帧尾永不返回（第一轮 600s 稳态
+/// 跑：板面 seq=9182 sent=9182 drop=0 全程健康，宿主 `rr3_recv_buf` 楔死 8
+/// 分钟无退出）。本线程每 500ms 查推进：武装后 [`STALL`] 无新分片字节 → 补
+/// wav 恢复头（data_len=盘侧写透字节）→ exit(3)。fail-honest：已收数据保得
+/// 住，停滞事实打得响。
 fn watchdog_run(w: Arc<WatchState>, out: String) {
     let mut last_seen = 0u64;
     let mut last_move = Instant::now();
     loop {
         std::thread::sleep(Duration::from_millis(500));
-        let nb = w.bytes.load(Ordering::Acquire);
+        let nb = w.ingested.load(Ordering::Acquire);
         if nb != last_seen {
             last_seen = nb;
             last_move = Instant::now();
@@ -562,18 +577,49 @@ fn watchdog_run(w: Arc<WatchState>, out: String) {
         if last_move.elapsed() < STALL {
             continue;
         }
+        let disk = w.disk_bytes.load(Ordering::Acquire);
         eprintln!(
-            "[rec] ✗ 收流停滞 ≥{STALL:?} 无新分片字节（楔死防护触发）：已落盘 {last_seen}B，补恢复头后退出"
+            "[rec] ✗ 收流停滞 ≥{STALL:?} 无新分片字节（楔死防护触发）：入队 {last_seen}B/盘侧 {disk}B，补恢复头后退出"
         );
-        let data_len = last_seen as u32;
+        let data_len = disk as u32;
         let rate = w.rate.load(Ordering::Acquire);
-        if let Err(e) = OpenOptions::new().write(true).open(&out).and_then(|mut f| {
-            f.seek(SeekFrom::Start(0))?;
-            f.write_all(&wav_header(data_len, 2, rate, 16))
-        }) {
+        let head = wav_header(data_len, 2, rate, 16);
+        if let Err(e) = OpenOptions::new()
+            .write(true)
+            .open(&out)
+            .and_then(|f| f.write_all_at(&head, 0))
+        {
             eprintln!("[rec] 恢复头补写失败 {out}: {e}");
         }
         std::process::exit(3);
+    }
+}
+
+/// 写线程（落盘独占面）：占位头 → 逐片写透（write_all + flush，崩溃面数据风险
+/// 与旧逐片同步落盘等价）→ 通道关闭即收兵退出。错误即整进程退（fail-honest，
+/// 不带病续跑冒领数据）；`disk_bytes` 只在实际写透后推进——恢复头 data_len 的
+/// 事实源。最终头（write_at(0)）由主线程 join 后补，无并发窗口。无界通道：写
+/// 线程被磁盘反压时分片在内存排队（87.5KB/s 流速下秒级尖峰至多 MB 级），读循环
+/// 不被磁盘 I/O 拖住（冻结放大器解耦的落点）。
+fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>) {
+    let mut w = BufWriter::new(file);
+    // 占位头（data_len=0）：正常收兵与看门狗/重连失败两路都回头 write_at(0) 补
+    // 真头。**立即 flush**：磁盘恒有合法头，恢复路径不依赖 BufWriter 析构刷出。
+    if let Err(e) = w
+        .write_all(&wav_header(0, 2, 16000, 16))
+        .and_then(|()| w.flush())
+    {
+        eprintln!("rr3-audio-rec: wav 占位头写入失败: {e}");
+        std::process::exit(1);
+    }
+    let mut written = 0u64;
+    for buf in rx {
+        if let Err(e) = w.write_all(&buf).and_then(|()| w.flush()) {
+            eprintln!("rr3-audio-rec: wav 写线程写失败: {e}");
+            std::process::exit(1);
+        }
+        written += buf.len() as u64;
+        watch.disk_bytes.store(written, Ordering::Release);
     }
 }
 
@@ -600,26 +646,30 @@ fn main() {
         std::process::exit(1);
     }
 
-    // 帧收流循环：dst/Event/topic/b64 四道门 → 逐片增量落盘 + seq 对账。
-    // 增量落盘是看门狗保数据的前提：停滞即整进程退，内存里攒的数据带不走。
+    // 帧收流循环：dst/Event/topic/b64 四道门 → 逐片交写线程落盘 + seq 对账。
+    // 落盘线程化（d4 /dev/null 决定性实验定案）：读循环零磁盘 I/O——每片同步
+    // 写刷的延迟尖峰把冻结概率放大 ~7 倍（38/51s vs 369s），通道解耦后尖峰不再
+    // 进读循环；看门狗保数据前提不变（停滞即整进程退，盘侧逐片写透）。
     let out_path = args.out.clone();
-    let mut wav = match File::create(&out_path).map(BufWriter::new) {
-        Ok(w) => w,
+    let wav_file = match File::create(&out_path) {
+        Ok(f) => f,
         Err(e) => {
             eprintln!("rr3-audio-rec: wav 建档失败 {}: {e}", out_path.display());
             std::process::exit(1);
         }
     };
-    // 占位头（data_len=0）：正常收兵与看门狗停滞两路都回头 seek(0) 补真头。
-    if let Err(e) = wav.write_all(&wav_header(0, 2, 16000, 16)) {
-        eprintln!("rr3-audio-rec: wav 占位头写入失败: {e}");
-        std::process::exit(1);
-    }
     let watch = Arc::new(WatchState {
-        bytes: AtomicU64::new(0),
+        ingested: AtomicU64::new(0),
+        disk_bytes: AtomicU64::new(0),
         rate: AtomicU32::new(16000),
         armed: AtomicBool::new(false),
     });
+    // 写线程独占 wav 文件（占位头/逐片写透全在此线程）；mpsc 解耦见 writer_run。
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let writer_thread = {
+        let w = Arc::clone(&watch);
+        std::thread::spawn(move || writer_run(wav_file, rx, w))
+    };
     {
         let w = Arc::clone(&watch);
         let path = out_path.clone();
@@ -662,13 +712,19 @@ fn main() {
                         let broke = (tracker.gaps, tracker.restarts) != account_before;
                         chunks += 1;
                         err_streak = 0;
-                        // 逐片增量落盘（看门狗保数据的前提）+ 看门狗账推进
-                        if let Err(e) = wav.write_all(&chunk.samples).and_then(|()| wav.flush()) {
-                            eprintln!("rr3-audio-rec: wav 增量写失败: {e}");
-                            std::process::exit(1);
+                        // DoA 在读循环侧算（纯计算）；分片移交写线程（零磁盘 I/O）
+                        if args.doa {
+                            if let Some(line) = doa.feed(&chunk.samples) {
+                                println!("{line}");
+                            }
                         }
-                        total_bytes += chunk.samples.len() as u64;
-                        watch.bytes.store(total_bytes, Ordering::Release);
+                        let nsamp = chunk.samples.len();
+                        if tx.send(chunk.samples).is_err() {
+                            eprintln!("rr3-audio-rec: 写线程通道断开（写线程已亡）");
+                            bail_with_recovery(&out_path, &watch);
+                        }
+                        total_bytes += nsamp as u64;
+                        watch.ingested.store(total_bytes, Ordering::Release);
                         let frames = total_bytes / 4;
                         // 连续段实测率：断档/重启即重新锚定（空洞不摊进分母）
                         if broke || need_reanchor || rate_anchor.is_none() {
@@ -695,11 +751,6 @@ fn main() {
                                 tracker.restarts,
                                 frame.header.src_task
                             );
-                        }
-                        if args.doa {
-                            if let Some(line) = doa.feed(&chunk.samples) {
-                                println!("{line}");
-                            }
                         }
                     }
                     Err(e) => {
@@ -775,7 +826,7 @@ fn main() {
                     }
                     if let Some(e) = hs_err {
                         eprintln!("[rec] 重连握手 {HANDSHAKE_TRIES} 次全败: {e}");
-                        bail_with_recovery(&out_path, total_bytes, &watch);
+                        bail_with_recovery(&out_path, &watch);
                     }
                     watch.armed.store(true, Ordering::Release);
                     fs = FrameStream::new(&mut conn);
@@ -791,10 +842,16 @@ fn main() {
     drop(fs);
     let _ = conn.write_all(b"AUDIO OFF\n");
     watch.armed.store(false, Ordering::Release);
+    // 关通道让写线程排空收兵（逐片已 flush，无尾数据）；写线程异常即整进程退，
+    // 不冒领成功。
+    drop(tx);
+    if let Err(e) = writer_thread.join() {
+        eprintln!("rr3-audio-rec: 写线程异常退出: {e:?}");
+        std::process::exit(1);
+    }
 
     if total_bytes == 0 {
         eprintln!("[rec] 0 分片（查板面 AUDIO ON 应答/I2S 面波特率档）");
-        drop(wav);
         let _ = std::fs::remove_file(&out_path); // 占位空壳不留垃圾
         std::process::exit(1);
     }
@@ -818,11 +875,11 @@ fn main() {
         }
         None => nominal_rate,
     };
-    let data_len = total_bytes as u32;
-    match wav
-        .seek(SeekFrom::Start(0))
-        .and_then(|_| wav.write_all(&wav_header(data_len, 2, measured, 16)))
-        .and_then(|()| wav.flush())
+    let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
+    match OpenOptions::new()
+        .write(true)
+        .open(&out_path)
+        .and_then(|f| f.write_all_at(&wav_header(data_len, 2, measured, 16), 0))
     {
         Ok(()) => println!(
             "[rec] ✓ {}：chunks={chunks} gaps={} restarts={} err={errors} resyncs={resyncs} reconnects={reconnects} frames={frames_total} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
