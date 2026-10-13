@@ -149,3 +149,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: 全链闭环演练（构建 + rr3-sim --chain）
         run: bash tools/ci/sim-chain.sh
+
+  # 点验矩阵出数入口（0.0.5 批M MC-10 L-1）：`tools/ci/matrix.sh` 此前**无任何调用方**
+  # （不在 check.sh、不在 ci.yml）——本 job 让它真跑并出一行矩阵（architecture §12.6
+  # 七列 / H3），产出**人工搬进** docs/status.md 矩阵行。出数 ≠ 判据：判据真源仍是
+  # tools/ci/*.sh 与 check.sh 十步，矩阵只如实记"本环境实跑了什么、跑出什么"。
+  # 非 --strict：⑦ 时序达标无固定载体（E4 真板专属，云 runner 是共享 x86、时间非硬件
+  # 时间），默认口径如实记"未跑"不冒领 PASS、退 0；矩阵出现 FAIL 列时退 1（job 红）。
+  matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: 点验矩阵出数（bash tools/ci/matrix.sh）
+        run: bash tools/ci/matrix.sh
