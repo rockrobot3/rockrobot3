@@ -12,4 +12,7 @@ handles = [
 # blink 周期 ← config.toml [rr3-act.led]（§3；代码再 .max(1)）
 ops = [
   { slot = "blink_period_ms", src_key = "rr3-act.led.blink_period_ms" },
+  # 灯效白名单子集 ← config.toml [rr3-act.led] effects（A-9：本形态接受哪个子集—
+  # 值不许改、集合可注入，"某形态不开 blink"= 改数据不改码）
+  { slot = "led_effects", src_key = "rr3-act.led.effects" },
 ]

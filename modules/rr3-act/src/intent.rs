@@ -4,10 +4,11 @@
 //!
 //! ① 归属门：topic ∈ 本模块 exposes（不越权——发布侧 `rr3_reg_publish_check`
 //!    四道门的精神在订阅执行面的对偶：别人的主题一个不碰）；
-//! ② 开放门：topic ∈ 意图执行面已开放集（`relay/set` 0.0.3 T3 起开放；
-//!    `servo/command` 批F2 随判向-转向编排开放——判据 8 的"注入'向左/向右'
-//!    类意图后舵机转到对应档位"走这条执行路；led 仍封闭，扩面随真实需要
-//!    append，不预先占位）。
+//! ② 开放门：topic ∈ 意图执行面**开放集**——该集由 config `[rr3-act.intent]
+//!    open_topics` 注入、组合件读入透传（0.0.5 批M MC-10 A-9："某形态不开某令"
+//!    = 改数据不改码）。开放集外的**已归属**主题（led/effect）到此拒执行；开放
+//!    集只认本模块**有执行臂**的在册主题（relay/set、servo/command），boot 时已
+//!    fail-closed 校验（越界值拒 boot）。
 //!
 //! 执行失败（参数裁决拒 / HAL 写失败）是**业务性失败**，逐条折日志继续收下一帧
 //! （事件语义无应答回路）；传输性失败（发布 relay/state、servo/state 写不出去）
@@ -46,19 +47,33 @@ pub enum Rr3IntentOutcome {
 ///
 /// `low_blocked` = 低电禁动闸门闭锁（MC-5 §20 ② ②）：**执行面**（servo/relay）
 /// 与 RPC 路同判拒动；**妆面 led 不受辖**（仍走开放门=在册未开放的既有口径）。
+/// `open_topics` = 意图执行面开放集（A-9，config 注入）：只有列在其中的**已归属**
+/// 主题才进入执行臂；未列（含 led/effect）一律由开放门拒执行。
 pub fn rr3_intent_actions_handle(
     actions: &Value,
     gpio: &mut dyn rr_hal::Rr3GpioOut,
     servo: &mut dyn rr_hal::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
     low_blocked: bool,
+    open_topics: &[String],
 ) -> Vec<Result<Rr3IntentOutcome, String>> {
     let Some(list) = actions.as_array() else {
         return vec![Err(format!("actions 必须是数组，收到 {actions}"))];
     };
     list.iter()
-        .map(|item| rr3_intent_action_handle(item, gpio, servo, servo_cfg, low_blocked))
+        .map(|item| {
+            rr3_intent_action_handle(item, gpio, servo, servo_cfg, low_blocked, open_topics)
+        })
         .collect()
+}
+
+/// 开放集展示串（`relay/set/servo/command`；拒因文案的唯一渲染点）。空集显示
+/// 为 `(空)`——"某形态意图执行面全关"是合法数据，不是错。
+fn rr3_open_topics_join(open_topics: &[String]) -> String {
+    if open_topics.is_empty() {
+        return "(空)".to_string();
+    }
+    open_topics.join("/")
 }
 
 /// 单条动作：形状裁决 → 两道门 → 执行（低电闸门只辖执行面）
@@ -68,6 +83,7 @@ fn rr3_intent_action_handle(
     servo: &mut dyn rr_hal::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
     low_blocked: bool,
+    open_topics: &[String],
 ) -> Result<Rr3IntentOutcome, String> {
     let topic = item
         .get("topic")
@@ -78,6 +94,14 @@ fn rr3_intent_action_handle(
         .ok_or_else(|| format!("动作缺 args（对象），收到 {item}"))?;
     if !EXPOSED.contains(&topic) {
         return Err(format!("越权拒执行 {topic}：不在本模块 exposes"));
+    }
+    // 开放门（A-9）：开放集由 config 注入（组合件读入透传），不再硬编码 match；
+    // 已归属但不在开放集的主题（led/effect）到此拒执行。
+    if !open_topics.iter().any(|t| t.as_str() == topic) {
+        return Err(format!(
+            "已归属但意图执行面未开放 {topic}（当前开放集 {}）",
+            rr3_open_topics_join(open_topics)
+        ));
     }
     match topic {
         RR3_RELAY_SET_TOPIC => {
@@ -105,8 +129,9 @@ fn rr3_intent_action_handle(
                 .map_err(|e| format!("舵机写入失败: {e}"))?;
             Ok(Rr3IntentOutcome::Servo(angle))
         }
+        // 开放集已 boot 校验只含上述两条执行臂主题；此臂为配置/执行面不一致的兜底
         other => Err(format!(
-            "已归属但意图执行面未开放 {other}（当前只认 {RR3_RELAY_SET_TOPIC}/{RR3_SERVO_COMMAND_TOPIC}）"
+            "意图开放集含 {other} 但本模块无对应执行臂（配置与执行面不一致）"
         )),
     }
 }
@@ -129,6 +154,14 @@ mod tests {
     /// 低电闸门开放态（既有用例的统一第 5 实参：不闭锁——两路对拍基线）
     const LOW_OPEN: bool = false;
 
+    /// 仓内默认开放集（relay/set + servo/command）——既有用例的统一第 6 实参基线
+    fn open_all() -> Vec<String> {
+        vec![
+            RR3_RELAY_SET_TOPIC.to_string(),
+            RR3_SERVO_COMMAND_TOPIC.to_string(),
+        ]
+    }
+
     #[test]
     fn valid_relay_action_drives_gpio() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
@@ -139,6 +172,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &open_all(),
         );
         assert_eq!(
             out,
@@ -153,6 +187,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &open_all(),
         );
         assert_eq!(out, vec![Ok(Rr3IntentOutcome::Relay(false, true))]);
         assert!(!gpio.rr3_sim_gpio_level(), "断开必须落到 GPIO 电平");
@@ -174,6 +209,7 @@ mod tests {
                 &mut servo,
                 &servo_cfg(),
                 LOW_OPEN,
+                &open_all(),
             );
             assert_eq!(out, vec![Ok(want)], "deg={deg}");
         }
@@ -197,6 +233,7 @@ mod tests {
                 &mut servo,
                 &servo_cfg(),
                 false,
+                &open_all(),
             );
             assert!(out[0].is_err(), "非法 servo 动作必须拒: {out:?}");
         }
@@ -213,6 +250,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &open_all(),
         );
         let err = out[0].as_ref().unwrap_err();
         assert!(err.contains("越权"), "归属门拒因要点名越权: {err}");
@@ -225,20 +263,78 @@ mod tests {
     fn exposed_but_closed_topic_is_rejected_by_open_gate() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
-        // led/effect 仍封闭（扩面随真实需要 append）；relay/servo 已开放
+        // led/effect 未列开放集（本形态不开 led 意图路）；relay/servo 在开放集内
         let out = rr3_intent_actions_handle(
             &json!([{ "topic": "rr3-act/led/effect", "args": {} }]),
             &mut gpio,
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &open_all(),
         );
         let err = out[0].as_ref().unwrap_err();
         assert!(
             err.contains("未开放"),
-            "归属但在册未开放的动作要由开放门拒: {err}"
+            "归属但不在开放集的动作要由开放门拒: {err}"
         );
         assert!(err.contains("relay/set"), "拒因点名当前开放集: {err}");
+    }
+
+    /// A-9 核心证据：注入开放集**收窄**即执行面收窄——只开 relay 时 servo/command
+    /// 被开放门拒、不落角；空开放集时已归属主题一律拒（改数据不改码）。
+    #[test]
+    fn injected_open_set_narrows_intent_surface() {
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
+        // 只开 relay/set：servo/command 被开放门拒
+        let only_relay = vec![RR3_RELAY_SET_TOPIC.to_string()];
+        let out = rr3_intent_actions_handle(
+            &json!([{"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}}]),
+            &mut gpio,
+            &mut servo,
+            &servo_cfg(),
+            LOW_OPEN,
+            &only_relay,
+        );
+        let err = out[0].as_ref().unwrap_err();
+        assert!(err.contains("未开放"), "收窄后 servo 必须被开放门拒: {err}");
+        assert_eq!(servo.rr3_sim_servo_angle(), 90, "未开放主题不得落角");
+        // 空开放集：relay 也被拒（拒因点名为空）
+        let out = rr3_intent_actions_handle(
+            &json!([{"topic": "rr3-act/relay/set", "args": {"on": true}}]),
+            &mut gpio,
+            &mut servo,
+            &servo_cfg(),
+            LOW_OPEN,
+            &Vec::new(),
+        );
+        let err = out[0].as_ref().unwrap_err();
+        assert!(err.contains("未开放"), "空开放集一律拒: {err}");
+        assert!(err.contains("(空)"), "拒因点名开放集为空: {err}");
+        assert!(!gpio.rr3_sim_gpio_level(), "空开放集不得碰 GPIO");
+    }
+
+    /// 开放集含本模块无执行臂的主题（配置/执行面不一致）→ 兜底臂点名，不静默
+    /// 放行（boot 校验挡住这种配置，本臂是纵深防御）
+    #[test]
+    fn open_set_without_exec_arm_is_named() {
+        let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+        let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
+        let with_led = vec![RR3_LED_EFFECT_TOPIC.to_string()];
+        let out = rr3_intent_actions_handle(
+            &json!([{"topic": "rr3-act/led/effect", "args": {}}]),
+            &mut gpio,
+            &mut servo,
+            &servo_cfg(),
+            LOW_OPEN,
+            &with_led,
+        );
+        let err = out[0].as_ref().unwrap_err();
+        assert!(
+            err.contains("无对应执行臂"),
+            "开放集含无臂主题要点名不一致: {err}"
+        );
+        assert!(!gpio.rr3_sim_gpio_level(), "被拒动作不得碰 GPIO");
     }
 
     #[test]
@@ -246,8 +342,14 @@ mod tests {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         // actions 不是数组
-        let out =
-            rr3_intent_actions_handle(&json!("开灯"), &mut gpio, &mut servo, &servo_cfg(), false);
+        let out = rr3_intent_actions_handle(
+            &json!("开灯"),
+            &mut gpio,
+            &mut servo,
+            &servo_cfg(),
+            false,
+            &open_all(),
+        );
         assert!(out[0].as_ref().unwrap_err().contains("数组"));
         // 元素缺 topic / 缺 args
         let out = rr3_intent_actions_handle(
@@ -256,6 +358,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             false,
+            &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("topic"));
         let out = rr3_intent_actions_handle(
@@ -264,6 +367,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("args"));
         // 参数裁决照常把门（非真布尔）
@@ -273,6 +377,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("布尔"));
         assert!(!gpio.rr3_sim_gpio_level(), "全部被拒，GPIO 不得变化");
@@ -293,6 +398,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &open_all(),
         );
         assert_eq!(out.len(), 3);
         assert_eq!(out[0], Ok(Rr3IntentOutcome::Relay(true, false)));
@@ -305,7 +411,7 @@ mod tests {
     /// MC-5 低电禁动闸门·intent 路两腿对拍（§20 ② ②）：
     /// 腿一·确定性——同一闭锁输入两跑逐条相等；
     /// 腿二·正确性——执行面（servo/relay）拒动且拒因点名"低电禁动"，
-    /// 妆面（led）不因低电禁动而拒（仍走开放门=在册未开放），解禁后照常执行。
+    /// 妆面（led）不因低电禁动而拒（仍走开放门=未列开放集），解禁后照常执行。
     #[test]
     fn low_gate_blocks_effector_not_face_on_intent_path() {
         let args = json!([
@@ -318,8 +424,14 @@ mod tests {
         let run = |low_blocked: bool| {
             let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
             let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
-            let out =
-                rr3_intent_actions_handle(&args, &mut gpio, &mut servo, &servo_cfg(), low_blocked);
+            let out = rr3_intent_actions_handle(
+                &args,
+                &mut gpio,
+                &mut servo,
+                &servo_cfg(),
+                low_blocked,
+                &open_all(),
+            );
             (out, gpio.rr3_sim_gpio_level(), servo.rr3_sim_servo_angle())
         };
         assert_eq!(run(true), run(true), "闭锁态两跑必须逐拍相等");
@@ -339,7 +451,7 @@ mod tests {
         );
         assert!(
             blocked[2].is_err() && blocked[2].as_ref().unwrap_err().contains("未开放"),
-            "led 不因低电被禁：拒因是开放门（在册未开放），非低电禁动: {blocked:?}"
+            "led 不因低电被禁：拒因是开放门（未列开放集），非低电禁动: {blocked:?}"
         );
         assert!(!gpio_lvl, "闭锁：relay 不得落到 GPIO");
         assert_eq!(servo_deg, 90, "闭锁：舵机不得动");

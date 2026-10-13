@@ -11,6 +11,16 @@ state_min_interval_ms = 50 # servo/state 限速：两次发布的最小间隔
 
 [rr3-act.led]
 blink_period_ms = 500     # blink 一个亮灭周期，亮/灭各占一半
+# 灯效白名单（0.0.5 批M MC-10 A-9）：本形态接受哪个**子集**——值本身
+# on/off/blink 是契约字面量（件侧映射不许改），可注入的是集合。非在册值
+# 或非字符串逐条拒 boot（fail-closed）；键在而没有元素 = 本形态一条点名都不认。
+effects = ["on", "off", "blink"]
+
+[rr3-act.intent]
+# 意图执行面开放集（A-9）：从件内 match 硬编码迁出，改数据不改码——某形态
+# 若不经 intent 路执行某令，从此表删一条即可。只认本模块可经 intent 执行的
+# 主题（relay/set、servo/command）；在册主题外的值拒 boot。缺键拒 boot。
+open_topics = ["rr3-act/relay/set", "rr3-act/servo/command"]
 
 [rr3-act.reflex]
 loop_hz = 1000            # 闭环频率；永不进总线（ADR-0007 裁定 1）
