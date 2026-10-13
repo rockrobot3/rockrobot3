@@ -517,6 +517,7 @@ dependencies = [
  "esp-idf-hal",
  "esp-idf-sys",
  "rr-ipc",
+ "rr-mech",
  "serde_json",
 ]
 
@@ -979,6 +980,10 @@ dependencies = [
 
 [[package]]
 name = "rr-ipc"
+version = "0.0.1"
+
+[[package]]
+name = "rr-mech"
 version = "0.0.1"
 
 [[package]]

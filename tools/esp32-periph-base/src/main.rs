@@ -93,7 +93,7 @@ use crate::board::{
 use crate::commands::cmd_loop;
 use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
 use crate::periph::{CtlUart, RtPeriph};
-use crate::power::RailMonitor;
+use crate::power::{RailJudge, RailMonitor, RailTier};
 use crate::runtime::runtime_loop;
 use crate::state::{lock_bus, push_job, Bus, Job, PeriphState};
 
@@ -254,6 +254,8 @@ fn main() {
         contrast_idx: 0,
         rail,
         next_rail_ms: 0,
+        rail_judge: RailJudge::new(),
+        rail_tier: RailTier::Ok,
     };
     let ctl = CtlUart { uart };
     let bus = Arc::new(Mutex::new(Bus {

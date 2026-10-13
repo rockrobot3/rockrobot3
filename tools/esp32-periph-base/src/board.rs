@@ -145,10 +145,10 @@ pub(crate) const LEDC_RES_BITS: Resolution = Resolution::Bits14;
 //
 // 根因链（真板实锤）：OLED 大面亮点帧 + 舵机保持电流抢同一条 5V 轨 → 轨压跌落
 // → ESP32 BOD 复位。此前这条轨**无任何观测手段**——欠压既看不见、也响应不了。
-// 本组常量是板侧唯一策略面（引脚/分压比/采样节拍/ADC 档位）；机制（读 ADC 一次 +
-// 按分压比换算回轨压 mV）在 [`crate::power`]，阈值判定核见同批步3。**机制与策略
-// 分离**：换板只动本文件，power.rs 零板名。分压测点接线后与万用表对拍（≤2%）再
-// 回填标定——**无真板证据前不 claim**。
+// 本组常量是板侧唯一策略面（引脚/分压比/采样节拍/ADC 档位/欠压阈值/接闸）；机制
+// （读 ADC 一次 + 按分压比换算回轨压 mV + 双阈值迟滞判定核）在 [`crate::power`]。
+// **机制与策略分离**：换板只动本文件，power.rs 零板名。分压测点接线后与万用表
+// 对拍（≤2%）再回填标定——**无真板证据前不 claim**。
 
 /// 5V 轨分压测点引脚（ADC1_CH6，input-only 档，见文件头引脚预算）。**数字真值**
 /// 只作观测打印与接线表锚点；驱动装配用 `peripherals.pins.gpio34`（具名类型，
@@ -167,6 +167,24 @@ pub(crate) const ADC_ATTEN: attenuation::adc_atten_t = attenuation::DB_11;
 pub(crate) const ADC_RESOLUTION: AdcResolution = AdcResolution::Resolution12Bit;
 /// ADC 标定开关（true：`read()` 直接回 mV，免手算 raw→mV 曲线）。
 pub(crate) const ADC_CALIBRATION: bool = true;
+
+// ---- 双阈值迟滞 + 接闸（方案A Q2 步3）-----------------------------------------
+// 档位判定是**双阈值电平分类**（[`crate::power::tier_of`]），越阈事件是**迟滞边沿**
+// （[`rr_mech::control::Rr3LowEdge`] 两实例，一核两条线）。重度 < 轻度。
+// **占位值随票 §8-Q5 明写"待标定"**——真板接分压测点后按实测轨压对拍回填。
+
+/// 5V 轨**轻度**欠压阈值（mV）：跌破 → 执行面维持**串行降级**（pan→整定→tilt，
+/// 削峰值电流）。**占位值待标定**（BOD 关心带 ~4.3–5.2V）。
+pub(crate) const RAIL_MILD_MV: u16 = 4_600;
+/// 5V 轨**重度**欠压阈值（mV）：跌破 → 执行面**拒动**（MC-5 语义：执行面拒动、
+/// 妆面不禁、回阈解禁不自动重放）。须 < [`RAIL_MILD_MV`]。**占位值待标定**。
+pub(crate) const RAIL_SEVERE_MV: u16 = 4_400;
+/// **接闸**（标定闸）：`false` = 分压比/阈值仍是占位、**未真板标定**——档位照算照看
+/// （`INFO rail_tier`）、越阈照打站记数，但**不驱动执行面拒动**。理由：GPIO34 测点
+/// **非必接线**，浮空/未标定下 ADC 可能读到近 0 的**伪欠压**，若直接接闸会把正常运动
+/// 误判打死（把一台能跑的板子变砖的回归 > 收益）。真板接分压测点、与万用表对拍
+/// （≤2%）回填分压比与阈值后置 `true` 接闸。**无真板证据前不接闸、不 claim**。
+pub(crate) const RAIL_GATE_ARMED: bool = false;
 
 /// 角度 → duty ticks（线性 0–180 ↦ 410–2048；入参已由调用方 clamp 0–180）。
 pub(crate) fn deg_to_duty(deg: u32) -> u32 {

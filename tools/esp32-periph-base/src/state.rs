@@ -6,6 +6,7 @@ use esp_idf_sys::{esp_random, esp_timer_get_time};
 
 use crate::board::{wander_step, Axis, AXIS_CENTER_DEG};
 use crate::link::reply;
+use crate::power::RailTier;
 
 /// esp_timer 毫秒（单调时基，微动作时钟源；u64 毫秒 58 万年不回绕）。
 pub(crate) fn now_ms() -> u64 {
@@ -54,9 +55,14 @@ pub(crate) struct PeriphState {
     pub(crate) wander_phase: u8,
     pub(crate) next_wander_ms: u64,
     /// 5V 轨最近一次采样（方案A Q1 观测面，由**运行面**写入）：轨压 mV + 引脚 raw。
-    /// `0` = 尚未采样（boot 初值/未装配）。纯观测；阈值判定在批M 步3。
+    /// `0` = 尚未采样（boot 初值/未装配）。
     pub(crate) rail_mv: u16,
     pub(crate) rail_raw: u16,
+    /// 5V 轨最近档位（方案A Q2，由**运行面**采样算出；`INFO` 观测 + 驱动面拒动判据）。
+    /// boot 初值 `Ok`（未采样前不误判拒动）。
+    pub(crate) rail_tier: RailTier,
+    /// 5V 轨越阈事件计数（低电段首发次数，只增不减；`INFO` 观测）。
+    pub(crate) rail_low_events: u32,
 }
 
 impl PeriphState {
@@ -85,6 +91,8 @@ impl PeriphState {
             next_wander_ms: 0,
             rail_mv: 0,
             rail_raw: 0,
+            rail_tier: RailTier::Ok,
+            rail_low_events: 0,
         }
     }
 

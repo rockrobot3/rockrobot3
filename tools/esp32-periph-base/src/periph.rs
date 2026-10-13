@@ -7,10 +7,10 @@ use esp_idf_hal::uart::UartDriver;
 
 use crate::board::{
     axis_check, deg_to_duty, Axis, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_RENDER_ATTEMPTS,
-    OLED_ROWS, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
+    OLED_ROWS, RAIL_GATE_ARMED, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
 };
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
-use crate::power::RailMonitor;
+use crate::power::{RailJudge, RailMonitor, RailTier};
 
 // ---------------------------------------------------------------------------
 // 外设面（控制面/运行面分离）：控制面独占 UART2，运行面独占 I2C0 + LEDC
@@ -41,6 +41,11 @@ pub(crate) struct RtPeriph {
     pub(crate) rail: Option<RailMonitor>,
     /// 下次 5V 轨周期采样时刻（运行面自主节拍；esp_timer ms，初值 0 = 首拍即采）。
     pub(crate) next_rail_ms: u64,
+    /// 5V 轨欠压判定核（方案A Q2）：每次采样喂一拍，产出档位 + 越阈事件。纯机制件，
+    /// 随采样在运行面推进（不读墙上时钟）。
+    pub(crate) rail_judge: RailJudge,
+    /// 5V 轨当前档位（快门值；`servo_set` 拒动判据，由运行面采样刷新）。boot 初值 `Ok`。
+    pub(crate) rail_tier: RailTier,
 }
 
 impl RtPeriph {
@@ -50,6 +55,16 @@ impl RtPeriph {
     /// （极限电源下的软启动：把整段跳变的电流尖峰摊成涓流）。
     pub(crate) fn servo_set(&mut self, axis: Axis, deg: u32) -> Result<u32, String> {
         let deg = axis_check(axis, deg)?;
+        // 5V 轨**重度欠压 → 执行面拒动**（方案A Q2 / MC-5 语义）：已接闸（真板标定后）
+        // 且档位为 `severe` 时拒收本次动作——fail-closed，绝不带着欠压去驱舵机、不去撞
+        // BOD 复位。**妆面（OLED）不受影响**；**回阈后不自动重放**（调用方须重发）。
+        // `RAIL_GATE_ARMED=false`（占位未标定）时不接闸，仅观测。
+        if RAIL_GATE_ARMED && self.rail_tier == RailTier::Severe {
+            return Err(format!(
+                "5V 轨重度欠压（tier=severe）执行面拒动：{} 轴 {deg}° 拒收（回阈后请重发）",
+                axis.name()
+            ));
+        }
         let cur = match axis {
             Axis::Pan => self.pan_deg,
             Axis::Tilt => self.tilt_deg,
