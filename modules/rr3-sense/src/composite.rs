@@ -111,7 +111,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
         };
         // DoA 粗判向（批F2）：多通道帧在下混**前**判向（双麦原始通道只在此一用），
         // 最新一档随下一次 onset 边沿上路；单声道/静音帧恒 None，事件体不带 doa
-        let doa = capture::rr3_doa_fix(&raw.samples, raw.cfg.channels);
+        let doa = capture::rr3_doa_fix(&raw.samples, raw.cfg.channels, cfg.doa.bin_threshold_deg);
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
         let pcm = rr3_pcm_downmix_stream(raw);
@@ -268,6 +268,13 @@ const RR3_SENSE_CONFIG_ENV: &str = "RR3_SENSE_CONFIG";
 pub struct Rr3SenseConfig {
     pub audio: Rr3AudioConfig,
     pub vad: Rr3VadConfig,
+    pub doa: Rr3DoaConfig,
+}
+
+/// DoA 判向配置：分档边界（S-5，原件内常量 `RR3_DOA_BIN_THRESHOLD_DEG` 迁此）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rr3DoaConfig {
+    pub bin_threshold_deg: i32,
 }
 
 impl Default for Rr3SenseConfig {
@@ -279,6 +286,9 @@ impl Default for Rr3SenseConfig {
                 frame_ms: 20,
             },
             vad: Rr3VadConfig::default(),
+            doa: Rr3DoaConfig {
+                bin_threshold_deg: 30,
+            },
         }
     }
 }
@@ -299,7 +309,10 @@ fn rr3_sense_config_load(manifest_path: &str) -> Result<Rr3SenseConfig, String> 
     });
     let text = std::fs::read_to_string(&path).map_err(|e| format!("读 config {path} 失败: {e}"))?;
     let cfg = rr3_sense_config_parse(&text)?;
-    println!("config 就绪: 来源={path}");
+    println!(
+        "config 就绪: 来源={path} doa_bin_threshold_deg={}",
+        cfg.doa.bin_threshold_deg
+    );
     Ok(cfg)
 }
 
@@ -333,6 +346,13 @@ fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, String> {
         rr3_cfg_i64(vad, "rms_start", &mut cfg.vad.rms_start)?;
         rr3_cfg_u64(vad, "silence_tail_ms", &mut cfg.vad.silence_tail_ms)?;
         rr3_cfg_u64(vad, "min_speech_ms", &mut cfg.vad.min_speech_ms)?;
+    }
+    // S-5：DoA 分档边界（策略面数据化，缺键回落默认 30）
+    if let Some(doa) = section.and_then(|s| s.get("doa")) {
+        let mut t = cfg.doa.bin_threshold_deg as i64;
+        rr3_cfg_i64(doa, "bin_threshold_deg", &mut t)?;
+        cfg.doa.bin_threshold_deg = i32::try_from(t)
+            .map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))?;
     }
     Ok(cfg)
 }
@@ -382,7 +402,8 @@ mod tests {
         // 全量
         let full = rr3_sense_config_parse(
             "[rr3-sense.audio]\nsample_rate = 48000\nchannels = 2\nframe_ms = 10\n\n\
-             [rr3-sense.vad]\nrms_start = 2000\nsilence_tail_ms = 500\nmin_speech_ms = 150\n",
+             [rr3-sense.vad]\nrms_start = 2000\nsilence_tail_ms = 500\nmin_speech_ms = 150\n\n\
+             [rr3-sense.doa]\nbin_threshold_deg = 20\n",
         )
         .unwrap();
         assert_eq!(full.audio.sample_rate, 48000);
@@ -391,6 +412,7 @@ mod tests {
         assert_eq!(full.vad.rms_start, 2000);
         assert_eq!(full.vad.silence_tail_ms, 500);
         assert_eq!(full.vad.min_speech_ms, 150);
+        assert_eq!(full.doa.bin_threshold_deg, 20, "S-5 阈值注入生效");
     }
 
     #[test]
@@ -398,6 +420,7 @@ mod tests {
         // 类型错显式报错，不静默吞
         assert!(rr3_sense_config_parse("[rr3-sense.vad]\nrms_start = \"loud\"\n").is_err());
         assert!(rr3_sense_config_parse("[rr3-sense.audio]\nframe_ms = -20\n").is_err());
+        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nbin_threshold_deg = \"wide\"\n").is_err());
         assert!(rr3_sense_config_parse("not toml at all [").is_err());
     }
 

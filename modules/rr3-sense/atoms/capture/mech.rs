@@ -77,20 +77,28 @@ const RR3_ASIN_DEG_LUT: [i32; 257] = [
     62, 63, 64, 65, 66, 67, 68, 70, 71, 72, 74, 76, 78, 80, 83, 90,
 ];
 
-/// 分档阈值的绝对值（度）：|θ| ≤ 30° 落中档，否则左/右档。
-/// 粗判向三档（左/中/右）的边界——±90° 值域对半砍出的常用档位，不进 config
-/// （判据只钉"±90° 分档"这个口径，阈值细化随真件换装实测再裁）。
-/// 0.0.5 批I S-6：mech 内私有常数，无件外读者，降 pub(crate)。
-pub(crate) const RR3_DOA_BIN_THRESHOLD_DEG: i32 = 30;
+/// DoA 分档：`|θ| ≤ threshold_deg` 落中档，否则左/右档（`< -t` 左、`> t` 右）。
+/// `threshold_deg` = 本形态的分档边界——0.0.5 批M MC-10 S-5 从件内常量迁为
+/// config `[rr3-sense.doa] bin_threshold_deg` 注入（ops 槽 `doa_bin_threshold_deg`）。
+/// 阈值仍是策略面（±90° 值域常用的对半档），"某形态换档口径"= 改数据不改码。
+fn rr3_doa_bin_of(deg: i32, threshold_deg: i32) -> Rr3DoaBin {
+    if deg < -threshold_deg {
+        Rr3DoaBin::Left
+    } else if deg > threshold_deg {
+        Rr3DoaBin::Right
+    } else {
+        Rr3DoaBin::Center
+    }
+}
 
 /// DoA 分档（±90° 值域的三档离散）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rr3DoaBin {
-    /// 声源在左（θ < -30°）
+    /// 声源在左（θ < -threshold_deg）
     Left,
-    /// 声源在正前附近（-30° ≤ θ ≤ 30°）
+    /// 声源在正前附近（-threshold_deg ≤ θ ≤ threshold_deg）
     Center,
-    /// 声源在右（θ > 30°）
+    /// 声源在右（θ > threshold_deg）
     Right,
 }
 
@@ -138,7 +146,9 @@ fn rr3_isqrt(x: u64) -> u64 {
 /// 判据：`sinθ = (r_r - r_l) / (r_r + r_l)`，r 为逐通道 RMS（平方和开根）。
 /// 注入模型（rr-hal sim 源）`g_l = 1 - sinθ`、`g_r = 1 + sinθ` 下该式严格可逆；
 /// 更多通道（USB 阵列真件）先只取前两路 L/R 对，通道序重排随换装批裁定。
-pub fn rr3_doa_fix(samples: &[i16], channels: u8) -> Option<Rr3DoaFix> {
+/// `threshold_deg` = 分档边界（S-5 迁 ops 槽 `doa_bin_threshold_deg`，本形态值
+/// 由组合件从 config 注入；件内不再持默认）。
+pub fn rr3_doa_fix(samples: &[i16], channels: u8, threshold_deg: i32) -> Option<Rr3DoaFix> {
     if channels < 2 {
         return None;
     }
@@ -159,13 +169,7 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8) -> Option<Rr3DoaFix> {
     // 256 格查表下标：round((k_Q15 + 32768) / 256)，值域 [0, 256]
     let idx = (((k_q15 + 32768) * 256 + 32768) >> 16) as usize;
     let deg = RR3_ASIN_DEG_LUT[idx];
-    let bin = if deg < -RR3_DOA_BIN_THRESHOLD_DEG {
-        Rr3DoaBin::Left
-    } else if deg > RR3_DOA_BIN_THRESHOLD_DEG {
-        Rr3DoaBin::Right
-    } else {
-        Rr3DoaBin::Center
-    };
+    let bin = rr3_doa_bin_of(deg, threshold_deg);
     Some(Rr3DoaFix { deg, bin })
 }
 
@@ -222,9 +226,9 @@ mod tests {
     /// 单声道恒 None；双通道全零恒 None——无方向信息不硬判。
     #[test]
     fn doa_returns_none_for_mono_and_silence() {
-        assert_eq!(rr3_doa_fix(&[10, -10, 20, -20], 1), None, "mono 无方向");
-        assert_eq!(rr3_doa_fix(&[0, 0, 0, 0], 2), None, "全静音无方向");
-        assert_eq!(rr3_doa_fix(&[], 2), None, "空帧无方向");
+        assert_eq!(rr3_doa_fix(&[10, -10, 20, -20], 1, 30), None, "mono 无方向");
+        assert_eq!(rr3_doa_fix(&[0, 0, 0, 0], 2, 30), None, "全静音无方向");
+        assert_eq!(rr3_doa_fix(&[], 2, 30), None, "空帧无方向");
     }
 
     /// 注入角 → 反演角逐点贴合（±1° 容差：S-8 整型化后的预算——Q15 量化与查表
@@ -243,7 +247,7 @@ mod tests {
             (90.0, Rr3DoaBin::Right),
         ] {
             let samples = stereo_frame(deg, 1600);
-            let fix = rr3_doa_fix(&samples, 2).unwrap_or_else(|| panic!("{deg} 应判出"));
+            let fix = rr3_doa_fix(&samples, 2, 30).unwrap_or_else(|| panic!("{deg} 应判出"));
             assert!(
                 (fix.deg as f64 - deg).abs() <= 1.0,
                 "deg={deg}: 反演角 {} 超容差",
@@ -253,17 +257,29 @@ mod tests {
         }
     }
 
-    /// 分档阈值常数钉死 30°：档位语义（左/中/右）与 as_str 字面量一起 pin——
-    /// 事件消费方按字面量分派，漂移当场红。查表端点与零点一并 pin。
+    /// 档位语义（左/中/右）与 as_str 字面量一起 pin——事件消费方按字面量分派，
+    /// 漂移当场红。查表端点与零点一并 pin。分档阈值 S-5 迁 ops 槽后不再有件内
+    /// 常量可 pin，其"注入即生效"由下方 `injected_threshold_moves_the_bins` 用例证。
     #[test]
-    fn doa_bin_str_and_threshold_are_pinned() {
-        assert_eq!(RR3_DOA_BIN_THRESHOLD_DEG, 30);
+    fn doa_bin_str_and_lut_are_pinned() {
         assert_eq!(Rr3DoaBin::Left.rr3_doa_bin_as_str(), "left");
         assert_eq!(Rr3DoaBin::Center.rr3_doa_bin_as_str(), "center");
         assert_eq!(Rr3DoaBin::Right.rr3_doa_bin_as_str(), "right");
         assert_eq!(RR3_ASIN_DEG_LUT[0], -90);
         assert_eq!(RR3_ASIN_DEG_LUT[128], 0);
         assert_eq!(RR3_ASIN_DEG_LUT[256], 90);
+    }
+
+    /// S-5：分档阈值是注入面——同一批帧换 `threshold_deg` 即换档界，"某形态换档
+    /// 口径 = 改数据不改码"。−15° 在 30° 边界下落中档，在 10° 边界下落左档。
+    #[test]
+    fn injected_threshold_moves_the_bins() {
+        let samples = stereo_frame(-15.0, 1600);
+        let wide = rr3_doa_fix(&samples, 2, 30).unwrap();
+        let narrow = rr3_doa_fix(&samples, 2, 10).unwrap();
+        assert_eq!(wide.bin, Rr3DoaBin::Center, "30° 边界：−15° 落在中档");
+        assert_eq!(narrow.bin, Rr3DoaBin::Left, "10° 边界：−15° 越界落左档");
+        assert_eq!(wide.deg, narrow.deg, "反演角与阈值无关，只档位随之变");
     }
 
     /// 多通道（>2）取前两路 L/R 对：第三路起的内容不影响判向结果。
@@ -277,8 +293,8 @@ mod tests {
             .iter()
             .flat_map(|f| [f[0], f[1], -777])
             .collect();
-        let a = rr3_doa_fix(&stereo, 2).unwrap();
-        let b = rr3_doa_fix(&three, 3).unwrap();
+        let a = rr3_doa_fix(&stereo, 2, 30).unwrap();
+        let b = rr3_doa_fix(&three, 3, 30).unwrap();
         assert_eq!(a, b, "第三路不得影响 L/R 对的判向");
     }
 
@@ -296,7 +312,7 @@ mod tests {
                 .iter()
                 .flat_map(|s| rr3_pcm_downmix_mono(s, 2))
                 .collect();
-            let fixes: Vec<Option<Rr3DoaFix>> = seq.iter().map(|s| rr3_doa_fix(s, 2)).collect();
+            let fixes: Vec<Option<Rr3DoaFix>> = seq.iter().map(|s| rr3_doa_fix(s, 2, 30)).collect();
             (mixed, fixes)
         }
         assert_eq!(run(), run(), "同输入序列两跑逐帧相等（腿一·确定性）");
@@ -312,7 +328,7 @@ mod tests {
             (-31.0, Rr3DoaBin::Left),
             (31.0, Rr3DoaBin::Right),
         ] {
-            let fix = rr3_doa_fix(&stereo_frame(deg, 1600), 2).unwrap();
+            let fix = rr3_doa_fix(&stereo_frame(deg, 1600), 2, 30).unwrap();
             assert_eq!(fix.bin, want_bin, "deg={deg} 等号边界档位");
         }
         // 零值：0ms 节拍与 0Hz 采样都换算出 0 帧（调用方不得拿 0 帧当 buf 死循环）
@@ -320,6 +336,6 @@ mod tests {
         assert_eq!(rr3_frames_per_tick(0, 20), 0, "(0, 20) → 0 帧");
         // 零样本下混/判向安全返回（空进空出，不 panic 不产帧）
         assert!(rr3_pcm_downmix_mono(&[], 2).is_empty());
-        assert_eq!(rr3_doa_fix(&[], 2), None, "空帧无方向可判");
+        assert_eq!(rr3_doa_fix(&[], 2, 30), None, "空帧无方向可判");
     }
 }
