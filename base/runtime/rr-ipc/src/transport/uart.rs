@@ -83,6 +83,19 @@ mod imp {
     pub const TCIFLUSH: i32 = 1;
     /// SDK sys/fcntl.h：`#define O_NONBLOCK 0x0004`（与 Linux 数值不同，不得混用）
     pub const O_NONBLOCK: i32 = 0x0004;
+    /// SDK sys/signal.h：`struct pollfd`（int + short + short = 8B，无填充）
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct PollFd {
+        pub fd: i32,
+        pub events: i16,
+        pub revents: i16,
+    }
+    const _: () = assert!(size_of::<PollFd>() == 8, "macOS struct pollfd ABI 漂移");
+    /// SDK sys/signal.h：`#define POLLIN 0x0001`
+    pub const POLLIN: i16 = 0x0001;
+    /// macOS：`typedef unsigned int nfds_t;`（与 Linux u64 不同，经 c_poll 对表）
+    pub type NfdsT = u32;
 
     /// BSD `struct termios`：4×u64 flags + c_cc[20] + 2×u64 speed。
     /// 尺寸 72 = 32 + 20 + (4 对齐填充) + 16；`const _` 断言在编译期钉死。
@@ -136,6 +149,19 @@ mod imp {
     /// Linux uapi asm-generic/fcntl.h：`#define O_NONBLOCK 04000`（八进制，与
     /// macOS 数值不同，不得混用）
     pub const O_NONBLOCK: i32 = 0o4000;
+    /// glibc sys/poll.h：`struct pollfd`（int + short + short = 8B，无填充）
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct PollFd {
+        pub fd: i32,
+        pub events: i16,
+        pub revents: i16,
+    }
+    const _: () = assert!(size_of::<PollFd>() == 8, "Linux struct pollfd ABI 漂移");
+    /// Linux uapi asm-generic/fcntl.h：`#define POLLIN 0x001`
+    pub const POLLIN: i16 = 0x001;
+    /// Linux：`typedef unsigned long int nfds_t;`（与 macOS u32 不同，经 c_poll 对表）
+    pub type NfdsT = u64;
 
     /// glibc/musl `struct termios`：4×u32 flags + c_line + c_cc[32] + 2×u32 speed。
     /// 尺寸 60 = 16 + 1 + 32 + 8（对齐到 4）；`const _` 断言在编译期钉死。
@@ -170,9 +196,7 @@ mod imp {
     }
 }
 
-use imp::{
-    SpeedT, Termios, B115200, B921600, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, TCIFLUSH, VMIN, VTIME,
-};
+use imp::{NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME};
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
 use std::collections::HashMap;
@@ -210,6 +234,9 @@ extern "C" {
     fn c_cfsetispeed(termios_p: *mut Termios, speed: SpeedT) -> i32;
     #[link_name = "cfsetospeed"]
     fn c_cfsetospeed(termios_p: *mut Termios, speed: SpeedT) -> i32;
+    /// `poll(2)`：nfds_t 宽度平台不同（macOS u32 / Linux u64），经 [`NfdsT`] 对表。
+    #[link_name = "poll"]
+    fn c_poll(fds: *mut PollFd, nfds: NfdsT, timeout: i32) -> i32;
 }
 
 /// 波特率 → `speed_t`。只认三档：115200（默认）、9600（P3 合法降速）与 921600
@@ -373,6 +400,50 @@ impl Rr3UartConn {
             return Err(std::io::Error::last_os_error());
         }
         Ok(())
+    }
+
+    /// 超时读（机制面，0.0.5 批D④ d4 600s 实锤新增）：`poll(2)` 等就绪至
+    /// `timeout_ms`，就绪即 `read(2)` 一次。`Ok(0)` = 超时**无数据**——"此刻
+    /// 无数据"语义，不是 EOF。缺省 [`Read::read`] 的 VMIN=1/VTIME=0 纯阻塞
+    /// 语义保持不变（桥/哨兵等其余用户的正当语义）；本方法只给"必须能醒来"
+    /// 的收流端一个出口——d4 实锤：驱动层丢字节后帧层等幻影帧尾纯阻塞永不
+    /// 返回（幻影帧头 magic 线上字节 "1ERA" 全落在 b64 字母表内，b64 载荷里
+    /// 撞上即合法幻影帧头）。EINTR 折叠为 `Ok(0)`（此轮无数据，调用方重试自便）。
+    pub fn rr3_read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut pfd = PollFd {
+            fd: self.fd,
+            events: POLLIN,
+            revents: 0,
+        };
+        // SAFETY：pfd 活到调用返回，fd 属 self。
+        let r = unsafe { c_poll(&mut pfd, 1, timeout_ms) };
+        if r < 0 {
+            let e = std::io::Error::last_os_error();
+            if e.kind() == std::io::ErrorKind::Interrupted {
+                return Ok(0);
+            }
+            return Err(e);
+        }
+        if r == 0 {
+            return Ok(0); // 超时：此刻无数据（非 EOF）
+        }
+        loop {
+            // SAFETY：buf 活到调用返回，fd 属 self。就绪后读一次，部分读如实上交。
+            let n = unsafe {
+                c_read(self.fd, buf.as_mut_ptr() as *mut std::ffi::c_void, buf.len())
+            };
+            if n < 0 {
+                let e = std::io::Error::last_os_error();
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(e);
+            }
+            return Ok(n as usize);
+        }
     }
 }
 
@@ -647,6 +718,44 @@ mod tests {
         master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
         let got = conn.rr3_recv_buf().expect("半帧后新帧必须完整读回");
         assert_eq!(Rr3Frame::try_from(got).unwrap(), f);
+    }
+
+    /// 超时读（机制面新增护栏，d4 600s 实锤）：静默必须 `Ok(0)` 且**按时醒来**
+    /// （不死锁不空转）；来数据必须读到，且超时档读过的字节与原帧逐字节一致。
+    #[test]
+    fn uart_read_timeout_idle_zero_then_data() {
+        let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
+        let mut buf = [0u8; 64];
+        let t0 = std::time::Instant::now();
+        assert_eq!(
+            conn.rr3_read_timeout(&mut buf, 80).unwrap(),
+            0,
+            "静默必须 Ok(0)（此刻无数据语义）"
+        );
+        assert!(
+            t0.elapsed() >= std::time::Duration::from_millis(70),
+            "必须等满超时才返回（未按时醒来 = 语义漂移）"
+        );
+        use std::io::Write as _;
+        let f = Rr3Frame {
+            header: hdr(3),
+            payload: b"t/o".to_vec(),
+        };
+        let bytes = rr3_frame_to_bytes(&f).unwrap();
+        master.write_all(&bytes).unwrap();
+        // 就绪读可能是部分读，循环收满整帧
+        let mut got = std::vec::Vec::new();
+        while got.len() < bytes.len() {
+            let n = conn
+                .rr3_read_timeout(&mut buf, 2000)
+                .expect("有数据必须能读");
+            assert!(n > 0, "有数据不得 Ok(0)");
+            got.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(
+            got, bytes,
+            "超时档读出的字节必须与原帧逐字节一致"
+        );
     }
 
     /// 设备不存在 → open 报 IO 错（错误路径不 panic、不静默）。
