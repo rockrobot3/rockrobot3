@@ -17,9 +17,11 @@ optional = []
 # 发布申报走 retired 撤除（号位保留、义务解除，contracts/topics.toml status="retired"，
 # 本模块全仓零发布点）；intent/result 订阅同批撤申报（不补实现）。
 # net/link 是面板状态页的链路卡片数据源（0.0.4 批C 订阅，发布方 rr3-connect 批D 上线）
+# tts_pcm 是语音下行载荷通路（MC-1 订阅，发布方 rr3-brain）：流收缓冲 + tts/text
+# 点名对账排空——流只是载荷，点名才是"该不该播"的唯一判据（0.0.5 方案 §20 第 1 条 (a)）
 [events]
 publishes = []
-subscribes = ["rr3-connect/net/link"]
+subscribes = ["rr3-connect/net/link", "rr3-brain/audio/tts_pcm"]
 
 [rpc]
 exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text"]
