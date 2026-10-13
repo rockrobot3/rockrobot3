@@ -461,6 +461,24 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   排水），实测组帧 **680→11.7ms（58×）**、AUDIO ON 期间 [mic] 稳定 16.2kHz；[mic] 统计窗
   加 `build=` 组帧耗时面（批D④ 稳态观测沿用）。rail_tier=severe 系 GPIO34 浮空伪读数
   （未接闸，预期内）；判据②③（10 分钟稳态 / DoA 出角）= 批D④⑤。
+- **0.0.5 增补轮五 批D④ 600s 稳态收口——判据② 被宿主侧 CP2102 硬件链路阻塞，等 FT232
+  采购（2026-10-14，修复批 `61743f0`）**：①宿主侧落盘线程化（mpsc 通道 + 写线程独占
+  wav，读循环**零磁盘 I/O**；`WatchState` 双真相——`ingested` 供看门狗判停滞 / `disk_bytes`
+  供恢复头 data_len；恢复头三路全走 `write_at` 位置写）+ 重连骑行窗加码
+  `HANDSHAKE_TRIES` 3→10（~90s）。②五轮真板实录定案：冻结样本 **38 / 51 / 184 / 310 /
+  369s（/dev/null）**横跨固件版本（板面旧 `a83c9f8-dirty` 乌龙查 boot banner 破案，重烧
+  `61743f0` 干净树后仍冻）与落盘配置（/dev/null 决定性实验**证伪 flush 根因论**——磁盘
+  I/O 只是 ~7× 放大器非触发器）；板面五轮洗冤（`seq=sent`、`drop=0 q=0`、重试期无 boot
+  banner 复现、CH340 控制台同挂单 XHCI 全程健康）→ 定性 = **宿主侧 CP2102@921600 RX
+  路径楔死**（板→宿主字节全无；宿主→板 TX 间歇存活——run#5 重试期板面 ×N ~6-7s 振荡
+  即每轮 handshake 防御 OFF+ON 间歇到达板面所致；渐变丢字节先于硬冻结：run#5 冻结前
+  gaps=7 / 撕裂 18 帧重同步救回）；自愈 >92s（10 轮重试窗全败）≤11min（历史观测）。
+  ③硬件手段逐项排除：CH340 **板载焊死 UART0** 互换不可行；降档 460800 被 Q1=(a) 带宽账
+  否定（46KB/s < 87KB/s 必背压丢片）；本机**单 XHCI 控制器**（`AppleUSBXHCIWPT`）换口
+  无信息量。④处置：**FT232 系适配器采购中**，到货后接 GPIO18/19 收流位重跑 d4（600s
+  gaps=0 + INFO 对账 + wav 落盘）→ d5 DoA 冒烟（`--secs 40 --doa`；拍手时间表 0–8s 左侧
+  / 10–18s 右侧，启动前发 "d5 开始"）→ RAM 三点收口。RAM 点1/点2 已随 run#5 到手
+  （boot 行 02:07:18 + INFO `free=191072B min_free=105136B`）。
 - **0.0.5 第 IV 轮 MCP-0 契约级评审批（2026-10-12）**：P1 评审批开工门兑现——MCP-1
   `topics.toml` 29→30（append `rr3-brain/audio/tts_pcm` stream L2，载荷体逐字段复用
   `rr3-sense/audio/pcm` 已定形状，F-4 下行通路契约半边；与批C/批D 合成一次改表，批C/批D
