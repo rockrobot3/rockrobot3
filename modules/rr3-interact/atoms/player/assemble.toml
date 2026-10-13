@@ -4,5 +4,10 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 播放面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
-ops = []       # 预缓冲/音量经 config 数据化注入（config.toml [rr3-interact.player]）
+# 播放面经能力面 Rr3AudioSink，绑描述符 alsa_device 键（§3 注入面）
+handles = [
+  { trait = "Rr3AudioSink", desc_key = "alsa_device" },
+]
+# 预缓冲/音量（§3）目前无 config 键读者（批I I-1 已删键），故无 ops 槽——
+# 真件实装时按"音量/预缓冲进 ops 槽"回归（§3 逐槽落位）
+ops = []

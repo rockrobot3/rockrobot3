@@ -38,7 +38,7 @@
 
 | 面 | 内容 |
 |---|---|
-| `handles` | 无能力面句柄（HTTP + 总线） |
+| `handles` | 无能力面句柄（HTTP + 总线）；四件 `assemble.toml` 只报 ops（批M MC-10 L-5，2026-10-13 已结） |
 | `ops`（策略，落位正确） | 模型名与 `base_url`（**读自 `config.toml` 的 `[rr3-brain.cloud]`**，不是 env；只有 `RR3_CLOUD_API_KEY` 走 env——通用键名，MC-8② 已结）、`SYSTEM_PROMPT`、`LLM_MAX_TOKENS=150`、`LLM_HISTORY_ROUNDS=4`、`timeout_s`、`max_utterance_ms`、舵机角 45/90/135、关键词表；⚠️ `max_turn_chars` 在 `config.toml` 里在册但**无读者**（B-8：实装或删除）；⚠️ `silence_tail_ms` 同为无读者的死参数（B-2） |
 | 契约面（本册要改的） | `subscribes` 必须**只增**补齐为实然集（`sense/audio/pcm`、`sense/audio/vad_start`），`interact/asr/text` 走 retired |
 

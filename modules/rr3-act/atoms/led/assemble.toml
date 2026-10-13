@@ -4,5 +4,12 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 灯面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
-ops = []       # blink 周期经 config 数据化注入（config.toml [rr3-act.led]）
+# 灯面经能力面 Rr3GpioOut（role=led），绑描述符 gpio_chip + gpio_led_line 两键
+handles = [
+  { trait = "Rr3GpioOut", desc_key = "gpio_chip" },
+  { trait = "Rr3GpioOut", desc_key = "gpio_led_line" },
+]
+# blink 周期 ← config.toml [rr3-act.led]（§3；代码再 .max(1)）
+ops = [
+  { slot = "blink_period_ms", src_key = "rr3-act.led.blink_period_ms" },
+]

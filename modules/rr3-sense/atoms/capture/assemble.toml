@@ -4,5 +4,13 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 音频源经 rr-hal 后端面直取；描述符句柄化归批D/批E 对表
-ops = []       # 采样率/声道/节拍等策略经 config 数据化注入（config.toml [rr3-sense.audio]）
+# 音频源经能力面 Rr3AudioSource 直取，绑描述符 alsa_device 键（§3 注入面）
+handles = [
+  { trait = "Rr3AudioSource", desc_key = "alsa_device" },
+]
+# 采样率/声道/节拍 ← config.toml [rr3-sense.audio]（§3 逐槽落位，L-5 补齐）
+ops = [
+  { slot = "sample_rate", src_key = "rr3-sense.audio.sample_rate" },
+  { slot = "channels", src_key = "rr3-sense.audio.channels" },
+  { slot = "frame_ms", src_key = "rr3-sense.audio.frame_ms" },
+]

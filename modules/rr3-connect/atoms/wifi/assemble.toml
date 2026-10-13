@@ -4,5 +4,13 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 链路读数经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
-ops = []       # 上报周期/漫游探针开关经 config 数据化注入（config.toml [rr3-connect.wifi]）
+# 链路读数经能力面 Rr3Link，绑描述符 link_ifname 键（§3 注入面）
+handles = [
+  { trait = "Rr3Link", desc_key = "link_ifname" },
+]
+# 上报周期/子进程超时 ← config.toml [rr3-connect.wifi]（§3 逐槽落位，L-5 补齐；
+# roam_probe_enabled/tls_min_version 批I N-2 已删键，不占槽）
+ops = [
+  { slot = "link_report_period_ms", src_key = "rr3-connect.wifi.link_report_period_ms" },
+  { slot = "timeout_ms", src_key = "rr3-connect.wifi.timeout_ms" },
+]
