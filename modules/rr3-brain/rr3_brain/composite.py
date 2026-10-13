@@ -28,6 +28,7 @@ intent.py（策略层唯一归属在 brain，0.0.3 Q1 裁定）。
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -48,7 +49,7 @@ from rr3_brain.dialog import Rr3Dialog, Rr3DialogTurn
 from rr3_brain.intent import rr3_extract_actions
 
 MANIFEST_NAME = "rr3-brain"
-PUBLISHES = ["rr3-brain/intent/result"]
+PUBLISHES = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"]
 # 申报订阅面（与 module.toml 同源双写）：C14（ADR-0019 修订 2 ②）后对齐实然面——
 # asr/text 走 retired 撤申报、net/link 撤申报（不补实现）；实际消费入口 = pcm + vad_start
 SUBSCRIBES = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
@@ -57,10 +58,17 @@ RPC_EXPOSES = ["rr3-brain/llm/completion"]
 TOPIC_PCM = "rr3-sense/audio/pcm"
 TOPIC_VAD = "rr3-sense/audio/vad_start"
 TOPIC_TTS = "rr3-interact/tts/text"
+TOPIC_TTS_PCM = "rr3-brain/audio/tts_pcm"
 TOPIC_INTENT = "rr3-brain/intent/result"
 TOPIC_COMPLETION = "rr3-brain/llm/completion"
 
 RR3_CALL_TIMEOUT_S = 30.0
+
+# TTS 下行流分帧规格（MCP-1 定形）：逐字段复用上行 rr3-sense/audio/pcm 的事件体，
+# 同 20ms 一块（@16k/mono/s16le = 320 样点 = 640 字节），base64 后 ≈856 字符。
+# 采样规格与 sense/interact 同一张表（16k/mono/16bit）。
+RR3_TTS_SAMPLE_RATE = 16_000
+RR3_TTS_PCM_FRAME_BYTES = 640
 
 
 def rr3_config_load() -> dict:
@@ -103,6 +111,8 @@ def rr3_brain_run() -> int:
     tts = Rr3TtsClient(cloud_cfg["base_url"], cloud_cfg["tts_model"], float(cloud_cfg["timeout_s"]))
     dialog = Rr3Dialog(max_utterance_ms=int(dialog_cfg.get("max_utterance_ms", 8000)))
     trace_seq = 0
+    # TTS 下行流的 seq 水位：模块级单调，跨轮不复位（对位 sense 的 pcm seq 语义）
+    pcm_seq = 0
 
     while True:
         # 总线死亡探针：断开后 poll_wait 立即返回空，与"暂时没帧"不可区分
@@ -119,7 +129,9 @@ def rr3_brain_run() -> int:
                     dialog.rr3_feed_pcm(body)
                 elif topic == TOPIC_VAD:
                     if dialog.rr3_feed_vad(body):
-                        trace_seq = rr3_finish_turn(bus, dialog, asr, llm, tts, trace_seq)
+                        trace_seq, pcm_seq = rr3_finish_turn(
+                            bus, dialog, asr, llm, tts, trace_seq, pcm_seq
+                        )
             elif frame["type"] == RR3_PT_REQUEST:
                 body = json.loads(frame["body_raw"])
                 if body.get("method") != "rr3.call":
@@ -136,19 +148,53 @@ def rr3_brain_run() -> int:
                 bus.rr3_reply_call(frame["header"]["trace_id"], body.get("id", 0), result)
 
         if dialog.rr3_utterance_expired():
-            trace_seq = rr3_finish_turn(bus, dialog, asr, llm, tts, trace_seq)
+            trace_seq, pcm_seq = rr3_finish_turn(bus, dialog, asr, llm, tts, trace_seq, pcm_seq)
+
+
+def rr3_tts_pcm_frames(pcm: bytes, seq: int) -> tuple[list[dict], int]:
+    """把一轮 TTS 的 PCM 分帧为 `rr3-brain/audio/tts_pcm` 的载荷体列表（纯函数）。
+
+    逐字段复用上行 `rr3-sense/audio/pcm` 已定的形状（`rr3_pcm_event_body` 为形状
+    事实源）：`{seq, format:"s16le", rate, channels, ms, pcm_b64}`，20ms 一块
+    （640 字节）。`seq` 从入参水位起逐帧 +1（**模块级单调，不随轮次复位**）；`ms`
+    由块内样点数导出（尾块不足 20ms 时按实算）。`topic` 不含（由 `rr3_publish`
+    并入）。返回 `(frames, 新 seq 水位)`——总线发布与跨语言一致性用例共用同一份组装。
+    """
+    frames: list[dict] = []
+    for off in range(0, len(pcm), RR3_TTS_PCM_FRAME_BYTES):
+        chunk = pcm[off : off + RR3_TTS_PCM_FRAME_BYTES]
+        samples = len(chunk) // 2
+        seq += 1
+        frames.append({
+            "seq": seq,
+            "format": "s16le",
+            "rate": RR3_TTS_SAMPLE_RATE,
+            "channels": 1,
+            "ms": samples * 1000 // RR3_TTS_SAMPLE_RATE,
+            "pcm_b64": base64.b64encode(chunk).decode("ascii"),
+        })
+    return frames, seq
+
+
+def rr3_publish_tts_pcm(bus: Rr3BusClient, pcm: bytes, seq: int) -> int:
+    """按 [`rr3_tts_pcm_frames`] 分帧发布 tts_pcm 流，返回新的 seq 水位。"""
+    frames, seq = rr3_tts_pcm_frames(pcm, seq)
+    for body in frames:
+        bus.rr3_publish(TOPIC_TTS_PCM, body)
+    return seq
 
 
 def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm: Rr3LlmClient,
-                    tts: Rr3TtsClient, trace_seq: int) -> int:
-    """判停后的一整轮：ASR → LLM → TTS → interact 播放 → intent 发布。
+                    tts: Rr3TtsClient, trace_seq: int, pcm_seq: int) -> tuple[int, int]:
+    """判停后的一整轮：ASR → LLM → TTS → 下发 PCM 流 → interact 播放 → intent 发布。
 
     业务失败（云端错误 / 空文本 / 被调方超时）折日志弃轮返回；传输失败
     （总线写不出去）抛 OSError/RuntimeError 由主循环按退出语义收口。
+    返回 `(trace_seq, pcm_seq)`——pcm_seq 是模块级单调的 TTS 下行流 seq 水位。
     """
     pcm = dialog.rr3_take_utterance()
     if not pcm:
-        return trace_seq
+        return trace_seq, pcm_seq
     trace_seq += 1
 
     try:
@@ -156,35 +202,40 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
     except RuntimeError as e:
         bus.rr3_counter_bump("asr_fail")
         print(f"轮次 {trace_seq}: ASR 失败，弃轮（{e}）", flush=True)
-        return trace_seq
+        return trace_seq, pcm_seq
     bus.rr3_counter_bump("asr_ok")
     if not user_text.strip():
         print(f"轮次 {trace_seq}: 识别为空文本，弃轮", flush=True)
-        return trace_seq
+        return trace_seq, pcm_seq
 
     try:
         reply_text = llm.complete(user_text)
     except RuntimeError as e:
         bus.rr3_counter_bump("llm_fail")
         print(f"轮次 {trace_seq}: LLM 失败，弃轮（user={user_text!r}，{e}）", flush=True)
-        return trace_seq
+        return trace_seq, pcm_seq
 
-    # TTS 验证性消费（M4 不接播放面，ADR-0014 裁定 3）：非空 + 时长换算入日志
     try:
         reply_pcm = tts.synthesize(reply_text)
     except RuntimeError as e:
         bus.rr3_counter_bump("tts_fail")
         print(f"轮次 {trace_seq}: TTS 失败，弃轮（{e}）", flush=True)
-        return trace_seq
+        return trace_seq, pcm_seq
     if len(reply_pcm) % 2:
         reply_pcm = reply_pcm[:-1]
     tts_ms = len(reply_pcm) // 2 // 16000 * 1000 + (len(reply_pcm) // 2 % 16000) * 1000 // 16000
 
-    # 播放走事务面：interact 的 tts/text 是 registered request 主题。
-    # 被调方不在册/超时是业务失败（弃轮），不应答不致命。
+    # 语音下行：先把 PCM 按 MCP-1 的形状分帧发布到 rr3-brain/audio/tts_pcm（stream），
+    # 再走事务面点名 interact 的 tts/text——点名是"该不该播"的**唯一判据**，流只是
+    # 载荷通路（§20 第 1 条 (a)）。点名的 args 带 pcm_bytes，供播放面校验缓冲完整性
+    # （半流/空缓冲不静默，MC-1）。通路对引擎中立：今天接 cloud/tts.py，R31 Q3 的
+    # 本地 Piper adapter 落地后接 Piper，两腿共用同一份分帧。
+    pcm_seq = rr3_publish_tts_pcm(bus, reply_pcm, pcm_seq)
     played = ""
     try:
-        reply = bus.rr3_call_topic(TOPIC_TTS, {"text": reply_text}, RR3_CALL_TIMEOUT_S)
+        reply = bus.rr3_call_topic(
+            TOPIC_TTS, {"text": reply_text, "pcm_bytes": len(reply_pcm)}, RR3_CALL_TIMEOUT_S
+        )
         played = f" played_ms={reply.get('played_ms')}"
     except RuntimeError as e:
         print(f"轮次 {trace_seq}: interact 播放点名失败（{e}）", flush=True)
@@ -207,4 +258,4 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
         f" tts_pcm_ms={tts_ms}{played} actions={len(actions)}",
         flush=True,
     )
-    return trace_seq
+    return trace_seq, pcm_seq

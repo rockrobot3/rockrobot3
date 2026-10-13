@@ -35,9 +35,10 @@ pub const RR3_BRAIN_TURN_MARK: &str = "对话轮完成";
 /// interact 日志里的播放判据（player 的 tts 完成行前缀）
 pub const RR3_INTERACT_TTS_MARK: &str = "tts:";
 
-/// brain 的三个演练判据主题（名字必须真实在契约里，tests 有对账用例）
+/// brain 的演练判据主题（名字必须真实在契约里，tests 有对账用例）
 pub const RR3_BRAIN_TOPIC_INTENT: &str = "rr3-brain/intent/result";
 pub const RR3_BRAIN_TOPIC_COMPLETION: &str = "rr3-brain/llm/completion";
+pub const RR3_BRAIN_TOPIC_TTS_PCM: &str = "rr3-brain/audio/tts_pcm";
 pub const RR3_SENSE_TOPIC_PCM: &str = "rr3-sense/audio/pcm";
 
 /// 三份 wire manifest 文本（纯函数，tests 直测形状）
@@ -73,7 +74,7 @@ pub fn rr3_brain_manifests(
                 RR3_BRAIN_WD_MS,
                 "never",
                 &[],
-                &["rr3-runtime/module/state"],
+                &["rr3-runtime/module/state", RR3_BRAIN_TOPIC_TTS_PCM],
                 &["rr3-interact/tts/text", "rr3-interact/face/expression"],
             ),
         ),
@@ -87,7 +88,7 @@ pub fn rr3_brain_manifests(
                 RR3_BRAIN_HB_MS,
                 RR3_BRAIN_WD_MS,
                 "never",
-                &[RR3_BRAIN_TOPIC_INTENT],
+                &[RR3_BRAIN_TOPIC_INTENT, RR3_BRAIN_TOPIC_TTS_PCM],
                 // C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：asr/text retired 撤申报、
                 // net/link 撤申报（不补实现）；订阅面对齐实然面 = pcm + vad_start（B-1 补齐）
                 &[RR3_SENSE_TOPIC_PCM, "rr3-sense/audio/vad_start"],
@@ -457,6 +458,7 @@ mod tests {
             RR3_SIM_MODULE_BRAIN,
             RR3_BRAIN_TOPIC_INTENT,
             RR3_BRAIN_TOPIC_COMPLETION,
+            RR3_BRAIN_TOPIC_TTS_PCM,
             RR3_SENSE_TOPIC_PCM,
             "rr3-sense/audio/vad_start",
             "rr3-interact/tts/text",
