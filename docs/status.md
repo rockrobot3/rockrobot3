@@ -438,6 +438,29 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   需显式 `+ Send` bound（编译器实爆驱动补，非 unsafe impl）。余口：peak 低位 0x…0FF
   结构化触顶疑 1bit 时隙错位（留 wav 真录音判据核）；921600 参数化 + 音频主题上行 +
   宿主 wav 落盘 + DoA 出角 = 批D 后续小步。接线表落 [README 批D 节](../tools/esp32-periph-base/README.md)。
+- **0.0.5 增补轮五 批D②/D③ 音频主题上行收官——判据① 过 + 双根因排障（2026-10-13，提交
+  `f947ddb` + `c5d318c` + 修复批 `dd1e55a`）**：D② 921600 参数化（宿主 transport/桥构造面
+  `_with_baud` + `RR3_HAL_PERIPH_BAUD` env，缺省仍 115200 向后兼容；Q1=(a) 带宽账：7.8 片/s
+  ≈87KB/s 落 921600 有效 92.16KB/s 内，板侧 `UART2_BAUD_HZ` 烧录即 deliberate）；D③ 板侧
+  `AUDIO ON` 起 mic 线每 2048 帧（128ms @16k）逐通道减本片 DC → 24bit 截 16bit s16le →
+  b64 → JSON 体（`rr3-sense/audio/pcm` 在册主题，形状对齐 rr3-sense `rr3_pcm_event_body`）
+  → Event 帧整帧入有界 audio_q（4 深，满丢**最旧**计 `audio_dropped`）→ 控制面 drain 整帧
+  写 UART2；宿主工具 [rr3-audio-rec](../tools/rr3-audio-rec)（单测 4/4）收流解码落 wav
+  （**wav 头按实测率写**——I2S 实际率与标称差，按实测写回放音高才对）。**判据① 真板实录过**：
+  15s 收流 117 片 seq 连续 gaps=0 err=0（实测 16138Hz / 14.85s / 958KB），wav 双通道 16bit
+  L==R 仅 1.65%（非单声道假象）零饱和，板面 `drop=0 q=0` 对账一致。排障双根因实录：
+  ① **CP2102 三线物理断线**——0001 全静默用双判别探针实锤（0001 在 921600/115200 双判别档
+  0 字节 + 1410 控制台完整 boot 对照），重插即愈，行/帧/音频三面全通；② **dev 缺省
+  opt-level=0 下组帧 680ms/片 → I2S DMA 环溢出丢数**——分阶段计时插桩一烧定案（pcm≈280/
+  b64≈200/json≈150ms，memcpy 面 body/frame 仅 1-3ms：全段无病态，纯 -O0 逐元素堆写慢两个
+  数量级；此前"b64/JSON ms 级"的排除按 -O3 直觉估算全不成立），[mic] 16.5kHz→2.8kHz 崩塌
+  与"128ms 音频 + 680ms 组帧 = 2.5kHz"精确自洽。修复：Cargo.toml dev profile 提
+  **opt-level=2**（门禁构建=烧录产物同位形，根治"-O0 不代表真板性能"失真）+
+  `UART2_TX_RING=16KB` TX 环（[board.rs](../tools/esp32-periph-base/src/board.rs) 策略面；
+  缺省 256B 下整帧写 11.4KB 同步等线速排空 ~120ms/帧，≥ 单帧后 write 降 memcpy 入环异步
+  排水），实测组帧 **680→11.7ms（58×）**、AUDIO ON 期间 [mic] 稳定 16.2kHz；[mic] 统计窗
+  加 `build=` 组帧耗时面（批D④ 稳态观测沿用）。rail_tier=severe 系 GPIO34 浮空伪读数
+  （未接闸，预期内）；判据②③（10 分钟稳态 / DoA 出角）= 批D④⑤。
 - **0.0.5 第 IV 轮 MCP-0 契约级评审批（2026-10-12）**：P1 评审批开工门兑现——MCP-1
   `topics.toml` 29→30（append `rr3-brain/audio/tts_pcm` stream L2，载荷体逐字段复用
   `rr3-sense/audio/pcm` 已定形状，F-4 下行通路契约半边；与批C/批D 合成一次改表，批C/批D
