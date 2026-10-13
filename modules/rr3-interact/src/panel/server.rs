@@ -108,7 +108,8 @@ pub fn rr3_panel_surface() -> Vec<String> {
 /// 主循环代执行的面板动作（beep/face），HTTP 线程经 mpsc 递给主循环。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rr3PanelAction {
-    /// 喇叭测试音：进程内直调播放面（占位正弦 burst，真音随后续里程碑）
+    /// 喇叭测试音（MC-1 起 beep 占位退役）：主循环如实回业务错误"无本地波形源"
+    /// ——播放面只接受 tts_pcm 流，selftest 的 speaker 项恒报 error 属预期
     Beep,
     /// 表情切换：进程内直调表情机（名字合法性由 Rr3Face 白名单裁决）
     Face { expression: String },
