@@ -62,10 +62,12 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
             if rt_move(ph, pan, tilt) {
                 // 姿态到位回读（**硬件侧证据**：直接读 LEDC 寄存器换算，不听记账角；
                 // 只回读本次请求的轴——未动的轴 duty 可能为 0，换算无意义）。
-                let rd = |axis: Axis| duty_to_deg(match axis {
-                    Axis::Pan => ph.pan.get_duty(),
-                    Axis::Tilt => ph.tilt.get_duty(),
-                });
+                let rd = |axis: Axis| {
+                    duty_to_deg(match axis {
+                        Axis::Pan => ph.pan.get_duty(),
+                        Axis::Tilt => ph.tilt.get_duty(),
+                    })
+                };
                 let want = |v: Option<u32>| v.map_or_else(|| "-".into(), |d| d.to_string());
                 println!(
                     "[periph] 姿态到位 pan={} tilt={}（LEDC 回读 pan={}° tilt={}°，记账 {}°/{}°）",
@@ -183,7 +185,10 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
         thread::sleep(Duration::from_millis(SCAN_POINT_MS));
         // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），与设定角并打
         // ——判据②"目视 + 串口回读一致"的硬件侧证据
-        let (pr, tr) = (duty_to_deg(ph.pan.get_duty()), duty_to_deg(ph.tilt.get_duty()));
+        let (pr, tr) = (
+            duty_to_deg(ph.pan.get_duty()),
+            duty_to_deg(ph.tilt.get_duty()),
+        );
         {
             let mut b = lock_bus(bus);
             b.st.wander_on = false;

@@ -103,7 +103,10 @@ impl RtPeriph {
         self.contrast_idx += 1;
         let lv = OLED_CONTRAST_LEVELS[self.contrast_idx];
         match oled_cmd(&mut self.i2c, &[0x81, lv]) {
-            Ok(()) => println!("[periph] OLED 降亮 → 0x{lv:02X}（轨压降级第 {} 档）", self.contrast_idx),
+            Ok(()) => println!(
+                "[periph] OLED 降亮 → 0x{lv:02X}（轨压降级第 {} 档）",
+                self.contrast_idx
+            ),
             Err(e) => eprintln!("[periph] 降亮写失败: {e}"),
         }
         true
@@ -175,12 +178,23 @@ impl RtPeriph {
     }
 
     /// OLED 文本 3 行（21 列硬切）+ 角度行（row 3）刷新（**带恢复环**）。
-    pub(crate) fn oled_show(&mut self, text: &str, pan_deg: u32, tilt_deg: u32) -> Result<(), String> {
+    pub(crate) fn oled_show(
+        &mut self,
+        text: &str,
+        pan_deg: u32,
+        tilt_deg: u32,
+    ) -> Result<(), String> {
         // 先过滤成可见 ASCII（其余转空格，与 glyph 行为一致）再按 21 列硬切
         // 3 行——字节切片不劈多字节字符（char boundary 安全），行对齐不漂移。
         let ascii: Vec<u8> = text
             .chars()
-            .map(|c| if (0x20..=0x7E).contains(&(c as u32)) { c as u8 } else { b' ' })
+            .map(|c| {
+                if (0x20..=0x7E).contains(&(c as u32)) {
+                    c as u8
+                } else {
+                    b' '
+                }
+            })
             .collect();
         let mut lines: Vec<Vec<u8>> = Vec::with_capacity(OLED_ROWS);
         for row in 0..(OLED_ROWS - 1) {

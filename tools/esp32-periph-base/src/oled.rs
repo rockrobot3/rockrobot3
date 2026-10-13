@@ -251,8 +251,7 @@ pub(crate) fn oled_cmd(i2c: &mut I2cDriver, cmds: &[u8]) -> Result<(), String> {
         return Err("命令序列超长".into());
     }
     buf[1..=cmds.len()].copy_from_slice(cmds);
-    i2c_write_retry(i2c, OLED_ADDR, &buf[..=cmds.len()])
-        .map_err(|e| format!("I2C 命令写失败: {e}"))
+    i2c_write_retry(i2c, OLED_ADDR, &buf[..=cmds.len()]).map_err(|e| format!("I2C 命令写失败: {e}"))
 }
 
 /// 写一页 GDDRAM（128 列）。**分块写**：每笔 ≤33 字节（1 控制字节 + 32 数据），
@@ -306,20 +305,29 @@ pub(crate) fn oled_init(i2c: &mut I2cDriver) -> Result<(), String> {
         i2c,
         &[
             0xAE, // display off
-            0xD5, 0x80, // clock div
-            0xA8, 0x3F, // multiplex 64
-            0xD3, 0x00, // display offset
+            0xD5,
+            0x80, // clock div
+            0xA8,
+            0x3F, // multiplex 64
+            0xD3,
+            0x00, // display offset
             0x40, // start line 0
-            0x8D, 0x14, // charge pump on
-            0x20, 0x02, // page addressing mode
+            0x8D,
+            0x14, // charge pump on
+            0x20,
+            0x02, // page addressing mode
             0xA1, // segment remap
             0xC8, // COM scan dec
-            0xDA, 0x12, // COM pins
-            0x81, OLED_CONTRAST_LEVELS[0], // contrast（**初始中档**；见 OLED_CONTRAST_LEVELS
-                         // ——满亮 0xCF 会在胶囊眼大面亮点上屏时反噬 I2C，故起点即已调低，
-                         // 失败再逐级往下走）
-            0xD9, 0xF1, // precharge
-            0xDB, 0x40, // VCOM detect
+            0xDA,
+            0x12, // COM pins
+            0x81,
+            OLED_CONTRAST_LEVELS[0], // contrast（**初始中档**；见 OLED_CONTRAST_LEVELS
+            // ——满亮 0xCF 会在胶囊眼大面亮点上屏时反噬 I2C，故起点即已调低，
+            // 失败再逐级往下走）
+            0xD9,
+            0xF1, // precharge
+            0xDB,
+            0x40, // VCOM detect
             0xA4, // resume from RAM
             0xA6, // normal display
             0xAF, // display on
@@ -388,7 +396,12 @@ pub(crate) fn oled_frame(i2c: &mut I2cDriver, frame: &[u8; 8]) -> Result<(), Str
 /// min(半宽, 半高)：满高 26px 时即纯胶囊，眯缝低压扁成 18px 宽横缝不退化成
 /// 圆盘）；行内实心段解析求宽（直段区全宽、圆角区 sqrt 余量），逐页写
 /// GDDRAM。扫视出界自然裁剪（0..127 列钳制）不回卷。
-pub(crate) fn oled_capsules(i2c: &mut I2cDriver, open_pct: u32, dx: i16, dy: i16) -> Result<(), String> {
+pub(crate) fn oled_capsules(
+    i2c: &mut I2cDriver,
+    open_pct: u32,
+    dx: i16,
+    dy: i16,
+) -> Result<(), String> {
     const W2: i32 = 9; // 眼半宽（眼宽 18px）
     const H_FULL: i32 = 26; // 满开眼高
     const CY: i32 = 32; // 眼中心行（64 行画布居中）

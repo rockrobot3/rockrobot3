@@ -40,8 +40,11 @@
 //! 精度注记：账本按**路径字符串**记账，同一节点的别名路径（symlink）不记账
 //! ——本仓所有消费方都用同一固定路径写法，别名逃逸留 runbook 纪律兜底。
 //!
-//! 波特率只收 [`rr3_uart_baud_speed`] 认识的两档（115200 默认 / 9600）：9600 是
-//! 0.0.7 方案 P3 的合法降速处置，不预设更大的波特率动物园。
+//! 波特率只收 [`rr3_uart_baud_speed`] 认识的三档（115200 默认 / 9600 降速 /
+//! 921600 高速）：9600 是 0.0.7 方案 P3 的合法降速处置；921600 是 0.0.5 增补轮五
+//! 批D② 按带宽账加的高速档（音频上行双通道 16kHz×16bit ≈ 512kbps，115200 载
+//! 不动、921600 有效 ≈ 737kbps 可承载）。缺省 115200 不变（Q1=(a) 裁定），高速
+//! 档只显式选择——不预设更大的波特率动物园。
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -70,6 +73,8 @@ mod imp {
     /// macOS 直接用字面波特率当 speed 常量（SDK sys/termios.h：`#define B115200 115200`）
     pub const B115200: SpeedT = 115200;
     pub const B9600: SpeedT = 9600;
+    /// macOS 字面波特率（SDK sys/termios.h：`#define B921600 921600`，批D② 高速档）
+    pub const B921600: SpeedT = 921600;
     /// SDK sys/termios.h：`#define NCCS 20`、`#define VMIN 16`、`#define VTIME 17`
     pub const NCCS: usize = 20;
     pub const VMIN: usize = 16;
@@ -120,6 +125,8 @@ mod imp {
     /// Linux uapi asm-generic/termbits.h：`#define B115200 0010002`（八进制）
     pub const B115200: SpeedT = 0o10002;
     pub const B9600: SpeedT = 0o14;
+    /// Linux uapi asm-generic/termbits.h：`#define B921600 0010007`（八进制，批D②）
+    pub const B921600: SpeedT = 0o10007;
     /// Linux：`#define NCCS 32`、`#define VMIN 6`、`#define VTIME 5`
     pub const NCCS: usize = 32;
     pub const VMIN: usize = 6;
@@ -163,7 +170,9 @@ mod imp {
     }
 }
 
-use imp::{SpeedT, Termios, B115200, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, TCIFLUSH, VMIN, VTIME};
+use imp::{
+    SpeedT, Termios, B115200, B921600, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, TCIFLUSH, VMIN, VTIME,
+};
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
 use std::collections::HashMap;
@@ -203,15 +212,19 @@ extern "C" {
     fn c_cfsetospeed(termios_p: *mut Termios, speed: SpeedT) -> i32;
 }
 
-/// 波特率 → `speed_t`。只认两档：115200（默认）与 9600（P3 合法降速）。
-/// 不在档位上报错——静默降到最近的档位等于把线路参数交给运气。
+/// 波特率 → `speed_t`。只认三档：115200（默认）、9600（P3 合法降速）与 921600
+/// （批D② 音频上行高速档）。不在档位上报错——静默降到最近的档位等于把线路参数
+/// 交给运气。
 pub fn rr3_uart_baud_speed(baud: u32) -> std::io::Result<SpeedT> {
     match baud {
         115200 => Ok(B115200),
         9600 => Ok(B9600),
+        921600 => Ok(B921600),
         other => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("不支持的波特率 {other}：只支持 115200（默认）与 9600（P3 降速档）"),
+            format!(
+                "不支持的波特率 {other}：只支持 115200（默认）、9600（P3 降速档）与 921600（批D② 高速档）"
+            ),
         )),
     }
 }
@@ -308,7 +321,7 @@ impl Rr3UartConn {
         Self::open_with_baud(path, RR3_UART_BAUD_DEFAULT)
     }
 
-    /// 打开串口设备并配 raw 模式，波特率显式给定（只收 115200/9600）。
+    /// 打开串口设备并配 raw 模式，波特率显式给定（只收 115200/9600/921600）。
     pub fn open_with_baud(path: &Path, baud: u32) -> std::io::Result<Self> {
         let speed = rr3_uart_baud_speed(baud)?;
         // 排他登记先行：guard 拿不到就不开数据 fd，报错点名叫人（fail-closed）。
@@ -671,13 +684,14 @@ mod tests {
         );
     }
 
-    /// 波特率档位表：两档内放行，档位外拒绝（静默换档是线路事故）。
+    /// 波特率档位表：三档内放行，档位外拒绝（静默换档是线路事故）。
     #[test]
     fn uart_baud_speed_table() {
         assert!(rr3_uart_baud_speed(115200).is_ok());
         assert!(rr3_uart_baud_speed(9600).is_ok());
-        assert!(rr3_uart_baud_speed(921600).is_err());
+        assert!(rr3_uart_baud_speed(921600).is_ok());
         assert!(rr3_uart_baud_speed(0).is_err());
+        assert!(rr3_uart_baud_speed(230400).is_err(), "档位动物园不得静默扩张");
     }
 
     /// 排他开口·同进程重入（批G G0 守门用例）：同一节点同进程两次 open 都放行

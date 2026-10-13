@@ -54,7 +54,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
     };
     reply(
         &mut io.uart,
-        "READY periph-base v0.3.3 ctrl/runtime split + serial-servo (type HELP for commands)",
+        "READY periph-base v0.4.0 ctrl/runtime split + serial-servo + baud921600 (type HELP for commands)",
     );
     loop {
         // 先清 outbox（运行面异步回包：SCAN 逐点等），再窥视下一字节

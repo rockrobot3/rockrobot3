@@ -61,11 +61,12 @@ fn main() -> ExitCode {
 
 /// 用法文本（参数名 §5.1.2 钉死：--uart / --baud / --socket）。
 const USAGE: &str =
-    "用法: rr3-bridge --uart <串口设备> --socket <rrd套接字路径> [--baud <115200|9600>]";
+    "用法: rr3-bridge --uart <串口设备> --socket <rrd套接字路径> [--baud <115200|9600|921600>]";
 
 /// CLI 解析（未知参数即错——脚本工具的第一错法是静默忽略拼写错误）。
-/// 波特率只收两档（115200 缺省 / 9600 降速档），档位外即错：静默换档是线路事故，
-/// 与 rr-ipc `rr3_uart_baud_speed` 同一张表，错误在解析期显形而不是深到 open 才炸。
+/// 波特率收 rr-ipc 档位表全部三档（115200 缺省 / 9600 降速档 / 921600 批D②
+/// 高速档），档位外即错：静默换档是线路事故——与 rr-ipc
+/// `rr3_uart_baud_speed` 同一张表（真值单点），错误在解析期显形而不是深到 open 才炸。
 pub fn parse_args(args: &[String]) -> Result<link::BridgeConfig, String> {
     let mut uart: Option<PathBuf> = None;
     let mut socket: Option<PathBuf> = None;
@@ -97,7 +98,8 @@ pub fn parse_args(args: &[String]) -> Result<link::BridgeConfig, String> {
     }
     let uart = uart.ok_or("缺 --uart（UART 设备路径）")?;
     let socket = socket.ok_or("缺 --socket（rrd 套接字路径）")?;
-    // 档位校验在这里显形（rr3_uart_baud_speed 同表）；桥不认识第三档。
+    // 档位校验在这里显形（rr3_uart_baud_speed 同表，三档白名单真值单点在
+    // rr-ipc）；桥不自持档位清单。
     rr_ipc::transport::uart::rr3_uart_baud_speed(baud)
         .map_err(|e| format!("--baud {baud} 不可用: {e}"))?;
     Ok(link::BridgeConfig { uart, baud, socket })
@@ -142,19 +144,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_baud_only_two_speeds() {
+    fn parse_baud_tier_table() {
         let ok = parse_args(&args(&[
             "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "9600",
         ]))
         .expect("9600 是 P3 合法降速档");
         assert_eq!(ok.baud, 9600);
-        assert!(
-            parse_args(&args(&[
-                "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "921600"
-            ]))
-            .is_err(),
-            "档位外必须在解析期报错（静默换档是线路事故）"
-        );
+        let hi = parse_args(&args(&[
+            "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "921600",
+        ]))
+        .expect("921600 是批D② 合法高速档");
+        assert_eq!(hi.baud, 921600);
+        assert!(parse_args(&args(&[
+            "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "230400"
+        ]))
+        .is_err(), "档位外必须在解析期报错（静默换档是线路事故）");
         assert!(parse_args(&args(&[
             "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "abc"
         ]))
