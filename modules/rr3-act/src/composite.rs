@@ -38,6 +38,7 @@ mod servo;
 use std::time::Duration;
 
 use rr_bus::{Rr3BusClient, Rr3TimeBase};
+use rr_core::control::Rr3LowGate;
 use rr_hal::{backend::rr3_hal_gpio_out, backend::rr3_hal_servo, Rr3GpioOut, Rr3PwmServo};
 use rr_ipc::{opcode, Rr3PayloadType};
 use serde_json::{json, Value};
@@ -45,14 +46,25 @@ use serde_json::{json, Value};
 use led::{Rr3Led, Rr3LedEffect};
 use servo::Rr3ServoCfg;
 
+/// 低电禁动拒因（MC-5，§20 ② ③）：点名是哪条执行令被闸门拒了、解禁口径、
+/// 以及"不自动重放被拒的令"（拒因回显，由上层决定是否重发）。
+fn rr3_low_power_reject(what: &str) -> String {
+    format!("低电禁动：{what} 拒动（回阈 + 迟滞后解禁，不自动重放）")
+}
+
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
 const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
 
 /// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
 const RR3_ACT_CONFIG_ENV: &str = "RR3_ACT_CONFIG";
 
-/// 订阅面唯一主题（module.toml [events].subscribes 同源）
+/// 订阅面主题之一（module.toml [events].subscribes 同源）：意图面
 const RR3_INTENT_TOPIC: &str = "rr3-brain/intent/result";
+
+/// 订阅面主题之二（MCP-3 申报 2026-10-12）：rrd 的低电旗广播——低电禁动闸门的
+/// **唯一触发源**（0.0.5 §20 ② ①：判定已在 power 侧、rrd 置旗已在，件内不再判定
+/// 电压，避免第三真值点）。帧体 `{topic, reason:"battery-low", percent, voltage_mv}`。
+const RR3_SYSTEM_POWER_TOPIC: &str = "rr3-runtime/system/power";
 
 /// 收帧等待上界：无帧时空转一圈的代价，值不敏感（心跳在独立线程）
 const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
@@ -127,10 +139,11 @@ pub fn rr3_act_run() -> Result<(), String> {
         .spawn(move || reflex::rr3_reflex_loop(cfg.reflex, reflex_bus))
         .map_err(|e| format!("起反射环宿主线程失败: {e}"))?;
 
-    // 主循环状态：限速门 + 流序
+    // 主循环状态：限速门 + 流序 + 低电禁动闸门（MC-5：初态开，未低电不禁动）
     let mut servo_seq: u64 = 0;
     let mut relay_seq: u64 = 0;
     let mut servo_gate = servo::Rr3RateGate::rr3_gate_new(cfg.servo.state_min_interval_ms);
+    let mut low_gate = Rr3LowGate::rr3_low_gate_new();
 
     loop {
         // led 节拍（批I A-1：线程上收组合件）：每圈先推状态机，眨眼到点即落
@@ -159,17 +172,26 @@ pub fn rr3_act_run() -> Result<(), String> {
                 let topic = params.get("topic").and_then(Value::as_str).unwrap_or("");
                 let args = params.get("args").cloned().unwrap_or(Value::Null);
 
-                // 业务性失败折 error 应答（请求-应答语义），不当致命错误
+                // 业务性失败折 error 应答（请求-应答语义），不当致命错误。
+                // 低电禁动闸门（MC-5 §20 ② ②）：只辖**执行面** servo/relay（点名与
+                // 意图两路同判），**妆面 led 不禁**（禁动它只增加卡死面积）。
+                let blocked = low_gate.rr3_low_gate_is_blocked();
                 let outcome = match topic {
                     servo::RR3_SERVO_COMMAND_TOPIC => {
-                        rr3_handle_servo(&mut *servo_dev, &cfg.servo, &args)
+                        rr3_handle_servo(&mut *servo_dev, &cfg.servo, &args, blocked)
                     }
                     led::RR3_LED_EFFECT_TOPIC => {
                         rr3_handle_led(&mut led_ctrl, &mut *led_gpio, &args, tb.rr3_now_ms())
                     }
-                    relay::RR3_RELAY_SET_TOPIC => rr3_relay_parse_args(&args)
-                        .and_then(|on| relay::rr3_relay_apply(&mut *relay_gpio, on))
-                        .map(|(on, prev)| (rr3_relay_result(on), None, Some((on, prev)))),
+                    relay::RR3_RELAY_SET_TOPIC => {
+                        if blocked {
+                            Err(rr3_low_power_reject(relay::RR3_RELAY_SET_TOPIC))
+                        } else {
+                            rr3_relay_parse_args(&args)
+                                .and_then(|on| relay::rr3_relay_apply(&mut *relay_gpio, on))
+                                .map(|(on, prev)| (rr3_relay_result(on), None, Some((on, prev))))
+                        }
+                    }
                     other => Err(format!(
                         "rr3-act 只 exposes {}/{}/{}，收到 {other}",
                         servo::RR3_SERVO_COMMAND_TOPIC,
@@ -215,7 +237,19 @@ pub fn rr3_act_run() -> Result<(), String> {
             // 生效即发 relay/state 摘要；拒执行/非法载荷点名折日志（业务性失败）；
             // 无 actions 字段即纯对话轮，记一行日志。
             if let Ok((_, body)) = Rr3BusClient::rr3_frame_body(&frame) {
-                if body.get("topic").and_then(Value::as_str) != Some(RR3_INTENT_TOPIC) {
+                let topic = body.get("topic").and_then(Value::as_str).unwrap_or("");
+                // 低电禁动闸门（MC-5 §20 ② ①）：触发源唯一 = rrd 低电旗广播
+                // `rr3-runtime/system/power`（判定已在 power 侧、rrd 置旗已在，件内
+                // 不再判定电压）。置位即闭锁执行面；trip 自带去抖（同段重复广播只记账一次）。
+                if topic == RR3_SYSTEM_POWER_TOPIC {
+                    if low_gate.rr3_low_gate_trip() {
+                        println!(
+                            "低电禁动：执行面（servo/relay）闭锁，妆面不受辖（{RR3_SYSTEM_POWER_TOPIC}）"
+                        );
+                    }
+                    continue;
+                }
+                if topic != RR3_INTENT_TOPIC {
                     continue;
                 }
                 let trace = body.get("trace").and_then(Value::as_u64).unwrap_or(0);
@@ -229,6 +263,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                             &mut *relay_gpio,
                             &mut *servo_dev,
                             &cfg.servo,
+                            low_gate.rr3_low_gate_is_blocked(),
                         ) {
                             match r {
                                 Ok(intent::Rr3IntentOutcome::Relay(on, prev)) => {
@@ -281,12 +316,18 @@ pub fn rr3_act_run() -> Result<(), String> {
 /// （relay 面才有——A-7 同态抑制的组合件侧原料）)。Err = 业务性失败折 result.error。
 type Rr3CallOutcome = Result<(Value, Option<u16>, Option<(bool, bool)>), String>;
 
-/// servo/command 点名：参数裁决 → HAL 落角 → 回 (应答体, 待发的 state 角度, relay 无)
+/// servo/command 点名：低电闸门 → 参数裁决 → HAL 落角 → 回 (应答体, 待发的 state
+/// 角度, relay 无)。`blocked` = 低电禁动闸门闭锁（MC-5：闸门先于参数裁决，
+/// 闭锁期一律拒动，拒因明确点名低电）。
 fn rr3_handle_servo(
     servo: &mut dyn Rr3PwmServo,
     cfg: &Rr3ServoCfg,
     args: &Value,
+    blocked: bool,
 ) -> Rr3CallOutcome {
+    if blocked {
+        return Err(rr3_low_power_reject(servo::RR3_SERVO_COMMAND_TOPIC));
+    }
     let (angle, move_ms) = rr3_servo_parse_args(args, cfg)?;
     // 安全核钳位最后包一道（批D₃ 裁定 5：安全核永远包住控制图）——上游裁决
     // 被绕过时输出也不越行程；输入合法时恒等，行为守恒
