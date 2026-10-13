@@ -8,6 +8,11 @@ schema_version = 2
 handles = [
   { trait = "Rr3AudioSink", desc_key = "alsa_device" },
 ]
-# 预缓冲/音量（§3）目前无 config 键读者（批I I-1 已删键），故无 ops 槽——
-# 真件实装时按"音量/预缓冲进 ops 槽"回归（§3 逐槽落位）
-ops = []
+# 预缓冲/音量（§3）：MC-2 实装回归——两键从 config.toml [rr3-interact.player]
+# 经本表 ops 槽声明进件（组合件读入透传，机制面 rr3_tts_apply_gain/
+# rr3_tts_prebuffer_ready 吃值），legacy 0cf029e 语义（起播水位抗抖动、样点
+# 整型增益饱和）。
+ops = [
+  { slot = "prebuffer_ms", src_key = "rr3-interact.player.prebuffer_ms" },
+  { slot = "volume_pct", src_key = "rr3-interact.player.volume_pct" },
+]
