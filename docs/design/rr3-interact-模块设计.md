@@ -41,7 +41,7 @@
 
 | 件 | `handles` | `ops` 槽（现状 vs 目标） | 非法收敛 |
 |---|---|---|---|
-| face | `dyn Rr3Display` ← `[hardware]` **无显示键**（现只有 ALSA/PWM/GPIO/I2C/link 九键） → 需扩键（走 C4 契约评审） | `non_pointable ← [rr3-interact.face] non_pointable`（**I-11 已落**：不可点名集；`default_expression: string` 现仍无人读）；帧推进周期 250 ms（代码常量） | 无屏 → 格缺，不调帧机 |
+| face | `dyn Rr3Display` ← `rr3_hal_display()` 环境档解析（`RR3_HAL_BACKEND=esp32` 桥后端 + `RR3_HAL_PERIPH_UART` 设备路径；`[hardware]` **不扩键**——MCP-2 随 R31 Q2 作废登记，九键闭合表维持；缺 env 落 `Rr3UnavailableSource`，探活失败 `exit(1)`） | `non_pointable ← [rr3-interact.face] non_pointable`（**I-11 已落**：不可点名集；`default_expression: string` 现仍无人读）；帧推进周期 250 ms（代码常量） | 无屏 → 格缺，不调帧机 |
 | player | `dyn Rr3AudioSink` ← `[hardware].alsa_device` | `prebuffer_ms=500`、`volume_pct=70`（**MC-2 已落**：config `[rr3-interact.player]` 键回归 + `atoms/player/assemble.toml` ops 槽两条，组合件读入透传——缺键回落默认、类型错/负数/增益越界 0..=1000 逐键拒 boot；机制面 `rr3_tts_apply_gain` i64 中间量整型饱和、`rr3_tts_prebuffer_ready` 起播水位 legacy `0cf029e` 语义）；字符估时长已随 MC-1 删（播放时长由样点数导出，20ms 分块 = 契约字面量 `RR3_TTS_BLOCK_SAMPLES=320`/`RR3_TTS_SAMPLE_RATE=16_000`） | 无 sink / 缓冲对账不过 → `tts/text` 回拒因 + 计数，**不得静默吞文本** |
 | panel | 无句柄（TCP） | `RR3_PANEL_ADDR` env；`bind`/`port` 在 config 里但**未被读** → 二者取一（删或读） | 地址非法 → 起不来即 `exit(1)` |
 
@@ -160,7 +160,7 @@
 | `src/panel/server.rs` | `RR3_PANEL_ADDR_DEFAULT="127.0.0.1:8080"`、`RR3_PANEL_MAX_CONNS=8`、`RR3_PANEL_READ_TIMEOUT/CALL_TIMEOUT=5s`、`HEADER_LIMIT=8*1024`、`BODY_LIMIT=4*1024` | 监听面与防护上界 | 有 | 并发/超时/上界 = **ops 槽**（安全相关的上界可留件内，但必须登记）；地址缺省 = config `[panel] bind/port` 的正解，今天两处真值 |
 | `src/panel/server.rs` 路由 + `src/panel/www/index.html` | 11 条 `/api/*` + `/`、三枚透传主题、四枚 `rr3.ctl.*` 方法、id 1/2/3/4、body 键 `on`/`expression`；页面**逐字复读**这些串并读 `result.played_ms/previous/ssid/connected` | 端点白名单 = 对外可观测面 | 有 | **契约字面量—不许动**；但"后端一份、页面一份"的**双写是债**（改一端必漂移）→ 由 `/api/meta` 下发或生成器产页（I-12） |
 | `atoms/face/mech.rs : rr3_face_set` 报错文案 | `"不可被点名（本形态不可点名集 talk）"`、`"不认表情 {expr:?}（允许 …）"` | 应答文案 | 有 | **契约字面量—不许动**（I-11 后"不可点名"拒因由注入集渲染，空集显示 `(空)`） |
-| `atoms/face/mech.rs : RR3_FRAMES_*` | 11 帧 `0b0110_0110` 一类 8×8 位模式 | 渲染**数据**（不是阈值） | 有 | 不是策略，但也不该焊在 `mech.rs`：随批F5a 显示 trait 落 sim 后端 / 描述符数据面（帧表 = 板面事实） |
+| `atoms/face/mech.rs : RR3_FRAMES_*` | 11 帧 `0b0110_0110` 一类 8×8 位模式 | 渲染**数据**（不是阈值） | 有 | 不是策略，但也不该焊在 `mech.rs`（R-12：换屏必须重画帧）——**2026-10-13 MC-3 复核余数**：R31 Q2 后板面数据落点 = ESP32 板侧渲染（批C `expr_eye_base` 胶囊眼基态 + 微动作已落 `tools/esp32-periph-base/src/oled.rs`），但宿主生产链仍走位图变体（composite 250ms tick 推 `RR3_FRAMES_*` → 桥 `frame` 变体 → 板 `frame_mode`），件内表仍是唯一真值——余数 = 出帧链切板面数据 + 件内表退役/降 sim 档专用，归属待裁（0.0.5 方案 §19 MC-3 行） |
 | `src/panel/server.rs : SelfTest` | `"happy"` | 自检用表情 | 有 | ops 槽（自检期望不该硬编码） |
 | `atoms/face/assemble.toml` | `handles = []`、`ops = [{slot="non_pointable" ← rr3-interact.face.non_pointable}]`；player 件 `handles = [{Rr3AudioSink ← alsa_device}]`、`ops = [{prebuffer_ms ← rr3-interact.player.prebuffer_ms}、{volume_pct ← rr3-interact.player.volume_pct}]`（**MC-2 落**） | 注入面申报 | **face 报 ops（I-11）/ player 报 handle + ops（L-5/MC-2）** | face 无可用显示句柄（`[hardware]` 连显示键都没有，I-2 前置 C4）→ `handles` 仍空，但 ops 非空故不写 `no_injection`（rr-registry 形状级规则：该键只允许两数组都空）。`default_expression` 槽待显示键落地时补 |
 
