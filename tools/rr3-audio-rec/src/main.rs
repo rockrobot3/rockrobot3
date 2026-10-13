@@ -14,23 +14,29 @@
 //! - 开口 settle 纪律（批C 实锤）：CP2102 DTR/RTS 翻转会复位板子，open 后停 1.2s
 //!   再 `rr3_flush_input` 净化复位 banner 残留，然后才发 `AUDIO ON`；
 //! - seq 连续性记账（wrapping u32）：断档即板侧背压丢片（`INFO` 的 `drop` 互为
-//!   对账），收流端只对账不补救（fail-honest：wav 是真实收到的流）。
-//! - 长流楔死看门狗（d4 600s 实锤）：rr-ipc uart 读为 VMIN=1/VTIME=0 纯阻塞，
-//!   宿主/驱动层丢字节后帧层等幻影帧尾会**永不返回**。收流端逐片增量落盘 +
-//!   看门狗线程：武装后 [`STALL`] 无新分片字节即补 wav 头（data_len=已落盘字节）
-//!   保住已收数据并 exit(3)——机制面不动（阻塞读是 rr-ipc 其余用户的正当语义），
-//!   防护落在本件策略面。
-//! - 失步重同步（同源实锤）：帧头 magic 线上字节 = "1ERA"（全 b64 字母表字符），
-//!   失步后在载荷里撞上即"合法幻影帧头"+ 天文 payload_len。连续
-//!   [`ERR_STREAK_RESYNC`] 次收帧失败即 magic 扫描对齐续收——断档帧由 seq
-//!   对账如实记账，只求不死不冒领。
+//!   对账）；大步进（≥ 0x8000_0000）= 板侧重启记 `restarts`，不按 wrapping 补
+//!   天文 gap。收流端只对账不补救（fail-honest：wav 是真实收到的流）。
+//! - 三级防护（0.0.5 批D④ d4 600s 实锤；机制与策略分离）：
+//!   ① 读超时——机制面 rr-ipc `rr3_read_timeout`（poll 等就绪，`Ok(0)`=此刻无
+//!   数据非 EOF），本件帧读/应答读全走超时档；阻塞读缺省语义保持为 rr-ipc
+//!   其余用户（桥/哨兵）不动。
+//!   ② 失步重同步——帧头 magic 线上字节 = "1ERA"（全 b64 字母表字符），失步后
+//!   在载荷里撞上即"合法幻影帧头"+ 天文 payload_len。连续 [`ERR_STREAK_RESYNC`]
+//!   次收帧失败即 magic 扫描对齐续收；连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s
+//!   静默）= 线上断流，扫描救不了，转 ③。
+//!   ③ 断流重连——重开口 settle + AUDIO ON 续收（开口翻转复位板子 → seq 重走
+//!   → `restarts` 记账）。
+//!   看门狗（逐片增量落盘 + 武装后 [`STALL`] 无新分片字节 → 补 wav 恢复头
+//!   exit(3)）是最外层兜底；重连周期盖得住 [`STALL`] 不误触发。
 //!
 //! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
 //! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=921600（板面批D② 落板档；
 //! 波特率仍过 rr-ipc 档位表白名单，不预设动物园）。
+//! 退出码：0=收兵；1=开口/握手/0 分片；2=参数错；3=看门狗停滞恢复；4=重连失败
+//! （3/4 都先补恢复头保住已落盘数据再退）。
 
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Read as _, Seek, SeekFrom, Write as _};
+use std::io::{BufWriter, Seek, SeekFrom, Write as _};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -56,8 +62,9 @@ const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 开口 settle（CP2102 DTR/RTS 翻转复位板子的既定时序，批C 实锤）。
 const SETTLE: Duration = Duration::from_millis(1200);
 /// 停滞死线（看门狗）：武装后无新分片字节即判停滞。分片节拍 128ms/片，
-/// 3s ≈ 24 片空窗——正常流不可达，触发即实锤线上断流/驱动丢字节。
-const STALL: Duration = Duration::from_secs(3);
+/// 10s ≈ 78 片空窗——正常流不可达；重连周期（settle 1.2s + 握手 ≤4.2s）与
+/// 重同步窗口（1.6s）都盖得住不误触发，触发即实锤重连后仍无流。
+const STALL: Duration = Duration::from_secs(10);
 /// 帧头 magic 小端线上字节（contracts/README.md 歧义裁定：字段值 0x41524531
 /// 小端存储 = 31 45 52 41 = "1ERA"——与 rr-ipc protocol::header 同值锚定，
 /// 板不依赖 rr-core、收流端常量自证同纪律）。b64 载荷里也会出现该子串，
@@ -66,6 +73,18 @@ const RR3_MAGIC_LE: [u8; 4] = 0x41524531u32.to_le_bytes();
 /// 连续收帧失败达此数即判失步，触发 magic 扫描重同步（1-2 次可能是单帧毛刺，
 /// 3 次 = 帧界已丢，盲目重试只会撞幻影帧头）。
 const ERR_STREAK_RESYNC: u64 = 3;
+/// 帧读超时（毫秒，机制面 `rr3_read_timeout`）：单次等就绪时长。正常流分片
+/// 背靠背（921600 线速 ~89ms/片），200ms 静默 = 此读无数据（EOF 形状上交帧层
+/// → `Closed`/`Torn*` 报错计 err_streak）；连续 3 次 → 重同步。缺省阻塞读
+/// 语义留给其余用户，本件全部走超时档。
+const READ_TIMEOUT_MS: i32 = 200;
+/// 应答行逐字节超时（毫秒）：板面应答整行一次写出（write_all + wait_tx_done），
+/// 3s 无字节 = 板面哑了（握手路径点名失败，不再无限等）。
+const REPLY_TIMEOUT_MS: i32 = 3000;
+/// 重同步零读宽限：连续 8 次 200ms 零读 = 1.6s 连续静默 → 扫 magic 也救不了
+/// （线上断流），resync 返回 None 交主循环重连。数据在流时 256B 块 ~10ms 即满，
+/// 零读必然是真静默（连续计数，数据一恢复即清零续扫）。
+const RESYNC_ZERO_BAIL: u32 = 8;
 
 // ---------------------------------------------------------------------------
 
@@ -220,10 +239,12 @@ fn parse_audio_event(frame: &Rr3Frame) -> Result<AudioChunk, String> {
 }
 
 /// seq 连续性记账（wrapping u32）：断档数 = (seq - prev) - 1（wrapping 域），
-/// 首片记账不断档。
+/// 首片记账不断档；大步进（≥ 0x8000_0000）= 板侧重启（重连开口翻转复位，seq
+/// 归零重走）记 `restarts`——合法事件，不按 wrapping 补天文 gap。
 struct SeqTracker {
     prev: Option<u32>,
     gaps: u64,
+    restarts: u64,
 }
 
 /// DoA 冒烟面（`--doa`，批D⑤ 判据③）：逐 1s 窗双通道 ILD 出角。
@@ -328,7 +349,10 @@ impl SeqTracker {
     fn feed(&mut self, seq: u32) -> u64 {
         if let Some(prev) = self.prev {
             let step = seq.wrapping_sub(prev);
-            if step > 1 {
+            if step >= 0x8000_0000 {
+                // 板侧重启：seq 归零重走是合法事件，不是天文丢片
+                self.restarts += 1;
+            } else if step > 1 {
                 self.gaps += (step - 1) as u64;
             }
         }
@@ -344,6 +368,21 @@ struct FrameStream<'a> {
     conn: &'a mut Rr3UartConn,
     pre: Vec<u8>,
     pos: usize,
+    /// 帧读超时（毫秒，机制面 `rr3_read_timeout`）：`Ok(0)` = 此刻无数据（非
+    /// EOF），帧层以 EOF 形状（`Closed`/`Torn*`）上交——主循环按 err_streak
+    /// 走重同步/重连，楔死不再可能。
+    timeout: i32,
+}
+
+impl<'a> FrameStream<'a> {
+    fn new(conn: &'a mut Rr3UartConn) -> Self {
+        Self {
+            conn,
+            pre: Vec::new(),
+            pos: 0,
+            timeout: READ_TIMEOUT_MS,
+        }
+    }
 }
 
 impl Rr3ByteStream for FrameStream<'_> {
@@ -354,7 +393,7 @@ impl Rr3ByteStream for FrameStream<'_> {
             self.pos += n;
             return n;
         }
-        self.conn.read(buf).unwrap_or(0)
+        self.conn.rr3_read_timeout(buf, self.timeout).unwrap_or(0)
     }
 
     fn rr3_write_all_bytes(&mut self, buf: &[u8]) -> usize {
@@ -366,25 +405,32 @@ impl Rr3ByteStream for FrameStream<'_> {
 }
 
 impl FrameStream<'_> {
-    /// 失步重同步（收流端策略面）：逐字节滑动窗口扫 [`RR3_MAGIC_LE`]，对齐即把
-    /// 4B magic 塞进 `pre` 回放进帧层（既有接缝，零第二份帧语义）——后续 124B
-    /// 头照常读。返回弃扫的字节数（诊断显示）。扫中 b64 里的幻影 "1ERA" 也会
-    /// 返回，但那读出来的头必 BadMagic → 连续失败再次触发重同步，收敛到真帧头。
-    /// 流死了就阻塞在 read 上——由看门狗按停滞兜底，本方法只管扫。
-    fn resync(&mut self) -> u64 {
+    /// 失步重同步（收流端策略面，三级防护第 ② 级）：逐字节滑动窗口扫
+    /// [`RR3_MAGIC_LE`]，对齐即把 4B magic 塞进 `pre` 回放进帧层（既有接缝，零
+    /// 第二份帧语义）——后续 124B 头照常读。返回弃扫的字节数（诊断显示）。扫中
+    /// b64 里的幻影 "1ERA" 也会返回，但那读出来的头必 BadMagic → 连续失败再次
+    /// 触发重同步，收敛到真帧头。连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s 静默）
+    /// = 线上断流，扫描救不了，返回 None 交主循环重连（第 ③ 级）。
+    fn resync(&mut self) -> Option<u64> {
         let mut win = [0u8; 3]; // magic 前 3 字节滑动历史（第 4 字节逐个比）
         let mut n = 0u64;
+        let mut zeros = 0u32;
         let mut buf = [0u8; 256];
         loop {
             let got = self.rr3_read_into(&mut buf);
             if got == 0 {
-                continue; // 阻塞语义下不该出现；防御性继续
+                zeros += 1;
+                if zeros >= RESYNC_ZERO_BAIL {
+                    return None; // 1.6s 连续静默 = 断流
+                }
+                continue;
             }
+            zeros = 0; // 数据一恢复即清零续扫（连续静默才判死）
             for &b in &buf[..got] {
                 if win == RR3_MAGIC_LE[..3] && b == RR3_MAGIC_LE[3] {
                     self.pre = RR3_MAGIC_LE.to_vec();
                     self.pos = 0;
-                    return n + 1;
+                    return Some(n + 1);
                 }
                 win[0] = win[1];
                 win[1] = win[2];
@@ -395,14 +441,18 @@ impl FrameStream<'_> {
     }
 }
 
-/// 收一行（阻塞逐字节；'\r' 剥离；换行即返回）。
+/// 收一行（逐字节超时读 [`REPLY_TIMEOUT_MS`]；'\r' 剥离；换行即返回）。
+/// 超时无字节即 Err（板面哑了——握手路径据此点名，不再无限等）。
 fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error> {
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
     loop {
-        let n = conn.read(&mut byte)?;
+        let n = conn.rr3_read_timeout(&mut byte, REPLY_TIMEOUT_MS)?;
         if n == 0 {
-            continue;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("应答 {REPLY_TIMEOUT_MS}ms 无字节"),
+            ));
         }
         match byte[0] {
             b'\n' => {
@@ -414,6 +464,36 @@ fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error> {
             b => line.push(b),
         }
     }
+}
+
+/// 开口握手（首连/重连同款，批C settle 纪律）：停 1.2s 让开口翻转的板复位走完
+/// → 冲残留 → `AUDIO ON` → 核验应答。Ok(应答行)；板面拒收/IO 失败 Err 点名。
+fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
+    std::thread::sleep(SETTLE);
+    conn.rr3_flush_input()
+        .map_err(|e| format!("flush 失败: {e}"))?;
+    conn.write_all(b"AUDIO ON\n")
+        .map_err(|e| format!("发 AUDIO ON 失败: {e}"))?;
+    let reply = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
+    println!("[rec] board reply: {reply:?}");
+    if !reply.starts_with("OK") {
+        return Err(format!("板面拒收（{reply:?}）"));
+    }
+    Ok(reply)
+}
+
+/// fail-honest 退出（重连失败路径）：已落盘数据补恢复头保住，exit(4) 点名。
+/// （看门狗 exit(3) 同款恢复头逻辑——两路独立小段，不抽象共享。）
+fn bail_with_recovery(out_path: &std::path::Path, total_bytes: u64, watch: &WatchState) -> ! {
+    let data_len = total_bytes as u32;
+    let rate = watch.rate.load(Ordering::Acquire);
+    if let Err(e) = OpenOptions::new().write(true).open(out_path).and_then(|mut f| {
+        f.seek(SeekFrom::Start(0))?;
+        f.write_all(&wav_header(data_len, 2, rate, 16))
+    }) {
+        eprintln!("[rec] 恢复头补写失败 {}: {e}", out_path.display());
+    }
+    std::process::exit(4);
 }
 
 /// 看门狗共享账（主线程逐片推进，看门狗线程只读）：停滞判据 = 已落盘字节不再
@@ -484,28 +564,9 @@ fn main() {
             std::process::exit(1);
         }
     };
-    // settle 纪律：开口翻转复位板子 → 板 reboot banner 在开口 flush 之后才进队，
-    // 停 1.2s 让复位走完再冲一次（批C 实锤），随后才发 AUDIO ON。
-    std::thread::sleep(SETTLE);
-    if let Err(e) = conn.rr3_flush_input() {
-        eprintln!("rr3-audio-rec: flush 失败: {e}");
-        std::process::exit(1);
-    }
-    if let Err(e) = conn.write_all(b"AUDIO ON\n") {
-        eprintln!("rr3-audio-rec: 发 AUDIO ON 失败: {e}");
-        std::process::exit(1);
-    }
-    let leftover = Vec::new();
-    let reply = match read_reply_line(&mut conn) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("rr3-audio-rec: 读应答失败: {e}");
-            std::process::exit(1);
-        }
-    };
-    println!("[rec] board reply: {reply:?}");
-    if !reply.starts_with("OK") {
-        eprintln!("rr3-audio-rec: 板面拒收（{reply:?}），不收流");
+    // 首连握手（重连同款路径，见 handshake；开口翻转复位板子 → settle 后冲残留）
+    if let Err(e) = handshake(&mut conn) {
+        eprintln!("rr3-audio-rec: 握手失败: {e}");
         std::process::exit(1);
     }
 
@@ -539,21 +600,22 @@ fn main() {
     let mut tracker = SeqTracker {
         prev: None,
         gaps: 0,
+        restarts: 0,
     };
     let mut doa = DoaTracker::new();
     let mut chunks = 0u64;
     let mut errors = 0u64;
     let mut err_streak = 0u64; // 连续收帧失败（好片即清零；达阈值触发重同步）
     let mut resyncs = 0u64;
+    let mut reconnects = 0u64;
     let mut total_bytes = 0u64;
-    let mut first_frame: Option<Instant> = None;
     let mut last_frame: Option<Instant> = None;
+    // 连续段实测率锚 (锚时刻, 锚时帧数)：断档/重启/重同步/重连/首片即重新锚定
+    // ——断流空洞不摊进实测率分母（旧版首末墙钟摊全程，断流后实测率被稀释）。
+    let mut rate_anchor: Option<(Instant, u64)> = None;
+    let mut need_reanchor = false; // resync/reconnect 后下一好片重新锚定
     let deadline = Instant::now() + Duration::from_secs(args.secs);
-    let mut fs = FrameStream {
-        conn: &mut conn,
-        pre: leftover,
-        pos: 0,
-    };
+    let mut fs = FrameStream::new(&mut conn);
     println!(
         "[rec] streaming {}s @ {} ({})…",
         args.secs, args.baud, args.device
@@ -564,9 +626,10 @@ fn main() {
                 Ok(frame) => match parse_audio_event(&frame) {
                     Ok(chunk) => {
                         let now = Instant::now();
-                        first_frame.get_or_insert(now);
                         last_frame = Some(now);
+                        let account_before = (tracker.gaps, tracker.restarts);
                         tracker.feed(chunk.seq);
+                        let broke = (tracker.gaps, tracker.restarts) != account_before;
                         chunks += 1;
                         err_streak = 0;
                         // 逐片增量落盘（看门狗保数据的前提）+ 看门狗账推进
@@ -577,22 +640,29 @@ fn main() {
                         total_bytes += chunk.samples.len() as u64;
                         watch.bytes.store(total_bytes, Ordering::Release);
                         let frames = total_bytes / 4;
-                        if let Some(a) = first_frame {
-                            let d = now.duration_since(a);
+                        // 连续段实测率：断档/重启即重新锚定（空洞不摊进分母）
+                        if broke || need_reanchor || rate_anchor.is_none() {
+                            rate_anchor = Some((now, frames));
+                            need_reanchor = false;
+                        }
+                        if let Some((t0, f0)) = rate_anchor {
+                            let d = now.duration_since(t0);
                             if d.as_secs_f64() > 0.5 {
-                                watch.rate.store(
-                                    ((frames as f64) / d.as_secs_f64()).round() as u32,
-                                    Ordering::Release,
-                                );
+                                let r =
+                                    (((frames - f0) as f64) / d.as_secs_f64()).round() as u32;
+                                if r > 0 {
+                                    watch.rate.store(r, Ordering::Release);
+                                }
                             }
                         }
                         if chunks % 8 == 0 {
                             println!(
-                                "[rec] chunk={chunks} seq={} ms={} bytes={} gaps={} err={errors} src_task={}",
+                                "[rec] chunk={chunks} seq={} ms={} bytes={} gaps={} restarts={} err={errors} src_task={}",
                                 chunk.seq,
                                 chunk.ms,
                                 total_bytes,
                                 tracker.gaps,
+                                tracker.restarts,
                                 frame.header.src_task
                             );
                         }
@@ -620,14 +690,45 @@ fn main() {
                 eprintln!("[rec] 收帧失败: {e:?}");
             }
         }
-        // 失步重同步（收流端策略面，d4 实锤）：连续失败 = 帧界已丢，盲目重试
-        // 只会在 b64 载荷里撞幻影 "1ERA" 头等天文 payload。magic 扫描对齐后
-        // 继续收；断档帧由 seq 对账如实记账（不冒领数据，只求不死）。
+        // 失步重同步（三级防护第 ② 级）：连续失败 = 帧界已丢，盲目重试只会在
+        // b64 载荷里撞幻影 "1ERA" 头等天文 payload。magic 扫描对齐后继续收；
+        // 扫描期连续静默（None）= 线上断流，升级第 ③ 级重连。断档帧由 seq
+        // 对账如实记账（不冒领数据，只求不死）。
         if err_streak >= ERR_STREAK_RESYNC {
-            let scanned = fs.resync();
-            resyncs += 1;
-            err_streak = 0;
-            eprintln!("[rec] 失步重同步 #{resyncs}：弃扫 {scanned}B 后 magic 对齐，续收");
+            match fs.resync() {
+                Some(scanned) => {
+                    resyncs += 1;
+                    err_streak = 0;
+                    need_reanchor = true;
+                    eprintln!("[rec] 失步重同步 #{resyncs}：弃扫 {scanned}B 后 magic 对齐，续收");
+                }
+                None => {
+                    // 三级防护第 ③ 级：1.6s 连续静默 = 线上断流，重开口续收
+                    reconnects += 1;
+                    drop(fs); // 还 conn 可变借用
+                    eprintln!("[rec] 重同步 1.6s 连续静默 → 断流重连 #{reconnects}");
+                    match Rr3UartConn::open_with_baud(
+                        std::path::Path::new(&args.device),
+                        args.baud,
+                    ) {
+                        Ok(c) => conn = c,
+                        Err(e) => {
+                            eprintln!("[rec] 重连开口失败: {e}");
+                            bail_with_recovery(&out_path, total_bytes, &watch);
+                        }
+                    }
+                    if let Err(e) = handshake(&mut conn) {
+                        eprintln!("[rec] 重连握手失败: {e}");
+                        // 尽力停板面流（板死则无效；INFO 探针前仍须先 OFF 兜底）
+                        let _ = conn.write_all(b"AUDIO OFF\n");
+                        bail_with_recovery(&out_path, total_bytes, &watch);
+                    }
+                    fs = FrameStream::new(&mut conn);
+                    err_streak = 0;
+                    need_reanchor = true;
+                    eprintln!("[rec] 重连 #{reconnects} 完成，续收（板侧已复位，seq 重走记 restarts）");
+                }
+            }
         }
     }
     // 收兵：先还 conn 可变借用（fs 持有 &mut conn），再发 OFF——板面队列余片
@@ -642,14 +743,25 @@ fn main() {
         let _ = std::fs::remove_file(&out_path); // 占位空壳不留垃圾
         std::process::exit(1);
     }
-    // 实测采样率：首末分片墙钟 × 总帧数（板面 I2S 实际率 ~16.6kHz 与标称 16k 有
-    // 差，wav 头按实测率写回放音高才对）。单分片（不足测）退标称 rate。
+    // 实测采样率改按**连续段**（锚后至最后一片的墙钟 × 段内帧数）：断流空洞
+    // 不摊进分母。段 <0.5s 或退化率（<1kHz，锚后无实流的边缘段）退标称 rate。
     let (frames_total, nominal_rate) = (total_bytes / 4, 16000u32);
-    let measured = match (first_frame, last_frame) {
-        (Some(a), Some(b)) if b.duration_since(a).as_secs_f64() > 0.5 => {
-            (frames_total as f64 / b.duration_since(a).as_secs_f64()).round() as u32
+    let measured = match rate_anchor {
+        Some((t0, f0)) => {
+            let end = last_frame.unwrap_or(t0);
+            let d = end.duration_since(t0).as_secs_f64();
+            let r = if d > 0.5 {
+                (((frames_total - f0) as f64) / d).round() as u32
+            } else {
+                0
+            };
+            if r >= 1000 {
+                r
+            } else {
+                nominal_rate
+            }
         }
-        _ => nominal_rate,
+        None => nominal_rate,
     };
     let data_len = total_bytes as u32;
     match wav
@@ -658,9 +770,10 @@ fn main() {
         .and_then(|()| wav.flush())
     {
         Ok(()) => println!(
-            "[rec] ✓ {}：chunks={chunks} gaps={} err={errors} resyncs={resyncs} frames={frames_total} rate={}Hz（实测）dur≈{:.1}s size={data_len}B",
+            "[rec] ✓ {}：chunks={chunks} gaps={} restarts={} err={errors} resyncs={resyncs} reconnects={reconnects} frames={frames_total} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
             out_path.display(),
             tracker.gaps,
+            tracker.restarts,
             measured,
             frames_total as f64 / measured as f64,
         ),
@@ -743,6 +856,7 @@ mod tests {
         let mut t = SeqTracker {
             prev: None,
             gaps: 0,
+            restarts: 0,
         };
         assert_eq!(t.feed(1), 0, "首片记账不断档");
         assert_eq!(t.feed(2), 0);
@@ -753,8 +867,21 @@ mod tests {
         let mut w = SeqTracker {
             prev: Some(u32::MAX),
             gaps: 0,
+            restarts: 0,
         };
         assert_eq!(w.feed(1), 1);
+        // 板侧重启（重连开口翻转复位，seq 归零重走）：大步进记 restarts，
+        // 不按 wrapping 补天文 gap
+        let mut r = SeqTracker {
+            prev: Some(9182),
+            gaps: 0,
+            restarts: 0,
+        };
+        assert_eq!(r.feed(0), 0, "重启不记 gap");
+        assert_eq!(r.restarts, 1);
+        r.feed(1);
+        assert_eq!(r.gaps, 0, "重启后续流正常记账");
+        assert_eq!(r.restarts, 1);
     }
 
     /// 1s 窗合成 PCM（全窗同幅值交错对）。
