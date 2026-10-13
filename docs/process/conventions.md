@@ -2042,10 +2042,26 @@ BOM #3 记待采购）。**方案A 裁定**：用户 2026-10-12 授权"详细研
 现场处置续批并与 M-ζ MC-5 合并为一个动作）。施工未开工（Q4 契约评审前置）。详见
 [方案A §8/§9](dev/方案A——整板电压监测与分轴限幅立项评审.md)。
 
+2026-10-13 0.0.5 批M M-ζ 开工（MC-5 低电禁动闸门 + MC-8① cutoff 判 (c) + MC-10 L-1）——**MC-10 L-1**：
+`tools/ci/matrix.sh` 此前**无任何调用方**（不在 `check.sh`、不在 `ci.yml`），点验矩阵出数入口形同虚设；
+本批新增 CI 第九 job `matrix`（`runs-on: ubuntu-latest` + stable 工具链 + rust-cache，`run: bash
+tools/ci/matrix.sh` **非 `--strict`**——⑦ 时序达标无固定载体（E4 真板专属），默认口径如实记"未跑"、
+退 0；矩阵出现 FAIL 列才退 1），产出**人工搬进** `docs/status.md` 矩阵行（出数 ≠ 判据，判据真源仍是
+`tools/ci/*.sh` 与 `check.sh` 十步）。`.github/README.md` "八 job"改"九 job" + ⑨ 行补录；本文件 CI 侧
+步骤引言"八 job"改"九 job"。本机实跑 `matrix.sh` 回执 PASS=4 / 未跑=3 / FAIL=0（① Docker 缺 3/4 路、
+⑥ python3 3.9.6<3.11、⑦ E4 真板专属——无载体如实记）。**MC-8① 判 (c)**：`battery.cutoff_voltage_mv`
+由"在册 + 解析 + `println` 回显 + 无动作"中间态结清——键保留为策略数据、**明写"本版不关断"**（关断
+动作归 M6 关机链），**机器读者 = 注入门**（`assemble.toml` ops 槽 → `rr3_registry_assemble_injection_gaps`
+按点路径取值、⑧-c 门仓级强制；`println` 回显不算读者），见方案 §20 第 2 条 ⑤。**MC-5** 低电禁动
+闸门：`rr-mech` 加 `Rr3LowGate` 原语 + `Rr3LowEdge` 读出面，`rr3-act` 消费 `rr3-runtime/system/power`
+广播置闸——执行面（servo/relay 的 RPC/intent 两路同判）拒动、妆面（led）不禁、拒因点名低电禁动。
+十步门禁直跑全绿；推三远端 `ls-remote` 四端核对随本批推送执行。
+
 其余规约（命名、分层、职责边界）靠评审；命名唯一权威是 [naming.md](naming.md)。
 
 **十步之外的 CI 侧步骤**（`.github/workflows/ci.yml` 拆步 job——0.0.5 增补轮四
-批W2 落八 job，R30 裁定（2026-10-11：atomgit 无流水线功能，CI 改走 GitHub Actions）
+批W2 落八 job，0.0.5 批M M-ζ MC-10 L-1 增至**九 job**；R30 裁定（2026-10-11：atomgit
+无流水线功能，CI 改走 GitHub Actions）
 起 CI 单真源迁此；不进十步门，本地可跑）：
 `lint`——rustfmt `--check` 与 clippy `-D warnings` 各自独立失败，覆盖 base/runtime 与
 全部独立工程（④ 同一 find 口径）；绿色基线是 2026-10-01 的 rustfmt 全仓归一 + clippy
