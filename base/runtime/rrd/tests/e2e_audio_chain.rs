@@ -70,6 +70,14 @@ fn audio_chain_sense_to_interact_end_to_end() {
         .to_str()
         .expect("config 路径必须是 UTF-8")
         .to_string();
+    // I-11（0.0.5 批M MC-10）起 interact config 必读（不可点名集注入）：同 sense
+    // 纪律——夹具 manifest 平铺 /tmp，缺省 config.toml 会落到 /tmp，故 env 显式
+    // 指向仓内缺省档（talk 不可点名恰是本链被测形状）。
+    let inter_cfg_arg = rr3_repo_root()
+        .join("modules/rr3-interact/config.toml")
+        .to_str()
+        .expect("config 路径必须是 UTF-8")
+        .to_string();
 
     // ---------- ① boot spawn → 注册 → running ----------
     // boot 用例必须传小 tick（support 注释：sweep 复用同一旋钮，安静 tick 会让收尸永不发生）
@@ -78,7 +86,10 @@ fn audio_chain_sense_to_interact_end_to_end() {
         &[m_sense.path.as_path(), m_inter.path.as_path()],
         "chain",
         E2E_TICK_MS,
-        &[("RR3_SENSE_CONFIG", cfg_arg.as_str())],
+        &[
+            ("RR3_SENSE_CONFIG", cfg_arg.as_str()),
+            ("RR3_INTERACT_CONFIG", inter_cfg_arg.as_str()),
+        ],
     );
 
     // ---------- ① 旁观连接先就位，再看模块起不起来 ----------

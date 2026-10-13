@@ -150,6 +150,7 @@ dependencies = [
  "rr-hal",
  "rr-ipc",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

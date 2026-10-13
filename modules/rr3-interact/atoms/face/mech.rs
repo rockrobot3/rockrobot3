@@ -9,7 +9,10 @@
 //! 已上移承载层（0.0.5 批I I-8，ADR-0019 修订 4）：件面只交状态机
 //! （结构体 + 判定），组装归 `src/composite.rs`，线上字节逐字不变。
 
-use super::{Rr3FaceFrame, RR3_FACE_EXPRESSIONS, RR3_FACE_TALK, RR3_FACE_TOPIC};
+use super::{
+    rr3_face_expression_lookup, rr3_face_non_pointable_join, Rr3FaceFrame, RR3_FACE_EXPRESSIONS,
+    RR3_FACE_TALK, RR3_FACE_TOPIC,
+};
 
 /// idle：睁眼 + 平嘴（单帧）
 const RR3_FRAMES_IDLE: [Rr3FaceFrame; 1] = [[
@@ -162,21 +165,25 @@ impl Default for Rr3Face {
 
 impl Rr3Face {
     /// 点名切换表情：名字必须在白名单内。返回 `(切换后, 切换前)`。
-    /// talk 不可被点名（它是播放面的自动态），点名切换会打断挂起态——
-    /// 显式指令优先于自动恢复，这是表情机的最小仲裁规则。
-    pub fn rr3_face_set(&mut self, expr: &str) -> Result<(&'static str, &'static str), String> {
-        let expr = RR3_FACE_EXPRESSIONS
-            .iter()
-            .find(|&&e| e == expr)
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "{RR3_FACE_TOPIC} 不认表情 {expr:?}（允许 {expr_list}）",
-                    expr_list = RR3_FACE_EXPRESSIONS.join("/")
-                )
-            })?;
-        if expr == RR3_FACE_TALK {
-            return Err(format!("{RR3_FACE_TALK} 由 TTS 播放自动驱动，不接受点名"));
+    /// `non_pointable` = 本形态不可点名集（0.0.5 批M MC-10 I-11：config 注入，
+    /// 默认含 `talk`——它是播放面的自动态）。命中排除集则拒（状态不动）；点名
+    /// 切换会打断挂起态——显式指令优先于自动恢复，这是表情机的最小仲裁规则。
+    pub fn rr3_face_set(
+        &mut self,
+        expr: &str,
+        non_pointable: &[&str],
+    ) -> Result<(&'static str, &'static str), String> {
+        let expr = rr3_face_expression_lookup(expr).ok_or_else(|| {
+            format!(
+                "{RR3_FACE_TOPIC} 不认表情 {expr:?}（允许 {}）",
+                RR3_FACE_EXPRESSIONS.join("/")
+            )
+        })?;
+        if non_pointable.contains(&expr) {
+            return Err(format!(
+                "{expr} 不可被点名（本形态不可点名集 {}）",
+                rr3_face_non_pointable_join(non_pointable)
+            ));
         }
         let prev = core::mem::replace(&mut self.current, expr);
         self.suspended = None; // 显式指令打断 talk 挂起态
@@ -225,6 +232,9 @@ impl Rr3Face {
 mod tests {
     use super::*;
 
+    /// 缺省形态的不可点名集（config 档同源：`[rr3-interact.face] non_pointable`）
+    const NON_TALK: &[&str] = &["talk"];
+
     #[test]
     fn whitelist_covers_seven_expressions() {
         assert_eq!(
@@ -232,14 +242,14 @@ mod tests {
             ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
         );
         // 初始态 idle：首次切换的"切换前"就是它
-        assert_eq!(Rr3Face::default().rr3_face_set("blink").unwrap().1, "idle");
+        assert_eq!(Rr3Face::default().rr3_face_set("blink", NON_TALK).unwrap().1, "idle");
     }
 
     #[test]
     fn new_states_are_point_namable() {
         let mut f = Rr3Face::default();
-        assert_eq!(f.rr3_face_set("listen").unwrap(), ("listen", "idle"));
-        assert_eq!(f.rr3_face_set("turn").unwrap(), ("turn", "listen"));
+        assert_eq!(f.rr3_face_set("listen", NON_TALK).unwrap(), ("listen", "idle"));
+        assert_eq!(f.rr3_face_set("turn", NON_TALK).unwrap(), ("turn", "listen"));
     }
 
     #[test]
@@ -253,7 +263,7 @@ mod tests {
     #[test]
     fn multi_frame_state_cycles() {
         let mut f = Rr3Face::default();
-        f.rr3_face_set("blink").unwrap();
+        f.rr3_face_set("blink", NON_TALK).unwrap();
         assert_eq!(f.rr3_face_tick(), ("blink", 0));
         assert_eq!(f.rr3_face_tick(), ("blink", 1));
         assert_eq!(f.rr3_face_tick(), ("blink", 0), "到尾回卷");
@@ -263,16 +273,16 @@ mod tests {
     #[test]
     fn switch_resets_frame_pointer() {
         let mut f = Rr3Face::default();
-        f.rr3_face_set("blink").unwrap();
+        f.rr3_face_set("blink", NON_TALK).unwrap();
         f.rr3_face_tick(); // 指针已推到 1
-        f.rr3_face_set("think").unwrap();
+        f.rr3_face_set("think", NON_TALK).unwrap();
         assert_eq!(f.rr3_face_tick(), ("think", 0), "切换后从首帧重播");
     }
 
     #[test]
     fn talk_window_ticks_talk_frames() {
         let mut f = Rr3Face::default();
-        f.rr3_face_set("happy").unwrap();
+        f.rr3_face_set("happy", NON_TALK).unwrap();
         f.rr3_face_begin_talk();
         assert_eq!(f.rr3_face_tick(), ("talk", 0));
         assert_eq!(f.rr3_face_tick(), ("talk", 1), "挂起期间走 talk 帧表");
@@ -310,37 +320,60 @@ mod tests {
     #[test]
     fn set_accepts_whitelist_and_reports_transition() {
         let mut f = Rr3Face::default();
-        assert_eq!(f.rr3_face_set("happy").unwrap(), ("happy", "idle"));
-        assert_eq!(f.rr3_face_set("think").unwrap(), ("think", "happy"));
+        assert_eq!(f.rr3_face_set("happy", NON_TALK).unwrap(), ("happy", "idle"));
+        assert_eq!(f.rr3_face_set("think", NON_TALK).unwrap(), ("think", "happy"));
     }
 
     #[test]
     fn set_rejects_unknown_and_point_named_talk() {
         let mut f = Rr3Face::default();
-        assert!(f.rr3_face_set("wink").is_err());
-        assert!(f.rr3_face_set("").is_err());
-        assert!(f.rr3_face_set("talk").is_err(), "talk 是播放面的自动态");
+        assert!(f.rr3_face_set("wink", NON_TALK).is_err());
+        assert!(f.rr3_face_set("", NON_TALK).is_err());
+        assert!(f.rr3_face_set("talk", NON_TALK).is_err(), "talk 是播放面的自动态");
         // 失败切换不动状态：下次成功切换的"切换前"仍是 idle
-        assert_eq!(f.rr3_face_set("think").unwrap(), ("think", "idle"));
+        assert_eq!(f.rr3_face_set("think", NON_TALK).unwrap(), ("think", "idle"));
+    }
+
+    /// I-11：排除规则从件内 if 迁出为注入集——改数据即改行为，件内无 `match` 分支
+    #[test]
+    fn injected_non_pointable_narrows_surface() {
+        // 空集：本形态不排除任何表情点名，连 talk 都可点名
+        let mut open = Rr3Face::default();
+        assert_eq!(open.rr3_face_set("talk", &[]).unwrap(), ("talk", "idle"));
+        // 换一个排除子集（点名规则随数据走）：此刻排除 blink、放开 talk
+        let mut swap = Rr3Face::default();
+        assert_eq!(swap.rr3_face_set("talk", &["blink"]).unwrap(), ("talk", "idle"));
+        assert!(swap.rr3_face_set("blink", &["blink"]).is_err(), "blink 进了排除集");
+        // 非在册名与排除集无关：白名单是契约面，任何注入集都拒
+        assert!(swap.rr3_face_set("wink", &[]).is_err());
+    }
+
+    /// I-11：拒因文案点名"本形态不可点名集"（空集渲染 `(空)`，见 face.rs 用例）
+    #[test]
+    fn non_pointable_reject_names_the_set() {
+        let mut f = Rr3Face::default();
+        let err = f.rr3_face_set("talk", NON_TALK).unwrap_err();
+        assert!(err.contains("不可被点名"), "拒因点明规则: {err}");
+        assert!(err.contains("talk"), "拒因回显排除集: {err}");
     }
 
     #[test]
     fn talk_suspends_and_restores_previous() {
         let mut f = Rr3Face::default();
-        f.rr3_face_set("think").unwrap();
+        f.rr3_face_set("think", NON_TALK).unwrap();
         assert_eq!(f.rr3_face_begin_talk(), "think", "挂起前的表情");
         assert_eq!(
-            f.rr3_face_set("blink").unwrap(),
+            f.rr3_face_set("blink", NON_TALK).unwrap(),
             ("blink", "talk"),
             "talk 期间 current 是 talk"
         );
         // talk 期间被点名打断了挂起态，end_talk 只能回 idle——见 explicit_set 测试；
         // 这里另起一台机器验证正常恢复路径
         let mut g = Rr3Face::default();
-        g.rr3_face_set("think").unwrap();
+        g.rr3_face_set("think", NON_TALK).unwrap();
         g.rr3_face_begin_talk();
         assert_eq!(g.rr3_face_end_talk(), "think", "播放结束恢复");
-        assert_eq!(g.rr3_face_set("blink").unwrap(), ("blink", "think"));
+        assert_eq!(g.rr3_face_set("blink", NON_TALK).unwrap(), ("blink", "think"));
     }
 
     #[test]
@@ -349,12 +382,12 @@ mod tests {
         // 无挂起态的 end_talk 回 idle
         assert_eq!(f.rr3_face_end_talk(), "idle");
         // 嵌套 begin_talk 幂等：不覆盖 suspended
-        f.rr3_face_set("happy").unwrap();
+        f.rr3_face_set("happy", NON_TALK).unwrap();
         f.rr3_face_begin_talk();
         assert_eq!(f.rr3_face_begin_talk(), "happy", "嵌套挂起不丢原表情");
         assert_eq!(f.rr3_face_end_talk(), "happy");
         assert_eq!(
-            f.rr3_face_set("think").unwrap(),
+            f.rr3_face_set("think", NON_TALK).unwrap(),
             ("think", "happy"),
             "恢复到位"
         );
@@ -363,13 +396,13 @@ mod tests {
     #[test]
     fn explicit_set_interrupts_talk_suspend() {
         let mut f = Rr3Face::default();
-        f.rr3_face_set("blink").unwrap();
+        f.rr3_face_set("blink", NON_TALK).unwrap();
         f.rr3_face_begin_talk();
         // 播放途中被点名 happy：挂起态作废，end_talk 不再回 blink
-        let (cur, prev) = f.rr3_face_set("happy").unwrap();
+        let (cur, prev) = f.rr3_face_set("happy", NON_TALK).unwrap();
         assert_eq!((cur, prev), ("happy", "talk"));
         assert_eq!(f.rr3_face_end_talk(), "idle", "挂起态已被显式指令打断");
-        assert_eq!(f.rr3_face_set("blink").unwrap(), ("blink", "idle"));
+        assert_eq!(f.rr3_face_set("blink", NON_TALK).unwrap(), ("blink", "idle"));
     }
 
     // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
@@ -386,10 +419,10 @@ mod tests {
         fn run() -> Vec<(&'static str, &'static str, usize)> {
             let mut f = Rr3Face::default();
             let mut out = Vec::new();
-            let (cur, prev) = f.rr3_face_set("happy").unwrap();
+            let (cur, prev) = f.rr3_face_set("happy", NON_TALK).unwrap();
             out.push((cur, prev, f.rr3_face_tick().1));
             out.push((f.rr3_face_begin_talk(), "", f.rr3_face_tick().1));
-            let (cur, prev) = f.rr3_face_set("listen").unwrap();
+            let (cur, prev) = f.rr3_face_set("listen", NON_TALK).unwrap();
             out.push((cur, prev, f.rr3_face_tick().1));
             let back = f.rr3_face_end_talk();
             out.push((back, "", f.rr3_face_tick().1));
@@ -404,9 +437,9 @@ mod tests {
     fn parity_leg2_face_matches_authority_order() {
         // 挂起期被显式点名 → 挂起作废 → end_talk 回默认态 idle
         let mut f = Rr3Face::default();
-        f.rr3_face_set("happy").unwrap();
+        f.rr3_face_set("happy", NON_TALK).unwrap();
         f.rr3_face_begin_talk();
-        f.rr3_face_set("listen").unwrap();
+        f.rr3_face_set("listen", NON_TALK).unwrap();
         assert_eq!(
             f.rr3_face_end_talk(),
             "idle",
@@ -414,7 +447,7 @@ mod tests {
         );
         // 连续两次 begin（幂等）：不覆盖挂起态
         let mut g = Rr3Face::default();
-        g.rr3_face_set("think").unwrap();
+        g.rr3_face_set("think", NON_TALK).unwrap();
         assert_eq!(g.rr3_face_begin_talk(), "think");
         assert_eq!(g.rr3_face_begin_talk(), "think", "嵌套 begin 幂等");
         assert_eq!(g.rr3_face_end_talk(), "think", "挂起态未被嵌套覆盖");
@@ -423,11 +456,11 @@ mod tests {
         assert_eq!(h.rr3_face_end_talk(), "idle", "未 begin 就 end 回 idle");
         // 双帧态回绕 + 换态归零（§8 帧推进行）
         let mut k = Rr3Face::default();
-        k.rr3_face_set("blink").unwrap();
+        k.rr3_face_set("blink", NON_TALK).unwrap();
         assert_eq!(k.rr3_face_tick().1, 0);
         assert_eq!(k.rr3_face_tick().1, 1);
         assert_eq!(k.rr3_face_tick().1, 0, "双帧态到尾回卷");
-        k.rr3_face_set("turn").unwrap();
+        k.rr3_face_set("turn", NON_TALK).unwrap();
         assert_eq!(k.rr3_face_tick().1, 0, "换态归零");
     }
 }

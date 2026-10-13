@@ -38,11 +38,14 @@ use rr_hal::{backend::rr3_hal_audio_sink, backend::rr3_hal_display, RR3_AUDIO_CF
 use rr_ipc::{opcode, Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 use serde_json::{json, Value};
 
-use face::{rr3_face_frames, Rr3Face};
+use face::{rr3_face_expression_lookup, rr3_face_frames, rr3_face_non_pointable_join, Rr3Face};
 use panel::server::{rr3_panel_serve, Rr3PanelAction, Rr3PanelShared};
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
 const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
+
+/// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
+const RR3_INTERACT_CONFIG_ENV: &str = "RR3_INTERACT_CONFIG";
 
 /// 面板状态页的链路卡片数据源（0.0.4 批C 只做订阅缓存，发布方 rr3-connect 随批D 上线）
 const RR3_NET_LINK_TOPIC: &str = "rr3-connect/net/link";
@@ -78,6 +81,15 @@ pub fn rr3_interact_run() -> Result<(), String> {
         .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
     println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
+
+    // config 装载（I-11 重开装载面）：不可点名集等策略经 config 数据化注入，机制件
+    // 零策略载荷。缺文件/缺键/在册外值一律拒 boot（fail-closed）。
+    let cfg = rr3_config_load(&manifest_path)?;
+    // 注入的策略面在启动自述里可见（I-11：改数据即改行为，日志是第一证据）
+    println!(
+        "config 就绪: face non_pointable={}",
+        rr3_face_non_pointable_join(&cfg.face.non_pointable)
+    );
 
     let (mut sink, backend) = rr3_hal_audio_sink();
     sink.open(RR3_AUDIO_CFG_16K_MONO16)
@@ -152,7 +164,9 @@ pub fn rr3_interact_run() -> Result<(), String> {
                         player::RR3_TTS_TOPIC => {
                             rr3_handle_tts(&bus, sink.as_mut(), &mut face, &args)
                         }
-                        face::RR3_FACE_TOPIC => rr3_handle_face(&mut face, &args),
+                        face::RR3_FACE_TOPIC => {
+                            rr3_handle_face(&mut face, &args, &cfg.face.non_pointable)
+                        }
                         other => Err(format!(
                             "rr3-interact 只 exposes {}/{}，收到 {other}",
                             player::RR3_TTS_TOPIC,
@@ -172,7 +186,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
                     player::rr3_tts_play(sink.as_mut(), "beep").map(|ms| json!({ "played_ms": ms }))
                 }
                 Rr3PanelAction::Face { expression } => face
-                    .rr3_face_set(&expression)
+                    .rr3_face_set(&expression, &cfg.face.non_pointable)
                     .map(|(c, p)| rr3_face_result(c, p)),
             };
             let _ = tx.send(result);
@@ -211,10 +225,11 @@ fn rr3_handle_tts(
     Ok(rr3_tts_result(&text, played_ms))
 }
 
-/// 表情点名：校验并切换，回 `{"expression","previous"}`。
-fn rr3_handle_face(face: &mut Rr3Face, args: &Value) -> Result<Value, String> {
+/// 表情点名：校验并切换，回 `{"expression","previous"}`。`non_pointable` = 本形态
+/// 不可点名集（I-11：config 注入，透传给件面判定）。
+fn rr3_handle_face(face: &mut Rr3Face, args: &Value, non_pointable: &[&str]) -> Result<Value, String> {
     let expr = rr3_face_parse_args(args)?;
-    let (current, previous) = face.rr3_face_set(&expr)?;
+    let (current, previous) = face.rr3_face_set(&expr, non_pointable)?;
     Ok(rr3_face_result(current, previous))
 }
 
@@ -255,6 +270,72 @@ fn rr3_face_result(current: &str, previous: &str) -> Value {
     json!({ "expression": current, "previous": previous })
 }
 
+// ---------- config 装载面（I-11：重开装载面） ----------
+// interact 自 0.0.5 批I I-1 起不装载 config（空壳）；MC-10 I-11 把"不可点名规则"
+// 从件内 `if` 迁为 config 数据，本模块自此**装载 config.toml**（缺文件开机即退，
+// fail-closed，同 act/sense 口径）。字面值（表情名）仍是契约面，可注入的是集合。
+
+/// config.toml 解析：env 覆盖优先，缺省 manifest 同目录。
+fn rr3_config_load(manifest_path: &str) -> Result<Rr3InteractCfg, String> {
+    let path = std::env::var(RR3_INTERACT_CONFIG_ENV).unwrap_or_else(|_| {
+        std::path::Path::new(manifest_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("config.toml")
+            .to_string_lossy()
+            .into_owned()
+    });
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读 config {path} 失败: {e}"))?;
+    rr3_interact_config_parse(&text)
+}
+
+/// 本模块 config 的汇总形状
+#[derive(Debug, Clone)]
+struct Rr3InteractCfg {
+    face: Rr3FaceCfg,
+}
+
+/// config `[rr3-interact.face]` 的形状（`non_pointable` = 本形态不可点名集，I-11）。
+/// 值取 `&'static str`（经白名单对账），件面判定直接吃 `&[&str]`。
+#[derive(Debug, Clone)]
+struct Rr3FaceCfg {
+    non_pointable: Vec<&'static str>,
+}
+
+/// TOML 文本 → Rr3InteractCfg。手工下钻不引 serde derive：字段个位数，
+/// 点名缺字段的文案比派生宏的默认报错可读。
+fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
+    let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
+    let face_sect = v
+        .get("rr3-interact")
+        .and_then(|s| s.get("face"))
+        .ok_or_else(|| "config 缺 [rr3-interact.face] 段".to_string())?;
+    // 不可点名集（I-11）：数组逐元素必须是**在册契约值**，非在册名或非字符串
+    // 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态不排除任何表情点名（合法）
+    let arr = face_sect
+        .get("non_pointable")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| {
+            "config [rr3-interact.face] 缺 non_pointable（不可点名表情数组）".to_string()
+        })?;
+    let mut non_pointable = Vec::with_capacity(arr.len());
+    for (i, e) in arr.iter().enumerate() {
+        let s = e.as_str().ok_or_else(|| {
+            format!("config [rr3-interact.face] non_pointable[{i}] 必须是字符串，收到 {e}")
+        })?;
+        let expr = rr3_face_expression_lookup(s).ok_or_else(|| {
+            format!(
+                "config [rr3-interact.face] non_pointable[{i}] 非在册表情 {s:?}（在册值 {}）",
+                face::RR3_FACE_EXPRESSIONS.join("/")
+            )
+        })?;
+        non_pointable.push(expr);
+    }
+    Ok(Rr3InteractCfg {
+        face: Rr3FaceCfg { non_pointable },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +373,42 @@ mod tests {
             "face 应答两字段无加戏: {r}"
         );
         assert_eq!(r.get("topic"), None, "应答体不带 topic");
+    }
+
+    /// 仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
+    #[test]
+    fn config_parse_covers_repo_shape() {
+        let text = r#"
+[rr3-interact.face]
+non_pointable = ["talk"]
+"#;
+        let cfg = rr3_interact_config_parse(text).unwrap();
+        assert_eq!(cfg.face.non_pointable, vec!["talk"], "不可点名集注入");
+    }
+
+    #[test]
+    fn config_parse_rejects_missing_sections_and_fields() {
+        let e = rr3_interact_config_parse("").unwrap_err();
+        assert!(e.contains("[rr3-interact.face]"), "缺段点名: {e}");
+        let e = rr3_interact_config_parse("[rr3-interact.face]\n").unwrap_err();
+        assert!(e.contains("non_pointable"), "缺键点名: {e}");
+        let e = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = 3\n").unwrap_err();
+        assert!(e.contains("non_pointable"), "非数组点名: {e}");
+        let e = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = [\"wink\"]\n")
+            .unwrap_err();
+        assert!(e.contains("非在册"), "在册外值点名: {e}");
+        // 空数组合法：本形态不排除任何表情点名（fail-closed 的键必填 + 空值合法）
+        let cfg = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = []\n").unwrap();
+        assert!(cfg.face.non_pointable.is_empty());
+    }
+
+    /// 注入集经组合件透传进件面判定（I-11 端到端）：缺省排除 talk；放开则 talk 可点名
+    #[test]
+    fn non_pointable_flows_through_handle_face() {
+        let mut f = Rr3Face::default();
+        let err = rr3_handle_face(&mut f, &json!({ "expression": "talk" }), &["talk"]).unwrap_err();
+        assert!(err.contains("不可被点名"), "talk 被排除集拒: {err}");
+        let ok = rr3_handle_face(&mut f, &json!({ "expression": "talk" }), &[]).unwrap();
+        assert_eq!(ok["expression"], "talk", "空集放开 talk 点名");
     }
 }

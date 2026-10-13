@@ -7,3 +7,13 @@
 # - panel bind/port：删除（真值 = panel/server.rs 的 RR3_PANEL_ADDR_DEFAULT
 #   常量 "127.0.0.1:8080"，env RR3_PANEL_ADDR 可改——键与常量是第二真值点）。
 # 本文件保留空壳：rr3-pack 随包必带 config.toml（缺件必重启环）。
+#
+# 0.0.5 批M MC-10 I-11（重开装载面）：不可点名规则从件内 if 数据化——本模块
+# 自此**装载 config.toml**（缺文件开机即退，fail-closed，同 act/sense 口径）。
+
+[rr3-interact.face]
+# 不可点名集（I-11）：talk 由 TTS 播放自动驱动、不接受点名——规则从件内 if
+# 迁为本表数据，"某形态放开 talk 点名"= 删一条不改码。值必须在册
+# （RR3_FACE_EXPRESSIONS）；在册外或非字符串逐条拒 boot。缺键拒 boot。
+# 空数组合法（本形态不排除任何表情点名）。
+non_pointable = ["talk"]
