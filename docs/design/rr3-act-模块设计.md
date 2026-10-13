@@ -86,7 +86,7 @@
    不能绕过，因为钳位在"角度进执行器之前"这一唯一出口上（两路都走它，用例已钉）。
 2. **时限**：`move_timeout_ms = 800`（超时即停，不给堵转留机会）——参数可注入，语义不可改。
 3. **饱和通告**：`Rr3SaturationDetector`（机制核），episode 首报恰一次。
-低电兜底不在本单元（在 power），但"低电时禁动"这条**尚未定义**——列入工单 A-5。
+低电兜底不在本单元（在 power），但"低电时禁动"这条**已定义并落码**——A-5 由索引 R-15 结案（2026-10-12），批M MC-5 于 `071dcad`+`8b5b57e`（2026-10-13）落 `Rr3LowGate` 接 `rr3-runtime/system/power`，执行面 RPC/intent 两路拒动、妆面不禁（欠板上实录）。
 
 ## §8 两腿对拍用例设计
 
@@ -116,7 +116,7 @@
 | A-2 | 时基改 `Rr3TimeBase`（含 `rr-bus` 心跳），去掉 `SystemTime` 单调性误称 | 批I | — |
 | A-3 | `loop_hz` 用 `try_from<u64> for u32` + 越界拒 boot | 批I | — |
 | A-4 | servo/relay 句柄面换 `rr-hal-api` 同步签名（去 `rr3_block_on`） | 批I | C5 |
-| A-5 | "低电禁动"语义定义（power 边沿 → act 闸门，落点在机制核安全核段）——**2026-10-12 由索引 §13.3 裁定 R-15 结案**（四条语义：触发源唯一 = rrd 的 `rr3-runtime/system/power` 广播；禁执行面、不禁妆面；回阈 + 迟滞解禁且不自动重放被拒的令；bare 档由安全核段自判 `Rr3LowEdge` 出 `RR3G` 行），详见 [0.0.5 §20 第 2 条](../process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | **0.0.5 批M MC-5**（前置 MCP-3 申报面评审；与 P-8 / 批L L-8 合并成一个动作） | MCP-3 |
+| A-5 | "低电禁动"语义定义（power 边沿 → act 闸门，落点在机制核安全核段）——**2026-10-12 由索引 §13.3 裁定 R-15 结案**（四条语义：触发源唯一 = rrd 的 `rr3-runtime/system/power` 广播；禁执行面、不禁妆面；回阈 + 迟滞解禁且不自动重放被拒的令；bare 档由安全核段自判 `Rr3LowEdge` 出 `RR3G` 行），详见 [0.0.5 §20 第 2 条](../process/dev/0.0.5版本洛克三号对齐与裁定方案.md) | **0.0.5 批M MC-5**——**已结（`071dcad`+`8b5b57e`，2026-10-13）**（前置 MCP-3 申报面评审；与 P-8 / 批L L-8 合并成一个动作） | MCP-3 |
 | A-6 | 环 tick 计入 counters（健康面可观测"活着但不动"） | 批K | C9 |
 | A-8 | **载荷组装上移承载层**：`rr3_servo_state_body` / `rr3_led_*` / `rr3_relay_result` 之类 `-> Value` 的函数从件面移到 `src/composite.rs`，件只交结构体与判定（依据 = ADR-0019 修订 4；做完 `serde_json` 从件面清零） | 批I | — |
 | A-9 | 意图开放门与灯效白名单从硬编码 `match` 改**数据化**——**2026-10-13 由 0.0.5 批M MC-10 落**：意图开放门落 config 键 `[rr3-act.intent] open_topics`（组合件读入透传；因 ⑧-c 注入面门只扫 `atoms/*/assemble.toml`、组合件层无 ops 校验位，故**不进 assemble.toml**）；灯效白名单落 `atoms/led/assemble.toml` 的 ops 槽 `led_effects ← rr3-act.led.effects`。契约字面量不许改（on/off/blink、两条执行臂主题），可注入的只是**集合**；缺键/越界值拒 boot（fail-closed），空数组合法（本形态一条不认）| **0.0.5 批M MC-10**（结）| C1 |
@@ -188,7 +188,7 @@
 | A-2 时基改 `Rr3TimeBase` | `rr-bus/src/client.rs` 已立 `Rr3TimeBase`（`anchor: Instant::now()`），注释自陈"`SystemTime` 自称单调是误称，本型纠正" | **结**（旧正文不回改） |
 | A-3 `loop_hz` 越界拒 boot | `rr3-act/src/composite.rs` 的 `u32::try_from(loop_hz_raw)` + 越界回"拒 boot"文案（注释点名 A-3） | **结** |
 | A-10 / 批L L-7 内联主题串 | `intent.rs : EXPOSED` 现引 `RR3_SERVO_COMMAND_TOPIC`/`RR3_LED_EFFECT_TOPIC`/`RR3_RELAY_SET_TOPIC` 三常量 | **结**（从批L 与 MC-11 同时摘账） |
-| A-5 低电禁动 | 语义由索引 **R-15** 结案（四条），原挂"待裁"栏 | **裁定已下 → 施工落 0.0.5 MC-5**（前置 MCP-3；与 power P-8 / 批L L-8 合并成一个动作） |
+| A-5 低电禁动 | 语义由索引 **R-15** 结案（四条），原挂"待裁"栏 | **已结（批M MC-5 `071dcad`+`8b5b57e`，2026-10-13）**——`Rr3LowGate` 落 `rr3-act/src/composite.rs` 接 `rr3-runtime/system/power`，执行面 RPC/intent 两路拒动、妆面不禁（原裁定"施工落 0.0.5 MC-5；与 power P-8 / 批L L-8 合并成一个动作"已兑现） |
 | A-6 环 tick 计入 counters | `src/reflex.rs` 立常量 `RR3_REFLEX_TICKS_KEY`（字面量唯一落点），速率窗结算点 bump（值 = 窗内实跑节拍数），README 计数归属表加行 | **已结（批M M-β 3bc30f1，2026-10-12）**：e2e_act ⑧ 经 `rr3.ctl.counters` 有界轮询点验 `rr3-act/reflex_ticks` 非零（先红后绿） |
 | A-9 开放门与灯效白名单数据化 | 开放门改读 config `[rr3-act.intent] open_topics`（`intent.rs` 去件内硬编码开放判定，执行臂 `match` 与兜底臂保留）；灯效白名单落 `atoms/led/assemble.toml` ops 槽 `led_effects ← rr3-act.led.effects`（`led.rs` 出值集常量 `RR3_LED_EFFECT_VALUES` + `rr3_led_effects_join`，组合件透传子集）；两键均 fail-closed（缺键/越界值拒 boot）、空数组合法 | **已结（批M MC-10 A-9，2026-10-13）** |
 | F-1 舵机承载路径 | R31 **Q2** 已裁舵机挂 ESP32 协处理器（LEDC）；Pi 侧 `linux_pwm.rs` 保留 | 施工落**增补轮五批B/批C**；`linux_pwm.rs` 不注销，降为无协处理器形态的兜底路径（本册 §12 跨档表按两条路径读） |

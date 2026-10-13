@@ -469,6 +469,24 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   十步门禁直跑 GATE_EXIT=0（54 PASS）全绿，推三远端四端核对一致。
   [索引 §13.4](design/模块设计索引.md)/设计册判定列对账同批落档；教训登记 [conventions §2](process/conventions.md)。
   余批：M-ζ（MC-5 + MC-8① + MC-10）最后；
+- **0.0.5 增补轮五 批M M-ζ 收官——MC-5 + MC-8① + MC-10（2026-10-13，提交 `071dcad`+`8b5b57e`（MC-5）/
+  `a5ce663`（MC-8①）/ `c1bd370`+`48e6145`+`1b1768a`+`98e032d`（MC-10 取证基础设施）
+  + `9d3043a`+`b6966fe`+`5245ba9`（MC-10 策略出件三连））**：
+  **MC-5 低电禁动闸门**（A-5 ⊕ power P-8 ⊕ 批L L-8 三单合一）落机制核闸门 `Rr3LowGate`，
+  `rr3-act/src/composite.rs` 接 `rr3-runtime/system/power` 广播——执行面 RPC/intent 两路拒动、妆面不禁、
+  回阈 + 迟滞解禁（欠板上实录）；**MC-8① 判 (c)**：`cutoff_voltage_mv` 键保留为策略数据、
+  启动日志显式"声明未生效"，本版不关断（关断动作归 M6 关机链）；
+  **MC-10 取证基础设施 + 策略出件**：L-1 `matrix.sh` 进 CI 第九 job、L-2 ⑦-c/⑧-a 数据位化、
+  L-4 ⑦-e 自指判等、L-5 14 份 `assemble.toml` 补齐/明写 `no_injection`；策略出件三连
+  A-9（开放门落 `[rr3-act.intent] open_topics` + 灯效白名单落 ops 槽 `led_effects`）/
+  I-11（interact talk 不可点名改 ops `non_pointable`）/ S-5（sense DoA 分档阈值迁 ops），三处均 fail-closed。
+  **mz-dod 收口台账已结**（§22 DoD 勾点 + §18.2 站替台账清零核对 + 本锚重写 + 敞口登记）。
+  十步门禁 `bash tools/ci/check.sh` 全绿（尾行"所有规约检查通过"），推三远端四端 `ls-remote` 核对一致。
+  **批M 余数如实登记（批次未收口）**：MC-1/MC-2 播放真链路未结——brain 仍未发布 `rr3-brain/audio/tts_pcm`、
+  `atoms/player/mech.rs` 仍产占位正弦且 `RR3_TTS_MS_PER_CHAR` 在册（**台-2 未清零**）；
+  MC-3/MC-7 判据面已具备、**待复核勾定**——ESP32 桥后端支 + 开机自述 + `backend.rs` 形状测试在册（**台-3 待复核**）。
+  §22 DoD 相应条目（L1284 四条 F 项、L1287 站替清零）如实不勾，缺项与触发条件见
+  [方案 §22](process/dev/0.0.5版本洛克三号对齐与裁定方案.md)。
 - **0.0.5 增补轮五 现场处置续批（二）——OLED 表情不出的根因修复（2026-10-12，本提交）**：
   用户现场裁定（"OLED 屏幕没有显示出表情 + 舵机没有正常转向 + 考虑整板电压 + 极限资源下
   也能正常系统运行"）。**真板实验链把根因定死**：长度阶梯探针排除"单笔长度"、逐页轨迹排除
