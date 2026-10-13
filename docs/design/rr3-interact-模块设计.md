@@ -171,10 +171,10 @@
 | §13 五个死配置键（I-1） | `config.toml` 头注逐键写明删除理由，`log_level`/`default_expression`/`prebuffer_ms`/`volume_pct`/`bind`/`port` 不再挂"看着生效"的面 | **I-1 已结**；**新查出 5 个同类**（`[rr3-sense.audio].bit_depth`、player 两键、panel `bind`/`port`）已并回 0.0.5 §17 孤儿参数条 |
 | §12 face 三处 std/alloc 形状 | **未结**：`RR3_FACE_EXPRESSIONS.join("/")` 仍产堆、`rr3_face_set -> Result<(_, _), String>` 仍是 `String` 错型、`std::mem::replace` 未改 `core::`（另：`mech.rs` 内 f64 仅测试面） | 批L **L-3** |
 | §3/§12 显示句柄 `[hardware]` 无键（I-2） | **本轮裁定为"不扩键"**：`descriptor.rs` 九键闭合表原样，`rr3_hal_display` 只有 sim/placeholder 两分支（真屏未实装）。扩键评审（C4）以"不扩"结案，真屏到位时再走一次 append | **I-2 关闭**（判定改，不是实现改） |
-| §12/§13 `handles`/`ops` 申报 | `atoms/{face,player}/assemble.toml` 仍全空 | 批L **L-5** |
+| §12/§13 `handles`/`ops` 申报 | **L-5 已结（批M MC-10 L-5，2026-10-13）**：player 报 `Rr3AudioSink`←`alsa_device` 句柄；face 无可用注入面（显示句柄键未立、config 空壳）→ 明写 `no_injection = true` | — |
 | §4 panel `live` 计数与 accept 循环（R-5 改判的可达缺陷） | `rr3_panel_accept_loop` 抽缝落地：spawn 失败弃置该连接并 `panel_spawn_fail` 点账，accept 循环继续服务；`Rr3ConnSlot` RAII 守卫管 `live` 计数（Drop 归还，panic 展开不泄漏） | **I-4 已结**（批M M-β 3bc30f1，2026-10-12） |
 
-**本册新净余数**：批L **L-3**、**L-5**。**面板端点双写（I-12）与 SURFACE/serve 端点数不一致（I-9）** 保持未结。
+**本册新净余数**：批L **L-3**。**L-5 已结（批M MC-10 L-5）**；**I-12/I-9 已结**（批M MC-8③ `ba90367`）。
 
 ### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
 

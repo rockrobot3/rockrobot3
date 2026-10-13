@@ -403,7 +403,7 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   策略出件三连、S-3/A-6→MC-11 可观测面、N-9 与 L-3 与 L-10→0.0.8 W-B、L-1/L-2/L-5/L-6→MC-10/MC-11）；
   A-5/P-8/L-8 由索引 R-15 结案后统一落 **MC-5**。
   **本轮同时收回我自己写错的三条**（点名，不静改）：① L-5 份数被我"订正"成 16/17——实况 14/17 空、
-  battery/charger/bt 三份已填，错因是用单行 grep 读多行 TOML 数组；② power P-2 被我记成"后半未做"——
+  battery/charger/bt 三份已填，错因是用单行 grep 读多行 TOML 数组（**L-5 本体已结：批M MC-10 L-5，2026-10-13——14 份补齐/明写 `no_injection`，`rr-registry` 形状级空面规则，门认声明**）；② power P-2 被我记成"后半未做"——
   实况 `composite.rs` 已有 `rr3_counter_bump("battery_read_fail", 1)`，错因是 grep 漏了下划线键名；
   ③ connect N-8 上一版记"栈名仍打 SURFACE"——实况已改为"后端=动态，由 HAL 选择面交名"，
   连带批L L-10 降为可选清理。三条同族：**工具给的计数不等于实况**，跨行结构必须按结构解析。

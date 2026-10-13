@@ -164,19 +164,18 @@
 | §12 DoA 卡在 `f64::{sqrt,asin,to_degrees,round}`（S-8） | 改 **`RR3_ASIN_DEG_LUT: [i32; 257]` + isqrt/Q15** 整型；`f64`/`sin` 只在 `#[cfg(test)]` 内 | **S-8 已结**；`f64::sqrt` 仍在测试夹具里（不影响 bare 编译面） |
 | §1 `Rr3AudioSource::read` 是 `#[async_trait]` + `Send + Sync`，件侧经 `rr3_block_on` | 契约面 `rr-hal-api::Rr3AudioSource` 为同步且改**借用缓冲**：`read(&mut self, buf: &mut [i16]) -> Result<usize, Rr3HalError>`（返回 0 = 无新数据）；`rr3_block_on` 全仓不存在 | §12 该行作废 |
 | §12 "件签名里 `Vec<i16>` 待改借用" | `rr3_pcm_downmix_mono(&[i16], u8) -> Vec<i16>` **仍产堆**（现为 `pub(crate)`，件内部使用） | **未结** → 批L L-3（改调用方缓冲或降 `pub(crate)` 后豁免） |
-| §3/§13 "`sample_rate/channels/frame_ms` 待进 ops，DoA 阈值待进 ops（S-5）" | `atoms/{capture,vad}/assemble.toml` 仍 **`handles = []` / `ops = []`**；注入校验门已存在（`rr-registry` `assemble.rs` + `rrd` `rr3_assemble_scan`），但**本单元无内容可校验** | **未结** → S-5 转 **批L L-5**（句柄与 ops 申报补齐；门在等数据） |
+| §3/§13 "`sample_rate/channels/frame_ms` 待进 ops，DoA 阈值待进 ops（S-5）" | `atoms/{capture,vad}/assemble.toml` **已填**（批M MC-10 L-5，2026-10-13）：capture 报 `Rr3AudioSource`←`alsa_device` 句柄 + `sample_rate`/`channels`/`frame_ms` ops；vad 报 `rms_start`/`silence_tail_ms`/`min_speech_ms` ops；门有内容可校验 | **L-5 已结**；DoA 阈值迁 ops 续做（S-5，见下） |
 | §13 `bit_depth: 16` 无 config 键 | 实况未变，但**本轮判定归位**：s16le 是线格式契约，不是策略 → 从"孤儿参数"改记**契约字面量豁免**（0.0.5 §17 同批订正） | 判定改，动作撤 |
 | §13 DoA 查表：`RR3_ASIN_DEG_LUT` 257 项常量在件内 | **本轮裁定**：数学常量表属**机制**（跨板同值、不随硬件变），与 `RR3_FRAMES_*`（板面渲染数据）不同类 → 允许留在 `mech.rs`，不必外提到描述符 | 新裁定 R-12（见索引 §13.3 同源） |
 
-**本册新净余数**：批L **L-3**（`downmix_mono` 去堆）、**L-5**（capture/vad 的 `handles`/`ops` 申报补齐，
-句柄今天仍由 `composite.rs` 走 `rr3_hal_audio_source()` 直取）。
+**本册新净余数**：批L **L-3**（`downmix_mono` 去堆）。**L-5 已结（批M MC-10 L-5）**：capture/vad 的 `handles`/`ops` 申报补齐。
 
 ### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
 
 | 项 | 复验实况（符号） | 判定 / 新落点 |
 |---|---|---|
 | S-6 件面导出面收口 | `atoms/capture/capture.rs` 已把 `rr3_pcm_downmix_mono` 收为 `pub(crate)`，`Rr3DoaBin` 注明"仅测试按名构造" | **结**（"内松外紧"消除；阈值注入的余数转 S-5） |
-| S-5 DoA 阈值迁 ops | `atoms/capture/mech.rs : RR3_DOA_BIN_THRESHOLD_DEG = 30` 仍是件内常量，ops 侧零命中 | **未结 → 0.0.5 MC-10**（与 A-9/I-11/L-5 同批动 `assemble.toml` 形状） |
+| S-5 DoA 阈值迁 ops | `atoms/capture/mech.rs : RR3_DOA_BIN_THRESHOLD_DEG = 30` 仍是件内常量，ops 侧零命中 | **未结 → 0.0.5 MC-10**（L-5 数据面已落，S-5 续加阈值 ops 槽） |
 | S-3 采集新鲜度 counters | **已结（批M M-β 3bc30f1，2026-10-12）**：`composite.rs` 主循环 `pcm_frames`（发布成功一帧 +1）/ `pcm_empty_frames`（空帧另账）两键落账，e2e_audio_chain ⑤ 经 `rr3.ctl.counters` 有界轮询点验非零（先红后绿） | 已结 |
 | S-1 缺项：`bit_depth` 不是配置键 | 本册曾把 `[rr3-sense.audio].bit_depth` 记为"在册无读者"——**实况不存在**：`config.toml` 只有 `sample_rate`/`channels`/`frame_ms`，`bit_depth: 16` 是 `composite.rs` 的代码常量（`linux.rs` 用它做 ALSA 校验） | **收回该宣称**；位深若将来要可配，须连同读者与用例一起立单，不留静默常量当配置 |
 | F-3 采集承载路径 | R31 **Q1/Q2** 增第二条路径：INMP441 ×2 → I2S → UART 921600 过桥，DoA/ASR 在宿主算（施工 = 增补轮五批D）；Pi 侧 ALSA 保留 | 本册 §12 跨档表按两条路径读；"缺麦不降级"的清零判据留 **MC-4** |

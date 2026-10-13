@@ -4,5 +4,9 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 通断面经 rr-hal 后端 trait 由组合件注入；描述符句柄化归批D 对表
-ops = []       # 通断真值随请求给出，无配置项
+# 通断面经能力面 Rr3GpioOut（role=relay），绑描述符 gpio_relay_line 键
+handles = [
+  { trait = "Rr3GpioOut", desc_key = "gpio_relay_line" },
+]
+# 无常量：通断真值随请求给出（§3 注入面"无"，故无 ops 槽）
+ops = []

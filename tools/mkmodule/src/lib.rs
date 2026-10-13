@@ -279,8 +279,11 @@ fn atom_assemble_toml(name: &str) -> String {
 schema_version = 2
 
 [assemble]
-handles = []   # 每条 {{ trait = "能力面", desc_key = "描述符键" }}（在册表见 rr-registry assemble.rs）
-ops = []       # 每条 {{ slot = "参数槽", src_key = "config 点路径" }}，填实随真件批次
+handles = []          # 每条 {{ trait = "能力面", desc_key = "描述符键" }}（在册表见 rr-registry assemble.rs）
+ops = []              # 每条 {{ slot = "参数槽", src_key = "config 点路径" }}
+# 骨架期无注入面：明写 no_injection（L-5）。件填实后删本行，按上面两数组申报真实句柄/参数槽；
+# 两数组均空而缺本行即判红（"漏填"与"确无注入面"不可区分）。
+no_injection = true
 "#
     )
 }

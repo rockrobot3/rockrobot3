@@ -4,5 +4,7 @@
 schema_version = 2
 
 [assemble]
-handles = []   # 占位件：真件后端随采购批填实
-ops = []       # 占位件：暂无策略载荷
+# 占位件：真件句柄与策略随采购批填实（§3 注入面"待定"）
+handles = []
+ops = []
+no_injection = true

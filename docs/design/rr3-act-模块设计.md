@@ -175,11 +175,10 @@
 | §12 bare 档"`Arc<dyn Rr3GpioOut>` 需改泛型（禁 trait 对象）" | `led` 已无 `Arc`；**`rr3_relay_apply(&mut dyn Rr3GpioOut, bool)` 与 `rr3_tts_play(&mut dyn …)` 仍是 `&mut dyn`** | **未结** → 批L **L-3** |
 | §1 错型面 | `rr3_servo_check_travel` / `rr3_servo_check_timeout` / `rr3_relay_apply` 返回 `Result<_, String>` | **未结** → 批L **L-3**（`Rr3HalError`/件枚举错型收敛） |
 | §13 "`intent.rs : EXPOSED` 内联 led 主题串（A-10 双写）" | `const EXPOSED: [&str; 3]` 与 `"已归属但意图执行面未开放 …"` 仍在，led 通路仍封闭（注释写明"扩面随真实需要 append"） | **未结** → 批L **L-7**（串值单点），封闭本身按 R-3 不变 |
-| §13 策略申报位 | `atoms/{servo,led,relay}/assemble.toml` 仍 `handles = []` / `ops = []`（`battery` 那类真值样本本册没抄走） | **未结** → 批L **L-5** |
+| §13 策略申报位 | `atoms/{servo,led,relay}/assemble.toml` **已填**（批M MC-10 L-5，2026-10-13）：servo 报 `Rr3PwmServo`←`pwm_chip`/`pwm_channel` 句柄 + `angle_min_deg`/`angle_max_deg`/`move_timeout_ms`/`state_min_interval_ms` ops；led 报 `Rr3GpioOut`←`gpio_chip`/`gpio_led_line` + `blink_period_ms`；relay 报 `Rr3GpioOut`←`gpio_relay_line` | **L-5 已结**（白名单 ops 续做见 A-9） |
 | §11/框架通用约定 1 "妆面件失败语义例外" | 代码未变（led 写失败仍 `eprintln` 不退） | **A-12 未结**（D8 范围仍待你定） |
 
-**本册新净余数**：批L **L-3**（`&mut dyn` + `String` 错型）、**L-5**（三件 `handles`/`ops` 申报）、
-**L-7**（主题串单点）。**A-2/A-3** 由 `rr3_led_tick(now_ms)` 与 ⑧-b 门一起收口。
+**本册新净余数**：批L **L-3**（`&mut dyn` + `String` 错型）。**L-5 已结（批M MC-10 L-5）**、**L-7 已结**（`intent.rs` 现引 `RR3_*_TOPIC` 三常量）。**A-2/A-3** 由 `rr3_led_tick(now_ms)` 与 ⑧-b 门一起收口。
 **L-6 已随批M M-β 摘账**（2026-10-12：RPC 路同态断言落 e2e_act ④b，intent 路 ⑤b 原有）。
 
 ### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
@@ -191,5 +190,5 @@
 | A-10 / 批L L-7 内联主题串 | `intent.rs : EXPOSED` 现引 `RR3_SERVO_COMMAND_TOPIC`/`RR3_LED_EFFECT_TOPIC`/`RR3_RELAY_SET_TOPIC` 三常量 | **结**（从批L 与 MC-11 同时摘账） |
 | A-5 低电禁动 | 语义由索引 **R-15** 结案（四条），原挂"待裁"栏 | **裁定已下 → 施工落 0.0.5 MC-5**（前置 MCP-3；与 power P-8 / 批L L-8 合并成一个动作） |
 | A-6 环 tick 计入 counters | `src/reflex.rs` 立常量 `RR3_REFLEX_TICKS_KEY`（字面量唯一落点），速率窗结算点 bump（值 = 窗内实跑节拍数），README 计数归属表加行 | **已结（批M M-β 3bc30f1，2026-10-12）**：e2e_act ⑧ 经 `rr3.ctl.counters` 有界轮询点验 `rr3-act/reflex_ticks` 非零（先红后绿） |
-| A-9 开放门与灯效白名单 ops 化 | led/relay/servo 三份 `assemble.toml` 的 `ops = []` 仍全空，开放门仍是件内 `match` | **未结 → MC-10**（与 I-11/S-5/L-5 同批动 `assemble.toml` 形状） |
+| A-9 开放门与灯效白名单 ops 化 | **L-5 已填三份 `assemble.toml` 的句柄与既有 config ops**（`ops` 已非空，门有内容可校验）；**开放门仍是件内 `match`、白名单 ops 槽待立**（件内字面量迁出 + 新增 config 键先行） | **未结 → MC-10**（A-9 续做；与 I-11/S-5 同族"策略出件"） |
 | F-1 舵机承载路径 | R31 **Q2** 已裁舵机挂 ESP32 协处理器（LEDC）；Pi 侧 `linux_pwm.rs` 保留 | 施工落**增补轮五批B/批C**；`linux_pwm.rs` 不注销，降为无协处理器形态的兜底路径（本册 §12 跨档表按两条路径读） |

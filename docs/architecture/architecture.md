@@ -1318,7 +1318,7 @@ pub trait Rr3ByteStream {
 | **⑦ 时序证据回填**（v0.9 同日五轮新立） | ⑦ 列只认 E4 真板证据：`matrix.sh --manual ⑦ --evidence <路径>`，证据文件必须带环境指纹 + 采样窗口与样本数 + 原始数据，缺一判"证据不足"不判 PASS；手测行与自动行分色 | `tools/ci/matrix.sh`（0.0.5 批K **H3/C12**） | **fail-closed** |
 | 门禁清单同步 | 新建机制核面 crate 必须**同批**出现在**三处**清单：`check.sh` ⑦-a 的禁词扫面枚举、`tools/ci/rr-core-xtensa-check.sh` 的目标 crate 列表、以及步序说明（`conventions.md` §2 与本节 §13）。**三处一致已由脚本判等**：`check.sh` ⑦-e 以 ⑦-a 扫面数组（唯一真值）归一出面名集 A，逐名在 `conventions.md` §2 与 `tools/ci/README.md` ⑦ 行查齐、并断言 xtensa 门 `-p` 目标集 ⊆ A（0.0.5 批M **MC-10 L-4**；该件立门时即拦下"批M 起 `rr-mech` 进了扫面、两处文档行未列"的真漂移）。防止"§13 宣称有门、门实际没扫"的门，自己也被扫 | 静态断言（自指：门查门，`check.sh` ⑦-e，已接） | **fail-closed** |
 | 每格一件 · 不留空格 | manifest/profile 引用的格必须命中 `slots.toml`；`enabled_slots` 声明的格有对应原子件；占位件登记显式豁免、不折算达标 | 查册门 + 仓扫描（§4.3 门禁②扩，已接） | **fail-closed** |
-| 注入面校验 | `assemble.toml` 的 `handles`/`ops` 与描述符对表：件要的句柄/参数槽未给 → 该格 `Degraded` 并点名到件与键 | 数据面校验（rr-registry contract；`check.sh` ⑧-c 显式过滤器封用例改名/删除的 fail-open，已接） | **fail-closed** |
+| 注入面校验 | `assemble.toml` 的 `handles`/`ops` 与描述符对表：件要的句柄/参数槽未给 → 该格 `Degraded` 并点名到件与键；**两数组均空须明写 `no_injection = true`**（0.0.5 批M MC-10 L-5：把"漏填"与"本件确无注入面"分开，否则空申报与漏填不可区分、门里无内容可校验） | 数据面校验（rr-registry contract；`check.sh` ⑧-c 显式过滤器封用例改名/删除的 fail-open，已接） | **fail-closed** |
 | `F⊗F` 非法 | 面不得作为被装配方出现在装配清单里（面间只 `⊙`）；`composite.toml` 的 `⊗` 链成员必须是本模块原子件 | 静态断言（`check.sh` ⑦-b，已接） | **fail-closed** |
 | 禁薄胶水 | 跨原子件的串联必须有组合件实体（`composite.toml` + 入口 + 实现），散落转发直连原子即红 | 静态（存在性，已接）+ 评审（"散落"判定） | fail-closed（存在性）|
 | 五件套齐全 | 每个**组合件** ①`.manifest`+②入口+③实现+④装配清单+⑤唯一私有头 五件缺一即红（`rr3-mkmod` 产物回灌契约，承 ②b）。**面不计**——面是视图，无独立声明物（§4.0 读法注记） | 计数断言（⑦-c，已接） | **fail-closed** |
