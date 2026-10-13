@@ -20,6 +20,15 @@ use crate::{Rr3ErrText, Rr3HalError};
 /// 的空转代价可忽略；比它粗会让超时迟到，比它细纯烧 CPU。
 pub(crate) const RR3_NM_POLL: Duration = Duration::from_millis(10);
 
+/// 夹具/冒烟用例的 nmcli 子进程超时档（**非计时用例**用）：假脚本与真 nmcli
+/// 都毫秒级返回，本档只防"夹具真挂死"，取生产 config `timeout_ms` 同档
+/// （`modules/rr3-connect/config.toml` = 20000）。此前各逻辑用例硬写 5 s，
+/// 假脚本 spawn 在 macOS 并行负载下偶发超 5 s，会让 parse/持久化语义用例假红
+/// （0.0.5 批M MC-10 前置修）。**超时守护本体**由各 `*_timeout_kills_slow_child`
+/// 用例以 100 ms 档独立钉，不用本档。
+#[cfg(test)]
+pub(crate) const RR3_TEST_NM_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// terse 值的反转义：NM terse 模式把值里的 `:` 与 `\` 分别转义成 `\:`
 /// 与 `\\`（否则冒号分隔表无法承载含冒号的 SSID）。
 pub(crate) fn rr3_nm_unescape(s: &str) -> String {

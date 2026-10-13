@@ -214,6 +214,9 @@ impl Rr3WifiStore for Rr3WifiStoreUnavailable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // 非计时用例的夹具超时档（生产 config 同档），见 nmcli_support 常量 doc——
+    // 逻辑用例不因 spawn 负载抖动而假红；100 ms 档由超时守护用例自带
+    use crate::nmcli_support::RR3_TEST_NM_TIMEOUT;
 
     /// 唯一 temp 目录（pid + 纳秒后缀，批H5 教训：只 pid 会撞上一轮遗留目录）
     fn rr3_test_prov_dir(tag: &str) -> PathBuf {
@@ -291,7 +294,7 @@ exit 9
     #[test]
     fn nm_store_persists_across_reconstruct() {
         let (script, conf_file) = rr3_test_nm_script("persist", "");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_secs(5));
+        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
 
         rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("home", "password8")).unwrap();
         let on_disk = std::fs::read_to_string(&conf_file).unwrap();
@@ -302,7 +305,7 @@ exit 9
         );
 
         // "重启"：丢弃旧句柄，凭同一夹具重新构造后端——凭据仍在册
-        let store2 = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_secs(5));
+        let store2 = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
         let ssid =
             rr3_test_txtbsy_retry(|| store2.rr3_wifi_store_ssid()).unwrap();
         assert_eq!(
@@ -314,7 +317,7 @@ exit 9
         // forget 真删：配置文件消失，新构造的"重启"视角查不在册
         rr3_test_txtbsy_retry(|| store2.rr3_wifi_store_forget()).unwrap();
         assert!(!conf_file.exists(), "forget 后连接配置真消失");
-        let store3 = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_secs(5));
+        let store3 = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
         let ssid = rr3_test_txtbsy_retry(|| store3.rr3_wifi_store_ssid()).unwrap();
         assert!(ssid.is_none(), "forget 后重启查不在册");
 
@@ -325,7 +328,7 @@ exit 9
     #[test]
     fn nm_store_second_connect_updates_same_profile() {
         let (script, conf_file) = rr3_test_nm_script("update", "");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_secs(5));
+        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
         rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("first", "password1")).unwrap();
         rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("second", "password2")).unwrap();
         let on_disk = std::fs::read_to_string(&conf_file).unwrap();
@@ -339,7 +342,7 @@ exit 9
     #[test]
     fn nm_store_forget_is_idempotent_when_absent() {
         let (script, conf_file) = rr3_test_nm_script("forget-empty", "");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_secs(5));
+        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
         rr3_test_txtbsy_retry(|| store.rr3_wifi_store_forget()).unwrap();
         assert!(!conf_file.exists());
         let _ = std::fs::remove_dir_all(conf_file.parent().unwrap().parent().unwrap());
@@ -351,7 +354,7 @@ exit 9
         let (script, conf_file) = rr3_test_nm_script("empty-ssid", "");
         // 手工把 profile 写成空 SSID（模拟 open 网络 profile 无 ssid 域值）
         std::fs::write(&conf_file, "|x\n").unwrap();
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_secs(5));
+        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
         let ssid = rr3_test_txtbsy_retry(|| store.rr3_wifi_store_ssid()).unwrap();
         assert!(ssid.is_none(), "空 SSID 域如实 None: {ssid:?}");
         let _ = std::fs::remove_dir_all(conf_file.parent().unwrap().parent().unwrap());
@@ -381,7 +384,7 @@ exit 9
     fn nm_store_nonzero_exit_fails_loudly() {
         let (script, conf_file) =
             rr3_test_nm_script("fail", "if [ \"$2\" = \"delete\" ]; then echo nm no such profile >&2; exit 4; fi\n");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_secs(5));
+        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
         rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("home", "password8")).unwrap();
         let err = rr3_test_txtbsy_retry(|| store.rr3_wifi_store_forget()).unwrap_err();
         assert!(
