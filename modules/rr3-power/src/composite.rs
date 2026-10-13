@@ -20,8 +20,11 @@
 //! "活着"，死交给 supervisor 按 restart_policy=always 重启。订阅面为空是**设计**
 //! （module.toml 同条注）：低压关断是本地决策，不依赖总线可达。
 //!
-//! cutoff 电压阈值本轮只解析不动作（0.0.2 方案 Q4：关机与充电策略归 rr3-power
-//! 演进与 M6），装配时回显进启动日志。
+//! cutoff 电压阈值**声明未生效**（0.0.5 批M MC-8① 裁定 (c)）：0.0.5 **不关断**
+//! （关断动作归 M6 关机链，需 T1/T2 物理断电硬件）。本键保留为**策略数据**、机器
+//! 读者 = 注入门（`atoms/battery/assemble.toml` 的 ops 槽，⑧-c 门仓级强制其按点路径
+//! 可取），启动日志显式标注"声明未生效"，避免被读成"已实现关断"；本轮唯一低电保护
+//! 动作 = MC-5 低电禁动（触发阈 = `low_voltage_mv`，见方案 §20 第 2 条）。
 
 #[path = "../atoms/battery/battery.rs"]
 mod battery;
@@ -69,12 +72,14 @@ pub fn rr3_power_run() -> Result<(), String> {
     println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
     let cfg = rr3_config_load(&manifest_path)?;
+    // cutoff 显式标注"声明未生效"（MC-8① 裁定 (c)）：回显 ≠ 读者，本行只为运维
+    // 自述，不构成"已实现关断"的宣称（关断动作归 M6）。
     println!(
-        "config 就绪: battery sample={}ms low={}mV cutoff={}mV charger state={}ms",
+        "config 就绪: battery sample={}ms low={}mV charger state={}ms | cutoff={}mV（声明未生效：本版不关断，归 M6）",
         cfg.battery.sample_period_ms,
         cfg.battery.low_voltage_mv,
+        cfg.charger.state_period_ms,
         cfg.battery.cutoff_voltage_mv,
-        cfg.charger.state_period_ms
     );
 
     // HAL 电源面选择 + 开机探活：Unsupported 即致命——显式回错不静默退化
