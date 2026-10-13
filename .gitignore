@@ -35,6 +35,8 @@ docs/superpowers/
 
 **/target/
 **/build/
+# 实录证据件（rr3-audio-rec 录音 wav）不入库：验收时随收流落盘，落档路径见 status.md 批D③
+tools/rr3-audio-rec/*.wav
 # rr3-brain 是 Python 包：编译产物随 build 再生，不入库（modules/** 白名单覆盖过宽）
 **/__pycache__/
 **/*.py[cod]
