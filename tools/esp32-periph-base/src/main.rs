@@ -67,6 +67,7 @@ mod board;
 mod commands;
 mod frame;
 mod link;
+mod mic;
 mod oled;
 mod periph;
 mod power;
@@ -87,8 +88,8 @@ use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches};
 
 use crate::board::{
-    AXIS_CENTER_DEG, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS,
-    ADC_RAIL_PIN, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ,
+    ADC_RAIL_PIN, AXIS_CENTER_DEG, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ,
+    LEDC_RES_BITS, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ,
 };
 use crate::commands::cmd_loop;
 use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
@@ -306,6 +307,15 @@ fn main() {
         .stack_size(THREAD_STACK)
         .spawn(move || cmd_loop(ctl, bus))
         .expect("起控制面线程失败");
+
+    // ---- 批D 采集冒烟：INMP441 双麦 @ I2S0（GPIO25 BCLK / GPIO27 SD / GPIO26 WS）----
+    mic::spawn_mic_smoke(
+        peripherals.i2s0,
+        peripherals.pins.gpio25,
+        peripherals.pins.gpio27,
+        peripherals.pins.gpio26,
+    );
+    ram_point("3-mic-smoke");
 
     // main 循环：周期状态行（观测面）
     loop {
