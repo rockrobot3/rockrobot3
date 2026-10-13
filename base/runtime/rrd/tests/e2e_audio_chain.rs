@@ -7,10 +7,11 @@
 //! 2. `rr3-sense/audio/vad_start` 事件上总线（sim 正弦必过 VAD 起音阈值，恰一次 onset）；
 //! 3. `rr3-sense/audio/pcm` stream 有序——seq 从旁观连接看到的任意一点起逐帧 +1
 //!    （旁观者看到的是流的**连续后缀**，起点不是 1 是正形，起点错序才是 bug）；
-//! 4. `rr3.call` 回路穿过真进程：旁观连接点名 `rr3-interact/tts/text` 与
-//!    `rr3-interact/face/expression`，应答体（played_ms/chars、expression/previous）
-//!    由 interact 进程里的播放面与表情机真实算出——模块侧 rr3_reply_call 的
-//!    trace_id 语义在这条线上被端到端复证。
+//! 4. `rr3.call` 回路穿过真进程：旁观连接点名 `rr3-interact/tts/text`（本链无
+//!    brain、无 tts_pcm 流——`pcm_bytes` 对账必拒，MC-1：无流不静默，拒因折
+//!    result.error）与 `rr3-interact/face/expression`（应答体 expression/previous
+//!    由 interact 进程里的表情机真实算出）——模块侧 rr3_reply_call 的 trace_id
+//!    语义在这条线上被端到端复证。
 //!
 //! 模块二进制**由测试现场 cargo build**（独立工程，`CARGO_BIN_EXE` 够不着它们）：
 //! 增量编译下缓存命中，代价只在首次全量。
@@ -143,23 +144,22 @@ fn audio_chain_sense_to_interact_end_to_end() {
     }
 
     // ---------- ④ rr3.call 回路穿过真进程 ----------
-    // TTS："你好"=2 字符 × 60ms = 120ms（占位合成公式在 interact 进程里真实执行）
+    // TTS：本链没有 brain、没有 tts_pcm 流——点名申报 1920 字节而缓冲实收 0，
+    // 对账必拒（MC-1：半流/无流不静默，拒因折 result.error 回话而非断链）
     rr3_send(
         &mut obs,
         &rr3_rpc_frame(
             rr_bus::RR3_METHOD_CALL,
             42,
-            json!({"topic": "rr3-interact/tts/text", "args": {"text": "你好"}}),
+            json!({"topic": "rr3-interact/tts/text", "args": {"text": "你好", "pcm_bytes": 1920}}),
             obs_task,
         ),
     );
     let v = rr3_read_call_reply(&mut obs, 42);
-    assert!(v.get("error").is_none(), "TTS 点名不该被拒: {v}");
-    assert_eq!(
-        v["result"]["played_ms"], 120,
-        "60ms/字符的占位时长公式: {v}"
-    );
-    assert_eq!(v["result"]["chars"], 2);
+    let err = v["result"]["error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("无流 TTS 点名必须折 result.error 拒因: {v}"));
+    assert!(err.contains("不完整"), "拒因要点名缓冲对账缺口: {err}");
 
     // 表情：五态白名单切换，应答带回切换前后
     rr3_send(
@@ -175,7 +175,7 @@ fn audio_chain_sense_to_interact_end_to_end() {
     assert_eq!(v["result"]["expression"], "happy", "{v}");
     assert_eq!(
         v["result"]["previous"], "idle",
-        "TTS 的 talk 挂起已恢复，切换前是 idle: {v}"
+        "TTS 在对账处拒返未进 talk 态，切换前是 idle: {v}"
     );
 
     // 坏参数折成 result.error 应答而不是断链（业务性失败 ≠ 传输性失败的线上分界；
@@ -195,7 +195,7 @@ fn audio_chain_sense_to_interact_end_to_end() {
         .unwrap_or_else(|| panic!("缺 text 必须回 result.error 字符串: {v}"));
     assert!(err.contains("text"), "错误信息要点名缺的参数: {err}");
 
-    // 回路打完，sense 的流还活着（interact 的 120ms 阻塞没拖垮任何一方）
+    // 回路打完，sense 的流还活着（TTS 对账拒返即时，没拖垮任何一方）
     let f = rr3_read_where(&mut obs, " 回路后的又一帧 pcm", |f| {
         rr3_json_of(f)["topic"] == "rr3-sense/audio/pcm"
     });

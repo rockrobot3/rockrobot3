@@ -8,12 +8,15 @@
 //! 启动序列（自原入口 rr3_run 逐字迁入，语义零改动）与 rr3-sense 同构：读
 //! `RR3_MANIFEST`（rrd spawn 注入，supervisor.rs）→ [`Rr3BusClient::rr3_connect`]
 //! → 打开 `Rr3AudioSink` → 面板线程 → 事件循环。循环做两件事：
-//! - `rr3_poll_wait` 收帧，应答本模块 exposes 的两个点名——
-//!   `rr3-interact/tts/text`（占位正弦 burst，回 `{"played_ms","chars"}`）与
-//!   `rr3-interact/face/expression`（表情机切换，回 `{"expression","previous"}`）；
-//!   订阅的 `rr3-connect/net/link` 事件快照进缓存（面板状态页数据源）；
-//! - 排空面板动作通道：beep/face 由主循环串行代执行（面板 HTTP 线程不碰
-//!   sink/face 所有权，与 TTS 点名天然互斥，无锁）；
+//! - `rr3_poll_wait` 收帧：订阅的 `rr3-brain/audio/tts_pcm`（MC-1 语音下行，流是
+//!   载荷通路）逐帧解码进收流缓冲；订阅的 `rr3-connect/net/link` 事件快照进缓存
+//!   （面板状态页数据源）；应答 exposes 的两个点名——
+//!   `rr3-interact/tts/text`（对账 `pcm_bytes` 后排空缓冲播放，回
+//!   `{"played_ms","chars"}`）与 `rr3-interact/face/expression`（表情机切换，回
+//!   `{"expression","previous"}`）；
+//! - 排空面板动作通道：face 由主循环串行代执行（面板 HTTP 线程不碰 sink/face
+//!   所有权，与 TTS 点名天然互斥，无锁）；beep 占位已随 MC-1 退役，如实回
+//!   业务错误"无本地波形源"；
 //! - 表情帧动画节拍（批F3 sim 档）：~250ms 一拍推一帧，显示件随批F5a
 //!   显示 trait 实装，sim 档只推帧指针。
 //!
@@ -57,6 +60,34 @@ const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
 /// 按墙上时钟节拍推进，帧速率不随总线流量漂移。
 const RR3_FACE_TICK: Duration = Duration::from_millis(250);
 
+/// tts_pcm 流收缓冲（MC-1）：brain 语音下行**先流后点名**——流是载荷通路，
+/// `rr3-interact/tts/text` 点名是"该不该播"的唯一判据（0.0.5 方案 §20 第 1 条
+/// (a)）。Event 帧逐帧解码进缓冲，点名对账后排空播放；对账不过整缓冲作废
+/// （残流不跨轮滞留）。
+#[derive(Default)]
+struct Rr3TtsPcmBuf {
+    bytes: Vec<u8>,
+}
+
+impl Rr3TtsPcmBuf {
+    /// 收一帧：`pcm_b64` 解码追加（STREAM 语义有序到达，帧序即字节序）。
+    /// 解码失败上抛，由调用方弃帧——缺口由点名的对账兜住，不静默。
+    fn rr3_tts_buf_push(&mut self, pcm_b64: &str) -> Result<(), rr_ipc::Rr3Base64Error> {
+        self.bytes.extend_from_slice(&rr_ipc::rr3_base64_decode(pcm_b64)?);
+        Ok(())
+    }
+
+    /// 缓冲实收字节数（对账的一侧）
+    fn rr3_tts_buf_len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// 排空：取走全部字节，缓冲归零（残流不跨轮滞留）。
+    fn rr3_tts_buf_take(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.bytes)
+    }
+}
+
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_interact_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
@@ -98,6 +129,10 @@ pub fn rr3_interact_run() -> Result<(), String> {
 
     let mut face = Rr3Face::default();
     let mut face_tick_at = std::time::Instant::now();
+
+    // tts_pcm 收流缓冲（MC-1）：brain 先发流后点名，Event 帧逐帧解码进这里，
+    // tts/text 点名对账后排空播放
+    let mut tts_pcm = Rr3TtsPcmBuf::default();
 
     // 显示面选择 + 开机探活：读回当前帧，Unsupported 即致命——显式回错不静默
     // 退化（真件档板显式 linux 时 MAX7219 后端未实装，探活 exit(1) 是预期语义，
@@ -145,11 +180,22 @@ pub fn rr3_interact_run() -> Result<(), String> {
                 continue;
             };
             match ty {
-                Rr3PayloadType::Event => {
-                    if body.get("topic").and_then(Value::as_str) == Some(RR3_NET_LINK_TOPIC) {
+                Rr3PayloadType::Event => match body.get("topic").and_then(Value::as_str) {
+                    Some(RR3_NET_LINK_TOPIC) => {
                         *link.lock().unwrap_or_else(|p| p.into_inner()) = Some(body);
                     }
-                }
+                    Some(player::RR3_TTS_PCM_TOPIC) => {
+                        // tts_pcm 收流（MC-1）：逐帧解码追加，帧数记账。坏帧
+                        // （base64 非法）只弃该帧——缺口由 tts/text 点名的
+                        // pcm_bytes 对账兜住折拒因，不静默。
+                        if let Some(b64) = body.get("pcm_b64").and_then(Value::as_str) {
+                            if tts_pcm.rr3_tts_buf_push(b64).is_ok() {
+                                bus.rr3_counter_bump("tts_pcm_frames", 1);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
                 Rr3PayloadType::Request => {
                     if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
                         continue;
@@ -162,7 +208,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
                     // 业务性失败折成 error 应答（请求-应答语义），不当致命错误
                     let result = match topic {
                         player::RR3_TTS_TOPIC => {
-                            rr3_handle_tts(&bus, sink.as_mut(), &mut face, &args)
+                            rr3_handle_tts(&bus, sink.as_mut(), &mut face, &mut tts_pcm, &args)
                         }
                         face::RR3_FACE_TOPIC => {
                             rr3_handle_face(&mut face, &args, &cfg.face.non_pointable)
@@ -179,12 +225,13 @@ pub fn rr3_interact_run() -> Result<(), String> {
                 _ => {}
             }
         }
-        // 面板动作排空：beep/face 主循环串行代执行（与 TTS 点名天然互斥，无锁）
+        // 面板动作排空：face 主循环串行代执行（与 TTS 点名天然互斥，无锁）；
+        // beep 占位已随 MC-1 退役——播放面只吃 tts_pcm 流，无本地波形源，如实回错
         while let Ok((action, tx)) = act_rx.try_recv() {
             let result = match action {
-                Rr3PanelAction::Beep => {
-                    player::rr3_tts_play(sink.as_mut(), "beep").map(|ms| json!({ "played_ms": ms }))
-                }
+                Rr3PanelAction::Beep => Err(
+                    "无本地波形源：beep 占位已随 MC-1 退役，播放面只接受 tts_pcm 流".into(),
+                ),
                 Rr3PanelAction::Face { expression } => face
                     .rr3_face_set(&expression, &cfg.face.non_pointable)
                     .map(|(c, p)| rr3_face_result(c, p)),
@@ -206,20 +253,30 @@ pub fn rr3_interact_run() -> Result<(), String> {
     }
 }
 
-/// TTS 点名：校验参数 → 表情切 talk → 播放 → 恢复表情 → 回 played_ms。
+/// TTS 点名（MC-1 重铺）：参数校验 → PCM 缓冲对账（半流/残留皆拒，拒因路径
+/// 同样清缓冲）→ 表情切 talk → 排空缓冲播放 → 恢复表情 → 回 played_ms。
+/// 记账：拒 `tts_play_reject`、播成 `tts_play_ok`（收流帧另有 `tts_pcm_frames`）。
 fn rr3_handle_tts(
-    _bus: &Rr3BusClient,
+    bus: &Rr3BusClient,
     sink: &mut dyn rr_hal::Rr3AudioSink,
     face: &mut Rr3Face,
+    tts_pcm: &mut Rr3TtsPcmBuf,
     args: &Value,
 ) -> Result<Value, String> {
-    let text = rr3_tts_parse_args(args)?;
+    let (text, pcm_bytes) = rr3_tts_parse_args(args)?;
+    if let Err(e) = rr3_tts_pcm_integrity(pcm_bytes, tts_pcm.rr3_tts_buf_len()) {
+        bus.rr3_counter_bump("tts_play_reject", 1);
+        tts_pcm.rr3_tts_buf_take();
+        return Err(e);
+    }
+    let samples = rr3_pcm_bytes_to_samples(&tts_pcm.rr3_tts_buf_take());
     let suspended = face.rr3_face_begin_talk();
-    let played = player::rr3_tts_play(sink, &text);
+    let played = player::rr3_tts_play(sink, &samples);
     face.rr3_face_end_talk();
     let played_ms = played?;
+    bus.rr3_counter_bump("tts_play_ok", 1);
     println!(
-        "tts: {} 字符播了 {played_ms}ms（talk 挂起 {suspended}）",
+        "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，talk 挂起 {suspended}）",
         text.chars().count()
     );
     Ok(rr3_tts_result(&text, played_ms))
@@ -237,9 +294,10 @@ fn rr3_handle_face(face: &mut Rr3Face, args: &Value, non_pointable: &[&str]) -> 
 // 件的对外契约面 = 结构体 + 判定函数；点名下钻（parse_args）与应答体（result）
 // 的 Value 生产归本文件，线上字节逐字不变（用例随迁继续守字节面）。
 
-/// TTS 点名下钻：`text` 必填且须非空字符串。校验失败返回 `Err`，由调用方折成
-/// error 应答（请求-应答语义，不当致命错误）。
-fn rr3_tts_parse_args(args: &Value) -> Result<String, String> {
+/// TTS 点名下钻（MC-1）：`text` 必填且须非空字符串；`pcm_bytes` 必填——本轮
+/// PCM 的字节总数，播放面对账收流缓冲完整性的唯一判据（无流不静默）。校验
+/// 失败返回 `Err`，由调用方折成 error 应答（请求-应答语义，不当致命错误）。
+fn rr3_tts_parse_args(args: &Value) -> Result<(String, u64), String> {
     let text = args
         .get("text")
         .and_then(Value::as_str)
@@ -247,11 +305,42 @@ fn rr3_tts_parse_args(args: &Value) -> Result<String, String> {
     if text.is_empty() {
         return Err(format!("{} 的 text 不能为空", player::RR3_TTS_TOPIC));
     }
-    Ok(text.to_string())
+    let pcm_bytes = args
+        .get("pcm_bytes")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{} 缺 integer 参数 pcm_bytes", player::RR3_TTS_TOPIC))?;
+    Ok((text.to_string(), pcm_bytes))
+}
+
+/// tts PCM 缓冲对账（MC-1）：点名申报的 `pcm_bytes` vs 缓冲实收。少 = 半流
+/// （发布侧断流/坏帧弃置），多 = 残留（上轮余量未清）——皆拒，拒因带缺口
+/// 字节。判定纯函数化：记账（tts_play_reject）与清缓冲归调用方。
+fn rr3_tts_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(), String> {
+    let buffered = buffered as u64;
+    if buffered == pcm_bytes {
+        return Ok(());
+    }
+    let (how, gap) = if buffered < pcm_bytes {
+        ("半流", pcm_bytes - buffered)
+    } else {
+        ("残留", buffered - pcm_bytes)
+    };
+    Err(format!(
+        "tts PCM 缓冲不完整（{how}）：点名申报 {pcm_bytes} 字节、缓冲实收 {buffered} 字节，缺口 {gap} 字节，弃播"
+    ))
+}
+
+/// s16le 字节列 → i16 样点：小端两两成对。brain 分帧保证偶数字节，尾部奇数
+/// 字节不成样点，防御性丢弃（chunks_exact 自带该语义）。
+fn rr3_pcm_bytes_to_samples(bytes: &[u8]) -> Vec<i16> {
+    bytes
+        .chunks_exact(2)
+        .map(|p| i16::from_le_bytes([p[0], p[1]]))
+        .collect()
 }
 
 /// `rr3-interact/tts/text` 的应答体：实际播出的毫秒数与计费字符数
-/// （封顶后 played_ms < chars×60 时两者对不上，一并回给调用方对表）。
+/// （played_ms 由实收样点导出，与字符数脱钩，一并回给调用方对表）。
 fn rr3_tts_result(text: &str, played_ms: u64) -> Value {
     json!({ "played_ms": played_ms, "chars": text.chars().count() })
 }
@@ -343,12 +432,18 @@ mod tests {
     /// 点名下钻与应答体形状（用例自件面随迁，I-8：承载层守字节面）。
     #[test]
     fn args_and_result_shapes() {
-        assert_eq!(rr3_tts_parse_args(&json!({ "text": "hi" })).unwrap(), "hi");
+        assert_eq!(
+            rr3_tts_parse_args(&json!({ "text": "hi", "pcm_bytes": 640 })).unwrap(),
+            ("hi".to_string(), 640)
+        );
         for bad in [
             json!({}),
             json!({ "text": 3 }),
             json!({ "text": "" }),
             json!({ "text": null }),
+            json!({ "text": "hi" }),                     // 缺 pcm_bytes（对账判据必带）
+            json!({ "text": "hi", "pcm_bytes": "640" }), // 非整数
+            json!({ "text": "hi", "pcm_bytes": -1 }),    // 负数不成字节
         ] {
             assert!(rr3_tts_parse_args(&bad).is_err(), "{bad}");
         }
@@ -373,6 +468,40 @@ mod tests {
             "face 应答两字段无加戏: {r}"
         );
         assert_eq!(r.get("topic"), None, "应答体不带 topic");
+    }
+
+    /// tts PCM 缓冲对账（MC-1）：完整 = 过；半流/残留 = 拒且缺口字节进拒因
+    #[test]
+    fn tts_pcm_integrity_rejects_half_and_residual_streams() {
+        assert_eq!(rr3_tts_pcm_integrity(640, 640), Ok(()));
+        let e = rr3_tts_pcm_integrity(1920, 640).unwrap_err();
+        assert!(e.contains("半流") && e.contains("1280"), "{e}");
+        let e = rr3_tts_pcm_integrity(640, 1280).unwrap_err();
+        assert!(e.contains("残留") && e.contains("640"), "{e}");
+        let e = rr3_tts_pcm_integrity(1920, 0).unwrap_err();
+        assert!(e.contains("半流"), "空缓冲必拒（无流不静默）: {e}");
+    }
+
+    /// 收流缓冲：解码追加 + 排空清零（残流不跨轮滞留），坏帧 fail-closed
+    #[test]
+    fn tts_pcm_buf_pushes_frames_and_takes_all() {
+        let mut buf = Rr3TtsPcmBuf::default();
+        buf.rr3_tts_buf_push(&rr_ipc::rr3_base64_encode(&[1, 2, 3, 4]))
+            .unwrap();
+        buf.rr3_tts_buf_push(&rr_ipc::rr3_base64_encode(&[5, 6]))
+            .unwrap();
+        assert_eq!(buf.rr3_tts_buf_len(), 6);
+        assert_eq!(buf.rr3_tts_buf_take(), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(buf.rr3_tts_buf_len(), 0, "排空后缓冲清零");
+        assert!(buf.rr3_tts_buf_push("not-b64!!").is_err(), "坏帧 fail-closed");
+    }
+
+    /// s16le 字节列 → i16 样点：小端两两成对，奇数尾字节防御性丢弃
+    #[test]
+    fn pcm_bytes_to_samples_is_little_endian_pairs() {
+        assert_eq!(rr3_pcm_bytes_to_samples(&[0x34, 0x12]), vec![0x1234]);
+        assert_eq!(rr3_pcm_bytes_to_samples(&[0x00, 0x80]), vec![i16::MIN]);
+        assert!(rr3_pcm_bytes_to_samples(&[0x01]).is_empty());
     }
 
     /// 仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红

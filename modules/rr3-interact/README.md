@@ -13,7 +13,7 @@ modules/rr3-interact/
 ├── Cargo.toml           ← 独立 workspace；path 依赖 rr-ipc / rr-bus / rr-hal
 ├── atoms/               ← 原子件（每格一件，五件套：atom.toml + 入口 + mech + assemble.toml + private.rs）
 │   ├── face/            ← ui.face：最小表情机（五态白名单；talk 自动挂起/恢复，显式指令可打断）
-│   └── player/          ← audio.playback：占位 TTS：440Hz 正弦 burst，60ms/字符封顶 10s（真 TTS 随 M4 云面）
+│   └── player/          ← audio.playback：TTS 播放：tts_pcm 流收缓冲排空播放（MC-1 真 PCM 下行；占位正弦已退役）
 └── src/
     ├── main.rs          ← 入口：只装配与启动（≤80 行）
     ├── composite.rs     ← 组合件：总线注册/心跳 + TTS 播放 + 表情机 + 面板动作代执行
@@ -40,7 +40,7 @@ WiFi 配网页随 0.0.4 批D 挂上）：
 | GET | `/api/data` | `rr3.ctl.counters` 短连 | `/api/data` |
 | GET | `/api/logs` | `rr3.ctl.logs` 短连 | `/api/logs` |
 | POST | `/api/relay` | `rr3.call` → `rr3-act/relay/set`（act 既有 exposes，零新增） | `/api/relay` |
-| POST | `/api/beep` | 进程内动作通道（主循环代执行） | `/api/beep` |
+| POST | `/api/beep` | 进程内动作通道（主循环代执行；MC-1 起 beep 占位退役，如实回业务错误"无本地波形源"） | `/api/beep` |
 | POST | `/api/face` | 进程内动作通道（主循环代执行） | `/api/face` |
 | POST | `/api/selftest` | 并列三调（beep+relay+face），各答各展示，无依赖链**不算编排** | `/api/selftest` |
 | POST | `/api/reboot` | `rr3.ctl.reboot`（rrd 双重门缺省恒拒，面板如实转达拒因） | `/api/reboot` |
@@ -66,6 +66,7 @@ WiFi 配网页随 0.0.4 批D 挂上）：
 | rpc | `rr3-interact/face/expression` | request |
 | rpc | `rr3-interact/tts/text` | request |
 | subscribe | `rr3-connect/net/link` | event（面板状态页链路卡片数据源，0.0.4 批C 订阅；0.0.4 批D 起负载带 `mode` 配网态字段，WiFi 页同源自此） |
+| subscribe | `rr3-brain/audio/tts_pcm` | event（语音下行载荷通路，MC-1 订阅：流收缓冲 + `tts/text` 点名对账排空，发布方 rr3-brain） |
 
 C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：原申报发布的 `asr/text` 与 `dialog/turn`
 走 **retired** 撤除（号位保留、义务解除，本模块全仓零发布点）；原申报订阅的
@@ -82,6 +83,9 @@ C14（ADR-0019 修订 2 ②，2026-10-10 评审裁定）：原申报发布的 `a
 | 键 | 记账点 |
 |---|---|
 | `panel_spawn_fail` | `panel/server.rs 的 RR3_PANEL_SPAWN_FAIL_KEY`（字面量唯一落点）；连接线程 spawn 失败时点账并弃置该连接，accept 循环继续服务（I-4：面板是运维的最后一扇门，一条连接起不来不退循环） |
+| `tts_pcm_frames` | `src/composite.rs` 主循环：每收一帧 `rr3-brain/audio/tts_pcm`（base64 解码成功入缓冲）点一笔（MC-1） |
+| `tts_play_ok` | `src/composite.rs` `rr3_handle_tts`：对账通过且排空播放成功点一笔（MC-1） |
+| `tts_play_reject` | `src/composite.rs` `rr3_handle_tts`：`pcm_bytes` 对账不过（半流/残留）拒播点一笔，缓冲同拍清空（MC-1） |
 
 ## 本地自检
 
