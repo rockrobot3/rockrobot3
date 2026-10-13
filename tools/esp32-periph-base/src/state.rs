@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::{esp_random, esp_timer_get_time};
+use rr_ipc::Rr3ByteStream;
 
 use crate::board::{wander_step, Axis, AXIS_CENTER_DEG};
-use crate::link::reply;
+use crate::link::{reply, UartIo};
 use crate::power::RailTier;
 
 /// esp_timer 毫秒（单调时基，微动作时钟源；u64 毫秒 58 万年不回绕）。
@@ -63,6 +64,16 @@ pub(crate) struct PeriphState {
     pub(crate) rail_tier: RailTier,
     /// 5V 轨越阈事件计数（低电段首发次数，只增不减；`INFO` 观测）。
     pub(crate) rail_low_events: u32,
+    /// 音频上行开关（`AUDIO ON|OFF` 行命令置位；mic 线每 read 批读——false 时
+    /// 只出统计冒烟面不攒分片）。
+    pub(crate) audio_on: bool,
+    /// 音频分片序号（wrapping u32，随分片自增；recorder 按 seq 连续性计丢片，
+    /// 与 `audio_dropped` 互为对账）。
+    pub(crate) audio_seq: u32,
+    /// 音频已上行分片数（audio_q 出队整帧写全即计；`INFO` 观测）。
+    pub(crate) audio_sent: u64,
+    /// 音频背压丢弃分片数（audio_q 满丢最旧即计；`INFO` 观测）。
+    pub(crate) audio_dropped: u64,
 }
 
 impl PeriphState {
@@ -93,6 +104,10 @@ impl PeriphState {
             rail_raw: 0,
             rail_tier: RailTier::Ok,
             rail_low_events: 0,
+            audio_on: false,
+            audio_seq: 0,
+            audio_sent: 0,
+            audio_dropped: 0,
         }
     }
 
@@ -205,6 +220,9 @@ impl PeriphState {
 pub(crate) struct Bus {
     pub(crate) jobs: VecDeque<Job>,
     pub(crate) outbox: VecDeque<String>,
+    /// 音频上行队列（mic 线产 → 控制面 drain；元素 = 整帧字节，出队即写 UART2。
+    /// 有界 [`crate::board::AUDIO_Q_CAP`]，满丢最旧 + 计 `audio_dropped`）。
+    pub(crate) audio_q: VecDeque<Vec<u8>>,
     pub(crate) st: PeriphState,
 }
 
@@ -252,6 +270,22 @@ pub(crate) fn drain_outbox(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>
         match line {
             Some(l) => reply(uart, &l),
             None => break,
+        }
+    }
+}
+
+/// 取空 audio_q 并整帧写 UART2（控制面每轮首步，紧跟 [`drain_outbox`]——同线程
+/// 串行写，与行面/应答字节在线上互不交错）。单分片 ~11KB ≈ 120ms@921600（整帧
+/// write_all + wait_tx_done，[`UartIo`] 语义），发送期间命令面短延迟是分片粒度
+/// 的既定代价（Q1=(a) 带宽账口径）。写不全（IO 失败）不计 `audio_sent`——线上
+/// 半帧由帧层拒收自愈，recorder 端 seq 断档对账。
+pub(crate) fn drain_audio(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>) {
+    let mut uio = UartIo { uart, pre: None };
+    loop {
+        let frame = lock_bus(bus).audio_q.pop_front();
+        let Some(f) = frame else { break };
+        if uio.rr3_write_all_bytes(&f) == f.len() {
+            lock_bus(bus).st.audio_sent += 1;
         }
     }
 }

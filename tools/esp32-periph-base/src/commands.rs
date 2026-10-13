@@ -9,7 +9,9 @@ use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
 use crate::link::{read_line, reply, UartIo};
 use crate::oled::{expr_eye_base, glyph};
 use crate::periph::CtlUart;
-use crate::state::{drain_outbox, esp_random_u32, lock_bus, push_job, Bus, CtlState, Job};
+use crate::state::{
+    drain_audio, drain_outbox, esp_random_u32, lock_bus, push_job, Bus, CtlState, Job,
+};
 
 // ---------------------------------------------------------------------------
 // 指令循环（批B 行面 + 批C 帧面双面并存：行面保留调试与舵机五点 SCAN 判据）
@@ -57,8 +59,10 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         "READY periph-base v0.4.0 ctrl/runtime split + serial-servo + baud921600 (type HELP for commands)",
     );
     loop {
-        // 先清 outbox（运行面异步回包：SCAN 逐点等），再窥视下一字节
+        // 先清 outbox（运行面异步回包：SCAN 逐点等）+ audio_q（批D③ 音频分片整帧
+        // 上行，同线程串行写与行面字节互不交错），再窥视下一字节
         drain_outbox(&mut io.uart, &bus);
+        drain_audio(&mut io.uart, &bus);
         let mut first = [0u8; 1];
         // 窥视带 1-tick（10ms）超时：空口返回 Ok(0) 即回到轮首（转手清 outbox +
         // 让出 CPU，自主行为在运行面跑，不再占用控制面）；有字节（Ok(n≥1)）照旧
@@ -91,7 +95,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；开机默认表情 idle + 姿态 P060 T098)"
+                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@921600，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T098)"
                     .into(),
             ),
             "OLED" => {
@@ -246,10 +250,39 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                 push_job(&bus, Job::SampleRail);
                 Ok("OK rail sample queued".into())
             }
+            // 音频上行开关（批D③）：ON 后 mic 线攒满分片（2048 帧 = 128ms）即组
+            // Event 帧推 audio_q，控制面每轮 drain_audio 整帧写 UART2。OFF 后队列
+            // 余片仍照常发完（drain_audio 不看开关），mic 线不再攒新片。
+            "AUDIO" => match parts.next() {
+                Some("ON") => {
+                    lock_bus(&bus).st.audio_on = true;
+                    Ok("OK audio on".into())
+                }
+                Some("OFF") => {
+                    lock_bus(&bus).st.audio_on = false;
+                    Ok("OK audio off".into())
+                }
+                _ => Err("AUDIO 需 ON|OFF 参数".into()),
+            },
             "INFO" => {
                 let (plo, phi) = Axis::Pan.range();
                 let (tlo, thi) = Axis::Tilt.range();
-                let (pan, tilt, wander, phase, last_text, rail_mv, rail_raw, rail_tier, rail_low) = {
+                let (
+                    pan,
+                    tilt,
+                    wander,
+                    phase,
+                    last_text,
+                    rail_mv,
+                    rail_raw,
+                    rail_tier,
+                    rail_low,
+                    audio_on,
+                    audio_seq,
+                    audio_sent,
+                    audio_dropped,
+                    audio_q,
+                ) = {
                     let b = lock_bus(&bus);
                     (
                         b.st.pan_deg,
@@ -261,12 +294,18 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         b.st.rail_raw,
                         b.st.rail_tier,
                         b.st.rail_low_events,
+                        b.st.audio_on,
+                        b.st.audio_seq,
+                        b.st.audio_sent,
+                        b.st.audio_dropped,
+                        b.audio_q.len(),
                     )
                 };
                 Ok(format!(
-                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} oled_last=\"{last_text}\" free={}B min_free={}B",
+                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} oled_last=\"{last_text}\" free={}B min_free={}B",
                     if wander { "on" } else { "off" },
                     rail_tier.name(),
+                    if audio_on { "on" } else { "off" },
                     unsafe { esp_get_free_heap_size() },
                     unsafe { esp_get_minimum_free_heap_size() }
                 ))
