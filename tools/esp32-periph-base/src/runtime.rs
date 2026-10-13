@@ -106,15 +106,28 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
     }
 }
 
-/// 采样一次 5V 轨并写共享状态（**机制面**，方案A Q1）：成功即更新 `st.rail_mv/rail_raw`
-/// 并回 `(轨压 mV, 引脚 raw)`；失败只回 Err（**不改状态**——stale 旧值不冒充新鲜读数）。
-/// 纯机制：不判阈值、不决策（欠压档位/拒动在批M 步3）。
+/// 采样一次 5V 轨 → 判欠压档 → 写共享状态（**机制面**，方案A Q1/Q2）：成功即更新
+/// `st.rail_mv/rail_raw/rail_tier`（越阈事件另计 `st.rail_low_events` 并打站）；失败只
+/// 回 Err（**不改状态**——stale 旧值不冒充新鲜读数）。判定核 [`crate::power::RailJudge`]
+/// 在此喂一拍：边沿产**一次性越阈事件**（打站/计数），电平产**档位**（驱动面拒动/降级）。
 fn sample_rail(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) -> Result<(u16, u16), String> {
     let (mv, raw) = ph.rail_sample()?;
+    let (tier, event) = ph.rail_judge.feed(mv);
+    ph.rail_tier = tier;
     {
         let mut b = lock_bus(bus);
         b.st.rail_mv = mv;
         b.st.rail_raw = raw;
+        b.st.rail_tier = tier;
+        if event {
+            b.st.rail_low_events = b.st.rail_low_events.saturating_add(1);
+        }
+    }
+    if event {
+        println!(
+            "[periph] 5V 轨欠压越阈 tier={} rail={mv}mV raw={raw}",
+            tier.name()
+        );
     }
     Ok((mv, raw))
 }
@@ -201,8 +214,8 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
 /// 运行面自主节拍（无作业时 10ms 一拍）：**决策段持锁纯算，渲染/驱动段脱锁慢跑**
 /// ——慢 I2C 不阻塞控制面命令吞吐。
 fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
-    // 5V 轨周期采样（**机制面**，方案A Q1）：到点采一次并写入共享状态（`INFO` 观测面；
-    // 批M 步3 的欠压判定核在此读数之上接入）。失败只打站不 panic——读不到不拖垮节拍。
+    // 5V 轨周期采样 + 欠压判定（**机制面**，方案A Q1/Q2）：到点采一次、喂判定核，写
+    // 档位/计数入共享状态（`INFO` 观测面 + `servo_set` 拒动判据）。失败只打站不 panic。
     if now_ms() >= ph.next_rail_ms {
         ph.next_rail_ms = now_ms() + RAIL_SAMPLE_PERIOD_MS;
         if let Err(e) = sample_rail(ph, bus) {
