@@ -75,7 +75,8 @@
 ## §7 安全核接入
 
 低电兜底是本单元唯一的守护动作：**边沿判定在机制核**（`Rr3LowEdge`），本单元只提供读数与发布，
-**不能**被策略绕过（brain 停机也不影响 battery/low 上报）；**关断动作未实装**（cutoff 只回显），
+**不能**被策略绕过（brain 停机也不影响 battery/low 上报）；**关断动作未实装**（MC-8① 判 (c)，
+2026-10-13：`cutoff_voltage_mv` **声明未生效、本版不关断**），
 归 M6——设计定：关断落点在机制核安全核段，触发方在本单元，与 act 限位同级。
 
 ## §8 两腿对拍用例设计
@@ -127,7 +128,7 @@
 |---|---|---|---|---|
 | battery | ✅（sim 与 INA219 两后端） | ⚠️ 只差 HAL 形状 | ⚠️ 只差 HAL 形状 | ① `rr_hal::Rr3Power::battery()` 是 `#[async_trait] + Send + Sync`，件不碰它（调用在 `composite.rs`），但件签名里的 `Rr3BatteryState` 来自 `rr_hal` → 批I F1 把值类型挪进 `rr-hal-api`；② `rr3_battery_state_body` / `rr3_battery_low_body` 的 `json!` → **上移承载层**（P-7），件面即可去 `serde_json`；③ `Rr3LowEdge` 已 re-export 保路径 ✅ |
 | charger | ✅ | ✅ 同 battery | ✅ 同 battery | 一处：`rr3_charger_state_body(seq, charging) -> Value` 上移（P-7）。件内除 `json!` 外无任何平台面——**它是"件应当长什么样"的样板** |
-| 组合件（`rr3_power_run`） | ✅ | ✅ 逻辑不变 | ⚠️ 形态差异全在这里 | 三档差异**不该**下进件层：host 由 rrd 监督（注册/心跳/重启）；rtos 由平台 task 承载（描述符静态分配 task 号，ADR-0018 修订 2 ①）；bare 无监督面，**挂死只能靠平台看门狗**——本仓四类供给里没有"看门狗"位，这是真实缺口（ADR-0018 修订 4 ② 补 `[supplies]` 平台看门狗位）。低电边沿在 bare 档仍然跑（它是件+机制核），但**没人收帧**：兜底动作必须本地化（关断/降速由本地安全核执行，不等总线），今天 cutoff 无读者 = 这条链在 bare 档直接断，见 §11 审计 L-5 |
+| 组合件（`rr3_power_run`） | ✅ | ✅ 逻辑不变 | ⚠️ 形态差异全在这里 | 三档差异**不该**下进件层：host 由 rrd 监督（注册/心跳/重启）；rtos 由平台 task 承载（描述符静态分配 task 号，ADR-0018 修订 2 ①）；bare 无监督面，**挂死只能靠平台看门狗**——本仓四类供给里没有"看门狗"位，这是真实缺口（ADR-0018 修订 4 ② 补 `[supplies]` 平台看门狗位）。低电边沿在 bare 档仍然跑（它是件+机制核），但**没人收帧**：兜底动作必须本地化（拒动/降速由本地安全核执行，不等总线）——机制原语已备（`Rr3LowEdge` 回阈+迟滞判定 + MC-5 的 `Rr3LowGate` 闸门原语），**动作接线在安全核段**（MC-5 §20 ② ④：bare 档自判出 `RR3G` 守护行），载体待 0.0.7 真板；`cutoff_voltage_mv` 于 0.0.5 **声明未生效**（MC-8① 判 (c)） |
 
 **动作序**：批I F1 → P-7（载荷上移）→ 单元即可标"rtos/bare 可达"。
 **微型形态里的本单元**：`power.battery` 是 base 层"恒在位"格，与"纯 USB 供电的微型形态"直接冲突（索引 D3 待裁）——
@@ -138,7 +139,7 @@
 | 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
 |---|---|---|---|---|
 | `src/composite.rs : rr3_power_config_parse` | 缺段/缺键一律 `Err("config 缺 [rr3-power.{name}] 段" / "缺 {key}（0–65535 整数）")`；**无任何数值缺省**；仅 `.max(1)` | 配置面 fail-closed | 有 | **本仓正面样板**：策略全在 `config.toml`，代码不藏缺省值。其余五册都该收敛到这个形状（sense 的 `default()` 三份重复就是反例） |
-| `src/composite.rs` + `battery.rs : Rr3BatteryCfg.cutoff_voltage_mv` | config `3150` | 关断阈值 | **无读者**：只在 `println!("…cutoff={}mV")` 回显，模块注释自认"只解析不动作" | 保留 config 键、动作归 M6；**今天必须在 §11 与格状态位上标"声明未生效"**，不能让运维以为它关得了机（索引审计 L-5 的实证） |
+| `src/composite.rs` + `battery.rs : Rr3BatteryCfg.cutoff_voltage_mv` | config `3150` | 关断阈值 | **机器读者 = 注入门**（`atoms/battery/assemble.toml` 的 ops 槽 → `rr3_registry_assemble_injection_gaps` 按点路径取值，⑧-c 门仓级强制）；**非** `println!("…cutoff={}mV")` 回显（回显不算读者） | **MC-8① 判 (c)（2026-10-13）**：键保留为策略数据（保 M6 意图），**本版不关断**（关断动作归 M6 关机链，需 T1/T2 硬件）——启动日志显式标注"声明未生效"，从此不再有"回显即当作已实现"的中间态（见方案 §20 第 2 条 ⑤） |
 | `composite.rs : low_voltage_mv` | config `3300` → `Rr3LowEdge::rr3_low_edge_new` | 低电阈值 | 有（**本单元唯一有后果的阈值**） | ✅ 已合规（policy 在 config，判据在机制核） |
 | `composite.rs : sample_period_ms` / `state_period_ms` | `5000` / `2000` | 拍点 | 有 | ✅ 已合规；`.max(1)` 钳位补留痕（P-2） |
 | `composite.rs : RR3_POLL_WAIT` | `100ms` | 收帧空转代价 | 有 | ops/config 键（与五册 POLL_WAIT 同批归一） |
@@ -171,5 +172,5 @@
 | P-2 钳制留痕 + 采样失败计数 | `src/composite.rs` 解析期 `eprintln` 打"键名/原值/钳后值" + 用例钉 0→1ms 收敛；`composite.rs:118` 的 `rr3_counter_bump("battery_read_fail", 1)` 把采样失败计入 counters | **结（整条）** |
 | P-2 后半（上一条已并入） | 上一版本册 §14 写"仍无 `rr3_counter_*`"系我 grep 漏了带下划线的键名，实况有 `battery_read_fail` | **收回，随 P-2 整条结**；"活着但不动"族仍欠的是 sense S-3 与 act A-6 两处 |
 | P-8 / A-5 / 批L L-8 三单 | 语义由索引 **R-15** 结案（触发源唯一 = rrd 的 `rr3-runtime/system/power` 广播；禁执行面不禁妆面；回阈 + 迟滞解禁；bare 档安全核段自判 `Rr3LowEdge` 出 `RR3G` 行） | **一个动作 → MC-5**（前置 MCP-3 申报面评审）；本册不再单独挂"本地兜底"账 |
-| `cutoff_voltage_mv` | 有解析、有 `println` 回显、**无动作**（注释自陈"本轮只解析不动作"） | **未结 → MC-8**，按"实装关断 / 删键 / 改 ops 槽并写明不关断的理由"三选一；**回显不算读者** |
+| `cutoff_voltage_mv` | 有解析、**机器读者 = 注入门**（ops 槽）+ 启动日志显式"声明未生效"；**本版不关断** | **结 → MC-8① 判 (c)（2026-10-13）**：键保留为策略数据、明写不关断（关断动作归 M6 关机链）；`println` 回显不再充当"已实现"，键的机器读者是注入门（⑧-c 门） |
 | P-5 电压→容量曲线标定 | 需两点以上真读数 | 留 **0.0.6 真件档**（载体依赖，不进开发窗） |

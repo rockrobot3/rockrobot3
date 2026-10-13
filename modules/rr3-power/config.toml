@@ -1,7 +1,12 @@
 # rr3-power 运行期配置（secret 一律走环境变量，不落盘）
-# 关断阈值是本地安全决策的输入，不依赖总线可达（architecture §7.3）。
+# 低电阈值是本地安全决策的输入，不依赖总线可达（architecture §7.3）。
 # 0.0.5 批I P-6：[rr3-power] log_level 删除（解析函数不读、全仓无读者——
 # 被读或删除，选删除，与 I-1/N-6/B-2/B-8 同纪律）。
+# 0.0.5 批M MC-8①：cutoff_voltage_mv **声明未生效**——0.0.5 **不关断**（关断动作
+# 归 M6 关机链，需 T1/T2 物理断电硬件）。本键的机器读者是**注入门**（assemble.toml
+# 的 ops 槽 → rr3_registry_assemble_injection_gaps 按点路径取值，⑧-c 门仓级强制），
+# 不是启动日志的 println 回显（回显不算读者，§17 判据）。本轮唯一低电保护动作 =
+# MC-5 低电禁动（触发阈 = low_voltage_mv），见方案 §20 第 2 条。
 
 [rr3-power.battery]
 sample_period_ms = 5000

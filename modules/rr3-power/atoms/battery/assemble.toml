@@ -13,5 +13,8 @@ handles = [
 ops = [
   { slot = "sample_period_ms", src_key = "rr3-power.battery.sample_period_ms" },
   { slot = "low_voltage_mv", src_key = "rr3-power.battery.low_voltage_mv" },
+  # cutoff 声明未生效（0.0.5 批M MC-8① 裁定 (c)）：本版不关断（关断动作归 M6），
+  # 键保留为策略数据；本 ops 槽即其**机器读者**（注入门按点路径取值，⑧-c 门强制）——
+  # 非启动日志的 println 回显（回显不算读者）。键若被删，本槽当场注入缺、门变红。
   { slot = "cutoff_voltage_mv", src_key = "rr3-power.battery.cutoff_voltage_mv" },
 ]
