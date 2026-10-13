@@ -15,9 +15,29 @@
 use rr_hal::Rr3AudioSink;
 
 /// 播放采样规格：16k/mono/16bit（与采集侧同一张 cfg，整条链一张表）
-const RR3_TTS_SAMPLE_RATE: u32 = 16_000;
+pub const RR3_TTS_SAMPLE_RATE: u32 = 16_000;
 /// 写块样点数：20ms @ 16k = 320（16k/20ms 恰整除）
 const RR3_TTS_BLOCK_SAMPLES: usize = 320;
+
+/// 播放增益（MC-2）：`volume_pct` 整型饱和缩放——i64 中间量乘除（不上浮
+/// f32），结果夹回 i16（饱和不回卷）。0% → 全零、100% → 逐字原样（×100/100
+/// 恒等）、>100% 超界样点饱和夹断。原地改写不分配（⑧-b：机制不分配）。
+pub fn rr3_tts_apply_gain(samples: &mut [i16], volume_pct: u32) {
+    for s in samples.iter_mut() {
+        let v = *s as i64 * volume_pct as i64 / 100;
+        *s = v.clamp(i16::MIN as i64, i16::MAX as i64) as i16;
+    }
+}
+
+/// 起播水位（MC-2，legacy 0cf029e 语义回归）：缓冲达水位才起播（抗网络
+/// 抖动），流已完整则未攒满也播（短回答不卡水位——水位取
+/// `min(prebuffer_ms, total_ms)`）。三参全毫秒域：
+/// - `buffered_ms` 起播时刻缓冲实收时长；
+/// - `total_ms` 本轮流总时长（点名 `pcm_bytes` 对账一侧导出）；
+/// - `prebuffer_ms` 策略水位（config 注入）。
+pub fn rr3_tts_prebuffer_ready(buffered_ms: u64, total_ms: u64, prebuffer_ms: u64) -> bool {
+    buffered_ms >= prebuffer_ms.min(total_ms)
+}
 
 /// 播放一段已解码的 PCM 样点：按 20ms 分块写 sink（透传语义——块边界不改
 /// 造样本），返回实际写出的毫秒数 = `样点数 × 1000 / 16000`（整除截断，与
@@ -61,6 +81,45 @@ mod tests {
             self.written.extend_from_slice(samples);
             Ok(())
         }
+    }
+
+    // ---------- 增益与水位（0.0.5 批M MC-2：播放面参数真正生效） ----------
+
+    /// 增益三档（MC-2 工单判据）：0% → 全零 / 100% → 逐字原样 / 饱和不回卷
+    #[test]
+    fn gain_three_rungs_zero_full_and_saturating() {
+        // 0% → 全零样点
+        let mut s = vec![123i16, -456, i16::MAX, i16::MIN];
+        rr3_tts_apply_gain(&mut s, 0);
+        assert_eq!(s, vec![0i16; 4], "0% 增益 = 全零样点");
+        // 100% → 逐字原样（×100/100 恒等，含极值）
+        let mut s = vec![123i16, -456, i16::MAX, i16::MIN];
+        rr3_tts_apply_gain(&mut s, 100);
+        assert_eq!(s, vec![123i16, -456, i16::MAX, i16::MIN], "100% 增益恒等");
+        // 200% 超界样点饱和夹断：30000×2=60000 → 32767；-30000×2=-60000 → -32768
+        // （夹回 i16 极值，不回卷成反号）
+        let mut s = vec![30000i16, -30000, 123, -456];
+        rr3_tts_apply_gain(&mut s, 200);
+        assert_eq!(s, vec![i16::MAX, i16::MIN, 246, -912], "200% 饱和夹断不回卷");
+    }
+
+    /// 起播水位（MC-2，legacy 0cf029e 语义）：达水位起播 / 未达不起播 /
+    /// 短回答（总长 < 水位）流完整即播——水位取 min 不卡短语音
+    #[test]
+    fn prebuffer_ready_gate_min_semantics() {
+        // 达水位：缓冲 800ms ≥ 水位 500ms → 播
+        assert!(rr3_tts_prebuffer_ready(800, 800, 500));
+        // 恰好等于水位（边界含等号）→ 播
+        assert!(rr3_tts_prebuffer_ready(500, 800, 500));
+        // 未达水位且流长于水位 → 不播（抗抖动：水位未满不起播）
+        assert!(!rr3_tts_prebuffer_ready(200, 1000, 500));
+        // 短回答放行：流总长 300ms < 水位 500ms，缓冲已完整（300ms）→ 播
+        // （legacy："短回答没攒满也播"）
+        assert!(rr3_tts_prebuffer_ready(300, 300, 500));
+        // 短回答未攒满：缓冲 200ms < 总长 300ms < 水位 500ms → 不播（流未完整）
+        assert!(!rr3_tts_prebuffer_ready(200, 300, 500));
+        // 水位 0 = 无预缓冲：缓冲非零即播
+        assert!(rr3_tts_prebuffer_ready(1, 1000, 0));
     }
 
     #[test]
