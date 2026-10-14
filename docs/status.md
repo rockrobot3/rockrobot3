@@ -479,6 +479,27 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   gaps=0 + INFO 对账 + wav 落盘）→ d5 DoA 冒烟（`--secs 40 --doa`；拍手时间表 0–8s 左侧
   / 10–18s 右侧，启动前发 "d5 开始"）→ RAM 三点收口。RAM 点1/点2 已随 run#5 到手
   （boot 行 02:07:18 + INFO `free=191072B min_free=105136B`）。
+- **0.0.6 模型连接抽象批——AgentRT v3 式连接行 + 密钥双源 + 面板密钥面（2026-10-14，提交
+  `d69e918`+`89eb71e`+本批记）**：用户需求"抽象化 API 客户端连云端/本地模型；操作面板填 key，
+  代码无明文密钥"（立项计划 .trae/documents/rock3-model-client-abstraction-and-panel-keys.md，
+  本地工作区文档）
+  → ①**云适配层**（[rr3-brain/cloud](../modules/rr3-brain/rr3_brain/cloud/__init__.py)）——
+  `config.toml` 新增 `[[rr3-brain.model]]` 连接行（name/mode(api|local)/api_format(本批仅
+  openai，anthropic 预留)/base_url/model_id/api_key_ref/active，恰一 active 由解析器强制，
+  白名单外 fail-closed，无表回退旧 `[rr3-brain.cloud]` 通用键不破）；`Rr3LlmClient` 加
+  key_ref/mode，密钥双源解析：`env:VAR` 前缀走环境变量（缺省 None = 旧 `RR3_CLOUD_API_KEY`
+  不破）、裸名走仓外 secrets 文件；`mode="local"` 免鉴权（请求不带 Authorization 头）；
+  ②**面板密钥面**（[panel/secrets.rs](../modules/rr3-interact/src/panel/secrets.rs) 新建）——
+  端点 `GET /api/model/keys`（清单只回 ref 名永不回值）+ `POST /api/model/key`（upsert，
+  value 空=删，应答只回 ref）；落仓外 `~/.rr3/secrets.json`（0600，父目录 0700，
+  `RR3_SECRETS_FILE` 与 brain 侧同名同义双端单一契约），坏文件回错**不静默覆盖**（防一把抹掉
+  用户其他 key）；brain 每轮现读 secrets，面板保存后下一轮对话即生效；页签"模型密钥"卡片
+  （textContent 防 XSS，保存后清空密码框）；端点总表 12→14，漂移门同批 pin；③**演练 real 档**
+  （tools/sim brain.rs）真云 config 镜像补连接行（`--brain-base-url` 旗标→行 base_url，密钥
+  引用 `env:RR3_CLOUD_API_KEY` 沿用演练面旧契约）。rr3-brain 59 tests OK（skipped=3）、
+  rr3-interact 47 tests OK、tools/sim 25 tests OK；开源自查 `git grep "sk-"` 命中均为测试
+  假值（sk-test-value 等 fixture）与 "task-4" 子串误中，无真实密钥入库；敞口：acc③④
+  真云等用户在面板填 key。
 - **Mac 宿主真麦全环首通 + 真云 opt-in 冒烟落库（2026-10-14）**：四步收口——① rr-hal 新增
   [macaudio.rs](../base/runtime/rr-hal/src/macaudio.rs)：CoreAudio AudioQueue **手写 extern 面**
   （零 crates.io 增量，同 shm 先例），源/汇 16k mono s16、回调锁内零分配、Drop 时序

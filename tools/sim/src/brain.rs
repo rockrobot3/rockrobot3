@@ -114,7 +114,9 @@ pub fn rr3_brain_shim_script(brain_pkg_dir: &Path, py_module: &str) -> String {
 /// brain 演练专属 config。mock 档（缺省）：死地址 + mock 模型，闭环不碰网络、
 /// burst 源 1.5s 短判停。real 档（`--brain-cloud real`）：真端点 + 生产模型名
 /// （真值源 modules/rr3-brain/config.toml，此处按值镜像）+ 人声 8s 判停（生产值，
-/// 真人说话远慢于 burst 周期）。
+/// 真人说话远慢于 burst 周期）。0.0.6 模型连接抽象批：real 档补 `[[rr3-brain.model]]`
+/// 连接行——`--brain-base-url` 旗标落到行 base_url，LLM 腿走 openai 格式，密钥引用
+/// `env:RR3_CLOUD_API_KEY`（演练面沿用旧环境变量契约，面板 secrets 是板上/宿主面）。
 pub fn rr3_brain_config_text(cloud_real: bool, base_url: &str) -> String {
     if cloud_real {
         const ASR_MODEL: &str = "iic/SenseVoiceSmall";
@@ -124,7 +126,9 @@ pub fn rr3_brain_config_text(cloud_real: bool, base_url: &str) -> String {
             "[rr3-brain]\nlog_level = \"info\"\n\n[rr3-brain.cloud]\n\
              base_url = \"{base_url}\"\nasr_model = \"{ASR_MODEL}\"\nllm_model = \"{LLM_MODEL}\"\n\
              tts_model = \"{TTS_MODEL}\"\ntimeout_s = 20\n\n[rr3-brain.dialog]\n\
-             max_utterance_ms = 8000\n"
+             max_utterance_ms = 8000\n\n[[rr3-brain.model]]\nname = \"演练真云\"\n\
+             mode = \"api\"\napi_format = \"openai\"\nbase_url = \"{base_url}\"\n\
+             model_id = \"{LLM_MODEL}\"\napi_key_ref = \"env:RR3_CLOUD_API_KEY\"\nactive = true\n"
         )
     } else {
         format!(
@@ -567,6 +571,20 @@ mod tests {
             "{cfg}"
         );
         assert!(cfg.contains("timeout_s = 20"), "{cfg}");
+        // 0.0.6 模型连接抽象批：real 档必须携带 [[rr3-brain.model]] 连接行
+        // （恰一 active、openai 格式、密钥走 env 引用——演练面沿用 RR3_CLOUD_API_KEY）
+        assert!(cfg.contains("[[rr3-brain.model]]"), "{cfg}");
+        assert!(cfg.contains("mode = \"api\""), "{cfg}");
+        assert!(cfg.contains("api_format = \"openai\""), "{cfg}");
+        assert!(
+            cfg.contains("model_id = \"deepseek-ai/DeepSeek-V3\""),
+            "{cfg}"
+        );
+        assert!(
+            cfg.contains("api_key_ref = \"env:RR3_CLOUD_API_KEY\""),
+            "{cfg}"
+        );
+        assert!(cfg.contains("active = true"), "{cfg}");
         // 人声 8s 判停（生产值）——burst 的 1.5s 兜底对真人太紧
         assert!(cfg.contains("max_utterance_ms = 8000"), "{cfg}");
         assert!(!cfg.contains("127.0.0.1:9"), "{cfg}");
