@@ -27,7 +27,7 @@ mode = "api"
 api_format = "openai"
 base_url = "https://api.deepseek.com"
 model_id = "deepseek-chat"
-api_key_ref = "env:RR3_CLOUD_API_KEY"
+api_key_ref = "DeepSeek官方"
 active = true
 
 [rr3-brain.dialog]
