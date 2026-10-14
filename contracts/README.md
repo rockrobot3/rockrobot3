@@ -142,7 +142,12 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   notification L2——低电兜底点名广播，Q4 裁定）；新增第二个事件负载 schema
   `events/power-battery-low.schema.json`（形状最小：seq / percent / voltage_mv；
   生产者 rr3-power 的 battery 实装落地后为形状唯一事实源）。同批更新 rr-registry 形状 pin
-  （24 条三元组、kind 8-9-3-4、格位 21 / 层分布 5-12-4）、`modules/rr3-act/module.toml`
+  （24 条三元组、kind 8-9-3-4、格位 21 / 层分布 5-12-4）。**2026-10-15 注**：本行是该批次的历史记录，
+  不改写；**现值为 30 条主题（event 10 / request 12 / notification 4 / stream 4，8 owner，2 条 retired）
+  与 21 格（normal 18 / placeholder 3 / retired 0）**——计数唯一事实源是 `topics.toml` 与 `slots.toml` 本身，
+  任何文档复述这个数字都必须以两份表为准（本 README 下文 ③ 段已按现值更新，两处并存即是漂移教训，
+  见 `docs/process/adr/ADR-0021`/`ADR-0022` 的"计数分母要写死且要对"一条）；
+  `modules/rr3-act/module.toml`
   （provides `act.relay` + exposes `rr3-act/relay/set`）、`profiles/default.toml`
   （bindings 16 条 + faces）。battery/low 定 L1：兜底触发面负载取最小集、不再扩字段，
   演化走"只增不改"评审。
