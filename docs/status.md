@@ -498,8 +498,17 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   （tools/sim brain.rs）真云 config 镜像补连接行（`--brain-base-url` 旗标→行 base_url，密钥
   引用 `env:RR3_CLOUD_API_KEY` 沿用演练面旧契约）。rr3-brain 59 tests OK（skipped=3）、
   rr3-interact 47 tests OK、tools/sim 25 tests OK；开源自查 `git grep "sk-"` 命中均为测试
-  假值（sk-test-value 等 fixture）与 "task-4" 子串误中，无真实密钥入库；敞口：acc③④
-  真云等用户在面板填 key。
+  假值（sk-test-value 等 fixture）与 "task-4" 子串误中，无真实密钥入库。
+- **0.0.6 模型连接抽象批验收补记——面板密钥面真连过 + 演练面板地址透传（2026-10-14，提交
+  `eed8d61`+`efb8ad6`+`90b19a9`）**：①用户裁定 key 供给方 = DeepSeek 官方（仅 LLM 腿，
+  ASR/TTS 维持 mock/半真环前提）——active 行切 `https://api.deepseek.com` + `deepseek-chat`；
+  ②用户裁定 key 不走 shell 环境变量（面板路径最小暴露面）——api_key_ref 切裸名
+  `DeepSeek官方` → 仓外 secrets 现读；③**面板密钥面实操真连过**：手机/局域网面板填 key →
+  `~/.rr3/secrets.json`（0600）→ brain 现读 → DeepSeek 真连应答（生产路径：模型行 → 客户端 →
+  裸名 ref → secrets，值全程零回显）；④演练修复：RR3_PANEL_ADDR 原被硬钉回环 18080（手机
+  永远够不着），改用户显式设置优先；interact 旧二进制（12 端点）重建至 14 端点。**acc③
+  （LLM 腿真云）就此通过**；敞口改记：acc④ 全语音真云环待全栈云 key（SiliconFlow）或本地
+  模型（mode=local）——DeepSeek 官方仅 LLM，演练 mock/real 是全局档无 per-leg 开关。
 - **Mac 宿主真麦全环首通 + 真云 opt-in 冒烟落库（2026-10-14）**：四步收口——① rr-hal 新增
   [macaudio.rs](../base/runtime/rr-hal/src/macaudio.rs)：CoreAudio AudioQueue **手写 extern 面**
   （零 crates.io 增量，同 shm 先例），源/汇 16k mono s16、回调锁内零分配、Drop 时序
