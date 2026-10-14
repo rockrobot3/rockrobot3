@@ -406,14 +406,14 @@ mod tests {
             "--brain-cloud",
             "real",
             "--brain-base-url",
-            "https://api.siliconflow.cn/v1",
+            "https://api.siliconflow.cn",
         ]))
         .unwrap();
         assert_eq!(a.audio_backend.as_deref(), Some("mac"));
         assert_eq!(a.brain_cloud.as_deref(), Some("real"));
         assert_eq!(
             a.brain_base_url.as_deref(),
-            Some("https://api.siliconflow.cn/v1")
+            Some("https://api.siliconflow.cn")
         );
         // 缺省：三旗标全 None（CI 纪律——缺省行为零改动）
         let a = rr3_sim_args_parse(&v(&["--brain"])).unwrap();
@@ -440,7 +440,7 @@ mod tests {
             "--brain-cloud",
             "real",
             "--brain-base-url",
-            "api.siliconflow.cn/v1",
+            "api.siliconflow.cn",
         ]))
         .unwrap_err();
         assert!(e.contains("http"), "{e}");

@@ -550,9 +550,10 @@ mod tests {
 
     #[test]
     fn real_cloud_config_carries_production_models_and_endpoint() {
-        let cfg = rr3_brain_config_text(true, "https://api.siliconflow.cn/v1");
+        // 真值镜像 modules/rr3-brain/config.toml：base_url 是主机根（客户端自拼 /v1）
+        let cfg = rr3_brain_config_text(true, "https://api.siliconflow.cn");
         assert!(
-            cfg.contains("base_url = \"https://api.siliconflow.cn/v1\""),
+            cfg.contains("base_url = \"https://api.siliconflow.cn\""),
             "{cfg}"
         );
         // 生产模型名与 modules/rr3-brain/config.toml 同值（此处按值镜像，改名两侧同红）
