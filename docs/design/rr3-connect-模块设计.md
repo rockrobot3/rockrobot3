@@ -116,6 +116,7 @@
 | N-7 | **载荷组装上移承载层**：`rr3_link_body` 与三枚 `*_result` 的 `json!` 移到 `src/composite.rs`/`session.rs`，件只交 `Rr3LinkState` + `mode` + 判定（依据 = ADR-0019 修订 4）；验收 = `net/link` 与三 RPC 应答字节逐字不变 | 批I | — |
 | N-8 | 对外自述里的栈名（`BlueZ`、`NetworkManager`/`D-Bus`）从 SURFACE 与 println 撤出，改由 `rr3_hal_backend_resolve` 交后端名——**换协议栈不该要求改代码**，这是本单元最直白的"换芯片不改码"检验点 | 批I | — |
 | N-9 | sim 假 AP 表（三条 SSID/RSSI/auth）整表从 `atoms/wifi/mech.rs` 迁 `rr-hal` sim 后端，与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流成一处真值 | 批I | — |
+| N-10 | **资源与链路形状**（[ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 裁定 3 的第二个语义域）：① `[pins].mux_group` 除引脚互斥外还要覆盖**射频共存**（WiFi 与 BT 共天线在 ESP32 上是真实资源冲突，与 GPIO18/19 那两次同类）；② **板侧凭据存储立对象**——rtos 形态自己配网，而今天凭据只有宿主侧仓外 0600 文件那一条路，板侧既无 `cred_store` 键也无读取窄缝，"值零回显"必须是**契约要求**而不是实现细节；③ UART 资源参数进绑定（`link.uart.baud` / `link.uart.tx_ring` / `audio.chunk_frames`）——板侧注释已实锤"缺省 256B TX 环让 mic 组帧线程被线速拖住、采样率从 16.5kHz 崩到 4.5kHz"，那是**资源参数住常量**的同型病例（16KB 环 + 680ms→11.7ms 是修复，但修复住在一块板的注释里） | **增补轮六 批N1**（键与形状）+ 批N4（凭据面面板可见） | 批N1；D12（BLE 面板路径） |
 
 ## §11 待证与敞口
 

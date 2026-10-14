@@ -112,6 +112,8 @@
 | S-6 | **件面导出面收口**：`rr3_pcm_downmix_mono`、`rr3_frame_rms`、`Rr3DoaBin`(+`rr3_doa_bin_as_str`)、`Rr3VadEdge` 四个 `mech` 内 `pub` 符号今天不出件入口——要么进 `capture.rs`/`vad.rs` 的 re-export（成为契约面），要么降 `pub(crate)`。不许停在"内松外紧"的中间态。**已结**：`rr3_pcm_downmix_mono` 降 `pub(crate)`；`Rr3DoaBin` 转 `#[cfg(test)]` 测试面专用导出（原 `RR3_DOA_BIN_THRESHOLD_DEG` 随 S-5 件内删除） | 批I→**已结** | C5 |
 | S-7 | **载荷组装上移承载层**：`rr3_pcm_event_body` / `rr3_vad_event_body` 的 `json!` 生产移到 `src/composite.rs`，件面只交 `Rr3PcmStream`/`Rr3VadEdge` 结构（依据 = ADR-0019 修订 4）。验收 = `audio/pcm`、`audio/vad_start` 字节逐字不变（mono golden 与 schema 用例继续绿）；做完本单元两件去 `serde_json` | 批I | — |
 | S-8 | DoA 数学面整型化：`rr3_doa_fix` 去 `f64::{sqrt,asin,to_degrees,round}`，改整数时延 + 定点 `asin` 查表（表进 sim 后端/描述符数据面），误差预算 ±1°；复用 `vad` 的 `rr3_isqrt` 整型开方先例 | 批I | — |
+| S-9 | **传感能力面立 trait**（[ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md)：能力面半边残缺——`rr-hal-api` 七个 trait 里**零个传感器读取**）：`Rr3Sensor { rr3_read(..) -> Rr3Sample{kind, value, unit, quality} }`，按**一张格 + 角色表 + 器件档案**建模，**不逐器件扩格**（DHT11 一格、BMP280 一格那种扩法会炸掉坐标系，也违反"格 = 能力"的定义）。`sensor.env`/`sensor.imu` 从 placeholder 升 normal 的时机 = trait 落 + 一个真后端到（与 D9 一并裁） | **增补轮六 批N3**（与执行件同批走契约级评审） | 批N1；器件到货（D9） |
+| S-10 | **数字输入面**（`Rr3DigitalIn`，与 `Rr3GpioOut` 对称）：底座今天只有输出没有输入，于是"碰壁检测 / 限位开关 / 触摸"这类部件在契约面无对象，`[pins].direction` 与"输入专用脚不得作输出"那条校验也失去一半用武之地。定长形状 + 消抖 / 极性 / 内部上拉走绑定（`role` + `active_low` + `debounce_ms` + `internal_pull`） | **增补轮六 批N3** | 批N1 |
 
 ## §11 待证与敞口
 

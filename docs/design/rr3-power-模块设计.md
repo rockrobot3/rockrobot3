@@ -109,6 +109,8 @@
 | P-6 | `config.toml` 的 `[rr3-power] log_level` 是孤儿键（解析函数不读、全仓无读者）：**被读或删除**，不许第三种状态（与 interact I-1 同纪律） | 批I | — |
 | P-7 | **载荷组装上移承载层**：`rr3_battery_state_body` / `rr3_battery_low_body` / `rr3_charger_state_body` 的 `json!` 生产移到 `src/composite.rs`，件面只交 `Rr3BatteryState` 与 `bool`（依据 = ADR-0019 修订 4）。**做完本单元两件即 `core`-only**，是"件级 no_std 可达"的第一个样板；验收 = 三主题载荷字节逐字不变（schema 用例继续绿） | 批I | — |
 | P-8 | 描述符 `[supplies]` 补**平台看门狗**位（bare 档挂死无主承载层可救，只能靠平台 WDT；四类供给今天不含它，是真缺口不是笔误——见索引 §11 审计 L-2）：本册负责给出"低电边沿在 bare 档的本地兜底动作"需求（与 cutoff 未实装同条链）——**看门狗位已随批J 落（C15/G6）**，本条余下的是**动作半边** | **0.0.5 批M MC-5**（与 act A-5、批L L-8 **三单合一**，索引 R-15 已裁语义；不再本册单独挂单） | MC-5 |
+| P-9 | **第七供给位 能源域**（[ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 裁定 2）：`[[supplies.domain]]` 键集（`name/nominal_mv/current_cap_ma/sense/current_sense/mild_mv/severe_mv/switchable/armed`）+ 新能力面 `Rr3Rail`（逐域电压/电流与档位）+ 两张格 `power.rail`/`power.budget` 与主题 `rr3-power/rail/state`。今日事实：轨压机制与双阈值核**已在板 crate 真跑**（`tools/esp32-periph-base/src/power.rs` 的 `RailMonitor`/`tier_of`/`RailJudge`，复用 `rr_mech::control::Rr3LowEdge`），**但 `rr-hal-api` 与本册对它零命中**——本单是"归属搬家"，机制不动 | **增补轮六 批N2** | 批N1（角色与键集形状）；阈值/分压比**取值**待真板对拍，未对拍前 `armed=false` 不接闸 |
+| P-10 | 件的 `[[atom.demand]]` 申报面（`rail`/`peak_ma`/`sustained_ma`/`critical`）+ 装载期电流加总校验（超域上限拒 boot 并点名组合）+ 运行期三档降载（`Mild` 串行与降亮、`Severe` 拒动沿用 MC-5 `Rr3LowGate` 语义：**拒执行面、不禁妆面、回阈不自动重放**）。板侧今天的 `AXIS_SETTLE_MS` 串行整定与 `OLED_CONTRAST_LEVELS` 逐级降亮，是这三层的**未经建模的事后补救版本**——它们是行为，不是数据结构，所以换板学不到 | **增补轮六 批N2** | P-9；逐域电流采样硬件（D10） |
 
 ## §11 待证与敞口
 
