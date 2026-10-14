@@ -397,6 +397,59 @@ mod tests {
     }
 
     #[test]
+    fn brain_flags_parse_whitelist_and_fail_closed() {
+        // 合法组合：mac 真麦 + 真云 + 端点
+        let a = rr3_sim_args_parse(&v(&[
+            "--brain",
+            "--audio-backend",
+            "mac",
+            "--brain-cloud",
+            "real",
+            "--brain-base-url",
+            "https://api.siliconflow.cn/v1",
+        ]))
+        .unwrap();
+        assert_eq!(a.audio_backend.as_deref(), Some("mac"));
+        assert_eq!(a.brain_cloud.as_deref(), Some("real"));
+        assert_eq!(
+            a.brain_base_url.as_deref(),
+            Some("https://api.siliconflow.cn/v1")
+        );
+        // 缺省：三旗标全 None（CI 纪律——缺省行为零改动）
+        let a = rr3_sim_args_parse(&v(&["--brain"])).unwrap();
+        assert!(a.audio_backend.is_none() && a.brain_cloud.is_none() && a.brain_base_url.is_none());
+        // 取值白名单
+        let e = rr3_sim_args_parse(&v(&["--brain", "--audio-backend", "win"])).unwrap_err();
+        assert!(e.contains("取值不认"), "{e}");
+        let e = rr3_sim_args_parse(&v(&["--brain", "--brain-cloud", "hybrid"])).unwrap_err();
+        assert!(e.contains("取值不认"), "{e}");
+        // fail-closed：real 缺端点拒起
+        let e = rr3_sim_args_parse(&v(&["--brain", "--brain-cloud", "real"])).unwrap_err();
+        assert!(e.contains("--brain-base-url"), "{e}");
+        // mock 给端点拒（mock 不碰网络，静默忽略是第一错法）
+        let e = rr3_sim_args_parse(&v(&[
+            "--brain",
+            "--brain-base-url",
+            "https://x.example/v1",
+        ]))
+        .unwrap_err();
+        assert!(e.contains("mock"), "{e}");
+        // 端点形状把关
+        let e = rr3_sim_args_parse(&v(&[
+            "--brain",
+            "--brain-cloud",
+            "real",
+            "--brain-base-url",
+            "api.siliconflow.cn/v1",
+        ]))
+        .unwrap_err();
+        assert!(e.contains("http"), "{e}");
+        // 专用旗标不许在别的演练里静默生效
+        let e = rr3_sim_args_parse(&v(&["--chain", "--audio-backend", "mac"])).unwrap_err();
+        assert!(e.contains("仅 --brain"), "{e}");
+    }
+
+    #[test]
     fn repo_root_found_upward_by_contract_marker() {
         let base = std::env::temp_dir().join(format!("rr3-sim-root-{}", std::process::id()));
         let deep = base.join("a/b/c");
