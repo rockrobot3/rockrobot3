@@ -266,7 +266,15 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_interact)
             .env("RR3_HAL_BACKEND", &audio_backend)
-            .env("RR3_PANEL_ADDR", crate::drill::RR3_SIM_PANEL_ADDR)
+            // 面板地址：用户显式给的 RR3_PANEL_ADDR 优先（手机/局域网面板面），
+            // 未给才落演练缺省回环 18080
+            .env(
+                "RR3_PANEL_ADDR",
+                std::env::var("RR3_PANEL_ADDR")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| crate::drill::RR3_SIM_PANEL_ADDR.to_string()),
+            )
             .env("RR3_INTERACT_CONFIG", &interact_cfg)
             .stdout(Stdio::from(
                 std::fs::File::create(&interact_log)
