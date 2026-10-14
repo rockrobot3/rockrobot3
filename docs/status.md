@@ -479,6 +479,27 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   gaps=0 + INFO 对账 + wav 落盘）→ d5 DoA 冒烟（`--secs 40 --doa`；拍手时间表 0–8s 左侧
   / 10–18s 右侧，启动前发 "d5 开始"）→ RAM 三点收口。RAM 点1/点2 已随 run#5 到手
   （boot 行 02:07:18 + INFO `free=191072B min_free=105136B`）。
+- **Mac 宿主真麦全环首通 + 真云 opt-in 冒烟落库（2026-10-14）**：四步收口——① rr-hal 新增
+  [macaudio.rs](../base/runtime/rr-hal/src/macaudio.rs)：CoreAudio AudioQueue **手写 extern 面**
+  （零 crates.io 增量，同 shm 先例），源/汇 16k mono s16、回调锁内零分配、Drop 时序
+  Stop(true)→Dispose(true)→回收 Shared；选择面 `RR3_HAL_BACKEND=mac` **显式启用**（缺省仍
+  sim，CI/e2e 零改动）；② mac 宿主档显示面落 sim 同款虚拟点阵（宿主无 LED 矩阵是平台事实
+  非能力缺失，R11③ 的探活回错退出保留给 linux 真件档——首跑 interact 显示面探活判死即修，
+  [backend.rs](../base/runtime/rr-hal/src/backend.rs) `rr3_hal_display` mac 臂）；③ tools/sim
+  `--brain` 三旗标 `--audio-backend / --brain-cloud / --brain-base-url`（取值白名单 +
+  real 缺端点 fail-closed 拒起）；④ 真云 base_url 修正（云客户端自拼 `/v1/<路径>`，契约 =
+  主机根；config.toml 与 sim 演练镜像值去 `/v1` 尾缀，防 `/v1/v1/...` 404）+
+  [test_cloud_real.py](../modules/rr3-brain/tests/test_cloud_real.py) opt-in 冒烟
+  （skipUnless key：无 key 整模块 skip 日常单测零网络零红，本机 3.13.5 44 tests OK
+  skipped=3）。**acc② 实录过**：`rr3-sim --brain --audio-backend mac` 全环——sense(mac 真麦)
+  → brain mock 云「对话轮完成」trace=1 user='你好，今天天气怎么样' tts_pcm_ms=1520 →
+  interact `播放面就绪: backend=mac` `tts: 19 字符播了 1520ms`（48640B gain 70%，talk 挂起），
+  三模块 running denied_publish=0。排障链存档：真麦探针曾全静音（用户已说话 + TCC 已授权 +
+  协商流格式 rate=16000 ch=1 精确一致），加强探针（`AudioQueueGetProperty` 诊断面 + 10s 包络）
+  定位真因 = **正常说话 rms ~700 低于 sense VAD 阈 rms_start=1500**（输入音量 50%），非拾音
+  链路问题——输入音量提 85% + 靠近说话即破阈成轮；真麦探针升级为包络观测面沿用。敞口：
+  真云两测（acc③④）等 SiliconFlow key 到位；判据② 板麦仍等 FT232（CP2102 RX 楔死定性不变，
+  今日复测 0001@921600 0 字节；板载 1410 静默期无自发帧，未复位不计证据）。
 - **0.0.5 第 IV 轮 MCP-0 契约级评审批（2026-10-12）**：P1 评审批开工门兑现——MCP-1
   `topics.toml` 29→30（append `rr3-brain/audio/tts_pcm` stream L2，载荷体逐字段复用
   `rr3-sense/audio/pcm` 已定形状，F-4 下行通路契约半边；与批C/批D 合成一次改表，批C/批D
