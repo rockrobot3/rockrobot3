@@ -22,11 +22,11 @@ timeout_s = 20
 # secrets 文件（~/.rr3/secrets.json，0600，仓外；RR3_SECRETS_FILE 可改路径）。
 # 铁律不变：密钥值不进本文件、不进代码/仓库；active 全表恰一行（解析器强制）。
 [[rr3-brain.model]]
-name = "SiliconFlow-DeepSeek"
+name = "DeepSeek官方"
 mode = "api"
 api_format = "openai"
-base_url = "https://api.siliconflow.cn"
-model_id = "deepseek-ai/DeepSeek-V3"
+base_url = "https://api.deepseek.com"
+model_id = "deepseek-chat"
 api_key_ref = "env:RR3_CLOUD_API_KEY"
 active = true
 
