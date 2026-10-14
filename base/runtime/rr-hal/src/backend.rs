@@ -9,6 +9,7 @@
 //! | `linux`（电源） | 批F5a（`linux_power.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | INA219@0x40 I2C 总线电压读数（R18，判据 12；charging 判定随真件档校准） |
 //! | `linux`（链路） | 批F5a（`linux_link.rs`，仅 `target_os = "linux"` 单门，nmcli 子进程） | NetworkManager 链路状态读数（R18，判据 13；配网/断链重连是 NM 自身行为，HAL 只如实报数） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
+//! | `mac` | 宿主真件（`macaudio.rs`，仅 `target_os = "macos"` 单门，手写 AudioQueue 绑定） | macOS 宿主真麦拾音/扬声器回放——显式 `RR3_HAL_BACKEND=mac` 才启用，平台缺省仍 sim（CI 纪律） |
 //! | `esp32` | 批C（`esp32_uart.rs`，`RR3_HAL_PERIPH_UART` 指定设备路径） | ESP32 外设桥：舵机/显示两能力面的 UART 能力帧承载——板不进城，宿主直连；跨进程 flock 排他即单消费者 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
@@ -24,10 +25,13 @@ use crate::{
 pub const RR3_BACKEND_LINUX: &str = "linux";
 pub const RR3_BACKEND_SIM: &str = "sim";
 pub const RR3_BACKEND_ESP32: &str = "esp32";
+/// macOS CoreAudio 音频后端（macaudio.rs，宿主真麦/扬声器）：仅显式启用——
+/// macOS 平台缺省仍 sim（CI/e2e 真开麦是纪律红线），与 linux"显式启用真件"同裁定。
+pub const RR3_BACKEND_MAC: &str = "mac";
 pub const RR3_BACKEND_PLACEHOLDER: &str = "placeholder";
 
 /// 后端选择的环境变量键（naming.md：`RR3_` 大写前缀）。
-/// 取值：`sim` / `linux` / `esp32` / `placeholder`；未设或取值不认 → 走平台默认。
+/// 取值：`sim` / `linux` / `esp32` / `mac` / `placeholder`；未设或取值不认 → 走平台默认。
 pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 
 // —— 以下 `RR3_HAL_*` 键全部是**应急覆盖**（批D④ 收口，ADR-0018 裁定 4）：
@@ -124,6 +128,7 @@ pub const RR3_HAL_SIM_LINK_SSID_DEFAULT: &str = "rock-sim";
 pub const RR3_HAL_SIM_LINK_RSSI_DEFAULT: i8 = -50;
 
 /// 平台默认后端：linux + `alsa` feature 编进来了就是 `linux`，否则 `sim`。
+/// macOS 平台缺省同为 `sim`（真麦走显式 `mac`——CI/无头不真开设备，见 [`RR3_BACKEND_MAC`]）。
 pub const fn rr3_hal_backend_default() -> &'static str {
     if cfg!(all(target_os = "linux", feature = "alsa")) {
         RR3_BACKEND_LINUX
@@ -155,8 +160,15 @@ pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
                 Ok(RR3_BACKEND_PLACEHOLDER) // 使用时回 Unsupported，不静默降级
             }
         }
+        RR3_BACKEND_MAC => {
+            if cfg!(target_os = "macos") {
+                Ok(RR3_BACKEND_MAC)
+            } else {
+                Ok(RR3_BACKEND_PLACEHOLDER) // 使用时回 Unsupported，不静默降级
+            }
+        }
         other => Err(format!(
-            "环境变量 {RR3_HAL_BACKEND_ENV} 取值不认: {other}（允许 sim/linux/esp32/placeholder）"
+            "环境变量 {RR3_HAL_BACKEND_ENV} 取值不认: {other}（允许 sim/linux/esp32/mac/placeholder）"
         )),
     }
 }
@@ -226,6 +238,19 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
         // 显式 linux 但 alsa 后端没编进（无 alsa 的板上构建）：占位显式回错，
         // 不静默落 sim（resolve 订正为平台门后此分支结构上可达）
         RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        // macOS 真麦（显式 mac 才进；缺省仍 sim——CI/无头不真开设备）
+        RR3_BACKEND_MAC if cfg!(target_os = "macos") => {
+            #[cfg(target_os = "macos")]
+            return (
+                Box::new(crate::macaudio::Rr3MacAudioSource::rr3_mac_source_new())
+                    as Box<dyn Rr3AudioSource>,
+                RR3_BACKEND_MAC,
+            );
+            #[cfg(not(target_os = "macos"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
+        // 显式 mac 但平台不是 macOS：占位显式回错，不静默落 sim
+        RR3_BACKEND_MAC => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         _ => {
             let doa = std::env::var(RR3_HAL_SIM_DOA_DEG_ENV)
@@ -264,6 +289,19 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
         }
         // 同 audio_source：显式 linux 但 alsa 没编进 → 占位显式回错，不静默落 sim
         RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        // macOS 真扬声器（显式 mac 才进；缺省仍 sim——CI/无头不真开设备）
+        RR3_BACKEND_MAC if cfg!(target_os = "macos") => {
+            #[cfg(target_os = "macos")]
+            return (
+                Box::new(crate::macaudio::Rr3MacAudioSink::rr3_mac_sink_new())
+                    as Box<dyn Rr3AudioSink>,
+                RR3_BACKEND_MAC,
+            );
+            #[cfg(not(target_os = "macos"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
+        // 显式 mac 但平台不是 macOS：占位显式回错，不静默落 sim
+        RR3_BACKEND_MAC => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         _ => (
             Box::new(crate::sim::Rr3SimAudioSink::rr3_sim_sink_new(16000 * 10)),
@@ -611,19 +649,35 @@ mod tests {
 
     /// 解析函数的平台默认分支：未设环境变量时回落平台默认（本机 macOS = sim）。
     /// 环境变量支无法在本测试里安全置位（并发测试读同一进程环境，std::env::set_var
-    /// 是 unsafe 且有竞态），显式取值路径由模块侧 e2e 以真实进程环境覆盖。
+    /// 是 unsafe 且有竞态），故三态自洽：未设 → 钉平台缺省；显式合法值 → 白名单；
+    /// 显式非法值 → Err 点名（fail-closed）。显式取值路径另由模块侧 e2e 以真实
+    /// 进程环境覆盖（如 `--audio-backend mac` 起的 rr3-sim 全环）。
     #[test]
     fn default_backend_is_sim_off_linux_alsa() {
-        // 不动环境：只钉"解析不 panic 且返回合法档位"
-        let resolved = rr3_hal_backend_resolve().expect("未设环境变量必须解析成功");
-        assert!(
-            [RR3_BACKEND_SIM, RR3_BACKEND_LINUX, RR3_BACKEND_PLACEHOLDER].contains(&resolved),
-            "解析结果必须是合法后端名: {resolved}"
-        );
-        if cfg!(all(target_os = "linux", feature = "alsa")) {
-            assert_eq!(resolved, RR3_BACKEND_LINUX);
-        } else {
-            assert_eq!(resolved, RR3_BACKEND_SIM);
+        let env_set = std::env::var_os(RR3_HAL_BACKEND_ENV).is_some();
+        match rr3_hal_backend_resolve() {
+            Ok(resolved) => {
+                assert!(
+                    [
+                        RR3_BACKEND_SIM,
+                        RR3_BACKEND_LINUX,
+                        RR3_BACKEND_MAC,
+                        RR3_BACKEND_PLACEHOLDER,
+                    ]
+                    .contains(&resolved),
+                    "解析结果必须是合法后端名: {resolved}"
+                );
+                if !env_set {
+                    if cfg!(all(target_os = "linux", feature = "alsa")) {
+                        assert_eq!(resolved, RR3_BACKEND_LINUX);
+                    } else {
+                        assert_eq!(resolved, RR3_BACKEND_SIM);
+                    }
+                }
+            }
+            Err(e) => {
+                assert!(env_set, "未设环境变量必须解析成功: {e}");
+            }
         }
     }
 
