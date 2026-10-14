@@ -43,7 +43,7 @@ from rr3_brain.bus import (
     rr3_bus_connect,
 )
 from rr3_brain.cloud.asr import Rr3AsrClient
-from rr3_brain.cloud.llm import Rr3LlmClient
+from rr3_brain.cloud.llm import LLM_MODE_API, LLM_MODE_LOCAL, Rr3LlmClient
 from rr3_brain.cloud.tts import Rr3TtsClient
 from rr3_brain.dialog import Rr3Dialog, Rr3DialogTurn
 from rr3_brain.intent import rr3_extract_actions
@@ -80,6 +80,41 @@ def rr3_config_load() -> dict:
         return tomllib.load(f)
 
 
+def rr3_brain_model_row(cfg: dict) -> tuple[str, str, str | None, str | None]:
+    """LLM 连接行解析（0.0.6 抽象批）：[[rr3-brain.model]] 恰一 active 行。
+
+    返回 (base_url, model_id, key_ref, mode)；无表 → 旧路径四元组
+    （cloud 段 base_url + llm_model，key_ref=None 走通用环境变量键，mode=None
+    随全局档）。fail-closed：active 数≠1、mode/api_format 不认、缺 base_url/
+    model_id 一律 RuntimeError（点名行 name，不静默挑行）。
+    """
+    brain = cfg.get("rr3-brain", {})
+    rows = brain.get("model", [])
+    if not rows:
+        cloud_cfg = brain["cloud"]
+        return cloud_cfg["base_url"], cloud_cfg["llm_model"], None, None
+    active = [r for r in rows if r.get("active")]
+    if len(active) != 1:
+        names = [r.get("name", "?") for r in rows]
+        raise RuntimeError(f"[[rr3-brain.model]] 须恰一行 active=true（现 {len(active)} 行: {names}）")
+    row = active[0]
+    name = row.get("name", "?")
+    mode = row.get("mode", LLM_MODE_API)
+    if mode not in (LLM_MODE_API, LLM_MODE_LOCAL):
+        raise RuntimeError(f"模型行 {name} mode 不认: {mode}（允许 {LLM_MODE_API}/{LLM_MODE_LOCAL}）")
+    fmt = row.get("api_format", "openai")
+    if fmt != "openai":
+        raise RuntimeError(f"模型行 {name} api_format 暂不支持: {fmt}（本批仅 openai）")
+    base_url = str(row.get("base_url", "")).strip()
+    model_id = str(row.get("model_id", "")).strip()
+    if not base_url or not model_id:
+        raise RuntimeError(f"模型行 {name} 缺 base_url/model_id")
+    key_ref = row.get("api_key_ref")
+    if key_ref is not None:
+        key_ref = str(key_ref).strip() or None
+    return base_url, model_id, key_ref, mode
+
+
 def main() -> int:
     try:
         return rr3_brain_run()
@@ -107,7 +142,8 @@ def rr3_brain_run() -> int:
     cloud_cfg = cfg["rr3-brain"]["cloud"]
     dialog_cfg = cfg["rr3-brain"]["dialog"]
     asr = Rr3AsrClient(cloud_cfg["base_url"], cloud_cfg["asr_model"], float(cloud_cfg["timeout_s"]))
-    llm = Rr3LlmClient(cloud_cfg["base_url"], cloud_cfg["llm_model"], float(cloud_cfg["timeout_s"]))
+    base_url, model_id, key_ref, mode = rr3_brain_model_row(cfg)
+    llm = Rr3LlmClient(base_url, model_id, float(cloud_cfg["timeout_s"]), key_ref=key_ref, mode=mode)
     tts = Rr3TtsClient(cloud_cfg["base_url"], cloud_cfg["tts_model"], float(cloud_cfg["timeout_s"]))
     dialog = Rr3Dialog(max_utterance_ms=int(dialog_cfg.get("max_utterance_ms", 8000)))
     trace_seq = 0
