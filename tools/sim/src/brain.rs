@@ -7,9 +7,13 @@
 //! brain 日志出现"对话轮完成"证据 → `rr3-ctl status` 断言三模块 running 且
 //! `denied_publish = 0` → 报告 + 收尾。
 //!
-//! 云端走 mock（`RR3_BRAIN_CLOUD=mock`，ADR-0014 裁定 2）：brain 的 ASR/LLM/TTS
+//! 云端缺省走 mock（`RR3_BRAIN_CLOUD=mock`，ADR-0014 裁定 2）：brain 的 ASR/LLM/TTS
 //! 全部确定性应答——闭环里只有云端 socket 一跳是假的，其余（总线、rrd 路由、
-//! rr3.call、事件扇出）全是真进程真套接字。本模块依赖 UDS 与真进程，仅 Unix 参与编译。
+//! rr3.call、事件扇出）全是真进程真套接字。真云档（`--brain-cloud real
+//! --brain-base-url <端点>` + 环境变量 `RR3_CLOUD_API_KEY`）把最后一跳也接真——
+//! 端点 fail-closed 必给（演练 config 缺省是死地址，不落）。音频后端缺省 sim，
+//! `--audio-backend mac` 换 macOS 真麦/扬声器（rr-hal `mac` 后端，真件显式启用纪律）。
+//! 本模块依赖 UDS 与真进程，仅 Unix 参与编译。
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -107,14 +111,29 @@ pub fn rr3_brain_shim_script(brain_pkg_dir: &Path, py_module: &str) -> String {
     )
 }
 
-/// brain 演练专属 config（mock 云 + 短判停；base_url 是死地址，mock 路径不碰网络）
-pub fn rr3_brain_config_text() -> String {
-    format!(
-        "[rr3-brain]\nlog_level = \"info\"\n\n[rr3-brain.cloud]\n\
-         base_url = \"http://127.0.0.1:9/v1\"\nasr_model = \"mock\"\nllm_model = \"mock\"\n\
-         tts_model = \"mock\"\ntimeout_s = 5\n\n[rr3-brain.dialog]\nsilence_tail_ms = 700\n\
-         max_turn_chars = 800\nmax_utterance_ms = {RR3_BRAIN_MAX_UTTERANCE_MS}\n"
-    )
+/// brain 演练专属 config。mock 档（缺省）：死地址 + mock 模型，闭环不碰网络、
+/// burst 源 1.5s 短判停。real 档（`--brain-cloud real`）：真端点 + 生产模型名
+/// （真值源 modules/rr3-brain/config.toml，此处按值镜像）+ 人声 8s 判停（生产值，
+/// 真人说话远慢于 burst 周期）。
+pub fn rr3_brain_config_text(cloud_real: bool, base_url: &str) -> String {
+    if cloud_real {
+        const ASR_MODEL: &str = "iic/SenseVoiceSmall";
+        const LLM_MODEL: &str = "deepseek-ai/DeepSeek-V3";
+        const TTS_MODEL: &str = "FunAudioLLM/CosyVoice2-0.5B";
+        format!(
+            "[rr3-brain]\nlog_level = \"info\"\n\n[rr3-brain.cloud]\n\
+             base_url = \"{base_url}\"\nasr_model = \"{ASR_MODEL}\"\nllm_model = \"{LLM_MODEL}\"\n\
+             tts_model = \"{TTS_MODEL}\"\ntimeout_s = 20\n\n[rr3-brain.dialog]\n\
+             max_utterance_ms = 8000\n"
+        )
+    } else {
+        format!(
+            "[rr3-brain]\nlog_level = \"info\"\n\n[rr3-brain.cloud]\n\
+             base_url = \"http://127.0.0.1:9/v1\"\nasr_model = \"mock\"\nllm_model = \"mock\"\n\
+             tts_model = \"mock\"\ntimeout_s = 5\n\n[rr3-brain.dialog]\nsilence_tail_ms = 700\n\
+             max_turn_chars = 800\nmax_utterance_ms = {RR3_BRAIN_MAX_UTTERANCE_MS}\n"
+        )
+    }
 }
 
 pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
@@ -158,6 +177,18 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     }
     let py = which_python3()?;
 
+    // 音频后端与云模式（缺省行为零改动：sim + mock——CI/无头纪律；真件只显式启用）
+    let audio_backend = a
+        .audio_backend
+        .clone()
+        .unwrap_or_else(|| "sim".to_string());
+    let cloud_real = a.brain_cloud.as_deref() == Some("real");
+    // real 的 base_url 已在参数解析处 fail-closed 把关（必给），此处 unwrap 不可达
+    let brain_base_url = a
+        .brain_base_url
+        .clone()
+        .unwrap_or_else(|| "http://127.0.0.1:9/v1".to_string());
+
     // ---- 1. 夹具：套接字 + 三份 manifest + shim + 演练 config ----
     let workdir = match &a.socket {
         Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -173,7 +204,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .map_err(|e| format!("写 shim 失败: {e}"))?;
     make_executable(&shim_path)?;
     let manifest_path = workdir.join("config.toml");
-    std::fs::write(&manifest_path, rr3_brain_config_text())
+    std::fs::write(&manifest_path, rr3_brain_config_text(cloud_real, &brain_base_url))
         .map_err(|e| format!("写演练 config 失败: {e}"))?;
     // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
     // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
@@ -203,7 +234,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             .arg("--boot-role")
             .arg("resident")
             .args(["--pre-register-timeout-ms", "3000"])
-            .env("RR3_HAL_BACKEND", "sim")
+            .env("RR3_HAL_BACKEND", &audio_backend)
             // burst（1s 正弦 + 1s 静音循环）：VAD 周期性发 onset/offset，
             // brain 晚于首个 onset 注册也能赶上下一轮——sine 恒有声只发一次 onset
             .env("RR3_HAL_SIM_WAVE", "burst")
@@ -216,8 +247,9 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         let rrd_pid = rrd.id();
         children.push(("rrd".into(), rrd));
         println!(
-            "rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}",
-            socket.display()
+            "rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}，音频后端={audio_backend}，云={}",
+            socket.display(),
+            if cloud_real { "real" } else { "mock" },
         );
 
         // ---- 2.5 等 rrd bind 完套接字再起外部模块：sense 由 rrd spawn（bind 后），
@@ -229,7 +261,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         let interact_child = Command::new(&interact)
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_interact)
-            .env("RR3_HAL_BACKEND", "sim")
+            .env("RR3_HAL_BACKEND", &audio_backend)
             .env("RR3_PANEL_ADDR", crate::drill::RR3_SIM_PANEL_ADDR)
             .env("RR3_INTERACT_CONFIG", &interact_cfg)
             .stdout(Stdio::from(
@@ -254,7 +286,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             .env("PYTHONPATH", &brain_pkg)
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_brain)
-            .env("RR3_BRAIN_CLOUD", "mock")
+            .env("RR3_BRAIN_CLOUD", if cloud_real { "real" } else { "mock" })
             .env("RR3_BRAIN_CONFIG", &manifest_path)
             .stdout(Stdio::from(
                 std::fs::File::create(&brain_log)
@@ -313,6 +345,8 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     })();
 
     // ---- 6. 收尾：杀全部子进程；--keep 保留现场 ----
+    let cloud_label = if cloud_real { "云端 real" } else { "云端 mock" };
+    let chain_label = format!("rrd + rr3-sense({audio_backend}) + rr3-brain + rr3-interact");
     if a.keep {
         println!(
             "rr3-sim --brain: --keep 保留现场：socket={} workdir={}",
@@ -322,7 +356,9 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         println!("rr3-sim --brain: 手动收尾：kill 上述进程；rm -rf {workdir:?}");
         return match outcome {
             Ok(()) => {
-                report.push_str("\n=== 演练结论 ===\n全语音对话闭环 OK（云端 mock）\n");
+                report.push_str(&format!(
+                    "\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}：{chain_label}）\n"
+                ));
                 Ok(report)
             }
             Err(e) => Err(e),
@@ -336,7 +372,9 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let _ = std::fs::remove_file(&socket);
     match outcome {
         Ok(()) => {
-            report.push_str("\n=== 演练结论 ===\n全语音对话闭环 OK（云端 mock）：rrd + rr3-sense(sim) + rr3-brain + rr3-interact\n");
+            report.push_str(&format!(
+                "\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}）：{chain_label}\n"
+            ));
             Ok(report)
         }
         Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
@@ -500,11 +538,36 @@ mod tests {
             "{shim}"
         );
         assert!(shim.contains("exec python3 -m rr3_brain"), "{shim}");
-        let cfg = rr3_brain_config_text();
+        // mock 档（缺省）：死地址 + mock 模型 + burst 短判停
+        let cfg = rr3_brain_config_text(false, "http://127.0.0.1:9/v1");
         assert!(cfg.contains("max_utterance_ms = 1500"), "{cfg}");
         assert!(
             cfg.contains("base_url = \"http://127.0.0.1:9/v1\""),
             "{cfg}"
         );
+        assert!(cfg.contains("llm_model = \"mock\""), "{cfg}");
+    }
+
+    #[test]
+    fn real_cloud_config_carries_production_models_and_endpoint() {
+        let cfg = rr3_brain_config_text(true, "https://api.siliconflow.cn/v1");
+        assert!(
+            cfg.contains("base_url = \"https://api.siliconflow.cn/v1\""),
+            "{cfg}"
+        );
+        // 生产模型名与 modules/rr3-brain/config.toml 同值（此处按值镜像，改名两侧同红）
+        assert!(cfg.contains("asr_model = \"iic/SenseVoiceSmall\""), "{cfg}");
+        assert!(
+            cfg.contains("llm_model = \"deepseek-ai/DeepSeek-V3\""),
+            "{cfg}"
+        );
+        assert!(
+            cfg.contains("tts_model = \"FunAudioLLM/CosyVoice2-0.5B\""),
+            "{cfg}"
+        );
+        assert!(cfg.contains("timeout_s = 20"), "{cfg}");
+        // 人声 8s 判停（生产值）——burst 的 1.5s 兜底对真人太紧
+        assert!(cfg.contains("max_utterance_ms = 8000"), "{cfg}");
+        assert!(!cfg.contains("127.0.0.1:9"), "{cfg}");
     }
 }

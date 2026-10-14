@@ -396,7 +396,7 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .map_err(|e| format!("写 shim 失败: {e}"))?;
     make_executable(&shim_path)?;
     for (name, text) in [
-        ("brain-config.toml", rr3_brain_config_text()),
+        ("brain-config.toml", rr3_brain_config_text(false, "http://127.0.0.1:9/v1")),
         ("sense-config.toml", rr3_chain_sense_config_text()),
         ("interact-config.toml", rr3_chain_interact_config_text()),
         ("act-config.toml", rr3_chain_act_config_text()),
