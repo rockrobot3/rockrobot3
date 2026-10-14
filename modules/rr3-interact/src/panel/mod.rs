@@ -6,6 +6,7 @@
 //! `127.0.0.1:8080`，`RR3_PANEL_ADDR` 可改（局域网可信面声明落 README）。
 //! 静态资源单文件内嵌于 `www/index.html`，无运行时文件依赖。
 
+pub mod secrets;
 pub mod server;
 
 /// 单文件内嵌静态页（`GET /` 的 body）——编译期打进二进制

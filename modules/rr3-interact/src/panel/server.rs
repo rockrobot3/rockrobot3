@@ -34,6 +34,7 @@ use rr_ipc::{
 };
 use serde_json::{json, Value};
 
+use super::secrets::{rr3_secrets_list_at, rr3_secrets_path, rr3_secrets_upsert_at};
 use super::RR3_PANEL_INDEX_HTML;
 
 /// 面板监听面：env `RR3_PANEL_ADDR` 优先，缺省只绑回环（Q3 裁定）。
@@ -95,6 +96,8 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/wifi/scan"),
     ("POST", "/api/wifi/connect"),
     ("POST", "/api/wifi/forget"),
+    ("GET", "/api/model/keys"),
+    ("POST", "/api/model/key"),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -140,6 +143,15 @@ pub enum Rr3PanelDispatch {
     SelfTest,
     /// `POST /api/reboot`：ctl.reboot（rrd 侧双重门，缺省恒拒）
     Reboot,
+    /// `GET /api/model/keys`：secrets 已存 ref 清单（只报名字，永不回值——
+    /// 0.0.6 模型连接抽象批，面板密钥面）
+    ModelKeysQuery,
+    /// `POST /api/model/key`：secrets upsert（value 空=删）；落仓外 0600 文件，
+    /// 应答只回 ref 不回值
+    ModelKeySet {
+        ref_name: String,
+        value: String,
+    },
     NotFound,
     MethodNotAllowed,
     BadRequest(String),
@@ -342,6 +354,31 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
             },
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
+        // 模型密钥面（0.0.6 抽象批）：key 落仓外 secrets 文件（panel::secrets），
+        // 不走总线不入配置——GET 清单只回 ref 名，POST 应答只回 ref 不回值
+        "/api/model/keys" => match method {
+            "GET" => Rr3PanelDispatch::ModelKeysQuery,
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/model/key" => {
+            if method != "POST" {
+                return Rr3PanelDispatch::MethodNotAllowed;
+            }
+            let args = match rr3_panel_body_json(body) {
+                Ok(v) => v,
+                Err(e) => return Rr3PanelDispatch::BadRequest(e),
+            };
+            match (
+                args.get("ref").and_then(Value::as_str),
+                args.get("value").and_then(Value::as_str),
+            ) {
+                (Some(ref_name), Some(value)) => Rr3PanelDispatch::ModelKeySet {
+                    ref_name: ref_name.to_string(),
+                    value: value.to_string(),
+                },
+                _ => Rr3PanelDispatch::BadRequest("缺字符串参数 ref/value".to_string()),
+            }
+        }
         _ => Rr3PanelDispatch::NotFound,
     }
 }
@@ -629,6 +666,21 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 直接回 403 + rrd 原文案——"解锁旋钮"是运维要看见的字）
             Err(e) => Rr3PanelReply::json(403, "Forbidden", json!({ "error": e })),
         },
+        Rr3PanelDispatch::ModelKeysQuery => match rr3_secrets_path() {
+            Ok(path) => match rr3_secrets_list_at(&path) {
+                Ok(keys) => Rr3PanelReply::json(200, "OK", json!({ "keys": keys })),
+                Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+            },
+            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+        },
+        Rr3PanelDispatch::ModelKeySet { ref_name, value } => match rr3_secrets_path() {
+            Ok(path) => match rr3_secrets_upsert_at(&path, &ref_name, &value) {
+                // 应答只回 ref——值永不进任何负载/日志（secrets 模块铁律）
+                Ok(()) => Rr3PanelReply::json(200, "OK", json!({ "ok": true, "ref": ref_name })),
+                Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+            },
+            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+        },
     }
 }
 
@@ -756,7 +808,7 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            12,
+            14,
             "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径"
         );
         for (method, path) in RR3_PANEL_ROUTES {
@@ -764,6 +816,7 @@ mod tests {
                 ("POST", "/api/relay") => br#"{"on":true}"#,
                 ("POST", "/api/face") => br#"{"expression":"happy"}"#,
                 ("POST", "/api/wifi/connect") => br#"{"ssid":"s","pass":"password8"}"#,
+                ("POST", "/api/model/key") => r#"{"ref":"测试键","value":"sk-x"}"#.as_bytes(),
                 _ => b"",
             };
             let d = rr3_panel_route(method, path, body);

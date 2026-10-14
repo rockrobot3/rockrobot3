@@ -111,6 +111,14 @@
     <button class="btn warn" onclick="wifiForget()">清除 WiFi 凭据</button>
     <div class="msg" id="wifi-reset-msg">仅清配网凭据回 AP 态；≠ 整机恢复出厂（M6 分区回滚，两语义不合并）。</div>
   </div>
+  <div class="card">
+    <h2>模型密钥（仓外 secrets 文件，0600；值只写不回显）</h2>
+    <p class="ph">引用名 <input id="model-ref" placeholder="如 SiliconFlow 或 DeepSeek官方"> 密钥 <input id="model-key" type="password" placeholder="sk-...（留空=删除该引用）"></p>
+    <button class="btn" onclick="modelKeySave()">保存密钥</button>
+    <button class="btn off" onclick="modelKeysRefresh()">刷新清单</button>
+    <table id="model-keys"><thead><tr><th>引用名</th><th>状态</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="model-key-msg">模型连接（地址/模型名）在 rr3-brain config.toml 的 [[rr3-brain.model]] 表；此处只管密钥。brain 每轮现读，保存后下一轮对话即生效。</div>
+  </div>
 </section>
 
 <section id="tab-wifi">
@@ -253,6 +261,38 @@ async function wifiForget() {
     setMsg("wifi-forget-msg", "已清除凭据，mode=" + v.result.mode, true);
     setMsg("wifi-reset-msg", "已清除凭据，mode=" + v.result.mode, true);
   } catch (e) { setMsg("wifi-forget-msg", "失败：" + e.message, false); }
+}
+// ---- 模型密钥（0.0.6 抽象批：值只写不回显，清单只回 ref 名）----
+async function modelKeysRefresh() {
+  try {
+    const v = await api("/api/model/keys");
+    const tb = $("model-keys").querySelector("tbody");
+    tb.innerHTML = "";
+    (v.keys || []).forEach((k) => {
+      const tr = document.createElement("tr");
+      const td1 = document.createElement("td"); td1.textContent = k.ref;
+      const td2 = document.createElement("td"); td2.textContent = "已设置";
+      tr.appendChild(td1); tr.appendChild(td2); tb.appendChild(tr);
+    });
+    if (!(v.keys || []).length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 2; td.textContent = "（空）";
+      tr.appendChild(td); tb.appendChild(tr);
+    }
+    setMsg("model-key-msg", "清单已刷新（共 " + (v.keys || []).length + " 条，值不回显）。", true);
+  } catch (e) { setMsg("model-key-msg", "刷新失败：" + e.message, false); }
+}
+async function modelKeySave() {
+  const ref = $("model-ref").value.trim();
+  const key = $("model-key").value;
+  if (!ref) { setMsg("model-key-msg", "引用名不能为空", false); return; }
+  try {
+    const v = await api("/api/model/key", { ref, value: key });
+    setMsg("model-key-msg", key ? "引用「" + v.ref + "」已保存（brain 下一轮对话生效）。" : "引用「" + v.ref + "」已删除。", true);
+    $("model-key").value = "";
+    await modelKeysRefresh();
+  } catch (e) { setMsg("model-key-msg", "保存失败：" + e.message, false); }
 }
 </script>
 </body>
