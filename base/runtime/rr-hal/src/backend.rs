@@ -467,12 +467,20 @@ pub fn rr3_pwm_index_parse(s: &str) -> Option<u32> {
 /// 按环境选显示面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无显示
 /// 真件后端（MAX7219 SPI 归批F5a 真件档，R11③——trait 已立、后端待真件到位）：
 /// 显式要 `linux` 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim——
-/// rr3-interact 开机探活会按"能力缺失显式回错"退出。
+/// rr3-interact 开机探活会按"能力缺失显式回错"退出。mac 宿主档（C4 修正）：
+/// Mac 天然无 LED 矩阵，显示面落 sim 同款虚拟点阵（内存记录，机制同源）——
+/// R11③ 的回错退出保留给 linux 真件档，宿主开发档不因显示件缺席整体判死。
 pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimDisplay::rr3_sim_display_new([0; 8])),
             RR3_BACKEND_SIM,
+        ),
+        // mac 宿主档：真麦真扬声器 + 虚拟点阵（无显示硬件是平台事实，非能力缺失）
+        #[cfg(target_os = "macos")]
+        RR3_BACKEND_MAC => (
+            Box::new(crate::sim::Rr3SimDisplay::rr3_sim_display_new([0; 8])),
+            RR3_BACKEND_MAC,
         ),
         // ESP32 外设桥（批C）：OLED 出帧链路的宿主承载（帧面 rr3.call，板侧
         // 8x8→64x64 放大渲染）。设备路径同舵机面的应急 env；缺 → 占位显式回错。
@@ -705,6 +713,10 @@ mod tests {
         if cfg!(target_os = "linux") {
             legal.push(RR3_BACKEND_LINUX);
         }
+        if cfg!(target_os = "macos") {
+            // mac 宿主档显示面 = sim 同款虚拟点阵（宿主无 LED 矩阵是平台事实）
+            legal.push(RR3_BACKEND_MAC);
+        }
         let (servo, servo_backend) = rr3_hal_servo();
         assert!(
             legal.contains(&servo_backend),
@@ -731,8 +743,8 @@ mod tests {
             assert_eq!(servo.angle().unwrap(), 90, "sim 舵机初始中位");
             assert!(!gpio.level().unwrap(), "sim 通道初始断电");
         }
-        if display_backend == RR3_BACKEND_SIM {
-            assert_eq!(display.frame().unwrap(), [0; 8], "sim 点阵初始黑屏");
+        if display_backend == RR3_BACKEND_SIM || display_backend == RR3_BACKEND_MAC {
+            assert_eq!(display.frame().unwrap(), [0; 8], "宿主虚拟点阵初始黑屏");
         }
         if link_backend == RR3_BACKEND_SIM {
             let st = link.state().unwrap();
