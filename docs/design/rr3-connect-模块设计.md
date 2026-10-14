@@ -117,6 +117,7 @@
 | N-8 | 对外自述里的栈名（`BlueZ`、`NetworkManager`/`D-Bus`）从 SURFACE 与 println 撤出，改由 `rr3_hal_backend_resolve` 交后端名——**换协议栈不该要求改代码**，这是本单元最直白的"换芯片不改码"检验点 | 批I | — |
 | N-9 | sim 假 AP 表（三条 SSID/RSSI/auth）整表从 `atoms/wifi/mech.rs` 迁 `rr-hal` sim 后端，与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流成一处真值 | 批I | — |
 | N-10 | **资源与链路形状**（[ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 裁定 3 的第二个语义域）：① `[pins].mux_group` 除引脚互斥外还要覆盖**射频共存**（WiFi 与 BT 共天线在 ESP32 上是真实资源冲突，与 GPIO18/19 那两次同类）；② **板侧凭据存储立对象**——rtos 形态自己配网，而今天凭据只有宿主侧仓外 0600 文件那一条路，板侧既无 `cred_store` 键也无读取窄缝，"值零回显"必须是**契约要求**而不是实现细节；③ UART 资源参数进绑定（`link.uart.baud` / `link.uart.tx_ring` / `audio.chunk_frames`）——板侧注释已实锤"缺省 256B TX 环让 mic 组帧线程被线速拖住、采样率从 16.5kHz 崩到 4.5kHz"，那是**资源参数住常量**的同型病例（16KB 环 + 680ms→11.7ms 是修复，但修复住在一块板的注释里） | **增补轮六 批N1**（键与形状）+ 批N4（凭据面面板可见） | 批N1；D12（BLE 面板路径） |
+| N-11 | **三条**：① 配网最短密码位住**组合件**码内（`src/composite.rs` 的 `pass.len() < 8`），`atoms/wifi/assemble.toml` 的 `ops` 只有 `link_report_period_ms`/`timeout_ms` 两槽、**无 `min_pass_len`**——而 §14 曾把 N-1 判"已结"，那是**半边判整条**（改判随门 j 把组合件申报面进门禁）；② "rock-sim" 假 AP 名有**两处**（`composite.rs` 与 `src/session.rs`），L-9→0.0.8 W-B 那一条只覆盖前者；③ 探针卡死与"真的没网"在现场不可分——act 有 A-6、sense 有 S-3，**connect 无单**，本单补 counters 侧。**另承接 D5/D12 裁定**：`up` 只表链路关联、AP 态须在文案里点名；BLE 的占位语义改注为"bare 档运维入口"（不立 rtos 必达）。细则见 [全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §15.1 M-6 与 §12 D5/D12 | ① **批N4**（+ 门 j 随批N1）；② **0.0.8 W-B**；③ **0.0.5 批M 余数**（挂 0.0.8 W-B 同批） | C17；门 j |
 
 ## §11 待证与敞口
 
@@ -148,7 +149,7 @@
 | `atoms/wifi/mech.rs : rr3_wifi_scan_result` | 三条假 AP：`rock-sim/-42/true`、`rock-sim-guest/-58/true`、`neighbour-2g/-71/false`、`"backend":"sim"` | **sim 假数据** | 有（scan 点名直回） | 最该搬走的一条：假 AP 表在**件**里，`RR3_HAL_SIM_LINK_SSID_DEFAULT` 已是同类落点的正解 → 整表迁 `rr-hal` sim 后端（N-1）。件里留假数据 = bare 档要么带上它要么删码，两坏 |
 | `atoms/wifi/mech.rs : rr3_provision_mode` | `"ap"` / `"station"` | `net/link.mode` 词汇 | 有 | **契约字面量—不许动** |
 | `atoms/wifi/mech.rs : rr3_link_body` / `*_result` | 键 `seq/up/ssid/rssi_dbm/mode`、`ok/connected/ssid`、`{ok:true,mode:"ap"}` | 载荷契约 | 有（面板逐字读 `connected`、`ssid`） | **契约字面量—不许动**；上移后逐字保留（N-7 验收） |
-| `wifi.rs` | `"rr3-connect/net/link"`、`wifi/scan|connect|forget`、`Rr3LinkCfg{link_report_period_ms, roam_probe_enabled}` | 主题与 cfg 形状 | 主题有读者 | 主题 = 契约字面量（与 `module.toml` 双写记债） |
+| `wifi.rs` | `"rr3-connect/net/link"`、`wifi/scan`·`wifi/connect`·`wifi/forget`、`Rr3LinkCfg{link_report_period_ms, roam_probe_enabled}` | 主题与 cfg 形状 | 主题有读者 | 主题 = 契约字面量（与 `module.toml` 双写记债） |
 | `src/composite.rs : Rr3LinkCfg.roam_probe_enabled` | config `false` | 漫游探针开关 | **无读者**（只 `println`；mech 注释自认） | 标"声明未生效"或删除（N-6） |
 | `src/session.rs : Rr3SessionCfg` | `tls_min_version:"1.3"`、`timeout_ms:20000` | 云侧下限与超时 | **无读者**（注释自认"与 cutoff 同款口径"；真超时另有 HTTP 值） | 同上（N-6）；本册 §7 已把"TLS 下限"从守护语义里降级，**不再声称三条守护** |
 | `src/session.rs : rr3_session_parse_args/result` | 只认 `action="open"`；`"未知 action: {action}（只认 \"open\"）"`；`"链路未就绪（net/link up=false），云端会话拒绝建立"`；`session:"opened"`、`endpoint:"mock"` | 会话契约 | 有 | **契约字面量—不许动**；`endpoint:"mock"` 是诚实面，不得删（R4 口径） |
