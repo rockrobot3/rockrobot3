@@ -177,7 +177,7 @@ pub fn rr3_assemble_layout(
         // 其余用仓源 config（纯运行参数，sim 环境全部适用）
         let dst_config = dst_dir.join("config.toml");
         if facts.lang == "python" {
-            std::fs::write(&dst_config, rr3_brain_config_text())
+            std::fs::write(&dst_config, rr3_brain_config_text(false, "http://127.0.0.1:9/v1"))
                 .map_err(|e| format!("写 {dst_config:?} 失败: {e}"))?;
         } else {
             let src_config = src_dir.join("config.toml");
