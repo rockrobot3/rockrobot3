@@ -25,12 +25,16 @@
 | ⑦ | **§13 静态断言五件**（全 fail-closed，逐条点名） | ⑦-a 机制核与件面零策略载荷（禁词扫 `rr-mech/src/*.rs`（0.0.5 批M 控制原语叶子件下沉，MC-10 L-4 补）+ `rr-core/src/*.rs` + `rr-hal-api/src/*.rs`（0.0.5 批I C8 起）+ `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，**0.0.5 批K H2 起再加 `modules/*/atoms/*/*.rs`**——件声明面同样不许带厂商/芯片/器件名，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（件形按 `module.toml` 的 `lang` 数据位选：rust 五件 / python 两件式 / 组合件实体按 lang 推导——零件名零硬编码，批M MC-10 L-2）· ⑦-d 入口体量 ≤80 行（入口路径亦按 `lang` 推导）· ⑦-e 门禁清单自指判等（⑦-a 扫面名集 A 逐名须在 §2 本行与 `tools/ci/README.md` 的 ⑦ 行齐 + `tools/ci/rr-core-xtensa-check.sh` 的 `-p` 目标集 ⊆ A；代码为唯一真值、文档向代码看齐；0.0.5 批M MC-10 L-4）。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
 | ⑧ | **件级判据三门**（0.0.5 批K H2 接入；全 fail-closed，上线即全绿） | ⑧-a 两腿对拍计数门：格两轴读 `contracts/slots.toml`——`status` 判分母（C9 门只读这一处）+ `tier_scope` 记档位适用并校验非空/档名在册（批M MC-10 L-2 扩读，收 R-8）——normal 格落点件须 mech.rs + 模块 composite.rs 两腿各 ≥1（腿一 `fn parity_leg1_*`、腿二 `fn parity_leg2_*`，命名即机器锚），只有腿一记未达标；placeholder 记"不适用"、retired 退出分母；件形按 `module.toml` 的 `lang` 判（lang=python 两件式记不适用，不再用 `[ ! -f mech.rs ]` 存在性启发式）；C10 stub 反例自证内置（须由**对拍计数**拦下，拦不住空件则门自身 FAIL）· ⑧-b 依赖闭包 grep 门（C7 分级执法）：扫 `modules/*/atoms/*/*.rs` 非 test 面（行注释与 `#[cfg(test)]` 块先剥）——L0 = `std::`（含 `use std::`/`extern crate std`/全限定内联），L1 = L0 + `serde_json` · ⑧-c 注入面校验门：rr-registry contract 的 injection 用例**显式过滤器**，打空即红（run_tests ≥1 断言），封"用例被改名/删除"的 fail-open；形状级含 **L-5 空面规则**（`handles`/`ops` 两数组**均空**须明写 `no_injection = true`，否则与"漏填"不可区分判红——0.0.5 批M MC-10 L-5） |
 
-**拟增两步（2026-10-14 增补轮六登记，尚未建成——建成前不得当作现有强度引用）**：
-⑨ **资源与接线门**（四表一致 / 十项装载期校验 / 生成物一致性 / 行程单真值点）与
-⑩ **面板覆盖率门**（面板项集 ⊇ `ops` 槽 ∪ 描述符键 ∪ 角色 ∪ 执行件档案字段，差非空即红）。
+**拟增三步（2026-10-14 增补轮六登记，尚未建成——建成前不得当作现有强度引用）**：
+⑨ **资源与接线门**（四表一致 a / 十项装载期校验 b / 能源预算 c / 生成物一致性 d / 行程单真值点 e /
+**禁词单源 f**——`RR3_BOARD_TOKENS` 与 `check.sh` ⑦-a 词表必须同一份 /
+**注释不得独承载器件事实 g** / **组合件申报面进 ⑧-c h**）；
+⑩ **面板覆盖率门**（面板项集 ⊇ `ops` 槽 ∪ 描述符键 ∪ 角色 ∪ 执行件档案字段，差非空即红）；
+⑪ **文档门 ⑤ 扩一条**：md 内出现"同批 / 一并处理 / 随 X 批"而**同一句不含工单号或批次号**即红，
+点名到文件与行（本轮实测这种句式既是无主项的生产方式，其事实基础本身也会错）。
 判据、红例与逐批转绿面见
-[0.0.5增补轮六全案](dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §5/§8 与
-[architecture](../architecture/architecture.md) §13 的六行"待建"门；
+[0.0.5增补轮六全案](dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §5/§8/§15 与
+[architecture](../architecture/architecture.md) §13 的"待建"门行；
 同批还须把 `tools/esp32-periph-base` 这类独立固件 crate 从 ④/⑥ 的排除表里放进来（否则"格格双达标"
 对板侧永远是空话）。本仓规矩不变：**门禁的强度只等于脚本真做的事**。
 
@@ -2126,6 +2130,25 @@ brain B-12；[增补轮五](dev/0.0.5增补轮五——交互功能落地全案.
 按 `board.rs` 实锤**订正为已被推翻**。architecture §11 新增风险行自此用 **`RK-` 前缀**（该表原 `R1…R16`
 与 0.0.5 裁定 `R1–R37`、索引裁定 `R-1…R-16` 三套编号已在同一份 status.md 里互相指错，
 存量不回改、增量先消歧，登记为命名敞口）。
+2026-10-14 0.0.5 增补轮六**同日二轮**（主线一致性复查 + 裁定落档，仍零 `.rs`）——用户口径
+"以机制和策略分离为主线，尽可能找出阻碍生产、运维的问题"。产物三类：
+① **D10–D15 六条全部裁定**（只有 D10 取值是可撤回设计默认），顺带结清 **D3/D5/D6/D7/D8** 五条同族待裁；
+结论行落 [模块设计索引](../design/模块设计索引.md) §8、**细则唯一落点 =
+[增补轮六全案](dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §12**（不复述）。
+② 三条**纪律层自指失败**登记为索引 §11 **L-14/L-15/L-16**，全部本轮 `grep` 自核过符号现存性：
+器件级探测缺失（`rrd/src/probe.rs` 的 `Rr3LinuxProbe::rr3_face_present` 对 I2C 只判 `/dev/i2c-*` 存在、
+从不问从机 ⇒ `power.charger`/`sensor.env`/`sensor.imu` 恒判在位）；**"零策略载荷"有两套禁词表**
+（`rr-registry/src/atom.rs` 的 `RR3_BOARD_TOKENS` 含 `gpio/i2c/spi/uart/pwm/bcm`，
+`tools/ci/check.sh` ⑦-a 的 grep 模式不含这些词；且 ⑦-a 执法前 `sed 's://.*$::'` 剥注释，
+`rr-hal-api` 里 `Rr3FaceFrame` 的"MAX7219 行寄存器直排"对门永不可见）；
+**"N 册同批"句式造无主项**（实测 `RR3_POLL_WAIT` 只在 act/connect/interact/power 四份 `composite.rs`，
+sense 无此符号，"五册同批"的事实基础即错）。
+③ **§15.1 十条无主项逐条指派工单号**：act A-15、interact I-17、sense S-11、connect N-11、brain B-13、
+power P-11（细则只在全案里，册内挂单号 + 指针，避免第二真值点）。
+门禁面由此从六门扩到**十门**（拟增 h/i/j/k，见本节上方"拟增三步"）——其中 **门 k 最便宜**：
+它拦的不是代码，是"看起来有归属"。
+**同时核掉两条子代理误报**（落档前自核的产物，登记在全案 §15.4）：一处处数断言未逐字核到故不写入裁定；
+`[rr3-brain] log_level` 只核到"零读者"这一半，"未进 §13 清单"半句撤回。
 
 ## 3 结构纪律
 
