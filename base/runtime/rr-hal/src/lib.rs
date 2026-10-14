@@ -56,6 +56,11 @@ pub mod linux_power;
 /// 不挂 alsa feature——音频可用性与舵机可用性是两回事，各能力面各判各的。
 #[cfg(target_os = "linux")]
 pub mod linux_pwm;
+/// macOS（CoreAudio/AudioQueue）音频后端：宿主真麦拾音/扬声器回放。手写 extern "C"
+/// 绑定（系统框架链接，crates.io 零增量），单重平台门不挂 feature；选择纪律同
+/// linux 先例——macOS 缺省仍 sim，真件显式 `RR3_HAL_BACKEND=mac`（backend.rs）。
+#[cfg(target_os = "macos")]
+pub mod macaudio;
 pub mod sim;
 
 /// PCM 帧缓冲（承载层数据，批I F1 起不再进契约签名）。所有权随返回值移交
