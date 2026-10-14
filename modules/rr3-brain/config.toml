@@ -7,7 +7,9 @@
 log_level = "info"
 
 [rr3-brain.cloud]
-base_url = "https://api.siliconflow.cn/v1"
+# base_url 是主机根：客户端自拼 /v1/<路径>（tests/test_cloud.py 假端点同契约）。
+# 写成带 /v1 的 API 根会拼出 /v1/v1/... 必 404——真云冒烟（C4）前修正。
+base_url = "https://api.siliconflow.cn"
 asr_model = "iic/SenseVoiceSmall"
 llm_model = "deepseek-ai/DeepSeek-V3"
 tts_model = "FunAudioLLM/CosyVoice2-0.5B"
