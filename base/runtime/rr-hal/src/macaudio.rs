@@ -126,6 +126,12 @@ extern "C" {
     fn AudioQueueStart(aq: AudioQueueRef, in_start_time: *const core::ffi::c_void) -> OsStatus;
     fn AudioQueueStop(aq: AudioQueueRef, in_immediately: u8) -> OsStatus;
     fn AudioQueueDispose(aq: AudioQueueRef, in_immediately: u8) -> OsStatus;
+    fn AudioQueueGetProperty(
+        aq: AudioQueueRef,
+        in_property_id: u32,
+        out_data: *mut core::ffi::c_void,
+        io_data_size: *mut u32,
+    ) -> OsStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +151,9 @@ const MAC_OUT_BUF_BYTES: u32 = 3200;
 const MAC_OUT_BUF_COUNT: usize = 4;
 /// 回放 deque 高水位（秒数 × 采样规格）——`write` 到顶阻塞让出（对位 ALSA 排空）。
 const MAC_OUT_WATERMARK_SECS: u64 = 1;
+/// kAudioQueueProperty_StreamFormat（'aqft'）：队列协商出的实际流格式——
+/// 诊断面用（请求 16k/mono 与协商值不一致 = 转换/路由问题的第一证据）。
+const AQ_PROP_STREAM_FORMAT: u32 = 0x6171_6674;
 
 // ---------------------------------------------------------------------------
 // 纯逻辑（裁决/形状，可单测）
@@ -269,6 +278,48 @@ impl Rr3MacAudioSource {
         Self {
             inner: Mutex::new(None),
         }
+    }
+
+    /// 诊断面（真件探针用）：队列协商出的流格式。请求 16k/mono/s16 与协商值
+    /// 不一致 = 转换/路由问题第一证据（acc② 排障加）。
+    pub fn rr3_mac_source_stream_format_debug(&self) -> String {
+        let guard = rr3_mac_lock(&self.inner);
+        let Some(st) = guard.as_ref() else {
+            return "未 open".into();
+        };
+        let mut fmt = AudioStreamBasicDescription {
+            m_sample_rate: 0.0,
+            m_format_id: 0,
+            m_format_flags: 0,
+            m_bytes_per_packet: 0,
+            m_frames_per_packet: 0,
+            m_bytes_per_frame: 0,
+            m_channels_per_frame: 0,
+            m_bits_per_channel: 0,
+        };
+        let mut size =
+            u32::try_from(std::mem::size_of::<AudioStreamBasicDescription>()).unwrap_or(0);
+        // SAFETY：aq 为 open 出参合法句柄，fmt/size 为本地出参，属性类型与尺寸匹配
+        let status = unsafe {
+            AudioQueueGetProperty(
+                st.aq,
+                AQ_PROP_STREAM_FORMAT,
+                &mut fmt as *mut _ as *mut core::ffi::c_void,
+                &mut size,
+            )
+        };
+        if status != 0 {
+            return format!("GetProperty 失败 status={status}");
+        }
+        format!(
+            "rate={} ch={} bits={} bytes/frame={} flags=0x{:x} fmtid=0x{:x}",
+            fmt.m_sample_rate,
+            fmt.m_channels_per_frame,
+            fmt.m_bits_per_channel,
+            fmt.m_bytes_per_frame,
+            fmt.m_format_flags,
+            fmt.m_format_id
+        )
     }
 }
 
@@ -606,11 +657,20 @@ mod tests {
     fn mac_source_real_device_reads_nonzero_audio() {
         let mut src = Rr3MacAudioSource::rr3_mac_source_new();
         src.open(RR3_AUDIO_CFG_16K_MONO16).expect("mac 源 open");
-        let mut buf = [0i16; 16000]; // 1s @16k
-        let n = src.read(&mut buf).expect("mac 源 read");
-        assert_eq!(n, 16000);
-        let peak = buf.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
-        println!("mac 真麦 1s 拾音峰值幅度: {peak}");
-        assert!(peak > 0, "1s 拾音全零：设备未出数或 TCC 麦克风权限被拒");
+        println!(
+            "queue 协商流格式: {}",
+            src.rr3_mac_source_stream_format_debug()
+        );
+        println!("--- 10s 拾音包络（请对麦克风说话，块峰 >3000 即语音级）---");
+        let mut buf = [0i16; 8000]; // 0.5s @16k
+        for b in 0..20 {
+            let n = src.read(&mut buf).expect("mac 源 read");
+            assert_eq!(n, buf.len());
+            let peak = buf.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
+            let energy: f64 = buf.iter().map(|s| f64::from(*s) * f64::from(*s)).sum();
+            let rms = (energy / n as f64).sqrt() as u32;
+            let bar = "█".repeat((peak / 500).min(40) as usize);
+            println!("块{b:02}  peak={peak:5}  rms={rms:5}  {bar}");
+        }
     }
 }
