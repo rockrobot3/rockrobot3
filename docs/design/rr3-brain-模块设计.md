@@ -119,6 +119,7 @@
 | B-9 | `RR3_CALL_TIMEOUT_S = 30.0` 从 `composite.py` 常量改 ops/config 槽——它是"一轮最坏 ≈90 s"的组成项，调它却要改码违背数据面原则；与 B-3 同批裁 | 批I | — |
 | B-10 | 凭据键名把云供应商焊进代码——**已结（0.0.5 批M MC-8②，2026-10-12）**：改通用键 `RR3_CLOUD_API_KEY`（原 `SILICONFLOW_API_KEY`），供应商由 config `[rr3-brain.cloud]` 的 `base_url`/模型名承载，换云只改配置不改码；测试随 `API_KEY_ENV` 常量注入 | 已结 | — |
 | B-11 | **把已合成的 PCM 送上总线**（2026-10-12 立单，版本边界改判产物 = 索引 R-14 / ADR-0020 背景表 #1）：`composite.py` 的 `rr3_finish_turn` 今天取到 `reply_pcm = tts.synthesize(reply_text)` 后只算 `tts_ms` 入日志，再 `rr3_call_topic(TOPIC_TTS, {"text": reply_text})`——**云侧真人声从未有可能出声**。本单 = 按 MCP-1 的分帧把 `reply_pcm` 发布到新主题 `rr3-brain/audio/tts_pcm`，`tts/text` 点名保留作"该不该播"的事务判据；`seq` 单调、`ms` 由样点数导出 | **0.0.5 批M MC-1**（前置 MCP-1 契约 append 已落 `8d05590`；消费侧对号 interact I-14） | MCP-1 |
+| B-12 | **模型连接表与 ops 槽的面板可见性**（[ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 裁定 6）：`[[rr3-brain.model]]` 连接表与密钥双源解析已落，但模型面参数（超时、重试、失败是否降级到本地引擎）住在 ops 槽里，**面板既看不见也改不了**——这是增补轮六批N4 覆盖率门上线即红的第一批项。本单负责把 brain 的 ops 槽与密钥端点对该门逐面转绿，并守住"值零回显"（写面只报"已更新/长度"，不回显值） | **增补轮六 批N4** | I-15；D11 |
 
 ## §11 待证与敞口
 

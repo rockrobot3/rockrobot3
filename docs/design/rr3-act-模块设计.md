@@ -124,6 +124,8 @@
 | A-11 | `config.toml [rr3-act] log_level` 孤儿键：被读或删除（与 P-6/N-6/I-1/B-8 同批） | 批I | — |
 | A-12 | **件失败语义分类表**（D8 本轮立单，此前索引挂着无工单）：`led`/`face` 属妆面（写失败折日志不退）、`servo`/`relay`/`player` 属执行与回放（传输性失败 `exit(1)` 交监督）——分类落**一处数据**，框架通用约定 1 引该表，各册不再各写各的例外。与 interact I-13 同一张表，谁先做谁负责 | 批I（表）+ 契约评审（范围含 player 与 D8） | C17 |
 | A-7 | `relay/state` 补变化判定：`rr3_relay_apply` 已有 `(生效, 前一)` 形状可判，只在 `Some(on)` 且电平真变时续 `relay_seq` 并发布；同时补同态抑制用例。**注意守恒**：`tools/sim/chain.rs` 与 legacy 面板按"每命令一帧"数过这条流，改语义要同批改它们的期望，不能只改件 | 批I | — |
+| A-13 | **关节成为对象**（[ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 裁定 5）：新立 `Rr3Actuator`（`rr3_profile`/`rr3_enable`/`rr3_goto`/`rr3_position`/`rr3_store_profile`）+ `Rr3Position{deg, source}`（`Commanded`/`DutyRegister`/`Encoder` 三态，把"回读不是真实角度"写进类型）+ **执行件档案**为机械行程唯一真值点。今日三处真值互斥、且其中两处的注释**错声称**板侧是 pan[70,110]（实为板侧 `Axis::range()` 的 [60,120]）：servo schema 的线格式域 0–180 / `config.toml` 的 `angle_limit_deg = [70, 110]` / 板侧 `PAN_LIMIT_DEG`+`TILT_LIMIT_DEG` 派生集。后果是可执行集合真的不同（pan=115 在模块面被拒、在板侧帧面受理）。收敛后判据 = 增补轮六门 g"行程字面量读者数 1" | **增补轮六 批N3** | 批N1；`Rr3Store` 窄缝（rtos 档档案落 NVS） |
+| A-14 | **标定与复位**（用户点名"电机怎么复位标定"）：定性 = 开环位置舵机**标不出角度**，只能标**脉宽域与机械窗的关系**（中点、方向符号、上下软挡块脉宽、到位是否释放激磁）。四路线 A 工装 / B 电流找挡块（依赖 P-9 的逐域电流，`hard_stop = unknown` 时**代码级禁用**）/ C 开环自恢复 + 软挡块（建议默认，待 D13 裁）/ D 换闭环执行器（新格新 trait，本版不做）。复位三义分开写：**归中**（需已标定）/ **归安全姿态**（形态默认，进 profile）/ **失能归位**（`[pins].failsafe = release`，复位循环里不再反复堵转）。**未标定轴不得进自动模式**（只许点动且带 deadline）；标定动作本身是受控堵转，必须限流限时限次数限单步、失败回退上一份档案——否则标定流程变成第二次烧舵机的路径 | **增补轮六 批N3**（手册页同批改 [`真件装配与标定手册`](../process/dev/真件装配与标定手册.md)） | A-13；D13 |
 
 ## §11 待证与敞口
 
@@ -191,4 +193,4 @@
 | A-5 低电禁动 | 语义由索引 **R-15** 结案（四条），原挂"待裁"栏 | **已结（批M MC-5 `071dcad`+`8b5b57e`，2026-10-13）**——`Rr3LowGate` 落 `rr3-act/src/composite.rs` 接 `rr3-runtime/system/power`，执行面 RPC/intent 两路拒动、妆面不禁（原裁定"施工落 0.0.5 MC-5；与 power P-8 / 批L L-8 合并成一个动作"已兑现） |
 | A-6 环 tick 计入 counters | `src/reflex.rs` 立常量 `RR3_REFLEX_TICKS_KEY`（字面量唯一落点），速率窗结算点 bump（值 = 窗内实跑节拍数），README 计数归属表加行 | **已结（批M M-β 3bc30f1，2026-10-12）**：e2e_act ⑧ 经 `rr3.ctl.counters` 有界轮询点验 `rr3-act/reflex_ticks` 非零（先红后绿） |
 | A-9 开放门与灯效白名单数据化 | 开放门改读 config `[rr3-act.intent] open_topics`（`intent.rs` 去件内硬编码开放判定，执行臂 `match` 与兜底臂保留）；灯效白名单落 `atoms/led/assemble.toml` ops 槽 `led_effects ← rr3-act.led.effects`（`led.rs` 出值集常量 `RR3_LED_EFFECT_VALUES` + `rr3_led_effects_join`，组合件透传子集）；两键均 fail-closed（缺键/越界值拒 boot）、空数组合法 | **已结（批M MC-10 A-9，2026-10-13）** |
-| F-1 舵机承载路径 | R31 **Q2** 已裁舵机挂 ESP32 协处理器（LEDC）；Pi 侧 `linux_pwm.rs` 保留 | 施工落**增补轮五批B/批C**；`linux_pwm.rs` 不注销，降为无协处理器形态的兜底路径（本册 §12 跨档表按两条路径读） |
+| F-1 舵机承载路径 | R31 **Q2** 已裁舵机挂 ESP32 协处理器（LEDC）；Pi 侧 `linux_pwm.rs` 保留 | 施工落**增补轮五批B/批C**；`linux_pwm.rs` 不注销，降为无协处理器形态的兜底路径（本册 §12 跨档表按两条路径读）。**2026-10-14 定性订正**："协处理器"随 [ADR-0021](../process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 裁定 1 作废——ESP32 与树莓派是两台独立机器，所以这不是"主路径 + 兜底路径"，而是**两条平行形态各自的路径**；本行其余判据不变（行程与标定自批N3 起读执行件档案，见 **A-13**） |
