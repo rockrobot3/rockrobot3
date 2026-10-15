@@ -25,9 +25,10 @@ use support::*;
 /// 装配单：connect 两格位各绑 rr3-connect、enabled_slots 与 bindings 互认领。
 /// 格位名取自真 `contracts/slots.toml`（net.online 是基础层 base 格，绑它致命，
 /// e2e_profile 钉过——这里只绑身体层两格）。schema_version=2 起三新段必填
-///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）。
+///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；schema_version=3 起 [[pin]] 进场
+///（增补轮六批N1）——本夹具不声明 [pins]，校验②只记 role_missing 非致命，boot 照常。
 const PROFILE: &str = r#"
-schema_version = 2
+schema_version = 3
 
 [os]
 route = "distro"

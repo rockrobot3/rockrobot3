@@ -1,12 +1,15 @@
 //! 装配单装载（ADR-0012 裁定 3/5②，0.0.2 方案 D2 / Q3 裁定）。
 //!
-//! `profiles/<机型>.toml` 是**纯数据**装配单，schema_version=2 起按 ADR-0018 修订 1 ④
-//! 的描述符七段定形：`[os]`（运行期不读）+ `[platform]`（tier 三档 host/rtos/bare）+
+//! `profiles/<机型>.toml` 是**纯数据**装配单，schema_version=3 起按增补轮六 §4.2
+//! 定形为八段：`[os]`（运行期不读）+ `[platform]`（tier 三档 host/rtos/bare）+
 //! `[supplies]`（看门狗三键 + 时序预算位三键，修订 4 ② / 修订 2 ③）+ `[slots]`
 //! （present = 本板物理在位集）+ `[bindings]` 格位→件、`[enabled_slots]` 模块→本形态
-//! 启用的格位集合、`[hardware]` 物理绑定（ADR-0018 裁定 4：引脚/控制器编号/总线/设备名的唯一
-//! 数据事实源，批D④ 收口——可选段，缺了它 linux 硬件面按 fail-closed 显式回错，应急 env 可救）。
-//! 本模块只做五件事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
+//! 启用的格位集合、`[hardware]` 非引脚键（`alsa_device`/`link_ifname`/`spi_device`
+//! 直给）、`[[pin]]` 物理绑定（增补轮六 §4.2：**引脚侧唯一真值点**——七物理键
+//! `pwm_chip`/`pwm_channel`/`gpio_chip`/`gpio_led_line`/`gpio_relay_line`/`i2c_bus`/
+//! `ina219_addr` 自 [hardware] 下移，role 外键 → `contracts/roles.toml`，host 档由
+//! 派生器合成注入文本，rtos/bare 档板侧消费归 0.0.7 批G/批D1）。
+//! 本模块只做这些事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
 //! 运行期不重排，F⊗F 非法）：
 //! 1. 解析装配单文本（fail-closed：形状不合逐条点名，一条不静默放行）——
 //!    schema_version=2 起 [platform]/[supplies]/[slots] 三段必填；
@@ -20,7 +23,12 @@
 //!    绝不带病起，provides 仍留在可满足性宇宙（下游不连坐，ADR-0009 同款语义）；
 //! 4. 档位一致性（ADR-0018 修订 1：无看门狗的板不允许归 bare 档）：tier=bare 而
 //!    [supplies].watchdog_present=false 的装配单自相矛盾 → 拒 boot；
-//! 5. 把 enabled_slots 模块名解析成 manifest 路径：`<modules-root>/profiles/<机>.toml` 的上两级即
+//! 5. 装载期校验①②（增补轮六 §5）：`[[pin]]` 的 role 外键查册（roles.toml）、
+//!    per_instance/instance 规则、requires 字段留空即红、所需角色齐（②的后果是
+//!    "降"——`role_missing` 点名清单随 boot 带出，Degraded 可见面归批N4 I-15）；
+//! 6. 门 n 注入路径唯一（§8）：[hardware] 出现物理键即红（稳态判据），[pins] 与
+//!    [hardware] 并存时错误信息点名两份取值；
+//! 7. 把 enabled_slots 模块名解析成 manifest 路径：`<modules-root>/profiles/<机>.toml` 的上两级即
 //!    modules-root，manifest 在 `<modules-root>/modules/<名>/module.toml`——装机布局由
 //!    打包步骤保证（modules/README.md 装机约定 + 0.0.2 T5 deb 打包同一布局）。
 //!
@@ -31,16 +39,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use rr_registry::{rr3_registry_slot_table_from_text, Rr3SlotTable};
+use rr_registry::{
+    rr3_registry_role_table_from_text, rr3_registry_slot_table_from_text, Rr3RoleTable,
+    Rr3SlotTable,
+};
 
 /// 契约格位表的编译期定位（与 `topics_load::RR3_CONTRACT_TOPICS_PATH` 同深度：
 /// base/runtime/<crate> → 仓库根）
 pub const RR3_CONTRACT_SLOTS_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/slots.toml");
 
-/// 只认 schema_version = 2（1→2 为破坏性变更：新增 [platform]/[supplies]/[slots]
-/// 三必填段，描述符七段定形，ADR-0018 修订 1 ④；不匹配 = 契约事故，拒启动）
-const RR3_PROFILE_SCHEMA_VERSION: i64 = 2;
+/// 契约角色表定位（与 slots.toml 同目录，增补轮六 §4.1）
+pub const RR3_CONTRACT_ROLES_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/roles.toml");
+
+/// 只认 schema_version = 3（2→3 为破坏性变更：`[[pin]]` 物理绑定段进场、七物理键
+/// 自 [hardware] 下移为 [pins] 派生视图，增补轮六 §4.2 / 门 n P-13；注意与
+/// `RR3_ASSEMBLE_SCHEMA_VERSION`（rr-registry，装配清单域）是两个域，不混写）。
+/// 不匹配 = 契约事故，拒启动。
+const RR3_PROFILE_SCHEMA_VERSION: i64 = 3;
 
 /// [supplies] 六键（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）——
 /// 未知键点名与解析白名单共用
@@ -55,6 +72,34 @@ const RR3_SUPPLIES_KEYS: [&str; 6] = [
 
 /// [platform] tier 三档（ADR-0018 修订 1：承载二分 → 三档）
 const RR3_PLATFORM_TIERS: [&str; 3] = ["host", "rtos", "bare"];
+
+/// 描述符物理键集（增补轮六 §4.2：自 [hardware] 下移 [pins] 派生的**七个**引脚侧键——
+/// 全案 §4.2/§8 门 n 写"六个"但枚举列了七键，以枚举为准）。[hardware] 出现任一即红
+/// （门 n 稳态判据）；注入文本键名不变，rr-hal 描述符解析端零改动。
+const RR3_PIN_DERIVED_KEYS: [&str; 7] = [
+    "pwm_chip",
+    "pwm_channel",
+    "gpio_chip",
+    "gpio_led_line",
+    "gpio_relay_line",
+    "i2c_bus",
+    "ina219_addr",
+];
+
+/// [[pin]] 条目字段词表（§4.2 [pins] 段；role 的 requires 域即此表子集——
+/// 门 a 六表对账的第 5 张表）
+const RR3_PIN_KEYS: [&str; 10] = [
+    "role",
+    "instance",
+    "controller",
+    "channel",
+    "physical",
+    "direction",
+    "rail",
+    "addr",
+    "failsafe",
+    "mux_group",
+];
 
 /// [supplies]：平台供给声明（不可变快照）。看门狗三键 = 有无 / 超时上界 / 由哪一路喂
 /// （修订 4 ②）；时序三键 = 机制核节拍周期 / 节拍抖动预算 / 安全核最小复核间隔的
@@ -75,6 +120,52 @@ pub struct Rr3Supplies {
     pub safety_core_interval_ms: i64,
 }
 
+/// 一条 [[pin]] 物理绑定（增补轮六 §4.2）。身份 = `pin_id`：`per_instance=false`
+/// ⇒ `pin_id = role`；`per_instance = true` ⇒ `pin_id = role "." instance`——
+/// [supplies.domain] 绑定位、wire.signal、轴档案的 pin 键一律写 pin_id，不各造语法。
+/// 字段"在场"语义（§5 缺失语义列）：String 键以空串 = 缺、`channel` 以 `None` = 缺、
+/// `physical` 以空数组 = 缺——"合法不适用"必须显式写（`rail`/`addr` 写 `"none"`），
+/// 留空即红（校验①-b 按 roles.requires 逐项判）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rr3PinEntry {
+    /// 角色外键 → contracts/roles.toml（校验①-a 查册）
+    pub role: String,
+    /// 多实例名（per_instance=true 必填、false 禁填；如舵机 pan/tilt）
+    pub instance: String,
+    /// 控制器名（取值 ∈ 平台在册控制器词表，校验⑧-b——词表随批N7 platform 表落地，
+    /// 本批先过形状；host 档词形 pwm<N>/gpiochip<N>/i2c<N> 由派生器解析）
+    pub controller: String,
+    /// 控制器通道（独立资源维度，校验③-b 的 (controller, channel) 不双占空间）
+    pub channel: Option<i64>,
+    /// 物理引脚数组（一角色可占多脚；GPIO 类派生取 physical[0]）
+    pub physical: Vec<i64>,
+    /// 方向（须与 role.direction 相等）
+    pub direction: String,
+    /// 供电轨名（kind=power 角色必填且须 ∈ [supplies].domains，校验⑥；信号侧控制线
+    /// 显式写 "none"——留空即红，与 sense 的显式范式同型）。domains 随批N6 立册后
+    /// 校验⑥-a 判在册
+    pub rail: String,
+    /// I2C 从地址（0x 前缀十六进制；power.battery.meter 类角色用，校验⑨ 互校随批N2）
+    pub addr: String,
+    /// 复位/欠压时的期望物理态：release | hold | driven_low | driven_high（§6 复位语义③）
+    pub failsafe: String,
+    /// 互斥组（§4.2 裁定：**不再自愿**——由平台 conflicts 表反推，漏声明即红；
+    /// platform 表随批N7 落地，本批显式空集合法）
+    pub mux_group: Vec<String>,
+}
+
+impl Rr3PinEntry {
+    /// pin_id（§4.2 全案外键语法）：per_instance 规则的取值侧。instance 空 = 无实例
+    /// 名（调用方须先用 roles 表的 per_instance 判合法性，本函数不判）。
+    pub fn rr3_pin_id(&self) -> String {
+        if self.instance.is_empty() {
+            self.role.clone()
+        } else {
+            format!("{}.{}", self.role, self.instance)
+        }
+    }
+}
+
 /// 一份装配单（不可变快照）。BTreeMap 让"模块序/格位序"确定化为升序——
 /// spawn 序由 `plan_boot` 仲裁裁，这里不携带任何顺序语义。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -89,9 +180,13 @@ pub struct Rr3Profile {
     pub slots_present: Vec<String>,
     /// [supplies]：平台供给声明（看门狗三键 + 时序预算位三键）
     pub supplies: Rr3Supplies,
-    /// [hardware]：物理绑定键值（键位语义与取值域由 rr-hal 描述符解析裁，
+    /// [hardware]：非引脚键直给（`alsa_device`/`link_ifname`/`spi_device`；七物理键
+    /// 出现即红——门 n 注入路径唯一，键位语义与取值域由 rr-hal 描述符解析裁，
     /// rrd 只管装配形状——标量字符串化，注入时不解释）
     pub hardware: BTreeMap<String, String>,
+    /// [[pin]]：物理绑定（引脚侧唯一真值点，增补轮六 §4.2）。可选段（纯 sim/无硬件
+    /// 格形态不给——此时校验②不判，sim 形态无物理面可绑）
+    pub pins: Vec<Rr3PinEntry>,
 }
 
 /// 装配链交给 daemon 的 boot 输入
@@ -107,6 +202,10 @@ pub struct Rr3ProfileBoot {
     /// 装配缺项 (模块名, 点名文案)（G4/ADR-0019 修订 1 ③）：atoms/*/assemble.toml
     /// 缺文件/坏形/ops 注入缺 → 模块照常 spawn 但在册即 Degraded（不 fatal，点名到件）
     pub assemble_broken: Vec<(String, String)>,
+    /// 缺角色 (格位, 角色)（装载期校验②，后果 = 降不拒）：present ∩ enabled_slots 的
+    /// 格位在 roles.toml 有归属角色却无 [[pin]] 绑定——缺角色即缺能力。daemon 点名
+    /// 日志；Degraded 可见面归批N4 I-15（今天面板零配置可见）
+    pub role_missing: Vec<(String, String)>,
 }
 
 /// 装配单路径解析成绝对路径：装载与横幅凭证共用同一个解析结果。
@@ -199,6 +298,114 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                         "hardware.{k} 应为字符串或整数标量（物理绑定值），收到 {other:?}"
                     )),
                 }
+            }
+        }
+    }
+    // [[pin]]：可选段（schema 3，增补轮六 §4.2——纯 sim/无硬件格形态不给，此时校验②
+    // 不判：无物理面可绑不等于角色缺失）。字段白名单 RR3_PIN_KEYS 十键、类型逐键点名；
+    // 身份键 role/direction 解析期即须在场（①缺失语义：role/direction 缺 → 红，判定
+    // 不依赖角色表）；instance/controller 及各 requires 键的"在场与留空"在 boot 链按
+    // 角色表逐条裁——本函数不带契约真值，不越权判角色语义。
+    let mut pins: Vec<Rr3PinEntry> = Vec::new();
+    match root.get("pin").and_then(toml::Value::as_array) {
+        None => {}
+        Some(items) => {
+            for (i, item) in items.iter().enumerate() {
+                let t = match item.as_table() {
+                    Some(t) => t,
+                    None => {
+                        errs.push(format!("pin #{i} 须为 [[pin]] 表（数组内出现非表值）"));
+                        continue;
+                    }
+                };
+                let mut pin = Rr3PinEntry::default();
+                for (k, v) in t {
+                    match k.as_str() {
+                        "role" => match v.as_str() {
+                            Some(s) if !s.is_empty() => pin.role = s.to_string(),
+                            _ => errs.push(format!("pin #{i}.role 缺失或为空（角色外键）")),
+                        },
+                        "instance" => match v.as_str() {
+                            Some(s) => pin.instance = s.to_string(),
+                            None => errs.push(format!("pin #{i}.instance 应为字符串")),
+                        },
+                        "controller" => match v.as_str() {
+                            Some(s) => pin.controller = s.to_string(),
+                            None => errs.push(format!("pin #{i}.controller 应为字符串")),
+                        },
+                        "channel" => match v.as_integer() {
+                            Some(n) => pin.channel = Some(n),
+                            None => errs.push(format!("pin #{i}.channel 应为整数")),
+                        },
+                        "physical" => match v.as_array() {
+                            Some(a) => {
+                                for x in a {
+                                    match x.as_integer() {
+                                        Some(n) => pin.physical.push(n),
+                                        None => errs.push(format!(
+                                            "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
+                                        )),
+                                    }
+                                }
+                            }
+                            None => errs.push(format!("pin #{i}.physical 应为整数数组")),
+                        },
+                        "direction" => match v.as_str() {
+                            Some(s) if !s.is_empty() => pin.direction = s.to_string(),
+                            _ => errs.push(format!(
+                                "pin #{i}.direction 缺失或为空（校验①缺失语义：direction 缺 → 红）"
+                            )),
+                        },
+                        "rail" => match v.as_str() {
+                            Some(s) => pin.rail = s.to_string(),
+                            None => errs.push(format!(
+                                "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
+                            )),
+                        },
+                        "addr" => match v.as_str() {
+                            Some(s) => pin.addr = s.to_string(),
+                            None => errs.push(format!(
+                                "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
+                            )),
+                        },
+                        "failsafe" => match v.as_str() {
+                            Some(s) => pin.failsafe = s.to_string(),
+                            None => errs.push(format!(
+                                "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
+                            )),
+                        },
+                        "mux_group" => match v.as_array() {
+                            Some(a) => {
+                                for x in a {
+                                    match x.as_str() {
+                                        Some(s) if !s.is_empty() => {
+                                            pin.mux_group.push(s.to_string())
+                                        }
+                                        _ => errs.push(format!(
+                                            "pin #{i}.mux_group 的每一项都必须是非空字符串"
+                                        )),
+                                    }
+                                }
+                            }
+                            None => errs.push(format!(
+                                "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表批N7）"
+                            )),
+                        },
+                        other => errs.push(format!(
+                            "pin #{i} 未知键 {other}（只认 {}）",
+                            RR3_PIN_KEYS.join("/")
+                        )),
+                    }
+                }
+                if !t.contains_key("role") {
+                    errs.push(format!(
+                        "pin #{i} 缺 role（角色外键——引脚侧唯一真值点必须挂角色）"
+                    ));
+                }
+                if !t.contains_key("direction") {
+                    errs.push(format!("pin #{i} 缺 direction（校验①缺失语义）"));
+                }
+                pins.push(pin);
             }
         }
     }
@@ -305,6 +512,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         slots_present,
         supplies,
         hardware,
+        pins,
     })
 }
 
@@ -312,6 +520,67 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
 fn supplies_int(v: Option<&toml::Value>, key: &str) -> Result<i64, String> {
     v.and_then(toml::Value::as_integer)
         .ok_or_else(|| format!("supplies.{key} 缺失或不是整数"))
+}
+
+/// 控制器词形解析（host 档派生规则的机制侧）：`<前缀><十进制编号>` 才算命中，返回
+/// 编号串——roles.toml 注记的取值语义（pwm<N> 派生 pwm_chip=N），与旧 [hardware]
+/// 的整数字符串化逐字节对齐，注入文本形状不变。
+fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
+    let rest = controller.strip_prefix(prefix)?;
+    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(rest.to_string())
+}
+
+/// 单条 pin 的派生取值（机制侧，七物理键封闭）：role.derives（策略，contracts/
+/// roles.toml）只声明"该角色供给哪些键"，取值法一律查本函数——键不在册/来源字段
+/// 留空/控制器词形不合都红。gpio_led_line 与 gpio_relay_line 同取 physical[0]，由
+/// 角色声明区分（两角色不共用同一派生键名，不歧义）。
+fn rr3_pin_derive_value(pin: &Rr3PinEntry, key: &str) -> Result<String, String> {
+    match key {
+        "pwm_chip" => rr3_controller_wordform(&pin.controller, "pwm")
+            .ok_or_else(|| format!("controller 词形 {} 不合 pwm<N>", pin.controller)),
+        "pwm_channel" => pin
+            .channel
+            .map(|c| c.to_string())
+            .ok_or_else(|| "channel 留空".to_string()),
+        "gpio_chip" => rr3_controller_wordform(&pin.controller, "gpiochip")
+            .ok_or_else(|| format!("controller 词形 {} 不合 gpiochip<N>", pin.controller)),
+        "gpio_led_line" | "gpio_relay_line" => pin
+            .physical
+            .first()
+            .map(|n| n.to_string())
+            .ok_or_else(|| "physical 留空".to_string()),
+        "i2c_bus" => rr3_controller_wordform(&pin.controller, "i2c")
+            .ok_or_else(|| format!("controller 词形 {} 不合 i2c<N>", pin.controller)),
+        "ina219_addr" => {
+            if pin.addr.is_empty() {
+                Err("addr 留空".to_string())
+            } else {
+                Ok(pin.addr.clone())
+            }
+        }
+        other => Err(format!("派生键 {other} 不在派生规则表（七物理键封闭）")),
+    }
+}
+
+/// 校验①-b 的"字段在场"判定（§5 缺失语义列）：String 空串 = 缺、channel 以 None =
+/// 缺、physical 以空数组 = 缺。mux_group 不进 requires（互斥组由平台 conflicts 表
+/// 反推，批N7）；词表外字段名由调用方点名（门 a 六表对账第 5 张的漂移）。
+fn rr3_pin_field_present(pin: &Rr3PinEntry, field: &str) -> bool {
+    match field {
+        "role" => !pin.role.is_empty(),
+        "instance" => !pin.instance.is_empty(),
+        "controller" => !pin.controller.is_empty(),
+        "channel" => pin.channel.is_some(),
+        "physical" => !pin.physical.is_empty(),
+        "direction" => !pin.direction.is_empty(),
+        "rail" => !pin.rail.is_empty(),
+        "addr" => !pin.addr.is_empty(),
+        "failsafe" => !pin.failsafe.is_empty(),
+        _ => false,
+    }
 }
 
 /// [hardware] 段序列化成注入文本：每行 `键 = "值"`（值已字符串化，TOML 基本
@@ -330,15 +599,17 @@ fn rr3_hardware_bindings_text(hardware: &BTreeMap<String, String>) -> String {
 
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
 /// 致命错误（读不到 / 形状不合 / 查册未命中 / 结构不自洽）打包成一条串返回；
-/// 缺格**不是**致命项（P2：缺格只降点名模块，缺格≠拒 boot），进 [`Rr3ProfileBoot::missing`]。
-/// `slots_path` 由调用方给定（`--contracts` 运行期定位或编译期仓内路径）——
-/// 查册真值仍只有 rr-registry 那一册，这里只管从哪读。
+/// 缺格**不是**致命项（P2：缺格只降点名模块，缺格≠拒 boot），进 [`Rr3ProfileBoot::missing`]；
+/// 缺角色同样不是致命项（校验②后果 = 降），进 [`Rr3ProfileBoot::role_missing`]。
+/// `slots_path`/`roles_path` 由调用方给定（`--contracts` 运行期定位或编译期仓内路径）——
+/// 查册真值仍只有 rr-registry 那两册，这里只管从哪读。
 pub fn rr3_profile_boot_inputs(
     profile_path: &Path,
     slots_path: &Path,
+    roles_path: &Path,
 ) -> Result<Rr3ProfileBoot, String> {
     let probe = crate::probe::rr3_probe_default();
-    rr3_profile_boot_inputs_with_probe(profile_path, slots_path, probe.as_ref())
+    rr3_profile_boot_inputs_with_probe(profile_path, slots_path, roles_path, probe.as_ref())
 }
 
 /// 同 [`rr3_profile_boot_inputs`]，但探测件由调用方注入（MC-4 接缝）：生产走
@@ -348,6 +619,7 @@ pub fn rr3_profile_boot_inputs(
 pub fn rr3_profile_boot_inputs_with_probe(
     profile_path: &Path,
     slots_path: &Path,
+    roles_path: &Path,
     probe: &dyn crate::probe::Rr3Probe,
 ) -> Result<Rr3ProfileBoot, String> {
     let abs = rr3_profile_absolute_path(profile_path)?;
@@ -381,6 +653,28 @@ pub fn rr3_profile_boot_inputs_with_probe(
             "格位契约 {} 形状不合，拒绝启动: {}",
             slots_abs.display(),
             slot_errs.join("; ")
+        ));
+    }
+
+    // 角色契约装载（增补轮六 §4.1，校验①②判据源）：与格位契约同一 fail-closed
+    // 口径——读不到 / 解析空 / 形状越界都是契约事故，拒启动（空角色表不是放行许可证）。
+    let roles_abs = std::fs::canonicalize(roles_path)
+        .map_err(|e| format!("读不到角色契约 {}: {e}", roles_path.display()))?;
+    let roles_text = std::fs::read_to_string(&roles_abs)
+        .map_err(|e| format!("读不到角色契约 {}: {e}", roles_abs.display()))?;
+    let roles: Rr3RoleTable = rr3_registry_role_table_from_text(&roles_text);
+    if roles.rr3_role_table_is_empty() {
+        return Err(format!(
+            "角色契约 {} 解析后为空，拒绝启动（空角色表是契约事故）",
+            roles_abs.display()
+        ));
+    }
+    let role_errs = roles.rr3_role_table_check();
+    if !role_errs.is_empty() {
+        return Err(format!(
+            "角色契约 {} 形状不合，拒绝启动: {}",
+            roles_abs.display(),
+            role_errs.join("; ")
         ));
     }
 
@@ -464,9 +758,138 @@ pub fn rr3_profile_boot_inputs_with_probe(
             ));
         }
     }
+    // 装载期校验①（增补轮六 §5，后果 = 拒）：[[pin]] 逐条——role 查册、per_instance
+    // 规则、requires 逐项在场（留空即红）、direction 与角色一致、role.slot ∈ slots。
+    // 同环做 host 档派生（机制常量规则 × 角色 derives 声明）：rtos/bare 档不派生，
+    // 板侧描述符消费归 0.0.7 批G/批D1——pins 的校验照跑（物理真值不分档）。
+    let mut derived: BTreeMap<String, String> = BTreeMap::new();
+    for pin in &profile.pins {
+        let label = format!("pins[{}]", pin.rr3_pin_id());
+        // ①-a 角色在册（未在册的角色后续判据无从谈起，点名后跳过该条，不级联刷屏）
+        let Some(derives) = roles.rr3_role_table_derives(&pin.role) else {
+            errs.push(format!(
+                "{label} 角色 {} 未在册（contracts/roles.toml 无此角色，装配单不得自造角色）",
+                pin.role
+            ));
+            continue;
+        };
+        // ①-b per_instance 规则：true ⇒ instance 必填（pin_id = role.instance），
+        // false ⇒ instance 禁填（pin_id = role）
+        match roles.rr3_role_table_per_instance(&pin.role) {
+            Some(true) if pin.instance.is_empty() => errs.push(format!(
+                "{label} 角色 {} per_instance = true，instance 必填（多实例角色的身份一半在 instance）",
+                pin.role
+            )),
+            Some(false) if !pin.instance.is_empty() => errs.push(format!(
+                "{label} 角色 {} per_instance = false，instance 禁填（填了 pin_id 就有两个真值点）",
+                pin.role
+            )),
+            _ => {}
+        }
+        // ①-b requires 逐项在场（§5 缺失语义：String 空串 = 缺、channel None = 缺、
+        // physical 空数组 = 缺；rail/addr 的合法显式值 "none" 照常算在场——
+        // "合法不适用"必须显式写，留空即红）
+        for f in roles.rr3_role_table_requires(&pin.role).unwrap_or_default() {
+            if !RR3_PIN_KEYS.contains(&f.as_str()) {
+                errs.push(format!(
+                    "角色 {} 的 requires 引用未知字段 {f}（[pins] 字段词表外——门 a 六表对账第 5 张的漂移）",
+                    pin.role
+                ));
+            } else if !rr3_pin_field_present(pin, &f) {
+                errs.push(format!(
+                    "{label} 缺 {f}（角色 {} requires 必填，留空即红——§5 缺失语义；\"合法不适用\"须显式写 none）",
+                    pin.role
+                ));
+            }
+        }
+        // ① direction 相等（pin 的物理方向与角色声明的方向各说一套 = 数据矛盾）
+        if let Some(d) = roles.rr3_role_table_direction(&pin.role) {
+            if pin.direction != d {
+                errs.push(format!(
+                    "{label} direction = {} 与角色 {} direction = {d} 不一致（校验①）",
+                    pin.direction, pin.role
+                ));
+            }
+        }
+        // ① role.slot ∈ slots（roles/slots 两表对账的装载侧执法——真值各在对方表）
+        if let Some(slot) = roles.rr3_role_table_slot(&pin.role) {
+            if !table.rr3_slot_table_contains(&slot) {
+                errs.push(format!(
+                    "角色 {} 的 slot {slot} 未在格位契约在册（roles/slots 两表对账）",
+                    pin.role
+                ));
+            }
+        }
+        if profile.platform_tier != "host" {
+            continue;
+        }
+        // host 档派生：derives 声明逐键取值；多实例共键须同值（双轴同 chip 合法，
+        // 两 chip 抢一个键名 = 资源矛盾）
+        for d in &derives {
+            match rr3_pin_derive_value(pin, d) {
+                Ok(v) => match derived.get(d) {
+                    None => {
+                        derived.insert(d.clone(), v);
+                    }
+                    Some(prev) if prev != &v => errs.push(format!(
+                        "{label} 派生键 {d} 与他条取值不同（{prev} vs {v}）——多实例共键须同值（同一资源维）"
+                    )),
+                    _ => {}
+                },
+                Err(e) => errs.push(format!("{label} 派生 {d} 失败: {e}")),
+            }
+        }
+        // 词形漂移：控制器词形已指明总线族，该族派生键必须被角色声明（否则派生视图
+        // 会漏键——roles.derives 与 pin 实况各说一套）
+        for (prefix, key) in [
+            ("pwm", "pwm_chip"),
+            ("gpiochip", "gpio_chip"),
+            ("i2c", "i2c_bus"),
+        ] {
+            if rr3_controller_wordform(&pin.controller, prefix).is_some()
+                && !derives.iter().any(|d| d == key)
+            {
+                errs.push(format!(
+                    "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
+                    pin.controller, pin.role
+                ));
+            }
+        }
+    }
+    // 门 n（§8 注入路径唯一，power P-13）：同一 handle(trait, key) 的取值只能有一条
+    // 来源路径。[hardware] 出现物理键一律红——pin 实际派生该键时点名两份取值（两处
+    // 并存判据），否则按稳态判据点名；check.sh 拟 ⑨-n 的静态扫面与本条互为冗余。
+    for k in RR3_PIN_DERIVED_KEYS {
+        if let Some(hv) = profile.hardware.get(k) {
+            match derived.get(k) {
+                Some(dv) => errs.push(format!(
+                    "hardware.{k} = \"{hv}\" 与 [pins] 派生值 \"{dv}\" 两处并存（门 n：注入路径唯一，[pins] 派生或 [hardware] 直给二者取一）"
+                )),
+                None => errs.push(format!(
+                    "hardware.{k} 是引脚侧派生键（schema 3 起唯一来源 = [pins] 派生，[hardware] 不得直给——门 n 稳态判据）"
+                )),
+            }
+        }
+    }
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
+    // 装载期校验②（增补轮六 §5，后果 = 降不拒）：present ∩ enabled_slots 的每个格位，
+    // roles 表归入它的角色必须都有 [[pin]] 绑定——缺角色即缺能力。(格位, 角色) 进
+    // role_missing 清单随 boot 带出，由 daemon 点名（Degraded 可见面归批N4 I-15）。
+    let mut role_missing: Vec<(String, String)> = Vec::new();
+    let enabled_all: BTreeSet<String> = profile.enabled_slots.values().flatten().cloned().collect();
+    for slot in enabled_all {
+        if !profile.slots_present.contains(&slot) {
+            continue;
+        }
+        for role in roles.rr3_role_table_names_for_slot(&slot) {
+            if !profile.pins.iter().any(|p| p.role == role) {
+                role_missing.push((slot.clone(), role));
+            }
+        }
+    }
+    role_missing.sort();
 
     // 缺格判定：enabled_slots 声明的非基础层格位没有指向本模块的有效 binding（或探测不到）。
     // 基础层恒在位，跳过（slots.toml 注记：net.online / power.battery boot 即在位、恒不降级）。
@@ -514,7 +937,14 @@ pub fn rr3_profile_boot_inputs_with_probe(
         .keys()
         .map(|m| root.join("modules").join(m).join("module.toml"))
         .collect();
-    let hal_bindings = rr3_hardware_bindings_text(&profile.hardware);
+    // hal_bindings（spawn 时注入 RR3_HAL_BINDINGS）：host 档 = [pins] 派生视图 ∪
+    // [hardware] 三非引脚键（键名不变，rr-hal descriptor.rs 解析端零改动）；rtos/bare
+    // 档不派生，[hardware] 原样直给。门 n 已保证物理键不双占，合并无覆盖歧义。
+    let mut merged = derived;
+    for (k, v) in &profile.hardware {
+        merged.insert(k.clone(), v.clone());
+    }
+    let hal_bindings = rr3_hardware_bindings_text(&merged);
 
     // G4 装配段校验（ADR-0019 修订 1 ③）：enabled_slots 的每个模块扫
     // atoms/*/assemble.toml——缺文件/坏形/ops 注入缺逐条点名，该模块 boot 入
@@ -531,6 +961,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         missing,
         hal_bindings,
         assemble_broken,
+        role_missing,
     })
 }
 
@@ -589,13 +1020,14 @@ fn rr3_assemble_scan(module_dir: &Path) -> Vec<String> {
 mod tests {
     use super::*;
 
-    /// 全部规则走真的 contracts/slots.toml（查册真值同源），夹具落 pid 唯一临时目录
+    /// 全部规则走真的 contracts/slots.toml 与 contracts/roles.toml（查册真值同源），
+    /// 夹具落 pid 唯一临时目录
     struct Root {
         dir: PathBuf,
     }
 
     const GOOD: &str = r#"
-schema_version = 2
+schema_version = 3
 
 [os]
 route = "distro"
@@ -623,6 +1055,17 @@ rr3-pc = ["cognition.llm"]
 
 [slots]
 present = ["act.servo", "cognition.llm", "sensor.env"]
+
+[[pin]]
+role = "act.axis.pwm"
+instance = "pan"
+controller = "pwm0"
+channel = 0
+physical = [12]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
 "#;
 
     impl Root {
@@ -706,7 +1149,7 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
         assert_eq!(p.bindings.len(), 3);
         assert_eq!(p.enabled_slots.len(), 3);
         assert_eq!(p.enabled_slots["rr3-pa"], vec!["act.servo".to_string()]);
-        // 描述符七段（schema_version=2）：[platform]/[supplies]/[slots] 逐字段收齐
+        // 描述符八段（schema_version=3）：[platform]/[supplies]/[slots]/[[pin]] 逐字段收齐
         assert_eq!(p.platform_tier, "host");
         assert!(p.supplies.watchdog_present);
         assert_eq!(p.supplies.watchdog_timeout_ms, 15000);
@@ -718,13 +1161,24 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
             p.slots_present,
             ["act.servo", "cognition.llm", "sensor.env"]
         );
+        // [[pin]]：十键逐字段收齐，pin_id 按 per_instance 语法拼装
+        assert_eq!(p.pins.len(), 1, "{:?}", p.pins);
+        let pin = &p.pins[0];
+        assert_eq!(pin.rr3_pin_id(), "act.axis.pwm.pan");
+        assert_eq!(pin.controller, "pwm0");
+        assert_eq!(pin.channel, Some(0));
+        assert_eq!(pin.physical, vec![12]);
+        assert_eq!(pin.direction, "out");
+        assert_eq!(pin.rail, "rail5v");
+        assert_eq!(pin.failsafe, "release");
+        assert!(pin.mux_group.is_empty());
         // [os].route 被无视（运行期不读），但它的存在不构成错误
     }
 
     #[test]
     fn parse_errors_are_all_collected_and_named() {
         let text = GOOD
-            .replace("schema_version = 2", "schema_version = 3")
+            .replace("schema_version = 3", "schema_version = 9")
             .replace("\"act.servo\" = \"rr3-pa\"", "\"act.servo\" = \"\"")
             .replace("rr3-pb = [\"sensor.env\"]", "rr3-pb = [\"\"]")
             .replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = 3");
@@ -752,7 +1206,7 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
 
     #[test]
     fn missing_sections_and_empty_enabled_slots_are_errors() {
-        let errs = rr3_profile_from_text("schema_version = 2\n").expect_err("缺段必须报错");
+        let errs = rr3_profile_from_text("schema_version = 3\n").expect_err("缺段必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [bindings]")),
             "{errs:?}"
@@ -762,7 +1216,7 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
             "{errs:?}"
         );
 
-        let errs = rr3_profile_from_text("schema_version = 2\n[bindings]\n\n[enabled_slots]\n")
+        let errs = rr3_profile_from_text("schema_version = 3\n[bindings]\n\n[enabled_slots]\n")
             .expect_err("空 enabled_slots 必须报错");
         assert!(
             errs.iter().any(|e| e.contains("[enabled_slots] 为空")),
@@ -782,8 +1236,12 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
     fn full_profile_resolves_manifests_and_finds_no_missing() {
         let root = Root::new("full");
         let p = root.write_profile("full.toml", GOOD);
-        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("满配装配单应通过");
+        let boot = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("满配装配单应通过");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
         assert_eq!(boot.manifests.len(), 3);
         // 比对基准必须是**规范化后**的根目录：boot_inputs 拿到的 manifest 路径派生自
@@ -816,6 +1274,7 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
         let boot = rr3_profile_boot_inputs_with_probe(
             &p,
             Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
             &crate::probe::Rr3AbsentProbe,
         )
         .expect("缺格不是致命项，boot 输入必须成功返回");
@@ -845,6 +1304,7 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
         let boot = rr3_profile_boot_inputs_with_probe(
             &p,
             Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
             &OnlyServoAbsent,
         )
         .expect("部分缺格不致命");
@@ -864,8 +1324,12 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
             "missing.toml",
             &GOOD.replace("\"sensor.env\" = \"rr3-pb\"\n", ""),
         );
-        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("缺格不是致命项");
+        let boot = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("缺格不是致命项");
         assert_eq!(
             boot.missing,
             vec![("rr3-pb".to_string(), "sensor.env".to_string())],
@@ -885,8 +1349,12 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
         let root = Root::new("cross");
         let text = GOOD.replace("\"sensor.env\" = \"rr3-pb\"", "\"sensor.env\" = \"rr3-pc\"");
         let p = root.write_profile("cross.toml", &text);
-        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect_err("binding 被他人认领必须致命");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("binding 被他人认领必须致命");
         assert!(e.contains("未被 enabled_slots 认领"), "{e}");
     }
 
@@ -896,8 +1364,12 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
         let root = Root::new("base");
         let text = GOOD.replace("[bindings]\n", "[bindings]\n\"bus.publish\" = \"rr3-pa\"\n");
         let p = root.write_profile("base.toml", &text);
-        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect_err("基础层 binding 必须致命");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("基础层 binding 必须致命");
         assert!(e.contains("bindings 不得绑定基础层格位 bus.publish"), "{e}");
     }
 
@@ -907,8 +1379,12 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
         let root = Root::new("unknown");
         let text = GOOD.replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = [\"sensor.wifi\"]");
         let p = root.write_profile("unknown.toml", &text);
-        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect_err("未在册格位必须致命");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("未在册格位必须致命");
         assert!(
             e.contains("enabled_slots 模块 rr3-pc 的格位 sensor.wifi 未在册"),
             "{e}"
@@ -924,25 +1400,36 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
             "rr3-pc = [\"cognition.llm\", \"power.battery\"]",
         );
         let p = root.write_profile("baseslot.toml", &text);
-        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("基础层 enabled_slots 格位不缺格");
+        let boot = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("基础层 enabled_slots 格位不缺格");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
 
-    /// [hardware] 段：字符串/整数标量收、整数字符串化、缺段可选；坏类型逐条点名。
+    /// [hardware] 段（schema 3 只余非引脚键）：字符串/整数标量收、整数字符串化、
+    /// 缺段可选；坏类型逐条点名。物理键的"出现即红"在 boot 链裁（门 n），解析层
+    /// 不带契约真值不越权。
     #[test]
     fn hardware_section_is_optional_scalars_stringified() {
         // 缺段：合法（纯 sim/无硬件格形态），hal_bindings 为空文本
         let p = rr3_profile_from_text(GOOD).expect("缺 [hardware] 段必须合法");
         assert!(p.hardware.is_empty(), "{:?}", p.hardware);
 
-        // 字符串 + 整数混合：整数按十进制字符串化
-        let text = format!("{GOOD}\n[hardware]\npwm_chip = 0\nlink_ifname = \"wlan0\"\n");
+        // 字符串 + 整数混合：整数按十进制字符串化（[hardware] 不设键白名单，
+        // 键位语义归 rr-hal 描述符解析，rrd 只管装配形状）
+        let text =
+            format!("{GOOD}\n[hardware]\nspi_device = \"/dev/spidev0.0\"\nlink_metric = 100\n");
         let p = rr3_profile_from_text(&text).expect("标量 [hardware] 必须合法");
-        assert_eq!(p.hardware.get("pwm_chip").map(String::as_str), Some("0"));
         assert_eq!(
-            p.hardware.get("link_ifname").map(String::as_str),
-            Some("wlan0")
+            p.hardware.get("spi_device").map(String::as_str),
+            Some("/dev/spidev0.0")
+        );
+        assert_eq!(
+            p.hardware.get("link_metric").map(String::as_str),
+            Some("100")
         );
 
         // 布尔/浮点/数组/表逐条点名，一次全收集
@@ -973,29 +1460,233 @@ present = ["act.servo", "cognition.llm", "sensor.env"]
             "空表 → 空串"
         );
         let mut hw = BTreeMap::new();
-        hw.insert("pwm_chip".to_string(), "0".to_string());
+        hw.insert("spi_device".to_string(), "0".to_string());
         hw.insert("link_ifname".to_string(), "wl\"x\\".to_string());
         let text = rr3_hardware_bindings_text(&hw);
-        // BTreeMap 升序：link_ifname < pwm_chip
+        // BTreeMap 升序：link_ifname < spi_device
         assert_eq!(
-            text, "link_ifname = \"wl\\\"x\\\\\"\npwm_chip = \"0\"\n",
+            text, "link_ifname = \"wl\\\"x\\\\\"\nspi_device = \"0\"\n",
             "升序 + 转义（双引号/反斜杠）"
         );
     }
 
-    /// boot_inputs 带出 [hardware] 文本：满配装配单的物理绑定进 hal_bindings，
-    /// spawn 注入通道的端到端形状（daemon 只透传，不解释）。
+    /// 派生器正例（host 档）：[pins] 派生视图 ∪ [hardware] 非引脚键合成注入文本——
+    /// 取值与旧 [hardware] 逐字节对齐（pwm<N> 派生 pwm_chip=N、行号取 physical[0]、
+    /// addr 原样），键名不变，rr-hal descriptor.rs 解析端零改动；四角色全派生 +
+    /// 多条 pin 共键同值（led/relay 同 gpiochip0）不误报。
     #[test]
-    fn boot_inputs_carries_hardware_bindings_text() {
-        let root = Root::new("hardware");
-        let text = format!("{GOOD}\n[hardware]\npwm_chip = 0\nlink_ifname = \"wlan0\"\n");
-        let p = root.write_profile("hardware.toml", &text);
-        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("满配装配单应通过");
-        assert_eq!(
-            boot.hal_bindings, "link_ifname = \"wlan0\"\npwm_chip = \"0\"\n",
-            "注入文本升序、整数已字符串化"
+    fn boot_inputs_derives_and_merges_hal_bindings() {
+        let root = Root::new("derive");
+        let text = format!(
+            "{GOOD}\n[hardware]\nalsa_device = \"default\"\nlink_ifname = \"wlan0\"\n\
+             [[pin]]\nrole = \"act.led.gpio\"\ncontroller = \"gpiochip0\"\nphysical = [4]\n\
+             direction = \"out\"\nrail = \"none\"\nfailsafe = \"hold\"\nmux_group = []\n\
+             [[pin]]\nrole = \"act.relay.gpio\"\ncontroller = \"gpiochip0\"\nphysical = [17]\n\
+             direction = \"out\"\nrail = \"none\"\nfailsafe = \"driven_low\"\nmux_group = []\n\
+             [[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\naddr = \"0x40\"\n\
+             direction = \"in\"\nmux_group = []\n"
         );
+        let p = root.write_profile("derive.toml", &text);
+        let boot = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("满配装配单应通过");
+        assert_eq!(
+            boot.hal_bindings,
+            "alsa_device = \"default\"\n\
+             gpio_chip = \"0\"\n\
+             gpio_led_line = \"4\"\n\
+             gpio_relay_line = \"17\"\n\
+             i2c_bus = \"1\"\n\
+             ina219_addr = \"0x40\"\n\
+             link_ifname = \"wlan0\"\n\
+             pwm_channel = \"0\"\n\
+             pwm_chip = \"0\"\n",
+            "派生视图与非引脚键按 BTreeMap 升序合并，取值与旧 [hardware] 一致"
+        );
+        assert!(boot.role_missing.is_empty(), "{:?}", boot.role_missing);
+    }
+
+    /// 校验①-a：role 未在 roles.toml 在册 → 致命点名（真契约上跑）
+    #[test]
+    fn pin_unknown_role_is_fatal() {
+        let root = Root::new("pin-role");
+        let text = GOOD.replace("role = \"act.axis.pwm\"", "role = \"act.axis.magical\"");
+        let p = root.write_profile("pin-role.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("自造角色必须致命");
+        assert!(
+            e.contains("角色 act.axis.magical 未在册"),
+            "{e}"
+        );
+    }
+
+    /// 校验①-b per_instance 两侧：true 角色缺 instance / false 角色填 instance 都红
+    #[test]
+    fn pin_per_instance_rules_are_fatal_both_sides() {
+        let root = Root::new("pin-perinst");
+        // act.axis.pwm per_instance=true，删 instance → 必填缺
+        let text = GOOD.replace("instance = \"pan\"\n", "");
+        let p = root.write_profile("perinst-missing.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("per_instance=true 缺 instance 必须致命");
+        assert!(e.contains("instance 必填"), "{e}");
+
+        // act.led.gpio per_instance=false，填 instance → 禁填
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"act.led.gpio\"\ninstance = \"x\"\n\
+             controller = \"gpiochip0\"\nphysical = [4]\ndirection = \"out\"\nfailsafe = \"hold\"\n"
+        );
+        let p = root.write_profile("perinst-extra.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("per_instance=false 填 instance 必须致命");
+        assert!(e.contains("instance 禁填"), "{e}");
+    }
+
+    /// 校验①-b 留空反例（§5 缺失语义）：requires 必填字段删键即红——channel 以
+    /// None = 缺、failsafe 以空串 = 缺，一次收集、逐条点名，一条不静默放行
+    #[test]
+    fn pin_requires_left_blank_is_fatal() {
+        let root = Root::new("pin-blank");
+        let text = GOOD
+            .replace("channel = 0\n", "")
+            .replace("failsafe = \"release\"\n", "");
+        let p = root.write_profile("pin-blank.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("requires 字段留空必须致命");
+        assert!(e.contains("缺 channel"), "{e}");
+        assert!(e.contains("缺 failsafe"), "{e}");
+    }
+
+    /// 校验① direction 相等：pin.direction 与角色 direction 各说一套 → 致命点名
+    #[test]
+    fn pin_direction_mismatch_is_fatal() {
+        let root = Root::new("pin-direction");
+        let text = GOOD.replace("direction = \"out\"", "direction = \"in\"");
+        let p = root.write_profile("pin-direction.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("direction 与角色不一致必须致命");
+        assert!(
+            e.contains("direction = in 与角色 act.axis.pwm direction = out 不一致"),
+            "{e}"
+        );
+    }
+
+    /// [[pin]] 形状：未知键/坏类型/缺身份键逐条点名，一次收集完
+    #[test]
+    fn pin_section_shape_errors_are_named() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"\"\ndirection = \"out\"\nwat = 1\nphysical = [\"x\"]\n"
+        );
+        let errs = rr3_profile_from_text(&text).expect_err("形状不合必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("pin #1.role 缺失或为空")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("pin #1 未知键 wat")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("pin #1.physical 的每一项都必须是整数")),
+            "{errs:?}"
+        );
+        // 缺 role / 缺 direction（身份键缺席，解析期即红）
+        let errs =
+            rr3_profile_from_text(format!("{GOOD}\n[[pin]]\ncontroller = \"pwm1\"\n").as_str())
+                .expect_err("缺 role/direction 必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("pin #1 缺 role")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("pin #1 缺 direction")),
+            "{errs:?}"
+        );
+    }
+
+    /// 门 n 稳态判据（§8，power P-13）：[hardware] 出现物理键即红——GOOD 无电表
+    /// pin，i2c_bus 无派生者，按稳态文案点名
+    #[test]
+    fn gate_n_hardware_physical_key_is_fatal() {
+        let root = Root::new("gate-n-static");
+        let text = format!("{GOOD}\n[hardware]\ni2c_bus = 1\n");
+        let p = root.write_profile("gate-n-static.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("[hardware] 物理键必须致命");
+        assert!(
+            e.contains("hardware.i2c_bus 是引脚侧派生键") && e.contains("门 n 稳态判据"),
+            "{e}"
+        );
+    }
+
+    /// 门 n 两处并存判据：pin 实际派生该键时点名两份取值（[hardware] 值 vs 派生值）
+    #[test]
+    fn gate_n_coexistence_names_both_values() {
+        let root = Root::new("gate-n-both");
+        let text = format!("{GOOD}\n[hardware]\npwm_chip = 5\n");
+        let p = root.write_profile("gate-n-both.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("两处并存必须致命");
+        assert!(
+            e.contains("hardware.pwm_chip = \"5\" 与 [pins] 派生值 \"0\" 两处并存"),
+            "{e}"
+        );
+    }
+
+    /// 校验②（后果 = 降不拒）：格位在位且被启用但角色无 [[pin]] 绑定 → (格位, 角色)
+    /// 进 role_missing 清单随 boot 带出，模块照常起——缺角色是缺能力，不是拒 boot
+    #[test]
+    fn role_missing_is_listed_not_fatal() {
+        let root = Root::new("role-missing");
+        let text = GOOD.replace(
+            "\n[[pin]]\nrole = \"act.axis.pwm\"\ninstance = \"pan\"\ncontroller = \"pwm0\"\nchannel = 0\nphysical = [12]\ndirection = \"out\"\nrail = \"rail5v\"\nfailsafe = \"release\"\nmux_group = []\n",
+            "",
+        );
+        let p = root.write_profile("role-missing.toml", &text);
+        let boot = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("缺角色不是致命项");
+        assert_eq!(
+            boot.role_missing,
+            vec![("act.servo".to_string(), "act.axis.pwm".to_string()),],
+            "present ∩ enabled_slots 的格位缺角色逐条点名（sensor.env/cognition.llm 无角色不误报）"
+        );
+        assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
 
     /// 格位契约形状门进运行期装载（0.0.5 批J 深挖收口）：status/tier_scope 越界的
@@ -1017,7 +1708,8 @@ tier_scope = ["quantum"]
         )
         .unwrap();
         let p = root.write_profile("ok.toml", GOOD);
-        let errs = rr3_profile_boot_inputs(&p, &bad_slots).expect_err("越界契约必须拒");
+        let errs = rr3_profile_boot_inputs(&p, &bad_slots, Path::new(RR3_CONTRACT_ROLES_PATH))
+            .expect_err("越界契约必须拒");
         assert!(errs.contains("status 非法"), "{errs}");
         assert!(errs.contains("tier_scope 含非法档 quantum"), "{errs}");
     }
@@ -1090,14 +1782,22 @@ tier_scope = ["quantum"]
             .replace("tier = \"host\"", "tier = \"bare\"")
             .replace("watchdog_present = true", "watchdog_present = false");
         let p = root.write_profile("bare-nowd.toml", &bad);
-        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect_err("无看门狗的 bare 档必须被拒");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("无看门狗的 bare 档必须被拒");
         assert!(e.contains("无看门狗的板不允许归 bare 档"), "{e}");
 
         let ok = GOOD.replace("tier = \"host\"", "tier = \"bare\"");
         let p = root.write_profile("bare-wd.toml", &ok);
-        rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("bare 档 + 看门狗在场应放行");
+        rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("bare 档 + 看门狗在场应放行");
     }
 
     /// L-10 tier↔tier_scope 交叉校验（0.0.5 批K，ADR-0012 增补注记分族的装配侧
@@ -1112,8 +1812,12 @@ tier_scope = ["quantum"]
             "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"bus.publish\"]",
         );
         let p = root.write_profile("bare-bus.toml", &bad);
-        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect_err("bare 档引用 bus 格必须被拒");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("bare 档引用 bus 格必须被拒");
         assert!(
             e.contains("tier↔tier_scope 交叉校验失败") && e.contains("bus.publish"),
             "{e}"
@@ -1124,8 +1828,12 @@ tier_scope = ["quantum"]
             "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"power.battery\"]",
         );
         let p = root.write_profile("bare-battery.toml", &ok);
-        rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("bare 档引用 scope 全档的 power.battery 应放行");
+        rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("bare 档引用 scope 全档的 power.battery 应放行");
     }
 
     /// F-B 桥接微型形态装配演练（0.0.5 批K H4/R3-D6）：对仓内真件
@@ -1139,8 +1847,12 @@ tier_scope = ["quantum"]
     fn esp32_mini_profile_boot_inputs_drill() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let p = repo.join("profiles/esp32-mini.toml");
-        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("esp32-mini 装配单必须过完整装载门（rtos 档）");
+        let boot = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("esp32-mini 装配单必须过完整装载门（rtos 档）");
         let mods: Vec<String> = boot
             .manifests
             .iter()
@@ -1168,8 +1880,13 @@ tier_scope = ["quantum"]
             boot.assemble_broken
         );
         assert!(
+            boot.role_missing.is_empty(),
+            "三格全有角色绑定（[[pin]] 真值点在位）: {:?}",
+            boot.role_missing
+        );
+        assert!(
             boot.hal_bindings.is_empty(),
-            "[hardware] 缺省 → 不注入物理绑定（板侧描述符归 0.0.7）"
+            "[hardware] 缺省 + rtos 档不派生 → 不注入物理绑定（板侧描述符归 0.0.7）"
         );
     }
 
@@ -1180,8 +1897,12 @@ tier_scope = ["quantum"]
         let root = Root::new("present");
         let text = GOOD.replace(", \"sensor.env\"", "");
         let p = root.write_profile("absent.toml", &text);
-        let boot = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect("声明缺不是致命项");
+        let boot = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect("声明缺不是致命项");
         assert_eq!(
             boot.missing,
             vec![("rr3-pb".to_string(), "sensor.env".to_string())],
@@ -1198,8 +1919,12 @@ tier_scope = ["quantum"]
             "present = [\"sensor.wifi\", \"act.servo\"",
         );
         let p = root.write_profile("present-unknown.toml", &unknown);
-        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect_err("present 未在册格位必须致命");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("present 未在册格位必须致命");
         assert!(e.contains("格位 sensor.wifi 未在册"), "{e}");
 
         let base = GOOD.replace(
@@ -1207,8 +1932,12 @@ tier_scope = ["quantum"]
             "present = [\"bus.publish\", \"act.servo\"",
         );
         let p = root.write_profile("present-base.toml", &base);
-        let e = rr3_profile_boot_inputs(&p, Path::new(RR3_CONTRACT_SLOTS_PATH))
-            .expect_err("present 声明基础层格位必须致命");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("present 声明基础层格位必须致命");
         assert!(e.contains("不得声明基础层格位 bus.publish"), "{e}");
     }
 
@@ -1218,6 +1947,7 @@ tier_scope = ["quantum"]
         let e = rr3_profile_boot_inputs(
             Path::new("/nonexistent/rr3-nope.toml"),
             Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
         )
         .expect_err("读不到装配单必须致命");
         assert!(e.contains("无法解析为绝对路径"), "{e}");

@@ -5,8 +5,12 @@
 # contracts/slots.toml，绑定的件必须是 modules/ 在册模块——由 rr-registry 契约测试在 CI 全集层判。
 # schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：新增
 # [platform]/[supplies]/[slots] 三必填段，1→2 为破坏性变更。
+# schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段进场、
+# 七物理键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
+# [hardware] 只留三非引脚键（alsa_device/link_ifname/spi_device），role 外键查册
+# contracts/roles.toml，2→3 为破坏性变更。
 
-schema_version = 2
+schema_version = 3
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
@@ -49,21 +53,55 @@ safety_core_interval_ms = 1000
 "cognition.tts" = "rr3-brain"
 
 [hardware]
-# 物理绑定（ADR-0018 裁定 4、批D④ 收口）：引脚/控制器编号/总线/设备名的唯一
-# 数据事实源——rrd 装配链读本段序列化注入 RR3_HAL_BINDINGS，rr-hal 据此实例化
-# 后端；RR3_HAL_* env 降为应急覆盖；代码缺省 fail-closed，不回落任何一块板的
-# 引脚。键位与 rr-hal 后端一一对应；取值 = 现参考机真值（R22 定案档
-# pwmchip0/pwm0=GPIO12、R8 预算表 GPIO4/17 软件路行、接线 3 i2c1、BOM #5
-# INA219@0x40、runbook 件 4 wlan0）。换板/换装配 = 只改本段，不改代码。
+# 非引脚键直给（schema 3，增补轮六 §4.2）：设备名/接口名类标量——rrd 装配链读本段
+# 序列化注入 RR3_HAL_BINDINGS，rr-hal 据此实例化后端；RR3_HAL_* env 降为应急覆盖；
+# 代码缺省 fail-closed，不回落任何一块板的引脚。七物理键（pwm_chip/pwm_channel/
+# gpio_chip/gpio_led_line/gpio_relay_line/i2c_bus/ina219_addr）已下移 [[pin]] 派生
+# （门 n：[hardware] 出现即拒 boot）；本段取值 = 现参考机真值（runbook 件 4 wlan0）。
+# 换板/换装配 = 只改本段与 [[pin]]，不改代码。
 alsa_device = "default"
-pwm_chip = 0
-pwm_channel = 0
-gpio_chip = 0
-gpio_led_line = 4
-gpio_relay_line = 17
-i2c_bus = 1
-ina219_addr = "0x40"
 link_ifname = "wlan0"
+
+[[pin]]
+# 物理绑定真值点（schema 3，增补轮六 §4.2：引脚侧唯一事实源，role 外键 →
+# contracts/roles.toml）。rrd 装载按 host 档派生器合成 pwm_chip/pwm_channel 等注入键
+# （取值语义见 roles.toml 注记：pwm<N> 派生 pwm_chip=N）；"合法不适用"显式写 none，
+# 留空即红（§5 缺失语义）。取值 = 现参考机真值（R22 定案档 pwm0=GPIO12、R8 预算表
+# GPIO4/17 软件路行、接线 3 i2c1、BOM #5 INA219@0x40）。
+role = "act.axis.pwm"
+instance = "pan"
+controller = "pwm0"
+channel = 0
+physical = [12]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[[pin]]
+role = "act.led.gpio"
+controller = "gpiochip0"
+physical = [4]
+direction = "out"
+rail = "none" # 信号侧控制线（负载电流在 LED 模组内），无可切轨
+failsafe = "hold"
+mux_group = []
+
+[[pin]]
+role = "act.relay.gpio"
+controller = "gpiochip0"
+physical = [17]
+direction = "out"
+rail = "none" # 通断控制线（被切负载归 domains 侧管，批N2）
+failsafe = "driven_low"
+mux_group = []
+
+[[pin]]
+role = "power.battery.meter"
+controller = "i2c1"
+addr = "0x40" # 七位从地址（0x 前缀十六进制）
+direction = "in"
+mux_group = []
 
 [enabled_slots]
 # 模块 → 本形态启用的格位集合。default 机各模块启用其 manifest provides 全集；

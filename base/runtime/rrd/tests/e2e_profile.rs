@@ -35,8 +35,10 @@ use support::*;
 /// 放在这里恰恰是为了证明"带着它也能过"。schema_version=2 起三新段必填
 ///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；present 只声明 bindings 用的
 /// 非 base 格位——P2 删 binding 行后 sensor.env 仍 declared present，缺格判定照走注入缺。
+/// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
+/// 校验②只记 role_missing 非致命，boot 照常。
 const GOOD: &str = r#"
-schema_version = 2
+schema_version = 3
 
 [os]
 route = "distro"

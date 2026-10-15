@@ -931,6 +931,74 @@ fn every_manifest_capability_is_a_registered_slot() {
     }
 }
 
+/// schema 3 [pins] 与 roles.toml 的对账 pin（增补轮六批N1，§4.2 + 校验①的 CI 全集
+/// 层同判）：[[pin]] 的 role 外键查册、direction 与角色一致、instance 有无与
+/// per_instance 相符；[hardware] 不得出现七物理键（门 n 稳态判据的 CI 侧 pin——
+/// 运行期判在 rrd 装载，两轴缺一即带病）。
+fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_pin_roles: &[&str]) {
+    let roles = rr_registry::rr3_registry_role_table_from_text(
+        &std::fs::read_to_string(root.join("contracts/roles.toml"))
+            .expect("读 contracts/roles.toml"),
+    );
+    let pins = v
+        .get("pin")
+        .and_then(toml::Value::as_array)
+        .expect("缺 [[pin]]（schema 3 物理绑定真值点，§4.2）");
+    let mut pin_roles: Vec<String> = pins
+        .iter()
+        .map(|p| {
+            p.get("role")
+                .and_then(toml::Value::as_str)
+                .expect("pin 缺 role")
+                .to_string()
+        })
+        .collect();
+    pin_roles.sort();
+    assert_eq!(
+        pin_roles.iter().map(String::as_str).collect::<Vec<_>>(),
+        expect_pin_roles,
+        "[[pin]] 角色集漂移"
+    );
+    for p in pins {
+        let role = p.get("role").and_then(toml::Value::as_str).unwrap();
+        assert!(
+            roles.rr3_role_table_contains(role),
+            "[[pin]] 角色 {role} 未在 roles.toml 在册（校验①-a）"
+        );
+        if let (Some(pd), Some(rd)) = (
+            p.get("direction").and_then(toml::Value::as_str),
+            roles.rr3_role_table_direction(role),
+        ) {
+            assert_eq!(pd, rd, "pin {role} direction 与角色不一致（校验①）");
+        }
+        let per = roles.rr3_role_table_per_instance(role).unwrap_or(false);
+        let has_inst = p
+            .get("instance")
+            .and_then(toml::Value::as_str)
+            .is_some_and(|s| !s.is_empty());
+        assert_eq!(
+            has_inst, per,
+            "pin {role} instance 有无与 per_instance = {per} 不符（校验①-b）"
+        );
+    }
+    if let Some(hardware) = v.get("hardware").and_then(toml::Value::as_table) {
+        for k in [
+            "pwm_chip",
+            "pwm_channel",
+            "gpio_chip",
+            "gpio_led_line",
+            "gpio_relay_line",
+            "i2c_bus",
+            "ina219_addr",
+        ] {
+            assert!(
+                !hardware.contains_key(k),
+                "[hardware] 出现物理键 {k}（门 n：schema 3 起唯一来源 = [pins] 派生）"
+            );
+        }
+    }
+}
+
 /// 门禁②（profile 侧）+ 裁定 3 的装配自洽：default 装配单的 bindings 逐格对表查册、
 /// 绑到真实模块、与该模块的 manifest provides 对账；enabled_slots 与 provides 全集相等；
 /// 全部非 base 格位恰好被绑定一次（default 机不留缺格）。
@@ -970,12 +1038,12 @@ fn default_profile_binds_module_slots_to_real_modules() {
         "route 越界: {route}"
     );
 
-    // schema_version=2 三新段（描述符七段，ADR-0018 修订 1 ④）：[platform]/[supplies]/
+    // schema_version=3（0.0.5 批J 三新段 + 增补轮六批N1 [pins]）：[platform]/[supplies]/
     // [slots].present 逐键 pin——两份机型与 rrd 解析器同口径演进，漂移即红。
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(2),
-        "profile schema_version 漂移（三新段随 2 落地）"
+        Some(3),
+        "profile schema_version 漂移（[pins] 随 3 落地）"
     );
     let tier = v
         .get("platform")
@@ -1027,6 +1095,16 @@ fn default_profile_binds_module_slots_to_real_modules() {
     assert_eq!(
         present_sorted, expected_present,
         "[slots].present 与非 base 格位全集漂移（参考机 16 格全在位）"
+    );
+    assert_profile_pins_schema3(
+        &v,
+        &root,
+        &[
+            "act.axis.pwm",
+            "act.led.gpio",
+            "act.relay.gpio",
+            "power.battery.meter",
+        ],
     );
 
     let manifests: std::collections::BTreeMap<String, toml::Value> =
@@ -1135,11 +1213,11 @@ fn distro_profile_binds_exactly_the_body_layer() {
         .expect("profile 缺 [os] route");
     assert_eq!(route, "distro", "distro 机 route 必须是快路");
 
-    // schema_version=2 三新段：与 default 同一块参考机，[platform]/[supplies]/[slots]
-    // 逐值一致（present 仍为 16 格全集——distro 缺格是"不绑定"，不是"物理缺"）。
+    // schema_version=3 三新段 + [pins]：与 default 同一块参考机，[platform]/[supplies]/
+    // [slots] 逐值一致（present 仍为 16 格全集——distro 缺格是"不绑定"，不是"物理缺"）。
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(2),
+        Some(3),
         "profile schema_version 漂移"
     );
     assert_eq!(
@@ -1183,6 +1261,16 @@ fn distro_profile_binds_exactly_the_body_layer() {
     assert_eq!(
         present_sorted, expected_present,
         "[slots].present 与非 base 格位全集漂移"
+    );
+    assert_profile_pins_schema3(
+        &v,
+        &root,
+        &[
+            "act.axis.pwm",
+            "act.led.gpio",
+            "act.relay.gpio",
+            "power.battery.meter",
+        ],
     );
 
     let bindings = v
@@ -1283,7 +1371,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
 
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(2),
+        Some(3),
         "esp32-mini schema_version 漂移"
     );
     assert_eq!(
@@ -1315,8 +1403,11 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     );
     assert!(
         v.get("hardware").is_none(),
-        "esp32-mini 出现 [hardware] 段（板侧描述符进位须同批改本 pin 与 0.0.7 判据）"
+        "esp32-mini 出现 [hardware] 段（三非引脚键是宿主侧语义；板侧描述符进位须同批改本 pin 与 0.0.7 判据）"
     );
+    // schema 3 [pins]（增补轮六批N1）：板侧唯一执行件的物理绑定真值点——rtos 档 rrd
+    // 不派生（controller 词形 ledc<N> 是板侧词表），但校验①的形状照判。
+    assert_profile_pins_schema3(&v, &root, &["act.axis.pwm"]);
 
     // [bindings] 恰好三格——微型形态的"裁剪"是显式集合，多绑少绑都算漂移
     let bindings = v
