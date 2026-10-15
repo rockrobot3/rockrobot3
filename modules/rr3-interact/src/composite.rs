@@ -73,7 +73,8 @@ impl Rr3TtsPcmBuf {
     /// 收一帧：`pcm_b64` 解码追加（STREAM 语义有序到达，帧序即字节序）。
     /// 解码失败上抛，由调用方弃帧——缺口由点名的对账兜住，不静默。
     fn rr3_tts_buf_push(&mut self, pcm_b64: &str) -> Result<(), rr_ipc::Rr3Base64Error> {
-        self.bytes.extend_from_slice(&rr_ipc::rr3_base64_decode(pcm_b64)?);
+        self.bytes
+            .extend_from_slice(&rr_ipc::rr3_base64_decode(pcm_b64)?);
         Ok(())
     }
 
@@ -209,16 +210,14 @@ pub fn rr3_interact_run() -> Result<(), String> {
 
                     // 业务性失败折成 error 应答（请求-应答语义），不当致命错误
                     let result = match topic {
-                        player::RR3_TTS_TOPIC => {
-                            rr3_handle_tts(
-                                &bus,
-                                sink.as_mut(),
-                                &mut face,
-                                &mut tts_pcm,
-                                &args,
-                                &cfg.player,
-                            )
-                        }
+                        player::RR3_TTS_TOPIC => rr3_handle_tts(
+                            &bus,
+                            sink.as_mut(),
+                            &mut face,
+                            &mut tts_pcm,
+                            &args,
+                            &cfg.player,
+                        ),
                         face::RR3_FACE_TOPIC => {
                             rr3_handle_face(&mut face, &args, &cfg.face.non_pointable)
                         }
@@ -238,9 +237,9 @@ pub fn rr3_interact_run() -> Result<(), String> {
         // beep 占位已随 MC-1 退役——播放面只吃 tts_pcm 流，无本地波形源，如实回错
         while let Ok((action, tx)) = act_rx.try_recv() {
             let result = match action {
-                Rr3PanelAction::Beep => Err(
-                    "无本地波形源：beep 占位已随 MC-1 退役，播放面只接受 tts_pcm 流".into(),
-                ),
+                Rr3PanelAction::Beep => {
+                    Err("无本地波形源：beep 占位已随 MC-1 退役，播放面只接受 tts_pcm 流".into())
+                }
                 Rr3PanelAction::Face { expression } => face
                     .rr3_face_set(&expression, &cfg.face.non_pointable)
                     .map(|(c, p)| rr3_face_result(c, p)),
@@ -312,7 +311,11 @@ fn rr3_handle_tts(
 
 /// 表情点名：校验并切换，回 `{"expression","previous"}`。`non_pointable` = 本形态
 /// 不可点名集（I-11：config 注入，透传给件面判定）。
-fn rr3_handle_face(face: &mut Rr3Face, args: &Value, non_pointable: &[&str]) -> Result<Value, String> {
+fn rr3_handle_face(
+    face: &mut Rr3Face,
+    args: &Value,
+    non_pointable: &[&str],
+) -> Result<Value, String> {
     let expr = rr3_face_parse_args(args)?;
     let (current, previous) = face.rr3_face_set(&expr, non_pointable)?;
     Ok(rr3_face_result(current, previous))
@@ -457,7 +460,9 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
         player.volume_pct = u32::try_from(t)
             .ok()
             .filter(|pct| *pct <= 1000)
-            .ok_or_else(|| format!("[rr3-interact.player] volume_pct 越界（值域 0..=1000）: {t}"))?;
+            .ok_or_else(|| {
+                format!("[rr3-interact.player] volume_pct 越界（值域 0..=1000）: {t}")
+            })?;
     }
     let face_sect = v
         .get("rr3-interact")
@@ -499,8 +504,7 @@ fn rr3_cfg_u64(sect: &toml::Value, key: &str, out: &mut u64) -> Result<(), Strin
     let t = v
         .as_integer()
         .ok_or_else(|| format!("[rr3-interact.player] {key} 必须是整数，收到 {v}"))?;
-    *out = u64::try_from(t)
-        .map_err(|_| format!("[rr3-interact.player] {key} 不得为负: {t}"))?;
+    *out = u64::try_from(t).map_err(|_| format!("[rr3-interact.player] {key} 不得为负: {t}"))?;
     Ok(())
 }
 
@@ -520,9 +524,9 @@ mod tests {
             json!({ "text": 3 }),
             json!({ "text": "" }),
             json!({ "text": null }),
-            json!({ "text": "hi" }),                     // 缺 pcm_bytes（对账判据必带）
+            json!({ "text": "hi" }), // 缺 pcm_bytes（对账判据必带）
             json!({ "text": "hi", "pcm_bytes": "640" }), // 非整数
-            json!({ "text": "hi", "pcm_bytes": -1 }),    // 负数不成字节
+            json!({ "text": "hi", "pcm_bytes": -1 }), // 负数不成字节
         ] {
             assert!(rr3_tts_parse_args(&bad).is_err(), "{bad}");
         }
@@ -572,7 +576,10 @@ mod tests {
         assert_eq!(buf.rr3_tts_buf_len(), 6);
         assert_eq!(buf.rr3_tts_buf_take(), vec![1, 2, 3, 4, 5, 6]);
         assert_eq!(buf.rr3_tts_buf_len(), 0, "排空后缓冲清零");
-        assert!(buf.rr3_tts_buf_push("not-b64!!").is_err(), "坏帧 fail-closed");
+        assert!(
+            buf.rr3_tts_buf_push("not-b64!!").is_err(),
+            "坏帧 fail-closed"
+        );
     }
 
     /// s16le 字节列 → i16 样点：小端两两成对，奇数尾字节防御性丢弃

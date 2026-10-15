@@ -677,7 +677,9 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             Ok(path) => match rr3_secrets_upsert_at(&path, &ref_name, &value) {
                 // 应答只回 ref——值永不进任何负载/日志（secrets 模块铁律）
                 Ok(()) => Rr3PanelReply::json(200, "OK", json!({ "ok": true, "ref": ref_name })),
-                Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+                Err(e) => {
+                    Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e }))
+                }
             },
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
         },
