@@ -7,7 +7,9 @@
 //!
 //! 后端三档（MC-4 台-1 清零）：
 //! - [`Rr3LinuxProbe`]：**生产 linux 档的真值探测**，五面在位性（sysfs PWM 通道 /
-//!   GPIO line / I2C 设备 / SPI 设备 / ALSA 卡名）。探测根可注入（`rr3_linux_probe_new`），
+//!   GPIO line / I2C 设备 / SPI 设备 / ALSA 卡名）+ I2C 格位的**器件级探测**
+//!   （[`Rr3Probe::rr3_probe_slot_bound`]，L-14：总线在 ≠ 器件在，总线级降前置
+//!   条件）。探测根可注入（`rr3_linux_probe_new`），
 //!   生产传 `/`，单测传假根——判据因此主机可测。纯 std，无外部依赖，全平台编译。
 //! - [`Rr3AbsentProbe`]：非 linux 生产面（本机 macOS 直跑 rrd 的场合）——有硬件面的
 //!   格位恒缺（不冒充在位，fail-closed）；无硬件面可反证的格位与真值探测同判"在位"。
@@ -29,6 +31,17 @@ use std::sync::Arc;
 /// 一台机器的"格位在位吗"探测面。装配链每 boot 构造一次、逐格询问。
 pub trait Rr3Probe: Send + Sync {
     fn rr3_probe_slot(&self, slot: &str) -> bool;
+
+    /// 器件级探测（L-14，增补轮六批N1）：I2C 格位在装机档 `[pins]` 在册
+    /// `(bus, addr)` 时，在位判据升为"内核已为该从机地址注册器件节点"
+    /// （sysfs `devices/<bus>-<addr4hex>`），总线级判据降为**前置条件**——
+    /// "总线在 ≠ 器件在"（L-14：只看 `/dev/i2c-*` 存在会让器件没接也恒绿）。
+    /// `bus`/`addr` 任一缺席（装配单未声明 `[pins]` / 该格无 I2C 绑定）→
+    /// 回落五面判据原样（无 [pins] 形态的兼容面；缺格点名仍走装配链"缺格"）。
+    /// 读不到答案一律 `false`（fail-closed 与 [`Rr3Probe::rr3_probe_slot`] 同判）。
+    fn rr3_probe_slot_bound(&self, slot: &str, _bus: Option<u32>, _addr: Option<&str>) -> bool {
+        self.rr3_probe_slot(slot)
+    }
 }
 
 /// 探测面五面（MC-4）：格位归到哪张硬件面，决定探什么。
@@ -92,6 +105,20 @@ impl Rr3LinuxProbe {
         std::fs::read(path).map(|b| !b.is_empty()).unwrap_or(false)
     }
 
+    /// 装机档 `addr` → sysfs 器件节点词形（内核约定：`<bus>-<7位地址4位小写16进制>`，
+    /// 如 `1-0040`）。"0x" 前缀认、越出 7 位地址域（>0x7F）不认——词形解析失败
+    /// = 拿不到答案 = 缺（fail-closed，不回落总线级冒充在位）。
+    fn rr3_i2c_addr_sysfs_word(addr: &str) -> Option<String> {
+        let hex = addr
+            .strip_prefix("0x")
+            .or_else(|| addr.strip_prefix("0X"))?;
+        let v = u32::from_str_radix(hex, 16).ok()?;
+        if v > 0x7F {
+            return None;
+        }
+        Some(format!("{v:04x}"))
+    }
+
     /// 面在位性。任一面拿不到答案 → `false`（fail-closed）。
     fn rr3_face_present(&self, face: Rr3ProbeFace) -> bool {
         match face {
@@ -114,6 +141,30 @@ impl Rr3Probe for Rr3LinuxProbe {
             Some(face) => self.rr3_face_present(face),
             // 无硬件面可反证：在位（软件格/运行期格/基础层——见文件头末段）
             None => true,
+        }
+    }
+
+    /// L-14 器件级探测：I2C 格位 + (bus, addr) 在册 → 在位 = 总线节点在（前置
+    /// 条件，收窄到该具体总线）**且** sysfs 器件节点在（`devices/<bus>-<addr4>`）。
+    /// 器件节点不存在 = 内核没为该地址注册从机 = 总线在、器件不在 → 缺。
+    /// 寄存器 ID 读回比对（INA219 0x00 = 0x2268）需 i2c-dev 事务、会碰器件，
+    /// 归器件与真板批（status 敞口在案）——本判据不冒充它是读回。
+    fn rr3_probe_slot_bound(&self, slot: &str, bus: Option<u32>, addr: Option<&str>) -> bool {
+        match (rr3_slot_probe_face(slot), bus, addr) {
+            (Some(Rr3ProbeFace::I2c), Some(n), Some(a)) => {
+                let Some(word) = Self::rr3_i2c_addr_sysfs_word(a) else {
+                    return false; // 词形解析失败 = 拿不到答案 = 缺（fail-closed）
+                };
+                // 前置条件：该具体总线的设备节点在（n 由装机档 controller 词形
+                // i2c<N> 数据驱动，非硬编码板号）；器件级：sysfs 从机节点在。
+                self.root.join("dev").join(format!("i2c-{n}")).exists()
+                    && self
+                        .root
+                        .join("sys/bus/i2c/devices")
+                        .join(format!("{n}-{word}"))
+                        .exists()
+            }
+            _ => self.rr3_probe_slot(slot),
         }
     }
 }
@@ -289,6 +340,79 @@ mod tests {
             !probe.rr3_probe_slot("audio.playback"),
             "空卡表 = 无卡注册 → 缺"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// L-14 主判据（这条是缺陷的判据身）：总线节点在而 sysfs 从机节点不在 =
+    /// "总线在、器件不在" → 缺。改造前这一格恒判在位（只看 /dev/i2c-* 存在），
+    /// 器件没接也绿——缺格降级环在 I2C 三格上不转的真缺陷。
+    #[test]
+    fn linux_probe_i2c_requires_device_node_not_just_bus() {
+        let root = rr3_test_probe_root("dev-only");
+        std::fs::create_dir_all(root.join("dev")).unwrap();
+        std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
+        let probe = Rr3LinuxProbe::rr3_linux_probe_new(&root);
+        // 总线级判据（前置条件）单看是绿的——正是 L-14 的病：它不是在位证据
+        assert!(probe.rr3_probe_slot("power.charger"), "旧判据下总线在即绿");
+        // 器件级判据：sysfs 从机节点不在 → 缺
+        assert!(
+            !probe.rr3_probe_slot_bound("power.charger", Some(1), Some("0x40")),
+            "总线在、器件不在必须缺（L-14）"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 器件级正例：总线节点 + sysfs 从机节点都在 → 在位；从机节点摆错总线号 → 缺。
+    #[test]
+    fn linux_probe_i2c_device_node_satisfies_and_is_bus_scoped() {
+        let root = rr3_test_probe_root("dev-node");
+        std::fs::create_dir_all(root.join("dev")).unwrap();
+        std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
+        std::fs::create_dir_all(root.join("sys/bus/i2c/devices/1-0040")).unwrap();
+        let probe = Rr3LinuxProbe::rr3_linux_probe_new(&root);
+        assert!(
+            probe.rr3_probe_slot_bound("power.charger", Some(1), Some("0x40")),
+            "1-0040 在 → 在位"
+        );
+        assert!(
+            !probe.rr3_probe_slot_bound("power.charger", Some(0), Some("0x40")),
+            "节点在总线 1，问总线 0 → 缺（收窄到具体总线，不回退任一总线即绿）"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// addr 词形坏（无 0x 前缀 / 越出 7 位地址域）= 拿不到答案 = 缺
+    /// （fail-closed，不回落总线级冒充在位）。
+    #[test]
+    fn linux_probe_i2c_bad_addr_word_is_absent() {
+        let root = rr3_test_probe_root("bad-addr");
+        std::fs::create_dir_all(root.join("dev")).unwrap();
+        std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
+        std::fs::create_dir_all(root.join("sys/bus/i2c/devices/1-0040")).unwrap();
+        let probe = Rr3LinuxProbe::rr3_linux_probe_new(&root);
+        for bad in ["40", "0xzz", "0x80", "0x", "none"] {
+            assert!(
+                !probe.rr3_probe_slot_bound("sensor.env", Some(1), Some(bad)),
+                "addr 词形 {bad:?} 必须缺"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 兼容面：装配单未声明 [pins] / 该格无 I2C 绑定（bus/addr 任一缺席）→
+    /// 回落五面总线级判据原样——无 [pins] 形态的行为逐位不变（e2e 夹具即此形）。
+    #[test]
+    fn linux_probe_i2c_without_binding_falls_back_to_bus_level() {
+        let root = rr3_test_probe_root("fallback");
+        std::fs::create_dir_all(root.join("dev")).unwrap();
+        std::fs::write(root.join("dev/i2c-1"), b"").unwrap();
+        let probe = Rr3LinuxProbe::rr3_linux_probe_new(&root);
+        for (bus, addr) in [(None, None), (Some(1), None), (None, Some("0x40"))] {
+            assert!(
+                probe.rr3_probe_slot_bound("sensor.imu", bus, addr),
+                "bus/addr 缺席（{bus:?}, {addr:?}）必须回落总线级"
+            );
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
