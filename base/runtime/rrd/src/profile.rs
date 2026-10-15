@@ -1185,7 +1185,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // role_missing 清单随 boot 带出，由 daemon 点名（Degraded 可见面归批N4 I-15）。
     let mut role_missing: Vec<(String, String)> = Vec::new();
     let enabled_all: BTreeSet<String> = profile.enabled_slots.values().flatten().cloned().collect();
-    for slot in enabled_all {
+    for slot in &enabled_all {
         if !profile.slots_present.contains(&slot) {
             continue;
         }
@@ -1200,11 +1200,37 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 缺格判定：enabled_slots 声明的非基础层格位没有指向本模块的有效 binding（或探测不到）。
     // 基础层恒在位，跳过（slots.toml 注记：net.online / power.battery boot 即在位、恒不降级）。
     let mut missing: Vec<(String, String)> = Vec::new();
+    // L-14 器件级探测的 (bus, addr) 组装：格位 → 该格角色在 [pins] 的 I2C 绑定
+    // （controller 词形 i2c<N> → N，addr 非 none 非空才有效）。装配单未声明 [pins]
+    // / 该格无 I2C 绑定 → 传 None → 探针回落总线级五面判据（无 [pins] 形态兼容面）。
+    let mut i2c_bind: BTreeMap<String, (u32, String)> = BTreeMap::new();
+    for slot in &enabled_all {
+        for role in roles.rr3_role_table_names_for_slot(&slot) {
+            for pin in profile.pins.iter().filter(|p| p.role == role) {
+                let Some(n) = pin
+                    .controller
+                    .strip_prefix("i2c")
+                    .and_then(|rest| rest.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if !pin.addr.is_empty() && pin.addr != "none" {
+                    i2c_bind
+                        .entry(slot.clone())
+                        .or_insert_with(|| (n, pin.addr.clone()));
+                }
+            }
+        }
+    }
     // 探测先行：bindings 声明的格位逐格探测（MC-4：linux 走五面真值探测，非 linux
     // 生产面恒缺，test 面/显式注入走注入件）。探测自身故障按"探测不到"处理
     // （fail-closed，方案 §4）；缺格三源合一的"实测缺"这一源即出自本环。
     for (slot, module) in &profile.bindings {
-        if !probe.rr3_probe_slot(slot) {
+        let (bus, addr) = match i2c_bind.get(slot) {
+            Some((n, a)) => (Some(*n), Some(a.as_str())),
+            None => (None, None),
+        };
+        if !probe.rr3_probe_slot_bound(slot, bus, addr) {
             missing.push((module.clone(), slot.clone()));
         }
     }
