@@ -1,8 +1,9 @@
 //! face 原子件入口（五件套②，0.0.5 批C③ 原子重铺）：只声明公开面，机制在 mech.rs。
 //!
 //! 占格 `ui.face`（atom.toml）。SURFACE 是启动自述（组合件 rr3_interact_run 开头
-//! 逐字打印，契约面零改动红线）。表情渲染：idle / blink / talk / think / happy /
-//! listen / turn——七态白名单与 `talk` 自动挂起恢复是现在就要钉死的契约面；
+//! 逐字打印，契约面零改动红线）。表情渲染：七核心态（idle/blink/talk/think/
+//! happy/listen/turn）+ char 单字符档 36 态（charA..charZ/char0..char9，
+//! 2026-10-15 板上批）——白名单与 `talk` 自动挂起恢复是现在就要钉死的契约面；
 //! **"不可点名"规则是策略**（0.0.5 批M MC-10 I-11）：值本身（表情名）是契约字面量
 //! 不许改，本形态排除哪个子集由 config `[rr3-interact.face] non_pointable` 注入。
 //! 显示面经 rr-hal 显示 trait（批F5a③）由组合件注入，原子只钉"状态→帧"映射
@@ -19,10 +20,17 @@ pub const SURFACE: &[&str] = &["face: rpc rr3-interact/face/expression (request)
 /// 本模块 exposes 的表情主题（module.toml [rpc].exposes 同源；原子层不重述 rpc 契约）
 pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 
-/// 合法表情白名单（contracts/topics.toml 的 note 同源；批F3 增 listen/turn——
-/// 判据 9 点名的听取/转向两态）
-pub const RR3_FACE_EXPRESSIONS: [&str; 7] =
-    ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
+/// 合法表情白名单（contracts/events/interact-face-expression.schema.json 的 enum
+/// 与 contracts/topics.toml 的 note 同源；批F3 增 listen/turn——判据 9 点名的
+/// 听取/转向两态；2026-10-15 板上批增 char 单字符档 36 态——charA..charZ +
+/// char0..char9，面板真链路单字 8x8 显示，帧表随 mech.rs 同序扩容）
+pub const RR3_FACE_EXPRESSIONS: [&str; 43] = [
+    "idle", "blink", "talk", "think", "happy", "listen", "turn", "charA", "charB", "charC",
+    "charD", "charE", "charF", "charG", "charH", "charI", "charJ", "charK", "charL", "charM",
+    "charN", "charO", "charP", "charQ", "charR", "charS", "charT", "charU", "charV", "charW",
+    "charX", "charY", "charZ", "char0", "char1", "char2", "char3", "char4", "char5", "char6",
+    "char7", "char8", "char9",
+];
 
 /// TTS 播放期间的临时表情（模块内自动切换；"不可点名"规则由 config 注入，见下）
 pub const RR3_FACE_TALK: &str = "talk";
@@ -56,7 +64,11 @@ mod tests {
     #[test]
     fn expression_lookup_covers_whitelist() {
         for e in RR3_FACE_EXPRESSIONS {
-            assert_eq!(rr3_face_expression_lookup(e), Some(e), "在册名必须查得回: {e}");
+            assert_eq!(
+                rr3_face_expression_lookup(e),
+                Some(e),
+                "在册名必须查得回: {e}"
+            );
         }
         assert_eq!(rr3_face_expression_lookup("wink"), None, "非在册名不认");
     }
@@ -65,7 +77,10 @@ mod tests {
     #[test]
     fn non_pointable_join_renders_set_and_empty() {
         assert_eq!(rr3_face_non_pointable_join(&["talk"]), "talk");
-        assert_eq!(rr3_face_non_pointable_join(&["talk", "blink"]), "talk/blink");
+        assert_eq!(
+            rr3_face_non_pointable_join(&["talk", "blink"]),
+            "talk/blink"
+        );
         assert_eq!(rr3_face_non_pointable_join(&[]), "(空)");
     }
 }

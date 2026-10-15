@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "rr3-interact/face/expression",
   "schema_version": 1,
-  "description": "表情机切换/点阵渲染指令（request L1；request 类负载 schema——顶层钉请求 args 形状，应答 result 形状钉在 $defs.response/$defs.response_error）。双面承载：模块面 modules/rr3-interact/atoms/face/mech.rs 的 rr3_face_set（7 态白名单 RR3_FACE_EXPRESSIONS）+ composite.rs 应答体 {expression, previous}，与板侧帧执行面 tools/esp32-periph-base/src/main.rs 的 frame_handle_face（0.0.5 增补轮五 批C 路线二：宿主 rr-hal::esp32_uart 桥后端经 rr3.call 帧 direct 点名）共用同形状。frame 变体是板侧帧面扩展（HAL 渲染变体：8x8 点阵整帧 → OLED 中央 64x64 放大，位图契约 rr-hal-api Rr3FaceFrame——行主序 8 字节、每字节 bit7 为该行最左点）；模块面只受理 expression 变体。业务性失败两实现同款折 result.error 点名。",
+  "description": "表情机切换/点阵渲染指令（request L1；request 类负载 schema——顶层钉请求 args 形状，应答 result 形状钉在 $defs.response/$defs.response_error）。双面承载：模块面 modules/rr3-interact/atoms/face/mech.rs 的 rr3_face_set（白名单 RR3_FACE_EXPRESSIONS，43 态：七核心 + char 单字符档）+ composite.rs 应答体 {expression, previous}，与板侧帧执行面 tools/esp32-periph-base/src/main.rs 的 frame_handle_face（0.0.5 增补轮五 批C 路线二：宿主 rr-hal::esp32_uart 桥后端经 rr3.call 帧 direct 点名）共用同形状。frame 变体是板侧帧面扩展（HAL 渲染变体：8x8 点阵整帧 → OLED 中央 64x64 放大，位图契约 rr-hal-api Rr3FaceFrame——行主序 8 字节、每字节 bit7 为该行最左点）；模块面只受理 expression 变体。业务性失败两实现同款折 result.error 点名。",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/expression" },
@@ -10,13 +10,13 @@
   ],
   "$defs": {
     "expression": {
-      "description": "expression 变体：表情切换（模块面/板侧帧面共用，白名单同源 7 态）",
+      "description": "expression 变体：表情切换（模块面/板侧帧面共用，白名单同源：七核心态 + char 单字符档共 43 态）",
       "type": "object",
       "required": ["expression"],
       "properties": {
         "expression": {
           "type": "string",
-          "enum": ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
+          "enum": ["idle", "blink", "talk", "think", "happy", "listen", "turn", "charA", "charB", "charC", "charD", "charE", "charF", "charG", "charH", "charI", "charJ", "charK", "charL", "charM", "charN", "charO", "charP", "charQ", "charR", "charS", "charT", "charU", "charV", "charW", "charX", "charY", "charZ", "char0", "char1", "char2", "char3", "char4", "char5", "char6", "char7", "char8", "char9"]
         }
       },
       "additionalProperties": false
@@ -43,7 +43,7 @@
       "properties": {
         "expression": {
           "type": "string",
-          "enum": ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
+          "enum": ["idle", "blink", "talk", "think", "happy", "listen", "turn", "charA", "charB", "charC", "charD", "charE", "charF", "charG", "charH", "charI", "charJ", "charK", "charL", "charM", "charN", "charO", "charP", "charQ", "charR", "charS", "charT", "charU", "charV", "charW", "charX", "charY", "charZ", "char0", "char1", "char2", "char3", "char4", "char5", "char6", "char7", "char8", "char9"]
         },
         "previous": { "type": "string" }
       },
