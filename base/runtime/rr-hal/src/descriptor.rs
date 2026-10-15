@@ -13,6 +13,8 @@
 //! 九键维持现状——后续扩键/扩 role 同走契约级评审，届时本处与
 //! rr-registry `RR3_ASSEMBLE_DESC_KEYS` 在册表**两处同批**（副本滞后 = fail-closed
 //! 拒绝，见 rr-registry assemble 模块契约测试）。
+//! 十键批（0.0.6 链④真件档）：MAX7219 显示面随真件落地按裁定流程扩 `spi_device`
+//! 键（spidev 设备路径），rr-registry 在册表与 face 原子 assemble.toml 句柄同批。
 
 use std::collections::BTreeMap;
 
@@ -44,6 +46,8 @@ pub struct Rr3HalBindings {
     pub ina219_addr: Option<u8>,
     /// NetworkManager 链路读数的接口名（参考机 runbook 件 4 = wlan0）
     pub link_ifname: Option<String>,
+    /// spidev 设备路径（显示面 MAX7219；链④真件档，参考机 = /dev/spidev0.0）
+    pub spi_device: Option<String>,
 }
 
 /// 非空串裁决（trim 后空 = 不认）。
@@ -64,6 +68,7 @@ impl Rr3HalBindings {
         match key {
             "alsa_device" => self.alsa_device = Some(rr3_non_empty(raw).ok_or_else(bad)?),
             "link_ifname" => self.link_ifname = Some(rr3_non_empty(raw).ok_or_else(bad)?),
+            "spi_device" => self.spi_device = Some(rr3_non_empty(raw).ok_or_else(bad)?),
             "pwm_chip" => self.pwm_chip = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
             "pwm_channel" => self.pwm_channel = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
             "gpio_chip" => self.gpio_chip = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
@@ -167,6 +172,7 @@ pub fn rr3_hal_env_override_map() -> BTreeMap<String, String> {
         "link_ifname",
         crate::backend::RR3_HAL_LINK_IFNAME_ENV,
     );
+    put(&mut m, "spi_device", crate::backend::RR3_HAL_SPI_DEVICE_ENV);
     m
 }
 
@@ -194,6 +200,7 @@ mod tests {
             "i2c_bus = \"1\"\n",
             "ina219_addr = \"0x40\"\n",
             "link_ifname = \"wlan0\"\n",
+            "spi_device = \"/dev/spidev0.0\"\n",
         );
         let b = rr3_hal_bindings_from_text(text).expect("全键正例必须解析");
         assert_eq!(b.alsa_device.as_deref(), Some("default"));
@@ -205,6 +212,7 @@ mod tests {
         assert_eq!(b.i2c_bus, Some(1));
         assert_eq!(b.ina219_addr, Some(0x40));
         assert_eq!(b.link_ifname.as_deref(), Some("wlan0"));
+        assert_eq!(b.spi_device.as_deref(), Some("/dev/spidev0.0"));
     }
 
     /// 空文本 = 空绑定（合法，装配单未给 [hardware]；纯 sim 形态照常起）。

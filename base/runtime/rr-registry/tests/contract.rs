@@ -1485,6 +1485,7 @@ fn assemble_registry_tables_are_pinned() {
             "i2c_bus",
             "ina219_addr",
             "link_ifname",
+            "spi_device",
         ]
     );
 }
