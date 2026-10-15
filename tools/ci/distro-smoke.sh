@@ -95,6 +95,9 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   must_file /usr/lib/rockrobot3/profiles/distro.toml
   must_file /usr/lib/rockrobot3/contracts/topics.toml
   must_file /usr/lib/rockrobot3/contracts/slots.toml
+  must_file /usr/lib/rockrobot3/contracts/roles.toml
+  must_file /usr/lib/rockrobot3/contracts/devices.toml
+  must_file /usr/lib/rockrobot3/hardware/distro/wiring.toml
   for m in act connect interact sense power; do
     must_exec "/usr/lib/rockrobot3/modules/rr3-$m/rr3-$m"
     must_file "/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
