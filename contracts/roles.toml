@@ -1,0 +1,80 @@
+# RockRobot3 角色词表（[SC] 契约层，增补轮六 §4.1 新建；单一事实源）
+# 消费方：profiles/*.toml [pins] 的 role 外键、rr-registry 查册门（装载期校验①）、
+#   rrd [pins] 派生器（derives 键 → RR3_HAL_BINDINGS 注入文本）、面板配置项生成（批N4）、
+#   门禁六表对账（门 a，§8 待建——建即全红，现状六表从未对齐过）。
+# 纪律（§4.1）：角色 ↔ 格 ↔ trait ↔ 描述符键的一致性由门禁判等（门 a 按六表判：
+#   slots.toml / roles.toml / RR3_ASSEMBLE_HANDLE_TRAITS / 件 handles[].desc_key ×
+#   RR3_ASSEMBLE_DESC_KEYS / [pins] 字段词表 / 平台 role→具名构造表）。
+#   加一类外设 = 同批改多处（本表 + slots + 件 desc_key + [pins] + platform 构造表），一次评审；
+#   这是裁定 4 撤销"闭集"之后防止键域自由生长的唯一替代物。
+# 字段语义（§4.1 + §18 F-27）：
+#   kind          封闭三值 signal | power | logic。power = 必须带 rail（校验⑥-b）；
+#                 logic = 无物理绑定（bus.publish 那类内建格走它，不进 [pins]）。
+#   iface         外键 → RR3_ASSEMBLE_HANDLE_TRAITS（门 a 的 ∃trait(role) 判据对象）。
+#   requires      该角色的 [pins] 必填字段集（校验①-b 判据对象；"合法不适用"必须显式写
+#                 none/false，留空 = 红，§5 缺失语义列）。
+#   direction     out | in | io | passive。
+#   droppable     欠压降载时可否被切断（舵机 true=松轴放行、电表 false=测量面须活着才知欠压）。
+#   input_only_ok 该角色是否允许绑到 input-only 引脚（校验⑤-a 的另一侧输入）。
+#   per_instance  一角色可多实例（双轴即两条 instance）；false 时填 instance 即红（校验①-b）。
+# derives（批N1 实装裁定，§4.1 字段集的增补，随 n1-10 文档回写）：该角色向描述符
+#   派生视图供给的键集——[pins] 是物理绑定唯一真值点，rrd 派生出 RR3_HAL_BINDINGS
+#   注入文本（键名 = rr-hal descriptor.rs 在册键），门 n"注入路径唯一"的另一侧真值。
+#   非引脚键 alsa_device/link_ifname/spi_device 不派生，留 [hardware] 直给。
+# 变更纪律：加角色 = append（同步六表对账面）；字段语义变更 = 破坏性 = 升
+#   schema_version 并走契约级评审。格位命名两段式同 slots.toml，角色名点分式、
+#   前缀 = 格名的动作侧。
+
+schema_version = 1
+
+[[role]]
+name = "act.axis.pwm"
+slot = "act.servo"
+kind = "power"
+iface = "Rr3PwmServo"
+requires = ["controller", "channel", "physical", "rail", "failsafe"]
+derives = ["pwm_chip", "pwm_channel"]
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = true
+note = "SG90 类位置舵机；行程与标定不住这里（住执行件档案，批N3）。host 侧 controller 词形 pwm<N> 派生 pwm_chip=N、channel 派生 pwm_channel；failsafe=release 对应'不保持激磁'既有裁定（§6 复位语义③）"
+
+[[role]]
+name = "act.led.gpio"
+slot = "act.led"
+kind = "signal"
+iface = "Rr3GpioOut"
+requires = ["controller", "physical", "failsafe"]
+derives = ["gpio_chip", "gpio_led_line"]
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "指示灯数字输出；控制线是信号侧（负载电流在 LED 模组内），rail 语义（可切轨）不适用。host 侧 controller 词形 gpiochip<N> 派生 gpio_chip=N、physical[0] 派生 gpio_led_line"
+
+[[role]]
+name = "act.relay.gpio"
+slot = "act.relay"
+kind = "signal"
+iface = "Rr3GpioOut"
+requires = ["controller", "physical", "failsafe"]
+derives = ["gpio_chip", "gpio_relay_line"]
+direction = "out"
+droppable = false
+input_only_ok = false
+per_instance = false
+note = "继电器通断控制线；droppable=false——继电器是安全动作面，欠压降载不得切断其控制（被切的是它下游负载，那归 domains 侧管，批N2）。host 侧 physical[0] 派生 gpio_relay_line"
+
+[[role]]
+name = "power.battery.meter"
+slot = "power.battery"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr"]
+derives = ["i2c_bus", "ina219_addr"]
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+note = "INA219 电池计（I2C 读数面）；droppable=false——测量面必须活着才知欠压。addr 写 0x 前缀十六进制（七位从地址域）。批N2 起它兼任域测点（domains[].current_sense/sense 一律写本角色 pin_id，校验⑥-d）"
