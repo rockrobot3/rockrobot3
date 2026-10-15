@@ -1,0 +1,17 @@
+[package]
+name = "rr3-codegen"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+description = "0.0.5 增补轮六 批N1 n1-8：契约真值点 → 板侧常量表生成器（全案 §4.5 生成物表；重跑 diff 为空 = 门 f 拟 ⑨-d）"
+
+# 独立 workspace：host 侧工具（读 contracts/*.toml 写板侧生成文件），不进
+# base/runtime 主 workspace（职责：纯生成器，无运行时消费），也不进 esp32-periph-base
+# 的 xtensa workspace（那边 host 编译不过——esp-idf build-std 链接参数在宿主无处落）。
+[workspace]
+
+[dependencies]
+# TOML 平表解析：topics.toml / face-expressions.toml 都是 Value 级手查（无 serde
+# 结构体，键名 fail-closed 手点名，与 rr-registry 读表器同口径）。
+toml = "0.8"

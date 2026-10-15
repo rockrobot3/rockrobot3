@@ -71,24 +71,16 @@ pub(crate) const RR3_PERIPH_TASK: u64 = 2;
 /// 帧头 magic "1ERA" 的 LE 首字节（0x31='1'）——双面分流窥视判据。行面首字节
 /// 集全为字母（HELP/OLED/PAN/...），与 0x31 无交集，分流无歧义。
 pub(crate) const RR3_MAGIC_FIRST: u8 = 0x31;
-/// 舵机点名主题（在册 request L1；形状事实源
-/// contracts/events/act-servo-command.schema.json，与 topics.toml 同串）。
-pub(crate) const RR3_SERVO_TOPIC: &str = "rr3-act/servo/command";
-/// 表情点名主题（在册 request L1；形状事实源
-/// contracts/events/interact-face-expression.schema.json，与 topics.toml 同串）。
-pub(crate) const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
-/// 表情白名单（rr3-interact 模块面同款 7 态；帧面执行面同步执行该裁定）。
-pub(crate) const RR3_FACE_EXPRS: [&str; 7] =
-    ["idle", "blink", "talk", "think", "happy", "listen", "turn"];
+// 板侧常量表生成物（主题串三枚 + 板侧表情白名单七态）——真值点（contracts/
+// topics.toml + contracts/face-expressions.toml）与生成器（tools/rr3-codegen）
+// 见 topics_gen.rs 头注。本文件不再手写副本：全案 0.0.5 增补轮六 §4.5 裁定
+// "真值点 → 生成副本"，重跑生成器 diff 为空 = 门 f 拟 ⑨-d（check.sh 接线）。
+//（include! 前的 doc 注释挂不到宏产物上，用普通注释。）
+include!("topics_gen.rs");
 /// 音频上行宿主 task 位形（帧头 dst 门）：宿主侧占位形 1——与宿主 rr-hal
 /// esp32_uart 桥后端同值帧头约定（板不依赖 rr-core，与 [`RR3_PERIPH_TASK`]
 /// 同一"两端常量自证"纪律）。Event 帧只发宿主（dst=1），trace_id=0（direct）。
 pub(crate) const RR3_HOST_TASK: u64 = 1;
-/// 音频 PCM 上行主题（在册 stream L1：contracts/topics.toml `rr3-sense/audio/pcm`；
-/// 载荷形状事实源 modules/rr3-sense composite::rr3_pcm_event_body——seq/format/
-/// rate/channels/ms/pcm_b64 + topic 并入体。板无 rr-bus 客户端，topic 键由本板
-/// 按 rr-bus `rr3_publish` 的 `body["topic"]` 形状自行并入事件体）。
-pub(crate) const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 音频上行分片（每通道帧数）：2048 帧 = 128ms @16kHz = 8192B PCM/分片——b64+
 /// JSON+帧头开销摊薄后单分片上行 ≈11.1KB，7.8 分片/s ≈ 87KB/s，落 921600 有效
 /// 92.16KB/s 内（Q1=(a) 带宽账）。分片过短开销占比暴涨、过长背压延迟变大。
