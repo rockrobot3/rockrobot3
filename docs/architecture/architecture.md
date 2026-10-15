@@ -296,12 +296,23 @@ rock3/
 │   ├── README.md                  ← 歧义裁定与"契约只增不改"的演进规则
 │   ├── envelope.schema.json       ← A-IPC 128B 消息头 + 5 种 payload 类型契约（ADR-0006）
 │   ├── topics.toml                ← 主题所有权注册表（前缀归属与校验入口见 §6.3）
+│   ├── face-expressions.toml      ← 表情白名单真值点（43 态全集 + board_subset 七态，§4.5/批N1 n1-8）
+│   ├── roles.toml                 ← 角色词表（`[pins].role` 外键；iface/requires/derives/input_only_ok，批N1 n1-1）
+│   ├── devices.toml               ← 器件词表（速率档/合法地址集/峰值电流/id_reg，门 ⑨-o 与 L-14 比对源，批N1 n1-2）
 │   ├── slots.toml                 ← 能力格坐标系总表（查册门真值，§4.3、ADR-0012 裁定 1）
+│   ├── platform/                  ← 平台事实登记表按芯片一册（`<chip>.toml`：控制器词表/能力集/
+│   │                                conflicts 冲突矩阵/具名构造表——校验③④⑤⑧ 的判据前件，批N1 基-22）
 │   ├── golden/                    ← event-header-128.hex：一条真实头的 hex 向量（同机字节基准）
 │   └── events/                    ← 各模块事件负载 JSON Schema 的落点（命名与登记规矩在其 README）
 │
 ├── profiles/                      ← 机器人装配单（纯数据，一机型一文件，§4.3、ADR-0012 裁定 3）
-│   └── default.toml               ← RK3566 参考机：[os] 轨道 · [bindings] 格位→件 · [enabled_slots] 模块→格位
+│   ├── default.toml               ← RK3566 参考机：[os] 轨道 · [bindings] 格位→件 · [enabled_slots] 模块→格位
+│   ├── distro.toml                ← 发行版快路轨机型（schema 3 三新段与 default 同板同供给，ADR-0013 裁定 3）
+│   └── esp32-mini.toml            ← 轻承载档 rtos 机型（[platform].chip 取值源 board.rs，0.0.7 形态）
+│
+├── hardware/                      ← 装机接线档与执行件档案（增补轮六 §4.3，批N1 n1-6b；
+│   │                                `.gitignore` 白名单同批放开）
+│   └── <形态>/wiring.toml         ← 连接器/防呆/额定电流/共地——校验⑦ 的判据对象（feeds 加总）
 │
 ├── base/                          ← 基座层（横切关注点，见 §2 原则 1）
 │   ├── os/                        ← OS 双轨（ADR-0001 选型、ADR-0013 分轨）

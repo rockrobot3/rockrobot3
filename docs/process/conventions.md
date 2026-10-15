@@ -2310,6 +2310,20 @@ power 6 / sense 5）、`eprintln!` 只有 13 处 ⇒ **舵机写入失败、配�
 零语义）。rr3-interact 单测 **47→48**（char 档白名单位次 + charH 横杠行字模 +
 单帧 tick 恒 0 用例）；十步门禁 GATE_EXIT=0 全绿。
 
+2026-10-16 **增补轮六 批N1 收口**（十小步 n1-1…n1-10，施工图 Task 1–9 + L-14
+探测收口；判据真值 = 全案 §5）：契约层新落三份（`roles.toml` 角色词表四角色带
+`iface/requires/derives/input_only_ok` / `devices.toml` 器件词表 / `platform/<平台>.toml`
+三份 fail-closed 读表器）+ profile schema 3 `[[pin]]` 全链（`[hardware]` 七物理键下移
+派生视图、门 n 两稳态实判）+ `[[supplies.domain]]` 第七供给位与校验⑥ + `wiring.toml`
+接线档全链与校验⑦ + 装载校验接平台表（⑤-a/⑤-b/⑧-b/③ 三资源空间双占/④-b conflicts
+反推互斥，判据实判位 **5→12**，后果一律拒）。rrd lib 单测至 **194**（批N1 全链累计
++约 40：[pins] 解析/查册/六校验/装载门判据用例 + n1-10 L-14 器件级探测 4 条——
+探针接口加 `rr3_probe_slot_bound`，I2C 格位在册 `(bus, addr)` 时在位判据升 sysfs
+器件节点、总线级降前置条件，"总线在、器件不在"反例落库；rr-registry 63，e2e_profile
+3）；十步门禁全绿。批内施工修 1 缺陷：③ 双占 owner 判重原用 pin_id 字符串，
+per_instance=false 同角色双 pin 同名吞红，改循环序号判"同一条"。敞口表第 18/19 行
+（spi_* 派生键 / L-14 读回比对）随收口登记，批N2–N5 待排。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
