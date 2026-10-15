@@ -11,7 +11,11 @@
 # 真板（ESP32-S3 硬件已齐，0.0.6 §5.4 BOM），本版只做装配演练
 # （rrd profile.rs 的 rr3_profile_boot_inputs 正例 + contract.rs 形状 pin）。
 
-schema_version = 2
+# schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段
+# 进场（板侧唯一执行件的真值点），七物理键不再走 [hardware]（门 n 注入路径唯一）；
+# rtos 档 rrd 不派生，板侧描述符消费归 0.0.7 批G/批D1。
+
+schema_version = 3
 
 # [os] 段缺省：route 轴（distro | buildroot）是 Linux 底座镜像路线，rtos 档不适用
 # （rrd 装载对 [os] 只收不读，architecture.md §4.3 注记）。
@@ -39,9 +43,25 @@ safety_core_interval_ms = 1000
 "audio.capture" = "rr3-sense"
 "audio.vad" = "rr3-sense"
 
-# [hardware] 段缺省：九键描述符是宿主 Linux 侧语义（alsa 设备名 / gpio 控制器号 /
-# 网络接口名，rr-hal descriptor.rs C4 闭合表），板侧物理绑定归 0.0.7 批G/批D1 的
-# 描述符装载——进位时同批改 contract.rs 的 esp32-mini pin 与 0.0.7 判据。
+# [hardware] 段缺省：三非引脚键（alsa_device/link_ifname/spi_device）是宿主 Linux
+# 侧语义（rr-hal descriptor.rs C4 闭合表），板侧无此类键——物理绑定住下面的 [[pin]]；
+# 板侧描述符消费归 0.0.7 批G/批D1 的描述符装载，进位时同批改 contract.rs 的
+# esp32-mini pin 与 0.0.7 判据。
+
+[[pin]]
+# 板侧唯一执行件（SG90：LEDC0 通道 0、信号脚 32，0.0.6 §5.4 BOM）——物理绑定
+# 真值点（schema 3，增补轮六 §4.2），role 外键查册 contracts/roles.toml。rtos 档
+# rrd 不派生（controller 词形 ledc<N> 是板侧词表，host 档派生器不识别也不需要）；
+# 校验①照跑（role 在册 / per_instance=true ⇒ instance 必填 / direction 与角色一致）。
+role = "act.axis.pwm"
+instance = "pan"
+controller = "ledc0"
+channel = 0
+physical = [32]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
 
 [enabled_slots]
 # 模块 → 本形态启用的格位集合。裁剪自检三问（模块设计索引 §10）逐条在案：

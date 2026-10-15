@@ -26,9 +26,11 @@ use support::*;
 
 /// 装配单：power.charger 绑 rr3-power。power.battery 是基础层恒在位格，绑它致命
 /// （profile.rs 的 `base 层 binding 必须致命` 钉过），可绑格只有 charger。
-/// schema_version=2 起三新段必填（[platform]/[supplies]/[slots]，ADR-0018 修订 1）。
+/// schema_version=2 起三新段必填（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；
+/// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
+/// 校验②只记 role_missing 非致命，boot 照常。
 const PROFILE: &str = r#"
-schema_version = 2
+schema_version = 3
 
 [os]
 route = "distro"
