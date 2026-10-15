@@ -45,8 +45,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rr_registry::{
-    rr3_registry_device_table_from_text, rr3_registry_role_table_from_text,
-    rr3_registry_slot_table_from_text, Rr3DeviceTable, Rr3RoleTable, Rr3SlotTable,
+    rr3_registry_device_table_from_text, rr3_registry_platform_table_from_text,
+    rr3_registry_role_table_from_text, rr3_registry_slot_table_from_text, Rr3DeviceTable,
+    Rr3PlatformTable, Rr3RoleTable, Rr3SlotTable,
 };
 
 /// 契约格位表的编译期定位（与 `topics_load::RR3_CONTRACT_TOPICS_PATH` 同深度：
@@ -198,8 +199,9 @@ pub struct Rr3PinEntry {
     pub role: String,
     /// 多实例名（per_instance=true 必填、false 禁填；如舵机 pan/tilt）
     pub instance: String,
-    /// 控制器名（取值 ∈ 平台在册控制器词表，校验⑧-b——词表随批N7 platform 表落地，
-    /// 本批先过形状；host 档词形 pwm<N>/gpiochip<N>/i2c<N> 由派生器解析）
+    /// 控制器名（取值 ∈ 平台在册控制器词表，校验⑧-b——词表 = contracts/platform/
+    /// <chip>.toml 的 [[controller]]，批N1 基-22 已在册；host 档词形 pwm<N>/gpiochip<N>/
+    /// i2c<N> 由派生器解析）
     pub controller: String,
     /// 控制器通道（独立资源维度，校验③-b 的 (controller, channel) 不双占空间）
     pub channel: Option<i64>,
@@ -216,7 +218,7 @@ pub struct Rr3PinEntry {
     /// 复位/欠压时的期望物理态：release | hold | driven_low | driven_high（§6 复位语义③）
     pub failsafe: String,
     /// 互斥组（§4.2 裁定：**不再自愿**——由平台 conflicts 表反推，漏声明即红；
-    /// platform 表随批N7 落地，本批显式空集合法）
+    /// 组名取自平台表 [[conflict]].group，装机档不得自起名，校验④-b 执法）
     pub mux_group: Vec<String>,
 }
 
@@ -238,6 +240,9 @@ impl Rr3PinEntry {
 pub struct Rr3Profile {
     /// [platform].tier：本机档位（host / rtos / bare，ADR-0018 修订 1 三档）
     pub platform_tier: String,
+    /// [platform].chip：平台事实表外键（§4.6，批N1 基-22）——校验③④⑤⑧按它选
+    /// contracts/platform/<chip>.toml（fail-closed：表读不到/形状坏都拒 boot）
+    pub platform_chip: String,
     /// [bindings]：格位 → 模块名（只允许 body/cognition 层格位）
     pub bindings: BTreeMap<String, String>,
     /// [enabled_slots]：模块名 → 本形态启用的格位集合
@@ -476,25 +481,41 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         }
     }
     // [platform]：必填段、单键 tier（ADR-0018 修订 1 ④ 七段之一）。tier 取值域
-    // host/rtos/bare 三档，未知键逐条点名。
+    // host/rtos/bare 三档；chip = 平台事实表外键（§4.6，校验③④⑤⑧的判据前件选册
+    // ——contracts/platform/<chip>.toml，批N1 基-22），非空必填：芯片是装机事实，
+    // 留空 = ⑤⑧ 判不了 = fail-closed（同"留空即红"纪律），未知键逐条点名。
     let mut platform_tier = String::new();
+    let mut platform_chip = String::new();
     match root.get("platform").and_then(toml::Value::as_table) {
         None => errs
             .push("缺少 [platform]（tier = host/rtos/bare；schema_version=2 起必填）".to_string()),
-        Some(t) => match t.get("tier") {
-            None => errs.push("[platform] 缺 tier（host/rtos/bare）".to_string()),
-            Some(v) => match v.as_str() {
-                Some(s) if RR3_PLATFORM_TIERS.contains(&s) => platform_tier = s.to_string(),
-                other => errs.push(format!(
-                    "platform.tier 必须是 host/rtos/bare 之一，收到 {other:?}"
-                )),
-            },
-        },
+        Some(t) => {
+            match t.get("tier") {
+                None => errs.push("[platform] 缺 tier（host/rtos/bare）".to_string()),
+                Some(v) => match v.as_str() {
+                    Some(s) if RR3_PLATFORM_TIERS.contains(&s) => platform_tier = s.to_string(),
+                    other => errs.push(format!(
+                        "platform.tier 必须是 host/rtos/bare 之一，收到 {other:?}"
+                    )),
+                },
+            }
+            match t.get("chip") {
+                Some(toml::Value::String(s)) if !s.trim().is_empty() => platform_chip = s.clone(),
+                Some(toml::Value::String(_)) => {
+                    errs.push("[platform].chip 不得为空串（平台事实表外键，contracts/platform/<chip>.toml 选册）".to_string())
+                }
+                Some(other) => errs.push(format!("[platform].chip 应为字符串，收到 {other:?}")),
+                None => errs.push(
+                    "[platform] 缺 chip（平台事实表外键——校验③④⑤⑧按它选 contracts/platform/<chip>.toml，留空即红）"
+                        .to_string(),
+                ),
+            }
+        }
     }
     if let Some(t) = root.get("platform").and_then(toml::Value::as_table) {
         for k in t.keys() {
-            if k != "tier" {
-                errs.push(format!("[platform] 未知键 {k}（只认 tier）"));
+            if k != "tier" && k != "chip" {
+                errs.push(format!("[platform] 未知键 {k}（只认 tier / chip）"));
             }
         }
     }
@@ -639,6 +660,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
     }
     Ok(Rr3Profile {
         platform_tier,
+        platform_chip,
         bindings,
         enabled_slots,
         slots_present,
@@ -743,6 +765,7 @@ pub fn rr3_profile_boot_inputs(
     roles_path: &Path,
     devices_path: &Path,
     wiring_path: &Path,
+    platform_dir: &Path,
 ) -> Result<Rr3ProfileBoot, String> {
     let probe = crate::probe::rr3_probe_default();
     rr3_profile_boot_inputs_with_probe(
@@ -751,6 +774,7 @@ pub fn rr3_profile_boot_inputs(
         roles_path,
         devices_path,
         wiring_path,
+        platform_dir,
         probe.as_ref(),
     )
 }
@@ -765,6 +789,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     roles_path: &Path,
     devices_path: &Path,
     wiring_path: &Path,
+    platform_dir: &Path,
     probe: &dyn crate::probe::Rr3Probe,
 ) -> Result<Rr3ProfileBoot, String> {
     let abs = rr3_profile_absolute_path(profile_path)?;
@@ -860,6 +885,28 @@ pub fn rr3_profile_boot_inputs_with_probe(
             errs.join("; ")
         )
     })?;
+
+    // 平台事实表装载（增补轮六 §4.6，批N1 基-22；校验③④⑤⑧的判据前件）：按
+    // [platform].chip 在 platform_dir 下选册（daemon 传 contracts/platform/，与
+    // roles/devices 同源）。fail-closed 与 roles 同口径但更严——platform.rs 解析本就
+    // 回 Err 版（roles/devices 宽容回空表走"表为空"点名，那是集合词表；平台表宽容 =
+    // ④⑤⑧ 静默不判，§18 F-6 同病），读不到/形状坏都逐条点名拒 boot，不降级。
+    let platform_path = platform_dir.join(format!("{}.toml", profile.platform_chip));
+    let platform_text = std::fs::read_to_string(&platform_path).map_err(|e| {
+        format!(
+            "读不到平台事实表 {}（[platform].chip = {} 的选册）: {e}",
+            platform_path.display(),
+            profile.platform_chip
+        )
+    })?;
+    let platform: Rr3PlatformTable =
+        rr3_registry_platform_table_from_text(&platform_text).map_err(|errs| {
+            format!(
+                "平台事实表 {} 形状不合，拒绝启动: {}",
+                platform_path.display(),
+                errs.join("; ")
+            )
+        })?;
 
     let mut errs: Vec<String> = Vec::new();
     // bindings 的格位必须查册命中，且不得是基础层（基础层由基座内建承载，slots.toml 注记）
@@ -1054,6 +1101,13 @@ pub fn rr3_profile_boot_inputs_with_probe(
             }
         }
     }
+    // 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；Task 4）：方向/能力/词表
+    // 三面接平台表——判据真值只有 contracts/platform/<chip>.toml 一册，不推断、
+    // 不运行期回退；表在上方已 fail-closed 装载，此处只判。
+    errs.extend(rr3_check_pin_capabilities(&profile, &roles, &platform));
+    // 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；Task 5）：三个资源
+    // 空间各自不双占 + 平台 conflicts 反推互斥（组名取自平台表，漏声明即红）。
+    errs.extend(rr3_check_pin_occupancy(&profile, &platform));
     // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
     // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
     // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
@@ -1217,6 +1271,166 @@ pub fn rr3_profile_boot_inputs_with_probe(
     })
 }
 
+/// 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；施工图 Task 4）：方向与能力
+/// 合法、控制器在册，判据真值 = 平台事实表（`contracts/platform/<chip>.toml`，
+/// 基-22）。三条判定逐条可判：
+/// - ⑧-b `pin.controller ∈ 平台在册控制器词表`（词表不是器件型号，D10a 同族；
+///   controller 留空的缺失语义归校验①-b requires 判，此处不重复点名）；
+/// - ⑤-a `direction = out` 且角色 `input_only_ok = false` → `physical` 不得落平台
+///   input-only 脚集（input-only 脚无输出驱动能力，写 out 即假账）；
+/// - ⑤-b 模拟测点必须落平台 ADC 能力集——测点 = 域 `sense`/`current_sense` 按
+///   pin_id 引用的条目（⑥-d 的同一外键语法），其 `physical` 元素逐个对 ADC 集；
+///   I2C 测点无直接脚（INA219 在片上量），`physical` 空即无判据对象，不算红。
+fn rr3_check_pin_capabilities(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    platform: &Rr3PlatformTable,
+) -> Vec<String> {
+    let mut errs = Vec::new();
+    let plat = platform.rr3_platform_name();
+    for pin in &profile.pins {
+        let label = format!("pins[{}]", pin.rr3_pin_id());
+        // ⑧-b 控制器在册（词表随平台表，装配单不得自造控制器）
+        if !pin.controller.is_empty()
+            && !platform
+                .rr3_platform_controller_names()
+                .iter()
+                .any(|c| c == &pin.controller)
+        {
+            errs.push(format!(
+                "{label} controller \"{}\" 不在平台 {plat} 的在册控制器词表（校验⑧-b——词表源 contracts/platform/{plat}.toml 的 [[controller]]，装配单不得自造控制器）",
+                pin.controller
+            ));
+        }
+        // ⑤-a output 落 input-only 集（角色 input_only_ok 的另一侧输入取 roles 表）
+        if pin.direction == "out" && roles.rr3_role_table_input_only_ok(&pin.role) == Some(false) {
+            for p in &pin.physical {
+                if platform.rr3_platform_input_only_pins().contains(p) {
+                    errs.push(format!(
+                        "{label} physical 元素 {p} 落在平台 {plat} 的 input-only 脚集（校验⑤-a：direction = out 且角色 {} input_only_ok = false，input-only 脚无输出驱动能力）",
+                        pin.role
+                    ));
+                }
+            }
+        }
+    }
+    // ⑤-b 模拟测点落 ADC 能力集（测点引用面 = 域绑定位，与 ⑥-d 同一 pin_id 语法）
+    for d in &profile.supplies.domains {
+        for (key, val) in [("sense", &d.sense), ("current_sense", &d.current_sense)] {
+            if val == "none" {
+                continue;
+            }
+            let Some(pin) = profile.pins.iter().find(|p| &p.rr3_pin_id() == val) else {
+                continue; // 悬空 pin_id 由 ⑥-d 点名，此处不重复报
+            };
+            for p in &pin.physical {
+                if !platform.rr3_platform_adc_pins().contains(p) {
+                    errs.push(format!(
+                        "pins[{}] 是域 {} 的模拟测点（{key} 绑定），physical 元素 {p} 不在平台 {plat} 的 ADC 能力集（校验⑤-b：测点落非 ADC 脚读回恒值，档位恒真或恒假——F-9）",
+                        pin.rr3_pin_id(),
+                        d.name
+                    ));
+                }
+            }
+        }
+    }
+    errs
+}
+
+/// 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；施工图 Task 5）：不双占
+/// 与互斥。三个资源空间各自 ≤ 1 次（启用集 = [pins] 全集——[[pin]] 无使能位，
+/// 在册即启用）：
+/// - ③-a 同一 `physical` 元素 ≤ 1 次；
+/// - ③-b 同一 `(controller, channel)` ≤ 1 次（channel 缺席不占通道维，F-7：脚 +
+///   通道两维，`board.rs:146` 双轴两通道即证）；
+/// - ③-c 同一 `(bus, addr)` ≤ 1 次（addr = "none" 是显式不适值，不占地址维）；
+/// - ④-b 平台 `conflicts` 命中同一子集而未申报同组 ⇒ 漏声明即红——组名取自平台表
+///   `[[conflict]].group`，装机档不得自起名（否则 `mux_group` 退回自愿填写）；命中
+///   是单向含入：构造/冲突表按芯片事实收全，profile 现役绑定只是子集，平台表超出
+///   现役的部分不算红（芯片事实 ≠ 现役占用）。
+fn rr3_check_pin_occupancy(profile: &Rr3Profile, platform: &Rr3PlatformTable) -> Vec<String> {
+    let mut errs = Vec::new();
+    let plat = platform.rr3_platform_name();
+    // ③-a physical 元素唯一（BTreeMap 定化点名序：首占者记录）。owner 值用
+    // pin 序号判"同一条"，不用 pin_id 字符串——per_instance=false 角色的多条
+    // pin 无 instance 可分，pin_id 同名会把双占误判成"自己撞自己"而吞红。
+    let mut phys_owner: BTreeMap<i64, usize> = BTreeMap::new();
+    // ③-b (controller, channel) 唯一
+    let mut chan_owner: BTreeMap<(String, i64), usize> = BTreeMap::new();
+    // ③-c (bus, addr) 唯一
+    let mut addr_owner: BTreeMap<(String, String), usize> = BTreeMap::new();
+    for (idx, pin) in profile.pins.iter().enumerate() {
+        let label = format!("pins[{}]", pin.rr3_pin_id());
+        for p in &pin.physical {
+            match phys_owner.get(p) {
+                Some(first) if *first != idx => errs.push(format!(
+                    "{label} physical 元素 {p} 与 pins[{}] 双占（校验③-a：同一 physical 元素在启用集里 ≤ 1 次）",
+                    profile.pins[*first].rr3_pin_id()
+                )),
+                None => {
+                    phys_owner.insert(*p, idx);
+                }
+                _ => {}
+            }
+        }
+        if let (true, Some(ch)) = (!pin.controller.is_empty(), pin.channel) {
+            let key = (pin.controller.clone(), ch);
+            match chan_owner.get(&key) {
+                Some(first) if *first != idx => errs.push(format!(
+                    "{label} (controller {}, channel {ch}) 与 pins[{}] 双占（校验③-b：同一 (controller, channel) ≤ 1 次——F-7 脚+通道两维）",
+                    pin.controller,
+                    profile.pins[*first].rr3_pin_id()
+                )),
+                None => {
+                    chan_owner.insert(key, idx);
+                }
+                _ => {}
+            }
+        }
+        if !pin.controller.is_empty() && !pin.addr.is_empty() && pin.addr != "none" {
+            let key = (pin.controller.clone(), pin.addr.clone());
+            match addr_owner.get(&key) {
+                Some(first) if *first != idx => errs.push(format!(
+                    "{label} (bus {}, addr {}) 与 pins[{}] 双占（校验③-c：同一 (bus, addr) ≤ 1 次）",
+                    pin.controller,
+                    pin.addr,
+                    profile.pins[*first].rr3_pin_id()
+                )),
+                None => {
+                    addr_owner.insert(key, idx);
+                }
+                _ => {}
+            }
+        }
+    }
+    // ④-b conflicts 反推互斥：同一条冲突登记面的命中者 ≥ 2 且任一未申报该组 → 红
+    for entry in platform.rr3_platform_conflicts() {
+        let group = entry.rr3_conflict_group();
+        let hits: Vec<&Rr3PinEntry> = profile
+            .pins
+            .iter()
+            .filter(|p| {
+                p.physical.iter().any(|x| entry.rr3_conflict_pins().contains(x))
+                    || (!p.controller.is_empty()
+                        && entry.rr3_conflict_controllers().contains(&p.controller))
+            })
+            .collect();
+        if hits.len() < 2 {
+            continue; // 冲突未成形：另一成员不在现役绑定集（单向含入语义）
+        }
+        for p in hits {
+            if !p.mux_group.iter().any(|g| g == group) {
+                errs.push(format!(
+                    "pins[{}] 命中平台 {plat} conflicts 组 {group}（{}）但 mux_group 未申报该组（校验④-b：漏声明即红——组名取自平台表，装机档不得自起名）",
+                    p.rr3_pin_id(),
+                    entry.rr3_conflict_why()
+                ));
+            }
+        }
+    }
+    errs
+}
+
 /// 扫描单个模块目录的装配清单（G4/ADR-0019 修订 1 ③）：`atoms/<件>/` 必有
 /// assemble.toml（五件套④），形状校验走 rr-registry 共用真值；ops 非空时对模块
 /// config.toml 做注入缺点路径游走。无 atoms/ 目录的模块（夹具树/两件式形态）返回空。
@@ -1286,6 +1500,7 @@ route = "distro"
 
 [platform]
 tier = "host"
+chip = "rk3566"
 
 [supplies]
 watchdog_present = true
@@ -1401,7 +1616,8 @@ gnd_common = "star-1"
 
     /// 测试本地帮手：真契约三册（slots/roles/devices）+ 由装配单路径推导的接线档
     /// （`hardware/<形态>/wiring.toml`）——与 daemon `--profile` 正门同一条推导路，
-    /// 顺带把路径推导钉进每条用例。
+    /// 顺带把路径推导钉进每条用例。平台表目录同样走编译期真值（rr-registry 常量，
+    /// 与真仓 contracts/platform 同一册——夹具不复制契约，真值同源纪律）。
     fn boot_inputs(p: &Path) -> Result<Rr3ProfileBoot, String> {
         let wiring =
             crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
@@ -1411,6 +1627,7 @@ gnd_common = "star-1"
             Path::new(RR3_CONTRACT_ROLES_PATH),
             Path::new(RR3_CONTRACT_DEVICES_PATH),
             &wiring,
+            Path::new(rr_registry::RR3_CONTRACT_PLATFORM_PATH),
         )
     }
 
@@ -1427,9 +1644,125 @@ gnd_common = "star-1"
             Path::new(RR3_CONTRACT_ROLES_PATH),
             Path::new(RR3_CONTRACT_DEVICES_PATH),
             &wiring,
+            Path::new(rr_registry::RR3_CONTRACT_PLATFORM_PATH),
             probe,
         )
     }
+
+    /// 平台事实表真值点（校验③④⑤⑧的判据前件，esp32 真形态实例——与
+    /// rr-registry 平台单测同一 include 路径，真值同源不复制）。
+    fn platform_esp32_text() -> &'static str {
+        include_str!("../../../../contracts/platform/esp32.toml")
+    }
+
+    /// 平台文本注入版帮手（施工图 Task 4 Interfaces）：platform 文本落 Root 临时
+    /// 目录的 `platform/<chip>.toml`——与 daemon 的 contracts/platform/ 选册同布局，
+    /// chip 固定 esp32（本组用例的夹具装配单都声明 chip = "esp32"）。
+    fn rr3_profile_from_text_with_platform(
+        tag: &str,
+        profile_text: &str,
+        platform_text: &str,
+    ) -> Result<Rr3ProfileBoot, String> {
+        let root = Root::new(tag);
+        let p = root.write_profile("plat.toml", profile_text);
+        let dir = root.dir.join("platform");
+        std::fs::create_dir_all(&dir).expect("建 platform 目录");
+        std::fs::write(dir.join("esp32.toml"), platform_text).expect("写平台表");
+        boot_inputs_in(&root, &p, &dir)
+    }
+
+    /// [`boot_inputs`] 的平台目录显式版（上面两个帮手的共同实现）。
+    fn boot_inputs_in(root: &Root, p: &Path, platform_dir: &Path) -> Result<Rr3ProfileBoot, String> {
+        let _ = root; // Root 只为临时目录的生命周期在场（Drop 清树）
+        let wiring =
+            crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
+        rr3_profile_boot_inputs(
+            p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+            Path::new(RR3_CONTRACT_DEVICES_PATH),
+            &wiring,
+            platform_dir,
+        )
+    }
+
+    /// 校验⑤⑧判据的 esp32 夹具底稿（rtos 档真形态）：LEDC 轴 + ADC 直读电表——
+    /// 电表 pin（controller = adc1、physical = [34]）是 batt 域的模拟测点
+    /// （sense 按 pin_id 引用，⑥-d 同一语法），34 ∈ esp32 adc_pins ⇒ 全绿基线；
+    /// 反例经定点替换构造。rtos 档不派生（host 档派生器不识别板侧词形）。
+    const ESP32_GOOD: &str = r#"
+schema_version = 3
+
+[platform]
+tier = "rtos"
+chip = "esp32"
+
+[supplies]
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rr-core"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[[supplies.domain]]
+name = "batt"
+nominal_mv = 3700
+mild_mv = 3500
+severe_mv = 3300
+current_cap_ma = 2000
+sense = "power.battery.meter"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[bindings]
+"act.servo" = "rr3-pa"
+"sensor.env" = "rr3-pb"
+"cognition.llm" = "rr3-pc"
+
+[enabled_slots]
+rr3-pa = ["act.servo"]
+rr3-pb = ["sensor.env"]
+rr3-pc = ["cognition.llm"]
+
+[slots]
+present = ["act.servo", "cognition.llm", "sensor.env"]
+
+[[pin]]
+role = "act.axis.pwm"
+instance = "pan"
+controller = "ledc0"
+channel = 0
+physical = [32]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[[pin]]
+role = "power.battery.meter"
+controller = "adc1"
+addr = "none"
+physical = [34]
+direction = "in"
+mux_group = []
+"#;
 
     /// G4 装配段扫描直测（ADR-0019 修订 1 ③）：缺文件/坏形/注入缺逐条点名，
     /// 无 atoms 目录与合法空数组不产生缺口
@@ -1493,6 +1826,8 @@ gnd_common = "star-1"
         assert_eq!(p.enabled_slots["rr3-pa"], vec!["act.servo".to_string()]);
         // 描述符八段（schema_version=3）：[platform]/[supplies]/[slots]/[[pin]] 逐字段收齐
         assert_eq!(p.platform_tier, "host");
+        // 平台事实表外键（§4.6，校验③④⑤⑧判据前件选册）
+        assert_eq!(p.platform_chip, "rk3566");
         assert!(p.supplies.watchdog_present);
         assert_eq!(p.supplies.watchdog_timeout_ms, 15000);
         assert_eq!(p.supplies.watchdog_feeder, "rrd");
@@ -2055,6 +2390,7 @@ tier_scope = ["quantum"]
             Path::new(RR3_CONTRACT_ROLES_PATH),
             Path::new(RR3_CONTRACT_DEVICES_PATH),
             &wiring,
+            Path::new(rr_registry::RR3_CONTRACT_PLATFORM_PATH),
         )
         .expect_err("越界契约必须拒");
         assert!(errs.contains("status 非法"), "{errs}");
@@ -2373,8 +2709,166 @@ gnd_common = "star-1"
             Path::new(RR3_CONTRACT_ROLES_PATH),
             Path::new(RR3_CONTRACT_DEVICES_PATH),
             Path::new("/nonexistent/rr3-nope-wiring.toml"),
+            Path::new("/nonexistent/rr3-nope-platform"),
         )
         .expect_err("读不到装配单必须致命");
         assert!(e.contains("无法解析为绝对路径"), "{e}");
+    }
+
+    /// 校验③④⑤⑧判据前件的 fail-closed（§4.6 裁定①）：[platform].chip 选不到表 =
+    /// 拒 boot，不许降级成"无表 = 无冲突/无词表"（宽容 = ④⑤⑧ 静默不判，F-6 同病）
+    #[test]
+    fn platform_table_missing_for_chip_is_fatal() {
+        let root = Root::new("plat-missing");
+        let p = root.write_profile("plat-missing.toml", GOOD);
+        let wiring =
+            crate::wiring::rr3_wiring_path_for_profile(&p).expect("夹具装配单必须能推导接线档");
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+            Path::new(RR3_CONTRACT_DEVICES_PATH),
+            &wiring,
+            &root.dir.join("platform-empty"),
+        )
+        .expect_err("chip 选不到平台表必须拒 boot");
+        assert!(e.contains("读不到平台事实表") && e.contains("rk3566"), "{e}");
+    }
+
+    /// [platform].chip 留空反例（F-6 缺字段可被留空绕过的封堵面）：chip 是平台
+    /// 事实外键，"合法不适用"不存在——留空即红
+    #[test]
+    fn platform_chip_left_blank_is_fatal() {
+        let text = GOOD.replace("chip = \"rk3566\"", "");
+        let errs = rr3_profile_from_text(&text).expect_err("chip 留空必须报错");
+        assert!(errs.iter().any(|e| e.contains("缺 chip")), "{errs:?}");
+
+        let text = GOOD.replace("chip = \"rk3566\"", "chip = \"\"");
+        let errs = rr3_profile_from_text(&text).expect_err("chip 空串必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("chip 不得为空串")),
+            "{errs:?}"
+        );
+    }
+
+    /// 校验⑤-b 反例（F-9）：模拟测点落非 ADC 脚——GPIO23 读回 0 mV ⇒ 档位恒真或
+    /// 恒假。ESP32_GOOD 的电表 pin physical = [34] ∈ adc_pins 是绿基线，替换成
+    /// 23 即红（测点引用面 = 域 sense 的 pin_id 外键）。
+    #[test]
+    fn analog_sense_pin_off_adc_set_is_rejected() {
+        let bad = ESP32_GOOD.replace("physical = [34]", "physical = [23]");
+        let e = rr3_profile_from_text_with_platform("adc-off", &bad, platform_esp32_text())
+            .expect_err("测点落非 ADC 脚必须拒 boot");
+        assert!(e.contains("ADC 能力集") && e.contains("校验⑤-b"), "{e}");
+    }
+
+    /// 校验⑤-a 反例：direction = out（角色 input_only_ok = false）落 input-only
+    /// 脚集——GPIO35 无输出驱动能力，写 out 即假账。换到 35 避开电表 34 的 ③-a
+    /// 双占级联，红因单一。
+    #[test]
+    fn output_on_input_only_pin_is_rejected() {
+        let bad = ESP32_GOOD.replace("physical = [32]", "physical = [35]");
+        let e = rr3_profile_from_text_with_platform("input-only", &bad, platform_esp32_text())
+            .expect_err("output 落 input-only 脚必须拒 boot");
+        assert!(e.contains("input-only") && e.contains("校验⑤-a"), "{e}");
+    }
+
+    /// 校验⑧-b 反例：controller 不在平台在册控制器词表——装配单不得自造控制器
+    /// （ledc9 词形合法但词表无此名，词表不是词形）。
+    #[test]
+    fn controller_off_platform_vocabulary_is_rejected() {
+        let bad = ESP32_GOOD.replace("controller = \"ledc0\"", "controller = \"ledc9\"");
+        let e = rr3_profile_from_text_with_platform("ctl-word", &bad, platform_esp32_text())
+            .expect_err("自造控制器必须拒 boot");
+        assert!(e.contains("在册控制器词表") && e.contains("校验⑧-b"), "{e}");
+    }
+
+    /// 校验③-a 反例：同一 physical 元素两条 pin 双占（启用集 = [pins] 全集）
+    #[test]
+    fn two_pins_same_physical_is_rejected() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"act.led.gpio\"\ncontroller = \"gpiochip0\"\n\
+             physical = [12]\ndirection = \"out\"\nrail = \"none\"\nfailsafe = \"hold\"\n\
+             mux_group = []\n"
+        );
+        let root = Root::new("dup-phys");
+        let p = root.write_profile("dup-phys.toml", &text);
+        let e = boot_inputs(&p).expect_err("physical 双占必须拒 boot");
+        assert!(
+            e.contains("校验③-a") && e.contains("physical 元素 12"),
+            "{e}"
+        );
+    }
+
+    /// 校验③-b 反例：同一 (controller, channel) 双占——F-7 的"脚 + 通道"两维，
+    /// 双轴两通道即证；占同通道不同脚照红。
+    #[test]
+    fn two_pins_same_controller_channel_is_rejected() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"act.axis.pwm\"\ninstance = \"tilt\"\n\
+             controller = \"pwm0\"\nchannel = 0\nphysical = [13]\ndirection = \"out\"\n\
+             rail = \"rail5v\"\nfailsafe = \"release\"\nmux_group = []\n"
+        );
+        let root = Root::new("dup-chan");
+        let p = root.write_profile("dup-chan.toml", &text);
+        let e = boot_inputs(&p).expect_err("(controller, channel) 双占必须拒 boot");
+        assert!(
+            e.contains("校验③-b") && e.contains("(controller pwm0, channel 0)"),
+            "{e}"
+        );
+    }
+
+    /// 校验③-c 反例：同一 (bus, addr) 双占——I2C 地址是独立资源维，同总线上两条
+    /// 绑定抢一个从地址即假账（"none" 是显式不适值，不占地址维不误报）。GOOD 只有
+    /// servo 一条 pin，这里成对追加两条同 (i2c1, 0x40) 的 meter 才构成双占。
+    #[test]
+    fn two_pins_same_bus_addr_is_rejected() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\n\
+             addr = \"0x40\"\ndirection = \"in\"\nmux_group = []\n\
+             [[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\n\
+             addr = \"0x40\"\ndirection = \"in\"\nmux_group = []\n"
+        );
+        let root = Root::new("dup-addr");
+        let p = root.write_profile("dup-addr.toml", &text);
+        let e = boot_inputs(&p).expect_err("(bus, addr) 双占必须拒 boot");
+        assert!(e.contains("校验③-c") && e.contains("(bus i2c1, addr 0x40)"), "{e}");
+    }
+
+    /// 校验④-b 反例：两条 pin 的 physical 命中平台 conflicts 同一子集（esp32 组
+    /// i2c0 = {21, 22}）而 mux_group 都未申报该组 ⇒ 漏声明即红；组名取自平台表
+    /// （装机档不得自起名，否则 mux_group 退回自愿填写）。
+    #[test]
+    fn conflict_subset_without_mux_group_is_rejected() {
+        let text = format!(
+            "{ESP32_GOOD}\n[[pin]]\nrole = \"act.led.gpio\"\ncontroller = \"gpio0\"\n\
+             physical = [22]\ndirection = \"out\"\nrail = \"none\"\nfailsafe = \"hold\"\n\
+             mux_group = []\n"
+        )
+        .replace("physical = [32]", "physical = [21]");
+        let e = rr3_profile_from_text_with_platform("conflict-miss", &text, platform_esp32_text())
+            .expect_err("命中 conflicts 子集而未申报同组必须拒 boot");
+        assert!(
+            e.contains("mux_group") && e.contains("conflicts") && e.contains("校验④-b"),
+            "{e}"
+        );
+        // 漏声明的两条各点名一条（成员成对才成形，点名到每一条漏报者）
+        assert_eq!(e.matches("校验④-b").count(), 2, "{e}");
+    }
+
+    /// 校验④-b 正例：同一冲突子集的两条 pin 都申报平台组名（mux_group = ["i2c0"]）
+    /// → 放行。平台表超出现役绑定的成员（18/19 组）不算红——芯片事实 ≠ 现役占用，
+    /// 单向含入语义。
+    #[test]
+    fn conflict_subset_with_mux_group_passes() {
+        let text = format!(
+            "{ESP32_GOOD}\n[[pin]]\nrole = \"act.led.gpio\"\ncontroller = \"gpio0\"\n\
+             physical = [22]\ndirection = \"out\"\nrail = \"none\"\nfailsafe = \"hold\"\n\
+             mux_group = [\"i2c0\"]\n"
+        )
+        .replace("physical = [32]", "physical = [21]")
+        .replace("mux_group = []\n\n[[pin]]\nrole = \"power.battery.meter\"", "mux_group = [\"i2c0\"]\n\n[[pin]]\nrole = \"power.battery.meter\"");
+        rr3_profile_from_text_with_platform("conflict-ok", &text, platform_esp32_text())
+            .expect("同组申报的两条命中者必须放行");
     }
 }

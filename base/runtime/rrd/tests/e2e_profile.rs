@@ -45,6 +45,7 @@ route = "distro"
 
 [platform]
 tier = "host"
+chip = "rk3566"
 
 [supplies]
 watchdog_present = false
