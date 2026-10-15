@@ -52,9 +52,11 @@ if ! rrun 'pkg-config --exists alsa && pkg-config --modversion alsa'; then
   exit 1
 fi
 
-echo "== ② 源码同步（rsync 排除 target/ 与 .git/）=="
+echo "== ② 源码同步（rsync 排除 target/、.git/ 与四个 ESP32 宿主工具目录——板上构建闭包只含 base/+modules/，0.0.6 批F5 收口批收窄）=="
 rsync -a --delete \
   --exclude 'target/' --exclude '.git/' \
+  --exclude 'tools/esp32-periph-base/' --exclude 'tools/espidf-sentinel/' \
+  --exclude 'tools/espidf-std-hello/' --exclude 'tools/esp32-uart-echo/' \
   ./ "$HOST:$RMT_SRC/"
 
 echo "== ③ 依赖通道（板上有外网则直连 crates.io；无外网则预置 vendor）=="

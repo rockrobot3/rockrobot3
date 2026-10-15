@@ -1,7 +1,8 @@
 # 实测笔记：树莓派 64-bit（Pi 4B / Pi 5 · Raspberry Pi OS Bookworm）
 
 - **状态**：已实测收口（批D 2026-10-05 六条判据全过，§6 已回填；批F1 2026-10-06
-  四项验证过，§8 已回填；socket 权限修复敞口见 §7）
+  四项验证过，§8 已回填；§10 板上三项欠账 + 链④真件档 MAX7219 2026-10-15
+  收官，§11 已回填——§7 socket 放行复验结清，板上巡检免 sudo）
 - **板卡**：Pi 4B / Pi 5（0.0.6 方案 Q2 裁定：手头已有、型号不锁——payload 对
   Layer 0 无感正是验证目标）
 - **OS**：Raspberry Pi OS Bookworm 64-bit（Debian 12 系，与 CI distro-smoke 的
@@ -202,3 +203,83 @@ act: intent: trace=1 servo angle=45，state#1 已发
 - 判定标准：全链 exit 0 + 巡检 `denied_publish = 0`。
 - 失败处置：同批F1 真板缺陷四条的既有处置（cp 摊平/shim 注入/fetch 位置/
   errno 解构均已修）；新缺陷同批结清并登记。
+
+## 11. 实测回填：§10 板上三项欠账收官 + 链④真件档 MAX7219（2026-10-15）
+
+§10 三项照单执行（①→③，② 独立），链④真件档随 MAX7219 点阵到位同批验收。
+执行通道：wifi（spharx，192.168.0.194）+ 网线带外（spharx-eth，192.168.0.150，
+`~/.ssh/config` 固化——本轮 wifi 事故后新增，见运维教训 1）。
+
+**§10 三项回执**：
+
+| §10 项 | 实测 |
+|---|---|
+| ① 板上 `cargo test -p rr-hal` | rsync 源码同步（排除 `target/` 与四个 ESP32 工具目录）→ 板上 rustc 1.85.1 构建 → **`test result: ok. 79 passed; 0 failed`**（rr-hal lib：宿主 50 + 29 个 linux-only 真后端用例；Doc-tests 收尾 ok）。板上 rustc 比宿主多暴露 4 个 dead_code warning——§10① "零 warning"口径按失败处置首句如实登记，死代码随本批删除（见真板暴露问题 3） |
+| ② socket 放行真机复验 | `id -nG` 含 `rockrobot3` → **非 root** `rr3-ctl status/health` 直连成功零 `Permission denied`；sock 现值 `srw-rw---- root rockrobot3`。§7 "真机复验留板上线"**结清**，板上巡检口径自本批起免 sudo |
+| ③ 部署链回归演练 | reboot 自恢复全链经判据 15 档二真机复验（整机 reboot → rrd 自启 → 六模块全新 running + boots 累积，回执见判据对账）；"宿主出包 → `dpkg -i` 重装"段未重走（批D/批F1 已验两轮，本轮无包结构变更，变更面为源码级 rsync + 板上构建） |
+
+**链④ 真件档（MAX7219 显示，R11③ trait 立面实装验收）**：
+
+| 项 | 实测 |
+|---|---|
+| 硬件 | MAX7219 双位级联点阵（两片级联，`RR3_MAX7219_CHIPS = 2`），SPI 接线 VCC/GND/DIN(GPIO10 MOSI)/CS(GPIO8 CE0)/CLK(GPIO11 SCLK)，`dtparam=spi=on` 在位；**pin 1 = 靠 3.5mm 音频孔端**（接线方向教训见运维教训 3） |
+| 后端实装 | [linux_display.rs](../../../base/runtime/rr-hal/src/linux_display.rs)：spidev UAPI（模式 0 / MSB / 8bit / 1MHz），CS 包络由内核 `write()` 管理；init 序列 DISPLAYTEST→SCANLIMIT→DECODE→INTENSITY→SHUTDOWN；惰性 ensure + `last` 快照承载读回语义；ioctl 号/包组装纯函数单测 + temp 树错误传播测试 |
+| 键位 | descriptor 十键批：`spi_device` 进 `Rr3HalBindings` + `RR3_ASSEMBLE_DESC_KEYS` + contract 钉死表（**两处同批**纪律）；`profiles/distro.toml` 补 `spi_device = "/dev/spidev0.0"`；face 装配 `desc_key = "spi_device"` |
+| 硬证据 | `systemctl restart rrd` 六模块 running 后：`rr3-interact` 进程 `fd 5 -> /dev/spidev0.0`（Rust HAL 真实开设备，非脚本演示）；`denied_publish = 0`；面板/动画秀（python 预验六节目）→ Rust 后端同屏出帧 |
+
+**真板暴露问题（同批结清）**：
+
+1. **procfs 探测陷阱**（产品缺陷）：`/proc/asound/cards` 的 stat 尺寸**恒 0**
+   （`cat` 有三卡）——[probe.rs](../../../base/runtime/rrd/src/probe.rs) 按
+   `metadata.len()` 判空导致真板音频格恒"探测不到"，rrd 拒起 sense/interact
+   （链④验收前置卡点）。修：按 `read()` 内容判空（`rr3_file_nonempty`）。
+   procfs 文件 stat 尺寸语义与普通文件不同，宿主 CI 无 procfs 覆盖故未暴露。
+2. **alsa_device 真值**：`"default"` 在无 pulse/pipewire 的 Bookworm Lite 上映射
+   PulseAudio 插件 → open 失败（EINVAL）。实测真值
+   `plughw:CARD=sndrpigooglevoi`（用 CARD **名**不钉卡号，插拔稳定）；两修齐
+   后六模块（含 sense/interact）全 running。
+3. **板上 rustc 1.85 warning 差异**：宿主 `--all-targets` 零 warning，板上构建
+   暴露 4 个 dead_code（alsa-gated 面 `GOLDEN_HEADER_HEX` 等从未被编译踩过）→
+   死代码删除（esp32_uart `rr3_bridge_conn_new`）+ linux_link.rs E0425 修复 +
+   全仓 rustfmt 对齐；宿主门禁复绿（fmt clean + 全 workspace **489 passed /
+   0 failed** + aarch64 musl check 干净）。
+4. **rsync 排除清单收窄**：[build-onboard.sh](../../../../tools/deploy/build-onboard.sh)
+   排除四个 ESP32 工具目录（源码同步瘦身，口径同批F1 ②段）。
+
+**运维教训（板上线事故登记）**：
+
+1. **wifi radio off 持久化事故**：断链测试把 off/on 拆两条 ssh——off 生效瞬间
+   失联，on 永远发不出去；且关闭态被 rfkill **持久化**（`/var/lib/systemd/rfkill/`），
+   断电重启不恢复 → 板失联多轮，网线插板（eth0 DHCP）`sudo -n nmcli radio
+   wifi on` 救回。**口径固化**：断链操作必须板端自愈脚本**一次下发**
+   （`nohup bash -c "sudo -n nmcli radio wifi off; sleep 30; sudo -n nmcli radio wifi on"`），
+   观察面走有线；非交互 ssh 下 `nmcli radio` 需 sudo（polkit 拒非授权会话）。
+2. **pkill/pgrep 自匹配陷阱**：`pkill -f "nmcli radio"` 把同 ssh 命令行里刚下发
+   的新脚本一并杀（模式匹配自身命令行）；`pgrep -f "cargo test"` 匹配观察
+   shell 自身（etime 00:00 假象）——进程匹配用 `pgrep -x` / 更精确模式。
+3. **MAX7219 接线方向**：Pi 4B **pin 1 = 靠 3.5mm 音频孔端**（不是网口端），
+   从网口端起数 → VCC 落 GPIO 针过流（芯片烫手全黑）；模块黑色 2x10 母座
+   不是 5 针信号排，认丝印 VCC/GND/DIN/CS/CLK；MAX7219（SPI 移位寄存器无
+   应答）与 OLED（I2C SSD1306）不可互代。
+
+**判据对账（0.0.6 方案 §5.2）**：
+
+```
+=== 判据 13 断链自恢复（板端自愈脚本一次下发，观察面有线） ===
+STATE 100 → off 生效（journal off/on success 成对 14:31:43 / 14:32:13，30s 整）
+→ STATE 100 回连 WXYYBG——三断言全过
+=== 判据 14 看门狗判死重启（hb=2000ms / wd=10000ms） ===
+SIGSTOP 冻结 ~12s → 判死 spawn attempt=1 → 补发在册状态 → running 广播
+SIGKILL 2s 兜底；systemctl kill 后 6s 六模块恢复
+=== 判据 15 断电恢复 + 真 reboot 两档 ===
+断电恢复：今日 16:23 / 17:29 两次真实断电开机，boots 跨断电累积
+档一（UnsetEnvironment 摘 RR3_REBOOT_OK）：rr3-ctl reboot: reboot 被拒（code -22）
+  ：reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）—— exit=1
+档二（恢复注入）：rr3-ctl reboot: 系统重启已发起（rrd 侧 systemctl reboot 已执行）
+  —— exit=0 → 整机 17:48:49 重启 → 六模块全新 running / denied_publish = 0
+  / boots 42→45（两次 restart +1 各一次、整机 reboot +1，逐次对账自洽）
+```
+
+判据 13/14/15 **全过**；判据 12（真电池）仍随电池组采购（BOM 待采购件，不在
+§10 三项欠账内）。链④真件档显示件收口；链④其余真件（真麦 DoA / 真舵机）
+仍随采购到位逐件验收。
