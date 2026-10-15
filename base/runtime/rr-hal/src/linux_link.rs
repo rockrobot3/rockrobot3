@@ -37,7 +37,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::nmcli_support::{rr3_nm_field, rr3_nm_run, rr3_nm_unescape};
-use crate::{Rr3Link, Rr3LinkState, Rr3SsidText};
+use crate::{Rr3HalError, Rr3Link, Rr3LinkState, Rr3SsidText};
 
 /// GENERAL.STATE 值 → 在链：取首个空格前的数字段 == 100（NM terse 形如
 /// `100 (connected)` / `30 (disconnected)`）。解析失败一律 false——不认的
@@ -118,7 +118,7 @@ impl Rr3LinuxNmLink {
     /// [`crate::nmcli_support::rr3_nm_run`]（M-γ 起与配网凭据存储共享，一个
     /// 事实一个真值点），此处只绑定本后端的程序路径与超时。
     fn nm(&self, args: &[&str]) -> Result<String, Rr3HalError> {
-        crate::nmcli_support::rr3_nm_run(&self.nmcli, args, self.nmcli_timeout)
+        rr3_nm_run(&self.nmcli, args, self.nmcli_timeout)
     }
 }
 
