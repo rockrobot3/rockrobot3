@@ -27,7 +27,10 @@ pub fn rr3_secrets_path() -> Result<PathBuf, String> {
 }
 
 /// 路径解析纯函数（tests 直测，免 env 竞争）：env 非空优先，否则 HOME 拼接。
-fn rr3_secrets_path_with(secrets_env: Option<String>, home: Option<String>) -> Result<PathBuf, String> {
+fn rr3_secrets_path_with(
+    secrets_env: Option<String>,
+    home: Option<String>,
+) -> Result<PathBuf, String> {
     if let Some(p) = secrets_env {
         if !p.trim().is_empty() {
             return Ok(PathBuf::from(p));
@@ -53,10 +56,12 @@ fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
     }
     let v: Value = serde_json::from_str(&text)
         .map_err(|e| format!("{} 不是合法 JSON: {e}", path.display()))?;
-    let keys = v
-        .get("keys")
-        .and_then(Value::as_object)
-        .ok_or_else(|| format!("{} 形状不符（须 {{\"keys\": {{ref: 值}}}}）", path.display()))?;
+    let keys = v.get("keys").and_then(Value::as_object).ok_or_else(|| {
+        format!(
+            "{} 形状不符（须 {{\"keys\": {{ref: 值}}}}）",
+            path.display()
+        )
+    })?;
     let mut out = BTreeMap::new();
     for (k, val) in keys {
         if let Some(s) = val.as_str() {
@@ -113,7 +118,10 @@ pub fn rr3_secrets_list() -> Result<Vec<Value>, String> {
 
 pub fn rr3_secrets_list_at(path: &Path) -> Result<Vec<Value>, String> {
     let keys = rr3_secrets_read(path)?;
-    Ok(keys.keys().map(|k| json!({ "ref": k, "set": true })).collect())
+    Ok(keys
+        .keys()
+        .map(|k| json!({ "ref": k, "set": true }))
+        .collect())
 }
 
 #[cfg(test)]
@@ -121,7 +129,8 @@ mod tests {
     use super::*;
 
     fn tmp_secrets(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("rr3-panel-secrets-{}-{tag}", std::process::id()));
+        let d =
+            std::env::temp_dir().join(format!("rr3-panel-secrets-{}-{tag}", std::process::id()));
         let _ = std::fs::create_dir_all(&d);
         d.join("secrets.json")
     }
@@ -130,8 +139,7 @@ mod tests {
     fn path_resolution_env_wins_then_home() {
         // env 非空优先
         assert_eq!(
-            rr3_secrets_path_with(Some("/tmp/x.json".into()), Some("/home/u".into()))
-                .unwrap(),
+            rr3_secrets_path_with(Some("/tmp/x.json".into()), Some("/home/u".into())).unwrap(),
             PathBuf::from("/tmp/x.json")
         );
         // env 空串回退 HOME
