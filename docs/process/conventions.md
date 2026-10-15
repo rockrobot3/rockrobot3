@@ -2298,6 +2298,18 @@ power 6 / sense 5）、`eprintln!` 只有 13 处 ⇒ **舵机写入失败、配�
 全案新增 §20（Z 类 7 条 + 流 类 5 条 + 两条逐跳表）。**不产任何板上证据**；
 板侧运行面失败是否发生过、gaps/restarts 的真实量级，都归 0.0.7 验证窗。
 
+2026-10-15 **链④真件档板上批补登**（`e014c89`/`747c586`/`d1d7327`，板上实测回执见
+[boards §11](../../base/os/distro/boards/raspberry-pi-64.md)）：①rr-hal MAX7219
+**级联锁存纪律**修复——级联下一次 CS 包络每片只锁存移位流最后 16 位，init 序列收
+`RR3_MAX7219_INIT_SEQ` 常量表逐条 write、整帧逐行 write（golden 单测随改钉序），
+原"一次 write 发完"只对单片成立；②表情白名单 **7→43 态**（七核心态 + char 单字符
+档 36 态 charA..charZ/char0..char9）——schema enum / topics.toml note /
+`RR3_FACE_EXPRESSIONS` 三处同源同批，帧表 `RR3_FACE_FRAME_TABLE` 同序扩容（36 字模
+5×7 列位图：行 0-6 落 bit6..bit2、行 7 恒空），面板下拉 optgroup 同步；**机制零
+改动**，点名/挂起/tick 语义不动；③rustfmt 对齐四处（server/secrets/player/composite，
+零语义）。rr3-interact 单测 **47→48**（char 档白名单位次 + charH 横杠行字模 +
+单帧 tick 恒 0 用例）；十步门禁 GATE_EXIT=0 全绿。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
