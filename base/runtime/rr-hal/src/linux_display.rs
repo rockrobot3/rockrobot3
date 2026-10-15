@@ -24,6 +24,11 @@
 //! （0x03 = 3/31 占空比，近看不刺眼；现场可调走重装，不留 env 旋钮——旋钮
 //! 应急键是"物理绑定"口径，亮度是体验参数）。
 //!
+//! **级联锁存纪律（真板实证）**：MAX7219 级联下一次 CS 包络里每片只锁存
+//! 移位流的最后 16 位——一次 write 多包会让更早的包全部被吞。因此 init
+//! 序列逐条 write、整帧逐行 write（每条/每行 = 一个独立 CS 包络），包形状
+//! 统一走 [`rr3_max7219_cmd_payload`]（单包双片同值）。
+//!
 //! boot 语义：选择函数（[`crate::backend::rr3_hal_display`]）不触设备：构造
 //! 只存路径，打开 + ioctl 配置 + init 序列延迟到首次 trait 调用（ensure，与
 //! gpio/pwm/alsa 后端 open 延迟同形）。设备不在位/权限不足/非字符设备在此
@@ -83,28 +88,15 @@ fn rr3_max7219_cmd_payload(reg: u8, data: u8) -> [u8; RR3_MAX7219_CHIPS * 2] {
     p
 }
 
-/// 开机 init 序列（见模块头注记顺序）。独立纯函数：序列形状可单测。
-fn rr3_max7219_init_payloads() -> Vec<u8> {
-    [
-        (RR3_MAX7219_REG_DISPLAYTEST, 0x00),
-        (RR3_MAX7219_REG_SCANLIMIT, 0x07),
-        (RR3_MAX7219_REG_DECODE, 0x00),
-        (RR3_MAX7219_REG_INTENSITY, RR3_MAX7219_INTENSITY_DEFAULT),
-        (RR3_MAX7219_REG_SHUTDOWN, 0x01),
-    ]
-    .iter()
-    .flat_map(|&(reg, data)| rr3_max7219_cmd_payload(reg, data))
-    .collect()
-}
-
-/// 整帧刷包：8 行 × 双片，行号 = [`RR3_MAX7219_REG_DIGIT0`] + n，行数据按
-/// 帧面直排（bit7 最左，rr-hal-api 定案档，无位序变换）。一次 `write()` 发
-/// 完（CS 包络整段覆盖 = 8 行一次刷新，整帧替换语义）。
-fn rr3_max7219_frame_payload(frame: &Rr3FaceFrame) -> Vec<u8> {
-    (0u8..8)
-        .flat_map(|row| rr3_max7219_cmd_payload(RR3_MAX7219_REG_DIGIT0 + row, frame[row as usize]))
-        .collect()
-}
+/// 开机 init 序列（见模块头注记顺序）。逐条 write（级联锁存纪律），ensure
+/// 消费；序列形状单测钉死。
+const RR3_MAX7219_INIT_SEQ: [(u8, u8); 5] = [
+    (RR3_MAX7219_REG_DISPLAYTEST, 0x00),
+    (RR3_MAX7219_REG_SCANLIMIT, 0x07),
+    (RR3_MAX7219_REG_DECODE, 0x00),
+    (RR3_MAX7219_REG_INTENSITY, RR3_MAX7219_INTENSITY_DEFAULT),
+    (RR3_MAX7219_REG_SHUTDOWN, 0x01),
+];
 
 /// linux spidev MAX7219 显示（[`crate::Rr3Display`] 的 linux 后端）。
 ///
@@ -178,14 +170,16 @@ impl Rr3Max7219SpiDisplay {
             return Err(rr3_spidev_err(&self.dev_path, "写时钟上限失败", errno));
         }
         use std::io::Write;
-        (&dev)
-            .write_all(&rr3_max7219_init_payloads())
-            .map_err(|e| {
-                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
-                    "display {:?} init 序列写失败: {e}",
-                    self.dev_path.display()
-                )))
-            })?;
+        for (reg, data) in RR3_MAX7219_INIT_SEQ {
+            (&dev)
+                .write_all(&rr3_max7219_cmd_payload(reg, data))
+                .map_err(|e| {
+                    Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                        "display {:?} init 序列写失败: {e}",
+                        self.dev_path.display()
+                    )))
+                })?;
+        }
         *slot = Some(dev);
         Ok(())
     }
@@ -229,7 +223,13 @@ impl Rr3Display for Rr3Max7219SpiDisplay {
             let mut guard = self.spi.lock().unwrap_or_else(|p| p.into_inner());
             self.ensure(&mut guard)?;
         }
-        self.write_all(&rr3_max7219_frame_payload(frame), "出帧写失败")?;
+        // 整帧逐行 write（级联锁存纪律：一次包络一片一包，行号直排 bit7 最左）
+        for row in 0u8..8 {
+            self.write_all(
+                &rr3_max7219_cmd_payload(RR3_MAX7219_REG_DIGIT0 + row, frame[row as usize]),
+                "出帧写失败",
+            )?;
+        }
         *self.last.lock().unwrap_or_else(|p| p.into_inner()) = *frame;
         Ok(())
     }
@@ -265,39 +265,20 @@ mod tests {
         );
     }
 
-    /// init 序列 golden：五条命令按头注记顺序，各带双片同值包
+    /// init 序列 golden：五条命令按头注记顺序（ensure 逐条 write，每条一个
+    /// 独立 CS 包络——级联锁存纪律见模块头注记）
     #[test]
-    fn init_payload_matches_datasheet_order() {
+    fn init_seq_matches_datasheet_order() {
         assert_eq!(
-            rr3_max7219_init_payloads(),
-            vec![
-                0x0F, 0x00, 0x0F, 0x00, // DISPLAYTEST off
-                0x0B, 0x07, 0x0B, 0x07, // SCANLIMIT 7
-                0x09, 0x00, 0x09, 0x00, // DECODE off
-                0x0A, 0x03, 0x0A, 0x03, // INTENSITY 缺省
-                0x0C, 0x01, 0x0C, 0x01, // SHUTDOWN normal
+            RR3_MAX7219_INIT_SEQ,
+            [
+                (0x0F, 0x00), // DISPLAYTEST off
+                (0x0B, 0x07), // SCANLIMIT 7
+                (0x09, 0x00), // DECODE off
+                (0x0A, 0x03), // INTENSITY 缺省
+                (0x0C, 0x01), // SHUTDOWN normal
             ]
         );
-    }
-
-    /// 整帧刷包 golden：行号直排（DIGIT0..7）、行数据 bit7 最左原样搬运、
-    /// 双片同值——黑帧全 0、特征帧逐行落位
-    #[test]
-    fn frame_payload_maps_rows_in_order() {
-        // 黑帧：寄存器地址字节恒在位（DIGIT1..8），数据字节全 0
-        assert_eq!(
-            rr3_max7219_frame_payload(&[0; 8]),
-            (1u8..=8).flat_map(|r| [r, 0, r, 0]).collect::<Vec<u8>>()
-        );
-        let frame = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
-        let p = rr3_max7219_frame_payload(&frame);
-        for row in 0..8usize {
-            let off = row * 4;
-            assert_eq!(p[off], (RR3_MAX7219_REG_DIGIT0 + row as u8));
-            assert_eq!(p[off + 1], frame[row], "行 {row} 数据直排");
-            assert_eq!(p[off + 2], (RR3_MAX7219_REG_DIGIT0 + row as u8));
-            assert_eq!(p[off + 3], frame[row], "双片同显");
-        }
     }
 
     /// 错误传播路径（确定性，不触真硬件）：temp 树放普通文件冒充 spidev——
