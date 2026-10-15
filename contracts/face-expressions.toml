@@ -1,0 +1,34 @@
+# RockRobot3 表情白名单契约（[SC] 契约层，单一事实源）
+# 全案（0.0.5 增补轮六）§4.5 生成物表：板侧表情白名单的 7 态集合"唯一来源随批N1
+# 定形，落 contracts/"（此前真值散在两处代码常量：宿主 rr3-interact atoms/face
+# 43 态、板侧 esp32-periph-base 7 态，靠注释互指——正是 §4.5 要收的分叉）。
+#
+# 真值点（本文件）→ 副本与对账：
+# - 板侧副本：tools/esp32-periph-base/src/topics_gen.rs 的 RR3_FACE_EXPRS（由
+#   tools/rr3-codegen 生成，board_subset；重跑生成器 diff 为空 = 门 f 拟 ⑨-d）
+# - 宿主副本：modules/rr3-interact/atoms/face/face.rs 的 RR3_FACE_EXPRESSIONS
+#   （Rust 常量投影；include_str! 对账测试钉死逐名一致，扩态两处同批）
+#
+# 约束：expressions 有序不重复；board_subset ⊆ expressions（有序子集，下标与
+# 板侧帧表基态对齐）；扩态走契约级评审并同批改 face.rs 常量与 mech.rs 帧表。
+# 引用：全案 §4.5、§8 门 f（拟 ⑨-d）、contracts/events/interact-face-expression.schema.json
+
+schema_version = 1
+
+# 全集 43 态：7 基态（idle/blink/talk/think/happy/listen/turn；批F3 增 listen/turn）
+# + char 单字符档 36 态（charA..charZ / char0..char9；2026-10-15 板上批，面板真链路
+# 单字 8x8 显示）。顺序即帧表序（mech.rs RR3_FACE_FRAME_TABLE 同序）。
+expressions = [
+  "idle", "blink", "talk", "think", "happy", "listen", "turn",
+  "charA", "charB", "charC", "charD", "charE", "charF", "charG", "charH", "charI",
+  "charJ", "charK", "charL", "charM", "charN", "charO", "charP", "charQ", "charR",
+  "charS", "charT", "charU", "charV", "charW", "charX", "charY", "charZ",
+  "char0", "char1", "char2", "char3", "char4", "char5", "char6", "char7", "char8", "char9",
+]
+
+# 板侧（ESP32 OLED 胶囊眼执行面）可渲染子集：七态各有面目基态（oled.rs 预设表），
+# char 单字符档在板侧由帧面执行（char 后缀取 8x8 字模），不占预设槽——板侧白名单
+# 只生成这七态（board.rs 旧手写 RR3_FACE_EXPRS 的同款集合，历史裁定照搬）。
+board_subset = [
+  "idle", "blink", "talk", "think", "happy", "listen", "turn",
+]
