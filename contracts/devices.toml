@@ -1,0 +1,54 @@
+# RockRobot3 器件型号词表（[SC] 契约层，增补轮六 §4.1b 新立，第五份契约文件；sense S-13）
+# 消费方：门 o devices 在册（§8 待建——[pins].bus/addr/baud、wire.mate、注释里的型号词
+#   一律必须 ∈ 本表；addrs/baud_ok 是取值域而非示例值）、门 i 前件（注释不得独承载器件事实，
+#   "怎么机判器件事实"靠本表型号词）、§12.1 器件级在位探测（id_reg 数据源，L-14）、
+#   wire.mate 对账（校验⑦-d）、peak_ma 与件 demands 互校（校验⑨）。
+# 与 D10a"装载期不认具体器件型号"不冲突：装载期不认，评审期与出厂自检必须认。
+# 字段语义（§4.1b + §21 T-5）：
+#   bus        能力侧不是引脚侧：i2c | spi | vspi | 1wire | adc | pwm（取值域封闭；
+#              I2S 不在其列，INMP441 等板侧拾音器件待 bus 词表扩（契约级变更）再收）。
+#   addrs      合法地址集（I2C 类必填；SPI/PWM 无地址语义，缺省）。
+#   baud_ok    速率取值域 Hz（坑 7 的落点：50k 实测恒 ESP_FAIL ⇒ 不在册即拒 boot；
+#              探测期/评审期判，装载期不认）。
+#   id_reg     器件级在位探测的寄存器 ID（§12.1/L-14 数据源）。可缺省，但缺省时
+#              探测面取值只允许 {reachable, absent}（不得报"在位"）；在册时允许
+#              {present, wrong_device, absent}，wrong_device = 地址有应答而寄存器读回不符
+#              （坑 7 与两块 SSD1306 占同一对地址这两件事的区分位）。
+#   peak_ma    器件峰值电流（与件 demands.peak_ma 互校，校验⑨；依据写进 note）。
+#   mate       对端连接器型号（wire.mate 外键；无连接器形态缺省）。
+# 变更纪律：加器件 = append；取值域收窄 = 破坏性 = 升 schema_version 并走契约级评审。
+
+schema_version = 1
+
+[[device]]
+model = "SSD1306"
+bus = "i2c"
+addrs = ["0x3C", "0x3D"] # 只有这两个 ⇒ 装机写第三个即红；板侧两块 OLED 同址冲突由此可判
+baud_ok = [100000, 400000]
+# id_reg 缺省：SSD1306 无器件 ID 寄存器（0x00 是命令口，读回不保证）——
+# 探测面只允许报 reachable/absent，不得冒充"在位"
+peak_ma = 20             # 全屏点亮典型 ~20-26mA，取下沿；与件 demands 互校口径
+mate = "0.96in-OLED-FPC"
+
+[[device]]
+model = "MAX7219"
+bus = "spi"
+baud_ok = [10000000]     # 数据手册上界 10MHz；spidev0.0 实配值须落此域
+peak_ma = 330            # Rset 默认档 8 位全亮段电流加总（datasheet ~40mA/段 × 8 位复用）
+mate = "MAX7219-DIP24"
+
+[[device]]
+model = "INA219"
+bus = "i2c"
+addrs = ["0x40", "0x41", "0x42", "0x43", "0x44", "0x45", "0x46", "0x47", "0x48", "0x49", "0x4A", "0x4B", "0x4C", "0x4D", "0x4E", "0x4F"] # A0/A1 全 16 地址；BOM #5 参考机 = 0x40
+baud_ok = [100000, 400000]
+id_reg = { addr = 0x00, expect = 0x399F } # 配置寄存器上电复位值（datasheet 定值）——器件级在位判据
+peak_ma = 1              # 自身耗流 <1.2mA（量的是别人，不是负载）
+# mate 缺省：排针/焊线直连，无对端连接器
+
+[[device]]
+model = "SG90"
+bus = "pwm"
+baud_ok = [50]           # 50Hz 标准舵机帧
+peak_ma = 700            # 堵转实测 ~700mA/只（§1 坑 9）——校验⑨ 预算分母的事实源
+mate = "SG90-3P"
