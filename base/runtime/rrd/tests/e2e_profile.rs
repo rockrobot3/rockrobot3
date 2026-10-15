@@ -174,12 +174,8 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
     // env 显式钉 sim 探针（MC-4：非 test 面不再默认 sim）：act.servo/sensor.env 归
     // PWM/I2C 硬件面，开发机与 CI runner 无这些 linux sysfs 设备，不显式选 sim 会被
     // fail-closed 判缺格、模块不 spawn（被测行为之外的夹具前提）。
-    let mut rrd = RrdTest::rr3_start_profile_env(
-        "prof-full",
-        &profile,
-        E2E_TICK_MS,
-        &[("RR3_PROBE", "sim")],
-    );
+    let mut rrd =
+        RrdTest::rr3_start_profile_env("prof-full", &profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
 
     // 装配单凭证行（横幅之后、监听行之前的 stdout 事实）：证明这条 boot 走的是正门，
     // 不是"给了 --profile 却按 --manifest 空表静默起了一个空 daemon"。

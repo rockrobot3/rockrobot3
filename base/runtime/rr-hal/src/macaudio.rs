@@ -89,8 +89,11 @@ type InputCallback = unsafe extern "C" fn(
     packet_descs: *const core::ffi::c_void,
 );
 /// AudioQueueOutputCallback（AudioQueue.h）
-type OutputCallback =
-    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, aq: AudioQueueRef, buffer: AudioQueueBufferRef);
+type OutputCallback = unsafe extern "C" fn(
+    user_data: *mut core::ffi::c_void,
+    aq: AudioQueueRef,
+    buffer: AudioQueueBufferRef,
+);
 
 #[link(name = "AudioToolbox", kind = "framework")]
 extern "C" {
@@ -340,7 +343,7 @@ impl Rr3AudioSource for Rr3MacAudioSource {
                 &asbd,
                 rr3_mac_input_cb,
                 shared as *mut core::ffi::c_void,
-                ptr::null_mut(),   // NULL runloop = AudioQueue 内部线程回调
+                ptr::null_mut(), // NULL runloop = AudioQueue 内部线程回调
                 ptr::null_mut(),
                 0,
                 &mut aq,
@@ -372,10 +375,7 @@ impl Rr3AudioSource for Rr3MacAudioSource {
         let shared = unsafe { &*st.shared };
         let mut state = rr3_mac_lock(&shared.state);
         while state.len() < buf.len() {
-            state = shared
-                .cv
-                .wait(state)
-                .unwrap_or_else(|p| p.into_inner());
+            state = shared.cv.wait(state).unwrap_or_else(|p| p.into_inner());
         }
         for (d, b) in state.drain(..buf.len()).zip(buf.iter_mut()) {
             *b = d;
@@ -486,8 +486,8 @@ impl Rr3MacAudioSink {
 impl Rr3AudioSink for Rr3MacAudioSink {
     fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
         rr3_mac_cfg_check(cfg)?;
-        let watermark = cfg.sample_rate_hz as usize * cfg.channels as usize
-            * MAC_OUT_WATERMARK_SECS as usize;
+        let watermark =
+            cfg.sample_rate_hz as usize * cfg.channels as usize * MAC_OUT_WATERMARK_SECS as usize;
         let shared = Box::into_raw(Box::new(SinkShared {
             state: Mutex::new(SinkState {
                 deque: VecDeque::with_capacity(watermark),
@@ -537,10 +537,7 @@ impl Rr3AudioSink for Rr3MacAudioSink {
         let mut i = 0usize;
         while i < samples.len() {
             while state.deque.len() >= state.watermark {
-                state = shared
-                    .cv
-                    .wait(state)
-                    .unwrap_or_else(|p| p.into_inner());
+                state = shared.cv.wait(state).unwrap_or_else(|p| p.into_inner());
             }
             let room = state.watermark - state.deque.len();
             let take = room.min(samples.len() - i);

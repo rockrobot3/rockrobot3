@@ -84,11 +84,12 @@ impl Rr3LinuxProbe {
             .any(|e| e.file_name().to_string_lossy().starts_with(prefix))
     }
 
-    /// 文件存在且非空（ALSA 卡表有内容 = 至少注册了一张卡）。
+    /// 文件内容非空（ALSA 卡表有内容 = 至少注册了一张卡）。**按内容不按 stat
+    /// 尺寸**：procfs 文件 stat 尺寸恒 0（真板实测 `/proc/asound/cards` size=0
+    /// 而 cat 有三卡），按 metadata.len() 判会让真板音频格恒判"探测不到"。
     fn rr3_file_nonempty(path: &Path) -> bool {
-        std::fs::metadata(path)
-            .map(|m| m.len() > 0)
-            .unwrap_or(false)
+        // 读不到文件 = 探测不到 = 缺（fail-closed，与目录读失败同判）
+        std::fs::read(path).map(|b| !b.is_empty()).unwrap_or(false)
     }
 
     /// 面在位性。任一面拿不到答案 → `false`（fail-closed）。
@@ -305,7 +306,13 @@ mod tests {
     #[test]
     fn absent_probe_reports_hardware_faces_missing_software_present() {
         let probe = Rr3AbsentProbe;
-        for slot in ["act.servo", "act.led", "ui.face", "power.charger", "audio.capture"] {
+        for slot in [
+            "act.servo",
+            "act.led",
+            "ui.face",
+            "power.charger",
+            "audio.capture",
+        ] {
             assert!(!probe.rr3_probe_slot(slot), "有硬件面格位必须缺: {slot}");
         }
         for slot in ["cognition.llm", "net.wifi", "net.bt", "net.online", ""] {
@@ -330,7 +337,10 @@ mod tests {
             );
         }
         // 取值不认（含空串）：与"未给"同判 → 平台默认
-        assert!(rr3_probe_select(Some("bogus")).rr3_probe_slot("act.servo"), "test 面回落 sim");
+        assert!(
+            rr3_probe_select(Some("bogus")).rr3_probe_slot("act.servo"),
+            "test 面回落 sim"
+        );
         // 未给：test 面默认 sim；非 test 且非 linux → 恒缺（分流观察式）
         let d = rr3_probe_select(None);
         if cfg!(test) {
