@@ -46,7 +46,8 @@ pub fn rr3_tts_prebuffer_ready(buffered_ms: u64, total_ms: u64, prebuffer_ms: u6
 /// open 固定，write 不再校验配置不符）。
 pub fn rr3_tts_play(sink: &mut dyn Rr3AudioSink, samples: &[i16]) -> Result<u64, String> {
     for block in samples.chunks(RR3_TTS_BLOCK_SAMPLES) {
-        sink.write(block).map_err(|e| format!("写播放面失败: {e}"))?;
+        sink.write(block)
+            .map_err(|e| format!("写播放面失败: {e}"))?;
     }
     Ok(samples.len() as u64 * 1000 / RR3_TTS_SAMPLE_RATE as u64)
 }
@@ -100,7 +101,11 @@ mod tests {
         // （夹回 i16 极值，不回卷成反号）
         let mut s = vec![30000i16, -30000, 123, -456];
         rr3_tts_apply_gain(&mut s, 200);
-        assert_eq!(s, vec![i16::MAX, i16::MIN, 246, -912], "200% 饱和夹断不回卷");
+        assert_eq!(
+            s,
+            vec![i16::MAX, i16::MIN, 246, -912],
+            "200% 饱和夹断不回卷"
+        );
     }
 
     /// 起播水位（MC-2，legacy 0cf029e 语义）：达水位起播 / 未达不起播 /
@@ -180,6 +185,10 @@ mod tests {
         let played = rr3_tts_play(&mut sink, &input).unwrap();
         assert_eq!(played, 961 * 1000 / 16000, "毫秒 = 样点数×1000/16000 截断");
         assert_eq!(sink.rr3_sim_sink_written_count(), input.len());
-        assert_eq!(sink.rr3_sim_sink_played(), &input[..], "写出流 == 输入（透传）");
+        assert_eq!(
+            sink.rr3_sim_sink_played(),
+            &input[..],
+            "写出流 == 输入（透传）"
+        );
     }
 }
