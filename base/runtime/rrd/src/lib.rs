@@ -15,6 +15,7 @@ pub mod profile;
 pub mod registry;
 pub mod rpc;
 pub mod topics_load;
+pub mod wiring;
 
 #[cfg(unix)]
 pub mod conn;

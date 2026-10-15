@@ -1,0 +1,65 @@
+# RockRobot3 装机接线档：distro 机型（与 default 同板同接线，增补轮六 §4.3）。
+# 与 hardware/default/wiring.toml 内容镜像——双轨形态（ADR-0013）各自必有一份
+# 装机档（装载期按 profiles/<形态> 推导 hardware/<形态>/wiring.toml 定位），
+# 两份各自独立演进；接线变更须同批改两份（对账归批N2 门 c）。
+# 九字段语义、校验⑦ 判据、演练实例取值说明见 hardware/default/wiring.toml 头注。
+
+[[wire]]
+# batt 主干：电池 → 板上调节器（feeds 闭包待批N2 ⑦-c，先记敞口）
+connector = "J-PWR"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "batt"
+feeds = []
+mate = "none"
+keyed = true
+rated_a = 3.0
+gnd_common = "star-1"
+
+[[wire]]
+# J3 舵机：SG90 三线（§4.3 原例）
+connector = "J3"
+hdr_pin = [2, 3, 4]
+signal = ["vcc", "act.axis.pwm.pan", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P"
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"
+
+[[wire]]
+# J4 LED 模组：控制线 + 地（net=none：纯信号/地线组）
+connector = "J4"
+hdr_pin = [1, 2]
+signal = ["act.led.gpio", "gnd"]
+net = "none"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 0.5
+gnd_common = "star-1"
+
+[[wire]]
+# J5 电表：INA219 四线（SDA/SCL 两导体同属一个 pin_id）
+connector = "J5"
+hdr_pin = [1, 2, 3, 4]
+signal = ["vcc", "gnd", "power.battery.meter", "power.battery.meter"]
+net = "rail3v3"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 0.5
+gnd_common = "star-1"
+
+[[wire]]
+# J6 继电器模组：通断控制线 + 地（net=none 同 J4 判读）
+connector = "J6"
+hdr_pin = [1, 2]
+signal = ["act.relay.gpio", "gnd"]
+net = "none"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 0.5
+gnd_common = "star-1"

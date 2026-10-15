@@ -85,6 +85,21 @@ cutoff_voltage_mv = 3150
 state_period_ms = 300
 "#;
 
+/// 接线档底稿（增补轮六 §4.3）：装载期校验⑦要求装机档必在——vcc/gnd-only
+/// 单线组（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
+const WIRING: &str = r#"
+[[wire]]
+connector = "J-T"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 1.0
+gnd_common = "star-1"
+"#;
+
 /// 装机布局夹具（e2e_act 同款）：Drop 清整树——断言 panic 后 /tmp 不许留残迹。
 struct Root {
     dir: PathBuf,
@@ -101,6 +116,15 @@ impl Root {
     fn write_profile(&self, text: &str) -> PathBuf {
         let p = self.dir.join("profiles").join("default.toml");
         std::fs::write(&p, text).expect("写装配单");
+        // 同批 stage 接线档（hardware/<形态>/wiring.toml，rr3_wiring_path_for_profile
+        // 推导的同一布局）：装载期校验⑦要求装机档必在
+        let w = self
+            .dir
+            .join("hardware")
+            .join("default")
+            .join("wiring.toml");
+        std::fs::create_dir_all(w.parent().unwrap()).expect("建 hardware 目录");
+        std::fs::write(&w, WIRING).expect("写接线档");
         p
     }
 }

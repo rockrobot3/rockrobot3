@@ -30,6 +30,10 @@ docs/superpowers/
 !contracts/**
 !profiles/
 !profiles/**
+# 装机接线档（增补轮六批N1 §4.3）：hardware/<形态>/wiring.toml——机器可查、人照它插线，
+# 校验⑦ 的判据面，与 profiles/ 同级入库
+!hardware/
+!hardware/**
 !tools/
 !tools/**
 
