@@ -23,14 +23,18 @@ pub use rr_hal_api::{
 };
 
 pub mod backend;
-/// ESP32 外设桥后端（批C）：舵机/显示两能力面的 UART 能力帧承载——板上外设
-/// 不进城（不注册总线身份），宿主直连 UART 发在册主题形状的 `rr3.call` 帧。
-pub mod esp32_uart;
 /// 物理绑定描述符（ADR-0018 裁定 4、批D④）：引脚/总线/设备的唯一数据事实源，
 /// 描述符为底、env 应急覆盖、代码缺省 fail-closed。
 pub mod descriptor;
+/// ESP32 外设桥后端（批C）：舵机/显示两能力面的 UART 能力帧承载——板上外设
+/// 不进城（不注册总线身份），宿主直连 UART 发在册主题形状的 `rr3.call` 帧。
+pub mod esp32_uart;
 #[cfg(all(target_os = "linux", feature = "alsa"))]
 pub mod linux;
+/// linux spidev MAX7219 点阵显示后端（真件档，链④）：libc 仅做 ioctl 声明壳，
+/// 同为单重平台门，不挂 alsa feature。
+#[cfg(target_os = "linux")]
+pub mod linux_display;
 /// linux chardev GPIO 数字输出后端（R11②）：libc 仅做 ioctl/close 声明
 /// （musl 静态零额外 C 依赖），同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]
@@ -39,15 +43,6 @@ pub mod linux_gpio;
 /// Command 零新依赖），同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]
 pub mod linux_link;
-/// nmcli 子进程承载的公共机制层（M-γ 抽共享）：terse 转义/字段提取与
-/// "spawn + 超时守护 + 管道读"，链路读数（linux_link）与配网凭据存储
-/// （provision_store，MC-6）两后端共用一份真值。全平台编译（非阻塞读的
-/// libc 依赖按平台 cfg 分叉，守护本体是纯 std）。
-pub mod nmcli_support;
-/// 配网凭据存储后端（0.0.5 批M M-γ，MC-6）：凭据由后端承载持久化（linux =
-/// NetworkManager 连接配置，nmcli 子进程；sim = 内存档），件内不自写文件。
-/// 全平台编译——"connect → 重启 → 仍在册"用 NMCONF_HOME 假脚本夹具主机可测。
-pub mod provision_store;
 /// linux I2C 电池读数后端（R18，INA219@0x40）：libc 仅做 ioctl/read/write/close
 /// 声明壳，同为单重平台门，不挂 alsa feature。
 #[cfg(target_os = "linux")]
@@ -61,6 +56,15 @@ pub mod linux_pwm;
 /// linux 先例——macOS 缺省仍 sim，真件显式 `RR3_HAL_BACKEND=mac`（backend.rs）。
 #[cfg(target_os = "macos")]
 pub mod macaudio;
+/// nmcli 子进程承载的公共机制层（M-γ 抽共享）：terse 转义/字段提取与
+/// "spawn + 超时守护 + 管道读"，链路读数（linux_link）与配网凭据存储
+/// （provision_store，MC-6）两后端共用一份真值。全平台编译（非阻塞读的
+/// libc 依赖按平台 cfg 分叉，守护本体是纯 std）。
+pub mod nmcli_support;
+/// 配网凭据存储后端（0.0.5 批M M-γ，MC-6）：凭据由后端承载持久化（linux =
+/// NetworkManager 连接配置，nmcli 子进程；sim = 内存档），件内不自写文件。
+/// 全平台编译——"connect → 重启 → 仍在册"用 NMCONF_HOME 假脚本夹具主机可测。
+pub mod provision_store;
 pub mod sim;
 
 /// PCM 帧缓冲（承载层数据，批I F1 起不再进契约签名）。所有权随返回值移交

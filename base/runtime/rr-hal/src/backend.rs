@@ -5,7 +5,7 @@
 //! | `linux` | M3（`linux.rs`，`alsa` feature + `target_os = "linux"` 双门） | Buildroot 根文件系统内的 ALSA 采集/回放 |
 //! | `linux`（舵机） | 批F5a（`linux_pwm.rs`，仅 `target_os = "linux"` 单门，纯 std） | 树莓派 sysfs PWM 驱动 SG90（R11①/R22 定案档，GPIO12/13） |
 //! | `linux`（GPIO） | 批F5a（`linux_gpio.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | 树莓派 chardev GPIO 数字输出：LED / 继电器（R11②，R8 预算表 GPIO4/17 软件路行） |
-//! | `linux`（显示） | 真件档（MAX7219 SPI 后端未实装，R11③） | 显式要 `linux` 时落占位显式回错（interact 探活 exit(1)——真件未到位语义） |
+//! | `linux`（显示） | 链④真件档（`linux_display.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | MAX7219 spidev 点阵帧渲染（R11③ trait 立面 + 链④真件到位实装；设备路径来自描述符 `spi_device`） |
 //! | `linux`（电源） | 批F5a（`linux_power.rs`，仅 `target_os = "linux"` 单门，libc 声明壳） | INA219@0x40 I2C 总线电压读数（R18，判据 12；charging 判定随真件档校准） |
 //! | `linux`（链路） | 批F5a（`linux_link.rs`，仅 `target_os = "linux"` 单门，nmcli 子进程） | NetworkManager 链路状态读数（R18，判据 13；配网/断链重连是 NM 自身行为，HAL 只如实报数） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
@@ -17,8 +17,8 @@
 //! 反射环（1k–10kHz 电机 FOC/PID）不进这些 trait，留在 `rr3-act` 进程内。
 
 use crate::{
-    Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3Power, Rr3PwmServo, Rr3UnavailableSource,
-    provision_store::Rr3WifiStore,
+    provision_store::Rr3WifiStore, Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3Power, Rr3PwmServo,
+    Rr3UnavailableSource,
 };
 
 /// 后端标识（写入日志与诊断主题 `rr3-runtime/module/state`）
@@ -79,6 +79,11 @@ pub const RR3_HAL_INA219_ADDR_ENV: &str = "RR3_HAL_INA219_ADDR";
 /// `link_ifname` 同域；都没给 → 链路面占位显式回错（fail-closed，runbook 件 4
 /// 参考机 wlan0 在 profiles）。
 pub const RR3_HAL_LINK_IFNAME_ENV: &str = "RR3_HAL_LINK_IFNAME";
+
+/// linux spidev 显示面的设备路径键（如 `/dev/spidev0.0`）。应急覆盖：描述符键
+/// `spi_device` 同域；都没给 → 显示面占位显式回错（fail-closed，链④真件档
+/// 参考机 spidev0.0 在 profiles）。
+pub const RR3_HAL_SPI_DEVICE_ENV: &str = "RR3_HAL_SPI_DEVICE";
 
 /// INA219 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义
 /// （"40" 是 0x28 还是 40？），不收；7-bit 可寻址域 0x08..=0x77 外不认）。
@@ -464,14 +469,32 @@ pub fn rr3_pwm_index_parse(s: &str) -> Option<u32> {
     s.trim().parse::<u32>().ok()
 }
 
-/// 按环境选显示面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 尚无显示
-/// 真件后端（MAX7219 SPI 归批F5a 真件档，R11③——trait 已立、后端待真件到位）：
-/// 显式要 `linux` 时返回占位件，使用时以 `Unsupported` 回错，不静默换 sim——
-/// rr3-interact 开机探活会按"能力缺失显式回错"退出。mac 宿主档（C4 修正）：
-/// Mac 天然无 LED 矩阵，显示面落 sim 同款虚拟点阵（内存记录，机制同源）——
-/// R11③ 的回错退出保留给 linux 真件档，宿主开发档不因显示件缺席整体判死。
+/// 按环境选显示面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 档走
+/// MAX7219 spidev 后端（[`crate::linux_display`]，链④真件档实装），设备路径
+/// 来自生效绑定（描述符 `spi_device`，`RR3_HAL_SPI_DEVICE` env 应急覆盖）；
+/// 键缺失、合成失败或开口失败 → 占位件使用时以 `Unsupported` 回错
+/// （fail-closed）——rr3-interact 开机探活会按"能力缺失显式回错"退出，不
+/// 静默换 sim。mac 宿主档（C4 修正）：Mac 天然无 LED 矩阵，显示面落 sim 同
+/// 款虚拟点阵（内存记录，机制同源）——宿主开发档不因显示件缺席整体判死。
 pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
+            #[cfg(target_os = "linux")]
+            return rr3_hal_bindings_effective_named("显示")
+                .and_then(|b| {
+                    Some((
+                        Box::new(
+                            crate::linux_display::Rr3Max7219SpiDisplay::rr3_max7219_display_new(
+                                std::path::Path::new(b.spi_device.as_deref()?),
+                            ),
+                        ) as Box<dyn crate::Rr3Display>,
+                        RR3_BACKEND_LINUX,
+                    ))
+                })
+                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
+            #[cfg(not(target_os = "linux"))]
+            unreachable!("上面 guard 已保证只在本分支编译")
+        }
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimDisplay::rr3_sim_display_new([0; 8])),
             RR3_BACKEND_SIM,
@@ -625,16 +648,19 @@ pub fn rr3_hal_link(
 pub fn rr3_hal_wifi_store(
     // 非 linux 平台 linux 分支被剔除、sim/placeholder 分支不消费超时——参数在
     // 那些平台编译面上未使用是结构性的，不是疏漏（linux 上它进子进程守护）
-    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] store_timeout: std::time::Duration,
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+    store_timeout: std::time::Duration,
 ) -> (Box<dyn Rr3WifiStore>, &'static str) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
             return (
-                Box::new(crate::provision_store::Rr3NmWifiStore::rr3_nm_wifi_store_new(
-                    "nmcli",
-                    store_timeout,
-                )),
+                Box::new(
+                    crate::provision_store::Rr3NmWifiStore::rr3_nm_wifi_store_new(
+                        "nmcli",
+                        store_timeout,
+                    ),
+                ),
                 RR3_BACKEND_LINUX,
             );
             #[cfg(not(target_os = "linux"))]

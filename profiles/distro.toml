@@ -50,7 +50,10 @@ safety_core_interval_ms = 1000
 [hardware]
 # 物理绑定（ADR-0018 裁定 4、批D④ 收口）：键位与取值同 profiles/default.toml
 # 注释（R22/R8/接线 3/BOM #5/runbook 件 4）；换板 = 只改本段，不改代码。
-alsa_device = "default"
+# alsa_device 用 CARD 名不钉卡号（卡号随枚举顺序可变）；"default" 在无 pulse/
+# pipewire 的发行版快路轨上映射 PulseAudio 插件 → open 失败（真板实测 EINVAL/524），
+# 参考机真值 = voicehat 声卡（0.0.6 批F5a R13 换装，googlevoicehat 单卡双向）。
+alsa_device = "plughw:CARD=sndrpigooglevoi"
 pwm_chip = 0
 pwm_channel = 0
 gpio_chip = 0
@@ -59,6 +62,9 @@ gpio_relay_line = 17
 i2c_bus = 1
 ina219_addr = "0x40"
 link_ifname = "wlan0"
+# spidev 显示件（链④真件档，十键批）：MAX7219 双位模块接 SPI0 CE0（接线 4：
+# DIN=脚19/CS=脚24/CLK=脚23），spidev0.0 = 总线 0 片选 0。
+spi_device = "/dev/spidev0.0"
 
 [enabled_slots]
 # 模块 → 本形态启用的格位集合。enabled_slots 决定起谁（Q3 裁定）。
