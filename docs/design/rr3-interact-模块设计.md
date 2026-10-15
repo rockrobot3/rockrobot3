@@ -27,7 +27,9 @@
 
 ## §2 状态机（face 表情机）
 
-七态白名单（含 `listen`/`turn` 可点名）；`talk` 由播放自动驱动——**"不可点名"是策略**：
+白名单 43 态（**七核心态**含 `listen`/`turn` 可点名 + **char 单字符档** 36 态
+`charA..charZ/char0..char9`，2026-10-15 板上批随 MAX7219 真件档扩容——机制零改动，
+只扩白名单与帧表数据）；`talk` 由播放自动驱动——**"不可点名"是策略**：
 排除哪个子集由 config `[rr3-interact.face] non_pointable` 注入（I-11），缺省含 `talk`，
 某形态可改数据放开。不变式：
 ① 点名非法态 → 拒且**状态不动**；② **权威序：显式点名 > 播放自动态**——`begin_talk` 挂起当前表情，
@@ -87,7 +89,7 @@
 
 | 件 | 输入序列 | 期望值来源 | 边界集 | 现状 |
 |---|---|---|---|---|
-| face 白名单 | 七态逐个点名 + 一个非法名 | 白名单常量（件外可核对）+ §2 不变式① | 非法名 / 与当前同名 | ✅ 解析用例齐 |
+| face 白名单 | 全集 43 态逐个点名 + 一个非法名（char 档另钉白名单位次与 charH 横杠行字模） | 白名单常量（件外可核对）+ §2 不变式① | 非法名 / 与当前同名 | ✅ 解析用例齐 |
 | face talk 挂起 | `set("happy") → begin_talk → set("listen") → end_talk` 序列 | §2 不变式②（**权威序**：挂起期被显式点名则挂起作废、`end_talk` 回默认态；未被打断才回前一态） | 连续两次 begin（幂等）/ 未 begin 就 end / 点名打断 | ✅ **已有四条**：挂起、恢复、嵌套幂等、显式打断（`face/mech.rs` 的 tests 面 `explicit_set_interrupts_talk_suspend` 等）；缺的是 §5 的载荷 schema 腿 |
 | face 帧推进 | `tick × N`（N = 帧表长 × 2） | 帧表事实（`rr3_face_frames` 返回值的长度与位序） | 单帧态游标恒 0、双帧回绕、换态归零 | ✅ **已有三条**（同一 tests 面） |
 | player 时长 | 文本长度 `{1, 100, 10000}` | 裁定语义（60 ms/字符、10 s 封顶） | 封顶边界、空文本 | ✅ 有 |
@@ -158,7 +160,7 @@
 
 | 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
 |---|---|---|---|---|
-| `atoms/face/face.rs : RR3_FACE_EXPRESSIONS` | `["idle","blink","talk","think","happy","listen","turn"]` | 表情白名单 | 有（`rr3_face_set`/`rr3_face_frames`） | **契约字面量—不许动**（面板下拉框与 schema 都在读；集合扩容走契约评审） |
+| `atoms/face/face.rs : RR3_FACE_EXPRESSIONS` | `["idle","blink","talk","think","happy","listen","turn"]` + `charA..charZ`/`char0..char9` 共 43 态（2026-10-15 板上批扩容） | 表情白名单 | 有（`rr3_face_set`/`rr3_face_frames`） | **契约字面量—不许动**（面板下拉框与 schema 都在读；集合扩容走契约评审——char 档即按此三处同批：schema enum / topics note / 本常量） |
 | `atoms/face/face.rs : RR3_FACE_TALK` | `"talk"` | "不可点名"的排除项 | 有 | 契约字面量；**规则本身（"播放态不可点名"）已外移** → config `[rr3-interact.face] non_pointable` + ops 槽 `non_pointable`（**I-11 已落**，让形态可选择放开——空集全放） |
 | `atoms/face/mech.rs : Default / begin_talk / end_talk` | `"idle"` ×3 | 默认表情兜底 | 有 | ops 槽 `default_expression`（config 里同名键**今天无读者**——见下一行） |
 | `config.toml [rr3-interact]` | `[rr3-interact.face] non_pointable = ["talk"]`、`[rr3-interact.player] prebuffer_ms = 500 / volume_pct = 70` | 不可点名集 + 起播水位/播放增益（策略数据） | 有（组合件 `rr3_interact_config_parse`；**I-11 起装载**，env `RR3_INTERACT_CONFIG` 可覆盖） | 死键六项已随 I-1 删；face 键是 I-11 落点（**可注入的是集合，"某形态放开 talk"= 改数据**）。player 两键**已随 MC-2 实装回归**（缺键回落默认 500/70，类型错/负数/越界拒 boot） |
