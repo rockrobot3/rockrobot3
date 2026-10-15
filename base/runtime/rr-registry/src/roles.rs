@@ -98,10 +98,7 @@ pub fn rr3_registry_role_table_from_text(text: &str) -> Rr3RoleTable {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string(),
-                    droppable: r
-                        .get("droppable")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
+                    droppable: r.get("droppable").and_then(Value::as_bool).unwrap_or(false),
                     input_only_ok: r
                         .get("input_only_ok")
                         .and_then(Value::as_bool)
@@ -192,7 +189,9 @@ impl Rr3RoleTable {
         let mut errs = Vec::new();
         for (name, e) in &self.roles {
             if e.slot.is_empty() {
-                errs.push(format!("role {name} 缺 slot 外键（→ contracts/slots.toml）"));
+                errs.push(format!(
+                    "role {name} 缺 slot 外键（→ contracts/slots.toml）"
+                ));
             }
             if !RR3_ROLE_KINDS.contains(&e.kind.as_str()) {
                 errs.push(format!(
@@ -252,7 +251,10 @@ mod tests {
             table.rr3_role_table_slot("act.axis.pwm").as_deref(),
             Some("act.servo")
         );
-        assert_eq!(table.rr3_role_table_per_instance("act.axis.pwm"), Some(true));
+        assert_eq!(
+            table.rr3_role_table_per_instance("act.axis.pwm"),
+            Some(true)
+        );
         assert_eq!(
             table.rr3_role_table_per_instance("act.led.gpio"),
             Some(false)
@@ -271,16 +273,16 @@ mod tests {
         );
         assert_eq!(
             table.rr3_role_table_derives("act.led.gpio"),
-            Some(vec![
-                "gpio_chip".to_string(),
-                "gpio_led_line".to_string(),
-            ])
+            Some(vec!["gpio_chip".to_string(), "gpio_led_line".to_string(),])
         );
         assert_eq!(
             table.rr3_role_table_kind("power.battery.meter").as_deref(),
             Some("signal")
         );
-        assert_eq!(table.rr3_role_table_droppable("act.relay.gpio"), Some(false));
+        assert_eq!(
+            table.rr3_role_table_droppable("act.relay.gpio"),
+            Some(false)
+        );
         assert_eq!(
             table.rr3_role_table_names_for_slot("act.servo"),
             vec!["act.axis.pwm"]
@@ -330,8 +332,7 @@ per_instance = false
         );
         let errs = bad.rr3_role_table_check();
         assert!(
-            errs.iter()
-                .any(|e| e.contains("act.axis.pwm 缺 slot 外键")),
+            errs.iter().any(|e| e.contains("act.axis.pwm 缺 slot 外键")),
             "{errs:?}"
         );
         assert!(
@@ -339,12 +340,12 @@ per_instance = false
             "{errs:?}"
         );
         assert!(
-            errs.iter()
-                .any(|e| e.contains("direction 非法: sideways")),
+            errs.iter().any(|e| e.contains("direction 非法: sideways")),
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains("act.led.gpio 缺 iface 外键")),
+            errs.iter()
+                .any(|e| e.contains("act.led.gpio 缺 iface 外键")),
             "{errs:?}"
         );
         assert!(

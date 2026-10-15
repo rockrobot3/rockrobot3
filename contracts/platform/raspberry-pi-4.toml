@@ -1,0 +1,50 @@
+# contracts/platform/raspberry-pi-4.toml —— 树莓派 4 芯片事实登记表（**演练实例**）。
+# 树莓派 = 0.0.6 真板批的独立形态（architecture §12.7 三形态两两零关系），其
+# profiles 装配单尚未立——本表只立形状与芯片手册在案事实的最小集，取值待真板
+# 对账（施工图 Task 3 Step 2"演练实例"纪律，进 status.md 敞口）。
+schema_version = 1
+platform = "raspberry-pi-4"
+
+# 评审确认无冲突矩阵（演练实例，待器件核对）——§4.6 裁定②：空数组必须显式写。
+# 组合件尚未立装配单（树莓派形态 profiles 未立），构造表空表显式——§4.6 裁定①
+# 只判"段缺"不判"空"；首个绑定随 0.0.7 对账回填。
+# （顶层键须落在任何 [段头] 之前，否则被 TOML 归入前一段表内。）
+conflict = []
+construction = {}
+
+[[controller]]
+# 演练实例：BCM2711 硬件 PWM 两通道（PWM0/PWM1），树莓派形态现役绑定待 profile
+# 立档后回填。
+name = "pwm0"
+kind = "pwm"
+channels = 2
+
+[[controller]]
+# 演练实例：Linux gpiochip0（无通道维）。
+name = "gpiochip0"
+kind = "gpio"
+channels = 0
+
+[[controller]]
+# 演练实例：I2C1（树莓派 40-pin 排针惯用总线）。
+name = "i2c1"
+kind = "i2c"
+channels = 0
+
+[[controller]]
+# 演练实例：SPI0（树莓派另加——MAX7219 点阵链路候选，树莓派形态外设采购在案）。
+name = "spi0"
+kind = "spi"
+channels = 0
+
+[capabilities]
+# 评审确认：本芯片无片上 ADC，模拟测点须外挂（施工图 Task 3 Step 2 原文口径，
+# §4.6 裁定②"空集须显式"）。
+adc_pins = []
+# 演练实例：input-only 脚集待器件核对（BCM2711 无 input-only 硬约束的出脚），
+# 显式空。
+input_only_pins = []
+# 演练实例：同上，显式空。
+no_open_drain = []
+# 取值规则集不写枚举（§4.6）；platform.rs 只认在册规则名。
+output_capable_pins = "complement(input_only_pins)"

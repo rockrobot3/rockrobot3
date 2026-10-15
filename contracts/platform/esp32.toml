@@ -1,0 +1,90 @@
+# contracts/platform/esp32.toml —— ESP32 芯片事实登记表（增补轮六 §4.6，基-22）。
+# 芯片事实（不是底板走线、不是器件型号——后者住 devices.toml，供给住 profiles
+# [supplies]；三份数据三个主人，不许并表）。取值来源 = tools/esp32-periph-base/
+# src/board.rs 引脚真值段与 ESP32 数据手册在案事实（施工图 Task 3"不许编"纪律；
+# 与施工图示例的差异逐条写在行注与 commit body）。
+#
+# 消费者：校验 ③-b（(controller, channel) 不双占的通道上界）、④-b（conflicts 集
+# 反推互斥）、⑤-a/⑤-b（input-only 集 / ADC 能力集）、⑧-a/⑧-b（在册控制器词表 +
+# (controller, role, instance) 三元构造对账）。**任一段缺 ⇒ 装载红**（§4.6 裁定①，
+# platform.rs fail-closed 落实）；空集必须显式写并带行级注记（裁定②）。
+schema_version = 1
+platform = "esp32"
+
+[[controller]]
+# LEDC：高速/低速两组各 8 通道（ESP32 TRM §LED PWM），故上界 16——施工图示例写 8
+# 系待核对占位，本表按数据手册收全（差异已在 commit body 登记）。
+# 板侧现用 ch0（pan GPIO32）/ ch1（tilt GPIO33，board.rs 引脚真值段）。
+name = "ledc0"
+kind = "pwm"
+channels = 16
+
+[[controller]]
+# GPIO 控制器无通道维（资源就是脚本身），③-b 不判 (controller, channel)。
+name = "gpio0"
+kind = "gpio"
+channels = 0
+
+[[controller]]
+# I2C0：现役 SSD1306 0x3C（board.rs 引脚真值段 GPIO21 SDA / GPIO22 SCL）。
+name = "i2c0"
+kind = "i2c"
+channels = 0
+
+[[controller]]
+# UART2：板↔宿主桥（921600，批D②）。缺省引脚 GPIO16/17 一装驱动即把 I2C0 打死
+# （board.rs 自述"弃用"）——该约束不进 conflicts 集（它约束的是 UART2 的选脚，
+# 不是两条已启用线的互斥），由本注记与 board.rs 单点承载；UART2 实用 GPIO18/19。
+name = "uart2"
+kind = "uart"
+channels = 0
+
+[[controller]]
+# ADC1：经典 ESP32 出脚六通道（GPIO32/33 = CH4/CH5、GPIO34 = CH6、GPIO35 = CH7、
+# GPIO36/39 = CH0/CH1）。板侧现用 GPIO34（ADC_RAIL_PIN，轨压测点）。
+name = "adc1"
+kind = "adc"
+channels = 6
+
+[[controller]]
+# VSPI：点阵（MAX7219/SPI）预留——D10b 裁定点阵不进本形态，未立项；在册只为
+# 让 conflicts 集能点名它与 UART2 的同脚关系（见下 [[conflict]]）。
+name = "vspi"
+kind = "vspi"
+channels = 0
+
+[capabilities]
+# ADC1 六个出脚（同 [[controller]] adc1 的通道集——两处是"脚集/控制器"两个视图，
+# 由 CI 契约测试钉住计数相等，不写第二份枚举以外的推导）。
+adc_pins = [32, 33, 34, 35, 36, 39]
+# 无输出驱动能力脚（GPIO34–39）。本模组变体 GPIO37/38 是否出脚 board.rs 未记，
+# 暂按"不出脚"收窄为四脚——模组型号核对后回填，登 status.md 敞口（施工图 Task 3
+# "待核对项（不许编）"）。
+input_only_pins = [34, 35, 36, 39]
+# 同族：input-only 脚连开漏输出也做不到（同上待核对注记）。
+no_open_drain = [34, 35, 36, 39]
+# 取值规则集不写枚举，避免两处真值（§4.6 原文）；platform.rs 只认在册规则名。
+output_capable_pins = "complement(input_only_pins)"
+
+[[conflict]]
+# I2C0 硬线：SDA/SCL 同一外设矩阵，不可再分给第二绑定。施工图示例写 [22,23]、
+# 全案 §4.6 示例写 [19,22,23]——均系待核对占位，实接 GPIO21/22（board.rs 引脚
+# 真值段），差异已在 commit body 登记。
+pins = [21, 22]
+group = "i2c0"
+why = "I2C0 硬线（GPIO21 SDA / GPIO22 SCL，SSD1306 0x3C 板侧接法，board.rs 引脚真值段）——同外设矩阵，两条线必须同组不可拆绑"
+
+[[conflict]]
+pins = [18, 19]
+group = "uart2"
+why = "UART2 TX/RX 用 GPIO18/19（批D② 921600 迁定）；GPIO19 与点阵 VSPI 预留同脚（board.rs 自述'点阵立项时需再迁，已在案'，D10b）——点阵一立即撞，两条线必须同组申报"
+
+[construction]
+# 具名构造表：键 = (controller, role, instance) 三元串（⑧-a 定形；非 per_instance
+# 角色第三段留空）。值 = 板侧具名构造路径（esp-idf-hal 具名类型，**不可生成**，
+# §4.5 生成物表第 3 行）。role 段只收 contracts/roles.toml 在册角色（门 a 对账）。
+# 板侧现役构造两处（board.rs 引脚真值段：LEDC GPIO32 pan / GPIO33 tilt）：
+# esp32-mini.toml [pins] 现只绑 pan——构造表按**芯片事实**收全，⑧ 对账的过滤语义
+# （"构造无绑定是否红"按启用格/绑定集裁剪）归装载门（n1-9）裁定，本表不预裁。
+"ledc0:act.axis.pwm:pan" = "ledc"
+"ledc0:act.axis.pwm:tilt" = "ledc"

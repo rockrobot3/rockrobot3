@@ -1697,3 +1697,113 @@ fn repo_assemble_manifests_validate_and_injection_complete() {
         "装配清单数量漂移：新增须走 rr3-mkmod 五件套，删除须走 ADR"
     );
 }
+
+/// 平台登记表三份真文件可解析 + 关键形状钉死（基-22：校验 ④⑤⑧ 的判据前件；
+/// 细 pin 在 rr-registry/src/platform.rs mod tests，此层做 CI ②③ 的同源复核——
+/// 任一侧漂移即红）。演练两份的"空集显式"是裁定②的形状，不是缺段。
+#[test]
+fn platform_tables_parse_and_shape_is_pinned() {
+    let esp = rr_registry::rr3_registry_platform_table_from_text(
+        &std::fs::read_to_string(repo_root().join("contracts/platform/esp32.toml"))
+            .expect("contracts/platform/esp32.toml 必须存在（批N1 基-22 产物）"),
+    )
+    .expect("esp32 平台表须可解析");
+    assert_eq!(esp.rr3_platform_name(), "esp32");
+    assert_eq!(
+        esp.rr3_platform_controller_names(),
+        vec!["adc1", "gpio0", "i2c0", "ledc0", "uart2", "vspi"]
+    );
+    assert!(esp.rr3_platform_adc_pins().contains(&34));
+    assert!(esp.rr3_platform_input_only_pins().contains(&34));
+    assert!(esp
+        .rr3_platform_conflicts()
+        .iter()
+        .any(|c| c.rr3_conflict_group() == "i2c0"));
+    assert!(esp.rr3_platform_construction_contains("ledc0", "act.axis.pwm", "pan"));
+
+    let rk = rr_registry::rr3_registry_platform_table_from_text(
+        &std::fs::read_to_string(repo_root().join("contracts/platform/rk3566.toml"))
+            .expect("contracts/platform/rk3566.toml 必须存在（演练实例，取值待器件核对）"),
+    )
+    .expect("rk3566 平台表须可解析");
+    assert_eq!(rk.rr3_platform_name(), "rk3566");
+    assert!(rk.rr3_platform_adc_pins().is_empty());
+    assert!(rk.rr3_platform_conflicts().is_empty());
+    assert!(rk.rr3_platform_construction_contains("pwm0", "act.axis.pwm", "pan"));
+    assert!(rk.rr3_platform_construction_contains("i2c1", "power.battery.meter", ""));
+
+    let rpi = rr_registry::rr3_registry_platform_table_from_text(
+        &std::fs::read_to_string(repo_root().join("contracts/platform/raspberry-pi-4.toml"))
+            .expect("contracts/platform/raspberry-pi-4.toml 必须存在（演练实例，待真板对账）"),
+    )
+    .expect("rpi4 平台表须可解析");
+    assert_eq!(rpi.rr3_platform_name(), "raspberry-pi-4");
+    assert!(rpi.rr3_platform_adc_pins().is_empty());
+    assert!(rpi.rr3_platform_conflicts().is_empty());
+    assert!(rpi.rr3_platform_construction_keys().is_empty());
+    assert_eq!(rpi.rr3_platform_controller_channels("pwm0"), Some(2));
+}
+
+/// 六份组合件清单真文件：申报面定形 pin（N-11，§8 门 j 前件）——schema 位（组合件
+/// 面版本域 = 1，与件级 2 同名不同域）、name 与目录名同源、atoms ⊗ 链集合、空面
+/// 明写 no_injection；外加三枚合成反例钉死判据本身。
+#[test]
+fn composite_declaration_face_is_pinned() {
+    let expected: &[(&str, &[&str])] = &[
+        ("rr3-act", &["servo", "led", "relay"]),
+        ("rr3-brain", &["dialog", "asr", "llm", "tts"]),
+        ("rr3-connect", &["wifi", "bt"]),
+        ("rr3-interact", &["face", "player"]),
+        ("rr3-power", &["battery", "charger"]),
+        ("rr3-sense", &["capture", "vad", "env", "imu"]),
+    ];
+    for (name, atoms) in expected {
+        let path = repo_root().join(format!("modules/{name}/composite.toml"));
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{} 读不到: {e}", path.display()));
+        let facts = rr_registry::rr3_registry_composite_from_text(&text)
+            .unwrap_or_else(|errs| panic!("{} 坏形: {errs:?}", path.display()));
+        assert_eq!(facts.name, *name, "{}: name 与目录名不同源", path.display());
+        assert_eq!(facts.unit, "process");
+        assert_eq!(
+            facts.atoms,
+            *atoms,
+            "{}: atoms ⊗ 链漂移（增删原子件须走 ADR 并同批改本 pin）",
+            path.display()
+        );
+        assert!(
+            facts.handles.is_empty() && facts.ops.is_empty() && facts.no_injection,
+            "{}: 组合件申报面漂移（N-11：零注入面组合件必须显式申报）",
+            path.display()
+        );
+    }
+
+    let prologue =
+        "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\n";
+    // 反例 1：两数组均空却漏写 no_injection → L-5 红
+    let errs = rr_registry::rr3_registry_composite_from_text(&format!(
+        "{prologue}handles = []\nops = []\n"
+    ))
+    .expect_err("空面漏写声明必须红");
+    assert!(
+        errs.iter().any(|e| e.contains("未明写 no_injection")),
+        "{errs:?}"
+    );
+    // 反例 2：unit 出域 → 红
+    let errs = rr_registry::rr3_registry_composite_from_text(
+        &prologue.replace("unit = \"process\"", "unit = \"thread\""),
+    )
+    .expect_err("unit 出域必须红");
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("unit") && e.contains("thread")),
+        "{errs:?}"
+    );
+    // 反例 3：写件级域的版本值 2 → 红，且点名"同名不同域"（schema 位裁定）
+    assert_eq!(rr_registry::RR3_COMPOSITE_SCHEMA_VERSION, 1);
+    let errs = rr_registry::rr3_registry_composite_from_text(
+        &"schema_version = 2\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n",
+    )
+    .expect_err("组合件面写件级版本值必须红");
+    assert!(errs.iter().any(|e| e.contains("同名不同域")), "{errs:?}");
+}
