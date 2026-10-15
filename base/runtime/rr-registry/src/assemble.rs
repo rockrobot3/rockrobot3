@@ -95,6 +95,107 @@ fn rr3_dotted_key_ok(s: &str) -> bool {
     !s.is_empty() && s.split('.').all(|seg| !seg.is_empty())
 }
 
+/// handles 数组条目级解析与校验（件级与组合件级**同形同规则**，composite.rs 共用；
+/// 点名文案两处一致——一份判据一份真值）
+pub(crate) fn rr3_handles_from_array(items: &[Value]) -> (Vec<Rr3AssembleHandle>, Vec<String>) {
+    let mut handles = Vec::new();
+    let mut errs: Vec<String> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let Some(h) = item.as_table() else {
+            errs.push(format!("handles[{i}] 应为内联表 {{ trait, desc_key }}"));
+            continue;
+        };
+        for k in h.keys() {
+            if k != "trait" && k != "desc_key" {
+                errs.push(format!("handles[{i}] 未知键 {k}（只认 trait / desc_key）"));
+            }
+        }
+        let trait_name = h.get("trait").and_then(Value::as_str);
+        let desc_key = h.get("desc_key").and_then(Value::as_str);
+        match trait_name {
+            Some(tr) if RR3_ASSEMBLE_HANDLE_TRAITS.contains(&tr) => {}
+            Some(tr) => errs.push(format!(
+                "handles[{i}].trait \"{tr}\" 未在册（七能力面表见 assemble.rs，扩面走契约级评审）"
+            )),
+            None => errs.push(format!("handles[{i}].trait 应为字符串")),
+        }
+        match desc_key {
+            Some(dk) if RR3_ASSEMBLE_DESC_KEYS.contains(&dk) => {}
+            Some(dk) => errs.push(format!(
+                "handles[{i}].desc_key \"{dk}\" 未在册（键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
+            )),
+            None => errs.push(format!("handles[{i}].desc_key 应为字符串")),
+        }
+        if let (Some(tr), Some(dk)) = (trait_name, desc_key) {
+            handles.push(Rr3AssembleHandle {
+                trait_name: tr.into(),
+                desc_key: dk.into(),
+            });
+        }
+    }
+    (handles, errs)
+}
+
+/// ops 数组条目级解析与校验（同上：件级与组合件级共用）
+pub(crate) fn rr3_ops_from_array(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<String>) {
+    let mut ops = Vec::new();
+    let mut errs: Vec<String> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let Some(o) = item.as_table() else {
+            errs.push(format!("ops[{i}] 应为内联表 {{ slot, src_key }}"));
+            continue;
+        };
+        for k in o.keys() {
+            if k != "slot" && k != "src_key" {
+                errs.push(format!("ops[{i}] 未知键 {k}（只认 slot / src_key）"));
+            }
+        }
+        let slot = o.get("slot").and_then(Value::as_str);
+        let src_key = o.get("src_key").and_then(Value::as_str);
+        match slot {
+            Some(s) if !s.trim().is_empty() => {}
+            Some(_) => errs.push(format!("ops[{i}].slot 不得为空")),
+            None => errs.push(format!("ops[{i}].slot 应为字符串")),
+        }
+        match src_key {
+            Some(k) if rr3_dotted_key_ok(k) => {}
+            Some(k) => errs.push(format!(
+                "ops[{i}].src_key \"{k}\" 不是合法点路径（按 . 切分后每段须非空）"
+            )),
+            None => errs.push(format!("ops[{i}].src_key 应为字符串")),
+        }
+        if let (Some(s), Some(k)) = (slot, src_key) {
+            ops.push(Rr3AssembleOp {
+                slot: s.into(),
+                src_key: k.into(),
+            });
+        }
+    }
+    (ops, errs)
+}
+
+/// L-5 空面规则（0.0.5 批M MC-10）：两数组均在文本中出现且均为空 ⇒ 必须明写
+/// no_injection = true；明写 no_injection 时两数组必须都空。件级与组合件级共用。
+pub(crate) fn rr3_empty_surface_errors(
+    handles_present: bool,
+    handles_empty: bool,
+    ops_present: bool,
+    ops_empty: bool,
+    no_injection: bool,
+) -> Vec<String> {
+    let mut errs: Vec<String> = Vec::new();
+    if handles_present && handles_empty && ops_present && ops_empty && !no_injection {
+        errs.push(
+            "注入面两数组均空却未明写 no_injection = true（L-5：或补齐 handles/ops，或明写该件不需注入面）"
+                .into(),
+        );
+    }
+    if no_injection && !(handles_present && handles_empty && ops_present && ops_empty) {
+        errs.push("no_injection = true 只允许与空的 handles/ops 并存（该声明与注入面互斥）".into());
+    }
+    errs
+}
+
 /// 解析 + 形状级校验一份装配清单文本。fail-closed：一条不静默放行，全部错误
 /// 逐条点名（与 manifest/描述符校验同一口径）。空 `[assemble]` 数组合法。
 pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
@@ -161,85 +262,27 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
         None => {}
     }
 
-    // handles：数组，每条 = { trait, desc_key }，两键都在册表内
+    // handles：数组，每条 = { trait, desc_key }，两键都在册表内（解析与组合件级共用一份）
     match asm.get("handles") {
         Some(Value::Array(items)) => {
             handles_present = true;
             handles_empty = items.is_empty();
-            for (i, item) in items.iter().enumerate() {
-                let Some(h) = item.as_table() else {
-                    errs.push(format!("handles[{i}] 应为内联表 {{ trait, desc_key }}"));
-                    continue;
-                };
-                for k in h.keys() {
-                    if k != "trait" && k != "desc_key" {
-                        errs.push(format!("handles[{i}] 未知键 {k}（只认 trait / desc_key）"));
-                    }
-                }
-                let trait_name = h.get("trait").and_then(Value::as_str);
-                let desc_key = h.get("desc_key").and_then(Value::as_str);
-                match trait_name {
-                    Some(tr) if RR3_ASSEMBLE_HANDLE_TRAITS.contains(&tr) => {}
-                    Some(tr) => errs.push(format!(
-                        "handles[{i}].trait \"{tr}\" 未在册（七能力面表见 assemble.rs，扩面走契约级评审）"
-                    )),
-                    None => errs.push(format!("handles[{i}].trait 应为字符串")),
-                }
-                match desc_key {
-                    Some(dk) if RR3_ASSEMBLE_DESC_KEYS.contains(&dk) => {}
-                    Some(dk) => errs.push(format!(
-                        "handles[{i}].desc_key \"{dk}\" 未在册（键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
-                    )),
-                    None => errs.push(format!("handles[{i}].desc_key 应为字符串")),
-                }
-                if let (Some(tr), Some(dk)) = (trait_name, desc_key) {
-                    facts.handles.push(Rr3AssembleHandle {
-                        trait_name: tr.into(),
-                        desc_key: dk.into(),
-                    });
-                }
-            }
+            let (parsed, mut item_errs) = rr3_handles_from_array(items);
+            facts.handles = parsed;
+            errs.append(&mut item_errs);
         }
         Some(other) => errs.push(format!("[assemble].handles 应为数组，收到 {other:?}")),
         None => errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into()),
     }
 
-    // ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径
+    // ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径（共用同上）
     match asm.get("ops") {
         Some(Value::Array(items)) => {
             ops_present = true;
             ops_empty = items.is_empty();
-            for (i, item) in items.iter().enumerate() {
-                let Some(o) = item.as_table() else {
-                    errs.push(format!("ops[{i}] 应为内联表 {{ slot, src_key }}"));
-                    continue;
-                };
-                for k in o.keys() {
-                    if k != "slot" && k != "src_key" {
-                        errs.push(format!("ops[{i}] 未知键 {k}（只认 slot / src_key）"));
-                    }
-                }
-                let slot = o.get("slot").and_then(Value::as_str);
-                let src_key = o.get("src_key").and_then(Value::as_str);
-                match slot {
-                    Some(s) if !s.trim().is_empty() => {}
-                    Some(_) => errs.push(format!("ops[{i}].slot 不得为空")),
-                    None => errs.push(format!("ops[{i}].slot 应为字符串")),
-                }
-                match src_key {
-                    Some(k) if rr3_dotted_key_ok(k) => {}
-                    Some(k) => errs.push(format!(
-                        "ops[{i}].src_key \"{k}\" 不是合法点路径（按 . 切分后每段须非空）"
-                    )),
-                    None => errs.push(format!("ops[{i}].src_key 应为字符串")),
-                }
-                if let (Some(s), Some(k)) = (slot, src_key) {
-                    facts.ops.push(Rr3AssembleOp {
-                        slot: s.into(),
-                        src_key: k.into(),
-                    });
-                }
-            }
+            let (parsed, mut item_errs) = rr3_ops_from_array(items);
+            facts.ops = parsed;
+            errs.append(&mut item_errs);
         }
         Some(other) => errs.push(format!("[assemble].ops 应为数组，收到 {other:?}")),
         None => errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into()),
@@ -248,15 +291,13 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
     // 空面规则（L-5）：两数组均在文本中出现且均为空 ⇒ 必须明写 no_injection = true；
     // 反之，明写 no_injection 时两数组必须都空。这条把"漏填"与"本件确无注入面"分开——
     // 光看空数组分不清，于是此前 14 份空申报在门里无内容可校验（方案 §12.4 C3）。
-    if handles_present && handles_empty && ops_present && ops_empty && !facts.no_injection {
-        errs.push(
-            "注入面两数组均空却未明写 no_injection = true（L-5：或补齐 handles/ops，或明写该件不需注入面）"
-                .into(),
-        );
-    }
-    if facts.no_injection && !(handles_present && handles_empty && ops_present && ops_empty) {
-        errs.push("no_injection = true 只允许与空的 handles/ops 并存（该声明与注入面互斥）".into());
-    }
+    errs.extend(rr3_empty_surface_errors(
+        handles_present,
+        handles_empty,
+        ops_present,
+        ops_empty,
+        facts.no_injection,
+    ));
 
     if errs.is_empty() {
         Ok(facts)

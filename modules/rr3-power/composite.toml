@@ -1,6 +1,10 @@
 # rr3-power 组合件装配清单（三层 manifest 的 Composite 层，0.0.5 批B③ 打样）
 # 方案 §9：Composite 声明"装配了哪些原子件（⊗ 链）+ 落为哪种执行单元"。
-# 机器校验 schema 归批E 门禁接线；本文件先以数据形状落位。
+# 机器校验已接线（0.0.5 增补轮六 批N1 N-11）：rr-registry composite.rs 按本形状
+# fail-closed 校验。schema_version 归组合件面版本域（RR3_COMPOSITE_SCHEMA_VERSION = 1，
+# 与件级 assemble.toml 的 RR3_ASSEMBLE_SCHEMA_VERSION = 2 同名不同域，不互认不迁移）；
+# 本轮增 handles/ops/no_injection 三键属首次定形只增不 bump（落位时无代码读本文件，
+# 校验器与数据同批落盘，不存在旧数据带病运行窗口）。
 # owner 级契约 module.toml 功能守恒不动（architecture.md §4.1 注记）。
 schema_version = 1
 
@@ -10,3 +14,9 @@ unit = "process"   # 执行单元：独立进程（module.toml entry=rr3-power�
 
 [assemble]
 atoms = ["battery", "charger"]   # battery ⊗ charger（⊗=装配期、执行单元内函数调用，ADR-0019 裁定 2）
+# 组合件申报面（N-11，§8 门 j 前件）：句柄/参数槽结构与件级同形同规则（composite.rs
+# 共用件级 helper）；两数组均空必须明写 no_injection = true（L-5 同一条判据）。
+# 参数槽随消费落地增补（min_pass_len 首槽归 M-6 批N4）。
+handles = []
+ops = []
+no_injection = true

@@ -8,8 +8,10 @@
 
 pub mod assemble;
 pub mod atom;
+pub mod composite;
 pub mod depends;
 pub mod devices;
+pub mod platform;
 pub mod roles;
 pub mod schema;
 pub mod slots;
@@ -25,11 +27,18 @@ pub use atom::{
     rr3_registry_atom_field_specs, rr3_registry_board_free_assert, rr3_registry_validate_atom,
     rr3_registry_validate_atom_text, RR3_ATOM_SCHEMA_VERSION,
 };
+pub use composite::{
+    rr3_registry_composite_from_text, Rr3CompositeFacts, RR3_COMPOSITE_SCHEMA_VERSION,
+};
 pub use depends::{
     rr3_registry_depends_facts_from_text, rr3_registry_plan_boot, rr3_registry_resolve_boot_order,
     Rr3BootPlan, Rr3DependsFacts,
 };
 pub use devices::{rr3_registry_device_table_from_text, Rr3DeviceTable};
+pub use platform::{
+    rr3_registry_platform_table_from_text, Rr3ConflictEntry, Rr3PlatformTable,
+    RR3_CONTRACT_PLATFORM_PATH, RR3_PLATFORM_KINDS, RR3_PLATFORM_OUTPUT_RULES,
+};
 pub use roles::{rr3_registry_role_table_from_text, Rr3RoleTable};
 pub use schema::{
     rr3_registry_field_specs, rr3_registry_get_by_path, rr3_registry_rule_list, Rr3FieldSpec,

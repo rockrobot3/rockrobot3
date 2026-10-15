@@ -1,0 +1,50 @@
+# contracts/platform/rk3566.toml —— RK3566 芯片事实登记表（**演练实例**）。
+# RK3566 = default.toml 参考机（RK3566 桌面具身形态）的平台。施工图 Task 3 Step 2：
+# 树莓派与 RK3566 只能先给演练实例，取值全部标"演练"并进 status.md 敞口——
+# host 侧的引脚/控制器事实散在 runbook/R22 定案档，未经真机逐一核过，本表只立
+# 形状与"与现役 profile 可对账的最小集"，**不充当已核事实**。
+schema_version = 1
+platform = "rk3566"
+
+# 评审确认无冲突矩阵（演练实例，待器件核对）——§4.6 裁定②：空数组必须显式写。
+# （顶层键须落在任何 [段头] 之前，否则被 TOML 归入前一段表内。）
+conflict = []
+
+[[controller]]
+# 演练实例：Rockchip 每 PWM 硬件通道一枚 chip（pwmchip0 仅 ch0），通道上界待芯片
+# 手册核对后回填。现参考机只用 ch0（default.toml [pins] R22 定案档 pwm0=GPIO12）。
+name = "pwm0"
+kind = "pwm"
+channels = 1
+
+[[controller]]
+# 演练实例：Linux gpiochip0（无通道维，资源是线本身）。
+name = "gpiochip0"
+kind = "gpio"
+channels = 0
+
+[[controller]]
+# 演练实例：I2C1（default.toml [pins] 接线 3：BOM #5 INA219@0x40 挂 i2c1）。
+name = "i2c1"
+kind = "i2c"
+channels = 0
+
+[capabilities]
+# 演练实例：RK3566 片上 SARADC 通道集待器件核对后回填——现 host 档模拟测点走
+# 外挂 INA219（i2c1），无片上 ADC 消费者，故按"当前可消费集为空"显式写空。
+adc_pins = []
+# 演练实例：input-only 脚集待器件核对（现役绑定无此约束消费者），显式空。
+input_only_pins = []
+# 演练实例：同上，显式空。
+no_open_drain = []
+# 取值规则集不写枚举（§4.6）；platform.rs 只认在册规则名。
+output_capable_pins = "complement(input_only_pins)"
+
+[construction]
+# 具名构造表（演练实例）：值 = rr-hal 后端构造函数名（base/runtime/rr-hal/src/
+# backend.rs 在案符号，host 侧"平台侧构造路径"的真值点）。取值 = default.toml
+# [pins] 现役四绑定的真值（R22 定案档 / 接线 3 / BOM #5），非凭记忆编造。
+"pwm0:act.axis.pwm:pan" = "rr3_hal_servo"
+"gpiochip0:act.led.gpio:" = "rr3_hal_gpio_out"
+"gpiochip0:act.relay.gpio:" = "rr3_hal_gpio_out"
+"i2c1:power.battery.meter:" = "rr3_hal_power"

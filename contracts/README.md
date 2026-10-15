@@ -14,6 +14,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 | `slots.toml` | 能力格坐标系总表：`[[slot]]`（name/layer/note），三层 base/body/cognition（查册门真值见下"slots.toml 裁定"） | L2 |
 | `roles.toml` | 角色词表（增补轮六 §4.1 新建）：`[[role]]`（name/slot/kind/iface/requires/derives/direction/droppable/input_only_ok/per_instance/note）——profiles `[pins]` 的 role 外键、rrd 派生器（derives）与门 a 六表对账的真值源；slot 外键必须命中 `slots.toml`，iface 外键必须命中 `RR3_ASSEMBLE_HANDLE_TRAITS`（两者当前由本表数据自守，门 a 待建） | L2 |
 | `devices.toml` | 器件型号词表（增补轮六 §4.1b 新立，sense S-13）：`[[device]]`（model/bus/addrs/baud_ok/id_reg/peak_ma/mate）——门 o 在册对账、门 i 前件、§12.1 器件级在位探测（id_reg，缺省时探测面只许报 reachable/absent）与校验⑨ 电流互校的真值源；装载期不认型号（D10a），评审期与出厂自检必须认 | L2 |
+| `platform/<平台>.toml` | 平台事实登记表（增补轮六 §4.6 新立，基-22），每平台一份四段：`[[controller]]` 在册控制器词表（name/kind/channels，kind 封闭七值 pwm/gpio/i2c/spi/vspi/adc/uart）、`[capabilities]` 能力集（adc_pins/input_only_pins/no_open_drain/output_capable_pins，空集必须显式写并带行级注记）、`[[conflict]]` 冲突矩阵（group/pins/controllers/why，无冲突显式写 `conflict = []`）、`[construction]` 具名构造表（键 = `controller:role:instance` 三元串，值 = 平台侧构造路径）——校验 ③-b/④-b/⑤-a/⑤-b/⑧ 的判据前件；**不是器件型号**（D10a：装载期不认型号，器件能力住 devices.toml）、不与 profiles `[supplies]` 并表（三份数据三个主人）；rr-registry `src/platform.rs` fail-closed 读表（任一段缺即红，宽容 = F-6 病）。当前在册 esp32（真形态，board.rs 直读）、rk3566 与 raspberry-pi-4（**演练实例**，取值待器件/真板核对，敞口见 docs/status.md） | L2 |
 | `events/*.schema.json` | 各模块事件负载 schema（命名规则与模板见 [`events/README.md`](events/README.md)） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
