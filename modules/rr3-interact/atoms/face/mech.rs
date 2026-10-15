@@ -122,8 +122,445 @@ const RR3_FRAMES_TURN: [Rr3FaceFrame; 1] = [[
     0b0000_0000,
 ]];
 
-/// 白名单序 → 帧序列表（与 RR3_FACE_EXPRESSIONS 下标对齐；blink/talk 双帧其余单帧）
-const RR3_FACE_FRAME_TABLE: [&[Rr3FaceFrame]; 7] = [
+// ---------- char 单字符档（2026-10-15 板上批：36 字符静态单帧，机制零改动） ----------
+// 字模 = 经典 5×7 列位图（与板上 marquee 实验同源），行 0-6 顶对齐、5 列落在
+// bit6..bit2（glyph 左列 = bit6，bit7 最左空一位）；行 7 恒空。
+
+/// charA：单字符 "A"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_A: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0111_1100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0000_0000,
+]];
+
+/// charB：单字符 "B"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_B: [Rr3FaceFrame; 1] = [[
+    0b0111_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0111_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0111_1000,
+    0b0000_0000,
+]];
+
+/// charC：单字符 "C"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_C: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// charD：单字符 "D"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D: [Rr3FaceFrame; 1] = [[
+    0b0111_0000,
+    0b0100_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_1000,
+    0b0111_0000,
+    0b0000_0000,
+]];
+
+/// charE：单字符 "E"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_E: [Rr3FaceFrame; 1] = [[
+    0b0111_1100,
+    0b0100_0000,
+    0b0100_0000,
+    0b0111_1000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0111_1100,
+    0b0000_0000,
+]];
+
+/// charF：单字符 "F"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_F: [Rr3FaceFrame; 1] = [[
+    0b0111_1100,
+    0b0100_0000,
+    0b0100_0000,
+    0b0111_1000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0000_0000,
+]];
+
+/// charG：单字符 "G"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_G: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0000,
+    0b0101_1100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// charH：单字符 "H"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_H: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0111_1100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0000_0000,
+]];
+
+/// charI：单字符 "I"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_I: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// charJ：单字符 "J"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_J: [Rr3FaceFrame; 1] = [[
+    0b0001_1100,
+    0b0000_1000,
+    0b0000_1000,
+    0b0000_1000,
+    0b0000_1000,
+    0b0100_1000,
+    0b0011_0000,
+    0b0000_0000,
+]];
+
+/// charK：单字符 "K"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_K: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_1000,
+    0b0101_0000,
+    0b0110_0000,
+    0b0101_0000,
+    0b0100_1000,
+    0b0100_0100,
+    0b0000_0000,
+]];
+
+/// charL：单字符 "L"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_L: [Rr3FaceFrame; 1] = [[
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0111_1100,
+    0b0000_0000,
+]];
+
+/// charM：单字符 "M"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_M: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0110_1100,
+    0b0101_0100,
+    0b0101_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0000_0000,
+]];
+
+/// charN：单字符 "N"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_N: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_0100,
+    0b0110_0100,
+    0b0101_0100,
+    0b0100_1100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0000_0000,
+]];
+
+/// charO：单字符 "O"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_O: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// charP：单字符 "P"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_P: [Rr3FaceFrame; 1] = [[
+    0b0111_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0111_1000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0100_0000,
+    0b0000_0000,
+]];
+
+/// charQ：单字符 "Q"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_Q: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0101_0100,
+    0b0100_1000,
+    0b0011_0100,
+    0b0000_0000,
+]];
+
+/// charR：单字符 "R"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_R: [Rr3FaceFrame; 1] = [[
+    0b0111_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0111_1000,
+    0b0101_0000,
+    0b0100_1000,
+    0b0100_0100,
+    0b0000_0000,
+]];
+
+/// charS：单字符 "S"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_S: [Rr3FaceFrame; 1] = [[
+    0b0011_1100,
+    0b0100_0000,
+    0b0100_0000,
+    0b0011_1000,
+    0b0000_0100,
+    0b0000_0100,
+    0b0111_1000,
+    0b0000_0000,
+]];
+
+/// charT：单字符 "T"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_T: [Rr3FaceFrame; 1] = [[
+    0b0111_1100,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0000_0000,
+]];
+
+/// charU：单字符 "U"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_U: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// charV：单字符 "V"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_V: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0010_1000,
+    0b0001_0000,
+    0b0000_0000,
+]];
+
+/// charW：单字符 "W"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_W: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0101_0100,
+    0b0101_0100,
+    0b0101_0100,
+    0b0010_1000,
+    0b0000_0000,
+]];
+
+/// charX：单字符 "X"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_X: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_0100,
+    0b0010_1000,
+    0b0001_0000,
+    0b0010_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0000_0000,
+]];
+
+/// charY：单字符 "Y"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_Y: [Rr3FaceFrame; 1] = [[
+    0b0100_0100,
+    0b0100_0100,
+    0b0100_0100,
+    0b0010_1000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0000_0000,
+]];
+
+/// charZ：单字符 "Z"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_Z: [Rr3FaceFrame; 1] = [[
+    0b0111_1100,
+    0b0000_0100,
+    0b0000_1000,
+    0b0001_0000,
+    0b0010_0000,
+    0b0100_0000,
+    0b0111_1100,
+    0b0000_0000,
+]];
+
+/// char0：单字符 "0"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D0: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_1100,
+    0b0101_0100,
+    0b0110_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// char1：单字符 "1"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D1: [Rr3FaceFrame; 1] = [[
+    0b0001_0000,
+    0b0011_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0001_0000,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// char2：单字符 "2"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D2: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0000_0100,
+    0b0000_1000,
+    0b0001_0000,
+    0b0010_0100,
+    0b0111_1100,
+    0b0000_0000,
+]];
+
+/// char3：单字符 "3"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D3: [Rr3FaceFrame; 1] = [[
+    0b0111_1100,
+    0b0000_1000,
+    0b0001_0000,
+    0b0000_1000,
+    0b0000_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// char4：单字符 "4"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D4: [Rr3FaceFrame; 1] = [[
+    0b0000_1000,
+    0b0001_1000,
+    0b0010_1000,
+    0b0100_1000,
+    0b0111_1100,
+    0b0000_1000,
+    0b0000_1000,
+    0b0000_0000,
+]];
+
+/// char5：单字符 "5"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D5: [Rr3FaceFrame; 1] = [[
+    0b0111_1100,
+    0b0100_0000,
+    0b0111_1000,
+    0b0000_0100,
+    0b0000_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// char6：单字符 "6"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D6: [Rr3FaceFrame; 1] = [[
+    0b0001_1000,
+    0b0010_0000,
+    0b0100_0000,
+    0b0111_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// char7：单字符 "7"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D7: [Rr3FaceFrame; 1] = [[
+    0b0111_1100,
+    0b0000_0100,
+    0b0000_1000,
+    0b0001_0000,
+    0b0010_0000,
+    0b0010_0000,
+    0b0010_0000,
+    0b0000_0000,
+]];
+
+/// char8：单字符 "8"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D8: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0011_1000,
+    0b0000_0000,
+]];
+
+/// char9：单字符 "9"（5×7 居中：行 0-6、列 bit6..bit2）
+const RR3_FRAMES_CHAR_D9: [Rr3FaceFrame; 1] = [[
+    0b0011_1000,
+    0b0100_0100,
+    0b0100_0100,
+    0b0011_1100,
+    0b0000_0100,
+    0b0000_1000,
+    0b0011_0000,
+    0b0000_0000,
+]];
+
+/// 白名单序 → 帧序列表（与 RR3_FACE_EXPRESSIONS 下标对齐；blink/talk 双帧，
+/// 七核心态与 char 单字符档全为单帧）
+const RR3_FACE_FRAME_TABLE: [&[Rr3FaceFrame]; 43] = [
     &RR3_FRAMES_IDLE,
     &RR3_FRAMES_BLINK,
     &RR3_FRAMES_TALK,
@@ -131,6 +568,42 @@ const RR3_FACE_FRAME_TABLE: [&[Rr3FaceFrame]; 7] = [
     &RR3_FRAMES_HAPPY,
     &RR3_FRAMES_LISTEN,
     &RR3_FRAMES_TURN,
+    &RR3_FRAMES_CHAR_A,
+    &RR3_FRAMES_CHAR_B,
+    &RR3_FRAMES_CHAR_C,
+    &RR3_FRAMES_CHAR_D,
+    &RR3_FRAMES_CHAR_E,
+    &RR3_FRAMES_CHAR_F,
+    &RR3_FRAMES_CHAR_G,
+    &RR3_FRAMES_CHAR_H,
+    &RR3_FRAMES_CHAR_I,
+    &RR3_FRAMES_CHAR_J,
+    &RR3_FRAMES_CHAR_K,
+    &RR3_FRAMES_CHAR_L,
+    &RR3_FRAMES_CHAR_M,
+    &RR3_FRAMES_CHAR_N,
+    &RR3_FRAMES_CHAR_O,
+    &RR3_FRAMES_CHAR_P,
+    &RR3_FRAMES_CHAR_Q,
+    &RR3_FRAMES_CHAR_R,
+    &RR3_FRAMES_CHAR_S,
+    &RR3_FRAMES_CHAR_T,
+    &RR3_FRAMES_CHAR_U,
+    &RR3_FRAMES_CHAR_V,
+    &RR3_FRAMES_CHAR_W,
+    &RR3_FRAMES_CHAR_X,
+    &RR3_FRAMES_CHAR_Y,
+    &RR3_FRAMES_CHAR_Z,
+    &RR3_FRAMES_CHAR_D0,
+    &RR3_FRAMES_CHAR_D1,
+    &RR3_FRAMES_CHAR_D2,
+    &RR3_FRAMES_CHAR_D3,
+    &RR3_FRAMES_CHAR_D4,
+    &RR3_FRAMES_CHAR_D5,
+    &RR3_FRAMES_CHAR_D6,
+    &RR3_FRAMES_CHAR_D7,
+    &RR3_FRAMES_CHAR_D8,
+    &RR3_FRAMES_CHAR_D9,
 ];
 
 /// 表情名 → 帧序列。未知表情回退 idle 帧（调用方已过白名单，此为兜底）。
@@ -235,21 +708,64 @@ mod tests {
     /// 缺省形态的不可点名集（config 档同源：`[rr3-interact.face] non_pointable`）
     const NON_TALK: &[&str] = &["talk"];
 
+    /// 白名单口径：七核心态在前（帧表下标锚点，契约字面量不动），char 单字符
+    /// 档 36 个随后（charA..charZ + char0..char9），全集 43。
     #[test]
-    fn whitelist_covers_seven_expressions() {
+    fn whitelist_covers_core_and_char_expressions() {
+        assert_eq!(RR3_FACE_EXPRESSIONS.len(), 43);
         assert_eq!(
-            RR3_FACE_EXPRESSIONS,
+            &RR3_FACE_EXPRESSIONS[..7],
             ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
         );
+        for (ix, byte) in (b'A'..=b'Z').chain(b'0'..=b'9').enumerate() {
+            let expected = format!("char{}", byte as char);
+            assert_eq!(
+                RR3_FACE_EXPRESSIONS[7 + ix],
+                expected.as_str(),
+                "白名单位次 7+{ix}"
+            );
+        }
         // 初始态 idle：首次切换的"切换前"就是它
-        assert_eq!(Rr3Face::default().rr3_face_set("blink", NON_TALK).unwrap().1, "idle");
+        assert_eq!(
+            Rr3Face::default()
+                .rr3_face_set("blink", NON_TALK)
+                .unwrap()
+                .1,
+            "idle"
+        );
+    }
+
+    /// char 单字符档：帧表映射对得上 + 点名成功 + 单帧恒报 0（charH 横杠行钉死，
+    /// 字模转换走偏在此最先响）
+    #[test]
+    fn char_expression_is_pointable_single_frame() {
+        assert_eq!(rr3_face_frames("charH"), RR3_FRAMES_CHAR_H.as_slice());
+        assert_eq!(
+            RR3_FRAMES_CHAR_H[0][3], 0b0111_1100,
+            "H 横杠行（列 bit6..bit2）"
+        );
+        let mut f = Rr3Face::default();
+        assert_eq!(
+            f.rr3_face_set("charH", NON_TALK).unwrap(),
+            ("charH", "idle")
+        );
+        for _ in 0..3 {
+            assert_eq!(f.rr3_face_tick(), ("charH", 0), "单帧态恒报帧 0");
+        }
+        assert_eq!(rr3_face_frames("char9").len(), 1, "数字档同构单帧");
     }
 
     #[test]
     fn new_states_are_point_namable() {
         let mut f = Rr3Face::default();
-        assert_eq!(f.rr3_face_set("listen", NON_TALK).unwrap(), ("listen", "idle"));
-        assert_eq!(f.rr3_face_set("turn", NON_TALK).unwrap(), ("turn", "listen"));
+        assert_eq!(
+            f.rr3_face_set("listen", NON_TALK).unwrap(),
+            ("listen", "idle")
+        );
+        assert_eq!(
+            f.rr3_face_set("turn", NON_TALK).unwrap(),
+            ("turn", "listen")
+        );
     }
 
     #[test]
@@ -320,8 +836,14 @@ mod tests {
     #[test]
     fn set_accepts_whitelist_and_reports_transition() {
         let mut f = Rr3Face::default();
-        assert_eq!(f.rr3_face_set("happy", NON_TALK).unwrap(), ("happy", "idle"));
-        assert_eq!(f.rr3_face_set("think", NON_TALK).unwrap(), ("think", "happy"));
+        assert_eq!(
+            f.rr3_face_set("happy", NON_TALK).unwrap(),
+            ("happy", "idle")
+        );
+        assert_eq!(
+            f.rr3_face_set("think", NON_TALK).unwrap(),
+            ("think", "happy")
+        );
     }
 
     #[test]
@@ -329,9 +851,15 @@ mod tests {
         let mut f = Rr3Face::default();
         assert!(f.rr3_face_set("wink", NON_TALK).is_err());
         assert!(f.rr3_face_set("", NON_TALK).is_err());
-        assert!(f.rr3_face_set("talk", NON_TALK).is_err(), "talk 是播放面的自动态");
+        assert!(
+            f.rr3_face_set("talk", NON_TALK).is_err(),
+            "talk 是播放面的自动态"
+        );
         // 失败切换不动状态：下次成功切换的"切换前"仍是 idle
-        assert_eq!(f.rr3_face_set("think", NON_TALK).unwrap(), ("think", "idle"));
+        assert_eq!(
+            f.rr3_face_set("think", NON_TALK).unwrap(),
+            ("think", "idle")
+        );
     }
 
     /// I-11：排除规则从件内 if 迁出为注入集——改数据即改行为，件内无 `match` 分支
@@ -342,8 +870,14 @@ mod tests {
         assert_eq!(open.rr3_face_set("talk", &[]).unwrap(), ("talk", "idle"));
         // 换一个排除子集（点名规则随数据走）：此刻排除 blink、放开 talk
         let mut swap = Rr3Face::default();
-        assert_eq!(swap.rr3_face_set("talk", &["blink"]).unwrap(), ("talk", "idle"));
-        assert!(swap.rr3_face_set("blink", &["blink"]).is_err(), "blink 进了排除集");
+        assert_eq!(
+            swap.rr3_face_set("talk", &["blink"]).unwrap(),
+            ("talk", "idle")
+        );
+        assert!(
+            swap.rr3_face_set("blink", &["blink"]).is_err(),
+            "blink 进了排除集"
+        );
         // 非在册名与排除集无关：白名单是契约面，任何注入集都拒
         assert!(swap.rr3_face_set("wink", &[]).is_err());
     }
@@ -373,7 +907,10 @@ mod tests {
         g.rr3_face_set("think", NON_TALK).unwrap();
         g.rr3_face_begin_talk();
         assert_eq!(g.rr3_face_end_talk(), "think", "播放结束恢复");
-        assert_eq!(g.rr3_face_set("blink", NON_TALK).unwrap(), ("blink", "think"));
+        assert_eq!(
+            g.rr3_face_set("blink", NON_TALK).unwrap(),
+            ("blink", "think")
+        );
     }
 
     #[test]
@@ -402,7 +939,10 @@ mod tests {
         let (cur, prev) = f.rr3_face_set("happy", NON_TALK).unwrap();
         assert_eq!((cur, prev), ("happy", "talk"));
         assert_eq!(f.rr3_face_end_talk(), "idle", "挂起态已被显式指令打断");
-        assert_eq!(f.rr3_face_set("blink", NON_TALK).unwrap(), ("blink", "idle"));
+        assert_eq!(
+            f.rr3_face_set("blink", NON_TALK).unwrap(),
+            ("blink", "idle")
+        );
     }
 
     // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------
