@@ -223,14 +223,14 @@ act: intent: trace=1 servo angle=45，state#1 已发
 | 项 | 实测 |
 |---|---|
 | 硬件 | MAX7219 双位级联点阵（两片级联，`RR3_MAX7219_CHIPS = 2`），SPI 接线 VCC/GND/DIN(GPIO10 MOSI)/CS(GPIO8 CE0)/CLK(GPIO11 SCLK)，`dtparam=spi=on` 在位；**pin 1 = 靠 3.5mm 音频孔端**（接线方向教训见运维教训 3） |
-| 后端实装 | [linux_display.rs](../../../base/runtime/rr-hal/src/linux_display.rs)：spidev UAPI（模式 0 / MSB / 8bit / 1MHz），CS 包络由内核 `write()` 管理；init 序列 DISPLAYTEST→SCANLIMIT→DECODE→INTENSITY→SHUTDOWN；惰性 ensure + `last` 快照承载读回语义；ioctl 号/包组装纯函数单测 + temp 树错误传播测试 |
+| 后端实装 | [linux_display.rs](../../../../base/runtime/rr-hal/src/linux_display.rs)：spidev UAPI（模式 0 / MSB / 8bit / 1MHz），CS 包络由内核 `write()` 管理；init 序列 DISPLAYTEST→SCANLIMIT→DECODE→INTENSITY→SHUTDOWN；惰性 ensure + `last` 快照承载读回语义；ioctl 号/包组装纯函数单测 + temp 树错误传播测试 |
 | 键位 | descriptor 十键批：`spi_device` 进 `Rr3HalBindings` + `RR3_ASSEMBLE_DESC_KEYS` + contract 钉死表（**两处同批**纪律）；`profiles/distro.toml` 补 `spi_device = "/dev/spidev0.0"`；face 装配 `desc_key = "spi_device"` |
 | 硬证据 | `systemctl restart rrd` 六模块 running 后：`rr3-interact` 进程 `fd 5 -> /dev/spidev0.0`（Rust HAL 真实开设备，非脚本演示）；`denied_publish = 0`；面板/动画秀（python 预验六节目）→ Rust 后端同屏出帧 |
 
 **真板暴露问题（同批结清）**：
 
 1. **procfs 探测陷阱**（产品缺陷）：`/proc/asound/cards` 的 stat 尺寸**恒 0**
-   （`cat` 有三卡）——[probe.rs](../../../base/runtime/rrd/src/probe.rs) 按
+   （`cat` 有三卡）——[probe.rs](../../../../base/runtime/rrd/src/probe.rs) 按
    `metadata.len()` 判空导致真板音频格恒"探测不到"，rrd 拒起 sense/interact
    （链④验收前置卡点）。修：按 `read()` 内容判空（`rr3_file_nonempty`）。
    procfs 文件 stat 尺寸语义与普通文件不同，宿主 CI 无 procfs 覆盖故未暴露。
