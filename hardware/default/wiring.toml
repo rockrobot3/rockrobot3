@@ -1,0 +1,74 @@
+# RockRobot3 装机接线档：default 机型（RK3566 参考机，增补轮六 §4.3 新立）。
+# 机器可查、人照它插线：面板出图、出厂自检逐条点名、rated_a 与件 demands.peak_ma
+# 互校的载体。它拦不住人插错线——诚实边界，但每条线组从此有判据可点。
+# 九字段全键必填（§5 缺失语义列 + "合法不适用显式写"）：feeds 无下游显式写 []；
+# mate/net/gnd_common 的合法不适值是 "none"；keyed/rated_a 缺即红。
+# 校验⑦（装载期，后果 = 拒）：⑦-a signal ⊆ [pins] 的 pin_id ∪ {vcc,gnd}；
+# ⑦-b net ⊆ [[supplies.domain]]（none = 纯信号/地线组）；⑦-d mate ∈ devices.toml
+# mate 集；feeds 位号集在本档内闭合、不得自环。⑦-c（额定加总）待件 demands 数据面
+# 归批N2。hdr_pin[k] ↔ signal[k] 位序对应（丝印序即信号序）；同一逻辑信号占多个
+# 导体按导体数重复写（J5 电表的 SDA/SCL 同属 power.battery.meter 一个 pin_id）。
+# 取值 = 演练实例（与 profiles/default.toml [pins] 同源：R22 定案档、BOM #5 INA219@0x40）；
+# 阈值/额定为**声明预算位**，对账归批N2 门 c。distro 机型与 default 同板同接线，
+# 内容镜像（hardware/<形态>/wiring.toml 各自必在，装载期按形态推导定位）。
+
+[[wire]]
+# batt 主干：电池 → 板上调节器（调节器不是连接器，feeds 闭包待批N2 ⑦-c，先记敞口）
+connector = "J-PWR"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "batt"
+feeds = []
+mate = "none" # 电源输入直插排针，无对端连接器型号
+keyed = true  # 主干防反插（keyed），主干额定 3A ≥ 舵机堵转 0.7A + 板耗
+rated_a = 3.0
+gnd_common = "star-1" # 单点共地：J-PWR 负极
+
+[[wire]]
+# J3 舵机：SG90 三线（§4.3 原例）——vcc 挂 rail5v、信号线写 pin_id、gnd 共地
+connector = "J3"
+hdr_pin = [2, 3, 4]
+signal = ["vcc", "act.axis.pwm.pan", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P" # devices.toml 在册（校验⑦-d）
+keyed = true     # 3P 防呆：丝印序 vcc/信号/gnd
+rated_a = 1.0
+gnd_common = "star-1"
+
+[[wire]]
+# J4 LED 模组：控制线 + 地（net=none：纯信号/地线组，不承载电力网络导体——
+# 负载电流在 LED 模组内，与 profiles/default.toml [pins] led 条目 rail=none 同判读）
+connector = "J4"
+hdr_pin = [1, 2]
+signal = ["act.led.gpio", "gnd"]
+net = "none"
+feeds = []
+mate = "none"
+keyed = false # 2P 排针无防呆
+rated_a = 0.5
+gnd_common = "star-1"
+
+[[wire]]
+# J5 电表：INA219 四线（vcc/gnd 供电挂 rail3v3；SDA/SCL 两导体同属一个 pin_id）
+connector = "J5"
+hdr_pin = [1, 2, 3, 4]
+signal = ["vcc", "gnd", "power.battery.meter", "power.battery.meter"]
+net = "rail3v3"
+feeds = []
+mate = "none" # 排针直连（INA219 模组无对端连接器型号在册）
+keyed = false
+rated_a = 0.5
+gnd_common = "star-1"
+
+[[wire]]
+# J6 继电器模组：通断控制线 + 地（net=none 同 J4 判读：被切负载归 domains 侧管，批N2）
+connector = "J6"
+hdr_pin = [1, 2]
+signal = ["act.relay.gpio", "gnd"]
+net = "none"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 0.5
+gnd_common = "star-1"
