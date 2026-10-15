@@ -18,6 +18,9 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 [platform]
 # 平台档位（ADR-0018 修订 1）：与 default 同一块参考机 = host。取值依据同 default 注释。
 tier = "host"
+# 平台事实表外键（§4.6，批N1 基-22）：与 default 同一块 RK3566（contracts/platform/
+# rk3566.toml，演练实例——status.md 敞口在案）。
+chip = "rk3566"
 
 [supplies]
 # 平台供给声明：与 profiles/default.toml 同板同值（注释见 default——

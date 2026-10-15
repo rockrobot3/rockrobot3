@@ -168,9 +168,19 @@
   include_str! 逐名对账）+ 生成器 `tools/rr3-codegen`（板侧 `topics_gen.rs` 生成副本，
   board.rs 四手写常量退役改 include）+ 门 f 接线（check.sh 拟 ⑨-d 重跑 diff 为空）+
   descriptor 键集改判收口（rr-registry contract.rs 机判 `Rr3HalBindings` 十键与
-  `RR3_ASSEMBLE_DESC_KEYS` 两处同批，C4 撤销后 spi_device 进场的对账钉死）——余 n1-9
-  装载校验①②⑤⑦⑧ 接线（含 profiles `[platform].chip` 键与 ⑧ 双向对账过滤语义）/
-  n1-10 L-14 器件级探测 + 文档回写收口。
+  `RR3_ASSEMBLE_DESC_KEYS` 两处同批，C4 撤销后 spi_device 进场的对账钉死）/ n1-9 装载校验接平台表
+  （判据实判位 **5→12**）：`[platform].chip` FK 必填非空（boot 链按 `contracts/platform/<chip>.toml`
+  选册，读不到/形状坏 fail-closed 拒 boot）+ 校验⑤-a（`direction=out` 落平台 input-only 集；
+  `input_only_ok` 住 roles.toml 角色侧）/⑤-b（域 `sense`/`current_sense` 按 pin_id 引用的 pin，
+  其 physical ∈ 平台 adc_pins；I2C 测点 physical 空 = 无判据对象）/⑧-b（controller ∈ 平台词表）/
+  ③ 三资源空间双占（physical 元素 / (controller, channel) / (bus, addr)——addr="none" 显式不适值
+  不占地址维）/④-b conflicts 反推互斥（命中同一冲突子集者 ≥2 且任一未申报该组即红，**组名取自
+  平台表**，装机档不得自起名；单向含入——芯片事实 ≠ 现役占用）——后果一律拒（全案 §5 第 5 列）；
+  10 条新用例（含 ④-b 正例：双 pin 申报 `mux_group=["i2c0"]` 放行）全绿，daemon 喂
+  `contracts/platform/` 目录，profiles 三份 + e2e 四夹具（act/power/connect/sim）同批补 chip；
+  施工中修 1 缺陷：③ owner 判重原用 pin_id 字符串，per_instance=false 角色的双 pin 同名会把双占
+  误判成"自己撞自己"吞红，改循环序号判"同一条"（③-c 用例当场抓出）——余 n1-10 L-14 器件级探测 +
+  文档回写收口。
 
 - **2026-10-15 全代码逐 crate 复盘 → [ADR-0022](process/adr/ADR-0022-代码事实复盘-机制核纯净度与申报面逃逸与安全语义身体.md) 落档**（文档轮，
   零 `.rs`、零契约文件改动）：取证 = 四路并行审查 + **每条断言我本人 grep/读码复核**（撤回与收窄项见

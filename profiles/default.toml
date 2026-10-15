@@ -18,6 +18,9 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 [platform]
 # 平台档位（ADR-0018 修订 1：host / rtos / bare 三档）。参考机跑完整 Linux 底座 = host。
 tier = "host"
+# 平台事实表外键（§4.6，批N1 基-22）：校验③④⑤⑧按它选 contracts/platform/rk3566.toml
+# （演练实例，取值待器件核对——status.md 敞口在案）。
+chip = "rk3566"
 
 [supplies]
 # 平台供给声明（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）。
