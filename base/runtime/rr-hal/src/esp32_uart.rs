@@ -31,8 +31,8 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf,
-    Rr3Header, Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_UART_BAUD_DEFAULT,
+    opcode, rr3_body_encode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3Header,
+    Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_UART_BAUD_DEFAULT,
 };
 use serde_json::{json, Value};
 
@@ -152,10 +152,6 @@ struct Rr3BridgeConn {
 }
 
 impl Rr3BridgeConn {
-    fn rr3_bridge_conn_new(path: PathBuf) -> Self {
-        Self::rr3_bridge_conn_new_with_baud(path, RR3_BRIDGE_BAUD)
-    }
-
     /// 波特率显式档（批D②）：板固件 921600 时经 env/构造参数同档传入。
     fn rr3_bridge_conn_new_with_baud(path: PathBuf, baud: u32) -> Self {
         Self {
@@ -236,7 +232,10 @@ impl Rr3BridgeConn {
             }
         };
         if frame.header.dst_task != RR3_TASK_HOST {
-            eprintln!("rr-hal-esp32: 应答 dst_task={} 非 {RR3_TASK_HOST}，拒收", frame.header.dst_task);
+            eprintln!(
+                "rr-hal-esp32: 应答 dst_task={} 非 {RR3_TASK_HOST}，拒收",
+                frame.header.dst_task
+            );
             self.conn = None;
             return Err(Rr3HalError::Busy);
         }
@@ -439,7 +438,8 @@ mod tests {
         let nr = rr3_body_encode(ty, no_res.to_string().as_bytes());
         assert!(rr3_bridge_parse_response(ty, &nr[2..], 3).is_err());
         // result.error 折 Err
-        let err_body = json!({"jsonrpc": "2.0", "id": 3, "result": {"error": "角度超范围 0-180: 200"}});
+        let err_body =
+            json!({"jsonrpc": "2.0", "id": 3, "result": {"error": "角度超范围 0-180: 200"}});
         let eb = rr3_body_encode(ty, err_body.to_string().as_bytes());
         let e = rr3_bridge_parse_response(ty, &eb[2..], 3).unwrap_err();
         assert!(e.contains("板侧业务失败"), "{e}");
@@ -451,8 +451,14 @@ mod tests {
     #[test]
     fn task_and_trace_constants_match_rr_core_truth() {
         assert_eq!(RR3_TASK_HOST, 1, "宿主位形=rrd（rr-core::RR3_TASK_RRD）");
-        assert_eq!(RR3_TRACE_DIRECT, 0, "直连 trace（rr-core::RR3_TRACE_ID_DIRECT）");
+        assert_eq!(
+            RR3_TRACE_DIRECT, 0,
+            "直连 trace（rr-core::RR3_TRACE_ID_DIRECT）"
+        );
         assert_eq!(RR3_PERIPH_TASK, 2, "板上执行面占首模块池位形");
-        assert_eq!(RR3_BRIDGE_BAUD, 115200, "缺省档保持 115200（Q1=(a)：宿主缺省不变）");
+        assert_eq!(
+            RR3_BRIDGE_BAUD, 115200,
+            "缺省档保持 115200（Q1=(a)：宿主缺省不变）"
+        );
     }
 }

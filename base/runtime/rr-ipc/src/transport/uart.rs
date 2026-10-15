@@ -196,7 +196,10 @@ mod imp {
     }
 }
 
-use imp::{NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME};
+use imp::{
+    NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN,
+    TCIFLUSH, VMIN, VTIME,
+};
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
 use std::collections::HashMap;
@@ -433,7 +436,11 @@ impl Rr3UartConn {
         loop {
             // SAFETY：buf 活到调用返回，fd 属 self。就绪后读一次，部分读如实上交。
             let n = unsafe {
-                c_read(self.fd, buf.as_mut_ptr() as *mut std::ffi::c_void, buf.len())
+                c_read(
+                    self.fd,
+                    buf.as_mut_ptr() as *mut std::ffi::c_void,
+                    buf.len(),
+                )
             };
             if n < 0 {
                 let e = std::io::Error::last_os_error();
@@ -752,10 +759,7 @@ mod tests {
             assert!(n > 0, "有数据不得 Ok(0)");
             got.extend_from_slice(&buf[..n]);
         }
-        assert_eq!(
-            got, bytes,
-            "超时档读出的字节必须与原帧逐字节一致"
-        );
+        assert_eq!(got, bytes, "超时档读出的字节必须与原帧逐字节一致");
     }
 
     /// 设备不存在 → open 报 IO 错（错误路径不 panic、不静默）。
@@ -800,7 +804,10 @@ mod tests {
         assert!(rr3_uart_baud_speed(9600).is_ok());
         assert!(rr3_uart_baud_speed(921600).is_ok());
         assert!(rr3_uart_baud_speed(0).is_err());
-        assert!(rr3_uart_baud_speed(230400).is_err(), "档位动物园不得静默扩张");
+        assert!(
+            rr3_uart_baud_speed(230400).is_err(),
+            "档位动物园不得静默扩张"
+        );
     }
 
     /// 排他开口·同进程重入（批G G0 守门用例）：同一节点同进程两次 open 都放行
