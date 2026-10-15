@@ -997,6 +997,34 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
             );
         }
     }
+    // 域 pin（校验⑥ CI 侧静态面）：[[supplies.domain]] 域名非空不重复；
+    // [pins].rail ∈ 域名集 ∪ {"none"}（⑥-a 在册 + ⑥-b 功率面挂真轨的名单面）
+    let mut domains: Vec<String> = Vec::new();
+    for d in v
+        .get("supplies")
+        .and_then(|s| s.get("domain"))
+        .and_then(toml::Value::as_array)
+        .expect("缺 [[supplies.domain]]（第七供给位，schema 3 起必填）")
+    {
+        let name = d
+            .get("name")
+            .and_then(toml::Value::as_str)
+            .expect("域条目缺 name");
+        assert!(!name.is_empty(), "域名不得为空");
+        assert!(!domains.contains(&name.to_string()), "域名 {name} 重复声明");
+        domains.push(name.to_string());
+    }
+    for p in pins {
+        if let Some(rail) = p.get("rail").and_then(toml::Value::as_str) {
+            if rail != "none" {
+                assert!(
+                    domains.contains(&rail.to_string()),
+                    "pin {} rail = {rail} 未在 [[supplies.domain]] 在册（校验⑥-a）",
+                    p.get("role").and_then(toml::Value::as_str).unwrap_or("?")
+                );
+            }
+        }
+    }
 }
 
 /// 门禁②（profile 侧）+ 裁定 3 的装配自洽：default 装配单的 bindings 逐格对表查册、

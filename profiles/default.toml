@@ -32,6 +32,50 @@ tick_period_ms = 200
 tick_jitter_ms = 100
 safety_core_interval_ms = 1000
 
+# [[supplies.domain]] 电力网络声明（第七供给位，schema 3，增补轮六 §3.1/§5 校验⑥）。
+# 阈值/上限为**声明预算位**（演练实例，全案 §4.1b"取值待器件"：RK3566 只能先给演练
+# 实例记敞口；5V 轨阈值与板 crate board.rs RAIL_*_MV 占位同源），对账归批N2 门 c；
+# 全域 armed=false（未标定即不武装，§3.1 降级语义——armed=true 须有测点 + 龄期上界）。
+# 三个绑定引用位一律写 pin_id（⑥-d），无对象显式写 "none"。
+[[supplies.domain]]
+name = "batt"
+nominal_mv = 3700
+mild_mv = 3500
+severe_mv = 3300
+current_cap_ma = 2000
+sense = "power.battery.meter" # pin_id 外键（INA219 在位，[pins] meter 条目）
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
 # 本节绑定全部身体层与认知层格位（16 格，default 机不留缺格）。
