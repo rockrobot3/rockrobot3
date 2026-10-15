@@ -522,6 +522,10 @@ watchdog_timeout_ms = 5000\n";
              [supplies]\nwatchdog_present = false\nwatchdog_timeout_ms = 15000\n\
              watchdog_feeder = \"none\"\ntick_period_ms = 200\ntick_jitter_ms = 100\n\
              safety_core_interval_ms = 1000\n\n\
+             [[supplies.domain]]\nname = \"rail5v\"\nnominal_mv = 5000\nmild_mv = 4600\n\
+             severe_mv = 4400\ncurrent_cap_ma = 2000\nsense = \"none\"\n\
+             current_sense = \"none\"\nswitch = \"none\"\nswitchable = false\n\
+             armed = false\nmax_age_ms = 0\n\n\
              [bindings]\n\"a.b\" = \"rr3-pa\"\n\n\
              [enabled_slots]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n\n\
              [slots]\npresent = [\"a.b\"]\n",

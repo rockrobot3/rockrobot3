@@ -30,6 +30,47 @@ tick_period_ms = 200
 tick_jitter_ms = 100
 safety_core_interval_ms = 1000
 
+# [[supplies.domain]] 电力网络声明：与 default 同板同域（[[supplies.domain]] 逐值
+# 一致；占位口径与对账归宿见 default 注释）。
+[[supplies.domain]]
+name = "batt"
+nominal_mv = 3700
+mild_mv = 3500
+severe_mv = 3300
+current_cap_ma = 2000
+sense = "power.battery.meter"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
 # 认知层四格绑定 rr3-brain（0.0.6 批F1：brain 随 deb 装机、经装配单进 boot）。
