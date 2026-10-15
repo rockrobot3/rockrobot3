@@ -4,11 +4,12 @@
 schema_version = 2
 
 [assemble]
-# 显示面句柄待立：描述符九键无显示键（C4 裁定不扩键），本件暂无 Rr3Display 句柄
-# → handles 仍空；但 ops 已非空（I-11），故不写 no_injection（该键只允许两数组
-# 都空，rr-registry 形状级规则）。真屏件与显示键落地时补 Rr3Display 句柄与
-# default_expression 槽。
-handles = []
+# 显示面句柄（0.0.6 链④真件档补立，预留注记兑现）：Rr3Display ← 描述符键
+# spi_device（MAX7219 spidev 设备路径，十键批两处同批）；ops 同前（I-11），
+# 故不写 no_injection（该键只允许两数组都空，rr-registry 形状级规则）。
+handles = [
+  { trait = "Rr3Display", desc_key = "spi_device" },
+]
 ops = [
   # 不可点名集 ← config.toml [rr3-interact.face] non_pointable（I-11：规则从件内
   # if 迁出——值本身是契约字面量不许改，可注入的是集合，"某形态放开 talk"= 改数据）

@@ -51,7 +51,8 @@ pub const RR3_ASSEMBLE_HANDLE_TRAITS: &[&str] = &[
     "Rr3Display",
 ];
 
-/// 九描述符键在册表（真值源 rr-hal descriptor.rs `[hardware]` 键集；C4 批J 裁定不扩键）
+/// 描述符键在册表（真值源 rr-hal descriptor.rs `[hardware]` 键集；C4 批J 裁定
+/// 不扩键，0.0.6 链④真件档按裁定流程扩 `spi_device`——两处同批）
 pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "alsa_device",
     "pwm_chip",
@@ -62,6 +63,7 @@ pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "i2c_bus",
     "ina219_addr",
     "link_ifname",
+    "spi_device",
 ];
 
 /// 一条句柄声明：件用 `trait_name` 能力面，绑描述符 `desc_key` 键
@@ -186,7 +188,7 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
                 match desc_key {
                     Some(dk) if RR3_ASSEMBLE_DESC_KEYS.contains(&dk) => {}
                     Some(dk) => errs.push(format!(
-                        "handles[{i}].desc_key \"{dk}\" 未在册（九键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
+                        "handles[{i}].desc_key \"{dk}\" 未在册（键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
                     )),
                     None => errs.push(format!("handles[{i}].desc_key 应为字符串")),
                 }
@@ -361,7 +363,8 @@ ops = [
         )
         .expect_err("声明与注入面并存必须红");
         assert!(
-            errs.iter().any(|e| e.contains("只允许与空的 handles/ops 并存")),
+            errs.iter()
+                .any(|e| e.contains("只允许与空的 handles/ops 并存")),
             "{errs:?}"
         );
 
