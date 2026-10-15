@@ -65,6 +65,19 @@ tick_period_ms = 200
 tick_jitter_ms = 100
 safety_core_interval_ms = 1000
 
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
 [slots]
 present = ["act.servo", "act.led", "act.relay"]
 

@@ -101,6 +101,25 @@ const RR3_PIN_KEYS: [&str; 10] = [
     "mux_group",
 ];
 
+/// [[supplies.domain]] 条目字段词表（§3.1 家族 A ④ 列 + §5 校验⑥）：域名与阈值三键、
+/// 域电流上限、三个绑定引用位（sense/current_sense/switch 一律写 pin_id）与开关/
+/// 武装/龄期三键。全键必填——"合法不适用"显式写 `none`/`false`/`0`，留空即红
+/// （§5 缺失语义列，同 no_injection 范式）；`max_age_ms = 0` 且 `armed = true`
+/// 无运行期读者，由校验⑥-c 拒。
+const RR3_DOMAIN_KEYS: [&str; 11] = [
+    "name",
+    "nominal_mv",
+    "mild_mv",
+    "severe_mv",
+    "current_cap_ma",
+    "sense",
+    "current_sense",
+    "switch",
+    "switchable",
+    "armed",
+    "max_age_ms",
+];
+
 /// [supplies]：平台供给声明（不可变快照）。看门狗三键 = 有无 / 超时上界 / 由哪一路喂
 /// （修订 4 ②）；时序三键 = 机制核节拍周期 / 节拍抖动预算 / 安全核最小复核间隔的
 /// **声明预算位**（修订 2 ③）——声明值与生产真值的对账归 0.0.6 点验矩阵，这里只管收。
@@ -118,6 +137,41 @@ pub struct Rr3Supplies {
     pub tick_jitter_ms: i64,
     /// 安全核最小复核间隔声明 ms
     pub safety_core_interval_ms: i64,
+    /// [[supplies.domain]] 电力网络声明（第七供给位，§3.1 家族 A；域名唯一，
+    /// [pins].rail / wire.net 的在册名单源，校验⑥-a/⑦-b）。声明序 = TOML 序，
+    /// 不携带顺序语义；查册用名字，无序消费。
+    pub domains: Vec<Rr3Domain>,
+}
+
+/// 一条电力网络域（§3.1 家族 A 轨与域行 + §5 校验⑥）。阈值三键 = nominal/mild/severe
+/// （mild > severe > 0 的次序校验归批N2 门 c——域阈值消费者侧；本批只收形状）。
+/// 三个绑定引用位写 `pin_id`（§4.2 定义），`"none"` 是合法显式值——留空即红（⑥-d）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rr3Domain {
+    /// 域名（在册名单源；[pins].rail 外键。全案在册名集 = batt/rail5v/rail3v3，
+    /// 新名 = 契约级评审——§18 F-5）
+    pub name: String,
+    /// 标称电压 mV
+    pub nominal_mv: i64,
+    /// 轻度欠压阈 mV（tier=Mild 源，批N2 门 c 消费）
+    pub mild_mv: i64,
+    /// 重度欠压阈 mV（tier=Severe 源，批N2 门 c 消费）
+    pub severe_mv: i64,
+    /// 域电流上限 mA（校验⑨ 预算分母，批N2 门 c 消费）
+    pub current_cap_ma: i64,
+    /// 轨压测点（pin_id 外键，⑥-d；无测点显式写 "none"）
+    pub sense: String,
+    /// 电流采样点（pin_id 外键，⑥-d；无采样显式写 "none"）
+    pub current_sense: String,
+    /// 断电开关控制位（pin_id 外键，⑥-d；不可切显式写 "none"）
+    pub switch: String,
+    /// 可切域标记（断电轨 T1/T2 的数据位；与 switch ≠ none 成对）
+    pub switchable: bool,
+    /// 武装位（§3.1 降级语义：未标定即 false——armed=false 时档位照算越阈照报，
+    /// 但不驱动拒动；armed=true 而无测点由校验⑥-c 拒）
+    pub armed: bool,
+    /// 测点龄期上界 ms（⑥-c：armed=true 必填且 > 0；无龄期快照不得充当拒动依据，§19 Y-4）
+    pub max_age_ms: i64,
 }
 
 /// 一条 [[pin]] 物理绑定（增补轮六 §4.2）。身份 = `pin_id`：`per_instance=false`
@@ -465,12 +519,78 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                 _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
             }
             for k in t.keys() {
-                if !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
+                // domain 是 [[supplies.domain]] 数组键，单独成块解析（第七供给位）
+                if k != "domain" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
                     errs.push(format!(
                         "[supplies] 未知键 {k}（只认 {}）",
                         RR3_SUPPLIES_KEYS.join("/")
                     ));
                 }
+            }
+            // [[supplies.domain]]：电力网络声明（第七供给位，§3.1 家族 A；校验⑥ 判据源）。
+            // 缺数组 = 红吗？——不：域集是形态事实（无电力网络声明的形态不存在，
+            // 但 schema 3 装载期校验⑥-a 需要名单源，pins.rail 非空即须命中本表；
+            // 空数组 = 全 pin 无轨 = ⑥-b 若有 power 角色即红），解析层只收形状。
+            match t.get("domain").and_then(toml::Value::as_array) {
+                Some(items) => {
+                    for (i, item) in items.iter().enumerate() {
+                        let label = format!("supplies.domains[{i}]");
+                        let Some(dt) = item.as_table() else {
+                            errs.push(format!("{label} 必须是 [[supplies.domain]] 表"));
+                            continue;
+                        };
+                        let mut d = Rr3Domain::default();
+                        for key in RR3_DOMAIN_KEYS {
+                            let path = format!("{label}.{key}");
+                            match key {
+                                "name" | "sense" | "current_sense" | "switch" => {
+                                    match dt.get(key).and_then(toml::Value::as_str) {
+                                        Some(s) if !s.is_empty() => {
+                                            let v = s.to_string();
+                                            match key {
+                                                "name" => d.name = v,
+                                                "sense" => d.sense = v,
+                                                "current_sense" => d.current_sense = v,
+                                                _ => d.switch = v,
+                                            }
+                                        }
+                                        _ => errs.push(format!("{path} 缺失或不是非空字符串")),
+                                    }
+                                }
+                                "switchable" | "armed" => {
+                                    match (key, dt.get(key).and_then(toml::Value::as_bool)) {
+                                        ("switchable", Some(b)) => d.switchable = b,
+                                        ("armed", Some(b)) => d.armed = b,
+                                        _ => errs.push(format!("{path} 缺失或不是布尔")),
+                                    }
+                                }
+                                _ => match supplies_int(dt.get(key), &path) {
+                                    Ok(v) => match key {
+                                        "nominal_mv" => d.nominal_mv = v,
+                                        "mild_mv" => d.mild_mv = v,
+                                        "severe_mv" => d.severe_mv = v,
+                                        "current_cap_ma" => d.current_cap_ma = v,
+                                        _ => d.max_age_ms = v,
+                                    },
+                                    Err(e) => errs.push(e),
+                                },
+                            }
+                        }
+                        for k in dt.keys() {
+                            if !RR3_DOMAIN_KEYS.contains(&k.as_str()) {
+                                errs.push(format!(
+                                    "{label} 未知键 {k}（只认 {}）",
+                                    RR3_DOMAIN_KEYS.join("/")
+                                ));
+                            }
+                        }
+                        supplies.domains.push(d);
+                    }
+                }
+                None => errs.push(
+                    "缺少 [[supplies.domain]]（电力网络声明，第七供给位；schema_version=3 起必填，至少声明一域）"
+                        .to_string(),
+                ),
             }
         }
     }
@@ -871,6 +991,68 @@ pub fn rr3_profile_boot_inputs_with_probe(
             }
         }
     }
+    // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
+    // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
+    // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
+    // （无龄期快照不得充当拒动依据，§19 Y-4）；⑥-d 域的三个绑定引用位写 pin_id
+    // 且能在 [pins] 取到（F-2：第二套语法一条校验都打不到）。校验⑦-b（wire.net
+    // ⊆ domains）随 n1-6b wiring.toml 落地同链判。
+    let domain_names: BTreeSet<&str> = profile
+        .supplies
+        .domains
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect();
+    for pin in &profile.pins {
+        // rail 缺省的合法性与角色 kind 挂钩：power 面（⑥-b）必须有在册轨；
+        // signal 面（meter 类，requires 无 rail）不写 rail 合法——写了非 none 的
+        // 名字则一律查在册（⑥-a）。"none" 是 signal 侧控制线的显式不适值。
+        let kind = roles.rr3_role_table_kind(&pin.role);
+        let rail_unlisted = pin.rail.is_empty() || pin.rail == "none";
+        if rail_unlisted {
+            if kind.as_deref() == Some("power") {
+                errs.push(format!(
+                    "pins[{}] rail {} 但角色 {} kind = power（校验⑥-b：功率面必须挂真实供电轨，缺 rail 或 none 即红）",
+                    pin.rr3_pin_id(),
+                    if pin.rail.is_empty() { "缺失" } else { "= none" },
+                    pin.role
+                ));
+            }
+        } else if !domain_names.contains(pin.rail.as_str()) {
+            errs.push(format!(
+                "pins[{}] rail = {} 未在 [[supplies.domain]] 在册（校验⑥-a；域名单源在该形态的域声明，§18 F-5）",
+                pin.rr3_pin_id(),
+                pin.rail
+            ));
+        }
+    }
+    for d in &profile.supplies.domains {
+        let label = format!("supplies.domains[{}]", d.name);
+        if d.armed && (d.sense == "none" || d.max_age_ms <= 0) {
+            errs.push(format!(
+                "{label} armed = true 但 sense = none 或 max_age_ms ≤ 0（校验⑥-c：无测点/无龄期上界的域不得武装拒动——未标定即 armed=false，§3.1 降级语义）"
+            ));
+        }
+        for (key, val) in [
+            ("sense", &d.sense),
+            ("current_sense", &d.current_sense),
+            ("switch", &d.switch),
+        ] {
+            if val == "none" {
+                continue;
+            }
+            if !profile.pins.iter().any(|p| p.rr3_pin_id() == *val) {
+                errs.push(format!(
+                    "{label}.{key} = {val} 不在 [pins] 的 pin_id 集（校验⑥-d：绑定位一律写 pin_id，\"none\" 是合法显式值——第二套语法如 adc:gp34 一律红，F-2）"
+                ));
+            }
+        }
+        if d.switchable && d.switch == "none" {
+            errs.push(format!(
+                "{label} switchable = true 但 switch = none（可切域必有开关控制位，两键成对）"
+            ));
+        }
+    }
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -1042,6 +1224,32 @@ watchdog_feeder = "rrd"
 tick_period_ms = 200
 tick_jitter_ms = 100
 safety_core_interval_ms = 1000
+
+[[supplies.domain]]
+name = "batt"
+nominal_mv = 3700
+mild_mv = 3500
+severe_mv = 3300
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
 
 [bindings]
 "act.servo" = "rr3-pa"
@@ -1521,10 +1729,7 @@ mux_group = []
             Path::new(RR3_CONTRACT_ROLES_PATH),
         )
         .expect_err("自造角色必须致命");
-        assert!(
-            e.contains("角色 act.axis.magical 未在册"),
-            "{e}"
-        );
+        assert!(e.contains("角色 act.axis.magical 未在册"), "{e}");
     }
 
     /// 校验①-b per_instance 两侧：true 角色缺 instance / false 角色填 instance 都红
@@ -1626,6 +1831,110 @@ mux_group = []
             errs.iter().any(|e| e.contains("pin #1 缺 direction")),
             "{errs:?}"
         );
+    }
+
+    /// 校验⑥-a/⑥-b 反例（§18 F-5 的自造域名 + 功率面挂 none）：未在册 rail 与
+    /// kind=power 而 rail=none 都必须拒 boot 并点名
+    #[test]
+    fn pin_rail_domain_gate_is_fatal() {
+        let root = Root::new("rail-gate");
+        // ⑥-a：自造域名（F-5：rail24 不在任何一处在册集——文档示例值会被装机档抄）
+        let text = GOOD.replace("rail = \"rail5v\"", "rail = \"rail24\"");
+        let p = root.write_profile("rail-unknown.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("自造域名必须致命");
+        assert!(
+            e.contains("rail = rail24 未在 [[supplies.domain]] 在册"),
+            "{e}"
+        );
+
+        // ⑥-b：kind=power 角色挂 none（act.axis.pwm 是 power，none 是 signal 侧显式值）
+        let text = GOOD.replace("rail = \"rail5v\"", "rail = \"none\"");
+        let p = root.write_profile("rail-none-power.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("功率面挂 none 必须致命");
+        assert!(e.contains("kind = power"), "{e}");
+    }
+
+    /// 校验⑥-c 反例：armed=true 而 sense=none / max_age_ms=0——未标定即不武装，
+    /// 无测点/无龄期上界的域不得武装拒动（§3.1 降级语义 + §19 Y-4）。
+    /// GOOD 的 batt 域恰是 sense=none + max_age_ms=0 的最小反例，armed 一开即双红。
+    #[test]
+    fn domain_armed_without_sense_is_fatal() {
+        let root = Root::new("armed-gate");
+        let text = GOOD.replace(
+            "switchable = false\narmed = false\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "switchable = false\narmed = true\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+        );
+        let p = root.write_profile("armed.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("武装而无测点/龄期必须致命");
+        assert!(e.contains("校验⑥-c"), "{e}");
+    }
+
+    /// 校验⑥-d 反例：域绑定位写第二套语法（F-2 的 adc:gp34）——不在 pin_id 集
+    /// 即红，"一律写 pin_id，不再各造语法"
+    #[test]
+    fn domain_binding_uses_pin_id_not_adhoc_syntax() {
+        let root = Root::new("pid-gate");
+        let text = GOOD.replace(
+            "sense = \"none\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "sense = \"adc:gp34\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+        );
+        let p = root.write_profile("pid.toml", &text);
+        let e = rr3_profile_boot_inputs(
+            &p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+        )
+        .expect_err("第二套语法必须致命");
+        assert!(e.contains("不在 [pins] 的 pin_id 集"), "{e}");
+        assert!(e.contains("sense = adc:gp34"), "{e}");
+    }
+
+    /// [[supplies.domain]] 形状门（解析层）：缺键逐键点名、未知键点名、
+    /// 缺整个域数组点名——一次收集完，运维一次改对
+    #[test]
+    fn domain_section_shape_errors_are_named() {
+        // 缺整个域数组（schema 3 起必填）：取 GOOD 的 [supplies] 段头做最小文本
+        let minimal_head = GOOD.split("[[supplies.domain]]").next().unwrap_or(GOOD);
+        let errs = rr3_profile_from_text(minimal_head).expect_err("缺域数组必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("缺少 [[supplies.domain]]")),
+            "{errs:?}"
+        );
+
+        // 域条目缺键 + 未知键逐条点名
+        let errs = rr3_profile_from_text(&format!(
+            "{minimal_head}[[supplies.domain]]\nname = \"batt\"\nnominal_mv = 3700\nghost = 1\n"
+        ))
+        .expect_err("缺键/未知键必须报错");
+        for want in [
+            "supplies.domains[0].mild_mv",
+            "supplies.domains[0].severe_mv",
+            "supplies.domains[0].current_cap_ma",
+            "supplies.domains[0].sense",
+            "supplies.domains[0].current_sense",
+            "supplies.domains[0].switch",
+            "supplies.domains[0].switchable",
+            "supplies.domains[0].armed",
+            "supplies.domains[0].max_age_ms",
+            "supplies.domains[0] 未知键 ghost",
+        ] {
+            assert!(errs.iter().any(|e| e.contains(want)), "缺 {want}: {errs:?}");
+        }
     }
 
     /// 门 n 稳态判据（§8，power P-13）：[hardware] 出现物理键即红——GOOD 无电表
