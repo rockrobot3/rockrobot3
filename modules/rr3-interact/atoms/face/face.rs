@@ -83,4 +83,39 @@ mod tests {
         );
         assert_eq!(rr3_face_non_pointable_join(&[]), "(空)");
     }
+
+    /// 本常量是契约真值点（contracts/face-expressions.toml）的 Rust 投影——
+    /// 全案 0.0.5 增补轮六 §4.5：白名单唯一来源落 contracts/，代码常量是对账
+    /// 副本。本测试把真值点文本逐名比对钉死：扩态须契约文件与本常量同批，
+    /// 单改一侧即红（板侧副本由 rr3-codegen 生成，门 f 拟 ⑨-d 重跑 diff 为空）。
+    #[test]
+    fn expressions_match_contract_truth_point() {
+        let contract = include_str!("../../../../contracts/face-expressions.toml");
+        // 提取 TOML 数组（跨行）内的字符串项——契约文件形状由门 f 与真值点
+        // 自身钉死，此处只做最小文本提取，不引 toml 解析依赖。
+        let arr_of = |key: &str| -> Vec<String> {
+            let start = contract
+                .find(&format!("{key} = ["))
+                .unwrap_or_else(|| panic!("契约文件缺 {key}"));
+            let rest = &contract[start + key.len() + 3..];
+            let end = rest.find(']').expect("数组未闭合");
+            rest[..end]
+                .split('"')
+                .enumerate()
+                .filter(|(i, _)| i % 2 == 1)
+                .map(|(_, s)| s.to_string())
+                .collect()
+        };
+        let all = arr_of("expressions");
+        let board_subset = arr_of("board_subset");
+        assert_eq!(
+            all, RR3_FACE_EXPRESSIONS,
+            "契约真值点与宿主投影漂移：扩态走契约级评审，contracts/face-expressions.toml 与本常量同批"
+        );
+        assert_eq!(
+            board_subset,
+            RR3_FACE_EXPRESSIONS[..7].to_vec(),
+            "板侧可渲染子集（board_subset）须与基态前 7 位一致（板侧生成物 rr3-codegen 用它）"
+        );
+    }
 }

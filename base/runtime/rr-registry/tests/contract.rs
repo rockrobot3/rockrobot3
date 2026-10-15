@@ -1807,3 +1807,32 @@ fn composite_declaration_face_is_pinned() {
     .expect_err("组合件面写件级版本值必须红");
     assert!(errs.iter().any(|e| e.contains("同名不同域")), "{errs:?}");
 }
+
+/// descriptor.rs 键集与 rr-registry 在册表"两处同批"机判（C4 撤销后的改判收口，
+/// 全案 §9 N1 行："descriptor.rs 键集改判与 rr-registry 在册表同批"）。十键批
+/// `spi_device` 进场后，rr-hal `Rr3HalBindings` 字段集与 RR3_ASSEMBLE_DESC_KEYS
+/// 必须逐名一致——单边扩键即红（在册表是 handles[].desc_key 的判等域，注入端
+/// 键名不同源 = 装配申报被静默丢键）。rr-registry 不依赖 rr-hal，按契约测试
+/// 惯例读真值文本扫描（与 roles/devices/platform 的 include_str! 同路）。
+#[test]
+fn descriptor_keys_and_registry_desc_keys_are_the_same_batch() {
+    let desc = std::fs::read_to_string(repo_root().join("base/runtime/rr-hal/src/descriptor.rs"))
+        .expect("rr-hal descriptor.rs 必须存在");
+    for k in rr_registry::RR3_ASSEMBLE_DESC_KEYS.iter() {
+        assert!(
+            desc.contains(&format!("pub {k}: Option<")),
+            "描述符键 {k} 在 descriptor.rs 的 Rr3HalBindings 无同名字段（两处同批被打破，扩键须契约级评审并同批）"
+        );
+    }
+    // 反向：descriptor.rs 的 Option 字段总数 = 在册表长度（防 descriptor 单边多键）
+    let field_count = desc
+        .lines()
+        .filter(|l| l.contains("pub ") && l.contains(": Option<"))
+        .count();
+    assert_eq!(
+        field_count,
+        rr_registry::RR3_ASSEMBLE_DESC_KEYS.len(),
+        "descriptor.rs Rr3HalBindings 字段数（{field_count}）与在册表（{}）不一致——扩键两处同批",
+        rr_registry::RR3_ASSEMBLE_DESC_KEYS.len()
+    );
+}

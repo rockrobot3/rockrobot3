@@ -163,8 +163,13 @@
   拒 boot，宽容 = §18 F-6 病）+ 组合件申报面定形（`src/composite.rs`：六份 `modules/*/composite.toml`
   同批补 `handles`/`ops`/`no_injection` 三键，N-11 门 j 前件；**schema 位裁定**：组合件面
   `RR3_COMPOSITE_SCHEMA_VERSION = 1` 与件级 `RR3_ASSEMBLE_SCHEMA_VERSION = 2` 同名不同域，
-  本轮增三键属首次定形只增不 bump）——余 n1-8 主题串/白名单生成器 + descriptor 键集改判 /
-  n1-9 装载校验①②⑤⑦⑧ 接线（含 profiles `[platform].chip` 键与 ⑧ 双向对账过滤语义）/
+  本轮增三键属首次定形只增不 bump）/ n1-8 生成物真值点定形（§4.5）：白名单唯一来源落
+  `contracts/face-expressions.toml`（43 态全集 + board_subset 七态；宿主投影 face.rs
+  include_str! 逐名对账）+ 生成器 `tools/rr3-codegen`（板侧 `topics_gen.rs` 生成副本，
+  board.rs 四手写常量退役改 include）+ 门 f 接线（check.sh 拟 ⑨-d 重跑 diff 为空）+
+  descriptor 键集改判收口（rr-registry contract.rs 机判 `Rr3HalBindings` 十键与
+  `RR3_ASSEMBLE_DESC_KEYS` 两处同批，C4 撤销后 spi_device 进场的对账钉死）——余 n1-9
+  装载校验①②⑤⑦⑧ 接线（含 profiles `[platform].chip` 键与 ⑧ 双向对账过滤语义）/
   n1-10 L-14 器件级探测 + 文档回写收口。
 
 - **2026-10-15 全代码逐 crate 复盘 → [ADR-0022](process/adr/ADR-0022-代码事实复盘-机制核纯净度与申报面逃逸与安全语义身体.md) 落档**（文档轮，

@@ -587,6 +587,19 @@ if [ "$gate_fail" -ne 0 ]; then
 fi
 run_tests sh -c 'cd base/runtime && cargo test -p rr-registry --test contract injection'
 
+# —— ⑨-d 生成物一致性门（门 f：重跑生成器 diff 为空；全案 §8/§4.5，批N1 n1-8）
+# 真值点 contracts/topics.toml + contracts/face-expressions.toml → 板侧副本
+# tools/esp32-periph-base/src/topics_gen.rs（rr3-codegen --check 只比对不写）。
+step "⑨-d 生成物一致性（真值点 → 板侧常量表，重跑 rr3-codegen diff 为空）"
+if codegen_out="$(cd tools/rr3-codegen && cargo run -q -- --check 2>&1)"; then
+  printf '%s\n' "$codegen_out"
+  printf 'PASS  ⑨-d 生成物一致（topics_gen.rs：三主题串 + 板侧七态白名单，与 contracts/ 真值点同步）\n'
+else
+  printf '%s\n' "$codegen_out"
+  printf 'FAIL  ⑨-d 生成物漂移（tools/esp32-periph-base/src/topics_gen.rs 与 contracts/ 真值点不一致；在仓根跑 cd tools/rr3-codegen && cargo run 重生成并审阅）\n'
+  fail=1
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"
