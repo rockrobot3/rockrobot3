@@ -9,6 +9,7 @@
 pub mod assemble;
 pub mod atom;
 pub mod depends;
+pub mod roles;
 pub mod schema;
 pub mod slots;
 pub mod topics;
@@ -31,6 +32,7 @@ pub use schema::{
     rr3_registry_field_specs, rr3_registry_get_by_path, rr3_registry_rule_list, Rr3FieldSpec,
     RR3_MANIFEST_SCHEMA_VERSION,
 };
+pub use roles::{rr3_registry_role_table_from_text, Rr3RoleTable};
 pub use slots::{rr3_registry_slot_table_from_text, Rr3SlotTable};
 pub use topics::{rr3_registry_topic_set_from_text, Rr3TopicSet};
 pub use validate::{

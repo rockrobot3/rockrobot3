@@ -208,13 +208,22 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
     let (boot_manifests, degraded, hal_bindings, predegraded) = match &cfg.profile {
         Some(p) => {
-            // 格位契约与主题契约同目录（--contracts 运行期落点，T5）
-            let slots =
-                crate::topics_load::rr3_contracts_dir(cfg.contracts.as_deref()).join("slots.toml");
-            let boot = crate::profile::rr3_profile_boot_inputs(p, &slots)?;
+            // 格位/角色契约与主题契约同目录（--contracts 运行期落点，T5；roles.toml
+            // 是校验①②判据源，增补轮六 §4.1）
+            let contracts = crate::topics_load::rr3_contracts_dir(cfg.contracts.as_deref());
+            let slots = contracts.join("slots.toml");
+            let roles = contracts.join("roles.toml");
+            let boot = crate::profile::rr3_profile_boot_inputs(p, &slots, &roles)?;
             for (module, slot) in &boot.missing {
                 rr3_log(&format!(
                     "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
+                ));
+            }
+            // 校验②（增补轮六 §5，后果 = 降）：缺角色与缺格分开点名——缺格是
+            // "bindings 无此格"，缺角色是"格位在位却无 [[pin]] 绑定"，两件事不可混写。
+            for (slot, role) in &boot.role_missing {
+                rr3_log(&format!(
+                    "缺角色 {slot}：角色 {role} 无 [pins] 绑定（校验②——该格缺能力，修装配单 [pins] 后重启解除）"
                 ));
             }
             // G4（ADR-0019 修订 1 ③）：装配缺项点名到件，模块照常 spawn 但在册即 Degraded

@@ -46,8 +46,10 @@ fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
 /// 格位名取自真 `contracts/slots.toml`（Q1 裁定立格 act.relay 后三格齐备）。
 /// schema_version=2 起三新段必填（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；
 /// present 只声明 bindings 用到的非 base 格位（base 格在册恒在，声明即致命）。
+/// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
+/// 校验②只记 role_missing 非致命，boot 照常。
 const PROFILE: &str = r#"
-schema_version = 2
+schema_version = 3
 
 [os]
 route = "distro"

@@ -6,8 +6,11 @@
 # rr3-brain，随装配单进 boot 队列（CI distro-smoke 同步改断"六模块 spawn"）。
 # schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：三新段与
 # default 同板同供给（[platform]/[supplies]/[slots] 逐值一致）。
+# schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段进场、
+# 七物理键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
+# [hardware] 只留三非引脚键，与 default 同板同引脚（[[pin]] 逐值一致）。
 
-schema_version = 2
+schema_version = 3
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
@@ -48,23 +51,54 @@ safety_core_interval_ms = 1000
 "cognition.tts" = "rr3-brain"
 
 [hardware]
-# 物理绑定（ADR-0018 裁定 4、批D④ 收口）：键位与取值同 profiles/default.toml
-# 注释（R22/R8/接线 3/BOM #5/runbook 件 4）；换板 = 只改本段，不改代码。
+# 非引脚键直给（schema 3，增补轮六 §4.2）：键位语义与取值同 profiles/default.toml
+# 注释（runbook 件 4）；七物理键已下移 [[pin]] 派生（门 n：[hardware] 出现即拒 boot）。
 # alsa_device 用 CARD 名不钉卡号（卡号随枚举顺序可变）；"default" 在无 pulse/
 # pipewire 的发行版快路轨上映射 PulseAudio 插件 → open 失败（真板实测 EINVAL/524），
 # 参考机真值 = voicehat 声卡（0.0.6 批F5a R13 换装，googlevoicehat 单卡双向）。
 alsa_device = "plughw:CARD=sndrpigooglevoi"
-pwm_chip = 0
-pwm_channel = 0
-gpio_chip = 0
-gpio_led_line = 4
-gpio_relay_line = 17
-i2c_bus = 1
-ina219_addr = "0x40"
 link_ifname = "wlan0"
 # spidev 显示件（链④真件档，十键批）：MAX7219 双位模块接 SPI0 CE0（接线 4：
 # DIN=脚19/CS=脚24/CLK=脚23），spidev0.0 = 总线 0 片选 0。
 spi_device = "/dev/spidev0.0"
+
+[[pin]]
+# 物理绑定真值点（schema 3，增补轮六 §4.2）：与 default 同一块板同引脚，
+# [[pin]] 逐值一致（字段语义与取值依据见 default 注释）。
+role = "act.axis.pwm"
+instance = "pan"
+controller = "pwm0"
+channel = 0
+physical = [12]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[[pin]]
+role = "act.led.gpio"
+controller = "gpiochip0"
+physical = [4]
+direction = "out"
+rail = "none"
+failsafe = "hold"
+mux_group = []
+
+[[pin]]
+role = "act.relay.gpio"
+controller = "gpiochip0"
+physical = [17]
+direction = "out"
+rail = "none"
+failsafe = "driven_low"
+mux_group = []
+
+[[pin]]
+role = "power.battery.meter"
+controller = "i2c1"
+addr = "0x40"
+direction = "in"
+mux_group = []
 
 [enabled_slots]
 # 模块 → 本形态启用的格位集合。enabled_slots 决定起谁（Q3 裁定）。
