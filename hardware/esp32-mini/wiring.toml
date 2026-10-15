@@ -1,0 +1,29 @@
+# RockRobot3 装机接线档：esp32-mini 机型（F-B 桥接微型形态，增补轮六 §4.3）。
+# 与 profiles/esp32-mini.toml（rtos 档，rail5v 单域、单 pin act.axis.pwm.pan）
+# 配套的最小接线面：电源入一条 + 舵机一条。九字段语义、校验⑦ 判据、
+# 演练实例取值说明见 hardware/default/wiring.toml 头注。
+
+[[wire]]
+# J0 电源入：USB/外部 5V → 舵机轨（本形态唯一下游线组，feeds 闭合在本档内——
+# 3A 主干 ≥ 舵机堵转 0.7A，⑦-c 的额定加总判据归批N2 消费）
+connector = "J0"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = ["J1"]
+mate = "none"
+keyed = true
+rated_a = 3.0
+gnd_common = "star-1"
+
+[[wire]]
+# J1 舵机：SG90 三线（vcc 挂 rail5v、信号线写 pin_id、gnd 共地）
+connector = "J1"
+hdr_pin = [1, 2, 3]
+signal = ["vcc", "act.axis.pwm.pan", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P"
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"

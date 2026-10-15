@@ -30,7 +30,12 @@
 //!    [hardware] 并存时错误信息点名两份取值；
 //! 7. 把 enabled_slots 模块名解析成 manifest 路径：`<modules-root>/profiles/<机>.toml` 的上两级即
 //!    modules-root，manifest 在 `<modules-root>/modules/<名>/module.toml`——装机布局由
-//!    打包步骤保证（modules/README.md 装机约定 + 0.0.2 T5 deb 打包同一布局）。
+//!    打包步骤保证（modules/README.md 装机约定 + 0.0.2 T5 deb 打包同一布局）；
+//! 8. 器件词表与接线档装载（增补轮六 §4.1b/§4.3）：`contracts/devices.toml` 的
+//!    mate 集 + `hardware/<形态>/wiring.toml`（路径由 [`crate::wiring::
+//!    rr3_wiring_path_for_profile`] 按装配单推导）——校验⑦-a/b/d 的跨档判据在
+//!    boot 链合龙（⑦-c 待件 demands 数据面，批N2），接线档形状与闭合面在
+//!    [`crate::wiring`] 裁。
 //!
 //! 基础层格位（`net.online` / `power.battery`）**恒在位**（slots.toml 2026-10-03 注记）：
 //! 不进 bindings、不进缺格判定，enabled_slots 里声明它们只是"本形态用到"的记账。
@@ -40,8 +45,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rr_registry::{
-    rr3_registry_role_table_from_text, rr3_registry_slot_table_from_text, Rr3RoleTable,
-    Rr3SlotTable,
+    rr3_registry_device_table_from_text, rr3_registry_role_table_from_text,
+    rr3_registry_slot_table_from_text, Rr3DeviceTable, Rr3RoleTable, Rr3SlotTable,
 };
 
 /// 契约格位表的编译期定位（与 `topics_load::RR3_CONTRACT_TOPICS_PATH` 同深度：
@@ -52,6 +57,13 @@ pub const RR3_CONTRACT_SLOTS_PATH: &str =
 /// 契约角色表定位（与 slots.toml 同目录，增补轮六 §4.1）
 pub const RR3_CONTRACT_ROLES_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../../contracts/roles.toml");
+
+/// 契约器件词表定位（与 roles.toml 同目录，增补轮六 §4.1b——校验⑦-d 的 mate 集
+/// 判定源；探测期取值域消费归 L-14/出厂自检，装载期不认型号，D10a）
+pub const RR3_CONTRACT_DEVICES_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../contracts/devices.toml"
+);
 
 /// 只认 schema_version = 3（2→3 为破坏性变更：`[[pin]]` 物理绑定段进场、七物理键
 /// 自 [hardware] 下移为 [pins] 派生视图，增补轮六 §4.2 / 门 n P-13；注意与
@@ -721,15 +733,26 @@ fn rr3_hardware_bindings_text(hardware: &BTreeMap<String, String>) -> String {
 /// 致命错误（读不到 / 形状不合 / 查册未命中 / 结构不自洽）打包成一条串返回；
 /// 缺格**不是**致命项（P2：缺格只降点名模块，缺格≠拒 boot），进 [`Rr3ProfileBoot::missing`]；
 /// 缺角色同样不是致命项（校验②后果 = 降），进 [`Rr3ProfileBoot::role_missing`]。
-/// `slots_path`/`roles_path` 由调用方给定（`--contracts` 运行期定位或编译期仓内路径）——
-/// 查册真值仍只有 rr-registry 那两册，这里只管从哪读。
+/// `slots_path`/`roles_path`/`devices_path`/`wiring_path` 由调用方给定（`--contracts`
+/// 运行期定位或编译期仓内路径；接线档由 [`crate::wiring::rr3_wiring_path_for_profile`]
+/// 按 `hardware/<形态>/wiring.toml` 布局推导）——查册真值仍只有 rr-registry 那几册
+/// 与接线档本体，这里只管从哪读。
 pub fn rr3_profile_boot_inputs(
     profile_path: &Path,
     slots_path: &Path,
     roles_path: &Path,
+    devices_path: &Path,
+    wiring_path: &Path,
 ) -> Result<Rr3ProfileBoot, String> {
     let probe = crate::probe::rr3_probe_default();
-    rr3_profile_boot_inputs_with_probe(profile_path, slots_path, roles_path, probe.as_ref())
+    rr3_profile_boot_inputs_with_probe(
+        profile_path,
+        slots_path,
+        roles_path,
+        devices_path,
+        wiring_path,
+        probe.as_ref(),
+    )
 }
 
 /// 同 [`rr3_profile_boot_inputs`]，但探测件由调用方注入（MC-4 接缝）：生产走
@@ -740,6 +763,8 @@ pub fn rr3_profile_boot_inputs_with_probe(
     profile_path: &Path,
     slots_path: &Path,
     roles_path: &Path,
+    devices_path: &Path,
+    wiring_path: &Path,
     probe: &dyn crate::probe::Rr3Probe,
 ) -> Result<Rr3ProfileBoot, String> {
     let abs = rr3_profile_absolute_path(profile_path)?;
@@ -797,6 +822,44 @@ pub fn rr3_profile_boot_inputs_with_probe(
             role_errs.join("; ")
         ));
     }
+
+    // 器件词表装载（增补轮六 §4.1b，校验⑦-d 的 mate 集判定源）：与格位/角色契约
+    // 同一 fail-closed 口径——空器件表是契约事故，不是放行许可证。装载期只查
+    // mate 外键闭合，不认型号能力（D10a：addrs/baud_ok 是探测期/出厂自检判据）。
+    let devices_abs = std::fs::canonicalize(devices_path)
+        .map_err(|e| format!("读不到器件词表 {}: {e}", devices_path.display()))?;
+    let devices_text = std::fs::read_to_string(&devices_abs)
+        .map_err(|e| format!("读不到器件词表 {}: {e}", devices_abs.display()))?;
+    let devices: Rr3DeviceTable = rr3_registry_device_table_from_text(&devices_text);
+    if devices.rr3_device_table_is_empty() {
+        return Err(format!(
+            "器件词表 {} 解析后为空，拒绝启动（空器件表是契约事故）",
+            devices_abs.display()
+        ));
+    }
+    let device_errs = devices.rr3_device_table_check();
+    if !device_errs.is_empty() {
+        return Err(format!(
+            "器件词表 {} 形状不合，拒绝启动: {}",
+            devices_abs.display(),
+            device_errs.join("; ")
+        ));
+    }
+
+    // 接线档装载（增补轮六 §4.3，校验⑦ 判据面）：装机档必在——读不到/空表/
+    // 形状不合/闭合面破都是装配事故，拒启动（接线闭合是校验⑦的前提，没有
+    // "无线的机器"）。
+    let wiring_abs = std::fs::canonicalize(wiring_path)
+        .map_err(|e| format!("读不到接线档 {}: {e}", wiring_path.display()))?;
+    let wiring_text = std::fs::read_to_string(&wiring_abs)
+        .map_err(|e| format!("读不到接线档 {}: {e}", wiring_abs.display()))?;
+    let wiring = crate::wiring::rr3_wiring_from_text(&wiring_text).map_err(|errs| {
+        format!(
+            "接线档 {} 形状不合，拒绝启动: {}",
+            wiring_abs.display(),
+            errs.join("; ")
+        )
+    })?;
 
     let mut errs: Vec<String> = Vec::new();
     // bindings 的格位必须查册命中，且不得是基础层（基础层由基座内建承载，slots.toml 注记）
@@ -995,13 +1058,12 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
     // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
     // （无龄期快照不得充当拒动依据，§19 Y-4）；⑥-d 域的三个绑定引用位写 pin_id
-    // 且能在 [pins] 取到（F-2：第二套语法一条校验都打不到）。校验⑦-b（wire.net
-    // ⊆ domains）随 n1-6b wiring.toml 落地同链判。
-    let domain_names: BTreeSet<&str> = profile
+    // 且能在 [pins] 取到（F-2：第二套语法一条校验都打不到）。
+    let domain_names: BTreeSet<String> = profile
         .supplies
         .domains
         .iter()
-        .map(|d| d.name.as_str())
+        .map(|d| d.name.clone())
         .collect();
     for pin in &profile.pins {
         // rail 缺省的合法性与角色 kind 挂钩：power 面（⑥-b）必须有在册轨；
@@ -1053,6 +1115,14 @@ pub fn rr3_profile_boot_inputs_with_probe(
             ));
         }
     }
+    // 装载期校验⑦（增补轮六 §5，后果 = 拒）：接线闭合与额定加总。⑦-a wire.signal
+    // ⊆ pin_id ∪ {vcc,gnd}；⑦-b wire.net ⊆ domains；⑦-d wire.mate ∈ devices.toml
+    // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。⑦-c（rated_a × 1000 ≥
+    // Σ(feeds 闭包内 peak_ma) × 裕量）的判据对象是件 demands 申报（n1-7 才立数据
+    // 面），批N2 同链补——本批不预支。
+    let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
+    let mate_set = devices.rr3_device_table_mates();
+    errs.extend(wiring.rr3_wiring_check(&pin_ids, &domain_names, &mate_set));
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -1276,6 +1346,22 @@ failsafe = "release"
 mux_group = []
 "#;
 
+    /// 接线档底稿（§4.3 九字段，与 wiring.rs 测试区 GOOD 同形状）：单线组只挂
+    /// vcc/gnd 与电力导体（net=rail5v 在 GOOD 两域在册）——对 [[pin]] 增删免疫，
+    /// 删 pin 的用例不因 ⑦-a 误红。校验⑦ 反例用 `write_wiring` 覆写。
+    const GOOD_WIRING: &str = r#"
+[[wire]]
+connector = "J-T"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 1.0
+gnd_common = "star-1"
+"#;
+
     impl Root {
         fn new(tag: &str) -> Root {
             let dir =
@@ -1284,10 +1370,26 @@ mux_group = []
             Root { dir }
         }
 
+        /// 落装配单并同批 stage 接线档（`hardware/<形态>/wiring.toml`，与
+        /// [`crate::wiring::rr3_wiring_path_for_profile`] 推导同一布局）——装载期
+        /// 校验⑦要求装机档必在，缺省给 GOOD_WIRING，反例随后覆写。
         fn write_profile(&self, name: &str, text: &str) -> PathBuf {
             let p = self.dir.join("profiles").join(name);
             std::fs::write(&p, text).expect("写装配单");
+            self.write_wiring(&p, GOOD_WIRING);
             p
+        }
+
+        /// 落一份接线档到 `<root>/hardware/<装配单 stem>/wiring.toml`。
+        fn write_wiring(&self, profile: &Path, text: &str) {
+            let stem = profile
+                .file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .expect("夹具装配单须有文件名");
+            let w = self.dir.join("hardware").join(stem).join("wiring.toml");
+            std::fs::create_dir_all(w.parent().expect("接线档必有父目录"))
+                .expect("建 hardware 目录");
+            std::fs::write(&w, text).expect("写接线档");
         }
     }
 
@@ -1295,6 +1397,38 @@ mux_group = []
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    /// 测试本地帮手：真契约三册（slots/roles/devices）+ 由装配单路径推导的接线档
+    /// （`hardware/<形态>/wiring.toml`）——与 daemon `--profile` 正门同一条推导路，
+    /// 顺带把路径推导钉进每条用例。
+    fn boot_inputs(p: &Path) -> Result<Rr3ProfileBoot, String> {
+        let wiring =
+            crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
+        rr3_profile_boot_inputs(
+            p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+            Path::new(RR3_CONTRACT_DEVICES_PATH),
+            &wiring,
+        )
+    }
+
+    /// 同 [`boot_inputs`]，探测件注入版（MC-4 门禁用例）。
+    fn boot_inputs_with_probe(
+        p: &Path,
+        probe: &dyn crate::probe::Rr3Probe,
+    ) -> Result<Rr3ProfileBoot, String> {
+        let wiring =
+            crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
+        rr3_profile_boot_inputs_with_probe(
+            p,
+            Path::new(RR3_CONTRACT_SLOTS_PATH),
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+            Path::new(RR3_CONTRACT_DEVICES_PATH),
+            &wiring,
+            probe,
+        )
     }
 
     /// G4 装配段扫描直测（ADR-0019 修订 1 ③）：缺文件/坏形/注入缺逐条点名，
@@ -1444,12 +1578,7 @@ mux_group = []
     fn full_profile_resolves_manifests_and_finds_no_missing() {
         let root = Root::new("full");
         let p = root.write_profile("full.toml", GOOD);
-        let boot = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("满配装配单应通过");
+        let boot = boot_inputs(&p).expect("满配装配单应通过");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
         assert_eq!(boot.manifests.len(), 3);
         // 比对基准必须是**规范化后**的根目录：boot_inputs 拿到的 manifest 路径派生自
@@ -1479,13 +1608,8 @@ mux_group = []
     fn injected_absent_probe_names_missing_module_and_slot() {
         let root = Root::new("probe-absent");
         let p = root.write_profile("absent.toml", GOOD);
-        let boot = rr3_profile_boot_inputs_with_probe(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-            &crate::probe::Rr3AbsentProbe,
-        )
-        .expect("缺格不是致命项，boot 输入必须成功返回");
+        let boot = boot_inputs_with_probe(&p, &crate::probe::Rr3AbsentProbe)
+            .expect("缺格不是致命项，boot 输入必须成功返回");
         assert_eq!(
             boot.missing,
             vec![
@@ -1509,13 +1633,7 @@ mux_group = []
         }
         let root = Root::new("probe-selective");
         let p = root.write_profile("selective.toml", GOOD);
-        let boot = rr3_profile_boot_inputs_with_probe(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-            &OnlyServoAbsent,
-        )
-        .expect("部分缺格不致命");
+        let boot = boot_inputs_with_probe(&p, &OnlyServoAbsent).expect("部分缺格不致命");
         assert_eq!(
             boot.missing,
             vec![("rr3-pa".to_string(), "act.servo".to_string())],
@@ -1532,12 +1650,7 @@ mux_group = []
             "missing.toml",
             &GOOD.replace("\"sensor.env\" = \"rr3-pb\"\n", ""),
         );
-        let boot = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("缺格不是致命项");
+        let boot = boot_inputs(&p).expect("缺格不是致命项");
         assert_eq!(
             boot.missing,
             vec![("rr3-pb".to_string(), "sensor.env".to_string())],
@@ -1557,12 +1670,7 @@ mux_group = []
         let root = Root::new("cross");
         let text = GOOD.replace("\"sensor.env\" = \"rr3-pb\"", "\"sensor.env\" = \"rr3-pc\"");
         let p = root.write_profile("cross.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("binding 被他人认领必须致命");
+        let e = boot_inputs(&p).expect_err("binding 被他人认领必须致命");
         assert!(e.contains("未被 enabled_slots 认领"), "{e}");
     }
 
@@ -1572,12 +1680,7 @@ mux_group = []
         let root = Root::new("base");
         let text = GOOD.replace("[bindings]\n", "[bindings]\n\"bus.publish\" = \"rr3-pa\"\n");
         let p = root.write_profile("base.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("基础层 binding 必须致命");
+        let e = boot_inputs(&p).expect_err("基础层 binding 必须致命");
         assert!(e.contains("bindings 不得绑定基础层格位 bus.publish"), "{e}");
     }
 
@@ -1587,12 +1690,7 @@ mux_group = []
         let root = Root::new("unknown");
         let text = GOOD.replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = [\"sensor.wifi\"]");
         let p = root.write_profile("unknown.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("未在册格位必须致命");
+        let e = boot_inputs(&p).expect_err("未在册格位必须致命");
         assert!(
             e.contains("enabled_slots 模块 rr3-pc 的格位 sensor.wifi 未在册"),
             "{e}"
@@ -1608,12 +1706,7 @@ mux_group = []
             "rr3-pc = [\"cognition.llm\", \"power.battery\"]",
         );
         let p = root.write_profile("baseslot.toml", &text);
-        let boot = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("基础层 enabled_slots 格位不缺格");
+        let boot = boot_inputs(&p).expect("基础层 enabled_slots 格位不缺格");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
 
@@ -1695,12 +1788,7 @@ mux_group = []
              direction = \"in\"\nmux_group = []\n"
         );
         let p = root.write_profile("derive.toml", &text);
-        let boot = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("满配装配单应通过");
+        let boot = boot_inputs(&p).expect("满配装配单应通过");
         assert_eq!(
             boot.hal_bindings,
             "alsa_device = \"default\"\n\
@@ -1723,12 +1811,7 @@ mux_group = []
         let root = Root::new("pin-role");
         let text = GOOD.replace("role = \"act.axis.pwm\"", "role = \"act.axis.magical\"");
         let p = root.write_profile("pin-role.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("自造角色必须致命");
+        let e = boot_inputs(&p).expect_err("自造角色必须致命");
         assert!(e.contains("角色 act.axis.magical 未在册"), "{e}");
     }
 
@@ -1739,12 +1822,7 @@ mux_group = []
         // act.axis.pwm per_instance=true，删 instance → 必填缺
         let text = GOOD.replace("instance = \"pan\"\n", "");
         let p = root.write_profile("perinst-missing.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("per_instance=true 缺 instance 必须致命");
+        let e = boot_inputs(&p).expect_err("per_instance=true 缺 instance 必须致命");
         assert!(e.contains("instance 必填"), "{e}");
 
         // act.led.gpio per_instance=false，填 instance → 禁填
@@ -1753,12 +1831,7 @@ mux_group = []
              controller = \"gpiochip0\"\nphysical = [4]\ndirection = \"out\"\nfailsafe = \"hold\"\n"
         );
         let p = root.write_profile("perinst-extra.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("per_instance=false 填 instance 必须致命");
+        let e = boot_inputs(&p).expect_err("per_instance=false 填 instance 必须致命");
         assert!(e.contains("instance 禁填"), "{e}");
     }
 
@@ -1771,12 +1844,7 @@ mux_group = []
             .replace("channel = 0\n", "")
             .replace("failsafe = \"release\"\n", "");
         let p = root.write_profile("pin-blank.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("requires 字段留空必须致命");
+        let e = boot_inputs(&p).expect_err("requires 字段留空必须致命");
         assert!(e.contains("缺 channel"), "{e}");
         assert!(e.contains("缺 failsafe"), "{e}");
     }
@@ -1787,12 +1855,7 @@ mux_group = []
         let root = Root::new("pin-direction");
         let text = GOOD.replace("direction = \"out\"", "direction = \"in\"");
         let p = root.write_profile("pin-direction.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("direction 与角色不一致必须致命");
+        let e = boot_inputs(&p).expect_err("direction 与角色不一致必须致命");
         assert!(
             e.contains("direction = in 与角色 act.axis.pwm direction = out 不一致"),
             "{e}"
@@ -1841,12 +1904,7 @@ mux_group = []
         // ⑥-a：自造域名（F-5：rail24 不在任何一处在册集——文档示例值会被装机档抄）
         let text = GOOD.replace("rail = \"rail5v\"", "rail = \"rail24\"");
         let p = root.write_profile("rail-unknown.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("自造域名必须致命");
+        let e = boot_inputs(&p).expect_err("自造域名必须致命");
         assert!(
             e.contains("rail = rail24 未在 [[supplies.domain]] 在册"),
             "{e}"
@@ -1855,12 +1913,7 @@ mux_group = []
         // ⑥-b：kind=power 角色挂 none（act.axis.pwm 是 power，none 是 signal 侧显式值）
         let text = GOOD.replace("rail = \"rail5v\"", "rail = \"none\"");
         let p = root.write_profile("rail-none-power.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("功率面挂 none 必须致命");
+        let e = boot_inputs(&p).expect_err("功率面挂 none 必须致命");
         assert!(e.contains("kind = power"), "{e}");
     }
 
@@ -1875,12 +1928,7 @@ mux_group = []
             "switchable = false\narmed = true\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
         );
         let p = root.write_profile("armed.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("武装而无测点/龄期必须致命");
+        let e = boot_inputs(&p).expect_err("武装而无测点/龄期必须致命");
         assert!(e.contains("校验⑥-c"), "{e}");
     }
 
@@ -1894,12 +1942,7 @@ mux_group = []
             "sense = \"adc:gp34\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
         );
         let p = root.write_profile("pid.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("第二套语法必须致命");
+        let e = boot_inputs(&p).expect_err("第二套语法必须致命");
         assert!(e.contains("不在 [pins] 的 pin_id 集"), "{e}");
         assert!(e.contains("sense = adc:gp34"), "{e}");
     }
@@ -1944,12 +1987,7 @@ mux_group = []
         let root = Root::new("gate-n-static");
         let text = format!("{GOOD}\n[hardware]\ni2c_bus = 1\n");
         let p = root.write_profile("gate-n-static.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("[hardware] 物理键必须致命");
+        let e = boot_inputs(&p).expect_err("[hardware] 物理键必须致命");
         assert!(
             e.contains("hardware.i2c_bus 是引脚侧派生键") && e.contains("门 n 稳态判据"),
             "{e}"
@@ -1962,12 +2000,7 @@ mux_group = []
         let root = Root::new("gate-n-both");
         let text = format!("{GOOD}\n[hardware]\npwm_chip = 5\n");
         let p = root.write_profile("gate-n-both.toml", &text);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("两处并存必须致命");
+        let e = boot_inputs(&p).expect_err("两处并存必须致命");
         assert!(
             e.contains("hardware.pwm_chip = \"5\" 与 [pins] 派生值 \"0\" 两处并存"),
             "{e}"
@@ -1984,12 +2017,7 @@ mux_group = []
             "",
         );
         let p = root.write_profile("role-missing.toml", &text);
-        let boot = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("缺角色不是致命项");
+        let boot = boot_inputs(&p).expect("缺角色不是致命项");
         assert_eq!(
             boot.role_missing,
             vec![("act.servo".to_string(), "act.axis.pwm".to_string()),],
@@ -2017,8 +2045,18 @@ tier_scope = ["quantum"]
         )
         .unwrap();
         let p = root.write_profile("ok.toml", GOOD);
-        let errs = rr3_profile_boot_inputs(&p, &bad_slots, Path::new(RR3_CONTRACT_ROLES_PATH))
-            .expect_err("越界契约必须拒");
+        // slots 册由本用例自备（被测对象就是它），其余各册照常走真值——接线档由
+        // 推导函数定位（write_profile 已同批 stage）
+        let wiring =
+            crate::wiring::rr3_wiring_path_for_profile(&p).expect("夹具装配单必须能推导接线档");
+        let errs = rr3_profile_boot_inputs(
+            &p,
+            &bad_slots,
+            Path::new(RR3_CONTRACT_ROLES_PATH),
+            Path::new(RR3_CONTRACT_DEVICES_PATH),
+            &wiring,
+        )
+        .expect_err("越界契约必须拒");
         assert!(errs.contains("status 非法"), "{errs}");
         assert!(errs.contains("tier_scope 含非法档 quantum"), "{errs}");
     }
@@ -2091,22 +2129,12 @@ tier_scope = ["quantum"]
             .replace("tier = \"host\"", "tier = \"bare\"")
             .replace("watchdog_present = true", "watchdog_present = false");
         let p = root.write_profile("bare-nowd.toml", &bad);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("无看门狗的 bare 档必须被拒");
+        let e = boot_inputs(&p).expect_err("无看门狗的 bare 档必须被拒");
         assert!(e.contains("无看门狗的板不允许归 bare 档"), "{e}");
 
         let ok = GOOD.replace("tier = \"host\"", "tier = \"bare\"");
         let p = root.write_profile("bare-wd.toml", &ok);
-        rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("bare 档 + 看门狗在场应放行");
+        boot_inputs(&p).expect("bare 档 + 看门狗在场应放行");
     }
 
     /// L-10 tier↔tier_scope 交叉校验（0.0.5 批K，ADR-0012 增补注记分族的装配侧
@@ -2121,12 +2149,7 @@ tier_scope = ["quantum"]
             "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"bus.publish\"]",
         );
         let p = root.write_profile("bare-bus.toml", &bad);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("bare 档引用 bus 格必须被拒");
+        let e = boot_inputs(&p).expect_err("bare 档引用 bus 格必须被拒");
         assert!(
             e.contains("tier↔tier_scope 交叉校验失败") && e.contains("bus.publish"),
             "{e}"
@@ -2137,12 +2160,121 @@ tier_scope = ["quantum"]
             "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"power.battery\"]",
         );
         let p = root.write_profile("bare-battery.toml", &ok);
-        rr3_profile_boot_inputs(
+        boot_inputs(&p).expect("bare 档引用 scope 全档的 power.battery 应放行");
+    }
+
+    /// 校验⑦ 跨档反例（后果 = 拒；boot 链把 [pins]/domains/devices 三份真值接起来
+    /// 判，wiring.rs 单测已钉判定逻辑，这里钉的是跨档接线）：signal 越出
+    /// pin_id ∪ {vcc,gnd}（F-3 自造语法）、net 越出 domains（F-5）、mate 越出
+    /// devices mate 集（§4.1b 门 o）逐条点名；命中集全绿由末段正例钉住。
+    #[test]
+    fn wiring_cross_file_gates_are_fatal() {
+        // ⑦-a：自造语法 pwm:12 既非 pin_id 也非 vcc/gnd（F-2 同款病，接线侧再现）
+        let root = Root::new("wiring-7a");
+        let p = root.write_profile("wiring-7a.toml", GOOD);
+        root.write_wiring(
             &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("bare 档引用 scope 全档的 power.battery 应放行");
+            &GOOD_WIRING.replace(
+                "signal = [\"vcc\", \"gnd\"]",
+                "signal = [\"vcc\", \"pwm:12\"]",
+            ),
+        );
+        let e = boot_inputs(&p).expect_err("signal 自造语法必须致命");
+        assert!(e.contains("校验⑦-a") && e.contains("pwm:12"), "{e}");
+
+        // ⑦-b：自造域名（F-5：文档示例值会被装机档抄）
+        let root = Root::new("wiring-7b");
+        let p = root.write_profile("wiring-7b.toml", GOOD);
+        root.write_wiring(
+            &p,
+            &GOOD_WIRING.replace("net = \"rail5v\"", "net = \"rail24\""),
+        );
+        let e = boot_inputs(&p).expect_err("自造域名必须致命");
+        assert!(e.contains("校验⑦-b") && e.contains("rail24"), "{e}");
+
+        // ⑦-d：对端型号不在 devices.toml mate 集（词形错误——在册的是 SG90-3P）
+        let root = Root::new("wiring-7d");
+        let p = root.write_profile("wiring-7d.toml", GOOD);
+        root.write_wiring(
+            &p,
+            &GOOD_WIRING.replace("mate = \"none\"", "mate = \"SG90-9G\""),
+        );
+        let e = boot_inputs(&p).expect_err("mate 不在册必须致命");
+        assert!(e.contains("校验⑦-d") && e.contains("SG90-9G"), "{e}");
+
+        // 命中集全绿：signal 写 [pins] 真值 pin_id、net/mate 写在册值——⑦ 三判据同过
+        let root = Root::new("wiring-7-ok");
+        let p = root.write_profile("wiring-7-ok.toml", GOOD);
+        root.write_wiring(
+            &p,
+            r#"
+[[wire]]
+connector = "J-S"
+hdr_pin = [1, 2, 3]
+signal = ["vcc", "act.axis.pwm.pan", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P"
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"
+"#,
+        );
+        boot_inputs(&p).expect("signal/net/mate 全命中在册集必须放行");
+    }
+
+    /// 接线档装载门（fail-closed，后果 = 拒）：留空反例（§5 缺失语义列——rated_a
+    /// 无不适值可言，缺即红）与闭合面破（feeds 悬空引用）都在 boot 即拒并点名
+    #[test]
+    fn wiring_shape_and_closure_gates_are_fatal_at_boot() {
+        let root = Root::new("wiring-blank");
+        let p = root.write_profile("wiring-blank.toml", GOOD);
+        root.write_wiring(&p, &GOOD_WIRING.replace("rated_a = 1.0\n", ""));
+        let e = boot_inputs(&p).expect_err("rated_a 留空必须致命");
+        assert!(e.contains("形状不合，拒绝启动"), "{e}");
+        assert!(e.contains("rated_a 缺失或不是正数"), "{e}");
+
+        let root = Root::new("wiring-dangle");
+        let p = root.write_profile("wiring-dangle.toml", GOOD);
+        root.write_wiring(
+            &p,
+            &GOOD_WIRING.replace("feeds = []", "feeds = [\"J-NOPE\"]"),
+        );
+        let e = boot_inputs(&p).expect_err("悬空 feeds 必须致命");
+        assert!(
+            e.contains("wiring[J-T].feeds = J-NOPE") && e.contains("位号集"),
+            "{e}"
+        );
+    }
+
+    /// 真仓 default 机 drill：profiles/default.toml + hardware/default/wiring.toml
+    /// 过完整装载门——⑦-a 的四个 pin_id（act.axis.pwm.pan/act.led.gpio/
+    /// act.relay.gpio/power.battery.meter）、⑦-b 的三域名（batt/rail5v/rail3v3）、
+    /// ⑦-d 的 SG90-3P 全部命中仓内真值（跨档对账的三份真值两两闭合）。
+    #[test]
+    fn default_profile_wiring_drill() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let p = repo.join("profiles/default.toml");
+        let wiring = crate::wiring::rr3_wiring_path_for_profile(&p).expect("真仓装配单可推导");
+        assert!(
+            wiring.exists(),
+            "真仓接线档必须随批N1 落位: {}",
+            wiring.display()
+        );
+        let boot = boot_inputs(&p).expect("default 机装配单+接线档必须过完整装载门（host 档）");
+        assert_eq!(boot.manifests.len(), 6, "enabled_slots 六模块（升序）");
+    }
+
+    /// 真仓 distro 机 drill：profiles/distro.toml + hardware/distro/wiring.toml
+    /// （与 default 同板同接线的镜像）过完整装载门——镜像双轨各自对各自的装配单
+    /// 闭合（distro.toml 的 pin/域集真值 + 同一 devices.toml mate 集），镜像漂移
+    /// 即此测试红；装机 deb 面由此件随 rr3-pack 入包（Z-4）。
+    #[test]
+    fn distro_profile_wiring_drill() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let p = repo.join("profiles/distro.toml");
+        let boot = boot_inputs(&p).expect("distro 机装配单+接线档必须过完整装载门（host 档）");
+        assert_eq!(boot.manifests.len(), 6, "enabled_slots 六模块（升序）");
     }
 
     /// F-B 桥接微型形态装配演练（0.0.5 批K H4/R3-D6）：对仓内真件
@@ -2156,12 +2288,7 @@ tier_scope = ["quantum"]
     fn esp32_mini_profile_boot_inputs_drill() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let p = repo.join("profiles/esp32-mini.toml");
-        let boot = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("esp32-mini 装配单必须过完整装载门（rtos 档）");
+        let boot = boot_inputs(&p).expect("esp32-mini 装配单必须过完整装载门（rtos 档）");
         let mods: Vec<String> = boot
             .manifests
             .iter()
@@ -2206,12 +2333,7 @@ tier_scope = ["quantum"]
         let root = Root::new("present");
         let text = GOOD.replace(", \"sensor.env\"", "");
         let p = root.write_profile("absent.toml", &text);
-        let boot = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect("声明缺不是致命项");
+        let boot = boot_inputs(&p).expect("声明缺不是致命项");
         assert_eq!(
             boot.missing,
             vec![("rr3-pb".to_string(), "sensor.env".to_string())],
@@ -2228,12 +2350,7 @@ tier_scope = ["quantum"]
             "present = [\"sensor.wifi\", \"act.servo\"",
         );
         let p = root.write_profile("present-unknown.toml", &unknown);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("present 未在册格位必须致命");
+        let e = boot_inputs(&p).expect_err("present 未在册格位必须致命");
         assert!(e.contains("格位 sensor.wifi 未在册"), "{e}");
 
         let base = GOOD.replace(
@@ -2241,22 +2358,21 @@ tier_scope = ["quantum"]
             "present = [\"bus.publish\", \"act.servo\"",
         );
         let p = root.write_profile("present-base.toml", &base);
-        let e = rr3_profile_boot_inputs(
-            &p,
-            Path::new(RR3_CONTRACT_SLOTS_PATH),
-            Path::new(RR3_CONTRACT_ROLES_PATH),
-        )
-        .expect_err("present 声明基础层格位必须致命");
+        let e = boot_inputs(&p).expect_err("present 声明基础层格位必须致命");
         assert!(e.contains("不得声明基础层格位 bus.publish"), "{e}");
     }
 
-    /// 装配单文件不存在 = 致命，文案是绝对化口径（canonicalize 的 ENOENT）
+    /// 装配单文件不存在 = 致命，文案是绝对化口径（canonicalize 的 ENOENT）。
+    /// 接线路径随意给：装配单 canonicalize 先败，轮不到它（有 Root 帮手的用例都
+    /// 走真推导，本条只钉读不到装配单的文案口径）。
     #[test]
     fn missing_profile_file_is_fatal() {
         let e = rr3_profile_boot_inputs(
             Path::new("/nonexistent/rr3-nope.toml"),
             Path::new(RR3_CONTRACT_SLOTS_PATH),
             Path::new(RR3_CONTRACT_ROLES_PATH),
+            Path::new(RR3_CONTRACT_DEVICES_PATH),
+            Path::new("/nonexistent/rr3-nope-wiring.toml"),
         )
         .expect_err("读不到装配单必须致命");
         assert!(e.contains("无法解析为绝对路径"), "{e}");

@@ -1027,6 +1027,42 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
     }
 }
 
+/// 器件词表形状 pin（增补轮六批N1 §4.1b 的 CI 全集层，与 roles/slots pin 同判）：
+/// 装载形状门（bus 取值域封闭、i2c ⇒ addrs 非空、baud_ok 非空、peak_ma > 0）+
+/// 型号集与 mate 集封闭——加器件 = append 不红，改型号/删型号 = 契约级变更当场红
+/// （wire.mate 对账⑦-d、id_reg 探测 L-14、peak_ma 互校⑨ 的判据源都在这一册）。
+#[test]
+fn devices_table_shape_and_mates_are_pinned() {
+    let root = repo_root();
+    let devices = rr_registry::rr3_registry_device_table_from_text(
+        &std::fs::read_to_string(root.join("contracts/devices.toml"))
+            .expect("读 contracts/devices.toml"),
+    );
+    assert!(
+        !devices.rr3_device_table_is_empty(),
+        "器件词表解析后为空（契约事故）"
+    );
+    let errs = devices.rr3_device_table_check();
+    assert!(errs.is_empty(), "devices.toml 形状越界: {errs:?}");
+    assert_eq!(
+        devices.rr3_device_table_names(),
+        vec![
+            "INA219".to_string(),
+            "MAX7219".to_string(),
+            "SG90".to_string(),
+            "SSD1306".to_string(),
+        ],
+        "器件型号集漂移（加器件 = append 同批改本 pin；改/删型号 = 契约级变更）"
+    );
+    let mates = devices.rr3_device_table_mates();
+    for mate in ["0.96in-OLED-FPC", "MAX7219-DIP24", "SG90-3P"] {
+        assert!(
+            mates.contains(mate),
+            "mate {mate} 不在器件词表 mate 集（wire.mate 对账⑦-d 的判据面漂移）"
+        );
+    }
+}
+
 /// 门禁②（profile 侧）+ 裁定 3 的装配自洽：default 装配单的 bindings 逐格对表查册、
 /// 绑到真实模块、与该模块的 manifest provides 对账；enabled_slots 与 provides 全集相等；
 /// 全部非 base 格位恰好被绑定一次（default 机不留缺格）。

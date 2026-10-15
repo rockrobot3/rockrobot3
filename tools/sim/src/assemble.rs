@@ -113,7 +113,8 @@ pub type Rr3AssembleEntry = (String, PathBuf, bool);
 
 /// 演练夹具：把仓源真值装进 workdir 的装机布局（modules-root），返回
 /// (夹具装配单路径, 模块产物清单)。
-/// 装配单原文拷贝零改；manifest 仅 entry 绝对化；config 同目录就位。
+/// 装配单原文拷贝零改；接线档同批原文拷贝零改（`hardware/<形态>/wiring.toml`，
+/// 校验⑦ 要求装机档必在，缺件 fail-fast）；manifest 仅 entry 绝对化；config 同目录就位。
 pub fn rr3_assemble_layout(
     repo: &Path,
     workdir: &Path,
@@ -132,6 +133,20 @@ pub fn rr3_assemble_layout(
     let profile_dst = profiles_dir.join(profile_name);
     std::fs::write(&profile_dst, &profile_text)
         .map_err(|e| format!("写 {profile_dst:?} 失败: {e}"))?;
+
+    // 接线档同批装机（原文零改）：装载期校验⑦要求 hardware/<形态>/wiring.toml
+    // 必在，仓源缺件在这里红，不让演练跑一半才红
+    let stem = profile_src
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| format!("装配单路径 {} 无文件名", profile_src.display()))?;
+    let wiring_src = repo.join("hardware").join(stem).join("wiring.toml");
+    let wiring_dst_dir = workdir.join("hardware").join(stem);
+    std::fs::create_dir_all(&wiring_dst_dir)
+        .map_err(|e| format!("建 {wiring_dst_dir:?} 失败: {e}"))?;
+    std::fs::copy(&wiring_src, wiring_dst_dir.join("wiring.toml")).map_err(|e| {
+        format!("仓源接线档 {wiring_src:?} 拷贝失败: {e}（校验⑦要求装机档必在）")
+    })?;
 
     let mut entries = Vec::new();
     for module in profile.enabled_slots.keys() {
@@ -531,6 +546,16 @@ watchdog_timeout_ms = 5000\n";
              [slots]\npresent = [\"a.b\"]\n",
         )
         .unwrap();
+        // 接线档仓源（校验⑦ 装机档必在）：vcc/gnd-only 单线组，对夹具不声明
+        // [pins] 免疫
+        std::fs::create_dir_all(repo.join("hardware/default")).unwrap();
+        std::fs::write(
+            repo.join("hardware/default/wiring.toml"),
+            "[[wire]]\nconnector = \"J-T\"\nhdr_pin = [1, 2]\nsignal = [\"vcc\", \"gnd\"]\n\
+             net = \"rail5v\"\nfeeds = []\nmate = \"none\"\nkeyed = false\nrated_a = 1.0\n\
+             gnd_common = \"star-1\"\n",
+        )
+        .unwrap();
 
         let work = std::env::temp_dir().join(format!("rr3-assemble-w-{}", std::process::id()));
         let (profile_dst, entries) =
@@ -540,6 +565,11 @@ watchdog_timeout_ms = 5000\n";
         assert_eq!(
             std::fs::read_to_string(&profile_dst).unwrap(),
             std::fs::read_to_string(repo.join("profiles/default.toml")).unwrap()
+        );
+        // 接线档同批原文零改
+        assert_eq!(
+            std::fs::read_to_string(work.join("hardware/default/wiring.toml")).unwrap(),
+            std::fs::read_to_string(repo.join("hardware/default/wiring.toml")).unwrap()
         );
         // 两模块各就位：rust entry 指 target/debug 产物、python 指 workdir 内 shim
         assert_eq!(entries.len(), 2);
@@ -574,13 +604,18 @@ watchdog_timeout_ms = 5000\n";
     }
 
     /// 装配演练的仓内前提：default 机型 face 的每个模块，仓源 manifest 可解析、
-    /// entry 可装机（仓相对）、config 在——契约/目录漂移让单测红，不是演练跑一半红
+    /// entry 可装机（仓相对）、config 在；接线档在（校验⑦ 装机档必在）——
+    /// 契约/目录漂移让单测红，不是演练跑一半红
     #[test]
     fn repo_default_enabled_slots_are_assembly_ready() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let profile_text = std::fs::read_to_string(repo.join("profiles/default.toml")).unwrap();
         let profile = rr3_profile_from_text(&profile_text).expect("default 装配单可解析");
         assert_eq!(profile.enabled_slots.len(), 6, "default 机六模块满配");
+        assert!(
+            repo.join("hardware/default/wiring.toml").is_file(),
+            "default 机缺仓源接线档（校验⑦ 要求 hardware/<形态>/wiring.toml 必在）"
+        );
         for module in profile.enabled_slots.keys() {
             let dir = repo.join("modules").join(module);
             let text = std::fs::read_to_string(dir.join("module.toml"))

@@ -208,12 +208,17 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
     let (boot_manifests, degraded, hal_bindings, predegraded) = match &cfg.profile {
         Some(p) => {
-            // 格位/角色契约与主题契约同目录（--contracts 运行期落点，T5；roles.toml
-            // 是校验①②判据源，增补轮六 §4.1）
+            // 格位/角色/器件契约与主题契约同目录（--contracts 运行期落点，T5；roles.toml
+            // 是校验①②判据源、devices.toml 是校验⑦-d 的 mate 集判定源，增补轮六
+            // §4.1/§4.1b）；接线档按装机布局由装配单推导（hardware/<形态>/wiring.toml，
+            // §4.3——与 modules-root 同一条 <root> 纪律，校验⑦ 判据面）
             let contracts = crate::topics_load::rr3_contracts_dir(cfg.contracts.as_deref());
             let slots = contracts.join("slots.toml");
             let roles = contracts.join("roles.toml");
-            let boot = crate::profile::rr3_profile_boot_inputs(p, &slots, &roles)?;
+            let devices = contracts.join("devices.toml");
+            let wiring = crate::wiring::rr3_wiring_path_for_profile(p)?;
+            let boot =
+                crate::profile::rr3_profile_boot_inputs(p, &slots, &roles, &devices, &wiring)?;
             for (module, slot) in &boot.missing {
                 rr3_log(&format!(
                     "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
