@@ -13,6 +13,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 | `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_publish_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
 | `slots.toml` | 能力格坐标系总表：`[[slot]]`（name/layer/note），三层 base/body/cognition（查册门真值见下"slots.toml 裁定"） | L2 |
 | `roles.toml` | 角色词表（增补轮六 §4.1 新建）：`[[role]]`（name/slot/kind/iface/requires/derives/direction/droppable/input_only_ok/per_instance/note）——profiles `[pins]` 的 role 外键、rrd 派生器（derives）与门 a 六表对账的真值源；slot 外键必须命中 `slots.toml`，iface 外键必须命中 `RR3_ASSEMBLE_HANDLE_TRAITS`（两者当前由本表数据自守，门 a 待建） | L2 |
+| `devices.toml` | 器件型号词表（增补轮六 §4.1b 新立，sense S-13）：`[[device]]`（model/bus/addrs/baud_ok/id_reg/peak_ma/mate）——门 o 在册对账、门 i 前件、§12.1 器件级在位探测（id_reg，缺省时探测面只许报 reachable/absent）与校验⑨ 电流互校的真值源；装载期不认型号（D10a），评审期与出厂自检必须认 | L2 |
 | `events/*.schema.json` | 各模块事件负载 schema（命名规则与模板见 [`events/README.md`](events/README.md)） | L2 |
 
 > **golden 向量的效力边界**：它钉住的是"本机 Rust 编解码与契约字节逐位一致"（IPC-T-001 侧），
