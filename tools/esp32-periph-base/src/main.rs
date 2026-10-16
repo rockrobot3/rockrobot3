@@ -96,7 +96,7 @@ use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text
 use crate::periph::{CtlUart, RtPeriph};
 use crate::power::{RailJudge, RailMonitor, RailTier};
 use crate::runtime::runtime_loop;
-use crate::state::{lock_bus, now_ms, push_job, Bus, Job, PeriphState};
+use crate::state::{lock_bus, push_job, Bus, Job, PeriphState};
 
 // ---------------------------------------------------------------------------
 
@@ -105,62 +105,6 @@ fn ram_point(point: &str) {
     let free = unsafe { esp_get_free_heap_size() };
     let min_free = unsafe { esp_get_minimum_free_heap_size() };
     println!("[periph] RAM point={point} free={free}B min_free={min_free}B");
-}
-
-/// UART2 片内环回探针（临时排障面）：`uart_set_loop_back` 硬件自环 TX→RX，发 2KB
-/// 图案四段（128B 长零串 = 病源假设内容 / 896B 'A' 边沿密集 / 512B 递增 / 512B
-/// 0xFF 恒高），64B 交叉写读（RX FIFO 仅 128B 防溢出），逐字节比对后关环回 +
-/// 清残输入。OK = 芯片内 UART2 收发链路干净（病害在外部链路）；MISMATCH/TIMEOUT
-/// = 芯片内即坏（与线缆无关）。此段在两平面线程 spawn 前独占 UART2，无竞争。
-fn uart_loopback_probe(uart: &mut UartDriver<'static>) {
-    const UART2: esp_idf_sys::uart_port_t = 2 as esp_idf_sys::uart_port_t;
-    let mut pattern = vec![0u8; 2048];
-    for b in &mut pattern[128..1024] {
-        *b = b'A';
-    }
-    for (i, b) in pattern.iter_mut().enumerate().skip(1024).take(512) {
-        *b = i as u8;
-    }
-    for b in &mut pattern[1536..] {
-        *b = 0xFF;
-    }
-
-    unsafe { esp_idf_sys::uart_set_loop_back(UART2, true) };
-    let _ = uart.wait_tx_done(u32::MAX);
-
-    const CHUNK: usize = 64;
-    let mut sent = 0usize;
-    let mut got = 0usize;
-    let mut mism: Option<(usize, u8, u8)> = None;
-    let mut rbuf = [0u8; CHUNK];
-    let deadline = now_ms() + 3000;
-    while got < pattern.len() && now_ms() < deadline {
-        if sent < pattern.len() {
-            let end = (sent + CHUNK).min(pattern.len());
-            sent += uart.write(&pattern[sent..end]).unwrap_or(0);
-        }
-        if let Ok(n) = uart.read(&mut rbuf, 10) {
-            for &b in &rbuf[..n] {
-                if got >= pattern.len() {
-                    break;
-                }
-                if b != pattern[got] {
-                    mism = Some((got, b, pattern[got]));
-                }
-                got += 1;
-            }
-        }
-    }
-    unsafe { esp_idf_sys::uart_set_loop_back(UART2, false) };
-    unsafe { esp_idf_sys::uart_flush_input(UART2) };
-    let _ = uart.wait_tx_done(u32::MAX);
-    match (mism, got == pattern.len()) {
-        (None, true) => println!("[probe] UART2 片内环回 OK（2KB 图案逐字节全对上）"),
-        (Some((at, g, w)), _) => {
-            println!("[probe] UART2 片内环回 MISMATCH @{at}: got={g:#04x} want={w:#04x}")
-        }
-        (None, false) => println!("[probe] UART2 片内环回 TIMEOUT：只回 {got}/2048B"),
-    }
 }
 
 fn main() {
@@ -186,7 +130,7 @@ fn main() {
     let uart_config = UartConfig::new()
         .baudrate(Hertz(UART2_BAUD_HZ))
         .tx_fifo_size(UART2_TX_RING);
-    let mut uart = UartDriver::new(
+    let uart = UartDriver::new(
         peripherals.uart2,
         peripherals.pins.gpio18,
         peripherals.pins.gpio19,
@@ -197,24 +141,25 @@ fn main() {
     .expect("UART2 驱动安装失败");
     println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO18(TX)/GPIO19(RX)");
 
-    // ---- 临时排障面（判据② 音频上行帧头病害，定案即撤）----
-    // 法证在案：帧头部长零串区（trace_id/reserved 全零）宿主侧收到全 0xff / 0xffff8000
-    // 族，payload[212:] 起完好；损坏按字节定界不按时间（921600/460800 同窗口）→ 内容
-    // 依赖 = 长零串（线上持续低电平）期间电平被抬高的电气边际假设（与 I2C 长跳线被迫
-    // 50k 同案）。固件写出面/波特率时钟差已排除。本段区分"驱动能力不足"vs"接线/共地"：
-    // (a) GPIO18 驱动档拉满 CAP_3（≈40mA）——抓流转净则软件修复成立；
-    // (b) 片内 TX→RX 环回探针——环回净而抓流脏则芯片内排除，钉死外部链路。
+    // ---- GPIO18 驱动档拉满 CAP_3（判据② 音频上行病害的定案修复，2026-10-16）----
+    // 根因（真板双探针实锤）：默认档 CAP_2（≈20mA）推不动 18/19 的长跳线 + FT232
+    // 接收链路——**长零串（线上持续低电平）期间电平被耦合/漏电抬高**，接收端把 0
+    // 读成 1。受害区 = 帧头部长零串（trace_id/reserved 全零收成 0xff 族）+ payload
+    // 头 212B；'A' 等边沿密集内容完好。三重证据定案：① 片内 TX→RX 环回 2KB 四段
+    // 图案（长零串/'A'/递增/0xFF）逐字节全对上——芯片内排除；② CAP_3（≈40mA）
+    // 拉满后 FT232 抓流 27 完整帧**位级全对**（payload 整体 + PCM 图案 L=seq/R=递增
+    // 核验过）；③ 损坏按字节数定界不按时间（921600/460800 同窗口）= 内容依赖。与
+    // I2C 被迫 50k 同族（长跳线电气边际），但本例驱动档即可治。临时排障探针（环回
+    // 函数 + 460800 对照）定案已撤。
     let drive_res = unsafe {
         esp_idf_sys::gpio_set_drive_capability(
             18 as esp_idf_sys::gpio_num_t,
             esp_idf_sys::gpio_drive_cap_t_GPIO_DRIVE_CAP_3,
         )
     };
-    println!(
-        "[probe] GPIO18 驱动档拉满 CAP_3: {}",
-        if drive_res == 0 { "ok" } else { "err" }
-    );
-    uart_loopback_probe(&mut uart);
+    if drive_res != 0 {
+        println!("[periph] GPIO18 驱动档 CAP_3 设置失败 err={drive_res}（继续跑，查 esp-idf-sys 对表）");
+    }
 
     // ---- I2C0 @ GPIO21/22（判据①：扫描 0x3C 应答）----
     // 频率档 400k → 100k → **50k**：真板实证 400k/100k 在长跳线 + 模块弱上拉下**时序
