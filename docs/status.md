@@ -764,6 +764,21 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   gaps=0 + INFO 对账 + wav 落盘）→ d5 DoA 冒烟（`--secs 40 --doa`；拍手时间表 0–8s 左侧
   / 10–18s 右侧，启动前发 "d5 开始"）→ RAM 三点收口。RAM 点1/点2 已随 run#5 到手
   （boot 行 02:07:18 + INFO `free=191072B min_free=105136B`）。
+- **0.0.5 增补轮五 批D④ 续——FT232 接入首跑病害根因定案：GPIO18 驱动档不足（CAP_3 修复）+ 收流落 wav 证据面复测过（2026-10-16，提交
+  `d5d9398`+`158bc4f`+`055cf48`+`63212c7`）**：FT232 到货接 GPIO18/19 收流位后 921600 抓流帧头仍脏——trace_id/reserved
+  长零区收成 0xff 族 + payload 头 212B 冻结垃圾，payload 尾 b64 完好；损坏按字节数定界不按时间（921600/460800 对照同窗口）=
+  内容依赖（长零串）。三重证据定案**第三根因 = GPIO18 默认驱动档 CAP_2（≈20mA）推不动长跳线 + FT232 接收链路——长零串（线上
+  持续低电平）期间电平被耦合/漏电抬高，接收端把 0 读成 1**：① 板面片内 TX→RX 环回探针（`uart_set_loop_back`，2KB 四段图案
+  长零串/'A'/递增/0xFF，64B 交叉写读防 RX FIFO 溢出）逐字节全对上——芯片内排除；② mic.rs 改**自定位图案探针**（L=seq 帧恒定
+  / R=帧内样本序号，任何损坏字节自带坐标）后 CAP_3 拉满抓流 27 完整帧**位级全对**（payload 整体逐字节 + PCM 图案逐样本
+  L==seq/R==0..2047 核验，seq 连续无断）；③ 边沿密集内容（'A' 段/递增段）全程完好。修复 = `gpio_set_drive_capability(GPIO18,
+  CAP_3)`（≈40mA）一行转正（[main.rs](../tools/esp32-periph-base/src/main.rs) 定案注释在位），与 I2C 被迫 50k 同族（长跳线
+  电气边际）但驱动档即治；临时面（环回探针/460800 对照/图案探针）定案即撤。宿主证据面复测过：图案流 wav（chunks=78 gaps=0
+  err=0 实测 16010Hz / 9.98s）+ 真声流 wav（chunks=94 gaps=0 err=0 resyncs=0 **实测 15995Hz / 12.04s / 770KB**，双通道
+  RMS≈74 峰值 369 = 安静室底噪；`rr3-audio-real-mic.wav` / `rr3-audio-pattern-probe.wav` 随收流落盘不入库）。过程实录一段
+  宿主侧 FT232 瞬态噪声插字（一窗 err=186 resyncs=62 但 seq 零丢失、wav 无损——同时刻原始抓流 46/46 帧净对表，噪声字节穿插
+  帧间非换帧，三级防护重同步按设计护住对齐），与 d4 已档宿主侧 RX 异态自愈同族，非板面回归。正式判据②（600s 稳态）与判据③
+  （DoA 拍手）待跑。
 - **0.0.6 模型连接抽象批——AgentRT v3 式连接行 + 密钥双源 + 面板密钥面（2026-10-14，提交
   `d69e918`+`89eb71e`+本批记）**：用户需求"抽象化 API 客户端连云端/本地模型；操作面板填 key，
   代码无明文密钥"（立项计划 .trae/documents/rock3-model-client-abstraction-and-panel-keys.md，
