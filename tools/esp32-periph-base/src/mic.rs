@@ -57,6 +57,14 @@ const MIC_WINDOW_READS: usize = 16;
 /// 语音档采样率（判据① wav 口径；全案批D §4）。
 pub const MIC_SR_HZ: u32 = 16000;
 
+/// 判据② 流完整性定案探针（**临时排障面，定案即撤**）：true 时 PCM 不装真
+/// 音频，改填**自定位图案**——L 通道 = seq 低 16 位（整帧恒定），R 通道 =
+/// 帧内样本序号（u16 wrapping）。任何线上损坏字节都自带"第几帧第几样本"
+/// 坐标：宿主逐样本校验即可读出损坏区来自哪个 seq 的哪个偏移——陈旧重发
+/// （旧 seq 坐标）、越界写（图案被别的数据覆盖）、链路误码（坐标不连续）
+/// 一测即分，不再靠字节面相猜。
+const AUDIO_PATTERN_PROBE: bool = true;
+
 /// 一分片 → 整帧字节（批D③ Event 帧面，rr-bus `rr3_publish` 板侧等价形）：
 /// 逐通道减**本分片** DC（INMP441 近零偏置，分片内均值即干净基线，无跨片状态）→
 /// 24bit 截 16bit（>>8 保高位）→ s16le 双通道交错 → b64 → JSON 体（seq/format/
@@ -78,12 +86,23 @@ fn audio_chunk_to_frame(chunk: &[i32], seq: u32) -> Option<Vec<u8>> {
     l_dc /= frames as i64;
     r_dc /= frames as i64;
     let mut pcm = Vec::with_capacity(frames * 4);
-    for f in 0..frames {
-        // 24bit（±2^23）>> 8 落 16bit 满幅；i64 域减 DC 后回 i16 无截断
-        let l = ((chunk[f * 2] as i64 - l_dc) >> 8) as i16;
-        let r = ((chunk[f * 2 + 1] as i64 - r_dc) >> 8) as i16;
-        pcm.extend_from_slice(&l.to_le_bytes());
-        pcm.extend_from_slice(&r.to_le_bytes());
+    if AUDIO_PATTERN_PROBE {
+        // 探针图案（见 const 注）：字节面 = [seq_lo seq_hi f_lo f_hi] × frames，
+        // 每 4B 自带 (seq, f) 坐标；DC/真音频路径整段让位
+        for f in 0..frames {
+            let l = seq as u16;
+            let r = f as u16;
+            pcm.extend_from_slice(&l.to_le_bytes());
+            pcm.extend_from_slice(&r.to_le_bytes());
+        }
+    } else {
+        for f in 0..frames {
+            // 24bit（±2^23）>> 8 落 16bit 满幅；i64 域减 DC 后回 i16 无截断
+            let l = ((chunk[f * 2] as i64 - l_dc) >> 8) as i16;
+            let r = ((chunk[f * 2 + 1] as i64 - r_dc) >> 8) as i16;
+            pcm.extend_from_slice(&l.to_le_bytes());
+            pcm.extend_from_slice(&r.to_le_bytes());
+        }
     }
     let body = json!({
         "topic": RR3_AUDIO_TOPIC,
