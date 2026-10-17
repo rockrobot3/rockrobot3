@@ -511,6 +511,13 @@ fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error> {
     }
 }
 
+/// ON 应答行判据：OK 可在行中——流前缀混行合法（p3 实录形状）。
+/// 判 `OK audio on` 全串而非裸 `OK`：b64 字符表含 O/K，裸两字符在流 payload 里
+/// 误配率不可忽略；9 字节全串在 b64/JSON 流里现实上不可撞。
+fn ok_reply_line(line: &str) -> bool {
+    line.contains("OK audio on")
+}
+
 /// 开口握手（首连/重连同款，批C settle 纪律）：停 1.2s 让开口翻转的板复位走完
 /// → 冲残留 → **防御停流** → 再冲一次 → `AUDIO ON` → 核验应答。
 ///
@@ -519,6 +526,13 @@ fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error> {
 /// "应答行"是 b64 音频载荷，握手必挂。先发 OFF（幂等）并吞掉应答行（残流混行
 /// 不解析），流停后冲净，AUDIO ON 的应答才是干净行首。板本来就没流时 OFF 照
 /// 常应答，路径不变。
+///
+/// ON 应答判据放宽（p2/p3 冒烟实锤，批D④ 续）：板 `OK audio on` 应答与首帧字节
+/// 背靠背进线时，读窗口可能先抓到流/失步字节再扫得 OK（p3 实录：seq=10604 帧的
+/// b64 payload + `OK audio on` 同行）——“首行必须 OK 开头”把合法起流误判为拒收。
+/// 改为 [`REPLY_TIMEOUT_MS`] 总预算内逐行扫 [`ok_reply_line`]，任一行含
+/// `OK audio on` 即过；预算耗尽才点名。板静默拒收仍走 `read_reply_line` 的
+/// 3s 无字节 Err，失败行为不变。
 fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
     std::thread::sleep(SETTLE);
     conn.rr3_flush_input()
@@ -537,12 +551,26 @@ fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
         .map_err(|e| format!("二次 flush 失败: {e}"))?;
     conn.write_all(b"AUDIO ON\n")
         .map_err(|e| format!("发 AUDIO ON 失败: {e}"))?;
-    let reply = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
-    println!("[rec] board reply: {reply:?}");
-    if !reply.starts_with("OK") {
-        return Err(format!("板面拒收（{reply:?}）"));
+    // 逐行扫（判据见 [`ok_reply_line`]；每行超时同 [`read_reply_line`] 口径，
+    // 总预算 [`REPLY_TIMEOUT_MS`] 兜底防板持续推流把握手拖死）
+    let deadline = Instant::now() + Duration::from_millis(REPLY_TIMEOUT_MS as u64);
+    loop {
+        let line = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
+        if ok_reply_line(&line) {
+            let (pfx, _) = line.split_at(line.find("OK audio on").unwrap());
+            println!(
+                "[rec] board reply: OK（行内扫得；前置 {}B 流/残渣字节）",
+                pfx.len()
+            );
+            return Ok(line);
+        }
+        eprintln!("[rec] 应答行未见 OK（{}B，继续扫）: {:?}", line.len(), &line[..line.len().min(80)]);
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "应答 {REPLY_TIMEOUT_MS}ms 预算内未见 OK audio on（末行 {line:?}）"
+            ));
+        }
     }
-    Ok(reply)
 }
 
 /// fail-honest 退出（重连失败路径）：已落盘数据补恢复头保住，exit(4) 点名。
@@ -1143,6 +1171,19 @@ mod tests {
         let (dropped, why) = a.pull().unwrap_err();
         assert_eq!(dropped, 4);
         assert!(why.contains("越拆帧护栏"), "{why}");
+    }
+
+    /// ON 应答判据：OK 可在行中（p3 冒烟实录形状——seq=10604 帧的 b64 payload
+    /// 与 `OK audio on` 同行）；裸 `OK` 不误配（b64 字符表含 O/K）。
+    #[test]
+    fn ok_reply_line_accepts_stream_prefixed_mixed_line() {
+        assert!(ok_reply_line("OK audio on"));
+        assert!(ok_reply_line(
+            "CR//D/MQAwAFEAcAARALD/8f8wAPH/MAAxALD/UQBQADEA...,\"rate\":16000,\"seq\":10604,\"topic\":\"rr3-sense/audio/pcm\"}OK audio on"
+        ));
+        assert!(!ok_reply_line("OK audio off"));
+        assert!(!ok_reply_line("\u{5d4}\u{14}()QI"));
+        assert!(!ok_reply_line("Qr//D/MQAwAFEAcAARALD/OK"));
     }
 
     #[test]
