@@ -51,8 +51,8 @@ pub enum Rr3IntentOutcome {
 /// 主题才进入执行臂；未列（含 led/effect）一律由开放门拒执行。
 pub fn rr3_intent_actions_handle(
     actions: &Value,
-    gpio: &mut dyn rr_hal::Rr3GpioOut,
-    servo: &mut dyn rr_hal::Rr3PwmServo,
+    gpio: &mut dyn rr_hal_api::Rr3GpioOut,
+    servo: &mut dyn rr_hal_api::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
     low_blocked: bool,
     open_topics: &[String],
@@ -79,8 +79,8 @@ fn rr3_open_topics_join(open_topics: &[String]) -> String {
 /// 单条动作：形状裁决 → 两道门 → 执行（低电闸门只辖执行面）
 fn rr3_intent_action_handle(
     item: &Value,
-    gpio: &mut dyn rr_hal::Rr3GpioOut,
-    servo: &mut dyn rr_hal::Rr3PwmServo,
+    gpio: &mut dyn rr_hal_api::Rr3GpioOut,
+    servo: &mut dyn rr_hal_api::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
     low_blocked: bool,
     open_topics: &[String],

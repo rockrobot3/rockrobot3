@@ -31,7 +31,9 @@ mod vad;
 use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_audio_source, Rr3AudioCfg, Rr3PcmStream};
+use rr_hal::backend::rr3_hal_audio_source;
+use rr_hal::Rr3PcmStream;
+use rr_hal_api::Rr3AudioCfg;
 use rr_ipc::{opcode, rr3_base64_encode, Rr3PayloadType};
 use serde_json::{json, Value};
 

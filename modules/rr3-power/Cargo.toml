@@ -17,7 +17,12 @@ path = "src/main.rs"
 # 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
 rr-bus = { path = "../../base/runtime/rr-bus" }
+# 能力面契约 crate（基-35/⑨-w）：契约符号一律走 rr_hal_api，不经理 rr-hal 的
+# re-export。rr-hal 边仅为装配选择函数（backend::rr3_hal_*）保留——装配位今日在
+# 单元组合件内是结构事实，Cargo 级拆边需装配上移（敞口在册）；use 面白名单由
+# check.sh 步 ⑨-w 冻结执法。
 rr-hal = { path = "../../base/runtime/rr-hal" }
+rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
 rr-core = { path = "../../base/runtime/rr-core" }
 serde_json = "1"
 toml = "0.8"

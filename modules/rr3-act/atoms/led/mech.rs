@@ -70,7 +70,7 @@ pub fn rr3_led_tick(now_ms: u64, led: &mut Rr3Led) -> Option<bool> {
 mod tests {
     use super::*;
     use rr_hal::sim::Rr3SimGpioOut;
-    use rr_hal::Rr3GpioOut as _;
+    use rr_hal_api::Rr3GpioOut as _;
 
     #[test]
     fn effect_parse_covers_whitelist_and_rejects_garbage() {

@@ -13,9 +13,12 @@ name = "rr3-connect"
 path = "src/main.rs"
 
 [dependencies]
-# 总线与 HAL：path 依赖（勿用 crates.io 同名包）
+# 总线与 HAL：path 依赖（勿用 crates.io 同名包）。rr-hal-api = 能力面契约 crate
+# （基-35/⑨-w）：契约符号一律走 rr_hal_api；rr-hal 边仅为装配函数 + sim/配网承载
+# 保留（白名单由 check.sh 步 ⑨-w 冻结执法，Cargo 级拆边需装配上移，敞口在册）。
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
 rr-bus = { path = "../../base/runtime/rr-bus" }
 rr-hal = { path = "../../base/runtime/rr-hal" }
+rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
 serde_json = "1"
 toml = "0.8"

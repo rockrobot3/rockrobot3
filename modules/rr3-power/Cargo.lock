@@ -108,6 +108,7 @@ dependencies = [
  "rr-bus",
  "rr-core",
  "rr-hal",
+ "rr-hal-api",
  "rr-ipc",
  "serde_json",
  "toml",

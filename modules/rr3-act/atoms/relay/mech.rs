@@ -5,7 +5,7 @@
 //! ADR-0019 修订 4）：件面只交判定与应用，组装归 `src/composite.rs`，
 //! 线上字节逐字不变。
 
-use rr_hal::Rr3GpioOut;
+use rr_hal_api::Rr3GpioOut;
 
 /// 运维计数键（0.0.4 批B，方案 §4 归属表）：`rr3_relay_apply` 成功后按目标电平
 /// 经 bus client 的 counters 通道自报，字面量只在这一个函数
