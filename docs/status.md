@@ -332,7 +332,7 @@
    （`/usr/lib/rockrobot3` vs `/usr/lib/rr3`）——**一句已经为假的注释比没有注释更危险**。
    ② **实-6（抽象只做一档）"裁剪与接线都只改数据"今天只对 host 档成立**——host 侧那条链是真的
    （`profiles/*.toml` → `[pins]` 派生 → `RR3_HAL_BINDINGS` → `descriptor.rs`）；rtos 侧四项零命中：
-   板侧引脚**硬编码**（`tools/esp32-periph-base/src/board.rs:156/158/182`）、桥上**无配置命令集**、
+   板侧引脚**硬编码**（`tools/esp32-periph-base/src/board.rs`，取证时点 `e9a764f` :148/150/174；原记 `:156/158/182` 系 `b11dd2f` 时点，漂移即基-37 活体）、桥上**无配置命令集**、
    平台词形硬编码在 `profile.rs:660`、`:1006` 的档位守卫拿字面量 `"host"` 比 ⇒ **三册对 rtos 是零消费者的装饰数据**。
    这一条正打在**跨芯片跨平台快部署**这个核心价值主张上。修法 = 新立 **基-24 桥上配置腿**（归属 connect 册，不另起 N 号），
    验收是**行为判据**："改 `profiles/esp32-mini.toml` 的 `physical` 值后板行为发生变化" + 读不到注入值即 fail-closed 拒起。
@@ -352,7 +352,7 @@
    写好了要往本表加的那一整行字，而那行断言"`spi_*` 派生键**未入** `RR3_ASSEMBLE_DESC_KEYS`"与
    `base/runtime/rr-registry/src/assemble.rs:56-67` **直接矛盾**——十名里第十名就是 `spi_device`
    （其注释还写明它是 0.0.6 链④按裁定流程扩进去的）。真正的缺口在**另一张表**：门 n 的扫面
-   `rrd/src/profile.rs:91-99` 的 `RR3_PIN_DERIVED_KEYS: [&str; 7]` **不含**它，
+   `rrd/src/profile.rs` 的 `RR3_PIN_DERIVED_KEYS: [&str; 7]`（取证时点 `e9a764f` :92；原记 `:91-99` 系 `b11dd2f` 时点）**不含**它，
    而两张表相差的三名（`alsa_device`/`link_ifname`/`spi_device`）恰好就是 `[hardware]` 的三个非引脚键。
    **它比 F-5 更重的地方**：F-5 抄的是**值**，这里抄的是**一句关于代码状态的断言**，而施工图的执行纪律是
    "每行带证据、无证据的句子删掉"——执行者按纪律照抄时**不会质疑那行断言本身**，于是假账**带着证据号进台账**。
