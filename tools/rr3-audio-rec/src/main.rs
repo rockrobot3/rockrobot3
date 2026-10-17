@@ -17,27 +17,33 @@
 //! - seq 连续性记账（wrapping u32）：断档即板侧背压丢片（`INFO` 的 `drop` 互为
 //!   对账）；大步进（≥ 0x8000_0000）= 板侧重启记 `restarts`，不按 wrapping 补
 //!   天文 gap。收流端只对账不补救（fail-honest：wav 是真实收到的流）。
-//! - 三级防护（0.0.5 批D④ d4 600s 实锤；机制与策略分离）：
+//! - 三级防护（0.0.5 批D④ d4 600s 实锤；机制与策略分离；判据② 收流线程化——
+//!   A/B 决定性实验定案：病灶是分相读节奏（128B 头→plen 载荷两段间让出），
+//!   85KB/s 连续流下间歇 RX 溢出丢字节；python read(65536) 同款大块裸读 600s
+//!   满速零污染。读线程只做大块裸读推裸字节通道，解码线程纯内存拆帧
+//!   （[`FrameAssembler`]，头校验全数 rr-ipc [`Rr3Header::from_bytes`] 单点，
+//!   零第二份帧语义））：
 //!   ① 读超时——机制面 rr-ipc `rr3_read_timeout`（poll 等就绪，`Ok(0)`=此刻无
-//!   数据非 EOF），本件帧读/应答读全走超时档；阻塞读缺省语义保持为 rr-ipc
+//!   数据非 EOF），读线程裸读/应答读全走超时档；阻塞读缺省语义保持为 rr-ipc
 //!   其余用户（桥/哨兵）不动。
 //!   ② 失步重同步——帧头 magic 线上字节 = "1ERA"（全 b64 字母表字符），失步后
-//!   在载荷里撞上即"合法幻影帧头"+ 天文 payload_len。连续 [`ERR_STREAK_RESYNC`]
-//!   次收帧失败即 magic 扫描对齐续收；连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s
-//!   静默）= 线上断流，扫描救不了，转 ③。
-//!   ③ 断流重连——重开口 settle + AUDIO ON 续收（seq 重走/续走都如实记账：
-//!   板复位 `restarts`，续走空洞入 `gaps`）；握手 [`HANDSHAKE_TRIES`] 次重试、
-//!   每轮重开 fd（宿主侧 CP2102 RX 冻结数分钟内自愈、板面四轮洗冤，重开 fd
+//!   在载荷里撞上即"合法幻影帧头"+ 天文 payload_len。坏帧起点弃 4B magic 续扫
+//!   （字节已在缓冲，弃扫零新 I/O——滑移不放大为风暴的关键）；连续
+//!   [`ERR_STREAK_RESYNC`] 次拆帧失败记一次重同步账（日志对账用）。
+//!   ③ 断流重连——读线程见过数据后连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s
+//!   静默）= 线上断流，就地重开口 settle + AUDIO ON 续收（seq 重走/续走都如实
+//!   记账：板复位 `restarts`，续走空洞入 `gaps`）；握手 [`HANDSHAKE_TRIES`] 次
+//!   重试、每轮重开 fd（宿主侧 USB RX 冻结数分钟内自愈、板面四轮洗冤，重开 fd
 //!   是宿主侧唯一捅法，骑行期看门狗解武装）。
-//!   落盘走写线程（读循环零磁盘 I/O，/dev/null 实验定案：逐片同步写刷是冻结
+//!   落盘走写线程（解码循环零磁盘 I/O，/dev/null 实验定案：逐片同步写刷是冻结
 //!   放大器）；看门狗（武装后 [`STALL`] 无新分片字节 → 补 wav 恢复头 exit(3)）
-//!   是最外层兜底；只管武装后的收流期，重连/重同步期解武装不误触发。
+//!   是最外层兜底；只管武装后的收流期，重连骑行期解武装不误触发。
 //!
 //! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
 //! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=921600（板面批D② 落板档；
 //! 波特率仍过 rr-ipc 档位表白名单，不预设动物园）。
-//! 退出码：0=收兵；1=开口/握手/0 分片；2=参数错；3=看门狗停滞恢复；4=重连失败
-//! （3/4 都先补恢复头保住已落盘数据再退）。
+//! 退出码：0=收兵；1=开口/握手/0 分片；2=参数错；3=看门狗停滞恢复；4=重连失败/
+//! 收流线程亡（3/4 都先补恢复头保住已落盘数据再退）。
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write as _};
@@ -48,8 +54,8 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use rr_ipc::{
-    rr3_base64_decode, rr3_body_split, rr3_uart_baud_speed, Rr3ByteStream, Rr3Frame,
-    Rr3PayloadType, Rr3TransportConn, Rr3UartConn,
+    rr3_base64_decode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3Header,
+    Rr3PayloadType, Rr3UartConn, RR3_IPC_HDR_SIZE,
 };
 use serde_json::Value;
 
@@ -76,8 +82,9 @@ const STALL: Duration = Duration::from_secs(10);
 /// 板不依赖 rr-core、收流端常量自证同纪律）。b64 载荷里也会出现该子串，
 /// 失步后撞上即"合法幻影帧头"，重同步扫描以它为锚。
 const RR3_MAGIC_LE: [u8; 4] = 0x41524531u32.to_le_bytes();
-/// 连续收帧失败达此数即判失步，触发 magic 扫描重同步（1-2 次可能是单帧毛刺，
-/// 3 次 = 帧界已丢，盲目重试只会撞幻影帧头）。
+/// 连续拆帧失败达此数记一次失步重同步账（日志对账；坏帧弃扫本身由
+/// [`FrameAssembler`] 在内存里即时完成，无独立扫描动作——1-2 次可能是单帧毛刺，
+/// 3 次 = 帧界成片损坏，值得一条日志点名）。
 const ERR_STREAK_RESYNC: u64 = 3;
 /// 帧读超时（毫秒，机制面 `rr3_read_timeout`）：单次等就绪时长。正常流分片
 /// 背靠背（921600 线速 ~89ms/片），200ms 静默 = 此读无数据（EOF 形状上交帧层
@@ -87,10 +94,21 @@ const READ_TIMEOUT_MS: i32 = 200;
 /// 应答行逐字节超时（毫秒）：板面应答整行一次写出（write_all + wait_tx_done），
 /// 3s 无字节 = 板面哑了（握手路径点名失败，不再无限等）。
 const REPLY_TIMEOUT_MS: i32 = 3000;
-/// 重同步零读宽限：连续 8 次 200ms 零读 = 1.6s 连续静默 → 扫 magic 也救不了
-/// （线上断流），resync 返回 None 交主循环重连。数据在流时 256B 块 ~10ms 即满，
-/// 零读必然是真静默（连续计数，数据一恢复即清零续扫）。
+/// 读线程断流判据：见过数据后连续 8 次 200ms 零读 = 1.6s 连续静默 → 线上断流
+/// （扫描救不了），读线程就地转重连（第 ③ 级）。数据在流时大块 ~10ms 即满，
+/// 零读必然是真静默（连续计数，数据一恢复即清零）。
 const RESYNC_ZERO_BAIL: u32 = 8;
+/// 读线程大块裸读窗（判据② A/B 定案的节奏）：单次 poll 就绪后 read 一次的
+/// 请求宽度——python read(65536) 同款 600s 满速零污染；分相读（128B 头→plen
+/// 载荷两段间让出）在同等链路 2-16s 起逐帧损坏风暴。
+const READ_BLOCK: usize = 65536;
+/// 解码线程等裸字节的醒来节拍（查收兵死线；断流/重连由读线程自治，解码面
+/// 只管出帧与记账）。
+const DECODE_TICK: Duration = Duration::from_millis(200);
+/// 拆帧 plen 护栏（收流端策略面）：板面音频片 plen 实测 ~11KB，rr-ipc 头层
+/// 上限 64MiB——幻影 magic（b64 载荷撞出的合法 "1ERA"）后的垃圾 plen 若照单
+/// 全收，等待/缓冲都天文。超护栏按坏帧弃 4B magic 续扫。
+const FRAMING_PLEN_CAP: usize = 1024 * 1024;
 /// 重连握手重试次数（d4 系列实锤定案）：宿主侧 CP2102 RX 路径冻结——板→宿主字节
 /// 全无而宿主→板命令畅通（板面 seq=sent/drop=0 四轮洗冤）；/dev/null 决定性实验
 /// 证伪"落盘 flush 触发"根因论（零磁盘 I/O 仍 369s 冻结；磁盘 I/O 只是放大器：
@@ -378,84 +396,94 @@ impl SeqTracker {
     }
 }
 
-/// 收流期的帧面字节流：行命令阶段的**尾部残留**（OK 行之后已到的帧前缀字节）
-/// 经 pre 回放进帧层——批次边界不吞字节。实现 [`Rr3ByteStream`] 两 `usize` 方法，
-/// 经 blanket impl 免费获得 rr3_recv_buf（板侧 UartIo 同款接缝）。
-struct FrameStream<'a> {
-    conn: &'a mut Rr3UartConn,
-    pre: Vec<u8>,
-    pos: usize,
-    /// 帧读超时（毫秒，机制面 `rr3_read_timeout`）：`Ok(0)` = 此刻无数据（非
-    /// EOF），帧层以 EOF 形状（`Closed`/`Torn*`）上交——主循环按 err_streak
-    /// 走重同步/重连，楔死不再可能。
-    timeout: i32,
+/// 拆帧器（收流端机制面，判据② A/B 定案新增）：大块裸字节 → 整帧，纯内存。
+/// 机制面只做"对齐 magic + 头层解析定长 + 按 plen 切整帧"，头校验全数交
+/// rr-ipc [`Rr3Header::from_bytes`]（零第二份帧语义）；失步恢复 = 从坏帧起点
+/// 弃 4B magic 续扫（原分相读接缝 resync 的内存版——字节已在缓冲，弃扫不再
+/// 产生任何新 I/O，滑移由此不放大为风暴）。
+struct FrameAssembler {
+    buf: Vec<u8>,
+    /// 距上一整帧的弃扫字节（诊断：重同步日志行）。
+    discarded: u64,
 }
 
-impl<'a> FrameStream<'a> {
-    fn new(conn: &'a mut Rr3UartConn) -> Self {
+/// 拆帧出片：整帧 = 头（已解析）+ 载荷字节。
+type Assembled = (Rr3Header, Vec<u8>);
+
+impl FrameAssembler {
+    fn new() -> Self {
         Self {
-            conn,
-            pre: Vec::new(),
-            pos: 0,
-            timeout: READ_TIMEOUT_MS,
+            buf: Vec::new(),
+            discarded: 0,
         }
+    }
+
+    /// 读线程推来的裸字节进缓冲。
+    fn feed(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
+    /// 距上一整帧的弃扫字节。
+    fn discarded(&self) -> u64 {
+        self.discarded
+    }
+
+    /// 尝试出下一整帧：Ok(Some) = 出帧（消费即移除）；Ok(None) = 不够一帧，
+    /// 等更多字节；Err((弃字节数, 诊断)) = 坏帧（magic 在而头非法 / plen 越栏），
+    /// 起点已弃，续扫由下次 pull 自然接上。
+    fn pull(&mut self) -> Result<Option<Assembled>, (u64, String)> {
+        // 对齐 magic：无全 magic 则只留尾 3B（可能跨块的前缀），其余静默弃
+        // （起始垃圾/断帧残骸——帧间垃圾不计数，丢片由 seq 对账如实记账）。
+        if let Some(pos) = find(&self.buf, &RR3_MAGIC_LE) {
+            if pos > 0 {
+                self.discarded += pos as u64;
+                self.buf.drain(..pos);
+            }
+        } else {
+            let keep_from = self.buf.len().saturating_sub(RR3_MAGIC_LE.len() - 1);
+            self.discarded += keep_from as u64;
+            self.buf.drain(..keep_from);
+            return Ok(None);
+        }
+        if self.buf.len() < RR3_IPC_HDR_SIZE {
+            return Ok(None);
+        }
+        let header = match Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]) {
+            Ok(h) => h,
+            Err(e) => return Err(self.drop_magic(4, format!("头层拒收: {e:?}"))),
+        };
+        let plen = header.payload_len as usize;
+        if plen > FRAMING_PLEN_CAP {
+            return Err(self.drop_magic(
+                4,
+                format!("payload_len {plen} 越拆帧护栏 {FRAMING_PLEN_CAP}（幻影头）"),
+            ));
+        }
+        let want = RR3_IPC_HDR_SIZE + plen;
+        if self.buf.len() < want {
+            return Ok(None);
+        }
+        let payload = self.buf[RR3_IPC_HDR_SIZE..want].to_vec();
+        self.buf.drain(..want);
+        self.discarded = 0;
+        Ok(Some((header, payload)))
+    }
+
+    /// 坏帧处置：弃 magic 起点（坏头只弃 4B——真帧起点可能就在其后不远处，
+    /// 续扫自会找到），返回 (弃字节数, 诊断)。
+    fn drop_magic(&mut self, n: usize, why: String) -> (u64, String) {
+        self.buf.drain(..n);
+        self.discarded += n as u64;
+        (n as u64, why)
     }
 }
 
-impl Rr3ByteStream for FrameStream<'_> {
-    fn rr3_read_into(&mut self, buf: &mut [u8]) -> usize {
-        if self.pos < self.pre.len() {
-            let n = (self.pre.len() - self.pos).min(buf.len());
-            buf[..n].copy_from_slice(&self.pre[self.pos..self.pos + n]);
-            self.pos += n;
-            return n;
-        }
-        self.conn.rr3_read_timeout(buf, self.timeout).unwrap_or(0)
+/// 子串查找（拆帧器专用；标准库无字节切片 `find`，不引依赖）。
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.len() > hay.len() {
+        return None;
     }
-
-    fn rr3_write_all_bytes(&mut self, buf: &[u8]) -> usize {
-        match self.conn.write_all(buf) {
-            Ok(()) => buf.len(),
-            Err(_) => 0,
-        }
-    }
-}
-
-impl FrameStream<'_> {
-    /// 失步重同步（收流端策略面，三级防护第 ② 级）：逐字节滑动窗口扫
-    /// [`RR3_MAGIC_LE`]，对齐即把 4B magic 塞进 `pre` 回放进帧层（既有接缝，零
-    /// 第二份帧语义）——后续 124B 头照常读。返回弃扫的字节数（诊断显示）。扫中
-    /// b64 里的幻影 "1ERA" 也会返回，但那读出来的头必 BadMagic → 连续失败再次
-    /// 触发重同步，收敛到真帧头。连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s 静默）
-    /// = 线上断流，扫描救不了，返回 None 交主循环重连（第 ③ 级）。
-    fn resync(&mut self) -> Option<u64> {
-        let mut win = [0u8; 3]; // magic 前 3 字节滑动历史（第 4 字节逐个比）
-        let mut n = 0u64;
-        let mut zeros = 0u32;
-        let mut buf = [0u8; 256];
-        loop {
-            let got = self.rr3_read_into(&mut buf);
-            if got == 0 {
-                zeros += 1;
-                if zeros >= RESYNC_ZERO_BAIL {
-                    return None; // 1.6s 连续静默 = 断流
-                }
-                continue;
-            }
-            zeros = 0; // 数据一恢复即清零续扫（连续静默才判死）
-            for &b in &buf[..got] {
-                if win == RR3_MAGIC_LE[..3] && b == RR3_MAGIC_LE[3] {
-                    self.pre = RR3_MAGIC_LE.to_vec();
-                    self.pos = 0;
-                    return Some(n + 1);
-                }
-                win[0] = win[1];
-                win[1] = win[2];
-                win[2] = b;
-                n += 1;
-            }
-        }
-    }
+    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
 }
 
 /// 收一行（逐字节超时读 [`REPLY_TIMEOUT_MS`]；'\r' 剥离；换行即返回）。
@@ -536,16 +564,115 @@ fn bail_with_recovery(out_path: &std::path::Path, watch: &WatchState) -> ! {
     std::process::exit(4);
 }
 
-/// 看门狗共享账（读线程推进 `ingested`/`rate`，写线程推进 `disk_bytes`，看门狗
-/// 线程只读）：停滞判据 = 已确认入队字节不再增长（原始字节到达≠有分片——失步
-/// 垃圾流也算死流，只认过了事件门的分片）。落盘线程化（d4 /dev/null 实验定案：
-/// 读循环零磁盘 I/O）后账拆**流侧/盘侧**双真相——`ingested` 给看门狗判停滞，
-/// `disk_bytes` 给恢复头报实际写透字节数（写线程 flush 后推进，未刷尾不虚计）。
+/// 读线程（收流端机制面，判据② A/B 定案改造）：**只做大块裸读**——单次
+/// [`Rr3UartConn::rr3_read_timeout`]（poll 等就绪 + read 一次 [`READ_BLOCK`] 窗）
+/// 整块推进裸字节通道，分相读的 128B 头/plen 载荷两段间不再让出节奏（A/B
+/// 决定性实验：python read(65536) 同款节奏 600s 满速零污染；分相读同等链路
+/// 2-16s 起逐帧损坏风暴——病灶是读路径节奏，不是链路也不是板）。
+///
+/// 静默检测与重连同线程闭环（证据面在读侧）：见过数据后连续
+/// [`RESYNC_ZERO_BAIL`] 次零读（1.6s 连续静默 = 宿主侧 USB RX 冻结实锤形状）
+/// → 就地重开口 + 握手（[`reader_reconnect`]，[HANDSHAKE_TRIES] 次），武装旗
+/// 骑行期解武装（看门狗不计停滞）。停流旗置位即发 AUDIO OFF 收兵（收兵语义
+/// 与旧版同序：先停板面流，写线程排空由主线程收口）。
+fn reader_run(
+    mut conn: Rr3UartConn,
+    tx: mpsc::Sender<Vec<u8>>,
+    stop: Arc<AtomicBool>,
+    watch: Arc<WatchState>,
+    device: String,
+    baud: u32,
+    out_path: PathBuf,
+) {
+    let mut buf = vec![0u8; READ_BLOCK];
+    let mut seen_data = false; // 本段（首连/重连后）见过数据才算真静默
+    let mut zeros = 0u32;
+    loop {
+        if stop.load(Ordering::Acquire) {
+            let _ = conn.write_all(b"AUDIO OFF\n");
+            return;
+        }
+        match conn.rr3_read_timeout(&mut buf, READ_TIMEOUT_MS) {
+            Ok(n) if n > 0 => {
+                seen_data = true;
+                zeros = 0;
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    return; // 解码面已亡（主线程先退），主线程/看门狗收口
+                }
+            }
+            _ => {
+                if !seen_data {
+                    continue; // 武装后首片前的静默合法（复位 banner/settle 窗）
+                }
+                zeros += 1;
+                if zeros < RESYNC_ZERO_BAIL {
+                    continue;
+                }
+                eprintln!("[rec] 1.6s 连续静默 → 线上断流，读线程重连");
+                watch.armed.store(false, Ordering::Release);
+                if !reader_reconnect(&mut conn, &device, baud) {
+                    eprintln!("[rec] 读线程重连全败");
+                    bail_with_recovery(&out_path, &watch); // exit(4)，盘侧真相保数据
+                }
+                watch.reconnects.fetch_add(1, Ordering::Relaxed);
+                watch.armed.store(true, Ordering::Release);
+                seen_data = false;
+                zeros = 0;
+            }
+        }
+    }
+}
+
+/// 读线程重连（三级防护第 ③ 级，判据② 改造后搬进读线程）：[HANDSHAKE_TRIES]
+/// 次、每轮重开 fd（宿主侧 USB RX 冻结唯一捅法）+ 防御停流握手。全败 false
+/// 交调用方 fail-honest 收场。
+fn reader_reconnect(conn: &mut Rr3UartConn, device: &str, baud: u32) -> bool {
+    let mut hs_err: Option<String> = None;
+    for attempt in 1..=HANDSHAKE_TRIES {
+        if attempt > 1 {
+            eprintln!(
+                "[rec] 重连握手重试 {attempt}/{HANDSHAKE_TRIES}（歇 {}s 后重开口…）",
+                HANDSHAKE_RETRY_PAUSE.as_secs()
+            );
+            std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
+        }
+        match Rr3UartConn::open_with_baud(std::path::Path::new(device), baud) {
+            Ok(c) => *conn = c, // 赋值即 drop 旧 conn（close 旧 fd）
+            Err(e) => {
+                eprintln!("[rec] 重连开口失败（第 {attempt} 次）: {e}");
+                hs_err = Some(format!("开口失败: {e}"));
+                continue;
+            }
+        }
+        match handshake(conn) {
+            Ok(_) => return true,
+            Err(e) => {
+                eprintln!("[rec] 重连握手失败（第 {attempt} 次）: {e}");
+                hs_err = Some(e);
+                // 尽力停板面流（下一轮重开还会再发防御 OFF；板死则无效）
+                let _ = conn.write_all(b"AUDIO OFF\n");
+            }
+        }
+    }
+    if let Some(e) = hs_err {
+        eprintln!("[rec] 重连握手 {HANDSHAKE_TRIES} 次全败: {e}");
+    }
+    false
+}
+
+/// 看门狗共享账（解码线程推进 `ingested`/`rate`，写线程推进 `disk_bytes`，读
+/// 线程推进 `reconnects`/`armed`，看门狗线程只读其余）：停滞判据 = 已确认入队
+/// 字节不再增长（原始字节到达≠有分片——失步垃圾流也算死流，只认过了事件门的
+/// 分片）。落盘线程化（d4 /dev/null 实验定案：解码循环零磁盘 I/O）后账拆**流侧/
+/// 盘侧**双真相——`ingested` 给看门狗判停滞，`disk_bytes` 给恢复头报实际写透
+/// 字节数（写线程 flush 后推进，未刷尾不虚计）。
 struct WatchState {
-    /// 读线程已确认交给写线程的 PCM 字节（流侧真相；看门狗停滞判据）。
+    /// 解码线程已确认交给写线程的 PCM 字节（流侧真相；看门狗停滞判据）。
     ingested: AtomicU64,
     /// 写线程已写透落盘的 PCM 字节（盘侧真相；恢复头 data_len 事实源）。
     disk_bytes: AtomicU64,
+    /// 读线程重连记账（骑行一次 +1；收兵汇总显示用）。
+    reconnects: AtomicU64,
     /// 实测采样率（逐片刷新：frames/elapsed；不足 0.5s 测时标称）。
     rate: AtomicU32,
     /// AUDIO ON 应答后武装（武装前不计时——开口 settle/复位 banner 阶段静默合法）。
@@ -599,7 +726,7 @@ fn watchdog_run(w: Arc<WatchState>, out: String) {
 /// 与旧逐片同步落盘等价）→ 通道关闭即收兵退出。错误即整进程退（fail-honest，
 /// 不带病续跑冒领数据）；`disk_bytes` 只在实际写透后推进——恢复头 data_len 的
 /// 事实源。最终头（write_at(0)）由主线程 join 后补，无并发窗口。无界通道：写
-/// 线程被磁盘反压时分片在内存排队（87.5KB/s 流速下秒级尖峰至多 MB 级），读循环
+/// 线程被磁盘反压时分片在内存排队（87.5KB/s 流速下秒级尖峰至多 MB 级），收流面
 /// 不被磁盘 I/O 拖住（冻结放大器解耦的落点）。
 fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>) {
     let mut w = BufWriter::new(file);
@@ -646,10 +773,12 @@ fn main() {
         std::process::exit(1);
     }
 
-    // 帧收流循环：dst/Event/topic/b64 四道门 → 逐片交写线程落盘 + seq 对账。
-    // 落盘线程化（d4 /dev/null 决定性实验定案）：读循环零磁盘 I/O——每片同步
-    // 写刷的延迟尖峰把冻结概率放大 ~7 倍（38/51s vs 369s），通道解耦后尖峰不再
-    // 进读循环；看门狗保数据前提不变（停滞即整进程退，盘侧逐片写透）。
+    // 收流面线程化（判据② A/B 定案）：读线程（conn 所有权整体移交）只做大块
+    // 裸读推裸字节通道；解码主循环纯内存拆帧 → dst/Event/topic/b64 四道门 →
+    // 逐片交写线程落盘 + seq 对账。落盘线程化（d4 /dev/null 决定性实验定案）：
+    // 解码循环零磁盘 I/O——每片同步写刷的延迟尖峰把冻结概率放大 ~7 倍（38/51s
+    // vs 369s），通道解耦后尖峰不再进收流面；看门狗保数据前提不变（停滞即整
+    // 进程退，盘侧逐片写透）。
     let out_path = args.out.clone();
     let wav_file = match File::create(&out_path) {
         Ok(f) => f,
@@ -661,6 +790,7 @@ fn main() {
     let watch = Arc::new(WatchState {
         ingested: AtomicU64::new(0),
         disk_bytes: AtomicU64::new(0),
+        reconnects: AtomicU64::new(0),
         rate: AtomicU32::new(16000),
         armed: AtomicBool::new(false),
     });
@@ -675,6 +805,18 @@ fn main() {
         let path = out_path.clone();
         std::thread::spawn(move || watchdog_run(w, path.to_string_lossy().into_owned()));
     }
+    // 读线程：conn/裸字节通道/停流旗移交（静默重连与收兵 OFF 全在读侧闭环，
+    // 见 reader_run）。
+    let (byte_tx, byte_rx) = mpsc::channel::<Vec<u8>>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let reader_thread = {
+        let w = Arc::clone(&watch);
+        let stop = Arc::clone(&stop);
+        let dev = args.device.clone();
+        let out = out_path.clone();
+        let baud = args.baud;
+        std::thread::spawn(move || reader_run(conn, byte_tx, stop, w, dev, baud, out))
+    };
     watch.armed.store(true, Ordering::Release);
 
     let mut tracker = SeqTracker {
@@ -685,25 +827,45 @@ fn main() {
     let mut doa = DoaTracker::new();
     let mut chunks = 0u64;
     let mut errors = 0u64;
-    let mut err_streak = 0u64; // 连续收帧失败（好片即清零；达阈值触发重同步）
+    let mut err_streak = 0u64; // 连续拆帧失败（好片即清零；达阈值记重同步账）
     let mut resyncs = 0u64;
-    let mut reconnects = 0u64;
     let mut total_bytes = 0u64;
     let mut last_frame: Option<Instant> = None;
-    // 连续段实测率锚 (锚时刻, 锚时帧数)：断档/重启/重同步/重连/首片即重新锚定
-    // ——断流空洞不摊进实测率分母（旧版首末墙钟摊全程，断流后实测率被稀释）。
+    // 连续段实测率锚 (锚时刻, 锚时帧数)：断档/重启/首片即重新锚定——断流空洞
+    // 不摊进实测率分母（旧版首末墙钟摊全程，断流后实测率被稀释）。重连/失步
+    // 必然丢片（seq 断档或重启）→ `broke` 覆盖全部重锚场景。
     let mut rate_anchor: Option<(Instant, u64)> = None;
-    let mut need_reanchor = false; // resync/reconnect 后下一好片重新锚定
     let deadline = Instant::now() + Duration::from_secs(args.secs);
-    let mut fs = FrameStream::new(&mut conn);
+    let mut asm = FrameAssembler::new();
     println!(
         "[rec] streaming {}s @ {} ({})…",
         args.secs, args.baud, args.device
     );
     while Instant::now() < deadline {
-        match fs.rr3_recv_buf() {
-            Ok(buf) => match Rr3Frame::try_from(buf) {
-                Ok(frame) => match parse_audio_event(&frame) {
+        match byte_rx.recv_timeout(DECODE_TICK) {
+            Ok(bytes) => asm.feed(&bytes),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                eprintln!("[rec] 裸字节通道断开（读线程已亡）");
+                bail_with_recovery(&out_path, &watch);
+            }
+        }
+        // 内存拆帧：出尽当前缓冲。坏帧弃扫即时完成（Err 起点已弃，续扫由下次
+        // pull 自然接上），丢片由 seq 对账如实记账。
+        loop {
+            let assembled = match asm.pull() {
+                Ok(Some(a)) => Some(a),
+                Ok(None) => break,
+                Err((dropped, why)) => {
+                    errors += 1;
+                    err_streak += 1;
+                    eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
+                    None
+                }
+            };
+            if let Some((header, payload)) = assembled {
+                let frame = Rr3Frame { header, payload };
+                match parse_audio_event(&frame) {
                     Ok(chunk) => {
                         let now = Instant::now();
                         last_frame = Some(now);
@@ -712,7 +874,7 @@ fn main() {
                         let broke = (tracker.gaps, tracker.restarts) != account_before;
                         chunks += 1;
                         err_streak = 0;
-                        // DoA 在读循环侧算（纯计算）；分片移交写线程（零磁盘 I/O）
+                        // DoA 在解码面算（纯计算）；分片移交写线程（零磁盘 I/O）
                         if args.doa {
                             if let Some(line) = doa.feed(&chunk.samples) {
                                 println!("{line}");
@@ -727,9 +889,8 @@ fn main() {
                         watch.ingested.store(total_bytes, Ordering::Release);
                         let frames = total_bytes / 4;
                         // 连续段实测率：断档/重启即重新锚定（空洞不摊进分母）
-                        if broke || need_reanchor || rate_anchor.is_none() {
+                        if broke || rate_anchor.is_none() {
                             rate_anchor = Some((now, frames));
-                            need_reanchor = false;
                         }
                         if let Some((t0, f0)) = rate_anchor {
                             let d = now.duration_since(t0);
@@ -758,89 +919,27 @@ fn main() {
                         err_streak += 1;
                         eprintln!("[rec] 事件门拒收: {e}");
                     }
-                },
-                Err(e) => {
-                    errors += 1;
-                    err_streak += 1;
-                    eprintln!("[rec] 帧还原失败: {e:?}");
                 }
-            },
-            Err(e) => {
-                errors += 1;
-                err_streak += 1;
-                eprintln!("[rec] 收帧失败: {e:?}");
             }
-        }
-        // 失步重同步（三级防护第 ② 级）：连续失败 = 帧界已丢，盲目重试只会在
-        // b64 载荷里撞幻影 "1ERA" 头等天文 payload。magic 扫描对齐后继续收；
-        // 扫描期连续静默（None）= 线上断流，升级第 ③ 级重连。断档帧由 seq
-        // 对账如实记账（不冒领数据，只求不死）。
-        if err_streak >= ERR_STREAK_RESYNC {
-            match fs.resync() {
-                Some(scanned) => {
-                    resyncs += 1;
-                    err_streak = 0;
-                    need_reanchor = true;
-                    eprintln!("[rec] 失步重同步 #{resyncs}：弃扫 {scanned}B 后 magic 对齐，续收");
-                }
-                None => {
-                    // 三级防护第 ③ 级：1.6s 连续静默 = 线上断流，重开口续收
-                    reconnects += 1;
-                    drop(fs); // 还 conn 可变借用
-                    eprintln!("[rec] 重同步 1.6s 连续静默 → 断流重连 #{reconnects}");
-                    // 握手重试（HANDSHAKE_TRIES 次，每轮重新 close/open fd——宿主
-                    // USB RX 冻结唯一捅法；骑行期看门狗解武装不计停滞）
-                    watch.armed.store(false, Ordering::Release);
-                    let mut hs_err: Option<String> = None;
-                    for attempt in 1..=HANDSHAKE_TRIES {
-                        if attempt > 1 {
-                            eprintln!(
-                                "[rec] 重连握手重试 {attempt}/{HANDSHAKE_TRIES}（歇 {}s 后重开口…）",
-                                HANDSHAKE_RETRY_PAUSE.as_secs()
-                            );
-                            std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
-                        }
-                        match Rr3UartConn::open_with_baud(
-                            std::path::Path::new(&args.device),
-                            args.baud,
-                        ) {
-                            Ok(c) => conn = c,
-                            Err(e) => {
-                                eprintln!("[rec] 重连开口失败（第 {attempt} 次）: {e}");
-                                hs_err = Some(format!("开口失败: {e}"));
-                                continue;
-                            }
-                        }
-                        match handshake(&mut conn) {
-                            Ok(_) => {
-                                hs_err = None;
-                                break;
-                            }
-                            Err(e) => {
-                                eprintln!("[rec] 重连握手失败（第 {attempt} 次）: {e}");
-                                hs_err = Some(e);
-                                // 尽力停板面流（下一轮重开还会再发防御 OFF；板死则无效）
-                                let _ = conn.write_all(b"AUDIO OFF\n");
-                            }
-                        }
-                    }
-                    if let Some(e) = hs_err {
-                        eprintln!("[rec] 重连握手 {HANDSHAKE_TRIES} 次全败: {e}");
-                        bail_with_recovery(&out_path, &watch);
-                    }
-                    watch.armed.store(true, Ordering::Release);
-                    fs = FrameStream::new(&mut conn);
-                    err_streak = 0;
-                    need_reanchor = true;
-                    eprintln!("[rec] 重连 #{reconnects} 完成，续收（板侧已复位，seq 重走记 restarts）");
-                }
+            // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
+            // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
+            if err_streak >= ERR_STREAK_RESYNC {
+                resyncs += 1;
+                err_streak = 0;
+                eprintln!(
+                    "[rec] 失步重同步 #{resyncs}：内存弃扫 {}B 后对齐续收",
+                    asm.discarded()
+                );
             }
         }
     }
-    // 收兵：先还 conn 可变借用（fs 持有 &mut conn），再发 OFF——板面队列余片
-    // 照发，本端不再读，conn 关闭即弃。OFF 后解武装（本地补头不走看门狗）。
-    drop(fs);
-    let _ = conn.write_all(b"AUDIO OFF\n");
+    // 收兵：停流旗 → 读线程发 AUDIO OFF 退出（板面队列余片照发，本端不再读，
+    // conn 随线程收口关闭）。OFF 后解武装（本地补头不走看门狗）。
+    stop.store(true, Ordering::Release);
+    if reader_thread.join().is_err() {
+        eprintln!("rr3-audio-rec: 读线程异常退出");
+        std::process::exit(1);
+    }
     watch.armed.store(false, Ordering::Release);
     // 关通道让写线程排空收兵（逐片已 flush，无尾数据）；写线程异常即整进程退，
     // 不冒领成功。
@@ -882,10 +981,11 @@ fn main() {
         .and_then(|f| f.write_all_at(&wav_header(data_len, 2, measured, 16), 0))
     {
         Ok(()) => println!(
-            "[rec] ✓ {}：chunks={chunks} gaps={} restarts={} err={errors} resyncs={resyncs} reconnects={reconnects} frames={frames_total} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
+            "[rec] ✓ {}：chunks={chunks} gaps={} restarts={} err={errors} resyncs={resyncs} reconnects={} frames={frames_total} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
             out_path.display(),
             tracker.gaps,
             tracker.restarts,
+            watch.reconnects.load(Ordering::Acquire),
             measured,
             frames_total as f64 / measured as f64,
         ),
@@ -904,7 +1004,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rr_ipc::{opcode, rr3_base64_encode, rr3_body_encode, Rr3FrameBuf, Rr3Header};
+    use rr_ipc::{
+        opcode, rr3_base64_encode, rr3_body_encode, Rr3FrameBuf, Rr3Header, MAX_PAYLOAD_LEN,
+    };
 
     /// 构造一条与板面 mic.rs 同形的 Event 帧（seal/还原链路与收流端同源 rr-ipc）。
     fn board_like_frame(seq: u32, pcm: &[u8], dst: u64) -> Rr3Frame {
@@ -961,6 +1063,86 @@ mod tests {
         // dst 门：非宿主位形拒收
         let other = board_like_frame(8, &pcm, 9);
         assert!(parse_audio_event(&other).is_err(), "dst=9 必须被拒");
+    }
+
+    /// 拆帧器：分块喂入（头中/载荷中切）→ 整帧逐字节还原。
+    #[test]
+    fn assembler_reassembles_split_frames() {
+        let f = board_like_frame(7, &[1, 2, 3, 4], RR3_HOST_TASK);
+        let bytes = Rr3FrameBuf::from(&f)
+            .rr3_as_sealed_bytes()
+            .unwrap()
+            .to_vec();
+        let mut a = FrameAssembler::new();
+        a.feed(&bytes[..64]);
+        assert!(a.pull().unwrap().is_none(), "半个头不出帧");
+        a.feed(&bytes[64..100]);
+        assert!(a.pull().unwrap().is_none(), "载荷中段不出帧");
+        a.feed(&bytes[100..]);
+        let (hdr, payload) = a.pull().unwrap().expect("拼满必须出帧");
+        assert_eq!(hdr, f.header);
+        assert_eq!(payload, f.payload);
+        assert!(a.pull().unwrap().is_none(), "缓冲耗尽");
+    }
+
+    /// 拆帧器：前导垃圾（含半个 magic 前缀）静默弃扫，真帧照常出。
+    #[test]
+    fn assembler_skips_garbage_then_yields_frame() {
+        let f = board_like_frame(9, b"pcm", RR3_HOST_TASK);
+        let bytes = Rr3FrameBuf::from(&f)
+            .rr3_as_sealed_bytes()
+            .unwrap()
+            .to_vec();
+        let mut a = FrameAssembler::new();
+        let mut noisy = b"junk\x01\x02junk1ER".to_vec(); // 尾部半个 magic 前缀
+        noisy.extend_from_slice(&bytes);
+        a.feed(&noisy);
+        let (hdr, payload) = a.pull().unwrap().expect("垃圾弃扫后必须出真帧");
+        assert_eq!(hdr, f.header);
+        assert_eq!(payload, f.payload);
+        assert!(a.pull().unwrap().is_none());
+    }
+
+    /// 拆帧器：坏帧（reserved 污染——滑移实测签名）计错弃 4B magic，续扫
+    /// 收敛到下一真帧。
+    #[test]
+    fn assembler_bad_header_drops_magic_and_resumes() {
+        let f = board_like_frame(1, b"ab", RR3_HOST_TASK);
+        let mut bad = Rr3FrameBuf::from(&f)
+            .rr3_as_sealed_bytes()
+            .unwrap()
+            .to_vec();
+        bad[RR3_IPC_HDR_SIZE - 1] = 0xFF; // 头 reserved 尾字节污染
+        let f2 = board_like_frame(2, b"cd", RR3_HOST_TASK);
+        let bytes2 = Rr3FrameBuf::from(&f2)
+            .rr3_as_sealed_bytes()
+            .unwrap()
+            .to_vec();
+        let mut a = FrameAssembler::new();
+        a.feed(&bad);
+        a.feed(&bytes2);
+        let (dropped, why) = a.pull().unwrap_err();
+        assert_eq!(dropped, 4, "坏帧只弃 magic 起点");
+        assert!(why.contains("ReservedNotZero"), "{why}");
+        let (hdr, payload) = a.pull().unwrap().expect("坏帧后续扫必须出真帧");
+        assert_eq!(hdr, f2.header);
+        assert_eq!(payload, f2.payload);
+    }
+
+    /// 拆帧器：头层合法的 64MiB plen 越拆帧护栏——按坏帧弃 magic，不缓冲。
+    #[test]
+    fn assembler_rejects_plen_over_cap() {
+        let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, MAX_PAYLOAD_LEN);
+        h.trace_id = 0;
+        h.timestamp_ns = 100;
+        h.src_task = RR3_PERIPH_TASK;
+        h.dst_task = RR3_HOST_TASK;
+        let bytes = h.to_bytes().to_vec();
+        let mut a = FrameAssembler::new();
+        a.feed(&bytes);
+        let (dropped, why) = a.pull().unwrap_err();
+        assert_eq!(dropped, 4);
+        assert!(why.contains("越拆帧护栏"), "{why}");
     }
 
     #[test]
