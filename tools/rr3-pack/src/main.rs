@@ -53,7 +53,11 @@ const RR3_INSTALL_ROOT: &str = "/usr/lib/rockrobot3";
 /// systemd 单元实体在 base/os/distro/units/rrd.service，include_str! 编译期嵌入：
 /// 文件缺席直接编译失败（比运行期读 --repo 再报错更早），打包器对 repo 布局的依赖
 /// 只剩 --repo 下的 profiles/contracts/hardware 三个数据目录与各模块 config.toml。
-const RR3_SERVICE_UNIT: &str = include_str!("../../../base/os/distro/units/rrd.service");
+/// 路径以 CARGO_MANIFEST_DIR 构建期注入（基-32：不手写跨仓层数）。
+const RR3_SERVICE_UNIT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../base/os/distro/units/rrd.service"
+));
 
 /// 打包配置
 #[derive(Debug, Clone, PartialEq, Eq)]

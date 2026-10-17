@@ -1,7 +1,6 @@
 //! # rr-core —— 机制核切片：总线语义层
 //!
-//! 承 [ADR-0018](../../../docs/process/adr/ADR-0018-跨操作系统移植-机制核与主承载层分离.md)
-//! 裁定 1：机制核与操作系统无关、`no_std`（core+alloc）可达、契约级冻结。字节协议层
+//! 承 ADR-0018（docs/process/adr/ 在册）裁定 1：机制核与操作系统无关、`no_std`（core+alloc）可达、契约级冻结。字节协议层
 //! 已下沉（`rr-ipc` protocol，0.0.7 批B）；本 crate（0.0.5 第 II 轮批D₁）把**总线语义**
 //! 从 `rr-bus`（std 客户端 crate）里抽出下沉：
 //!
