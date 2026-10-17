@@ -600,6 +600,74 @@ else
   fail=1
 fi
 
+# —— ⑨-w 依赖面禁令（基-35，裁定 12；全案 §24.4 C 组 / architecture §14，0.0.5 增补轮六
+#     第 0.5 步建门）。判据（可施工面，窄化已登记 decisions.md 基-35 行）：
+#   1) 单元（modules/*/Cargo.toml）必须直依能力面契约 crate rr-hal-api——契约符号的
+#      Cargo 依赖面可证，不再靠 rr-hal re-export 的隐性传递；
+#   2) 单元 use 面（modules/** 非 test 面一并扫，行注释先剥——文档注释可表述门规则自身，
+#      同 ⑦-a 口径）`rr_hal::` 引用仅许**冻结白名单**四类，白名单外（含经 rr-hal re-export
+#      引契约符号、crate 根花括号多导 `rr_hal::{`——多导可把契约符号与白名单混进一行，
+#      扫描面不可分词，故直接红）即红：
+#        rr_hal::backend::*          装配选择函数（返回 Box<dyn 契约 trait>）——装配位
+#                                    今日在单元组合件内是结构事实，Cargo 级拆边需装配
+#                                    上移（敞口在册，落地后本行同步收紧为 Cargo 禁令）；
+#        rr_hal::sim::*              sim 承载（单测夹具 + connect 扫描列表运行期真值）；
+#        rr_hal::provision_store::*  配网凭据存储面（第 8 能力面 trait 住实现 crate；
+#                                    句柄面契约分母 7 冻结，迁移属分母变更须另裁）；
+#        rr_hal::Rr3PcmStream        std 侧承载类型（rr-hal-api 定形要点 F1 明文留 rr-hal）。
+#   3) 板侧（tools/esp32-periph-base）Cargo 依赖不得出现实现 crate rr-hal / rr-bus / rrd
+#      （architecture §14 全量口径；今日零依赖，钉住防漂）。tools/sim 是 CI/无头开发
+#      承载工具（工具层），不在单元分母，豁免。
+step "⑨-w 依赖面禁令（单元契约面走 rr-hal-api + use 面白名单冻结 + 板侧禁实现 crate，基-35）"
+dep_fail=0
+dep_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+# 1) rr-hal-api 必依（逐单元点名；枚举打空即门禁失效，与 ④/⑥ 同口径）
+unit_manifests="$(find modules -maxdepth 2 -name Cargo.toml -not -path '*/target/*' | sort)"
+if [ -z "$unit_manifests" ]; then
+  printf 'FAIL  ⑨-w 单元 Cargo.toml 枚举打空（门禁失效，不放行）\n'
+  dep_fail=1
+fi
+for c in $unit_manifests; do
+  if grep -q 'rr-hal-api' "$c"; then
+    printf 'PASS  ⑨-w %s 直依 rr-hal-api（契约依赖面在 Cargo 清单可证）\n' "$c"
+  else
+    printf 'FAIL  ⑨-w %s 未声明 rr-hal-api——单元契约符号须直依能力面 crate，不经实现 crate re-export（基-35）\n' "$c"
+    dep_fail=1
+  fi
+done
+# 2) use 面白名单（modules/** 全部 .rs；行注释先剥；白名单外逐行点名）
+unit_rs=0
+while IFS= read -r -d '' f; do
+  unit_rs=$((unit_rs + 1))
+  sed 's://.*$::' "$f" \
+    | grep -nE 'rr_hal::' \
+    | grep -vE 'rr_hal::(backend::|sim|provision_store|Rr3PcmStream)' \
+    | sed "s|^|$f:|" >> "$dep_hits"
+done < <(find modules -name '*.rs' -not -path '*/target/*' -print0 | sort -z)
+if [ "$unit_rs" -eq 0 ]; then
+  printf 'FAIL  ⑨-w 单元 .rs 枚举打空（门禁失效，不放行）\n'
+  dep_fail=1
+elif [ -s "$dep_hits" ]; then
+  cat "$dep_hits"
+  printf 'FAIL  ⑨-w 依赖面白名单外命中（契约符号须走 rr_hal_api；白名单=backend 装配/sim/provision_store/Rr3PcmStream 四类冻结，扩名单须登记，见上行号）\n'
+  dep_fail=1
+else
+  printf 'PASS  ⑨-w 单元 use 面白名单（%s 份 .rs 全扫，rr_hal:: 引用皆装配/承载白名单四类）\n' "$unit_rs"
+fi
+rm -f "$dep_hits"
+# 3) 板侧禁实现 crate（rr-hal/rr-bus/rrd；用 `名 =` 形状匹配依赖键，不误伤 rr-hal-api）
+board_dep="$(grep -E '^[[:space:]]*(rr-hal|rr-bus|rrd)[[:space:]]*=' tools/esp32-periph-base/Cargo.toml 2>/dev/null || true)"
+if [ -n "$board_dep" ]; then
+  printf '%s\n' "$board_dep"
+  printf 'FAIL  ⑨-w 板侧 Cargo 出现实现 crate 依赖（rr-hal/rr-bus/rrd，architecture §14 全量口径）\n'
+  dep_fail=1
+else
+  printf 'PASS  ⑨-w 板侧零实现 crate 依赖（esp32-periph-base，rr-hal/rr-bus/rrd 三件钉住）\n'
+fi
+if [ "$dep_fail" -ne 0 ]; then
+  fail=1
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"

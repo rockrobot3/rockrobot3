@@ -39,7 +39,8 @@ use std::time::Duration;
 
 use rr_bus::{Rr3BusClient, Rr3TimeBase};
 use rr_core::control::Rr3LowGate;
-use rr_hal::{backend::rr3_hal_gpio_out, backend::rr3_hal_servo, Rr3GpioOut, Rr3PwmServo};
+use rr_hal::backend::{rr3_hal_gpio_out, rr3_hal_servo};
+use rr_hal_api::{Rr3GpioOut, Rr3PwmServo};
 use rr_ipc::{opcode, Rr3PayloadType};
 use serde_json::{json, Value};
 
