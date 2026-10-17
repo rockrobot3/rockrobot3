@@ -52,7 +52,7 @@ pub fn rr3_face_non_pointable_join(non_pointable: &[&str]) -> String {
 
 /// 8x8 点阵单帧：类型事实源在 rr-hal 的 `Rr3Display` trait 签名（批F5a③），
 /// 此处 re-export 保模块内名。
-pub use rr_hal::Rr3FaceFrame;
+pub use rr_hal_api::Rr3FaceFrame;
 
 pub use mech::{rr3_face_frames, Rr3Face};
 

@@ -6,7 +6,7 @@
 //! down 则业务性失败折 error 应答回话——请求-应答语义，不当致命错误。
 //! 凭据不经过本模块持久化（conventions §3）。
 
-use rr_hal::Rr3LinkState;
+use rr_hal_api::Rr3LinkState;
 use serde_json::{json, Value};
 
 /// 会话点名（module.toml [rpc].exposes 同源；topics.toml owner=rr3-connect）
@@ -47,7 +47,7 @@ pub fn rr3_session_result(st: &Rr3LinkState) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rr_hal::Rr3SsidText;
+    use rr_hal_api::Rr3SsidText;
 
     fn st(up: bool) -> Rr3LinkState {
         Rr3LinkState {

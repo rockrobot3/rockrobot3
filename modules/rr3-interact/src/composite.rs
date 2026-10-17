@@ -37,7 +37,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_audio_sink, backend::rr3_hal_display, RR3_AUDIO_CFG_16K_MONO16};
+use rr_hal::backend::{rr3_hal_audio_sink, rr3_hal_display};
+use rr_hal_api::RR3_AUDIO_CFG_16K_MONO16;
 use rr_ipc::{opcode, Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 use serde_json::{json, Value};
 
@@ -268,7 +269,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
 #[allow(clippy::too_many_arguments)]
 fn rr3_handle_tts(
     bus: &Rr3BusClient,
-    sink: &mut dyn rr_hal::Rr3AudioSink,
+    sink: &mut dyn rr_hal_api::Rr3AudioSink,
     face: &mut Rr3Face,
     tts_pcm: &mut Rr3TtsPcmBuf,
     args: &Value,

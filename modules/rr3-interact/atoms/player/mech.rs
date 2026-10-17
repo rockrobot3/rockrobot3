@@ -12,7 +12,7 @@
 //!
 //! ⑧-b：机制主体不 `use std`、不分配——`&[i16]` 借用进、`u64` 毫秒出。
 
-use rr_hal::Rr3AudioSink;
+use rr_hal_api::Rr3AudioSink;
 
 /// 播放采样规格：16k/mono/16bit（与采集侧同一张 cfg，整条链一张表）
 pub const RR3_TTS_SAMPLE_RATE: u32 = 16_000;
@@ -56,7 +56,7 @@ pub fn rr3_tts_play(sink: &mut dyn Rr3AudioSink, samples: &[i16]) -> Result<u64,
 mod tests {
     use super::*;
     use rr_hal::sim::Rr3SimAudioSink;
-    use rr_hal::RR3_AUDIO_CFG_16K_MONO16;
+    use rr_hal_api::RR3_AUDIO_CFG_16K_MONO16;
 
     /// 记账 sink：记每次 write 的块长并原样收流——钉分块形状与透传语义
     struct ChunkSpySink {
@@ -74,10 +74,10 @@ mod tests {
     }
 
     impl Rr3AudioSink for ChunkSpySink {
-        fn open(&mut self, _cfg: rr_hal::Rr3AudioCfg) -> Result<(), rr_hal::Rr3HalError> {
+        fn open(&mut self, _cfg: rr_hal_api::Rr3AudioCfg) -> Result<(), rr_hal_api::Rr3HalError> {
             Ok(())
         }
-        fn write(&mut self, samples: &[i16]) -> Result<(), rr_hal::Rr3HalError> {
+        fn write(&mut self, samples: &[i16]) -> Result<(), rr_hal_api::Rr3HalError> {
             self.lens.push(samples.len());
             self.written.extend_from_slice(samples);
             Ok(())

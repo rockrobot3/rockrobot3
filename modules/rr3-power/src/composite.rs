@@ -34,7 +34,8 @@ mod charger;
 use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
-use rr_hal::{backend::rr3_hal_power, Rr3BatteryState};
+use rr_hal::backend::rr3_hal_power;
+use rr_hal_api::Rr3BatteryState;
 use serde_json::{json, Value};
 
 use battery::{Rr3BatteryCfg, Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_STATE_TOPIC};

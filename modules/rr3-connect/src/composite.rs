@@ -45,7 +45,7 @@ use std::time::{Duration, Instant};
 use rr_bus::Rr3BusClient;
 use rr_hal::backend::{rr3_hal_link, rr3_hal_wifi_store};
 use rr_hal::provision_store::Rr3WifiStore;
-use rr_hal::Rr3LinkState;
+use rr_hal_api::Rr3LinkState;
 use rr_ipc::{opcode, Rr3PayloadType};
 use serde_json::{json, Value};
 
@@ -284,7 +284,7 @@ pub fn rr3_wifi_forget_result() -> Value {
 }
 
 /// cloud/session 点名：参数裁决 → 链路裁决 → mock 会话应答
-fn rr3_handle_session(dev: &dyn rr_hal::Rr3Link, args: &Value) -> Result<Value, String> {
+fn rr3_handle_session(dev: &dyn rr_hal_api::Rr3Link, args: &Value) -> Result<Value, String> {
     session::rr3_session_parse_args(args)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
     let v = session::rr3_session_result(&st)?;
@@ -302,7 +302,7 @@ fn rr3_handle_wifi_scan(args: &Value) -> Result<Value, String> {
 /// 折 error 应答、状态机不动，fail-closed）→ 存凭据转 station → connected
 /// 如实取链路读数回执。
 fn rr3_handle_wifi_connect(
-    dev: &dyn rr_hal::Rr3Link,
+    dev: &dyn rr_hal_api::Rr3Link,
     store: &dyn Rr3WifiStore,
     prov: &mut wifi::Rr3Provision,
     args: &Value,
@@ -391,7 +391,7 @@ fn rr3_connect_config_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rr_hal::Rr3SsidText;
+    use rr_hal_api::Rr3SsidText;
 
     fn st(up: bool) -> Rr3LinkState {
         Rr3LinkState {
@@ -585,16 +585,16 @@ up = false
                 &self,
                 _ssid: &str,
                 _pass: &str,
-            ) -> Result<(), rr_hal::Rr3HalError> {
-                Err(rr_hal::Rr3HalError::Unsupported("test/failing-store"))
+            ) -> Result<(), rr_hal_api::Rr3HalError> {
+                Err(rr_hal_api::Rr3HalError::Unsupported("test/failing-store"))
             }
-            fn rr3_wifi_store_forget(&self) -> Result<(), rr_hal::Rr3HalError> {
-                Err(rr_hal::Rr3HalError::Unsupported("test/failing-store"))
+            fn rr3_wifi_store_forget(&self) -> Result<(), rr_hal_api::Rr3HalError> {
+                Err(rr_hal_api::Rr3HalError::Unsupported("test/failing-store"))
             }
             fn rr3_wifi_store_ssid(
                 &self,
-            ) -> Result<Option<rr_hal::Rr3SsidText>, rr_hal::Rr3HalError> {
-                Err(rr_hal::Rr3HalError::Unsupported("test/failing-store"))
+            ) -> Result<Option<rr_hal_api::Rr3SsidText>, rr_hal_api::Rr3HalError> {
+                Err(rr_hal_api::Rr3HalError::Unsupported("test/failing-store"))
             }
         }
         let dev = rr_hal::sim::Rr3SimLink::rr3_sim_link_new(true, "rock-sim", -50);
