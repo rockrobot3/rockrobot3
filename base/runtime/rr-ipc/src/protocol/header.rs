@@ -285,8 +285,12 @@ const fn put_le(buf: &mut [u8], off: usize, v: u64, len: usize) {
 // 求值通过即"该目标编译出的编码器产出与 golden 文件逐字节一致"，无需运行任何代码。
 // 运行期 dump 对拍（x86 / aarch64 / arm64 容器）由 `tools/ci/ipct003.sh` 承担，
 // xtensa 真机运行期 dump 归批C UART 夹具（同一判据的第二重证据）。
-const GOLDEN_HEADER_HEX: &str =
-    include_str!("../../../../../contracts/golden/event-header-128.hex");
+// golden 路径以 CARGO_MANIFEST_DIR 构建期注入（基-32：契约根不靠手写跨仓层数，
+// 目录动一层不再炸机制核）——"路径无关"须注入后才成立（裁-12）。
+const GOLDEN_HEADER_HEX: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../contracts/golden/event-header-128.hex"
+));
 
 /// golden 文件前 256 hex 字符（文件 257 字节含尾换行，运行期测试另有全文校验）。
 const fn golden_header_hex_first_256() -> [u8; 256] {
