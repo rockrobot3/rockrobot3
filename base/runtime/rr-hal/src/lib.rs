@@ -1,7 +1,7 @@
 //! rr-hal —— 硬件抽象层实现层（architecture.md §5）。
 //!
 //! 契约层在 [`rr-hal-api`](../rr-hal-api)（no_std，ADR-0018 修订 1 ③，批I F1）：
-//! 7 trait 同步签名 + 值类型 + 错型。本 crate 是它的 **Linux/sim 实现层**，并经
+//! 8 trait 同步签名 + 值类型 + 错型。本 crate 是它的 **Linux/sim 实现层**，并经
 //! `pub use` 把契约名与路径原样保住（`rr_hal::Rr3GpioOut` 等，六模块调用点不改路径）。
 //! 慢速事件级接口优先：1kHz 以上闭环属模块进程内的反射环，永不进 HAL trait
 //! （ADR-0007 裁定 1）。
@@ -19,7 +19,8 @@
 pub use rr_hal_api::{
     Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3BatteryState, Rr3Display, Rr3ErrText,
     Rr3FaceFrame, Rr3GpioOut, Rr3HalError, Rr3Link, Rr3LinkState, Rr3Power, Rr3PwmServo,
-    Rr3SsidText, Rr3UnavailableSource, RR3_AUDIO_CFG_16K_MONO16,
+    Rr3Rail, Rr3RailState, Rr3RailTier, Rr3SsidText, Rr3UnavailableSource,
+    RR3_AUDIO_CFG_16K_MONO16,
 };
 
 pub mod backend;

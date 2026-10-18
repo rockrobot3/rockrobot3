@@ -249,3 +249,10 @@ kind = "stream"
 owner = "rr3-brain"
 stable = "L2"
 note = "TTS PCM 下行流（0.0.5 第 IV 轮 MCP-1 契约评审 2026-10-12，承 0.0.5 方案 §20 第 1 条选 (a)）：brain 把 TTS 产出 PCM 分帧下发 interact player，播放面从'文本点名+占位波形'升级为真声流（F-4）。载荷体逐字段复用 rr3-sense/audio/pcm 已定形状 {seq, format:'s16le', rate, channels, ms, pcm_b64}（rr3-sense composite.rs 的 rr3_pcm_event_body 为形状事实源），对 TTS 引擎中立——云 CosyVoice2 与本地 Piper（R31 Q3）走同一份通路；上行 audio/pcm 与 audio/vad_start 字节零改动"
+
+[[topic]]
+name = "rr3-power/rail/state"
+kind = "event"
+owner = "rr3-power"
+stable = "L2"
+note = "电源域电平观测摘要（0.0.5 增补轮六 批N2 件二，ADR-0021 裁定 2）：mv/tier/age_ms 同帧；域压消费走 Rr3Rail trait 本地决策不经总线（同 battery 语义），主题供次级观测面；bare 档经守护输出行呈现、不发本主题"

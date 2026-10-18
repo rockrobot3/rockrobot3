@@ -497,6 +497,19 @@
   全案 §16.4 同批）；decisions.md 基-36 行回填首件提交号 `bcc13fd`、裁-9 推翻条件满足；
   `contracts/*.toml` 零改动、敞口表无增减。
 
+- **2026-10-18 批N2 件二：能源能力面 Rr3Rail ＋ 两格一主题（ADR-0021 裁定 2，契约三册同批扩格）**：
+  ①`rr-hal-api` 立 `Rr3Rail` trait 三方法（`rr3_read`/`rr3_current_ma`/`rr3_switch`——F-32 撤名收口，
+  `Rr3Power` 保留不动）＋ `Rr3RailState{mv,tier,age_ms}` ＋ `Rr3RailTier` 四态含 `Unknown`
+  （T-6/P-15：`age_ms > max_age_ms` 或时基取不到 ⇒ Unknown；执行面按 Severe 处置、展示面原样显示，
+  执法归⑥-c2 件三，契约层只供数）；占位后端显式 `Unsupported` 不静默退化，rr-hal re-export 三名。
+  ②`slots.toml` schema_version 2→3、基础层 append `power.rail`（域电平观测，bare 档经守护输出行
+  不发主题）/`power.budget`（能源预算仲裁），三档全在、`power.battery` 保留不动；`topics.toml`
+  30→31 条 append `rr3-power/rail/state` event L2（消费走 trait 本地决策不经总线，同 battery 语义）；
+  base_capabilities 5→7 等价面同步；五处形状 pin 同批（rr-registry `slots.rs`/`contract.rs`/
+  `topics.rs`＋rrd `topics_load.rs` 三处）＋atom 承担账两格进 `BUILTIN_NO_ATOM`（机制切片承载、
+  无原子目录，D15 防空壳）。③本件不建执法步（check.sh 零改动、可数 step 14 行/待建门 20 把不变），
+  角色覆盖扩表 4→18 归件六基-39；敞口表无增减。详录 [conventions §2](process/conventions.md) 同日条目。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

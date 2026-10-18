@@ -129,4 +129,4 @@ topic_allowed_kinds = ["request", "event", "stream", "notification"]
 # v0.0.1 的"依赖只许 base 白名单"已由 ADR-0009 定型：可满足者 = 本表 ∪ 本次 boot
 # 全集内各 manifest 的 provides.capabilities；可满足性与环检测在 depends.rs 的
 # 跨 manifest 仲裁（rrd boot 与 CI 全集检查共用），单件校验只保 capability 形状
-base_capabilities = ["bus.publish", "bus.subscribe", "bus.rpc", "net.online", "power.battery"]
+base_capabilities = ["bus.publish", "bus.subscribe", "bus.rpc", "net.online", "power.battery", "power.rail", "power.budget"]

@@ -68,9 +68,10 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 1. 能力格（slot）= 固定命名的能力位，只描述"这里需要/可以有什么"，不描述"谁来填"（谁填登记在
    [`profiles/`](../profiles/default.toml) 装配单，纯数据）。总表与 topics.toml 同级同纪律：**只增不改**，
    破坏性变更升 `schema_version`；**不留空格**——进表的都是有明确供给方或需求的格。
-2. 分三层：**base**（`bus.publish`/`bus.subscribe`/`bus.rpc`/`net.online`/`power.battery`，
-   即 `module.schema.toml` `[rules] base_capabilities` 的表内化，格名随原能力名）·
-   **body**（11 格）· **cognition**（4 格）。layer 只取这三个值；格位命名两段式 `<域>.<格>`，
+2. 分三层：**base**（`bus.publish`/`bus.subscribe`/`bus.rpc`/`net.online`/`power.battery`/
+   `power.rail`/`power.budget`，即 `module.schema.toml` `[rules] base_capabilities` 的表内化，
+   格名随原能力名）·
+   **body**（12 格）· **cognition**（4 格）。layer 只取这三个值；格位命名两段式 `<域>.<格>`，
    与主题命名（`rr3-<模块>/<域>/<事件>`）不同轴，互不混写。
 3. **查册门**（ADR-0012 裁定 5②，fail-closed）：manifest 的 `provides.capabilities` 与 `depends.*`
    引用的每个能力、profile `[bindings]`/`[faces]` 引用的每个格位，都必须命中本表。单件校验只保语法，
@@ -78,7 +79,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
    `slots_base_layer_is_pinned_to_base_capabilities` 逐条钉死等价——依赖仲裁（ADR-0009）与格位查册
    共用同一份 base 真值，第二份白名单不存在。
 4. **上述形状是机器钉住的**：`cargo test -p rr-registry --test contract` 里的
-   `slots_registry_shape_is_pinned` 断言全部 20 条 `(name, layer)` 逐条在册、层分布 5/11/4。
+   `slots_registry_shape_is_pinned` 断言全部 23 条 `(name, layer)` 逐条在册、层分布 7/12/4。
    新增格位合法，但必须是一次有意识的编辑——同一次改动里同步更新 `contracts/slots.toml`、
    该测试常量与计数、`profiles/default.toml`（如涉及绑定面），以及把这些数字当事实抄进正文的文档。
 
@@ -147,8 +148,9 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   `events/power-battery-low.schema.json`（形状最小：seq / percent / voltage_mv；
   生产者 rr3-power 的 battery 实装落地后为形状唯一事实源）。同批更新 rr-registry 形状 pin
   （24 条三元组、kind 8-9-3-4、格位 21 / 层分布 5-12-4）。**2026-10-15 注**：本行是该批次的历史记录，
-  不改写；**现值为 30 条主题（event 10 / request 12 / notification 4 / stream 4，8 owner，2 条 retired）
-  与 21 格（normal 18 / placeholder 3 / retired 0）**——计数唯一事实源是 `topics.toml` 与 `slots.toml` 本身，
+  不改写；**现值为 31 条主题（event 11 / request 12 / notification 4 / stream 4，8 owner，2 条 retired）
+  与 23 格（normal 20 / placeholder 3 / retired 0）**（2026-10-18 批N2 件二随 append 更新）——
+  计数唯一事实源是 `topics.toml` 与 `slots.toml` 本身，
   任何文档复述这个数字都必须以两份表为准（本 README 下文 ③ 段已按现值更新，两处并存即是漂移教训，
   见 `docs/process/adr/ADR-0021`/`ADR-0022` 的"计数分母要写死且要对"一条）；
   `modules/rr3-act/module.toml`
@@ -230,6 +232,19 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   rr3-interact face mech.rs，板侧帧执行面 tools/esp32-periph-base/src/main.rs 的
   frame_handle_servo/frame_handle_face。两条主题均在册 request L1 不动——批C 复用在册主题
   零新增登记（MCP-1 防重规则①口径），topics.toml 全轮冻结维持。
+- **2026-10-18 · 0.0.5 增补轮六 批N2 件二 契约 append（ADR-0021 裁定 2：能源是第七位供给＋两张格）**：
+  `slots.toml` schema_version 2→**3**、21→**23** 格（基础层 append `power.rail`——域电平观测，
+  bare 档经本地守护输出行、不发总线主题；`power.budget`——能源预算仲裁；tier_scope 三档全在，
+  `power.battery` **保留不动**：单域电池与新格的多域不是同一对象）；`topics.toml` 30→**31** 条
+  （append `rr3-power/rail/state` event L2——mv/tier/age_ms 同帧；域压消费走 `Rr3Rail` trait 本地
+  决策不经总线，同 battery 语义，主题供次级观测面）；`module.schema.toml` `[rules]
+  base_capabilities` 5→**7**（与 slots 基础层钉死等价的同一张名单）。能力面半边落
+  `rr-hal-api`：新立 `Rr3Rail` trait 三方法（`rr3_read`/`rr3_current_ma`/`rr3_switch`，F-32 撤名
+  收口）与 `Rr3RailState{mv, tier, age_ms}`（`Rr3RailTier` 四态含 `Unknown`——T-6/P-15 读数
+  可信度第四态，龄期超限或时基取不到即 `Unknown`），占位后端显式 `Unsupported` 不静默退化。
+  同批更新 rr-registry / rrd 五处形状 pin（31 条三元组、kind 12-11-4-4、格位 23 / 层分布
+  7-12-4）与 atom 承担账（两格进 `BUILTIN_NO_ATOM` 内建豁免集：承载是 rr3-power 进程内机制
+  切片 RailMonitor/RailJudge 与板侧守护，无独立原子目录——立无源码空原子件即 D15 空壳）。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 

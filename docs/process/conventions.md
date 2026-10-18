@@ -378,10 +378,11 @@ watchdog 判死但不广播 → 第一/三条红；广播里的相位写错 → 
 不进 contracts/topics.toml"不受影响；落点偏离的文字同步归 Task 13；
 `contracts/README.md` 称那批用例是契约的执行入口，若 ① 只是普通 `cargo check`，
 它们连编译都不做，更谈不上执行）；② **24** 条（含 `registry_shape_is_pinned` 的注册表形状
-硬 pin：8 owner / 30 topic / kind 12-10-4-4 / 30 条三元组——0.0.4 批D 随 connect
+硬 pin：8 owner / 31 topic / kind 12-11-4-4 / 31 条三元组——0.0.4 批D 随 connect
 wifi/scan|connect|forget append 同步（0.0.3 批C 曾随 `rr3-act/relay/state`；0.0.7 批E
 随 `rr3-sentinel/diag/probe` append 再同步，28→29；0.0.5 第 IV 轮 MCP-0 随
-`rr3-brain/audio/tts_pcm` append 再同步，29→30）；`every_module_manifest_passes_contract`
+`rr3-brain/audio/tts_pcm` append 再同步，29→30；增补轮六 批N2 件二随
+`rr3-power/rail/state` append 再同步，30→31）；`every_module_manifest_passes_contract`
 钉住 modules/ 六模块集合且每份 module.toml 过契约；`every_owner_path_exists` 钉住 topics.toml
 每条 owner.path 目录真实存在）、③ **5** 条（均为 ①b 的子集）、
 ②b **5** 条（`tools/mkmodule` 是独立包，不在 workspace 内，故 ①b 覆盖不到它）、
@@ -2561,6 +2562,29 @@ concurrency_group **缺键即红**（T-5 同 no_injection 范式——缺省与�
 decisions.md 基-36 行回填首件提交号 `bcc13fd`，裁-9 推翻条件（"写了 demands 且 ⑨ 在跑"）**满足**——
 申报面定形 `[assemble].demands`（形状以 ADR-0021 裁定 2 / 基-36 为准，非裁-9 行原文的 `[[demand]]`）。
 `contracts/*.toml` 零改动。
+
+2026-10-18（**批N2 件二：能源能力面 Rr3Rail ＋ 两格一主题**，ADR-0021 裁定 2）：判据实体落 hal
+契约面，契约三册同批扩格。①`rr-hal-api` 立 `Rr3Rail` trait 三方法（`rr3_read(domain) ->
+Rr3RailState` / `rr3_current_ma(domain)` / `rr3_switch(domain, on)`——F-32 撤名收口：
+`Rr3PowerDomain` 是无定义名不进文档，一次定形归 `Rr3Rail`；`Rr3Power` 保留不动＝增长律
+"新立不改既有"）＋ `Rr3RailState{mv, tier, age_ms}`（**T-6/P-15**：`age_ms` 与 `Rr3RailTier::Unknown`
+同批落——判据一条写完：`age_ms > max_age_ms` 或时基取不到 ⇒ `Unknown`（max_age_ms 住 profile
+域声明 ⑥-c1）；消费纪律＝执行面按 Severe 处置、展示面原样显示不许折算 Ok，执法归⑥-c2 件三，
+契约层只供数）＋ `rr3_rail_tier_name` 四态名（ok/mild/severe/unknown，与板侧 `RailTier::name`
+同串）；占位后端 `Rr3UnavailableSource` 三方法显式回 `Unsupported` 不静默退化；rr-hal re-export
+三名（`Rr3Rail`/`Rr3RailState`/`Rr3RailTier`）路径原样保住。②契约三册 append：`slots.toml`
+schema_version 2→**3** 基础层两格 `power.rail`（域电平观测；bare 档经守护输出行不发主题）/
+`power.budget`（能源预算仲裁），tier_scope 三档全在，`power.battery` 保留不动（单域电池与新格
+多域不是同一对象）；`topics.toml` 30→**31** 条 append `rr3-power/rail/state` event L2（域压
+消费走 Rr3Rail trait 本地决策不经总线，同 battery 语义，主题供次级观测面）；`module.schema.toml`
+base_capabilities 5→**7**（与 slots 基础层钉死等价，`slots_base_layer_is_pinned_to_base_capabilities`
+自动跟随）。③五处形状 pin 同批：rr-registry `src/slots.rs`（23 格 / base 7＋新格 tier_scope 断言）、
+`tests/contract.rs`（三元组 31 条、kind 12-11-4-4、格位 23 / 层分布 7-12-4）、`src/topics.rs`
+（merge 34 = 31 + 3）、rrd `src/topics_load.rs`（31 / 34 三处）；atom 承担账两格进
+`BUILTIN_NO_ATOM` 豁免（承载是 rr3-power 进程内机制切片 RailMonitor/RailJudge——件五归属搬家——
+与板侧守护，无独立原子目录，立无源码空原子件即 D15 空壳）。**本件不建执法步**（check.sh 零改动，
+可数 step 14 行、待建门 20 把计数均不变）；②-a0 元判据尚未建，新格 normal 无在册角色属诚实红账，
+角色覆盖扩表 4→18 归件六基-39；contracts/README 演进登记与裁定段计数、status.md 台账同批。
 
 ## 3 结构纪律
 
