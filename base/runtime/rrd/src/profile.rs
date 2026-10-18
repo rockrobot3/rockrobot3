@@ -46,8 +46,8 @@ use std::path::{Path, PathBuf};
 
 use rr_registry::{
     rr3_registry_device_table_from_text, rr3_registry_platform_table_from_text,
-    rr3_registry_role_table_from_text, rr3_registry_slot_table_from_text, Rr3DeviceTable,
-    Rr3PlatformTable, Rr3RoleTable, Rr3SlotTable,
+    rr3_registry_role_table_from_text, rr3_registry_slot_table_from_text, Rr3AssembleDemand,
+    Rr3DeviceTable, Rr3PlatformTable, Rr3RoleTable, Rr3SlotTable,
 };
 
 /// 契约格位表的编译期定位（与 `topics_load::RR3_CONTRACT_TOPICS_PATH` 同深度：
@@ -1508,9 +1508,122 @@ fn rr3_assemble_scan(module_dir: &Path) -> Vec<String> {
     out
 }
 
+/// 校验⑨ 最小读者（批N2 首件基-36，全案 §5 判据⑨）：`Σ demands.peak_ma
+/// (critical=true) ≤ domains[rail].current_cap_ma`。fail-closed 逐条点名：
+/// - demand.rail 不在 [[supplies.domain]] ⇒ 红（域缺 = `current_cap_ma` 缺，预算无分母）；
+/// - per rail Σ(critical=true) 超域 cap ⇒ 红点名（域 + 加总值 + cap + 申报者清单）。
+/// critical=false 不进 Σ（判据原文只算 critical=true）；并发缺省 = 全部同时（最坏），
+/// `concurrency_group` 收窄随门 c（批N2 本体）同批，本读者不预支。
+/// **基-36 只落判据实体（本函数）＋反例用例（tests ①b）**：装载拒链（专属执法位
+/// ⑨-c / 门 c）仍待建，待建门计数与 check.sh step 行数不变——接链随批N2 本体同批。
+fn rr3_demand_budget_check(
+    declared: &[(String, Vec<Rr3AssembleDemand>)],
+    domains: &[Rr3Domain],
+) -> Vec<String> {
+    let mut errs = Vec::new();
+    // 域在册性先行：rail 不在 domains ⇒ 该条需求无分母可比，逐条点名
+    for (owner, demands) in declared {
+        for d in demands {
+            if !domains.iter().any(|dm| dm.name == d.rail) {
+                errs.push(format!(
+                    "件 {owner} 申报 rail = {} 不在 [[supplies.domain]] 在册域集（校验⑨：域缺即 current_cap_ma 缺，预算无分母）",
+                    d.rail
+                ));
+            }
+        }
+    }
+    // per rail 预算加总（并发缺省 = 全部同时，最坏口径）
+    for dm in domains {
+        let sum: i64 = declared
+            .iter()
+            .flat_map(|(_, demands)| demands.iter())
+            .filter(|d| d.critical && d.rail == dm.name)
+            .map(|d| d.peak_ma)
+            .sum();
+        if sum > dm.current_cap_ma {
+            let owners: Vec<&str> = declared
+                .iter()
+                .filter(|(_, demands)| {
+                    demands
+                        .iter()
+                        .any(|d| d.critical && d.rail == dm.name)
+                })
+                .map(|(o, _)| o.as_str())
+                .collect();
+            errs.push(format!(
+                "域 {} 电流预算超限（校验⑨）：Σ demands.peak_ma (critical=true) = {sum} mA > current_cap_ma = {} mA（申报者：{}；并发缺省 = 全部同时）",
+                dm.name,
+                dm.current_cap_ma,
+                owners.join("、")
+            ));
+        }
+    }
+    errs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 校验⑨ 最小读者反例组（批N2 首件基-36，判据实体进 ①b）：正例（servo 首条
+    /// 真实申报形状 Σ700 ≤ cap 2000 ⇒ 绿）＋三条反例——同域加总超 cap ⇒ 红、
+    /// rail 不在 domains ⇒ 红、critical=false 不进 Σ。装载拒链（⑨-c / 门 c）仍
+    /// 待建：本测试只钉判据本体，step 行数与待建门计数不变。
+    #[test]
+    fn demand_budget_check_nine() {
+        let rail5v = || Rr3Domain {
+            name: "rail5v".into(),
+            current_cap_ma: 2000,
+            ..Default::default()
+        };
+        let d = |rail: &str, peak: i64, critical: bool| Rr3AssembleDemand {
+            rail: rail.into(),
+            peak_ma: peak,
+            critical,
+        };
+
+        // 正例：servo 首条申报形状（rail5v peak 700 critical）⇒ 无红
+        let ok = vec![("rr3-act.servo".to_string(), vec![d("rail5v", 700, true)])];
+        assert!(
+            rr3_demand_budget_check(&ok, &[rail5v()]).is_empty(),
+            "Σ700 ≤ cap 2000 必须绿"
+        );
+
+        // 反例①：两件同域加总超 cap（Σ2400 > 2000）⇒ 红点名域 + 加总 + cap + 申报者
+        let over = vec![
+            ("rr3-act.servo".to_string(), vec![d("rail5v", 700, true)]),
+            ("rr3-x.dummy".to_string(), vec![d("rail5v", 1700, true)]),
+        ];
+        let errs = rr3_demand_budget_check(&over, &[rail5v()]);
+        assert!(
+            errs.iter().any(|e| e.contains("电流预算超限")
+                && e.contains("rail5v")
+                && e.contains("2400")
+                && e.contains("2000")
+                && e.contains("rr3-act.servo")
+                && e.contains("rr3-x.dummy")),
+            "{errs:?}"
+        );
+
+        // 反例②：rail 不在 domains ⇒ 红（域缺即 cap 缺，预算无分母）
+        let ghost = vec![("rr3-x.dummy".to_string(), vec![d("rail9v", 1, true)])];
+        let errs = rr3_demand_budget_check(&ghost, &[rail5v()]);
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("rail9v") && e.contains("不在 [[supplies.domain]]")),
+            "{errs:?}"
+        );
+
+        // 反例③：critical=false 不进 Σ（判据只算 critical=true）——5000 mA 也绿
+        let noncrit = vec![(
+            "rr3-x.dummy".to_string(),
+            vec![d("rail5v", 5000, false)],
+        )];
+        assert!(
+            rr3_demand_budget_check(&noncrit, &[rail5v()]).is_empty(),
+            "critical=false 不得进加总"
+        );
+    }
 
     /// 全部规则走真的 contracts/slots.toml 与 contracts/roles.toml（查册真值同源），
     /// 夹具落 pid 唯一临时目录

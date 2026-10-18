@@ -27,6 +27,16 @@
 //!   desc_key 存在性**不在本模块判**——描述符注入是 spawn 时 `RR3_HAL_BINDINGS`
 //!   env 的事，存在性归探测面（实测缺），与 rr-hal 后端选择的 fail-closed 同一路。
 //!
+//! **电流需求申报面**（`[assemble].demands`，批N2 首件基-36 / 裁定 13"只交一件"）：
+//! 每条 `{ rail, peak_ma, critical }`——件在 `rail` 域上的峰值电流需求（mA）。
+//! 校验⑨ 判据（`Σ demands.peak_ma (critical=true) ≤ domains[rail].current_cap_ma`，
+//! 全案 §5）的读者在 rrd 装载侧（`profile::rr3_demand_budget_check`），本模块只管
+//! 形状：rail 非空、peak_ma 正整数、critical 显式布尔（不给缺省）；**缺键 = 空申报
+//! 合法**——执法面"件未申报而角色 kind=power → 红"归门 c（批N2 本体），不在此预支。
+//! rail 域在册性也不在此判（rr-registry 无 domains 数据，读者对 profile 比对）。
+//! `concurrency_group`（P-10 申报面字段）随门 c 同批落。增键不 bump：demands 缺省
+//! 语义 = 未申报，已激活 17 份数据语义不变（composite.rs 头注"只增不 bump"同构）。
+//!
 //! 装配段对缺项的处置（ADR-0019 修订 1 ③）：**该格 `Degraded`、点名到件，不 fatal**
 //! ——件没病，装配声明坏了重启治不了；修数据 + 重启 rrd 是唯一解除路。
 //!
@@ -80,11 +90,26 @@ pub struct Rr3AssembleOp {
     pub src_key: String,
 }
 
+/// 一条电流需求申报：件在 `rail` 域上的峰值电流需求（批N2 首件基-36；判据⑨ 的
+/// 申报分子，加总与域 cap 比对在 rrd 读者侧）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3AssembleDemand {
+    /// 电力网络域名（对 [[supplies.domain]].name 比对，在册性归 rrd 读者）
+    pub rail: String,
+    /// 峰值电流 mA（正整数；critical=true 时进校验⑨ 预算加总）
+    pub peak_ma: i64,
+    /// 是否关键需求（显式布尔不给缺省；false 不进 Σ）
+    pub critical: bool,
+}
+
 /// 一份装配清单的解析产物（空数组合法，但空面须明写 no_injection，见下）
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Rr3AssembleFacts {
     pub handles: Vec<Rr3AssembleHandle>,
     pub ops: Vec<Rr3AssembleOp>,
+    /// 电流需求申报（基-36 首件；缺键 = 空申报合法——"kind=power 未申报 → 红"
+    /// 的执法面归门 c，不在形状层预支）
+    pub demands: Vec<Rr3AssembleDemand>,
     /// `no_injection = true`：件明写"本件不需注入面"（0.0.5 批M MC-10 L-5）。
     /// `handles`/`ops` 两数组**均空**时此键必填——否则与"漏填"不可区分，一律判红。
     pub no_injection: bool,
@@ -174,6 +199,55 @@ pub(crate) fn rr3_ops_from_array(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<St
     (ops, errs)
 }
 
+/// demands 数组条目级解析与校验（**件级专用**：组合件级 [assemble] 不认 demands——
+/// 电流需求是原子件的物理属性，不随组合件申报，组合件清单未知键点名即拦）
+pub(crate) fn rr3_demands_from_array(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec<String>) {
+    let mut demands = Vec::new();
+    let mut errs: Vec<String> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let Some(d) = item.as_table() else {
+            errs.push(format!(
+                "demands[{i}] 应为内联表 {{ rail, peak_ma, critical }}"
+            ));
+            continue;
+        };
+        for k in d.keys() {
+            if k != "rail" && k != "peak_ma" && k != "critical" {
+                errs.push(format!(
+                    "demands[{i}] 未知键 {k}（只认 rail / peak_ma / critical；concurrency_group 随门 c 同批落）"
+                ));
+            }
+        }
+        let rail = d.get("rail").and_then(Value::as_str);
+        match rail {
+            Some(r) if !r.trim().is_empty() => {}
+            Some(_) => errs.push(format!("demands[{i}].rail 不得为空")),
+            None => errs.push(format!("demands[{i}].rail 应为字符串")),
+        }
+        match d.get("peak_ma").and_then(Value::as_integer) {
+            Some(v) if v > 0 => {}
+            Some(v) => errs.push(format!(
+                "demands[{i}].peak_ma = {v} 须为正整数（mA，峰值电流需求）"
+            )),
+            None => errs.push(format!("demands[{i}].peak_ma 应为整数")),
+        }
+        let critical = d.get("critical").and_then(Value::as_bool);
+        if critical.is_none() {
+            errs.push(format!(
+                "demands[{i}].critical 应为布尔（显式写不给缺省：true 进校验⑨ 预算加总）"
+            ));
+        }
+        if let (Some(r), Some(v), Some(c)) = (rail, d.get("peak_ma").and_then(Value::as_integer), critical) {
+            demands.push(Rr3AssembleDemand {
+                rail: r.into(),
+                peak_ma: v,
+                critical: c,
+            });
+        }
+    }
+    (demands, errs)
+}
+
 /// L-5 空面规则（0.0.5 批M MC-10）：两数组均在文本中出现且均为空 ⇒ 必须明写
 /// no_injection = true；明写 no_injection 时两数组必须都空。件级与组合件级共用。
 pub(crate) fn rr3_empty_surface_errors(
@@ -238,9 +312,9 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
     };
     // [assemble] 未知键点名
     for k in asm.keys() {
-        if k != "handles" && k != "ops" && k != "no_injection" {
+        if k != "handles" && k != "ops" && k != "no_injection" && k != "demands" {
             errs.push(format!(
-                "[assemble] 未知键 {k}（只认 handles / ops / no_injection）"
+                "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands）"
             ));
         }
     }
@@ -286,6 +360,18 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
         }
         Some(other) => errs.push(format!("[assemble].ops 应为数组，收到 {other:?}")),
         None => errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into()),
+    }
+
+    // demands：电流需求申报（基-36 首件）。缺键 = 空申报合法（执法面归门 c，
+    // 不在形状层强制——L-5 空面规则只管注入面 handles/ops，不涉 demands）。
+    match asm.get("demands") {
+        Some(Value::Array(items)) => {
+            let (parsed, mut item_errs) = rr3_demands_from_array(items);
+            facts.demands = parsed;
+            errs.append(&mut item_errs);
+        }
+        Some(other) => errs.push(format!("[assemble].demands 应为数组，收到 {other:?}")),
+        None => {}
     }
 
     // 空面规则（L-5）：两数组均在文本中出现且均为空 ⇒ 必须明写 no_injection = true；
@@ -524,5 +610,55 @@ ops = [
         )
         .unwrap();
         assert!(rr3_registry_assemble_injection_gaps(&empty, "garbage =\n").is_empty());
+    }
+
+    /// 电流需求申报面（基-36 首件）：正例解析 + 缺键 = 空申报合法 + 坏形逐条点名。
+    /// 判据本体（Σ ≤ cap）不在本模块——读者在 rrd rr3_demand_budget_check。
+    #[test]
+    fn demands_parse_and_shape_errors_are_named() {
+        // 正例：servo 首条真实申报形状（rail5v / 700 / critical；handles 同 servo 真实句柄，
+        // demands 不豁免 L-5 空面规则——它不是注入面）
+        let f = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"rail5v\", peak_ma = 700, critical = true },\n]\n",
+        )
+        .expect("正例必须过");
+        assert_eq!(f.demands.len(), 1);
+        assert_eq!(f.demands[0].rail, "rail5v");
+        assert_eq!(f.demands[0].peak_ma, 700);
+        assert!(f.demands[0].critical);
+
+        // 缺 demands 键 = 空申报合法（执法面归门 c）
+        let f = rr3_registry_assemble_from_text(OK_SAMPLE).expect("无 demands 必须过");
+        assert!(f.demands.is_empty());
+
+        // 坏形逐条点名：空 rail / 峰值非正 / critical 缺失 / 未知键 / 非表条目
+        let errs = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"\", peak_ma = 700, critical = true },\n  { rail = \"rail5v\", peak_ma = 0, critical = true },\n  { rail = \"rail5v\", peak_ma = 700 },\n  { rail = \"rail5v\", peak_ma = 700, critical = true, concurrency_group = [] },\n  \"bare\",\n]\n",
+        )
+        .expect_err("坏形必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("demands[0].rail 不得为空")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("demands[1].peak_ma = 0 须为正整数")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("demands[2].critical 应为布尔")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains(
+                "demands[3] 未知键 concurrency_group（只认 rail / peak_ma / critical；concurrency_group 随门 c 同批落）"
+            )),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("demands[4] 应为内联表")),
+            "{errs:?}"
+        );
     }
 }

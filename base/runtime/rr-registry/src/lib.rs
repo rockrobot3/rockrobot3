@@ -19,9 +19,9 @@ pub mod topics;
 pub mod validate;
 
 pub use assemble::{
-    rr3_registry_assemble_from_text, rr3_registry_assemble_injection_gaps, Rr3AssembleFacts,
-    Rr3AssembleHandle, Rr3AssembleOp, RR3_ASSEMBLE_DESC_KEYS, RR3_ASSEMBLE_HANDLE_TRAITS,
-    RR3_ASSEMBLE_SCHEMA_VERSION,
+    rr3_registry_assemble_from_text, rr3_registry_assemble_injection_gaps, Rr3AssembleDemand,
+    Rr3AssembleFacts, Rr3AssembleHandle, Rr3AssembleOp, RR3_ASSEMBLE_DESC_KEYS,
+    RR3_ASSEMBLE_HANDLE_TRAITS, RR3_ASSEMBLE_SCHEMA_VERSION,
 };
 pub use atom::{
     rr3_registry_atom_field_specs, rr3_registry_board_free_assert, rr3_registry_validate_atom,
