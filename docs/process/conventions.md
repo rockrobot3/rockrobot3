@@ -45,6 +45,17 @@
 归属按组互斥取 max（F-12：不重叠必须是数据——空组/多组归属按不收窄计，宁超算不漏算）；
 显式过滤器 `demand_budget` 封 fail-open（4 用例＝`demand_budget_check_nine` 并发三态 ＋ `demand_budget_chain_*`
 装载拒链三用例；新拒链用例命名须带 `demand_budget` 前缀进本步扫面）。
+**2026-10-18 对表（批N2 件六，⑨-a 门 a 报告模式）**：建 **`step "⑨-a 基-39 角色覆盖六表对账·报告模式…"`**
+（门 a 第 ③ 层执法位，全案 §8 门 a / §24.1 第 5 条 + 裁-6）⇒ 可数 step **15 行**、
+**专属执法位建成 4 把＋报告位 1 把、待建门 19 把**（门 a 转入"已建·报告模式"——报告不置红，转红随基-39
+全刀落完）；判据＝红账三段（A 未覆盖 normal 格／B roles 四外键悬空——应恒 0，悬空是错不是账、硬红不进
+基线／C TRAITS·PIN_KEYS 差集）对低水位基线文件 `tools/ci/gate-a-baseline.txt`（count>基线即红防回涨、
+文件缺/坏即红 fail-closed、count 下降打印须同批下调）；配套 (a) 报告走 stdout 可见面，配套 (b) 转红
+终点＝基-39 角色覆盖扩表（N2 那一刀同件落 roles.toml 两角色 power.rail.sense/power.current.sense，
+covered normal 4→5、红账 23＝基线初值；switch/charger 归批N3——switch 需新派生键属契约级裁定、
+charger 随器件角色进场）；键集四腿全部自代码常量导出（`RR3_ASSEMBLE_HANDLE_TRAITS`/
+`RR3_ASSEMBLE_DESC_KEYS`/`RR3_PIN_KEYS` ＋ slots/roles 两契约表，单真值点不抄第二份，⑨-n 先例）；
+六表第 5 表已由 ② parse 层执法、第 6 表（平台 role→具名构造）归转红收口件——本步如实不判。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
@@ -2669,6 +2680,34 @@ Unknown 不喂核＋fresh 拍喂核）；rr-hal/rrd/rr3-power cargo test 全绿�
 check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。
 ⑥decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；rr3-power 模块设计
 P-9 行 X-4 加注（归属搬家落点与执法用例落点）；板侧 power.rs 零改动。
+
+2026-10-18（**批N2 件六：⑨-a 门 a 报告模式 ＋ 基-39 N2 那一刀角色扩表**，decisions.md §2
+施工图§6-④ 裁定）：门 a 首建采报告模式＋三件配套，缺一件即等同永久红灯。①契约扩表：
+`contracts/roles.toml` append 两角色 `power.rail.sense`/`power.current.sense`（slot=power.rail，
+kind=signal，iface=Rr3Power 设备类面——域级 Rr3Rail 由 rr3-power 组合件经 RailMonitor/RailJudge
+承载（件五），不经 [pins] 句柄，本件不做 trait 扩面；requires=controller+addr，
+derives=i2c_bus+ina219_addr，direction=in，droppable=false 测量面须活着才知欠压，
+input_only_ok=true，per_instance=true，instance=域名 → pin_id=power.rail.sense.rail5v，
+domains[] 绑定位一律写 pin_id 校验⑥-d）；covered normal 格 4→5（power.rail 进账）。
+②执法位 `check.sh` 建 `step "⑨-a 基-39 角色覆盖六表对账·报告模式"`：报告三段（A 未覆盖
+normal 格／B roles 四外键悬空——应恒 0，悬空是错不是账、硬红不进基线／C TRAITS·PIN_KEYS
+差集），红账＝A+B+C 对低水位基线文件 `tools/ci/gate-a-baseline.txt`（初值 23＝15+4+4：
+20 normal−5 covered＝15、TRAITS 差 4＝Rr3AudioSource/Rr3AudioSink/Rr3Link/Rr3Display、
+PIN_KEYS 差 4＝role/instance/direction/mux_group）——count>基线即红（"红条数单调不增"，
+裁定配套 c）、文件缺/坏/非整数即红 fail-closed、count 下降打印"须同批下调"提醒；报告走
+stdout 可见面（裁定配套 a，不走被 `Stdio::null()` 吞掉的面）。键集四腿全部自代码常量导出
+（assemble.rs 两在册表＋profile.rs `RR3_PIN_KEYS` 声明数/实解析数判等＋slots/roles 两契约表，
+单真值点不抄第二份，⑨-n 先例）；六表之第 5 表（件 handles[].desc_key）已由 ② parse 层执法、
+第 6 表（平台 role→具名构造）归门 a 转红收口件，本步如实不判。③归批N3 的两笔如实注记在
+roles.toml：power.switch 不落本表（derives 需新派生键——gpio_relay_line/gpio_led_line 是格位
+专名，语义不可混用，扩键属契约级 C4 裁定＋descriptor.rs＋backend＋门 n 联动）；power.charger
+随批N3 器件角色进场（计划 §3）；bus.*/net.online/power.budget＝logic 内建格无引脚绑定
+（roles.rs 判 logic 角色不进本表），其覆盖口径归转红收口件另裁（豁免或 logic 词形）。
+④rr-registry roles.rs 契约测试同批 4→6（len＋names＋新角色 per_instance/requires/droppable/
+names_for_slot 断言）。**三事实源同批对表：可数 step 14→15 行、专属执法位 4 把不变＋报告位
+1 把、待建门 20→19 把**（§2 对表段 / architecture §14 / 全案 §16.4）；decisions.md §2
+施工图§6-④ 行施工注记＋§4 变更记录同批（提交号随批N2 收口对账回填）；contracts/README
+演进登记同批；基线文件初值随本件落 `tools/ci/gate-a-baseline.txt`。
 
 ## 3 结构纪律
 
