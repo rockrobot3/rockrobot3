@@ -724,6 +724,163 @@ fi
 step "⑨-c 电流预算装载拒链（校验⑨ per-instance 扩算 + kind=power 覆盖判据，门 c）"
 run_tests sh -c 'cd base/runtime && cargo test -p rrd --lib demand_budget'
 
+# —— ⑨-a 基-39 角色覆盖六表对账·报告模式（门 a 第 ③ 层执法位——报告不置红，转红随
+#     基-39 全刀落完；全案 §8 门 a / §24.1 第 5 条 + 裁-6，批N2 件六）。
+#     四腿键集全部自代码常量/契约表导出（单真值点，不抄第二份；⑨-n 先例）：
+#       slots ← contracts/slots.toml；roles ← contracts/roles.toml；
+#       TRAITS/DESC_KEYS ← rr-registry/src/assemble.rs 两在册表；
+#       PIN_KEYS ← rrd/src/profile.rs RR3_PIN_KEYS（声明数/实解析数判等）。
+#     报告三段（裁定配套 (a)：走 stdout 可见面，不走被 Stdio::null() 吞掉的面）：
+#       A 段 = 未覆盖 normal 格（status=normal 且无任何 role.slot 指向）；
+#       B 段 = roles 侧悬空（slot/iface/requires/derives 任一不在对方真值集——**应恒 0**，
+#              悬空外键是错不是账，>0 即硬红、不进基线）；
+#       C 段 = TRAITS 未被 roles.iface 引用差集 ＋ RR3_PIN_KEYS 未被 roles.requires 引用差集。
+#     门 a 数学（§24.1 第 5 条）：置红 ＝ A + B + C。
+#     机器判据（裁定配套 (c)）：低水位基线文件 tools/ci/gate-a-baseline.txt——
+#       count > 基线即 FAIL（防红账回涨）；文件缺/坏/非整数即 FAIL（fail-closed）；
+#       count < 基线 PASS 并打印"须同批下调基线"提醒（转红终点＝基-39 全覆盖 count=0）。
+#     六表之第 5 表（件 handles[].desc_key × DESC_KEYS）已由 ② parse 层执法；第 6 表
+#     （平台 role→具名构造）归门 a 转红收口件——本步如实不判、不抄第二份。
+#     TRAITS/DESC_KEYS 是 &[&str] 切片无常量 N，提取打空的护栏＝B 段全悬空硬红＋扫面前件四查。
+step "⑨-a 基-39 角色覆盖六表对账·报告模式（A 未覆盖 normal 格 / B roles 悬空 / C trait·键差集，门 a）"
+gate_a_fail=0
+ga_slots="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+ga_roles="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+ga_traits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+ga_desc="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+ga_pins="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"' EXIT
+trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"; exit 130' INT TERM
+awk '/pub const RR3_ASSEMBLE_HANDLE_TRAITS/{f=1} f{print} f && /\];/{exit}' \
+  base/runtime/rr-registry/src/assemble.rs | grep -oE '"[^"]+"' | tr -d '"' > "$ga_traits"
+awk '/pub const RR3_ASSEMBLE_DESC_KEYS/{f=1} f{print} f && /\];/{exit}' \
+  base/runtime/rr-registry/src/assemble.rs | grep -oE '"[^"]+"' | tr -d '"' > "$ga_desc"
+awk '/const RR3_PIN_KEYS/{f=1} f{print} f && /\];/{exit}' \
+  base/runtime/rrd/src/profile.rs | grep -oE '"[^"]+"' | tr -d '"' > "$ga_pins"
+decl_pin_n="$(grep -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+real_pin_n="$(grep -c . "$ga_pins" || true)"
+# slots：name+status 两轴逐格（⑧-a 同款 awk 口径）；roles：name/slot/iface/requires/derives 逐条
+awk '
+  /^\[\[slot\]\]/        { in_s = 1; nm = "" }
+  in_s && $1 == "name"   { v = $3; gsub(/[",]/, "", v); nm = v }
+  in_s && $1 == "status" { v = $3; gsub(/[",]/, "", v); print nm "\t" v; in_s = 0 }
+' contracts/slots.toml > "$ga_slots"
+awk '
+  function flush() { if (nm != "") printf "%s\t%s\t%s\t%s\t%s\n", nm, sl, ifc, rq, dv }
+  /^\[\[role\]\]/    { flush(); nm = ""; sl = ""; ifc = ""; rq = ""; dv = ""; next }
+  $1 == "name"       { v = $3; gsub(/[",]/, "", v); nm = v }
+  $1 == "slot"       { v = $3; gsub(/[",]/, "", v); sl = v }
+  $1 == "iface"      { v = $3; gsub(/[",]/, "", v); ifc = v }
+  $1 == "requires"   { line = $0; rq = ""
+                       while (match(line, /"[^"]+"/)) { rq = rq substr(line, RSTART+1, RLENGTH-2) " "; line = substr(line, RSTART+RLENGTH) } }
+  $1 == "derives"    { line = $0; dv = ""
+                       while (match(line, /"[^"]+"/)) { dv = dv substr(line, RSTART+1, RLENGTH-2) " "; line = substr(line, RSTART+RLENGTH) } }
+  END { flush() }
+' contracts/roles.toml > "$ga_roles"
+ga_slot_n="$(wc -l < "$ga_slots" | tr -d ' ')"
+ga_normal_n="$(awk -F'\t' '$2 == "normal"' "$ga_slots" | wc -l | tr -d ' ')"
+ga_roles_n="$(grep -c . "$ga_roles" || true)"
+ga_traits_n="$(grep -c . "$ga_traits" || true)"
+ga_desc_n="$(grep -c . "$ga_desc" || true)"
+if [ -z "$ga_slot_n" ] || [ "$ga_slot_n" -eq 0 ] || [ "$ga_normal_n" -eq 0 ] \
+   || [ -z "$ga_roles_n" ] || [ "$ga_roles_n" -eq 0 ] \
+   || [ -z "$ga_traits_n" ] || [ "$ga_traits_n" -eq 0 ] \
+   || [ -z "$ga_desc_n" ] || [ "$ga_desc_n" -eq 0 ] \
+   || [ -z "$decl_pin_n" ] || [ -z "$real_pin_n" ] || [ "$real_pin_n" -eq 0 ] || [ "$decl_pin_n" -ne "$real_pin_n" ]; then
+  printf 'FAIL  ⑨-a 扫面前件不成立（slots=%s/normal=%s roles=%s traits=%s desc_keys=%s pin_keys 声明=%s 实解析=%s）——键集导出打空属门禁失效，不放行\n' \
+    "${ga_slot_n:-空}" "${ga_normal_n:-空}" "${ga_roles_n:-空}" "${ga_traits_n:-空}" "${ga_desc_n:-空}" "${decl_pin_n:-空}" "${real_pin_n:-空}"
+  gate_a_fail=1
+else
+  printf 'PASS  ⑨-a 扫面前件（slots %s 格/normal %s × roles %s × traits %s × desc_keys %s × pin_keys %s，全部自契约表/代码常量导出）\n' \
+    "$ga_slot_n" "$ga_normal_n" "$ga_roles_n" "$ga_traits_n" "$ga_desc_n" "$real_pin_n"
+  ga_a=0; ga_b=0; ga_c=0
+  # —— B 段：roles 侧悬空（应恒 0；悬空外键任何时候都是错，硬红不进基线）
+  while IFS=$'\t' read -r r_nm r_sl r_if r_rq r_dv; do
+    [ -n "$r_nm" ] || continue
+    if ! printf '%s\n' "$(cut -f1 "$ga_slots")" | grep -qxF "$r_sl"; then
+      printf 'B  role %s 的 slot 悬空: %s（slots.toml 无此格）\n' "$r_nm" "$r_sl"
+      ga_b=$((ga_b + 1))
+    fi
+    if ! grep -qxF "$r_if" "$ga_traits"; then
+      printf 'B  role %s 的 iface 悬空: %s（RR3_ASSEMBLE_HANDLE_TRAITS 无此名）\n' "$r_nm" "$r_if"
+      ga_b=$((ga_b + 1))
+    fi
+    for k in $r_rq; do
+      if ! grep -qxF "$k" "$ga_pins"; then
+        printf 'B  role %s 的 requires 悬空: %s（RR3_PIN_KEYS 无此键）\n' "$r_nm" "$k"
+        ga_b=$((ga_b + 1))
+      fi
+    done
+    for k in $r_dv; do
+      if ! grep -qxF "$k" "$ga_desc"; then
+        printf 'B  role %s 的 derives 悬空: %s（RR3_ASSEMBLE_DESC_KEYS 无此键）\n' "$r_nm" "$k"
+        ga_b=$((ga_b + 1))
+      fi
+    done
+  done < "$ga_roles"
+  # —— A 段：未覆盖 normal 格
+  ga_covered="$(awk -F'\t' '{print $2}' "$ga_roles" | sort -u)"
+  while IFS=$'\t' read -r s_nm s_st; do
+    [ -n "$s_nm" ] || continue
+    if [ "$s_st" = "normal" ] && ! printf '%s\n' "$ga_covered" | grep -qxF "$s_nm"; then
+      printf 'A  normal 格未覆盖: %s（无任何 role.slot 指向）\n' "$s_nm"
+      ga_a=$((ga_a + 1))
+    fi
+  done < "$ga_slots"
+  # —— C 段：trait 差集 ＋ pin 键差集（未被 roles 引用侧）
+  ga_used_if="$(awk -F'\t' '{print $3}' "$ga_roles" | sort -u)"
+  ga_used_rq="$(awk -F'\t' '{print $4}' "$ga_roles" | tr ' ' '\n' | sort -u)"
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    if ! printf '%s\n' "$ga_used_if" | grep -qxF "$t"; then
+      printf 'C  trait 未被 roles.iface 引用: %s\n' "$t"
+      ga_c=$((ga_c + 1))
+    fi
+  done < "$ga_traits"
+  while IFS= read -r k; do
+    [ -n "$k" ] || continue
+    if ! printf '%s\n' "$ga_used_rq" | grep -qxF "$k"; then
+      printf 'C  pin 键未被 roles.requires 引用: %s\n' "$k"
+      ga_c=$((ga_c + 1))
+    fi
+  done < "$ga_pins"
+  ga_total=$((ga_a + ga_b + ga_c))
+  printf '门 a 数学（全案 §24.1 第 5 条）：置红 = 未覆盖 normal 格(A=%s) + roles 悬空(B=%s) + TRAITS/PIN_KEYS 差集(C=%s) = %s\n' \
+    "$ga_a" "$ga_b" "$ga_c" "$ga_total"
+  if [ "$ga_b" -gt 0 ]; then
+    printf 'FAIL  ⑨-a roles 侧悬空 %s 笔（B 段应恒 0——悬空外键是错不是账，硬红不进基线）\n' "$ga_b"
+    gate_a_fail=1
+  fi
+  ga_base="tools/ci/gate-a-baseline.txt"
+  if [ ! -r "$ga_base" ]; then
+    printf 'FAIL  ⑨-a 基线文件不可读: %s（裁定配套(c) fail-closed——低水位基线缺位即红，不放行）\n' "$ga_base"
+    gate_a_fail=1
+  else
+    ga_baseline="$(grep -vE '^[[:space:]]*(#|$)' "$ga_base" | head -1 | tr -d '[:space:]')"
+    case "$ga_baseline" in
+      ''|*[!0-9]*)
+        printf 'FAIL  ⑨-a 基线文件形状坏: %s（首个非注释行非纯整数: "%s"）——fail-closed，不放行\n' "$ga_base" "${ga_baseline:-<空>}"
+        gate_a_fail=1
+        ;;
+      *)
+        if [ "$ga_total" -gt "$ga_baseline" ]; then
+          printf 'FAIL  ⑨-a 红账回涨: %s > 基线 %s（"红条数单调不增"被破——回涨必有一笔未登记的新红，先归因再动基线）\n' "$ga_total" "$ga_baseline"
+          gate_a_fail=1
+        elif [ "$ga_total" -lt "$ga_baseline" ]; then
+          printf 'PASS  ⑨-a 红账 %s ≤ 基线 %s（**红账下降 %s 笔：须同批下调 tools/ci/gate-a-baseline.txt；转红终点 = 基-39 全覆盖 count=0，届时本门转红、基线文件退役**）\n' \
+            "$ga_total" "$ga_baseline" "$((ga_baseline - ga_total))"
+        else
+          printf 'PASS  ⑨-a 红账 %s = 基线 %s（报告模式：A/C 已知红不置红，转红随基-39 全刀落完）\n' "$ga_total" "$ga_baseline"
+        fi
+        ;;
+    esac
+  fi
+fi
+rm -f "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"
+if [ "$gate_a_fail" -ne 0 ]; then
+  fail=1
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"

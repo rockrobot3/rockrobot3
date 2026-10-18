@@ -1,0 +1,10 @@
+# 门 a（check.sh ⑨-a）红账低水位基线——裁定配套(c)"红条数单调不增"机器判据
+# （decisions.md §2 施工图§6-④ / 全案 §24.1 第 5 条 + 裁-6，批N2 件六落）。
+# 语义：红账总数（A 未覆盖 normal 格 + B roles 悬空 + C trait/键差集，⑨-a 报告打印）
+#   不得超过本数——count > 本数即 FAIL（防红账回涨）；count < 本数须同批下调本数
+#   （⑨-a 打印提醒；转红终点 = 基-39 全覆盖 count=0，届时本门转红、本文件退役）。
+#   文件缺/坏/首个非注释行非纯整数即 FAIL（fail-closed）。
+# 23 = 批N2 件六初值：15 未覆盖 normal 格（20 normal − 5 covered：act.servo / act.led /
+#   act.relay / power.battery / power.rail）+ 4 TRAITS 差（Rr3AudioSource / Rr3AudioSink /
+#   Rr3Link / Rr3Display）+ 4 PIN_KEYS 差（role / instance / direction / mux_group）。
+23

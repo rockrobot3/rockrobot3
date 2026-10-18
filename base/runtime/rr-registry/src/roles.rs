@@ -232,11 +232,11 @@ mod tests {
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/roles.toml");
 
-    /// 契约必须解析成 4 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 6 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let table = rr3_registry_role_table_from_text(CONTRACT);
-        assert_eq!(table.roles.len(), 4, "契约角色数（现役四条）");
+        assert_eq!(table.roles.len(), 6, "契约角色数（批N2 件六扩表后六条）");
         assert_eq!(
             table.rr3_role_table_names(),
             vec![
@@ -244,6 +244,8 @@ mod tests {
                 "act.led.gpio",
                 "act.relay.gpio",
                 "power.battery.meter",
+                "power.current.sense",
+                "power.rail.sense",
             ]
         );
         // slot 外键与 per_instance 语义（校验①-b 的两侧）
@@ -287,6 +289,29 @@ mod tests {
             table.rr3_role_table_names_for_slot("act.servo"),
             vec!["act.axis.pwm"]
         );
+        // 批N2 件六新角色：域测点两角色同挂 power.rail（per_instance 语义、
+        // requires/derives 同 power.battery.meter 形状）
+        assert_eq!(
+            table.rr3_role_table_slot("power.rail.sense").as_deref(),
+            Some("power.rail")
+        );
+        assert_eq!(
+            table.rr3_role_table_per_instance("power.rail.sense"),
+            Some(true)
+        );
+        assert_eq!(
+            table.rr3_role_table_droppable("power.current.sense"),
+            Some(false)
+        );
+        assert_eq!(
+            table.rr3_role_table_requires("power.rail.sense"),
+            Some(vec!["controller".to_string(), "addr".to_string()])
+        );
+        assert_eq!(
+            table.rr3_role_table_names_for_slot("power.rail"),
+            vec!["power.current.sense", "power.rail.sense"]
+        );
+        assert_eq!(table.rr3_role_table_contains("power.switch"), false);
         assert!(
             table.rr3_role_table_check().is_empty(),
             "{:?}",

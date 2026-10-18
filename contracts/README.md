@@ -12,7 +12,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 | `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001 的**同机**基准；跨架构等值另见下） | L1 |
 | `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_publish_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
 | `slots.toml` | 能力格坐标系总表：`[[slot]]`（name/layer/note），三层 base/body/cognition（查册门真值见下"slots.toml 裁定"） | L2 |
-| `roles.toml` | 角色词表（增补轮六 §4.1 新建）：`[[role]]`（name/slot/kind/iface/requires/derives/direction/droppable/input_only_ok/per_instance/note）——profiles `[pins]` 的 role 外键、rrd 派生器（derives）与门 a 六表对账的真值源；slot 外键必须命中 `slots.toml`，iface 外键必须命中 `RR3_ASSEMBLE_HANDLE_TRAITS`（两者当前由本表数据自守，门 a 待建） | L2 |
+| `roles.toml` | 角色词表（增补轮六 §4.1 新建）：`[[role]]`（name/slot/kind/iface/requires/derives/direction/droppable/input_only_ok/per_instance/note）——profiles `[pins]` 的 role 外键、rrd 派生器（derives）与门 a 六表对账的真值源；slot 外键必须命中 `slots.toml`，iface 外键必须命中 `RR3_ASSEMBLE_HANDLE_TRAITS`（两者由 ⑨-a 报告模式执法——2026-10-18 批N2 件六建步：红账三段对低水位基线 `tools/ci/gate-a-baseline.txt`，转红随基-39 全刀落完） | L2 |
 | `devices.toml` | 器件型号词表（增补轮六 §4.1b 新立，sense S-13）：`[[device]]`（model/bus/addrs/baud_ok/id_reg/peak_ma/mate）——门 o 在册对账、门 i 前件、§12.1 器件级在位探测（id_reg，缺省时探测面只许报 reachable/absent）与校验⑨ 电流互校的真值源；装载期不认型号（D10a），评审期与出厂自检必须认 | L2 |
 | `platform/<平台>.toml` | 平台事实登记表（增补轮六 §4.6 新立，基-22），每平台一份四段：`[[controller]]` 在册控制器词表（name/kind/channels，kind 封闭七值 pwm/gpio/i2c/spi/vspi/adc/uart）、`[capabilities]` 能力集（adc_pins/input_only_pins/no_open_drain/output_capable_pins，空集必须显式写并带行级注记）、`[[conflict]]` 冲突矩阵（group/pins/controllers/why，无冲突显式写 `conflict = []`）、`[construction]` 具名构造表（键 = `controller:role:instance` 三元串，值 = 平台侧构造路径）——校验 ③-b/④-b/⑤-a/⑤-b/⑧ 的判据前件；**不是器件型号**（D10a：装载期不认型号，器件能力住 devices.toml）、不与 profiles `[supplies]` 并表（三份数据三个主人）；rr-registry `src/platform.rs` fail-closed 读表（任一段缺即红，宽容 = F-6 病）。当前在册 esp32（真形态，board.rs 直读）、rk3566 与 raspberry-pi-4（**演练实例**，取值待器件/真板核对，敞口见 docs/status.md） | L2 |
 | `face-expressions.toml` | 表情白名单契约（增补轮六 §4.5 新立，批N1 n1-8）：`expressions` 全集 43 态（7 基态 + char 单字符档 36 态，顺序即帧表序）+ `board_subset` 板侧可渲染七态——白名单唯一事实源；宿主投影 = atoms/face `RR3_FACE_EXPRESSIONS`（include_str! 逐名对账），板侧副本 = `topics_gen.rs`（tools/rr3-codegen 生成，重跑 diff 为空 = 门 f 拟 ⑨-d）；扩态走契约级评审并三处同批 | L2 |
@@ -245,6 +245,13 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
   同批更新 rr-registry / rrd 五处形状 pin（31 条三元组、kind 12-11-4-4、格位 23 / 层分布
   7-12-4）与 atom 承担账（两格进 `BUILTIN_NO_ATOM` 内建豁免集：承载是 rr3-power 进程内机制
   切片 RailMonitor/RailJudge 与板侧守护，无独立原子目录——立无源码空原子件即 D15 空壳）。
+- **2026-10-18 · 0.0.5 增补轮六 批N2 件六 角色扩表（基-39 N2 那一刀，decisions.md §2 施工图§6-④
+  配套(b)）**：`roles.toml` **4→6** 条（append `power.rail.sense` / `power.current.sense`——
+  slot=power.rail、iface=Rr3Power、requires=controller+addr、derives=i2c_bus+ina219_addr、
+  per_instance=true，instance=域名 → pin_id=power.rail.sense.rail5v；schema_version 维持 1，
+  加角色＝append 非破坏）。covered normal 格 4→5，门 a 红账 23＝`tools/ci/gate-a-baseline.txt`
+  基线初值（⑨-a 报告模式同件落 `check.sh`，转红终点＝基-39 全刀：switch/charger 归批N3，
+  logic 内建格覆盖口径归转红收口件另裁）。归批N3 注记随两角色 note 在册。
 
 ## 标准歧义登记（每半年随 ADR-0004 复查核对）
 
