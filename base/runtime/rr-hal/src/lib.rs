@@ -17,10 +17,10 @@
 #![allow(clippy::result_large_err)]
 
 pub use rr_hal_api::{
-    Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3BatteryState, Rr3Display, Rr3ErrText,
-    Rr3FaceFrame, Rr3GpioOut, Rr3HalError, Rr3Link, Rr3LinkState, Rr3Power, Rr3PwmServo,
-    Rr3Rail, Rr3RailState, Rr3RailTier, Rr3SsidText, Rr3UnavailableSource,
-    RR3_AUDIO_CFG_16K_MONO16, rr3_rail_tier_effective,
+    rr3_rail_tier_effective, Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3BatteryState,
+    Rr3Display, Rr3ErrText, Rr3FaceFrame, Rr3GpioOut, Rr3HalError, Rr3Link, Rr3LinkState, Rr3Power,
+    Rr3PwmServo, Rr3Rail, Rr3RailState, Rr3RailTier, Rr3SsidText, Rr3UnavailableSource,
+    RR3_AUDIO_CFG_16K_MONO16,
 };
 
 pub mod backend;
@@ -30,6 +30,10 @@ pub mod descriptor;
 /// ESP32 外设桥后端（批C）：舵机/显示两能力面的 UART 能力帧承载——板上外设
 /// 不进城（不注册总线身份），宿主直连 UART 发在册主题形状的 `rr3.call` 帧。
 pub mod esp32_uart;
+/// ESP32-UART 板面音频源后端（A 批 c3）：板面 INMP441 双麦流（AUDIO ON 起流 →
+/// A-IPC Event 帧）→ 宿主环形缓冲 → `rr3_hal_audio_source()` esp32 档。flock
+/// 排他与舵机/显示同源——流期间外设面/收流工具互斥（fail-closed）。
+pub mod esp32audio;
 #[cfg(all(target_os = "linux", feature = "alsa"))]
 pub mod linux;
 /// linux spidev MAX7219 点阵显示后端（真件档，链④）：libc 仅做 ioctl 声明壳，
