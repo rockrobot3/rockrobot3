@@ -18,7 +18,7 @@
 
 use crate::{
     provision_store::Rr3WifiStore, Rr3AudioSink, Rr3AudioSource, Rr3GpioOut, Rr3Power, Rr3PwmServo,
-    Rr3UnavailableSource,
+    Rr3Rail, Rr3UnavailableSource,
 };
 
 /// 后端标识（写入日志与诊断主题 `rr3-runtime/module/state`）
@@ -579,6 +579,17 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
         }
         _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
     }
+}
+
+/// 按环境选轨压/域压读数面（批N2 件五，P-9 归属搬家——机制不动、归属搬家：
+/// 轨压采样与双阈值判定核的机制本体已在板 crate 真跑（`tools/esp32-periph-base`
+/// 的 `RailMonitor`/`RailJudge`），宿主侧今日只立选择入口）。今日全后端落占位
+/// （使用时以 `Unsupported` 回错，fail-closed）：宿主真件（INA219 电压/电流面）
+/// 归 0.0.7 真件批（status.md 敞口表 12 行），届时照 [`rr3_hal_power`] 模板接
+/// linux 分支与生效绑定。消费方（rr3-power 件五）`rail.up = true` 时开机探活，
+/// 占位回错即 `exit(1)`——能力缺失显式回错，不静默带病常驻。
+pub fn rr3_hal_rail() -> (Box<dyn Rr3Rail>, &'static str) {
+    (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
 }
 
 /// 按环境选网络链路读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux
