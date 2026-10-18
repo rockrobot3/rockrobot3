@@ -2637,6 +2637,39 @@ wiring.rs 路径推导夹具同批 schema 4。
 进 CI，**本件不建 check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。
 ⑥decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；decisions.md §2/§3 无增减。
 
+2026-10-18（**批N2 件五：RailMonitor/RailJudge 接能力面——机制不动、归属搬家**，
+decisions.md §4 变更记录同批）：
+①选择入口 `rr3_hal_rail()`（rr-hal backend.rs，与 `rr3_hal_power` 同族）：今日全后端
+回占位（`Rr3UnavailableSource`，使用时 Unsupported 显式回错 fail-closed）——板侧
+RailMonitor/RailJudge 机制本体在 tools/esp32-periph-base 真跑（rtos 档自持，板侧文件
+不改），宿主真件（INA219 电压/电流面）归 0.0.7 真件批（status.md 敞口表 12 行），届时
+照 `rr3_hal_power` 模板接 linux 分支与生效绑定。
+②rr3-power 接面：config 新 `[rr3-power.rail]` 段——段必填＋全部键必填（up=false 时
+其余键惰性但显式写，F-6 精神：统一解析路径无分支）；`severe_mv < mild_mv` 严格校验
+（相等也红：Mild 档不可达）；`max_age_ms = 0` 合法（龄期恒超界 ⇒ 恒 Unknown，诚实
+语义）。主循环第 4 拍（`rail.up = true` 才跑）：读域压 → ⑥-c2 按龄期折有效档位 →
+判定核 → 发 `rail/state`（四键 `{seq, mv, age_ms, tier}`，tier 串走
+`rr3_rail_tier_name` 同源词表，Unknown 拍 "unknown" 原样）＋越阈首拍边沿守护行；
+`up = true` 开机探活占位回错即 exit(1)（fail-closed 同电源面口径）；周期读数失败
+counter（`rail_read_fail`）先行再 exit(1)（同 battery_read_fail 纪律）。
+③机制切片归属搬家（逐字对照板侧 power.rs，机制不动）：`rr3_rail_tier_of`（纯 mV
+比较：mv≤severe⇒Severe、mv≤mild⇒Mild）＋ `Rr3RailJudge`（一核两条线，mild/severe
+各由 Rr3LowEdge 一实例承载，event = 两线任一低电段首拍，逐拍等价于向下档变——
+"严格回阈才再武装"语义钉在 Rr3LowEdge 内，4500 回阈后 4300 是 severe 新段首发再报）
+＋ `rr3_rail_beat`（⑥-c2 消费执法点：有效档 Unknown 不喂核原样透传——mv 再好不许
+从 mv 重分类出 Ok；fresh 拍喂核取判定核分类值）。
+④module.toml publishes 加 `rr3-power/rail/state`（topics.toml 件二已在册）；仓
+config.toml 与 rrd e2e_power CONFIG 夹具同形状 up=false 段（取值与 host 档
+profiles/default.toml rail5v 域一致：mild=4600/severe=4400/max_age=0）。
+⑤测试（composite.rs 追加，power 非 atom 名不占 ⑧-a 分母）：config 逐键覆盖/缺段/
+缺 up/倒挂（含相等红）/0 周期钳制同拍、`rail_state_body` 四键无加戏、判定核序列
+对照板语义、两腿对拍（腿一确定性＋腿二"事件 ⇔ 向下档变"）、⑥-c2 执法两条各一
+（`rail_beat_unknown_not_refed_and_passthrough`：Unknown 不折 Ok 不喂核＋陈旧折
+Unknown 不喂核＋fresh 拍喂核）；rr-hal/rrd/rr3-power cargo test 全绿，**本件不建
+check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。
+⑥decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；rr3-power 模块设计
+P-9 行 X-4 加注（归属搬家落点与执法用例落点）；板侧 power.rs 零改动。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
