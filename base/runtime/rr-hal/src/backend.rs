@@ -10,7 +10,7 @@
 //! | `linux`（链路） | 批F5a（`linux_link.rs`，仅 `target_os = "linux"` 单门，nmcli 子进程） | NetworkManager 链路状态读数（R18，判据 13；配网/断链重连是 NM 自身行为，HAL 只如实报数） |
 //! | `sim` | M3（`sim.rs`：正弦/噪声/静音三模式虚拟麦克风 + 尾窗虚拟扬声器） | `tools/sim`（bin `rr3-sim`）与 CI、无硬件开发 |
 //! | `mac` | 宿主真件（`macaudio.rs`，仅 `target_os = "macos"` 单门，手写 AudioQueue 绑定） | macOS 宿主真麦拾音/扬声器回放——显式 `RR3_HAL_BACKEND=mac` 才启用，平台缺省仍 sim（CI 纪律） |
-//! | `esp32` | 批C（`esp32_uart.rs`，`RR3_HAL_PERIPH_UART` 指定设备路径） | ESP32 外设桥：舵机/显示两能力面的 UART 能力帧承载——板不进城，宿主直连；跨进程 flock 排他即单消费者 |
+//! | `esp32` | 批C（`esp32_uart.rs`，`RR3_HAL_PERIPH_UART` 指定设备路径）；A 批 c3 音频源（`esp32audio.rs`，板面双麦流） | ESP32 外设桥：舵机/显示两能力面的 UART 能力帧承载 + 音频上行——板不进城，宿主直连；跨进程 flock 排他即单消费者 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
 //! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
 //!
@@ -256,8 +256,39 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
         }
         // 显式 mac 但平台不是 macOS：占位显式回错，不静默落 sim
         RR3_BACKEND_MAC => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        // ESP32 板面双麦流（A 批 c3，esp32audio.rs）：设备/波特来自应急 env
+        // （与舵机/显示面同键）；缺 env → 点名 + placeholder（fail-closed，
+        // 不猜设备不静默换 sim）。
+        RR3_BACKEND_ESP32 => {
+            match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
+                .map(|p| p.trim().to_string())
+            {
+                Ok(p) if !p.is_empty() => {
+                    let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
+                        .ok()
+                        .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
+                        .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+                    (
+                        Box::new(
+                            crate::esp32audio::Rr3Esp32UartAudioSource::rr3_esp32_audio_source_new(
+                                std::path::PathBuf::from(p),
+                                baud,
+                            ),
+                        ) as Box<dyn Rr3AudioSource>,
+                        RR3_BACKEND_ESP32,
+                    )
+                }
+                _ => {
+                    eprintln!(
+                        "rr-hal: esp32 档缺环境变量 {}，音频采集面落占位（使用时以 Unsupported 回错）",
+                        crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
+                    );
+                    (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+                }
+            }
+        }
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
-        _ => {
+        RR3_BACKEND_SIM => {
             let doa = std::env::var(RR3_HAL_SIM_DOA_DEG_ENV)
                 .ok()
                 .and_then(|v| rr3_sim_doa_deg_parse(&v))
@@ -270,6 +301,10 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
                 RR3_BACKEND_SIM,
             )
         }
+        // `&str` 模式编译器裁定无法穷举（E0004）：白名单收敛在
+        // [`rr3_hal_backend_resolve`] 单点，此臂不可达；防御性落占位
+        // （使用时 Unsupported 显式回错），不静默换 sim。
+        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
     }
 }
 
@@ -307,11 +342,16 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
         }
         // 显式 mac 但平台不是 macOS：占位显式回错，不静默落 sim
         RR3_BACKEND_MAC => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        // 板无扬声器（A 批 c3）：esp32 档回放面显式落占位——TTS 回放恒宿主
+        // （mac AudioQueue / sim 尾窗），fail-closed 不静默换。
+        RR3_BACKEND_ESP32 => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
-        _ => (
+        RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimAudioSink::rr3_sim_sink_new(16000 * 10)),
             RR3_BACKEND_SIM,
         ),
+        // 同 audio_source：白名单收敛在 resolve 单点，此臂不可达；防御性落占位
+        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
     }
 }
 
@@ -797,6 +837,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 音频面选择（A 批 c3）：源/播两选择函数拿到的后端名必须合法；**播面
+    /// 永不落 esp32**（板无扬声器，fail-closed 显式档）。构造不触设备
+    /// （esp32 源 open 才真开 UART），环境变量缺席时本机缺省档合法即可。
+    #[test]
+    fn audio_selectors_return_legal_backend_objects() {
+        let (src, src_backend) = rr3_hal_audio_source();
+        assert!(
+            [
+                RR3_BACKEND_SIM,
+                RR3_BACKEND_LINUX,
+                RR3_BACKEND_MAC,
+                RR3_BACKEND_ESP32,
+                RR3_BACKEND_PLACEHOLDER,
+            ]
+            .contains(&src_backend),
+            "音频源后端名合法: {src_backend}"
+        );
+        let (sink, sink_backend) = rr3_hal_audio_sink();
+        assert!(
+            [
+                RR3_BACKEND_SIM,
+                RR3_BACKEND_LINUX,
+                RR3_BACKEND_MAC,
+                RR3_BACKEND_PLACEHOLDER,
+            ]
+            .contains(&sink_backend),
+            "音频播后端名合法: {sink_backend}"
+        );
+        assert_ne!(
+            sink_backend, RR3_BACKEND_ESP32,
+            "板无扬声器，播面永不落 esp32"
+        );
+        let _ = (src, sink); // 对象可用性归使用面（探活），选择面不触设备
     }
 
     /// GPIO 角色 → 应急 env 键拼装（R8 预算表 GPIO4/17 真值已迁 profiles
