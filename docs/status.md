@@ -559,7 +559,7 @@
   body 四键无加戏、判定核序列对照板语义、两腿对拍、⑥-c2 执法两条各一
   `rail_beat_unknown_not_refed_and_passthrough`）；rr-hal/rrd/rr3-power cargo test
   全绿，**不建 check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。⑤
-  decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；rr3-power 模块设计 P-9
+  decisions.md §4 变更记录同批（提交 `53e243a`，批N2 收口对账 2026-10-18）；rr3-power 模块设计 P-9
   行 X-4 加注。⑥板侧 power.rs 零改动；敞口表无增减。
 
 - **2026-10-18 批N2 件六：⑨-a 门 a 报告模式 ＋ 基-39 N2 那一刀角色扩表（decisions.md §2
@@ -576,7 +576,7 @@
   **三事实源同批对表：可数 step 14→15 行、专属执法位 4 把不变＋报告位 1 把、待建门
   20→19 把**（门 a 转入"已建·报告模式"，转红随基-39 全刀落完——switch/charger 归批N3、
   logic 内建格覆盖口径归转红收口件另裁）；decisions.md §2 施工图§6-④ 行施工注记＋§4
-  变更记录同批（提交号随批N2 收口对账回填）；contracts/README 演进登记同批；敞口表无增减。
+  变更记录同批（提交 `e918b76`，批N2 收口对账 2026-10-18）；contracts/README 演进登记同批；敞口表无增减。
 
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
