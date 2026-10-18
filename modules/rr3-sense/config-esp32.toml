@@ -1,0 +1,19 @@
+# rr3-sense ESP32 板麦档（A 批 c5）：板面 esp32-periph-base 双通道 16k/20ms，
+# 采集参数与固件侧同源；VAD 阈值与默认档同款（宿主真麦 acc② 实录教训如实沿用：
+# rms_start=1500 需靠近说话或加大输入音量，破阈成轮）。
+# 装载方式：RR3_SENSE_CONFIG=<repo>/modules/rr3-sense/config-esp32.toml 显式 env
+# （经 rrd 继承进 sense）；不动仓库默认 config.toml——默认档仍是宿主单麦。
+# channels=2 走 R14 双麦期语义：DoA 吃原始双通道、总线承载下混 mono（brain 零改动）。
+
+[rr3-sense.audio]
+sample_rate = 16000
+channels = 2
+frame_ms = 20        # <1 无节拍意义，模块侧收敛 20 并留痕
+
+[rr3-sense.vad]
+rms_start = 1500        # 起音阈值
+silence_tail_ms = 700   # 判停尾静音
+min_speech_ms = 200
+
+[rr3-sense.doa]
+bin_threshold_deg = 30  # DoA 三档边界（S-5：阈值数据化，件内常量已迁出）

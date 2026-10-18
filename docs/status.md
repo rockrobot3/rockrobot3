@@ -972,6 +972,29 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   FT232 瞬态噪声同族嫌疑）。wav 落盘在位（`rr3-audio-600s-run4.wav` 37.6MB 实测 16002Hz）。判据② 重跑
   与判据③（DoA 拍手）仍待跑；功能开发（brain 语音交流 / DoA 听声识位）按"可用但有损"口径可并行开工，
   不以判据② pass 为前置。
+- **A 批（语音自由交流）c1–c5——板麦进城四步上提 + esp32 音频源后端 + 板麦档与 runbook（2026-10-18，提交
+  `1d00cef`+`5cb7f98`+`5dce1cd`+`406b1ef`+本批记）**：立项计划
+  .trae/documents/A语音自由交流实施计划.md（用户拍板"先 A 后 B"），M4 四进程闭环已在
+  （brain 对话编排 ASR→LLM→TTS→tts_pcm→interact 播放），唯一缺口 = 板侧麦克风流进总线的承载
+  （rr-hal 音频源仅 linux/sim/mac 三档，esp32 静默落 sim）——五步收口：
+  ①c1 `rr_ipc::framing::FrameAssembler` 拆帧器上提单点（rr3-audio-rec 改用，四类测试随迁）；
+  ②c2 `rr_ipc::audio_session` 板面会话握手上提单点（read_reply_line/ok_reply_line/共享常量，
+  B 类 ON 应答判据修复随迁）；③c3 **核心**：rr-hal `esp32audio.rs` `Rr3Esp32UartAudioSource`
+  （`RR3_HAL_PERIPH_UART/BAUD` 开口 → 握手 → 读线程 64KB 裸读 → FrameAssembler 四道门 →
+  Mutex<VecDeque> 环形缓冲 ~1s 溢丢最旧；断流重开口重握手永不退；backend.rs 两选择函数补
+  esp32/sim 显式臂（E0004 裁定 `&str` match 无法穷举，`_` 臂保留为防御性落占位，白名单收敛
+  `rr3_hal_backend_resolve` 单点），esp32 sink 落 placeholder——板无扬声器，fail-closed）；④c4 rr3-sim `--sink-backend`
+  （源/回放分列，`--audio-backend esp32` 无 `--sink-backend` 拒收 + `--sink-backend esp32` 拒收
+  两条 fail-closed；interact 进程 env 单独透传，既有 sim/mac 链零改动）；⑤c5
+  `modules/rr3-sense/config-esp32.toml`（双通道 16k/20ms，R14 双麦期语义：DoA 吃原始双通道、
+  总线承载下混 mono，brain 零改动）+ 本条 runbook。**runbook（mock 档真板冒烟：宿主四进程 +
+  板面真麦）**：`RR3_HAL_PERIPH_UART=/dev/cu.usbserial-A98KN77U RR3_HAL_PERIPH_BAUD=921600
+  RR3_SENSE_CONFIG=<repo>/modules/rr3-sense/config-esp32.toml rr3-sim --brain --audio-backend
+  esp32 --sink-backend mac --keep`——对板说话 → brain「对话轮完成」（mock 固定文本）→ mac
+  扬声器出声；onset 事件带 doa 字段（B 铺垫）。注记两条：**flock 独占**——音频流期间
+  舵机/显示/rr3-audio-rec 与音频源互斥不可并存（B 延后自洽）；**~2% 时钟滑移**（run4 gaps
+  口径）→ ring 溢丢稳态损耗，VAD/ASR 可容忍。真 key 就位后 `--brain-cloud real` 切档即
+  全语音自由对话（acc④，运维动作不属本轮代码）。
 - **0.0.6 模型连接抽象批——AgentRT v3 式连接行 + 密钥双源 + 面板密钥面（2026-10-14，提交
   `d69e918`+`89eb71e`+本批记）**：用户需求"抽象化 API 客户端连云端/本地模型；操作面板填 key，
   代码无明文密钥"（立项计划 .trae/documents/rock3-model-client-abstraction-and-panel-keys.md，
