@@ -679,7 +679,7 @@ fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     let reflex_sect = sect("reflex")?.clone();
     // 行程键不在 config（批N3 件五门 g 收敛）：Rr3ServoCfg 的 angle_min/max_deg
     // 由执行轴状态注入填值（RR3_ACT_AXIS_STATE 的 lo/hi，档案真值），本解析面
-    // 只管时限/限速。config 出现 angle_limit_deg 键 = 读者零的死键，装配期
+    // 只管时限/限速。config 出现任何行程键 = 读者零的死键，装配期
     // （rrd assemble scan）与 CI 门 ⑨-e 双面执法，此处不再解析。
     // loop_hz 越界拒 boot（0.0.5 批I A-3）：`as u32` 裸截断会把 2^32+1 之类
     // 值偷偷收成 1，节拍面静默变形——try_from 点名拒绝

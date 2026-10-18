@@ -36,8 +36,9 @@ pub const RR3_SERVO_PERIOD_NS: u32 = 20_000_000;
 pub const RR3_SERVO_PULSE_MIN_NS: u32 = 500_000;
 /// SG90 脉宽上界 2.5ms ↔ 180°
 pub const RR3_SERVO_PULSE_MAX_NS: u32 = 2_500_000;
-/// SG90 物理角域上限：越域显式回错、不静默 clamp（行程裁决在模块 config
-/// `angle_limit_deg`，这里钉的是舵机物理域——两者都越才到得了这一层）
+/// SG90 物理角域上限：越域显式回错、不静默 clamp（行程裁决在执行轴档案的
+/// lo/hi——批N3 件五门 g 收敛后经 RR3_ACT_AXIS_STATE 注入模块、板侧经生成表
+/// axis_gen.rs，这里钉的是舵机物理域——两者都越才到得了这一层）
 pub const RR3_SERVO_ANGLE_MAX_DEG: u16 = 180;
 
 /// 取通道所有权时落定的初始角（与 sim 后端"初始角 90°（中位）"同语义）
@@ -52,7 +53,7 @@ const PWM_EXPORT_POLL: Duration = Duration::from_millis(10);
 fn servo_duty_ns(deg: u16) -> Result<u32, Rr3HalError> {
     if deg > RR3_SERVO_ANGLE_MAX_DEG {
         return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
-            "SG90 角域 0..={RR3_SERVO_ANGLE_MAX_DEG}，收到 {deg}°——越域显式回错不静默 clamp（行程裁决在模块 config angle_limit_deg）"
+            "SG90 角域 0..={RR3_SERVO_ANGLE_MAX_DEG}，收到 {deg}°——越域显式回错不静默 clamp（行程裁决在执行轴档案 lo/hi）"
         ))));
     }
     let span = RR3_SERVO_PULSE_MAX_NS - RR3_SERVO_PULSE_MIN_NS;
