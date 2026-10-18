@@ -53,9 +53,13 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
+use rr_ipc::audio_session::{
+    handshake, HANDSHAKE_RETRY_PAUSE, HANDSHAKE_TRIES, READ_BLOCK, READ_TIMEOUT_MS,
+    RESYNC_ZERO_BAIL,
+};
 use rr_ipc::{
-    rr3_base64_decode, rr3_body_split, rr3_uart_baud_speed, FrameAssembler, Rr3Frame, Rr3Header,
-    Rr3PayloadType, Rr3UartConn, RR3_IPC_HDR_SIZE,
+    rr3_base64_decode, rr3_body_split, rr3_uart_baud_speed, FrameAssembler, Rr3Frame,
+    Rr3PayloadType, Rr3UartConn,
 };
 use serde_json::Value;
 
@@ -70,51 +74,22 @@ const RR3_HOST_TASK: u64 = 1;
 const RR3_PERIPH_TASK: u64 = 2;
 /// 音频 PCM 上行主题（在册 stream L1：contracts/topics.toml）。
 const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
-/// 开口 settle（CP2102 DTR/RTS 翻转复位板子的既定时序，批C 实锤）。
-const SETTLE: Duration = Duration::from_millis(1200);
 /// 停滞死线（看门狗）：**武装后的收流期**内无新分片字节即判停滞。分片节拍
 /// 128ms/片，10s ≈ 78 片空窗——正常流不可达；重连握手重试期（≈90s 骑行窗）
 /// 与重同步窗口（1.6s）看门狗解武装不计停滞，否则长骑行必被误杀；触发即实锤
 /// "武装收流中，分片字节 10s 未确认入队"。
 const STALL: Duration = Duration::from_secs(10);
-/// 帧头 magic 小端线上字节与拆帧器已上提 rr-ipc 单点（`rr_ipc::framing`，A 批
-/// 随 rr-hal esp32 音频源后端共用；`RR3_MAGIC_LE`/`FrameAssembler` 从彼处来，
-/// 本件不再持第二份帧机制）。
+/// 开口 settle/应答超时/断流判据/大块裸读窗/重连预算七常量与握手三函数已上提
+/// rr-ipc 单点（`rr_ipc::audio_session`，A 批 c2 随 rr-hal esp32 音频源后端共用；
+/// 本件 import 接线，不再持第二份会话机制）。
 
 /// 连续拆帧失败达此数记一次失步重同步账（日志对账；坏帧弃扫本身由
 /// [`FrameAssembler`] 在内存里即时完成，无独立扫描动作——1-2 次可能是单帧毛刺，
 /// 3 次 = 帧界成片损坏，值得一条日志点名）。
 const ERR_STREAK_RESYNC: u64 = 3;
-/// 帧读超时（毫秒，机制面 `rr3_read_timeout`）：单次等就绪时长。正常流分片
-/// 背靠背（921600 线速 ~89ms/片），200ms 静默 = 此读无数据（EOF 形状上交帧层
-/// → `Closed`/`Torn*` 报错计 err_streak）；连续 3 次 → 重同步。缺省阻塞读
-/// 语义留给其余用户，本件全部走超时档。
-const READ_TIMEOUT_MS: i32 = 200;
-/// 应答行逐字节超时（毫秒）：板面应答整行一次写出（write_all + wait_tx_done），
-/// 3s 无字节 = 板面哑了（握手路径点名失败，不再无限等）。
-const REPLY_TIMEOUT_MS: i32 = 3000;
-/// 读线程断流判据：见过数据后连续 8 次 200ms 零读 = 1.6s 连续静默 → 线上断流
-/// （扫描救不了），读线程就地转重连（第 ③ 级）。数据在流时大块 ~10ms 即满，
-/// 零读必然是真静默（连续计数，数据一恢复即清零）。
-const RESYNC_ZERO_BAIL: u32 = 8;
-/// 读线程大块裸读窗（判据② A/B 定案的节奏）：单次 poll 就绪后 read 一次的
-/// 请求宽度——python read(65536) 同款 600s 满速零污染；分相读（128B 头→plen
-/// 载荷两段间让出）在同等链路 2-16s 起逐帧损坏风暴。
-const READ_BLOCK: usize = 65536;
 /// 解码线程等裸字节的醒来节拍（查收兵死线；断流/重连由读线程自治，解码面
 /// 只管出帧与记账）。
 const DECODE_TICK: Duration = Duration::from_millis(200);
-/// 重连握手重试次数（d4 系列实锤定案）：宿主侧 CP2102 RX 路径冻结——板→宿主字节
-/// 全无而宿主→板命令畅通（板面 seq=sent/drop=0 四轮洗冤）；/dev/null 决定性实验
-/// 证伪"落盘 flush 触发"根因论（零磁盘 I/O 仍 369s 冻结；磁盘 I/O 只是放大器：
-/// 有之 38/51s 即冻、无之 369s），自愈在宿主软件之外，逐次**重开 fd** 是唯一
-/// 捅法。run#3/nulltest 3 次重试（~26s 骑行窗）全败，自愈时长上限未知（run#3
-/// 冻结 ~01:05 → 次轮 ~01:15 起流已自愈，∈(26s, 11min]）——预算加码到 10 次
-/// ×（settle 1.2s + OFF/ON 应答 2×3s）+ 9×2s 歇口 ≈ 90s：窗内自愈则续收（冻结
-/// 空洞由 seq 对账如实记账，判据不虚报），仍不愈则 fail-honest exit(4)。
-const HANDSHAKE_TRIES: u32 = 10;
-/// 两次握手尝试之间的歇口（给宿主 USB 栈缓冲；每轮都重新 close/open fd）。
-const HANDSHAKE_RETRY_PAUSE: Duration = Duration::from_secs(2);
 
 // ---------------------------------------------------------------------------
 
@@ -393,93 +368,8 @@ impl SeqTracker {
 
 // 拆帧器已上提 rr-ipc 单点（`rr_ipc::framing`，2026-10-18 A 批随 rr-hal esp32
 // 音频源后端共用而搬迁；机制本体与用例随迁彼处，本件只接线）。
-
-/// 收一行（逐字节超时读 [`REPLY_TIMEOUT_MS`]；'\r' 剥离；换行即返回）。
-/// 超时无字节即 Err（板面哑了——握手路径据此点名，不再无限等）。
-fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error> {
-    let mut line = Vec::new();
-    let mut byte = [0u8; 1];
-    loop {
-        let n = conn.rr3_read_timeout(&mut byte, REPLY_TIMEOUT_MS)?;
-        if n == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                format!("应答 {REPLY_TIMEOUT_MS}ms 无字节"),
-            ));
-        }
-        match byte[0] {
-            b'\n' => {
-                while matches!(line.last(), Some(b'\r')) {
-                    line.pop();
-                }
-                return Ok(String::from_utf8_lossy(&line).into_owned());
-            }
-            b => line.push(b),
-        }
-    }
-}
-
-/// ON 应答行判据：OK 可在行中——流前缀混行合法（p3 实录形状）。
-/// 判 `OK audio on` 全串而非裸 `OK`：b64 字符表含 O/K，裸两字符在流 payload 里
-/// 误配率不可忽略；9 字节全串在 b64/JSON 流里现实上不可撞。
-fn ok_reply_line(line: &str) -> bool {
-    line.contains("OK audio on")
-}
-
-/// 开口握手（首连/重连同款，批C settle 纪律）：停 1.2s 让开口翻转的板复位走完
-/// → 冲残留 → **防御停流** → 再冲一次 → `AUDIO ON` → 核验应答。
-///
-/// 防御停流实锤（d4 重跑）：上一会话看门狗 exit(3) 不发 AUDIO OFF（conn 被帧层
-/// 借用），板面 audio_on 残留开态续流——残流字节抢在 OK 应答之前进线，读到的
-/// "应答行"是 b64 音频载荷，握手必挂。先发 OFF（幂等）并吞掉应答行（残流混行
-/// 不解析），流停后冲净，AUDIO ON 的应答才是干净行首。板本来就没流时 OFF 照
-/// 常应答，路径不变。
-///
-/// ON 应答判据放宽（p2/p3 冒烟实锤，批D④ 续）：板 `OK audio on` 应答与首帧字节
-/// 背靠背进线时，读窗口可能先抓到流/失步字节再扫得 OK（p3 实录：seq=10604 帧的
-/// b64 payload + `OK audio on` 同行）——“首行必须 OK 开头”把合法起流误判为拒收。
-/// 改为 [`REPLY_TIMEOUT_MS`] 总预算内逐行扫 [`ok_reply_line`]，任一行含
-/// `OK audio on` 即过；预算耗尽才点名。板静默拒收仍走 `read_reply_line` 的
-/// 3s 无字节 Err，失败行为不变。
-fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
-    std::thread::sleep(SETTLE);
-    conn.rr3_flush_input()
-        .map_err(|e| format!("flush 失败: {e}"))?;
-    // 防御停流：残流开着也停、没流也幂等；应答行（可能混残流）读了即弃
-    if let Err(e) = conn.write_all(b"AUDIO OFF\n") {
-        return Err(format!("发防御 AUDIO OFF 失败: {e}"));
-    }
-    // OFF 应答读了即弃，但**超时可见**（d4 run#2 排障教训：`let _ =` 静默丢弃
-    // 害排查——宿主侧 USB RX 冻结时这条读无声超时，故障面全靠 seq 对账反推）
-    match read_reply_line(conn) {
-        Ok(l) => eprintln!("[rec] 防御 OFF 应答: {l:?}"),
-        Err(e) => eprintln!("[rec] 防御 OFF 应答未收到（残流/宿主侧静默，继续）: {e}"),
-    }
-    conn.rr3_flush_input()
-        .map_err(|e| format!("二次 flush 失败: {e}"))?;
-    conn.write_all(b"AUDIO ON\n")
-        .map_err(|e| format!("发 AUDIO ON 失败: {e}"))?;
-    // 逐行扫（判据见 [`ok_reply_line`]；每行超时同 [`read_reply_line`] 口径，
-    // 总预算 [`REPLY_TIMEOUT_MS`] 兜底防板持续推流把握手拖死）
-    let deadline = Instant::now() + Duration::from_millis(REPLY_TIMEOUT_MS as u64);
-    loop {
-        let line = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
-        if ok_reply_line(&line) {
-            let (pfx, _) = line.split_at(line.find("OK audio on").unwrap());
-            println!(
-                "[rec] board reply: OK（行内扫得；前置 {}B 流/残渣字节）",
-                pfx.len()
-            );
-            return Ok(line);
-        }
-        eprintln!("[rec] 应答行未见 OK（{}B，继续扫）: {:?}", line.len(), &line[..line.len().min(80)]);
-        if Instant::now() >= deadline {
-            return Err(format!(
-                "应答 {REPLY_TIMEOUT_MS}ms 预算内未见 OK audio on（末行 {line:?}）"
-            ));
-        }
-    }
-}
+// 收一行/OK 判据/开口握手三函数同批上提 `rr_ipc::audio_session`（机制单点）——
+// 诊断日志前缀由 "[rec]" 改 "[audio]"（机制面属主中立，线上字节零变化）。
 
 /// fail-honest 退出（重连失败路径）：已落盘数据补恢复头保住，exit(4) 点名。
 /// data_len 用盘侧真相 [`WatchState::disk_bytes`]（写线程只在实际写透后推进，
@@ -940,9 +830,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rr_ipc::{
-        opcode, rr3_base64_encode, rr3_body_encode, Rr3FrameBuf, Rr3Header, MAX_PAYLOAD_LEN,
-    };
+    use rr_ipc::{opcode, rr3_base64_encode, rr3_body_encode, Rr3FrameBuf, Rr3Header};
 
     /// 构造一条与板面 mic.rs 同形的 Event 帧（seal/还原链路与收流端同源 rr-ipc）。
     fn board_like_frame(seq: u32, pcm: &[u8], dst: u64) -> Rr3Frame {
@@ -1004,18 +892,8 @@ mod tests {
     // 拆帧器用例已随机制上提 rr-ipc（`rr_ipc::framing` tests，四类：分块还原/
     // 垃圾跳过/坏头弃 magic 续扫/plen 越栏），本件不再持第二份。
 
-    /// ON 应答判据：OK 可在行中（p3 冒烟实录形状——seq=10604 帧的 b64 payload
-    /// 与 `OK audio on` 同行）；裸 `OK` 不误配（b64 字符表含 O/K）。
-    #[test]
-    fn ok_reply_line_accepts_stream_prefixed_mixed_line() {
-        assert!(ok_reply_line("OK audio on"));
-        assert!(ok_reply_line(
-            "CR//D/MQAwAFEAcAARALD/8f8wAPH/MAAxALD/UQBQADEA...,\"rate\":16000,\"seq\":10604,\"topic\":\"rr3-sense/audio/pcm\"}OK audio on"
-        ));
-        assert!(!ok_reply_line("OK audio off"));
-        assert!(!ok_reply_line("\u{5d4}\u{14}()QI"));
-        assert!(!ok_reply_line("Qr//D/MQAwAFEAcAARALD/OK"));
-    }
+    // ON 应答判据用例已随机制上提 rr-ipc（`rr_ipc::audio_session` tests：
+    // ok_reply_line_accepts_stream_prefixed_mixed_line），本件不再持第二份。
 
     #[test]
     fn seq_tracker_gap_accounting() {

@@ -11,7 +11,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::protocol::header::{MAGIC, Rr3Header, RR3_IPC_HDR_SIZE};
+use crate::protocol::header::{Rr3Header, MAGIC, RR3_IPC_HDR_SIZE};
 
 /// 帧头 magic 小端线上字节（字段值 0x41524531 小端存储 = 31 45 52 41 = "1ERA"，
 /// 自 [`MAGIC`] 派生单点）。b64 载荷里也会出现该子串，失步后撞上即"合法幻影
