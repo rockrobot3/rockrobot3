@@ -144,9 +144,8 @@ pub fn rr3_assemble_layout(
     let wiring_dst_dir = workdir.join("hardware").join(stem);
     std::fs::create_dir_all(&wiring_dst_dir)
         .map_err(|e| format!("建 {wiring_dst_dir:?} 失败: {e}"))?;
-    std::fs::copy(&wiring_src, wiring_dst_dir.join("wiring.toml")).map_err(|e| {
-        format!("仓源接线档 {wiring_src:?} 拷贝失败: {e}（校验⑦要求装机档必在）")
-    })?;
+    std::fs::copy(&wiring_src, wiring_dst_dir.join("wiring.toml"))
+        .map_err(|e| format!("仓源接线档 {wiring_src:?} 拷贝失败: {e}（校验⑦要求装机档必在）"))?;
 
     let mut entries = Vec::new();
     for module in profile.enabled_slots.keys() {
@@ -192,8 +191,11 @@ pub fn rr3_assemble_layout(
         // 其余用仓源 config（纯运行参数，sim 环境全部适用）
         let dst_config = dst_dir.join("config.toml");
         if facts.lang == "python" {
-            std::fs::write(&dst_config, rr3_brain_config_text(false, "http://127.0.0.1:9/v1"))
-                .map_err(|e| format!("写 {dst_config:?} 失败: {e}"))?;
+            std::fs::write(
+                &dst_config,
+                rr3_brain_config_text(false, "http://127.0.0.1:9/v1"),
+            )
+            .map_err(|e| format!("写 {dst_config:?} 失败: {e}"))?;
         } else {
             let src_config = src_dir.join("config.toml");
             std::fs::copy(&src_config, &dst_config).map_err(|e| {
