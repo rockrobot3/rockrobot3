@@ -78,8 +78,8 @@ mod tests {
                 .unwrap_or_else(|| panic!("在册值必须可解析: {s}"));
             assert_eq!(e.rr3_led_effect_as_str(), s, "值↔枚举↔串三相一致");
         }
-        let listed =
-            [Rr3LedEffect::On, Rr3LedEffect::Off, Rr3LedEffect::Blink].map(|e| e.rr3_led_effect_as_str());
+        let listed = [Rr3LedEffect::On, Rr3LedEffect::Off, Rr3LedEffect::Blink]
+            .map(|e| e.rr3_led_effect_as_str());
         assert_eq!(listed, RR3_LED_EFFECT_VALUES, "枚举全集与值集常量漂移");
     }
 

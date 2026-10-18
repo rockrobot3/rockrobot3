@@ -784,25 +784,23 @@ ops = [
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains("demands[5].concurrency_group 缺失")),
+            errs.iter()
+                .any(|e| e.contains("demands[5].concurrency_group 缺失")),
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains(
-                "demands[6].concurrency_group 应为字符串数组"
-            )),
+            errs.iter()
+                .any(|e| e.contains("demands[6].concurrency_group 应为字符串数组")),
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains(
-                "demands[7].concurrency_group[0] 不得为空"
-            )),
+            errs.iter()
+                .any(|e| e.contains("demands[7].concurrency_group[0] 不得为空")),
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains(
-                "demands[7].concurrency_group[1] 应为字符串"
-            )),
+            errs.iter()
+                .any(|e| e.contains("demands[7].concurrency_group[1] 应为字符串")),
             "{errs:?}"
         );
         assert!(
@@ -844,8 +842,7 @@ ops = [
             "{errs:?}"
         );
         assert!(
-            errs.iter()
-                .any(|e| e.contains("heap_peak_bytes 应为整数")),
+            errs.iter().any(|e| e.contains("heap_peak_bytes 应为整数")),
             "{errs:?}"
         );
         assert!(
