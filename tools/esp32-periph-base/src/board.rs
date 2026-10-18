@@ -77,6 +77,11 @@ pub(crate) const RR3_MAGIC_FIRST: u8 = 0x31;
 // "真值点 → 生成副本"，重跑生成器 diff 为空 = 门 f 拟 ⑨-d（check.sh 接线）。
 //（include! 前的 doc 注释挂不到宏产物上，用普通注释。）
 include!("topics_gen.rs");
+// 板侧行程常量表生成物（RR3_AXIS_<INSTANCE> 三元组 + rr3_axis_travel 查表）——
+// 真值点 hardware/esp32-mini/axis/*.toml、生成器 tools/rr3-codegen（批N3 件五
+// 门 g 收敛：行程唯一真值点在档案，本文件的手写行程字面量已撤除；WANDER/SCAN/
+// 越程拒收的判据全部改读生成表）。同批 include 进条目流，理由同上。
+include!("axis_gen.rs");
 /// 音频上行宿主 task 位形（帧头 dst 门）：宿主侧占位形 1——与宿主 rr-hal
 /// esp32_uart 桥后端同值帧头约定（板不依赖 rr-core，与 [`RR3_PERIPH_TASK`]
 /// 同一"两端常量自证"纪律）。Event 帧只发宿主（dst=1），trace_id=0（direct）。
@@ -106,29 +111,29 @@ pub(crate) const DUTY_MIN: u32 = 410;
 pub(crate) const DUTY_MAX: u32 = 2048;
 
 // ---------------------------------------------------------------------------
-// 分轴行程（方案 C 裁定 2026-10-12；现场续批再裁：pan 由 ±20° 放宽到 ±30°）
-// ——pan 相对中位 ±30°、tilt 相对中位 ±10°（tilt 由 ±5° 放宽，纳现场实测所需的
-// 上抬 98°，行程 [80,100]）
+// 分轴行程（批N3 件五门 g 收敛：真值 = 轴档案，本文件零手写行程字面量）
 // ---------------------------------------------------------------------------
+//
+// 行程三元组（lo, hi, center）住生成物 axis_gen.rs（真值点
+// hardware/esp32-mini/axis/*.toml，RR3_AXIS_PAN / RR3_AXIS_TILT），消费一律经
+// [`rr3_axis_travel`]——查无此轴回 None，调用方 fail-closed（不猜缺省）。
 //
 // 真板实锤（批C v0.3.2 与现场排障）：云台机械行程远小于 SG90 全程 0–180°——
 // 旧版 WANDER 全行程扫摆 / SCAN 五点（0/45/90/135/180）会把舵机推到机械死点
 // 并**持续施力**，表现为"卡住不动 + 舵机发烫"（堵转电流 ~700mA/只持续流动），
 // 叠加板载 USB 5V 直供时触发欠压复位与 USB 链路反复掉线。故本轴行程以中位为
-// 基准收窄，越界**拒收点名**（fail-closed：静默钳到边界会让调用方误以为按给值
-// 生效），WANDER/SCAN 的端点与判据点一律收进区间内。
-// **pan ±30°（用户 2026-10-12 现场裁定，纳"左转 30°"所需）**：放宽后若机械到不了
-// 边界会持续堵转——现场须目视，一旦卡住即断电（见 README 现场注记）。
+// 基准收窄（pan [60,120] / tilt [80,100]，2026-10-12 现场裁定），越界**拒收点名**
+// （fail-closed：静默钳到边界会让调用方误以为按给值生效），WANDER/SCAN 的端点
+// 与判据点一律收进区间内。**pan ±30°（用户 2026-10-12 现场裁定，纳"左转 30°"
+// 所需）**：放宽后若机械到不了边界会持续堵转——现场须目视，一旦卡住即断电
+// （见 README 现场注记）。改行程 = 改档案 + 重跑生成器（门 f 拟 ⑨-d 兜底）。
 
-/// 云台中位绝对角（两轴共用刻度中点；boot 置位与角度行基准）。
-pub(crate) const AXIS_CENTER_DEG: u32 = 90;
-/// pan（水平轴）相对中位的最大摆幅。
-pub(crate) const PAN_LIMIT_DEG: u32 = 30;
-/// tilt（俯仰轴）相对中位的最大摆幅。
-pub(crate) const TILT_LIMIT_DEG: u32 = 10;
 /// 开机默认姿态（用户现场裁定）：pan 左转 30°（中位 −30）、tilt 上抬 8°（中位 +8）。
-pub(crate) const BOOT_PAN_DEG: u32 = AXIS_CENTER_DEG - 30;
-pub(crate) const BOOT_TILT_DEG: u32 = AXIS_CENTER_DEG + 8;
+/// 中位锚引用生成表 center（RR3_AXIS_*.2）——boot 姿态是"相对本轴中位"的偏移
+/// 语义（复位语义②），不属行程字面量；偏移量 −30/+8 保留字面（现场姿态裁定，
+/// 非行程）。改档案中位时本两值随生成表联动。
+pub(crate) const BOOT_PAN_DEG: u32 = RR3_AXIS_PAN.2 - 30;
+pub(crate) const BOOT_TILT_DEG: u32 = RR3_AXIS_TILT.2 + 8;
 
 // ---------------------------------------------------------------------------
 // 引脚真值（board 层单一真值点）——接线总表：
@@ -229,21 +234,22 @@ impl Axis {
         }
     }
 
-    /// 本轴相对中位的最大摆幅。
-    pub(crate) fn limit_deg(self) -> u32 {
-        match self {
-            Axis::Pan => PAN_LIMIT_DEG,
-            Axis::Tilt => TILT_LIMIT_DEG,
+    /// 本轴绝对行程区间 `[lo, hi]`（WANDER 端点与 SCAN 判据点都从这里取，
+    /// 机制不另写字面量）——生成表 [`rr3_axis_travel`] 查得；查无此轴 panic
+    /// （Axis 枚举与生成表同源，此处失配 = 生成物缺失，fail-closed 不静默）。
+    pub(crate) fn range(self) -> (u32, u32) {
+        match rr3_axis_travel(self.name()) {
+            Some((lo, hi, _)) => (lo, hi),
+            None => panic!("轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）", self.name()),
         }
     }
 
-    /// 本轴绝对行程区间 `[lo, hi]` = 中位 ± 摆幅（WANDER 端点与 SCAN 判据点
-    /// 都从这里取，机制不另写字面量）。
-    pub(crate) fn range(self) -> (u32, u32) {
-        (
-            AXIS_CENTER_DEG - self.limit_deg(),
-            AXIS_CENTER_DEG + self.limit_deg(),
-        )
+    /// 本轴中位锚（boot 置位与角度行基准）——生成表查得，同上 fail-closed。
+    pub(crate) fn center_deg(self) -> u32 {
+        match rr3_axis_travel(self.name()) {
+            Some((_, _, center)) => center,
+            None => panic!("轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）", self.name()),
+        }
     }
 }
 
@@ -254,12 +260,13 @@ pub(crate) fn axis_check(axis: Axis, deg: u32) -> Result<u32, String> {
     if deg > 180 {
         return Err(format!("角度超范围 0-180: {deg}"));
     }
-    let (lo, hi) = axis.range();
+    let Some((lo, hi, center)) = rr3_axis_travel(axis.name()) else {
+        return Err(format!("{} 轴无行程表（axis_gen.rs 生成物缺轴）", axis.name()));
+    };
     if !(lo..=hi).contains(&deg) {
         return Err(format!(
-            "{} 轴超出行程 [{lo}, {hi}]（中位 {AXIS_CENTER_DEG}° ±{}°）: {deg}",
-            axis.name(),
-            axis.limit_deg()
+            "{} 轴超出行程 [{lo}, {hi}]（中位 {center}°）: {deg}",
+            axis.name()
         ));
     }
     Ok(deg)
