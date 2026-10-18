@@ -79,6 +79,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rr-hal-api"
+version = "0.0.1"
+
+[[package]]
 name = "rr-ipc"
 version = "0.0.1"
 
@@ -106,6 +110,7 @@ version = "0.0.1"
 dependencies = [
  "libc",
  "rr-bus",
+ "rr-hal-api",
  "rr-ipc",
  "rr-registry",
  "serde_json",

@@ -125,6 +125,7 @@ version = "0.0.1"
 dependencies = [
  "libc",
  "rr-bus",
+ "rr-hal-api",
  "rr-ipc",
  "rr-registry",
  "serde_json",

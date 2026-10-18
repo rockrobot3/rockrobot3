@@ -104,23 +104,33 @@ pub fn rr3_counters_load(path: &Path) -> (BTreeMap<String, u64>, Option<String>)
     }
 }
 
-/// write-through 落盘：tmp 写全量 → fsync → rename（同目录原子覆盖）。
+/// 原子写序共享件：tmp 写全量 → fsync → rename（同目录原子覆盖）。counters 与
+/// 执行件档案（`axis.rs` 标定写入面）共用这一条序——§4.4 档案写入"必须复用仓内
+/// 那一份原子序，不许出现第二条写路径"，共享件让这句话可指（第二份同形序不存在）。
 /// 任何一步失败都把错误交回调用方（daemon/conn 落日志点名），不 panic 不重试——
 /// 重试在窗口判据再次成立时自然发生（R26 合并写）。
+pub fn rr3_atomic_store(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), String> {
+    {
+        let mut f = File::create(tmp).map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
+        f.write_all(body)
+            .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
+        f.sync_all()
+            .map_err(|e| format!("fsync {} 失败: {e}", tmp.display()))?;
+    }
+    std::fs::rename(tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(tmp);
+        format!("rename {} → {} 失败: {e}", tmp.display(), path.display())
+    })
+}
+
+/// write-through 落盘：tmp 写全量 → fsync → rename（同目录原子覆盖），序本体见
+/// [`rr3_atomic_store`]。
 pub fn rr3_counters_store(path: &Path, table: &BTreeMap<String, u64>) -> Result<(), String> {
     let body = json!(table).to_string();
     let tmp = path.with_file_name(COUNTERS_TMP);
-    {
-        let mut f = File::create(&tmp).map_err(|e| format!("建 {COUNTERS_TMP} 失败: {e}"))?;
-        f.write_all(body.as_bytes())
-            .map_err(|e| format!("写 {COUNTERS_TMP} 失败: {e}"))?;
-        f.sync_all()
-            .map_err(|e| format!("fsync {COUNTERS_TMP} 失败: {e}"))?;
-    }
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("rename {COUNTERS_TMP} → {COUNTERS_FILE} 失败: {e}")
-    })
+    rr3_atomic_store(path, &tmp, body.as_bytes())
+        .map_err(|e| e.replace(&tmp.display().to_string(), COUNTERS_TMP))
+        .map_err(|e| e.replace(&path.display().to_string(), COUNTERS_FILE))
 }
 
 // ── R26 心跳合并写（0.0.5 增补轮四 批W3）────────────────────────────────────

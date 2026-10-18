@@ -7,6 +7,7 @@
 //! 所以 Windows 侧既能 `cargo check --all-targets` 也能跑到这里的全部测试——但那只证明
 //! cfg 边界未破，`conn.rs`/`daemon.rs`/`supervisor.rs` 的每一行都要靠 Unix 侧（L2/L3）才有证据。
 
+pub mod axis;
 pub mod cli;
 pub mod counters;
 pub mod manifest;
