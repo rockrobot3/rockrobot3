@@ -22,6 +22,12 @@ path = "src/main.rs"
 name = "sim_peer"
 path = "src/bin/sim_peer.rs"
 
+# 执行件档案写入面的产线薄壳（批N3 件四，全案 §6 路线 A"随批N3 落手册与档案
+# 写入"）：策略在 lib 的 axis_write 模块，本 bin 只有参数解析与退出码。
+[[bin]]
+name = "axis_write"
+path = "src/bin/axis_write.rs"
+
 [dependencies]
 rr-ipc = { path = "../rr-ipc" }
 rr-registry = { path = "../rr-registry" }
