@@ -28,8 +28,20 @@ use crate::drill::{
 
 use crate::drill::Rr3SimArgs;
 
-/// 演练就绪上界：冷启动 + 第一轮对话（max_utterance_ms=1500 判停）也要够用
-const RR3_BRAIN_READY_DEADLINE: Duration = Duration::from_secs(60);
+/// 演练就绪上界：冷启动 + 第一轮对话（max_utterance_ms=1500 判停）也要够用。
+/// 真板档（`--audio-backend esp32`）等真人说话，节奏不可预置——env
+/// `RR3_BRAIN_READY_DEADLINE_MS` 可拉长（解析失败/缺省回 60s，不动 sim 档节奏）。
+fn rr3_brain_ready_deadline() -> Duration {
+    const DEFAULT_S: u64 = 60;
+    Duration::from_secs(
+        std::env::var("RR3_BRAIN_READY_DEADLINE_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|ms| ms / 1000)
+            .filter(|&s| s >= 1)
+            .unwrap_or(DEFAULT_S),
+    )
+}
 /// 模块健康参数：与两面演练同值（比生产紧、比测试宽）
 const RR3_BRAIN_HB_MS: u64 = 200;
 const RR3_BRAIN_WD_MS: u64 = 1000;
@@ -269,7 +281,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
 
         // ---- 2.5 等 rrd bind 完套接字再起外部模块：sense 由 rrd spawn（bind 后），
         //      interact/brain 是外部进程，抢跑会撞 ENOENT（模块按契约快速退，不重试） ----
-        wait_socket_exists(&socket, RR3_BRAIN_READY_DEADLINE)?;
+        wait_socket_exists(&socket, rr3_brain_ready_deadline())?;
 
         // ---- 3. 外部起 interact 与 brain ----
         let interact_log = workdir.join("interact.log");
@@ -336,17 +348,17 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
                 (RR3_SIM_MODULE_B, "running"),
                 (RR3_SIM_MODULE_BRAIN, "running"),
             ],
-            RR3_BRAIN_READY_DEADLINE,
+            rr3_brain_ready_deadline(),
         )?;
         report.push_str("\n=== 三模块 running ===\n");
-        wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, RR3_BRAIN_READY_DEADLINE)?;
+        wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, rr3_brain_ready_deadline())?;
         report.push_str(&format!(
             "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
         ));
         wait_log_contains(
             &interact_log,
             RR3_INTERACT_TTS_MARK,
-            RR3_BRAIN_READY_DEADLINE,
+            rr3_brain_ready_deadline(),
         )?;
         report.push_str(&format!(
             "interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"
