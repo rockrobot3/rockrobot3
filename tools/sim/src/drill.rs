@@ -55,6 +55,11 @@ pub struct Rr3SimArgs {
     /// --brain 专用：音频后端（缺省 `sim`；`mac` = macOS 真麦/扬声器，与 rr-hal
     /// `RR3_HAL_BACKEND` 取值同白名单）。缺省不变的 CI 纪律：真件只显式启用。
     pub audio_backend: Option<String>,
+    /// --brain 专用：音频回放后端（interact 面；缺省跟随 `--audio-backend`——
+    /// 既有 sim/mac 链路零改动）。两条 fail-closed（A 批 c4）：`--audio-backend
+    /// esp32` 必须显式给本旗标（板面流与回放是两块后端，缺省跟随会令 interact
+    /// 抢同一 UART 被 flock 拒）；本旗标取 esp32 拒收（板无扬声器，回放恒宿主）。
+    pub sink_backend: Option<String>,
     /// --brain 专用：brain 云模式（缺省 `mock`；`real` = 真云，需 `RR3_CLOUD_API_KEY`
     /// 经调用方环境传入——密钥铁律只走环境变量）。
     pub brain_cloud: Option<String>,
@@ -79,6 +84,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         interact: None,
         act: None,
         audio_backend: None,
+        sink_backend: None,
         brain_cloud: None,
         brain_base_url: None,
     };
@@ -90,7 +96,8 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
             "--brain" => a.brain = true,
             "--chain" => a.chain = true,
             "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense" | "--interact"
-            | "--act" | "--profile" | "--audio-backend" | "--brain-cloud" | "--brain-base-url" => {
+            | "--act" | "--profile" | "--audio-backend" | "--sink-backend" | "--brain-cloud"
+            | "--brain-base-url" => {
                 let v = args
                     .get(i + 1)
                     .ok_or_else(|| format!("{flag} 缺参数"))?
@@ -109,6 +116,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
                     "--act" => a.act = Some(p),
                     "--profile" => a.profile = Some(p),
                     "--audio-backend" => a.audio_backend = Some(p.to_string_lossy().into_owned()),
+                    "--sink-backend" => a.sink_backend = Some(p.to_string_lossy().into_owned()),
                     "--brain-cloud" => a.brain_cloud = Some(p.to_string_lossy().into_owned()),
                     "--brain-base-url" => a.brain_base_url = Some(p.to_string_lossy().into_owned()),
                     _ => a.rrctl = Some(p),
@@ -117,7 +125,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
             }
             other => {
                 return Err(format!(
-                    "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act --audio-backend --brain-cloud --brain-base-url）"
+                    "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act --audio-backend --sink-backend --brain-cloud --brain-base-url）"
                 ))
             }
         }
@@ -146,6 +154,32 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
                 "--audio-backend 取值不认: {b}（允许 sim/linux/esp32/mac/placeholder——与 RR3_HAL_BACKEND 同白名单）"
             ));
         }
+    }
+    if let Some(b) = &a.sink_backend {
+        if !a.brain {
+            return Err("--sink-backend 仅 --brain 演练适用".to_string());
+        }
+        if !AUDIO_BACKENDS.contains(&b.as_str()) {
+            return Err(format!(
+                "--sink-backend 取值不认: {b}（允许 sim/linux/esp32/mac/placeholder——与 RR3_HAL_BACKEND 同白名单）"
+            ));
+        }
+        // fail-closed ②（A 批 c4）：板无扬声器，回放恒宿主——显式给 esp32 即拒
+        if b == "esp32" {
+            return Err(
+                "--sink-backend esp32 拒收：板无扬声器，TTS 回放恒宿主（mac AudioQueue / sim 尾窗）"
+                    .to_string(),
+            );
+        }
+    }
+    // fail-closed ①（A 批 c4）：esp32 源未显式给回放后端拒起——缺省跟随
+    // audio_backend 会令 interact 吃 esp32 抢同一 UART（Rr3UartConn flock 跨进程
+    // 排他），探活必败；板面流与回放是两块后端，必须分列明示。
+    if a.audio_backend.as_deref() == Some("esp32") && a.sink_backend.is_none() {
+        return Err(
+            "--audio-backend esp32 必须显式给 --sink-backend（板面流与回放是两块后端；缺省跟随会令 interact 抢同一 UART 被 flock 拒）"
+                .to_string(),
+        );
     }
     if let Some(c) = &a.brain_cloud {
         if !a.brain {
