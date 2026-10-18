@@ -2521,6 +2521,21 @@ test 面 `header.rs:356`/`:440` 本就是 concat 形，不在本件；其余"44 
 专属执法位 2→3 把、待建门 22→21 把**（§2 对表段 / architecture §14 / 全案 §16.4）。**零 `.rs` 零 `contracts/*.toml`**；
 `spi_device` 收口仍随批N3（status.md 敞口第 18 行）。
 
+2026-10-18（**批N2 首件：基-36 demands 最小集**，裁定 13"只交一件"）：申报面＋判据实体＋反例三层同批。
+①申报面定形 `[assemble].demands = [{ rail, peak_ma, critical }]`（rr-registry `assemble.rs`：条目级解析
+`rr3_demands_from_array` 件级专用——组合件级 [assemble] 不认 demands，电流需求是原子件物理属性，未知键点名即拦；
+rail 非空 / peak_ma 正整数 / critical 显式布尔不给缺省；**缺键 = 空申报合法**，执法面"kind=power 未申报 → 红"归门 c
+不在形状层预支；增键不 bump，demands 缺省语义 = 未申报，已激活 17 份数据语义不变——composite.rs 头注同构先例）；
+②判据实体 `rr3_demand_budget_check` 落 `rrd/src/profile.rs`（`Σ demands.peak_ma (critical=true) ≤
+domains[rail].current_cap_ma`，fail-closed 逐条点名：rail 不在 domains ⇒ 域缺即 cap 缺红；per rail 超额 ⇒ 红点名
+申报者；critical=false 不进 Σ；并发缺省 = 全部同时，`concurrency_group` 收窄随门 c 不预支）；③反例用例
+`demand_budget_check_nine` 进 rrd ①b（正例 Σ700≤2000 绿 / 双件超 cap 红 / ghost rail 红 / critical=false 不进 Σ）；
+首条真实声明落 `modules/rr3-act/atoms/servo/assemble.toml`（`rail5v peak_ma=700 critical=true`——act.axis.pwm 是
+全仓唯一 kind=power 角色，未来门 c 执法面恰闭合于一件；三份 profile rail5v cap=2000 ⇒ 绿）。
+**三层诚实登记（实-14）**：①判据实体落、②反例用例落、**③专属执法步 = ⑨-c / 门 c 仍待建**——判据不接装载拒链，
+可数 step 13 行、待建门 21 把**计数均不变**；裁-9 推翻条件（"写了 demands 且 ⑨ 在跑"）**未满足**（⑨ 尚不在跑）。
+`contracts/*.toml` 零改动、`check.sh` 零改动。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

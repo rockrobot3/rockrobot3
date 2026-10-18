@@ -474,6 +474,16 @@
   被作废注记覆盖：施工图 §4 首条验收项 / §5"新增批次号"行 / Task 1 收编落字，本体按历史保留、指针在 §6-① 裁定行）；
   D3/D5/D6/D7/D9 状态词改"已裁"（D3 值更新、D6 值反转、D9 转自动可判）。敞口表无增减。
 
+- **2026-10-18 批N2 开工·首件：基-36 demands 最小集**（裁定 13"只交一件"；申报面＋判据实体＋反例三层同批，
+  详录 [conventions §2](process/conventions.md) 同日条目）：①申报面定形 `[assemble].demands = [{ rail, peak_ma, critical }]`
+  （rr-registry `assemble.rs` 条目级解析件级专用、fail-closed 逐条点名；缺键 = 空申报合法，"kind=power 未申报 → 红"
+  执法面归门 c；增键不 bump——17 份已激活数据语义不变）；②判据实体 `rr3_demand_budget_check` 落
+  `rrd/src/profile.rs`（`Σ demands.peak_ma (critical=true) ≤ domains[rail].current_cap_ma`）；③反例 #[test]
+  进 ①b（正例＋超 cap 红＋ghost rail 红＋critical=false 不进 Σ）；首条真实声明落 servo 件
+  （`rail5v peak_ma=700 critical=true`——act.axis.pwm 是全仓唯一 kind=power 角色）。**三层诚实登记（实-14）**：
+  ①②落、**③专属执法步 = ⑨-c/门 c 仍待建**——判据不接装载拒链，可数 step 13 行、待建门 21 把**计数均不变**；
+  裁-9 推翻条件（"写了 demands 且 ⑨ 在跑"）未满足。`contracts/*.toml`、`check.sh` 零改动；敞口表无增减。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；
