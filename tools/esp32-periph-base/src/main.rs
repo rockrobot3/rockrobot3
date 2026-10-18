@@ -88,8 +88,8 @@ use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches};
 
 use crate::board::{
-    ADC_RAIL_PIN, AXIS_CENTER_DEG, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ,
-    LEDC_RES_BITS, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ, UART2_TX_RING,
+    ADC_RAIL_PIN, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ,
+    LEDC_RES_BITS, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ, UART2_TX_RING, Axis,
 };
 use crate::commands::cmd_loop;
 use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
@@ -276,8 +276,9 @@ fn main() {
         i2c,
         pan,
         tilt,
-        pan_deg: AXIS_CENTER_DEG,
-        tilt_deg: AXIS_CENTER_DEG,
+        // 初始姿态 = 各轴中位锚（生成表 center，批N3 件五：行程真值收敛档案）
+        pan_deg: Axis::Pan.center_deg(),
+        tilt_deg: Axis::Tilt.center_deg(),
         contrast_idx: 0,
         rail,
         next_rail_ms: 0,
