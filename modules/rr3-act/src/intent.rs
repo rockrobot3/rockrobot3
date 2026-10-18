@@ -179,11 +179,15 @@ mod tests {
         ]
     }
 
-    /// 已标定轴态——既有用例的统一第 7 实参基线（auto 放行的正面）
+    /// 已标定轴态——既有用例的统一第 7 实参基线（auto 放行的正面；行程
+    /// lo/hi/center 为件五五键形状的样本值，jog/auto 走位用例角度在其内）
     fn axis_calibrated() -> Rr3ActAxisState {
         Rr3ActAxisState {
             hard_stop: rr_hal_api::Rr3ActHardStop::Yes,
             calibrated: true,
+            lo_deg: 60,
+            hi_deg: 120,
+            center_deg: 90,
         }
     }
 

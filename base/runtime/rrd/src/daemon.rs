@@ -355,8 +355,10 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             // 物理绑定描述符（ADR-0018 裁定 4、批D④）：装配链解析出的 [hardware]
             // 文本随每个 job 透传，supervisor spawn 时注入 RR3_HAL_BINDINGS；
             // --manifest 调试后门无装配单 → 空串（不注入，fail-closed + 应急 env）。
-            // 执行轴状态（批N3 件三）同位透传：轴档案恰一份合法装载的投影，spawn
-            // 时注入 RR3_ACT_AXIS_STATE；空串不注入（模块侧折保守缺省）。
+            // 执行轴状态（批N3 件三，件五消歧）同位透传：instance 与轴读数
+            // （RR3_HAL_PERIPH_AXIS，缺省契约常量）相等的恰一份合法档案的投影（含
+            // 行程三键），spawn 时注入 RR3_ACT_AXIS_STATE；空串不注入（模块侧折保守
+            // 缺省）。
             job.hal_bindings = hal_bindings.clone();
             job.axis_state = axis_state.clone();
             jobs.push(job);

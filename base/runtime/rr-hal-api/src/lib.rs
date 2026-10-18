@@ -633,6 +633,15 @@ impl Rr3ActSource {
     }
 }
 
+/// ESP32 档舵机轴 env 键（批N3 件五上移单点）：宿主单轴 trait ↔ 板上双轴云台的
+/// 映射面——rr-hal 桥后端按它选轴（缺省 [`RR3_PERIPH_AXIS_DEFAULT`]，板侧帧面
+/// `axis` 参数可逐调用覆盖），rrd 装配链按同一 env、同一缺省为注入面选轴档案
+/// （执行轴状态只投影被驱动那根轴的行程真值）。键名/缺省值两份副本不存在。
+pub const RR3_PERIPH_AXIS_ENV: &str = "RR3_HAL_PERIPH_AXIS";
+/// 轴 env 缺省值（与板侧帧面 `axis` 键缺席 = pan 同构；档案 pin instance 词形
+/// 与本值同域——pin 真值在装配单 [[pin]]，此处只是映射缺省，不是词表）。
+pub const RR3_PERIPH_AXIS_DEFAULT: &str = "pan";
+
 /// 执行件档案值面（批N3，全案 §4.4 十四键的**值投影**）。装载域两键不进本面：
 /// `schema` 是版本对账数（装载侧只认 1，升版走契约级评审）、`pin` 是外键
 /// （F-4，由装载产物 `Rr3AxisFile` 持有）——十二键值域逐键注记给到。

@@ -937,14 +937,32 @@ fn rr3_hardware_bindings_text(hardware: &BTreeMap<String, String>) -> String {
     out
 }
 
-/// 执行轴状态投影（批N3 件三，全案 §4.4 载体 + §6 硬约束）：扫 `axis/` 目录的
-/// *.toml（升序 = 确定性），**恰一份**合法装载（件二 [`crate::axis::
-/// rr3_act_profile_load`]，外键 = [[pin]] 的 pin_id 集——与档案 `pin` 键同一语法，
-/// F-2：第二套语法一条校验都打不到）才投影 `calibrated=<bool>,hard_stop=<词>`。
-/// 零份回空串且安静（无档案是常态起跑态）；坏件逐条点名但不拒 boot（档案装载
-/// 是降级面，与缺格/缺角色同档——模块侧折保守缺省仍是安全向）；多份合法点名
-/// "消歧归件五"后同样空串。目录读不到同零份（无 axis 目录 = 无档案）。
-fn rr3_axis_state_text(axis_dir: &Path, pin_ids: &BTreeSet<String>) -> (String, Vec<String>) {
+/// 执行轴状态投影（批N3 件三建，件五收口消歧）。扫 `axis_dir`/*.toml（升序 =
+/// 确定性），**全部合法装载**（件二 [`crate::axis::rr3_act_profile_load`]，外键
+/// = [[pin]] 的 pin_id 集——与档案 `pin` 键同一语法，F-2：第二套语法一条校验
+/// 都打不到）后按轴消歧投影。
+///
+/// 消歧裁决（件五，收"多轴未消歧"挂账）：模块面是单轴 trait——rr-hal 桥后端按
+/// `RR3_HAL_PERIPH_AXIS` env（缺省 [`rr_hal_api::RR3_PERIPH_AXIS_DEFAULT`]）选轴；
+/// 本函数的 `axis` 参数即该 env 的读数（env 读取在 [`rr3_profile_boot_inputs`]
+/// 调用点，本函数吃值不吃全局态——cli.rs 先例，测试不碰进程环境），选 pin 末段
+/// （instance）与之**相等**的恰一份合法档案投影——注入的行程真值必须属于被驱动
+/// 的那根轴。单份也对轴：env 指了 tilt 而档案只有 pan 时，"注入 pan 行程、驱动
+/// tilt 轴"是错配，宁可空串折保守缺省。同 pin 多份文件（副本）不是消歧对象是
+/// 病灶——投影空串并点名（恰一份合法才投影的 boot 链防线，写侧同款拒面在
+/// axis_write 件四）。
+///
+/// 投影文本 = `calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>`（件五
+/// 扩形：行程三键随状态同路注入，模块侧行程改读档案——门 g"档案之外的行程
+/// 读者数为 0"的 host 侧半边）。零份回空串且安静（无档案是常态起跑态）；坏件
+/// 逐条点名但不拒 boot（档案装载是降级面，与缺格/缺角色同档——模块侧折保守
+/// 缺省仍是安全向）；多份合法点名后同样空串。目录读不到同零份（无 axis 目录 =
+/// 无档案）。
+fn rr3_axis_state_text(
+    axis_dir: &Path,
+    pin_ids: &BTreeSet<String>,
+    axis: &str,
+) -> (String, Vec<String>) {
     let mut notes = Vec::new();
     let Ok(entries) = std::fs::read_dir(axis_dir) else {
         return (String::new(), notes);
@@ -958,7 +976,7 @@ fn rr3_axis_state_text(axis_dir: &Path, pin_ids: &BTreeSet<String>) -> (String, 
     let mut found = Vec::new();
     for f in &files {
         match crate::axis::rr3_act_profile_load(f, pin_ids) {
-            Ok(Some(file)) => found.push(file.profile),
+            Ok(Some(file)) => found.push(file),
             Ok(None) => {}
             Err(errs) => notes.extend(
                 errs.into_iter()
@@ -966,19 +984,50 @@ fn rr3_axis_state_text(axis_dir: &Path, pin_ids: &BTreeSet<String>) -> (String, 
             ),
         }
     }
-    match found.as_slice() {
-        [] => (String::new(), notes),
-        [one] => (
-            format!(
-                "calibrated={},hard_stop={}",
-                one.calibrated,
-                one.hard_stop.rr3_act_hard_stop_name()
-            ),
-            notes,
-        ),
+    // 副本病灶：同 pin 多份文件 → 不注入（恰一份合法才投影；先清理副本）
+    let mut pin_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for f in &found {
+        *pin_counts.entry(f.pin.as_str()).or_insert(0) += 1;
+    }
+    if let Some((pin, n)) = pin_counts.into_iter().find(|(_, n)| *n > 1) {
+        notes.push(format!(
+            "pin {pin} 有 {n} 份合法档案（副本）——恰一份合法才投影，先清理副本"
+        ));
+        return (String::new(), notes);
+    }
+    // 轴消歧（件五）：instance（pin 末段）与轴读数相等的恰一份才投影
+    let selected: Vec<&crate::axis::Rr3AxisFile> = found
+        .iter()
+        .filter(|f| f.pin.rsplit('.').next() == Some(axis))
+        .collect();
+    match selected.as_slice() {
+        [] => {
+            if !found.is_empty() {
+                notes.push(format!(
+                    "轴档案合法装载 {} 份，但无一 instance = {axis:?}（{}/缺省）——不注入执行轴状态，模块按保守缺省起跑",
+                    found.len(),
+                    rr_hal_api::RR3_PERIPH_AXIS_ENV
+                ));
+            }
+            (String::new(), notes)
+        }
+        [one] => {
+            let p = &one.profile;
+            (
+                format!(
+                    "calibrated={},hard_stop={},lo={},hi={},center={}",
+                    p.calibrated,
+                    p.hard_stop.rr3_act_hard_stop_name(),
+                    p.lo_deg,
+                    p.hi_deg,
+                    p.center_deg
+                ),
+                notes,
+            )
+        }
         many => {
             notes.push(format!(
-                "轴档案合法装载 {} 份，不注入执行轴状态——多轴身份消歧归件五，模块按保守缺省起跑",
+                "instance {axis:?} 命中 {} 份合法档案（同 instance 异 pin，装配单形貌异常）——不注入执行轴状态，模块按保守缺省起跑",
                 many.len()
             ));
             (String::new(), notes)
@@ -1573,12 +1622,20 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     let hal_bindings = rr3_hardware_bindings_text(&merged);
 
-    // 执行轴状态投影（批N3 件三）：目录 = 接线档同级的 axis/（hardware/<形态>/axis/
-    // *.toml，件二装载器落位）；pin_ids 复用校验⑦段的同一集合（[[pin]] 的 pin_id 全集
-    // ——档案外键与接线闭合对同一真值源对账，两个读者一套语法）。恰一份合法才投影，
-    // 其余口径见 [`rr3_axis_state_text`]（降级面点名，不拒 boot）。
+    // 执行轴状态投影（批N3 件三，件五消歧）：目录 = 接线档同级的 axis/（hardware/
+    // <形态>/axis/*.toml，件二装载器落位）；pin_ids 复用校验⑦段的同一集合（[[pin]]
+    // 的 pin_id 全集——档案外键与接线闭合对同一真值源对账，两个读者一套语法）。
+    // 轴读数 = RR3_HAL_PERIPH_AXIS env（缺省 RR3_PERIPH_AXIS_DEFAULT，与 rr-hal 桥
+    // 后端同一契约常量——spawn 的子进程继承本进程环境，注入面选轴与后端选轴因此
+    // 同源）；恰一份 instance 命中才投影，其余口径见 [`rr3_axis_state_text`]（降级
+    // 面点名，不拒 boot）。
     let axis_dir = wiring_abs.parent().expect("接线档必有父目录").join("axis");
-    let (axis_state, axis_notes) = rr3_axis_state_text(&axis_dir, &pin_ids);
+    let axis_wanted = std::env::var(rr_hal_api::RR3_PERIPH_AXIS_ENV)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| rr_hal_api::RR3_PERIPH_AXIS_DEFAULT.to_string());
+    let (axis_state, axis_notes) = rr3_axis_state_text(&axis_dir, &pin_ids, &axis_wanted);
 
     // G4 装配段校验（ADR-0019 修订 1 ③）已在门 c 段随装配扫描一次完成：缺文件/
     // 坏形/ops 注入缺逐条点名进 assemble_broken，该模块 boot 入 Degraded（不 fatal；
@@ -2920,14 +2977,31 @@ mux_group = []
     /// 三键参数化——pin 走 GOOD 的 pin_id 语法（外键对账 F-4），状态两键即执行轴
     /// 投影的输入面。
     fn axis_text(pin: &str, calibrated: bool, hard_stop: &str) -> String {
+        axis_text_range(pin, calibrated, hard_stop, 60, 120)
+    }
+
+    /// 行程可变的投影输入面（件五双轴用例：pan/tilt 各给一行程，注入文本可辨源）。
+    fn axis_text_range(pin: &str, calibrated: bool, hard_stop: &str, lo: u16, hi: u16) -> String {
         format!(
-            "schema = 1\npin = \"{pin}\"\ncenter_deg = 90\nlo_deg = 60\nhi_deg = 120\ndir_sign = 1\nslew_deg_s = 100\nsettle_ms = 200\nhold = \"release\"\ncurrent_ceil_ma = 750\nwarmup_ms = 0\nhard_stop = \"{hard_stop}\"\ncalibrated = {calibrated}\nsource = \"manual\"\n"
+            "schema = 1\npin = \"{pin}\"\ncenter_deg = 90\nlo_deg = {lo}\nhi_deg = {hi}\ndir_sign = 1\nslew_deg_s = 100\nsettle_ms = 200\nhold = \"release\"\ncurrent_ceil_ma = 750\nwarmup_ms = 0\nhard_stop = \"{hard_stop}\"\ncalibrated = {calibrated}\nsource = \"manual\"\n"
         )
     }
 
-    /// 执行轴状态投影·恰一份（批N3 件三）：合法档案装载成功 → 注入文本按
-    /// `calibrated=<bool>,hard_stop=<词>` 投影，点名清单干净——rr3-act 拒动判据
-    /// 的输入面就是这两个键的档案真值。
+    /// 双轴装配单（ESP32_GOOD + tilt pin）：rtos 档不派生 [hardware]，双 pin 可在册
+    /// （host 档派生键同值校验会把双轴拒在门外——host 模块实例是单轴单描述符，模型
+    /// 自洽；板侧双轴真形貌在 rtos 档，板侧描述符消费归 0.0.7）。channel/physical 与
+    /// pan 错开（③-a/③-b 双占各守一维）。件五消歧用例的输入面。
+    fn esp32_good_tilt() -> String {
+        format!(
+            "{ESP32_GOOD}\n[[pin]]\nrole = \"act.axis.pwm\"\ninstance = \"tilt\"\n\
+             controller = \"ledc0\"\nchannel = 1\nphysical = [33]\ndirection = \"out\"\n\
+             rail = \"rail5v\"\nfailsafe = \"release\"\nmux_group = []\n"
+        )
+    }
+
+    /// 执行轴状态投影·恰一份（批N3 件三建，件五扩形）：合法档案装载成功 → 注入
+    /// 文本按 `calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>` 投影，
+    /// 点名清单干净——rr3-act 拒动判据与行程裁决的输入面就是这五键的档案真值。
     #[test]
     fn axis_state_projects_when_exactly_one_profile_loads() {
         let root = Root::new("axis-one");
@@ -2935,7 +3009,7 @@ mux_group = []
         root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
         let boot = boot_inputs(&p).expect("恰一份合法档案不改变 boot 绿面");
         assert_eq!(
-            boot.axis_state, "calibrated=true,hard_stop=yes",
+            boot.axis_state, "calibrated=true,hard_stop=yes,lo=60,hi=120,center=90",
             "恰一份合法档案必须投影执行轴状态（rr3-act 拒动判据的输入面）"
         );
         assert!(boot.axis_notes.is_empty(), "{:?}", boot.axis_notes);
@@ -2963,12 +3037,11 @@ mux_group = []
         );
     }
 
-    /// 执行轴状态投影·多份（批N3 件三）：两份合法档案 → 注入文本空串，点名
-    /// "消歧归件五"——单轴消歧的步位判定未建，rrd 不猜（机制与策略分离：
-    /// 装载机制在件二/件三，消歧策略在件五）。多份的真实形貌 = 遗留副本/误复制
-    /// （同 pin 两份文件——外键对账只查 pin ∈ pin_ids，文件名不是身份键）。
+    /// 执行轴状态投影·同 pin 副本（批N3 件三建，件五收口）：两份合法档案同一 pin
+    /// → 注入文本空串并点名副本——同 pin 副本不是消歧对象是病灶（恰一份合法才投影
+    /// 的 boot 链防线；写侧同款拒面在 axis_write 件四，读侧点名指清理）。
     #[test]
-    fn axis_state_stays_empty_and_notes_ambiguous_axes() {
+    fn axis_state_stays_empty_and_notes_duplicate_pin_profiles() {
         let root = Root::new("axis-two");
         let p = root.write_profile("full.toml", GOOD);
         root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
@@ -2976,13 +3049,62 @@ mux_group = []
         let boot = boot_inputs(&p).expect("两份合法档案不改变 boot 绿面");
         assert!(
             boot.axis_state.is_empty(),
-            "多轴未消歧不得投影注入文本——不猜身份"
+            "同 pin 副本不得投影注入文本——恰一份合法才投影"
         );
         assert!(
             boot.axis_notes
                 .iter()
-                .any(|n| n.contains("2 份") && n.contains("消歧归件五")),
-            "多份合法必须点名消歧挂账: {:?}",
+                .any(|n| n.contains("2 份合法档案（副本）") && n.contains("先清理副本")),
+            "同 pin 副本必须点名病灶: {:?}",
+            boot.axis_notes
+        );
+    }
+
+    /// 执行轴状态投影·双轴消歧（批N3 件五，收"多轴未消歧"挂账）：pan + tilt 两份
+    /// 合法档案，轴读数 = pan（env 缺省同源）→ 只投影 pan 的行程真值（五键文本
+    /// 可辨源：pan [60,120] ≠ tilt [80,100]）；点名清单干净——注入的行程必须属于
+    /// 被驱动的那根轴。
+    #[test]
+    fn axis_state_projects_driven_axis_when_two_axes_present() {
+        let root = Root::new("axis-dual");
+        let p = root.write_profile("dual.toml", &esp32_good_tilt());
+        root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
+        root.write_axis(
+            &p,
+            "tilt",
+            &axis_text_range("act.axis.pwm.tilt", true, "yes", 80, 100),
+        );
+        let boot = boot_inputs(&p).expect("双轴两份合法档案不改变 boot 绿面");
+        assert_eq!(
+            boot.axis_state, "calibrated=true,hard_stop=yes,lo=60,hi=120,center=90",
+            "双轴在场只投影被驱动轴（env 缺省 pan）的行程真值"
+        );
+        assert!(boot.axis_notes.is_empty(), "{:?}", boot.axis_notes);
+    }
+
+    /// 执行轴状态投影·轴读数与档案 instance 错配（批N3 件五）：装配单只挂 tilt
+    /// pin、档案只有 tilt，轴读数 = 缺省 pan → 单份也对轴，"注入 tilt 行程、驱动
+    /// pan 轴"是错配，宁可空串折保守缺省并点名。
+    #[test]
+    fn axis_state_stays_empty_when_axis_env_misses_every_instance() {
+        let text = GOOD.replace("instance = \"pan\"", "instance = \"tilt\"");
+        let root = Root::new("axis-mismatch");
+        let p = root.write_profile("tilt-only.toml", &text);
+        root.write_axis(
+            &p,
+            "tilt",
+            &axis_text_range("act.axis.pwm.tilt", true, "yes", 80, 100),
+        );
+        let boot = boot_inputs(&p).expect("轴错配不改变 boot 绿面（降级面）");
+        assert!(
+            boot.axis_state.is_empty(),
+            "轴读数对不上任何 instance 不得投影——错配行程比无行程更危险"
+        );
+        assert!(
+            boot.axis_notes
+                .iter()
+                .any(|n| n.contains("无一 instance = \"pan\"")),
+            "错配必须点名轴读数与 instance 集: {:?}",
             boot.axis_notes
         );
     }

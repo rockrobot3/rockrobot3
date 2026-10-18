@@ -68,8 +68,10 @@ pub const RR3_HAL_PERIPH_UART_ENV: &str = "RR3_HAL_PERIPH_UART";
 pub const RR3_HAL_PERIPH_BAUD_ENV: &str = "RR3_HAL_PERIPH_BAUD";
 
 /// ESP32 档舵机轴 env 键：`pan` / `tilt`（板上双轴云台 ↔ 宿主单轴 trait 的
-/// 映射面，缺省 `pan`；板侧帧面另有 `axis` 参数可逐调用覆盖）。
-pub const RR3_HAL_PERIPH_AXIS_ENV: &str = "RR3_HAL_PERIPH_AXIS";
+/// 映射面，缺省 `pan`；板侧帧面另有 `axis` 参数可逐调用覆盖）。真值单点已上移
+/// 契约层（rr-hal-api `RR3_PERIPH_AXIS_ENV`，批N3 件五——rrd 装配链同键选轴档案），
+/// 本地 re-export 保既有路径。
+pub use rr_hal_api::RR3_PERIPH_AXIS_ENV as RR3_HAL_PERIPH_AXIS_ENV;
 
 /// 舵机点名主题（在册 request L1；payload 形状事实源
 /// contracts/events/act-servo_command.schema.json）。

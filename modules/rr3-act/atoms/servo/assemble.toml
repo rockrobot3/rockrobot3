@@ -9,11 +9,13 @@ handles = [
   { trait = "Rr3PwmServo", desc_key = "pwm_chip" },
   { trait = "Rr3PwmServo", desc_key = "pwm_channel" },
 ]
-# 行程/时限/限速 ← config.toml [rr3-act.servo]（§3 逐槽落位，L-5 补齐；
-# 单区间 [angle_limit_deg] 拆上下界两槽，轴由 RR3_HAL_PERIPH_AXIS 选）
+# 时限/限速 ← config.toml [rr3-act.servo]（§3 逐槽落位，L-5 补齐）。**行程不在
+# ops**（批N3 件五门 g 收敛，全案 §8 门 g"行程字面量档案之外读者数为 0"）：
+# 行程真值 = 执行件档案（hardware/<形态>/axis/<instance>.toml 的 lo_deg/hi_deg/
+# center_deg），经 rrd 装配链投影 RR3_ACT_AXIS_STATE 注入，组合件填 Rr3ServoCfg
+# ——config/assemble 两侧的字面量读者已全部撤除（A-17：ops[].src_key 也是读者，
+# 撤 config 键必须同批撤这两槽，否则"档案落地后 config 那份仍被 src_key 引着"）。
 ops = [
-  { slot = "angle_min_deg", src_key = "rr3-act.servo.angle_limit_deg" },
-  { slot = "angle_max_deg", src_key = "rr3-act.servo.angle_limit_deg" },
   { slot = "move_timeout_ms", src_key = "rr3-act.servo.move_timeout_ms" },
   { slot = "state_min_interval_ms", src_key = "rr3-act.servo.state_min_interval_ms" },
 ]

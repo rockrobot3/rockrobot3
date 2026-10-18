@@ -176,9 +176,11 @@ pub fn rr3_chain_sense_config_text() -> String {
         .to_string()
 }
 
-/// act 演练 config（与 e2e_act 夹具同形状，漂移当场由 main.rs 的形状解析红）
+/// act 演练 config（与 e2e_act 夹具同形状，漂移当场由 main.rs 的形状解析红）。
+/// 行程键不在 config（批N3 件五门 g 收敛：行程真值 = 执行轴档案经
+/// RR3_ACT_AXIS_STATE 注入），本文本与仓内 modules/rr3-act/config.toml 同形。
 pub fn rr3_chain_act_config_text() -> String {
-    "[rr3-act]\nlog_level = \"info\"\n\n[rr3-act.servo]\nangle_limit_deg = [70, 110]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\", \"off\", \"blink\"]\n\n[rr3-act.intent]\nopen_topics = [\"rr3-act/relay/set\", \"rr3-act/servo/command\"]\n\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
+    "[rr3-act]\nlog_level = \"info\"\n\n[rr3-act.servo]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\", \"off\", \"blink\"]\n\n[rr3-act.intent]\nopen_topics = [\"rr3-act/relay/set\", \"rr3-act/servo/command\"]\n\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
         .to_string()
 }
 
@@ -484,9 +486,13 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
                 let mut c = Command::new(&act);
                 c.env("RR3_HAL_BACKEND", "sim")
                     .env("RR3_ACT_CONFIG", &act_cfg)
-                    // 执行轴状态（批N3 件三）：chain 直起路径与 rrd --manifest 并存，
-                    // 模块 env 由 chain 直设——sim 档已标定 + 挡块在册，Auto 放行
-                    .env("RR3_ACT_AXIS_STATE", "calibrated=true,hard_stop=yes");
+                    // 执行轴状态（批N3 件三建、件五五键）：chain 直起路径与
+                    // rrd --manifest 并存，模块 env 由 chain 直设——sim 档已
+                    // 标定 + 挡块在册，行程/中位同档案样本值，Auto 放行
+                    .env(
+                        "RR3_ACT_AXIS_STATE",
+                        "calibrated=true,hard_stop=yes,lo=60,hi=120,center=90",
+                    );
                 (RR3_SIM_MODULE_ACT, c)
             },
         ] {
@@ -687,8 +693,13 @@ mod tests {
         assert!(sense.contains("rms_start = 1500"), "{sense}");
         assert!(sense.contains("bin_threshold_deg = 30"), "{sense}");
         let act = rr3_chain_act_config_text();
-        assert!(act.contains("angle_limit_deg = [70, 110]"), "{act}");
+        // 行程键已撤（批N3 件五门 g），断言改锚存活键——servo 节时限仍在
+        assert!(act.contains("move_timeout_ms = 800"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
+        assert!(
+            !act.contains("angle_limit_deg"),
+            "行程键不得回流 config: {act}"
+        );
         let interact = rr3_chain_interact_config_text();
         assert!(
             interact.contains("non_pointable = [\"talk\"]"),

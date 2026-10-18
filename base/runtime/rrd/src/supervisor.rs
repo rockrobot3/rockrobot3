@@ -77,9 +77,11 @@ pub struct Rr3SpawnJob {
     /// 文本，daemon 组装时从装配链透传（`--manifest` 直起路径为空串 = 无描述符）。
     /// spawn 时空值不注入——模块侧 rr-hal 维持"无描述符"fail-closed 状态。
     pub hal_bindings: String,
-    /// 执行轴状态注入文本（批N3 件三）：装配链轴档案（`hardware/<形态>/axis/*.toml`）
-    /// 恰一份合法装载的投影（`calibrated=<bool>,hard_stop=<词>`），daemon 同位透传，
-    /// spawn 时注入 `RR3_ACT_AXIS_STATE`；空串 = 不注入——模块侧折保守缺省
+    /// 执行轴状态注入文本（批N3 件三，件五消歧扩形）：装配链轴档案
+    /// （`hardware/<形态>/axis/*.toml`）中 instance 与轴读数（`RR3_HAL_PERIPH_AXIS`，
+    /// 缺省契约常量）相等的恰一份合法装载的投影
+    /// （`calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>`），daemon 同位
+    /// 透传，spawn 时注入 `RR3_ACT_AXIS_STATE`；空串 = 不注入——模块侧折保守缺省
     /// （未标定不得自动，§6 硬约束），与 hal_bindings 同一条空值不注入纪律。
     pub axis_state: String,
 }
