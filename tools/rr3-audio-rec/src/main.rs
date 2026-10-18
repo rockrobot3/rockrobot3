@@ -54,7 +54,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use rr_ipc::{
-    rr3_base64_decode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3Header,
+    rr3_base64_decode, rr3_body_split, rr3_uart_baud_speed, FrameAssembler, Rr3Frame, Rr3Header,
     Rr3PayloadType, Rr3UartConn, RR3_IPC_HDR_SIZE,
 };
 use serde_json::Value;
@@ -77,11 +77,10 @@ const SETTLE: Duration = Duration::from_millis(1200);
 /// 与重同步窗口（1.6s）看门狗解武装不计停滞，否则长骑行必被误杀；触发即实锤
 /// "武装收流中，分片字节 10s 未确认入队"。
 const STALL: Duration = Duration::from_secs(10);
-/// 帧头 magic 小端线上字节（contracts/README.md 歧义裁定：字段值 0x41524531
-/// 小端存储 = 31 45 52 41 = "1ERA"——与 rr-ipc protocol::header 同值锚定，
-/// 板不依赖 rr-core、收流端常量自证同纪律）。b64 载荷里也会出现该子串，
-/// 失步后撞上即"合法幻影帧头"，重同步扫描以它为锚。
-const RR3_MAGIC_LE: [u8; 4] = 0x41524531u32.to_le_bytes();
+/// 帧头 magic 小端线上字节与拆帧器已上提 rr-ipc 单点（`rr_ipc::framing`，A 批
+/// 随 rr-hal esp32 音频源后端共用；`RR3_MAGIC_LE`/`FrameAssembler` 从彼处来，
+/// 本件不再持第二份帧机制）。
+
 /// 连续拆帧失败达此数记一次失步重同步账（日志对账；坏帧弃扫本身由
 /// [`FrameAssembler`] 在内存里即时完成，无独立扫描动作——1-2 次可能是单帧毛刺，
 /// 3 次 = 帧界成片损坏，值得一条日志点名）。
@@ -105,10 +104,6 @@ const READ_BLOCK: usize = 65536;
 /// 解码线程等裸字节的醒来节拍（查收兵死线；断流/重连由读线程自治，解码面
 /// 只管出帧与记账）。
 const DECODE_TICK: Duration = Duration::from_millis(200);
-/// 拆帧 plen 护栏（收流端策略面）：板面音频片 plen 实测 ~11KB，rr-ipc 头层
-/// 上限 64MiB——幻影 magic（b64 载荷撞出的合法 "1ERA"）后的垃圾 plen 若照单
-/// 全收，等待/缓冲都天文。超护栏按坏帧弃 4B magic 续扫。
-const FRAMING_PLEN_CAP: usize = 1024 * 1024;
 /// 重连握手重试次数（d4 系列实锤定案）：宿主侧 CP2102 RX 路径冻结——板→宿主字节
 /// 全无而宿主→板命令畅通（板面 seq=sent/drop=0 四轮洗冤）；/dev/null 决定性实验
 /// 证伪"落盘 flush 触发"根因论（零磁盘 I/O 仍 369s 冻结；磁盘 I/O 只是放大器：
@@ -396,95 +391,8 @@ impl SeqTracker {
     }
 }
 
-/// 拆帧器（收流端机制面，判据② A/B 定案新增）：大块裸字节 → 整帧，纯内存。
-/// 机制面只做"对齐 magic + 头层解析定长 + 按 plen 切整帧"，头校验全数交
-/// rr-ipc [`Rr3Header::from_bytes`]（零第二份帧语义）；失步恢复 = 从坏帧起点
-/// 弃 4B magic 续扫（原分相读接缝 resync 的内存版——字节已在缓冲，弃扫不再
-/// 产生任何新 I/O，滑移由此不放大为风暴）。
-struct FrameAssembler {
-    buf: Vec<u8>,
-    /// 距上一整帧的弃扫字节（诊断：重同步日志行）。
-    discarded: u64,
-}
-
-/// 拆帧出片：整帧 = 头（已解析）+ 载荷字节。
-type Assembled = (Rr3Header, Vec<u8>);
-
-impl FrameAssembler {
-    fn new() -> Self {
-        Self {
-            buf: Vec::new(),
-            discarded: 0,
-        }
-    }
-
-    /// 读线程推来的裸字节进缓冲。
-    fn feed(&mut self, bytes: &[u8]) {
-        self.buf.extend_from_slice(bytes);
-    }
-
-    /// 距上一整帧的弃扫字节。
-    fn discarded(&self) -> u64 {
-        self.discarded
-    }
-
-    /// 尝试出下一整帧：Ok(Some) = 出帧（消费即移除）；Ok(None) = 不够一帧，
-    /// 等更多字节；Err((弃字节数, 诊断)) = 坏帧（magic 在而头非法 / plen 越栏），
-    /// 起点已弃，续扫由下次 pull 自然接上。
-    fn pull(&mut self) -> Result<Option<Assembled>, (u64, String)> {
-        // 对齐 magic：无全 magic 则只留尾 3B（可能跨块的前缀），其余静默弃
-        // （起始垃圾/断帧残骸——帧间垃圾不计数，丢片由 seq 对账如实记账）。
-        if let Some(pos) = find(&self.buf, &RR3_MAGIC_LE) {
-            if pos > 0 {
-                self.discarded += pos as u64;
-                self.buf.drain(..pos);
-            }
-        } else {
-            let keep_from = self.buf.len().saturating_sub(RR3_MAGIC_LE.len() - 1);
-            self.discarded += keep_from as u64;
-            self.buf.drain(..keep_from);
-            return Ok(None);
-        }
-        if self.buf.len() < RR3_IPC_HDR_SIZE {
-            return Ok(None);
-        }
-        let header = match Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]) {
-            Ok(h) => h,
-            Err(e) => return Err(self.drop_magic(4, format!("头层拒收: {e:?}"))),
-        };
-        let plen = header.payload_len as usize;
-        if plen > FRAMING_PLEN_CAP {
-            return Err(self.drop_magic(
-                4,
-                format!("payload_len {plen} 越拆帧护栏 {FRAMING_PLEN_CAP}（幻影头）"),
-            ));
-        }
-        let want = RR3_IPC_HDR_SIZE + plen;
-        if self.buf.len() < want {
-            return Ok(None);
-        }
-        let payload = self.buf[RR3_IPC_HDR_SIZE..want].to_vec();
-        self.buf.drain(..want);
-        self.discarded = 0;
-        Ok(Some((header, payload)))
-    }
-
-    /// 坏帧处置：弃 magic 起点（坏头只弃 4B——真帧起点可能就在其后不远处，
-    /// 续扫自会找到），返回 (弃字节数, 诊断)。
-    fn drop_magic(&mut self, n: usize, why: String) -> (u64, String) {
-        self.buf.drain(..n);
-        self.discarded += n as u64;
-        (n as u64, why)
-    }
-}
-
-/// 子串查找（拆帧器专用；标准库无字节切片 `find`，不引依赖）。
-fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.len() > hay.len() {
-        return None;
-    }
-    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
-}
+// 拆帧器已上提 rr-ipc 单点（`rr_ipc::framing`，2026-10-18 A 批随 rr-hal esp32
+// 音频源后端共用而搬迁；机制本体与用例随迁彼处，本件只接线）。
 
 /// 收一行（逐字节超时读 [`REPLY_TIMEOUT_MS`]；'\r' 剥离；换行即返回）。
 /// 超时无字节即 Err（板面哑了——握手路径据此点名，不再无限等）。
@@ -1093,85 +1001,8 @@ mod tests {
         assert!(parse_audio_event(&other).is_err(), "dst=9 必须被拒");
     }
 
-    /// 拆帧器：分块喂入（头中/载荷中切）→ 整帧逐字节还原。
-    #[test]
-    fn assembler_reassembles_split_frames() {
-        let f = board_like_frame(7, &[1, 2, 3, 4], RR3_HOST_TASK);
-        let bytes = Rr3FrameBuf::from(&f)
-            .rr3_as_sealed_bytes()
-            .unwrap()
-            .to_vec();
-        let mut a = FrameAssembler::new();
-        a.feed(&bytes[..64]);
-        assert!(a.pull().unwrap().is_none(), "半个头不出帧");
-        a.feed(&bytes[64..100]);
-        assert!(a.pull().unwrap().is_none(), "载荷中段不出帧");
-        a.feed(&bytes[100..]);
-        let (hdr, payload) = a.pull().unwrap().expect("拼满必须出帧");
-        assert_eq!(hdr, f.header);
-        assert_eq!(payload, f.payload);
-        assert!(a.pull().unwrap().is_none(), "缓冲耗尽");
-    }
-
-    /// 拆帧器：前导垃圾（含半个 magic 前缀）静默弃扫，真帧照常出。
-    #[test]
-    fn assembler_skips_garbage_then_yields_frame() {
-        let f = board_like_frame(9, b"pcm", RR3_HOST_TASK);
-        let bytes = Rr3FrameBuf::from(&f)
-            .rr3_as_sealed_bytes()
-            .unwrap()
-            .to_vec();
-        let mut a = FrameAssembler::new();
-        let mut noisy = b"junk\x01\x02junk1ER".to_vec(); // 尾部半个 magic 前缀
-        noisy.extend_from_slice(&bytes);
-        a.feed(&noisy);
-        let (hdr, payload) = a.pull().unwrap().expect("垃圾弃扫后必须出真帧");
-        assert_eq!(hdr, f.header);
-        assert_eq!(payload, f.payload);
-        assert!(a.pull().unwrap().is_none());
-    }
-
-    /// 拆帧器：坏帧（reserved 污染——滑移实测签名）计错弃 4B magic，续扫
-    /// 收敛到下一真帧。
-    #[test]
-    fn assembler_bad_header_drops_magic_and_resumes() {
-        let f = board_like_frame(1, b"ab", RR3_HOST_TASK);
-        let mut bad = Rr3FrameBuf::from(&f)
-            .rr3_as_sealed_bytes()
-            .unwrap()
-            .to_vec();
-        bad[RR3_IPC_HDR_SIZE - 1] = 0xFF; // 头 reserved 尾字节污染
-        let f2 = board_like_frame(2, b"cd", RR3_HOST_TASK);
-        let bytes2 = Rr3FrameBuf::from(&f2)
-            .rr3_as_sealed_bytes()
-            .unwrap()
-            .to_vec();
-        let mut a = FrameAssembler::new();
-        a.feed(&bad);
-        a.feed(&bytes2);
-        let (dropped, why) = a.pull().unwrap_err();
-        assert_eq!(dropped, 4, "坏帧只弃 magic 起点");
-        assert!(why.contains("ReservedNotZero"), "{why}");
-        let (hdr, payload) = a.pull().unwrap().expect("坏帧后续扫必须出真帧");
-        assert_eq!(hdr, f2.header);
-        assert_eq!(payload, f2.payload);
-    }
-
-    /// 拆帧器：头层合法的 64MiB plen 越拆帧护栏——按坏帧弃 magic，不缓冲。
-    #[test]
-    fn assembler_rejects_plen_over_cap() {
-        let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, MAX_PAYLOAD_LEN);
-        h.trace_id = 0;
-        h.timestamp_ns = 100;
-        h.src_task = RR3_PERIPH_TASK;
-        h.dst_task = RR3_HOST_TASK;
-        let bytes = h.to_bytes().to_vec();
-        let mut a = FrameAssembler::new();
-        a.feed(&bytes);
-        let (dropped, why) = a.pull().unwrap_err();
-        assert_eq!(dropped, 4);
-        assert!(why.contains("越拆帧护栏"), "{why}");
-    }
+    // 拆帧器用例已随机制上提 rr-ipc（`rr_ipc::framing` tests，四类：分块还原/
+    // 垃圾跳过/坏头弃 magic 续扫/plen 越栏），本件不再持第二份。
 
     /// ON 应答判据：OK 可在行中（p3 冒烟实录形状——seq=10604 帧的 b64 payload
     /// 与 `OK audio on` 同行）；裸 `OK` 不误配（b64 字符表含 O/K）。

@@ -17,6 +17,7 @@ extern crate alloc;
 #[cfg(not(target_os = "none"))]
 extern crate std;
 
+pub mod framing;
 pub mod protocol;
 // transport 层拆门（批J G1，ADR-0018 修订 3 ①）：窄缝 bytestream（Rr3ByteStream）
 // 与帧缓冲 buf（alloc 面）在裸金属目标（target_os="none"，如 0.0.7 层① 的
@@ -26,6 +27,7 @@ pub mod protocol;
 // 系照常编译，行为与线上字节零改动。
 pub mod transport;
 
+pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{
