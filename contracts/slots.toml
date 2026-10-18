@@ -14,8 +14,12 @@
 #                 两轴分判不混判：把"这形态本就没有总线"误报成"缺件"即违此列语义
 # 变更纪律：加格 = append（同步更新 contract.rs 的形状 pin）；status/tier_scope/层集
 #   变更 = 破坏性 = 升 schema_version 并走契约级评审
+#
+# schema_version = 3（0.0.5 增补轮六 批N2，ADR-0021 裁定 2）：基础层 append 两格——
+#   power.rail（域电平观测）与 power.budget（能源预算仲裁），tier_scope 三档全在；
+#   append 非破坏，版本号随裁定记录契约扩格事件
 
-schema_version = 2
+schema_version = 3
 
 # ---------- 基础层（基座内建，永远在位，不进 profile [bindings]） ----------
 # 分族（ADR-0012 增补注记）：bus.* 与 net.online = base-bus（host / rtos(经桥) 档在位，
@@ -54,6 +58,20 @@ layer = "base"
 status = "normal"
 tier_scope = ["host", "rtos", "bare"]
 note = "电池读数通道（通道 boot 即在位、恒不降级；电量读数由 rr3-power 运行期发布，反应归策略层——ADR-0012 裁定 1 base 格语义注记）"
+
+[[slot]]
+name = "power.rail"
+layer = "base"
+status = "normal"
+tier_scope = ["host", "rtos", "bare"]
+note = "电源域电平观测通道（通道 boot 即在位、恒不降级；域压读数由 rr3-power 运行期发布，反应归策略层——ADR-0021 裁定 2；bare 档经本地守护输出行观测、不发总线主题，格语义 = 通道承诺非器件承诺）"
+
+[[slot]]
+name = "power.budget"
+layer = "base"
+status = "normal"
+tier_scope = ["host", "rtos", "bare"]
+note = "能源预算仲裁通道（通道 boot 即在位、恒不降级；并发峰值电流对域上限的预算裁决由 rr3-power 运行期执行，反应归策略层——ADR-0021 裁定 2；格语义 = 通道承诺非器件承诺）"
 
 # ---------- 身体层（模块提供，按装配单绑定） ----------
 [[slot]]

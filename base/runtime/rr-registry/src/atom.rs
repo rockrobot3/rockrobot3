@@ -493,7 +493,17 @@ slots = ["audio.vad"]
         // 基座内建豁免集（0.0.5 方案 §12.1 终裁：boot 即在位、无独立原子目录——
         // rr-bus/rrd 承载或机制核切片承载；power.battery 虽 base 层但由 battery
         // 原子承担，不在豁免集。此常量漂移 = 覆盖账不平断言当场红）
-        const BUILTIN_NO_ATOM: &[&str] = &["bus.publish", "bus.subscribe", "bus.rpc", "net.online"];
+        // power.rail/power.budget（批N2 件二，ADR-0021 裁定 2）同为 base 层，承载是
+        // rr3-power 进程内机制切片（RailMonitor/RailJudge，件五归属搬家）与板侧守护，
+        // 无独立原子目录——立无源码的空原子件即 D15 所防的空壳件
+        const BUILTIN_NO_ATOM: &[&str] = &[
+            "bus.publish",
+            "bus.subscribe",
+            "bus.rpc",
+            "net.online",
+            "power.rail",
+            "power.budget",
+        ];
         let slots = slots();
 
         // ① 仓扫描：逐份全量校验 + 收格主（每格一件的唯一性在此建立）
@@ -543,7 +553,7 @@ slots = ["audio.vad"]
             "仓扫描仅见 {scanned} 份 atom.toml（打空/缺件属门禁失效，不放行）"
         );
 
-        // ② 不留空格 + 内建格不立件：21 格逐格反查，末尾覆盖账必须轧平
+        // ② 不留空格 + 内建格不立件：23 格逐格反查，末尾覆盖账必须轧平
         let names = slots.rr3_slot_table_names();
         for slot in &names {
             let provided = owner.get(slot);

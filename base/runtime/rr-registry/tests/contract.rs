@@ -423,9 +423,9 @@ fn topics_registry_zero_topics_is_rejected() {
 
 // ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
 
-/// 注册表的全部 30 条 `(name, owner, kind)` 三元组。
+/// 注册表的全部 31 条 `(name, owner, kind)` 三元组。
 /// 顺序即 `contracts/topics.toml` 的登记顺序。
-const RR3_PINNED_TOPICS: [(&str, &str, &str); 30] = [
+const RR3_PINNED_TOPICS: [(&str, &str, &str); 31] = [
     ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
     ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
     ("rr3-sense/env/temperature", "rr3-sense", "event"),
@@ -460,6 +460,7 @@ const RR3_PINNED_TOPICS: [(&str, &str, &str); 30] = [
     ("rr3-connect/wifi/connect", "rr3-connect", "request"),
     ("rr3-connect/wifi/forget", "rr3-connect", "request"),
     ("rr3-sentinel/diag/probe", "rr3-sentinel", "request"),
+    ("rr3-power/rail/state", "rr3-power", "event"),
 ];
 
 /// 从 topics.toml 文本解析出的 (name, owner, kind) 三元组
@@ -488,7 +489,7 @@ fn registry_triples(text: &str) -> Vec<(String, String, String)> {
 }
 
 /// C2：把 `contracts/topics.toml` 的**形状**钉死——owner 数、topic 数、kind 分布，
-/// 以及全部 30 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
+/// 以及全部 31 条 `(name, owner, kind)` 三元组逐条在册（且不多不少）。
 ///
 /// 计数做成硬 pin 是**故意**的，不是"禁止 append"：契约只增不改，新增主题合法，
 /// 但必须是一次**有意识的编辑**——同一次改动里既要改 `contracts/topics.toml`，
@@ -518,20 +519,20 @@ fn registry_shape_is_pinned() {
         "owner 名不得重复登记: {owners:?}"
     );
 
-    // 2) topic 侧：30 条，且不重名（重名会让下面的子集论证失去意义）
+    // 2) topic 侧：31 条，且不重名（重名会让下面的子集论证失去意义）
     let topics = registry_triples(&text);
     assert_eq!(
         topics.len(),
-        30,
-        "契约 30 条主题（0.0.5 第 IV 轮 MCP-0 2026-10-12 29→30：append brain/audio/tts_pcm 下行流，F-4 通路契约；与批C/批D 同一张改表纪律 §18.4 防重规则①）"
+        31,
+        "契约 31 条主题（0.0.5 第 IV 轮 MCP-0 2026-10-12 29→30：append brain/audio/tts_pcm 下行流，F-4 通路契约；增补轮六 批N2 件二 2026-10-18 30→31：append rr3-power/rail/state，ADR-0021 裁定 2；与批C/批D 同一张改表纪律 §18.4 防重规则①）"
     );
     let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
 
-    // 3) kind 分布：12 request / 10 event / 4 stream / 4 notification
+    // 3) kind 分布：12 request / 11 event / 4 stream / 4 notification
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
     assert_eq!(count("request"), 12, "kind=request 的分布漂移");
-    assert_eq!(count("event"), 10, "kind=event 的分布漂移");
+    assert_eq!(count("event"), 11, "kind=event 的分布漂移");
     assert_eq!(count("stream"), 4, "kind=stream 的分布漂移");
     assert_eq!(count("notification"), 4, "kind=notification 的分布漂移");
     assert_eq!(
@@ -540,7 +541,7 @@ fn registry_shape_is_pinned() {
         "存在四类之外的 kind: {topics:?}"
     );
 
-    // 4) 30 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
+    // 4) 31 条三元组逐条在册；配合上面的等长与唯一性，等价于"不多不少"
     for (name, owner, kind) in RR3_PINNED_TOPICS {
         assert!(
             topics
@@ -846,16 +847,18 @@ fn slots_base_layer_is_pinned_to_base_capabilities() {
     assert_eq!(base, caps, "slots 基础层与 base_capabilities 漂移");
 }
 
-/// 格位表的全部 21 条 `(name, layer)`，顺序即 `contracts/slots.toml` 登记顺序。
+/// 格位表的全部 23 条 `(name, layer)`，顺序即 `contracts/slots.toml` 登记顺序。
 /// 与 `registry_shape_is_pinned` 同一钉法：append 合法但必须是有意识的编辑——
 /// 同一次改动里同步更新 `contracts/slots.toml`、本常量与层分布计数、
 /// `profiles/default.toml`（如涉及绑定面），以及把这些数字当事实抄进正文的文档。
-const RR3_PINNED_SLOTS: [(&str, &str); 21] = [
+const RR3_PINNED_SLOTS: [(&str, &str); 23] = [
     ("bus.publish", "base"),
     ("bus.subscribe", "base"),
     ("bus.rpc", "base"),
     ("net.online", "base"),
     ("power.battery", "base"),
+    ("power.rail", "base"),
+    ("power.budget", "base"),
     ("act.servo", "body"),
     ("act.led", "body"),
     ("act.relay", "body"),
@@ -885,7 +888,7 @@ fn slots_registry_shape_is_pinned() {
         table.rr3_slot_table_check()
     );
 
-    // 1) 21 格、逐条 (name, layer) 在册且不多不少（配合唯一性与等长断言）
+    // 1) 23 格、逐条 (name, layer) 在册且不多不少（配合唯一性与等长断言）
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for (name, layer) in RR3_PINNED_SLOTS {
         assert_eq!(
@@ -901,8 +904,8 @@ fn slots_registry_shape_is_pinned() {
         "格位总数漂移"
     );
 
-    // 2) 层分布 5/12/4
-    assert_eq!(counts.get("base"), Some(&5));
+    // 2) 层分布 7/12/4
+    assert_eq!(counts.get("base"), Some(&7));
     assert_eq!(counts.get("body"), Some(&12));
     assert_eq!(counts.get("cognition"), Some(&4));
 }

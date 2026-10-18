@@ -815,7 +815,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         ));
     }
     // 形状门（0.0.5 批J 深挖收口；与 topics 装载的 rr3_topic_set_check 同构——
-    // CI 契约测试钉 21 格是全集层门，这里是运行期门，两轴缺一即带病）：
+    // CI 契约测试钉 23 格是全集层门，这里是运行期门，两轴缺一即带病）：
     // 格名规则、层名、status/tier_scope 白名单逐条点名。
     let slot_errs = table.rr3_slot_table_check();
     if !slot_errs.is_empty() {
