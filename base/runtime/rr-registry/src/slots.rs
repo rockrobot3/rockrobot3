@@ -168,13 +168,13 @@ mod tests {
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/slots.toml");
 
-    /// 契约必须解析成 21 格，三层分布 5/12/4（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 23 格，三层分布 7/12/4（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let table = rr3_registry_slot_table_from_text(CONTRACT);
-        assert_eq!(table.slots.len(), 21, "契约格位数");
+        assert_eq!(table.slots.len(), 23, "契约格位数");
         assert!(!table.rr3_slot_table_is_empty());
-        assert_eq!(table.rr3_slot_table_base().len(), 5, "基础层格数");
+        assert_eq!(table.rr3_slot_table_base().len(), 7, "基础层格数");
         assert!(table.rr3_slot_table_contains("audio.capture"));
         assert!(table.rr3_slot_table_contains("bus.rpc"));
         assert!(!table.rr3_slot_table_contains("audio"), "单段名不是格位");
@@ -211,6 +211,25 @@ mod tests {
         );
         assert_eq!(
             table.rr3_slot_table_tier_scope("power.battery"),
+            Some(vec![
+                "host".to_string(),
+                "rtos".to_string(),
+                "bare".to_string()
+            ])
+        );
+        // 批N2 件二（ADR-0021 裁定 2）：power.rail/power.budget 基础层 append，三档全在
+        assert!(table.rr3_slot_table_contains("power.rail"));
+        assert!(table.rr3_slot_table_contains("power.budget"));
+        assert_eq!(
+            table.rr3_slot_table_tier_scope("power.rail"),
+            Some(vec![
+                "host".to_string(),
+                "rtos".to_string(),
+                "bare".to_string()
+            ])
+        );
+        assert_eq!(
+            table.rr3_slot_table_tier_scope("power.budget"),
             Some(vec![
                 "host".to_string(),
                 "rtos".to_string(),
