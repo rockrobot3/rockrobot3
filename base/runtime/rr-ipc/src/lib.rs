@@ -19,6 +19,9 @@ extern crate std;
 
 pub mod framing;
 pub mod protocol;
+// 板面音频会话握手（A 批 c2 上提单点）：Rr3UartConn 同径 cfg 门（linux/macos）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod audio_session;
 // transport 层拆门（批J G1，ADR-0018 修订 3 ①）：窄缝 bytestream（Rr3ByteStream）
 // 与帧缓冲 buf（alloc 面）在裸金属目标（target_os="none"，如 0.0.7 层① 的
 // xtensa-esp32-none-elf）上可达——"板侧接总线 = 实现两个 usize 方法"由此成立；
@@ -27,6 +30,11 @@ pub mod protocol;
 // 系照常编译，行为与线上字节零改动。
 pub mod transport;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use audio_session::{
+    handshake, ok_reply_line, read_reply_line, HANDSHAKE_RETRY_PAUSE, HANDSHAKE_TRIES, READ_BLOCK,
+    READ_TIMEOUT_MS, REPLY_TIMEOUT_MS, RESYNC_ZERO_BAIL, SETTLE,
+};
 pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
