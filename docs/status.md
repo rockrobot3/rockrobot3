@@ -578,6 +578,20 @@
   logic 内建格覆盖口径归转红收口件另裁）；decisions.md §2 施工图§6-④ 行施工注记＋§4
   变更记录同批（提交 `e918b76`，批N2 收口对账 2026-10-18）；contracts/README 演进登记同批；敞口表无增减。
 
+- **2026-10-19 批N3 件一～件五：执行件契约面＋档案装载＋拒动＋标定写入＋行程收敛（⑨-e 门 g 建成）**：
+  ①件一 `c5220f5` rr-hal-api 落 `Rr3Actuator`/`Rr3Position{source}`/`Rr3ActProfile` 契约面＋`Rr3Store`
+  窄缝＋句柄面 trait 在册扩名；②件二 `a5bf8ea` rrd 档案装载器 `hardware/<形态>/axis/*.toml`
+  （外键对账＋原子写＋坏件不覆盖）＋判据用例；③件三 `be8ba8c` 拒动硬约束——闸门复位保守默认＋
+  motion 词面＋判据两路径接线＋rrd 轴状态注入；④件四 `0df6969` 标定路线 A/C 写入面 `axis_write`
+  （② bin 薄壳与③手册回写挂账未完）；⑤件五行程三处收敛（② host 撤 config 行程键＋注入面五键扩形
+  `bfe3505` / ③ 板侧撤手写行程字面量改 `axis_gen.rs` 生成表＋esp32-mini 双轴档案＋profile 补 tilt pin
+  `ee18519` / ④ `check.sh` 建 `step "⑨-e 行程真值单点…"` `af61210`）。**三事实源同批对表：可数 step
+  15→16 行、专属执法位 4→5 把、待建门 19→18 把**（门 g 转入"已建"——四字面全仓零命中 fail-closed，
+  注释/断言提及同红；行程唯一真值点 = 轴档案 center/lo/hi，host 注入/板侧生成表两路同源）；
+  conventions §2 对表段＋architecture §14 门表 ⑨-e 行"待建"改"已建"（相邻 ⑨-d 行同批订正）＋
+  全案 §16.4 待建门链＋基-5 行施工回执（两处索引）＋act 册 §0/§3 行程口径与 A-13/A-17 状态同批；
+  敞口表无增减（brain 档位角 B-14② 挂独立 todo 不占敞口行）。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；
