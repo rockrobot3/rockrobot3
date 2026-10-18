@@ -78,3 +78,37 @@ droppable = false
 input_only_ok = true
 per_instance = false
 note = "INA219 电池计（I2C 读数面）；droppable=false——测量面必须活着才知欠压。addr 写 0x 前缀十六进制（七位从地址域）。批N2 起它兼任域测点（domains[].current_sense/sense 一律写本角色 pin_id，校验⑥-d）"
+
+# —— 批N2 件六（基-39 N2 那一刀，decisions.md §2 施工图§6-④ 配套(b)）：域测点两角色进场。
+#    covered normal 格 4→5（power.rail 进账），门 a 红账 23＝tools/ci/gate-a-baseline.txt 基线初值。
+#    iface 取 Rr3Power 设备类面（在册七名）：域级 Rr3Rail 由 rr3-power 组合件经
+#    RailMonitor/RailJudge 承载（批N2 件五），不经 [pins] 句柄——本件不做 trait 扩面。
+#    归批N3 的两笔如实注记：power.switch 不落本表（derives 需新派生键——gpio_relay_line/
+#    gpio_led_line 是格位专名，语义不可混用；扩键属契约级 C4 裁定＋descriptor.rs＋backend＋
+#    门 n 联动）；power.charger 随批N3 器件角色进场（计划 §3）。bus.*/net.online/power.budget
+#    ＝logic 内建格无引脚绑定（logic 角色不进本表），其覆盖口径归门 a 转红收口件另裁。
+[[role]]
+name = "power.rail.sense"
+slot = "power.rail"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr"]
+derives = ["i2c_bus", "ina219_addr"]
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = true
+note = "域电平测点；instance=域名 → pin_id=power.rail.sense.rail5v（domains[].sense 一律写 pin_id，校验⑥-d）。droppable=false——测量面必须活着才知欠压（同 power.battery.meter）。host 侧 controller 词形 i2c<N> 派生 i2c_bus=N、addr 派生 ina219_addr（测点器件类同 INA219）"
+
+[[role]]
+name = "power.current.sense"
+slot = "power.rail"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr"]
+derives = ["i2c_bus", "ina219_addr"]
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = true
+note = "域电流测点（同 power.rail.sense 形状，域流面）；instance=域名 → pin_id=power.current.sense.rail5v（domains[].current_sense 一律写 pin_id，校验⑥-d）。droppable=false 同上"

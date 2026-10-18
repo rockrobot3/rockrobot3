@@ -562,6 +562,22 @@
   decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；rr3-power 模块设计 P-9
   行 X-4 加注。⑥板侧 power.rs 零改动；敞口表无增减。
 
+- **2026-10-18 批N2 件六：⑨-a 门 a 报告模式 ＋ 基-39 N2 那一刀角色扩表（decisions.md §2
+  施工图§6-④ 裁定）**：①`contracts/roles.toml` append 两角色 power.rail.sense/
+  power.current.sense（slot=power.rail、iface=Rr3Power、requires=controller+addr、
+  per_instance=true、droppable=false——形状与批N3 归属注记见 conventions §2 件六条目；
+  covered normal 格 4→5，校验②不涉——power.rail 是 base 层格不进 enabled_slots∩present）；
+  ②`check.sh` 建 `step "⑨-a 基-39 角色覆盖六表对账·报告模式"`——报告三段 A（未覆盖
+  normal 格）/B（roles 四外键悬空，应恒 0、硬红不进基线）/C（TRAITS·PIN_KEYS 差集），
+  红账＝A+B+C 对低水位基线 `tools/ci/gate-a-baseline.txt`（初值 23＝15+4+4，配套 c
+  "红条数单调不增"：count>基线即红、文件缺/坏即红 fail-closed、count 下降打印须同批下调；
+  配套 a＝报告走 stdout 可见面）；键集四腿全部自代码常量导出不抄第二份（⑨-n 先例，
+  `RR3_PIN_KEYS` 声明数/实解析数判等）；③rr-registry roles.rs 契约测试同批 4→6。
+  **三事实源同批对表：可数 step 14→15 行、专属执法位 4 把不变＋报告位 1 把、待建门
+  20→19 把**（门 a 转入"已建·报告模式"，转红随基-39 全刀落完——switch/charger 归批N3、
+  logic 内建格覆盖口径归转红收口件另裁）；decisions.md §2 施工图§6-④ 行施工注记＋§4
+  变更记录同批（提交号随批N2 收口对账回填）；contracts/README 演进登记同批；敞口表无增减。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；
