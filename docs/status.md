@@ -510,6 +510,18 @@
   无原子目录，D15 防空壳）。③本件不建执法步（check.sh 零改动、可数 step 14 行/待建门 20 把不变），
   角色覆盖扩表 4→18 归件六基-39；敞口表无增减。详录 [conventions §2](process/conventions.md) 同日条目。
 
+- **2026-10-18 批N2 件三：校验⑥-c2 运行期判据实体 ＋ D3 无器件合法态（decisions.md 裁定 5）**：
+  ①`rr-hal-api` 落判据实体 `rr3_rail_tier_effective(tier, age_ms: Option<u32>, max_age_ms)`——
+  `age > max_age_ms` 或时基取不到（`None`，零新类型）⇒ 折 `Unknown`、边界 `age == max` 不折；
+  红例五断言（新鲜原样/边界不折/超龄 Ok⇒Unknown/超龄 Severe⇒Unknown 陈旧不许冒充新鲜/None⇒Unknown），
+  rr-hal re-export 补函数名——单真值点，产出侧与消费侧共用不许手抄判据。②D3 落地 rrd `profile.rs`：
+  `[slots].device_absent` 表（格名 → 非空理由）＋三查 fail-closed（在册 / 必须 base 层格——非 base
+  格缺席表达＝不进 present，第二套语法即红 F-2 同型 / 理由非空）；`present` 语义不动、schema_version
+  = 3 不动（可选键 append 非破坏性）。③测试：rrd 正例一绿（power.battery 带理由登记 boot 过、不进
+  缺格判定）＋三红一组＋空 map 断言，rr-hal-api 红例进 lib 测试；**本件不建 check.sh 执法步**
+  （可数 step 14 行/待建门 20 把不变）。④decisions.md D3 行施工注记同批（提交号随批N2 收口对账
+  回填）；运行期对照（"无器件 vs 坏了"分辨）归件五/批N4；敞口表无增减。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

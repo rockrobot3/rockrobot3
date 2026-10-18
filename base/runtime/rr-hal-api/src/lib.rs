@@ -191,6 +191,31 @@ pub struct Rr3RailState {
     pub age_ms: u32,
 }
 
+/// ⑥-c2 判据实体（批N2 件三，全案 §6 T-6 运行期读数可信度）：按龄期折算有效档位。
+///
+/// 判据一条写完——`age_ms > max_age_ms` **或** 时基取不到基准（`age_ms` 观测端
+/// 为 `None`）⇒ 折 [`Rr3RailTier::Unknown`]；否则读数原样。`Option` 表达"取不到
+/// 基准"零新类型：产出侧（后端/RailMonitor）取不到 epoch 时本就不该编造龄期，
+/// `None` 就是如实申报的形状（Y-4：折 0 的假龄期不许冒充新鲜）。
+///
+/// 单真值点：产出侧与消费侧（执行面闸门、展示面面板、brain）共用本函数，不许
+/// 各自手抄 `>` 判据。边界 `age == max_age_ms` 不折（新鲜度上界是闭区间内）。
+///
+/// 消费纪律（[`Rr3RailTier`] 类型注记）：折出的 `Unknown` 在执行面按 `Severe`
+/// 那一侧处置（闸门保持置位 / 不许解禁），在展示面原样显示——本函数只折档，
+/// 不判处置策略，执法归校验⑥-c2 消费侧（板侧守护 / 件五 RailMonitor 归属搬家）。
+pub fn rr3_rail_tier_effective(
+    tier: Rr3RailTier,
+    age_ms: Option<u32>,
+    max_age_ms: u32,
+) -> Rr3RailTier {
+    match age_ms {
+        None => Rr3RailTier::Unknown,
+        Some(age) if age > max_age_ms => Rr3RailTier::Unknown,
+        Some(_) => tier,
+    }
+}
+
 /// HAL 错误
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rr3HalError {
@@ -491,5 +516,38 @@ mod tests {
             tier: Rr3RailTier::Severe,
             age_ms: 0
         }, s, "陈旧的 Severe 与新鲜的 Severe 在接口上必须可区分（age_ms 入等值面）");
+    }
+
+    /// ⑥-c2 判据红例组（批N2 件三，全案 §6）：超龄与无基准折 Unknown、新鲜原样、
+    /// 边界不折、陈旧 Severe 不许冒充新鲜（T-6 立项理由——没有 Unknown 第四态，
+    /// 面板/brain 拿着不敢信的数据照样判定）。
+    #[test]
+    fn rail_tier_effective_folds_stale_or_unclocked_readings_into_unknown() {
+        // 新鲜读数原样（三电平档都不折）
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(100), 1_000),
+            Rr3RailTier::Ok
+        );
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(1_000), 1_000),
+            Rr3RailTier::Severe,
+            "边界 age == max_age_ms 不折（判据是严格 >，新鲜度上界闭区间内）"
+        );
+        // 超龄 Ok ⇒ Unknown（陈旧的 Ok 不许冒充新鲜）
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(1_001), 1_000),
+            Rr3RailTier::Unknown
+        );
+        // 超龄 Severe ⇒ Unknown（陈旧的 Severe 与"新鲜的 Severe"在执行面等处置，
+        // 但在可信度上必须可区分——冒充新鲜即 T-6 红例）
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(u32::MAX), 1_000),
+            Rr3RailTier::Unknown
+        );
+        // 时基取不到基准（None）⇒ Unknown（Y-4：编造龄期不许冒充新鲜）
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Ok, None, 1_000),
+            Rr3RailTier::Unknown
+        );
     }
 }

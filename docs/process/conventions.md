@@ -2586,6 +2586,27 @@ base_capabilities 5→**7**（与 slots 基础层钉死等价，`slots_base_laye
 可数 step 14 行、待建门 20 把计数均不变）；②-a0 元判据尚未建，新格 normal 无在册角色属诚实红账，
 角色覆盖扩表 4→18 归件六基-39；contracts/README 演进登记与裁定段计数、status.md 台账同批。
 
+2026-10-18（**批N2 件三：校验⑥-c2 运行期判据实体 ＋ D3 无器件合法态**，decisions.md 裁定 5）：
+①判据实体落 rr-hal-api 契约面（单真值点——产出侧与消费侧共用，不许各自手抄 `>` 判据）：
+`rr3_rail_tier_effective(tier, age_ms: Option<u32>, max_age_ms: u32) -> Rr3RailTier`——判据一条写完：
+`age_ms > max_age_ms` **或** 时基取不到基准（`Option::None`，零新类型表达"取不到 epoch 就不编造
+龄期"，Y-4 同线）⇒ 折 `Unknown`；边界 `age == max_age_ms` 不折（新鲜度上界闭区间内）；红例五断言
+（新鲜原样 / 边界不折 / 超龄 Ok ⇒ Unknown / 超龄 Severe ⇒ Unknown——陈旧 Severe 不许冒充新鲜，
+T-6 立项理由 / `None` ⇒ Unknown），rr-hal re-export 同批补函数名。②D3 落地 rrd `profile.rs`：
+`Rr3Profile` 加 `slots_device_absent: BTreeMap<String, String>` 字段（[slots].present 附近，
+doc 引 D3/L-28），[slots] 段解析 `device_absent` 表（格名 → 非空理由；留空即红——no_injection
+范式，缺席不写理由＝未申报的静默退化）＋未知键白名单 `present`→`present / device_absent` 放行；
+查册门三查 fail-closed：格名在册（查册门）、必须是 base 层格（**非 base 格的缺席表达＝不进
+present，写进本表属第二套语法即红，F-2 同型**）、理由非空（解析段已判）。`present` 语义不动
+（本板物理在位格位声明，base 格不许进 present 的既有门照跑）——device_absent 是 base 格专属的
+器件缺席登记，与 present 正交；schema_version = 3 不动（[slots] 段新可选键 append，非破坏性）。
+③测试：rrd `device_absent_declares_base_slot_absence_legally`（正例：power.battery 带理由登记
+boot 过、不进缺格判定）＋ `device_absent_gate_rejects_unknown_nonbase_and_empty_reason`（三红）
+＋ `good_profile_parses` 补空 map 断言；rr-hal-api 红例用例进 lib 测试（判据实体＋红例全在
+cargo test，**本件不建 check.sh 执法步**——可数 step 14 行、待建门 20 把计数均不变）。
+④decisions.md D3 行施工注记同批（提交号随批N2 收口对账回填）；运行期对照（battery 回
+Unsupported 时"无器件 vs 坏了"的分辨）归件五/批N4——本件只落登记面与判据实体，不消费。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按
