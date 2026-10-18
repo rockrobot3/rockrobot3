@@ -794,10 +794,19 @@ else
   printf 'PASS  ⑨-a 扫面前件（slots %s 格/normal %s × roles %s × traits %s × desc_keys %s × pin_keys %s，全部自契约表/代码常量导出）\n' \
     "$ga_slot_n" "$ga_normal_n" "$ga_roles_n" "$ga_traits_n" "$ga_desc_n" "$real_pin_n"
   ga_a=0; ga_b=0; ga_c=0
+  # slot 名单单源导出（循环外一次 fork；打空即红——键集导出打空属门禁失效，fail-closed 同扫面前件）。
+  # 判定用 herestring 同源变量：不得写 `printf '%s\n' "$(cut ...)" | grep -qxF`——
+  # command substitution 在管道左子 shell 内延迟写入，grep -q 会竞态提前退而误判悬空
+  # （实-15：完整门禁下间歇 B=1/2 假红，write error 与红笔一一对应，⑨-a 段独立跑恒绿）。
+  ga_slot_ids="$(cut -f1 "$ga_slots")"
+  if [ -z "$ga_slot_ids" ]; then
+    printf 'FAIL  ⑨-a slot 名单导出打空——键集导出打空属门禁失效，不放行\n'
+    gate_a_fail=1
+  fi
   # —— B 段：roles 侧悬空（应恒 0；悬空外键任何时候都是错，硬红不进基线）
   while IFS=$'\t' read -r r_nm r_sl r_if r_rq r_dv; do
     [ -n "$r_nm" ] || continue
-    if ! printf '%s\n' "$(cut -f1 "$ga_slots")" | grep -qxF "$r_sl"; then
+    if ! grep -qxF "$r_sl" <<<"$ga_slot_ids"; then
       printf 'B  role %s 的 slot 悬空: %s（slots.toml 无此格）\n' "$r_nm" "$r_sl"
       ga_b=$((ga_b + 1))
     fi
