@@ -18,9 +18,11 @@ pub use rr_core::control::Rr3RateGate;
 
 /// servo/command 动作形态判定（批N3 件三，值域留件）：词缺席 = auto（保守——
 /// 不申报按自动）。词表解析走 rr-hal-api 单真值点，运行命令面白名单窄化到
-/// {jog, auto}——calib-* 两词是标定面（批N3 件四）的形态，运行面收到也不执行。
-/// 形态合法性（未标定拒自动等）在 [`rr_hal_api::rr3_act_motion_allowed`]，
-/// 调用方持轴状态判，本判定只管词面。
+/// {jog, auto}——calib-* 两词是标定面形态（判据 rr-hal-api 在册），其运行受理
+/// 随批N2 逐域电流采样到位后开（全案 §6 路线 C 自动段）；N2 收口前标定只准
+/// 单步点动＋人工确认，标定产物的落盘走 rrd 的 axis_write 写入面（批N3 件四），
+/// 不经运行命令面。形态合法性（未标定拒自动等）在
+/// [`rr_hal_api::rr3_act_motion_allowed`]，调用方持轴状态判，本判定只管词面。
 pub fn rr3_servo_check_motion(word: Option<&str>) -> Result<Rr3ActMotion, String> {
     match word {
         None => Ok(Rr3ActMotion::Auto),
