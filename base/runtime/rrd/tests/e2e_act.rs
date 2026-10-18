@@ -129,13 +129,13 @@ source = "manual"
 "#;
 
 /// config 夹具：与仓内 `modules/rr3-act/config.toml` 同形状（main.rs 的
-/// `config_parse_covers_repo_shape` 钉过同形状解析，漂移当场红）。
+/// `config_parse_covers_repo_shape` 钉过同形状解析，漂移当场红）。行程键不在
+/// config（批N3 件五门 g 收敛：行程真值 = 轴档案经 RR3_ACT_AXIS_STATE 注入）。
 const CONFIG: &str = r#"
 [rr3-act]
 log_level = "info"
 
 [rr3-act.servo]
-angle_limit_deg = [70, 110]
 move_timeout_ms = 800
 state_min_interval_ms = 50
 
