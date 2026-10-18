@@ -1010,6 +1010,18 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   （本表第 9 行在案，`--brain` 演练 fail-fast 同款），brain 腿归 CI/装机环境。**VAD feed 毫秒账
   与 esp32 非阻塞源部分读的耦合**（`vad/mech.rs` `above_ms += frame_ms` 假设每 feed 恒 20ms）：
   探针实证 92% 拍满 320 帧（esp32audio ring 已把 128ms 突发摊平），实际影响小，如实登记不改判。
+- **A 批真板冒烟（二）——全链完全体验收过（2026-10-18，提交 `623a526`）**：`rr3-sim --brain
+  --audio-backend esp32 --sink-backend mac`（mock 档）全语音对话闭环 **OK**——板麦语音 →
+  VAD 真起音真判停（vad_start ×12）→ brain 成轮 ×6（trace=1..6，ASR/LLM 为 mock 固定文本，
+  轮次由真板音频驱动）→ interact mac 扬声器出声 ×6（tts 1520ms/轮）→ `rr3-ctl status` 三模块
+  running、`denied_publish = 0`。工具随批小改：`--brain` 演练就绪上界 env 可覆盖
+  （`RR3_BRAIN_READY_DEADLINE_MS`，缺省 60s 零改动）——sim burst 源自动说话 60s 够用，
+  真板档等真人响应节奏不可预置（60s 硬上限首轮演练超时暴露）。本机 python 门槛随批解决：
+  Miniforge x86_64 用户目录静默装（`/Users/apple/miniforge3`，python 3.14，不碰系统
+  python3/shell 配置；brew 源被墙 + arm64 包 Bad CPU type（本机 Intel）两绕行），调用时
+  `PATH=/Users/apple/miniforge3/bin:$PATH` 显式前插。A 批（语音自由交流）至此**代码 + 配置 +
+  工具 + 真板验收全收官**：c1–c6（`1d00cef`→`5cb7f98`→`5dce1cd`→`406b1ef`→`ebb0c81`）+
+  冒烟(一)（`7438dcc`）+ 本批。真 key 就位后 `--brain-cloud real` 切档即全语音自由对话。
 - **0.0.6 模型连接抽象批——AgentRT v3 式连接行 + 密钥双源 + 面板密钥面（2026-10-14，提交
   `d69e918`+`89eb71e`+本批记）**：用户需求"抽象化 API 客户端连云端/本地模型；操作面板填 key，
   代码无明文密钥"（立项计划 .trae/documents/rock3-model-client-abstraction-and-panel-keys.md，
