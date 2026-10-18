@@ -2,8 +2,8 @@
 // 真值点：hardware/esp32-mini/axis/*.toml（行程档案的 center/lo/hi 三键；文件名
 // instance 与 pin 末段对账、行程窗口 lo<center<hi 由生成器 fail-closed 校验）。
 // 批N3 件五门 g 收敛：行程唯一真值点在档案——板侧 board.rs 撤手写
-// AXIS_CENTER/PAN_LIMIT/TILT_LIMIT 字面量改读本表；改行程只改档案并重跑本
-// 生成器。rrd 装配注入（RR3_ACT_AXIS_STATE）与板侧本表同源同值。
+// 行程字面量改读本表；改行程只改档案并重跑本生成器（rrd 装配注入
+// 与板侧本表同源同值）。
 //（include! 进 board.rs 条目流，头注用普通注释——inner doc 在 item 后不合法。）
 
 /// 轴 pan 行程真值三元组（lo, hi, center）——档案
