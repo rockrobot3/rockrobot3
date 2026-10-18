@@ -17,10 +17,12 @@ ops = [
   { slot = "move_timeout_ms", src_key = "rr3-act.servo.move_timeout_ms" },
   { slot = "state_min_interval_ms", src_key = "rr3-act.servo.state_min_interval_ms" },
 ]
-# 电流需求申报（校验⑨ 申报面，批N2 首件基-36）：act.axis.pwm 是全仓唯一
-# kind=power 角色（roles.toml），SG90 类峰值 ~700 mA（全案坑 9 / §3.2 例）。
-# Σ(critical=true) 对 rail5v current_cap_ma=2000 的比对读者 = rrd
-# rr3_demand_budget_check；sustained_ma / concurrency_group 随门 c（批N2 本体）同批落。
+# 电流需求申报（校验⑨ 申报面，批N2 首件基-36 + 门 c 五键定形）：act.axis.pwm 是
+# 全仓唯一 kind=power 角色（roles.toml），SG90 类峰值 ~700 mA / 连续 ~120 mA
+# （ADR-0021 裁定 2 / 全案坑 9）。**每实例语义**：条目是每个角色实例（每轴）的需求，
+# 装载读者 rrd rr3_demand_budget_check 按角色实例数扩算后 Σ(critical=true) 对
+# rail5v current_cap_ma=2000 比对；concurrency_group=[] 显式不分群 = 与同域全体
+# 并发（最坏口径，T-5 必须显式写）。
 demands = [
-  { rail = "rail5v", peak_ma = 700, critical = true },
+  { rail = "rail5v", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },
 ]

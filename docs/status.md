@@ -484,6 +484,19 @@
   ①②落、**③专属执法步 = ⑨-c/门 c 仍待建**——判据不接装载拒链，可数 step 13 行、待建门 21 把**计数均不变**；
   裁-9 推翻条件（"写了 demands 且 ⑨ 在跑"）未满足。`contracts/*.toml`、`check.sh` 零改动；敞口表无增减。
 
+- **2026-10-18 批N2 件一：⑨-c 门 c 接链（校验⑨ 装载拒链）**：①申报面升五键定形（ADR-0021 裁定 2——
+  `sustained_ma` 正整数且 ≤ peak（物理矛盾 fail-closed）、`concurrency_group` 缺键即红（T-5 同 no_injection
+  范式，显式 `[]` = 不分组 = 最坏口径合法）；servo 申报升 `rail5v 700/120/true/[]`）；②判据接 boot 链
+  致命汇合点——`rr3_demand_declared_expand` per-instance 扩算（实例数 = 角色 iface ∈ 件 handles.trait 且
+  slot 绑本模块的 pin 数，归因打空地板 1）＋`rr3_demand_budget_check` 并发口径（恰一组归属 = 组内互斥取
+  max，空组/多组归属按不收窄计——F-12 收窄必须是数据）＋`rr3_demand_kind_power_gaps`（kind=power pin
+  挂轨而绑定模块未申报 ⇒ 红）；③专属执法步 `check.sh` 建 `step "⑨-c 电流预算装载拒链"`（显式过滤器
+  `demand_budget` 封 fail-open，4 用例）。反例组扩：并发三态（同组互斥绿 / 多组不收窄 2100 红）＋装载
+  拒链三用例 `demand_budget_chain_*`（三件叠加 2100 红 / 未申报红 / 同布局组收窄 1400 绿）；
+  **可数 step 13→14 行、专属执法位 3→4 把、待建门 21→20 把**（conventions §2 对表段 / architecture §14 /
+  全案 §16.4 同批）；decisions.md 基-36 行回填首件提交号 `bcc13fd`、裁-9 推翻条件满足；
+  `contracts/*.toml` 零改动、敞口表无增减。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

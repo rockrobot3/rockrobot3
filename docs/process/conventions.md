@@ -38,6 +38,13 @@
 **专属执法位建成 3 把、待建门 21 把**；键名单自代码常量 `RR3_PIN_DERIVED_KEYS` 导出（单真值点，批N3 扫面 7→8 自动跟随），
 扫面前件 fail-closed 四查、`[hardware]` 段行注释先剥后逐行点名；**门 n 三层判据自此齐**（下两段"③ 缺"的历史登记不回改），
 `spi_device` 收口仍随批N3（status.md 敞口第 18 行）。
+**2026-10-18 对表（批N2 件一，⑨-c 门 c 接链）**：建 **`step "⑨-c 电流预算装载拒链…"`**（校验⑨ 第 ③ 层专属执法步，
+全案 §5 ⑨ 行 / §16.4）⇒ 可数 step **14 行**、**专属执法位建成 4 把、待建门 20 把**；
+判据＝装载期 per-instance 扩算后 Σ demands.peak_ma (critical=true) ≤ current_cap_ma（`rrd rr3_demand_budget_check`，
+接 boot 链致命汇合点）＋ kind=power pin 申报覆盖判据（`rr3_demand_kind_power_gaps`）＋ concurrency_group 恰一组
+归属按组互斥取 max（F-12：不重叠必须是数据——空组/多组归属按不收窄计，宁超算不漏算）；
+显式过滤器 `demand_budget` 封 fail-open（4 用例＝`demand_budget_check_nine` 并发三态 ＋ `demand_budget_chain_*`
+装载拒链三用例；新拒链用例命名须带 `demand_budget` 前缀进本步扫面）。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
@@ -2535,6 +2542,25 @@ domains[rail].current_cap_ma`，fail-closed 逐条点名：rail 不在 domains �
 **三层诚实登记（实-14）**：①判据实体落、②反例用例落、**③专属执法步 = ⑨-c / 门 c 仍待建**——判据不接装载拒链，
 可数 step 13 行、待建门 21 把**计数均不变**；裁-9 推翻条件（"写了 demands 且 ⑨ 在跑"）**未满足**（⑨ 尚不在跑）。
 `contracts/*.toml` 零改动、`check.sh` 零改动。
+
+2026-10-18（**批N2 件一：⑨-c 门 c 接链**，校验⑨ 装载拒链）：判据接 boot 链致命汇合点。
+①申报面五键定形（ADR-0021 裁定 2）＝`{ rail, peak_ma, sustained_ma, critical, concurrency_group }`
+（`rr3_demands_from_array` 重写：sustained_ma 正整数且 ≤ peak_ma——连续分量超过峰值是物理矛盾 fail-closed；
+concurrency_group **缺键即红**（T-5 同 no_injection 范式——缺省与漏填不可区分），显式 `[]` = 不分组 =
+全体并发最坏口径合法；servo 申报升五键 `rail5v 700/120/true/[]`）；②判据实体接链（`rrd/src/profile.rs`）：
+`rr3_demand_declared_expand` per-instance 扩算（**每实例语义**：条目 = 该件服务的每个角色实例的需求，
+实例数 = 角色 iface ∈ 件 handles.trait 且 slot 绑本模块的 pin 数，归因打空地板 1 宁超算不漏算，
+同模块多件声明同一 trait 各按全额计）＋`rr3_demand_budget_check` 并发口径（恰一组归属 = 组内互斥取 max，
+空组/多组归属按不收窄计——F-12 收窄必须是数据，判据只认数据不验物理）＋`rr3_demand_kind_power_gaps`
+（§5 ⑨ 缺失语义：角色 kind=power 的 pin 挂轨 X 而绑定模块申报面无 X 需求 ⇒ 红；rail 空/none 由⑥-b
+点名不双报）；③执法位 `check.sh` 建 `step "⑨-c 电流预算装载拒链"`。反例组扩：`demand_budget_check_nine`
+并发三态（同组互斥 3×700→max 绿 / 多组归属不收窄 2100 红）＋装载拒链三用例 `demand_budget_chain_*`
+（三件同域叠加 2100 红 / kind=power 未申报红 / 同布局组收窄 1400 绿）；真实 drill 兼容
+（default/distro/esp32-mini 三份 profile 各单轴 700 ≤ cap 2000）。**三事实源同批对表：可数 step 13→14 行、
+专属执法位 3→4 把、待建门 21→20 把**（§2 对表段 / architecture §14 / 全案 §16.4）；
+decisions.md 基-36 行回填首件提交号 `bcc13fd`，裁-9 推翻条件（"写了 demands 且 ⑨ 在跑"）**满足**——
+申报面定形 `[assemble].demands`（形状以 ADR-0021 裁定 2 / 基-36 为准，非裁-9 行原文的 `[[demand]]`）。
+`contracts/*.toml` 零改动。
 
 ## 3 结构纪律
 

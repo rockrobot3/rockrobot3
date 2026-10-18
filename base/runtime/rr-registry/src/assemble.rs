@@ -27,15 +27,19 @@
 //!   desc_key 存在性**不在本模块判**——描述符注入是 spawn 时 `RR3_HAL_BINDINGS`
 //!   env 的事，存在性归探测面（实测缺），与 rr-hal 后端选择的 fail-closed 同一路。
 //!
-//! **电流需求申报面**（`[assemble].demands`，批N2 首件基-36 / 裁定 13"只交一件"）：
-//! 每条 `{ rail, peak_ma, critical }`——件在 `rail` 域上的峰值电流需求（mA）。
-//! 校验⑨ 判据（`Σ demands.peak_ma (critical=true) ≤ domains[rail].current_cap_ma`，
-//! 全案 §5）的读者在 rrd 装载侧（`profile::rr3_demand_budget_check`），本模块只管
-//! 形状：rail 非空、peak_ma 正整数、critical 显式布尔（不给缺省）；**缺键 = 空申报
-//! 合法**——执法面"件未申报而角色 kind=power → 红"归门 c（批N2 本体），不在此预支。
+//! **电流需求申报面**（`[assemble].demands`，批N2 首件基-36 / 裁定 13"只交一件"，
+//! 门 c 补齐五键定形＝ADR-0021 裁定 2）：每条
+//! `{ rail, peak_ma, sustained_ma, critical, concurrency_group }`——件在 `rail` 域上的
+//! 电流需求（mA）。**每实例语义**：条目是"该件服务的每个角色实例"的需求，装载读者
+//! （rrd `profile::rr3_demand_budget_check`）按角色实例数扩算后再加总比对域 cap
+//! （校验⑨，全案 §5），本模块只管形状：rail 非空、peak_ma/sustained_ma 正整数且
+//! sustained ≤ peak、critical 显式布尔（不给缺省）、concurrency_group 必须显式写
+//! （T-5：显式空数组 = 不分组 = 全体并发最坏口径，合法；缺键即红——同 no_injection
+//! 范式，缺省与漏填不可区分）。**缺 `demands` 键 = 空申报合法**——执法面"件未申报
+//! 而角色 kind=power → 红"已随门 c（批N2 本体 ⑨-c）落 rrd 装载拒链，不在形状层预支。
 //! rail 域在册性也不在此判（rr-registry 无 domains 数据，读者对 profile 比对）。
-//! `concurrency_group`（P-10 申报面字段）随门 c 同批落。增键不 bump：demands 缺省
-//! 语义 = 未申报，已激活 17 份数据语义不变（composite.rs 头注"只增不 bump"同构）。
+//! 增键不 bump：demands 缺省语义 = 未申报，已激活 17 份数据语义不变（composite.rs
+//! 头注"只增不 bump"同构）。
 //!
 //! 装配段对缺项的处置（ADR-0019 修订 1 ③）：**该格 `Degraded`、点名到件，不 fatal**
 //! ——件没病，装配声明坏了重启治不了；修数据 + 重启 rrd 是唯一解除路。
@@ -90,16 +94,25 @@ pub struct Rr3AssembleOp {
     pub src_key: String,
 }
 
-/// 一条电流需求申报：件在 `rail` 域上的峰值电流需求（批N2 首件基-36；判据⑨ 的
-/// 申报分子，加总与域 cap 比对在 rrd 读者侧）
+/// 一条电流需求申报：件在 `rail` 域上的电流需求（批N2 首件基-36 立三键，门 c 补齐
+/// 五键定形＝ADR-0021 裁定 2 `[[atom.demand]]` 形状；判据⑨ 的申报分子，加总与域
+/// cap 比对在 rrd 读者侧）。**每实例语义**：条目是"该件服务的每个角色实例"的需求，
+/// 装载读者按角色实例数扩算（pin 数 × peak_ma），件不预乘。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rr3AssembleDemand {
     /// 电力网络域名（对 [[supplies.domain]].name 比对，在册性归 rrd 读者）
     pub rail: String,
-    /// 峰值电流 mA（正整数；critical=true 时进校验⑨ 预算加总）
+    /// 峰值电流 mA（正整数；critical=true 时进校验⑨ 预算加总；堵转/满亮等最坏瞬时）
     pub peak_ma: i64,
+    /// 连续电流 mA（正整数且 ≤ peak_ma——连续分量超过峰值是物理矛盾，fail-closed）
+    pub sustained_ma: i64,
     /// 是否关键需求（显式布尔不给缺省；false 不进 Σ）
     pub critical: bool,
+    /// 并发组名集（T-5）：同组条目互斥（至多一个同时取流），收窄校验⑨ 的"全部同时"
+    /// 最坏缺省——不重叠必须是数据，不许运行期推断（F-12）。**必须显式写**（同
+    /// no_injection 范式）：缺键 = 与"漏填"不可区分，一律红；显式空数组 = 不分组 =
+    /// 全体并发（最坏口径）合法。多组归属的条目在读者侧按不收窄计（宁超算不漏算）。
+    pub concurrency_group: Vec<String>,
 }
 
 /// 一份装配清单的解析产物（空数组合法，但空面须明写 no_injection，见下）
@@ -107,8 +120,8 @@ pub struct Rr3AssembleDemand {
 pub struct Rr3AssembleFacts {
     pub handles: Vec<Rr3AssembleHandle>,
     pub ops: Vec<Rr3AssembleOp>,
-    /// 电流需求申报（基-36 首件；缺键 = 空申报合法——"kind=power 未申报 → 红"
-    /// 的执法面归门 c，不在形状层预支）
+    /// 电流需求申报（基-36 首件立三键、门 c 补齐五键；缺 `demands` 键 = 空申报合法
+    /// ——"kind=power 未申报 → 红"的执法面在 rrd 装载拒链 ⑨-c）
     pub demands: Vec<Rr3AssembleDemand>,
     /// `no_injection = true`：件明写"本件不需注入面"（0.0.5 批M MC-10 L-5）。
     /// `handles`/`ops` 两数组**均空**时此键必填——否则与"漏填"不可区分，一律判红。
@@ -200,21 +213,26 @@ pub(crate) fn rr3_ops_from_array(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<St
 }
 
 /// demands 数组条目级解析与校验（**件级专用**：组合件级 [assemble] 不认 demands——
-/// 电流需求是原子件的物理属性，不随组合件申报，组合件清单未知键点名即拦）
+/// 电流需求是原子件的物理属性，不随组合件申报，组合件清单未知键点名即拦）。
+/// 五键全部显式（T-5 / ADR-0021 裁定 2）：`concurrency_group` 缺键即红（同 no_injection
+/// 范式——缺省与漏填不可区分），显式空数组 = 不分组 = 全体并发最坏口径，合法。
 pub(crate) fn rr3_demands_from_array(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec<String>) {
     let mut demands = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
         let Some(d) = item.as_table() else {
             errs.push(format!(
-                "demands[{i}] 应为内联表 {{ rail, peak_ma, critical }}"
+                "demands[{i}] 应为内联表 {{ rail, peak_ma, sustained_ma, critical, concurrency_group }}"
             ));
             continue;
         };
         for k in d.keys() {
-            if k != "rail" && k != "peak_ma" && k != "critical" {
+            if !matches!(
+                k.as_str(),
+                "rail" | "peak_ma" | "sustained_ma" | "critical" | "concurrency_group"
+            ) {
                 errs.push(format!(
-                    "demands[{i}] 未知键 {k}（只认 rail / peak_ma / critical；concurrency_group 随门 c 同批落）"
+                    "demands[{i}] 未知键 {k}（只认 rail / peak_ma / sustained_ma / critical / concurrency_group）"
                 ));
             }
         }
@@ -224,12 +242,30 @@ pub(crate) fn rr3_demands_from_array(items: &[Value]) -> (Vec<Rr3AssembleDemand>
             Some(_) => errs.push(format!("demands[{i}].rail 不得为空")),
             None => errs.push(format!("demands[{i}].rail 应为字符串")),
         }
-        match d.get("peak_ma").and_then(Value::as_integer) {
+        let peak = d.get("peak_ma").and_then(Value::as_integer);
+        match peak {
             Some(v) if v > 0 => {}
             Some(v) => errs.push(format!(
-                "demands[{i}].peak_ma = {v} 须为正整数（mA，峰值电流需求）"
+                "demands[{i}].peak_ma = {v} 须为正整数（mA，每实例峰值电流需求）"
             )),
             None => errs.push(format!("demands[{i}].peak_ma 应为整数")),
+        }
+        let sustained = d.get("sustained_ma").and_then(Value::as_integer);
+        match sustained {
+            Some(v) if v > 0 => {}
+            Some(v) => errs.push(format!(
+                "demands[{i}].sustained_ma = {v} 须为正整数（mA，每实例连续电流；ADR-0021 裁定 2 五键定形）"
+            )),
+            None => errs.push(format!(
+                "demands[{i}].sustained_ma 应为整数（连续分量，须 ≤ peak_ma；缺键即红——不给缺省）"
+            )),
+        }
+        if let (Some(p), Some(s)) = (peak, sustained) {
+            if p > 0 && s > p {
+                errs.push(format!(
+                    "demands[{i}].sustained_ma = {s} > peak_ma = {p}（连续分量超过峰值是物理矛盾，fail-closed）"
+                ));
+            }
         }
         let critical = d.get("critical").and_then(Value::as_bool);
         if critical.is_none() {
@@ -237,11 +273,47 @@ pub(crate) fn rr3_demands_from_array(items: &[Value]) -> (Vec<Rr3AssembleDemand>
                 "demands[{i}].critical 应为布尔（显式写不给缺省：true 进校验⑨ 预算加总）"
             ));
         }
-        if let (Some(r), Some(v), Some(c)) = (rail, d.get("peak_ma").and_then(Value::as_integer), critical) {
+        // concurrency_group（T-5）：必须显式写；显式空数组 = 不分组 = 全体并发（最坏
+        // 口径）合法；非空数组的每元素须非空字符串（组名是判据 label 的一部分）。
+        match d.get("concurrency_group") {
+            Some(Value::Array(gs)) => {
+                for (j, g) in gs.iter().enumerate() {
+                    match g.as_str() {
+                        Some(s) if !s.trim().is_empty() => {}
+                        Some(_) => errs.push(format!(
+                            "demands[{i}].concurrency_group[{j}] 不得为空（组名是互斥判据的 label）"
+                        )),
+                        None => errs.push(format!(
+                            "demands[{i}].concurrency_group[{j}] 应为字符串（组名）"
+                        )),
+                    }
+                }
+            }
+            Some(_) => errs.push(format!(
+                "demands[{i}].concurrency_group 应为字符串数组（[] 显式不分组合法——T-5 必须显式写）"
+            )),
+            None => errs.push(format!(
+                "demands[{i}].concurrency_group 缺失（T-5：必须显式写，[] = 不分组 = 全体并发最坏口径；同 no_injection 范式）"
+            )),
+        }
+        let groups: Vec<String> = d
+            .get("concurrency_group")
+            .and_then(Value::as_array)
+            .map(|gs| {
+                gs.iter()
+                    .filter_map(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let (Some(r), Some(p), Some(s), Some(c)) = (rail, peak, sustained, critical) {
             demands.push(Rr3AssembleDemand {
                 rail: r.into(),
-                peak_ma: v,
+                peak_ma: p,
+                sustained_ma: s,
                 critical: c,
+                concurrency_group: groups,
             });
         }
     }
@@ -616,24 +688,28 @@ ops = [
     /// 判据本体（Σ ≤ cap）不在本模块——读者在 rrd rr3_demand_budget_check。
     #[test]
     fn demands_parse_and_shape_errors_are_named() {
-        // 正例：servo 首条真实申报形状（rail5v / 700 / critical；handles 同 servo 真实句柄，
-        // demands 不豁免 L-5 空面规则——它不是注入面）
+        // 正例：servo 真实申报形状（五键定形 = ADR-0021 裁定 2；handles 同 servo 真实
+        // 句柄，demands 不豁免 L-5 空面规则——它不是注入面）
         let f = rr3_registry_assemble_from_text(
-            "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"rail5v\", peak_ma = 700, critical = true },\n]\n",
+            "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n]\n",
         )
         .expect("正例必须过");
         assert_eq!(f.demands.len(), 1);
         assert_eq!(f.demands[0].rail, "rail5v");
         assert_eq!(f.demands[0].peak_ma, 700);
+        assert_eq!(f.demands[0].sustained_ma, 120);
         assert!(f.demands[0].critical);
+        assert!(f.demands[0].concurrency_group.is_empty());
 
         // 缺 demands 键 = 空申报合法（执法面归门 c）
         let f = rr3_registry_assemble_from_text(OK_SAMPLE).expect("无 demands 必须过");
         assert!(f.demands.is_empty());
 
-        // 坏形逐条点名：空 rail / 峰值非正 / critical 缺失 / 未知键 / 非表条目
+        // 坏形逐条点名（五键全显式，T-5）：空 rail / 峰值非正 / 缺 sustained_ma /
+        // sustained>peak 物理矛盾 / critical 缺失 / concurrency_group 缺键 / 非数组 /
+        // 空组名与非串元素 / 未知键 / 非表条目
         let errs = rr3_registry_assemble_from_text(
-            "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"\", peak_ma = 700, critical = true },\n  { rail = \"rail5v\", peak_ma = 0, critical = true },\n  { rail = \"rail5v\", peak_ma = 700 },\n  { rail = \"rail5v\", peak_ma = 700, critical = true, concurrency_group = [] },\n  \"bare\",\n]\n",
+            "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 0, sustained_ma = 120, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 800, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = \"axis\" },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [\"\", 1] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [], wat = 1 },\n  \"bare\",\n]\n",
         )
         .expect_err("坏形必须报错");
         assert!(
@@ -647,17 +723,48 @@ ops = [
         );
         assert!(
             errs.iter()
-                .any(|e| e.contains("demands[2].critical 应为布尔")),
+                .any(|e| e.contains("demands[2].sustained_ma 应为整数")),
             "{errs:?}"
         );
         assert!(
             errs.iter().any(|e| e.contains(
-                "demands[3] 未知键 concurrency_group（只认 rail / peak_ma / critical；concurrency_group 随门 c 同批落）"
+                "demands[3].sustained_ma = 800 > peak_ma = 700（连续分量超过峰值是物理矛盾"
             )),
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains("demands[4] 应为内联表")),
+            errs.iter()
+                .any(|e| e.contains("demands[4].critical 应为布尔")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("demands[5].concurrency_group 缺失")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains(
+                "demands[6].concurrency_group 应为字符串数组"
+            )),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains(
+                "demands[7].concurrency_group[0] 不得为空"
+            )),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains(
+                "demands[7].concurrency_group[1] 应为字符串"
+            )),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("demands[8] 未知键 wat")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("demands[9] 应为内联表")),
             "{errs:?}"
         );
     }
