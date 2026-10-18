@@ -598,10 +598,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
             for k in t.keys() {
                 // domain / budget 是子段键，各自成块解析（第七供给位 / 校验⑩ 分母）
-                if k != "domain"
-                    && k != "budget"
-                    && !RR3_SUPPLIES_KEYS.contains(&k.as_str())
-                {
+                if k != "domain" && k != "budget" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
                     errs.push(format!(
                         "[supplies] 未知键 {k}（只认 {}）",
                         RR3_SUPPLIES_KEYS.join("/")
@@ -827,7 +824,9 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
             for k in t.keys() {
                 if k != "present" && k != "device_absent" {
-                    errs.push(format!("[slots] 未知键 {k}（只认 present / device_absent）"));
+                    errs.push(format!(
+                        "[slots] 未知键 {k}（只认 present / device_absent）"
+                    ));
                 }
             }
         }
@@ -1077,8 +1076,8 @@ pub fn rr3_profile_boot_inputs_with_probe(
             profile.platform_chip
         )
     })?;
-    let platform: Rr3PlatformTable =
-        rr3_registry_platform_table_from_text(&platform_text).map_err(|errs| {
+    let platform: Rr3PlatformTable = rr3_registry_platform_table_from_text(&platform_text)
+        .map_err(|errs| {
             format!(
                 "平台事实表 {} 形状不合，拒绝启动: {}",
                 platform_path.display(),
@@ -1377,15 +1376,12 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 就此上提（原在缺格判定段，纯路径推导无副作用）。
     // 如实注记：assemble.toml 坏形的件无法供 demands facts（坏形已进 assemble_broken
     // 点名），预算加总不含它——洞的可见面 = Degraded 点名，此处不 claim 全覆盖。
-    let root = abs
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| {
-            format!(
-                "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
-                abs.display()
-            )
-        })?;
+    let root = abs.parent().and_then(Path::parent).ok_or_else(|| {
+        format!(
+            "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
+            abs.display()
+        )
+    })?;
     let mut assemble_broken: Vec<(String, String)> = Vec::new();
     let mut scanned: Vec<(String, Vec<(String, Rr3AssembleFacts)>)> = Vec::new();
     for m in profile.enabled_slots.keys() {
@@ -1398,7 +1394,10 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 申报分子：每实例扩算（条目 × 该件经 iface 归因服务到的角色 pin 数，地板 1）
     let declared = rr3_demand_declared_expand(&profile, &roles, &scanned);
     // 校验⑨ 本判（F-12 加总口径：缺省全部同时，收窄只认 concurrency_group 数据）
-    errs.extend(rr3_demand_budget_check(&declared, &profile.supplies.domains));
+    errs.extend(rr3_demand_budget_check(
+        &declared,
+        &profile.supplies.domains,
+    ));
     // 校验⑨ 缺失语义另一半：kind=power 角色挂轨，绑定模块的件申报面必须覆盖
     errs.extend(rr3_demand_kind_power_gaps(&profile, &roles, &scanned));
     // 校验⑩ 内存预算（批N2 n2c-v10，全案 §5 判据⑩ / F-13）：分子 = 装配扫描
@@ -1668,7 +1667,9 @@ fn rr3_check_pin_occupancy(profile: &Rr3Profile, platform: &Rr3PlatformTable) ->
             .pins
             .iter()
             .filter(|p| {
-                p.physical.iter().any(|x| entry.rr3_conflict_pins().contains(x))
+                p.physical
+                    .iter()
+                    .any(|x| entry.rr3_conflict_pins().contains(x))
                     || (!p.controller.is_empty()
                         && entry.rr3_conflict_controllers().contains(&p.controller))
             })
@@ -1961,7 +1962,10 @@ mod tests {
         };
 
         // 正例：servo 五键申报形状（rail5v peak 700 sustained 120 critical，空组）⇒ 无红
-        let ok = vec![("rr3-act/servo".to_string(), vec![d("rail5v", 700, true, &[])])];
+        let ok = vec![(
+            "rr3-act/servo".to_string(),
+            vec![d("rail5v", 700, true, &[])],
+        )];
         assert!(
             rr3_demand_budget_check(&ok, &[rail5v()]).is_empty(),
             "Σ700 ≤ cap 2000 必须绿"
@@ -1969,8 +1973,14 @@ mod tests {
 
         // 反例①：两件同域加总超 cap（Σ2400 > 2000）⇒ 红点名域 + 最坏值 + cap + 申报者
         let over = vec![
-            ("rr3-act/servo".to_string(), vec![d("rail5v", 700, true, &[])]),
-            ("rr3-x/dummy".to_string(), vec![d("rail5v", 1700, true, &[])]),
+            (
+                "rr3-act/servo".to_string(),
+                vec![d("rail5v", 700, true, &[])],
+            ),
+            (
+                "rr3-x/dummy".to_string(),
+                vec![d("rail5v", 1700, true, &[])],
+            ),
         ];
         let errs = rr3_demand_budget_check(&over, &[rail5v()]);
         assert!(
@@ -2005,9 +2015,18 @@ mod tests {
         // 并发口径（F-12：不重叠必须是数据）——恰一组归属 = 组内互斥取 max：
         // 三件各 700 同挂 "axis" 组 ⇒ 最坏 = max(700) = 700 ≤ 2000 绿（不加总 2100）
         let grouped = vec![
-            ("rr3-a/servo".to_string(), vec![d("rail5v", 700, true, &["axis"])]),
-            ("rr3-b/servo".to_string(), vec![d("rail5v", 700, true, &["axis"])]),
-            ("rr3-c/servo".to_string(), vec![d("rail5v", 700, true, &["axis"])]),
+            (
+                "rr3-a/servo".to_string(),
+                vec![d("rail5v", 700, true, &["axis"])],
+            ),
+            (
+                "rr3-b/servo".to_string(),
+                vec![d("rail5v", 700, true, &["axis"])],
+            ),
+            (
+                "rr3-c/servo".to_string(),
+                vec![d("rail5v", 700, true, &["axis"])],
+            ),
         ];
         assert!(
             rr3_demand_budget_check(&grouped, &[rail5v()]).is_empty(),
@@ -2015,7 +2034,10 @@ mod tests {
         );
         // 多组归属 = 不收窄（宁超算不漏算）：条目同时挂两组 ⇒ 全额进 Σ
         let multi = vec![
-            ("rr3-a/x".to_string(), vec![d("rail5v", 700, true, &["g1", "g2"])]),
+            (
+                "rr3-a/x".to_string(),
+                vec![d("rail5v", 700, true, &["g1", "g2"])],
+            ),
             ("rr3-b/y".to_string(), vec![d("rail5v", 700, true, &["g1"])]),
             ("rr3-c/z".to_string(), vec![d("rail5v", 700, true, &["g2"])]),
         ];
@@ -2136,9 +2158,7 @@ gnd_common = "star-1"
         /// act.axis.pwm pin 绑 rr3-pa——无 stage 件则所有 boot 用例被 ⑨ 覆盖判据误红。
         /// 反例用例经覆写本文件构造（空申报 / 追加 oled 件）。
         fn stage_servo_module(&self) {
-            let a = self
-                .dir
-                .join("modules/rr3-pa/atoms/servo/assemble.toml");
+            let a = self.dir.join("modules/rr3-pa/atoms/servo/assemble.toml");
             std::fs::create_dir_all(a.parent().expect("必有父目录")).expect("建 atoms 目录");
             std::fs::write(
                 &a,
@@ -2159,9 +2179,7 @@ gnd_common = "star-1"
 
         /// 覆写 stage 件申报面为"未申报"（⑨ 覆盖判据红例的构造器）
         fn stage_servo_undeclared(&self) {
-            let a = self
-                .dir
-                .join("modules/rr3-pa/atoms/servo/assemble.toml");
+            let a = self.dir.join("modules/rr3-pa/atoms/servo/assemble.toml");
             std::fs::write(
                 &a,
                 "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\n",
@@ -2294,7 +2312,11 @@ gnd_common = "star-1"
     }
 
     /// [`boot_inputs`] 的平台目录显式版（上面两个帮手的共同实现）。
-    fn boot_inputs_in(root: &Root, p: &Path, platform_dir: &Path) -> Result<Rr3ProfileBoot, String> {
+    fn boot_inputs_in(
+        root: &Root,
+        p: &Path,
+        platform_dir: &Path,
+    ) -> Result<Rr3ProfileBoot, String> {
         let _ = root; // Root 只为临时目录的生命周期在场（Drop 清树）
         let wiring =
             crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
@@ -2401,9 +2423,7 @@ mux_group = []
     fn assemble_scan_names_missing_broken_and_injection_gaps() {
         let root = Root::new("assemble-scan");
         // 无 atoms/ 目录 → 空（夹具树/两件式形态）
-        assert!(rr3_assemble_scan(&root.dir.join("no-atoms"))
-            .1
-            .is_empty());
+        assert!(rr3_assemble_scan(&root.dir.join("no-atoms")).1.is_empty());
 
         // 合法空声明（v2，明写不需注入面）→ 空
         let ok = root.dir.join("ok");
@@ -2413,10 +2433,7 @@ mux_group = []
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .unwrap();
-        assert!(
-            rr3_assemble_scan(&ok).1.is_empty(),
-            "合法空声明不得报缺"
-        );
+        assert!(rr3_assemble_scan(&ok).1.is_empty(), "合法空声明不得报缺");
 
         // 缺文件 / 坏形 / 注入缺 三路点名，互不遮蔽
         let bad = root.dir.join("bad");
@@ -2601,10 +2618,7 @@ mux_group = []
         assert!(errs.iter().any(|e| e.contains("heap_reserved_bytes 缺失")));
 
         // 段缺（schema 4 起必填，不许整个子段留空）
-        let bad = GOOD.replace(
-            "[supplies.budget]\nnot_applicable = true\n\n",
-            "",
-        );
+        let bad = GOOD.replace("[supplies.budget]\nnot_applicable = true\n\n", "");
         let errs = rr3_profile_from_text(&bad).expect_err("缺 [supplies.budget] 必须红");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [supplies.budget]")),
@@ -2627,7 +2641,8 @@ mux_group = []
         let bad = ESP32_GOOD.replace("heap_total_bytes = 327680", "heap_total_bytes = 8192");
         let errs = rr3_profile_from_text(&bad).expect_err("total ≤ reserved 必须红");
         assert!(
-            errs.iter().any(|e| e.contains("可用堆 = total − reserved ≤ 0")),
+            errs.iter()
+                .any(|e| e.contains("可用堆 = total − reserved ≤ 0")),
             "{errs:?}"
         );
     }
@@ -3616,7 +3631,10 @@ gnd_common = "star-1"
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
         let parsed = rr3_profile_from_text(&ok).expect("正例文本应能解析");
         assert_eq!(
-            parsed.slots_device_absent.get("power.battery").map(String::as_str),
+            parsed
+                .slots_device_absent
+                .get("power.battery")
+                .map(String::as_str),
             Some("无电池形态（市电/桥上灌供电），校验⑥认它为合法态")
         );
     }
@@ -3691,7 +3709,10 @@ gnd_common = "star-1"
             &root.dir.join("platform-empty"),
         )
         .expect_err("chip 选不到平台表必须拒 boot");
-        assert!(e.contains("读不到平台事实表") && e.contains("rk3566"), "{e}");
+        assert!(
+            e.contains("读不到平台事实表") && e.contains("rk3566"),
+            "{e}"
+        );
     }
 
     /// [platform].chip 留空反例（F-6 缺字段可被留空绕过的封堵面）：chip 是平台
@@ -3791,7 +3812,10 @@ gnd_common = "star-1"
         let root = Root::new("dup-addr");
         let p = root.write_profile("dup-addr.toml", &text);
         let e = boot_inputs(&p).expect_err("(bus, addr) 双占必须拒 boot");
-        assert!(e.contains("校验③-c") && e.contains("(bus i2c1, addr 0x40)"), "{e}");
+        assert!(
+            e.contains("校验③-c") && e.contains("(bus i2c1, addr 0x40)"),
+            "{e}"
+        );
     }
 
     /// 校验④-b 反例：两条 pin 的 physical 命中平台 conflicts 同一子集（esp32 组
@@ -3826,7 +3850,10 @@ gnd_common = "star-1"
              mux_group = [\"i2c0\"]\n"
         )
         .replace("physical = [32]", "physical = [21]")
-        .replace("mux_group = []\n\n[[pin]]\nrole = \"power.battery.meter\"", "mux_group = [\"i2c0\"]\n\n[[pin]]\nrole = \"power.battery.meter\"");
+        .replace(
+            "mux_group = []\n\n[[pin]]\nrole = \"power.battery.meter\"",
+            "mux_group = [\"i2c0\"]\n\n[[pin]]\nrole = \"power.battery.meter\"",
+        );
         rr3_profile_from_text_with_platform("conflict-ok", &text, platform_esp32_text())
             .expect("同组申报的两条命中者必须放行");
     }
