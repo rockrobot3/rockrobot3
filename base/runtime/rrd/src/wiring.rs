@@ -486,7 +486,7 @@ gnd_common = "star-1"
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("profiles")).unwrap();
         let p = dir.join("profiles").join("mini.toml");
-        std::fs::write(&p, "schema_version = 3\n").unwrap();
+        std::fs::write(&p, "schema_version = 4\n").unwrap();
         // 比对基准必须是规范化后的根目录：推导走 canonicalize（macOS 的 /tmp 是
         // /private/tmp 的符号链接），拿夹具原始路径比对会红在系统布局上
         let root_canon = std::fs::canonicalize(&dir).unwrap();

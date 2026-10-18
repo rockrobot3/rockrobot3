@@ -2607,6 +2607,36 @@ cargo test，**本件不建 check.sh 执法步**——可数 step 14 行、待�
 ④decisions.md D3 行施工注记同批（提交号随批N2 收口对账回填）；运行期对照（battery 回
 Unsupported 时"无器件 vs 坏了"的分辨）归件五/批N4——本件只落登记面与判据实体，不消费。
 
+2026-10-18（**批N2 件四：校验⑩ 内存预算——[supplies.budget] 分母 ＋ [assemble] 分子 ＋ schema 4**，
+decisions.md §4 变更记录同批）：
+①分母落 `[supplies.budget]` 四键 `{ not_applicable, task_stack_budget_bytes, heap_total_bytes,
+heap_reserved_bytes }`（ADR-0021 修订 3"栈/堆预算不住 platform 表——三份数据三个主人"）＋**分档自洽
+parse 层裁**：host ⇒ `not_applicable` 必须真且三数键不得并存（自相矛盾红）；rtos/bare ⇒ 必假且三数键
+必填（`task_stack_budget_bytes > 0` / `heap_total_bytes > 0` / `heap_reserved_bytes ≥ 0` /
+`total ≤ reserved` 红文案点名"可用堆 = total − reserved ≤ 0"）；tier 非法（空）跳过分档判不级联；
+段缺红文案点名"host 档显式写 not_applicable = true，不许留空"（F-6）；`schema_version` 3→4
+（新必填段 = 破坏性变更，批N1 `[[supplies.domain]]` 先例；`[supplies]` 段缺时 budget 点名不级联）。
+②分子落 `[assemble]` 新增 `task_stack_bytes`/`heap_peak_bytes` 两键（rr-registry `assemble.rs`）：
+**件级语义非每实例**（双轴共享一个任务栈直加不扩算，与 ⑨ demands 的每实例扩算相反）；负数红
+（"负数是物理矛盾"）；缺省 0 = 未申报不进 Σ——申报义务未触发（板侧任务映射未建模归 0.0.7
+批G/批D1），红例用合成申报＋诚实注记防 L-24 假绿；组合件级 [assemble] 点名两键即红（件级专用）。
+③判据实体 `rr3_memory_budget_check(stack_sum, heap_sum, budget, tier)`（rrd `profile.rs`）：
+`not_applicable` ⇒ 绿；⑩-a 红文案含"分子为件级直加非每实例扩算"；⑩-b 红文案点名
+"heap_total_bytes − 常驻 heap_reserved_bytes"并引 F-13（渲染缓冲/队列/板侧配置全是堆账，
+只加总栈会击穿半边）；装载拒链接入（`rr3_demand_kind_power_gaps` 之后致命汇合点前）——
+坏形件不进加总（可见面 = `assemble_broken` 点名，不 claim 全覆盖，同 ⑨ 诚实注记）。
+④数据三份：default/distro（host）显式 `not_applicable = true`；esp32-mini（rtos）落**声明预算位**
+65536/327680/16384（= 2× 现役 16KB 任务栈＋余量，board.rs THREAD_STACK/MIC_THREAD_STACK 同源；
+堆上限按 S3 数据手册内部 SRAM 推算待 0.0.7 真板对账；首位落账 `UART2_TX_RING`——F-13 常驻
+缓冲是堆账，audio 队列/渲染缓冲/批N4 配置服务随 N-13 补账）；四份 e2e 夹具 + tools/sim 夹具 +
+wiring.rs 路径推导夹具同批 schema 4。
+⑤测试：rrd 六条新用例（判据实体绿/红含等号边界、分档自洽七红、两超限拒 boot、只超堆不超栈
+断言 `!contains("校验⑩-a")`、边界和过 boot、双件直加非每实例扩算）＋ rr-registry 两新
+（parse 正/负/非整数/未知键、组合件级点名红）＋ contract.rs 三处形状 pin 同批 3→4（host 两处
+`not_applicable = true`＋数字键不得并存、rtos 三数键逐值 pin）；⑩ 经步①b `cargo test --workspace`
+进 CI，**本件不建 check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。
+⑥decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；decisions.md §2/§3 无增减。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

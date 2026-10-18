@@ -1105,12 +1105,13 @@ fn default_profile_binds_module_slots_to_real_modules() {
         "route 越界: {route}"
     );
 
-    // schema_version=3（0.0.5 批J 三新段 + 增补轮六批N1 [pins]）：[platform]/[supplies]/
-    // [slots].present 逐键 pin——两份机型与 rrd 解析器同口径演进，漂移即红。
+    // schema_version=4（0.0.5 批J 三新段 + 增补轮六批N1 [pins] + 批N2 [supplies.budget]）：
+    // [platform]/[supplies]/[slots].present 逐键 pin——两份机型与 rrd 解析器同口径演进，
+    // 漂移即红。
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(3),
-        "profile schema_version 漂移（[pins] 随 3 落地）"
+        Some(4),
+        "profile schema_version 漂移（[supplies.budget] 随 4 落地）"
     );
     let tier = v
         .get("platform")
@@ -1134,6 +1135,27 @@ fn default_profile_binds_module_slots_to_real_modules() {
         "safety_core_interval_ms",
     ] {
         assert!(supplies.contains_key(k), "缺 [supplies].{k}");
+    }
+    // [supplies.budget]（schema 4，批N2 校验⑩ 分母）：host 档合法不适用显式写 true
+    //（F-6 不许留空），数字预算键不得并存（与 rrd parse 层分档自洽同口径）。
+    let budget = supplies
+        .get("budget")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies.budget]（校验⑩ 分母，批N2）");
+    assert_eq!(
+        budget.get("not_applicable").and_then(toml::Value::as_bool),
+        Some(true),
+        "host 档 budget 合法不适用必须显式 true"
+    );
+    for num_key in [
+        "task_stack_budget_bytes",
+        "heap_total_bytes",
+        "heap_reserved_bytes",
+    ] {
+        assert!(
+            budget.get(num_key).is_none(),
+            "host 档 not_applicable = true 与数字预算键 {num_key} 并存（自相矛盾）"
+        );
     }
     assert_eq!(
         supplies
@@ -1280,11 +1302,12 @@ fn distro_profile_binds_exactly_the_body_layer() {
         .expect("profile 缺 [os] route");
     assert_eq!(route, "distro", "distro 机 route 必须是快路");
 
-    // schema_version=3 三新段 + [pins]：与 default 同一块参考机，[platform]/[supplies]/
-    // [slots] 逐值一致（present 仍为 16 格全集——distro 缺格是"不绑定"，不是"物理缺"）。
+    // schema_version=4 三新段 + [pins] + [supplies.budget]：与 default 同一块参考机，
+    // [platform]/[supplies]/[slots] 逐值一致（present 仍为 16 格全集——distro 缺格是
+    // "不绑定"，不是"物理缺"）。
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(3),
+        Some(4),
         "profile schema_version 漂移"
     );
     assert_eq!(
@@ -1307,6 +1330,27 @@ fn distro_profile_binds_exactly_the_body_layer() {
         "safety_core_interval_ms",
     ] {
         assert!(supplies.contains_key(k), "缺 [supplies].{k}");
+    }
+    // [supplies.budget]（schema 4，批N2 校验⑩ 分母）：与 default 同板同值——host 档
+    // 合法不适用显式写 true，数字预算键不得并存。
+    let budget = supplies
+        .get("budget")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies.budget]（校验⑩ 分母，批N2）");
+    assert_eq!(
+        budget.get("not_applicable").and_then(toml::Value::as_bool),
+        Some(true),
+        "distro 机 host 档 budget 合法不适用必须显式 true"
+    );
+    for num_key in [
+        "task_stack_budget_bytes",
+        "heap_total_bytes",
+        "heap_reserved_bytes",
+    ] {
+        assert!(
+            budget.get(num_key).is_none(),
+            "host 档 not_applicable = true 与数字预算键 {num_key} 并存（自相矛盾）"
+        );
     }
     let present: Vec<String> = v
         .get("slots")
@@ -1438,8 +1482,8 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
 
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(3),
-        "esp32-mini schema_version 漂移"
+        Some(4),
+        "esp32-mini schema_version 漂移（[supplies.budget] 随 4 落地）"
     );
     assert_eq!(
         v.get("platform")
@@ -1468,6 +1512,30 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
         Some("rr-core"),
         "F-B 看门狗由板侧运行环（rr-core::runtime）喂，不是 rrd"
     );
+    // [supplies.budget]（schema 4，批N2 校验⑩ 分母）：rtos 档必填三数键，取值为
+    // **声明预算位**——与 profiles/esp32-mini.toml 注释同源（board.rs 任务栈 +
+    // S3 内部 SRAM 堆上限推算 + UART2_TX_RING 常驻缓冲），对账归 0.0.7 真板，
+    // 漂移即红（契约 append 同批更新全部形状 pin）。
+    let budget = supplies
+        .get("budget")
+        .and_then(toml::Value::as_table)
+        .expect("esp32-mini 缺 [supplies.budget]（校验⑩ 分母，批N2）");
+    assert_eq!(
+        budget.get("not_applicable").and_then(toml::Value::as_bool),
+        Some(false),
+        "rtos 档 budget 必须走数字预算键（合法不适用为假）"
+    );
+    for (k, expected) in [
+        ("task_stack_budget_bytes", 65536),
+        ("heap_total_bytes", 327680),
+        ("heap_reserved_bytes", 16384),
+    ] {
+        assert_eq!(
+            budget.get(k).and_then(toml::Value::as_integer),
+            Some(expected),
+            "esp32-mini budget {k} 漂移（声明预算位，对账归 0.0.7）"
+        );
+    }
     assert!(
         v.get("hardware").is_none(),
         "esp32-mini 出现 [hardware] 段（三非引脚键是宿主侧语义；板侧描述符进位须同批改本 pin 与 0.0.7 判据）"

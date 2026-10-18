@@ -9,6 +9,9 @@
 //! `pwm_chip`/`pwm_channel`/`gpio_chip`/`gpio_led_line`/`gpio_relay_line`/`i2c_bus`/
 //! `ina219_addr` 自 [hardware] 下移，role 外键 → `contracts/roles.toml`，host 档由
 //! 派生器合成注入文本，rtos/bare 档板侧消费归 0.0.7 批G/批D1）。
+//! schema_version=4 起新增 `[supplies.budget]` 内存预算子段（批N2 n2c-v10，校验⑩
+//! 分母——ADR-0021 修订 3：栈/堆预算不住 platform 表，住 [supplies].budget，
+//! 三份数据三个主人）。
 //! 本模块只做这些事，全部发生在 boot 之前（裁定 4：boot 前消费一次，
 //! 运行期不重排，F⊗F 非法）：
 //! 1. 解析装配单文本（fail-closed：形状不合逐条点名，一条不静默放行）——
@@ -35,7 +38,10 @@
 //!    mate 集 + `hardware/<形态>/wiring.toml`（路径由 [`crate::wiring::
 //!    rr3_wiring_path_for_profile`] 按装配单推导）——校验⑦-a/b/d 的跨档判据在
 //!    boot 链合龙（⑦-c 待件 demands 数据面，批N2），接线档形状与闭合面在
-//!    [`crate::wiring`] 裁。
+//!    [`crate::wiring`] 裁；
+//! 9. 装载期校验⑨⑩（批N2 本体）：装配扫描一次两用——⑨ 电流预算与覆盖判据
+//!    （门 c）+ ⑩ 内存预算判据（[`rr3_memory_budget_check`]，分子 = [assemble]
+//!    内存申报件级直加，分母 = [supplies.budget]），超限即拒 boot（§5 后果 = 拒）。
 //!
 //! 基础层格位（`net.online` / `power.battery`）**恒在位**（slots.toml 2026-10-03 注记）：
 //! 不进 bindings、不进缺格判定，enabled_slots 里声明它们只是"本形态用到"的记账。
@@ -70,14 +76,14 @@ pub const RR3_CONTRACT_DEVICES_PATH: &str = concat!(
     "/../../../contracts/devices.toml"
 );
 
-/// 只认 schema_version = 3（2→3 为破坏性变更：`[[pin]]` 物理绑定段进场、七物理键
-/// 自 [hardware] 下移为 [pins] 派生视图，增补轮六 §4.2 / 门 n P-13；注意与
-/// `RR3_ASSEMBLE_SCHEMA_VERSION`（rr-registry，装配清单域）是两个域，不混写）。
-/// 不匹配 = 契约事故，拒启动。
-const RR3_PROFILE_SCHEMA_VERSION: i64 = 3;
+/// 只认 schema_version = 4（3→4 为破坏性变更：`[supplies.budget]` 内存预算子段
+/// 进场——校验⑩ 分母，批N2 n2c-v10；新必填段随版本 bump，批N1 [[supplies.domain]]
+/// 2→3 先例；注意与 `RR3_ASSEMBLE_SCHEMA_VERSION`（rr-registry，装配清单域）是
+/// 两个域，不混写）。不匹配 = 契约事故，拒启动。
+const RR3_PROFILE_SCHEMA_VERSION: i64 = 4;
 
 /// [supplies] 六键（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）——
-/// 未知键点名与解析白名单共用
+/// 未知键点名与解析白名单共用（budget 子段单独成块解析，同 domain）
 const RR3_SUPPLIES_KEYS: [&str; 6] = [
     "watchdog_present",
     "watchdog_timeout_ms",
@@ -85,6 +91,17 @@ const RR3_SUPPLIES_KEYS: [&str; 6] = [
     "tick_period_ms",
     "tick_jitter_ms",
     "safety_core_interval_ms",
+];
+
+/// [supplies.budget] 四键（校验⑩ 分母，全案 §5 判据⑩ / §4.6 定形裁定③：栈/堆
+/// 预算不住 platform 表，住 [supplies].budget——三份数据三个主人，ADR-0021 修订 3）。
+/// `not_applicable` 是"合法不适用"的显式声明（host 档校验⑩ 不适用必须显式写 true，
+/// 不许留空——F-6）；三数键 host 档不得并存（自相矛盾红）、rtos/bare 档必填。
+const RR3_BUDGET_KEYS: [&str; 4] = [
+    "not_applicable",
+    "task_stack_budget_bytes",
+    "heap_total_bytes",
+    "heap_reserved_bytes",
 ];
 
 /// [platform] tier 三档（ADR-0018 修订 1：承载二分 → 三档）
@@ -158,6 +175,25 @@ pub struct Rr3Supplies {
     /// [pins].rail / wire.net 的在册名单源，校验⑥-a/⑦-b）。声明序 = TOML 序，
     /// 不携带顺序语义；查册用名字，无序消费。
     pub domains: Vec<Rr3Domain>,
+    /// [supplies.budget] 内存预算（校验⑩ 分母，schema 4；⑩-a/⑩-b 的判据分母，
+    /// 分子 = [assemble] 内存申报，见 [`rr3_memory_budget_check`]）
+    pub budget: Rr3Budget,
+}
+
+/// [supplies.budget]：平台内存预算（校验⑩ 分母，不可变快照；ADR-0021 修订 3——
+/// 板侧常量数据化的住处，与 board.rs 真值对账归点验矩阵/真板批）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rr3Budget {
+    /// host 档"合法不适用"显式态（校验⑩ 对 host 不适用必须显式写 true，不许
+    /// 留空——F-6；与三数键互斥：并存 = 自相矛盾红）
+    pub not_applicable: bool,
+    /// 任务栈总预算字节（⑩-a 分母：Σ task_stack_bytes ≤ 本值）
+    pub task_stack_budget_bytes: i64,
+    /// 平台可用堆字节（⑩-b 分母基数）
+    pub heap_total_bytes: i64,
+    /// 平台常驻占用字节（⑩-b 分母减项：可用堆 = total − reserved——板侧常量
+    /// 如 UART2_TX_RING=16384 的数据化住处，F-13）
+    pub heap_reserved_bytes: i64,
 }
 
 /// 一条电力网络域（§3.1 家族 A 轨与域行 + §5 校验⑥）。阈值三键 = nominal/mild/severe
@@ -561,8 +597,11 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                 _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
             }
             for k in t.keys() {
-                // domain 是 [[supplies.domain]] 数组键，单独成块解析（第七供给位）
-                if k != "domain" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
+                // domain / budget 是子段键，各自成块解析（第七供给位 / 校验⑩ 分母）
+                if k != "domain"
+                    && k != "budget"
+                    && !RR3_SUPPLIES_KEYS.contains(&k.as_str())
+                {
                     errs.push(format!(
                         "[supplies] 未知键 {k}（只认 {}）",
                         RR3_SUPPLIES_KEYS.join("/")
@@ -633,6 +672,120 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                     "缺少 [[supplies.domain]]（电力网络声明，第七供给位；schema_version=3 起必填，至少声明一域）"
                         .to_string(),
                 ),
+            }
+            // [supplies.budget]：内存预算声明（校验⑩ 分母，schema 4 起必填——新必填
+            // 段随版本 bump，批N1 [[supplies.domain]] 先例）。分档自洽（ADR-0021 修订 3）
+            // 在 parse 层裁：host 档 not_applicable 必须真且三数键不得并存（自相矛盾）；
+            // rtos/bare 档 not_applicable 必须假且三数键必填（stack/total > 0、
+            // reserved ≥ 0、total ≤ reserved 红）。tier 非法（空）时跳过分档判——
+            // platform.tier 自有错误点名，不级联刷屏。
+            match t.get("budget").and_then(toml::Value::as_table) {
+                None => errs.push(
+                    "缺少 [supplies.budget]（内存预算声明，校验⑩ 分母；schema_version=4 起必填——host 档显式写 not_applicable = true，不许留空）"
+                        .to_string(),
+                ),
+                Some(bt) => {
+                    for k in bt.keys() {
+                        if !RR3_BUDGET_KEYS.contains(&k.as_str()) {
+                            errs.push(format!(
+                                "[supplies.budget] 未知键 {k}（只认 {}）",
+                                RR3_BUDGET_KEYS.join("/")
+                            ));
+                        }
+                    }
+                    match bt.get("not_applicable").and_then(toml::Value::as_bool) {
+                        Some(b) => supplies.budget.not_applicable = b,
+                        None => errs.push(
+                            "supplies.budget.not_applicable 缺失或不是布尔（校验⑩ 不适用必须显式声明，不许留空——F-6）"
+                                .to_string(),
+                        ),
+                    }
+                    let mut nums: BTreeMap<&str, i64> = BTreeMap::new();
+                    for key in [
+                        "task_stack_budget_bytes",
+                        "heap_total_bytes",
+                        "heap_reserved_bytes",
+                    ] {
+                        match bt.get(key).and_then(toml::Value::as_integer) {
+                            Some(v) => {
+                                nums.insert(key, v);
+                                match key {
+                                    "task_stack_budget_bytes" => {
+                                        supplies.budget.task_stack_budget_bytes = v
+                                    }
+                                    "heap_total_bytes" => supplies.budget.heap_total_bytes = v,
+                                    _ => supplies.budget.heap_reserved_bytes = v,
+                                }
+                            }
+                            None => {
+                                if bt.get(key).is_some() {
+                                    errs.push(format!("supplies.budget.{key} 应为整数"));
+                                }
+                            }
+                        }
+                    }
+                    if !platform_tier.is_empty() {
+                        if platform_tier == "host" {
+                            if !supplies.budget.not_applicable {
+                                errs.push(
+                                    "分档自洽校验失败（校验⑩）：tier = host 但 supplies.budget.not_applicable = false——校验⑩ 对 host 档不适用，合法不适用必须显式写 true，不许留空（F-6 / ADR-0021 修订 3）"
+                                        .to_string(),
+                                );
+                            }
+                            if !nums.is_empty() {
+                                errs.push(format!(
+                                    "分档自洽校验失败（校验⑩）：tier = host 但 [supplies.budget] 并存数字预算键 {}（与 not_applicable = true 自相矛盾——栈/堆预算只属于 rtos/bare 档，ADR-0021 修订 3）",
+                                    nums.keys().copied().collect::<Vec<_>>().join("/")
+                                ));
+                            }
+                        } else {
+                            // rtos / bare：有真栈/堆预算，not_applicable 不得真
+                            if supplies.budget.not_applicable {
+                                errs.push(
+                                    "分档自洽校验失败（校验⑩）：tier = rtos/bare 但 supplies.budget.not_applicable = true（rtos/bare 档有真栈/堆预算，写不适用是自相矛盾——ADR-0021 修订 3）"
+                                        .to_string(),
+                                );
+                            }
+                            for key in [
+                                "task_stack_budget_bytes",
+                                "heap_total_bytes",
+                                "heap_reserved_bytes",
+                            ] {
+                                if !nums.contains_key(key) {
+                                    errs.push(format!(
+                                        "supplies.budget.{key} 缺失（rtos/bare 档必填——校验⑩ 分母，合法不适用才走 not_applicable，不许留空——F-6）"
+                                    ));
+                                }
+                            }
+                            if let (Some(&st), Some(&tot), Some(&res)) = (
+                                nums.get("task_stack_budget_bytes"),
+                                nums.get("heap_total_bytes"),
+                                nums.get("heap_reserved_bytes"),
+                            ) {
+                                if st <= 0 {
+                                    errs.push(format!(
+                                        "supplies.budget.task_stack_budget_bytes = {st} 须为正整数（⑩-a 分母，0 预算 = 栈账无分母）"
+                                    ));
+                                }
+                                if tot <= 0 {
+                                    errs.push(format!(
+                                        "supplies.budget.heap_total_bytes = {tot} 须为正整数（⑩-b 分母基数）"
+                                    ));
+                                }
+                                if res < 0 {
+                                    errs.push(format!(
+                                        "supplies.budget.heap_reserved_bytes = {res} 须为非负整数（平台常驻占用，负数是物理矛盾）"
+                                    ));
+                                }
+                                if tot > 0 && res >= 0 && tot <= res {
+                                    errs.push(format!(
+                                        "supplies.budget.heap_total_bytes = {tot} ≤ heap_reserved_bytes = {res}（可用堆 = total − reserved ≤ 0，⑩-b 无分母——物理矛盾）"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1248,6 +1401,26 @@ pub fn rr3_profile_boot_inputs_with_probe(
     errs.extend(rr3_demand_budget_check(&declared, &profile.supplies.domains));
     // 校验⑨ 缺失语义另一半：kind=power 角色挂轨，绑定模块的件申报面必须覆盖
     errs.extend(rr3_demand_kind_power_gaps(&profile, &roles, &scanned));
+    // 校验⑩ 内存预算（批N2 n2c-v10，全案 §5 判据⑩ / F-13）：分子 = 装配扫描
+    // facts 的内存申报**件级直加**（非每实例扩算，assemble.rs 头注同源；坏形件
+    // 不进加总——可见面 = assemble_broken 点名，不 claim 全覆盖，同⑨ 诚实注记）；
+    // 分母 = [supplies.budget]（host 档 not_applicable = true 显式不适用 ⇒ 绿）。
+    let stack_sum: i64 = scanned
+        .iter()
+        .flat_map(|(_, atoms)| atoms.iter())
+        .map(|(_, f)| f.task_stack_bytes)
+        .sum();
+    let heap_sum: i64 = scanned
+        .iter()
+        .flat_map(|(_, atoms)| atoms.iter())
+        .map(|(_, f)| f.heap_peak_bytes)
+        .sum();
+    errs.extend(rr3_memory_budget_check(
+        stack_sum,
+        heap_sum,
+        &profile.supplies.budget,
+        &profile.platform_tier,
+    ));
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -1726,6 +1899,43 @@ fn rr3_demand_kind_power_gaps(
     errs
 }
 
+/// 校验⑩ 判据实体（批N2 n2c-v10，全案 §5 判据⑩ / F-13 / ADR-0021 修订 3）：
+/// - ⑩-a `Σ task_stack_bytes ≤ [supplies.budget].task_stack_budget_bytes`
+/// - ⑩-b `Σ heap_peak_bytes ≤ heap_total_bytes − heap_reserved_bytes`（可用堆 =
+///   平台堆 − 常驻——F-13：UART2_TX_RING/AUDIO_Q_CAP/渲染缓冲/批N4 板侧配置
+///   全是堆账，只加总栈会击穿半边）
+/// `not_applicable = true`（host 档显式不适用）⇒ 绿（parse 层分档自洽已保证 host
+/// 档 not_applicable 必真且三数键不并存）。fail-closed 逐条点名：栈超与堆超各一条、
+/// 各自点名判据号与两侧数值——F-13 形状（堆值不计栈）下只红 ⑩-b 不级联 ⑩-a。
+/// 分子是**件级直加**非每实例扩算（assemble.rs 头注同源：件全部实例共享一个任务
+/// 栈/一条堆账）；输入由装载链对扫描成功的件直加，坏形件不进加总（可见面 =
+/// assemble_broken 点名，不 claim 全覆盖，同校验⑨ 诚实注记）。
+fn rr3_memory_budget_check(
+    stack_sum: i64,
+    heap_sum: i64,
+    budget: &Rr3Budget,
+    tier: &str,
+) -> Vec<String> {
+    let mut errs = Vec::new();
+    if budget.not_applicable {
+        return errs;
+    }
+    if stack_sum > budget.task_stack_budget_bytes {
+        errs.push(format!(
+            "内存预算超限（校验⑩-a，{tier} 档）：Σ task_stack_bytes = {stack_sum} B > task_stack_budget_bytes = {} B（分子为件级直加非每实例扩算，分母住 [supplies].budget——ADR-0021 修订 3 三份数据三个主人）",
+            budget.task_stack_budget_bytes
+        ));
+    }
+    let heap_available = budget.heap_total_bytes - budget.heap_reserved_bytes;
+    if heap_sum > heap_available {
+        errs.push(format!(
+            "内存预算超限（校验⑩-b，{tier} 档）：Σ heap_peak_bytes = {heap_sum} B > 可用堆 {heap_available} B（heap_total_bytes = {} − 常驻 heap_reserved_bytes = {}；F-13：渲染缓冲/队列/板侧配置全是堆账，只加总栈会击穿半边）",
+            budget.heap_total_bytes, budget.heap_reserved_bytes
+        ));
+    }
+    errs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1823,7 +2033,7 @@ mod tests {
     }
 
     const GOOD: &str = r#"
-schema_version = 3
+schema_version = 4
 
 [os]
 route = "distro"
@@ -1865,6 +2075,10 @@ switch = "none"
 switchable = false
 armed = false
 max_age_ms = 0
+
+# [supplies.budget]（schema 4，校验⑩ 分母）：host 档合法不适用必须显式写，不许留空
+[supplies.budget]
+not_applicable = true
 
 [bindings]
 "act.servo" = "rr3-pa"
@@ -1977,6 +2191,22 @@ gnd_common = "star-1"
             .expect("stage 显示件 assemble.toml");
         }
 
+        /// 追加一件内存申报件（校验⑩ 分子面用例构造器）：空注入面（no_injection
+        /// 显式）+ 合成内存申报。诚实注记（防 L-24 假绿指控）：申报义务未触发
+        /// ——板侧任务映射未建模归 0.0.7 批G/批D1，本批红例用合成申报验判据
+        /// 实体与装载拒链，非真实件账。
+        fn stage_memory_atom(&self, name: &str, stack: i64, heap: i64) {
+            let dir = self.dir.join("modules/rr3-pa/atoms").join(name);
+            std::fs::create_dir_all(&dir).expect("建内存申报件目录");
+            std::fs::write(
+                dir.join("assemble.toml"),
+                format!(
+                    "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\ntask_stack_bytes = {stack}\nheap_peak_bytes = {heap}\n"
+                ),
+            )
+            .expect("stage 内存申报件 assemble.toml");
+        }
+
         /// 落装配单并同批 stage 接线档（`hardware/<形态>/wiring.toml`，与
         /// [`crate::wiring::rr3_wiring_path_for_profile`] 推导同一布局）——装载期
         /// 校验⑦要求装机档必在，缺省给 GOOD_WIRING，反例随后覆写。
@@ -2083,7 +2313,7 @@ gnd_common = "star-1"
     /// （sense 按 pin_id 引用，⑥-d 同一语法），34 ∈ esp32 adc_pins ⇒ 全绿基线；
     /// 反例经定点替换构造。rtos 档不派生（host 档派生器不识别板侧词形）。
     const ESP32_GOOD: &str = r#"
-schema_version = 3
+schema_version = 4
 
 [platform]
 tier = "rtos"
@@ -2122,6 +2352,15 @@ switch = "none"
 switchable = false
 armed = false
 max_age_ms = 0
+
+# [supplies.budget]（schema 4，校验⑩ 分母）：栈预算 = 2× 现役 16KB 任务 + 余量
+# （board.rs THREAD_STACK/MIC_THREAD_STACK 同源）；堆三键 = ESP32-S3 数据表推算
+# 的演练实例，对账归 0.0.7 真板（N-13：内存核算进校验⑩-b 的板 crate 前置）。
+[supplies.budget]
+not_applicable = false
+task_stack_budget_bytes = 65536
+heap_total_bytes = 327680
+heap_reserved_bytes = 16384
 
 [bindings]
 "act.servo" = "rr3-pa"
@@ -2268,13 +2507,193 @@ mux_group = []
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
 
+    /// 校验⑩ 判据实体反例组（n2c-v10）：not_applicable 绿（host 显式不适用）、
+    /// 边界等号绿（Σ = 预算不算超）、栈超红 ⑩-a、堆超红 ⑩-b——F-13 形状
+    /// （堆值不计栈）下只红 ⑩-b 不级联 ⑩-a，两条红文各点名判据号与两侧数值。
+    #[test]
+    fn memory_budget_check_entity_green_and_red() {
+        let budget = Rr3Budget {
+            not_applicable: false,
+            task_stack_budget_bytes: 65536,
+            heap_total_bytes: 327680,
+            heap_reserved_bytes: 16384,
+        };
+        // host 显式不适用 ⇒ 绿（多大都绿——判据关闭是显式的）
+        let host = Rr3Budget {
+            not_applicable: true,
+            ..Rr3Budget::default()
+        };
+        assert!(rr3_memory_budget_check(i64::MAX, i64::MAX, &host, "host").is_empty());
+        // 边界等号 ⇒ 绿（≤ 判，> 才红）；栈绿堆不超
+        assert!(rr3_memory_budget_check(65536, 311296, &budget, "rtos").is_empty());
+        // ⑩-a 栈超红：点名判据号、两侧数值与档位
+        let e = rr3_memory_budget_check(65537, 0, &budget, "rtos");
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(
+            e[0].contains("校验⑩-a")
+                && e[0].contains("65537")
+                && e[0].contains("65536")
+                && e[0].contains("rtos"),
+            "{e:?}"
+        );
+        // ⑩-b 堆超红（F-13 形状：栈值不超 ⇒ 栈绿，只红堆）：可用堆 = 327680 − 16384
+        let e = rr3_memory_budget_check(0, 311297, &budget, "rtos");
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(
+            e[0].contains("校验⑩-b")
+                && e[0].contains("311297")
+                && e[0].contains("311296")
+                && e[0].contains("16384"),
+            "{e:?}"
+        );
+        // 双超各一条，互不遮蔽
+        let e = rr3_memory_budget_check(70000, 400000, &budget, "rtos");
+        assert_eq!(e.len(), 2, "{e:?}");
+    }
+
+    /// [supplies.budget] 分档自洽反例组（parse 层，ADR-0021 修订 3 / F-6 留空反例）：
+    /// host 档 not_applicable 缺失或写 false ⇒ 红；host 档并存数字键 ⇒ 红；
+    /// rtos 档 not_applicable = true ⇒ 红；rtos 档缺三数键 ⇒ 红；段缺 ⇒ 红
+    /// （DoD 3：每个缺失语义有留空反例）。
+    #[test]
+    fn budget_tier_consistency_errors_are_named() {
+        // host 档 not_applicable 写 false（合法不适用不显式写 = 留空即红）
+        let bad = GOOD.replace("not_applicable = true", "not_applicable = false");
+        let errs = rr3_profile_from_text(&bad).expect_err("host 档不写不适用必须红");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("分档自洽校验失败") && e.contains("not_applicable = false")),
+            "{errs:?}"
+        );
+
+        // host 档并存数字键（与 not_applicable = true 自相矛盾）
+        let bad = GOOD.replace(
+            "[supplies.budget]\nnot_applicable = true",
+            "[supplies.budget]\nnot_applicable = true\ntask_stack_budget_bytes = 65536",
+        );
+        let errs = rr3_profile_from_text(&bad).expect_err("host 档并存数字键必须红");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("并存数字预算键") && e.contains("task_stack_budget_bytes")),
+            "{errs:?}"
+        );
+
+        // rtos 档 not_applicable = true（有真栈/堆预算却写不适用）
+        let bad = ESP32_GOOD.replace("not_applicable = false", "not_applicable = true");
+        let errs = rr3_profile_from_text(&bad).expect_err("rtos 档写不适用必须红");
+        assert!(
+            errs.iter().any(|e| e.contains("tier = rtos/bare 但")),
+            "{errs:?}"
+        );
+
+        // rtos 档缺三数键（留空反例：必填键缺失逐条点名）
+        let bad = ESP32_GOOD
+            .replace("task_stack_budget_bytes = 65536\n", "")
+            .replace("heap_total_bytes = 327680\n", "")
+            .replace("heap_reserved_bytes = 16384\n", "");
+        let errs = rr3_profile_from_text(&bad).expect_err("rtos 档缺数键必须红");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("task_stack_budget_bytes 缺失")),
+            "{errs:?}"
+        );
+        assert!(errs.iter().any(|e| e.contains("heap_total_bytes 缺失")));
+        assert!(errs.iter().any(|e| e.contains("heap_reserved_bytes 缺失")));
+
+        // 段缺（schema 4 起必填，不许整个子段留空）
+        let bad = GOOD.replace(
+            "[supplies.budget]\nnot_applicable = true\n\n",
+            "",
+        );
+        let errs = rr3_profile_from_text(&bad).expect_err("缺 [supplies.budget] 必须红");
+        assert!(
+            errs.iter().any(|e| e.contains("缺少 [supplies.budget]")),
+            "{errs:?}"
+        );
+
+        // 未知键点名（词表封闭）
+        let bad = GOOD.replace(
+            "[supplies.budget]\nnot_applicable = true",
+            "[supplies.budget]\nnot_applicable = true\nstack_budget = 1",
+        );
+        let errs = rr3_profile_from_text(&bad).expect_err("budget 未知键必须红");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("[supplies.budget] 未知键 stack_budget")),
+            "{errs:?}"
+        );
+
+        // rtos 档物理矛盾：total ≤ reserved（可用堆 ≤ 0，⑩-b 无分母）
+        let bad = ESP32_GOOD.replace("heap_total_bytes = 327680", "heap_total_bytes = 8192");
+        let errs = rr3_profile_from_text(&bad).expect_err("total ≤ reserved 必须红");
+        assert!(
+            errs.iter().any(|e| e.contains("可用堆 = total − reserved ≤ 0")),
+            "{errs:?}"
+        );
+    }
+
+    /// 门 c 装载拒链·校验⑩ 红例①（§5 ⑩-a 后果 = 拒）：ESP32_GOOD（rtos 档，
+    /// task_stack_budget_bytes = 65536）+ 合成内存申报件 98304 B ⇒ boot Err 点名
+    /// 判据号与两侧数值（申报义务未触发，红例用合成数据——见 stage_memory_atom
+    /// 诚实注记）。
+    #[test]
+    fn memory_budget_chain_boot_rejects_stack_over_budget() {
+        let root = Root::new("mem-stack-red");
+        root.stage_memory_atom("stackhog", 98304, 0);
+        let p = root.write_profile("mem-stack-red.toml", ESP32_GOOD);
+        let e = boot_inputs(&p).expect_err("Σ栈 98304 > 65536 必须致命");
+        assert!(
+            e.contains("校验⑩-a") && e.contains("98304") && e.contains("65536"),
+            "{e}"
+        );
+    }
+
+    /// 门 c 装载拒链·校验⑩ 红例②（F-13 形状：堆值不计栈 ⇒ 栈绿堆红）：栈申报
+    /// 16384 B 在预算内（⑩-a 绿），堆申报 327680 B > 可用堆 311296 B ⇒ 只红
+    /// ⑩-b——只加总栈会击穿半边的反例在装载链可达。
+    #[test]
+    fn memory_budget_chain_boot_rejects_heap_over_budget_while_stack_green() {
+        let root = Root::new("mem-heap-red");
+        root.stage_memory_atom("stacklegit", 16384, 0);
+        root.stage_memory_atom("heaphog", 0, 327680);
+        let p = root.write_profile("mem-heap-red.toml", ESP32_GOOD);
+        let e = boot_inputs(&p).expect_err("Σ堆 327680 > 可用 311296 必须致命");
+        assert!(e.contains("校验⑩-b") && e.contains("327680"), "{e}");
+        assert!(!e.contains("校验⑩-a"), "栈在预算内不得级联红：{e}");
+    }
+
+    /// 门 c 装载拒链·校验⑩ 绿例：Σ栈 = 预算（等号不算超）且堆在可用堆内 ⇒ boot 过
+    /// ——与红例①对照钉住边界语义（≤ 判，> 才红）。
+    #[test]
+    fn memory_budget_chain_boot_accepts_boundary_sums() {
+        let root = Root::new("mem-green");
+        root.stage_memory_atom("stacklegit", 65536, 311296);
+        let p = root.write_profile("mem-green.toml", ESP32_GOOD);
+        let boot = boot_inputs(&p).expect("等号边界必须过");
+        assert!(boot.missing.is_empty(), "{:?}", boot.missing);
+    }
+
+    /// 件级直加语义钉子（非每实例扩算，assemble.rs 头注同源）：同一内存申报件
+    /// 在多实例角色下不扩算——GOOD（host）换 ESP32_GOOD 载体不便，此处以
+    /// ESP32_GOOD 单轴（实例 1）+ 双件同值申报对照红例①直接钉数值（98304 =
+    /// 件级两件直加），扩算语义由 rr3_demand_declared_expand 的 ⑨ 用例反向对照。
+    #[test]
+    fn memory_budget_sums_are_per_atom_not_per_instance() {
+        let root = Root::new("mem-peratom");
+        root.stage_memory_atom("stacka", 49152, 0);
+        root.stage_memory_atom("stackb", 49152, 0);
+        let p = root.write_profile("mem-peratom.toml", ESP32_GOOD);
+        let e = boot_inputs(&p).expect_err("两件直加 98304 > 65536 必须致命");
+        assert!(e.contains("Σ task_stack_bytes = 98304"), "{e}");
+    }
+
     #[test]
     fn good_profile_parses() {
         let p = rr3_profile_from_text(GOOD).expect("应能解析");
         assert_eq!(p.bindings.len(), 3);
         assert_eq!(p.enabled_slots.len(), 3);
         assert_eq!(p.enabled_slots["rr3-pa"], vec!["act.servo".to_string()]);
-        // 描述符八段（schema_version=3）：[platform]/[supplies]/[slots]/[[pin]] 逐字段收齐
+        // 描述符八段（schema_version=4）：[platform]/[supplies]/[slots]/[[pin]] 逐字段收齐
         assert_eq!(p.platform_tier, "host");
         // 平台事实表外键（§4.6，校验③④⑤⑧判据前件选册）
         assert_eq!(p.platform_chip, "rk3566");
@@ -2284,6 +2703,11 @@ mux_group = []
         assert_eq!(p.supplies.tick_period_ms, 200);
         assert_eq!(p.supplies.tick_jitter_ms, 100);
         assert_eq!(p.supplies.safety_core_interval_ms, 1000);
+        // [supplies.budget]（schema 4，校验⑩ 分母）：host 档显式不适用态收齐
+        assert!(p.supplies.budget.not_applicable);
+        assert_eq!(p.supplies.budget.task_stack_budget_bytes, 0);
+        assert_eq!(p.supplies.budget.heap_total_bytes, 0);
+        assert_eq!(p.supplies.budget.heap_reserved_bytes, 0);
         assert_eq!(
             p.slots_present,
             ["act.servo", "cognition.llm", "sensor.env"]
@@ -2309,7 +2733,7 @@ mux_group = []
     #[test]
     fn parse_errors_are_all_collected_and_named() {
         let text = GOOD
-            .replace("schema_version = 3", "schema_version = 9")
+            .replace("schema_version = 4", "schema_version = 9")
             .replace("\"act.servo\" = \"rr3-pa\"", "\"act.servo\" = \"\"")
             .replace("rr3-pb = [\"sensor.env\"]", "rr3-pb = [\"\"]")
             .replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = 3");
@@ -2337,7 +2761,7 @@ mux_group = []
 
     #[test]
     fn missing_sections_and_empty_enabled_slots_are_errors() {
-        let errs = rr3_profile_from_text("schema_version = 3\n").expect_err("缺段必须报错");
+        let errs = rr3_profile_from_text("schema_version = 4\n").expect_err("缺段必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [bindings]")),
             "{errs:?}"
@@ -2346,8 +2770,11 @@ mux_group = []
             errs.iter().any(|e| e.contains("缺少 [enabled_slots]")),
             "{errs:?}"
         );
+        // [supplies] 段缺时 [supplies.budget] 的点名不级联（budget 错误只在
+        // supplies 段在场时裁）——budget 段缺的留空反例归
+        // budget_tier_consistency_errors_are_named。
 
-        let errs = rr3_profile_from_text("schema_version = 3\n[bindings]\n\n[enabled_slots]\n")
+        let errs = rr3_profile_from_text("schema_version = 4\n[bindings]\n\n[enabled_slots]\n")
             .expect_err("空 enabled_slots 必须报错");
         assert!(
             errs.iter().any(|e| e.contains("[enabled_slots] 为空")),
@@ -2911,18 +3338,26 @@ tier_scope = ["quantum"]
     }
 
     /// G6 档位一致性（ADR-0018 修订 1）：tier=bare 且无看门狗 → 致命点名；
-    /// bare + 看门狗在场 → 一致，放行。
+    /// bare + 看门狗在场 → 一致，放行。tier 换档同批翻转 [supplies.budget] 为
+    /// bare 档形状（分档自洽：not_applicable = false + 三数键，parse 层判据）。
     #[test]
     fn bare_tier_without_watchdog_is_fatal() {
         let root = Root::new("g6");
         let bad = GOOD
             .replace("tier = \"host\"", "tier = \"bare\"")
-            .replace("watchdog_present = true", "watchdog_present = false");
+            .replace("watchdog_present = true", "watchdog_present = false")
+            .replace(
+                "[supplies.budget]\nnot_applicable = true",
+                "[supplies.budget]\nnot_applicable = false\ntask_stack_budget_bytes = 65536\nheap_total_bytes = 327680\nheap_reserved_bytes = 16384",
+            );
         let p = root.write_profile("bare-nowd.toml", &bad);
         let e = boot_inputs(&p).expect_err("无看门狗的 bare 档必须被拒");
         assert!(e.contains("无看门狗的板不允许归 bare 档"), "{e}");
 
-        let ok = GOOD.replace("tier = \"host\"", "tier = \"bare\"");
+        let ok = GOOD.replace("tier = \"host\"", "tier = \"bare\"").replace(
+            "[supplies.budget]\nnot_applicable = true",
+            "[supplies.budget]\nnot_applicable = false\ntask_stack_budget_bytes = 65536\nheap_total_bytes = 327680\nheap_reserved_bytes = 16384",
+        );
         let p = root.write_profile("bare-wd.toml", &ok);
         boot_inputs(&p).expect("bare 档 + 看门狗在场应放行");
     }
@@ -2934,10 +3369,18 @@ tier_scope = ["quantum"]
     #[test]
     fn tier_outside_slot_tier_scope_is_fatal() {
         let root = Root::new("l10");
-        let bad = GOOD.replace("tier = \"host\"", "tier = \"bare\"").replace(
-            "rr3-pa = [\"act.servo\"]",
-            "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"bus.publish\"]",
-        );
+        // tier 换 bare 同批翻转 [supplies.budget] 为 bare 档形状（分档自洽，
+        // bare_tier_without_watchdog_is_fatal 注记同源）
+        let bad = GOOD
+            .replace("tier = \"host\"", "tier = \"bare\"")
+            .replace(
+                "[supplies.budget]\nnot_applicable = true",
+                "[supplies.budget]\nnot_applicable = false\ntask_stack_budget_bytes = 65536\nheap_total_bytes = 327680\nheap_reserved_bytes = 16384",
+            )
+            .replace(
+                "rr3-pa = [\"act.servo\"]",
+                "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"bus.publish\"]",
+            );
         let p = root.write_profile("bare-bus.toml", &bad);
         let e = boot_inputs(&p).expect_err("bare 档引用 bus 格必须被拒");
         assert!(
@@ -2945,10 +3388,16 @@ tier_scope = ["quantum"]
             "{e}"
         );
 
-        let ok = GOOD.replace("tier = \"host\"", "tier = \"bare\"").replace(
-            "rr3-pa = [\"act.servo\"]",
-            "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"power.battery\"]",
-        );
+        let ok = GOOD
+            .replace("tier = \"host\"", "tier = \"bare\"")
+            .replace(
+                "[supplies.budget]\nnot_applicable = true",
+                "[supplies.budget]\nnot_applicable = false\ntask_stack_budget_bytes = 65536\nheap_total_bytes = 327680\nheap_reserved_bytes = 16384",
+            )
+            .replace(
+                "rr3-pa = [\"act.servo\"]",
+                "rr3-pa = [\"act.servo\"]\nrr3-pd = [\"power.battery\"]",
+            );
         let p = root.write_profile("bare-battery.toml", &ok);
         boot_inputs(&p).expect("bare 档引用 scope 全档的 power.battery 应放行");
     }

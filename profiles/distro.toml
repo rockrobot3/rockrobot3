@@ -9,8 +9,10 @@
 # schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段进场、
 # 七物理键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
 # [hardware] 只留三非引脚键，与 default 同板同引脚（[[pin]] 逐值一致）。
+# schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
+# 子段进场（⑩-a/⑩-b 分母），与 default 同板同值——3→4 为破坏性变更。
 
-schema_version = 3
+schema_version = 4
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
@@ -73,6 +75,11 @@ switch = "none"
 switchable = false
 armed = false
 max_age_ms = 0
+
+# [supplies.budget] 内存预算声明（校验⑩ 分母，schema 4，批N2）：与 default 同板同值
+# ——host 档校验⑩ 不适用，"合法不适用"显式写 true 不许留空（F-6）。
+[supplies.budget]
+not_applicable = true
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；

@@ -36,9 +36,10 @@ use support::*;
 ///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；present 只声明 bindings 用的
 /// 非 base 格位——P2 删 binding 行后 sensor.env 仍 declared present，缺格判定照走注入缺。
 /// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
-/// 校验②只记 role_missing 非致命，boot 照常。
+/// 校验②只记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
+/// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。
 const GOOD: &str = r#"
-schema_version = 3
+schema_version = 4
 
 [os]
 route = "distro"
@@ -67,6 +68,9 @@ switch = "none"
 switchable = false
 armed = false
 max_age_ms = 0
+
+[supplies.budget]
+not_applicable = true
 
 [slots]
 present = ["act.servo", "sensor.env", "cognition.llm"]
