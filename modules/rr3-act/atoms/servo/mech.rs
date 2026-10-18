@@ -12,8 +12,24 @@
 //! 函数 + 注入时钟）——本文件 re-export 保既有路径，时钟由调用方给 ms。
 
 use super::Rr3ServoCfg;
+use rr_hal_api::Rr3ActMotion;
 
 pub use rr_core::control::Rr3RateGate;
+
+/// servo/command 动作形态判定（批N3 件三，值域留件）：词缺席 = auto（保守——
+/// 不申报按自动）。词表解析走 rr-hal-api 单真值点，运行命令面白名单窄化到
+/// {jog, auto}——calib-* 两词是标定面（批N3 件四）的形态，运行面收到也不执行。
+/// 形态合法性（未标定拒自动等）在 [`rr_hal_api::rr3_act_motion_allowed`]，
+/// 调用方持轴状态判，本判定只管词面。
+pub fn rr3_servo_check_motion(word: Option<&str>) -> Result<Rr3ActMotion, String> {
+    match word {
+        None => Ok(Rr3ActMotion::Auto),
+        Some(s) => match Rr3ActMotion::rr3_act_motion_parse(s) {
+            Some(m @ (Rr3ActMotion::Jog | Rr3ActMotion::Auto)) => Ok(m),
+            _ => Err(format!("不认的动作形态 {s:?}（运行命令面只认 jog/auto）")),
+        },
+    }
+}
 
 /// servo/command 行程判定（值域留件，批I A-8 拆层）：越行程点名区间。
 /// 缺参/类型错/越 u16 的下钻文案在承载层（每句落在唯一一处）。
@@ -84,6 +100,31 @@ mod tests {
         let mut gate = Rr3RateGate::rr3_gate_new(50);
         assert!(gate.rr3_gate_allow(1_000));
         assert!(!gate.rr3_gate_allow(1_010), "窗内连发被限（rr-core 判定）");
+    }
+
+    /// 动作形态判定（批N3 件三）：缺席 = auto 保守（不申报按自动）；jog/auto
+    /// 在册放行；calib-* 标定面词与词表外词在运行命令面点名拒。
+    #[test]
+    fn check_motion_defaults_to_auto_and_narrows_to_runface_words() {
+        assert_eq!(
+            rr3_servo_check_motion(None).unwrap(),
+            Rr3ActMotion::Auto,
+            "词缺席 = auto（保守）"
+        );
+        assert_eq!(
+            rr3_servo_check_motion(Some("jog")).unwrap(),
+            Rr3ActMotion::Jog
+        );
+        assert_eq!(
+            rr3_servo_check_motion(Some("auto")).unwrap(),
+            Rr3ActMotion::Auto
+        );
+        let e = rr3_servo_check_motion(Some("calib-openloop")).unwrap_err();
+        assert!(e.contains("只认 jog/auto"), "标定面词不进运行命令面: {e}");
+        assert!(
+            rr3_servo_check_motion(Some("walk")).is_err(),
+            "词表外点名拒"
+        );
     }
 
     // ---------- 两腿对拍（architecture §4.0.3 判据②，0.0.5 批K H1） ----------

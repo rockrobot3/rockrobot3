@@ -369,6 +369,30 @@ pub enum Rr3ActMotion {
     CalibStallSearch,
 }
 
+impl Rr3ActMotion {
+    /// 词名（命令面取值串同源：`jog` / `auto` / `calib-openloop` / `calib-stall-search`）
+    pub fn rr3_act_motion_name(self) -> &'static str {
+        match self {
+            Rr3ActMotion::Jog => "jog",
+            Rr3ActMotion::Auto => "auto",
+            Rr3ActMotion::CalibOpenLoop => "calib-openloop",
+            Rr3ActMotion::CalibStallSearch => "calib-stall-search",
+        }
+    }
+
+    /// 从词解析（词表外回 `None`，调用侧点名红，不猜——与 name 同源成对，
+    /// 词形改动只许落这一处）
+    pub fn rr3_act_motion_parse(s: &str) -> Option<Self> {
+        match s {
+            "jog" => Some(Rr3ActMotion::Jog),
+            "auto" => Some(Rr3ActMotion::Auto),
+            "calib-openloop" => Some(Rr3ActMotion::CalibOpenLoop),
+            "calib-stall-search" => Some(Rr3ActMotion::CalibStallSearch),
+            _ => None,
+        }
+    }
+}
+
 /// 执行件动作合法性判据实体（批N3，全案 §6 硬约束——"未标定不得自动"与
 /// "hard_stop=unknown 护栏"都是**代码拒动**，非文档建议）。
 ///
@@ -1035,6 +1059,16 @@ mod tests {
             assert_eq!(Rr3ActSource::rr3_act_source_parse(w), Some(s));
         }
         assert_eq!(Rr3ActSource::rr3_act_source_parse("unknown"), None);
+        for (m, w) in [
+            (Rr3ActMotion::Jog, "jog"),
+            (Rr3ActMotion::Auto, "auto"),
+            (Rr3ActMotion::CalibOpenLoop, "calib-openloop"),
+            (Rr3ActMotion::CalibStallSearch, "calib-stall-search"),
+        ] {
+            assert_eq!(m.rr3_act_motion_name(), w);
+            assert_eq!(Rr3ActMotion::rr3_act_motion_parse(w), Some(m));
+        }
+        assert_eq!(Rr3ActMotion::rr3_act_motion_parse("walk"), None);
     }
 
     /// 位置读数来源在册（坑 11：开环回显与闭环测量在接口上可区分——来源缺席的
