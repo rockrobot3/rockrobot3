@@ -697,7 +697,7 @@ mod tests {
         assert!(act.contains("move_timeout_ms = 800"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
         assert!(
-            !act.contains("angle_limit_deg"),
+            !act.contains("limit_deg"),
             "行程键不得回流 config: {act}"
         );
         let interact = rr3_chain_interact_config_text();

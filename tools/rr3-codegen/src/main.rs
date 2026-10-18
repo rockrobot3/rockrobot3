@@ -14,10 +14,9 @@
 //!   ← `contracts/face-expressions.toml`
 //! - 轴行程常量表：`RR3_AXIS_<INSTANCE>`（lo, hi, center）＋ `rr3_axis_travel`
 //!   查表函数 ← `hardware/esp32-mini/axis/*.toml` 行程档案（批N3 件五门 g 收敛：
-//!   行程唯一真值点在档案，板侧 `AXIS_CENTER/PAN_LIMIT/TILT_LIMIT` 手写字面量
-//!   撤除改读本表；生成器独立工程不依赖 rrd，对档案只做最小校验面——平表
-//!   schema=1、三键非负整数、lo<center<hi、文件名与 pin 末段对账，坏了宁可红
-//!   也不生成带病副本）
+//!   行程唯一真值点在档案，板侧手写行程字面量撤除改读本表；生成器独立工程不
+//!   依赖 rrd，对档案只做最小校验面——平表 schema=1、三键非负整数、lo<center<hi、
+//!   文件名与 pin 末段对账，坏了宁可红也不生成带病副本）
 //!
 //! 用法：`cargo run -p rr3-codegen`（仓根执行，写生成文件）；
 //! `cargo run -p rr3-codegen -- --check`（只比对不写，漂移退出 1——门禁用）。
@@ -279,8 +278,8 @@ fn render_axes(axes: &[(String, u32, u32, u32)]) -> String {
          // 真值点：hardware/esp32-mini/axis/*.toml（行程档案的 center/lo/hi 三键；文件名\n\
          // instance 与 pin 末段对账、行程窗口 lo<center<hi 由生成器 fail-closed 校验）。\n\
          // 批N3 件五门 g 收敛：行程唯一真值点在档案——板侧 board.rs 撤手写\n\
-         // AXIS_CENTER/PAN_LIMIT/TILT_LIMIT 字面量改读本表；改行程只改档案并重跑本\n\
-         // 生成器。rrd 装配注入（RR3_ACT_AXIS_STATE）与板侧本表同源同值。\n\
+         // 行程字面量改读本表；改行程只改档案并重跑本生成器（rrd 装配注入\n\
+         // 与板侧本表同源同值）。\n\
          //（include! 进 board.rs 条目流，头注用普通注释——inner doc 在 item 后不合法。）\n\n\
          {}\n\
          /// 按轴名查行程（板侧 fail-closed：查无此轴回 None，调用方显式红，\n\
