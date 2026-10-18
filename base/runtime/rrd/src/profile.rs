@@ -39,6 +39,10 @@
 //!
 //! 基础层格位（`net.online` / `power.battery`）**恒在位**（slots.toml 2026-10-03 注记）：
 //! 不进 bindings、不进缺格判定，enabled_slots 里声明它们只是"本形态用到"的记账。
+//! base 层格的**器件缺席**（板上根本没装电池这类）是另一件事：D3 裁定（decisions.md
+//! 裁定 5）给 `power.battery` 加"无器件"合法态——`[slots].device_absent` 登记
+//! 格名 → 非空理由，校验⑥认它；`present` 仍是本板物理在位格位声明，与
+//! `device_absent` 语义正交（base 格不许进 present，缺席表达只有这一条语法）。
 //! `[os].route` 运行期不读（ADR-0012 裁定 3 B3 注记），解析时无视该段。
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -249,6 +253,11 @@ pub struct Rr3Profile {
     pub enabled_slots: BTreeMap<String, Vec<String>>,
     /// [slots].present：本板物理在位格位声明（缺格三源合一第一源——声明缺）
     pub slots_present: Vec<String>,
+    /// [slots].device_absent：base 层格的器件缺席登记（格名 → 非空理由，D3 裁定 5）。
+    /// "恒在位"是**通道**承诺不是**器件**承诺——板上没装电池时 power.battery 的通道
+    /// 仍在（基座内建），但器件缺席须显式登记，校验⑥认它为合法态；retired 会让
+    /// power.budget 的判据前件二次落空（L-28 型），故改层不 retired。
+    pub slots_device_absent: BTreeMap<String, String>,
     /// [supplies]：平台供给声明（看门狗三键 + 时序预算位三键）
     pub supplies: Rr3Supplies,
     /// [hardware]：非引脚键直给（`alsa_device`/`link_ifname`/`spi_device`；七物理键
@@ -629,7 +638,10 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
     }
     // [slots]：必填段、present = 本板物理在位格位声明（缺格三源合一第一源）。
     // 每项非空字符串；未知键点名。空数组合法——板可以什么都不在位（全 Degraded）。
+    // device_absent = base 层格的器件缺席登记（D3 裁定 5）：表键为格位名、值为
+    // 非空理由；留空即红（no_injection 范式——缺席不写理由 = 未申报的静默退化）。
     let mut slots_present: Vec<String> = Vec::new();
+    let mut slots_device_absent: BTreeMap<String, String> = BTreeMap::new();
     match root.get("slots").and_then(toml::Value::as_table) {
         None => errs.push(
             "缺少 [slots]（present = 本板物理在位格位声明；schema_version=2 起必填）".to_string(),
@@ -648,9 +660,21 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                 }
                 None => errs.push("[slots] 缺 present（本板物理在位格位数组）".to_string()),
             }
+            if let Some(absent) = t.get("device_absent").and_then(toml::Value::as_table) {
+                for (slot, reason) in absent {
+                    match reason.as_str() {
+                        Some(r) if !r.trim().is_empty() => {
+                            slots_device_absent.insert(slot.clone(), r.to_string());
+                        }
+                        _ => errs.push(format!(
+                            "[slots].device_absent 格位 {slot} 的理由必须是非空字符串（缺席须显式申报理由，留空即红）"
+                        )),
+                    }
+                }
+            }
             for k in t.keys() {
-                if k != "present" {
-                    errs.push(format!("[slots] 未知键 {k}（只认 present）"));
+                if k != "present" && k != "device_absent" {
+                    errs.push(format!("[slots] 未知键 {k}（只认 present / device_absent）"));
                 }
             }
         }
@@ -664,6 +688,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         bindings,
         enabled_slots,
         slots_present,
+        slots_device_absent,
         supplies,
         hardware,
         pins,
@@ -941,6 +966,21 @@ pub fn rr3_profile_boot_inputs_with_probe(
         } else if table.rr3_slot_table_layer(slot).as_deref() == Some("base") {
             errs.push(format!(
                 "[slots].present 不得声明基础层格位 {slot}（基础层由基座内建承载，恒在位）"
+            ));
+        }
+    }
+    // [slots].device_absent 查册门（D3 裁定 5，批N2 件三）：三查 fail-closed——
+    // ① 格名必须在册（查册门）；② 必须是 base 层格：device_absent 是 base 格专属的
+    // 器件缺席登记，非 base 格的缺席表达 = 不进 present（缺格判定自然红），写进本表
+    // 属第二套语法即红（F-2 同型：一个语义不许两条语法）；③ 理由非空已在解析段判。
+    for slot in profile.slots_device_absent.keys() {
+        if !table.rr3_slot_table_contains(slot) {
+            errs.push(format!(
+                "[slots].device_absent 格位 {slot} 未在册（contracts/slots.toml 无此格）"
+            ));
+        } else if table.rr3_slot_table_layer(slot).as_deref() != Some("base") {
+            errs.push(format!(
+                "[slots].device_absent 只登记基础层格位，{slot} 非 base 层（非基础层格的缺席表达 = 不进 [slots].present，写进本表属第二套语法）"
             ));
         }
     }
@@ -2248,6 +2288,10 @@ mux_group = []
             p.slots_present,
             ["act.servo", "cognition.llm", "sensor.env"]
         );
+        assert!(
+            p.slots_device_absent.is_empty(),
+            "GOOD 无缺席登记 → 空 map（D3 合法态是可选键）"
+        );
         // [[pin]]：十键逐字段收齐，pin_id 按 per_instance 语法拼装
         assert_eq!(p.pins.len(), 1, "{:?}", p.pins);
         let pin = &p.pins[0];
@@ -3106,6 +3150,62 @@ gnd_common = "star-1"
         let p = root.write_profile("present-base.toml", &base);
         let e = boot_inputs(&p).expect_err("present 声明基础层格位必须致命");
         assert!(e.contains("不得声明基础层格位 bus.publish"), "{e}");
+    }
+
+    /// [slots].device_absent 正例（D3 裁定 5，批N2 件三）：base 层格带理由登记
+    /// 器件缺席 = 校验⑥合法态——boot 过、不进缺格判定（"恒在位"是通道承诺不是
+    /// 器件承诺，缺席显式申报即认）。
+    #[test]
+    fn device_absent_declares_base_slot_absence_legally() {
+        let root = Root::new("absent-ok");
+        let ok = GOOD.replace(
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"power.battery\" = \"无电池形态（市电/桥上灌供电），校验⑥认它为合法态\"",
+        );
+        let p = root.write_profile("absent-ok.toml", &ok);
+        let boot = boot_inputs(&p).expect("base 层格带理由登记缺席必须过");
+        assert!(boot.missing.is_empty(), "{:?}", boot.missing);
+        let parsed = rr3_profile_from_text(&ok).expect("正例文本应能解析");
+        assert_eq!(
+            parsed.slots_device_absent.get("power.battery").map(String::as_str),
+            Some("无电池形态（市电/桥上灌供电），校验⑥认它为合法态")
+        );
+    }
+
+    /// [slots].device_absent 查册门三红：未在册格名、非 base 层格（缺席表达 =
+    /// 不进 present，写进本表属第二套语法即红，F-2 同型）、理由留空（no_injection
+    /// 范式——缺席不写理由 = 未申报的静默退化）。
+    #[test]
+    fn device_absent_gate_rejects_unknown_nonbase_and_empty_reason() {
+        let root = Root::new("absent-unknown");
+        let unknown = GOOD.replace(
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"sensor.nope\" = \"不存在的格\"",
+        );
+        let p = root.write_profile("absent-unknown.toml", &unknown);
+        let e = boot_inputs(&p).expect_err("device_absent 未在册格位必须致命");
+        assert!(e.contains("device_absent 格位 sensor.nope 未在册"), "{e}");
+
+        let root = Root::new("absent-body");
+        let body = GOOD.replace(
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"act.servo\" = \"板上无舵机\"",
+        );
+        let p = root.write_profile("absent-body.toml", &body);
+        let e = boot_inputs(&p).expect_err("device_absent 声明非 base 层格必须致命");
+        assert!(
+            e.contains("只登记基础层格位") && e.contains("act.servo"),
+            "{e}"
+        );
+
+        let root = Root::new("absent-empty");
+        let empty = GOOD.replace(
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"power.battery\" = \"\"",
+        );
+        let p = root.write_profile("absent-empty.toml", &empty);
+        let e = boot_inputs(&p).expect_err("device_absent 理由留空必须致命");
+        assert!(e.contains("理由必须是非空字符串"), "{e}");
     }
 
     /// 装配单文件不存在 = 致命，文案是绝对化口径（canonicalize 的 ENOENT）。
