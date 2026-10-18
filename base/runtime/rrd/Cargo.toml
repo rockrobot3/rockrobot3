@@ -26,6 +26,9 @@ path = "src/bin/sim_peer.rs"
 rr-ipc = { path = "../rr-ipc" }
 rr-registry = { path = "../rr-registry" }
 rr-bus = { path = "../rr-bus" }
+# 执行件档案装载（批N3 件二）：档案十四键词表与值面 Rr3ActProfile 的真值源——
+# rrd 是装载域，吃契约层，不反向（⑨-w 禁令只约束 modules 单元）
+rr-hal-api = { path = "../rr-hal-api" }
 # unix 门内的 socket 放行声明壳（chmod/getgrnam/chown，批F5b R12）——musl 静态零额外 C 依赖
 libc = "0.2"
 toml = { workspace = true }
