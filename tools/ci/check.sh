@@ -668,6 +668,52 @@ if [ "$dep_fail" -ne 0 ]; then
   fail=1
 fi
 
+# —— ⑨-n 注入路径唯一（门 n 静态面执法位；全案 §8 门 n / 施工图 Task 8 Step 2，n1-11）。
+# 三层判据（实-14）：①装载期判据与 ②反例用例已在（profile.rs 门 n 段 + gate_n_* 两用例，
+# 经步 ①b cargo test --workspace 进 CI），本步补 ③专属执法步。判据＝[hardware] 段出现
+# RR3_PIN_DERIVED_KEYS 任一物理键即红（稳态：物理键一律 [pins] 派生，[hardware] 只留
+# 非引脚键 alsa_device/link_ifname/spi_device——spi_device 合法直给，扫面扩键随批N3，
+# 敞口 18 行）。键名单从代码常量导出（单真值点，不抄第二份）：解析 rrd/src/profile.rs 的
+# RR3_PIN_DERIVED_KEYS 数组，声明数量与实解析数量不等即门禁失效——批N3 扫面 7→8 时本步自动跟随。
+step "⑨-n 注入路径唯一（[hardware] 禁物理键——[pins] 派生稳态判据静态面，门 n）"
+gate_n_fail=0
+keys_file="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+awk '/const RR3_PIN_DERIVED_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/src/profile.rs \
+  | grep -oE '"[^"]+"' | tr -d '"' > "$keys_file"
+decl_n="$(grep -m1 -oE 'RR3_PIN_DERIVED_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+real_n="$(grep -c . "$keys_file" || true)"
+prof_n="$(find profiles -maxdepth 1 -name '*.toml' 2>/dev/null | wc -l | tr -d ' ')"
+if [ -z "$decl_n" ] || [ "$real_n" -eq 0 ] || [ "$decl_n" -ne "$real_n" ] || [ "$prof_n" -eq 0 ]; then
+  printf 'FAIL  ⑨-n 扫面前件不成立（键名单声明数=%s 实解析数=%s，profiles 份数=%s）——门禁失效，不放行\n' \
+    "${decl_n:-空}" "$real_n" "$prof_n"
+  gate_n_fail=1
+else
+  printf 'PASS  ⑨-n 扫面前件（键名单自代码常量 RR3_PIN_DERIVED_KEYS 导出 %s 键 × profiles %s 份）\n' "$real_n" "$prof_n"
+fi
+if [ "$gate_n_fail" -eq 0 ]; then
+  hits_file="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+  key_alt="$(tr '\n' '|' < "$keys_file")"; key_alt="${key_alt%|}"
+  for f in profiles/*.toml; do
+    awk -v alt="$key_alt" '
+      /^[[:space:]]*#/ {next}                       # TOML 注释先剥（键名住注释是合法表述，同 ⑨-w 口径）
+      /^\[/ {in_hw = ($0 ~ /^\[hardware\]/); next}  # 段界：进 [hardware]，遇下一节头（含 [[…]]）即出
+      in_hw && $0 ~ "^(" alt ")[[:space:]]*=" {print FILENAME ":" FNR ": " $0}
+    ' "$f" >> "$hits_file"
+  done
+  if [ -s "$hits_file" ]; then
+    cat "$hits_file"
+    printf 'FAIL  ⑨-n [hardware] 出现物理键（门 n 稳态判据：物理键一律 [pins] 派生；迁移期判据见 profile.rs 门 n 段）\n'
+    gate_n_fail=1
+  else
+    printf 'PASS  ⑨-n [hardware] 零物理键（%s 份 profile 全扫，[hardware] 只留非引脚键）\n' "$prof_n"
+  fi
+  rm -f "$hits_file"
+fi
+rm -f "$keys_file"
+if [ "$gate_n_fail" -ne 0 ]; then
+  fail=1
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"
