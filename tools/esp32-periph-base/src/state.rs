@@ -5,7 +5,7 @@ use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::{esp_random, esp_timer_get_time};
 use rr_ipc::Rr3ByteStream;
 
-use crate::board::{wander_step, Axis, AXIS_CENTER_DEG};
+use crate::board::{wander_step, Axis};
 use crate::link::{reply, UartIo};
 use crate::power::RailTier;
 
@@ -81,8 +81,9 @@ impl PeriphState {
     pub(crate) fn boot() -> Self {
         Self {
             last_text: String::from("(boot)"),
-            pan_deg: AXIS_CENTER_DEG,
-            tilt_deg: AXIS_CENTER_DEG,
+            // 初值 = 各轴中位锚（生成表 center，批N3 件五：行程真值收敛档案）
+            pan_deg: Axis::Pan.center_deg(),
+            tilt_deg: Axis::Tilt.center_deg(),
             frame_mode: false,
             expr_mode: false,
             base_open: 100,

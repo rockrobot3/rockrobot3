@@ -1,0 +1,21 @@
+# esp32-mini 形态 tilt（俯仰）轴行程档案（批N3 件五门 g 收敛：行程唯一真值点）。
+# 十四键 = rr-hal-api RR3_ACT_PROFILE_FIELDS 词表序；外键 pin 对账装配单
+# profiles/esp32-mini.toml [[pin]]（act.axis.pwm / instance=tilt）。行程值 = 板侧
+# 实锤（2026-10-12 现场裁定 tilt ±10°，纳现场所需上抬 98°）：[80, 100]、中位 90。
+# 本档是 rr3-codegen 板侧行程常量表（axis_gen.rs，⑨-e 门执法）与 rrd 装配注入
+# （RR3_ACT_AXIS_STATE）的共同输入——改行程只改这里，三处消费面（板侧扫描/拒收、
+# host 装配、标定工具）随生成与注入同步，不许在任何一侧手写副本。
+schema = 1
+pin = "act.axis.pwm.tilt"
+center_deg = 90
+lo_deg = 80
+hi_deg = 100
+dir_sign = 1
+slew_deg_s = 100
+settle_ms = 200
+hold = "release"
+current_ceil_ma = 750
+warmup_ms = 0
+hard_stop = "yes"
+calibrated = true
+source = "manual"

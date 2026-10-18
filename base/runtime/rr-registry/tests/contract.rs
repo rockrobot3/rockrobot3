@@ -1540,9 +1540,11 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
         v.get("hardware").is_none(),
         "esp32-mini 出现 [hardware] 段（三非引脚键是宿主侧语义；板侧描述符进位须同批改本 pin 与 0.0.7 判据）"
     );
-    // schema 3 [pins]（增补轮六批N1）：板侧唯一执行件的物理绑定真值点——rtos 档 rrd
-    // 不派生（controller 词形 ledc<N> 是板侧词表），但校验①的形状照判。
-    assert_profile_pins_schema3(&v, &root, &["act.axis.pwm"]);
+    // schema 3 [pins]（增补轮六批N1）：板侧执行件的物理绑定真值点——rtos 档 rrd
+    // 不派生（controller 词形 ledc<N> 是板侧词表），但校验①的形状照判。批N3 件五
+    // 双轴收敛：pan/tilt 两枚同角色 pin（act.axis.pwm × 2，instance 消歧）——
+    // 机型集 pin 变化同批改本 pin（文件头 C2 判据）。
+    assert_profile_pins_schema3(&v, &root, &["act.axis.pwm", "act.axis.pwm"]);
 
     // [bindings] 恰好三格——微型形态的"裁剪"是显式集合，多绑少绑都算漂移
     let bindings = v
