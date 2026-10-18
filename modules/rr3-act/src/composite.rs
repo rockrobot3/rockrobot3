@@ -60,37 +60,60 @@ const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
 const RR3_ACT_CONFIG_ENV: &str = "RR3_ACT_CONFIG";
 
 /// rrd spawn 注入的执行轴状态（批N3 件三，supervisor 与 RR3_HAL_BINDINGS 同位注入）：
-/// 装配链装载 `hardware/<形态>/axis/*.toml` 恰一份时投影
-/// `calibrated=<bool>,hard_stop=<档案词>`。未注入（无档案/坏件/多轴未消歧）与
-/// 坏形文本一律折保守缺省——§6"未标定不得自动"是代码拒动，缺真相就按最窄面起跑。
+/// 装配链装载 `hardware/<形态>/axis/*.toml`、按 `RR3_HAL_PERIPH_AXIS`（缺省契约
+/// 常量）消歧后，对 instance 相等的恰一份合法档案投影
+/// `calibrated=<bool>,hard_stop=<档案词>,lo=<n>,hi=<n>,center=<n>`。未注入（无档案/
+/// 坏件/副本/轴错配）与坏形文本一律折保守缺省——§6"未标定不得自动"是代码拒动，
+/// 缺真相就按最窄面起跑（行程窄域除外：保守行程 = 器件全域，点动面必须活着）。
 const RR3_ACT_AXIS_STATE_ENV: &str = "RR3_ACT_AXIS_STATE";
 
-/// 执行轴状态（批N3 件三）：拒动判据 [`rr_hal_api::rr3_act_motion_allowed`] 的
-/// 输入面。两键都来自档案（件二装载器真值），模块侧零判定载荷——只解析不判域。
+/// 执行轴状态（批N3 件三建，件五扩形）：拒动判据 [`rr_hal_api::rr3_act_motion_allowed`]
+/// 的输入面＋**行程真值**（门 g 收敛：模块行程改读档案——config 键撤除，`lo/hi`
+/// 两键就是 `Rr3ServoCfg` 行程的填值来源，`center` 是档案中位锚的随路真值）。五键
+/// 都来自档案（件二装载器真值），模块侧零判定载荷——只解析不判域（行程窗口自洽
+/// lo<center<hi 在 rrd 装载器已判，这里不设第二裁决点）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Rr3ActAxisState {
     hard_stop: rr_hal_api::Rr3ActHardStop,
     calibrated: bool,
+    /// 行程下限（度）——档案 lo_deg
+    lo_deg: u16,
+    /// 行程上限（度）——档案 hi_deg
+    hi_deg: u16,
+    /// 中位锚（度）——档案 center_deg（当前仅随路可查：jog/走位锚随 Rr3Actuator
+    /// 进场接线，先保真值不丢）
+    center_deg: u16,
 }
 
 impl Rr3ActAxisState {
-    /// 保守缺省：未标定 + 挡块未知——判据按 §6 硬约束把 Auto 全拒，执行面只剩点动
+    /// 保守缺省：未标定 + 挡块未知 + **器件全域行程**——判据按 §6 硬约束把 Auto
+    /// 全拒，执行面只剩点动；行程给器件全域（0..=180）而非窄域，窄域会杀死点动面
+    /// （点动是未标定轴唯一合法动作面，行程窄域等于把"活着"也收走）。center 取
+    /// 全域中点 90。
     fn rr3_conservative() -> Self {
         Self {
             hard_stop: rr_hal_api::Rr3ActHardStop::Unknown,
             calibrated: false,
+            lo_deg: 0,
+            hi_deg: 180,
+            center_deg: 90,
         }
     }
 
-    /// 注入文本解析：`calibrated=<bool>,hard_stop=<词>`，键序无关、两键必在、
-    /// 重复键/坏布尔/词表外词/未知键逐条点名。解析失败由调用方折保守缺省并
-    /// 打点（不 exit——保守态是安全向，退出反而进重启循环）。
+    /// 注入文本解析：`calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>`，
+    /// 键序无关、五键必在、重复键/坏布尔/词表外词/越 u16/未知键逐条点名。解析失败
+    /// 由调用方折保守缺省并打点（不 exit——保守态是安全向，退出反而进重启循环）。
     fn rr3_from_env(text: &str) -> Result<Self, String> {
         let mut calibrated = None;
         let mut hard_stop = None;
+        let mut lo = None;
+        let mut hi = None;
+        let mut center = None;
         for kv in text.split(',') {
             let (k, v) = kv.split_once('=').ok_or_else(|| {
-                format!("执行轴状态段 {kv:?} 缺 =（形状 calibrated=<bool>,hard_stop=<词>）")
+                format!(
+                    "执行轴状态段 {kv:?} 缺 =（形状 calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>）"
+                )
             })?;
             match k {
                 "calibrated" => {
@@ -113,12 +136,42 @@ impl Rr3ActAxisState {
                         )?,
                     );
                 }
+                "lo" => {
+                    if lo.is_some() {
+                        return Err("执行轴状态 lo 重复".into());
+                    }
+                    lo =
+                        Some(v.parse::<u16>().map_err(|_| {
+                            format!("执行轴状态 lo={v:?} 非行程下限整数（u16 域）")
+                        })?);
+                }
+                "hi" => {
+                    if hi.is_some() {
+                        return Err("执行轴状态 hi 重复".into());
+                    }
+                    hi =
+                        Some(v.parse::<u16>().map_err(|_| {
+                            format!("执行轴状态 hi={v:?} 非行程上限整数（u16 域）")
+                        })?);
+                }
+                "center" => {
+                    if center.is_some() {
+                        return Err("执行轴状态 center 重复".into());
+                    }
+                    center =
+                        Some(v.parse::<u16>().map_err(|_| {
+                            format!("执行轴状态 center={v:?} 非中位锚整数（u16 域）")
+                        })?);
+                }
                 other => return Err(format!("执行轴状态未知键 {other:?}")),
             }
         }
         Ok(Self {
             calibrated: calibrated.ok_or("执行轴状态缺 calibrated")?,
             hard_stop: hard_stop.ok_or("执行轴状态缺 hard_stop")?,
+            lo_deg: lo.ok_or("执行轴状态缺 lo（档案行程下限）")?,
+            hi_deg: hi.ok_or("执行轴状态缺 hi（档案行程上限）")?,
+            center_deg: center.ok_or("执行轴状态缺 center（档案中位锚）")?,
         })
     }
 }
@@ -163,7 +216,34 @@ pub fn rr3_act_run() -> Result<(), String> {
     // 单调时基（0.0.5 批I A-2）：led 节拍/servo 限速门/led 点名同锚点
     let tb = Rr3TimeBase::rr3_time_base_new();
 
+    // 执行轴状态：装配链注入真值，坏形/缺席折保守缺省并点名（安全向，不退）。
+    // 解析先于 config——行程真值随路（批N3 件五门 g 收敛）：Rr3ServoCfg 的行程
+    // 填值从这里取，config 行程键已撤（档案是唯一真值点）。
+    let axis = match std::env::var(RR3_ACT_AXIS_STATE_ENV) {
+        Ok(text) => Rr3ActAxisState::rr3_from_env(&text).unwrap_or_else(|e| {
+            eprintln!("rr3-act: {e}，按保守缺省起跑（未标定，只受点动）");
+            Rr3ActAxisState::rr3_conservative()
+        }),
+        Err(_) => {
+            println!("执行轴状态: 未注入（无档案/坏件/副本/轴错配），按保守缺省起跑");
+            Rr3ActAxisState::rr3_conservative()
+        }
+    };
+    println!(
+        "执行轴状态: calibrated={} hard_stop={} 行程=[{}, {}] 中位={}（注入策略面在启动自述可见，A-9）",
+        axis.calibrated,
+        axis.hard_stop.rr3_act_hard_stop_name(),
+        axis.lo_deg,
+        axis.hi_deg,
+        axis.center_deg
+    );
+
     let cfg = rr3_config_load(&manifest_path)?;
+    // 行程填值 = 档案注入（批N3 件五门 g）：config 只持时限/限速，行程键撤除后
+    // 模块行程真值唯一来源 = RR3_ACT_AXIS_STATE 的 lo/hi（保守缺省时为器件全域）
+    let mut cfg = cfg;
+    cfg.servo.angle_min_deg = axis.lo_deg;
+    cfg.servo.angle_max_deg = axis.hi_deg;
     // 注入的策略面在启动自述里可见（A-9：改数据即改行为，日志是第一证据）
     let intent_open = if cfg.intent.open_topics.is_empty() {
         "(空)".to_string()
@@ -171,7 +251,7 @@ pub fn rr3_act_run() -> Result<(), String> {
         cfg.intent.open_topics.join("/")
     };
     println!(
-        "config 就绪: servo [{}, {}]/{}ms state>={}ms blink={}ms led_effects={} intent_open={intent_open} reflex {}Hz",
+        "config 就绪: servo [{}, {}]（行程=轴档案）/{}/ms state>={}ms blink={}ms led_effects={} intent_open={intent_open} reflex {}Hz",
         cfg.servo.angle_min_deg,
         cfg.servo.angle_max_deg,
         cfg.servo.move_timeout_ms,
@@ -211,7 +291,8 @@ pub fn rr3_act_run() -> Result<(), String> {
         .spawn(move || reflex::rr3_reflex_loop(cfg.reflex, reflex_bus))
         .map_err(|e| format!("起反射环宿主线程失败: {e}"))?;
 
-    // 主循环状态：限速门 + 流序 + 低电禁动闸门（MC-5）+ 执行轴状态（批N3 件三）。
+    // 主循环状态：限速门 + 流序 + 低电禁动闸门（MC-5）＋ 执行轴状态（前段已解析，
+    // 批N3 件三建、件五扩形——行程真值随路）。
     // 闸门复位保守默认（§6 复位语义④）：构造即闭锁未武装。host 档现无轨压样本流
     // （rr3-runtime/system/power 只广播低电上升沿、无 OK 帧，e2e_power 已点名），
     // 起手武装 + 解禁是**窄化的诚实开局**：假设轨压健康，把"订阅 battery/state
@@ -223,22 +304,6 @@ pub fn rr3_act_run() -> Result<(), String> {
     let mut low_gate = Rr3LowGate::rr3_low_gate_new();
     low_gate.rr3_low_gate_arm();
     low_gate.rr3_low_gate_release();
-    // 执行轴状态：装配链注入真值，坏形/缺席折保守缺省并点名（安全向，不退）
-    let axis = match std::env::var(RR3_ACT_AXIS_STATE_ENV) {
-        Ok(text) => Rr3ActAxisState::rr3_from_env(&text).unwrap_or_else(|e| {
-            eprintln!("rr3-act: {e}，按保守缺省起跑（未标定，只受点动）");
-            Rr3ActAxisState::rr3_conservative()
-        }),
-        Err(_) => {
-            println!("执行轴状态: 未注入（无档案/坏件/多轴未消歧），按保守缺省起跑");
-            Rr3ActAxisState::rr3_conservative()
-        }
-    };
-    println!(
-        "执行轴状态: calibrated={} hard_stop={}（注入策略面在启动自述可见，A-9）",
-        axis.calibrated,
-        axis.hard_stop.rr3_act_hard_stop_name()
-    );
 
     loop {
         // led 节拍（批I A-1：线程上收组合件）：每圈先推状态机，眨眼到点即落
@@ -612,23 +677,10 @@ fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     let led_sect = sect("led")?.clone();
     let intent_sect = sect("intent")?.clone();
     let reflex_sect = sect("reflex")?.clone();
-    let range = servo_sect
-        .get("angle_limit_deg")
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| "config [rr3-act.servo] 缺 angle_limit_deg（[min, max]）".to_string())?;
-    let bad_range =
-        || "config [rr3-act.servo] angle_limit_deg 必须是 [min, max] 两个非负整数".to_string();
-    if range.len() != 2 {
-        return Err(bad_range());
-    }
-    let angle_min_deg = range[0]
-        .as_integer()
-        .filter(|n| *n >= 0)
-        .ok_or_else(bad_range)? as u64;
-    let angle_max_deg = range[1]
-        .as_integer()
-        .filter(|n| *n >= 0)
-        .ok_or_else(bad_range)? as u64;
+    // 行程键不在 config（批N3 件五门 g 收敛）：Rr3ServoCfg 的 angle_min/max_deg
+    // 由执行轴状态注入填值（RR3_ACT_AXIS_STATE 的 lo/hi，档案真值），本解析面
+    // 只管时限/限速。config 出现 angle_limit_deg 键 = 读者零的死键，装配期
+    // （rrd assemble scan）与 CI 门 ⑨-e 双面执法，此处不再解析。
     // loop_hz 越界拒 boot（0.0.5 批I A-3）：`as u32` 裸截断会把 2^32+1 之类
     // 值偷偷收成 1，节拍面静默变形——try_from 点名拒绝
     let loop_hz_raw = u64_of(&reflex_sect, "loop_hz", "reflex")?.max(1);
@@ -676,8 +728,10 @@ fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     }
     Ok(Rr3ActCfg {
         servo: Rr3ServoCfg {
-            angle_min_deg: u16::try_from(angle_min_deg).map_err(|_| bad_range())?,
-            angle_max_deg: u16::try_from(angle_max_deg).map_err(|_| bad_range())?,
+            // 行程占位（批N3 件五）：真值由调用方 rr3_act_run 用执行轴状态注入
+            // 覆填（cfg.servo.angle_min/max_deg = axis.lo/hi_deg），此处不解析
+            angle_min_deg: 0,
+            angle_max_deg: 180,
             move_timeout_ms: u64_of(&servo_sect, "move_timeout_ms", "servo")?,
             state_min_interval_ms: u64_of(&servo_sect, "state_min_interval_ms", "servo")?,
         },
@@ -706,28 +760,64 @@ mod tests {
         }
     }
 
-    /// 轴状态注入文本解析（批N3 件三）：正例键序无关；缺键/坏布尔/词表外词/
-    /// 未知键/重复键逐条点名红——装配链注入的文本坏了必须看得见，不许静默猜。
+    /// 轴状态注入文本解析（批N3 件三建、件五扩五键）：正例键序无关；缺键/
+    /// 坏布尔/词表外词/未知键/重复键/越 u16 逐条点名红——装配链注入的文本坏了
+    /// 必须看得见，不许静默猜。
     #[test]
     fn axis_state_env_parses_strict() {
-        let ok = Rr3ActAxisState::rr3_from_env("calibrated=true,hard_stop=yes").unwrap();
+        let ok =
+            Rr3ActAxisState::rr3_from_env("calibrated=true,hard_stop=yes,lo=60,hi=120,center=90")
+                .unwrap();
         assert_eq!(
             ok,
             Rr3ActAxisState {
                 calibrated: true,
-                hard_stop: rr_hal_api::Rr3ActHardStop::Yes
+                hard_stop: rr_hal_api::Rr3ActHardStop::Yes,
+                lo_deg: 60,
+                hi_deg: 120,
+                center_deg: 90
             }
         );
-        let ok = Rr3ActAxisState::rr3_from_env("hard_stop=unknown,calibrated=false").unwrap();
-        assert_eq!(ok, Rr3ActAxisState::rr3_conservative(), "键序无关");
+        let ok = Rr3ActAxisState::rr3_from_env(
+            "hard_stop=unknown,calibrated=false,lo=0,hi=180,center=90",
+        )
+        .unwrap();
+        assert_eq!(
+            ok,
+            Rr3ActAxisState {
+                calibrated: false,
+                hard_stop: rr_hal_api::Rr3ActHardStop::Unknown,
+                lo_deg: 0,
+                hi_deg: 180,
+                center_deg: 90
+            },
+            "键序无关"
+        );
         for (bad, needle) in [
-            ("calibrated=true", "hard_stop"),
-            ("hard_stop=yes", "calibrated"),
-            ("calibrated=1,hard_stop=yes", "布尔"),
-            ("calibrated=true,hard_stop=maybe", "词表"),
-            ("calibrated=true,hard_stop=yes,extra=1", "未知键"),
-            ("calibrated=true,calibrated=false,hard_stop=yes", "重复"),
-            ("calibrated", "="),
+            (
+                "calibrated=true,hard_stop=yes,lo=60,hi=120,center=90,x=1",
+                "未知键",
+            ),
+            (
+                "calibrated=true,hard_stop=yes,center=90",
+                "lo（档案行程下限）",
+            ),
+            (
+                "calibrated=true,hard_stop=yes,lo=60,hi=120",
+                "center（档案中位锚）",
+            ),
+            (
+                "calibrated=true,hard_stop=yes,lo=60,center=90",
+                "hi（档案行程上限）",
+            ),
+            (
+                "calibrated=true,hard_stop=yes,lo=60,hi=120,center=70000",
+                "u16",
+            ),
+            (
+                "calibrated=true,hard_stop=yes,lo=abc,hi=120,center=90",
+                "u16",
+            ),
         ] {
             let e = Rr3ActAxisState::rr3_from_env(bad).unwrap_err();
             assert!(e.contains(needle), "{bad:?} → {e}");
@@ -743,6 +833,9 @@ mod tests {
         let calibrated = Rr3ActAxisState {
             hard_stop: rr_hal_api::Rr3ActHardStop::Yes,
             calibrated: true,
+            lo_deg: 60,
+            hi_deg: 120,
+            center_deg: 90,
         };
         let run = |args: &Value, axis: &Rr3ActAxisState| {
             let mut servo = rr_hal::sim::Rr3SimServo::rr3_sim_servo_new(90);
@@ -772,12 +865,12 @@ mod tests {
         vec![Rr3LedEffect::On, Rr3LedEffect::Off, Rr3LedEffect::Blink]
     }
 
-    /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
+    /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红。
+    /// 行程键不在 config（批N3 件五门 g 收敛），本夹具与仓内文件同形。
     #[test]
     fn config_parse_covers_repo_shape() {
         let text = r#"
 [rr3-act.servo]
-angle_limit_deg = [70, 110]
 move_timeout_ms = 800
 state_min_interval_ms = 50
 
@@ -793,8 +886,10 @@ loop_hz = 1000
 saturate_notice_ms = 500
 "#;
         let cfg = rr3_act_config_parse(text).unwrap();
-        assert_eq!(cfg.servo.angle_min_deg, 70);
-        assert_eq!(cfg.servo.angle_max_deg, 110);
+        // 行程两键在 config 解析面恒为占位 0/180——真值由 rr3_act_run 用执行轴
+        // 状态覆填（门 g 收敛：档案是唯一真值点）
+        assert_eq!(cfg.servo.angle_min_deg, 0);
+        assert_eq!(cfg.servo.angle_max_deg, 180);
         assert_eq!(cfg.servo.move_timeout_ms, 800);
         assert_eq!(cfg.servo.state_min_interval_ms, 50);
         assert_eq!(cfg.led.blink_period_ms, 500);
@@ -815,11 +910,18 @@ saturate_notice_ms = 500
     fn config_parse_rejects_missing_sections_and_fields() {
         let e = rr3_act_config_parse("").unwrap_err();
         assert!(e.contains("[rr3-act.servo]"), "缺段点名: {e}");
-        let e = rr3_act_config_parse(
+        // 行程键已撤（批N3 件五门 g），servo 节只剩时限/限速两必填键——
+        // 全节齐备即应解析通过（同仓内 config.toml 形状）
+        let ok = rr3_act_config_parse(
             "[rr3-act.servo]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\"]\n[rr3-act.intent]\nopen_topics = []\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n",
+        );
+        assert!(ok.is_ok(), "时限/限速两键齐备即完整: {:?}", ok.err());
+        // 缺必填键照旧点名（换 move_timeout_ms 当靶）
+        let e = rr3_act_config_parse(
+            "[rr3-act.servo]\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\"]\n[rr3-act.intent]\nopen_topics = []\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n",
         )
         .unwrap_err();
-        assert!(e.contains("angle_limit_deg"), "缺字段点名: {e}");
+        assert!(e.contains("move_timeout_ms"), "缺字段点名: {e}");
         let e = rr3_act_config_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
     }
@@ -830,7 +932,6 @@ saturate_notice_ms = 500
     fn config_parse_rejects_loop_hz_overflow() {
         let text = r#"
 [rr3-act.servo]
-angle_limit_deg = [0, 180]
 move_timeout_ms = 800
 state_min_interval_ms = 50
 
@@ -856,7 +957,7 @@ saturate_notice_ms = 500
         // 基座（四段齐备），按需替换 led.effects / intent.open_topics 行
         let base = |led: &str, top: &str| {
             format!(
-                "[rr3-act.servo]\nangle_limit_deg = [0, 180]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\n{led}\n[rr3-act.intent]\n{top}\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
+                "[rr3-act.servo]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\n{led}\n[rr3-act.intent]\n{top}\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
             )
         };
         // 缺 effects 键
@@ -874,7 +975,7 @@ saturate_notice_ms = 500
         assert!(e.contains("非在册灯效"), "越界值点名在册值: {e}");
         // 缺 intent 段
         let e = rr3_act_config_parse(
-            "[rr3-act.servo]\nangle_limit_deg = [0, 180]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\"]\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n",
+            "[rr3-act.servo]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\"]\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n",
         )
         .unwrap_err();
         assert!(e.contains("[rr3-act.intent]"), "缺段点名: {e}");

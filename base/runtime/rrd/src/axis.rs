@@ -19,10 +19,11 @@
 //!   `Err` **且不许覆盖**——`secrets.rs` 那个"坏 JSON 恒 Err 且不能自愈"的
 //!   形状就是这条要防的。
 //!
-//! 消费接线（诚实登记）：执行轴状态注入面已随批N3 件三接进 boot 链（rrd
-//! profile.rs 扫 `axis/` 恰一份合法才投影 `RR3_ACT_AXIS_STATE`，空 = 模块侧折
-//! 保守缺省）；行程三处收敛（config 侧字面量与板侧分轴字面量改读档案）随件五、
-//! 标定写入面随件四——未接线的读者继续等，不预接线。
+//! 消费接线（批N3 件五现状）：执行轴状态注入面已接进 boot 链（rrd profile.rs 扫
+//! `axis/`，按 `RR3_HAL_PERIPH_AXIS`（缺省契约常量）消歧——instance 与轴读数相等的
+//! 恰一份合法档案才投影 `RR3_ACT_AXIS_STATE`，文本含行程三键 lo/hi/center，空 =
+//! 模块侧折保守缺省）；行程收敛的注入半边在本文件（档案即行程真值源），config 与
+//! 板侧字面量的撤除随件五同批推进；标定写入面随件四（axis_write）。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
