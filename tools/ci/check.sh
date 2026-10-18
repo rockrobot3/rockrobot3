@@ -714,6 +714,16 @@ if [ "$gate_n_fail" -ne 0 ]; then
   fail=1
 fi
 
+# —— ⑨-c 电流预算装载拒链（校验⑨ 专属执法步，门 c；全案 §5 ⑨ 行 / §16.4 计数，
+#    批N2 本体 件一）。三层判据（实-14）：①装载期判据（rrd rr3_demand_budget_check
+#    ＋ rr3_demand_declared_expand per-instance 扩算 ＋ rr3_demand_kind_power_gaps
+#    kind=power 覆盖判据，接 boot 链致命汇合点）与 ②反例用例（demand_budget_check_nine
+#    并发三态 ＋ demand_budget_chain_* 装载拒链三用例）经 ①b 全量进 CI，本步补 ③专属
+#    执法步——显式过滤器 demand_budget 封 fail-open（过滤器打空或用例改名即 0 通过，
+#    run_tests 直接红；新拒链用例命名须带 demand_budget 前缀进本步扫面）。
+step "⑨-c 电流预算装载拒链（校验⑨ per-instance 扩算 + kind=power 覆盖判据，门 c）"
+run_tests sh -c 'cd base/runtime && cargo test -p rrd --lib demand_budget'
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"

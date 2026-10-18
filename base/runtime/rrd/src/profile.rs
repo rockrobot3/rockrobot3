@@ -47,7 +47,7 @@ use std::path::{Path, PathBuf};
 use rr_registry::{
     rr3_registry_device_table_from_text, rr3_registry_platform_table_from_text,
     rr3_registry_role_table_from_text, rr3_registry_slot_table_from_text, Rr3AssembleDemand,
-    Rr3DeviceTable, Rr3PlatformTable, Rr3RoleTable, Rr3SlotTable,
+    Rr3AssembleFacts, Rr3DeviceTable, Rr3PlatformTable, Rr3RoleTable, Rr3SlotTable,
 };
 
 /// 契约格位表的编译期定位（与 `topics_load::RR3_CONTRACT_TOPICS_PATH` 同深度：
@@ -1177,6 +1177,37 @@ pub fn rr3_profile_boot_inputs_with_probe(
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
     let mate_set = devices.rr3_device_table_mates();
     errs.extend(wiring.rr3_wiring_check(&pin_ids, &domain_names, &mate_set));
+
+    // 门 c 装载执法（批N2 本体 ⑨-c，校验⑨ 后果 = 拒）：装配扫描一次两用——形状/
+    // 注入缺错误照旧进 assemble_broken（G4 该格 Degraded，不 fatal），校验⑨ 的预算
+    // 与覆盖判据在此接装载拒链（进 errs，boot 拒）。manifest 解析所需的 modules-root
+    // 就此上提（原在缺格判定段，纯路径推导无副作用）。
+    // 如实注记：assemble.toml 坏形的件无法供 demands facts（坏形已进 assemble_broken
+    // 点名），预算加总不含它——洞的可见面 = Degraded 点名，此处不 claim 全覆盖。
+    let root = abs
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| {
+            format!(
+                "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
+                abs.display()
+            )
+        })?;
+    let mut assemble_broken: Vec<(String, String)> = Vec::new();
+    let mut scanned: Vec<(String, Vec<(String, Rr3AssembleFacts)>)> = Vec::new();
+    for m in profile.enabled_slots.keys() {
+        let (atoms, msgs) = rr3_assemble_scan(&root.join("modules").join(m));
+        scanned.push((m.clone(), atoms));
+        for msg in msgs {
+            assemble_broken.push((m.clone(), msg));
+        }
+    }
+    // 申报分子：每实例扩算（条目 × 该件经 iface 归因服务到的角色 pin 数，地板 1）
+    let declared = rr3_demand_declared_expand(&profile, &roles, &scanned);
+    // 校验⑨ 本判（F-12 加总口径：缺省全部同时，收窄只认 concurrency_group 数据）
+    errs.extend(rr3_demand_budget_check(&declared, &profile.supplies.domains));
+    // 校验⑨ 缺失语义另一半：kind=power 角色挂轨，绑定模块的件申报面必须覆盖
+    errs.extend(rr3_demand_kind_power_gaps(&profile, &roles, &scanned));
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -1257,13 +1288,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     missing.sort();
 
-    // manifest 解析：modules-root = 装配单路径的上两级（<root>/profiles/<机>.toml）。
-    let root = abs.parent().and_then(Path::parent).ok_or_else(|| {
-        format!(
-            "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
-            abs.display()
-        )
-    })?;
+    // manifest 解析：modules-root 已在门 c 段上提（装配单路径的上两级，<root>/profiles/<机>.toml）。
     let manifests: Vec<PathBuf> = profile
         .enabled_slots
         .keys()
@@ -1278,15 +1303,9 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     let hal_bindings = rr3_hardware_bindings_text(&merged);
 
-    // G4 装配段校验（ADR-0019 修订 1 ③）：enabled_slots 的每个模块扫
-    // atoms/*/assemble.toml——缺文件/坏形/ops 注入缺逐条点名，该模块 boot 入
-    // Degraded（不 fatal；修数据 + 重启是唯一解除路）。
-    let mut assemble_broken: Vec<(String, String)> = Vec::new();
-    for m in profile.enabled_slots.keys() {
-        for msg in rr3_assemble_scan(&root.join("modules").join(m)) {
-            assemble_broken.push((m.clone(), msg));
-        }
-    }
+    // G4 装配段校验（ADR-0019 修订 1 ③）已在门 c 段随装配扫描一次完成：缺文件/
+    // 坏形/ops 注入缺逐条点名进 assemble_broken，该模块 boot 入 Degraded（不 fatal；
+    // 修数据 + 重启是唯一解除路）。此处只消费上文的 assemble_broken。
 
     Ok(Rr3ProfileBoot {
         manifests,
@@ -1460,10 +1479,13 @@ fn rr3_check_pin_occupancy(profile: &Rr3Profile, platform: &Rr3PlatformTable) ->
 /// 扫描单个模块目录的装配清单（G4/ADR-0019 修订 1 ③）：`atoms/<件>/` 必有
 /// assemble.toml（五件套④），形状校验走 rr-registry 共用真值；ops 非空时对模块
 /// config.toml 做注入缺点路径游走。无 atoms/ 目录的模块（夹具树/两件式形态）返回空。
-fn rr3_assemble_scan(module_dir: &Path) -> Vec<String> {
+/// 门 c（⑨-c）起同时返回解析成功的 facts（(件名, facts) 升序）供校验⑨ 消费——
+/// 形状错误照旧走错误串（该件 Degraded），坏形件的 demands 不进预算加总（可见面 =
+/// assemble_broken 点名，不 claim 全覆盖）。
+fn rr3_assemble_scan(module_dir: &Path) -> (Vec<(String, Rr3AssembleFacts)>, Vec<String>) {
     let atoms_dir = module_dir.join("atoms");
     let Ok(entries) = std::fs::read_dir(&atoms_dir) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut names: Vec<String> = entries
         .filter_map(|e| e.ok())
@@ -1471,7 +1493,8 @@ fn rr3_assemble_scan(module_dir: &Path) -> Vec<String> {
         .filter_map(|e| e.file_name().to_str().map(str::to_string))
         .collect();
     names.sort();
-    let mut out = Vec::new();
+    let mut facts_out: Vec<(String, Rr3AssembleFacts)> = Vec::new();
+    let mut out: Vec<String> = Vec::new();
     for atom in names {
         let path = atoms_dir.join(&atom).join("assemble.toml");
         let text = match std::fs::read_to_string(&path) {
@@ -1491,6 +1514,7 @@ fn rr3_assemble_scan(module_dir: &Path) -> Vec<String> {
             }
         };
         if facts.ops.is_empty() {
+            facts_out.push((atom, facts));
             continue;
         }
         // 注入缺：ops 声明的参数槽必须能从模块 config.toml 按点路径取到
@@ -1504,18 +1528,22 @@ fn rr3_assemble_scan(module_dir: &Path) -> Vec<String> {
                 "件 {atom} 参数槽来源不可证：config.toml 读不到 ({e})"
             )),
         }
+        facts_out.push((atom, facts));
     }
-    out
+    (facts_out, out)
 }
 
-/// 校验⑨ 最小读者（批N2 首件基-36，全案 §5 判据⑨）：`Σ demands.peak_ma
-/// (critical=true) ≤ domains[rail].current_cap_ma`。fail-closed 逐条点名：
+/// 校验⑨ 判据实体（批N2 首件基-36 落、门 c ⑨-c 接链，全案 §5 判据⑨）：
+/// `Σ demands.peak_ma (critical=true) ≤ domains[rail].current_cap_ma`。fail-closed
+/// 逐条点名：
 /// - demand.rail 不在 [[supplies.domain]] ⇒ 红（域缺 = `current_cap_ma` 缺，预算无分母）；
-/// - per rail Σ(critical=true) 超域 cap ⇒ 红点名（域 + 加总值 + cap + 申报者清单）。
-/// critical=false 不进 Σ（判据原文只算 critical=true）；并发缺省 = 全部同时（最坏），
-/// `concurrency_group` 收窄随门 c（批N2 本体）同批，本读者不预支。
-/// **基-36 只落判据实体（本函数）＋反例用例（tests ①b）**：装载拒链（专属执法位
-/// ⑨-c / 门 c）仍待建，待建门计数与 check.sh step 行数不变——接链随批N2 本体同批。
+/// - per rail 扩算后最坏并发 Σ 超域 cap ⇒ 红点名（域 + 最坏值 + cap + 申报者清单）。
+/// 加总口径（F-12）：**缺省 = 全部 critical=true 同时（最坏）**；收窄只认数据——
+/// `concurrency_group` **恰一组**归属的条目同组互斥（至多一个同时取流）⇒ 组内取
+/// max；显式空数组（不分组）与**多组**归属按不收窄计（宁超算不漏算），不许运行期
+/// 推断。收窄是申报者的自证声明，判据只认数据不验物理——错报收窄即假绿，归申报者。
+/// `critical=false` 不进 Σ；输入条目应已经 [`rr3_demand_declared_expand`] 按角色
+/// 实例数扩算（每实例语义，assemble.rs 头注同源）。
 fn rr3_demand_budget_check(
     declared: &[(String, Vec<Rr3AssembleDemand>)],
     domains: &[Rr3Domain],
@@ -1532,29 +1560,126 @@ fn rr3_demand_budget_check(
             }
         }
     }
-    // per rail 预算加总（并发缺省 = 全部同时，最坏口径）
+    // per rail 预算加总：不分组/多组归属条目全额进最坏值，恰一组归属的条目按组
+    // 互斥取组内 max（BTreeMap 保确定性，红例文案顺序稳定）
     for dm in domains {
-        let sum: i64 = declared
-            .iter()
-            .flat_map(|(_, demands)| demands.iter())
-            .filter(|d| d.critical && d.rail == dm.name)
-            .map(|d| d.peak_ma)
-            .sum();
-        if sum > dm.current_cap_ma {
-            let owners: Vec<&str> = declared
-                .iter()
-                .filter(|(_, demands)| {
-                    demands
-                        .iter()
-                        .any(|d| d.critical && d.rail == dm.name)
-                })
-                .map(|(o, _)| o.as_str())
-                .collect();
+        let mut worst = 0i64;
+        let mut owners: BTreeSet<&str> = BTreeSet::new();
+        let mut groups: BTreeMap<&str, i64> = BTreeMap::new();
+        for (owner, demands) in declared {
+            for d in demands.iter().filter(|d| d.critical && d.rail == dm.name) {
+                owners.insert(owner.as_str());
+                match d.concurrency_group.as_slice() {
+                    [g] => {
+                        let slot = groups.entry(g.as_str()).or_insert(0);
+                        *slot = (*slot).max(d.peak_ma);
+                    }
+                    _ => worst += d.peak_ma,
+                }
+            }
+        }
+        for peak in groups.values() {
+            worst += peak;
+        }
+        if worst > dm.current_cap_ma {
             errs.push(format!(
-                "域 {} 电流预算超限（校验⑨）：Σ demands.peak_ma (critical=true) = {sum} mA > current_cap_ma = {} mA（申报者：{}；并发缺省 = 全部同时）",
+                "域 {} 电流预算超限（校验⑨）：扩算后 Σ demands.peak_ma (critical=true) 最坏并发 = {worst} mA > current_cap_ma = {} mA（申报者：{}；缺省 = 全部同时，显式 concurrency_group 按组互斥取 max——F-12 不重叠必须是数据）",
                 dm.name,
                 dm.current_cap_ma,
-                owners.join("、")
+                owners.into_iter().collect::<Vec<_>>().join("、")
+            ));
+        }
+    }
+    errs
+}
+
+/// 门 c 申报分子构建（批N2 本体 ⑨-c）：把装配扫描 facts 扩算成校验⑨ 的加总输入。
+/// **每实例语义**（assemble.rs 头注同源）：demand 条目是"该件服务的每个角色实例"的
+/// 需求——实例数 = [pins] 中"角色 iface ∈ 件 handles.trait 集 且 角色 slot 绑到
+/// 本模块"的 pin 数（归因链 pin→role→iface→件 handles）；归因打空的地板 = 1（模块
+/// 启用件即运行，取流不因归因失配而消失，宁超算不漏算）；同模块多件声明同一 trait
+/// 时各按全额计（互相不知情，fail-closed 向红）。owner = "模块/件"（红例点名到件）。
+fn rr3_demand_declared_expand(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    scanned: &[(String, Vec<(String, Rr3AssembleFacts)>)],
+) -> Vec<(String, Vec<Rr3AssembleDemand>)> {
+    let mut out = Vec::new();
+    for (module, atoms) in scanned {
+        for (atom, facts) in atoms {
+            if facts.demands.is_empty() {
+                continue;
+            }
+            let traits: BTreeSet<&str> = facts
+                .handles
+                .iter()
+                .map(|h| h.trait_name.as_str())
+                .collect();
+            let mut instances: i64 = 0;
+            for pin in &profile.pins {
+                let served = roles
+                    .rr3_role_table_iface(&pin.role)
+                    .is_some_and(|i| traits.contains(i.as_str()));
+                let bound = roles
+                    .rr3_role_table_slot(&pin.role)
+                    .and_then(|s| profile.bindings.get(&s))
+                    .is_some_and(|m| m == module);
+                if served && bound {
+                    instances += 1;
+                }
+            }
+            let n = instances.max(1);
+            let expanded: Vec<Rr3AssembleDemand> = facts
+                .demands
+                .iter()
+                .map(|d| {
+                    let mut e = d.clone();
+                    e.peak_ma *= n;
+                    e.sustained_ma *= n;
+                    e
+                })
+                .collect();
+            out.push((format!("{module}/{atom}"), expanded));
+        }
+    }
+    out
+}
+
+/// 门 c 覆盖判据（校验⑨ 缺失语义另一半，§5 ⑨ 行"件未申报 demands 而角色
+/// kind=power → 红"）：角色 kind=power 的每个 pin，其绑定模块的件申报面必须覆盖
+/// 该 pin 的 rail（≥1 条 rail 相同的申报，跨件合计）。绑定缺失由缺格/结构自洽判
+/// 点名，此处不重复报；rail 空/none 由校验⑥-b 点名，此处跳过不双报。
+fn rr3_demand_kind_power_gaps(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    scanned: &[(String, Vec<(String, Rr3AssembleFacts)>)],
+) -> Vec<String> {
+    let mut errs = Vec::new();
+    for pin in &profile.pins {
+        if roles.rr3_role_table_kind(&pin.role).as_deref() != Some("power") {
+            continue;
+        }
+        if pin.rail.is_empty() || pin.rail == "none" {
+            continue; // ⑥-b 已点名功率面缺轨，不双报
+        }
+        let Some(module) = roles
+            .rr3_role_table_slot(&pin.role)
+            .and_then(|s| profile.bindings.get(&s))
+        else {
+            continue;
+        };
+        let covered = scanned
+            .iter()
+            .filter(|(m, _)| m == module)
+            .flat_map(|(_, atoms)| atoms.iter())
+            .flat_map(|(_, f)| f.demands.iter())
+            .any(|d| d.rail == pin.rail);
+        if !covered {
+            errs.push(format!(
+                "pins[{}] 角色 {} kind = power 挂轨 {rail}，但模块 {module} 的件申报面无 {rail} 需求（校验⑨ 缺失语义：件未申报 demands 而角色 kind=power → 红）",
+                pin.rr3_pin_id(),
+                pin.role,
+                rail = pin.rail
             ));
         }
     }
@@ -1565,10 +1690,11 @@ fn rr3_demand_budget_check(
 mod tests {
     use super::*;
 
-    /// 校验⑨ 最小读者反例组（批N2 首件基-36，判据实体进 ①b）：正例（servo 首条
-    /// 真实申报形状 Σ700 ≤ cap 2000 ⇒ 绿）＋三条反例——同域加总超 cap ⇒ 红、
-    /// rail 不在 domains ⇒ 红、critical=false 不进 Σ。装载拒链（⑨-c / 门 c）仍
-    /// 待建：本测试只钉判据本体，step 行数与待建门计数不变。
+    /// 校验⑨ 判据实体反例组（批N2 首件基-36 立，门 c ⑨-c 补并发口径，判据进 ①b）：
+    /// 正例（servo 五键申报形状 Σ700 ≤ cap 2000 ⇒ 绿）＋反例——同域加总超 cap ⇒ 红、
+    /// rail 不在 domains ⇒ 红、critical=false 不进 Σ；并发口径三态——显式空组 =
+    /// 全体同时（最坏缺省）、恰一组归属 = 组内互斥取 max（收窄须是数据，F-12）、
+    /// 多组归属 = 不收窄（宁超算不漏算）。
     #[test]
     fn demand_budget_check_nine() {
         let rail5v = || Rr3Domain {
@@ -1576,23 +1702,25 @@ mod tests {
             current_cap_ma: 2000,
             ..Default::default()
         };
-        let d = |rail: &str, peak: i64, critical: bool| Rr3AssembleDemand {
+        let d = |rail: &str, peak: i64, critical: bool, groups: &[&str]| Rr3AssembleDemand {
             rail: rail.into(),
             peak_ma: peak,
+            sustained_ma: peak.min(120).max(1),
             critical,
+            concurrency_group: groups.iter().map(|g| g.to_string()).collect(),
         };
 
-        // 正例：servo 首条申报形状（rail5v peak 700 critical）⇒ 无红
-        let ok = vec![("rr3-act.servo".to_string(), vec![d("rail5v", 700, true)])];
+        // 正例：servo 五键申报形状（rail5v peak 700 sustained 120 critical，空组）⇒ 无红
+        let ok = vec![("rr3-act/servo".to_string(), vec![d("rail5v", 700, true, &[])])];
         assert!(
             rr3_demand_budget_check(&ok, &[rail5v()]).is_empty(),
             "Σ700 ≤ cap 2000 必须绿"
         );
 
-        // 反例①：两件同域加总超 cap（Σ2400 > 2000）⇒ 红点名域 + 加总 + cap + 申报者
+        // 反例①：两件同域加总超 cap（Σ2400 > 2000）⇒ 红点名域 + 最坏值 + cap + 申报者
         let over = vec![
-            ("rr3-act.servo".to_string(), vec![d("rail5v", 700, true)]),
-            ("rr3-x.dummy".to_string(), vec![d("rail5v", 1700, true)]),
+            ("rr3-act/servo".to_string(), vec![d("rail5v", 700, true, &[])]),
+            ("rr3-x/dummy".to_string(), vec![d("rail5v", 1700, true, &[])]),
         ];
         let errs = rr3_demand_budget_check(&over, &[rail5v()]);
         assert!(
@@ -1600,13 +1728,13 @@ mod tests {
                 && e.contains("rail5v")
                 && e.contains("2400")
                 && e.contains("2000")
-                && e.contains("rr3-act.servo")
-                && e.contains("rr3-x.dummy")),
+                && e.contains("rr3-act/servo")
+                && e.contains("rr3-x/dummy")),
             "{errs:?}"
         );
 
         // 反例②：rail 不在 domains ⇒ 红（域缺即 cap 缺，预算无分母）
-        let ghost = vec![("rr3-x.dummy".to_string(), vec![d("rail9v", 1, true)])];
+        let ghost = vec![("rr3-x/dummy".to_string(), vec![d("rail9v", 1, true, &[])])];
         let errs = rr3_demand_budget_check(&ghost, &[rail5v()]);
         assert!(
             errs.iter()
@@ -1616,12 +1744,35 @@ mod tests {
 
         // 反例③：critical=false 不进 Σ（判据只算 critical=true）——5000 mA 也绿
         let noncrit = vec![(
-            "rr3-x.dummy".to_string(),
-            vec![d("rail5v", 5000, false)],
+            "rr3-x/dummy".to_string(),
+            vec![d("rail5v", 5000, false, &[])],
         )];
         assert!(
             rr3_demand_budget_check(&noncrit, &[rail5v()]).is_empty(),
             "critical=false 不得进加总"
+        );
+
+        // 并发口径（F-12：不重叠必须是数据）——恰一组归属 = 组内互斥取 max：
+        // 三件各 700 同挂 "axis" 组 ⇒ 最坏 = max(700) = 700 ≤ 2000 绿（不加总 2100）
+        let grouped = vec![
+            ("rr3-a/servo".to_string(), vec![d("rail5v", 700, true, &["axis"])]),
+            ("rr3-b/servo".to_string(), vec![d("rail5v", 700, true, &["axis"])]),
+            ("rr3-c/servo".to_string(), vec![d("rail5v", 700, true, &["axis"])]),
+        ];
+        assert!(
+            rr3_demand_budget_check(&grouped, &[rail5v()]).is_empty(),
+            "同组互斥按 max 计（700 ≤ 2000）必须绿"
+        );
+        // 多组归属 = 不收窄（宁超算不漏算）：条目同时挂两组 ⇒ 全额进 Σ
+        let multi = vec![
+            ("rr3-a/x".to_string(), vec![d("rail5v", 700, true, &["g1", "g2"])]),
+            ("rr3-b/y".to_string(), vec![d("rail5v", 700, true, &["g1"])]),
+            ("rr3-c/z".to_string(), vec![d("rail5v", 700, true, &["g2"])]),
+        ];
+        let errs = rr3_demand_budget_check(&multi, &[rail5v()]);
+        assert!(
+            errs.iter().any(|e| e.contains("2100")),
+            "多组归属不收窄，全额加总 2100 > 2000 ⇒ 红 {errs:?}"
         );
     }
 
@@ -1721,7 +1872,69 @@ gnd_common = "star-1"
             let dir =
                 std::env::temp_dir().join(format!("rr3-profile-{}-{tag}", std::process::id()));
             std::fs::create_dir_all(dir.join("profiles")).expect("建 profiles 目录");
-            Root { dir }
+            let root = Root { dir };
+            root.stage_servo_module();
+            root
+        }
+
+        /// stage rr3-pa 的 servo 件装配清单（五键 demands，与仓内 servo 件同形状）：
+        /// 门 c（⑨-c）起装载链对 kind=power 角色执法预算与覆盖判据，GOOD 夹具的
+        /// act.axis.pwm pin 绑 rr3-pa——无 stage 件则所有 boot 用例被 ⑨ 覆盖判据误红。
+        /// 反例用例经覆写本文件构造（空申报 / 追加 oled 件）。
+        fn stage_servo_module(&self) {
+            let a = self
+                .dir
+                .join("modules/rr3-pa/atoms/servo/assemble.toml");
+            std::fs::create_dir_all(a.parent().expect("必有父目录")).expect("建 atoms 目录");
+            std::fs::write(
+                &a,
+                concat!(
+                    "schema_version = 2\n\n[assemble]\n",
+                    "handles = [\n",
+                    "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n",
+                    "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_channel\" },\n",
+                    "]\n",
+                    "ops = []\n",
+                    "demands = [\n",
+                    "  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n",
+                    "]\n",
+                ),
+            )
+            .expect("stage servo assemble.toml");
+        }
+
+        /// 覆写 stage 件申报面为"未申报"（⑨ 覆盖判据红例的构造器）
+        fn stage_servo_undeclared(&self) {
+            let a = self
+                .dir
+                .join("modules/rr3-pa/atoms/servo/assemble.toml");
+            std::fs::write(
+                &a,
+                "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\n",
+            )
+            .expect("覆写 servo assemble.toml");
+        }
+
+        /// 追加一件显示件（Rr3Display/spi_device，rail5v 700 critical）——"舵机
+        /// 堵转叠加满亮屏超 2A"预算红例与组收窄绿例的构造器（§9 N2 判据列）；
+        /// 无对应角色 pin，实例数走归因地板 1（宁超算不漏算）；group 传 TOML
+        /// 数组字面量（`[]` = 不分组最坏口径，`["axis"]` = 组互斥申报）
+        fn stage_display_atom(&self, name: &str, group: &str) {
+            let dir = self.dir.join("modules/rr3-pa/atoms").join(name);
+            std::fs::create_dir_all(&dir).expect("建显示件目录");
+            std::fs::write(
+                dir.join("assemble.toml"),
+                concat!(
+                    "schema_version = 2\n\n[assemble]\n",
+                    "handles = [\n  { trait = \"Rr3Display\", desc_key = \"spi_device\" },\n]\n",
+                    "ops = []\n",
+                    "demands = [\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = ",
+                )
+                .to_string()
+                    + group
+                    + " },\n]\n",
+            )
+            .expect("stage 显示件 assemble.toml");
         }
 
         /// 落装配单并同批 stage 接线档（`hardware/<形态>/wiring.toml`，与
@@ -1909,7 +2122,9 @@ mux_group = []
     fn assemble_scan_names_missing_broken_and_injection_gaps() {
         let root = Root::new("assemble-scan");
         // 无 atoms/ 目录 → 空（夹具树/两件式形态）
-        assert!(rr3_assemble_scan(&root.dir.join("no-atoms")).is_empty());
+        assert!(rr3_assemble_scan(&root.dir.join("no-atoms"))
+            .1
+            .is_empty());
 
         // 合法空声明（v2，明写不需注入面）→ 空
         let ok = root.dir.join("ok");
@@ -1919,7 +2134,10 @@ mux_group = []
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .unwrap();
-        assert!(rr3_assemble_scan(&ok).is_empty(), "合法空声明不得报缺");
+        assert!(
+            rr3_assemble_scan(&ok).1.is_empty(),
+            "合法空声明不得报缺"
+        );
 
         // 缺文件 / 坏形 / 注入缺 三路点名，互不遮蔽
         let bad = root.dir.join("bad");
@@ -1938,7 +2156,7 @@ mux_group = []
         )
         .unwrap();
         std::fs::write(bad.join("config.toml"), "[x.y]\nw = 1\n").unwrap();
-        let out = rr3_assemble_scan(&bad);
+        let out = rr3_assemble_scan(&bad).1;
         assert_eq!(out.len(), 3, "{out:?}");
         assert!(
             out.iter()
@@ -1955,6 +2173,59 @@ mux_group = []
                 .any(|m| m.contains("gap") && m.contains("注入缺") && m.contains("x.y.z")),
             "{out:?}"
         );
+    }
+
+    /// 门 c 装载拒链·红例①（§5 ⑨ 后果 = 拒：扩算后 Σ critical > cap ⇒ boot Err）：
+    /// GOOD 单轴（servo 700，角色 pin 归因实例 1）+ 两件显示件（oled/face 各 700，
+    /// 无对应角色 pin 走归因地板 1，空组最坏口径）⇒ 2100 > 2000，红条点名域、
+    /// 最坏值与申报者——"舵机堵转叠加满亮屏"这一 ADR-0021 裁定 2 立项红例在
+    /// 装载链可达（多件同域叠加逐件全额计）。
+    #[test]
+    fn demand_budget_chain_boot_rejects_over_cap() {
+        let root = Root::new("budget-red");
+        root.stage_display_atom("face", "[]");
+        root.stage_display_atom("oled", "[]");
+        let p = root.write_profile("budget-red.toml", GOOD);
+        let e = boot_inputs(&p).expect_err("扩算 2100 > cap 2000 必须致命");
+        assert!(
+            e.contains("电流预算超限")
+                && e.contains("rail5v")
+                && e.contains("2100")
+                && e.contains("2000")
+                && e.contains("rr3-pa/servo")
+                && e.contains("rr3-pa/oled")
+                && e.contains("rr3-pa/face"),
+            "{e}"
+        );
+    }
+
+    /// 门 c 装载拒链·红例②（§5 ⑨ 缺失语义：件未申报 demands 而角色 kind=power ⇒ 红）：
+    /// 覆写 servo 为无申报——act.axis.pwm（全仓唯一 kind=power 角色）挂轨 rail5v 而
+    /// rr3-pa 申报面无 rail5v 需求，红条点名 pin、模块与判据原文。
+    #[test]
+    fn demand_budget_chain_boot_rejects_uncovered_power_pin() {
+        let root = Root::new("budget-undeclared");
+        root.stage_servo_undeclared();
+        let p = root.write_profile("undeclared.toml", GOOD);
+        let e = boot_inputs(&p).expect_err("kind=power pin 无申报覆盖必须致命");
+        assert!(
+            e.contains("件未申报 demands") && e.contains("rail5v") && e.contains("rr3-pa"),
+            "{e}"
+        );
+    }
+
+    /// 门 c 装载拒链·绿例（F-12：收窄必须是数据）：同一红例布局（servo+oled+face），
+    /// 两件显示件申报同挂 "axis" 组 ⇒ 组内互斥取 max = 700，Σ = 700（servo 未分组
+    /// 全额）+ 700 = 1400 ≤ 2000，boot 过——与红例①对照钉住"同布局、只多一条申报
+    /// 数据，红转绿"，收窄是申报者自证声明，判据只认数据不验物理。
+    #[test]
+    fn demand_budget_chain_boot_accepts_group_narrowing() {
+        let root = Root::new("budget-grouped");
+        root.stage_display_atom("face", "[\"axis\"]");
+        root.stage_display_atom("oled", "[\"axis\"]");
+        let p = root.write_profile("budget-grouped.toml", GOOD);
+        let boot = boot_inputs(&p).expect("组收窄 1400 ≤ 2000 必须过");
+        assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
 
     #[test]
