@@ -483,7 +483,10 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             {
                 let mut c = Command::new(&act);
                 c.env("RR3_HAL_BACKEND", "sim")
-                    .env("RR3_ACT_CONFIG", &act_cfg);
+                    .env("RR3_ACT_CONFIG", &act_cfg)
+                    // 执行轴状态（批N3 件三）：chain 直起路径与 rrd --manifest 并存，
+                    // 模块 env 由 chain 直设——sim 档已标定 + 挡块在册，Auto 放行
+                    .env("RR3_ACT_AXIS_STATE", "calibrated=true,hard_stop=yes");
                 (RR3_SIM_MODULE_ACT, c)
             },
         ] {

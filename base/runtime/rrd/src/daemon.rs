@@ -206,7 +206,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
     // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
     // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
-    let (boot_manifests, degraded, hal_bindings, predegraded) = match &cfg.profile {
+    let (boot_manifests, degraded, hal_bindings, axis_state, predegraded) = match &cfg.profile {
         Some(p) => {
             // 格位/角色/器件契约与主题契约同目录（--contracts 运行期落点，T5；roles.toml
             // 是校验①②判据源、devices.toml 是校验⑦-d 的 mate 集判定源、platform/ 是
@@ -240,17 +240,29 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                     "装配缺项 {module}：{msg}（该模块在册即 Degraded，不致命——修数据后重启 rrd 解除）"
                 ));
             }
+            // 执行轴状态（批N3 件三）：档案装载点名（坏件逐条 / 多份合法）与缺格/
+            // 缺角色分开——注入文本空串 = 不注入，模块侧折保守缺省（§6 复位语义④）
+            for note in &boot.axis_notes {
+                rr3_log(note);
+            }
             let names: BTreeSet<String> = boot.missing.iter().map(|(m, _)| m.clone()).collect();
             let predegraded: BTreeSet<String> = boot
                 .assemble_broken
                 .iter()
                 .map(|(m, _)| m.clone())
                 .collect();
-            (boot.manifests, names, boot.hal_bindings, predegraded)
+            (
+                boot.manifests,
+                names,
+                boot.hal_bindings,
+                boot.axis_state,
+                predegraded,
+            )
         }
         None => (
             cfg.manifests.clone(),
             BTreeSet::new(),
+            String::new(),
             String::new(),
             BTreeSet::new(),
         ),
@@ -343,7 +355,10 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             // 物理绑定描述符（ADR-0018 裁定 4、批D④）：装配链解析出的 [hardware]
             // 文本随每个 job 透传，supervisor spawn 时注入 RR3_HAL_BINDINGS；
             // --manifest 调试后门无装配单 → 空串（不注入，fail-closed + 应急 env）。
+            // 执行轴状态（批N3 件三）同位透传：轴档案恰一份合法装载的投影，spawn
+            // 时注入 RR3_ACT_AXIS_STATE；空串不注入（模块侧折保守缺省）。
             job.hal_bindings = hal_bindings.clone();
+            job.axis_state = axis_state.clone();
             jobs.push(job);
         }
     }

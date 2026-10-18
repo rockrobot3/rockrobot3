@@ -21,8 +21,8 @@ use serde_json::Value;
 
 use super::led::RR3_LED_EFFECT_TOPIC;
 use super::relay::{self, RR3_RELAY_SET_TOPIC};
-use super::servo::{Rr3ServoCfg, RR3_SERVO_COMMAND_TOPIC};
-use super::{rr3_low_power_reject, rr3_relay_parse_args, rr3_servo_parse_args};
+use super::servo::{rr3_servo_check_motion, Rr3ServoCfg, RR3_SERVO_COMMAND_TOPIC};
+use super::{rr3_low_power_reject, rr3_relay_parse_args, rr3_servo_parse_args, Rr3ActAxisState};
 
 /// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值；
 /// 字面量零内联，主题事实源在各自原子件的常量）
@@ -47,6 +47,9 @@ pub enum Rr3IntentOutcome {
 ///
 /// `low_blocked` = 低电禁动闸门闭锁（MC-5 §20 ② ②）：**执行面**（servo/relay）
 /// 与 RPC 路同判拒动；**妆面 led 不受辖**（仍走开放门=在册未开放的既有口径）。
+/// `axis` = 执行轴状态（批N3 件三）：servo 动作过拒动判据（§6 硬约束）——广播
+/// 无 motion 键 = auto（语音触发的判向/转向无逐步人工确认，按点动申报是撒谎），
+/// 未标定轴在此被代码拒动。
 /// `open_topics` = 意图执行面开放集（A-9，config 注入）：只有列在其中的**已归属**
 /// 主题才进入执行臂；未列（含 led/effect）一律由开放门拒执行。
 pub fn rr3_intent_actions_handle(
@@ -55,6 +58,7 @@ pub fn rr3_intent_actions_handle(
     servo: &mut dyn rr_hal_api::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
     low_blocked: bool,
+    axis: &Rr3ActAxisState,
     open_topics: &[String],
 ) -> Vec<Result<Rr3IntentOutcome, String>> {
     let Some(list) = actions.as_array() else {
@@ -62,7 +66,7 @@ pub fn rr3_intent_actions_handle(
     };
     list.iter()
         .map(|item| {
-            rr3_intent_action_handle(item, gpio, servo, servo_cfg, low_blocked, open_topics)
+            rr3_intent_action_handle(item, gpio, servo, servo_cfg, low_blocked, axis, open_topics)
         })
         .collect()
 }
@@ -76,13 +80,21 @@ fn rr3_open_topics_join(open_topics: &[String]) -> String {
     open_topics.join("/")
 }
 
-/// 单条动作：形状裁决 → 两道门 → 执行（低电闸门只辖执行面）
+/// servo 动作的形态词下钻（承载层 Value 下钻，值域判定留件 mech）：词缺席 =
+/// auto（保守缺省——不申报按自动）。
+fn servo_motion_of(args: &Value) -> Result<rr_hal_api::Rr3ActMotion, String> {
+    rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))
+}
+
+/// 单条动作：形状裁决 → 两道门 → 执行（低电闸门只辖执行面；servo 动作再过
+/// 拒动判据——批N3 件三，与 RPC 路同判）
 fn rr3_intent_action_handle(
     item: &Value,
     gpio: &mut dyn rr_hal_api::Rr3GpioOut,
     servo: &mut dyn rr_hal_api::Rr3PwmServo,
     servo_cfg: &Rr3ServoCfg,
     low_blocked: bool,
+    axis: &Rr3ActAxisState,
     open_topics: &[String],
 ) -> Result<Rr3IntentOutcome, String> {
     let topic = item
@@ -116,6 +128,11 @@ fn rr3_intent_action_handle(
             if low_blocked {
                 return Err(rr3_low_power_reject(RR3_SERVO_COMMAND_TOPIC));
             }
+            // 拒动硬约束（§6，批N3 件三）：广播无 motion 键 = auto（保守缺省），
+            // 未标定轴被代码拒动——判据与 RPC 路同源（rr-hal-api 单真值点）
+            let motion = servo_motion_of(args)?;
+            rr_hal_api::rr3_act_motion_allowed(axis.hard_stop, axis.calibrated, motion)
+                .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
             let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
             // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
             let angle = rr_core::control::rr3_travel_clamp(
@@ -162,6 +179,59 @@ mod tests {
         ]
     }
 
+    /// 已标定轴态——既有用例的统一第 7 实参基线（auto 放行的正面）
+    fn axis_calibrated() -> Rr3ActAxisState {
+        Rr3ActAxisState {
+            hard_stop: rr_hal_api::Rr3ActHardStop::Yes,
+            calibrated: true,
+        }
+    }
+
+    /// 拒动硬约束·intent 路（§6，批N3 件三）：未标定轴的 servo 广播（无 motion
+    /// 键 = auto 保守缺省）被代码拒动不落角、拒因点名"未标定"；显式 jog 放行；
+    /// 已标定轴 auto 照常（既有基线不动）。
+    #[test]
+    fn uncalibrated_axis_refuses_auto_but_jogs() {
+        let args_auto = json!([{"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}}]);
+        let args_jog =
+            json!([{"topic": "rr3-act/servo/command", "args": {"angle_deg": 45, "motion": "jog"}}]);
+        let conservative = Rr3ActAxisState::rr3_conservative();
+        let run = |args: &Value, axis: &Rr3ActAxisState| {
+            let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
+            let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
+            let out = rr3_intent_actions_handle(
+                args,
+                &mut gpio,
+                &mut servo,
+                &servo_cfg(),
+                LOW_OPEN,
+                axis,
+                &open_all(),
+            );
+            (out, servo.rr3_sim_servo_angle())
+        };
+        // 未标定 + auto（缺省）：拒动，舵机纹丝不动
+        let (out, deg) = run(&args_auto, &conservative);
+        let err = out[0].as_ref().unwrap_err();
+        assert!(err.contains("未标定"), "拒因点名未标定: {err}");
+        assert!(err.contains("auto"), "拒因点名动作形态: {err}");
+        assert_eq!(deg, 90, "未标定轴 auto 不得落角");
+        // 未标定 + 显式 jog：点动是未标定轴唯一合法动作面
+        let (out, deg) = run(&args_jog, &conservative);
+        assert_eq!(out[0], Ok(Rr3IntentOutcome::Servo(45)), "{out:?}");
+        assert_eq!(deg, 45, "jog 落角");
+        // 已标定 + auto：照常走位（既有基线语义）
+        let (out, deg) = run(&args_auto, &axis_calibrated());
+        assert_eq!(out[0], Ok(Rr3IntentOutcome::Servo(45)), "{out:?}");
+        assert_eq!(deg, 45);
+        // relay 不受轴状态辖（闸门语义只对 servo 加判据）
+        let (out, _) = run(
+            &json!([{"topic": "rr3-act/relay/set", "args": {"on": true}}]),
+            &conservative,
+        );
+        assert_eq!(out[0], Ok(Rr3IntentOutcome::Relay(true, false)), "{out:?}");
+    }
+
     #[test]
     fn valid_relay_action_drives_gpio() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
@@ -172,6 +242,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &open_all(),
         );
         assert_eq!(
@@ -187,6 +258,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &open_all(),
         );
         assert_eq!(out, vec![Ok(Rr3IntentOutcome::Relay(false, true))]);
@@ -209,6 +281,7 @@ mod tests {
                 &mut servo,
                 &servo_cfg(),
                 LOW_OPEN,
+                &axis_calibrated(),
                 &open_all(),
             );
             assert_eq!(out, vec![Ok(want)], "deg={deg}");
@@ -233,6 +306,7 @@ mod tests {
                 &mut servo,
                 &servo_cfg(),
                 false,
+                &axis_calibrated(),
                 &open_all(),
             );
             assert!(out[0].is_err(), "非法 servo 动作必须拒: {out:?}");
@@ -250,6 +324,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &open_all(),
         );
         let err = out[0].as_ref().unwrap_err();
@@ -270,6 +345,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &open_all(),
         );
         let err = out[0].as_ref().unwrap_err();
@@ -294,6 +370,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &only_relay,
         );
         let err = out[0].as_ref().unwrap_err();
@@ -306,6 +383,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &Vec::new(),
         );
         let err = out[0].as_ref().unwrap_err();
@@ -327,6 +405,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &with_led,
         );
         let err = out[0].as_ref().unwrap_err();
@@ -348,6 +427,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             false,
+            &axis_calibrated(),
             &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("数组"));
@@ -358,6 +438,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             false,
+            &axis_calibrated(),
             &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("topic"));
@@ -367,6 +448,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("args"));
@@ -377,6 +459,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("布尔"));
@@ -398,6 +481,7 @@ mod tests {
             &mut servo,
             &servo_cfg(),
             LOW_OPEN,
+            &axis_calibrated(),
             &open_all(),
         );
         assert_eq!(out.len(), 3);
@@ -430,6 +514,7 @@ mod tests {
                 &mut servo,
                 &servo_cfg(),
                 low_blocked,
+                &axis_calibrated(),
                 &open_all(),
             );
             (out, gpio.rr3_sim_gpio_level(), servo.rr3_sim_servo_angle())
