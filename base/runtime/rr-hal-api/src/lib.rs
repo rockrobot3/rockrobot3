@@ -1,6 +1,6 @@
 //! rr-hal-api —— 能力面契约（no_std，ADR-0018 修订 1 ③，0.0.5 批I F1）。
 //!
-//! 件 ↔ 硬件的唯一契约面：8 trait **同步签名**、去 `Send + Sync`、值类型去
+//! 件 ↔ 硬件的唯一契约面：10 trait **同步签名**、去 `Send + Sync`、值类型去
 //! `String`/`Vec`（core-only）。此前件经 `rr3_block_on`（yield_now 自旋）驱动
 //! `#[async_trait]` 的 `rr-hal` 七 trait——件把 std 的调度形状当成了机制。本 crate
 //! 把契约层从实现层（`rr-hal` 的 Linux/sim 后端）切出来：async 留模块侧（与
@@ -297,6 +297,252 @@ pub trait Rr3Rail {
     fn rr3_switch(&mut self, domain: &str, on: bool) -> Result<(), Rr3HalError>;
 }
 
+/// 位置读数来源（批N3，全案 §1 坑 11：开环舵机的"位置"不是测量——任何把
+/// `angle()` 回读当位置的说法都是该坑的重演，来源必须在接口上可区分）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3PositionSource {
+    /// 指令回显：无位置反馈的开环面，"位置"= 最后一次已受理的指令值（记账位，
+    /// 非测量——断电/堵转后它与真实轴角可任意偏离，消费方不得当反馈用）
+    Commanded,
+    /// 闭环反馈（`act.axis.enc` 预留格位，路线 D 换闭环执行器才进场——预留
+    /// 不 = 立格，全案 §6 路线表；本版无实现）
+    Encoder,
+}
+
+/// 位置读数（批N3）：角度与来源同帧——来源缺席的裸角度就是坑 11 的形状
+/// （读数可信度与档位同帧给出的 T-6 同一族：拿不到"敢不敢信"的角度不许冒充测量）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rr3Position {
+    /// 角度（度，本轴行程域内；越域值由后端拒收，不进读数）
+    pub deg: u16,
+    /// 读数来源（[`Rr3PositionSource`]——Commanded 是回显不是测量）
+    pub source: Rr3PositionSource,
+}
+
+/// 执行件挡块事实（批N3，档案 `hard_stop` 键的契约投影，全案 §4.4/§6）。
+/// `unknown` 不是"没有挡块"，是"还没标定过这个事实"——护栏判据按最保守一侧处置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3ActHardStop {
+    /// 挡块事实未标定：路线 B 禁用、路线 C 自动段禁用（档案注释原文）
+    Unknown,
+    /// 存在硬挡块（标定实测过）
+    Yes,
+    /// 无硬挡块（标定实测过——路线 B 无挡块可找，同样禁用）
+    No,
+}
+
+impl Rr3ActHardStop {
+    /// 档名（档案取值串同源：`unknown` / `yes` / `no`）
+    pub fn rr3_act_hard_stop_name(self) -> &'static str {
+        match self {
+            Rr3ActHardStop::Unknown => "unknown",
+            Rr3ActHardStop::Yes => "yes",
+            Rr3ActHardStop::No => "no",
+        }
+    }
+}
+
+/// 执行件动作形态（批N3，判据实体 [`rr3_act_motion_allowed`] 的判据对象）。
+/// 四形态各有判据，不许在调用点手抄第二份。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3ActMotion {
+    /// 点动（带 deadline，§6：唯一永不拒的动作形态——未标定轴的合法动作面）
+    Jog,
+    /// 运行期自动动作（扫摆 / 表情联动 / goto 走位）——未标定一律拒（§6 硬约束）
+    Auto,
+    /// 标定路线 C 自动段（开环自恢复走向软挡块，D13 已裁默认路线）——
+    /// `hard_stop = unknown` 拒（§4.4 档案注释原文）
+    CalibOpenLoop,
+    /// 标定路线 B（电流找挡块）——`hard_stop = unknown` 拒、`no` 拒（无挡块可找）；
+    /// 逐域电流采样前提归采样侧判据（校验⑥/⑨），不进本判据
+    CalibStallSearch,
+}
+
+/// 执行件动作合法性判据实体（批N3，全案 §6 硬约束——"未标定不得自动"与
+/// "hard_stop=unknown 护栏"都是**代码拒动**，非文档建议）。
+///
+/// 判据两条写完：
+/// 1. `calibrated = false` ⇒ [`Rr3ActMotion::Auto`] 一律拒（`rr3_goto` 只收点动）；
+/// 2. `hard_stop = unknown` ⇒ [`Rr3ActMotion::CalibOpenLoop`] /
+///    [`Rr3ActMotion::CalibStallSearch`] 拒；`hard_stop = no` ⇒
+///    [`Rr3ActMotion::CalibStallSearch`] 拒（无硬挡块可找）。
+/// [`Rr3ActMotion::Jog`] 永远放行。
+///
+/// 单真值点：产出侧（rr3-act 组合件执行面）与判据用例共用本函数，不许各自
+/// 手抄 `if` 链。拒收回 [`Rr3HalError::InvalidParam`]（文案带动作形态与判据名，
+/// 与板侧 `axis_check` 越域回错同形——越界显式回错不静默 clamp）。
+pub fn rr3_act_motion_allowed(
+    hard_stop: Rr3ActHardStop,
+    calibrated: bool,
+    motion: Rr3ActMotion,
+) -> Result<(), Rr3HalError> {
+    let refuse = |why: &str| Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(why)));
+    match motion {
+        Rr3ActMotion::Jog => Ok(()),
+        Rr3ActMotion::Auto if calibrated => Ok(()),
+        Rr3ActMotion::Auto => refuse("未标定轴不得自动（只许点动，§6 硬约束）"),
+        Rr3ActMotion::CalibOpenLoop if hard_stop == Rr3ActHardStop::Unknown => {
+            refuse("hard_stop=unknown：路线 C 自动段禁用（§6 护栏）")
+        }
+        Rr3ActMotion::CalibOpenLoop => Ok(()),
+        Rr3ActMotion::CalibStallSearch if hard_stop != Rr3ActHardStop::Yes => {
+            refuse("hard_stop≠yes：路线 B 禁用（unknown 未标定挡块事实 / no 无挡块可找）")
+        }
+        Rr3ActMotion::CalibStallSearch => Ok(()),
+    }
+}
+
+/// 执行件动作面（批N3，全案 §9 N3——"关节成为对象"的契约承载）。
+///
+/// 实现归属：rr3-act 组合件在 `dyn Rr3PwmServo` 句柄之上包行程 / 标定 / 拒动
+/// 语义（与批N2 件五 RailMonitor 归属搬家同构——机制住组合件，契约住本层）。
+/// 拒动判据不进签名：调用方先经 [`rr3_act_motion_allowed`] 判，再调本面——
+/// 契约层只供给动作形态与判据实体，不持策略（[`Rr3Rail`] 同线）。
+///
+/// 四方法在立 trait 时一次定形（§18 F-32：不许有一个未定义就进文档的方法名）：
+/// - [`Rr3Actuator::rr3_jog`]：点动一步（带 deadline），未标定轴唯一合法动作；
+/// - [`Rr3Actuator::rr3_goto`]：自动走位（判据拒绝时本方法不受理）；
+/// - [`Rr3Actuator::rr3_position`]：位置读数，角度与来源同帧（[`Rr3Position`]）；
+/// - [`Rr3Actuator::rr3_hold`]：激磁保持语义（`false` = 释放激磁，`failsafe=release`
+///   既有裁定，§6 复位语义③）。
+pub trait Rr3Actuator {
+    /// 点动一步到 `deg`（超 `deadline_ms` 回错——受控堵转护栏的时间维，§6 路线 B）
+    fn rr3_jog(&mut self, deg: u16, deadline_ms: u32) -> Result<(), Rr3HalError>;
+    /// 自动走位到 `deg`（判据 [`rr3_act_motion_allowed`] 拒收的动作形态不受理）
+    fn rr3_goto(&mut self, deg: u16, deadline_ms: u32) -> Result<(), Rr3HalError>;
+    /// 位置读数（角度 + 来源同帧；无反馈面回 `Commanded` 回显，不许冒充测量）
+    fn rr3_position(&self) -> Result<Rr3Position, Rr3HalError>;
+    /// 激磁保持（`true` = 保持激磁；`false` = 释放——欠压/复位后让轴自由，
+    /// 避免复位循环里反复堵转，§6 复位语义③）
+    fn rr3_hold(&mut self, hold: bool) -> Result<(), Rr3HalError>;
+}
+
+/// 执行件档案字段的读者三态（ADR-0022 修订 1 工单 F-25，门 ⑨-m 的**标注面**——
+/// "标注与实际读者集合不一致即红"的唯一数据源）。三态含义：
+/// [`Rr3ActFieldReader::Adjudicate`] = 参与裁决（判据输入，拒动 / 对账一侧）、
+/// [`Rr3ActFieldReader::Act`] = 有动作侧读者（驱动执行）、
+/// [`Rr3ActFieldReader::Echo`] = 仅回显（写了保护语义却没有动作侧——如实标注，
+/// "登记为只回显不丢人，写了保护语义却没有动作侧才丢人"，§4.4）。
+///
+/// 已知"只回显"如实登记（§4.4 点名 `settle_ms`（批N3 前无串行读者）与
+/// `warmup_ms`（激磁预热无动作侧）两处候选；`source` 标定来源是追溯回显面，
+/// 同属回显——标注与实际读者集合一致，门 ⑨-m 建成后按本表对账）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3ActFieldReader {
+    Adjudicate,
+    Act,
+    Echo,
+}
+
+/// 执行件档案字段词表（批N3，全案 §4.4 档案形状的**契约面**：键名 / 值类型 /
+/// 读者三态一张表）。装载侧（rrd 档案装载器）的白名单、类型派发与门 ⑨-m 的
+/// 标注对账都只认本表——键名第二份真值点不存在。
+///
+/// `schema` 与 `pin` 两键是装载域键（版本对账 / 外键对账），读者同属裁决侧。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rr3ActProfileField {
+    pub key: &'static str,
+    /// 值类型（int = 非负整数域；text = 在册枚举词；bool = 显式布尔）
+    pub kind: Rr3ActFieldKind,
+    pub reader: Rr3ActFieldReader,
+}
+
+/// 档案字段值类型（装载派发用，与 [`Rr3ActProfileField`] 同表）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3ActFieldKind {
+    Int,
+    Text,
+    Bool,
+}
+
+/// 档案十四键（§4.4 示例档逐键对齐；加键 = 本表 append + 装载侧同批，契约级评审）
+pub const RR3_ACT_PROFILE_FIELDS: &[Rr3ActProfileField] = &[
+    Rr3ActProfileField {
+        key: "schema",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Adjudicate,
+    },
+    Rr3ActProfileField {
+        key: "pin",
+        kind: Rr3ActFieldKind::Text,
+        reader: Rr3ActFieldReader::Adjudicate,
+    },
+    Rr3ActProfileField {
+        key: "center_deg",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Act,
+    },
+    Rr3ActProfileField {
+        key: "lo_deg",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Adjudicate,
+    },
+    Rr3ActProfileField {
+        key: "hi_deg",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Adjudicate,
+    },
+    Rr3ActProfileField {
+        key: "dir_sign",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Act,
+    },
+    Rr3ActProfileField {
+        key: "slew_deg_s",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Act,
+    },
+    Rr3ActProfileField {
+        key: "settle_ms",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Echo,
+    },
+    Rr3ActProfileField {
+        key: "hold",
+        kind: Rr3ActFieldKind::Text,
+        reader: Rr3ActFieldReader::Act,
+    },
+    Rr3ActProfileField {
+        key: "current_ceil_ma",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Adjudicate,
+    },
+    Rr3ActProfileField {
+        key: "warmup_ms",
+        kind: Rr3ActFieldKind::Int,
+        reader: Rr3ActFieldReader::Echo,
+    },
+    Rr3ActProfileField {
+        key: "hard_stop",
+        kind: Rr3ActFieldKind::Text,
+        reader: Rr3ActFieldReader::Adjudicate,
+    },
+    Rr3ActProfileField {
+        key: "calibrated",
+        kind: Rr3ActFieldKind::Bool,
+        reader: Rr3ActFieldReader::Adjudicate,
+    },
+    Rr3ActProfileField {
+        key: "source",
+        kind: Rr3ActFieldKind::Text,
+        reader: Rr3ActFieldReader::Echo,
+    },
+];
+
+/// 载体窄缝（批N3，全案 §4.4 Y-2/Y-7 + 工单 sense S-14）：执行件档案的掉电载体
+/// 抽象。host 档档案是文件（rrd 装载链直读直写，复用 counters 原子序，不经本缝）；
+/// rtos 档的 NVS 实现走本缝。**S-14 三项载体性质实测前（`set_blob` 掉电原子性 /
+/// 写放大上限 / 单键容量上限），实现侧 fail-closed 回 `Unsupported`**——
+/// `calibrated` 只许运行期内存态（§6 复位语义④），rtos 可达终点表明写
+/// "标定状态重启即失"（§17），不许拿一个没测过掉电原子性的写路径冒充持久化。
+pub trait Rr3Store {
+    /// 读一个键到调用方缓冲，返回有效字节数（缓冲不足回 `InvalidParam`——
+    /// 容量语义显式，不静默截断：档案字节被劈半比失败更糟）
+    fn rr3_store_read(&self, key: &str, buf: &mut [u8]) -> Result<usize, Rr3HalError>;
+    /// 写一个键（掉电原子性未实测前实现侧必须回 `Unsupported`，见类型注记）
+    fn rr3_store_write(&mut self, key: &str, data: &[u8]) -> Result<(), Rr3HalError>;
+}
+
 /// 网络链路读数
 pub trait Rr3Link {
     fn state(&self) -> Result<Rr3LinkState, Rr3HalError>;
@@ -392,6 +638,32 @@ impl Rr3Display for Rr3UnavailableSource {
     }
     fn frame(&self) -> Result<Rr3FaceFrame, Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/display"))
+    }
+}
+
+impl Rr3Actuator for Rr3UnavailableSource {
+    fn rr3_jog(&mut self, _deg: u16, _deadline_ms: u32) -> Result<(), Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/actuator"))
+    }
+    fn rr3_goto(&mut self, _deg: u16, _deadline_ms: u32) -> Result<(), Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/actuator"))
+    }
+    fn rr3_position(&self) -> Result<Rr3Position, Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/actuator"))
+    }
+    fn rr3_hold(&mut self, _hold: bool) -> Result<(), Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/actuator"))
+    }
+}
+
+impl Rr3Store for Rr3UnavailableSource {
+    fn rr3_store_read(&self, _key: &str, _buf: &mut [u8]) -> Result<usize, Rr3HalError> {
+        Err(Rr3HalError::Unsupported("placeholder/store"))
+    }
+    fn rr3_store_write(&mut self, _key: &str, _data: &[u8]) -> Result<(), Rr3HalError> {
+        // S-14 载体性质实测前写侧恒拒（fail-closed）——rtos 档 calibrated 只许
+        // 内存态，冒充持久化即违 §6 复位语义④
+        Err(Rr3HalError::Unsupported("placeholder/store"))
     }
 }
 
@@ -511,11 +783,15 @@ mod tests {
             age_ms: 9_999,
         };
         assert_eq!(s.tier, Rr3RailTier::Unknown);
-        assert_ne!(Rr3RailState {
-            mv: 4400,
-            tier: Rr3RailTier::Severe,
-            age_ms: 0
-        }, s, "陈旧的 Severe 与新鲜的 Severe 在接口上必须可区分（age_ms 入等值面）");
+        assert_ne!(
+            Rr3RailState {
+                mv: 4400,
+                tier: Rr3RailTier::Severe,
+                age_ms: 0
+            },
+            s,
+            "陈旧的 Severe 与新鲜的 Severe 在接口上必须可区分（age_ms 入等值面）"
+        );
     }
 
     /// ⑥-c2 判据红例组（批N2 件三，全案 §6）：超龄与无基准折 Unknown、新鲜原样、
@@ -549,5 +825,98 @@ mod tests {
             rr3_rail_tier_effective(Rr3RailTier::Ok, None, 1_000),
             Rr3RailTier::Unknown
         );
+    }
+
+    /// 拒动判据红例组（批N3，全案 §6 硬约束——"未标定不得自动"与 hard_stop
+    /// 护栏都是代码拒动）：四形态 × 三挡块事实 × 标定位的全组合关键臂。
+    #[test]
+    fn act_motion_allowed_refuses_uncalibrated_auto_and_unknown_hardstop() {
+        use Rr3ActHardStop as Hs;
+        use Rr3ActMotion as Mo;
+        // 点动永远放行（未标定轴的唯一合法动作面）
+        for hs in [Hs::Unknown, Hs::Yes, Hs::No] {
+            for cal in [false, true] {
+                assert!(rr3_act_motion_allowed(hs, cal, Mo::Jog).is_ok());
+            }
+        }
+        // 硬约束一：calibrated=false ⇒ Auto 一律拒（判据文案点名判据名）
+        let e = rr3_act_motion_allowed(Hs::Yes, false, Mo::Auto).unwrap_err();
+        assert!(e.to_string().contains("未标定轴不得自动"), "{e}");
+        // 标定过 ⇒ Auto 放行
+        assert!(rr3_act_motion_allowed(Hs::Yes, true, Mo::Auto).is_ok());
+        // 硬约束二：hard_stop=unknown ⇒ C 自动段 / B 找挡块都拒
+        let e = rr3_act_motion_allowed(Hs::Unknown, true, Mo::CalibOpenLoop).unwrap_err();
+        assert!(e.to_string().contains("hard_stop=unknown"), "{e}");
+        assert!(rr3_act_motion_allowed(Hs::Unknown, false, Mo::CalibStallSearch).is_err());
+        // hard_stop=yes ⇒ C 自动段 / B 找挡块放行（标定动作，与 calibrated 无关）
+        assert!(rr3_act_motion_allowed(Hs::Yes, false, Mo::CalibOpenLoop).is_ok());
+        assert!(rr3_act_motion_allowed(Hs::Yes, false, Mo::CalibStallSearch).is_ok());
+        // hard_stop=no ⇒ B 拒（无硬挡块可找）、C 自动段放行（软挡块路线不依赖该事实）
+        assert!(rr3_act_motion_allowed(Hs::No, true, Mo::CalibStallSearch).is_err());
+        assert!(rr3_act_motion_allowed(Hs::No, true, Mo::CalibOpenLoop).is_ok());
+    }
+
+    /// 档案字段词表形状 pin（批N3，§4.4 档案十四键）：键名唯一、两处"只回显"
+    /// 如实标注（F-25 读者三态——settle_ms/warmup_ms 是 §4.4 点名的已知候选）。
+    #[test]
+    fn act_profile_fields_pinned_shape_and_reader_annotations() {
+        assert_eq!(RR3_ACT_PROFILE_FIELDS.len(), 14);
+        for i in 0..RR3_ACT_PROFILE_FIELDS.len() {
+            for j in (i + 1)..RR3_ACT_PROFILE_FIELDS.len() {
+                assert_ne!(
+                    RR3_ACT_PROFILE_FIELDS[i].key, RR3_ACT_PROFILE_FIELDS[j].key,
+                    "档案键名重复：{}",
+                    RR3_ACT_PROFILE_FIELDS[i].key
+                );
+            }
+        }
+        let echo_keys: Vec<_> = RR3_ACT_PROFILE_FIELDS
+            .iter()
+            .filter(|f| f.reader == Rr3ActFieldReader::Echo)
+            .map(|f| f.key)
+            .collect();
+        assert_eq!(echo_keys, ["settle_ms", "warmup_ms", "source"]);
+        // 装载域键与判据输入键都属裁决侧（读者三态标注与实际读者集合一致）
+        for k in [
+            "schema",
+            "pin",
+            "lo_deg",
+            "hi_deg",
+            "hard_stop",
+            "calibrated",
+        ] {
+            let f = RR3_ACT_PROFILE_FIELDS.iter().find(|f| f.key == k).unwrap();
+            assert_eq!(f.reader, Rr3ActFieldReader::Adjudicate, "{k}");
+        }
+        // 挡块事实档名与档案取值串同源
+        assert_eq!(Rr3ActHardStop::Unknown.rr3_act_hard_stop_name(), "unknown");
+        assert_eq!(Rr3ActHardStop::Yes.rr3_act_hard_stop_name(), "yes");
+        assert_eq!(Rr3ActHardStop::No.rr3_act_hard_stop_name(), "no");
+    }
+
+    /// 位置读数来源在册（坑 11：开环回显与闭环测量在接口上可区分——来源缺席的
+    /// 裸角度不许冒充测量）；占位后端对执行件/载体缝回错（能力缺失显式回错）。
+    #[test]
+    fn position_and_placeholder_actuator_store_pinned() {
+        let p = Rr3Position {
+            deg: 90,
+            source: Rr3PositionSource::Commanded,
+        };
+        assert_eq!(p.source, Rr3PositionSource::Commanded);
+        let _ = Rr3PositionSource::Encoder; // 预留格位（路线 D）在册不撤名
+        let mut boxed: Box<dyn Rr3Actuator> = Box::new(Rr3UnavailableSource);
+        assert!(matches!(
+            boxed.rr3_jog(90, 800),
+            Err(Rr3HalError::Unsupported("placeholder/actuator"))
+        ));
+        assert!(matches!(
+            boxed.rr3_goto(90, 800),
+            Err(Rr3HalError::Unsupported("placeholder/actuator"))
+        ));
+        let mut store: Box<dyn Rr3Store> = Box::new(Rr3UnavailableSource);
+        assert!(matches!(
+            store.rr3_store_write("calibrated", b"true"),
+            Err(Rr3HalError::Unsupported("placeholder/store"))
+        ));
     }
 }
