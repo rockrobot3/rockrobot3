@@ -4,10 +4,11 @@
 //! 定形为八段：`[os]`（运行期不读）+ `[platform]`（tier 三档 host/rtos/bare）+
 //! `[supplies]`（看门狗三键 + 时序预算位三键，修订 4 ② / 修订 2 ③）+ `[slots]`
 //! （present = 本板物理在位集）+ `[bindings]` 格位→件、`[enabled_slots]` 模块→本形态
-//! 启用的格位集合、`[hardware]` 非引脚键（`alsa_device`/`link_ifname`/`spi_device`
-//! 直给）、`[[pin]]` 物理绑定（增补轮六 §4.2：**引脚侧唯一真值点**——七物理键
+//! 启用的格位集合、`[hardware]` 非引脚键（`alsa_device`/`link_ifname` 两键直给；
+//! `spi_device` 批N3 件六起同进派生轨——敞口 18 行收口）、`[[pin]]` 物理绑定（增补轮六
+//! §4.2：**引脚侧唯一真值点**——八物理键
 //! `pwm_chip`/`pwm_channel`/`gpio_chip`/`gpio_led_line`/`gpio_relay_line`/`i2c_bus`/
-//! `ina219_addr` 自 [hardware] 下移，role 外键 → `contracts/roles.toml`，host 档由
+//! `ina219_addr`/`spi_device` 自 [hardware] 下移，role 外键 → `contracts/roles.toml`，host 档由
 //! 派生器合成注入文本，rtos/bare 档板侧消费归 0.0.7 批G/批D1）。
 //! schema_version=4 起新增 `[supplies.budget]` 内存预算子段（批N2 n2c-v10，校验⑩
 //! 分母——ADR-0021 修订 3：栈/堆预算不住 platform 表，住 [supplies].budget，
@@ -107,10 +108,11 @@ const RR3_BUDGET_KEYS: [&str; 4] = [
 /// [platform] tier 三档（ADR-0018 修订 1：承载二分 → 三档）
 const RR3_PLATFORM_TIERS: [&str; 3] = ["host", "rtos", "bare"];
 
-/// 描述符物理键集（增补轮六 §4.2：自 [hardware] 下移 [pins] 派生的**七个**引脚侧键——
-/// 全案 §4.2/§8 门 n 写"六个"但枚举列了七键，以枚举为准）。[hardware] 出现任一即红
-/// （门 n 稳态判据）；注入文本键名不变，rr-hal 描述符解析端零改动。
-const RR3_PIN_DERIVED_KEYS: [&str; 7] = [
+/// 描述符物理键集（增补轮六 §4.2：自 [hardware] 下移 [pins] 派生的**八个**引脚侧键——
+/// 全案 §4.2/§8 门 n 写"六个"但枚举列了七键，以枚举为准；第八键 `spi_device` 批N3
+/// 件六进场（敞口 18 行收口：spidev<N> 词形 + channel 派生 /dev/spidev<N>.<M>））。
+/// [hardware] 出现任一即红（门 n 稳态判据）；注入文本键名不变，rr-hal 描述符解析端零改动。
+const RR3_PIN_DERIVED_KEYS: [&str; 8] = [
     "pwm_chip",
     "pwm_channel",
     "gpio_chip",
@@ -118,6 +120,7 @@ const RR3_PIN_DERIVED_KEYS: [&str; 7] = [
     "gpio_relay_line",
     "i2c_bus",
     "ina219_addr",
+    "spi_device",
 ];
 
 /// [[pin]] 条目字段词表（§4.2 [pins] 段；role 的 requires 域即此表子集——
@@ -296,8 +299,9 @@ pub struct Rr3Profile {
     pub slots_device_absent: BTreeMap<String, String>,
     /// [supplies]：平台供给声明（看门狗三键 + 时序预算位三键）
     pub supplies: Rr3Supplies,
-    /// [hardware]：非引脚键直给（`alsa_device`/`link_ifname`/`spi_device`；七物理键
-    /// 出现即红——门 n 注入路径唯一，键位语义与取值域由 rr-hal 描述符解析裁，
+    /// [hardware]：非引脚键直给（`alsa_device`/`link_ifname`；八物理键
+    /// 出现即红——门 n 注入路径唯一，`spi_device` 批N3 件六起同进物理键集（敞口 18 行
+    /// 收口），键位语义与取值域由 rr-hal 描述符解析裁，
     /// rrd 只管装配形状——标量字符串化，注入时不解释）
     pub hardware: BTreeMap<String, String>,
     /// [[pin]]：物理绑定（引脚侧唯一真值点，增补轮六 §4.2）。可选段（纯 sim/无硬件
@@ -873,10 +877,12 @@ fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
     Some(rest.to_string())
 }
 
-/// 单条 pin 的派生取值（机制侧，七物理键封闭）：role.derives（策略，contracts/
+/// 单条 pin 的派生取值（机制侧，八物理键封闭）：role.derives（策略，contracts/
 /// roles.toml）只声明"该角色供给哪些键"，取值法一律查本函数——键不在册/来源字段
 /// 留空/控制器词形不合都红。gpio_led_line 与 gpio_relay_line 同取 physical[0]，由
-/// 角色声明区分（两角色不共用同一派生键名，不歧义）。
+/// 角色声明区分（两角色不共用同一派生键名，不歧义）；spi_device 由 spidev<N> 词形
+/// （总线号）+ channel（片选号）合成 /dev/spidev<N>.<M>，与旧 [hardware] 直给值
+/// （profiles/distro.toml 链④真件档）逐字节对齐。
 fn rr3_pin_derive_value(pin: &Rr3PinEntry, key: &str) -> Result<String, String> {
     match key {
         "pwm_chip" => rr3_controller_wordform(&pin.controller, "pwm")
@@ -901,7 +907,16 @@ fn rr3_pin_derive_value(pin: &Rr3PinEntry, key: &str) -> Result<String, String> 
                 Ok(pin.addr.clone())
             }
         }
-        other => Err(format!("派生键 {other} 不在派生规则表（七物理键封闭）")),
+        "spi_device" => {
+            let bus = rr3_controller_wordform(&pin.controller, "spidev")
+                .ok_or_else(|| format!("controller 词形 {} 不合 spidev<N>", pin.controller))?;
+            let cs = pin
+                .channel
+                .map(|c| c.to_string())
+                .ok_or_else(|| "channel 留空（SPI 片选号）".to_string())?;
+            Ok(format!("/dev/spidev{bus}.{cs}"))
+        }
+        other => Err(format!("派生键 {other} 不在派生规则表（八物理键封闭）")),
     }
 }
 
@@ -1374,6 +1389,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
             ("pwm", "pwm_chip"),
             ("gpiochip", "gpio_chip"),
             ("i2c", "i2c_bus"),
+            ("spidev", "spi_device"),
         ] {
             if rr3_controller_wordform(&pin.controller, prefix).is_some()
                 && !derives.iter().any(|d| d == key)
@@ -1614,8 +1630,9 @@ pub fn rr3_profile_boot_inputs_with_probe(
         .map(|m| root.join("modules").join(m).join("module.toml"))
         .collect();
     // hal_bindings（spawn 时注入 RR3_HAL_BINDINGS）：host 档 = [pins] 派生视图 ∪
-    // [hardware] 三非引脚键（键名不变，rr-hal descriptor.rs 解析端零改动）；rtos/bare
-    // 档不派生，[hardware] 原样直给。门 n 已保证物理键不双占，合并无覆盖歧义。
+    // [hardware] 非引脚键（`alsa_device`/`link_ifname` 两键；键名不变，rr-hal
+    // descriptor.rs 解析端零改动；`spi_device` 批N3 件六起走派生视图——敞口 18 行收口）；
+    // rtos/bare 档不派生，[hardware] 原样直给。门 n 已保证物理键不双占，合并无覆盖歧义。
     let mut merged = derived;
     for (k, v) in &profile.hardware {
         merged.insert(k.clone(), v.clone());
@@ -3314,6 +3331,27 @@ mux_group = []
         assert!(boot.role_missing.is_empty(), "{:?}", boot.role_missing);
     }
 
+    /// SPI 词形派生正例（批N3 件六，敞口 18 行收口）：spidev<N> 词形（总线号）+
+    /// channel（片选号）合成 /dev/spidev<N>.<M>——与链④真件档旧 [hardware] 直给值
+    /// 逐字节对齐（profiles/distro.toml 迁移前 = "/dev/spidev0.0"），注入文本形状不变。
+    #[test]
+    fn boot_inputs_derives_spi_device_wordform() {
+        let root = Root::new("derive-spi");
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"ui.face.spi\"\ncontroller = \"spidev0\"\nchannel = 0\n\
+             direction = \"out\"\nmux_group = []\n"
+        );
+        let p = root.write_profile("derive-spi.toml", &text);
+        let boot = boot_inputs(&p).expect("SPI 显示 pin 应通过装载");
+        assert_eq!(
+            boot.hal_bindings,
+            "pwm_channel = \"0\"\n\
+             pwm_chip = \"0\"\n\
+             spi_device = \"/dev/spidev0.0\"\n",
+            "spidev0 + channel 0 派生 /dev/spidev0.0，与旧 [hardware] 直给值逐字节对齐"
+        );
+    }
+
     /// 校验①-a：role 未在 roles.toml 在册 → 致命点名（真契约上跑）
     #[test]
     fn pin_unknown_role_is_fatal() {
@@ -3512,6 +3550,41 @@ mux_group = []
         let e = boot_inputs(&p).expect_err("两处并存必须致命");
         assert!(
             e.contains("hardware.pwm_chip = \"5\" 与 [pins] 派生值 \"0\" 两处并存"),
+            "{e}"
+        );
+    }
+
+    /// 门 n 稳态判据（批N3 件六，敞口 18 行收口）：`spi_device` 进物理键集后，
+    /// [hardware] 再出现即红——GOOD 无显示 pin，按稳态文案点名（SPI 器件走 schema 2
+    /// 旧路直给的迁移残留，正是敞口 18 行登记的病形）
+    #[test]
+    fn gate_n_spi_device_steady_state_red() {
+        let root = Root::new("gate-n-spi");
+        let text = format!("{GOOD}\n[hardware]\nspi_device = \"/dev/spidev0.0\"\n");
+        let p = root.write_profile("gate-n-spi.toml", &text);
+        let e = boot_inputs(&p).expect_err("[hardware] spi_device 必须致命");
+        assert!(
+            e.contains("hardware.spi_device 是引脚侧派生键") && e.contains("门 n 稳态判据"),
+            "{e}"
+        );
+    }
+
+    /// 门 n 两处并存判据（spi_device 形）：显示 pin 已派生该键时 [hardware] 残留直给
+    /// → 点名两份取值（两值恰同也是红——并存本身就是第二真值点，L-23）
+    #[test]
+    fn gate_n_spi_device_coexistence_names_both_values() {
+        let root = Root::new("gate-n-spi-both");
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"ui.face.spi\"\ncontroller = \"spidev0\"\nchannel = 0\n\
+             direction = \"out\"\nmux_group = []\n\
+             [hardware]\nspi_device = \"/dev/spidev0.0\"\n"
+        );
+        let p = root.write_profile("gate-n-spi-both.toml", &text);
+        let e = boot_inputs(&p).expect_err("两处并存必须致命");
+        assert!(
+            e.contains(
+                "hardware.spi_device = \"/dev/spidev0.0\" 与 [pins] 派生值 \"/dev/spidev0.0\" 两处并存"
+            ),
             "{e}"
         );
     }

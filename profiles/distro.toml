@@ -7,8 +7,9 @@
 # schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：三新段与
 # default 同板同供给（[platform]/[supplies]/[slots] 逐值一致）。
 # schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段进场、
-# 七物理键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
-# [hardware] 只留三非引脚键，与 default 同板同引脚（[[pin]] 逐值一致）。
+# 引脚侧键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
+# 批N3 件六起 SPI 词形同轨（spi_device 由 controller+channel 派生），[hardware] 只留
+# 两非引脚键，与 default 同板同引脚（[[pin]] 逐值一致）。
 # schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
 # 子段进场（⑩-a/⑩-b 分母），与 default 同板同值——3→4 为破坏性变更。
 
@@ -103,15 +104,12 @@ not_applicable = true
 
 [hardware]
 # 非引脚键直给（schema 3，增补轮六 §4.2）：键位语义与取值同 profiles/default.toml
-# 注释（runbook 件 4）；七物理键已下移 [[pin]] 派生（门 n：[hardware] 出现即拒 boot）。
-# alsa_device 用 CARD 名不钉卡号（卡号随枚举顺序可变）；"default" 在无 pulse/
-# pipewire 的发行版快路轨上映射 PulseAudio 插件 → open 失败（真板实测 EINVAL/524），
-# 参考机真值 = voicehat 声卡（0.0.6 批F5a R13 换装，googlevoicehat 单卡双向）。
+# 注释（runbook 件 4）；引脚侧键已下移 [[pin]] 派生（门 n：[hardware] 出现引脚侧
+# 派生键即拒 boot）。alsa_device 用 CARD 名不钉卡号（卡号随枚举顺序可变）；"default"
+# 在无 pulse/pipewire 的发行版快路轨上映射 PulseAudio 插件 → open 失败（真板实测
+# EINVAL/524），参考机真值 = voicehat 声卡（0.0.6 批F5a R13 换装，googlevoicehat 单卡双向）。
 alsa_device = "plughw:CARD=sndrpigooglevoi"
 link_ifname = "wlan0"
-# spidev 显示件（链④真件档，十键批）：MAX7219 双位模块接 SPI0 CE0（接线 4：
-# DIN=脚19/CS=脚24/CLK=脚23），spidev0.0 = 总线 0 片选 0。
-spi_device = "/dev/spidev0.0"
 
 [[pin]]
 # 物理绑定真值点（schema 3，增补轮六 §4.2）：与 default 同一块板同引脚，
@@ -149,6 +147,16 @@ role = "power.battery.meter"
 controller = "i2c1"
 addr = "0x40"
 direction = "in"
+mux_group = []
+
+[[pin]]
+# SPI 显示面（批N3 件六拆格，敞口 18 行收口）：spidev0 = 总线 0、channel = 0 =
+# 片选 0，装载期派生合成 spi_device="/dev/spidev0.0"（链④真件档 MAX7219 双位模块
+# 接 SPI0 CE0，接线 4：DIN=脚19/CS=脚24/CLK=脚23；旧 [hardware] 直给值由此下移）。
+role = "ui.face.spi"
+controller = "spidev0"
+channel = 0
+direction = "out"
 mux_group = []
 
 [enabled_slots]

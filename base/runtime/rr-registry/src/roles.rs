@@ -232,11 +232,15 @@ mod tests {
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/roles.toml");
 
-    /// 契约必须解析成 6 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 7 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let table = rr3_registry_role_table_from_text(CONTRACT);
-        assert_eq!(table.roles.len(), 6, "契约角色数（批N2 件六扩表后六条）");
+        assert_eq!(
+            table.roles.len(),
+            7,
+            "契约角色数（批N3 件六 SPI 词形进场后七条）"
+        );
         assert_eq!(
             table.rr3_role_table_names(),
             vec![
@@ -246,6 +250,7 @@ mod tests {
                 "power.battery.meter",
                 "power.current.sense",
                 "power.rail.sense",
+                "ui.face.spi",
             ]
         );
         // slot 外键与 per_instance 语义（校验①-b 的两侧）
@@ -312,6 +317,29 @@ mod tests {
             vec!["power.current.sense", "power.rail.sense"]
         );
         assert_eq!(table.rr3_role_table_contains("power.switch"), false);
+        // 批N3 件六新角色：SPI 显示面词形（slot=ui.face，iface=Rr3Display，
+        // requires=controller+channel → derives=spi_device 派生对——敞口 18 行收口）
+        assert_eq!(
+            table.rr3_role_table_slot("ui.face.spi").as_deref(),
+            Some("ui.face")
+        );
+        assert_eq!(
+            table.rr3_role_table_per_instance("ui.face.spi"),
+            Some(false)
+        );
+        assert_eq!(table.rr3_role_table_droppable("ui.face.spi"), Some(true));
+        assert_eq!(
+            table.rr3_role_table_requires("ui.face.spi"),
+            Some(vec!["controller".to_string(), "channel".to_string()])
+        );
+        assert_eq!(
+            table.rr3_role_table_derives("ui.face.spi"),
+            Some(vec!["spi_device".to_string()])
+        );
+        assert_eq!(
+            table.rr3_role_table_direction("ui.face.spi").as_deref(),
+            Some("out")
+        );
         assert!(
             table.rr3_role_table_check().is_empty(),
             "{:?}",

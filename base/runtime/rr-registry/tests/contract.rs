@@ -936,8 +936,8 @@ fn every_manifest_capability_is_a_registered_slot() {
 
 /// schema 3 [pins] 与 roles.toml 的对账 pin（增补轮六批N1，§4.2 + 校验①的 CI 全集
 /// 层同判）：[[pin]] 的 role 外键查册、direction 与角色一致、instance 有无与
-/// per_instance 相符；[hardware] 不得出现七物理键（门 n 稳态判据的 CI 侧 pin——
-/// 运行期判在 rrd 装载，两轴缺一即带病）。
+/// per_instance 相符；[hardware] 不得出现八物理键（门 n 稳态判据的 CI 侧 pin——
+/// 运行期判在 rrd 装载，两轴缺一即带病；spi_device 批N3 件六随 SPI 词形进表）。
 fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_pin_roles: &[&str]) {
     let roles = rr_registry::rr3_registry_role_table_from_text(
         &std::fs::read_to_string(root.join("contracts/roles.toml"))
@@ -993,6 +993,7 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
             "gpio_relay_line",
             "i2c_bus",
             "ina219_addr",
+            "spi_device",
         ] {
             assert!(
                 !hardware.contains_key(k),
@@ -1193,6 +1194,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "act.led.gpio",
             "act.relay.gpio",
             "power.battery.meter",
+            "ui.face.spi",
         ],
     );
 
@@ -1381,6 +1383,7 @@ fn distro_profile_binds_exactly_the_body_layer() {
             "act.led.gpio",
             "act.relay.gpio",
             "power.battery.meter",
+            "ui.face.spi",
         ],
     );
 
@@ -1538,7 +1541,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     }
     assert!(
         v.get("hardware").is_none(),
-        "esp32-mini 出现 [hardware] 段（三非引脚键是宿主侧语义；板侧描述符进位须同批改本 pin 与 0.0.7 判据）"
+        "esp32-mini 出现 [hardware] 段（两非引脚键是宿主侧语义；板侧描述符进位须同批改本 pin 与 0.0.7 判据）"
     );
     // schema 3 [pins]（增补轮六批N1）：板侧执行件的物理绑定真值点——rtos 档 rrd
     // 不派生（controller 词形 ledc<N> 是板侧词表），但校验①的形状照判。批N3 件五
