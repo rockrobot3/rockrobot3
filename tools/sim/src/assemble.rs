@@ -531,9 +531,10 @@ watchdog_timeout_ms = 5000\n";
         std::fs::create_dir_all(repo.join("profiles")).unwrap();
         std::fs::write(
             repo.join("profiles/default.toml"),
-            // schema_version=3 形状（增补轮六批N1 [[pin]] 进场）：本夹具不声明 [pins]，
-            // "a.b" 是夹具自造格位，本函数只走形状解析（rr3_profile_from_text），不查册。
-            "schema_version = 3\n\n[platform]\ntier = \"host\"\nchip = \"rk3566\"\n\n\
+            // schema_version=4 形状（批N2 [supplies.budget] 进场，校验⑩ 分母）：host 档
+            // 合法不适用显式写；本夹具不声明 [pins]，"a.b" 是夹具自造格位，本函数
+            // 只走形状解析（rr3_profile_from_text），不查册。
+            "schema_version = 4\n\n[platform]\ntier = \"host\"\nchip = \"rk3566\"\n\n\
              [supplies]\nwatchdog_present = false\nwatchdog_timeout_ms = 15000\n\
              watchdog_feeder = \"none\"\ntick_period_ms = 200\ntick_jitter_ms = 100\n\
              safety_core_interval_ms = 1000\n\n\
@@ -541,6 +542,7 @@ watchdog_timeout_ms = 5000\n";
              severe_mv = 4400\ncurrent_cap_ma = 2000\nsense = \"none\"\n\
              current_sense = \"none\"\nswitch = \"none\"\nswitchable = false\n\
              armed = false\nmax_age_ms = 0\n\n\
+             [supplies.budget]\nnot_applicable = true\n\n\
              [bindings]\n\"a.b\" = \"rr3-pa\"\n\n\
              [enabled_slots]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n\n\
              [slots]\npresent = [\"a.b\"]\n",

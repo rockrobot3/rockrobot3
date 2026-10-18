@@ -368,4 +368,21 @@ mod tests {
             "{errs:?}"
         );
     }
+
+    /// 内存申报键是件级专用（校验⑩ 分子面，批N2 n2c-v10）：组合件级 [assemble]
+    /// 点名即拦，同 demands 的件级专用语义——内存账是原子件的物理属性。
+    #[test]
+    fn composite_assemble_rejects_memory_keys() {
+        for key in ["task_stack_bytes", "heap_peak_bytes"] {
+            let errs = rr3_registry_composite_from_text(&format!(
+                "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n{key} = 4096\n"
+            ))
+            .expect_err("组合件级内存申报键必须拦");
+            assert!(
+                errs.iter()
+                    .any(|e| e.contains(&format!("[assemble] 未知键 {key}"))),
+                "{errs:?}"
+            );
+        }
+    }
 }

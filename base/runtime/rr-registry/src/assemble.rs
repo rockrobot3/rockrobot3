@@ -41,6 +41,16 @@
 //! 增键不 bump：demands 缺省语义 = 未申报，已激活 17 份数据语义不变（composite.rs
 //! 头注"只增不 bump"同构）。
 //!
+//! **内存需求申报面**（`[assemble].task_stack_bytes` / `[assemble].heap_peak_bytes`，
+//! 校验⑩ 分子面，批N2 n2c-v10 = 全案 §5 判据⑩ / F-13）：件级语义**非每实例**——
+//! 件全部实例共享一个任务栈、一条堆账（如双轴共享同一任务栈），装载读者
+//! （rrd `rr3_memory_budget_check`）直加不扩算，与 demands 的每实例扩算语义相反。
+//! 缺省 0 = 未申报不进 Σ：申报义务未触发（板侧任务映射未建模，归 0.0.7 批G/批D1），
+//! 本批立判据实体与装载拒链，红例用合成申报；给键必须是非负整数（负数 = 物理矛盾）。
+//! 两键同样**件级专用**：组合件级 [assemble] 不认，未知键点名即拦（同 demands）。
+//! 预算分母不住这里——住 [supplies].budget（rrd 域，ADR-0021 修订 3：三份数据
+//! 三个主人），本模块只收分子形状。
+//!
 //! 装配段对缺项的处置（ADR-0019 修订 1 ③）：**该格 `Degraded`、点名到件，不 fatal**
 //! ——件没病，装配声明坏了重启治不了；修数据 + 重启 rrd 是唯一解除路。
 //!
@@ -126,6 +136,16 @@ pub struct Rr3AssembleFacts {
     /// `no_injection = true`：件明写"本件不需注入面"（0.0.5 批M MC-10 L-5）。
     /// `handles`/`ops` 两数组**均空**时此键必填——否则与"漏填"不可区分，一律判红。
     pub no_injection: bool,
+    /// 内存需求申报（校验⑩ 分子面，批N2 n2c-v10）：本件任务栈占用字节数。
+    /// **件级语义非每实例**（与 demands 的每实例语义相反）：件全部实例共享一个
+    /// 任务栈（如双轴共享同一任务栈），装载读者 [`crate::assemble`] 消费方
+    /// （rrd `rr3_memory_budget_check`）直加不扩算。缺省 0 = 未申报不进 Σ
+    /// （申报义务未触发——板侧任务映射未建模，归 0.0.7 批G/批D1；立判据实体
+    /// 与执法链在先，数据申报随后）。
+    pub task_stack_bytes: i64,
+    /// 本件堆峰值占用字节数（同上件级语义；F-13：渲染缓冲/队列等全是堆账，
+    /// 只加总栈会击穿半边——⑩-b 的分子）。
+    pub heap_peak_bytes: i64,
 }
 
 /// 点路径合法性：按 `.` 切分后每段非空（空串/首尾点/连续点都不认）
@@ -382,11 +402,18 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
             Err(errs)
         };
     };
-    // [assemble] 未知键点名
+    // [assemble] 未知键点名（内存申报键 task_stack_bytes/heap_peak_bytes 是件级
+    // 专用——组合件级 [assemble] 不认，同 demands：内存账是原子件的物理属性）
     for k in asm.keys() {
-        if k != "handles" && k != "ops" && k != "no_injection" && k != "demands" {
+        if k != "handles"
+            && k != "ops"
+            && k != "no_injection"
+            && k != "demands"
+            && k != "task_stack_bytes"
+            && k != "heap_peak_bytes"
+        {
             errs.push(format!(
-                "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands）"
+                "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands / task_stack_bytes / heap_peak_bytes）"
             ));
         }
     }
@@ -444,6 +471,25 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
         }
         Some(other) => errs.push(format!("[assemble].demands 应为数组，收到 {other:?}")),
         None => {}
+    }
+
+    // task_stack_bytes / heap_peak_bytes：内存需求申报（校验⑩ 分子面，批N2 n2c-v10）。
+    // 缺键 = 未申报 = 0 不进 Σ（申报义务未触发——板侧任务映射未建模，0.0.7 批G/批D1；
+    // 形状层不强制，同 demands 的"缺键 = 空申报合法"）；给键必须是非负整数
+    // （负数 = 物理矛盾，fail-closed）。件级语义非每实例——判据消费在
+    // rrd `rr3_memory_budget_check`，直加不扩算。
+    for (key, slot) in [
+        ("task_stack_bytes", &mut facts.task_stack_bytes),
+        ("heap_peak_bytes", &mut facts.heap_peak_bytes),
+    ] {
+        match asm.get(key) {
+            Some(Value::Integer(v)) if *v >= 0 => *slot = *v,
+            Some(Value::Integer(v)) => errs.push(format!(
+                "[assemble].{key} = {v} 须为非负整数（本件内存占用字节数，负数是物理矛盾）"
+            )),
+            Some(other) => errs.push(format!("[assemble].{key} 应为整数，收到 {other:?}")),
+            None => {}
+        }
     }
 
     // 空面规则（L-5）：两数组均在文本中出现且均为空 ⇒ 必须明写 no_injection = true；
@@ -765,6 +811,46 @@ ops = [
         );
         assert!(
             errs.iter().any(|e| e.contains("demands[9] 应为内联表")),
+            "{errs:?}"
+        );
+    }
+
+    /// 内存需求申报面（校验⑩ 分子，批N2 n2c-v10）：正例解析 + 缺键 = 未申报 0
+    /// 合法 + 负数/非整数红。判据本体（Σ ≤ 预算）不在本模块——读者在
+    /// rrd `rr3_memory_budget_check`（分母住 [supplies].budget）。
+    #[test]
+    fn memory_bytes_parse_and_shape_errors_are_named() {
+        // 正例：两键显式给出（件级语义非每实例，直加不扩算——头注同源）
+        let f = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3Display\", desc_key = \"spi_device\" },\n]\nops = []\ntask_stack_bytes = 8192\nheap_peak_bytes = 24576\n",
+        )
+        .expect("正例必须过");
+        assert_eq!(f.task_stack_bytes, 8192);
+        assert_eq!(f.heap_peak_bytes, 24576);
+
+        // 缺两键 = 未申报 = 0 不进 Σ（申报义务未触发，同 demands 缺键合法）
+        let f = rr3_registry_assemble_from_text(OK_SAMPLE).expect("无内存键必须过");
+        assert_eq!(f.task_stack_bytes, 0);
+        assert_eq!(f.heap_peak_bytes, 0);
+
+        // 坏形逐条点名：负数（物理矛盾）/ 非整数 / 未知键拼错（词表封闭）
+        let errs = rr3_registry_assemble_from_text(
+            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\ntask_stack_bytes = -1\nheap_peak_bytes = \"16k\"\nstack_bytes = 4096\n",
+        )
+        .expect_err("坏形必须报错");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("task_stack_bytes = -1 须为非负整数")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("heap_peak_bytes 应为整数")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("[assemble] 未知键 stack_bytes")),
             "{errs:?}"
         );
     }
