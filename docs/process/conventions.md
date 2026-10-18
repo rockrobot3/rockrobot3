@@ -56,6 +56,18 @@ covered normal 4→5、红账 23＝基线初值；switch/charger 归批N3——s
 charger 随器件角色进场）；键集四腿全部自代码常量导出（`RR3_ASSEMBLE_HANDLE_TRAITS`/
 `RR3_ASSEMBLE_DESC_KEYS`/`RR3_PIN_KEYS` ＋ slots/roles 两契约表，单真值点不抄第二份，⑨-n 先例）；
 六表第 5 表已由 ② parse 层执法、第 6 表（平台 role→具名构造）归转红收口件——本步如实不判。
+**2026-10-19 对表（批N3 件五，⑨-e 门 g 行程单真值点）**：建 **`step "⑨-e 行程真值单点…"`**
+（门 g 第 ③ 层专属执法步，全案 §8 门 g / §16.4；读者集合定义随 act A-17①）⇒ 可数 step **16 行**、
+**专属执法位建成 5 把、待建门 18 把**；判据＝旧行程键名（host config 侧）＋板侧三旧手写行程常量名
+**全仓零命中 fail-closed**（行程唯一真值点 = 执行轴档案 `hardware/<形态>/axis/<instance>.toml` 的
+center/lo/hi 三键，host 经 `RR3_ACT_AXIS_STATE` 装配注入、板侧经 `axis_gen.rs` 生成表两路同源）；
+**严格口径：注释/断言提及字面量名同样红**（表述一律用"行程键/手写行程字面量"泛称——防回流靠门
+不靠记性）；豁免三处写明非放水：docs/ 历史账（status/conventions/全案/ADR 记录漂移与裁定不改史）、
+门自身执法文本（grep 模式必然含字面量）、target/ 构建产物。配套 (a) 档案生成链 = rr3-codegen
+`axis_gen.rs`（最小校验面：schema=1/三键非负整数/lo<center<hi/文件名与 pin 末段对账，坏档宁可红
+不生成带病副本，件五③ `ee18519`）；配套 (b) host 侧注入面五键扩形（件五② `bfe3505`，e2e 证
+分批必红——生产者消费者同批）。⑨-d 相邻行顺带订正：architecture §14 门表 ⑨-d 行"待建"改"已建"
+（n1-8 `bbc853d` 建成时漏改，本批发现即订）。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
