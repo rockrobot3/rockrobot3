@@ -2615,7 +2615,7 @@ present，写进本表属第二套语法即红，F-2 同型**）、理由非空�
 boot 过、不进缺格判定）＋ `device_absent_gate_rejects_unknown_nonbase_and_empty_reason`（三红）
 ＋ `good_profile_parses` 补空 map 断言；rr-hal-api 红例用例进 lib 测试（判据实体＋红例全在
 cargo test，**本件不建 check.sh 执法步**——可数 step 14 行、待建门 20 把计数均不变）。
-④decisions.md D3 行施工注记同批（提交号随批N2 收口对账回填）；运行期对照（battery 回
+④decisions.md D3 行施工注记同批（提交 `f47d6c7`，批N2 收口对账 2026-10-18）；运行期对照（battery 回
 Unsupported 时"无器件 vs 坏了"的分辨）归件五/批N4——本件只落登记面与判据实体，不消费。
 
 2026-10-18（**批N2 件四：校验⑩ 内存预算——[supplies.budget] 分母 ＋ [assemble] 分子 ＋ schema 4**，
@@ -2646,7 +2646,7 @@ wiring.rs 路径推导夹具同批 schema 4。
 （parse 正/负/非整数/未知键、组合件级点名红）＋ contract.rs 三处形状 pin 同批 3→4（host 两处
 `not_applicable = true`＋数字键不得并存、rtos 三数键逐值 pin）；⑩ 经步①b `cargo test --workspace`
 进 CI，**本件不建 check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。
-⑥decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；decisions.md §2/§3 无增减。
+⑥decisions.md §4 变更记录同批（提交 `954ea75`，批N2 收口对账 2026-10-18）；decisions.md §2/§3 无增减。
 
 2026-10-18（**批N2 件五：RailMonitor/RailJudge 接能力面——机制不动、归属搬家**，
 decisions.md §4 变更记录同批）：
@@ -2678,7 +2678,7 @@ profiles/default.toml rail5v 域一致：mild=4600/severe=4400/max_age=0）。
 （`rail_beat_unknown_not_refed_and_passthrough`：Unknown 不折 Ok 不喂核＋陈旧折
 Unknown 不喂核＋fresh 拍喂核）；rr-hal/rrd/rr3-power cargo test 全绿，**本件不建
 check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。
-⑥decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；rr3-power 模块设计
+⑥decisions.md §4 变更记录同批（提交 `53e243a`，批N2 收口对账 2026-10-18）；rr3-power 模块设计
 P-9 行 X-4 加注（归属搬家落点与执法用例落点）；板侧 power.rs 零改动。
 
 2026-10-18（**批N2 件六：⑨-a 门 a 报告模式 ＋ 基-39 N2 那一刀角色扩表**，decisions.md §2
@@ -2706,7 +2706,7 @@ roles.toml：power.switch 不落本表（derives 需新派生键——gpio_relay
 ④rr-registry roles.rs 契约测试同批 4→6（len＋names＋新角色 per_instance/requires/droppable/
 names_for_slot 断言）。**三事实源同批对表：可数 step 14→15 行、专属执法位 4 把不变＋报告位
 1 把、待建门 20→19 把**（§2 对表段 / architecture §14 / 全案 §16.4）；decisions.md §2
-施工图§6-④ 行施工注记＋§4 变更记录同批（提交号随批N2 收口对账回填）；contracts/README
+施工图§6-④ 行施工注记＋§4 变更记录同批（提交 `e918b76`，批N2 收口对账 2026-10-18）；contracts/README
 演进登记同批；基线文件初值随本件落 `tools/ci/gate-a-baseline.txt`。
 
 ## 3 结构纪律
