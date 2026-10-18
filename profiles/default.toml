@@ -9,8 +9,11 @@
 # 七物理键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
 # [hardware] 只留三非引脚键（alsa_device/link_ifname/spi_device），role 外键查册
 # contracts/roles.toml，2→3 为破坏性变更。
+# schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
+# 子段进场（⑩-a/⑩-b 分母，ADR-0021 修订 3"栈/堆预算不住 platform 表"）——新必填段
+# 随版本 bump（批N1 [[supplies.domain]] 先例），3→4 为破坏性变更。
 
-schema_version = 3
+schema_version = 4
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
@@ -78,6 +81,13 @@ switch = "none"
 switchable = false
 armed = false
 max_age_ms = 0
+
+# [supplies.budget] 内存预算声明（校验⑩ 分母，schema 4，ADR-0021 修订 3：栈/堆预算
+# 不住 platform 表，住 [supplies].budget——三份数据三个主人）。host 档校验⑩ 不适用，
+# "合法不适用"显式写 true 不许留空（F-6）；数字预算键与 not_applicable = true
+# 互斥（并存 = 自相矛盾红，装载期 parse 层裁）。
+[supplies.budget]
+not_applicable = true
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；

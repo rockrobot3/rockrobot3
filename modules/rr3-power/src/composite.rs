@@ -434,4 +434,91 @@ state_period_ms = 0
             "派生值随读数变，不受 seq 影响"
         );
     }
+
+    // ---------- 轨压档位对拍（批N2 件四，⑥-c2 真值面） ----------
+    // rr_hal_api 的 rr3_rail_tier_effective 是契约层纯函数（无原子件 mech.rs，⑥-c2
+    // 判据单真值点），对拍随其运行期唯一消费模块 rr3-power 落本文件。power 不是
+    // atom 名（本模块原子 = battery/charger），⑧-a 计数门不数这两条（不占原子门
+    // 分母，命名前缀照模块名走）。
+
+    #[test]
+    fn parity_leg1_power_rail_tier_effective_train_is_deterministic() {
+        // 腿一·确定性：同一 (档位, 龄期, 上界) 合成序列喂两跑，输出档位序列逐拍相等
+        use rr_hal_api::{rr3_rail_tier_effective, Rr3RailTier};
+        fn run() -> Vec<Rr3RailTier> {
+            let max = 250u32;
+            [
+                (Rr3RailTier::Ok, Some(0u32)),
+                (Rr3RailTier::Ok, Some(max)),     // 边界：不折
+                (Rr3RailTier::Ok, Some(max + 1)), // 越上界：折
+                (Rr3RailTier::Mild, Some(max)),
+                (Rr3RailTier::Mild, Some(max + 1)),
+                (Rr3RailTier::Severe, Some(9)),
+                (Rr3RailTier::Severe, None),     // 取不到基准：折
+                (Rr3RailTier::Unknown, Some(0)), // 已是 Unknown：原样
+                (Rr3RailTier::Unknown, None),
+            ]
+            .iter()
+            .map(|&(tier, age)| rr3_rail_tier_effective(tier, age, max))
+            .collect()
+        }
+        assert_eq!(run(), run(), "同输入序列两跑逐拍相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_power_rail_tier_effective_matches_ruling_semantics() {
+        // 腿二·正确性：裁定语义逐条点名（真值 = rr_hal_api rr3_rail_tier_effective，
+        // 全案 §6 T-6 运行期读数可信度 + Y-4 如实申报）
+        use rr_hal_api::{rr3_rail_tier_effective, Rr3RailTier};
+        let max = 250u32;
+        // 取不到基准（None）⇒ Unknown，与档位无关——新鲜 Ok 也折不出"可信"
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Ok, None, max),
+            Rr3RailTier::Unknown,
+            "时基取不到基准 ⇒ Unknown（Y-4：None 是如实申报，不许编龄期冒充新鲜）"
+        );
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Severe, None, max),
+            Rr3RailTier::Unknown,
+            "None 折档与输入档位无关"
+        );
+        // 越上界 ⇒ Unknown：陈旧的 Severe 与新鲜的 Severe 必须可区分（T-6）
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(max + 1), max),
+            Rr3RailTier::Unknown,
+            "age > max ⇒ Unknown（陈旧 Severe ≠ 新鲜 Severe，T-6）"
+        );
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(max + 1), max),
+            Rr3RailTier::Unknown
+        );
+        // 边界 age == max 不折（新鲜度上界是闭区间内）；龄期内原样透传
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(max), max),
+            Rr3RailTier::Severe,
+            "age == max 边界不折（闭区间内）"
+        );
+        assert_eq!(
+            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(0), max),
+            Rr3RailTier::Ok,
+            "新鲜读数原样透传"
+        );
+        // 档名串同源：第四态 "unknown" 不冒充 "severe"（守护输出行 INFO rail_tier=
+        // 与板侧 RailTier::name 同一词表——展示面原样的数据基础）
+        assert_eq!(Rr3RailTier::Unknown.rr3_rail_tier_name(), "unknown");
+        assert_ne!(Rr3RailTier::Unknown.rr3_rail_tier_name(), "severe");
+        // 消费纪律的类型基础（本函数只折档不判处置，执法归⑥-c2 消费侧）：Unknown
+        // 是独立第四态（执行面 match 得到独立臂按 Severe 那一侧处置），且折档结果
+        // 不许再折成 Ok（展示面原样）
+        assert_ne!(
+            rr3_rail_tier_effective(Rr3RailTier::Severe, None, max),
+            Rr3RailTier::Severe,
+            "折出的 Unknown 与 Severe 可区分（执行面独立处置的判据基础）"
+        );
+        assert_ne!(
+            rr3_rail_tier_effective(Rr3RailTier::Severe, None, max),
+            Rr3RailTier::Ok,
+            "Unknown 不许折算成 Ok（展示面原样不折）"
+        );
+    }
 }

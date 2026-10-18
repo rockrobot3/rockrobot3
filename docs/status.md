@@ -522,6 +522,26 @@
   （可数 step 14 行/待建门 20 把不变）。④decisions.md D3 行施工注记同批（提交号随批N2 收口对账
   回填）；运行期对照（"无器件 vs 坏了"分辨）归件五/批N4；敞口表无增减。
 
+- **2026-10-18 批N2 件四：校验⑩ 内存预算——[supplies.budget] 分母 ＋ [assemble] 分子 ＋ schema 4**：
+  ①分母 `[supplies.budget]` 四键（`not_applicable`/`task_stack_budget_bytes`/`heap_total_bytes`/
+  `heap_reserved_bytes`，ADR-0021 修订 3 三份数据三个主人）＋分档自洽 parse 层裁（host ⇒ 显式真且
+  数字键不得并存；rtos/bare ⇒ 必假且三数键必填、`total ≤ reserved` 红；段缺点名"不许留空"——F-6）；
+  `schema_version` 3→4（破坏性变更，批N1 `[[supplies.domain]]` 先例；supplies 段缺不级联）。②分子
+  `[assemble]` 新增 `task_stack_bytes`/`heap_peak_bytes` 两键（**件级语义非每实例**——双轴共享任务栈
+  直加不扩算，与 ⑨ 每实例扩算相反；负数红；缺省 0 = 未申报不进 Σ，申报义务未触发归 0.0.7 批G/
+  批D1，红例合成申报防 L-24 假绿；组合件级点名即红）。③判据实体 `rr3_memory_budget_check` ＋装载
+  拒链（坏形件不进加总——可见面 = assemble_broken 点名，同 ⑨ 诚实注记）；红文案点名 ⑩-a/⑩-b 与
+  F-13（渲染缓冲/队列/板侧配置全是堆账）。④数据：default/distro（host）显式 `not_applicable = true`；
+  esp32-mini（rtos）声明预算位 65536/327680/16384（board.rs 任务栈同源 + S3 内部 SRAM 推算 +
+  `UART2_TX_RING` 首位落账，对账归 0.0.7 真板）；四份 e2e 夹具 + tools/sim + wiring 路径推导夹具
+  同批 schema 4。⑤测试：rrd 六条新用例（实体绿/红含等号边界、分档自洽七红、两超限拒 boot、
+  只超堆断言不含 ⑩-a、边界和过 boot、双件直加）＋ rr-registry 两新＋ contract.rs 三处形状 pin
+  同批 3→4；⑩ 经步①b cargo test --workspace 进 CI，**不建 check.sh 新步**（计数均不变）。
+  ⑥两腿对拍用例落 rr3-power composite.rs（⑥-c2 真值面：腿一确定性 + 腿二裁定语义逐条点名：
+  None⇒Unknown、边界不折、档名 "unknown" 同源、Unknown 独立第四态不折 Ok——power 非 atom 名
+  不占 ⑧-a 分母）；全案 §5 ⑩ 行 X-4 加注、decisions.md §4 变更记录同批（提交号随批N2 收口
+  对账回填）；敞口表无增减。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

@@ -28,9 +28,10 @@ use support::*;
 /// （profile.rs 的 `base 层 binding 必须致命` 钉过），可绑格只有 charger。
 /// schema_version=2 起三新段必填（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；
 /// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
-/// 校验②只记 role_missing 非致命，boot 照常。
+/// 校验②只记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
+/// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。
 const PROFILE: &str = r#"
-schema_version = 3
+schema_version = 4
 
 [os]
 route = "distro"
@@ -59,6 +60,9 @@ switch = "none"
 switchable = false
 armed = false
 max_age_ms = 0
+
+[supplies.budget]
+not_applicable = true
 
 [slots]
 present = ["power.charger"]
