@@ -12,7 +12,9 @@
 //! rr3.call、事件扇出）全是真进程真套接字。真云档（`--brain-cloud real
 //! --brain-base-url <端点>` + 环境变量 `RR3_CLOUD_API_KEY`）把最后一跳也接真——
 //! 端点 fail-closed 必给（演练 config 缺省是死地址，不落）。音频后端缺省 sim，
-//! `--audio-backend mac` 换 macOS 真麦/扬声器（rr-hal `mac` 后端，真件显式启用纪律）。
+//! `--audio-backend mac` 换 macOS 真麦/扬声器（rr-hal `mac` 后端，真件显式启用
+//! 纪律）；`--sink-backend` 分列 interact 回放面（缺省跟随源面，既有链路零改动；
+//! `--audio-backend esp32` 必给——flock 排他下 interact 不得吃源面 UART，A 批 c4）。
 //! 本模块依赖 UDS 与真进程，仅 Unix 参与编译。
 
 use std::path::{Path, PathBuf};
@@ -182,10 +184,13 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let py = which_python3()?;
 
     // 音频后端与云模式（缺省行为零改动：sim + mock——CI/无头纪律；真件只显式启用）
-    let audio_backend = a
-        .audio_backend
+    let audio_backend = a.audio_backend.clone().unwrap_or_else(|| "sim".to_string());
+    // 回放面（interact）：缺省跟随源面（既有 sim/mac 链路零改动）；esp32 源
+    // 档必显式分列（参数解析处 fail-closed 把关，此处 unwrap 缺省不可达 esp32）
+    let sink_backend = a
+        .sink_backend
         .clone()
-        .unwrap_or_else(|| "sim".to_string());
+        .unwrap_or_else(|| audio_backend.clone());
     let cloud_real = a.brain_cloud.as_deref() == Some("real");
     // real 的 base_url 已在参数解析处 fail-closed 把关（必给），此处 unwrap 不可达
     let brain_base_url = a
@@ -208,14 +213,20 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .map_err(|e| format!("写 shim 失败: {e}"))?;
     make_executable(&shim_path)?;
     let manifest_path = workdir.join("config.toml");
-    std::fs::write(&manifest_path, rr3_brain_config_text(cloud_real, &brain_base_url))
-        .map_err(|e| format!("写演练 config 失败: {e}"))?;
+    std::fs::write(
+        &manifest_path,
+        rr3_brain_config_text(cloud_real, &brain_base_url),
+    )
+    .map_err(|e| format!("写演练 config 失败: {e}"))?;
     // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
     // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
     // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
     let interact_cfg = workdir.join("interact-config.toml");
-    std::fs::write(&interact_cfg, crate::chain::rr3_chain_interact_config_text())
-        .map_err(|e| format!("写 interact config 失败: {e}"))?;
+    std::fs::write(
+        &interact_cfg,
+        crate::chain::rr3_chain_interact_config_text(),
+    )
+    .map_err(|e| format!("写 interact config 失败: {e}"))?;
 
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
@@ -251,7 +262,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         let rrd_pid = rrd.id();
         children.push(("rrd".into(), rrd));
         println!(
-            "rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}，音频后端={audio_backend}，云={}",
+            "rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}，音频={audio_backend}（源）/ {sink_backend}（回放），云={}",
             socket.display(),
             if cloud_real { "real" } else { "mock" },
         );
@@ -265,7 +276,10 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         let interact_child = Command::new(&interact)
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_interact)
-            .env("RR3_HAL_BACKEND", &audio_backend)
+            // 回放面独立后端（A 批 c4）：interact 吃 sink_backend——esp32 源档下
+            // 源（rrd/sense）与回放（interact）分列，同一 UART 的 flock 排他
+            // 天然不成立
+            .env("RR3_HAL_BACKEND", &sink_backend)
             // 面板地址：用户显式给的 RR3_PANEL_ADDR 优先（手机/局域网面板面），
             // 未给才落演练缺省回环 18080
             .env(
@@ -357,8 +371,13 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     })();
 
     // ---- 6. 收尾：杀全部子进程；--keep 保留现场 ----
-    let cloud_label = if cloud_real { "云端 real" } else { "云端 mock" };
-    let chain_label = format!("rrd + rr3-sense({audio_backend}) + rr3-brain + rr3-interact");
+    let cloud_label = if cloud_real {
+        "云端 real"
+    } else {
+        "云端 mock"
+    };
+    let chain_label =
+        format!("rrd + rr3-sense({audio_backend}) + rr3-brain + rr3-interact({sink_backend})");
     if a.keep {
         println!(
             "rr3-sim --brain: --keep 保留现场：socket={} workdir={}",

@@ -427,12 +427,8 @@ mod tests {
         let e = rr3_sim_args_parse(&v(&["--brain", "--brain-cloud", "real"])).unwrap_err();
         assert!(e.contains("--brain-base-url"), "{e}");
         // mock 给端点拒（mock 不碰网络，静默忽略是第一错法）
-        let e = rr3_sim_args_parse(&v(&[
-            "--brain",
-            "--brain-base-url",
-            "https://x.example/v1",
-        ]))
-        .unwrap_err();
+        let e = rr3_sim_args_parse(&v(&["--brain", "--brain-base-url", "https://x.example/v1"]))
+            .unwrap_err();
         assert!(e.contains("mock"), "{e}");
         // 端点形状把关
         let e = rr3_sim_args_parse(&v(&[
@@ -447,6 +443,38 @@ mod tests {
         // 专用旗标不许在别的演练里静默生效
         let e = rr3_sim_args_parse(&v(&["--chain", "--audio-backend", "mac"])).unwrap_err();
         assert!(e.contains("仅 --brain"), "{e}");
+    }
+
+    #[test]
+    fn sink_backend_flag_fails_closed() {
+        // 缺省 None（既有链路零改动）；合法取值入库
+        let a = rr3_sim_args_parse(&v(&["--brain"])).unwrap();
+        assert!(a.sink_backend.is_none());
+        let a = rr3_sim_args_parse(&v(&["--brain", "--sink-backend", "mac"])).unwrap();
+        assert_eq!(a.sink_backend.as_deref(), Some("mac"));
+        // 仅 --brain 适用
+        let e = rr3_sim_args_parse(&v(&["--chain", "--sink-backend", "mac"])).unwrap_err();
+        assert!(e.contains("仅 --brain"), "{e}");
+        // 取值白名单
+        let e = rr3_sim_args_parse(&v(&["--brain", "--sink-backend", "win"])).unwrap_err();
+        assert!(e.contains("取值不认"), "{e}");
+        // fail-closed ②：sink=esp32 拒收（板无扬声器，回放恒宿主）
+        let e = rr3_sim_args_parse(&v(&["--brain", "--sink-backend", "esp32"])).unwrap_err();
+        assert!(e.contains("板无扬声器"), "{e}");
+        // fail-closed ①：audio=esp32 未给 sink 拒起（缺省跟随会令 interact 抢 UART）
+        let e = rr3_sim_args_parse(&v(&["--brain", "--audio-backend", "esp32"])).unwrap_err();
+        assert!(e.contains("--sink-backend"), "{e}");
+        // fail-closed ① 的正门：audio=esp32 + sink=mac 分列通过
+        let a = rr3_sim_args_parse(&v(&[
+            "--brain",
+            "--audio-backend",
+            "esp32",
+            "--sink-backend",
+            "mac",
+        ]))
+        .unwrap();
+        assert_eq!(a.audio_backend.as_deref(), Some("esp32"));
+        assert_eq!(a.sink_backend.as_deref(), Some("mac"));
     }
 
     #[test]
