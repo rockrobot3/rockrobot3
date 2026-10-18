@@ -995,6 +995,21 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   舵机/显示/rr3-audio-rec 与音频源互斥不可并存（B 延后自洽）；**~2% 时钟滑移**（run4 gaps
   口径）→ ring 溢丢稳态损耗，VAD/ASR 可容忍。真 key 就位后 `--brain-cloud real` 切档即
   全语音自由对话（acc④，运维动作不属本轮代码）。
+- **A 批真板冒烟——分层验收过（sense 面）+ 板麦口径标定 120 + 物理层两课（2026-10-18，本提交）**：
+  分层冒烟（无 brain，rrd --manifest 直起 sense）：`denied_publish = 0`、pcm 62 万+ 帧事件在流、
+  板面流就绪 16000/2ch/s16le 与钉定值一致、**VAD 真板成轮 8 次 onset**（说话 → vad_start 上总线）
+  ——A 批新增面（板麦 → esp32 源 → VAD → 总线）真件验证通过。**板麦口径标定**：`rms_start 1500→120`
+  （config-esp32.toml）——VAD 不成轮的根因不是阈值略高而是电平差一个量级：临时探针（RR3_VAD_PROBE，
+  已撤）+ wav 对拍实测说话 RMS 峰值 163 / 环境底噪 73（INMP441 半米距离真实物理量级，宿主真麦的
+  1500/800 口径在板麦上不适用；板固件 `>>8` 24bit→16bit 处理复核无误）；**板端数字增益（+18dB
+  拉开信噪余量）板固件小批立项**。**物理层两课（当日流劣化排查）**：①UART2 杜邦线接触不良 =
+  劣化主因（20s 实收 5.4s/73% 丢 + 112 resyncs → 压实后 14.0s/15s 实收 + 7 resyncs，恢复 run4
+  同量级）；②FT232R 通道容量余量课题——音频 b64 组帧需求 ~90KB/s vs 921600 上限 92.16KB/s
+  余量仅 ~7%（板钟实测 16010–16019Hz 漂移在吃余量；桥型号已核：A98KN77U=FT232R 上限 3M、
+  1420=CH340），提波特率板固件小批评估。**全链（brain→mac 出声）仍被本机 python 3.9 门槛卡**
+  （本表第 9 行在案，`--brain` 演练 fail-fast 同款），brain 腿归 CI/装机环境。**VAD feed 毫秒账
+  与 esp32 非阻塞源部分读的耦合**（`vad/mech.rs` `above_ms += frame_ms` 假设每 feed 恒 20ms）：
+  探针实证 92% 拍满 320 帧（esp32audio ring 已把 128ms 突发摊平），实际影响小，如实登记不改判。
 - **0.0.6 模型连接抽象批——AgentRT v3 式连接行 + 密钥双源 + 面板密钥面（2026-10-14，提交
   `d69e918`+`89eb71e`+本批记）**：用户需求"抽象化 API 客户端连云端/本地模型；操作面板填 key，
   代码无明文密钥"（立项计划 .trae/documents/rock3-model-client-abstraction-and-panel-keys.md，
