@@ -322,6 +322,15 @@ pub struct Rr3ProfileBoot {
     /// 格位在 roles.toml 有归属角色却无 [[pin]] 绑定——缺角色即缺能力。daemon 点名
     /// 日志；Degraded 可见面归批N4 I-15（今天面板零配置可见）
     pub role_missing: Vec<(String, String)>,
+    /// 执行轴状态注入文本（批N3 件三，`RR3_ACT_AXIS_STATE`）：`calibrated=<bool>,hard_stop=<词>`
+    /// ——轴档案（`hardware/<形态>/axis/*.toml`，件二装载器真值）**恰一份**合法装载时
+    /// 的投影，是 rr3-act 拒动判据 [`rr_hal_api::rr3_act_motion_allowed`] 的输入面。
+    /// 空串 = 不注入（无档案/坏件/多轴未消歧），模块侧折保守缺省——§6 复位语义④：
+    /// 缺真相就按最窄面起跑（未标定不得自动），拒绝不是安全向、保守才是。
+    pub axis_state: String,
+    /// 轴档案装载点名（坏件逐条 / 多份合法）：daemon 逐条日志，不拒 boot——档案装载
+    /// 是降级面，与缺格/缺角色同档；拒绝启动面留给契约事故
+    pub axis_notes: Vec<String>,
 }
 
 /// 装配单路径解析成绝对路径：装载与横幅凭证共用同一个解析结果。
@@ -928,6 +937,55 @@ fn rr3_hardware_bindings_text(hardware: &BTreeMap<String, String>) -> String {
     out
 }
 
+/// 执行轴状态投影（批N3 件三，全案 §4.4 载体 + §6 硬约束）：扫 `axis/` 目录的
+/// *.toml（升序 = 确定性），**恰一份**合法装载（件二 [`crate::axis::
+/// rr3_act_profile_load`]，外键 = [[pin]] 的 pin_id 集——与档案 `pin` 键同一语法，
+/// F-2：第二套语法一条校验都打不到）才投影 `calibrated=<bool>,hard_stop=<词>`。
+/// 零份回空串且安静（无档案是常态起跑态）；坏件逐条点名但不拒 boot（档案装载
+/// 是降级面，与缺格/缺角色同档——模块侧折保守缺省仍是安全向）；多份合法点名
+/// "消歧归件五"后同样空串。目录读不到同零份（无 axis 目录 = 无档案）。
+fn rr3_axis_state_text(axis_dir: &Path, pin_ids: &BTreeSet<String>) -> (String, Vec<String>) {
+    let mut notes = Vec::new();
+    let Ok(entries) = std::fs::read_dir(axis_dir) else {
+        return (String::new(), notes);
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("toml"))
+        .collect();
+    files.sort();
+    let mut found = Vec::new();
+    for f in &files {
+        match crate::axis::rr3_act_profile_load(f, pin_ids) {
+            Ok(Some(file)) => found.push(file.profile),
+            Ok(None) => {}
+            Err(errs) => notes.extend(
+                errs.into_iter()
+                    .map(|e| format!("轴档案 {} 坏形: {e}", f.display())),
+            ),
+        }
+    }
+    match found.as_slice() {
+        [] => (String::new(), notes),
+        [one] => (
+            format!(
+                "calibrated={},hard_stop={}",
+                one.calibrated,
+                one.hard_stop.rr3_act_hard_stop_name()
+            ),
+            notes,
+        ),
+        many => {
+            notes.push(format!(
+                "轴档案合法装载 {} 份，不注入执行轴状态——多轴身份消歧归件五，模块按保守缺省起跑",
+                many.len()
+            ));
+            (String::new(), notes)
+        }
+    }
+}
+
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
 /// 致命错误（读不到 / 形状不合 / 查册未命中 / 结构不自洽）打包成一条串返回；
 /// 缺格**不是**致命项（P2：缺格只降点名模块，缺格≠拒 boot），进 [`Rr3ProfileBoot::missing`]；
@@ -1515,6 +1573,13 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     let hal_bindings = rr3_hardware_bindings_text(&merged);
 
+    // 执行轴状态投影（批N3 件三）：目录 = 接线档同级的 axis/（hardware/<形态>/axis/
+    // *.toml，件二装载器落位）；pin_ids 复用校验⑦段的同一集合（[[pin]] 的 pin_id 全集
+    // ——档案外键与接线闭合对同一真值源对账，两个读者一套语法）。恰一份合法才投影，
+    // 其余口径见 [`rr3_axis_state_text`]（降级面点名，不拒 boot）。
+    let axis_dir = wiring_abs.parent().expect("接线档必有父目录").join("axis");
+    let (axis_state, axis_notes) = rr3_axis_state_text(&axis_dir, &pin_ids);
+
     // G4 装配段校验（ADR-0019 修订 1 ③）已在门 c 段随装配扫描一次完成：缺文件/
     // 坏形/ops 注入缺逐条点名进 assemble_broken，该模块 boot 入 Degraded（不 fatal；
     // 修数据 + 重启是唯一解除路）。此处只消费上文的 assemble_broken。
@@ -1525,6 +1590,8 @@ pub fn rr3_profile_boot_inputs_with_probe(
         hal_bindings,
         assemble_broken,
         role_missing,
+        axis_state,
+        axis_notes,
     })
 }
 
@@ -2246,6 +2313,24 @@ gnd_common = "star-1"
                 .expect("建 hardware 目录");
             std::fs::write(&w, text).expect("写接线档");
         }
+
+        /// 落一份轴档案到 `<root>/hardware/<装配单 stem>/axis/<stem>.toml`（件二
+        /// 装载器落位；批N3 件三执行轴状态投影的用例夹具，与 write_wiring 同一
+        /// 形态目录推导）。
+        fn write_axis(&self, profile: &Path, stem: &str, text: &str) {
+            let shape = profile
+                .file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .expect("夹具装配单须有文件名");
+            let a = self
+                .dir
+                .join("hardware")
+                .join(shape)
+                .join("axis")
+                .join(format!("{stem}.toml"));
+            std::fs::create_dir_all(a.parent().expect("轴档案必有父目录")).expect("建 axis 目录");
+            std::fs::write(&a, text).expect("写轴档案");
+        }
     }
 
     impl Drop for Root {
@@ -2829,6 +2914,77 @@ mux_group = []
                 "manifest 路径必须按 modules-root 解析且升序"
             );
         }
+    }
+
+    /// 轴档案文本帮手（十四键，值面参照件二 §4.4 示例档）：pin/calibrated/hard_stop
+    /// 三键参数化——pin 走 GOOD 的 pin_id 语法（外键对账 F-4），状态两键即执行轴
+    /// 投影的输入面。
+    fn axis_text(pin: &str, calibrated: bool, hard_stop: &str) -> String {
+        format!(
+            "schema = 1\npin = \"{pin}\"\ncenter_deg = 90\nlo_deg = 60\nhi_deg = 120\ndir_sign = 1\nslew_deg_s = 100\nsettle_ms = 200\nhold = \"release\"\ncurrent_ceil_ma = 750\nwarmup_ms = 0\nhard_stop = \"{hard_stop}\"\ncalibrated = {calibrated}\nsource = \"manual\"\n"
+        )
+    }
+
+    /// 执行轴状态投影·恰一份（批N3 件三）：合法档案装载成功 → 注入文本按
+    /// `calibrated=<bool>,hard_stop=<词>` 投影，点名清单干净——rr3-act 拒动判据
+    /// 的输入面就是这两个键的档案真值。
+    #[test]
+    fn axis_state_projects_when_exactly_one_profile_loads() {
+        let root = Root::new("axis-one");
+        let p = root.write_profile("full.toml", GOOD);
+        root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
+        let boot = boot_inputs(&p).expect("恰一份合法档案不改变 boot 绿面");
+        assert_eq!(
+            boot.axis_state, "calibrated=true,hard_stop=yes",
+            "恰一份合法档案必须投影执行轴状态（rr3-act 拒动判据的输入面）"
+        );
+        assert!(boot.axis_notes.is_empty(), "{:?}", boot.axis_notes);
+    }
+
+    /// 执行轴状态投影·坏件（批N3 件三）：档案形状错 → 注入文本空串 = 不注入
+    /// （模块侧折保守缺省，§6 复位语义④），点名清单逐条入账且**不拒 boot**——
+    /// 档案装载是降级面，与缺格/缺角色同档。
+    #[test]
+    fn axis_state_stays_empty_and_notes_broken_profile() {
+        let root = Root::new("axis-broken");
+        let p = root.write_profile("full.toml", GOOD);
+        root.write_axis(&p, "pan", "schema = 1\npin = \"act.axis.pwm.pan\"\n");
+        let boot = boot_inputs(&p).expect("坏档案不拒 boot（降级面，与缺格同档）");
+        assert!(
+            boot.axis_state.is_empty(),
+            "坏档案不得投影注入文本——缺真相按最窄面起跑"
+        );
+        assert!(
+            boot.axis_notes
+                .iter()
+                .any(|n| n.contains("pan.toml") && n.contains("坏形")),
+            "坏件必须点名到件: {:?}",
+            boot.axis_notes
+        );
+    }
+
+    /// 执行轴状态投影·多份（批N3 件三）：两份合法档案 → 注入文本空串，点名
+    /// "消歧归件五"——单轴消歧的步位判定未建，rrd 不猜（机制与策略分离：
+    /// 装载机制在件二/件三，消歧策略在件五）。多份的真实形貌 = 遗留副本/误复制
+    /// （同 pin 两份文件——外键对账只查 pin ∈ pin_ids，文件名不是身份键）。
+    #[test]
+    fn axis_state_stays_empty_and_notes_ambiguous_axes() {
+        let root = Root::new("axis-two");
+        let p = root.write_profile("full.toml", GOOD);
+        root.write_axis(&p, "pan", &axis_text("act.axis.pwm.pan", true, "yes"));
+        root.write_axis(&p, "pan-copy", &axis_text("act.axis.pwm.pan", true, "yes"));
+        let boot = boot_inputs(&p).expect("两份合法档案不改变 boot 绿面");
+        assert!(
+            boot.axis_state.is_empty(),
+            "多轴未消歧不得投影注入文本——不猜身份"
+        );
+        assert!(
+            boot.axis_notes
+                .iter()
+                .any(|n| n.contains("2 份") && n.contains("消歧归件五")),
+            "多份合法必须点名消歧挂账: {:?}",
+            boot.axis_notes
+        );
     }
 
     /// MC-4 门禁用例①：注入非 linux 生产探针（有硬件面的格位恒缺）→ 这些格位进缺格

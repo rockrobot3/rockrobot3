@@ -46,8 +46,9 @@ fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
 /// 格位名取自真 `contracts/slots.toml`（Q1 裁定立格 act.relay 后三格齐备）。
 /// schema_version=2 起三新段必填（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；
 /// present 只声明 bindings 用到的非 base 格位（base 格在册恒在，声明即致命）。
-/// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
-/// 校验②只记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
+/// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具只声明舵机轴一条
+/// （批N3 件三：执行轴状态注入的正例基底），led/relay 的角色照旧缺绑定，校验②
+/// 记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
 /// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。
 const PROFILE: &str = r#"
 schema_version = 4
@@ -93,6 +94,38 @@ present = ["act.servo", "act.led", "act.relay"]
 
 [enabled_slots]
 rr3-act = ["act.servo", "act.led", "act.relay"]
+
+[[pin]]
+role = "act.axis.pwm"
+instance = "pan"
+controller = "pwm0"
+channel = 0
+physical = [12]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+"#;
+
+/// 轴档案夹具（hardware/<形态>/axis/pan.toml，件二装载器落位；批N3 件三）：
+/// 已标定 + 挡块在册——执行轴状态投影 `calibrated=true,hard_stop=yes`，Auto 放行，
+/// 既有 servo 点名断言不红；拒动语义由模块单测钉（e2e 只钉注入链路通）。
+/// 值面参照件二 §4.4 示例档（(center,lo,hi) = (90,60,120)）。
+const AXIS_PAN: &str = r#"
+schema = 1
+pin = "act.axis.pwm.pan"
+center_deg = 90
+lo_deg = 60
+hi_deg = 120
+dir_sign = 1
+slew_deg_s = 100
+settle_ms = 200
+hold = "release"
+current_ceil_ma = 750
+warmup_ms = 0
+hard_stop = "yes"
+calibrated = true
+source = "manual"
 "#;
 
 /// config 夹具：与仓内 `modules/rr3-act/config.toml` 同形状（main.rs 的
@@ -158,6 +191,16 @@ impl Root {
             .join("wiring.toml");
         std::fs::create_dir_all(w.parent().unwrap()).expect("建 hardware 目录");
         std::fs::write(&w, WIRING).expect("写接线档");
+        // 同批 stage 轴档案（hardware/<形态>/axis/pan.toml，件二装载器落位；批N3 件三
+        // 执行轴状态注入的正例基底——恰一份合法才投影，见 profile.rs rr3_axis_state_text）
+        let a = self
+            .dir
+            .join("hardware")
+            .join("default")
+            .join("axis")
+            .join("pan.toml");
+        std::fs::create_dir_all(a.parent().unwrap()).expect("建 axis 目录");
+        std::fs::write(&a, AXIS_PAN).expect("写轴档案");
         p
     }
 }
@@ -181,6 +224,27 @@ fn act_module_full_face_end_to_end() {
     )
     .expect("写模块 manifest");
     std::fs::write(mod_dir.join("config.toml"), CONFIG).expect("写模块 config");
+    // 同批 stage servo 件装配清单（与 profile.rs 单测 stage_servo_module 同形状）：
+    // 门 c（批N2 ⑨-c）对 kind=power 角色执法覆盖判据——act.axis.pwm（kind=power）
+    // 挂轨 rail5v 绑 rr3-act，件申报面无 rail5v 需求即拒 boot，故夹具件必须申报
+    // （五键 demands，与仓内 servo 件同形状）
+    let asm = mod_dir.join("atoms/servo/assemble.toml");
+    std::fs::create_dir_all(asm.parent().unwrap()).expect("建 atoms 目录");
+    std::fs::write(
+        &asm,
+        concat!(
+            "schema_version = 2\n\n[assemble]\n",
+            "handles = [\n",
+            "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n",
+            "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_channel\" },\n",
+            "]\n",
+            "ops = []\n",
+            "demands = [\n",
+            "  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n",
+            "]\n",
+        ),
+    )
+    .expect("stage servo assemble.toml");
     let profile = root.write_profile(PROFILE);
 
     // ---------- ① 装配单正门 boot：spawn 行回显真 entry → 注册 → running ----------

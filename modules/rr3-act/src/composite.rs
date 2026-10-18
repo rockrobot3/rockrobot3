@@ -59,6 +59,70 @@ const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
 /// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
 const RR3_ACT_CONFIG_ENV: &str = "RR3_ACT_CONFIG";
 
+/// rrd spawn 注入的执行轴状态（批N3 件三，supervisor 与 RR3_HAL_BINDINGS 同位注入）：
+/// 装配链装载 `hardware/<形态>/axis/*.toml` 恰一份时投影
+/// `calibrated=<bool>,hard_stop=<档案词>`。未注入（无档案/坏件/多轴未消歧）与
+/// 坏形文本一律折保守缺省——§6"未标定不得自动"是代码拒动，缺真相就按最窄面起跑。
+const RR3_ACT_AXIS_STATE_ENV: &str = "RR3_ACT_AXIS_STATE";
+
+/// 执行轴状态（批N3 件三）：拒动判据 [`rr_hal_api::rr3_act_motion_allowed`] 的
+/// 输入面。两键都来自档案（件二装载器真值），模块侧零判定载荷——只解析不判域。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rr3ActAxisState {
+    hard_stop: rr_hal_api::Rr3ActHardStop,
+    calibrated: bool,
+}
+
+impl Rr3ActAxisState {
+    /// 保守缺省：未标定 + 挡块未知——判据按 §6 硬约束把 Auto 全拒，执行面只剩点动
+    fn rr3_conservative() -> Self {
+        Self {
+            hard_stop: rr_hal_api::Rr3ActHardStop::Unknown,
+            calibrated: false,
+        }
+    }
+
+    /// 注入文本解析：`calibrated=<bool>,hard_stop=<词>`，键序无关、两键必在、
+    /// 重复键/坏布尔/词表外词/未知键逐条点名。解析失败由调用方折保守缺省并
+    /// 打点（不 exit——保守态是安全向，退出反而进重启循环）。
+    fn rr3_from_env(text: &str) -> Result<Self, String> {
+        let mut calibrated = None;
+        let mut hard_stop = None;
+        for kv in text.split(',') {
+            let (k, v) = kv.split_once('=').ok_or_else(|| {
+                format!("执行轴状态段 {kv:?} 缺 =（形状 calibrated=<bool>,hard_stop=<词>）")
+            })?;
+            match k {
+                "calibrated" => {
+                    if calibrated.is_some() {
+                        return Err("执行轴状态 calibrated 重复".into());
+                    }
+                    calibrated = Some(match v {
+                        "true" => true,
+                        "false" => false,
+                        _ => return Err(format!("执行轴状态 calibrated={v:?} 非显式布尔")),
+                    });
+                }
+                "hard_stop" => {
+                    if hard_stop.is_some() {
+                        return Err("执行轴状态 hard_stop 重复".into());
+                    }
+                    hard_stop = Some(
+                        rr_hal_api::Rr3ActHardStop::rr3_act_hard_stop_parse(v).ok_or_else(
+                            || format!("执行轴状态 hard_stop={v:?} 不在档案词表（unknown/yes/no）"),
+                        )?,
+                    );
+                }
+                other => return Err(format!("执行轴状态未知键 {other:?}")),
+            }
+        }
+        Ok(Self {
+            calibrated: calibrated.ok_or("执行轴状态缺 calibrated")?,
+            hard_stop: hard_stop.ok_or("执行轴状态缺 hard_stop")?,
+        })
+    }
+}
+
 /// 订阅面主题之一（module.toml [events].subscribes 同源）：意图面
 const RR3_INTENT_TOPIC: &str = "rr3-brain/intent/result";
 
@@ -147,11 +211,34 @@ pub fn rr3_act_run() -> Result<(), String> {
         .spawn(move || reflex::rr3_reflex_loop(cfg.reflex, reflex_bus))
         .map_err(|e| format!("起反射环宿主线程失败: {e}"))?;
 
-    // 主循环状态：限速门 + 流序 + 低电禁动闸门（MC-5：初态开，未低电不禁动）
+    // 主循环状态：限速门 + 流序 + 低电禁动闸门（MC-5）+ 执行轴状态（批N3 件三）。
+    // 闸门复位保守默认（§6 复位语义④）：构造即闭锁未武装。host 档现无轨压样本流
+    // （rr3-runtime/system/power 只广播低电上升沿、无 OK 帧，e2e_power 已点名），
+    // 起手武装 + 解禁是**窄化的诚实开局**：假设轨压健康，把"订阅 battery/state
+    // 判新鲜样本再武装"的喂入面挂账批N3 件七（D5 读数位）。trip 随闭锁撤销武装，
+    // 此后 host 无样本可再武装 → 拒动直至重启（与既有"无 release 路径"事实一致）。
     let mut servo_seq: u64 = 0;
     let mut relay_seq: u64 = 0;
     let mut servo_gate = servo::Rr3RateGate::rr3_gate_new(cfg.servo.state_min_interval_ms);
     let mut low_gate = Rr3LowGate::rr3_low_gate_new();
+    low_gate.rr3_low_gate_arm();
+    low_gate.rr3_low_gate_release();
+    // 执行轴状态：装配链注入真值，坏形/缺席折保守缺省并点名（安全向，不退）
+    let axis = match std::env::var(RR3_ACT_AXIS_STATE_ENV) {
+        Ok(text) => Rr3ActAxisState::rr3_from_env(&text).unwrap_or_else(|e| {
+            eprintln!("rr3-act: {e}，按保守缺省起跑（未标定，只受点动）");
+            Rr3ActAxisState::rr3_conservative()
+        }),
+        Err(_) => {
+            println!("执行轴状态: 未注入（无档案/坏件/多轴未消歧），按保守缺省起跑");
+            Rr3ActAxisState::rr3_conservative()
+        }
+    };
+    println!(
+        "执行轴状态: calibrated={} hard_stop={}（注入策略面在启动自述可见，A-9）",
+        axis.calibrated,
+        axis.hard_stop.rr3_act_hard_stop_name()
+    );
 
     loop {
         // led 节拍（批I A-1：线程上收组合件）：每圈先推状态机，眨眼到点即落
@@ -186,7 +273,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                 let blocked = low_gate.rr3_low_gate_is_blocked();
                 let outcome = match topic {
                     servo::RR3_SERVO_COMMAND_TOPIC => {
-                        rr3_handle_servo(&mut *servo_dev, &cfg.servo, &args, blocked)
+                        rr3_handle_servo(&mut *servo_dev, &cfg.servo, &args, blocked, &axis)
                     }
                     led::RR3_LED_EFFECT_TOPIC => rr3_handle_led(
                         &mut led_ctrl,
@@ -276,6 +363,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                             &mut *servo_dev,
                             &cfg.servo,
                             low_gate.rr3_low_gate_is_blocked(),
+                            &axis,
                             &cfg.intent.open_topics,
                         ) {
                             match r {
@@ -329,18 +417,26 @@ pub fn rr3_act_run() -> Result<(), String> {
 /// （relay 面才有——A-7 同态抑制的组合件侧原料）)。Err = 业务性失败折 result.error。
 type Rr3CallOutcome = Result<(Value, Option<u16>, Option<(bool, bool)>), String>;
 
-/// servo/command 点名：低电闸门 → 参数裁决 → HAL 落角 → 回 (应答体, 待发的 state
-/// 角度, relay 无)。`blocked` = 低电禁动闸门闭锁（MC-5：闸门先于参数裁决，
-/// 闭锁期一律拒动，拒因明确点名低电）。
+/// servo/command 点名：低电闸门 → 拒动判据（批N3 件三）→ 参数裁决 → HAL 落角 →
+/// 回 (应答体, 待发的 state 角度, relay 无)。`blocked` = 低电禁动闸门闭锁（MC-5：
+/// 闸门先于一切裁决，闭锁期一律拒动，拒因明确点名低电）；`axis` = 执行轴状态——
+/// 动作形态先裁（§6 硬约束：未标定轴 Auto 拒，判据 rr-hal-api 单真值点），
+/// 参数值域后裁（形态都不许，参数值没有意义）。
 fn rr3_handle_servo(
     servo: &mut dyn Rr3PwmServo,
     cfg: &Rr3ServoCfg,
     args: &Value,
     blocked: bool,
+    axis: &Rr3ActAxisState,
 ) -> Rr3CallOutcome {
     if blocked {
         return Err(rr3_low_power_reject(servo::RR3_SERVO_COMMAND_TOPIC));
     }
+    // 拒动硬约束（§6，批N3 件三）：词缺席 = auto（保守——不申报按自动）；
+    // 判据拒收回 InvalidParam，折业务性失败点名言
+    let motion = servo::rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))?;
+    rr_hal_api::rr3_act_motion_allowed(axis.hard_stop, axis.calibrated, motion)
+        .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
     let (angle, move_ms) = rr3_servo_parse_args(args, cfg)?;
     // 安全核钳位最后包一道（批D₃ 裁定 5：安全核永远包住控制图）——上游裁决
     // 被绕过时输出也不越行程；输入合法时恒等，行为守恒
@@ -610,6 +706,67 @@ mod tests {
         }
     }
 
+    /// 轴状态注入文本解析（批N3 件三）：正例键序无关；缺键/坏布尔/词表外词/
+    /// 未知键/重复键逐条点名红——装配链注入的文本坏了必须看得见，不许静默猜。
+    #[test]
+    fn axis_state_env_parses_strict() {
+        let ok = Rr3ActAxisState::rr3_from_env("calibrated=true,hard_stop=yes").unwrap();
+        assert_eq!(
+            ok,
+            Rr3ActAxisState {
+                calibrated: true,
+                hard_stop: rr_hal_api::Rr3ActHardStop::Yes
+            }
+        );
+        let ok = Rr3ActAxisState::rr3_from_env("hard_stop=unknown,calibrated=false").unwrap();
+        assert_eq!(ok, Rr3ActAxisState::rr3_conservative(), "键序无关");
+        for (bad, needle) in [
+            ("calibrated=true", "hard_stop"),
+            ("hard_stop=yes", "calibrated"),
+            ("calibrated=1,hard_stop=yes", "布尔"),
+            ("calibrated=true,hard_stop=maybe", "词表"),
+            ("calibrated=true,hard_stop=yes,extra=1", "未知键"),
+            ("calibrated=true,calibrated=false,hard_stop=yes", "重复"),
+            ("calibrated", "="),
+        ] {
+            let e = Rr3ActAxisState::rr3_from_env(bad).unwrap_err();
+            assert!(e.contains(needle), "{bad:?} → {e}");
+        }
+    }
+
+    /// 拒动硬约束·RPC 路（§6，批N3 件三）：未标定轴的 servo/command（无 motion
+    /// 键 = auto 保守缺省）折 result.error 点名"未标定"；显式 jog 落角；已标定
+    /// 轴 auto 照常。与 intent 路同判（判据 rr-hal-api 单真值点）。
+    #[test]
+    fn rpc_servo_refuses_uncalibrated_auto_but_jogs() {
+        let conservative = Rr3ActAxisState::rr3_conservative();
+        let calibrated = Rr3ActAxisState {
+            hard_stop: rr_hal_api::Rr3ActHardStop::Yes,
+            calibrated: true,
+        };
+        let run = |args: &Value, axis: &Rr3ActAxisState| {
+            let mut servo = rr_hal::sim::Rr3SimServo::rr3_sim_servo_new(90);
+            rr3_handle_servo(&mut servo, &servo_cfg(), args, false, axis)
+        };
+        // 未标定 + auto（缺省）：拒动，拒因点名动作形态与未标定
+        let e = run(&json!({"angle_deg": 90}), &conservative).unwrap_err();
+        assert!(e.contains("未标定"), "{e}");
+        assert!(e.contains("auto"), "{e}");
+        // 未标定 + 显式 jog：点动落角
+        let v = run(&json!({"angle_deg": 90, "motion": "jog"}), &conservative).unwrap();
+        assert_eq!(v.0["angle_deg"], 90);
+        // 已标定 + auto：照常走位
+        let v = run(&json!({"angle_deg": 90}), &calibrated).unwrap();
+        assert_eq!(v.0["angle_deg"], 90);
+        // 标定面词（calib-*）不进运行命令面（mech 白名单窄化）
+        let e = run(
+            &json!({"angle_deg": 90, "motion": "calib-openloop"}),
+            &calibrated,
+        )
+        .unwrap_err();
+        assert!(e.contains("只认 jog/auto"), "{e}");
+    }
+
     /// 仓内默认灯效白名单全集（三值）——下钻用例的统一实参基线
     fn led_effects_all() -> Vec<Rr3LedEffect> {
         vec![Rr3LedEffect::On, Rr3LedEffect::Off, Rr3LedEffect::Blink]
@@ -712,7 +869,8 @@ saturate_notice_ms = 500
         let e = rr3_act_config_parse(&base("effects = [1]", "open_topics = []")).unwrap_err();
         assert!(e.contains("effects[0]"), "元素类型点名: {e}");
         // 越在册值
-        let e = rr3_act_config_parse(&base("effects = [\"pulse\"]", "open_topics = []")).unwrap_err();
+        let e =
+            rr3_act_config_parse(&base("effects = [\"pulse\"]", "open_topics = []")).unwrap_err();
         assert!(e.contains("非在册灯效"), "越界值点名在册值: {e}");
         // 缺 intent 段
         let e = rr3_act_config_parse(

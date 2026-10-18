@@ -84,36 +84,62 @@ impl Rr3LowEdge {
     }
 }
 
-/// 低电禁动闸门（安全核原语，0.0.5 批M MC-5；方案 §20 第 2 条裁定 A-5/P-8/L-8 三单合一）。
+/// 低电禁动闸门（安全核原语，0.0.5 批M MC-5；方案 §20 第 2 条裁定 A-5/P-8/L-8 三单合一；
+/// 批N3 件三按全案 §6 复位语义④改形——复位保守默认）。
 ///
-/// **一位状态，零判定载荷**：本型不读电压、不持阈值——判定来源由承载层注入，
+/// **两位状态，零判定载荷**：本型不读电压、不持阈值——判定来源由承载层注入，
 /// 一个事实一个真值点：
 /// - **host 档**：承载层消费 rrd 的 `rr3-runtime/system/power` 低电旗广播（触发源
 ///   唯一，件内不再判定电压），低电 → [`Rr3LowGate::rr3_low_gate_trip`]；
 /// - **bare 档**：安全核段本地采样过 [`Rr3LowEdge`]（回阈 + 迟滞），越阈 → trip、
 ///   回阈 → [`Rr3LowGate::rr3_low_gate_release`]，并出 `RR3G` 守护行。
 ///
-/// 解禁**不自动重放**被拒的令（拒因回显，由上层决定是否重发）：闸门只是一位
-/// 状态，不缓存不重放。妆面（led/face）不受辖——禁动它们只增加卡死面积。
+/// 复位语义④（§6）：**闸门复位后默认不开闸**——构造即闭锁且未武装，须先取到
+/// 一次合法轨压样本（喂入侧裁定新鲜度）经 [`Rr3LowGate::rr3_low_gate_arm`] 武装，
+/// 解禁才被受理；闭锁（trip）同时**撤销武装**——让旗升起的轨压事实已过时，再解禁
+/// 须要闭锁后的新样本。"未武装不得解禁"是代码拒动，不是文档建议。
+///
+/// 解禁**不自动重放**被拒的令（拒因回显，由上层决定是否重发）：闸门只是状态位，
+/// 不缓存不重放。妆面（led/face）不受辖——禁动它们只增加卡死面积。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rr3LowGate {
     blocked: bool,
+    /// 合法轨压样本资格位（复位语义④）：false 时 release 一律拒
+    armed: bool,
 }
 
 impl Rr3LowGate {
+    /// 复位即闭锁且未武装（§6 复位语义④：默认不开闸）——"起手即开"由承载层
+    /// 显式武装 + 解禁表达，不再是无声的缺省。
     pub fn rr3_low_gate_new() -> Self {
-        Self { blocked: false }
+        Self {
+            blocked: true,
+            armed: false,
+        }
+    }
+
+    /// 武装（喂入侧取到一次合法轨压样本后调用；样本新鲜度 `age_ms ≤ max_age_ms`
+    /// 由喂入侧对账，机制只持资格位，零判定载荷）。
+    pub fn rr3_low_gate_arm(&mut self) {
+        self.armed = true;
     }
 
     /// 闭锁执行面。返回是否发生翻转（false→true 才是真边沿，供日志/计数去抖）。
+    /// 多闭锁是安全向（重复广播不翻转）；闭锁同时撤销武装——再解禁须闭锁后的
+    /// 新样本（复位语义④）。
     pub fn rr3_low_gate_trip(&mut self) -> bool {
         let flip = !self.blocked;
         self.blocked = true;
+        self.armed = false;
         flip
     }
 
     /// 解禁执行面（回阈 + 迟滞解禁的落点）。返回是否发生翻转（true→false）。
+    /// **未武装一律拒**（返回 false 保持闭锁）——没取到合法样本就没有"回阈"可言。
     pub fn rr3_low_gate_release(&mut self) -> bool {
+        if !self.armed {
+            return false;
+        }
         let flip = self.blocked;
         self.blocked = false;
         flip
@@ -265,38 +291,56 @@ mod tests {
         assert!(!e.rr3_low_edge_is_low(), "回阈后解禁读出");
     }
 
-    /// 低电禁动闸门（MC-5）：闭锁/解禁各恰一次翻转，重复同态不再翻转（去抖）；
-    /// 初态开（未低电不禁动）。
+    /// 低电禁动闸门（MC-5 + 批N3 复位语义④）：复位即闭锁未武装——未武装解禁
+    /// 一律拒；武装后闭锁/解禁各恰一次翻转，重复同态不再翻转（去抖）。
     #[test]
     fn low_gate_trips_and_releases_with_single_flip() {
         let mut g = Rr3LowGate::rr3_low_gate_new();
-        assert!(!g.rr3_low_gate_is_blocked(), "初态开");
-        assert!(g.rr3_low_gate_trip(), "首次闭锁是真边沿");
+        assert!(g.rr3_low_gate_is_blocked(), "复位即闭锁（§6 复位语义④）");
+        assert!(!g.rr3_low_gate_release(), "未武装解禁被拒，保持闭锁");
         assert!(g.rr3_low_gate_is_blocked());
-        assert!(!g.rr3_low_gate_trip(), "重复闭锁不再翻转");
-        assert!(g.rr3_low_gate_release(), "解禁是真边沿");
+        g.rr3_low_gate_arm();
+        assert!(g.rr3_low_gate_release(), "武装后解禁是真边沿");
         assert!(!g.rr3_low_gate_is_blocked());
         assert!(!g.rr3_low_gate_release(), "重复解禁不再翻转");
+    }
+
+    /// trip 撤销武装（复位语义④的核心）：让旗升起的轨压事实已过时，闭锁后
+    /// 不取新样本（re-arm）就解禁，闸门必须纹丝不动。
+    #[test]
+    fn low_gate_trip_disarms_until_fresh_sample() {
+        let mut g = Rr3LowGate::rr3_low_gate_new();
+        g.rr3_low_gate_arm();
+        assert!(g.rr3_low_gate_release(), "先武装解禁（起手健康开局）");
+        assert!(g.rr3_low_gate_trip(), "低电闭锁是真边沿");
+        assert!(!g.rr3_low_gate_release(), "旧武装已随 trip 撤销：解禁被拒");
+        assert!(g.rr3_low_gate_is_blocked(), "trip 撤了武装：闭锁保持");
+        g.rr3_low_gate_arm();
+        assert!(g.rr3_low_gate_release(), "闭锁后的新样本（re-arm）才解禁");
+        assert!(!g.rr3_low_gate_is_blocked());
     }
 
     /// bare 本地兜底合成（MC-5 ④）：安全核段本地采样 → `Rr3LowEdge` 回阈 + 迟滞
     /// 判定 → 闸门闭锁/解禁。判定纯函数、无时钟、无总线（裁定 5），
     /// 与 host 档"消费广播置位"共用同一个 `Rr3LowGate`（一位状态，一个真值点）。
+    /// 每拍采样即样本（复位语义④的武装由喂入侧表达）：高电压拍 = arm + release。
     #[test]
     fn low_gate_composes_with_edge_for_bare_local_fallback() {
         let mut edge = Rr3LowEdge::rr3_low_edge_new(3300);
         let mut gate = Rr3LowGate::rr3_low_gate_new();
-        // 安全核每一拍：feed 电压 → 把边沿状态镜像进闸门
+        // 安全核每一拍：feed 电压 → 把边沿状态镜像进闸门（低电闭锁；健康样本
+        // 武装并解禁——未武装的 release 被 §6 复位语义④拒，故 arm 必须先行）
         let mut feed = |mv: u16| {
             edge.rr3_low_edge_cross(mv);
             if edge.rr3_low_edge_is_low() {
                 gate.rr3_low_gate_trip();
             } else {
+                gate.rr3_low_gate_arm();
                 gate.rr3_low_gate_release();
             }
             gate.rr3_low_gate_is_blocked()
         };
-        assert!(!feed(3900), "高电压：开");
+        assert!(!feed(3900), "高电压：开（首拍样本即武装）");
         assert!(feed(3300), "越阈：闭锁（拒动）");
         assert!(feed(3250), "段内继续跌落：仍闭锁");
         assert!(!feed(3301), "回阈（严格大于）：解禁");
