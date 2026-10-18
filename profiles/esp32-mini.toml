@@ -79,7 +79,7 @@ heap_reserved_bytes = 16384
 "audio.capture" = "rr3-sense"
 "audio.vad" = "rr3-sense"
 
-# [hardware] 段缺省：三非引脚键（alsa_device/link_ifname/spi_device）是宿主 Linux
+# [hardware] 段缺省：两非引脚键（alsa_device/link_ifname）是宿主 Linux
 # 侧语义（rr-hal descriptor.rs C4 闭合表），板侧无此类键——物理绑定住下面的 [[pin]]；
 # 板侧描述符消费归 0.0.7 批G/批D1 的描述符装载，进位时同批改 contract.rs 的
 # esp32-mini pin 与 0.0.7 判据。

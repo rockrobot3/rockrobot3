@@ -695,12 +695,12 @@ if [ "$dep_fail" -ne 0 ]; then
 fi
 
 # —— ⑨-n 注入路径唯一（门 n 静态面执法位；全案 §8 门 n / 施工图 Task 8 Step 2，n1-11）。
-# 三层判据（实-14）：①装载期判据与 ②反例用例已在（profile.rs 门 n 段 + gate_n_* 两用例，
+# 三层判据（实-14）：①装载期判据与 ②反例用例已在（profile.rs 门 n 段 + gate_n_* 用例，
 # 经步 ①b cargo test --workspace 进 CI），本步补 ③专属执法步。判据＝[hardware] 段出现
 # RR3_PIN_DERIVED_KEYS 任一物理键即红（稳态：物理键一律 [pins] 派生，[hardware] 只留
-# 非引脚键 alsa_device/link_ifname/spi_device——spi_device 合法直给，扫面扩键随批N3，
-# 敞口 18 行）。键名单从代码常量导出（单真值点，不抄第二份）：解析 rrd/src/profile.rs 的
-# RR3_PIN_DERIVED_KEYS 数组，声明数量与实解析数量不等即门禁失效——批N3 扫面 7→8 时本步自动跟随。
+# 非引脚键 alsa_device/link_ifname——批N3 件六 SPI 词形收口：spi_device 已进派生键集、
+# 扫面 8 键，敞口 18 行已结）。键名单从代码常量导出（单真值点，不抄第二份）：解析
+# rrd/src/profile.rs 的 RR3_PIN_DERIVED_KEYS 数组，声明数量与实解析数量不等即门禁失效。
 step "⑨-n 注入路径唯一（[hardware] 禁物理键——[pins] 派生稳态判据静态面，门 n）"
 gate_n_fail=0
 keys_file="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }

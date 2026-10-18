@@ -29,6 +29,13 @@ name = "i2c1"
 kind = "i2c"
 channels = 0
 
+[[controller]]
+# 演练实例：SPI0（批N3 件六：ui.face.spi 显示面走 SPI0 CE0，profiles 两份 [[pin]]
+# controller="spidev0"/channel=0 的词表校验⑧-b 读者——链④真件档 MAX7219）。
+name = "spidev0"
+kind = "spi"
+channels = 1
+
 [capabilities]
 # 演练实例：RK3566 片上 SARADC 通道集待器件核对后回填——现 host 档模拟测点走
 # 外挂 INA219（i2c1），无片上 ADC 消费者，故按"当前可消费集为空"显式写空。
@@ -43,8 +50,10 @@ output_capable_pins = "complement(input_only_pins)"
 [construction]
 # 具名构造表（演练实例）：值 = rr-hal 后端构造函数名（base/runtime/rr-hal/src/
 # backend.rs 在案符号，host 侧"平台侧构造路径"的真值点）。取值 = default.toml
-# [pins] 现役四绑定的真值（R22 定案档 / 接线 3 / BOM #5），非凭记忆编造。
+# [pins] 现役五绑定的真值（R22 定案档 / 接线 3 / BOM #5 / 批N3 件六接线 4），
+# 非凭记忆编造。
 "pwm0:act.axis.pwm:pan" = "rr3_hal_servo"
 "gpiochip0:act.led.gpio:" = "rr3_hal_gpio_out"
 "gpiochip0:act.relay.gpio:" = "rr3_hal_gpio_out"
 "i2c1:power.battery.meter:" = "rr3_hal_power"
+"spidev0:ui.face.spi:" = "rr3_hal_display"

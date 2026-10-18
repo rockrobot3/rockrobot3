@@ -6,9 +6,10 @@
 # schema_version = 2（0.0.5 批J，ADR-0018 修订 1 ④ 描述符七段定形）：新增
 # [platform]/[supplies]/[slots] 三必填段，1→2 为破坏性变更。
 # schema_version = 3（0.0.5 增补轮六批N1，§4.2 [pins] 定形）：[[pin]] 物理绑定段进场、
-# 七物理键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
-# [hardware] 只留三非引脚键（alsa_device/link_ifname/spi_device），role 外键查册
-# contracts/roles.toml，2→3 为破坏性变更。
+# 引脚侧键自 [hardware] 下移为 [pins] 派生视图（门 n 注入路径唯一，power P-13）——
+# 批N3 件六起 SPI 词形同轨（spi_device 由 controller+channel 派生），[hardware] 只留
+# 两非引脚键（alsa_device/link_ifname），role 外键查册 contracts/roles.toml，
+# 2→3 为破坏性变更。
 # schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
 # 子段进场（⑩-a/⑩-b 分母，ADR-0021 修订 3"栈/堆预算不住 platform 表"）——新必填段
 # 随版本 bump（批N1 [[supplies.domain]] 先例），3→4 为破坏性变更。
@@ -112,10 +113,10 @@ not_applicable = true
 [hardware]
 # 非引脚键直给（schema 3，增补轮六 §4.2）：设备名/接口名类标量——rrd 装配链读本段
 # 序列化注入 RR3_HAL_BINDINGS，rr-hal 据此实例化后端；RR3_HAL_* env 降为应急覆盖；
-# 代码缺省 fail-closed，不回落任何一块板的引脚。七物理键（pwm_chip/pwm_channel/
-# gpio_chip/gpio_led_line/gpio_relay_line/i2c_bus/ina219_addr）已下移 [[pin]] 派生
-# （门 n：[hardware] 出现即拒 boot）；本段取值 = 现参考机真值（runbook 件 4 wlan0）。
-# 换板/换装配 = 只改本段与 [[pin]]，不改代码。
+# 代码缺省 fail-closed，不回落任何一块板的引脚。引脚侧键（含批N3 件六 SPI 词形
+# spi_device）已下移 [[pin]] 派生（门 n：[hardware] 出现引脚侧派生键即拒 boot）；
+# 本段取值 = 现参考机真值（runbook 件 4 wlan0）。换板/换装配 = 只改本段与 [[pin]]，
+# 不改代码。
 alsa_device = "default"
 link_ifname = "wlan0"
 
@@ -158,6 +159,16 @@ role = "power.battery.meter"
 controller = "i2c1"
 addr = "0x40" # 七位从地址（0x 前缀十六进制）
 direction = "in"
+mux_group = []
+
+[[pin]]
+# SPI 显示面（批N3 件六拆格，敞口 18 行收口）：spidev0 = 总线 0、channel = 0 =
+# 片选 0，装载期派生合成 spi_device="/dev/spidev0.0"（链④真件档 MAX7219 双位模块
+# 接 SPI0 CE0，接线 4：DIN=脚19/CS=脚24/CLK=脚23；与 distro 同板同引脚逐值一致）。
+role = "ui.face.spi"
+controller = "spidev0"
+channel = 0
+direction = "out"
 mux_group = []
 
 [enabled_slots]
