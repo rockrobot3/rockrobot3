@@ -20,7 +20,9 @@
 # derives（批N1 实装裁定，§4.1 字段集的增补，随 n1-10 文档回写）：该角色向描述符
 #   派生视图供给的键集——[pins] 是物理绑定唯一真值点，rrd 派生出 RR3_HAL_BINDINGS
 #   注入文本（键名 = rr-hal descriptor.rs 在册键），门 n"注入路径唯一"的另一侧真值。
-#   非引脚键 alsa_device/link_ifname/spi_device 不派生，留 [hardware] 直给。
+#   非引脚键 alsa_device/link_ifname 不派生，留 [hardware] 直给；spi_device 批N3
+#   件六起进派生轨（controller 词形 spidev<N> + channel 片选 → /dev/spidev<N>.<M>，
+#   敞口 18 行收口——裁定 = decisions.md §2 行 2"先立词形、批N3 拆格"）。
 # 变更纪律：加角色 = append（同步六表对账面）；字段语义变更 = 破坏性 = 升
 #   schema_version 并走契约级评审。格位命名两段式同 slots.toml，角色名点分式、
 #   前缀 = 格名的动作侧。
@@ -112,3 +114,21 @@ droppable = false
 input_only_ok = true
 per_instance = true
 note = "域电流测点（同 power.rail.sense 形状，域流面）；instance=域名 → pin_id=power.current.sense.rail5v（domains[].current_sense 一律写 pin_id，校验⑥-d）。droppable=false 同上"
+
+# —— 批N3 件六（敞口 18 行收口，decisions.md §2 行 2"先立词形、批N3 拆格"）：SPI 显示
+#    面角色进场。格仍一个 ui.face（拆的是 spi_device 值不是格——全案 §24.4 ②：总线号+
+#    片选号两个数拆成 controller 词形 spidev<N> + channel 的派生对），rr3-interact 的
+#    face 件句柄申报（Rr3Display ← spi_device）不变。 Droppable=true：显示是观感面，
+#    欠压降载可切（同 act.led，负载电流在模组内，rail 语义不适用——kind=signal）。
+[[role]]
+name = "ui.face.spi"
+slot = "ui.face"
+kind = "signal"
+iface = "Rr3Display"
+requires = ["controller", "channel"]
+derives = ["spi_device"]
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "SPI 显示器件（链④真件档 MAX7219 点阵类）；host 侧 controller 词形 spidev<N> 派生总线号、channel 派生片选号，合成 spi_device=/dev/spidev<N>.<M>（与旧 [hardware] 直给值逐字节对齐，profiles/distro.toml 迁移批N3 件六）。物理走线（DIN/CS/CLK）由总线自身钉死，不占 physical 维"

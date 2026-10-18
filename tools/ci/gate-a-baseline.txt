@@ -7,4 +7,9 @@
 # 23 = 批N2 件六初值：15 未覆盖 normal 格（20 normal − 5 covered：act.servo / act.led /
 #   act.relay / power.battery / power.rail）+ 4 TRAITS 差（Rr3AudioSource / Rr3AudioSink /
 #   Rr3Link / Rr3Display）+ 4 PIN_KEYS 差（role / instance / direction / mux_group）。
-23
+# 21 = 批N3 件六（ui.face SPI 词形拆格，敞口 18 行收口）：14 未覆盖 normal 格
+#   （20 normal − 6 covered：上批 5 + ui.face）+ 3 TRAITS 差（Rr3AudioSource /
+#   Rr3AudioSink / Rr3Link，Rr3Display 随 ui.face.spi 角色引用出场）+ 4 PIN_KEYS 差
+#   （role / instance / direction / mux_group，SPI 词形不加键——controller/channel 复用
+#   既有两物理键）。
+21
