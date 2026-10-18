@@ -3,17 +3,19 @@
 //! 组合件 = battery ⊗ charger（composite.toml 的 ⊗ 链；⊗=装配期、执行单元内
 //! 函数调用，ADR-0019 裁定 2）。本文件承载装配与运行机制：config 解析（阈值等
 //! 策略经 config 数据化注入，机制件零策略载荷）、HAL 电源面开机探活、主循环
-//! 三拍（battery 拍 / 低电边沿 / charger 派生拍）。
+//! 四拍（battery 拍 / 低电边沿 / charger 派生拍 / rail 域压拍——批N2 件五）。
 //!
 //! 启动序列（自原入口迁入，语义零改动）：读 `RR3_MANIFEST`（rrd spawn 注入的
 //! manifest 绝对路径，supervisor.rs）→ [`Rr3BusClient::rr3_connect`] → 读 config.toml
 //! → 选 HAL 电源面并**开机探活**（Unsupported 即 exit(1)：能力缺失显式回错，不静默
 //! 带病常驻）→ 主循环。本模块没有事务面（module.toml 无 [rpc].exposes），主循环只做
-//! 三件事：
+//! 四件事（第 4 件 `rail.up = true` 才跑）：
 //! 1. 每 `sample_period_ms` 读一次 HAL 电池 → 发 `battery/state`（首拍即采）；
 //! 2. 电压越过低电阈值的第一拍发 `battery/low`（Rr3LowEdge：同一次低电段恰一次，
 //!    恢复再武装）——rrd 订阅它执行进程内兜底（Q4 裁定），brain 不在场也要能触发；
-//! 3. 每 `state_period_ms` 发 `charger/state`（由最近一次电池读数的 charging 位派生）。
+//! 3. 每 `state_period_ms` 发 `charger/state`（由最近一次电池读数的 charging 位派生）；
+//! 4. 每 `rail.sample_period_ms` 读一次域压 → ⑥-c2 按龄期折有效档位 → 判定核 →
+//!    发 `rail/state`，越阈首拍出边沿守护行（批N2 件五，P-9 归属搬家）。
 //!
 //! 失败语义与 sense/interact/act 同一口径：本模块没有调用方，周期采样里**全部**失败
 //! 都是传输性/设备级——HAL 读数失败、发布写不出去都 `eprintln` + `exit(1)`，不装
@@ -34,12 +36,15 @@ mod charger;
 use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
-use rr_hal::backend::rr3_hal_power;
-use rr_hal_api::Rr3BatteryState;
+use rr_hal::backend::{rr3_hal_power, rr3_hal_rail};
+use rr_hal_api::{rr3_rail_tier_effective, Rr3BatteryState, Rr3RailState, Rr3RailTier};
 use serde_json::{json, Value};
 
 use battery::{Rr3BatteryCfg, Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_STATE_TOPIC};
 use charger::{Rr3ChargerCfg, RR3_CHARGER_STATE_TOPIC};
+
+/// 电源域电平观测主题（contracts/topics.toml 在册，批N2 件二落的）
+const RR3_RAIL_STATE_TOPIC: &str = "rr3-power/rail/state";
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
 const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
@@ -82,6 +87,19 @@ pub fn rr3_power_run() -> Result<(), String> {
         cfg.charger.state_period_ms,
         cfg.battery.cutoff_voltage_mv,
     );
+    // rail 段回显（批N2 件五）：独立一行，不动上面的 config 就绪行（逐字红线）
+    if cfg.rail.up {
+        println!(
+            "rail 监测就绪: domain={} mild={}mV severe={}mV max_age={}ms period={}ms",
+            cfg.rail.domain,
+            cfg.rail.mild_mv,
+            cfg.rail.severe_mv,
+            cfg.rail.max_age_ms,
+            cfg.rail.sample_period_ms
+        );
+    } else {
+        println!("rail 未启用（up=false，合法不适用显式写）");
+    }
 
     // HAL 电源面选择 + 开机探活：Unsupported 即致命——显式回错不静默退化
     // （rr-hal 占位件的契约），也不给"没有电池读数还常驻"的假活
@@ -94,13 +112,27 @@ pub fn rr3_power_run() -> Result<(), String> {
         first.percent, first.voltage_mv, first.charging
     );
 
-    // 主循环状态：两条流的 seq 各自计数、两个拍点、低电边沿机（首拍即武装）
+    // 轨压面选择 + 开机探活（批N2 件五）：`rail.up = true` 时能力缺失显式回错，
+    // 不静默带病常驻（与电源面同一 fail-closed 口径；今日全后端占位，宿主真件归
+    // 0.0.7 敞口 12 行——up=false 是 host 档合法不适用，无测点不探活）
+    let (rail_dev, rail_backend) = rr3_hal_rail();
+    if cfg.rail.up {
+        rail_dev
+            .rr3_read(&cfg.rail.domain)
+            .map_err(|e| format!("轨压面探活失败({rail_backend}): {e}"))?;
+        println!("轨压面就绪: {rail_backend} domain={}", cfg.rail.domain);
+    }
+
+    // 主循环状态：各流 seq 各自计数、各拍点、低电边沿机（首拍即武装）、轨压判定核
     let mut battery_seq: u64 = 0;
     let mut charger_seq: u64 = 0;
     let mut low_seq: u64 = 0;
+    let mut rail_seq: u64 = 0;
     let mut low_edge = Rr3LowEdge::rr3_low_edge_new(cfg.battery.low_voltage_mv);
+    let mut rail_judge = Rr3RailJudge::rr3_rail_judge_new(cfg.rail.mild_mv, cfg.rail.severe_mv);
     let mut next_battery = Instant::now(); // 首拍即采：兜底链路不等第一个周期
     let mut next_charger = Instant::now();
+    let mut next_rail = Instant::now();
     let mut last = Some(first);
 
     loop {
@@ -153,6 +185,34 @@ pub fn rr3_power_run() -> Result<(), String> {
             }
             next_charger = now + Duration::from_millis(cfg.charger.state_period_ms);
         }
+
+        // rail 拍（批N2 件五）：读域压 → ⑥-c2 按龄期折有效档位 → 判定核 → 周期流
+        // ＋边沿守护行。HAL 读数失败同 battery_read_fail 纪律：counter 先行再退——
+        // 失败是设备/传输级，exit(1) 不装活着。
+        if cfg.rail.up && now >= next_rail {
+            let st = match rail_dev.rr3_read(&cfg.rail.domain) {
+                Ok(st) => st,
+                Err(e) => {
+                    bus.rr3_counter_bump("rail_read_fail", 1);
+                    return Err(format!("轨压读数失败（{rail_backend}）: {e}"));
+                }
+            };
+            rail_seq += 1;
+            let (tier, event) = rr3_rail_beat(&mut rail_judge, st, cfg.rail.max_age_ms);
+            bus.rr3_publish(
+                RR3_RAIL_STATE_TOPIC,
+                rr3_rail_state_body(rail_seq, st.mv, st.age_ms, tier.rr3_rail_tier_name()),
+            )?;
+            if event == Some(true) {
+                bus.rr3_counter_bump("rail_edge", 1);
+                println!(
+                    "rail/edge: {}mV tier={}（越阈首拍，段内不重发）",
+                    st.mv,
+                    tier.rr3_rail_tier_name()
+                );
+            }
+            next_rail = now + Duration::from_millis(cfg.rail.sample_period_ms);
+        }
     }
 }
 
@@ -185,6 +245,88 @@ fn rr3_charger_state_body(seq: u64, charging: bool) -> Value {
     json!({ "seq": seq, "charging": charging })
 }
 
+/// rail/state 流体（批N2 件五）：四键 `{seq, mv, age_ms, tier}`——tier 串走
+/// [`Rr3RailTier::rr3_rail_tier_name`] 同源词表（fresh 拍 = 判定核分类值，Unknown
+/// 拍 = "unknown" 原样，展示面不折）。无独立 schema json，四键不加戏。
+fn rr3_rail_state_body(seq: u64, mv: u16, age_ms: u32, tier_name: &str) -> Value {
+    json!({
+        "seq": seq,
+        "mv": mv,
+        "age_ms": age_ms,
+        "tier": tier_name,
+    })
+}
+
+// ---------- 轨压档位机制切片（批N2 件五，P-9 归属搬家——机制不动） ----------
+// 板侧真值 = tools/esp32-periph-base/src/power.rs 的 `tier_of`/`RailJudge`，逐字
+// 对照迁入组合件层；板侧文件不改（rtos 档自持）。搬家后两条线同源一个判定核：
+// 电平管档位（每拍分类），边沿管事件（每低电段首拍报一次），共用同一对阈值，
+// "向下档变"与"边沿事件"逐拍等价。阈值策略量由 config 注入，机制零策略载荷。
+
+/// 电平分类（纯 mV 比较，板侧 `tier_of` 对照）：`mv <= severe ⇒ Severe`、
+/// `mv <= mild ⇒ Mild`、否则 Ok。不含迟滞/事件语义（事件走 [`Rr3RailJudge`]）。
+fn rr3_rail_tier_of(mv: u16, mild_mv: u16, severe_mv: u16) -> Rr3RailTier {
+    if mv <= severe_mv {
+        Rr3RailTier::Severe
+    } else if mv <= mild_mv {
+        Rr3RailTier::Mild
+    } else {
+        Rr3RailTier::Ok
+    }
+}
+
+/// 欠压判定核（板侧 `RailJudge` 对照，**一核两条线**）：mild/severe 两条迟滞边沿
+/// 各由 [`Rr3LowEdge`] 一实例承载，不另写第二个边沿点（裁定 5：调用方只能喂电压
+/// 不能改语义）。event = 两线任一低电段首拍，逐拍等价于向下档变（Ok→Mild 轻度线
+/// 报；Ok→Severe / Mild→Severe 重度线报；回阈不报，只是再武装）。
+struct Rr3RailJudge {
+    mild: Rr3LowEdge,
+    severe: Rr3LowEdge,
+    mild_mv: u16,
+    severe_mv: u16,
+}
+
+impl Rr3RailJudge {
+    /// 装配：两线阈值取 config rail 段（重度 < 轻度，解析面已执法倒挂）
+    fn rr3_rail_judge_new(mild_mv: u16, severe_mv: u16) -> Self {
+        Self {
+            mild: Rr3LowEdge::rr3_low_edge_new(mild_mv),
+            severe: Rr3LowEdge::rr3_low_edge_new(severe_mv),
+            mild_mv,
+            severe_mv,
+        }
+    }
+
+    /// 喂一拍轨压 mV：返回 `(本拍电平档位, 是否越阈首发事件)`
+    fn rr3_rail_feed(&mut self, mv: u16) -> (Rr3RailTier, bool) {
+        let mild_hit = self.mild.rr3_low_edge_cross(mv);
+        let severe_hit = self.severe.rr3_low_edge_cross(mv);
+        (
+            rr3_rail_tier_of(mv, self.mild_mv, self.severe_mv),
+            mild_hit || severe_hit,
+        )
+    }
+}
+
+/// ⑥-c2 消费执法可测点（纯函数，批N2 件五）：先按采样龄期折有效档位，再过判定核。
+///
+/// - 有效档 = Unknown ⇒ `(Unknown, None)`：**不喂判定核**（执行面保持置位），
+///   产出侧已折的 Unknown 原样透传——mv 再好也不许从 mv 重分类出 Ok；
+/// - 否则 `(tier, Some(event)) = judge.rr3_rail_feed(st.mv)`：判定核 tier 与后端
+///   `st.tier` 在同域阈值下一致（机制产出）；0.0.7 真件对账归敞口 12 行。
+fn rr3_rail_beat(
+    judge: &mut Rr3RailJudge,
+    st: Rr3RailState,
+    max_age_ms: u32,
+) -> (Rr3RailTier, Option<bool>) {
+    let effective = rr3_rail_tier_effective(st.tier, Some(st.age_ms), max_age_ms);
+    if effective == Rr3RailTier::Unknown {
+        return (Rr3RailTier::Unknown, None);
+    }
+    let (tier, event) = judge.rr3_rail_feed(st.mv);
+    (tier, Some(event))
+}
+
 /// config.toml 解析：env 覆盖优先，缺省 manifest 同目录。
 fn rr3_config_load(manifest_path: &str) -> Result<Rr3PowerCfg, String> {
     let path = std::env::var(RR3_POWER_CONFIG_ENV).unwrap_or_else(|_| {
@@ -200,10 +342,25 @@ fn rr3_config_load(manifest_path: &str) -> Result<Rr3PowerCfg, String> {
 }
 
 /// 本模块 config 的汇总形状
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Rr3PowerCfg {
     battery: Rr3BatteryCfg,
     charger: Rr3ChargerCfg,
+    rail: Rr3RailCfg,
+}
+
+/// rail 段形状（批N2 件五）：段必填＋全部键必填——`up = false` 时其余键为惰性
+/// 但显式写（F-6 精神：合法不适用也要写出来，统一解析路径无分支）；`max_age_ms
+/// = 0` 合法（0 = 龄期恒超界 ⇒ 恒 Unknown，诚实语义）；`severe_mv < mild_mv`
+/// 严格校验（相等也红——Mild 档不可达）。
+#[derive(Debug, Clone)]
+struct Rr3RailCfg {
+    up: bool,
+    domain: String,
+    sample_period_ms: u64,
+    mild_mv: u16,
+    severe_mv: u16,
+    max_age_ms: u32,
 }
 
 /// TOML 文本 → Rr3PowerCfg。手工下钻不引 serde derive：字段个位数，
@@ -221,6 +378,13 @@ fn rr3_power_config_parse(text: &str) -> Result<Rr3PowerCfg, String> {
             .filter(|n| *n >= 0 && *n <= u16::MAX as i64)
             .map(|n| n as u16)
             .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–65535 整数）"))
+    };
+    let u32_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u32, String> {
+        sect.get(key)
+            .and_then(toml::Value::as_integer)
+            .filter(|n| *n >= 0 && *n <= u32::MAX as i64)
+            .map(|n| n as u32)
+            .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–4294967295 整数）"))
     };
     let u64_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
         sect.get(key)
@@ -242,15 +406,43 @@ fn rr3_power_config_parse(text: &str) -> Result<Rr3PowerCfg, String> {
             Ok(raw)
         }
     };
+    // battery/charger 先解析（既有红例的次序契约：缺字段点名先于 rail 段点名），
+    // rail 段（批N2 件五）殿后——段必填＋全键必填，up=false 惰性但显式写
+    let battery = Rr3BatteryCfg {
+        sample_period_ms: period_of(&battery_sect, "sample_period_ms", "battery")?,
+        low_voltage_mv: u16_of(&battery_sect, "low_voltage_mv", "battery")?,
+        cutoff_voltage_mv: u16_of(&battery_sect, "cutoff_voltage_mv", "battery")?,
+    };
+    let charger = Rr3ChargerCfg {
+        state_period_ms: period_of(&charger_sect, "state_period_ms", "charger")?,
+    };
+    let rail_sect = sect("rail")?.clone();
+    let rail = Rr3RailCfg {
+        up: rail_sect
+            .get("up")
+            .and_then(toml::Value::as_bool)
+            .ok_or_else(|| "config [rr3-power.rail] 缺 up（布尔）".to_string())?,
+        domain: rail_sect
+            .get("domain")
+            .and_then(toml::Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "config [rr3-power.rail] 缺 domain（非空字符串）".to_string())?,
+        sample_period_ms: period_of(&rail_sect, "sample_period_ms", "rail")?,
+        mild_mv: u16_of(&rail_sect, "mild_mv", "rail")?,
+        severe_mv: u16_of(&rail_sect, "severe_mv", "rail")?,
+        max_age_ms: u32_of(&rail_sect, "max_age_ms", "rail")?,
+    };
+    if rail.severe_mv >= rail.mild_mv {
+        return Err(format!(
+            "config [rr3-power.rail] 阈值倒挂: severe={}mV 必须 < mild={}mV（相等则 Mild 档不可达）",
+            rail.severe_mv, rail.mild_mv
+        ));
+    }
     Ok(Rr3PowerCfg {
-        battery: Rr3BatteryCfg {
-            sample_period_ms: period_of(&battery_sect, "sample_period_ms", "battery")?,
-            low_voltage_mv: u16_of(&battery_sect, "low_voltage_mv", "battery")?,
-            cutoff_voltage_mv: u16_of(&battery_sect, "cutoff_voltage_mv", "battery")?,
-        },
-        charger: Rr3ChargerCfg {
-            state_period_ms: period_of(&charger_sect, "state_period_ms", "charger")?,
-        },
+        battery,
+        charger,
+        rail,
     })
 }
 
@@ -312,25 +504,68 @@ cutoff_voltage_mv = 3150
 
 [rr3-power.charger]
 state_period_ms = 2000
+
+[rr3-power.rail]
+up = false
+domain = "rail5v"
+sample_period_ms = 1000
+mild_mv = 4600
+severe_mv = 4400
+max_age_ms = 0
 "#;
         let cfg = rr3_power_config_parse(text).unwrap();
         assert_eq!(cfg.battery.sample_period_ms, 5000);
         assert_eq!(cfg.battery.low_voltage_mv, 3300);
         assert_eq!(cfg.battery.cutoff_voltage_mv, 3150);
         assert_eq!(cfg.charger.state_period_ms, 2000);
+        // rail 段逐键（批N2 件五）：up=false 全键惰性但显式写，max_age_ms=0 合法
+        assert!(!cfg.rail.up);
+        assert_eq!(cfg.rail.domain, "rail5v");
+        assert_eq!(cfg.rail.sample_period_ms, 1000);
+        assert_eq!(cfg.rail.mild_mv, 4600);
+        assert_eq!(cfg.rail.severe_mv, 4400);
+        assert_eq!(cfg.rail.max_age_ms, 0);
     }
 
     #[test]
     fn config_parse_rejects_missing_sections_and_fields() {
         let e = rr3_power_config_parse("[rr3-power]\nlog_level = \"info\"\n").unwrap_err();
-        assert!(e.contains("[rr3-power.battery]"), "缺段点名: {e}");
+        assert!(e.contains("[rr3-power.battery]"), "缺段点名（battery 先解析）: {e}");
         let e = rr3_power_config_parse(
             "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n[rr3-power.charger]\nstate_period_ms = 2000\n",
         )
         .unwrap_err();
         assert!(e.contains("cutoff_voltage_mv"), "缺字段点名: {e}");
+        // rail 段缺段点名（批N2 件五：段必填）＋缺 up 键点名（全键必填）
+        let e = rr3_power_config_parse(
+            "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("[rr3-power.rail]"), "rail 缺段点名: {e}");
+        let e = rr3_power_config_parse(
+            "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\ndomain = \"rail5v\"\nsample_period_ms = 1000\nmild_mv = 4600\nsevere_mv = 4400\nmax_age_ms = 0\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("缺 up"), "rail 缺 up 键点名: {e}");
         let e = rr3_power_config_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
+    }
+
+    /// 阈值倒挂执法（批N2 件五）：severe >= mild 即红——相等也红（Mild 档不可达）。
+    /// up=false 不豁免：解析路径统一无分支，策略量合法性不看开关。
+    #[test]
+    fn config_parse_rejects_inverted_rail_thresholds() {
+        let base = "\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\nup = false\ndomain = \"rail5v\"\nsample_period_ms = 1000\n";
+        let e = rr3_power_config_parse(
+            &format!("[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n{base}mild_mv = 4400\nsevere_mv = 4400\nmax_age_ms = 0\n"),
+        )
+        .unwrap_err();
+        assert!(e.contains("阈值倒挂"), "相等也红: {e}");
+        let e = rr3_power_config_parse(
+            &format!("[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n{base}mild_mv = 4400\nsevere_mv = 4500\nmax_age_ms = 0\n"),
+        )
+        .unwrap_err();
+        assert!(e.contains("阈值倒挂"), "severe > mild 红: {e}");
     }
 
     /// 钳制留痕（0.0.5 批I P-2）：0 周期收敛 1 不拒 boot——采样拍不能自毁；
@@ -345,10 +580,19 @@ cutoff_voltage_mv = 3150
 
 [rr3-power.charger]
 state_period_ms = 0
+
+[rr3-power.rail]
+up = false
+domain = "rail5v"
+sample_period_ms = 0
+mild_mv = 4600
+severe_mv = 4400
+max_age_ms = 0
 "#;
         let cfg = rr3_power_config_parse(text).unwrap();
         assert_eq!(cfg.battery.sample_period_ms, 1, "0 周期钳到 1ms");
         assert_eq!(cfg.charger.state_period_ms, 1, "0 周期钳到 1ms");
+        assert_eq!(cfg.rail.sample_period_ms, 1, "rail 0 周期同钳 1ms");
     }
 
     // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
@@ -520,5 +764,112 @@ state_period_ms = 0
             Rr3RailTier::Ok,
             "Unknown 不许折算成 Ok（展示面原样不折）"
         );
+    }
+
+    // ---------- 轨压监测归属搬家用例（批N2 件五，P-9：机制不动、归属搬家） ----------
+    // 判定核切片（rr3_rail_tier_of / Rr3RailJudge）与 ⑥-c2 消费执法点（rr3_rail_beat）
+    // 的用例落本文件；板侧 tools/esp32-periph-base 的 tier_of/RailJudge 不改，语义逐字对照。
+
+    #[test]
+    fn rail_state_body_carries_four_keys() {
+        let v = rr3_rail_state_body(5, 4500, 120, "mild");
+        assert_eq!(v["seq"], 5);
+        assert_eq!(v["mv"], 4500);
+        assert_eq!(v["age_ms"], 120);
+        assert_eq!(v["tier"], "mild");
+        assert_eq!(v.as_object().unwrap().len(), 4, "四键不加戏: {v}");
+    }
+
+    #[test]
+    fn rail_judge_feed_matches_board_semantics() {
+        // 板侧 RailJudge::feed 逐字对照（mild=4600/severe=4400）：档位 = tier_of 纯
+        // mV 分类，event = 两线任一低电段首拍。4500 对 severe 线是"严格回阈 ⇒ 再
+        // 武装"（Rr3LowEdge 语义），故 4300 是新段首发再报——与"向下档变 ⇔ 边沿
+        // 事件"一致，不是同段重发。
+        let mut j = Rr3RailJudge::rr3_rail_judge_new(4600, 4400);
+        let seq = [
+            (4700u16, Rr3RailTier::Ok, false),
+            (4600, Rr3RailTier::Mild, true),   // 轻度线首发（Ok→Mild）
+            (4500, Rr3RailTier::Mild, false),  // 段内不重发
+            (4400, Rr3RailTier::Severe, true), // 重度线首发（Mild→Severe）
+            (4500, Rr3RailTier::Mild, false),  // 回阈不报（severe 线再武装）
+            (4300, Rr3RailTier::Severe, true), // severe 新段首发（4500 已严格回阈）
+            (4700, Rr3RailTier::Ok, false),    // 回 Ok（mild 线再武装）
+            (4600, Rr3RailTier::Mild, true),   // 再武装后越阈再发
+        ];
+        for (mv, want_tier, want_event) in seq {
+            let (tier, event) = j.rr3_rail_feed(mv);
+            assert_eq!(tier, want_tier, "mv={mv} 档位");
+            assert_eq!(event, want_event, "mv={mv} 事件");
+        }
+    }
+
+    #[test]
+    fn parity_leg1_power_rail_judge_train_is_deterministic() {
+        // 腿一·确定性：同一 mV 序列喂两跑，(档位, 事件) 轨迹逐拍相等
+        fn run() -> Vec<(Rr3RailTier, bool)> {
+            let mut j = Rr3RailJudge::rr3_rail_judge_new(4600, 4400);
+            [4700u16, 4600, 4500, 4400, 4500, 4300, 4700, 4600]
+                .iter()
+                .map(|&mv| j.rr3_rail_feed(mv))
+                .collect()
+        }
+        assert_eq!(run(), run(), "同输入序列两跑逐拍相等（腿一·确定性）");
+    }
+
+    #[test]
+    fn parity_leg2_power_rail_judge_edge_equivalent_to_downward_transition() {
+        // 腿二·正确性：边沿事件 ⇔ 向下档变（板侧 RailJudge 类型注的逐拍等价性）。
+        // 档序 Ok=0/Mild=1/Severe=2，prev 初值 Ok：event ⇔ rank 增；回阈（rank 降）
+        // 不报。与 rail_judge_feed_matches_board_semantics 同一序列、判据独立重写。
+        fn rank(t: Rr3RailTier) -> u8 {
+            match t {
+                Rr3RailTier::Ok => 0,
+                Rr3RailTier::Mild => 1,
+                Rr3RailTier::Severe => 2,
+                Rr3RailTier::Unknown => 3,
+            }
+        }
+        let mut j = Rr3RailJudge::rr3_rail_judge_new(4600, 4400);
+        let mut prev = rank(Rr3RailTier::Ok);
+        for mv in [4700u16, 4600, 4500, 4400, 4500, 4300, 4700, 4600] {
+            let (tier, event) = j.rr3_rail_feed(mv);
+            assert_eq!(event, rank(tier) > prev, "mv={mv}: 事件 ⇔ 向下档变");
+            prev = rank(tier);
+        }
+    }
+
+    #[test]
+    fn rail_beat_unknown_not_refed_and_passthrough() {
+        // ⑥-c2 消费执法两条（P-15 末列"执行面按保守侧处置、展示面原样显示"的落点）：
+        // ① 产出侧已折的 Unknown 原样透传——mv 再好也不许从 mv 重分类出 Ok（不喂核，
+        //    执行面保持置位）；
+        let mut j = Rr3RailJudge::rr3_rail_judge_new(4600, 4400);
+        let st = Rr3RailState {
+            mv: 4700,
+            tier: Rr3RailTier::Unknown,
+            age_ms: 0,
+        };
+        let (tier, event) = rr3_rail_beat(&mut j, st, 250);
+        assert_eq!(tier, Rr3RailTier::Unknown, "Unknown 原样透传，不折 Ok");
+        assert_eq!(event, None, "Unknown 不喂判定核");
+        // ② 陈旧读数（age > max）折 Unknown——同样不喂核（T-6：陈旧 Ok ≠ 新鲜 Ok）
+        let st = Rr3RailState {
+            mv: 4700,
+            tier: Rr3RailTier::Ok,
+            age_ms: 251,
+        };
+        let (tier, event) = rr3_rail_beat(&mut j, st, 250);
+        assert_eq!(tier, Rr3RailTier::Unknown, "陈旧 Ok 折 Unknown（T-6）");
+        assert_eq!(event, None);
+        // 新鲜读数（age == max 边界不折）正常喂核：档位 = 判定核分类值（机制产出）
+        let st = Rr3RailState {
+            mv: 4300,
+            tier: Rr3RailTier::Severe,
+            age_ms: 250,
+        };
+        let (tier, event) = rr3_rail_beat(&mut j, st, 250);
+        assert_eq!(tier, Rr3RailTier::Severe);
+        assert_eq!(event, Some(true), "fresh 拍喂核，severe 线首发");
     }
 }

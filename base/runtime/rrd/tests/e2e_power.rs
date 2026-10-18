@@ -77,6 +77,8 @@ rr3-power = ["power.charger"]
 /// config 夹具：字段名与仓内 `modules/rr3-power/config.toml` 同形状（main.rs 的
 /// `config_parse_covers_repo_shape` 钉过同形状解析，漂移当场红）。周期压短让观察者
 /// 在用例寿命内拿到多拍周期流；阈值 3300mV 与 env 注入的 5% → 3250mV 构成越阈算式。
+/// rail 段同形状 up=false（批N2 件五：全键惰性但显式写，e2e 只 grep 低电兜底两行，
+/// 新增 println 安全）。
 const CONFIG: &str = r#"
 [rr3-power]
 log_level = "info"
@@ -88,6 +90,14 @@ cutoff_voltage_mv = 3150
 
 [rr3-power.charger]
 state_period_ms = 300
+
+[rr3-power.rail]
+up = false
+domain = "rail5v"
+sample_period_ms = 300
+mild_mv = 4600
+severe_mv = 4400
+max_age_ms = 0
 "#;
 
 /// 接线档底稿（增补轮六 §4.3）：装载期校验⑦要求装机档必在——vcc/gnd-only

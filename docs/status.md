@@ -542,6 +542,26 @@
   不占 ⑧-a 分母）；全案 §5 ⑩ 行 X-4 加注、decisions.md §4 变更记录同批（提交号随批N2 收口
   对账回填）；敞口表无增减。
 
+- **2026-10-18 批N2 件五：RailMonitor/RailJudge 接能力面——机制不动、归属搬家**：
+  ①选择入口 `rr3_hal_rail()`（rr-hal backend.rs，与 `rr3_hal_power` 同族）今日全后端
+  占位 fail-closed（`Rr3UnavailableSource`，使用时 Unsupported 显式回错）——板侧
+  RailMonitor/RailJudge 机制本体 esp32-periph-base 真跑零改动；宿主真件（INA219）归
+  0.0.7（敞口表 12 行）。②rr3-power 接面：config `[rr3-power.rail]` 段必填＋全键必填
+  （up=false 惰性但显式写——F-6；`severe < mild` 严格校验相等也红；`max_age_ms = 0`
+  合法＝恒 Unknown 诚实语义）；主循环第 4 拍（up=true 才跑：读域压 → ⑥-c2 折档 →
+  判定核 → `rail/state` 四键流 `{seq, mv, age_ms, tier}`＋越阈首拍边沿守护行）；
+  up=true 探活与周期读数失败均 exit(1)（fail-closed，counter `rail_read_fail` 先行）；
+  module.toml publishes 加 `rr3-power/rail/state`（topics.toml 件二已在册）；仓
+  config.toml 与 e2e_power 夹具同形状 up=false（rail5v 域 4600/4400/0 同源）。③机制
+  切片归属搬家：`rr3_rail_tier_of`（纯 mV 比较）＋`Rr3RailJudge`（双 Rr3LowEdge 一核
+  两条线，event ⇔ 向下档变）＋`rr3_rail_beat`（⑥-c2 消费执法点：Unknown 不喂核原样
+  透传）逐字对照板侧 power.rs 迁组合件层。④测试九条（config 五向含倒挂相等红、
+  body 四键无加戏、判定核序列对照板语义、两腿对拍、⑥-c2 执法两条各一
+  `rail_beat_unknown_not_refed_and_passthrough`）；rr-hal/rrd/rr3-power cargo test
+  全绿，**不建 check.sh 新步**（可数 step 14 行、待建门 20 把计数均不变）。⑤
+  decisions.md §4 变更记录同批（提交号随批N2 收口对账回填）；rr3-power 模块设计 P-9
+  行 X-4 加注。⑥板侧 power.rs 零改动；敞口表无增减。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

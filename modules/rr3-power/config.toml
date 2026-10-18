@@ -15,3 +15,16 @@ cutoff_voltage_mv = 3150
 
 [rr3-power.charger]
 state_period_ms = 2000
+
+# 批N2 件五（P-9 归属搬家）：rail 段全键必填——up=false 时其余键惰性但显式写
+# （F-6：合法不适用也要写出来，统一解析路径无分支）。取值与 host 档
+# profiles/default.toml 的 rail5v 域声明一致（mild/severe/max_age 同源）；
+# max_age_ms = 0 = 龄期恒超界 ⇒ 恒 Unknown（诚实语义）。宿主真件（INA219）
+# 归 0.0.7（status.md 敞口表 12 行），届时 up 翻真、探活 fail-closed。
+[rr3-power.rail]
+up = false
+domain = "rail5v"
+sample_period_ms = 1000
+mild_mv = 4600
+severe_mv = 4400
+max_age_ms = 0
