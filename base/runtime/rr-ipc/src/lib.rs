@@ -17,6 +17,10 @@ extern crate alloc;
 #[cfg(not(target_os = "none"))]
 extern crate std;
 
+// 证据引用校验（brain B-15，批N4 件一）：std::fs 文件面，与 audio_session 同径
+// cfg 门——裸金属目标不载文件系统；消费面（面板写面/装载期）都在 std 语境。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod evidence;
 pub mod framing;
 pub mod protocol;
 // 板面音频会话握手（A 批 c2 上提单点）：Rr3UartConn 同径 cfg 门（linux/macos）。
@@ -35,6 +39,8 @@ pub use audio_session::{
     handshake, ok_reply_line, read_reply_line, HANDSHAKE_RETRY_PAUSE, HANDSHAKE_TRIES, READ_BLOCK,
     READ_TIMEOUT_MS, REPLY_TIMEOUT_MS, RESYNC_ZERO_BAIL, SETTLE,
 };
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use evidence::{rr3_evidence_ref_wellformed, rr3_evidence_verify};
 pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
