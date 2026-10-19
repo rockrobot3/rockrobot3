@@ -65,13 +65,22 @@ max_age_ms = 0
 # task_stack_budget_bytes = 65536 = 2× 现役 16KB 任务栈 + 余量（board.rs
 # THREAD_STACK/MIC_THREAD_STACK 同源）；heap_total_bytes = 327680 按 ESP32-S3
 # 数据手册可配 PSRAM 前的内部 SRAM 堆上限推算，待 0.0.7 真板对账回填；
-# heap_reserved_bytes = 16384 首位落账 UART2_TX_RING（F-13：常驻缓冲是堆账），
-# audio 队列/渲染缓冲/批N4 板侧配置服务随 N-13 补账。
+# heap_reserved_bytes = 98816 板侧常驻堆账逐项留痕（批N4 件二 N-13 ② 全账，F-13：
+# 常驻缓冲全是堆账，只加总栈会击穿半边）——
+#   16384 = UART2_TX_RING（board.rs :102）；
+#   65536 = audio_q 峰值 = AUDIO_Q_CAP(4) × 每片 16384B（mic.rs Vec<i32> with_capacity
+#           AUDIO_CHUNK_FRAMES×2 = 4096 元素 × 4B，board.rs :92/:96）；
+#     512 = 渲染缓冲 ≈ OLED_ROWS(4)×(OLED_COLS(21)+Vec 元头) + 外层（periph.rs :199），
+#           向上取整给余量；
+#   16384 = 批N4 板侧配置服务预留（选型 esp_http_server 单连接口径推算，含 lwip
+#           TCP 收发窗口与控制块；真值随服务本体施工与 0.0.7 真板
+#           esp_get_free_heap_size 对账回填——N-13 ①，结构先行、取值随后）。
+# 四项逐项可溯板侧常量；总账回填后不得再写"首版推算"字样以外的值。
 [supplies.budget]
 not_applicable = false
 task_stack_budget_bytes = 65536
 heap_total_bytes = 327680
-heap_reserved_bytes = 16384
+heap_reserved_bytes = 98816
 
 [bindings]
 # 格位 → 件。三格微型形态恰好三绑定；基础层由基座内建承载，不在此绑定。
