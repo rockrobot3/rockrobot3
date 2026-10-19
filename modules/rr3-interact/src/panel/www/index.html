@@ -86,9 +86,9 @@
     <div class="msg" id="face-msg"></div>
   </div>
   <div class="card">
-    <h2>自检（并列三调，各答各展示）</h2>
+    <h2>自检（逐腿三调）</h2>
     <button class="btn" onclick="selftest()">开始自检</button>
-    <pre id="selftest-out">喇叭 + 继电器 + 表情 依次各做一次，单项失败不连锁。</pre>
+    <pre id="selftest-out">喇叭 + 继电器 + 表情 逐腿各做一次，单项失败不连锁；判定 = 全腿通过才通过。</pre>
   </div>
 </section>
 
@@ -201,9 +201,19 @@ async function face() {
     setMsg("face-msg", expression + "（前一态：" + v.result.previous + "）", true);
   } catch (e) { setMsg("face-msg", "失败：" + e.message, false); }
 }
+// 自检逐腿渲染（批N4 件五 I-18③）：应答 {legs:[{leg,pass,reason?}],verdict}，
+// pass = pass|fail|n-a 三态（n-a = 本形态不具备该腿）；恒败腿如实 fail 不折算。
 async function selftest() {
   $("selftest-out").textContent = "自检中……";
-  try { $("selftest-out").textContent = JSON.stringify(await api("/api/selftest", {}), null, 2); }
+  try {
+    const v = await api("/api/selftest", {});
+    const mark = { pass: "[通过]", fail: "[失败]", "n-a": "[不适用]" };
+    const lines = (v.legs || []).map(
+      (l) => (mark[l.pass] || "[" + l.pass + "]") + " " + l.leg + (l.reason ? "：" + l.reason : "")
+    );
+    lines.unshift("判定：" + v.verdict);
+    $("selftest-out").textContent = lines.join("\n");
+  }
   catch (e) { $("selftest-out").textContent = "自检失败：" + e.message; }
 }
 // ---- 系统页签 ----

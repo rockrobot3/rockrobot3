@@ -163,7 +163,13 @@ pub fn rr3_connect_run() -> Result<(), String> {
                     }
                     wifi::RR3_WIFI_SCAN_TOPIC => rr3_handle_wifi_scan(&args),
                     wifi::RR3_WIFI_CONNECT_TOPIC => {
-                        rr3_handle_wifi_connect(dev.as_ref(), store.as_ref(), &mut prov, &args)
+                        rr3_handle_wifi_connect(
+                            dev.as_ref(),
+                            store.as_ref(),
+                            &mut prov,
+                            &args,
+                            cfg.0.min_pass_len,
+                        )
                     }
                     wifi::RR3_WIFI_FORGET_TOPIC => {
                         rr3_handle_wifi_forget(store.as_ref(), &mut prov, &args)
@@ -246,9 +252,13 @@ pub fn rr3_wifi_scan_result() -> Value {
 }
 
 /// wifi/connect 点名参数裁决（legacy panel.c h_connect 语义照搬）：ssid 非空、
-/// 密码至少 8 位，文案点名（"密码至少 8 位"是 legacy 原词，配网页依赖它）。
+/// 密码不短于下限，文案点名（"密码至少 8 位"是 legacy 原词，配网页依赖它——
+/// 下限数据化后文案数字随 [`Rr3LinkCfg::min_pass_len`] 走，缺省 8 时不漂移）。
 /// 字段名沿用 legacy 的 `pass`——面板表单同名透传，零翻译。（自 wifi 原子件上移）
-pub fn rr3_wifi_connect_parse_args(args: &Value) -> Result<(String, String), String> {
+pub fn rr3_wifi_connect_parse_args(
+    args: &Value,
+    min_pass_len: u64,
+) -> Result<(String, String), String> {
     let ssid = args
         .get("ssid")
         .and_then(Value::as_str)
@@ -258,8 +268,8 @@ pub fn rr3_wifi_connect_parse_args(args: &Value) -> Result<(String, String), Str
     if ssid.is_empty() {
         return Err("缺 ssid（非空字符串）".into());
     }
-    if pass.len() < 8 {
-        return Err("密码至少 8 位（legacy 配网语义）".into());
+    if (pass.len() as u64) < min_pass_len {
+        return Err(format!("密码至少 {min_pass_len} 位（legacy 配网语义）"));
     }
     Ok((ssid.to_string(), pass.to_string()))
 }
@@ -318,8 +328,9 @@ fn rr3_handle_wifi_connect(
     store: &dyn Rr3WifiStore,
     prov: &mut wifi::Rr3Provision,
     args: &Value,
+    min_pass_len: u64,
 ) -> Result<Value, String> {
-    let (ssid, pass) = rr3_wifi_connect_parse_args(args)?;
+    let (ssid, pass) = rr3_wifi_connect_parse_args(args, min_pass_len)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
     store
         .rr3_wifi_store_connect(&ssid, &pass)
@@ -395,6 +406,16 @@ fn rr3_connect_config_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
         Rr3LinkCfg {
             link_report_period_ms: u64_of(&wifi_sect, "link_report_period_ms", "wifi")?.max(1),
             timeout_ms: u64_of(&wifi_sect, "timeout_ms", "wifi")?.max(1),
+            // 配网口令下限（N-11①/M-6，批N4 件五数据化）：缺键回落 8 = legacy
+            // 语义（已部署旧 config 兼容，同 bt 段缺段回落口径）；显式给值时
+            // 必须 ≥1（0 = 无下限是策略漏洞，不当合法配置放行）
+            min_pass_len: wifi_sect
+                .get("min_pass_len")
+                .and_then(toml::Value::as_integer)
+                .filter(|n| *n >= 0)
+                .map(|n| n as u64)
+                .unwrap_or(8)
+                .max(1),
         },
         bt_up,
     ))
@@ -420,6 +441,7 @@ mod tests {
 [rr3-connect.wifi]
 link_report_period_ms = 5000
 timeout_ms = 20000
+min_pass_len = 8
 
 [rr3-connect.bt]
 up = false
@@ -427,7 +449,25 @@ up = false
         let (wifi, bt_up) = rr3_connect_config_parse(text).unwrap();
         assert_eq!(wifi.link_report_period_ms, 5000);
         assert_eq!(wifi.timeout_ms, 20000);
+        assert_eq!(wifi.min_pass_len, 8);
         assert!(!bt_up, "未写 bt 段 = 出厂不自动开蓝牙");
+    }
+
+    /// 配网口令下限（批N4 件五 N-11①）：缺键回落 8 = legacy 语义（旧 config
+    /// 兼容，同 bt 缺段回落口径）；显式值生效；显式 0 按 1 拒放（0 = 无下限
+    /// 是策略漏洞，不当合法配置）
+    #[test]
+    fn config_min_pass_len_defaults_to_legacy_eight() {
+        let base = "[rr3-connect.wifi]\nlink_report_period_ms = 5000\ntimeout_ms = 20000\n";
+        assert_eq!(rr3_connect_config_parse(base).unwrap().0.min_pass_len, 8);
+        let text = format!("{base}min_pass_len = 6\n");
+        assert_eq!(rr3_connect_config_parse(&text).unwrap().0.min_pass_len, 6);
+        let text = format!("{base}min_pass_len = 0\n");
+        assert_eq!(
+            rr3_connect_config_parse(&text).unwrap().0.min_pass_len,
+            1,
+            "显式 0 按 1 拒放（无下限不是合法配置）"
+        );
     }
 
     #[test]
@@ -483,32 +523,46 @@ up = false
     }
 
     /// wifi/connect 参数裁决（legacy 语义）：合法放行；缺 ssid / 空 ssid /
-    /// 缺 pass / 密码 <8 位 全部点名拒，"密码至少 8 位"是 legacy 原词。
-    /// 等号 8 位是边界（§8 打折过的边界用例，本批补上）
+    /// 缺 pass / 密码短于下限 全部点名拒，"密码至少 8 位"是 legacy 原词。
+    /// 等号下限是边界（§8 打折过的边界用例，本批补上）；下限数据化（批N4 件五
+    /// N-11①）：传 8 = legacy 档，传 6 = 现场放宽档，文案数字随值走
     #[test]
     fn wifi_connect_args_parse_legacy_semantics() {
         let (ssid, pass) =
-            rr3_wifi_connect_parse_args(&json!({"ssid": " home ", "pass": "password8"})).unwrap();
+            rr3_wifi_connect_parse_args(&json!({"ssid": " home ", "pass": "password8"}), 8)
+                .unwrap();
         assert_eq!(
             (ssid.as_str(), pass.as_str()),
             ("home", "password8"),
             "ssid 去首尾空白"
         );
         let (ssid, _) =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "12345678"})).unwrap();
+            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "12345678"}), 8).unwrap();
         assert_eq!(ssid, "home", "恰好 8 位放行（等号边界）");
-        let e = rr3_wifi_connect_parse_args(&json!({"pass": "password8"})).unwrap_err();
+        let e = rr3_wifi_connect_parse_args(&json!({"pass": "password8"}), 8).unwrap_err();
         assert!(e.contains("ssid"), "缺 ssid 点名: {e}");
         let e =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "  ", "pass": "password8"})).unwrap_err();
+            rr3_wifi_connect_parse_args(&json!({"ssid": "  ", "pass": "password8"}), 8)
+                .unwrap_err();
         assert!(e.contains("ssid"), "空 ssid 点名: {e}");
-        let e = rr3_wifi_connect_parse_args(&json!({"ssid": "home"})).unwrap_err();
+        let e = rr3_wifi_connect_parse_args(&json!({"ssid": "home"}), 8).unwrap_err();
         assert!(e.contains("8 位"), "缺 pass 点名: {e}");
-        let e = rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "short"})).unwrap_err();
+        let e =
+            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "short"}), 8).unwrap_err();
         assert!(
             e.contains("密码至少 8 位"),
             "短密码点名（legacy 原词）: {e}"
         );
+        // 现场放宽档：下限 6 时 7 位密码放行、6 位等号放行、文案数字跟值
+        let (ssid, _) =
+            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "1234567"}), 6).unwrap();
+        assert_eq!(ssid, "home", "放宽档 7 位放行");
+        let (ssid, _) =
+            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "123456"}), 6).unwrap();
+        assert_eq!(ssid, "home", "放宽档等号 6 位放行");
+        let e =
+            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "12345"}), 6).unwrap_err();
+        assert!(e.contains("密码至少 6 位"), "文案数字随下限走: {e}");
     }
 
     /// wifi/scan|forget 无参裁决 + 结果形状：sim 诚实标注、items 三行、
@@ -565,6 +619,7 @@ up = false
             &store,
             &mut prov,
             &json!({"ssid": "home", "pass": "password8"}),
+            8,
         )
         .unwrap();
         assert_eq!(v["mode"], "station");
@@ -618,6 +673,7 @@ up = false
             &store,
             &mut prov,
             &json!({"ssid": "home", "pass": "password8"}),
+            8,
         )
         .unwrap_err();
         assert!(e.contains("凭据持久化失败"), "存储失败点名: {e}");

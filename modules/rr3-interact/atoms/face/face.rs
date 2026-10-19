@@ -56,6 +56,12 @@ pub use rr_hal_api::Rr3FaceFrame;
 
 pub use mech::{rr3_face_frames, Rr3Face};
 
+/// 带兜底表情的构造器（批N4 件五 I-17/M-3）：mech 状态机各回落点的表情
+/// 数据化注入面（config `default_expression` → 组合件装配 → 此处转出）。
+pub fn rr3_face_with_default(default_expr: &'static str) -> Rr3Face {
+    Rr3Face::rr3_face_with_default(default_expr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

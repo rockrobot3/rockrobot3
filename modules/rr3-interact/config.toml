@@ -1,7 +1,9 @@
 # rr3-interact 运行期配置（secret 一律走环境变量，不落盘）
 # 0.0.5 批I I-1（孤儿参数清零，六键全删——被读或删除，本模块今天不装载
 # config.toml，六键全无读者）：
-# - log_level / default_expression：删除，无读者；
+# - log_level：删除，无读者；
+# - default_expression：曾随 I-1 删除，**0.0.5 批N4 件五 I-17/M-3 实装回归**
+#   （mech 状态机各回落点数据化）——键回归本表，ops 槽落 atoms/face/assemble.toml；
 # - volume_pct / prebuffer_ms：曾随 I-1 删除（行为未实装不提前占键），**0.0.5
 #   批M MC-2 实装回归**（legacy 0cf029e 语义：起播水位抗抖动、样点整型增益
 #   饱和）——键回归本表，ops 槽落 atoms/player/assemble.toml；
@@ -28,3 +30,27 @@ volume_pct = 70
 # （RR3_FACE_EXPRESSIONS）；在册外或非字符串逐条拒 boot。缺键拒 boot。
 # 空数组合法（本形态不排除任何表情点名）。
 non_pointable = ["talk"]
+# 表情节拍（I-17/M-2 批N4 件五，legacy 250ms）：组合件主循环推帧节拍——多帧态
+# （blink/talk）由此循环，帧速率不随总线流量漂移。缺键回落 250；0 会自残
+# （节拍恒过），<1 折 1 拒放。值须为正整数。
+face_tick_ms = 250
+# 兜底表情（I-17/M-3 批N4 件五，legacy idle）：mech 状态机各回落点（end_talk
+# 无挂起、begin_talk 幂等分支）的去处——"换人格取向"= 改此值不改码。
+# 值必须在册（RR3_FACE_EXPRESSIONS）；在册外点名拒 boot。缺键回落 idle。
+default_expression = "idle"
+
+[rr3-interact.panel]
+# 面板五限额/超时（I-18② 批N4 件五）：legacy 常量值（server.rs 原 RR3_PANEL_*
+# 常量）数据化——"现场限并发只能改码"的无主策略就此清账。缺段/缺键回落
+# legacy 值（同 sense S-5 口径）；类型错点名拒 boot，四值下界 ≥1（0 = 面板
+# 自残，不当合法配置放行）。值语义不变：超限 503、半包折 Err、超界断连。
+max_conns = 8          # 并发连接槽位（超限 503）
+read_timeout_ms = 5000 # 请求读耐心（半包/慢客户端超界折 Err）
+header_limit = 8192    # 头区总字节上界（8*1024，超界断连）
+body_limit = 4096      # body 总字节上界（4*1024，超界 413 语义）
+call_timeout_ms = 5000 # bus/动作调用的应答耐心
+
+[rr3-interact.selftest]
+# 自检 face 腿的期望表情（I-17/M-10 批N4 件五，legacy happy）：产线取向可按
+# 形态改数据。值必须在册（RR3_FACE_EXPRESSIONS）；在册外点名拒 boot。
+face_expect = "happy"

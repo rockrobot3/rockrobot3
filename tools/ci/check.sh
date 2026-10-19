@@ -951,7 +951,12 @@ gd_sets="$gd_dir/sets"; gd_den="$gd_dir/den"; gd_diff="$gd_dir/diff"
 trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"; rm -rf "$gd_dir"' EXIT
 trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"; rm -rf "$gd_dir"; exit 130' INT TERM
 # —— 分母五路导出
-grep -hoE 'slot = "[^"]+"' modules/*/atoms/*/assemble.toml | sed 's/.*slot = "/ops\//;s/"$//' | sort -u > "$gd_ops"
+# ops 路 = 件级 assemble.toml ＋ 组合件级 composite.toml（批N4 件五扩面：panel
+# 五限额/自检期望/表情节拍七槽申报在组合件级，消费点在组合件面无原子件对应——
+# 两来源 slot 形制相同，并集去重后同账）
+{ grep -hoE 'slot = "[^"]+"' modules/*/atoms/*/assemble.toml
+  grep -hoE 'slot = "[^"]+"' modules/*/composite.toml; } \
+  | sed 's/.*slot = "/ops\//;s/"$//' | sort -u > "$gd_ops"
 awk '/const RR3_PIN_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/src/profile.rs \
   | grep -oE '"[^"]+"' | tr -d '"' | sed 's/^/pin\//' | sort -u > "$gd_pin"
 gd_pin_decl="$(grep -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
