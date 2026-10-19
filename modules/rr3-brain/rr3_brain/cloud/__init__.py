@@ -15,6 +15,10 @@ mock 后端：环境变量 `RR3_BRAIN_CLOUD=mock`（默认 `real`）时三家换
 HTTP 一律 stdlib `urllib`（零第三方依赖，pyproject dependencies 不动）。
 """
 
+# PEP 563：注解不求值（str | None 等 PEP 604 形在 3.9 亦 import 安全；与
+# bus/dialog/intent/composite 同风格，注解只是文档）
+from __future__ import annotations
+
 import base64
 import json
 import math
