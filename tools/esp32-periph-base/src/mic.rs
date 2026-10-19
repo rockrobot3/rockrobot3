@@ -57,6 +57,26 @@ const MIC_WINDOW_READS: usize = 16;
 /// 语音档采样率（判据① wav 口径；全案批D §4）。
 pub const MIC_SR_HZ: u32 = 16000;
 
+/// 板麦数字增益 ×8（+18dB，真板冒烟(一) 2026-10-18 标定）：半米说话 RMS 实测
+/// ~163 / 环境底噪 ~73，信噪余量 1.36 倍太薄（宿主 VAD rms_start 千位级口径
+/// 复用不了）——×8 后 ~1300/584，余量拉到舒适区，同时服务 DoA 判向质量
+/// （B 铺垫；DoA 相关计算走 24bit 原始域，线性增益不影响相关峰位置，仅作用
+/// 本上行面）。近讲大音量饱和钳位（不翻卷——翻卷产生假静音假爆音，比削顶伤）。
+const MIC_GAIN: i64 = 8;
+
+/// 增益 + 饱和钳位（纯函数，宿主单测可达）：输入 16bit 域采样值（已 >>8），
+/// 输出 ×[`MIC_GAIN`] 后钳回 i16。
+fn rr3_mic_gain_i16(v: i64) -> i16 {
+    let g = v * MIC_GAIN;
+    if g > i16::MAX as i64 {
+        i16::MAX
+    } else if g < i16::MIN as i64 {
+        i16::MIN
+    } else {
+        g as i16
+    }
+}
+
 /// 一分片 → 整帧字节（批D③ Event 帧面，rr-bus `rr3_publish` 板侧等价形）：
 /// 逐通道减**本分片** DC（INMP441 近零偏置，分片内均值即干净基线，无跨片状态）→
 /// 24bit 截 16bit（>>8 保高位）→ s16le 双通道交错 → b64 → JSON 体（seq/format/
@@ -79,9 +99,9 @@ fn audio_chunk_to_frame(chunk: &[i32], seq: u32) -> Option<Vec<u8>> {
     r_dc /= frames as i64;
     let mut pcm = Vec::with_capacity(frames * 4);
     for f in 0..frames {
-        // 24bit（±2^23）>> 8 落 16bit 满幅；i64 域减 DC 后回 i16 无截断
-        let l = ((chunk[f * 2] as i64 - l_dc) >> 8) as i16;
-        let r = ((chunk[f * 2 + 1] as i64 - r_dc) >> 8) as i16;
+        // 24bit（±2^23）>> 8 落 16bit 满幅 → 数字增益 ×8 饱和钳位（冒烟(一) 标定）
+        let l = rr3_mic_gain_i16((chunk[f * 2] as i64 - l_dc) >> 8);
+        let r = rr3_mic_gain_i16((chunk[f * 2 + 1] as i64 - r_dc) >> 8);
         pcm.extend_from_slice(&l.to_le_bytes());
         pcm.extend_from_slice(&r.to_le_bytes());
     }
