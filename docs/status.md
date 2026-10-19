@@ -643,6 +643,23 @@ architecture 对表；板上 HTTP 实证与真板堆对账归真板批，敞口�
 README 进 docs/README.md 库地图（⑤ 导航漏链红）＋contract pin `heap_reserved_bytes` 16384→98816
 同批（`esp32_mini_profile_binds_bridged_minimal_shape` 红）。
 
+**2026-10-19 批N4 件四**（interact I-20 面板写面两硬要求，两半全结）：①**落盘原子序单点**
+（全案 §19.3 判据 2，索引 L-26/L-23 写路径形态）——`rr3_atomic_store` 实现自 `rrd/src/counters.rs`
+原样迁 `rr-ipc/src/persist.rs`（凭据面 rr3-interact 是独立 workspace 不依赖 daemon crate，
+共享件住双方公共最低层——evidence.rs 同径先例；rrd 侧 `pub use` re-export 保 counters/axis
+调用点零改动；模块注释登记三调用方，改面须同批过注释）；`panel/secrets.rs` 写侧退役
+`truncate(true)` 原地覆盖（掉电卡写中间 ⇒ 凭据文件恒 Err 不能自愈），改走共享序＋父目录
+0700（tmp 窗口护城河）＋rename 后收 0600；persist 单测 1 条（原子覆盖＋tmp 无残留）。②**applies
+生效路径三态申报**（全案 §19.3 判据 1"缺失即红"）——码内词表 `RR3_PANEL_APPLY_MODES =
+[live, reboot, reflash]` 单真值点，`RR3_PANEL_ROUTES` 升四元组 `(method, path, covers, applies)`，
+今日唯一申报 = `POST /api/model/key` → `live`（secrets 落盘后 brain 每次现读；应答带
+`applies` 字段＋前端文案"brain 下一轮对话生效"同义双面），其余 13 端点如实空；执法双门 =
+`applies_use_declared_vocabulary_only` 单测（词表＋写口带 covers 必填＋申报面漂移 pin）＋
+check.sh 步 ⑩ applies 段（词表打空/词表外/写口缺申报/行形制坏四路 fail-closed 实测全红过；
+申报面硬红不进红账口径——covers 列整列丢失归 Rust 四元组类型门，bash 不重复执法）；可数
+step 仍 17 行（⑩ 扩段非建步）；interact 册 I-20 行对表注记＋conventions §2 件四条目＋L-26
+两判据行"已建/已修"注记＋architecture §14 门 d 行 applies 补记＋全案 §19.3 同批对表。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

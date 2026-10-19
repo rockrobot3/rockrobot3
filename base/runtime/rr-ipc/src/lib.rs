@@ -26,6 +26,10 @@ pub mod protocol;
 // 板面音频会话握手（A 批 c2 上提单点）：Rr3UartConn 同径 cfg 门（linux/macos）。
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod audio_session;
+// 本地落盘原子序（批N4 件四 I-20 下沉，全仓唯一实现）：std::fs 文件面，与
+// evidence 同径 cfg 门——消费面（rrd 计数/档案、面板凭据）都在宿主 std 语境。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod persist;
 // transport 层拆门（批J G1，ADR-0018 修订 3 ①）：窄缝 bytestream（Rr3ByteStream）
 // 与帧缓冲 buf（alloc 面）在裸金属目标（target_os="none"，如 0.0.7 层① 的
 // xtensa-esp32-none-elf）上可达——"板侧接总线 = 实现两个 usize 方法"由此成立；
@@ -41,6 +45,8 @@ pub use audio_session::{
 };
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use evidence::{rr3_evidence_ref_wellformed, rr3_evidence_verify};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use persist::rr3_atomic_store;
 pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
