@@ -184,5 +184,65 @@ class TestFinishTurnLedger(unittest.TestCase):
         self.assertEqual(self._bumps_of(bus, "asr_fail"), 1, "弃轮仍有失败计数")
 
 
+class TestOpsSnapshot(unittest.TestCase):
+    """B-12（批N4 件六二）：`rr3-brain/ops/list` 应答体——白名单六槽、按原子分组、
+    密钥与 key_ref 不进应答（值零回显守脑面）。"""
+
+    def _cfg(self, with_model_row):
+        cfg = {
+            "rr3-brain": {
+                "cloud": {
+                    "base_url": "https://cloud.example",
+                    "asr_model": "asr-m",
+                    "llm_model": "llm-cloud-m",
+                    "tts_model": "tts-m",
+                    "timeout_s": 20,
+                },
+                "dialog": {"max_utterance_ms": 8000},
+            }
+        }
+        if with_model_row:
+            cfg["rr3-brain"]["model"] = [
+                {"name": "行A", "active": True, "base_url": "https://row.example",
+                 "model_id": "llm-row-m", "api_key_ref": "机密引用"},
+            ]
+        return cfg
+
+    def test_without_model_row_cloud_fallback_values(self):
+        snap = composite.rr3_ops_snapshot(self._cfg(False), "https://cloud.example", "llm-cloud-m")
+        self.assertEqual(snap["asr"], {"asr_model": "asr-m", "base_url": "https://cloud.example", "timeout_s": 20})
+        self.assertEqual(snap["llm"], {"llm_model": "llm-cloud-m", "base_url": "https://cloud.example", "timeout_s": 20})
+        self.assertEqual(snap["tts"]["tts_model"], "tts-m")
+        self.assertEqual(snap["dialog"], {"max_utterance_ms": 8000})
+
+    def test_with_model_row_llm_group_takes_row_values(self):
+        # 行覆盖 fallback（B-14① 分裂不在本单修，快照如实取实效值）
+        snap = composite.rr3_ops_snapshot(self._cfg(True), "https://row.example", "llm-row-m")
+        self.assertEqual(snap["llm"]["base_url"], "https://row.example")
+        self.assertEqual(snap["llm"]["llm_model"], "llm-row-m")
+        self.assertEqual(snap["asr"]["base_url"], "https://cloud.example", "asr 组仍取 cloud 槽值")
+
+    def test_secret_and_key_ref_never_in_payload(self):
+        # 值零回显（B-12 验收句）：config 的 model 行含 api_key_ref，快照整对象
+        # 只允许六槽名单键——序列化全文不得出现引用名或密钥字样
+        snap = composite.rr3_ops_snapshot(self._cfg(True), "https://row.example", "llm-row-m")
+        text = json.dumps(snap, ensure_ascii=False)
+        self.assertNotIn("机密引用", text)
+        self.assertNotIn("api_key_ref", text)
+        self.assertEqual(
+            set(snap.keys()), {"asr", "llm", "tts", "dialog"}, "顶层只允许四原子组"
+        )
+        for group in snap.values():
+            self.assertTrue(set(group) <= {"asr_model", "llm_model", "tts_model",
+                                           "base_url", "timeout_s", "max_utterance_ms"},
+                            f"组键越出六槽白名单: {set(group)}")
+
+    def test_missing_dialog_section_falls_back_to_default(self):
+        cfg = self._cfg(False)
+        del cfg["rr3-brain"]["dialog"]
+        snap = composite.rr3_ops_snapshot(cfg, "u", "m")
+        self.assertEqual(snap["dialog"]["max_utterance_ms"], 8000, "缺段随主循环同款缺省")
+
+
 if __name__ == "__main__":
     unittest.main()
