@@ -125,8 +125,9 @@ const RR3_PIN_DERIVED_KEYS: [&str; 8] = [
 
 /// [[pin]] 条目字段词表（§4.2 [pins] 段；role 的 requires 域即此表子集——
 /// 门 a 六表对账的第 5 张表）。批N3 件八起十一键：`device` 器件型号词进场
-/// （外键 → contracts/devices.toml，门 o 装载侧执法 + 校验③-c 精化判据字段）
-const RR3_PIN_KEYS: [&str; 11] = [
+/// （外键 → contracts/devices.toml，门 o 装载侧执法 + 校验③-c 精化判据字段）。
+/// crate 内可见：assembly.rs 渲染完整性测试用门 d 同源词表逐键断言（不抄第二份清单）。
+pub(crate) const RR3_PIN_KEYS: [&str; 11] = [
     "role",
     "instance",
     "controller",
@@ -144,8 +145,9 @@ const RR3_PIN_KEYS: [&str; 11] = [
 /// 域电流上限、三个绑定引用位（sense/current_sense/switch 一律写 pin_id）与开关/
 /// 武装/龄期三键。全键必填——"合法不适用"显式写 `none`/`false`/`0`，留空即红
 /// （§5 缺失语义列，同 no_injection 范式）；`max_age_ms = 0` 且 `armed = true`
-/// 无运行期读者，由校验⑥-c 拒。
-const RR3_DOMAIN_KEYS: [&str; 11] = [
+/// 无运行期读者，由校验⑥-c 拒。crate 内可见：同 [`RR3_PIN_KEYS`]（assembly.rs
+/// 渲染完整性测试同源引用）。
+pub(crate) const RR3_DOMAIN_KEYS: [&str; 11] = [
     "name",
     "nominal_mv",
     "mild_mv",
@@ -315,8 +317,10 @@ pub struct Rr3Profile {
     pub pins: Vec<Rr3PinEntry>,
 }
 
-/// 装配链交给 daemon 的 boot 输入
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 装配链交给 daemon 的 boot 输入。`Eq` 已随批N4 件九笔4 摘除：`snapshot` 成员
+/// 载 `Rr3Wiring`（`rated_a: f64` 只有 `PartialEq`），结构体的判等面不受 daemon
+/// 任何消费点依赖（boot 输入只做 destructure 与 clone），摘 `Eq` 零行为漂移。
+#[derive(Debug, Clone, PartialEq)]
 pub struct Rr3ProfileBoot {
     /// enabled_slots 模块的 manifest 路径（模块名升序，确定性）
     pub manifests: Vec<PathBuf>,
@@ -341,6 +345,12 @@ pub struct Rr3ProfileBoot {
     /// 轴档案装载点名（坏件逐条 / 多份合法）：daemon 逐条日志，不拒 boot——档案装载
     /// 是降级面，与缺格/缺角色同档；拒绝启动面留给契约事故
     pub axis_notes: Vec<String>,
+    /// 装配快照（批N4 件九笔4，`rr3.ctl.wiring` 判据源）：boot 装载链验收通过后
+    /// 的四元不可变底账（装配单本体 / 接线档 / 轴档案 / 角色表）。None = 本 boot
+    /// 未走装配单路径（`--manifest` 调试路径）或接线档尚未在册（快照无接线档即
+    /// 不成形，如实缺位不造假）。daemon 收货后一次定格进 OnceLock（assembly.rs
+    /// 单点），boot 函数自身不碰全局态——纯构造，快照住处由调用方拍。
+    pub snapshot: Option<crate::assembly::Rr3AssemblySnapshot>,
 }
 
 /// 装配单路径解析成绝对路径：装载与横幅凭证共用同一个解析结果。
@@ -983,35 +993,20 @@ fn rr3_hardware_bindings_text(hardware: &BTreeMap<String, String>) -> String {
     out
 }
 
-/// 执行轴状态投影（批N3 件三建，件五收口消歧）。扫 `axis_dir`/*.toml（升序 =
-/// 确定性），**全部合法装载**（件二 [`crate::axis::rr3_act_profile_load`]，外键
-/// = [[pin]] 的 pin_id 集——与档案 `pin` 键同一语法，F-2：第二套语法一条校验
-/// 都打不到）后按轴消歧投影。
-///
-/// 消歧裁决（件五，收"多轴未消歧"挂账）：模块面是单轴 trait——rr-hal 桥后端按
-/// `RR3_HAL_PERIPH_AXIS` env（缺省 [`rr_hal_api::RR3_PERIPH_AXIS_DEFAULT`]）选轴；
-/// 本函数的 `axis` 参数即该 env 的读数（env 读取在 [`rr3_profile_boot_inputs`]
-/// 调用点，本函数吃值不吃全局态——cli.rs 先例，测试不碰进程环境），选 pin 末段
-/// （instance）与之**相等**的恰一份合法档案投影——注入的行程真值必须属于被驱动
-/// 的那根轴。单份也对轴：env 指了 tilt 而档案只有 pan 时，"注入 pan 行程、驱动
-/// tilt 轴"是错配，宁可空串折保守缺省。同 pin 多份文件（副本）不是消歧对象是
-/// 病灶——投影空串并点名（恰一份合法才投影的 boot 链防线，写侧同款拒面在
-/// axis_write 件四）。
-///
-/// 投影文本 = `calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>`（件五
-/// 扩形：行程三键随状态同路注入，模块侧行程改读档案——门 g"档案之外的行程
-/// 读者数为 0"的 host 侧半边）。零份回空串且安静（无档案是常态起跑态）；坏件
-/// 逐条点名但不拒 boot（档案装载是降级面，与缺格/缺角色同档——模块侧折保守
-/// 缺省仍是安全向）；多份合法点名后同样空串。目录读不到同零份（无 axis 目录 =
-/// 无档案）。
-fn rr3_axis_state_text(
+/// 轴档案全量装载（批N4 件九笔4 自 [`rr3_axis_state_text`] 拆出，零行为漂移）：
+/// 扫 `axis_dir`/*.toml（升序 = 确定性），全部合法装载（件二
+/// [`crate::axis::rr3_act_profile_load`]，外键 = [[pin]] 的 pin_id 集——与档案
+/// `pin` 键同一语法，F-2：第二套语法一条校验都打不到），返回 (合法档案件,
+/// 坏件逐条点名)。目录读不到同零份（无 axis 目录 = 无档案）。拆出理由：
+/// 装配快照要的是**全量**合法档案件（面板出图要看见全部轴），投影函数只返回
+/// 消歧后的 (state_text, notes)、清单被丢弃——装载与投影两段各自可测可复用。
+fn rr3_axis_files_load(
     axis_dir: &Path,
     pin_ids: &BTreeSet<String>,
-    axis: &str,
-) -> (String, Vec<String>) {
+) -> (Vec<crate::axis::Rr3AxisFile>, Vec<String>) {
     let mut notes = Vec::new();
     let Ok(entries) = std::fs::read_dir(axis_dir) else {
-        return (String::new(), notes);
+        return (Vec::new(), notes);
     };
     let mut files: Vec<PathBuf> = entries
         .flatten()
@@ -1030,9 +1025,36 @@ fn rr3_axis_state_text(
             ),
         }
     }
+    (found, notes)
+}
+
+/// 执行轴状态投影（批N3 件三建，件五收口消歧；批N4 件九笔4 起吃
+/// [`rr3_axis_files_load`] 的装载结果做纯投影——boot 装载一次，投影与快照共用
+/// 同一份清单，不重读目录造第二真值点）。
+///
+/// 消歧裁决（件五，收"多轴未消歧"挂账）：模块面是单轴 trait——rr-hal 桥后端按
+/// `RR3_HAL_PERIPH_AXIS` env（缺省 [`rr_hal_api::RR3_PERIPH_AXIS_DEFAULT`]）选轴；
+/// 本函数的 `axis` 参数即该 env 的读数（env 读取在 [`rr3_profile_boot_inputs`]
+/// 调用点，本函数吃值不吃全局态——cli.rs 先例，测试不碰进程环境），选 pin 末段
+/// （instance）与之**相等**的恰一份合法档案投影——注入的行程真值必须属于被驱动
+/// 的那根轴。单份也对轴：env 指了 tilt 而档案只有 pan 时，"注入 pan 行程、驱动
+/// tilt 轴"是错配，宁可空串折保守缺省。同 pin 多份文件（副本）不是消歧对象是
+/// 病灶——投影空串并点名（恰一份合法才投影的 boot 链防线，写侧同款拒面在
+/// axis_write 件四）。
+///
+/// 投影文本 = `calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>`（件五
+/// 扩形：行程三键随状态同路注入，模块侧行程改读档案——门 g"档案之外的行程
+/// 读者数为 0"的 host 侧半边）。零份回空串且安静（无档案是常态起跑态）；坏件
+/// 逐条点名但不拒 boot（档案装载是降级面，与缺格/缺角色同档——模块侧折保守
+/// 缺省仍是安全向）；多份合法点名后同样空串。
+fn rr3_axis_state_text(
+    found: &[crate::axis::Rr3AxisFile],
+    axis: &str,
+) -> (String, Vec<String>) {
+    let mut notes = Vec::new();
     // 副本病灶：同 pin 多份文件 → 不注入（恰一份合法才投影；先清理副本）
     let mut pin_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    for f in &found {
+    for f in found {
         *pin_counts.entry(f.pin.as_str()).or_insert(0) += 1;
     }
     if let Some((pin, n)) = pin_counts.into_iter().find(|(_, n)| *n > 1) {
@@ -1687,18 +1709,39 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 轴读数 = RR3_HAL_PERIPH_AXIS env（缺省 RR3_PERIPH_AXIS_DEFAULT，与 rr-hal 桥
     // 后端同一契约常量——spawn 的子进程继承本进程环境，注入面选轴与后端选轴因此
     // 同源）；恰一份 instance 命中才投影，其余口径见 [`rr3_axis_state_text`]（降级
-    // 面点名，不拒 boot）。
+    // 面点名，不拒 boot）。批N4 件九笔4：装载一次，清单同时进装配快照（面板出图
+    // 要看见全部轴），投影只吃这份清单——不重读目录造第二真值点。
     let axis_dir = wiring_abs.parent().expect("接线档必有父目录").join("axis");
     let axis_wanted = std::env::var(rr_hal_api::RR3_PERIPH_AXIS_ENV)
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| rr_hal_api::RR3_PERIPH_AXIS_DEFAULT.to_string());
-    let (axis_state, axis_notes) = rr3_axis_state_text(&axis_dir, &pin_ids, &axis_wanted);
+    let (axis_files, axis_notes) = rr3_axis_files_load(&axis_dir, &pin_ids);
+    let (axis_state, axis_notes_project) = rr3_axis_state_text(&axis_files, &axis_wanted);
+    let mut axis_notes = axis_notes;
+    axis_notes.extend(axis_notes_project);
 
     // G4 装配段校验（ADR-0019 修订 1 ③）已在门 c 段随装配扫描一次完成：缺文件/
     // 坏形/ops 注入缺逐条点名进 assemble_broken，该模块 boot 入 Degraded（不 fatal；
     // 修数据 + 重启是唯一解除路）。此处只消费上文的 assemble_broken。
+
+    // 装配快照（批N4 件九笔4，`rr3.ctl.wiring` 判据源）：至此装配单/接线档/轴
+    // 档案/角色表四路全部过完装载期校验（fatal 面早已逐条拒净），这是"验收通过的
+    // 世界"唯一收账点——clone 进快照交给 daemon 定格 OnceLock；boot 函数自身不碰
+    // 全局态（纯构造，住处由调用方拍）。快照与 boot 返回值同生命周期，装载面之后
+    // 对文件的改动进不了本进程的 ctl 应答（快照语义，assembly.rs 模块头注）。
+    let snapshot = crate::assembly::Rr3AssemblySnapshot {
+        profile_name: abs
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        profile: profile.clone(),
+        wiring: wiring.clone(),
+        axis: axis_files,
+        roles: roles.clone(),
+    };
 
     Ok(Rr3ProfileBoot {
         manifests,
@@ -1708,6 +1751,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         role_missing,
         axis_state,
         axis_notes,
+        snapshot: Some(snapshot),
     })
 }
 

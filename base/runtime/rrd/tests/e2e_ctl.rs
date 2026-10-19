@@ -156,6 +156,25 @@ fn ctl_reboot_is_refused_by_default_double_gate() {
     rr3_assert_ctl_closed(&mut ctl);
 }
 
+/// 装配快照读口（批N4 件九笔4）：--manifest 调试路径无装配快照 → 如实回
+/// `available:false` + 点名解锁路径（不造假数据）。快照在册面（--profile 启动）
+/// 的渲染完整性由 assembly.rs 单测用门 d 同源词表逐键钉死；两端到端形状在此合拢。
+#[test]
+fn ctl_wiring_reports_unavailable_without_profile_boot() {
+    let t = RrdTest::rr3_start_no_overlay("ctl-wiring");
+    let mut ctl = t.rr3_connect();
+    let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.wiring", 1);
+    let result = &v["result"];
+    assert!(result.is_object(), "wiring 必须以成功信封应答（不可得不是协议错误）: {v}");
+    assert_eq!(result["available"], false, "{v}");
+    let msg = result["reason"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("--profile"),
+        "不可得理由必须点名 --profile 解锁路径: {v}"
+    );
+    rr3_assert_ctl_closed(&mut ctl);
+}
+
 #[test]
 fn registered_module_uplink_ctl_is_refused_but_connection_survives() {
     let t = RrdTest::rr3_start_no_overlay("ctl-uplink-deny");

@@ -23,15 +23,18 @@ pub enum Rr3RpcMethod {
     Heartbeat,
     Unregister,
     Call,
-    /// rr3.ctl.* 六方法（ADR-0010；0.0.4 批B 增 `rr3.ctl.counters`/`rr3.ctl.reboot`）：
-    /// 控制查询，只对**未注册**的控制连接开放（conn 握手在方法分流处把 ctl 旁支接走）；
-    /// 已注册模块连接上行一律拒。
+    /// rr3.ctl.* 方法（ADR-0010）：控制查询，只对**未注册**的控制连接开放
+    /// （conn 握手在方法分流处把 ctl 旁支接走）；已注册模块连接上行一律拒。
+    /// 0.0.4 批B 增 `rr3.ctl.counters`/`rr3.ctl.reboot`；
+    /// 批N4 件九笔4 增 `rr3.ctl.wiring`（装配快照读口，`[pins]×wiring` 全交叉
+    /// 判果与四路底账一应答给出，判据源 = assembly.rs）。
     CtlStatus,
     CtlHealth,
     CtlLogs,
     CtlOta,
     CtlCounters,
     CtlReboot,
+    CtlWiring,
 }
 
 impl Rr3RpcMethod {
@@ -48,6 +51,7 @@ impl Rr3RpcMethod {
             Self::CtlOta => "rr3.ctl.ota",
             Self::CtlCounters => "rr3.ctl.counters",
             Self::CtlReboot => "rr3.ctl.reboot",
+            Self::CtlWiring => "rr3.ctl.wiring",
         }
     }
 
@@ -63,6 +67,7 @@ impl Rr3RpcMethod {
             "rr3.ctl.ota" => Some(Self::CtlOta),
             "rr3.ctl.counters" => Some(Self::CtlCounters),
             "rr3.ctl.reboot" => Some(Self::CtlReboot),
+            "rr3.ctl.wiring" => Some(Self::CtlWiring),
             _ => None,
         }
     }
@@ -79,6 +84,7 @@ impl Rr3RpcMethod {
                 | Self::CtlOta
                 | Self::CtlCounters
                 | Self::CtlReboot
+                | Self::CtlWiring
         )
     }
 }
@@ -331,7 +337,8 @@ mod tests {
     }
 
     /// F3（ADR-0010）：ctl 方法走同一解析器，is_ctl 的判据与方法面一致
-    /// （0.0.4 批B 起 `rr3.ctl.counters`/`rr3.ctl.reboot` 入列，白名单六 ctl）
+    /// （0.0.4 批B 起 `rr3.ctl.counters`/`rr3.ctl.reboot` 入列；批N4 件九笔4 起
+    /// `rr3.ctl.wiring` 入列，白名单七 ctl）
     #[test]
     fn parses_ctl_methods_and_flags_them() {
         for m in [
@@ -341,6 +348,7 @@ mod tests {
             "rr3.ctl.ota",
             "rr3.ctl.counters",
             "rr3.ctl.reboot",
+            "rr3.ctl.wiring",
         ] {
             let got = rr3_rpc_parse_request(&bytes(
                 json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}}),

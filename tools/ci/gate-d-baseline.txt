@@ -20,5 +20,8 @@
 # 43 = 批N4 件九二（观测面收官刀）：五模块 ops 读口五端点（/api/{act,connect,
 #   interact,power,sense}/ops）covers 申报 30 槽——ops 路分母 36 槽全部转绿
 #   （余红 = pin 11 + role 7 + domain 11 + axis 14，读口归件九后续笔）；分母不动。
-43
+# 0 = 批N4 件九笔4（接线图收官刀）：GET /api/wiring covers 申报四族全集 43 项
+#   （pin 11 + role 7 + domain 11 + axis 14，与分母五路并集逐项同源）——红账 43
+#   全转绿，差集空。转绿终点达成：门 d 转红（差集 > 0 即 FAIL），本文件退役在即。
+0
 79

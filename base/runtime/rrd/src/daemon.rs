@@ -251,6 +251,13 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 .iter()
                 .map(|(m, _)| m.clone())
                 .collect();
+            // 装配快照定格（批N4 件九笔4）：boot 链验收通过的底账一次 set 进
+            // OnceLock（assembly.rs 单点，日志环同款进程级静态），`rr3.ctl.wiring`
+            // 的渲染源。首份胜出语义下重复 boot 不覆盖；--manifest 调试路径
+            // （None 臂）无快照，ctl.wiring 如实回不可得。
+            if let Some(s) = boot.snapshot.clone() {
+                crate::assembly::rr3_assembly_snapshot_set(s);
+            }
             (
                 boot.manifests,
                 names,
