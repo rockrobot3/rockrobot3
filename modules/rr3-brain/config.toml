@@ -30,6 +30,14 @@ model_id = "deepseek-chat"
 api_key_ref = "DeepSeek官方"
 active = true
 
+[rr3-brain.bus]
+# 总线 RPC 超时（批N4 件六 B-13①，自 composite.py/bus.py 码内常量退役数据化）：
+# call_timeout_s = 点名 interact/tts/text 的等待上界；connect_timeout_s = 注册帧
+# 等待上界。与 [rr3-brain.dialog] max_utterance_ms（话轮封顶）及 [rr3-brain.cloud]
+# timeout_s（云 HTTP 预算）三值解耦（D7 裁定：不写派生凑法，各管各的维度）。
+call_timeout_s = 30.0
+connect_timeout_s = 5.0
+
 [rr3-brain.dialog]
 # 0.0.5 批I B-2：silence_tail_ms 删除（死参数——dialog.py 从不读它，判停完全
 # 依赖 sense 的 Offset 边沿；留键会让人以为它在生效）。

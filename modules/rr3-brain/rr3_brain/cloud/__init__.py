@@ -65,6 +65,12 @@ def rr3_brain_http_post(url: str, key: str, body: bytes, content_type: str, time
 
     key 空串 → 不带 Authorization 头（local 免鉴权路径，0.0.6 模型连接抽象批）；
     real 档缺 key 由调用方先报错，不在此静默放行。
+
+    传输异常收敛（批N4 件六 B-16②，云面异常一个类型一个处置点）：URLError/
+    超时/连接重置等 OSError 族原样逃逸会让 composite 的 except RuntimeError
+    接不住 ⇒ 进程退出（同一类云不可用一半弃轮一半掀进程）。此处统一折
+    RuntimeError（URL 不含密钥——Authorization 只进 header，文案可安全带出），
+    结局只剩两种且都有计数：调用方 except RuntimeError 折 `*_fail` 弃轮。
     """
     headers = {"Content-Type": content_type}
     if key:
@@ -75,6 +81,8 @@ def rr3_brain_http_post(url: str, key: str, body: bytes, content_type: str, time
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
+    except OSError as e:  # URLError/socket.timeout/ConnectionReset 等全是 OSError 子类
+        raise RuntimeError(f"云端不可达 {url}: {e}") from e
 
 
 def rr3_brain_secrets_get(ref: str) -> str | None:

@@ -40,6 +40,13 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"error":"boom"}')
             return
+        if server.bad_json_path and self.path == server.bad_json_path:
+            # 200 + 非 JSON 体（B-16②：云 200 空体/坏体的静默假成功口）
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"not-json-at-all")
+            return
         if self.path == "/v1/audio/transcriptions":
             out = b'{"text": "\xe4\xbd\xa0\xe5\xa5\xbd"}'  # 你好
         elif self.path == "/v1/chat/completions":
@@ -62,6 +69,7 @@ class FakeSiliconFlow(HTTPServer):
         super().__init__(("127.0.0.1", 0), _Handler)
         self.requests: list[tuple[str, str, bytes]] = []
         self.fail_path: str | None = None
+        self.bad_json_path: str | None = None
 
 
 class TestPureHelpers(unittest.TestCase):
@@ -180,6 +188,42 @@ class TestMockPath(unittest.TestCase):
         client = Rr3TtsClient("http://127.0.0.1:1", "m", 1.0)
         pcm = client.synthesize("hi")
         self.assertGreater(len(pcm), 0)
+
+
+class TestTransportErrorConvergence(unittest.TestCase):
+    """B-16②：云面传输异常收敛到一个类型（RuntimeError）——结局只有两种且都计数，
+    不得再逃逸到进程退出（同一类云不可用一半弃轮一半掀进程）。"""
+
+    def setUp(self):
+        self.srv = FakeSiliconFlow()
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+        os.environ[API_KEY_ENV] = "test-key"
+
+    def tearDown(self):
+        self.srv.shutdown()
+        os.environ.pop(API_KEY_ENV, None)
+
+    def test_http_post_folds_unreachable_endpoint_into_runtime_error(self):
+        # 端口 1 无监听 → ConnectionRefused（OSError 族）——收敛为 RuntimeError
+        with self.assertRaises(RuntimeError) as ctx:
+            rr3_brain_http_post("http://127.0.0.1:1/v1/audio/transcriptions", "k", b"x", "text/plain", 1.0)
+        self.assertIn("云端不可达", str(ctx.exception))
+
+    def test_asr_non_json_body_is_runtime_error_not_escape(self):
+        # 200 + 非 JSON 体：JSONDecodeError 原在 try 外逃逸——现在折 RuntimeError
+        self.srv.bad_json_path = "/v1/audio/transcriptions"
+        client = Rr3AsrClient(self.base, "m", 5.0)
+        with self.assertRaises(RuntimeError) as ctx:
+            client.transcribe(b"\x00\x00" * 100)
+        self.assertIn("非 JSON", str(ctx.exception))
+
+    def test_llm_non_json_body_is_runtime_error_not_escape(self):
+        # LLM 腿既有护栏（llm.py try 内 json.loads）回归钉住不退化
+        self.srv.bad_json_path = "/v1/chat/completions"
+        client = Rr3LlmClient(self.base, "m", 5.0)
+        with self.assertRaises(RuntimeError):
+            client.complete("在吗")
 
 
 if __name__ == "__main__":
