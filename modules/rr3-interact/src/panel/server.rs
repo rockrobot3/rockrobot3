@@ -124,14 +124,17 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
-/// 今日实况（批N4 件九三，配置面刀）：21 端点，读配置者 6 = `GET /api/brain/ops`
+/// 今日实况（批N4 件九四，接线图刀）：22 端点，读配置者 6 = `GET /api/brain/ops`
 /// （brain ops 六槽）＋五模块 ops 读口五端点（`GET /api/{act,connect,interact,power,
 /// sense}/ops`，BusCall 透传各模块 `rr3-<mod>/ops/list`，白名单组体应答）；写口 1 =
 /// `POST /api/brain/ops`（BusCall 透传 `rr3-brain/ops/set`，组.槽寻址、owner 白名单
 /// fail-closed）——ops 路分母 36 槽全部转绿（covers 申报 30 项随件九二上表，写口
-/// 申报同集合 ∪ 不增），红账 43 = pin 11 + role 7 + domain 11 + axis 14（读口归
-/// 件九笔4），基线 tools/ci/gate-d-baseline.txt 行 1 不动；密钥面两端点（keys/key）
-/// 不申报 covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
+/// 申报同集合 ∪ 不增）。接线图读口 `GET /api/wiring`（批N4 件九笔4）：ctl.wiring
+/// 透传（判据真值单点 = rrd assembly.rs 的装配快照，面板只渲染不判——第二真值点
+/// 禁令），covers 申报 43 项 = pin 11 + role 7 + domain 11 + axis 14（门 d 分母
+/// 四路字段级全集，与 rrd 渲染完整性测试同源钉死）⇒ 红账 43 全转绿，基线
+/// tools/ci/gate-d-baseline.txt 行 1 同批 43→0；密钥面两端点（keys/key）不申报
+/// covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
 /// applies 今日两条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
 /// ⇒ live）＋ `POST /api/brain/ops`（写臂重建受影响客户端，live 内存生效**不落盘**，
 /// 应答 `persisted:false` 如实申报——重启回 config.toml 真值；Python 无 TOML
@@ -161,6 +164,7 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/api/interact/ops", &["ops/non_pointable", "ops/default_expression", "ops/face_tick_ms", "ops/selftest_face_expect", "ops/panel_max_conns", "ops/panel_read_timeout_ms", "ops/panel_header_limit", "ops/panel_body_limit", "ops/panel_call_timeout_ms", "ops/prebuffer_ms", "ops/volume_pct"], ""),
     ("GET", "/api/power/ops", &["ops/sample_period_ms", "ops/low_voltage_mv", "ops/cutoff_voltage_mv", "ops/state_period_ms"], ""),
     ("GET", "/api/sense/ops", &["ops/sample_rate", "ops/channels", "ops/frame_ms", "ops/doa_bin_threshold_deg", "ops/rms_start", "ops/silence_tail_ms", "ops/min_speech_ms"], ""),
+    ("GET", "/api/wiring", &["pin/role", "pin/instance", "pin/controller", "pin/channel", "pin/physical", "pin/direction", "pin/rail", "pin/addr", "pin/device", "pin/failsafe", "pin/mux_group", "role/controller", "role/channel", "role/physical", "role/rail", "role/failsafe", "role/addr", "role/device", "domain/name", "domain/nominal_mv", "domain/mild_mv", "domain/severe_mv", "domain/current_cap_ma", "domain/sense", "domain/current_sense", "domain/switch", "domain/switchable", "domain/armed", "domain/max_age_ms", "axis/schema", "axis/pin", "axis/center_deg", "axis/lo_deg", "axis/hi_deg", "axis/dir_sign", "axis/slew_deg_s", "axis/settle_ms", "axis/hold", "axis/current_ceil_ma", "axis/warmup_ms", "axis/hard_stop", "axis/calibrated", "axis/source"], ""),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -193,6 +197,9 @@ pub enum Rr3PanelDispatch {
     CountersQuery,
     /// `GET /api/logs`：ctl.logs（rrd 日志环尾部）
     LogsQuery,
+    /// `GET /api/wiring`：ctl.wiring（装配快照读口——四路底账 + [pins]×wiring
+    /// 全交叉逐条判果，批N4 件九笔4；判据真值单点 = rrd assembly.rs）
+    WiringQuery,
     /// 硬件控制：`rr3.call` 经 rrd 归属门转发（relay → `rr3-act/relay/set`）
     BusCall {
         topic: String,
@@ -344,6 +351,12 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         },
         "/api/logs" => match method {
             "GET" => Rr3PanelDispatch::LogsQuery,
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        // 接线图读口（批N4 件九笔4）：ctl.wiring 透传。面板不解析不判——
+        // 全交叉判据的真值单点在 rrd（assembly.rs），第二真值点禁令
+        "/api/wiring" => match method {
+            "GET" => Rr3PanelDispatch::WiringQuery,
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         "/api/relay" => {
@@ -762,6 +775,17 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             Ok(v) => Rr3PanelReply::json(200, "OK", v),
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
         },
+        // 接线图（批N4 件九笔4）：rrd 应答原样透传（available:false = 未以
+        // --profile 启动的诚实面，仍 200——不可得是数据态不是网关错）
+        Rr3PanelDispatch::WiringQuery => match rr3_ctl_query(
+            &shared.bus_path,
+            "rr3.ctl.wiring",
+            5,
+            shared.limits.read_timeout,
+        ) {
+            Ok(v) => Rr3PanelReply::json(200, "OK", v),
+            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+        },
         Rr3PanelDispatch::BusCall { topic, args } => {
             match shared.bus.rr3_call_topic(&topic, args, shared.limits.call_timeout) {
                 Ok(result) => {
@@ -788,12 +812,17 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
         },
         Rr3PanelDispatch::SelfTest => {
-            // 并列三调（Q3）：各答各展示、无依赖链、单项失败不连锁——
+            // 并列三调＋接线全交叉（Q3）：各答各展示、无依赖链、单项失败不连锁——
             // 这不是编排（无状态机无裁决），brain 才是唯一编排者（ADR-0007）。
             // 批N4 件五 I-18③（D15 裁定）：逐腿输出 `{leg, pass, reason?}`——
             // pass = pass|fail|n-a 三态；恒败腿如实报 fail **不折算通过**；
-            // verdict = 全腿 pass 才 pass（n-a 不拖累也不救场）。
-            let mut legs = Vec::with_capacity(3);
+            // verdict = 有 fail 即 fail、无 fail 且至少一腿真判 pass 才 pass
+            // （n-a 不拖累也不救场：全 n-a = 无一真判，如实 fail）。
+            // 批N4 件九笔4 起加腿四 wiring：rr3.ctl.wiring 取装配快照的全交叉
+            // 判果**逐条摊进 legs**（`leg = "wiring/<item>"`，逐形态内容不同 =
+            // 全案 §7 ⑤"出厂自检必测 [pins]×wiring 全交叉"的原文）——判果本身
+            // 是 rrd 的产出，这里只转述不重判（第二真值点禁令）。
+            let mut legs = Vec::with_capacity(6);
             // 腿1 speaker：beep 走主循环代执行——无本地波形源是已知业务错误，
             // 如实 fail 点名原因（产线换真波形源后此腿自然转 pass）
             let reason = match rr3_panel_act(shared, Rr3PanelAction::Beep) {
@@ -845,15 +874,62 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                 face_leg["reason"] = json!(e);
             }
             legs.push(face_leg);
-            let all_pass = legs
+            // 腿4 wiring（批N4 件九笔4）：ctl 取数失败/快照不可得 = 单腿 fail
+            // 如实点名；取到即把 rrd 三态判果逐条转述（"not-applicable" → n-a，
+            // 其余未知值 fail-closed 折 fail——恒败腿不得折算通过）
+            match rr3_ctl_query(&shared.bus_path, "rr3.ctl.wiring", 5, shared.limits.read_timeout)
+            {
+                Err(e) => legs.push(json!({
+                    "leg": "wiring/取数", "pass": "fail", "reason": e,
+                })),
+                Ok(v) => {
+                    if v.get("available").and_then(Value::as_bool) != Some(true) {
+                        legs.push(json!({
+                            "leg": "wiring/取数", "pass": "fail",
+                            "reason": v.get("reason").cloned()
+                                .unwrap_or(json!("ctl.wiring 应答缺 available:true（数据漂移）")),
+                        }));
+                    } else {
+                        let checks = v
+                            .get("checks")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default();
+                        if checks.is_empty() {
+                            legs.push(json!({
+                                "leg": "wiring/空", "pass": "n-a",
+                                "reason": "装配快照在册但零判据对象（零线组零 pin）",
+                            }));
+                        }
+                        for c in &checks {
+                            let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
+                            let pass = match c.get("pass").and_then(Value::as_str) {
+                                Some("pass") => "pass",
+                                Some("not-applicable") => "n-a",
+                                _ => "fail",
+                            };
+                            let mut leg =
+                                json!({ "leg": format!("wiring/{item}"), "pass": pass });
+                            if let Some(r) = c.get("reason") {
+                                leg["reason"] = r.clone();
+                            }
+                            legs.push(leg);
+                        }
+                    }
+                }
+            }
+            let any_fail = legs
                 .iter()
-                .all(|l| l.get("pass").and_then(Value::as_str) == Some("pass"));
+                .any(|l| l.get("pass").and_then(Value::as_str) == Some("fail"));
+            let any_pass = legs
+                .iter()
+                .any(|l| l.get("pass").and_then(Value::as_str) == Some("pass"));
             Rr3PanelReply::json(
                 200,
                 "OK",
                 json!({
                     "legs": legs,
-                    "verdict": if all_pass { "pass" } else { "fail" },
+                    "verdict": if !any_fail && any_pass { "pass" } else { "fail" },
                 }),
             )
         }
@@ -1084,6 +1160,11 @@ mod tests {
                 args: json!({})
             }
         );
+        // 装配快照读口（批N4 件九笔4）：GET /api/wiring → ctl 七号方法透传
+        assert_eq!(
+            rr3_panel_route("GET", "/api/wiring", b""),
+            Rr3PanelDispatch::WiringQuery
+        );
     }
 
     /// 端点表 ↔ 路由分派漂移门（MC-8③/I-9）：表内每条必须分派成功（不是
@@ -1093,8 +1174,8 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            21,
-            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N4 件九三 20→21：POST /api/brain/ops 配置面写口）"
+            22,
+            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N4 件九笔4 21→22：GET /api/wiring 装配快照读口）"
         );
         for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {
@@ -1311,53 +1392,74 @@ mod tests {
     const I4_MANIFEST: &str = "[manifest]\nschema_version = 1\nname = \"rr3-interact\"\nversion = \"0.0.1\"\ntype = \"module\"\nlang = \"rust\"\nentry = \"/bin/true\"\n\n[events]\npublishes = []\nsubscribes = []\n\n[health]\nheartbeat_ms = 50\n";
 
     #[cfg(test)]
-    fn rr3_i4_fake_rrd(listener: std::os::unix::net::UnixListener, beats: Arc<Mutex<Vec<Value>>>) {
-        while let Ok((mut stream, _)) = listener.accept() {
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-            loop {
-                let Some(frame) = rr3_frame_read(&mut stream).ok() else {
-                    break;
-                };
-                let Ok((ty, body)) = rr3_body_split_of(&frame) else {
-                    break;
-                };
-                let Ok(v) = serde_json::from_slice::<Value>(&body) else {
-                    break;
-                };
-                if ty != Rr3PayloadType::Request {
-                    continue;
+    fn rr3_i4_fake_rrd(
+        listener: std::os::unix::net::UnixListener,
+        beats: Arc<Mutex<Vec<Value>>>,
+        wiring: Value,
+    ) {
+        // 每连接一线程：总线心跳是长连接（占住内层读环），而自检腿四的 ctl.wiring
+        // 查询会另开一条短连接——串行 accept 会让短连接永远排在长连接后面，
+        // 5s 读超时把整个自检拖挂（真 rrd 也是并发连接，假件不得更弱）
+        while let Ok((stream, _)) = listener.accept() {
+            let beats = beats.clone();
+            let wiring = wiring.clone();
+            std::thread::spawn(move || rr3_i4_fake_rrd_conn(stream, beats, wiring));
+        }
+    }
+
+    /// 假 rrd 单连接处理体（注册回 src_task=7、心跳回 accepted，并把每拍心跳
+    /// params 原样记账；ctl.wiring 回预置应答）
+    #[cfg(test)]
+    fn rr3_i4_fake_rrd_conn(
+        mut stream: std::os::unix::net::UnixStream,
+        beats: Arc<Mutex<Vec<Value>>>,
+        wiring: Value,
+    ) {
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        loop {
+            let Some(frame) = rr3_frame_read(&mut stream).ok() else {
+                break;
+            };
+            let Ok((ty, body)) = rr3_body_split_of(&frame) else {
+                break;
+            };
+            let Ok(v) = serde_json::from_slice::<Value>(&body) else {
+                break;
+            };
+            if ty != Rr3PayloadType::Request {
+                continue;
+            }
+            let method = v["method"].as_str().unwrap_or("");
+            let result = match method {
+                "rr3.register" => json!({ "src_task": 7 }),
+                "rr3.heartbeat" => {
+                    beats.lock().unwrap().push(v["params"].clone());
+                    json!({ "beat": "accepted" })
                 }
-                let method = v["method"].as_str().unwrap_or("");
-                let result = match method {
-                    "rr3.register" => json!({ "src_task": 7 }),
-                    "rr3.heartbeat" => {
-                        beats.lock().unwrap().push(v["params"].clone());
-                        json!({ "beat": "accepted" })
-                    }
-                    _ => json!({ "noop": true }),
-                };
-                let id = v["id"].as_u64().unwrap_or(0);
-                let payload = rr3_body_encode(
-                    Rr3PayloadType::Response,
-                    json!({"jsonrpc": "2.0", "id": id, "result": result})
-                        .to_string()
-                        .as_bytes(),
-                );
-                let out = Rr3Frame {
-                    header: Rr3Header {
-                        opcode: opcode::SEND,
-                        flags: 0,
-                        trace_id: 0,
-                        timestamp_ns: rr3_now_ns(),
-                        src_task: rr_bus::RR3_TASK_RRD,
-                        dst_task: 7,
-                        payload_len: payload.len() as u32,
-                    },
-                    payload,
-                };
-                if rr3_frame_write(&mut stream, &out).is_err() {
-                    break;
-                }
+                "rr3.ctl.wiring" => wiring.clone(),
+                _ => json!({ "noop": true }),
+            };
+            let id = v["id"].as_u64().unwrap_or(0);
+            let payload = rr3_body_encode(
+                Rr3PayloadType::Response,
+                json!({"jsonrpc": "2.0", "id": id, "result": result})
+                    .to_string()
+                    .as_bytes(),
+            );
+            let out = Rr3Frame {
+                header: Rr3Header {
+                    opcode: opcode::SEND,
+                    flags: 0,
+                    trace_id: 0,
+                    timestamp_ns: rr3_now_ns(),
+                    src_task: rr_bus::RR3_TASK_RRD,
+                    dst_task: 7,
+                    payload_len: payload.len() as u32,
+                },
+                payload,
+            };
+            if rr3_frame_write(&mut stream, &out).is_err() {
+                break;
             }
         }
     }
@@ -1411,7 +1513,7 @@ mod tests {
         let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
         {
             let beats = beats.clone();
-            std::thread::spawn(move || rr3_i4_fake_rrd(listener, beats));
+            std::thread::spawn(move || rr3_i4_fake_rrd(listener, beats, json!({})));
         }
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
@@ -1518,14 +1620,15 @@ mod tests {
     fn selftest_reports_legs_and_honest_speaker_fail() {
         // 假 rrd + 真总线客户端（同 I4 夹具口径）：relay 腿经假 rrd 应答走通；
         // actions 接收者即刻 drop——speaker/face 两腿走"主循环不在"业务 Err，
-        // 三腿混合 pass/fail，verdict 必 fail
+        // 假 rrd 不预置 wiring（json!({})，available 缺）→ wiring/取数 如实 fail，
+        // 四腿混合 pass/fail，verdict 必 fail
         let dir = std::env::temp_dir().join(format!("panel-selftest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let bus_path = dir.join("st.sock");
         let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
         std::thread::spawn(move || {
-            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())))
+            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), json!({}))
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
@@ -1561,7 +1664,7 @@ mod tests {
         let v: Value = serde_json::from_str(body).expect("自检应答是 JSON: {body}");
 
         let legs = v["legs"].as_array().expect("逐腿数组");
-        assert_eq!(legs.len(), 3, "并列三腿");
+        assert_eq!(legs.len(), 4, "并列四腿（三调＋接线腿）");
         assert_eq!(legs[0]["leg"], "speaker");
         assert_eq!(legs[0]["pass"], "fail", "恒败腿如实 fail，不折算通过（D15）");
         assert!(
@@ -1572,6 +1675,171 @@ mod tests {
         assert_eq!(legs[1]["pass"], "pass", "假 rrd 应答 noop，on/off 两步都成");
         assert_eq!(legs[2]["leg"], "face");
         assert_eq!(legs[2]["pass"], "fail", "主循环不在，face 腿走业务 Err");
-        assert_eq!(v["verdict"], "fail", "混合态 verdict 必 fail（全腿 pass 才 pass）");
+        assert_eq!(
+            legs[3]["leg"], "wiring/取数",
+            "假 rrd 未预置 wiring 应答（available 缺）→ 取数单腿 fail"
+        );
+        assert_eq!(legs[3]["pass"], "fail");
+        assert_eq!(
+            v["verdict"], "fail",
+            "混合态 verdict 必 fail（有 fail 即 fail）"
+        );
+    }
+
+    /// 自检腿四展开（批N4 件九笔4，全案 §7 ⑤ + F-31）：假 rrd 预置
+    /// available:true + 三态混合 checks——pass 如实 pass、not-applicable 映射
+    /// n-a（不拖累不救场）、未知值 fail-closed 折 fail（恒败腿不得折算通过）；
+    /// 判果是 rrd 的产出，面板只转述（leg = "wiring/<item>" 逐条摊开）。
+    #[test]
+    fn selftest_wiring_leg_expands_checks_with_three_states() {
+        let dir = std::env::temp_dir().join(format!("panel-wlegs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bus_path = dir.join("wl.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
+        let canned = json!({
+            "available": true,
+            "profile": "default",
+            "checks": [
+                { "item": "net:J-T:rail5v", "pass": "pass" },
+                { "item": "signal:J-T[1]:gnd", "pass": "not-applicable",
+                  "reason": "gnd-only 单线组不判导体" },
+                { "item": "pin:J-T[2]:vcc", "pass": "weird-unknown", "reason": "未知值兜底" }
+            ]
+        });
+        std::thread::spawn(move || {
+            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned)
+        });
+        std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
+        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
+
+        let (actions_tx, _rx) = mpsc::channel();
+        drop(_rx); // 接收者即刻 drop：speaker/face 走业务 Err
+        let shared = Arc::new(Rr3PanelShared {
+            bus,
+            bus_path: bus_path.to_string_lossy().into_owned(),
+            actions: actions_tx,
+            link: Arc::new(Mutex::new(None)),
+            limits: Rr3PanelLimits::default(),
+            selftest_face_expect: "happy",
+        });
+        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = tcp.local_addr().unwrap();
+        let jh = std::thread::spawn(move || {
+            let (mut sock, _) = tcp.accept().unwrap();
+            rr3_panel_handle(&mut sock, &shared)
+        });
+
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(b"POST /api/selftest HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+            .unwrap();
+        let _ = c.shutdown(std::net::Shutdown::Write);
+        let mut buf = Vec::new();
+        c.read_to_end(&mut buf).expect("自检应答必须完整可读");
+        jh.join().unwrap();
+        let text = String::from_utf8_lossy(&buf);
+        let body = text.split("\r\n\r\n").nth(1).expect("应答带 body");
+        let v: Value = serde_json::from_str(body).expect("自检应答是 JSON: {body}");
+
+        let legs = v["legs"].as_array().expect("逐腿数组");
+        assert_eq!(legs.len(), 6, "三调腿＋checks 三条逐条摊开: {v}");
+        assert_eq!(legs[0]["leg"], "speaker");
+        assert_eq!(legs[0]["pass"], "fail", "主循环不在，如实 fail");
+        assert_eq!(legs[1]["leg"], "relay");
+        assert_eq!(legs[1]["pass"], "pass", "假 rrd noop 兜底应答，两步都成");
+        assert_eq!(legs[2]["leg"], "face");
+        assert_eq!(legs[2]["pass"], "fail", "主循环不在，如实 fail");
+        assert_eq!(legs[3]["leg"], "wiring/net:J-T:rail5v");
+        assert_eq!(legs[3]["pass"], "pass", "rrd 判 pass 如实转述");
+        assert_eq!(legs[4]["leg"], "wiring/signal:J-T[1]:gnd");
+        assert_eq!(legs[4]["pass"], "n-a", "not-applicable 映射 n-a，不折算 fail");
+        assert_eq!(legs[4]["reason"], "gnd-only 单线组不判导体", "reason 透传");
+        assert_eq!(legs[5]["leg"], "wiring/pin:J-T[2]:vcc");
+        assert_eq!(legs[5]["pass"], "fail", "未知 pass 值 fail-closed 折 fail");
+        assert_eq!(legs[5]["reason"], "未知值兜底");
+        assert_eq!(
+            v["verdict"], "fail",
+            "wiring fail 腿在 → verdict fail（有 fail 即 fail；n-a 不救场也不拖累）"
+        );
+    }
+
+    /// 接线图 HTTP 透传（批N4 件九笔4）：GET /api/wiring → ctl.wiring 一问一答，
+    /// rrd 应答原样 200 回浏览器（available:true 快照在册面）。
+    #[test]
+    fn wiring_endpoint_passes_through_canned_snapshot() {
+        let dir = std::env::temp_dir().join(format!("panel-wpass-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bus_path = dir.join("wp.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
+        let canned = json!({
+            "available": true,
+            "profile": "default",
+            "pins": [],
+            "domains": [ { "name": "rail5v", "nominal_mv": 5000 } ],
+            "wires": [ { "connector": "J-T", "net": "rail5v" } ],
+            "checks": [ { "item": "net:J-T:rail5v", "pass": "pass" } ]
+        });
+        let expect = canned.clone();
+        std::thread::spawn(move || {
+            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned)
+        });
+        std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
+        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
+
+        let (actions_tx, _rx) = mpsc::channel();
+        let shared = Arc::new(Rr3PanelShared {
+            bus,
+            bus_path: bus_path.to_string_lossy().into_owned(),
+            actions: actions_tx,
+            link: Arc::new(Mutex::new(None)),
+            limits: Rr3PanelLimits::default(),
+            selftest_face_expect: "happy",
+        });
+        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = tcp.local_addr().unwrap();
+        let jh = std::thread::spawn(move || {
+            let (mut sock, _) = tcp.accept().unwrap();
+            rr3_panel_handle(&mut sock, &shared)
+        });
+
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(b"GET /api/wiring HTTP/1.1\r\n\r\n").unwrap();
+        let _ = c.shutdown(std::net::Shutdown::Write);
+        let mut buf = Vec::new();
+        c.read_to_end(&mut buf).expect("接线图应答必须完整可读");
+        jh.join().unwrap();
+        let text = String::from_utf8_lossy(&buf);
+        assert!(text.starts_with("HTTP/1.1 200 OK"), "透传 200: {text}");
+        let body = text.split("\r\n\r\n").nth(1).expect("应答带 body");
+        let v: Value = serde_json::from_str(body).expect("应答是 JSON: {body}");
+        assert_eq!(v, expect, "rrd 应答原样透传，面板不重判不改写");
+    }
+
+    /// covers 计数 pin（批N4 件九笔4，门 d 分母同源）：/api/wiring 申报
+    /// [pins]×wiring 全交叉读口的四族词表全集——pin 11 + role 7 + domain 11 +
+    /// axis 14 = 43，与 check.sh 步 ⑩ 的分母导出逐项对齐（红账 43 全转绿的
+    /// 面板侧申报表）；增删字段 = 改端点表 + 改本 pin + 过门 d。
+    #[test]
+    fn wiring_endpoint_declares_full_cross_cover_vocabulary() {
+        let entry = RR3_PANEL_ROUTES
+            .iter()
+            .find(|(_, p, _, _)| *p == "/api/wiring")
+            .expect("端点表必含 /api/wiring");
+        let covers: Vec<&str> = entry.2.to_vec();
+        assert_eq!(covers.len(), 43, "四族全集 43 项: {covers:?}");
+        let count = |prefix: &str| covers.iter().filter(|c| c.starts_with(prefix)).count();
+        assert_eq!(count("pin/"), 11, "pin 族 11 字段（RR3_PIN_KEYS 同源）");
+        assert_eq!(count("role/"), 7, "role 族 7 字段（roles.toml requires 同源）");
+        assert_eq!(count("domain/"), 11, "domain 族 11 字段（RR3_DOMAIN_KEYS 同源）");
+        assert_eq!(count("axis/"), 14, "axis 族 14 字段（RR3_ACT_PROFILE_FIELDS 同源）");
+        let mut sorted = covers.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), covers.len(), "covers 申报不得重复");
     }
 }

@@ -32,6 +32,9 @@ schema = 1
 # 成员清单来自 step ⑩ " D " 行打印（本文件落笔时点快照）。
 # 2026-10-19 对表：件九二观测面收官——ops 组 30 槽全转绿（status=done、fields
 # 清空），基线 73→43；余下四组（pin/role/domain/axis 43 项）状态不变。
+# 2026-10-20 对表：件九笔4 接线图收官——pin/role/domain/axis 四组 43 项全转绿
+# （GET /api/wiring 一端点 covers 申报四族全集，status=done、fields 清空），
+# 基线 43→0，差集空，门 d 转红（差集 > 0 即 FAIL）；提交见 conventions 同日对表。
 
 [[gap]]
 entry = "ops 槽读口缺失：五模块 ops 槽无面板可见读口（brain 六槽已随件六二转绿；本组随件九二全组转绿——观测面五端点建成，提交见 conventions 同日对表）"
@@ -39,53 +42,41 @@ kind = "无载体"
 fields = [
 ]
 owner = "批N4 件九二（已收口）：五模块 ops/list RPC＋面板 /api/{act,connect,interact,power,sense}/ops 五 GET 端点＋covers 申报 30 槽"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（43）；contracts/topics.toml 五 ops/list 主题"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；contracts/topics.toml 五 ops/list 主题"
 status = "done"
 
 [[gap]]
-entry = "pin 装配数据读口缺失：[pins] 派生视图字段无面板可见读口"
+entry = "pin 装配数据读口缺失：[pins] 派生视图字段无面板可见读口（本组随件九笔4 全组转绿——装配快照读口建成，提交见 conventions 同日对表）"
 kind = "无载体"
 fields = [
-  "pin/addr", "pin/channel", "pin/controller", "pin/device", "pin/direction",
-  "pin/failsafe", "pin/instance", "pin/mux_group", "pin/physical",
-  "pin/rail", "pin/role",
 ]
-owner = "批N4 件九：观测面——装配数据读口端点＋covers 申报"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
-status = "open"
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 pin 11 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
 
 [[gap]]
-entry = "role.requires 读口缺失：roles.toml 角色依赖项无面板可见读口"
+entry = "role.requires 读口缺失：roles.toml 角色依赖项无面板可见读口（本组随件九笔4 与 pin 组同端点合并申报转绿）"
 kind = "无载体"
 fields = [
-  "role/addr", "role/channel", "role/controller", "role/device",
-  "role/failsafe", "role/physical", "role/rail",
 ]
-owner = "批N4 件九：观测面——装配数据读口端点＋covers 申报（与 pin 组同端点可合并申报）"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
-status = "open"
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 role 7 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
 
 [[gap]]
-entry = "domain 域档读口缺失：能源域字段无面板可见读口"
+entry = "domain 域档读口缺失：能源域字段无面板可见读口（本组随件九笔4 全组转绿——装配快照读口建成，提交见 conventions 同日对表）"
 kind = "无载体"
 fields = [
-  "domain/armed", "domain/current_cap_ma", "domain/current_sense",
-  "domain/max_age_ms", "domain/mild_mv", "domain/name", "domain/nominal_mv",
-  "domain/sense", "domain/severe_mv", "domain/switch", "domain/switchable",
 ]
-owner = "批N4 件九：观测面——域档读口端点＋covers 申报"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
-status = "open"
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 domain 11 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
 
 [[gap]]
-entry = "axis 轴档案读口缺失：执行件档案十四键无面板可见读口"
+entry = "axis 轴档案读口缺失：执行件档案十四键无面板可见读口（本组随件九笔4 全组转绿——装配快照读口建成，提交见 conventions 同日对表）"
 kind = "无载体"
 fields = [
-  "axis/calibrated", "axis/center_deg", "axis/current_ceil_ma",
-  "axis/dir_sign", "axis/hard_stop", "axis/hi_deg", "axis/hold",
-  "axis/lo_deg", "axis/pin", "axis/schema", "axis/settle_ms",
-  "axis/slew_deg_s", "axis/source", "axis/warmup_ms",
 ]
-owner = "批N4 件九：观测面——轴档案读口端点＋covers 申报"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
-status = "open"
+owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 axis 14 字段"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
+status = "done"
