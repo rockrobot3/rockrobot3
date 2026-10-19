@@ -10,10 +10,11 @@
 //! → 打开 `Rr3AudioSink` → 面板线程 → 事件循环。循环做两件事：
 //! - `rr3_poll_wait` 收帧：订阅的 `rr3-brain/audio/tts_pcm`（MC-1 语音下行，流是
 //!   载荷通路）逐帧解码进收流缓冲；订阅的 `rr3-connect/net/link` 事件快照进缓存
-//!   （面板状态页数据源）；应答 exposes 的两个点名——
+//!   （面板状态页数据源）；应答 exposes 的三个点名——
 //!   `rr3-interact/tts/text`（对账 `pcm_bytes` 后排空缓冲播放，回
-//!   `{"played_ms","chars"}`）与 `rr3-interact/face/expression`（表情机切换，回
-//!   `{"expression","previous"}`）；
+//!   `{"played_ms","chars"}`）、`rr3-interact/face/expression`（表情机切换，回
+//!   `{"expression","previous"}`）与 `rr3-interact/ops/list`（批N4 件九二 ops
+//!   槽快照读口，白名单组体）；
 //! - 排空面板动作通道：face 由主循环串行代执行（面板 HTTP 线程不碰 sink/face
 //!   所有权，与 TTS 点名天然互斥，无锁）；beep 占位已随 MC-1 退役，如实回
 //!   业务错误"无本地波形源"；
@@ -59,6 +60,11 @@ const RR3_NET_LINK_TOPIC: &str = "rr3-connect/net/link";
 
 /// 收帧等待上界：无点名时空转一圈的代价，值不敏感（心跳在独立线程）
 const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
+
+/// 本模块 exposes 的 ops 槽快照读口（批N4 件九二，module.toml [rpc].exposes 同源）：
+/// 白名单组体应答，槽名与 assemble.toml/composite.toml 槽表申报同源
+/// （门 d covers 申报的对账面）
+const RR3_OPS_LIST_TOPIC: &str = "rr3-interact/ops/list";
 
 /// tts_pcm 流收缓冲（MC-1）：brain 语音下行**先流后点名**——流是载荷通路，
 /// `rr3-interact/tts/text` 点名是"该不该播"的唯一判据（0.0.5 方案 §20 第 1 条
@@ -239,10 +245,12 @@ pub fn rr3_interact_run() -> Result<(), String> {
                         face::RR3_FACE_TOPIC => {
                             rr3_handle_face(&mut face, &args, &cfg.face.non_pointable)
                         }
+                        RR3_OPS_LIST_TOPIC => Ok(json!({ "ops": rr3_interact_ops_snapshot(&cfg) })),
                         other => Err(format!(
-                            "rr3-interact 只 exposes {}/{}，收到 {other}",
+                            "rr3-interact 只 exposes {}/{}/{}，收到 {other}",
                             player::RR3_TTS_TOPIC,
-                            face::RR3_FACE_TOPIC
+                            face::RR3_FACE_TOPIC,
+                            RR3_OPS_LIST_TOPIC
                         )),
                     };
                     let result = result.unwrap_or_else(|e| json!({ "error": e }));
@@ -424,6 +432,35 @@ fn rr3_face_parse_args(args: &Value) -> Result<String, String> {
 /// `rr3-interact/face/expression` 的应答体：切换后的表情与切换前的表情。
 fn rr3_face_result(current: &str, previous: &str) -> Value {
     json!({ "expression": current, "previous": previous })
+}
+
+/// `rr3-interact/ops/list` 应答体（批N4 件九二，面板 /api/interact/ops 读口）：
+/// ops 槽快照，**白名单组体**——槽名与 assemble.toml/composite.toml 槽表申报
+/// 同源（face/player/panel/selftest 四组，门 d covers 申报的对账面），config
+/// 其余键一律不进应答。组合件级七槽（件五 I-17/I-18② 数据化）住 face_tick_ms/
+/// selftest_face_expect/panel 五限额，键 = 槽名逐字。
+fn rr3_interact_ops_snapshot(cfg: &Rr3InteractCfg) -> Value {
+    json!({
+        "face": {
+            "non_pointable": cfg.face.non_pointable,
+            "default_expression": cfg.face.default_expr,
+            "face_tick_ms": cfg.face.face_tick_ms,
+        },
+        "player": {
+            "prebuffer_ms": cfg.player.prebuffer_ms,
+            "volume_pct": cfg.player.volume_pct,
+        },
+        "panel": {
+            "panel_max_conns": cfg.panel.max_conns,
+            "panel_read_timeout_ms": cfg.panel.read_timeout_ms,
+            "panel_header_limit": cfg.panel.header_limit,
+            "panel_body_limit": cfg.panel.body_limit,
+            "panel_call_timeout_ms": cfg.panel.call_timeout_ms,
+        },
+        "selftest": {
+            "selftest_face_expect": cfg.selftest.face_expect,
+        },
+    })
 }
 
 // ---------- config 装载面（I-11：重开装载面） ----------

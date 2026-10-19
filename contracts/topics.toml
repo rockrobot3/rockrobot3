@@ -264,3 +264,42 @@ kind = "event"
 owner = "rr3-power"
 stable = "L2"
 note = "电源域电平观测摘要（0.0.5 增补轮六 批N2 件二，ADR-0021 裁定 2）：mv/tier/age_ms 同帧；域压消费走 Rr3Rail trait 本地决策不经总线（同 battery 语义），主题供次级观测面；bare 档经守护输出行呈现、不发本主题"
+
+# ---------- 批N4 件九二：五模块 ops 槽快照只读点名（照 rr3-brain/ops/list 先例） ----------
+# 面板观测面扩端点的总线承接（全案 §9 N4）：白名单组体应答，槽名与 assemble.toml/
+# composite.toml 槽表申报同源（门 d covers 申报的对账面）；密钥/凭据不进应答。
+
+[[topic]]
+name = "rr3-act/ops/list"
+kind = "request"
+owner = "rr3-act"
+stable = "L2"
+note = "ops 槽快照只读点名（批N4 件九二）：白名单四槽应答（led/servo 两组），行程真值随轴档案不在快照面；面板 /api/act/ops 读口"
+
+[[topic]]
+name = "rr3-connect/ops/list"
+kind = "request"
+owner = "rr3-connect"
+stable = "L2"
+note = "ops 槽快照只读点名（批N4 件九二）：白名单四槽应答（bt/wifi 两组），配网凭据不进应答；面板 /api/connect/ops 读口"
+
+[[topic]]
+name = "rr3-interact/ops/list"
+kind = "request"
+owner = "rr3-interact"
+stable = "L2"
+note = "ops 槽快照只读点名（批N4 件九二）：白名单十一槽应答（face/player/panel/selftest 四组）；面板 /api/interact/ops 读口"
+
+[[topic]]
+name = "rr3-power/ops/list"
+kind = "request"
+owner = "rr3-power"
+stable = "L2"
+note = "ops 槽快照只读点名（批N4 件九二）：白名单四槽应答（battery/charger 两组），rail 段键不在槽表不在快照面；面板 /api/power/ops 读口"
+
+[[topic]]
+name = "rr3-sense/ops/list"
+kind = "request"
+owner = "rr3-sense"
+stable = "L2"
+note = "ops 槽快照只读点名（批N4 件九二）：白名单七槽应答（audio/doa/vad 三组）；面板 /api/sense/ops 读口"

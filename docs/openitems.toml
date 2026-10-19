@@ -30,25 +30,17 @@ schema = 1
 # ============ 门 d 差集归因（批N4 件九登记，基线 73/79 时点） ============
 # 五组 = 门 d 分母五路减去已转绿的 brain ops 六槽（批N4 件六二，79→73）。
 # 成员清单来自 step ⑩ " D " 行打印（本文件落笔时点快照）。
+# 2026-10-19 对表：件九二观测面收官——ops 组 30 槽全转绿（status=done、fields
+# 清空），基线 73→43；余下四组（pin/role/domain/axis 43 项）状态不变。
 
 [[gap]]
-entry = "ops 槽读口缺失：五模块 ops 槽无面板可见读口（brain 六槽已随件六二转绿）"
+entry = "ops 槽读口缺失：五模块 ops 槽无面板可见读口（brain 六槽已随件六二转绿；本组随件九二全组转绿——观测面五端点建成，提交见 conventions 同日对表）"
 kind = "无载体"
 fields = [
-  "ops/blink_period_ms", "ops/channels", "ops/cutoff_voltage_mv",
-  "ops/default_expression", "ops/doa_bin_threshold_deg", "ops/face_tick_ms",
-  "ops/frame_ms", "ops/led_effects", "ops/link_report_period_ms",
-  "ops/low_voltage_mv", "ops/min_pass_len", "ops/min_speech_ms",
-  "ops/move_timeout_ms", "ops/non_pointable", "ops/panel_body_limit",
-  "ops/panel_call_timeout_ms", "ops/panel_header_limit", "ops/panel_max_conns",
-  "ops/panel_read_timeout_ms", "ops/prebuffer_ms", "ops/rms_start",
-  "ops/sample_period_ms", "ops/sample_rate", "ops/selftest_face_expect",
-  "ops/silence_tail_ms", "ops/state_min_interval_ms", "ops/state_period_ms",
-  "ops/timeout_ms", "ops/up", "ops/volume_pct",
 ]
-owner = "批N4 件九：观测面——五模块 ops/list RPC（照 rr3-brain/ops/list 先例）＋面板 GET 端点＋covers 申报"
-evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
-status = "open"
+owner = "批N4 件九二（已收口）：五模块 ops/list RPC＋面板 /api/{act,connect,interact,power,sense}/ops 五 GET 端点＋covers 申报 30 槽"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（43）；contracts/topics.toml 五 ops/list 主题"
+status = "done"
 
 [[gap]]
 entry = "pin 装配数据读口缺失：[pins] 派生视图字段无面板可见读口"

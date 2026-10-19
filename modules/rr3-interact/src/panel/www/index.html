@@ -126,6 +126,16 @@
     <table id="brain-ops"><thead><tr><th>原子</th><th>槽</th><th>值</th></tr></thead><tbody></tbody></table>
     <div class="msg" id="brain-ops-msg">槽值来自 rr3-brain config.toml（assemble.toml 申报六槽，llm 组取模型行实效值）；密钥不在此面（值零回显），保存/删除走上方模型密钥卡。</div>
   </div>
+  <div class="card">
+    <h2>模块配置面（rr3.call → rr3-模块/ops/list，只读；批N4 件九二）</h2>
+    <button class="btn off" onclick="moduleOpsLoad('act')">act</button>
+    <button class="btn off" onclick="moduleOpsLoad('connect')">connect</button>
+    <button class="btn off" onclick="moduleOpsLoad('interact')">interact</button>
+    <button class="btn off" onclick="moduleOpsLoad('power')">power</button>
+    <button class="btn off" onclick="moduleOpsLoad('sense')">sense</button>
+    <table id="module-ops"><thead><tr><th>模块</th><th>组</th><th>槽</th><th>值</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="module-ops-msg">各模块 config 注入的 ops 槽快照（槽名与装配清单申报同源）；行程/凭据/瞬态不在快照面。</div>
+  </div>
 </section>
 
 <section id="tab-wifi">
@@ -331,6 +341,28 @@ async function brainOpsLoad() {
     }
     setMsg("brain-ops-msg", "已读取 " + n + " 槽（密钥不在此面，值零回显守脑面）。", true);
   } catch (e) { setMsg("brain-ops-msg", "读取失败：" + e.message, false); }
+}
+// 五模块 ops 槽读面（批N4 件九二）：同一渲染范式，模块名入列（数组值逐字展示）
+async function moduleOpsLoad(mod) {
+  try {
+    const v = await api("/api/" + mod + "/ops");
+    const ops = v.ops || {};
+    const tb = $("module-ops").querySelector("tbody");
+    tb.innerHTML = "";
+    let n = 0;
+    for (const [group, slots] of Object.entries(ops)) {
+      for (const [slot, val] of Object.entries(slots)) {
+        const tr = document.createElement("tr");
+        const td1 = document.createElement("td"); td1.textContent = mod;
+        const td2 = document.createElement("td"); td2.textContent = group;
+        const td3 = document.createElement("td"); td3.textContent = slot;
+        const td4 = document.createElement("td"); td4.textContent = Array.isArray(val) ? val.join(" / ") : String(val);
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tb.appendChild(tr);
+        n++;
+      }
+    }
+    setMsg("module-ops-msg", mod + " 已读取 " + n + " 槽（白名单组体，策略面快照）。", true);
+  } catch (e) { setMsg("module-ops-msg", mod + " 读取失败：" + e.message, false); }
 }
 </script>
 </body>

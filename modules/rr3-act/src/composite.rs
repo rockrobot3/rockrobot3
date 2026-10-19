@@ -12,7 +12,8 @@
 //! → 读 config.toml → 选 HAL 执行面（servo / led-gpio / relay-gpio）并**开机
 //! 探活**（Unsupported 即 exit(1)：能力缺失显式回错，不静默带病常驻）→ 起反射
 //! 环宿主线程 → 主循环收帧。主循环只做两件事：
-//! 1. 应答本模块 exposes 的三个点名（servo/command、led/effect、relay/set）；
+//! 1. 应答本模块 exposes 的四个点名（servo/command、led/effect、relay/set、ops/list——
+//!    末者为批N4 件九二的 ops 槽快照读口）；
 //! 2. 订阅面：`rr3-brain/intent/result` 到达 → `actions` 结构化动作走两道归属门
 //!    （exposes 归属 + 意图面开放）逐条执行 relay/servo（0.0.3 T3，Q1 裁定
 //!    "brain 产出意图、执行器广播认领"；servo 批F2 随判向-转向编排开放——判据 8），
@@ -187,6 +188,10 @@ const RR3_SYSTEM_POWER_TOPIC: &str = "rr3-runtime/system/power";
 /// 收帧等待上界：无帧时空转一圈的代价，值不敏感（心跳在独立线程）
 const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
 
+/// 本模块 exposes 的 ops 槽快照读口（批N4 件九二，module.toml [rpc].exposes 同源）：
+/// 白名单组体应答，槽名与 assemble.toml 槽表申报同源（门 d covers 申报的对账面）
+const RR3_OPS_LIST_TOPIC: &str = "rr3-act/ops/list";
+
 // 限速门/眨眼节拍只看间隔不看绝对值：时基 = `rr_bus::Rr3TimeBase`（Instant
 // 单调毫秒，0.0.5 批I A-2 的 std 供给）。旧本地 SystemTime 实现自称"单调"
 // 是误称（墙钟可回拨），已删。
@@ -356,11 +361,17 @@ pub fn rr3_act_run() -> Result<(), String> {
                                 .map(|(on, prev)| (rr3_relay_result(on), None, Some((on, prev))))
                         }
                     }
+                    RR3_OPS_LIST_TOPIC => Ok((
+                        json!({ "ops": rr3_act_ops_snapshot(&cfg) }),
+                        None,
+                        None,
+                    )),
                     other => Err(format!(
-                        "rr3-act 只 exposes {}/{}/{}，收到 {other}",
+                        "rr3-act 只 exposes {}/{}/{}/{}，收到 {other}",
                         servo::RR3_SERVO_COMMAND_TOPIC,
                         led::RR3_LED_EFFECT_TOPIC,
-                        relay::RR3_RELAY_SET_TOPIC
+                        relay::RR3_RELAY_SET_TOPIC,
+                        RR3_OPS_LIST_TOPIC
                     )),
                 };
                 let reply = match outcome {
@@ -569,6 +580,28 @@ pub fn rr3_relay_result(on: bool) -> Value {
 /// （contracts/events/act-relay_state.schema.json 的形状事实源）
 pub fn rr3_relay_state_body(seq: u64, on: bool) -> Value {
     json!({ "seq": seq, "on": on })
+}
+
+/// `rr3-act/ops/list` 应答体（批N4 件九二，面板 /api/act/ops 读口）：ops 槽快照，
+/// **白名单组体**——槽名与 assemble.toml 槽表申报同源（led/servo 两组，门 d
+/// covers 申报的对账面），config 其余键（intent/reflex 等非槽表键）一律不进应答；
+/// 行程真值随轴档案（批N3 件五门 g），不在快照面。灯效子集按词表名成列。
+fn rr3_act_ops_snapshot(cfg: &Rr3ActCfg) -> Value {
+    json!({
+        "led": {
+            "blink_period_ms": cfg.led.blink_period_ms,
+            "led_effects": cfg
+                .led
+                .effects
+                .iter()
+                .map(Rr3LedEffect::rr3_led_effect_as_str)
+                .collect::<Vec<_>>(),
+        },
+        "servo": {
+            "move_timeout_ms": cfg.servo.move_timeout_ms,
+            "state_min_interval_ms": cfg.servo.state_min_interval_ms,
+        },
+    })
 }
 
 /// servo/command 参数下钻（Value→纯值）：缺参/类型错/越 u16 在这里点名；

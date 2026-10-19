@@ -23,7 +23,8 @@ publishes = ["rr3-act/servo/state", "rr3-act/relay/state", "rr3-act/motor/reflex
 subscribes = ["rr3-brain/intent/result", "rr3-runtime/system/power"]
 
 [rpc]
-exposes = ["rr3-act/servo/command", "rr3-act/led/effect", "rr3-act/relay/set"]
+# ops/list = ops 槽快照读口（批N4 件九二）：白名单四槽应答（led/servo），面板观测面读口
+exposes = ["rr3-act/servo/command", "rr3-act/led/effect", "rr3-act/relay/set", "rr3-act/ops/list"]
 
 [resources]
 restart_policy = "always"
