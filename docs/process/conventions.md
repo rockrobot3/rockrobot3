@@ -2721,6 +2721,36 @@ names_for_slot 断言）。**三事实源同批对表：可数 step 14→15 行�
 施工图§6-④ 行施工注记＋§4 变更记录同批（提交 `e918b76`，批N2 收口对账 2026-10-18）；contracts/README
 演进登记同批；基线文件初值随本件落 `tools/ci/gate-a-baseline.txt`。
 
+2026-10-19（**批N3 件六～件九收口：SPI 词形拆格＋D5 up 语义落码＋计量格补课**）：代码＋门＋
+文档三面同批。⑥件六 `6953222`：`profile.rs` SPI 派生臂（`spidev<N>` 词形＋channel 片选号 →
+`/dev/spidev<N>.<M>`，与旧 `[hardware]` 直给值逐字节对齐）＋门 n 扫面 `RR3_PIN_DERIVED_KEYS`
+7→8（直给与派生并存即红，装载红例落库）＋roles 新角色 `ui.face.spi`（iface=Rr3Display、
+requires=[controller,channel]、derives=[spi_device]）＋profiles 两份 `[hardware].spi_device`
+撤除迁移 `[[pin]]`＋gate-a 基线 23→21 同批下调——**敞口 18 行结项**（decisions §2 行 2 施工
+注记同批）。⑦件七 `4e77e1f`：`contracts/events/connect-net-link.schema.json` 补齐（net/link
+载荷 schema 此前缺位；up 只表链路层已关联不表可出网——D5，出网性由 `net.online` 通道另证、
+`Rr3LinkState` 不加字段；AP 态恒 `up=false`；`up=false ⇒ ssid/rssi_dbm` 必 null 的 §9 红线
+机器化进 allOf）＋`cloud/session` 未就绪文案按配网态分流（AP 态点名 `mode=ap`、不折叠成
+`up=false`；station 原词 append 保留，判据词"链路"两分支都在）＋`rr3_link_body` doc 注记
+（载荷字节不变）＋topics.toml net/link 行 note＋connect 册五处对表（N-4 随结；decisions D5
+行施工注记同批）。⑧件八 `3025205`＋`5018e20`：rr-hal-api 五型计量契约面（Rr3SampleKind/
+Rr3SampleQuality/Rr3Sample/Rr3Sensor/Rr3DigitalIn——Rr3Sensor 随三计量角色进 roles.iface 引用、
+Rr3DigitalIn 在册而 iface 未引用（数字输入面先行，差集第三段 3→4 如实进红账））＋
+assemble traits 7→9＋roles 三计量角色 charger/env/imu（derives=[] 显式空语义——roles.rs 撤
+"空 derives=红"判据、词形漂移判据跳过空 derives）＋profile `device` 键（RR3_PIN_KEYS 10→11）
+＋装载校验 ③-c 共址精化（同 (bus,addr) 共址须同 device 非空且型号在册，四反例矩阵）＋
+devices.toml SHTC3/ICM-42688 进场（现役六器件）＋profiles 两份 charger/env/imu 三 pin 补
+device＋architecture 四处对表（不 bump 版本）。附加评估 `e07bbe7`：B-14② brain 档位角
+70/90/110 档案派生改判批N4（语义位进 payload 属契约级变更／通道与 A-13③ 同链未立／语义位→
+档案键映射待裁定；三理由落 brain 册 B-14 行，intent.py 三常量维持）。⑨件九收口对账（本条目）：
+decisions §2 行 2＋D5 行施工注记、status 敞口 18 行结项＋19 行对表注记（id_reg 判据源 4→6，
+不结项）＋缺裁定类清零注记＋status 批N3 件六～件九行回填（本提交）。**四项推荐代行待追认**
+（AskUserQuestion 四问用户跳过、按全案推荐项代行施工，追认前不改裁决力）：charger 形状＝
+meter 采样面／env-imu 深度＝器件在册＋契约面先行、真件探测归器件批／家族E 立格＝三计量角色
+进场／D5＝up 只表链路关联。**三事实源同批对表**：红账 21＝基线（A=13＋B=0＋C=8＝trait 差
+4＋pin 键差 4），roles 现役 10 角色、devices 现役 6 器件、RR3_ASSEMBLE_HANDLE_TRAITS=9、
+RR3_PIN_KEYS=11。
+
 ## 3 结构纪律
 
 - **主语言 Rust（2026-10-04 立规）**：仓内一切新实现一律 Rust；存量非 Rust 面按

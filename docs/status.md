@@ -87,7 +87,7 @@
 收口证据，所以下面如实写明缺的是哪一手证据，不软化。
 
 **第八轮起本表有两类行，读之前先看类别**（**第十轮 裁-2 订正：原写"第 1–19 行是缺证据类"既与"18 是缺裁定类首条"互斥、又滞后于后来新增的 20/21 两行 ⇒ 按"区间写法是易失分母"的既有纪律改列全枚举**）：
-本表现共 **21 行**——**缺证据类＝第 1…17 行 ＋ 第 19…21 行（共 20 行）**；**缺裁定类＝只有第 18 行（共 1 行，且其**裁定半边已于 2026-10-17 结清**：`ui.face` 拆格已拍板——先立 SPI 词形规则、批N3 拆格 ＋ 门 n 扫面 7→8，裁定记录见 [decisions.md §2](process/decisions.md) 行 2；**余量只剩批N3 代码半边，收口即结项**）**。上面那段章程管的只有缺证据类。
+本表现共 **21 行**——**缺证据类＝第 1…17 行 ＋ 第 19…21 行（共 20 行）**；**缺裁定类＝只有第 18 行（共 1 行，且其**裁定半边已于 2026-10-17 结清**：`ui.face` 拆格已拍板——先立 SPI 词形规则、批N3 拆格 ＋ 门 n 扫面 7→8，裁定记录见 [decisions.md §2](process/decisions.md) 行 2；**余量只剩批N3 代码半边，收口即结项**）**。上面那段章程管的只有缺证据类。**2026-10-19 对表：第 18 行代码半边已随批N3 件六收口（`6953222`），18 行结项 ⇒ 缺裁定类清零**（裁定记录与施工注记见 [decisions.md §2](process/decisions.md) 行 2）。
 第 **18** 行是**缺裁定**类的首条——它收口不需要任何硬件，需要的是**一次用户裁定**（施工图 §6 第二问）+ 一批代码（批 N3）；**裁定半边已随 2026-10-17 拍板轮结清（未决对象唯一登记处 = [decisions.md](process/decisions.md)，裁定类预算自此为零）**。
 它之所以也住这张表，是因为 [模块设计索引 §11 L-23](design/模块设计索引.md) 明文要求"必须挂敞口账，不许等它自然消失"，
 而**本表是全仓唯一的敞口账**——为它另开一张表就等于造第二个真值点（那正是 L-23 自己在批的病）。
@@ -112,8 +112,8 @@
 | 15 | **证据号命名空间**（D11 界面门与"mock 不得充当在位证据"的正面答案） | `docs/evidence/<形态>/<编号>.md` 规则立起来，且面板/装载期能校验所引编号存在并形态匹配 | 实测 `docs/evidence/` 与 `evidence/` 均不存在，仓内无任何证据编号规则（conventions 只有"每行带证据路径"的散文；`contracts/golden/` 是 IPC 字节向量不是板上对拍记录）⇒ D11"`armed=true` 须引用一条真板对拍证据"这条**界面门不可执行**。工单 brain **B-15**，列批N4 前置；细则见全案 §18 F-24 |
 | 16 | **两条链上只能由板上证据收口的三问**：板侧运行面失败（舵机拒动/移动失败）在真机上发生过没有、`rr3-audio-rec` 的 gaps/restarts 真实量级、云失败各分支（HTTP 非 200 / 超时 / 坏 JSON / 缺 key）的实际分布 | 一次真板长跑的串口日志样本 + 一次 `RR3_BRAIN_CLOUD` 真云档的 counters 读数 | 第六轮追流（全案 §20.5/§20.6）证明这三问**在仓内无答案**：板侧 `rt_move` 的失败只 `eprintln` 且返回值被 `exec_job` 丢弃、不回宿主；`audio-rec` 的 gaps 只 println 不落 counters；`mock` 档使全部云失败分支不可达。本机无 ESP-IDF、板不在手 ⇒ **缺码与缺载体并存**，归 0.0.7 验证窗；在拿到样本前，可达终点表相应三格写"不能 + 触发条件"，不许留白 |
 | 17 | **三形态的平台事实登记表取值**（`contracts/platform/<平台>.toml`：控制器词表 / ADC 脚集 / input-only 脚集 / 冲突矩阵 / 具名构造表，全案 §4.6，第七轮 T-4 逼出的对象） | 每形态一份**由芯片数据手册或 HAL 直读**的取值集 + 一次"故意把模拟测点绑到无 ADC 脚"的装载红例 | 第七轮查出：装载校验 **④-b/⑤-a/⑤-b/⑧-a/⑧-b 五个判定位一直在读这张表，而它从头到尾没有住处**（新类 L-28）——本轮给它一个可指的文件名与形状，**取值仍待器件**：ESP32 一份可由 `tools/esp32-periph-base/src/board.rs` 直读（`ADC_RAIL_PIN=34`、GPIO22/23 硬线 I2C、GPIO19 与 VSPI 预留同脚这三条已在案），树莓派与 RK3566 今天**没有任何机器可查的平台事实**，批N1 只能先交演练实例。与 D9/D10 同族（**卡取值不卡结构**）；表为空 ⇒ 基-2（门 b 装载门）的那五个判定位一律判不了，故 **基-22 必须与基-2 同批** |
-| 18 | **`spi_device` 不在门 n 扫面 ⇒ L-23（新设计自带第二真值点）对 SPI 那条链未闭** | 门 n 的扫面 `RR3_PIN_DERIVED_KEYS` 由 **7** 键扩到 **8** 键（含 `spi_device`）、`[hardware]` 里再出现 `spi_device` 即红的一次装载红例；~~前提是先有施工图 §6 第二问的裁定~~（**该裁定已于 2026-10-17 拍板**：先立 SPI 词形规则、批N3 拆格，见 [decisions.md §2](process/decisions.md) 行 2） | 第八轮 实-9 + **实-15** 查实：`rr-registry/src/assemble.rs:56-67` 的 `RR3_ASSEMBLE_DESC_KEYS` **十名，含 `spi_device`**（注释写明它是 0.0.6 链④按裁定流程扩进去的）；而 `rrd/src/profile.rs:91-99` 的门 n 扫面 `RR3_PIN_DERIVED_KEYS: [&str; 7]` **不含**它 ⇒ SPI 器件（MAX7219 点阵）仍走 schema 2 的 `[hardware]` 直给旧路，**注入路径对它不唯一、门 n 对它永远不闭**。两张表相差的三名（`alsa_device`/`link_ifname`/`spi_device`）恰好就是 `contracts/roles.toml:23` 的三个非引脚键。**收口终点＝批 N3**——**裁定半边已结（2026-10-17 拍板：批N3 交 SPI 词形规则 ＋ 门 n 扫面 7→8，同批拆格；不给 SPI 显示面造角色名）**，余量只剩批N3 代码半边。**实-15 顺带查出**：施工图 Task 9 Step 2 原本预写的那行文本（"`spi_*` 派生键未入 `RR3_ASSEMBLE_DESC_KEYS`"）与本行第一句矛盾，已改判，**不得回抄原文** ／ **2026-10-16 对表**：该号位原由并行设备填入一句假账（"spi 派生键未入 `RR3_ASSEMBLE_DESC_KEYS`"与 `assemble.rs:66` 矛盾；`ui.face.matrix` 不在 `roles.toml` 四角色里），本轮就地订正文本并**保留其号**（先占者保号）；判据已升 **实-16**——抄入台账的每一行须由执行者再跑一次该行点名的命令，写侧 + 抄侧两次回执缺一不可（全案 §22.9） |
-| 19 | **L-14 器件级探测的寄存器 ID 读回比对**（INA219 0x00 = 0x2268 等 `contracts/devices.toml` `id_reg` 判据源）：本批（n1-10）已立 sysfs 器件节点判据 + "总线在、器件不在"反例，**读回比对需 i2c-dev 事务（会碰器件），本机 macOS/CI 无法实跑** | 真板上一轮"器件没接 → 该格缺格点名"实测（sysfs 节点不出现）+ 读回比对落 HAL 后端（与 P-5 电流符号派生共用同一 INA219 句柄，不另立句柄） | 全案 §12.1 / power **P-11** + sense **S-11** 需求面；判据本体已落 [`probe.rs`](../base/runtime/rrd/src/probe.rs)（批N1 n1-10），读回归器件与真板批——**结构先行，取值随后**（D9/D10 同族纪律） |
+| 18 | **`spi_device` 不在门 n 扫面 ⇒ L-23（新设计自带第二真值点）对 SPI 那条链未闭** | 门 n 的扫面 `RR3_PIN_DERIVED_KEYS` 由 **7** 键扩到 **8** 键（含 `spi_device`）、`[hardware]` 里再出现 `spi_device` 即红的一次装载红例；~~前提是先有施工图 §6 第二问的裁定~~（**该裁定已于 2026-10-17 拍板**：先立 SPI 词形规则、批N3 拆格，见 [decisions.md §2](process/decisions.md) 行 2） | 第八轮 实-9 + **实-15** 查实：`rr-registry/src/assemble.rs:56-67` 的 `RR3_ASSEMBLE_DESC_KEYS` **十名，含 `spi_device`**（注释写明它是 0.0.6 链④按裁定流程扩进去的）；而 `rrd/src/profile.rs:91-99` 的门 n 扫面 `RR3_PIN_DERIVED_KEYS: [&str; 7]` **不含**它 ⇒ SPI 器件（MAX7219 点阵）仍走 schema 2 的 `[hardware]` 直给旧路，**注入路径对它不唯一、门 n 对它永远不闭**。两张表相差的三名（`alsa_device`/`link_ifname`/`spi_device`）恰好就是 `contracts/roles.toml:23` 的三个非引脚键。**收口终点＝批 N3**——**裁定半边已结（2026-10-17 拍板：批N3 交 SPI 词形规则 ＋ 门 n 扫面 7→8，同批拆格；不给 SPI 显示面造角色名）**，余量只剩批N3 代码半边。**实-15 顺带查出**：施工图 Task 9 Step 2 原本预写的那行文本（"`spi_*` 派生键未入 `RR3_ASSEMBLE_DESC_KEYS`"）与本行第一句矛盾，已改判，**不得回抄原文** ／ **2026-10-16 对表**：该号位原由并行设备填入一句假账（"spi 派生键未入 `RR3_ASSEMBLE_DESC_KEYS`"与 `assemble.rs:66` 矛盾；`ui.face.matrix` 不在 `roles.toml` 四角色里），本轮就地订正文本并**保留其号**（先占者保号）；判据已升 **实-16**——抄入台账的每一行须由执行者再跑一次该行点名的命令，写侧 + 抄侧两次回执缺一不可（全案 §22.9）／**2026-10-19 结项（批N3 件六 `6953222`）**：词形规则落 `profile.rs` 派生臂（`spidev<N>`＋channel → `/dev/spidev<N>.<M>`，与旧直给值逐字节对齐）＋`RR3_PIN_DERIVED_KEYS` 7→8（`spi_device` 进门 n 扫面，直给与派生并存即红——一次装载红例落库）＋拆格半边 roles 新角色 `ui.face.spi` 与 profiles 两份 `[hardware].spi_device` 撤除迁移 `[[pin]]`；L-23 对 SPI 链闭合，本行结项（施工注记见 [decisions.md §2](process/decisions.md) 行 2） |
+| 19 | **L-14 器件级探测的寄存器 ID 读回比对**（INA219 0x00 = 0x2268 等 `contracts/devices.toml` `id_reg` 判据源）：本批（n1-10）已立 sysfs 器件节点判据 + "总线在、器件不在"反例，**读回比对需 i2c-dev 事务（会碰器件），本机 macOS/CI 无法实跑** | 真板上一轮"器件没接 → 该格缺格点名"实测（sysfs 节点不出现）+ 读回比对落 HAL 后端（与 P-5 电流符号派生共用同一 INA219 句柄，不另立句柄） | 全案 §12.1 / power **P-11** + sense **S-11** 需求面；判据本体已落 [`probe.rs`](../base/runtime/rrd/src/probe.rs)（批N1 n1-10），读回归器件与真板批——**结构先行，取值随后**（D9/D10 同族纪律）／**2026-10-19 对表（批N3 件八①）**：`id_reg` 判据源随计量格补课 4→6（SHTC3/ICM-42688 演练行进场，`3025205`），结构面再实、取值随后口径不变，本行不结项（真板批） |
 | 20 | **出厂轨（buildroot / `S99rrd`）上装载门真跑过一次的证据** | 一份全量 make 产出的镜像里，`/etc/init.d/S99rrd` 带 `--profile` 启动后的一次 `rrd` 日志（能看到 31 位判据里那 14 位真在判），以及一次**故意写坏接线档**让它拒起的对照 | 第八轮 实-1 / 新类 **L-31** 查出：今天出厂轨**根本不传 `--profile`**（`base/os/buildroot/board/radxa-zero3/post-build.sh:129-155` 生成的启动脚本只有 `--socket`/`--manifest`），`daemon.rs:209` 的 `None` 臂（`:248-253`）于是合法地返回空 `hal_bindings` + 空降级集 ⇒ **十条校验一个判定位都不跑，而 `rrd` 退出码 0、日志无异常**。修法是代码侧的（`--profile` 升必选 + 两轨参数集对账，**基-23**，批N1），但**"修好了"这件事只能由一次出厂轨启动日志证明**，本机无 Radxa ZERO 3 也无全量 Buildroot 环境（同第 6 行）。在拿到证据前，**不得把"装载门已建成"读成"出厂机上装载门在跑"** |
 | 21 | **rtos 档"只改数据即改接线"的行为证据** | 改一次 `profiles/esp32-mini.toml` 的 `[pins].physical` 取值，板上行为随之变化的一次实录；以及一次**抽掉注入通路**让它 fail-closed 拒起的对照 | 第八轮 实-6 查出：这条链**今天只做了一档**。host 档是真的（`profiles/*.toml` → `[pins]` 派生 → `RR3_HAL_BINDINGS` → `descriptor.rs`）；rtos 档四项零命中——板侧引脚**硬编码**（`tools/esp32-periph-base/src/board.rs`，取证时点 `e9a764f` :148/150/174；原记 `:156/158/182` 系 `b11dd2f` 时点）、桥上**无配置命令集**、平台词形硬编码在 `rrd/src/profile.rs:660`、`:1006` 的档位守卫拿字面量 `"host"` 比 ⇒ **三份接线档与 `[pins]` 对 rtos 是零消费者的装饰数据**。修法是 **基-24 桥上配置腿**（归属 connect 册，批N1），验收判据是**行为判据**而非"代码里读了配置"；本机无 ESP-IDF 也无板（同第 13/14 行），故只能登记为敞口。在拿到证据前，**"裁剪与接线都只改数据"这句必须带档位限定读** |
 | 22 | **单元装配位仍住实现 crate**（基-35 半切余量①）：装配选择函数 `rr3_hal_*()` 住 `rr-hal/src/backend.rs`（实现 crate），装配位今日在五单元 composite.rs 内——⑨-w 白名单第一类 `rr_hal::backend::*` 因它存在而必须放行，Cargo 级拆边需**装配上移** | **缺裁定类**（首条先例＝第 18 行）：一次用户裁定"装配位上移到哪一层"（装配层收编装配选择，单元只持 `Box<dyn 契约 trait>` 句柄）＋一批代码；裁定归属 = [decisions.md §3 在册未决](process/decisions.md) | 施工事实（`be69c09`，⑨-w 三判据）：单元 Cargo 已直依 `rr-hal-api`、契约符号 use 已切 `rr_hal_api::`（30 处），但 rr-hal 边按裁定 12 保留装配用 ⇒ **"单元零实现 crate 引用"今天不成立**。不裁的缺省态：白名单四类冻结现状，**不阻塞批N2–N5**；上移落地后 [check.sh](../tools/ci/check.sh) ⑨-w 白名单第一类同步收紧为 Cargo 禁令（该步注记在案） |
@@ -590,7 +590,32 @@
   注释/断言提及同红；行程唯一真值点 = 轴档案 center/lo/hi，host 注入/板侧生成表两路同源）；
   conventions §2 对表段＋architecture §14 门表 ⑨-e 行"待建"改"已建"（相邻 ⑨-d 行同批订正）＋
   全案 §16.4 待建门链＋基-5 行施工回执（两处索引）＋act 册 §0/§3 行程口径与 A-13/A-17 状态同批；
-  敞口表无增减（brain 档位角 B-14② 挂独立 todo 不占敞口行）。
+  敞口表无增减（brain 档位角 B-14② 当日已评估改判批N4——落档 `e07bbe7`，注记见 brain 册 B-14 行；挂独立 todo 不占敞口行）。
+
+- **2026-10-19 批N3 件六～件九：SPI 词形拆格＋D5 up 语义落码＋计量格补课＋收口对账**：
+  ⑥件六 `6953222` ui.face SPI 词形拆格——`profile.rs` 派生臂（`spidev<N>` 词形＋channel 片选号，
+  与旧 `[hardware]` 直给逐字节对齐）＋`RR3_PIN_DERIVED_KEYS` 7→8＋roles 新角色 `ui.face.spi`＋
+  profiles 两份 `[hardware].spi_device` 撤除迁移 `[[pin]]`＋CI contract/roles 判据同批＋gate-a
+  基线 23→21 同批下调＋architecture 三处对表——**敞口 18 行结项**；⑦件七 `4e77e1f` D5 up 语义
+  定案落码——`contracts/events/connect-net-link.schema.json` 补齐（§5 点名的缺 schema：up 只表
+  链路层已关联不表可出网、出网性由 `net.online` 另证、AP 态恒 `up=false`、`up=false ⇒
+  ssid/rssi_dbm` 必 null 红线进 allOf）＋`cloud/session` 未就绪文案按配网态分流（AP 态点名
+  `mode=ap`，不折叠 `up=false`；station 原词保留）＋topics.toml note＋connect 册五处对表——
+  connect 册 N-4 随结；⑧件八 `3025205`＋`5018e20` charger/env/imu 计量格补课——rr-hal-api
+  五型契约面（Rr3SampleKind/Rr3SampleQuality/Rr3Sample/Rr3Sensor/Rr3DigitalIn）＋assemble
+  traits 7→9＋roles 三计量角色（derives=[] 显式空语义）＋profile `device` 键（RR3_PIN_KEYS 11）
+  ＋③-c 共址精化（同 (bus,addr) 须同 device 且型号在册）＋devices.toml SHTC3/ICM-42688 进场
+  （现役六器件）＋profiles 两份 charger/env/imu 三 pin 补 device＋architecture 四处对表；附加
+  评估 `e07bbe7` B-14② brain 档位角派生改判批N4（语义位进 payload 属契约级变更／通道与
+  A-13③ 同链未立／映射待裁定，三理由落 brain 册 B-14 行）。**四项推荐代行待追认**（AskUserQuestion
+  四问用户跳过，按全案推荐项代行施工、事实已在案，追认前不改裁决力）：charger 形状＝meter
+  采样面（件八①）；env/imu 深度＝器件在册＋契约面先行、真件探测归器件批（件八①，D9 同族）；
+  家族E 立格＝charger/env/imu 三计量角色进场（件八①）；D5＝up 只表链路关联、出网性
+  `net.online` 另证（件七，decisions §2 D5 行施工注记同批）。**三事实源同批对表：红账 21 与
+  基线持平**（A=13＋B=0＋C=8＝trait 差 4＋pin 键差 4；roles 现役 10 角色、devices 现役 6 器件、
+  RR3_ASSEMBLE_HANDLE_TRAITS=9、RR3_PIN_KEYS=11）；decisions §2 行 2＋D5 行施工注记、
+  conventions §2 批N3 条目、敞口 18 行结项＋19 行对表注记＋:90 缺裁定类清零注记、本行同批
+  （件九收口对账，本提交，2026-10-19）。
 
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
