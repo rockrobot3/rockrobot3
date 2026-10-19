@@ -147,6 +147,7 @@ name = "rr3-connect/net/link"
 kind = "event"
 owner = "rr3-connect"
 stable = "L1"
+note = "链路摘要事件（翻转必发 + 周期保底；up=链路层已关联不表可出网——增补轮六 D5 裁定，出网性由 net.online 通道另证；AP 态恒 up=false）。负载 schema 见 events/connect-net-link.schema.json"
 
 [[topic]]
 name = "rr3-connect/cloud/session"
