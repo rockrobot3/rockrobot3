@@ -33,8 +33,15 @@ pub fn rr3_session_parse_args(args: &Value) -> Result<(), String> {
 /// 失败（折 result.error，不断链）。"链路"是判据词，e2e 靠它点名。
 /// ssid 序列化面：契约值类型 `Rr3SsidText` 出定长缓冲取 &str（serde_json 不
 /// 进契约类型，F1 定形）。
-pub fn rr3_session_result(st: &Rr3LinkState) -> Result<Value, String> {
+/// 未就绪文案按配网态分流（增补轮六 D5 裁定，2026-10-19 落码）：AP 态必须
+/// 点名这一种，不许折叠成 up=false——"本机热点没配网"与"station 断链"是
+/// 两个现场，混报会把没配网误诊成网断了。station 分支保留原词（append 语义，
+/// 原文案字面未动，既有断言/e2e 判据词"链路"两分支都在）。
+pub fn rr3_session_result(st: &Rr3LinkState, mode: &str) -> Result<Value, String> {
     if !st.up {
+        if mode == "ap" {
+            return Err("配网态 AP（mode=ap，未关联上游链路），云端会话拒绝建立".into());
+        }
         return Err("链路未就绪（net/link up=false），云端会话拒绝建立".into());
     }
     Ok(json!({
@@ -71,13 +78,27 @@ mod tests {
     }
 
     /// 会话裁决：链路 up 回 mock 会话（回显 ssid），down 折 error 点名"链路"。
+    /// 未就绪文案按配网态分流（D5）：AP 态点名 mode=ap（不许折叠成 up=false），
+    /// station 断链保留原词。
     #[test]
     fn session_result_follows_link_up() {
-        let v = rr3_session_result(&st(true)).unwrap();
+        let v = rr3_session_result(&st(true), "station").unwrap();
         assert_eq!(v["session"], "opened");
         assert_eq!(v["endpoint"], "mock");
         assert_eq!(v["ssid"], "rock-sim");
-        let e = rr3_session_result(&st(false)).unwrap_err();
+        let e = rr3_session_result(&st(false), "station").unwrap_err();
         assert!(e.contains("链路"), "断链要点名判据词: {e}");
+        assert!(
+            e.contains("up=false"),
+            "station 断链保留原词（append 语义）: {e}"
+        );
+        let e = rr3_session_result(&st(false), "ap").unwrap_err();
+        assert!(
+            e.contains("链路") && e.contains("mode=ap"),
+            "AP 态必须点名这一种，不许折叠成 up=false（D5）: {e}"
+        );
+        // up=true 时不管配网态——会话建立（up 是判据，mode 只影响未就绪文案）
+        let v = rr3_session_result(&st(true), "ap").unwrap();
+        assert_eq!(v["session"], "opened");
     }
 }
