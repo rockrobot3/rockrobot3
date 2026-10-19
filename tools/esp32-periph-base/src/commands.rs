@@ -277,6 +277,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                     rail_raw,
                     rail_tier,
                     rail_low,
+                    selfheal_skip,
                     audio_on,
                     audio_seq,
                     audio_sent,
@@ -294,6 +295,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         b.st.rail_raw,
                         b.st.rail_tier,
                         b.st.rail_low_events,
+                        b.st.selfheal_skipped,
                         b.st.audio_on,
                         b.st.audio_seq,
                         b.st.audio_sent,
@@ -302,7 +304,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                     )
                 };
                 Ok(format!(
-                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} oled_last=\"{last_text}\" free={}B min_free={}B",
+                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} oled_last=\"{last_text}\" free={}B min_free={}B",
                     if wander { "on" } else { "off" },
                     rail_tier.name(),
                     if audio_on { "on" } else { "off" },

@@ -5,8 +5,9 @@ use esp_idf_hal::i2c::I2cDriver;
 
 use crate::board::{
     I2C_CHUNK_GAP_MS, I2C_PAGE_ATTEMPTS, I2C_RETRY, I2C_RETRY_DELAY_MS, I2C_TIMEOUT, OLED_ADDR,
-    OLED_COLS, OLED_CONTRAST_LEVELS, OLED_ROWS, PIN_I2C_SCL, PIN_I2C_SDA,
+    OLED_COLS, OLED_CONTRAST_LEVELS, OLED_ROWS,
 };
+use crate::state::rr3_board_bindings_i2c_pair;
 
 // ---------------------------------------------------------------------------
 // SSD1306 5x7 字模（ASCII 32–126，经典公共域 glcdfont 表；每字符 5 列 LSB 在左）
@@ -159,18 +160,25 @@ fn i2c_write_retry(i2c: &mut I2cDriver, addr: u8, bytes: &[u8]) -> Result<(), St
 /// 换向噪声会在**空闲期**（两笔事务之间）把 SSD1306 的 I2C 状态机顶进"半途态"——此后
 /// 恒 NACK，而**此刻 SDA 是高电平**（不是被拉低的"锁死"），故条件版（只在 SDA 低时打
 /// 时钟）根本不触发、救不回来。故在每次动作收尾（尤其舵机动作后）**强制**重同步一次。
+///
+/// **引脚真值 fail-closed（批N4 件七(c)）**：SDA/SCL 号取注入态
+/// ([`crate::state::rr3_board_bindings_i2c_pair`]，宿主经 `rr3.set_bindings` 下发）；
+/// 未注入即**静默拒**（不碰 GPIO——引脚号未知时任何位打操作都是越权）。运行期每拍
+/// 调用方的 `selfheal_skipped` 计数与本路径重试终败的 Err 冒泡各自是观测面。
 pub(crate) fn i2c_bus_recover(force: bool) {
     use esp_idf_sys as sys;
-    const SDA: i32 = PIN_I2C_SDA;
-    const SCL: i32 = PIN_I2C_SCL;
+    let Some((sda, scl)) = rr3_board_bindings_i2c_pair() else {
+        return;
+    };
+    let (sda, scl) = (sda as i32, scl as i32);
     unsafe {
-        sys::gpio_set_direction(SDA, sys::gpio_mode_t_GPIO_MODE_INPUT);
-        sys::gpio_set_pull_mode(SDA, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
-        sys::gpio_set_direction(SCL, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
-        sys::gpio_set_pull_mode(SCL, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
-        sys::gpio_set_level(SCL, 1);
+        sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
+        sys::gpio_set_pull_mode(sda, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
+        sys::gpio_set_direction(scl, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+        sys::gpio_set_pull_mode(scl, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
+        sys::gpio_set_level(scl, 1);
         sys::esp_rom_delay_us(5);
-        let stuck = sys::gpio_get_level(SDA) == 0;
+        let stuck = sys::gpio_get_level(sda) == 0;
         if force || stuck {
             // SDA 被从机拉低 = 丢拍锁死：9 个时钟走完从机位计数器 + STOP 释放。
             // force 但 SDA 高 = 半途态：同样打 9 时钟 + STOP 把从机推回 idle。
@@ -178,25 +186,25 @@ pub(crate) fn i2c_bus_recover(force: bool) {
                 println!("[periph] I2C 自愈：SDA 被从机拉低（丢拍锁死），打 9 时钟 + STOP");
             }
             for _ in 0..9 {
-                sys::gpio_set_level(SCL, 0);
+                sys::gpio_set_level(scl, 0);
                 sys::esp_rom_delay_us(5);
-                sys::gpio_set_level(SCL, 1);
+                sys::gpio_set_level(scl, 1);
                 sys::esp_rom_delay_us(5);
             }
-            sys::gpio_set_direction(SDA, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
-            sys::gpio_set_level(SDA, 0);
+            sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+            sys::gpio_set_level(sda, 0);
             sys::esp_rom_delay_us(5);
-            sys::gpio_set_level(SCL, 1);
+            sys::gpio_set_level(scl, 1);
             sys::esp_rom_delay_us(5);
-            sys::gpio_set_level(SDA, 1);
+            sys::gpio_set_level(sda, 1);
             sys::esp_rom_delay_us(5);
-            sys::gpio_set_direction(SDA, sys::gpio_mode_t_GPIO_MODE_INPUT);
+            sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
         }
         // 交还 I2C 外设（IOMUX 复位为 I2C 功能 + 内部上拉），驱动内部状态不受影响
         sys::i2c_set_pin(
             sys::i2c_port_t_I2C_NUM_0,
-            SDA,
-            SCL,
+            sda,
+            scl,
             true,
             true,
             sys::i2c_mode_t_I2C_MODE_MASTER,
@@ -209,10 +217,20 @@ pub(crate) fn i2c_bus_recover(force: bool) {
 /// 全部事务 NACK/超时（真板实录：复位后 boot 扫描恒 `[]`、init 5 连败）。IC 上电
 /// 前先用 GPIO 手动发 9 个 SCL 时钟把从机的位计数器走完、再补一个 STOP，SDA 即
 /// 释放。裸寄存器操作（不进 HAL 驱动状态机），随后 I2cDriver::new 会重配这两脚。
-pub(crate) unsafe fn i2c_bus_unstick() {
+///
+/// **引脚真值 fail-closed（批N4 件七(c)）**：引脚号取注入态（同
+/// [`i2c_bus_recover`]）；未注入回 `false` 拒不动作（boot 期桥未连、注入必缺席
+/// ——v3 拍板：消费面级 fail-closed，不做板级等宿主的启动时序重构，启动期解卡
+/// 缺席的取舍与点名归调用方），调用方据此打站。
+///
+/// 返回：`true` = 已注入且解卡动作走完（SDA 高则本就无事可做，同回 true）；
+/// `false` = 绑定未注入，拒。
+pub(crate) unsafe fn i2c_bus_unstick() -> bool {
     use esp_idf_sys as sys;
-    let sda = PIN_I2C_SDA;
-    let scl = PIN_I2C_SCL;
+    let Some((sda, scl)) = rr3_board_bindings_i2c_pair() else {
+        return false;
+    };
+    let (sda, scl) = (sda as i32, scl as i32);
     // SDA 输入上拉（读电平）、SCL 开漏输出上拉
     sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
     sys::gpio_set_pull_mode(sda, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
@@ -239,6 +257,7 @@ pub(crate) unsafe fn i2c_bus_unstick() {
         sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
         println!("[periph] I2C 总线解卡：SDA 曾被拉低，已发 9 时钟 + STOP");
     }
+    true
 }
 
 /// 发命令（控制字节 0x00 + 命令字节序列）。SSD1306 控制字节 Co=0/D/C#=0 表示

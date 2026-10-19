@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::{esp_random, esp_timer_get_time};
-use rr_ipc::Rr3ByteStream;
+use rr_ipc::{Rr3BoardBindings, Rr3ByteStream};
 
 use crate::board::{wander_step, Axis};
 use crate::link::{reply, UartIo};
@@ -17,6 +17,35 @@ pub(crate) fn now_ms() -> u64 {
 /// 硬件 RNG（WIFI/蓝牙未启也能用——ESP32 硬件熵源独立于无线栈）。
 pub(crate) fn esp_random_u32() -> u32 {
     unsafe { esp_random() }
+}
+
+// ---------------------------------------------------------------------------
+// 板侧绑定单点（rr3.set_bindings 注入态，批N4 件七(c)）：宿主经桥上 method 下发
+// 的引脚真值（esp32-mini [hardware] 三键 → rrd RR3_HAL_BINDINGS → supervisor env
+// → 桥），落此进程级单例。引脚号是芯片级物理事实，且 I2C 自愈的裸寄存器路径在
+// 深层自由函数（[`crate::oled`]，够不到 `Bus`）——故不随 `PeriphState` 走，单点
+// 存取。**消费面 fail-closed：未注入（None）即拒不动作**，观测面在调用方
+// （boot 解卡点名 / 运行面 `selfheal_skipped` 计数）。
+// ---------------------------------------------------------------------------
+
+/// 板侧绑定单点（`None` = 未注入）。毒锁不失效（同 [`lock_bus`] 纪律）。
+static BOARD_BINDINGS: Mutex<Option<Rr3BoardBindings>> = Mutex::new(None);
+
+/// 覆盖写板侧绑定单点（set_bindings 分发面用；全量覆盖语义，与宿主
+/// `rr3_push_bindings` 每次连接重推全量一致）。
+pub(crate) fn rr3_board_bindings_store(b: Rr3BoardBindings) {
+    *BOARD_BINDINGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(b);
+}
+
+/// 读 I2C 引脚对 `(sda, scl)`（自愈路径消费点用；缺任一键或未注入回 None）。
+pub(crate) fn rr3_board_bindings_i2c_pair() -> Option<(u8, u8)> {
+    BOARD_BINDINGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .and_then(Rr3BoardBindings::rr3_board_bindings_i2c)
 }
 
 /// 控制面/运行面共享状态（[`Bus`] 内，`Arc<Mutex<..>>` 护）：行面/帧面的文本与
@@ -74,6 +103,10 @@ pub(crate) struct PeriphState {
     pub(crate) audio_sent: u64,
     /// 音频背压丢弃分片数（audio_q 满丢最旧即计；`INFO` 观测）。
     pub(crate) audio_dropped: u64,
+    /// I2C 自愈因绑定未注入而跳过的拍数（运行面每拍 force 重同步遇
+    /// `rr3_board_bindings_i2c_pair()` 缺席即计，`INFO` 观测；非零即绑定下发链
+    /// 未通——fail-closed 的观测面，注入到达即停增、恢复自愈）。
+    pub(crate) selfheal_skipped: u32,
 }
 
 impl PeriphState {
@@ -109,6 +142,7 @@ impl PeriphState {
             audio_seq: 0,
             audio_sent: 0,
             audio_dropped: 0,
+            selfheal_skipped: 0,
         }
     }
 

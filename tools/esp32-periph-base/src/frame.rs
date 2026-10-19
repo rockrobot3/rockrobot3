@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, Rr3Frame, Rr3FrameBuf, Rr3Header, Rr3PayloadType,
-    Rr3TransportConn,
+    opcode, rr3_board_binding_entry, rr3_body_encode, rr3_body_split, Rr3BoardBindings, Rr3Frame,
+    Rr3FrameBuf, Rr3Header, Rr3PayloadType, Rr3TransportConn, RR3_METHOD_SET_BINDINGS,
 };
 use serde_json::{json, Value};
 
@@ -11,7 +11,7 @@ use crate::board::{
 };
 use crate::link::{rr3_frame_now_ns, UartIo};
 use crate::oled::expr_eye_base;
-use crate::state::{lock_bus, push_job, Bus, CtlState, Job};
+use crate::state::{lock_bus, push_job, rr3_board_bindings_store, Bus, CtlState, Job};
 
 /// 帧面请求（协议门全过后的视图）：id/method/params 摘出，帧头位形随行携带
 /// （应答回带 trace_id / dst=src_task 用）。
@@ -70,15 +70,19 @@ pub(crate) fn frame_recv(io: &mut UartIo) -> Result<FrameReq, String> {
     })
 }
 
-/// 主题分发（**控制面**：只解析/校验/改状态/推作业，不碰硬件）：method 恒
-/// rr3.call（rrd 转发形状，宿主桥同款）；主题只认两条在册能力面。method/主题/
-/// args 层面的失败是**业务性失败**——折 result.error 点名回帧（模块面同款形状，
-/// 宿主 rr3_bridge_parse_response 的解析契约）。
+/// 主题分发（**控制面**：只解析/校验/改状态/推作业，不碰硬件）：method 两面——
+/// `rr3.set_bindings`（绑定注入，宿主桥连接建立即推）与 rr3.call（rrd 转发形状，
+/// 宿主桥同款；主题只认两条在册能力面）。method/主题/args 层面的失败是**业务性
+/// 失败**——折 result.error 点名回帧（模块面同款形状，宿主 rr3_bridge_parse_response
+/// 的解析契约）。
 pub(crate) fn frame_dispatch(
     bus: &Arc<Mutex<Bus>>,
     ctl: &mut CtlState,
     req: &FrameReq,
 ) -> Result<Value, String> {
+    if req.method == RR3_METHOD_SET_BINDINGS {
+        return frame_handle_set_bindings(&req.args);
+    }
     if req.method != "rr3.call" {
         return Err(format!("method 非法: \"{}\"（恒 rr3.call）", req.method));
     }
@@ -87,6 +91,34 @@ pub(crate) fn frame_dispatch(
         RR3_FACE_TOPIC => frame_handle_face(bus, ctl, &req.args),
         other => Err(format!("未知主题: \"{other}\"")),
     }
+}
+
+/// 绑定注入（rr3.set_bindings，**控制面**，批N4 件七(c)）：宿主桥连接建立时下发
+/// 描述符解析的引脚真值（`{"i2c_sda": "21", ...}`——值全字符串，rr-hal/rr-registry
+/// 契约同形）。逐键过 [`rr3_board_binding_entry`] 键域/值域校验：未知键/坏值
+/// fail-closed 整体不落（暂存区不半写入，Err 折 result.error 回帧）；全过才覆盖
+/// 写板侧单点（[`crate::state::rr3_board_bindings_store`]）。部分注入合法（缺键 =
+/// None，消费点各自判齐）。成功即打印三键值——板侧引脚真值的**观测面**（boot 横幅
+/// 已去引脚号，此打印是唯一真值观测点）。
+fn frame_handle_set_bindings(args: &Value) -> Result<Value, String> {
+    let obj = args
+        .as_object()
+        .ok_or_else(|| format!("args 非法: {args}（须对象）"))?;
+    let mut nb = Rr3BoardBindings::default();
+    for (k, v) in obj {
+        let s = v
+            .as_str()
+            .ok_or_else(|| format!("{k} 值非法: {v}（须字符串）"))?;
+        rr3_board_binding_entry(&mut nb, k, s)?;
+    }
+    rr3_board_bindings_store(nb.clone());
+    println!(
+        "[periph] 绑定注入 ✓ i2c_sda={} i2c_scl={} adc_rail_pin={}",
+        nb.i2c_sda.map_or("-".into(), |v| v.to_string()),
+        nb.i2c_scl.map_or("-".into(), |v| v.to_string()),
+        nb.adc_rail_pin.map_or("-".into(), |v| v.to_string()),
+    );
+    Ok(json!({ "applied": true }))
 }
 
 /// 舵机执行（rr3-act/servo/command，**控制面**）：args 带 angle_deg = 写（校验 +
