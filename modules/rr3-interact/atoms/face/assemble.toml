@@ -14,4 +14,7 @@ ops = [
   # 不可点名集 ← config.toml [rr3-interact.face] non_pointable（I-11：规则从件内
   # if 迁出——值本身是契约字面量不许改，可注入的是集合，"某形态放开 talk"= 改数据）
   { slot = "non_pointable", src_key = "rr3-interact.face.non_pointable" },
+  # 兜底表情 ← config.toml [rr3-interact.face] default_expression（I-17/M-3 批N4
+  # 件五：mech 状态机各回落点数据化——"换人格取向"= 改数据不改码；值必须在册）
+  { slot = "default_expression", src_key = "rr3-interact.face.default_expression" },
 ]

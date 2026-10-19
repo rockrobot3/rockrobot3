@@ -660,6 +660,26 @@ check.sh 步 ⑩ applies 段（词表打空/词表外/写口缺申报/行形制�
 step 仍 17 行（⑩ 扩段非建步）；interact 册 I-20 行对表注记＋conventions §2 件四条目＋L-26
 两判据行"已建/已修"注记＋architecture §14 门 d 行 applies 补记＋全案 §19.3 同批对表。
 
+**2026-10-19 批N4 件五**（N-11①＋I-17＋I-18②③ 五组硬编码数据化，机制与策略分离收账）：①N-11①
+connect 配网最短密码位出码——`min_pass_len` 进 `config.toml [rr3-connect.wifi]`（缺 8 位 legacy
+语义回落）＋`atoms/wifi/assemble.toml` 第 3 槽，`rr3_wifi_connect_parse_args` 加参、文案模板化
+（"密码至少 N 位（legacy 配网语义）"）。②I-17/I-18② interact 四组出码——`RR3_FACE_TICK` 节拍
+（composite.toml 组合件级槽 face_tick_ms）、SelfTest 期望表情（selftest_face_expect）、face 兜底
+"idle"（`rr3_face_with_default` 件级槽 default_expression，Default 真值点唯一）、面板五限额
+（`Rr3PanelLimits` 结构 max_conns/read_timeout/header_limit/body_limit/call_timeout，Default=
+legacy 8/5s/8KiB/4KiB/5s；`RR3_PANEL_ADDR` 按批I I-1 同口径保持 env+常量双真值不进 config）；
+composite.toml 删 `no_injection`、ops 七槽首启用＝**组合件级申报面首次有内容**。③I-18③ 自检
+逐腿（D15）——SelfTest 改逐腿 `[{leg, pass, reason?}]`＋`verdict` 聚合（全腿 pass 才 pass），
+pass 词表 pass|fail|n-a；speaker 恒败腿（主循环缺席即 send 失败）**如实 fail 不折算通过**；
+panel/www 逐腿渲染＋判定行。④门 d 扩面——check.sh ⑩ ops 导出改**两来源并集**（件级
+assemble.toml ∪ 组合件 composite.toml），ops 27→36、分母 70→79 双行基线同批上调（79=上限=
+下限）。⑤撞 pin 修复（门禁回执抓出）——rr-registry contract `composite_declaration_face_is_pinned`
+原把六份组合件全 pin 零注入面，rr3-interact 七槽首启用后同批改 pin：rr3-interact 分立具名七槽
+断言（句柄仍零＋no_injection 不写），其余五份零注入面断言不变。单测 interact 54/54（新 3 条：
+逐腿形状、default 注入驱动回落、face/panel/selftest 键回落与拒值）＋connect 22/22；对表五文档
+（interact 册 I-17/I-18、connect 册 N-11、计划 §3、全案 M-2/M-3/M-6/M-10/G-3）＋conventions §2
+件五段。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

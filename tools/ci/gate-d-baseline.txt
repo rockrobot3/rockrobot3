@@ -10,5 +10,9 @@
 # 70 = 批N4 件三初值：分母 70（ops 27 + pin 11 + role.requires 去重 7 + domain 11
 #   + axis 14）− covers 申报 0（今日 14 端点读配置者 0，I-15 实况；covers 申报制
 #   "未申报不计分子"）——建即红如实在账，红项随批N4 件九三面扩端点逐批转绿。
-70
-70
+# 79 = 批N4 件五：ops 27→36（connect wifi min_pass_len 1 槽 + interact face
+#   default_expression 1 槽走件级 assemble.toml；interact composite.toml 七槽
+#   face_tick_ms/selftest_face_expect/panel 五限额走组合件级——⑩ ops 路导出面
+#   同批扩为两来源并集）+ pin 11 + role 7 + domain 11 + axis 14。
+79
+79

@@ -101,6 +101,19 @@ re-export 保 counters/axis 调用点零改动），`panel/secrets.rs` 写侧退
 硬红不进红账口径，门 d 账 = covers 差集一路——covers 列整列丢失归 Rust 四元组类型门，
 bash 不重复执法）；可数 step 仍 **17 行**（⑩ 是扩段非建步）。persist 单测 1 条随 ①b、
 secrets 5 条随 ⑥。
+**2026-10-19 对表（批N4 件五，五组硬编码数据化＋门 d 分母上调）**：ops 槽九处进分母——
+connect `min_pass_len` 与 interact `default_expression` 走**件级** `assemble.toml`
+（消费点在原子件面）；interact `face_tick_ms`/`selftest_face_expect`/panel 五限额走
+**组合件级** `composite.toml` `[assemble]` ops（消费点在组合件面无原子件对应——门 j
+组合件申报面的第一个消费批，全案 G-3"策略往组合件躲"的规避路径就此封死）；⑩ ops
+导出面同批扩"件级＋组合件级"两来源并集（slot 形制相同，并集去重同账）；基线
+`gate-d-baseline.txt` 双行 70/70→79/79（ops 27→36，扩面同批动基线有迹可循）。策略
+装载沿用 S-5 口径：代码默认 = 文件缺键回落；fail-closed 三路 = 白名单外值点名拒
+boot（default_expression/face_expect 过 `RR3_FACE_EXPRESSIONS` 对账）、类型错点名拒、
+0 值自残折 1 拒放（节拍/限额下界）。`RR3_PANEL_ADDR_DEFAULT`/ENV 保持 env+常量双真值
+不进 config（批I I-1 bind/port 删除同口径，避免第三真值点）；自检逐腿
+`{legs:[{leg, pass, reason?}], verdict}` 上线（pass 词表 pass|fail|n-a，恒败腿如实
+fail 不折算通过＝D15），前端逐腿渲染同步。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
