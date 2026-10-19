@@ -128,6 +128,30 @@ fn rr3_bridge_request_body(id: u64, topic: &str, args: &Value) -> String {
     rr3_bridge_request_body_params(id, "rr3.call", &json!({ "topic": topic, "args": args }))
 }
 
+/// 请求帧构造（pub(crate)：B 批 b1 音频源命令旁路复用——信封/帧头同形单点，
+/// 舵机/显示桥与旁路面零重复）：body → Request payload → 帧头（SEND /
+/// direct trace / src=宿主 1 / dst=板 2）。独立纯函数：形状可单测。
+pub(crate) fn rr3_bridge_request_frame(id: u64, method: &str, params: &Value) -> Rr3Frame {
+    let body = rr3_bridge_request_body_params(id, method, params);
+    let payload = rr3_body_encode(Rr3PayloadType::Request, body.as_bytes());
+    let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
+    hdr.trace_id = RR3_TRACE_DIRECT;
+    hdr.timestamp_ns = rr3_now_ns();
+    hdr.src_task = RR3_TASK_HOST;
+    hdr.dst_task = RR3_PERIPH_TASK;
+    Rr3Frame {
+        header: hdr,
+        payload,
+    }
+}
+
+/// 主题点名请求帧（pub(crate)：B 批 b1 旁路复用）——[`rr3_bridge_request_frame`]
+/// 的 `rr3.call` 信封形，与 [`Rr3BridgeConn::rr3_call`] 逐字同源
+/// （topic 在 `params.topic`、args 在 `params.args`）。
+pub(crate) fn rr3_bridge_call_frame(id: u64, topic: &str, args: &Value) -> Rr3Frame {
+    rr3_bridge_request_frame(id, "rr3.call", &json!({ "topic": topic, "args": args }))
+}
+
 /// 应答解析（纯函数）：payload 类型必须 Response、`jsonrpc` 必须 2.0、id 必须
 /// 回显一致、result 在位；`result.error`（板侧业务性失败折形状，模块面同款）
 /// 折 Err 点名。独立纯函数：门序可单测。
@@ -279,17 +303,7 @@ impl Rr3BridgeConn {
         };
         let id = self.next_id;
         self.next_id += 1;
-        let body = rr3_bridge_request_body_params(id, method, params);
-        let payload = rr3_body_encode(Rr3PayloadType::Request, body.as_bytes());
-        let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
-        hdr.trace_id = RR3_TRACE_DIRECT;
-        hdr.timestamp_ns = rr3_now_ns();
-        hdr.src_task = RR3_TASK_HOST;
-        hdr.dst_task = RR3_PERIPH_TASK;
-        let req = Rr3Frame {
-            header: hdr,
-            payload,
-        };
+        let req = rr3_bridge_request_frame(id, method, params);
         if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
             eprintln!("rr-hal-esp32: Request 写出失败: {e:?}");
             self.conn = None;

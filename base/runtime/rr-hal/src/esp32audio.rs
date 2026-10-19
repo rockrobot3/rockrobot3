@@ -11,9 +11,15 @@
 //! （~1s，溢出丢最旧整帧 + 计数）→ `read()` 整声道帧出样。
 //!
 //! 纪律：
-//! - flock 单消费者（`Rr3UartConn` 开口即跨进程排他）：流期间舵机/显示/
-//!   rr3-audio-rec 不可并存——fail-closed 点名，不是静默截流；A 链回放恒宿主
-//!   扬声器（backend.rs sink 侧 esp32 档显式落占位），互斥面天然不成立。
+//! - flock 单消费者（`Rr3UartConn` 开口即跨进程排他）：**宿主侧唯一持 conn 者
+//!   = 本件**，板外设命令下行唯一通路 = 本件命令旁路（B 批 b1：语义命令入
+//!   有界队列 → 读线程单写者逐帧写出，帧构造走
+//!   [`crate::esp32_uart::rr3_bridge_request_frame`] 桥同形单点）；rr3-audio-rec
+//!   等第二 opener 仍 fail-closed 点名，不是静默截流；A 链回放恒宿主扬声器
+//!   （backend.rs sink 侧 esp32 档显式落占位），互斥面天然不成立。
+//! - 旁路 fire-and-forget：板侧执行**前**回成功（status.md 对表实录），回执由
+//!   板帧分类面放行记账（不污音频四道门的 err_streak）；队列满丢最旧 + 计数
+//!   （板侧 audio_q 同款背压口径）。
 //! - 欠载语义：`read()` 非阻塞，无新数据回 0——消费面（rr3-sense）走既有
 //!   `pcm_empty_frames` 记账（饥饿可见，不阻塞节拍）。
 //! - 断流重连**永不放弃**：见过数据后连续 [`RESYNC_ZERO_BAIL`] 次零读（1.6s
@@ -33,7 +39,7 @@
 use std::collections::VecDeque;
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -43,9 +49,10 @@ use rr_ipc::audio_session::{
     RESYNC_ZERO_BAIL,
 };
 use rr_ipc::{
-    rr3_base64_decode, rr3_body_split, FrameAssembler, Rr3Header, Rr3PayloadType, Rr3UartConn,
+    rr3_base64_decode, rr3_body_split, FrameAssembler, Rr3FrameBuf, Rr3Header, Rr3PayloadType,
+    Rr3TransportConn, Rr3UartConn,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 
 // ---------------------------------------------------------------------------
 // 两端帧头约定（板不依赖 rr-core，板/宿主常量自证——与 tools/rr3-audio-rec
@@ -72,6 +79,141 @@ pub const RR3_ESP32_AUDIO_CHANNELS: u8 = 2;
 /// 交织结构）+ 计数；~2% 板-宿主钟滑移下溢丢是稳态损耗（见模块文档）。
 const RR3_ESP32_RING_CAP_SAMPLES: usize =
     RR3_ESP32_AUDIO_RATE as usize * RR3_ESP32_AUDIO_CHANNELS as usize;
+
+/// 命令旁路队列深度（策略量）：反射环 onset 驱动天然低频（VAD min_speech +
+/// silence_tail 下限节流），2 深吸收偶发连发；满丢最旧保最新意图（板侧
+/// audio_q 同款背压口径）。
+const RR3_AUDIO_CMD_CAP: usize = 2;
+
+// ---------------------------------------------------------------------------
+// 板外设命令旁路（B 批 b1）：flock 单消费者纪律下的命令下行唯一通路——
+// 音频源持有 conn，舵机命令不再另开连接（跨进程第二 opener 必被拒），改为
+// 语义命令入有界队列、读线程单写者逐帧写出。帧构造单点在
+// [`crate::esp32_uart::rr3_bridge_request_frame`]（与舵机/显示桥同形零重复）。
+// ---------------------------------------------------------------------------
+
+/// 板外设语义命令（旁路载荷；帧构造在读线程单点，id/帧头/信封全走桥形状）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3PeriphCmd {
+    /// 舵机 pan 轴绝对角 → `rr3-act/servo/command`，args `{"angle_deg":N,"axis":"pan"}`
+    /// （payload 形状事实源 contracts/events/act-servo_command.schema.json）。
+    /// 板侧行程收窄 fail-closed：越界拒收点名，宿主侧不猜行程不预钳。
+    ServoPan(u16),
+}
+
+/// 命令旁路盒（Mutex 内纯数据）：有界、满丢最旧 + 溢丢计数（板侧 audio_q
+/// 同款背压口径）。产面归构造方（rr3-sense 反射环），耗面归读线程独占。
+struct Rr3AudioCmdShared {
+    deque: Mutex<VecDeque<Rr3PeriphCmd>>,
+    cap: usize,
+    dropped: AtomicU64,
+}
+
+/// 命令旁路产面（Arc 克隆廉价；push 永不阻塞）。
+#[derive(Clone)]
+pub struct Rr3AudioCmdProducer {
+    shared: Arc<Rr3AudioCmdShared>,
+}
+
+impl Rr3AudioCmdProducer {
+    /// 推一条命令（满 = 丢最旧 + 计数，永不阻塞——反射环节拍不容背压等待）。
+    pub fn rr3_cmd_push(&self, cmd: Rr3PeriphCmd) {
+        let mut q = self.shared.deque.lock().unwrap_or_else(|p| p.into_inner());
+        if q.len() >= self.shared.cap {
+            q.pop_front();
+            self.shared.dropped.fetch_add(1, Ordering::Release);
+        }
+        q.push_back(cmd);
+    }
+
+    /// 溢丢计数（记账对账面；>0 = 反射环产速超过排水能力，点名可见）。
+    pub fn rr3_cmd_dropped(&self) -> u64 {
+        self.shared.dropped.load(Ordering::Acquire)
+    }
+}
+
+/// 命令旁路耗面（读线程独占——单写者纪律：conn 的全部写收拢读线程）。
+#[derive(Clone)]
+struct Rr3AudioCmdConsumer {
+    shared: Arc<Rr3AudioCmdShared>,
+}
+
+impl Rr3AudioCmdConsumer {
+    /// 弹一条（空回 None）——逐条弹出制：写失败可回插队首不丢命令。
+    fn rr3_cmd_pop(&self) -> Option<Rr3PeriphCmd> {
+        let mut q = self.shared.deque.lock().unwrap_or_else(|p| p.into_inner());
+        q.pop_front()
+    }
+
+    /// 回插队首（io 失败保命：命令不丢，重连后补写；不计溢丢账）。
+    fn rr3_cmd_push_front(&self, cmd: Rr3PeriphCmd) {
+        let mut q = self.shared.deque.lock().unwrap_or_else(|p| p.into_inner());
+        q.push_front(cmd);
+    }
+}
+
+/// 产/耗面对（cap 见 [`RR3_AUDIO_CMD_CAP`]）。
+fn rr3_audio_cmd_pair() -> (Rr3AudioCmdProducer, Rr3AudioCmdConsumer) {
+    let shared = Arc::new(Rr3AudioCmdShared {
+        deque: Mutex::new(VecDeque::with_capacity(RR3_AUDIO_CMD_CAP)),
+        cap: RR3_AUDIO_CMD_CAP,
+        dropped: AtomicU64::new(0),
+    });
+    (
+        Rr3AudioCmdProducer {
+            shared: Arc::clone(&shared),
+        },
+        Rr3AudioCmdConsumer { shared },
+    )
+}
+
+/// 语义命令 → 整帧（纯函数）：走 [`crate::esp32_uart::rr3_bridge_call_frame`]
+/// 桥同形单点——信封 `rr3.call`（topic 在 params.topic / args 在 params.args）、
+/// 帧头 src=宿主 1 / dst=板 2 / direct trace，与舵机/显示桥逐字同源。
+fn rr3_esp32_cmd_frame(id: u64, cmd: &Rr3PeriphCmd) -> rr_ipc::Rr3Frame {
+    let (topic, args) = match cmd {
+        Rr3PeriphCmd::ServoPan(deg) => (
+            crate::esp32_uart::RR3_SERVO_TOPIC,
+            json!({ "angle_deg": *deg, "axis": "pan" }),
+        ),
+    };
+    crate::esp32_uart::rr3_bridge_call_frame(id, topic, &args)
+}
+
+/// 板面入帧分类（b1）：Response（命令旁路的板侧应答）放行记账，其余走音频
+/// 四道门——旁路回执不再污 err_streak（帧界损坏记账语义保住）。
+#[derive(Debug)]
+enum Rr3BoardFrameIn {
+    /// 音频 Event（四道门全过）
+    Audio(Rr3Esp32AudioChunk),
+    /// 板侧请求应答（执行**前**回成功，status.md 对表实录）：id 回显 + 业务
+    /// 结果——ok 形状即 pre-execution ack。
+    Reply { id: u64, err: Option<String> },
+}
+
+fn rr3_esp32_classify_board_frame(
+    hdr: &Rr3Header,
+    payload: &[u8],
+) -> Result<Rr3BoardFrameIn, String> {
+    if hdr.dst_task != RR3_HOST_TASK {
+        return Err(format!(
+            "dst_task={} 非宿主位形 {RR3_HOST_TASK}",
+            hdr.dst_task
+        ));
+    }
+    let (ty, body) = rr3_body_split(payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+    if ty == Rr3PayloadType::Response {
+        let v: Value = serde_json::from_slice(&body).map_err(|e| format!("应答体非 JSON: {e}"))?;
+        let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
+        let err = v
+            .get("result")
+            .and_then(|r| r.get("error"))
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+        return Ok(Rr3BoardFrameIn::Reply { id, err });
+    }
+    rr3_esp32_parse_audio_event(hdr, payload).map(Rr3BoardFrameIn::Audio)
+}
 
 // ---------------------------------------------------------------------------
 // 纯逻辑件（不依赖串口/线程，单测直测）
@@ -143,6 +285,7 @@ impl Rr3AudioRing {
 }
 
 /// 一条音频事件（四道门全过后的解码前载荷）。
+#[derive(Debug)]
 struct Rr3Esp32AudioChunk {
     /// 板面实测采样率（流就绪日志用；open 已按板事实校验配置）
     rate: u32,
@@ -221,13 +364,15 @@ fn rr3_esp32_audio_open(path: &PathBuf, baud: u32) -> Result<Rr3UartConn, String
 // 运行期件（读线程 + 环形缓冲 + trait 面）
 // ---------------------------------------------------------------------------
 
-/// 读线程共享核：连接参数 + 环形缓冲 + 停旗。
+/// 读线程共享核：连接参数 + 环形缓冲 + 停旗 + 命令旁路耗面（None = 无旁路
+/// 构造形态；open 时自源克隆注入）。
 struct Rr3Esp32AudioCore {
     path: PathBuf,
     baud: u32,
     channels: u8,
     ring: Mutex<Rr3AudioRing>,
     stop: AtomicBool,
+    cmd: Option<Rr3AudioCmdConsumer>,
 }
 
 /// 断流重连（永不放弃）：歇口 → [`HANDSHAKE_TRIES`] 轮逐次**重开 fd** + 握手
@@ -266,11 +411,36 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     let mut conn: Option<Rr3UartConn> = Some(first);
     let mut logged_ready = false;
     let mut logged_overflow = false;
+    // 命令旁路请求 id 计数（读线程局部；fire-and-forget 面只服务回执对账日志，
+    // 无跨会话唯一性要求）
+    let mut cmd_id: u64 = 1;
     while !core.stop.load(Ordering::Acquire) {
         let Some(c) = conn.as_mut() else {
             conn = rr3_esp32_reconnect(&core);
             continue;
         };
+        // —— 命令旁路排水（顶拍先排水再读）：逐条弹出 fire-and-forget 写出
+        // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
+        // 队首不丢，按读失败同路重连后补写（有界丢最旧兜底）——
+        if let Some(rx) = core.cmd.as_ref() {
+            let mut cmd_io_err = false;
+            while let Some(cmd) = rx.rr3_cmd_pop() {
+                let frame = rr3_esp32_cmd_frame(cmd_id, &cmd);
+                if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
+                    rx.rr3_cmd_push_front(cmd);
+                    eprintln!(
+                        "rr-hal-esp32-audio: 命令写出失败（回插队首，连接报废转重连）: {e:?}"
+                    );
+                    cmd_io_err = true;
+                    break;
+                }
+                cmd_id += 1;
+            }
+            if cmd_io_err {
+                conn = None;
+                break;
+            }
+        }
         // —— 会话内读循环（拆帧器/记账随会话重置：新会话是新流）——
         let mut asm = FrameAssembler::new();
         let mut raw = vec![0u8; READ_BLOCK];
@@ -307,8 +477,8 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                     loop {
                         match asm.pull() {
                             Ok(Some((hdr, body))) => {
-                                match rr3_esp32_parse_audio_event(&hdr, &body) {
-                                    Ok(chunk) => {
+                                match rr3_esp32_classify_board_frame(&hdr, &body) {
+                                    Ok(Rr3BoardFrameIn::Audio(chunk)) => {
                                         err_streak = 0;
                                         if !logged_ready {
                                             logged_ready = true;
@@ -328,6 +498,14 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                                             );
                                         }
                                     }
+                                    Ok(Rr3BoardFrameIn::Reply { id, err }) => match err {
+                                        Some(e) => eprintln!(
+                                            "rr-hal-esp32-audio: 板面应答 id={id} 业务失败: {e}"
+                                        ),
+                                        None => eprintln!(
+                                            "rr-hal-esp32-audio: 板面应答 id={id} ok（pre-execution ack）"
+                                        ),
+                                    },
                                     Err(e) => {
                                         err_streak += 1;
                                         if err_streak == RR3_ERR_STREAK_LOG {
@@ -359,12 +537,15 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     }
 }
 
-/// ESP32-UART 板面音频源（A 批 c3）。构造不触设备（选择函数口径）；open 时
-/// 真开 UART + 握手 + 起读线程。
+/// ESP32-UART 板面音频源（A 批 c3；B 批 b1 增命令旁路面）。构造不触设备
+/// （选择函数口径）；open 时真开 UART + 握手 + 起读线程。
 pub struct Rr3Esp32UartAudioSource {
     path: PathBuf,
     baud: u32,
     inner: Mutex<Option<Rr3Esp32AudioStream>>,
+    /// 命令旁路盒（构造即建）：产面是否外发由构造子裁定（[`Self::
+    /// rr3_esp32_audio_source_new_with_cmd`]），耗面 open 时注入读线程核。
+    cmd: (Rr3AudioCmdProducer, Rr3AudioCmdConsumer),
 }
 
 struct Rr3Esp32AudioStream {
@@ -373,13 +554,26 @@ struct Rr3Esp32AudioStream {
 }
 
 impl Rr3Esp32UartAudioSource {
-    /// 构造（设备路径/波特率来自应急 env 的裁决结果；open 时才真开）。
+    /// 构造（设备路径/波特率来自应急 env 的裁决结果；open 时才真开）。无旁路
+    /// 产面形态（产面随 self 内部弃置——push 无人调，队列恒空，行为同旧版）。
     pub fn rr3_esp32_audio_source_new(path: PathBuf, baud: u32) -> Self {
         Self {
             path,
             baud,
             inner: Mutex::new(None),
+            cmd: rr3_audio_cmd_pair(),
         }
+    }
+
+    /// 带旁路构造（B 批 b1）：返 `(源, 产面)`——产面交宿主消费方（rr3-sense
+    /// 反射环），耗面 open 时注入读线程（单写者纪律）。
+    pub fn rr3_esp32_audio_source_new_with_cmd(
+        path: PathBuf,
+        baud: u32,
+    ) -> (Self, Rr3AudioCmdProducer) {
+        let s = Self::rr3_esp32_audio_source_new(path, baud);
+        let producer = s.cmd.0.clone();
+        (s, producer)
     }
 
     /// 停流（open 重入/Drop 共用）：置停旗 → 有界等读线程退出（读循环最迟
@@ -416,6 +610,7 @@ impl Rr3AudioSource for Rr3Esp32UartAudioSource {
             channels: cfg.channels,
             ring: Mutex::new(Rr3AudioRing::rr3_ring_new(RR3_ESP32_RING_CAP_SAMPLES)),
             stop: AtomicBool::new(false),
+            cmd: Some(self.cmd.1.clone()),
         });
         let reader_core = Arc::clone(&core);
         let reader = std::thread::Builder::new()
@@ -597,5 +792,106 @@ mod tests {
             rr3_esp32_parse_audio_event(&other.header, &other.payload).is_err(),
             "dst=9 必须被拒"
         );
+    }
+
+    /// 板形应答帧（分类面测试孪生）：src=板 2 / dst=宿主 1，Response payload。
+    fn board_reply_frame(id: u64, error: Option<&str>) -> Rr3Frame {
+        let result = match error {
+            Some(e) => serde_json::json!({ "error": e }),
+            None => serde_json::json!({ "angle_deg": 90 }),
+        };
+        let body = serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result });
+        let payload = rr3_body_encode(Rr3PayloadType::Response, body.to_string().as_bytes());
+        let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
+        hdr.trace_id = 0;
+        hdr.timestamp_ns = 100;
+        hdr.src_task = crate::esp32_uart::RR3_PERIPH_TASK;
+        hdr.dst_task = RR3_HOST_TASK;
+        Rr3Frame {
+            header: hdr,
+            payload,
+        }
+    }
+
+    #[test]
+    fn cmd_queue_bounded_drops_oldest_and_counts() {
+        let (producer, consumer) = rr3_audio_cmd_pair();
+        assert_eq!(producer.rr3_cmd_dropped(), 0);
+        producer.rr3_cmd_push(Rr3PeriphCmd::ServoPan(60));
+        producer.rr3_cmd_push(Rr3PeriphCmd::ServoPan(90));
+        assert_eq!(producer.rr3_cmd_dropped(), 0, "未满不计丢");
+        // 队深 2：第三条挤掉最旧（60），最新意图（120）保住
+        producer.rr3_cmd_push(Rr3PeriphCmd::ServoPan(120));
+        assert_eq!(producer.rr3_cmd_dropped(), 1, "满丢最旧记账");
+        assert_eq!(consumer.rr3_cmd_pop(), Some(Rr3PeriphCmd::ServoPan(90)));
+        assert_eq!(consumer.rr3_cmd_pop(), Some(Rr3PeriphCmd::ServoPan(120)));
+        assert_eq!(consumer.rr3_cmd_pop(), None, "排空回 None");
+        // 回插队首：io 失败保命路径（重连后补写）
+        consumer.rr3_cmd_push_front(Rr3PeriphCmd::ServoPan(120));
+        assert_eq!(consumer.rr3_cmd_pop(), Some(Rr3PeriphCmd::ServoPan(120)));
+    }
+
+    #[test]
+    fn cmd_frame_matches_bridge_shape() {
+        let frame = rr3_esp32_cmd_frame(7, &Rr3PeriphCmd::ServoPan(105));
+        // 帧头：src=宿主 1 / dst=板 2 / direct trace（与舵机/显示桥同形）
+        assert_eq!(frame.header.src_task, RR3_HOST_TASK);
+        assert_eq!(frame.header.dst_task, crate::esp32_uart::RR3_PERIPH_TASK);
+        assert_eq!(frame.header.trace_id, 0);
+        // 信封：rr3.call → params.topic = 在册舵机主题，args 同舵机桥 payload
+        let (ty, body) = rr3_body_split(&frame.payload).expect("payload 前缀合法");
+        assert_eq!(ty, Rr3PayloadType::Request);
+        let v: Value = serde_json::from_slice(&body).expect("体为 JSON");
+        assert_eq!(v["jsonrpc"], "2.0");
+        assert_eq!(v["id"], 7);
+        assert_eq!(v["method"], "rr3.call");
+        assert_eq!(v["params"]["topic"], crate::esp32_uart::RR3_SERVO_TOPIC);
+        assert_eq!(v["params"]["args"]["angle_deg"], 105);
+        assert_eq!(v["params"]["args"]["axis"], "pan");
+        // 与桥侧 golden 同值锚定（esp32_uart 测试 rr3_bridge_request_body(7, ...) 同形）；
+        // timestamp_ns 是构造时刻、两帧天然不同，不参与对拍
+        let bridge = crate::esp32_uart::rr3_bridge_call_frame(
+            7,
+            crate::esp32_uart::RR3_SERVO_TOPIC,
+            &serde_json::json!({ "angle_deg": 105, "axis": "pan" }),
+        );
+        assert_eq!(frame.payload, bridge.payload, "payload 字节级同形");
+        assert_eq!(frame.header.src_task, bridge.header.src_task);
+        assert_eq!(frame.header.dst_task, bridge.header.dst_task);
+        assert_eq!(frame.header.trace_id, bridge.header.trace_id);
+        assert_eq!(frame.header.payload_len, bridge.header.payload_len);
+    }
+
+    #[test]
+    fn classify_routes_reply_and_audio() {
+        // 音频 Event → Audio（原四道门语义不变）
+        let pcm: Vec<u8> = (0..8u8).collect();
+        let audio = board_like_frame(3, &pcm, RR3_HOST_TASK);
+        match rr3_esp32_classify_board_frame(&audio.header, &audio.payload) {
+            Ok(Rr3BoardFrameIn::Audio(c)) => assert_eq!(c.samples, pcm),
+            other => panic!("音频帧须落 Audio 臂: {other:?}"),
+        }
+        // 板侧应答 ok → Reply{id, err=None}
+        let ok = board_reply_frame(7, None);
+        match rr3_esp32_classify_board_frame(&ok.header, &ok.payload) {
+            Ok(Rr3BoardFrameIn::Reply { id, err }) => {
+                assert_eq!(id, 7);
+                assert_eq!(err, None);
+            }
+            other => panic!("应答帧须落 Reply 臂: {other:?}"),
+        }
+        // 板侧业务失败（越程拒收）→ Reply{err=Some}（fail-visible，不静默）
+        let bad = board_reply_frame(8, Some("越程拒收"));
+        match rr3_esp32_classify_board_frame(&bad.header, &bad.payload) {
+            Ok(Rr3BoardFrameIn::Reply { id, err }) => {
+                assert_eq!(id, 8);
+                assert_eq!(err.as_deref(), Some("越程拒收"));
+            }
+            other => panic!("失败应答须落 Reply 臂带 err: {other:?}"),
+        }
+        // dst 门：非宿主位形拒收（与音频门同口径）
+        let mut other_dst = board_reply_frame(9, None);
+        other_dst.header.dst_task = 9;
+        assert!(rr3_esp32_classify_board_frame(&other_dst.header, &other_dst.payload).is_err());
     }
 }
