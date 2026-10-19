@@ -52,3 +52,25 @@ bus = "pwm"
 baud_ok = [50]           # 50Hz 标准舵机帧
 peak_ma = 700            # 堵转实测 ~700mA/只（§1 坑 9）——校验⑨ 预算分母的事实源
 mate = "SG90-3P"
+
+# —— 批N3 件八（器件角色进场配套）：sensor.env/sensor.imu 演练实例两行。取值 =
+#    演练真值档（profiles [[pin]] device/addr 与此对表，门 o 装载侧执法的取值域），
+#    实机器件核对与真后端选型随真板批（status.md 敞口在案——演练 ≠ 定型）。
+[[device]]
+model = "SHTC3"
+bus = "i2c"
+addrs = ["0x70"]         # SHTC3 固定 7 位从地址 0x70（无地址引脚，不可改）
+baud_ok = [100000, 400000]
+# id_reg 缺省：SHTC3 无单寄存器 ID 读（器件 ID 须经 0xEFC8 命令返回，不是寄存器读）
+# ——探测面只允许报 reachable/absent，不得冒充"在位"
+peak_ma = 1              # 采样耗流 µA 级（<1mA，量的是环境不是负载）
+# mate 缺省：焊盘直连，无对端连接器
+
+[[device]]
+model = "ICM-42688"
+bus = "i2c"
+addrs = ["0x68", "0x69"] # AD0 引脚选址：GND=0x68 / VDD=0x69（演练实例 AD0 接地 = 0x68）
+baud_ok = [100000, 400000]
+id_reg = { addr = 0x75, expect = 0x47 } # WHO_AM_I 上电复位值（datasheet 定值）——器件级在位判据
+peak_ma = 3              # low-noise 模式 ~2.4mA，取上沿；与件 demands 互校口径
+# mate 缺省：焊盘直连，无对端连接器

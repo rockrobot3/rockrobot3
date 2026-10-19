@@ -178,14 +178,18 @@ mod tests {
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/devices.toml");
 
-    /// 契约必须解析成 4 条器件，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 6 条器件，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let table = rr3_registry_device_table_from_text(CONTRACT);
-        assert_eq!(table.devices.len(), 4, "契约器件数（现役四条）");
+        assert_eq!(
+            table.devices.len(),
+            6,
+            "契约器件数（批N3 件八起 SHTC3/ICM-42688 演练行，现役六条）"
+        );
         assert_eq!(
             table.rr3_device_table_names(),
-            vec!["INA219", "MAX7219", "SG90", "SSD1306"]
+            vec!["ICM-42688", "INA219", "MAX7219", "SG90", "SHTC3", "SSD1306"]
         );
         assert!(table.rr3_device_table_contains("SSD1306"));
         assert!(
