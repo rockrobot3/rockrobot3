@@ -92,17 +92,17 @@ impl Rr3TtsPcmBuf {
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_interact_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    println!("rr3-interact 0.0.1 (M3 实装)");
+    eprintln!("rr3-interact 0.0.1 (M3 实装)");
     for line in face::SURFACE
         .iter()
         .copied()
         .chain(player::SURFACE.iter().copied())
     {
-        println!("  {line}");
+        eprintln!("  {line}");
     }
     // panel 自述是推导文案（端点数由 RR3_PANEL_ROUTES 推导，MC-8③），String 面单独成段
     for line in panel::surface() {
-        println!("  {line}");
+        eprintln!("  {line}");
     }
 
     // 总线接入：manifest 路径是 rrd spawn 的契约环境变量，直跑（开发调试）须自行设置
@@ -112,14 +112,14 @@ pub fn rr3_interact_run() -> Result<(), String> {
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
-    println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
+    eprintln!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
     // config 装载（I-11 重开装载面）：不可点名集等策略经 config 数据化注入，机制件
     // 零策略载荷。缺文件/缺键/在册外值一律拒 boot（fail-closed）。
     let cfg = rr3_config_load(&manifest_path)?;
     // 注入的策略面在启动自述里可见（I-11：改数据即改行为，日志是第一证据）。
     // I-17/I-18② 新增键随批N4 件五进自述：节拍/兜底表情/面板并发放自检期望。
-    println!(
+    eprintln!(
         "config 就绪: face non_pointable={} tick_ms={} default={} player prebuffer_ms={} volume_pct={} panel max_conns={} selftest face_expect={}",
         rr3_face_non_pointable_join(&cfg.face.non_pointable),
         cfg.face.face_tick_ms,
@@ -133,7 +133,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
     let (mut sink, backend) = rr3_hal_audio_sink();
     sink.open(RR3_AUDIO_CFG_16K_MONO16)
         .map_err(|e| format!("打开播放面({backend})失败: {e}"))?;
-    println!("播放面就绪: backend={backend} rate=16000 ch=1");
+    eprintln!("播放面就绪: backend={backend} rate=16000 ch=1");
 
     // 兜底表情注入（批N4 件五 I-17/M-3）：mech 各回落点取 config
     // `default_expression`（parse 已对账白名单），legacy 缺键回落 idle
@@ -151,7 +151,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
     display
         .frame()
         .map_err(|e| format!("显示面探活失败({display_backend}): {e}"))?;
-    println!("显示面就绪: backend={display_backend} 8x8");
+    eprintln!("显示面就绪: backend={display_backend} 8x8");
 
     // 面板（0.0.4 批C，Q3 裁定）：独立 HTTP 线程 + 动作通道。link 缓存是状态页
     // 卡片的数据源——面板线程只读、主循环只写；总线句柄 clone 是同一连接的另一
@@ -328,7 +328,7 @@ fn rr3_handle_tts(
         ));
     }
     bus.rr3_counter_bump("tts_play_ok", 1);
-    println!(
+    eprintln!(
         "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，gain {}%，水位 {}ms，talk 挂起 {suspended}）",
         text.chars().count(),
         player.volume_pct,

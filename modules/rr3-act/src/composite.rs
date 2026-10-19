@@ -194,7 +194,7 @@ const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_act_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    println!("rr3-act 0.0.1 (0.0.2 T4a 实装，0.0.3 T3 意图执行)");
+    eprintln!("rr3-act 0.0.1 (0.0.2 T4a 实装，0.0.3 T3 意图执行)");
     for line in servo::SURFACE
         .iter()
         .copied()
@@ -202,7 +202,7 @@ pub fn rr3_act_run() -> Result<(), String> {
         .chain(relay::SURFACE.iter().copied())
         .chain(reflex::SURFACE.iter().copied())
     {
-        println!("  {line}");
+        eprintln!("  {line}");
     }
 
     // 总线接入：manifest 路径是 rrd spawn 的契约环境变量，直跑（开发调试）须自行设置
@@ -212,7 +212,7 @@ pub fn rr3_act_run() -> Result<(), String> {
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
-    println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
+    eprintln!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
     // 单调时基（0.0.5 批I A-2）：led 节拍/servo 限速门/led 点名同锚点
     let tb = Rr3TimeBase::rr3_time_base_new();
 
@@ -225,11 +225,11 @@ pub fn rr3_act_run() -> Result<(), String> {
             Rr3ActAxisState::rr3_conservative()
         }),
         Err(_) => {
-            println!("执行轴状态: 未注入（无档案/坏件/副本/轴错配），按保守缺省起跑");
+            eprintln!("执行轴状态: 未注入（无档案/坏件/副本/轴错配），按保守缺省起跑");
             Rr3ActAxisState::rr3_conservative()
         }
     };
-    println!(
+    eprintln!(
         "执行轴状态: calibrated={} hard_stop={} 行程=[{}, {}] 中位={}（注入策略面在启动自述可见，A-9）",
         axis.calibrated,
         axis.hard_stop.rr3_act_hard_stop_name(),
@@ -250,7 +250,7 @@ pub fn rr3_act_run() -> Result<(), String> {
     } else {
         cfg.intent.open_topics.join("/")
     };
-    println!(
+    eprintln!(
         "config 就绪: servo [{}, {}]（行程=轴档案）/{}/ms state>={}ms blink={}ms led_effects={} intent_open={intent_open} reflex {}Hz",
         cfg.servo.angle_min_deg,
         cfg.servo.angle_max_deg,
@@ -276,7 +276,7 @@ pub fn rr3_act_run() -> Result<(), String> {
     relay_gpio
         .level()
         .map_err(|e| format!("继电器面探活失败({relay_backend}): {e}"))?;
-    println!("执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}");
+    eprintln!("执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}");
 
     let mut led_ctrl = Rr3Led::rr3_led_new(cfg.led.blink_period_ms);
     // 初始落灭态（原 worker 起手写 0 的语义上收组合件；写失败折日志不退——妆面件）
@@ -407,7 +407,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                 // 不再判定电压）。置位即闭锁执行面；trip 自带去抖（同段重复广播只记账一次）。
                 if topic == RR3_SYSTEM_POWER_TOPIC {
                     if low_gate.rr3_low_gate_trip() {
-                        println!(
+                        eprintln!(
                             "低电禁动：执行面（servo/relay）闭锁，妆面不受辖（{RR3_SYSTEM_POWER_TOPIC}）"
                         );
                     }
@@ -419,7 +419,7 @@ pub fn rr3_act_run() -> Result<(), String> {
                 let trace = body.get("trace").and_then(Value::as_u64).unwrap_or(0);
                 match body.get("actions") {
                     None | Some(Value::Null) => {
-                        println!("intent: trace={trace}（纯对话轮，无动作）");
+                        eprintln!("intent: trace={trace}（纯对话轮，无动作）");
                     }
                     Some(actions) => {
                         for r in intent::rr3_intent_actions_handle(
@@ -441,11 +441,11 @@ pub fn rr3_act_run() -> Result<(), String> {
                                             relay::RR3_RELAY_STATE_TOPIC,
                                             rr3_relay_state_body(relay_seq, on),
                                         )?;
-                                        println!(
+                                        eprintln!(
                                             "intent: trace={trace} relay on={on}，state#{relay_seq} 已发"
                                         );
                                     } else {
-                                        println!(
+                                        eprintln!(
                                             "intent: trace={trace} relay on={on}（同态不续发）"
                                         );
                                     }
@@ -459,16 +459,16 @@ pub fn rr3_act_run() -> Result<(), String> {
                                             servo::RR3_SERVO_STATE_TOPIC,
                                             rr3_servo_state_body(servo_seq, angle),
                                         )?;
-                                        println!(
+                                        eprintln!(
                                             "intent: trace={trace} servo angle={angle}，state#{servo_seq} 已发"
                                         );
                                     } else {
-                                        println!(
+                                        eprintln!(
                                             "intent: trace={trace} servo angle={angle}（state 被限速挡下）"
                                         );
                                     }
                                 }
-                                Err(e) => println!("intent: trace={trace} 拒执行: {e}"),
+                                Err(e) => eprintln!("intent: trace={trace} 拒执行: {e}"),
                             }
                         }
                     }
@@ -510,7 +510,7 @@ fn rr3_handle_servo(
     servo
         .set_angle(angle)
         .map_err(|e| format!("舵机写入失败: {e}"))?;
-    println!("servo: angle={angle} move_ms={move_ms}（sim 即时到位；实机按时限走反射环闭环）");
+    eprintln!("servo: angle={angle} move_ms={move_ms}（sim 即时到位；实机按时限走反射环闭环）");
     Ok((
         json!({ "angle_deg": angle, "move_ms": move_ms }),
         Some(angle),
@@ -532,7 +532,7 @@ fn rr3_handle_led(
     let (applied, previous, level) = led.rr3_led_apply(now_ms, effect);
     gpio.set(level)
         .unwrap_or_else(|e| eprintln!("rr3-act-led: 写电平失败: {e}"));
-    println!(
+    eprintln!(
         "led: {}（前态 {}）",
         applied.rr3_led_effect_as_str(),
         previous.rr3_led_effect_as_str()

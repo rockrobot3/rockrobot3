@@ -59,13 +59,13 @@ const RR3_POLL_WAIT: Duration = Duration::from_millis(100);
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_power_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    println!("rr3-power 0.0.1 (0.0.2 T4b 实装)");
+    eprintln!("rr3-power 0.0.1 (0.0.2 T4b 实装)");
     for line in battery::SURFACE
         .iter()
         .copied()
         .chain(charger::SURFACE.iter().copied())
     {
-        println!("  {line}");
+        eprintln!("  {line}");
     }
 
     // 总线接入：manifest 路径是 rrd spawn 的契约环境变量，直跑（开发调试）须自行设置
@@ -75,12 +75,12 @@ pub fn rr3_power_run() -> Result<(), String> {
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
-    println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
+    eprintln!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
     let cfg = rr3_config_load(&manifest_path)?;
     // cutoff 显式标注"声明未生效"（MC-8① 裁定 (c)）：回显 ≠ 读者，本行只为运维
     // 自述，不构成"已实现关断"的宣称（关断动作归 M6）。
-    println!(
+    eprintln!(
         "config 就绪: battery sample={}ms low={}mV charger state={}ms | cutoff={}mV（声明未生效：本版不关断，归 M6）",
         cfg.battery.sample_period_ms,
         cfg.battery.low_voltage_mv,
@@ -89,7 +89,7 @@ pub fn rr3_power_run() -> Result<(), String> {
     );
     // rail 段回显（批N2 件五）：独立一行，不动上面的 config 就绪行（逐字红线）
     if cfg.rail.up {
-        println!(
+        eprintln!(
             "rail 监测就绪: domain={} mild={}mV severe={}mV max_age={}ms period={}ms",
             cfg.rail.domain,
             cfg.rail.mild_mv,
@@ -98,7 +98,7 @@ pub fn rr3_power_run() -> Result<(), String> {
             cfg.rail.sample_period_ms
         );
     } else {
-        println!("rail 未启用（up=false，合法不适用显式写）");
+        eprintln!("rail 未启用（up=false，合法不适用显式写）");
     }
 
     // HAL 电源面选择 + 开机探活：Unsupported 即致命——显式回错不静默退化
@@ -107,7 +107,7 @@ pub fn rr3_power_run() -> Result<(), String> {
     let first = dev
         .battery()
         .map_err(|e| format!("电源面探活失败({backend}): {e}"))?;
-    println!(
+    eprintln!(
         "电源面就绪: {backend} 电量 {}% {}mV charging={}",
         first.percent, first.voltage_mv, first.charging
     );
@@ -120,7 +120,7 @@ pub fn rr3_power_run() -> Result<(), String> {
         rail_dev
             .rr3_read(&cfg.rail.domain)
             .map_err(|e| format!("轨压面探活失败({rail_backend}): {e}"))?;
-        println!("轨压面就绪: {rail_backend} domain={}", cfg.rail.domain);
+        eprintln!("轨压面就绪: {rail_backend} domain={}", cfg.rail.domain);
     }
 
     // 主循环状态：各流 seq 各自计数、各拍点、低电边沿机（首拍即武装）、轨压判定核
@@ -165,7 +165,7 @@ pub fn rr3_power_run() -> Result<(), String> {
             if low_edge.rr3_low_edge_cross(st.voltage_mv) {
                 low_seq += 1;
                 bus.rr3_publish(RR3_BATTERY_LOW_TOPIC, rr3_battery_low_body(low_seq, st))?;
-                println!(
+                eprintln!(
                     "battery/low: {}% {}mV（越阈首拍，段内不重发）",
                     st.percent, st.voltage_mv
                 );
@@ -205,7 +205,7 @@ pub fn rr3_power_run() -> Result<(), String> {
             )?;
             if event == Some(true) {
                 bus.rr3_counter_bump("rail_edge", 1);
-                println!(
+                eprintln!(
                     "rail/edge: {}mV tier={}（越阈首拍，段内不重发）",
                     st.mv,
                     tier.rr3_rail_tier_name()

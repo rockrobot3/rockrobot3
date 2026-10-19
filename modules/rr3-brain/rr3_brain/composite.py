@@ -160,13 +160,15 @@ def main() -> int:
 
 
 def rr3_brain_run() -> int:
-    print(f"{MANIFEST_NAME} {__version__} (M4 实装)")
+    # 留痕一律走 stderr（门 r 定形，批N4 件八）：stdout 被 supervisor 接成 null，
+    # print 到 stdout 按设计不可达任何去处；stderr 由 rrd 落 per-unit 日志文件
+    print(f"{MANIFEST_NAME} {__version__} (M4 实装)", file=sys.stderr)
     for topic in PUBLISHES:
-        print(f"  publish   {topic}")
+        print(f"  publish   {topic}", file=sys.stderr)
     for topic in SUBSCRIBES:
-        print(f"  subscribe {topic}")
+        print(f"  subscribe {topic}", file=sys.stderr)
     for topic in RPC_EXPOSES:
-        print(f"  rpc       {topic}")
+        print(f"  rpc       {topic}", file=sys.stderr)
 
     manifest_path = os.environ.get(RR3_MANIFEST_ENV)
     if not manifest_path:
@@ -180,7 +182,7 @@ def rr3_brain_run() -> int:
     call_timeout_s = float(bus_cfg.get("call_timeout_s", RR3_BUS_CALL_TIMEOUT_DEFAULT_S))
     connect_timeout_s = float(bus_cfg.get("connect_timeout_s", 5.0))
     bus = rr3_bus_connect(manifest_path, connect_timeout_s=connect_timeout_s)
-    print(f"总线就绪: name={bus.rr3_name()} task={bus.rr3_task()}", flush=True)
+    print(f"总线就绪: name={bus.rr3_name()} task={bus.rr3_task()}", file=sys.stderr, flush=True)
 
     asr = Rr3AsrClient(cloud_cfg["base_url"], cloud_cfg["asr_model"], float(cloud_cfg["timeout_s"]))
     base_url, model_id, key_ref, mode = rr3_brain_model_row(cfg)
@@ -191,6 +193,7 @@ def rr3_brain_run() -> int:
         f"config 就绪: cloud timeout_s={cloud_cfg['timeout_s']} "
         f"bus call={call_timeout_s}s connect={connect_timeout_s}s "
         f"dialog max_utterance_ms={dialog.max_utterance_ms}",
+        file=sys.stderr,
         flush=True,
     )
     trace_seq = 0
@@ -296,25 +299,25 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
         user_text = asr.transcribe(pcm)
     except RuntimeError as e:
         bus.rr3_counter_bump("asr_fail")
-        print(f"轮次 {trace_seq}: ASR 失败，弃轮（{e}）", flush=True)
+        print(f"轮次 {trace_seq}: ASR 失败，弃轮（{e}）", file=sys.stderr, flush=True)
         return trace_seq, pcm_seq
     bus.rr3_counter_bump("asr_ok")
     if not user_text.strip():
-        print(f"轮次 {trace_seq}: 识别为空文本，弃轮", flush=True)
+        print(f"轮次 {trace_seq}: 识别为空文本，弃轮", file=sys.stderr, flush=True)
         return trace_seq, pcm_seq
 
     try:
         reply_text = llm.complete(user_text)
     except RuntimeError as e:
         bus.rr3_counter_bump("llm_fail")
-        print(f"轮次 {trace_seq}: LLM 失败，弃轮（user={user_text!r}，{e}）", flush=True)
+        print(f"轮次 {trace_seq}: LLM 失败，弃轮（user={user_text!r}，{e}）", file=sys.stderr, flush=True)
         return trace_seq, pcm_seq
 
     try:
         reply_pcm = tts.synthesize(reply_text)
     except RuntimeError as e:
         bus.rr3_counter_bump("tts_fail")
-        print(f"轮次 {trace_seq}: TTS 失败，弃轮（{e}）", flush=True)
+        print(f"轮次 {trace_seq}: TTS 失败，弃轮（{e}）", file=sys.stderr, flush=True)
         return trace_seq, pcm_seq
     if len(reply_pcm) % 2:
         reply_pcm = reply_pcm[:-1]
@@ -339,7 +342,7 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
         if isinstance(played_ms, (int, float)) and not isinstance(played_ms, bool) and played_ms > 0:
             bus.rr3_counter_bump("rounds_audible")
     except RuntimeError as e:
-        print(f"轮次 {trace_seq}: interact 播放点名失败（{e}）", flush=True)
+        print(f"轮次 {trace_seq}: interact 播放点名失败（{e}）", file=sys.stderr, flush=True)
 
     # 意图→动作映射在 brain（策略层唯一归属，0.0.3 Q1 裁定）：结构化 actions
     # 随 intent/result 广播，执行器按 exposes 归属门各自认领（brain 不单播不等待）
@@ -358,6 +361,7 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
     print(
         f"对话轮完成: trace={trace_seq} user={user_text!r} reply={reply_text!r}"
         f" tts_pcm_ms={tts_ms}{played} actions={len(actions)}",
+        file=sys.stderr,
         flush=True,
     )
     return trace_seq, pcm_seq

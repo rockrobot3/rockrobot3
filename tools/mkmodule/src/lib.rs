@@ -128,7 +128,8 @@ fn main_rs(id: &str) -> String {
         r#"//! {id} 骨架。业务实现见 modules/{id}/README.md 的首个里程碑。
 
 fn main() {{
-    println!("{id} 0.0.1 (骨架，未接入总线)");
+    // 门 r（批N4 件八）：骨架生成即合规——stdout 被 supervisor 接成 null，留痕走 stderr
+    eprintln!("{id} 0.0.1 (骨架，未接入总线)");
 }}
 "#
     )

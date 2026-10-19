@@ -522,7 +522,7 @@ pub struct Rr3PanelShared {
 pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     let addr = rr3_panel_addr();
     let listener = TcpListener::bind(&addr).map_err(|e| format!("绑面板 {addr} 失败: {e}"))?;
-    println!(
+    eprintln!(
         "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
         RR3_PANEL_ROUTES.len()
     );
