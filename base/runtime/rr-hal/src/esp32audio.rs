@@ -38,7 +38,7 @@
 
 use std::collections::VecDeque;
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -353,7 +353,7 @@ fn rr3_esp32_audio_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
 
 /// 开口 + 握手（首连/重连同款路径）：open 自带 flock 排他（跨进程第二 opener
 /// 当场被拒）→ `audio_session::handshake`（settle/防御 OFF/ON 应答扫描）。
-fn rr3_esp32_audio_open(path: &PathBuf, baud: u32) -> Result<Rr3UartConn, String> {
+fn rr3_esp32_audio_open(path: &Path, baud: u32) -> Result<Rr3UartConn, String> {
     let mut conn =
         Rr3UartConn::open_with_baud(path, baud).map_err(|e| format!("open 失败: {e}"))?;
     handshake(&mut conn).map_err(|e| format!("握手失败: {e}"))?;

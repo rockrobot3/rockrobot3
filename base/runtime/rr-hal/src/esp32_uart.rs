@@ -122,12 +122,6 @@ fn rr3_bridge_request_body_params(id: u64, method: &str, params: &Value) -> Stri
     .to_string()
 }
 
-/// JSON-RPC 请求体（`method` 恒 `rr3.call`、点名主题在 `params.topic`——rrd
-/// 转发形状，与模块侧/哨兵侧的分发依据同源）。独立纯函数：形状可单测。
-fn rr3_bridge_request_body(id: u64, topic: &str, args: &Value) -> String {
-    rr3_bridge_request_body_params(id, "rr3.call", &json!({ "topic": topic, "args": args }))
-}
-
 /// 请求帧构造（pub(crate)：B 批 b1 音频源命令旁路复用——信封/帧头同形单点，
 /// 舵机/显示桥与旁路面零重复）：body → Request payload → 帧头（SEND /
 /// direct trace / src=宿主 1 / dst=板 2）。独立纯函数：形状可单测。
@@ -499,12 +493,18 @@ mod tests {
         }
     }
 
-    /// 请求体形状：method 恒 rr3.call、主题在 params.topic、args 原样内嵌
-    /// （conn.rs 转发形状的分发依据；形状漂移此处即红）。
+    /// 请求帧信封形状（B批 b1 起 `rr3_bridge_call_frame` 是 rr3.call 的生产单点，
+    /// 原 `rr3_bridge_request_body` 已并入）：method 恒 rr3.call、主题在
+    /// params.topic、args 原样内嵌（conn.rs 转发形状的分发依据；漂移此处即红）。
     #[test]
     fn bridge_request_body_is_rr3_call_with_topic_in_params() {
-        let s = rr3_bridge_request_body(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 90 }));
-        let v: Value = serde_json::from_str(&s).unwrap();
+        let frame = rr3_bridge_call_frame(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 90 }));
+        assert_eq!(frame.header.src_task, RR3_TASK_HOST);
+        assert_eq!(frame.header.dst_task, RR3_PERIPH_TASK);
+        assert_eq!(frame.header.trace_id, RR3_TRACE_DIRECT);
+        let (ty, body) = rr3_body_split(&frame.payload).expect("payload 前缀合法");
+        assert_eq!(ty, Rr3PayloadType::Request);
+        let v: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["jsonrpc"], "2.0");
         assert_eq!(v["id"], 7);
         assert_eq!(v["method"], "rr3.call");
