@@ -2593,12 +2593,14 @@ max_age_ms = 0
 
 # [supplies.budget]（schema 4，校验⑩ 分母）：栈预算 = 2× 现役 16KB 任务 + 余量
 # （board.rs THREAD_STACK/MIC_THREAD_STACK 同源）；堆三键 = ESP32-S3 数据表推算
-# 的演练实例，对账归 0.0.7 真板（N-13：内存核算进校验⑩-b 的板 crate 前置）。
+# 的演练实例，对账归 0.0.7 真板。heap_reserved_bytes 与 profiles/esp32-mini.toml
+# 同账同值（批N4 件二 N-13 ②：16384 UART2_TX_RING + 65536 audio_q 峰值 + 512 渲染
+# + 16384 板侧配置服务预留 = 98816——演练形状随真值面同批，防夹具与真值分叉）。
 [supplies.budget]
 not_applicable = false
 task_stack_budget_bytes = 65536
 heap_total_bytes = 327680
-heap_reserved_bytes = 16384
+heap_reserved_bytes = 98816
 
 [bindings]
 "act.servo" = "rr3-pa"
@@ -2823,7 +2825,7 @@ mux_group = []
         let bad = ESP32_GOOD
             .replace("task_stack_budget_bytes = 65536\n", "")
             .replace("heap_total_bytes = 327680\n", "")
-            .replace("heap_reserved_bytes = 16384\n", "");
+            .replace("heap_reserved_bytes = 98816\n", "");
         let errs = rr3_profile_from_text(&bad).expect_err("rtos 档缺数键必须红");
         assert!(
             errs.iter()
@@ -2880,15 +2882,15 @@ mux_group = []
     }
 
     /// 门 c 装载拒链·校验⑩ 红例②（F-13 形状：堆值不计栈 ⇒ 栈绿堆红）：栈申报
-    /// 16384 B 在预算内（⑩-a 绿），堆申报 327680 B > 可用堆 311296 B ⇒ 只红
-    /// ⑩-b——只加总栈会击穿半边的反例在装载链可达。
+    /// 16384 B 在预算内（⑩-a 绿），堆申报 327680 B > 可用堆 228864 B（327680 −
+    /// 98816，N-13 ② 全账后）⇒ 只红 ⑩-b——只加总栈会击穿半边的反例在装载链可达。
     #[test]
     fn memory_budget_chain_boot_rejects_heap_over_budget_while_stack_green() {
         let root = Root::new("mem-heap-red");
         root.stage_memory_atom("stacklegit", 16384, 0);
         root.stage_memory_atom("heaphog", 0, 327680);
         let p = root.write_profile("mem-heap-red.toml", ESP32_GOOD);
-        let e = boot_inputs(&p).expect_err("Σ堆 327680 > 可用 311296 必须致命");
+        let e = boot_inputs(&p).expect_err("Σ堆 327680 > 可用 228864 必须致命");
         assert!(e.contains("校验⑩-b") && e.contains("327680"), "{e}");
         assert!(!e.contains("校验⑩-a"), "栈在预算内不得级联红：{e}");
     }
@@ -2898,7 +2900,7 @@ mux_group = []
     #[test]
     fn memory_budget_chain_boot_accepts_boundary_sums() {
         let root = Root::new("mem-green");
-        root.stage_memory_atom("stacklegit", 65536, 311296);
+        root.stage_memory_atom("stacklegit", 65536, 228864);
         let p = root.write_profile("mem-green.toml", ESP32_GOOD);
         let boot = boot_inputs(&p).expect("等号边界必须过");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
