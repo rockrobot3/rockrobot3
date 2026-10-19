@@ -68,6 +68,23 @@ center/lo/hi 三键，host 经 `RR3_ACT_AXIS_STATE` 装配注入、板侧经 `ax
 不生成带病副本，件五③ `ee18519`）；配套 (b) host 侧注入面五键扩形（件五② `bfe3505`，e2e 证
 分批必红——生产者消费者同批）。⑨-d 相邻行顺带订正：architecture §14 门表 ⑨-d 行"待建"改"已建"
 （n1-8 `bbc853d` 建成时漏改，本批发现即订）。
+**2026-10-19 对表（批N4 件三，⑩ 门 d 面板覆盖率·报告模式）**：建 **`step "⑩ 门 d 面板覆盖率对账·报告模式…"`**
+（门 d 第 ③ 层执法位，全案 §8 门 d / §16.4 / interact 册 I-19；基-19↔拟步 ⑩）⇒ 可数 step **17 行**、
+**专属执法位建成 5 把＋报告位 2 把、待建门 17 把**；判据三段：① 分母**降字段级五路并集**
+（`ops[].slot` ∪ `RR3_PIN_KEYS` ∪ roles.requires 每项 ∪ `RR3_DOMAIN_KEYS` ∪ `RR3_ACT_PROFILE_FIELDS`，
+五路全部自代码/契约常量导出＋声明数判等——单真值点不抄第二份，⑨-a/⑨-n 先例）＝**70**
+（ops 27＋pin 11＋role.requires 去重 7＋domain 11＋axis 14）；② 分子＝每端点数据化申报
+`covers = [<集合>/<字段>]`（`RR3_PANEL_ROUTES` 升三元组，词表单真值点＝码内
+`RR3_PANEL_COVER_SETS` 五名 ops/pin/role/domain/axis；申报制：未申报不计分子、不是"默认全算"；
+词表外/缺斜杠/多段＝申报面错硬红不进基线，⑨-a B 段同款）；③ 差集机器生成逐条 "D " 行打印
+（ADR-0022 裁定 6.3 开放项的差集产出位；敞口表章程"缺码＋工单号不许混装"，开放项数据结构表
+随批N4 件九同批立——本件红账以步 ⑩ 打印为机器真值，不进敞口表）；**红项数不许靠缩分母减少**
+（I-19 判据字面）机器化＝双行基线 `tools/ci/gate-d-baseline.txt`（行 1 红账上限：回涨 FAIL、
+下降打印须同批下调；行 2 分母下限：缩分母 FAIL——I-19 判据字面、扩面打印须同批上调；文件缺/坏/
+非纯整数 FAIL fail-closed）；初值 70/70＝**建即红如实在账**（今日 14 端点读配置者 0＝I-15 实况，
+covers 全 `&[]` 如实申报），红项随批N4 件九三面扩端点逐批转绿、转绿终点＝差集空、门 d 转红退役；
+fail-closed 四路实测（covers 形制乱写／基线坏／基线缺／分母缩水各一次红）；步 ⑩ 的 EXIT trap 为
+⑨-a trap 超集（临时目录＋五基线文件清单原样保留，bash trap 后设覆盖先设）。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
@@ -2750,6 +2767,26 @@ meter 采样面／env-imu 深度＝器件在册＋契约面先行、真件探测
 进场／D5＝up 只表链路关联。**三事实源同批对表**：红账 21＝基线（A=13＋B=0＋C=8＝trait 差
 4＋pin 键差 4），roles 现役 10 角色、devices 现役 6 器件、RR3_ASSEMBLE_HANDLE_TRAITS=9、
 RR3_PIN_KEYS=11。
+
+2026-10-19（**批N4 件一～件三：证据号命名空间＋板侧配置腿选型＋门 d 覆盖率门建成**）：三件分笔
+落库，日期台账同批补登。①件一 `947af3d`（brain B-15）：证据号规则落 §6.1 新段（形制 `<形态>/<编号>`、
+frontmatter 六键；校验器唯一实现住 `rr-ipc::evidence`——形制＋存在＋frontmatter＋form 与目录一致
+四道 fail-closed，单测钉死）＋容器 `docs/evidence/`（README 模板）建成＋敞口表 15 行结构面注记；
+证据产出归 0.0.6/0.0.7 验证窗，写面挂接随批N4 件九端点。②件二 `1c30b9b`（connect N-13）：板侧
+配置腿载体选型 esp_http_server（TLS 不做四理由落 connect 册 N-13 行注记、凭据面不接 N-11）＋
+堆核算全账进装载校验⑩-b（`profiles/esp32-mini.toml` heap_reserved 16384→98816 逐项留痕：
+UART2_TX_RING＋audio_q 峰值＋渲染＋配置服务预留）＋architecture 对表；板上 HTTP 实证与真板堆
+对账归真板批。③件三（本提交，interact I-19）：`panel/server.rs` `RR3_PANEL_ROUTES` 升三元组带
+`covers` 数据化申报（14 端点全 `&[]` 如实——读配置者 0）＋词表常量 `RR3_PANEL_COVER_SETS` 五名
+码内单真值点＋形制单测；`check.sh` 建 `step "⑩ 门 d 面板覆盖率对账·报告模式…"`（判据三段与
+fail-closed 细目见本节对表段本日条目）；基线文件 `tools/ci/gate-d-baseline.txt` 初值 70/70
+（建即红如实在账，红项随件九扩端点转绿）；interact 册 I-19 行对表注记＋status 批N4 行回填。
+**三事实源同批对表：可数 step 16→17 行、专属执法位 5 把不变＋报告位 1→2 把、待建门 18→17 把**
+（本节对表段 / architecture §14——计数行补登批N3 件五 ⑨-e 漏更后随本件续记 / 全案 §16.4）。
+**随批补修件一/件二两处漏更**（独立提交，全量门禁回执抓出——两件当时未跑全量门即落库，属违尺，
+本批如实登记）：①件一漏把 `docs/evidence/README.md` 写进 docs/README.md 库地图（⑤ 文档门
+"导航漏链"红）；②件二漏把 contract 形状 pin `heap_reserved_bytes` 16384→98816 同批
+（`rr-registry/tests/contract.rs` `esp32_mini_profile_binds_bridged_minimal_shape` 红）。
 
 ## 3 结构纪律
 

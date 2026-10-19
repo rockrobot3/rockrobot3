@@ -916,6 +916,152 @@ if [ "$gate_a_fail" -ne 0 ]; then
   fail=1
 fi
 
+# —— ⑩ 门 d 面板覆盖率对账·报告模式（基-19↔本步；interact I-19，批N4 件三；全案 §8
+#     门 d / conventions §2 拟步 ⑩）。判据（字段级分母 + covers 申报制分子）：
+#       分母 = 五路字段并集（全部自代码常量/契约表导出——单真值点，⑨-a/⑨-n 先例）：
+#         ops/<slot>   ← modules/*/atoms/*/assemble.toml 的 ops 槽；
+#         pin/<field>  ← rrd/src/profile.rs RR3_PIN_KEYS（⑨-a 同款 awk，声明数判等）；
+#         role/<req>   ← contracts/roles.toml requires 逐项（⑨-a 同款拆词）；
+#         domain/<f>   ← rrd/src/profile.rs RR3_DOMAIN_KEYS（声明数判等）；
+#         axis/<field> ← rr-hal-api lib.rs RR3_ACT_PROFILE_FIELDS 十四键。
+#       分子 = ∪ 每端点 covers 申报（panel/server.rs RR3_PANEL_ROUTES 三元组第三列），
+#       元素形制 = <集合>/<单段字段>、集合词表自 RR3_PANEL_COVER_SETS 导出——未申报
+#       不计分子（申报制，不是"默认全算"；词表外/缺斜杠/多段 = 申报面错，硬红不进基线）。
+#     门 d 数学：置红 = |分母 − 分子|，差集逐条打印（"D "行 = 机器可读红账，
+#     ADR-0022 裁定 6.3 开放项的差集产出位）。
+#     机器判据（gate-a-baseline 先例，双行 fail-closed）：
+#       行 1 红账上限：红账 > 上限 FAIL（回涨必有一笔未登记的新红，先归因再动基线）；
+#         红账 < 上限 提醒同批下调（转绿进度，转绿终点 = 差集空，届时本门转红、基线退役）；
+#       行 2 分母下限：分母 < 下限 FAIL（I-19 判据字面——红项数不许靠缩分母减少）；
+#         分母 > 下限 提醒同批上调（合法扩面必须动基线，有迹可循）。
+#     建即红：今日 14 端点读配置者 0（I-15 实况）⇒ 差集 = 全分母，红项随批N4 件九
+#     三面扩端点逐批转绿；分母是设计产物，集合定义改动 = 契约级评审。
+step "⑩ 门 d 面板覆盖率对账·报告模式（分子 covers 申报 / 分母字段级五路并集，门 d）"
+gate_d_fail=0
+gd_dir="$(mktemp -d)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+gd_ops="$gd_dir/ops"; gd_pin="$gd_dir/pin"; gd_role="$gd_dir/role"; gd_dom="$gd_dir/dom"
+gd_axis="$gd_dir/axis"; gd_cov="$gd_dir/cov"; gd_cov_raw="$gd_dir/cov_raw"
+gd_sets="$gd_dir/sets"; gd_den="$gd_dir/den"; gd_diff="$gd_dir/diff"
+# bash 的 trap 后设覆盖先设：本两行是 ⑨-a trap（tmpout + ga 五文件）的超集，⑨-a 清单
+# 必须原样保留在本行内——单独改 ⑨-a 或本步时两处同看。
+trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"; rm -rf "$gd_dir"' EXIT
+trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"; rm -rf "$gd_dir"; exit 130' INT TERM
+# —— 分母五路导出
+grep -hoE 'slot = "[^"]+"' modules/*/atoms/*/assemble.toml | sed 's/.*slot = "/ops\//;s/"$//' | sort -u > "$gd_ops"
+awk '/const RR3_PIN_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/src/profile.rs \
+  | grep -oE '"[^"]+"' | tr -d '"' | sed 's/^/pin\//' | sort -u > "$gd_pin"
+gd_pin_decl="$(grep -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+awk '
+  $1 == "requires" {
+    line = $0
+    while (match(line, /"[^"]+"/)) { print substr(line, RSTART+1, RLENGTH-2); line = substr(line, RSTART+RLENGTH) }
+  }
+' contracts/roles.toml | sed 's/^/role\//' | sort -u > "$gd_role"
+awk '/const RR3_DOMAIN_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/src/profile.rs \
+  | grep -oE '"[^"]+"' | tr -d '"' | sed 's/^/domain\//' | sort -u > "$gd_dom"
+gd_dom_decl="$(grep -m1 -oE 'RR3_DOMAIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+awk '/pub const RR3_ACT_PROFILE_FIELDS/{f=1} f{print} f && /^\];/{exit}' base/runtime/rr-hal-api/src/lib.rs \
+  | grep -oE 'key: "[^"]+"' | sed 's/key: "/axis\//;s/"$//' | sort -u > "$gd_axis"
+# —— covers 原串导出（RR3_PANEL_ROUTES 区段内带斜杠且不以 / 开头的字符串：
+#     path 以 / 开头被排除，method 无斜杠不匹配；"rr3-act/..." 类 topic 字面量
+#     不住本区段）＋ 词表导出
+awk '/pub const RR3_PANEL_ROUTES/{f=1} f{print} f && /^\];/{exit}' \
+  modules/rr3-interact/src/panel/server.rs \
+  | grep -oE '"[^"/][^"]*/[^"]*"' | tr -d '"' > "$gd_cov_raw"
+awk '/pub const RR3_PANEL_COVER_SETS/{f=1} f{print} f && /\];/{exit}' \
+  modules/rr3-interact/src/panel/server.rs | grep -oE '"[^"]+"' | tr -d '"' | sort -u > "$gd_sets"
+# —— 扫面前件（键集导出打空属门禁失效，fail-closed，⑨-a 同款）
+gd_ops_n="$(grep -c . "$gd_ops" || true)"; gd_pin_n="$(grep -c . "$gd_pin" || true)"
+gd_role_n="$(grep -c . "$gd_role" || true)"; gd_dom_n="$(grep -c . "$gd_dom" || true)"
+gd_axis_n="$(grep -c . "$gd_axis" || true)"; gd_sets_n="$(grep -c . "$gd_sets" || true)"
+if [ "$gd_ops_n" -eq 0 ] || [ "$gd_pin_n" -eq 0 ] || [ "$gd_role_n" -eq 0 ] \
+   || [ "$gd_dom_n" -eq 0 ] || [ "$gd_axis_n" -eq 0 ] || [ "$gd_sets_n" -eq 0 ] \
+   || [ "$gd_pin_decl" -ne "$gd_pin_n" ] || [ "$gd_dom_decl" -ne "$gd_dom_n" ]; then
+  printf 'FAIL  ⑩ 扫面前件不成立（ops=%s pin=%s 声明=%s role=%s domain=%s 声明=%s axis=%s 词表=%s）——键集导出打空属门禁失效，不放行\n' \
+    "$gd_ops_n" "$gd_pin_n" "${gd_pin_decl:-空}" "$gd_role_n" "$gd_dom_n" "${gd_dom_decl:-空}" "$gd_axis_n" "$gd_sets_n"
+  gate_d_fail=1
+else
+  printf 'PASS  ⑩ 扫面前件（分母五路：ops %s + pin %s + role %s + domain %s + axis %s；covers 词表 %s 集合）\n' \
+    "$gd_ops_n" "$gd_pin_n" "$gd_role_n" "$gd_dom_n" "$gd_axis_n" "$gd_sets_n"
+  # —— covers 形制校验：合法进分子，乱写硬红（申报面错不是账，⑨-a B 段同款）
+  gd_cov_bad=0
+  : > "$gd_cov"
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    gd_set="${c%%/*}"; gd_rest="${c#*/}"
+    gd_bad=0
+    case "$gd_rest" in
+      ''|*/*) gd_bad=1 ;;   # 字段段空或多段
+    esac
+    grep -qxF "$gd_set" "$gd_sets" || gd_bad=1   # 集合不在词表
+    if [ "$gd_bad" -ne 0 ]; then
+      printf 'X  covers 形制乱写: %s（应为 <RR3_PANEL_COVER_SETS 词表集合>/<单段字段>）\n' "$c"
+      gd_cov_bad=$((gd_cov_bad + 1))
+    else
+      printf '%s\n' "$c" >> "$gd_cov"
+    fi
+  done < "$gd_cov_raw"
+  gd_cov_n="$(grep -c . "$gd_cov" || true)"
+  # —— 差集（分子分母各 sort -u 后 comm；分母已有序）
+  cat "$gd_ops" "$gd_pin" "$gd_role" "$gd_dom" "$gd_axis" | sort -u > "$gd_den"
+  sort -u "$gd_cov" > "$gd_dir/cov_sorted"
+  comm -23 "$gd_den" "$gd_dir/cov_sorted" > "$gd_diff"
+  gd_den_n="$(grep -c . "$gd_den" || true)"
+  gd_red_n="$(grep -c . "$gd_diff" || true)"
+  if grep -q . "$gd_diff"; then
+    sed 's/^/D  /' "$gd_diff"
+  fi
+  printf '门 d 数学（全案 §8 / I-19）：分母 %s − covers 申报 %s = 差集（红账）%s\n' \
+    "$gd_den_n" "$gd_cov_n" "$gd_red_n"
+  if [ "$gd_cov_bad" -gt 0 ]; then
+    printf 'FAIL  ⑩ covers 形制乱写 %s 笔（申报面错不是账，硬红不进基线）\n' "$gd_cov_bad"
+    gate_d_fail=1
+  fi
+  # —— 基线双行判据（fail-closed）
+  gd_base="tools/ci/gate-d-baseline.txt"
+  if [ ! -r "$gd_base" ]; then
+    printf 'FAIL  ⑩ 基线文件不可读: %s（裁定配套(c) fail-closed——低水位基线缺位即红，不放行）\n' "$gd_base"
+    gate_d_fail=1
+  else
+    gd_b1="$(grep -vE '^[[:space:]]*(#|$)' "$gd_base" | sed -n '1p' | tr -d '[:space:]')"
+    gd_b2="$(grep -vE '^[[:space:]]*(#|$)' "$gd_base" | sed -n '2p' | tr -d '[:space:]')"
+    case "$gd_b1$gd_b2" in
+      ''|*[!0-9]*)
+        printf 'FAIL  ⑩ 基线文件形状坏: %s（前两非注释行须各为纯整数，实得行1="%s" 行2="%s"）——fail-closed，不放行\n' \
+          "$gd_base" "${gd_b1:-<空>}" "${gd_b2:-<空>}"
+        gate_d_fail=1
+        ;;
+      *)
+        if [ "$gd_red_n" -gt "$gd_b1" ]; then
+          printf 'FAIL  ⑩ 红账回涨: %s > 上限 %s（"红条数单调不增"被破——回涨必有一笔未登记的新红，先归因再动基线）\n' \
+            "$gd_red_n" "$gd_b1"
+          gate_d_fail=1
+        elif [ "$gd_red_n" -lt "$gd_b1" ]; then
+          printf 'PASS  ⑩ 红账 %s ≤ 上限 %s（**红账下降 %s 笔：须同批下调 %s 行 1；转绿终点 = 差集空，届时本门转红、基线退役**）\n' \
+            "$gd_red_n" "$gd_b1" "$((gd_b1 - gd_red_n))" "$gd_base"
+        else
+          printf 'PASS  ⑩ 红账 %s = 上限 %s（报告模式：建即红如实在账，红项随批N4 件九扩端点逐批转绿）\n' \
+            "$gd_red_n" "$gd_b1"
+        fi
+        if [ "$gd_den_n" -lt "$gd_b2" ]; then
+          printf 'FAIL  ⑩ 分母缩水: %s < 下限 %s（I-19 判据字面——红项数不许靠缩分母减少；缩分母 = 集合定义改动，走契约级评审并同批动基线）\n' \
+            "$gd_den_n" "$gd_b2"
+          gate_d_fail=1
+        elif [ "$gd_den_n" -gt "$gd_b2" ]; then
+          printf 'PASS  ⑩ 分母 %s ≥ 下限 %s（**分母扩面 %s 笔：须同批上调 %s 行 2**）\n' \
+            "$gd_den_n" "$gd_b2" "$((gd_den_n - gd_b2))" "$gd_base"
+        else
+          printf 'PASS  ⑩ 分母 %s = 下限 %s（字段级分母无缩水）\n' "$gd_den_n" "$gd_b2"
+        fi
+        ;;
+    esac
+  fi
+fi
+rm -rf "$gd_dir"
+if [ "$gate_d_fail" -ne 0 ]; then
+  fail=1
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"
