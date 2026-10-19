@@ -63,14 +63,14 @@ const RR3_POLL_WAIT: Duration = Duration::from_millis(100);
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_connect_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    println!("rr3-connect 0.0.1 (0.0.2 T4c 实装)");
+    eprintln!("rr3-connect 0.0.1 (0.0.2 T4c 实装)");
     for line in wifi::SURFACE
         .iter()
         .copied()
         .chain(session::SURFACE.iter().copied())
         .chain(bt::SURFACE.iter().copied())
     {
-        println!("  {line}");
+        eprintln!("  {line}");
     }
 
     // 总线接入：manifest 路径是 rrd spawn 的契约环境变量，直跑（开发调试）须自行设置
@@ -80,10 +80,10 @@ pub fn rr3_connect_run() -> Result<(), String> {
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
-    println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
+    eprintln!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
     let cfg = rr3_config_load(&manifest_path)?;
-    println!(
+    eprintln!(
         "config 就绪: link report={}ms nmcli timeout={}ms",
         cfg.0.link_report_period_ms, cfg.0.timeout_ms
     );
@@ -96,7 +96,7 @@ pub fn rr3_connect_run() -> Result<(), String> {
     let first = dev
         .state()
         .map_err(|e| format!("链路面探活失败({backend}): {e}"))?;
-    println!(
+    eprintln!(
         "链路面就绪: {backend} up={} ssid={:?} rssi={:?}",
         first.up, first.ssid, first.rssi_dbm
     );
@@ -114,11 +114,11 @@ pub fn rr3_connect_run() -> Result<(), String> {
     {
         Some(ssid) => {
             let ssid = ssid.rr3_ssid_text_as_str().to_string();
-            println!("配网面就绪: {store_backend} 在册 ssid={ssid:?}（重启恢复 station）");
+            eprintln!("配网面就绪: {store_backend} 在册 ssid={ssid:?}（重启恢复 station）");
             wifi::Rr3Provision::rr3_provision_restored(ssid)
         }
         None => {
-            println!("配网面就绪: {store_backend} 无在册凭据（出厂 ap）");
+            eprintln!("配网面就绪: {store_backend} 无在册凭据（出厂 ap）");
             wifi::Rr3Provision::rr3_provision_new()
         }
     };
@@ -130,7 +130,7 @@ pub fn rr3_connect_run() -> Result<(), String> {
     // 承接（不走转移矩阵——装配期注入）。本进程暂无蓝牙事件面（主题不登记），
     // 相位只进开机自述——真后端接线接 Phase 时才有可发布语义。
     let bt_state = bt::Rr3BtState::rr3_bt_state_new(cfg.1);
-    println!(
+    eprintln!(
         "蓝牙面: phase={}（骨架，真后端板上后置）",
         bt_state.rr3_bt_phase().rr3_bt_phase_name()
     );
@@ -310,7 +310,7 @@ fn rr3_handle_session(
     session::rr3_session_parse_args(args)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
     let v = session::rr3_session_result(&st, mode)?;
-    println!("session: opened ssid={:?}", v["ssid"]);
+    eprintln!("session: opened ssid={:?}", v["ssid"]);
     Ok(v)
 }
 
@@ -336,7 +336,7 @@ fn rr3_handle_wifi_connect(
         .rr3_wifi_store_connect(&ssid, &pass)
         .map_err(|e| format!("凭据持久化失败: {e}"))?;
     prov.rr3_provision_connect(ssid.clone(), pass);
-    println!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
+    eprintln!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
     Ok(rr3_wifi_connect_result(&st, &ssid))
 }
 
@@ -352,7 +352,7 @@ fn rr3_handle_wifi_forget(
         .rr3_wifi_store_forget()
         .map_err(|e| format!("凭据删除失败: {e}"))?;
     prov.rr3_provision_forget();
-    println!("wifi: forget mode=ap（连接配置已真删）");
+    eprintln!("wifi: forget mode=ap（连接配置已真删）");
     Ok(rr3_wifi_forget_result())
 }
 

@@ -56,7 +56,7 @@ const RR3_PCM_EMPTY_FRAMES_KEY: &str = "pcm_empty_frames";
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_sense_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    println!("rr3-sense 0.0.1 (M3 实装)");
+    eprintln!("rr3-sense 0.0.1 (M3 实装)");
     for line in capture::SURFACE
         .iter()
         .copied()
@@ -64,7 +64,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
         .chain(env::SURFACE.iter().copied())
         .chain(imu::SURFACE.iter().copied())
     {
-        println!("  {line}");
+        eprintln!("  {line}");
     }
 
     // 总线接入：manifest 路径是 rrd spawn 的契约环境变量，直跑（开发调试）须自行设置
@@ -74,7 +74,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
     let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
-    println!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
+    eprintln!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
     let cfg = rr3_sense_config_load(&manifest_path)?;
     let (mut source, backend) = rr3_hal_audio_source();
@@ -87,7 +87,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
     source
         .open(open_cfg)
         .map_err(|e| format!("打开音频源({backend})失败: {e}"))?;
-    println!(
+    eprintln!(
         "音频源就绪: backend={backend} rate={} ch={} frame_ms={}",
         cfg.audio.sample_rate, cfg.audio.channels, cfg.audio.frame_ms
     );
@@ -311,7 +311,7 @@ fn rr3_sense_config_load(manifest_path: &str) -> Result<Rr3SenseConfig, String> 
     });
     let text = std::fs::read_to_string(&path).map_err(|e| format!("读 config {path} 失败: {e}"))?;
     let cfg = rr3_sense_config_parse(&text)?;
-    println!(
+    eprintln!(
         "config 就绪: 来源={path} doa_bin_threshold_deg={}",
         cfg.doa.bin_threshold_deg
     );

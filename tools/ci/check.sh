@@ -916,6 +916,58 @@ if [ "$gate_a_fail" -ne 0 ]; then
   fail=1
 fi
 
+# —— ⑨-r 留痕不进被丢弃的流（门 r 静态面执法位；全案 §8 门 r / §20 流-1，批N4 件八）。
+#     机制定形（件八笔1 07b998d）：supervisor 对子进程 stderr 接 per-unit 日志文件
+#     <socket>.log/<unit>.log（append），stdout 仍 null——stdout 是唯一被丢弃的流，
+#     故六模块生产码 stdout 留痕零命中；stderr（eprintln! / print(file=sys.stderr)）
+#     是声明过的通道，不在禁列。二选一裁定 per-unit 日志文件（上报窄缝否决：观测面
+#     不得依赖被观测面总线健康度；§17 同轨判据"一次重启后仍能取到崩溃前的最后 N 行"
+#     内存环做不到，文件天然满足；总线连接前的早期留痕只有文件通道可达）。
+#     扫面 = 五 Rust 模块 src 全部（act/connect/interact/power/sense）+ brain Python
+#     源（六模块生产码；atoms 面另有 ⑦-a 禁词扫面盖着，不在此重复）。brain 原不在
+#     门 r "45 处"实测口径内（该口径只数五 Rust 模块），件八扩面同批登记全案 §8
+#     门 r 行对表注记。Rust 面词边界 grep（防 eprintln! 子串误伤）；Python 面按 AST
+#     判（多行 print 调用按行 grep 会误报起始行），python3 缺失/解析崩 = 门禁失效不放行
+#     （⑨-n 扫面前件同一纪律）。
+step "⑨-r 留痕不进被丢弃的流（六模块生产码 stdout 留痕零命中，门 r）"
+gate_r_fail=0
+gr_rs="$(grep -rnE '(^|[^A-Za-z_])(println|print)!\(' \
+  modules/rr3-act/src modules/rr3-connect/src modules/rr3-interact/src \
+  modules/rr3-power/src modules/rr3-sense/src \
+  --include='*.rs' 2>/dev/null || true)"
+if [ -n "$gr_rs" ]; then
+  gate_r_fail=1
+  printf '%s\n' "$gr_rs"
+  printf 'FAIL  ⑨-r 模块生产码 stdout 留痕命中（见上行号）——stdout 被 supervisor 接成 Stdio::null()，留痕按设计不可达：改 eprintln!（stderr 落 per-unit 日志 <socket>.log/<unit>.log，门 r 定形批N4 件八）\n'
+fi
+gr_py="$(python3 - modules/rr3-brain/rr3_brain 2>/dev/null <<'PYEOF'
+import ast, pathlib, sys
+hits = []
+for f in sorted(pathlib.Path(sys.argv[1]).glob("*.py")):
+    tree = ast.parse(f.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "print"
+                and not any(kw.arg == "file" for kw in node.keywords)):
+            hits.append(f"{f}:{node.lineno}")
+print("\n".join(hits))
+PYEOF
+)"
+gr_py_rc=$?
+if [ "$gr_py_rc" -ne 0 ]; then
+  gate_r_fail=1
+  printf 'FAIL  ⑨-r Python 扫面前件不成立（python3 缺失或 AST 解析崩）——门禁失效，不放行\n'
+elif [ -n "$gr_py" ]; then
+  gate_r_fail=1
+  printf '%s\n' "$gr_py"
+  printf 'FAIL  ⑨-r 模块生产码 stdout print 命中（见上行号）——stdout 被 supervisor 接成 null，留痕按设计不可达：print(..., file=sys.stderr)（stderr 落 per-unit 日志，门 r 定形批N4 件八）\n'
+fi
+if [ "$gate_r_fail" -ne 0 ]; then
+  fail=1
+else
+  printf 'PASS  ⑨-r 留痕不进被丢弃的流（五 Rust 模块 stdout 宏 + brain Python stdout print 全零命中；stderr 通道 = per-unit 日志 <socket>.log/<unit>.log，append 保留重启历史）\n'
+fi
+
 # —— ⑩ 门 d 面板覆盖率对账·报告模式（基-19↔本步；interact I-19，批N4 件三；全案 §8
 #     门 d / conventions §2 拟步 ⑩）。判据（字段级分母 + covers 申报制分子）：
 #       分母 = 五路字段并集（全部自代码常量/契约表导出——单真值点，⑨-a/⑨-n 先例）：
