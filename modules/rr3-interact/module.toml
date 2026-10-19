@@ -24,7 +24,9 @@ publishes = []
 subscribes = ["rr3-connect/net/link", "rr3-brain/audio/tts_pcm"]
 
 [rpc]
-exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text"]
+# ops/list = ops 槽快照读口（批N4 件九二）：白名单十一槽应答（face/player/panel/selftest），
+# 面板观测面读口（面板与被点名模块同进程，仍走 rrd 归属门）
+exposes = ["rr3-interact/face/expression", "rr3-interact/tts/text", "rr3-interact/ops/list"]
 
 [resources]
 restart_policy = "always"

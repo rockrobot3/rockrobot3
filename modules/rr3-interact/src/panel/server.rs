@@ -19,7 +19,9 @@
 //! `POST /api/beep`（进程内）、`POST /api/face`（进程内）、`POST /api/selftest`
 //! （并列三调，各答各展示）、`POST /api/reboot`（ctl.reboot，双重门缺省拒）、
 //! `GET /api/wifi/scan` + `POST /api/wifi/connect` + `POST /api/wifi/forget`
-//! （0.0.4 批D：BusCall 透传 connect 三 RPC，参数裁决在 owner 模块）。
+//! （0.0.4 批D：BusCall 透传 connect 三 RPC，参数裁决在 owner 模块）＋模型密钥面
+//! 与 brain ops 读口（0.0.6 抽象批/B-12）＋五模块 ops 读口（批N4 件九二，同一
+//! BusCall 透传范式）。端点全集与 covers/applies 申报以 [`RR3_PANEL_ROUTES`] 为真值。
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -122,11 +124,13 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
-/// 今日实况（B-12，批N4 件六二转绿首刀）：15 端点，读配置者 1 =
-/// `GET /api/brain/ops`（covers 申报 brain ops 六槽：asr_model/base_url/
-/// llm_model/max_utterance_ms/timeout_s/tts_model——门 d 红账随本刀 79→73，
-/// 基线 tools/ci/gate-d-baseline.txt 行 1 同批下调）；密钥面两端点（keys/key）
-/// 不申报 covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
+/// 今日实况（批N4 件九二，观测面收官刀）：20 端点，读配置者 6 = `GET /api/brain/ops`
+/// （brain ops 六槽）＋五模块 ops 读口五端点（`GET /api/{act,connect,interact,power,
+/// sense}/ops`，BusCall 透传各模块 `rr3-<mod>/ops/list`，白名单组体应答）——ops 路
+/// 分母 36 槽全部转绿（covers 申报 30 项随本刀上表），红账 73→43 = pin 11 + role 7
+/// + domain 11 + axis 14（读口归件九后续笔），基线 tools/ci/gate-d-baseline.txt
+/// 行 1 同批下调；密钥面两端点（keys/key）不申报 covers——密钥不在五路分母
+/// （secrets 不住 assemble.toml 槽表），如实空。
 /// applies 今日唯一申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
 /// ⇒ live）；其余写口（beep/face/selftest/reboot/relay/wifi）写的是动作与运行态，
 /// 不动可配置集，如实空。**表项一律单行书写**（硬约束）：check.sh 步 ⑩ 的 applies
@@ -148,6 +152,11 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/api/model/keys", &[], ""),
     ("POST", "/api/model/key", &[], "live"),
     ("GET", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], ""),
+    ("GET", "/api/act/ops", &["ops/blink_period_ms", "ops/led_effects", "ops/move_timeout_ms", "ops/state_min_interval_ms"], ""),
+    ("GET", "/api/connect/ops", &["ops/up", "ops/link_report_period_ms", "ops/timeout_ms", "ops/min_pass_len"], ""),
+    ("GET", "/api/interact/ops", &["ops/non_pointable", "ops/default_expression", "ops/face_tick_ms", "ops/selftest_face_expect", "ops/panel_max_conns", "ops/panel_read_timeout_ms", "ops/panel_header_limit", "ops/panel_body_limit", "ops/panel_call_timeout_ms", "ops/prebuffer_ms", "ops/volume_pct"], ""),
+    ("GET", "/api/power/ops", &["ops/sample_period_ms", "ops/low_voltage_mv", "ops/cutoff_voltage_mv", "ops/state_period_ms"], ""),
+    ("GET", "/api/sense/ops", &["ops/sample_rate", "ops/channels", "ops/frame_ms", "ops/doa_bin_threshold_deg", "ops/rms_start", "ops/silence_tail_ms", "ops/min_speech_ms"], ""),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -420,6 +429,45 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         "/api/brain/ops" => match method {
             "GET" => Rr3PanelDispatch::BusCall {
                 topic: "rr3-brain/ops/list".to_string(),
+                args: json!({}),
+            },
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        // 五模块 ops 槽读面（批N4 件九二，观测面收官刀）：同一 BusCall 透传范式——
+        // 参数裁决在 owner（各模块白名单组体快照，槽名 = assemble/composite.toml
+        // 槽表申报同源），面板只透传；covers 申报五组 30 槽 = ops 路分母全转绿
+        // （interact 自身也走 rrd 归属门——面板不因同进程豁免，ADR-0006 裁定 3）
+        "/api/act/ops" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-act/ops/list".to_string(),
+                args: json!({}),
+            },
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/connect/ops" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/ops/list".to_string(),
+                args: json!({}),
+            },
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/interact/ops" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-interact/ops/list".to_string(),
+                args: json!({}),
+            },
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/power/ops" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-power/ops/list".to_string(),
+                args: json!({}),
+            },
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/sense/ops" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-sense/ops/list".to_string(),
                 args: json!({}),
             },
             _ => Rr3PanelDispatch::MethodNotAllowed,
@@ -964,6 +1012,49 @@ mod tests {
                 args: json!({})
             }
         );
+        // 五模块 ops 读口（批N4 件九二）：无参 BusCall 透传，各点名 owner 模块
+        assert_eq!(
+            rr3_panel_route("GET", "/api/brain/ops", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-brain/ops/list".into(),
+                args: json!({})
+            }
+        );
+        assert_eq!(
+            rr3_panel_route("GET", "/api/act/ops", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-act/ops/list".into(),
+                args: json!({})
+            }
+        );
+        assert_eq!(
+            rr3_panel_route("GET", "/api/connect/ops", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-connect/ops/list".into(),
+                args: json!({})
+            }
+        );
+        assert_eq!(
+            rr3_panel_route("GET", "/api/interact/ops", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-interact/ops/list".into(),
+                args: json!({})
+            }
+        );
+        assert_eq!(
+            rr3_panel_route("GET", "/api/power/ops", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-power/ops/list".into(),
+                args: json!({})
+            }
+        );
+        assert_eq!(
+            rr3_panel_route("GET", "/api/sense/ops", b""),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-sense/ops/list".into(),
+                args: json!({})
+            }
+        );
     }
 
     /// 端点表 ↔ 路由分派漂移门（MC-8③/I-9）：表内每条必须分派成功（不是
@@ -973,8 +1064,8 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            15,
-            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径"
+            20,
+            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N4 件九二 15→20：五模块 ops 读口）"
         );
         for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {

@@ -193,6 +193,21 @@ pin 自动适配＋covers 词表门自动过）、brain 快照四例（fallback/
 转绿不在差集。本机 python3 3.9 无 tomllib ⇒ 形制自验走一次性脚本（5 组/73 引用/零错，
 仓外即弃），机判校验归 CI（python3.12）后续批随门位扩展再议。docs/README 库地图
 同批登记；status.md 敞口表对账归批N4 收口件。
+**2026-10-19 对表（批N4 件九笔2，观测面收官——ops 组 30 槽全转绿）**：契约 32→37
+（topics.toml append 五模块 `rr3-<mod>/ops/list` request 主题，照 brain 先例 stable=L2；
+八处计数 pin 同批：rr-registry topics.rs ×3、tests/contract.rs 32→37＋request 13→18、
+rrd topics_load.rs ×3，35→40 两处随契约计数联动）；五 module.toml exposes 双写（power
+自此首个事务面主题）；五模块 composite 快照应答臂＝**白名单组体**（槽名与 assemble/
+composite.toml 槽表申报同源——act led/servo 四槽、connect bt/wifi 四槽、interact
+face/player/panel/selftest 十一槽、power battery/charger 四槽、sense audio/doa/vad
+七槽；密钥/凭据/行程/瞬态不在快照面）；面板 `GET /api/{act,connect,interact,power,
+sense}/ops` 五端点同一 BusCall 透传范式（interact 自身也走 rrd 归属门，不因同进程
+豁免），covers 申报 30 槽 ⇒ ops 路 36 槽全转绿，端点 pin 15→20，基线
+`gate-d-baseline.txt` 行 1 **73→43**（余红 = pin 11＋role 7＋domain 11＋axis 14，
+读口归件九后续笔；分母 79 不动）；openitems.toml ops 组 status=done、fields 清空
+（头注对表行同批）；前端 tab-sys 加「模块配置面」只读卡（模块名入列四栏渲染）。
+门 d 差集机器真值仍＝步 ⑩ " D " 行打印，openitems 归因表随转绿同批改状态——
+两口径本批实跑一致。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`

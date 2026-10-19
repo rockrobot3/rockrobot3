@@ -46,6 +46,10 @@ const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
 /// 本模块 exposes 的唯一事务面主题（module.toml [rpc].exposes 同源）
 const RR3_DUMP_TOPIC: &str = "rr3-sense/capture/dump";
 
+/// 本模块 exposes 的 ops 槽快照读口（批N4 件九二，module.toml [rpc].exposes 同源）：
+/// 白名单组体应答，槽名与 assemble.toml 槽表申报同源（门 d covers 申报的对账面）
+const RR3_OPS_LIST_TOPIC: &str = "rr3-sense/ops/list";
+
 /// 采集新鲜度运维计数键（批M M-β S-3）：`pcm_frames` 每实际上总线一帧 +1；
 /// `pcm_empty_frames` 读回欠载空帧（read 实填 0 采样——"活着但不动"的饿死
 /// 信号，MC-11 判据：卡死与静默停摆看得见）另账。经心跳自报 rrd 归并，
@@ -153,8 +157,10 @@ pub fn rr3_sense_run() -> Result<(), String> {
                 .unwrap_or("");
             let result = if topic == RR3_DUMP_TOPIC {
                 rr3_dump_result(seq, backend, &cfg)
+            } else if topic == RR3_OPS_LIST_TOPIC {
+                json!({ "ops": rr3_sense_ops_snapshot(&cfg) })
             } else {
-                json!({ "error": format!("rr3-sense 只 exposes {RR3_DUMP_TOPIC}，收到 {topic}") })
+                json!({ "error": format!("rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}，收到 {topic}") })
             };
             bus.rr3_reply_call(frame.header.trace_id, id, result)?;
         }
@@ -252,6 +258,28 @@ fn rr3_dump_result(seq: u64, backend: &str, cfg: &Rr3SenseConfig) -> Value {
         "sample_rate": cfg.audio.sample_rate,
         "channels": cfg.audio.channels,
         "frame_ms": cfg.audio.frame_ms,
+        "vad": {
+            "rms_start": cfg.vad.rms_start,
+            "silence_tail_ms": cfg.vad.silence_tail_ms,
+            "min_speech_ms": cfg.vad.min_speech_ms,
+        },
+    })
+}
+
+/// `rr3-sense/ops/list` 应答体（批N4 件九二，面板 /api/sense/ops 读口）：ops 槽
+/// 快照，**白名单组体**——槽名与 assemble.toml 槽表申报同源（audio/doa/vad 三组，
+/// 门 d covers 申报的对账面），config 其余键一律不进应答。槽名 doa_bin_threshold_deg
+/// 与 config 键 bin_threshold_deg 的映射是装配清单 src_key 的事（槽表申报同源）。
+fn rr3_sense_ops_snapshot(cfg: &Rr3SenseConfig) -> Value {
+    json!({
+        "audio": {
+            "sample_rate": cfg.audio.sample_rate,
+            "channels": cfg.audio.channels,
+            "frame_ms": cfg.audio.frame_ms,
+        },
+        "doa": {
+            "doa_bin_threshold_deg": cfg.doa.bin_threshold_deg,
+        },
         "vad": {
             "rms_start": cfg.vad.rms_start,
             "silence_tail_ms": cfg.vad.silence_tail_ms,
