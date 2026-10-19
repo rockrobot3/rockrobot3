@@ -136,23 +136,26 @@ pub(crate) const BOOT_PAN_DEG: u32 = RR3_AXIS_PAN.2 - 30;
 pub(crate) const BOOT_TILT_DEG: u32 = RR3_AXIS_TILT.2 + 8;
 
 // ---------------------------------------------------------------------------
-// 引脚真值（board 层单一真值点）——接线总表：
+// 引脚真值（**注入面**，批N4 件七(c)）——接线总表：
 //   UART2 = GPIO18→TX / GPIO19←RX（921600 批D②；GPIO16/17 一装 UART2 驱动即把 I2C0
 //           打死，弃用；19 与点阵 VSPI 预留同脚，点阵立项时需再迁，已在案）
 //   I2C0  = GPIO21 SDA / GPIO22 SCL（SSD1306 0x3C）
 //   LEDC  = GPIO32 pan / GPIO33 tilt（50Hz 14bit）
 //   UART0 = 控制台（板载 USB）
-// 说明：esp-idf-hal 的 `LedcDriver::new`/`UartDriver::new` 需**具名引脚类型**
-// （`peripherals.pins.gpioNN`），无法由 i32 常量构造——故这两类 new 仍按上表用
-// `peripherals.pins.gpioNN` 传参（其名自证引脚号）；只有**裸寄存器自愈路径**
-// （[`crate::oled::i2c_bus_recover`] / [`crate::oled::i2c_bus_unstick`]）需要
-// 数字引脚，故单独落常量。不另立一份"驱动 new 用"的重复常量真值（防两处漂移）。
+//   轨测点 = GPIO34（ADC1_CH6，input-only 档）
+// **I2C0 两脚与轨测点的数字引脚号不落常量**（原 PIN_I2C_SDA/SCL、ADC_RAIL_PIN 已
+// 随批N4 件七(c) 删除）：真值由宿主经 rr3.set_bindings 下发（esp32-mini [hardware]
+// 三键 → rrd RR3_HAL_BINDINGS → supervisor env → 桥上 method），板侧落
+// [`crate::state`] 单点，消费面 fail-closed——未注入即拒不动作（裸寄存器自愈路径
+// [`crate::oled::i2c_bus_recover`] / [`crate::oled::i2c_bus_unstick`]；观测面 =
+// 绑定注入打印 + 运行面 `selfheal_skipped` 计数）。上表数字保留作文档锚点（接线
+// 对表用），真值以下发为准。
+// 说明：esp-idf-hal 的 `LedcDriver::new`/`UartDriver::new`/`I2cDriver::new`/
+// `RailMonitor::new` 需**具名引脚类型**（`peripherals.pins.gpioNN`），无法由 i32
+// 值构造——驱动装配仍按上表用 `peripherals.pins.gpioNN` 传参（其名自证引脚号；
+// 主驱动具名引脚的真值化改造归 0.0.7 批G/D1）。
 // ---------------------------------------------------------------------------
 
-/// I2C0（SSD1306）SDA（裸寄存器自愈路径用）。
-pub(crate) const PIN_I2C_SDA: i32 = 21;
-/// I2C0（SSD1306）SCL（裸寄存器自愈路径用）。
-pub(crate) const PIN_I2C_SCL: i32 = 22;
 /// UART2 指令面波特率（批D② 落板 921600——Q1=(a) 带宽账裁定：音频上行双通道
 /// 16kHz×16bit ≈ 512kbps，115200 载不动；烧录即 deliberate。宿主侧缺省仍
 /// 115200，会话须以 RR3_HAL_PERIPH_BAUD=921600 或 `_with_baud` 构造显式同档）。
@@ -173,10 +176,6 @@ pub(crate) const LEDC_RES_BITS: Resolution = Resolution::Bits14;
 // **机制与策略分离**：换板只动本文件，power.rs 零板名。分压测点接线后与万用表
 // 对拍（≤2%）再回填标定——**无真板证据前不 claim**。
 
-/// 5V 轨分压测点引脚（ADC1_CH6，input-only 档，见文件头引脚预算）。**数字真值**
-/// 只作观测打印与接线表锚点；驱动装配用 `peripherals.pins.gpio34`（具名类型，
-/// 与 LEDC/UART 同例——见上文引脚真值段注记，不另立重复真值）。
-pub(crate) const ADC_RAIL_PIN: i32 = 34;
 /// 5V 轨采样节拍（运行面自主节拍周期采样；占位值 **待真板标定**）。
 pub(crate) const RAIL_SAMPLE_PERIOD_MS: u64 = 500;
 /// 分压比分子：轨压 mV = 引脚 mV × NUM / DEN。**占位 1:1 待标定**——真板装上
@@ -240,7 +239,10 @@ impl Axis {
     pub(crate) fn range(self) -> (u32, u32) {
         match rr3_axis_travel(self.name()) {
             Some((lo, hi, _)) => (lo, hi),
-            None => panic!("轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）", self.name()),
+            None => panic!(
+                "轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）",
+                self.name()
+            ),
         }
     }
 
@@ -248,7 +250,10 @@ impl Axis {
     pub(crate) fn center_deg(self) -> u32 {
         match rr3_axis_travel(self.name()) {
             Some((_, _, center)) => center,
-            None => panic!("轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）", self.name()),
+            None => panic!(
+                "轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）",
+                self.name()
+            ),
         }
     }
 }
@@ -261,7 +266,10 @@ pub(crate) fn axis_check(axis: Axis, deg: u32) -> Result<u32, String> {
         return Err(format!("角度超范围 0-180: {deg}"));
     }
     let Some((lo, hi, center)) = rr3_axis_travel(axis.name()) else {
-        return Err(format!("{} 轴无行程表（axis_gen.rs 生成物缺轴）", axis.name()));
+        return Err(format!(
+            "{} 轴无行程表（axis_gen.rs 生成物缺轴）",
+            axis.name()
+        ));
     };
     if !(lo..=hi).contains(&deg) {
         return Err(format!(

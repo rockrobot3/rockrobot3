@@ -88,8 +88,8 @@ use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches};
 
 use crate::board::{
-    ADC_RAIL_PIN, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ,
-    LEDC_RES_BITS, OLED_ADDR, THREAD_STACK, UART2_BAUD_HZ, UART2_TX_RING, Axis,
+    Axis, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, OLED_ADDR,
+    THREAD_STACK, UART2_BAUD_HZ, UART2_TX_RING,
 };
 use crate::commands::cmd_loop;
 use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
@@ -112,7 +112,9 @@ fn main() {
     link_patches();
 
     println!(
-        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0@21/22 servo=ledc@32/33 rail=adc1@34 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo"
+        // 引脚号不上横幅（批N4 件七(c)）：I2C/轨测点真值经 rr3.set_bindings 注入
+        // （成功打印见 frame_handle_set_bindings），装配面引脚号在各装配打印自证。
+        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0 servo=ledc rail=adc1 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo"
     );
     ram_point("1-boot");
 
@@ -158,7 +160,9 @@ fn main() {
         )
     };
     if drive_res != 0 {
-        println!("[periph] GPIO18 驱动档 CAP_3 设置失败 err={drive_res}（继续跑，查 esp-idf-sys 对表）");
+        println!(
+            "[periph] GPIO18 驱动档 CAP_3 设置失败 err={drive_res}（继续跑，查 esp-idf-sys 对表）"
+        );
     }
 
     // ---- I2C0 @ GPIO21/22（判据①：扫描 0x3C 应答）----
@@ -170,7 +174,14 @@ fn main() {
         .sda_enable_pullup(true)
         .scl_enable_pullup(true);
     // 欠压复位后 SSD1306 常抱死 SDA→总线全黑；装驱动前先解卡（见 i2c_bus_unstick）。
-    unsafe { i2c_bus_unstick() };
+    // fail-closed（批N4 件七(c)）：引脚真值经 rr3.set_bindings 注入，boot 期桥未连
+    // 必缺席 → 拒解卡并点名（v3 拍板：消费面级 fail-closed，不做板级等宿主的启动
+    // 时序重构；启动期解卡能力随 0.0.7 批G/D1 主驱动具名引脚改造回归）。
+    if unsafe { i2c_bus_unstick() } {
+        println!("[periph] I2C boot 解卡 ✓（绑定已注入；SDA 高则本无需）");
+    } else {
+        eprintln!("[periph] I2C boot 解卡拒（绑定未注入）——欠压复位致总线抱死的自愈待 rr3.set_bindings 后由运行面接管");
+    }
     let mut i2c = I2cDriver::new(
         peripherals.i2c0,
         peripherals.pins.gpio21,
@@ -240,7 +251,9 @@ fn main() {
     let rail = match RailMonitor::new(peripherals.adc1, peripherals.pins.gpio34) {
         Ok(r) => {
             println!(
-                "[periph] 5V 轨监测 ✓ ADC1 @ GPIO{ADC_RAIL_PIN}（占位分压 1:1 待标定；RAIL 命令采一次）"
+                // 测点引脚号不上打印（批N4 件七(c)）：具名装配自证 gpio34，数字真值
+                // 以 rr3.set_bindings 注入打印为准（观测面唯一真值点）。
+                "[periph] 5V 轨监测 ✓ ADC1 @ 测点引脚经 rr3.set_bindings 下发（占位分压 1:1 待标定；RAIL 命令采一次）"
             );
             Some(r)
         }
