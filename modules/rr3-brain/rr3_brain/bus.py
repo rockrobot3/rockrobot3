@@ -70,7 +70,6 @@ RR3_MANIFEST_ENV = "RR3_MANIFEST"
 
 RR3_METHOD_CALL = "rr3.call"
 
-RR3_CONNECT_TIMEOUT_S = 5.0
 _RR3_HDR = struct.Struct("<IHHQQQQI")  # magic/opcode/flags/trace/ts/src/dst/len
 
 
@@ -195,9 +194,15 @@ def rr3_manifest_entry_absolutize(text: str, entry_abs: str) -> str:
 
 
 class Rr3BusClient:
-    """一站式连接：读环境变量 → 取身份 → 绝对化 entry → 连接 → 注册 → 起心跳。"""
+    """一站式连接：读环境变量 → 取身份 → 绝对化 entry → 连接 → 注册 → 起心跳。
 
-    def __init__(self, path: str, manifest_text: str, entry_abs: str | None = None):
+    `connect_timeout_s` = 注册帧等待上界（批N4 件六 B-13① 数据化：composite 经
+    config `[rr3-brain.bus].connect_timeout_s` 注入；缺省回落 legacy 值 5.0——
+    默认值只在此签名与 config.toml 注释两处对表）。
+    """
+
+    def __init__(self, path: str, manifest_text: str, entry_abs: str | None = None,
+                 connect_timeout_s: float = 5.0):
         identity = rr3_manifest_identity(manifest_text)
         if entry_abs is None:
             entry_abs = os.path.realpath(sys.argv[0] or ".")
@@ -225,7 +230,7 @@ class Rr3BusClient:
         self._reader = threading.Thread(target=self._reader_loop, name="rr3-bus-reader", daemon=True)
         self._reader.start()
 
-        reply = self._call_locked(0, "rr3.register", {"name": self._name, "manifest": wire}, RR3_CONNECT_TIMEOUT_S)
+        reply = self._call_locked(0, "rr3.register", {"name": self._name, "manifest": wire}, connect_timeout_s)
         task = reply.get("src_task") if isinstance(reply, dict) else None
         if not isinstance(task, int):
             self._shutdown()
@@ -397,10 +402,15 @@ class Rr3BusClient:
         self._sock.close()
 
 
-def rr3_bus_connect(manifest_path: str, path: str | None = None) -> Rr3BusClient:
-    """模块 main 的第一行：读 RR3_MANIFEST（rrd spawn 注入）→ 连接注册起心跳。"""
+def rr3_bus_connect(manifest_path: str, path: str | None = None,
+                    connect_timeout_s: float = 5.0) -> Rr3BusClient:
+    """模块 main 的第一行：读 RR3_MANIFEST（rrd spawn 注入）→ 连接注册起心跳。
+
+    `connect_timeout_s`（B-13①）透传给 [`Rr3BusClient`]——注册帧等待上界，
+    composite 经 config `[rr3-brain.bus]` 注入。
+    """
     if path is None:
         path = os.environ.get(RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT)
     with open(manifest_path, "rb") as f:
         manifest_text = f.read().decode()
-    return Rr3BusClient(path, manifest_text)
+    return Rr3BusClient(path, manifest_text, connect_timeout_s=connect_timeout_s)

@@ -135,6 +135,20 @@ boot 期桥未连注入必缺席，启动期解卡能力随 0.0.7 批G/D1 主驱
 字面量；绑定注入成功打印三键值＝板侧引脚真值唯一观测点）。**读不到注入值即拒不回退硬编码**
 的机制面三处观测：boot 解卡点名 / 运行面 `selfheal_skipped` 计数 / 重试路径终败 Err 冒泡。
 行为判据（改档案实录＋抽注入拒起对照）仍归真板批——status 敞口 21 行不结项。
+**2026-10-19 对表（批N4 件六第一笔，I-21①③＋B-13①＋B-16①②——"成功"的假通过口与超时数据化）**：
+三处假通过口同笔闭合——interact `rr3_tts_pcm_integrity` 加零字节下界（(0,0) 不再是合法通过态，
+云 200 空体的静默假成功口关死）且 `played_ms==0` 折 `tts_play_reject`＋error 应答不记
+`tts_play_ok`；面板 `BusCall` 出口加载荷判等（`rr3_bus_reply_status`：应答含 `error` 即
+422+`ok:false`，与 502 传输失败分码——脚本按状态码判成败不再恒真，前端 `r.ok` 失败即
+显示拒因）；brain 计账拆两本（`chat_rounds` 退役，`rounds_replied`=应答发布完毕、
+`rounds_audible`=回执 `played_ms>0`——"完成一轮"与"用户听见"自此可分，`/api/data`
+counters 同表可见）。超时数据化（B-13①，D7 解耦裁定）：`[rr3-brain.bus]`
+`call_timeout_s=30.0`/`connect_timeout_s=5.0` 新段，码内 `RR3_CALL_TIMEOUT_S`/
+`RR3_CONNECT_TIMEOUT_S` 两常量退役，config 先于总线连接装载（缺键 fail-closed 更早）；
+云面传输异常收敛一个类型一个处置点（`rr3_brain_http_post` OSError 族→RuntimeError、
+`asr.py` json.loads 进护栏，llm 腿既有护栏回归钉住）——同一类云不可用不再一半弃轮
+一半掀进程。单测：interact 55 条（零字节下界两例＋422 判等三例）、brain 拆账四例＋
+收敛三例（brain 单测归 CI brain-unittest job，本机 check.sh 不覆盖）。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`

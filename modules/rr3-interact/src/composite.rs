@@ -318,6 +318,15 @@ fn rr3_handle_tts(
     let played = player::rr3_tts_play(sink, &samples);
     face.rr3_face_end_talk();
     let played_ms = played?;
+    // played_ms==0 不得记 ok（批N4 件六 I-21①）：对账通过但样点不足一个毫秒窗
+    // （<16 样点）对用户等于没听见——按业务失败折 error 应答（brain 侧 audible
+    // 不计，B-16① 拆账判据），与传输失败分账不折成功。
+    if played_ms == 0 {
+        bus.rr3_counter_bump("tts_play_reject", 1);
+        return Err(format!(
+            "tts 播出 0ms（PCM {pcm_bytes} 字节对账通过但不足 1ms 窗口），不得记 ok（I-21①）"
+        ));
+    }
     bus.rr3_counter_bump("tts_play_ok", 1);
     println!(
         "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，gain {}%，水位 {}ms，talk 挂起 {suspended}）",
@@ -364,8 +373,16 @@ fn rr3_tts_parse_args(args: &Value) -> Result<(String, u64), String> {
 
 /// tts PCM 缓冲对账（MC-1）：点名申报的 `pcm_bytes` vs 缓冲实收。少 = 半流
 /// （发布侧断流/坏帧弃置），多 = 残留（上轮余量未清）——皆拒，拒因带缺口
-/// 字节。判定纯函数化：记账（tts_play_reject）与清缓冲归调用方。
+/// 字节。下界（批N4 件六 I-21①）：申报 0 字节一律拒——`buffered == pcm_bytes`
+/// 的等式判据会把"什么都没发"当"全发到了"（云 200 空体 → (0,0) → Ok →
+/// `played_ms=0` → 计 ok 的静默假成功口），无流不静默。判定纯函数化：记账
+/// （tts_play_reject）与清缓冲归调用方。
 fn rr3_tts_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(), String> {
+    if pcm_bytes == 0 {
+        return Err(format!(
+            "tts PCM 点名申报 0 字节（空体无流，I-21① 下界拒），弃播"
+        ));
+    }
     let buffered = buffered as u64;
     if buffered == pcm_bytes {
         return Ok(());
@@ -685,7 +702,8 @@ mod tests {
         assert_eq!(r.get("topic"), None, "应答体不带 topic");
     }
 
-    /// tts PCM 缓冲对账（MC-1）：完整 = 过；半流/残留 = 拒且缺口字节进拒因
+    /// tts PCM 缓冲对账（MC-1）：完整 = 过；半流/残留 = 拒且缺口字节进拒因；
+    /// 零字节申报一律拒（I-21① 下界：(0,0) 不再是合法通过态）
     #[test]
     fn tts_pcm_integrity_rejects_half_and_residual_streams() {
         assert_eq!(rr3_tts_pcm_integrity(640, 640), Ok(()));
@@ -695,6 +713,10 @@ mod tests {
         assert!(e.contains("残留") && e.contains("640"), "{e}");
         let e = rr3_tts_pcm_integrity(1920, 0).unwrap_err();
         assert!(e.contains("半流"), "空缓冲必拒（无流不静默）: {e}");
+        let e = rr3_tts_pcm_integrity(0, 0).unwrap_err();
+        assert!(e.contains("0 字节"), "(0,0) 恒拒（I-21① 静默假成功口）: {e}");
+        let e = rr3_tts_pcm_integrity(0, 640).unwrap_err();
+        assert!(e.contains("0 字节"), "零申报有残留同样拒: {e}");
     }
 
     /// 收流缓冲：解码追加 + 排空清零（残流不跨轮滞留），坏帧 fail-closed
