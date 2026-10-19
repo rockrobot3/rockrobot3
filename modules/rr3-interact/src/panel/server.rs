@@ -122,12 +122,16 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
-/// 今日实况（I-15）：14 端点读配置者为 0（GET 全是运行态、POST 全是动作），
-/// covers 全空是**如实的**——门 d（check.sh 步 ⑩）建即红，红项随批N4 件九
-/// 三面扩端点逐批转绿（红条数单调不增，基线 tools/ci/gate-d-baseline.txt）。
+/// 今日实况（B-12，批N4 件六二转绿首刀）：15 端点，读配置者 1 =
+/// `GET /api/brain/ops`（covers 申报 brain ops 六槽：asr_model/base_url/
+/// llm_model/max_utterance_ms/timeout_s/tts_model——门 d 红账随本刀 79→73，
+/// 基线 tools/ci/gate-d-baseline.txt 行 1 同批下调）；密钥面两端点（keys/key）
+/// 不申报 covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
 /// applies 今日唯一申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
 /// ⇒ live）；其余写口（beep/face/selftest/reboot/relay/wifi）写的是动作与运行态，
-/// 不动可配置集，如实空。
+/// 不动可配置集，如实空。**表项一律单行书写**（硬约束）：check.sh 步 ⑩ 的 applies
+/// 解析器逐行按引号段切本表——跨行表项/行内注释都会被拆行判坏（批N4 件六二
+/// 首跑即红的实证）。
 pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/", &[], ""),
     ("GET", "/api/status", &[], ""),
@@ -143,6 +147,7 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("POST", "/api/wifi/forget", &[], ""),
     ("GET", "/api/model/keys", &[], ""),
     ("POST", "/api/model/key", &[], "live"),
+    ("GET", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], ""),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -407,6 +412,16 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         // 不走总线不入配置——GET 清单只回 ref 名，POST 应答只回 ref 不回值
         "/api/model/keys" => match method {
             "GET" => Rr3PanelDispatch::ModelKeysQuery,
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        // brain ops 槽读面（B-12，批N4 件六二）：BusCall 点名 `rr3-brain/ops/list`
+        // ——参数裁决在 owner（brain 侧白名单组体，密钥不进应答），面板只透传；
+        // covers 六槽申报 = 门 d 转绿首刀（本端点真实渲染 brain ops 槽值）
+        "/api/brain/ops" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-brain/ops/list".to_string(),
+                args: json!({}),
+            },
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         "/api/model/key" => {
@@ -958,7 +973,7 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            14,
+            15,
             "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径"
         );
         for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
