@@ -9,6 +9,9 @@
 [rr3-connect.wifi]
 link_report_period_ms = 5000
 timeout_ms = 20000          # nmcli 子进程超时（N-2 实装：管住 net/link 最坏翻转延迟）
+min_pass_len = 8            # 配网口令下限（批N4 件五 N-11①/M-6：组合件码内 pass.len()<8
+                            # 数据化——口令规则是策略，现场放宽到 6 位是合法需求；
+                            # 缺键回落 8 = legacy 语义，显式 0 按 1 拒放）
 
 [rr3-connect.bt]
 up = false                  # 开机蓝牙初值（出厂不自动开；0.0.5 批I N-1：env 注入退役改数据化注入）

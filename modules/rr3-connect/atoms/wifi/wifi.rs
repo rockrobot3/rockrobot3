@@ -28,12 +28,16 @@ pub const RR3_WIFI_SCAN_TOPIC: &str = "rr3-connect/wifi/scan";
 pub const RR3_WIFI_CONNECT_TOPIC: &str = "rr3-connect/wifi/connect";
 pub const RR3_WIFI_FORGET_TOPIC: &str = "rr3-connect/wifi/forget";
 
-/// config `[rr3-connect.wifi]` 的形状（上报周期 + nmcli 子进程超时；0.0.5 批I
-/// N-2：timeout_ms 自 session 段迁入并实装生效点，N-6：无读者的 roam_probe_enabled 删除）
+/// config `[rr3-connect.wifi]` 的形状（上报周期 + nmcli 子进程超时 + 配网口令
+/// 下限；0.0.5 批I N-2：timeout_ms 自 session 段迁入并实装生效点，N-6：无读者
+/// 的 roam_probe_enabled 删除；0.0.5 增补轮六 批N4 件五 N-11①/M-6：min_pass_len
+/// 自组合件码内 `pass.len() < 8` 数据化——口令规则是策略，现场放宽到 6 位是合法
+/// 需求，缺键回落 8 = legacy 语义）
 #[derive(Debug, Clone, Copy)]
 pub struct Rr3LinkCfg {
     pub link_report_period_ms: u64,
     pub timeout_ms: u64,
+    pub min_pass_len: u64,
 }
 
 pub use mech::{Rr3LinkEdge, Rr3Provision};

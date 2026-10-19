@@ -1834,6 +1834,9 @@ fn platform_tables_parse_and_shape_is_pinned() {
 /// 六份组合件清单真文件：申报面定形 pin（N-11，§8 门 j 前件）——schema 位（组合件
 /// 面版本域 = 1，与件级 2 同名不同域）、name 与目录名同源、atoms ⊗ 链集合、空面
 /// 明写 no_injection；外加三枚合成反例钉死判据本身。
+/// 2026-10-19 批N4 件五对表：rr3-interact 组合件级 ops 七槽首启用（表情节拍＋自检
+/// 期望表情＋面板五限额，消费点在组合件面），不再是零注入面——单独具名 pin 槽集；
+/// 其余五份维持零注入面断言不变。
 #[test]
 fn composite_declaration_face_is_pinned() {
     let expected: &[(&str, &[&str])] = &[
@@ -1858,6 +1861,31 @@ fn composite_declaration_face_is_pinned() {
             "{}: atoms ⊗ 链漂移（增删原子件须走 ADR 并同批改本 pin）",
             path.display()
         );
+        if *name == "rr3-interact" {
+            // 批N4 件五：组合件级 ops 七槽首启用（I-17/I-18②），句柄仍零、
+            // no_injection 不再写——增删槽须同批改本 pin 与门 d 分母基线。
+            assert!(
+                facts.handles.is_empty() && !facts.no_injection,
+                "{}: 组合件申报面漂移（rr3-interact 非零注入面：七 ops 槽在册）",
+                path.display()
+            );
+            let slots: Vec<&str> = facts.ops.iter().map(|o| o.slot.as_str()).collect();
+            assert_eq!(
+                slots,
+                [
+                    "face_tick_ms",
+                    "selftest_face_expect",
+                    "panel_max_conns",
+                    "panel_read_timeout_ms",
+                    "panel_header_limit",
+                    "panel_body_limit",
+                    "panel_call_timeout_ms",
+                ],
+                "{}: 组合件级 ops 七槽漂移（批N4 件五 I-17/I-18②，增删须同批改本 pin）",
+                path.display()
+            );
+            continue;
+        }
         assert!(
             facts.handles.is_empty() && facts.ops.is_empty() && facts.no_injection,
             "{}: 组合件申报面漂移（N-11：零注入面组合件必须显式申报）",

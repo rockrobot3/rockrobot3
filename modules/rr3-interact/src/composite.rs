@@ -42,8 +42,11 @@ use rr_hal_api::RR3_AUDIO_CFG_16K_MONO16;
 use rr_ipc::{opcode, Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
 use serde_json::{json, Value};
 
-use face::{rr3_face_expression_lookup, rr3_face_frames, rr3_face_non_pointable_join, Rr3Face};
-use panel::server::{rr3_panel_serve, Rr3PanelAction, Rr3PanelShared};
+use face::{
+    rr3_face_expression_lookup, rr3_face_frames, rr3_face_non_pointable_join,
+    rr3_face_with_default, Rr3Face,
+};
+use panel::server::{rr3_panel_serve, Rr3PanelAction, Rr3PanelLimits, Rr3PanelShared};
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
 const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
@@ -56,10 +59,6 @@ const RR3_NET_LINK_TOPIC: &str = "rr3-connect/net/link";
 
 /// 收帧等待上界：无点名时空转一圈的代价，值不敏感（心跳在独立线程）
 const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
-
-/// 表情帧动画节拍：~250ms 一帧（批F3 sim 档；多帧态 blink/talk 由此循环）。
-/// 按墙上时钟节拍推进，帧速率不随总线流量漂移。
-const RR3_FACE_TICK: Duration = Duration::from_millis(250);
 
 /// tts_pcm 流收缓冲（MC-1）：brain 语音下行**先流后点名**——流是载荷通路，
 /// `rr3-interact/tts/text` 点名是"该不该播"的唯一判据（0.0.5 方案 §20 第 1 条
@@ -118,12 +117,17 @@ pub fn rr3_interact_run() -> Result<(), String> {
     // config 装载（I-11 重开装载面）：不可点名集等策略经 config 数据化注入，机制件
     // 零策略载荷。缺文件/缺键/在册外值一律拒 boot（fail-closed）。
     let cfg = rr3_config_load(&manifest_path)?;
-    // 注入的策略面在启动自述里可见（I-11：改数据即改行为，日志是第一证据）
+    // 注入的策略面在启动自述里可见（I-11：改数据即改行为，日志是第一证据）。
+    // I-17/I-18② 新增键随批N4 件五进自述：节拍/兜底表情/面板并发放自检期望。
     println!(
-        "config 就绪: face non_pointable={} player prebuffer_ms={} volume_pct={}",
+        "config 就绪: face non_pointable={} tick_ms={} default={} player prebuffer_ms={} volume_pct={} panel max_conns={} selftest face_expect={}",
         rr3_face_non_pointable_join(&cfg.face.non_pointable),
+        cfg.face.face_tick_ms,
+        cfg.face.default_expr,
         cfg.player.prebuffer_ms,
-        cfg.player.volume_pct
+        cfg.player.volume_pct,
+        cfg.panel.max_conns,
+        cfg.selftest.face_expect
     );
 
     let (mut sink, backend) = rr3_hal_audio_sink();
@@ -131,7 +135,9 @@ pub fn rr3_interact_run() -> Result<(), String> {
         .map_err(|e| format!("打开播放面({backend})失败: {e}"))?;
     println!("播放面就绪: backend={backend} rate=16000 ch=1");
 
-    let mut face = Rr3Face::default();
+    // 兜底表情注入（批N4 件五 I-17/M-3）：mech 各回落点取 config
+    // `default_expression`（parse 已对账白名单），legacy 缺键回落 idle
+    let mut face = rr3_face_with_default(cfg.face.default_expr);
     let mut face_tick_at = std::time::Instant::now();
 
     // tts_pcm 收流缓冲（MC-1）：brain 先发流后点名，Event 帧逐帧解码进这里，
@@ -152,12 +158,23 @@ pub fn rr3_interact_run() -> Result<(), String> {
     // 份Arc 共享句柄（rr-bus 语义），面板的 rr3.call 与主循环应答互不干扰。
     let link = Arc::new(Mutex::new(None::<Value>));
     let (act_tx, act_rx) = mpsc::channel::<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>();
+    // 面板五限额/超时（批N4 件五 I-18②）：config 毫秒值转 Duration，装配期
+    // 一次换算，server 侧机制面只见 Duration 不再携带策略
+    let panel_limits = Rr3PanelLimits {
+        max_conns: cfg.panel.max_conns as usize,
+        read_timeout: Duration::from_millis(cfg.panel.read_timeout_ms),
+        header_limit: cfg.panel.header_limit as usize,
+        body_limit: cfg.panel.body_limit as usize,
+        call_timeout: Duration::from_millis(cfg.panel.call_timeout_ms),
+    };
     let panel_shared = Arc::new(Rr3PanelShared {
         bus: bus.clone(),
         bus_path: std::env::var(RR3_BUS_PATH_ENV)
             .unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string()),
         actions: act_tx,
         link: Arc::clone(&link),
+        limits: panel_limits,
+        selftest_face_expect: cfg.selftest.face_expect,
     });
     std::thread::Builder::new()
         .name("rr3-panel".into())
@@ -247,11 +264,12 @@ pub fn rr3_interact_run() -> Result<(), String> {
             };
             let _ = tx.send(result);
         }
-        // 表情帧动画一拍（批F3 sim 档）：~250ms 节拍推进帧指针，多帧态
+        // 表情帧动画一拍（批F3 sim 档）：节拍自 config `face_tick_ms`
+        // （批N4 件五 I-17/M-2 数据化，legacy 250ms）推进帧指针，多帧态
         // （blink/talk）由此循环；批F5a③ 接显示 trait——出帧交 HAL 渲染
         // （sim 后端内存记录，真件档 MAX7219 SPI 换后端零编排改动）。显示是
         // 妆面件，draw 失败只 eprintln 不退出（同 led worker 口径）
-        if face_tick_at.elapsed() >= RR3_FACE_TICK {
+        if face_tick_at.elapsed() >= Duration::from_millis(cfg.face.face_tick_ms) {
             face_tick_at = std::time::Instant::now();
             let (expr, ix) = face.rr3_face_tick();
             let frame = rr3_face_frames(expr)[ix];
@@ -415,6 +433,8 @@ fn rr3_config_load(manifest_path: &str) -> Result<Rr3InteractCfg, String> {
 struct Rr3InteractCfg {
     player: Rr3PlayerCfg,
     face: Rr3FaceCfg,
+    panel: Rr3PanelCfg,
+    selftest: Rr3SelftestCfg,
 }
 
 /// config `[rr3-interact.player]` 的形状（MC-2）：起播水位与播放增益。
@@ -438,10 +458,54 @@ impl Default for Rr3PlayerCfg {
 }
 
 /// config `[rr3-interact.face]` 的形状（`non_pointable` = 本形态不可点名集，I-11）。
-/// 值取 `&'static str`（经白名单对账），件面判定直接吃 `&[&str]`。
+/// 值取 `&'static str`（经白名单对账），件面判定直接吃 `&[&str]`。批N4 件五
+/// I-17/M-2/M-3：`face_tick_ms` = 表情节拍（组合件主循环节步频）与
+/// `default_expr` = 兜底表情（mech 状态机各回落点）数据化——节拍与人格取向
+/// 都是策略，缺键回落 legacy 值。
 #[derive(Debug, Clone)]
 struct Rr3FaceCfg {
     non_pointable: Vec<&'static str>,
+    face_tick_ms: u64,
+    default_expr: &'static str,
+}
+
+/// config `[rr3-interact.panel]` 的形状（批N4 件五 I-18②）：面板五限额/超时
+/// 数据化——面板是"覆盖率门缺失"的活证（I-15 分子分母数不到它们），本批补齐。
+/// 缺段/缺键回落默认（legacy 常量值，S-5 口径）；类型错/负数/越界点名拒 boot。
+#[derive(Debug, Clone)]
+struct Rr3PanelCfg {
+    max_conns: u64,
+    read_timeout_ms: u64,
+    header_limit: u64,
+    body_limit: u64,
+    call_timeout_ms: u64,
+}
+
+impl Default for Rr3PanelCfg {
+    fn default() -> Self {
+        // legacy 常量值（server.rs 原 RR3_PANEL_* 常量）——一个事实一个真值点：
+        // 默认值只在此处与 config.toml 注释对表
+        Self {
+            max_conns: 8,
+            read_timeout_ms: 5000,
+            header_limit: 8 * 1024,
+            body_limit: 4 * 1024,
+            call_timeout_ms: 5000,
+        }
+    }
+}
+
+/// config `[rr3-interact.selftest]` 的形状（批N4 件五 I-17/M-10）：自检期望
+/// 表情是产线取向，可按形态改数据。值必须在册（白名单对账）。
+#[derive(Debug, Clone)]
+struct Rr3SelftestCfg {
+    face_expect: &'static str,
+}
+
+impl Default for Rr3SelftestCfg {
+    fn default() -> Self {
+        Self { face_expect: "happy" }
+    }
 }
 
 /// TOML 文本 → Rr3InteractCfg。手工下钻不引 serde derive：字段个位数，
@@ -454,16 +518,50 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
     let mut player = Rr3PlayerCfg::default();
     if let Some(p) = v.get("rr3-interact").and_then(|s| s.get("player")) {
         let mut t = player.prebuffer_ms;
-        rr3_cfg_u64(p, "prebuffer_ms", &mut t)?;
+        rr3_cfg_u64(p, "prebuffer_ms", "player", &mut t)?;
         player.prebuffer_ms = t;
         let mut t = player.volume_pct as u64;
-        rr3_cfg_u64(p, "volume_pct", &mut t)?;
+        rr3_cfg_u64(p, "volume_pct", "player", &mut t)?;
         player.volume_pct = u32::try_from(t)
             .ok()
             .filter(|pct| *pct <= 1000)
             .ok_or_else(|| {
                 format!("[rr3-interact.player] volume_pct 越界（值域 0..=1000）: {t}")
             })?;
+    }
+    // panel 段（批N4 件五 I-18②）：段/键缺省回落 legacy 常量值（S-5 口径）；
+    // 类型错/负数点名拒。四值下界：max_conns ≥1、read_timeout_ms ≥1、
+    // header/body_limit ≥1（0 = 面板自残，不当合法配置放行）。
+    let mut panel = Rr3PanelCfg::default();
+    if let Some(p) = v.get("rr3-interact").and_then(|s| s.get("panel")) {
+        let mut t = panel.max_conns;
+        rr3_cfg_u64(p, "max_conns", "panel", &mut t)?;
+        panel.max_conns = t.max(1);
+        let mut t = panel.read_timeout_ms;
+        rr3_cfg_u64(p, "read_timeout_ms", "panel", &mut t)?;
+        panel.read_timeout_ms = t.max(1);
+        let mut t = panel.header_limit;
+        rr3_cfg_u64(p, "header_limit", "panel", &mut t)?;
+        panel.header_limit = t.max(1);
+        let mut t = panel.body_limit;
+        rr3_cfg_u64(p, "body_limit", "panel", &mut t)?;
+        panel.body_limit = t.max(1);
+        let mut t = panel.call_timeout_ms;
+        rr3_cfg_u64(p, "call_timeout_ms", "panel", &mut t)?;
+        panel.call_timeout_ms = t.max(1);
+    }
+    // selftest 段（批N4 件五 I-17/M-10）：段缺省回落 legacy 期望（"happy"）；
+    // 值必须在册（同 non_pointable 白名单对账口径），在册外点名拒 boot。
+    let mut selftest = Rr3SelftestCfg::default();
+    if let Some(s) = v.get("rr3-interact").and_then(|x| x.get("selftest")) {
+        if let Some(name) = s.get("face_expect").and_then(toml::Value::as_str) {
+            selftest.face_expect = rr3_face_expression_lookup(name).ok_or_else(|| {
+                format!(
+                    "config [rr3-interact.selftest] face_expect 非在册表情 {name:?}（在册值 {}）",
+                    face::RR3_FACE_EXPRESSIONS.join("/")
+                )
+            })?;
+        }
     }
     let face_sect = v
         .get("rr3-interact")
@@ -490,22 +588,55 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
         })?;
         non_pointable.push(expr);
     }
+    // 表情节拍与兜底表情（批N4 件五 I-17/M-2/M-3）：缺键回落 legacy 值；
+    // default_expression 必须在册（同 non_pointable 白名单对账）
+    let mut face_tick_ms = 250u64;
+    rr3_cfg_u64(face_sect, "face_tick_ms", "face", &mut face_tick_ms)?;
+    let face_tick_ms = face_tick_ms.max(1);
+    let default_expr = match face_sect.get("default_expression") {
+        Some(name) => {
+            let s = name.as_str().ok_or_else(|| {
+                format!("config [rr3-interact.face] default_expression 必须是字符串，收到 {name}")
+            })?;
+            rr3_face_expression_lookup(s).ok_or_else(|| {
+                format!(
+                    "config [rr3-interact.face] default_expression 非在册表情 {s:?}（在册值 {}）",
+                    face::RR3_FACE_EXPRESSIONS.join("/")
+                )
+            })?
+        }
+        None => rr3_face_expression_lookup("idle")
+            .expect("在册白名单恒含 idle，lookup 必中"),
+    };
     Ok(Rr3InteractCfg {
         player,
-        face: Rr3FaceCfg { non_pointable },
+        face: Rr3FaceCfg {
+            non_pointable,
+            face_tick_ms,
+            default_expr,
+        },
+        panel,
+        selftest,
     })
 }
 
 /// config 键的 u64 下钻（S-5 同款口径）：键缺省不动 `out`（回落调用方给的
-/// 默认）；类型错（非整数/负数）显式点名拒 boot，不静默吞。
-fn rr3_cfg_u64(sect: &toml::Value, key: &str, out: &mut u64) -> Result<(), String> {
+/// 默认）；类型错（非整数/负数）显式点名拒 boot，不静默吞。段名进文案便于
+/// 逐段定位（player/face/panel 各段共用）。
+fn rr3_cfg_u64(
+    sect: &toml::Value,
+    key: &str,
+    sect_name: &str,
+    out: &mut u64,
+) -> Result<(), String> {
     let Some(v) = sect.get(key) else {
         return Ok(());
     };
-    let t = v
-        .as_integer()
-        .ok_or_else(|| format!("[rr3-interact.player] {key} 必须是整数，收到 {v}"))?;
-    *out = u64::try_from(t).map_err(|_| format!("[rr3-interact.player] {key} 不得为负: {t}"))?;
+    let t = v.as_integer().ok_or_else(|| {
+        format!("[rr3-interact.{sect_name}] {key} 必须是整数，收到 {v}")
+    })?;
+    *out = u64::try_from(t)
+        .map_err(|_| format!("[rr3-interact.{sect_name}] {key} 不得为负: {t}"))?;
     Ok(())
 }
 
@@ -641,11 +772,83 @@ volume_pct = 70
 
 [rr3-interact.face]
 non_pointable = ["talk"]
+face_tick_ms = 250
+default_expression = "idle"
+
+[rr3-interact.panel]
+max_conns = 8
+read_timeout_ms = 5000
+header_limit = 8192
+body_limit = 4096
+call_timeout_ms = 5000
+
+[rr3-interact.selftest]
+face_expect = "happy"
 "#;
         let cfg = rr3_interact_config_parse(text).unwrap();
         assert_eq!(cfg.face.non_pointable, vec!["talk"], "不可点名集注入");
         assert_eq!(cfg.player.prebuffer_ms, 500, "起播水位注入（MC-2）");
         assert_eq!(cfg.player.volume_pct, 70, "播放增益注入（MC-2）");
+        assert_eq!(cfg.face.face_tick_ms, 250, "表情节拍注入（I-17/M-2）");
+        assert_eq!(cfg.face.default_expr, "idle", "兜底表情注入（I-17/M-3）");
+        assert_eq!(cfg.panel.max_conns, 8, "面板限额注入（I-18②）");
+        assert_eq!(cfg.selftest.face_expect, "happy", "自检期望注入（I-17/M-10）");
+    }
+
+    /// face/panel/selftest 新键（批N4 件五 I-17/I-18②）：键/段缺省回落 legacy
+    /// 值；类型错、在册外值、0 值逐键点名拒（fail-closed）
+    #[test]
+    fn face_panel_selftest_keys_fall_back_and_reject_bad_values() {
+        let minimal = "[rr3-interact.face]\nnon_pointable = []\n";
+        // 全缺省：face 节拍/兜底回落 250/idle，panel 五值回落 legacy，
+        // selftest 回落 happy
+        let cfg = rr3_interact_config_parse(minimal).unwrap();
+        assert_eq!(cfg.face.face_tick_ms, 250);
+        assert_eq!(cfg.face.default_expr, "idle");
+        assert_eq!(cfg.panel.max_conns, 8);
+        assert_eq!(cfg.panel.read_timeout_ms, 5000);
+        assert_eq!(cfg.panel.header_limit, 8 * 1024);
+        assert_eq!(cfg.panel.body_limit, 4 * 1024);
+        assert_eq!(cfg.panel.call_timeout_ms, 5000);
+        assert_eq!(cfg.selftest.face_expect, "happy");
+        // 显式值合法读入：非 legacy 取值同样放行（在册表情任选）
+        let cfg = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\nface_tick_ms = 120\ndefault_expression = \"happy\"\n[rr3-interact.panel]\nmax_conns = 2\n[rr3-interact.selftest]\nface_expect = \"blink\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.face.face_tick_ms, 120);
+        assert_eq!(cfg.face.default_expr, "happy");
+        assert_eq!(cfg.panel.max_conns, 2);
+        assert_eq!(cfg.selftest.face_expect, "blink");
+        // 0 值自残拒放：节拍/限额折 1 下界——0 不当合法配置
+        let cfg = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\nface_tick_ms = 0\n[rr3-interact.panel]\nmax_conns = 0\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.face.face_tick_ms, 1, "节拍 0 折 1");
+        assert_eq!(cfg.panel.max_conns, 1, "并发 0 折 1");
+        // 类型错拒：字符串进整数键、整数进字符串键
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\nface_tick_ms = \"soon\"\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("face_tick_ms"), "类型错点名: {e}");
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\ndefault_expression = 3\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("default_expression"), "非字符串点名: {e}");
+        // 在册外值拒：表情名必须过白名单对账
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\ndefault_expression = \"wink\"\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("非在册表情"), "兜底表情在册外点名: {e}");
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest]\nface_expect = \"wink\"\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("非在册表情"), "自检期望在册外点名: {e}");
     }
 
     /// player 两键（MC-2）：键/段缺省回落默认；类型错、负数、越界逐键点名拒

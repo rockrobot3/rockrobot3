@@ -624,15 +624,32 @@ pub struct Rr3Face {
     suspended: Option<&'static str>,
     /// 当前表情帧序列内的指针（rr3_face_tick 推进；入态归零从首帧重播）
     frame_ix: usize,
+    /// 兜底表情（批N4 件五 I-17/M-3 数据化）：各回落点（end_talk 无挂起、
+    /// begin_talk 幂等分支）的去处——装配期自 config `default_expression`
+    /// 注入，构造器 [`Rr3Face::rr3_face_with_default`]；Default 是 legacy 回落
+    /// （S-5 口径），不再是唯一真值点
+    default_expr: &'static str,
+}
+
+impl Rr3Face {
+    /// 带兜底表情的构造器（批N4 件五 I-17/M-3）：`default_expr` 须为在册值
+    /// （装配期 parse 已对账白名单；此处机制面不再复检，值域由调用方保证）。
+    /// 初态即兜底表情——新机器当前态就是人格取向本身。
+    pub fn rr3_face_with_default(default_expr: &'static str) -> Self {
+        Self {
+            current: default_expr,
+            suspended: None,
+            frame_ix: 0,
+            default_expr,
+        }
+    }
 }
 
 impl Default for Rr3Face {
     fn default() -> Self {
-        Self {
-            current: "idle",
-            suspended: None,
-            frame_ix: 0,
-        }
+        // legacy 兜底 idle（一个事实一个真值点：legacy 值只在此处与 config.toml
+        // 注释对表）
+        Self::rr3_face_with_default("idle")
     }
 }
 
@@ -667,7 +684,7 @@ impl Rr3Face {
     /// TTS 播放开始：切到 talk，返回被挂起的表情。已在 talk（嵌套播放）则幂等。
     pub fn rr3_face_begin_talk(&mut self) -> &'static str {
         if self.current == RR3_FACE_TALK {
-            return self.suspended.unwrap_or("idle");
+            return self.suspended.unwrap_or(self.default_expr);
         }
         let prev = core::mem::replace(&mut self.current, RR3_FACE_TALK);
         self.suspended = Some(prev);
@@ -675,7 +692,8 @@ impl Rr3Face {
         prev
     }
 
-    /// TTS 播放结束：恢复挂起前的表情。没有挂起态（如点名后直接调）则回 idle。
+    /// TTS 播放结束：恢复挂起前的表情。没有挂起态（如点名后直接调）则回兜底
+    /// 表情（批N4 件五 I-17/M-3：default_expr 数据化，legacy 回落 idle）。
     pub fn rr3_face_end_talk(&mut self) -> &'static str {
         match self.suspended.take() {
             Some(prev) => {
@@ -684,9 +702,9 @@ impl Rr3Face {
                 prev
             }
             None => {
-                self.current = "idle";
+                self.current = self.default_expr;
                 self.frame_ix = 0;
-                "idle"
+                self.default_expr
             }
         }
     }
@@ -733,6 +751,22 @@ mod tests {
                 .1,
             "idle"
         );
+    }
+
+    /// 兜底表情注入（批N4 件五 I-17/M-3）：`rr3_face_with_default` 注入后，
+    /// 各回落点（end_talk 无挂起、begin_talk 幂等分支、切换前值）取注入值
+    /// 而非硬编码 idle——机制零策略载荷的 mech 侧钉子。
+    #[test]
+    fn default_expression_injection_drives_fallbacks() {
+        let mut f = Rr3Face::rr3_face_with_default("happy");
+        // 初态即兜底表情：首次切换的"切换前"就是注入值
+        assert_eq!(f.rr3_face_set("blink", NON_TALK).unwrap().1, "happy");
+        // end_talk 无挂起：回落注入值（连续调用同样回落，不折 idle）
+        assert_eq!(f.rr3_face_end_talk(), "happy");
+        assert_eq!(f.rr3_face_end_talk(), "happy");
+        // begin_talk 幂等分支：已在 talk 且无挂起时返回注入值
+        f.rr3_face_begin_talk();
+        assert_eq!(f.rr3_face_begin_talk(), "happy");
     }
 
     /// char 单字符档：帧表映射对得上 + 点名成功 + 单帧恒报 0（charH 横杠行钉死，

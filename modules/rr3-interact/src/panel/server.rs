@@ -42,17 +42,33 @@ use super::RR3_PANEL_INDEX_HTML;
 pub const RR3_PANEL_ADDR_ENV: &str = "RR3_PANEL_ADDR";
 pub const RR3_PANEL_ADDR_DEFAULT: &str = "127.0.0.1:8080";
 
-/// 并发连接上限：面板是单人调试面，8 个并发连接已是慷慨上限；
-/// 超限直接 503 拒——慢客户端不能把 accept 队列占穿。
-pub const RR3_PANEL_MAX_CONNS: usize = 8;
-/// 单请求读超时：半包/慢客户端的耐心上界（P3 风险缓解）
-pub const RR3_PANEL_READ_TIMEOUT: Duration = Duration::from_secs(5);
-/// 头区上界：请求行 + 头，8KB 足够面板这种乖客户端
-const RR3_PANEL_HEADER_LIMIT: usize = 8 * 1024;
-/// body 上界：最大的是 selftest 的空 body，4KB 只是防滥用
-const RR3_PANEL_BODY_LIMIT: usize = 4 * 1024;
-/// 模块间 RPC 的应答耐心：relay 经 rrd 路由到 act，正常毫秒级，5s 是 10 倍余量
-const RR3_PANEL_CALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// 面板五限额/超时（批N4 件五 I-18② 数据化）：装配期自 config
+/// `[rr3-interact.panel]` 读出构造（缺键回落 [`Default`] 的 legacy 值），
+/// 经 [`Rr3PanelShared`] 贯穿 serve/accept/handle——"现场限并发只能改码"
+/// 的无主策略就此清账。值语义不变：超限 503、半包折 Err、超界断连。
+#[derive(Debug, Clone, Copy)]
+pub struct Rr3PanelLimits {
+    pub max_conns: usize,
+    pub read_timeout: Duration,
+    pub header_limit: usize,
+    pub body_limit: usize,
+    pub call_timeout: Duration,
+}
+
+impl Default for Rr3PanelLimits {
+    fn default() -> Self {
+        // legacy 常量值——一个事实一个真值点：默认值只在此处与 config.toml
+        // 注释对表（composite.rs 的 Rr3PanelCfg::default 是 config 缺键回落，
+        // 与此处同值同源叙述）
+        Self {
+            max_conns: 8,
+            read_timeout: Duration::from_secs(5),
+            header_limit: 8 * 1024,
+            body_limit: 4 * 1024,
+            call_timeout: Duration::from_secs(5),
+        }
+    }
+}
 
 /// 连接线程 spawn 失败的运维计数键（批M M-β I-4）：失败点账后续连，
 /// `rr3.ctl.counters` 读面键 `rr3-interact/panel_spawn_fail`。
@@ -195,10 +211,14 @@ pub struct Rr3HttpRequest {
 }
 
 /// 从连接上读一个请求：请求行 → 头（找 Content-Length）→ 读满 body。
-/// 半包/慢客户端按 [`RR3_PANEL_READ_TIMEOUT`] 折 Err，不 panic 不占线程。
-pub fn rr3_http_read_request(stream: &TcpStream) -> Result<Rr3HttpRequest, String> {
+/// 半包/慢客户端按 [`Rr3PanelLimits::read_timeout`] 折 Err，不 panic 不占线程；
+/// 头区/body 上界同取 [`Rr3PanelLimits`]（I-18②：限额经 shared 贯穿）。
+pub fn rr3_http_read_request(
+    stream: &TcpStream,
+    limits: &Rr3PanelLimits,
+) -> Result<Rr3HttpRequest, String> {
     stream
-        .set_read_timeout(Some(RR3_PANEL_READ_TIMEOUT))
+        .set_read_timeout(Some(limits.read_timeout))
         .map_err(|e| format!("设读超时失败: {e}"))?;
     let mut reader = BufReader::new(
         stream
@@ -230,8 +250,8 @@ pub fn rr3_http_read_request(stream: &TcpStream) -> Result<Rr3HttpRequest, Strin
             .read_line(&mut head)
             .map_err(|e| format!("读头失败: {e}"))?;
         header_bytes += head.len();
-        if header_bytes > RR3_PANEL_HEADER_LIMIT {
-            return Err(format!("头区超界（>{RR3_PANEL_HEADER_LIMIT}B）"));
+        if header_bytes > limits.header_limit {
+            return Err(format!("头区超界（>{0}B）", limits.header_limit));
         }
         let head = head.trim_end();
         if head.is_empty() {
@@ -247,8 +267,8 @@ pub fn rr3_http_read_request(stream: &TcpStream) -> Result<Rr3HttpRequest, Strin
                 .map_err(|_| format!("Content-Length 不是数字: {v:?}"))?;
         }
     }
-    if content_length > RR3_PANEL_BODY_LIMIT {
-        return Err(format!("body 超界（>{RR3_PANEL_BODY_LIMIT}B）"));
+    if content_length > limits.body_limit {
+        return Err(format!("body 超界（>{0}B）", limits.body_limit));
     }
 
     // body 按声明的 Content-Length 读满——半包在这里等满或超时
@@ -423,11 +443,17 @@ fn rr3_now_ns() -> u64 {
 /// ctl 短连一问一答（ADR-0010 的面板侧执行面）：裸 UDS 连 rrd，发一条
 /// `rr3.ctl.*` 请求（src=0，与外部运维探针同权），收一条应答即断。
 /// 错误信封折 `Err`（HTTP 层转 502 语义的 JSON），成功回 result 对象。
-pub fn rr3_ctl_query(bus_path: &str, method: &str, id: u64) -> Result<Value, String> {
+/// 读耐心 = [`Rr3PanelLimits::read_timeout`]（I-18②：调用方自 shared 取）。
+pub fn rr3_ctl_query(
+    bus_path: &str,
+    method: &str,
+    id: u64,
+    read_timeout: Duration,
+) -> Result<Value, String> {
     let mut stream = std::os::unix::net::UnixStream::connect(bus_path)
         .map_err(|e| format!("连总线失败: {e}"))?;
     stream
-        .set_read_timeout(Some(RR3_PANEL_READ_TIMEOUT))
+        .set_read_timeout(Some(read_timeout))
         .map_err(|e| format!("设读超时失败: {e}"))?;
     let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": {}});
     let payload = rr3_body_encode(Rr3PayloadType::Request, body.to_string().as_bytes());
@@ -462,16 +488,22 @@ pub fn rr3_ctl_query(bus_path: &str, method: &str, id: u64) -> Result<Value, Str
 }
 
 /// 面板服务线程的共享面：总线句柄（clone = 同一连接的另一句柄）、总线路径
-/// （ctl 短连用）、动作通道（beep/face 递主循环）、link 订阅缓存。
+/// （ctl 短连用）、动作通道（beep/face 递主循环）、link 订阅缓存、五限额
+/// （I-18②：config 数据化贯穿）与自检期望表情（I-17/M-10：产线取向可配）。
 pub struct Rr3PanelShared {
     pub bus: Rr3BusClient,
     pub bus_path: String,
     pub actions: mpsc::Sender<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>,
     pub link: Arc<Mutex<Option<Value>>>,
+    /// 面板五限额/超时（批N4 件五 I-18②：装配期自 config 构造）
+    pub limits: Rr3PanelLimits,
+    /// 自检 face 腿的期望表情（批N4 件五 I-17/M-10：在册白名单值，'static
+    /// 来自表情册 lookup，跨线程安全）
+    pub selftest_face_expect: &'static str,
 }
 
 /// 面板入口：绑 [`rr3_panel_addr`] 起 accept 循环（阻塞，调用方起线程收容）。
-/// 每连接一线程，超 [`RR3_PANEL_MAX_CONNS`] 直接 503。
+/// 每连接一线程，超 [`Rr3PanelLimits::max_conns`] 直接 503。
 pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     let addr = rr3_panel_addr();
     let listener = TcpListener::bind(&addr).map_err(|e| format!("绑面板 {addr} 失败: {e}"))?;
@@ -498,7 +530,7 @@ fn rr3_panel_accept_loop(
 ) -> Result<(), String> {
     loop {
         let (mut stream, _) = listener.accept().map_err(|e| format!("accept 失败: {e}"))?;
-        if live.load(Ordering::Relaxed) >= RR3_PANEL_MAX_CONNS {
+        if live.load(Ordering::Relaxed) >= shared.limits.max_conns {
             let body = br#"{"error":"conn limit"}"#;
             let _ = rr3_http_respond(
                 &mut stream,
@@ -566,7 +598,7 @@ impl Rr3PanelReply {
 /// 单连接处理：读请求 → 路由 → 执行 → 应答。任何错误都折 JSON 应答——
 /// 面板连接没有"协议违规掉线"语义，坏请求回 400 就是它的全部惩罚。
 fn rr3_panel_handle(stream: &mut TcpStream, shared: &Rr3PanelShared) {
-    let req = match rr3_http_read_request(stream) {
+    let req = match rr3_http_read_request(stream, &shared.limits) {
         Ok(r) => r,
         Err(e) => {
             let reply = Rr3PanelReply::json(400, "Bad Request", json!({ "error": e }));
@@ -607,7 +639,12 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
         }
         Rr3PanelDispatch::StatusQuery => {
             // health 是 ctl 查询；link 是订阅缓存（主循环从总线收 Event 存的）
-            let health = rr3_ctl_query(&shared.bus_path, "rr3.ctl.health", 1);
+            let health = rr3_ctl_query(
+                &shared.bus_path,
+                "rr3.ctl.health",
+                1,
+                shared.limits.read_timeout,
+            );
             let link = shared.link.lock().map(|g| g.clone()).unwrap_or(None);
             match health {
                 Ok(h) => Rr3PanelReply::json(200, "OK", json!({ "health": h, "link": link })),
@@ -615,20 +652,27 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             }
         }
         Rr3PanelDispatch::CountersQuery => {
-            match rr3_ctl_query(&shared.bus_path, "rr3.ctl.counters", 2) {
+            match rr3_ctl_query(
+                &shared.bus_path,
+                "rr3.ctl.counters",
+                2,
+                shared.limits.read_timeout,
+            ) {
                 Ok(v) => Rr3PanelReply::json(200, "OK", v),
                 Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
             }
         }
-        Rr3PanelDispatch::LogsQuery => match rr3_ctl_query(&shared.bus_path, "rr3.ctl.logs", 3) {
+        Rr3PanelDispatch::LogsQuery => match rr3_ctl_query(
+            &shared.bus_path,
+            "rr3.ctl.logs",
+            3,
+            shared.limits.read_timeout,
+        ) {
             Ok(v) => Rr3PanelReply::json(200, "OK", v),
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
         },
         Rr3PanelDispatch::BusCall { topic, args } => {
-            match shared
-                .bus
-                .rr3_call_topic(&topic, args, RR3_PANEL_CALL_TIMEOUT)
-            {
+            match shared.bus.rr3_call_topic(&topic, args, shared.limits.call_timeout) {
                 Ok(result) => {
                     Rr3PanelReply::json(200, "OK", json!({ "ok": true, "result": result }))
                 }
@@ -643,53 +687,80 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
         },
         Rr3PanelDispatch::SelfTest => {
             // 并列三调（Q3）：各答各展示、无依赖链、单项失败不连锁——
-            // 这不是编排（无状态机无裁决），brain 才是唯一编排者（ADR-0007）
-            let mut out = serde_json::Map::new();
-            let beep = rr3_panel_act(shared, Rr3PanelAction::Beep);
-            out.insert(
-                "speaker".into(),
-                match beep {
-                    Ok(v) => json!({ "ok": true, "result": v }),
-                    Err(e) => json!({ "ok": false, "error": e }),
-                },
-            );
+            // 这不是编排（无状态机无裁决），brain 才是唯一编排者（ADR-0007）。
+            // 批N4 件五 I-18③（D15 裁定）：逐腿输出 `{leg, pass, reason?}`——
+            // pass = pass|fail|n-a 三态；恒败腿如实报 fail **不折算通过**；
+            // verdict = 全腿 pass 才 pass（n-a 不拖累也不救场）。
+            let mut legs = Vec::with_capacity(3);
+            // 腿1 speaker：beep 走主循环代执行——无本地波形源是已知业务错误，
+            // 如实 fail 点名原因（产线换真波形源后此腿自然转 pass）
+            let reason = match rr3_panel_act(shared, Rr3PanelAction::Beep) {
+                Ok(_) => None,
+                Err(e) => Some(e),
+            };
+            legs.push(json!({
+                "leg": "speaker",
+                "pass": if reason.is_none() { "pass" } else { "fail" },
+            }));
+            if let Some(e) = reason {
+                legs.last_mut().unwrap()["reason"] = json!(e);
+            }
+            // 腿2 relay：开→关两步复位验证；on 失败 = 腿 fail（off 未执行）
             let relay_on = shared.bus.rr3_call_topic(
                 "rr3-act/relay/set",
                 json!({ "on": true }),
-                RR3_PANEL_CALL_TIMEOUT,
+                shared.limits.call_timeout,
             );
-            let relay_off = if relay_on.is_ok() {
-                shared
-                    .bus
-                    .rr3_call_topic(
-                        "rr3-act/relay/set",
-                        json!({ "on": false }),
-                        RR3_PANEL_CALL_TIMEOUT,
-                    )
-                    .is_ok()
-            } else {
-                false
+            let (relay_pass, relay_reason) = match relay_on {
+                Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
+                Ok(_) => match shared.bus.rr3_call_topic(
+                    "rr3-act/relay/set",
+                    json!({ "on": false }),
+                    shared.limits.call_timeout,
+                ) {
+                    Ok(_) => ("pass", None),
+                    Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
+                },
             };
-            out.insert(
-                "relay".into(),
-                json!({ "on": relay_on.is_ok(), "off": relay_off }),
-            );
-            let face = rr3_panel_act(
-                shared,
-                Rr3PanelAction::Face {
-                    expression: "happy".into(),
-                },
-            );
-            out.insert(
-                "face".into(),
-                match face {
-                    Ok(v) => json!({ "ok": true, "result": v }),
-                    Err(e) => json!({ "ok": false, "error": e }),
-                },
-            );
-            Rr3PanelReply::json(200, "OK", Value::Object(out))
+            let mut relay_leg = json!({ "leg": "relay", "pass": relay_pass });
+            if let Some(e) = relay_reason {
+                relay_leg["reason"] = json!(e);
+            }
+            legs.push(relay_leg);
+            // 腿3 face：切到期望表情（I-17/M-10：期望值 config 数据化，产线
+            // 按形态改 [rr3-interact.selftest].face_expect）
+            let reason = match rr3_panel_act(shared, Rr3PanelAction::Face {
+                expression: shared.selftest_face_expect.to_string(),
+            }) {
+                Ok(_) => None,
+                Err(e) => Some(e),
+            };
+            let mut face_leg = json!({
+                "leg": "face",
+                "pass": if reason.is_none() { "pass" } else { "fail" },
+            });
+            if let Some(e) = reason {
+                face_leg["reason"] = json!(e);
+            }
+            legs.push(face_leg);
+            let all_pass = legs
+                .iter()
+                .all(|l| l.get("pass").and_then(Value::as_str) == Some("pass"));
+            Rr3PanelReply::json(
+                200,
+                "OK",
+                json!({
+                    "legs": legs,
+                    "verdict": if all_pass { "pass" } else { "fail" },
+                }),
+            )
         }
-        Rr3PanelDispatch::Reboot => match rr3_ctl_query(&shared.bus_path, "rr3.ctl.reboot", 4) {
+        Rr3PanelDispatch::Reboot => match rr3_ctl_query(
+            &shared.bus_path,
+            "rr3.ctl.reboot",
+            4,
+            shared.limits.read_timeout,
+        ) {
             Ok(v) => Rr3PanelReply::json(200, "OK", v),
             // rrd 侧双重门缺省恒拒：面板如实转达拒因（403 语义用 502 会误导，
             // 直接回 403 + rrd 原文案——"解锁旋钮"是运维要看见的字）
@@ -729,7 +800,7 @@ fn rr3_panel_act(shared: &Rr3PanelShared, action: Rr3PanelAction) -> Result<Valu
         .actions
         .send((action, tx))
         .map_err(|_| "主循环不在了（进程正在退出）".to_string())?;
-    match rx.recv_timeout(RR3_PANEL_CALL_TIMEOUT) {
+    match rx.recv_timeout(shared.limits.call_timeout) {
         Ok(v) => v,
         Err(RecvTimeoutError::Timeout) => Err("主循环处理动作超时".to_string()),
         Err(RecvTimeoutError::Disconnected) => Err("应答通道已断（主循环退出）".to_string()),
@@ -977,7 +1048,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let t = std::thread::spawn(move || {
             let (sock, _) = listener.accept().unwrap();
-            rr3_http_read_request(&sock).unwrap()
+            rr3_http_read_request(&sock, &Rr3PanelLimits::default()).unwrap()
         });
         let mut c = TcpStream::connect(addr).unwrap();
         let full = b"POST /api/relay HTTP/1.1\r\nContent-Length: 11\r\n\r\n{\"on\":true}";
@@ -992,7 +1063,7 @@ mod tests {
         let addr2 = listener2.local_addr().unwrap();
         let t2 = std::thread::spawn(move || {
             let (sock, _) = listener2.accept().unwrap();
-            rr3_http_read_request(&sock)
+            rr3_http_read_request(&sock, &Rr3PanelLimits::default())
         });
         let mut c2 = TcpStream::connect(addr2).unwrap();
         c2.write_all(b"POST /api/relay HTTP/1.1\r\nContent-Length: 11\r\n\r\n{\"on")
@@ -1014,7 +1085,13 @@ mod tests {
             listener,
             json!({ "jsonrpc": "2.0", "id": 1, "result": { "modules": [] } }),
         );
-        let v = rr3_ctl_query(path.to_str().unwrap(), "rr3.ctl.health", 1).unwrap();
+        let v = rr3_ctl_query(
+            path.to_str().unwrap(),
+            "rr3.ctl.health",
+            1,
+            Duration::from_secs(5),
+        )
+        .unwrap();
         assert_eq!(v["modules"], json!([]));
         jh.join().unwrap();
 
@@ -1031,7 +1108,12 @@ mod tests {
             }),
         );
         // 假 rrd 回的是 error 信封，rr3_ctl_query 读到 error 字段 → Err
-        let got = rr3_ctl_query(path.to_str().unwrap(), "rr3.ctl.reboot", 4);
+        let got = rr3_ctl_query(
+            path.to_str().unwrap(),
+            "rr3.ctl.reboot",
+            4,
+            Duration::from_secs(5),
+        );
         assert!(got.is_err(), "error 信封必须折 Err");
         assert!(
             got.unwrap_err().contains("reboot"),
@@ -1159,6 +1241,8 @@ mod tests {
             bus_path: bus_path.to_string_lossy().into_owned(),
             actions: actions_tx,
             link: Arc::new(Mutex::new(None)),
+            limits: Rr3PanelLimits::default(),
+            selftest_face_expect: "happy",
         });
 
         let live = Arc::new(AtomicUsize::new(0));
@@ -1243,5 +1327,69 @@ mod tests {
             "spawn 失败必须进 counters 心跳自报（panel_spawn_fail）: {seen}"
         );
         drop(loop_jh); // accept 循环不退出（判据本身），随测试进程收尾
+    }
+
+    /// 自检逐腿输出（批N4 件五 I-18③/D15）：应答 `{legs:[{leg,pass,reason?}],verdict}`——
+    /// speaker 恒败腿（无本地波形源）如实 fail 不折算通过；verdict = 全腿 pass
+    /// 才 pass（混合态必 fail）。
+    #[test]
+    fn selftest_reports_legs_and_honest_speaker_fail() {
+        // 假 rrd + 真总线客户端（同 I4 夹具口径）：relay 腿经假 rrd 应答走通；
+        // actions 接收者即刻 drop——speaker/face 两腿走"主循环不在"业务 Err，
+        // 三腿混合 pass/fail，verdict 必 fail
+        let dir = std::env::temp_dir().join(format!("panel-selftest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bus_path = dir.join("st.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
+        std::thread::spawn(move || {
+            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())))
+        });
+        std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
+        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
+
+        let (actions_tx, _rx) = mpsc::channel(); // 接收者即刻 drop（下行）：主循环不在
+        drop(_rx); // 显式 drop 保 send 失败立即折 Err，不撞 5s 调用耐心
+        let shared = Arc::new(Rr3PanelShared {
+            bus,
+            bus_path: bus_path.to_string_lossy().into_owned(),
+            actions: actions_tx,
+            link: Arc::new(Mutex::new(None)),
+            limits: Rr3PanelLimits::default(),
+            selftest_face_expect: "happy",
+        });
+        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = tcp.local_addr().unwrap();
+        let jh = std::thread::spawn(move || {
+            let (mut sock, _) = tcp.accept().unwrap();
+            rr3_panel_handle(&mut sock, &shared)
+        });
+
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(b"POST /api/selftest HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+            .unwrap();
+        let _ = c.shutdown(std::net::Shutdown::Write);
+        let mut buf = Vec::new();
+        c.read_to_end(&mut buf).expect("自检应答必须完整可读");
+        jh.join().unwrap();
+        let text = String::from_utf8_lossy(&buf);
+        let body = text.split("\r\n\r\n").nth(1).expect("应答带 body");
+        let v: Value = serde_json::from_str(body).expect("自检应答是 JSON: {body}");
+
+        let legs = v["legs"].as_array().expect("逐腿数组");
+        assert_eq!(legs.len(), 3, "并列三腿");
+        assert_eq!(legs[0]["leg"], "speaker");
+        assert_eq!(legs[0]["pass"], "fail", "恒败腿如实 fail，不折算通过（D15）");
+        assert!(
+            legs[0]["reason"].as_str().unwrap().contains("主循环"),
+            "失败原因进 reason（本场景主循环缺席；'无本地波形源'业务文案由活主循环回）"
+        );
+        assert_eq!(legs[1]["leg"], "relay");
+        assert_eq!(legs[1]["pass"], "pass", "假 rrd 应答 noop，on/off 两步都成");
+        assert_eq!(legs[2]["leg"], "face");
+        assert_eq!(legs[2]["pass"], "fail", "主循环不在，face 腿走业务 Err");
+        assert_eq!(v["verdict"], "fail", "混合态 verdict 必 fail（全腿 pass 才 pass）");
     }
 }
