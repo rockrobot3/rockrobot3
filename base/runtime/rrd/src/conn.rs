@@ -448,6 +448,10 @@ fn rr3_serve_ctl(
                 "reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）".to_string(),
             )),
         },
+        // 装配快照读口（批N4 件九笔4）：boot 装载链验收后的四路底账 + [pins]×
+        // wiring 全交叉逐条判果，一应答给出（判据真值单点 = assembly.rs）。快照
+        // 未在册（--manifest 调试路径）时如实回不可得，不造假数据。
+        Rr3RpcMethod::CtlWiring => Ok(crate::assembly::rr3_assembly_wiring_json()),
         // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
         other => Err((
             Rr3StatusCode::Invalid,
@@ -672,7 +676,8 @@ fn rr3_serve_request(
         | Rr3RpcMethod::CtlLogs
         | Rr3RpcMethod::CtlOta
         | Rr3RpcMethod::CtlCounters
-        | Rr3RpcMethod::CtlReboot => {
+        | Rr3RpcMethod::CtlReboot
+        | Rr3RpcMethod::CtlWiring => {
             rr3_reply_err(
                 out,
                 me,

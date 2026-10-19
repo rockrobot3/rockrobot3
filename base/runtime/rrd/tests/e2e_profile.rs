@@ -251,6 +251,33 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
         "三个 face 模块必须全部到达 running；最后一次快照: {:?}",
         rr3_status(&rrd)
     );
+
+    // 装配快照读口（批N4 件九笔4）：--profile 正门 boot 成功 → `rr3.ctl.wiring`
+    // 应答 available:true，四路底账（形态名/域/线组/角色）与 [pins]×wiring 全交叉
+    // 判果同帧在线。夹具无 [[pin]]/axis 目录——零 pin 零轴是如实投影（装载面
+    // role_missing 非致命），vcc/gnd 豁免导体判 not-applicable、在册域判 pass。
+    let mut ctl = rrd.rr3_connect();
+    rr3_send(&mut ctl, &rr3_rpc_frame("rr3.ctl.wiring", 2, json!({}), 0));
+    let f = rr3_read_where(&mut ctl, "ctl.wiring 应答", |fr| {
+        rr3_body_split(&fr.payload)
+            .map(|(ty, _)| ty == Rr3PayloadType::Response)
+            .unwrap_or(false)
+    });
+    let v = rr3_json_of(&f);
+    let w = &v["result"];
+    assert_eq!(w["available"], true, "{v}");
+    assert_eq!(w["profile"], "default", "形态名 = 装配单文件 stem: {v}");
+    assert_eq!(w["domains"][0]["name"], "rail5v", "{v}");
+    assert_eq!(w["wires"][0]["connector"], "J-T", "{v}");
+    assert_eq!(w["roles"].as_array().map(Vec::len), Some(10), "{v}");
+    let checks = w["checks"].as_array().expect("checks 必须在场: {v}");
+    let net_pass = checks
+        .iter()
+        .any(|c| c["item"] == "net:J-T:rail5v" && c["pass"] == "pass");
+    let gnd_na = checks
+        .iter()
+        .any(|c| c["item"] == "signal:J-T[1]:gnd" && c["pass"] == "not-applicable");
+    assert!(net_pass && gnd_na, "全交叉判果必须在场: {checks:?}");
 }
 
 /// P2 — 缺格：enabled_slots 声明的 sensor.env 没有指向 rr3-pb 的 binding → 逐条点名

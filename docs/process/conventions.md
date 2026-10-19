@@ -230,6 +230,26 @@ owner 裁决），端点 pin 20→21，covers 六槽申报 = 与 GET 读口同�
 基线 43 不动），applies 申报实况 pin 一条→两条（model/key live ＋ brain/ops
 live——写口动了可配置集必填生效路径，I-20 双门同批过）；前端 brain 模型面卡加
 写槽行（数值槽前端转 Number，owner 仍 fail-closed 兜底）。
+**2026-10-20 对表（批N4 件九笔4，接线图——门 d 红账 43 全转绿收官刀）**：
+rrd 第七 ctl 方法 `rr3.ctl.wiring`（ADR-0010 白名单六 ctl→七 ctl 同批扩，rpc.rs 解析/白名单/计数
+pin 同批）：assembly.rs 建 OnceLock 全局单例快照（boot 成功臂 set 首份胜出）＋纯渲染
+`rr3_assembly_render`（四路底账 profile/pins 11 键/domains 11 键/wires 9 键/axis 14 键/roles/checks
+逐条——单测用门 d 同源词表逐键钉死，全局壳 None 分支由 e2e --manifest 路径覆盖）＋`available`
+位（--manifest 调试路径如实 `available:false` 点名 --profile 解锁路径，不造假数据）；profile.rs
+boot 链交出快照（Rr3ProfileBoot 加 `snapshot` 字段、Eq 随 f64 摘除；axis 档案装载拆
+`rr3_axis_files_load` 单次装载——投影与快照共用同一清单，不重读目录造第二真值点）；conn.rs
+serve_ctl 加臂＋已注册连接显式 OR 臂；daemon boot 成功臂 set 快照。**[pins]×wiring 全交叉判据**
+三族三态（pass / not-applicable / fail；未知值 fail-closed 折 fail——恒败腿不得折算通过）单点在
+assembly.rs 纯函数；面板 selftest 加**腿四 wiring**（判果是 rrd 的产出只转述不重判，第二真值点
+禁令——`leg = "wiring/<item>"` 逐条摊进 legs＝全案 §7 ⑤"出厂自检必测全交叉"原文；取数失败/
+快照不可得＝单腿如实 fail；**verdict 语义改判** `有 fail 即 fail、无 fail 且至少一腿真判 pass 才
+pass`——n-a 不拖累不救场，全 n-a＝无一真判如实 fail；旧 all_pass 在无 n-a 时行为不变）。面板
+`GET /api/wiring`（ctl.wiring 一问一答 200 原样透传，端点 pin 21→22），covers 申报四族全集 43 项
+（pin 11＋role 7＋domain 11＋axis 14，与分母五路并集逐项同源；计数 pin 测试同批钉 43＝
+11＋7＋11＋14）⇒ **红账 43 全转绿**，基线 `gate-d-baseline.txt` 行 1 **43→0**、差集空、门 d 转
+红（差集 > 0 即 FAIL，转绿终点达成）；openitems 四组 status=done、fields 清空（头注对表行同
+批）；前端 tab-hw 加「接线图」卡（判果表＋四族底账表渲染、available:false 如实展示）＋自检卡
+文案同批点接线腿与 verdict 新语义。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
