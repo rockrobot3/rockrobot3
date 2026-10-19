@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-connect/net/link",
+  "schema_version": 1,
+  "description": "链路摘要事件（翻转必发 + link_report_period_ms 周期保底，流是摘要不是逐拍镜像；contracts/topics.toml 在册 event，owner=rr3-connect）。载荷组装唯一事实源 = rr3-connect/src/composite.rs 的 rr3_link_body（0.0.5 批I N-7 上移承载层）。up 语义定案（增补轮六 D5 裁定）：up 只表示\"链路层已关联\"（station 已关联上游 AP），不表示\"可出网\"——出网性由 net.online 通道（base 层恒在位格，本模块供数不占有）与运行期探测另证，本流不混载第二个事实的真值（一个事实一个真值点：up 与可用是两个事实，混成一个位既说不清也查不到）。AP 态（mode=ap）恒 up=false：本机热点无上游关联（N-4 随 D5 结，2026-10-19 落码）。mode 是配网状态机词汇（rr3-connect atoms/wifi Rr3Provision：ap|station），0.0.4 批D append 字段——契约只增不改。up=false 时 ssid/rssi_dbm 必为 null：断链抹身份是守护语义，不许从死链读信息（设计册 §9 红线；设备面 Rr3SimLink 已抹，承载层如实透传）。",
+  "type": "object",
+  "required": ["seq", "up", "ssid", "rssi_dbm", "mode"],
+  "properties": {
+    "seq": { "type": "integer", "minimum": 1, "description": "本流自己的计数（envelope 惯例，从 1 起；与其它事件流的 seq 各自独立）" },
+    "up": { "type": "boolean", "description": "链路层已关联（不表可出网——D5 裁定，出网性由 net.online 通道另证）" },
+    "ssid": { "type": ["string", "null"], "description": "已关联 AP 的 SSID；up=false 时必为 null（断链抹身份）" },
+    "rssi_dbm": { "type": ["integer", "null"], "description": "已关联 AP 的信号强度（dBm，负值）；up=false 时必为 null（断链抹身份）" },
+    "mode": { "type": "string", "enum": ["ap", "station"], "description": "配网状态机当前模式（0.0.4 批D append；ap=出厂热点待配网，station=已在册凭据的客户端态）" }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "up": { "const": false } } },
+      "then": { "properties": { "ssid": { "type": "null" }, "rssi_dbm": { "type": "null" } } }
+    }
+  ]
+}

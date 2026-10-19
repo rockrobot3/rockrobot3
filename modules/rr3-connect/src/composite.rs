@@ -158,7 +158,9 @@ pub fn rr3_connect_run() -> Result<(), String> {
                 // 业务性失败折 error 应答（请求-应答语义），不当致命错误；
                 // HAL 读数失败也按业务性折 error（会话/配网本来就是问"现在能不能"）
                 let reply = match topic {
-                    session::RR3_SESSION_TOPIC => rr3_handle_session(dev.as_ref(), &args),
+                    session::RR3_SESSION_TOPIC => {
+                        rr3_handle_session(dev.as_ref(), prov.rr3_provision_mode(), &args)
+                    }
                     wifi::RR3_WIFI_SCAN_TOPIC => rr3_handle_wifi_scan(&args),
                     wifi::RR3_WIFI_CONNECT_TOPIC => {
                         rr3_handle_wifi_connect(dev.as_ref(), store.as_ref(), &mut prov, &args)
@@ -200,6 +202,11 @@ pub fn rr3_connect_run() -> Result<(), String> {
 /// ssid/rssi 断链时是 null——设备面（Rr3SimLink）已抹掉，这里如实透传。
 /// `mode` 是配网状态机（[`wifi::Rr3Provision`]）的当前模式，0.0.4 批D append——
 /// 契约只增不改：既有 seq/up/ssid/rssi_dbm 四字段原样保留。
+/// `up` 语义定案（增补轮六 D5 裁定，2026-10-19 对表落注）：只表"链路层已
+/// 关联"，不表"可出网"——出网性由 `net.online` 通道（base 层恒在位格，本模块
+/// 供数不占有）与运行期探测另证，本流不混载第二个事实的真值（一个事实一个
+/// 真值点）。AP 态（mode=ap）恒 up=false：本机热点无上游关联。
+/// 载荷形状契约 = contracts/events/connect-net-link.schema.json（随 D5 补齐）。
 /// ssid 序列化面：契约值类型 `Rr3SsidText` 出定长缓冲取 &str（serde_json 不
 /// 进契约类型，F1 定形）。（自 wifi 原子件上移）
 pub fn rr3_link_body(seq: u64, st: &Rr3LinkState, mode: &str) -> Value {
@@ -283,11 +290,16 @@ pub fn rr3_wifi_forget_result() -> Value {
     json!({ "ok": true, "mode": "ap" })
 }
 
-/// cloud/session 点名：参数裁决 → 链路裁决 → mock 会话应答
-fn rr3_handle_session(dev: &dyn rr_hal_api::Rr3Link, args: &Value) -> Result<Value, String> {
+/// cloud/session 点名：参数裁决 → 链路裁决 → mock 会话应答（未就绪文案的
+/// 配网态分流由 session 裁决面承接，D5——AP 态点名，不折叠成 up=false）
+fn rr3_handle_session(
+    dev: &dyn rr_hal_api::Rr3Link,
+    mode: &str,
+    args: &Value,
+) -> Result<Value, String> {
     session::rr3_session_parse_args(args)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
-    let v = session::rr3_session_result(&st)?;
+    let v = session::rr3_session_result(&st, mode)?;
     println!("session: opened ssid={:?}", v["ssid"]);
     Ok(v)
 }

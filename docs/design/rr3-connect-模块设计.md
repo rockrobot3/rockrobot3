@@ -63,7 +63,7 @@
 
 | 主题 | kind | seq | 触发 | 载荷必填 | 申报与实现 |
 |---|---|---|---|---|---|
-| `net/link` | **event**（`contracts/topics.toml` 登记的就是 event，本册旧版写 stream/event 两可是笔误） | 自增 | 翻转必发 + 5 s 保底 | `seq, up, ssid?, rssi_dbm?, mode`（键名是 **rssi_dbm**，不是 rssi） | 一致；⚠️ `contracts/events/` 里**没有** net/link 的载荷 schema，§8 的"腿二"只能引件内 golden 与面板取键 |
+| `net/link` | **event**（`contracts/topics.toml` 登记的就是 event，本册旧版写 stream/event 两可是笔误） | 自增 | 翻转必发 + 5 s 保底 | `seq, up, ssid?, rssi_dbm?, mode`（键名是 **rssi_dbm**，不是 rssi） | 一致；⚠️ `contracts/events/` 里**没有** net/link 的载荷 schema，§8 的"腿二"只能引件内 golden 与面板取键——**2026-10-19 对表：schema 已补 `events/connect-net-link.schema.json`（随 D5 落码），up 语义定案已写进 schema 注记；三 RPC 应答仍无 schema（口径不变）** |
 | `wifi/scan` | RPC | — | 点名 | `{backend:"sim", items:[{ssid,rssi,auth}]}` | 一致（`backend` 标注是诚实面，不得删） |
 | `wifi/connect` | RPC | — | 点名 | `{ok, connected, mode, ssid}` | `connected` **如实取链路读数**，不 fake |
 | `wifi/forget` | RPC | — | 点名 | 清 + 回 ap | 一致 |
@@ -77,7 +77,7 @@
 | `net.wifi` | 不产 `net/link` → 依赖方 `Degraded`（现状探测恒真使环不转，批J 修） | placeholder → 显式 `Unsupported` | 描述符作废且静默（批J） | nmcli 在 linux 有码、**板上未证** | `ssid` 空 / 密码 <8 → 业务 error 点名 |
 | `net.bt` | 只停状态机（无主题即无下游） | — | — | BlueZ 真后端后置 | 非法转移 → 不动 + false |
 | `net.online`（base） | 恒在位；本单元缺位时基座报"未就绪"而不是本单元报 | — | — | — | — |
-| AP 态语义 | **未定**：`mode = ap` 时 `up` 该不该为真（AP ≠ 出网就绪）——本册主张 `up = 已关联且可出站`，AP 态 `up=false, mode="ap"` | | | | |
+| AP 态语义 | **未定**：`mode = ap` 时 `up` 该不该为真（AP ≠ 出网就绪）——本册主张 `up = 已关联且可出站`，AP 态 `up=false, mode="ap"`——**2026-10-19 对表：已随 D5 裁定结案**——`up` 只表"链路层已关联"（不表"可出网"，出网性由 `net.online` 通道 base-supply 与运行期探测另证，`Rr3LinkState` 不加字段），AP 态恒 `up=false, mode="ap"`（本机热点无上游关联）；本册旧主张"已关联且可出站"被裁定取代——up 与可用是两个事实，不许混成一个真值点 | | | | |
 
 ## §7 安全核接入
 
@@ -98,6 +98,7 @@
 ## §9 不变量与红线断言
 
 - 断言：`net/link` 在 `up=false` 时 `ssid`/`rssi` 必为空。
+- 断言：`up` 只表"链路层已关联"，不表"可出网"；AP 态恒 `up=false, mode="ap"`；`cloud/session` 未就绪文案点名 AP 态这一种、不许折叠成 `up=false`（**D5 裁定，2026-10-19 落码**——schema 注记＋session 文案分流）。
 - 断言：`connect` 的 `connected` 只取读数，**永不**因请求成功而置真。
 - 断言：配网三点名的字段名与文案（`pass`、"密码至少 8 位"）是 legacy 面板依赖的契约字面量。
 - 断言：bt 不登记主题（新增即契约变更，需评审）。
@@ -110,7 +111,7 @@
 | N-1 | 三处策略出件（8 位规则 / sim AP 表 / bt env 初值）→ ops + sim 后端 | **批I**（本轮定死，M-4 消解：原写"批I/J"二义；bt 去 env 本就在批I F3 清单内） | C5 |
 | N-2 | nmcli 子进程必须有自己的超时并被 `timeout_ms` 管：今天该值无读者，最坏翻转延迟由子进程自由决定 | 批I | — |
 | N-3 | `Rr3LinkState.ssid` 去 `String`（`⊙` 跨片形状） | 批I | C5 |
-| N-4 | AP 态与 `up` 的语义定案并写进 schema 注记 | **待裁** | — |
+| N-4 | AP 态与 `up` 的语义定案并写进 schema 注记 | **待裁**——**2026-10-19 对表：已结，随 D5 裁定落码**（`events/connect-net-link.schema.json` 注记＋`session.rs` 文案分流＋`composite.rs` doc 注记；详见 §6 AP 态语义行与 §9 断言行） | — |
 | N-5 | 真链路（wpa_supplicant 持久化 / BlueZ）**按 2026-10-12 版本边界改判拆成两半**：① **凭据持久化 = 开发项**，搬入 0.0.5 批M **MC-6**（linux 侧由 NetworkManager 承载持久化、`forget` 真删除，主机侧可用临时 `NMCONF_HOME` 夹具测）；② **BlueZ 真后端 = 不在 F 清单内**，本轮不写码——**已落（MC-9 裁定 (a)，2026-10-12）：`net.bt` 改记 `placeholder` + 触发条件（配网备选通道立项 / BlueZ 真后端批），bt 件 SURFACE/注释写明"骨架，不 claim 射频"**，"骨架却记 normal"属承诺 > 事实（索引 R-16） | **MC-6**（持久化）/ **MC-9 已结**（bt 三态） | 采购（仅影响验证半边） |
 | N-6 | 三个无读者的声明项（`roam_probe_enabled` / `tls_min_version` / `timeout_ms` 的语义归一）：**实装、或删除、或改为 ops 槽并写清生效点**，不许停在"回显即当作已实现"。与 interact I-1、power P-6 同纪律，同批做以免三份册子各说各话 | 批I | — |
 | N-7 | **载荷组装上移承载层**：`rr3_link_body` 与三枚 `*_result` 的 `json!` 移到 `src/composite.rs`/`session.rs`，件只交 `Rr3LinkState` + `mode` + 判定（依据 = ADR-0019 修订 4）；验收 = `net/link` 与三 RPC 应答字节逐字不变 | 批I | — |
@@ -156,7 +157,7 @@
 | `wifi.rs` | `"rr3-connect/net/link"`、`wifi/scan`·`wifi/connect`·`wifi/forget`、`Rr3LinkCfg{link_report_period_ms, roam_probe_enabled}` | 主题与 cfg 形状 | 主题有读者 | 主题 = 契约字面量（与 `module.toml` 双写记债） |
 | `src/composite.rs : Rr3LinkCfg.roam_probe_enabled` | config `false` | 漫游探针开关 | **无读者**（只 `println`；mech 注释自认） | 标"声明未生效"或删除（N-6） |
 | `src/session.rs : Rr3SessionCfg` | `tls_min_version:"1.3"`、`timeout_ms:20000` | 云侧下限与超时 | **无读者**（注释自认"与 cutoff 同款口径"；真超时另有 HTTP 值） | 同上（N-6）；本册 §7 已把"TLS 下限"从守护语义里降级，**不再声称三条守护** |
-| `src/session.rs : rr3_session_parse_args/result` | 只认 `action="open"`；`"未知 action: {action}（只认 \"open\"）"`；`"链路未就绪（net/link up=false），云端会话拒绝建立"`；`session:"opened"`、`endpoint:"mock"` | 会话契约 | 有 | **契约字面量—不许动**；`endpoint:"mock"` 是诚实面，不得删（R4 口径） |
+| `src/session.rs : rr3_session_parse_args/result` | 只认 `action="open"`；`"未知 action: {action}（只认 \"open\"）"`；`"链路未就绪（net/link up=false），云端会话拒绝建立"`；`session:"opened"`、`endpoint:"mock"` | 会话契约 | 有 | **契约字面量—不许动**；`endpoint:"mock"` 是诚实面，不得删（R4 口径）——**2026-10-19 对表：未就绪文案随 D5 分流**——AP 态分支新增 `"配网态 AP（mode=ap，未关联上游链路），云端会话拒绝建立"`（append 语义，station 原词未动；D5 要求点名 AP 态、不许折叠成 `up=false`） |
 | `atoms/bt/bt.rs : RR3_HAL_SIM_BT_UP_ENV` + `mech.rs : rr3_bt_backend_up_default` | `"RR3_HAL_SIM_BT_UP"`，`matches!(.., Ok("1"))`——**只有 `"1"` 算上**，`0`/未设/杂值一律 Off | 出厂不开蓝牙（显式拒绝宽容解析） | 有 | ✅ 落位正确（env 注入口在件内是过渡形态，N-1 改 ops）；**方向值得作为范本**：对照 `base/os/distro/README.md` 记的 `RR3_HAL_SIM_LINK_UP` 缺省 `1`＝"未设即在线"，两处 opt-in/opt-out 方向相反（索引审计 L-4） |
 | `atoms/bt/bt.rs : SURFACE`、`mech.rs`、`src/composite.rs : println!` | `"BlueZ"`（**运行期打印**，非仅注释） | 后端自述 | 有 | 换芯片/换栈时这些串要跟着改 = **违背"换板不改代码"**。去处：后端名由 `rr3_hal_backend_resolve` 交上来，SURFACE 行只写"bt 面（后端=动态）"（N-8）。同类：`wifi.rs : SURFACE` 的 `"NetworkManager/D-Bus"` |
 | `atoms/wifi/mech.rs`、`atoms/bt/mech.rs` | `NetworkManager`/`D-Bus`/`wpa_supplicant`/`NVS`/`BlueZ` 注释 | 厂商/栈名出现在件声明面 | — | ⑦-a 禁词表（`rr-registry/src/atom.rs::RR3_BOARD_TOKENS`）**只扫 `rr-core`/`rr-ipc::protocol`/`transport/mod.rs`，不扫 module mech** → 今天不红。但 ADR-0018 修订 3 ③ 定的"禁词作用件声明面"与这里冲突：注释里的栈名会随 SURFACE/println 出到对外面。**处置见索引 §11 审计 L-6**：禁词作用域要分"代码常量/运行期输出/纯注释"三档，别一刀切 |
