@@ -1,0 +1,99 @@
+# 开放项数据结构（ADR-0022 裁定 6.3，批N4 件九首笔立）。
+#
+# 裁定 6.3 原文（docs/process/adr/ADR-0022-*.md 裁定 6 第 3 条）：新增一类开放项
+# 数据结构（status.md 的表由它生成，散文不再当唯一载体）：
+#   { 条目, 分类: 缺码|无载体, 工单号|触发条件, 证据路径, 状态 }
+# 它同时是面板覆盖率门（门 d）的差集落点（谁红着、为什么红、谁负责）。
+#
+# 与两个既有面的分工（单真值点纪律，谁答什么不混装）：
+# - 门 d 差集的**机器真值** = `tools/ci/check.sh` step ⑩ 逐条 " D " 行打印
+#   （哪些字段红着，步 ⑩ 说了算；低水位基线 `tools/ci/gate-d-baseline.txt`）；
+# - **status.md 敞口表** = 本机无法收口的项与里程碑进度（敞口表章程：缺码＋工单号
+#   与无载体证据不许混装一行）；
+# - **本表** = 归因登记：每个红项组"为什么红、谁负责（工单号）、证据在哪、现状态"。
+#   `fields` 成员清单是登记时的快照（非执法面——成员增减以步 ⑩ 打印为准，
+#   本表随转绿同批改状态与清单）。
+#
+# "status.md 的表由它生成"：生成关系随本表落地后建立（全案 §17 可达终点表行
+# "生成关系随 Nn-6.3 落地后建立"）；status.md 现存敞口行迁移不做本批（历史行
+# 不改写，新增行按本结构登记）。
+#
+# 五字段口径（TOML 键 ↔ 裁定字段）：
+#   entry    = 条目（组级描述）
+#   kind     = 分类（缺码 | 无载体——二选一，裁定 6.3 取值域）
+#   owner    = 工单号（谁负责；无工单时写"触发条件"）
+#   evidence = 证据路径（机器真值点或 `文件:符号`）
+#   status   = 状态（open | done——转绿即 done 并注记提交号）
+
+schema = 1
+
+# ============ 门 d 差集归因（批N4 件九登记，基线 73/79 时点） ============
+# 五组 = 门 d 分母五路减去已转绿的 brain ops 六槽（批N4 件六二，79→73）。
+# 成员清单来自 step ⑩ " D " 行打印（本文件落笔时点快照）。
+
+[[gap]]
+entry = "ops 槽读口缺失：五模块 ops 槽无面板可见读口（brain 六槽已随件六二转绿）"
+kind = "无载体"
+fields = [
+  "ops/blink_period_ms", "ops/channels", "ops/cutoff_voltage_mv",
+  "ops/default_expression", "ops/doa_bin_threshold_deg", "ops/face_tick_ms",
+  "ops/frame_ms", "ops/led_effects", "ops/link_report_period_ms",
+  "ops/low_voltage_mv", "ops/min_pass_len", "ops/min_speech_ms",
+  "ops/move_timeout_ms", "ops/non_pointable", "ops/panel_body_limit",
+  "ops/panel_call_timeout_ms", "ops/panel_header_limit", "ops/panel_max_conns",
+  "ops/panel_read_timeout_ms", "ops/prebuffer_ms", "ops/rms_start",
+  "ops/sample_period_ms", "ops/sample_rate", "ops/selftest_face_expect",
+  "ops/silence_tail_ms", "ops/state_min_interval_ms", "ops/state_period_ms",
+  "ops/timeout_ms", "ops/up", "ops/volume_pct",
+]
+owner = "批N4 件九：观测面——五模块 ops/list RPC（照 rr3-brain/ops/list 先例）＋面板 GET 端点＋covers 申报"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
+status = "open"
+
+[[gap]]
+entry = "pin 装配数据读口缺失：[pins] 派生视图字段无面板可见读口"
+kind = "无载体"
+fields = [
+  "pin/addr", "pin/channel", "pin/controller", "pin/device", "pin/direction",
+  "pin/failsafe", "pin/instance", "pin/mux_group", "pin/physical",
+  "pin/rail", "pin/role",
+]
+owner = "批N4 件九：观测面——装配数据读口端点＋covers 申报"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
+status = "open"
+
+[[gap]]
+entry = "role.requires 读口缺失：roles.toml 角色依赖项无面板可见读口"
+kind = "无载体"
+fields = [
+  "role/addr", "role/channel", "role/controller", "role/device",
+  "role/failsafe", "role/physical", "role/rail",
+]
+owner = "批N4 件九：观测面——装配数据读口端点＋covers 申报（与 pin 组同端点可合并申报）"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
+status = "open"
+
+[[gap]]
+entry = "domain 域档读口缺失：能源域字段无面板可见读口"
+kind = "无载体"
+fields = [
+  "domain/armed", "domain/current_cap_ma", "domain/current_sense",
+  "domain/max_age_ms", "domain/mild_mv", "domain/name", "domain/nominal_mv",
+  "domain/sense", "domain/severe_mv", "domain/switch", "domain/switchable",
+]
+owner = "批N4 件九：观测面——域档读口端点＋covers 申报"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
+status = "open"
+
+[[gap]]
+entry = "axis 轴档案读口缺失：执行件档案十四键无面板可见读口"
+kind = "无载体"
+fields = [
+  "axis/calibrated", "axis/center_deg", "axis/current_ceil_ma",
+  "axis/dir_sign", "axis/hard_stop", "axis/hi_deg", "axis/hold",
+  "axis/lo_deg", "axis/pin", "axis/schema", "axis/settle_ms",
+  "axis/slew_deg_s", "axis/source", "axis/warmup_ms",
+]
+owner = "批N4 件九：观测面——轴档案读口端点＋covers 申报"
+evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1"
+status = "open"

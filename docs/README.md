@@ -75,6 +75,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`process/dev/真件装配与标定手册.md`](process/dev/真件装配与标定手册.md) | 真件到货做验收、装配与标定时照单执行（批W5 每件四件套 + 到货差异登记表） |
 | [`process/dev/方案A——整板电压监测与分轴限幅立项评审.md`](process/dev/方案A——整板电压监测与分轴限幅立项评审.md) | 用户新需求（整板电压监测 + 分轴限幅 + 低电压串行降级）的立项评审——**已裁定** Q1–Q6（§8）+ 真板验收实测（§9），施工待契约评审 |
 | [`process/legacy-digest.md`](process/legacy-digest.md) | legacy（ESP32 冻结区）逐组件消化到哪了（已归档：0.0.4 退役批整树删除，待融合清零） |
+| [`openitems.toml`](openitems.toml) | 开放项数据结构（ADR-0022 裁定 6.3，批N4 件九立）：归因登记表 `{条目, 分类, 工单号, 证据路径, 状态}`——门 d 差集"为什么红、谁负责"的结构化落点；机器真值仍在 `check.sh` 步 ⑩，status.md 敞口表的生成关系随它建立 |
 | [`evidence/README.md`](evidence/README.md) | 真板对拍/实测证据文件容器（brain B-15，批N4 件一立）：`<形态>/<编号>.md` 编号规则与 frontmatter 六键见 [`process/conventions.md`](process/conventions.md) §6.1，校验器唯一实现住 `rr-ipc::evidence`；证据产出随 0.0.6/0.0.7 验证窗 |
 
 ### contracts/ · base/ · modules/ · tools/ · .github/
