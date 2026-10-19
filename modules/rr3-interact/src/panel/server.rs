@@ -124,18 +124,21 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
-/// 今日实况（批N4 件九二，观测面收官刀）：20 端点，读配置者 6 = `GET /api/brain/ops`
+/// 今日实况（批N4 件九三，配置面刀）：21 端点，读配置者 6 = `GET /api/brain/ops`
 /// （brain ops 六槽）＋五模块 ops 读口五端点（`GET /api/{act,connect,interact,power,
-/// sense}/ops`，BusCall 透传各模块 `rr3-<mod>/ops/list`，白名单组体应答）——ops 路
-/// 分母 36 槽全部转绿（covers 申报 30 项随本刀上表），红账 73→43 = pin 11 + role 7
-/// + domain 11 + axis 14（读口归件九后续笔），基线 tools/ci/gate-d-baseline.txt
-/// 行 1 同批下调；密钥面两端点（keys/key）不申报 covers——密钥不在五路分母
-/// （secrets 不住 assemble.toml 槽表），如实空。
-/// applies 今日唯一申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
-/// ⇒ live）；其余写口（beep/face/selftest/reboot/relay/wifi）写的是动作与运行态，
-/// 不动可配置集，如实空。**表项一律单行书写**（硬约束）：check.sh 步 ⑩ 的 applies
-/// 解析器逐行按引号段切本表——跨行表项/行内注释都会被拆行判坏（批N4 件六二
-/// 首跑即红的实证）。
+/// sense}/ops`，BusCall 透传各模块 `rr3-<mod>/ops/list`，白名单组体应答）；写口 1 =
+/// `POST /api/brain/ops`（BusCall 透传 `rr3-brain/ops/set`，组.槽寻址、owner 白名单
+/// fail-closed）——ops 路分母 36 槽全部转绿（covers 申报 30 项随件九二上表，写口
+/// 申报同集合 ∪ 不增），红账 43 = pin 11 + role 7 + domain 11 + axis 14（读口归
+/// 件九笔4），基线 tools/ci/gate-d-baseline.txt 行 1 不动；密钥面两端点（keys/key）
+/// 不申报 covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
+/// applies 今日两条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
+/// ⇒ live）＋ `POST /api/brain/ops`（写臂重建受影响客户端，live 内存生效**不落盘**，
+/// 应答 `persisted:false` 如实申报——重启回 config.toml 真值；Python 无 TOML
+/// writer、Y-2 单写路径协商点归后续批）；其余写口（beep/face/selftest/reboot/
+/// relay/wifi）写的是动作与运行态，不动可配置集，如实空。**表项一律单行书写**
+/// （硬约束）：check.sh 步 ⑩ 的 applies 解析器逐行按引号段切本表——跨行表项/
+/// 行内注释都会被拆行判坏（批N4 件六二首跑即红的实证）。
 pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/", &[], ""),
     ("GET", "/api/status", &[], ""),
@@ -152,6 +155,7 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/api/model/keys", &[], ""),
     ("POST", "/api/model/key", &[], "live"),
     ("GET", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], ""),
+    ("POST", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], "live"),
     ("GET", "/api/act/ops", &["ops/blink_period_ms", "ops/led_effects", "ops/move_timeout_ms", "ops/state_min_interval_ms"], ""),
     ("GET", "/api/connect/ops", &["ops/up", "ops/link_report_period_ms", "ops/timeout_ms", "ops/min_pass_len"], ""),
     ("GET", "/api/interact/ops", &["ops/non_pointable", "ops/default_expression", "ops/face_tick_ms", "ops/selftest_face_expect", "ops/panel_max_conns", "ops/panel_read_timeout_ms", "ops/panel_header_limit", "ops/panel_body_limit", "ops/panel_call_timeout_ms", "ops/prebuffer_ms", "ops/volume_pct"], ""),
@@ -423,14 +427,27 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
             "GET" => Rr3PanelDispatch::ModelKeysQuery,
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
-        // brain ops 槽读面（B-12，批N4 件六二）：BusCall 点名 `rr3-brain/ops/list`
-        // ——参数裁决在 owner（brain 侧白名单组体，密钥不进应答），面板只透传；
-        // covers 六槽申报 = 门 d 转绿首刀（本端点真实渲染 brain ops 槽值）
+        // brain ops 槽读面（B-12，批N4 件六二）＋写面（件九三 配置面）：同一
+        // BusCall 透传范式——GET 点名 `rr3-brain/ops/list` 快照；POST 点名
+        // `rr3-brain/ops/set` 写口，group/slot/value body 原样透传（参数裁决在
+        // owner：白名单/类型域值 fail-closed；live 内存生效不落盘，应答带
+        // persisted:false）。covers 六槽申报 = 门 d 转绿首刀（读渲染/写同一批
+        // ops 槽，写口申报同集合）
         "/api/brain/ops" => match method {
             "GET" => Rr3PanelDispatch::BusCall {
                 topic: "rr3-brain/ops/list".to_string(),
                 args: json!({}),
             },
+            "POST" => {
+                let args = match rr3_panel_body_json(body) {
+                    Ok(v) => v,
+                    Err(e) => return Rr3PanelDispatch::BadRequest(e),
+                };
+                Rr3PanelDispatch::BusCall {
+                    topic: "rr3-brain/ops/set".to_string(),
+                    args,
+                }
+            }
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         // 五模块 ops 槽读面（批N4 件九二，观测面收官刀）：同一 BusCall 透传范式——
@@ -1020,6 +1037,18 @@ mod tests {
                 args: json!({})
             }
         );
+        // 配置面写口（件九三）：group/slot/value body 原样透传，点名 owner 写臂
+        assert_eq!(
+            rr3_panel_route(
+                "POST",
+                "/api/brain/ops",
+                br#"{"group":"asr","slot":"asr_model","value":"m2"}"#
+            ),
+            Rr3PanelDispatch::BusCall {
+                topic: "rr3-brain/ops/set".into(),
+                args: json!({ "group": "asr", "slot": "asr_model", "value": "m2" })
+            }
+        );
         assert_eq!(
             rr3_panel_route("GET", "/api/act/ops", b""),
             Rr3PanelDispatch::BusCall {
@@ -1064,8 +1093,8 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            20,
-            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N4 件九二 15→20：五模块 ops 读口）"
+            21,
+            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N4 件九三 20→21：POST /api/brain/ops 配置面写口）"
         );
         for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {
@@ -1073,6 +1102,7 @@ mod tests {
                 ("POST", "/api/face") => br#"{"expression":"happy"}"#,
                 ("POST", "/api/wifi/connect") => br#"{"ssid":"s","pass":"password8"}"#,
                 ("POST", "/api/model/key") => r#"{"ref":"测试键","value":"sk-x"}"#.as_bytes(),
+                ("POST", "/api/brain/ops") => br#"{"group":"asr","slot":"asr_model","value":"m2"}"#,
                 _ => b"",
             };
             let d = rr3_panel_route(method, path, body);
@@ -1134,15 +1164,19 @@ mod tests {
                 );
             }
         }
-        // 今日申报实况 pin：唯一 applies = model-key 写口（live——secrets 落盘
-        // 后 brain 每次现读，无需重启/重烧）。改申报 = 同批改本 pin 与设计册 I-20。
+        // 今日申报实况 pin：两条 applies = model-key 写口（live——secrets 落盘
+        // 后 brain 每次现读，无需重启/重烧）＋ brain ops 写口（件九三，live 内存
+        // 生效不落盘）。改申报 = 同批改本 pin 与设计册 I-20。
         let declared: Vec<_> = RR3_PANEL_ROUTES
             .iter()
             .filter(|(_, _, _, a)| !a.is_empty())
             .collect();
         assert_eq!(
             declared,
-            vec![&("POST", "/api/model/key", &[][..], "live")],
+            vec![
+                &("POST", "/api/model/key", &[][..], "live"),
+                &("POST", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"][..], "live"),
+            ],
             "applies 申报面漂移：新增写口申报须同批改本 pin"
         );
     }

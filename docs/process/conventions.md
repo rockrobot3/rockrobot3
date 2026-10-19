@@ -208,6 +208,28 @@ sense}/ops` 五端点同一 BusCall 透传范式（interact 自身也走 rrd 归
 （头注对表行同批）；前端 tab-sys 加「模块配置面」只读卡（模块名入列四栏渲染）。
 门 d 差集机器真值仍＝步 ⑩ " D " 行打印，openitems 归因表随转绿同批改状态——
 两口径本批实跑一致。
+**2026-10-19 对表（批N4 件九笔3，配置面——brain ops 槽写口＋applies 第二条申报）**：
+契约 37→38（topics.toml append `rr3-brain/ops/set` request L2；计数 pin 同批：
+rr-registry topics.rs ×3、tests/contract.rs 37→38＋request 18→19、rrd
+topics_load.rs ×3，40→41 两处随契约计数联动；contracts/README.md 现值窗行
+31→38 补齐——批N2 时点的现值句笔2 漏更，本笔对表时补）；**写面三问拍板**：
+① 寻址 = 组.槽与 `ops/list` 快照读源对偶（llm 组写实效源——模型行 active 在则
+写行、fallback 写 cloud 段；asr/tts/dialog 组与 llm.timeout_s 写 cloud/dialog 段）；
+② 生效 = live 内存生效（写臂重建 asr/llm/tts 客户端，llm 重建即换会话 history
+归零；dialog 就地改参——`rr3_utterance_expired` 现读 `max_utterance_ms` 不丢开轮
+状态），**不落盘**——应答 `persisted:false` 如实申报，重启回 config.toml 真值
+（不申报 reboot：内存写不落盘，重启是丢失不是生效）；③ 落盘归后续批（Python 无
+TOML writer、重写丢 config 注释、Y-2 单写路径是 Rust persist.rs——三条协商点
+随本行在册）。brain 写臂 = 纯函数 `rr3_ops_write`（白名单/类型域值 fail-closed
+点名拒，密钥与 key_ref 不在写面）＋分发臂重建段；module.toml exposes 双写 +1；
+单测 TestOpsWrite 六用例（brain tests 归 CI brain-unittest job，本机 python3.9
+无 tomllib 以仓外一次性 runner 验证 19/19；同批给 cloud/__init__.py、cloud/llm.py
+补 `from __future__ import annotations`——包内其余四文件已有，风格补齐，PEP 604
+注解 3.9 import 安全）。面板 `POST /api/brain/ops`（BusCall 透传，body 原样交
+owner 裁决），端点 pin 20→21，covers 六槽申报 = 与 GET 读口同集合（∪ 不增，
+基线 43 不动），applies 申报实况 pin 一条→两条（model/key live ＋ brain/ops
+live——写口动了可配置集必填生效路径，I-20 双门同批过）；前端 brain 模型面卡加
+写槽行（数值槽前端转 Number，owner 仍 fail-closed 兜底）。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`

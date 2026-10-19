@@ -15,8 +15,9 @@ intent.py（策略层唯一归属在 brain，0.0.3 Q1 裁定）。
    （`[rr3-brain.dialog].max_utterance_ms`）；
 3. 判停 → ASR →（空文本弃轮）→ LLM → TTS（验证性消费）→ `rr3.call`
    `rr3-interact/tts/text` → 发布 `rr3-brain/intent/result`；
-4. 应答 exposes 的 `rr3-brain/llm/completion` 点名（rr3.call 转发帧的
-   trace_id = 调用方 task，顺原路应答）。
+4. 应答 exposes 的事务面点名（rr3.call 转发帧的 trace_id = 调用方 task，顺原路
+   应答）：`llm/completion`、`ops/list` 槽值快照读口（B-12）与 `ops/set` 写口
+   （批N4 件九三：组.槽寻址、白名单校验、live 内存生效不落盘）。
 
 失败语义（与 rr3-sense/rr3-interact 同一契约）：业务失败（云端 4xx/5xx、空文本、
 被调方超时/拒答）折日志弃轮，进程不死；传输失败（发布/应答写不出去、总线断开）
@@ -53,7 +54,7 @@ PUBLISHES = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"]
 # 申报订阅面（与 module.toml 同源双写）：C14（ADR-0019 修订 2 ②）后对齐实然面——
 # asr/text 走 retired 撤申报、net/link 撤申报（不补实现）；实际消费入口 = pcm + vad_start
 SUBSCRIBES = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
-RPC_EXPOSES = ["rr3-brain/llm/completion", "rr3-brain/ops/list"]
+RPC_EXPOSES = ["rr3-brain/llm/completion", "rr3-brain/ops/list", "rr3-brain/ops/set"]
 
 TOPIC_PCM = "rr3-sense/audio/pcm"
 TOPIC_VAD = "rr3-sense/audio/vad_start"
@@ -62,6 +63,7 @@ TOPIC_TTS_PCM = "rr3-brain/audio/tts_pcm"
 TOPIC_INTENT = "rr3-brain/intent/result"
 TOPIC_COMPLETION = "rr3-brain/llm/completion"
 TOPIC_OPS_LIST = "rr3-brain/ops/list"
+TOPIC_OPS_SET = "rr3-brain/ops/set"
 
 # TTS 下行流分帧规格（MCP-1 定形）：逐字段复用上行 rr3-sense/audio/pcm 的事件体，
 # 同 20ms 一块（@16k/mono/s16le = 320 样点 = 640 字节），base64 后 ≈856 字符。
@@ -151,6 +153,76 @@ def rr3_ops_snapshot(cfg: dict, model_base_url: str, model_id: str) -> dict:
     }
 
 
+# 写面白名单（批N4 件九三，与 rr3_ops_snapshot 读面同源对偶）：组 → 槽名单。
+# 写源映射：asr/tts 组三槽与 llm 组 timeout_s 写 cloud 段、dialog 组写 dialog 段；
+# llm 组的 llm_model/base_url 实效源两态（模型行 active 在则写行、否则 cloud
+# fallback 路径）由 rr3_ops_write 动态解析——快照读哪份、写口就写哪份。
+RR3_OPS_WRITE_GROUPS: dict[str, set[str]] = {
+    "asr": {"asr_model", "base_url", "timeout_s"},
+    "llm": {"llm_model", "base_url", "timeout_s"},
+    "tts": {"tts_model", "base_url", "timeout_s"},
+    "dialog": {"max_utterance_ms"},
+}
+RR3_OPS_STRING_SLOTS = {"asr_model", "llm_model", "tts_model", "base_url"}
+
+
+def rr3_ops_write(cfg: dict, group: str, slot: str, value) -> tuple:
+    """ops 槽写臂纯函数（批N4 件九三）：白名单校验 → 类型域值校验 → 写内存 cfg。
+
+    返回 `(old, new)` 供应答回显；违规一律 `RuntimeError` 点名拒因（fail-closed，
+    不静默夹值）。**只动内存字典不落盘**——Python 无 TOML writer、重写丢 config
+    注释、Y-2 单写路径（rr-ipc persist.rs）是 Rust 侧实现，三问归后续批；生效
+    语义 = live（调用方写后重建受影响客户端），重启回 config.toml 真值。
+    密钥与 key_ref 不在写面（密钥面走 panel secrets 端点，值零回显 B-12）。
+    """
+    slots = RR3_OPS_WRITE_GROUPS.get(group)
+    if slots is None:
+        raise RuntimeError(f"组不认: {group!r}（白名单 {sorted(RR3_OPS_WRITE_GROUPS)}）")
+    if slot not in slots:
+        raise RuntimeError(f"组 {group} 槽不认: {slot!r}（白名单 {sorted(slots)}）")
+
+    if slot in RR3_OPS_STRING_SLOTS:
+        if not isinstance(value, str):
+            raise RuntimeError(f"槽 {group}.{slot} 须字符串，收到 {type(value).__name__}")
+        value = value.strip()
+        if not value:
+            raise RuntimeError(f"槽 {group}.{slot} 不得为空")
+    elif slot == "timeout_s":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError(f"槽 {group}.{slot} 须数值，收到 {type(value).__name__}")
+        value = float(value)
+        if not value > 0:
+            raise RuntimeError(f"槽 {group}.{slot} 须 >0，收到 {value}")
+    else:  # max_utterance_ms（白名单仅此一整数槽，走这里即它）
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError(f"槽 {group}.{slot} 须数值，收到 {type(value).__name__}")
+        if float(value) != int(value):
+            raise RuntimeError(f"槽 {group}.{slot} 须整数，收到 {value}")
+        value = int(value)
+        if not value > 0:
+            raise RuntimeError(f"槽 {group}.{slot} 须 >0，收到 {value}")
+
+    brain = cfg["rr3-brain"]
+    if group == "dialog":
+        section, key = brain.setdefault("dialog", {}), slot
+    elif group in ("asr", "tts") or slot == "timeout_s":
+        section, key = brain["cloud"], slot  # asr/tts 全槽与 llm.timeout_s 读源都在 cloud 段
+    else:  # llm 组 llm_model/base_url：实效源 = 模型行 active 在则行、否则 cloud fallback
+        rows = brain.get("model", [])
+        if not rows:
+            section, key = brain["cloud"], {"llm_model": "llm_model", "base_url": "base_url"}[slot]
+        else:
+            actives = [r for r in rows if r.get("active")]
+            if len(actives) != 1:
+                raise RuntimeError(
+                    f"[[rr3-brain.model]] 须恰一行 active=true（现 {len(actives)} 行）——写面不修结构错误"
+                )
+            section, key = actives[0], {"llm_model": "model_id", "base_url": "base_url"}[slot]
+    old = section.get(key)
+    section[key] = value
+    return old, value
+
+
 def main() -> int:
     try:
         return rr3_brain_run()
@@ -235,6 +307,45 @@ def rr3_brain_run() -> int:
                     # key_ref 不进任何应答（值零回显守脑面），槽名与 assemble.toml
                     # 申报同源（面板 covers 申报的对账面）
                     result = {"ops": rr3_ops_snapshot(cfg, base_url, model_id)}
+                elif rpc_topic == TOPIC_OPS_SET:
+                    # ops 槽写臂（批N4 件九三 配置面）：白名单/类型域值校验（纯函数
+                    # rr3_ops_write）→ 写内存 cfg → 重建受影响客户端 = live 内存
+                    # 生效。不落盘：应答 persisted:false 如实申报，重启回 config.toml
+                    # 真值（Python 无 TOML writer、保注释重写面与 Y-2 单写路径协商
+                    # 点归后续批）。llm 重建即换会话（history 归零，如实语义）；
+                    # dialog 就地改参——rr3_utterance_expired 现读 max_utterance_ms，
+                    # 不丢开轮状态。密钥与 key_ref 不在写面（B-12）。
+                    args = params.get("args", {})
+                    group = str(args.get("group", ""))
+                    slot = str(args.get("slot", ""))
+                    try:
+                        old, new = rr3_ops_write(cfg, group, slot, args.get("value"))
+                    except RuntimeError as e:
+                        result = {"error": str(e)}
+                    else:
+                        if group == "asr":
+                            cloud = cfg["rr3-brain"]["cloud"]
+                            asr = Rr3AsrClient(
+                                cloud["base_url"], cloud["asr_model"], float(cloud["timeout_s"])
+                            )
+                        elif group == "tts":
+                            cloud = cfg["rr3-brain"]["cloud"]
+                            tts = Rr3TtsClient(
+                                cloud["base_url"], cloud["tts_model"], float(cloud["timeout_s"])
+                            )
+                        elif group == "llm":
+                            b, m, k, mo = rr3_brain_model_row(cfg)
+                            llm = Rr3LlmClient(
+                                b, m, float(cfg["rr3-brain"]["cloud"]["timeout_s"]),
+                                key_ref=k, mode=mo,
+                            )
+                        else:  # dialog（rr3_ops_write 已保证四组白名单，其余即 dialog）
+                            dialog.max_utterance_ms = int(new)
+                        result = {
+                            "ok": True, "group": group, "slot": slot,
+                            "old": old, "new": new,
+                            "persisted": False, "applies": "live",
+                        }
                 else:
                     result = {"error": f"rr3-brain 只 exposes {RPC_EXPOSES}，收到 {rpc_topic}"}
                 bus.rr3_reply_call(frame["header"]["trace_id"], body.get("id", 0), result)

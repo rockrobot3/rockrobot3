@@ -27,8 +27,10 @@ publishes = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"]
 subscribes = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
 
 [rpc]
-# ops/list = 槽值快照读口（批N4 件六二 B-12）：白名单六槽应答，密钥不进应答
-exposes = ["rr3-brain/llm/completion", "rr3-brain/ops/list"]
+# ops/list = 槽值快照读口（批N4 件六二 B-12）：白名单六槽应答，密钥不进应答；
+# ops/set = 槽写口（批N4 件九三 配置面）：组.槽寻址、live 内存生效不落盘（应答
+# persisted:false 如实申报），密钥与 key_ref 不在写面
+exposes = ["rr3-brain/llm/completion", "rr3-brain/ops/list", "rr3-brain/ops/set"]
 
 [resources]
 restart_policy = "on-failure"
