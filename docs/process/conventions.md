@@ -114,6 +114,27 @@ boot（default_expression/face_expect 过 `RR3_FACE_EXPRESSIONS` 对账）、类
 不进 config（批I I-1 bind/port 删除同口径，避免第三真值点）；自检逐腿
 `{legs:[{leg, pass, reason?}], verdict}` 上线（pass 词表 pass|fail|n-a，恒败腿如实
 fail 不折算通过＝D15），前端逐腿渲染同步。
+**2026-10-19 对表（批N4 件七，实-6 修法三件——rtos 档"只改数据"补课）**：三笔分立提交，
+每笔独立自洽——(a) host 词形规则下移平台事实表（`0082114`：三份 `contracts/platform/*.toml`
+加 `[controller_wordform]` 段、`rr-registry` 扩段解析＋键域封闭、rrd 派生器改读表＋①-f 遍历；
+词形规则从 rrd 机制侧撤出，⑦-a 禁词扫面逃逸随之闭合）；(b) 桥上配置腿（`b9cc482`：rr-ipc 新增
+bindings 模块＝绑定真值单点（no_std 零依赖 serde-free，method 常量＋三键域＋快照结构＋u8 裁决
+＋单条目写入，JSON 遍历留两侧各自消费面）＋`Rr3HalBindings` 三字段＋`RR3_ASSEMBLE_DESC_KEYS`
+十→十三键（契约级评审同 批N3 件六 spi_device 先例；三键不在 `[pins]` 派生键集——无 role 对应，
+rtos 档 `[hardware]` 原样直给进 `RR3_HAL_BINDINGS`）＋`esp32-mini.toml` `[hardware]` 三键
+（`i2c_sda="21"`/`i2c_scl="22"`/`adc_rail_pin="34"`，取值同源板侧装配）＋`esp32_uart.rs` 桥上
+method 下发（`rr3.set_bindings` 载荷住 `params.args`、值全字符串；连接建立即推；失败仅点名
+不上抛不重试——执法点在板侧消费面，板未支持 method 时宿主仅打点，舵机/表情不受扰））；
+(c) 板侧消费腿（本笔：`frame.rs` 分发臂逐键过键域/值域校验、坏值整体不落；`state.rs` 进程级
+注入单点（引脚号是芯片级物理事实且自愈路径在深层自由函数够不到 `Bus`——单点存取，毒锁不失效
+同 `lock_bus`）；`board.rs` 三常量删除（`PIN_I2C_SDA/SCL`、`ADC_RAIL_PIN`），接线表数字降为
+文档锚点；`oled.rs` 自愈两路径（`i2c_bus_recover`/`i2c_bus_unstick`）改读注入，未注入拒不碰
+GPIO；`runtime.rs` 每拍 force 重同步缺注入即跳并计 `selfheal_skipped`（INFO 观测面，静默防刷屏）；
+`main.rs` boot 解卡拒则点名（v3 拍板：消费面级 fail-closed，不做板级等宿主的启动时序重构——
+boot 期桥未连注入必缺席，启动期解卡能力随 0.0.7 批G/D1 主驱动具名引脚改造回归）、横幅去引脚号
+字面量；绑定注入成功打印三键值＝板侧引脚真值唯一观测点）。**读不到注入值即拒不回退硬编码**
+的机制面三处观测：boot 解卡点名 / 运行面 `selfheal_skipped` 计数 / 重试路径终败 Err 冒泡。
+行为判据（改档案实录＋抽注入拒起对照）仍归真板批——status 敞口 21 行不结项。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
