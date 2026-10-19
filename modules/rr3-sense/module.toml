@@ -22,7 +22,9 @@ publishes = [
     "rr3-sense/env/temperature",
     "rr3-sense/imu/state",
 ]
-subscribes = []
+# B批 b2：订阅 brain 的 TTS 回放流喂播放期门控（扬声器自声不触发听声转头）——
+# 零新契约，主题在册（裁定②）
+subscribes = ["rr3-brain/audio/tts_pcm"]
 
 # request 语义的自有主题走事务面，不混进 publishes
 [rpc]
