@@ -14,5 +14,8 @@
 #   default_expression 1 槽走件级 assemble.toml；interact composite.toml 七槽
 #   face_tick_ms/selftest_face_expect/panel 五限额走组合件级——⑩ ops 路导出面
 #   同批扩为两来源并集）+ pin 11 + role 7 + domain 11 + axis 14。
-79
+# 73 = 批N4 件六二（B-12 转绿首刀）：/api/brain/ops 读面 covers 申报 brain ops
+#   六槽（asr_model/base_url/llm_model/max_utterance_ms/timeout_s/tts_model），
+#   红账 79→73 同批下调本行；分母不动（槽表无增减）。
+73
 79

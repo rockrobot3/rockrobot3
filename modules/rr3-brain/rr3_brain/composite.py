@@ -53,7 +53,7 @@ PUBLISHES = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"]
 # 申报订阅面（与 module.toml 同源双写）：C14（ADR-0019 修订 2 ②）后对齐实然面——
 # asr/text 走 retired 撤申报、net/link 撤申报（不补实现）；实际消费入口 = pcm + vad_start
 SUBSCRIBES = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
-RPC_EXPOSES = ["rr3-brain/llm/completion"]
+RPC_EXPOSES = ["rr3-brain/llm/completion", "rr3-brain/ops/list"]
 
 TOPIC_PCM = "rr3-sense/audio/pcm"
 TOPIC_VAD = "rr3-sense/audio/vad_start"
@@ -61,6 +61,7 @@ TOPIC_TTS = "rr3-interact/tts/text"
 TOPIC_TTS_PCM = "rr3-brain/audio/tts_pcm"
 TOPIC_INTENT = "rr3-brain/intent/result"
 TOPIC_COMPLETION = "rr3-brain/llm/completion"
+TOPIC_OPS_LIST = "rr3-brain/ops/list"
 
 # TTS 下行流分帧规格（MCP-1 定形）：逐字段复用上行 rr3-sense/audio/pcm 的事件体，
 # 同 20ms 一块（@16k/mono/s16le = 320 样点 = 640 字节），base64 后 ≈856 字符。
@@ -115,6 +116,39 @@ def rr3_brain_model_row(cfg: dict) -> tuple[str, str, str | None, str | None]:
     if key_ref is not None:
         key_ref = str(key_ref).strip() or None
     return base_url, model_id, key_ref, mode
+
+
+def rr3_ops_snapshot(cfg: dict, model_base_url: str, model_id: str) -> dict:
+    """ops 槽快照（批N4 件六二 B-12：`rr3-brain/ops/list` 应答体，面板脑面读口）。
+
+    按原子分组、槽名与 assemble.toml 申报同源（asr/llm/tts/dialog 四组）——
+    llm 组取模型行实效值（rr3_brain_model_row 解析产物，行覆盖 cloud fallback；
+    B-14① 的双源分裂不在本单修，快照如实分组不合并）。**白名单组体**：只取
+    六槽名单键，config 其余键（含密钥/凭据/模型行 api_key_ref）一律不进应答
+    ——值零回显守脑面（B-12 验收句），密钥面走 panel secrets 端点（只报名字）。
+    """
+    cloud = cfg["rr3-brain"]["cloud"]
+    dialog = cfg["rr3-brain"].get("dialog", {})
+    return {
+        "asr": {
+            "asr_model": cloud["asr_model"],
+            "base_url": cloud["base_url"],
+            "timeout_s": cloud["timeout_s"],
+        },
+        "llm": {
+            "llm_model": model_id,
+            "base_url": model_base_url,
+            "timeout_s": cloud["timeout_s"],
+        },
+        "tts": {
+            "tts_model": cloud["tts_model"],
+            "base_url": cloud["base_url"],
+            "timeout_s": cloud["timeout_s"],
+        },
+        "dialog": {
+            "max_utterance_ms": dialog.get("max_utterance_ms", 8000),
+        },
+    }
 
 
 def main() -> int:
@@ -186,14 +220,20 @@ def rr3_brain_run() -> int:
                 if body.get("method") != "rr3.call":
                     continue
                 params = body.get("params", {})
-                if params.get("topic") != TOPIC_COMPLETION:
-                    result = {"error": f"rr3-brain 只 exposes {TOPIC_COMPLETION}，收到 {params.get('topic')}"}
-                else:
+                rpc_topic = params.get("topic")
+                if rpc_topic == TOPIC_COMPLETION:
                     text = str(params.get("args", {}).get("text", ""))
                     try:
                         result = {"text": llm.complete(text)}
                     except RuntimeError as e:
                         result = {"error": str(e)}
+                elif rpc_topic == TOPIC_OPS_LIST:
+                    # ops 槽快照应答（批N4 件六二 B-12）：白名单组体——密钥与
+                    # key_ref 不进任何应答（值零回显守脑面），槽名与 assemble.toml
+                    # 申报同源（面板 covers 申报的对账面）
+                    result = {"ops": rr3_ops_snapshot(cfg, base_url, model_id)}
+                else:
+                    result = {"error": f"rr3-brain 只 exposes {RPC_EXPOSES}，收到 {rpc_topic}"}
                 bus.rr3_reply_call(frame["header"]["trace_id"], body.get("id", 0), result)
 
         if dialog.rr3_utterance_expired():

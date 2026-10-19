@@ -162,6 +162,13 @@ owner = "rr3-brain"
 stable = "L1"
 
 [[topic]]
+name = "rr3-brain/ops/list"
+kind = "request"
+owner = "rr3-brain"
+stable = "L2"
+note = "ops 槽快照只读点名（批N4 件六二 B-12）：白名单六槽应答（asr/llm/tts/dialog 四组），密钥不进应答；件九配置面扩写口时随面演进"
+
+[[topic]]
 name = "rr3-brain/intent/result"
 kind = "event"
 owner = "rr3-brain"

@@ -27,7 +27,8 @@ publishes = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"]
 subscribes = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"]
 
 [rpc]
-exposes = ["rr3-brain/llm/completion"]
+# ops/list = 槽值快照读口（批N4 件六二 B-12）：白名单六槽应答，密钥不进应答
+exposes = ["rr3-brain/llm/completion", "rr3-brain/ops/list"]
 
 [resources]
 restart_policy = "on-failure"

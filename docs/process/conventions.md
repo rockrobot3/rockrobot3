@@ -149,6 +149,23 @@ counters 同表可见）。超时数据化（B-13①，D7 解耦裁定）：`[rr
 `asr.py` json.loads 进护栏，llm 腿既有护栏回归钉住）——同一类云不可用不再一半弃轮
 一半掀进程。单测：interact 55 条（零字节下界两例＋422 判等三例）、brain 拆账四例＋
 收敛三例（brain 单测归 CI brain-unittest job，本机 check.sh 不覆盖）。
+
+**2026-10-19 对表（批N4 件六第二笔，B-12——brain ops 槽对门 d 转绿首刀＋值零回显）**：
+新 RPC 主题 `rr3-brain/ops/list` 契约注册（contracts/topics.toml，request/**L2**——
+件九配置面扩写口时随面演进，MCP-1「先 append 契约再落码」先例），主题计数 pin
+七处断言同批续登 31→32（rr-registry topics.rs 三处含 merge 前后、contract.rs 计数
+＋kind 分布 request 12→13、rrd topics_load.rs 三处含 overlay 合并）；brain 侧
+`RPC_EXPOSES` 与 module.toml `[rpc].exposes` 双写同源＋1，应答体 = 纯函数
+`rr3_ops_snapshot` 白名单组体（按 asr/llm/tts/dialog 四原子分组、六槽名单键——
+llm 组取模型行实效值，B-14① 双源分裂如实分组不合并；密钥与 `api_key_ref` 不进
+任何应答，值零回显守脑面，密钥写读走 panel secrets 端点只报 ref 名）。面板
+`GET /api/brain/ops` 读口复用 BusCall 透传（wifi/scan 先例），covers 申报六槽
+（ops/asr_model、ops/base_url、ops/llm_model、ops/max_utterance_ms、ops/timeout_s、
+ops/tts_model）＝ 门 d 红账 79→73（基线行 1 同批下调，分母不动）；端点数 pin
+14→15；前端 tab-sys 加「brain 模型面」只读卡（表行单行书写是 ⑩ awk 逐行解析的
+硬约束，跨行表项被拆行判坏——首跑即红的实证）。单测：interact 55 条（表-分派
+pin 自动适配＋covers 词表门自动过）、brain 快照四例（fallback/行覆盖/密钥零回显
+序列化全文断言/缺段缺省）——brain 单测归 CI。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`

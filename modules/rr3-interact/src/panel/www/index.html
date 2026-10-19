@@ -120,6 +120,12 @@
     <table id="model-keys"><thead><tr><th>引用名</th><th>状态</th></tr></thead><tbody></tbody></table>
     <div class="msg" id="model-key-msg">模型连接（地址/模型名）在 rr3-brain config.toml 的 [[rr3-brain.model]] 表；此处只管密钥。brain 每轮现读，保存后下一轮对话即生效。</div>
   </div>
+  <div class="card">
+    <h2>brain 模型面（rr3.call → rr3-brain/ops/list，只读）</h2>
+    <button class="btn off" onclick="brainOpsLoad()">读取槽值</button>
+    <table id="brain-ops"><thead><tr><th>原子</th><th>槽</th><th>值</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="brain-ops-msg">槽值来自 rr3-brain config.toml（assemble.toml 申报六槽，llm 组取模型行实效值）；密钥不在此面（值零回显），保存/删除走上方模型密钥卡。</div>
+  </div>
 </section>
 
 <section id="tab-wifi">
@@ -304,6 +310,27 @@ async function modelKeySave() {
     $("model-key").value = "";
     await modelKeysRefresh();
   } catch (e) { setMsg("model-key-msg", "保存失败：" + e.message, false); }
+}
+// brain ops 槽读面（B-12，批N4 件六二）：只读点名，应答按原子分组逐槽渲染
+async function brainOpsLoad() {
+  try {
+    const v = await api("/api/brain/ops");
+    const ops = v.ops || {};
+    const tb = $("brain-ops").querySelector("tbody");
+    tb.innerHTML = "";
+    let n = 0;
+    for (const [atom, slots] of Object.entries(ops)) {
+      for (const [slot, val] of Object.entries(slots)) {
+        const tr = document.createElement("tr");
+        const td1 = document.createElement("td"); td1.textContent = atom;
+        const td2 = document.createElement("td"); td2.textContent = slot;
+        const td3 = document.createElement("td"); td3.textContent = String(val);
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tb.appendChild(tr);
+        n++;
+      }
+    }
+    setMsg("brain-ops-msg", "已读取 " + n + " 槽（密钥不在此面，值零回显守脑面）。", true);
+  } catch (e) { setMsg("brain-ops-msg", "读取失败：" + e.message, false); }
 }
 </script>
 </body>
