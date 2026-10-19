@@ -132,3 +132,51 @@ droppable = true
 input_only_ok = false
 per_instance = false
 note = "SPI 显示器件（链④真件档 MAX7219 点阵类）；host 侧 controller 词形 spidev<N> 派生总线号、channel 派生片选号，合成 spi_device=/dev/spidev<N>.<M>（与旧 [hardware] 直给值逐字节对齐，profiles/distro.toml 迁移批N3 件六）。物理走线（DIN/CS/CLK）由总线自身钉死，不占 physical 维"
+
+# —— 批N3 件八（基-39 N3 那一刀 + 器件角色进场，decisions.md §2 行 2）：I2C 读数
+#    器件三角色进场。requires 首次引用 device 键（[pins] 字段词表批N3 件八起十一键）：
+#    device = 器件型号词（外键 → contracts/devices.toml，门 o 装载侧执法；校验③-c
+#    精化判据——同 (bus, addr) 的多条 pin 须同 device 且型号在册——的字段）。
+#    derives 一律显式 []：三格共用既有读数源句柄（P-5：charger 与 battery.meter
+#    共用 INA219 同一读数面，env/imu 是 status=placeholder 格无句柄消费），不派生
+#    注入键维持"无第二真值点"——rr3_role_table_check 的"derives 空"判据随本件放宽
+#    （显式空 = 不派生，合法；显式性由 CI 契约测试逐条点名钉住）。iface=Rr3Sensor
+#    为批N3 契约面先行（rr-hal-api 无实现件，件一 Rr3Actuator 先例）。
+[[role]]
+name = "power.charger.meter"
+slot = "power.charger"
+kind = "signal"
+iface = "Rr3Power"
+requires = ["controller", "addr", "device"]
+derives = []
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+note = "充电计读数面（P-5 裁定：与 power.battery.meter 共用同一 INA219 读数源，不另立句柄——同 (i2c1, 0x40) 同 device 共址合法，校验③-c 精化判据的正例形状）。droppable=false 同 battery.meter（测量面必须活着才知欠压）。device=INA219 与 battery.meter 同型号在册"
+
+[[role]]
+name = "sensor.env.meter"
+slot = "sensor.env"
+kind = "signal"
+iface = "Rr3Sensor"
+requires = ["controller", "addr", "device"]
+derives = []
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+note = "环境量读数面（status=placeholder 格的角色面先行——格升 normal 的时机 = Rr3Sensor 落真后端，D9 一并裁；probe.rs 探测机制本就绪，bus/addr 一旦进 pin 即生效）。device 取值须与 devices.toml 演练行一致（SHTC3@0x70）；derives=[] 无句柄消费不注入（真后端随真板批）"
+
+[[role]]
+name = "sensor.imu.meter"
+slot = "sensor.imu"
+kind = "signal"
+iface = "Rr3Sensor"
+requires = ["controller", "addr", "device"]
+derives = []
+direction = "in"
+droppable = false
+input_only_ok = true
+per_instance = false
+note = "姿态量读数面（同 sensor.env.meter 形状，kind=Vec3 变体消费；融合归 act 反射环——格 note 明写，契约面只搬运不定融合语义）。device 取值须与 devices.toml 演练行一致（ICM-42688@0x68）；derives=[] 同上"

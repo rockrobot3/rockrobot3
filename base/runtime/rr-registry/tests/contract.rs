@@ -1051,12 +1051,14 @@ fn devices_table_shape_and_mates_are_pinned() {
     assert_eq!(
         devices.rr3_device_table_names(),
         vec![
+            "ICM-42688".to_string(),
             "INA219".to_string(),
             "MAX7219".to_string(),
             "SG90".to_string(),
+            "SHTC3".to_string(),
             "SSD1306".to_string(),
         ],
-        "器件型号集漂移（加器件 = append 同批改本 pin；改/删型号 = 契约级变更）"
+        "器件型号集漂移（加器件 = append 同批改本 pin；改/删型号 = 契约级变更；批N3 件八起 SHTC3/ICM-42688 演练行）"
     );
     let mates = devices.rr3_device_table_mates();
     for mate in ["0.96in-OLED-FPC", "MAX7219-DIP24", "SG90-3P"] {
@@ -1194,6 +1196,9 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "act.led.gpio",
             "act.relay.gpio",
             "power.battery.meter",
+            "power.charger.meter",
+            "sensor.env.meter",
+            "sensor.imu.meter",
             "ui.face.spi",
         ],
     );
@@ -1383,6 +1388,9 @@ fn distro_profile_binds_exactly_the_body_layer() {
             "act.led.gpio",
             "act.relay.gpio",
             "power.battery.meter",
+            "power.charger.meter",
+            "sensor.env.meter",
+            "sensor.imu.meter",
             "ui.face.spi",
         ],
     );
@@ -1686,7 +1694,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     }
 }
 
-/// G4 在册表钉死（ADR-0019 修订 1 ③，批J）：七能力面 trait × 九描述符键逐项点名。
+/// G4 在册表钉死（ADR-0019 修订 1 ③，批J）：九能力面 trait × 九描述符键逐项点名。
 /// 两表真值源 = rr-hal-api（trait 面）/ rr-hal descriptor.rs（[hardware] 键集，
 /// C4 裁定不扩键）；本测试钉的是装配校验在 rr-registry 的这份副本——扩 trait/
 /// 扩键都走契约级评审，届时两处同批改，单改一处此测试当场红。
@@ -1702,6 +1710,8 @@ fn assemble_registry_tables_are_pinned() {
             "Rr3Power",
             "Rr3Link",
             "Rr3Display",
+            "Rr3Sensor",
+            "Rr3DigitalIn",
         ]
     );
     assert_eq!(

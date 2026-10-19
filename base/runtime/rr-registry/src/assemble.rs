@@ -19,7 +19,7 @@
 //!
 //! 两级真值、两处消费（`rrd` 与裸机装配段共用本模块，不各说一套）：
 //! - **形状级**（[`rr3_registry_assemble_from_text`]）：schema 版本、未知字段点名、
-//!   trait ∈ 七能力面在册表、desc_key ∈ 九描述符键在册表、参数槽与来源键非空点路径。
+//!   trait ∈ 九能力面在册表、desc_key ∈ 九描述符键在册表、参数槽与来源键非空点路径。
 //!   空数组**合法**，但**两数组均空时须明写 `no_injection = true`**（0.0.5 批M MC-10 L-5：
 //!   把"漏填"与"本件确无注入面"分开——否则空申报与漏填不可区分，门里无内容可校验）。
 //! - **注入缺级**（[`rr3_registry_assemble_injection_gaps`]）：ops 的 `src_key`
@@ -54,7 +54,7 @@
 //! 装配段对缺项的处置（ADR-0019 修订 1 ③）：**该格 `Degraded`、点名到件，不 fatal**
 //! ——件没病，装配声明坏了重启治不了；修数据 + 重启 rrd 是唯一解除路。
 //!
-//! 在册表与真值源的关系：七 trait 真值源 = `rr-hal-api`（能力面契约），九键真值源 =
+//! 在册表与真值源的关系：九 trait 真值源 = `rr-hal-api`（能力面契约），九键真值源 =
 //! `rr-hal` `descriptor.rs`（`[hardware]` 键集，C4 裁定**不扩键**）。两表在此按
 //! 契约层纪律另立一份并由契约测试钉死——扩 trait/键都走契约级评审，届时两处同批；
 //! 本表滞后 = 新 trait/键被装配校验拒绝（fail-closed 方向，不会带病放行）。
@@ -64,7 +64,9 @@ use toml::Value;
 /// 装配清单 schema 版本（本文件定形即 2：handles/ops 从字符串数组升为结构化条目）
 pub const RR3_ASSEMBLE_SCHEMA_VERSION: u32 = 2;
 
-/// 七能力面 trait 在册表（真值源 rr-hal-api；handles[].trait 只认这七个名字）
+/// 九能力面 trait 在册表（真值源 rr-hal-api；handles[].trait 只认这九个名字。
+/// 批N3 件八起 `Rr3Sensor`/`Rr3DigitalIn` 进表——契约面先行无实现件，件一
+/// `Rr3Actuator` 先例；roles.toml 感知角色 iface 外键据此查册）
 pub const RR3_ASSEMBLE_HANDLE_TRAITS: &[&str] = &[
     "Rr3GpioOut",
     "Rr3PwmServo",
@@ -73,6 +75,8 @@ pub const RR3_ASSEMBLE_HANDLE_TRAITS: &[&str] = &[
     "Rr3Power",
     "Rr3Link",
     "Rr3Display",
+    "Rr3Sensor",
+    "Rr3DigitalIn",
 ];
 
 /// 描述符键在册表（真值源 rr-hal descriptor.rs `[hardware]` 键集；C4 批J 裁定
@@ -173,7 +177,7 @@ pub(crate) fn rr3_handles_from_array(items: &[Value]) -> (Vec<Rr3AssembleHandle>
         match trait_name {
             Some(tr) if RR3_ASSEMBLE_HANDLE_TRAITS.contains(&tr) => {}
             Some(tr) => errs.push(format!(
-                "handles[{i}].trait \"{tr}\" 未在册（七能力面表见 assemble.rs，扩面走契约级评审）"
+                "handles[{i}].trait \"{tr}\" 未在册（能力面表见 assemble.rs，扩面走契约级评审）"
             )),
             None => errs.push(format!("handles[{i}].trait 应为字符串")),
         }

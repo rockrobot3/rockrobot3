@@ -712,6 +712,62 @@ pub trait Rr3Display {
     fn frame(&self) -> Result<Rr3FaceFrame, Rr3HalError>;
 }
 
+/// 采样形状类别（增补轮六 §3.5 家族 E：一张格多器件档案，不逐器件扩格——
+/// 温湿度这类单值量与姿态这类三元量共用一张格，形状在样本上可区分而非格上分家）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3SampleKind {
+    /// 标量量（温度/湿度/光照/VOC 这类单值；取 [`Rr3Sample::value`][0]）
+    Scalar,
+    /// 三元量（加速度/角速度这类姿态分量；value 全长有效，融合归 act 反射环——
+    /// sensor.imu 格 note 明写，契约面只搬运不定融合语义）
+    Vec3,
+}
+
+/// 样本可信度（T-6 同族："读数可信度"必须与读数同帧给出——拿不到可信度的
+/// 数值不许冒充测量。`Stale` 是后端缓存的陈旧快照，消费方按最保守一侧处置）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rr3SampleQuality {
+    /// 本次轮询实测
+    Fresh,
+    /// 陈旧快照（器件无响应等——数值仍给出但已不可信，消费方不得当新鲜数据用）
+    Stale,
+}
+
+/// 一次环境量采样（定长形状，`no_std` 可达——[全案 §3.5](../../docs/process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)：
+/// `Rr3Sample{kind,value,unit,quality}`。`value` 定长 `[f32; 3]`：`Scalar` 只用
+/// [0]，`Vec3` 全长有效——不引入 Vec，与 [`Rr3FaceFrame`] 同一"契约层不拥有堆"线）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rr3Sample {
+    /// 形状类别（[`Rr3SampleKind`]——value 的有效长度由此裁）
+    pub kind: Rr3SampleKind,
+    /// 采样值（Scalar 用 [0]；Vec3 全长；单位见 unit）
+    pub value: [f32; 3],
+    /// 计量单位（器件档案同源："°C"/"%RH"/"lux" 这类 SI 词；&'static str——
+    /// 单位词是器件事实不是运行期拼串）
+    pub unit: &'static str,
+    /// 可信度位（[`Rr3SampleQuality`]——与读数同帧，T-6）
+    pub quality: Rr3SampleQuality,
+}
+
+/// 环境量采样面（批N3 契约面先行，无实现件——件一 `Rr3Actuator` 先例 c5220f5；
+/// 真后端随真板批，`sensor.env`/`sensor.imu` 格升 normal 的时机 = 本 trait 落 +
+/// 一个真后端到，D9 一并裁）。探测面先行不依赖它：器件级在位探测走
+/// devices.toml `id_reg`（L-14），句柄面与此独立。
+pub trait Rr3Sensor {
+    /// 读一次样本（[`Rr3Sample`] 四元同帧：形状/数值/单位/可信度）
+    fn read(&self) -> Result<Rr3Sample, Rr3HalError>;
+}
+
+/// 数字输入面（批N3 契约面先行；与 [`Rr3GpioOut`] 对称——能力面今天只有输出
+/// 没有输入是半边残缺，全案 §3.5 家族 E）。触摸/限位/碰壁检测这类部件的
+/// 极性（active_low）、消抖（debounce_ms）、内部上拉（internal_pull）走
+/// [pins] 绑定参数（roles.toml requires），不在签名里——签名只有"读"一个动词。
+pub trait Rr3DigitalIn {
+    /// 读逻辑有效态：active_low 绑定时物理低 = true；消抖由后端按绑定参数执行
+    /// （未消抖的毛刺不许透传——碰壁检测误触发 = 停机误动作）。
+    fn level(&self) -> Result<bool, Rr3HalError>;
+}
+
 /// 占位后端：所有能力返回 `Unsupported`。它承载的是"能力缺失必须显式回错，不许
 /// 静默退化"的设计裁定，不是一时代替后端的临时件。音频两路（source/sink）由
 /// `rr-hal` 的 `backend::sim` / `backend::linux` 承担；gpio/pwm 已有 linux 后端；
