@@ -86,33 +86,47 @@ impl Drop for Rr3ConnSlot {
 /// fail-closed 当场红。
 pub const RR3_PANEL_COVER_SETS: [&str; 5] = ["ops", "pin", "role", "domain", "axis"];
 
+/// applies 生效路径词表（I-20，批N4 件四，全案 §19.3 判据 1）：面板写口动了
+/// 可配置集时必填的三态申报——`live` 即时生效｜`reboot` 重启进程生效｜
+/// `reflash` 重烧固件生效。申报住 [`RR3_PANEL_ROUTES`] 第四列（单真值点），
+/// check.sh 步 ⑩ 自本常量导出词表校验（词表外红、写口带 covers 申报而缺
+/// applies 红）；UI 面对操作者显式告知（写口应答带 `applies` 字段，前端文案
+/// 同义转述——密钥面即"brain 下一轮对话生效"）。
+pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
+
 /// 端点总表（I-9/I-12 唯一真值，0.0.5 批M MC-8③；covers 申报面随 I-19 批N4 件三
-/// 升三元组）：`(方法, 路径, covers)`——第三列是**数据化申报**：本端点真实
-/// 渲染/写入的可配置集元素（元素形制见 [`RR3_PANEL_COVER_SETS`]），与件
+/// 升三元组，applies 申报面随 I-20 批N4 件四升四元组）：`(方法, 路径, covers,
+/// applies)`——第三列是**数据化申报**：本端点真实渲染/写入的可配置集元素（元素
+/// 形制见 [`RR3_PANEL_COVER_SETS`]），第四列是写口的**生效路径**（词表见
+/// [`RR3_PANEL_APPLY_MODES`]，空串 = 无可配置量写入，读口/动作口皆空）。与件
 /// `handles`/`ops` 同一申报范式：**未申报就不计入门 d 分子**（不是"默认全算"，
 /// 端点数 ≠ 面板项数）。自述文案与 serve 行的端点数由本表长度推导（文案不手写
 /// 数字），match 分派与本表的漂移由 `route_table_matches_dispatch` 单测钉死，
-/// covers 词表形制由 `covers_use_declared_vocabulary_only` 单测钉死——新增端点 =
-/// 加表 + 过双门，不再改第三处文案。
+/// covers 词表形制由 `covers_use_declared_vocabulary_only` 单测钉死，applies 词表
+/// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
+/// 不再改第三处文案。
 ///
 /// 今日实况（I-15）：14 端点读配置者为 0（GET 全是运行态、POST 全是动作），
 /// covers 全空是**如实的**——门 d（check.sh 步 ⑩）建即红，红项随批N4 件九
 /// 三面扩端点逐批转绿（红条数单调不增，基线 tools/ci/gate-d-baseline.txt）。
-pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str])] = &[
-    ("GET", "/", &[]),
-    ("GET", "/api/status", &[]),
-    ("GET", "/api/data", &[]),
-    ("GET", "/api/logs", &[]),
-    ("POST", "/api/relay", &[]),
-    ("POST", "/api/beep", &[]),
-    ("POST", "/api/face", &[]),
-    ("POST", "/api/selftest", &[]),
-    ("POST", "/api/reboot", &[]),
-    ("GET", "/api/wifi/scan", &[]),
-    ("POST", "/api/wifi/connect", &[]),
-    ("POST", "/api/wifi/forget", &[]),
-    ("GET", "/api/model/keys", &[]),
-    ("POST", "/api/model/key", &[]),
+/// applies 今日唯一申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
+/// ⇒ live）；其余写口（beep/face/selftest/reboot/relay/wifi）写的是动作与运行态，
+/// 不动可配置集，如实空。
+pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
+    ("GET", "/", &[], ""),
+    ("GET", "/api/status", &[], ""),
+    ("GET", "/api/data", &[], ""),
+    ("GET", "/api/logs", &[], ""),
+    ("POST", "/api/relay", &[], ""),
+    ("POST", "/api/beep", &[], ""),
+    ("POST", "/api/face", &[], ""),
+    ("POST", "/api/selftest", &[], ""),
+    ("POST", "/api/reboot", &[], ""),
+    ("GET", "/api/wifi/scan", &[], ""),
+    ("POST", "/api/wifi/connect", &[], ""),
+    ("POST", "/api/wifi/forget", &[], ""),
+    ("GET", "/api/model/keys", &[], ""),
+    ("POST", "/api/model/key", &[], "live"),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -690,8 +704,14 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
         },
         Rr3PanelDispatch::ModelKeySet { ref_name, value } => match rr3_secrets_path() {
             Ok(path) => match rr3_secrets_upsert_at(&path, &ref_name, &value) {
-                // 应答只回 ref——值永不进任何负载/日志（secrets 模块铁律）
-                Ok(()) => Rr3PanelReply::json(200, "OK", json!({ "ok": true, "ref": ref_name })),
+                // 应答只回 ref——值永不进任何负载/日志（secrets 模块铁律）；
+                // applies=live 机器可读申报（I-20）：secrets 落盘后 brain 每次现读，
+                // 前端文案"brain 下一轮对话生效"与这里的字面同源同义。
+                Ok(()) => Rr3PanelReply::json(
+                    200,
+                    "OK",
+                    json!({ "ok": true, "ref": ref_name, "applies": "live" }),
+                ),
                 Err(e) => {
                     Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e }))
                 }
@@ -828,7 +848,7 @@ mod tests {
             14,
             "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径"
         );
-        for (method, path, _covers) in RR3_PANEL_ROUTES {
+        for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {
                 ("POST", "/api/relay") => br#"{"on":true}"#,
                 ("POST", "/api/face") => br#"{"expression":"happy"}"#,
@@ -858,7 +878,7 @@ mod tests {
     /// 两处真值同源都是本常量）。
     #[test]
     fn covers_use_declared_vocabulary_only() {
-        for (method, path, covers) in RR3_PANEL_ROUTES {
+        for (method, path, covers, _applies) in RR3_PANEL_ROUTES {
             for c in *covers {
                 let (set, field) = c
                     .split_once('/')
@@ -873,6 +893,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// applies 申报词表门（I-20，批N4 件四，全案 §19.3 判据 1）：第四列非空
+    /// 必须在 [`RR3_PANEL_APPLY_MODES`] 三态内；写口（非 GET）动了可配置集
+    /// （covers 非空）则 applies 必填——缺失即红。今日 covers 全空 ⇒ 判据
+    /// 后半 vacuous，但门先建：件九三面扩端点写 covers 的当场被兜住。
+    #[test]
+    fn applies_use_declared_vocabulary_only() {
+        for (method, path, covers, applies) in RR3_PANEL_ROUTES {
+            if !applies.is_empty() {
+                assert!(
+                    RR3_PANEL_APPLY_MODES.contains(applies),
+                    "{method} {path} 的 applies {applies:?} 不在 RR3_PANEL_APPLY_MODES"
+                );
+            }
+            if *method != "GET" && !covers.is_empty() {
+                assert!(
+                    !applies.is_empty(),
+                    "{method} {path} 写口动了可配置集（covers 非空）却缺 applies 申报"
+                );
+            }
+        }
+        // 今日申报实况 pin：唯一 applies = model-key 写口（live——secrets 落盘
+        // 后 brain 每次现读，无需重启/重烧）。改申报 = 同批改本 pin 与设计册 I-20。
+        let declared: Vec<_> = RR3_PANEL_ROUTES
+            .iter()
+            .filter(|(_, _, _, a)| !a.is_empty())
+            .collect();
+        assert_eq!(
+            declared,
+            vec![&("POST", "/api/model/key", &[][..], "live")],
+            "applies 申报面漂移：新增写口申报须同批改本 pin"
+        );
     }
 
     /// 越权拒的静态形态：路由器里没有"发布"这种产物——relay 只能以

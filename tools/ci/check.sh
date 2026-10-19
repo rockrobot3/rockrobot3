@@ -924,9 +924,13 @@ fi
 #         role/<req>   ← contracts/roles.toml requires 逐项（⑨-a 同款拆词）；
 #         domain/<f>   ← rrd/src/profile.rs RR3_DOMAIN_KEYS（声明数判等）；
 #         axis/<field> ← rr-hal-api lib.rs RR3_ACT_PROFILE_FIELDS 十四键。
-#       分子 = ∪ 每端点 covers 申报（panel/server.rs RR3_PANEL_ROUTES 三元组第三列），
+#       分子 = ∪ 每端点 covers 申报（panel/server.rs RR3_PANEL_ROUTES 第三列），
 #       元素形制 = <集合>/<单段字段>、集合词表自 RR3_PANEL_COVER_SETS 导出——未申报
 #       不计分子（申报制，不是"默认全算"；词表外/缺斜杠/多段 = 申报面错，硬红不进基线）。
+#       同表第四列 = applies 生效路径申报（I-20，批N4 件四，全案 §19.3 判据 1）：
+#       非空须在 RR3_PANEL_APPLY_MODES 词表（live|reboot|reflash）内；写口（非 GET）
+#       动了可配置集（covers 非空）则必填——缺失即红（申报面校验不进红账口径，
+#       账 = covers 差集一路；词表外/缺失/行形制坏硬红同 covers）。
 #     门 d 数学：置红 = |分母 − 分子|，差集逐条打印（"D "行 = 机器可读红账，
 #     ADR-0022 裁定 6.3 开放项的差集产出位）。
 #     机器判据（gate-a-baseline 先例，双行 fail-closed）：
@@ -936,7 +940,7 @@ fi
 #         分母 > 下限 提醒同批上调（合法扩面必须动基线，有迹可循）。
 #     建即红：今日 14 端点读配置者 0（I-15 实况）⇒ 差集 = 全分母，红项随批N4 件九
 #     三面扩端点逐批转绿；分母是设计产物，集合定义改动 = 契约级评审。
-step "⑩ 门 d 面板覆盖率对账·报告模式（分子 covers 申报 / 分母字段级五路并集，门 d）"
+step "⑩ 门 d 面板覆盖率对账·报告模式（分子 covers 申报＋applies 生效路径 / 分母字段级五路并集，门 d）"
 gate_d_fail=0
 gd_dir="$(mktemp -d)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 gd_ops="$gd_dir/ops"; gd_pin="$gd_dir/pin"; gd_role="$gd_dir/role"; gd_dom="$gd_dir/dom"
@@ -1002,6 +1006,59 @@ else
     fi
   done < "$gd_cov_raw"
   gd_cov_n="$(grep -c . "$gd_cov" || true)"
+  # —— applies 申报面校验（I-20，批N4 件四，全案 §19.3 判据 1）：第四列（生效路径）
+  #     非空须在 RR3_PANEL_APPLY_MODES 三态词表内；写口（非 GET）动了可配置集
+  #     （covers 非空）则必填——缺失即红。行解析按引号段计：段数 n = 3 +
+  #     covers 元素数（method/path/applies 三段打底），解析出怪行 = 表形制坏，
+  #     fail-closed 当场红。
+  gd_apply_sets="$gd_dir/apply_sets"; gd_apply_rows="$gd_dir/apply_rows"
+  awk '/pub const RR3_PANEL_APPLY_MODES/{f=1} f{print} f && /\];/{exit}' \
+    modules/rr3-interact/src/panel/server.rs | grep -oE '"[^"]+"' | tr -d '"' | sort -u > "$gd_apply_sets"
+  awk '/pub const RR3_PANEL_ROUTES/{f=1;next} f && /^\];/{exit} f {
+    n = 0; line = $0
+    while (match(line, /"[^"]*"/)) {
+      n++; val[n] = substr(line, RSTART+1, RLENGTH-2); line = substr(line, RSTART+RLENGTH)
+    }
+    if (n >= 3) printf "%s|%s|%d|%s\n", val[1], val[2], n - 3, val[n]
+    else printf "MALFORMED|%s\n", $0
+  }' modules/rr3-interact/src/panel/server.rs > "$gd_apply_rows"
+  gd_apply_sets_n="$(grep -c . "$gd_apply_sets" || true)"
+  gd_apply_n="$(grep -c . "$gd_apply_rows" || true)"
+  gd_apply_declared=0; gd_apply_bad=0
+  if [ "$gd_apply_sets_n" -eq 0 ]; then
+    printf 'X  applies 词表打空（RR3_PANEL_APPLY_MODES 读不到属门禁失效，不放行）\n'
+    gd_apply_bad=$((gd_apply_bad + 1))
+  fi
+  while IFS= read -r r; do
+    case "$r" in
+      MALFORMED*)
+        printf 'X  applies 行解析失败（RR3_PANEL_ROUTES 行形制坏）: %s\n' "$r"
+        gd_apply_bad=$((gd_apply_bad + 1)); continue ;;
+    esac
+    gd_m="${r%%|*}"; gd_rest="${r#*|}"
+    gd_p="${gd_rest%%|*}"; gd_rest="${gd_rest#*|}"
+    gd_cn="${gd_rest%%|*}"; gd_a="${gd_rest#*|}"
+    if [ -n "$gd_a" ]; then
+      if grep -qxF "$gd_a" "$gd_apply_sets"; then
+        gd_apply_declared=$((gd_apply_declared + 1))
+      else
+        printf 'X  applies 词表外: %s %s -> %s（词表真值 = RR3_PANEL_APPLY_MODES 单真值点）\n' \
+          "$gd_m" "$gd_p" "$gd_a"
+        gd_apply_bad=$((gd_apply_bad + 1))
+      fi
+    elif [ "$gd_m" != "GET" ] && [ "$gd_cn" -gt 0 ]; then
+      printf 'X  applies 缺失: %s %s 写口动了可配置集（covers %s 项）却未申报生效路径（I-20 缺失即红）\n' \
+        "$gd_m" "$gd_p" "$gd_cn"
+      gd_apply_bad=$((gd_apply_bad + 1))
+    fi
+  done < "$gd_apply_rows"
+  if [ "$gd_apply_bad" -gt 0 ]; then
+    printf 'FAIL  ⑩ applies 申报面 %s 笔坏（词表外/缺失/形制坏，申报面错不是账，硬红不进基线）\n' "$gd_apply_bad"
+    gate_d_fail=1
+  else
+    printf 'PASS  ⑩ applies 申报面（行 %s 全过词表/必填判据，申报 %s 笔，词表 %s 态）\n' \
+      "$gd_apply_n" "$gd_apply_declared" "$gd_apply_sets_n"
+  fi
   # —— 差集（分子分母各 sort -u 后 comm；分母已有序）
   cat "$gd_ops" "$gd_pin" "$gd_role" "$gd_dom" "$gd_axis" | sort -u > "$gd_den"
   sort -u "$gd_cov" > "$gd_dir/cov_sorted"

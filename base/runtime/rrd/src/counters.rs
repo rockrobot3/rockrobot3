@@ -24,8 +24,6 @@
 //! - 其余（env 无值 + 非 linux）→ `None`：不持久化，启动日志一行点名，不报错。
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
@@ -104,24 +102,11 @@ pub fn rr3_counters_load(path: &Path) -> (BTreeMap<String, u64>, Option<String>)
     }
 }
 
-/// 原子写序共享件：tmp 写全量 → fsync → rename（同目录原子覆盖）。counters 与
-/// 执行件档案（`axis.rs` 标定写入面）共用这一条序——§4.4 档案写入"必须复用仓内
-/// 那一份原子序，不许出现第二条写路径"，共享件让这句话可指（第二份同形序不存在）。
-/// 任何一步失败都把错误交回调用方（daemon/conn 落日志点名），不 panic 不重试——
-/// 重试在窗口判据再次成立时自然发生（R26 合并写）。
-pub fn rr3_atomic_store(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), String> {
-    {
-        let mut f = File::create(tmp).map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
-        f.write_all(body)
-            .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
-        f.sync_all()
-            .map_err(|e| format!("fsync {} 失败: {e}", tmp.display()))?;
-    }
-    std::fs::rename(tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(tmp);
-        format!("rename {} → {} 失败: {e}", tmp.display(), path.display())
-    })
-}
+/// 原子写序共享件（批N4 件四 I-20 下沉）：实现原样迁 `rr-ipc/src/persist.rs`
+/// （凭据面 modules/rr3-interact 不依赖 daemon crate，共享件须住双方公共最低层）。
+/// 本 re-export 保持 axis.rs 既有 `use crate::counters::rr3_atomic_store` 路径
+/// 零改动；全仓仍只有这一份实现——任何落盘写路径出现第二条同形序即红（I-20）。
+pub use rr_ipc::persist::rr3_atomic_store;
 
 /// write-through 落盘：tmp 写全量 → fsync → rename（同目录原子覆盖），序本体见
 /// [`rr3_atomic_store`]。

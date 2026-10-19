@@ -85,6 +85,22 @@ center/lo/hi 三键，host 经 `RR3_ACT_AXIS_STATE` 装配注入、板侧经 `ax
 covers 全 `&[]` 如实申报），红项随批N4 件九三面扩端点逐批转绿、转绿终点＝差集空、门 d 转红退役；
 fail-closed 四路实测（covers 形制乱写／基线坏／基线缺／分母缩水各一次红）；步 ⑩ 的 EXIT trap 为
 ⑨-a trap 超集（临时目录＋五基线文件清单原样保留，bash trap 后设覆盖先设）。
+**2026-10-19 对表（批N4 件四，I-20 原子序下沉＋applies 申报面）**：两件——
+① **落盘原子序单点**（全案 §19.3 判据 2，L-23 写路径形态）：`rr3_atomic_store` 实现自
+`rrd/src/counters.rs` 原样迁 `rr-ipc/src/persist.rs`（凭据面 rr3-interact 是独立 workspace
+不依赖 daemon crate——共享件住双方公共最低层，evidence.rs 同径先例；rrd 侧 `pub use`
+re-export 保 counters/axis 调用点零改动），`panel/secrets.rs` 写侧退役 `truncate(true)`
+原地覆盖改走共享序（父目录 0700 = tmp 窗口护城河、rename 后收 0600）——**仓内落盘写路径
+仍只有这一份**，persist.rs 模块注释登记三调用方（counters/axis/secrets），改面须同批过注释；
+② **applies 生效路径三态申报**（全案 §19.3 判据 1，"缺失即红"）：码内词表
+`RR3_PANEL_APPLY_MODES = [live, reboot, reflash]`（单真值点），`RR3_PANEL_ROUTES` 升四元组
+`(method, path, covers, applies)`，今日唯一申报 = `POST /api/model/key` → `live`（brain 现读
+即时生效；应答带 `applies` 字段＋前端文案同义双面），其余 13 端点如实空（写口全是动作与
+运行态，不动可配置集）。执法双门：`applies_use_declared_vocabulary_only` 单测（随 ⑥）＋
+步 ⑩ applies 段（词表打空/词表外/写口缺申报/行形制坏四路 fail-closed 实测全红过；申报面
+硬红不进红账口径，门 d 账 = covers 差集一路——covers 列整列丢失归 Rust 四元组类型门，
+bash 不重复执法）；可数 step 仍 **17 行**（⑩ 是扩段非建步）。persist 单测 1 条随 ①b、
+secrets 5 条随 ⑥。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
@@ -2367,9 +2383,12 @@ ADR-0022 裁定 3.1 用 `kind != logic` 判必填而 `logic` 从未进过取值�
 `timebase`/`heap` 键，要么明写"5 位靠运行期注册 / 人工自证"，**三态不许被一句话抹平**。
 **(B) 运行期语义**——四条设计只写了正常路径，读码核实后各立一条判据（索引 §11 **L-26**、全案 §19.2）：
 ① **面板写阈值没有通路**（阈值与 `armed` 是 `const`、`SIGHUP`/`reload` 零命中、14 端点无阈值写口）
-⇒ 可写量必填 `applies = live｜reboot｜reflash`；② **面板唯一写落盘不是原子的**
+⇒ 可写量必填 `applies = live｜reboot｜reflash`（**2026-10-19 对表（批N4 件四）：已建**——词表
+`RR3_PANEL_APPLY_MODES` 单真值点＋`RR3_PANEL_ROUTES` 第四列申报＋单测/步 ⑩ 双门，详见本文件
+§2 同日件四条目）；② **面板唯一写落盘不是原子的**
 （`secrets.rs:95-105` truncate 原地覆盖、无 fsync/rename，读侧坏 JSON 回 `Err` 不覆盖 ⇒ 一次掉电从此坏死且不能自愈；
-仓内正确范式只有一份 `counters.rs:110-124`）⇒ **写落盘只许一份实现，出现第二条即红**；
+仓内正确范式只有一份 `counters.rs:110-124`）⇒ **写落盘只许一份实现，出现第二条即红**（**2026-10-19 对表（批N4 件四）：已修**——
+范式下沉 `rr-ipc/src/persist.rs` 共享单点，secrets 改走共享序，rrd re-export 保调用点）；
 ③ **闸门复位即开闸**（`Rr3LowGate{blocked:false}` 纯内存；"回阈不自动重放"的真身是"没有重放实现"）
 ⇒ §6 复位三义**扩为四义**，复位后默认值必须取保守侧；④ **用于判定的读数没有龄期**
 （档位是 RAM 快门值；`rr3_now_ns()` 取不到 epoch 折 `0` = 假时间戳）⇒ `age_ms`/`max_age_ms` 入校验⑥-c，
