@@ -48,3 +48,13 @@ input_only_pins = []
 no_open_drain = []
 # 取值规则集不写枚举（§4.6）；platform.rs 只认在册规则名。
 output_capable_pins = "complement(input_only_pins)"
+
+[controller_wordform]
+# host 词形派生表（实-6 (a)，批N4 件七——演练实例，与 rk3566 同为 Linux sysfs
+# 命名习惯故同形同值；树莓派形态真机对账后回填，进 status.md 敞口）。键 = 词形
+# 派生物理键（封闭四值），值 = 控制器名前缀——与上方 [[controller]] 在册名
+# （pwm0/gpiochip0/i2c1）逐一对拍。
+pwm_chip = "pwm"
+gpio_chip = "gpiochip"
+i2c_bus = "i2c"
+spi_device = "spidev"

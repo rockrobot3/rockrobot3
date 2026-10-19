@@ -57,3 +57,14 @@ output_capable_pins = "complement(input_only_pins)"
 "gpiochip0:act.relay.gpio:" = "rr3_hal_gpio_out"
 "i2c1:power.battery.meter:" = "rr3_hal_power"
 "spidev0:ui.face.spi:" = "rr3_hal_display"
+
+[controller_wordform]
+# host 词形派生表（实-6 (a)，批N4 件七——host 词形规则自 rrd 硬编码下移平台表，
+# rrd 只读不写）：键 = 词形派生物理键（封闭四值，physical[0]/channel/addr 类派生
+# 不经词形、不进本段），值 = 控制器名前缀（<前缀><十进制编号> 命中，编号注入描述
+# 符）。取值与上方 [[controller]] 在册名逐一对拍（pwm0/gpiochip0/i2c1/spidev0 全
+# 合词形），非新发明——host 档换平台 = 换本段数据，rrd 零改动。
+pwm_chip = "pwm"
+gpio_chip = "gpiochip"
+i2c_bus = "i2c"
+spi_device = "spidev"

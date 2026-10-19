@@ -245,8 +245,8 @@ pub struct Rr3PinEntry {
     /// 多实例名（per_instance=true 必填、false 禁填；如舵机 pan/tilt）
     pub instance: String,
     /// 控制器名（取值 ∈ 平台在册控制器词表，校验⑧-b——词表 = contracts/platform/
-    /// <chip>.toml 的 [[controller]]，批N1 基-22 已在册；host 档词形 pwm<N>/gpiochip<N>/
-    /// i2c<N> 由派生器解析）
+    /// <chip>.toml 的 [[controller]]，批N1 基-22 已在册；host 档词形派生的前缀
+    /// 同源读该表 [controller_wordform] 段，实-6 (a)）
     pub controller: String,
     /// 控制器通道（独立资源维度，校验③-b 的 (controller, channel) 不双占空间）
     pub channel: Option<i64>,
@@ -879,8 +879,9 @@ fn supplies_int(v: Option<&toml::Value>, key: &str) -> Result<i64, String> {
 }
 
 /// 控制器词形解析（host 档派生规则的机制侧）：`<前缀><十进制编号>` 才算命中，返回
-/// 编号串——roles.toml 注记的取值语义（pwm<N> 派生 pwm_chip=N），与旧 [hardware]
-/// 的整数字符串化逐字节对齐，注入文本形状不变。
+/// 编号串——roles.toml 注记的取值语义（pwm<N> 派生 pwm_chip=N）。前缀**住平台表**
+/// `[controller_wordform]` 段（实-6 (a)，批N4 件七下移：rrd 零硬编码词形规则，
+/// 换平台 = 改数据），本函数只做词形匹配机制。
 fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
     let rest = controller.strip_prefix(prefix)?;
     if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
@@ -889,29 +890,45 @@ fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
     Some(rest.to_string())
 }
 
+/// 词形前缀查询 + fail-closed 守卫（实-6 (a)）：派生键查平台表词形前缀，查不到
+/// 红——不许回退硬编码（回退 = 策略重新住回机制侧，下移作废）。
+fn rr3_platform_wordform_prefix(
+    platform: &Rr3PlatformTable,
+    key: &str,
+) -> Result<String, String> {
+    platform.rr3_platform_wordform(key).map(str::to_string).ok_or_else(|| {
+        format!(
+            "平台事实表 controller_wordform 无 {key} 词形（host 档派生前件缺失，fail-closed）"
+        )
+    })
+}
+
 /// 单条 pin 的派生取值（机制侧，八物理键封闭）：role.derives（策略，contracts/
 /// roles.toml）只声明"该角色供给哪些键"，取值法一律查本函数——键不在册/来源字段
 /// 留空/控制器词形不合都红。gpio_led_line 与 gpio_relay_line 同取 physical[0]，由
-/// 角色声明区分（两角色不共用同一派生键名，不歧义）；spi_device 由 spidev<N> 词形
+/// 角色声明区分（两角色不共用同一派生键名，不歧义）；spi_device 由词形段前缀
 /// （总线号）+ channel（片选号）合成 /dev/spidev<N>.<M>，与旧 [hardware] 直给值
 /// （profiles/distro.toml 链④真件档）逐字节对齐。
-fn rr3_pin_derive_value(pin: &Rr3PinEntry, key: &str) -> Result<String, String> {
+fn rr3_pin_derive_value(
+    pin: &Rr3PinEntry,
+    key: &str,
+    platform: &Rr3PlatformTable,
+) -> Result<String, String> {
     match key {
-        "pwm_chip" => rr3_controller_wordform(&pin.controller, "pwm")
-            .ok_or_else(|| format!("controller 词形 {} 不合 pwm<N>", pin.controller)),
+        "pwm_chip" | "gpio_chip" | "i2c_bus" => {
+            let prefix = rr3_platform_wordform_prefix(platform, key)?;
+            rr3_controller_wordform(&pin.controller, &prefix)
+                .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))
+        }
         "pwm_channel" => pin
             .channel
             .map(|c| c.to_string())
             .ok_or_else(|| "channel 留空".to_string()),
-        "gpio_chip" => rr3_controller_wordform(&pin.controller, "gpiochip")
-            .ok_or_else(|| format!("controller 词形 {} 不合 gpiochip<N>", pin.controller)),
         "gpio_led_line" | "gpio_relay_line" => pin
             .physical
             .first()
             .map(|n| n.to_string())
             .ok_or_else(|| "physical 留空".to_string()),
-        "i2c_bus" => rr3_controller_wordform(&pin.controller, "i2c")
-            .ok_or_else(|| format!("controller 词形 {} 不合 i2c<N>", pin.controller)),
         "ina219_addr" => {
             if pin.addr.is_empty() {
                 Err("addr 留空".to_string())
@@ -920,8 +937,10 @@ fn rr3_pin_derive_value(pin: &Rr3PinEntry, key: &str) -> Result<String, String> 
             }
         }
         "spi_device" => {
-            let bus = rr3_controller_wordform(&pin.controller, "spidev")
-                .ok_or_else(|| format!("controller 词形 {} 不合 spidev<N>", pin.controller))?;
+            let prefix = rr3_platform_wordform_prefix(platform, key)?;
+            let bus = rr3_controller_wordform(&pin.controller, &prefix).ok_or_else(|| {
+                format!("controller 词形 {} 不合 {prefix}<N>", pin.controller)
+            })?;
             let cs = pin
                 .channel
                 .map(|c| c.to_string())
@@ -1317,9 +1336,19 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     // 装载期校验①（增补轮六 §5，后果 = 拒）：[[pin]] 逐条——role 查册、per_instance
     // 规则、requires 逐项在场（留空即红）、direction 与角色一致、role.slot ∈ slots。
-    // 同环做 host 档派生（机制常量规则 × 角色 derives 声明）：rtos/bare 档不派生，
-    // 板侧描述符消费归 0.0.7 批G/批D1——pins 的校验照跑（物理真值不分档）。
+    // 同环做 host 档派生（词形前缀 × 角色 derives 声明，前缀真值 = 平台表
+    // [controller_wordform]，实-6 (a)）：rtos/bare 档不派生，板侧描述符消费归
+    // 0.0.7 批G/批D1——pins 的校验照跑（物理真值不分档）。
+    // host 档词形前件守卫（实-6 (a)，批N4 件七）：词形派生表空 = 平台没提供派生
+    // 前件——host 档必须选带词形表的主机平台册（rtos/bare 册空表显式，esp32 形状）。
+    // 逐键 fail-closed 由 rr3_platform_wordform_prefix 承担，此处总守卫一条。
     let mut derived: BTreeMap<String, String> = BTreeMap::new();
+    if profile.platform_tier == "host" && platform.rr3_platform_wordform_map().is_empty() {
+        errs.push(
+            "host 档平台事实表 controller_wordform 为空（词形派生前件缺失，host 档必须选带词形表的主机平台册，fail-closed）"
+                .into(),
+        );
+    }
     for pin in &profile.pins {
         let label = format!("pins[{}]", pin.rr3_pin_id());
         // ①-a 角色在册（未在册的角色后续判据无从谈起，点名后跳过该条，不级联刷屏）
@@ -1383,7 +1412,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         // host 档派生：derives 声明逐键取值；多实例共键须同值（双轴同 chip 合法，
         // 两 chip 抢一个键名 = 资源矛盾）
         for d in &derives {
-            match rr3_pin_derive_value(pin, d) {
+            match rr3_pin_derive_value(pin, d, &platform) {
                 Ok(v) => match derived.get(d) {
                     None => {
                         derived.insert(d.clone(), v);
@@ -1396,17 +1425,14 @@ pub fn rr3_profile_boot_inputs_with_probe(
                 Err(e) => errs.push(format!("{label} 派生 {d} 失败: {e}")),
             }
         }
-        // 词形漂移：控制器词形已指明总线族，该族派生键必须被角色声明（否则派生视图
-        // 会漏键——roles.derives 与 pin 实况各说一套）。derives 显式空的角色跳过
-        // （批N3 件八：P-5 共读源/placeholder 格不派生注入键——"不派生"是声明
-        // 不是漏声明，见 roles.toml 器件三角色注记）
+        // 词形漂移（①-f）：控制器词形已指明总线族，该族派生键必须被角色声明（否则
+        // 派生视图会漏键——roles.derives 与 pin 实况各说一套）。词形清单**住平台表**
+        // （实-6 (a)，批N4 件七）：遍历 [controller_wordform] 逐键试词形——表里有
+        // 什么判什么，rrd 零硬编码词形清单，新增词形键 = 改数据判据自动扩。derives
+        // 显式空的角色跳过（批N3 件八：P-5 共读源/placeholder 格不派生注入键——
+        // "不派生"是声明不是漏声明，见 roles.toml 器件三角色注记）
         if !derives.is_empty() {
-            for (prefix, key) in [
-                ("pwm", "pwm_chip"),
-                ("gpiochip", "gpio_chip"),
-                ("i2c", "i2c_bus"),
-                ("spidev", "spi_device"),
-            ] {
+            for (key, prefix) in platform.rr3_platform_wordform_map() {
                 if rr3_controller_wordform(&pin.controller, prefix).is_some()
                     && !derives.iter().any(|d| d == key)
                 {
@@ -4135,6 +4161,49 @@ gnd_common = "star-1"
             e.contains("读不到平台事实表") && e.contains("rk3566"),
             "{e}"
         );
+    }
+
+    /// 平台事实表词形段缺失 = 致命（实-6 (a)，批N4 件七，裁定①）：host 词形派生
+    /// 前件随平台表形状强制在册，缺段在 rr-registry 解析即红、boot 链原样上抛
+    /// 拒 boot（宽容 = 派生静默不判，F-6 同病）。
+    #[test]
+    fn platform_wordform_section_missing_is_fatal() {
+        let good_esp = GOOD.replace("chip = \"rk3566\"", "chip = \"esp32\"");
+        let no_wf =
+            platform_esp32_text().replace("[controller_wordform]", "[controller_wordform_x]");
+        let e = rr3_profile_from_text_with_platform("wf-missing", &good_esp, &no_wf)
+            .expect_err("平台表缺词形段必须拒 boot");
+        assert!(e.contains("controller_wordform") && e.contains("形状不合"), "{e}");
+    }
+
+    /// host 档 + 空词形表 = 守卫红（实-6 (a) fail-closed）：rtos 册（esp32）空表
+    /// 显式合法，但 host 档误选即前件缺失——逐键红之外总守卫一条，点名选册错误。
+    #[test]
+    fn host_tier_with_empty_wordform_table_is_fatal() {
+        let good_esp = GOOD.replace("chip = \"rk3566\"", "chip = \"esp32\"");
+        let e = rr3_profile_from_text_with_platform(
+            "host-empty-wf",
+            &good_esp,
+            platform_esp32_text(),
+        )
+        .expect_err("host 档选空词形表必须拒 boot");
+        assert!(e.contains("controller_wordform 为空"), "{e}");
+    }
+
+    /// ①-f 反例（实-6 (a) 下移后补齐——此前四对词形硬编码在 rrd、本判据零反例）：
+    /// 控制器词形指明 i2c 总线族，但角色 derives 只声明 GPIO 族键——派生视图会漏
+    /// 键，装载即红。词形清单遍历自平台表（rk3566 真册），i2c1 ∈ ⑧-b 词表在册。
+    #[test]
+    fn controller_wordform_family_off_role_derives_is_rejected() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"act.led.gpio\"\ncontroller = \"i2c1\"\n\
+             physical = [26]\ndirection = \"out\"\nrail = \"none\"\nfailsafe = \"hold\"\n\
+             mux_group = []\n"
+        );
+        let root = Root::new("wf-drift");
+        let p = root.write_profile("wf-drift.toml", &text);
+        let e = boot_inputs(&p).expect_err("词形族与角色 derives 各说一套必须拒 boot");
+        assert!(e.contains("派生漂移") && e.contains("i2c_bus"), "{e}");
     }
 
     /// [platform].chip 留空反例（F-6 缺字段可被留空绕过的封堵面）：chip 是平台
