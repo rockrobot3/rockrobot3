@@ -14,7 +14,11 @@
 //!    刷屏总线；实时源（ALSA）read 本身就耗一个节拍，sleep 余量为零，两种后端同一形状；
 //! 2. 发布 `rr3-sense/audio/pcm`（stream）与 VAD 边沿 `rr3-sense/audio/vad_start`
 //!    （event；onset 的 doa 字段体由 capture 原子判出、组合件桥接进 vad 事件体）；
-//! 3. `rr3_poll` 排空 inbox，应答 `rr3-sense/capture/dump` 点名（rr3.call 回路）。
+//! 3. `rr3_poll` 排空 inbox：应答 `rr3-sense/capture/dump` 点名（rr3.call 回路）；
+//!    订阅的 `rr3-brain/audio/tts_pcm` 流帧喂播放期门控（B批 b2，裁定②零新契约）；
+//! 4. 反射环（B批 b2，裁定①快环落 sense）：非门开期的 onset 带判向 → 换算 pan
+//!    目标 → 命令旁路（rr-hal 音频源内建 CmdProducer）fire-and-forget 下发舵机——
+//!    持音频 conn 者执行，flock 单消费者纪律下的板外设命令唯一下行通路。
 //!
 //! 发布/读帧失败一律 `eprintln` + `exit(1)`：模块不装"活着"，死交给 supervisor 按
 //! restart_policy=always 重启（rrd 的进程语义）。
@@ -31,7 +35,8 @@ mod vad;
 use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
-use rr_hal::backend::rr3_hal_audio_source;
+use rr_hal::backend::rr3_hal_audio_source_with_cmd;
+use rr_hal::esp32audio::Rr3PeriphCmd;
 use rr_hal::Rr3PcmStream;
 use rr_hal_api::Rr3AudioCfg;
 use rr_ipc::{opcode, rr3_base64_encode, Rr3PayloadType};
@@ -57,6 +62,20 @@ const RR3_OPS_LIST_TOPIC: &str = "rr3-sense/ops/list";
 const RR3_PCM_FRAMES_KEY: &str = "pcm_frames";
 const RR3_PCM_EMPTY_FRAMES_KEY: &str = "pcm_empty_frames";
 
+/// 播放期门控的订阅主题（B批 b2，contracts/topics.toml 在册）：brain 的 TTS
+/// 回放流，帧体带 `ms`（块内样点时长）——门控外推的数据源，零新契约（裁定②）。
+const RR3_TTS_PCM_TOPIC: &str = "rr3-brain/audio/tts_pcm";
+
+/// 运维计数键（B批 b2 冒烟观测面）：门开期被弃的 onset 数 / 反射环实际下发的
+/// pan 指令数。经心跳自报 rrd 归并（与 pcm_frames 同一通路）。
+const RR3_VAD_ONSET_GATED_KEY: &str = "vad_onset_gated";
+const RR3_REFLEX_PAN_CMDS_KEY: &str = "reflex_pan_cmds";
+
+/// 反射环行程常量（机制面，策略量在 config）：pan 中位 = boot 姿态基准，
+/// 单侧摆幅上限是板侧行程 fail-closed 之外的第二道软件限幅。
+const RR3_REFLEX_PAN_CENTER_DEG: i32 = 90;
+const RR3_REFLEX_PAN_SWING_DEG: i32 = 30;
+
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_sense_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
@@ -81,7 +100,12 @@ pub fn rr3_sense_run() -> Result<(), String> {
     eprintln!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
 
     let cfg = rr3_sense_config_load(&manifest_path)?;
-    let (mut source, backend) = rr3_hal_audio_source();
+    let (mut source, cmd_tx, backend) = rr3_hal_audio_source_with_cmd();
+    if cfg.reflex.enable && cmd_tx.is_none() {
+        eprintln!(
+            "rr3-sense: 反射环已启用但后端 {backend} 无命令旁路，转头指令无处可去（仅 esp32 档承载）"
+        );
+    }
     // 采集配置按 config 真值开（R14：channels>1 即双麦期；默认 1 声道与旧硬编码逐点等价）
     let open_cfg = Rr3AudioCfg {
         sample_rate_hz: cfg.audio.sample_rate,
@@ -100,6 +124,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
     let mut vad_state = Rr3VadState::rr3_vad_new(cfg.vad, cfg.audio.frame_ms);
     let tick = Duration::from_millis(cfg.audio.frame_ms);
     let mut seq: u64 = 0;
+    let mut tts_gate = Rr3TtsGate::default();
 
     loop {
         let start = Instant::now();
@@ -131,38 +156,85 @@ pub fn rr3_sense_run() -> Result<(), String> {
         bus.rr3_counter_bump(RR3_PCM_FRAMES_KEY, 1);
 
         if let Some(edge) = vad_state.rr3_vad_feed(&pcm.samples) {
-            bus.rr3_publish(
-                vad::RR3_VAD_START_TOPIC,
-                rr3_vad_event_body(seq, edge, doa.map(|d| rr3_doa_field(&d))),
-            )?;
+            let gate_open = tts_gate.rr3_tts_gate_open(Instant::now());
+            match edge {
+                // 播放期门控（B批 b2）：门开只弃 onset 发布（扬声器自声不再触发
+                // 听声转头），VAD 状态机照喂不中断；offset 与门无关照发
+                Rr3VadEdge::Onset { .. } if gate_open => {
+                    bus.rr3_counter_bump(RR3_VAD_ONSET_GATED_KEY, 1);
+                    eprintln!("播放期门控: onset 弃发布（TTS 回声中）");
+                }
+                edge => {
+                    let doa_deg = doa.map(|d| d.deg);
+                    bus.rr3_publish(
+                        vad::RR3_VAD_START_TOPIC,
+                        rr3_vad_event_body(seq, edge, doa.map(|d| rr3_doa_field(&d))),
+                    )?;
+                    // 反射环（B批 b2）：onset 实际发布后才动作——被门弃掉的 onset
+                    // 不转头。判向缺档（单声道/静音帧）自然无目标，机制面零特判；
+                    // 判据全量入参（gate_open 此臂恒 false），纯函数独立可单测
+                    if let (Rr3VadEdge::Onset { .. }, Some(deg)) = (&edge, doa_deg) {
+                        if let Some(target) = rr3_reflex_pan_target(
+                            cfg.reflex.enable,
+                            cfg.reflex.deadband_deg,
+                            deg,
+                            gate_open,
+                        ) {
+                            if let Some(tx) = cmd_tx.as_ref() {
+                                tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
+                                bus.rr3_counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
+                                eprintln!("反射环: doa={deg}° → pan={target}°");
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        // 排空 inbox：v0.0.1 不订阅任何主题，inbox 只会有点名 Request——
-        // rr3.call 转发帧的 trace_id=调用方 task（rrd 路由语义），顺原路应答
+        // 排空 inbox（B批 b2 起有订阅）：tts_pcm 流帧喂播放期门控，其余 Event
+        // 与本件无关径直忽略；点名 Request——rr3.call 转发帧的 trace_id=调用方
+        // task（rrd 路由语义），顺原路应答
         for frame in bus.rr3_poll() {
             if frame.header.opcode != opcode::SEND {
                 continue;
             }
-            let Ok((Rr3PayloadType::Request, body)) = Rr3BusClient::rr3_frame_body(&frame) else {
+            let Ok((ty, body)) = Rr3BusClient::rr3_frame_body(&frame) else {
                 continue;
             };
-            if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
-                continue;
+            match ty {
+                Rr3PayloadType::Event => {
+                    if body.get("topic").and_then(Value::as_str) == Some(RR3_TTS_PCM_TOPIC) {
+                        if let Some(ms) = body.get("ms").and_then(Value::as_u64) {
+                            tts_gate.rr3_tts_gate_feed(
+                                Instant::now(),
+                                ms,
+                                cfg.reflex.gate_gap_ms,
+                                cfg.reflex.gate_tail_ms,
+                            );
+                        }
+                    }
+                }
+                Rr3PayloadType::Request => {
+                    if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
+                        continue;
+                    }
+                    let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
+                    let topic = body
+                        .get("params")
+                        .and_then(|p| p.get("topic"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let result = if topic == RR3_DUMP_TOPIC {
+                        rr3_dump_result(seq, backend, &cfg)
+                    } else if topic == RR3_OPS_LIST_TOPIC {
+                        json!({ "ops": rr3_sense_ops_snapshot(&cfg) })
+                    } else {
+                        json!({ "error": format!("rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}，收到 {topic}") })
+                    };
+                    bus.rr3_reply_call(frame.header.trace_id, id, result)?;
+                }
+                _ => {}
             }
-            let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
-            let topic = body
-                .get("params")
-                .and_then(|p| p.get("topic"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let result = if topic == RR3_DUMP_TOPIC {
-                rr3_dump_result(seq, backend, &cfg)
-            } else if topic == RR3_OPS_LIST_TOPIC {
-                json!({ "ops": rr3_sense_ops_snapshot(&cfg) })
-            } else {
-                json!({ "error": format!("rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}，收到 {topic}") })
-            };
-            bus.rr3_reply_call(frame.header.trace_id, id, result)?;
         }
 
         // 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；
@@ -288,6 +360,72 @@ fn rr3_sense_ops_snapshot(cfg: &Rr3SenseConfig) -> Value {
     })
 }
 
+// ---------- 播放期门控与反射环（B批 b2） ----------
+//
+// 两个纯机制面：门控吃 tts_pcm 帧流外推静音窗（裁定②：订阅既有主题零新契约），
+// 反射环吃 onset 判向换算 pan 目标（裁定①：快环落 sense，唯一持音频 conn 者）。
+// 策略量全在 config（Rr3ReflexConfig），此处只有判定与算术。
+
+/// TTS 回放的门控状态机：帧流（与上一帧间隔 > gap 判新一轮）累计 `ms`，
+/// 外推线 = 本轮首帧时刻 + 累计时长 + 尾窗。状态只进不外泄，
+/// [`Rr3TtsGate::rr3_tts_gate_open`] 是唯一读口。
+#[derive(Debug, Default)]
+struct Rr3TtsGate {
+    /// 本轮首帧时刻（外推线的锚点）
+    round_start: Option<Instant>,
+    /// 上一帧到达时刻（轮分隔判据）
+    last_frame_at: Option<Instant>,
+    /// 本轮累计时长（帧体 ms 直加——brain 侧 ms 由样点数导出，含尾块实算）
+    cum_ms: u64,
+    /// 门外推线：now ≤ 外推线即门开
+    deadline: Option<Instant>,
+}
+
+impl Rr3TtsGate {
+    /// 喂一帧 tts_pcm：轮分隔（与上一帧间隔 > `gap_ms` 重置累计）→ 累计 → 外推。
+    fn rr3_tts_gate_feed(&mut self, now: Instant, ms: u64, gap_ms: u64, tail_ms: u64) {
+        let new_round = match self.last_frame_at {
+            None => true,
+            Some(t) => now.duration_since(t) > Duration::from_millis(gap_ms),
+        };
+        if new_round {
+            self.round_start = Some(now);
+            self.cum_ms = 0;
+        }
+        self.last_frame_at = Some(now);
+        self.cum_ms = self.cum_ms.saturating_add(ms);
+        if let Some(start) = self.round_start {
+            // checked_add：Instant 端点溢出按"门长开"处理，不 panic（裸板口径）
+            self.deadline = start.checked_add(Duration::from_millis(self.cum_ms + tail_ms));
+        }
+    }
+
+    /// 门开着吗（now ≤ 外推线）。从未收到帧 = 关。
+    fn rr3_tts_gate_open(&self, now: Instant) -> bool {
+        match self.deadline {
+            Some(d) => now <= d,
+            None => false,
+        }
+    }
+}
+
+/// 反射环换算（纯函数）：onset 判向角 → pan 目标角。全量判据过不了 = `None`
+/// （不转头）：未启用 / 门开（播放回声）/ 死区内（正前方说话免抖动）。
+/// 目标 = 中位 + clamp(deg, ±摆幅)——正负号直通（右声源右转头），板侧行程
+/// fail-closed 之外这里是第二道软件限幅。
+fn rr3_reflex_pan_target(
+    enable: bool,
+    deadband_deg: i32,
+    doa_deg: i32,
+    gate_open: bool,
+) -> Option<u16> {
+    if !enable || gate_open || doa_deg.abs() < deadband_deg {
+        return None;
+    }
+    let swing = doa_deg.clamp(-RR3_REFLEX_PAN_SWING_DEG, RR3_REFLEX_PAN_SWING_DEG);
+    Some((RR3_REFLEX_PAN_CENTER_DEG + swing) as u16)
+}
+
 // ---------- 配置加载（装配期注入，原 audio/mod.rs 配置段逐字迁入） ----------
 
 /// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
@@ -299,12 +437,26 @@ pub struct Rr3SenseConfig {
     pub audio: Rr3AudioConfig,
     pub vad: Rr3VadConfig,
     pub doa: Rr3DoaConfig,
+    pub reflex: Rr3ReflexConfig,
 }
 
 /// DoA 判向配置：分档边界（S-5，原件内常量 `RR3_DOA_BIN_THRESHOLD_DEG` 迁此）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rr3DoaConfig {
     pub bin_threshold_deg: i32,
+}
+
+/// 反射环配置（B批 b2）：策略量全部数据化。代码缺省 `enable = false`——不显式
+/// 开（config-esp32.toml 档开）行为与旧版逐点等价：无门控无转头，纯采集照旧。
+/// - `deadband_deg`：判向死区（|deg| < 死区不转头，正前方说话免抖动）；
+/// - `gate_tail_ms`：TTS 帧流停后门保持开的尾窗（扬声器回声拖尾）；
+/// - `gate_gap_ms`：tts_pcm 帧间隔超过此值判新一轮播放（门控累计重置）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rr3ReflexConfig {
+    pub enable: bool,
+    pub deadband_deg: i32,
+    pub gate_tail_ms: u64,
+    pub gate_gap_ms: u64,
 }
 
 impl Default for Rr3SenseConfig {
@@ -318,6 +470,12 @@ impl Default for Rr3SenseConfig {
             vad: Rr3VadConfig::default(),
             doa: Rr3DoaConfig {
                 bin_threshold_deg: 30,
+            },
+            reflex: Rr3ReflexConfig {
+                enable: false,
+                deadband_deg: 10,
+                gate_tail_ms: 1000,
+                gate_gap_ms: 500,
             },
         }
     }
@@ -381,8 +539,18 @@ fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, String> {
     if let Some(doa) = section.and_then(|s| s.get("doa")) {
         let mut t = cfg.doa.bin_threshold_deg as i64;
         rr3_cfg_i64(doa, "bin_threshold_deg", &mut t)?;
-        cfg.doa.bin_threshold_deg = i32::try_from(t)
-            .map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))?;
+        cfg.doa.bin_threshold_deg =
+            i32::try_from(t).map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))?;
+    }
+    // B批 b2：反射环与播放期门控策略量（缺键回落默认，enable 缺省 false）
+    if let Some(reflex) = section.and_then(|s| s.get("reflex")) {
+        rr3_cfg_bool(reflex, "enable", &mut cfg.reflex.enable)?;
+        let mut db = cfg.reflex.deadband_deg as i64;
+        rr3_cfg_i64(reflex, "deadband_deg", &mut db)?;
+        cfg.reflex.deadband_deg =
+            i32::try_from(db).map_err(|_| format!("[rr3-sense.reflex] deadband_deg 越界: {db}"))?;
+        rr3_cfg_u64(reflex, "gate_tail_ms", &mut cfg.reflex.gate_tail_ms)?;
+        rr3_cfg_u64(reflex, "gate_gap_ms", &mut cfg.reflex.gate_gap_ms)?;
     }
     Ok(cfg)
 }
@@ -407,6 +575,18 @@ fn rr3_cfg_i64(table: &toml::Value, key: &str, slot: &mut i64) -> Result<(), Str
             *slot = v
                 .as_integer()
                 .ok_or_else(|| format!("配置项 {key} 须为整数，收到 {v}"))?;
+            Ok(())
+        }
+    }
+}
+
+fn rr3_cfg_bool(table: &toml::Value, key: &str, slot: &mut bool) -> Result<(), String> {
+    match table.get(key) {
+        None => Ok(()),
+        Some(v) => {
+            *slot = v
+                .as_bool()
+                .ok_or_else(|| format!("配置项 {key} 须为布尔值，收到 {v}"))?;
             Ok(())
         }
     }
@@ -611,5 +791,86 @@ mod tests {
             Some(json!({ "deg": 0, "bin": "center" })),
         );
         assert!(off.get("doa").is_none(), "offset 不得携带 doa: {off}");
+    }
+
+    // ---------- B批 b2：播放期门控与反射环用例 ----------
+
+    /// 门控三拍：帧到开门 → 尾窗外推到期关门 → 帧间隔超 gap 判新一轮重置累计。
+    #[test]
+    fn tts_gate_opens_expires_and_re_rounds_on_gap() {
+        let t0 = Instant::now();
+        let mut g = Rr3TtsGate::default();
+        assert!(!g.rr3_tts_gate_open(t0), "从未收到帧 = 门关");
+        g.rr3_tts_gate_feed(t0, 200, 500, 1000);
+        // deadline = t0 + 200 + 1000
+        assert!(g.rr3_tts_gate_open(t0));
+        assert!(g.rr3_tts_gate_open(t0 + Duration::from_millis(1200)));
+        assert!(!g.rr3_tts_gate_open(t0 + Duration::from_millis(1201)));
+        // 间隔 600ms > gap 500ms：新一轮，累计重置——新 deadline = t0.6 + 100 + 1000。
+        // t0+1.6s 在旧线（t0+1.2s）外本已关门，新线把它重新覆盖，即轮分隔生效的证据
+        g.rr3_tts_gate_feed(t0 + Duration::from_millis(600), 100, 500, 1000);
+        assert!(
+            g.rr3_tts_gate_open(t0 + Duration::from_millis(1600)),
+            "新轮外推线生效（旧线早已到期）"
+        );
+        assert!(g.rr3_tts_gate_open(t0 + Duration::from_millis(1700)));
+        assert!(!g.rr3_tts_gate_open(t0 + Duration::from_millis(1701)));
+    }
+
+    /// 同轮多帧：ms 逐帧直加（brain 侧尾块按实算），deadline 随累计外推。
+    #[test]
+    fn tts_gate_accumulates_ms_within_round() {
+        let t0 = Instant::now();
+        let mut g = Rr3TtsGate::default();
+        // 同轮三帧各 200ms、间隔 20ms（< gap 500）：deadline = t0 + 600 + 1000
+        g.rr3_tts_gate_feed(t0, 200, 500, 1000);
+        g.rr3_tts_gate_feed(t0 + Duration::from_millis(20), 200, 500, 1000);
+        g.rr3_tts_gate_feed(t0 + Duration::from_millis(40), 200, 500, 1000);
+        assert!(g.rr3_tts_gate_open(t0 + Duration::from_millis(1600)));
+        assert!(!g.rr3_tts_gate_open(t0 + Duration::from_millis(1601)));
+    }
+
+    /// 反射环全量判据：未启用 / 门开 / 死区内三路不转头；过判据的换算
+    /// = 中位 90 + clamp(deg, ±30)，左右号直通、双端限幅。
+    #[test]
+    fn reflex_pan_target_respects_enable_gate_and_deadband() {
+        assert_eq!(rr3_reflex_pan_target(false, 10, -60, false), None, "未启用");
+        assert_eq!(rr3_reflex_pan_target(true, 10, -60, true), None, "门开");
+        assert_eq!(rr3_reflex_pan_target(true, 10, 5, false), None, "死区内");
+        assert_eq!(rr3_reflex_pan_target(true, 10, -9, false), None, "死区负侧");
+        // 死区边界恰过：|deg| >= deadband 即动作
+        assert_eq!(rr3_reflex_pan_target(true, 10, 10, false), Some(100));
+        assert_eq!(rr3_reflex_pan_target(true, 10, -15, false), Some(75));
+        assert_eq!(
+            rr3_reflex_pan_target(true, 10, 60, false),
+            Some(120),
+            "右摆限幅"
+        );
+        assert_eq!(
+            rr3_reflex_pan_target(true, 10, -60, false),
+            Some(60),
+            "左摆限幅"
+        );
+    }
+
+    /// reflex 段解析：缺段 = enable 缺省 false（不开与旧版逐点等价）；全量注入
+    /// 生效；类型错显式拒收（bool 有专属 helper，字符串 "on" 不认）。
+    #[test]
+    fn config_parse_reflex_section_defaults_disabled() {
+        let cfg = rr3_sense_config_parse("").unwrap();
+        assert!(!cfg.reflex.enable);
+        assert_eq!(cfg.reflex.deadband_deg, 10);
+        assert_eq!(cfg.reflex.gate_tail_ms, 1000);
+        assert_eq!(cfg.reflex.gate_gap_ms, 500);
+        let cfg = rr3_sense_config_parse(
+            "[rr3-sense.reflex]\nenable = true\ndeadband_deg = 15\ngate_tail_ms = 800\ngate_gap_ms = 300\n",
+        )
+        .unwrap();
+        assert!(cfg.reflex.enable);
+        assert_eq!(cfg.reflex.deadband_deg, 15);
+        assert_eq!(cfg.reflex.gate_tail_ms, 800);
+        assert_eq!(cfg.reflex.gate_gap_ms, 300);
+        assert!(rr3_sense_config_parse("[rr3-sense.reflex]\nenable = \"on\"\n").is_err());
+        assert!(rr3_sense_config_parse("[rr3-sense.reflex]\ndeadband_deg = \"wide\"\n").is_err());
     }
 }

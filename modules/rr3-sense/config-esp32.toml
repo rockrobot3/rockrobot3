@@ -21,3 +21,11 @@ min_speech_ms = 200
 
 [rr3-sense.doa]
 bin_threshold_deg = 30  # DoA 三档边界（S-5：阈值数据化，件内常量已迁出）
+
+# B批 b2 听声识位反射环（裁定①快环落 sense；命令旁路仅 esp32 档音频源承载——
+# 默认档不落此段，代码缺省 enable=false，行为与旧版逐点等价）
+[rr3-sense.reflex]
+enable = true
+deadband_deg = 10       # 判向死区：正前方 ±10° 内不转头（免抖动）
+gate_tail_ms = 1000     # TTS 帧流停后门保持开的尾窗（扬声器回声拖尾）
+gate_gap_ms = 500       # tts_pcm 帧间隔超过此值判新一轮播放（累计重置）
