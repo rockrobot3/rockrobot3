@@ -62,13 +62,15 @@ TOPIC_TTS_PCM = "rr3-brain/audio/tts_pcm"
 TOPIC_INTENT = "rr3-brain/intent/result"
 TOPIC_COMPLETION = "rr3-brain/llm/completion"
 
-RR3_CALL_TIMEOUT_S = 30.0
-
 # TTS 下行流分帧规格（MCP-1 定形）：逐字段复用上行 rr3-sense/audio/pcm 的事件体，
 # 同 20ms 一块（@16k/mono/s16le = 320 样点 = 640 字节），base64 后 ≈856 字符。
 # 采样规格与 sense/interact 同一张表（16k/mono/16bit）。
 RR3_TTS_SAMPLE_RATE = 16_000
 RR3_TTS_PCM_FRAME_BYTES = 640
+
+# 总线 RPC 超时缺省（B-13①：`[rr3-brain.bus].call_timeout_s` 缺键时的回落值——
+# legacy `RR3_CALL_TIMEOUT_S = 30.0` 常量已退役，真值点 = config.toml 注释）
+RR3_BUS_CALL_TIMEOUT_DEFAULT_S = 30.0
 
 
 def rr3_config_load() -> dict:
@@ -135,17 +137,28 @@ def rr3_brain_run() -> int:
     manifest_path = os.environ.get(RR3_MANIFEST_ENV)
     if not manifest_path:
         raise RuntimeError(f"缺环境变量 {RR3_MANIFEST_ENV}（rrd spawn 注入；直跑请指向 module.toml）")
-    bus = rr3_bus_connect(manifest_path)
-    print(f"总线就绪: name={bus.rr3_name()} task={bus.rr3_task()}", flush=True)
-
+    # config 先于总线连接装载（B-13①）：connect_timeout_s 是连总线的参数，
+    # 缺文件/坏键在连接前拒（fail-closed 更早，省一次注定失败的注册）
     cfg = rr3_config_load()
     cloud_cfg = cfg["rr3-brain"]["cloud"]
     dialog_cfg = cfg["rr3-brain"]["dialog"]
+    bus_cfg = cfg["rr3-brain"].get("bus", {})
+    call_timeout_s = float(bus_cfg.get("call_timeout_s", RR3_BUS_CALL_TIMEOUT_DEFAULT_S))
+    connect_timeout_s = float(bus_cfg.get("connect_timeout_s", 5.0))
+    bus = rr3_bus_connect(manifest_path, connect_timeout_s=connect_timeout_s)
+    print(f"总线就绪: name={bus.rr3_name()} task={bus.rr3_task()}", flush=True)
+
     asr = Rr3AsrClient(cloud_cfg["base_url"], cloud_cfg["asr_model"], float(cloud_cfg["timeout_s"]))
     base_url, model_id, key_ref, mode = rr3_brain_model_row(cfg)
     llm = Rr3LlmClient(base_url, model_id, float(cloud_cfg["timeout_s"]), key_ref=key_ref, mode=mode)
     tts = Rr3TtsClient(cloud_cfg["base_url"], cloud_cfg["tts_model"], float(cloud_cfg["timeout_s"]))
     dialog = Rr3Dialog(max_utterance_ms=int(dialog_cfg.get("max_utterance_ms", 8000)))
+    print(
+        f"config 就绪: cloud timeout_s={cloud_cfg['timeout_s']} "
+        f"bus call={call_timeout_s}s connect={connect_timeout_s}s "
+        f"dialog max_utterance_ms={dialog.max_utterance_ms}",
+        flush=True,
+    )
     trace_seq = 0
     # TTS 下行流的 seq 水位：模块级单调，跨轮不复位（对位 sense 的 pcm seq 语义）
     pcm_seq = 0
@@ -166,7 +179,7 @@ def rr3_brain_run() -> int:
                 elif topic == TOPIC_VAD:
                     if dialog.rr3_feed_vad(body):
                         trace_seq, pcm_seq = rr3_finish_turn(
-                            bus, dialog, asr, llm, tts, trace_seq, pcm_seq
+                            bus, dialog, asr, llm, tts, trace_seq, pcm_seq, call_timeout_s
                         )
             elif frame["type"] == RR3_PT_REQUEST:
                 body = json.loads(frame["body_raw"])
@@ -184,7 +197,9 @@ def rr3_brain_run() -> int:
                 bus.rr3_reply_call(frame["header"]["trace_id"], body.get("id", 0), result)
 
         if dialog.rr3_utterance_expired():
-            trace_seq, pcm_seq = rr3_finish_turn(bus, dialog, asr, llm, tts, trace_seq, pcm_seq)
+            trace_seq, pcm_seq = rr3_finish_turn(
+                bus, dialog, asr, llm, tts, trace_seq, pcm_seq, call_timeout_s
+            )
 
 
 def rr3_tts_pcm_frames(pcm: bytes, seq: int) -> tuple[list[dict], int]:
@@ -221,12 +236,16 @@ def rr3_publish_tts_pcm(bus: Rr3BusClient, pcm: bytes, seq: int) -> int:
 
 
 def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm: Rr3LlmClient,
-                    tts: Rr3TtsClient, trace_seq: int, pcm_seq: int) -> tuple[int, int]:
+                    tts: Rr3TtsClient, trace_seq: int, pcm_seq: int,
+                    call_timeout_s: float = RR3_BUS_CALL_TIMEOUT_DEFAULT_S) -> tuple[int, int]:
     """判停后的一整轮：ASR → LLM → TTS → 下发 PCM 流 → interact 播放 → intent 发布。
 
     业务失败（云端错误 / 空文本 / 被调方超时）折日志弃轮返回；传输失败
     （总线写不出去）抛 OSError/RuntimeError 由主循环按退出语义收口。
     返回 `(trace_seq, pcm_seq)`——pcm_seq 是模块级单调的 TTS 下行流 seq 水位。
+    计账拆两本（B-16①，不许一个词盖两件事）：`rounds_replied` = LLM 应答发布
+    完毕（rr3_record 成功后 bump）；`rounds_audible` = interact 回执 played_ms>0
+    （点名失败/播出 0ms 不计）。`/api/data` counters 表同时可见两键。
     """
     pcm = dialog.rr3_take_utterance()
     if not pcm:
@@ -270,9 +289,15 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
     played = ""
     try:
         reply = bus.rr3_call_topic(
-            TOPIC_TTS, {"text": reply_text, "pcm_bytes": len(reply_pcm)}, RR3_CALL_TIMEOUT_S
+            TOPIC_TTS, {"text": reply_text, "pcm_bytes": len(reply_pcm)}, call_timeout_s
         )
-        played = f" played_ms={reply.get('played_ms')}"
+        played_ms = reply.get("played_ms")
+        played = f" played_ms={played_ms}"
+        # audible 记账（B-16①）：播出且 >0ms 才算"用户听得见"——点名失败
+        # （RuntimeError）与 played_ms=0 都不进这本账（I-21① 修后 interact 侧
+        # 0ms 已折 error 应答，此处的 isinstance 防御异常形状）
+        if isinstance(played_ms, (int, float)) and not isinstance(played_ms, bool) and played_ms > 0:
+            bus.rr3_counter_bump("rounds_audible")
     except RuntimeError as e:
         print(f"轮次 {trace_seq}: interact 播放点名失败（{e}）", flush=True)
 
@@ -287,8 +312,9 @@ def rr3_finish_turn(bus: Rr3BusClient, dialog: Rr3Dialog, asr: Rr3AsrClient, llm
         "actions": actions,
     })
     dialog.rr3_record(Rr3DialogTurn(user_text=user_text, reply_text=reply_text, trace_id=trace_seq))
-    # 完成一轮才记账（计数点 = rr3_record 成功，方案 §4 归属表）
-    bus.rr3_counter_bump("chat_rounds")
+    # 完成一轮才记账（计数点 = rr3_record 成功，方案 §4 归属表）。键名拆账
+    # （B-16①）：chat_rounds 一个词盖"应答"与"听见"两件事，退役拆两本
+    bus.rr3_counter_bump("rounds_replied")
     print(
         f"对话轮完成: trace={trace_seq} user={user_text!r} reply={reply_text!r}"
         f" tts_pcm_ms={tts_ms}{played} actions={len(actions)}",

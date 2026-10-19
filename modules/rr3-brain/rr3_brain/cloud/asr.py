@@ -51,7 +51,12 @@ class Rr3AsrClient:
         )
         if status != 200:
             raise RuntimeError(f"识别接口 HTTP {status}")
-        text = json.loads(resp).get("text")
+        # json.loads 进护栏（B-16②）：JSONDecodeError 原逃逸到进程退出（同一次
+        # 云不可用一半弃轮一半掀进程），收敛为 RuntimeError 折弃轮
+        try:
+            text = json.loads(resp).get("text")
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"识别应答非 JSON: {e}") from e
         if not isinstance(text, str):
             raise RuntimeError("识别应答缺 text 字段")
         return text

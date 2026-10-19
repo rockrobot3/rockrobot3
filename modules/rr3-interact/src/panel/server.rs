@@ -622,6 +622,17 @@ fn rr3_panel_handle(stream: &mut TcpStream, shared: &Rr3PanelShared) {
     );
 }
 
+/// BusCall 应答的状态码裁定（批N4 件六 I-21③）：载荷含 `error` = 被调方业务
+/// 失败 → 422 + ok:false（"上游受理但拒"——与 502 传输失败分码，脚本与产线按
+/// 状态码判成败不得恒真）；其余 200 + ok:true。判定纯函数化：应答折装归调用方。
+fn rr3_bus_reply_status(result: &Value) -> (u16, &'static str) {
+    if result.get("error").is_some() {
+        (422, "Unprocessable Entity")
+    } else {
+        (200, "OK")
+    }
+}
+
 /// 路由产物的执行面：状态码三元组在返回处一次定形。
 fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelReply {
     match rr3_panel_route(&req.method, &req.path, &req.body) {
@@ -674,7 +685,18 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
         Rr3PanelDispatch::BusCall { topic, args } => {
             match shared.bus.rr3_call_topic(&topic, args, shared.limits.call_timeout) {
                 Ok(result) => {
-                    Rr3PanelReply::json(200, "OK", json!({ "ok": true, "result": result }))
+                    // 业务错误按载荷裁（I-21③）：被调方折 `{"error":…}` 应答 =
+                    // 业务失败，不得 200+ok:true 假成功（脚本报永远成功）
+                    let (status, reason) = rr3_bus_reply_status(&result);
+                    if status == 200 {
+                        Rr3PanelReply::json(status, reason, json!({ "ok": true, "result": result }))
+                    } else {
+                        Rr3PanelReply::json(
+                            status,
+                            reason,
+                            json!({ "ok": false, "error": result["error"] }),
+                        )
+                    }
                 }
                 Err(e) => {
                     Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e }))
@@ -839,6 +861,26 @@ fn rr3_fake_ctl_rrd(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BusCall 应答状态码裁定（I-21③）：载荷含 error = 422 业务失败，其余 200
+    #[test]
+    fn bus_reply_status_splits_business_error_from_success() {
+        assert_eq!(
+            rr3_bus_reply_status(&json!({ "played_ms": 120 })),
+            (200, "OK"),
+            "正常应答 200"
+        );
+        assert_eq!(
+            rr3_bus_reply_status(&json!({ "expression": "talk", "previous": "idle" })),
+            (200, "OK"),
+            "多字段成功应答 200"
+        );
+        assert_eq!(
+            rr3_bus_reply_status(&json!({ "error": "舵机越界拒收" })),
+            (422, "Unprocessable Entity"),
+            "业务错误 422（不得折 200+ok:true 假成功）"
+        );
+    }
 
     #[test]
     fn route_covers_all_table_entries() {
