@@ -13,6 +13,8 @@ system + 最近 LLM_HISTORY_ROUNDS 轮（一轮 = user + assistant 两条），�
 错误文案只点名 ref/环境变量名，任何路径都不得带出密钥值。
 """
 
+from __future__ import annotations  # 注解不求值（PEP 604 形在 3.9 亦 import 安全）
+
 import json
 import os
 

@@ -244,5 +244,94 @@ class TestOpsSnapshot(unittest.TestCase):
         self.assertEqual(snap["dialog"]["max_utterance_ms"], 8000, "缺段随主循环同款缺省")
 
 
+class TestOpsWrite(unittest.TestCase):
+    """件九三（配置面）：`rr3-brain/ops/set` 写臂纯函数——白名单校验、类型域值
+    校验、写源与快照读源对偶（llm 组写实效源：模型行 active 在则行、否则 cloud
+    fallback），违规 RuntimeError 点名（fail-closed）。"""
+
+    def _cfg(self, with_model_row=False):
+        cfg = {
+            "rr3-brain": {
+                "cloud": {
+                    "base_url": "https://cloud.example",
+                    "asr_model": "asr-m",
+                    "llm_model": "llm-cloud-m",
+                    "tts_model": "tts-m",
+                    "timeout_s": 20,
+                },
+                "dialog": {"max_utterance_ms": 8000},
+            }
+        }
+        if with_model_row:
+            cfg["rr3-brain"]["model"] = [
+                {"name": "行A", "active": True, "base_url": "https://row.example", "model_id": "llm-row-m"},
+            ]
+        return cfg
+
+    def test_unknown_group_and_slot_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "组不认"):
+            composite.rr3_ops_write(self._cfg(), "sense", "sample_rate", 16000)
+        with self.assertRaisesRegex(RuntimeError, "槽不认"):
+            composite.rr3_ops_write(self._cfg(), "asr", "gain", 3)
+
+    def test_string_slot_strips_then_writes_cloud_section(self):
+        old, new = composite.rr3_ops_write(self._cfg(), "asr", "asr_model", "  asr-m2  ")
+        self.assertEqual((old, new), ("asr-m", "asr-m2"), "回显旧值新值供应答")
+        with self.assertRaisesRegex(RuntimeError, "须字符串"):
+            composite.rr3_ops_write(self._cfg(), "asr", "asr_model", 5)
+        with self.assertRaisesRegex(RuntimeError, "不得为空"):
+            composite.rr3_ops_write(self._cfg(), "tts", "tts_model", "   ")
+
+    def test_timeout_s_type_and_domain_gates(self):
+        cfg = self._cfg()
+        for bad in (0, -1, "20", True, None):
+            with self.assertRaises(RuntimeError, msg=f"timeout_s 拒 {bad!r}"):
+                composite.rr3_ops_write(cfg, "asr", "timeout_s", bad)
+        old, new = composite.rr3_ops_write(cfg, "asr", "timeout_s", 30)
+        self.assertEqual((old, new), (20, 30.0))
+        self.assertEqual(cfg["rr3-brain"]["cloud"]["timeout_s"], 30.0, "写进 cloud 段")
+
+    def test_dialog_slot_writes_dialog_section_with_integer_gate(self):
+        cfg = self._cfg()
+        old, new = composite.rr3_ops_write(cfg, "dialog", "max_utterance_ms", 5000)
+        self.assertEqual((old, new), (8000, 5000))
+        self.assertEqual(cfg["rr3-brain"]["dialog"]["max_utterance_ms"], 5000)
+        for bad in (8.5, 0, True, "5000"):
+            with self.assertRaises(RuntimeError, msg=f"max_utterance_ms 拒 {bad!r}"):
+                composite.rr3_ops_write(cfg, "dialog", "max_utterance_ms", bad)
+
+    def test_llm_model_row_fallback_and_row_paths(self):
+        # 无模型行 = cloud fallback 路径：写 cloud 段（快照读哪份写哪份）
+        cfg = self._cfg(False)
+        _, new = composite.rr3_ops_write(cfg, "llm", "llm_model", "llm-new")
+        self.assertEqual(new, "llm-new")
+        self.assertEqual(cfg["rr3-brain"]["cloud"]["llm_model"], "llm-new")
+        # 有恰一 active 行：写行的 model_id，cloud fallback 值不动（B-14① 双源如实分组）
+        cfg2 = self._cfg(True)
+        _, new2 = composite.rr3_ops_write(cfg2, "llm", "llm_model", "llm-row-new")
+        self.assertEqual(new2, "llm-row-new")
+        self.assertEqual(cfg2["rr3-brain"]["model"][0]["model_id"], "llm-row-new")
+        self.assertEqual(cfg2["rr3-brain"]["cloud"]["llm_model"], "llm-cloud-m")
+        # 行在也只写 llm_model/base_url 两键的实效源；timeout_s 读源恒 cloud 段
+        _, new3 = composite.rr3_ops_write(cfg2, "llm", "timeout_s", 25)
+        self.assertEqual(new3, 25.0)
+        self.assertEqual(cfg2["rr3-brain"]["cloud"]["timeout_s"], 25.0)
+
+    def test_llm_structural_error_fail_closed(self):
+        # 0/2 行 active = 结构错误：写面不修，RuntimeError 上来折 error 应答
+        cfg = self._cfg()
+        cfg["rr3-brain"]["model"] = [
+            {"name": "行A", "active": True, "base_url": "u", "model_id": "m"},
+            {"name": "行B", "active": True, "base_url": "u", "model_id": "m"},
+        ]
+        with self.assertRaisesRegex(RuntimeError, "恰一行 active"):
+            composite.rr3_ops_write(cfg, "llm", "llm_model", "x")
+        # 写其他组不受 llm 行结构影响（按需解析，不越组检查）
+        _, new = composite.rr3_ops_write(cfg, "asr", "asr_model", "asr-m2")
+        self.assertEqual(new, "asr-m2")
+
+
 if __name__ == "__main__":
     unittest.main()
+
+

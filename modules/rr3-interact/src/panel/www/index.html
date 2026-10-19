@@ -121,10 +121,12 @@
     <div class="msg" id="model-key-msg">模型连接（地址/模型名）在 rr3-brain config.toml 的 [[rr3-brain.model]] 表；此处只管密钥。brain 每轮现读，保存后下一轮对话即生效。</div>
   </div>
   <div class="card">
-    <h2>brain 模型面（rr3.call → rr3-brain/ops/list，只读）</h2>
+    <h2>brain 模型面（rr3.call → rr3-brain/ops/list 读 / ops/set 写）</h2>
     <button class="btn off" onclick="brainOpsLoad()">读取槽值</button>
     <table id="brain-ops"><thead><tr><th>原子</th><th>槽</th><th>值</th></tr></thead><tbody></tbody></table>
-    <div class="msg" id="brain-ops-msg">槽值来自 rr3-brain config.toml（assemble.toml 申报六槽，llm 组取模型行实效值）；密钥不在此面（值零回显），保存/删除走上方模型密钥卡。</div>
+    <p class="ph">写槽：组 <input id="brain-set-group" placeholder="asr | llm | tts | dialog" style="width:14ch"> 槽 <input id="brain-set-slot" placeholder="如 asr_model / timeout_s" style="width:22ch"> 值 <input id="brain-set-value" placeholder="新值（数值槽填数字）" style="width:24ch"></p>
+    <button class="btn" onclick="brainOpsSave()">写入槽值</button>
+    <div class="msg" id="brain-set-msg">live 内存生效（写后重建 asr/llm/tts 客户端，llm 重建即换会话）；**不落盘**——进程重启回 config.toml 真值（应答 persisted:false 如实申报）。密钥不在写面（走上方模型密钥卡）；白名单外组/槽与类型域值错由 brain 拒。</div>
   </div>
   <div class="card">
     <h2>模块配置面（rr3.call → rr3-模块/ops/list，只读；批N4 件九二）</h2>
@@ -341,6 +343,23 @@ async function brainOpsLoad() {
     }
     setMsg("brain-ops-msg", "已读取 " + n + " 槽（密钥不在此面，值零回显守脑面）。", true);
   } catch (e) { setMsg("brain-ops-msg", "读取失败：" + e.message, false); }
+}
+// brain ops 槽写口（批N4 件九三 配置面）：group/slot/value 透传，裁决在 owner；
+// 数值槽（timeout_s/max_utterance_ms）前端转 Number，其余按字符串交 brain 校验
+async function brainOpsSave() {
+  try {
+    const slot = $("brain-set-slot").value.trim();
+    const raw = $("brain-set-value").value;
+    const numSlots = new Set(["timeout_s", "max_utterance_ms"]);
+    const v = await api("/api/brain/ops", {
+      group: $("brain-set-group").value.trim(),
+      slot: slot,
+      value: numSlots.has(slot) ? Number(raw) : raw,
+    });
+    setMsg("brain-set-msg",
+      "已写入 " + v.group + "." + v.slot + "：" + JSON.stringify(v.old) + " → " + JSON.stringify(v.new)
+      + "（live 内存生效，persisted=" + v.persisted + "——重启回 config.toml 真值）", true);
+  } catch (e) { setMsg("brain-set-msg", "写入失败：" + e.message, false); }
 }
 // 五模块 ops 槽读面（批N4 件九二）：同一渲染范式，模块名入列（数组值逐字展示）
 async function moduleOpsLoad(mod) {

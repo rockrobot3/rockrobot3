@@ -166,7 +166,7 @@ name = "rr3-brain/ops/list"
 kind = "request"
 owner = "rr3-brain"
 stable = "L2"
-note = "ops 槽快照只读点名（批N4 件六二 B-12）：白名单六槽应答（asr/llm/tts/dialog 四组），密钥不进应答；件九配置面扩写口时随面演进"
+note = "ops 槽快照只读点名（批N4 件六二 B-12）：白名单六槽应答（asr/llm/tts/dialog 四组），密钥不进应答；写口 = rr3-brain/ops/set（批N4 件九三 同批 append，组.槽寻址与本主题快照读源对偶）"
 
 [[topic]]
 name = "rr3-brain/intent/result"
@@ -296,6 +296,13 @@ kind = "request"
 owner = "rr3-power"
 stable = "L2"
 note = "ops 槽快照只读点名（批N4 件九二）：白名单四槽应答（battery/charger 两组），rail 段键不在槽表不在快照面；面板 /api/power/ops 读口"
+
+[[topic]]
+name = "rr3-brain/ops/set"
+kind = "request"
+owner = "rr3-brain"
+stable = "L2"
+note = "ops 槽写口点名（批N4 件九三 配置面）：组.槽寻址与 ops/list 快照读源对偶（llm 组写实效源——模型行 active 在则写行、fallback 写 cloud 段），白名单外与类型域值错一律拒（fail-closed）；live 内存生效（写臂重建受影响客户端，dialog 就地改参），不落盘——应答 persisted:false 如实申报，重启回 config.toml 真值（Python 无 TOML writer、保注释重写面与 Y-2 单写路径协商点归后续批）；密钥与 key_ref 不在写面（密钥面走 panel secrets 端点）"
 
 [[topic]]
 name = "rr3-sense/ops/list"
