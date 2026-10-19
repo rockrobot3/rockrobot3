@@ -39,10 +39,15 @@
 //! （其余模块的退出码、僵尸回收、重启全堵在后面）。
 //!
 //! 环境注入三件（E-6）：`RR3_BUS_PATH` / `RR3_MANIFEST` / `RR3_SIM_PEER_ROLE`。子进程
-//! `stdout(Stdio::null())`、`stderr(Stdio::inherit())` —— **绝不能把子进程 stdout 接进 rrd 的
+//! `stdout(Stdio::null())`、`stderr → per-unit 日志文件` —— **绝不能把子进程 stdout 接进 rrd 的
 //! stdout 管道**：`RrdTest::rr3_wait_log` / `rr3_assert_no_log` 读的就是那条管道，混进子进程
 //! 输出就把"rrd 说过什么"变成"这堆进程里谁说过什么"（`sim_peer` 打的是中文，一条 `已主动退场`
 //! 就足以扰动 needle）。
+//!
+//! stderr 定形（门 r 留痕通道，批N4 件八）：留痕不得进被丢弃的流——stdout 是 null（死路，
+//! 原先 45 处模块 `println!` 按设计不可达任何去处），stderr 接 `<socket>.log/<unit>.log`
+//! （append，重启后仍可取崩溃前的行，§17 运维留痕同轨判据）；文件打不开回退 inherit 并
+//! 点名，观测通道故障降级、不放大成可用性故障。
 //!
 //! 日志用词纪律（与测试的否定 needle 同源，改字面量前要一起看）：
 //! `spawn ` 只用于"成功起了一个进程"那一行；起不来一律写 `起进程失败`。
@@ -271,6 +276,31 @@ fn rr3_absorb_exit(
     }
 }
 
+/// per-unit 日志文件的定位与打开（append）：`<socket 路径>.log/<unit>.log`。
+///
+/// 门 r 留痕通道定形（批N4 件八）：目录名由 socket 全路径加 `.log` 后缀派生——同机
+/// 多实例（测试 `/tmp/rr3-m2-*.sock`、产线 `/var/run/rock3-ipc.sock`）天然按实例隔离，
+/// 不需要新 CLI 键；append 不 truncate，重启历史保留在文件里。这里只负责"打开"；
+/// 打不开的错误交调用方裁决（回退 inherit，不挡起跑）。
+fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::File> {
+    // fail-closed：bus_path 由 daemon 侧绝对化（cli.rs 的 rr3_socket_absolute_path），
+    // 相对/空路径到这里就是链条上游破了——拒开，绝不相对 CWD 悄悄建目录
+    if !bus_path.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "socket 路径非绝对（上游绝对化失效）",
+        ));
+    }
+    let mut dir = bus_path.as_os_str().to_os_string();
+    dir.push(".log");
+    let dir = PathBuf::from(dir);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(format!("{unit}.log")))
+}
+
 /// 起进程的唯一漏斗：boot 与到期重启都过这里（Task 10 的 D-7 同一条教训——
 /// 护栏长在唯一的入口上，比在每个调用点各写一遍强）。
 ///
@@ -328,8 +358,20 @@ fn rr3_boot_spawn(
     if !job.axis_state.is_empty() {
         cmd.env("RR3_ACT_AXIS_STATE", &job.axis_state);
     }
-    // 见文件头的 stdout 纪律：子进程输出绝不进 rrd 自己那条管道。
-    let spawned = cmd.stdout(Stdio::null()).stderr(Stdio::inherit()).spawn();
+    // 见文件头的 stdout 纪律：子进程输出绝不进 rrd 自己那条管道（stdout null 不动）。
+    // stderr 接 per-unit 日志文件（门 r 留痕通道定形，批N4 件八）：模块留痕唯一可达
+    // 通道——append 语义让"一次重启后仍能取到崩溃前的最后 N 行"（§17 同轨判据）天然
+    // 成立；文件打不开回退 inherit 并点名，观测通道故障降级、不挡起跑。
+    let stderr_stdio = match rr3_open_unit_log(bus_path, &name) {
+        Ok(f) => Stdio::from(f),
+        Err(e) => {
+            rr3_log(&format!(
+                "per-unit 日志打不开（{name}）: {e} —— stderr 回退 inherit"
+            ));
+            Stdio::inherit()
+        }
+    };
+    let spawned = cmd.stdout(Stdio::null()).stderr(stderr_stdio).spawn();
     match spawned {
         Ok(child) => {
             let pid = child.id();
@@ -523,4 +565,48 @@ pub fn rr3_spawn_supervisor(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// 门 r 机制面（批N4 件八）：per-unit 日志三断言——打开即建、append 不截断
+    /// （"一次重启后仍能取到崩溃前的行"的载体语义）、socket 无父段时 fail-closed
+    /// 报错（绝不落到 CWD 相对路径上悄悄建目录）。
+    #[test]
+    fn unit_log_opens_appends_and_fails_closed() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("时钟在 UNIX_EPOCH 之前")
+            .as_nanos();
+        let sock = std::env::temp_dir()
+            .join(format!("rr3-unit-log-{}-{nanos}.sock", std::process::id()));
+
+        // 两世 spawn 各写一行，两行都在——append 不 truncate
+        let f1 = rr3_open_unit_log(&sock, "rr3-x").expect("首开即建");
+        drop(f1);
+        let f2 = rr3_open_unit_log(&sock, "rr3-x").expect("重开不拒");
+        writeln!(&f2, "first").expect("写首行");
+        drop(f2);
+        let f3 = rr3_open_unit_log(&sock, "rr3-x").expect("第三世仍 append");
+        writeln!(&f3, "second").expect("写次行");
+        drop(f3);
+        let mut dir_os = sock.clone().into_os_string();
+        dir_os.push(".log");
+        let text = std::fs::read_to_string(PathBuf::from(dir_os.clone()).join("rr3-x.log"))
+            .expect("日志文件可读");
+        assert!(
+            text.contains("first") && text.contains("second"),
+            "append 语义被破: {text:?}"
+        );
+        let _ = std::fs::remove_dir_all(PathBuf::from(dir_os));
+
+        // socket 无父段（空路径）必须报错，而不是相对 CWD 悄悄建目录
+        assert!(
+            rr3_open_unit_log(Path::new(""), "rr3-x").is_err(),
+            "空 socket 路径应 fail-closed"
+        );
+    }
 }
