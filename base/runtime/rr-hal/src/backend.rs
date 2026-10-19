@@ -223,6 +223,18 @@ pub fn rr3_sim_doa_deg_parse(s: &str) -> Option<f64> {
 /// linux 档的设备名来自生效绑定（[`crate::descriptor::rr3_hal_bindings_effective`]：
 /// 描述符为底、env 应急覆盖）；键缺失/合成失败 → 占位显式回错（fail-closed，批D④）。
 pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
+    let (src, _, backend) = rr3_hal_audio_source_with_cmd();
+    (src, backend)
+}
+
+/// 音频源 + 板外设命令旁路产面（B 批 b1）：esp32 档返 `Some`——flock 单消费者
+/// 纪律下板外设命令下行唯一通路 = 持 conn 的音频源旁路（esp32audio.rs）；
+/// 其余档 `None`（无旁路面，消费方按 None fail-closed 关闭反射环）。
+pub fn rr3_hal_audio_source_with_cmd() -> (
+    Box<dyn Rr3AudioSource>,
+    Option<crate::esp32audio::Rr3AudioCmdProducer>,
+    &'static str,
+) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
@@ -232,30 +244,44 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
                         (
                             Box::new(crate::linux::Rr3AlsaAudioSource::rr3_alsa_source_new(&dev))
                                 as Box<dyn Rr3AudioSource>,
+                            None,
                             RR3_BACKEND_LINUX,
                         )
                     })
                 })
-                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
+                .unwrap_or((
+                    Box::new(Rr3UnavailableSource),
+                    None,
+                    RR3_BACKEND_PLACEHOLDER,
+                ));
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
         // 显式 linux 但 alsa 后端没编进（无 alsa 的板上构建）：占位显式回错，
         // 不静默落 sim（resolve 订正为平台门后此分支结构上可达）
-        RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        RR3_BACKEND_LINUX => (
+            Box::new(Rr3UnavailableSource),
+            None,
+            RR3_BACKEND_PLACEHOLDER,
+        ),
         // macOS 真麦（显式 mac 才进；缺省仍 sim——CI/无头不真开设备）
         RR3_BACKEND_MAC if cfg!(target_os = "macos") => {
             #[cfg(target_os = "macos")]
             return (
                 Box::new(crate::macaudio::Rr3MacAudioSource::rr3_mac_source_new())
                     as Box<dyn Rr3AudioSource>,
+                None,
                 RR3_BACKEND_MAC,
             );
             #[cfg(not(target_os = "macos"))]
             unreachable!("上面 guard 已保证只在本分支编译")
         }
         // 显式 mac 但平台不是 macOS：占位显式回错，不静默落 sim
-        RR3_BACKEND_MAC => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        RR3_BACKEND_MAC => (
+            Box::new(Rr3UnavailableSource),
+            None,
+            RR3_BACKEND_PLACEHOLDER,
+        ),
         // ESP32 板面双麦流（A 批 c3，esp32audio.rs）：设备/波特来自应急 env
         // （与舵机/显示面同键）；缺 env → 点名 + placeholder（fail-closed，
         // 不猜设备不静默换 sim）。
@@ -268,13 +294,14 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
                         .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+                    let (src, producer) =
+                        crate::esp32audio::Rr3Esp32UartAudioSource::rr3_esp32_audio_source_new_with_cmd(
+                            std::path::PathBuf::from(p),
+                            baud,
+                        );
                     (
-                        Box::new(
-                            crate::esp32audio::Rr3Esp32UartAudioSource::rr3_esp32_audio_source_new(
-                                std::path::PathBuf::from(p),
-                                baud,
-                            ),
-                        ) as Box<dyn Rr3AudioSource>,
+                        Box::new(src) as Box<dyn Rr3AudioSource>,
+                        Some(producer),
                         RR3_BACKEND_ESP32,
                     )
                 }
@@ -283,11 +310,19 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
                         "rr-hal: esp32 档缺环境变量 {}，音频采集面落占位（使用时以 Unsupported 回错）",
                         crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
                     );
-                    (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+                    (
+                        Box::new(Rr3UnavailableSource),
+                        None,
+                        RR3_BACKEND_PLACEHOLDER,
+                    )
                 }
             }
         }
-        RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        RR3_BACKEND_PLACEHOLDER => (
+            Box::new(Rr3UnavailableSource),
+            None,
+            RR3_BACKEND_PLACEHOLDER,
+        ),
         RR3_BACKEND_SIM => {
             let doa = std::env::var(RR3_HAL_SIM_DOA_DEG_ENV)
                 .ok()
@@ -298,13 +333,18 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
                     rr3_hal_sim_wave(),
                     doa,
                 )),
+                None,
                 RR3_BACKEND_SIM,
             )
         }
         // `&str` 模式编译器裁定无法穷举（E0004）：白名单收敛在
         // [`rr3_hal_backend_resolve`] 单点，此臂不可达；防御性落占位
         // （使用时 Unsupported 显式回错），不静默换 sim。
-        _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        _ => (
+            Box::new(Rr3UnavailableSource),
+            None,
+            RR3_BACKEND_PLACEHOLDER,
+        ),
     }
 }
 
