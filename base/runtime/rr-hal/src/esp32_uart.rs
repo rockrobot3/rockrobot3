@@ -32,10 +32,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3Header,
-    Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_UART_BAUD_DEFAULT,
+    Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_BOARD_BINDING_ADC_RAIL_PIN,
+    RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA, RR3_METHOD_SET_BINDINGS,
+    RR3_UART_BAUD_DEFAULT,
 };
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
+use crate::descriptor::{rr3_hal_bindings_from_text, Rr3HalBindings, RR3_HAL_BINDINGS_ENV};
 use crate::{Rr3Display, Rr3FaceFrame, Rr3HalError, Rr3PwmServo};
 
 /// 板上外设执行面的 task 号（批C 帧头约定：外设固件帧面占首模块池位形 2；
@@ -107,16 +110,22 @@ fn rr3_now_ns() -> u64 {
         .unwrap_or(0)
 }
 
-/// JSON-RPC 请求体（`method` 恒 `rr3.call`、点名主题在 `params.topic`——rrd
-/// 转发形状，与模块侧/哨兵侧的分发依据同源）。独立纯函数：形状可单测。
-fn rr3_bridge_request_body(id: u64, topic: &str, args: &Value) -> String {
+/// JSON-RPC 请求体（通用 method 面）：method 与 params 原样内嵌——`rr3.call` 与
+/// `rr3.set_bindings`（批N4 件七(b) 基-24）同走本信封。独立纯函数：形状可单测。
+fn rr3_bridge_request_body_params(id: u64, method: &str, params: &Value) -> String {
     json!({
         "jsonrpc": "2.0",
         "id": id,
-        "method": "rr3.call",
-        "params": { "topic": topic, "args": args },
+        "method": method,
+        "params": params,
     })
     .to_string()
+}
+
+/// JSON-RPC 请求体（`method` 恒 `rr3.call`、点名主题在 `params.topic`——rrd
+/// 转发形状，与模块侧/哨兵侧的分发依据同源）。独立纯函数：形状可单测。
+fn rr3_bridge_request_body(id: u64, topic: &str, args: &Value) -> String {
+    rr3_bridge_request_body_params(id, "rr3.call", &json!({ "topic": topic, "args": args }))
 }
 
 /// 应答解析（纯函数）：payload 类型必须 Response、`jsonrpc` 必须 2.0、id 必须
@@ -142,6 +151,52 @@ fn rr3_bridge_parse_response(
         return Err(format!("板侧业务失败: {e}"));
     }
     Ok(result)
+}
+
+/// 板侧绑定载荷（纯函数，批N4 件七(b) 基-24 桥上配置腿宿主半边）：描述符板侧三键
+/// `Some` 者逐键入载荷，值保持字符串（描述符同形纪律：注入文本值全字符串，JSON
+/// 侧不换形）；全缺 = `None`（无板侧配置可注）。独立纯函数：键位/换形可单测。
+fn rr3_board_bindings_payload(b: &Rr3HalBindings) -> Option<Value> {
+    let mut m = Map::new();
+    if let Some(v) = b.i2c_sda {
+        m.insert(RR3_BOARD_BINDING_I2C_SDA.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.i2c_scl {
+        m.insert(RR3_BOARD_BINDING_I2C_SCL.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.adc_rail_pin {
+        m.insert(
+            RR3_BOARD_BINDING_ADC_RAIL_PIN.to_string(),
+            json!(v.to_string()),
+        );
+    }
+    if m.is_empty() {
+        return None;
+    }
+    Some(Value::Object(m))
+}
+
+/// 板侧绑定载荷取环境（[`RR3_HAL_BINDINGS_ENV`] → 同形解析 → 载荷）。返回 `None`
+/// 的三种形态都**不构成错误**——绑定只服务板侧自愈路径，执法点在板侧消费面
+/// fail-closed（未注入即拒并点名），桥上腿的职责是"尽力送达、失败可见"：
+/// - env 未设 = 无描述符形态（纯 sim/`--manifest` 调试后门）；
+/// - 文本解析失败 = 配置坏，eprintln 点名后跳过（fail-visible；后端选择侧已
+///   fail-closed，此处兜底点名不静默放行坏值）；
+/// - 三键全缺 = 无板侧配置可注（host 档描述符本就无板侧键）。
+fn rr3_board_bindings_payload_from_env() -> Option<Value> {
+    let text = std::env::var(RR3_HAL_BINDINGS_ENV).ok()?;
+    let b = match rr3_hal_bindings_from_text(&text) {
+        Ok(b) => b,
+        Err(errs) => {
+            eprintln!(
+                "rr-hal-esp32: {} 解析失败，跳过板侧绑定推送: {}",
+                RR3_HAL_BINDINGS_ENV,
+                errs.join("; ")
+            );
+            return None;
+        }
+    };
+    rr3_board_bindings_payload(&b)
 }
 
 /// UART 长连接 + 请求 id 计数（servo/display 两实例面共用的连接盒）。
@@ -180,6 +235,11 @@ impl Rr3BridgeConn {
                     return Err(Rr3HalError::Busy);
                 }
                 self.conn = Some(c);
+                // 板侧绑定推送（批N4 件七(b) 基-24 桥上配置腿）：每次（重）开连接
+                // 都推——板侧重启或连接重建后注入态随之恢复，板侧覆盖语义幂等。
+                // 推送失败只点名不上抛（rr3_push_bindings 内部消化）：绑定仅服务
+                // 板侧自愈路径，执法点在板侧消费面 fail-closed，不挡舵机/表情能力面。
+                self.rr3_push_bindings();
                 Ok(())
             }
             Err(e) => {
@@ -189,9 +249,29 @@ impl Rr3BridgeConn {
         }
     }
 
-    /// 一次 `rr3.call` round-trip：组帧 → 发 → 阻塞收 → 四道门（dst/前缀/
-    /// jsonrpc+id/error）。io 或协议失败点名后折 Busy，连接报废下次重开。
+    /// 板侧绑定推送（`rr3.set_bindings`，载荷住 `params.args`——method 面信封，
+    /// rr-ipc bindings 模块定形）。推送失败（io/协议/板侧拒收）只 eprintln 点名，
+    /// 不上抛不重试：绑定推送不挡能力面（执法点在板侧消费面 fail-closed）；
+    /// io 失败时连接已由 rr3_method_call 报废，下次重开重推。
+    fn rr3_push_bindings(&mut self) {
+        let Some(payload) = rr3_board_bindings_payload_from_env() else {
+            return;
+        };
+        if let Err(e) = self.rr3_method_call(RR3_METHOD_SET_BINDINGS, &json!({ "args": payload })) {
+            eprintln!(
+                "rr-hal-esp32: 板侧绑定推送未达（板侧自愈路径将 fail-closed 拒并点名）: {e:?}"
+            );
+        }
+    }
+
+    /// 一次 `rr3.call` round-trip（主题点名形状，rrd 转发同源）。
     fn rr3_call(&mut self, topic: &str, args: &Value) -> Result<Value, Rr3HalError> {
+        self.rr3_method_call("rr3.call", &json!({ "topic": topic, "args": args }))
+    }
+
+    /// 一次 method 面 round-trip：组帧 → 发 → 阻塞收 → 四道门（dst/前缀/
+    /// jsonrpc+id/error）。io 或协议失败点名后折 Busy，连接报废下次重开。
+    fn rr3_method_call(&mut self, method: &str, params: &Value) -> Result<Value, Rr3HalError> {
         self.rr3_ensure()?;
         let conn = match self.conn.as_mut() {
             Some(c) => c,
@@ -199,7 +279,7 @@ impl Rr3BridgeConn {
         };
         let id = self.next_id;
         self.next_id += 1;
-        let body = rr3_bridge_request_body(id, topic, args);
+        let body = rr3_bridge_request_body_params(id, method, params);
         let payload = rr3_body_encode(Rr3PayloadType::Request, body.as_bytes());
         let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
         hdr.trace_id = RR3_TRACE_DIRECT;
@@ -416,6 +496,32 @@ mod tests {
         assert_eq!(v["method"], "rr3.call");
         assert_eq!(v["params"]["topic"], RR3_SERVO_TOPIC);
         assert_eq!(v["params"]["args"]["angle_deg"], 90);
+    }
+
+    /// method 面请求体信封：method/params 原样内嵌（rr3.set_bindings 的协议形状
+    /// 锚——载荷住 params.args，rr-ipc bindings 模块定形）。
+    #[test]
+    fn bridge_request_body_params_is_generic_method_envelope() {
+        let s = rr3_bridge_request_body_params(9, "rr3.set_bindings", &json!({ "args": {} }));
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["jsonrpc"], "2.0");
+        assert_eq!(v["id"], 9);
+        assert_eq!(v["method"], "rr3.set_bindings");
+        assert_eq!(v["params"]["args"], json!({}));
+    }
+
+    /// 板侧绑定载荷（纯函数）：三键 Some 者逐键入载荷、值保持字符串（描述符同形
+    /// 纪律）；全缺 = None（无板侧配置可注）；部分注入只带已有键。
+    #[test]
+    fn board_bindings_payload_carries_string_values_only() {
+        let mut b = Rr3HalBindings::default();
+        assert_eq!(rr3_board_bindings_payload(&b), None, "三键全缺 = 无载荷");
+        b.i2c_sda = Some(21);
+        b.adc_rail_pin = Some(34);
+        let p = rr3_board_bindings_payload(&b).expect("有键必须有载荷");
+        assert_eq!(p["i2c_sda"], "21", "值保持字符串（描述符同形纪律）");
+        assert_eq!(p["adc_rail_pin"], "34");
+        assert!(p.get("i2c_scl").is_none(), "未注入键不入载荷");
     }
 
     /// 应答门序：Response + id 回显 + result 在位放行；类型错/id 错/缺 result/

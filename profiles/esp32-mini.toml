@@ -88,10 +88,17 @@ heap_reserved_bytes = 98816
 "audio.capture" = "rr3-sense"
 "audio.vad" = "rr3-sense"
 
-# [hardware] 段缺省：两非引脚键（alsa_device/link_ifname）是宿主 Linux
-# 侧语义（rr-hal descriptor.rs C4 闭合表），板侧无此类键——物理绑定住下面的 [[pin]]；
-# 板侧描述符消费归 0.0.7 批G/批D1 的描述符装载，进位时同批改 contract.rs 的
-# esp32-mini pin 与 0.0.7 判据。
+# [hardware] 板侧配置三键（批N4 件七(b) 基-24 桥上配置腿）：板侧裸寄存器自愈路径
+# （I2C unstick）与打印面的引脚真值——非 [pins] 派生面（无 role 对应，门 n 物理键集
+# 不收），rtos 档原样直给进 RR3_HAL_BINDINGS，经桥 rr3.set_bindings 注入板侧；注入前
+# 板侧消费面 fail-closed 拒（不回退硬编码）。取值与板侧 main.rs 引脚真值段同源
+# （SDA=21/SCL=22 = OLED I2C 总线；34 = 电池分压 ADC，输入-only 脚）。宿主侧两键
+# （alsa_device/link_ifname）仍缺省——本形态无宿主音频/链路语义。主驱动具名引脚面
+# （esp-idf-hal 结构约束）的装载归 0.0.7 批G/批D1。
+[hardware]
+i2c_sda = "21"
+i2c_scl = "22"
+adc_rail_pin = "34"
 
 [[pin]]
 # 板侧执行件 pan（水平）轴（SG90：LEDC0 通道 0、信号脚 32，0.0.6 §5.4 BOM）——物理绑定

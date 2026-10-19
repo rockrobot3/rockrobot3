@@ -1548,10 +1548,24 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             "esp32-mini budget {k} 漂移（声明预算位，对账归 0.0.7）"
         );
     }
-    assert!(
-        v.get("hardware").is_none(),
-        "esp32-mini 出现 [hardware] 段（两非引脚键是宿主侧语义；板侧描述符进位须同批改本 pin 与 0.0.7 判据）"
-    );
+    // [hardware] 板侧配置三键（批N4 件七(b) 基-24 桥上配置腿）：板侧裸寄存器自愈
+    // 路径（I2C unstick）与打印面的引脚真值——非 [pins] 派生面（无 role 对应，门 n
+    // 物理键集不收），rtos 档 [hardware] 原样直给进 RR3_HAL_BINDINGS，经桥
+    // rr3.set_bindings 注入板侧；注入前板侧消费面 fail-closed 拒（不回退硬编码）。
+    // 取值与板侧 main.rs 引脚真值段同源（SDA=21/SCL=22 = OLED I2C 总线；34 = 电池
+    // 分压 ADC），漂移即红。主驱动具名引脚面（esp-idf-hal 结构约束）的装载仍归
+    // 0.0.7 批G/批D1，进位同批改本 pin。
+    let hardware = v
+        .get("hardware")
+        .and_then(toml::Value::as_table)
+        .expect("esp32-mini 缺 [hardware] 段（板侧配置三键真值点，批N4 件七(b)）");
+    for (k, expected) in [("i2c_sda", "21"), ("i2c_scl", "22"), ("adc_rail_pin", "34")] {
+        assert_eq!(
+            hardware.get(k).and_then(toml::Value::as_str),
+            Some(expected),
+            "esp32-mini hardware.{k} 漂移（板侧自愈引脚真值，与板侧 main.rs 同源）"
+        );
+    }
     // schema 3 [pins]（增补轮六批N1）：板侧执行件的物理绑定真值点——rtos 档 rrd
     // 不派生（controller 词形 ledc<N> 是板侧词表），但校验①的形状照判。批N3 件五
     // 双轴收敛：pan/tilt 两枚同角色 pin（act.axis.pwm × 2，instance 消歧）——
@@ -1695,10 +1709,10 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     }
 }
 
-/// G4 在册表钉死（ADR-0019 修订 1 ③，批J）：九能力面 trait × 九描述符键逐项点名。
-/// 两表真值源 = rr-hal-api（trait 面）/ rr-hal descriptor.rs（[hardware] 键集，
-/// C4 裁定不扩键）；本测试钉的是装配校验在 rr-registry 的这份副本——扩 trait/
-/// 扩键都走契约级评审，届时两处同批改，单改一处此测试当场红。
+/// G4 在册表钉死（ADR-0019 修订 1 ③，批J）：九能力面 trait × 描述符键逐项点名。
+/// 两表真值源 = rr-hal-api（trait 面）/ rr-hal descriptor.rs（[hardware] 键集）；
+/// 本测试钉的是装配校验在 rr-registry 的这份副本——扩 trait/扩键都走契约级评审，
+/// 届时两处同批改，单改一处此测试当场红。
 #[test]
 fn assemble_registry_tables_are_pinned() {
     assert_eq!(
@@ -1728,6 +1742,11 @@ fn assemble_registry_tables_are_pinned() {
             "ina219_addr",
             "link_ifname",
             "spi_device",
+            // 批N4 件七(b) 基-24 桥上配置腿：板侧配置三键（板侧裸寄存器自愈路径
+            // 引脚真值，无 role 对应故不在 [pins] 派生键集，rtos 档 [hardware] 直给）
+            "i2c_sda",
+            "i2c_scl",
+            "adc_rail_pin",
         ]
     );
 }
@@ -1925,10 +1944,11 @@ fn composite_declaration_face_is_pinned() {
 
 /// descriptor.rs 键集与 rr-registry 在册表"两处同批"机判（C4 撤销后的改判收口，
 /// 全案 §9 N1 行："descriptor.rs 键集改判与 rr-registry 在册表同批"）。十键批
-/// `spi_device` 进场后，rr-hal `Rr3HalBindings` 字段集与 RR3_ASSEMBLE_DESC_KEYS
-/// 必须逐名一致——单边扩键即红（在册表是 handles[].desc_key 的判等域，注入端
-/// 键名不同源 = 装配申报被静默丢键）。rr-registry 不依赖 rr-hal，按契约测试
-/// 惯例读真值文本扫描（与 roles/devices/platform 的 include_str! 同路）。
+/// `spi_device` 与批N4 件七(b) 板侧三键 `i2c_sda`/`i2c_scl`/`adc_rail_pin` 进场后，
+/// rr-hal `Rr3HalBindings` 字段集与 RR3_ASSEMBLE_DESC_KEYS 必须逐名一致——单边扩键
+/// 即红（在册表是 handles[].desc_key 的判等域，注入端键名不同源 = 装配申报被静默
+/// 丢键）。rr-registry 不依赖 rr-hal，按契约测试惯例读真值文本扫描（与
+/// roles/devices/platform 的 include_str! 同路）。
 #[test]
 fn descriptor_keys_and_registry_desc_keys_are_the_same_batch() {
     let desc = std::fs::read_to_string(repo_root().join("base/runtime/rr-hal/src/descriptor.rs"))
