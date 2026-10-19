@@ -135,6 +135,22 @@ boot 期桥未连注入必缺席，启动期解卡能力随 0.0.7 批G/D1 主驱
 字面量；绑定注入成功打印三键值＝板侧引脚真值唯一观测点）。**读不到注入值即拒不回退硬编码**
 的机制面三处观测：boot 解卡点名 / 运行面 `selfheal_skipped` 计数 / 重试路径终败 Err 冒泡。
 行为判据（改档案实录＋抽注入拒起对照）仍归真板批——status 敞口 21 行不结项。
+**2026-10-19 对表（批N4 件八，⑨-r 门 r 留痕不进被丢弃的流）**：建 **`step "⑨-r 留痕不进被丢弃的流…"`**
+⇒ 可数 step **18 行**、**专属执法位建成 6 把、待建门 16 把**。二选一裁定 **per-unit 日志文件**
+（上报窄缝否决：观测面不得依赖被观测面总线健康度；§17 同轨判据"一次重启后仍能取到崩溃前的
+最后 N 行"内存环做不到；总线连接前的早期留痕只有文件通道可达）。机制单点（笔1 `07b998d`）：
+`supervisor.rs` spawn 处 stderr 由 inherit 改接 `<socket>.log/<unit>.log`（append 不截断，实例按
+socket 全路径隔离零新 CLI 键；`rr3_open_unit_log` 非绝对路径 fail-closed 拒开；文件打不开回退
+inherit 并点名——观测通道故障降级不放大成可用性故障），stdout `Stdio::null()` 测试管道纪律
+不动（RrdTest 读的就是那条管道）；单测三断言＋`e2e_unit_log.rs` 线上证据（子进程 stderr 真
+落 per-unit 文件）随 ①b。执法位判据（笔2 同批）：六模块生产码 stdout 留痕零命中——五 Rust
+模块 `println!`/`print!` 词边界 grep（防 `eprintln!` 子串误伤）＋ brain Python **AST 判**
+stdout `print`（多行调用按行 grep 会误报起始行；python3 缺失/解析崩＝门禁失效不放行，⑨-n
+扫面前件同一纪律）；`eprintln!`/`print(file=sys.stderr)` 是声明过的通道（per-unit 日志）不在
+禁列。**扩面注记**：brain 原不在门 r "45 处"实测口径内（只数五 Rust 模块），件八同批纳入
+（brain stdout print 12 处 → `file=sys.stderr`）；五 Rust 模块现役 52 处 stdout 宏同批清零；
+mkmodule 骨架模板同步改 `eprintln!`（新生成模块生来合规）。sim 夹具两处 spawn（brain.rs/
+chain.rs）本就 stdout/stderr 双流同文件，brain print 改 stderr 不破 `wait_log_contains` 消费。
 **2026-10-19 对表（批N4 件六第一笔，I-21①③＋B-13①＋B-16①②——"成功"的假通过口与超时数据化）**：
 三处假通过口同笔闭合——interact `rr3_tts_pcm_integrity` 加零字节下界（(0,0) 不再是合法通过态，
 云 200 空体的静默假成功口关死）且 `played_ms==0` 折 `tts_play_reject`＋error 应答不记
@@ -223,7 +239,9 @@ pin 自动适配＋covers 词表门自动过）、brain 快照四例（fallback/
 **q 调用通道申报一致**（有 bus call 的模块，`[depends].required` 必含 `bus.rpc`；
 现违例 `rr3-interact` 四次 call 未申报）·
 **r 留痕不得进被丢弃的流**（模块生产码 `println!` 计数须为 0——`supervisor.rs:319` 把子进程
-stdout 接成了 `Stdio::null()`，实测 45 处留痕按设计不可达）；
+stdout 接成了 `Stdio::null()`，实测 45 处留痕按设计不可达；**2026-10-19 对表：批N4 件八已定形并建成**——
+二选一裁定 per-unit 日志文件，stderr 接 `<socket>.log/<unit>.log` append、stdout null 纪律不动，
+机制 `07b998d`＋执法位 ⑨-r 同批，见 §2 ⑨ 段对表行）；
 **n 注入路径唯一**（同一 `handle(trait, key)` 只能有一条来源：`[pins]` 派生或 `[hardware]` 直给，
   并存即拒 boot；**七个**物理键迁移完成后在 `[hardware]` 出现即红（第八轮订正计数：原写"六个"而枚举七键，
   裁定源 `RR3_PIN_DERIVED_KEYS: [&str; 7]`（`rrd/src/profile.rs`，取证时点 `e9a764f` :92；实-9 时点记 `:88-99`），全案 §22 实-9）——本轮最重的一处改判，见全案 §18 F-1）·
