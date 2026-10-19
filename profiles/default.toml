@@ -158,6 +158,7 @@ mux_group = []
 role = "power.battery.meter"
 controller = "i2c1"
 addr = "0x40" # 七位从地址（0x 前缀十六进制）
+device = "INA219" # 器件型号词（外键 → devices.toml；③-c 共址对账的身份字段）
 direction = "in"
 mux_group = []
 
@@ -169,6 +170,36 @@ role = "ui.face.spi"
 controller = "spidev0"
 channel = 0
 direction = "out"
+mux_group = []
+
+# —— 批N3 件八（器件角色进场）：charger 与 battery.meter 共用同一 INA219 读数源
+# （P-5 裁定：同 (i2c1, 0x40) 同 device 共址合法，校验③-c 精化判据的正例形状；
+# derives=[] 不派生注入键——读数面句柄仍是 battery.meter 一份，无第二真值点）。
+# env/imu 两格 status=placeholder（升格等真后端，D9），角色面先行 + probe 探测面
+# 生效：bus/addr 进 pin 即被器件级在位探测消费（L-14）；演练实例取值待器件核对
+# （与 devices.toml 演练行对表——SHTC3@0x70、ICM-42688@0x68，AD0 接地）。
+[[pin]]
+role = "power.charger.meter"
+controller = "i2c1"
+addr = "0x40"
+device = "INA219"
+direction = "in"
+mux_group = []
+
+[[pin]]
+role = "sensor.env.meter"
+controller = "i2c1"
+addr = "0x70"
+device = "SHTC3"
+direction = "in"
+mux_group = []
+
+[[pin]]
+role = "sensor.imu.meter"
+controller = "i2c1"
+addr = "0x68"
+device = "ICM-42688"
+direction = "in"
 mux_group = []
 
 [enabled_slots]

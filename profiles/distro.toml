@@ -146,6 +146,7 @@ mux_group = []
 role = "power.battery.meter"
 controller = "i2c1"
 addr = "0x40"
+device = "INA219" # 器件型号词（外键 → devices.toml；③-c 共址对账的身份字段）
 direction = "in"
 mux_group = []
 
@@ -157,6 +158,33 @@ role = "ui.face.spi"
 controller = "spidev0"
 channel = 0
 direction = "out"
+mux_group = []
+
+# —— 批N3 件八（器件角色进场）：与 default 同板同取值（P-5 共读源 + 演练实例，
+# 语义见 default.toml 同段注记——charger 同 (i2c1, 0x40) 同 device 共址合法；
+# env/imu placeholder 格角色面先行，probe 探测面生效）。
+[[pin]]
+role = "power.charger.meter"
+controller = "i2c1"
+addr = "0x40"
+device = "INA219"
+direction = "in"
+mux_group = []
+
+[[pin]]
+role = "sensor.env.meter"
+controller = "i2c1"
+addr = "0x70"
+device = "SHTC3"
+direction = "in"
+mux_group = []
+
+[[pin]]
+role = "sensor.imu.meter"
+controller = "i2c1"
+addr = "0x68"
+device = "ICM-42688"
+direction = "in"
 mux_group = []
 
 [enabled_slots]

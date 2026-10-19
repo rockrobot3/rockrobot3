@@ -124,8 +124,9 @@ const RR3_PIN_DERIVED_KEYS: [&str; 8] = [
 ];
 
 /// [[pin]] 条目字段词表（§4.2 [pins] 段；role 的 requires 域即此表子集——
-/// 门 a 六表对账的第 5 张表）
-const RR3_PIN_KEYS: [&str; 10] = [
+/// 门 a 六表对账的第 5 张表）。批N3 件八起十一键：`device` 器件型号词进场
+/// （外键 → contracts/devices.toml，门 o 装载侧执法 + 校验③-c 精化判据字段）
+const RR3_PIN_KEYS: [&str; 11] = [
     "role",
     "instance",
     "controller",
@@ -134,6 +135,7 @@ const RR3_PIN_KEYS: [&str; 10] = [
     "direction",
     "rail",
     "addr",
+    "device",
     "failsafe",
     "mux_group",
 ];
@@ -258,6 +260,10 @@ pub struct Rr3PinEntry {
     pub rail: String,
     /// I2C 从地址（0x 前缀十六进制；power.battery.meter 类角色用，校验⑨ 互校随批N2）
     pub addr: String,
+    /// 器件型号词（批N3 件八，外键 → contracts/devices.toml——门 o 装载侧执法 +
+    /// 校验③-c 精化判据字段：同 (bus, addr) 的多条 pin 须同 device 且型号在册，
+    /// P-5 共读源形态由此可判。空串 = 未给（requires 不含 device 的角色不填）
+    pub device: String,
     /// 复位/欠压时的期望物理态：release | hold | driven_low | driven_high（§6 复位语义③）
     pub failsafe: String,
     /// 互斥组（§4.2 裁定：**不再自愿**——由平台 conflicts 表反推，漏声明即红；
@@ -431,7 +437,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         }
     }
     // [[pin]]：可选段（schema 3，增补轮六 §4.2——纯 sim/无硬件格形态不给，此时校验②
-    // 不判：无物理面可绑不等于角色缺失）。字段白名单 RR3_PIN_KEYS 十键、类型逐键点名；
+    // 不判：无物理面可绑不等于角色缺失）。字段白名单 RR3_PIN_KEYS 十一键、类型逐键点名；
     // 身份键 role/direction 解析期即须在场（①缺失语义：role/direction 缺 → 红，判定
     // 不依赖角色表）；instance/controller 及各 requires 键的"在场与留空"在 boot 链按
     // 角色表逐条裁——本函数不带契约真值，不越权判角色语义。
@@ -495,6 +501,12 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                             Some(s) => pin.addr = s.to_string(),
                             None => errs.push(format!(
                                 "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
+                            )),
+                        },
+                        "device" => match v.as_str() {
+                            Some(s) => pin.device = s.to_string(),
+                            None => errs.push(format!(
+                                "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
                             )),
                         },
                         "failsafe" => match v.as_str() {
@@ -933,6 +945,7 @@ fn rr3_pin_field_present(pin: &Rr3PinEntry, field: &str) -> bool {
         "direction" => !pin.direction.is_empty(),
         "rail" => !pin.rail.is_empty(),
         "addr" => !pin.addr.is_empty(),
+        "device" => !pin.device.is_empty(),
         "failsafe" => !pin.failsafe.is_empty(),
         _ => false,
     }
@@ -1384,20 +1397,24 @@ pub fn rr3_profile_boot_inputs_with_probe(
             }
         }
         // 词形漂移：控制器词形已指明总线族，该族派生键必须被角色声明（否则派生视图
-        // 会漏键——roles.derives 与 pin 实况各说一套）
-        for (prefix, key) in [
-            ("pwm", "pwm_chip"),
-            ("gpiochip", "gpio_chip"),
-            ("i2c", "i2c_bus"),
-            ("spidev", "spi_device"),
-        ] {
-            if rr3_controller_wordform(&pin.controller, prefix).is_some()
-                && !derives.iter().any(|d| d == key)
-            {
-                errs.push(format!(
-                    "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
-                    pin.controller, pin.role
-                ));
+        // 会漏键——roles.derives 与 pin 实况各说一套）。derives 显式空的角色跳过
+        // （批N3 件八：P-5 共读源/placeholder 格不派生注入键——"不派生"是声明
+        // 不是漏声明，见 roles.toml 器件三角色注记）
+        if !derives.is_empty() {
+            for (prefix, key) in [
+                ("pwm", "pwm_chip"),
+                ("gpiochip", "gpio_chip"),
+                ("i2c", "i2c_bus"),
+                ("spidev", "spi_device"),
+            ] {
+                if rr3_controller_wordform(&pin.controller, prefix).is_some()
+                    && !derives.iter().any(|d| d == key)
+                {
+                    errs.push(format!(
+                        "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
+                        pin.controller, pin.role
+                    ));
+                }
             }
         }
     }
@@ -1422,7 +1439,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     errs.extend(rr3_check_pin_capabilities(&profile, &roles, &platform));
     // 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；Task 5）：三个资源
     // 空间各自不双占 + 平台 conflicts 反推互斥（组名取自平台表，漏声明即红）。
-    errs.extend(rr3_check_pin_occupancy(&profile, &platform));
+    errs.extend(rr3_check_pin_occupancy(&profile, &platform, &devices));
     // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
     // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
     // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
@@ -1741,12 +1758,21 @@ fn rr3_check_pin_capabilities(
 /// - ③-a 同一 `physical` 元素 ≤ 1 次；
 /// - ③-b 同一 `(controller, channel)` ≤ 1 次（channel 缺席不占通道维，F-7：脚 +
 ///   通道两维，`board.rs:146` 双轴两通道即证）；
-/// - ③-c 同一 `(bus, addr)` ≤ 1 次（addr = "none" 是显式不适值，不占地址维）；
+/// - ③-c 同一 `(bus, addr)` 的多条 pin 须**同 device 且型号在册**（批N3 件八精化，
+///   全案 §5 :437：addr = "none" 是显式不适值，不占地址维；"双占"由无条件的 ≤ 1 次
+///   精化为"共址须同器件"——P-5 裁定 charger 与 battery.meter 共用同一 INA219 读数
+///   源是合法形态，一个物理器件服务两个角色不等于地址冲突；真冲突 = 同址而器件
+///   身份不同或不可判（device 缺省 = 空串），两条各点名）。device 非空即须在册
+///   （门 o 装载侧执法——装配单不得自造型号词），单条 pin 也判；
 /// - ④-b 平台 `conflicts` 命中同一子集而未申报同组 ⇒ 漏声明即红——组名取自平台表
 ///   `[[conflict]].group`，装机档不得自起名（否则 `mux_group` 退回自愿填写）；命中
 ///   是单向含入：构造/冲突表按芯片事实收全，profile 现役绑定只是子集，平台表超出
 ///   现役的部分不算红（芯片事实 ≠ 现役占用）。
-fn rr3_check_pin_occupancy(profile: &Rr3Profile, platform: &Rr3PlatformTable) -> Vec<String> {
+fn rr3_check_pin_occupancy(
+    profile: &Rr3Profile,
+    platform: &Rr3PlatformTable,
+    devices: &Rr3DeviceTable,
+) -> Vec<String> {
     let mut errs = Vec::new();
     let plat = platform.rr3_platform_name();
     // ③-a physical 元素唯一（BTreeMap 定化点名序：首占者记录）。owner 值用
@@ -1755,10 +1781,18 @@ fn rr3_check_pin_occupancy(profile: &Rr3Profile, platform: &Rr3PlatformTable) ->
     let mut phys_owner: BTreeMap<i64, usize> = BTreeMap::new();
     // ③-b (controller, channel) 唯一
     let mut chan_owner: BTreeMap<(String, i64), usize> = BTreeMap::new();
-    // ③-c (bus, addr) 唯一
+    // ③-c (bus, addr) 共址对账：owner 只记首占者索引，同址时对 device 判等
     let mut addr_owner: BTreeMap<(String, String), usize> = BTreeMap::new();
     for (idx, pin) in profile.pins.iter().enumerate() {
         let label = format!("pins[{}]", pin.rr3_pin_id());
+        // device 非空即在册（门 o 装载侧执法：装配单不得自造型号词——型号词的
+        // 取值域 = contracts/devices.toml 在册名单，单条 pin 也判，与共址无关）
+        if !pin.device.is_empty() && !devices.rr3_device_table_contains(&pin.device) {
+            errs.push(format!(
+                "{label} device \"{}\" 未在器件词表在册（门 o：device 外键 → contracts/devices.toml，装配单不得自造型号词）",
+                pin.device
+            ));
+        }
         for p in &pin.physical {
             match phys_owner.get(p) {
                 Some(first) if *first != idx => errs.push(format!(
@@ -1788,16 +1822,31 @@ fn rr3_check_pin_occupancy(profile: &Rr3Profile, platform: &Rr3PlatformTable) ->
         if !pin.controller.is_empty() && !pin.addr.is_empty() && pin.addr != "none" {
             let key = (pin.controller.clone(), pin.addr.clone());
             match addr_owner.get(&key) {
-                Some(first) if *first != idx => errs.push(format!(
-                    "{label} (bus {}, addr {}) 与 pins[{}] 双占（校验③-c：同一 (bus, addr) ≤ 1 次）",
-                    pin.controller,
-                    pin.addr,
-                    profile.pins[*first].rr3_pin_id()
-                )),
+                Some(first) => {
+                    // ③-c 精化（批N3 件八）：共址须同 device 且非空——器件身份
+                    // 不同 = 真冲突（坑 7 与"两块 SSD1306 同址"的区分位），
+                    // device 缺省 = 身份不可判（同址红不可豁免——无身份就没法
+                    // 判"是不是同一个器件"，fail-closed）。两条各点名一条。
+                    let first_pin = &profile.pins[*first];
+                    if pin.device.is_empty() || first_pin.device.is_empty() {
+                        errs.push(format!(
+                            "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 缺省（校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册——共读源须显式登记器件身份，缺省 = 不可判即红）",
+                            pin.controller, pin.addr, first_pin.rr3_pin_id()
+                        ));
+                    } else if pin.device != first_pin.device {
+                        errs.push(format!(
+                            "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 不同（{} vs {}）——校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册（器件身份不同 = 地址冲突，坑 7）",
+                            pin.controller,
+                            pin.addr,
+                            first_pin.rr3_pin_id(),
+                            first_pin.device,
+                            pin.device
+                        ));
+                    }
+                }
                 None => {
                     addr_owner.insert(key, idx);
                 }
-                _ => {}
             }
         }
     }
@@ -2265,6 +2314,14 @@ physical = [12]
 direction = "out"
 rail = "rail5v"
 failsafe = "release"
+mux_group = []
+
+[[pin]]
+role = "sensor.env.meter"
+controller = "i2c1"
+addr = "0x70"
+device = "SHTC3"
+direction = "in"
 mux_group = []
 "#;
 
@@ -2890,8 +2947,9 @@ mux_group = []
             p.slots_device_absent.is_empty(),
             "GOOD 无缺席登记 → 空 map（D3 合法态是可选键）"
         );
-        // [[pin]]：十键逐字段收齐，pin_id 按 per_instance 语法拼装
-        assert_eq!(p.pins.len(), 1, "{:?}", p.pins);
+        // [[pin]]：逐字段收齐，pin_id 按 per_instance 语法拼装（device 批N3 件八进场，
+        // GOOD 的 servo pin 无 I2C 面不填 = 空串；env pin 满配语义全字段收齐）
+        assert_eq!(p.pins.len(), 2, "{:?}", p.pins);
         let pin = &p.pins[0];
         assert_eq!(pin.rr3_pin_id(), "act.axis.pwm.pan");
         assert_eq!(pin.controller, "pwm0");
@@ -2901,6 +2959,14 @@ mux_group = []
         assert_eq!(pin.rail, "rail5v");
         assert_eq!(pin.failsafe, "release");
         assert!(pin.mux_group.is_empty());
+        assert_eq!(pin.device, "", "GOOD servo pin 无器件面，device = 空串");
+        // 第二条 pin：sensor.env.meter（I2C 满配，device 键非空）
+        let env = &p.pins[1];
+        assert_eq!(env.role, "sensor.env.meter");
+        assert_eq!(env.controller, "i2c1");
+        assert_eq!(env.addr, "0x70");
+        assert_eq!(env.device, "SHTC3");
+        assert_eq!(env.direction, "in");
         // [os].route 被无视（运行期不读），但它的存在不构成错误
     }
 
@@ -3415,18 +3481,19 @@ mux_group = []
         let text = format!(
             "{GOOD}\n[[pin]]\nrole = \"\"\ndirection = \"out\"\nwat = 1\nphysical = [\"x\"]\n"
         );
+        // GOOD 现役两条 pin，追加的坏 pin 序号 = #2
         let errs = rr3_profile_from_text(&text).expect_err("形状不合必须报错");
         assert!(
-            errs.iter().any(|e| e.contains("pin #1.role 缺失或为空")),
+            errs.iter().any(|e| e.contains("pin #2.role 缺失或为空")),
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains("pin #1 未知键 wat")),
+            errs.iter().any(|e| e.contains("pin #2 未知键 wat")),
             "{errs:?}"
         );
         assert!(
             errs.iter()
-                .any(|e| e.contains("pin #1.physical 的每一项都必须是整数")),
+                .any(|e| e.contains("pin #2.physical 的每一项都必须是整数")),
             "{errs:?}"
         );
         // 缺 role / 缺 direction（身份键缺席，解析期即红）
@@ -3434,11 +3501,11 @@ mux_group = []
             rr3_profile_from_text(format!("{GOOD}\n[[pin]]\ncontroller = \"pwm1\"\n").as_str())
                 .expect_err("缺 role/direction 必须报错");
         assert!(
-            errs.iter().any(|e| e.contains("pin #1 缺 role")),
+            errs.iter().any(|e| e.contains("pin #2 缺 role")),
             "{errs:?}"
         );
         assert!(
-            errs.iter().any(|e| e.contains("pin #1 缺 direction")),
+            errs.iter().any(|e| e.contains("pin #2 缺 direction")),
             "{errs:?}"
         );
     }
@@ -3590,7 +3657,9 @@ mux_group = []
     }
 
     /// 校验②（后果 = 降不拒）：格位在位且被启用但角色无 [[pin]] 绑定 → (格位, 角色)
-    /// 进 role_missing 清单随 boot 带出，模块照常起——缺角色是缺能力，不是拒 boot
+    /// 进 role_missing 清单随 boot 带出，模块照常起——缺角色是缺能力，不是拒 boot。
+    /// GOOD 补了 sensor.env.meter pin（批N3 件八：sensor.env 有归属角色了，满配须有
+    /// pin——本测试删 servo pin 后清单纯 act.servo 一条；sensor.env pin 在场不误报）
     #[test]
     fn role_missing_is_listed_not_fatal() {
         let root = Root::new("role-missing");
@@ -3603,7 +3672,7 @@ mux_group = []
         assert_eq!(
             boot.role_missing,
             vec![("act.servo".to_string(), "act.axis.pwm".to_string()),],
-            "present ∩ enabled_slots 的格位缺角色逐条点名（sensor.env/cognition.llm 无角色不误报）"
+            "present ∩ enabled_slots 的格位缺角色逐条点名（sensor.env pin 在场不误报）"
         );
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
@@ -4149,24 +4218,84 @@ gnd_common = "star-1"
         );
     }
 
-    /// 校验③-c 反例：同一 (bus, addr) 双占——I2C 地址是独立资源维，同总线上两条
-    /// 绑定抢一个从地址即假账（"none" 是显式不适值，不占地址维不误报）。GOOD 只有
-    /// servo 一条 pin，这里成对追加两条同 (i2c1, 0x40) 的 meter 才构成双占。
+    /// 校验③-c 反例（批N3 件八精化判据）：同一 (bus, addr) 共址而 device 缺省——
+    /// 共址须同 device 且型号在册，器件身份不可判（缺省）即红（P-5 共读源必须显式
+    /// 登记器件身份；"none" 是显式不适值，不占地址维不误报）。GOOD 只有 servo 一条
+    /// pin，这里成对追加两条同 (i2c1, 0x40) 的 meter 才构成共址。
     #[test]
-    fn two_pins_same_bus_addr_is_rejected() {
+    fn two_pins_same_bus_addr_without_device_is_rejected() {
         let text = format!(
             "{GOOD}\n[[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\n\
              addr = \"0x40\"\ndirection = \"in\"\nmux_group = []\n\
-             [[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\n\
+             [[pin]]\nrole = \"power.charger.meter\"\ncontroller = \"i2c1\"\n\
              addr = \"0x40\"\ndirection = \"in\"\nmux_group = []\n"
         );
         let root = Root::new("dup-addr");
         let p = root.write_profile("dup-addr.toml", &text);
-        let e = boot_inputs(&p).expect_err("(bus, addr) 双占必须拒 boot");
+        let e = boot_inputs(&p).expect_err("共址而 device 缺省必须拒 boot");
         assert!(
             e.contains("校验③-c") && e.contains("(bus i2c1, addr 0x40)"),
             "{e}"
         );
+    }
+
+    /// 校验③-c 正例（P-5 共读源形状）：battery 与 charger 同 (i2c1, 0x40) 同
+    /// device = INA219 共用同一读数源——合法不红（一个物理器件服务两个角色不等于
+    /// 地址冲突；device 非空且在册 = 门 o 装载侧执法同时过）。
+    #[test]
+    fn two_pins_same_bus_addr_same_device_is_allowed() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\n\
+             addr = \"0x40\"\ndevice = \"INA219\"\ndirection = \"in\"\nmux_group = []\n\
+             [[pin]]\nrole = \"power.charger.meter\"\ncontroller = \"i2c1\"\n\
+             addr = \"0x40\"\ndevice = \"INA219\"\ndirection = \"in\"\nmux_group = []\n"
+        );
+        let root = Root::new("shared-addr");
+        let p = root.write_profile("shared-addr.toml", &text);
+        let boot = boot_inputs(&p).expect("同址同器件（共读源）应通过");
+        assert!(
+            boot.hal_bindings.contains("i2c_bus = \"1\""),
+            "battery.meter 派生键照常注入（charger derives=[] 不派生）: {:?}",
+            boot.hal_bindings
+        );
+        assert_eq!(
+            boot.hal_bindings.matches("ina219_addr").count(),
+            1,
+            "共读源角色不重复派生（derives=[] 维持注入单真值点）"
+        );
+    }
+
+    /// 校验③-c 反例（器件身份不同 = 真冲突）：同 (i2c1, 0x40) 而两条 device 各说
+    /// 一套——坑 7 的区分位（地址有应答 ≠ 型号正确），两条各点名一条。
+    #[test]
+    fn two_pins_same_bus_addr_mismatched_device_is_rejected() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\n\
+             addr = \"0x40\"\ndevice = \"INA219\"\ndirection = \"in\"\nmux_group = []\n\
+             [[pin]]\nrole = \"power.charger.meter\"\ncontroller = \"i2c1\"\n\
+             addr = \"0x40\"\ndevice = \"SSD1306\"\ndirection = \"in\"\nmux_group = []\n"
+        );
+        let root = Root::new("addr-mix");
+        let p = root.write_profile("addr-mix.toml", &text);
+        let e = boot_inputs(&p).expect_err("共址而 device 不同必须拒 boot");
+        assert!(
+            e.contains("校验③-c") && e.contains("(bus i2c1, addr 0x40)"),
+            "{e}"
+        );
+    }
+
+    /// 门 o 装载侧执法反例：device 非空但型号不在器件词表——装配单不得自造型号词
+    /// （单条 pin 也判，与共址无关）。
+    #[test]
+    fn device_off_vocabulary_is_rejected() {
+        let text = format!(
+            "{GOOD}\n[[pin]]\nrole = \"power.battery.meter\"\ncontroller = \"i2c1\"\n\
+             addr = \"0x40\"\ndevice = \"INMP441\"\ndirection = \"in\"\nmux_group = []\n"
+        );
+        let root = Root::new("dev-word");
+        let p = root.write_profile("dev-word.toml", &text);
+        let e = boot_inputs(&p).expect_err("自造型号词必须拒 boot");
+        assert!(e.contains("门 o") && e.contains("INMP441"), "{e}");
     }
 
     /// 校验④-b 反例：两条 pin 的 physical 命中平台 conflicts 同一子集（esp32 组

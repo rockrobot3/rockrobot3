@@ -215,11 +215,11 @@ impl Rr3RoleTable {
                     e.direction
                 ));
             }
-            if e.derives.is_empty() {
-                errs.push(format!(
-                    "role {name} 的 derives 为空（logic 角色不进本表；无派生键须显式 []）"
-                ));
-            }
+            // derives 允许显式空（批N3 件八放宽）：P-5 共读源角色（power.charger.meter
+            // 与 battery.meter 同一 INA219 读数面）与 placeholder 格角色（env/imu，
+            // 真后端未到无句柄消费）不派生注入键，维持"无第二真值点"。判空即红的
+            // 旧判据撤销——解析层无法区分"缺键"与"显式 []"，显式性由 CI 契约测试
+            // 逐条点名钉住（roles.rs / contract.rs 各一份名单）。
         }
         errs
     }
@@ -232,14 +232,14 @@ mod tests {
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/roles.toml");
 
-    /// 契约必须解析成 7 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 10 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let table = rr3_registry_role_table_from_text(CONTRACT);
         assert_eq!(
             table.roles.len(),
-            7,
-            "契约角色数（批N3 件六 SPI 词形进场后七条）"
+            10,
+            "契约角色数（批N3 件八器件三角色进场后十条）"
         );
         assert_eq!(
             table.rr3_role_table_names(),
@@ -248,8 +248,11 @@ mod tests {
                 "act.led.gpio",
                 "act.relay.gpio",
                 "power.battery.meter",
+                "power.charger.meter",
                 "power.current.sense",
                 "power.rail.sense",
+                "sensor.env.meter",
+                "sensor.imu.meter",
                 "ui.face.spi",
             ]
         );
@@ -340,6 +343,62 @@ mod tests {
             table.rr3_role_table_direction("ui.face.spi").as_deref(),
             Some("out")
         );
+        // 批N3 件八新角色：I2C 读数器件三角色（requires 首引 device 键、derives
+        // 显式空 = 不派生注入键——P-5 共读源与 placeholder 格两形态，见 roles.toml 注记）
+        assert_eq!(
+            table.rr3_role_table_slot("power.charger.meter").as_deref(),
+            Some("power.charger")
+        );
+        assert_eq!(
+            table.rr3_role_table_iface("power.charger.meter").as_deref(),
+            Some("Rr3Power")
+        );
+        assert_eq!(
+            table.rr3_role_table_requires("power.charger.meter"),
+            Some(vec![
+                "controller".to_string(),
+                "addr".to_string(),
+                "device".to_string()
+            ])
+        );
+        assert_eq!(
+            table.rr3_role_table_derives("power.charger.meter"),
+            Some(vec![])
+        );
+        assert_eq!(
+            table.rr3_role_table_droppable("power.charger.meter"),
+            Some(false)
+        );
+        assert_eq!(
+            table.rr3_role_table_per_instance("power.charger.meter"),
+            Some(false)
+        );
+        assert_eq!(
+            table.rr3_role_table_slot("sensor.env.meter").as_deref(),
+            Some("sensor.env")
+        );
+        assert_eq!(
+            table.rr3_role_table_iface("sensor.env.meter").as_deref(),
+            Some("Rr3Sensor")
+        );
+        assert_eq!(
+            table.rr3_role_table_slot("sensor.imu.meter").as_deref(),
+            Some("sensor.imu")
+        );
+        assert_eq!(
+            table.rr3_role_table_iface("sensor.imu.meter").as_deref(),
+            Some("Rr3Sensor")
+        );
+        assert_eq!(
+            table.rr3_role_table_derives("sensor.imu.meter"),
+            Some(vec![])
+        );
+        assert_eq!(
+            table
+                .rr3_role_table_direction("sensor.env.meter")
+                .as_deref(),
+            Some("in")
+        );
         assert!(
             table.rr3_role_table_check().is_empty(),
             "{:?}",
@@ -355,8 +414,9 @@ mod tests {
         assert!(!table.rr3_role_table_check().is_empty());
     }
 
-    /// 形状检查：kind 越界 / direction 越界 / 缺 slot / 缺 iface / requires 空 / 派生键空
-    /// 逐条点名（§4.1 字段域封闭判据的装载侧实现）
+    /// 形状检查：kind 越界 / direction 越界 / 缺 slot / 缺 iface / requires 空
+    /// 逐条点名（§4.1 字段域封闭判据的装载侧实现；derives 空 = 显式不派生合法，
+    /// 批N3 件八放宽——见 rr3_role_table_check 注记，无对应红例）
     #[test]
     fn shape_violations_are_named() {
         let bad = rr3_registry_role_table_from_text(
@@ -399,11 +459,6 @@ per_instance = false
         assert!(
             errs.iter()
                 .any(|e| e.contains("act.led.gpio 缺 iface 外键")),
-            "{errs:?}"
-        );
-        assert!(
-            errs.iter()
-                .any(|e| e.contains("act.led.gpio 的 derives 为空")),
             "{errs:?}"
         );
     }
