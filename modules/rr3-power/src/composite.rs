@@ -8,14 +8,16 @@
 //! 启动序列（自原入口迁入，语义零改动）：读 `RR3_MANIFEST`（rrd spawn 注入的
 //! manifest 绝对路径，supervisor.rs）→ [`Rr3BusClient::rr3_connect`] → 读 config.toml
 //! → 选 HAL 电源面并**开机探活**（Unsupported 即 exit(1)：能力缺失显式回错，不静默
-//! 带病常驻）→ 主循环。本模块没有事务面（module.toml 无 [rpc].exposes），主循环只做
-//! 四件事（第 4 件 `rail.up = true` 才跑）：
+//! 带病常驻）→ 主循环。主循环做五件事（第 4 件 `rail.up = true` 才跑）：
 //! 1. 每 `sample_period_ms` 读一次 HAL 电池 → 发 `battery/state`（首拍即采）；
 //! 2. 电压越过低电阈值的第一拍发 `battery/low`（Rr3LowEdge：同一次低电段恰一次，
 //!    恢复再武装）——rrd 订阅它执行进程内兜底（Q4 裁定），brain 不在场也要能触发；
 //! 3. 每 `state_period_ms` 发 `charger/state`（由最近一次电池读数的 charging 位派生）；
 //! 4. 每 `rail.sample_period_ms` 读一次域压 → ⑥-c2 按龄期折有效档位 → 判定核 →
-//!    发 `rail/state`，越阈首拍出边沿守护行（批N2 件五，P-9 归属搬家）。
+//!    发 `rail/state`，越阈首拍出边沿守护行（批N2 件五，P-9 归属搬家）；
+//! 5. 应答 `rr3-power/ops/list` 点名（批N4 件九二 ops 槽快照读口，白名单组体）——
+//!    power 自此首个事务面主题，点名应答是请求-应答语义（业务性失败折 error），
+//!    与周期拍的传输性失败退出语义分流。
 //!
 //! 失败语义与 sense/interact/act 同一口径：本模块没有调用方，周期采样里**全部**失败
 //! 都是传输性/设备级——HAL 读数失败、发布写不出去都 `eprintln` + `exit(1)`，不装
@@ -38,6 +40,7 @@ use std::time::{Duration, Instant};
 use rr_bus::Rr3BusClient;
 use rr_hal::backend::{rr3_hal_power, rr3_hal_rail};
 use rr_hal_api::{rr3_rail_tier_effective, Rr3BatteryState, Rr3RailState, Rr3RailTier};
+use rr_ipc::{opcode, Rr3PayloadType};
 use serde_json::{json, Value};
 
 use battery::{Rr3BatteryCfg, Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_STATE_TOPIC};
@@ -55,6 +58,10 @@ const RR3_POWER_CONFIG_ENV: &str = "RR3_POWER_CONFIG";
 /// 收帧等待上界兼循环节拍：广播全量扇出会送来与己无关的帧，排空即可，
 /// 采样/充电拍点由 Instant 比较驱动，与帧到达无关
 const RR3_POLL_WAIT: Duration = Duration::from_millis(100);
+
+/// 本模块 exposes 的 ops 槽快照读口（批N4 件九二，module.toml [rpc].exposes 同源）：
+/// 白名单组体应答，槽名与 assemble.toml 槽表申报同源（门 d covers 申报的对账面）
+const RR3_OPS_LIST_TOPIC: &str = "rr3-power/ops/list";
 
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_power_run() -> Result<(), String> {
@@ -141,9 +148,33 @@ pub fn rr3_power_run() -> Result<(), String> {
         if !bus.rr3_connected() {
             return Err("总线已断开（reader EOF）：交 supervisor 按 restart_policy 裁定".into());
         }
-        // 订阅面为空：广播全量扇出送到的帧（module/state 等）只排空不处理
+        // 收帧：广播（与己无关的扇出）只排空；点名 Request 走 rr3.call 语义——
+        // 转发帧的 trace_id=调用方 task（rrd 路由语义），顺原路应答（批N4 件九二起
+        // exposes ops/list，自此有事务面；业务性失败折 error，不当致命错误）
         for frame in bus.rr3_poll_wait(RR3_POLL_WAIT) {
-            let _ = frame;
+            if frame.header.opcode != opcode::SEND {
+                continue;
+            }
+            let Ok((Rr3PayloadType::Request, body)) = Rr3BusClient::rr3_frame_body(&frame) else {
+                continue;
+            };
+            if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
+                continue;
+            }
+            let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
+            let topic = body
+                .get("params")
+                .and_then(|p| p.get("topic"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let result = if topic == RR3_OPS_LIST_TOPIC {
+                json!({ "ops": rr3_power_ops_snapshot(&cfg) })
+            } else {
+                json!({
+                    "error": format!("rr3-power 只 exposes {RR3_OPS_LIST_TOPIC}，收到 {topic}")
+                })
+            };
+            bus.rr3_reply_call(frame.header.trace_id, id, result)?;
         }
 
         // battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，exit(1)；
@@ -243,6 +274,23 @@ fn rr3_battery_low_body(seq: u64, st: Rr3BatteryState) -> Value {
 /// charger/state 流体：charging 是最近一次 battery 读数的派生值
 fn rr3_charger_state_body(seq: u64, charging: bool) -> Value {
     json!({ "seq": seq, "charging": charging })
+}
+
+/// `rr3-power/ops/list` 应答体（批N4 件九二，面板 /api/power/ops 读口）：ops 槽
+/// 快照，**白名单组体**——槽名与 assemble.toml 槽表申报同源（battery/charger 两组，
+/// 门 d covers 申报的对账面），rail 段键不在槽表不在快照面。cutoff_voltage_mv
+/// 如实进快照（策略数据在册），"声明未生效"语义由启动日志与文档承载、不在此折算。
+fn rr3_power_ops_snapshot(cfg: &Rr3PowerCfg) -> Value {
+    json!({
+        "battery": {
+            "sample_period_ms": cfg.battery.sample_period_ms,
+            "low_voltage_mv": cfg.battery.low_voltage_mv,
+            "cutoff_voltage_mv": cfg.battery.cutoff_voltage_mv,
+        },
+        "charger": {
+            "state_period_ms": cfg.charger.state_period_ms,
+        },
+    })
 }
 
 /// rail/state 流体（批N2 件五）：四键 `{seq, mv, age_ms, tier}`——tier 串走

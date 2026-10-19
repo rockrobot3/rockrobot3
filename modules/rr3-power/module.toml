@@ -19,6 +19,11 @@ optional = []
 publishes = ["rr3-power/battery/state", "rr3-power/battery/low", "rr3-power/charger/state", "rr3-power/rail/state"]
 subscribes = []
 
+# ops/list = ops 槽快照读口（批N4 件九二）：白名单四槽应答（battery/charger），
+# 面板观测面读口——power 自此首个事务面主题（此前只发布不点名）
+[rpc]
+exposes = ["rr3-power/ops/list"]
+
 [resources]
 restart_policy = "always"
 mem_limit_mb = 16

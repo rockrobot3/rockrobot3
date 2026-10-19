@@ -24,6 +24,8 @@ exposes = [
     "rr3-connect/wifi/scan",
     "rr3-connect/wifi/connect",
     "rr3-connect/wifi/forget",
+    # ops/list = ops 槽快照读口（批N4 件九二）：白名单四槽应答（bt/wifi），面板观测面读口
+    "rr3-connect/ops/list",
 ]
 
 [resources]

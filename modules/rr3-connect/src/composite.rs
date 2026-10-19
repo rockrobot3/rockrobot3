@@ -15,11 +15,12 @@
 //! manifest 绝对路径，supervisor.rs）→ [`Rr3BusClient::rr3_connect`] → 读
 //! config.toml → 选 HAL 链路面并**开机探活**（Unsupported 即 exit(1)：能力缺失
 //! 显式回错，不静默带病常驻）→ 主循环。主循环做两件事：
-//! 1. 应答本模块 exposes 的四个点名：`cloud/session`（action=open；链路未就绪
-//!    折 error 应答回话）与配网面三 RPC（0.0.4 批D：scan 回 sim 模拟列表、
+//! 1. 应答本模块 exposes 的五个点名：`cloud/session`（action=open；链路未就绪
+//!    折 error 应答回话）、配网面三 RPC（0.0.4 批D：scan 回 sim 模拟列表、
 //!    connect/forget 改 [`wifi::Rr3Provision`] 状态机与**后端承载的凭据**（MC-6：
 //!    先过 `Rr3WifiStore` 落盘/真删，失败折 error 且状态机不动——业务性失败折
-//!    error 应答回话，请求-应答语义不当致命错误）；
+//!    error 应答回话，请求-应答语义不当致命错误）与 `ops/list`（批N4 件九二
+//!    ops 槽快照读口）；
 //! 2. 链路拍：每圈读一次 HAL 链路状态——翻转（`Rr3LinkEdge`）立即发
 //!    `net/link` 不等周期；同态到点才发（周期保底，流是摘要不是逐拍镜像）；
 //!    事件体带 `mode` 字段（配网态 ap|station，随流发布）。
@@ -59,6 +60,10 @@ const RR3_CONNECT_CONFIG_ENV: &str = "RR3_CONNECT_CONFIG";
 
 /// 收帧等待上界兼链路拍节拍下界：翻转检测每圈做，sim 读数廉价；值不敏感
 const RR3_POLL_WAIT: Duration = Duration::from_millis(100);
+
+/// 本模块 exposes 的 ops 槽快照读口（批N4 件九二，module.toml [rpc].exposes 同源）：
+/// 白名单组体应答，槽名与 assemble.toml 槽表申报同源（门 d covers 申报的对账面）
+const RR3_OPS_LIST_TOPIC: &str = "rr3-connect/ops/list";
 
 /// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
 pub fn rr3_connect_run() -> Result<(), String> {
@@ -174,8 +179,9 @@ pub fn rr3_connect_run() -> Result<(), String> {
                     wifi::RR3_WIFI_FORGET_TOPIC => {
                         rr3_handle_wifi_forget(store.as_ref(), &mut prov, &args)
                     }
+                    RR3_OPS_LIST_TOPIC => Ok(json!({ "ops": rr3_connect_ops_snapshot(&cfg) })),
                     other => Err(format!(
-                        "rr3-connect 只 exposes {} 与 wifi/scan|connect|forget，收到 {other}",
+                        "rr3-connect 只 exposes {} 与 wifi/scan|connect|forget|ops/list，收到 {other}",
                         session::RR3_SESSION_TOPIC
                     )),
                 };
@@ -298,6 +304,21 @@ pub fn rr3_wifi_forget_parse_args(args: &Value) -> Result<(), String> {
 /// wifi/forget 结果：清凭据回 ap，回执转移后的模式。（自 wifi 原子件上移）
 pub fn rr3_wifi_forget_result() -> Value {
     json!({ "ok": true, "mode": "ap" })
+}
+
+/// `rr3-connect/ops/list` 应答体（批N4 件九二，面板 /api/connect/ops 读口）：
+/// ops 槽快照，**白名单组体**——槽名与 assemble.toml 槽表申报同源（bt/wifi 两组，
+/// 门 d covers 申报的对账面）；配网凭据（ssid/pass）与链路瞬态（ssid/rssi 等
+/// 运行态）不在快照面——快照只答 config 注入的策略面，瞬态走 net/link 事件流。
+fn rr3_connect_ops_snapshot(cfg: &(Rr3LinkCfg, bool)) -> Value {
+    json!({
+        "bt": { "up": cfg.1 },
+        "wifi": {
+            "link_report_period_ms": cfg.0.link_report_period_ms,
+            "timeout_ms": cfg.0.timeout_ms,
+            "min_pass_len": cfg.0.min_pass_len,
+        },
+    })
 }
 
 /// cloud/session 点名：参数裁决 → 链路裁决 → mock 会话应答（未就绪文案的
