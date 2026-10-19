@@ -29,6 +29,12 @@ pub const RR3_PLATFORM_KINDS: [&str; 7] = ["pwm", "gpio", "i2c", "spi", "vspi", 
 /// 不发明第二套规则语言；扩规则走契约级评审）
 pub const RR3_PLATFORM_OUTPUT_RULES: [&str; 1] = ["complement(input_only_pins)"];
 
+/// `[controller_wordform]` 键域（实-6 (a)，批N4 件七：host 词形派生表——封闭四值，
+/// 只收"由控制器名派生取值"的物理键；physical[0]/channel/addr 类派生不经词形，
+/// 不进本段）。扩键走契约级评审。
+pub const RR3_PLATFORM_WORDFORM_KEYS: [&str; 4] =
+    ["pwm_chip", "gpio_chip", "i2c_bus", "spi_device"];
+
 /// rrd 装载链按 `[platform].chip` 拼文件名的契约目录（施工图 Task 3 Interfaces；
 /// 路径相对 rr-registry crate 根向上三级到仓库根）
 pub const RR3_CONTRACT_PLATFORM_PATH: &str =
@@ -67,6 +73,10 @@ pub struct Rr3PlatformTable {
     capabilities: Rr3Capabilities,
     conflicts: Vec<Rr3ConflictEntry>,
     construction: BTreeMap<String, String>,
+    /// host 词形派生表（实-6 (a)）：派生键 → 控制器名前缀。空表合法 = 本平台无
+    /// host 词形派生面（rtos/bare 档显式声明）；host 档消费时查不到即 fail-closed
+    /// （rrd 派生器逐键红）。
+    controller_wordform: BTreeMap<String, String>,
 }
 
 /// 脚号数组解析：逐元素判非负整数，坏的逐条点名（不静默丢弃）
@@ -119,7 +129,7 @@ pub fn rr3_registry_platform_table_from_text(text: &str) -> Result<Rr3PlatformTa
     };
     let mut errs: Vec<String> = Vec::new();
 
-    // 顶层未知键点名（只认六键）
+    // 顶层未知键点名（只认七键）
     for k in t.keys() {
         if ![
             "schema_version",
@@ -128,11 +138,12 @@ pub fn rr3_registry_platform_table_from_text(text: &str) -> Result<Rr3PlatformTa
             "capabilities",
             "conflict",
             "construction",
+            "controller_wordform",
         ]
         .contains(&k.as_str())
         {
             errs.push(format!(
-                "平台表顶层未知键 {k}（只认 schema_version / platform / controller / capabilities / conflict / construction）"
+                "平台表顶层未知键 {k}（只认 schema_version / platform / controller / capabilities / conflict / construction / controller_wordform）"
             ));
         }
     }
@@ -428,6 +439,42 @@ pub fn rr3_registry_platform_table_from_text(text: &str) -> Result<Rr3PlatformTa
             .push("平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into()),
     }
 
+    // [controller_wordform]：host 词形派生表（实-6 (a)，批N4 件七——规则自 rrd
+    // 硬编码下移平台表）。段缺即红（裁定①）；空表合法 = 显式声明本平台无 host
+    // 词形派生面（rtos/bare 档经 [[construction]] 具名构造直给，esp32 形状）；
+    // host 档消费侧（rrd 派生器）对查不到的词形逐键 fail-closed，空表配 host 档
+    // 必红。键域封闭四值，值 = 非空前缀字符串。
+    match t.get("controller_wordform") {
+        Some(Value::Table(wf)) => {
+            for (k, v) in wf {
+                if !RR3_PLATFORM_WORDFORM_KEYS.contains(&k.as_str()) {
+                    errs.push(format!(
+                        "[controller_wordform] 未知键 {k}（只认词形派生四键 {RR3_PLATFORM_WORDFORM_KEYS:?}；physical/channel/addr 类派生不经词形）"
+                    ));
+                    continue;
+                }
+                match v.as_str() {
+                    Some(p) if !p.trim().is_empty() => {
+                        table.controller_wordform.insert(k.clone(), p.to_string());
+                    }
+                    Some(_) => errs.push(format!(
+                        "[controller_wordform].{k} 词形前缀不得为空串（无词形须删键走空表显式）"
+                    )),
+                    None => errs.push(format!(
+                        "[controller_wordform].{k} 应为字符串前缀，收到 {v:?}"
+                    )),
+                }
+            }
+        }
+        Some(other) => errs.push(format!(
+            "平台表 controller_wordform 应为表（[controller_wordform]），收到 {other:?}"
+        )),
+        None => errs.push(
+            "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
+                .into(),
+        ),
+    }
+
     if errs.is_empty() {
         Ok(table)
     } else {
@@ -489,6 +536,19 @@ impl Rr3PlatformTable {
     pub fn rr3_platform_construction_keys(&self) -> Vec<String> {
         self.construction.keys().cloned().collect()
     }
+
+    /// host 词形前缀查询（实-6 (a)，批N4 件七）：派生键 → 控制器名前缀。查不到 =
+    /// 本平台无该键词形（空表或未录）——rrd 派生器拿 None 必须 fail-closed 红，
+    /// 不许回退硬编码前缀（这正是下移的纪律面）。
+    pub fn rr3_platform_wordform(&self, key: &str) -> Option<&str> {
+        self.controller_wordform.get(key).map(String::as_str)
+    }
+
+    /// 词形表全量（BTreeMap 升序引用）——装载期 ①-f 词形漂移判据遍历用：表里
+    /// 有什么判什么，rrd 零硬编码词形清单（新增词形键 = 改数据，判据自动扩）。
+    pub fn rr3_platform_wordform_map(&self) -> &BTreeMap<String, String> {
+        &self.controller_wordform
+    }
 }
 
 impl Rr3ConflictEntry {
@@ -547,6 +607,9 @@ mod tests {
         // ⑤-a：GPIO34 input-only；GPIO32 可输出（LEDC ch0 在用）
         assert!(esp.rr3_platform_input_only_pins().contains(&34));
         assert!(!esp.rr3_platform_input_only_pins().contains(&32));
+        // 实-6 (a)：esp32 为 rtos 档，词形派生面空表显式（非缺段——缺段在
+        // missing_sections_and_keys_are_named 反例判）
+        assert!(esp.rr3_platform_wordform_map().is_empty());
         // ④-b：I2C0 硬线 {21,22} 与 UART2 {18,19} 两组互斥集
         assert!(esp
             .rr3_platform_conflicts()
@@ -586,15 +649,35 @@ mod tests {
         assert!(rpi
             .rr3_platform_controller_names()
             .contains(&"spi0".to_string()));
+        // 实-6 (a)：host 形态两份词形派生表同形同值（Linux sysfs 命名习惯）——
+        // rr3 派生器的词形前件真值点，四键封闭
+        for t in [rk, rpi] {
+            assert_eq!(
+                t.rr3_platform_wordform_map(),
+                &BTreeMap::from([
+                    ("pwm_chip".to_string(), "pwm".to_string()),
+                    ("gpio_chip".to_string(), "gpiochip".to_string()),
+                    ("i2c_bus".to_string(), "i2c".to_string()),
+                    ("spi_device".to_string(), "spidev".to_string()),
+                ])
+            );
+        }
     }
 
-    /// 缺失语义（裁定①）：最小文本一次点名全部四段；单键缺与段缺同红
+    /// 缺失语义（裁定①）：最小文本一次点名全部五段；单键缺与段缺同红
     #[test]
     fn missing_sections_and_keys_are_named() {
-        // 四段全缺的最小文本：controller / capabilities / conflict / construction 各点名一条
+        // 五段全缺的最小文本：controller / capabilities / conflict / construction /
+        // controller_wordform 各点名一条
         let errs = rr3_registry_platform_table_from_text("schema_version = 1\nplatform = \"t\"\n")
-            .expect_err("缺四段必须红");
-        for needle in ["controller", "capabilities", "conflict", "construction"] {
+            .expect_err("缺五段必须红");
+        for needle in [
+            "controller",
+            "capabilities",
+            "conflict",
+            "construction",
+            "controller_wordform",
+        ] {
             assert!(
                 errs.iter().any(|e| e.contains(needle)),
                 "{needle}: {errs:?}"
@@ -665,5 +748,32 @@ mod tests {
         );
         let errs = rr3_registry_platform_table_from_text(&neg_pin).expect_err("负脚号须红");
         assert!(errs.iter().any(|e| e.contains("非负")), "{errs:?}");
+
+        // 实-6 (a) 词形段三反例：键出域 / 值空串 / 段缺（esp32 空表换段名即段缺）
+        let bad_wf_key =
+            ESP32.replace("[controller_wordform]", "[controller_wordform]\ngpio_line = \"gpio\"");
+        let errs =
+            rr3_registry_platform_table_from_text(&bad_wf_key).expect_err("词形键出域须红");
+        assert!(
+            errs.iter().any(|e| e.contains("controller_wordform") && e.contains("gpio_line")),
+            "{errs:?}"
+        );
+
+        let empty_wf_val = RPI4.replace("pwm_chip = \"pwm\"", "pwm_chip = \"\"");
+        let errs =
+            rr3_registry_platform_table_from_text(&empty_wf_val).expect_err("词形前缀空串须红");
+        assert!(
+            errs.iter().any(|e| e.contains("pwm_chip") && e.contains("不得为空串")),
+            "{errs:?}"
+        );
+
+        let no_wf = RK3566.replace("[controller_wordform]", "[controller_wordform_x]");
+        let errs = rr3_registry_platform_table_from_text(&no_wf).expect_err("词形段缺须红");
+        assert!(
+            errs.iter().any(|e| e.contains("缺 [controller_wordform]")),
+            "{errs:?}"
+        );
+        // 顶层未知键点名同步照出（改名后的 controller_wordform_x 是顶层未知键）
+        assert!(errs.iter().any(|e| e.contains("顶层未知键")), "{errs:?}");
     }
 }

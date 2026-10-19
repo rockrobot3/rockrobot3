@@ -88,3 +88,10 @@ why = "UART2 TX/RX 用 GPIO18/19（批D② 921600 迁定）；GPIO19 与点阵 V
 # （"构造无绑定是否红"按启用格/绑定集裁剪）归装载门（n1-9）裁定，本表不预裁。
 "ledc0:act.axis.pwm:pan" = "ledc"
 "ledc0:act.axis.pwm:tilt" = "ledc"
+
+[controller_wordform]
+# esp32 为 rtos 档：控制器经 [[construction]] 具名构造直给（§4.5 生成物表第 3 行，
+# esp-idf-hal 具名类型不可生成），不走 host 词形派生（rrd 派生器只在 host 档跑）——
+# 空表显式声明（裁定②：空 ≠ 缺，缺段即红）。host 档绝不选本表；若误选（chip 指向
+# esp32 的 host 装配单），rrd 派生器查词形逐键 fail-closed 红、boot 拒。
+# （实-6 (a)，批N4 件七：词形段随基-22 平台表形状强制在册，无词形派生面须显式空。）
