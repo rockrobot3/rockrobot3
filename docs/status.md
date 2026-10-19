@@ -276,7 +276,7 @@
    六单元里只有 brain 看得见（新门 **⑨-r**）；板侧控制面在物理执行**之前**回成功、回显记账角、
    `move_ms` 恒 0 ⇒ 宿主"回显一致性"门**结构性地发现不了拒动**；`rr3_low_gate_release` **零调用方**
    ⇒ 低电闸门一旦置位永不解除（与第五轮"复位即开闸"合起来 = 同一闸门两端都错）；
-   播放点名失败被吞成一行 print 后照常 `chat_rounds+1`、`integrity(0,0)=Ok` ⇒ **"完成一轮"与"播出声"解耦**。
+   播放点名失败被吞成一行 print 后照常 `chat_rounds+1`、`integrity(0,0)=Ok` ⇒ **"完成一轮"与"播出声"解耦**（2026-10-20 对表：两处假通过口已随批N4 件六一笔闭合——`chat_rounds` 拆账 `rounds_replied`/`rounds_audible`、零字节下界进 `rr3_tts_pcm_integrity`，本行取证时点写法保留）。
    **一处宣称订正**：**"板侧双麦 → 宿主 VAD"这一跳结构上不存在**（`rr3-audio-rec` 只依赖 `rr-ipc`+`serde_json`
    不落总线、`rr3_hal_audio_source()` 无 esp32 分支）⇒ §2 表"四件已在板上真跑"已改为如实表述，
    可达终点表 rtos 行"拾音"按此填。**面板也没有舵机端点**（14 端点无 servo、interact 全目录 `servo` 零命中），
@@ -679,6 +679,35 @@ assemble.toml ∪ 组合件 composite.toml），ops 27→36、分母 70→79 双
 逐腿形状、default 注入驱动回落、face/panel/selftest 键回落与拒值）＋connect 22/22；对表五文档
 （interact 册 I-17/I-18、connect 册 N-11、计划 §3、全案 M-2/M-3/M-6/M-10/G-3）＋conventions §2
 件五段。
+
+**2026-10-19～20 批N4 件六～件九笔4（批次N4 收官，门 d 转绿终点达成）**（六笔分立提交，逐笔对表
+见 conventions §2）：①件六一笔 `09df07e`（I-21①③＋B-13①＋B-16①②）——"成功"的假通过口两道
+闭合（`rr3_tts_pcm_integrity` 零字节下界＋`played_ms==0` 折 `tts_play_reject`；面板 `BusCall` 载荷
+判等 `rr3_bus_reply_status` 业务错误折 422 与 502 传输失败分码）＋brain 计账拆账
+`rounds_replied`/`rounds_audible`（`chat_rounds` 退役）＋总线 RPC 超时数据化
+`[rr3-brain.bus].call_timeout_s=30/connect_timeout_s=5`（legacy 两常量退役）＋云面异常收敛一个
+处置点；②件六二笔（B-12 读面）——brain 新 RPC `rr3-brain/ops/list` 白名单六槽应答（密钥与
+`api_key_ref` 不进应答，值零回显守脑面）＋面板 `GET /api/brain/ops` BusCall 透传＋covers 六槽 ⇒
+门 d 红账 79→73 基线同批下调；③件七三笔（实-6 修法，rtos 档"只改数据"补课）——host 词形规则
+下移平台表 `0082114`／桥上配置腿（数据面＋宿主腿 `b9cc482`）／板侧消费腿（`frame.rs` 分发
+`rr3.set_bindings`＋进程级注入单点＋`board.rs` 三常量删除＋自愈 fail-closed 三观测）；
+"改 physical 后板行为变化"的行为判据归真板批（敞口 21 行不结项）；④件八两笔（门 r 定形，二选一
+裁定 **per-unit 日志文件**）——笔1 机制单点 `07b998d`（supervisor stderr 接 `<socket>.log/<unit>.log`
+append、打不开回退 inherit 点名＋单测＋`e2e_unit_log.rs`）；笔2 清零＋执法位（五 Rust 模块 52 处
+stdout 宏→`eprintln!`、brain 12 处 print→`file=sys.stderr`〔brain 扩面同批登记〕＋
+`step "⑨-r"` ⇒ 可数 step 18 行、专属执法位 6 把、待建门 16 把三事实源同批）；⑤件九五笔——
+笔1 openitems.toml 新立（裁定 6.3 开放项数据结构，门 d 差集 73 项五组归因）；笔2 观测面收官
+（契约 32→37＋五模块 ops/list 快照读口＋面板五端点 covers 30 槽 ⇒ 红账 73→43）；笔3 配置面
+（brain `rr3-brain/ops/set` 写口 `rr3_ops_write` 白名单 fail-closed＋live 生效不落盘
+`persisted:false` 如实＋面板 `POST /api/brain/ops` pin 20→21＋applies 第二条申报，covers 六槽
+∪ 不增）；笔4 接线图收官刀 `e0a7c1a`（rrd 第七 ctl 方法 `rr3.ctl.wiring`＋assembly.rs OnceLock
+快照＋[pins]×wiring 全交叉三族三态判据单点＋profile boot 交出快照＋面板 `GET /api/wiring`
+pin 21→22＋covers 四族全集 43 项 ⇒ **红账 43→0、差集空、门 d 转红（差集 > 0 即 FAIL）转绿终点
+达成**；selftest 腿四 wiring 逐条摊开＋verdict 改判"有 fail 即 fail、无 fail 且至少一腿真判 pass
+才 pass"；前端 tab-hw 接线图卡＋自检卡文案同批）。**批次N4 工单全件收官（件一至件九笔4）**；
+decisions.md D6/D7 施工注记同批补登；openitems 四组（pin/role/domain/axis）status=done、
+fields 清空；敞口表无增减（差集红账按章程不进敞口表，机器真值＝步 ⑩；15 行证据半边归验证窗、
+14 行证据半边归真板批维持原状）。
 
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
