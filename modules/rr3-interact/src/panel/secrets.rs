@@ -8,11 +8,12 @@
 //! 接入随装配演进（注记，不 claim）。
 
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs::File;
+use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use rr_ipc::persist::rr3_atomic_store;
 use serde_json::{json, Value};
 
 /// secrets 路径环境变量（brain 侧同名同义——双端单一契约）
@@ -72,7 +73,10 @@ fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
 }
 
 /// upsert 一条（`POST /api/model/key` 的落点）：value 非空=写入/覆盖，空=删除
-/// 该 ref（轮换与撤销一个语义）；ref 只认非空无空白。落盘 0600，父目录 0700。
+/// 该 ref（轮换与撤销一个语义）；ref 只认非空无空白。落盘走 [`rr3_atomic_store`]
+/// （批N4 件四 I-20：原 `truncate(true)` 原地覆盖无 tmp/无 fsync，掉电卡写中间
+/// ⇒ 凭据文件恒 Err 且写侧不能自愈——全案 §19.2 Y-2 判据 2"落盘原子序单点"），
+/// 父目录 0700（tmp 窗口的护城河），rename 后收 0600（敏感面铁律）。
 pub fn rr3_secrets_upsert(ref_name: &str, value: &str) -> Result<(), String> {
     rr3_secrets_upsert_at(&rr3_secrets_path()?, ref_name, value)
 }
@@ -97,15 +101,8 @@ pub fn rr3_secrets_upsert_at(path: &Path, ref_name: &str, value: &str) -> Result
         let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
     let body = json!({ "keys": keys }).to_string();
-    let mut f = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|e| format!("写 {} 失败: {e}", path.display()))?;
-    f.write_all(body.as_bytes())
-        .map_err(|e| format!("写 {} 失败: {e}", path.display()))?;
+    let tmp = path.with_extension("json.tmp");
+    rr3_atomic_store(path, &tmp, body.as_bytes())?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("收 {} 权限失败: {e}", path.display()))?;
     Ok(())
