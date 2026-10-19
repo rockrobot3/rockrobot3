@@ -1525,7 +1525,8 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     );
     // [supplies.budget]（schema 4，批N2 校验⑩ 分母）：rtos 档必填三数键，取值为
     // **声明预算位**——与 profiles/esp32-mini.toml 注释同源（board.rs 任务栈 +
-    // S3 内部 SRAM 堆上限推算 + UART2_TX_RING 常驻缓冲），对账归 0.0.7 真板，
+    // S3 内部 SRAM 堆上限推算 + UART2_TX_RING 常驻缓冲 + audio_q 峰值 + 渲染 +
+    // 板侧配置服务预留，批N4 件二 N-13 全账 16384→98816），对账归 0.0.7 真板，
     // 漂移即红（契约 append 同批更新全部形状 pin）。
     let budget = supplies
         .get("budget")
@@ -1539,7 +1540,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     for (k, expected) in [
         ("task_stack_budget_bytes", 65536),
         ("heap_total_bytes", 327680),
-        ("heap_reserved_bytes", 16384),
+        ("heap_reserved_bytes", 98816),
     ] {
         assert_eq!(
             budget.get(k).and_then(toml::Value::as_integer),
