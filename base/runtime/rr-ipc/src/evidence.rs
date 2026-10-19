@@ -70,12 +70,8 @@ pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
     let path = root.join(format!("{reference}.md"));
     let text = fs::read_to_string(&path)
         .map_err(|e| format!("证据文件读不到（{}）: {e}", path.display()))?;
-    let fields = rr3_evidence_frontmatter(&text).map_err(|e| {
-        format!(
-            "证据文件 {} frontmatter 不合法: {e}",
-            path.display()
-        )
-    })?;
+    let fields = rr3_evidence_frontmatter(&text)
+        .map_err(|e| format!("证据文件 {} frontmatter 不合法: {e}", path.display()))?;
     let declared = fields
         .iter()
         .find(|(k, _)| *k == "form")
@@ -116,7 +112,10 @@ fn rr3_evidence_frontmatter(text: &str) -> Result<Vec<(&str, &str)>, String> {
         let key = key.trim();
         let value = value.trim();
         if !RR3_EVIDENCE_KEYS.contains(&key) {
-            return Err(format!("未知键 {key:?}（只认 {}）", RR3_EVIDENCE_KEYS.join("/")));
+            return Err(format!(
+                "未知键 {key:?}（只认 {}）",
+                RR3_EVIDENCE_KEYS.join("/")
+            ));
         }
         let inner = value
             .strip_prefix('"')
@@ -146,11 +145,8 @@ mod tests {
     /// 测试容器根：temp_dir 下按进程 id + 用例名隔离，尾夹具手清（与 uds.rs
     /// 测试同范式，本 crate dev-dependencies 保持为零）。
     fn ut_root(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "rr3_evidence_ut_{}_{}",
-            std::process::id(),
-            name
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("rr3_evidence_ut_{}_{}", std::process::id(), name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("对拍")).expect("造形态目录");
         dir
@@ -167,7 +163,10 @@ mod tests {
     fn ref_wellformed_accepts_form_plus_four_digits() {
         assert!(rr3_evidence_ref_wellformed("对拍/0001"));
         assert!(rr3_evidence_ref_wellformed("实测/9999"));
-        assert!(!rr3_evidence_ref_wellformed("对拍/0001/x"), "编号段含斜杠红");
+        assert!(
+            !rr3_evidence_ref_wellformed("对拍/0001/x"),
+            "编号段含斜杠红"
+        );
         assert!(!rr3_evidence_ref_wellformed("对拍/001"), "三位编号红");
         assert!(!rr3_evidence_ref_wellformed("对拍/00001"), "五位编号红");
         assert!(!rr3_evidence_ref_wellformed("对拍/00a1"), "编号含字母红");
@@ -209,40 +208,42 @@ mod tests {
     fn verify_rejects_bad_frontmatter_variants() {
         let root = ut_root("bad_fm");
         // 缺必填键
-        ut_write(&root, "对拍/0001", &GOOD_FM.replace("recorder = \"lei_huang\"\n", ""));
-        assert!(
-            rr3_evidence_verify(&root, "对拍/0001")
-                .expect_err("缺键必须红")
-                .contains("缺必填键"),
+        ut_write(
+            &root,
+            "对拍/0001",
+            &GOOD_FM.replace("recorder = \"lei_huang\"\n", ""),
         );
+        assert!(rr3_evidence_verify(&root, "对拍/0001")
+            .expect_err("缺键必须红")
+            .contains("缺必填键"),);
         // 未知键
-        ut_write(&root, "对拍/0002", &GOOD_FM.replace("+++\n", "+++\nextra = \"x\"\n"));
-        assert!(
-            rr3_evidence_verify(&root, "对拍/0002")
-                .expect_err("未知键必须红")
-                .contains("未知键"),
+        ut_write(
+            &root,
+            "对拍/0002",
+            &GOOD_FM.replace("+++\n", "+++\nextra = \"x\"\n"),
         );
+        assert!(rr3_evidence_verify(&root, "对拍/0002")
+            .expect_err("未知键必须红")
+            .contains("未知键"),);
         // 无 frontmatter 定界
         ut_write(&root, "对拍/0003", "纯正文，没有 frontmatter。\n");
-        assert!(
-            rr3_evidence_verify(&root, "对拍/0003")
-                .expect_err("缺定界必须红")
-                .contains("+++"),
-        );
+        assert!(rr3_evidence_verify(&root, "对拍/0003")
+            .expect_err("缺定界必须红")
+            .contains("+++"),);
         // 缺收界
         ut_write(&root, "对拍/0004", &GOOD_FM.replace("+++\n\n正文。\n", ""));
-        assert!(
-            rr3_evidence_verify(&root, "对拍/0004")
-                .expect_err("缺收界必须红")
-                .contains("收界"),
-        );
+        assert!(rr3_evidence_verify(&root, "对拍/0004")
+            .expect_err("缺收界必须红")
+            .contains("收界"),);
         // 值不含引号
-        ut_write(&root, "对拍/0005", &GOOD_FM.replace("form = \"对拍\"", "form = 对拍"));
-        assert!(
-            rr3_evidence_verify(&root, "对拍/0005")
-                .expect_err("值缺引号必须红")
-                .contains("双引号"),
+        ut_write(
+            &root,
+            "对拍/0005",
+            &GOOD_FM.replace("form = \"对拍\"", "form = 对拍"),
         );
+        assert!(rr3_evidence_verify(&root, "对拍/0005")
+            .expect_err("值缺引号必须红")
+            .contains("双引号"),);
         let _ = fs::remove_dir_all(&root);
     }
 

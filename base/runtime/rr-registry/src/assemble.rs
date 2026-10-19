@@ -80,7 +80,9 @@ pub const RR3_ASSEMBLE_HANDLE_TRAITS: &[&str] = &[
 ];
 
 /// 描述符键在册表（真值源 rr-hal descriptor.rs `[hardware]` 键集；C4 批J 裁定
-/// 不扩键，0.0.6 链④真件档按裁定流程扩 `spi_device`——两处同批）
+/// 不扩键，0.0.6 链④真件档按裁定流程扩 `spi_device`——两处同批；批N4 件七(b)
+/// 同款裁定扩板侧配置三键 `i2c_sda`/`i2c_scl`/`adc_rail_pin`——板侧裸寄存器自愈
+/// 路径引脚真值，无 role 对应故不在 [pins] 派生键集，rtos 档 [hardware] 直给）
 pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "alsa_device",
     "pwm_chip",
@@ -92,6 +94,9 @@ pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "ina219_addr",
     "link_ifname",
     "spi_device",
+    "i2c_sda",
+    "i2c_scl",
+    "adc_rail_pin",
 ];
 
 /// 一条句柄声明：件用 `trait_name` 能力面，绑描述符 `desc_key` 键

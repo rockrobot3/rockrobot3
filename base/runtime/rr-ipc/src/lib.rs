@@ -17,6 +17,10 @@ extern crate alloc;
 #[cfg(not(target_os = "none"))]
 extern crate std;
 
+// 板侧绑定载荷真值（批N4 件七(b) 基-24 桥上配置腿）：no_std 纯 core，宿主
+// （rr-hal 下发腿）与板侧（esp32-periph-base 接收腿）两侧消费；JSON 遍历留
+// 各自消费面（本 crate 不引 serde_json——no_std 纪律）。
+pub mod bindings;
 // 证据引用校验（brain B-15，批N4 件一）：std::fs 文件面，与 audio_session 同径
 // cfg 门——裸金属目标不载文件系统；消费面（面板写面/装载期）都在 std 语境。
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -43,11 +47,16 @@ pub use audio_session::{
     handshake, ok_reply_line, read_reply_line, HANDSHAKE_RETRY_PAUSE, HANDSHAKE_TRIES, READ_BLOCK,
     READ_TIMEOUT_MS, REPLY_TIMEOUT_MS, RESYNC_ZERO_BAIL, SETTLE,
 };
+pub use bindings::{
+    rr3_board_binding_entry, rr3_gpio_number_parse, Rr3BoardBindings,
+    RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA,
+    RR3_BOARD_BINDING_KEYS, RR3_METHOD_SET_BINDINGS,
+};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use evidence::{rr3_evidence_ref_wellformed, rr3_evidence_verify};
+pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use persist::rr3_atomic_store;
-pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{

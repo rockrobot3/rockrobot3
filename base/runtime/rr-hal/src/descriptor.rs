@@ -15,8 +15,18 @@
 //! 拒绝，见 rr-registry assemble 模块契约测试）。
 //! 十键批（0.0.6 链④真件档）：MAX7219 显示面随真件落地按裁定流程扩 `spi_device`
 //! 键（spidev 设备路径），rr-registry 在册表与 face 原子 assemble.toml 句柄同批。
+//! 板侧配置三键批（批N4 件七(b) 基-24 桥上配置腿）：`i2c_sda`/`i2c_scl`/
+//! `adc_rail_pin` 进场——板侧裸寄存器自愈路径（I2C unstick）与打印面的引脚真值，
+//! rtos 档 `[hardware]` 原样直给、经桥 `rr3.set_bindings` 注入板侧（载荷键域/取值域
+//! 真值单点 = rr-ipc bindings 模块，本表解析共用其 `rr3_gpio_number_parse`）。
+//! 三键不在 [pins] 派生键集（无 role 对应——自愈路径没有能力面角色，rrd 门 n 不收）；
+//! 扩键裁定与批N3 件六 `spi_device` 同款：契约级评审、rr-registry 在册表两处同批、
+//! contract.rs 机判钉死。三键不设 `RR3_HAL_*` 应急 env 覆盖位（板侧配置随描述符
+//! 走单一路径，不设第二注入面——现场救场改装配单数据 + 重启）。
 
 use std::collections::BTreeMap;
+
+use rr_ipc::rr3_gpio_number_parse;
 
 use crate::backend::{rr3_ina219_addr_parse, rr3_pwm_index_parse};
 
@@ -48,6 +58,13 @@ pub struct Rr3HalBindings {
     pub link_ifname: Option<String>,
     /// spidev 设备路径（显示面 MAX7219；链④真件档，参考机 = /dev/spidev0.0）
     pub spi_device: Option<String>,
+    /// I2C 数据线 GPIO 编号（板侧自愈路径；esp32-mini = 21，真值源
+    /// profiles/esp32-mini.toml [hardware]，经桥 rr3.set_bindings 注入板侧）
+    pub i2c_sda: Option<u8>,
+    /// I2C 时钟线 GPIO 编号（板侧自愈路径；esp32-mini = 22）
+    pub i2c_scl: Option<u8>,
+    /// 电池分压 ADC 输入脚 GPIO 编号（板侧打印面；esp32-mini = 34）
+    pub adc_rail_pin: Option<u8>,
 }
 
 /// 非空串裁决（trim 后空 = 不认）。
@@ -77,6 +94,9 @@ impl Rr3HalBindings {
                 self.gpio_relay_line = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?)
             }
             "i2c_bus" => self.i2c_bus = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
+            "i2c_sda" => self.i2c_sda = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "i2c_scl" => self.i2c_scl = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "adc_rail_pin" => self.adc_rail_pin = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
             "ina219_addr" => self.ina219_addr = Some(rr3_ina219_addr_parse(raw).ok_or_else(bad)?),
             other => {
                 return Err(format!(
@@ -187,9 +207,9 @@ pub fn rr3_hal_bindings_effective() -> Result<Rr3HalBindings, String> {
 mod tests {
     use super::*;
 
-    /// rrd 注入器产物形状的全键正例：九键逐字段落位（值全字符串——注入器已字符串化）。
+    /// rrd 注入器产物形状的全键正例：十三键逐字段落位（值全字符串——注入器已字符串化）。
     #[test]
-    fn full_descriptor_parses_all_nine_keys() {
+    fn full_descriptor_parses_all_thirteen_keys() {
         let text = concat!(
             "alsa_device = \"default\"\n",
             "pwm_chip = \"0\"\n",
@@ -201,6 +221,9 @@ mod tests {
             "ina219_addr = \"0x40\"\n",
             "link_ifname = \"wlan0\"\n",
             "spi_device = \"/dev/spidev0.0\"\n",
+            "i2c_sda = \"21\"\n",
+            "i2c_scl = \"22\"\n",
+            "adc_rail_pin = \"34\"\n",
         );
         let b = rr3_hal_bindings_from_text(text).expect("全键正例必须解析");
         assert_eq!(b.alsa_device.as_deref(), Some("default"));
@@ -213,6 +236,9 @@ mod tests {
         assert_eq!(b.ina219_addr, Some(0x40));
         assert_eq!(b.link_ifname.as_deref(), Some("wlan0"));
         assert_eq!(b.spi_device.as_deref(), Some("/dev/spidev0.0"));
+        assert_eq!(b.i2c_sda, Some(21));
+        assert_eq!(b.i2c_scl, Some(22));
+        assert_eq!(b.adc_rail_pin, Some(34));
     }
 
     /// 空文本 = 空绑定（合法，装配单未给 [hardware]；纯 sim 形态照常起）。
@@ -224,7 +250,7 @@ mod tests {
         );
     }
 
-    /// fail-closed 点名：未知键、坏值（十进制域/裸十六进制/空串）、非字符串值，
+    /// fail-closed 点名：未知键、坏值（十进制域/裸十六进制/空串/越 u8）、非字符串值，
     /// 一次全收集不静默放行。
     #[test]
     fn unknown_keys_and_bad_values_are_all_named() {
@@ -234,10 +260,11 @@ mod tests {
             "ina219_addr = \"40\"\n", // 裸写有十进制歧义，只认 0x 前缀
             "alsa_device = \"  \"\n", // trim 后空 = 不认
             "mystery_key = \"x\"\n",
-            "link_ifname = 3\n", // 非字符串标量
+            "link_ifname = 3\n",   // 非字符串标量
+            "i2c_sda = \"256\"\n", // 板侧键取值域 = u8，越域即红
         );
         let errs = rr3_hal_bindings_from_text(text).expect_err("坏值必须报错");
-        assert_eq!(errs.len(), 6, "{errs:?}");
+        assert_eq!(errs.len(), 7, "{errs:?}");
         assert!(
             errs.iter().any(|e| e.contains("pwm_chip 取值不认")),
             "{errs:?}"
@@ -261,6 +288,10 @@ mod tests {
         assert!(
             errs.iter()
                 .any(|e| e.contains("link_ifname 应为字符串标量")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("i2c_sda 取值不认")),
             "{errs:?}"
         );
     }

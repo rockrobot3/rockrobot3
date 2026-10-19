@@ -892,15 +892,15 @@ fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
 
 /// 词形前缀查询 + fail-closed 守卫（实-6 (a)）：派生键查平台表词形前缀，查不到
 /// 红——不许回退硬编码（回退 = 策略重新住回机制侧，下移作废）。
-fn rr3_platform_wordform_prefix(
-    platform: &Rr3PlatformTable,
-    key: &str,
-) -> Result<String, String> {
-    platform.rr3_platform_wordform(key).map(str::to_string).ok_or_else(|| {
-        format!(
-            "平台事实表 controller_wordform 无 {key} 词形（host 档派生前件缺失，fail-closed）"
-        )
-    })
+fn rr3_platform_wordform_prefix(platform: &Rr3PlatformTable, key: &str) -> Result<String, String> {
+    platform
+        .rr3_platform_wordform(key)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "平台事实表 controller_wordform 无 {key} 词形（host 档派生前件缺失，fail-closed）"
+            )
+        })
 }
 
 /// 单条 pin 的派生取值（机制侧，八物理键封闭）：role.derives（策略，contracts/
@@ -938,9 +938,8 @@ fn rr3_pin_derive_value(
         }
         "spi_device" => {
             let prefix = rr3_platform_wordform_prefix(platform, key)?;
-            let bus = rr3_controller_wordform(&pin.controller, &prefix).ok_or_else(|| {
-                format!("controller 词形 {} 不合 {prefix}<N>", pin.controller)
-            })?;
+            let bus = rr3_controller_wordform(&pin.controller, &prefix)
+                .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))?;
             let cs = pin
                 .channel
                 .map(|c| c.to_string())
@@ -3983,7 +3982,8 @@ gnd_common = "star-1"
     /// `profiles/esp32-mini.toml` + 真 contracts/slots.toml 走完整 boot 输入装配——
     /// 查册/形状门、G6 档位一致性、L-10 tier↔tier_scope 全过；三格自洽
     /// （missing 空 = present/bindings/enabled_slots 三源一致）、装配段扫描零缺口、
-    /// boot 队列恰为两模块、[hardware] 缺省不注入。真板侧运行（限位/时限/饱和
+    /// boot 队列恰为两模块、[hardware] 板侧配置三键直给进注入文本（批N4 件七(b)）。
+    /// 真板侧运行（限位/时限/饱和
     /// 通告、桥断仍守护）触发条件 = 0.0.7 轻承载档真板，本测试只证装配链层
     /// "裁剪 = 改数据"（CI 全集层形状 pin 在 rr-registry contract.rs）。
     #[test]
@@ -4022,9 +4022,14 @@ gnd_common = "star-1"
             "三格全有角色绑定（[[pin]] 真值点在位）: {:?}",
             boot.role_missing
         );
+        // [hardware] 板侧配置三键（批N4 件七(b) 基-24 桥上配置腿）：rtos 档原样
+        // 直给进注入文本（BTreeMap 升序确定性——三键逐名在文，值全字符串形状）
         assert!(
-            boot.hal_bindings.is_empty(),
-            "[hardware] 缺省 + rtos 档不派生 → 不注入物理绑定（板侧描述符归 0.0.7）"
+            boot.hal_bindings.contains("adc_rail_pin = \"34\"")
+                && boot.hal_bindings.contains("i2c_scl = \"22\"")
+                && boot.hal_bindings.contains("i2c_sda = \"21\""),
+            "esp32-mini [hardware] 板侧配置三键必须进 RR3_HAL_BINDINGS 注入文本: {:?}",
+            boot.hal_bindings
         );
     }
 
@@ -4173,7 +4178,10 @@ gnd_common = "star-1"
             platform_esp32_text().replace("[controller_wordform]", "[controller_wordform_x]");
         let e = rr3_profile_from_text_with_platform("wf-missing", &good_esp, &no_wf)
             .expect_err("平台表缺词形段必须拒 boot");
-        assert!(e.contains("controller_wordform") && e.contains("形状不合"), "{e}");
+        assert!(
+            e.contains("controller_wordform") && e.contains("形状不合"),
+            "{e}"
+        );
     }
 
     /// host 档 + 空词形表 = 守卫红（实-6 (a) fail-closed）：rtos 册（esp32）空表
@@ -4181,12 +4189,9 @@ gnd_common = "star-1"
     #[test]
     fn host_tier_with_empty_wordform_table_is_fatal() {
         let good_esp = GOOD.replace("chip = \"rk3566\"", "chip = \"esp32\"");
-        let e = rr3_profile_from_text_with_platform(
-            "host-empty-wf",
-            &good_esp,
-            platform_esp32_text(),
-        )
-        .expect_err("host 档选空词形表必须拒 boot");
+        let e =
+            rr3_profile_from_text_with_platform("host-empty-wf", &good_esp, platform_esp32_text())
+                .expect_err("host 档选空词形表必须拒 boot");
         assert!(e.contains("controller_wordform 为空"), "{e}");
     }
 
