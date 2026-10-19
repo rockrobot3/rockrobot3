@@ -617,6 +617,32 @@
   conventions §2 批N3 条目、敞口 18 行结项＋19 行对表注记＋:90 缺裁定类清零注记、本行同批
   （件九收口对账，本提交，2026-10-19）。
 
+**2026-10-19 批N4 件一～件三**（证据号命名空间＋板侧配置腿选型＋门 d 覆盖率门建成，三件分笔
+落库、本条目随件三同批补登）：①件一 `947af3d`（brain B-15）证据号命名空间——规则落
+conventions §6.1 新段、容器 `docs/evidence/`（README 模板）建成、校验器唯一实现住
+`rr-ipc::evidence`（形制＋存在＋frontmatter 六键＋form 与目录一致，四道 fail-closed 单测钉死）；
+敞口表 15 行结构面注记同批，证据产出归 0.0.6/0.0.7 验证窗，写面挂接随件九端点。②件二
+`1c30b9b`（connect N-13）板侧配置腿选型——载体 esp_http_server（TLS 不做四理由落 connect 册
+N-13 行注记、凭据面不接 N-11）＋堆核算全账进装载校验⑩-b（`profiles/esp32-mini.toml`
+heap_reserved 16384→98816 逐项留痕：UART2_TX_RING＋audio_q 峰值＋渲染＋配置服务预留）＋
+architecture 对表；板上 HTTP 实证与真板堆对账归真板批，敞口表 14 行证据半边维持敞口。③件三
+（本提交，interact I-19）门 d 覆盖率门建成——`panel/server.rs` `RR3_PANEL_ROUTES` 升三元组带
+`covers` 数据化申报（申报制：未申报不计分子；今日 14 端点读配置者 0＝I-15 实况，covers 全
+`&[]` 如实）＋词表常量 `RR3_PANEL_COVER_SETS` 五名（ops/pin/role/domain/axis）码内单真值点＋
+形制单测；`check.sh` 建 `step "⑩ 门 d 面板覆盖率对账·报告模式…"`：分母降字段级五路并集
+（`ops[].slot` ∪ `RR3_PIN_KEYS` ∪ roles.requires 每项 ∪ `RR3_DOMAIN_KEYS` ∪
+`RR3_ACT_PROFILE_FIELDS`）＝70（27+11+7+11+14，五路自代码/契约常量导出）、差集 comm 逐条
+" D " 行打印（ADR-0022 裁定 6.3 开放项的差集产出位）、双行基线 `tools/ci/gate-d-baseline.txt`
+（行 1 红账上限回涨 FAIL／行 2 分母下限缩分母 FAIL——"红项数不许靠缩分母减少"机器化）初值
+70/70 建即红如实在账；fail-closed 四路实测（covers 形制乱写／基线坏／基线缺／分母缩水各一次红）；
+可数 step 16→17 行、专属执法位 5 把不变＋报告位 1→2 把、待建门 18→17 把；差集红账不进敞口表
+（:435 章程"缺码＋工单号不许混装"），机器真值＝步 ⑩ 打印，开放项数据结构表（裁定 6.3）随件九
+面板与运维面同批立；interact 册 I-19 行对表注记＋conventions §2 批N4 条目＋architecture §14
+（门 d 行改已建·报告模式＋计数行补登批N3 件五 ⑨-e 漏更）＋全案 §16.4 同批（件三收口对账，
+本提交，2026-10-19）。**随批补修件一/件二两处漏更**（独立提交，全量门禁回执抓出）：evidence
+README 进 docs/README.md 库地图（⑤ 导航漏链红）＋contract pin `heap_reserved_bytes` 16384→98816
+同批（`esp32_mini_profile_binds_bridged_minimal_shape` 红）。
+
 **0.0.6 版本批次全景（修订版 6 口径）与在制品**：
 
 - ~~**0.0.6 阶段一收尾件（批E'）**~~：**已落库并真板复验结清（`a5b3093` + `f2597d5`）**——boots 三件修复（unit 注入 `RR3_DATA_DIR` + postinst 建目录置属主 + distro-smoke 断言补 ⑧"counters 回写"）+ boards §7 补录 ctl socket root/sudo 现状；板上 restart 落盘 `{"boots":1}`、reboot 自恢复 `{"boots":2}` 跨重启累积成立；ctl socket 加组放行牵动 ADR-0010 权限模型，归阶段二小批（同批核对 unit 补注 `RR3_REBOOT_OK`）；

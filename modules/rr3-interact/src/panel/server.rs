@@ -79,25 +79,40 @@ impl Drop for Rr3ConnSlot {
     }
 }
 
-/// 端点总表（I-9/I-12 唯一真值，0.0.5 批M MC-8③）：`(方法, 路径)` 二元组，
-/// 自述文案与 serve 行的端点数由本表长度推导（文案不手写数字），match 分派与
-/// 本表的漂移由 `route_table_matches_dispatch` 单测钉死——新增端点 = 加表 +
-/// 过漂移门，不再改第三处文案。
-pub const RR3_PANEL_ROUTES: &[(&str, &str)] = &[
-    ("GET", "/"),
-    ("GET", "/api/status"),
-    ("GET", "/api/data"),
-    ("GET", "/api/logs"),
-    ("POST", "/api/relay"),
-    ("POST", "/api/beep"),
-    ("POST", "/api/face"),
-    ("POST", "/api/selftest"),
-    ("POST", "/api/reboot"),
-    ("GET", "/api/wifi/scan"),
-    ("POST", "/api/wifi/connect"),
-    ("POST", "/api/wifi/forget"),
-    ("GET", "/api/model/keys"),
-    ("POST", "/api/model/key"),
+/// covers 申报的集合词表（I-19，批N4 件三）：covers 元素形制 = `<集合>/<字段>`，
+/// 集合只认本表五路——与门 d 分母五路一一对应（`ops[].slot` ∪ `pin_id.field` ∪
+/// `roles.requires` 每项 ∪ `domains` 字段 ∪ 轴档案字段）。check.sh 步 ⑩ 自本常量
+/// 导出词表做 covers 形制校验（单真值点，不抄第二份）；词表外的集合 = 申报无效，
+/// fail-closed 当场红。
+pub const RR3_PANEL_COVER_SETS: [&str; 5] = ["ops", "pin", "role", "domain", "axis"];
+
+/// 端点总表（I-9/I-12 唯一真值，0.0.5 批M MC-8③；covers 申报面随 I-19 批N4 件三
+/// 升三元组）：`(方法, 路径, covers)`——第三列是**数据化申报**：本端点真实
+/// 渲染/写入的可配置集元素（元素形制见 [`RR3_PANEL_COVER_SETS`]），与件
+/// `handles`/`ops` 同一申报范式：**未申报就不计入门 d 分子**（不是"默认全算"，
+/// 端点数 ≠ 面板项数）。自述文案与 serve 行的端点数由本表长度推导（文案不手写
+/// 数字），match 分派与本表的漂移由 `route_table_matches_dispatch` 单测钉死，
+/// covers 词表形制由 `covers_use_declared_vocabulary_only` 单测钉死——新增端点 =
+/// 加表 + 过双门，不再改第三处文案。
+///
+/// 今日实况（I-15）：14 端点读配置者为 0（GET 全是运行态、POST 全是动作），
+/// covers 全空是**如实的**——门 d（check.sh 步 ⑩）建即红，红项随批N4 件九
+/// 三面扩端点逐批转绿（红条数单调不增，基线 tools/ci/gate-d-baseline.txt）。
+pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str])] = &[
+    ("GET", "/", &[]),
+    ("GET", "/api/status", &[]),
+    ("GET", "/api/data", &[]),
+    ("GET", "/api/logs", &[]),
+    ("POST", "/api/relay", &[]),
+    ("POST", "/api/beep", &[]),
+    ("POST", "/api/face", &[]),
+    ("POST", "/api/selftest", &[]),
+    ("POST", "/api/reboot", &[]),
+    ("GET", "/api/wifi/scan", &[]),
+    ("POST", "/api/wifi/connect", &[]),
+    ("POST", "/api/wifi/forget", &[]),
+    ("GET", "/api/model/keys", &[]),
+    ("POST", "/api/model/key", &[]),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -813,7 +828,7 @@ mod tests {
             14,
             "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径"
         );
-        for (method, path) in RR3_PANEL_ROUTES {
+        for (method, path, _covers) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {
                 ("POST", "/api/relay") => br#"{"on":true}"#,
                 ("POST", "/api/face") => br#"{"expression":"happy"}"#,
@@ -835,6 +850,29 @@ mod tests {
             rr3_panel_route("GET", "/api/not-in-table", b""),
             Rr3PanelDispatch::NotFound
         ));
+    }
+
+    /// covers 申报词表形制门（I-19，批N4 件三）：每端点 covers 元素形制必须 =
+    /// `<RR3_PANEL_COVER_SETS 词表集合>/<单段字段>`——集合词表外、缺斜杠、多段
+    /// 都是申报面错，当场红（fail-closed；check.sh 步 ⑩ 侧另以同一词表导出复验，
+    /// 两处真值同源都是本常量）。
+    #[test]
+    fn covers_use_declared_vocabulary_only() {
+        for (method, path, covers) in RR3_PANEL_ROUTES {
+            for c in *covers {
+                let (set, field) = c
+                    .split_once('/')
+                    .unwrap_or_else(|| panic!("{method} {path} 的 covers {c:?} 缺 '/'"));
+                assert!(
+                    RR3_PANEL_COVER_SETS.contains(&set),
+                    "{method} {path} 的 covers {c:?} 集合 {set:?} 不在 RR3_PANEL_COVER_SETS"
+                );
+                assert!(
+                    !field.is_empty() && !field.contains('/'),
+                    "{method} {path} 的 covers {c:?} 字段段须非空且单段"
+                );
+            }
+        }
     }
 
     /// 越权拒的静态形态：路由器里没有"发布"这种产物——relay 只能以
