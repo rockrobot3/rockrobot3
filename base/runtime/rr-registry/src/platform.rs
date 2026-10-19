@@ -750,12 +750,14 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("非负")), "{errs:?}");
 
         // 实-6 (a) 词形段三反例：键出域 / 值空串 / 段缺（esp32 空表换段名即段缺）
-        let bad_wf_key =
-            ESP32.replace("[controller_wordform]", "[controller_wordform]\ngpio_line = \"gpio\"");
-        let errs =
-            rr3_registry_platform_table_from_text(&bad_wf_key).expect_err("词形键出域须红");
+        let bad_wf_key = ESP32.replace(
+            "[controller_wordform]",
+            "[controller_wordform]\ngpio_line = \"gpio\"",
+        );
+        let errs = rr3_registry_platform_table_from_text(&bad_wf_key).expect_err("词形键出域须红");
         assert!(
-            errs.iter().any(|e| e.contains("controller_wordform") && e.contains("gpio_line")),
+            errs.iter()
+                .any(|e| e.contains("controller_wordform") && e.contains("gpio_line")),
             "{errs:?}"
         );
 
@@ -763,7 +765,8 @@ mod tests {
         let errs =
             rr3_registry_platform_table_from_text(&empty_wf_val).expect_err("词形前缀空串须红");
         assert!(
-            errs.iter().any(|e| e.contains("pwm_chip") && e.contains("不得为空串")),
+            errs.iter()
+                .any(|e| e.contains("pwm_chip") && e.contains("不得为空串")),
             "{errs:?}"
         );
 
