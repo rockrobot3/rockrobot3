@@ -302,6 +302,29 @@ manifest 真实落盘＋夹具树 Drop 清理）＋`rr3_start_manifest_stub` 后
 终点表 RK3566 观测格、索引 §14.7、architecture v0.16 段④与 §13 装载门行、开发计划 §3、本节。
 敞口表无增减；敞口 20 修法半边已落、证据半边（出厂机真跑启动日志＋坏接线档拒起对照）归真板批
 不结项。
+**2026-10-21 对表（批N5 件五：出厂自检判据四缺口四笔收官）**：
+判据原文＝全案 §17 出厂自检行＋§20.1 Z-4 行（"包内四份契约文件齐全且 sha 对"）。
+笔1 F-31 预期表进判（`6f32e94`）——`[rr3-interact.selftest.expect]` 预期表落装（固定腿
+speaker/relay/face 逐名三态值域闭集＋组预期 zero-fail），verdict 纯函数化改判**逐腿结果集与
+预期集等值**（F-31：整体红绿是派生量非判据），段/键缺省回落全 pass＋组零 fail，未知腿名/
+在册外值 fail-closed 拒 boot；笔2 speaker 内置测试音（`dcdb28f`）——beep 臂合成 440Hz/200ms
+短正弦直喂播放面（同径 volume_pct 增益），波形源进程内自持不再依赖 tts_pcm 流（I-21① 由构造
+保证），speaker 恒败腿自此消失（D15"测试音内置策略件补回"兑现，落批N5 件五非裁定原文的
+批N4）；笔3 wiring ⑦-c1 额定加总族（`b5016eb`）——wiring 带 feeds 后按 net 拓扑加总判
+（F-10 峰值直加 Σpeak≤rated_a×1000，三色 DFS 环/悬空即漂移 fail，菱形分叉只收账一次），判据
+真值单点仍在 `rr3_assembly_cross_checks`，装载期不预支（裕量取值是策略位须数据承载，⑦-c2
+件侧归批N2）；笔4 契约 sha 链（本笔）——rrd 新 `contracts.rs`：手写 FIPS 180-4 sha256
+（rrd 零密码学依赖纪律，NIST 五向量钉正确性）＋boot 装载链验收后契约四册
+（topics/slots/roles/devices）sha256 记账快照（OnceLock，定格点 fail-closed 拒 boot）＋第八
+ctl 方法 `rr3.ctl.contracts`（白名单七 ctl→八 ctl，`--manifest` 调试路径 `available:false`
+如实）＋自检腿五 contracts"齐全且 sha 对"（缺册＝齐全破、sha 漂＝sha 对破，判据同质无 n-a
+豁免面）＋面板 selftest `contracts/*` 组 verdict 加 zero-fail 臂（与 wiring/* 同规则）＋预期表
+contracts 键。门 d 分母 79 不动（无新 HTTP 端点，covers 零波及）。单测：rrd lib 250（＋sha256
+向量＋判果渲染两用例）、e2e_profile 5（＋契约问询四册点名）、interact 62（＋五腿/预期表/
+正弦确定性对拍）。**批N5 件五全件收官**（笔0–笔4）。对表十处：status.md 能力行十二方法与本
+轮次条、开发计划 §3、interact README beep/selftest 行、索引 D15、全案 §17/§20.1、ADR-0010、
+rrd-rpc.md ctl 表（补 wiring 行——件九笔4 漏登，本批同批补齐）、architecture devices 行、本节。
+敞口表无增减。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`

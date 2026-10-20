@@ -49,7 +49,7 @@ use face::{
 };
 use panel::server::{
     rr3_panel_serve, Rr3PanelAction, Rr3PanelLimits, Rr3PanelShared, Rr3SelftestExpect,
-    RR3_SELFTEST_LEG_STATES, RR3_SELFTEST_WIRING_EXPECTS,
+    RR3_SELFTEST_CONTRACTS_EXPECTS, RR3_SELFTEST_LEG_STATES, RR3_SELFTEST_WIRING_EXPECTS,
 };
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
@@ -130,7 +130,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
     // I-17/I-18② 新增键随批N4 件五进自述：节拍/兜底表情/面板并发与自检期望；
     // 批N5 件五 F-31 预期表随行（verdict 判据数据化，改表即改红绿）。
     eprintln!(
-        "config 就绪: face non_pointable={} tick_ms={} default={} player prebuffer_ms={} volume_pct={} panel max_conns={} selftest face_expect={} expect[speaker={},relay={},face={},wiring={}]",
+        "config 就绪: face non_pointable={} tick_ms={} default={} player prebuffer_ms={} volume_pct={} panel max_conns={} selftest face_expect={} expect[speaker={},relay={},face={},wiring={},contracts={}]",
         rr3_face_non_pointable_join(&cfg.face.non_pointable),
         cfg.face.face_tick_ms,
         cfg.face.default_expr,
@@ -141,7 +141,8 @@ pub fn rr3_interact_run() -> Result<(), String> {
         cfg.selftest.expect.speaker,
         cfg.selftest.expect.relay,
         cfg.selftest.expect.face,
-        cfg.selftest.expect.wiring
+        cfg.selftest.expect.wiring,
+        cfg.selftest.expect.contracts
     );
 
     let (mut sink, backend) = rr3_hal_audio_sink();
@@ -686,6 +687,16 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
                                 )
                             })?;
                     }
+                    // contracts 组（批N5 件五笔4，Z-4）：同 wiring 组的闭集对账
+                    "contracts" => {
+                        selftest.expect.contracts = Rr3SelftestExpect::rr3_contracts_lookup(sval)
+                            .ok_or_else(|| {
+                                format!(
+                                    "config [rr3-interact.selftest.expect] contracts 非在册组预期 {sval:?}（在册值 {}）",
+                                    RR3_SELFTEST_CONTRACTS_EXPECTS.join("/")
+                                )
+                            })?;
+                    }
                     leg @ ("speaker" | "relay" | "face") => {
                         let st = Rr3SelftestExpect::rr3_state_lookup(sval).ok_or_else(|| {
                             format!(
@@ -701,7 +712,7 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
                     }
                     other => {
                         return Err(format!(
-                            "config [rr3-interact.selftest.expect] 未知腿名 {other:?}（在册腿 speaker/relay/face/wiring）"
+                            "config [rr3-interact.selftest.expect] 未知腿名 {other:?}（在册腿 speaker/relay/face/wiring/contracts）"
                         ))
                     }
                 }
@@ -1007,21 +1018,23 @@ face_expect = "happy"
     #[test]
     fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
         let minimal = "[rr3-interact.face]\nnon_pointable = []\n";
-        // 段/键缺省：预期表回落固定腿全 pass + wiring 组零 fail
+        // 段/键缺省：预期表回落固定腿全 pass + 两组零 fail
         let cfg = rr3_interact_config_parse(minimal).unwrap();
         assert_eq!(cfg.selftest.expect.speaker, "pass");
         assert_eq!(cfg.selftest.expect.relay, "pass");
         assert_eq!(cfg.selftest.expect.face, "pass");
         assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
+        assert_eq!(cfg.selftest.expect.contracts, "zero-fail");
         // 显式值合法读入：在册三态任选（恒败形态可如实申报期望 fail/n-a）
         let cfg = rr3_interact_config_parse(
-            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"fail\"\nrelay = \"pass\"\nface = \"n-a\"\nwiring = \"zero-fail\"\n",
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"fail\"\nrelay = \"pass\"\nface = \"n-a\"\nwiring = \"zero-fail\"\ncontracts = \"zero-fail\"\n",
         )
         .unwrap();
         assert_eq!(cfg.selftest.expect.speaker, "fail");
         assert_eq!(cfg.selftest.expect.relay, "pass");
         assert_eq!(cfg.selftest.expect.face, "n-a");
         assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
+        assert_eq!(cfg.selftest.expect.contracts, "zero-fail");
         // 三态值域外拒：非在册判值点名
         let e = rr3_interact_config_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"ok\"\n",
@@ -1037,6 +1050,15 @@ face_expect = "happy"
         )
         .unwrap_err();
         assert!(e.contains("非在册组预期"), "组预期词表点名: {e}");
+        // contracts 组预期词表外拒（批N5 件五笔4，同闭集）
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\ncontracts = \"zero_fail\"\n",
+        )
+        .unwrap_err();
+        assert!(
+            e.contains("非在册组预期") && e.contains("contracts"),
+            "组预期词表点名: {e}"
+        );
         // 未知腿名拒：腿册外预期不容静默（fail-closed）
         let e = rr3_interact_config_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\narm = \"pass\"\n",
