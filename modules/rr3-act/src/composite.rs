@@ -299,10 +299,12 @@ pub fn rr3_act_run() -> Result<(), String> {
     // 主循环状态：限速门 + 流序 + 低电禁动闸门（MC-5）＋ 执行轴状态（前段已解析，
     // 批N3 件三建、件五扩形——行程真值随路）。
     // 闸门复位保守默认（§6 复位语义④）：构造即闭锁未武装。host 档现无轨压样本流
-    // （rr3-runtime/system/power 只广播低电上升沿、无 OK 帧，e2e_power 已点名），
-    // 起手武装 + 解禁是**窄化的诚实开局**：假设轨压健康，把"订阅 battery/state
-    // 判新鲜样本再武装"的喂入面挂账批N3 件七（D5 读数位）。trip 随闭锁撤销武装，
-    // 此后 host 无样本可再武装 → 拒动直至重启（与既有"无 release 路径"事实一致）。
+    // （rr3-runtime/system/power 自批N5 件二笔3 起两值 reason——battery-low/battery-ok，
+    // 解除沿已进场、e2e_power_ok 点名；battery-ok 到本侧只点名不解禁，见订阅臂——
+    // 解禁只认轨压样本），起手武装 + 解禁是**窄化的诚实开局**：假设轨压健康，把
+    // "订阅 battery/state 判新鲜样本再武装"的喂入面挂账批N3 件七（D5 读数位）。
+    // trip 随闭锁撤销武装，此后 host 无样本可再武装 → 拒动直至重启（battery-ok
+    // 不构成样本，解除归喂入面）。
     let mut servo_seq: u64 = 0;
     let mut relay_seq: u64 = 0;
     let mut servo_gate = servo::Rr3RateGate::rr3_gate_new(cfg.servo.state_min_interval_ms);
@@ -415,11 +417,18 @@ pub fn rr3_act_run() -> Result<(), String> {
                 let topic = body.get("topic").and_then(Value::as_str).unwrap_or("");
                 // 低电禁动闸门（MC-5 §20 ② ①）：触发源唯一 = rrd 低电旗广播
                 // `rr3-runtime/system/power`（判定已在 power 侧、rrd 置旗已在，件内
-                // 不再判定电压）。置位即闭锁执行面；trip 自带去抖（同段重复广播只记账一次）。
+                // 不再判定电压）。置位即闭锁执行面；trip 自带去抖（重复广播不翻转）。
+                // 批N5 件二笔3 波及订正：该主题现两值 reason——battery-low 闭锁；
+                // **battery-ok 是解除广播，不闭锁也不解禁**（解禁只认轨压样本，复位
+                // 语义④；低电段中本件重启会被解除广播误闭锁至重启，缺 reason/未知值
+                // 按 fail-closed 闭锁安全向）。
                 if topic == RR3_SYSTEM_POWER_TOPIC {
-                    if low_gate.rr3_low_gate_trip() {
+                    let reason = body.get("reason").and_then(Value::as_str).unwrap_or("");
+                    if reason == "battery-ok" {
+                        eprintln!("低电禁动：battery-ok 解除广播不闭锁（本侧解禁只认轨压样本，喂入面挂账批N3 件七）");
+                    } else if low_gate.rr3_low_gate_trip() {
                         eprintln!(
-                            "低电禁动：执行面（servo/relay）闭锁，妆面不受辖（{RR3_SYSTEM_POWER_TOPIC}）"
+                            "低电禁动：执行面（servo/relay）闭锁，妆面不受辖（{RR3_SYSTEM_POWER_TOPIC} reason={reason}）"
                         );
                     }
                     continue;
