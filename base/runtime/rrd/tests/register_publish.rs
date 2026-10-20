@@ -456,7 +456,12 @@ fn legal_publish_is_forwarded_to_other_peers() {
         "发布是广播语义"
     );
     assert_eq!(rr3_json_of(&got)["seq"], 1, "体必须原样转发");
-    rrd.rr3_assert_no_log("拒绝", Duration::from_millis(150));
+    // needle 收窄（基-23 夹具适配）：监听面夹具改走缺格跳过装配单正门，启动期会打
+    // 一行"拒绝启动 rr3-listenstub：缺格 act.servo"（见 support::rr3_listen_profile），
+    // rr3_logs 全量回放必把它带进来。这条断言抓的是"合法发布被 rrd 拒"——发布拒因
+    // 实词见 registry.rs（"未注册主题 …，拒绝发布"），用"拒绝发布"仍抓得住拒发，
+    // 不再误伤启动期的"拒绝启动"（判据收窄，不变弱）。
+    rrd.rr3_assert_no_log("拒绝发布", Duration::from_millis(150));
 
     // F1（评审 I-1）：b 侧的正向断言只证明"帧到了别人"，不证明"没回到自己手上"。
     // "排除项 = 发布者 task" 是 `conn.rs` 的接线选择（`rr3_reg_fanout(&frame, me.task)`），

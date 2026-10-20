@@ -39,7 +39,14 @@ pub struct RrdConfig {
     pub contracts: Option<PathBuf>,
 }
 
-const USAGE: &str = "用法: rrd [--socket <path>] [--topics-overlay <path>] [--contracts <dir>] [--profile <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]\n说明: --contracts 定位包内契约目录（topics.toml/slots.toml，缺省编译期仓内路径——deb 装机必给）。--boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。--profile 与 --manifest 不得同给（Q3：profile 装机正门，--manifest 调试后门）。";
+/// 装配面必选门（基-23，L-31 的出口）：既无 `--profile` 又无 `--manifest` 即拒。
+/// 没有装配面 = 装载门整体被跳过（None 臂空 hal_bindings 空降级集、十条校验一个
+/// 判定位都不跑而 rrd 退出码 0）——那正是"门在什么条件下被跳过"这道缝本身。
+/// 正门（--profile，装机）与后门（--manifest，调试）二选一，Q3 裁定的两路径形状
+/// 不变，只是"两可都不选"从此不是合法启动方式。拒绝发生在 parse 处，非 0 退出。
+const ASSEMBLY_SURFACE_REQUIRED: &str = "启动缺装配面：--profile（装机正门）与 --manifest（调试后门）至少给其一——两者都不给时装载门整体不跑（rrd 空起、十条校验零判定位），基-23 起不再合法";
+
+const USAGE: &str = "用法: rrd [--socket <path>] [--contracts <dir>] (--profile <path> | --manifest <path> | --manifest <path> --manifest <path> ...) [--topics-overlay <path>] [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]\n说明: --contracts 定位包内契约目录（topics.toml/slots.toml，缺省编译期仓内路径——deb 装机必给）。--boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。装配面必选（基-23）：--profile（装机正门）与 --manifest（调试后门）至少给其一；两者同给也拒（Q3：两路径共用仲裁与 spawn，不双真值）。";
 
 /// `--profile` 与 `--manifest` 同给当场拒的共用文案（两处分支同一句，不许各说一套）。
 /// 拒绝发生在 parse 处：非 0 退出，没有任何"后给者赢"或"合并两份"的歧义路径（Q3 裁定细则）。
@@ -194,6 +201,11 @@ pub fn rr3_cli_parse_with_env(
     if cfg.socket.as_os_str().is_empty() {
         return Err("--socket 不得为空".to_string());
     }
+    // 装配面必选门（基-23）：放在 socket 空检查之后——参数形状错误（缺值/未知开关）
+    // 在循环内已拒，双缺是"形状合法但语义不合法"的最后一道，报错也要最后说。
+    if cfg.profile.is_none() && cfg.manifests.is_empty() {
+        return Err(format!("{ASSEMBLY_SURFACE_REQUIRED}\n{USAGE}"));
+    }
     Ok(cfg)
 }
 
@@ -252,7 +264,13 @@ mod tests {
 
     #[test]
     fn defaults_come_from_contract_constants() {
-        let cfg = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        // 装配面必选门（基-23）后"纯缺省"不再可解析：本用例只关心与装配面无关的
+        // 默认值，走 --profile 正门满足必选门（manifests 缺省空断言由它保住）
+        let cfg = rr3_cli_parse_with_env(
+            &a(&["--profile", "/root/profiles/default.toml"]),
+            &env_none,
+        )
+        .unwrap();
         // M-6：原来这里还有一行 `assert_eq!(cfg.socket, rr3_default_socket(&env_none))`，
         // 两边同走一个函数、恒真（自证），删掉。真正起锚作用的是下面与契约常量的对账。
         assert_eq!(
@@ -276,12 +294,20 @@ mod tests {
     /// 都从同一个 parse 出来，漂任何一个都会让集成测试的时间口径与生产不一致。
     #[test]
     fn watchdog_tick_is_configurable_and_never_zero() {
-        let ok = rr3_cli_parse_with_env(&a(&["--socket", "/tmp/x.sock"]), &env_none).unwrap();
+        let ok = rr3_cli_parse_with_env(
+            &a(&["--manifest", "/m/d.toml", "--socket", "/tmp/x.sock"]),
+            &env_none,
+        )
+        .unwrap();
         assert_eq!(
             ok.watchdog_tick_ms, 200,
             "默认 tick 必须与 USAGE/字段文档同口径"
         );
-        let ok = rr3_cli_parse_with_env(&a(&["--watchdog-tick-ms", "20"]), &env_none).unwrap();
+        let ok = rr3_cli_parse_with_env(
+            &a(&["--manifest", "/m/d.toml", "--watchdog-tick-ms", "20"]),
+            &env_none,
+        )
+        .unwrap();
         assert_eq!(ok.watchdog_tick_ms, 20);
         let err = rr3_cli_parse_with_env(&a(&["--watchdog-tick-ms", "0"]), &env_none).unwrap_err();
         assert!(
@@ -297,34 +323,51 @@ mod tests {
     /// rrd 校验它就要跟着夹具新增的脚本一起改（第二处真值），而且真设备模块根本不读这个变量。
     #[test]
     fn boot_role_defaults_to_resident_and_is_pass_through_verbatim() {
-        let dflt = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        // 各分支只关心 boot_role 的缺省与透传，统一带 --manifest 满足装配面必选门
+        let dflt =
+            rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
         assert_eq!(
             dflt.boot_role, "resident",
             "默认必须是 resident（与夹具不传 RR3_SIM_PEER_ROLE 时的回落一致）"
         );
         // 原样透传：不做大小写归一、不裁剪、不映射
         for role in ["abort", "go_silent", "publish_once", "SOME-UNKNOWN-role"] {
-            let got = rr3_cli_parse_with_env(&a(&["--boot-role", role]), &env_none).unwrap();
+            let got = rr3_cli_parse_with_env(
+                &a(&["--manifest", "/m/d.toml", "--boot-role", role]),
+                &env_none,
+            )
+            .unwrap();
             assert_eq!(
                 got.boot_role, role,
                 "rrd 不校验 role 取值，必须逐字进 cfg（{role} 被改写就是它在替夹具做主）"
             );
         }
         // 空值拒，且文案要点名开关与理由
-        let e = rr3_cli_parse_with_env(&a(&["--boot-role", ""]), &env_none).unwrap_err();
+        let e = rr3_cli_parse_with_env(
+            &a(&["--manifest", "/m/d.toml", "--boot-role", ""]),
+            &env_none,
+        )
+        .unwrap_err();
         assert!(
             e.contains("--boot-role") && e.contains("不得为空") && e.contains("用法"),
             "报错要点名开关、理由与用法: {e}"
         );
         // 缺值走 need_value 的同一条口径（`--boot-role` 是最后一个参数）
-        let e = rr3_cli_parse_with_env(&a(&["--boot-role"]), &env_none).unwrap_err();
+        let e = rr3_cli_parse_with_env(
+            &a(&["--manifest", "/m/d.toml", "--boot-role"]),
+            &env_none,
+        )
+        .unwrap_err();
         assert!(
             e.contains("--boot-role 缺参数") && e.contains("用法"),
             "{e}"
         );
         // 疑似开关的值不当 role 吞下（否则后面那个真开关就被吃了，与 need_path_value 同形）
-        let e = rr3_cli_parse_with_env(&a(&["--boot-role", "--socket", "/tmp/x.sock"]), &env_none)
-            .unwrap_err();
+        let e = rr3_cli_parse_with_env(
+            &a(&["--manifest", "/m/d.toml", "--boot-role", "--socket", "/tmp/x.sock"]),
+            &env_none,
+        )
+        .unwrap_err();
         assert!(
             e.contains("--boot-role 缺参数") && e.contains("--socket"),
             "必须点名被误当值的开关: {e}"
@@ -337,11 +380,14 @@ mod tests {
     fn default_socket_follows_bus_env() {
         let injected =
             |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-env.sock".to_string());
-        let cfg = rr3_cli_parse_with_env(&a(&[]), &injected).unwrap();
+        let cfg = rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &injected).unwrap();
         assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-env.sock"));
         // 命令行显式给值时压过 env
-        let overridden =
-            rr3_cli_parse_with_env(&a(&["--socket", "/tmp/rr3-m2-order.sock"]), &injected).unwrap();
+        let overridden = rr3_cli_parse_with_env(
+            &a(&["--manifest", "/m/d.toml", "--socket", "/tmp/rr3-m2-order.sock"]),
+            &injected,
+        )
+        .unwrap();
         assert_eq!(overridden.socket, PathBuf::from("/tmp/rr3-m2-order.sock"));
     }
 
@@ -351,10 +397,11 @@ mod tests {
     fn default_socket_comes_from_injected_env() {
         let injected =
             |k: &str| (k == RR3_BUS_PATH_ENV).then(|| "/tmp/rr3-m2-inject.sock".to_string());
-        let cfg = rr3_cli_parse_with_env(&a(&[]), &injected).unwrap();
+        let cfg = rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &injected).unwrap();
         assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-inject.sock"));
         // 表里没有这个键 → 回落契约常量（两条分支各自可达，不是一律吞注入值）
-        let none = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        let none =
+            rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
         assert_eq!(none.socket, PathBuf::from(RR3_UDS_PATH_DEFAULT));
     }
 
@@ -363,8 +410,12 @@ mod tests {
     /// `rr3_cli_parse` 被悄悄改成"常量默认值"而没人发现。
     #[test]
     fn production_entry_delegates_to_the_process_env() {
-        let from_parse = rr3_cli_parse(&a(&[])).unwrap();
-        let from_reader = rr3_cli_parse_with_env(&a(&[]), &|k| std::env::var(k).ok()).unwrap();
+        let from_parse = rr3_cli_parse(&a(&["--manifest", "/m/d.toml"])).unwrap();
+        let from_reader =
+            rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &|k| {
+                std::env::var(k).ok()
+            })
+            .unwrap();
         assert_eq!(from_parse, from_reader);
         match std::env::var(RR3_BUS_PATH_ENV) {
             Ok(v) => assert_eq!(
@@ -397,14 +448,11 @@ mod tests {
         );
     }
 
-    /// `--profile`（0.0.2 Q3）：默认 None、与叠加层可并存、路径口径与其它路径开关一致
+    /// `--profile`（0.0.2 Q3）：显式值原样携带、与叠加层可并存、路径口径与其它路径开关一致。
+    /// "缺省 None 即后门路径"的旧读法随装配面必选门（基-23）作废：None 只有在
+    /// manifests 非空（--manifest 后门）时才合法，纯 None 由双缺拒用例钉住。
     #[test]
-    fn profile_is_optional_and_coexists_with_overlay() {
-        let dflt = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
-        assert_eq!(
-            dflt.profile, None,
-            "不带 --profile 就是后门路径，默认值必须为 None"
-        );
+    fn profile_is_the_front_door_and_coexists_with_overlay() {
         let cfg = rr3_cli_parse_with_env(
             &a(&[
                 "--topics-overlay",
@@ -430,17 +478,45 @@ mod tests {
         );
     }
 
+    /// 装配面必选门（基-23，L-31 的出口）：`--profile` 与 `--manifest` 都不给即拒——
+    /// 否则装载门整体被跳过（daemon None 臂空 hal_bindings 空降级集，十条校验一个
+    /// 判定位都不跑而 rrd 退出码 0）。拒在 parse 处非 0 退出；文案要点名两个开关、
+    /// 为什么（装载门整体不跑）与用法。
+    #[test]
+    fn assembly_surface_is_mandatory_neither_flag_is_rejected() {
+        for args in [a(&[]), a(&["--socket", "/tmp/x.sock"]), a(&["--boot-role", "x"])] {
+            let e = rr3_cli_parse_with_env(&args, &env_none).expect_err("双缺必须拒");
+            assert!(
+                e.contains("启动缺装配面")
+                    && e.contains("--profile")
+                    && e.contains("--manifest")
+                    && e.contains("装载门整体不跑")
+                    && e.contains("基-23")
+                    && e.contains("用法"),
+                "报错要点名开关、理由与用法: {e}"
+            );
+        }
+        // 两面各给其一必须收（门不拦合法路径）：正门/后门各验一次
+        assert!(rr3_cli_parse(&a(&["--profile", "/p.toml"])).is_ok());
+        assert!(rr3_cli_parse(&a(&["--manifest", "/m.toml"])).is_ok());
+    }
+
     /// `--contracts`（0.0.2 T5）：默认 None（编译期仓内路径）、显式值原样携带、
     /// 路径口径与其它路径开关同族（缺参数 / `-` 开头值都拒）。
     #[test]
     fn contracts_is_optional_with_shared_path_flag_rules() {
-        let dflt = rr3_cli_parse_with_env(&a(&[]), &env_none).unwrap();
+        let dflt = rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
         assert_eq!(
             dflt.contracts, None,
             "不带 --contracts 就是仓内编译期路径，默认值必须为 None"
         );
         let cfg = rr3_cli_parse_with_env(
-            &a(&["--contracts", "/usr/lib/rockrobot3/contracts"]),
+            &a(&[
+                "--manifest",
+                "/m/d.toml",
+                "--contracts",
+                "/usr/lib/rockrobot3/contracts",
+            ]),
             &env_none,
         )
         .unwrap();
@@ -551,7 +627,7 @@ mod tests {
         );
         // 1 是下界本身，必须收：否则"拒 0"会悄悄变成"拒一切小值"
         assert_eq!(
-            rr3_cli_parse(&a(&["--restart-base-ms", "1"]))
+            rr3_cli_parse(&a(&["--manifest", "/m/d.toml", "--restart-base-ms", "1"]))
                 .unwrap()
                 .restart_base_ms,
             1
@@ -567,8 +643,13 @@ mod tests {
         let max_ok = u64::MAX / last;
         // 常量和表必须同源：改表（加一档、把末档改成 120）不改常量的话，溢出缝就悄悄回来了
         assert_eq!(RR3_RESTART_BASE_MS_MAX, max_ok, "上界必须由退避表末档导出");
-        let ok = rr3_cli_parse(&a(&["--restart-base-ms", &max_ok.to_string()]))
-            .expect("末档乘上去仍不溢出的值必须收");
+        let ok = rr3_cli_parse(&a(&[
+            "--manifest",
+            "/m/d.toml",
+            "--restart-base-ms",
+            &max_ok.to_string(),
+        ]))
+        .expect("末档乘上去仍不溢出的值必须收");
         assert_eq!(ok.restart_base_ms, max_ok);
         let e = rr3_cli_parse(&a(&["--restart-base-ms", &(max_ok + 1).to_string()]))
             .expect_err("溢出必须拒，不能饱和成「永不重启」");
