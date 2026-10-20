@@ -22,7 +22,7 @@ use rr_registry::Rr3RoleTable;
 
 use crate::axis::Rr3AxisFile;
 use crate::profile::Rr3Profile;
-use crate::wiring::Rr3Wiring;
+use crate::wiring::{Rr3Wire, Rr3Wiring};
 
 /// 一份装配快照（不可变）。成员全是 boot 链已装载并验收的原值（clone 语义），
 /// 不做第二次解析——快照 = "本进程 boot 时装载面看到的世界"。PartialEq（无
@@ -35,6 +35,10 @@ pub struct Rr3AssemblySnapshot {
     pub profile: Rr3Profile,
     /// 接线档（校验⑦-a/b/d 验收后的线组）
     pub wiring: Rr3Wiring,
+    /// 器件表的 mate → peak_ma 索引（装载链同一份 `contracts/devices.toml` 派生，
+    /// 非第二真值点）：额定加总族（校验⑦-c1·自检时点判，批N5 件五）的峰值事实源，
+    /// 判据真值单点仍住 [`rr3_assembly_cross_checks`]。
+    pub peak_by_mate: BTreeMap<String, i64>,
     /// 轴档案（`hardware/<形态>/axis/*.toml` 全量合法装载件，件二装载器产物；
     /// 非投影选轴——面板出图要看见全部轴，投影 RR3_ACT_AXIS_STATE 只属于注入面）
     pub axis: Vec<Rr3AxisFile>,
@@ -67,7 +71,8 @@ pub const RR3_CHECK_NA: &str = "not-applicable";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rr3AssemblyCheck {
     /// 点名位：`signal:<连接器>[<导体序>]:<信号>` / `net:<连接器>:<网络>` /
-    /// `pin:<pin_id>`（与 wiring 档九字段、[pins] 外键语法同一套词）
+    /// `rated:<连接器>` / `pin:<pin_id>`（与 wiring 档九字段、[pins] 外键语法
+    /// 同一套词）
     pub item: String,
     /// 三态判果（[`RR3_CHECK_PASS`] / [`RR3_CHECK_FAIL`] / [`RR3_CHECK_NA`]）
     pub pass: &'static str,
@@ -75,13 +80,19 @@ pub struct Rr3AssemblyCheck {
     pub reason: String,
 }
 
-/// [pins]×wiring 全交叉逐条点名（纯函数，判据真值单点）。三族：
+/// [pins]×wiring 全交叉逐条点名（纯函数，判据真值单点）。四族：
 /// - **signal 族**（wiring→pins 方向，装载期⑦-a 的自检时点复演）：每线组每导体，
 ///   `vcc`/`gnd` 记 not-applicable（供电/地导体非 pin 引用，⑦-a 豁免面），其余
 ///   须在 pin_id 集——装载期已执法，这里复演防"快照与装载面漂移"（漂移即 fail，
 ///   正是自检要抓的）；
 /// - **net 族**（⑦-b 复演）：每线组 net，`none` 记 not-applicable（纯信号/地线组），
 ///   其余须在 domains 名集；
+/// - **额定加总族**（校验⑦-c1·自检时点判——装载期 ⑦-c1 待建，先在自检点判，
+///   同落点族先例）：每线组，本线 + feeds 闭包各线组按 mate 查器件峰值加总
+///   ≤ `rated_a × 1000`（§5 ⑦-c1 / F-10 拓扑加总，不逐角色判）；`net = "none"`
+///   纯信号/地线组记 not-applicable（⑦-c1 无判据面）；feeds 一般环/悬空装载期
+///   不判（闭合面只拒自环/悬空在册）——环即快照与装载面漂移，fail，正是自检
+///   要抓的；
 /// - **落点族**（pins→wiring 方向，装载期未判的自检新判据）：每 pin_id 数接线
 ///   引用导体数，≥1 记 pass；**零引用记 not-applicable**——现役合法态（ui.face.spi
 ///   物理走线总线钉死不占连接器维 / power.charger.meter 共读源 / env·imu 占位格 /
@@ -90,6 +101,7 @@ pub struct Rr3AssemblyCheck {
 pub fn rr3_assembly_cross_checks(
     profile: &Rr3Profile,
     wiring: &Rr3Wiring,
+    peak_by_mate: &BTreeMap<String, i64>,
 ) -> Vec<Rr3AssemblyCheck> {
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
     let domain_names: BTreeSet<&str> = profile
@@ -101,6 +113,12 @@ pub fn rr3_assembly_cross_checks(
     let mut out = Vec::new();
     // pin_id → 接线引用导体数（落点族判据面；signal 族顺路记账，一遍扫完两族）
     let mut refs: BTreeMap<&str, usize> = BTreeMap::new();
+    // 额定加总族的闭包图：位号 → 线组（feeds 位号集装载期已判在本档内闭合）
+    let by_conn: BTreeMap<&str, &Rr3Wire> = wiring
+        .wires
+        .iter()
+        .map(|w| (w.connector.as_str(), w))
+        .collect();
     for w in &wiring.wires {
         for (k, sig) in w.signal.iter().enumerate() {
             let item = format!("signal:{}[{}]:{sig}", w.connector, k);
@@ -146,6 +164,60 @@ pub fn rr3_assembly_cross_checks(
                 reason: "net 不在 domains（校验⑦-b 破——快照与装载面漂移）".to_string(),
             });
         }
+        // 额定加总族（校验⑦-c1·自检时点判——装载期 ⑦-c1 待建，先在自检点判，
+        // 同落点族先例）。判据 = §5 ⑦-c1 / F-10 修法（按 net 拓扑加总，不逐角色
+        // 判）：本线 + feeds 闭包（自反——本线对端器件的峰值是本线的主负载）各
+        // 线组按 mate 查器件峰值（mate = "none" 直连无注册对端型号，负载未注册
+        // 按 0 计——诚实边界），Σ peak_ma ≤ rated_a × 1000。裕量 = 1（F-10 峰值
+        // 直加口径；带裕量的装载期语义归其批，取值须数据承载、不入机制）。
+        // mate 非 none 必在器件 mate 集（装载期⑦-d 已判），查不到只会是契约坏形
+        // （rr3_device_table_check 点名 peak_ma 缺失），按 0 计不隐藏也不炸。
+        let item = format!("rated:{}", w.connector);
+        if w.net == "none" {
+            out.push(Rr3AssemblyCheck {
+                item,
+                pass: RR3_CHECK_NA,
+                reason: "纯信号/地线组，不承载电力导体（校验⑦-c1 无判据面）".to_string(),
+            });
+        } else {
+            let peak = |g: &Rr3Wire| -> i64 {
+                if g.mate == "none" {
+                    0
+                } else {
+                    peak_by_mate.get(g.mate.as_str()).copied().unwrap_or(0)
+                }
+            };
+            match rated_closure(w, &by_conn) {
+                Err(fault) => out.push(Rr3AssemblyCheck {
+                    item,
+                    pass: RR3_CHECK_FAIL,
+                    reason: format!("feeds {fault}——额定加总不可判（快照与装载面漂移，正是自检要抓的）"),
+                }),
+                Ok(closure) => {
+                    let sum_ma: i64 = closure.iter().map(|g| peak(g)).sum();
+                    if sum_ma as f64 > w.rated_a * 1000.0 {
+                        out.push(Rr3AssemblyCheck {
+                            item,
+                            pass: RR3_CHECK_FAIL,
+                            reason: format!(
+                                "馈线峰值加总 {sum_ma}mA > 本线额定 {}mA（校验⑦-c1 破——F-10：本线 + feeds 闭包 {} 组按拓扑加总，不逐角色判）",
+                                w.rated_a * 1000.0,
+                                closure.len()
+                            ),
+                        });
+                    } else {
+                        out.push(Rr3AssemblyCheck {
+                            item,
+                            pass: RR3_CHECK_PASS,
+                            reason: format!(
+                                "馈线峰值加总 {sum_ma}mA ≤ 本线额定 {}mA（校验⑦-c1 额定加总·自检时点判——F-10 拓扑加总；mate=none 直连负载未注册按 0 计）",
+                                w.rated_a * 1000.0
+                            ),
+                        });
+                    }
+                }
+            }
+        }
     }
     for pin in &profile.pins {
         let id = pin.rr3_pin_id();
@@ -165,6 +237,43 @@ pub fn rr3_assembly_cross_checks(
         }
     }
     out
+}
+
+/// feeds 自反闭包（含起点——本线组对端器件的峰值是本线的主负载，F-10 的
+/// "该线承载之和"）+ 环检测：三色迭代 DFS，gray 重逢 = 环，black 重逢 = 菱形
+/// 分叉（两条路汇到同一线组，只收账一次，不误报）。Err = 闭包不可判的漂移：
+/// "环"（装载期闭合面只拒自环，一般环漏到这里 = 快照与装载面漂移）或"悬空"
+/// （feeds 指向不在册位号——装载期已拒，同理漂移；防御分支保纯函数对任意
+/// 输入不炸）。
+fn rated_closure<'a>(
+    start: &'a Rr3Wire,
+    by_conn: &BTreeMap<&str, &'a Rr3Wire>,
+) -> Result<Vec<&'a Rr3Wire>, &'static str> {
+    let mut color: BTreeMap<&str, u8> = BTreeMap::new(); // 1 = 在栈，2 = 已收账
+    let mut stack: Vec<(&Rr3Wire, usize)> = vec![(start, 0)];
+    let mut acc: Vec<&Rr3Wire> = Vec::new();
+    color.insert(start.connector.as_str(), 1);
+    while let Some((w, i)) = stack.pop() {
+        if i < w.feeds.len() {
+            let next = w.feeds[i].as_str();
+            stack.push((w, i + 1));
+            match color.get(next) {
+                Some(&1) => return Err("环"),
+                // 2 = 已收账（black 重逢——菱形分叉只收账一次，不误报环）；
+                // 其余值按构造不可达（只写 1/2）
+                Some(_) => {}
+                None => {
+                    let nw = by_conn.get(next).copied().ok_or("悬空")?;
+                    color.insert(next, 1);
+                    stack.push((nw, 0));
+                }
+            }
+        } else {
+            color.insert(w.connector.as_str(), 2);
+            acc.push(w);
+        }
+    }
+    Ok(acc)
 }
 
 /// `rr3.ctl.wiring` 应答渲染（纯函数）。字段面 = 门 d 分母四路的字段级全集
@@ -242,7 +351,7 @@ pub fn rr3_assembly_render(s: &Rr3AssemblySnapshot) -> Value {
             "derives": s.roles.rr3_role_table_derives(name),
             "direction": s.roles.rr3_role_table_direction(name),
         })).collect::<Vec<Value>>(),
-        "checks": rr3_assembly_cross_checks(p, &s.wiring).iter().map(|c| {
+        "checks": rr3_assembly_cross_checks(p, &s.wiring, &s.peak_by_mate).iter().map(|c| {
             json!({ "item": c.item, "pass": c.pass, "reason": c.reason })
         }).collect::<Vec<Value>>(),
     })
@@ -361,6 +470,7 @@ mod tests {
             profile_name: "test形态".into(),
             profile,
             wiring,
+            peak_by_mate: BTreeMap::from([("SG90-3P".to_string(), 700)]),
             axis,
             roles,
         }
@@ -381,9 +491,9 @@ mod tests {
     }
 
     #[test]
-    fn cross_checks_cover_three_families_with_three_states() {
+    fn cross_checks_cover_four_families_with_three_states() {
         let s = snapshot();
-        let checks = rr3_assembly_cross_checks(&s.profile, &s.wiring);
+        let checks = rr3_assembly_cross_checks(&s.profile, &s.wiring, &s.peak_by_mate);
         // signal 族 3 导体：vcc/gnd 记 not-applicable，pin 导体记 pass
         let sig = |item: &str| checks.iter().find(|c| c.item == item).expect("点名位必在");
         assert_eq!(sig("signal:J3[0]:vcc").pass, RR3_CHECK_NA);
@@ -391,6 +501,9 @@ mod tests {
         assert_eq!(sig("signal:J3[2]:gnd").pass, RR3_CHECK_NA);
         // net 族：在册域 pass（none 形状归独立用例）
         assert_eq!(sig("net:J3:rail5v").pass, RR3_CHECK_PASS);
+        // 额定加总族：J3 电力线组（mate=none 负载未注册按 0 计，feeds=[]）判 pass
+        assert_eq!(sig("rated:J3").pass, RR3_CHECK_PASS);
+        assert!(sig("rated:J3").reason.contains("⑦-c1"), "{:?}", sig("rated:J3").reason);
         // 落点族：pan 有 1 导体引用 pass；face.spi 零引用记 not-applicable（合法态）
         assert_eq!(sig("pin:act.axis.pwm.pan").pass, RR3_CHECK_PASS);
         assert_eq!(sig("pin:ui.face.spi").pass, RR3_CHECK_NA);
@@ -409,11 +522,93 @@ mod tests {
                 gnd_common: "none".into(),
             }],
         };
-        let bad = rr3_assembly_cross_checks(&s.profile, &broken);
+        let bad = rr3_assembly_cross_checks(&s.profile, &broken, &s.peak_by_mate);
         assert_eq!(bad[0].pass, RR3_CHECK_FAIL);
         assert!(bad[0].reason.contains("⑦-a"));
         assert_eq!(bad[1].pass, RR3_CHECK_FAIL);
         assert!(bad[1].reason.contains("⑦-b"));
+        // 额定加总族在 fail 场合照常收账（JX 电力线组照判，与 ⑦-a/⑦-b 的红同帧）
+        assert_eq!(bad[2].pass, RR3_CHECK_PASS);
+        assert!(bad[2].reason.contains("⑦-c1"), "{:?}", bad[2].reason);
+    }
+
+    /// 额定加总族（校验⑦-c1·自检时点判）四态：F-10 红例形状（主供线额定不足）、
+    /// 菱形分叉只收账一次、feeds 一般环 fail（装载期闭合面只拒自环，环即漂移）、
+    /// 自反口径钉门（本线对端负载计入"该线承载之和"）。
+    #[test]
+    fn rated_sum_family_judges_f10_topology_sum() {
+        let s = snapshot(); // peak_by_mate：SG90-3P → 700mA
+        let mk = |connector: &str, feeds: Vec<&str>, rated: f64| crate::wiring::Rr3Wire {
+            connector: connector.into(),
+            hdr_pin: vec![1, 2],
+            signal: vec!["vcc".into(), "gnd".into()],
+            net: "rail5v".into(),
+            feeds: feeds.into_iter().map(str::to_string).collect(),
+            mate: "SG90-3P".into(),
+            keyed: true,
+            rated_a: rated,
+            gnd_common: "star-1".into(),
+        };
+        fn c<'a>(checks: &'a [Rr3AssemblyCheck], item: &str) -> &'a Rr3AssemblyCheck {
+            checks
+                .iter()
+                .find(|x| x.item == item)
+                .unwrap_or_else(|| panic!("点名位 {item} 必在: {checks:?}"))
+        }
+        // F-10 红例形状：主供线 1.0A 自挂 + 下馈两条 1.0A 舵机线 ⇒ 700×3 = 2100 > 1000 红
+        let wiring = crate::wiring::Rr3Wiring {
+            wires: vec![
+                mk("J1", vec!["J2", "J3"], 1.0),
+                mk("J2", vec![], 1.0),
+                mk("J3", vec![], 1.0),
+                crate::wiring::Rr3Wire {
+                    connector: "J9".into(),
+                    hdr_pin: vec![1],
+                    signal: vec!["gnd".into()],
+                    net: "none".into(),
+                    feeds: vec![],
+                    mate: "none".into(),
+                    keyed: false,
+                    rated_a: 0.5,
+                    gnd_common: "none".into(),
+                },
+            ],
+        };
+        let checks = rr3_assembly_cross_checks(&s.profile, &wiring, &s.peak_by_mate);
+        assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_FAIL);
+        assert!(c(&checks, "rated:J1").reason.contains("2100"), "{:?}", c(&checks, "rated:J1").reason);
+        assert_eq!(c(&checks, "rated:J2").pass, RR3_CHECK_PASS);
+        assert_eq!(c(&checks, "rated:J3").pass, RR3_CHECK_PASS);
+        // net = none 纯信号/地线组：⑦-c1 无判据面，not-applicable
+        assert_eq!(c(&checks, "rated:J9").pass, RR3_CHECK_NA);
+
+        // 自反口径：单线 0.5A 自挂 700mA 舵机 ⇒ 本线承载之和含自身对端，红
+        let solo = crate::wiring::Rr3Wiring { wires: vec![mk("J7", vec![], 0.5)] };
+        let checks = rr3_assembly_cross_checks(&s.profile, &solo, &s.peak_by_mate);
+        assert_eq!(c(&checks, "rated:J7").pass, RR3_CHECK_FAIL);
+        assert!(c(&checks, "rated:J7").reason.contains("700"), "{:?}", c(&checks, "rated:J7").reason);
+
+        // 菱形分叉不是环：J1→{J2,J3}、J2→J4、J3→J4 ⇒ J4 只收账一次，Σ = 700×4 = 2800
+        let diamond = crate::wiring::Rr3Wiring {
+            wires: vec![
+                mk("J1", vec!["J2", "J3"], 4.0),
+                mk("J2", vec!["J4"], 1.0),
+                mk("J3", vec!["J4"], 1.0),
+                mk("J4", vec![], 1.0),
+            ],
+        };
+        let checks = rr3_assembly_cross_checks(&s.profile, &diamond, &s.peak_by_mate);
+        assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_PASS);
+        assert!(c(&checks, "rated:J1").reason.contains("2800"), "{:?}", c(&checks, "rated:J1").reason);
+
+        // feeds 一般环：J5→J6→J5（装载期闭合面只拒自环，环漏进快照即漂移）——双红
+        let cycle = crate::wiring::Rr3Wiring {
+            wires: vec![mk("J5", vec!["J6"], 3.0), mk("J6", vec!["J5"], 1.0)],
+        };
+        let checks = rr3_assembly_cross_checks(&s.profile, &cycle, &s.peak_by_mate);
+        assert_eq!(c(&checks, "rated:J5").pass, RR3_CHECK_FAIL);
+        assert!(c(&checks, "rated:J5").reason.contains("环"), "{:?}", c(&checks, "rated:J5").reason);
+        assert_eq!(c(&checks, "rated:J6").pass, RR3_CHECK_FAIL);
     }
 
     #[test]
