@@ -13,11 +13,19 @@
 # schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
 # 子段进场（⑩-a/⑩-b 分母，ADR-0021 修订 3"栈/堆预算不住 platform 表"）——新必填段
 # 随版本 bump（批N1 [[supplies.domain]] 先例），3→4 为破坏性变更。
+# schema_version = 5（0.0.5 增补轮六批N5，F-30 环容量判据落数据）：[runtime] rrd
+# 运行参数段进场，首键 log_ring_cap 日志环容量（行数）——宿主运维参数与外设绑定
+# 分家，不进 [hardware]/[[pin]] 注入面（不上桥）；装载期缺即红，4→5 为破坏性变更。
 
-schema_version = 4
+schema_version = 5
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：日志环容量（行数）。满了丢最旧（环形语义），
+# `rr3.ctl.logs` 读环尾；daemon 启动一次定格，装载期缺键即拒 boot。
+log_ring_cap = 512
 
 [platform]
 # 平台档位（ADR-0018 修订 1：host / rtos / bare 三档）。参考机跑完整 Linux 底座 = host。

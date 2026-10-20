@@ -215,13 +215,16 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    /// 装配单最小夹具（schema_version = 4，与 e2e_act PROFILE 同形状缩减到
+    /// 装配单最小夹具（schema_version = 5，与 e2e_act PROFILE 同形状缩减到
     /// 一条舵机轴 pin）——写入面的输入只有它，接线档与模块装配都不需要。
     const PROFILE: &str = r#"
-schema_version = 4
+schema_version = 5
 
 [os]
 route = "distro"
+
+[runtime]
+log_ring_cap = 512
 
 [platform]
 tier = "host"

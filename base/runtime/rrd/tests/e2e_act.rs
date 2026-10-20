@@ -50,11 +50,15 @@ fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
 /// （批N3 件三：执行轴状态注入的正例基底），led/relay 的角色照旧缺绑定，校验②
 /// 记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
 /// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。
+/// schema_version=5 起 [runtime] 必填（批N5 件二 F-30）——log_ring_cap 进场。
 const PROFILE: &str = r#"
-schema_version = 4
+schema_version = 5
 
 [os]
 route = "distro"
+
+[runtime]
+log_ring_cap = 512
 
 [platform]
 tier = "host"

@@ -533,10 +533,10 @@ watchdog_timeout_ms = 5000\n";
         std::fs::create_dir_all(repo.join("profiles")).unwrap();
         std::fs::write(
             repo.join("profiles/default.toml"),
-            // schema_version=4 形状（批N2 [supplies.budget] 进场，校验⑩ 分母）：host 档
+            // schema_version=5 形状（批N5 [runtime] 进场，F-30 环容量落数据）：host 档
             // 合法不适用显式写；本夹具不声明 [pins]，"a.b" 是夹具自造格位，本函数
             // 只走形状解析（rr3_profile_from_text），不查册。
-            "schema_version = 4\n\n[platform]\ntier = \"host\"\nchip = \"rk3566\"\n\n\
+            "schema_version = 5\n\n[runtime]\nlog_ring_cap = 512\n\n[platform]\ntier = \"host\"\nchip = \"rk3566\"\n\n\
              [supplies]\nwatchdog_present = false\nwatchdog_timeout_ms = 15000\n\
              watchdog_feeder = \"none\"\ntick_period_ms = 200\ntick_jitter_ms = 100\n\
              safety_core_interval_ms = 1000\n\n\

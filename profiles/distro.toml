@@ -12,11 +12,17 @@
 # 两非引脚键，与 default 同板同引脚（[[pin]] 逐值一致）。
 # schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
 # 子段进场（⑩-a/⑩-b 分母），与 default 同板同值——3→4 为破坏性变更。
+# schema_version = 5（0.0.5 增补轮六批N5，F-30 环容量判据落数据）：[runtime] rrd
+# 运行参数段进场（log_ring_cap 与 default 同值）——装载期缺即红，4→5 为破坏性变更。
 
-schema_version = 4
+schema_version = 5
 
 [os]
 route = "distro" # distro | buildroot（双轨见 ADR-0013）
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：日志环容量（行数），取值与 default 同源同值。
+log_ring_cap = 512
 
 [platform]
 # 平台档位（ADR-0018 修订 1）：与 default 同一块参考机 = host。取值依据同 default 注释。
