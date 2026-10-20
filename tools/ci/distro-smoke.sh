@@ -97,6 +97,10 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   must_file /usr/lib/rockrobot3/contracts/slots.toml
   must_file /usr/lib/rockrobot3/contracts/roles.toml
   must_file /usr/lib/rockrobot3/contracts/devices.toml
+  # 平台事实表（装载必需件，缺即拒 boot——块-15：此前装机断言看不见它缺席的洞）。
+  # 册位随装配单 [platform].chip 选册（distro→rk3566）；清单真值 = rrd
+  # rr3_runtime_truth_set（基-25），本断言集与 rr3-pack 打包面同单对账。
+  must_file /usr/lib/rockrobot3/contracts/platform/rk3566.toml
   must_file /usr/lib/rockrobot3/hardware/distro/wiring.toml
   for m in act connect interact sense power; do
     must_exec "/usr/lib/rockrobot3/modules/rr3-$m/rr3-$m"
