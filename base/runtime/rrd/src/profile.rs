@@ -1148,6 +1148,49 @@ fn rr3_axis_state_text(
     }
 }
 
+/// 平台事实表文件名（选册格式化单点）：清单成员与 boot 选册（
+/// [`rr3_profile_boot_inputs_with_probe`] 的 `platform_dir` join）两处共用，防字面漂移。
+fn rr3_platform_table_file_name(chip: &str) -> String {
+    format!("{chip}.toml")
+}
+
+/// 装载消费真值集清单（增补轮六 基-25／实-12：全仓唯一一份，三处消费方判等——
+/// `rr3-pack` 打包 / buildroot `post-build.sh` 装机 / OTA 模块级更新）。清单由装载面
+/// 定义，打包与装机面不得各写一份文件清单——装载新增册时只改这里，消费方判等随之
+/// 生效（块-15 的病根就是打包面手抄四册、装载面加了必需册而打包面不知道）。
+/// 成员判据＝rrd 装载期读的文件：装配单本体（`--profile`）、契约四册（topics/slots/
+/// roles/devices）、平台事实表（按 `[platform].chip` 选册）、机型接线档；目录成员＝
+/// 轴档案目录（在则整目录随装、缺目录＝零份合法，与 [`rr3_axis_files_load`] 同语义）。
+/// 装载期不读的契约件（envelope/golden/face-expressions 等）不在清单——成员判据写死
+/// 为"装载期读"，不随"契约在册数"漂移。
+/// 输出相对路径以仓根／装机安装根为基准（两侧同名同布局，消费方逐条 join 即落位）。
+#[derive(Debug, PartialEq, Eq)]
+pub struct Rr3RuntimeTruthSet {
+    /// 必需逐文件成员：缺任一册 rrd 装载即拒 boot，打包面缺任一册必须拒出包。
+    pub files: Vec<String>,
+    /// 可选目录成员：目录在则整目录随装（升序确定性由消费方保证），不在不红。
+    pub dirs: Vec<String>,
+}
+
+/// 按装配单解析结果与机型 stem 列装载消费真值集（清单真值点，见 [`Rr3RuntimeTruthSet`]）。
+pub fn rr3_runtime_truth_set(p: &Rr3Profile, profile_stem: &str) -> Rr3RuntimeTruthSet {
+    Rr3RuntimeTruthSet {
+        files: vec![
+            format!("profiles/{profile_stem}.toml"),
+            "contracts/topics.toml".to_string(),
+            "contracts/slots.toml".to_string(),
+            "contracts/roles.toml".to_string(),
+            "contracts/devices.toml".to_string(),
+            format!(
+                "contracts/platform/{}",
+                rr3_platform_table_file_name(&p.platform_chip)
+            ),
+            format!("hardware/{profile_stem}/wiring.toml"),
+        ],
+        dirs: vec![format!("hardware/{profile_stem}/axis")],
+    }
+}
+
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
 /// 致命错误（读不到 / 形状不合 / 查册未命中 / 结构不自洽）打包成一条串返回；
 /// 缺格**不是**致命项（P2：缺格只降点名模块，缺格≠拒 boot），进 [`Rr3ProfileBoot::missing`]；
@@ -1288,7 +1331,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // roles/devices 同源）。fail-closed 与 roles 同口径但更严——platform.rs 解析本就
     // 回 Err 版（roles/devices 宽容回空表走"表为空"点名，那是集合词表；平台表宽容 =
     // ④⑤⑧ 静默不判，§18 F-6 同病），读不到/形状坏都逐条点名拒 boot，不降级。
-    let platform_path = platform_dir.join(format!("{}.toml", profile.platform_chip));
+    let platform_path = platform_dir.join(rr3_platform_table_file_name(&profile.platform_chip));
     let platform_text = std::fs::read_to_string(&platform_path).map_err(|e| {
         format!(
             "读不到平台事实表 {}（[platform].chip = {} 的选册）: {e}",
@@ -2245,6 +2288,38 @@ fn rr3_memory_budget_check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 装载消费真值集清单逐成员钉死（基-25／实-12：清单真值点的成员判据反例面）。
+    /// 以真仓两份装配单为源（chip 选册成员随装配单变——distro→rk3566、
+    /// esp32-mini→esp32），轴档案目录成员恒在清单（在则随装、缺目录合法由消费方裁）。
+    /// 成员名单有变必须改 [`rr3_runtime_truth_set`] 本体并同步三处消费方，本用例红即拦截。
+    #[test]
+    fn runtime_truth_set_members_are_pinned() {
+        let distro = rr3_profile_from_text(include_str!("../../../../profiles/distro.toml"))
+            .expect("真仓 distro 装配单必须合法");
+        let t = rr3_runtime_truth_set(&distro, "distro");
+        assert_eq!(
+            t.files,
+            vec![
+                "profiles/distro.toml",
+                "contracts/topics.toml",
+                "contracts/slots.toml",
+                "contracts/roles.toml",
+                "contracts/devices.toml",
+                "contracts/platform/rk3566.toml",
+                "hardware/distro/wiring.toml",
+            ]
+        );
+        assert_eq!(t.dirs, vec!["hardware/distro/axis"]);
+        let rtos = rr3_profile_from_text(include_str!("../../../../profiles/esp32-mini.toml"))
+            .expect("真仓 esp32-mini 装配单必须合法");
+        let t2 = rr3_runtime_truth_set(&rtos, "esp32-mini");
+        assert!(
+            t2.files.contains(&"contracts/platform/esp32.toml".to_string()),
+            "chip 选册成员随装配单 [platform].chip 变（esp32-mini → esp32）"
+        );
+        assert_eq!(t2.dirs, vec!["hardware/esp32-mini/axis"]);
+    }
 
     /// 校验⑨ 判据实体反例组（批N2 首件基-36 立，门 c ⑨-c 补并发口径，判据进 ①b）：
     /// 正例（servo 五键申报形状 Σ700 ≤ cap 2000 ⇒ 绿）＋反例——同域加总超 cap ⇒ 红、
