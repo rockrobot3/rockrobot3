@@ -28,12 +28,16 @@ use support::*;
 ///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；schema_version=3 起 [[pin]] 进场
 ///（增补轮六批N1）——本夹具不声明 [pins]，校验②只记 role_missing 非致命，boot 照常。
 /// schema_version=4 起 [supplies.budget] 必填（批N2 校验⑩ 分母）——host 档合法
-/// 不适用显式写，boot 照常。
+/// 不适用显式写，boot 照常。schema_version=5 起 [runtime] 必填（批N5 件二 F-30）
+/// ——log_ring_cap 进场。
 const PROFILE: &str = r#"
-schema_version = 4
+schema_version = 5
 
 [os]
 route = "distro"
+
+[runtime]
+log_ring_cap = 512
 
 [platform]
 tier = "host"

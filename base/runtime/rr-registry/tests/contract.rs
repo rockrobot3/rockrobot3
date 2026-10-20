@@ -1108,13 +1108,26 @@ fn default_profile_binds_module_slots_to_real_modules() {
         "route 越界: {route}"
     );
 
-    // schema_version=4（0.0.5 批J 三新段 + 增补轮六批N1 [pins] + 批N2 [supplies.budget]）：
+    // schema_version=5（0.0.5 增补轮六批N5 [runtime] 进场，F-30 环容量落数据）：
     // [platform]/[supplies]/[slots].present 逐键 pin——两份机型与 rrd 解析器同口径演进，
     // 漂移即红。
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(4),
-        "profile schema_version 漂移（[supplies.budget] 随 4 落地）"
+        Some(5),
+        "profile schema_version 漂移（[runtime] 随 5 落地）"
+    );
+    // [runtime].log_ring_cap（批N5 件二 F-30"装载期缺即红"）：三份现役装配单必须
+    // 全部带正整数容量键——rrd parse 层同判据，这里 pin 的是"数据在册"这半边。
+    let runtime = v
+        .get("runtime")
+        .and_then(toml::Value::as_table)
+        .expect("default 缺 [runtime]（rrd 运行参数段，批N5 件二）");
+    assert!(
+        runtime
+            .get("log_ring_cap")
+            .and_then(toml::Value::as_integer)
+            .is_some_and(|n| n > 0),
+        "default 缺 [runtime].log_ring_cap 或非正整数（日志环容量，行数）"
     );
     let tier = v
         .get("platform")
@@ -1309,13 +1322,24 @@ fn distro_profile_binds_exactly_the_body_layer() {
         .expect("profile 缺 [os] route");
     assert_eq!(route, "distro", "distro 机 route 必须是快路");
 
-    // schema_version=4 三新段 + [pins] + [supplies.budget]：与 default 同一块参考机，
-    // [platform]/[supplies]/[slots] 逐值一致（present 仍为 16 格全集——distro 缺格是
-    // "不绑定"，不是"物理缺"）。
+    // schema_version=5 三新段 + [pins] + [supplies.budget] + [runtime]（批N5 件二）：
+    // 与 default 同一块参考机，[platform]/[supplies]/[slots] 逐值一致（present 仍为
+    // 16 格全集——distro 缺格是"不绑定"，不是"物理缺"）。
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(4),
+        Some(5),
         "profile schema_version 漂移"
+    );
+    let runtime = v
+        .get("runtime")
+        .and_then(toml::Value::as_table)
+        .expect("distro 缺 [runtime]（rrd 运行参数段，批N5 件二）");
+    assert!(
+        runtime
+            .get("log_ring_cap")
+            .and_then(toml::Value::as_integer)
+            .is_some_and(|n| n > 0),
+        "distro 缺 [runtime].log_ring_cap 或非正整数（日志环容量，行数）"
     );
     assert_eq!(
         v.get("platform")
@@ -1493,8 +1517,19 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
 
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
-        Some(4),
-        "esp32-mini schema_version 漂移（[supplies.budget] 随 4 落地）"
+        Some(5),
+        "esp32-mini schema_version 漂移（[runtime] 随 5 落地）"
+    );
+    let runtime = v
+        .get("runtime")
+        .and_then(toml::Value::as_table)
+        .expect("esp32-mini 缺 [runtime]（rrd 运行参数段，批N5 件二）");
+    assert!(
+        runtime
+            .get("log_ring_cap")
+            .and_then(toml::Value::as_integer)
+            .is_some_and(|n| n > 0),
+        "esp32-mini 缺 [runtime].log_ring_cap 或非正整数（日志环容量，行数）"
     );
     assert_eq!(
         v.get("platform")

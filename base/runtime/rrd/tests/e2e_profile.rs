@@ -9,6 +9,8 @@
 //! - P2 缺格：缺格模块逐条点名"拒绝启动"、不 spawn，其余模块照常（缺格≠拒 boot，
 //!   ADR-0009 同款"provides 留在可满足性宇宙、下游不连坐"语义）；
 //! - P3 非法装配单：查册未命中 → bind 之前 fatal，非 0 退出、套接字无残迹。
+//! - P4 环容量落数据（批N5 件二 F-30）：[runtime].log_ring_cap = 4 → `rr3.ctl.logs`
+//!   恰回 4 行、最早一行已丢——环容量是装配单数据不是代码常量（512 编译期写死即红）。
 //!
 //! 三条口径（与 `e2e_spawn_restart.rs` 同源，不重复论证）：
 //! 1. **tick 必传小值**（`E2E_TICK_MS`）：supervisor 的扫尸节拍复用 `--watchdog-tick-ms`，
@@ -37,12 +39,16 @@ use support::*;
 /// 非 base 格位——P2 删 binding 行后 sensor.env 仍 declared present，缺格判定照走注入缺。
 /// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
 /// 校验②只记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
-/// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。
+/// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。schema_version=5
+/// 起 [runtime] 必填（批N5 件二 F-30）——log_ring_cap 进场，P4 换小容量钉环判据。
 const GOOD: &str = r#"
-schema_version = 4
+schema_version = 5
 
 [os]
 route = "distro"
+
+[runtime]
+log_ring_cap = 512
 
 [platform]
 tier = "host"
@@ -354,5 +360,51 @@ fn unregistered_slot_in_enabled_slots_is_fatal_before_bind_with_no_socket_residu
     assert!(
         !socket.exists(),
         "装配链致命发生在 bind 之前，套接字不得留残迹"
+    );
+}
+
+/// P4 — 环容量落数据（批N5 件二 F-30）：`[runtime].log_ring_cap = 4` → 日志环只留
+/// 最后 4 行。判据两截：`rr3.ctl.logs` 恰回 4 行（容量来自装配单——若还是编译期
+/// 512 兜底，这里会是 boot 期全部 ~9 行）；最早一行（装配单已加载）已被丢（环形
+/// 语义：满则丢最旧，不是"到顶即停"）。boot 自身 ≥9 行（装配单已加载/容量定格/
+/// 缺角色×3/监听/三条 spawn）保证两截都判得到，等待点钉在第三条 spawn 行——
+/// 缺角色点名在 spawn 之前（bind 之后立即打），到达序无歧义。
+#[test]
+fn log_ring_cap_from_profile_bounds_ctl_logs() {
+    let root = Root::new("cap");
+    for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
+        root.write_module(name);
+    }
+    let profile = root.write_profile(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 4"));
+    let mut rrd = RrdTest::rr3_start_profile_env(
+        "prof-cap",
+        &profile,
+        E2E_TICK_MS,
+        &[("RR3_PROBE", "sim")],
+    );
+    for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
+        rrd.rr3_wait_log(&format!("spawn {name} pid="));
+    }
+
+    let mut ctl = rrd.rr3_connect();
+    rr3_send(&mut ctl, &rr3_rpc_frame("rr3.ctl.logs", 2, json!({}), 0));
+    let f = rr3_read_where(&mut ctl, "ctl.logs 应答", |fr| {
+        rr3_body_split(&fr.payload)
+            .map(|(ty, _)| ty == Rr3PayloadType::Response)
+            .unwrap_or(false)
+    });
+    let v = rr3_json_of(&f);
+    let lines = v["result"]["lines"]
+        .as_array()
+        .expect("logs 应带 result.lines");
+    let joined: Vec<&str> = lines.iter().filter_map(|l| l.as_str()).collect();
+    assert_eq!(
+        joined.len(),
+        4,
+        "环容量 = 装配单 [runtime].log_ring_cap = 4，ctl.logs 必须恰回 4 行: {joined:?}"
+    );
+    assert!(
+        !joined.iter().any(|l| l.contains("装配单已加载")),
+        "最早的装配单行必须已被环形淘汰（满则丢最旧）: {joined:?}"
     );
 }
