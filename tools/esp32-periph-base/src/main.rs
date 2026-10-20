@@ -351,11 +351,19 @@ fn main() {
         .spawn(move || cmd_loop(ctl, bus))
         .expect("起控制面线程失败");
 
-    // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（GPIO25 BCLK / GPIO27 SD / GPIO26 WS）----
+    // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（GPIO4 BCLK / GPIO27 SD / GPIO26 WS）----
+    // **BCLK 迁移实录（2026-10-20）**：原 GPIO25 桥测取证卡死——拔麦后桥线自桥
+    // （GPIO25→GPIO27 / GPIO26→GPIO27），WS 桥 dump `01 00 00 00 FE FF FF FF` 循环
+    // 爆表（WS/输入路径/桥线全活），BCLK 桥两次（含用力按实叠插复测）恒 rms=1、
+    // L==R 100%、dump 全 FF（线恒高 = 浮空）→ GPIO25 无任何时钟输出。同一外设 WS
+    // 正常 = I2S 在跑，唯一变量源引脚 → GPIO25 pad 损坏实锤。**此前全部音频数据
+    // （10-13 冒烟/校准/ILD/TDOA）均为浮空总线图案假阳性，全部作废**。迁 GPIO4
+    // （无 strapping/UART/I2C/LEDC/VSPI 冲突；12/15 strapping、16/17 打死 I2C 实锤、
+    // 18/19 UART2、21/22 I2C、23 VSPI 预留、32/33 LEDC、25 嫌疑件、34-39 仅输入）。
     mic::spawn_mic_smoke(
         mic_bus,
         peripherals.i2s0,
-        peripherals.pins.gpio25,
+        peripherals.pins.gpio4,
         peripherals.pins.gpio27,
         peripherals.pins.gpio26,
     );

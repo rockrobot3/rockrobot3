@@ -1,7 +1,9 @@
 //! 批D 采集冒烟 + 音频上行（INMP441 双麦 @ I2S0；0.0.5 增补轮五 全案 §4 批D）。
 //!
 //! 接线（README runbook 批D 节；两麦 L/R 时隙复用共一条总线）：
-//! - BCLK → GPIO25（两麦并接）、WS → GPIO26（两麦并接）、SD → GPIO27（两麦并接）
+//! - BCLK → GPIO4（两麦并接）、WS → GPIO26（两麦并接）、SD → GPIO27（两麦并接）
+//!   （**2026-10-20 迁移**：原 GPIO25 桥测取证无时钟输出——WS 桥爆表/BCLK 桥恒零
+//!   对照实锤 pad 损坏，此前全部音频数据为浮空总线图案假阳性，见 main.rs 装配注）
 //! - 麦甲 L/R → GND（左时隙）、麦乙 L/R → 3V3（右时隙）——接错则双通道同相/单声道假象
 //! - VDD → 3V3、GND → GND；INMP441 无 MCLK 需求（mclk 传 None）
 //!
@@ -156,12 +158,12 @@ pub fn spawn_mic_smoke(
                         d
                     }
                     Err(e) => {
-                        println!("[mic] I2S0 驱动安装失败: {e:?}（查 25/26/27 占用/接线）");
+                        println!("[mic] I2S0 驱动安装失败: {e:?}（查 4/26/27 占用/接线）");
                         return;
                     }
                 };
             println!(
-                "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK=25 SD=27 WS=26（INMP441 双麦 L/R 时隙）"
+                "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK=4 SD=27 WS=26（INMP441 双麦 L/R 时隙；原 25 桥测卡死迁移）"
             );
             let mut buf = [0u8; MIC_BUF];
             let mut reads = 0usize;
