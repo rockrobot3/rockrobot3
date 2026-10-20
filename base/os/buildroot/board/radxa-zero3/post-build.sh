@@ -9,10 +9,19 @@
 #      避免残留旧 socket 文件跨重启干扰 bind）；
 #   3. data / rr_staging 挂载点（分区标签见 genimage.cfg，rr-ota 守护用例钉死）；
 #   4. rrd 与模块产物安装位（交叉编译产物经 $BINARIES_DIR 注入，不在 Buildroot 里编译；
-#      manifest 归位 /usr/lib/rr3/modules/<name>/module.toml，entry 改写为装机绝对路径，
+#      manifest 归位 /usr/lib/rockrobot3/modules/<name>/module.toml，entry 改写为装机绝对路径，
 #      config 从仓源随装——线上注册门禁拒绝相对 entry，模块开机即读同目录 config）；
 #   5. 装载消费真值集装机（profiles/contracts/hardware 三目录随装，增补轮六 基-25——
-#      装载必需件缺席的洞此前在 buildroot 装机侧完全不可见，块-15）。
+#      装载必需件缺席的洞此前在 buildroot 装机侧完全不可见，块-15）；
+#   6. S99rrd 传 --contracts/--profile 启用装载正门（基-23：出厂轨装载门此前不存在——
+#      不传 --profile 时 rrd 走 --manifest 后门、十条校验一个判定位都不跑，L-31）。
+#
+# 安装位与 deb 快路轨同根 /usr/lib/rockrobot3（rrd.service 头注"两轨同一组安装位"
+# 纪律，基-23 由假变真）：这不只是口径美观——rrd 装载链由装配单路径上两级推导
+# modules-root（profile.rs），S99rrd 传 --profile /usr/lib/rockrobot3/profiles/distro.toml
+# 后 manifests 必然落 /usr/lib/rockrobot3/modules/<名>/module.toml，模块装机位不同根
+# 即 spawn 必败。数据面 /var/lib/rr3/staging 不随根动（rr_staging 分区挂载点，
+# partition-layout.md 钉死，属分区布局不属安装位）。
 
 set -eu
 TARGET="${TARGET_DIR:?post-build.sh 需要 TARGET_DIR（Buildroot 提供）}"
@@ -20,7 +29,7 @@ TARGET="${TARGET_DIR:?post-build.sh 需要 TARGET_DIR（Buildroot 提供）}"
 # ---- 4. 产物安装位与目录骨架 -------------------------------------------------
 install -d -m 0755 \
 	"$TARGET/usr/bin" \
-	"$TARGET/usr/lib/rr3/modules" \
+	"$TARGET/usr/lib/rockrobot3/modules" \
 	"$TARGET/var/lib/rr3/staging" \
 	"$TARGET/data" \
 	"$TARGET/extlinux"
@@ -38,9 +47,9 @@ done
 
 # 模块注入：$BINARIES_DIR/rr3-modules/<name>/{bin,manifest.toml}（两轨同源注入格式，
 # 快路轨 rr3-pack 读同一格式，两轨不互抄装配）。装机布局对齐装配单语义：
-#   /usr/lib/rr3/modules/<name>/{module.toml,<entry>,config.toml}
+#   /usr/lib/rockrobot3/modules/<name>/{module.toml,<entry>,config.toml}
 # 三处与旧版不同（0.0.2 保底轨修复，与快路轨 rr3-pack 同一套裁定）：
-#   a. manifest 不再平铺 /usr/lib/rr3/manifest/<name>.toml——模块 rr3_config_load 读
+#   a. manifest 不再平铺 /usr/lib/rockrobot3/manifest/<name>.toml——模块 rr3_config_load 读
 #      manifest 同目录 config.toml，平铺下各模块 config 全部撞同一文件名，且 bin 的
 #      相对 entry 解析到 manifest 所在目录必错位；
 #   b. entry 改写为装机绝对路径（rr3-pack rr3_manifest_install_rewrite 同语义）：
@@ -57,7 +66,7 @@ fi
 if [ -d "$BINARIES_DIR/rr3-modules" ]; then
 	for mod_dir in "$BINARIES_DIR"/rr3-modules/*/; do
 		name="$(basename "$mod_dir")"
-		mod_dst="$TARGET/usr/lib/rr3/modules/$name"
+		mod_dst="$TARGET/usr/lib/rockrobot3/modules/$name"
 		if [ ! -f "$mod_dir/manifest.toml" ]; then
 			echo "post-build.sh: 警告：模块 $name 缺 manifest.toml，整模块跳过" >&2
 			continue
@@ -93,13 +102,13 @@ if [ -d "$BINARIES_DIR/rr3-modules" ]; then
 		# bin 按入口落位：注入格式的固定名 bin 装到 entry 指向的装机相对路径
 		install -m 0755 "$mod_dir/bin" "$mod_dst/$entry_rel"
 		# entry 绝对化：仅引号内的值换成装机绝对路径，其余字节原样
-		sed "s|entry\([[:space:]]*=[[:space:]]*\)\"[^\"]*\"|entry\1\"/usr/lib/rr3/modules/$name/$entry_rel\"|" \
+		sed "s|entry\([[:space:]]*=[[:space:]]*\)\"[^\"]*\"|entry\1\"/usr/lib/rockrobot3/modules/$name/$entry_rel\"|" \
 			"$mod_dir/manifest.toml" > "$mod_dst/module.toml.tmp"
 		chmod 0644 "$mod_dst/module.toml.tmp"
 		mv "$mod_dst/module.toml.tmp" "$mod_dst/module.toml"
 		# 改写复核：装机 manifest 的 entry 必须恰为新绝对路径（防同型错位回归）
 		check="$(sed -n 's/^entry[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$mod_dst/module.toml" | head -n 1)"
-		if [ "$check" != "/usr/lib/rr3/modules/$name/$entry_rel" ]; then
+		if [ "$check" != "/usr/lib/rockrobot3/modules/$name/$entry_rel" ]; then
 			echo "post-build.sh: 警告：模块 $name entry 改写复核不一致（得 $check），整模块跳过" >&2
 			rm -rf "$mod_dst"
 			continue
@@ -114,19 +123,21 @@ fi
 
 # ---- 5. 装载消费真值集装机（增补轮六 基-25／实-12，块-15 修法 c：buildroot 轨此前
 # 连一册契约都不装——装载必需件缺席的洞在装机侧完全不可见）----
-# 装机位与快路轨同根（/usr/lib/rockrobot3，rrd.service 头注"两轨同一组安装位"纪律）；
+# 装机位与快路轨同根（/usr/lib/rockrobot3，rrd.service 头注"两轨同一组安装位"纪律，
+# 基-23 兑现）；
 # 清单真值 = rrd rr3_runtime_truth_set（基-25：三处消费方判等的唯一清单，装机面整目录
 # 随装、不抄第二份文件清单——多带装载不读的契约件无害，逐册判等是 rr3-pack 打包面
-# 与 distro-smoke 断言面的事）。缺件 = 警告不阻断，与上面 rrd/rr3-ctl 产物缺席同口径：
-# 镜像结构仍应可构建；S99rrd 传 --contracts/--profile 启用消费归基-23（收 L-31 旁路，
-# 排在基-25 之后——块-15 的施工顺序约束）。
+# 与 distro-smoke 断言面的事）。缺件 = 警告不阻断（镜像构建面），与上面 rrd/rr3-ctl
+# 产物缺席同口径：镜像结构仍应可构建；但 S99rrd 已传 --contracts/--profile 启用消费
+# （基-23，本脚本第 6 件），真值集缺席的镜像板上 rrd 装载期缺册即拒 boot——
+# fail-closed 点名，这正是装载门在出厂轨存在后的预期行为。
 if [ -n "$REPO_ROOT" ]; then
 	for rel in profiles contracts hardware; do
 		if [ -d "$REPO_ROOT/$rel" ]; then
 			mkdir -p "$TARGET/usr/lib/rockrobot3/$rel"
 			cp -R "$REPO_ROOT/$rel/." "$TARGET/usr/lib/rockrobot3/$rel/"
 		else
-			echo "post-build.sh: 警告：$REPO_ROOT/$rel 缺席，装载真值集未随装（rrd 装载期缺册即拒 boot；S99rrd 启用运行期入口前不红，归基-23）" >&2
+			echo "post-build.sh: 警告：$REPO_ROOT/$rel 缺席，装载真值集未随装（S99rrd 已启用装载正门，此镜像板上 rrd 装载期缺册即拒 boot）" >&2
 		fi
 	done
 else
@@ -156,12 +167,17 @@ cat > "$TARGET/etc/init.d/S99rrd" <<'EOF'
 case "$1" in
 	start)
 		[ -x /usr/bin/rrd ] || exit 0
-		ARGS=""
-		for m in /usr/lib/rr3/modules/*/module.toml; do
-			[ -e "$m" ] && ARGS="$ARGS --manifest $m"
-		done
+		# 装载正门（基-23）：与发行版快路轨 rrd.service 的 ExecStart 三参数同形——
+		# 两轨注入约定同源，装配链（装载/查册/缺格判定/manifest 解析）在 bind 前完成，
+		# 缺册/缺格 fail-closed 点名。不再逐个 --manifest（与 --profile 同给 rrd 在
+		# parse 处即拒）：manifests 由装配单按 modules-root（/usr/lib/rockrobot3，
+		# 装配单路径上两级）推导，模块装机布局见本脚本第 4 件。
+		# 机型档选型：distro.toml = RK3566 参考机 host 档（chip=rk3566，与 rrd.service
+		# 缺省锚点同源）；机型专属装配单归真板档（M1）另立后此处随改。
 		start-stop-daemon -S -b -m -p /var/run/rrd.pid \
-			-x /usr/bin/rrd -- --socket /var/run/rock3-ipc.sock $ARGS
+			-x /usr/bin/rrd -- --socket /var/run/rock3-ipc.sock \
+			--contracts /usr/lib/rockrobot3/contracts \
+			--profile /usr/lib/rockrobot3/profiles/distro.toml
 		;;
 	stop)
 		start-stop-daemon -K -p /var/run/rrd.pid
@@ -178,4 +194,4 @@ esac
 EOF
 chmod 0755 "$TARGET/etc/init.d/S99rrd"
 
-echo "post-build.sh: 目标根装配完成（fstab + S99rrd + 产物安装位）"
+echo "post-build.sh: 目标根装配完成（fstab + S99rrd 装载正门 + 产物安装位）"
