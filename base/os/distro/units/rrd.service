@@ -2,6 +2,8 @@
 # 实体真值在本文件；rr3-pack include_str! 编译期嵌入 deb。ExecStart 的 --profile
 # 装机位是唯一例外：rr3-pack 出包时按 --profile 名改写（缺省 distro 恒等）。
 # 与保底轨 S99rrd 同一组安装位与套接字（两轨装配各自薄装、注入约定同源，ADR-0013 裁定 5）：
+# 2026-10-20 基-23 起该句为真：S99rrd 同传 --socket/--contracts/--profile 三参数（与 ExecStart
+# 逐字同源）、安装根同 /usr/lib/rockrobot3（post-build.sh，ff2f318）——此前两轨不同名不同源。
 # 契约与装配单走 --contracts / --profile 运行期入口（T5 新增；编译期仓内路径装机不存在），
 # profile 是装机正门——faces 决定起谁（0.0.2 方案 Q3）。
 [Unit]
