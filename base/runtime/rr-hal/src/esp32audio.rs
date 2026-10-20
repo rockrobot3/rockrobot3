@@ -419,28 +419,6 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
             conn = rr3_esp32_reconnect(&core);
             continue;
         };
-        // —— 命令旁路排水（顶拍先排水再读）：逐条弹出 fire-and-forget 写出
-        // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
-        // 队首不丢，按读失败同路重连后补写（有界丢最旧兜底）——
-        if let Some(rx) = core.cmd.as_ref() {
-            let mut cmd_io_err = false;
-            while let Some(cmd) = rx.rr3_cmd_pop() {
-                let frame = rr3_esp32_cmd_frame(cmd_id, &cmd);
-                if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
-                    rx.rr3_cmd_push_front(cmd);
-                    eprintln!(
-                        "rr-hal-esp32-audio: 命令写出失败（回插队首，连接报废转重连）: {e:?}"
-                    );
-                    cmd_io_err = true;
-                    break;
-                }
-                cmd_id += 1;
-            }
-            if cmd_io_err {
-                conn = None;
-                break;
-            }
-        }
         // —— 会话内读循环（拆帧器/记账随会话重置：新会话是新流）——
         let mut asm = FrameAssembler::new();
         let mut raw = vec![0u8; READ_BLOCK];
@@ -450,6 +428,31 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
         loop {
             if core.stop.load(Ordering::Acquire) {
                 break;
+            }
+            // —— 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出
+            // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
+            // 队首不丢，按读失败同路重连后补写（有界丢最旧兜底）。b3 冒烟修正：
+            // 原实现把排水放在建连拍——会话中途入队的命令永远等不到写出口
+            // （队容 2 满丢最旧），板面收不到 servo 点名——b1 计划原文即
+            // 「读循环每拍先排水再读」，此为落位笔误。
+            if let Some(rx) = core.cmd.as_ref() {
+                let mut cmd_io_err = false;
+                while let Some(cmd) = rx.rr3_cmd_pop() {
+                    let frame = rr3_esp32_cmd_frame(cmd_id, &cmd);
+                    if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
+                        rx.rr3_cmd_push_front(cmd);
+                        eprintln!(
+                            "rr-hal-esp32-audio: 命令写出失败（回插队首，连接报废转重连）: {e:?}"
+                        );
+                        cmd_io_err = true;
+                        break;
+                    }
+                    cmd_id += 1;
+                }
+                if cmd_io_err {
+                    conn = None;
+                    break;
+                }
             }
             match c.rr3_read_timeout(&mut raw, READ_TIMEOUT_MS) {
                 Err(e) => {
