@@ -289,6 +289,19 @@ rrd 立 `rr3_runtime_truth_set` 唯一清单（装载面 files 七条＋dirs 一
 base/ota/partition-layout.md（staging 真值集判等＋manifest 契约 schema 版本列不等即拒装，载体随
 M6）。块-15 施工顺序约束"基-25 必须先于基-23"host 半边兑现；status.md 轮次条、开发计划 §3、
 索引 §14.7、architecture §13 顺序约束注记同批对表（本笔对表）。
+**2026-10-20 对表（批N5 件四：基-23 出厂轨装载面齐装＋`--profile` 升必选，三笔收官）**：
+判据原文＝索引 §14.7 基-23 行＋L-31 实-1。笔1（`ff2f318`）——post-build.sh 安装根全迁
+`/usr/lib/rockrobot3`（与 deb 轨同名；modules-root 由装配单路径上两级推导是物理前件，
+`/var/lib/rr3/staging` 是分区挂载点不属安装位不随根动）＋S99rrd 改传 `--socket`/`--contracts`/
+`--profile` 三参数（与 rrd.service ExecStart 逐字同源，`--manifest` 循环删除）＋机型档
+distro.toml 随装＋真值集三目录落盘断言进场（装配冒烟 22 项断言，镜像级）。笔2（`8b1390c`）——
+rrd cli 双缺拒门（装配面必选：`--profile` 与 `--manifest` 至少给其一，两者同给也拒〔Q3〕；
+拒门在 socket 空检查之后保住既有拒因序）＋单测改判 10 处＋监听面缺格跳过夹具适配（stub
+manifest 真实落盘＋夹具树 Drop 清理）＋`rr3_start_manifest_stub` 后门夹具＋裸"拒绝"needle
+收窄＋daemon None 臂注释收窄＋rrd-cli.md。笔3 对表：status.md 敞口 20 与轮次条、rrd.service:4、
+终点表 RK3566 观测格、索引 §14.7、architecture v0.16 段④与 §13 装载门行、开发计划 §3、本节。
+敞口表无增减；敞口 20 修法半边已落、证据半边（出厂机真跑启动日志＋坏接线档拒起对照）归真板批
+不结项。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
