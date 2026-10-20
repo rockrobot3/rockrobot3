@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
 use rr_hal::backend::rr3_hal_audio_source_with_cmd;
-use rr_hal::esp32audio::Rr3PeriphCmd;
+use rr_hal::backend::Rr3PeriphCmd;
 use rr_hal::Rr3PcmStream;
 use rr_hal_api::Rr3AudioCfg;
 use rr_ipc::{opcode, rr3_base64_encode, Rr3PayloadType};
