@@ -7,10 +7,13 @@
 //!   如 `rr3_brain/`；entry 装机产物是打包器生成的 shim，见下）；
 //! - `--repo` 仓根：`profiles/<name>.toml`（`--profile` 选机型，缺省 distro——H4/C2 批K
 //!   参数化，出包链不再只认一份装配单）、`contracts/{topics,slots,roles,devices}.toml`、
-//!   `hardware/<name>/wiring.toml`、`modules/<name>/config.toml`（config 是源真值，
-//!   不是构建产物，不进注入格式）。后三册契约与接线档是 rrd 装载门的 boot 真值集
-//!   （roles/devices 是校验①②/⑦-d 判据源、wiring 是校验⑦ 判据面，增补轮六批N1；
-//!   deb 缺任一册 rrd 即拒 boot——Z-4：打包真值集必须跟装载消费集同批走）。
+//!   `contracts/platform/<chip>.toml`（按装配单 `[platform].chip` 选册，批N1 基-22）、
+//!   `hardware/<name>/wiring.toml`、`hardware/<name>/axis/`（轴档案目录，在则整目录
+//!   随装）、`modules/<name>/config.toml`（config 是源真值，不是构建产物，不进注入
+//!   格式）。前六册 + 轴档案是 rrd 装载门的 boot 真值集，成员清单的真值只有 rrd
+//!   `rr3_runtime_truth_set` 一份（增补轮六 基-25／实-12：装载面定义清单，打包面照单
+//!   收口、不自带第二份——deb 缺任一必需册 rrd 即拒 boot，打包面缺任一册拒出包；
+//!   打包先按装载同判据预验装配单，坏单不得出包）。
 //!
 //! staging 装配是纯 Rust（macOS 可跑可单测），deb 布局：
 //! `/usr/bin/{rrd,rr3-ctl}` + `/usr/lib/rockrobot3/{profiles,contracts,modules,hardware}` +
@@ -322,36 +325,35 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         }
     }
     let names = rr3_module_names(&cfg.payload)?;
-    // ---- 仓内数据真值（缺席点名）----
+    // ---- 装载消费真值集（基-25／实-12：清单真值只有 rrd rr3_runtime_truth_set 一份，
+    // 打包面照单收口、不自带第二份文件清单）----
     let profile_name = format!("{}.toml", cfg.profile);
     let profile_src = cfg.repo.join("profiles").join(&profile_name);
-    let topics_src = cfg.repo.join("contracts").join("topics.toml");
-    let slots_src = cfg.repo.join("contracts").join("slots.toml");
-    let roles_src = cfg.repo.join("contracts").join("roles.toml");
-    let devices_src = cfg.repo.join("contracts").join("devices.toml");
-    // 接线档按 --profile 机型落装机位 hardware/<name>/wiring.toml——与 rrd 装载链
-    // rr3_wiring_path_for_profile 的推导同一布局纪律（装配单装机位上一级是安装根，
-    // 增补轮六批N1 §4.3；Z-4：boot 真值集五册缺任一册 rrd 拒 boot，打包必须带齐）
-    let wiring_src = cfg
-        .repo
-        .join("hardware")
-        .join(&cfg.profile)
-        .join("wiring.toml");
-    for p in [
-        &profile_src,
-        &topics_src,
-        &slots_src,
-        &roles_src,
-        &devices_src,
-        &wiring_src,
-    ] {
-        if !p.is_file() {
-            return Err(format!(
-                "仓内文件缺席: {}（--repo 须指向仓根：profiles/{profile_name}、contracts/{{topics,slots,roles,devices}}.toml 与 hardware/{}/wiring.toml 是装机正门的真值——缺任一册 rrd 装载即拒 boot（增补轮六 Z-4））",
-                p.display(),
-                cfg.profile
-            ));
-        }
+    // 打包先按装载同判据预验装配单（rr3_profile_from_text，与 boot 链同一函数）：坏单
+    // 拒出包——出包时红比装机 boot 红早一个环节（块-15：装载必需件缺席而装机验证全绿
+    // 才是最贵的洞）；预验同时给出 [platform].chip，平台事实表按它选册。
+    let profile_text = fs::read_to_string(&profile_src)
+        .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
+    let profile = rrd::profile::rr3_profile_from_text(&profile_text).map_err(|errs| {
+        format!(
+            "装配单 {} 预验失败（打包与装载同一判据，坏单不得出包）: {}",
+            profile_src.display(),
+            errs.join("; ")
+        )
+    })?;
+    let truth = rrd::profile::rr3_runtime_truth_set(&profile, &cfg.profile);
+    let missing: Vec<String> = truth
+        .files
+        .iter()
+        .filter(|rel| !cfg.repo.join(rel).is_file())
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "装载消费真值集缺册: {}（--repo 须指向仓根 {}；清单真值 = rrd rr3_runtime_truth_set——缺任一必需册 rrd 装载即拒 boot，打包拒出包，基-25/实-12）",
+            missing.join(", "),
+            cfg.repo.display()
+        ));
     }
     // ---- 落 staging ----
     let stage = cfg.out.with_file_name(format!(
@@ -366,9 +368,6 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         stage.join("DEBIAN"),
         stage.join("usr/bin"),
         stage.join("usr/lib/systemd/system"),
-        root.join("profiles"),
-        root.join("contracts"),
-        root.join("hardware").join(&cfg.profile),
     ] {
         fs::create_dir_all(&d).map_err(|e| format!("建目录 {} 失败: {e}", d.display()))?;
     }
@@ -398,21 +397,23 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         ),
     )
     .map_err(|e| format!("写 rrd.service 失败: {e}"))?;
-    fs::copy(&profile_src, root.join("profiles").join(&profile_name))
-        .map_err(|e| format!("复制 {profile_name} 失败: {e}"))?;
-    fs::copy(&topics_src, root.join("contracts/topics.toml"))
-        .map_err(|e| format!("复制 topics.toml 失败: {e}"))?;
-    fs::copy(&slots_src, root.join("contracts/slots.toml"))
-        .map_err(|e| format!("复制 slots.toml 失败: {e}"))?;
-    fs::copy(&roles_src, root.join("contracts/roles.toml"))
-        .map_err(|e| format!("复制 roles.toml 失败: {e}"))?;
-    fs::copy(&devices_src, root.join("contracts/devices.toml"))
-        .map_err(|e| format!("复制 devices.toml 失败: {e}"))?;
-    fs::copy(
-        &wiring_src,
-        root.join("hardware").join(&cfg.profile).join("wiring.toml"),
-    )
-    .map_err(|e| format!("复制 wiring.toml 失败: {e}"))?;
+    // ---- 数据真值随包：按清单逐条落位（files 直落、dirs 在则整目录随装）----
+    // 装机布局与仓根同名同布（清单相对路径两侧通用）；轴档案目录缺席合法跳过——
+    // 与装载链 rr3_axis_files_load 的"无 axis 目录 = 无档案"同语义（基-25 清单 dirs 成员）。
+    for rel in &truth.files {
+        let dst = root.join(rel);
+        let parent = dst
+            .parent()
+            .ok_or_else(|| format!("清单相对路径异常（无父目录）: {rel}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
+        fs::copy(cfg.repo.join(rel), &dst).map_err(|e| format!("复制 {rel} 失败: {e}"))?;
+    }
+    for rel in &truth.dirs {
+        let src = cfg.repo.join(rel);
+        if src.is_dir() {
+            rr3_copy_dir(&src, &root.join(rel))?;
+        }
+    }
     // ---- 逐模块：manifest（entry 改写）+ 产物（rust bin / python pkg+shim）+ config（仓内源真值）----
     for name in &names {
         let mod_src = cfg.payload.join("rr3-modules").join(name);
@@ -607,6 +608,12 @@ fn main() {
 mod tests {
     use super::*;
 
+    /// 真仓装配单（基-25：打包预验走 rrd 解析器，夹具必须给合法装配单——空文本过不了
+    /// 解析器。include_str! 相对源文件 src/，到仓根四级）。distro chip=rk3566、
+    /// esp32-mini chip=esp32，平台事实表册位随之。
+    const DISTRO_PROFILE: &str = include_str!("../../../profiles/distro.toml");
+    const ESP32_MINI_PROFILE: &str = include_str!("../../../profiles/esp32-mini.toml");
+
     /// 夹具根唯一序号：并行测试各占一个目录（ZST 指针恒同、pid 同批相同，都当不得唯一键）
     fn fixture_seq() -> u64 {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -660,12 +667,19 @@ mod tests {
         )
         .unwrap();
         fs::write(repo.join("modules/rr3-brain/config.toml"), "[rr3-brain]\n").unwrap();
-        fs::write(repo.join("profiles/distro.toml"), "# distro 装配单\n").unwrap();
+        fs::write(repo.join("profiles/distro.toml"), DISTRO_PROFILE).unwrap();
         fs::write(repo.join("contracts/topics.toml"), "# topics\n").unwrap();
         fs::write(repo.join("contracts/slots.toml"), "# slots\n").unwrap();
-        // boot 真值集随批N1 扩到五册（Z-4）：roles/devices 契约 + 接线档随 --profile 机型
+        // boot 真值集（基-25 清单 files 成员）：roles/devices 契约 + 平台事实表
+        //（按装配单 [platform].chip 选册）+ 机型接线档
         fs::write(repo.join("contracts/roles.toml"), "# roles\n").unwrap();
         fs::write(repo.join("contracts/devices.toml"), "# devices\n").unwrap();
+        fs::create_dir_all(repo.join("contracts/platform")).unwrap();
+        fs::write(
+            repo.join("contracts/platform/rk3566.toml"),
+            "# platform rk3566\n",
+        )
+        .unwrap();
         fs::create_dir_all(repo.join("hardware/distro")).unwrap();
         fs::write(repo.join("hardware/distro/wiring.toml"), "# wiring\n").unwrap();
         (payload, repo)
@@ -705,13 +719,14 @@ mod tests {
         // 数据真值位：零改写
         assert_eq!(
             fs::read_to_string(root.join("profiles/distro.toml")).unwrap(),
-            "# distro 装配单\n"
+            DISTRO_PROFILE
         );
         assert_eq!(
             fs::read_to_string(root.join("contracts/slots.toml")).unwrap(),
             "# slots\n"
         );
-        // boot 真值集五册随包（Z-4，增补轮六批N1）：roles/devices 契约 + 机型接线档
+        // boot 真值集随包（基-25 清单 files 成员）：roles/devices 契约 + chip 选册的
+        // 平台事实表 + 机型接线档；轴档案目录缺席（distro 无 axis）不造假数据
         assert_eq!(
             fs::read_to_string(root.join("contracts/roles.toml")).unwrap(),
             "# roles\n"
@@ -721,10 +736,16 @@ mod tests {
             "# devices\n"
         );
         assert_eq!(
+            fs::read_to_string(root.join("contracts/platform/rk3566.toml")).unwrap(),
+            "# platform rk3566\n",
+            "平台事实表按装配单 [platform].chip 选册随包（基-25）"
+        );
+        assert_eq!(
             fs::read_to_string(root.join("hardware/distro/wiring.toml")).unwrap(),
             "# wiring\n",
             "接线档落装机位 hardware/<机型>/wiring.toml（装载推导同布局）"
         );
+        assert!(!root.join("hardware/distro/axis").exists());
         assert_eq!(
             fs::read_to_string(stage.join("usr/lib/systemd/system/rrd.service")).unwrap(),
             RR3_SERVICE_UNIT
@@ -950,26 +971,37 @@ mod tests {
     #[test]
     fn profile_flag_stages_named_profile_and_names_it_when_absent() {
         // 正例：--profile esp32-mini → 装机位 profiles/esp32-mini.toml，字节零改写
+        //（真仓文本：rtos 档装配单过打包预验 = 过装载同判据，chip=esp32）
         let (payload, repo) = fixture();
-        fs::write(
-            repo.join("profiles/esp32-mini.toml"),
-            "# esp32-mini 装配单\n",
-        )
-        .unwrap();
-        // 机型接线档随 --profile 同名落位（boot 真值集，Z-4）
+        fs::write(repo.join("profiles/esp32-mini.toml"), ESP32_MINI_PROFILE).unwrap();
+        // chip 选册的平台事实表随 --profile 机型（基-25 清单成员）
+        fs::write(repo.join("contracts/platform/esp32.toml"), "# platform esp32\n").unwrap();
+        // 机型接线档随 --profile 同名落位（基-25 清单成员）
         fs::create_dir_all(repo.join("hardware/esp32-mini")).unwrap();
         fs::write(
             repo.join("hardware/esp32-mini/wiring.toml"),
             "# esp32-mini 接线档\n",
         )
         .unwrap();
+        // 轴档案目录在则整目录随装（基-25 清单 dirs 成员，rtos 机型）
+        fs::create_dir_all(repo.join("hardware/esp32-mini/axis")).unwrap();
+        fs::write(repo.join("hardware/esp32-mini/axis/pan.toml"), "# pan\n").unwrap();
+        fs::write(repo.join("hardware/esp32-mini/axis/tilt.toml"), "# tilt\n").unwrap();
         let (mut cfg, _) = cfg_of(&payload, &repo);
         cfg.profile = "esp32-mini".to_string();
         let stage = rr3_stage(&cfg).unwrap();
         assert_eq!(
             fs::read_to_string(stage.join("usr/lib/rockrobot3/profiles/esp32-mini.toml")).unwrap(),
-            "# esp32-mini 装配单\n",
+            ESP32_MINI_PROFILE,
             "指定机型装配单零改写落位"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                stage.join("usr/lib/rockrobot3/contracts/platform/esp32.toml")
+            )
+            .unwrap(),
+            "# platform esp32\n",
+            "平台事实表按机型 chip 选册随包（基-25）"
         );
         assert_eq!(
             fs::read_to_string(stage.join("usr/lib/rockrobot3/hardware/esp32-mini/wiring.toml"))
@@ -977,6 +1009,15 @@ mod tests {
             "# esp32-mini 接线档\n",
             "指定机型接线档落同名装机位（装载推导同布局）"
         );
+        assert_eq!(
+            fs::read_to_string(stage.join("usr/lib/rockrobot3/hardware/esp32-mini/axis/pan.toml"))
+                .unwrap(),
+            "# pan\n",
+            "轴档案目录在则整目录随装（基-25 清单 dirs 成员）"
+        );
+        assert!(stage
+            .join("usr/lib/rockrobot3/hardware/esp32-mini/axis/tilt.toml")
+            .is_file());
         // deb 只装 --profile 指的那一份装配单/接线档，不顺手带上 distro
         assert!(!stage
             .join("usr/lib/rockrobot3/profiles/distro.toml")
@@ -1000,6 +1041,35 @@ mod tests {
         cfg.profile = "esp32-mini".to_string();
         let e = rr3_stage(&cfg).unwrap_err();
         assert!(e.contains("esp32-mini.toml"), "{e}");
+    }
+
+    /// 基-25 清单判等反例面：平台事实表缺席 → 打包拒出包并点名册位（清单真值 =
+    /// rrd rr3_runtime_truth_set，打包面不自带第二份清单）。
+    #[test]
+    fn stage_refuses_when_truth_set_file_missing() {
+        let (payload, repo) = fixture();
+        fs::remove_file(repo.join("contracts/platform/rk3566.toml")).unwrap();
+        let (cfg, _) = cfg_of(&payload, &repo);
+        let e = rr3_stage(&cfg).unwrap_err();
+        assert!(e.contains("真值集缺册"), "{e}");
+        assert!(e.contains("contracts/platform/rk3566.toml"), "{e}");
+    }
+
+    /// 基-25 打包预验判据（与装载同判据单点）：装配单坏形 → 拒出包，出包时红早于
+    /// 装机 boot 红（块-15：装载必需件缺席而装机验证全绿才是最贵的洞）。
+    #[test]
+    fn stage_rejects_malformed_profile_by_loader_criteria() {
+        let (payload, repo) = fixture();
+        let bad = DISTRO_PROFILE.replace(
+            &format!("schema_version = {}", 5),
+            &format!("schema_version = {}", 99),
+        );
+        assert_ne!(bad, DISTRO_PROFILE, "替换须命中（schema_version 行在册）");
+        fs::write(repo.join("profiles/distro.toml"), bad).unwrap();
+        let (cfg, _) = cfg_of(&payload, &repo);
+        let e = rr3_stage(&cfg).unwrap_err();
+        assert!(e.contains("预验失败"), "{e}");
+        assert!(e.contains("schema_version"), "{e}");
     }
 
     #[test]
