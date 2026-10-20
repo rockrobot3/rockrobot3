@@ -280,7 +280,9 @@ fn rr3_absorb_exit(
 ///
 /// 门 r 留痕通道定形（批N4 件八）：目录名由 socket 全路径加 `.log` 后缀派生——同机
 /// 多实例（测试 `/tmp/rr3-m2-*.sock`、产线 `/var/run/rock3-ipc.sock`）天然按实例隔离，
-/// 不需要新 CLI 键；append 不 truncate，重启历史保留在文件里。这里只负责"打开"；
+/// 不需要新 CLI 键；append 不 truncate，重启历史保留在文件里。目录派生单点在
+/// lib.rs 的 `rr3_unit_log_dir`（批N5 件二笔2 迁入）：rrd 自身日志落盘与 per-unit
+/// 文件同目录同规则，路径规则一处定形。这里只负责"打开"；
 /// 打不开的错误交调用方裁决（回退 inherit，不挡起跑）。
 fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::File> {
     // fail-closed：bus_path 由 daemon 侧绝对化（cli.rs 的 rr3_socket_absolute_path），
@@ -291,9 +293,7 @@ fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::Fi
             "socket 路径非绝对（上游绝对化失效）",
         ));
     }
-    let mut dir = bus_path.as_os_str().to_os_string();
-    dir.push(".log");
-    let dir = PathBuf::from(dir);
+    let dir = crate::rr3_unit_log_dir(bus_path);
     std::fs::create_dir_all(&dir)?;
     std::fs::OpenOptions::new()
         .create(true)

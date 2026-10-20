@@ -285,6 +285,19 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             BTreeSet::new(),
         ),
     };
+    // rrd 自身日志落盘（批N5 件二笔2，§17 运维留痕同轨判据）：`<socket>.log/rrd.log`
+    // append——与 per-unit 文件同目录同派生单点。每行同步 append、不轮转；下一行
+    // 的启动回填把崩溃前的文件尾置回环头，`rr3.ctl.logs` 重启后仍取得到崩溃前的
+    // 最后若干行（模块侧批N4 件八已同轨成立，rrd 自身自此同权）。打不开 = 点名
+    // 退纯内存，观测通道故障降级、不放大成可用性故障（supervisor stderr 回退
+    // inherit 同一条纪律）。位置钉死在装配链 match **之后**：--profile 路径此刻
+    // 环容量已定格（回填行数按真容量收）；--manifest 调试路径按 512 兜底收。
+    if let Err(e) = crate::rr3_log_sink_set(&cfg.socket) {
+        rr3_log(&format!(
+            "rrd 日志落盘不可用: {e} —— 运维留痕退纯内存（rr3.ctl.logs 仅本次启动的环）"
+        ));
+    }
+    crate::rr3_log_backfill();
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     Rr3UdsListener::rr3_cleanup(&cfg.socket)

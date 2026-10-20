@@ -607,13 +607,15 @@ fi
 # 全仓四字面零命中 fail-closed：旧行程键名（host config 侧，件五② 撤除）与
 # 板侧三旧手写行程常量名（件五③ 撤除改生成表）。注释/断言提及字面量名同样
 # 红（严格口径——表述一律用"行程键/手写行程字面量"泛称，防回流靠门不靠记性）。
-# 豁免（三处，非放水）：
+# 豁免（四处，非放水）：
 #   docs/ —— status/conventions/全案/ADR 是历史账，记录漂移与裁定，不改史；
 #   本步自身 —— 执法文本（grep 模式）必然含字面量，门不自查自身；
-#   target/ —— 构建产物不属仓面。
+#   target/ —— 构建产物不属仓面；
+#   .embuild/ —— esp-idf SDK 树（⑨-c/⑨-d 的 ESP32 构建依赖，批N5 件二笔2 补豁免：
+#   同 target 同性质的构建产物，几十万文件的全树扫描还让本门在冷缓存下拖数分钟）。
 step "⑨-e 行程真值单点（门 g：旧行程键名与板侧旧行程常量名全仓零命中，档案是唯一真值）"
 travel_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-grep -rn --exclude-dir=.git --exclude-dir=target --exclude-dir=docs \
+grep -rn --exclude-dir=.git --exclude-dir=target --exclude-dir=docs --exclude-dir=.embuild \
      --exclude=check.sh \
      -e 'angle_limit_deg' -e 'AXIS_CENTER_DEG' -e 'PAN_LIMIT_DEG' -e 'TILT_LIMIT_DEG' \
      . > "$travel_hits" 2>/dev/null
