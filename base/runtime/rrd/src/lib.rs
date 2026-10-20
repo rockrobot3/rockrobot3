@@ -28,7 +28,75 @@ pub mod daemon;
 pub mod supervisor;
 
 use std::collections::VecDeque;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+
+/// per-unit 日志目录的派生单点：socket 全路径 + `.log` 后缀（批N4 件八定形，批N5
+/// 件二笔2 迁本文件供两路共用——supervisor 的 per-unit 文件与 rrd 自身落盘同一
+/// 目录）。同机多实例（测试 `/tmp/rr3-m2-*.sock`、产线 `/var/run/rock3-ipc.sock`）
+/// 天然按实例隔离，不需要新 CLI 键；只算路径不建目录不打开，副作用留给调用方。
+#[cfg(unix)]
+pub(crate) fn rr3_unit_log_dir(bus_path: &Path) -> PathBuf {
+    let mut dir = bus_path.as_os_str().to_os_string();
+    dir.push(".log");
+    PathBuf::from(dir)
+}
+
+/// rrd 自身日志的落盘文件路径（批N5 件二笔2，§17 运维留痕）：OnceLock 首份胜出，
+/// daemon 装配链后定格一次。未定格（启动早于接线 / `--manifest` 前段 / Windows）
+/// = 纯内存，`rr3_log` 行为与笔1 之前一字不变。
+static RR3_LOG_SINK: OnceLock<PathBuf> = OnceLock::new();
+
+/// 落盘写失败后的降级记账位：置位后本进程不再重试（磁盘故障不是每行日志都要
+/// 重新撞一遍的墙），点名一次交给运维，之后退纯内存。
+static RR3_LOG_SINK_DEAD: AtomicBool = AtomicBool::new(false);
+
+/// 定格 rrd 自身日志落盘（批N5 件二笔2）：`<socket>.log/rrd.log`，与 per-unit
+/// 文件同目录同派生单点（[`rr3_unit_log_dir`]）。目录建不出 = 返回 Err，调用方
+/// 点名降级纯内存——观测通道故障降级、不放大成可用性故障。`bus_path` 必须已
+/// 绝对化（main 的 [`crate::cli::rr3_socket_absolute_path`]）——相对路径就是链条
+/// 上游破了，fail-closed 拒定格（与 supervisor 的 `rr3_open_unit_log` 同一口径）。
+#[cfg(unix)]
+pub fn rr3_log_sink_set(bus_path: &Path) -> Result<(), String> {
+    if !bus_path.is_absolute() {
+        return Err("socket 路径非绝对（上游绝对化失效）".into());
+    }
+    let dir = rr3_unit_log_dir(bus_path);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建目录 {}: {e}", dir.display()))?;
+    RR3_LOG_SINK
+        .set(dir.join("rrd.log"))
+        .map_err(|_| "落盘路径已定格过（首份胜出，重复定格被拒）".to_string())
+}
+
+/// `rr3_log` 的落盘臂：一行同步 append，不缓冲不批写——"崩溃前最后 N 行"的判据
+/// 要求打过的行当场就在文件里。append 不 truncate 不轮转（批N4 件八同轨纪律）。
+/// 每行现开现写：运维留痕是事件级频率，不值得常持句柄。打开或写失败 = 点名
+/// 一次后置降级位，之后静默退纯内存。
+fn rr3_log_sink_append(line: &str) {
+    let Some(path) = RR3_LOG_SINK.get() else {
+        return;
+    };
+    if RR3_LOG_SINK_DEAD.load(Ordering::Relaxed) {
+        return;
+    }
+    let res = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(line.as_bytes()).and_then(|_| f.write_all(b"\n")));
+    if let Err(e) = res {
+        if !RR3_LOG_SINK_DEAD.swap(true, Ordering::Relaxed) {
+            // eprintln 不走 rr3_log：降级说明本身不能再依赖降级中的通道（递归），
+            // 也绝不进 stdout 管道（测试的可观察面是"rrd 说过什么"，不许混入）
+            eprintln!(
+                "rrd: 落盘写失败（{}）: {e} —— 运维留痕退纯内存，本进程不再重试",
+                path.display()
+            );
+        }
+    }
+}
 
 /// 统一日志出口：stdout、行首 `rrd: `。集成测试的可观察面全靠它。
 /// 走 `println!`：Rust stdout 是行缓冲，管道里也按行 flush，父进程逐行读得到。
@@ -36,9 +104,13 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 /// ADR-0010 裁定 5：stdout 行为一字不动，同一行**追加**一份进固定容量日志环；
 /// `rr3.ctl.logs` 读环的尾部副本。环在这里单点落——rr3_log 是全 daemon 唯一日志出口，
 /// 在别的调用点各存一份迟早分叉。
+///
+/// 批N5 件二笔2（§17 运维留痕）：sink 已定格时同一行再同步 append 进
+/// `<socket>.log/rrd.log`——stdout/环/文件三面同源，重启回填见 [`rr3_log_backfill`]。
 pub fn rr3_log(msg: &str) {
     let line = format!("rrd: {msg}");
     println!("{line}");
+    rr3_log_sink_append(&line);
     let mut ring = rr3_lock(rr3_log_ring());
     rr3_ring_push(&mut ring, line, rr3_log_ring_cap());
 }
@@ -86,6 +158,59 @@ fn rr3_log_ring() -> &'static Mutex<VecDeque<String>> {
 #[cfg(unix)]
 pub fn rr3_log_tail() -> Vec<String> {
     rr3_lock(rr3_log_ring()).iter().cloned().collect()
+}
+
+/// 启动回填（批N5 件二笔2，§17 运维留痕同轨判据）：读落盘文件尾，把崩溃前的最后
+/// 若干行**静默**置回环头——不 println、不再落盘（行已在文件里）。未定格 sink =
+/// no-op。次序语义：文件行必比本次启动已打的行旧，[`rr3_backfill_lines`] 给出的
+/// 消费序保证 push_front 后最旧行恰在环头；超容量由下面的裁剪收敛，环恒是
+/// "最后 cap 行"。
+#[cfg(unix)]
+pub fn rr3_log_backfill() {
+    let Some(path) = RR3_LOG_SINK.get() else {
+        return;
+    };
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return;
+    };
+    let len = match f.metadata() {
+        Ok(m) => m.len(),
+        Err(_) => return,
+    };
+    // 从尾块取（append 不轮转下文件无界，整读违背"有界"本意）。64KB 对兜底
+    // 容量 512 行 × 常见行长 ~80B 满配有余；起点不在文件头时块首行可能截断，
+    // 丢弃（rr3_backfill_lines 的 drop_first）。
+    const RR3_LOG_BACKFILL_TAIL_BYTES: u64 = 64 * 1024;
+    let start = len.saturating_sub(RR3_LOG_BACKFILL_TAIL_BYTES);
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return;
+    }
+    let mut buf = String::new();
+    if f.read_to_string(&mut buf).is_err() {
+        return;
+    }
+    let cap = rr3_log_ring_cap();
+    let lines = rr3_backfill_lines(&buf, start > 0, cap);
+    let mut ring = rr3_lock(rr3_log_ring());
+    for line in lines {
+        ring.push_front(line);
+    }
+    while ring.len() > cap {
+        ring.pop_front();
+    }
+}
+
+/// 回填行集（纯函数）：文本按行取尾 `cap` 行，按 push_front 消费序返回——
+/// 最新在前，依次 push_front 后时序与文件一致（最旧在环头）。`drop_first` =
+/// 尾块起点不在文件头：块首行可能是截断的半行，丢弃。独立纯函数是为单测能
+/// 无全局态地钉选取序（同 [`rr3_ring_push`] 的理由）。
+fn rr3_backfill_lines(text: &str, drop_first: bool, cap: usize) -> Vec<String> {
+    let mut lines: Vec<&str> = text.lines().collect();
+    if drop_first {
+        lines.remove(0);
+    }
+    lines.reverse();
+    lines.into_iter().take(cap).map(str::to_string).collect()
 }
 
 /// 锁中毒的唯一处理口径：中毒只可能来自 panic 的持锁者，继续用比弃连接/比整个守护停摆好。
@@ -159,5 +284,34 @@ mod tests {
         assert!(rr3_log_ring_cap_set(8), "首次 set 必须成功");
         assert!(!rr3_log_ring_cap_set(999), "重复 set 必须失败（首份胜出）");
         assert_eq!(rr3_log_ring_cap(), 8);
+    }
+
+    /// 回填行集（批N5 件二笔2）：取尾 cap 行、push_front 消费序（最新在前）；
+    /// drop_first 只丢块首可能截断的半行；空文本回填空。
+    #[test]
+    fn backfill_lines_take_tail_in_front_push_order() {
+        let text = "l0\nl1\nl2\nl3";
+        assert_eq!(
+            rr3_backfill_lines(text, false, 2),
+            vec!["l3".to_string(), "l2".to_string()],
+            "尾 cap 行、最新在前：依次 push_front 后 l2 在环头、l3 在环尾（时序与文件一致）"
+        );
+        assert_eq!(
+            rr3_backfill_lines(text, true, 3),
+            vec!["l3".to_string(), "l2".to_string(), "l1".to_string()],
+            "drop_first 只丢 l0，不影响尾部选取"
+        );
+        assert!(rr3_backfill_lines("", false, 4).is_empty(), "空文件回填空");
+    }
+
+    /// 目录派生单点：`<socket>.log` 后缀直拼，不解析不 canonicalize——supervisor
+    /// 的 per-unit 文件与 rrd 自身落盘共用同一条路径规则（一处定形）。
+    #[cfg(unix)]
+    #[test]
+    fn unit_log_dir_appends_log_suffix() {
+        assert_eq!(
+            rr3_unit_log_dir(Path::new("/tmp/rr3-a.sock")),
+            PathBuf::from("/tmp/rr3-a.sock.log")
+        );
     }
 }
