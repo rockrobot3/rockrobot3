@@ -47,7 +47,10 @@ use face::{
     rr3_face_expression_lookup, rr3_face_frames, rr3_face_non_pointable_join,
     rr3_face_with_default, Rr3Face,
 };
-use panel::server::{rr3_panel_serve, Rr3PanelAction, Rr3PanelLimits, Rr3PanelShared};
+use panel::server::{
+    rr3_panel_serve, Rr3PanelAction, Rr3PanelLimits, Rr3PanelShared, Rr3SelftestExpect,
+    RR3_SELFTEST_LEG_STATES, RR3_SELFTEST_WIRING_EXPECTS,
+};
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
 const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
@@ -124,16 +127,21 @@ pub fn rr3_interact_run() -> Result<(), String> {
     // 零策略载荷。缺文件/缺键/在册外值一律拒 boot（fail-closed）。
     let cfg = rr3_config_load(&manifest_path)?;
     // 注入的策略面在启动自述里可见（I-11：改数据即改行为，日志是第一证据）。
-    // I-17/I-18② 新增键随批N4 件五进自述：节拍/兜底表情/面板并发放自检期望。
+    // I-17/I-18② 新增键随批N4 件五进自述：节拍/兜底表情/面板并发与自检期望；
+    // 批N5 件五 F-31 预期表随行（verdict 判据数据化，改表即改红绿）。
     eprintln!(
-        "config 就绪: face non_pointable={} tick_ms={} default={} player prebuffer_ms={} volume_pct={} panel max_conns={} selftest face_expect={}",
+        "config 就绪: face non_pointable={} tick_ms={} default={} player prebuffer_ms={} volume_pct={} panel max_conns={} selftest face_expect={} expect[speaker={},relay={},face={},wiring={}]",
         rr3_face_non_pointable_join(&cfg.face.non_pointable),
         cfg.face.face_tick_ms,
         cfg.face.default_expr,
         cfg.player.prebuffer_ms,
         cfg.player.volume_pct,
         cfg.panel.max_conns,
-        cfg.selftest.face_expect
+        cfg.selftest.face_expect,
+        cfg.selftest.expect.speaker,
+        cfg.selftest.expect.relay,
+        cfg.selftest.expect.face,
+        cfg.selftest.expect.wiring
     );
 
     let (mut sink, backend) = rr3_hal_audio_sink();
@@ -181,6 +189,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
         link: Arc::clone(&link),
         limits: panel_limits,
         selftest_face_expect: cfg.selftest.face_expect,
+        selftest_expect: cfg.selftest.expect,
     });
     std::thread::Builder::new()
         .name("rr3-panel".into())
@@ -550,15 +559,21 @@ impl Default for Rr3PanelCfg {
 }
 
 /// config `[rr3-interact.selftest]` 的形状（批N4 件五 I-17/M-10）：自检期望
-/// 表情是产线取向，可按形态改数据。值必须在册（白名单对账）。
+/// 表情是产线取向，可按形态改数据。值必须在册（白名单对账）。批N5 件五
+/// F-31 扩预期表 `expect`：固定腿逐名期望三态 + wiring 组预期——verdict =
+/// 结果集与预期集等值，判据数据化（值域闭集与机制面同住在 panel server）。
 #[derive(Debug, Clone)]
 struct Rr3SelftestCfg {
     face_expect: &'static str,
+    expect: Rr3SelftestExpect,
 }
 
 impl Default for Rr3SelftestCfg {
     fn default() -> Self {
-        Self { face_expect: "happy" }
+        Self {
+            face_expect: "happy",
+            expect: Rr3SelftestExpect::default(),
+        }
     }
 }
 
@@ -606,6 +621,9 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
     }
     // selftest 段（批N4 件五 I-17/M-10）：段缺省回落 legacy 期望（"happy"）；
     // 值必须在册（同 non_pointable 白名单对账口径），在册外点名拒 boot。
+    // 批N5 件五 F-31 扩 expect 预期表：段/键缺省回落默认（固定腿全 pass +
+    // wiring 组零 fail）；三态值域闭集与腿名册逐键对账，未知腿名/在册外值
+    // 点名拒 boot（fail-closed——预期表错一个字就改判红绿，不容静默）。
     let mut selftest = Rr3SelftestCfg::default();
     if let Some(s) = v.get("rr3-interact").and_then(|x| x.get("selftest")) {
         if let Some(name) = s.get("face_expect").and_then(toml::Value::as_str) {
@@ -615,6 +633,45 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
                     face::RR3_FACE_EXPRESSIONS.join("/")
                 )
             })?;
+        }
+        if let Some(e) = s.get("expect") {
+            let table = e
+                .as_table()
+                .ok_or_else(|| format!("config [rr3-interact.selftest] expect 段必须是表，收到 {e}"))?;
+            for (k, val) in table {
+                let sval = val.as_str().ok_or_else(|| {
+                    format!("config [rr3-interact.selftest.expect] {k} 必须是字符串，收到 {val}")
+                })?;
+                match k.as_str() {
+                    "wiring" => {
+                        selftest.expect.wiring = Rr3SelftestExpect::rr3_wiring_lookup(sval)
+                            .ok_or_else(|| {
+                                format!(
+                                    "config [rr3-interact.selftest.expect] wiring 非在册组预期 {sval:?}（在册值 {}）",
+                                    RR3_SELFTEST_WIRING_EXPECTS.join("/")
+                                )
+                            })?;
+                    }
+                    leg @ ("speaker" | "relay" | "face") => {
+                        let st = Rr3SelftestExpect::rr3_state_lookup(sval).ok_or_else(|| {
+                            format!(
+                                "config [rr3-interact.selftest.expect] {leg} 非在册三态 {sval:?}（在册值 {}）",
+                                RR3_SELFTEST_LEG_STATES.join("/")
+                            )
+                        })?;
+                        match leg {
+                            "speaker" => selftest.expect.speaker = st,
+                            "relay" => selftest.expect.relay = st,
+                            _ => selftest.expect.face = st,
+                        }
+                    }
+                    other => {
+                        return Err(format!(
+                            "config [rr3-interact.selftest.expect] 未知腿名 {other:?}（在册腿 speaker/relay/face/wiring）"
+                        ))
+                    }
+                }
+            }
         }
     }
     let face_sect = v
@@ -908,6 +965,62 @@ face_expect = "happy"
         )
         .unwrap_err();
         assert!(e.contains("非在册表情"), "自检期望在册外点名: {e}");
+    }
+
+    /// selftest expect 预期表（批N5 件五 F-31）：段/键缺省回落固定腿全 pass +
+    /// wiring 组零 fail；在册三态任选；值域外、组预期词表外、未知腿名、非字符
+    /// 串值、非表段逐键点名拒 boot（fail-closed）
+    #[test]
+    fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
+        let minimal = "[rr3-interact.face]\nnon_pointable = []\n";
+        // 段/键缺省：预期表回落固定腿全 pass + wiring 组零 fail
+        let cfg = rr3_interact_config_parse(minimal).unwrap();
+        assert_eq!(cfg.selftest.expect.speaker, "pass");
+        assert_eq!(cfg.selftest.expect.relay, "pass");
+        assert_eq!(cfg.selftest.expect.face, "pass");
+        assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
+        // 显式值合法读入：在册三态任选（恒败形态可如实申报期望 fail/n-a）
+        let cfg = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"fail\"\nrelay = \"pass\"\nface = \"n-a\"\nwiring = \"zero-fail\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.selftest.expect.speaker, "fail");
+        assert_eq!(cfg.selftest.expect.relay, "pass");
+        assert_eq!(cfg.selftest.expect.face, "n-a");
+        assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
+        // 三态值域外拒：非在册判值点名
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"ok\"\n",
+        )
+        .unwrap_err();
+        assert!(
+            e.contains("非在册三态") && e.contains("speaker"),
+            "值域闭集点名: {e}"
+        );
+        // wiring 组预期词表外拒（单值词表也是闭集，拼错当场红）
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nwiring = \"zero_fail\"\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("非在册组预期"), "组预期词表点名: {e}");
+        // 未知腿名拒：腿册外预期不容静默（fail-closed）
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\narm = \"pass\"\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("未知腿名") && e.contains("arm"), "腿名册点名: {e}");
+        // 非字符串值拒
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = 3\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("必须是字符串"), "类型错点名: {e}");
+        // expect 段非表拒
+        let e = rr3_interact_config_parse(
+            "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest]\nexpect = 3\n",
+        )
+        .unwrap_err();
+        assert!(e.contains("expect 段必须是表"), "段形状点名: {e}");
     }
 
     /// player 两键（MC-2）：键/段缺省回落默认；类型错、负数、越界逐键点名拒

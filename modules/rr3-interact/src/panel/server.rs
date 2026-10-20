@@ -580,6 +580,55 @@ pub fn rr3_ctl_query(
         .ok_or_else(|| format!("ctl {method} 应答缺 result"))
 }
 
+/// 自检预期表值域闭集（批N5 件五 F-31）：固定腿期望三态词表——parse 面对账
+/// 在册（词表外拒 boot），verdict 等值判定的合法判值集。
+pub const RR3_SELFTEST_LEG_STATES: [&str; 3] = ["pass", "fail", "n-a"];
+
+/// wiring 组预期词表（批N5 件五 F-31）：组内零 fail 即组过（n-a 不拖累不救场）。
+/// 单值词表也是闭集——拼错的预期值（如 "zero_fail"）当场拒 boot，不容静默。
+pub const RR3_SELFTEST_WIRING_EXPECTS: [&str; 1] = ["zero-fail"];
+
+/// 自检预期表（批N5 件五 F-31）：固定腿 speaker/relay/face 逐名期望三态 +
+/// wiring 组预期——verdict 的判据集，整体红绿是结果集对预期集等值的派生量。
+/// 装配期自 config `[rr3-interact.selftest.expect]` 读出构造（parse 已对账
+/// 词表），字段恒持在册值（'static 来自词表 lookup）。
+#[derive(Debug, Clone, Copy)]
+pub struct Rr3SelftestExpect {
+    pub speaker: &'static str,
+    pub relay: &'static str,
+    pub face: &'static str,
+    /// wiring/* 组预期（`zero-fail` = 组内零 fail 即组过）
+    pub wiring: &'static str,
+}
+
+impl Default for Rr3SelftestExpect {
+    fn default() -> Self {
+        // 缺省 = 固定腿全 pass + wiring 组零 fail——缺省判据下 speaker 恒败腿
+        // 在场时现行红绿不变（F-31 缺省回落不破坏现状）
+        Self {
+            speaker: "pass",
+            relay: "pass",
+            face: "pass",
+            wiring: "zero-fail",
+        }
+    }
+}
+
+impl Rr3SelftestExpect {
+    /// 固定腿三态 lookup（'static 来自词表）；词表外 None，调用方点名拒 boot
+    pub fn rr3_state_lookup(s: &str) -> Option<&'static str> {
+        RR3_SELFTEST_LEG_STATES.iter().find(|&&v| v == s).copied()
+    }
+
+    /// wiring 组预期 lookup（'static 来自词表）；词表外 None，调用方点名拒 boot
+    pub fn rr3_wiring_lookup(s: &str) -> Option<&'static str> {
+        RR3_SELFTEST_WIRING_EXPECTS
+            .iter()
+            .find(|&&v| v == s)
+            .copied()
+    }
+}
+
 /// 面板服务线程的共享面：总线句柄（clone = 同一连接的另一句柄）、总线路径
 /// （ctl 短连用）、动作通道（beep/face 递主循环）、link 订阅缓存、五限额
 /// （I-18②：config 数据化贯穿）与自检期望表情（I-17/M-10：产线取向可配）。
@@ -593,6 +642,9 @@ pub struct Rr3PanelShared {
     /// 自检 face 腿的期望表情（批N4 件五 I-17/M-10：在册白名单值，'static
     /// 来自表情册 lookup，跨线程安全）
     pub selftest_face_expect: &'static str,
+    /// 自检预期表（批N5 件五 F-31）：固定腿逐名期望三态 + wiring 组预期，
+    /// verdict = 结果集与预期集等值（装配期 parse 已对词表，'static 值）
+    pub selftest_expect: Rr3SelftestExpect,
 }
 
 /// 面板入口：绑 [`rr3_panel_addr`] 起 accept 循环（阻塞，调用方起线程收容）。
@@ -815,13 +867,13 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 并列三调＋接线全交叉（Q3）：各答各展示、无依赖链、单项失败不连锁——
             // 这不是编排（无状态机无裁决），brain 才是唯一编排者（ADR-0007）。
             // 批N4 件五 I-18③（D15 裁定）：逐腿输出 `{leg, pass, reason?}`——
-            // pass = pass|fail|n-a 三态；恒败腿如实报 fail **不折算通过**；
-            // verdict = 有 fail 即 fail、无 fail 且至少一腿真判 pass 才 pass
-            // （n-a 不拖累也不救场：全 n-a = 无一真判，如实 fail）。
+            // pass = pass|fail|n-a 三态；恒败腿如实报 fail **不折算通过**。
             // 批N4 件九笔4 起加腿四 wiring：rr3.ctl.wiring 取装配快照的全交叉
             // 判果**逐条摊进 legs**（`leg = "wiring/<item>"`，逐形态内容不同 =
             // 全案 §7 ⑤"出厂自检必测 [pins]×wiring 全交叉"的原文）——判果本身
             // 是 rrd 的产出，这里只转述不重判（第二真值点禁令）。
+            // verdict 判定归 [`rr3_selftest_verdict`]（批N5 件五 F-31 预期表
+            // 等值改判，纯函数化守判据面）。
             let mut legs = Vec::with_capacity(6);
             // 腿1 speaker：beep 走主循环代执行——无本地波形源是已知业务错误，
             // 如实 fail 点名原因（产线换真波形源后此腿自然转 pass）
@@ -918,20 +970,11 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                     }
                 }
             }
-            let any_fail = legs
-                .iter()
-                .any(|l| l.get("pass").and_then(Value::as_str) == Some("fail"));
-            let any_pass = legs
-                .iter()
-                .any(|l| l.get("pass").and_then(Value::as_str) == Some("pass"));
-            Rr3PanelReply::json(
-                200,
-                "OK",
-                json!({
-                    "legs": legs,
-                    "verdict": if !any_fail && any_pass { "pass" } else { "fail" },
-                }),
-            )
+            // verdict = 结果集与预期集等值（批N5 件五 F-31）：固定腿逐名三态
+            // 等值（缺腿即红、腿册外多腿 fail-closed 红），wiring/* 组内零 fail
+            // 即组过（n-a 不拖累）。整体红绿是派生量，预期表 config 数据化。
+            let verdict = rr3_selftest_verdict(&legs, &shared.selftest_expect);
+            Rr3PanelReply::json(200, "OK", json!({ "legs": legs, "verdict": verdict }))
         }
         Rr3PanelDispatch::Reboot => match rr3_ctl_query(
             &shared.bus_path,
@@ -968,6 +1011,43 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
         },
     }
+}
+
+/// 自检 verdict 判定（批N5 件五 F-31，纯函数化）：verdict = 结果集与预期集
+/// 等值——固定腿 speaker/relay/face 逐名三态等值，结果集缺腿即红、多出腿册外
+/// 未知腿名 fail-closed 红；wiring/* 组内零 fail 即组过（n-a 不拖累不救场）。
+/// 整体红绿是派生量：预期表可按形态改数据（[rr3-interact.selftest.expect]），
+/// 恒败腿如实申报期望 fail 即等值过（改数据不改码）。
+fn rr3_selftest_verdict(legs: &[Value], expect: &Rr3SelftestExpect) -> &'static str {
+    let mut seen = [false; 3]; // speaker/relay/face 到场记账（缺腿即红）
+    for l in legs {
+        let name = l.get("leg").and_then(Value::as_str).unwrap_or("");
+        let state = l.get("pass").and_then(Value::as_str).unwrap_or("");
+        match name {
+            "speaker" | "relay" | "face" => {
+                let ix = match name {
+                    "speaker" => 0,
+                    "relay" => 1,
+                    _ => 2,
+                };
+                seen[ix] = true;
+                let want = [expect.speaker, expect.relay, expect.face][ix];
+                if state != want {
+                    return "fail";
+                }
+            }
+            n if n.starts_with("wiring/") => {
+                if state == "fail" {
+                    return "fail";
+                }
+            }
+            _ => return "fail", // 腿册外未知腿名 fail-closed：不算通过
+        }
+    }
+    if seen.iter().any(|s| !s) {
+        return "fail"; // 结果集缺固定腿即红
+    }
+    "pass"
 }
 
 /// 进程内动作执行：递主循环、等应答（动作在主循环串行处理，与 TTS 点名互斥）。
@@ -1527,6 +1607,7 @@ mod tests {
             link: Arc::new(Mutex::new(None)),
             limits: Rr3PanelLimits::default(),
             selftest_face_expect: "happy",
+            selftest_expect: Rr3SelftestExpect::default(),
         });
 
         let live = Arc::new(AtomicUsize::new(0));
@@ -1614,8 +1695,8 @@ mod tests {
     }
 
     /// 自检逐腿输出（批N4 件五 I-18③/D15）：应答 `{legs:[{leg,pass,reason?}],verdict}`——
-    /// speaker 恒败腿（无本地波形源）如实 fail 不折算通过；verdict = 全腿 pass
-    /// 才 pass（混合态必 fail）。
+    /// speaker 恒败腿（无本地波形源）如实 fail 不折算通过；verdict = 结果集
+    /// 与预期集等值（批N5 件五 F-31），缺省判据下恒败腿在场必 fail。
     #[test]
     fn selftest_reports_legs_and_honest_speaker_fail() {
         // 假 rrd + 真总线客户端（同 I4 夹具口径）：relay 腿经假 rrd 应答走通；
@@ -1643,6 +1724,7 @@ mod tests {
             link: Arc::new(Mutex::new(None)),
             limits: Rr3PanelLimits::default(),
             selftest_face_expect: "happy",
+            selftest_expect: Rr3SelftestExpect::default(),
         });
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = tcp.local_addr().unwrap();
@@ -1682,7 +1764,7 @@ mod tests {
         assert_eq!(legs[3]["pass"], "fail");
         assert_eq!(
             v["verdict"], "fail",
-            "混合态 verdict 必 fail（有 fail 即 fail）"
+            "混合态 verdict 必 fail（speaker/face 不等值 + wiring 组含 fail）"
         );
     }
 
@@ -1723,6 +1805,7 @@ mod tests {
             link: Arc::new(Mutex::new(None)),
             limits: Rr3PanelLimits::default(),
             selftest_face_expect: "happy",
+            selftest_expect: Rr3SelftestExpect::default(),
         });
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = tcp.local_addr().unwrap();
@@ -1761,7 +1844,87 @@ mod tests {
         assert_eq!(legs[5]["reason"], "未知值兜底");
         assert_eq!(
             v["verdict"], "fail",
-            "wiring fail 腿在 → verdict fail（有 fail 即 fail；n-a 不救场也不拖累）"
+            "wiring 组含 fail → verdict fail（零 fail 判据；n-a 不救场也不拖累）"
+        );
+    }
+
+    /// 自检 verdict 预期表等值判定（批N5 件五 F-31，纯函数钉门）：等值 pass／
+    /// 固定腿不等值 fail／缺腿 fail／wiring 组含 fail fail／腿册外未知腿名
+    /// fail-closed fail；预期可改数据——恒败腿如实申报期望 fail 即等值过
+    /// （改数据不改码）。
+    #[test]
+    fn selftest_verdict_compares_result_set_against_expect_table() {
+        let leg = |name: &str, pass: &str| json!({ "leg": name, "pass": pass });
+        // 等值 pass：固定腿全 pass + wiring 组零 fail（pass/n-a 混合不拖累）
+        let legs = vec![
+            leg("speaker", "pass"),
+            leg("relay", "pass"),
+            leg("face", "pass"),
+            leg("wiring/net:J-T:rail5v", "pass"),
+            leg("wiring/signal:J-T[1]:gnd", "n-a"),
+        ];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &Rr3SelftestExpect::default()),
+            "pass",
+            "结果集与缺省预期全等值"
+        );
+        // 预期改数据（F-31）：恒败形态如实申报期望 fail／n-a，等值即过
+        let expect = Rr3SelftestExpect {
+            speaker: "fail",
+            face: "n-a",
+            ..Default::default()
+        };
+        let legs = vec![
+            leg("speaker", "fail"),
+            leg("relay", "pass"),
+            leg("face", "n-a"),
+        ];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &expect),
+            "pass",
+            "预期表改数据即改判据，结果与预期等值即过"
+        );
+        // 固定腿不等值：speaker 结果 fail 而预期 pass → 红
+        let legs = vec![
+            leg("speaker", "fail"),
+            leg("relay", "pass"),
+            leg("face", "pass"),
+        ];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &Rr3SelftestExpect::default()),
+            "fail",
+            "固定腿三态不等值即红"
+        );
+        // wiring 组含 fail → 红（组内零 fail 判据）
+        let legs = vec![
+            leg("speaker", "pass"),
+            leg("relay", "pass"),
+            leg("face", "pass"),
+            leg("wiring/pin:J-T[2]:vcc", "fail"),
+        ];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &Rr3SelftestExpect::default()),
+            "fail",
+            "wiring 组零 fail 判据"
+        );
+        // 结果集缺固定腿 → 红（缺的腿无从对表）
+        let legs = vec![leg("speaker", "pass"), leg("relay", "pass")];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &Rr3SelftestExpect::default()),
+            "fail",
+            "缺腿即红"
+        );
+        // 腿册外未知腿名 → fail-closed 红（结果集多腿不容静默）
+        let legs = vec![
+            leg("speaker", "pass"),
+            leg("relay", "pass"),
+            leg("face", "pass"),
+            leg("arm", "pass"),
+        ];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &Rr3SelftestExpect::default()),
+            "fail",
+            "腿册外未知腿名 fail-closed"
         );
     }
 
@@ -1798,6 +1961,7 @@ mod tests {
             link: Arc::new(Mutex::new(None)),
             limits: Rr3PanelLimits::default(),
             selftest_face_expect: "happy",
+            selftest_expect: Rr3SelftestExpect::default(),
         });
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = tcp.local_addr().unwrap();
