@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rr3-power/battery/ok",
+  "schema_version": 1,
+  "description": "低电恢复事件（批N5 件二笔3，2026-10-20 随全案 §17 运维留痕 'low_power 旗补解除路径' 落盘）。rr3-power 电压回到低电阈值之上（严格大于，恰等阈值仍是低电段内）的首拍发布一次（同一次低电段的恢复沿不重复发布）；rrd 订阅后清全局低电旗、恢复新 spawn，并点名广播 rr3-runtime/system/power（reason=battery-ok）。与 battery/low 同形状（seq / percent / voltage_mv 三必填），生产者 rr3-power 的 battery 实装为形状唯一事实源；板上实测阈值只改发布方常量，不改本 schema。",
+  "type": "object",
+  "required": ["seq", "percent", "voltage_mv"],
+  "properties": {
+    "seq": { "type": "integer", "minimum": 0, "description": "rr3-power 事件发布序号（本模块事件流自己的计数）" },
+    "percent": { "type": "integer", "minimum": 0, "maximum": 100, "description": "恢复首拍的电量百分比读数" },
+    "voltage_mv": { "type": "integer", "minimum": 0, "description": "恢复首拍的电池电压（毫伏）" }
+  },
+  "additionalProperties": false
+}
