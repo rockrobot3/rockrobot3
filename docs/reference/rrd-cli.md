@@ -27,8 +27,8 @@
 `cli.rs` 的 `USAGE` 常量是所有报错的尾巴，逐字如下（换行 = `\n`）：
 
 ```text
-用法: rrd [--socket <path>] [--topics-overlay <path>] [--contracts <dir>] [--profile <path>] [--manifest <path>]... [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]
-说明: --contracts 定位包内契约目录（topics.toml/slots.toml，缺省编译期仓内路径——deb 装机必给）。--boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。--profile 与 --manifest 不得同给（Q3：profile 装机正门，--manifest 调试后门）。
+用法: rrd [--socket <path>] [--contracts <dir>] (--profile <path> | --manifest <path> | --manifest <path> --manifest <path> ...) [--topics-overlay <path>] [--restart-base-ms <n>] [--pre-register-timeout-ms <n>] [--watchdog-tick-ms <n>] [--boot-role <role>]
+说明: --contracts 定位包内契约目录（topics.toml/slots.toml，缺省编译期仓内路径——deb 装机必给）。--boot-role 的值原样注入 boot 子进程的 RR3_SIM_PEER_ROLE，取值由夹具解释，rrd 不校验（E-6）。装配面必选（基-23）：--profile（装机正门）与 --manifest（调试后门）至少给其一；两者同给也拒（Q3：两路径共用仲裁与 spawn，不双真值）。
 ```
 
 `-h` / `--help` 打印的就是这一串（`rr3_cli_parse_with_env` 的 `-h`/`--help` 分支）。多数参数错误也在文案第二段拼上它
@@ -48,8 +48,8 @@
 | `--socket` | 路径 | `rr3_default_socket`：环境键 `RR3_BUS_PATH`（常量 `RR3_BUS_PATH_ENV`）优先，缺省回落 `RR3_UDS_PATH_DEFAULT`（值 `/var/run/rock3-ipc.sock`） | UDS 绑定路径；进横幅与 `UnixListener::bind` 前被绝对化 | `cli.rs 的 rr3_default_socket`、`rr3_cli_parse_with_env` 的 `RrdConfig` 初始化、`transport/mod.rs 的 RR3_UDS_PATH_DEFAULT 常量` |
 | `--topics-overlay` | 路径 | `None`（不加载） | 主题叠加层，**仅测试用**；`main.rs` 与装载入口各规范化一次（横幅凭证取 `main.rs` 那次、致命文案取装载入口那次，见 §4） | `rr3_cli_parse_with_env` 的 `--topics-overlay` 分支、`main` 的叠加层绝对化段、`topics_load.rs 的 rr3_overlay_resolved` |
 | `--contracts` | 目录 | `None`（编译期常量：仓内 `contracts/`，由 `CARGO_MANIFEST_DIR` 拼出） | 契约目录的**运行期落点**（0.0.2 T5）：topics 与 slots 共用 `rr3_contracts_dir` 解析——显式给值时原样使用，缺省回落编译期仓内路径（仓内开发零变化）；deb 装机后编译期路径不存在，payload 必须显式指向包内 `/usr/lib/rockrobot3/contracts`。显式值**不单独规范化、无横幅凭证行**——存在性检查落在 join 出的 `topics.toml` / `slots.toml` 上，由装载入口各自 canonicalize（见 §4） | `rr3_cli_parse_with_env` 的 `--contracts` 分支、`RrdConfig 的 contracts 字段`、`topics_load.rs 的 rr3_contracts_dir`、`profile.rs 的 rr3_profile_boot_inputs`（`slots_path` 参数） |
-| `--profile` | 路径 | `None`（不装载） | **装配单**（0.0.2 Q3 的装机**正门**）：`[bindings]`/`[enabled_slots]` 决定起谁，装载/查册/缺格判定/manifest 解析全部在 bind 之前完成；缺格只逐条点名"拒绝启动"降级该模块，**不是**致命项。与 `--manifest` 同给当场拒（§3） | `rr3_cli_parse_with_env` 的 `--profile` 分支、`main` 的装配单绝对化段、`profile.rs 的 rr3_profile_boot_inputs` |
-| `--manifest` | 路径，**可重复** | 空表，顺序原样保留 | 待启动模块的 manifest（调试**后门**，Q3）；约定为绝对路径 | `rr3_cli_parse_with_env` 的 `--manifest` 分支 |
+| `--profile` | 路径 | `None`（不装载） | **装配单**（0.0.2 Q3 的装机**正门**）：`[bindings]`/`[enabled_slots]` 决定起谁，装载/查册/缺格判定/manifest 解析全部在 bind 之前完成；缺格只逐条点名"拒绝启动"降级该模块，**不是**致命项。与 `--manifest` 同给当场拒（§3）；基-23 起是**装配面必选**之一——不给它就必须给 `--manifest`，双缺在 parse 收尾拒（§3） | `rr3_cli_parse_with_env` 的 `--profile` 分支、`main` 的装配单绝对化段、`profile.rs 的 rr3_profile_boot_inputs` |
+| `--manifest` | 路径，**可重复** | 空表，顺序原样保留 | 待启动模块的 manifest（调试**后门**，Q3）；约定为绝对路径。基-23 起是**装配面必选**之一——不给它就必须给 `--profile`，双缺在 parse 收尾拒（§3） | `rr3_cli_parse_with_env` 的 `--manifest` 分支 |
 | `--restart-base-ms` | 整数毫秒 | `1000` | 重启退避基数：`delay_ms` = 表值 × base；下界 1、上界 `RR3_RESTART_BASE_MS_MAX` | `rr3_cli_parse_with_env` 的 `--restart-base-ms` 分支、`cli.rs 的 RR3_RESTART_BASE_MS_MAX 常量` |
 | `--pre-register-timeout-ms` | 整数毫秒 | `3000` | 连接 accept 后多久没完成注册判为失败；`conn.rs` 侧按 `.max(1)` 用作读超时 | `rr3_cli_parse_with_env` 的 `--pre-register-timeout-ms` 分支、`conn.rs 的 rr3_conn_serve` |
 | `--watchdog-tick-ms` | 整数毫秒 | `200` | **唯一 watchdog 线程的扫描间隔**（tick）；`0` 在 parse 处**当场拒**、不 `.max(1)` 静默夹——0 是忙循环，不是"更快一点"。非数字走 `parse_ms` 的"需为非负整数毫秒"口径 | `rr3_cli_parse_with_env` 的 `--watchdog-tick-ms` 分支、`rr3_cli_parse_with_env` 的文档注释、`RrdConfig 的 watchdog_tick_ms 字段`、`rr3_cli_parse_with_env` 的拒 0 分支 |
@@ -116,8 +116,16 @@ rrd 在 `<RR3_DATA_DIR>/counters.json` 维护**心跳计数聚合账**（`rr3.ct
 | `--restart-base-ms 0` | `--restart-base-ms 需为正整数毫秒：0 会让重启退避恒为 0（热重启循环，spec §5.3）` + 换行 + `USAGE` | `cli.rs 的 parse_restart_base` |
 | `--restart-base-ms` 超上界 | `--restart-base-ms {v} 过大：退避末档乘上它会溢出 u64（饱和 = 永不重启），最大 {RR3_RESTART_BASE_MS_MAX}` + 换行 + `USAGE` | `cli.rs 的 parse_restart_base` |
 | `--profile` 与 `--manifest` 同给（**两种顺序都拒**） | `--profile 与 --manifest 不得同给：profile 是装机正门（enabled_slots 决定起谁），--manifest 是调试后门（0.0.2 方案 Q3 裁定，两路径共用仲裁与 spawn，不双真值）` + 换行 + `USAGE` | `rr3_cli_parse_with_env` 的 `--profile`/`--manifest` 互斥分支（`cli.rs 的 PROFILE_MANIFEST_CONFLICT 常量`，两处分支共用同一句） |
+| 既无 `--profile` 又无 `--manifest`（**双缺，parse 收尾最后一道**——socket 空检查之后，参数形状错误已在循环内先拒） | `启动缺装配面：--profile（装机正门）与 --manifest（调试后门）至少给其一——两者都不给时装载门整体不跑（rrd 空起、十条校验零判定位），基-23 起不再合法` + 换行 + `USAGE` | `rr3_cli_parse_with_env` 的装配面必选分支（`cli.rs 的 ASSEMBLY_SURFACE_REQUIRED 常量`）；线级证据 `cli/tests 的 assembly_surface_is_mandatory_neither_flag_is_rejected` |
 
-四条设计裁定，改门禁前必读：
+五条设计裁定，改门禁前必读：
+
+- **装配面必选（基-23，L-31 的出口）**：既无 `--profile` 又无 `--manifest` 在 parse 收尾拒
+  （`rr3_cli_parse_with_env` 的装配面必选分支）。没有装配面 = 装载门整体被跳过（None 臂空
+  hal_bindings 空降级集、十条校验一个判定位都不跑而 rrd 退出码 0）——那正是"门在什么条件下
+  被跳过"这道缝本身。正门（装机）与后门（调试）二选一，Q3 的两路径形状不变，只是"两可都不
+  选"从此不是合法启动方式；拒绝发生在 parse 处、非 0 退出，与下面三条同一口径：
+  **策略结论必须在启动时让运维听到**。
 
 - **`--profile` 与 `--manifest` 在 parse 处互斥、当场拒**（`rr3_cli_parse_with_env` 的互斥分支）：
   不拒的后果不是报错晚，而是**双真值**——同一次 boot 里"enabled_slots 决定起谁"与"CLI 列表决定起谁"

@@ -278,6 +278,10 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 predegraded,
             )
         }
+        // None 臂 = **仅 --manifest 调试后门**（基-23）：裸起（既无 --profile 又无
+        // --manifest）在 cli parse 处已非 0 退出，走不到这里；后门路径无装配单，
+        // hal_bindings/axis_state 空串（spawn 不注入，fail-closed + 应急 env）、
+        // 无缺格点名、无装配快照（ctl.wiring 如实回不可得）。
         None => (
             cfg.manifests.clone(),
             BTreeSet::new(),
