@@ -3,14 +3,16 @@
 # 运行环境由 Buildroot 提供：$TARGET_DIR（目标根）、$BINARIES_DIR（镜像产物目录）、
 # $HOST_DIR（宿主工具）。档位：脚本就绪；实测=板上（串口出 shell + rrd 自启）。
 #
-# 四件事（对应 base/os/README.md 的交付物清单）：
+# 五件事（对应 base/os/README.md 的交付物清单）：
 #   1. rrd 开机自启（BusyBox init 的 /etc/init.d/S99rrd）；
 #   2. /var/run tmpfs（rrd 默认 UDS 路径 /var/run/rock3-ipc.sock 落在易失区，
 #      避免残留旧 socket 文件跨重启干扰 bind）；
 #   3. data / rr_staging 挂载点（分区标签见 genimage.cfg，rr-ota 守护用例钉死）；
 #   4. rrd 与模块产物安装位（交叉编译产物经 $BINARIES_DIR 注入，不在 Buildroot 里编译；
 #      manifest 归位 /usr/lib/rr3/modules/<name>/module.toml，entry 改写为装机绝对路径，
-#      config 从仓源随装——线上注册门禁拒绝相对 entry，模块开机即读同目录 config）。
+#      config 从仓源随装——线上注册门禁拒绝相对 entry，模块开机即读同目录 config）；
+#   5. 装载消费真值集装机（profiles/contracts/hardware 三目录随装，增补轮六 基-25——
+#      装载必需件缺席的洞此前在 buildroot 装机侧完全不可见，块-15）。
 
 set -eu
 TARGET="${TARGET_DIR:?post-build.sh 需要 TARGET_DIR（Buildroot 提供）}"
@@ -108,6 +110,27 @@ if [ -d "$BINARIES_DIR/rr3-modules" ]; then
 			echo "post-build.sh: 警告：模块 $name 的 config.toml 未随装（RR3_REPO_ROOT=$REPO_ROOT 下 modules/$name/config.toml 缺席）——模块开机即读 manifest 同目录 config，缺件必重启环" >&2
 		fi
 	done
+fi
+
+# ---- 5. 装载消费真值集装机（增补轮六 基-25／实-12，块-15 修法 c：buildroot 轨此前
+# 连一册契约都不装——装载必需件缺席的洞在装机侧完全不可见）----
+# 装机位与快路轨同根（/usr/lib/rockrobot3，rrd.service 头注"两轨同一组安装位"纪律）；
+# 清单真值 = rrd rr3_runtime_truth_set（基-25：三处消费方判等的唯一清单，装机面整目录
+# 随装、不抄第二份文件清单——多带装载不读的契约件无害，逐册判等是 rr3-pack 打包面
+# 与 distro-smoke 断言面的事）。缺件 = 警告不阻断，与上面 rrd/rr3-ctl 产物缺席同口径：
+# 镜像结构仍应可构建；S99rrd 传 --contracts/--profile 启用消费归基-23（收 L-31 旁路，
+# 排在基-25 之后——块-15 的施工顺序约束）。
+if [ -n "$REPO_ROOT" ]; then
+	for rel in profiles contracts hardware; do
+		if [ -d "$REPO_ROOT/$rel" ]; then
+			mkdir -p "$TARGET/usr/lib/rockrobot3/$rel"
+			cp -R "$REPO_ROOT/$rel/." "$TARGET/usr/lib/rockrobot3/$rel/"
+		else
+			echo "post-build.sh: 警告：$REPO_ROOT/$rel 缺席，装载真值集未随装（rrd 装载期缺册即拒 boot；S99rrd 启用运行期入口前不红，归基-23）" >&2
+		fi
+	done
+else
+	echo "post-build.sh: 警告：RR3_REPO_ROOT 未设且仓根定位失败，装载真值集未随装（基-25）" >&2
 fi
 
 # ---- 2. fstab：/var/run tmpfs + data / staging 挂载 --------------------------
