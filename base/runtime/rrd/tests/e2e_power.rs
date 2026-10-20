@@ -276,7 +276,8 @@ fn power_module_low_battery_fallback_end_to_end() {
     // ---------- ④ 末尾破坏性收尾：段内 battery/low 恰一次、system/power 不重发 ----------
     // 模块死后帧流安静，collect 快速终止。收尾窗口不得再有 battery/low（模块侧边沿机
     // 同段恰一次；若真重启了，新实例首拍还会再发——与 ③ 双保险），也不得再有
-    // system/power（rrd 侧旗只升不降、上升沿恰一次）。
+    // system/power（rrd 侧上升沿恰一次；解除沿归 battery/ok，本用例窗口内不会有——
+    // 模块已死、sim 电量定格 5%，低电段没有出口）。
     let tail = rr3_collect_within(&mut obs, Duration::from_millis(500));
     let lows = tail
         .iter()

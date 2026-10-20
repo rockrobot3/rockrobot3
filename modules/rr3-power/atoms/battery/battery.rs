@@ -10,15 +10,20 @@ mod mech;
 #[path = "private.rs"]
 mod private;
 
-/// 启动自述（字符串逐字冻结——原 src/battery.rs SURFACE 常量，契约面零改动）
+/// 启动自述（批B③ 逐字冻结面；批N5 件二笔3 随 battery/ok 新发布面 append 一行——
+/// 自述与发布面同账，防 ⑨-l 那类"publishes 有主题自述不认"的漂移）
 pub const SURFACE: &[&str] = &[
     "battery: 电压/电量/温度摘要 -> rr3-power/battery/state (event)，关断为本地决策",
     "battery: 低电越阈 -> rr3-power/battery/low (event)，同一次低电段恰发一次",
+    "battery: 回阈恢复 -> rr3-power/battery/ok (event)，同一次低电段恢复沿恰发一次（批N5 件二笔3）",
 ];
 
-/// 发布面两主题（atom.toml [events].publishes 同源；topics.toml owner=rr3-power）
+/// 发布面三主题（atom.toml [events].publishes 同源；topics.toml owner=rr3-power）
 pub const RR3_BATTERY_STATE_TOPIC: &str = "rr3-power/battery/state";
 pub const RR3_BATTERY_LOW_TOPIC: &str = "rr3-power/battery/low";
+/// 低电恢复事件（批N5 件二笔3，§17 运维留痕）：回阈首拍恰一次，rrd 据此清
+/// 全局低电旗、恢复新 spawn。与 low 同 owner 同 L1，常量放邻位（两个沿一个对）。
+pub const RR3_BATTERY_OK_TOPIC: &str = "rr3-power/battery/ok";
 
 /// config `[rr3-power.battery]` 的形状（采样周期 + 两级阈值）
 #[derive(Debug, Clone, Copy)]

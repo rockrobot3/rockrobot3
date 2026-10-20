@@ -13,5 +13,5 @@ slots = ["power.battery"]   # 电池读数格（base 层，恒在位）
 slots = []           # 电池读数当前经 rr-hal 电源面直取；描述符句柄化归批D 对表
 
 [events]
-publishes = ["rr3-power/battery/state", "rr3-power/battery/low"]
+publishes = ["rr3-power/battery/state", "rr3-power/battery/low", "rr3-power/battery/ok"]
 subscribes = []

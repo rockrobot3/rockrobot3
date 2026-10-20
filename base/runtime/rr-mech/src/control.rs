@@ -48,7 +48,9 @@ impl Rr3RateGate {
 /// 低电边沿机：armed 时电压跌破阈值 → 报一次并解除武装；电压回到阈值**之上**
 /// （严格大于，恰好等于阈值仍算低电段内）→ 重新武装。状态只有这一位。
 /// 安全核语义：武装本身**不是**事件——[`Rr3LowEdge::rr3_low_edge_cross`]
-/// 返回 true 的唯一含义是"发布 battery/low"。
+/// 返回 true 的唯一含义是"发布 battery/low"；[`Rr3LowEdge::rr3_low_edge_recover`]
+/// 返回 true 的唯一含义是"发布 battery/ok"（批N5 件二笔3，§17 运维留痕
+/// "low_power 旗补解除路径"——低电段的恢复沿自此有显式读出）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rr3LowEdge {
     low_voltage_mv: u16,
@@ -75,10 +77,28 @@ impl Rr3LowEdge {
         false
     }
 
+    /// 恢复沿（批N5 件二笔3）：解除武装中且电压严格大于阈值 → 置回 armed，
+    /// 返回 true = 此刻应发布 battery/ok（本次低电段的恢复首拍，段内不重发）。
+    /// 恰等阈值仍是低电段内（与 [`Rr3LowEdge::rr3_low_edge_cross`] 的回阈口径同源）。
+    ///
+    /// **喂入次序契约：先 `rr3_low_edge_recover` 后 `rr3_low_edge_cross`、同一采样
+    /// 值**——`rr3_low_edge_cross` 的再武装分支同样会置 `armed`，先喂它会把恢复沿
+    /// 悄悄吞掉（本方法见 `!armed` 不成立而返回 false），battery/ok 就丢了。两个
+    /// 写入点方向相反（一个武装→解除、一个解除→武装），语义各由本类型钉死，调用方
+    /// 只能喂输入不能改语义（裁定 5）。
+    pub fn rr3_low_edge_recover(&mut self, voltage_mv: u16) -> bool {
+        if !self.armed && voltage_mv > self.low_voltage_mv {
+            self.armed = true;
+            return true;
+        }
+        false
+    }
+
     /// 读出当前是否处于低电段（`armed` 的反面；回阈 + 迟滞语义与
     /// [`Rr3LowEdge::rr3_low_edge_cross`] 同源，本方法只加**读出面**不改判定——
-    /// `rr3_low_edge_cross` 仍是唯一写入点）。供消费点（低电禁动闸门的 bare
-    /// 本地兜底 / 观测）读状态，不新增第二个边沿判定点（0.0.5 §20 ② ①）。
+    /// 写入点 = `rr3_low_edge_cross` 与 `rr3_low_edge_recover` 各管一个方向）。供
+    /// 消费点（低电禁动闸门的 bare 本地兜底 / 观测）读状态，不新增第三个边沿判定
+    /// 点（0.0.5 §20 ② ①）。
     pub fn rr3_low_edge_is_low(&self) -> bool {
         !self.armed
     }
@@ -275,6 +295,42 @@ mod tests {
         assert!(!e.rr3_low_edge_cross(3301), "武装后高电平拍照旧不触发");
         assert!(e.rr3_low_edge_cross(3200), "重新武装已生效：再次越阈再报");
         assert!(!e.rr3_low_edge_cross(3200));
+    }
+
+    /// 恢复沿主语义（批N5 件二笔3）：低电段内不报、恰等阈值不报（仍在段内）、
+    /// 严格大于报恰一次（恢复首拍）、段内重报不存在——与 cross 的低电首拍对称：
+    /// 一次低电段 = 一个 battery/low + 一个 battery/ok。
+    #[test]
+    fn recover_fires_once_per_episode_strictly_above_threshold() {
+        let mut e = Rr3LowEdge::rr3_low_edge_new(3300);
+        assert!(!e.rr3_low_edge_recover(3900), "武装态（未低电）没有恢复沿可言");
+        assert!(e.rr3_low_edge_cross(3290), "越阈进低电段");
+        assert!(!e.rr3_low_edge_recover(3290), "段内不恢复");
+        assert!(!e.rr3_low_edge_recover(3300), "恰等阈值仍是低电段内");
+        assert!(e.rr3_low_edge_recover(3301), "严格大于阈值：恢复首拍");
+        assert!(!e.rr3_low_edge_recover(3301), "恢复后不再报（armed 已回）");
+        assert!(e.rr3_low_edge_is_low() == false, "恢复即出段");
+    }
+
+    /// 喂入次序契约（钉 doc 那句"先 recover 后 cross"）：同拍先 cross 会把恢复沿
+    /// 吞掉（cross 的再武装分支置回 armed，recover 见 !armed 不成立而回 false）——
+    /// 先 recover 后 cross 才能既报出 battery/ok 又不破坏 cross 的判定。
+    #[test]
+    fn recover_before_cross_is_the_only_order_that_keeps_the_edge() {
+        let thr = 3300;
+        // 正确次序：先 recover（报沿）再 cross（armed 已回、无事发生）
+        let mut good = Rr3LowEdge::rr3_low_edge_new(thr);
+        assert!(good.rr3_low_edge_cross(3200));
+        assert!(good.rr3_low_edge_recover(3400), "先 recover：恢复沿报出");
+        assert!(!good.rr3_low_edge_cross(3400), "同拍 cross 不再有动作");
+        // 错误次序（反例钉契约）：先 cross 吞沿——这正是调用方必须守的次序
+        let mut bad = Rr3LowEdge::rr3_low_edge_new(thr);
+        assert!(bad.rr3_low_edge_cross(3200));
+        assert!(!bad.rr3_low_edge_cross(3400), "cross 静默再武装（不是事件）");
+        assert!(
+            !bad.rr3_low_edge_recover(3400),
+            "后 recover 已无沿可报——battery/ok 被吞，这就是次序契约存在的理由"
+        );
     }
 
     /// 读出面不改判定（MC-5）：`is_low` = `armed` 反相，与 `cross` 同拍一致；

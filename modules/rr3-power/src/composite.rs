@@ -10,8 +10,12 @@
 //! → 选 HAL 电源面并**开机探活**（Unsupported 即 exit(1)：能力缺失显式回错，不静默
 //! 带病常驻）→ 主循环。主循环做五件事（第 4 件 `rail.up = true` 才跑）：
 //! 1. 每 `sample_period_ms` 读一次 HAL 电池 → 发 `battery/state`（首拍即采）；
-//! 2. 电压越过低电阈值的第一拍发 `battery/low`（Rr3LowEdge：同一次低电段恰一次，
-//!    恢复再武装）——rrd 订阅它执行进程内兜底（Q4 裁定），brain 不在场也要能触发；
+//! 2. 电压越过低电阈值的第一拍发 `battery/low`（Rr3LowEdge：同一次低电段恰一次）；
+//!    回到阈值**之上**的第一拍发 `battery/ok`（批N5 件二笔3，§17 运维留痕：低电段
+//!    一对沿、两个事件，rrd 订阅 low/ok 执行进程内兜底的置旗与解除）——brain 不在
+//!    场也要能触发。**e2e 限制注记**：sim 电池读数由 `RR3_HAL_SIM_BATTERY_PERCENT/
+//!    CHARGING` env 启动定格、无运行期注入，真模块的低电↔恢复往返 e2e 归真板批；
+//!    宿主 e2e 用测试连接注册 rr3-power 伪造沿事件钉 rrd 侧全链；
 //! 3. 每 `state_period_ms` 发 `charger/state`（由最近一次电池读数的 charging 位派生）；
 //! 4. 每 `rail.sample_period_ms` 读一次域压 → ⑥-c2 按龄期折有效档位 → 判定核 →
 //!    发 `rail/state`，越阈首拍出边沿守护行（批N2 件五，P-9 归属搬家）；
@@ -43,7 +47,10 @@ use rr_hal_api::{rr3_rail_tier_effective, Rr3BatteryState, Rr3RailState, Rr3Rail
 use rr_ipc::{opcode, Rr3PayloadType};
 use serde_json::{json, Value};
 
-use battery::{Rr3BatteryCfg, Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_STATE_TOPIC};
+use battery::{
+    Rr3BatteryCfg, Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_OK_TOPIC,
+    RR3_BATTERY_STATE_TOPIC,
+};
 use charger::{Rr3ChargerCfg, RR3_CHARGER_STATE_TOPIC};
 
 /// 电源域电平观测主题（contracts/topics.toml 在册，批N2 件二落的）
@@ -134,6 +141,7 @@ pub fn rr3_power_run() -> Result<(), String> {
     let mut battery_seq: u64 = 0;
     let mut charger_seq: u64 = 0;
     let mut low_seq: u64 = 0;
+    let mut ok_seq: u64 = 0;
     let mut rail_seq: u64 = 0;
     let mut low_edge = Rr3LowEdge::rr3_low_edge_new(cfg.battery.low_voltage_mv);
     let mut rail_judge = Rr3RailJudge::rr3_rail_judge_new(cfg.rail.mild_mv, cfg.rail.severe_mv);
@@ -193,6 +201,18 @@ pub fn rr3_power_run() -> Result<(), String> {
                 RR3_BATTERY_STATE_TOPIC,
                 rr3_battery_state_body(battery_seq, st),
             )?;
+            // 低电两个沿、同一采样值，喂入次序是契约（Rr3LowEdge doc 钉死）：
+            // **先 recover 后 cross**——cross 的再武装分支会悄悄置回 armed，先喂它
+            // 会把恢复沿吞掉（battery/ok 丢失）。恢复沿发布 = rrd 清全局低电旗、
+            // 恢复新 spawn 的解除路径（批N5 件二笔3，§17 运维留痕）。
+            if low_edge.rr3_low_edge_recover(st.voltage_mv) {
+                ok_seq += 1;
+                bus.rr3_publish(RR3_BATTERY_OK_TOPIC, rr3_battery_ok_body(ok_seq, st))?;
+                eprintln!(
+                    "battery/ok: {}% {}mV（回阈恢复首拍，段内不重发）",
+                    st.percent, st.voltage_mv
+                );
+            }
             if low_edge.rr3_low_edge_cross(st.voltage_mv) {
                 low_seq += 1;
                 bus.rr3_publish(RR3_BATTERY_LOW_TOPIC, rr3_battery_low_body(low_seq, st))?;
@@ -264,6 +284,17 @@ fn rr3_battery_state_body(seq: u64, st: Rr3BatteryState) -> Value {
 /// battery/low 事件体：形状钉在 contracts/events/power-battery-low.schema.json
 /// （seq/percent/voltage_mv 三必填，additionalProperties=false——不加多余字段）。
 fn rr3_battery_low_body(seq: u64, st: Rr3BatteryState) -> Value {
+    json!({
+        "seq": seq,
+        "percent": st.percent,
+        "voltage_mv": st.voltage_mv,
+    })
+}
+
+/// battery/ok 事件体（批N5 件二笔3）：形状钉在
+/// contracts/events/power-battery-ok.schema.json——与 low 同形状（三必填、
+/// additionalProperties=false），载荷取恢复首拍的读数透传。
+fn rr3_battery_ok_body(seq: u64, st: Rr3BatteryState) -> Value {
     json!({
         "seq": seq,
         "percent": st.percent,
@@ -523,6 +554,21 @@ mod tests {
         assert_eq!(v["seq"], 1);
         assert_eq!(v["percent"], 5);
         assert_eq!(v["voltage_mv"], 3250);
+        assert_eq!(
+            v.as_object().unwrap().len(),
+            3,
+            "schema additionalProperties=false，字段超集即违约: {v}"
+        );
+    }
+
+    /// battery/ok 体与 schema 逐字段对齐（批N5 件二笔3）：三必填，且**没有**多余
+    /// 字段——与 low 同形状（additionalProperties=false）。
+    #[test]
+    fn ok_body_matches_schema_exactly() {
+        let v = rr3_battery_ok_body(2, st(3310, 8));
+        assert_eq!(v["seq"], 2);
+        assert_eq!(v["percent"], 8);
+        assert_eq!(v["voltage_mv"], 3310);
         assert_eq!(
             v.as_object().unwrap().len(),
             3,

@@ -280,8 +280,9 @@ pub struct RrdRegistry {
     providers: BTreeMap<String, BTreeSet<String>>,
     /// 全局低电旗（0.0.2 方案 Q4 裁定的兜底动作面之一）。conn 转发
     /// `rr3-power/battery/low` 时置位（上升沿恰一次），supervisor 的唯一 spawn
-    /// 漏斗（`rr3_boot_spawn`）读它拒一切新 spawn。本轮只升不降：解除归充电策略
-    /// （rr3-power 演进与 M6），不进本版本。放本表的理由与 `denied_publish` 同款：
+    /// 漏斗（`rr3_boot_spawn`）读它拒一切新 spawn；conn 收到
+    /// `rr3-power/battery/ok`（恢复沿，批N5 件二笔3，§17 运维留痕）时清位——
+    /// 解除即恢复新 spawn。放本表的理由与 `denied_publish` 同款：
     /// conn 与 supervisor 两路共见的守护级状态，真值只许有一份。
     low_power: bool,
     /// 运维计数聚合表（0.0.4 批B，Q1/Q2 裁定）：键 = `模块名/键`（模块自报经心跳
@@ -624,6 +625,16 @@ impl RrdRegistry {
         let rising = !self.low_power;
         self.low_power = true;
         rising
+    }
+
+    /// 清全局低电旗（批N5 件二笔3，§17 运维留痕"low_power 旗补解除路径"）。
+    /// 返回是否为真**下降沿**（此前确实在低电段）——conn 用它保证同一次低电段
+    /// 只广播一次 `reason=battery-ok` 的解除点名（重复 battery/ok 不重复广播）。
+    /// 与 raise 同一张表同一面：两个沿一个对，谁触发谁点名。
+    pub fn rr3_reg_low_power_lower(&mut self) -> bool {
+        let falling = self.low_power;
+        self.low_power = false;
+        falling
     }
 
     /// supervisor 的 spawn 漏斗（`rr3_boot_spawn`）每 spawn 前读这一问。
@@ -2672,18 +2683,23 @@ watchdog_timeout_ms = 60000
         );
     }
 
-    // ---------- 全局低电旗（0.0.2 方案 Q4 裁定）----------
+    // ---------- 全局低电旗（0.0.2 方案 Q4 裁定；解除路径批N5 件二笔3）----------
 
-    /// 上升沿语义：首次 raise 返回 true（conn 据此广播恰好一次 system/power），
-    /// 此后重复 raise 只回 false——同一次低电段不重复点名。旗只升不降：
-    /// 解除归充电策略（rr3-power 演进与 M6），本表不提供下降沿。
+    /// 沿语义：raise 首次返回 true（上升沿，conn 据此广播恰好一次 system/power），
+    /// 此后重复 raise 只回 false——同一次低电段不重复点名；lower 在旗已置位时返回
+    /// true（下降沿，conn 据此广播恰一次 battery-ok 解除点名），旗未置位时返回
+    /// false；解除后可再次升起（低电是可循环的 episodes，不是一次性熔断）。
     #[test]
-    fn low_power_flag_rises_once_and_never_lowers() {
+    fn low_power_flag_rises_once_lowers_and_rises_again() {
         let mut r = RrdRegistry::new(1000);
         assert!(!r.rr3_reg_low_power_is_set(), "初始未置位");
         assert!(r.rr3_reg_low_power_raise(), "首次置位是上升沿");
         assert!(r.rr3_reg_low_power_is_set());
         assert!(!r.rr3_reg_low_power_raise(), "重复置位不再是上升沿");
+        assert!(r.rr3_reg_low_power_lower(), "旗已置位：lower 是真下降沿");
+        assert!(!r.rr3_reg_low_power_is_set(), "解除即出段");
+        assert!(!r.rr3_reg_low_power_lower(), "重复解除不再是下降沿");
+        assert!(r.rr3_reg_low_power_raise(), "解除后可再升起（episodes 语义）");
         assert!(r.rr3_reg_low_power_is_set());
     }
 

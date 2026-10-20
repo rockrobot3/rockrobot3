@@ -210,6 +210,13 @@ stable = "L1"
 note = "低电阈值事件，rrd 进程内兜底触发前置（architecture §7.3）；负载 schema 见 events/power-battery-low.schema.json"
 
 [[topic]]
+name = "rr3-power/battery/ok"
+kind = "event"
+owner = "rr3-power"
+stable = "L1"
+note = "低电恢复事件（批N5 件二笔3，§17 运维留痕：low_power 旗补解除路径）——回阈首拍恰一次，rrd 据此清全局低电旗、恢复新 spawn；负载 schema 见 events/power-battery-ok.schema.json"
+
+[[topic]]
 name = "rr3-runtime/system/power"
 kind = "notification"
 owner = "rr3-runtime"
