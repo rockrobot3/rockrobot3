@@ -237,11 +237,11 @@ mod tests {
         (!out.as_os_str().is_empty()).then_some(out)
     }
 
-    /// 不带叠加层 = 生产面，38 条主题一个不多
+    /// 不带叠加层 = 生产面，39 条主题一个不多
     #[test]
     fn contract_only_load_is_the_production_surface() {
         let (set, added) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
-        assert_eq!(set.rr3_topic_set_names().len(), 38, "契约计数（批N4 件九三 37→38）");
+        assert_eq!(set.rr3_topic_set_names().len(), 39, "契约计数（批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿）");
         assert!(added.is_empty(), "没传叠加层就不该有新增条目");
         assert!(set.rr3_topic_set_contains("rr3-runtime/system/heartbeat"));
     }
@@ -252,8 +252,8 @@ mod tests {
             rr3_topics_load(&contract(), Some(&fixture_overlay())).expect("夹具应能合并");
         assert_eq!(
             set.rr3_topic_set_names().len(),
-            41,
-            "38 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口）"
+            42,
+            "39 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿）"
         );
         assert_eq!(added.len(), 3);
         assert!(added.contains(&"rr3-sima/ping/state".to_string()));
@@ -549,8 +549,8 @@ owner = "rr3-sima"
         let (set, added) = rr3_topics_load(&contract(), Some(&rel)).expect("相对路径必须能装载");
         assert_eq!(
             set.rr3_topic_set_names().len(),
-            41,
-            "38 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口）"
+            42,
+            "39 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿）"
         );
         assert_eq!(added.len(), 3);
     }

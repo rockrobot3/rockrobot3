@@ -16,7 +16,7 @@ optional = []
 # 低压关断是本模块的本地决策，不依赖总线（contracts/topics.toml 同条 note）：
 # 因此 subscribes 为空是设计而非遗漏。
 [events]
-publishes = ["rr3-power/battery/state", "rr3-power/battery/low", "rr3-power/charger/state", "rr3-power/rail/state"]
+publishes = ["rr3-power/battery/state", "rr3-power/battery/low", "rr3-power/battery/ok", "rr3-power/charger/state", "rr3-power/rail/state"]
 subscribes = []
 
 # ops/list = ops 槽快照读口（批N4 件九二）：白名单四槽应答（battery/charger），

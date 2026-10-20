@@ -217,7 +217,12 @@ payload 类型 `Notification`（`daemon.rs` 的 `rr3_state_frame`），`src_task
 上升沿则取已解析体里的 `percent` / `voltage_mv` 透传构造 `rr3-runtime/system/power` 帧（`daemon.rs` 的
 `rr3_system_power_frame`，缺键按 0），以 `src = RR3_TASK_RRD` 再扇出一次并打 `低电兜底触发：battery/low percent=… voltage_mv=… → 置全局低电旗、停止新 spawn，广播 rr3-runtime/system/power 到 {n} 个连接`；
 非上升沿只打 `低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）`。**兜底是额外动作，
-不截断事件流**——battery/low 本身在上一步已作为普通事件转发；旗只升不降，supervisor 的 spawn 漏斗据它拒新 spawn。
+不截断事件流**——battery/low 本身在上一步已作为普通事件转发；supervisor 的 spawn 漏斗据旗拒新 spawn。
+**解除路径（批N5 件二笔3，全案 §17 运维留痕）**：同一钩子点若 `topic == rr3-power/battery/ok`（`RR3_BATTERY_OK_TOPIC`），
+调 `rr3_reg_low_power_lower`——下降沿则同式构造 `reason = "battery-ok"` 的点名帧扇出并打
+`低电兜底解除：battery/ok percent=… voltage_mv=… → 清全局低电旗、恢复新 spawn，…`；旗未置位时只打
+`低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）`。两个沿一个对：置旗听 low、清旗听 ok，
+同一次低电段各点名恰一次。
 
 一条由 `conn.rs` 承担的调用方义务：`sender_name` 取的是**这条连接注册时确立的在册身份**
 `me.name`（`Rr3Peer` 随握手成功才构造，`conn.rs` 的 `rr3_handshake`），转发前帧上的 `src_task` 已被强制等于
