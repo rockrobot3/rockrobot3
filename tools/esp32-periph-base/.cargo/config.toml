@@ -24,3 +24,10 @@ build-std-features = ["panic_immediate_abort"]
 # MCU 必须显式（esp-idf-sys 据此选 IDF 工具链与目标）。
 [env]
 MCU = "esp32"
+# 离线构建钉（2026-10-20）：esp-idf-sys 0.35.0 build.rs 每次 rerun 都对 managed
+# esp-idf 仓库跑 `git remote show origin`（cargo_driver.rs patch 集判定用，v5.2.x
+# 实为 NO_PATCHES 纯浪费）——github 不通时构建即炸。设 IDF_PATH 指向本地框架仓库
+# 走 Custom 路径，该网络调用整段跳过（Custom 不进 patch 判定；对 cmake 缓存零影响
+# ——缓存本就绑定此路径）。实测离线 5m10s 过。路径为本机绝对路径（单人单机工程，
+# 换机需同步改）。验证法：断网重跑 `cargo +esp build` 应无 git 网络报错。
+IDF_PATH = "/Users/apple/.espressif/frameworks/esp-idf-v5.2.2"
