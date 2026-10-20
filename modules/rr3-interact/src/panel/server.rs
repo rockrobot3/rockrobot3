@@ -178,8 +178,9 @@ pub fn rr3_panel_surface() -> Vec<String> {
 /// 主循环代执行的面板动作（beep/face），HTTP 线程经 mpsc 递给主循环。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rr3PanelAction {
-    /// 喇叭测试音（MC-1 起 beep 占位退役）：主循环如实回业务错误"无本地波形源"
-    /// ——播放面只接受 tts_pcm 流，selftest 的 speaker 项恒报 error 属预期
+    /// 喇叭测试音（批N5 件五笔2 起内置测试音）：主循环合成短正弦进程内直喂
+    /// 播放面，回 `{played_ms}`——selftest 的 speaker 腿由此转 pass（波形源
+    /// 进程内自持，不再依赖 tts_pcm 流）
     Beep,
     /// 表情切换：进程内直调表情机（名字合法性由 Rr3Face 白名单裁决）
     Face { expression: String },
@@ -603,8 +604,8 @@ pub struct Rr3SelftestExpect {
 
 impl Default for Rr3SelftestExpect {
     fn default() -> Self {
-        // 缺省 = 固定腿全 pass + wiring 组零 fail——缺省判据下 speaker 恒败腿
-        // 在场时现行红绿不变（F-31 缺省回落不破坏现状）
+        // 缺省 = 固定腿全 pass + wiring 组零 fail——speaker 内置测试音（批N5
+        // 件五笔2）落地后缺省判据即全绿；形态性缺腿仍可改表如实申报（F-31）
         Self {
             speaker: "pass",
             relay: "pass",
@@ -867,7 +868,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 并列三调＋接线全交叉（Q3）：各答各展示、无依赖链、单项失败不连锁——
             // 这不是编排（无状态机无裁决），brain 才是唯一编排者（ADR-0007）。
             // 批N4 件五 I-18③（D15 裁定）：逐腿输出 `{leg, pass, reason?}`——
-            // pass = pass|fail|n-a 三态；恒败腿如实报 fail **不折算通过**。
+            // pass = pass|fail|n-a 三态；失败腿如实报 fail **不折算通过**。
             // 批N4 件九笔4 起加腿四 wiring：rr3.ctl.wiring 取装配快照的全交叉
             // 判果**逐条摊进 legs**（`leg = "wiring/<item>"`，逐形态内容不同 =
             // 全案 §7 ⑤"出厂自检必测 [pins]×wiring 全交叉"的原文）——判果本身
@@ -875,8 +876,8 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // verdict 判定归 [`rr3_selftest_verdict`]（批N5 件五 F-31 预期表
             // 等值改判，纯函数化守判据面）。
             let mut legs = Vec::with_capacity(6);
-            // 腿1 speaker：beep 走主循环代执行——无本地波形源是已知业务错误，
-            // 如实 fail 点名原因（产线换真波形源后此腿自然转 pass）
+            // 腿1 speaker：beep 走主循环代执行——内置测试音（批N5 件五笔2）
+            // 播放成功即 pass；主循环缺席/写播放面失败如实 fail 点名原因
             let reason = match rr3_panel_act(shared, Rr3PanelAction::Beep) {
                 Ok(_) => None,
                 Err(e) => Some(e),
@@ -928,7 +929,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             legs.push(face_leg);
             // 腿4 wiring（批N4 件九笔4）：ctl 取数失败/快照不可得 = 单腿 fail
             // 如实点名；取到即把 rrd 三态判果逐条转述（"not-applicable" → n-a，
-            // 其余未知值 fail-closed 折 fail——恒败腿不得折算通过）
+            // 其余未知值 fail-closed 折 fail——失败腿不得折算通过）
             match rr3_ctl_query(&shared.bus_path, "rr3.ctl.wiring", 5, shared.limits.read_timeout)
             {
                 Err(e) => legs.push(json!({
@@ -1695,8 +1696,8 @@ mod tests {
     }
 
     /// 自检逐腿输出（批N4 件五 I-18③/D15）：应答 `{legs:[{leg,pass,reason?}],verdict}`——
-    /// speaker 恒败腿（无本地波形源）如实 fail 不折算通过；verdict = 结果集
-    /// 与预期集等值（批N5 件五 F-31），缺省判据下恒败腿在场必 fail。
+    /// speaker 腿（主循环缺席场景）如实 fail 不折算通过；verdict = 结果集
+    /// 与预期集等值（批N5 件五 F-31），不等值即 fail。
     #[test]
     fn selftest_reports_legs_and_honest_speaker_fail() {
         // 假 rrd + 真总线客户端（同 I4 夹具口径）：relay 腿经假 rrd 应答走通；
@@ -1748,10 +1749,10 @@ mod tests {
         let legs = v["legs"].as_array().expect("逐腿数组");
         assert_eq!(legs.len(), 4, "并列四腿（三调＋接线腿）");
         assert_eq!(legs[0]["leg"], "speaker");
-        assert_eq!(legs[0]["pass"], "fail", "恒败腿如实 fail，不折算通过（D15）");
+        assert_eq!(legs[0]["pass"], "fail", "主循环缺席腿如实 fail，不折算通过（D15）");
         assert!(
             legs[0]["reason"].as_str().unwrap().contains("主循环"),
-            "失败原因进 reason（本场景主循环缺席；'无本地波形源'业务文案由活主循环回）"
+            "失败原因进 reason（本场景主循环缺席；内置测试音的播放结果由活主循环回）"
         );
         assert_eq!(legs[1]["leg"], "relay");
         assert_eq!(legs[1]["pass"], "pass", "假 rrd 应答 noop，on/off 两步都成");
