@@ -52,6 +52,107 @@ pub const RR3_QUIET_WATCHDOG_TICK_MS: u64 = 3_600_000;
 /// `watchdog_ms = 500` 一起决定"到期上界 520ms"这条算式，两处各写一个数就是两处真值。
 pub const E2E_TICK_MS: u64 = 20;
 
+/// 监听面夹具的**缺格跳过装配单**（基-23）：schema 与 `e2e_profile.rs` 的 GOOD 同形
+///（schema_version=5 起五段必填全给；[[supplies.domain]] 留 rail5v 一个域，与接线底稿的
+/// `net = "rail5v"` 配套——校验⑦要求 net 在装配单供给域在册），唯 [bindings] /
+/// [slots].present 引用集清零、[enabled_slots] 只留 rr3-listenstub 一个模块：它声明的
+/// act.servo 既不在 present（声明缺）、又无 binding（注入缺）→ 缺格点名后 boot 队列
+/// **跳过**（P2 的同一条"缺格≠拒 boot"语义）——装载门真跑（查册/缺格/预算/wiring 四
+/// 校验全过）而零 spawn、零进程、task 号段仍从线上注册起算。三个不能更简的形状约束：
+/// **空 enabled_slots 在 parse 层即拒**（"空装配单没有可起模块"，fail-closed，实测撞过）；
+/// **stub 的 manifest 必须真实落盘**（P2 教训：少了就退化成另一条读取失败路径）；
+/// **缺格点名行含"拒绝启动"**（监听面用例的否定 needle 不得用裸"拒绝"——见
+/// register_publish.rs 那处收窄）。空装配还免探针：缺格判定先于探测，零格位零探测，
+/// 不需要 P1 那样的 `RR3_PROBE=sim` 前提。
+const RR3_LISTEN_PROFILE: &str = r#"
+schema_version = 5
+
+[os]
+route = "distro"
+
+[runtime]
+log_ring_cap = 512
+
+[platform]
+tier = "host"
+chip = "rk3566"
+
+[supplies]
+watchdog_present = false
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+max_age_ms = 0
+
+[supplies.budget]
+not_applicable = true
+
+[slots]
+present = []
+
+[bindings]
+
+[enabled_slots]
+rr3-listenstub = ["act.servo"]
+"#;
+
+/// 监听面夹具的接线档底稿（与 `e2e_profile.rs` 的 WIRING 同一底稿，两份独立存在——
+/// support 不引测试文件的常量）：装载期校验⑦要求装机档必在——vcc/gnd-only 单线组
+///（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
+const RR3_LISTEN_WIRING: &str = r#"
+[[wire]]
+connector = "J-T"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = false
+rated_a = 1.0
+gnd_common = "star-1"
+"#;
+
+/// 造一份监听面夹具（`e2e_profile.rs` 的 Root 同一装机布局：`<root>/profiles/default.toml`
+/// + `<root>/hardware/default/wiring.toml` + `<root>/modules/rr3-listenstub/module.toml`
+///——rr3_wiring_path_for_profile 推导的同一棵树；名字取套接字 stem，pid 级唯一）。
+/// **stub manifest 必须真实落盘**（P2 教训）：缺格模块的 manifest 也进装载第 7 步的
+/// 路径解析，少了就退化成另一条"读取失败"的失败路径，钉不住缺格跳过语义。
+/// 返回 (装配单路径, 夹具根)——根交给 `RrdTest.fixture_root`，Drop 清整树：断言 panic
+/// 后 /tmp 不许留残迹（Task 7 评审 N-1 的同一条教训）。
+fn rr3_listen_profile(socket: &Path) -> (PathBuf, PathBuf) {
+    let stem = socket
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("listen");
+    let root = std::env::temp_dir().join(format!("rr3-listen-fix-{}-{stem}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root); // pid 复用留下的上次残根不许干扰本次
+    let p = root.join("profiles").join("default.toml");
+    std::fs::create_dir_all(p.parent().unwrap()).expect("建夹具 profiles 目录");
+    std::fs::write(&p, RR3_LISTEN_PROFILE).expect("写监听面装配单");
+    let w = root.join("hardware").join("default").join("wiring.toml");
+    std::fs::create_dir_all(w.parent().unwrap()).expect("建夹具 hardware 目录");
+    std::fs::write(&w, RR3_LISTEN_WIRING).expect("写监听面接线档");
+    let m = root.join("modules").join("rr3-listenstub").join("module.toml");
+    std::fs::create_dir_all(m.parent().unwrap()).expect("建夹具 modules 目录");
+    std::fs::write(&m, rr3_manifest("rr3-listenstub", 100, 500, "never"))
+        .expect("写监听面 stub manifest");
+    (p, root)
+}
+
 /// "等一条**应当出现的行**"的统一耐心上限——既管启动就绪行（监听 / 线程横幅），也管
 /// 运行期日志（注册 / 判死 / 重启）。为什么统一：两者的到来时刻都由**宿主机负载**支配
 /// （boot 场景是 spawn → 子进程 exec → 连接 → 注册的整条链，exec 在过载机上就要秒级），
@@ -158,6 +259,10 @@ pub struct RrdTest {
     child: Child,
     lines: mpsc::Receiver<String>,
     seen: Vec<String>,
+    /// 监听面夹具根（基-23）：经 `rr3_listen_profile` 造的 /tmp 树。非 None 时 Drop
+    /// 连树一起清——断言 panic 后不留残迹（Task 7 评审 N-1 教训，`e2e_profile.rs`
+    /// 的 Root 同一条 Drop 纪律）。
+    fixture_root: Option<PathBuf>,
 }
 
 impl RrdTest {
@@ -179,6 +284,7 @@ impl RrdTest {
     /// 专治"叠加层被当成生产放行口"（K4）：夹具命名空间 `rr3-sima/*` 在这里根本不存在，
     /// 而生产命名空间的 owner 又不是夹具模块 → 两种拒法都必须在**生产口径**下成立。
     /// 套接字名与 `rr3_start` 同一套 pid+tag 唯一名规则（Global Constraints 8）。
+    /// 基-23 起与 `rr3_start` 共用同一份缺格跳过装配单（装载面正交于叠加层面）。
     pub fn rr3_start_no_overlay(tag: &str) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
         RrdTest::rr3_spawn_with_overlay(&socket, None, &socket, None, RR3_QUIET_WATCHDOG_TICK_MS)
@@ -189,7 +295,10 @@ impl RrdTest {
     /// 同一纪律：测试进程的 env 是共享的，改自己会串别的用例）。
     pub fn rr3_start_env(tag: &str, envs: &[(&str, &str)]) -> RrdTest {
         let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
-        RrdTest::rr3_spawn_inner(
+        // 基-23：与 rr3_spawn_with_overlay 同一条缺格跳过装配门口径（它不走 overlay 形参、
+        // 直接铺 rr3_spawn_inner，所以单独补装配面——两个入口都不许裸起）。
+        let (profile, fixture_root) = rr3_listen_profile(&socket);
+        let mut me = RrdTest::rr3_spawn_inner(
             &socket,
             None,
             &socket,
@@ -197,8 +306,35 @@ impl RrdTest {
             RR3_QUIET_WATCHDOG_TICK_MS,
             &[],
             None,
-            None,
+            Some(&profile),
             envs,
+        );
+        me.fixture_root = Some(fixture_root);
+        me
+    }
+
+    /// **显式 `--manifest` 调试后门**的起法（基-23）：manifest 指向 pid 唯一的**不存在
+    /// 路径**——`rr3_boot_job_from_manifest` 打一行"拒绝启动：manifest … 读取失败"后返回
+    /// None（E-3：boot 期配置错误不吃预算，读不动 = None 跳过，非 fatal），boot 队列为空，
+    /// rrd 照常监听。专供"必须走后门路径"的用例（e2e_ctl 的 ctl.wiring unavailable 断言：
+    /// 后门无装配快照，如实回 available:false）——监听面主口径（rr3_start 一族）走的是
+    /// 缺格跳过装配单正门，两形状的可观察面同为零 spawn。
+    pub fn rr3_start_manifest_stub(tag: &str) -> RrdTest {
+        let socket = PathBuf::from(format!("/tmp/rr3-m2-{}-{tag}.sock", std::process::id()));
+        let stub = std::env::temp_dir().join(format!(
+            "rr3-no-such-manifest-{}-{tag}.toml",
+            std::process::id()
+        ));
+        RrdTest::rr3_spawn_inner(
+            &socket,
+            None,
+            &socket,
+            None,
+            RR3_QUIET_WATCHDOG_TICK_MS,
+            &[stub.as_path()],
+            None,
+            None,
+            &[],
         )
     }
 
@@ -319,9 +455,12 @@ impl RrdTest {
         overlay: Option<&Path>,
         watchdog_tick_ms: u64,
     ) -> RrdTest {
-        // `boot = (无 manifest, None)`：既有 28 条线级用例的可观察面因此一字未动
-        //（既不传 `--manifest`，也不等 `supervisor 启动` 那一行）。
-        RrdTest::rr3_spawn_inner(
+        // 装配面（基-23）：监听面夹具走**空装配单正门**——装载门真跑（查册/缺格/预算/
+        // wiring），enabled_slots 空表 = 零 boot 模块，可观察面与旧裸起完全一致（无 spawn
+        // 行、task 号段仍从线上注册起算）。裸起（既无 --profile 又无 --manifest）在基-23
+        // 后 parse 即拒，旧注释里的 `boot = (无 manifest, None)` 形状不再合法。
+        let (profile, fixture_root) = rr3_listen_profile(socket);
+        let mut me = RrdTest::rr3_spawn_inner(
             socket,
             cwd,
             socket_arg,
@@ -329,9 +468,11 @@ impl RrdTest {
             watchdog_tick_ms,
             &[],
             None,
-            None,
+            Some(&profile),
             &[],
-        )
+        );
+        me.fixture_root = Some(fixture_root);
+        me
     }
 
     /// 起进程的唯一实现。`boot_role: Some(role)` 时才传 `--boot-role`，并且**多等一行**
@@ -388,6 +529,7 @@ impl RrdTest {
             child,
             lines,
             seen: Vec::new(),
+            fixture_root: None, // 夹具根由调用方（监听面两入口）在返回后认领并负责 Drop 清理
         };
         me.rr3_wait_log(&format!("监听 {}", socket.display()));
         // 每个用例都付这一行的等待代价，换来的是一条全局前提：**监视线程真的起了**。
@@ -474,6 +616,9 @@ impl Drop for RrdTest {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.socket);
+        if let Some(root) = self.fixture_root.take() {
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 }
 

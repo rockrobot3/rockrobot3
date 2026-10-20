@@ -161,7 +161,10 @@ fn ctl_reboot_is_refused_by_default_double_gate() {
 /// 的渲染完整性由 assembly.rs 单测用门 d 同源词表逐键钉死；两端到端形状在此合拢。
 #[test]
 fn ctl_wiring_reports_unavailable_without_profile_boot() {
-    let t = RrdTest::rr3_start_no_overlay("ctl-wiring");
+    // 基-23：本用例要钉的是"--manifest 调试后门路径无装配快照"，起法显式走后门
+    // （rr3_start_manifest_stub）——监听面主口径（rr3_start 一族）已改走缺格跳过
+    // 装配单正门，那里的 rr3.ctl.wiring 是 available:true，不再是这里的被测形状。
+    let t = RrdTest::rr3_start_manifest_stub("ctl-wiring");
     let mut ctl = t.rr3_connect();
     let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.wiring", 1);
     let result = &v["result"];
