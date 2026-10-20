@@ -455,6 +455,10 @@ fn rr3_serve_ctl(
         // wiring 全交叉逐条判果，一应答给出（判据真值单点 = assembly.rs）。快照
         // 未在册（--manifest 调试路径）时如实回不可得，不造假数据。
         Rr3RpcMethod::CtlWiring => Ok(crate::assembly::rr3_assembly_wiring_json()),
+        // 契约完整性审计读口（批N5 件五笔4，Z-4）：boot 装载链验收后的契约四册
+        // sha256 记账 + "齐全且 sha 对"自检判果一应答给出（判据真值单点 =
+        // contracts.rs）。快照未在册（--manifest 调试路径）如实回不可得。
+        Rr3RpcMethod::CtlContracts => Ok(crate::contracts::rr3_contracts_json()),
         // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
         other => Err((
             Rr3StatusCode::Invalid,
@@ -700,7 +704,8 @@ fn rr3_serve_request(
         | Rr3RpcMethod::CtlOta
         | Rr3RpcMethod::CtlCounters
         | Rr3RpcMethod::CtlReboot
-        | Rr3RpcMethod::CtlWiring => {
+        | Rr3RpcMethod::CtlWiring
+        | Rr3RpcMethod::CtlContracts => {
             rr3_reply_err(
                 out,
                 me,

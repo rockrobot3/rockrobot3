@@ -270,6 +270,14 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             if let Some(s) = boot.snapshot.clone() {
                 crate::assembly::rr3_assembly_snapshot_set(s);
             }
+            // 契约记账快照定格（批N5 件五笔4，Z-4）：boot 链验收通过后对 `--contracts`
+            // 目录契约四册 sha256 记账（contracts.rs 单点），`rr3.ctl.contracts` 的
+            // 渲染源 + 自检"齐全且 sha 对"的对比锚。此刻四册刚被装载面读过一遍，
+            // 记账重读失败 = 文件系统级异常，fail-closed 带因拒 boot（不带病定格）。
+            let cs = crate::contracts::rr3_contracts_snapshot_from_dir(&contracts)?;
+            if crate::contracts::rr3_contracts_snapshot_set(cs) {
+                rr3_log("契约四册 sha256 记账定格（rr3.ctl.contracts 自检判据锚）");
+            }
             (
                 boot.manifests,
                 names,

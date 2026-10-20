@@ -11,6 +11,7 @@ pub mod axis;
 pub mod axis_write;
 pub mod assembly;
 pub mod cli;
+pub mod contracts;
 pub mod counters;
 pub mod manifest;
 pub mod probe;
