@@ -259,6 +259,25 @@ pass`——n-a 不拖累不救场，全 n-a＝无一真判如实 fail；旧 all_
 `b6d5902`；判定分布＝能做到 8 格、不能 22 格（无载体／缺码／语义未裁，逐格带触发条件或工单号——
 "不能"不带触发条件即 FAIL 是判据原文第 3 条）。零 `.rs` 零 `contracts/*.toml`；docs/README 主表、
 开发计划 §3 批N5 段、status.md 轮次条三处登记随批N5 首件同批（§5 文档纪律的本行即对表动作）。
+**2026-10-20 对表（批N5 件二运维留痕三笔收官＋波及订正，`low_power`"只升不降"敞口关闭）**：
+判据原文＝全案 §17 运维留痕行三半句。笔1 环容量键（`f8329f0`）——profile schema_version 4→5，
+`[runtime]` 段 `log_ring_cap` 键装载缺红逐条点名；**载体订正**：环容量进装配单 `[runtime]`
+顶层段而非 HAL 描述符键集（`RR3_ASSEMBLE_DESC_KEYS` 有契约测试逐名钉死，且环容量是 rrd 运维
+参数非外设绑定），F-30 改判判据"环容量∈描述符键集"的落点随载体订正为"`[runtime]` 段键集，
+装载期缺即红"（判据精神不变）。笔2 rrd 自身日志有界落盘（`8e02be8`）——stdout/内存环/落盘
+文件三面同源、sink OnceLock 首份胜出、启动回填尾 64KB 置环头，"一次重启后仍能取到崩溃前的
+最后 N 行"另一半成立（模块侧批N4 件八已成立，rrd 自此同权）。笔3 解除路径（`8a336e5`）——
+契约 append `rr3-power/battery/ok`（event L1，主题 38→39、event 12，schema 三必填
+additionalProperties=false；RR3_PINNED_TOPICS 数组随本笔补齐批N4 件六二/九二/九三漏掉的
+7 条 ops 主题 31→39，既有缺口顺带修复留痕）；`Rr3LowEdge` 补 `rr3_low_edge_recover`
+（回阈首拍恰一次；先 recover 后 cross、同一采样值的喂入次序是契约——先喂 cross 会被再武装
+分支吞掉恢复沿）；rrd `rr3_reg_low_power_lower()`（返回是否真下降沿）＋conn battery/ok 臂
+（falling 才广播 `system/power(reason=battery-ok)`，重复 ok 不重复广播）＋新
+`e2e_power_ok` 全链线级证据；"low_power 旗补解除路径（今天只升不降）"敞口自此关闭——
+两个沿一个对：battery/low 上升沿置旗拒新 spawn／battery/ok 回阈下降沿清旗恢复新 spawn。
+波及订正（`69b2b47`）——rr3-act 订阅臂按 reason 分流：battery-ok 解除广播不闭锁不解禁
+（低电段中 act 重启会被解除广播误闭锁至重启；解禁只认轨压样本复位语义④，喂入面挂账批N3
+件七不变），缺 reason/未知值 fail-closed 闭锁；status.md 能力行"只升不降"表述同批补正。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
@@ -770,7 +789,8 @@ apply 落电平且应答回显）+ main config 解析 2（仓形同构可解析 
 charger/state，rrd 低电兜底四件动作面，0.0.2 方案 Q4 裁定）同口径：rr-hal lib
 17→**19**（+2：sim 电池三元组读回与电压曲线两端钉死（3200mV + 10mV/1%）/ 电池
 env 取值裁决纯函数（percent 0–100、charging 只认 1/0，未设缺省 80/未充电））；rrd
-lib +2：registry 全局低电旗（上升沿恰一次、只升不降——与 denied_publish 同款
+lib +2：registry 全局低电旗（上升沿恰一次、只升不降〔解除沿批N5 件二笔3 补——
+`rr3_reg_low_power_lower`＋battery/ok 回阈清旗，两个沿一个对，见 2026-10-20 件二条目〕——与 denied_publish 同款
 "conn 与 supervisor 两路共见"守护态）+ daemon 低电点名帧形状钉死（Notification /
 src=rrd / dst=广播 / 体恰四字段——e2e 旁观者接入时首拍已过，帧形状只有单测能钉，
 两半拼成完整证据链）；新线级目标 `rrd/tests/e2e_power.rs` **1** 条（整体
@@ -904,7 +924,8 @@ T4a/b/c 三模块实装、T4b 低电兜底、T5 deb 打包链、保底轨修复�
 §5 启动序第 5 步契约定位与第 7 步致命面补"格位契约读不到"）；
 [rrd-registry.md](../reference/rrd-registry.md) §1 `RrdRegistry` 字段列补 `low_power`、
 §10 补 `rr3_reg_low_power_raise` / `rr3_reg_low_power_is_set` 行（上升沿恰一次、只升不降
-不设解除口、spawn 漏斗唯一消费者）；[rrd-rpc.md](../reference/rrd-rpc.md) §7 发布处理序
+不设解除口〔解除口 `rr3_reg_low_power_lower` 批N5 件二笔3 补，见 2026-10-20 件二条目〕、
+spawn 漏斗唯一消费者）；[rrd-rpc.md](../reference/rrd-rpc.md) §7 发布处理序
 补低电兜底钩子段（挂转发点之后、兜底是额外动作不截断事件流、两段日志逐字）。
 同批订正 [.github/README.md](../../.github/README.md) 的实况漂移（四 job → 七 job 清单、
 "主远端已迁 gitcode" → 双远端口径）——T5/保底轨/D9 三批挂 job 时该文件漏同步，此处结清。
