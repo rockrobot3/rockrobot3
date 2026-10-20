@@ -17,11 +17,19 @@
 # schema_version = 4（0.0.5 增补轮六批N2，校验⑩ 定形）：[supplies.budget] 内存预算
 # 子段进场（⑩-a/⑩-b 分母，ADR-0021 修订 3：栈/堆预算不住 platform 表）——
 # rtos 档必填三数键（合法不适用才走 not_applicable），3→4 为破坏性变更。
+# schema_version = 5（0.0.5 增补轮六批N5，F-30 环容量判据落数据）：[runtime] rrd
+# 运行参数段进场（log_ring_cap）——rtos 档上灌演练时 rrd 侧装载判同一次（rrd 不分
+# 档豁免 [runtime]），装载期缺即红，4→5 为破坏性变更。
 
-schema_version = 4
+schema_version = 5
 
 # [os] 段缺省：route 轴（distro | buildroot）是 Linux 底座镜像路线，rtos 档不适用
 # （rrd 装载对 [os] 只收不读，architecture.md §4.3 注记）。
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：日志环容量（行数）。rrd 装载不分档豁免
+# [runtime]（宿主运维参数与承载档位两轴），取值与 default 同源同值。
+log_ring_cap = 512
 
 [platform]
 # 平台档位（ADR-0018 修订 1 三档）：ESP32 跑 RTOS 底座、经桥上主承载层 = rtos。

@@ -40,15 +40,40 @@ pub fn rr3_log(msg: &str) {
     let line = format!("rrd: {msg}");
     println!("{line}");
     let mut ring = rr3_lock(rr3_log_ring());
-    if ring.len() >= RR3_LOG_RING_CAP {
+    rr3_ring_push(&mut ring, line, rr3_log_ring_cap());
+}
+
+/// 日志环容量兜底值（行数）。512 行对"运维看刚才发生了什么"足够，内存成本有界；
+/// 满了丢最旧（环形语义，不是"到顶即停"）。装配单正门由 daemon 启动读
+/// `[runtime].log_ring_cap` 一次定格（[`rr3_log_ring_cap_set`]，批N5 件二 F-30——
+/// 判据"环容量 ∈ 装配单键集，装载期缺即红"）；`--manifest` 调试路径与装载完成前
+/// 先打的行按本值收。
+const RR3_LOG_RING_CAP_FALLBACK: usize = 512;
+
+/// 日志环容量的进程级定格点（OnceLock 首份胜出，与装配快照同语义）。
+static RR3_LOG_RING_CAP: OnceLock<usize> = OnceLock::new();
+
+/// 定格日志环容量（行数）。daemon 装配链装载成功后调一次；重复调用失败返回
+/// `false`——容量是 boot 期事实，运行期不改。
+pub fn rr3_log_ring_cap_set(cap: usize) -> bool {
+    RR3_LOG_RING_CAP.set(cap).is_ok()
+}
+
+/// 当前生效的环容量：定格值未落（未走装配单路径/尚未装载完）按兜底值收。
+fn rr3_log_ring_cap() -> usize {
+    *RR3_LOG_RING_CAP.get().unwrap_or(&RR3_LOG_RING_CAP_FALLBACK)
+}
+
+/// 日志环的单点入环：满则先丢最旧再入队。独立成纯函数（环 + 容量都是参数），
+/// 裁剪语义才能在无全局态的单测里钉死——OnceLock 一进程只 set 得上一次，
+/// 直接打全局的用例会互相污染。容量调小的一次性收敛也在本循环：环长超过
+/// 新容量时连丢到容量以内，不会出现"只丢一个、环永远缩不回去"的僵局。
+fn rr3_ring_push(ring: &mut VecDeque<String>, line: String, cap: usize) {
+    while ring.len() >= cap {
         ring.pop_front();
     }
     ring.push_back(line);
 }
-
-/// 日志环容量（行数）。512 行对"运维看刚才发生了什么"足够，内存成本有界；
-/// 满了丢最旧（环形语义，不是"到顶即停"）。
-const RR3_LOG_RING_CAP: usize = 512;
 
 static RR3_LOG_RING: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
@@ -102,5 +127,37 @@ mod tests {
     #[test]
     fn banner_topic_count_is_not_hardcoded() {
         assert!(rr3_banner(1, 1, "/tmp/x", 24).contains("24 topics"));
+    }
+
+    /// 环形裁剪语义（批N5 件二）：满则丢最旧、尾部恒是新行；容量调小时环一次性
+    /// 收敛到容量以内（批N5 件二笔1 的 while 循环是钉这条的——只丢一个的写法
+    /// 会让"cap 从 512 改 8"之后环永远缩不回 8）
+    #[test]
+    fn ring_push_keeps_last_cap_lines_and_converges_on_shrink() {
+        let mut ring = VecDeque::new();
+        for i in 0..4 {
+            rr3_ring_push(&mut ring, format!("l{i}"), 2);
+        }
+        assert_eq!(
+            ring.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["l2", "l3"],
+            "满则丢最旧，环里恒是最后 cap 行"
+        );
+        // 容量调小的一次性收敛：环长 2 > 新 cap 1，下一推连丢到容量以内
+        rr3_ring_push(&mut ring, "l4".into(), 1);
+        assert_eq!(
+            ring.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["l4"],
+            "容量调小后环必须收敛到新容量以内"
+        );
+    }
+
+    /// 容量定格一次（首份胜出）：重复 set 不覆盖——容量是 boot 期事实，运行期不改。
+    /// 全 crate 单测只有本用例 set（OnceLock 进程级单次，别处再 set 会互相污染）。
+    #[test]
+    fn log_ring_cap_sets_once_and_first_wins() {
+        assert!(rr3_log_ring_cap_set(8), "首次 set 必须成功");
+        assert!(!rr3_log_ring_cap_set(999), "重复 set 必须失败（首份胜出）");
+        assert_eq!(rr3_log_ring_cap(), 8);
     }
 }

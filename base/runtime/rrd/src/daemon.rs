@@ -222,6 +222,17 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             let boot = crate::profile::rr3_profile_boot_inputs(
                 p, &slots, &roles, &devices, &wiring, &platform,
             )?;
+            // 日志环容量一次定格（批N5 件二 F-30）：装配单 [runtime].log_ring_cap——
+            // 装载期缺键已在 parse 层拒（缺即红），到这里必是合法正整数。首份胜出
+            // （OnceLock，与装配快照同语义）；--manifest 调试路径不读装配单，环按
+            // lib.rs 的 512 兜底。点名一行进环本身：运维在 rr3.ctl.logs 里看得到
+            // 本机容量是多少。
+            if crate::rr3_log_ring_cap_set(boot.log_ring_cap) {
+                rr3_log(&format!(
+                    "日志环容量定格 {} 行（装配单 [runtime].log_ring_cap）",
+                    boot.log_ring_cap
+                ));
+            }
             for (module, slot) in &boot.missing {
                 rr3_log(&format!(
                     "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"

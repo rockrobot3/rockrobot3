@@ -77,11 +77,18 @@ pub const RR3_CONTRACT_DEVICES_PATH: &str = concat!(
     "/../../../contracts/devices.toml"
 );
 
-/// 只认 schema_version = 4（3→4 为破坏性变更：`[supplies.budget]` 内存预算子段
-/// 进场——校验⑩ 分母，批N2 n2c-v10；新必填段随版本 bump，批N1 [[supplies.domain]]
-/// 2→3 先例；注意与 `RR3_ASSEMBLE_SCHEMA_VERSION`（rr-registry，装配清单域）是
-/// 两个域，不混写）。不匹配 = 契约事故，拒启动。
-const RR3_PROFILE_SCHEMA_VERSION: i64 = 4;
+/// 只认 schema_version = 5（4→5 为破坏性变更：`[runtime]` rrd 运行参数段进场——
+/// 首键 `log_ring_cap` 日志环容量，批N5 件二 F-30"环容量 ∈ 装配单键集、装载期缺
+/// 即红"；新必填段随版本 bump，批N2 [supplies.budget] 3→4 先例；注意与
+/// `RR3_ASSEMBLE_SCHEMA_VERSION`（rr-registry，装配清单域）是两个域，不混写）。
+/// 不匹配 = 契约事故，拒启动。
+const RR3_PROFILE_SCHEMA_VERSION: i64 = 5;
+
+/// [runtime] 键（rrd 运行参数段，批N5 件二）——未知键点名与解析白名单共用。
+/// 只收 rrd 自身的运维参数：外设绑定住 [hardware]/[[pin]]（经桥注入板侧），
+/// 环容量这类宿主运维参数不混装上桥（描述符键集 ↔ Rr3HalBindings 有契约测试
+/// 逐名钉死，多一个键就红）。
+const RR3_RUNTIME_KEYS: [&str; 1] = ["log_ring_cap"];
 
 /// [supplies] 六键（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）——
 /// 未知键点名与解析白名单共用（budget 子段单独成块解析，同 domain）
@@ -312,6 +319,10 @@ pub struct Rr3Profile {
     /// 收口），键位语义与取值域由 rr-hal 描述符解析裁，
     /// rrd 只管装配形状——标量字符串化，注入时不解释）
     pub hardware: BTreeMap<String, String>,
+    /// [runtime].log_ring_cap：日志环容量（行数，批N5 件二 F-30）。rrd 自身的
+    /// 运维参数——daemon 启动一次定格进日志环（lib.rs `rr3_log_ring_cap_set`），
+    /// 不进 [hardware] 注入面（不上桥）。正整数必填，缺即红。
+    pub log_ring_cap: usize,
     /// [[pin]]：物理绑定（引脚侧唯一真值点，增补轮六 §4.2）。可选段（纯 sim/无硬件
     /// 格形态不给——此时校验②不判，sim 形态无物理面可绑）
     pub pins: Vec<Rr3PinEntry>,
@@ -345,6 +356,10 @@ pub struct Rr3ProfileBoot {
     /// 轴档案装载点名（坏件逐条 / 多份合法）：daemon 逐条日志，不拒 boot——档案装载
     /// 是降级面，与缺格/缺角色同档；拒绝启动面留给契约事故
     pub axis_notes: Vec<String>,
+    /// [runtime].log_ring_cap（批N5 件二 F-30）：日志环容量（行数）。daemon 收货后
+    /// 一次定格进 lib.rs 的 OnceLock（`rr3_log_ring_cap_set`，首份胜出）——
+    /// `--manifest` 调试路径不读装配单，环按 512 兜底。
+    pub log_ring_cap: usize,
     /// 装配快照（批N4 件九笔4，`rr3.ctl.wiring` 判据源）：boot 装载链验收通过后
     /// 的四元不可变底账（装配单本体 / 接线档 / 轴档案 / 角色表）。None = 本 boot
     /// 未走装配单路径（`--manifest` 调试路径）或接线档尚未在册（快照无接线档即
@@ -596,6 +611,35 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         for k in t.keys() {
             if k != "tier" && k != "chip" {
                 errs.push(format!("[platform] 未知键 {k}（只认 tier / chip）"));
+            }
+        }
+    }
+    // [runtime]：必填段（schema 5 起必填，批N5 件二 F-30——"环容量 ∈ 装配单键集，
+    // 装载期缺即红"与 F-6 缺失语义同一列）。单键 log_ring_cap 正整数必填：0 行环 =
+    // 运维留痕无环（rr3.ctl.logs 恒空），负数非物理；未知键逐条点名。
+    let mut log_ring_cap: usize = 0;
+    match root.get("runtime").and_then(toml::Value::as_table) {
+        None => errs.push(
+            "缺少 [runtime]（rrd 运行参数；schema_version=5 起必填，批N5 件二）".to_string(),
+        ),
+        Some(t) => {
+            match t.get("log_ring_cap").and_then(toml::Value::as_integer) {
+                Some(v) if v > 0 => log_ring_cap = v as usize,
+                Some(v) => errs.push(format!(
+                    "runtime.log_ring_cap = {v} 须为正整数（日志环容量，0 = 运维留痕无环）"
+                )),
+                None => errs.push(
+                    "runtime.log_ring_cap 缺失或不是整数（日志环容量，行数；批N5 件二）"
+                        .to_string(),
+                ),
+            }
+            for k in t.keys() {
+                if !RR3_RUNTIME_KEYS.contains(&k.as_str()) {
+                    errs.push(format!(
+                        "[runtime] 未知键 {k}（只认 {}）",
+                        RR3_RUNTIME_KEYS.join("/")
+                    ));
+                }
             }
         }
     }
@@ -878,6 +922,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         slots_device_absent,
         supplies,
         hardware,
+        log_ring_cap,
         pins,
     })
 }
@@ -1751,6 +1796,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         role_missing,
         axis_state,
         axis_notes,
+        log_ring_cap: profile.log_ring_cap,
         snapshot: Some(snapshot),
     })
 }
@@ -2314,10 +2360,13 @@ mod tests {
     }
 
     const GOOD: &str = r#"
-schema_version = 4
+schema_version = 5
 
 [os]
 route = "distro"
+
+[runtime]
+log_ring_cap = 512
 
 [platform]
 tier = "host"
@@ -2620,7 +2669,10 @@ gnd_common = "star-1"
     /// （sense 按 pin_id 引用，⑥-d 同一语法），34 ∈ esp32 adc_pins ⇒ 全绿基线；
     /// 反例经定点替换构造。rtos 档不派生（host 档派生器不识别板侧词形）。
     const ESP32_GOOD: &str = r#"
-schema_version = 4
+schema_version = 5
+
+[runtime]
+log_ring_cap = 512
 
 [platform]
 tier = "rtos"
@@ -3044,7 +3096,7 @@ mux_group = []
     #[test]
     fn parse_errors_are_all_collected_and_named() {
         let text = GOOD
-            .replace("schema_version = 4", "schema_version = 9")
+            .replace("schema_version = 5", "schema_version = 9")
             .replace("\"act.servo\" = \"rr3-pa\"", "\"act.servo\" = \"\"")
             .replace("rr3-pb = [\"sensor.env\"]", "rr3-pb = [\"\"]")
             .replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = 3");
@@ -3072,7 +3124,7 @@ mux_group = []
 
     #[test]
     fn missing_sections_and_empty_enabled_slots_are_errors() {
-        let errs = rr3_profile_from_text("schema_version = 4\n").expect_err("缺段必须报错");
+        let errs = rr3_profile_from_text("schema_version = 5\n").expect_err("缺段必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [bindings]")),
             "{errs:?}"
@@ -3081,16 +3133,68 @@ mux_group = []
             errs.iter().any(|e| e.contains("缺少 [enabled_slots]")),
             "{errs:?}"
         );
+        assert!(
+            errs.iter().any(|e| e.contains("缺少 [runtime]")),
+            "[runtime] 必填段缺也必须点名（schema 5 起，批N5 件二 F-30）: {errs:?}"
+        );
         // [supplies] 段缺时 [supplies.budget] 的点名不级联（budget 错误只在
         // supplies 段在场时裁）——budget 段缺的留空反例归
         // budget_tier_consistency_errors_are_named。
 
-        let errs = rr3_profile_from_text("schema_version = 4\n[bindings]\n\n[enabled_slots]\n")
+        let errs = rr3_profile_from_text("schema_version = 5\n[bindings]\n\n[enabled_slots]\n")
             .expect_err("空 enabled_slots 必须报错");
         assert!(
             errs.iter().any(|e| e.contains("[enabled_slots] 为空")),
             "{errs:?}"
         );
+    }
+
+    /// [runtime].log_ring_cap 判据（批N5 件二 F-30"装载期缺即红"）：键缺/段缺/零/负/
+    /// 类型错逐条点名；合法值如实收进结构体（换成 64 仍解析成功——证明容量是
+    /// 装配单数据不是解析器写死）。
+    #[test]
+    fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
+        // 段缺（GOOD 定点删除）
+        let errs = rr3_profile_from_text(&GOOD.replace("[runtime]\nlog_ring_cap = 512\n", ""))
+            .expect_err("缺 [runtime] 必须报错");
+        assert!(errs.iter().any(|e| e.contains("缺少 [runtime]")), "{errs:?}");
+        // 键缺
+        let errs = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", ""))
+            .expect_err("缺 log_ring_cap 必须报错");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("runtime.log_ring_cap 缺失或不是整数")),
+            "{errs:?}"
+        );
+        // 0 与负数（正整数判据）
+        for bad in ["log_ring_cap = 0", "log_ring_cap = -8"] {
+            let errs = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", bad))
+                .expect_err("非正容量必须报错");
+            assert!(
+                errs.iter().any(|e| e.contains("须为正整数")),
+                "{bad} 必须点名正整数判据: {errs:?}"
+            );
+        }
+        // 类型错（字符串不是整数）
+        let errs = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = \"many\""))
+            .expect_err("字符串容量必须报错");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("runtime.log_ring_cap 缺失或不是整数")),
+            "{errs:?}"
+        );
+        // 未知键点名
+        let errs = rr3_profile_from_text(&GOOD.replace("[runtime]", "[runtime]\nlog_level = \"debug\""))
+            .expect_err("未知键必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("[runtime] 未知键 log_level")),
+            "{errs:?}"
+        );
+        // 合法值如实收进结构体（64 ≠ 编译期兜底 512——数据流证明）
+        let p = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 64"))
+            .expect("64 是合法容量");
+        assert_eq!(p.log_ring_cap, 64, "容量必须来自装配单数据");
+        assert_eq!(rr3_profile_from_text(GOOD).expect("GOOD 合法").log_ring_cap, 512);
     }
 
     #[test]
