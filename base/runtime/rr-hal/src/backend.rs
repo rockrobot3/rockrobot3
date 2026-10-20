@@ -227,6 +227,11 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
     (src, backend)
 }
 
+/// 板外设命令帧承载符号经 backend 装配面 re-export（⑨-w 依赖面白名单：单元侧
+/// `rr_hal::` 引用只许四类，命令旁路消费方走 `rr_hal::backend::` 同面引用——
+/// backend 面就是板外设命令下行的职责面，见 [`rr3_hal_audio_source_with_cmd`]）。
+pub use crate::esp32audio::Rr3PeriphCmd;
+
 /// 音频源 + 板外设命令旁路产面（B 批 b1）：esp32 档返 `Some`——flock 单消费者
 /// 纪律下板外设命令下行唯一通路 = 持 conn 的音频源旁路（esp32audio.rs）；
 /// 其余档 `None`（无旁路面，消费方按 None fail-closed 关闭反射环）。
