@@ -127,6 +127,24 @@ impl Rr3DeviceTable {
             .collect()
     }
 
+    /// 全表 mate → peak_ma 索引（校验⑦-c1 额定加总的峰值事实源——自检时点判，
+    /// 批N5 件五）：按对端连接器型号查器件峰值。同一 mate 多器件在册取最大值
+    /// （连接器口径的保守取法——对端可能接其中任一器件）；空 mate（直连缺省类）
+    /// 不进索引，与 [`Self::rr3_device_table_mates`] 同一收账口径。映射自同一份
+    /// 装载表，非第二真值点。
+    pub fn rr3_device_table_peak_by_mate(&self) -> BTreeMap<String, i64> {
+        let mut out: BTreeMap<String, i64> = BTreeMap::new();
+        for (_, e) in &self.devices {
+            if e.mate.is_empty() {
+                continue;
+            }
+            out.entry(e.mate.clone())
+                .and_modify(|p| *p = (*p).max(e.peak_ma))
+                .or_insert(e.peak_ma);
+        }
+        out
+    }
+
     /// 自身形状检查：非空 + bus 词域封闭 + I2C 类必带地址集 + baud_ok/peak_ma
     /// 必填（峰值 0 会让校验⑨ 恒过 = 假账）。mate 可缺省（直连类器件）。
     /// addrs/baud_ok 的**取值域**（地址是否合法、速率是否可达）是探测期与
@@ -206,6 +224,14 @@ mod tests {
         // peak_ma 与 id_reg（⑨ 的事实源 / L-14 的数据源）
         assert_eq!(table.rr3_device_table_peak_ma("SG90"), Some(700));
         assert_eq!(table.rr3_device_table_peak_ma("INA219"), Some(1));
+        // mate → peak 索引（⑦-c1 额定加总的峰值事实源，批N5 件五）：三 mate 对
+        // 三器件；INA219 直连缺省不进索引
+        let peak_by_mate = table.rr3_device_table_peak_by_mate();
+        assert_eq!(peak_by_mate.len(), 3, "{peak_by_mate:?}");
+        assert_eq!(peak_by_mate.get("SG90-3P"), Some(&700));
+        assert_eq!(peak_by_mate.get("0.96in-OLED-FPC"), Some(&20));
+        assert_eq!(peak_by_mate.get("MAX7219-DIP24"), Some(&330));
+        assert!(!peak_by_mate.contains_key("none"));
         // 契约形状自检：真契约必须全绿
         assert!(table.rr3_device_table_check().is_empty());
     }

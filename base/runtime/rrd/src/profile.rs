@@ -1638,9 +1638,10 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     // 装载期校验⑦（增补轮六 §5，后果 = 拒）：接线闭合与额定加总。⑦-a wire.signal
     // ⊆ pin_id ∪ {vcc,gnd}；⑦-b wire.net ⊆ domains；⑦-d wire.mate ∈ devices.toml
-    // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。⑦-c（rated_a × 1000 ≥
-    // Σ(feeds 闭包内 peak_ma) × 裕量）的判据对象是件 demands 申报（n1-7 才立数据
-    // 面），批N2 同链补——本批不预支。
+    // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。额定加总两位（§22
+    // 实-4 拆分）装载期均不预支：⑦-c1（器件侧，判据对象 = devices.toml peak_ma）
+    // 的自检时点判已随 assembly.rs 额定加总族先行（批N5 件五）；⑦-c2（件侧）的
+    // 判据对象是件 demands 申报（n1-7 才立数据面），批N2 同链补。
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
     let mate_set = devices.rr3_device_table_mates();
     errs.extend(wiring.rr3_wiring_check(&pin_ids, &domain_names, &mate_set));
@@ -1827,6 +1828,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
             .to_string(),
         profile: profile.clone(),
         wiring: wiring.clone(),
+        peak_by_mate: devices.rr3_device_table_peak_by_mate(),
         axis: axis_files,
         roles: roles.clone(),
     };
