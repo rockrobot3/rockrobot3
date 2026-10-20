@@ -15,9 +15,9 @@
 //!   `{"played_ms","chars"}`）、`rr3-interact/face/expression`（表情机切换，回
 //!   `{"expression","previous"}`）与 `rr3-interact/ops/list`（批N4 件九二 ops
 //!   槽快照读口，白名单组体）；
-//! - 排空面板动作通道：face 由主循环串行代执行（面板 HTTP 线程不碰 sink/face
-//!   所有权，与 TTS 点名天然互斥，无锁）；beep 占位已随 MC-1 退役，如实回
-//!   业务错误"无本地波形源"；
+//! - 排空面板动作通道：face/beep 由主循环串行代执行（面板 HTTP 线程不碰
+//!   sink/face 所有权，与 TTS 点名天然互斥，无锁）；beep 走内置测试音——
+//!   短正弦进程内直喂播放面（批N5 件五笔2，speaker 自检腿的波形源）；
 //! - 表情帧动画节拍（批F3 sim 档）：~250ms 一拍推一帧，显示件随批F5a
 //!   显示 trait 实装，sim 档只推帧指针。
 //!
@@ -268,13 +268,12 @@ pub fn rr3_interact_run() -> Result<(), String> {
                 _ => {}
             }
         }
-        // 面板动作排空：face 主循环串行代执行（与 TTS 点名天然互斥，无锁）；
-        // beep 占位已随 MC-1 退役——播放面只吃 tts_pcm 流，无本地波形源，如实回错
+        // 面板动作排空：face/beep 主循环串行代执行（与 TTS 点名天然互斥，无锁）；
+        // beep 走内置测试音（批N5 件五笔2 缺口①）：短正弦同径增益（volume_pct）
+        // 后进程内直喂播放面——波形源进程内自持，不再依赖 tts_pcm 流
         while let Ok((action, tx)) = act_rx.try_recv() {
             let result = match action {
-                Rr3PanelAction::Beep => {
-                    Err("无本地波形源：beep 占位已随 MC-1 退役，播放面只接受 tts_pcm 流".into())
-                }
+                Rr3PanelAction::Beep => rr3_beep_play(sink.as_mut(), cfg.player.volume_pct),
                 Rr3PanelAction::Face { expression } => face
                     .rr3_face_set(&expression, &cfg.face.non_pointable)
                     .map(|(c, p)| rr3_face_result(c, p)),
@@ -364,6 +363,41 @@ fn rr3_handle_face(
     let expr = rr3_face_parse_args(args)?;
     let (current, previous) = face.rr3_face_set(&expr, non_pointable)?;
     Ok(rr3_face_result(current, previous))
+}
+
+// ---------- beep 测试音（批N5 件五笔2，§17 缺口①：speaker 腿波形源） ----------
+
+/// 测试音波形参数：440Hz / 200ms 短正弦，峰值 12000（约 37% 满幅）——同径
+/// 增益叠加后仍远低于饱和，不削顶。440 × 0.2s = 88 个整周期，波形首尾同相。
+const RR3_BEEP_FREQ_HZ: f64 = 440.0;
+const RR3_BEEP_MS: u64 = 200;
+const RR3_BEEP_AMP: i16 = 12_000;
+
+/// 合成内置测试音：16k mono s16le 与播放面同一张采样规格
+/// （`RR3_TTS_SAMPLE_RATE`），进程内自持不依赖 tts_pcm 流。
+fn rr3_beep_samples() -> Vec<i16> {
+    let n = RR3_BEEP_MS as usize * player::RR3_TTS_SAMPLE_RATE as usize / 1000;
+    (0..n)
+        .map(|i| {
+            (RR3_BEEP_AMP as f64
+                * (2.0 * std::f64::consts::PI * RR3_BEEP_FREQ_HZ * i as f64
+                    / player::RR3_TTS_SAMPLE_RATE as f64)
+                    .sin()) as i16
+        })
+        .collect()
+}
+
+/// beep 动作执行（主循环代执行）：合成 → 增益（与 tts 同径 `volume_pct`，
+/// MC-2 同一播放参数面）→ 直喂播放面，回 `{"played_ms"}`。波形长度编译期
+/// 固定 3200 样点 = 200ms ≥ 1ms 窗口，`played_ms == 0` 恒不触（I-21① 同口径
+/// 由构造保证）；写播放面失败原样上抛折 error 应答（同 tts 口径）。
+fn rr3_beep_play(
+    sink: &mut dyn rr_hal_api::Rr3AudioSink,
+    volume_pct: u32,
+) -> Result<Value, String> {
+    let mut samples = rr3_beep_samples();
+    player::rr3_tts_apply_gain(&mut samples, volume_pct);
+    player::rr3_tts_play(sink, &samples).map(|played_ms| json!({ "played_ms": played_ms }))
 }
 
 // ---------- 载荷组装面（0.0.5 批I I-8：上移承载层，ADR-0019 修订 4） ----------
@@ -1088,5 +1122,41 @@ face_expect = "happy"
         assert!(err.contains("不可被点名"), "talk 被排除集拒: {err}");
         let ok = rr3_handle_face(&mut f, &json!({ "expression": "talk" }), &[]).unwrap();
         assert_eq!(ok["expression"], "talk", "空集放开 talk 点名");
+    }
+
+    /// beep 测试音合成（批N5 件五笔2）：确定性——长度 3200（200ms@16k）、
+    /// 首样点 sin(0)=0、峰值幅内不削顶（|s| ≤ 12000）且实达半幅以上（可听）、
+    /// 两跑逐样本相等
+    #[test]
+    fn beep_samples_are_deterministic_sine_without_clipping() {
+        let s = rr3_beep_samples();
+        assert_eq!(s.len(), 3200, "200ms × 16k 样点");
+        assert_eq!(s[0], 0, "首样点 sin(0)=0");
+        let peak = s.iter().map(|v| v.unsigned_abs()).max().unwrap();
+        assert!(peak <= RR3_BEEP_AMP.unsigned_abs(), "幅内不削顶: {peak}");
+        assert!(peak > 6_000, "实达半幅以上（可听）: {peak}");
+        assert_eq!(rr3_beep_samples(), s, "两跑逐样本相等（确定性）");
+    }
+
+    /// beep 动作执行（批N5 件五笔2）：合成→同径增益→直喂播放面——回
+    /// played_ms=200，播出流 = 合成样点过同径增益（100% 恒等档对拍）；0% 档
+    /// 播出全零流但时长如实 200ms（时长由样点数导出，与 tts 同一口径）
+    #[test]
+    fn beep_play_feeds_sink_through_gain_path() {
+        use rr_hal_api::{Rr3AudioSink, RR3_AUDIO_CFG_16K_MONO16};
+        let mut sink = rr_hal::sim::Rr3SimAudioSink::rr3_sim_sink_new(16_000 * 2);
+        sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
+        let v = rr3_beep_play(&mut sink, 100).unwrap();
+        assert_eq!(v["played_ms"], 200);
+        assert_eq!(v.as_object().unwrap().len(), 1, "beep 应答单字段无加戏: {v}");
+        let mut want = rr3_beep_samples();
+        player::rr3_tts_apply_gain(&mut want, 100);
+        assert_eq!(sink.rr3_sim_sink_played(), want, "播出流 = 合成样点过同径增益");
+
+        let mut sink = rr_hal::sim::Rr3SimAudioSink::rr3_sim_sink_new(16_000 * 2);
+        sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
+        let v = rr3_beep_play(&mut sink, 0).unwrap();
+        assert_eq!(v["played_ms"], 200, "0% 增益时长如实（样点数导出）");
+        assert!(sink.rr3_sim_sink_played().iter().all(|&s| s == 0));
     }
 }
