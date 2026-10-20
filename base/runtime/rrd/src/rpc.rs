@@ -27,7 +27,9 @@ pub enum Rr3RpcMethod {
     /// （conn 握手在方法分流处把 ctl 旁支接走）；已注册模块连接上行一律拒。
     /// 0.0.4 批B 增 `rr3.ctl.counters`/`rr3.ctl.reboot`；
     /// 批N4 件九笔4 增 `rr3.ctl.wiring`（装配快照读口，`[pins]×wiring` 全交叉
-    /// 判果与四路底账一应答给出，判据源 = assembly.rs）。
+    /// 判果与四路底账一应答给出，判据源 = assembly.rs）；
+    /// 批N5 件五笔4 增 `rr3.ctl.contracts`（契约完整性审计读口，Z-4"四册齐全
+    /// 且 sha 对"判果与 sha 记账一应答给出，判据源 = contracts.rs）。
     CtlStatus,
     CtlHealth,
     CtlLogs,
@@ -35,6 +37,7 @@ pub enum Rr3RpcMethod {
     CtlCounters,
     CtlReboot,
     CtlWiring,
+    CtlContracts,
 }
 
 impl Rr3RpcMethod {
@@ -52,6 +55,7 @@ impl Rr3RpcMethod {
             Self::CtlCounters => "rr3.ctl.counters",
             Self::CtlReboot => "rr3.ctl.reboot",
             Self::CtlWiring => "rr3.ctl.wiring",
+            Self::CtlContracts => "rr3.ctl.contracts",
         }
     }
 
@@ -68,6 +72,7 @@ impl Rr3RpcMethod {
             "rr3.ctl.counters" => Some(Self::CtlCounters),
             "rr3.ctl.reboot" => Some(Self::CtlReboot),
             "rr3.ctl.wiring" => Some(Self::CtlWiring),
+            "rr3.ctl.contracts" => Some(Self::CtlContracts),
             _ => None,
         }
     }
@@ -85,6 +90,7 @@ impl Rr3RpcMethod {
                 | Self::CtlCounters
                 | Self::CtlReboot
                 | Self::CtlWiring
+                | Self::CtlContracts
         )
     }
 }
@@ -338,7 +344,7 @@ mod tests {
 
     /// F3（ADR-0010）：ctl 方法走同一解析器，is_ctl 的判据与方法面一致
     /// （0.0.4 批B 起 `rr3.ctl.counters`/`rr3.ctl.reboot` 入列；批N4 件九笔4 起
-    /// `rr3.ctl.wiring` 入列，白名单七 ctl）
+    /// `rr3.ctl.wiring` 入列；批N5 件五笔4 起 `rr3.ctl.contracts` 入列，白名单八 ctl）
     #[test]
     fn parses_ctl_methods_and_flags_them() {
         for m in [
@@ -349,6 +355,7 @@ mod tests {
             "rr3.ctl.counters",
             "rr3.ctl.reboot",
             "rr3.ctl.wiring",
+            "rr3.ctl.contracts",
         ] {
             let got = rr3_rpc_parse_request(&bytes(
                 json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}}),

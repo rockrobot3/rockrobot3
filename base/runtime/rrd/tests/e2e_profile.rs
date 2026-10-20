@@ -288,6 +288,39 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
         .iter()
         .any(|c| c["item"] == "signal:J-T[1]:gnd" && c["pass"] == "not-applicable");
     assert!(net_pass && gnd_na, "全交叉判果必须在场: {checks:?}");
+
+    // 契约完整性审计（批N5 件五笔4，Z-4）：--profile 正门 boot 成功 → 契约四册
+    // sha256 记账定格，`rr3.ctl.contracts` available:true，四行记账（真仓契约
+    // 目录，e2e 不传 --contracts）+ 四条判果"齐全且 sha 对"全 pass。
+    let mut ctl2 = rrd.rr3_connect();
+    rr3_send(&mut ctl2, &rr3_rpc_frame("rr3.ctl.contracts", 3, json!({}), 0));
+    let f = rr3_read_where(&mut ctl2, "ctl.contracts 应答", |fr| {
+        rr3_body_split(&fr.payload)
+            .map(|(ty, _)| ty == Rr3PayloadType::Response)
+            .unwrap_or(false)
+    });
+    let v = rr3_json_of(&f);
+    let c = &v["result"];
+    assert_eq!(c["available"], true, "{v}");
+    let books = c["contracts"].as_array().expect("契约记账必须在场: {v}");
+    assert_eq!(
+        books
+            .iter()
+            .map(|b| b["file"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["topics.toml", "slots.toml", "roles.toml", "devices.toml"],
+        "四册点名 = RR3_CONTRACT_FILES 清单序: {books:?}"
+    );
+    assert!(
+        books.iter().all(|b| b["sha256"].as_str().map(|s| s.len()) == Some(64)),
+        "每册带 64 字符 sha256 十六进制: {books:?}"
+    );
+    let cchecks = c["checks"].as_array().expect("契约判果必须在场: {v}");
+    assert_eq!(cchecks.len(), 4, "{cchecks:?}");
+    assert!(
+        cchecks.iter().all(|x| x["pass"] == "pass"),
+        "boot 未动包内契约 → 四条判果全 pass: {cchecks:?}"
+    );
 }
 
 /// P2 — 缺格：enabled_slots 声明的 sensor.env 没有指向 rr3-pb 的 binding → 逐条点名

@@ -40,9 +40,9 @@ WiFi 配网页随 0.0.4 批D 挂上）：
 | GET | `/api/data` | `rr3.ctl.counters` 短连 | `/api/data` |
 | GET | `/api/logs` | `rr3.ctl.logs` 短连 | `/api/logs` |
 | POST | `/api/relay` | `rr3.call` → `rr3-act/relay/set`（act 既有 exposes，零新增） | `/api/relay` |
-| POST | `/api/beep` | 进程内动作通道（主循环代执行；MC-1 起 beep 占位退役，如实回业务错误"无本地波形源"） | `/api/beep` |
+| POST | `/api/beep` | 进程内动作通道（主循环代执行；内置测试音＝440Hz/200ms 短正弦直喂播放面，波形源进程内自持——批N5 件五笔2） | `/api/beep` |
 | POST | `/api/face` | 进程内动作通道（主循环代执行） | `/api/face` |
-| POST | `/api/selftest` | 并列三调（beep+relay+face），各答各展示，无依赖链**不算编排** | `/api/selftest` |
+| POST | `/api/selftest` | 五腿判定（speaker/relay/face 三动作腿＋wiring/contracts 两读口腿），逐腿结果集与预期表等值定红绿（F-31）——腿间无依赖链**不算编排** | `/api/selftest` |
 | POST | `/api/reboot` | `rr3.ctl.reboot`（rrd 双重门缺省恒拒，面板如实转达拒因） | `/api/reboot` |
 | GET | `/api/wifi/scan` | `rr3.call` → `rr3-connect/wifi/scan`（sim 后端，`backend:"sim"` 诚实标注） | `/api/wifi/scan` |
 | POST | `/api/wifi/connect` | `rr3.call` → `rr3-connect/wifi/connect`（`ssid`/`pass` body 原样透传，参数裁决在 owner 模块） | `/api/wifi/connect` |
@@ -56,7 +56,8 @@ WiFi 配网页随 0.0.4 批D 挂上）：
   同权同拒（ADR-0010）；
 - **beep/face 不出进程**——sink/face 归主循环所有，HTTP 线程经 mpsc 动作通道递
   请求，主循环每圈 `try_recv` 串行代执行，与 TTS 点名天然互斥（无锁）；
-- **selftest 不是编排**——三个动作并列发起、单项失败不连锁、无状态机；
+- **selftest 不是编排**——五腿并列发起（动作腿经动作通道、读口腿走 ctl 短连）、单项失败
+  不连锁、无状态机；判据真值单点在 rrd（wiring/contracts 判果面板只转述不重判），
   编排权归 brain（ADR-0007）。
 
 ## 总线面

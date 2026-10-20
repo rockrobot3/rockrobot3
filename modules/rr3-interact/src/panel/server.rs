@@ -589,10 +589,14 @@ pub const RR3_SELFTEST_LEG_STATES: [&str; 3] = ["pass", "fail", "n-a"];
 /// 单值词表也是闭集——拼错的预期值（如 "zero_fail"）当场拒 boot，不容静默。
 pub const RR3_SELFTEST_WIRING_EXPECTS: [&str; 1] = ["zero-fail"];
 
+/// contracts 组预期词表（批N5 件五笔4，Z-4）：契约四册"齐全且 sha 对"的自检
+/// 腿组，判据同质恒 zero-fail——词表保持闭集同款（拼错值当场拒 boot）。
+pub const RR3_SELFTEST_CONTRACTS_EXPECTS: [&str; 1] = ["zero-fail"];
+
 /// 自检预期表（批N5 件五 F-31）：固定腿 speaker/relay/face 逐名期望三态 +
-/// wiring 组预期——verdict 的判据集，整体红绿是结果集对预期集等值的派生量。
-/// 装配期自 config `[rr3-interact.selftest.expect]` 读出构造（parse 已对账
-/// 词表），字段恒持在册值（'static 来自词表 lookup）。
+/// wiring / contracts 组预期——verdict 的判据集，整体红绿是结果集对预期集
+/// 等值的派生量。装配期自 config `[rr3-interact.selftest.expect]` 读出构造
+/// （parse 已对账词表），字段恒持在册值（'static 来自词表 lookup）。
 #[derive(Debug, Clone, Copy)]
 pub struct Rr3SelftestExpect {
     pub speaker: &'static str,
@@ -600,17 +604,20 @@ pub struct Rr3SelftestExpect {
     pub face: &'static str,
     /// wiring/* 组预期（`zero-fail` = 组内零 fail 即组过）
     pub wiring: &'static str,
+    /// contracts/* 组预期（批N5 件五笔4，Z-4：契约四册齐全且 sha 对）
+    pub contracts: &'static str,
 }
 
 impl Default for Rr3SelftestExpect {
     fn default() -> Self {
-        // 缺省 = 固定腿全 pass + wiring 组零 fail——speaker 内置测试音（批N5
+        // 缺省 = 固定腿全 pass + 两组零 fail——speaker 内置测试音（批N5
         // 件五笔2）落地后缺省判据即全绿；形态性缺腿仍可改表如实申报（F-31）
         Self {
             speaker: "pass",
             relay: "pass",
             face: "pass",
             wiring: "zero-fail",
+            contracts: "zero-fail",
         }
     }
 }
@@ -624,6 +631,14 @@ impl Rr3SelftestExpect {
     /// wiring 组预期 lookup（'static 来自词表）；词表外 None，调用方点名拒 boot
     pub fn rr3_wiring_lookup(s: &str) -> Option<&'static str> {
         RR3_SELFTEST_WIRING_EXPECTS
+            .iter()
+            .find(|&&v| v == s)
+            .copied()
+    }
+
+    /// contracts 组预期 lookup（'static 来自词表）；词表外 None，调用方点名拒 boot
+    pub fn rr3_contracts_lookup(s: &str) -> Option<&'static str> {
+        RR3_SELFTEST_CONTRACTS_EXPECTS
             .iter()
             .find(|&&v| v == s)
             .copied()
@@ -873,9 +888,11 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 判果**逐条摊进 legs**（`leg = "wiring/<item>"`，逐形态内容不同 =
             // 全案 §7 ⑤"出厂自检必测 [pins]×wiring 全交叉"的原文）——判果本身
             // 是 rrd 的产出，这里只转述不重判（第二真值点禁令）。
+            // 批N5 件五笔4 起加腿五 contracts：rr3.ctl.contracts 取契约四册
+            // "齐全且 sha 对"（Z-4）判果，同款逐条摊 `contracts/<item>`。
             // verdict 判定归 [`rr3_selftest_verdict`]（批N5 件五 F-31 预期表
             // 等值改判，纯函数化守判据面）。
-            let mut legs = Vec::with_capacity(6);
+            let mut legs = Vec::with_capacity(8);
             // 腿1 speaker：beep 走主循环代执行——内置测试音（批N5 件五笔2）
             // 播放成功即 pass；主循环缺席/写播放面失败如实 fail 点名原因
             let reason = match rr3_panel_act(shared, Rr3PanelAction::Beep) {
@@ -971,9 +988,60 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                     }
                 }
             }
+            // 腿5 contracts（批N5 件五笔4，Z-4）：契约四册"齐全且 sha 对"的
+            // rrd 自检判果逐条转述（`leg = "contracts/<item>"`）——判据真值
+            // 单点在 rrd contracts.rs，这里只转述不重判（第二真值点禁令）；
+            // 取数失败/快照不可得 = 单腿 fail 如实点名
+            match rr3_ctl_query(
+                &shared.bus_path,
+                "rr3.ctl.contracts",
+                5,
+                shared.limits.read_timeout,
+            ) {
+                Err(e) => legs.push(json!({
+                    "leg": "contracts/取数", "pass": "fail", "reason": e,
+                })),
+                Ok(v) => {
+                    if v.get("available").and_then(Value::as_bool) != Some(true) {
+                        legs.push(json!({
+                            "leg": "contracts/取数", "pass": "fail",
+                            "reason": v.get("reason").cloned().unwrap_or(json!(
+                                "ctl.contracts 应答缺 available:true（数据漂移）"
+                            )),
+                        }));
+                    } else {
+                        let checks = v
+                            .get("checks")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default();
+                        if checks.is_empty() {
+                            legs.push(json!({
+                                "leg": "contracts/空", "pass": "fail",
+                                "reason": "契约记账在册但零判据对象（四册点名清单漂移）",
+                            }));
+                        }
+                        for c in &checks {
+                            let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
+                            let pass = match c.get("pass").and_then(Value::as_str) {
+                                Some("pass") => "pass",
+                                Some("not-applicable") => "n-a",
+                                _ => "fail",
+                            };
+                            let mut leg =
+                                json!({ "leg": format!("contracts/{item}"), "pass": pass });
+                            if let Some(r) = c.get("reason") {
+                                leg["reason"] = r.clone();
+                            }
+                            legs.push(leg);
+                        }
+                    }
+                }
+            }
             // verdict = 结果集与预期集等值（批N5 件五 F-31）：固定腿逐名三态
-            // 等值（缺腿即红、腿册外多腿 fail-closed 红），wiring/* 组内零 fail
-            // 即组过（n-a 不拖累）。整体红绿是派生量，预期表 config 数据化。
+            // 等值（缺腿即红、腿册外多腿 fail-closed 红），wiring/* 与
+            // contracts/* 组内零 fail 即组过（n-a 不拖累）。整体红绿是派生量，
+            // 预期表 config 数据化。
             let verdict = rr3_selftest_verdict(&legs, &shared.selftest_expect);
             Rr3PanelReply::json(200, "OK", json!({ "legs": legs, "verdict": verdict }))
         }
@@ -1016,9 +1084,10 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
 
 /// 自检 verdict 判定（批N5 件五 F-31，纯函数化）：verdict = 结果集与预期集
 /// 等值——固定腿 speaker/relay/face 逐名三态等值，结果集缺腿即红、多出腿册外
-/// 未知腿名 fail-closed 红；wiring/* 组内零 fail 即组过（n-a 不拖累不救场）。
-/// 整体红绿是派生量：预期表可按形态改数据（[rr3-interact.selftest.expect]），
-/// 恒败腿如实申报期望 fail 即等值过（改数据不改码）。
+/// 未知腿名 fail-closed 红；wiring/* 与 contracts/*（批N5 件五笔4）组内零 fail
+/// 即组过（n-a 不拖累不救场）。整体红绿是派生量：预期表可按形态改数据
+/// （[rr3-interact.selftest.expect]），恒败腿如实申报期望 fail 即等值过
+/// （改数据不改码）。
 fn rr3_selftest_verdict(legs: &[Value], expect: &Rr3SelftestExpect) -> &'static str {
     let mut seen = [false; 3]; // speaker/relay/face 到场记账（缺腿即红）
     for l in legs {
@@ -1038,6 +1107,14 @@ fn rr3_selftest_verdict(legs: &[Value], expect: &Rr3SelftestExpect) -> &'static 
                 }
             }
             n if n.starts_with("wiring/") => {
+                if state == "fail" {
+                    return "fail";
+                }
+            }
+            // contracts/* 组（批N5 件五笔4，Z-4）：同 wiring 组规则——组内零
+            // fail 即组过（n-a 不拖累不救场；判据同质无豁免面，n-a 不会出现，
+            // 万一出现按零 fail 处理不放大）
+            n if n.starts_with("contracts/") => {
                 if state == "fail" {
                     return "fail";
                 }
@@ -1477,24 +1554,28 @@ mod tests {
         listener: std::os::unix::net::UnixListener,
         beats: Arc<Mutex<Vec<Value>>>,
         wiring: Value,
+        contracts: Value,
     ) {
-        // 每连接一线程：总线心跳是长连接（占住内层读环），而自检腿四的 ctl.wiring
-        // 查询会另开一条短连接——串行 accept 会让短连接永远排在长连接后面，
-        // 5s 读超时把整个自检拖挂（真 rrd 也是并发连接，假件不得更弱）
+        // 每连接一线程：总线心跳是长连接（占住内层读环），而自检腿四/腿五的
+        // ctl.wiring / ctl.contracts 查询会另开短连接——串行 accept 会让短连接
+        // 永远排在长连接后面，5s 读超时把整个自检拖挂（真 rrd 也是并发连接，
+        // 假件不得更弱）
         while let Ok((stream, _)) = listener.accept() {
             let beats = beats.clone();
             let wiring = wiring.clone();
-            std::thread::spawn(move || rr3_i4_fake_rrd_conn(stream, beats, wiring));
+            let contracts = contracts.clone();
+            std::thread::spawn(move || rr3_i4_fake_rrd_conn(stream, beats, wiring, contracts));
         }
     }
 
     /// 假 rrd 单连接处理体（注册回 src_task=7、心跳回 accepted，并把每拍心跳
-    /// params 原样记账；ctl.wiring 回预置应答）
+    /// params 原样记账；ctl.wiring / ctl.contracts 回各自预置应答）
     #[cfg(test)]
     fn rr3_i4_fake_rrd_conn(
         mut stream: std::os::unix::net::UnixStream,
         beats: Arc<Mutex<Vec<Value>>>,
         wiring: Value,
+        contracts: Value,
     ) {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         loop {
@@ -1518,6 +1599,7 @@ mod tests {
                     json!({ "beat": "accepted" })
                 }
                 "rr3.ctl.wiring" => wiring.clone(),
+                "rr3.ctl.contracts" => contracts.clone(),
                 _ => json!({ "noop": true }),
             };
             let id = v["id"].as_u64().unwrap_or(0);
@@ -1594,7 +1676,7 @@ mod tests {
         let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
         {
             let beats = beats.clone();
-            std::thread::spawn(move || rr3_i4_fake_rrd(listener, beats, json!({})));
+            std::thread::spawn(move || rr3_i4_fake_rrd(listener, beats, json!({}), json!({})));
         }
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
@@ -1710,7 +1792,7 @@ mod tests {
         let bus_path = dir.join("st.sock");
         let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
         std::thread::spawn(move || {
-            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), json!({}))
+            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), json!({}), json!({}))
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
@@ -1747,7 +1829,7 @@ mod tests {
         let v: Value = serde_json::from_str(body).expect("自检应答是 JSON: {body}");
 
         let legs = v["legs"].as_array().expect("逐腿数组");
-        assert_eq!(legs.len(), 4, "并列四腿（三调＋接线腿）");
+        assert_eq!(legs.len(), 5, "并列五腿（三调＋wiring 腿＋contracts 腿）");
         assert_eq!(legs[0]["leg"], "speaker");
         assert_eq!(legs[0]["pass"], "fail", "主循环缺席腿如实 fail，不折算通过（D15）");
         assert!(
@@ -1764,8 +1846,13 @@ mod tests {
         );
         assert_eq!(legs[3]["pass"], "fail");
         assert_eq!(
+            legs[4]["leg"], "contracts/取数",
+            "假 rrd 未预置 contracts 应答（available 缺）→ 取数单腿 fail（腿五同口径）"
+        );
+        assert_eq!(legs[4]["pass"], "fail");
+        assert_eq!(
             v["verdict"], "fail",
-            "混合态 verdict 必 fail（speaker/face 不等值 + wiring 组含 fail）"
+            "混合态 verdict 必 fail（speaker/face 不等值 + wiring/contracts 组含 fail）"
         );
     }
 
@@ -1790,8 +1877,20 @@ mod tests {
                 { "item": "pin:J-T[2]:vcc", "pass": "weird-unknown", "reason": "未知值兜底" }
             ]
         });
+        // 腿五 contracts 的预置应答（批N5 件五笔4）：available:true + 两条
+        // 全 pass 判果——顺带钉 contracts/<item> 的逐条摊开形（与 wiring 同构）
+        let canned_contracts = json!({
+            "available": true,
+            "contracts": [
+                { "file": "topics.toml", "sha256": "64hex", "bytes": 1 }
+            ],
+            "checks": [
+                { "item": "contract:topics.toml", "pass": "pass", "reason": "sha256 对上" },
+                { "item": "contract:slots.toml", "pass": "pass", "reason": "sha256 对上" }
+            ]
+        });
         std::thread::spawn(move || {
-            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned)
+            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned, canned_contracts)
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
@@ -1828,7 +1927,11 @@ mod tests {
         let v: Value = serde_json::from_str(body).expect("自检应答是 JSON: {body}");
 
         let legs = v["legs"].as_array().expect("逐腿数组");
-        assert_eq!(legs.len(), 6, "三调腿＋checks 三条逐条摊开: {v}");
+        assert_eq!(
+            legs.len(),
+            8,
+            "三调腿＋wiring 三条逐条摊开＋contracts 两条: {v}"
+        );
         assert_eq!(legs[0]["leg"], "speaker");
         assert_eq!(legs[0]["pass"], "fail", "主循环不在，如实 fail");
         assert_eq!(legs[1]["leg"], "relay");
@@ -1843,6 +1946,13 @@ mod tests {
         assert_eq!(legs[5]["leg"], "wiring/pin:J-T[2]:vcc");
         assert_eq!(legs[5]["pass"], "fail", "未知 pass 值 fail-closed 折 fail");
         assert_eq!(legs[5]["reason"], "未知值兜底");
+        // 腿五 contracts（批N5 件五笔4）：预置判果逐条摊 contracts/<item>，
+        // reason 透传——与 wiring 腿同构的第二真值点禁令口径
+        assert_eq!(legs[6]["leg"], "contracts/contract:topics.toml");
+        assert_eq!(legs[6]["pass"], "pass");
+        assert_eq!(legs[6]["reason"], "sha256 对上");
+        assert_eq!(legs[7]["leg"], "contracts/contract:slots.toml");
+        assert_eq!(legs[7]["pass"], "pass");
         assert_eq!(
             v["verdict"], "fail",
             "wiring 组含 fail → verdict fail（零 fail 判据；n-a 不救场也不拖累）"
@@ -1908,6 +2018,30 @@ mod tests {
             "fail",
             "wiring 组零 fail 判据"
         );
+        // contracts 组（批N5 件五笔4，Z-4）：组内零 fail 即组过；含 fail 即红
+        let legs = vec![
+            leg("speaker", "pass"),
+            leg("relay", "pass"),
+            leg("face", "pass"),
+            leg("contracts/contract:topics.toml", "pass"),
+            leg("contracts/contract:roles.toml", "pass"),
+        ];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &Rr3SelftestExpect::default()),
+            "pass",
+            "contracts 组零 fail 即组过"
+        );
+        let legs = vec![
+            leg("speaker", "pass"),
+            leg("relay", "pass"),
+            leg("face", "pass"),
+            leg("contracts/contract:roles.toml", "fail"),
+        ];
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &Rr3SelftestExpect::default()),
+            "fail",
+            "contracts 组零 fail 判据"
+        );
         // 结果集缺固定腿 → 红（缺的腿无从对表）
         let legs = vec![leg("speaker", "pass"), leg("relay", "pass")];
         assert_eq!(
@@ -1948,7 +2082,7 @@ mod tests {
         });
         let expect = canned.clone();
         std::thread::spawn(move || {
-            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned)
+            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned, json!({}))
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
