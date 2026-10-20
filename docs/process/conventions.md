@@ -278,6 +278,17 @@ additionalProperties=false；RR3_PINNED_TOPICS 数组随本笔补齐批N4 件六
 波及订正（`69b2b47`）——rr3-act 订阅臂按 reason 分流：battery-ok 解除广播不闭锁不解禁
 （低电段中 act 重启会被解除广播误闭锁至重启；解禁只认轨压样本复位语义④，喂入面挂账批N3
 件七不变），缺 reason/未知值 fail-closed 闭锁；status.md 能力行"只升不降"表述同批补正。
+**2026-10-20 对表（批N5 件三：装载消费真值集清单＋三处消费方判等，host 半边收官）**：
+判据原文＝全案 §17 基-25 行＋实-12 修法；范围裁定＝烧录与装机 **host 半边**归基-25，rtos espflash
+烧录半边等真板另登（余量落索引 §14.7 基-25 行，缺载体按敞口表章程不混装）。笔1（`280da7b`）——
+rrd 立 `rr3_runtime_truth_set` 唯一清单（装载面 files 七条＋dirs 一条，单测真仓双装配单逐成员钉死；
+清单是数据不抄第二份）；rr3-pack 照单扩包：装配单先按装载同判据预验（坏单拒出包）→ truth set
+缺册检查（缺册拒出包）→ 按清单循环落位。笔2（`497e1a6`）——装机面消费方判等：distro-smoke ⑤
+补平台册装机断言（块-15 修法 b）；post-build.sh 新立第 5 件 profiles/contracts/hardware 整目录
+随装（块-15 修法 c＝基-23 第二半提前归基-25，S99rrd 传参启用消费仍归基-23）；OTA 判据占位落
+base/ota/partition-layout.md（staging 真值集判等＋manifest 契约 schema 版本列不等即拒装，载体随
+M6）。块-15 施工顺序约束"基-25 必须先于基-23"host 半边兑现；status.md 轮次条、开发计划 §3、
+索引 §14.7、architecture §13 顺序约束注记同批对表（本笔对表）。
 **"执法位"是三层，报数必须写清是哪一层**（第八轮 实-14 立）：① **判据实体**（代码里判不判）② **反例用例**（有没有一条输入让它变红）
 ③ **专属执法步**（`check.sh` 里有没有一个点名它的 step）。三层各自可缺，**混报即失真**。
 门 n 今天是 ①② 有、③ 缺：两条稳态判据有装载期实体（`rrd/src/profile.rs` 门 n 段——`rr3_profile_boot_inputs_with_probe`
