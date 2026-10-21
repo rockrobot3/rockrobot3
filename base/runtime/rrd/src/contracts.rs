@@ -19,11 +19,10 @@ use serde_json::{json, Value};
 
 use crate::assembly::{Rr3AssemblyCheck, RR3_CHECK_FAIL, RR3_CHECK_PASS};
 
-/// 契约四册（Z-4 判据的"四份"，与 [`crate::profile::rr3_runtime_truth_set`]
-/// 的 contracts 四册成员同名同序）：打包面（rr3-pack）与装载面共用那份清单，
-/// 本文件是自检判据面的点名清单——判据对象以"装载期读的文件"为成员判据。
-pub const RR3_CONTRACT_FILES: [&str; 4] =
-    ["topics.toml", "slots.toml", "roles.toml", "devices.toml"];
+/// 契约四册（Z-4 判据的"四份"，字面在 [`crate::profile::RR3_CONTRACT_BOOKS`]）：
+/// 成员集相等由判据保证（基-40 单测＋规约 ⑨-z 门），不再靠注释声称——本清单是
+/// 自检判据面的点名域，成员判据 = 装载期读的文件（真值集 contracts 子集）。
+pub const RR3_CONTRACT_FILES: [&str; 4] = crate::profile::RR3_CONTRACT_BOOKS;
 
 /// 一册契约的记账行：boot 时定格的文件名、定位路径与 sha256 十六进制串、字节数。
 #[derive(Debug, Clone, PartialEq, Eq)]
