@@ -264,7 +264,7 @@ pub struct Rr3PinEntry {
     /// 方向（须与 role.direction 相等）
     pub direction: String,
     /// 供电轨名（kind=power 角色必填且须 ∈ [supplies].domains，校验⑥；信号侧控制线
-    /// 显式写 "none"——留空即红，与 sense 的显式范式同型）。domains 随批N6 立册后
+    /// 显式写 "none"——留空即红，与 sense 的显式范式同型）。domains 已随批N6 立册，
     /// 校验⑥-a 判在册
     pub rail: String,
     /// I2C 从地址（0x 前缀十六进制；power.battery.meter 类角色用，校验⑨ 互校随批N2）
