@@ -191,7 +191,9 @@ pub fn rr3_assembly_cross_checks(
                 Err(fault) => out.push(Rr3AssemblyCheck {
                     item,
                     pass: RR3_CHECK_FAIL,
-                    reason: format!("feeds {fault}——额定加总不可判（快照与装载面漂移，正是自检要抓的）"),
+                    reason: format!(
+                        "feeds {fault}——额定加总不可判（快照与装载面漂移，正是自检要抓的）"
+                    ),
                 }),
                 Ok(closure) => {
                     let sum_ma: i64 = closure.iter().map(|g| peak(g)).sum();
@@ -503,7 +505,11 @@ mod tests {
         assert_eq!(sig("net:J3:rail5v").pass, RR3_CHECK_PASS);
         // 额定加总族：J3 电力线组（mate=none 负载未注册按 0 计，feeds=[]）判 pass
         assert_eq!(sig("rated:J3").pass, RR3_CHECK_PASS);
-        assert!(sig("rated:J3").reason.contains("⑦-c1"), "{:?}", sig("rated:J3").reason);
+        assert!(
+            sig("rated:J3").reason.contains("⑦-c1"),
+            "{:?}",
+            sig("rated:J3").reason
+        );
         // 落点族：pan 有 1 导体引用 pass；face.spi 零引用记 not-applicable（合法态）
         assert_eq!(sig("pin:act.axis.pwm.pan").pass, RR3_CHECK_PASS);
         assert_eq!(sig("pin:ui.face.spi").pass, RR3_CHECK_NA);
@@ -576,17 +582,27 @@ mod tests {
         };
         let checks = rr3_assembly_cross_checks(&s.profile, &wiring, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_FAIL);
-        assert!(c(&checks, "rated:J1").reason.contains("2100"), "{:?}", c(&checks, "rated:J1").reason);
+        assert!(
+            c(&checks, "rated:J1").reason.contains("2100"),
+            "{:?}",
+            c(&checks, "rated:J1").reason
+        );
         assert_eq!(c(&checks, "rated:J2").pass, RR3_CHECK_PASS);
         assert_eq!(c(&checks, "rated:J3").pass, RR3_CHECK_PASS);
         // net = none 纯信号/地线组：⑦-c1 无判据面，not-applicable
         assert_eq!(c(&checks, "rated:J9").pass, RR3_CHECK_NA);
 
         // 自反口径：单线 0.5A 自挂 700mA 舵机 ⇒ 本线承载之和含自身对端，红
-        let solo = crate::wiring::Rr3Wiring { wires: vec![mk("J7", vec![], 0.5)] };
+        let solo = crate::wiring::Rr3Wiring {
+            wires: vec![mk("J7", vec![], 0.5)],
+        };
         let checks = rr3_assembly_cross_checks(&s.profile, &solo, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J7").pass, RR3_CHECK_FAIL);
-        assert!(c(&checks, "rated:J7").reason.contains("700"), "{:?}", c(&checks, "rated:J7").reason);
+        assert!(
+            c(&checks, "rated:J7").reason.contains("700"),
+            "{:?}",
+            c(&checks, "rated:J7").reason
+        );
 
         // 菱形分叉不是环：J1→{J2,J3}、J2→J4、J3→J4 ⇒ J4 只收账一次，Σ = 700×4 = 2800
         let diamond = crate::wiring::Rr3Wiring {
@@ -599,7 +615,11 @@ mod tests {
         };
         let checks = rr3_assembly_cross_checks(&s.profile, &diamond, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_PASS);
-        assert!(c(&checks, "rated:J1").reason.contains("2800"), "{:?}", c(&checks, "rated:J1").reason);
+        assert!(
+            c(&checks, "rated:J1").reason.contains("2800"),
+            "{:?}",
+            c(&checks, "rated:J1").reason
+        );
 
         // feeds 一般环：J5→J6→J5（装载期闭合面只拒自环，环漏进快照即漂移）——双红
         let cycle = crate::wiring::Rr3Wiring {
@@ -607,7 +627,11 @@ mod tests {
         };
         let checks = rr3_assembly_cross_checks(&s.profile, &cycle, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J5").pass, RR3_CHECK_FAIL);
-        assert!(c(&checks, "rated:J5").reason.contains("环"), "{:?}", c(&checks, "rated:J5").reason);
+        assert!(
+            c(&checks, "rated:J5").reason.contains("环"),
+            "{:?}",
+            c(&checks, "rated:J5").reason
+        );
         assert_eq!(c(&checks, "rated:J6").pass, RR3_CHECK_FAIL);
     }
 

@@ -129,22 +129,16 @@ fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
 }
 
 /// 点名帧的头与体形状（daemon.rs 单测钉帧级形状，这里钉线上的同一帧）
-fn assert_power_frame_shape(
-    f: &rr_ipc::Rr3Frame,
-    reason: &str,
-    percent: u64,
-    voltage_mv: u64,
-) {
+fn assert_power_frame_shape(f: &rr_ipc::Rr3Frame, reason: &str, percent: u64, voltage_mv: u64) {
     assert_eq!(f.header.src_task, RR3_TASK_RRD, "点名由 rrd 署名");
     assert_eq!(f.header.dst_task, RR3_BROADCAST_DST_TASK, "点名是广播语义");
     let v: Value = rr3_json_of(f);
     assert_eq!(v["topic"], "rr3-runtime/system/power");
     assert_eq!(v["reason"], reason);
     assert_eq!(v["percent"], percent, "透传触发事件的 percent: {v}");
-    assert_eq!(v["voltage_mv"], voltage_mv, "透传触发事件的 voltage_mv: {v}");
     assert_eq!(
-        v.as_object().map(|o| o.len()),
-        Some(4),
-        "体恰四字段: {v}"
+        v["voltage_mv"], voltage_mv,
+        "透传触发事件的 voltage_mv: {v}"
     );
+    assert_eq!(v.as_object().map(|o| o.len()), Some(4), "体恰四字段: {v}");
 }

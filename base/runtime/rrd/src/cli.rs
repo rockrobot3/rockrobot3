@@ -266,11 +266,9 @@ mod tests {
     fn defaults_come_from_contract_constants() {
         // 装配面必选门（基-23）后"纯缺省"不再可解析：本用例只关心与装配面无关的
         // 默认值，走 --profile 正门满足必选门（manifests 缺省空断言由它保住）
-        let cfg = rr3_cli_parse_with_env(
-            &a(&["--profile", "/root/profiles/default.toml"]),
-            &env_none,
-        )
-        .unwrap();
+        let cfg =
+            rr3_cli_parse_with_env(&a(&["--profile", "/root/profiles/default.toml"]), &env_none)
+                .unwrap();
         // M-6：原来这里还有一行 `assert_eq!(cfg.socket, rr3_default_socket(&env_none))`，
         // 两边同走一个函数、恒真（自证），删掉。真正起锚作用的是下面与契约常量的对账。
         assert_eq!(
@@ -324,8 +322,7 @@ mod tests {
     #[test]
     fn boot_role_defaults_to_resident_and_is_pass_through_verbatim() {
         // 各分支只关心 boot_role 的缺省与透传，统一带 --manifest 满足装配面必选门
-        let dflt =
-            rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
+        let dflt = rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
         assert_eq!(
             dflt.boot_role, "resident",
             "默认必须是 resident（与夹具不传 RR3_SIM_PEER_ROLE 时的回落一致）"
@@ -353,18 +350,21 @@ mod tests {
             "报错要点名开关、理由与用法: {e}"
         );
         // 缺值走 need_value 的同一条口径（`--boot-role` 是最后一个参数）
-        let e = rr3_cli_parse_with_env(
-            &a(&["--manifest", "/m/d.toml", "--boot-role"]),
-            &env_none,
-        )
-        .unwrap_err();
+        let e = rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml", "--boot-role"]), &env_none)
+            .unwrap_err();
         assert!(
             e.contains("--boot-role 缺参数") && e.contains("用法"),
             "{e}"
         );
         // 疑似开关的值不当 role 吞下（否则后面那个真开关就被吃了，与 need_path_value 同形）
         let e = rr3_cli_parse_with_env(
-            &a(&["--manifest", "/m/d.toml", "--boot-role", "--socket", "/tmp/x.sock"]),
+            &a(&[
+                "--manifest",
+                "/m/d.toml",
+                "--boot-role",
+                "--socket",
+                "/tmp/x.sock",
+            ]),
             &env_none,
         )
         .unwrap_err();
@@ -384,7 +384,12 @@ mod tests {
         assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-env.sock"));
         // 命令行显式给值时压过 env
         let overridden = rr3_cli_parse_with_env(
-            &a(&["--manifest", "/m/d.toml", "--socket", "/tmp/rr3-m2-order.sock"]),
+            &a(&[
+                "--manifest",
+                "/m/d.toml",
+                "--socket",
+                "/tmp/rr3-m2-order.sock",
+            ]),
             &injected,
         )
         .unwrap();
@@ -400,8 +405,7 @@ mod tests {
         let cfg = rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &injected).unwrap();
         assert_eq!(cfg.socket, PathBuf::from("/tmp/rr3-m2-inject.sock"));
         // 表里没有这个键 → 回落契约常量（两条分支各自可达，不是一律吞注入值）
-        let none =
-            rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
+        let none = rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &env_none).unwrap();
         assert_eq!(none.socket, PathBuf::from(RR3_UDS_PATH_DEFAULT));
     }
 
@@ -412,10 +416,8 @@ mod tests {
     fn production_entry_delegates_to_the_process_env() {
         let from_parse = rr3_cli_parse(&a(&["--manifest", "/m/d.toml"])).unwrap();
         let from_reader =
-            rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &|k| {
-                std::env::var(k).ok()
-            })
-            .unwrap();
+            rr3_cli_parse_with_env(&a(&["--manifest", "/m/d.toml"]), &|k| std::env::var(k).ok())
+                .unwrap();
         assert_eq!(from_parse, from_reader);
         match std::env::var(RR3_BUS_PATH_ENV) {
             Ok(v) => assert_eq!(
@@ -484,7 +486,11 @@ mod tests {
     /// 为什么（装载门整体不跑）与用法。
     #[test]
     fn assembly_surface_is_mandatory_neither_flag_is_rejected() {
-        for args in [a(&[]), a(&["--socket", "/tmp/x.sock"]), a(&["--boot-role", "x"])] {
+        for args in [
+            a(&[]),
+            a(&["--socket", "/tmp/x.sock"]),
+            a(&["--boot-role", "x"]),
+        ] {
             let e = rr3_cli_parse_with_env(&args, &env_none).expect_err("双缺必须拒");
             assert!(
                 e.contains("启动缺装配面")

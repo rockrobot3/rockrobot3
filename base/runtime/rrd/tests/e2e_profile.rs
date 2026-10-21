@@ -293,7 +293,10 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
     // sha256 记账定格，`rr3.ctl.contracts` available:true，四行记账（真仓契约
     // 目录，e2e 不传 --contracts）+ 四条判果"齐全且 sha 对"全 pass。
     let mut ctl2 = rrd.rr3_connect();
-    rr3_send(&mut ctl2, &rr3_rpc_frame("rr3.ctl.contracts", 3, json!({}), 0));
+    rr3_send(
+        &mut ctl2,
+        &rr3_rpc_frame("rr3.ctl.contracts", 3, json!({}), 0),
+    );
     let f = rr3_read_where(&mut ctl2, "ctl.contracts 应答", |fr| {
         rr3_body_split(&fr.payload)
             .map(|(ty, _)| ty == Rr3PayloadType::Response)
@@ -312,7 +315,9 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
         "四册点名 = RR3_CONTRACT_FILES 清单序: {books:?}"
     );
     assert!(
-        books.iter().all(|b| b["sha256"].as_str().map(|s| s.len()) == Some(64)),
+        books
+            .iter()
+            .all(|b| b["sha256"].as_str().map(|s| s.len()) == Some(64)),
         "每册带 64 字符 sha256 十六进制: {books:?}"
     );
     let cchecks = c["checks"].as_array().expect("契约判果必须在场: {v}");
@@ -413,12 +418,8 @@ fn log_ring_cap_from_profile_bounds_ctl_logs() {
         root.write_module(name);
     }
     let profile = root.write_profile(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 4"));
-    let mut rrd = RrdTest::rr3_start_profile_env(
-        "prof-cap",
-        &profile,
-        E2E_TICK_MS,
-        &[("RR3_PROBE", "sim")],
-    );
+    let mut rrd =
+        RrdTest::rr3_start_profile_env("prof-cap", &profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         rrd.rr3_wait_log(&format!("spawn {name} pid="));
     }
@@ -476,12 +477,8 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
     let profile = root.write_profile(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 64"));
 
     // —— 第一世：boot → rr3-pb running → kill -9 → 收尸行 → kill rrd ——
-    let mut rrd1 = RrdTest::rr3_start_profile_env(
-        "prof-sink",
-        &profile,
-        E2E_TICK_MS,
-        &[("RR3_PROBE", "sim")],
-    );
+    let mut rrd1 =
+        RrdTest::rr3_start_profile_env("prof-sink", &profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
     let spawn_pb = rrd1.rr3_wait_log("spawn rr3-pb pid=");
     let pb_running = rr3_wait_until(
         || {
@@ -507,12 +504,8 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
     drop(rrd1);
 
     // —— 第二世：同 tag = 同 socket；ctl.logs 应含第一世崩溃前的行 ——
-    let mut rrd2 = RrdTest::rr3_start_profile_env(
-        "prof-sink",
-        &profile,
-        E2E_TICK_MS,
-        &[("RR3_PROBE", "sim")],
-    );
+    let mut rrd2 =
+        RrdTest::rr3_start_profile_env("prof-sink", &profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
     rrd2.rr3_wait_log("spawn rr3-pa pid=");
     let mut ctl = rrd2.rr3_connect();
     rr3_send(&mut ctl, &rr3_rpc_frame("rr3.ctl.logs", 2, json!({}), 0));
