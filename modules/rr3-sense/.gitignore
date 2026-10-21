@@ -1,0 +1,4 @@
+# espidf 档构建产物与 IDF 构建现场不进仓（照 tools/espidf-sentinel/.gitignore；target/ 由仓根 **/target/ 兜底）
+/.embuild
+/sdkconfig
+/sdkconfig.old

@@ -1,0 +1,17 @@
+# espidf 档编译面配置（批N8 件三，照 tools/espidf-sentinel/.cargo/config.toml 先例；
+# 与 modules/rr3-act/.cargo/config.toml 同形）。
+# **双档工程不写死 [build] target**（宿主 linux 档照常进门禁 ④/⑥ 扫面）——门脚本
+# 显式 --target xtensa-esp32-espidf；[unstable] build-std 只在带 --target 时生效，
+# 宿主构建忽略。target 级 linker/rustflags 只作用于 xtensa-esp32-espidf，宿主不取用。
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+# esp-idf-sys BUILD-OPTIONS：IDF 5.0+ 必设（libc time_t 64 位面与 C 头对齐）
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+build-std-features = ["panic_immediate_abort"]
+
+# MCU 必须显式（esp-idf-sys 据此选 IDF 工具链与目标）。
+[env]
+MCU = "esp32"

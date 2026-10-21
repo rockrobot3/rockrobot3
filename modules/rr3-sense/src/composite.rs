@@ -39,6 +39,8 @@ use std::time::{Duration, Instant};
 
 use rr_bus::Rr3BusClient;
 use rr_hal::backend::rr3_hal_audio_source_with_cmd;
+// 反射旁路是宿主桥档符号（Rr3PeriphCmd，rr-hal backend 宿主档门，批N8 件三）
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use rr_hal::backend::Rr3PeriphCmd;
 use rr_hal::Rr3PcmStream;
 use rr_hal_api::Rr3AudioCfg;
@@ -72,6 +74,8 @@ const RR3_TTS_PCM_TOPIC: &str = "rr3-brain/audio/tts_pcm";
 /// 运维计数键（B批 b2 冒烟观测面）：门开期被弃的 onset 数 / 反射环实际下发的
 /// pan 指令数。经心跳自报 rrd 归并（与 pcm_frames 同一通路）。
 const RR3_VAD_ONSET_GATED_KEY: &str = "vad_onset_gated";
+// 反射计数键与旁路下发点同径（宿主桥档专用，批N8 件三）
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 const RR3_REFLEX_PAN_CMDS_KEY: &str = "reflex_pan_cmds";
 
 /// 反射环行程常量（机制面，策略量在 config）：pan 中位 = boot 姿态基准，
@@ -226,12 +230,20 @@ pub fn rr3_sense_run() -> Result<(), String> {
                             }
                         }
                         Rr3VadEdge::Offset { .. } => {
+                            // 旁路下发是宿主桥档行为（Rr3PeriphCmd，rr-hal backend
+                            // 宿主档门）：espidf 档 pending 自然落空，take 即弃，
+                            // 不进旁路（批N8 件三）。
+                            #[cfg(any(target_os = "linux", target_os = "macos"))]
                             if let Some(target) = pending_pan.take() {
                                 if let Some(tx) = cmd_tx.as_ref() {
                                     tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
                                     bus.rr3_counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
                                     eprintln!("反射环: 判停后下发 pan={target}°");
                                 }
+                            }
+                            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                            {
+                                let _ = pending_pan.take();
                             }
                         }
                     }
