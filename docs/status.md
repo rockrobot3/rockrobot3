@@ -1174,6 +1174,65 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   本地伪仓 `~/.espressif/frameworks/esp-idf-v5.2.1-offline`（tarball 源树删 .gitmodules + 22
   个 gitlink 去 .git 化转普通文件 + tag v5.2.1）+ `ESP_IDF_REPOSITORY` 指向，构建 7m13s 过
   （github 被墙 + embuild `--recursive` clone 触网拉子模块 exit 1 两绕行）。
+- **B批 听声识位全账——b1/b2 实装 + ILD→TDOA 升级 + 排障批 b3c 五项收口（2026-10-20/21，
+  提交 `971bdb6`/`3febbb9`/`9dcad5c`/`6965484`/`f0678b7`/`c74afa9`/`e89312b`/`54ce893`/
+  `31f18e1`/`4d13a12` + fmt `746866b`/`39ed826` + 本落档提交）**：
+  ①**b1 命令旁路（`971bdb6`+收尾 `9dcad5c`、红账 `6965484`）**：flock 单消费者纪律下音频源
+  持 conn 者即板外设命令下行唯一通路——`Rr3PeriphCmd` 语义命令入有界队列（cap=2 满丢最旧+
+  溢丢计数）、读循环顶拍逐条弹出写出（io 失败回插队首转重连不丢命令）、板帧分类面 Response
+  放行记账不污 err_streak；帧构造与舵机桥同单点（`rr3_bridge_call_frame`）逐字同源。
+  ②**b2 反射环 + 播放期 VAD 门控（`3febbb9`）**：sense 订阅 `tts_pcm` 喂门（帧体 ms 累计外推
+  +gap 轮分隔+tail 尾窗）抑制外放回捕，门开只弃 onset 发布（状态机照喂）；onset 带判向换算
+  pan 目标（中位 90+clamp ±30）走 b1 旁路 fire-and-forget；策略量 `[rr3-sense.reflex]`
+  缺省 disable 逐点等价、esp32 档 enable=true；上轮登记的「播放期 VAD 门控 B 批前课题」
+  随 b2 结清。
+  ③**判据 v2 + 批D 音频验收过（`bb9be1c`，前置 `14e7dcc` BCLK GPIO25→GPIO4 迁移）**：
+  重建 rig 实录 L==R 0-5%、说话帧 ZCR 低至 0.135（浊音）、人耳听清「你好洛克」——真音频
+  定案；**撤回「BCLK pad 损坏实锤」误判**——桥测判据对 BCLK 天生失明（I2S RX 上升沿采样
+  SD 自采样恒捕捉跳变后高电平，BCLK 活也全 FF），根因改判 rig 接触面；判据 v2 = L==R 率 +
+  ZCR 结构 + 取值种类按 MIC_GAIN 域重校，终判人耳听感。
+  ④**b3a ILD 实证无判向力 → b3b ILD→TDOA 升级（`f0678b7`）**：b3a 板上实证裸麦近场 rms 比
+  恒 ~1.0（方向信息只在相位差不在幅度差），判向机制重写 TDOA 时域 plain 互相关——整数 i64
+  累加、物理搜索域 ±lag_max（按构造剔除离群峰）、Q7 抛物线亚样本、K_Q15 反演 sinθ 经 256
+  格 asin LUT 出整度，零浮点零滤波器；判向从逐帧即时改 onset 时整窗回看（判向窗 ring +
+  线性化快照交纯函数）；Rr3DoaCfg 整体注入（window_ms/window_rms_min/mic_baseline_mm
+  三键，ops 七槽→十槽）；golden 向量 7 组延迟反演逐位钉死（`/tmp/rr3-b3-smoke/golden_doa.py`
+  1:1 镜像），35 测试全绿。**b3b 遗留合同红修复（`e89312b`）**：doa 三键只给 esp32 档补了、
+  漏默认档 config.toml——装配注入缺，补齐三键（window_rms_min 与默认 vad.rms_start 同口径
+  1500）42 绿。
+  ⑤**b3 回归通道映射定案（`c74afa9`）**：板上双侧交叉实测（站左判 +90 满偏右/站右判 −72）
+  ——判向符号与物理方位系统性相反，定案 esp32 档 I2S 帧序 frame[0]=物理右麦（b3a「甲=右」
+  口头确认不可靠，悬空实验只有相对稳定性无绝对方位锚点，装配事实以板上实测锚定）；互相关
+  取样下标对调 + golden 通道摆放对调重钉，35 绿。
+  ⑥**b3c 排障批五项**（触发 = b3 回归期「说完话 mac 无回应」间歇复发）：
+  - **b3c-① 运维计数器天文数字（`54ce893`）**： pcm_frames ~40 亿根因 = 2026-10-05 批B
+    落地即埋的**快照×增量双端语义分裂**——客户端发累计快照、rrd 按增量饱和累加，快增长键
+    二次方膨胀（pcm_frames 25n²@12700 拍 ≈ 40 亿实测对上）、停止增长键线性虚胖；契约钉
+    **增量语义**（心跳值 = 自上一拍以来的增量，conventions 双头各写各的两处口径同批归一），
+    Rust/Python 双端镜像修（已发水位镜像 counters_sent），四种重启组合账目自洽，rrd 零改动
+    两条既有 e2e 守恒；**在跑链路待重启生效**。
+  - **b3c-② 0xE0FF glitch 词（零代码收口）**：mic 统计窗 0x00E0FF00/0x01E0FF00 固定位图
+    （同族 bit16 翻转）= INMP441 **SD 三态残留**（固件 dump 注释早已在案），每 0.512s 窗
+    ≥1 拍双通道同值，上行换算 ≈1799–3848 单拍 click（12% FS）；三消费面量化无害（VAD 单拍
+    RMS≈152≪650 / ASR 抓流实测完美 / DoA 双通道同拍 lag=0 deadband 免转）；随 parked-5v
+    独立供电复测预期消落。同批纠偏：console `build=12.3ms×4` 是窗内组帧块数（4×2048=8192=
+    整窗）非重试，「组包超时」口径误读撤销。
+  - **b3c-③ 断流重连卡死（`31f18e1`）**：sense 实录 24 次断流 23 次重连第 1 轮即愈
+    （失步本身属宿主 USB 域，d4 系列在案）——**卡死真凶非回环逻辑**：重连第 2 轮握手扫到
+    失步二进制乱行，诊断日志 `&line[..80]` 按字节切片切进 `from_utf8_lossy` 产出的 U+FFFD
+    多字节字符内部 panic，**读线程当场毙命**，「重连永不放弃」被一行日志格式化打破；修
+    `rr3_log_head` 按字符截断 + 回归测试复现实录形状（79 ASCII + U+FFFD 字节 80 恰在
+    chars 79..82 内）。
+  - **b3c-④ VAD 阈值余量（`4d13a12`，用户认可）**：交互实测半米嗓音峰值 RMS 830–945 vs
+    起音阈 800 余量仅 1.04–1.18×（轻声/退半步即漏起音——正是「说完话无回应」主因之一），
+    底噪 430（拔舵机后）比标定 584 干净；`rms_start`/`doa.window_rms_min` 同口径成对
+    800→**650**（语音余量 1.28–1.45× / 底噪余量 1.51× 两侧均衡），默认档 1500 不动。
+  - **b3c-⑤ 底噪/brownout 结案**：底噪 430 < 标定 584 可结案；**brownout 根因链回写实锤**
+    ——舵机接板载 5V 激磁压垮轨（电压告警 tier=severe rail=142mV，BOD 复位循环与 0.0.5
+    方案C 同形状），独立 5V 共地供电方案 parked-5v 待落。
+  ⑦**真板验收实录**：反射环快环在板——说话即「doa=23° → pan=113°」判向换算 + 板面应答
+  id=N ok（pre-execution ack）逐拍在案；ASR 抓流真云对拍完美（0xE0FF click 本在流中不碍
+  识别）；计数器/断流/VAD 三修复后链路稳定性敞口随下次链路重启生效复测。
 - **A 批真板冒烟——分层验收过（sense 面）+ 板麦口径标定 120 + 物理层两课（2026-10-18，本提交）**：
   分层冒烟（无 brain，rrd --manifest 直起 sense）：`denied_publish = 0`、pcm 62 万+ 帧事件在流、
   板面流就绪 16000/2ch/s16le 与钉定值一致、**VAD 真板成轮 8 次 onset**（说话 → vad_start 上总线）
