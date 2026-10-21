@@ -270,13 +270,20 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             if let Some(s) = boot.snapshot.clone() {
                 crate::assembly::rr3_assembly_snapshot_set(s);
             }
-            // 契约记账快照定格（批N5 件五笔4，Z-4）：boot 链验收通过后对 `--contracts`
-            // 目录契约四册 sha256 记账（contracts.rs 单点），`rr3.ctl.contracts` 的
-            // 渲染源 + 自检"齐全且 sha 对"的对比锚。此刻四册刚被装载面读过一遍，
+            // 契约记账快照定格（批N5 件五笔4，Z-4；批N8 件一②扩面，基-40）：boot
+            // 链验收通过后对装载消费真值集记账（contracts.rs 单点）——契约四册
+            // sha256 记账（Z-4 判据）＋真值集七成员记账（基-40 成员完整性判据，
+            // 定位由装载面 rr3_runtime_truth_set_locations 派生），`rr3.ctl.contracts`
+            // 的渲染源 + 自检"齐全且 sha 对"的对比锚。此刻七册刚被装载面读过一遍，
             // 记账重读失败 = 文件系统级异常，fail-closed 带因拒 boot（不带病定格）。
-            let cs = crate::contracts::rr3_contracts_snapshot_from_dir(&contracts)?;
+            let cs = crate::contracts::rr3_contracts_snapshot_capture(
+                p,
+                &contracts,
+                &wiring,
+                &boot.platform_chip,
+            )?;
             if crate::contracts::rr3_contracts_snapshot_set(cs) {
-                rr3_log("契约四册 sha256 记账定格（rr3.ctl.contracts 自检判据锚）");
+                rr3_log("真值集记账定格：契约四册 Z-4 账＋真值集七成员基-40 账（rr3.ctl.contracts 自检判据锚）");
             }
             (
                 boot.manifests,

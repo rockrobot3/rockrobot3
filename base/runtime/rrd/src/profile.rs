@@ -360,6 +360,10 @@ pub struct Rr3ProfileBoot {
     /// 一次定格进 lib.rs 的 OnceLock（`rr3_log_ring_cap_set`，首份胜出）——
     /// `--manifest` 调试路径不读装配单，环按 512 兜底。
     pub log_ring_cap: usize,
+    /// [platform].chip（基-40 boot 底账）：boot 链验收通过的选册 chip，真值集
+    /// 记账（[`rr3_runtime_truth_set_locations`] 消费）按它定位平台事实表——
+    /// daemon 臂不再二次解析装配单拿 chip（双真值即漂移温床）。
+    pub platform_chip: String,
     /// 装配快照（批N4 件九笔4，`rr3.ctl.wiring` 判据源）：boot 装载链验收通过后
     /// 的四元不可变底账（装配单本体 / 接线档 / 轴档案 / 角色表）。None = 本 boot
     /// 未走装配单路径（`--manifest` 调试路径）或接线档尚未在册（快照无接线档即
@@ -1174,23 +1178,82 @@ pub struct Rr3RuntimeTruthSet {
     pub dirs: Vec<String>,
 }
 
+/// 真值集成员名生成单点（基-40：相对名唯一生成处）。相对名以仓根／装机安装根为
+/// 基准（包内布局口径），`rr3_runtime_truth_set`（装载面清单）与
+/// [`rr3_runtime_truth_set_locations`]（boot 记账定位）都消费它——成员名两处各自
+/// 手写即漂移温床，收在这里后成员集判等只差"函数返回值相等"一条单测（⑨-z 判据）。
+fn rr3_truth_set_member_names(profile_stem: &str, chip: &str) -> Vec<String> {
+    let mut names = vec![format!("profiles/{profile_stem}.toml")];
+    names.extend(
+        RR3_CONTRACT_BOOKS
+            .iter()
+            .map(|b| format!("contracts/{b}")),
+    );
+    names.push(format!(
+        "contracts/platform/{}",
+        rr3_platform_table_file_name(chip)
+    ));
+    names.push(format!("hardware/{profile_stem}/wiring.toml"));
+    names
+}
+
 /// 按装配单解析结果与机型 stem 列装载消费真值集（清单真值点，见 [`Rr3RuntimeTruthSet`]）。
 pub fn rr3_runtime_truth_set(p: &Rr3Profile, profile_stem: &str) -> Rr3RuntimeTruthSet {
     Rr3RuntimeTruthSet {
-        files: vec![
-            format!("profiles/{profile_stem}.toml"),
-            format!("contracts/{}", RR3_CONTRACT_BOOKS[0]),
-            format!("contracts/{}", RR3_CONTRACT_BOOKS[1]),
-            format!("contracts/{}", RR3_CONTRACT_BOOKS[2]),
-            format!("contracts/{}", RR3_CONTRACT_BOOKS[3]),
-            format!(
-                "contracts/platform/{}",
-                rr3_platform_table_file_name(&p.platform_chip)
-            ),
-            format!("hardware/{profile_stem}/wiring.toml"),
-        ],
+        files: rr3_truth_set_member_names(profile_stem, &p.platform_chip),
         dirs: vec![format!("hardware/{profile_stem}/axis")],
     }
+}
+
+/// boot 真值集记账行：成员相对名（[`rr3_truth_set_member_names`] 生成，包内布局
+/// 口径）+ boot 实际定位路径（本机口径，自检复演重读的就是它）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rr3TruthSetLocation {
+    /// 相对成员名（如 `contracts/topics.toml`；ctl 应答 truth_set 段点名用）
+    pub member: String,
+    /// 本机定位路径（boot 臂输入映射产物；`--profile` 任意路径、`--contracts`
+    /// 运行期落点都在这里如实记账，不假设包内布局）
+    pub path: PathBuf,
+}
+
+/// boot 臂真值集定位派生（基-40 件一②，机制面）：按成员名单点生成七条相对名，
+/// 再按 boot 臂输入映射本机实际路径——装配单本体 = `--profile` 定位、契约四册与
+/// 平台事实表 = `--contracts` join、接线档 = 接线布局推导产物。stem 提取与
+/// [`crate::wiring::rr3_wiring_path_for_profile`] 同法（canonicalize 后取
+/// file_stem），保证成员名 `profiles/<stem>.toml` 与 `hardware/<stem>/wiring.toml`
+/// 的 stem 同源。任何一条定位失败都带因报 Err（调用点在 boot 链验收之后，正常
+/// 到不了这里——失败即文件系统级异常，fail-closed 不带病记账）。
+pub fn rr3_runtime_truth_set_locations(
+    profile_path: &Path,
+    contracts_dir: &Path,
+    wiring_path: &Path,
+    chip: &str,
+) -> Result<Vec<Rr3TruthSetLocation>, String> {
+    let abs = rr3_profile_absolute_path(profile_path)?;
+    let stem = abs
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| format!("装配单 {} 无文件名", abs.display()))?;
+    let names = rr3_truth_set_member_names(stem, chip);
+    // 与 names 同序逐条映射（成员名生成与定位映射一一对应，错位即成员集判等红）
+    let paths = vec![
+        vec![abs.clone()],
+        RR3_CONTRACT_BOOKS
+            .iter()
+            .map(|b| contracts_dir.join(b))
+            .collect::<Vec<_>>(),
+        vec![contracts_dir
+            .join("platform")
+            .join(rr3_platform_table_file_name(chip))],
+        vec![wiring_path.to_path_buf()],
+    ]
+    .concat();
+    debug_assert_eq!(names.len(), paths.len(), "真值集成员名与定位映射错位");
+    Ok(names
+        .into_iter()
+        .zip(paths)
+        .map(|(member, path)| Rr3TruthSetLocation { member, path })
+        .collect())
 }
 
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
@@ -1844,6 +1907,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         axis_state,
         axis_notes,
         log_ring_cap: profile.log_ring_cap,
+        platform_chip: profile.platform_chip.clone(),
         snapshot: Some(snapshot),
     })
 }
