@@ -289,9 +289,10 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
         .any(|c| c["item"] == "signal:J-T[1]:gnd" && c["pass"] == "not-applicable");
     assert!(net_pass && gnd_na, "全交叉判果必须在场: {checks:?}");
 
-    // 契约完整性审计（批N5 件五笔4，Z-4）：--profile 正门 boot 成功 → 契约四册
-    // sha256 记账定格，`rr3.ctl.contracts` available:true，四行记账（真仓契约
-    // 目录，e2e 不传 --contracts）+ 四条判果"齐全且 sha 对"全 pass。
+    // 契约完整性审计（批N5 件五笔4，Z-4；批N8 件一②扩面，基-40）：--profile 正门
+    // boot 成功 → 真值集记账定格，`rr3.ctl.contracts` available:true，四行四册记账
+    // （真仓契约目录，e2e 不传 --contracts）+ 七行真值集成员记账（基-40 成员名 =
+    // 装载面真值集相对名）+ 五条判果"齐全且 sha 对"全 pass。
     let mut ctl2 = rrd.rr3_connect();
     rr3_send(
         &mut ctl2,
@@ -320,11 +321,34 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
             .all(|b| b["sha256"].as_str().map(|s| s.len()) == Some(64)),
         "每册带 64 字符 sha256 十六进制: {books:?}"
     );
+    // 基-40 成员完整性段：七成员点名（成员名 = rr3_runtime_truth_set 相对名，顺序 =
+    // 成员名单点序），每成员带 64 字符 sha256——与四册账同源同值（四册成员重复记账）。
+    let ts = c["truth_set"].as_array().expect("真值集记账必须在场: {v}");
+    assert_eq!(
+        ts.iter()
+            .map(|t| t["member"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![
+            "profiles/default.toml",
+            "contracts/topics.toml",
+            "contracts/slots.toml",
+            "contracts/roles.toml",
+            "contracts/devices.toml",
+            "contracts/platform/rk3566.toml",
+            "hardware/default/wiring.toml",
+        ],
+        "七成员点名 = 装载面真值集成员序: {ts:?}"
+    );
+    assert!(
+        ts.iter()
+            .all(|t| t["sha256"].as_str().map(|s| s.len()) == Some(64)),
+        "每成员带 64 字符 sha256 十六进制: {ts:?}"
+    );
     let cchecks = c["checks"].as_array().expect("契约判果必须在场: {v}");
-    assert_eq!(cchecks.len(), 4, "{cchecks:?}");
+    assert_eq!(cchecks.len(), 5, "四册逐条＋truth_set 汇总: {cchecks:?}");
     assert!(
         cchecks.iter().all(|x| x["pass"] == "pass"),
-        "boot 未动包内契约 → 四条判果全 pass: {cchecks:?}"
+        "boot 未动包内契约 → 五条判果全 pass: {cchecks:?}"
     );
 }
 
