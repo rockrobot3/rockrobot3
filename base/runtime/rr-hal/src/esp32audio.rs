@@ -33,8 +33,9 @@
 //!   tools/rr3-audio-rec 的 `parse_audio_event` **同值锚定**（rr-ipc 零第三方
 //!   依赖约束，serde_json 面不上提；门序与判据逐字同源，双侧测试兜底防分叉）。
 //!
-//! cfg 无平台门（与 [`crate::esp32_uart`] 同口径）：rr-ipc 的 UART/会话机制
-//! 面 cfg 门（linux/macos）兜底，其余平台编译即错——显式优于隐式。
+//! cfg 宿主档门（批N8 件三，与 [`crate::esp32_uart`] 同口径 any(linux, macos)）：
+//! 本模块是 Pi 侧桥消费件（rr-ipc 的 UART/会话机制面同在宿主档门内），espidf
+//! 档不载——其余平台编译即错，显式优于隐式。
 
 use std::collections::VecDeque;
 use std::io::Write as _;

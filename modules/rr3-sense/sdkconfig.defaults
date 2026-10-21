@@ -1,0 +1,4 @@
+# espidf 档编译面（批N8 件三）：最小编译口径（同 tools/espidf-sentinel/sdkconfig.defaults
+# 经典 ESP32 两行；板上调优归真板批——本件范围红线 = 只建编译面）。
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

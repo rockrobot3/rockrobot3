@@ -20,7 +20,15 @@
 use std::collections::{BTreeMap, HashMap};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// 原子计数器型（task 序号 / JSON-RPC id 两处单调计数器的承载型，批N8 件三）：
+/// 64 位平台走 AtomicU64；32 位目标（xtensa esp32 的 espidf 档 std 无 64 位原子）
+/// 退 AtomicU32——两处都是进程内单调计数器，esp32 档生命周期内不触回绕面。
+#[cfg(target_pointer_width = "64")]
+type AtomicCounter = std::sync::atomic::AtomicU64;
+#[cfg(not(target_pointer_width = "64"))]
+type AtomicCounter = std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -122,7 +130,7 @@ impl Rr3TimeBase {
 }
 
 struct Rr3Inner {
-    task: AtomicU64,
+    task: AtomicCounter,
     name: String,
     /// 写半边（reader 线程持有读半边的另一个句柄）
     sock: Mutex<UnixStream>,
@@ -146,7 +154,7 @@ struct Rr3Inner {
     /// （sleep 等拍点、socket 收发），连接→注册→心跳→分发→节拍的决策在
     /// rr-core（ADR-0018 裁定 1/3）。锁内即放，无嵌套锁。
     rt: Mutex<Rr3ModuleRuntime>,
-    next_id: AtomicU64,
+    next_id: AtomicCounter,
     stop: AtomicBool,
 }
 
@@ -204,7 +212,7 @@ impl Rr3Inner {
     }
 
     fn rr3_next_id(&self) -> u64 {
-        self.next_id.fetch_add(1, Ordering::Relaxed) + 1
+        self.next_id.fetch_add(1, Ordering::Relaxed) as u64 + 1
     }
 
     /// 计数增量（心跳线程每拍调用）：对每键算「当前累计 − 已发水位」，零增量键
@@ -232,7 +240,7 @@ impl Rr3Inner {
     }
 
     fn rr3_task(&self) -> u64 {
-        self.task.load(Ordering::Relaxed)
+        self.task.load(Ordering::Relaxed) as u64
     }
 }
 
@@ -273,7 +281,7 @@ impl Rr3BusClient {
             .map_err(|e| format!("try_clone 失败: {e}"))?;
         let (tx, rx) = mpsc::channel::<Rr3Frame>();
         let inner = Arc::new(Rr3Inner {
-            task: AtomicU64::new(0),
+            task: AtomicCounter::new(0),
             name: identity.name,
             sock: Mutex::new(writer),
             pending: Mutex::new(HashMap::new()),
@@ -281,7 +289,7 @@ impl Rr3BusClient {
             counters: Mutex::new(BTreeMap::new()),
             counters_sent: Mutex::new(BTreeMap::new()),
             rt: Mutex::new(Rr3ModuleRuntime::rr3_runtime_new(identity.heartbeat_ms)),
-            next_id: AtomicU64::new(0),
+            next_id: AtomicCounter::new(0),
             stop: AtomicBool::new(false),
         });
 
@@ -322,7 +330,7 @@ impl Rr3BusClient {
                 return Err(e);
             }
         };
-        inner.task.store(task, Ordering::Relaxed);
+        inner.task.store(task as _, Ordering::Relaxed);
         // 单调时基（批I A-2）：拍点全链（注册首拍 + 心跳判定）同一 Instant 锚点，
         // 墙钟回拨不再能扰动心跳节拍
         let tb = Rr3TimeBase::rr3_time_base_new();

@@ -23,6 +23,11 @@
 #    同例：tools/esp32-periph-base（0.0.5 增补轮五 批B 外设底座档，同款 espidf
 #    工具链，OLED/舵机/UART2 指令面）——专用门 tools/ci/esp32-periph-base-check.sh，
 #    SKIP 纪律同上。
+#    同例（0.0.5 增补轮六 批N8 件三）：modules/rr3-act、modules/rr3-sense 是
+#    **双档工程**——espidf 档专属依赖挂 Cargo.toml target 表（宿主构建不解析），
+#    宿主 linux 档照常进本门 ④/⑥，**不**整目录排除（与上述 tools/ 专用工程不同）；
+#    espidf 档编译面由专用门 tools/ci/rr3-act-sense-espidf-check.sh 执法（显式
+#    --target，SKIP 纪律同上）。
 # ⑧ 件级判据三门（0.0.5 批K H2）：⑧-a 两腿对拍计数门（slots.toml status 三态 join
 #    atom.toml provides，normal 格须 fn parity_leg1_+parity_leg2_ 各 ≥1，C10 stub 反例
 #    自证内置）；⑧-b 依赖闭包 grep 门（L0=std::（含 use/extern crate/全限定内联）、
