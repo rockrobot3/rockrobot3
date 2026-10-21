@@ -102,7 +102,11 @@ mod tests {
         assert_eq!(rr3_gpio_number_parse(" 34 "), Some(34));
         assert_eq!(rr3_gpio_number_parse("0"), Some(0));
         assert_eq!(rr3_gpio_number_parse("255"), Some(255));
-        assert_eq!(rr3_gpio_number_parse("+2"), Some(2), "u8 parse 标准语义收前导加号");
+        assert_eq!(
+            rr3_gpio_number_parse("+2"),
+            Some(2),
+            "u8 parse 标准语义收前导加号"
+        );
         for bad in ["", " ", "-1", "256", "0x15", "21x", "1.5"] {
             assert_eq!(rr3_gpio_number_parse(bad), None, "{bad}");
         }

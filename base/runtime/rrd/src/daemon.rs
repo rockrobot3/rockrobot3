@@ -662,7 +662,11 @@ mod tests {
         assert_eq!(v["reason"], "battery-ok", "解除点名 reason=battery-ok");
         assert_eq!(v["percent"], 80);
         assert_eq!(v["voltage_mv"], 3900);
-        assert_eq!(v.as_object().map(|o| o.len()), Some(4), "解除点名同恰四字段");
+        assert_eq!(
+            v.as_object().map(|o| o.len()),
+            Some(4),
+            "解除点名同恰四字段"
+        );
     }
 
     /// socket 放行落位（批F5b R12）：temp 树真 bind 一个 uds → grant → 权限位

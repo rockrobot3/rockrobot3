@@ -303,7 +303,10 @@ mod tests {
     #[test]
     fn recover_fires_once_per_episode_strictly_above_threshold() {
         let mut e = Rr3LowEdge::rr3_low_edge_new(3300);
-        assert!(!e.rr3_low_edge_recover(3900), "武装态（未低电）没有恢复沿可言");
+        assert!(
+            !e.rr3_low_edge_recover(3900),
+            "武装态（未低电）没有恢复沿可言"
+        );
         assert!(e.rr3_low_edge_cross(3290), "越阈进低电段");
         assert!(!e.rr3_low_edge_recover(3290), "段内不恢复");
         assert!(!e.rr3_low_edge_recover(3300), "恰等阈值仍是低电段内");
@@ -326,7 +329,10 @@ mod tests {
         // 错误次序（反例钉契约）：先 cross 吞沿——这正是调用方必须守的次序
         let mut bad = Rr3LowEdge::rr3_low_edge_new(thr);
         assert!(bad.rr3_low_edge_cross(3200));
-        assert!(!bad.rr3_low_edge_cross(3400), "cross 静默再武装（不是事件）");
+        assert!(
+            !bad.rr3_low_edge_cross(3400),
+            "cross 静默再武装（不是事件）"
+        );
         assert!(
             !bad.rr3_low_edge_recover(3400),
             "后 recover 已无沿可报——battery/ok 被吞，这就是次序契约存在的理由"

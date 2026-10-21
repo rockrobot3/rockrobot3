@@ -543,8 +543,16 @@ fn registry_shape_is_pinned() {
 
     // 3) kind 分布：19 request / 12 event / 4 stream / 4 notification
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
-    assert_eq!(count("request"), 19, "kind=request 的分布漂移（批N4 件九三 18→19：append rr3-brain/ops/set）");
-    assert_eq!(count("event"), 12, "kind=event 的分布漂移（批N5 件二笔3 11→12：append rr3-power/battery/ok）");
+    assert_eq!(
+        count("request"),
+        19,
+        "kind=request 的分布漂移（批N4 件九三 18→19：append rr3-brain/ops/set）"
+    );
+    assert_eq!(
+        count("event"),
+        12,
+        "kind=event 的分布漂移（批N5 件二笔3 11→12：append rr3-power/battery/ok）"
+    );
     assert_eq!(count("stream"), 4, "kind=stream 的分布漂移");
     assert_eq!(count("notification"), 4, "kind=notification 的分布漂移");
     assert_eq!(

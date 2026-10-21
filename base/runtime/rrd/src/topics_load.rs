@@ -241,7 +241,11 @@ mod tests {
     #[test]
     fn contract_only_load_is_the_production_surface() {
         let (set, added) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
-        assert_eq!(set.rr3_topic_set_names().len(), 39, "契约计数（批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿）");
+        assert_eq!(
+            set.rr3_topic_set_names().len(),
+            39,
+            "契约计数（批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿）"
+        );
         assert!(added.is_empty(), "没传叠加层就不该有新增条目");
         assert!(set.rr3_topic_set_contains("rr3-runtime/system/heartbeat"));
     }

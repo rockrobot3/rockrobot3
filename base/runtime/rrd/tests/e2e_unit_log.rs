@@ -32,8 +32,7 @@ fn spawned_module_stderr_lands_in_per_unit_log() {
             .expect("时钟在 UNIX_EPOCH 之前")
             .as_nanos()
     ));
-    std::fs::write(&script, "#!/bin/sh\necho unit-log-probe >&2\nexit 0\n")
-        .expect("写夹具脚本");
+    std::fs::write(&script, "#!/bin/sh\necho unit-log-probe >&2\nexit 0\n").expect("写夹具脚本");
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
         .expect("脚本可执行位");
 
