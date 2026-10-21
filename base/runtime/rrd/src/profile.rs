@@ -2390,6 +2390,43 @@ mod tests {
         assert_eq!(t2.dirs, vec!["hardware/esp32-mini/axis"]);
     }
 
+    /// 真值集三方成员判等（基-40／⑨-z 判据实体）：装载面清单
+    /// （[`rr3_runtime_truth_set`]）与 boot 记账定位（[`rr3_runtime_truth_set_locations`]
+    /// 的成员名）逐条相等——成员名单点生成（[`rr3_truth_set_member_names`]），两
+    /// 消费方手抄即漂移温床，本用例红即拦截。定位形状一并钉死：装配单本体 =
+    /// `--profile` canonicalize 产物、契约四册 = `--contracts` join、平台事实表 =
+    /// platform/ join 选册、接线档 = 接线布局推导原样记账。
+    #[test]
+    fn truth_set_members_and_boot_locations_are_the_same_set() {
+        let distro = rr3_profile_from_text(include_str!("../../../../profiles/distro.toml"))
+            .expect("真仓 distro 装配单必须合法");
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let profile_path = repo.join("profiles/distro.toml");
+        let contracts_dir = repo.join("contracts");
+        let wiring_path = repo.join("hardware/distro/wiring.toml");
+        let t = rr3_runtime_truth_set(&distro, "distro");
+        let locs = rr3_runtime_truth_set_locations(
+            &profile_path,
+            &contracts_dir,
+            &wiring_path,
+            &distro.platform_chip,
+        )
+        .expect("真仓七成员应全部定位成功");
+        let members: Vec<String> = locs.iter().map(|l| l.member.clone()).collect();
+        assert_eq!(
+            t.files, members,
+            "装载面清单与 boot 记账定位成员名逐条相等（⑨-z 判据实体——非空差即红）"
+        );
+        // 定位形状抽三处钉死（装配单/平台选册/接线档——四册 join 形状由
+        // contracts.rs 单测覆盖）
+        assert_eq!(locs[0].path, profile_path.canonicalize().unwrap());
+        assert_eq!(
+            locs[5].path,
+            contracts_dir.join(format!("platform/{}.toml", distro.platform_chip))
+        );
+        assert_eq!(locs[6].path, wiring_path);
+    }
+
     /// 校验⑨ 判据实体反例组（批N2 首件基-36 立，门 c ⑨-c 补并发口径，判据进 ①b）：
     /// 正例（servo 五键申报形状 Σ700 ≤ cap 2000 ⇒ 绿）＋反例——同域加总超 cap ⇒ 红、
     /// rail 不在 domains ⇒ 红、critical=false 不进 Σ；并发口径三态——显式空组 =
