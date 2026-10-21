@@ -43,7 +43,10 @@ pub(crate) fn rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16> {
 // ---------- DoA 粗判向（B批 b3b：TDOA 时域互相关；批F2 ILD 版被 b3a 实证替换） ----------
 //
 // 双麦**到达时差（TDOA）**判向：判向窗（onset 时 ring 快照，默认 1s 立体声）上做
-// plain 时域互相关 `cc[d] = Σ_t R[t]·L[t+d]`，lag>0 = R（甲/物理右）先到 = 声源在右。
+// plain 时域互相关 `cc[d] = Σ_t R[t]·L[t+d]`，lag>0 = R 先到 = 声源在右。
+// 通道映射定案（B批 b3 回归双侧交叉实测）：esp32 档 frame[0] = 物理右麦（R）、
+// frame[1] = 物理左麦（L）——板档直接按此取样；板麦接线/I2S 通道序是装配事实，
+// 以板上实测锚定，不依赖口头方位确认（b3a「甲=右」口答即被此实测推翻）。
 // 搜索域钉死物理可达范围 ±lag_max（lag_max = round(sr·基线/声速)，15cm 基线 @16k
 // = ±7 样本）——b3a 离线时间线反复出现的 ±31/32 样本次峰离群在物理域外，搜索域
 // 收口后按构造剔除，比峰质门更硬的一道。
@@ -135,9 +138,12 @@ pub struct Rr3DoaFix {
 
 /// 判向窗 TDOA 判向。返回 `None` 的情形：单声道（channels < 2）/ 空窗 /
 /// 基线为 0（无几何可换算）/ 能量门不过（全静音或欠能量窗）。
-/// `samples` = 判向窗快照（帧交错：帧内 ch 通道，L=0/R=1——组合件在 onset 时从
+/// `samples` = 判向窗快照（帧交错：帧内 ch 通道，R=0/L=1——组合件在 onset 时从
 /// ring 线性化快照，窗长 = config `window_ms`；单声道链路不判向恒 `None`）。
-/// 符号约定（b3a 定案）：lag>0 = R 先到 = 声源在右（甲），deg>0 同号直通反射环。
+/// 通道映射定案（B批 b3 回归双侧交叉实测 2026-10-21）：esp32 档 frame[0] =
+/// 物理右麦、frame[1] = 物理左麦（站左判 +90、站右判 −72 的系统性反号钉出来的，
+/// b3a「甲=右」口头确认不可靠——悬空实验只有相对稳定性、无绝对方位锚点）。
+/// 符号约定：lag>0 = R（frame[0]，物理右）先到 = 声源在右，deg>0 同号直通反射环。
 pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3DoaFix> {
     if channels < 2 || cfg.mic_baseline_mm == 0 {
         return None;
@@ -185,13 +191,13 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
             let dd = d as usize;
             if dd < frames {
                 for t in 0..frames - dd {
-                    acc += samples[(t + dd) * ch] as i64 * samples[t * ch + 1] as i64;
+                    acc += samples[t * ch] as i64 * samples[(t + dd) * ch + 1] as i64;
                 }
             }
         } else {
             let off = (-d) as usize;
             for t in off..frames {
-                acc += samples[(t - off) * ch] as i64 * samples[t * ch + 1] as i64;
+                acc += samples[t * ch] as i64 * samples[(t - off) * ch + 1] as i64;
             }
         }
         *slot = acc;
@@ -277,19 +283,20 @@ mod tests {
         }
     }
 
-    /// 延迟立体声窗：τ>0 声源在右（R 领先 |τ| 样本），τ<0 声源在左——
-    /// 与 b3a 符号定案同构（R=甲/物理右先到 = lag>0）。
+    /// 延迟立体声窗：τ>0 声源在右（frame[0]=物理右麦先到，R 无延迟、L 延迟 |τ|），
+    /// τ<0 声源在左（frame[1] 先到）——与机制取样语义 1:1（b3 回归双侧交叉定案：
+    /// esp32 档 frame[0]=物理右、frame[1]=物理左，lag>0 = frame[0] 先到 = 右）。
     fn delayed_stereo(tau: i32, frames: usize, amp: i32) -> Vec<i16> {
         let mut xs = Xorshift(0x1234_5678);
         let u: Vec<i16> = (0..frames + tau.unsigned_abs() as usize)
             .map(|_| xs.next_i16_scaled(amp))
             .collect();
-        let (l, r): (Vec<i16>, Vec<i16>) = if tau >= 0 {
-            (u[..frames].to_vec(), u[tau as usize..].to_vec())
+        let (r, l): (Vec<i16>, Vec<i16>) = if tau >= 0 {
+            (u[tau as usize..].to_vec(), u[..frames].to_vec())
         } else {
-            (u[(-tau) as usize..].to_vec(), u[..frames].to_vec())
+            (u[..frames].to_vec(), u[(-tau) as usize..].to_vec())
         };
-        (0..frames).flat_map(|t| [l[t], r[t]]).collect()
+        (0..frames).flat_map(|t| [r[t], l[t]]).collect()
     }
 
     fn doa_cfg() -> Rr3DoaCfg {
