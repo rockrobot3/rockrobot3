@@ -58,9 +58,12 @@ const RR3_SIM_NOISE_AMP: i16 = 8000;
 /// 噪声种子（xorshift64*）：任何机器同一帧序同一波形，确定性是 golden 向量的前提
 const RR3_SIM_NOISE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
-/// 双麦方位模型的基线（米）：sim 阵列的虚拟麦距，量级取 USB 麦阵列常见值
-/// （R14 定案 USB 阵列；真件换装 F5a 按实际阵列几何替换，sim 模型只求可复现）。
-const RR3_SIM_MIC_BASELINE_M: f64 = 0.06;
+/// 双麦方位模型的基线（米）：sim 阵列的虚拟麦距。**与 sense 判向反演基线同源**
+/// （B批 b3b TDOA 起"注入与反演同一模型"是 sim 正门前提——ILD 时代基线不进反演，
+/// 0.06 的 USB 阵列量级无人消费；TDOA 按时延反演，sim 基线与 sense 随版缺省
+/// `mic_baseline_mm=150` 必须同值，改任一侧必须同批改另一侧，判据面＝
+/// `e2e_audio_chain::audio_chain_doa_stereo_env_injection_end_to_end` 的 ±2° 容差）。
+const RR3_SIM_MIC_BASELINE_M: f64 = 0.150;
 /// 声速（m/s，20 °C 空气）：ITD（到达时间差）换算用
 const RR3_SIM_SOUND_SPEED_MPS: f64 = 343.0;
 
@@ -80,10 +83,14 @@ pub struct Rr3SimAudioSource {
 
 /// 双麦方位注入（批F2 sim 先行，方案 §5.3 判向-转向编排 / R14）：声源方位角
 /// `-90..=90`（负=左、0=正前、正=右）。物理模型：
-/// - **ILD（幅度差）**：`g_l = 1 - sin θ`、`g_r = 1 + sin θ`——θ=0 两路同幅，
+/// - **ILD（幅度差）**：`g_r = 1 + sin θ`、`g_l = 1 - sin θ`——θ=0 两路同幅，
 ///   θ=±90° 单侧 2 倍另侧归零；sense 侧 DoA 按同一模型反演（可逆、确定性）；
-/// - **ITD（相位差）**：有声路按基线时差 `Δt = d·sinθ/c` 做音调相位偏移——
-///   噪声无分数延迟不可相移，只吃增益（粗判向走 ILD，ITD 是保真项不是判据）。
+/// - **ITD（相位差）**：双路按基线时差 `Δt = d·sinθ/c` 做音调相位偏移（B批 b3b
+///   TDOA 起它是判据不是保真项：sense 互相关按时延反演，ITD 量级由
+///   [`RR3_SIM_MIC_BASELINE_M`] 与反演基线同源保证）。
+/// 通道序对齐板端口径（B批 b3 定案：frame[0] = 物理右、frame[1] = 物理左）——
+/// 本源 ch0 输出物理右、ch1 物理左，θ>0（右）时 ch0 近且先到（增益高、相位超前），
+/// sense 侧 `lag>0 = 右` 同号直通，注入角即反演角。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rr3SimDoa {
     deg: f64,
@@ -167,22 +174,25 @@ impl Rr3AudioSource for Rr3SimAudioSource {
         };
         for (i, out) in buf.iter_mut().enumerate() {
             let idx = open.cursor + i as u64;
-            let t = idx as f64 / rate;
+            // 波形时间轴按**帧序**（idx/ch_n）：每通道按自己的采样时刻取值——
+            // B批 b3b 修复：旧写法 t = idx/rate 是交错样点轴，双通道下每通道波形
+            // 时间被拉伸 2 倍（16k 轴上 440Hz 实际出 880Hz），ITD 注入的互相关
+            // 出"伪峰与物理峰并列"双峰（b3b 回归 root cause 之二）。mono 路径
+            // idx/1 = idx 逐点等价，golden 向量不动。
+            let t = (idx / ch_n as u64) as f64 / rate;
             // 通道归属：交错排布，i % 声道数。方位注入只进前两路（L/R 对），
             // 更多路输出静音（真件换装 F5a 按阵列实际通道序重排，sim 不发明通道语义）
             let ch = i % ch_n;
             // 各路形状：增益（ILD）与音调相位偏移（ITD，仅音调波）
             let (gain, t_shift) = match (k, itd) {
                 (Some(k), itd) => {
-                    let g = match ch {
-                        0 => 1.0 - k,
-                        1 => 1.0 + k,
-                        _ => 0.0,
-                    };
-                    let dt = match (ch, itd) {
-                        (0, Some(itd)) => -itd / 2.0,
-                        (1, Some(itd)) => itd / 2.0,
-                        _ => 0.0,
+                    // 通道序对齐板端口径（ch0=物理右、ch1=物理左）：θ>0（右）时
+                    // ch0 近——增益高（1+sinθ）、先到（R[t]=s(t+itd/2) 取未来样本
+                    // 即超前 itd/2；左右半差分配，绝对相位中心不动）
+                    let (g, dt) = match (ch, itd) {
+                        (0, Some(itd)) => (1.0 + k, itd / 2.0),
+                        (1, Some(itd)) => (1.0 - k, -itd / 2.0),
+                        _ => (0.0, 0.0),
                     };
                     (g, dt)
                 }
@@ -757,6 +767,7 @@ mod tests {
 
     /// 双麦 ILD 模型的可逆性：按注入角读双通道帧，逐通道 RMS 反演出 sinθ，
     /// 必须与注入角自洽（sense 侧 DoA 的正门前提——注入与反演同一模型）。
+    /// 通道序按板端口径（ch0=物理右）；注入模型 `g_r = 1 + sinθ`、`g_l = 1 - sinθ`。
     #[test]
     fn sim_doa_stereo_ild_matches_injected_direction() {
         for deg in [-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0] {
@@ -779,13 +790,73 @@ mod tests {
                 e0 += f[0] as i64 * f[0] as i64;
                 e1 += f[1] as i64 * f[1] as i64;
             }
-            // sinθ 的 RMS 反演 = (r_r - r_l)/(r_r + r_l)；注入模型 g_l=1-sinθ、g_r=1+sinθ
+            // sinθ 的 RMS 反演 = (r_r - r_l)/(r_r + r_l)；帧序 ch0=物理右（g_r = 1+sinθ）
             let (r0, r1) = ((e0 as f64).sqrt(), (e1 as f64).sqrt());
-            let k_est = (r1 - r0) / (r1 + r0);
+            let k_est = (r0 - r1) / (r0 + r1);
             let k_want = deg.to_radians().sin();
             assert!(
                 (k_est - k_want).abs() < 0.01,
                 "deg={deg}: RMS 反演 k={k_est:.4} 必须贴合注入 sinθ={k_want:.4}"
+            );
+        }
+    }
+
+    /// 双麦 ITD 模型的可逆性（B批 b3b TDOA 回归钉）：按注入角读双通道正弦帧，
+    /// 通道间互相关峰的时延 lag 反演出 sinθ，必须与注入角自洽——sense 侧
+    /// `rr3_doa_fix` 用同一物理量（lag→sinθ→deg）反演，sim 基线与反演基线同源
+    /// 由本测与 e2e_audio_chain 的 ±2° 容差双面钉住。
+    #[test]
+    fn sim_doa_stereo_itd_lag_matches_injected_direction() {
+        // TDOA 判据域 ±60°：±90° 是 ILD 模型边界（单侧 2 倍另侧归零）——另侧静音
+        // 无时延可测，TDOA 在该角退化（sense 侧互相关全零峰退 0°，物理同构），
+        // 不属判据域。
+        for deg in [-60.0, -30.0, 0.0, 30.0, 60.0] {
+            let mut s = Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+                Rr3SimWave::Sine,
+                Rr3SimDoa::rr3_sim_doa_new(deg),
+            );
+            s.open(Rr3AudioCfg {
+                sample_rate_hz: 16000,
+                channels: 2,
+                bit_depth: 16,
+            })
+            .unwrap();
+            // 读 200ms 双通道（3200 帧——覆盖整周期多圈，互相关峰稳定）
+            let n_frames = 3200;
+            let mut pcm = vec![0i16; n_frames * 2];
+            let n = s.read(&mut pcm).unwrap();
+            assert_eq!(n, pcm.len());
+            // 通道间互相关：cc[d] = Σ frame0[t]·frame1[t+d]，d ∈ ±12（覆盖 90° 全域
+            // lag = round(16000·150/343000) = 7，留 ±1 供抛物线取邻与噪声余量）
+            let (r0, r1): (Vec<f64>, Vec<f64>) = (
+                pcm.chunks_exact(2).map(|f| f[0] as f64).collect(),
+                pcm.chunks_exact(2).map(|f| f[1] as f64).collect(),
+            );
+            let lag_max = 12i64;
+            let mut best = 0f64;
+            let mut bv = -1f64;
+            for d in -lag_max..=lag_max {
+                let off = d.unsigned_abs() as usize;
+                let acc: f64 = if d >= 0 {
+                    (0..n_frames - off).map(|t| r0[t] * r1[t + off]).sum()
+                } else {
+                    (off..n_frames).map(|t| r0[t] * r1[t - off]).sum()
+                };
+                if acc.abs() > bv {
+                    bv = acc.abs();
+                    best = d as f64;
+                }
+            }
+            // lag 反演 sinθ（与 sense rr3_doa_fix 同一物理式：lag·c/(sr·d)）。
+            // 容差 0.15 ≈ 1 样本 lag 误差带（1·343/(16000·0.150) = 0.143）：窄带单频
+            // 正弦是 TDOA 最劣信号（36 样本周期的余弦宽峰），亚样本抛物线插值在
+            // 宽峰上有 ≤1 样本系统性偏差；真宽带语音（板端 b3 双侧交叉实测）无此
+            // 退化。e2e_audio_chain 的 ±2° 容差（±60° 判据点）另钉端到端。
+            let sin_est = best * 343.0 / (16000.0 * 0.150);
+            let k_want = deg.to_radians().sin();
+            assert!(
+                (sin_est - k_want).abs() < 0.15,
+                "deg={deg}: ITD lag={best} 反演 sinθ={sin_est:.4} 必须贴合注入 {k_want:.4}"
             );
         }
     }
