@@ -260,6 +260,10 @@ min_speech_ms = 200
 
 [rr3-sense.doa]
 bin_threshold_deg = 30  # DoA 三档边界（S-5 注入面形状 pin）
+window_ms = 1000        # 判向窗长（B批 b3b TDOA：onset 时 ring 回看窗整窗互相关）
+window_rms_min = 800    # 窗能量门（B批 b3b 注入面判据显式化：与代码缺省同值落档）
+mic_baseline_mm = 150   # 双麦间距（b3a 实测安装同源；sim 注入基线常量与此同源，
+                        # 改任一侧必须同批改另一侧——e2e ±2° 容差即两处一致判据）
 "#;
 
 #[test]
