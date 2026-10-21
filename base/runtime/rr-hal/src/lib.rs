@@ -29,10 +29,15 @@ pub mod backend;
 pub mod descriptor;
 /// ESP32 外设桥后端（批C）：舵机/显示两能力面的 UART 能力帧承载——板上外设
 /// 不进城（不注册总线身份），宿主直连 UART 发在册主题形状的 `rr3.call` 帧。
+/// 宿主档门（批N8 件三，形状同 linux_* 系）：桥后端是 Pi 侧件（开宿主串口
+/// 设备与板对话，经 rr-ipc UART 面），espidf 档不载。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod esp32_uart;
 /// ESP32-UART 板面音频源后端（A 批 c3）：板面 INMP441 双麦流（AUDIO ON 起流 →
 /// A-IPC Event 帧）→ 宿主环形缓冲 → `rr3_hal_audio_source()` esp32 档。flock
 /// 排他与舵机/显示同源——流期间外设面/收流工具互斥（fail-closed）。
+/// 宿主档门（批N8 件三）：同 [`crate::esp32_uart`]。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod esp32audio;
 #[cfg(all(target_os = "linux", feature = "alsa"))]
 pub mod linux;

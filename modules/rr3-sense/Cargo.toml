@@ -30,3 +30,22 @@ rr-hal = { path = "../../base/runtime/rr-hal" }
 rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
 serde_json = "1"
 toml = "0.8"
+
+# —— espidf 档编译面（批N8 件三，MC-7 半边：rr3-act/rr3-sense 非 linux 目标构建）——
+# 照 tools/espidf-sentinel 先例（xtensa-esp32-espidf + build-std + esp-idf-sys），但
+# 本 crate 是**双档工程**（宿主 linux 档照常进 ④/⑥ 扫面）：espidf 专属依赖挂 target
+# 表（同 rr-hal 的 alsa 先例），宿主构建不解析、零扰动；编译面由专用门
+# tools/ci/rr3-act-sense-espidf-check.sh 执法（SKIP 纪律同 espidf-sentinel-check.sh）。
+# 版本组合对表批W1 钉死登记（tools/espidf-std-hello/README.md）：
+# esp-idf-sys =0.35.0 ↔ ESP-IDF v5.2.2 ↔ embuild =0.32.0 ↔ ldproxy 0.3.5。
+[target.'cfg(target_os = "espidf")'.dependencies]
+esp-idf-sys = { version = "=0.35.0", features = ["binstart"] }
+
+[build-dependencies]
+# 链接参数接力（build.rs）：esp-idf-sys 的 cargo:rustc-link-arg 只作用于它自己包内
+# bins 面，根 crate 必须经 DEP_ESP_IDF_* 元数据自行取回并转发（官方 esp-idf-template
+# 同款 build.rs，espidf-sentinel 同源）。**不可挂 espidf target 表**——cargo 对
+# build-dependencies 的 cfg 按 host 三元组判（build script 恒 host 编译），挂表即
+# embuild 缺席 build.rs；宿主构建不碰 espidf 逻辑由 build.rs 的 TARGET 护栏把守
+# （embuild 是纯 Rust crate，宿主多编译一次无害）。
+embuild = "=0.32.0"

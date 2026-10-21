@@ -230,14 +230,19 @@ pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
 /// 板外设命令帧承载符号经 backend 装配面 re-export（⑨-w 依赖面白名单：单元侧
 /// `rr_hal::` 引用只许四类，命令旁路消费方走 `rr_hal::backend::` 同面引用——
 /// backend 面就是板外设命令下行的职责面，见 [`rr3_hal_audio_source_with_cmd`]）。
-pub use crate::esp32audio::Rr3PeriphCmd;
+/// 宿主档门（批N8 件三）：桥旁路面是宿主档符号；espidf 档类型名经空枚举承载
+/// （不可构造，`Option` 恒 `None`——装配面天然落 `None` 走 fail-closed，不静默）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use crate::esp32audio::{Rr3AudioCmdProducer, Rr3PeriphCmd};
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub enum Rr3AudioCmdProducer {}
 
 /// 音频源 + 板外设命令旁路产面（B 批 b1）：esp32 档返 `Some`——flock 单消费者
 /// 纪律下板外设命令下行唯一通路 = 持 conn 的音频源旁路（esp32audio.rs）；
 /// 其余档 `None`（无旁路面，消费方按 None fail-closed 关闭反射环）。
 pub fn rr3_hal_audio_source_with_cmd() -> (
     Box<dyn Rr3AudioSource>,
-    Option<crate::esp32audio::Rr3AudioCmdProducer>,
+    Option<Rr3AudioCmdProducer>,
     &'static str,
 ) {
     match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
@@ -290,6 +295,8 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
         // ESP32 板面双麦流（A 批 c3，esp32audio.rs）：设备/波特来自应急 env
         // （与舵机/显示面同键）；缺 env → 点名 + placeholder（fail-closed，
         // 不猜设备不静默换 sim）。
+        // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
             match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
                 .map(|p| p.trim().to_string())
@@ -427,6 +434,9 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
         RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         // ESP32 外设桥（批C）：设备路径来自应急 env（描述符键 periph_uart 随真件
         // 装配批补入 profiles）；键缺失 → 占位显式回错（fail-closed，不猜设备）。
+        // 宿主档门（批N8 件三）：espidf 档无桥面，本臂剔除后显式要 esp32 落
+        // 下方 `_` 兜底臂占位回错（resolve 白名单单点不裁）。
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
             match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
                 .map(|p| p.trim().to_string())
@@ -592,6 +602,8 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
         ),
         // ESP32 外设桥（批C）：OLED 出帧链路的宿主承载（帧面 rr3.call，板侧
         // 8x8→64x64 放大渲染）。设备路径同舵机面的应急 env；缺 → 占位显式回错。
+        // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
             match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
                 .map(|p| p.trim().to_string())
