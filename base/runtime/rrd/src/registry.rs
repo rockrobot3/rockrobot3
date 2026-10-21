@@ -330,6 +330,11 @@ impl RrdRegistry {
 
     /// 运维计数：把模块自报的一拍 counters 归并进聚合表——键加模块名前缀
     /// `module/key`（同名键不同模块互不覆盖，聚合表是全局命名空间），同键累加。
+    /// 线上语义（b3c 2026-10-21 钉死）：心跳 `counters` 值 = 模块「自上一拍以来」
+    /// 的**增量**（客户端记已发水位，rr-bus client.rs / brain bus.py 双端镜像），
+    /// 归并累加后聚合表 = 生命周期累计——旧线上客户端曾每拍发全量快照被本方法
+    /// 当增量再收一遍，pcm_frames 跑出 40 亿量级（快照 × 增量两语义同线各说各话
+    /// 的双端分裂，2026-10-05 批B 落地即埋）。
     /// 返回是否产生了变化（调用方据此决定要不要 write-through 落盘，空拍不写盘）。
     pub fn rr3_reg_counters_merge(
         &mut self,
@@ -2699,7 +2704,10 @@ watchdog_timeout_ms = 60000
         assert!(r.rr3_reg_low_power_lower(), "旗已置位：lower 是真下降沿");
         assert!(!r.rr3_reg_low_power_is_set(), "解除即出段");
         assert!(!r.rr3_reg_low_power_lower(), "重复解除不再是下降沿");
-        assert!(r.rr3_reg_low_power_raise(), "解除后可再升起（episodes 语义）");
+        assert!(
+            r.rr3_reg_low_power_raise(),
+            "解除后可再升起（episodes 语义）"
+        );
         assert!(r.rr3_reg_low_power_is_set());
     }
 
