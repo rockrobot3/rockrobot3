@@ -352,14 +352,16 @@ fn main() {
         .expect("起控制面线程失败");
 
     // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（GPIO4 BCLK / GPIO27 SD / GPIO26 WS）----
-    // **BCLK 迁移实录（2026-10-20）**：原 GPIO25 桥测取证卡死——拔麦后桥线自桥
-    // （GPIO25→GPIO27 / GPIO26→GPIO27），WS 桥 dump `01 00 00 00 FE FF FF FF` 循环
-    // 爆表（WS/输入路径/桥线全活），BCLK 桥两次（含用力按实叠插复测）恒 rms=1、
-    // L==R 100%、dump 全 FF（线恒高 = 浮空）→ GPIO25 无任何时钟输出。同一外设 WS
-    // 正常 = I2S 在跑，唯一变量源引脚 → GPIO25 pad 损坏实锤。**此前全部音频数据
-    // （10-13 冒烟/校准/ILD/TDOA）均为浮空总线图案假阳性，全部作废**。迁 GPIO4
-    // （无 strapping/UART/I2C/LEDC/VSPI 冲突；12/15 strapping、16/17 打死 I2C 实锤、
-    // 18/19 UART2、21/22 I2C、23 VSPI 预留、32/33 LEDC、25 嫌疑件、34-39 仅输入）。
+    // **BCLK 迁移实录（2026-10-20/21）**：原 GPIO25 装配下 10-13 起全部音频数据均为
+    // 图案假阳性（冒烟/校准/ILD/TDOA 作废——位指纹/取值种类/L==R 三判据钉死，见
+    // README 批D 节）。排障曲折在案：BCLK 桥测（25→27 与 4→27）恒 FF 曾误判「pad
+    // 损坏实锤」——**该判据对 BCLK 天生失明**（I2S RX 上升沿采样 SD，桥 BCLK 自采样
+    // 恒捕捉跳变后高电平，BCLK 活也出全 FF；浮空恒高同形不可区分）。WS 桥图案 +
+    // 重建后真音频 ZCR/听感复核 → 根因定位 rig 接触面（两根 SCK 叠插 GPIO25 单孔/
+    // 25 孔接触嫌疑），**25 pad 并未实锤损坏**。迁 GPIO4（无 strapping/UART/I2C/
+    // LEDC/VSPI 冲突；12/15 strapping、16/17 打死 I2C 实锤、18/19 UART2、21/22 I2C、
+    // 23 VSPI 预留、34-39 仅输入）+ 全线重插后 2026-10-21 验收过：L==R 0-5%、说话
+    // 帧 ZCR 低至 0.135（浊音）、人耳听清唤醒词、raw 域量级合 INMP441 灵敏度。
     mic::spawn_mic_smoke(
         mic_bus,
         peripherals.i2s0,
