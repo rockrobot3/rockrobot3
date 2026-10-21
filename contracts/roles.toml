@@ -17,6 +17,11 @@
 #   droppable     欠压降载时可否被切断（舵机 true=松轴放行、电表 false=测量面须活着才知欠压）。
 #   input_only_ok 该角色是否允许绑到 input-only 引脚（校验⑤-a 的另一侧输入）。
 #   per_instance  一角色可多实例（双轴即两条 instance）；false 时填 instance 即红（校验①-b）。
+#   status        登记状态：缺省 = 有 prod 实现者的常设角色（键可省）；planned = iface
+#                 无 prod 实现（裁-17：iface 在册 ≠ 有实现者），格升 normal 随真后端
+#                 落位一并转（门 a D 段执法，批N8 件二）。
+#   planned_until 终点登记（decisions.md 决策号，如 D9）；status="planned" 时必填且
+#                 非空（门 a D 段豁免判据的第二条件，终点缺位 = 未豁免）。
 # derives（批N1 实装裁定，§4.1 字段集的增补，随 n1-10 文档回写）：该角色向描述符
 #   派生视图供给的键集——[pins] 是物理绑定唯一真值点，rrd 派生出 RR3_HAL_BINDINGS
 #   注入文本（键名 = rr-hal descriptor.rs 在册键），门 n"注入路径唯一"的另一侧真值。
@@ -166,7 +171,9 @@ direction = "in"
 droppable = false
 input_only_ok = true
 per_instance = false
-note = "环境量读数面（status=placeholder 格的角色面先行——格升 normal 的时机 = Rr3Sensor 落真后端，D9 一并裁；probe.rs 探测机制本就绪，bus/addr 一旦进 pin 即生效）。device 取值须与 devices.toml 演练行一致（SHTC3@0x70）；derives=[] 无句柄消费不注入（真后端随真板批）"
+status = "planned"
+planned_until = "D9"
+note = "环境量读数面（status=placeholder 格的角色面先行，角色标 planned 终点 D9——格升 normal 的时机 = Rr3Sensor 落真后端，D9 一并裁；probe.rs 探测机制本就绪，bus/addr 一旦进 pin 即生效）。device 取值须与 devices.toml 演练行一致（SHTC3@0x70）；derives=[] 无句柄消费不注入（真后端随真板批）"
 
 [[role]]
 name = "sensor.imu.meter"
@@ -179,4 +186,6 @@ direction = "in"
 droppable = false
 input_only_ok = true
 per_instance = false
-note = "姿态量读数面（同 sensor.env.meter 形状，kind=Vec3 变体消费；融合归 act 反射环——格 note 明写，契约面只搬运不定融合语义）。device 取值须与 devices.toml 演练行一致（ICM-42688@0x68）；derives=[] 同上"
+status = "planned"
+planned_until = "D9"
+note = "姿态量读数面（同 sensor.env.meter 形状，同标 planned 终点 D9，kind=Vec3 变体消费；融合归 act 反射环——格 note 明写，契约面只搬运不定融合语义）。device 取值须与 devices.toml 演练行一致（ICM-42688@0x68）；derives=[] 同上"
