@@ -57,6 +57,40 @@ class TestUtteranceBoundary(unittest.TestCase):
         self.assertFalse(d.rr3_feed_vad({"edge": "whatever"}))
         self.assertFalse(d.rr3_active)
 
+    def test_preroll_prepended_at_onset(self):
+        """onset 前的判据语音（min_speech 段）经预滚环拼回采集头，短句不削头。"""
+        d = Rr3Dialog()
+        d.rr3_feed_pcm(pcm_body(b"\x01\x02", ms=200))  # onset 前流过的帧（判据段）
+        d.rr3_feed_pcm(pcm_body(b"\x03\x04", ms=200))
+        d.rr3_feed_vad({"edge": "onset"})
+        d.rr3_feed_pcm(pcm_body(b"\x05\x06", ms=32))  # onset 后第一帧
+        d.rr3_feed_vad({"edge": "offset"})
+        self.assertEqual(d.rr3_take_utterance(), b"\x01\x02\x03\x04\x05\x06")
+
+    def test_preroll_capped_to_window(self):
+        """预滚只留最近 PREROLL_MS，更早的帧丢最旧（窗有界， utterance 不虚胖）。"""
+        from rr3_brain.dialog import PREROLL_MS
+
+        d = Rr3Dialog()
+        n_frames = 30  # 30 × 32ms = 960ms ≫ 400ms 窗
+        for i in range(n_frames):
+            d.rr3_feed_pcm(pcm_body(bytes([i + 1]), ms=32))
+        d.rr3_feed_vad({"edge": "onset"})
+        d.rr3_feed_vad({"edge": "offset"})
+        pcm = d.rr3_take_utterance()
+        # 稳态：每推一帧弹至 ≤400ms，环内恒保窗长内最完整的整帧组（384ms=12帧）
+        n_kept = PREROLL_MS // 32
+        self.assertEqual(pcm, bytes(range(n_frames - n_kept + 1, n_frames + 1)))
+
+    def test_empty_frames_not_in_preroll(self):
+        """饥饿空帧（pcm_b64=""）不入预滚不计时——窗长不被空拍虚占。"""
+        d = Rr3Dialog()
+        d.rr3_feed_pcm(pcm_body(b"\x01\x02", ms=200))
+        d.rr3_feed_pcm(pcm_body(b"", ms=5000))  # 空帧带大 ms：不得挤掉真帧
+        d.rr3_feed_vad({"edge": "onset"})
+        d.rr3_feed_vad({"edge": "offset"})
+        self.assertEqual(d.rr3_take_utterance(), b"\x01\x02")
+
 
 class TestHistory(unittest.TestCase):
     def test_record_keeps_turns(self):

@@ -8,13 +8,22 @@
   的精神：连续语音无 offset 时也要有界）；
 - 上限之内的 pcm 帧在无 utterance 时丢弃（不开轮不积累）。
 
-判停后交出的 PCM 含 onset 前的预滚（onset 那一帧起算）到判停帧为止的全部字节。
+判停后交出的 PCM = **onset 前的预滚**（至多 [`PREROLL_MS`]）+ onset 起到判停帧为止的
+全部字节。预滚的必要性：sense 的 onset 事件要凑满 `min_speech_ms`（config 200ms）
+连续有声才发出——这段「判据语音」本体在 onset 事件**之前**就已流过总线；无预滚则
+每轮削头 200ms+，短句（~0.5s 的「你好」级）所剩过短，云端 ASR 对过短音频回空文本
+（2026-10-21 真板 E2E 实测「识别为空文本」的健康流成因）。
 """
 
 from __future__ import annotations
 
 import base64
 import time
+from collections import deque
+
+# 预滚窗长（机制量）：≥ sense 侧 min_speech_ms（200）+ 事件 transit 余量；
+# 以帧自身 ms 字段计长，空帧（饥饿拍 pcm_b64=""）不入环不计时。
+PREROLL_MS = 400
 
 
 class Rr3DialogTurn:
@@ -42,21 +51,36 @@ class Rr3Dialog:
         self._active = False
         self._buf = bytearray()
         self._started_ms = 0.0
+        # 预滚环：未开轮期间滚动保留最近 PREROLL_MS 的 pcm，onset 时拼回采集头。
+        # 开轮期间的帧只进 buf（采集连续，预滚无职责）；判停复位后预滚照滚——
+        # 下一轮 onset 拿到的永远是「此刻之前」的窗。
+        self._preroll: deque[tuple[bytes, int]] = deque()
+        self._preroll_ms = 0
 
     # -- 事件入口 --
 
     def rr3_feed_pcm(self, body: dict) -> None:
-        """吃一帧 rr3-sense/audio/pcm（{"pcm_b64", "ms", ...}）。开轮中才积累。"""
-        if not self._active:
+        """吃一帧 rr3-sense/audio/pcm（{"pcm_b64", "ms", ...}）。开轮中积累进
+        utterance；未开轮进预滚环（超窗丢最旧）。空帧（饥饿拍）两边都不收。"""
+        pcm = base64.b64decode(body.get("pcm_b64", ""))
+        if not pcm:
             return
-        self._buf += base64.b64decode(body.get("pcm_b64", ""))
+        if not self._active:
+            ms = int(body.get("ms") or 0)
+            self._preroll.append((pcm, ms))
+            self._preroll_ms += ms
+            while self._preroll_ms > PREROLL_MS and len(self._preroll) > 1:
+                _, old_ms = self._preroll.popleft()
+                self._preroll_ms -= old_ms
+            return
+        self._buf += pcm
 
     def rr3_feed_vad(self, body: dict) -> bool:
         """吃一帧 rr3-sense/audio/vad_start。返回 True = 本边沿触发判停。"""
         edge = body.get("edge")
         if edge == "onset":
             self._active = True
-            self._buf = bytearray()
+            self._buf = bytearray(b"".join(p for p, _ in self._preroll))
             self._started_ms = time.monotonic() * 1000
             return False
         if edge == "offset" and self._active:
