@@ -762,23 +762,30 @@ run_tests sh -c 'cd base/runtime && cargo test -p rrd --lib demand_budget'
 #       A 段 = 未覆盖 normal 格（status=normal 且无任何 role.slot 指向）；
 #       B 段 = roles 侧悬空（slot/iface/requires/derives 任一不在对方真值集——**应恒 0**，
 #              悬空外键是错不是账，>0 即硬红、不进基线）；
-#       C 段 = TRAITS 未被 roles.iface 引用差集 ＋ RR3_PIN_KEYS 未被 roles.requires 引用差集。
-#     门 a 数学（§24.1 第 5 条）：置红 ＝ A + B + C。
+#       C 段 = TRAITS 未被 roles.iface 引用差集 ＋ RR3_PIN_KEYS 未被 roles.requires 引用差集；
+#       D 段 = iface 实现者缺位（裁-17：iface 在册 ≠ 有实现者——role.iface 须 ≥1 个
+#              prod 实现（`impl <iface> for` 文本命中，扫 base/modules/tools 产码、
+#              排除 /tests/，口径同 ⑨-z 门；占位后端 Rr3UnavailableSource 是发布面
+#              产码"能力缺失显式回错"，命中算数），否则该角色须显式标 status="planned"
+#              且 planned_until 非空（终点登记）——**应恒 0**，硬红不进基线；
+#              sensor.env/imu 两角色 planned 终点 = D9 器件到货转自动可判）。
+#     门 a 数学（§24.1 第 5 条 + 裁-17）：置红 ＝ A + B + C + D。
 #     机器判据（裁定配套 (c)）：低水位基线文件 tools/ci/gate-a-baseline.txt——
 #       count > 基线即 FAIL（防红账回涨）；文件缺/坏/非整数即 FAIL（fail-closed）；
 #       count < 基线 PASS 并打印"须同批下调基线"提醒（转红终点＝基-39 全覆盖 count=0）。
 #     六表之第 5 表（件 handles[].desc_key × DESC_KEYS）已由 ② parse 层执法；第 6 表
 #     （平台 role→具名构造）归门 a 转红收口件——本步如实不判、不抄第二份。
 #     TRAITS/DESC_KEYS 是 &[&str] 切片无常量 N，提取打空的护栏＝B 段全悬空硬红＋扫面前件四查。
-step "⑨-a 基-39 角色覆盖六表对账·报告模式（A 未覆盖 normal 格 / B roles 悬空 / C trait·键差集，门 a）"
+step "⑨-a 基-39 角色覆盖六表对账·报告模式（A 未覆盖 normal 格 / B roles 悬空 / C trait·键差集 / D iface 实现者缺位，门 a）"
 gate_a_fail=0
 ga_slots="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 ga_roles="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 ga_traits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 ga_desc="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 ga_pins="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"' EXIT
-trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"; exit 130' INT TERM
+ga_status="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins" "$ga_status"' EXIT
+trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins" "$ga_status"; exit 130' INT TERM
 awk '/pub const RR3_ASSEMBLE_HANDLE_TRAITS/{f=1} f{print} f && /\];/{exit}' \
   base/runtime/rr-registry/src/assemble.rs | grep -oE '"[^"]+"' | tr -d '"' > "$ga_traits"
 awk '/pub const RR3_ASSEMBLE_DESC_KEYS/{f=1} f{print} f && /\];/{exit}' \
@@ -805,6 +812,15 @@ awk '
                        while (match(line, /"[^"]+"/)) { dv = dv substr(line, RSTART+1, RLENGTH-2) " "; line = substr(line, RSTART+RLENGTH) } }
   END { flush() }
 ' contracts/roles.toml > "$ga_roles"
+# planned 登记面（D 段豁免判据对象）：name/status/planned_until 三列，缺省键 = 空串
+awk '
+  function flush() { if (nm != "") printf "%s\t%s\t%s\n", nm, st, pu }
+  /^\[\[role\]\]/       { flush(); nm = ""; st = ""; pu = ""; next }
+  $1 == "name"          { v = $3; gsub(/[",]/, "", v); nm = v }
+  $1 == "status"        { v = $3; gsub(/[",]/, "", v); st = v }
+  $1 == "planned_until" { v = $3; gsub(/[",]/, "", v); pu = v }
+  END { flush() }
+' contracts/roles.toml > "$ga_status"
 ga_slot_n="$(wc -l < "$ga_slots" | tr -d ' ')"
 ga_normal_n="$(awk -F'\t' '$2 == "normal"' "$ga_slots" | wc -l | tr -d ' ')"
 ga_roles_n="$(grep -c . "$ga_roles" || true)"
@@ -881,11 +897,38 @@ else
       ga_c=$((ga_c + 1))
     fi
   done < "$ga_pins"
-  ga_total=$((ga_a + ga_b + ga_c))
-  printf '门 a 数学（全案 §24.1 第 5 条）：置红 = 未覆盖 normal 格(A=%s) + roles 悬空(B=%s) + TRAITS/PIN_KEYS 差集(C=%s) = %s\n' \
-    "$ga_a" "$ga_b" "$ga_c" "$ga_total"
+  # —— D 段：iface 实现者缺位（裁-17：iface 在册 ≠ 有实现者，应恒 0；硬红不进基线）。
+  # 先求"零实现 iface"名单（去重一次扫面，循环内零 fork），再逐 role 判豁免：
+  # status="planned" 且 planned_until 非空 = 豁免成立（终点登记在案）；否则逐角色点名硬红。
+  ga_dead_if="$(awk -F'\t' '{print $3}' "$ga_roles" | sort -u | while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    if [ -z "$(grep -rn --include='*.rs' "impl ${t} for" base modules tools 2>/dev/null | grep -v '/tests/' || true)" ]; then
+      printf '%s\n' "$t"
+    fi
+  done)"
+  ga_d=0
+  while IFS=$'\t' read -r r_nm r_sl r_if r_rq r_dv; do
+    [ -n "$r_nm" ] || continue
+    printf '%s\n' "$ga_dead_if" | grep -qxF "$r_if" || continue
+    r_st=""; r_pu=""
+    while IFS=$'\t' read -r s_nm s_st s_pu; do
+      if [ "$s_nm" = "$r_nm" ]; then r_st="$s_st"; r_pu="$s_pu"; fi
+    done < "$ga_status"
+    if [ "$r_st" = "planned" ] && [ -n "$r_pu" ]; then
+      continue  # 豁免成立：planned 且终点在案（D9 器件到货转自动可判）
+    fi
+    printf 'D  role %s 的 iface 实现者缺位: %s（裁-17：iface 在册 ≠ 有实现者——落 prod 实现者，或显式标 status="planned" 并给非空 planned_until 终点）\n' "$r_nm" "$r_if"
+    ga_d=$((ga_d + 1))
+  done < "$ga_roles"
+  ga_total=$((ga_a + ga_b + ga_c + ga_d))
+  printf '门 a 数学（全案 §24.1 第 5 条 + 裁-17）：置红 = 未覆盖 normal 格(A=%s) + roles 悬空(B=%s) + TRAITS/PIN_KEYS 差集(C=%s) + iface 实现者缺位(D=%s) = %s\n' \
+    "$ga_a" "$ga_b" "$ga_c" "$ga_d" "$ga_total"
   if [ "$ga_b" -gt 0 ]; then
     printf 'FAIL  ⑨-a roles 侧悬空 %s 笔（B 段应恒 0——悬空外键是错不是账，硬红不进基线）\n' "$ga_b"
+    gate_a_fail=1
+  fi
+  if [ "$ga_d" -gt 0 ]; then
+    printf 'FAIL  ⑨-a iface 实现者缺位 %s 笔（D 段应恒 0——iface 在册 ≠ 有实现者，硬红不进基线，裁-17）\n' "$ga_d"
     gate_a_fail=1
   fi
   ga_base="tools/ci/gate-a-baseline.txt"
