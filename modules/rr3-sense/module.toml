@@ -28,7 +28,7 @@ subscribes = ["rr3-brain/audio/tts_pcm"]
 
 # request 语义的自有主题走事务面，不混进 publishes
 [rpc]
-# ops/list = ops 槽快照读口（批N4 件九二）：白名单七槽应答（audio/doa/vad），面板观测面读口
+# ops/list = ops 槽快照读口（批N4 件九二）：白名单十槽应答（audio/doa/vad），面板观测面读口
 exposes = ["rr3-sense/capture/dump", "rr3-sense/ops/list"]
 
 [resources]

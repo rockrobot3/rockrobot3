@@ -21,6 +21,11 @@ min_speech_ms = 200
 
 [rr3-sense.doa]
 bin_threshold_deg = 30  # DoA 三档边界（S-5：阈值数据化，件内常量已迁出）
+window_ms = 1000        # 判向窗长（B批 b3b TDOA：onset 时 ring 回看窗整窗互相关）
+window_rms_min = 800    # 窗能量门（任一采集帧 rms ≥ 此值才算有声窗；与 vad.rms_start
+                        # 同口径——onset 路径恒过，防非 onset 直调与全静音窗）
+mic_baseline_mm = 150   # 双麦间距（物理 lag 上限 = round(sr·基线/声速) ≈ ±7 样本，
+                        # sinθ 反演的几何量；与 b3a 实测安装同源）
 
 # B批 b2 听声识位反射环（裁定①快环落 sense；命令旁路仅 esp32 档音频源承载——
 # 默认档不落此段，代码缺省 enable=false，行为与旧版逐点等价）
