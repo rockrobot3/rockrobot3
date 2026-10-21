@@ -1079,17 +1079,17 @@ mod tests {
         let n = 3400usize;
         let mut x = 0x1234_5678u32;
         let u: Vec<i16> = (0..n + 4).map(|_| xs_next(&mut x)).collect();
-        // τ=+4：R 先到 = 声源在右
-        let right: Vec<i16> = (0..n).flat_map(|t| [u[t], u[t + 4]]).collect();
+        // τ=+4：frame[0]=物理右麦领先（u[t+4] 相对 u[t] 左移 4 = 提前）→ 声源在右
+        let right: Vec<i16> = (0..n).flat_map(|t| [u[t + 4], u[t]]).collect();
         let mut ring = Rr3DoaRing::rr3_ring_new(3200, 2);
         ring.rr3_ring_feed(&right);
         let snap = ring.rr3_ring_snapshot();
         assert_eq!(snap.len(), 3200 * 2, "满窗快照 = 容量帧数×声道");
         assert_eq!(capture::rr3_doa_fix(&snap, 2, &cfg).unwrap().bin, Rr3DoaBin::Right);
-        // τ=−4：L 先到 = 声源在左
+        // τ=−4：frame[1]=物理左麦领先 → 声源在左
         let mut x = 0x1234_5678u32;
         let u: Vec<i16> = (0..n + 4).map(|_| xs_next(&mut x)).collect();
-        let left: Vec<i16> = (0..n).flat_map(|t| [u[t + 4], u[t]]).collect();
+        let left: Vec<i16> = (0..n).flat_map(|t| [u[t], u[t + 4]]).collect();
         let mut ring = Rr3DoaRing::rr3_ring_new(3200, 2);
         ring.rr3_ring_feed(&left);
         assert_eq!(
