@@ -1,0 +1,14 @@
+# ⑨-y 跨平台可编面低水位基线——§25.8 #9 拍板"钉数先行、拆修随后"的机器判据
+# （裁-19 / 基-33，批N8 件六落）。
+# 语义：base/runtime 九成员在 x86_64-pc-windows-msvc 上的红 crate 数（cargo check
+#   --locked --keep-going，check 不链接、宿主无需 MSVC；按 crate 名去重——同 crate
+#   lib/bin 双单元红只计一）不得超过本数——count > 本数即 FAIL（防红账回涨）；
+#   count < 本数须同批下调本数（⑨-y 打印提醒；转绿终点 = 基-33 拆修全落 count=0，
+#   届时本门转红、本文件退役）。文件缺/坏/首个非注释行非纯整数即 FAIL（fail-closed）；
+#   Windows target 未装即 FAIL（不设 SKIP，⑨-y 门内附安装命令——裁-10 同族理由：
+#   能跑的机器越少，漂移越没人发现）。
+# 1 = 批N8 件六初值（2026-10-22 本机按上述命令复跑：仅 rr-bus 红——client.rs:21
+#   std::os::unix::net 无门直用（基-33 断点①）；rr-hal 同命令下绿（esp32_uart 面经
+#   rr-ipc 的 cfg 门在 windows 编译通过，基-33 断点② 在现树不成立）。§25.5 纪律
+#   注记：第十一轮审计快照"红 2"系代理采信未复跑，本文件以文档化命令现跑为钉数。
+1
