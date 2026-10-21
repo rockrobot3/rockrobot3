@@ -131,9 +131,17 @@ struct Rr3Inner {
     /// 非应答帧（Event / Notification / 点名 Request）的去处；`Arc` 使 poll 取 &self
     inbox: Mutex<Receiver<Rr3Frame>>,
     /// 运维计数表（0.0.4 批B，Q1 裁定）：模块业务线程经 [`Rr3BusClient::rr3_counter_bump`]
-    /// 自愿累加，心跳线程每拍快照——非空则心跳 params 带 `{"counters": {...}}`，
-    /// 空则维持 `{}`（旧 rrd 兼容）。键是模块内部运维词汇，归属表落各模块 README。
+    /// 自愿累加，心跳线程每拍发「自上一拍以来」的**增量**（b3c 2026-10-21 语义钉死：
+    /// rrd 归并侧按增量累加，聚合表 = 生命周期累计——旧实现每拍发全量快照被 rrd
+    /// 当增量再收一遍，pcm_frames 跑出 40 亿量级）——非空则心跳 params 带
+    /// `{"counters": {...}}`，空则维持 `{}`（旧 rrd 兼容）。键是模块内部运维词汇，
+    /// 归属表落各模块 README。
     counters: Mutex<BTreeMap<String, u64>>,
+    /// 已发水位镜像（与 `counters` 同型）：键 → 上一拍已上线的累计值。心跳线程独占
+    /// 读写；增量 = 当前值 − 水位（水位只会 ≤ 当前值，模块进程内计数单调），发出后
+    /// 水位推进到当前值。心跳失败 = 模块 exit（见文件头），不存在"已记账未上线"
+    /// 的重发语义——丢的最多是临死一拍的量，运维账可接受。
+    counters_sent: Mutex<BTreeMap<String, u64>>,
     /// 机制核运行时状态机（批D₂）：心跳拍点真值——std 驱动器只做平台事
     /// （sleep 等拍点、socket 收发），连接→注册→心跳→分发→节拍的决策在
     /// rr-core（ADR-0018 裁定 1/3）。锁内即放，无嵌套锁。
@@ -199,12 +207,28 @@ impl Rr3Inner {
         self.next_id.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    /// 计数快照（心跳线程每拍调用）：克隆全表，锁内即放
-    fn rr3_counters_snapshot(&self) -> BTreeMap<String, u64> {
-        self.counters
+    /// 计数增量（心跳线程每拍调用）：对每键算「当前累计 − 已发水位」，零增量键
+    /// 不上线（空闲模块的心跳维持 `{}` 旧形状）；发出后水位推进到当前值。两把锁
+    /// 各自成段不嵌套——bump 只碰 `counters`，增量与水位只在心跳线程，竞态窗口
+    /// 内的 bump 自然落到下一拍。
+    fn rr3_counters_delta(&self) -> BTreeMap<String, u64> {
+        let cur = self
+            .counters
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .clone()
+            .clone();
+        let mut sent = self.counters_sent.lock().unwrap_or_else(|p| p.into_inner());
+        let mut delta = BTreeMap::new();
+        for (k, v) in &cur {
+            let base = sent.get(k).copied().unwrap_or(0);
+            // 模块进程内计数单调，水位只可能 ≤ 当前值；saturating 是防御形状
+            let d = v.saturating_sub(base);
+            if d > 0 {
+                delta.insert(k.clone(), d);
+            }
+            sent.insert(k.clone(), *v);
+        }
+        delta
     }
 
     fn rr3_task(&self) -> u64 {
@@ -255,6 +279,7 @@ impl Rr3BusClient {
             pending: Mutex::new(HashMap::new()),
             inbox: Mutex::new(rx),
             counters: Mutex::new(BTreeMap::new()),
+            counters_sent: Mutex::new(BTreeMap::new()),
             rt: Mutex::new(Rr3ModuleRuntime::rr3_runtime_new(identity.heartbeat_ms)),
             next_id: AtomicU64::new(0),
             stop: AtomicBool::new(false),
@@ -338,11 +363,11 @@ impl Rr3BusClient {
                 if !due {
                     continue; // 提前醒（信号打断等），回睡
                 }
-                let snap = hb_inner.rr3_counters_snapshot();
-                let params = if snap.is_empty() {
+                let delta = hb_inner.rr3_counters_delta();
+                let params = if delta.is_empty() {
                     json!({})
                 } else {
-                    json!({ "counters": snap })
+                    json!({ "counters": delta })
                 };
                 if hb_inner
                     .rr3_call_inner(
@@ -373,10 +398,11 @@ impl Rr3BusClient {
         self.inner.rr3_task()
     }
 
-    /// 运维计数自报（0.0.4 批B，Q1 裁定）：给键累加 `by`，心跳线程每拍把全表
-    /// 快照塞进 `rr3.heartbeat` 的可选 `counters` 字段。键是模块内部运维词汇
-    /// （不逐键 pin，归属表落各模块 README）；无上报的模块字段缺省，rrd 侧
-    /// 未知字段忽略——旧端 / 新端双向兼容。
+    /// 运维计数自报（0.0.4 批B，Q1 裁定；b3c 2026-10-21 增量语义钉死）：给键累加
+    /// `by`，心跳线程每拍把「自上一拍以来」的增量塞进 `rr3.heartbeat` 的可选
+    /// `counters` 字段（rrd 侧按增量归并，`rr3.ctl.counters` 聚合表 = 生命周期
+    /// 累计）。键是模块内部运维词汇（不逐键 pin，归属表落各模块 README）；无上报
+    /// 的模块字段缺省，rrd 侧未知字段忽略——旧端 / 新端双向兼容。
     pub fn rr3_counter_bump(&self, key: &str, by: u64) {
         let mut t = self
             .inner
@@ -752,15 +778,17 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// 计数自报 → 心跳载荷（0.0.4 批B，Q1 裁定的双端兼容面）：
-    /// 无上报的拍 params 维持 `{}`；bump 后的拍 params 带非空 `counters`，
-    /// 值是累加结果。有界轮询不猜时刻（hb=50ms，2s 上界足够）。
+    /// 计数自报 → 心跳载荷（0.0.4 批B，Q1 裁定的双端兼容面；b3c 2026-10-21
+    /// 增量语义钉死）：无上报的拍 params 维持 `{}`；bump 后的拍 params 带非空
+    /// `counters`，值是「自上一拍以来」的增量（首拍水位 0，增量恰为累计值；
+    /// 之后跨拍只发新增量——rrd 归并按增量累加，聚合表才是生命周期累计而非
+    /// 二次方膨胀）。有界轮询不猜时刻（hb=50ms，2s 上界足够）。
     #[test]
     fn heartbeat_carries_counters_only_after_bump() {
         use std::time::Instant;
         let log = Arc::new(Mutex::new(Vec::new()));
         let (client, path) = connect_on("cnt", log.clone());
-        // 第一段：等一个不带 counters 的心跳（空表 → params = {}）
+        // 第一段：等一个不带 counters 的心跳（空增量 → params = {}）
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             let has_empty = log
@@ -781,7 +809,7 @@ mod tests {
         client.rr3_counter_bump("relay_on", 2);
         client.rr3_counter_bump("relay_on", 1);
         client.rr3_counter_bump("chat_rounds", 1);
-        // 第二段：等带 counters 的心跳，值逐键核对
+        // 第二段：等带 counters 的心跳，值逐键核对（首拍增量 = 累计值）
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             let hit = {
@@ -791,11 +819,37 @@ mod tests {
                     .map(|(_, p)| p["counters"].clone())
             };
             if let Some(c) = hit {
-                assert_eq!(c["relay_on"], 3, "同键累加");
+                assert_eq!(c["relay_on"], 3, "首拍增量 = 水位 0 起的累计");
                 assert_eq!(c["chat_rounds"], 1);
                 break;
             }
             assert!(Instant::now() < deadline, "bump 后应出现带 counters 的心跳");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // 观测点游标：第三段只看此后的新增日志（旧拍仍在账上，整表倒查会撞旧值）
+        let observed_len = log.lock().unwrap().len();
+        // 第三段（b3c 语义钉）：水位已到 3，再 bump 1 → 下一拍只发增量 1（旧
+        // 快照语义会发全量 4，被 rrd 当增量再收一遍即 40 亿病灶）
+        client.rr3_counter_bump("relay_on", 1);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let hit = {
+                let log = log.lock().unwrap();
+                log[observed_len..]
+                    .iter()
+                    .rev()
+                    .find(|(m, p)| m == "rr3.heartbeat" && p.get("counters").is_some())
+                    .map(|(_, p)| p["counters"].clone())
+            };
+            if let Some(c) = hit {
+                assert_eq!(c["relay_on"], 1, "跨拍只发自上一拍以来的增量，不发全量快照");
+                assert!(
+                    c.get("chat_rounds").is_none(),
+                    "零增量键不上线（空闲键不刷拍）: {c}"
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline, "再 bump 后应出现带增量的心跳");
             std::thread::sleep(Duration::from_millis(10));
         }
         drop(client);
