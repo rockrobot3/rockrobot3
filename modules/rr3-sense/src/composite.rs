@@ -42,7 +42,7 @@ use rr_hal_api::Rr3AudioCfg;
 use rr_ipc::{opcode, rr3_base64_encode, Rr3PayloadType};
 use serde_json::{json, Value};
 
-use capture::{Rr3AudioConfig, Rr3DoaFix};
+use capture::{Rr3AudioConfig, Rr3DoaCfg, Rr3DoaFix};
 use vad::{Rr3VadConfig, Rr3VadEdge, Rr3VadState};
 
 /// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
@@ -126,6 +126,24 @@ pub fn rr3_sense_run() -> Result<(), String> {
     let mut seq: u64 = 0;
     let mut tts_gate = Rr3TtsGate::default();
 
+    // 判向策略量一次收进 Rr3DoaCfg（B批 b3b：能量门/几何/档界整体注入机制件）；
+    // 判向窗 ring 双麦链路才分配（单声道恒无方向可判，不分配零开销）
+    let doa_cfg = Rr3DoaCfg {
+        sample_rate_hz: cfg.audio.sample_rate,
+        frame_ms: cfg.audio.frame_ms,
+        mic_baseline_mm: cfg.doa.mic_baseline_mm,
+        window_rms_min: cfg.doa.window_rms_min,
+        bin_threshold_deg: cfg.doa.bin_threshold_deg,
+    };
+    let mut doa_ring = if cfg.audio.channels >= 2 {
+        Some(Rr3DoaRing::rr3_ring_new(
+            (cfg.audio.sample_rate as u64 * cfg.doa.window_ms / 1000) as usize,
+            cfg.audio.channels as usize,
+        ))
+    } else {
+        None
+    };
+
     loop {
         let start = Instant::now();
 
@@ -140,9 +158,11 @@ pub fn rr3_sense_run() -> Result<(), String> {
             cfg: open_cfg,
             samples: buf,
         };
-        // DoA 粗判向（批F2）：多通道帧在下混**前**判向（双麦原始通道只在此一用），
-        // 最新一档随下一次 onset 边沿上路；单声道/静音帧恒 None，事件体不带 doa
-        let doa = capture::rr3_doa_fix(&raw.samples, raw.cfg.channels, cfg.doa.bin_threshold_deg);
+        // 判向窗积累（B批 b3b）：原始双通道帧在下混**前**入 ring（双麦原始通道
+        // 只在此一用）；判向本身挪到 onset 边沿整窗回看（下方），单声道无 ring 直跳
+        if let Some(ring) = doa_ring.as_mut() {
+            ring.rr3_ring_feed(&raw.samples);
+        }
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
         let pcm = rr3_pcm_downmix_stream(raw);
@@ -165,6 +185,18 @@ pub fn rr3_sense_run() -> Result<(), String> {
                     eprintln!("播放期门控: onset 弃发布（TTS 回声中）");
                 }
                 edge => {
+                    // DoA 判向（B批 b3b）：仅 onset 判（offset 静音无方向可判），
+                    // 判向窗 = ring 线性化快照（最近 window_ms 的原始立体声）交
+                    // 机制纯函数；单声道链路 ring 不分配 → 恒 None，事件体不带 doa
+                    // （与旧版等价）。onset 时 VAD 已证 ≥min_speech_ms 连续有声帧，
+                    // 能量门对 onset 路径恒过——门防的是非 onset 直调与全静音窗
+                    let doa = match (&edge, doa_ring.as_ref()) {
+                        (Rr3VadEdge::Onset { .. }, Some(ring)) => {
+                            let snap = ring.rr3_ring_snapshot();
+                            capture::rr3_doa_fix(&snap, cfg.audio.channels, &doa_cfg)
+                        }
+                        _ => None,
+                    };
                     let doa_deg = doa.map(|d| d.deg);
                     bus.rr3_publish(
                         vad::RR3_VAD_START_TOPIC,
@@ -340,8 +372,8 @@ fn rr3_dump_result(seq: u64, backend: &str, cfg: &Rr3SenseConfig) -> Value {
 
 /// `rr3-sense/ops/list` 应答体（批N4 件九二，面板 /api/sense/ops 读口）：ops 槽
 /// 快照，**白名单组体**——槽名与 assemble.toml 槽表申报同源（audio/doa/vad 三组，
-/// 门 d covers 申报的对账面），config 其余键一律不进应答。槽名 doa_bin_threshold_deg
-/// 与 config 键 bin_threshold_deg 的映射是装配清单 src_key 的事（槽表申报同源）。
+/// 门 d covers 申报的对账面），config 其余键一律不进应答。槽名 doa_* 与 config 键
+/// 的映射是装配清单 src_key 的事（槽表申报同源；b3b 起 doa 组扩到四槽）。
 fn rr3_sense_ops_snapshot(cfg: &Rr3SenseConfig) -> Value {
     json!({
         "audio": {
@@ -351,6 +383,9 @@ fn rr3_sense_ops_snapshot(cfg: &Rr3SenseConfig) -> Value {
         },
         "doa": {
             "doa_bin_threshold_deg": cfg.doa.bin_threshold_deg,
+            "doa_window_ms": cfg.doa.window_ms,
+            "doa_window_rms_min": cfg.doa.window_rms_min,
+            "doa_mic_baseline_mm": cfg.doa.mic_baseline_mm,
         },
         "vad": {
             "rms_start": cfg.vad.rms_start,
@@ -426,6 +461,61 @@ fn rr3_reflex_pan_target(
     Some((RR3_REFLEX_PAN_CENTER_DEG + swing) as u16)
 }
 
+// ---------- 判向窗 ring（B批 b3b TDOA） ----------
+//
+// 双麦链路的判向窗积累器：每采集拍把原始立体声帧推入环形缓冲（容量 =
+// window_ms 的帧数），onset 边沿那一刻线性化快照交 [`capture::rr3_doa_fix`]
+// 整窗判向——判向从"逐帧即时"改为"onset 时回看"（b3a 实证：单帧瞬时判向
+// 无稳定方向，1s 窗才有；VAD onset 已证 ≥min_speech_ms 连续有声，窗内
+// 新鲜语音主导，无需中位数聚合）。单声道链路不分配（无方向可判）。
+
+/// 判向窗环形缓冲（帧交错存储，与采集 samples 同形；主循环单线程读写）
+struct Rr3DoaRing {
+    buf: Vec<i16>,
+    ch: usize,
+    cap_frames: usize,
+    /// 下一写入帧位（模 cap_frames）
+    pos: usize,
+    /// 已积累帧数（≤ cap_frames）
+    have: usize,
+}
+
+impl Rr3DoaRing {
+    fn rr3_ring_new(cap_frames: usize, ch: usize) -> Self {
+        let ch = ch.max(1);
+        let cap_frames = cap_frames.max(1);
+        Self {
+            buf: vec![0i16; cap_frames * ch],
+            ch,
+            cap_frames,
+            pos: 0,
+            have: 0,
+        }
+    }
+
+    /// 推入一拍原始采样（帧交错）；不足一帧的余数丢弃（采集整帧纪律）
+    fn rr3_ring_feed(&mut self, samples: &[i16]) {
+        for frame in samples.chunks_exact(self.ch) {
+            let off = self.pos * self.ch;
+            self.buf[off..off + self.ch].copy_from_slice(frame);
+            self.pos = (self.pos + 1) % self.cap_frames;
+            self.have = (self.have + 1).min(self.cap_frames);
+        }
+    }
+
+    /// 线性化快照：最旧帧在前、最新帧在后（onset 时交判向机制）
+    fn rr3_ring_snapshot(&self) -> Vec<i16> {
+        if self.have < self.cap_frames {
+            return self.buf[..self.have * self.ch].to_vec();
+        }
+        let off = self.pos * self.ch;
+        let mut snap = Vec::with_capacity(self.buf.len());
+        snap.extend_from_slice(&self.buf[off..]);
+        snap.extend_from_slice(&self.buf[..off]);
+        snap
+    }
+}
+
 // ---------- 配置加载（装配期注入，原 audio/mod.rs 配置段逐字迁入） ----------
 
 /// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
@@ -440,10 +530,17 @@ pub struct Rr3SenseConfig {
     pub reflex: Rr3ReflexConfig,
 }
 
-/// DoA 判向配置：分档边界（S-5，原件内常量 `RR3_DOA_BIN_THRESHOLD_DEG` 迁此）。
+/// DoA 判向配置（B批 b3b 起 TDOA 判向窗口径）：
+/// - `bin_threshold_deg`：三档分档边界（S-5，原件内常量迁此）；
+/// - `window_ms`：判向窗长（onset 时 ring 回看窗，0 收敛 1000 留痕）；
+/// - `window_rms_min`：窗能量门（任一采集帧 rms ≥ 此值才算有声窗，0 = 门全开）；
+/// - `mic_baseline_mm`：双麦间距（物理 lag 上限与 sinθ 反演的几何量，0 报错）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rr3DoaConfig {
     pub bin_threshold_deg: i32,
+    pub window_ms: u64,
+    pub window_rms_min: i64,
+    pub mic_baseline_mm: u32,
 }
 
 /// 反射环配置（B批 b2）：策略量全部数据化。代码缺省 `enable = false`——不显式
@@ -470,6 +567,9 @@ impl Default for Rr3SenseConfig {
             vad: Rr3VadConfig::default(),
             doa: Rr3DoaConfig {
                 bin_threshold_deg: 30,
+                window_ms: 1000,
+                window_rms_min: 800,
+                mic_baseline_mm: 150,
             },
             reflex: Rr3ReflexConfig {
                 enable: false,
@@ -498,8 +598,8 @@ fn rr3_sense_config_load(manifest_path: &str) -> Result<Rr3SenseConfig, String> 
     let text = std::fs::read_to_string(&path).map_err(|e| format!("读 config {path} 失败: {e}"))?;
     let cfg = rr3_sense_config_parse(&text)?;
     eprintln!(
-        "config 就绪: 来源={path} doa_bin_threshold_deg={}",
-        cfg.doa.bin_threshold_deg
+        "config 就绪: 来源={path} doa_bin_threshold_deg={} doa_window_ms={} doa_window_rms_min={} doa_mic_baseline_mm={}",
+        cfg.doa.bin_threshold_deg, cfg.doa.window_ms, cfg.doa.window_rms_min, cfg.doa.mic_baseline_mm
     );
     Ok(cfg)
 }
@@ -535,12 +635,36 @@ fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, String> {
         rr3_cfg_u64(vad, "silence_tail_ms", &mut cfg.vad.silence_tail_ms)?;
         rr3_cfg_u64(vad, "min_speech_ms", &mut cfg.vad.min_speech_ms)?;
     }
-    // S-5：DoA 分档边界（策略面数据化，缺键回落默认 30）
+    // S-5 + B批 b3b：DoA 档界与判向窗策略量（缺键回落默认；异常值显式报错，
+    // window_ms=0 无窗意义收敛默认留痕——与 audio.frame_ms 同一口径）
     if let Some(doa) = section.and_then(|s| s.get("doa")) {
         let mut t = cfg.doa.bin_threshold_deg as i64;
         rr3_cfg_i64(doa, "bin_threshold_deg", &mut t)?;
         cfg.doa.bin_threshold_deg =
             i32::try_from(t).map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))?;
+        rr3_cfg_u64(doa, "window_ms", &mut cfg.doa.window_ms)?;
+        if cfg.doa.window_ms < 1 {
+            eprintln!(
+                "config [rr3-sense.doa] window_ms={} 无窗意义，收敛 1000ms",
+                cfg.doa.window_ms
+            );
+            cfg.doa.window_ms = 1000;
+        }
+        let mut wrm = cfg.doa.window_rms_min;
+        rr3_cfg_i64(doa, "window_rms_min", &mut wrm)?;
+        if !(0..=32767).contains(&wrm) {
+            return Err(format!(
+                "[rr3-sense.doa] window_rms_min 须在 0..=32767，收到 {wrm}"
+            ));
+        }
+        cfg.doa.window_rms_min = wrm;
+        let mut mm = cfg.doa.mic_baseline_mm as u64;
+        rr3_cfg_u64(doa, "mic_baseline_mm", &mut mm)?;
+        if mm == 0 {
+            return Err("[rr3-sense.doa] mic_baseline_mm=0 无几何可判向".to_string());
+        }
+        cfg.doa.mic_baseline_mm =
+            u32::try_from(mm).map_err(|_| format!("[rr3-sense.doa] mic_baseline_mm 越界: {mm}"))?;
     }
     // B批 b2：反射环与播放期门控策略量（缺键回落默认，enable 缺省 false）
     if let Some(reflex) = section.and_then(|s| s.get("reflex")) {
@@ -872,5 +996,105 @@ mod tests {
         assert_eq!(cfg.reflex.gate_gap_ms, 300);
         assert!(rr3_sense_config_parse("[rr3-sense.reflex]\nenable = \"on\"\n").is_err());
         assert!(rr3_sense_config_parse("[rr3-sense.reflex]\ndeadband_deg = \"wide\"\n").is_err());
+    }
+
+    // ---------- B批 b3b：DoA 判向窗配置段 / ops 槽 / ring 用例 ----------
+
+    /// doa 段解析：缺段 = 全默认；全量注入生效；window_ms=0 收敛 1000 留痕
+    /// （与 audio.frame_ms 同口径）；异常值显式拒收（window_rms_min 越界 /
+    /// mic_baseline_mm=0 无几何），类型错走 rr3_cfg_* 通用报错。
+    #[test]
+    fn config_parse_doa_section_defaults_full_and_rejects() {
+        let cfg = rr3_sense_config_parse("").unwrap();
+        assert_eq!(cfg.doa.bin_threshold_deg, 30);
+        assert_eq!(cfg.doa.window_ms, 1000);
+        assert_eq!(cfg.doa.window_rms_min, 800);
+        assert_eq!(cfg.doa.mic_baseline_mm, 150);
+        let cfg = rr3_sense_config_parse(
+            "[rr3-sense.doa]\nbin_threshold_deg = 20\nwindow_ms = 500\nwindow_rms_min = 1200\nmic_baseline_mm = 180\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.doa.bin_threshold_deg, 20);
+        assert_eq!(cfg.doa.window_ms, 500);
+        assert_eq!(cfg.doa.window_rms_min, 1200);
+        assert_eq!(cfg.doa.mic_baseline_mm, 180);
+        let cfg = rr3_sense_config_parse("[rr3-sense.doa]\nwindow_ms = 0\n").unwrap();
+        assert_eq!(cfg.doa.window_ms, 1000, "0 窗无意义收敛默认");
+        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nwindow_rms_min = -1\n").is_err());
+        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nwindow_rms_min = 32768\n").is_err());
+        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nmic_baseline_mm = 0\n").is_err());
+        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nwindow_ms = \"long\"\n").is_err());
+    }
+
+    /// ops 槽快照（批N4 面 + b3b 三新槽）：白名单十槽应答，槽名与 assemble.toml
+    /// 槽表申报同源；白名单纪律 = 组内恰好这些槽，config 其余键不进应答。
+    #[test]
+    fn ops_snapshot_carries_whitelisted_slots_including_doa_window() {
+        let v = rr3_sense_ops_snapshot(&Rr3SenseConfig::default());
+        assert_eq!(v["audio"]["sample_rate"], 16000);
+        assert_eq!(v["audio"]["channels"], 1);
+        assert_eq!(v["audio"]["frame_ms"], 20);
+        assert_eq!(v["doa"]["doa_bin_threshold_deg"], 30);
+        assert_eq!(v["doa"]["doa_window_ms"], 1000);
+        assert_eq!(v["doa"]["doa_window_rms_min"], 800);
+        assert_eq!(v["doa"]["doa_mic_baseline_mm"], 150);
+        assert_eq!(v["vad"]["rms_start"], 1500);
+        assert_eq!(v["vad"]["silence_tail_ms"], 700);
+        assert_eq!(v["vad"]["min_speech_ms"], 200);
+        assert_eq!(v["doa"].as_object().unwrap().len(), 4, "doa 组恰好四槽: {v}");
+    }
+
+    /// 判向窗 ring：未满窗快照只有已积累帧（原序）；满窗回绕后快照 = 最旧在前
+    /// 最新在后的线性化；不足一帧的余数丢弃（帧交错纪律）。
+    #[test]
+    fn doa_ring_accumulates_and_linearizes_snapshot() {
+        let mut ring = Rr3DoaRing::rr3_ring_new(4, 2);
+        ring.rr3_ring_feed(&[1, 2, 3, 4, 5, 6]);
+        assert_eq!(ring.rr3_ring_snapshot(), vec![1, 2, 3, 4, 5, 6], "未满窗只回已积累帧");
+        // 再喂 2 帧共 5 帧：第 1 帧被挤掉，快照 = 帧2..帧5 原序（回绕线性化）
+        ring.rr3_ring_feed(&[7, 8, 9, 10]);
+        assert_eq!(ring.rr3_ring_snapshot(), vec![3, 4, 5, 6, 7, 8, 9, 10], "回绕线性化");
+        let mut ring = Rr3DoaRing::rr3_ring_new(4, 2);
+        ring.rr3_ring_feed(&[1, 2, 3, 4, 9]);
+        assert_eq!(ring.rr3_ring_snapshot(), vec![1, 2, 3, 4], "余数丢弃");
+    }
+
+    /// ring → snapshot → 判向机制的组合件侧集成形状：τ=+4 声源在右、τ=−4 在左
+    /// （确定性宽带源与 mech 侧 golden 同构；此处只证管线通，算法逐位由 mech 钉）。
+    #[test]
+    fn doa_ring_snapshot_feeds_tdoa_pipeline() {
+        fn xs_next(x: &mut u32) -> i16 {
+            *x ^= *x << 13;
+            *x ^= *x >> 17;
+            *x ^= *x << 5;
+            ((*x as i32) >> 16) as i16
+        }
+        let cfg = Rr3DoaCfg {
+            sample_rate_hz: 16000,
+            frame_ms: 20,
+            mic_baseline_mm: 150,
+            window_rms_min: 800,
+            bin_threshold_deg: 30,
+        };
+        let n = 3400usize;
+        let mut x = 0x1234_5678u32;
+        let u: Vec<i16> = (0..n + 4).map(|_| xs_next(&mut x)).collect();
+        // τ=+4：R 先到 = 声源在右
+        let right: Vec<i16> = (0..n).flat_map(|t| [u[t], u[t + 4]]).collect();
+        let mut ring = Rr3DoaRing::rr3_ring_new(3200, 2);
+        ring.rr3_ring_feed(&right);
+        let snap = ring.rr3_ring_snapshot();
+        assert_eq!(snap.len(), 3200 * 2, "满窗快照 = 容量帧数×声道");
+        assert_eq!(capture::rr3_doa_fix(&snap, 2, &cfg).unwrap().bin, Rr3DoaBin::Right);
+        // τ=−4：L 先到 = 声源在左
+        let mut x = 0x1234_5678u32;
+        let u: Vec<i16> = (0..n + 4).map(|_| xs_next(&mut x)).collect();
+        let left: Vec<i16> = (0..n).flat_map(|t| [u[t + 4], u[t]]).collect();
+        let mut ring = Rr3DoaRing::rr3_ring_new(3200, 2);
+        ring.rr3_ring_feed(&left);
+        assert_eq!(
+            capture::rr3_doa_fix(&ring.rr3_ring_snapshot(), 2, &cfg).unwrap().bin,
+            Rr3DoaBin::Left
+        );
     }
 }
