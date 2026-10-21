@@ -80,6 +80,14 @@ pub fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error>
     }
 }
 
+/// 日志安全截断（按**字符**不按字节）：应答行是 `from_utf8_lossy` 产物，行内
+/// U+FFFD 等多字节字符按字节切（`&line[..80]`）会切进字符内部 panic——
+/// b3c-③ 实录实锤：失步乱行打诊断日志时整条读线程毙命，「重连永不放弃」
+/// 被一行日志格式化打破。截断只影响日志可读性，按字符取永不 panic。
+fn rr3_log_head(line: &str, max_chars: usize) -> String {
+    line.chars().take(max_chars).collect()
+}
+
 /// ON 应答行判据：OK 可在行中——流前缀混行合法（p3 实录形状）。
 /// 判 `OK audio on` 全串而非裸 `OK`：b64 字符表含 O/K，裸两字符在流 payload 里
 /// 误配率不可忽略；9 字节全串在 b64/JSON 流里现实上不可撞。
@@ -136,7 +144,7 @@ pub fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
         eprintln!(
             "[audio] 应答行未见 OK（{}B，继续扫）: {:?}",
             line.len(),
-            &line[..line.len().min(80)]
+            rr3_log_head(&line, 80)
         );
         if Instant::now() >= deadline {
             return Err(format!(
@@ -161,5 +169,21 @@ mod tests {
         assert!(!ok_reply_line("OK audio off"));
         assert!(!ok_reply_line("\u{5d4}\u{14}()QI"));
         assert!(!ok_reply_line("Qr//D/MQAwAFEAcAARALD/OK"));
+    }
+
+    /// b3c-③ 回归：日志截断按字符不按字节。实录形状——失步乱行经
+    /// `from_utf8_lossy` 产出 U+FFFD（3 字节），79 个 ASCII 后紧跟一个时字节
+    /// 80 恰在字符内部（bytes 79..82），旧实现 `&line[..80]` 在此直接 panic
+    /// （读线程毙命）；本件截断语义保真且永不 panic。
+    #[test]
+    fn log_head_never_panics_on_multibyte_boundary() {
+        let line = format!("{}\u{FFFD}", "a".repeat(79)).repeat(2);
+        let head = rr3_log_head(&line, 80);
+        assert_eq!(head.chars().count(), 80);
+        assert!(head.starts_with(&"a".repeat(79)));
+        assert!(head.ends_with('\u{FFFD}'));
+        // 对照组：短行原样返回，长全 ASCII 行按字符数截断
+        assert_eq!(rr3_log_head("short", 80), "short");
+        assert_eq!(rr3_log_head(&"x".repeat(100), 80), "x".repeat(80));
     }
 }
