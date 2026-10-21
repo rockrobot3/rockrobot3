@@ -1150,6 +1150,12 @@ fn rr3_platform_table_file_name(chip: &str) -> String {
     format!("{chip}.toml")
 }
 
+/// 契约四册名单（基-40：字面唯一份）。全仓"契约四册文件名"只在这里写字面——
+/// 装载真值集（[`rr3_runtime_truth_set`]）、contracts.rs 的 `RR3_CONTRACT_FILES`、
+/// 打包/装机等消费方一律引用本常量；新增/改名册只改这里，成员判等（基-40 单测
+/// ＋规约 ⑨-z 门）随之生效。顺序＝topics/slots/roles/devices（Z-4 记账点名序）。
+pub const RR3_CONTRACT_BOOKS: [&str; 4] = ["topics.toml", "slots.toml", "roles.toml", "devices.toml"];
+
 /// 装载消费真值集清单（增补轮六 基-25／实-12：全仓唯一一份，三处消费方判等——
 /// `rr3-pack` 打包 / buildroot `post-build.sh` 装机 / OTA 模块级更新）。清单由装载面
 /// 定义，打包与装机面不得各写一份文件清单——装载新增册时只改这里，消费方判等随之
@@ -1173,10 +1179,10 @@ pub fn rr3_runtime_truth_set(p: &Rr3Profile, profile_stem: &str) -> Rr3RuntimeTr
     Rr3RuntimeTruthSet {
         files: vec![
             format!("profiles/{profile_stem}.toml"),
-            "contracts/topics.toml".to_string(),
-            "contracts/slots.toml".to_string(),
-            "contracts/roles.toml".to_string(),
-            "contracts/devices.toml".to_string(),
+            format!("contracts/{}", RR3_CONTRACT_BOOKS[0]),
+            format!("contracts/{}", RR3_CONTRACT_BOOKS[1]),
+            format!("contracts/{}", RR3_CONTRACT_BOOKS[2]),
+            format!("contracts/{}", RR3_CONTRACT_BOOKS[3]),
             format!(
                 "contracts/platform/{}",
                 rr3_platform_table_file_name(&p.platform_chip)
