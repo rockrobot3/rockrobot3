@@ -7,9 +7,9 @@
 //! 所以 Windows 侧既能 `cargo check --all-targets` 也能跑到这里的全部测试——但那只证明
 //! cfg 边界未破，`conn.rs`/`daemon.rs`/`supervisor.rs` 的每一行都要靠 Unix 侧（L2/L3）才有证据。
 
+pub mod assembly;
 pub mod axis;
 pub mod axis_write;
-pub mod assembly;
 pub mod cli;
 pub mod contracts;
 pub mod counters;
@@ -86,7 +86,10 @@ fn rr3_log_sink_append(line: &str) {
         .create(true)
         .append(true)
         .open(path)
-        .and_then(|mut f| f.write_all(line.as_bytes()).and_then(|_| f.write_all(b"\n")));
+        .and_then(|mut f| {
+            f.write_all(line.as_bytes())
+                .and_then(|_| f.write_all(b"\n"))
+        });
     if let Err(e) = res {
         if !RR3_LOG_SINK_DEAD.swap(true, Ordering::Relaxed) {
             // eprintln 不走 rr3_log：降级说明本身不能再依赖降级中的通道（递归），
