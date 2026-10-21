@@ -970,6 +970,51 @@ else
   printf 'PASS  ⑨-r 留痕不进被丢弃的流（五 Rust 模块 stdout 宏 + brain Python stdout print 全零命中；stderr 通道 = per-unit 日志 <socket>.log/<unit>.log，append 保留重启历史）\n'
 fi
 
+# —— ⑨-z 真值集三方成员判等（门 z 静态面执法位；基-40 / 模块设计索引 §14.7，批N8
+#     件一）。病根（自检五腿全绿而机器起不来）：三份"该带哪些文件"清单不同源——
+#     装载面 rr3_runtime_truth_set（七 files+一 dir）vs 判据面 RR3_CONTRACT_FILES
+#     （曾只四册）vs 打包面手抄。修法定形（件一 b2cc925/bda7fda）：成员名单点生成
+#     （profile.rs rr3_truth_set_member_names ← RR3_CONTRACT_BOOKS 字面唯一份），
+#     三面共读；成员集相等由判据保证（单测 truth_set_members_and_boot_locations_
+#     are_the_same_set 判等实体＋运行时 truth_set 自检逐枚点名），不再靠注释声称。
+#     本门四条执法（静态面，逐条点名，任一缺失即红）：
+#       1) 单点在位：profile.rs 定义 pub const RR3_CONTRACT_BOOKS（字面唯一份）；
+#       2) 判据面共读：contracts.rs 的 RR3_CONTRACT_FILES 定义必须引用该常量
+#          （判据面再现字面数组 = 第二份清单 = 红）；
+#       3) 打包面共读：rr3-pack 必须调 rrd::profile::rr3_runtime_truth_set 照单
+#          收口（打包面自带清单 = 块-15 同病 = 红）；
+#       4) 第二份字面零命中：全仓 .rs 产码不得再现四册并列清单字面（单点定义行
+#          与 tests/ 判据面豁免——判据钉四册点名是判据不是清单）。
+#     运行时半边（非空差逐枚点名）住 rrd 自检 truth_set check 与 boot 记账
+#     fail-closed，本门只执法静态面——两半合成 ⑨-z 全貌。
+step "⑨-z 真值集三方成员判等（单点在位＋判据面/打包面共读＋第二份字面零命中，门 z）"
+gate_z_fail=0
+if ! grep -q 'pub const RR3_CONTRACT_BOOKS' base/runtime/rrd/src/profile.rs; then
+  gate_z_fail=1
+  printf 'FAIL  ⑨-z 契约四册名单单点缺席（base/runtime/rrd/src/profile.rs 须定义 pub const RR3_CONTRACT_BOOKS——字面唯一份，基-40）\n'
+fi
+if ! grep -q 'pub const RR3_CONTRACT_FILES: \[&str; 4\] = crate::profile::RR3_CONTRACT_BOOKS' base/runtime/rrd/src/contracts.rs; then
+  gate_z_fail=1
+  printf 'FAIL  ⑨-z 判据面清单未共读单点（base/runtime/rrd/src/contracts.rs 的 RR3_CONTRACT_FILES 须引用 crate::profile::RR3_CONTRACT_BOOKS——自检判据面不得自带第二份字面，基-40）\n'
+fi
+if ! grep -q 'rrd::profile::rr3_runtime_truth_set(' tools/rr3-pack/src/main.rs; then
+  gate_z_fail=1
+  printf 'FAIL  ⑨-z 打包面未共读真值点（tools/rr3-pack 须调 rrd::profile::rr3_runtime_truth_set 照单收口——打包面自带清单即块-15 同病，基-25/实-12）\n'
+fi
+gz_lit="$(grep -rn --include='*.rs' '"topics.toml", "slots.toml", "roles.toml", "devices.toml"' \
+  base modules tools 2>/dev/null \
+  | grep -v '/tests/' | grep -v 'pub const RR3_CONTRACT_BOOKS' || true)"
+if [ -n "$gz_lit" ]; then
+  gate_z_fail=1
+  printf '%s\n' "$gz_lit"
+  printf 'FAIL  ⑨-z 第二份四册清单字面命中（见上行号）——成员名单点在 profile.rs RR3_CONTRACT_BOOKS，消费方一律引用常量，手抄清单即成员集漂移温床（基-40）\n'
+fi
+if [ "$gate_z_fail" -ne 0 ]; then
+  fail=1
+else
+  printf 'PASS  ⑨-z 真值集三方成员判等（单点 RR3_CONTRACT_BOOKS 在位；判据面/打包面共读；产码第二份字面零命中；成员集判等实体 = profile.rs 单测 truth_set_members_and_boot_locations_are_the_same_set）\n'
+fi
+
 # —— ⑩ 门 d 面板覆盖率对账·报告模式（基-19↔本步；interact I-19，批N4 件三；全案 §8
 #     门 d / conventions §2 拟步 ⑩）。判据（字段级分母 + covers 申报制分子）：
 #       分母 = 五路字段并集（全部自代码常量/契约表导出——单真值点，⑨-a/⑨-n 先例）：
