@@ -17,8 +17,11 @@
 //! 3. `rr3_poll` 排空 inbox：应答 `rr3-sense/capture/dump` 点名（rr3.call 回路）；
 //!    订阅的 `rr3-brain/audio/tts_pcm` 流帧喂播放期门控（B批 b2，裁定②零新契约）；
 //! 4. 反射环（B批 b2，裁定①快环落 sense）：非门开期的 onset 带判向 → 换算 pan
-//!    目标 → 命令旁路（rr-hal 音频源内建 CmdProducer）fire-and-forget 下发舵机——
-//!    持音频 conn 者执行，flock 单消费者纪律下的板外设命令唯一下行通路。
+//!    目标存 pending → **判停后**才经命令旁路（rr-hal 音频源内建 CmdProducer）
+//!    fire-and-forget 下发舵机——持音频 conn 者执行，flock 单消费者纪律下的板外
+//!    设命令唯一下行通路。动作时机 2026-10-21 自 onset 挪判停（EMI 避让）：舵机
+//!    激磁电流尖峰经共地打穿宿主 FTDI RX 造成断流重连，onset 即动 = 尖峰正落
+//!    采集窗斩 utterance；判停 = 语音已采集完毕，断流落在 ASR/LLM/TTS 窗自愈。
 //!
 //! 发布/读帧失败一律 `eprintln` + `exit(1)`：模块不装"活着"，死交给 supervisor 按
 //! restart_policy=always 重启（rrd 的进程语义）。
@@ -125,6 +128,10 @@ pub fn rr3_sense_run() -> Result<(), String> {
     let tick = Duration::from_millis(cfg.audio.frame_ms);
     let mut seq: u64 = 0;
     let mut tts_gate = Rr3TtsGate::default();
+    // 反射环 pending（EMI 避让）：onset 判向换算的目标在此挂起，判停后才实际
+    // 下发——激磁尖峰不落采集窗（见模块文档第 4 条）。连发 onset 覆盖旧值
+    // （最新意图优先，板侧 audio_q 同款背压口径）。
+    let mut pending_pan: Option<u16> = None;
 
     // 判向策略量一次收进 Rr3DoaCfg（B批 b3b：能量门/几何/档界整体注入机制件）；
     // 判向窗 ring 双麦链路才分配（单声道恒无方向可判，不分配零开销）
@@ -202,20 +209,29 @@ pub fn rr3_sense_run() -> Result<(), String> {
                         vad::RR3_VAD_START_TOPIC,
                         rr3_vad_event_body(seq, edge, doa.map(|d| rr3_doa_field(&d))),
                     )?;
-                    // 反射环（B批 b2）：onset 实际发布后才动作——被门弃掉的 onset
-                    // 不转头。判向缺档（单声道/静音帧）自然无目标，机制面零特判；
-                    // 判据全量入参（gate_open 此臂恒 false），纯函数独立可单测
-                    if let (Rr3VadEdge::Onset { .. }, Some(deg)) = (&edge, doa_deg) {
-                        if let Some(target) = rr3_reflex_pan_target(
-                            cfg.reflex.enable,
-                            cfg.reflex.deadband_deg,
-                            deg,
-                            gate_open,
-                        ) {
-                            if let Some(tx) = cmd_tx.as_ref() {
-                                tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
-                                bus.rr3_counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
-                                eprintln!("反射环: doa={deg}° → pan={target}°");
+                    // 反射环（B批 b2 起 onset 判向；2026-10-21 EMI 避让改判停后
+                    // 动作）：onset 实际发布后才换算存 pending（被门弃掉的 onset
+                    // 不进 pending），判停（语音采集完毕）才实际下发——激磁尖峰
+                    // 不落采集窗。判向缺档（单声道/静音帧）自然无目标，机制面零
+                    // 特判；判据全量入参（gate_open 此臂恒 false），纯函数独立可单测
+                    match &edge {
+                        Rr3VadEdge::Onset { .. } => {
+                            if let Some(deg) = doa_deg {
+                                pending_pan = rr3_reflex_pan_target(
+                                    cfg.reflex.enable,
+                                    cfg.reflex.deadband_deg,
+                                    deg,
+                                    gate_open,
+                                );
+                            }
+                        }
+                        Rr3VadEdge::Offset { .. } => {
+                            if let Some(target) = pending_pan.take() {
+                                if let Some(tx) = cmd_tx.as_ref() {
+                                    tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
+                                    bus.rr3_counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
+                                    eprintln!("反射环: 判停后下发 pan={target}°");
+                                }
                             }
                         }
                     }
