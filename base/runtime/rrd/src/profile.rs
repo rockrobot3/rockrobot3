@@ -558,7 +558,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                                 }
                             }
                             None => errs.push(format!(
-                                "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表批N7）"
+                                "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表，批N7 已立册）"
                             )),
                         },
                         other => errs.push(format!(
@@ -1010,7 +1010,7 @@ fn rr3_pin_derive_value(
 
 /// 校验①-b 的"字段在场"判定（§5 缺失语义列）：String 空串 = 缺、channel 以 None =
 /// 缺、physical 以空数组 = 缺。mux_group 不进 requires（互斥组由平台 conflicts 表
-/// 反推，批N7）；词表外字段名由调用方点名（门 a 六表对账第 5 张的漂移）。
+/// 反推，批N7 已立册）；词表外字段名由调用方点名（门 a 六表对账第 5 张的漂移）。
 fn rr3_pin_field_present(pin: &Rr3PinEntry, field: &str) -> bool {
     match field {
         "role" => !pin.role.is_empty(),
