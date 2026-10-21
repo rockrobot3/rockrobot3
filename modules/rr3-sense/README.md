@@ -12,7 +12,7 @@ modules/rr3-sense/
 ├── config.toml          ← 运行参数（VAD 阈值等），改参数不碰源码
 ├── Cargo.toml           ← 独立 workspace；path 依赖 rr-ipc / rr-bus / rr-hal
 ├── atoms/               ← 原子件（每格一件，五件套：atom.toml + 入口 + mech + assemble.toml + private.rs）
-│   ├── capture/         ← audio.capture：采集帧节拍 + DoA 粗判向（流级下混与 pcm 事件体构造上移组合件——批I）
+│   ├── capture/         ← audio.capture：采集帧节拍 + DoA TDOA 粗判向（B批 b3b：onset 整窗互相关；流级下混与 pcm 事件体构造上移组合件——批I）
 │   ├── vad/             ← audio.vad：边沿状态机 + vad_start 事件体（纯 DSP，golden PCM 向量本机全量测试）
 │   ├── env/             ← sensor.env：占位件（真件后端随采购批填实）
 │   └── imu/             ← sensor.imu：占位件（融合/闭环归 act 反射环）

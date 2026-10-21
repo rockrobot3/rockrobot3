@@ -1,11 +1,14 @@
-//! capture 原子件机制主体（五件套③，自原 src/audio/{capture.rs, mod.rs, doa.rs} 逐字迁入，
-//! 逻辑零改动）。
+//! capture 原子件机制主体（五件套③，自原 src/audio/{capture.rs, mod.rs, doa.rs} 迁入；
+//! DoA 判向段 B批 b3b 由 ILD 重写为 TDOA 时域互相关）。
 //!
-//! 两段：帧节拍换算 + 多通道下混（R14）｜DoA 粗判向（批F2；0.0.5 批I S-8 整型化）。
+//! 两段：帧节拍换算 + 多通道下混（R14）｜DoA 粗判向（批F2 立、B批 b3b 换 TDOA；
+//! 0.0.5 批I S-8 整型化纪律延续）。
 //! base64 编码归 rr-ipc 线格式层（0.0.5 批C① 塌缩，方案 §12.3），本原子只消费；
 //! pcm 事件体构造随 0.0.5 批I S-7 上移组合件（ADR-0019 修订 4：件面只留纯机制，
 //! 零 serde_json），用例随迁。流级下混随 0.0.5 批I 深挖收口同上移组合件——
 //! `Rr3PcmStream` 是承载层数据类型（C7 白名单外），件面只留纯切片机制。
+
+use super::Rr3DoaCfg;
 
 // ---------- 帧节拍换算 ----------
 
@@ -37,27 +40,38 @@ pub(crate) fn rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16> {
         .collect()
 }
 
-// ---------- DoA 粗判向（批F2，方案 §5.3 判向-转向编排 / R14） ----------
+// ---------- DoA 粗判向（B批 b3b：TDOA 时域互相关；批F2 ILD 版被 b3a 实证替换） ----------
 //
-// 双麦**幅度差（ILD）**粗判向：逐通道 RMS 的线性比值直接反演 `sin θ`
-// （注入模型 `g_l = 1 - sinθ`、`g_r = 1 + sinθ` 与 rr-hal sim 源同一套，
-// 反演可逆且确定——[`rr3_doa_fix`] 的单测与 rr-hal 的注入单测互为正反面）。
-// 相位差（ITD）在 sim 源里是保真项不是判据：粗判向 ±90° 分档走幅度差，
-// 真件换装（批F5a，USB 麦阵列）按实测阵列特性再评估是否升级互相关测向。
+// 双麦**到达时差（TDOA）**判向：判向窗（onset 时 ring 快照，默认 1s 立体声）上做
+// plain 时域互相关 `cc[d] = Σ_t R[t]·L[t+d]`，lag>0 = R（甲/物理右）先到 = 声源在右。
+// 搜索域钉死物理可达范围 ±lag_max（lag_max = round(sr·基线/声速)，15cm 基线 @16k
+// = ±7 样本）——b3a 离线时间线反复出现的 ±31/32 样本次峰离群在物理域外，搜索域
+// 收口后按构造剔除，比峰质门更硬的一道。
 //
-// S-8 整型化（0.0.5 批I）：与 vad 原子同一条 golden 纪律——任何机器逐位一致，
-// 浮点 sqrt/asin 无此保证。三步全整数流水线：
-// ① 逐通道 RMS 走 [`rr3_isqrt`]（与 vad/mech.rs 各持一份，原子间不交叉依赖）；
-// ② 比值 k = (r_r − r_l)/(r_r + r_l) 定点成 Q15 整数（[-32768, 32767]）；
-// ③ k 经 256 格 asin 查表（[`RR3_ASIN_DEG_LUT`]）反演成整度，下标 =
-//    round((k_Q15 + 32768) / 256)——舍入除法，±90° 端点干净落位（k=±1 → ±90°；
-//    截断除法会把 +90° 落到 86°，故必须舍入）。误差预算 |θ| ≤ 75° 内 ≤ 1°
-//    （Q15 量化与查表舍入的叠加上界）；75° 外落在左/右档深处，分档无歧义即达
-//    目的。分档边界（±29°/±31°）在单测钉死不糊。
+// 为什么替换 ILD：裸 INMP441 双麦 15cm 间距对语音的幅度差近乎零（b3a 近场实测
+// rms 比恒 1.0，方向信息只在相位差里），ILD 无判向力；TDOA 悬空实验 lag 随方向
+// 稳定摆动合几何。为什么 plain 时域而不是 FFT 限带/PHAT：离线对拍（b3a 三份
+// 录音，原型 proto_tdoa_int.py）整数时域 plain 相关与限带 FFT 版同号同档——反射
+// 环 pan 目标本就 clamp(±30°)，档位一致即行为一致；时域版零浮点零滤波器，
+// golden 纪律最短路径。
 //
-// 落档口径（零新契约）：结果只随在册主题 `rr3-sense/audio/vad_start` 的
-// **onset** 边沿上路（`doa` 字段）——offset 静音帧无方向可判，不带 doa
-// （与 rms_peak 同一形状纪律）。
+// S-8 整型化（golden 纪律，任何机器逐位一致）：
+// ① 互相关 i64 累加（窗 16000 帧 × 32767² ≈ 1.7e13，i64 安全）；
+// ② 亚样本抛物线定标 Q7：sub = 32·(y0−y2)/(2y1−y0−y2)，clamp [−64, 64]
+//   （i64 `/` 截断向零；真峰处 2y1 > y0+y2，den ≤ 0 的平台/边界不插补）；
+// ③ lag_Q7 × K_Q15 >> 7 反演 sinθ（K_Q15 = 声速·32768/(sr·基线)，调用处定标），
+//    经 256 格 asin 查表（[`RR3_ASIN_DEG_LUT`]，与 ILD 版同表）出整度，分档
+//    口径 [`rr3_doa_bin_of`] 不变。
+//
+// 能量门：窗内任一采集帧（L/R 任一通道）rms ≥ `window_rms_min`（阈值²×帧长定标
+// 比较，免 isqrt）。VAD onset 本身已证 ≥min_speech_ms 连续有声帧，此门对 onset
+// 路径恒过——防的是非 onset 直调与全静音窗（零比零无方向可判）。
+//
+// 落档口径（零新契约）不变：结果只随 vad_start **onset** 边沿上路（`doa` 字段）
+// ——offset 静音帧无方向可判，不带 doa（与 rms_peak 同一形状纪律）。
+
+/// 声速（mm/s，20°C 空气 ~343 m/s）：机制面物理常量，换环境校准随换装批。
+const RR3_SOUND_MM_PER_S: i64 = 343_000;
 
 /// 256 格 asin 查表（度）：`RR3_ASIN_DEG_LUT[i] = round(asin((i − 128) / 128))`，
 /// i ∈ [0, 256] 覆盖 sinθ ∈ [−1, 1] 全值域。生成式一次性钉死（python3 生成后
@@ -119,57 +133,95 @@ pub struct Rr3DoaFix {
     pub bin: Rr3DoaBin,
 }
 
-/// 整数平方根（牛顿二分）：`isqrt(x)` = ⌊√x⌋。通道平方和最大约
-/// 320 × 32767² ≈ 3.4e11，u64 绰绰有余；`mid <= x / mid` 的写法避免 mid*mid 溢出。
-/// 与 vad 原子的 rr3_isqrt 各持一份（原子间不交叉依赖，0.0.5 批C① 同款纪律）。
-fn rr3_isqrt(x: u64) -> u64 {
-    if x < 2 {
-        return x;
-    }
-    let (mut lo, mut hi, mut ans) = (1u64, x, 1u64);
-    while lo <= hi {
-        let mid = lo + (hi - lo) / 2;
-        if mid <= x / mid {
-            ans = mid;
-            lo = mid + 1;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    ans
-}
-
-/// 一帧多通道 PCM 的粗判向。返回 `None` 的三种情形：
-/// - 单声道（channels < 2）——没有方向信息，mono 链路恒 `None`；
-/// - 两路全静音——零比零无方向可判（VAD 起音前这类帧不会带 doa 上路）。
-///
-/// 判据：`sinθ = (r_r - r_l) / (r_r + r_l)`，r 为逐通道 RMS（平方和开根）。
-/// 注入模型（rr-hal sim 源）`g_l = 1 - sinθ`、`g_r = 1 + sinθ` 下该式严格可逆；
-/// 更多通道（USB 阵列真件）先只取前两路 L/R 对，通道序重排随换装批裁定。
-/// `threshold_deg` = 分档边界（S-5 迁 ops 槽 `doa_bin_threshold_deg`，本形态值
-/// 由组合件从 config 注入；件内不再持默认）。
-pub fn rr3_doa_fix(samples: &[i16], channels: u8, threshold_deg: i32) -> Option<Rr3DoaFix> {
-    if channels < 2 {
+/// 判向窗 TDOA 判向。返回 `None` 的情形：单声道（channels < 2）/ 空窗 /
+/// 基线为 0（无几何可换算）/ 能量门不过（全静音或欠能量窗）。
+/// `samples` = 判向窗快照（帧交错：帧内 ch 通道，L=0/R=1——组合件在 onset 时从
+/// ring 线性化快照，窗长 = config `window_ms`；单声道链路不判向恒 `None`）。
+/// 符号约定（b3a 定案）：lag>0 = R 先到 = 声源在右（甲），deg>0 同号直通反射环。
+pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3DoaFix> {
+    if channels < 2 || cfg.mic_baseline_mm == 0 {
         return None;
     }
     let ch = channels as usize;
-    let mut sq_l: i64 = 0;
-    let mut sq_r: i64 = 0;
-    for frame in samples.chunks_exact(ch) {
-        sq_l += frame[0] as i64 * frame[0] as i64;
-        sq_r += frame[1] as i64 * frame[1] as i64;
-    }
-    if sq_l + sq_r == 0 {
+    let frames = samples.len() / ch;
+    if frames == 0 {
         return None;
     }
-    let (r_l, r_r) = (rr3_isqrt(sq_l as u64), rr3_isqrt(sq_r as u64));
-    // Q15 定点比值：k ∈ [−1, 1] → 整数 [−32768, 32767]（+1 端点饱和到 32767）
-    let k_q15 =
-        (((r_r as i64 - r_l as i64) * 32768 / (r_l + r_r) as i64) as i32).clamp(-32768, 32767);
-    // 256 格查表下标：round((k_Q15 + 32768) / 256)，值域 [0, 256]
-    let idx = (((k_q15 + 32768) * 256 + 32768) >> 16) as usize;
+    // 能量门：任一采集帧（L/R 任一通道）rms ≥ 阈值（阈值²×帧长定标比较，免 isqrt）
+    let frame_len = ((cfg.sample_rate_hz as u64 * cfg.frame_ms) / 1000).max(1) as usize;
+    let min = cfg.window_rms_min.max(0) as u64;
+    if min > 0 {
+        let gate_sq = min * min * frame_len as u64;
+        let mut loud = false;
+        for fr in samples.chunks_exact(ch * frame_len) {
+            let (mut sq_l, mut sq_r) = (0u64, 0u64);
+            let mut i = 0;
+            while i + 1 < fr.len() {
+                let v = (fr[i] as i64).unsigned_abs();
+                sq_l += v * v;
+                let w = (fr[i + 1] as i64).unsigned_abs();
+                sq_r += w * w;
+                i += ch;
+            }
+            if sq_l >= gate_sq || sq_r >= gate_sq {
+                loud = true;
+                break;
+            }
+        }
+        if !loud {
+            return None;
+        }
+    }
+    // 物理 lag 上限：round(sr·基线/声速)——15cm @16k = round(6.997) = 7
+    let sr_mm = cfg.sample_rate_hz as i64 * cfg.mic_baseline_mm as i64;
+    let lag_max = ((2 * sr_mm + RR3_SOUND_MM_PER_S) / (2 * RR3_SOUND_MM_PER_S)) as usize;
+    // cc[d] = Σ_t R[t]·L[t+d]，d ∈ [−(lag_max+1), lag_max+1]（±1 供抛物线取邻）
+    let half = lag_max + 1;
+    let mut cc = vec![0i64; 2 * half + 1];
+    for (i, slot) in cc.iter_mut().enumerate() {
+        let d = i as i64 - half as i64;
+        let mut acc: i64 = 0;
+        if d >= 0 {
+            let dd = d as usize;
+            if dd < frames {
+                for t in 0..frames - dd {
+                    acc += samples[(t + dd) * ch] as i64 * samples[t * ch + 1] as i64;
+                }
+            }
+        } else {
+            let off = (-d) as usize;
+            for t in off..frames {
+                acc += samples[(t - off) * ch] as i64 * samples[t * ch + 1] as i64;
+            }
+        }
+        *slot = acc;
+    }
+    // 峰值搜索限物理域 [−lag_max, lag_max]（±31/32 次峰在域外，按构造剔除）
+    let mut best = 0i64;
+    let mut bv = -1i64;
+    for d in -(lag_max as i64)..=(lag_max as i64) {
+        let v = cc[(d + half as i64) as usize].abs();
+        if v > bv {
+            bv = v;
+            best = d;
+        }
+    }
+    // 整数抛物线亚样本（Q7）：真峰处 2y1 > y0+y2，den ≤ 0（平台/边界）不插补
+    let y0 = cc[(best - 1 + half as i64) as usize].abs();
+    let y2 = cc[(best + 1 + half as i64) as usize].abs();
+    let den = 2 * bv - y0 - y2;
+    let sub = if den > 0 {
+        (((y0 - y2) * 32) / den).clamp(-64, 64)
+    } else {
+        0
+    };
+    // sinθ = lag·声速/(sr·基线)：K_Q15 定标（Q7 lag → Q15 sinθ），查表出整度
+    let k_q15 = RR3_SOUND_MM_PER_S * 32768 / sr_mm;
+    let lag_q7 = best * 128 + sub;
+    let sin_q15 = ((lag_q7 * k_q15) >> 7).clamp(-32768, 32767) as i32;
+    let idx = (((sin_q15 + 32768) * 256 + 32768) >> 16) as usize;
     let deg = RR3_ASIN_DEG_LUT[idx];
-    let bin = rr3_doa_bin_of(deg, threshold_deg);
+    let bin = rr3_doa_bin_of(deg, cfg.bin_threshold_deg);
     Some(Rr3DoaFix { deg, bin })
 }
 
@@ -208,111 +260,142 @@ mod tests {
         );
     }
 
-    /// 用注入模型造一帧双通道样本：`g_l = 1 - sinθ`、`g_r = 1 + sinθ` 的整幅正弦
-    /// （与 rr-hal sim 源同一形状，独立小实现——判向正确性不依赖被测源头）。
-    fn stereo_frame(deg: f64, frames: usize) -> Vec<i16> {
-        let k = deg.to_radians().sin();
-        (0..frames)
-            .flat_map(|i| {
-                let v = (2.0 * core::f64::consts::PI * 440.0 * i as f64 / 16000.0).sin();
-                [
-                    ((1.0 - k) * v * 12000.0) as i16,
-                    ((1.0 + k) * v * 12000.0) as i16,
-                ]
-            })
-            .collect()
-    }
+    // ---------- TDOA 判向用例（B批 b3b，golden 镜像 /tmp/rr3-b3-smoke/golden_doa.py） ----------
 
-    /// 单声道恒 None；双通道全零恒 None——无方向信息不硬判。
-    #[test]
-    fn doa_returns_none_for_mono_and_silence() {
-        assert_eq!(rr3_doa_fix(&[10, -10, 20, -20], 1, 30), None, "mono 无方向");
-        assert_eq!(rr3_doa_fix(&[0, 0, 0, 0], 2, 30), None, "全静音无方向");
-        assert_eq!(rr3_doa_fix(&[], 2, 30), None, "空帧无方向");
-    }
-
-    /// 注入角 → 反演角逐点贴合（±1° 容差：S-8 整型化后的预算——Q15 量化与查表
-    /// 舍入的叠加），三档边界两侧各验一档；±90° 端点经舍入除法干净落位。
-    #[test]
-    fn doa_inverts_ild_model_and_bins_pm90() {
-        for (deg, want_bin) in [
-            (-90.0, Rr3DoaBin::Left),
-            (-60.0, Rr3DoaBin::Left),
-            (-31.0, Rr3DoaBin::Left),
-            (-29.0, Rr3DoaBin::Center),
-            (0.0, Rr3DoaBin::Center),
-            (29.0, Rr3DoaBin::Center),
-            (31.0, Rr3DoaBin::Right),
-            (60.0, Rr3DoaBin::Right),
-            (90.0, Rr3DoaBin::Right),
-        ] {
-            let samples = stereo_frame(deg, 1600);
-            let fix = rr3_doa_fix(&samples, 2, 30).unwrap_or_else(|| panic!("{deg} 应判出"));
-            assert!(
-                (fix.deg as f64 - deg).abs() <= 1.0,
-                "deg={deg}: 反演角 {} 超容差",
-                fix.deg
-            );
-            assert_eq!(fix.bin, want_bin, "deg={deg} 的档位");
+    /// 确定性宽带源：xorshift32(13,17,5) 高 16 位带符号截取 × amp 定标——
+    /// golden 向量任何机器重跑同值（S-8 整型化纪律的测试侧落点）。
+    struct Xorshift(u32);
+    impl Xorshift {
+        fn next_i16_scaled(&mut self, amp: i32) -> i16 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.0 = x;
+            let v = (x as i32) >> 16; // 高 16 位带符号 → [−32768, 32767]
+            ((v * amp) >> 15) as i16
         }
     }
 
-    /// 档位语义（左/中/右）与 as_str 字面量一起 pin——事件消费方按字面量分派，
-    /// 漂移当场红。查表端点与零点一并 pin。分档阈值 S-5 迁 ops 槽后不再有件内
-    /// 常量可 pin，其"注入即生效"由下方 `injected_threshold_moves_the_bins` 用例证。
-    #[test]
-    fn doa_bin_str_and_lut_are_pinned() {
-        assert_eq!(Rr3DoaBin::Left.rr3_doa_bin_as_str(), "left");
-        assert_eq!(Rr3DoaBin::Center.rr3_doa_bin_as_str(), "center");
-        assert_eq!(Rr3DoaBin::Right.rr3_doa_bin_as_str(), "right");
-        assert_eq!(RR3_ASIN_DEG_LUT[0], -90);
-        assert_eq!(RR3_ASIN_DEG_LUT[128], 0);
-        assert_eq!(RR3_ASIN_DEG_LUT[256], 90);
+    /// 延迟立体声窗：τ>0 声源在右（R 领先 |τ| 样本），τ<0 声源在左——
+    /// 与 b3a 符号定案同构（R=甲/物理右先到 = lag>0）。
+    fn delayed_stereo(tau: i32, frames: usize, amp: i32) -> Vec<i16> {
+        let mut xs = Xorshift(0x1234_5678);
+        let u: Vec<i16> = (0..frames + tau.unsigned_abs() as usize)
+            .map(|_| xs.next_i16_scaled(amp))
+            .collect();
+        let (l, r): (Vec<i16>, Vec<i16>) = if tau >= 0 {
+            (u[..frames].to_vec(), u[tau as usize..].to_vec())
+        } else {
+            (u[(-tau) as usize..].to_vec(), u[..frames].to_vec())
+        };
+        (0..frames).flat_map(|t| [l[t], r[t]]).collect()
     }
 
-    /// S-5：分档阈值是注入面——同一批帧换 `threshold_deg` 即换档界，"某形态换档
-    /// 口径 = 改数据不改码"。−15° 在 30° 边界下落中档，在 10° 边界下落左档。
+    fn doa_cfg() -> Rr3DoaCfg {
+        Rr3DoaCfg {
+            sample_rate_hz: 16000,
+            frame_ms: 20,
+            mic_baseline_mm: 150,
+            window_rms_min: 800,
+            bin_threshold_deg: 30,
+        }
+    }
+
+    /// golden 向量（生成器 golden_doa.py 与本件 1:1 镜像）：延迟反演逐位钉死——
+    /// 符号约定、物理 lag 上限、Q7 抛物线、K_Q15 定标、asin 查表任何一步漂移
+    /// 当场红。0.2s 窗（onset 量级）+ 全幅度 3000（rms ~1732 > 门 800）。
+    #[test]
+    fn tdoa_inverts_delay_and_bins_pm90() {
+        let cfg = doa_cfg();
+        for (tau, want_deg, want_bin) in [
+            (-7, -90, Rr3DoaBin::Left),
+            (-4, -35, Rr3DoaBin::Left),
+            (-2, -17, Rr3DoaBin::Center),
+            (0, 0, Rr3DoaBin::Center),
+            (2, 17, Rr3DoaBin::Center),
+            (4, 35, Rr3DoaBin::Right),
+            (7, 90, Rr3DoaBin::Right),
+        ] {
+            let samples = delayed_stereo(tau, 3200, 3000);
+            let fix = rr3_doa_fix(&samples, 2, &cfg).unwrap_or_else(|| panic!("tau={tau} 应判出"));
+            assert_eq!(fix.deg, want_deg, "tau={tau} 反演角");
+            assert_eq!(fix.bin, want_bin, "tau={tau} 档位");
+        }
+    }
+
+    /// 单声道/空窗/全静音/欠能量窗恒 None（无方向信息不硬判）；能量门按帧评，
+    /// 窗内只要有一帧过阈即判（onset 窗"头部静音尾部语音"形状照样判出）。
+    #[test]
+    fn tdoa_returns_none_for_mono_silence_and_quiet() {
+        let cfg = doa_cfg();
+        assert_eq!(rr3_doa_fix(&[10, -10, 20, -20], 1, &cfg), None, "mono 无方向");
+        assert_eq!(rr3_doa_fix(&[], 2, &cfg), None, "空窗");
+        assert_eq!(rr3_doa_fix(&[0; 640], 2, &cfg), None, "全静音");
+        // amp 375 峰值 → 帧 rms ~216 < 800：整窗欠能量（golden：fmax=224 → None）
+        let quiet = delayed_stereo(4, 3200, 375);
+        assert_eq!(rr3_doa_fix(&quiet, 2, &cfg), None, "欠能量窗不判");
+        // 0.2s 窗里只有尾 0.02s 有声：单帧过阈即过门，照样判出右向
+        let mut burst = vec![0i16; 3200 * 2];
+        for (i, v) in delayed_stereo(4, 320, 3000).into_iter().enumerate() {
+            burst[(3200 - 320) * 2 + i] = v;
+        }
+        assert_eq!(
+            rr3_doa_fix(&burst, 2, &cfg).map(|f| f.bin),
+            Some(Rr3DoaBin::Right),
+            "尾部语音帧过门判向"
+        );
+    }
+
+    /// 分档阈值注入面（S-5 延续）：同一窗换 `bin_threshold_deg` 即换档，
+    /// 反演角与阈值无关。
     #[test]
     fn injected_threshold_moves_the_bins() {
-        let samples = stereo_frame(-15.0, 1600);
-        let wide = rr3_doa_fix(&samples, 2, 30).unwrap();
-        let narrow = rr3_doa_fix(&samples, 2, 10).unwrap();
-        assert_eq!(wide.bin, Rr3DoaBin::Center, "30° 边界：−15° 落在中档");
-        assert_eq!(narrow.bin, Rr3DoaBin::Left, "10° 边界：−15° 越界落左档");
-        assert_eq!(wide.deg, narrow.deg, "反演角与阈值无关，只档位随之变");
+        let samples = delayed_stereo(2, 3200, 3000); // 17°
+        let wide = rr3_doa_fix(&samples, 2, &doa_cfg()).unwrap();
+        assert_eq!(wide.bin, Rr3DoaBin::Center, "30° 边界：17° 落中档");
+        let mut narrow = doa_cfg();
+        narrow.bin_threshold_deg = 10;
+        let narrowed = rr3_doa_fix(&samples, 2, &narrow).unwrap();
+        assert_eq!(narrowed.bin, Rr3DoaBin::Right, "10° 边界越界落右档");
+        assert_eq!(wide.deg, narrowed.deg, "反演角与阈值无关");
     }
 
     /// 多通道（>2）取前两路 L/R 对：第三路起的内容不影响判向结果。
     #[test]
-    fn doa_uses_first_two_channels_only() {
-        let stereo = stereo_frame(-60.0, 400);
-        // 三通道：前两路同 stereo，第三路塞满任意噪声值
+    fn tdoa_uses_first_two_channels_only() {
+        let stereo = delayed_stereo(-4, 1600, 3000);
         let three: Vec<i16> = stereo
             .as_chunks::<2>()
             .0
             .iter()
             .flat_map(|f| [f[0], f[1], -777])
             .collect();
-        let a = rr3_doa_fix(&stereo, 2, 30).unwrap();
-        let b = rr3_doa_fix(&three, 3, 30).unwrap();
-        assert_eq!(a, b, "第三路不得影响 L/R 对的判向");
+        let cfg = doa_cfg();
+        assert_eq!(
+            rr3_doa_fix(&stereo, 2, &cfg),
+            rr3_doa_fix(&three, 3, &cfg),
+            "第三路不得影响 L/R 对的判向"
+        );
     }
 
     // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
 
     #[test]
     fn parity_leg1_capture_output_train_is_deterministic() {
-        // 腿一·确定性：同一多通道样本序列两跑，(下混流, 判向序列) 逐帧相等
+        // 腿一·确定性：同一延迟立体声序列两跑，(下混流, 判向序列) 逐帧相等
         fn run() -> (Vec<i16>, Vec<Option<Rr3DoaFix>>) {
-            let seq: Vec<Vec<i16>> = [(-60.0f64, 400), (0.0, 400), (45.0, 400)]
+            let cfg = doa_cfg();
+            let seq: Vec<Vec<i16>> = [(-4i32, 800usize), (0, 800), (5, 800)]
                 .iter()
-                .map(|&(deg, n)| stereo_frame(deg, n))
+                .map(|&(tau, n)| delayed_stereo(tau, n, 3000))
                 .collect();
             let mixed: Vec<i16> = seq
                 .iter()
                 .flat_map(|s| rr3_pcm_downmix_mono(s, 2))
                 .collect();
-            let fixes: Vec<Option<Rr3DoaFix>> = seq.iter().map(|s| rr3_doa_fix(s, 2, 30)).collect();
+            let fixes: Vec<Option<Rr3DoaFix>> =
+                seq.iter().map(|s| rr3_doa_fix(s, 2, &cfg)).collect();
             (mixed, fixes)
         }
         assert_eq!(run(), run(), "同输入序列两跑逐帧相等（腿一·确定性）");
@@ -320,22 +403,17 @@ mod tests {
 
     #[test]
     fn parity_leg2_capture_matches_ruling_semantics() {
-        // 腿二·正确性：分档等号边界独立重写——|θ| ≤ 30° 落中档（含等号），
-        // 严格出界才落左/右；零值输入不产帧循环（0 帧换算、空样本安全返回）
-        for (deg, want_bin) in [
-            (-30.0, Rr3DoaBin::Center),
-            (30.0, Rr3DoaBin::Center),
-            (-31.0, Rr3DoaBin::Left),
-            (31.0, Rr3DoaBin::Right),
-        ] {
-            let fix = rr3_doa_fix(&stereo_frame(deg, 1600), 2, 30).unwrap();
-            assert_eq!(fix.bin, want_bin, "deg={deg} 等号边界档位");
+        // 腿二·正确性：分档等号边界独立重写（|deg| ≤ 30° 含等号落中档）；
+        // 零值输入不产帧循环（0 帧换算、空样本安全返回）
+        for (tau, want_bin) in [(-4, Rr3DoaBin::Left), (4, Rr3DoaBin::Right)] {
+            let fix = rr3_doa_fix(&delayed_stereo(tau, 3200, 3000), 2, &doa_cfg()).unwrap();
+            assert_eq!(fix.bin, want_bin, "tau={tau} 档位");
         }
         // 零值：0ms 节拍与 0Hz 采样都换算出 0 帧（调用方不得拿 0 帧当 buf 死循环）
         assert_eq!(rr3_frames_per_tick(16000, 0), 0, "(16000, 0) → 0 帧");
         assert_eq!(rr3_frames_per_tick(0, 20), 0, "(0, 20) → 0 帧");
         // 零样本下混/判向安全返回（空进空出，不 panic 不产帧）
         assert!(rr3_pcm_downmix_mono(&[], 2).is_empty());
-        assert_eq!(rr3_doa_fix(&[], 2, 30), None, "空帧无方向可判");
+        assert_eq!(rr3_doa_fix(&[], 2, &doa_cfg()), None, "空窗无方向可判");
     }
 }
