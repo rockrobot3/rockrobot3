@@ -581,8 +581,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("时钟在 UNIX_EPOCH 之前")
             .as_nanos();
-        let sock = std::env::temp_dir()
-            .join(format!("rr3-unit-log-{}-{nanos}.sock", std::process::id()));
+        let sock =
+            std::env::temp_dir().join(format!("rr3-unit-log-{}-{nanos}.sock", std::process::id()));
 
         // 两世 spawn 各写一行，两行都在——append 不 truncate
         let f1 = rr3_open_unit_log(&sock, "rr3-x").expect("首开即建");

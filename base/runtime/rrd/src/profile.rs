@@ -619,9 +619,8 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
     // 运维留痕无环（rr3.ctl.logs 恒空），负数非物理；未知键逐条点名。
     let mut log_ring_cap: usize = 0;
     match root.get("runtime").and_then(toml::Value::as_table) {
-        None => errs.push(
-            "缺少 [runtime]（rrd 运行参数；schema_version=5 起必填，批N5 件二）".to_string(),
-        ),
+        None => errs
+            .push("缺少 [runtime]（rrd 运行参数；schema_version=5 起必填，批N5 件二）".to_string()),
         Some(t) => {
             match t.get("log_ring_cap").and_then(toml::Value::as_integer) {
                 Some(v) if v > 0 => log_ring_cap = v as usize,
@@ -1092,10 +1091,7 @@ fn rr3_axis_files_load(
 /// 读者数为 0"的 host 侧半边）。零份回空串且安静（无档案是常态起跑态）；坏件
 /// 逐条点名但不拒 boot（档案装载是降级面，与缺格/缺角色同档——模块侧折保守
 /// 缺省仍是安全向）；多份合法点名后同样空串。
-fn rr3_axis_state_text(
-    found: &[crate::axis::Rr3AxisFile],
-    axis: &str,
-) -> (String, Vec<String>) {
+fn rr3_axis_state_text(found: &[crate::axis::Rr3AxisFile], axis: &str) -> (String, Vec<String>) {
     let mut notes = Vec::new();
     // 副本病灶：同 pin 多份文件 → 不注入（恰一份合法才投影；先清理副本）
     let mut pin_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
@@ -2317,7 +2313,8 @@ mod tests {
             .expect("真仓 esp32-mini 装配单必须合法");
         let t2 = rr3_runtime_truth_set(&rtos, "esp32-mini");
         assert!(
-            t2.files.contains(&"contracts/platform/esp32.toml".to_string()),
+            t2.files
+                .contains(&"contracts/platform/esp32.toml".to_string()),
             "chip 选册成员随装配单 [platform].chip 变（esp32-mini → esp32）"
         );
         assert_eq!(t2.dirs, vec!["hardware/esp32-mini/axis"]);
@@ -3234,7 +3231,10 @@ mux_group = []
         // 段缺（GOOD 定点删除）
         let errs = rr3_profile_from_text(&GOOD.replace("[runtime]\nlog_ring_cap = 512\n", ""))
             .expect_err("缺 [runtime] 必须报错");
-        assert!(errs.iter().any(|e| e.contains("缺少 [runtime]")), "{errs:?}");
+        assert!(
+            errs.iter().any(|e| e.contains("缺少 [runtime]")),
+            "{errs:?}"
+        );
         // 键缺
         let errs = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", ""))
             .expect_err("缺 log_ring_cap 必须报错");
@@ -3253,25 +3253,31 @@ mux_group = []
             );
         }
         // 类型错（字符串不是整数）
-        let errs = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = \"many\""))
-            .expect_err("字符串容量必须报错");
+        let errs =
+            rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = \"many\""))
+                .expect_err("字符串容量必须报错");
         assert!(
             errs.iter()
                 .any(|e| e.contains("runtime.log_ring_cap 缺失或不是整数")),
             "{errs:?}"
         );
         // 未知键点名
-        let errs = rr3_profile_from_text(&GOOD.replace("[runtime]", "[runtime]\nlog_level = \"debug\""))
-            .expect_err("未知键必须报错");
+        let errs =
+            rr3_profile_from_text(&GOOD.replace("[runtime]", "[runtime]\nlog_level = \"debug\""))
+                .expect_err("未知键必须报错");
         assert!(
-            errs.iter().any(|e| e.contains("[runtime] 未知键 log_level")),
+            errs.iter()
+                .any(|e| e.contains("[runtime] 未知键 log_level")),
             "{errs:?}"
         );
         // 合法值如实收进结构体（64 ≠ 编译期兜底 512——数据流证明）
         let p = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 64"))
             .expect("64 是合法容量");
         assert_eq!(p.log_ring_cap, 64, "容量必须来自装配单数据");
-        assert_eq!(rr3_profile_from_text(GOOD).expect("GOOD 合法").log_ring_cap, 512);
+        assert_eq!(
+            rr3_profile_from_text(GOOD).expect("GOOD 合法").log_ring_cap,
+            512
+        );
     }
 
     #[test]

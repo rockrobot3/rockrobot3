@@ -146,7 +146,10 @@ fn rr3_listen_profile(socket: &Path) -> (PathBuf, PathBuf) {
     let w = root.join("hardware").join("default").join("wiring.toml");
     std::fs::create_dir_all(w.parent().unwrap()).expect("建夹具 hardware 目录");
     std::fs::write(&w, RR3_LISTEN_WIRING).expect("写监听面接线档");
-    let m = root.join("modules").join("rr3-listenstub").join("module.toml");
+    let m = root
+        .join("modules")
+        .join("rr3-listenstub")
+        .join("module.toml");
     std::fs::create_dir_all(m.parent().unwrap()).expect("建夹具 modules 目录");
     std::fs::write(&m, rr3_manifest("rr3-listenstub", 100, 500, "never"))
         .expect("写监听面 stub manifest");

@@ -64,7 +64,9 @@ pub fn rr3_contracts_snapshot() -> Option<&'static Rr3ContractsSnapshot> {
 /// 对一份契约目录记账四册：逐册读 + sha256。任何一册读不到 / 不可读即 Err
 /// ——调用点是 boot 装载链验收之后，四册刚被装载面读过一遍，这里再读失败
 /// 是文件系统级异常，fail-closed 让 boot 带因退出（不带病定格）。
-pub fn rr3_contracts_snapshot_from_dir(dir: &std::path::Path) -> Result<Rr3ContractsSnapshot, String> {
+pub fn rr3_contracts_snapshot_from_dir(
+    dir: &std::path::Path,
+) -> Result<Rr3ContractsSnapshot, String> {
     let mut entries = Vec::with_capacity(RR3_CONTRACT_FILES.len());
     for f in RR3_CONTRACT_FILES {
         let path = dir.join(f);
@@ -230,7 +232,10 @@ pub fn rr3_sha256(data: &[u8]) -> [u8; 32] {
 
 /// sha256 十六进制小写串（记账与应答的呈现面）。
 pub fn rr3_sha256_hex(data: &[u8]) -> String {
-    rr3_sha256(data).iter().map(|b| format!("{b:02x}")).collect()
+    rr3_sha256(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[cfg(test)]
@@ -281,8 +286,7 @@ mod tests {
         assert!(e.contains("记账读失败") && e.contains("topics.toml"), "{e}");
         let _ = std::fs::remove_dir_all(&miss);
 
-        let dir =
-            std::env::temp_dir().join(format!("rrd-contracts-audit-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rrd-contracts-audit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("建临时契约目录");
         for (f, body) in [
             ("topics.toml", "# t1\n"),
@@ -301,23 +305,35 @@ mod tests {
         assert!(rr3_contracts_snapshot_set(snap));
         let checks = rr3_contracts_checks();
         assert_eq!(checks.len(), 4);
-        assert!(checks.iter().all(|c| c.pass == RR3_CHECK_PASS), "{checks:?}");
+        assert!(
+            checks.iter().all(|c| c.pass == RR3_CHECK_PASS),
+            "{checks:?}"
+        );
         assert_eq!(checks[0].item, "contract:topics.toml");
 
         // sha 对破：boot 后内容被改
         std::fs::write(dir.join("topics.toml"), "# t2\n").expect("改册");
         let checks = rr3_contracts_checks();
-        let drifted = checks.iter().find(|c| c.item == "contract:topics.toml").unwrap();
+        let drifted = checks
+            .iter()
+            .find(|c| c.item == "contract:topics.toml")
+            .unwrap();
         assert_eq!(drifted.pass, RR3_CHECK_FAIL);
         assert!(drifted.reason.contains("sha256 漂移"), "{}", drifted.reason);
 
         // 齐全破：boot 后文件被删；其余册逐条点名不连坐
         std::fs::remove_file(dir.join("roles.toml")).expect("删册");
         let checks = rr3_contracts_checks();
-        let missing = checks.iter().find(|c| c.item == "contract:roles.toml").unwrap();
+        let missing = checks
+            .iter()
+            .find(|c| c.item == "contract:roles.toml")
+            .unwrap();
         assert_eq!(missing.pass, RR3_CHECK_FAIL);
         assert!(missing.reason.contains("文件缺失"), "{}", missing.reason);
-        let slots = checks.iter().find(|c| c.item == "contract:slots.toml").unwrap();
+        let slots = checks
+            .iter()
+            .find(|c| c.item == "contract:slots.toml")
+            .unwrap();
         assert_eq!(slots.pass, RR3_CHECK_PASS);
 
         // 渲染（快照在册形）：available:true + 四行记账 + 四条判果

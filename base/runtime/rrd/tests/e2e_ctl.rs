@@ -168,7 +168,10 @@ fn ctl_wiring_reports_unavailable_without_profile_boot() {
     let mut ctl = t.rr3_connect();
     let v = rr3_ask_ctl(&mut ctl, "rr3.ctl.wiring", 1);
     let result = &v["result"];
-    assert!(result.is_object(), "wiring 必须以成功信封应答（不可得不是协议错误）: {v}");
+    assert!(
+        result.is_object(),
+        "wiring 必须以成功信封应答（不可得不是协议错误）: {v}"
+    );
     assert_eq!(result["available"], false, "{v}");
     let msg = result["reason"].as_str().unwrap_or_default();
     assert!(
