@@ -2,8 +2,9 @@
 //!
 //! 接线（README runbook 批D 节；两麦 L/R 时隙复用共一条总线）：
 //! - BCLK → GPIO4（两麦并接）、WS → GPIO26（两麦并接）、SD → GPIO27（两麦并接）
-//!   （**2026-10-20 迁移**：原 GPIO25 桥测取证无时钟输出——WS 桥爆表/BCLK 桥恒零
-//!   对照实锤 pad 损坏，此前全部音频数据为浮空总线图案假阳性，见 main.rs 装配注）
+//!   （**2026-10-20 迁移**：原 GPIO25 装配期全部音频为图案假阳性；根因为 rig 接触
+//!   面而非 pad 损坏——「BCLK 桥测」法对 BCLK 自身失明（自采样语义），撤回误判
+//!   过程见 main.rs 装配注）
 //! - 麦甲 L/R → GND（左时隙）、麦乙 L/R → 3V3（右时隙）——接错则双通道同相/单声道假象
 //! - VDD → 3V3、GND → GND；INMP441 无 MCLK 需求（mclk 传 None）
 //!
@@ -163,7 +164,7 @@ pub fn spawn_mic_smoke(
                     }
                 };
             println!(
-                "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK=4 SD=27 WS=26（INMP441 双麦 L/R 时隙；原 25 桥测卡死迁移）"
+                "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK=4 SD=27 WS=26（INMP441 双麦 L/R 时隙；原 25 装配期全图案已迁）"
             );
             let mut buf = [0u8; MIC_BUF];
             let mut reads = 0usize;
