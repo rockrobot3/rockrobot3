@@ -1063,7 +1063,56 @@ else
   printf 'PASS  ⑨-z 真值集三方成员判等（单点 RR3_CONTRACT_BOOKS 在位；判据面/打包面共读；产码第二份字面零命中；成员集判等实体 = profile.rs 单测 truth_set_members_and_boot_locations_are_the_same_set）\n'
 fi
 
-# —— ⑩ 门 d 面板覆盖率对账·报告模式（基-19↔本步；interact I-19，批N4 件三；全案 §8
+# —— ⑨-y 跨平台可编面（base 层 Windows 红 crate 数基线钉数，门 y；裁-19/基-33 /
+#    §25.8 #9，批N8 件六）。判据：cargo check --target x86_64-pc-windows-msvc
+#    （check 不链接，宿主无需 MSVC）--keep-going 尽量多编，base/runtime 九成员的
+#    **红 crate 数**（按 crate 名去重——同 crate lib/bin 双单元红只计一）不得超过
+#    tools/ci/gate-win-baseline.txt 的钉数（只降不升）。
+#    fail-closed 三查：基线文件缺/坏/首个非注释行非纯整数即红（gate-a 同款）；
+#    Windows target 未装即红（附安装命令，**不设 SKIP**——裁-10 同族理由：能跑的
+#    机器越少，漂移越没人发现，ci.yml conventions job 同批装 target）；count < 基线
+#    PASS 并打印"须同批下调基线"提醒。转绿终点 = 基-33 拆修全落 count=0，届时本门
+#    转红、基线退役。
+step "⑨-y 跨平台可编面（base 层 Windows 红 crate 数基线钉数，门 y）"
+gate_y_fail=0
+gy_log="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+if rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-msvc$'; then
+  gy_red=0
+  if ! cargo check --locked --manifest-path base/runtime/Cargo.toml \
+         --target x86_64-pc-windows-msvc --keep-going >"$gy_log" 2>&1; then
+    gy_red="$(grep -oE 'could not compile `[a-z0-9_-]+`' "$gy_log" | sort -u | wc -l | tr -d ' ')"
+  fi
+  gy_b="$(grep -vE '^[[:space:]]*(#|$)' tools/ci/gate-win-baseline.txt 2>/dev/null | sed -n '1p' | tr -d '[:space:]')"
+  case "$gy_b" in
+    ''|*[!0-9]*)
+      printf 'FAIL  ⑨-y 基线文件形状坏: tools/ci/gate-win-baseline.txt（首个非注释行须为纯整数，实得"%s"）——fail-closed，不放行\n' "${gy_b:-<缺文件或空>}"
+      gate_y_fail=1
+      ;;
+    *)
+      if [ "$gy_red" -gt "$gy_b" ]; then
+        printf 'FAIL  ⑨-y Windows 红 crate 回涨: %s > 基线 %s（"只降不升"被破——新红 crate 必有一笔未归因，先归因再动基线；红名单见上 cargo 输出）\n' \
+          "$gy_red" "$gy_b"
+        grep -oE 'could not compile `[a-z0-9_-]+`' "$gy_log" | sort -u | sed 's/^/      红 crate: /'
+        gate_y_fail=1
+      elif [ "$gy_red" -lt "$gy_b" ]; then
+        printf 'PASS  ⑨-y Windows 红 crate %s < 基线 %s（**红账下降 %s：须同批下调 tools/ci/gate-win-baseline.txt**；转绿终点 = 基-33 拆修全落 count=0）\n' \
+          "$gy_red" "$gy_b" "$((gy_b - gy_red))"
+      else
+        printf 'PASS  ⑨-y Windows 红 crate %s = 基线 %s（只降不升在账；唯一红 = 基-33 断点面，拆修随后）\n' \
+          "$gy_red" "$gy_b"
+      fi
+      ;;
+  esac
+else
+  printf 'FAIL  ⑨-y Windows target 未安装（rustup target add x86_64-pc-windows-msvc）——fail-closed 不设 SKIP（能跑的机器越少，漂移越没人发现）\n'
+  gate_y_fail=1
+fi
+rm -f "$gy_log"
+if [ "$gate_y_fail" -ne 0 ]; then
+  fail=1
+fi
+
+# —— ⑩ 门 d 面板覆盖率对账·基线钉数门（当前上限 0）（基-19↔本步；interact I-19，批N4 件三；全案 §8
 #     门 d / conventions §2 拟步 ⑩）。判据（字段级分母 + covers 申报制分子）：
 #       分母 = 五路字段并集（全部自代码常量/契约表导出——单真值点，⑨-a/⑨-n 先例）：
 #         ops/<slot>   ← modules/*/atoms/*/assemble.toml 的 ops 槽；
@@ -1087,7 +1136,7 @@ fi
 #         分母 > 下限 提醒同批上调（合法扩面必须动基线，有迹可循）。
 #     建即红：今日 14 端点读配置者 0（I-15 实况）⇒ 差集 = 全分母，红项随批N4 件九
 #     三面扩端点逐批转绿；分母是设计产物，集合定义改动 = 契约级评审。
-step "⑩ 门 d 面板覆盖率对账·报告模式（分子 covers 申报＋applies 生效路径 / 分母字段级五路并集，门 d）"
+step "⑩ 门 d 面板覆盖率对账·基线钉数门（当前上限 0）（分子 covers 申报＋applies 生效路径 / 分母字段级五路并集，门 d）"
 gate_d_fail=0
 gd_dir="$(mktemp -d)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 gd_ops="$gd_dir/ops"; gd_pin="$gd_dir/pin"; gd_role="$gd_dir/role"; gd_dom="$gd_dir/dom"
@@ -1249,7 +1298,7 @@ else
           printf 'PASS  ⑩ 红账 %s ≤ 上限 %s（**红账下降 %s 笔：须同批下调 %s 行 1；转绿终点 = 差集空，届时本门转红、基线退役**）\n' \
             "$gd_red_n" "$gd_b1" "$((gd_b1 - gd_red_n))" "$gd_base"
         else
-          printf 'PASS  ⑩ 红账 %s = 上限 %s（报告模式：建即红如实在账，红项随批N4 件九扩端点逐批转绿）\n' \
+          printf 'PASS  ⑩ 红账 %s = 上限 %s（基线钉数门·当前上限 0：建即红如实在账，红项随批N4 件九扩端点逐批转绿）\n' \
             "$gd_red_n" "$gd_b1"
         fi
         if [ "$gd_den_n" -lt "$gd_b2" ]; then
