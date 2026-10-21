@@ -175,8 +175,10 @@ class TestClientAgainstFakeRrd(unittest.TestCase):
         client._shutdown()
 
     def test_heartbeat_params_carry_counters_only_after_bump(self):
-        """0.0.4 批B 双端镜像（client.rs heartbeat_carries_counters_only_after_bump）：
-        无上报的拍 params 维持 {}；bump 后带非空 counters，同键累加、异键并存。"""
+        """0.0.4 批B 双端镜像（client.rs heartbeat_carries_counters_only_after_bump）；
+        b3c 2026-10-21 增量语义钉死：无上报的拍 params 维持 {}；bump 后带非空
+        counters，首拍增量 = 累计值，之后跨拍只发「自上一拍以来」的增量（旧快照
+        语义发全量被 rrd 当增量再收一遍，计数二次方膨胀）。"""
         client = self._connect()
         self.assertEqual(client._heartbeat_params(), {}, "空表不带 counters 字段")
         client.rr3_counter_bump("asr_ok", 2)
@@ -185,6 +187,14 @@ class TestClientAgainstFakeRrd(unittest.TestCase):
         self.assertEqual(
             client._heartbeat_params(),
             {"counters": {"asr_ok": 3, "chat_rounds": 1}},
+            "首拍水位 0，增量 = 累计值",
+        )
+        self.assertEqual(client._heartbeat_params(), {}, "零增量拍维持 {} 旧形状")
+        client.rr3_counter_bump("asr_ok")
+        self.assertEqual(
+            client._heartbeat_params(),
+            {"counters": {"asr_ok": 1}},
+            "跨拍只发增量，不发全量快照",
         )
         client._shutdown()
 

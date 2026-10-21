@@ -67,7 +67,7 @@
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
 | `rr3.register` | `Register` | `params.manifest`：非空字符串（manifest **全文文本**，不是路径）；`params.name` **不被读取**，身份取自 manifest 里的 `[manifest].name` | `{"src_task":<分配到的 u64>}` | `rpc.rs` 的 `Rr3RpcMethod::Register` 变体、`conn.rs` 的 `rr3_handshake` |
-| `rr3.heartbeat` | `Heartbeat` | 无必填 `params`（`json!({})` 即可）；可选 `counters` 对象（`{字符串键: u64 值}`）——0.0.4 批B 起，模块把自报计数（如 `asr_ok`/`relay_on`）随心跳上行。缺省 / 非对象 / 空对象都视为"不带"；非法值或空键**逐对静默跳过，不报错**（`rr3_rpc_heartbeat_counters`，`rpc.rs`）——心跳失败语义太重，脏计数不值一条拒绝 | `{"beat":"accepted"}` | `conn.rs` 的 `rr3_serve_request`（成功支；同一分支的失败面见 §5 `TimedOut` 行） |
+| `rr3.heartbeat` | `Heartbeat` | 无必填 `params`（`json!({})` 即可）；可选 `counters` 对象（`{字符串键: u64 值}`）——0.0.4 批B 起，模块把自报计数（如 `asr_ok`/`relay_on`）随心跳上行。**值 = 自上一拍以来的增量**（b3c 2026-10-21 钉死：客户端记已发水位每拍发差值，rrd 按 `模块名/键` 增量归并，`rr3.ctl.counters` 聚合表 = 生命周期累计；旧线上客户端曾发全量快照被当增量再收，计数二次方膨胀到 40 亿量级）。缺省 / 非对象 / 空对象都视为"不带"；非法值或空键**逐对静默跳过，不报错**（`rr3_rpc_heartbeat_counters`，`rpc.rs`）——心跳失败语义太重，脏计数不值一条拒绝 | `{"beat":"accepted"}` | `conn.rs` 的 `rr3_serve_request`（成功支；同一分支的失败面见 §5 `TimedOut` 行） |
 | `rr3.unregister` | `Unregister` | 无必填 `params` | `{"removed":<bool>}` | `conn.rs` 的 `rr3_serve_request` |
 | `rr3.call` | `Call` | `params.topic`：非空字符串（被调方须在 manifest `[rpc].exposes` 声明）；`params.args` 可缺省（缺省为 `Null`，被调方自己校验） | **不回 `result` 给调用方**——成功即转发，调用方的应答是被调方沿 trace_id 回路送回的 Response（见 §8） | `rpc.rs` 的 `rr3_rpc_call_params`、`conn.rs` 的 `rr3_serve_request`、`conn.rs` 的 `rr3_route_call` |
 
