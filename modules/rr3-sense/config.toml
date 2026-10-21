@@ -16,3 +16,8 @@ min_speech_ms = 200
 
 [rr3-sense.doa]
 bin_threshold_deg = 30  # DoA 三档边界（S-5：阈值数据化，件内常量已迁出）
+window_ms = 1000        # 判向窗长（B批 b3b TDOA：onset 时 ring 回看窗整窗互相关）
+window_rms_min = 1500   # 窗能量门（与 vad.rms_start 同口径——onset 路径恒过，
+                        # 防非 onset 直调与全静音窗；esp32 档随其 vad 阈 800 另配）
+mic_baseline_mm = 150   # 双麦间距（b3a 实测安装同源；单麦档无 ring 不消费，
+                        # 键在册只为装配注入完备——contract 注入缺拦下的 b3b 遗漏）
