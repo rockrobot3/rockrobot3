@@ -114,6 +114,11 @@ pub(crate) struct PeriphState {
     /// 缺席/失配逐键点名并累计，`INFO` 观测；非零即装配单/下发链漂移（fail-visible，
     /// 不拒收不拒 boot），注入值 = 装配时计数不增。
     pub(crate) binding_mismatch: u32,
+    /// 舵机移动失败累计（批N12 件一，敞口 16 第一问缺码半边观测面）：Move 作业
+    /// 失败与 WANDER 扫摆驱动失败各计一次（boot 以来只增不减；`INFO` 观测，同
+    /// `selfheal_skipped` 静默口径——Move 失败另走 outbox `ERR` 行回宿主，SCAN
+    /// 失败已有 outbox 回包不重复计）。
+    pub(crate) move_fail_events: u32,
 }
 
 impl PeriphState {
@@ -151,6 +156,7 @@ impl PeriphState {
             audio_dropped: 0,
             selfheal_skipped: 0,
             binding_mismatch: 0,
+            move_fail_events: 0,
         }
     }
 
