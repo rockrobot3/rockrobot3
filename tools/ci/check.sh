@@ -1194,7 +1194,8 @@ fi
 #         role/<req>   ← contracts/roles.toml requires 逐项（⑨-a 同款拆词）；
 #         domain/<f>   ← rrd/src/profile.rs RR3_DOMAIN_KEYS（声明数判等）；
 #         axis/<field> ← rr-hal-api lib.rs RR3_ACT_PROFILE_FIELDS 十四键。
-#       分子 = ∪ 每端点 covers 申报（panel/server.rs RR3_PANEL_ROUTES 第三列），
+#       分子 = ∪ 每端点 covers 申报（panel/server.rs RR3_PANEL_ROUTES 第三列 ＋
+#       板侧 httpd.rs RR3_BOARD_ROUTES 第三列，批N13 件二扩入两源同扫），
 #       元素形制 = <集合>/<单段字段>、集合词表自 RR3_PANEL_COVER_SETS 导出——未申报
 #       不计分子（申报制，不是"默认全算"；词表外/缺斜杠/多段 = 申报面错，硬红不进基线）。
 #       同表第四列 = applies 生效路径申报（I-20，批N4 件四，全案 §19.3 判据 1）：
@@ -1241,11 +1242,16 @@ awk '/const RR3_DOMAIN_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/sr
 gd_dom_decl="$(grep -m1 -oE 'RR3_DOMAIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
 awk '/pub const RR3_ACT_PROFILE_FIELDS/{f=1} f{print} f && /^\];/{exit}' base/runtime/rr-hal-api/src/lib.rs \
   | grep -oE 'key: "[^"]+"' | sed 's/key: "/axis\//;s/"$//' | sort -u > "$gd_axis"
-# —— covers 原串导出（RR3_PANEL_ROUTES 区段内带斜杠且不以 / 开头的字符串：
-#     path 以 / 开头被排除，method 无斜杠不匹配；"rr3-act/..." 类 topic 字面量
-#     不住本区段）＋ 词表导出
-awk '/pub const RR3_PANEL_ROUTES/{f=1} f{print} f && /^\];/{exit}' \
-  modules/rr3-interact/src/panel/server.rs \
+# —— covers 原串导出（两源同一段扫描逻辑复用，批N13 件二扩入板侧）：
+#     host 侧 RR3_PANEL_ROUTES 区段 ＋ 板侧 RR3_BOARD_ROUTES 区段
+#     （tools/esp32-periph-base/src/httpd.rs，pub(crate) 声明）——区段内带斜杠
+#     且不以 / 开头的字符串：path 以 / 开头被排除，method 无斜杠不匹配；
+#     "rr3-act/..." 类 topic 字面量不住本区段。板侧首笔两端点 covers 全空
+#     （批N13 件一注记：读的是运行态与注入绑定，不在 ⑩ 分母五路）＝本源贡献零行。
+{ awk '/pub const RR3_PANEL_ROUTES/{f=1} f{print} f && /^\];/{exit}' \
+    modules/rr3-interact/src/panel/server.rs
+  awk '/pub\(crate\) const RR3_BOARD_ROUTES/{f=1} f{print} f && /^\];/{exit}' \
+    tools/esp32-periph-base/src/httpd.rs; } \
   | grep -oE '"[^"/][^"]*/[^"]*"' | tr -d '"' > "$gd_cov_raw"
 awk '/pub const RR3_PANEL_COVER_SETS/{f=1} f{print} f && /\];/{exit}' \
   modules/rr3-interact/src/panel/server.rs | grep -oE '"[^"]+"' | tr -d '"' | sort -u > "$gd_sets"
@@ -1345,6 +1351,17 @@ else
   fi
   printf '门 d 数学（全案 §8 / I-19）：分母 %s − covers 申报 %s = 差集（红账）%s\n' \
     "$gd_den_n" "$gd_cov_n" "$gd_red_n"
+  # —— covers ⊆ 分母五路并集对拍执法（批N13 件二，申报制语义的另一半）：
+  #     分子元素越出分母即硬红——申报面校验只挡词表外形制，挡不住"词表内合法
+  #     形制、字段却不在五路分母"的越界申报；本位反向 comm（分子−分母）补齐。
+  #     两源共用（panel 与板侧同账同执法：任何一端申报越界字段都过不了门）。
+  comm -13 "$gd_dir/cov_sorted" "$gd_den" > "$gd_dir/cov_oob"
+  gd_oob_n="$(grep -c . "$gd_dir/cov_oob" || true)"
+  if grep -q . "$gd_dir/cov_oob"; then
+    sed 's/^/X  covers 越界（不在分母五路并集）: /' "$gd_dir/cov_oob"
+    printf 'FAIL  ⑩ covers 越界 %s 笔（申报制 ⊆ 分母执法，越界申报硬红不进基线）\n' "$gd_oob_n"
+    gate_d_fail=1
+  fi
   if [ "$gd_cov_bad" -gt 0 ]; then
     printf 'FAIL  ⑩ covers 形制乱写 %s 笔（申报面错不是账，硬红不进基线）\n' "$gd_cov_bad"
     gate_d_fail=1
