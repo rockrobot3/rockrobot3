@@ -97,6 +97,15 @@ pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "i2c_sda",
     "i2c_scl",
     "adc_rail_pin",
+    // 批N9 件五（MC-7 缺③ [hardware] 进位补齐）：板侧主驱动七键（板侧外设引脚
+    // 真值，消费语义 = 主驱动装配对账锚，无 role 对应故不在 [pins] 派生键集）
+    "uart2_tx",
+    "uart2_rx",
+    "ledc_pan",
+    "ledc_tilt",
+    "i2s_bclk",
+    "i2s_sd",
+    "i2s_ws",
 ];
 
 /// 一条句柄声明：件用 `trait_name` 能力面，绑描述符 `desc_key` 键

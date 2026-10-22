@@ -50,7 +50,9 @@ pub use audio_session::{
 pub use bindings::{
     rr3_board_binding_entry, rr3_gpio_number_parse, Rr3BoardBindings,
     RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA,
-    RR3_BOARD_BINDING_KEYS, RR3_METHOD_SET_BINDINGS,
+    RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS,
+    RR3_BOARD_BINDING_KEYS, RR3_BOARD_BINDING_LEDC_PAN, RR3_BOARD_BINDING_LEDC_TILT,
+    RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX, RR3_METHOD_SET_BINDINGS,
 };
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use evidence::{rr3_evidence_ref_wellformed, rr3_evidence_verify};
