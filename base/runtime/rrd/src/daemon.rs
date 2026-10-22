@@ -507,7 +507,8 @@ const RR3_CTL_SOCKET_GROUP: &str = "rockrobot3";
 // self-pipe 信号面：`signal(2)` 的处理器里只做 async-signal-safe 的一件事——
 // 往管道写一个字节；快照 / 写盘 / 日志全部落在 `counters-term-flush` 普通线程
 // （信号处理器里碰 Mutex/File 都是未定义行为，不能省这一层）。两个 libc 函数
-// 手写 extern 壳不引依赖（同 rr-ipc shm 六函数、rr-hal chmod/getgrnam 先例）。
+// 手写 extern 壳不引依赖（同 rr-hal chmod/getgrnam 先例；原 rr-ipc shm 六函数
+// 先例已随 L-32 摘面移除，0.0.8 批N19）。
 
 extern "C" {
     fn signal(signum: i32, handler: usize) -> usize;

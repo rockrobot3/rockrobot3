@@ -77,8 +77,7 @@ pub mod nmcli_support;
 pub mod provision_store;
 pub mod sim;
 
-/// PCM 帧缓冲（承载层数据，批I F1 起不再进契约签名）。所有权随返回值移交
-/// （M2 的 shm 零拷贝沿用同一语义）。
+/// PCM 帧缓冲（承载层数据，批I F1 起不再进契约签名）。所有权随返回值移交。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rr3PcmStream {
     pub cfg: Rr3AudioCfg,
