@@ -1,8 +1,8 @@
 //! 模块侧同步总线客户端（M3，architecture.md §6）。
 //!
-//! rr-bus 的文档声明落点（lib.rs 头注）：总线的**常量层 + 同步客户端**。客户端是
-//! 模块与 rrd 之间唯一的标准说话方式：连接 → 注册（manifest 全文，entry 绝对化）
-//! → 心跳线程 → 发布 / 点名调用 / 收帧。
+//! rr-bus-api 的文档声明落点（lib.rs 头注）：总线的**承载契约面**——客户端逐字自
+//! `rr-bus` 迁入（批N9 件一，基-35 窄化②），是模块与 rrd 之间唯一的标准说话方式：
+//! 连接 → 注册（manifest 全文，entry 绝对化）→ 心跳线程 → 发布 / 点名调用 / 收帧。
 //!
 //! 并发形状（与 rrd 的 conn.rs 同构、方向相反）：reader 线程独占读；写半边由
 //! `Mutex<UnixStream>` 保护（一帧一次 `write_all`，整帧原子）。**应答与广播在同一
@@ -35,14 +35,12 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rr_core::runtime::{rr3_dispatch_class, Rr3Dispatch, Rr3ModuleRuntime};
-use rr_core::{rr3_frame_compose, RR3_TRACE_ID_DIRECT};
+use rr_core::{rr3_frame_compose, RR3_METHOD_CALL, RR3_TASK_RRD, RR3_TRACE_ID_DIRECT};
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
     Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT,
 };
 use serde_json::{json, Value};
-
-use crate::{RR3_METHOD_CALL, RR3_TASK_RRD};
 
 /// 注册应答等待上界：注册是连接的第一件事，卡死在这里没有观察价值
 const RR3_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
