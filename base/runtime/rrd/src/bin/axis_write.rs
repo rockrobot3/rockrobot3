@@ -2,6 +2,9 @@
 //!
 //! 全部策略在 [`rrd::axis_write`]（模块头注释说清了职责边界与拒绝面）；
 //! 本文件只有参数解析 → 编排 → 退出码三行事，不出现第二条写路径。
+//!
+//! 写入编排面随落盘序 unix 门（批N9 件一补钉，`rrd::axis_write::rr3_axis_write_run`
+//! 同径）：非 unix 下解析面照常可验（--help 自述），编排臂点名退出。
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -19,6 +22,7 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::from(2);
         }
     };
+    #[cfg(unix)]
     match rrd::axis_write::rr3_axis_write_run(&cfg) {
         Ok(out) => {
             println!("{out}");
@@ -28,5 +32,11 @@ fn main() -> std::process::ExitCode {
             eprintln!("axis_write: {e}");
             std::process::ExitCode::FAILURE
         }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = cfg;
+        eprintln!("axis_write: 写入编排面仅 unix 在册（rr3_atomic_store 的 std::fs 原子序 cfg 门）");
+        std::process::ExitCode::FAILURE
     }
 }

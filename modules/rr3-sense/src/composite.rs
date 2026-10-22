@@ -37,7 +37,7 @@ mod vad;
 
 use std::time::{Duration, Instant};
 
-use rr_bus::Rr3BusClient;
+use rr_bus_api::Rr3BusClient;
 use rr_hal::backend::rr3_hal_audio_source_with_cmd;
 // 反射旁路是宿主桥档符号（Rr3PeriphCmd，rr-hal backend 宿主档门，批N8 件三）
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -275,7 +275,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
                     }
                 }
                 Rr3PayloadType::Request => {
-                    if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
+                    if body.get("method").and_then(Value::as_str) != Some(rr_core::RR3_METHOD_CALL) {
                         continue;
                     }
                     let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);

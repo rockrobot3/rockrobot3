@@ -746,7 +746,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rr-bus"
+name = "rr-bus-api"
 version = "0.0.1"
 dependencies = [
  "rr-core",
@@ -792,7 +792,7 @@ version = "0.0.1"
 dependencies = [
  "embuild",
  "esp-idf-sys",
- "rr-bus",
+ "rr-bus-api",
  "rr-core",
  "rr-hal",
  "rr-hal-api",

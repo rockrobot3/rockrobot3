@@ -106,10 +106,15 @@ pub fn rr3_counters_load(path: &Path) -> (BTreeMap<String, u64>, Option<String>)
 /// （凭据面 modules/rr3-interact 不依赖 daemon crate，共享件须住双方公共最低层）。
 /// 本 re-export 保持 axis.rs 既有 `use crate::counters::rr3_atomic_store` 路径
 /// 零改动；全仓仍只有这一份实现——任何落盘写路径出现第二条同形序即红（I-20）。
+/// `#[cfg(unix)]` 随 rr-ipc persist 模块门同径（批N9 件一 Windows 复跑时补钉：
+/// 此前漏门被 rr-bus 红以"依赖失败 skip 不自报"掩盖，承载面契约化后浮出）。
+#[cfg(unix)]
 pub use rr_ipc::persist::rr3_atomic_store;
 
 /// write-through 落盘：tmp 写全量 → fsync → rename（同目录原子覆盖），序本体见
-/// [`rr3_atomic_store`]。
+/// [`rr3_atomic_store`]。调用面（conn/daemon flush 路径）整体 `#[cfg(unix)]`，
+/// 本函数随写盘面同门。
+#[cfg(unix)]
 pub fn rr3_counters_store(path: &Path, table: &BTreeMap<String, u64>) -> Result<(), String> {
     let body = json!(table).to_string();
     let tmp = path.with_file_name(COUNTERS_TMP);

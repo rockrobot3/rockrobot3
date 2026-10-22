@@ -30,7 +30,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rr_bus::Rr3BusClient;
+use rr_bus_api::Rr3BusClient;
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_frame_read, rr3_frame_write, Rr3Frame, Rr3Header, Rr3PayloadType,
 };
@@ -558,7 +558,7 @@ pub fn rr3_ctl_query(
             trace_id: 0,
             timestamp_ns: rr3_now_ns(),
             src_task: 0, // ctl 连接没有 task，与外部运维探针同一写法
-            dst_task: rr_bus::RR3_TASK_RRD,
+            dst_task: rr_core::RR3_TASK_RRD,
             payload_len: payload.len() as u32,
         },
         payload,
@@ -1160,7 +1160,7 @@ fn rr3_fake_ctl_rrd(
                         flags: 0,
                         trace_id: 0,
                         timestamp_ns: rr3_now_ns(),
-                        src_task: rr_bus::RR3_TASK_RRD,
+                        src_task: rr_core::RR3_TASK_RRD,
                         dst_task: req.header.src_task, // 按对端自报回（注册期 rrd 同口径）
                         payload_len: payload.len() as u32,
                     },
@@ -1615,7 +1615,7 @@ mod tests {
                     flags: 0,
                     trace_id: 0,
                     timestamp_ns: rr3_now_ns(),
-                    src_task: rr_bus::RR3_TASK_RRD,
+                    src_task: rr_core::RR3_TASK_RRD,
                     dst_task: 7,
                     payload_len: payload.len() as u32,
                 },

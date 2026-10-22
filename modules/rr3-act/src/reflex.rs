@@ -13,7 +13,7 @@
 
 use std::time::{Duration, Instant};
 
-use rr_bus::Rr3BusClient;
+use rr_bus_api::Rr3BusClient;
 use serde_json::json;
 
 pub use rr_core::control::{

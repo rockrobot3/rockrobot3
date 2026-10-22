@@ -37,7 +37,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rr_bus::Rr3BusClient;
+use rr_bus_api::Rr3BusClient;
 use rr_hal::backend::{rr3_hal_audio_sink, rr3_hal_display};
 use rr_hal_api::RR3_AUDIO_CFG_16K_MONO16;
 use rr_ipc::{opcode, Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT};
@@ -234,7 +234,7 @@ pub fn rr3_interact_run() -> Result<(), String> {
                     _ => {}
                 },
                 Rr3PayloadType::Request => {
-                    if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
+                    if body.get("method").and_then(Value::as_str) != Some(rr_core::RR3_METHOD_CALL) {
                         continue;
                     }
                     let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
