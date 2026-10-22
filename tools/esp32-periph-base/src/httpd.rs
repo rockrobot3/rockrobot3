@@ -71,6 +71,8 @@ use esp_idf_sys::{
     wifi_interface_t_WIFI_IF_STA, wifi_mode_t_WIFI_MODE_STA, WIFI_INIT_CONFIG_MAGIC, ESP_OK,
 };
 
+use rr_ipc::Rr3BoardBindings;
+
 use crate::state::{lock_bus, Bus};
 
 // ---------------------------------------------------------------------------
@@ -80,7 +82,7 @@ use crate::state::{lock_bus, Bus};
 /// 端点白名单（与 host `RR3_PANEL_ROUTES` 四列同构：method / path / covers / applies）。
 /// 批N14 件二起四行：两读（GET state/bindings）＋两写（POST wifi/reboot）。
 /// covers 列＝该端点读的 ⑩ 配置模型字段（`<路>/<字段>`）；本表端点读的是板侧
-/// 运行态/注入绑定（**不在** ⑩ 分母五路——绑定十键是 rr-ipc 注入键非配置模型
+/// 运行态/注入绑定（**不在** ⑩ 分母五路——绑定十一键是 rr-ipc 注入键非配置模型
 /// [[pin]] 词表）/写的是板侧 NVS 凭据（同样不在五路），covers 全空如实登记；
 /// applies 列＝该端点改的配置对象（词表 `live`/空）：配网写口改的是"活配置"
 /// （STA 立即重连）＝`live`；reboot 是动作面（不改任何配置对象）＝空，同 host
@@ -100,7 +102,8 @@ pub(crate) enum Rr3BoardRoute {
     /// GET /api/board/state——板侧运行态观测快照（`PeriphState` 观测字段，
     /// 批N12 件一观测面含其中）
     State,
-    /// GET /api/board/bindings——注入绑定十键读数（批N9 件五对账锚同源）
+    /// GET /api/board/bindings——注入绑定十一键读数（批N9 件五对账锚同源；批N17
+    /// 件四 cred_store 随键——非 GPIO 存储源标记，读数面可见）
     Bindings,
     /// POST /api/board/wifi——事务性配网写口（批N14 件二，N-10 ② 配网半边）
     WifiWrite,
@@ -188,41 +191,50 @@ pub(crate) fn rr3_state_json(s: &Rr3BoardStateSnapshot) -> String {
     .to_string()
 }
 
-/// 注入绑定十键快照（state.rs 读窄缝自持锁、逐键 Option<u8> 抄出；`None` = 该键未注入）。
-fn rr3_bindings_snapshot() -> Option<[(&'static str, Option<u8>); 10]> {
-    use crate::state::rr3_board_bindings_snapshot as raw;
-    let b = raw()?;
-    Some([
-        ("i2c_sda", b.i2c_sda),
-        ("i2c_scl", b.i2c_scl),
-        ("adc_rail_pin", b.adc_rail_pin),
-        ("uart2_tx", b.uart2_tx),
-        ("uart2_rx", b.uart2_rx),
-        ("ledc_pan", b.ledc_pan),
-        ("ledc_tilt", b.ledc_tilt),
-        ("i2s_bclk", b.i2s_bclk),
-        ("i2s_sd", b.i2s_sd),
-        ("i2s_ws", b.i2s_ws),
-    ])
+/// 注入绑定快照（state.rs 读窄缝自持锁、Clone 出整体 [`Rr3BoardBindings`]——
+/// 批N17 件四起 cred_store 随 struct 透传，键名不再本侧手抄第二份）。
+fn rr3_bindings_snapshot() -> Option<Rr3BoardBindings> {
+    crate::state::rr3_board_bindings_snapshot()
 }
 
-/// 绑定快照 → JSON（纯函数；未注入整体 `null`，对账锚读数语义同源）。
-pub(crate) fn rr3_bindings_json(b: Option<[(&str, Option<u8>); 10]>) -> String {
-    match b {
-        None => "null".into(),
-        Some(pairs) => {
-            let obj: serde_json::Map<String, serde_json::Value> = pairs
-                .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k.to_string(),
-                        v.map_or(serde_json::Value::Null, serde_json::Value::from),
-                    )
-                })
-                .collect();
-            serde_json::Value::Object(obj).to_string()
-        }
-    }
+/// 绑定快照 → JSON（纯函数；未注入整体 `null`，对账锚读数语义同源）。键名用
+/// rr-ipc 在册常量（键真值单点不抄第二份）；值域：GPIO 十键 → 数字、cred_store
+/// → 字符串（批N17 件四——非 GPIO 存储源标记，与桥上注入载荷同域不同形：注入
+/// 侧值全字符串、读数侧 GPIO 数字化，两侧键域同源 rr-ipc 在册表）。
+pub(crate) fn rr3_bindings_json(b: Option<&Rr3BoardBindings>) -> String {
+    use rr_ipc::{
+        RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_CRED_STORE, RR3_BOARD_BINDING_I2C_SCL,
+        RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD,
+        RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_LEDC_PAN, RR3_BOARD_BINDING_LEDC_TILT,
+        RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX,
+    };
+    let Some(b) = b else {
+        return "null".into();
+    };
+    let mut obj = serde_json::Map::new();
+    let mut put_gpio = |k: &'static str, v: Option<u8>| {
+        obj.insert(
+            k.to_string(),
+            v.map_or(serde_json::Value::Null, serde_json::Value::from),
+        );
+    };
+    put_gpio(RR3_BOARD_BINDING_I2C_SDA, b.i2c_sda);
+    put_gpio(RR3_BOARD_BINDING_I2C_SCL, b.i2c_scl);
+    put_gpio(RR3_BOARD_BINDING_ADC_RAIL_PIN, b.adc_rail_pin);
+    put_gpio(RR3_BOARD_BINDING_UART2_TX, b.uart2_tx);
+    put_gpio(RR3_BOARD_BINDING_UART2_RX, b.uart2_rx);
+    put_gpio(RR3_BOARD_BINDING_LEDC_PAN, b.ledc_pan);
+    put_gpio(RR3_BOARD_BINDING_LEDC_TILT, b.ledc_tilt);
+    put_gpio(RR3_BOARD_BINDING_I2S_BCLK, b.i2s_bclk);
+    put_gpio(RR3_BOARD_BINDING_I2S_SD, b.i2s_sd);
+    put_gpio(RR3_BOARD_BINDING_I2S_WS, b.i2s_ws);
+    obj.insert(
+        RR3_BOARD_BINDING_CRED_STORE.to_string(),
+        b.cred_store
+            .as_ref()
+            .map_or(serde_json::Value::Null, |s| serde_json::Value::from(s.as_str())),
+    );
+    serde_json::Value::Object(obj).to_string()
 }
 
 /// 写口 body 上界（fail-closed：形制上限 32+64B 的 JSON 富余 8 倍——超长 body
@@ -402,26 +414,48 @@ mod tests {
         assert_eq!(v.as_object().unwrap().len(), 16);
     }
 
-    /// bindings JSON 形状：未注入整体 null；注入态十键全名＋None→null。
+    /// bindings JSON 形状：未注入整体 null；注入态十一键全名＋None→null；GPIO
+    /// 十键数字值、cred_store 字符串值（批N17 件四——键名与 rr-ipc 在册表同源）。
     #[test]
     fn bindings_json_shape() {
         assert_eq!(rr3_bindings_json(None), "null");
-        let v: serde_json::Value = serde_json::from_str(&rr3_bindings_json(Some([
-            ("i2c_sda", Some(21)),
-            ("i2c_scl", Some(22)),
-            ("adc_rail_pin", Some(34)),
-            ("uart2_tx", Some(18)),
-            ("uart2_rx", Some(19)),
-            ("ledc_pan", Some(32)),
-            ("ledc_tilt", Some(33)),
-            ("i2s_bclk", Some(4)),
-            ("i2s_sd", Some(27)),
-            ("i2s_ws", None),
-        ])))
-        .unwrap();
+        let b = Rr3BoardBindings {
+            i2c_sda: Some(21),
+            i2c_scl: Some(22),
+            adc_rail_pin: Some(34),
+            uart2_tx: Some(18),
+            uart2_rx: Some(19),
+            ledc_pan: Some(32),
+            ledc_tilt: Some(33),
+            i2s_bclk: Some(4),
+            i2s_sd: Some(27),
+            i2s_ws: None,
+            cred_store: Some("nvs:rr3".into()),
+        };
+        let v: serde_json::Value = serde_json::from_str(&rr3_bindings_json(Some(&b))).unwrap();
         assert_eq!(v["i2c_sda"], 21);
         assert_eq!(v["i2s_ws"], serde_json::Value::Null);
-        assert_eq!(v.as_object().unwrap().len(), 10);
+        assert_eq!(v["cred_store"], "nvs:rr3", "cred_store 字符串值（非 GPIO）");
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "adc_rail_pin",
+                "cred_store",
+                "i2c_scl",
+                "i2c_sda",
+                "i2s_bclk",
+                "i2s_sd",
+                "i2s_ws",
+                "ledc_pan",
+                "ledc_tilt",
+                "uart2_rx",
+                "uart2_tx",
+            ],
+            "恰十一键（rr-ipc 在册表封闭域）"
+        );
+        assert_eq!(v.as_object().unwrap().len(), 11);
     }
 }
 
@@ -513,7 +547,8 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
             httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
         }
         Rr3BoardRoute::Bindings => {
-            let body = rr3_bindings_json(rr3_bindings_snapshot());
+            let snap = rr3_bindings_snapshot();
+            let body = rr3_bindings_json(snap.as_ref());
             httpd_resp_set_type(req, c"application/json".as_ptr());
             httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
         }
