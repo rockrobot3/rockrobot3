@@ -1603,19 +1603,22 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             "esp32-mini budget {k} 漂移（声明预算位，对账归 0.0.7）"
         );
     }
-    // [hardware] 板侧配置十键（批N4 件七(b) 基-24 桥上配置腿三键 + 批N9 件五
-    // MC-7 缺③进位补齐七键）：板侧裸寄存器/外设路径的引脚真值——非 [pins] 派生面
-    // （无 role 对应，门 n 物理键集不收），rtos 档 [hardware] 原样直给进
-    // RR3_HAL_BINDINGS，经桥 rr3.set_bindings 注入板侧；注入前板侧消费面
-    // fail-closed 拒（不回退硬编码）；主驱动七键消费语义 = 装配对账锚（注入到达时
-    // 板侧逐键判等，不齐 ERROR 点名＋计数）。取值与板侧 main.rs 引脚真值段同源
-    // （SDA=21/SCL=22 = OLED I2C 总线；34 = 电池分压 ADC；UART2 TX=18/RX=19；
-    // LEDC pan=32/tilt=33 与 [[pin]] physical 同源同值；I2S BCLK=4/SD=27/WS=26），
+    // [hardware] 板侧配置十一键（批N4 件七(b) 基-24 桥上配置腿三键 + 批N9 件五
+    // MC-7 缺③进位补齐七键 + 批N17 件三 cred_store 键半边）：板侧裸寄存器/外设
+    // 路径的引脚真值与非 GPIO 存储源标记——非 [pins] 派生面（无 role 对应，门 n
+    // 物理键集不收），rtos 档 [hardware] 原样直给进 RR3_HAL_BINDINGS，经桥
+    // rr3.set_bindings 注入板侧；注入前板侧消费面 fail-closed 拒（不回退硬编码）；
+    // 主驱动七键消费语义 = 装配对账锚（注入到达时板侧逐键判等，不齐 ERROR 点名＋
+    // 计数）；cred_store 消费语义 = 板侧读数面可见（GET /api/board/bindings 随键，
+    // boot 读链不消费＝批N14 架构事实，非引脚不进对账锚）。取值与板侧 main.rs
+    // 引脚真值段同源（SDA=21/SCL=22 = OLED I2C 总线；34 = 电池分压 ADC；UART2
+    // TX=18/RX=19；LEDC pan=32/tilt=33 与 [[pin]] physical 同源同值；I2S
+    // BCLK=4/SD=27/WS=26；cred_store = nvs:rr3 与板侧 cred namespace 单真值同源），
     // 漂移即红。主驱动具名引脚面（esp-idf-hal 结构约束）的装载仍归 0.0.7 批G/批D1。
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
-        .expect("esp32-mini 缺 [hardware] 段（板侧配置十键真值点，批N4 件七(b) + 批N9 件五）");
+        .expect("esp32-mini 缺 [hardware] 段（板侧配置十一键真值点，批N4 件七(b) + 批N9 件五 + 批N17 件三）");
     for (k, expected) in [
         ("i2c_sda", "21"),
         ("i2c_scl", "22"),
@@ -1627,6 +1630,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
         ("i2s_bclk", "4"),
         ("i2s_sd", "27"),
         ("i2s_ws", "26"),
+        ("cred_store", "nvs:rr3"),
     ] {
         assert_eq!(
             hardware.get(k).and_then(toml::Value::as_str),
@@ -1824,6 +1828,9 @@ fn assemble_registry_tables_are_pinned() {
             "i2s_bclk",
             "i2s_sd",
             "i2s_ws",
+            // 批N17 件三（N-10 ② 键半边）：凭据存储源标记（非 GPIO，板侧读数面
+            // 可见；boot 读链不消费＝批N14 架构事实，非引脚不进对账锚）
+            "cred_store",
         ]
     );
 }

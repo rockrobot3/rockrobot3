@@ -107,15 +107,17 @@ heap_reserved_bytes = 98816
 "audio.vad" = "rr3-sense"
 
 # [hardware] 板侧配置键（批N4 件七(b) 基-24 桥上配置腿三键；批N9 件五补主驱动
-# 七键，语义见头注）：板侧裸寄存器/外设路径的引脚真值——非 [pins] 派生面（无 role
-# 对应，门 n 物理键集不收），rtos 档原样直给进 RR3_HAL_BINDINGS，经桥
-# rr3.set_bindings 注入板侧；注入前板侧消费面 fail-closed 拒（不回退硬编码）。
-# 取值与板侧 main.rs 引脚真值段同源：I2C SDA=21/SCL=22（OLED 总线）；34 = 电池
-# 分压 ADC（输入-only 脚）；UART2 TX=18/RX=19（桥链路面，921600）；LEDC pan=32/
-# tilt=33（与 [[pin]] physical 同源同值）；I2S BCLK=4/SD=27/WS=26（INMP441 双麦，
-# 2026-10-21 验收档）。宿主侧两键（alsa_device/link_ifname）仍缺省——本形态无
-# 宿主音频/链路语义。主驱动具名引脚面（esp-idf-hal 结构约束）的装载归 0.0.7
-# 批G/批D1。
+# 七键，语义见头注；批N17 件三补 cred_store 键半边）：板侧裸寄存器/外设路径的
+# 引脚真值与非 GPIO 存储源标记——非 [pins] 派生面（无 role 对应，门 n 物理键集
+# 不收），rtos 档原样直给进 RR3_HAL_BINDINGS，经桥 rr3.set_bindings 注入板侧；
+# 注入前板侧消费面 fail-closed 拒（不回退硬编码）。取值与板侧 main.rs 引脚真值段
+# 同源：I2C SDA=21/SCL=22（OLED 总线）；34 = 电池分压 ADC（输入-only 脚）；UART2
+# TX=18/RX=19（桥链路面，921600）；LEDC pan=32/tilt=33（与 [[pin]] physical 同源
+# 同值）；I2S BCLK=4/SD=27/WS=26（INMP441 双麦，2026-10-21 验收档）；cred_store
+# = nvs:rr3（凭据存储源标记非凭据值——板侧读数面可见，boot 读链不消费＝批N14
+# 架构事实，与板侧 cred namespace "rr3" 单真值同源）。宿主侧两键
+# （alsa_device/link_ifname）仍缺省——本形态无宿主音频/链路语义。主驱动具名引脚
+# 面（esp-idf-hal 结构约束）的装载归 0.0.7 批G/批D1。
 [hardware]
 i2c_sda = "21"
 i2c_scl = "22"
@@ -127,6 +129,7 @@ ledc_tilt = "33"
 i2s_bclk = "4"
 i2s_sd = "27"
 i2s_ws = "26"
+cred_store = "nvs:rr3"
 
 [[pin]]
 # 板侧执行件 pan（水平）轴（SG90：LEDC0 通道 0、信号脚 32，0.0.6 §5.4 BOM）——物理绑定
