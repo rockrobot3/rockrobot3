@@ -110,3 +110,47 @@ A/B 切换的断电安全不靠"翻标志不失败"，靠**失败可回**。U-Bo
 7. rr_factory 镜像内的恢复流程：进厂环境后由谁把 extlinux 标签切回
    （rr_a 或最近好槽），是否叠加 bootcount 兜底——`rr3-ota-ctl factory`
    只保证"进得去"，"回得来"的职责在 rr_factory 镜像自带逻辑。
+
+## 0.0.5 增补轮六 批N18 件二：ESP32 形态（rtos 档）升级语义定案
+
+范围＝微型形态（ESP32，`tools/esp32-periph-base`，4MB flash）；上文 A/B 槽布局是
+RK3566/树莓派 host 档的，本段是 rtos 档自己的明文结论（[全案 §17 批N5](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md)
+「升级与回滚」行判据：表内"不能"一格必须带触发条件；"不可回滚"也是一句合格答案，
+但必须写进表）。真值单点维持：`rr-ota` 常量与 `cargo test -p rr-ota` 只管 host 档
+A/B 槽；本段事实为 2026-10-23 侦查实测，标签体系与 ESP32 侧零关系。
+
+### 分区事实（手读 partition-table.bin，magic 0xAA50 逐项）
+
+`nvs@0x9000/0x6000`（批N14/15 凭据源）＋ `phy_init@0xf000/0x1000` ＋
+`factory@0x10000/0x100000`——**factory 单槽、无 ota_0/ota_1/otadata**。这是下方
+两条语义裁定的物理前提。
+
+如实登记（侥幸面）：debug 构建 app image 实测 1,130,224 B，**超 factory 槽上限
+1,048,576 B 约 8.2%**——`espflash flash` 烧录不校验槽界，溢出区（0x110000 起）
+无任何分区登记（分区表只到 factory 末尾）、bootloader 加载按 image 段表不按槽界，
+故真板可跑（批N9 件三烧录实录在案）；release 构建的 app image 尺寸未实测，如实
+不冒领。启用双槽前这属"能跑但未定义"状态，瘦固件与 release 取数随真板会话。
+
+### 升级语义＝重烧即升级
+
+本形态的升级路径＝`tools/deploy/flash-esp32.sh`（构建＋descriptor 三查＋烧录，
+批N9 件二落）或其镜像装配件 `tools/deploy/image-esp32.sh`（批N18 件一：
+save-image --merge 产整片 merged 镜像，布局三点 magic＋整片 4MB 自校验）重烧完整
+固件。**NVS 凭据保留**：`espflash flash` 只写涉及分区，`nvs@0x9000/0x6000` 不在
+擦除域——升级后免重配网（`cred_store = "nvs:rr3"`，批N14/15 读链消费）；仅
+`erase-flash` 全片擦除才清凭据（产线首烧语义）。
+
+### 真增量 OTA 不做（触发条件在案）
+
+`ota_0/ota_1` 双槽＋`otadata`＋esp_ota 下载链**不做**，三理由：
+
+1. 无双槽分区表：factory 单槽（上方手读事实），启用双槽须重裁 4MB flash 预算
+   （当前 debug app image 已超 1MB 槽界，双槽各 ~640KB 更装不下——须先瘦固件）；
+2. 无下载载体：形态无文件系统（NVS 除外）、配置腿 HTTP 无 TLS（批N13 裁定在案）、
+   云分发面未立项；
+3. 无接口语义：`rr3.ctl.ota` 恒拒面维持（解除需 M6 评审，全案 §17 判据原文）。
+
+**触发条件**＝形态裁定启用双槽分区表（ota_0/ota_1＋otadata，契约级评审）＋云分发
+面立项＋固件体积预算重裁。触发前，[可达终点表](../process/dev/0.0.5增补轮六——批N5首件——按形态分档可达终点表.md)
+ESP32"升级"格记「能做到（重烧档）」。
+
