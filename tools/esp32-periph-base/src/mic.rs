@@ -43,7 +43,8 @@ use rr_ipc::{
 use serde_json::json;
 
 use crate::board::{
-    AUDIO_CHUNK_FRAMES, AUDIO_Q_CAP, RR3_AUDIO_TOPIC, RR3_HOST_TASK, RR3_PERIPH_TASK,
+    AUDIO_CHUNK_FRAMES, AUDIO_Q_CAP, RR3_AUDIO_TOPIC, RR3_BIND_I2S_BCLK, RR3_BIND_I2S_SD,
+    RR3_BIND_I2S_WS, RR3_HOST_TASK, RR3_PERIPH_TASK,
 };
 use crate::link::rr3_frame_now_ns;
 use crate::state::{lock_bus, Bus};
@@ -164,7 +165,7 @@ pub fn spawn_mic_smoke(
                     }
                 };
             println!(
-                "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK=4 SD=27 WS=26（INMP441 双麦 L/R 时隙；原 25 装配期全图案已迁）"
+                "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK={RR3_BIND_I2S_BCLK} SD={RR3_BIND_I2S_SD} WS={RR3_BIND_I2S_WS}（INMP441 双麦 L/R 时隙；对账锚，board.rs）"
             );
             let mut buf = [0u8; MIC_BUF];
             let mut reads = 0usize;
