@@ -23,6 +23,13 @@
 //! 扩键裁定与批N3 件六 `spi_device` 同款：契约级评审、rr-registry 在册表两处同批、
 //! contract.rs 机判钉死。三键不设 `RR3_HAL_*` 应急 env 覆盖位（板侧配置随描述符
 //! 走单一路径，不设第二注入面——现场救场改装配单数据 + 重启）。
+//! 板侧主驱动七键批（批N9 件五，MC-7 缺③ [hardware] 进位补齐）：`uart2_tx`/
+//! `uart2_rx`/`ledc_pan`/`ledc_tilt`/`i2s_bclk`/`i2s_sd`/`i2s_ws` 进场——消费语义 =
+//! 板侧主驱动**装配对账锚**（esp-idf-hal 需具名引脚类型，驱动仍具名装配，注入值作
+//! 对账真值，不齐板侧 ERROR 点名＋计数；批N4 件七(c) 消费面纪律同款）。同上款：
+//! 不在 [pins] 派生键集、不设应急 env 覆盖位、rr-ipc/rr-registry/contract.rs
+//! 三处同批。`ledc_pan`/`ledc_tilt` 与 esp32-mini [[pin]] physical 同源同值
+//! （rtos 档 [pins] 派生为在册余量归 0.0.7 批G/D1——派生落位后本两键退役）。
 
 use std::collections::BTreeMap;
 
@@ -65,6 +72,20 @@ pub struct Rr3HalBindings {
     pub i2c_scl: Option<u8>,
     /// 电池分压 ADC 输入脚 GPIO 编号（板侧打印面；esp32-mini = 34）
     pub adc_rail_pin: Option<u8>,
+    /// UART2 发送脚 GPIO 编号（板侧桥链路装配对账；esp32-mini = 18，批N9 件五）
+    pub uart2_tx: Option<u8>,
+    /// UART2 接收脚 GPIO 编号（板侧桥链路装配对账；esp32-mini = 19，批N9 件五）
+    pub uart2_rx: Option<u8>,
+    /// LEDC pan 轴信号脚 GPIO 编号（板侧舵机装配对账；esp32-mini = 32，批N9 件五）
+    pub ledc_pan: Option<u8>,
+    /// LEDC tilt 轴信号脚 GPIO 编号（板侧舵机装配对账；esp32-mini = 33，批N9 件五）
+    pub ledc_tilt: Option<u8>,
+    /// I2S BCLK 脚 GPIO 编号（板侧双麦装配对账；esp32-mini = 4，批N9 件五）
+    pub i2s_bclk: Option<u8>,
+    /// I2S SD 脚 GPIO 编号（板侧双麦装配对账；esp32-mini = 27，批N9 件五）
+    pub i2s_sd: Option<u8>,
+    /// I2S WS 脚 GPIO 编号（板侧双麦装配对账；esp32-mini = 26，批N9 件五）
+    pub i2s_ws: Option<u8>,
 }
 
 /// 非空串裁决（trim 后空 = 不认）。
@@ -97,6 +118,13 @@ impl Rr3HalBindings {
             "i2c_sda" => self.i2c_sda = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
             "i2c_scl" => self.i2c_scl = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
             "adc_rail_pin" => self.adc_rail_pin = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "uart2_tx" => self.uart2_tx = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "uart2_rx" => self.uart2_rx = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "ledc_pan" => self.ledc_pan = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "ledc_tilt" => self.ledc_tilt = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "i2s_bclk" => self.i2s_bclk = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "i2s_sd" => self.i2s_sd = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "i2s_ws" => self.i2s_ws = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
             "ina219_addr" => self.ina219_addr = Some(rr3_ina219_addr_parse(raw).ok_or_else(bad)?),
             other => {
                 return Err(format!(

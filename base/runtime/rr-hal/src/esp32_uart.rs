@@ -33,8 +33,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3Header,
     Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_BOARD_BINDING_ADC_RAIL_PIN,
-    RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA, RR3_METHOD_SET_BINDINGS,
-    RR3_UART_BAUD_DEFAULT,
+    RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK,
+    RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_LEDC_PAN,
+    RR3_BOARD_BINDING_LEDC_TILT, RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX,
+    RR3_METHOD_SET_BINDINGS, RR3_UART_BAUD_DEFAULT,
 };
 use serde_json::{json, Map, Value};
 
@@ -187,6 +189,27 @@ fn rr3_board_bindings_payload(b: &Rr3HalBindings) -> Option<Value> {
             RR3_BOARD_BINDING_ADC_RAIL_PIN.to_string(),
             json!(v.to_string()),
         );
+    }
+    if let Some(v) = b.uart2_tx {
+        m.insert(RR3_BOARD_BINDING_UART2_TX.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.uart2_rx {
+        m.insert(RR3_BOARD_BINDING_UART2_RX.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.ledc_pan {
+        m.insert(RR3_BOARD_BINDING_LEDC_PAN.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.ledc_tilt {
+        m.insert(RR3_BOARD_BINDING_LEDC_TILT.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.i2s_bclk {
+        m.insert(RR3_BOARD_BINDING_I2S_BCLK.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.i2s_sd {
+        m.insert(RR3_BOARD_BINDING_I2S_SD.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = b.i2s_ws {
+        m.insert(RR3_BOARD_BINDING_I2S_WS.to_string(), json!(v.to_string()));
     }
     if m.is_empty() {
         return None;

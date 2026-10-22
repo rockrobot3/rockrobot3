@@ -20,6 +20,16 @@
 # schema_version = 5（0.0.5 增补轮六批N5，F-30 环容量判据落数据）：[runtime] rrd
 # 运行参数段进场（log_ring_cap）——rtos 档上灌演练时 rrd 侧装载判同一次（rrd 不分
 # 档豁免 [runtime]），装载期缺即红，4→5 为破坏性变更。
+# 批N9 件五注记（MC-7 缺③ [hardware] 进位补齐，键位扩面不升 schema_version——
+# 批N4 件七(b) 补三键同例）：[hardware] 三键 → 十键——板侧主驱动引脚真值
+# （uart2/ledc/i2s 七键）进场。键位语义不变（板侧裸寄存器/外设路径的引脚真值，
+# 非 [pins] 派生面，门 n 物理键集不收）；消费语义升级 = 板侧主驱动**装配对账锚**
+# （批N4 件七(c) 只盖自愈/观测面，本批盖主驱动）：esp-idf-hal 需具名引脚类型
+# （无法由 i32 构造），驱动仍具名装配，注入值作对账真值——桥连接建立注入到达时
+# 逐键判等，不齐 ERROR 点名＋计数（消费面纪律，不拒 boot 不打死指令面）。
+# ledc_pan/ledc_tilt 与 [[pin]] physical 同源同值（双写漂移由板侧对账面抓；
+# rtos 档 [pins] 派生为在册余量归 0.0.7 批G/D1——派生落位后本两键退役，
+# 双真值点随之消解）。
 
 schema_version = 5
 
@@ -96,17 +106,27 @@ heap_reserved_bytes = 98816
 "audio.capture" = "rr3-sense"
 "audio.vad" = "rr3-sense"
 
-# [hardware] 板侧配置三键（批N4 件七(b) 基-24 桥上配置腿）：板侧裸寄存器自愈路径
-# （I2C unstick）与打印面的引脚真值——非 [pins] 派生面（无 role 对应，门 n 物理键集
-# 不收），rtos 档原样直给进 RR3_HAL_BINDINGS，经桥 rr3.set_bindings 注入板侧；注入前
-# 板侧消费面 fail-closed 拒（不回退硬编码）。取值与板侧 main.rs 引脚真值段同源
-# （SDA=21/SCL=22 = OLED I2C 总线；34 = 电池分压 ADC，输入-only 脚）。宿主侧两键
-# （alsa_device/link_ifname）仍缺省——本形态无宿主音频/链路语义。主驱动具名引脚面
-# （esp-idf-hal 结构约束）的装载归 0.0.7 批G/批D1。
+# [hardware] 板侧配置键（批N4 件七(b) 基-24 桥上配置腿三键；批N9 件五补主驱动
+# 七键，语义见头注）：板侧裸寄存器/外设路径的引脚真值——非 [pins] 派生面（无 role
+# 对应，门 n 物理键集不收），rtos 档原样直给进 RR3_HAL_BINDINGS，经桥
+# rr3.set_bindings 注入板侧；注入前板侧消费面 fail-closed 拒（不回退硬编码）。
+# 取值与板侧 main.rs 引脚真值段同源：I2C SDA=21/SCL=22（OLED 总线）；34 = 电池
+# 分压 ADC（输入-only 脚）；UART2 TX=18/RX=19（桥链路面，921600）；LEDC pan=32/
+# tilt=33（与 [[pin]] physical 同源同值）；I2S BCLK=4/SD=27/WS=26（INMP441 双麦，
+# 2026-10-21 验收档）。宿主侧两键（alsa_device/link_ifname）仍缺省——本形态无
+# 宿主音频/链路语义。主驱动具名引脚面（esp-idf-hal 结构约束）的装载归 0.0.7
+# 批G/批D1。
 [hardware]
 i2c_sda = "21"
 i2c_scl = "22"
 adc_rail_pin = "34"
+uart2_tx = "18"
+uart2_rx = "19"
+ledc_pan = "32"
+ledc_tilt = "33"
+i2s_bclk = "4"
+i2s_sd = "27"
+i2s_ws = "26"
 
 [[pin]]
 # 板侧执行件 pan（水平）轴（SG90：LEDC0 通道 0、信号脚 32，0.0.6 §5.4 BOM）——物理绑定
