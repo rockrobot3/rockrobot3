@@ -66,6 +66,7 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
             }
         }
         Job::Move { pan, tilt } => {
+            let want = |v: Option<u32>| v.map_or_else(|| "-".into(), |d| d.to_string());
             if rt_move(ph, pan, tilt) {
                 // 姿态到位回读（**硬件侧证据**：直接读 LEDC 寄存器换算，不听记账角；
                 // 只回读本次请求的轴——未动的轴 duty 可能为 0，换算无意义）。
@@ -75,7 +76,6 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
                         Axis::Tilt => ph.tilt.get_duty(),
                     })
                 };
-                let want = |v: Option<u32>| v.map_or_else(|| "-".into(), |d| d.to_string());
                 println!(
                     "[periph] 姿态到位 pan={} tilt={}（LEDC 回读 pan={}° tilt={}°，记账 {}°/{}°）",
                     want(pan),
@@ -84,6 +84,25 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
                     rd(Axis::Tilt),
                     ph.pan_deg,
                     ph.tilt_deg
+                );
+            } else {
+                // 批N12 件一（敞口 16 第一问缺码半边）：失败半臂此前为空——rt_move
+                // 内部虽有逐轴 `eprintln`，但作业级失败不计数、不回宿主（全案 §20.5
+                // "返回值被丢弃"的残留形态）。失败行带稳定前缀＋累计值（串口取证
+                // grep 判据），并照 SCAN/SampleRail 先例走 outbox `ERR` 行回宿主。
+                let n = {
+                    let mut b = lock_bus(bus);
+                    b.st.move_fail_events = b.st.move_fail_events.saturating_add(1);
+                    b.st.move_fail_events
+                };
+                eprintln!(
+                    "[periph] Move 失败 pan={} tilt={}（累计 {n}）",
+                    want(pan),
+                    want(tilt)
+                );
+                outbox_push(
+                    bus,
+                    format!("ERR Move 失败 pan={} tilt={}（累计 {n}）", want(pan), want(tilt)),
                 );
             }
         }
@@ -249,6 +268,10 @@ fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
     if let Some((axis, deg)) = mv {
         if let Err(e) = ph.servo_set(axis, deg) {
             eprintln!("[periph] 扫摆驱动失败: {e}");
+            // 批N12 件一：自主扫摆失败计数（静默观测面，同 `selfheal_skipped`
+            // 口径——不刷 outbox 打扰宿主，Move 作业失败才回包）。
+            let mut b = lock_bus(bus);
+            b.st.move_fail_events = b.st.move_fail_events.saturating_add(1);
         }
     }
     if refresh {
