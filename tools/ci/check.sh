@@ -642,8 +642,10 @@ rm -f "$travel_hits"
 #      引契约符号、crate 根花括号多导 `rr_hal::{`——多导可把契约符号与白名单混进一行，
 #      扫描面不可分词，故直接红）即红：
 #        rr_hal::backend::*          装配选择函数（返回 Box<dyn 契约 trait>）——装配位
-#                                    今日在单元组合件内是结构事实，Cargo 级拆边需装配
-#                                    上移（敞口在册，落地后本行同步收紧为 Cargo 禁令）；
+#                                    在单元组合件内是**设计态**（基-35 窄化①裁定
+#                                    2026-10-22：不上移，§25.8 #1——Cargo 收益已由
+#                                    直依 rr-hal-api 拿到，上移属多抽象；白名单四类
+#                                    冻结，条目数由判据 6) 基线钉数执法）；
 #        rr_hal::sim::*              sim 承载（单测夹具 + connect 扫描列表运行期真值）；
 #        rr_hal::provision_store::*  配网凭据存储面（第 8 能力面 trait 住实现 crate；
 #                                    句柄面契约分母 7 冻结，迁移属分母变更须另裁）；
@@ -655,8 +657,12 @@ rm -f "$travel_hits"
 #      rr-bus（基-35 窄化②/批N9 件一，§25.8 #2——"单元绑实现 crate"同族的第二次
 #      出现，照 rr-hal-api 先例；rr-bus 收窄为语义常量 re-export 层，仅 rrd/tools 消费）；
 #   5) 单元 use 面（modules/**，行注释先剥同判据 2 口径）`rr_bus::` 零命中——承载
-#      客户端走 rr_bus_api，语义常量直引 rr_core（真值单点，不经 re-export 中介）。
-step "⑨-w 依赖面禁令（单元契约面走 rr-hal-api/rr-bus-api + use 面白名单冻结 + 板侧禁实现 crate，基-35）"
+#      客户端走 rr_bus_api，语义常量直引 rr_core（真值单点，不经 re-export 中介）；
+#   6) 白名单条目数基线钉数（基-35 窄化①裁定配套，§25.8 #1 终态"白名单条目数只降
+#      不升"机器化）：判据 2) 白名单正则的交替项数对基线文件 tools/ci/gate-w-baseline.txt，
+#      count > 基线即红（扩白名单须同批上调基线——diff 即登记）；count < 基线 PASS 并
+#      打印"须同批下调基线"提醒；文件缺/坏/非整数即红 fail-closed（同 gate-a 纪律）。
+step "⑨-w 依赖面禁令（单元契约面走 rr-hal-api/rr-bus-api + use 面白名单冻结＋条目数基线钉数 + 板侧禁实现 crate，基-35）"
 dep_fail=0
 dep_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 # 1) rr-hal-api 必依（逐单元点名；枚举打空即门禁失效，与 ④/⑥ 同口径）
@@ -729,6 +735,42 @@ else
   printf 'PASS  ⑨-w 单元 use 面零 rr_bus::（%s 份 .rs 全扫，承载面已契约化）\n' "$unit_rs"
 fi
 rm -f "$bus_hits"
+# 6) 白名单条目数基线钉数（判据 2) 白名单正则交替项数对基线；基-35 窄化①/§25.8 #1）。
+#    条目数从本文件判据 2) 的白名单行提取（单真值点自执法面自身导出，不抄第二份——
+#    同 ⑨-n 键名单从代码常量导出口径）；提取打空即门禁失效。
+wl_line="$(grep -m1 -oE "grep -vE 'rr_hal::\([^)]*\)'" tools/ci/check.sh || true)"
+wl_count="$(printf '%s' "$wl_line" | sed -n 's/.*rr_hal::(\([^)]*\)).*/\1/p' | awk -F'|' '{print NF}')"
+if [ -z "$wl_count" ] || [ "$wl_count" -eq 0 ] 2>/dev/null; then
+  printf 'FAIL  ⑨-w 白名单条目数提取打空（判据 2) 白名单行不在或形状漂移）——门禁失效，不放行\n'
+  dep_fail=1
+else
+  gate_w_base="tools/ci/gate-w-baseline.txt"
+  if [ ! -r "$gate_w_base" ]; then
+    printf 'FAIL  ⑨-w 基线文件不可读: %s（裁定配套 fail-closed——白名单条目基线缺位即红，不放行）\n' "$gate_w_base"
+    dep_fail=1
+  else
+    wl_baseline="$(grep -vE '^[[:space:]]*(#|$)' "$gate_w_base" | head -1 | tr -d '[:space:]')"
+    case "$wl_baseline" in
+      ''|*[!0-9]*)
+        printf 'FAIL  ⑨-w 基线文件形状坏: %s（首个非注释行非纯整数: "%s"）——fail-closed，不放行\n' "$gate_w_base" "${wl_baseline:-<空>}"
+        dep_fail=1
+        ;;
+      *)
+        if [ "$wl_count" -gt "$wl_baseline" ]; then
+          printf 'FAIL  ⑨-w 白名单条目 %s > 基线 %s（条目数只降不升违例——扩白名单须同批上调 %s，diff 即登记；基-35 窄化①/§25.8 #1）\n' \
+            "$wl_count" "$wl_baseline" "$gate_w_base"
+          dep_fail=1
+        elif [ "$wl_count" -lt "$wl_baseline" ]; then
+          printf 'PASS  ⑨-w 白名单条目 %s ≤ 基线 %s（**条目收紧 %s 类：须同批下调 tools/ci/gate-w-baseline.txt**）\n' \
+            "$wl_count" "$wl_baseline" "$((wl_baseline - wl_count))"
+        else
+          printf 'PASS  ⑨-w 白名单条目 %s = 基线 %s（四类冻结设计态：backend 装配/sim/provision_store/Rr3PcmStream，只降不升在账）\n' \
+            "$wl_count" "$wl_baseline"
+        fi
+        ;;
+    esac
+  fi
+fi
 if [ "$dep_fail" -ne 0 ]; then
   fail=1
 fi
