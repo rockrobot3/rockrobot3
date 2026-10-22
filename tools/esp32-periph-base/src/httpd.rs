@@ -18,11 +18,15 @@
 //!   字段真值逐项对表本项目生成 sdkconfig，见 [`wifi_default_config`]）＋
 //!   `httpd_start` ＋注册白名单 handler。
 //!
-//! 凭据：**编译期注入**（`RR3_BOARD_WIFI_SSID` / `RR3_BOARD_WIFI_PASS` 环境变量，
-//! `option_env!` 读，值不落仓）——板侧凭据存储对象是 N-10 ②/N-11 的工单（另批），
-//! 本件不引入运行时凭据面。**未装配（缺省/空）＝配置腿缺席**：boot 点名后
-//! fail-honest 返回，不阻塞既有链路（与"不立做不到的判据"同纪律——行为取证
-//! 归真板验证窗）。
+//! 凭据：**NVS 优先 → 编译期注入回落**（批N14 件一读链；存储对象见 [`crate::cred`]，
+//! namespace `"rr3"` 单真值——N-10 ② 主体半边）：
+//! - **NVS 优先**：`rr3_cred_read()` 读时现取（配网写口批N14 件二落值的消费点）；
+//! - **编译期回落**：`option_env!` 读 `RR3_BOARD_WIFI_SSID`/`RR3_BOARD_WIFI_PASS`
+//!   （构建期烘焙进 .rodata，值不落仓——**批N14 订正**：批N13 码面误用
+//!   `std::env::var` 运行期读，而板上 IDF newlib 把 `environ` 初始化为空数组
+//!   （newlib_init.c :169-174），运行期 env 永远缺席＝配置腿真机永不装配——文档
+//!   所述"编译期注入"与码面不符，本批按文档口径落实）；
+//! - 都缺＝**配置腿缺席**：boot 点名后 fail-honest 返回，不阻塞既有链路。
 //!
 //! 账面：httpd 任务栈 16KB（[`HTTPD_STACK_SIZE`]，`task_stack_budget_bytes =
 //! 65536` 容既有两 16KB 线程＋本面余量充足；起栈线程短命同栈）；WiFi/httpd
@@ -284,9 +288,6 @@ const HTTPD_STACK_SIZE: usize = 16384;
 /// HTTP 监听口（板侧只读面，80 与 host 面板同档；端口号住常量＝资源参数
 /// 同型病例的既有口径，本件不定新配置键）。
 const HTTPD_SERVER_PORT: u16 = 80;
-/// WiFi 凭据环境变量（编译期注入，值不落仓——见模块文档凭据节）。
-const RR3_BOARD_WIFI_SSID_ENV: &str = "RR3_BOARD_WIFI_SSID";
-const RR3_BOARD_WIFI_PASS_ENV: &str = "RR3_BOARD_WIFI_PASS";
 
 /// bus 单点（handler 裸壳取态的唯一入口——OnceLock 存 Arc clone，无裸指针
 /// user_ctx；板侧单点先例 = [`crate::state::BOARD_BINDINGS`] 同形状）。
@@ -359,22 +360,44 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
 
 /// 起板侧配置腿（main 挂载点；**fail-honest**——任何一步失败点名后返回，
 /// 配置腿缺席不阻塞既有链路；凭据未装配同口径）。
+///
+/// 凭据读链（批N14 件一，存储对象见 [`crate::cred`]）：**NVS 优先 → 编译期
+/// `option_env!` 回落 → 都缺＝缺席照常**（NVS 空时与批N13 逐字零回归）。
+/// NVS init 前移到本段（读链前件）——失败＝起栈链无健康前件，点名缺席
+/// （不 erase——不毁既有分区）；真机 env 永远缺席的机制订正见模块文档凭据节。
 pub(crate) fn rr3_board_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     let bus = Arc::clone(bus);
-    // 凭据编译期注入检查（值不落仓）；未装配＝配置腿缺席，点名即可
-    let ssid = match std::env::var(RR3_BOARD_WIFI_SSID_ENV) {
-        Ok(s) if !s.is_empty() => s,
-        _ => {
-            eprintln!(
-                "[periph] 配置腿未装配（{RR3_BOARD_WIFI_SSID_ENV} 未注入）——N-13 服务面缺席，板其余功能照常"
-            );
-            return;
+    // ① NVS init 前移（批N14 件一）：凭据读链前件，兼 WiFi 校准数据存储
+    if unsafe { nvs_flash_init() } != ESP_OK {
+        eprintln!("[periph] 配置腿未装配（nvs_flash_init 失败）——N-13 服务面缺席，板其余功能照常");
+        return;
+    }
+    // ② 凭据读链：NVS 优先（读取窄缝 [`crate::cred::rr3_cred_read`]，读时现取）
+    let (ssid, pass, cred_source) = match crate::cred::rr3_cred_read() {
+        Some(c) => {
+            let pass = c.pass().to_string(); // 先经窄缝取密码（借用），再 move ssid
+            (c.ssid, pass, "nvs")
         }
+        // 编译期回落（option_env! 需字面量——构建期烘焙 .rodata，值不落仓）
+        None => match (
+            option_env!("RR3_BOARD_WIFI_SSID"),
+            option_env!("RR3_BOARD_WIFI_PASS"),
+        ) {
+            (Some(s), p) if !s.is_empty() => {
+                (s.to_string(), p.unwrap_or_default().to_string(), "编译期")
+            }
+            _ => {
+                eprintln!(
+                    "[periph] 配置腿未装配（NVS 无存档且 RR3_BOARD_WIFI_SSID 未注入）——N-13 服务面缺席，板其余功能照常"
+                );
+                return;
+            }
+        },
     };
-    let pass = std::env::var(RR3_BOARD_WIFI_PASS_ENV).unwrap_or_default();
-    if ssid.len() > 32 || pass.len() > 64 {
+    // ③ 形制校验（两源同门——[`crate::cred::rr3_cred_form_check`]；错误不出值只出长度）
+    if let Err(e) = crate::cred::rr3_cred_form_check(&ssid, &pass) {
         eprintln!(
-            "[periph] 配置腿装配失败（SSID {}B/密码 {}B 超位形 32/64）——缺席照常",
+            "[periph] 配置腿装配失败（{e}：SSID {}B/密码 {}B）——缺席照常",
             ssid.len(),
             pass.len()
         );
@@ -382,24 +405,26 @@ pub(crate) fn rr3_board_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     }
     let ssid = ssid.as_bytes().to_vec();
     let pass = pass.as_bytes().to_vec();
-    thread_spawn(bus, ssid, pass);
+    thread_spawn(bus, cred_source, ssid, pass);
 }
 
-/// 起栈线程（与控制/运行面同 16KB 口径；短命——起完 httpd 即退）。
-fn thread_spawn(bus: Arc<Mutex<Bus>>, ssid: Vec<u8>, pass: Vec<u8>) {
+/// 起栈线程（与控制/运行面同 16KB 口径；短命——起完 httpd 即退；
+/// `cred_source`＝凭据来源点名串（"nvs"/"编译期"），boot 日志用，永不出值）。
+fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, pass: Vec<u8>) {
     std::thread::Builder::new()
         .name("periph-httpd".into())
         .stack_size(crate::board::THREAD_STACK)
         .spawn(move || unsafe {
-            if let Err(e) = start_httpd(&bus, &ssid, &pass) {
+            if let Err(e) = start_httpd(&bus, cred_source, &ssid, &pass) {
                 eprintln!("[periph] 配置腿启动失败（缺席照常）: {e:?}");
             }
         })
         .expect("起配置腿线程失败");
 }
 
-/// WiFi STA 起栈 + httpd_start + 白名单注册（unsafe 集中段；逐步 fail-honest）。
-unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, ssid: &[u8], pass: &[u8]) -> Result<(), i32> {
+/// WiFi STA 起栈 + httpd_start + 白名单注册（unsafe 集中段；逐步 fail-honest；
+/// NVS init 已前移到 [`rr3_board_httpd_spawn`]——本段只做起栈链）。
+unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pass: &[u8]) -> Result<(), i32> {
     // 逐步 helper：非 ESP_OK 即 Err（fail-honest，点名在调用方）
     fn chk(r: i32) -> Result<(), i32> {
         if r == ESP_OK {
@@ -408,13 +433,11 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, ssid: &[u8], pass: &[u8]) -> Result
             Err(r)
         }
     }
-    // ① NVS（WiFi 校准/存储依赖；失败不 erase——不毁既有分区，点名缺席）
-    chk(nvs_flash_init())?;
-    // ② netif + 事件循环 + STA 缺省 netif
+    // ① netif + 事件循环 + STA 缺省 netif
     chk(esp_netif_init())?;
     chk(esp_event_loop_create_default())?;
     esp_netif_create_default_wifi_sta();
-    // ③ WiFi 起栈（手抄宏配置见 wifi_default_config）
+    // ② WiFi 起栈（手抄宏配置见 wifi_default_config）
     let cfg = wifi_default_config();
     chk(esp_wifi_init(&cfg))?;
     chk(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
@@ -424,7 +447,7 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, ssid: &[u8], pass: &[u8]) -> Result
     wcfg.sta.password[..pass.len()].copy_from_slice(pass);
     chk(esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wcfg))?;
     chk(esp_wifi_start())?;
-    // ④ httpd 起（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
+    // ③ httpd 起（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
     //   false/null/0 的字段由全零起底等价覆盖，差异字段逐项对表 esp_http_server.h :53）
     let mut h: httpd_handle_t = std::ptr::null_mut();
     let conf = httpd_config_t {
@@ -442,7 +465,7 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, ssid: &[u8], pass: &[u8]) -> Result
         ..Default::default()
     };
     chk(httpd_start(&mut h, &conf))?;
-    // ⑤ 白名单注册（统一 handler；OnceLock 先写——handler 可达即 bus 在位）
+    // ④ 白名单注册（统一 handler；OnceLock 先写——handler 可达即 bus 在位）
     let _ = HTTPD_BUS.set(Arc::clone(bus));
     for (method, path, _, _) in RR3_BOARD_ROUTES {
         debug_assert_eq!(*method, "GET", "首笔只读——注册面只挂 GET 行");
@@ -456,7 +479,7 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, ssid: &[u8], pass: &[u8]) -> Result
         chk(httpd_register_uri_handler(h, &uri))?;
     }
     println!(
-        "[periph] 配置腿起（N-13）: http://0.0.0.0:{}/api/board/{{state,bindings}}（白名单 {} 端点，只读）",
+        "[periph] 配置腿起（N-13，凭据源={cred_source}）: http://0.0.0.0:{}/api/board/{{state,bindings}}（白名单 {} 端点，只读）",
         HTTPD_SERVER_PORT,
         RR3_BOARD_ROUTES.len()
     );
