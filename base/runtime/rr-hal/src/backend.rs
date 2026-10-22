@@ -12,7 +12,6 @@
 //! | `mac` | 宿主真件（`macaudio.rs`，仅 `target_os = "macos"` 单门，手写 AudioQueue 绑定） | macOS 宿主真麦拾音/扬声器回放——显式 `RR3_HAL_BACKEND=mac` 才启用，平台缺省仍 sim（CI 纪律） |
 //! | `esp32` | 批C（`esp32_uart.rs`，`RR3_HAL_PERIPH_UART` 指定设备路径）；A 批 c3 音频源（`esp32audio.rs`，板面双麦流） | ESP32 外设桥：舵机/显示两能力面的 UART 能力帧承载 + 音频上行——板不进城，宿主直连；跨进程 flock 排他即单消费者 |
 //! | `placeholder` | 恒回 `Unsupported` | 能力缺失显式回错的兜底（`Rr3UnavailableSource`） |
-//! | `shm` 加速 | M5 | 实时控制面（100Hz–1kHz）零拷贝路径，配 `F_ZEROCOPY` |
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）不进这些 trait，留在 `rr3-act` 进程内。
 
