@@ -22,7 +22,12 @@
 //! 键位批史：批N4 件七(b) 三键（自愈/观测面）；批N9 件五七键（板侧主驱动引脚
 //! 真值——MC-7 缺③ [hardware] 进位补齐，消费语义 = 板侧主驱动**装配对账锚**：
 //! esp-idf-hal 需具名引脚类型，驱动仍具名装配，注入值作对账真值，不齐板侧
-//! ERROR 点名＋计数）。键全部是 GPIO 编号（取值域共用 [`rr3_gpio_number_parse`]）。
+//! ERROR 点名＋计数）；批N17 件一 `cred_store` 键（**非 GPIO**——存储源标记
+//! `nvs:<namespace>`，全案 §3.6 凭据行；消费语义 = 板侧读数面可见，boot 读链
+//! 不消费＝批N14 架构事实注入晚于 WiFi 起栈，无装配对账语义＝非引脚不进对账
+//! 锚）。十键是 GPIO 编号（取值域共用 [`rr3_gpio_number_parse`]），cred_store
+//! 取值域独立裁决 [`rr3_cred_store_parse`]（同在本模块——键集与取值域真值单点
+//! 纪律不变）。
 
 // no_std + alloc（crate 根已 extern crate alloc）：String/format 走 alloc 面
 //（std 目标上与 std::string::String 同一实现，零行为差——lib.rs G1 注记同径）。
@@ -64,10 +69,17 @@ pub const RR3_BOARD_BINDING_I2S_SD: &str = "i2s_sd";
 /// I2S WS 字选择脚 GPIO 编号键（双麦采集驱动装配对账；批N9 件五）
 pub const RR3_BOARD_BINDING_I2S_WS: &str = "i2s_ws";
 
-/// 板侧绑定键在册表（载荷键域封闭判据；扩键走契约级评审并两处同批——rr-hal
+/// 凭据存储源标记键（**非 GPIO**——全案 §3.6 凭据行，批N17 件一）：值形
+/// `nvs:<namespace>`（如 `nvs:rr3`），声明"凭据在哪存"而非凭据值本身——SSID/
+/// 密码零回显契约不涉。消费语义 = 板侧读数面可见（GET /api/board/bindings
+/// 随键）；boot 读链不消费（批N14 架构事实：桥上注入晚于 WiFi 起栈）；无装配
+/// 对账语义（非引脚，不进板侧对账锚）。
+pub const RR3_BOARD_BINDING_CRED_STORE: &str = "cred_store";
+
+/// 板侧绑定键在册表（载荷键域封闭判据；扩键走契约级评审并三处同批——rr-hal
 /// `Rr3HalBindings` 字段集与 rr-registry `RR3_ASSEMBLE_DESC_KEYS` 由
 /// contract.rs 机判钉死，本表是桥上载荷键域的第三面真值，三处同批）。
-pub const RR3_BOARD_BINDING_KEYS: [&str; 10] = [
+pub const RR3_BOARD_BINDING_KEYS: [&str; 11] = [
     RR3_BOARD_BINDING_I2C_SDA,
     RR3_BOARD_BINDING_I2C_SCL,
     RR3_BOARD_BINDING_ADC_RAIL_PIN,
@@ -78,6 +90,7 @@ pub const RR3_BOARD_BINDING_KEYS: [&str; 10] = [
     RR3_BOARD_BINDING_I2S_BCLK,
     RR3_BOARD_BINDING_I2S_SD,
     RR3_BOARD_BINDING_I2S_WS,
+    RR3_BOARD_BINDING_CRED_STORE,
 ];
 
 /// 板侧注入绑定快照（不可变数据）：`None` = 该键未注入，消费面 fail-closed 拒。
@@ -104,6 +117,9 @@ pub struct Rr3BoardBindings {
     pub i2s_sd: Option<u8>,
     /// I2S WS 脚 GPIO 编号（esp32-mini = 26；批N9 件五）
     pub i2s_ws: Option<u8>,
+    /// 凭据存储源标记 `nvs:<namespace>`（esp32-mini = `nvs:rr3`；批N17 件一——
+    /// 非 GPIO 字符串键，取值域见 [`rr3_cred_store_parse`]）
+    pub cred_store: Option<String>,
 }
 
 impl Rr3BoardBindings {
@@ -120,10 +136,24 @@ pub fn rr3_gpio_number_parse(s: &str) -> Option<u8> {
     s.trim().parse::<u8>().ok()
 }
 
+/// 凭据存储源取值域裁决（批N17 件一）：`nvs:` 前缀＋非空 namespace（trim 宽容
+/// 整体，前缀后 namespace 原样不 trim——namespace 含空白不认，fail-closed）。
+/// 真值单点——rr-hal 描述符臂、桥上载荷臂与板侧消费面共用，漂移即此处单改。
+/// 返回 Some 归一形 `nvs:<namespace>`（前缀大小写敏感，只认小写——TOML 字面
+/// 纪律同描述符全字符串值不换形）。
+pub fn rr3_cred_store_parse(s: &str) -> Option<String> {
+    let s = s.trim();
+    let ns = s.strip_prefix("nvs:")?;
+    if ns.is_empty() {
+        return None;
+    }
+    Some(format!("nvs:{ns}"))
+}
+
 /// 单条目写入（载荷遍历侧逐条调用）：键必须在册、值过取值域裁决；坏条目**不
 /// 半写入**（先裁决后赋值）。独立纯函数：键域/值域可单测。
 pub fn rr3_board_binding_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Result<(), String> {
-    let bad = || format!("板侧绑定键 {k} 取值不认: {v:?}（十进制 GPIO 编号）");
+    let bad = || format!("板侧绑定键 {k} 取值不认: {v:?}");
     match k {
         RR3_BOARD_BINDING_I2C_SDA => b.i2c_sda = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
         RR3_BOARD_BINDING_I2C_SCL => b.i2c_scl = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
@@ -141,6 +171,9 @@ pub fn rr3_board_binding_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Re
         }
         RR3_BOARD_BINDING_I2S_SD => b.i2s_sd = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
         RR3_BOARD_BINDING_I2S_WS => b.i2s_ws = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_CRED_STORE => {
+            b.cred_store = Some(rr3_cred_store_parse(v).ok_or_else(bad)?)
+        }
         other => {
             return Err(format!(
                 "板侧绑定键 {other} 未在册（载荷键域见 bindings.rs 在册表）"
@@ -171,8 +204,8 @@ mod tests {
         }
     }
 
-    /// 单条目写入：十键逐个入位（批N4 三键 + 批N9 件五七键）；键出域/坏值点名
-    /// 即红，且红条目不半写入。
+    /// 单条目写入：十一键逐个入位（批N4 三键 + 批N9 件五七键 + 批N17 件一
+    /// cred_store）；键出域/坏值点名即红，且红条目不半写入。
     #[test]
     fn entry_fills_known_keys_and_names_unknown() {
         let mut b = Rr3BoardBindings::default();
@@ -188,6 +221,8 @@ mod tests {
         rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2S_BCLK, "4").expect("bclk 必须入位");
         rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2S_SD, "27").expect("sd 必须入位");
         rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2S_WS, "26").expect("ws 必须入位");
+        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_CRED_STORE, "nvs:rr3")
+            .expect("cred_store 必须入位");
         assert_eq!(b.rr3_board_bindings_i2c(), Some((21, 22)));
         assert_eq!(b.adc_rail_pin, Some(34));
         assert_eq!(b.uart2_tx, Some(18));
@@ -197,6 +232,7 @@ mod tests {
         assert_eq!(b.i2s_bclk, Some(4));
         assert_eq!(b.i2s_sd, Some(27));
         assert_eq!(b.i2s_ws, Some(26));
+        assert_eq!(b.cred_store.as_deref(), Some("nvs:rr3"));
 
         let mut b2 = Rr3BoardBindings::default();
         let e = rr3_board_binding_entry(&mut b2, "gpio_line", "4").expect_err("键出域必须红");
@@ -207,7 +243,37 @@ mod tests {
         let e = rr3_board_binding_entry(&mut b2, RR3_BOARD_BINDING_I2C_SCL, "256")
             .expect_err("越 u8 必须红");
         assert!(e.contains("i2c_scl 取值不认"), "{e}");
+        let e = rr3_board_binding_entry(&mut b2, RR3_BOARD_BINDING_CRED_STORE, "flash:boot")
+            .expect_err("非 nvs: 前缀必须红");
+        assert!(e.contains("cred_store 取值不认"), "{e}");
+        let e = rr3_board_binding_entry(&mut b2, RR3_BOARD_BINDING_CRED_STORE, "nvs:")
+            .expect_err("空 namespace 必须红");
+        assert!(e.contains("cred_store 取值不认"), "{e}");
         assert_eq!(b2, Rr3BoardBindings::default(), "红条目不得半写入");
+    }
+
+    /// 凭据存储源取值域（批N17 件一）：`nvs:` 前缀＋非空 namespace；整体 trim
+    /// 宽容，namespace 原样不 trim；前缀大小写敏感、空 namespace/无前缀/空值
+    /// 全拒（fail-closed）。
+    #[test]
+    fn cred_store_parse_domain() {
+        assert_eq!(
+            rr3_cred_store_parse("nvs:rr3").as_deref(),
+            Some("nvs:rr3")
+        );
+        assert_eq!(
+            rr3_cred_store_parse(" nvs:rr3 ").as_deref(),
+            Some("nvs:rr3"),
+            "整体 trim 宽容"
+        );
+        assert_eq!(
+            rr3_cred_store_parse("nvs:rr3-cred").as_deref(),
+            Some("nvs:rr3-cred"),
+            "namespace 含连字符合法"
+        );
+        for bad in ["", " ", "nvs:", "nvs: ", "NVS:rr3", "flash:boot", "rr3", "nvs"] {
+            assert_eq!(rr3_cred_store_parse(bad), None, "{bad}");
+        }
     }
 
     /// I2C 成对语义：sda/scl 缺一即 None（半份配置不成对——消费面 fail-closed 的
@@ -222,10 +288,10 @@ mod tests {
         assert_eq!(b.rr3_board_bindings_i2c(), Some((21, 22)));
     }
 
-    /// 在册表覆盖十常量且恰十键（键域封闭的表级锚——扩键先扩本表再扩消费面；
-    /// 批N4 件七(b) 三键 + 批N9 件五七键，次序 = 批史）。
+    /// 在册表覆盖十一常量且恰十一键（键域封闭的表级锚——扩键先扩本表再扩消费面；
+    /// 批N4 件七(b) 三键 + 批N9 件五七键 + 批N17 件一 cred_store，次序 = 批史）。
     #[test]
-    fn keys_table_is_exactly_the_ten_consts() {
+    fn keys_table_is_exactly_the_eleven_consts() {
         assert_eq!(
             RR3_BOARD_BINDING_KEYS,
             [
@@ -239,6 +305,7 @@ mod tests {
                 "i2s_bclk",
                 "i2s_sd",
                 "i2s_ws",
+                "cred_store",
             ]
         );
     }
