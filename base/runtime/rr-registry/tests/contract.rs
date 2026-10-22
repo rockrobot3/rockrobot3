@@ -1603,22 +1603,35 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             "esp32-mini budget {k} 漂移（声明预算位，对账归 0.0.7）"
         );
     }
-    // [hardware] 板侧配置三键（批N4 件七(b) 基-24 桥上配置腿）：板侧裸寄存器自愈
-    // 路径（I2C unstick）与打印面的引脚真值——非 [pins] 派生面（无 role 对应，门 n
-    // 物理键集不收），rtos 档 [hardware] 原样直给进 RR3_HAL_BINDINGS，经桥
-    // rr3.set_bindings 注入板侧；注入前板侧消费面 fail-closed 拒（不回退硬编码）。
-    // 取值与板侧 main.rs 引脚真值段同源（SDA=21/SCL=22 = OLED I2C 总线；34 = 电池
-    // 分压 ADC），漂移即红。主驱动具名引脚面（esp-idf-hal 结构约束）的装载仍归
-    // 0.0.7 批G/批D1，进位同批改本 pin。
+    // [hardware] 板侧配置十键（批N4 件七(b) 基-24 桥上配置腿三键 + 批N9 件五
+    // MC-7 缺③进位补齐七键）：板侧裸寄存器/外设路径的引脚真值——非 [pins] 派生面
+    // （无 role 对应，门 n 物理键集不收），rtos 档 [hardware] 原样直给进
+    // RR3_HAL_BINDINGS，经桥 rr3.set_bindings 注入板侧；注入前板侧消费面
+    // fail-closed 拒（不回退硬编码）；主驱动七键消费语义 = 装配对账锚（注入到达时
+    // 板侧逐键判等，不齐 ERROR 点名＋计数）。取值与板侧 main.rs 引脚真值段同源
+    // （SDA=21/SCL=22 = OLED I2C 总线；34 = 电池分压 ADC；UART2 TX=18/RX=19；
+    // LEDC pan=32/tilt=33 与 [[pin]] physical 同源同值；I2S BCLK=4/SD=27/WS=26），
+    // 漂移即红。主驱动具名引脚面（esp-idf-hal 结构约束）的装载仍归 0.0.7 批G/批D1。
     let hardware = v
         .get("hardware")
         .and_then(toml::Value::as_table)
-        .expect("esp32-mini 缺 [hardware] 段（板侧配置三键真值点，批N4 件七(b)）");
-    for (k, expected) in [("i2c_sda", "21"), ("i2c_scl", "22"), ("adc_rail_pin", "34")] {
+        .expect("esp32-mini 缺 [hardware] 段（板侧配置十键真值点，批N4 件七(b) + 批N9 件五）");
+    for (k, expected) in [
+        ("i2c_sda", "21"),
+        ("i2c_scl", "22"),
+        ("adc_rail_pin", "34"),
+        ("uart2_tx", "18"),
+        ("uart2_rx", "19"),
+        ("ledc_pan", "32"),
+        ("ledc_tilt", "33"),
+        ("i2s_bclk", "4"),
+        ("i2s_sd", "27"),
+        ("i2s_ws", "26"),
+    ] {
         assert_eq!(
             hardware.get(k).and_then(toml::Value::as_str),
             Some(expected),
-            "esp32-mini hardware.{k} 漂移（板侧自愈引脚真值，与板侧 main.rs 同源）"
+            "esp32-mini hardware.{k} 漂移（板侧引脚真值，与板侧 main.rs 同源）"
         );
     }
     // schema 3 [pins]（增补轮六批N1）：板侧执行件的物理绑定真值点——rtos 档 rrd
@@ -1802,6 +1815,15 @@ fn assemble_registry_tables_are_pinned() {
             "i2c_sda",
             "i2c_scl",
             "adc_rail_pin",
+            // 批N9 件五（MC-7 缺③进位补齐）：板侧主驱动七键（外设引脚真值，消费
+            // 语义 = 主驱动装配对账锚，同上不在 [pins] 派生键集）
+            "uart2_tx",
+            "uart2_rx",
+            "ledc_pan",
+            "ledc_tilt",
+            "i2s_bclk",
+            "i2s_sd",
+            "i2s_ws",
         ]
     );
 }
