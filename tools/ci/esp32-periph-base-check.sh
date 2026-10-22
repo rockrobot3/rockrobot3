@@ -82,4 +82,16 @@ else
   fail=1
 fi
 
+# ⑦ 纯逻辑单测编译面（批N13 件一：httpd 路由/漂移/JSON 形状单测——xtensa 目标
+#    本机不可跑，--no-run 只验测试码编译；xtensa 测试 harness 执行面归真板批）
+if cargo +esp test --no-run \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"' \
+     >/dev/null 2>&1; then
+  echo "PASS  甲面单测编译（--no-run）：httpd.rs 纯逻辑层 4 测试在编"
+else
+  echo "FAIL  esp32-periph-base 单测编译失败（cargo +esp test --no-run）" >&2
+  fail=1
+fi
+
 exit "$fail"
