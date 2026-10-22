@@ -717,6 +717,10 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pas
     // STA 凭据（helper 共用——写口 apply/回退同款；位形已在 spawn 前验）
     chk(wifi_sta_set_credentials(ssid, pass))?;
     chk(esp_wifi_start())?;
+    // STA 关联发起（批N15 件二真板取证实锤的缺陷修复：esp_wifi_start 只起驱动
+    // 不自动连 AP——缺此步板永不关联、无 got ip；写口 apply/回退两路本就有
+    // connect，唯 boot 路漏）
+    chk(esp_wifi_connect())?;
     // ③ httpd 起（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
     //   false/null/0 的字段由全零起底等价覆盖，差异字段逐项对表 esp_http_server.h :53）
     let mut h: httpd_handle_t = std::ptr::null_mut();
