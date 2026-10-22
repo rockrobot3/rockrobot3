@@ -1172,7 +1172,7 @@ if rustup target list --installed 2>/dev/null | grep -q '^x86_64-pc-windows-msvc
         printf 'PASS  ⑨-y Windows 红 crate %s < 基线 %s（**红账下降 %s：须同批下调 tools/ci/gate-win-baseline.txt**；转绿终点 = 基-33 拆修全落 count=0）\n' \
           "$gy_red" "$gy_b" "$((gy_b - gy_red))"
       else
-        printf 'PASS  ⑨-y Windows 红 crate %s = 基线 %s（只降不升在账；唯一红 = 基-33 断点面，拆修随后）\n' \
+        printf 'PASS  ⑨-y Windows 红 crate %s = 基线 %s（只降不升在账；基-33 转绿终点已至（批N19 结案），本门自此防回涨）\n' \
           "$gy_red" "$gy_b"
       fi
       ;;
