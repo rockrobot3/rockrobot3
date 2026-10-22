@@ -43,7 +43,7 @@ mod wifi;
 
 use std::time::{Duration, Instant};
 
-use rr_bus::Rr3BusClient;
+use rr_bus_api::Rr3BusClient;
 use rr_hal::backend::{rr3_hal_link, rr3_hal_wifi_store};
 use rr_hal::provision_store::Rr3WifiStore;
 use rr_hal_api::Rr3LinkState;
@@ -152,7 +152,7 @@ pub fn rr3_connect_run() -> Result<(), String> {
             }
             // 事务面：rr3.call 转发帧（Request，trace_id=调用方 task，顺原路应答）
             if let Ok((Rr3PayloadType::Request, body)) = Rr3BusClient::rr3_frame_body(&frame) {
-                if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
+                if body.get("method").and_then(Value::as_str) != Some(rr_core::RR3_METHOD_CALL) {
                     continue;
                 }
                 let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);

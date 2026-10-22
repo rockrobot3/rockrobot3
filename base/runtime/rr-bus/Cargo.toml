@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "总线常量层 + 模块侧同步 UDS 客户端（连接/注册/心跳/发布/rr3.call/收帧）"
+description = "总线语义常量 re-export 层（std 承载客户端已迁 rr-bus-api，基-35 窄化②）"
 
 [lib]
 name = "rr_bus"
@@ -13,6 +13,3 @@ path = "src/lib.rs"
 
 [dependencies]
 rr-core = { path = "../rr-core" }
-rr-ipc = { path = "../rr-ipc" }
-toml = { workspace = true }
-serde_json = { workspace = true }

@@ -30,6 +30,8 @@ use std::path::{Path, PathBuf};
 
 use rr_hal_api::{Rr3ActHardStop, Rr3ActHold, Rr3ActProfile, Rr3ActSource, RR3_ACT_PROFILE_FIELDS};
 
+// 落盘序共享件随写盘面 unix 门（counters.rs re-export 同径，批N9 件一补钉）
+#[cfg(unix)]
 use crate::counters::rr3_atomic_store;
 
 /// 一个轴的档案装载产物：装载域键 `pin`（F-4 外键，件五 boot 链拿它对
@@ -280,7 +282,9 @@ pub fn rr3_act_profile_to_toml(file: &Rr3AxisFile) -> String {
 
 /// 落盘：走 [`rr3_atomic_store`]（tmp 写全量 → fsync → rename）——§4.4 载体
 /// 语义①"必须复用仓内那一份原子序，不许出现第二条写路径"。tmp 同名加
-/// `.tmp` 后缀（counters 的 `counters.json.tmp` 同形）。
+/// `.tmp` 后缀（counters 的 `counters.json.tmp` 同形）。消费面（产线写入
+/// axis_write / 测试）随写盘面 unix 门（批N9 件一补钉，counters.rs 同径）。
+#[cfg(unix)]
 pub fn rr3_act_profile_store(path: &Path, file: &Rr3AxisFile) -> Result<(), String> {
     let body = rr3_act_profile_to_toml(file);
     let mut os = path.as_os_str().to_os_string();

@@ -41,7 +41,7 @@ mod charger;
 
 use std::time::{Duration, Instant};
 
-use rr_bus::Rr3BusClient;
+use rr_bus_api::Rr3BusClient;
 use rr_hal::backend::{rr3_hal_power, rr3_hal_rail};
 use rr_hal_api::{rr3_rail_tier_effective, Rr3BatteryState, Rr3RailState, Rr3RailTier};
 use rr_ipc::{opcode, Rr3PayloadType};
@@ -166,7 +166,7 @@ pub fn rr3_power_run() -> Result<(), String> {
             let Ok((Rr3PayloadType::Request, body)) = Rr3BusClient::rr3_frame_body(&frame) else {
                 continue;
             };
-            if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
+            if body.get("method").and_then(Value::as_str) != Some(rr_core::RR3_METHOD_CALL) {
                 continue;
             }
             let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);

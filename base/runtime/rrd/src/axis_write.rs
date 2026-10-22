@@ -26,7 +26,10 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use crate::axis::{rr3_act_profile_from_text, rr3_act_profile_load, rr3_act_profile_store};
+use crate::axis::{rr3_act_profile_from_text, rr3_act_profile_load};
+// 落盘序随写盘面 unix 门（counters/axis 同径，批N9 件一补钉；run 的接线位同门）
+#[cfg(unix)]
+use crate::axis::rr3_act_profile_store;
 
 /// 写入参数：`--profile` 装配单（pin_id 全集与形态名的唯一输入）＋
 /// `--candidate` 候选档案（十四键平表全文）。
@@ -82,7 +85,9 @@ pub fn rr3_axis_write_parse(args: &[String]) -> Result<Rr3AxisWriteArgs, String>
 
 /// 写入编排（策略全在本函数，逐条显式）：装配单装载 → 候选全判据 → 拒绝面
 /// （坏目标不覆盖 / 同 pin 异名副本不制造）→ 原子落盘。成功回显写入路径与
-/// 档案要点；失败逐条点名，**不落任何字节**。
+/// 档案要点；失败逐条点名，**不落任何字节**。随落盘序 unix 门（批N9 件一
+/// 补钉）——解析面 [`rr3_axis_write_parse`] 跨平台照常在册。
+#[cfg(unix)]
 pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
     // ① 装配单装载：绝对路径（与 daemon 的 rr3_profile_absolute_path 同口径，
     //    装机现场读不到装配单，pin_id 全集无从谈起）→ 文本 → 结构。

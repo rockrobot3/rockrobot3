@@ -1,22 +1,12 @@
 //! # rr-bus
 //!
-//! 总线**std 承载层**（模块侧同步 UDS 客户端，architecture.md §6，M3 落地）：
-//! 连接 → 注册（entry 绝对化）→ 心跳线程 → 发布 / `rr3.call` / 收帧，是模块与
-//! rrd 之间唯一的标准说话方式。客户端见 [`client`]。
+//! 总线**语义常量 re-export 层**：真值在 `rr-core`（0.0.5 第 II 轮批D₁，ADR-0018
+//! 裁定 1），本 crate re-export 保持既有 import 路径逐字不变（`rrd`/`tools` 的
+//! `use rr_bus::…` 零波及）。
 //!
-//! **总线语义层已下沉 `rr-core`（0.0.5 第 II 轮批D₁，ADR-0018 裁定 1）**：常量、
-//! 寻址规则与帧组装的 no_std 切片在 `rr-core`；本 crate re-export 保持既有
-//! import 路径逐字不变（`rrd` 的 rpc.rs 与六模块的 `use rr_bus::…` 零波及）。
-
-pub mod client;
-#[cfg(unix)]
-pub use client::{
-    rr3_manifest_entry_absolutize, rr3_manifest_identity, Rr3BusClient, Rr3BusIdentity, Rr3TimeBase,
-};
-
-// ---------------------------------------------------------------------------
-// 总线语义层：真值在 rr-core，这里只 re-export（批D₁ 下沉，对外路径不变）
-// ---------------------------------------------------------------------------
+//! **std 承载客户端已迁 `rr-bus-api`**（基-35 窄化②，批N9 件一，照 `rr-hal-api`
+//! ＋`⑨-w` 先例）：五单元承载面直依契约 crate，不再绑本 crate；客户端（连接 →
+//! 注册 → 心跳 → 发布 / `rr3.call` / 收帧）见 `rr-bus-api::client`。
 
 pub use rr_core::{
     rr3_event_compose, rr3_frame_compose, rr3_task_kind, Rr3TaskKind, RR3_BROADCAST_DST_TASK,

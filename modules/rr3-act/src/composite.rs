@@ -38,7 +38,7 @@ mod servo;
 
 use std::time::Duration;
 
-use rr_bus::{Rr3BusClient, Rr3TimeBase};
+use rr_bus_api::{Rr3BusClient, Rr3TimeBase};
 use rr_core::control::Rr3LowGate;
 use rr_hal::backend::{rr3_hal_gpio_out, rr3_hal_servo};
 use rr_hal_api::{Rr3GpioOut, Rr3PwmServo};
@@ -192,7 +192,7 @@ const RR3_POLL_WAIT: Duration = Duration::from_millis(250);
 /// 白名单组体应答，槽名与 assemble.toml 槽表申报同源（门 d covers 申报的对账面）
 const RR3_OPS_LIST_TOPIC: &str = "rr3-act/ops/list";
 
-// 限速门/眨眼节拍只看间隔不看绝对值：时基 = `rr_bus::Rr3TimeBase`（Instant
+// 限速门/眨眼节拍只看间隔不看绝对值：时基 = `rr_bus_api::Rr3TimeBase`（Instant
 // 单调毫秒，0.0.5 批I A-2 的 std 供给）。旧本地 SystemTime 实现自称"单调"
 // 是误称（墙钟可回拨），已删。
 
@@ -331,7 +331,7 @@ pub fn rr3_act_run() -> Result<(), String> {
             }
             // 事务面：rr3.call 转发帧（Request，trace_id=调用方 task，顺原路应答）
             if let Ok((Rr3PayloadType::Request, body)) = Rr3BusClient::rr3_frame_body(&frame) {
-                if body.get("method").and_then(Value::as_str) != Some(rr_bus::RR3_METHOD_CALL) {
+                if body.get("method").and_then(Value::as_str) != Some(rr_core::RR3_METHOD_CALL) {
                     continue;
                 }
                 let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);

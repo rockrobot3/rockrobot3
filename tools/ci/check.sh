@@ -651,7 +651,12 @@ rm -f "$travel_hits"
 #   3) 板侧（tools/esp32-periph-base）Cargo 依赖不得出现实现 crate rr-hal / rr-bus / rrd
 #      （architecture §14 全量口径；今日零依赖，钉住防漂）。tools/sim 是 CI/无头开发
 #      承载工具（工具层），不在单元分母，豁免。
-step "⑨-w 依赖面禁令（单元契约面走 rr-hal-api + use 面白名单冻结 + 板侧禁实现 crate，基-35）"
+#   4) 单元（modules/*/Cargo.toml）承载面必依契约 crate rr-bus-api 且不得列实现层
+#      rr-bus（基-35 窄化②/批N9 件一，§25.8 #2——"单元绑实现 crate"同族的第二次
+#      出现，照 rr-hal-api 先例；rr-bus 收窄为语义常量 re-export 层，仅 rrd/tools 消费）；
+#   5) 单元 use 面（modules/**，行注释先剥同判据 2 口径）`rr_bus::` 零命中——承载
+#      客户端走 rr_bus_api，语义常量直引 rr_core（真值单点，不经 re-export 中介）。
+step "⑨-w 依赖面禁令（单元契约面走 rr-hal-api/rr-bus-api + use 面白名单冻结 + 板侧禁实现 crate，基-35）"
 dep_fail=0
 dep_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 # 1) rr-hal-api 必依（逐单元点名；枚举打空即门禁失效，与 ④/⑥ 同口径）
@@ -697,6 +702,33 @@ if [ -n "$board_dep" ]; then
 else
   printf 'PASS  ⑨-w 板侧零实现 crate 依赖（esp32-periph-base，rr-hal/rr-bus/rrd 三件钉住）\n'
 fi
+# 4) 承载面必依 rr-bus-api 且禁列 rr-bus（依赖键 = 形状匹配，同判据 3 口径，不误伤
+#    注释与 rr-bus-api 自身；枚举复用判据 1 的 $unit_manifests）
+for c in $unit_manifests; do
+  if grep -qE '^[[:space:]]*rr-bus-api[[:space:]]*=' "$c" \
+     && ! grep -qE '^[[:space:]]*rr-bus[[:space:]]*=' "$c"; then
+    printf 'PASS  ⑨-w %s 承载面直依 rr-bus-api（不绑 rr-bus 实现层，基-35 窄化②）\n' "$c"
+  else
+    printf 'FAIL  ⑨-w %s 承载面依赖违例——须直依 rr-bus-api 且不得列 rr-bus（基-35 窄化②/批N9 件一）\n' "$c"
+    dep_fail=1
+  fi
+done
+# 5) 单元 use 面 rr_bus:: 零命中（rr_bus_api:: 不含子串 rr_bus:: 不误伤；rrd/tools 的
+#    re-export 路径不在扫描面——它们消费 rr-bus 是工具层既有 import，豁免同判据 3 注）
+bus_hits="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
+while IFS= read -r -d '' f; do
+  sed 's://.*$::' "$f" \
+    | grep -nE 'rr_bus::' \
+    | sed "s|^|$f:|" >> "$bus_hits"
+done < <(find modules -name '*.rs' -not -path '*/target/*' -print0 | sort -z)
+if [ -s "$bus_hits" ]; then
+  cat "$bus_hits"
+  printf 'FAIL  ⑨-w 单元 use 面命中 rr_bus::——承载客户端走 rr_bus_api，语义常量直引 rr_core（基-35 窄化②，见上行号）\n'
+  dep_fail=1
+else
+  printf 'PASS  ⑨-w 单元 use 面零 rr_bus::（%s 份 .rs 全扫，承载面已契约化）\n' "$unit_rs"
+fi
+rm -f "$bus_hits"
 if [ "$dep_fail" -ne 0 ]; then
   fail=1
 fi
@@ -1065,7 +1097,7 @@ fi
 
 # —— ⑨-y 跨平台可编面（base 层 Windows 红 crate 数基线钉数，门 y；裁-19/基-33 /
 #    §25.8 #9，批N8 件六）。判据：cargo check --target x86_64-pc-windows-msvc
-#    （check 不链接，宿主无需 MSVC）--keep-going 尽量多编，base/runtime 九成员的
+#    （check 不链接，宿主无需 MSVC）--keep-going 尽量多编，base/runtime 十成员的
 #    **红 crate 数**（按 crate 名去重——同 crate lib/bin 双单元红只计一）不得超过
 #    tools/ci/gate-win-baseline.txt 的钉数（只降不升）。
 #    fail-closed 三查：基线文件缺/坏/首个非注释行非纯整数即红（gate-a 同款）；

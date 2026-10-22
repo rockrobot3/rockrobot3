@@ -17,7 +17,10 @@ path = "src/main.rs"
 # （基-35/⑨-w）：契约符号一律走 rr_hal_api；rr-hal 边仅为装配函数 + sim/配网承载
 # 保留（白名单由 check.sh 步 ⑨-w 冻结执法，Cargo 级拆边需装配上移，敞口在册）。
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
-rr-bus = { path = "../../base/runtime/rr-bus" }
+# 总线承载契约面（基-35 窄化②/批N9 件一）：承载客户端走 rr_bus_api；语义常量直引
+# rr-core（真值单点，不经 re-export 中介）。
+rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
+rr-core = { path = "../../base/runtime/rr-core" }
 rr-hal = { path = "../../base/runtime/rr-hal" }
 rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
 serde_json = "1"

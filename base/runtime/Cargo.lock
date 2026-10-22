@@ -105,6 +105,13 @@ name = "rr-bus"
 version = "0.0.1"
 dependencies = [
  "rr-core",
+]
+
+[[package]]
+name = "rr-bus-api"
+version = "0.0.1"
+dependencies = [
+ "rr-core",
  "rr-ipc",
  "serde_json",
  "toml",
