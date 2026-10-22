@@ -106,5 +106,7 @@ echo "== ⑤ 烧录（espflash flash$([ "$MONITOR" = 1 ] && echo ' + monitor，�
 flash_args=()
 if [ -n "$PORT" ]; then flash_args+=(--port "$PORT"); fi
 if [ "$MONITOR" = 1 ]; then flash_args+=(--monitor); fi
-espflash flash "${flash_args[@]}" "$ELF" || die "espflash 烧录失败"
+# 哨兵展开必加：bash 3.2（macOS 默认）+ set -u 下空数组 "${arr[@]}" 即 unbound
+# variable（无 --port/--monitor 时 flash_args 为空）——空时不展开任何词
+espflash flash ${flash_args[@]+"${flash_args[@]}"} "$ELF" || die "espflash 烧录失败"
 echo "PASS  烧录完成: $ELF → 板"
