@@ -66,6 +66,7 @@
 mod board;
 mod commands;
 mod frame;
+mod httpd;
 mod link;
 mod mic;
 mod oled;
@@ -337,6 +338,10 @@ fn main() {
     ram_point("2-periph-ready");
     // mic 线与控制面共享 bus（audio_q 产者/消费者；clone 须在 cmd_loop move 前）
     let mic_bus = bus.clone();
+    // ---- 批N13 件一：板侧配置腿（N-13 服务本体）——WiFi 凭据编译期注入
+    //（RR3_BOARD_WIFI_SSID/PASS，值不落仓），未装配 fail-honest 点名后缺席，
+    //板其余功能照常；细节见 [httpd] 模块文档。（clone 同前——须在 cmd_loop move 前）
+    httpd::rr3_board_httpd_spawn(&bus);
     // 运行面先起（boot 后即可接作业 + 跑自主节拍），再起控制面
     {
         let bus = bus.clone();
