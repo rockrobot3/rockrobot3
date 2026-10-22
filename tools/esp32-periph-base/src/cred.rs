@@ -119,10 +119,9 @@ unsafe fn nvs_get_str_boxed(h: nvs_handle_t, key: &CString) -> Option<String> {
     }
 }
 
-/// 写入（配网写口消费点，批N14 件二）：形制校验前件（调用方已校验，此处复验——
-/// 毒不双入）→ 两键写 → commit。错误只回码，点名在调用方（键名级，不出值）。
-// 过渡 allow：件二写口落地即有消费点，届时摘除（甲面零 warning 纪律）。
-#[allow(dead_code)]
+/// 写入（配网写口消费点，批N14 件二 [crate::httpd::rr3_wifi_write_apply]——apply
+/// 与回退两路共用）：形制校验前件（调用方已校验，此处复验——毒不双入）→
+/// 两键写 → commit。错误只回码，点名在调用方（键名级，不出值）。
 pub(crate) fn rr3_cred_write(ssid: &str, pass: &str) -> Result<(), i32> {
     rr3_cred_form_check(ssid, pass).map_err(|_| -1)?; // -1：形制域内错误（非 esp_err 码空间）
     unsafe fn raw(h: nvs_handle_t, key: &CString, v: &str) -> Result<(), i32> {
@@ -162,10 +161,9 @@ pub(crate) fn rr3_cred_write(ssid: &str, pass: &str) -> Result<(), i32> {
     }
 }
 
-/// 擦除（事务回退到"原空态"消费点，批N14 件二）：两键 erase + commit；键不存在
-/// 不算错（幂等——回退目标是"读不到"，erase 一个不存在的键语义已达成）。
-// 过渡 allow：件二写口落地即有消费点，届时摘除（甲面零 warning 纪律）。
-#[allow(dead_code)]
+/// 擦除（事务回退到"原空态"消费点，批N14 件二 [crate::httpd::rr3_wifi_write_apply]）：
+/// 两键 erase + commit；键不存在不算错（幂等——回退目标是"读不到"，erase 一个
+/// 不存在的键语义已达成）。
 pub(crate) fn rr3_cred_erase() -> Result<(), i32> {
     let ns = match CString::new(RR3_CRED_NAMESPACE) {
         Ok(s) => s,

@@ -1,18 +1,27 @@
 //! 板侧配置腿服务（N-13 服务本体，批N13 件一；connect 册 N-13 / 全案 §7 F-18）。
 //!
 //! rtos 形态"自己的配置/观测腿"——不经桥（[`crate::frame`] 的 `rr3.set_bindings`
-//! 是 host **推给**板的另一条腿，基-24），板自己在 WiFi 上开极简 HTTP 只读面。
+//! 是 host **推给**板的另一条腿，基-24），板自己在 WiFi 上开极简 HTTP 面。
 //! 载体选型随批N4 件二定案：ESP-IDF 内置组件 `esp_http_server`（HTTP/1.1 子集：
-//! GET + JSON，与 host 面板 [server.rs](../../../modules/rr3-interact/src/panel/server.rs)
+//! GET/POST + JSON，与 host 面板 [server.rs](../../../modules/rr3-interact/src/panel/server.rs)
 //! 同形）；**TLS 不做**（四条理由在案：局域网可信面同 host 面板 Q3 裁定／板侧无
 //! TLS 栈现役，引 mbedtls 堆账不可收／零新依赖纪律／公网暴露立项时与凭据面同批
-//! 评审）——凭据面本件**不接 N-11**。
+//! 评审）。
+//!
+//! 写口（批N14 件二，N-10 ② 配网半边）：**POST /api/board/wifi** 事务性配网——
+//! 读旧值 → 写 NVS → STA 重配置重连 → 有界等连 → 败即回退旧值重连 → 如实应答
+//! `{ok, connected, reverted, stage}`（fail-safe 方向：消灭"写坏凭据板掉网"砖
+//! 路径；`connected` 字段＝实测等连结果，**永不因请求被接受而置真**，同 connect
+//! RPC 纪律）；**POST /api/board/reboot** 动作面——应答先行落链再 `esp_restart`。
+//! 事务全程**不持 bus 锁**（不碰 [`crate::state::PeriphState`]，观测面结构上无
+//! WiFi 字段——零回显契约的第二道墙，[`crate::cred`] 模块文档）。
 //!
 //! 分层（机制与策略分离）：
 //! - **纯逻辑层**（单测可钉）：白名单路由表 [`RR3_BOARD_ROUTES`]（与 host
 //!   `RR3_PANEL_ROUTES` 四列同构）＋路由纯函数 [`rr3_board_route`]＋快照 JSON
-//!   组包纯函数。表↔分派零漂移由 `route_table_matches_dispatch` 单测钉死
-//!   （同 host `route_table_matches_dispatch` 形状）。
+//!   组包纯函数＋写口 body 解析/应答组包纯函数。表↔分派零漂移由
+//!   `route_table_matches_dispatch` 单测钉死（同 host `route_table_matches_dispatch`
+//!   形状）。
 //! - **unsafe 壳层**（[`rr3_board_httpd_spawn`]）：WiFi STA 起栈（裸 sys——
 //!   [`wifi_init_config_t`] 手抄 v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开，
 //!   字段真值逐项对表本项目生成 sdkconfig，见 [`wifi_default_config`]）＋
@@ -32,18 +41,23 @@
 //! 65536` 容既有两 16KB 线程＋本面余量充足；起栈线程短命同栈）；WiFi/httpd
 //! 常驻堆从批N4 件二预留 16384 出——**取值对账归真板**（`esp_get_free_heap_size`
 //! 实测，`heap_reserved_bytes` 回填口径已注明，WiFi 静态缓冲 ~16KB 量级＋
-//! httpd 会话面，预留是否充足以真板实测为准，本件如实留痕不冒领）。
+//! httpd 会话面，预留是否充足以真板实测为准，本件如实留痕不冒领）。写口瞬时
+//! 面（批N14 件二）：body 收包缓冲 ≤512B＋等连探测 `wifi_ap_record_t`
+//! ~1.8KB 栈上临时——16KB 栈富余；事务不新增常驻堆。
 
 use std::ffi::CString;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use esp_idf_sys::{
     esp_event_loop_create_default, esp_netif_create_default_wifi_sta, esp_netif_init,
-    esp_wifi_init, esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start, g_wifi_default_wpa_crypto_funcs,
-    g_wifi_osi_funcs, http_method_HTTP_GET, httpd_config_t, httpd_err_code_t_HTTPD_404_NOT_FOUND,
-    httpd_handle_t, httpd_register_uri_handler, httpd_req_t,
-    httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type, httpd_start, httpd_uri_t,
-    nvs_flash_init, wifi_config_t, wifi_init_config_t, wifi_interface_t_WIFI_IF_STA,
+    esp_restart, esp_wifi_connect, esp_wifi_disconnect, esp_wifi_init, esp_wifi_set_config,
+    esp_wifi_set_mode, esp_wifi_sta_get_ap_info, esp_wifi_start, g_wifi_default_wpa_crypto_funcs,
+    g_wifi_osi_funcs, httpd_config_t, httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t, httpd_register_uri_handler,
+    httpd_req_recv, httpd_req_t, httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type,
+    httpd_start, httpd_uri_t, http_method_HTTP_GET, http_method_HTTP_POST, nvs_flash_init,
+    wifi_ap_record_t, wifi_config_t, wifi_init_config_t, wifi_interface_t_WIFI_IF_STA,
     wifi_mode_t_WIFI_MODE_STA, WIFI_INIT_CONFIG_MAGIC, ESP_OK,
 };
 
@@ -54,32 +68,45 @@ use crate::state::{lock_bus, Bus};
 // ---------------------------------------------------------------------------
 
 /// 端点白名单（与 host `RR3_PANEL_ROUTES` 四列同构：method / path / covers / applies）。
-/// **首笔只读**：写口（POST 改配置）并发面与凭据面另批。covers 列＝该端点读的
-/// ⑩ 配置模型字段（`<路>/<字段>`）；本批两端点读的是板侧运行态与注入绑定
-/// （**不在** ⑩ 分母五路——绑定十键是 rr-ipc 注入键非配置模型 [[pin]] 词表），
-/// covers 全空＋applies 全空如实登记；件二把本表区段扩进 check.sh ⑩ 扫描源，
-/// 执法位＝未来板侧端点读五路字段而不申报即红（对拍判据 ⊆ 分母五路并集）。
+/// 批N14 件二起四行：两读（GET state/bindings）＋两写（POST wifi/reboot）。
+/// covers 列＝该端点读的 ⑩ 配置模型字段（`<路>/<字段>`）；本表端点读的是板侧
+/// 运行态/注入绑定（**不在** ⑩ 分母五路——绑定十键是 rr-ipc 注入键非配置模型
+/// [[pin]] 词表）/写的是板侧 NVS 凭据（同样不在五路），covers 全空如实登记；
+/// applies 列＝该端点改的配置对象（词表 `live`/空）：配网写口改的是"活配置"
+/// （STA 立即重连）＝`live`；reboot 是动作面（不改任何配置对象）＝空，同 host
+/// 面板 POST /api/relay 动作面先例。申报面进 check.sh ⑩ 扫描（批N13 件二
+/// 已把本表区段扩进扫描源），执法位＝未来板侧端点读五路字段而不申报即红
+/// （对拍判据 ⊆ 分母五路并集）。
 pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/api/board/state", &[], ""),
     ("GET", "/api/board/bindings", &[], ""),
+    ("POST", "/api/board/wifi", &[], "live"),
+    ("POST", "/api/board/reboot", &[], ""),
 ];
 
 /// 路由分派产物（表内端点；`None` = 白名单外，fail-closed 回 404）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Rr3BoardGet {
-    /// 板侧运行态观测快照（`PeriphState` 观测字段，批N12 件一观测面含其中）
+pub(crate) enum Rr3BoardRoute {
+    /// GET /api/board/state——板侧运行态观测快照（`PeriphState` 观测字段，
+    /// 批N12 件一观测面含其中）
     State,
-    /// 注入绑定十键读数（批N9 件五对账锚同源）
+    /// GET /api/board/bindings——注入绑定十键读数（批N9 件五对账锚同源）
     Bindings,
+    /// POST /api/board/wifi——事务性配网写口（批N14 件二，N-10 ② 配网半边）
+    WifiWrite,
+    /// POST /api/board/reboot——动作面（应答先行落链再重启）
+    Reboot,
 }
 
 /// 路由纯函数：method + path → 分派。**白名单 = [`RR3_BOARD_ROUTES`]**——
 /// method 或 path 任一不在表内即 `None`（fail-closed，同 host 面板语义；
-/// 405 细分不做——首笔只读，GET 之外的 method 一律白名单外）。
-pub(crate) fn rr3_board_route(method: &str, path: &str) -> Option<Rr3BoardGet> {
+/// 405 细分不做——method 不在表内一律白名单外）。
+pub(crate) fn rr3_board_route(method: &str, path: &str) -> Option<Rr3BoardRoute> {
     match (method, path) {
-        ("GET", "/api/board/state") => Some(Rr3BoardGet::State),
-        ("GET", "/api/board/bindings") => Some(Rr3BoardGet::Bindings),
+        ("GET", "/api/board/state") => Some(Rr3BoardRoute::State),
+        ("GET", "/api/board/bindings") => Some(Rr3BoardRoute::Bindings),
+        ("POST", "/api/board/wifi") => Some(Rr3BoardRoute::WifiWrite),
+        ("POST", "/api/board/reboot") => Some(Rr3BoardRoute::Reboot),
         _ => None,
     }
 }
@@ -188,6 +215,63 @@ pub(crate) fn rr3_bindings_json(b: Option<[(&str, Option<u8>); 10]>) -> String {
     }
 }
 
+/// 写口 body 上界（fail-closed：形制上限 32+64B 的 JSON 富余 8 倍——超长 body
+/// 一律不读全，400 拒收）。
+const RR3_WIFI_BODY_MAX: usize = 512;
+/// 等连有界窗（事务与回退共用；步进 [`WIFI_POLL_MS`]——15s 上限，超窗＝未连
+/// 如实应答，不猜不造）。
+const WIFI_CONNECT_WAIT_MS: u64 = 15_000;
+const WIFI_POLL_MS: u64 = 500;
+
+/// 配网写口事务终态（应答 `{ok, connected, reverted, stage}`——`connected`＝
+/// 实测等连结果**永不因请求被接受而置真**（同 connect RPC 纪律）；`stage`＝
+/// 事务终态所在阶段名，点名不出值）。
+pub(crate) struct Rr3WifiWriteResult {
+    pub(crate) ok: bool,
+    pub(crate) connected: bool,
+    pub(crate) reverted: bool,
+    pub(crate) stage: &'static str,
+}
+
+impl Rr3WifiWriteResult {
+    /// 业务拒绝态（body/form/nvs——未触 STA，无回退发生）。
+    fn rejected(stage: &'static str) -> Self {
+        Self {
+            ok: false,
+            connected: false,
+            reverted: false,
+            stage,
+        }
+    }
+}
+
+/// 写口 body 解析（纯函数，单测钉域）：JSON object + `ssid`/`pass` 字符串字段；
+/// 空密码合法（开放网络，同形制域口径）。缺字段/非串/坏 JSON 一律 Err（点名串
+/// 不出值——零回显契约）。
+pub(crate) fn rr3_wifi_write_body(body: &[u8]) -> Result<(String, String), &'static str> {
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|_| "body 非 JSON")?;
+    let ssid = v
+        .get("ssid")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("ssid 字段缺席或非串")?;
+    let pass = v
+        .get("pass")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("pass 字段缺席或非串")?;
+    Ok((ssid.to_string(), pass.to_string()))
+}
+
+/// 事务终态 → 应答 JSON（纯函数，单测钉形状——四字段计数钉死防顺手加值字段）。
+pub(crate) fn rr3_wifi_write_json(r: &Rr3WifiWriteResult) -> String {
+    serde_json::json!({
+        "ok": r.ok,
+        "connected": r.connected,
+        "reverted": r.reverted,
+        "stage": r.stage,
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,17 +285,29 @@ mod tests {
             assert!(hit.is_some(), "表内行未命中分派: {method} {path}");
         }
         assert_eq!(rr3_board_route("GET", "/api/board/nope"), None);
-        assert_eq!(rr3_board_route("POST", "/api/board/state"), None);
+        assert_eq!(rr3_board_route("POST", "/api/board/state"), None, "读端点不受 POST——写口白名单外 fail-closed");
+        assert_eq!(rr3_board_route("GET", "/api/board/wifi"), None, "写端点不受 GET");
+        assert_eq!(rr3_board_route("PUT", "/api/board/wifi"), None);
         assert_eq!(rr3_board_route("GET", "/api/brain/ops"), None);
         assert_eq!(rr3_board_route("GET", "/api/board/state/extra"), None);
+        // 分派产物点名（enum 变体 ↔ 表行一一对应）
+        assert_eq!(rr3_board_route("GET", "/api/board/state"), Some(Rr3BoardRoute::State));
+        assert_eq!(rr3_board_route("GET", "/api/board/bindings"), Some(Rr3BoardRoute::Bindings));
+        assert_eq!(rr3_board_route("POST", "/api/board/wifi"), Some(Rr3BoardRoute::WifiWrite));
+        assert_eq!(rr3_board_route("POST", "/api/board/reboot"), Some(Rr3BoardRoute::Reboot));
     }
 
     /// covers 形制（同 check.sh ⑩ 扫描执法语义）：带斜杠且不以 `/` 开头；
-    /// applies 只收 `live`/空。本批全空＝平凡过，执法位防未来加错形状。
+    /// applies 只收 `live`/空；method 词表只收 GET/POST（注册面映射与 handler
+    /// 识别共用同一词表——批N14 件二扩 POST 行时钉死）。
     #[test]
     fn covers_wordform_shape() {
         for (method, path, covers, applies) in RR3_BOARD_ROUTES {
-            assert!(!method.is_empty() && !path.is_empty(), "空行: {method} {path}");
+            assert!(
+                *method == "GET" || *method == "POST",
+                "method 词表外: {path} {method}"
+            );
+            assert!(!path.is_empty(), "空 path 行");
             assert!(
                 applies.is_empty() || *applies == "live",
                 "applies 形制乱写: {path} {applies}"
@@ -223,6 +319,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 写口 body 解析域（纯函数）：合法/空密码合法（开放网络）/坏 JSON/缺字段/
+    /// 非串字段全点名。
+    #[test]
+    fn wifi_write_body_domain() {
+        let (s, p) = rr3_wifi_write_body(br#"{"ssid":"ap","pass":"pw"}"#).unwrap();
+        assert_eq!((s.as_str(), p.as_str()), ("ap", "pw"));
+        assert!(rr3_wifi_write_body(br#"{"ssid":"ap","pass":""}"#).is_ok(), "空密码合法（开放网络）");
+        assert!(rr3_wifi_write_body(b"not json").is_err(), "坏 JSON 必须红");
+        assert!(rr3_wifi_write_body(br#"{"ssid":"ap"}"#).is_err(), "pass 缺席必须红");
+        assert!(rr3_wifi_write_body(br#"{"pass":"pw"}"#).is_err(), "ssid 缺席必须红");
+        assert!(rr3_wifi_write_body(br#"{"ssid":1,"pass":"pw"}"#).is_err(), "非串字段必须红");
+    }
+
+    /// 写口应答 JSON 形状：四字段名/类型钉死（拒绝态与成功态同形状——
+    /// 宿主消费面契约面）。
+    #[test]
+    fn wifi_write_json_shape() {
+        let mk = |r: &Rr3WifiWriteResult| {
+            let v: serde_json::Value = serde_json::from_str(&rr3_wifi_write_json(r)).unwrap();
+            v
+        };
+        let v = mk(&Rr3WifiWriteResult {
+            ok: true,
+            connected: true,
+            reverted: false,
+            stage: "apply",
+        });
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["connected"], true);
+        assert_eq!(v["reverted"], false);
+        assert_eq!(v["stage"], "apply");
+        assert_eq!(v.as_object().unwrap().len(), 4);
+        let v = mk(&Rr3WifiWriteResult::rejected("form"));
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["connected"], false);
+        assert_eq!(v["reverted"], false);
+        assert_eq!(v["stage"], "form");
+        assert_eq!(v.as_object().unwrap().len(), 4);
     }
 
     /// state JSON 形状：字段名/类型钉死（宿主消费面契约面）。
@@ -328,7 +464,7 @@ unsafe fn wifi_default_config() -> wifi_init_config_t {
     }
 }
 
-/// 白名单统一 handler：req→路由纯函数→快照 JSON 应答。表外 404 fail-closed。
+/// 白名单统一 handler：req→路由纯函数→快照/写口应答。表外 404 fail-closed。
 unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
     let Some(bus) = HTTPD_BUS.get() else {
         // 未装配即被请求到（时序防御）：OnceLock 在 httpd_start 前写入，常态不可达
@@ -341,21 +477,158 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
     let path = std::ffi::CStr::from_ptr((*req).uri.as_ptr())
         .to_string_lossy()
         .into_owned();
-    let method = "GET"; // 注册面只挂 GET 行——method 分派在注册面，此处恒 GET
-    let Some(get) = rr3_board_route(method, &path) else {
+    // 真实 method 从 req 读（批N14 件二：注册面挂 GET/POST 两行——注册面未挂的
+    // method 判 "?"，路由纯函数必 None fail-closed 404；req.method 是 c_int，
+    // 绑定常量是 http_method=u32——比较处 as i32 对齐）
+    let method = match (*req).method {
+        m if m == http_method_HTTP_GET as i32 => "GET",
+        m if m == http_method_HTTP_POST as i32 => "POST",
+        _ => "?",
+    };
+    let Some(route) = rr3_board_route(method, &path) else {
         return httpd_resp_send_err(
             req,
             httpd_err_code_t_HTTPD_404_NOT_FOUND,
             b"not in board route whitelist\0".as_ptr() as *const _,
         );
     };
-    // 出锁组 JSON（快照取窗内不组串——模块文档纪律）
-    let body = match get {
-        Rr3BoardGet::State => rr3_state_json(&rr3_state_snapshot(bus)),
-        Rr3BoardGet::Bindings => rr3_bindings_json(rr3_bindings_snapshot()),
+    match route {
+        // 出锁组 JSON（快照取窗内不组串——模块文档纪律）
+        Rr3BoardRoute::State => {
+            let body = rr3_state_json(&rr3_state_snapshot(bus));
+            httpd_resp_set_type(req, c"application/json".as_ptr());
+            httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
+        }
+        Rr3BoardRoute::Bindings => {
+            let body = rr3_bindings_json(rr3_bindings_snapshot());
+            httpd_resp_set_type(req, c"application/json".as_ptr());
+            httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
+        }
+        // 事务性配网写口（批N14 件二）——body 有界收（fail-closed）→ 解析 →
+        // 形制 → 事务；HTTP 层失败 400 拒收不读全，业务层失败一律 200 JSON 如实应答
+        Rr3BoardRoute::WifiWrite => {
+            let clen = (*req).content_len;
+            if clen == 0 || clen > RR3_WIFI_BODY_MAX {
+                return httpd_resp_send_err(
+                    req,
+                    httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+                    b"wifi body out of bounds\0".as_ptr() as *const _,
+                );
+            }
+            let mut buf = vec![0u8; clen];
+            let got = httpd_req_recv(req, buf.as_mut_ptr() as *mut _, buf.len());
+            if got <= 0 || got as usize != buf.len() {
+                return httpd_resp_send_err(
+                    req,
+                    httpd_err_code_t_HTTPD_400_BAD_REQUEST,
+                    b"wifi body recv failed\0".as_ptr() as *const _,
+                );
+            }
+            let result = match rr3_wifi_write_body(&buf) {
+                Ok((s, p)) => match crate::cred::rr3_cred_form_check(&s, &p) {
+                    Ok(()) => rr3_wifi_write_apply(&s, &p),
+                    Err(_) => Rr3WifiWriteResult::rejected("form"),
+                },
+                Err(_) => Rr3WifiWriteResult::rejected("body"),
+            };
+            let body = rr3_wifi_write_json(&result);
+            httpd_resp_set_type(req, c"application/json".as_ptr());
+            httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
+        }
+        // 动作面：应答先行落链再重启（esp_restart 不返回——重启即断链，应答
+        // 不可达＝客户端误判超时，故先 send 后 restart）
+        Rr3BoardRoute::Reboot => {
+            let body = "{\"ok\":true}".to_string();
+            httpd_resp_set_type(req, c"application/json".as_ptr());
+            let _ = httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _);
+            println!("[periph] 写口 reboot 应答已发——esp_restart");
+            esp_restart()
+        }
+    }
+}
+
+/// STA 凭据装配（start_httpd 与写口 apply/回退共用；union 起底——sta 臂其余
+/// 字段零 = 默认；调用前形制已验 32/64 上限＝`sta.ssid[32]`/`sta.password[64]`
+/// 数组尺寸，copy_from_slice 不越界）。返回 esp_err。
+unsafe fn wifi_sta_set_credentials(ssid: &[u8], pass: &[u8]) -> i32 {
+    let mut wcfg: wifi_config_t = std::mem::zeroed();
+    wcfg.sta.ssid[..ssid.len()].copy_from_slice(ssid);
+    wcfg.sta.password[..pass.len()].copy_from_slice(pass);
+    esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wcfg)
+}
+
+/// 有界等连（连上＝`esp_wifi_sta_get_ap_info` 返 ESP_OK）：[`WIFI_CONNECT_WAIT_MS`]
+/// 上限、[`WIFI_POLL_MS`] 步进；超窗即 false（调用方如实应答——不猜不造）。
+unsafe fn wifi_sta_wait_connected() -> bool {
+    for _ in 0..(WIFI_CONNECT_WAIT_MS / WIFI_POLL_MS) {
+        let mut ap: wifi_ap_record_t = std::mem::zeroed();
+        if esp_wifi_sta_get_ap_info(&mut ap) == ESP_OK {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(WIFI_POLL_MS));
+    }
+    false
+}
+
+/// 配网事务（批N14 件二，fail-safe 方向——消灭"写坏凭据板掉网"砖路径）：
+/// 读旧值 → 写 NVS → apply（disconnect→set→connect）→ 有界等连 → 败即回退
+/// 旧值（Some→写回 / None→erase 回原空态）重连 → 如实应答。全程**不持 bus 锁**
+/// （不碰 [`crate::state::PeriphState`]）；httpd 服务任务串行处理请求＝两写口
+/// 天然互斥。回退写败＝砖路径残余（新凭据在 NVS 但未连——重启后读链装配新凭据
+/// 重试，AP 不可达则掉网）：NVS 写败罕见链，如实点名 stage 不冒领。
+unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
+    let old = crate::cred::rr3_cred_read(); // None＝原空态（回退目标＝erase）
+    // 写 NVS（cred 模块内复验形制——毒不双入；败＝NVS 未动无需回退）
+    if crate::cred::rr3_cred_write(ssid, pass).is_err() {
+        return Rr3WifiWriteResult::rejected("nvs");
+    }
+    // apply 新凭据（disconnect 返回值不看——未连态不阻断 apply 链；
+    // set/connect 任一败一律进回退分支）
+    esp_wifi_disconnect();
+    let mut apply_ok = wifi_sta_set_credentials(ssid.as_bytes(), pass.as_bytes()) == ESP_OK;
+    if apply_ok {
+        apply_ok = esp_wifi_connect() == ESP_OK;
+    }
+    if apply_ok && wifi_sta_wait_connected() {
+        return Rr3WifiWriteResult {
+            ok: true,
+            connected: true,
+            reverted: false,
+            stage: "apply",
+        };
+    }
+    // 新凭据未连——回退旧值（Some→写回；None→erase；cred 模块幂等语义在案）
+    let revert_ok = match &old {
+        Some(c) => crate::cred::rr3_cred_write(&c.ssid, c.pass()).is_ok(),
+        None => crate::cred::rr3_cred_erase().is_ok(),
     };
-    httpd_resp_set_type(req, c"application/json".as_ptr());
-    httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
+    if !revert_ok {
+        return Rr3WifiWriteResult {
+            ok: false,
+            connected: false,
+            reverted: false,
+            stage: "revert",
+        };
+    }
+    // 回退写成功——apply 旧凭据重连（原空态＝停在断态，不 connect）
+    match &old {
+        Some(c) => {
+            esp_wifi_disconnect();
+            if wifi_sta_set_credentials(c.ssid.as_bytes(), c.pass().as_bytes()) == ESP_OK {
+                let _ = esp_wifi_connect();
+            }
+        }
+        None => {
+            esp_wifi_disconnect();
+        }
+    }
+    let connected = wifi_sta_wait_connected();
+    Rr3WifiWriteResult {
+        ok: true,
+        connected,
+        reverted: true,
+        stage: "reverted",
+    }
 }
 
 /// 起板侧配置腿（main 挂载点；**fail-honest**——任何一步失败点名后返回，
@@ -441,11 +714,8 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pas
     let cfg = wifi_default_config();
     chk(esp_wifi_init(&cfg))?;
     chk(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
-    // STA 凭据（union 起底——sta 臂其余字段零 = 默认；位形已在 spawn 前验）
-    let mut wcfg: wifi_config_t = std::mem::zeroed();
-    wcfg.sta.ssid[..ssid.len()].copy_from_slice(ssid);
-    wcfg.sta.password[..pass.len()].copy_from_slice(pass);
-    chk(esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wcfg))?;
+    // STA 凭据（helper 共用——写口 apply/回退同款；位形已在 spawn 前验）
+    chk(wifi_sta_set_credentials(ssid, pass))?;
     chk(esp_wifi_start())?;
     // ③ httpd 起（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
     //   false/null/0 的字段由全零起底等价覆盖，差异字段逐项对表 esp_http_server.h :53）
@@ -465,21 +735,27 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pas
         ..Default::default()
     };
     chk(httpd_start(&mut h, &conf))?;
-    // ④ 白名单注册（统一 handler；OnceLock 先写——handler 可达即 bus 在位）
+    // ④ 白名单注册（统一 handler；OnceLock 先写——handler 可达即 bus 在位；
+    // method 映射随表行 GET/POST——表内词表由 covers_wordform_shape 单测钉死，
+    // 词表外 panic 不可达）
     let _ = HTTPD_BUS.set(Arc::clone(bus));
     for (method, path, _, _) in RR3_BOARD_ROUTES {
-        debug_assert_eq!(*method, "GET", "首笔只读——注册面只挂 GET 行");
         let cpath = CString::new(*path).expect("白名单 path 不含 NUL");
+        let m = match *method {
+            "GET" => http_method_HTTP_GET,
+            "POST" => http_method_HTTP_POST,
+            _ => panic!("白名单 method 词表外: {method}"),
+        };
         let uri = httpd_uri_t {
             uri: cpath.as_ptr(),
-            method: http_method_HTTP_GET,
+            method: m,
             handler: Some(rr3_board_httpd_handler),
             user_ctx: std::ptr::null_mut(),
         };
         chk(httpd_register_uri_handler(h, &uri))?;
     }
     println!(
-        "[periph] 配置腿起（N-13，凭据源={cred_source}）: http://0.0.0.0:{}/api/board/{{state,bindings}}（白名单 {} 端点，只读）",
+        "[periph] 配置腿起（N-13，凭据源={cred_source}）: http://0.0.0.0:{}/api/board/*（白名单 {} 端点＝GET state/bindings＋POST wifi/reboot）",
         HTTPD_SERVER_PORT,
         RR3_BOARD_ROUTES.len()
     );
