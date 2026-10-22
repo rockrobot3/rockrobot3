@@ -1128,6 +1128,20 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   FT232 瞬态噪声同族嫌疑）。wav 落盘在位（`rr3-audio-600s-run4.wav` 37.6MB 实测 16002Hz）。判据② 重跑
   与判据③（DoA 拍手）仍待跑；功能开发（brain 语音交流 / DoA 听声识位）按"可用但有损"口径可并行开工，
   不以判据② pass 为前置。
+- **0.0.5 增补轮六 批N10 件二——"事件门拒收：事件体非 JSON"病灶定案（本批零代码，修不修归 0.0.7 另裁）（2026-10-22）**：
+  打印点 [rr3-audio-rec :219](../tools/rr3-audio-rec/src/main.rs)（事件体 `serde_json::from_slice` 失败）←
+  :746；排查面＝板侧事件帧组装发送（[mic.rs](../tools/esp32-periph-base/src/mic.rs) 组帧/audio_q →
+  [state.rs](../tools/esp32-periph-base/src/state.rs) drain_audio 整帧写、写不全不计 sent →
+  [link.rs](../tools/esp32-periph-base/src/link.rs) :85-100 写侧 Err/Ok(0) 即 break）vs 宿主
+  [FrameAssembler](../base/runtime/rr-ipc/src/framing.rs) 读面；run6 同跑取证＋本机代码面，六条证据闭环：
+  ①板面 INFO 对账 `seq=4688 sent=4688 drop=0 q=0`——板侧零丢弃全量发出（背压/组帧面洗清）；②宿主终账
+  chunks=4486＋err=100，4688−4486=202≈gaps 200（1 拒收≈2 缺失）；③拒收错误全型 `trailing characters`
+  100/100（EOF/invalid character 零条）；④干净窗口 seq 全连续（375/375）——丢片只在拒收窗口内；⑤trailing
+  位置 C∈[10675,11021] vs 标准体≈11030（2B 前缀＋topic 19 字符＋b64 10924）——载荷＝**被拼短的合法 JSON＋
+  帧内尾随残渣**；⑥err:gaps 恒 1:2（run4 46:92／run5 12:24／run6 100:200）。**定性＝块级字节替换/拼接**
+  （USB 传输级 stale replay ≈2 帧字节量级嫌疑最合形状；"板侧静默写半帧"嫌疑与 EOF 零条不符）。
+  **批N9 件四副证原判修正**：原记"板侧事件帧尾部截断"改判"JSON 值完整、帧内尾随残渣"。收口裁定：字节级
+  机制取证归 0.0.7（原始流 tee 双录板面/宿主读面）；帧级 CRC 承载面增强候选随取证另裁；本批不修。
 - **0.0.5 增补轮六 批N10 件一——判据② run6 600s 复测仍未过（如实敞口；三态判读＝恶化）（2026-10-22）**：
   命令形态补录（批N9 会话实录命令行未落档，本批以 [rr3-audio-rec main.rs](../tools/rr3-audio-rec/src/main.rs)
   :42/:584 为准）：`rr3-audio-rec /dev/cu.usbserial-A98KN77U --secs 600 --out rr3-audio-600s-run6.wav`
