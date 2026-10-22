@@ -50,6 +50,15 @@ pub(crate) fn rr3_board_bindings_i2c_pair() -> Option<(u8, u8)> {
         .and_then(Rr3BoardBindings::rr3_board_bindings_i2c)
 }
 
+/// 读全量绑定快照（批N13 件一配置腿 `/api/board/bindings` 读数用；Clone 出锁，
+/// 不持锁组 JSON——与 [`rr3_board_bindings_i2c_pair`] 同一单点）。
+pub(crate) fn rr3_board_bindings_snapshot() -> Option<Rr3BoardBindings> {
+    BOARD_BINDINGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /// 控制面/运行面共享状态（[`Bus`] 内，`Arc<Mutex<..>>` 护）：行面/帧面的文本与
 /// 角度记账 + 自主行为（表情/扫摆）时钟。**不含任何硬件句柄**（故自动 Send）——
 /// 控制面改策略字段，运行面读之执行 + 回写自主推进的角度/拍号。帧面 expression
