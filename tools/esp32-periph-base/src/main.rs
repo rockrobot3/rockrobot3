@@ -89,7 +89,8 @@ use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_p
 
 use crate::board::{
     Axis, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, OLED_ADDR,
-    THREAD_STACK, UART2_BAUD_HZ, UART2_TX_RING,
+    RR3_BIND_LEDC_PAN, RR3_BIND_LEDC_TILT, RR3_BIND_UART2_RX, RR3_BIND_UART2_TX, THREAD_STACK,
+    UART2_BAUD_HZ, UART2_TX_RING,
 };
 use crate::commands::cmd_loop;
 use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
@@ -141,7 +142,7 @@ fn main() {
         &uart_config,
     )
     .expect("UART2 驱动安装失败");
-    println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO18(TX)/GPIO19(RX)");
+    println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO{RR3_BIND_UART2_TX}(TX)/GPIO{RR3_BIND_UART2_RX}(RX)（对账锚，board.rs）");
 
     // ---- GPIO18 驱动档拉满 CAP_3（判据② 音频上行病害的定案修复，2026-10-16）----
     // 根因（真板双探针实锤）：默认档 CAP_2（≈20mA）推不动 18/19 的长跳线 + FT232
@@ -280,7 +281,7 @@ fn main() {
     pan.set_duty(0).expect("pan 归零失败");
     tilt.set_duty(0).expect("tilt 归零失败");
     println!(
-        "[periph] LEDC ✓ pan=GPIO32 tilt=GPIO33 duty=0（待表情上屏后激磁）max={}",
+        "[periph] LEDC ✓ pan=GPIO{RR3_BIND_LEDC_PAN} tilt=GPIO{RR3_BIND_LEDC_TILT} duty=0（待表情上屏后激磁）max={}",
         pan.get_max_duty()
     );
     // 外设 'static 化 + 分发两平面（16KB 运行下限，哨兵纪律）：UART2 → 控制面，

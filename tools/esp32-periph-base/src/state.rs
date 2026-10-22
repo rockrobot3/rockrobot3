@@ -20,12 +20,14 @@ pub(crate) fn esp_random_u32() -> u32 {
 }
 
 // ---------------------------------------------------------------------------
-// 板侧绑定单点（rr3.set_bindings 注入态，批N4 件七(c)）：宿主经桥上 method 下发
-// 的引脚真值（esp32-mini [hardware] 三键 → rrd RR3_HAL_BINDINGS → supervisor env
-// → 桥），落此进程级单例。引脚号是芯片级物理事实，且 I2C 自愈的裸寄存器路径在
-// 深层自由函数（[`crate::oled`]，够不到 `Bus`）——故不随 `PeriphState` 走，单点
-// 存取。**消费面 fail-closed：未注入（None）即拒不动作**，观测面在调用方
-// （boot 解卡点名 / 运行面 `selfheal_skipped` 计数）。
+// 板侧绑定单点（rr3.set_bindings 注入态，批N4 件七(c) / 批N9 件五）：宿主经桥上
+// method 下发的引脚真值（esp32-mini [hardware] 十键 = 批N4 三键自愈/观测面 +
+// 批N9 件五七键主驱动对账面 → rrd RR3_HAL_BINDINGS → supervisor env → 桥），落
+// 此进程级单例。引脚号是芯片级物理事实，且 I2C 自愈的裸寄存器路径在深层自由函数
+// （[`crate::oled`]，够不到 `Bus`）——故不随 `PeriphState` 走，单点存取。
+// **消费面 fail-closed：未注入（None）即拒不动作**，观测面在调用方
+// （boot 解卡点名 / 运行面 `selfheal_skipped` 计数 / 注入到达时装配对账
+// `binding_mismatch` 计数，见 [`crate::board::rr3_bindings_reconcile`]）。
 // ---------------------------------------------------------------------------
 
 /// 板侧绑定单点（`None` = 未注入）。毒锁不失效（同 [`lock_bus`] 纪律）。
@@ -107,6 +109,11 @@ pub(crate) struct PeriphState {
     /// `rr3_board_bindings_i2c_pair()` 缺席即计，`INFO` 观测；非零即绑定下发链
     /// 未通——fail-closed 的观测面，注入到达即停增、恢复自愈）。
     pub(crate) selfheal_skipped: u32,
+    /// 绑定对账不齐键数累计（批N9 件五装配对账锚观测面）：set_bindings 注入到达
+    /// 时逐键判等板侧具名装配真值（[`crate::board::rr3_bindings_reconcile`]），
+    /// 缺席/失配逐键点名并累计，`INFO` 观测；非零即装配单/下发链漂移（fail-visible，
+    /// 不拒收不拒 boot），注入值 = 装配时计数不增。
+    pub(crate) binding_mismatch: u32,
 }
 
 impl PeriphState {
@@ -143,6 +150,7 @@ impl PeriphState {
             audio_sent: 0,
             audio_dropped: 0,
             selfheal_skipped: 0,
+            binding_mismatch: 0,
         }
     }
 

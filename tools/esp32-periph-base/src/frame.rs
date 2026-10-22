@@ -7,7 +7,8 @@ use rr_ipc::{
 use serde_json::{json, Value};
 
 use crate::board::{
-    axis_check, Axis, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_PERIPH_TASK, RR3_SERVO_TOPIC,
+    axis_check, rr3_bindings_reconcile, Axis, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_PERIPH_TASK,
+    RR3_SERVO_TOPIC,
 };
 use crate::link::{rr3_frame_now_ns, UartIo};
 use crate::oled::expr_eye_base;
@@ -81,7 +82,7 @@ pub(crate) fn frame_dispatch(
     req: &FrameReq,
 ) -> Result<Value, String> {
     if req.method == RR3_METHOD_SET_BINDINGS {
-        return frame_handle_set_bindings(&req.args);
+        return frame_handle_set_bindings(bus, &req.args);
     }
     if req.method != "rr3.call" {
         return Err(format!("method 非法: \"{}\"（恒 rr3.call）", req.method));
@@ -93,14 +94,17 @@ pub(crate) fn frame_dispatch(
     }
 }
 
-/// 绑定注入（rr3.set_bindings，**控制面**，批N4 件七(c)）：宿主桥连接建立时下发
-/// 描述符解析的引脚真值（`{"i2c_sda": "21", ...}`——值全字符串，rr-hal/rr-registry
-/// 契约同形）。逐键过 [`rr3_board_binding_entry`] 键域/值域校验：未知键/坏值
-/// fail-closed 整体不落（暂存区不半写入，Err 折 result.error 回帧）；全过才覆盖
-/// 写板侧单点（[`crate::state::rr3_board_bindings_store`]）。部分注入合法（缺键 =
-/// None，消费点各自判齐）。成功即打印三键值——板侧引脚真值的**观测面**（boot 横幅
-/// 已去引脚号，此打印是唯一真值观测点）。
-fn frame_handle_set_bindings(args: &Value) -> Result<Value, String> {
+/// 绑定注入（rr3.set_bindings，**控制面**，批N4 件七(c) / 批N9 件五）：宿主桥连接
+/// 建立时下发描述符解析的引脚真值（`{"i2c_sda": "21", ...}`——值全字符串，rr-hal/
+/// rr-registry 契约同形）。逐键过 [`rr3_board_binding_entry`] 键域/值域校验：未知键/
+/// 坏值 fail-closed 整体不落（暂存区不半写入，Err 折 result.error 回帧）；全过才
+/// 覆盖写板侧单点（[`crate::state::rr3_board_bindings_store`]）。部分注入合法（缺键 =
+/// None，消费点各自判齐）。成功即打印十键值——板侧引脚真值的**观测面**（boot 横幅
+/// 已去引脚号，此打印是唯一真值观测点）。随后**装配对账**（批N9 件五）：注入值逐键
+/// 判等具名装配真值（[`crate::board::rr3_bindings_reconcile`]），不齐 eprintln 点名
+/// ＋累计 `binding_mismatch`（fail-visible，不拒收不拒 boot），不齐数随应答
+/// `mismatch` 字段回带供宿主实录判读。
+fn frame_handle_set_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, String> {
     let obj = args
         .as_object()
         .ok_or_else(|| format!("args 非法: {args}（须对象）"))?;
@@ -113,12 +117,23 @@ fn frame_handle_set_bindings(args: &Value) -> Result<Value, String> {
     }
     rr3_board_bindings_store(nb.clone());
     println!(
-        "[periph] 绑定注入 ✓ i2c_sda={} i2c_scl={} adc_rail_pin={}",
+        "[periph] 绑定注入 ✓ i2c_sda={} i2c_scl={} adc_rail_pin={} uart2_tx={} uart2_rx={} ledc_pan={} ledc_tilt={} i2s_bclk={} i2s_sd={} i2s_ws={}",
         nb.i2c_sda.map_or("-".into(), |v| v.to_string()),
         nb.i2c_scl.map_or("-".into(), |v| v.to_string()),
         nb.adc_rail_pin.map_or("-".into(), |v| v.to_string()),
+        nb.uart2_tx.map_or("-".into(), |v| v.to_string()),
+        nb.uart2_rx.map_or("-".into(), |v| v.to_string()),
+        nb.ledc_pan.map_or("-".into(), |v| v.to_string()),
+        nb.ledc_tilt.map_or("-".into(), |v| v.to_string()),
+        nb.i2s_bclk.map_or("-".into(), |v| v.to_string()),
+        nb.i2s_sd.map_or("-".into(), |v| v.to_string()),
+        nb.i2s_ws.map_or("-".into(), |v| v.to_string()),
     );
-    Ok(json!({ "applied": true }))
+    let bad = rr3_bindings_reconcile(&nb);
+    if bad > 0 {
+        lock_bus(bus).st.binding_mismatch += bad as u32;
+    }
+    Ok(json!({ "applied": true, "mismatch": bad }))
 }
 
 /// 舵机执行（rr3-act/servo/command，**控制面**）：args 带 angle_deg = 写（校验 +

@@ -1,3 +1,5 @@
+use rr_ipc::Rr3BoardBindings;
+
 use esp_idf_hal::adc::{attenuation, Resolution as AdcResolution};
 use esp_idf_hal::ledc::Resolution;
 use esp_idf_sys::TickType_t;
@@ -136,25 +138,82 @@ pub(crate) const BOOT_PAN_DEG: u32 = RR3_AXIS_PAN.2 - 30;
 pub(crate) const BOOT_TILT_DEG: u32 = RR3_AXIS_TILT.2 + 8;
 
 // ---------------------------------------------------------------------------
-// 引脚真值（**注入面**，批N4 件七(c)）——接线总表：
+// 引脚真值（**注入面 + 装配对账锚**，批N4 件七(c) / 批N9 件五）——接线总表：
 //   UART2 = GPIO18→TX / GPIO19←RX（921600 批D②；GPIO16/17 一装 UART2 驱动即把 I2C0
 //           打死，弃用；19 与点阵 VSPI 预留同脚，点阵立项时需再迁，已在案）
 //   I2C0  = GPIO21 SDA / GPIO22 SCL（SSD1306 0x3C）
 //   LEDC  = GPIO32 pan / GPIO33 tilt（50Hz 14bit）
+//   I2S0  = GPIO4 BCLK / GPIO27 SD / GPIO26 WS（INMP441 双麦；2026-10-20 自 25 迁 4）
 //   UART0 = 控制台（板载 USB）
 //   轨测点 = GPIO34（ADC1_CH6，input-only 档）
-// **I2C0 两脚与轨测点的数字引脚号不落常量**（原 PIN_I2C_SDA/SCL、ADC_RAIL_PIN 已
-// 随批N4 件七(c) 删除）：真值由宿主经 rr3.set_bindings 下发（esp32-mini [hardware]
-// 三键 → rrd RR3_HAL_BINDINGS → supervisor env → 桥上 method），板侧落
-// [`crate::state`] 单点，消费面 fail-closed——未注入即拒不动作（裸寄存器自愈路径
-// [`crate::oled::i2c_bus_recover`] / [`crate::oled::i2c_bus_unstick`]；观测面 =
-// 绑定注入打印 + 运行面 `selfheal_skipped` 计数）。上表数字保留作文档锚点（接线
-// 对表用），真值以下发为准。
-// 说明：esp-idf-hal 的 `LedcDriver::new`/`UartDriver::new`/`I2cDriver::new`/
-// `RailMonitor::new` 需**具名引脚类型**（`peripherals.pins.gpioNN`），无法由 i32
-// 值构造——驱动装配仍按上表用 `peripherals.pins.gpioNN` 传参（其名自证引脚号；
-// 主驱动具名引脚的真值化改造归 0.0.7 批G/D1）。
+// **消费面数字引脚号不落常量**（批N4 件七(c) 定案维持）：I2C 自愈/轨测点的真值由
+// 宿主经 rr3.set_bindings 下发（esp32-mini [hardware] → rrd RR3_HAL_BINDINGS →
+// supervisor env → 桥上 method），板侧落 [`crate::state`] 单点，未注入即拒不动作
+// （裸寄存器自愈路径 [`crate::oled::i2c_bus_recover`] / [`crate::oled::i2c_bus_unstick`]；
+// 观测面 = 绑定注入打印 + 运行面 `selfheal_skipped` 计数）。
+// **装配对账锚常量**（批N9 件五，[`RR3_BIND_*`] 十枚）：esp-idf-hal 需**具名引脚
+// 类型**（`peripherals.pins.gpioNN`，无法由 i32 构造）——主驱动（UART2/LEDC/I2S/
+// I2C/ADC）仍具名装配，注入值作**对账真值**逐键判等本段常量（不齐 ERROR 点名＋
+// 计数，不拒 boot 不打死指令面——批N4 件七(c) 消费面纪律同款）。本段常量只作
+// 对账与装配打印自证引用，**不进任何消费路径**；与具名装配的一致性由装配打印
+// 引用同源（`peripherals.pins.gpioNN` ↔ 常量字面），三方（装配单 [hardware] /
+// 板侧常量 / 具名装配）漂移即对账实录红。双真值点（[`RR3_BIND_LEDC_PAN`] 等
+// 与 [[pin]] physical）由对账面抓；rtos 档 [pins] 派生落位后（0.0.7 批G/D1）
+// ledc 两键退役、具名引脚真值化改造收官。
 // ---------------------------------------------------------------------------
+
+/// I2C SDA 装配对账锚（= GPIO21，SDA 装配 `peripherals.pins.gpio21`）。
+pub(crate) const RR3_BIND_I2C_SDA: u8 = 21;
+/// I2C SCL 装配对账锚（= GPIO22，SCL 装配 `peripherals.pins.gpio22`）。
+pub(crate) const RR3_BIND_I2C_SCL: u8 = 22;
+/// 5V 轨测点装配对账锚（= GPIO34，ADC 装配 `peripherals.pins.gpio34`）。
+pub(crate) const RR3_BIND_ADC_RAIL: u8 = 34;
+/// UART2 TX 装配对账锚（= GPIO18，UART2 装配 `peripherals.pins.gpio18`）。
+pub(crate) const RR3_BIND_UART2_TX: u8 = 18;
+/// UART2 RX 装配对账锚（= GPIO19，UART2 装配 `peripherals.pins.gpio19`）。
+pub(crate) const RR3_BIND_UART2_RX: u8 = 19;
+/// LEDC pan 轴装配对账锚（= GPIO32，pan 装配 `peripherals.pins.gpio32`）。
+pub(crate) const RR3_BIND_LEDC_PAN: u8 = 32;
+/// LEDC tilt 轴装配对账锚（= GPIO33，tilt 装配 `peripherals.pins.gpio33`）。
+pub(crate) const RR3_BIND_LEDC_TILT: u8 = 33;
+/// I2S BCLK 装配对账锚（= GPIO4，BCLK 装配 `peripherals.pins.gpio4`）。
+pub(crate) const RR3_BIND_I2S_BCLK: u8 = 4;
+/// I2S SD 装配对账锚（= GPIO27，SD 装配 `peripherals.pins.gpio27`）。
+pub(crate) const RR3_BIND_I2S_SD: u8 = 27;
+/// I2S WS 装配对账锚（= GPIO26，WS 装配 `peripherals.pins.gpio26`）。
+pub(crate) const RR3_BIND_I2S_WS: u8 = 26;
+
+/// 装配对账（批N9 件五，**纯函数**：只判等打印，不碰硬件不拒收）：注入快照逐键
+/// 判等具名装配真值（[`RR3_BIND_*`] 十枚）。键缺席（未注入）与值失配都点名——
+/// 部分注入合法（缺键消费点各自判齐），但对账如实记"不齐"，非零即装配单/下发链
+/// 漂移（fail-visible）。返回不齐键数（0 = 十键全齐）。
+pub(crate) fn rr3_bindings_reconcile(b: &Rr3BoardBindings) -> usize {
+    let table: [(&str, Option<u8>, u8); 10] = [
+        ("i2c_sda", b.i2c_sda, RR3_BIND_I2C_SDA),
+        ("i2c_scl", b.i2c_scl, RR3_BIND_I2C_SCL),
+        ("adc_rail_pin", b.adc_rail_pin, RR3_BIND_ADC_RAIL),
+        ("uart2_tx", b.uart2_tx, RR3_BIND_UART2_TX),
+        ("uart2_rx", b.uart2_rx, RR3_BIND_UART2_RX),
+        ("ledc_pan", b.ledc_pan, RR3_BIND_LEDC_PAN),
+        ("ledc_tilt", b.ledc_tilt, RR3_BIND_LEDC_TILT),
+        ("i2s_bclk", b.i2s_bclk, RR3_BIND_I2S_BCLK),
+        ("i2s_sd", b.i2s_sd, RR3_BIND_I2S_SD),
+        ("i2s_ws", b.i2s_ws, RR3_BIND_I2S_WS),
+    ];
+    let mut bad = 0usize;
+    for (k, got, want) in table {
+        if got != Some(want) {
+            eprintln!(
+                "[periph] 绑定对账 ✗ {k}: 注入 {got:?} ≠ 装配 GPIO{want}（查 profiles/esp32-mini.toml [hardware] 与下发链）"
+            );
+            bad += 1;
+        }
+    }
+    if bad == 0 {
+        println!("[periph] 绑定对账 ✓ 十键全齐（注入 = 具名装配）");
+    }
+    bad
+}
 
 /// UART2 指令面波特率（批D② 落板 921600——Q1=(a) 带宽账裁定：音频上行双通道
 /// 16kHz×16bit ≈ 512kbps，115200 载不动；烧录即 deliberate。宿主侧缺省仍
