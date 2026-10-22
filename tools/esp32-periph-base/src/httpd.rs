@@ -42,23 +42,25 @@
 //! 常驻堆从批N4 件二预留 16384 出——**取值对账归真板**（`esp_get_free_heap_size`
 //! 实测，`heap_reserved_bytes` 回填口径已注明，WiFi 静态缓冲 ~16KB 量级＋
 //! httpd 会话面，预留是否充足以真板实测为准，本件如实留痕不冒领）。写口瞬时
-//! 面（批N14 件二）：body 收包缓冲 ≤512B＋等连探测 `wifi_ap_record_t`
-//! ~1.8KB 栈上临时——16KB 栈富余；事务不新增常驻堆。
+//! 面（批N14 件二；批N15 件二真板订正：等连判据改 `esp_netif_ip_info_t`
+//! DHCP 得 IP——`esp_wifi_sta_get_ap_info` 关联瞬态误报缺陷在案）：body 收包
+//! 缓冲 ≤512B＋`esp_netif_ip_info_t` ~16B 栈上临时——16KB 栈富余；事务不新增
+//! 常驻堆。
 
 use std::ffi::CString;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use esp_idf_sys::{
-    esp_event_loop_create_default, esp_netif_create_default_wifi_sta, esp_netif_init,
-    esp_restart, esp_wifi_connect, esp_wifi_disconnect, esp_wifi_init, esp_wifi_set_config,
-    esp_wifi_set_mode, esp_wifi_sta_get_ap_info, esp_wifi_start, g_wifi_default_wpa_crypto_funcs,
-    g_wifi_osi_funcs, httpd_config_t, httpd_err_code_t_HTTPD_400_BAD_REQUEST,
-    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t, httpd_register_uri_handler,
-    httpd_req_recv, httpd_req_t, httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type,
-    httpd_start, httpd_uri_t, http_method_HTTP_GET, http_method_HTTP_POST, nvs_flash_init,
-    wifi_ap_record_t, wifi_config_t, wifi_init_config_t, wifi_interface_t_WIFI_IF_STA,
-    wifi_mode_t_WIFI_MODE_STA, WIFI_INIT_CONFIG_MAGIC, ESP_OK,
+    esp_event_loop_create_default, esp_netif_create_default_wifi_sta, esp_netif_get_ip_info,
+    esp_netif_init, esp_netif_ip_info_t, esp_netif_t, esp_restart, esp_wifi_connect,
+    esp_wifi_disconnect, esp_wifi_init, esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start,
+    g_wifi_default_wpa_crypto_funcs, g_wifi_osi_funcs, httpd_config_t,
+    httpd_err_code_t_HTTPD_400_BAD_REQUEST, httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t,
+    httpd_register_uri_handler, httpd_req_recv, httpd_req_t, httpd_resp_send,
+    httpd_resp_send_err, httpd_resp_set_type, httpd_start, httpd_uri_t, http_method_HTTP_GET,
+    http_method_HTTP_POST, nvs_flash_init, wifi_config_t, wifi_init_config_t,
+    wifi_interface_t_WIFI_IF_STA, wifi_mode_t_WIFI_MODE_STA, WIFI_INIT_CONFIG_MAGIC, ESP_OK,
 };
 
 use crate::state::{lock_bus, Bus};
@@ -428,6 +430,9 @@ const HTTPD_SERVER_PORT: u16 = 80;
 /// bus 单点（handler 裸壳取态的唯一入口——OnceLock 存 Arc clone，无裸指针
 /// user_ctx；板侧单点先例 = [`crate::state::BOARD_BINDINGS`] 同形状）。
 static HTTPD_BUS: OnceLock<Arc<Mutex<Bus>>> = OnceLock::new();
+/// STA netif 句柄（起栈时写一次——等连判据 `esp_netif_get_ip_info` 查 IP 用；
+/// 存 `usize` 绕裸指针非 Send，解引用处均在 unsafe 集中段）。
+static STA_NETIF: OnceLock<usize> = OnceLock::new();
 
 /// v5.2.2 `WIFI_INIT_CONFIG_DEFAULT()` 宏展开手抄（[`wifi_init_config_t`]）——
 /// 宏不进绑定，裸 sys 必须手抄；字段真值逐项对表**本项目生成 sdkconfig**
@@ -557,12 +562,21 @@ unsafe fn wifi_sta_set_credentials(ssid: &[u8], pass: &[u8]) -> i32 {
     esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut wcfg)
 }
 
-/// 有界等连（连上＝`esp_wifi_sta_get_ap_info` 返 ESP_OK）：[`WIFI_CONNECT_WAIT_MS`]
+/// 有界等连（连上＝**DHCP 得 IP**，判据见函数内注记）：[`WIFI_CONNECT_WAIT_MS`]
 /// 上限、[`WIFI_POLL_MS`] 步进；超窗即 false（调用方如实应答——不猜不造）。
 unsafe fn wifi_sta_wait_connected() -> bool {
+    // 判据＝**DHCP 得 IP**（`esp_netif_get_ip_info` 的 ip.addr 非 0），批N15 件二
+    // 真板取证实锤的缺陷修复：原判据 `esp_wifi_sta_get_ap_info` 在关联瞬态
+    // （auth/assoc→run，4-way 握手前）即返 ESP_OK——坏凭据被误判成功→不回退→
+    // NVS 残留坏凭据＝真砖路径（真板波形：关联 run 后 3s 被 AP 踢回 init 反复）。
+    // 密码错永远到不了 DHCP，本判据物理可靠。
+    let netif = match STA_NETIF.get() {
+        Some(p) => *p as *mut esp_netif_t,
+        None => return false, // netif 未建（时序防御，常态不可达）
+    };
     for _ in 0..(WIFI_CONNECT_WAIT_MS / WIFI_POLL_MS) {
-        let mut ap: wifi_ap_record_t = std::mem::zeroed();
-        if esp_wifi_sta_get_ap_info(&mut ap) == ESP_OK {
+        let mut info: esp_netif_ip_info_t = std::mem::zeroed();
+        if esp_netif_get_ip_info(netif, &mut info) == ESP_OK && info.ip.addr != 0 {
             return true;
         }
         std::thread::sleep(Duration::from_millis(WIFI_POLL_MS));
@@ -706,10 +720,10 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pas
             Err(r)
         }
     }
-    // ① netif + 事件循环 + STA 缺省 netif
+    // ① netif + 事件循环 + STA 缺省 netif（句柄留存——等连判据查 IP 用）
     chk(esp_netif_init())?;
     chk(esp_event_loop_create_default())?;
-    esp_netif_create_default_wifi_sta();
+    let _ = STA_NETIF.set(esp_netif_create_default_wifi_sta() as usize);
     // ② WiFi 起栈（手抄宏配置见 wifi_default_config）
     let cfg = wifi_default_config();
     chk(esp_wifi_init(&cfg))?;
