@@ -37,7 +37,7 @@ pub mod persist;
 // transport 层拆门（批J G1，ADR-0018 修订 3 ①）：窄缝 bytestream（Rr3ByteStream）
 // 与帧缓冲 buf（alloc 面）在裸金属目标（target_os="none"，如 0.0.7 层① 的
 // xtensa-esp32-none-elf）上可达——"板侧接总线 = 实现两个 usize 方法"由此成立；
-// std::io 半边（frame/shm/uds/uart + Listener/Endpoint trait + std 单向 adapter）
+// std::io 半边（frame/uds/uart + Listener/Endpoint trait + std 单向 adapter）
 // 留在门内。ESP32 侧 std 语境（esp-rs std / espidf 目标，0.0.7 Q2 裁定）走 unix
 // 系照常编译，行为与线上字节零改动。
 pub mod transport;
@@ -73,14 +73,6 @@ pub use transport::buf::{rr3_framebuf_read, Rr3FrameBuf};
 pub use transport::bytestream::Rr3ByteStream;
 #[cfg(not(target_os = "none"))]
 pub use transport::frame::{rr3_frame_read, rr3_frame_write};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use transport::shm::Rr3ShmListener;
-// 门与 transport::shm 模块自身同径（批D1 修正）：espidf（unix 但非 linux/macos）
-// 上 `not(target_os = "none")` 放行而模块缺席 → E0432，xtensa-espidf 编译面实爆。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use transport::shm::{
-    Rr3ShmReaderConn, Rr3ShmWriterConn, RR3_SHM_NAME_DEFAULT, RR3_SHM_NAME_ENV,
-};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use transport::uart::{rr3_uart_baud_speed, Rr3UartConn, RR3_UART_BAUD_DEFAULT};
 #[cfg(unix)]

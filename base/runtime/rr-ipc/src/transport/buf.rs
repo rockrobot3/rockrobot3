@@ -4,7 +4,7 @@
 //! 用法：`rr3_new` 建缓冲 → `rr3_payload_mut` 直接往里填 payload（不再另配 payload Vec 再拷贝）
 //! → `rr3_seal` 原地编头 → 交 [`Rr3TransportConn::rr3_send_buf`](crate::transport::Rr3TransportConn)
 //! 消费整个缓冲、单次 write 提交。recv 侧由 [`rr3_framebuf_read`] 产出同一形状。
-//! uds 实现整块读写；M5 的 shm 在**同一签名**下把"拷贝"降为环形缓冲 grant，不改接口。
+//! uds 实现整块读写（原 M5 shm 环形缓冲 grant 设想随 L-32 摘面撤销，0.0.8 批N19）。
 //!
 //! [`Rr3Frame`](crate::protocol::wire::Rr3Frame) 保留为纯值视图（测试与既有代码不动）；
 //! 两个方向都提供与它的低成本互转。本文件批J G1 起为 **no_std 可达**（core+alloc）：

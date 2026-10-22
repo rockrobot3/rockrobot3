@@ -298,7 +298,7 @@ pub fn rr3_sense_run() -> Result<(), String> {
         }
 
         // 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；
-        // 抖动可接受——v0.0.1 的 pcm 流只供联调，时序对齐随 M5 shm）
+        // 抖动可接受——v0.0.1 的 pcm 流只供联调，时序对齐挂 M5）
         let spent = start.elapsed();
         if spent < tick {
             std::thread::sleep(tick - spent);
@@ -331,7 +331,7 @@ fn rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream {
 }
 
 /// `rr3-sense/audio/pcm` 的事件体（stream）。PCM 按 s16le 小端打包后 base64；
-/// 320 帧 @16k/mono ≈ 856 字符，20ms 一帧对 UDS 无压力（shm 零拷贝随 M5）。
+/// 320 帧 @16k/mono ≈ 856 字符，20ms 一帧对 UDS 无压力。
 /// 负载里**不含 topic**（topic 由 rr-bus 客户端并入，见 client.rs 的 rr3_publish）。
 fn rr3_pcm_event_body(seq: u64, pcm: &Rr3PcmStream) -> Value {
     let mut bytes = Vec::with_capacity(pcm.samples.len() * 2);

@@ -2,40 +2,37 @@
 //!
 //! **门下沉（批J G1，ADR-0018 修订 3 ①）**：本模块在 `target_os = "none"` 下也编译
 //! ——窄缝 [`Rr3ByteStream`]（`bytestream.rs`）与帧缓冲（`buf.rs`，alloc 面）是
-//! no_std 可达的；std::io 半边（`frame.rs` / `shm.rs` / `uds.rs` / `uart.rs`、
+//! no_std 可达的；std::io 半边（`frame.rs` / `uds.rs` / `uart.rs`、
 //! Listener/Endpoint 两 trait、std 单向 adapter）全部留在门内。裸金属目标上
 //! "接总线 = 实现两个 usize 方法"由此成立，宿主侧零变化。
 //!
 //! 三个 trait 构成接缝（ADR-0007 §裁定 3 的"造一次就不再推翻"落在这里）：
 //! - [`Rr3TransportConn`]：连接侧，同步阻塞、**所有权移交**语义——`rr3_send_buf` 消费整个
 //!   [`Rr3FrameBuf`](crate::transport::buf::Rr3FrameBuf)（幂等 seal 后单次提交），`rr3_recv_buf`
-//!   返回新分配的所有权缓冲。M5 的 shm 在同一签名下把"拷贝"降为环形缓冲 grant，不改接口；
+//!   返回新分配的所有权缓冲（原 shm 计划位的"拷贝降为 grant"设想随 L-32 摘面一并撤销）；
 //!   tcp（预留，标准端口 6060）同。
 //! - [`Rr3TransportListener`]：监听侧，accept 产出连接。一次 accept 的 `Err` 只属于那一次，
 //!   监听方决定继续（rrd 的口径：accept 失败记日志不带走守护进程）。
 //! - [`Rr3TransportEndpoint`]：端点建立，清理残留 → bind（uds：删残留 socket 文件 →
-//!   `UnixListener::bind`；shm：解链对象 → 创建共享内存区）。
+//!   `UnixListener::bind`）。
 //!
 //! **不引 async**（ADR-0008 裁定 1）：rrd 的并发形状是"每连接 2 线程 + 阻塞 IO"，
 //! 28+ 条线级用例钉在这个形状上；async 运行时只进模块侧（M3 定 executor）。
 //!
 //! 规划分层（ADR-0006 §5）：
 //! - `uds`：M2 唯一实现，路径取 [`RR3_UDS_PATH_DEFAULT`]，可被 [`RR3_BUS_PATH_ENV`] 覆盖
-//! - `shm`：实时控制面（100Hz–1kHz 关节状态/力矩/PCM 流），初版已落地（ADR-0011：
-//!   单写者多读者环形缓冲、丢最旧保最新、POSIX 附着）
 //! - `tcp`：多机协作，预留
 //! - `uart`：跨机点对点（跨芯片对端 ↔ 宿主，0.0.7 批C），conn 面经 blanket impl 同源帧语义
 //!
 //! 反射环（1k–10kHz 电机 FOC/PID）永远不进总线，见 ADR-0007 §裁定 1。
 //! rrd 服务侧（conn.rs）在 M2 仍持有 `UnixStream` 具体类型走 socket 专有门（读超时/shutdown），
-//! 只把 bind/cleanup/accept 三处换成 trait 工厂；全量泛化推迟到 M5 shm 落地时评估（ADR-0008）。
+//! 只把 bind/cleanup/accept 三处换成 trait 工厂；全量泛化评估挂 M5 里程碑（shm 第二实现
+//! 已按 L-32 裁定摘面，0.0.8 批N19——本模块自此无 shm 位）。
 
 pub mod buf;
 pub mod bytestream;
 #[cfg(not(target_os = "none"))]
 pub mod frame;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub mod shm;
 #[cfg(unix)]
 pub mod uds;
 // UART 第三实现位（0.0.7 批C，ADR-0008）：宿主侧 raw termios；点对点无监听语义，
@@ -89,7 +86,6 @@ pub trait Rr3TransportEndpoint: Sized {
 /// `Read + Write` 换到 [`Rr3ByteStream`]——uds 的 `UnixStream`、uart 的 raw fd 包装
 /// 经 std 单向 adapter 进缝后仍由本实现覆盖（行为与线上字节零改动）；板侧类型
 /// 直接实现两个 `usize` 方法即可获得同一份帧语义（mod.rs tests 的形状用例为证）。
-/// shm 写自己的实现（天生单向，方向不匹配的方法恒报 `Io`）。
 impl<S: Rr3ByteStream + Send> Rr3TransportConn for S {
     fn rr3_send_buf(&mut self, mut buf: Rr3FrameBuf) -> Result<(), Rr3FrameError> {
         buf.rr3_seal(); // 幂等：未 seal 就 seal，已 seal 落同一串字节

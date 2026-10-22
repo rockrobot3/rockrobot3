@@ -17,7 +17,7 @@
 //!
 //! 系统调用面：手写 `extern "C"` 声明壳（open/close/read/write/tcgetattr/
 //! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl），**不引 libc crate**——
-//! shm 裁定 5 同款仓内纪律，rr-ipc 依赖表保持为空。termios 结构与常量 Linux/macOS 分
+//! 同款仓内纪律，rr-ipc 依赖表保持为空。termios 结构与常量 Linux/macOS 分
 //! `cfg` 各钉一份（数值互不相同：Linux B115200 = `0o10002`，macOS 直接用字面
 //! 波特率；O_NOCTTY、VMIN/VTIME 下标、结构布局均异）——每一份都以各自平台
 //! 头文件为准，并用 `const _` 断言结构尺寸，编译期先拦 ABI 漂移。
