@@ -33,10 +33,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3Header,
     Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_BOARD_BINDING_ADC_RAIL_PIN,
-    RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK,
-    RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_LEDC_PAN,
-    RR3_BOARD_BINDING_LEDC_TILT, RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX,
-    RR3_METHOD_SET_BINDINGS, RR3_UART_BAUD_DEFAULT,
+    RR3_BOARD_BINDING_CRED_STORE, RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA,
+    RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS,
+    RR3_BOARD_BINDING_LEDC_PAN, RR3_BOARD_BINDING_LEDC_TILT, RR3_BOARD_BINDING_UART2_RX,
+    RR3_BOARD_BINDING_UART2_TX, RR3_METHOD_SET_BINDINGS, RR3_UART_BAUD_DEFAULT,
 };
 use serde_json::{json, Map, Value};
 
@@ -173,8 +173,8 @@ fn rr3_bridge_parse_response(
     Ok(result)
 }
 
-/// 板侧绑定载荷（纯函数，批N4 件七(b) 基-24 桥上配置腿宿主半边）：描述符板侧三键
-/// `Some` 者逐键入载荷，值保持字符串（描述符同形纪律：注入文本值全字符串，JSON
+/// 板侧绑定载荷（纯函数，批N4 件七(b) 基-24 桥上配置腿宿主半边）：描述符板侧
+/// 键 `Some` 者逐键入载荷，值保持字符串（描述符同形纪律：注入文本值全字符串，JSON
 /// 侧不换形）；全缺 = `None`（无板侧配置可注）。独立纯函数：键位/换形可单测。
 fn rr3_board_bindings_payload(b: &Rr3HalBindings) -> Option<Value> {
     let mut m = Map::new();
@@ -210,6 +210,12 @@ fn rr3_board_bindings_payload(b: &Rr3HalBindings) -> Option<Value> {
     }
     if let Some(v) = b.i2s_ws {
         m.insert(RR3_BOARD_BINDING_I2S_WS.to_string(), json!(v.to_string()));
+    }
+    if let Some(v) = &b.cred_store {
+        m.insert(
+            RR3_BOARD_BINDING_CRED_STORE.to_string(),
+            json!(v.to_string()),
+        );
     }
     if m.is_empty() {
         return None;
@@ -547,8 +553,9 @@ mod tests {
         assert_eq!(v["params"]["args"], json!({}));
     }
 
-    /// 板侧绑定载荷（纯函数）：三键 Some 者逐键入载荷、值保持字符串（描述符同形
-    /// 纪律）；全缺 = None（无板侧配置可注）；部分注入只带已有键。
+    /// 板侧绑定载荷（纯函数）：板侧键 Some 者逐键入载荷、值保持字符串（描述符同形
+    /// 纪律）；全缺 = None（无板侧配置可注）；部分注入只带已有键；cred_store
+    /// 字符串键随键（批N17 件二）。
     #[test]
     fn board_bindings_payload_carries_string_values_only() {
         let mut b = Rr3HalBindings::default();
@@ -559,6 +566,10 @@ mod tests {
         assert_eq!(p["i2c_sda"], "21", "值保持字符串（描述符同形纪律）");
         assert_eq!(p["adc_rail_pin"], "34");
         assert!(p.get("i2c_scl").is_none(), "未注入键不入载荷");
+        assert!(p.get("cred_store").is_none(), "未注入键不入载荷（cred_store 同）");
+        b.cred_store = Some("nvs:rr3".to_string());
+        let p = rr3_board_bindings_payload(&b).expect("有键必须有载荷");
+        assert_eq!(p["cred_store"], "nvs:rr3", "cred_store 字符串值随键");
     }
 
     /// 应答门序：Response + id 回显 + result 在位放行；类型错/id 错/缺 result/

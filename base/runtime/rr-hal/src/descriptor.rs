@@ -30,10 +30,16 @@
 //! 不在 [pins] 派生键集、不设应急 env 覆盖位、rr-ipc/rr-registry/contract.rs
 //! 三处同批。`ledc_pan`/`ledc_tilt` 与 esp32-mini [[pin]] physical 同源同值
 //! （rtos 档 [pins] 派生为在册余量归 0.0.7 批G/D1——派生落位后本两键退役）。
+//! 凭据存储源键批（批N17 件二，N-10 ② 键半边契约级扩批）：`cred_store` 进场——
+//! **非 GPIO** 存储源标记 `nvs:<namespace>`（全案 §3.6 凭据行），取值域裁决
+//! `rr3_cred_store_parse` 真值单点在 rr-ipc（键集/取值域纪律不变）；消费语义 =
+//! 板侧读数面可见（GET /api/board/bindings 随键），boot 读链不消费＝批N14 架构
+//! 事实（注入晚于 WiFi 起栈）、无装配对账语义（非引脚不进对账锚）。同上款：不在
+//! [pins] 派生键集、不设应急 env 覆盖位、rr-ipc/rr-registry/contract.rs 三处同批。
 
 use std::collections::BTreeMap;
 
-use rr_ipc::rr3_gpio_number_parse;
+use rr_ipc::{rr3_cred_store_parse, rr3_gpio_number_parse};
 
 use crate::backend::{rr3_ina219_addr_parse, rr3_pwm_index_parse};
 
@@ -86,6 +92,9 @@ pub struct Rr3HalBindings {
     pub i2s_sd: Option<u8>,
     /// I2S WS 脚 GPIO 编号（板侧双麦装配对账；esp32-mini = 26，批N9 件五）
     pub i2s_ws: Option<u8>,
+    /// 凭据存储源标记 `nvs:<namespace>`（板侧读数面可见；esp32-mini = `nvs:rr3`，
+    /// 批N17 件二——非 GPIO 字符串键，取值域裁决真值单点在 rr-ipc）
+    pub cred_store: Option<String>,
 }
 
 /// 非空串裁决（trim 后空 = 不认）。
@@ -125,6 +134,7 @@ impl Rr3HalBindings {
             "i2s_bclk" => self.i2s_bclk = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
             "i2s_sd" => self.i2s_sd = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
             "i2s_ws" => self.i2s_ws = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "cred_store" => self.cred_store = Some(rr3_cred_store_parse(raw).ok_or_else(bad)?),
             "ina219_addr" => self.ina219_addr = Some(rr3_ina219_addr_parse(raw).ok_or_else(bad)?),
             other => {
                 return Err(format!(
@@ -235,9 +245,11 @@ pub fn rr3_hal_bindings_effective() -> Result<Rr3HalBindings, String> {
 mod tests {
     use super::*;
 
-    /// rrd 注入器产物形状的全键正例：十三键逐字段落位（值全字符串——注入器已字符串化）。
+    /// rrd 注入器产物形状的全键正例：十四键逐字段落位（值全字符串——注入器已
+    /// 字符串化；原十三键 = 十 host 键 + 批N4 三键，批N17 件二随键集补 cred_store；
+    /// 批N9 七键不在本测试覆盖面，键域由 entry/rr-ipc 侧单测钉）。
     #[test]
-    fn full_descriptor_parses_all_thirteen_keys() {
+    fn full_descriptor_parses_all_fourteen_keys() {
         let text = concat!(
             "alsa_device = \"default\"\n",
             "pwm_chip = \"0\"\n",
@@ -252,6 +264,7 @@ mod tests {
             "i2c_sda = \"21\"\n",
             "i2c_scl = \"22\"\n",
             "adc_rail_pin = \"34\"\n",
+            "cred_store = \"nvs:rr3\"\n",
         );
         let b = rr3_hal_bindings_from_text(text).expect("全键正例必须解析");
         assert_eq!(b.alsa_device.as_deref(), Some("default"));
@@ -267,6 +280,7 @@ mod tests {
         assert_eq!(b.i2c_sda, Some(21));
         assert_eq!(b.i2c_scl, Some(22));
         assert_eq!(b.adc_rail_pin, Some(34));
+        assert_eq!(b.cred_store.as_deref(), Some("nvs:rr3"));
     }
 
     /// 空文本 = 空绑定（合法，装配单未给 [hardware]；纯 sim 形态照常起）。
@@ -278,21 +292,22 @@ mod tests {
         );
     }
 
-    /// fail-closed 点名：未知键、坏值（十进制域/裸十六进制/空串/越 u8）、非字符串值，
-    /// 一次全收集不静默放行。
+    /// fail-closed 点名：未知键、坏值（十进制域/裸十六进制/空串/越 u8/非 nvs:
+    /// 前缀）、非字符串值，一次全收集不静默放行。
     #[test]
     fn unknown_keys_and_bad_values_are_all_named() {
         let text = concat!(
             "pwm_chip = \"abc\"\n",
             "i2c_bus = \"-1\"\n",
-            "ina219_addr = \"40\"\n", // 裸写有十进制歧义，只认 0x 前缀
-            "alsa_device = \"  \"\n", // trim 后空 = 不认
+            "ina219_addr = \"40\"\n",    // 裸写有十进制歧义，只认 0x 前缀
+            "alsa_device = \"  \"\n",    // trim 后空 = 不认
             "mystery_key = \"x\"\n",
-            "link_ifname = 3\n",   // 非字符串标量
-            "i2c_sda = \"256\"\n", // 板侧键取值域 = u8，越域即红
+            "link_ifname = 3\n",         // 非字符串标量
+            "i2c_sda = \"256\"\n",       // 板侧键取值域 = u8，越域即红
+            "cred_store = \"flash:boot\"\n", // 非 nvs: 前缀，批N17 件二
         );
         let errs = rr3_hal_bindings_from_text(text).expect_err("坏值必须报错");
-        assert_eq!(errs.len(), 7, "{errs:?}");
+        assert_eq!(errs.len(), 8, "{errs:?}");
         assert!(
             errs.iter().any(|e| e.contains("pwm_chip 取值不认")),
             "{errs:?}"
@@ -320,6 +335,10 @@ mod tests {
         );
         assert!(
             errs.iter().any(|e| e.contains("i2c_sda 取值不认")),
+            "{errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("cred_store 取值不认")),
             "{errs:?}"
         );
     }
