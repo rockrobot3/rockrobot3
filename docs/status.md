@@ -1128,6 +1128,16 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   FT232 瞬态噪声同族嫌疑）。wav 落盘在位（`rr3-audio-600s-run4.wav` 37.6MB 实测 16002Hz）。判据② 重跑
   与判据③（DoA 拍手）仍待跑；功能开发（brain 语音交流 / DoA 听声识位）按"可用但有损"口径可并行开工，
   不以判据② pass 为前置。
+- **0.0.5 增补轮六 批N10 件一——判据② run6 600s 复测仍未过（如实敞口；三态判读＝恶化）（2026-10-22）**：
+  命令形态补录（批N9 会话实录命令行未落档，本批以 [rr3-audio-rec main.rs](../tools/rr3-audio-rec/src/main.rs)
+  :42/:584 为准）：`rr3-audio-rec /dev/cu.usbserial-A98KN77U --secs 600 --out rr3-audio-600s-run6.wav`
+  （baud 缺省 921600）。实测 chunks=4486 **gaps=200** err=100 restarts=0 resyncs=0 reconnects=0，wav 落盘
+  36.7MB 实测 16008Hz dur≈573.9s——600−573.9=26.1s ≈ 200×128ms=25.6s（口径自洽 ✓）。**口径 gaps=0 未过，
+  维持敞口不冒领 PASS**；纵向对比 run4 92 → run5 24 → run6 200（比 run5 恶化 8×），结构与 run4/5 同族
+  （散布丢片型，断流型病灶维持全零）；环境差异如实登记——run6 期间宿主并行 cargo build＋分析负载（run5 无）。
+  同批注记**敞口 16 第二问（gaps/restarts 真实量级）取数**：restarts/resyncs/reconnects 三跑全零；gaps 量级
+  0.5%–4.3%（run5 24/4686、run6 200/4686），随宿主负载波动，"可用但有损"定性不变。字节级病灶并案排查见
+  批N10 件二（同会话取证）。
 - **0.0.5 增补轮六 批N9 件三/件四上板会话——判据② run5 复测未过（如实敞口）＋判据③ DoA 冒烟过（2026-10-22）**：
   随件二 [flash-esp32.sh](../tools/deploy/flash-esp32.sh) 烧录全链首跑（串口 `/dev/cu.usbserial-1420` 自动
   探测→ESP32 rev v3.1→Flashing completed，板面重建为当前树固件）后同会话执行。**判据② run5**：600s 复测
