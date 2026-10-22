@@ -405,10 +405,52 @@ fn rr3_esp32_reconnect(core: &Rr3Esp32AudioCore) -> Option<Rr3UartConn> {
     }
 }
 
+/// 取证 tee 开关 env（批N12 件二，批N10 件二定案"原始流 tee 双录板面/宿主读面"
+/// 的**宿主读面**半边）：值＝落盘文件路径，设了即开——读线程把宿主从串口读到的
+/// **原始字节流**（拆帧前镜像，含帧间残渣/线噪——批N10 件二病灶取证层）逐字节
+/// 追加写入。默认关（未设/空＝无 fd 无文件）。板面半边由取证会话并行走板面
+/// USB 口外部录，不进本件（flock 单消费者，宿主 fd 唯一，第二 opener fail-closed）。
+pub(crate) const RR3_HAL_ESP32_TEE_ENV: &str = "RR3_HAL_ESP32_TEE";
+
+/// tee 开口（读线程起点一次；断流重连**续写同一文件**——一次取证会话内的重连
+/// 是同一原始流的中断续传，换文件会撕账）。env 未设/空 = `None`：关闭态零落盘
+/// 由**构造面**保证（不 open 即无 fd 无文件，非运行期判断）。打开失败 = tee
+/// 缺席（打一条不挡链路——tee 是观测面，不是链路面）。
+fn rr3_tee_open() -> Option<std::fs::File> {
+    let path = std::env::var(RR3_HAL_ESP32_TEE_ENV).ok()?;
+    if path.is_empty() {
+        return None;
+    }
+    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(f) => {
+            eprintln!("rr-hal-esp32-audio: 取证 tee 开（原始流追加 → {path}）");
+            Some(f)
+        }
+        Err(e) => {
+            eprintln!("rr-hal-esp32-audio: 取证 tee 打开失败（tee 缺席，链路不受影响）: {e}");
+            None
+        }
+    }
+}
+
+/// tee 写入面（单测锚点）：`sink = None`（tee 关）即 no-op 零副作用；打开时逐
+/// 字节镜像追加。写失败 = 观测面降级（打一条后停 tee），**绝不反噬链路面**——
+/// 音频链 fail-closed 纪律管的是链路判定，观测面降级不构成链路故障。
+fn rr3_tee_write(sink: &mut Option<std::fs::File>, bytes: &[u8]) {
+    let Some(f) = sink.as_mut() else { return };
+    use std::io::Write;
+    if let Err(e) = f.write_all(bytes).and_then(|()| f.flush()) {
+        eprintln!("rr-hal-esp32-audio: tee 写失败（tee 停用，链路不受影响）: {e}");
+        *sink = None;
+    }
+}
+
 /// 读线程主体：会话内大块裸读 → 拆帧 → 四道门 → 入环；断流/错会话就地转
 /// 重连。收兵（stop 旗）时板面 `AUDIO OFF`（防残流，conn 随作用域释放 →
 /// flock 退账）。
 fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
+    // 取证 tee（批N12 件二）：线程级开口一次，重连续写同一文件（见 [`rr3_tee_open`]）
+    let mut tee = rr3_tee_open();
     let mut conn: Option<Rr3UartConn> = Some(first);
     let mut logged_ready = false;
     let mut logged_overflow = false;
@@ -477,6 +519,9 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                 Ok(n) => {
                     zeros = 0;
                     seen = true;
+                    // 批N12 件二：宿主读面原始字节 tee（拆帧前镜像——批N10 件二
+                    // 病灶"帧内尾随残渣"的取证层，tee 流与消费流逐字节一致）
+                    rr3_tee_write(&mut tee, &raw[..n]);
                     asm.feed(&raw[..n]);
                     loop {
                         match asm.pull() {
@@ -897,5 +942,41 @@ mod tests {
         let mut other_dst = board_reply_frame(9, None);
         other_dst.header.dst_task = 9;
         assert!(rr3_esp32_classify_board_frame(&other_dst.header, &other_dst.payload).is_err());
+    }
+
+    /// 批N12 件二（敞口 16 对表 tee 工具面）：tee 关（None）＝no-op 零副作用；
+    /// tee 开＝多笔写入**逐字节一致**且按序追加（tee 流 == 消费流判据的单测
+    /// 锚点）。关闭态"零落盘"由构造面保证（env 未设不 open，见 [`rr3_tee_open`]），
+    /// 无路径可断言，不在此冒领。
+    #[test]
+    fn tee_disabled_noop_and_enabled_mirrors_bytes_in_order() {
+        // 关闭态：喂两笔零副作用（无 panic 即 no-op；无 fd 无文件可证）
+        let mut off: Option<std::fs::File> = None;
+        rr3_tee_write(&mut off, b"abc");
+        rr3_tee_write(&mut off, b"de");
+        assert!(off.is_none());
+
+        // 开启态：临时文件逐字节镜像 + 追加序
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "rr3-tee-test-{}-{}.bin",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .expect("tee 测试临时文件打开失败");
+        let mut on: Option<std::fs::File> = Some(f);
+        rr3_tee_write(&mut on, b"abc");
+        rr3_tee_write(&mut on, b"de");
+        assert!(on.is_some(), "正常写不应停 tee");
+        let got = std::fs::read(&path).expect("tee 测试临时文件回读失败");
+        assert_eq!(got, b"abcde", "tee 流须与消费流逐字节一致且按序追加");
+        let _ = std::fs::remove_file(&path);
     }
 }
