@@ -40,7 +40,7 @@ mod serve;
 pub(crate) mod test_support;
 
 #[cfg(unix)]
-pub use boot::{bootstrap, load_config_text};
+pub use boot::{bootstrap, load_config_text, rr3_config_path};
 
 #[cfg(unix)]
 pub use dispatch::Dispatcher;

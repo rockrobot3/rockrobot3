@@ -36,13 +36,19 @@ pub fn load_config_text(
     config_env: Option<&'static str>,
     manifest_path: &str,
 ) -> Result<String, String> {
-    let path = match config_env {
-        Some(env) => {
-            std::env::var(env).unwrap_or_else(|_| rr3_config_default_path(manifest_path))
-        }
-        None => rr3_config_default_path(manifest_path),
-    };
+    let path = rr3_config_path(config_env, manifest_path);
     std::fs::read_to_string(&path).map_err(|e| format!("读 config {path} 失败: {e}"))
+}
+
+/// config 路径投影（批N28 批3 扩展，与 [`load_config_text`] 同一解析单点）：
+/// 返回解析出的 config 路径本身。sense 装配段「config 就绪: 来源={path}」回显
+/// 消费——`parse_config` 是 fn 指针拿不到 path，投影是唯一不重复解析、不改
+/// 逐字文案的通路（新增不改旧签名，power/connect 已落地面零返工）。
+pub fn rr3_config_path(config_env: Option<&'static str>, manifest_path: &str) -> String {
+    match config_env {
+        Some(env) => std::env::var(env).unwrap_or_else(|_| rr3_config_default_path(manifest_path)),
+        None => rr3_config_default_path(manifest_path),
+    }
 }
 
 /// 缺省路径：manifest 同目录 config.toml（现行三模块逐字形状，
@@ -105,6 +111,31 @@ mod tests {
             err.contains("/nonexistent-rr3mod/config.toml"),
             "文案须点名解析出的路径: {err}"
         );
+    }
+
+    /// 批N28 批3：`rr3_config_path` 投影与 `load_config_text` 实读路径一致
+    /// （缺省/env 覆盖两例）——投影单点漂移当场红。
+    #[test]
+    fn config_path_projection_matches_load_config_text() {
+        let _g = env_lock().lock().unwrap();
+        let dir = rr3_tmp_dir("cfg-proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        let manifest = dir.join("manifest.toml");
+        std::fs::write(&manifest, "[manifest]\nname = \"x\"\n").unwrap();
+        std::fs::write(dir.join("config.toml"), "from = \"dir\"\n").unwrap();
+        // 缺省：投影 = manifest 同目录 config.toml（实读同路径）
+        let p = rr3_config_path(None, manifest.to_str().unwrap());
+        assert_eq!(p, dir.join("config.toml").to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "from = \"dir\"\n");
+        // env 覆盖：投影 = env 路径（实读同路径）
+        let alt = dir.join("override.toml");
+        std::fs::write(&alt, "from = \"env\"\n").unwrap();
+        std::env::set_var("RR3MOD_TEST_CFG_ENV_P", &alt);
+        let p = rr3_config_path(Some("RR3MOD_TEST_CFG_ENV_P"), manifest.to_str().unwrap());
+        assert_eq!(p, alt.to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "from = \"env\"\n");
+        std::env::remove_var("RR3MOD_TEST_CFG_ENV_P");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// 方案 §2.8-3：缺 RR3_MANIFEST 错误文案逐字断言（现行形状）。
