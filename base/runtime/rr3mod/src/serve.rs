@@ -221,4 +221,20 @@ mod tests {
             "双句柄 publish 各自可达 fake rrd: {topics:?}"
         );
     }
+
+    /// 批N29 批4：wrap 构造口冒烟——裸 client（自建连接，无 bootstrap）经
+    /// [`BusHandle::wrap`] 包进句柄后业务面可用（connected/publish 同活）。
+    /// 面板线程宿主与单测夹具的同一构造路径。
+    #[test]
+    fn bus_handle_wrap_smoke() {
+        let client = crate::test_support::connect_raw("serve-wrap", FakeMode::Quiet);
+        let bus = BusHandle::wrap(client);
+        assert!(bus.connected(), "wrap 后句柄同连接同活");
+        bus.publish("rr3mod-t/wrap", json!({ "n": 1 })).unwrap();
+        let log = rr3_wait_log("serve-wrap", 2);
+        let hit = log
+            .iter()
+            .any(|v| v["kind"] == "event" && v["topic"] == "rr3mod-t/wrap");
+        assert!(hit, "wrap 句柄 publish 可达 fake rrd: {log:?}");
+    }
 }
