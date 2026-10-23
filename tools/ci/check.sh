@@ -291,8 +291,12 @@ done
 for c in modules/*/composite.toml; do
   mod_dir="$(dirname "$c")"; mod="$(basename "$mod_dir")"
   lang="$(mod_lang "$mod_dir/module.toml")"
+  alt=""
   case "$lang" in
-    rust)   req="src/main.rs src/composite.rs" ;;
+    # rust 组合件实体（批N26 件二订正，0.0.8 W-A 批1 起）：装配入口 src/main.rs 必在；
+    # 运行机制实体 src/composite.rs（五件套②）与拆分后 src/dispatch.rs（0.0.8 方案 §4
+    # 各批目标树）至少其一——过渡期未拆模块持 composite.rs、已拆模块持 dispatch.rs，双态可判。
+    rust)   req="src/main.rs"; alt="src/composite.rs src/dispatch.rs" ;;
     # Python 组合件实体：包目录 = 模块名破折号转下划线（naming.md §3 目录名 == 进程名 ==
     # manifest.name；pyproject `packages.find` include `"<包>*"` 同源），不硬编码零件名。
     python) pkg="$(printf '%s' "$mod" | tr '-' '_')"; req="$pkg/__main__.py $pkg/composite.py" ;;
@@ -307,6 +311,16 @@ for c in modules/*/composite.toml; do
       static_fail=1
     fi
   done
+  # 运行机制实体至少其一（批N26 件二，0.0.8 W-A 批1 起：composite.rs / dispatch.rs；
+  # alt 非空才判——python 组合件两件全必在，req 已覆盖）
+  if [ -n "$alt" ]; then
+    alt_ok=0
+    for f in $alt; do [ -f "$mod_dir/$f" ] && alt_ok=1; done
+    if [ "$alt_ok" -eq 0 ]; then
+      printf 'FAIL  ⑦-c 五件套(组合件): %s 缺运行机制实体（%s 至少其一）\n' "$mod" "$alt"
+      static_fail=1
+    fi
+  fi
 done
 [ "$static_fail" -eq 0 ] && printf 'PASS  ⑦-c 五件套齐全（全部原子件与组合件实体逐件计数过）\n'
 # ⑦-d 入口体量（§13：装配入口 ≤80 行；批E 起 fail-closed——六入口现况 16–18 行）。
@@ -387,7 +401,8 @@ fi
 #     硬编码 if）——`status` 判分母（normal / placeholder / retired 三态），`tier_scope`
 #     记档位适用（非空且为 host|rtos|bare 子集，缺/非法即 fail-closed；0.0.5 批M
 #     MC-10 L-2 扩读，收 R-8——此前只读 status、tier_scope 门禁不读）。normal 格的落点
-#     件须 mech.rs + 模块 composite.rs 两腿各 ≥1（腿一 fn parity_leg1_*、腿二
+#     件须 mech.rs + 模块运行机制实体（composite.rs / dispatch.rs / rpc.rs——0.0.8 W-A
+#     拆分后多落点，批N26 件二订正）两腿各 ≥1（腿一 fn parity_leg1_*、腿二
 #     fn parity_leg2_*，命名即机器锚）；只有腿一记未达标（§4.0.3：否则恒输出 0 的空件
 #     照样过门）。件形由 module.toml `lang` 数据位判（rust|python，缺/非法即 fail-closed，
 #     不再用 `[ ! -f mech.rs ]` 存在性启发式猜）——lang=python 两件式件（无 atoms/*.rs
@@ -482,13 +497,15 @@ parity_gate() {
       # 件级精确归属：对拍函数名须带本件名前缀（fn parity_leg1_<件名>_*）——
       # 模块级粗扫会让同模块异件互充数（battery 没写、charger 写了也能过），
       # 与 C10"不许空件充数"同理。atom.name 与目录名一致性已由批E 断言钉死。
-      leg1="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" 2>/dev/null \
+      leg1="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" \
+                "$mod_dir/src/dispatch.rs" "$mod_dir/src/rpc.rs" 2>/dev/null \
                 | grep -cE "fn parity_leg1_${atom_name}_[a-z0-9_]+" || true)"
-      leg2="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" 2>/dev/null \
+      leg2="$(cat "$atom_dir/mech.rs" "$mod_dir/src/composite.rs" \
+                "$mod_dir/src/dispatch.rs" "$mod_dir/src/rpc.rs" 2>/dev/null \
                 | grep -cE "fn parity_leg2_${atom_name}_[a-z0-9_]+" || true)"
       leg1="${leg1:-0}"; leg2="${leg2:-0}"
       if [ "$leg1" -ge 1 ] && [ "$leg2" -ge 1 ]; then
-        printf 'PASS  ⑧-a %s→%s: 两腿齐（leg1=%s leg2=%s，扫描 mech.rs + composite.rs；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
+        printf 'PASS  ⑧-a %s→%s: 两腿齐（leg1=%s leg2=%s，扫描 mech.rs + composite/dispatch/rpc.rs；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
       else
         printf 'FAIL  ⑧-a %s→%s: normal 格两腿不齐（leg1=%s leg2=%s）——只有腿一记未达标（§4.0.3 判据②；lang=%s tier_scope=%s）\n' "$atom_name" "$slot" "$leg1" "$leg2" "$lang" "$tier_scope"
         rc=1
