@@ -165,6 +165,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rr3mod"
+version = "0.0.1"
+dependencies = [
+ "rr-bus-api",
+ "rr-core",
+ "rr-ipc",
+ "serde_json",
+]
+
+[[package]]
 name = "rrd"
 version = "0.0.1"
 dependencies = [
