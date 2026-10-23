@@ -35,6 +35,12 @@ pub const RR3_FACE_EXPRESSIONS: [&str; 43] = [
 /// TTS 播放期间的临时表情（模块内自动切换；"不可点名"规则由 config 注入，见下）
 pub const RR3_FACE_TALK: &str = "talk";
 
+/// [`RR3_FACE_EXPRESSIONS`] 的 `/` 连接串常量投影（批N24 件四零堆化）：错误
+/// 文案面的 `join("/")` 在运行时落堆，改用本常量（编译期字面，零分配）；
+/// 下方对账单测钉死与 `join` 输出逐字一致——白名单扩员时单测红，提示同步
+/// 扩本投影（一个事实两个面的对账锚）。
+pub const RR3_FACE_EXPRESSIONS_JOINED: &str = "idle/blink/talk/think/happy/listen/turn/charA/charB/charC/charD/charE/charF/charG/charH/charI/charJ/charK/charL/charM/charN/charO/charP/charQ/charR/charS/charT/charU/charV/charW/charX/charY/charZ/char0/char1/char2/char3/char4/char5/char6/char7/char8/char9";
+
 /// 表情名 → 白名单里的 `&'static str`（不认返回 `None`）。config 注入值与
 /// [`RR3_FACE_EXPRESSIONS`] 的对账点（值本身是契约字面量，扩值走契约评审）。
 pub fn rr3_face_expression_lookup(name: &str) -> Option<&'static str> {
@@ -54,7 +60,7 @@ pub fn rr3_face_non_pointable_join(non_pointable: &[&str]) -> String {
 /// 此处 re-export 保模块内名。
 pub use rr_hal_api::Rr3FaceFrame;
 
-pub use mech::{rr3_face_frames, Rr3Face};
+pub use mech::{rr3_face_frames, Rr3Face, Rr3FaceSetError};
 
 /// 带兜底表情的构造器（批N4 件五 I-17/M-3）：mech 状态机各回落点的表情
 /// 数据化注入面（config `default_expression` → 组合件装配 → 此处转出）。
@@ -88,6 +94,17 @@ mod tests {
             "talk/blink"
         );
         assert_eq!(rr3_face_non_pointable_join(&[]), "(空)");
+    }
+
+    /// 连接串常量投影对账（批N24 件四）：投影与 `join("/")` 输出逐字一致——
+    /// 白名单扩员时本测红，提示同步扩投影（错误文案面不再运行时 join 落堆）。
+    #[test]
+    fn joined_projection_matches_whitelist_join() {
+        assert_eq!(
+            RR3_FACE_EXPRESSIONS_JOINED,
+            RR3_FACE_EXPRESSIONS.join("/"),
+            "常量投影 = 白名单 join（对账锚，扩员两处同步）"
+        );
     }
 
     /// 本常量是契约真值点（contracts/face-expressions.toml）的 Rust 投影——
