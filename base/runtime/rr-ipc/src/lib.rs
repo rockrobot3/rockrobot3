@@ -21,9 +21,12 @@ extern crate std;
 // （rr-hal 下发腿）与板侧（esp32-periph-base 接收腿）两侧消费；JSON 遍历留
 // 各自消费面（本 crate 不引 serde_json——no_std 纪律）。
 pub mod bindings;
-// 证据引用校验（brain B-15，批N4 件一）：std::fs 文件面，与 audio_session 同径
-// cfg 门——裸金属目标不载文件系统；消费面（面板写面/装载期）都在 std 语境。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+// 证据引用校验（brain B-15，批N4 件一）：std::fs 文件面，裸金属目标不载文件
+// 系统；消费面（面板写面/装载期）都在 std 语境。批N21 件四：门拓 windows——
+// rrd 装载期半边（校验⑥-e）无条件消费本模块，原 any(linux,macos) 门令 rrd 在
+// Windows target 编不过（⑨-y 红根因）；audio_session/persist 无跨平台消费面，
+// 维持原门不动。
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod evidence;
 pub mod framing;
 pub mod protocol;
