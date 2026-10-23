@@ -117,8 +117,10 @@ fn main() {
     println!(
         // 引脚号不上横幅（批N4 件七(c)）：I2C/轨测点真值经 rr3.set_bindings 注入
         // （成功打印见 frame_handle_set_bindings），装配面引脚号在各装配打印自证。
-        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0 servo=ledc rail=adc1 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo"
+        "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0 servo=ledc rail=adc1 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo n20-live"
     );
+    // n20-live 标记（0.0.5 增补轮六 批N20 件二① 升级实录）：重烧后此行在册＝新固件
+    // 上板实证；同屏「凭据源=nvs」＝NVS 凭据跨重烧保留实证（升级即重烧语义）。
     ram_point("1-boot");
 
     let peripherals = Peripherals::take().unwrap();
