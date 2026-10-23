@@ -73,3 +73,22 @@ HARNESS_EXIT=0（14 PASS：注册 / 8 拍心跳 195–204ms / round-trip id=9001
 
 E6 本机彩排 PASS=18 + E7 真板 e2e PASS=16 FAIL=0（断链自愈真拔实锤）。权威
 落点 0.0.7 方案状态行与 §9.4，本笔记不重复。
+
+### 3.4 批N20 产线真板实录（2026-10-23，敞口 13 结项批）
+
+权威落点＝[批N20 计划册 §2](../process/dev/0.0.5增补轮六——批N20开发计划与产线真板实录.md)
+逐件证据行原文，本节只记板上机器事实摘要：
+
+- **首烧（merged 直烧）**：`espflash write-bin 0` 直烧 image-esp32.sh --release
+  产的 merged 4MB 全量 98s；板上分区表＝espflash 默认模板（factory 0x3F0000）；
+  boot 三达：OLED 4 行出字 / LEDC pan=60 tilt=98 / 双麦 16kHz rms 流；RAM
+  point 2-periph-ready 250660B。
+- **升级（重烧即升级）**：改横幅（n20-live）＋去编译期注入重烧 → `凭据源=nvs`
+  保持＋sta ip 192.168.0.167 自动重连——NVS 跨重烧保留实证（写口 POST 写入）。
+- **恢复（回得来）**：`espflash erase-flash` 3s 全片擦 → 带注入重烧 →
+  `凭据源=编译期` 回落＋重新在线。
+- **写口断链**：POST /api/board/wifi 应答 1.99s recv failure＝批N16 裁定物理
+  事实（STA 重配置杀 socket）；6s 后 GET state 200 旁证。
+- **机器事实订正**：release app image 实测 1,086,848 B（批N18 记录 444,576 B
+  系测量错误，批N20 件一定案）；分区表双表事实见 partition-layout.md 批N18 段
+  批N20 订正（IDF 表 0x100000 vs espflash 模板表 0x3F0000）。
