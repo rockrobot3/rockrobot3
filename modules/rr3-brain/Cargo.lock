@@ -306,6 +306,7 @@ version = "0.0.1"
 dependencies = [
  "rr-bus-api",
  "rr-hal-api",
+ "rr-ipc",
  "rr3mod",
  "serde_json",
  "toml",

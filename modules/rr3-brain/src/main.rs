@@ -3,12 +3,15 @@
 //! 启动序遵固定序，Python 侧「config 先于总线连接」的更早 fail-closed 不保留，
 //! 批N32 增补裁定 4）→ config 就绪行（`connect_timeout_s` 段随键退役撤除）→
 //! Dispatcher 构造 → [`rr3mod::serve`] 主循环（poll_wait 250ms 对位 Python 主
-//! 循环 0.25s）。config 解析在 [`boot`]，ops 读写两面在 [`rpc`]，事务面三臂在
-//! [`dispatch`]；语音主链（pcm/vad 订阅消费＋ASR→LLM→TTS 编排）随迁移件四落。
+//! 循环 0.25s）。config 解析在 [`boot`]，ops 读写两面在 [`rpc`]，事务面三臂与
+//! 语音主链编排（pcm/vad 订阅消费＋ASR→LLM→TTS→播放→intent）在 [`dispatch`]，
+//! 话轮边界状态机在 [`dialog`]，意图词表在 [`intent`]（批N32 迁移件四全接线）。
 
 mod boot;
 mod cloud;
+mod dialog;
 mod dispatch;
+mod intent;
 mod rpc;
 
 use std::time::Duration;
