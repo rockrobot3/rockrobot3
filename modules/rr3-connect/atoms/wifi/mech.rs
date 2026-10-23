@@ -21,6 +21,8 @@
 //! 三枚 `*_result` 与三枚 `*_parse_args` 的 json!/Value 下钻上移承载层
 //! （src/composite.rs），件面 serde_json 清零——本件只交纯结构体与判定。
 
+use rr_hal_api::Rr3SsidText;
+
 /// net/link 状态机：跟踪上一次的 up 值。首拍与**翻转**返回 true（立即发，
 /// 不等周期）；同态返回 false（交给主循环的周期拍点保底）。状态只有这一位。
 pub struct Rr3LinkEdge {
@@ -55,9 +57,12 @@ impl Rr3LinkEdge {
 /// 就这两步转移——"AP 态可模拟进出"由纯函数单测钉死（方案 D4 判据）。
 /// 凭据本体由后端承载持久化（MC-6：`Rr3WifiStore`，linux = NM 连接配置），
 /// 本状态机只管态不管存；重启后由承载层查在册、经
-/// [`Self::rr3_provision_restored`] 恢复 station。
+/// [`Self::rr3_provision_restored`] 恢复 station。批N24 件五值类型化：
+/// 在册面只记 SSID（[`Rr3SsidText`] 定长值，零堆）——**pass 由后端承载持久化，
+/// 状态机不持有**（connect 的 pass 入参只表"携口令连入"的转移语义，存取归
+/// `Rr3WifiStore`）。
 pub struct Rr3Provision {
-    credentials: Option<(String, String)>,
+    credentials: Option<Rr3SsidText>,
 }
 
 impl Rr3Provision {
@@ -68,9 +73,9 @@ impl Rr3Provision {
     /// 重启恢复：承载层查得在册 SSID 时以它起态（直接 `station`；psk 不回读
     /// ——NM 配置里的 psk 是 NM 私有面，模块不靠它做任何判定，见 MC-6"只管态
     /// 不管存"）。凭据本体仍在后端承载，本状态机只记 SSID 以出 `mode`。
-    pub fn rr3_provision_restored(ssid: String) -> Self {
+    pub fn rr3_provision_restored(ssid: &str) -> Self {
         Self {
-            credentials: Some((ssid, String::new())),
+            credentials: Some(Rr3SsidText::rr3_ssid_text_new(ssid)),
         }
     }
 
@@ -83,9 +88,10 @@ impl Rr3Provision {
     }
 
     /// 存凭据并转入 station（参数合法性由承载层 `rr3_wifi_connect_parse_args`
-    /// 裁决（N-7 上移），状态机只管转移）。
-    pub fn rr3_provision_connect(&mut self, ssid: String, pass: String) {
-        self.credentials = Some((ssid, pass));
+    /// 裁决（N-7 上移），状态机只管转移）。pass 不入态（批N24 件五 pass 去存储
+    /// ：持久化归 `Rr3WifiStore`，状态机只记 SSID 以出 `mode`）。
+    pub fn rr3_provision_connect(&mut self, ssid: &str, _pass: &str) {
+        self.credentials = Some(Rr3SsidText::rr3_ssid_text_new(ssid));
     }
 
     /// 清凭据回 ap——legacy `/api/factory_reset` 的 WiFi 语义承接（≠ M6 整机
@@ -118,7 +124,7 @@ mod tests {
     fn provision_roundtrips_ap_station() {
         let mut p = Rr3Provision::rr3_provision_new();
         assert_eq!(p.rr3_provision_mode(), "ap", "出厂无凭据 = 配网热点在开");
-        p.rr3_provision_connect("home".into(), "password8".into());
+        p.rr3_provision_connect("home", "password8");
         assert_eq!(
             p.rr3_provision_mode(),
             "station",
@@ -133,7 +139,7 @@ mod tests {
     /// ——另一半（凭据真落盘承载）在 `rr-hal::provision_store` 的用例钉。
     #[test]
     fn provision_restored_starts_in_station() {
-        let p = Rr3Provision::rr3_provision_restored("home".into());
+        let p = Rr3Provision::rr3_provision_restored("home");
         assert_eq!(
             p.rr3_provision_mode(),
             "station",
@@ -184,7 +190,7 @@ mod tests {
             "未连先忘 = 幂等回 ap（§8 边界）"
         );
         // connect 成功不置真：配网转移后链路边沿机的发射语义原样（真值单点 = HAL 读数）
-        p.rr3_provision_connect("home".into(), "password8".into());
+        p.rr3_provision_connect("home", "password8");
         assert_eq!(p.rr3_provision_mode(), "station");
         assert!(
             !e.rr3_link_edge_cross(true),
