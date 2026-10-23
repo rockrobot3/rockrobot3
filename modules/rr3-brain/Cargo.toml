@@ -25,3 +25,8 @@ rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
 rr3mod = { path = "../../base/runtime/rr3mod" }
 serde_json = "1"
 toml = "0.8"
+# 云端 HTTP/TLS 客户端（批N32 裁定 5：同步 API＋rustls 系——零异步栈，本仓全同步面，
+# reqwest 异步栈不取；TLS 必须库承载，panel 手写 HTTP 仅局域网服务端先例不适用云端）。
+# default-features 关掉 gzip（最小依赖面，三家端点无解压需求）；tls feature = rustls
+# ＋内置根证书（webpki-roots，板上无系统 CA 库亦可复现）。mock 路径纯 std 零 HTTP。
+ureq = { version = "2", default-features = false, features = ["tls"] }
