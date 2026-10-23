@@ -40,6 +40,18 @@
 //! 精度注记：账本按**路径字符串**记账，同一节点的别名路径（symlink）不记账
 //! ——本仓所有消费方都用同一固定路径写法，别名逃逸留 runbook 纪律兜底。
 //!
+//! CLOEXEC 边界与 spawn 瞬态（0.0.5 增补轮六批N21 件一根因实录）：guard 与
+//! 通信 fd 一律 `O_CLOEXEC`——guard fd 是持锁面，exec 换体时必须随手撤走，
+//! 锁的释放点不得被不相干的子进程生命周期拖长（无 CLOEXEC 时子进程继承的
+//! fd 副本把锁扣到子进程退场，同账本重开撞假"跨进程占用"）。批N19 起的
+//! 测试 flaky 由此拆修定案：即便有 O_CLOEXEC，`Command::spawn` 复制父进程
+//! fd 表的瞬间，fork 副本仍持 guard fd 的 open file description 引用，把
+//! flock 锁扣到子进程 exec 完成（CLOEXEC 生效）才放——macOS posix_spawn
+//! 语义的固有毫秒级窗口，与"账退尽后立即重开"并发即撞 EAGAIN（lsof 在
+//! 诊断窗内抓不到锁主：exec 已完成、fd 已关）。这是合法瞬态不是账本泄漏，
+//! 守门用例以有界重试容忍（真泄漏锁是永久的，重试恒败照常 panic）；生产
+//! 同形状（桥进程 spawn 运维工具后并发重开同路径）同理重试即过。
+//!
 //! 波特率只收 [`rr3_uart_baud_speed`] 认识的三档（115200 默认 / 9600 降速 /
 //! 921600 高速）：9600 是 0.0.7 方案 P3 的合法降速处置；921600 是 0.0.5 增补轮五
 //! 批D② 按带宽账加的高速档（音频上行双通道 16kHz×16bit ≈ 512kbps，115200 载
@@ -83,6 +95,8 @@ mod imp {
     pub const TCIFLUSH: i32 = 1;
     /// SDK sys/fcntl.h：`#define O_NONBLOCK 0x0004`（与 Linux 数值不同，不得混用）
     pub const O_NONBLOCK: i32 = 0x0004;
+    /// SDK sys/fcntl.h：`#define O_CLOEXEC 0x01000000`（与 Linux 数值不同，不得混用）
+    pub const O_CLOEXEC: i32 = 0x0100_0000;
     /// SDK sys/signal.h：`struct pollfd`（int + short + short = 8B，无填充）
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -149,6 +163,9 @@ mod imp {
     /// Linux uapi asm-generic/fcntl.h：`#define O_NONBLOCK 04000`（八进制，与
     /// macOS 数值不同，不得混用）
     pub const O_NONBLOCK: i32 = 0o4000;
+    /// Linux uapi asm-generic/fcntl.h：`#define O_CLOEXEC 02000000`（八进制，与
+    /// macOS 数值不同，不得混用）
+    pub const O_CLOEXEC: i32 = 0o2000000;
     /// glibc sys/poll.h：`struct pollfd`（int + short + short = 8B，无填充）
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -197,8 +214,8 @@ mod imp {
 }
 
 use imp::{
-    NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN,
-    TCIFLUSH, VMIN, VTIME,
+    NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, O_CLOEXEC, O_NOCTTY, O_NONBLOCK,
+    O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME,
 };
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
@@ -289,11 +306,14 @@ fn excl_enter(path: &str) -> std::io::Result<()> {
     let mut cpath = path.as_bytes().to_vec();
     cpath.push(0);
     // SAFETY：cpath 以 NUL 结尾，open 只读它；guard fd 不收发数据，O_NONBLOCK
-    // 只为 open(2) 自身不在 carrier 上悬住。
+    // 只为 open(2) 自身不在 carrier 上悬住。O_CLOEXEC：guard fd 是持锁面，
+    // exec 换体（桥进程 spawn 运维工具等）时必须随手撤走——锁的释放点不得
+    // 被不相干的子进程生命周期拖长（批N21 件一实录：无 CLOEXEC 时继承副本
+    // 把锁扣到子进程退场，同账本重开撞假"跨进程占用"）。
     let fd = unsafe {
         c_open(
             cpath.as_ptr() as *const CChar,
-            O_RDWR | O_NOCTTY | O_NONBLOCK,
+            O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC,
         )
     };
     if fd < 0 {
@@ -361,7 +381,9 @@ impl Rr3UartConn {
         let mut cpath = path.as_os_str().as_bytes().to_vec();
         cpath.push(0);
         // SAFETY：cpath 以 NUL 结尾，open 只读它；两参形状与 open(2) 变参声明一致。
-        let fd = unsafe { c_open(cpath.as_ptr() as *const CChar, O_RDWR | O_NOCTTY) };
+        // O_CLOEXEC 同 excl_enter guard：通信 fd 不随 spawn 泄漏进子进程
+        // （description 副本钉住 termios 配置与队列状态，同批N21 件一根因面）。
+        let fd = unsafe { c_open(cpath.as_ptr() as *const CChar, O_RDWR | O_NOCTTY | O_CLOEXEC) };
         if fd < 0 {
             let e = std::io::Error::last_os_error();
             excl_exit(&key);
@@ -813,6 +835,14 @@ mod tests {
     /// 排他开口·同进程重入（批G G0 守门用例）：同一节点同进程两次 open 都放行
     /// ——桥 rx/tx 双开（open_uart_pair）是仓内合法形状，flock 账本只对跨进程
     /// 生效。走真实 open(path) 入口。
+    ///
+    /// 重开的有界重试（批N21 件一拆修）：并行测试里本用例与跨进程用例的
+    /// spawn 同刻竞争——`Command::spawn` 复制父进程 fd 表的瞬间，fork 副本
+    /// 持有本进程 guard fd 的 open file description 引用，把 flock 锁扣到
+    /// 子进程 exec 完成（O_CLOEXEC 生效）才放——毫秒级窗口撞上"账退尽后
+    /// 重开"即 EAGAIN。这是 macOS posix_spawn 语义的固有瞬态（lsof 抓不到
+    /// 锁主：诊断窗内 exec 已完成、fd 已关），不是账本泄漏；有界重试即过。
+    /// 真泄漏形状（退账漏 close）锁是永久的，重试恒败照常 panic——守门不弱化。
     #[test]
     fn uart_open_same_process_pair_reentrant() {
         let (_master, _slave_keepalive, slave_path) = pty_pair_with_path();
@@ -821,7 +851,24 @@ mod tests {
         // 双双 drop 退账到零，随后第三次 open 仍须成功（账目可复用，无泄漏）。
         drop(_rx);
         drop(_tx);
-        let _again = Rr3UartConn::open(&slave_path).expect("账退尽后重开必须成功");
+        let mut _again = None;
+        for attempt in 0..10 {
+            match Rr3UartConn::open(&slave_path) {
+                Ok(conn) => {
+                    _again = Some(conn);
+                    break;
+                }
+                Err(e) if format!("{e}").contains("flock 排他") && attempt < 9 => {
+                    std::eprintln!(
+                        "uart 重入用例：重开撞上并发 spawn 的 flock 瞬态（第 {} 次），有界重试",
+                        attempt + 1
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(e) => panic!("账退尽后重开必须成功: {e}"),
+            }
+        }
+        assert!(_again.is_some(), "有界重试后重开仍失败＝锁非瞬态（账本泄漏形状）");
     }
 
     /// 排他开口·跨进程被拒（批G G0 守门用例，批E E7 实锤）：另一进程持锁时本
