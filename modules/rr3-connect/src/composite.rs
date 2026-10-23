@@ -118,7 +118,7 @@ pub fn rr3_connect_run() -> Result<(), String> {
         .map_err(|e| format!("配网凭据在册查询失败（{store_backend}）: {e}"))?
     {
         Some(ssid) => {
-            let ssid = ssid.rr3_ssid_text_as_str().to_string();
+            let ssid = ssid.rr3_ssid_text_as_str();
             eprintln!("配网面就绪: {store_backend} 在册 ssid={ssid:?}（重启恢复 station）");
             wifi::Rr3Provision::rr3_provision_restored(ssid)
         }
@@ -356,7 +356,7 @@ fn rr3_handle_wifi_connect(
     store
         .rr3_wifi_store_connect(&ssid, &pass)
         .map_err(|e| format!("凭据持久化失败: {e}"))?;
-    prov.rr3_provision_connect(ssid.clone(), pass);
+    prov.rr3_provision_connect(&ssid, &pass);
     eprintln!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
     Ok(rr3_wifi_connect_result(&st, &ssid))
 }
