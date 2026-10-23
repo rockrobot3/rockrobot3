@@ -459,6 +459,11 @@ fn rr3_serve_ctl(
         // sha256 记账 + "齐全且 sha 对"自检判果一应答给出（判据真值单点 =
         // contracts.rs）。快照未在册（--manifest 调试路径）如实回不可得。
         Rr3RpcMethod::CtlContracts => Ok(crate::contracts::rr3_contracts_json()),
+        // 装配侧写口（批N22 件一，conventions §6.1 三写口 + ADR-0021 裁定 6）：
+        // 门序编排全在 domain_write.rs 单点（confirm 门 → 证据四道核 → key 白名单
+        // → 文本手术 → 装载链全量预核 → 原子写回 → 契约记账重记），此处只接线。
+        // 快照未在册由 run 薄壳如实拒（--manifest 调试路径无装配单可写）。
+        Rr3RpcMethod::CtlDomainSet => crate::domain_write::rr3_domain_write_run(&req.params),
         // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
         other => Err((
             Rr3StatusCode::Invalid,
@@ -705,7 +710,8 @@ fn rr3_serve_request(
         | Rr3RpcMethod::CtlCounters
         | Rr3RpcMethod::CtlReboot
         | Rr3RpcMethod::CtlWiring
-        | Rr3RpcMethod::CtlContracts => {
+        | Rr3RpcMethod::CtlContracts
+        | Rr3RpcMethod::CtlDomainSet => {
             rr3_reply_err(
                 out,
                 me,
