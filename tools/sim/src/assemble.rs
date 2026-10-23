@@ -543,7 +543,7 @@ watchdog_timeout_ms = 5000\n";
              [[supplies.domain]]\nname = \"rail5v\"\nnominal_mv = 5000\nmild_mv = 4600\n\
              severe_mv = 4400\ncurrent_cap_ma = 2000\nsense = \"none\"\n\
              current_sense = \"none\"\nswitch = \"none\"\nswitchable = false\n\
-             armed = false\nmax_age_ms = 0\n\n\
+             armed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n\
              [supplies.budget]\nnot_applicable = true\n\n\
              [bindings]\n\"a.b\" = \"rr3-pa\"\n\n\
              [enabled_slots]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n\n\

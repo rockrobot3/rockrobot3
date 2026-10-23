@@ -23,5 +23,12 @@
 # 0 = 批N4 件九笔4（接线图收官刀）：GET /api/wiring covers 申报四族全集 43 项
 #   （pin 11 + role 7 + domain 11 + axis 14，与分母五路并集逐项同源）——红账 43
 #   全转绿，差集空。转绿终点达成：门 d 转红（差集 > 0 即 FAIL），本文件退役在即。
+# 83 = 批N21 件四：domain 11→12（批N21 件二 evidence 键入 RR3_DOMAIN_KEYS）+
+#   ops 36→39（B批 b3b `f0678b7` 2026-10-21 sense capture assemble.toml 判向窗
+#   三槽 doa_window_ms/doa_window_rms_min/doa_mic_baseline_mm——欠账补记：79→82
+#   的"分母扩面 3 笔"提示历批未上调，本批一并到位）+ pin 11 + role 7 + axis 14
+#   不动。同批件四：/api/wiring covers 补申报 domain/evidence 一笔（assembly 快照
+#   批N21 件二起渲染 evidence，读面可读即申报）；行 1 红账上限维持 0（红账 0→1→0
+#   同批复位，未上调）。
 0
-79
+83
