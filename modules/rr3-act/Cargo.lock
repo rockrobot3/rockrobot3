@@ -797,8 +797,19 @@ dependencies = [
  "rr-hal",
  "rr-hal-api",
  "rr-ipc",
+ "rr3mod",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "rr3mod"
+version = "0.0.1"
+dependencies = [
+ "rr-bus-api",
+ "rr-core",
+ "rr-ipc",
+ "serde_json",
 ]
 
 [[package]]
