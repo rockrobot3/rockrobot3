@@ -119,18 +119,36 @@ RK3566/树莓派 host 档的，本段是 rtos 档自己的明文结论（[全案
 但必须写进表）。真值单点维持：`rr-ota` 常量与 `cargo test -p rr-ota` 只管 host 档
 A/B 槽；本段事实为 2026-10-23 侦查实测，标签体系与 ESP32 侧零关系。
 
-### 分区事实（手读 partition-table.bin，magic 0xAA50 逐项）
+### 分区事实（手读 partition-table.bin，magic 0xAA50 逐项；批N20 双表订正）
 
 `nvs@0x9000/0x6000`（批N14/15 凭据源）＋ `phy_init@0xf000/0x1000` ＋
 `factory@0x10000/0x100000`——**factory 单槽、无 ota_0/ota_1/otadata**。这是下方
 两条语义裁定的物理前提。
 
-如实登记（侥幸面）：debug 构建 app image 实测 1,130,224 B，**超 factory 槽上限
-1,048,576 B 约 8.2%**——`espflash flash` 烧录不校验槽界，溢出区（0x110000 起）
-无任何分区登记（分区表只到 factory 末尾）、bootloader 加载按 image 段表不按槽界，
-故真板可跑（批N9 件三烧录实录在案）。release 构建 app image 实测 444,576 B
-（2026-10-23 批N18 件三补测——件二时点未实测如实注记后同日补上），槽内 42.4%
-不溢出：侥幸面仅 debug 构建所有，**产线交付一律走 `--release`**。
+**双表事实（2026-10-23 批N20 实录查获，机器可验）**：上述手读是 **IDF 构建表**
+（`partition-table.bin` hexdump factory length=0x00100000）；而
+`espflash save-image --merge` **未显式传 `--partition-table` 时用 espflash 内置
+默认模板表**——merged@0x8000 实读 factory length=**0x003F0000**（nvs/phy 起点
+与长度同 IDF 表逐字段一致，factory 加长撑满 4MB 尾），直烧后板上 boot 打印即
+此表（批N20 件一实录）。两表下 nvs/phy/factory 起点、nvs/phy 长度完全一致 ⇒
+NVS 凭据语义与升级语义跨两表兼容；唯一差异＝factory 槽长度（app 在两表下均可
+跑，见下方侥幸面）。装配面「镜像表≠构建表」缺口如实登记：image-esp32.sh 自校验
+四查不含分区表逐字段比对——补显式 `--partition-table` 或表比对判据随后续装配面
+批件（触发条件＝下一次动 image-esp32.sh 的批）。
+
+如实登记（侥幸面，批N20 订正）：debug 构建 app image 实测 1,130,224 B，**超
+IDF 表 factory 槽上限 1,048,576 B 约 8.2%**——`espflash flash` 烧录不校验槽界，
+溢出区（0x110000 起）无任何分区登记（分区表只到 factory 末尾）、bootloader 加载
+按 image 段表不按槽界，故真板可跑（批N9 件三烧录实录在案）。release 构建 app
+image 实测 **1,086,848 B**（2026-10-23 批N20 件一重测：esptool 段表＋espflash
+双源吻合；批N18 件三补测记录「444,576 B 槽内 42.4%」系**测量/记录错误**——
+worktree 挂批N18 收口点 `c6d9200` 冷构建 1,086,784 B 排除码面漂移，且带 WiFi 栈
+的 espidf std 应用物理上不可能 444 KB）——**release 在 IDF 表语义下同样超槽
+约 3.66%**（bootloader 按段表加载仍可跑，批N20 件一直烧实录真板再证）；merged
+直烧路径（espflash 模板表 0x3F0000）语义下槽内 26.32% 不溢出。批N18「release
+槽内 42.4% 不溢出」的侥幸面收窄句随之作废：侥幸面（bootloader 按段表加载、
+espflash 不校验槽界、真板可跑）对 debug/release 两档**同等成立**——`--release`
+裁定维持但理由更新＝release 仍小于 debug（43 KB 差）且为优化码，非「不溢出」。
 
 ### 升级语义＝重烧即升级
 
