@@ -66,6 +66,11 @@
 mod board;
 mod commands;
 mod cred;
+// face 原子件机制核（批N23 件二收编：atoms/face/mech.rs——ui.face 板侧执行面
+// 的胶囊眼位图几何与表情基态预设，文件级机制/策略分离；接线照 modules 先例
+// #[path = "../atoms/<名>/<文件>.rs"]）。
+#[path = "../atoms/face/mech.rs"]
+mod face;
 mod frame;
 mod httpd;
 mod link;
@@ -100,7 +105,8 @@ use crate::board::{
     UART2_BAUD_HZ, UART2_TX_RING,
 };
 use crate::commands::cmd_loop;
-use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text};
+use crate::face::expr_eye_base;
+use crate::oled::{i2c_bus_unstick, i2c_scan, oled_init, oled_text};
 use crate::periph::{CtlUart, RtPeriph};
 use crate::power::{RailJudge, RailMonitor, RailTier};
 use crate::runtime::runtime_loop;
