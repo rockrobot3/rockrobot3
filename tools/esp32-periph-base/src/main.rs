@@ -64,6 +64,11 @@
 //! SCAN 同守此律（每点 pan/tilt 两段），WANDER 扫摆**同拍只动一轴**（pan/tilt 错拍）。
 
 mod board;
+// capture 原子件机制核（批N23 件三收编：atoms/capture/mech.rs——audio.capture
+// 板侧执行面的采集变换纯算术：帧解析/增益钳位/DC 抑制分片变换/背压入队；接线
+// 照 modules 先例 #[path = "../atoms/<名>/<文件>.rs"]）。
+#[path = "../atoms/capture/mech.rs"]
+mod capture;
 mod commands;
 mod cred;
 // face 原子件机制核（批N23 件二收编：atoms/face/mech.rs——ui.face 板侧执行面
