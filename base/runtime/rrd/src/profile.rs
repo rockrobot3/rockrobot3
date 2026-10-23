@@ -150,11 +150,14 @@ pub(crate) const RR3_PIN_KEYS: [&str; 11] = [
 
 /// [[supplies.domain]] 条目字段词表（§3.1 家族 A ④ 列 + §5 校验⑥）：域名与阈值三键、
 /// 域电流上限、三个绑定引用位（sense/current_sense/switch 一律写 pin_id）与开关/
-/// 武装/龄期三键。全键必填——"合法不适用"显式写 `none`/`false`/`0`，留空即红
+/// 武装/龄期三键，批N21 件二再加武装证据引用键（⑥-e）。全键必填——"合法不适用"
+/// 显式写 `none`/`false`/`0`，留空即红
 /// （§5 缺失语义列，同 no_injection 范式）；`max_age_ms = 0` 且 `armed = true`
-/// 无运行期读者，由校验⑥-c 拒。crate 内可见：同 [`RR3_PIN_KEYS`]（assembly.rs
+/// 无运行期读者，由校验⑥-c 拒；`evidence` 与 `armed` 成对：未武装显式写 `"none"`、
+/// 武装必须携形制合法的证据引用（文件侧四道核在 [`rr3_profile_domain_evidence_check`]，
+/// 由 boot 装载链持仓内容器根调用）。crate 内可见：同 [`RR3_PIN_KEYS`]（assembly.rs
 /// 渲染完整性测试同源引用）。
-pub(crate) const RR3_DOMAIN_KEYS: [&str; 11] = [
+pub(crate) const RR3_DOMAIN_KEYS: [&str; 12] = [
     "name",
     "nominal_mv",
     "mild_mv",
@@ -166,6 +169,7 @@ pub(crate) const RR3_DOMAIN_KEYS: [&str; 11] = [
     "switchable",
     "armed",
     "max_age_ms",
+    "evidence",
 ];
 
 /// [supplies]：平台供给声明（不可变快照）。看门狗三键 = 有无 / 超时上界 / 由哪一路喂
@@ -239,6 +243,12 @@ pub struct Rr3Domain {
     pub armed: bool,
     /// 测点龄期上界 ms（⑥-c：armed=true 必填且 > 0；无龄期快照不得充当拒动依据，§19 Y-4）
     pub max_age_ms: i64,
+    /// 武装证据引用（⑥-e，批N21 件二：D11 界面门的装载期半边）——`<形态>/<四位编号>`
+    /// 形制（规则住 conventions §6.1，机制真值 rr-ipc::evidence）。与 `armed` 成对：
+    /// 未武装显式写 `"none"`；武装必须携引用——形制核在解析期（本模块 ⑥-e），文件侧
+    /// 四道核（存在/frontmatter/form 一致）在 [`rr3_profile_domain_evidence_check`]，
+    /// boot 装载链持仓内容器根（仓内 `docs/evidence`）调用。
+    pub evidence: String,
 }
 
 /// 一条 [[pin]] 物理绑定（增补轮六 §4.2）。身份 = `pin_id`：`per_instance=false`
@@ -703,7 +713,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                         for key in RR3_DOMAIN_KEYS {
                             let path = format!("{label}.{key}");
                             match key {
-                                "name" | "sense" | "current_sense" | "switch" => {
+                                "name" | "sense" | "current_sense" | "switch" | "evidence" => {
                                     match dt.get(key).and_then(toml::Value::as_str) {
                                         Some(s) if !s.is_empty() => {
                                             let v = s.to_string();
@@ -711,6 +721,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                                                 "name" => d.name = v,
                                                 "sense" => d.sense = v,
                                                 "current_sense" => d.current_sense = v,
+                                                "evidence" => d.evidence = v,
                                                 _ => d.switch = v,
                                             }
                                         }
@@ -1681,6 +1692,29 @@ pub fn rr3_profile_boot_inputs_with_probe(
                 "{label} armed = true 但 sense = none 或 max_age_ms ≤ 0（校验⑥-c：无测点/无龄期上界的域不得武装拒动——未标定即 armed=false，§3.1 降级语义）"
             ));
         }
+        // ⑥-e（批N21 件二，D11 界面门的装载期半边）：evidence 与 armed 成对——
+        // 武装必须携证据引用且形制合法（`<形态>/<四位编号>`，规则 conventions §6.1）；
+        // 未武装显式写 "none"（同 switch/switchable 成对范式）。文件侧四道核
+        // （存在/frontmatter/form 一致）需要证据容器根，归
+        // [`rr3_profile_domain_evidence_check`]，由 boot 装载链调用——解析期只持
+        // 无文件面判据（机制与策略分离：哪里需要文件系统，哪里才碰 fs）。
+        if d.armed {
+            if d.evidence == "none" || d.evidence.is_empty() {
+                errs.push(format!(
+                    "{label} armed = true 但 evidence = none（校验⑥-e：武装拒动必须引用一条真板实测证据，规则住 conventions §6.1；未标定即 armed = false）"
+                ));
+            } else if !rr_ipc::evidence::rr3_evidence_ref_wellformed(&d.evidence) {
+                errs.push(format!(
+                    "{label}.evidence = {} 形制不合法（校验⑥-e：应为 <形态>/<四位编号>，如 实测/0001）",
+                    d.evidence
+                ));
+            }
+        } else if d.evidence != "none" {
+            errs.push(format!(
+                "{label} armed = false 但 evidence = {}（校验⑥-e：未武装不携证据，evidence 显式写 \"none\"——证据位与武装位成对，不出现过期引用）",
+                if d.evidence.is_empty() { "缺失" } else { &d.evidence }
+            ));
+        }
         for (key, val) in [
             ("sense", &d.sense),
             ("current_sense", &d.current_sense),
@@ -1761,6 +1795,12 @@ pub fn rr3_profile_boot_inputs_with_probe(
         &profile.supplies.budget,
         &profile.platform_tier,
     ));
+    // 装载期校验⑥-e 文件半边（批N21 件二）：armed=true 域的证据引用四道核
+    // （存在/frontmatter/form 一致；形制与成对形状半边已在 parse 层与 ⑥ 校验段拒）。
+    // 证据容器根复用 modules-root 同一条 <root>/profiles/ 布局纪律 → <root>/docs/evidence；
+    // 装配单不在仓布局时容器缺＋有武装申报即红（不静默放行），无武装申报（evidence
+    // 恒 "none"）零波及。
+    errs.extend(rr3_profile_domain_evidence_check(&root.join("docs/evidence"), &profile));
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -1910,6 +1950,30 @@ pub fn rr3_profile_boot_inputs_with_probe(
         platform_chip: profile.platform_chip.clone(),
         snapshot: Some(snapshot),
     })
+}
+
+/// 装载期校验⑥-e 文件半边（批N21 件二，D11 界面门的装载期落点）：对 profile 中
+/// 全部 `armed = true` 域的 evidence 引用跑
+/// [`rr_ipc::evidence::rr3_evidence_verify`](rr_ipc::evidence::rr3_evidence_verify)
+/// 四道核（形制 → 文件存在 → frontmatter 六键 → form 与目录一致；形制半边已在
+/// [`rr3_profile_from_text`] 的 ⑥-e 拒，此处只补需要文件系统的后三道）。`root` =
+/// 证据容器根（仓内上下文为 `docs/evidence`）。armed=false 域零波及（evidence 恒为
+/// 显式 `"none"`，形状半边已保证成对）。返回逐条点名文案，调用方 fail-closed
+/// （任一条即拒装载，无豁免通道——§6.1 校验纪律）。
+pub fn rr3_profile_domain_evidence_check(root: &Path, profile: &Rr3Profile) -> Vec<String> {
+    let mut errs = Vec::new();
+    for d in &profile.supplies.domains {
+        if !d.armed {
+            continue;
+        }
+        if let Err(e) = rr_ipc::evidence::rr3_evidence_verify(root, &d.evidence) {
+            errs.push(format!(
+                "supplies.domains[{}] armed = true 的证据引用核验不过（校验⑥-e）: {e}",
+                d.name
+            ));
+        }
+    }
+    errs
 }
 
 /// 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；施工图 Task 4）：方向与能力
@@ -2572,6 +2636,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 [[supplies.domain]]
@@ -2585,6 +2650,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 # [supplies.budget]（schema 4，校验⑩ 分母）：host 档合法不适用必须显式写，不许留空
@@ -2878,6 +2944,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 [[supplies.domain]]
@@ -2891,6 +2958,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 # [supplies.budget]（schema 4，校验⑩ 分母）：栈预算 = 2× 现役 16KB 任务 + 余量
@@ -3903,8 +3971,8 @@ mux_group = []
     fn domain_armed_without_sense_is_fatal() {
         let root = Root::new("armed-gate");
         let text = GOOD.replace(
-            "switchable = false\narmed = false\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
-            "switchable = false\narmed = true\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "switchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "switchable = false\narmed = true\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
         );
         let p = root.write_profile("armed.toml", &text);
         let e = boot_inputs(&p).expect_err("武装而无测点/龄期必须致命");
@@ -3917,13 +3985,107 @@ mux_group = []
     fn domain_binding_uses_pin_id_not_adhoc_syntax() {
         let root = Root::new("pid-gate");
         let text = GOOD.replace(
-            "sense = \"none\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
-            "sense = \"adc:gp34\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "sense = \"none\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "sense = \"adc:gp34\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
         );
         let p = root.write_profile("pid.toml", &text);
         let e = boot_inputs(&p).expect_err("第二套语法必须致命");
         assert!(e.contains("不在 [pins] 的 pin_id 集"), "{e}");
         assert!(e.contains("sense = adc:gp34"), "{e}");
+    }
+
+    /// 校验⑥-e 形状反例一（批N21 件二）：armed=true 而 evidence = none——武装
+    /// 拒动必须引用一条真板实测证据（规则住 conventions §6.1），"none" 即未
+    /// 标定，须 armed = false。
+    #[test]
+    fn domain_armed_without_evidence_is_fatal() {
+        let root = Root::new("evid-none-gate");
+        let text = GOOD.replace(
+            "switchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "switchable = false\narmed = true\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+        );
+        let p = root.write_profile("evid-none.toml", &text);
+        let e = boot_inputs(&p).expect_err("武装而无证据引用必须致命");
+        assert!(e.contains("校验⑥-e"), "{e}");
+        assert!(e.contains("evidence = none"), "{e}");
+    }
+
+    /// 校验⑥-e 形状反例二（批N21 件二）：引用形制坏（三位编号）——
+    /// `<形态>/<四位编号>` 是唯一词形（机制真值 rr-ipc::evidence），装载即拒。
+    #[test]
+    fn domain_armed_with_malformed_evidence_ref_is_fatal() {
+        let root = Root::new("evid-form-gate");
+        let text = GOOD.replace(
+            "switchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "switchable = false\narmed = true\nevidence = \"实测/1\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+        );
+        let p = root.write_profile("evid-form.toml", &text);
+        let e = boot_inputs(&p).expect_err("形制坏的引用必须致命");
+        assert!(e.contains("形制不合法"), "{e}");
+    }
+
+    /// 校验⑥-e 成对反例三（批N21 件二）：armed=false 却携引用——证据位与
+    /// 武装位成对（同 switch/switchable 范式），未武装显式写 "none"，不留过期引用。
+    #[test]
+    fn domain_disarmed_with_evidence_ref_is_fatal() {
+        let root = Root::new("evid-pair-gate");
+        let text = GOOD.replace(
+            "switchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "switchable = false\narmed = false\nevidence = \"实测/0001\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+        );
+        let p = root.write_profile("evid-pair.toml", &text);
+        let e = boot_inputs(&p).expect_err("未武装携证据必须致命");
+        assert!(e.contains("未武装不携证据"), "{e}");
+    }
+
+    /// 校验⑥-e 文件半边（批N21 件二，boot 装载链持有容器根调用）：armed=true 的
+    /// 合法形制引用，证据文件缺席即红（fail-closed，容器缺不静默放行）；同一
+    /// 装配单落一份六键齐且 form 与目录一致的证据文件后 boot 过＝绿例——D11
+    /// 界面门的装载期半边全链打通。绿例顺带钉死 ⑥-c 的武装前提（有测点＋龄期
+    /// 上界 > 0），证据门不孤立于武装门。
+    #[test]
+    fn armed_domain_evidence_file_check_gate() {
+        let root = Root::new("evid-file-gate");
+        let text = GOOD.replace(
+            "sense = \"none\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "sense = \"sensor.env.meter\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = true\nevidence = \"实测/0001\"\nmax_age_ms = 30000\n\n[[supplies.domain]]\nname = \"rail5v\"",
+        );
+        let p = root.write_profile("evid-file.toml", &text);
+
+        // 红例：容器缺——armed 域的引用查无文件即拒
+        let e = boot_inputs(&p).expect_err("证据文件缺席必须致命");
+        assert!(e.contains("校验⑥-e"), "{e}");
+        assert!(e.contains("读不到"), "{e}");
+
+        // 绿例：容器里落一份形制合法的证据文件（frontmatter 六键齐，form 与
+        // 形态目录名一致）→ boot 过
+        let ev = root.dir.join("docs/evidence/实测/0001.md");
+        std::fs::create_dir_all(ev.parent().expect("证据路径必有父目录")).expect("建证据容器");
+        std::fs::write(
+            &ev,
+            concat!(
+                "+++\n",
+                "form = \"实测\"\n",
+                "slot_or_role = \"board.firmware\"\n",
+                "method = \"真板实测\"\n",
+                "conclusion = \"域武装依据成立\"\n",
+                "date = \"2026-10-23\"\n",
+                "recorder = \"lei_huang\"\n",
+                "+++\n\n正文。\n",
+            ),
+        )
+        .expect("写证据文件");
+        boot_inputs(&p).expect("证据文件四道核全过后 boot 必须过");
+    }
+
+    /// 仓内证据容器锁定（批N21 件二，首批真档形制回归）：rrd 装载面消费的容器
+    /// 根与仓内 `docs/evidence` 是同一处——首批两份证据必须四道核全过，真档
+    /// 形制漂移即刻在本仓测试红。
+    #[test]
+    fn repo_evidence_container_frontline_files_verify() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../docs/evidence");
+        rr_ipc::evidence::rr3_evidence_verify(&root, "实测/0001").expect("0001 必须是合法证据");
+        rr_ipc::evidence::rr3_evidence_verify(&root, "实测/0002").expect("0002 必须是合法证据");
     }
 
     /// [[supplies.domain]] 形状门（解析层）：缺键逐键点名、未知键点名、
@@ -3952,6 +4114,7 @@ mux_group = []
             "supplies.domains[0].switch",
             "supplies.domains[0].switchable",
             "supplies.domains[0].armed",
+            "supplies.domains[0].evidence",
             "supplies.domains[0].max_age_ms",
             "supplies.domains[0] 未知键 ghost",
         ] {
