@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use crate::board::{
     rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_PERIPH_TASK, RR3_SERVO_TOPIC,
 };
+use crate::face::expr_eye_base;
 use crate::link::{rr3_frame_now_ns, UartIo};
-use crate::oled::expr_eye_base;
 use crate::servo::{axis_check, Axis};
 use crate::state::{lock_bus, push_job, rr3_board_bindings_store, Bus, CtlState, Job};
 
