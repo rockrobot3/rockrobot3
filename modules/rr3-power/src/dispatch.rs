@@ -1,269 +1,192 @@
-//! rr3-power 组合件实现（组合件五件套③，0.0.5 批B③ 原子重铺打样）。
+//! rr3-power 机制层注册面（0.0.8 W-A 批1 拆分，ADR-0017 五层表机制层）。
 //!
-//! 组合件 = battery ⊗ charger（composite.toml 的 ⊗ 链；⊗=装配期、执行单元内
-//! 函数调用，ADR-0019 裁定 2）。本文件承载装配与运行机制：config 解析（阈值等
-//! 策略经 config 数据化注入，机制件零策略载荷）、HAL 电源面开机探活、主循环
-//! 四拍（battery 拍 / 低电边沿 / charger 派生拍 / rail 域压拍——批N2 件五）。
+//! [`Rr3PowerDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）：
+//! `on_tick` = battery/charger/rail 三节拍＋低电两沿（批N2 件五起三拍，方案 §4.1
+//! 「双节拍」为快照过时表述，批N26 件一订正）；`on_rpc` = `rr3-power/ops/list`
+//! 快照应答（批N4 件九二，真事务面——非方案快照所称"无 exposes 纯防御"）；
+//! `on_event` = 订阅面为空是**设计**（module.toml 同条注：低压关断是本地决策，
+//! 不依赖总线可达），广播只排空。载荷组装面（`*_body`，0.0.5 批I P-7 上移承载层）
+//! 与轨压判定核切片（批N2 件五 P-9 归属搬家）随 composite.rs 消解迁本文件，
+//! 机制不动、线上字节逐字不变。
 //!
-//! 启动序列（自原入口迁入，语义零改动）：读 `RR3_MANIFEST`（rrd spawn 注入的
-//! manifest 绝对路径，supervisor.rs）→ [`Rr3BusClient::rr3_connect`] → 读 config.toml
-//! → 选 HAL 电源面并**开机探活**（Unsupported 即 exit(1)：能力缺失显式回错，不静默
-//! 带病常驻）→ 主循环。主循环做五件事（第 4 件 `rail.up = true` 才跑）：
-//! 1. 每 `sample_period_ms` 读一次 HAL 电池 → 发 `battery/state`（首拍即采）；
-//! 2. 电压越过低电阈值的第一拍发 `battery/low`（Rr3LowEdge：同一次低电段恰一次）；
-//!    回到阈值**之上**的第一拍发 `battery/ok`（批N5 件二笔3，§17 运维留痕：低电段
-//!    一对沿、两个事件，rrd 订阅 low/ok 执行进程内兜底的置旗与解除）——brain 不在
-//!    场也要能触发。**e2e 限制注记**：sim 电池读数由 `RR3_HAL_SIM_BATTERY_PERCENT/
-//!    CHARGING` env 启动定格、无运行期注入，真模块的低电↔恢复往返 e2e 归真板批；
-//!    宿主 e2e 用测试连接注册 rr3-power 伪造沿事件钉 rrd 侧全链；
-//! 3. 每 `state_period_ms` 发 `charger/state`（由最近一次电池读数的 charging 位派生）；
-//! 4. 每 `rail.sample_period_ms` 读一次域压 → ⑥-c2 按龄期折有效档位 → 判定核 →
-//!    发 `rail/state`，越阈首拍出边沿守护行（批N2 件五，P-9 归属搬家）；
-//! 5. 应答 `rr3-power/ops/list` 点名（批N4 件九二 ops 槽快照读口，白名单组体）——
-//!    power 自此首个事务面主题，点名应答是请求-应答语义（业务性失败折 error），
-//!    与周期拍的传输性失败退出语义分流。
-//!
-//! 失败语义与 sense/interact/act 同一口径：本模块没有调用方，周期采样里**全部**失败
-//! 都是传输性/设备级——HAL 读数失败、发布写不出去都 `eprintln` + `exit(1)`，不装
-//! "活着"，死交给 supervisor 按 restart_policy=always 重启。订阅面为空是**设计**
-//! （module.toml 同条注）：低压关断是本地决策，不依赖总线可达。
-//!
-//! cutoff 电压阈值**声明未生效**（0.0.5 批M MC-8① 裁定 (c)）：0.0.5 **不关断**
-//! （关断动作归 M6 关机链，需 T1/T2 物理断电硬件）。本键保留为**策略数据**、机器
-//! 读者 = 注入门（`atoms/battery/assemble.toml` 的 ops 槽，⑧-c 门仓级强制其按点路径
-//! 可取），启动日志显式标注"声明未生效"，避免被读成"已实现关断"；本轮唯一低电保护
-//! 动作 = MC-5 低电禁动（触发阈 = `low_voltage_mv`，见方案 §20 第 2 条）。
-
-#[path = "../atoms/battery/battery.rs"]
-mod battery;
-#[path = "../atoms/charger/charger.rs"]
-mod charger;
+//! 错误语义两档（rr3mod 同款）：on_rpc 返 Err = 业务性失败折 `{"error": …}` 应答；
+//! on_tick 返 Err = 传输性/设备级失败上抛致命——HAL 读数失败先 counter 后退出，
+//! 发布写失败直接上抛，模块不装"活着"，死交给 supervisor 按 restart_policy 重启。
 
 use std::time::{Duration, Instant};
 
-use rr_bus_api::Rr3BusClient;
-use rr_hal::backend::{rr3_hal_power, rr3_hal_rail};
-use rr_hal_api::{rr3_rail_tier_effective, Rr3BatteryState, Rr3RailState, Rr3RailTier};
-use rr_ipc::{opcode, Rr3PayloadType};
+use rr3mod::{BusHandle, Dispatcher};
+use rr_hal_api::{rr3_rail_tier_effective, Rr3BatteryState, Rr3Power, Rr3Rail, Rr3RailState, Rr3RailTier};
 use serde_json::{json, Value};
 
-use battery::{
-    Rr3BatteryCfg, Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_OK_TOPIC,
-    RR3_BATTERY_STATE_TOPIC,
+use crate::battery::{
+    Rr3LowEdge, RR3_BATTERY_LOW_TOPIC, RR3_BATTERY_OK_TOPIC, RR3_BATTERY_STATE_TOPIC,
 };
-use charger::{Rr3ChargerCfg, RR3_CHARGER_STATE_TOPIC};
+use crate::boot::Rr3PowerCfg;
+use crate::charger::RR3_CHARGER_STATE_TOPIC;
 
 /// 电源域电平观测主题（contracts/topics.toml 在册，批N2 件二落的）
 const RR3_RAIL_STATE_TOPIC: &str = "rr3-power/rail/state";
-
-/// rrd spawn 时注入的 manifest 绝对路径（supervisor.rs；rr-ipc 尚无常量，模块侧本地定义）
-const RR3_MANIFEST_ENV: &str = "RR3_MANIFEST";
-
-/// config 覆盖入口（缺省取 manifest 同目录的 config.toml）
-const RR3_POWER_CONFIG_ENV: &str = "RR3_POWER_CONFIG";
-
-/// 收帧等待上界兼循环节拍：广播全量扇出会送来与己无关的帧，排空即可，
-/// 采样/充电拍点由 Instant 比较驱动，与帧到达无关
-const RR3_POLL_WAIT: Duration = Duration::from_millis(100);
 
 /// 本模块 exposes 的 ops 槽快照读口（批N4 件九二，module.toml [rpc].exposes 同源）：
 /// 白名单组体应答，槽名与 assemble.toml 槽表申报同源（门 d covers 申报的对账面）
 const RR3_OPS_LIST_TOPIC: &str = "rr3-power/ops/list";
 
-/// 组合件入口：装配原子件并跑主循环（原 main.rs `rr3_run` 逐字迁入，打印序列不变）。
-pub fn rr3_power_run() -> Result<(), String> {
-    // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    eprintln!("rr3-power 0.0.1 (0.0.2 T4b 实装)");
-    for line in battery::SURFACE
-        .iter()
-        .copied()
-        .chain(charger::SURFACE.iter().copied())
-    {
-        eprintln!("  {line}");
-    }
+/// 主循环状态整体持有（自原 composite.rs 局部状态迁入，状态归属随分发走）：
+/// 各流 seq 各自计数、各拍点、低电边沿机（首拍即武装）、轨压判定核。
+pub(crate) struct Rr3PowerDispatcher {
+    dev: Box<dyn Rr3Power>,
+    /// "电池读数失败（{backend}）"文案复用（探活编排随 boot.rs，后端名随句柄走）
+    backend: &'static str,
+    rail_dev: Box<dyn Rr3Rail>,
+    rail_backend: &'static str,
+    cfg: Rr3PowerCfg,
+    battery_seq: u64,
+    charger_seq: u64,
+    low_seq: u64,
+    ok_seq: u64,
+    rail_seq: u64,
+    low_edge: Rr3LowEdge,
+    rail_judge: Rr3RailJudge,
+    next_battery: Instant,
+    next_charger: Instant,
+    next_rail: Instant,
+    /// charger 拍派生源；首拍 battery 之前不发（读数还没着落）——探活首读作种子
+    last: Option<Rr3BatteryState>,
+}
 
-    // 总线接入：manifest 路径是 rrd spawn 的契约环境变量，直跑（开发调试）须自行设置
-    let manifest_path = std::env::var(RR3_MANIFEST_ENV).map_err(|_| {
-        format!("缺环境变量 {RR3_MANIFEST_ENV}（rrd spawn 注入；直跑请指向 module.toml）")
-    })?;
-    let manifest_text = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
-    let bus = Rr3BusClient::rr3_connect(&manifest_text)?;
-    eprintln!("总线就绪: name={} task={}", bus.rr3_name(), bus.rr3_task());
-
-    let cfg = rr3_config_load(&manifest_path)?;
-    // cutoff 显式标注"声明未生效"（MC-8① 裁定 (c)）：回显 ≠ 读者，本行只为运维
-    // 自述，不构成"已实现关断"的宣称（关断动作归 M6）。
-    eprintln!(
-        "config 就绪: battery sample={}ms low={}mV charger state={}ms | cutoff={}mV（声明未生效：本版不关断，归 M6）",
-        cfg.battery.sample_period_ms,
-        cfg.battery.low_voltage_mv,
-        cfg.charger.state_period_ms,
-        cfg.battery.cutoff_voltage_mv,
-    );
-    // rail 段回显（批N2 件五）：独立一行，不动上面的 config 就绪行（逐字红线）
-    if cfg.rail.up {
-        eprintln!(
-            "rail 监测就绪: domain={} mild={}mV severe={}mV max_age={}ms period={}ms",
-            cfg.rail.domain,
-            cfg.rail.mild_mv,
-            cfg.rail.severe_mv,
-            cfg.rail.max_age_ms,
-            cfg.rail.sample_period_ms
-        );
-    } else {
-        eprintln!("rail 未启用（up=false，合法不适用显式写）");
-    }
-
-    // HAL 电源面选择 + 开机探活：Unsupported 即致命——显式回错不静默退化
-    // （rr-hal 占位件的契约），也不给"没有电池读数还常驻"的假活
-    let (dev, backend) = rr3_hal_power();
-    let first = dev
-        .battery()
-        .map_err(|e| format!("电源面探活失败({backend}): {e}"))?;
-    eprintln!(
-        "电源面就绪: {backend} 电量 {}% {}mV charging={}",
-        first.percent, first.voltage_mv, first.charging
-    );
-
-    // 轨压面选择 + 开机探活（批N2 件五）：`rail.up = true` 时能力缺失显式回错，
-    // 不静默带病常驻（与电源面同一 fail-closed 口径；今日全后端占位，宿主真件归
-    // 0.0.7 敞口 12 行——up=false 是 host 档合法不适用，无测点不探活）
-    let (rail_dev, rail_backend) = rr3_hal_rail();
-    if cfg.rail.up {
-        rail_dev
-            .rr3_read(&cfg.rail.domain)
-            .map_err(|e| format!("轨压面探活失败({rail_backend}): {e}"))?;
-        eprintln!("轨压面就绪: {rail_backend} domain={}", cfg.rail.domain);
-    }
-
-    // 主循环状态：各流 seq 各自计数、各拍点、低电边沿机（首拍即武装）、轨压判定核
-    let mut battery_seq: u64 = 0;
-    let mut charger_seq: u64 = 0;
-    let mut low_seq: u64 = 0;
-    let mut ok_seq: u64 = 0;
-    let mut rail_seq: u64 = 0;
-    let mut low_edge = Rr3LowEdge::rr3_low_edge_new(cfg.battery.low_voltage_mv);
-    let mut rail_judge = Rr3RailJudge::rr3_rail_judge_new(cfg.rail.mild_mv, cfg.rail.severe_mv);
-    let mut next_battery = Instant::now(); // 首拍即采：兜底链路不等第一个周期
-    let mut next_charger = Instant::now();
-    let mut next_rail = Instant::now();
-    let mut last = Some(first);
-
-    loop {
-        // 总线死亡探针：断开后 poll_wait 立即返回空 Vec，与"暂时没帧"不可区分——
-        // 不探测，总线一死本循环就满转成僵尸。假了就走"不装活着"的退出语义。
-        if !bus.rr3_connected() {
-            return Err("总线已断开（reader EOF）：交 supervisor 按 restart_policy 裁定".into());
+impl Rr3PowerDispatcher {
+    /// 装配构造（main.rs 装配段调用）：探活句柄与首读由 boot.rs 编排产出；
+    /// 边沿机按 config 阈值武装，三拍点构造即 `Instant::now()`（首拍即采：
+    /// 兜底链路不等第一个周期）。
+    pub(crate) fn new(
+        dev: Box<dyn Rr3Power>,
+        backend: &'static str,
+        rail_dev: Box<dyn Rr3Rail>,
+        rail_backend: &'static str,
+        cfg: Rr3PowerCfg,
+        first: Rr3BatteryState,
+    ) -> Self {
+        Self {
+            dev,
+            backend,
+            rail_dev,
+            rail_backend,
+            battery_seq: 0,
+            charger_seq: 0,
+            low_seq: 0,
+            ok_seq: 0,
+            rail_seq: 0,
+            low_edge: Rr3LowEdge::rr3_low_edge_new(cfg.battery.low_voltage_mv),
+            rail_judge: Rr3RailJudge::rr3_rail_judge_new(cfg.rail.mild_mv, cfg.rail.severe_mv),
+            next_battery: Instant::now(),
+            next_charger: Instant::now(),
+            next_rail: Instant::now(),
+            cfg,
+            last: Some(first),
         }
-        // 收帧：广播（与己无关的扇出）只排空；点名 Request 走 rr3.call 语义——
-        // 转发帧的 trace_id=调用方 task（rrd 路由语义），顺原路应答（批N4 件九二起
-        // exposes ops/list，自此有事务面；业务性失败折 error，不当致命错误）
-        for frame in bus.rr3_poll_wait(RR3_POLL_WAIT) {
-            if frame.header.opcode != opcode::SEND {
-                continue;
-            }
-            let Ok((Rr3PayloadType::Request, body)) = Rr3BusClient::rr3_frame_body(&frame) else {
-                continue;
-            };
-            if body.get("method").and_then(Value::as_str) != Some(rr_core::RR3_METHOD_CALL) {
-                continue;
-            }
-            let id = body.get("id").and_then(Value::as_u64).unwrap_or(0);
-            let topic = body
-                .get("params")
-                .and_then(|p| p.get("topic"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let result = if topic == RR3_OPS_LIST_TOPIC {
-                json!({ "ops": rr3_power_ops_snapshot(&cfg) })
-            } else {
-                json!({
-                    "error": format!("rr3-power 只 exposes {RR3_OPS_LIST_TOPIC}，收到 {topic}")
-                })
-            };
-            bus.rr3_reply_call(frame.header.trace_id, id, result)?;
-        }
+    }
+}
 
-        // battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，exit(1)；
-        // 失败先计入 counters（0.0.5 批I P-2：数据新鲜度可观测），再走退出语义。
-        let now = Instant::now();
-        if now >= next_battery {
-            let st = match dev.battery() {
+impl Dispatcher for Rr3PowerDispatcher {
+    /// rr3.call 点名应答（批N4 件九二）：ops/list 快照；未知主题 Err 点名——
+    /// serve 折 `{"error": e}` 应答，与现行 wire 形状逐字等价。
+    fn on_rpc(&mut self, topic: &str, _args: &Value, _bus: &BusHandle) -> Result<Value, String> {
+        if topic == RR3_OPS_LIST_TOPIC {
+            Ok(json!({ "ops": rr3_power_ops_snapshot(&self.cfg) }))
+        } else {
+            Err(format!("rr3-power 只 exposes {RR3_OPS_LIST_TOPIC}，收到 {topic}"))
+        }
+    }
+
+    /// 订阅面为空是设计（module.toml 同条注）：低压关断是本地决策，不依赖总线
+    /// 可达——广播只排空（方案 §4.1 映射表「并入骨架」行）。
+    fn on_event(&mut self, _topic: &str, _body: &Value, _bus: &BusHandle) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// 三节拍（自原 composite.rs 主循环体逐字迁入，拍序不变：battery → charger →
+    /// rail）。`now` 由 serve 每圈传入（帧无关节拍，与帧到达无关）。
+    fn on_tick(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
+        // battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，上抛
+        // 致命；失败先计入 counters（0.0.5 批I P-2：数据新鲜度可观测），再走退出语义。
+        if now >= self.next_battery {
+            let st = match self.dev.battery() {
                 Ok(st) => st,
                 Err(e) => {
-                    bus.rr3_counter_bump("battery_read_fail", 1);
-                    return Err(format!("电池读数失败（{backend}）: {e}"));
+                    bus.counter_bump("battery_read_fail", 1);
+                    return Err(format!("电池读数失败（{}）: {e}", self.backend));
                 }
             };
-            battery_seq += 1;
-            bus.rr3_publish(
+            self.battery_seq += 1;
+            bus.publish(
                 RR3_BATTERY_STATE_TOPIC,
-                rr3_battery_state_body(battery_seq, st),
+                rr3_battery_state_body(self.battery_seq, st),
             )?;
             // 低电两个沿、同一采样值，喂入次序是契约（Rr3LowEdge doc 钉死）：
             // **先 recover 后 cross**——cross 的再武装分支会悄悄置回 armed，先喂它
             // 会把恢复沿吞掉（battery/ok 丢失）。恢复沿发布 = rrd 清全局低电旗、
             // 恢复新 spawn 的解除路径（批N5 件二笔3，§17 运维留痕）。
-            if low_edge.rr3_low_edge_recover(st.voltage_mv) {
-                ok_seq += 1;
-                bus.rr3_publish(RR3_BATTERY_OK_TOPIC, rr3_battery_ok_body(ok_seq, st))?;
+            if self.low_edge.rr3_low_edge_recover(st.voltage_mv) {
+                self.ok_seq += 1;
+                bus.publish(RR3_BATTERY_OK_TOPIC, rr3_battery_ok_body(self.ok_seq, st))?;
                 eprintln!(
                     "battery/ok: {}% {}mV（回阈恢复首拍，段内不重发）",
                     st.percent, st.voltage_mv
                 );
             }
-            if low_edge.rr3_low_edge_cross(st.voltage_mv) {
-                low_seq += 1;
-                bus.rr3_publish(RR3_BATTERY_LOW_TOPIC, rr3_battery_low_body(low_seq, st))?;
+            if self.low_edge.rr3_low_edge_cross(st.voltage_mv) {
+                self.low_seq += 1;
+                bus.publish(RR3_BATTERY_LOW_TOPIC, rr3_battery_low_body(self.low_seq, st))?;
                 eprintln!(
                     "battery/low: {}% {}mV（越阈首拍，段内不重发）",
                     st.percent, st.voltage_mv
                 );
             }
-            last = Some(st);
-            next_battery = now + Duration::from_millis(cfg.battery.sample_period_ms);
+            self.last = Some(st);
+            self.next_battery = now + Duration::from_millis(self.cfg.battery.sample_period_ms);
         }
 
         // charger 拍：由最近一次电池读数派生；首拍 battery 之前不发（读数还没着落）
-        if now >= next_charger {
-            if let Some(st) = last {
-                charger_seq += 1;
-                bus.rr3_publish(
+        if now >= self.next_charger {
+            if let Some(st) = self.last {
+                self.charger_seq += 1;
+                bus.publish(
                     RR3_CHARGER_STATE_TOPIC,
-                    rr3_charger_state_body(charger_seq, st.charging),
+                    rr3_charger_state_body(self.charger_seq, st.charging),
                 )?;
             }
-            next_charger = now + Duration::from_millis(cfg.charger.state_period_ms);
+            self.next_charger = now + Duration::from_millis(self.cfg.charger.state_period_ms);
         }
 
         // rail 拍（批N2 件五）：读域压 → ⑥-c2 按龄期折有效档位 → 判定核 → 周期流
         // ＋边沿守护行。HAL 读数失败同 battery_read_fail 纪律：counter 先行再退——
-        // 失败是设备/传输级，exit(1) 不装活着。
-        if cfg.rail.up && now >= next_rail {
-            let st = match rail_dev.rr3_read(&cfg.rail.domain) {
+        // 失败是设备/传输级，上抛致命不装活着。
+        if self.cfg.rail.up && now >= self.next_rail {
+            let st = match self.rail_dev.rr3_read(&self.cfg.rail.domain) {
                 Ok(st) => st,
                 Err(e) => {
-                    bus.rr3_counter_bump("rail_read_fail", 1);
-                    return Err(format!("轨压读数失败（{rail_backend}）: {e}"));
+                    bus.counter_bump("rail_read_fail", 1);
+                    return Err(format!("轨压读数失败（{}）: {e}", self.rail_backend));
                 }
             };
-            rail_seq += 1;
-            let (tier, event) = rr3_rail_beat(&mut rail_judge, st, cfg.rail.max_age_ms);
-            bus.rr3_publish(
+            self.rail_seq += 1;
+            let (tier, event) = rr3_rail_beat(&mut self.rail_judge, st, self.cfg.rail.max_age_ms);
+            bus.publish(
                 RR3_RAIL_STATE_TOPIC,
-                rr3_rail_state_body(rail_seq, st.mv, st.age_ms, tier.rr3_rail_tier_name()),
+                rr3_rail_state_body(self.rail_seq, st.mv, st.age_ms, tier.rr3_rail_tier_name()),
             )?;
             if event == Some(true) {
-                bus.rr3_counter_bump("rail_edge", 1);
+                bus.counter_bump("rail_edge", 1);
                 eprintln!(
                     "rail/edge: {}mV tier={}（越阈首拍，段内不重发）",
                     st.mv,
                     tier.rr3_rail_tier_name()
                 );
             }
-            next_rail = now + Duration::from_millis(cfg.rail.sample_period_ms);
+            self.next_rail = now + Duration::from_millis(self.cfg.rail.sample_period_ms);
         }
+        Ok(())
     }
 }
 
@@ -406,125 +329,6 @@ fn rr3_rail_beat(
     (tier, Some(event))
 }
 
-/// config.toml 解析：env 覆盖优先，缺省 manifest 同目录。
-fn rr3_config_load(manifest_path: &str) -> Result<Rr3PowerCfg, String> {
-    let path = std::env::var(RR3_POWER_CONFIG_ENV).unwrap_or_else(|_| {
-        std::path::Path::new(manifest_path)
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .join("config.toml")
-            .to_string_lossy()
-            .into_owned()
-    });
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("读 config {path} 失败: {e}"))?;
-    rr3_power_config_parse(&text)
-}
-
-/// 本模块 config 的汇总形状
-#[derive(Debug, Clone)]
-struct Rr3PowerCfg {
-    battery: Rr3BatteryCfg,
-    charger: Rr3ChargerCfg,
-    rail: Rr3RailCfg,
-}
-
-/// rail 段形状（批N2 件五）：段必填＋全部键必填——`up = false` 时其余键为惰性
-/// 但显式写（F-6 精神：合法不适用也要写出来，统一解析路径无分支）；`max_age_ms
-/// = 0` 合法（0 = 龄期恒超界 ⇒ 恒 Unknown，诚实语义）；`severe_mv < mild_mv`
-/// 严格校验（相等也红——Mild 档不可达）。
-#[derive(Debug, Clone)]
-struct Rr3RailCfg {
-    up: bool,
-    domain: String,
-    sample_period_ms: u64,
-    mild_mv: u16,
-    severe_mv: u16,
-    max_age_ms: u32,
-}
-
-/// TOML 文本 → Rr3PowerCfg。手工下钻不引 serde derive：字段个位数，
-/// 点名缺字段的文案比派生宏的默认报错可读（rr3-act 同款）。
-fn rr3_power_config_parse(text: &str) -> Result<Rr3PowerCfg, String> {
-    let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
-    let sect = |name: &str| -> Result<&toml::Value, String> {
-        v.get("rr3-power")
-            .and_then(|s| s.get(name))
-            .ok_or_else(|| format!("config 缺 [rr3-power.{name}] 段"))
-    };
-    let u16_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u16, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0 && *n <= u16::MAX as i64)
-            .map(|n| n as u16)
-            .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–65535 整数）"))
-    };
-    let u32_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u32, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0 && *n <= u32::MAX as i64)
-            .map(|n| n as u32)
-            .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–4294967295 整数）"))
-    };
-    let u64_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0)
-            .map(|n| n as u64)
-            .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（非负整数）"))
-    };
-    let battery_sect = sect("battery")?.clone();
-    let charger_sect = sect("charger")?.clone();
-    // 周期键钳制留痕（0.0.5 批I P-2）：0 无节拍意义，收敛 1ms 并打一行
-    // （哪个键、原值、钳后值）——钳位不再静默
-    let period_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
-        let raw = u64_of(sect, key, sect_name)?;
-        if raw < 1 {
-            eprintln!("config [rr3-power.{sect_name}] {key}={raw} 无节拍意义，钳到 1ms");
-            Ok(1)
-        } else {
-            Ok(raw)
-        }
-    };
-    // battery/charger 先解析（既有红例的次序契约：缺字段点名先于 rail 段点名），
-    // rail 段（批N2 件五）殿后——段必填＋全键必填，up=false 惰性但显式写
-    let battery = Rr3BatteryCfg {
-        sample_period_ms: period_of(&battery_sect, "sample_period_ms", "battery")?,
-        low_voltage_mv: u16_of(&battery_sect, "low_voltage_mv", "battery")?,
-        cutoff_voltage_mv: u16_of(&battery_sect, "cutoff_voltage_mv", "battery")?,
-    };
-    let charger = Rr3ChargerCfg {
-        state_period_ms: period_of(&charger_sect, "state_period_ms", "charger")?,
-    };
-    let rail_sect = sect("rail")?.clone();
-    let rail = Rr3RailCfg {
-        up: rail_sect
-            .get("up")
-            .and_then(toml::Value::as_bool)
-            .ok_or_else(|| "config [rr3-power.rail] 缺 up（布尔）".to_string())?,
-        domain: rail_sect
-            .get("domain")
-            .and_then(toml::Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .ok_or_else(|| "config [rr3-power.rail] 缺 domain（非空字符串）".to_string())?,
-        sample_period_ms: period_of(&rail_sect, "sample_period_ms", "rail")?,
-        mild_mv: u16_of(&rail_sect, "mild_mv", "rail")?,
-        severe_mv: u16_of(&rail_sect, "severe_mv", "rail")?,
-        max_age_ms: u32_of(&rail_sect, "max_age_ms", "rail")?,
-    };
-    if rail.severe_mv >= rail.mild_mv {
-        return Err(format!(
-            "config [rr3-power.rail] 阈值倒挂: severe={}mV 必须 < mild={}mV（相等则 Mild 档不可达）",
-            rail.severe_mv, rail.mild_mv
-        ));
-    }
-    Ok(Rr3PowerCfg {
-        battery,
-        charger,
-        rail,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,114 +388,9 @@ mod tests {
         assert_eq!(v.as_object().unwrap().len(), 2, "两字段，不加戏: {v}");
     }
 
-    /// 与仓内 config.toml 同形状的最小配置必须解析成功——漂移当场红
-    #[test]
-    fn config_parse_covers_repo_shape() {
-        let text = r#"
-[rr3-power]
-log_level = "info"
-
-[rr3-power.battery]
-sample_period_ms = 5000
-low_voltage_mv = 3300
-cutoff_voltage_mv = 3150
-
-[rr3-power.charger]
-state_period_ms = 2000
-
-[rr3-power.rail]
-up = false
-domain = "rail5v"
-sample_period_ms = 1000
-mild_mv = 4600
-severe_mv = 4400
-max_age_ms = 0
-"#;
-        let cfg = rr3_power_config_parse(text).unwrap();
-        assert_eq!(cfg.battery.sample_period_ms, 5000);
-        assert_eq!(cfg.battery.low_voltage_mv, 3300);
-        assert_eq!(cfg.battery.cutoff_voltage_mv, 3150);
-        assert_eq!(cfg.charger.state_period_ms, 2000);
-        // rail 段逐键（批N2 件五）：up=false 全键惰性但显式写，max_age_ms=0 合法
-        assert!(!cfg.rail.up);
-        assert_eq!(cfg.rail.domain, "rail5v");
-        assert_eq!(cfg.rail.sample_period_ms, 1000);
-        assert_eq!(cfg.rail.mild_mv, 4600);
-        assert_eq!(cfg.rail.severe_mv, 4400);
-        assert_eq!(cfg.rail.max_age_ms, 0);
-    }
-
-    #[test]
-    fn config_parse_rejects_missing_sections_and_fields() {
-        let e = rr3_power_config_parse("[rr3-power]\nlog_level = \"info\"\n").unwrap_err();
-        assert!(e.contains("[rr3-power.battery]"), "缺段点名（battery 先解析）: {e}");
-        let e = rr3_power_config_parse(
-            "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n[rr3-power.charger]\nstate_period_ms = 2000\n",
-        )
-        .unwrap_err();
-        assert!(e.contains("cutoff_voltage_mv"), "缺字段点名: {e}");
-        // rail 段缺段点名（批N2 件五：段必填）＋缺 up 键点名（全键必填）
-        let e = rr3_power_config_parse(
-            "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n",
-        )
-        .unwrap_err();
-        assert!(e.contains("[rr3-power.rail]"), "rail 缺段点名: {e}");
-        let e = rr3_power_config_parse(
-            "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\ndomain = \"rail5v\"\nsample_period_ms = 1000\nmild_mv = 4600\nsevere_mv = 4400\nmax_age_ms = 0\n",
-        )
-        .unwrap_err();
-        assert!(e.contains("缺 up"), "rail 缺 up 键点名: {e}");
-        let e = rr3_power_config_parse("garbage =\n").unwrap_err();
-        assert!(e.contains("TOML"), "坏文本点名: {e}");
-    }
-
-    /// 阈值倒挂执法（批N2 件五）：severe >= mild 即红——相等也红（Mild 档不可达）。
-    /// up=false 不豁免：解析路径统一无分支，策略量合法性不看开关。
-    #[test]
-    fn config_parse_rejects_inverted_rail_thresholds() {
-        let base = "\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\nup = false\ndomain = \"rail5v\"\nsample_period_ms = 1000\n";
-        let e = rr3_power_config_parse(
-            &format!("[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n{base}mild_mv = 4400\nsevere_mv = 4400\nmax_age_ms = 0\n"),
-        )
-        .unwrap_err();
-        assert!(e.contains("阈值倒挂"), "相等也红: {e}");
-        let e = rr3_power_config_parse(
-            &format!("[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n{base}mild_mv = 4400\nsevere_mv = 4500\nmax_age_ms = 0\n"),
-        )
-        .unwrap_err();
-        assert!(e.contains("阈值倒挂"), "severe > mild 红: {e}");
-    }
-
-    /// 钳制留痕（0.0.5 批I P-2）：0 周期收敛 1 不拒 boot——采样拍不能自毁；
-    /// eprintln 留痕在解析期打（键名/原值/钳后值），此处钉收敛结果
-    #[test]
-    fn config_parse_clamps_zero_period_to_one() {
-        let text = r#"
-[rr3-power.battery]
-sample_period_ms = 0
-low_voltage_mv = 3300
-cutoff_voltage_mv = 3150
-
-[rr3-power.charger]
-state_period_ms = 0
-
-[rr3-power.rail]
-up = false
-domain = "rail5v"
-sample_period_ms = 0
-mild_mv = 4600
-severe_mv = 4400
-max_age_ms = 0
-"#;
-        let cfg = rr3_power_config_parse(text).unwrap();
-        assert_eq!(cfg.battery.sample_period_ms, 1, "0 周期钳到 1ms");
-        assert_eq!(cfg.charger.state_period_ms, 1, "0 周期钳到 1ms");
-        assert_eq!(cfg.rail.sample_period_ms, 1, "rail 0 周期同钳 1ms");
-    }
-
     // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②） ----------
-    // battery/charger 的载荷 body fn 是 composite 私有（批I P-7 上移承载层），
-    // 对拍用例随载荷落本文件（对拍计数门扫 atom mech.rs + 模块 composite.rs 两处）。
+    // battery/charger 的载荷 body fn 随 0.0.8 批1 拆分落 dispatch.rs（原 composite.rs；
+    // 对拍计数门扫描面随批N26 件二扩四路），用例随载荷落本文件。
 
     #[test]
     fn parity_leg1_battery_output_train_is_deterministic() {
