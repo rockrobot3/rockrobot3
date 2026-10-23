@@ -7,6 +7,7 @@ use crate::board::{
     I2C_CHUNK_GAP_MS, I2C_PAGE_ATTEMPTS, I2C_RETRY, I2C_RETRY_DELAY_MS, I2C_TIMEOUT, OLED_ADDR,
     OLED_COLS, OLED_CONTRAST_LEVELS, OLED_ROWS,
 };
+use crate::face::capsule_page;
 use crate::state::rr3_board_bindings_i2c_pair;
 
 // ---------------------------------------------------------------------------
@@ -410,64 +411,17 @@ pub(crate) fn oled_frame(i2c: &mut I2cDriver, frame: &[u8; 8]) -> Result<(), Str
     Ok(())
 }
 
-/// 胶囊眼渲染（表情模式画面）：两只竖直胶囊眼，开合 open_pct% 与扫视偏移
-/// (dx,dy) 由表情基态 + 微动作动画合成。形状=圆角竖矩形（圆角半径取
-/// min(半宽, 半高)：满高 26px 时即纯胶囊，眯缝低压扁成 18px 宽横缝不退化成
-/// 圆盘）；行内实心段解析求宽（直段区全宽、圆角区 sqrt 余量），逐页写
-/// GDDRAM。扫视出界自然裁剪（0..127 列钳制）不回卷。
+/// 胶囊眼渲染（**I2C 传输薄壳**）：位图几何在 face 机制件（atoms/face/mech.rs，
+/// 批N23 件二收编），本函数逐页取图后只做页写——传输面与面目语义分离。
 pub(crate) fn oled_capsules(
     i2c: &mut I2cDriver,
     open_pct: u32,
     dx: i16,
     dy: i16,
 ) -> Result<(), String> {
-    const W2: i32 = 9; // 眼半宽（眼宽 18px）
-    const H_FULL: i32 = 26; // 满开眼高
-    const CY: i32 = 32; // 眼中心行（64 行画布居中）
-    const EYES: [i32; 2] = [42, 86]; // 眼中心列（128 列画布左右分置）
-    let h = ((H_FULL * open_pct.clamp(4, 100) as i32) / 100).max(4);
-    let half_h = h / 2;
-    let rc = W2.min(half_h); // 圆角半径
-    let straight = half_h - rc; // 垂直直段半长
     for page in 0u8..8 {
-        let mut buf = [0u8; 128];
-        let y0 = page as i32 * 8;
-        for y in y0..y0 + 8 {
-            let py = (y - (CY + dy as i32)).abs();
-            if py > half_h {
-                continue;
-            }
-            for &ecx in &EYES {
-                let cx = ecx + dx as i32;
-                let hw = if py <= straight {
-                    W2
-                } else {
-                    let rem = rc * rc - (py - straight) * (py - straight);
-                    if rem <= 0 {
-                        continue;
-                    }
-                    (W2 - rc + (rem as f32).sqrt() as i32).min(W2)
-                };
-                for x in (cx - hw).max(0)..=(cx + hw).min(127) {
-                    buf[x as usize] |= 1 << (y % 8);
-                }
-            }
-        }
+        let buf = capsule_page(page, open_pct, dx, dy);
         oled_page(i2c, page, &buf)?;
     }
     Ok(())
-}
-
-/// 表情→胶囊眼基态预设（开合% / 水平扫视 / 垂直扫视）：七态白名单各有面目，
-/// 微动作动画在此基态上叠加（眨眼/扫视见 [`PeriphState::anim_decide`]）。
-pub(crate) fn expr_eye_base(expr: &str) -> (u32, i16, i16) {
-    match expr {
-        "blink" => (4, 0, 0),     // 眯缝
-        "happy" => (55, 0, 2),    // 眯眼微垂
-        "talk" => (70, 0, 0),     // 说话态半开
-        "think" => (100, 6, -3),  // 抬眼右上
-        "listen" => (100, -6, 0), // 侧耳向左
-        "turn" => (100, 8, 0),    // 回望右方
-        _ => (100, 0, 0),         // idle 与兜底：正目全开
-    }
 }

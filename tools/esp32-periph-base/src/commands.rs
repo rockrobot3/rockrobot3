@@ -5,9 +5,10 @@ use std::time::Duration;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size};
 
 use crate::board::{OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST};
+use crate::face::expr_eye_base;
 use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
 use crate::link::{read_line, reply, UartIo};
-use crate::oled::{expr_eye_base, glyph};
+use crate::oled::glyph;
 use crate::periph::CtlUart;
 use crate::servo::{axis_check, Axis};
 use crate::state::{
