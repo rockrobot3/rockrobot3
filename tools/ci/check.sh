@@ -1355,7 +1355,10 @@ else
   #     分子元素越出分母即硬红——申报面校验只挡词表外形制，挡不住"词表内合法
   #     形制、字段却不在五路分母"的越界申报；本位反向 comm（分子−分母）补齐。
   #     两源共用（panel 与板侧同账同执法：任何一端申报越界字段都过不了门）。
-  comm -13 "$gd_dir/cov_sorted" "$gd_den" > "$gd_dir/cov_oob"
+  #     批N21 件四旗标订正：原 `comm -13 cov_sorted den` 打的是 col2（分母−分子），
+  #     与上行差集同集合——红账 0 时两集合同空潜伏至今，红账非零即双名单假报；
+  #     订正为 col1（分子−分母）＝越界申报，兑现本位登记语义。
+  comm -23 "$gd_dir/cov_sorted" "$gd_den" > "$gd_dir/cov_oob"
   gd_oob_n="$(grep -c . "$gd_dir/cov_oob" || true)"
   if grep -q . "$gd_dir/cov_oob"; then
     sed 's/^/X  covers 越界（不在分母五路并集）: /' "$gd_dir/cov_oob"

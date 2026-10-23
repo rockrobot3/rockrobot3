@@ -131,8 +131,10 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// fail-closed）——ops 路分母 36 槽全部转绿（covers 申报 30 项随件九二上表，写口
 /// 申报同集合 ∪ 不增）。接线图读口 `GET /api/wiring`（批N4 件九笔4）：ctl.wiring
 /// 透传（判据真值单点 = rrd assembly.rs 的装配快照，面板只渲染不判——第二真值点
-/// 禁令），covers 申报 43 项 = pin 11 + role 7 + domain 11 + axis 14（门 d 分母
-/// 四路字段级全集，与 rrd 渲染完整性测试同源钉死）⇒ 红账 43 全转绿，基线
+/// 禁令），covers 申报 44 项 = pin 11 + role 7 + domain 12 + axis 14（门 d 分母
+/// 四路字段级全集，与 rrd 渲染完整性测试同源钉死；domain 12 = 批N21 件二 evidence
+/// 键入 RR3_DOMAIN_KEYS 后件四同批补申报——assembly 快照批N21 件二起渲染 evidence，
+/// 读面可读即申报，写面半边敞口维持 status.md 敞口 15 行登记）⇒ 红账 43 全转绿，基线
 /// tools/ci/gate-d-baseline.txt 行 1 同批 43→0；密钥面两端点（keys/key）不申报
 /// covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
 /// applies 今日两条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
@@ -164,7 +166,7 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/api/interact/ops", &["ops/non_pointable", "ops/default_expression", "ops/face_tick_ms", "ops/selftest_face_expect", "ops/panel_max_conns", "ops/panel_read_timeout_ms", "ops/panel_header_limit", "ops/panel_body_limit", "ops/panel_call_timeout_ms", "ops/prebuffer_ms", "ops/volume_pct"], ""),
     ("GET", "/api/power/ops", &["ops/sample_period_ms", "ops/low_voltage_mv", "ops/cutoff_voltage_mv", "ops/state_period_ms"], ""),
     ("GET", "/api/sense/ops", &["ops/sample_rate", "ops/channels", "ops/frame_ms", "ops/doa_bin_threshold_deg", "ops/doa_window_ms", "ops/doa_window_rms_min", "ops/doa_mic_baseline_mm", "ops/rms_start", "ops/silence_tail_ms", "ops/min_speech_ms"], ""),
-    ("GET", "/api/wiring", &["pin/role", "pin/instance", "pin/controller", "pin/channel", "pin/physical", "pin/direction", "pin/rail", "pin/addr", "pin/device", "pin/failsafe", "pin/mux_group", "role/controller", "role/channel", "role/physical", "role/rail", "role/failsafe", "role/addr", "role/device", "domain/name", "domain/nominal_mv", "domain/mild_mv", "domain/severe_mv", "domain/current_cap_ma", "domain/sense", "domain/current_sense", "domain/switch", "domain/switchable", "domain/armed", "domain/max_age_ms", "axis/schema", "axis/pin", "axis/center_deg", "axis/lo_deg", "axis/hi_deg", "axis/dir_sign", "axis/slew_deg_s", "axis/settle_ms", "axis/hold", "axis/current_ceil_ma", "axis/warmup_ms", "axis/hard_stop", "axis/calibrated", "axis/source"], ""),
+    ("GET", "/api/wiring", &["pin/role", "pin/instance", "pin/controller", "pin/channel", "pin/physical", "pin/direction", "pin/rail", "pin/addr", "pin/device", "pin/failsafe", "pin/mux_group", "role/controller", "role/channel", "role/physical", "role/rail", "role/failsafe", "role/addr", "role/device", "domain/name", "domain/nominal_mv", "domain/mild_mv", "domain/severe_mv", "domain/current_cap_ma", "domain/sense", "domain/current_sense", "domain/switch", "domain/switchable", "domain/armed", "domain/max_age_ms", "domain/evidence", "axis/schema", "axis/pin", "axis/center_deg", "axis/lo_deg", "axis/hi_deg", "axis/dir_sign", "axis/slew_deg_s", "axis/settle_ms", "axis/hold", "axis/current_ceil_ma", "axis/warmup_ms", "axis/hard_stop", "axis/calibrated", "axis/source"], ""),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -2120,9 +2122,10 @@ mod tests {
     }
 
     /// covers 计数 pin（批N4 件九笔4，门 d 分母同源）：/api/wiring 申报
-    /// [pins]×wiring 全交叉读口的四族词表全集——pin 11 + role 7 + domain 11 +
-    /// axis 14 = 43，与 check.sh 步 ⑩ 的分母导出逐项对齐（红账 43 全转绿的
-    /// 面板侧申报表）；增删字段 = 改端点表 + 改本 pin + 过门 d。
+    /// [pins]×wiring 全交叉读口的四族词表全集——pin 11 + role 7 + domain 12 +
+    /// axis 14 = 44，与 check.sh 步 ⑩ 的分母导出逐项对齐（红账 43 全转绿的
+    /// 面板侧申报表；domain 12 = 批N21 件二 evidence 键随批N21 件四补申报）；
+    /// 增删字段 = 改端点表 + 改本 pin + 过门 d。
     #[test]
     fn wiring_endpoint_declares_full_cross_cover_vocabulary() {
         let entry = RR3_PANEL_ROUTES
@@ -2130,11 +2133,11 @@ mod tests {
             .find(|(_, p, _, _)| *p == "/api/wiring")
             .expect("端点表必含 /api/wiring");
         let covers: Vec<&str> = entry.2.to_vec();
-        assert_eq!(covers.len(), 43, "四族全集 43 项: {covers:?}");
+        assert_eq!(covers.len(), 44, "四族全集 44 项: {covers:?}");
         let count = |prefix: &str| covers.iter().filter(|c| c.starts_with(prefix)).count();
         assert_eq!(count("pin/"), 11, "pin 族 11 字段（RR3_PIN_KEYS 同源）");
         assert_eq!(count("role/"), 7, "role 族 7 字段（roles.toml requires 同源）");
-        assert_eq!(count("domain/"), 11, "domain 族 11 字段（RR3_DOMAIN_KEYS 同源）");
+        assert_eq!(count("domain/"), 12, "domain 族 12 字段（RR3_DOMAIN_KEYS 同源）");
         assert_eq!(count("axis/"), 14, "axis 族 14 字段（RR3_ACT_PROFILE_FIELDS 同源）");
         let mut sorted = covers.clone();
         sorted.sort_unstable();
