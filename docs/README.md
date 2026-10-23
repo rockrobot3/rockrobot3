@@ -101,6 +101,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../base/runtime/rr-hal/README.md`](../base/runtime/rr-hal/README.md) | HAL 的 trait 面、数据类型与后端规划 |
 | [`../base/runtime/rr-ota/README.md`](../base/runtime/rr-ota/README.md) | 升级"双轨"的类型形状 |
 | [`../base/runtime/rrd/README.md`](../base/runtime/rrd/README.md) | 守护进程装配层：supervisor / health / config / 在册表宿主 |
+| [`../base/runtime/rr3mod/README.md`](../base/runtime/rr3mod/README.md) | 模块公共骨架：bootstrap / serve / Dispatcher 同构启动序列编排（0.0.8 W-A 批0），只编排不重写 |
 | [`../modules/README.md`](../modules/README.md) | 模块名册与固定五件（加模块第一站） |
 | [`../modules/rr3-sense/README.md`](../modules/rr3-sense/README.md) | 感知：麦克风阵列、环境传感器、IMU |
 | [`../modules/rr3-act/README.md`](../modules/rr3-act/README.md) | 执行：舵机、LED、反射环宿主 |
