@@ -40,4 +40,5 @@ pub struct Rr3ServoCfg {
 
 pub use mech::{
     rr3_servo_check_motion, rr3_servo_check_timeout, rr3_servo_check_travel, Rr3RateGate,
+    Rr3ServoTimeoutError, Rr3ServoTravelError,
 };
