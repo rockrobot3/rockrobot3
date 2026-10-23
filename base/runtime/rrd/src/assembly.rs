@@ -314,6 +314,7 @@ pub fn rr3_assembly_render(s: &Rr3AssemblySnapshot) -> Value {
             "switchable": d.switchable,
             "armed": d.armed,
             "max_age_ms": d.max_age_ms,
+            "evidence": d.evidence,
         })).collect::<Vec<Value>>(),
         "wires": s.wiring.wires.iter().map(|w| json!({
             "connector": w.connector,
@@ -402,6 +403,7 @@ mod tests {
                     switchable: false,
                     armed: false,
                     max_age_ms: 0,
+                    evidence: "none".into(),
                 }],
                 ..Default::default()
             },

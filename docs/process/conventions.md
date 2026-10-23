@@ -3172,3 +3172,14 @@ D11 的 `armed=true` 界面门要求"必须引用一条真板对拍证据的编�
   引用字段核验）。
 - **本命名空间不产出板上结论**：它只规定结论的容器形制与被引用方式；证据本身随
   0.0.6/0.0.7 验证窗产出，"mock 不得充当在位证据"（brain 册 G-4）的正面答案即此节。
+- **挂接对表（批N21 件二，2026-10-23）**：**装载期半边已收**——`[[supplies.domain]]` 增
+  `evidence` 键（rrd `RR3_DOMAIN_KEYS` 第 12 键），与 `armed` 成对（同 switch/switchable
+  范式）：`armed = true` 必携形制合法引用、`armed = false` 显式写 `"none"` 不携过期引用
+  （形状半边＝装载校验⑥-e，`rr3_evidence_ref_wellformed` 同源判据）；文件半边
+  `rr3_profile_domain_evidence_check` 由 boot 装载链持证据容器根（modules-root 同一条
+  `<root>/profiles/` 布局纪律推导出 `<root>/docs/evidence`）调用四道核，fail-closed：
+  容器缺＋有武装申报即红，无武装申报零波及。上文"装载期随落盘数据的 evidence 引用
+  字段核验"按施工事实订正：装载期核验点＝装配单域表的 `evidence` 字段（面板写面落盘
+  的数据经 boot 重装载时同链被核），非另立落盘字段扫面。**写面半边维持敞口**（`armed=true`
+  置位、`severe_mv`、`current_ceil_ma` 三写口随件九端点批挂接）。首批证据文件
+  `实测/0001`、`实测/0002`（批N20 产线真板实录）已产出，rrd 仓内测试锁定其四道核全过。

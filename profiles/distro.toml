@@ -55,6 +55,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 [[supplies.domain]]
@@ -68,6 +69,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 [[supplies.domain]]
@@ -81,6 +83,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 # [supplies.budget] 内存预算声明（校验⑩ 分母，schema 4，批N2）：与 default 同板同值

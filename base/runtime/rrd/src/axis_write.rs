@@ -254,6 +254,7 @@ current_sense = "none"
 switch = "none"
 switchable = false
 armed = false
+evidence = "none"
 max_age_ms = 0
 
 [supplies.budget]
