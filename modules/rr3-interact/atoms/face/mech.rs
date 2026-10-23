@@ -10,8 +10,7 @@
 //! （结构体 + 判定），组装归 `src/composite.rs`，线上字节逐字不变。
 
 use super::{
-    rr3_face_expression_lookup, rr3_face_non_pointable_join, Rr3FaceFrame, RR3_FACE_EXPRESSIONS,
-    RR3_FACE_TALK, RR3_FACE_TOPIC,
+    rr3_face_expression_lookup, RR3_FACE_EXPRESSIONS, Rr3FaceFrame, RR3_FACE_TALK, RR3_FACE_TOPIC,
 };
 
 /// idle：睁眼 + 平嘴（单帧）
@@ -653,27 +652,34 @@ impl Default for Rr3Face {
     }
 }
 
+/// [`Rr3Face::rr3_face_set`] 的零堆错误（批N24 件四）：两拒因各占一变体，
+/// 动态数据（原始输入 / 在册名）随枚举走，机制层不落 `String` 堆——人读
+/// 文案由编排层渲染（`src/composite.rs` 的 `rr3_face_set_error_text`，与
+/// 改前逐字一致；白名单连接串用 [`super::RR3_FACE_EXPRESSIONS_JOINED`] 常量
+/// 投影，渲染不再运行时 join）。
+#[derive(Debug, PartialEq, Eq)]
+pub enum Rr3FaceSetError<'a> {
+    /// 不认的表情：携带原始输入（渲染带白名单连接串点名允许集）
+    UnknownExpression(&'a str),
+    /// 不可点名：携带查得后的在册名（'static，白名单值），渲染带本形态
+    /// 不可点名集（集是 config 注入的运行时数据，渲染面组装）
+    NonPointable(&'static str),
+}
+
 impl Rr3Face {
     /// 点名切换表情：名字必须在白名单内。返回 `(切换后, 切换前)`。
     /// `non_pointable` = 本形态不可点名集（0.0.5 批M MC-10 I-11：config 注入，
     /// 默认含 `talk`——它是播放面的自动态）。命中排除集则拒（状态不动）；点名
     /// 切换会打断挂起态——显式指令优先于自动恢复，这是表情机的最小仲裁规则。
-    pub fn rr3_face_set(
+    pub fn rr3_face_set<'a>(
         &mut self,
-        expr: &str,
+        expr: &'a str,
         non_pointable: &[&str],
-    ) -> Result<(&'static str, &'static str), String> {
-        let expr = rr3_face_expression_lookup(expr).ok_or_else(|| {
-            format!(
-                "{RR3_FACE_TOPIC} 不认表情 {expr:?}（允许 {}）",
-                RR3_FACE_EXPRESSIONS.join("/")
-            )
-        })?;
+    ) -> Result<(&'static str, &'static str), Rr3FaceSetError<'a>> {
+        let expr = rr3_face_expression_lookup(expr)
+            .ok_or(Rr3FaceSetError::UnknownExpression(expr))?;
         if non_pointable.contains(&expr) {
-            return Err(format!(
-                "{expr} 不可被点名（本形态不可点名集 {}）",
-                rr3_face_non_pointable_join(non_pointable)
-            ));
+            return Err(Rr3FaceSetError::NonPointable(expr));
         }
         let prev = core::mem::replace(&mut self.current, expr);
         self.suspended = None; // 显式指令打断 talk 挂起态
@@ -916,13 +922,32 @@ mod tests {
         assert!(swap.rr3_face_set("wink", &[]).is_err());
     }
 
+    /// 两拒因分变体（批N24 件四）：不认 → UnknownExpression 携原始输入、
+    /// 排除集命中 → NonPointable 携在册名——枚举映射是编排层渲染的依据。
+    #[test]
+    fn set_rejects_split_into_two_variants() {
+        let mut f = Rr3Face::default();
+        assert_eq!(
+            f.rr3_face_set("wink", NON_TALK).unwrap_err(),
+            Rr3FaceSetError::UnknownExpression("wink"),
+            "不认的表情携原始输入"
+        );
+        assert_eq!(
+            f.rr3_face_set("talk", NON_TALK).unwrap_err(),
+            Rr3FaceSetError::NonPointable("talk"),
+            "排除集命中携在册名（'static 白名单值）"
+        );
+    }
+
     /// I-11：拒因文案点名"本形态不可点名集"（空集渲染 `(空)`，见 face.rs 用例）
     #[test]
     fn non_pointable_reject_names_the_set() {
         let mut f = Rr3Face::default();
-        let err = f.rr3_face_set("talk", NON_TALK).unwrap_err();
-        assert!(err.contains("不可被点名"), "拒因点明规则: {err}");
-        assert!(err.contains("talk"), "拒因回显排除集: {err}");
+        assert_eq!(
+            f.rr3_face_set("talk", NON_TALK).unwrap_err(),
+            Rr3FaceSetError::NonPointable("talk"),
+            "talk 是播放面的自动态（拒因携在册名，集渲染在编排层）"
+        );
     }
 
     #[test]
