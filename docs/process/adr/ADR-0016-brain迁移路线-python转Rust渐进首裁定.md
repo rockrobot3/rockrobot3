@@ -114,6 +114,14 @@ brain 与 CI bash 胶水是仅存的两块非 Rust 面。立规晚于 ADR-0013/0
   ADR-0013 裁定 1/2 的真板兑现）、0.0.7 为 ESP32 边界预留。本 ADR 裁定 1/2/3
   （切分表、不变量、部署形态目标）一字不动；实施动工前仍须按裁定 4 立专项方案
   过评审。
+- 增补评审记录（2026-10-24）：**裁定 4 的"动工前过评审"由批N32 件一兑现**——增补
+  评审七裁定（rr3mod API 面无"Python 侧不可用"依赖／Dispatcher 形状＝编排挂
+  on_event vad_start 臂＋on_tick expired 臂两路共用／错误两档直接承载失败契约／
+  启动序遵 bootstrap 固定序＋`connect_timeout_s` 键随迁移退役／HTTP-TLS 依赖选型
+  方向同步 API＋rustls 系／评审性质与 ADR-0014 不增补／件表五件）落 decisions §2
+  （取证基线 `6add250`），细目见
+  [批N32 计划册 §2](../dev/0.0.8整理窗——批N32开发计划与W-Cbrain迁移增补评审.md)。
+  裁定 1/2/3/4 正文一字不动。
 - 校验项：实施批次每件照正常批次纪律收尾（九步门禁 + conventions §2 登记 +
   双远端核对）；brain 单测条数换轨时登记；`which_python3` 与 brain-unittest
   的退役动作随最后一件进收口清单，不提前删除。
