@@ -169,12 +169,12 @@
 | §1 "内松外紧"五个符号未导出（S-6） | `rr3_pcm_downmix_mono`、`rr3_frame_rms` 改 **`pub(crate)`**；载荷类符号随 S-7 离件，导出面自然收窄 | **S-6 已结** |
 | §12 DoA 卡在 `f64::{sqrt,asin,to_degrees,round}`（S-8） | 改 **`RR3_ASIN_DEG_LUT: [i32; 257]` + isqrt/Q15** 整型；`f64`/`sin` 只在 `#[cfg(test)]` 内 | **S-8 已结**；`f64::sqrt` 仍在测试夹具里（不影响 bare 编译面） |
 | §1 `Rr3AudioSource::read` 是 `#[async_trait]` + `Send + Sync`，件侧经 `rr3_block_on` | 契约面 `rr-hal-api::Rr3AudioSource` 为同步且改**借用缓冲**：`read(&mut self, buf: &mut [i16]) -> Result<usize, Rr3HalError>`（返回 0 = 无新数据）；`rr3_block_on` 全仓不存在 | §12 该行作废 |
-| §12 "件签名里 `Vec<i16>` 待改借用" | `rr3_pcm_downmix_mono(&[i16], u8) -> Vec<i16>` **仍产堆**（现为 `pub(crate)`，件内部使用） | **未结** → 批L L-3（改调用方缓冲或降 `pub(crate)` 后豁免） |
+| §12 "件签名里 `Vec<i16>` 待改借用" | `rr3_pcm_downmix_mono(&[i16], u8) -> Vec<i16>` **仍产堆**（现为 `pub(crate)`，件内部使用） | **结（批N24 件二核实 2026-10-23）**：本行自列豁免条件"改调用方缓冲或降 `pub(crate)` 后豁免"**已满足**（签名现已是 `pub(crate)`＋唯一读者 composite.rs :329 在件内），原记"未结"与豁免条件自相矛盾（批N22 盘点照录未核），改判豁免结项零码面 |
 | §3/§13 "`sample_rate/channels/frame_ms` 待进 ops，DoA 阈值待进 ops（S-5）" | `atoms/{capture,vad}/assemble.toml` **已填**（批M MC-10 L-5，2026-10-13）：capture 报 `Rr3AudioSource`←`alsa_device` 句柄 + `sample_rate`/`channels`/`frame_ms` ops；vad 报 `rms_start`/`silence_tail_ms`/`min_speech_ms` ops；门有内容可校验 | **L-5 已结**；DoA 阈值迁 ops 续做（S-5，见下） |
 | §13 `bit_depth: 16` 无 config 键 | 实况未变，但**本轮判定归位**：s16le 是线格式契约，不是策略 → 从"孤儿参数"改记**契约字面量豁免**（0.0.5 §17 同批订正） | 判定改，动作撤 |
 | §13 DoA 查表：`RR3_ASIN_DEG_LUT` 257 项常量在件内 | **本轮裁定**：数学常量表属**机制**（跨板同值、不随硬件变），与 `RR3_FRAMES_*`（板面渲染数据）不同类 → 允许留在 `mech.rs`，不必外提到描述符 | 新裁定 R-12（见索引 §13.3 同源） |
 
-**本册新净余数**：批L **L-3**（`downmix_mono` 去堆）。**L-5 已结（批M MC-10 L-5）**：capture/vad 的 `handles`/`ops` 申报补齐。
+**本册新净余数**：**零（批N24 件二核实 2026-10-23）**——原余数批L **L-3**（`downmix_mono` 去堆）经查豁免条件已满足（签名已 `pub(crate)`＋唯一读者在件内），改判豁免结项（见上表 §12 行），本册不再欠 L-3。**L-5 已结（批M MC-10 L-5）**：capture/vad 的 `handles`/`ops` 申报补齐。
 
 ### §14.1 增量对表（2026-10-12，代码基线 `78625ae`；全仓总表见 [索引 §13.4](模块设计索引.md)）
 
