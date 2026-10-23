@@ -75,6 +75,15 @@ pub struct BusHandle {
 
 #[cfg(unix)]
 impl BusHandle {
+    /// 显式包装构造（批N29 批4）：把既有 [`Rr3BusClient`] 包进句柄——面板线程
+    /// 宿主（rr3-interact `panel::spawn_host`）与单测夹具（假 rrd 短连）持有的
+    /// 是自建的 client，bootstrap 拿不到它们。**收窄纪律针对承载方法面**
+    /// （rr3_poll_wait / rr3_reply_call 等不进公开 API），构造口只让已持有
+    /// client 的人把既有连接包进句柄，不开任何承载方法洞。
+    pub fn wrap(client: rr_bus_api::Rr3BusClient) -> Self {
+        Self { client }
+    }
+
     /// 业务发布（Event 帧）。透传 [`Rr3BusClient::rr3_publish`]。
     pub fn publish(&self, topic: &str, body: serde_json::Value) -> Result<(), String> {
         self.client.rr3_publish(topic, body)
