@@ -171,7 +171,7 @@
 | §12/§13 wifi 凭据 `String`（N-3） | `Rr3LinkState.ssid` 改 `Option<Rr3SsidText { bytes: [u8; 32], len: u8 }`（契约面）；**件内 `rr3_provision_connect(&mut self, ssid: String, pass: String)` 与 `credentials: Option<(String, String)>` 仍是堆类型** | **部分结**：值类型侧结、凭据侧未结 → 批L **L-3** |
 | §12 "`&dyn`/`rr3_block_on` 清零（I-3/N-3 同族）" | 契约面同步、`rr3_block_on` 不存在；本册件面不持句柄（调用在 `composite.rs`） | 已结 |
 | §0/§13 三个零读者配置项（N-6/N-2） | `roam_probe_enabled` 与 `tls_min_version` **删除**；`timeout_ms` **实装为 nmcli 子进程超时**并迁入 wifi 段 | **N-2、N-6 已结**（三选一的"实装/删除"两条各用一次） |
-| §13 sim 假 AP 表在件里（N-9） | `rr3_wifi_scan_result` 的三条假 AP **仍在 `atoms/wifi/mech.rs`** | **N-9 未结** → 批L **L-9**（整表迁 sim 后端，与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流） |
+| §13 sim 假 AP 表在件里（N-9） | `rr3_wifi_scan_result` 的三条假 AP **仍在 `atoms/wifi/mech.rs`** | **已结（批I N-9 迁入 rr-hal sim 后端；批N24 件二核实 2026-10-23）**：`rr3_sim_link_scan_list` 住 rr-hal sim.rs（首行 SSID 与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流一处真值＋单测钉死），composite 只组装形状——下两行判定过时随批N24 件二改判，原记"未结 → 批L L-9"失效 |
 | §13 栈名出现在 SURFACE/println（N-8） | 未见改动：`wifi.rs`/`bt.rs` 的 `SURFACE` 与 `composite.rs` 的蓝牙行仍打 `BlueZ`/`NetworkManager`/`D-Bus`；**而 ⑦-a 现在会扫 `modules/*/atoms/*/*.rs`**（剥行注释后 grep 器件/厂商禁词，重跑 0 命中——说明这些串不在禁词表内，不在扫到的文件内，或两者皆非） | **N-8 未结**；并登记敞口：**禁词表与运行期自述之间仍有缝**（表里没有 `BlueZ`/`NetworkManager`）→ 批L **L-10**（禁词表补栈名或改由后端名下发） |
 | §3/§13 `handles`/`ops` 申报 | `atoms/wifi/assemble.toml` **已填**（批M MC-10 L-5，2026-10-13）：报 `Rr3Link`←`link_ifname` 句柄 + `link_report_period_ms`/`timeout_ms` ops；bt 早填为样板 | **L-5 已结** |
 
@@ -185,7 +185,7 @@
 | 项 | 复验实况 | 判定 / 新落点 |
 |---|---|---|
 | N-8 对外自述撤协议栈名 | 已撤，改由 `rr3_hal_backend_resolve` 交后端名 | **结**（"换协议栈不改码"这条在本单元已成立） |
-| 批L L-10 禁词表补栈名 | 动机（对外面写死栈名）随 N-8 消失 | **降为可选清理**，归 0.0.8 W-B，不卡任何批 |
-| N-9 / L-9 sim 假 AP 整表 | 表已**离开件面**，现居 `src/composite.rs : rr3_wifi_scan_result`（带 `backend:"sim"` 诚实标注） | 件面半边结；"整表迁 `rr-hal` sim 后端、与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流"半边归 **0.0.8 W-B** |
+| 批L L-10 禁词表补栈名 | 动机（对外面写死栈名）随 N-8 消失 | **降为可选清理**，归 0.0.8 W-B，不卡任何批；**批N24 件二核实（2026-10-23）：维持不排**（索引 §13 复验表/§14.2 L-10 行同注——防御性收益不抵成本，先例＝批N9 件六 brain 中止面不排维持） |
+| N-9 / L-9 sim 假 AP 整表 | 表已**离开件面**，现居 `src/composite.rs : rr3_wifi_scan_result`（带 `backend:"sim"` 诚实标注） | **结（批N24 件二核实 2026-10-23）**：件面半边批I 已结；"整表迁 `rr-hal` sim 后端、与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流"半边经查**码面已收**（`rr3_sim_link_scan_list` 迁入 sim.rs＋合流＋单测 `scan_list_first_ssid_ties_to_link_default` 钉死——批I N-9 施工时已带），原记"归 0.0.8 W-B"系册面滞后，改判结项零码面 |
 | N-5 真链路两半拆分 | 凭据持久化 = 可写码（NM 承载持久化 + `forget` 真删）；BlueZ = 不在 F 清单 | 持久化 → **MC-6**；bt → **MC-9**（建议 `net.bt` 改记 `placeholder`，索引 R-16 的"承诺 > 事实"案例） |
 | N-3/N-2/N-6/N-7 | `Rr3SsidText`、`timeout_ms` 实装为 nmcli 超时、三键删净、载荷上移 | **结**（与 §13 判定一致，此处只补一句：本册 §10 表的"归批"列按已收口批次写，不再重开） |
