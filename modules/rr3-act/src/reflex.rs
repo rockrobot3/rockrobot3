@@ -13,7 +13,7 @@
 
 use std::time::{Duration, Instant};
 
-use rr_bus_api::Rr3BusClient;
+use rr3mod::BusHandle;
 use serde_json::json;
 
 pub use rr_core::control::{
@@ -35,7 +35,9 @@ pub const SURFACE: &[&str] =
 /// 宿主线程主循环（不返回）：按 1/loop_hz 节拍空转；每速率窗结算一次实际速率，
 /// 饱和 episode 触发时经总线发**恰好一条**通告。总线死了不重试不退出——
 /// 主循环的死亡探针会先一步终结整个进程（restart_policy=always 兜底）。
-pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: Rr3BusClient) {
+/// 第二参 `BusHandle`（批N30 件二换型，0.0.8 方案 §4.6）：bootstrap 交出的句柄
+/// clone 只归反射环，承载方法同语义透传（publish/counter_bump）。
+pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
     let loop_hz = cfg.loop_hz.max(1);
     let period = Duration::from_micros(1_000_000 / loop_hz as u64);
     let (window_ms, need, expect) = rr3_reflex_window_plan(&cfg);
@@ -54,14 +56,14 @@ pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: Rr3BusClient) {
             if det.rr3_detector_feed(saturated) {
                 seq += 1;
                 let rate_hz = rr3_reflex_rate_hz(ticks, window_ms);
-                let _ = bus.rr3_publish(
+                let _ = bus.publish(
                     RR3_REFLEX_NOTICE_TOPIC,
                     json!({ "seq": seq, "reason": "saturate", "rate_hz": rate_hz }),
                 );
             }
             // 窗结算记账（批M M-β A-6）：值 = 窗内实跑节拍数，重置前落账；
             // bump 失败不进总线发布面（异常通告语义），静默容忍——计数是运维账
-            bus.rr3_counter_bump(RR3_REFLEX_TICKS_KEY, ticks);
+            bus.counter_bump(RR3_REFLEX_TICKS_KEY, ticks);
             ticks = 0;
             window_start = now;
         }

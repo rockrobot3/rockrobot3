@@ -13,6 +13,9 @@ name = "rr3-act"
 path = "src/main.rs"
 
 [dependencies]
+# 模块公共骨架（0.0.8 W-A 批0，ADR-0017）：bootstrap/serve/Dispatcher/BusHandle
+# 单点——本 crate 拆分随批1–批5 接入
+rr3mod = { path = "../../base/runtime/rr3mod" }
 # path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
 # 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
