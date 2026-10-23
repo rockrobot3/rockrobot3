@@ -5,9 +5,9 @@ use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::{esp_random, esp_timer_get_time};
 use rr_ipc::{Rr3BoardBindings, Rr3ByteStream};
 
-use crate::board::{wander_step, Axis};
 use crate::link::{reply, UartIo};
 use crate::power::RailTier;
+use crate::servo::{wander_step, Axis};
 
 /// esp_timer 毫秒（单调时基，微动作时钟源；u64 毫秒 58 万年不回绕）。
 pub(crate) fn now_ms() -> u64 {

@@ -4,6 +4,10 @@ use esp_idf_hal::adc::{attenuation, Resolution as AdcResolution};
 use esp_idf_hal::ledc::Resolution;
 use esp_idf_sys::TickType_t;
 
+// 行程生成物中位锚（boot 姿态策略的基准）——生成物自 servo 机制件引入
+// （批N23 件一收编：机制面收拢 atoms/servo/mech.rs，策略→机制单向依赖）。
+use crate::servo::{RR3_AXIS_PAN, RR3_AXIS_TILT};
+
 /// I2C 事务超时（TickType_t；portMAX_DELAY 同义 u32::MAX——阻塞至传输完成）。
 pub(crate) const I2C_TIMEOUT: TickType_t = u32::MAX;
 /// I2C 写重试次数（**有限电源优化**：板载 5V 直供下舵机转动/保持的电流尖峰拉塌轨压、
@@ -79,11 +83,9 @@ pub(crate) const RR3_MAGIC_FIRST: u8 = 0x31;
 // "真值点 → 生成副本"，重跑生成器 diff 为空 = 门 f 拟 ⑨-d（check.sh 接线）。
 //（include! 前的 doc 注释挂不到宏产物上，用普通注释。）
 include!("topics_gen.rs");
-// 板侧行程常量表生成物（RR3_AXIS_<INSTANCE> 三元组 + rr3_axis_travel 查表）——
-// 真值点 hardware/esp32-mini/axis/*.toml、生成器 tools/rr3-codegen（批N3 件五
-// 门 g 收敛：行程唯一真值点在档案，本文件的手写行程字面量已撤除；WANDER/SCAN/
-// 越程拒收的判据全部改读生成表）。同批 include 进条目流，理由同上。
-include!("axis_gen.rs");
+// 行程生成物（RR3_AXIS_* + rr3_axis_travel）已随批N23 件一收编迁入 servo 机制件
+// （atoms/servo/mech.rs include!）——行程是舵机机制真值，中位锚经上方 use 回流
+// 供 boot 姿态策略引用。
 /// 音频上行宿主 task 位形（帧头 dst 门）：宿主侧占位形 1——与宿主 rr-hal
 /// esp32_uart 桥后端同值帧头约定（板不依赖 rr-core，与 [`RR3_PERIPH_TASK`]
 /// 同一"两端常量自证"纪律）。Event 帧只发宿主（dst=1），trace_id=0（direct）。
@@ -104,7 +106,9 @@ pub(crate) const AUDIO_Q_CAP: usize = 4;
 pub(crate) const UART2_TX_RING: usize = 16384;
 
 // ---------------------------------------------------------------------------
-// 舵机换算（50Hz / 14bit：1 tick = 20ms / 16384 = 1.2207µs）
+// 舵机换算（50Hz / 14bit：1 tick = 20ms / 16384 = 1.2207µs）——**策略量**：
+// SG90 脉宽锚 × LEDC 档位换算的换算锚，换舵机/换 LEDC 档只动本文件；换算
+// 机制（线性映射与回读近似）在 servo 机制件（atoms/servo/mech.rs，按参吃值）。
 // ---------------------------------------------------------------------------
 
 /// 0° 对应 duty ticks（0.5ms = 500µs / 1.2207µs ≈ 409.6 → 410）。
@@ -113,12 +117,13 @@ pub(crate) const DUTY_MIN: u32 = 410;
 pub(crate) const DUTY_MAX: u32 = 2048;
 
 // ---------------------------------------------------------------------------
-// 分轴行程（批N3 件五门 g 收敛：真值 = 轴档案，本文件零手写行程字面量）
+// 分轴行程（批N3 件五门 g 收敛：真值 = 轴档案；批N23 件一收编：机制面迁
+// atoms/servo/mech.rs，本文件只留 boot 姿态策略）
 // ---------------------------------------------------------------------------
 //
-// 行程三元组（lo, hi, center）住生成物 axis_gen.rs（真值点
-// hardware/esp32-mini/axis/*.toml，RR3_AXIS_PAN / RR3_AXIS_TILT），消费一律经
-// [`rr3_axis_travel`]——查无此轴回 None，调用方 fail-closed（不猜缺省）。
+// 行程三元组（lo, hi, center）与其消费（Axis::range/center_deg、axis_check、
+// axis_scan_points、wander_step）已迁 servo 机制件（行程唯一真值点 =
+// hardware/esp32-mini/axis/*.toml，生成物 axis_gen.rs 随迁）。
 //
 // 真板实锤（批C v0.3.2 与现场排障）：云台机械行程远小于 SG90 全程 0–180°——
 // 旧版 WANDER 全行程扫摆 / SCAN 五点（0/45/90/135/180）会把舵机推到机械死点
@@ -274,99 +279,3 @@ pub(crate) const RAIL_SEVERE_MV: u16 = 4_400;
 /// 误判打死（把一台能跑的板子变砖的回归 > 收益）。真板接分压测点、与万用表对拍
 /// （≤2%）回填分压比与阈值后置 `true` 接闸。**无真板证据前不接闸、不 claim**。
 pub(crate) const RAIL_GATE_ARMED: bool = false;
-
-/// 角度 → duty ticks（线性 0–180 ↦ 410–2048；入参已由调用方 clamp 0–180）。
-pub(crate) fn deg_to_duty(deg: u32) -> u32 {
-    DUTY_MIN + (deg * (DUTY_MAX - DUTY_MIN)) / 180
-}
-
-/// duty ticks → 角度（回读换算，与 deg_to_duty 互逆的整数近似，±1° 内）。
-pub(crate) fn duty_to_deg(duty: u32) -> u32 {
-    ((duty.saturating_sub(DUTY_MIN)) * 180 + (DUTY_MAX - DUTY_MIN) / 2) / (DUTY_MAX - DUTY_MIN)
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum Axis {
-    Pan,
-    Tilt,
-}
-
-impl Axis {
-    /// 轴名（点名文案用，与帧面 `axis` 键取值同串）。
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Axis::Pan => "pan",
-            Axis::Tilt => "tilt",
-        }
-    }
-
-    /// 本轴绝对行程区间 `[lo, hi]`（WANDER 端点与 SCAN 判据点都从这里取，
-    /// 机制不另写字面量）——生成表 [`rr3_axis_travel`] 查得；查无此轴 panic
-    /// （Axis 枚举与生成表同源，此处失配 = 生成物缺失，fail-closed 不静默）。
-    pub(crate) fn range(self) -> (u32, u32) {
-        match rr3_axis_travel(self.name()) {
-            Some((lo, hi, _)) => (lo, hi),
-            None => panic!(
-                "轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）",
-                self.name()
-            ),
-        }
-    }
-
-    /// 本轴中位锚（boot 置位与角度行基准）——生成表查得，同上 fail-closed。
-    pub(crate) fn center_deg(self) -> u32 {
-        match rr3_axis_travel(self.name()) {
-            Some((_, _, center)) => center,
-            None => panic!(
-                "轴 {} 无行程表（axis_gen.rs 生成物与 Axis 枚举失配）",
-                self.name()
-            ),
-        }
-    }
-}
-
-/// 轴行程校验（**控制面纯函数**：只算不碰硬件，故控制面能在下发作业前即时拒）。
-/// 与运行面 [`RtPeriph::servo_set`] 共用同一判据、同一文案（"一处真值、两个检查点
-/// 复用同一判定"——两面都调本函数，杜绝控制/运行口径漂移）。
-pub(crate) fn axis_check(axis: Axis, deg: u32) -> Result<u32, String> {
-    if deg > 180 {
-        return Err(format!("角度超范围 0-180: {deg}"));
-    }
-    let Some((lo, hi, center)) = rr3_axis_travel(axis.name()) else {
-        return Err(format!(
-            "{} 轴无行程表（axis_gen.rs 生成物缺轴）",
-            axis.name()
-        ));
-    };
-    if !(lo..=hi).contains(&deg) {
-        return Err(format!(
-            "{} 轴超出行程 [{lo}, {hi}]（中位 {center}°）: {deg}",
-            axis.name()
-        ));
-    }
-    Ok(deg)
-}
-
-/// 轴行程五等分判据点（SCAN 判据：端点 + 三分点，全部落在本轴行程内——
-/// 旧版写死的 0/45/135/180 越出机械行程，正是堵转来源）。
-pub(crate) fn axis_scan_points(axis: Axis) -> [u32; 5] {
-    let (lo, hi) = axis.range();
-    let span = hi - lo;
-    [lo, lo + span / 4, lo + span / 2, lo + span * 3 / 4, hi]
-}
-
-/// 扫摆步进：deg ± step，轴行程端点折返后返回新角度。dir 应为 ±1
-/// （WANDER 开关随机起步；0 防御上不会出现——0 时原地不动）。
-/// `bounds` 由 [`Axis::range`] 给出，端点即机械安全边界。
-pub(crate) fn wander_step(deg: u32, dir: &mut i8, step: i32, bounds: (u32, u32)) -> u32 {
-    let (lo, hi) = bounds;
-    let mut next = deg as i32 + *dir as i32 * step;
-    if next >= hi as i32 {
-        next = hi as i32;
-        *dir = -1;
-    } else if next <= lo as i32 {
-        next = lo as i32;
-        *dir = 1;
-    }
-    next as u32
-}
