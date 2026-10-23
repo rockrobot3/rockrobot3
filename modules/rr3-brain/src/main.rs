@@ -7,6 +7,7 @@
 //! [`dispatch`]；语音主链（pcm/vad 订阅消费＋ASR→LLM→TTS 编排）随迁移件四落。
 
 mod boot;
+mod cloud;
 mod dispatch;
 mod rpc;
 

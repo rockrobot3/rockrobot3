@@ -15,25 +15,46 @@
 use serde_json::Value;
 
 /// LLM 模式（对位 cloud/llm.py `LLM_MODE_API`/`LLM_MODE_LOCAL`——常量真值点随
-/// 迁移件三归一，本件先按字面 "api"/"local" 承载解析面）。
+/// 迁移件三归一至 [`crate::cloud`]：解析面按字面 "api"/"local" 承载，鉴权消费面
+/// 在 [`crate::cloud::Rr3LlmClient`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Rr3LlmMode {
     Api,
     Local,
 }
 
-/// 模型连接行实效（`[[rr3-brain.model]]` 恰一 active 行解析产物，或无表时
+/// LLM 连接行实效（`[[rr3-brain.model]]` 恰一 active 行解析产物，或无表时
 /// cloud 段 fallback）。`mode = None` = 随全局档（RR3_BRAIN_CLOUD）——cloud
 /// fallback 路径的 Python 同形状。key_ref/mode 的消费面（LLM 客户端鉴权/免鉴权）
-/// 随迁移件三接线。
+/// 在 cloud.rs [`crate::cloud::Rr3LlmClient`]。
 #[derive(Debug, Clone)]
 pub(crate) struct Rr3ModelRow {
     pub(crate) base_url: String,
     pub(crate) model_id: String,
-    #[allow(dead_code)] // 迁移件三（cloud LLM 客户端）消费；本件解析面先全语义落位
     pub(crate) key_ref: Option<String>,
-    #[allow(dead_code)] // 迁移件三（cloud LLM 客户端）消费；本件解析面先全语义落位
     pub(crate) mode: Option<Rr3LlmMode>,
+}
+
+/// cloud 段四键实效（asr/llm/tts 三客户端装配与 ops/set 写后重建共用的取数口——
+/// Python composite 读 `cloud_cfg` 字典同形状：live 写后重建读 doc 新值，重启回
+/// config.toml 真值）。
+#[derive(Debug, Clone)]
+pub(crate) struct Rr3CloudCfg {
+    pub(crate) base_url: String,
+    pub(crate) asr_model: String,
+    pub(crate) tts_model: String,
+    pub(crate) timeout_s: f64,
+}
+
+/// cloud 段四键读取（boot 校验保证在册，缺失时 Err 点名——fail-closed 不静默）。
+pub(crate) fn rr3_cloud_cfg_of(doc: &Value) -> Result<Rr3CloudCfg, String> {
+    let cloud = rr3_brain_sect(doc, "cloud")?;
+    Ok(Rr3CloudCfg {
+        base_url: rr3_req_str(cloud, "cloud", "base_url")?.to_string(),
+        asr_model: rr3_req_str(cloud, "cloud", "asr_model")?.to_string(),
+        tts_model: rr3_req_str(cloud, "cloud", "tts_model")?.to_string(),
+        timeout_s: rr3_req_f64(cloud, "cloud", "timeout_s")?,
+    })
 }
 
 /// 本模块 config 形状：JSON 文档树（ops/set 写面 live 真值）＋ boot 投影。
