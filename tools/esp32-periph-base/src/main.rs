@@ -74,6 +74,11 @@ mod oled;
 mod periph;
 mod power;
 mod runtime;
+// servo 原子件机制核（批N23 件一收编：atoms/servo/mech.rs，文件级机制/策略
+// 分离——机制纯函数与行程生成物在件内，策略量留 board.rs；接线照 modules
+// 先例 #[path = "../atoms/<名>/<文件>.rs"]）。
+#[path = "../atoms/servo/mech.rs"]
+mod servo;
 mod state;
 
 use std::collections::VecDeque;
@@ -90,7 +95,7 @@ use esp_idf_hal::units::Hertz;
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches};
 
 use crate::board::{
-    Axis, BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, OLED_ADDR,
+    BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, OLED_ADDR,
     RR3_BIND_LEDC_PAN, RR3_BIND_LEDC_TILT, RR3_BIND_UART2_RX, RR3_BIND_UART2_TX, THREAD_STACK,
     UART2_BAUD_HZ, UART2_TX_RING,
 };
@@ -99,6 +104,7 @@ use crate::oled::{expr_eye_base, i2c_bus_unstick, i2c_scan, oled_init, oled_text
 use crate::periph::{CtlUart, RtPeriph};
 use crate::power::{RailJudge, RailMonitor, RailTier};
 use crate::runtime::runtime_loop;
+use crate::servo::Axis;
 use crate::state::{lock_bus, push_job, Bus, Job, PeriphState};
 
 // ---------------------------------------------------------------------------

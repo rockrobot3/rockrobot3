@@ -3,11 +3,11 @@ use std::thread;
 use std::time::Duration;
 
 use crate::board::{
-    axis_scan_points, duty_to_deg, Axis, AXIS_SETTLE_MS, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS,
-    SCAN_POINT_MS,
+    AXIS_SETTLE_MS, DUTY_MAX, DUTY_MIN, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS, SCAN_POINT_MS,
 };
 use crate::oled::i2c_bus_recover;
 use crate::periph::RtPeriph;
+use crate::servo::{axis_scan_points, duty_to_deg, Axis};
 use crate::state::{lock_bus, now_ms, outbox_push, rr3_board_bindings_i2c_pair, Bus, Job};
 
 // ---------------------------------------------------------------------------
@@ -71,10 +71,14 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
                 // 姿态到位回读（**硬件侧证据**：直接读 LEDC 寄存器换算，不听记账角；
                 // 只回读本次请求的轴——未动的轴 duty 可能为 0，换算无意义）。
                 let rd = |axis: Axis| {
-                    duty_to_deg(match axis {
-                        Axis::Pan => ph.pan.get_duty(),
-                        Axis::Tilt => ph.tilt.get_duty(),
-                    })
+                    duty_to_deg(
+                        match axis {
+                            Axis::Pan => ph.pan.get_duty(),
+                            Axis::Tilt => ph.tilt.get_duty(),
+                        },
+                        DUTY_MIN,
+                        DUTY_MAX,
+                    )
                 };
                 println!(
                     "[periph] 姿态到位 pan={} tilt={}（LEDC 回读 pan={}° tilt={}°，记账 {}°/{}°）",
@@ -212,8 +216,8 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
         // 回读闭环：LEDC 寄存器实际 duty 换算回角度（duty_to_deg），与设定角并打
         // ——判据②"目视 + 串口回读一致"的硬件侧证据
         let (pr, tr) = (
-            duty_to_deg(ph.pan.get_duty()),
-            duty_to_deg(ph.tilt.get_duty()),
+            duty_to_deg(ph.pan.get_duty(), DUTY_MIN, DUTY_MAX),
+            duty_to_deg(ph.tilt.get_duty(), DUTY_MIN, DUTY_MAX),
         );
         {
             let mut b = lock_bus(bus);
