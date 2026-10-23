@@ -22,4 +22,4 @@ pub const RR3_RELAY_SET_TOPIC: &str = "rr3-act/relay/set";
 /// 通断状态摘要主题（atom.toml [events].publishes 同源；contracts/topics.toml 25 条之一）
 pub const RR3_RELAY_STATE_TOPIC: &str = "rr3-act/relay/state";
 
-pub use mech::{rr3_relay_apply, rr3_relay_counter_key, rr3_relay_state_due};
+pub use mech::{rr3_relay_apply, rr3_relay_counter_key, rr3_relay_state_due, Rr3RelayApplyError};

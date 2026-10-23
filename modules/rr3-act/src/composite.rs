@@ -359,7 +359,10 @@ pub fn rr3_act_run() -> Result<(), String> {
                             Err(rr3_low_power_reject(relay::RR3_RELAY_SET_TOPIC))
                         } else {
                             rr3_relay_parse_args(&args)
-                                .and_then(|on| relay::rr3_relay_apply(&mut *relay_gpio, on))
+                                .and_then(|on| {
+                                    relay::rr3_relay_apply(&mut *relay_gpio, on)
+                                        .map_err(|e| rr3_relay_apply_error_text(&e))
+                                })
                                 .map(|(on, prev)| (rr3_relay_result(on), None, Some((on, prev))))
                         }
                     }
@@ -585,6 +588,16 @@ pub fn rr3_relay_result(on: bool) -> Value {
     json!({ "on": on })
 }
 
+/// relay 机制错误的人读文案（批N24 件三，L-3 形状清理）：机制层零堆枚举
+/// （`Rr3RelayApplyError`，HAL 错原样随行），文案在编排层渲染——act 册 §9
+/// 契约字面量逐字保持（面板与 legacy 依赖字面），每句落在唯一一处。
+pub fn rr3_relay_apply_error_text(e: &relay::Rr3RelayApplyError) -> String {
+    match e {
+        relay::Rr3RelayApplyError::ReadBack(e) => format!("继电器读回失败: {e}"),
+        relay::Rr3RelayApplyError::Write(e) => format!("继电器写入失败: {e}"),
+    }
+}
+
 /// relay/state 摘要体：变化即发，seq 是本状态流自己的计数
 /// （contracts/events/act-relay_state.schema.json 的形状事实源）
 pub fn rr3_relay_state_body(seq: u64, on: bool) -> Value {
@@ -624,7 +637,15 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
         .as_u64()
         .ok_or_else(|| format!("angle_deg 必须是非负整数，收到 {angle}"))?;
     let angle = u16::try_from(angle).map_err(|_| format!("angle_deg 超出 u16 范围: {angle}"))?;
-    servo::rr3_servo_check_travel(angle, cfg)?;
+    // 行程/时限的值域判定留件（零堆枚举，批N24 件三），文案在此渲染逐字
+    // （act 册 §9 契约字面量，每句落在唯一一处）
+    servo::rr3_servo_check_travel(angle, cfg).map_err(|e| match e {
+        servo::Rr3ServoTravelError::OutOfRange {
+            angle_deg,
+            min_deg,
+            max_deg,
+        } => format!("angle_deg={angle_deg} 超出行程 [{min_deg}, {max_deg}]"),
+    })?;
     let move_ms = match args.get("move_ms") {
         None | Some(Value::Null) => None,
         Some(v) => Some(
@@ -632,7 +653,12 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
                 .ok_or_else(|| format!("move_ms 必须是非负整数，收到 {v}"))?,
         ),
     };
-    let move_ms = servo::rr3_servo_check_timeout(move_ms, cfg)?;
+    let move_ms = servo::rr3_servo_check_timeout(move_ms, cfg).map_err(|e| match e {
+        servo::Rr3ServoTimeoutError::ZeroMs => "move_ms 必须大于 0".to_string(),
+        servo::Rr3ServoTimeoutError::BeyondLimit { ms, limit } => {
+            format!("move_ms={ms} 超出时限上限 {limit}（不给堵转留机会）")
+        }
+    })?;
     Ok((angle, move_ms))
 }
 
@@ -1118,6 +1144,38 @@ saturate_notice_ms = 500
         let e = rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": "x"}), &servo_cfg())
             .unwrap_err();
         assert!(e.contains("move_ms"), "类型不符点名: {e}");
+    }
+
+    /// 错误文案逐字钉死（批N24 件三，L-3 形状清理的对账单测）：机制层改交
+    /// 零堆枚举后，编排层渲染的 `String` 必须与改前逐字一致——act 册 §9
+    /// 契约字面量（面板与 legacy 依赖字面），零行为改变的直接证据。
+    #[test]
+    fn servo_parse_error_texts_are_verbatim() {
+        assert_eq!(
+            rr3_servo_parse_args(&json!({"angle_deg": 181}), &servo_cfg()).unwrap_err(),
+            "angle_deg=181 超出行程 [0, 180]"
+        );
+        assert_eq!(
+            rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": 801}), &servo_cfg())
+                .unwrap_err(),
+            "move_ms=801 超出时限上限 800（不给堵转留机会）"
+        );
+        assert_eq!(
+            rr3_servo_parse_args(&json!({"angle_deg": 90, "move_ms": 0}), &servo_cfg())
+                .unwrap_err(),
+            "move_ms 必须大于 0"
+        );
+    }
+
+    /// relay 错误文案逐字钉死（批N24 件三）：两腿渲染各一断言，`{e}` 走
+    /// `Rr3HalError` Display（HAL 错文本随行原样）。
+    #[test]
+    fn relay_apply_error_text_is_verbatim() {
+        use rr_hal_api::Rr3HalError;
+        let e = relay::Rr3RelayApplyError::ReadBack(Rr3HalError::Busy);
+        assert_eq!(rr3_relay_apply_error_text(&e), "继电器读回失败: HAL 设备忙");
+        let e = relay::Rr3RelayApplyError::Write(Rr3HalError::Busy);
+        assert_eq!(rr3_relay_apply_error_text(&e), "继电器写入失败: HAL 设备忙");
     }
 
     /// servo/state 体 seq/angle 两键钉死（自 servo 原子件迁入）
