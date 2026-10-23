@@ -43,9 +43,10 @@ use rr_ipc::{
 use serde_json::json;
 
 use crate::board::{
-    AUDIO_CHUNK_FRAMES, AUDIO_Q_CAP, RR3_AUDIO_TOPIC, RR3_BIND_I2S_BCLK, RR3_BIND_I2S_SD,
-    RR3_BIND_I2S_WS, RR3_HOST_TASK, RR3_PERIPH_TASK,
+    AUDIO_CHUNK_FRAMES, AUDIO_Q_CAP, MIC_GAIN, MIC_SR_HZ, RR3_AUDIO_TOPIC, RR3_BIND_I2S_BCLK,
+    RR3_BIND_I2S_SD, RR3_BIND_I2S_WS, RR3_HOST_TASK, RR3_PERIPH_TASK,
 };
+use crate::capture::{chunk_to_pcm, frame32_to_pair, push_bounded};
 use crate::link::rr3_frame_now_ns;
 use crate::state::{lock_bus, Bus};
 
@@ -58,57 +59,20 @@ const MIC_BUF: usize = 4096;
 /// 统计打印窗：16 次 read ≈ 512ms 一行。
 const MIC_WINDOW_READS: usize = 16;
 
-/// 语音档采样率（判据① wav 口径；全案批D §4）。
-pub const MIC_SR_HZ: u32 = 16000;
-
-/// 板麦数字增益 ×8（+18dB，真板冒烟(一) 2026-10-18 标定）：半米说话 RMS 实测
-/// ~163 / 环境底噪 ~73，信噪余量 1.36 倍太薄（宿主 VAD rms_start 千位级口径
-/// 复用不了）——×8 后 ~1300/584，余量拉到舒适区，同时服务 DoA 判向质量
-/// （B 铺垫；DoA 相关计算走 24bit 原始域，线性增益不影响相关峰位置，仅作用
-/// 本上行面）。近讲大音量饱和钳位（不翻卷——翻卷产生假静音假爆音，比削顶伤）。
-const MIC_GAIN: i64 = 8;
-
-/// 增益 + 饱和钳位（纯函数，宿主单测可达）：输入 16bit 域采样值（已 >>8），
-/// 输出 ×[`MIC_GAIN`] 后钳回 i16。
-fn rr3_mic_gain_i16(v: i64) -> i16 {
-    let g = v * MIC_GAIN;
-    if g > i16::MAX as i64 {
-        i16::MAX
-    } else if g < i16::MIN as i64 {
-        i16::MIN
-    } else {
-        g as i16
-    }
-}
-
 /// 一分片 → 整帧字节（批D③ Event 帧面，rr-bus `rr3_publish` 板侧等价形）：
-/// 逐通道减**本分片** DC（INMP441 近零偏置，分片内均值即干净基线，无跨片状态）→
-/// 24bit 截 16bit（>>8 保高位）→ s16le 双通道交错 → b64 → JSON 体（seq/format/
-/// rate/channels/ms/pcm_b64，形状对齐 modules/rr3-sense `rr3_pcm_event_body`；
-/// topic 键并入体——rr3_publish 的 `body["topic"]` 同形）→ Event payload →
-/// 帧头（SEND / trace_id=0 direct / src=板上 task 2 / dst=宿主 1）→ 整帧字节。
+/// 采样变换算术（逐通道减**本分片** DC → 24bit 截 16bit → 增益钳位 → s16le 双
+/// 通道交错）在 capture 机制件 [`chunk_to_pcm`]（批N23 件三收编，策略量按参）；
+/// 本函数只做组帧面——PCM → b64 → JSON 体（seq/format/rate/channels/ms/
+/// pcm_b64，形状对齐 modules/rr3-sense `rr3_pcm_event_body`；topic 键并入体
+/// ——rr3_publish 的 `body["topic"]` 同形）→ Event payload → 帧头（SEND /
+/// trace_id=0 direct / src=板上 task 2 / dst=宿主 1）→ 整帧字节。
 /// 帧构造失败回 None（调用方跳过不 panic 不冒领）。
 fn audio_chunk_to_frame(chunk: &[i32], seq: u32) -> Option<Vec<u8>> {
     let frames = chunk.len() / 2;
     if frames == 0 {
         return None;
     }
-    let mut l_dc = 0i64;
-    let mut r_dc = 0i64;
-    for f in 0..frames {
-        l_dc += chunk[f * 2] as i64;
-        r_dc += chunk[f * 2 + 1] as i64;
-    }
-    l_dc /= frames as i64;
-    r_dc /= frames as i64;
-    let mut pcm = Vec::with_capacity(frames * 4);
-    for f in 0..frames {
-        // 24bit（±2^23）>> 8 落 16bit 满幅 → 数字增益 ×8 饱和钳位（冒烟(一) 标定）
-        let l = rr3_mic_gain_i16((chunk[f * 2] as i64 - l_dc) >> 8);
-        let r = rr3_mic_gain_i16((chunk[f * 2 + 1] as i64 - r_dc) >> 8);
-        pcm.extend_from_slice(&l.to_le_bytes());
-        pcm.extend_from_slice(&r.to_le_bytes());
-    }
+    let pcm = chunk_to_pcm(chunk, MIC_GAIN);
     let body = json!({
         "topic": RR3_AUDIO_TOPIC,
         "seq": seq,
@@ -207,16 +171,8 @@ pub fn spawn_mic_smoke(
                         frames += nframes as u64;
                         for f in 0..nframes {
                             let o = f * 8;
-                            // 32bit 帧大端线序，24bit 有效左对齐：右移 8 位得符号幅度
-                            let l =
-                                i32::from_be_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]])
-                                    >> 8;
-                            let r = i32::from_be_bytes([
-                                buf[o + 4],
-                                buf[o + 5],
-                                buf[o + 6],
-                                buf[o + 7],
-                            ]) >> 8;
+                            // 32bit 帧大端线序 → 24bit 符号幅度（capture 机制件）
+                            let (l, r) = frame32_to_pair(&buf[o..o + 8]);
                             l_sum += (l as i64) * (l as i64);
                             r_sum += (r as i64) * (r as i64);
                             l_peak = l_peak.max(l.abs());
@@ -244,11 +200,11 @@ pub fn spawn_mic_smoke(
                                     build_n += 1;
                                     if let Some(bytes) = frame {
                                         let mut b = lock_bus(&bus);
-                                        if b.audio_q.len() >= AUDIO_Q_CAP {
-                                            b.audio_q.pop_front();
+                                        // 背压入队（capture 机制件）：满丢**最旧**，
+                                        // true = 发生丢弃 → 计观测计数
+                                        if push_bounded(&mut b.audio_q, bytes, AUDIO_Q_CAP) {
                                             b.st.audio_dropped += 1;
                                         }
-                                        b.audio_q.push_back(bytes);
                                     }
                                     chunk.clear();
                                 }
