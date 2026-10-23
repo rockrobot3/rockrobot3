@@ -1,0 +1,27 @@
+[package]
+name = "rr3-brain"
+# 版本随 module.toml [manifest].version（SURFACE 自述行的 0.1.0 是 Python
+# __version__ 的逐字保留，两套号各随其主，不互相改写）
+version = "0.0.1"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+# 独立工程：modules/ 不在 base/runtime workspace 内
+[workspace]
+
+[[bin]]
+name = "rr3-brain"
+path = "src/main.rs"
+
+[dependencies]
+# path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
+# 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承。
+# rr-hal-api/rr-bus-api 直依＝单元契约面清单必依（基-35，check.sh ⑨-w 逐单元点名）。
+# 模块公共骨架（0.0.8 W-A 批0，ADR-0016 增补评审取证笔1）：bootstrap 收敛序列 +
+# serve 主循环 + Dispatcher——brain 是第六消费方（六消费方同批改纪律）。
+rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
+rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
+rr3mod = { path = "../../base/runtime/rr3mod" }
+serde_json = "1"
+toml = "0.8"

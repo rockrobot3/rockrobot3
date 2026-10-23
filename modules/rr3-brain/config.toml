@@ -32,11 +32,14 @@ active = true
 
 [rr3-brain.bus]
 # 总线 RPC 超时（批N4 件六 B-13①，自 composite.py/bus.py 码内常量退役数据化）：
-# call_timeout_s = 点名 interact/tts/text 的等待上界；connect_timeout_s = 注册帧
-# 等待上界。与 [rr3-brain.dialog] max_utterance_ms（话轮封顶）及 [rr3-brain.cloud]
-# timeout_s（云 HTTP 预算）三值解耦（D7 裁定：不写派生凑法，各管各的维度）。
+# call_timeout_s = 点名 interact/tts/text 的等待上界。与 [rr3-brain.dialog]
+# max_utterance_ms（话轮封顶）及 [rr3-brain.cloud] timeout_s（云 HTTP 预算）
+# 三值解耦（D7 裁定：不写派生凑法，各管各的维度）。
+# 0.0.8 批N32 增补评审裁定 4：connect_timeout_s 删除——它是 Python 承载侧注册
+# 帧等待上界的注入口，Rust 侧 rr3_connect 无该参数入口（上界由 rr-bus-api 内部
+# 承载），键留无消费点即死键病形（批I B-2 先例：死参数必删、留键误导）。过渡态
+# Python 面回落默认 5.0 与原键值同值，行为零变化。
 call_timeout_s = 30.0
-connect_timeout_s = 5.0
 
 [rr3-brain.dialog]
 # 0.0.5 批I B-2：silence_tail_ms 删除（死参数——dialog.py 从不读它，判停完全
