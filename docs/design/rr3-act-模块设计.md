@@ -180,8 +180,8 @@
 | §5 "`relay/state` 实况每令必发，与申报的变化即发不符（A-7）" | 件面新增 **`rr3_relay_state_due(bool, bool) -> bool`**，变化判定进机制、发布受其门控 | A-7 已结（`relay.rs`/`mech.rs` 在册；同态不续发 e2e 断言已补——intent 路 ⑤b（批I d21839a）+ RPC 路 ④b（批M M-β 3bc30f1），破坏性验证证牙齿） |
 | §1 目标签名"载荷上移承载层（A-8）" | `rr3_servo_state_body`、`rr3_relay_result`、`rr3_led_parse_args`、`rr3_relay_parse_args` 全在 `src/composite.rs`；件面 `serde_json` 零命中 | **A-8 已结** |
 | §1 "`use rr_hal::` → `rr_hal_api`（A-4）" | 契约面已同步化；件内 import 源为 `rr_hal_api`（经 re-export 保路径），`rr3_block_on` 不存在 | **A-4 已结** |
-| §12 bare 档"`Arc<dyn Rr3GpioOut>` 需改泛型（禁 trait 对象）" | `led` 已无 `Arc`；**`rr3_relay_apply(&mut dyn Rr3GpioOut, bool)` 与 `rr3_tts_play(&mut dyn …)` 仍是 `&mut dyn`** | **未结** → 批L **L-3** |
-| §1 错型面 | `rr3_servo_check_travel` / `rr3_servo_check_timeout` / `rr3_relay_apply` 返回 `Result<_, String>` | **未结** → 批L **L-3**（`Rr3HalError`/件枚举错型收敛） |
+| §12 bare 档"`Arc<dyn Rr3GpioOut>` 需改泛型（禁 trait 对象）" | `led` 已无 `Arc`；`rr3_relay_apply` 与 `rr3_tts_play` 均已泛型化（`G: Rr3GpioOut + ?Sized` / `S: Rr3AudioSink + ?Sized`，批N24 件三 `b92e767` / 件四 `0272363`，调用点字面零改动） | **L-3 已结**（act 半边；`rr3_tts_play` 半边同族随件四收） |
+| §1 错型面 | 三签名已枚举化（批N24 件三，2026-10-23，`b92e767`）：`rr3_servo_check_travel` → `Rr3ServoTravelError::OutOfRange`、`rr3_servo_check_timeout` → `Rr3ServoTimeoutError`（`ZeroMs`/`BeyondLimit`）、`rr3_relay_apply` → `Rr3RelayApplyError`（`Rr3HalError` 包装），文案渲染归编排层逐字；**新余数如实登记**：`rr3_servo_check_motion` 仍 `Result<_, String>`（批N3 新增、不在 L-3 册面实证集，按 R-13 不扩工单随批补记，归后续批次收） | **L-3 已结**（act 半边＋一项新余数登记） |
 | §13 "`intent.rs : EXPOSED` 内联 led 主题串（A-10 双写）" | `const EXPOSED: [&str; 3]` 与 `"已归属但意图执行面未开放 …"` 仍在，led 通路仍封闭（注释写明"扩面随真实需要 append"） | **未结** → 批L **L-7**（串值单点），封闭本身按 R-3 不变 |
 | §13 策略申报位 | `atoms/{servo,led,relay}/assemble.toml` **已填**（批M MC-10 L-5，2026-10-13）：servo 报 `Rr3PwmServo`←`pwm_chip`/`pwm_channel` 句柄 + `angle_min_deg`/`angle_max_deg`/`move_timeout_ms`/`state_min_interval_ms` ops；led 报 `Rr3GpioOut`←`gpio_chip`/`gpio_led_line` + `blink_period_ms`；relay 报 `Rr3GpioOut`←`gpio_relay_line` | **L-5 已结**（白名单 ops 续做见 A-9） |
 | §11/框架通用约定 1 "妆面件失败语义例外" | 代码未变（led 写失败仍 `eprintln` 不退） | **A-12 未结**（D8 范围仍待你定） |
