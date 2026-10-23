@@ -1976,6 +1976,123 @@ pub fn rr3_profile_domain_evidence_check(root: &Path, profile: &Rr3Profile) -> V
     errs
 }
 
+// ── TOML 键行手术面（批N22 件一，敞口 15 写面半边的机制层）────────────────────
+//
+// 写口的落盘语义 = "下次 boot 生效"：写面只做**文本手术**（保留注释与其余行原封，
+// 只动目标键行），手术后由调用方对手术产物跑装载链预核（[`rr3_profile_boot_inputs`]
+// ——与 boot 正门同一份裁决，写面不重复判业务合法性，判了就是第二份裁决点）。手术
+// 判据 fail-closed：目标键行缺失 / 重复 / 目标域不唯一 / 缺域一律拒，不猜不插——
+// 键行缺失说明档已被改病（装载期十二键全键必填保证在场），写入面把病灶誊进新值
+// 等于带病落盘。
+
+/// 键行命中判据（单点）：行（去前导空白）以 `key` 开头且其后紧跟 `=`。
+/// 词边界由"后随字符必须是 '='"保证——`severe_mv` 不会误命中 `mild_mv` 行。
+fn rr3_key_line_is(line: &str, key: &str) -> bool {
+    let t = line.trim_start();
+    t.strip_prefix(key)
+        .is_some_and(|rest| rest.trim_start().starts_with('='))
+}
+
+/// 在行序列内把 `key` 的键行替换为 `key = new_raw`（机制核心，两手术面共用）：
+/// 命中 0 行 = 拒（键缺失——装载期全键必填保证在场，缺失即档已病）；命中多行 = 拒
+/// （TOML 重复键解析期就红，这里不替解析器兜底）。替换保留原行前导空白（域块/
+/// 轴档键行今无缩进，保留是防御不是依赖）。
+fn rr3_key_line_replace(lines: &mut [String], key: &str, new_raw: &str) -> Result<(), String> {
+    let mut hits = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if rr3_key_line_is(l, key) {
+            hits.push(i);
+        }
+    }
+    match hits.len() {
+        0 => Err(format!("键行 {key} 缺失（装配期全键必填保证在场，缺失说明档已被改病），拒绝手术")),
+        1 => {
+            let indent = lines[hits[0]][..lines[hits[0]].len()
+                - lines[hits[0]].trim_start().len()]
+            .to_string();
+            lines[hits[0]] = format!("{indent}{key} = {new_raw}");
+            Ok(())
+        }
+        n => Err(format!("键行 {key} 出现 {n} 次（TOML 重复键是解析期红），拒绝手术")),
+    }
+}
+
+/// 平铺 TOML 键行手术（轴档案等无块头平表用，批N22 件一）：全文本内 `key` 键行
+/// 唯一（轴档案十四键每键一行）时替换为 `key = new_raw`，注释与其余行原封。
+pub fn rr3_toml_key_line_apply(text: &str, key: &str, new_raw: &str) -> Result<String, String> {
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    rr3_key_line_replace(&mut lines, key, new_raw)
+        .map_err(|e| format!("键行手术拒: {e}"))?;
+    Ok(lines.join("\n") + if text.ends_with('\n') { "\n" } else { "" })
+}
+
+/// [[supplies.domain]] 域块键行手术（批N22 件一，写面机制）：在 `text` 中定位
+/// `name = <domain>` 的唯一域块，把 `updates` 逐键行替换为 `key = new_raw`。
+/// fail-closed 四拒：缺域（域名不在册——写面不做注册新域，新域是契约事件）、
+/// 同名多义（域名唯一是装载期判据，多义 = 档已病）、键行缺失/重复（同上）。
+/// 其余域块与其余行（含注释）原封。
+pub fn rr3_domain_keys_apply(
+    text: &str,
+    domain: &str,
+    updates: &[(&str, &str)],
+) -> Result<String, String> {
+    let lines: Vec<String> = text.lines().map(str::to_string).collect();
+    // 块扫描（两段式）：先收块头行序号（`[` 起头行；[[supplies.domain]] 精确等值
+    // 才算域块头——GOOD 锚形状，装载期验收过的档保证），再按下一块头定界块行范围。
+    let heads: Vec<(usize, bool)> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, raw)| {
+            let t = raw.trim_start();
+            if t == "[[supplies.domain]]" {
+                Some((i, true))
+            } else if t.starts_with('[') {
+                Some((i, false))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mut matched: Vec<(usize, usize)> = Vec::new(); // 命中块行范围（头行+1 .. 下一块头）
+    for (idx, &(head_i, is_domain)) in heads.iter().enumerate() {
+        if !is_domain {
+            continue;
+        }
+        let end = heads.get(idx + 1).map(|&(h, _)| h).unwrap_or(lines.len());
+        let is_match = lines[head_i + 1..end].iter().any(|l| {
+            rr3_key_line_is(l, "name")
+                && l.split_once('=')
+                    // 域名是引号串（GOOD 形状），允许行内注释——取首对引号内内容
+                    .and_then(|(_, v)| v.trim().strip_prefix('"'))
+                    .and_then(|s| s.split_once('"'))
+                    .map(|(inner, _)| inner == domain)
+                    .unwrap_or(false)
+        });
+        if is_match {
+            matched.push((head_i + 1, end));
+        }
+    }
+    match matched.len() {
+        0 => Err(format!(
+            "域 {domain:?} 不在 [[supplies.domain]] 在册（缺域拒——新域是契约事件，不经写口注册）"
+        )),
+        1 => {
+            let (s, e) = matched[0];
+            let mut out = lines;
+            for (key, new_raw) in updates {
+                // 替换限定在命中块行范围内——全文本替换依赖"域块键名不在他处出现"
+                // 的隐式前提，不依赖（批N22 件一 self-review 修正）
+                rr3_key_line_replace(&mut out[s..e], key, new_raw)
+                    .map_err(|e| format!("域 {domain:?} 键行手术拒: {e}"))?;
+            }
+            Ok(out.join("\n") + if text.ends_with('\n') { "\n" } else { "" })
+        }
+        n => Err(format!(
+            "域名 {domain:?} 命中 {n} 个 [[supplies.domain]] 块（装载期域名唯一判据破，档已病），拒绝手术"
+        )),
+    }
+}
+
 /// 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；施工图 Task 4）：方向与能力
 /// 合法、控制器在册，判据真值 = 平台事实表（`contracts/platform/<chip>.toml`，
 /// 基-22）。三条判定逐条可判：
@@ -4120,6 +4237,115 @@ mux_group = []
         ] {
             assert!(errs.iter().any(|e| e.contains(want)), "缺 {want}: {errs:?}");
         }
+    }
+
+    // ── TOML 键行手术面单测（批N22 件一）：红绿判据 = 只动目标行、fail-closed 四拒 ──
+
+    /// 手术夹具：三域块（带注释与 [supplies] 段头，形状 = default.toml 缩减）。
+    /// 手术函数是文本级纯函数，不吃完整档——注释保留与邻块原封是它的判据域。
+    const SURGERY_TEXT: &str = r#"# 电力网络声明
+[supplies]
+tick_period_ms = 200
+
+[[supplies.domain]]
+name = "batt" # 电池域
+nominal_mv = 3700
+severe_mv = 3300
+armed = false
+evidence = "none"
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+severe_mv = 4400
+armed = false
+evidence = "none"
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+severe_mv = 3000
+armed = false
+evidence = "none"
+"#;
+
+    /// 正例：只动目标域的目标键行——注释保留、邻域同名键行原封、块序不变
+    #[test]
+    fn domain_keys_apply_touches_target_block_only() {
+        let out = rr3_domain_keys_apply(SURGERY_TEXT, "batt", &[("severe_mv", "3200")])
+            .expect("合法手术应过");
+        // 目标行已改
+        assert!(out.contains("severe_mv = 3200"), "{out}");
+        // 邻域同名键行原封
+        assert!(out.contains("severe_mv = 4400"), "rail5v 不得波及: {out}");
+        assert!(out.contains("severe_mv = 3000"), "rail3v3 不得波及: {out}");
+        // 注释与块序保留
+        assert!(out.contains('#'), "注释须保留: {out}");
+        assert!(out.contains("# 电池域"), "{out}");
+        let batt = out.split("rail5v").next().unwrap_or_default();
+        assert!(
+            batt.contains("name = \"batt\"") && batt.contains("severe_mv = 3200"),
+            "batt 块内自洽: {batt}"
+        );
+    }
+
+    /// 正例：armed + evidence 两键行一次手术（写口联动写形状）
+    #[test]
+    fn domain_keys_apply_pairs_armed_and_evidence() {
+        let out = rr3_domain_keys_apply(
+            SURGERY_TEXT,
+            "rail5v",
+            &[("armed", "true"), ("evidence", "\"实测/0002\"")],
+        )
+        .expect("合法联动手术应过");
+        let rail5v = out.split("rail3v3").next().unwrap_or_default();
+        assert!(rail5v.contains("armed = true"), "{rail5v}");
+        assert!(rail5v.contains("evidence = \"实测/0002\""), "{rail5v}");
+        // batt 块的 armed 原封
+        let batt = out.split("rail5v").next().unwrap_or_default();
+        assert!(batt.contains("armed = false"), "batt 不得波及: {batt}");
+    }
+
+    /// 缺域拒：域名不在册不带病落盘
+    #[test]
+    fn domain_keys_apply_rejects_missing_domain() {
+        let e = rr3_domain_keys_apply(SURGERY_TEXT, "rail9v", &[("severe_mv", "1")])
+            .expect_err("缺域必须拒");
+        assert!(e.contains("rail9v") && e.contains("缺域拒"), "{e}");
+    }
+
+    /// 多义拒：同名两块 = 装载期域名唯一判据破，手术面不替解析器裁决
+    #[test]
+    fn domain_keys_apply_rejects_ambiguous_domain() {
+        let dup = format!("{SURGERY_TEXT}\n[[supplies.domain]]\nname = \"batt\"\nnominal_mv = 1\nsevere_mv = 2\narmed = false\nevidence = \"none\"\n");
+        let e = rr3_domain_keys_apply(&dup, "batt", &[("severe_mv", "1")])
+            .expect_err("同名多义必须拒");
+        assert!(e.contains("命中 2 个"), "{e}");
+    }
+
+    /// 键行缺拒：块内缺目标键（档被改病）不插入不猜
+    #[test]
+    fn domain_keys_apply_rejects_missing_key_line() {
+        let broken = SURGERY_TEXT.replace("severe_mv = 3300\n", "");
+        let e = rr3_domain_keys_apply(&broken, "batt", &[("severe_mv", "3200")])
+            .expect_err("键行缺失必须拒");
+        assert!(e.contains("severe_mv 缺失"), "{e}");
+    }
+
+    /// 平铺键行手术（轴档案用）：替换正例 + 词边界（`hi_deg` 不得命中他行）+
+    /// 缺行拒
+    #[test]
+    fn toml_key_line_apply_flat_and_word_boundary() {
+        let axis = "schema = 1\npin = \"act.axis.pwm.pan\"\nhi_deg = 120\nslew_deg_s = 100\n";
+        let out = rr3_toml_key_line_apply(axis, "hi_deg", "135").expect("平铺手术应过");
+        assert!(out.contains("hi_deg = 135"), "{out}");
+        assert!(out.contains("slew_deg_s = 100"), "{out}");
+        // 词边界：后随非 '=' 不命中——"deg" 无命中即拒而非误伤
+        let e = rr3_toml_key_line_apply(axis, "deg", "1").expect_err("无命中必须拒");
+        assert!(e.contains("deg 缺失"), "{e}");
+        // 尾行替换保尾换行
+        let out = rr3_toml_key_line_apply(axis, "slew_deg_s", "90").expect("应过");
+        assert!(out.ends_with('\n'), "尾换行须保留: {out:?}");
     }
 
     /// 门 n 稳态判据（§8，power P-13）：[hardware] 出现物理键即红——GOOD 无电表

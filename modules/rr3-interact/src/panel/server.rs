@@ -124,23 +124,28 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
-/// 今日实况（批N4 件九四，接线图刀）：22 端点，读配置者 6 = `GET /api/brain/ops`
+/// 今日实况（批N22 件一）：23 端点，读配置者 6 = `GET /api/brain/ops`
 /// （brain ops 六槽）＋五模块 ops 读口五端点（`GET /api/{act,connect,interact,power,
-/// sense}/ops`，BusCall 透传各模块 `rr3-<mod>/ops/list`，白名单组体应答）；写口 1 =
+/// sense}/ops`，BusCall 透传各模块 `rr3-<mod>/ops/list`，白名单组体应答）；写口 2 =
 /// `POST /api/brain/ops`（BusCall 透传 `rr3-brain/ops/set`，组.槽寻址、owner 白名单
-/// fail-closed）——ops 路分母 36 槽全部转绿（covers 申报 30 项随件九二上表，写口
-/// 申报同集合 ∪ 不增）。接线图读口 `GET /api/wiring`（批N4 件九笔4）：ctl.wiring
+/// fail-closed）＋ `POST /api/profile/domain`（批N22 件一，ctl.domain.set 透传——
+/// 装配侧写口，confirm/证据/key 白名单门序全在 rrd domain_write.rs 单点裁决，面板
+/// 只透传 body；covers 申报四键 = conventions §6.1 三写口点名集，applies=reboot
+/// 如实申报"下次 rrd boot 生效"）——ops 路分母 36 槽全部转绿（covers 申报 30 项随
+/// 件九二上表，写口申报同集合 ∪ 不增）。接线图读口 `GET /api/wiring`（批N4 件九笔4）：ctl.wiring
 /// 透传（判据真值单点 = rrd assembly.rs 的装配快照，面板只渲染不判——第二真值点
 /// 禁令），covers 申报 44 项 = pin 11 + role 7 + domain 12 + axis 14（门 d 分母
 /// 四路字段级全集，与 rrd 渲染完整性测试同源钉死；domain 12 = 批N21 件二 evidence
 /// 键入 RR3_DOMAIN_KEYS 后件四同批补申报——assembly 快照批N21 件二起渲染 evidence，
-/// 读面可读即申报，写面半边敞口维持 status.md 敞口 15 行登记）⇒ 红账 43 全转绿，基线
+/// 读面可读即申报，写面半边随批N22 件一 `/api/profile/domain` 收口）⇒ 红账 43 全转绿，基线
 /// tools/ci/gate-d-baseline.txt 行 1 同批 43→0；密钥面两端点（keys/key）不申报
 /// covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
-/// applies 今日两条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
+/// applies 今日三条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
 /// ⇒ live）＋ `POST /api/brain/ops`（写臂重建受影响客户端，live 内存生效**不落盘**，
 /// 应答 `persisted:false` 如实申报——重启回 config.toml 真值；Python 无 TOML
-/// writer、Y-2 单写路径协商点归后续批）；其余写口（beep/face/selftest/reboot/
+/// writer、Y-2 单写路径协商点归后续批）＋ `POST /api/profile/domain`（reboot——
+/// 装配单落盘，下次 rrd 进程装载投影，运行态不动；三态词表取最近义的 reboot）；
+/// 其余写口（beep/face/selftest/reboot/
 /// relay/wifi）写的是动作与运行态，不动可配置集，如实空。**表项一律单行书写**
 /// （硬约束）：check.sh 步 ⑩ 的 applies 解析器逐行按引号段切本表——跨行表项/
 /// 行内注释都会被拆行判坏（批N4 件六二首跑即红的实证）。
@@ -167,6 +172,7 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/api/power/ops", &["ops/sample_period_ms", "ops/low_voltage_mv", "ops/cutoff_voltage_mv", "ops/state_period_ms"], ""),
     ("GET", "/api/sense/ops", &["ops/sample_rate", "ops/channels", "ops/frame_ms", "ops/doa_bin_threshold_deg", "ops/doa_window_ms", "ops/doa_window_rms_min", "ops/doa_mic_baseline_mm", "ops/rms_start", "ops/silence_tail_ms", "ops/min_speech_ms"], ""),
     ("GET", "/api/wiring", &["pin/role", "pin/instance", "pin/controller", "pin/channel", "pin/physical", "pin/direction", "pin/rail", "pin/addr", "pin/device", "pin/failsafe", "pin/mux_group", "role/controller", "role/channel", "role/physical", "role/rail", "role/failsafe", "role/addr", "role/device", "domain/name", "domain/nominal_mv", "domain/mild_mv", "domain/severe_mv", "domain/current_cap_ma", "domain/sense", "domain/current_sense", "domain/switch", "domain/switchable", "domain/armed", "domain/max_age_ms", "domain/evidence", "axis/schema", "axis/pin", "axis/center_deg", "axis/lo_deg", "axis/hi_deg", "axis/dir_sign", "axis/slew_deg_s", "axis/settle_ms", "axis/hold", "axis/current_ceil_ma", "axis/warmup_ms", "axis/hard_stop", "axis/calibrated", "axis/source"], ""),
+    ("POST", "/api/profile/domain", &["domain/armed", "domain/evidence", "domain/severe_mv", "axis/current_ceil_ma"], "reboot"),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -203,6 +209,13 @@ pub enum Rr3PanelDispatch {
     /// `GET /api/wiring`：ctl.wiring（装配快照读口——四路底账 + [pins]×wiring
     /// 全交叉逐条判果，批N4 件九笔4；判据真值单点 = rrd assembly.rs）
     WiringQuery,
+    /// `POST /api/profile/domain`：ctl.domain.set（装配侧写口，批N22 件一）——
+    /// body 原样透传，confirm/证据四道核/key 白名单门序全在 rrd
+    /// domain_write.rs 单点裁决（面板零业务语义，wiring 读口同一条第二真值点
+    /// 禁令的写半边）；effective:boot 语义由 rrd 应答如实申报
+    ProfileDomainSet {
+        params: Value,
+    },
     /// 硬件控制：`rr3.call` 经 rrd 归属门转发（relay → `rr3-act/relay/set`）
     BusCall {
         topic: String,
@@ -362,6 +375,19 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
             "GET" => Rr3PanelDispatch::WiringQuery,
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
+        // 装配侧写口（批N22 件一）：body 原样透传 rrd 写口门序（confirm/证据/
+        // key 白名单全在 rrd 单点裁决，面板零业务语义——wiring 读口同一条第二
+        // 真值点禁令的写半边）
+        "/api/profile/domain" => {
+            if method != "POST" {
+                return Rr3PanelDispatch::MethodNotAllowed;
+            }
+            let params = match rr3_panel_body_json(body) {
+                Ok(v) => v,
+                Err(e) => return Rr3PanelDispatch::BadRequest(e),
+            };
+            Rr3PanelDispatch::ProfileDomainSet { params }
+        }
         "/api/relay" => {
             if method != "POST" {
                 return Rr3PanelDispatch::MethodNotAllowed;
@@ -546,12 +572,25 @@ pub fn rr3_ctl_query(
     id: u64,
     read_timeout: Duration,
 ) -> Result<Value, String> {
+    rr3_ctl_send(bus_path, method, &json!({}), id, read_timeout)
+}
+
+/// ctl 短连底层（批N22 件一自 [`rr3_ctl_query`] 拆分）：带 params 透传面——
+/// 装配侧写口 body 原样转发（参数裁决在 rrd 写口门序单点，第二真值点禁令）；
+/// [`rr3_ctl_query`] 是它的空参数特例（八处既有调用点零行为漂移）。
+pub fn rr3_ctl_send(
+    bus_path: &str,
+    method: &str,
+    params: &Value,
+    id: u64,
+    read_timeout: Duration,
+) -> Result<Value, String> {
     let mut stream = std::os::unix::net::UnixStream::connect(bus_path)
         .map_err(|e| format!("连总线失败: {e}"))?;
     stream
         .set_read_timeout(Some(read_timeout))
         .map_err(|e| format!("设读超时失败: {e}"))?;
-    let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": {}});
+    let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
     let payload = rr3_body_encode(Rr3PayloadType::Request, body.to_string().as_bytes());
     let frame = Rr3Frame {
         header: Rr3Header {
@@ -1058,6 +1097,21 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 直接回 403 + rrd 原文案——"解锁旋钮"是运维要看见的字）
             Err(e) => Rr3PanelReply::json(403, "Forbidden", json!({ "error": e })),
         },
+        // 装配侧写口（批N22 件一）：body 原样透传 rrd 门序——拒因全文转达
+        // （缺二次确认/证据不过/白名单外等 ADR-0021 点名文案是运维要看见的字）。
+        // 502 而非 403：写口拒混合形状病与权限病（Invalid/Permission），码→HTTP
+        // 状态的映射是业务语义，面板不判（第二真值点禁令）——rrd 拒因文案保真
+        // 即可，机器可读码在 rrd 应答层
+        Rr3PanelDispatch::ProfileDomainSet { params } => match rr3_ctl_send(
+            &shared.bus_path,
+            "rr3.ctl.domain.set",
+            &params,
+            6,
+            shared.limits.read_timeout,
+        ) {
+            Ok(v) => Rr3PanelReply::json(200, "OK", v),
+            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+        },
         Rr3PanelDispatch::ModelKeysQuery => match rr3_secrets_path() {
             Ok(path) => match rr3_secrets_list_at(&path) {
                 Ok(keys) => Rr3PanelReply::json(200, "OK", json!({ "keys": keys })),
@@ -1325,6 +1379,26 @@ mod tests {
             rr3_panel_route("GET", "/api/wiring", b""),
             Rr3PanelDispatch::WiringQuery
         );
+        // 装配侧写口（批N22 件一）：POST /api/profile/domain → ctl.domain.set
+        // 透传，body 原样进分派参数（门序裁决在 rrd 单点）
+        assert_eq!(
+            rr3_panel_route(
+                "POST",
+                "/api/profile/domain",
+                r#"{"target":"domain","name":"rail5v","key":"armed","value":true,"confirm":true,"evidence":"实测/0001"}"#.as_bytes()
+            ),
+            Rr3PanelDispatch::ProfileDomainSet {
+                params: json!({
+                    "target": "domain", "name": "rail5v", "key": "armed",
+                    "value": true, "confirm": true, "evidence": "实测/0001"
+                })
+            }
+        );
+        // 写口非 POST = 405（方法面收窄，与 relay/face 同口径）
+        assert!(matches!(
+            rr3_panel_route("GET", "/api/profile/domain", b""),
+            Rr3PanelDispatch::MethodNotAllowed
+        ));
     }
 
     /// 端点表 ↔ 路由分派漂移门（MC-8③/I-9）：表内每条必须分派成功（不是
@@ -1334,8 +1408,8 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            22,
-            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N4 件九笔4 21→22：GET /api/wiring 装配快照读口）"
+            23,
+            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N22 件一 22→23：POST /api/profile/domain 装配侧写口）"
         );
         for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {
@@ -1344,6 +1418,9 @@ mod tests {
                 ("POST", "/api/wifi/connect") => br#"{"ssid":"s","pass":"password8"}"#,
                 ("POST", "/api/model/key") => r#"{"ref":"测试键","value":"sk-x"}"#.as_bytes(),
                 ("POST", "/api/brain/ops") => br#"{"group":"asr","slot":"asr_model","value":"m2"}"#,
+                ("POST", "/api/profile/domain") => {
+                    r#"{"target":"domain","name":"rail5v","key":"armed","value":true,"confirm":true,"evidence":"实测/0001"}"#.as_bytes()
+                }
                 _ => b"",
             };
             let d = rr3_panel_route(method, path, body);
@@ -1405,9 +1482,10 @@ mod tests {
                 );
             }
         }
-        // 今日申报实况 pin：两条 applies = model-key 写口（live——secrets 落盘
+        // 今日申报实况 pin：三条 applies = model-key 写口（live——secrets 落盘
         // 后 brain 每次现读，无需重启/重烧）＋ brain ops 写口（件九三，live 内存
-        // 生效不落盘）。改申报 = 同批改本 pin 与设计册 I-20。
+        // 生效不落盘）＋ profile/domain 写口（批N22 件一，reboot——装配单落盘
+        // 下次 rrd 装载投影）。改申报 = 同批改本 pin 与设计册 I-20。
         let declared: Vec<_> = RR3_PANEL_ROUTES
             .iter()
             .filter(|(_, _, _, a)| !a.is_empty())
@@ -1417,6 +1495,7 @@ mod tests {
             vec![
                 &("POST", "/api/model/key", &[][..], "live"),
                 &("POST", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"][..], "live"),
+                &("POST", "/api/profile/domain", &["domain/armed", "domain/evidence", "domain/severe_mv", "axis/current_ceil_ma"][..], "reboot"),
             ],
             "applies 申报面漂移：新增写口申报须同批改本 pin"
         );
