@@ -23,6 +23,9 @@ path = "src/main.rs"
 rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
 rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
 rr3mod = { path = "../../base/runtime/rr3mod" }
+# 线格式原语（迁移件四）：pcm_b64 的编解码走 rr-ipc 线格式层唯一实现（仓内
+# base64 既有惯例——sense 上行/interact 收流同款，不引第三方 base64 crate）
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
 serde_json = "1"
 toml = "0.8"
 # 云端 HTTP/TLS 客户端（批N32 裁定 5：同步 API＋rustls 系——零异步栈，本仓全同步面，
