@@ -13,6 +13,7 @@ pub mod axis_write;
 pub mod cli;
 pub mod contracts;
 pub mod counters;
+pub mod domain_write;
 pub mod manifest;
 pub mod probe;
 pub mod profile;

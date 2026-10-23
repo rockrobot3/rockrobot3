@@ -13,7 +13,7 @@
 //! 对账不是安全面，不需要引入一个 crate 来证明 64 轮压缩写对了。
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
@@ -68,19 +68,42 @@ pub struct Rr3TruthSetEntry {
     pub bytes: u64,
 }
 
-static RR3_CONTRACTS_SNAPSHOT: OnceLock<Rr3ContractsSnapshot> = OnceLock::new();
+static RR3_CONTRACTS_SNAPSHOT: Mutex<Option<Rr3ContractsSnapshot>> = Mutex::new(None);
 
 /// boot 装载链成功后一次定格（daemon.rs --profile 臂单点调用）。重复 set
-/// 首份胜出并回 false（与装配快照 OnceLock 语义一致）；--manifest 调试路径
-/// 不定格——`rr3.ctl.contracts` 如实报不可得，不造假数据。
+/// 首份胜出并回 false（与装配快照同语义）；--manifest 调试路径不定格——
+/// `rr3.ctl.contracts` 如实报不可得，不造假数据。
+///
+/// 为什么从 OnceLock 换 Mutex（批N22 件一）：装配侧写口（`rr3.ctl.domain.set`）
+/// 落盘新装配单后要**重记账**（写口的 tmp 产物过装载链全量预核 = 新验收事实，
+/// 记账跟住最新验收事实；否则写口自造一笔常驻"sha 漂"自检红，把真漂移淹没）。
+/// OnceLock 一次定格无处可换；Mutex<Option<_>> 三口语义：set 首份胜出、
+/// [`rr3_contracts_snapshot_replace`] 写口专属覆盖、get 快照只读。
 pub fn rr3_contracts_snapshot_set(snapshot: Rr3ContractsSnapshot) -> bool {
-    RR3_CONTRACTS_SNAPSHOT.set(snapshot).is_ok()
+    let mut g = RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒");
+    if g.is_some() {
+        return false;
+    }
+    *g = Some(snapshot);
+    true
+}
+
+/// 写口重记账（批N22 件一，`rr3.ctl.domain.set` 成功路径单点调用）：对写口
+/// 落盘后的新装配单重跑 capture（调用方持四路输入，与 boot 记账同源同形）。
+/// 未在册时拒（记账语义 = "boot 后的账"，--manifest 调试路径无账可换）。
+pub fn rr3_contracts_snapshot_replace(snapshot: Rr3ContractsSnapshot) -> Result<(), String> {
+    let mut g = RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒");
+    if g.is_none() {
+        return Err("契约记账未在册（未以 --profile boot），无处可重记账".to_string());
+    }
+    *g = Some(snapshot);
+    Ok(())
 }
 
 /// 快照只读口（conn.rs `rr3.ctl.contracts` 渲染源）。None = 未以 `--profile`
 /// 启动（`--manifest` 调试路径无契约记账）。
-pub fn rr3_contracts_snapshot() -> Option<&'static Rr3ContractsSnapshot> {
-    RR3_CONTRACTS_SNAPSHOT.get()
+pub fn rr3_contracts_snapshot() -> Option<Rr3ContractsSnapshot> {
+    RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒").clone()
 }
 
 /// 对一份契约目录记账四册 + 真值集七成员（基-40 件一②）：逐条读 + sha256。

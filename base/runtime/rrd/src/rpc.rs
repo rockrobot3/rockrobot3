@@ -29,7 +29,10 @@ pub enum Rr3RpcMethod {
     /// 批N4 件九笔4 增 `rr3.ctl.wiring`（装配快照读口，`[pins]×wiring` 全交叉
     /// 判果与四路底账一应答给出，判据源 = assembly.rs）；
     /// 批N5 件五笔4 增 `rr3.ctl.contracts`（契约完整性审计读口，Z-4"四册齐全
-    /// 且 sha 对"判果与 sha 记账一应答给出，判据源 = contracts.rs）。
+    /// 且 sha 对"判果与 sha 记账一应答给出，判据源 = contracts.rs）；
+    /// 批N22 件一增 `rr3.ctl.domain.set`（装配侧策略量写口，敞口 15 写面半边：
+    /// armed/severe_mv/current_ceil_ma 三写口，confirm 门＋证据引用四道核＋
+    /// 装载链预核＋原子落盘"下次 boot 生效"，判据源 = domain_write.rs）。
     CtlStatus,
     CtlHealth,
     CtlLogs,
@@ -38,6 +41,7 @@ pub enum Rr3RpcMethod {
     CtlReboot,
     CtlWiring,
     CtlContracts,
+    CtlDomainSet,
 }
 
 impl Rr3RpcMethod {
@@ -56,6 +60,7 @@ impl Rr3RpcMethod {
             Self::CtlReboot => "rr3.ctl.reboot",
             Self::CtlWiring => "rr3.ctl.wiring",
             Self::CtlContracts => "rr3.ctl.contracts",
+            Self::CtlDomainSet => "rr3.ctl.domain.set",
         }
     }
 
@@ -73,6 +78,7 @@ impl Rr3RpcMethod {
             "rr3.ctl.reboot" => Some(Self::CtlReboot),
             "rr3.ctl.wiring" => Some(Self::CtlWiring),
             "rr3.ctl.contracts" => Some(Self::CtlContracts),
+            "rr3.ctl.domain.set" => Some(Self::CtlDomainSet),
             _ => None,
         }
     }
@@ -91,6 +97,7 @@ impl Rr3RpcMethod {
                 | Self::CtlReboot
                 | Self::CtlWiring
                 | Self::CtlContracts
+                | Self::CtlDomainSet
         )
     }
 }
@@ -344,7 +351,8 @@ mod tests {
 
     /// F3（ADR-0010）：ctl 方法走同一解析器，is_ctl 的判据与方法面一致
     /// （0.0.4 批B 起 `rr3.ctl.counters`/`rr3.ctl.reboot` 入列；批N4 件九笔4 起
-    /// `rr3.ctl.wiring` 入列；批N5 件五笔4 起 `rr3.ctl.contracts` 入列，白名单八 ctl）
+    /// `rr3.ctl.wiring` 入列；批N5 件五笔4 起 `rr3.ctl.contracts` 入列；批N22 件一
+    /// 起 `rr3.ctl.domain.set` 入列，白名单九 ctl）
     #[test]
     fn parses_ctl_methods_and_flags_them() {
         for m in [
@@ -356,6 +364,7 @@ mod tests {
             "rr3.ctl.reboot",
             "rr3.ctl.wiring",
             "rr3.ctl.contracts",
+            "rr3.ctl.domain.set",
         ] {
             let got = rr3_rpc_parse_request(&bytes(
                 json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}}),
