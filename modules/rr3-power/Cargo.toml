@@ -16,6 +16,8 @@ path = "src/main.rs"
 # path 依赖进仓内三件套（勿用 crates.io 同名包）；serde_json/toml 用具体版本——
 # 本 crate 是独立 workspace，吃不到 base/runtime 的 workspace 继承
 rr-ipc = { path = "../../base/runtime/rr-ipc" }
+# 模块公共骨架（0.0.8 W-A 批0/批1）：bootstrap 收敛序列 + serve 主循环 + Dispatcher
+rr3mod = { path = "../../base/runtime/rr3mod" }
 # 总线承载契约面（基-35 窄化②/批N9 件一）：承载客户端走 rr_bus_api；语义常量直引
 # rr-core（真值单点，不经 re-export 中介）。
 rr-bus-api = { path = "../../base/runtime/rr-bus-api" }
