@@ -31,6 +31,9 @@ rr-core = { path = "../../base/runtime/rr-core" }
 # 拆边需装配上移，敞口在册）。
 rr-hal = { path = "../../base/runtime/rr-hal" }
 rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
+# 模块公共骨架（0.0.8 W-A 批0，ADR-0017 裁定 1）：bootstrap/serve/Dispatcher/
+# load_config_text/rr3_config_path 五 API——批3（批N28）拆分接入
+rr3mod = { path = "../../base/runtime/rr3mod" }
 serde_json = "1"
 toml = "0.8"
 
