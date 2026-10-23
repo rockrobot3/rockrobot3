@@ -9,7 +9,7 @@
 | 件 | 四件为**两件式 manifest**（`atom.toml` + `assemble.toml`），机制本体 `.py` 原位；**`intent.py` / `bus.py` 不是件**，属组合件机制壳 | `atoms/*/`、`rr3_brain/` |
 | 主题 | 发布 `intent/result` + `rr3-brain/audio/tts_pcm`（MC-1 下行载荷流，2026-10-13 申报随实现补齐）；订阅 `sense/audio/pcm` + `sense/audio/vad_start`（B-1 已申报）；RPC `llm/completion` | `module.toml` 与 `composite.py`（`TOPIC_PCM`/`TOPIC_VAD`/`TOPIC_TTS_PCM`） |
 | 句柄 | 无能力面句柄（云 HTTP；**配置读自 `config.toml` 的 `[rr3-brain.cloud]`，只有 API key 走 env**） | `cloud/*.py`、`composite.py` |
-| 参数 | `base_url`、`asr_model`、`llm_model`、`tts_model`、`timeout_s=20`、`max_utterance_ms=8000` **有读者**；`silence_tail_ms=700`、`max_turn_chars=800` **在册无读者**（B-2/B-8）；另有一个不在 config 里的硬编码上界 `RR3_CALL_TIMEOUT_S = 30`（点名 interact 的等待）**2026-10-20 对表（批N4 件六一笔 B-13①）：该常量已退役**——总线 RPC 超时数据化为 `[rr3-brain.bus].call_timeout_s/connect_timeout_s`（缺键回落 `RR3_BUS_CALL_TIMEOUT_DEFAULT_S`），见 §13 `composite.py` 行与 B-13 对表 | `config.toml`、`composite.py` |
+| 参数 | `base_url`、`asr_model`、`llm_model`、`tts_model`、`timeout_s=20`、`max_utterance_ms=8000` **有读者**；`silence_tail_ms=700`、`max_turn_chars=800` **在册无读者**（B-2/B-8）；另有一个不在 config 里的硬编码上界 `RR3_CALL_TIMEOUT_S = 30`（点名 interact 的等待）**2026-10-20 对表（批N4 件六一笔 B-13①）：该常量已退役**——总线 RPC 超时数据化为 `[rr3-brain.bus].call_timeout_s/connect_timeout_s`（缺键回落 `RR3_BUS_CALL_TIMEOUT_DEFAULT_S`；`connect_timeout_s` 后随批N32 迁移退役删除，见 §4 B-13① 注记），见 §13 `composite.py` 行与 B-13 对表 | `config.toml`、`composite.py` |
 | 健康 | 心跳 2000 / 看门狗 10000 ms；`[depends].required = [bus.subscribe, bus.rpc, net.online]`，`optional = [power.battery]` | `module.toml` |
 
 ## §1 件契约表（Python 面按模块边界写，不虚构 Rust 签名）
@@ -51,7 +51,10 @@
 `RR3_CALL_TIMEOUT_S = 30`（调 `interact/tts/text`）→ 一轮最坏 **≈ 90 s**（旧版写 60 s 漏了这段）
 **2026-10-20 对表（批N4 件六一笔 B-13①）：该等待数据化为 `[rr3-brain.bus].call_timeout_s`
 （缺省 30，回落常量改名 `RR3_BUS_CALL_TIMEOUT_DEFAULT_S`；`connect_timeout_s=5` 新增）——
-一轮最坏 ≈ 90 s 的预算形状不变，读数从 config 取**，
+一轮最坏 ≈ 90 s 的预算形状不变，读数从 config 取**；
+**2026-10-24 对表（批N32 件二，增补评审裁定 4）：`connect_timeout_s` 随迁移退役删除**——
+Rust 迁移件遵 rr3mod bootstrap 固定序，注册帧等待上界由 rr-bus-api 内部承载，键无消费点
+即死键（批I B-2 先例）；`call_timeout_s` 保留（`BusHandle::call` timeout 显式实参消费点），
 而 `max_utterance_ms = 8000` 只管"起轮到封轮"的采集段，管不到云段——两者关系仍无人定义（工单 B-3）；
 心跳 2000 ms 独立线程，故"卡在云上 90 s"期间心跳仍续 →
 面板/健康看不出异常（同全系统"活着但不动"类别）。
