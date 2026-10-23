@@ -11,8 +11,14 @@
 //! 机制，线上字节归承载层。
 //!
 //! ⑧-b：机制主体不 `use std`、不分配——`&[i16]` 借用进、`u64` 毫秒出。
+//!
+//! 错误面零堆化（0.0.8 批N24 件四，L-3 形状清理）：`rr3_tts_play` 返回
+//! [`Rr3TtsPlayError`] 零堆枚举（写腿失败携 `Rr3HalError` 原样随行，机制层
+//! 不落 `String` 堆），人读文案由编排层渲染（`src/composite.rs` 的
+//! `rr3_tts_play_error_text`，与改前逐字一致）；HAL 句柄入参改泛型
+//! （`S: Rr3AudioSink + ?Sized`，调用点单态化不改行为）。
 
-use rr_hal_api::Rr3AudioSink;
+use rr_hal_api::{Rr3AudioSink, Rr3HalError};
 
 /// 播放采样规格：16k/mono/16bit（与采集侧同一张 cfg，整条链一张表）
 pub const RR3_TTS_SAMPLE_RATE: u32 = 16_000;
@@ -39,15 +45,27 @@ pub fn rr3_tts_prebuffer_ready(buffered_ms: u64, total_ms: u64, prebuffer_ms: u6
     buffered_ms >= prebuffer_ms.min(total_ms)
 }
 
+/// [`rr3_tts_play`] 的零堆错误（批N24 件四）：写腿失败一变体，HAL 错原样
+/// 随行——结构化数据进枚举，`String` 文案在编排层渲染（机制与策略分离：
+/// 机制层不落堆、不攒人读文案）。
+#[derive(Debug, PartialEq, Eq)]
+pub enum Rr3TtsPlayError {
+    /// 分块写播放面失败（后端拒）
+    Write(Rr3HalError),
+}
+
 /// 播放一段已解码的 PCM 样点：按 20ms 分块写 sink（透传语义——块边界不改
 /// 造样本），返回实际写出的毫秒数 = `样点数 × 1000 / 16000`（整除截断，与
 /// brain 分帧的逐帧 ms 同一公式：整块 20ms 恰整除、尾块截断，两侧对表零漂移）。
 /// 写失败（后端拒）原样上抛，由调用方折成 error 应答（F1 定形：采样规格在
-/// open 固定，write 不再校验配置不符）。
-pub fn rr3_tts_play(sink: &mut dyn Rr3AudioSink, samples: &[i16]) -> Result<u64, String> {
+/// open 固定，write 不再校验配置不符）。泛型 `?Sized`：调用点持
+/// `&mut dyn Rr3AudioSink` 或具体类型都可直接传（单态化不改行为）。
+pub fn rr3_tts_play<S: Rr3AudioSink + ?Sized>(
+    sink: &mut S,
+    samples: &[i16],
+) -> Result<u64, Rr3TtsPlayError> {
     for block in samples.chunks(RR3_TTS_BLOCK_SAMPLES) {
-        sink.write(block)
-            .map_err(|e| format!("写播放面失败: {e}"))?;
+        sink.write(block).map_err(Rr3TtsPlayError::Write)?;
     }
     Ok(samples.len() as u64 * 1000 / RR3_TTS_SAMPLE_RATE as u64)
 }
@@ -149,11 +167,14 @@ mod tests {
 
     #[test]
     fn play_write_error_propagates_verbatim() {
-        // 未 open 的 sim sink 首次 write 即拒（后端拒）——错误原样上抛，带
-        // "写播放面失败" 前缀，由调用方折成 error 应答
+        // 未 open 的 sim sink 首次 write 即拒（后端拒）——错误按零堆枚举原样
+        // 上抛（批N24 件四），人读文案由编排层渲染（composite 用例钉逐字）
         let mut sink = Rr3SimAudioSink::rr3_sim_sink_new(16000);
         let e = rr3_tts_play(&mut sink, &[0i16; 320]).unwrap_err();
-        assert!(e.contains("写播放面失败"), "{e}");
+        assert!(
+            matches!(e, Rr3TtsPlayError::Write(_)),
+            "写腿失败携 HAL 错随行: {e:?}"
+        );
     }
 
     // ---------- 两腿对拍用例（0.0.5 批K H1，architecture §4.0.3 判据②；

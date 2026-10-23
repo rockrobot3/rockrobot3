@@ -22,4 +22,7 @@ pub const RR3_TTS_TOPIC: &str = "rr3-interact/tts/text";
 /// 的样点列。
 pub const RR3_TTS_PCM_TOPIC: &str = "rr3-brain/audio/tts_pcm";
 
-pub use mech::{rr3_tts_apply_gain, rr3_tts_play, rr3_tts_prebuffer_ready, RR3_TTS_SAMPLE_RATE};
+pub use mech::{
+    rr3_tts_apply_gain, rr3_tts_play, rr3_tts_prebuffer_ready, RR3_TTS_SAMPLE_RATE,
+    Rr3TtsPlayError,
+};

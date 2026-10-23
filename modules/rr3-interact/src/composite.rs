@@ -277,7 +277,8 @@ pub fn rr3_interact_run() -> Result<(), String> {
                 Rr3PanelAction::Beep => rr3_beep_play(sink.as_mut(), cfg.player.volume_pct),
                 Rr3PanelAction::Face { expression } => face
                     .rr3_face_set(&expression, &cfg.face.non_pointable)
-                    .map(|(c, p)| rr3_face_result(c, p)),
+                    .map(|(c, p)| rr3_face_result(c, p))
+                    .map_err(|e| rr3_face_set_error_text(&e, &cfg.face.non_pointable)),
             };
             let _ = tx.send(result);
         }
@@ -294,6 +295,34 @@ pub fn rr3_interact_run() -> Result<(), String> {
                 .draw(&frame)
                 .unwrap_or_else(|e| eprintln!("rr3-interact-face: 出帧失败: {e}"));
         }
+    }
+}
+
+/// face 机制错误的人读文案（批N24 件四，L-3 形状清理）：机制层零堆枚举
+/// （`Rr3FaceSetError`，拒因数据随枚举走），文案在编排层渲染——线上字节
+/// 与改前逐字一致（契约面）。白名单连接串用常量投影（渲染不再 join 落堆）；
+/// 不可点名集是 config 注入的运行时数据，渲染面经
+/// `rr3_face_non_pointable_join` 组装（每句落在唯一一处）。
+fn rr3_face_set_error_text(e: &face::Rr3FaceSetError, non_pointable: &[&str]) -> String {
+    match e {
+        face::Rr3FaceSetError::UnknownExpression(expr) => format!(
+            "{} 不认表情 {expr:?}（允许 {}）",
+            face::RR3_FACE_TOPIC,
+            face::RR3_FACE_EXPRESSIONS_JOINED
+        ),
+        face::Rr3FaceSetError::NonPointable(expr) => format!(
+            "{expr} 不可被点名（本形态不可点名集 {}）",
+            rr3_face_non_pointable_join(non_pointable)
+        ),
+    }
+}
+
+/// player 机制错误的人读文案（批N24 件四，L-3 形状清理）：机制层零堆枚举
+/// （`Rr3TtsPlayError`，HAL 错原样随行），文案在编排层渲染——`{e}` 走
+/// `Rr3HalError` Display，与改前逐字一致（每句落在唯一一处）。
+fn rr3_tts_play_error_text(e: &player::Rr3TtsPlayError) -> String {
+    match e {
+        player::Rr3TtsPlayError::Write(e) => format!("写播放面失败: {e}"),
     }
 }
 
@@ -332,9 +361,10 @@ fn rr3_handle_tts(
     // 播放增益（MC-2）：config 注入的 volume_pct 整型饱和缩放，播放前就地生效
     player::rr3_tts_apply_gain(&mut samples, player.volume_pct);
     let suspended = face.rr3_face_begin_talk();
-    let played = player::rr3_tts_play(sink, &samples);
+    let played_ms = player::rr3_tts_play(sink, &samples)
+        .map_err(|e| rr3_tts_play_error_text(&e));
     face.rr3_face_end_talk();
-    let played_ms = played?;
+    let played_ms = played_ms?;
     // played_ms==0 不得记 ok（批N4 件六 I-21①）：对账通过但样点不足一个毫秒窗
     // （<16 样点）对用户等于没听见——按业务失败折 error 应答（brain 侧 audible
     // 不计，B-16① 拆账判据），与传输失败分账不折成功。
@@ -362,7 +392,9 @@ fn rr3_handle_face(
     non_pointable: &[&str],
 ) -> Result<Value, String> {
     let expr = rr3_face_parse_args(args)?;
-    let (current, previous) = face.rr3_face_set(&expr, non_pointable)?;
+    let (current, previous) = face
+        .rr3_face_set(&expr, non_pointable)
+        .map_err(|e| rr3_face_set_error_text(&e, non_pointable))?;
     Ok(rr3_face_result(current, previous))
 }
 
@@ -398,7 +430,9 @@ fn rr3_beep_play(
 ) -> Result<Value, String> {
     let mut samples = rr3_beep_samples();
     player::rr3_tts_apply_gain(&mut samples, volume_pct);
-    player::rr3_tts_play(sink, &samples).map(|played_ms| json!({ "played_ms": played_ms }))
+    player::rr3_tts_play(sink, &samples)
+        .map_err(|e| rr3_tts_play_error_text(&e))
+        .map(|played_ms| json!({ "played_ms": played_ms }))
 }
 
 // ---------- 载荷组装面（0.0.5 批I I-8：上移承载层，ADR-0019 修订 4） ----------
@@ -665,7 +699,7 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
             selftest.face_expect = rr3_face_expression_lookup(name).ok_or_else(|| {
                 format!(
                     "config [rr3-interact.selftest] face_expect 非在册表情 {name:?}（在册值 {}）",
-                    face::RR3_FACE_EXPRESSIONS.join("/")
+                    face::RR3_FACE_EXPRESSIONS_JOINED
                 )
             })?;
         }
@@ -739,7 +773,7 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
         let expr = rr3_face_expression_lookup(s).ok_or_else(|| {
             format!(
                 "config [rr3-interact.face] non_pointable[{i}] 非在册表情 {s:?}（在册值 {}）",
-                face::RR3_FACE_EXPRESSIONS.join("/")
+                face::RR3_FACE_EXPRESSIONS_JOINED
             )
         })?;
         non_pointable.push(expr);
@@ -757,7 +791,7 @@ fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
             rr3_face_expression_lookup(s).ok_or_else(|| {
                 format!(
                     "config [rr3-interact.face] default_expression 非在册表情 {s:?}（在册值 {}）",
-                    face::RR3_FACE_EXPRESSIONS.join("/")
+                    face::RR3_FACE_EXPRESSIONS_JOINED
                 )
             })?
         }
@@ -1144,6 +1178,36 @@ face_expect = "happy"
         assert!(err.contains("不可被点名"), "talk 被排除集拒: {err}");
         let ok = rr3_handle_face(&mut f, &json!({ "expression": "talk" }), &[]).unwrap();
         assert_eq!(ok["expression"], "talk", "空集放开 talk 点名");
+    }
+
+    /// 错误文案逐字钉死（批N24 件四，L-3 形状清理的对账单测）：机制层改交
+    /// 零堆枚举后，编排层渲染的 `String` 必须与改前逐字一致（线上契约面）。
+    #[test]
+    fn face_set_error_texts_are_verbatim() {
+        let e = face::Rr3FaceSetError::UnknownExpression("wink");
+        assert_eq!(
+            rr3_face_set_error_text(&e, &["talk"]),
+            "rr3-interact/face/expression 不认表情 \"wink\"（允许 idle/blink/talk/think/happy/listen/turn/charA/charB/charC/charD/charE/charF/charG/charH/charI/charJ/charK/charL/charM/charN/charO/charP/charQ/charR/charS/charT/charU/charV/charW/charX/charY/charZ/char0/char1/char2/char3/char4/char5/char6/char7/char8/char9）"
+        );
+        let e = face::Rr3FaceSetError::NonPointable("talk");
+        assert_eq!(
+            rr3_face_set_error_text(&e, &["talk"]),
+            "talk 不可被点名（本形态不可点名集 talk）"
+        );
+        let e = face::Rr3FaceSetError::NonPointable("talk");
+        assert_eq!(
+            rr3_face_set_error_text(&e, &[]),
+            "talk 不可被点名（本形态不可点名集 (空)）",
+            "空集渲染 (空)（rr3_face_non_pointable_join 同款口径）"
+        );
+    }
+
+    /// tts 错误文案逐字钉死（批N24 件四）：`{e}` 走 `Rr3HalError` Display
+    /// （HAL 错文本随行原样）。
+    #[test]
+    fn tts_play_error_text_is_verbatim() {
+        let e = player::Rr3TtsPlayError::Write(rr_hal_api::Rr3HalError::Busy);
+        assert_eq!(rr3_tts_play_error_text(&e), "写播放面失败: HAL 设备忙");
     }
 
     /// beep 测试音合成（批N5 件五笔2）：确定性——长度 3200（200ms@16k）、
