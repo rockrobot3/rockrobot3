@@ -33,7 +33,9 @@ use std::time::Duration;
 use rr_bus_api::Rr3BusClient;
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_frame_read, rr3_frame_write, Rr3Frame, Rr3Header, Rr3PayloadType,
+    RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT,
 };
+use rr3mod::BusHandle;
 use serde_json::{json, Value};
 
 use super::secrets::{rr3_secrets_list_at, rr3_secrets_path, rr3_secrets_upsert_at};
@@ -686,11 +688,12 @@ impl Rr3SelftestExpect {
     }
 }
 
-/// 面板服务线程的共享面：总线句柄（clone = 同一连接的另一句柄）、总线路径
+/// 面板服务线程的共享面：总线句柄（[`BusHandle`]，clone = 同一连接的另一句柄，
+/// 0.0.8 W-A 批4 换型——面板的 rr3.call 与主循环应答互不干扰）、总线路径
 /// （ctl 短连用）、动作通道（beep/face 递主循环）、link 订阅缓存、五限额
 /// （I-18②：config 数据化贯穿）与自检期望表情（I-17/M-10：产线取向可配）。
 pub struct Rr3PanelShared {
-    pub bus: Rr3BusClient,
+    pub bus: BusHandle,
     pub bus_path: String,
     pub actions: mpsc::Sender<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>,
     pub link: Arc<Mutex<Option<Value>>>,
@@ -716,6 +719,55 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     rr3_panel_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
         std::thread::Builder::new().name("rr3-panel-conn".into())
     })
+}
+
+/// 面板线程宿主（0.0.8 W-A 批4 函数化，方案 §4.6）：link Arc＋动作通道＋
+/// 五限额毫秒→Duration 换算＋[`Rr3PanelShared`] 构造＋线程 spawn 收进一处，
+/// main.rs 一行装配。返回 `(act_rx, link)` 给 Dispatcher——act_rx 主循环
+/// on_tick 排空（beep/face 代执行回执）、link 主循环 on_event 只写/面板线程
+/// 只读（状态页卡片数据源，Mutex 语义不变）。线程名 rr3-panel；spawn 失败
+/// Err 上抛（fail-closed，装配段显式回错）。
+pub fn spawn_host(
+    bus: &BusHandle,
+    panel: &crate::boot::Rr3PanelCfg,
+    selftest: &crate::boot::Rr3SelftestCfg,
+) -> Result<
+    (
+        mpsc::Receiver<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>,
+        Arc<Mutex<Option<Value>>>,
+    ),
+    String,
+> {
+    let link = Arc::new(Mutex::new(None::<Value>));
+    let (act_tx, act_rx) = mpsc::channel();
+    // 面板五限额/超时（批N4 件五 I-18②）：config 毫秒值转 Duration，装配期
+    // 一次换算，server 侧机制面只见 Duration 不再携带策略
+    let limits = Rr3PanelLimits {
+        max_conns: panel.max_conns as usize,
+        read_timeout: Duration::from_millis(panel.read_timeout_ms),
+        header_limit: panel.header_limit as usize,
+        body_limit: panel.body_limit as usize,
+        call_timeout: Duration::from_millis(panel.call_timeout_ms),
+    };
+    let shared = Arc::new(Rr3PanelShared {
+        bus: bus.clone(),
+        bus_path: std::env::var(RR3_BUS_PATH_ENV)
+            .unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string()),
+        actions: act_tx,
+        link: Arc::clone(&link),
+        limits,
+        selftest_face_expect: selftest.face_expect,
+        selftest_expect: selftest.expect,
+    });
+    std::thread::Builder::new()
+        .name("rr3-panel".into())
+        .spawn(move || {
+            if let Err(e) = rr3_panel_serve(shared) {
+                eprintln!("面板服务退出: {e}");
+            }
+        })
+        .map_err(|e| format!("起面板线程失败: {e}"))?;
+    Ok((act_rx, link))
 }
 
 /// accept 循环本体（批M M-β I-4 抽缝）：listener、槽位账与线程工厂显式注入——
@@ -754,9 +806,7 @@ fn rr3_panel_accept_loop(
             rr3_panel_handle(&mut stream, &shared);
             drop(slot); // RAII 守卫：正常返回或 panic 展开都在此归还槽位
         }) {
-            shared_bump
-                .bus
-                .rr3_counter_bump(RR3_PANEL_SPAWN_FAIL_KEY, 1);
+            shared_bump.bus.counter_bump(RR3_PANEL_SPAWN_FAIL_KEY, 1);
             eprintln!("面板连接线程起失败（连接弃置，服务继续）: {e}");
         }
     }
@@ -896,7 +946,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
         },
         Rr3PanelDispatch::BusCall { topic, args } => {
-            match shared.bus.rr3_call_topic(&topic, args, shared.limits.call_timeout) {
+            match shared.bus.call(&topic, &args, shared.limits.call_timeout) {
                 Ok(result) => {
                     // 业务错误按载荷裁（I-21③）：被调方折 `{"error":…}` 应答 =
                     // 业务失败，不得 200+ok:true 假成功（脚本报永远成功）
@@ -948,16 +998,16 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                 legs.last_mut().unwrap()["reason"] = json!(e);
             }
             // 腿2 relay：开→关两步复位验证；on 失败 = 腿 fail（off 未执行）
-            let relay_on = shared.bus.rr3_call_topic(
+            let relay_on = shared.bus.call(
                 "rr3-act/relay/set",
-                json!({ "on": true }),
+                &json!({ "on": true }),
                 shared.limits.call_timeout,
             );
             let (relay_pass, relay_reason) = match relay_on {
                 Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
-                Ok(_) => match shared.bus.rr3_call_topic(
+                Ok(_) => match shared.bus.call(
                     "rr3-act/relay/set",
-                    json!({ "on": false }),
+                    &json!({ "on": false }),
                     shared.limits.call_timeout,
                 ) {
                     Ok(_) => ("pass", None),
@@ -1760,7 +1810,7 @@ mod tests {
             std::thread::spawn(move || rr3_i4_fake_rrd(listener, beats, json!({}), json!({})));
         }
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
-        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
         std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
 
         let (actions_tx, _rx) = mpsc::channel();
@@ -1876,7 +1926,7 @@ mod tests {
             rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), json!({}), json!({}))
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
-        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
         std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
 
         let (actions_tx, _rx) = mpsc::channel(); // 接收者即刻 drop（下行）：主循环不在
@@ -1974,7 +2024,7 @@ mod tests {
             rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned, canned_contracts)
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
-        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
         std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
 
         let (actions_tx, _rx) = mpsc::channel();
@@ -2166,7 +2216,7 @@ mod tests {
             rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned, json!({}))
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
-        let bus = Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功");
+        let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
         std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
 
         let (actions_tx, _rx) = mpsc::channel();

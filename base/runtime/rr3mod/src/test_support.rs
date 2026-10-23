@@ -79,8 +79,9 @@ pub fn rr3_tmp_dir(tag: &str) -> PathBuf {
     tmp_path(tag, ".d")
 }
 
-/// 连假 rrd（`RR3_BUS_PATH_ENV` set→connect→remove 全程持锁）
-pub fn connect_client(tag: &str, mode: FakeMode) -> BusHandle {
+/// 连假 rrd 取裸客户端（`RR3_BUS_PATH_ENV` set→connect→remove 全程持锁）——
+/// [`connect_client`] 与 wrap 冒烟测共用的连接段，client 层真值单点。
+pub fn connect_raw(tag: &str, mode: FakeMode) -> rr_bus_api::Rr3BusClient {
     let path = tmp_path(tag, ".sock");
     let listener = UnixListener::bind(&path).unwrap();
     let log = log_slot(tag);
@@ -89,7 +90,13 @@ pub fn connect_client(tag: &str, mode: FakeMode) -> BusHandle {
     std::env::set_var(RR3_BUS_PATH_ENV, path.to_str().unwrap());
     let client = rr_bus_api::Rr3BusClient::rr3_connect(MANIFEST).expect("连假 rrd 应成功");
     std::env::remove_var(RR3_BUS_PATH_ENV);
-    BusHandle { client }
+    client
+}
+
+/// 连假 rrd 并包进 [`BusHandle`]（构造走 [`BusHandle::wrap`]——pub(crate) 字段
+/// 直构形状随批N29 退役，夹具与生产消费方同一构造口）
+pub fn connect_client(tag: &str, mode: FakeMode) -> BusHandle {
+    BusHandle::wrap(connect_raw(tag, mode))
 }
 
 /// 等待 fake rrd 记账到 `n` 条（至多 ~2s；reader 异步，不忙等断言）

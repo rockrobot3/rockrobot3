@@ -30,5 +30,8 @@ rr-core = { path = "../../base/runtime/rr-core" }
 # 选择函数保留（白名单由 check.sh 步 ⑨-w 冻结执法，Cargo 级拆边需装配上移，敞口在册）。
 rr-hal = { path = "../../base/runtime/rr-hal" }
 rr-hal-api = { path = "../../base/runtime/rr-hal-api" }
+# 模块公共骨架（0.0.8 W-A 批0，ADR-0017 裁定 1）：bootstrap/serve/Dispatcher/
+# BusHandle API——批4（批N29）拆分接入（wrap 构造口供面板线程宿主与测试夹具）
+rr3mod = { path = "../../base/runtime/rr3mod" }
 serde_json = "1"
 toml = "0.8"
