@@ -168,7 +168,7 @@
 | 本册旧断言 | 现在的事实（符号为证） | 判定 |
 |---|---|---|
 | §12 "bt 唯一硬点是件内 `std::env::var`（N-1）" | 函数与 env 键双双退役，件面改 `rr3_bt_state_new(up: bool)`，初值经 **ops 申报**注入（`atoms/bt/assemble.toml`：`up` ← `rr3-connect.bt.up`） | **N-1 已结**，且 bt 从"零申报"变成**已申报的三件之一** |
-| §12/§13 wifi 凭据 `String`（N-3） | `Rr3LinkState.ssid` 改 `Option<Rr3SsidText { bytes: [u8; 32], len: u8 }`（契约面）；**件内 `rr3_provision_connect(&mut self, ssid: String, pass: String)` 与 `credentials: Option<(String, String)>` 仍是堆类型** | **部分结**：值类型侧结、凭据侧未结 → 批L **L-3** |
+| §12/§13 wifi 凭据 `String`（N-3） | `Rr3LinkState.ssid` 改 `Option<Rr3SsidText { bytes: [u8; 32], len: u8 }`（契约面）；件内 `rr3_provision_connect(&mut self, ssid: &str, _pass: &str)` / `rr3_provision_restored(ssid: &str)` 入参 `&str` 化、`credentials: Option<Rr3SsidText>` 值类型化——**已结（批N24 件五，2026-10-23，`e3f8bf4`）**：pass 去存储（由后端 `Rr3WifiStore` 承载持久化，状态机不持有），mode 转移单测原样过 | **L-3 已结**（connect 半边） |
 | §12 "`&dyn`/`rr3_block_on` 清零（I-3/N-3 同族）" | 契约面同步、`rr3_block_on` 不存在；本册件面不持句柄（调用在 `composite.rs`） | 已结 |
 | §0/§13 三个零读者配置项（N-6/N-2） | `roam_probe_enabled` 与 `tls_min_version` **删除**；`timeout_ms` **实装为 nmcli 子进程超时**并迁入 wifi 段 | **N-2、N-6 已结**（三选一的"实装/删除"两条各用一次） |
 | §13 sim 假 AP 表在件里（N-9） | `rr3_wifi_scan_result` 的三条假 AP **仍在 `atoms/wifi/mech.rs`** | **已结（批I N-9 迁入 rr-hal sim 后端；批N24 件二核实 2026-10-23）**：`rr3_sim_link_scan_list` 住 rr-hal sim.rs（首行 SSID 与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流一处真值＋单测钉死），composite 只组装形状——下两行判定过时随批N24 件二改判，原记"未结 → 批L L-9"失效 |
