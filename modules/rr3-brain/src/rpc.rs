@@ -121,9 +121,10 @@ fn rr3_py_type_name(v: &Value) -> &'static str {
     }
 }
 
-/// Python str() 对位（ops/set args 的 group/slot 字段：Python str(args.get(...))
-/// 的 coercion 形状——str 原样，其余按 Python str() 常见产物折词）。
-fn rr3_py_str(v: &Value) -> String {
+/// Python str() 对位（ops/set args 的 group/slot 字段与 completion text 参数：
+/// Python str(args.get(...)) 的 coercion 形状——str 原样，其余按 Python str()
+/// 常见产物折词）。
+pub(crate) fn rr3_py_str(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Null => "None".to_string(),
@@ -321,9 +322,8 @@ pub(crate) fn rr3_ops_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<Val
     }))
 }
 
-/// 模型行实效重解析（ops/set llm 组写后供客户端重建消费——迁移件三接线；
-/// 本件先落纯函数与 rr3_brain_model_row 同源单真值）。
-#[allow(dead_code)] // 迁移件三（客户端重建取数口）消费；本件先落同源单真值
+/// 模型行实效重解析（ops/set llm 组写后供客户端重建消费——dispatch.rs 接线；
+/// 与 rr3_brain_model_row 同源单真值）。
 pub(crate) fn rr3_model_row_of(cfg: &Rr3BrainCfg) -> Result<crate::boot::Rr3ModelRow, String> {
     rr3_brain_model_row(&cfg.doc)
 }
