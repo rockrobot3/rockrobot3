@@ -6,11 +6,12 @@ use esp_idf_hal::ledc::LedcDriver;
 use esp_idf_hal::uart::UartDriver;
 
 use crate::board::{
-    axis_check, deg_to_duty, Axis, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_RENDER_ATTEMPTS,
-    OLED_ROWS, RAIL_GATE_ARMED, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
+    DUTY_MAX, DUTY_MIN, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_RENDER_ATTEMPTS, OLED_ROWS,
+    RAIL_GATE_ARMED, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
 };
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
 use crate::power::{RailJudge, RailMonitor, RailTier};
+use crate::servo::{axis_check, deg_to_duty, Axis};
 
 // ---------------------------------------------------------------------------
 // 外设面（控制面/运行面分离）：控制面独占 UART2，运行面独占 I2C0 + LEDC
@@ -81,7 +82,7 @@ impl RtPeriph {
                 Axis::Tilt => &mut self.tilt,
             };
             driver
-                .set_duty(deg_to_duty(step))
+                .set_duty(deg_to_duty(step, DUTY_MIN, DUTY_MAX))
                 .map_err(|e| format!("LEDC set_duty 失败: {e:?}"))?;
             if step != deg {
                 thread::sleep(Duration::from_millis(SERVO_SLEW_STEP_MS));
