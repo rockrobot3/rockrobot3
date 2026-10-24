@@ -6,7 +6,7 @@
 //!
 //! 线上契约逐项对齐 legacy/core/{asr,llm,tts}（SiliconFlow /v1 形状）：
 //! - ASR  POST {base}/v1/audio/transcriptions   multipart(model + WAV) → {"text": …}
-//! - LLM  POST {base}/v1/chat/completions       {model, messages, max_tokens} → choices[0].message.content
+//! - LLM  POST {api_root}/chat/completions      {model, messages, max_tokens} → choices[0].message.content
 //! - TTS  POST {base}/v1/audio/speech           {model, input, voice, response_format, sample_rate} → 原始 PCM
 //!
 //! 密钥**不进代码/仓库**，双源解析（0.0.6 模型连接抽象批）：ref 以 `env:` 开头 →
@@ -304,7 +304,10 @@ impl Rr3LlmClient {
         })
         .to_string()
         .into_bytes();
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        // base_url = 完整 OpenAI 兼容 API 根（含版本段，模型行配置承载），客户端
+        // 只拼 `/chat/completions`——GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`
+        // 与 DeepSeek `/v1` 同形接入，不按厂商猜版本段（ADR-0023）。
+        let url = format!("{}/chat/completions", self.base_url);
         let (status, resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
         if status != 200 {
             self.history.rr3_rollback_last();
@@ -737,7 +740,9 @@ mod tests {
         let srv = FakeCloud::start();
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
         std::env::set_var(RR3_API_KEY_ENV, "test-key");
-        let mut client = Rr3LlmClient::new(&srv.base, "deepseek-ai/DeepSeek-V3", 5.0, None, None);
+        // 模型行 base_url = 完整 API 根（假端点在主机根之上挂 /v1）
+        let llm_root = format!("{}/v1", srv.base);
+        let mut client = Rr3LlmClient::new(&llm_root, "deepseek-ai/DeepSeek-V3", 5.0, None, None);
         for i in 0..crate::llm::RR3_LLM_HISTORY_ROUNDS + 2 {
             assert_eq!(client.rr3_complete(&format!("问{i}")).unwrap(), "好的");
         }
@@ -778,7 +783,8 @@ mod tests {
         let srv = FakeCloud::start();
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
         std::env::set_var(RR3_API_KEY_ENV, "test-key");
-        let mut client = Rr3LlmClient::new(&srv.base, "m", 5.0, None, None);
+        let llm_root = format!("{}/v1", srv.base);
+        let mut client = Rr3LlmClient::new(&llm_root, "m", 5.0, None, None);
         *srv.bad_json_path.lock().unwrap() = Some("/v1/chat/completions".into());
         let e = client.rr3_complete("在吗").unwrap_err();
         assert!(e.contains("形状不符"), "{e}");
@@ -795,7 +801,8 @@ mod tests {
         let srv = FakeCloud::start();
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
         std::env::set_var(RR3_API_KEY_ENV, "test-key");
-        let mut client = Rr3LlmClient::new(&srv.base, "m", 5.0, None, None);
+        let llm_root = format!("{}/v1", srv.base);
+        let mut client = Rr3LlmClient::new(&llm_root, "m", 5.0, None, None);
         *srv.missing_field_path.lock().unwrap() = Some("/v1/chat/completions".into());
         let e = client.rr3_complete("在吗").unwrap_err();
         assert!(e.contains("形状不符"), "{e}");

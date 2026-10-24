@@ -120,19 +120,23 @@ pub fn rr3_brain_manifests(
 /// burst 源 1.5s 短判停。real 档（`--brain-cloud real`）：真端点 + 生产模型名
 /// （真值源 modules/rr3-brain/config.toml，此处按值镜像）+ 人声 8s 判停（生产值，
 /// 真人说话远慢于 burst 周期）。0.0.6 模型连接抽象批：real 档补 `[[rr3-brain.model]]`
-/// 连接行——`--brain-base-url` 旗标落到行 base_url，LLM 腿走 openai 格式，密钥引用
+/// 连接行——`--brain-base-url` 旗标按主机根传入，行 base_url 补成完整 API 根
+/// （ADR-0023：LLM 只拼 /chat/completions），LLM 腿走 openai 格式，密钥引用
 /// `env:RR3_CLOUD_API_KEY`（演练面沿用旧环境变量契约，面板 secrets 是板上/宿主面）。
 pub fn rr3_brain_config_text(cloud_real: bool, base_url: &str) -> String {
     if cloud_real {
         const ASR_MODEL: &str = "iic/SenseVoiceSmall";
         const LLM_MODEL: &str = "deepseek-ai/DeepSeek-V3";
         const TTS_MODEL: &str = "FunAudioLLM/CosyVoice2-0.5B";
+        // 演练面两义分离（ADR-0023）：cloud.base_url = 主机根（ASR/TTS 自拼
+        // /v1/audio/*）；模型行 base_url = 完整 API 根（LLM 只拼 /chat/completions）。
+        let llm_root = rr3_llm_root_of(base_url);
         format!(
             "[rr3-brain]\nlog_level = \"info\"\n\n[rr3-brain.cloud]\n\
              base_url = \"{base_url}\"\nasr_model = \"{ASR_MODEL}\"\nllm_model = \"{LLM_MODEL}\"\n\
              tts_model = \"{TTS_MODEL}\"\ntimeout_s = 20\n\n[rr3-brain.dialog]\n\
              max_utterance_ms = 8000\n\n[[rr3-brain.model]]\nname = \"演练真云\"\n\
-             mode = \"api\"\napi_format = \"openai\"\nbase_url = \"{base_url}\"\n\
+             mode = \"api\"\napi_format = \"openai\"\nbase_url = \"{llm_root}\"\n\
              model_id = \"{LLM_MODEL}\"\napi_key_ref = \"env:RR3_CLOUD_API_KEY\"\nactive = true\n"
         )
     } else {
@@ -142,6 +146,21 @@ pub fn rr3_brain_config_text(cloud_real: bool, base_url: &str) -> String {
              tts_model = \"mock\"\ntimeout_s = 5\n\n[rr3-brain.dialog]\nsilence_tail_ms = 700\n\
              max_turn_chars = 800\nmax_utterance_ms = {RR3_BRAIN_MAX_UTTERANCE_MS}\n"
         )
+    }
+}
+
+/// `--brain-base-url` 取值换算（与 rr3-brain boot 的 cloud fallback 同义）：主机根
+/// 路径为空补 `/v1`；已带路径（GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`）原样。
+fn rr3_llm_root_of(base_url: &str) -> String {
+    let s = base_url.trim().trim_end_matches('/');
+    let has_path = match s.split_once("://") {
+        Some((_, rest)) => rest.contains('/'),
+        None => s.contains('/'),
+    };
+    if has_path {
+        s.to_string()
+    } else {
+        format!("{s}/v1")
     }
 }
 
@@ -523,11 +542,22 @@ mod tests {
 
     #[test]
     fn real_cloud_config_carries_production_models_and_endpoint() {
-        // 真值镜像 modules/rr3-brain/config.toml：base_url 是主机根（客户端自拼 /v1）
+        // 真值镜像 modules/rr3-brain/config.toml：cloud.base_url 是主机根（ASR/TTS
+        // 自拼 /v1/audio/*）；模型行 base_url 是完整 API 根（LLM 只拼 /chat/completions）
         let cfg = rr3_brain_config_text(true, "https://api.siliconflow.cn");
         assert!(
             cfg.contains("base_url = \"https://api.siliconflow.cn\""),
             "{cfg}"
+        );
+        assert!(
+            cfg.contains("base_url = \"https://api.siliconflow.cn/v1\""),
+            "模型行补版本段: {cfg}"
+        );
+        // 已带路径的 API 根原样（GLM / Qwen 各写各的版本段，不按主机名猜）
+        let glm = rr3_brain_config_text(true, "https://open.bigmodel.cn/api/paas/v4");
+        assert!(
+            glm.contains("base_url = \"https://open.bigmodel.cn/api/paas/v4\""),
+            "{glm}"
         );
         // 生产模型名与 modules/rr3-brain/config.toml 同值（此处按值镜像，改名两侧同红）
         assert!(cfg.contains("asr_model = \"iic/SenseVoiceSmall\""), "{cfg}");
