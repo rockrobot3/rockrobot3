@@ -126,11 +126,13 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
-/// 今日实况（批N22 件一）：23 端点，读配置者 6 = `GET /api/brain/ops`
-/// （brain ops 六槽）＋五模块 ops 读口五端点（`GET /api/{act,connect,interact,power,
-/// sense}/ops`，BusCall 透传各模块 `rr3-<mod>/ops/list`，白名单组体应答）；写口 2 =
+/// 今日实况（ADR-0023 模型面后）：26 端点，读配置者 7 = `GET /api/brain/ops`
+/// （brain ops 六槽）＋ `GET /api/brain/models`（模型行快照）＋五模块 ops 读口五
+/// 端点（`GET /api/{act,connect,interact,power,sense}/ops`，BusCall 透传各模块
+/// `rr3-<mod>/ops/list`，白名单组体应答）；写口 3 =
 /// `POST /api/brain/ops`（BusCall 透传 `rr3-brain/ops/set`，组.槽寻址、owner 白名单
-/// fail-closed）＋ `POST /api/profile/domain`（批N22 件一，ctl.domain.set 透传——
+/// fail-closed）＋ `POST /api/brain/model`（ADR-0023 模型行 CRUD，落盘 + live 生效）＋
+/// `POST /api/profile/domain`（批N22 件一，ctl.domain.set 透传——
 /// 装配侧写口，confirm/证据/key 白名单门序全在 rrd domain_write.rs 单点裁决，面板
 /// 只透传 body；covers 申报四键 = conventions §6.1 三写口点名集，applies=reboot
 /// 如实申报"下次 rrd boot 生效"）——ops 路分母 36 槽全部转绿（covers 申报 30 项随
@@ -142,10 +144,12 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 读面可读即申报，写面半边随批N22 件一 `/api/profile/domain` 收口）⇒ 红账 43 全转绿，基线
 /// tools/ci/gate-d-baseline.txt 行 1 同批 43→0；密钥面两端点（keys/key）不申报
 /// covers——密钥不在五路分母（secrets 不住 assemble.toml 槽表），如实空。
-/// applies 今日三条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
+/// applies 今日四条申报 = `POST /api/model/key`（secrets 凭据写入，brain 现读
 /// ⇒ live）＋ `POST /api/brain/ops`（写臂重建受影响客户端，live 内存生效**不落盘**，
 /// 应答 `persisted:false` 如实申报——重启回 config.toml 真值；Python 无 TOML
-/// writer、Y-2 单写路径协商点归后续批）＋ `POST /api/profile/domain`（reboot——
+/// writer、Y-2 单写路径协商点归后续批）＋ `POST /api/brain/model`（ADR-0023：
+/// config.toml 原子落盘 + live 换客户端，`persisted:true` 如实申报）＋
+/// `POST /api/profile/domain`（reboot——
 /// 装配单落盘，下次 rrd 进程装载投影，运行态不动；三态词表取最近义的 reboot）；
 /// 其余写口（beep/face/selftest/reboot/
 /// relay/wifi）写的是动作与运行态，不动可配置集，如实空。**表项一律单行书写**
@@ -168,6 +172,9 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("POST", "/api/model/key", &[], "live"),
     ("GET", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], ""),
     ("POST", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], "live"),
+    ("GET", "/api/brain/models", &[], ""),
+    ("POST", "/api/brain/model", &[], "live"),
+    ("POST", "/api/brain/model/test", &[], ""),
     ("GET", "/api/act/ops", &["ops/blink_period_ms", "ops/led_effects", "ops/move_timeout_ms", "ops/state_min_interval_ms"], ""),
     ("GET", "/api/connect/ops", &["ops/up", "ops/link_report_period_ms", "ops/timeout_ms", "ops/min_pass_len"], ""),
     ("GET", "/api/interact/ops", &["ops/non_pointable", "ops/default_expression", "ops/face_tick_ms", "ops/selftest_face_expect", "ops/panel_max_conns", "ops/panel_read_timeout_ms", "ops/panel_header_limit", "ops/panel_body_limit", "ops/panel_call_timeout_ms", "ops/prebuffer_ms", "ops/volume_pct"], ""),
@@ -489,6 +496,43 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
                 };
                 Rr3PanelDispatch::BusCall {
                     topic: "rr3-brain/ops/set".to_string(),
+                    args,
+                }
+            }
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        // 模型行面（ADR-0023）：GET 点名 `rr3-brain/model/list` 快照；POST
+        // `/api/brain/model` 点名 CRUD 写口（op/name/字段 body 原样透传，裁决在
+        // owner：结构门 + base_url 完整根 + 落盘），POST `/api/brain/model/test`
+        // 点名单次连通性探测（业务失败以 ok:false 回，不折 HTTP 错）
+        "/api/brain/models" => match method {
+            "GET" => Rr3PanelDispatch::BusCall {
+                topic: "rr3-brain/model/list".to_string(),
+                args: json!({}),
+            },
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/brain/model" => match method {
+            "POST" => {
+                let args = match rr3_panel_body_json(body) {
+                    Ok(v) => v,
+                    Err(e) => return Rr3PanelDispatch::BadRequest(e),
+                };
+                Rr3PanelDispatch::BusCall {
+                    topic: "rr3-brain/model/set".to_string(),
+                    args,
+                }
+            }
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/brain/model/test" => match method {
+            "POST" => {
+                let args = match rr3_panel_body_json(body) {
+                    Ok(v) => v,
+                    Err(e) => return Rr3PanelDispatch::BadRequest(e),
+                };
+                Rr3PanelDispatch::BusCall {
+                    topic: "rr3-brain/model/test".to_string(),
                     args,
                 }
             }
@@ -1458,8 +1502,8 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            23,
-            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（批N22 件一 22→23：POST /api/profile/domain 装配侧写口）"
+            26,
+            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（ADR-0023 23→26：增 GET /api/brain/models + POST /api/brain/model + POST /api/brain/model/test）"
         );
         for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {
@@ -1468,6 +1512,12 @@ mod tests {
                 ("POST", "/api/wifi/connect") => br#"{"ssid":"s","pass":"password8"}"#,
                 ("POST", "/api/model/key") => r#"{"ref":"测试键","value":"sk-x"}"#.as_bytes(),
                 ("POST", "/api/brain/ops") => br#"{"group":"asr","slot":"asr_model","value":"m2"}"#,
+                ("POST", "/api/brain/model") => {
+                    r#"{"op":"activate","name":"DeepSeek官方"}"#.as_bytes()
+                }
+                ("POST", "/api/brain/model/test") => {
+                    r#"{"name":"DeepSeek官方"}"#.as_bytes()
+                }
                 ("POST", "/api/profile/domain") => {
                     r#"{"target":"domain","name":"rail5v","key":"armed","value":true,"confirm":true,"evidence":"实测/0001"}"#.as_bytes()
                 }
@@ -1545,6 +1595,7 @@ mod tests {
             vec![
                 &("POST", "/api/model/key", &[][..], "live"),
                 &("POST", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"][..], "live"),
+                &("POST", "/api/brain/model", &[][..], "live"),
                 &("POST", "/api/profile/domain", &["domain/armed", "domain/evidence", "domain/severe_mv", "axis/current_ceil_ma"][..], "reboot"),
             ],
             "applies 申报面漂移：新增写口申报须同批改本 pin"

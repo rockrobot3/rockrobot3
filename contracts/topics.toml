@@ -312,6 +312,27 @@ stable = "L2"
 note = "ops 槽写口点名（批N4 件九三 配置面）：组.槽寻址与 ops/list 快照读源对偶（llm 组写实效源——模型行 active 在则写行、fallback 写 cloud 段），白名单外与类型域值错一律拒（fail-closed）；live 内存生效（写臂重建受影响客户端，dialog 就地改参），不落盘——应答 persisted:false 如实申报，重启回 config.toml 真值（Python 无 TOML writer、保注释重写面与 Y-2 单写路径协商点归后续批）；密钥与 key_ref 不在写面（密钥面走 panel secrets 端点）"
 
 [[topic]]
+name = "rr3-brain/model/list"
+kind = "request"
+owner = "rr3-brain"
+stable = "L2"
+note = "模型行列表只读点名（ADR-0023 模型面）：OpenAI 兼容多厂商行表快照——每行回 name/mode/api_format/base_url/model_id/key_ref/key_set/active，只回 key_set 布尔、永无密钥明文；应答末位 active = 当前生效行名（空表走 cloud fallback 时为 null）"
+
+[[topic]]
+name = "rr3-brain/model/set"
+kind = "request"
+owner = "rr3-brain"
+stable = "L2"
+note = "模型行 CRUD 写点名（ADR-0023）：op=upsert|activate|delete + name（+ upsert 的 base_url/model_id/api_format/mode/api_key_ref/active）；写面自守「恰一 active」与 base_url 完整 API 根校验 → 块重写（块外逐字保留）→ 落盘前过 boot 解析器 → config.toml.bak 备份 + 原子写（tmp→fsync→rename）→ 提交内存并按 llm 组重建客户端；应答 persisted:true / applies:live，任一步失败内存与旧文件均不变"
+
+[[topic]]
+name = "rr3-brain/model/test"
+kind = "request"
+owner = "rr3-brain"
+stable = "L2"
+note = "模型行连通性测试点名（ADR-0023）：按 name 取行造临时客户端发 max_tokens=1 的 /chat/completions 探测，不写盘不改内存；业务失败（缺 key / 非 2xx / 不可达）用 ok:false + error 表达（不折 RPC 错误），成功回 status/latency_ms/mock"
+
+[[topic]]
 name = "rr3-sense/ops/list"
 kind = "request"
 owner = "rr3-sense"

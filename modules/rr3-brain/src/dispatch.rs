@@ -2,12 +2,14 @@
 //! 语音主链编排全接线）。
 //!
 //! [`Rr3BrainDispatcher`] 实现 rr3mod [`Dispatcher`]（serve 骨架回调）。事务面
-//! on_rpc 三臂（module.toml [rpc].exposes 三条全接线）：`llm/completion` 已激活
+//! on_rpc 六臂（module.toml [rpc].exposes 六条全接线）：`llm/completion` 已激活
 //! （[`cloud::Rr3LlmClient`]，mock 档回显/real 档带历史真调；业务失败 Err 折
 //! `{"error": …}` 应答——Python try/except RuntimeError 同 wire）、`ops/list`
 //! 快照（[`rpc::rr3_ops_snapshot`] 白名单组体）、`ops/set` 写臂（[`rpc::rr3_ops_set_arm`]
 //! 全语义：白名单/类型域校验 → live 内存生效不落盘 → 按组重建受影响客户端——
 //! asr/tts/llm 三组各重建、dialog 组就地改参 [`dialog::Rr3Dialog::max_utterance_ms`]）；
+//! `model/list|set|test` 模型行面（[`rpc::rr3_model_list_snapshot`] /
+//! [`rpc::rr3_model_set_arm`] 落盘 + llm 组重建 / [`rpc::rr3_model_test_arm`] 单次探测）；
 //! 未知 topic 返 Err 由 serve 折 `{"error": …}` 应答（Python 主循环兜底分支同 wire）。
 //!
 //! 事件面 on_event 两臂（自 Python composite.py 主循环事件分支逐语义迁入）：
@@ -34,7 +36,10 @@ use crate::boot::{rr3_cloud_cfg_of, Rr3BrainCfg};
 use crate::cloud::{Rr3AsrClient, Rr3LlmClient, Rr3TtsClient};
 use crate::dialog::{Rr3Dialog, Rr3DialogTurn};
 use crate::intent::rr3_extract_actions;
-use crate::rpc::{rr3_model_row_of, rr3_ops_set_arm, rr3_ops_snapshot, rr3_py_str};
+use crate::rpc::{
+    rr3_model_list_snapshot, rr3_model_row_of, rr3_model_set_arm, rr3_model_test_arm,
+    rr3_ops_set_arm, rr3_ops_snapshot, rr3_py_str,
+};
 
 /// 本模块 exposes 的 completion 点名（module.toml [rpc].exposes 同源）
 pub(crate) const RR3_COMPLETION_TOPIC: &str = "rr3-brain/llm/completion";
@@ -45,13 +50,48 @@ pub(crate) const RR3_OPS_LIST_TOPIC: &str = "rr3-brain/ops/list";
 /// ops 槽写口（批N4 件九三 配置面）
 pub(crate) const RR3_OPS_SET_TOPIC: &str = "rr3-brain/ops/set";
 
-/// exposes 申报面（module.toml [rpc].exposes 同源三件；SURFACE 自述与未知 topic
+/// 模型行列表读口（ADR-0023 面板模型面）
+pub(crate) const RR3_MODEL_LIST_TOPIC: &str = "rr3-brain/model/list";
+
+/// 模型行 CRUD 写口（upsert/activate/delete；落盘 + live 生效）
+pub(crate) const RR3_MODEL_SET_TOPIC: &str = "rr3-brain/model/set";
+
+/// 模型行连通性测试口（按名探测一次，不写盘不改内存）
+pub(crate) const RR3_MODEL_TEST_TOPIC: &str = "rr3-brain/model/test";
+
+/// exposes 申报面（module.toml [rpc].exposes 同源六件；SURFACE 自述与未知 topic
 /// 兜底文案共此一源——列表 repr 是 Python RPC_EXPOSES 的形状）
-pub(crate) const RR3_RPC_EXPOSES: [&str; 3] = [
+pub(crate) const RR3_RPC_EXPOSES: [&str; 6] = [
     "rr3-brain/llm/completion",
     "rr3-brain/ops/list",
     "rr3-brain/ops/set",
+    "rr3-brain/model/list",
+    "rr3-brain/model/set",
+    "rr3-brain/model/test",
 ];
+
+/// 申报发布面（与 module.toml [events].publishes 同源双写，composite.py PUBLISHES 同义）
+const RR3_PUBLISHES: [&str; 2] = ["rr3-brain/intent/result", "rr3-brain/audio/tts_pcm"];
+
+/// 申报订阅面（与 module.toml [events].subscribes 同源双写，C14 实然面：
+/// pcm + vad_start 是语音主链入口；消费编排随迁移件四落）
+const RR3_SUBSCRIBES: [&str; 2] = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_start"];
+
+/// 启动自述（Python composite.py `rr3_brain_run` 打印序列逐字不变）：架构面
+/// "这个模块管什么"的说明，版本随 Python `__version__` 逐字。机制面自述归
+/// dispatch（装配入口只留启动编排，ADR-0017 五层表 ≤80 行门）。
+pub(crate) fn rr3_brain_surface() {
+    eprintln!("rr3-brain 0.1.0 (M4 实装)");
+    for topic in RR3_PUBLISHES {
+        eprintln!("  publish   {topic}");
+    }
+    for topic in RR3_SUBSCRIBES {
+        eprintln!("  subscribe {topic}");
+    }
+    for topic in RR3_RPC_EXPOSES {
+        eprintln!("  rpc       {topic}");
+    }
+}
 
 /// 订阅消费面两臂事件（module.toml [events].subscribes 同源）
 pub(crate) const RR3_TOPIC_PCM: &str = "rr3-sense/audio/pcm";
@@ -361,8 +401,8 @@ impl Rr3BrainDispatcher {
 }
 
 impl Dispatcher for Rr3BrainDispatcher {
-    /// rr3.call 点名应答（事务面三臂，module.toml exposes 同源）。薄委托
-    /// [`rr3_rpc_arm`]——三臂是纯内存面不触总线（bus 参数留给 trait 形状），
+    /// rr3.call 点名应答（事务面六臂，module.toml exposes 同源）。薄委托
+    /// [`rr3_rpc_arm`]——六臂是内存面不触总线（bus 参数留给 trait 形状），
     /// 纯函数即测试真值入口（仓外侧无法凭空构造 BusHandle）。
     fn on_rpc(&mut self, topic: &str, args: &Value, _bus: &BusHandle) -> Result<Value, String> {
         rr3_rpc_arm(
@@ -416,6 +456,16 @@ pub(crate) fn rr3_rpc_arm(
             rr3_rebuild_clients(cfg, &group, &new, dialog, clients)?;
             Ok(reply)
         }
+        // 模型行三臂（ADR-0023）：列表只读；set 落盘后按 llm 组重建客户端
+        // （写面已自守结构门，重建取数不可达失败面如实上抛）；test 只探测一次，
+        // 业务失败用 `ok:false` 表达（面板要区分"接口通"与"RPC 出错"）
+        RR3_MODEL_LIST_TOPIC => rr3_model_list_snapshot(cfg),
+        RR3_MODEL_SET_TOPIC => {
+            let reply = rr3_model_set_arm(cfg, args)?;
+            rr3_rebuild_clients(cfg, "llm", &Value::Null, dialog, clients)?;
+            Ok(reply)
+        }
+        RR3_MODEL_TEST_TOPIC => rr3_model_test_arm(cfg, args),
         _ => {
             let list: Vec<String> = RR3_RPC_EXPOSES.iter().map(|t| format!("'{t}'")).collect();
             Err(format!(
@@ -601,7 +651,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e,
-            "rr3-brain 只 exposes ['rr3-brain/llm/completion', 'rr3-brain/ops/list', 'rr3-brain/ops/set']，收到 rr3-brain/other"
+            "rr3-brain 只 exposes ['rr3-brain/llm/completion', 'rr3-brain/ops/list', 'rr3-brain/ops/set', 'rr3-brain/model/list', 'rr3-brain/model/set', 'rr3-brain/model/test']，收到 rr3-brain/other"
         );
     }
 
