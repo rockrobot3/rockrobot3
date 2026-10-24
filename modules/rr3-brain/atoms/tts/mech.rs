@@ -16,6 +16,27 @@ pub fn rr3_tts_voice(model: &str) -> String {
     format!("{model}{RR3_TTS_VOICE_SUFFIX}")
 }
 
+/// WAV 容器里 `data` 块的载荷（宿主 `say` 兜底用）：跳过 RIFF 头与各子块，
+/// 只取 `data` 块本体；无 `data` 块/长度越界返回 None（不猜不补）。
+pub fn rr3_wav_data_chunk(wav: &[u8]) -> Option<&[u8]> {
+    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut i = 12;
+    while i + 8 <= wav.len() {
+        let id = &wav[i..i + 4];
+        let len = u32::from_le_bytes(wav[i + 4..i + 8].try_into().ok()?) as usize;
+        let body = i + 8;
+        if id == b"data" {
+            let end = body.checked_add(len)?;
+            return wav.get(body..end);
+        }
+        // 子块按声明长度跳过（奇数长度补 1 字节对齐）
+        i = body.checked_add(len + (len & 1))?;
+    }
+    None
+}
+
 /// mock TTS 的确定性 PCM：440Hz 正弦，时长随文本长度（s16le；振幅 12000）。
 pub fn rr3_sine_pcm(text: &str, sample_rate: u32) -> Vec<u8> {
     rr3_sine_pcm_ms(text, sample_rate, RR3_SINE_MS_PER_CHAR)
@@ -56,6 +77,36 @@ mod tests {
         }
         // 时长换算：2 字符 × 80ms × 16kHz × 2B
         assert_eq!(a.len(), 2 * 80 * 16 * 2);
+    }
+
+    /// WAV 抽 data 块：fmt 块在前、data 块在后（say 的实际形状）；非 RIFF/缺
+    /// data/长度越界一律 None
+    #[test]
+    fn wav_data_chunk_extracts_payload_and_rejects_malformed() {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36u32 + 6).to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&[0u8; 16]);
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&6u32.to_le_bytes());
+        wav.extend_from_slice(&[1, 2, 3, 4, 5, 6]);
+        assert_eq!(rr3_wav_data_chunk(&wav), Some(&[1, 2, 3, 4, 5, 6][..]));
+        // 非 RIFF
+        assert_eq!(rr3_wav_data_chunk(b"RIFXxxxxxxxx"), None);
+        // 缺 data 块
+        let mut no_data = wav[..12].to_vec();
+        no_data.extend_from_slice(b"fmt ");
+        no_data.extend_from_slice(&16u32.to_le_bytes());
+        no_data.extend_from_slice(&[0u8; 16]);
+        assert_eq!(rr3_wav_data_chunk(&no_data), None);
+        // data 声明长度越过缓冲
+        let mut short = wav.clone();
+        let n = short.len();
+        short[n - 10..n - 6].copy_from_slice(&99u32.to_le_bytes());
+        assert_eq!(rr3_wav_data_chunk(&short), None);
     }
 
     /// ⑧-a 腿二：voice 命名对位 legacy tts_config.h（模型名 + 女声 bella）

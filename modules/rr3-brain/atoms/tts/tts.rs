@@ -15,4 +15,4 @@ mod private;
 /// 公开面：voice 命名与 mock 正弦 PCM（确定性 440Hz；参数化底座
 /// rr3_sine_pcm_ms 与后缀常量由 rr3_sine_pcm/rr3_tts_voice 内部构成——mech 内
 /// pub fn 留给件级 parity 腿，bin 面无件外读者不进入口 re-export）
-pub use mech::{rr3_sine_pcm, rr3_tts_voice};
+pub use mech::{rr3_sine_pcm, rr3_tts_voice, rr3_wav_data_chunk};
