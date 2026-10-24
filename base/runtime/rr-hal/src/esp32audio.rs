@@ -53,16 +53,16 @@ use rr_ipc::{
     rr3_base64_decode, rr3_body_split, FrameAssembler, Rr3FrameBuf, Rr3Header, Rr3PayloadType,
     Rr3TransportConn, Rr3UartConn,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 
 // ---------------------------------------------------------------------------
 // 两端帧头约定（板不依赖 rr-core，板/宿主常量自证——与 tools/rr3-audio-rec
 // 同纪律；与 crate::esp32_uart 的同值锚定测试同一防静默分叉口径）
 // ---------------------------------------------------------------------------
 
-/// 宿主 task 位形（帧头 dst 门：只收发给宿主的 Event）。与
-/// `crate::esp32_uart::RR3_TASK_HOST` 同值 1（彼处私有，本地自证 + 注释锚定）。
-const RR3_HOST_TASK: u64 = 1;
+/// 宿主 task 位形（帧头 dst 门）：真值单点在 rr-periph-proto（ADR-0024），本地
+/// 别名保既有消费面与测试路径。
+pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST as RR3_HOST_TASK;
 /// 音频 PCM 上行主题（在册 stream L1：contracts/topics.toml；事实源
 /// modules/rr3-sense composite::`RR3_PCM_TOPIC`，本 crate 不加依赖边，同值锚定）。
 const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
@@ -93,17 +93,11 @@ const RR3_AUDIO_CMD_CAP: usize = 2;
 // [`crate::esp32_uart::rr3_bridge_request_frame`]（与舵机/显示桥同形零重复）。
 // ---------------------------------------------------------------------------
 
-/// 板外设语义命令（旁路载荷；帧构造在读线程单点，id/帧头/信封全走桥形状）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Rr3PeriphCmd {
-    /// 舵机 pan 轴绝对角 → `rr3-act/servo/command`，args `{"angle_deg":N,"axis":"pan"}`
-    /// （payload 形状事实源 contracts/events/act-servo_command.schema.json）。
-    /// 板侧行程收窄 fail-closed：越界拒收点名，宿主侧不猜行程不预钳。
-    ServoPan(u16),
-    /// 舵机 tilt 轴绝对角 → 同主题 args `{"angle_deg":N,"axis":"tilt"}`（点头示意
-    /// 动作，2026-10-24 批：反射环转头后的"应答"手势）。行程同样板侧裁决。
-    ServoTilt(u16),
-}
+// 板外设语义命令 + 帧构造：真值单点在 rr-periph-proto（ADR-0024，宿主与固件
+// 双向复用），本地 re-export 保既有 `rr_hal::esp32audio::Rr3PeriphCmd` 路径。
+pub use rr_periph_proto::cmd::Rr3PeriphCmd;
+pub(crate) use rr_periph_proto::cmd::rr3_esp32_cmd_frame;
+use rr_periph_proto::cmd::Rr3BoardFrame;
 
 /// 命令旁路盒（Mutex 内纯数据）：有界、满丢最旧 + 溢丢计数（板侧 audio_q
 /// 同款背压口径）。产面归构造方（rr3-sense 反射环），耗面归读线程独占。
@@ -171,25 +165,10 @@ fn rr3_audio_cmd_pair() -> (Rr3AudioCmdProducer, Rr3AudioCmdConsumer) {
     )
 }
 
-/// 语义命令 → 整帧（纯函数）：走 [`crate::esp32_uart::rr3_bridge_call_frame`]
-/// 桥同形单点——信封 `rr3.call`（topic 在 params.topic / args 在 params.args）、
-/// 帧头 src=宿主 1 / dst=板 2 / direct trace，与舵机/显示桥逐字同源。
-fn rr3_esp32_cmd_frame(id: u64, cmd: &Rr3PeriphCmd) -> rr_ipc::Rr3Frame {
-    let (topic, args) = match cmd {
-        Rr3PeriphCmd::ServoPan(deg) => (
-            crate::esp32_uart::RR3_SERVO_TOPIC,
-            json!({ "angle_deg": *deg, "axis": "pan" }),
-        ),
-        Rr3PeriphCmd::ServoTilt(deg) => (
-            crate::esp32_uart::RR3_SERVO_TOPIC,
-            json!({ "angle_deg": *deg, "axis": "tilt" }),
-        ),
-    };
-    crate::esp32_uart::rr3_bridge_call_frame(id, topic, &args)
-}
-
 /// 板面入帧分类（b1）：Response（命令旁路的板侧应答）放行记账，其余走音频
-/// 四道门——旁路回执不再污 err_streak（帧界损坏记账语义保住）。
+/// 四道门——旁路回执不再污 err_streak（帧界损坏记账语义保住）。协议级判别
+/// （dst 门 + payload 前缀门 + Response 解析）在 rr-periph-proto；音频载荷门序
+/// 与解码留在本件消费面。
 #[derive(Debug)]
 enum Rr3BoardFrameIn {
     /// 音频 Event（四道门全过）
@@ -203,24 +182,12 @@ fn rr3_esp32_classify_board_frame(
     hdr: &Rr3Header,
     payload: &[u8],
 ) -> Result<Rr3BoardFrameIn, String> {
-    if hdr.dst_task != RR3_HOST_TASK {
-        return Err(format!(
-            "dst_task={} 非宿主位形 {RR3_HOST_TASK}",
-            hdr.dst_task
-        ));
+    match rr_periph_proto::cmd::rr3_board_frame_classify(hdr, payload)? {
+        Rr3BoardFrame::Reply { id, err } => Ok(Rr3BoardFrameIn::Reply { id, err }),
+        Rr3BoardFrame::Event => {
+            rr3_esp32_parse_audio_event(hdr, payload).map(Rr3BoardFrameIn::Audio)
+        }
     }
-    let (ty, body) = rr3_body_split(payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
-    if ty == Rr3PayloadType::Response {
-        let v: Value = serde_json::from_slice(&body).map_err(|e| format!("应答体非 JSON: {e}"))?;
-        let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
-        let err = v
-            .get("result")
-            .and_then(|r| r.get("error"))
-            .and_then(Value::as_str)
-            .map(|s| s.to_string());
-        return Ok(Rr3BoardFrameIn::Reply { id, err });
-    }
-    rr3_esp32_parse_audio_event(hdr, payload).map(Rr3BoardFrameIn::Audio)
 }
 
 // ---------------------------------------------------------------------------

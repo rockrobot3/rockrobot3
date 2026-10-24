@@ -1,0 +1,19 @@
+[package]
+name = "rr-periph-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "ESP32 外设帧面协议共享层：task 位形/主题/magic/请求应答组帧解析（宿主与固件双向复用，零 esp-idf 依赖）"
+
+[lib]
+name = "rr_periph_proto"
+path = "src/lib.rs"
+
+# 只依赖 rr-ipc（字节契约 + 帧缓冲）与 serde_json（信封体）：**不得**引入任何
+# esp-idf-* ——宿主 rr-hal 与 xtensa 固件双向引用本 crate，esp-idf 依赖会反向
+# 污染宿主构建面（ADR-0024）。
+[dependencies]
+rr-ipc = { path = "../rr-ipc" }
+serde_json = { workspace = true }
