@@ -119,7 +119,8 @@ brain 与 CI bash 胶水是仅存的两块非 Rust 面。立规晚于 ADR-0013/0
   on_event vad_start 臂＋on_tick expired 臂两路共用／错误两档直接承载失败契约／
   启动序遵 bootstrap 固定序＋`connect_timeout_s` 键随迁移退役／HTTP-TLS 依赖选型
   方向同步 API＋rustls 系／评审性质与 ADR-0014 不增补／件表五件）落 decisions §2
-  （取证基线 `6add250`），细目见
+  （取证基线 `4ed3048`，批N32 收口随批订正——原误写 `6add250`＝批N31 件三载体提交），
+  细目见
   [批N32 计划册 §2](../dev/0.0.8整理窗——批N32开发计划与W-Cbrain迁移增补评审.md)。
   裁定 1/2/3/4 正文一字不动。
 - 校验项：实施批次每件照正常批次纪律收尾（九步门禁 + conventions §2 登记 +
