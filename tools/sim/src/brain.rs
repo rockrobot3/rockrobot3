@@ -3,7 +3,7 @@
 //!
 //! 与既有两面演练（main.rs `run` 模块）同构：夹具（临时目录 + 套接字 + 三份 wire
 //! manifest）→ rrd boot spawn rr3-sense（sim 正弦源，必过 VAD 起音阈值）→ 外部起
-//! rr3-interact 与 rr3-brain（shim 脚本对位"装机时写绝对 entry"）→ 有界等待
+//! rr3-interact 与 rr3-brain（`target/debug` 同名二进制，与其余模块同形）→ 有界等待
 //! brain 日志出现"对话轮完成"证据 → `rr3-ctl status` 断言三模块 running 且
 //! `denied_publish = 0` → 报告 + 收尾。
 //!
@@ -17,7 +17,7 @@
 //! `--audio-backend esp32` 必给——flock 排他下 interact 不得吃源面 UART，A 批 c4）。
 //! 本模块依赖 UDS 与真进程，仅 Unix 参与编译。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -102,7 +102,7 @@ pub fn rr3_brain_manifests(
                 RR3_SIM_MODULE_BRAIN,
                 brain_entry,
                 "brain",
-                "python",
+                "rust",
                 RR3_BRAIN_HB_MS,
                 RR3_BRAIN_WD_MS,
                 "never",
@@ -114,15 +114,6 @@ pub fn rr3_brain_manifests(
             ),
         ),
     ]
-}
-
-/// brain 演练现场生成的 shim 脚本（装机时由安装步骤写绝对 entry 的开发等价物）。
-/// `py_module` 是 `python3 -m` 的包名（目录名连字符转下划线，如 rr3-brain → rr3_brain）。
-pub fn rr3_brain_shim_script(brain_pkg_dir: &Path, py_module: &str) -> String {
-    format!(
-        "#!/bin/sh\nPYTHONPATH={} exec python3 -m {py_module}\n",
-        brain_pkg_dir.display()
-    )
 }
 
 /// brain 演练专属 config。mock 档（缺省）：死地址 + mock 模型，闭环不碰网络、
@@ -174,7 +165,10 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .interact
         .clone()
         .unwrap_or(repo.join("modules/rr3-interact/target/debug/rr3-interact"));
-    let brain_pkg = repo.join("modules/rr3-brain");
+    let brain = a
+        .brain_bin
+        .clone()
+        .unwrap_or(repo.join("modules/rr3-brain/target/debug/rr3-brain"));
     rr3_require_bins_ext(&[
         (&rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
         (&rrctl, "cargo build --manifest-path tools/rrctl/Cargo.toml"),
@@ -186,14 +180,8 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             &interact,
             "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
         ),
+        (&brain, "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）"),
     ])?;
-    if !brain_pkg.join("rr3_brain").is_dir() {
-        return Err(format!(
-            "缺 Python 包 {}",
-            brain_pkg.join("rr3_brain").display()
-        ));
-    }
-    let py = which_python3()?;
 
     // 音频后端与云模式（缺省行为零改动：sim + mock——CI/无头纪律；真件只显式启用）
     let audio_backend = a.audio_backend.clone().unwrap_or_else(|| "sim".to_string());
@@ -210,7 +198,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .clone()
         .unwrap_or_else(|| "http://127.0.0.1:9/v1".to_string());
 
-    // ---- 1. 夹具：套接字 + 三份 manifest + shim + 演练 config ----
+    // ---- 1. 夹具：套接字 + 三份 manifest + 演练 config ----
     let workdir = match &a.socket {
         Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
         None => std::env::temp_dir().join(format!("rr3-sim-brain-{}", std::process::id())),
@@ -219,11 +207,6 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
     let _ = std::fs::remove_file(&socket);
 
-    // brain 的 wire entry：workdir 里的 shim（exec python3 -m rr3_brain，PYTHONPATH 指仓内包）
-    let shim_path = workdir.join("rr3-brain");
-    std::fs::write(&shim_path, rr3_brain_shim_script(&brain_pkg, "rr3_brain"))
-        .map_err(|e| format!("写 shim 失败: {e}"))?;
-    make_executable(&shim_path)?;
     let manifest_path = workdir.join("config.toml");
     std::fs::write(
         &manifest_path,
@@ -243,7 +226,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
     let outcome = (|| -> Result<(), String> {
-        for (name, text) in rr3_brain_manifests(&sense, &interact, &shim_path) {
+        for (name, text) in rr3_brain_manifests(&sense, &interact, &brain) {
             let p = workdir.join(format!("{name}.toml"));
             std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
         }
@@ -317,11 +300,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         children.push((RR3_SIM_MODULE_B.into(), interact_child));
 
         let brain_log = workdir.join("brain.log");
-        let brain_child = Command::new(&py)
-            .arg("-u") // 日志落文件不缓冲：轮次完成判据按行可读，进程被杀也不丢现场
-            .arg("-m")
-            .arg("rr3_brain")
-            .env("PYTHONPATH", &brain_pkg)
+        let brain_child = Command::new(&brain)
             .env("RR3_BUS_PATH", &socket)
             .env("RR3_MANIFEST", &m_brain)
             .env("RR3_BRAIN_CLOUD", if cloud_real { "real" } else { "mock" })
@@ -481,48 +460,6 @@ pub(crate) fn wait_log_contains(
     ))
 }
 
-pub(crate) fn which_python3() -> Result<PathBuf, String> {
-    let mut tried: Vec<PathBuf> = Vec::new();
-    for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
-        let p = dir.join("python3");
-        if p.is_file() {
-            // 能力验证而非版本号比对：rr3-brain 的运行门槛是 stdlib tomllib（≥3.11）。
-            // 版本字符串解析脆弱（"Python 3.9.6" / "3.12.4" 形状各异），import 成败
-            // 是门槛本身的直接证据。不满足的候选继续向后找，全不满足才报错。
-            let ok = Command::new(&p)
-                .arg("-c")
-                .arg("import tomllib")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if ok {
-                return Ok(p);
-            }
-            tried.push(p);
-        }
-    }
-    Err(format!(
-        "PATH 里的 python3 都不满足 rr3-brain 运行门槛（stdlib tomllib，Python ≥3.11）：试过 {tried:?}。请把 3.11+ 的 python3 放进 PATH 前列（brain 工程的 pyproject 要求 3.12；远端 CI ubuntu runner 自带满足）"
-    ))
-}
-
-pub(crate) fn make_executable(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perm = std::fs::metadata(path)
-            .map_err(|e| format!("stat {path:?} 失败: {e}"))?
-            .permissions();
-        perm.set_mode(0o755);
-        std::fs::set_permissions(path, perm).map_err(|e| format!("chmod {path:?} 失败: {e}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Err("--brain 演练仅 Unix 可用".into())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,7 +502,7 @@ mod tests {
         );
         let brain = &ms[2].1;
         assert!(brain.contains("type = \"brain\""), "{brain}");
-        assert!(brain.contains("lang = \"python\""), "{brain}");
+        assert!(brain.contains("lang = \"rust\""), "{brain}");
         assert!(
             brain.contains("exposes = [\"rr3-brain/llm/completion\"]"),
             "{brain}"
@@ -573,14 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn shim_and_config_shapes() {
-        let shim = rr3_brain_shim_script(Path::new("/repo/modules/rr3-brain"), "rr3_brain");
-        assert!(shim.starts_with("#!/bin/sh\n"), "{shim}");
-        assert!(
-            shim.contains("PYTHONPATH=/repo/modules/rr3-brain"),
-            "{shim}"
-        );
-        assert!(shim.contains("exec python3 -m rr3_brain"), "{shim}");
+    fn config_shapes() {
         // mock 档（缺省）：死地址 + mock 模型 + burst 短判停
         let cfg = rr3_brain_config_text(false, "http://127.0.0.1:9/v1");
         assert!(cfg.contains("max_utterance_ms = 1500"), "{cfg}");

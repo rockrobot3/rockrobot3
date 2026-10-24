@@ -3,9 +3,9 @@ schema_version = 1
 name = "rr3-brain"
 version = "0.0.1"
 type = "brain"
-lang = "python"
-# 打包时由 base/os/buildroot/package/rr3-brain 安装同名 shim，实际执行 `python -m rr3_brain`
-# （naming.md §3：目录名 == 进程名 == manifest.name）
+# 0.0.8 批N32 件四（ADR-0016 收口）：Python 承载侧整体退役，brain 是 Rust 模块
+# （entry = target/debug 同名二进制，与其余模块同形）
+lang = "rust"
 entry = "rr3-brain"
 
 [provides]

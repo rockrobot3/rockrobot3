@@ -1,7 +1,8 @@
 # asr 原子件 manifest（三层 manifest 的 Atom 层，ADR-0019；0.0.5 批C⑤ 原子重铺）
 # 契约：base/runtime/rr-registry/src/atom.schema.toml；查册门查 contracts/slots.toml 同一张表
-# Python 面：机制本体 rr3_brain/cloud/asr.py 原位（单文件即机制+入口合一，
-# Rust 五件套拆分随 ADR-0016 迁移收敛）
+# Rust 面（批N32 件四，ADR-0016 收口）：机制 = mech.rs（WAV 头装配 + multipart
+# 请求体纯机制，自 src/cloud.rs ASR 段下沉），入口 = asr.rs，私有头 = private.rs；
+# 识别客户端（IO/JSON/密钥策略面）在组合件级 src/cloud.rs 按名委托
 schema_version = 1
 
 [atom]

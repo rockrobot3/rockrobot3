@@ -3,8 +3,8 @@
 //! 与既有两面演练（`--manifest` 手工清单）和 `--brain`（对话闭环）互补：本模式证
 //! **广度**——仓内装配单（缺省 profiles/default.toml，16 格满配六模块）驱动 rrd
 //! 装配链正门（`--profile` + `--contracts`，参数与 rrd.service 的 ExecStart 同形），
-//! boot spawn 全部 face 模块（5 Rust + 1 Python brain），判据是「六模块全
-//! running + `denied_publish = 0`」+ rr3-ctl 四命令巡检。
+//! boot spawn 全部 face 模块（六 Rust 模块，批N32 件四起 brain 也是 Rust），判据是
+//! 「六模块全 running + `denied_publish = 0`」+ rr3-ctl 四命令巡检。
 //!
 //! 演练 modules-root 布局 = **装机布局**（`<root>/profiles/<机>.toml` 上两级是
 //! modules-root、`modules/<name>/{module.toml,config.toml,<entry>}`）：
@@ -12,10 +12,9 @@
 //!   同语义同三道门）——装配对账的 provides 真值必须是仓源那一册，自造 manifest
 //!   等于第二份真值；entry 绝对化是「entry 在仓相对、装机绝对」的第三面
 //!   （装机 = 演练 modules-root，前两面：deb 打包、buildroot post-build）；
-//! - config 同目录就位：Rust 模块用仓源 config（纯运行参数，sim 环境全部适用），
-//!   brain 用 M4 先例的演练 config（mock 云 + 短判停，`rr3_brain_config_text`）——
-//!   仓源 brain config 是真云端，演练不碰网络；
-//! - python 模块的产物 = shim 脚本（`python3 -m rr3_brain`，M4 先例同形）。
+//! - config 同目录就位：全部模块用仓源 config（纯运行参数）。brain 的云端由
+//!   rrd 进程 env `RR3_BRAIN_CLOUD=mock` 压成 mock 档（确定性应答不发网络，
+//!   仓源真云 base_url 不触达）。
 //!
 //! mock 注入走 rrd 进程 env（`RR3_BRAIN_CLOUD=mock` 由 brain 继承；其余模块无
 //! 消费者）+ `RR3_HAL_BACKEND=sim`（模块 HAL 后端全落 sim）。本模块依赖 UDS 与
@@ -28,16 +27,13 @@ use std::time::Duration;
 use rrd::manifest::rr3_manifest_facts_from_text;
 use rrd::profile::rr3_profile_from_text;
 
-use crate::brain::{
-    make_executable, rr3_brain_config_text, rr3_brain_shim_script, wait_socket_exists,
-    which_python3,
-};
+use crate::brain::wait_socket_exists;
 use crate::drill::{
     rr3_default_bins, rr3_find_repo_root, rr3_parse_status, rr3_require_bins_ext, rr3_section,
     rr3_wait_modules, Rr3SimArgs,
 };
 
-/// 装配演练就绪上界：冷启动 + 六进程（含 Python brain）注册也要够用
+/// 装配演练就绪上界：冷启动 + 六进程注册也要够用
 const RR3_ASSEMBLE_READY_DEADLINE: Duration = Duration::from_secs(60);
 
 /// 仓源 manifest 的 entry 装机改写（rr3-pack `rr3_manifest_install_rewrite` 同语义同
@@ -108,8 +104,8 @@ pub fn rr3_assemble_entry_rewrite(
     Ok(out)
 }
 
-/// 装配布局的一条产物：模块名、entry 绝对路径、是否 Rust 产物（需在盘）
-pub type Rr3AssembleEntry = (String, PathBuf, bool);
+/// 装配布局的一条产物：模块名、entry 绝对路径
+pub type Rr3AssembleEntry = (String, PathBuf);
 
 /// 演练夹具：把仓源真值装进 workdir 的装机布局（modules-root），返回
 /// (夹具装配单路径, 模块产物清单)。
@@ -159,26 +155,13 @@ pub fn rr3_assemble_layout(
         })?;
         let facts = rr3_manifest_facts_from_text(&text)
             .map_err(|errs| format!("仓源 manifest {src_manifest:?} 解析失败: {errs:?}"))?;
-        // 产物推导：python = shim 脚本（M4 先例同形，包名 = 目录名连字符转下划线），
-        // rust = 独立工程 target/debug 产物
-        let (entry_abs, needs_bin) = if facts.lang == "python" {
-            let pkg_dir = workdir.join("modules").join(module);
-            std::fs::create_dir_all(&pkg_dir).map_err(|e| format!("建 {pkg_dir:?} 失败: {e}"))?;
-            let shim = pkg_dir.join(&facts.entry);
-            let py_module = module.replace('-', "_");
-            std::fs::write(&shim, rr3_brain_shim_script(&src_dir, &py_module))
-                .map_err(|e| format!("写 shim {shim:?} 失败: {e}"))?;
-            make_executable(&shim)?;
-            (shim, false)
-        } else {
-            (
-                repo.join("modules")
-                    .join(module)
-                    .join("target/debug")
-                    .join(&facts.entry),
-                true,
-            )
-        };
+        // 产物 = 独立工程 target/debug 产物（批N32 件四起六模块全 Rust——
+        // brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest 解析保证）
+        let entry_abs = repo
+            .join("modules")
+            .join(module)
+            .join("target/debug")
+            .join(&facts.entry);
         // manifest 装机改写（三道门）后落位
         let installed = rr3_assemble_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
         let dst_dir = workdir.join("modules").join(module);
@@ -187,24 +170,16 @@ pub fn rr3_assemble_layout(
         std::fs::write(&dst_manifest, installed)
             .map_err(|e| format!("写 {dst_manifest:?} 失败: {e}"))?;
         // config 同目录就位（模块 rr3_config_load 读 manifest 同目录 config.toml，
-        // 缺件必重启环——演练 fail-fast 不装必死模块）：brain 用演练 mock config，
-        // 其余用仓源 config（纯运行参数，sim 环境全部适用）
+        // 缺件必重启环——演练 fail-fast 不装必死模块）：全部模块用仓源 config
+        // （纯运行参数；brain 云端由 rrd env RR3_BRAIN_CLOUD=mock 压成 mock 档）
         let dst_config = dst_dir.join("config.toml");
-        if facts.lang == "python" {
-            std::fs::write(
-                &dst_config,
-                rr3_brain_config_text(false, "http://127.0.0.1:9/v1"),
+        let src_config = src_dir.join("config.toml");
+        std::fs::copy(&src_config, &dst_config).map_err(|e| {
+            format!(
+                "仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环"
             )
-            .map_err(|e| format!("写 {dst_config:?} 失败: {e}"))?;
-        } else {
-            let src_config = src_dir.join("config.toml");
-            std::fs::copy(&src_config, &dst_config).map_err(|e| {
-                format!(
-                    "仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环"
-                )
-            })?;
-        }
-        entries.push((module.clone(), entry_abs, needs_bin));
+        })?;
+        entries.push((module.clone(), entry_abs));
     }
     Ok((profile_dst, entries))
 }
@@ -245,20 +220,14 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
             "cargo build --manifest-path tools/rrctl/Cargo.toml".into(),
         ),
     ];
-    for (module, entry_abs, needs_bin) in &entries {
-        if *needs_bin {
-            bins.push((
-                entry_abs,
-                format!("cargo build -p {module}（在 modules/{module}/ 下）"),
-            ));
-        }
+    for (module, entry_abs) in &entries {
+        bins.push((
+            entry_abs.as_path(),
+            format!("cargo build -p {module}（在 modules/{module}/ 下）"),
+        ));
     }
     let bin_refs: Vec<(&Path, &str)> = bins.iter().map(|(p, h)| (*p, h.as_str())).collect();
     rr3_require_bins_ext(&bin_refs)?;
-    // python face 在册才需要 python3（shim 的 exec 依赖它）
-    if entries.iter().any(|(_, _, needs_bin)| !*needs_bin) {
-        which_python3()?;
-    }
 
     let mut report = String::new();
     let outcome = (|| -> Result<(), String> {
@@ -299,7 +268,7 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
             wait_socket_exists(&socket, RR3_ASSEMBLE_READY_DEADLINE)?;
             let wanted: Vec<(&str, &str)> = entries
                 .iter()
-                .map(|(m, _, _)| (m.as_str(), "running"))
+                .map(|(m, _)| (m.as_str(), "running"))
                 .collect();
             rr3_wait_modules(
                 || rr3_ctl_status_rows(&rrctl, &socket),
@@ -308,7 +277,7 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
             )
             .map_err(|e| rr3_with_log_tail(&e, &log_path))?;
             report.push_str(rr3_section("装配单驱动 boot：全部 face 模块 running").as_str());
-            for (m, entry_abs, _) in &entries {
+            for (m, entry_abs) in &entries {
                 report.push_str(&format!("{m}  entry={}\n", entry_abs.display()));
             }
 
@@ -321,7 +290,7 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
                 return Err(format!("denied_publish ≠ 0：发布被 rrd 拒了\n{status_out}"));
             }
             let rows = rr3_ctl_status_rows(&rrctl, &socket);
-            for (m, _, _) in &entries {
+            for (m, _) in &entries {
                 match rows.iter().find(|(n, _, p)| n == m && p == "running") {
                     Some(_) => {}
                     None => return Err(format!("巡检快照里 {m} 不在 running（掉线？）：{rows:?}")),
@@ -512,10 +481,10 @@ watchdog_timeout_ms = 5000\n";
 
     #[test]
     fn layout_stages_install_shape_from_a_fixture_repo() {
-        // 临时"仓"：profiles/default.toml + modules/rr3-pa（rust）/rr3-pb（python）
+        // 临时"仓"：profiles/default.toml + modules/rr3-pa（rust）
         let repo = std::env::temp_dir().join(format!("rr3-assemble-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&repo);
-        for (m, lang, entry) in [("rr3-pa", "rust", "rr3-pa"), ("rr3-pb", "python", "rr3-pb")] {
+        for (m, lang, entry) in [("rr3-pa", "rust", "rr3-pa")] {
             let dir = repo.join("modules").join(m);
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
@@ -546,7 +515,7 @@ watchdog_timeout_ms = 5000\n";
              armed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n\
              [supplies.budget]\nnot_applicable = true\n\n\
              [bindings]\n\"a.b\" = \"rr3-pa\"\n\n\
-             [enabled_slots]\nrr3-pa = [\"a.b\"]\nrr3-pb = []\n\n\
+             [enabled_slots]\nrr3-pa = [\"a.b\"]\n\n\
              [slots]\npresent = [\"a.b\"]\n",
         )
         .unwrap();
@@ -575,18 +544,15 @@ watchdog_timeout_ms = 5000\n";
             std::fs::read_to_string(work.join("hardware/default/wiring.toml")).unwrap(),
             std::fs::read_to_string(repo.join("hardware/default/wiring.toml")).unwrap()
         );
-        // 两模块各就位：rust entry 指 target/debug 产物、python 指 workdir 内 shim
-        assert_eq!(entries.len(), 2);
+        // 模块就位：entry 指 target/debug 产物
+        assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0],
             (
                 "rr3-pa".into(),
-                repo.join("modules/rr3-pa/target/debug/rr3-pa"),
-                true
+                repo.join("modules/rr3-pa/target/debug/rr3-pa")
             )
         );
-        let shim = work.join("modules/rr3-pb/rr3-pb");
-        assert_eq!(entries[1], ("rr3-pb".into(), shim.clone(), false));
         // manifest 已绝对化且原文仅 entry 一处改写
         let staged = std::fs::read_to_string(work.join("modules/rr3-pa/module.toml")).unwrap();
         assert!(
@@ -597,12 +563,8 @@ watchdog_timeout_ms = 5000\n";
             "{staged}"
         );
         assert!(staged.contains("name = \"rr3-pa\""));
-        // shim 已写即存在（make_executable 已断言）；config 同目录就位
-        let shim_text = std::fs::read_to_string(&shim).unwrap();
-        assert!(shim_text.contains("python3 -m rr3_pb"), "{shim_text}");
-        for m in ["rr3-pa", "rr3-pb"] {
-            assert!(work.join("modules").join(m).join("config.toml").is_file());
-        }
+        // config 同目录就位
+        assert!(work.join("modules/rr3-pa/config.toml").is_file());
         std::fs::remove_dir_all(&repo).ok();
         std::fs::remove_dir_all(&work).ok();
     }

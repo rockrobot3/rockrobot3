@@ -38,12 +38,10 @@ F4 起本入口是**脚本化全链路演练**：全部真进程、真套接字�
   （`--profile` + `--contracts`，与 rrd.service 的 ExecStart 同形）boot 全部 face 模块。
   演练 modules-root 是**装机布局**：仓源 manifest 原文只把 entry 改写为产物绝对路径
   （rr3-pack 装机改写同语义同三道门，"entry 在仓相对、装机绝对"的第三面）+ config
-  同目录就位（Rust 模块用仓源 config，brain 用 mock 演练 config）。判据：全部 face
-  模块真进程 running + `denied_publish = 0` + 四命令巡检。python 模块产物 = shim
-  （`python3 -m`），运行门槛 stdlib tomllib（Python ≥3.11）——不满足的 python3 会被
-  `which_python3` 能力验证当场点名（fail-fast，不空等超时）。macOS 本机 3.9 起不了
-  brain，六模块判据归 CI `sim-assemble` job 的远端回执；本机可用无 brain 子集装配单
-  验证同一机制。CI 入口 `bash tools/ci/sim-assemble.sh`（构建 + 运行同一脚本）。
+  同目录就位（全部模块用仓源 config；brain 云端由 env `RR3_BRAIN_CLOUD=mock` 压成
+  mock 档）。判据：全部 face 模块真进程 running + `denied_publish = 0` + 四命令巡检
+  （批N32 件四起六模块全 Rust，产物 = `target/debug` 同名二进制）。CI 入口
+  `bash tools/ci/sim-assemble.sh`（构建 + 运行同一脚本）。
 
 sim 设备源（`devices.rs`，`rr-hal` 的 sim 后端消费方）保留：报告里带一段静音流的时长
 换算（`Rr3PcmStream::rr3_pcm_duration_ms()`——sim 不算第二遍），钉住"sim 与 linux
