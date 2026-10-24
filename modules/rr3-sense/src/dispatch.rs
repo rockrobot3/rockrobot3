@@ -56,11 +56,18 @@ const RR3_VAD_ONSET_GATED_KEY: &str = "vad_onset_gated";
 // 反射计数键与旁路下发点同径（宿主桥档专用，批N8 件三）
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const RR3_REFLEX_PAN_CMDS_KEY: &str = "reflex_pan_cmds";
+/// 点头示意下发的 tilt 指令数（0.0.8 批"转完点头"，与 pan 计数分开记账：
+/// 手势动是否真发生一眼可见）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const RR3_REFLEX_TILT_CMDS_KEY: &str = "reflex_tilt_cmds";
 
 /// 反射环行程常量（机制面，策略量在 config）：pan 中位 = boot 姿态基准，
 /// 单侧摆幅上限是板侧行程 fail-closed 之外的第二道软件限幅。
 const RR3_REFLEX_PAN_CENTER_DEG: i32 = 90;
 const RR3_REFLEX_PAN_SWING_DEG: i32 = 30;
+/// tilt 中位（板侧行程 [80,100] 的中位 90）：点头手势的基准位——先回中位
+/// 蓄势，再上仰 `nod_deg`（绝对角 = 中位 + nod_deg，板侧 fail-closed 裁决）。
+const RR3_REFLEX_TILT_CENTER_DEG: i32 = 90;
 
 /// 主循环状态整体持有（自原 composite.rs 局部状态迁入，状态归属随分发走）：
 /// 音频源与采集形状、VAD 状态机、流 seq、门控/反射环/判向窗三切片状态。
@@ -89,6 +96,10 @@ pub(crate) struct Rr3SenseDispatcher {
     /// 下发——激磁尖峰不落采集窗（见模块文档第 4 条）。连发 onset 覆盖旧值
     /// （最新意图优先，板侧 audio_q 同款背压口径）。
     pending_pan: Option<u16>,
+    /// 点头手势时序（0.0.8 批"转完点头"）：pan 下发后按 nod_delay_ms 先回 tilt
+    /// 中位（蓄势位），再按 nod_hold_ms 上仰到中位 + nod_deg（示意"听到了"）。
+    /// None = 无手势在途（nod_deg=0 或尚未判停）。
+    pending_nod: Option<Rr3NodState>,
     /// 判向策略量一次收进 Rr3DoaCfg（B批 b3b：能量门/几何/档界整体注入机制件）
     doa_cfg: capture::Rr3DoaCfg,
     /// 判向窗 ring（B批 b3b）：双麦链路才分配（单声道恒无方向可判，不分配零开销）
@@ -136,8 +147,37 @@ impl Rr3SenseDispatcher {
             cmd_tx,
             tts_gate: Rr3TtsGate::default(),
             pending_pan: None,
+            pending_nod: None,
             doa_cfg,
             doa_ring,
+        }
+    }
+
+    /// 点头手势推进（宿主桥档专用）：蓄势段（回中位）到点下发后，按
+    /// `nod_hold_ms` 再下发上仰段并清账。两段各自计数（`reflex_tilt_cmds`），
+    /// 板侧应答失败不回插——手势是示意动作，丢一次可接受，重试会拉长手势。
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn rr3_nod_step(&mut self, now: Instant, bus: &BusHandle) {
+        let Some(st) = self.pending_nod else {
+            return;
+        };
+        let Some(tx) = self.cmd_tx.as_ref() else {
+            self.pending_nod = None;
+            return;
+        };
+        if !st.dip_sent && now >= st.dip_at {
+            tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.dip_deg));
+            bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
+            eprintln!("反射环: 点头蓄势 tilt={}°", st.dip_deg);
+            self.pending_nod = Some(Rr3NodState {
+                dip_sent: true,
+                ..st
+            });
+        } else if st.dip_sent && now >= st.lift_at {
+            tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.lift_deg));
+            bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
+            eprintln!("反射环: 点头示意 tilt={}°", st.lift_deg);
+            self.pending_nod = None;
         }
     }
 }
@@ -203,7 +243,10 @@ impl Dispatcher for Rr3SenseDispatcher {
             bus.counter_bump(RR3_PCM_EMPTY_FRAMES_KEY, 1);
         }
         self.seq += 1;
-        bus.publish(capture::RR3_PCM_TOPIC, rpc::rr3_pcm_event_body(self.seq, &pcm))?;
+        bus.publish(
+            capture::RR3_PCM_TOPIC,
+            rpc::rr3_pcm_event_body(self.seq, &pcm),
+        )?;
         bus.counter_bump(RR3_PCM_FRAMES_KEY, 1);
 
         if let Some(edge) = self.vad.rr3_vad_feed(&pcm.samples) {
@@ -231,7 +274,11 @@ impl Dispatcher for Rr3SenseDispatcher {
                     let doa_deg = doa.map(|d| d.deg);
                     bus.publish(
                         vad::RR3_VAD_START_TOPIC,
-                        rpc::rr3_vad_event_body(self.seq, edge, doa.map(|d| rpc::rr3_doa_field(&d))),
+                        rpc::rr3_vad_event_body(
+                            self.seq,
+                            edge,
+                            doa.map(|d| rpc::rr3_doa_field(&d)),
+                        ),
                     )?;
                     // 反射环（B批 b2 起 onset 判向；2026-10-21 EMI 避让改判停后
                     // 动作）：onset 实际发布后才换算存 pending（被门弃掉的 onset
@@ -259,6 +306,15 @@ impl Dispatcher for Rr3SenseDispatcher {
                                     tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
                                     bus.counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
                                     eprintln!("反射环: 判停后下发 pan={target}°");
+                                    // 点头示意（0.0.8 批）：pan 之后接一手势，
+                                    // 时序量全在 config；nod_deg=0 时计划为 None
+                                    self.pending_nod = rr3_reflex_nod_plan(
+                                        RR3_REFLEX_TILT_CENTER_DEG,
+                                        self.cfg.reflex.nod_deg,
+                                        self.cfg.reflex.nod_delay_ms,
+                                        self.cfg.reflex.nod_hold_ms,
+                                        now,
+                                    );
                                 }
                             }
                             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -270,6 +326,11 @@ impl Dispatcher for Rr3SenseDispatcher {
                 }
             }
         }
+
+        // 点头手势推进（0.0.8 批）：与 VAD 边沿无关，每拍看时刻——蓄势/上仰
+        // 两段按 config 时序到点下发（宿主桥档专用，espidf 档无旁路自然跳过）
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        self.rr3_nod_step(now, bus);
 
         // 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；
         // 抖动可接受——v0.0.1 的 pcm 流只供联调，时序对齐挂 M5）
@@ -342,6 +403,17 @@ impl Rr3TtsGate {
     }
 }
 
+/// 点头手势两段计划（纯数据；时序在 [`rr3_reflex_nod_plan`] 一次算定）：
+/// 蓄势段 = 回 tilt 中位，上仰段 = 中位 + nod_deg。两段各自到点下发。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rr3NodState {
+    dip_deg: u16,
+    lift_deg: u16,
+    dip_at: Instant,
+    lift_at: Instant,
+    dip_sent: bool,
+}
+
 /// 反射环换算（纯函数）：onset 判向角 → pan 目标角。全量判据过不了 = `None`
 /// （不转头）：未启用 / 门开（播放回声）/ 死区内（正前方说话免抖动）。
 /// 目标 = 中位 + clamp(deg, ±摆幅)——正负号直通（右声源右转头），板侧行程
@@ -357,6 +429,33 @@ fn rr3_reflex_pan_target(
     }
     let swing = doa_deg.clamp(-RR3_REFLEX_PAN_SWING_DEG, RR3_REFLEX_PAN_SWING_DEG);
     Some((RR3_REFLEX_PAN_CENTER_DEG + swing) as u16)
+}
+
+/// 点头手势计划（纯函数）：pan 下发时刻 `now` → 两段 tilt 目标与到点时刻。
+/// `nod_deg = 0` = 不做手势（旧版逐点等价）。目标 = tilt 中位（蓄势）→ 中位 +
+/// `nod_deg`（上仰）；绝对角越出舵机全域 0..=180 不生成（板侧行程 fail-closed
+/// 是最终裁决，这里只防无意义负角）。
+fn rr3_reflex_nod_plan(
+    center_deg: i32,
+    nod_deg: i32,
+    delay_ms: u64,
+    hold_ms: u64,
+    now: Instant,
+) -> Option<Rr3NodState> {
+    if nod_deg == 0 {
+        return None;
+    }
+    let lift_deg = center_deg + nod_deg;
+    if !(0..=180).contains(&lift_deg) {
+        return None;
+    }
+    Some(Rr3NodState {
+        dip_deg: center_deg as u16,
+        lift_deg: lift_deg as u16,
+        dip_at: now + Duration::from_millis(delay_ms),
+        lift_at: now + Duration::from_millis(delay_ms + hold_ms),
+        dip_sent: false,
+    })
 }
 
 /// 判向窗环形缓冲（帧交错存储，与采集 samples 同形；主循环单线程读写）
@@ -498,6 +597,30 @@ mod tests {
         );
     }
 
+    /// 点头计划：nod_deg=0 不生成（旧版逐点等价）；两段目标 = 中位 → 中位+deg，
+    /// 时刻按 delay/hold 排定；越出舵机全域不生成（板侧行程仍 fail-closed 裁决）。
+    #[test]
+    fn reflex_nod_plan_derives_two_segments_and_skips_disabled() {
+        let now = Instant::now();
+        assert_eq!(rr3_reflex_nod_plan(90, 0, 500, 200, now), None, "手势关");
+        let st = rr3_reflex_nod_plan(90, 8, 500, 200, now).expect("手势开必生成");
+        assert_eq!(st.dip_deg, 90, "蓄势段回 tilt 中位");
+        assert_eq!(st.lift_deg, 98, "上仰段 = 中位 + nod_deg");
+        assert_eq!(st.dip_at, now + Duration::from_millis(500));
+        assert_eq!(st.lift_at, now + Duration::from_millis(700));
+        assert!(!st.dip_sent);
+        assert_eq!(
+            rr3_reflex_nod_plan(90, 120, 500, 200, now),
+            None,
+            "越出 0..=180 不生成"
+        );
+        // 负值 = 下仰（行程内合法时照常生成，板侧裁决）
+        assert_eq!(
+            rr3_reflex_nod_plan(90, -8, 500, 200, now).unwrap().lift_deg,
+            82
+        );
+    }
+
     // ---------- B批 b3b：判向窗 ring 用例 ----------
 
     /// 判向窗 ring：未满窗快照只有已积累帧（原序）；满窗回绕后快照 = 最旧在前
@@ -506,10 +629,18 @@ mod tests {
     fn doa_ring_accumulates_and_linearizes_snapshot() {
         let mut ring = Rr3DoaRing::rr3_ring_new(4, 2);
         ring.rr3_ring_feed(&[1, 2, 3, 4, 5, 6]);
-        assert_eq!(ring.rr3_ring_snapshot(), vec![1, 2, 3, 4, 5, 6], "未满窗只回已积累帧");
+        assert_eq!(
+            ring.rr3_ring_snapshot(),
+            vec![1, 2, 3, 4, 5, 6],
+            "未满窗只回已积累帧"
+        );
         // 再喂 2 帧共 5 帧：第 1 帧被挤掉，快照 = 帧2..帧5 原序（回绕线性化）
         ring.rr3_ring_feed(&[7, 8, 9, 10]);
-        assert_eq!(ring.rr3_ring_snapshot(), vec![3, 4, 5, 6, 7, 8, 9, 10], "回绕线性化");
+        assert_eq!(
+            ring.rr3_ring_snapshot(),
+            vec![3, 4, 5, 6, 7, 8, 9, 10],
+            "回绕线性化"
+        );
         let mut ring = Rr3DoaRing::rr3_ring_new(4, 2);
         ring.rr3_ring_feed(&[1, 2, 3, 4, 9]);
         assert_eq!(ring.rr3_ring_snapshot(), vec![1, 2, 3, 4], "余数丢弃");
@@ -552,7 +683,9 @@ mod tests {
         let mut ring = Rr3DoaRing::rr3_ring_new(3200, 2);
         ring.rr3_ring_feed(&left);
         assert_eq!(
-            capture::rr3_doa_fix(&ring.rr3_ring_snapshot(), 2, &cfg).unwrap().bin,
+            capture::rr3_doa_fix(&ring.rr3_ring_snapshot(), 2, &cfg)
+                .unwrap()
+                .bin,
             Rr3DoaBin::Left
         );
     }

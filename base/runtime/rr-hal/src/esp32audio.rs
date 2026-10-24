@@ -100,6 +100,9 @@ pub enum Rr3PeriphCmd {
     /// （payload 形状事实源 contracts/events/act-servo_command.schema.json）。
     /// 板侧行程收窄 fail-closed：越界拒收点名，宿主侧不猜行程不预钳。
     ServoPan(u16),
+    /// 舵机 tilt 轴绝对角 → 同主题 args `{"angle_deg":N,"axis":"tilt"}`（点头示意
+    /// 动作，2026-10-24 批：反射环转头后的"应答"手势）。行程同样板侧裁决。
+    ServoTilt(u16),
 }
 
 /// 命令旁路盒（Mutex 内纯数据）：有界、满丢最旧 + 溢丢计数（板侧 audio_q
@@ -176,6 +179,10 @@ fn rr3_esp32_cmd_frame(id: u64, cmd: &Rr3PeriphCmd) -> rr_ipc::Rr3Frame {
         Rr3PeriphCmd::ServoPan(deg) => (
             crate::esp32_uart::RR3_SERVO_TOPIC,
             json!({ "angle_deg": *deg, "axis": "pan" }),
+        ),
+        Rr3PeriphCmd::ServoTilt(deg) => (
+            crate::esp32_uart::RR3_SERVO_TOPIC,
+            json!({ "angle_deg": *deg, "axis": "tilt" }),
         ),
     };
     crate::esp32_uart::rr3_bridge_call_frame(id, topic, &args)
@@ -421,7 +428,11 @@ fn rr3_tee_open() -> Option<std::fs::File> {
     if path.is_empty() {
         return None;
     }
-    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         Ok(f) => {
             eprintln!("rr-hal-esp32-audio: 取证 tee 开（原始流追加 → {path}）");
             Some(f)
@@ -897,6 +908,24 @@ mod tests {
         assert_eq!(v["params"]["topic"], crate::esp32_uart::RR3_SERVO_TOPIC);
         assert_eq!(v["params"]["args"]["angle_deg"], 105);
         assert_eq!(v["params"]["args"]["axis"], "pan");
+        // tilt 轴同形（点头示意批）：仅 axis 键换值，其余逐字同源
+        let tilt_frame = rr3_esp32_cmd_frame(8, &Rr3PeriphCmd::ServoTilt(98));
+        let (ty, body) = rr3_body_split(&tilt_frame.payload).expect("payload 前缀合法");
+        assert_eq!(ty, Rr3PayloadType::Request);
+        let tv: Value = serde_json::from_slice(&body).expect("体为 JSON");
+        assert_eq!(tv["id"], 8);
+        assert_eq!(tv["params"]["topic"], crate::esp32_uart::RR3_SERVO_TOPIC);
+        assert_eq!(tv["params"]["args"]["angle_deg"], 98);
+        assert_eq!(tv["params"]["args"]["axis"], "tilt");
+        let tilt_bridge = crate::esp32_uart::rr3_bridge_call_frame(
+            8,
+            crate::esp32_uart::RR3_SERVO_TOPIC,
+            &serde_json::json!({ "angle_deg": 98, "axis": "tilt" }),
+        );
+        assert_eq!(
+            tilt_frame.payload, tilt_bridge.payload,
+            "tilt payload 字节级同形"
+        );
         // 与桥侧 golden 同值锚定（esp32_uart 测试 rr3_bridge_request_body(7, ...) 同形）；
         // timestamp_ns 是构造时刻、两帧天然不同，不参与对拍
         let bridge = crate::esp32_uart::rr3_bridge_call_frame(

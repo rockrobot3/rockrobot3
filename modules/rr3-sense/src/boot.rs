@@ -81,13 +81,20 @@ pub struct Rr3DoaConfig {
 /// 开（config-esp32.toml 档开）行为与旧版逐点等价：无门控无转头，纯采集照旧。
 /// - `deadband_deg`：判向死区（|deg| < 死区不转头，正前方说话免抖动）；
 /// - `gate_tail_ms`：TTS 帧流停后门保持开的尾窗（扬声器回声拖尾）；
-/// - `gate_gap_ms`：tts_pcm 帧间隔超过此值判新一轮播放（门控累计重置）。
+/// - `gate_gap_ms`：tts_pcm 帧间隔超过此值判新一轮播放（门控累计重置）；
+/// - `nod_deg`：点头示意行程（**相对 tilt 中位**的上仰角，0 = 不做点头手势；
+///   0.0.8 批"转完点头"策略量，板侧行程 fail-closed 裁决，宿主不猜行程）；
+/// - `nod_delay_ms`：pan 下发后等舵机到位的间隔（点头起点，须 ≥ pan 动作时长）；
+/// - `nod_hold_ms`：回中位（点头蓄势位）到上仰的驻留时长（手势可见性）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rr3ReflexConfig {
     pub enable: bool,
     pub deadband_deg: i32,
     pub gate_tail_ms: u64,
     pub gate_gap_ms: u64,
+    pub nod_deg: i32,
+    pub nod_delay_ms: u64,
+    pub nod_hold_ms: u64,
 }
 
 impl Default for Rr3SenseConfig {
@@ -110,6 +117,9 @@ impl Default for Rr3SenseConfig {
                 deadband_deg: 10,
                 gate_tail_ms: 1000,
                 gate_gap_ms: 500,
+                nod_deg: 0,
+                nod_delay_ms: 500,
+                nod_hold_ms: 200,
             },
         }
     }
@@ -186,6 +196,14 @@ pub(crate) fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, Strin
             i32::try_from(db).map_err(|_| format!("[rr3-sense.reflex] deadband_deg 越界: {db}"))?;
         rr3_cfg_u64(reflex, "gate_tail_ms", &mut cfg.reflex.gate_tail_ms)?;
         rr3_cfg_u64(reflex, "gate_gap_ms", &mut cfg.reflex.gate_gap_ms)?;
+        // 0.0.8 批"转完点头"：策略三键（缺键回落默认；nod_deg 缺省 0 = 手势关，
+        // 与旧版逐点等价）。行程不在此预钳——板侧 fail-closed 是唯一裁决面。
+        let mut nod = cfg.reflex.nod_deg as i64;
+        rr3_cfg_i64(reflex, "nod_deg", &mut nod)?;
+        cfg.reflex.nod_deg =
+            i32::try_from(nod).map_err(|_| format!("[rr3-sense.reflex] nod_deg 越界: {nod}"))?;
+        rr3_cfg_u64(reflex, "nod_delay_ms", &mut cfg.reflex.nod_delay_ms)?;
+        rr3_cfg_u64(reflex, "nod_hold_ms", &mut cfg.reflex.nod_hold_ms)?;
     }
     Ok(cfg)
 }
@@ -286,16 +304,23 @@ mod tests {
         assert_eq!(cfg.reflex.deadband_deg, 10);
         assert_eq!(cfg.reflex.gate_tail_ms, 1000);
         assert_eq!(cfg.reflex.gate_gap_ms, 500);
+        assert_eq!(cfg.reflex.nod_deg, 0, "缺键 = 不做点头手势（旧版逐点等价）");
+        assert_eq!(cfg.reflex.nod_delay_ms, 500);
+        assert_eq!(cfg.reflex.nod_hold_ms, 200);
         let cfg = rr3_sense_config_parse(
-            "[rr3-sense.reflex]\nenable = true\ndeadband_deg = 15\ngate_tail_ms = 800\ngate_gap_ms = 300\n",
+            "[rr3-sense.reflex]\nenable = true\ndeadband_deg = 15\ngate_tail_ms = 800\ngate_gap_ms = 300\nnod_deg = 8\nnod_delay_ms = 400\nnod_hold_ms = 150\n",
         )
         .unwrap();
         assert!(cfg.reflex.enable);
         assert_eq!(cfg.reflex.deadband_deg, 15);
         assert_eq!(cfg.reflex.gate_tail_ms, 800);
         assert_eq!(cfg.reflex.gate_gap_ms, 300);
+        assert_eq!(cfg.reflex.nod_deg, 8);
+        assert_eq!(cfg.reflex.nod_delay_ms, 400);
+        assert_eq!(cfg.reflex.nod_hold_ms, 150);
         assert!(rr3_sense_config_parse("[rr3-sense.reflex]\nenable = \"on\"\n").is_err());
         assert!(rr3_sense_config_parse("[rr3-sense.reflex]\ndeadband_deg = \"wide\"\n").is_err());
+        assert!(rr3_sense_config_parse("[rr3-sense.reflex]\nnod_delay_ms = -1\n").is_err());
     }
 
     /// doa 段解析：缺段 = 全默认；全量注入生效；window_ms=0 收敛 1000 留痕
@@ -346,6 +371,9 @@ mod tests {
             "出厂策略 1500（Default 回落 800 的有意分歧，S-1 后 config.toml 是活值）"
         );
         assert_eq!(cfg.doa.mic_baseline_mm, 150);
-        assert!(!cfg.reflex.enable, "reflex 段不在 config.toml——出厂不开反射环");
+        assert!(
+            !cfg.reflex.enable,
+            "reflex 段不在 config.toml——出厂不开反射环"
+        );
     }
 }
