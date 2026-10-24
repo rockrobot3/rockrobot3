@@ -2,7 +2,9 @@
 <!-- 洛克三号面板（0.0.4 批C + 批D）：单文件静态页，无外部资源，vanilla JS。
      数据面端点（全集以后端 RR3_PANEL_ROUTES 为真值，MC-8③/I-12：本页不手写计数）：
      状态页签 = /api/status；硬件页签 = relay/beep/face/selftest/wiring（接线图，批N4 件九笔4）；
-     系统页签 = /api/data + /api/logs + reboot + 恢复出厂 WiFi（/api/wifi/forget）；
+     系统页签 = /api/data + /api/logs + reboot + 恢复出厂 WiFi（/api/wifi/forget）
+                 + 模型密钥（/api/model/keys|key）+ 模型行（/api/brain/models|model|model/test，
+                 ADR-0023 OpenAI 兼容多厂商 CRUD）+ brain/五模块 ops 槽（配置面）；
      WiFi 页签 = /api/wifi/scan|connect|forget（rr3-connect 三 RPC，0.0.4 批D 上线）。 -->
 <html lang="zh-CN">
 <head>
@@ -120,14 +122,40 @@
   </div>
   <div class="card">
     <h2>模型密钥（仓外 secrets 文件，0600；值只写不回显）</h2>
-    <p class="ph">引用名 <input id="model-ref" placeholder="如 SiliconFlow 或 DeepSeek官方"> 密钥 <input id="model-key" type="password" placeholder="sk-...（留空=删除该引用）"></p>
+    <p class="ph">引用名 <input id="model-ref" list="model-ref-presets" placeholder="如 SiliconFlow 或 DeepSeek官方"> 密钥 <input id="model-key" type="password" placeholder="sk-...（留空=删除该引用）"></p>
+    <datalist id="model-ref-presets">
+      <option value="DeepSeek官方"></option>
+      <option value="deepseek"></option>
+      <option value="glm"></option>
+      <option value="qwen"></option>
+      <option value="siliconflow"></option>
+    </datalist>
     <button class="btn" onclick="modelKeySave()">保存密钥</button>
     <button class="btn off" onclick="modelKeysRefresh()">刷新清单</button>
     <table id="model-keys"><thead><tr><th>引用名</th><th>状态</th></tr></thead><tbody></tbody></table>
     <div class="msg" id="model-key-msg">模型连接（地址/模型名）在 rr3-brain config.toml 的 [[rr3-brain.model]] 表；此处只管密钥。brain 每轮现读，保存后下一轮对话即生效。</div>
   </div>
   <div class="card">
-    <h2>brain 模型面（rr3.call → rr3-brain/ops/list 读 / ops/set 写）</h2>
+    <h2>模型行（OpenAI 兼容多厂商，rr3.call → rr3-brain/model list/set/test）</h2>
+    <p class="ph">预设 <select id="model-preset" onchange="modelPresetChange()">
+      <option value="">（手动填写）</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="glm">GLM（智谱）</option>
+      <option value="qwen">Qwen（百炼兼容模式）</option>
+      <option value="openai">OpenAI</option>
+    </select></p>
+    <p class="ph">名称 <input id="model-name" placeholder="如 DeepSeek官方" style="width:16ch">
+      API 根 <input id="model-base" placeholder="https://api.deepseek.com/v1" style="width:34ch"></p>
+    <p class="ph">模型 <input id="model-id" placeholder="如 deepseek-chat" style="width:18ch">
+      密钥引用 <input id="model-key-ref" placeholder="如 DeepSeek官方 或 env:DEEPSEEK_API_KEY" style="width:26ch">
+      <label class="ph"><input id="model-active" type="checkbox" style="width:auto"> 设为当前</label></p>
+    <button class="btn" onclick="modelSave()">保存模型行</button>
+    <button class="btn off" onclick="modelRowsLoad()">刷新列表</button>
+    <table id="model-rows"><thead><tr><th>名称</th><th>API 根</th><th>模型</th><th>格式/模式</th><th>密钥</th><th>当前</th><th>操作</th></tr></thead><tbody></tbody></table>
+    <div class="msg" id="model-rows-msg">API 根填「完整根」（含版本段，如 /v1），客户端只追加 /chat/completions。保存即写 config.toml（自动留 .bak 备份）并 live 换客户端；测试只发一次 max_tokens=1 探测，不改配置。</div>
+  </div>
+  <div class="card">
+    <h2>通用 cloud 槽（ASR/TTS/超时/话轮，rr3.call → rr3-brain/ops/list 读 / ops/set 写）</h2>
     <button class="btn off" onclick="brainOpsLoad()">读取槽值</button>
     <table id="brain-ops"><thead><tr><th>原子</th><th>槽</th><th>值</th></tr></thead><tbody></tbody></table>
     <p class="ph">写槽：组 <input id="brain-set-group" placeholder="asr | llm | tts | dialog" style="width:14ch"> 槽 <input id="brain-set-slot" placeholder="如 asr_model / timeout_s" style="width:22ch"> 值 <input id="brain-set-value" placeholder="新值（数值槽填数字）" style="width:24ch"></p>
@@ -391,6 +419,112 @@ async function modelKeySave() {
     $("model-key").value = "";
     await modelKeysRefresh();
   } catch (e) { setMsg("model-key-msg", "保存失败：" + e.message, false); }
+}
+// ---- 模型行（ADR-0023：OpenAI 兼容多厂商 CRUD + 切换 + 连通性测试）----
+// 预设只填「API 根 + 模型名」，名称/密钥引用由操作者定；手动填亦可（其他 OpenAI 兼容厂商）
+const MODEL_PRESETS = {
+  deepseek: { base_url: "https://api.deepseek.com/v1", model_id: "deepseek-chat" },
+  glm: { base_url: "https://open.bigmodel.cn/api/paas/v4", model_id: "glm-4.5" },
+  qwen: { base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model_id: "qwen-plus" },
+  openai: { base_url: "https://api.openai.com/v1", model_id: "gpt-4o-mini" },
+};
+let modelRows = [];
+function modelPresetChange() {
+  const p = MODEL_PRESETS[$("model-preset").value];
+  if (!p) return;
+  $("model-base").value = p.base_url;
+  $("model-id").value = p.model_id;
+}
+async function modelRowsLoad() {
+  try {
+    const v = await api("/api/brain/models");
+    modelRows = v.models || [];
+    const tb = $("model-rows").querySelector("tbody");
+    tb.innerHTML = "";
+    for (const m of modelRows) {
+      const tr = document.createElement("tr");
+      tr.insertCell().textContent = m.name;
+      tr.insertCell().textContent = m.base_url;
+      tr.insertCell().textContent = m.model_id;
+      tr.insertCell().textContent = m.api_format + " / " + m.mode;
+      tr.insertCell().textContent = (m.key_ref || "（无）") + (m.key_set ? " · 已就位" : " · 缺密钥");
+      tr.insertCell().textContent = m.active ? "当前" : "—";
+      const td = tr.insertCell();
+      [["测试", () => modelTest(m.name)], ["激活", () => modelActivate(m.name)],
+       ["编辑", () => modelEdit(m.name)], ["删除", () => modelDelete(m.name)]]
+        .forEach(([label, fn]) => {
+          const b = document.createElement("button");
+          b.className = "btn off";
+          b.textContent = label;
+          b.style.padding = "4px 10px"; b.style.margin = "2px 4px 2px 0";
+          b.onclick = fn;
+          td.appendChild(b);
+        });
+      tb.appendChild(tr);
+    }
+    if (!modelRows.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 7; td.textContent = "（空表——当前走 config [rr3-brain.cloud] 的 fallback 连接）";
+      tr.appendChild(td); tb.appendChild(tr);
+    }
+    setMsg("model-rows-msg", "模型行 " + modelRows.length + " 条；当前生效：" + (v.active || "无（cloud fallback）"), true);
+  } catch (e) { setMsg("model-rows-msg", "列表拉取失败：" + e.message, false); }
+}
+function modelEdit(name) {
+  const m = modelRows.find((x) => x.name === name);
+  if (!m) return;
+  $("model-name").value = m.name;
+  $("model-base").value = m.base_url;
+  $("model-id").value = m.model_id;
+  $("model-key-ref").value = m.key_ref || "";
+  $("model-active").checked = !!m.active;
+  $("model-preset").value = "";
+  setMsg("model-rows-msg", "已载入「" + name + "」——改完点保存即 upsert（同名覆盖）。", true);
+}
+async function modelSave() {
+  const body = {
+    op: "upsert",
+    name: $("model-name").value.trim(),
+    base_url: $("model-base").value.trim(),
+    model_id: $("model-id").value.trim(),
+    api_format: "openai",
+    active: $("model-active").checked,
+  };
+  const ref = $("model-key-ref").value.trim();
+  if (ref) body.api_key_ref = ref;
+  if (!body.name) { setMsg("model-rows-msg", "名称不能为空", false); return; }
+  try {
+    const v = await api("/api/brain/model", body);
+    setMsg("model-rows-msg",
+      "已保存「" + v.name + "」（persisted=" + v.persisted + "，applies=" + v.applies
+      + "；当前生效：" + (v.active || "无") + "）", true);
+    await modelRowsLoad();
+  } catch (e) { setMsg("model-rows-msg", "保存失败：" + e.message, false); }
+}
+async function modelActivate(name) {
+  try {
+    await api("/api/brain/model", { op: "activate", name });
+    setMsg("model-rows-msg", "已切换到「" + name + "」并落盘（下一轮对话即用它）。", true);
+    await modelRowsLoad();
+  } catch (e) { setMsg("model-rows-msg", "切换失败：" + e.message, false); }
+}
+async function modelDelete(name) {
+  if (!confirm("删除模型行「" + name + "」？（当前生效行不可删，先切换）")) return;
+  try {
+    await api("/api/brain/model", { op: "delete", name });
+    setMsg("model-rows-msg", "已删除「" + name + "」并落盘。", true);
+    await modelRowsLoad();
+  } catch (e) { setMsg("model-rows-msg", "删除失败：" + e.message, false); }
+}
+async function modelTest(name) {
+  setMsg("model-rows-msg", "测试「" + name + "」中……");
+  try {
+    const v = await api("/api/brain/model/test", { name });
+    if (v.ok && v.mock) setMsg("model-rows-msg", "「" + name + "」mock 档探测通过（未真发请求）。", true);
+    else if (v.ok) setMsg("model-rows-msg", "「" + name + "」连通：" + v.latency_ms + "ms（HTTP " + v.status + "）", true);
+    else setMsg("model-rows-msg", "「" + name + "」不通：" + v.error, false);
+  } catch (e) { setMsg("model-rows-msg", "测试失败：" + e.message, false); }
 }
 // brain ops 槽读面（B-12，批N4 件六二）：只读点名，应答按原子分组逐槽渲染
 async function brainOpsLoad() {

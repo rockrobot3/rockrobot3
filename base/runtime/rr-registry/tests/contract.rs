@@ -423,9 +423,9 @@ fn topics_registry_zero_topics_is_rejected() {
 
 // ---------- 最终整枝评审 C2：append-only 的形状守护 ----------
 
-/// 注册表的全部 39 条 `(name, owner, kind)` 三元组。
+/// 注册表的全部 42 条 `(name, owner, kind)` 三元组。
 /// 顺序即 `contracts/topics.toml` 的登记顺序。
-const RR3_PINNED_TOPICS: [(&str, &str, &str); 39] = [
+const RR3_PINNED_TOPICS: [(&str, &str, &str); 42] = [
     ("rr3-sense/audio/pcm", "rr3-sense", "stream"),
     ("rr3-sense/audio/vad_start", "rr3-sense", "event"),
     ("rr3-sense/env/temperature", "rr3-sense", "event"),
@@ -470,6 +470,10 @@ const RR3_PINNED_TOPICS: [(&str, &str, &str); 39] = [
     ("rr3-interact/ops/list", "rr3-interact", "request"),
     ("rr3-power/ops/list", "rr3-power", "request"),
     ("rr3-brain/ops/set", "rr3-brain", "request"),
+    // ADR-0023 模型行面三件（列表/CRUD/连通性测试）
+    ("rr3-brain/model/list", "rr3-brain", "request"),
+    ("rr3-brain/model/set", "rr3-brain", "request"),
+    ("rr3-brain/model/test", "rr3-brain", "request"),
     ("rr3-sense/ops/list", "rr3-sense", "request"),
 ];
 
@@ -531,22 +535,22 @@ fn registry_shape_is_pinned() {
         "owner 名不得重复登记: {owners:?}"
     );
 
-    // 2) topic 侧：39 条，且不重名（重名会让下面的子集论证失去意义）
+    // 2) topic 侧：42 条，且不重名（重名会让下面的子集论证失去意义）
     let topics = registry_triples(&text);
     assert_eq!(
         topics.len(),
-        39,
-        "契约 39 条主题（0.0.5 第 IV 轮 MCP-0 2026-10-12 29→30：append brain/audio/tts_pcm 下行流，F-4 通路契约；增补轮六 批N2 件二 2026-10-18 30→31：append rr3-power/rail/state，ADR-0021 裁定 2；批N4 件六二 2026-10-19 31→32：append rr3-brain/ops/list 只读点名，B-12；批N4 件九二 2026-10-19 32→37：append 五模块 ops/list 只读点名五主题；批N4 件九三 2026-10-19 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 2026-10-20 38→39：append rr3-power/battery/ok 低电恢复沿，§17 运维留痕；与批C/批D 同一张改表纪律 §18.4 防重规则①）"
+        42,
+        "契约 42 条主题（0.0.5 第 IV 轮 MCP-0 2026-10-12 29→30：append brain/audio/tts_pcm 下行流，F-4 通路契约；增补轮六 批N2 件二 2026-10-18 30→31：append rr3-power/rail/state，ADR-0021 裁定 2；批N4 件六二 2026-10-19 31→32：append rr3-brain/ops/list 只读点名，B-12；批N4 件九二 2026-10-19 32→37：append 五模块 ops/list 只读点名五主题；批N4 件九三 2026-10-19 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 2026-10-20 38→39：append rr3-power/battery/ok 低电恢复沿，§17 运维留痕；ADR-0023 2026-10-24 39→42：append rr3-brain/model list/set/test 模型行面；与批C/批D 同一张改表纪律 §18.4 防重规则①）"
     );
     let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
 
-    // 3) kind 分布：19 request / 12 event / 4 stream / 4 notification
+    // 3) kind 分布：22 request / 12 event / 4 stream / 4 notification
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
     assert_eq!(
         count("request"),
-        19,
-        "kind=request 的分布漂移（批N4 件九三 18→19：append rr3-brain/ops/set）"
+        22,
+        "kind=request 的分布漂移（ADR-0023 19→22：append rr3-brain/model list/set/test）"
     );
     assert_eq!(
         count("event"),

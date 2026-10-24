@@ -15,7 +15,12 @@
 
 use serde_json::{json, Value};
 
-use crate::boot::{rr3_brain_model_row, Rr3BrainCfg};
+use crate::boot::{
+    rr3_brain_config_parse, rr3_brain_model_row, rr3_cloud_cfg_of, rr3_model_base_url_validate,
+    Rr3BrainCfg, Rr3LlmMode,
+};
+use crate::cloud::{rr3_key_set_of, Rr3LlmClient};
+use crate::config_store::{rr3_config_persist, rr3_model_block_rewrite};
 
 /// ops 槽快照（自 composite.py `rr3_ops_snapshot` 逐语义迁入，批N4 件六二 B-12：
 /// `rr3-brain/ops/list` 应答体，面板脑面读口）。按原子分组、槽名与 assemble.toml
@@ -326,6 +331,355 @@ pub(crate) fn rr3_ops_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<Val
 /// 与 rr3_brain_model_row 同源单真值）。
 pub(crate) fn rr3_model_row_of(cfg: &Rr3BrainCfg) -> Result<crate::boot::Rr3ModelRow, String> {
     rr3_brain_model_row(&cfg.doc)
+}
+
+// ---------- 模型行面（ADR-0023：面板 CRUD + 切换 active + 连通性测试） ----------
+
+/// 模型行表快照（doc 内，缺表 = 空表；非数组点名拒——与 boot 同一文案）
+fn rr3_model_rows_cloned(doc: &Value) -> Result<Vec<Value>, String> {
+    match doc.get("rr3-brain").and_then(|b| b.get("model")) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(rows)) => Ok(rows.clone()),
+        Some(_) => Err("config [[rr3-brain.model]] 须为行表（数组）".to_string()),
+    }
+}
+
+/// 行内字符串字段（缺键/Null 回落空串；非串点名行号与键名）
+fn rr3_row_str<'a>(row: &'a Value, key: &str, idx: usize) -> Result<&'a str, String> {
+    match row.get(key) {
+        None | Some(Value::Null) => Ok(""),
+        Some(Value::String(s)) => Ok(s.as_str()),
+        Some(_) => Err(format!("模型行 #{idx}.{key} 须字符串")),
+    }
+}
+
+/// 表内 active 行名（无 → None：空表走 cloud fallback，没有行可点名）
+fn rr3_row_active_name(rows: &[Value]) -> Option<String> {
+    rows.iter()
+        .find(|r| r.get("active").and_then(Value::as_bool) == Some(true))
+        .and_then(|r| r.get("name").and_then(Value::as_str))
+        .map(|s| s.to_string())
+}
+
+/// 模型行列表（`rr3-brain/model/list` 应答体）：每行回 名称/API 根/模型/格式/
+/// 模式/key_ref/key 是否就位/active——**只回 `key_set` 布尔，永无密钥明文**。
+pub(crate) fn rr3_model_list_snapshot(cfg: &Rr3BrainCfg) -> Result<Value, String> {
+    let rows = rr3_model_rows_cloned(&cfg.doc)?;
+    let mut models = Vec::with_capacity(rows.len());
+    for (i, row) in rows.iter().enumerate() {
+        let name = rr3_row_str(row, "name", i)?;
+        if name.trim().is_empty() {
+            return Err(format!("模型行 #{i} 缺 name"));
+        }
+        let mode = match rr3_row_str(row, "mode", i)?.trim() {
+            "" => "api",
+            v => v,
+        };
+        let api_format = match rr3_row_str(row, "api_format", i)?.trim() {
+            "" => "openai",
+            v => v,
+        };
+        let key_ref = match rr3_row_str(row, "api_key_ref", i)?.trim() {
+            "" => None,
+            v => Some(v.to_string()),
+        };
+        let mode_enum = match mode {
+            "local" => Some(Rr3LlmMode::Local),
+            _ => Some(Rr3LlmMode::Api),
+        };
+        models.push(json!({
+            "name": name,
+            "base_url": rr3_row_str(row, "base_url", i)?,
+            "model_id": rr3_row_str(row, "model_id", i)?,
+            "api_format": api_format,
+            "mode": mode,
+            "key_ref": key_ref,
+            "key_set": rr3_key_set_of(&key_ref, mode_enum),
+            "active": row.get("active").and_then(Value::as_bool).unwrap_or(false),
+        }));
+    }
+    Ok(json!({ "models": models, "active": rr3_row_active_name(&rows) }))
+}
+
+/// upsert 一行（同名即更新；新行在表内无 active 时自动接任）
+fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(), String> {
+    let base_url = args
+        .get("base_url")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let model_id = args
+        .get("model_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if base_url.is_empty() || model_id.is_empty() {
+        return Err("upsert 须同时给 base_url 与 model_id（非空）".to_string());
+    }
+    rr3_model_base_url_validate(base_url).map_err(|e| format!("模型行 {name} {e}"))?;
+    let api_format = args
+        .get("api_format")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("openai");
+    if api_format != "openai" {
+        return Err(format!(
+            "模型行 {name} api_format 暂不支持: {api_format}（本批仅 openai）"
+        ));
+    }
+    let mode = args
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("api");
+    if mode != "api" && mode != "local" {
+        return Err(format!("模型行 {name} mode 不认: {mode}（允许 api/local）"));
+    }
+    // api_key_ref 三态：键缺席 = 保留现值（新建即无）；空串 = 清空；有值 = 校验后写
+    let key_ref_given = args
+        .get("api_key_ref")
+        .map(|v| {
+            v.as_str()
+                .map(str::trim)
+                .ok_or_else(|| format!("模型行 {name} api_key_ref 须字符串"))
+        })
+        .transpose()?;
+    let key_ref = match key_ref_given {
+        Some("") => None,
+        Some(s) => {
+            if s.chars().any(char::is_whitespace) {
+                return Err(format!("模型行 {name} api_key_ref 不得含空白: '{s}'"));
+            }
+            if let Some(var) = s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX) {
+                if var.is_empty() || var.chars().any(char::is_whitespace) {
+                    return Err(format!(
+                        "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
+                    ));
+                }
+            }
+            Some(s.to_string())
+        }
+        None => None,
+    };
+    let active_given = match args.get("active") {
+        None => None,
+        Some(v) => Some(
+            v.as_bool()
+                .ok_or_else(|| format!("模型行 {name} active 须布尔"))?,
+        ),
+    };
+    let idx = rows
+        .iter()
+        .position(|r| r.get("name").and_then(Value::as_str) == Some(name));
+    let is_new = idx.is_none();
+    let i = match idx {
+        Some(i) => i,
+        None => {
+            rows.push(json!({}));
+            rows.len() - 1
+        }
+    };
+    let others_active = rows
+        .iter()
+        .enumerate()
+        .any(|(j, r)| j != i && r.get("active").and_then(Value::as_bool) == Some(true));
+    let prev_active = rows[i].get("active").and_then(Value::as_bool) == Some(true);
+    let active = match active_given {
+        Some(a) => a,
+        None => {
+            if is_new {
+                !others_active // 表内无 active（空表/结构坏）→ 新行接任
+            } else {
+                prev_active
+            }
+        }
+    };
+    {
+        let obj = rows[i]
+            .as_object_mut()
+            .ok_or_else(|| format!("模型行 #{i} 须为表（TOML 行表同构）"))?;
+        obj.insert("name".to_string(), json!(name));
+        obj.insert("mode".to_string(), json!(mode));
+        obj.insert("api_format".to_string(), json!(api_format));
+        obj.insert("base_url".to_string(), json!(base_url));
+        obj.insert("model_id".to_string(), json!(model_id));
+        if let Some(given) = key_ref_given {
+            if let Some(k) = key_ref {
+                obj.insert("api_key_ref".to_string(), json!(k));
+            } else {
+                obj.remove("api_key_ref");
+            }
+            let _ = given;
+        }
+        obj.insert("active".to_string(), json!(active));
+    }
+    if active {
+        for (j, r) in rows.iter_mut().enumerate() {
+            if j != i {
+                if let Some(o) = r.as_object_mut() {
+                    o.insert("active".to_string(), json!(false));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 切换 active（其余行一律置 false）
+fn rr3_model_activate(rows: &mut [Value], name: &str) -> Result<(), String> {
+    let Some(i) = rows
+        .iter()
+        .position(|r| r.get("name").and_then(Value::as_str) == Some(name))
+    else {
+        return Err(format!("模型行不认: '{name}'"));
+    };
+    for (j, r) in rows.iter_mut().enumerate() {
+        if let Some(o) = r.as_object_mut() {
+            o.insert("active".to_string(), json!(j == i));
+        }
+    }
+    Ok(())
+}
+
+/// 删除非 active 行（active 行拒删——先切换再删，保证表内始终有连接）
+fn rr3_model_delete(rows: &mut Vec<Value>, name: &str) -> Result<(), String> {
+    let Some(i) = rows
+        .iter()
+        .position(|r| r.get("name").and_then(Value::as_str) == Some(name))
+    else {
+        return Err(format!("模型行不认: '{name}'"));
+    };
+    if rows[i].get("active").and_then(Value::as_bool) == Some(true) {
+        return Err(format!("模型行 {name} 是 active，先切换 active 再删"));
+    }
+    rows.remove(i);
+    Ok(())
+}
+
+/// 模型行 CRUD 写臂（`rr3-brain/model/set`）：克隆行表改 → 渲染块 → 解析验证 →
+/// 原子落盘（`.bak` + rename）→ 提交内存。任一步失败：内存与旧文件都不变。
+pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<Value, String> {
+    let op = args
+        .get("op")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if name.is_empty() {
+        return Err("模型行 name 不得为空".to_string());
+    }
+    let mut rows = rr3_model_rows_cloned(&cfg.doc)?;
+    match op {
+        "upsert" => rr3_model_upsert(&mut rows, name, args)?,
+        "activate" => rr3_model_activate(&mut rows, name)?,
+        "delete" => rr3_model_delete(&mut rows, name)?,
+        "" => return Err("缺 op（允许 upsert/activate/delete）".to_string()),
+        other => {
+            return Err(format!(
+                "op 不认: '{other}'（允许 upsert/activate/delete）"
+            ))
+        }
+    }
+    // 结构门（写面自守，不依赖 boot 兜底）：恰一 active
+    let active_n = rows
+        .iter()
+        .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
+        .count();
+    if active_n != 1 {
+        return Err(format!("模型行表须恰一行 active=true（现 {active_n} 行）"));
+    }
+    let path = cfg.config_path.clone().ok_or_else(|| {
+        "模型行写面未接 config 路径（cfg.config_path 未注入）——本次未改任何文件".to_string()
+    })?;
+    let old_text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读 config {} 失败: {e}", path.display()))?;
+    let new_text = rr3_model_block_rewrite(&old_text, &rows)?;
+    // 落盘前验证：新文本必须被 boot 解析器吃下（恰一 active/格式/URL 全过）
+    let parsed = rr3_brain_config_parse(&new_text)?;
+    rr3_config_persist(&path, &old_text, &new_text)?;
+    // 提交内存（解析产物与行表同源；失败面已在落盘前全部走完）
+    let mut doc = cfg.doc.clone();
+    let brain = doc
+        .get_mut("rr3-brain")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())?;
+    brain.insert("model".to_string(), Value::Array(rows.clone()));
+    cfg.doc = doc;
+    cfg.model = parsed.model;
+    Ok(json!({
+        "ok": true,
+        "op": op,
+        "name": name,
+        "active": rr3_row_active_name(&rows),
+        "persisted": true,
+        "applies": "live",
+    }))
+}
+
+/// 连通性测试（`rr3-brain/model/test`）：按名取行造临时客户端探测——业务失败
+/// （缺 key/HTTP 非 2xx/不可达）也回正常应答，用 `ok:false` 表达，不折 Err。
+pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Value, String> {
+    let name = args
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if name.is_empty() {
+        return Err("模型行 name 不得为空".to_string());
+    }
+    let rows = rr3_model_rows_cloned(&cfg.doc)?;
+    let Some(row) = rows
+        .iter()
+        .find(|r| r.get("name").and_then(Value::as_str) == Some(name))
+    else {
+        return Err(format!("模型行不认: '{name}'"));
+    };
+    let base_url = row
+        .get("base_url")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let model_id = row
+        .get("model_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if base_url.is_empty() || model_id.is_empty() {
+        return Err(format!("模型行 {name} 缺 base_url/model_id"));
+    }
+    let mode = match row.get("mode").and_then(Value::as_str).unwrap_or("api") {
+        "local" => Rr3LlmMode::Local,
+        _ => Rr3LlmMode::Api,
+    };
+    let key_ref = row
+        .get("api_key_ref")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let timeout_s = rr3_cloud_cfg_of(&cfg.doc)?.timeout_s;
+    let client = Rr3LlmClient::new(base_url, model_id, timeout_s, key_ref, Some(mode));
+    match client.rr3_probe() {
+        Ok((latency_ms, mock)) => Ok(json!({
+            "ok": true,
+            "name": name,
+            "status": 200,
+            "latency_ms": latency_ms,
+            "mock": mock,
+        })),
+        Err(e) => Ok(json!({
+            "ok": false,
+            "name": name,
+            "latency_ms": 0,
+            "error": e,
+        })),
+    }
 }
 
 #[cfg(test)]
@@ -664,5 +1018,190 @@ max_utterance_ms = 8000
         rr3_ops_write(&mut cfg.doc, "llm", "llm_model", &json!("deepseek-reasoner")).unwrap();
         let row = rr3_model_row_of(&cfg).unwrap();
         assert_eq!(row.model_id, "deepseek-reasoner", "重解析读 doc 真值");
+    }
+
+    // ---------- 模型行面（ADR-0023） ----------
+
+    /// set 臂的真载体：磁盘上一份与 repo_cfg 同文本的 config.toml + 注入路径
+    fn temp_cfg() -> (std::path::PathBuf, std::path::PathBuf, Rr3BrainCfg) {
+        let text = r#"[rr3-brain.cloud]
+base_url = "https://api.siliconflow.cn"
+asr_model = "iic/SenseVoiceSmall"
+llm_model = "deepseek-ai/DeepSeek-V3"
+tts_model = "FunAudioLLM/CosyVoice2-0.5B"
+timeout_s = 20
+
+[[rr3-brain.model]]
+name = "DeepSeek官方"
+mode = "api"
+api_format = "openai"
+base_url = "https://api.deepseek.com/v1"
+model_id = "deepseek-chat"
+api_key_ref = "DeepSeek官方"
+active = true
+
+[rr3-brain.bus]
+call_timeout_s = 30.0
+
+[rr3-brain.dialog]
+max_utterance_ms = 8000
+"#;
+        let dir = std::env::temp_dir().join(format!(
+            "rr3-model-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        let mut cfg = rr3_brain_config_parse(text).unwrap();
+        cfg.config_path = Some(path.clone());
+        (dir, path, cfg)
+    }
+
+    /// 列表快照：逐键形状齐备、只回 key_ref/key_set（无密钥明文）、active 点名
+    #[test]
+    fn model_list_snapshot_reports_rows_without_secret() {
+        let cfg = repo_cfg();
+        let v = rr3_model_list_snapshot(&cfg).unwrap();
+        assert_eq!(v["active"], json!("DeepSeek官方"));
+        let row = &v["models"][0];
+        assert_eq!(row["name"], json!("DeepSeek官方"));
+        assert_eq!(row["mode"], json!("api"));
+        assert_eq!(row["api_format"], json!("openai"));
+        assert_eq!(row["base_url"], json!("https://api.deepseek.com/v1"));
+        assert_eq!(row["model_id"], json!("deepseek-chat"));
+        assert_eq!(row["key_ref"], json!("DeepSeek官方"));
+        assert!(row["key_set"].is_boolean(), "只回布尔，不回密钥值");
+        assert_eq!(row["active"], json!(true));
+    }
+
+    /// 空行表：models 空、active = null（cloud fallback 无行可点名）
+    #[test]
+    fn model_list_snapshot_empty_table_has_null_active() {
+        let mut cfg = repo_cfg();
+        cfg.doc["rr3-brain"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model");
+        let v = rr3_model_list_snapshot(&cfg).unwrap();
+        assert_eq!(v, json!({ "models": [], "active": null }));
+    }
+
+    /// upsert：新行落盘（.bak 备份 + 正式文件新值）、内存同步、应答 persisted/live
+    #[test]
+    fn model_set_upsert_persists_and_hot_swaps_active() {
+        let (dir, path, mut cfg) = temp_cfg();
+        let reply = rr3_model_set_arm(
+            &mut cfg,
+            &json!({
+                "op": "upsert",
+                "name": "GLM",
+                "base_url": "https://open.bigmodel.cn/api/paas/v4",
+                "model_id": "glm-4.5",
+                "api_key_ref": "GLM",
+                "active": true,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            reply,
+            json!({
+                "ok": true,
+                "op": "upsert",
+                "name": "GLM",
+                "active": "GLM",
+                "persisted": true,
+                "applies": "live",
+            })
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("name = \"GLM\""), "{text}");
+        assert!(text.contains("base_url = \"https://open.bigmodel.cn/api/paas/v4\""), "{text}");
+        assert_eq!(text.matches("active = true").count(), 1, "{text}");
+        // .bak = 旧全量；内存投影同步为新 active 行
+        let bak = std::fs::read_to_string(dir.join("config.toml.bak")).unwrap();
+        assert!(bak.contains("name = \"DeepSeek官方\""), "{bak}");
+        assert!(!bak.contains("name = \"GLM\""), "{bak}");
+        assert_eq!(cfg.model.model_id, "glm-4.5");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// activate 切行 / active 行拒删 / 删后剩行仍恰一 active
+    #[test]
+    fn model_set_activate_and_delete_rules() {
+        let (dir, _path, mut cfg) = temp_cfg();
+        rr3_model_set_arm(
+            &mut cfg,
+            &json!({
+                "op": "upsert",
+                "name": "Qwen",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "model_id": "qwen-plus",
+                "active": false,
+            }),
+        )
+        .unwrap();
+        // active 行拒删（先切换再删）
+        let e = rr3_model_set_arm(&mut cfg, &json!({"op": "delete", "name": "DeepSeek官方"}))
+            .unwrap_err();
+        assert!(e.contains("先切换 active 再删"), "{e}");
+        // 切换后旧 active 变可删
+        rr3_model_set_arm(&mut cfg, &json!({"op": "activate", "name": "Qwen"})).unwrap();
+        assert_eq!(cfg.model.model_id, "qwen-plus");
+        let reply =
+            rr3_model_set_arm(&mut cfg, &json!({"op": "delete", "name": "DeepSeek官方"}))
+                .unwrap();
+        assert_eq!(reply["active"], json!("Qwen"));
+        let v = rr3_model_list_snapshot(&cfg).unwrap();
+        assert_eq!(v["models"].as_array().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 写面自守两红：base_url 非完整 API 根 / 未注入 config 路径（都不动文件）
+    #[test]
+    fn model_set_rejects_bad_root_and_missing_path() {
+        let (dir, _path, mut cfg) = temp_cfg();
+        let e = rr3_model_set_arm(
+            &mut cfg,
+            &json!({
+                "op": "upsert",
+                "name": "Bad",
+                "base_url": "https://x/v1/chat/completions",
+                "model_id": "m",
+                "active": false,
+            }),
+        )
+        .unwrap_err();
+        assert!(e.contains("不得含 /chat/completions"), "{e}");
+        cfg.config_path = None;
+        let e = rr3_model_set_arm(
+            &mut cfg,
+            &json!({
+                "op": "upsert",
+                "name": "Ok",
+                "base_url": "https://x/v1",
+                "model_id": "m",
+                "active": false,
+            }),
+        )
+        .unwrap_err();
+        assert!(e.contains("未接 config 路径"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 连通性测试：mock 档回 ok:true + mock:true（业务失败走 ok:false，不折 Err）
+    #[test]
+    fn model_test_arm_mock_and_unknown_row() {
+        std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "mock");
+        let cfg = repo_cfg();
+        let v = rr3_model_test_arm(&cfg, &json!({"name": "DeepSeek官方"})).unwrap();
+        assert_eq!(v["ok"], json!(true));
+        assert_eq!(v["mock"], json!(true));
+        let e = rr3_model_test_arm(&cfg, &json!({"name": "不存在"})).unwrap_err();
+        assert!(e.contains("模型行不认"), "{e}");
     }
 }

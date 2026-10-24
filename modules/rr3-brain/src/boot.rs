@@ -12,6 +12,8 @@
 //! `[rr3-brain.bus].connect_timeout_s` 键随迁移退役（Rust rr3_connect 无该参数
 //! 入口，连接等待上界归 rr-bus-api 内部承载），本解析面不再读它。
 
+use std::path::PathBuf;
+
 use serde_json::Value;
 
 /// LLM 模式（对位 cloud/llm.py `LLM_MODE_API`/`LLM_MODE_LOCAL`——常量真值点随
@@ -68,6 +70,10 @@ pub(crate) struct Rr3BrainCfg {
     pub(crate) cloud_timeout_s: f64,
     pub(crate) call_timeout_s: f64,
     pub(crate) max_utterance_ms: i64,
+    /// config 文件路径（面板模型行落盘写面消费，ADR-0023）：解析器是纯函数不碰
+    /// 路径解析，`main` 装配段用 `rr3mod::rr3_config_path` 投影后注入。
+    /// `None` = 未注入（测试直造 cfg），落盘写面 fail-closed 拒写。
+    pub(crate) config_path: Option<PathBuf>,
 }
 
 /// 总线 RPC 超时缺省（B-13①：`[rr3-brain.bus].call_timeout_s` 缺键时的回落值——
@@ -294,7 +300,24 @@ pub(crate) fn rr3_brain_config_parse(text: &str) -> Result<Rr3BrainCfg, String> 
         cloud_timeout_s,
         call_timeout_s,
         max_utterance_ms,
+        config_path: None,
     })
+}
+
+/// config 路径投影（ADR-0023 模型行落盘用）：与 [`rr3mod::bootstrap`] 实读同一
+/// 解析单点 [`rr3mod::rr3_config_path`]——解析器本身是纯函数不碰路径，装配段把
+/// 此处结果注入 [`Rr3BrainCfg::config_path`]，面板写面才能落回同一份文件。
+pub(crate) fn rr3_brain_config_path(config_env: Option<&'static str>) -> Result<PathBuf, String> {
+    let manifest_path = std::env::var(rr3mod::RR3_MANIFEST_ENV).map_err(|_| {
+        format!(
+            "缺环境变量 {}（rrd spawn 注入；bootstrap 同源）",
+            rr3mod::RR3_MANIFEST_ENV
+        )
+    })?;
+    Ok(PathBuf::from(rr3mod::rr3_config_path(
+        config_env,
+        &manifest_path,
+    )))
 }
 
 #[cfg(test)]
