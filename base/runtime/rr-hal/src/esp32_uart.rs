@@ -19,72 +19,53 @@
 //! 不在 rr-ipc 加读超时机制）。
 //!
 //! task 位形（帧头约定）：宿主下行 `src=1`（rrd 位形，与 `rr-core::RR3_TASK_RRD`
-//! 同值——机制真值单点在 rr-core，本 crate 不加依赖边、本地锚定常量）；板上
-//! `dst=2`（外设执行面位形，与首模块池位形同值，[`RR3_PERIPH_TASK`]）。应答帧
-//! 板侧回 `src=2/dst=1`、`trace_id` 原样回带，本侧按 `dst==1` 门 + id 回显校验。
+//! 同值），板上 `dst=2`（外设执行面位形，[`RR3_PERIPH_TASK`]）。应答帧板侧回
+//! `src=2/dst=1`、`trace_id` 原样回带，本侧按 `dst==1` 门 + id 回显校验。
+//! 位形/主题/信封真值单点在 `rr-periph-proto`（ADR-0024，固件双向复用），本模块
+//! re-export 保 `rr_hal::esp32_uart::*` 路径不变。
 //!
 //! 慢速事件级接口纪律（ADR-0007）：set_angle/draw 都是 round-trip ~26ms 量级
 //! （115200 下 300B 往返），远低于 100Hz 事务上限，不碰反射环边界。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3Header,
-    Rr3PayloadType, Rr3TransportConn, Rr3UartConn, RR3_BOARD_BINDING_ADC_RAIL_PIN,
+    rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3TransportConn, Rr3UartConn,
+    RR3_BOARD_BINDING_ADC_RAIL_PIN,
     RR3_BOARD_BINDING_CRED_STORE, RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA,
     RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS,
     RR3_BOARD_BINDING_LEDC_PAN, RR3_BOARD_BINDING_LEDC_TILT, RR3_BOARD_BINDING_UART2_RX,
-    RR3_BOARD_BINDING_UART2_TX, RR3_METHOD_SET_BINDINGS, RR3_UART_BAUD_DEFAULT,
+    RR3_BOARD_BINDING_UART2_TX, RR3_METHOD_SET_BINDINGS,
 };
 use serde_json::{json, Map, Value};
 
 use crate::descriptor::{rr3_hal_bindings_from_text, Rr3HalBindings, RR3_HAL_BINDINGS_ENV};
 use crate::{Rr3Display, Rr3FaceFrame, Rr3HalError, Rr3PwmServo};
 
-/// 板上外设执行面的 task 号（批C 帧头约定：外设固件帧面占首模块池位形 2；
-/// 不进城，无 registry 冲突面。与 rr-core::RR3_TASK_FIRST_MODULE 同值——真值
-/// 单点在 rr-core，本 crate 不加依赖边、本地锚定）。
-pub const RR3_PERIPH_TASK: u64 = 2;
-
-/// 宿主下行 task 号（rrd 位形；与 rr-core::RR3_TASK_RRD 同值，锚定注释见上）。
-const RR3_TASK_HOST: u64 = 1;
-
-/// 直连 trace（与 rr-core::RR3_TRACE_ID_DIRECT 同值 0——桥后端不经 rrd 路由）。
-const RR3_TRACE_DIRECT: u64 = 0;
-
-/// 桥后端**缺省**波特率：保持 115200（Q1=(a) 裁定——宿主缺省不变，高速档只
-/// 显式选择）。板固件自批D② 起钉 921600（带宽账：音频上行需 >512kbps），会话
-/// 须以 [`RR3_HAL_PERIPH_BAUD_ENV`] 或 `_with_baud` 构造显式同档；两侧档位不
-/// 一致即线路乱码（fail-visible：帧层 BadMagic 当场点名，不静默）。
-pub const RR3_BRIDGE_BAUD: u32 = RR3_UART_BAUD_DEFAULT;
+// 协议共享面（ADR-0024）：task 位形/主题/magic/波特率缺省/env 名/请求组帧/应答
+// 解析的真值单点在 rr-periph-proto（宿主与固件双向复用）；本模块 re-export 保
+// 既有 `rr_hal::esp32_uart::*` 路径——调用方与测试零改动。
+pub use rr_periph_proto::consts::{
+    RR3_BRIDGE_BAUD, RR3_FACE_TOPIC, RR3_HAL_PERIPH_BAUD_ENV, RR3_HAL_PERIPH_UART_ENV,
+    RR3_PERIPH_TASK, RR3_SERVO_TOPIC,
+};
+pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST;
+pub use rr_periph_proto::host_call::{
+    rr3_bridge_call_frame, rr3_bridge_request_body_params, rr3_bridge_request_frame,
+};
+pub use rr_periph_proto::response::rr3_bridge_parse_response;
 
 /// open 后的启动窗口：DTR/RTS 翻转复位板子（E7），ESP32 上电到帧面就绪的
 /// 等待（esp-idf 启动 + OLED init 的实测时长量级，1.2s 留裕量）。
 const RR3_OPEN_SETTLE_MS: u64 = 1200;
-
-/// ESP32 档设备路径 env 键（应急覆盖口径与 [`crate::backend`] 其余键一致；
-/// 描述符键 `periph_uart` 随真件装配批补入 profiles——本档先落 env 正门）。
-pub const RR3_HAL_PERIPH_UART_ENV: &str = "RR3_HAL_PERIPH_UART";
-
-/// ESP32 档波特率 env 键（批D②）：取值白名单见 [`rr3_periph_baud_parse`]，缺省
-/// [`RR3_BRIDGE_BAUD`]（115200）。板固件已钉 921600，会话须显式给 921600。
-pub const RR3_HAL_PERIPH_BAUD_ENV: &str = "RR3_HAL_PERIPH_BAUD";
 
 /// ESP32 档舵机轴 env 键：`pan` / `tilt`（板上双轴云台 ↔ 宿主单轴 trait 的
 /// 映射面，缺省 `pan`；板侧帧面另有 `axis` 参数可逐调用覆盖）。真值单点已上移
 /// 契约层（rr-hal-api `RR3_PERIPH_AXIS_ENV`，批N3 件五——rrd 装配链同键选轴档案），
 /// 本地 re-export 保既有路径。
 pub use rr_hal_api::RR3_PERIPH_AXIS_ENV as RR3_HAL_PERIPH_AXIS_ENV;
-
-/// 舵机点名主题（在册 request L1；payload 形状事实源
-/// contracts/events/act-servo_command.schema.json）。
-pub const RR3_SERVO_TOPIC: &str = "rr3-act/servo/command";
-
-/// 表情点名主题（在册 request L1；payload 形状事实源
-/// contracts/events/interact-face_expression.schema.json）。
-pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 
 /// 轴 env 取值裁决：只认 `pan` / `tilt`（trim 后）。独立纯函数：裁决可单测。
 pub fn rr3_periph_axis_parse(s: &str) -> Option<&'static str> {
@@ -101,76 +82,6 @@ pub fn rr3_periph_baud_parse(s: &str) -> Option<u32> {
     let baud = s.trim().parse::<u32>().ok()?;
     rr3_uart_baud_speed(baud).ok()?;
     Some(baud)
-}
-
-/// 墙钟纳秒（帧头 timestamp；取不到 epoch 时落 0——时间戳不参与校验，只作
-/// 诊断参考，不猜不造）。
-fn rr3_now_ns() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
-}
-
-/// JSON-RPC 请求体（通用 method 面）：method 与 params 原样内嵌——`rr3.call` 与
-/// `rr3.set_bindings`（批N4 件七(b) 基-24）同走本信封。独立纯函数：形状可单测。
-fn rr3_bridge_request_body_params(id: u64, method: &str, params: &Value) -> String {
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": method,
-        "params": params,
-    })
-    .to_string()
-}
-
-/// 请求帧构造（pub(crate)：B 批 b1 音频源命令旁路复用——信封/帧头同形单点，
-/// 舵机/显示桥与旁路面零重复）：body → Request payload → 帧头（SEND /
-/// direct trace / src=宿主 1 / dst=板 2）。独立纯函数：形状可单测。
-pub(crate) fn rr3_bridge_request_frame(id: u64, method: &str, params: &Value) -> Rr3Frame {
-    let body = rr3_bridge_request_body_params(id, method, params);
-    let payload = rr3_body_encode(Rr3PayloadType::Request, body.as_bytes());
-    let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
-    hdr.trace_id = RR3_TRACE_DIRECT;
-    hdr.timestamp_ns = rr3_now_ns();
-    hdr.src_task = RR3_TASK_HOST;
-    hdr.dst_task = RR3_PERIPH_TASK;
-    Rr3Frame {
-        header: hdr,
-        payload,
-    }
-}
-
-/// 主题点名请求帧（pub(crate)：B 批 b1 旁路复用）——[`rr3_bridge_request_frame`]
-/// 的 `rr3.call` 信封形，与 [`Rr3BridgeConn::rr3_call`] 逐字同源
-/// （topic 在 `params.topic`、args 在 `params.args`）。
-pub(crate) fn rr3_bridge_call_frame(id: u64, topic: &str, args: &Value) -> Rr3Frame {
-    rr3_bridge_request_frame(id, "rr3.call", &json!({ "topic": topic, "args": args }))
-}
-
-/// 应答解析（纯函数）：payload 类型必须 Response、`jsonrpc` 必须 2.0、id 必须
-/// 回显一致、result 在位；`result.error`（板侧业务性失败折形状，模块面同款）
-/// 折 Err 点名。独立纯函数：门序可单测。
-fn rr3_bridge_parse_response(
-    got_ty: Rr3PayloadType,
-    body: &[u8],
-    want_id: u64,
-) -> Result<Value, String> {
-    if got_ty != Rr3PayloadType::Response {
-        return Err(format!("payload 类型非 Response: {got_ty:?}"));
-    }
-    let v: Value = serde_json::from_slice(body).map_err(|e| format!("应答体非 JSON: {e}"))?;
-    if v.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return Err("jsonrpc 必须为 \"2.0\"".into());
-    }
-    if v.get("id").and_then(Value::as_u64) != Some(want_id) {
-        return Err(format!("id 回显不一致（要 {want_id}）"));
-    }
-    let result = v.get("result").cloned().ok_or("缺 result")?;
-    if let Some(e) = result.get("error").and_then(Value::as_str) {
-        return Err(format!("板侧业务失败: {e}"));
-    }
-    Ok(result)
 }
 
 /// 板侧绑定载荷（纯函数，批N4 件七(b) 基-24 桥上配置腿宿主半边）：描述符板侧
@@ -498,6 +409,10 @@ impl Rr3Display for Rr3Esp32UartDisplay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // 协议件（信封编码/载荷类型）与直连 trace：生产面已收拢到 rr-periph-proto，
+    // 测试侧显式取用（判据不变）。
+    use rr_ipc::{rr3_body_encode, Rr3PayloadType};
+    use rr_periph_proto::consts::RR3_TRACE_DIRECT;
 
     /// 轴 env 取值裁决：两档内放行，trim 宽容；其余全拒（落缺省 pan 的正门）。
     #[test]

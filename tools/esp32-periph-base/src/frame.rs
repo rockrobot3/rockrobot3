@@ -1,13 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use rr_ipc::{
-    opcode, rr3_board_binding_entry, rr3_body_encode, rr3_body_split, Rr3BoardBindings, Rr3Frame,
-    Rr3FrameBuf, Rr3Header, Rr3PayloadType, Rr3TransportConn, RR3_METHOD_SET_BINDINGS,
+    rr3_board_binding_entry, Rr3BoardBindings, Rr3Frame, Rr3FrameBuf, Rr3TransportConn,
+    RR3_METHOD_SET_BINDINGS,
 };
+use rr_periph_proto::{rr3_periph_request_parse, rr3_periph_response_frame, Rr3PeriphRequest};
 use serde_json::{json, Value};
 
 use crate::board::{
-    rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_PERIPH_TASK, RR3_SERVO_TOPIC,
+    rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC,
 };
 use crate::face::expr_eye_base;
 use crate::link::{rr3_frame_now_ns, UartIo};
@@ -15,60 +16,19 @@ use crate::servo::{axis_check, Axis};
 use crate::state::{lock_bus, push_job, rr3_board_bindings_store, Bus, CtlState, Job};
 
 /// 帧面请求（协议门全过后的视图）：id/method/params 摘出，帧头位形随行携带
-/// （应答回带 trace_id / dst=src_task 用）。
-pub(crate) struct FrameReq {
-    pub(crate) id: u64,
-    pub(crate) method: String,
-    pub(crate) topic: String,
-    pub(crate) args: Value,
-    pub(crate) src_task: u64,
-    pub(crate) trace_id: u64,
-}
+/// （应答回带 trace_id / dst=src_task 用）。形状真值单点在 rr-periph-proto
+/// （ADR-0024，宿主与固件双向复用）。
+pub(crate) type FrameReq = Rr3PeriphRequest;
 
 /// 收帧 + 协议门（全过才返回 Ok）：`rr3_framebuf_read` 整帧收 → 帧还原（magic/
-/// 长度校验在 rr-ipc）→ dst 门（非本板位形丢弃）→ payload 前缀门（非 Request
-/// 丢弃）→ JSON 门 → id 门。任一门失败回 Err = **丢弃不回帧**（fail-closed：
-/// 帧级不可信的请求不作确定性应答；宿主侧重开连接即恢复）。半帧失败后流上可能
-/// 残留尾巴字节——下一轮 magic 窥视大概率落行面 ERR，自愈路径在案。
+/// 长度校验在 rr-ipc）→ 协议门（dst/payload 前缀/JSON/id 在 rr-periph-proto
+/// [`rr3_periph_request_parse`]，单点真值）。任一门失败回 Err = **丢弃不回帧**
+/// （fail-closed：帧级不可信的请求不作确定性应答；宿主侧重开连接即恢复）。半帧
+/// 失败后流上可能残留尾巴字节——下一轮 magic 窥视大概率落行面 ERR，自愈路径在案。
 pub(crate) fn frame_recv(io: &mut UartIo) -> Result<FrameReq, String> {
     let buf = io.rr3_recv_buf().map_err(|e| format!("收帧失败: {e:?}"))?;
     let frame = Rr3Frame::try_from(buf).map_err(|e| format!("帧还原失败: {e:?}"))?;
-    if frame.header.dst_task != RR3_PERIPH_TASK {
-        return Err(format!(
-            "dst_task={} 非本板位形 {RR3_PERIPH_TASK}",
-            frame.header.dst_task
-        ));
-    }
-    let (ty, body) =
-        rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
-    if ty != Rr3PayloadType::Request {
-        return Err(format!("payload 类型非 Request: {ty:?}"));
-    }
-    let v: Value = serde_json::from_slice(&body).map_err(|e| format!("请求体非 JSON: {e}"))?;
-    let id = v.get("id").and_then(Value::as_u64).ok_or("请求缺 id")?;
-    let method = v
-        .get("method")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let (topic, args) = match v.get("params") {
-        Some(p) => (
-            p.get("topic")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            p.get("args").cloned().unwrap_or(Value::Null),
-        ),
-        None => (String::new(), Value::Null),
-    };
-    Ok(FrameReq {
-        id,
-        method,
-        topic,
-        args,
-        src_task: frame.header.src_task,
-        trace_id: frame.header.trace_id,
-    })
+    rr3_periph_request_parse(&frame)
 }
 
 /// 主题分发（**控制面**：只解析/校验/改状态/推作业，不碰硬件）：method 两面——
@@ -253,24 +213,11 @@ fn frame_handle_face(
 }
 
 /// Response 回帧：result 在位（业务失败折 {"error": 文案}——宿主解析契约），
-/// trace_id 原样回带、src=本板位形 2、dst=调用方、timestamp 单调时基。发送失败
-/// eprintln 点名不重试（宿主 io 失败自会重开连接重发）。
+/// trace_id 原样回带、src=本板位形 2、dst=调用方、timestamp 单调时基。组帧单点
+/// 在 rr-periph-proto（ADR-0024）；发送失败 eprintln 点名不重试（宿主 io 失败
+/// 自会重开连接重发）。
 pub(crate) fn frame_send_response(io: &mut UartIo, req: &FrameReq, result: Result<Value, String>) {
-    let result = match result {
-        Ok(v) => v,
-        Err(e) => json!({ "error": e }),
-    };
-    let body = json!({ "jsonrpc": "2.0", "id": req.id, "result": result });
-    let payload = rr3_body_encode(Rr3PayloadType::Response, body.to_string().as_bytes());
-    let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
-    hdr.trace_id = req.trace_id;
-    hdr.timestamp_ns = rr3_frame_now_ns();
-    hdr.src_task = RR3_PERIPH_TASK;
-    hdr.dst_task = req.src_task;
-    let resp = Rr3Frame {
-        header: hdr,
-        payload,
-    };
+    let resp = rr3_periph_response_frame(req, result, rr3_frame_now_ns());
     if let Err(e) = io.rr3_send_buf(Rr3FrameBuf::from(&resp)) {
         eprintln!("[periph] Response 发送失败: {e:?}");
     }
