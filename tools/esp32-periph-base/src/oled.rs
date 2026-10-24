@@ -4,10 +4,11 @@ use std::time::Duration;
 use esp_idf_hal::i2c::I2cDriver;
 
 use crate::board::{
-    I2C_CHUNK_GAP_MS, I2C_PAGE_ATTEMPTS, I2C_RETRY, I2C_RETRY_DELAY_MS, I2C_TIMEOUT, OLED_ADDR,
-    OLED_COLS, OLED_CONTRAST_LEVELS, OLED_ROWS,
+    I2C_CHUNK_GAP_MS, I2C_PAGE_ATTEMPTS, I2C_RETRY, I2C_RETRY_DELAY_MS, OLED_ADDR, OLED_COLS,
+    OLED_CONTRAST_LEVELS, OLED_ROWS,
 };
 use crate::face::capsule_page;
+use crate::ports::Rr3I2cPort;
 use crate::state::rr3_board_bindings_i2c_pair;
 
 // ---------------------------------------------------------------------------
@@ -129,13 +130,13 @@ pub(crate) fn glyph(c: u8) -> [u8; 5] {
 /// 至多 [`I2C_RETRY`] 次、每次隔 [`I2C_RETRY_DELAY_MS`]。SSD1306 每笔
 /// START-addr-bytes-STOP 独立，重发安全。成功即返回；全败才回 Err（文案带重试次数
 /// 与末次错因，便于 monitor 判因）。
-fn i2c_write_retry(i2c: &mut I2cDriver, addr: u8, bytes: &[u8]) -> Result<(), String> {
+fn i2c_write_retry(i2c: &mut impl Rr3I2cPort, addr: u8, bytes: &[u8]) -> Result<(), String> {
     let mut last = String::new();
     for attempt in 0..=I2C_RETRY {
-        match i2c.write(addr, bytes, I2C_TIMEOUT) {
+        match i2c.rr3_i2c_write(addr, bytes) {
             Ok(()) => return Ok(()),
             Err(e) => {
-                last = format!("{e:?}");
+                last = e;
                 if attempt < I2C_RETRY {
                     // 失败即先自愈总线再退避重发（丢拍锁死是本工程主故障模式）
                     i2c_bus_recover(false);
@@ -384,10 +385,10 @@ pub(crate) fn oled_text(i2c: &mut I2cDriver, row: usize, text: &[u8]) -> Result<
 
 /// I2C 总线扫描（0x03–0x77 逐地址单字节 0x00 探测，返回应答地址表）。
 /// 判据①：0x3C 必在表内（全案 §4 批B ① 预期输出）。
-pub(crate) fn i2c_scan(i2c: &mut I2cDriver) -> Vec<u8> {
+pub(crate) fn i2c_scan(i2c: &mut impl Rr3I2cPort) -> Vec<u8> {
     let mut found = Vec::new();
     for addr in 0x03u8..=0x77 {
-        if i2c.write(addr, &[0x00], I2C_TIMEOUT).is_ok() {
+        if i2c.rr3_i2c_write(addr, &[0x00]).is_ok() {
             found.push(addr);
         }
     }

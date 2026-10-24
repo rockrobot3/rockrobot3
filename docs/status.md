@@ -1551,7 +1551,17 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   （`GET /api/brain/models` / `POST /api/brain/model[|/test]`，写口申报 `live`），前端加"模型行"
   卡片（deepseek/glm/qwen/siliconflow 四预设 + 手填）；契约 39→42 条（request 19→22），
   `rr-registry` 两处 + `rrd` 三处 pin 同步。`bash tools/ci/check.sh` 全绿。
-  **在制品**：ESP32 协议共享 crate `rr-periph-proto` + 固件端口层（ADR-0024）未开工。
+- **ESP32 协议共享 crate + 固件端口层（2026-10-24，提交 `b0fa690` 与本批，ADR-0024）**：帧协议真值从
+  "宿主/固件各一份"收成一处——新 crate `base/runtime/rr-periph-proto`（依赖仅 `rr-ipc` + `serde_json`，
+  零 `esp-idf-*`，故两端双向可编译）收拢 task 位形/主题/magic/请求解析/应答组帧/桥调用帧/板命令帧；
+  `rr-hal` 两文件改 `pub use`（既有 `rr_hal::esp32_uart::*` 路径与测试零改动），固件 `frame.rs`
+  收帧/回帧改吃 crate 单点，`board.rs` 只 re-export 并以编译期 `const` 断言钉住生成物主题串
+  （⑨-d 管"生成物⇄契约"，本断言补"生成物⇄crate"这条边）。固件新增 `ports.rs` 五端口 trait
+  （UART/I2C/PWM/ADC/Clock）——事务级接缝、策略留上层，I2C 总线自愈与 LEDC 回读不进端口；
+  UART 帧面、舵机/轨压、OLED 写入三路迁移完成，I2S/麦克风本轮不抽象（登记后续 audio port）。
+  门禁：`cargo test -p rr-periph-proto` 10 + `rr-hal` 63（1 ignored）；
+  `tools/ci/esp32-periph-base-check.sh` xtensa 构建 + 单测编译 PASS；`bash tools/ci/check.sh` 全绿。
+  **遗留**：树莓派板侧端口后端留待后续批（rr-hal 宿主后端已齐备）。
 
 **已知偏差（有意保留，不是遗漏）：**
 
