@@ -1,0 +1,110 @@
+# RockRobot3 装配单：esp32s3-mini 机型（ESP32-S3 N16R8 微型形态，W1/T2）
+# 纯数据、零逻辑，门禁与 profiles/esp32-mini.toml 完全同一套（ADR-0012 裁定 5②
+# 查册门；机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
+#
+# 与 esp32-mini 的**唯一差异是芯片与线束**：形态语义（三格微型形态 F-B）、bindings、
+# enabled_slots、slots、电力/内存预算全部同源同值。S3 N16R8 的 GPIO26–37 被
+# 16MB Flash + 8MB Octal PSRAM 占用，故 classic 的 26/27/32/33/34 全部不可用：
+#   UART2 17/18、I2C0 8/9、LEDC 4/5、I2S0 6/15/7、ADC 1。
+# 真值表同源：board/pins_s3.rs ↔ main.rs 具名装配 ↔ 本文件 [hardware]/[[pin]]。
+#
+# 板侧必须自己守住：限位 / 时限 / 饱和通告在板侧跑（桥断仍守护）。本文件只加数据，
+# 件码、对外主题、contracts/slots.toml 零改动（功能守恒红线）。
+
+schema_version = 5
+
+[runtime]
+log_ring_cap = 512
+
+[platform]
+# ESP32-S3 跑 RTOS 底座、经桥上主承载层 = rtos。
+tier = "rtos"
+# 平台事实表外键：校验按它选 contracts/platform/esp32s3.toml。
+chip = "esp32s3"
+
+[supplies]
+# 与 esp32-mini 同源：看门狗由 rr-core::runtime 运行环喂；时序为声明预算位，
+# 真值对账归 0.0.7 板侧点验矩阵轻承载档行。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rr-core"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 2000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[supplies.budget]
+# 与 esp32-mini 同值：S3 内部 SRAM 更大，但预算按现役任务栈/常驻堆账申报，
+# PSRAM 不改变板侧常驻账（heap_total 待真板 esp_get_free_heap_size 对账回填）。
+not_applicable = false
+task_stack_budget_bytes = 65536
+heap_total_bytes = 327680
+heap_reserved_bytes = 98816
+
+[bindings]
+"act.servo" = "rr3-act"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+
+[hardware]
+# 板侧裸寄存器/外设路径的引脚真值（rtos 档原样直给进 RR3_HAL_BINDINGS，经桥
+# rr3.set_bindings 注入；注入前消费面 fail-closed 拒）。
+i2c_sda = "8"
+i2c_scl = "9"
+adc_rail_pin = "1"
+uart2_tx = "17"
+uart2_rx = "18"
+ledc_pan = "4"
+ledc_tilt = "5"
+i2s_bclk = "6"
+i2s_sd = "15"
+i2s_ws = "7"
+cred_store = "nvs:rr3"
+
+[[pin]]
+# pan（水平）轴：LEDC0 通道 0、信号脚 4（与 pins_s3.rs / main.rs 同源）。
+role = "act.axis.pwm"
+instance = "pan"
+controller = "ledc0"
+channel = 0
+physical = [4]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[[pin]]
+# tilt（俯仰）轴：LEDC0 通道 1、信号脚 5。
+role = "act.axis.pwm"
+instance = "tilt"
+controller = "ledc0"
+channel = 1
+physical = [5]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[enabled_slots]
+rr3-act = ["act.servo"]
+rr3-sense = ["audio.capture", "audio.vad"]
+
+[slots]
+present = [
+    "act.servo",
+    "audio.capture",
+    "audio.vad",
+]

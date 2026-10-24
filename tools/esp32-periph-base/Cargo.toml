@@ -16,6 +16,15 @@ description = "0.0.5 增补轮五 批B 外设底座档 + 批C 帧执行面 + 批
 # 身份——路线二裁定：宿主 HAL 桥后端直连，本固件只是被点名的执行面）。
 [workspace]
 
+# 芯片档位（W1/T2 件三）：esp-idf-sys 的 `cargo:rustc-cfg=esp32*` 只作用于其自身
+# crate，**不传递给依赖方**——本 crate 内的 `cfg(esp32)` / `cfg(esp32s3)` 恒假。
+# 故本 crate 自行以 Cargo feature 表达芯片档：默认 classic（既有 runbook 不变），
+# S3 门禁显式 `--no-default-features --features esp32s3`。两档互斥，禁同开。
+[features]
+default = ["esp32"]
+esp32 = []
+esp32s3 = []
+
 # 批D③ 真板实锤（2026-10-13）：dev 缺省 opt-level=0 下 mic 线程的逐元素堆写
 # （extend_from_slice / String::push / serde_json 序列化）慢两个数量级——组帧
 # 分段实测 pcm≈280ms / b64≈200ms / json≈150ms / memcpy 面（body/frame）≈2ms，

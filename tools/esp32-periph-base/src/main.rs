@@ -137,6 +137,12 @@ fn main() {
         // （成功打印见 frame_handle_set_bindings），装配面引脚号在各装配打印自证。
         "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0 servo=ledc rail=adc1 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo n20-live"
     );
+    // 芯片档自证行（W1/T2 §6.4 件四）：证据记录里直接可辨 classic / S3；引脚真值
+    // 仍以 board/pins_*.rs 装配对账锚为准（本行不印引脚号）。
+    #[cfg(feature = "esp32")]
+    println!("[periph] chip=esp32 pins=classic");
+    #[cfg(feature = "esp32s3")]
+    println!("[periph] chip=esp32s3 pins=s3 flash=16MB psram=8MB-octal");
     // n20-live 标记（0.0.5 增补轮六 批N20 件二① 升级实录）：重烧后此行在册＝新固件
     // 上板实证；同屏「凭据源=nvs」＝NVS 凭据跨重烧保留实证（升级即重烧语义）。
     ram_point("1-boot");
@@ -155,10 +161,16 @@ fn main() {
     let uart_config = UartConfig::new()
         .baudrate(Hertz(UART2_BAUD_HZ))
         .tx_fifo_size(UART2_TX_RING);
+    // 指令面引脚按 target 分档（真值表见 board/pins_classic.rs 与 board/pins_s3.rs）：
+    // classic 18/19；S3 N16R8 17/18（26–37 被 Flash/PSRAM 占用）。
+    #[cfg(feature = "esp32")]
+    let (uart2_tx, uart2_rx) = (peripherals.pins.gpio18, peripherals.pins.gpio19);
+    #[cfg(feature = "esp32s3")]
+    let (uart2_tx, uart2_rx) = (peripherals.pins.gpio17, peripherals.pins.gpio18);
     let uart = UartDriver::new(
         peripherals.uart2,
-        peripherals.pins.gpio18,
-        peripherals.pins.gpio19,
+        uart2_tx,
+        uart2_rx,
         None::<AnyInputPin>,
         None::<AnyOutputPin>,
         &uart_config,
@@ -166,8 +178,8 @@ fn main() {
     .expect("UART2 驱动安装失败");
     println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO{RR3_BIND_UART2_TX}(TX)/GPIO{RR3_BIND_UART2_RX}(RX)（对账锚，board.rs）");
 
-    // ---- GPIO18 驱动档拉满 CAP_3（判据② 音频上行病害的定案修复，2026-10-16）----
-    // 根因（真板双探针实锤）：默认档 CAP_2（≈20mA）推不动 18/19 的长跳线 + FT232
+    // ---- UART2 TX 驱动档拉满 CAP_3（判据② 音频上行病害的定案修复，2026-10-16）----
+    // 根因（真板双探针实锤）：默认档 CAP_2（≈20mA）推不动指令面长跳线 + FT232
     // 接收链路——**长零串（线上持续低电平）期间电平被耦合/漏电抬高**，接收端把 0
     // 读成 1。受害区 = 帧头部长零串（trace_id/reserved 全零收成 0xff 族）+ payload
     // 头 212B；'A' 等边沿密集内容完好。三重证据定案：① 片内 TX→RX 环回 2KB 四段
@@ -178,17 +190,17 @@ fn main() {
     // 函数 + 460800 对照）定案已撤。
     let drive_res = unsafe {
         esp_idf_sys::gpio_set_drive_capability(
-            18 as esp_idf_sys::gpio_num_t,
+            RR3_BIND_UART2_TX as esp_idf_sys::gpio_num_t,
             esp_idf_sys::gpio_drive_cap_t_GPIO_DRIVE_CAP_3,
         )
     };
     if drive_res != 0 {
         println!(
-            "[periph] GPIO18 驱动档 CAP_3 设置失败 err={drive_res}（继续跑，查 esp-idf-sys 对表）"
+            "[periph] UART2 TX(GPIO{RR3_BIND_UART2_TX}) 驱动档 CAP_3 设置失败 err={drive_res}（继续跑，查 esp-idf-sys 对表）"
         );
     }
 
-    // ---- I2C0 @ GPIO21/22（判据①：扫描 0x3C 应答）----
+    // ---- I2C0（判据①：扫描 0x3C 应答；classic 21/22，S3 8/9）----
     // 频率档 400k → 100k → **50k**：真板实证 400k/100k 在长跳线 + 模块弱上拉下**时序
     // 边际**——背靠背密集页写（8 页胶囊眼）在数据段丢拍，且丢拍一次即锁死总线
     // （机理见 [`i2c_bus_recover`]）。50k 上升裕量翻倍 + 失败自愈 + 整页重写三者叠加。
@@ -205,12 +217,11 @@ fn main() {
     } else {
         eprintln!("[periph] I2C boot 解卡拒（绑定未注入）——欠压复位致总线抱死的自愈待 rr3.set_bindings 后由运行面接管");
     }
-    let mut i2c = I2cDriver::new(
-        peripherals.i2c0,
-        peripherals.pins.gpio21,
-        peripherals.pins.gpio22,
-        &i2c_config,
-    )
+    #[cfg(feature = "esp32")]
+    let (i2c_sda, i2c_scl) = (peripherals.pins.gpio21, peripherals.pins.gpio22);
+    #[cfg(feature = "esp32s3")]
+    let (i2c_sda, i2c_scl) = (peripherals.pins.gpio8, peripherals.pins.gpio9);
+    let mut i2c = I2cDriver::new(peripherals.i2c0, i2c_sda, i2c_scl, &i2c_config)
     .expect("I2C0 驱动安装失败");
     let found = i2c_scan(&mut i2c);
     if found.contains(&OLED_ADDR) {
@@ -266,15 +277,19 @@ fn main() {
         );
     }
 
-    // ---- ADC1_CH6 @ GPIO34：5V 轨电压监测（方案A Q1）----
+    // ---- ADC1：5V 轨电压监测（方案A Q1；classic GPIO34=CH6，S3 GPIO1=CH0）----
     // 根因链（真板实锤）：OLED 大面亮点帧 + 舵机保持电流抢同一条 5V 轨 → 轨压跌落
-    // → ESP32 BOD 复位。这条轨此前**无任何观测手段**；本装 ADC1 CH6 周期采样轨压。
+    // → ESP32 BOD 复位。这条轨此前**无任何观测手段**；本装 ADC1 周期采样轨压。
     // 失败不 panic（照 OLED init 纪律）：缺测点/ADC 组件未启用时其余外设面照跑，采样
     // 路径回 Err（**不冒领读数**）。占位分压 1:1 **待真板标定**（接线后与万用表对拍）。
-    let rail = match RailMonitor::new(peripherals.adc1, peripherals.pins.gpio34) {
+    #[cfg(feature = "esp32")]
+    let rail = RailMonitor::new(peripherals.adc1, peripherals.pins.gpio34);
+    #[cfg(feature = "esp32s3")]
+    let rail = RailMonitor::new(peripherals.adc1, peripherals.pins.gpio1);
+    let rail = match rail {
         Ok(r) => {
             println!(
-                // 测点引脚号不上打印（批N4 件七(c)）：具名装配自证 gpio34，数字真值
+                // 测点引脚号不上打印（批N4 件七(c)）：具名装配自证，数字真值
                 // 以 rr3.set_bindings 注入打印为准（观测面唯一真值点）。
                 "[periph] 5V 轨监测 ✓ ADC1 @ 测点引脚经 rr3.set_bindings 下发（占位分压 1:1 待标定；RAIL 命令采一次）"
             );
@@ -286,16 +301,24 @@ fn main() {
         }
     };
 
-    // ---- LEDC timer0 50Hz 14bit：channel0→GPIO32 pan / channel1→GPIO33 tilt ----
+    // ---- LEDC timer0 50Hz 14bit：pan/tilt（classic 32/33，S3 4/5）----
     let timer_config = TimerConfig::new()
         .frequency(Hertz(LEDC_FREQ_HZ))
         .resolution(LEDC_RES_BITS);
     let timer =
         LedcTimerDriver::new(peripherals.ledc.timer0, &timer_config).expect("LEDC timer0 配置失败");
+    #[cfg(feature = "esp32")]
     let pan = LedcDriver::new(peripherals.ledc.channel0, &timer, peripherals.pins.gpio32)
         .expect("LEDC channel0(PAN, GPIO32) 安装失败");
+    #[cfg(feature = "esp32s3")]
+    let pan = LedcDriver::new(peripherals.ledc.channel0, &timer, peripherals.pins.gpio4)
+        .expect("LEDC channel0(PAN, GPIO4) 安装失败");
+    #[cfg(feature = "esp32")]
     let tilt = LedcDriver::new(peripherals.ledc.channel1, &timer, peripherals.pins.gpio33)
         .expect("LEDC channel1(TILT, GPIO33) 安装失败");
+    #[cfg(feature = "esp32s3")]
+    let tilt = LedcDriver::new(peripherals.ledc.channel1, &timer, peripherals.pins.gpio5)
+        .expect("LEDC channel1(TILT, GPIO5) 安装失败");
     let max_duty = pan.get_max_duty();
     // 外设 'static 化 + 分发两平面（16KB 运行下限，哨兵纪律）：UART2 → 控制面，
     // I2C/LEDC → 运行面；共享 Bus（Arc<Mutex>）连通两面。
@@ -378,7 +401,7 @@ fn main() {
         .spawn(move || cmd_loop(ctl, bus))
         .expect("起控制面线程失败");
 
-    // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（GPIO4 BCLK / GPIO27 SD / GPIO26 WS）----
+    // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（classic 4/27/26，S3 6/15/7）----
     // **BCLK 迁移实录（2026-10-20/21）**：原 GPIO25 装配下 10-13 起全部音频数据均为
     // 图案假阳性（冒烟/校准/ILD/TDOA 作废——位指纹/取值种类/L==R 三判据钉死，见
     // README 批D 节）。排障曲折在案：BCLK 桥测（25→27 与 4→27）恒 FF 曾误判「pad
@@ -389,12 +412,21 @@ fn main() {
     // LEDC/VSPI 冲突；12/15 strapping、16/17 打死 I2C 实锤、18/19 UART2、21/22 I2C、
     // 23 VSPI 预留、34-39 仅输入）+ 全线重插后 2026-10-21 验收过：L==R 0-5%、说话
     // 帧 ZCR 低至 0.135（浊音）、人耳听清唤醒词、raw 域量级合 INMP441 灵敏度。
+    #[cfg(feature = "esp32")]
     mic::spawn_mic_smoke(
         mic_bus,
         peripherals.i2s0,
         peripherals.pins.gpio4,
         peripherals.pins.gpio27,
         peripherals.pins.gpio26,
+    );
+    #[cfg(feature = "esp32s3")]
+    mic::spawn_mic_smoke(
+        mic_bus,
+        peripherals.i2s0,
+        peripherals.pins.gpio6,
+        peripherals.pins.gpio15,
+        peripherals.pins.gpio7,
     );
     ram_point("3-mic-smoke");
 

@@ -1,0 +1,75 @@
+# contracts/platform/esp32s3.toml —— ESP32-S3 芯片事实登记表（W1/T2，批N35 件八）。
+# 芯片事实（不是底板走线、不是器件型号）：取值来源 = ESP32-S3 数据手册与
+# tools/esp32-periph-base/src/board/pins_s3.rs 引脚真值段。
+#
+# 消费者：校验 ③-b（通道上界）、④-b（conflicts 集反推互斥）、⑤-a/⑤-b（input-only /
+# ADC 能力集）、⑧-a/⑧-b（在册控制器词表 + 构造对账）。任一段缺 ⇒ 装载红；空集
+# 必须显式写并带行级注记。
+#
+# 本板为 N16R8：GPIO26–37 被 16MB Flash + 8MB Octal PSRAM 占用，**不是可用 GPIO**；
+# GPIO19/20 为原生 USB，GPIO43/44 为 UART0 控制台，GPIO0/3/45/46 为 strapping。
+# 这些是"不可用脚"事实，不进 conflicts（conflicts 只表达已启用线的硬互斥）。
+schema_version = 1
+platform = "esp32s3"
+
+[[controller]]
+# LEDC：S3 共 8 通道（4 定时器）。板侧现用 ch0（pan GPIO4）/ ch1（tilt GPIO5）。
+name = "ledc0"
+kind = "pwm"
+channels = 8
+
+[[controller]]
+# GPIO 控制器无通道维（资源就是脚本身），③-b 不判 (controller, channel)。
+name = "gpio0"
+kind = "gpio"
+channels = 0
+
+[[controller]]
+# I2C0：现役 SSD1306 0x3C（pins_s3.rs：GPIO8 SDA / GPIO9 SCL）。
+name = "i2c0"
+kind = "i2c"
+channels = 0
+
+[[controller]]
+# UART2：板↔宿主桥（921600 档；面包板初版可降 460800）。pins_s3.rs：GPIO17/18。
+name = "uart2"
+kind = "uart"
+channels = 0
+
+[[controller]]
+# ADC1：S3 出脚十通道（GPIO1–10 = CH0–CH9）。板侧现用 GPIO1（ADC1_CH0，轨压测点）。
+# ADC2 与 Wi-Fi 共用，本形态不登记。
+name = "adc1"
+kind = "adc"
+channels = 10
+
+[capabilities]
+# ADC1 十个出脚（与上方 adc1 通道数两视图，CI 契约测试钉住计数相等）。
+adc_pins = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+# S3 无 input-only 出脚（GPIO26–37 是 Flash/PSRAM 占用，不是 input-only）。
+input_only_pins = []
+no_open_drain = []
+# 取值规则集不写枚举；platform.rs 只认在册规则名。
+output_capable_pins = "complement(input_only_pins)"
+
+[[conflict]]
+# I2C0 硬线：SDA/SCL 同一外设矩阵，不可再分给第二绑定。
+pins = [8, 9]
+group = "i2c0"
+why = "I2C0 硬线（GPIO8 SDA / GPIO9 SCL，SSD1306 0x3C 板侧接法，pins_s3.rs）——同外设矩阵，两条线必须同组不可拆绑"
+
+[[conflict]]
+# UART2 硬线：TX/RX 同组。
+pins = [17, 18]
+group = "uart2"
+why = "UART2 TX/RX 用 GPIO17/18（pins_s3.rs）——同一外设矩阵，两条线必须同组申报"
+
+[construction]
+# 具名构造表（esp-idf-hal 具名类型，不可生成）。S3 现役构造两处：
+# LEDC GPIO4 pan / GPIO5 tilt。
+"ledc0:act.axis.pwm:pan" = "ledc"
+"ledc0:act.axis.pwm:tilt" = "ledc"
+
+[controller_wordform]
+# rtos 档：控制器经 [[construction]] 具名构造直给，不走 host 词形派生——空表
+# 显式声明（空 ≠ 缺）。

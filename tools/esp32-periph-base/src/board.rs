@@ -173,16 +173,13 @@ pub(crate) const BOOT_PAN_DEG: u32 = RR3_AXIS_PAN.2 - 30;
 pub(crate) const BOOT_TILT_DEG: u32 = RR3_AXIS_TILT.2 + 8;
 
 // ---------------------------------------------------------------------------
-// 引脚真值（**注入面 + 装配对账锚**，批N4 件七(c) / 批N9 件五）——接线总表：
-//   UART2 = GPIO18→TX / GPIO19←RX（921600 批D②；GPIO16/17 一装 UART2 驱动即把 I2C0
-//           打死，弃用；19 与点阵 VSPI 预留同脚，点阵立项时需再迁，已在案）
-//   I2C0  = GPIO21 SDA / GPIO22 SCL（SSD1306 0x3C）
-//   LEDC  = GPIO32 pan / GPIO33 tilt（50Hz 14bit）
-//   I2S0  = GPIO4 BCLK / GPIO27 SD / GPIO26 WS（INMP441 双麦；2026-10-20 自 25 迁 4）
-//   UART0 = 控制台（板载 USB）
-//   轨测点 = GPIO34（ADC1_CH6，input-only 档）
+// 引脚真值（**注入面 + 装配对账锚**，批N4 件七(c) / 批N9 件五；批N35 件八按
+// target 分档）——接线总表已拆到 `board/pins_classic.rs` 与 `board/pins_s3.rs`：
+//   classic：UART2 18/19、I2C0 21/22、LEDC 32/33、I2S0 4/27/26、ADC 34；
+//   S3 N16R8：UART2 17/18、I2C0 8/9、LEDC 4/5、I2S0 6/15/7、ADC 1。
+// **两套线束不可混用**：S3 的 GPIO26–37 被 16MB Flash / 8MB Octal PSRAM 占用。
 // **消费面数字引脚号不落常量**（批N4 件七(c) 定案维持）：I2C 自愈/轨测点的真值由
-// 宿主经 rr3.set_bindings 下发（esp32-mini [hardware] → rrd RR3_HAL_BINDINGS →
+// 宿主经 rr3.set_bindings 下发（esp32*-mini [hardware] → rrd RR3_HAL_BINDINGS →
 // supervisor env → 桥上 method），板侧落 [`crate::state`] 单点，未注入即拒不动作
 // （裸寄存器自愈路径 [`crate::oled::i2c_bus_recover`] / [`crate::oled::i2c_bus_unstick`]；
 // 观测面 = 绑定注入打印 + 运行面 `selfheal_skipped` 计数）。
@@ -197,26 +194,14 @@ pub(crate) const BOOT_TILT_DEG: u32 = RR3_AXIS_TILT.2 + 8;
 // ledc 两键退役、具名引脚真值化改造收官。
 // ---------------------------------------------------------------------------
 
-/// I2C SDA 装配对账锚（= GPIO21，SDA 装配 `peripherals.pins.gpio21`）。
-pub(crate) const RR3_BIND_I2C_SDA: u8 = 21;
-/// I2C SCL 装配对账锚（= GPIO22，SCL 装配 `peripherals.pins.gpio22`）。
-pub(crate) const RR3_BIND_I2C_SCL: u8 = 22;
-/// 5V 轨测点装配对账锚（= GPIO34，ADC 装配 `peripherals.pins.gpio34`）。
-pub(crate) const RR3_BIND_ADC_RAIL: u8 = 34;
-/// UART2 TX 装配对账锚（= GPIO18，UART2 装配 `peripherals.pins.gpio18`）。
-pub(crate) const RR3_BIND_UART2_TX: u8 = 18;
-/// UART2 RX 装配对账锚（= GPIO19，UART2 装配 `peripherals.pins.gpio19`）。
-pub(crate) const RR3_BIND_UART2_RX: u8 = 19;
-/// LEDC pan 轴装配对账锚（= GPIO32，pan 装配 `peripherals.pins.gpio32`）。
-pub(crate) const RR3_BIND_LEDC_PAN: u8 = 32;
-/// LEDC tilt 轴装配对账锚（= GPIO33，tilt 装配 `peripherals.pins.gpio33`）。
-pub(crate) const RR3_BIND_LEDC_TILT: u8 = 33;
-/// I2S BCLK 装配对账锚（= GPIO4，BCLK 装配 `peripherals.pins.gpio4`）。
-pub(crate) const RR3_BIND_I2S_BCLK: u8 = 4;
-/// I2S SD 装配对账锚（= GPIO27，SD 装配 `peripherals.pins.gpio27`）。
-pub(crate) const RR3_BIND_I2S_SD: u8 = 27;
-/// I2S WS 装配对账锚（= GPIO26，WS 装配 `peripherals.pins.gpio26`）。
-pub(crate) const RR3_BIND_I2S_WS: u8 = 26;
+#[cfg(feature = "esp32")]
+mod pins_classic;
+#[cfg(feature = "esp32s3")]
+mod pins_s3;
+#[cfg(feature = "esp32")]
+pub(crate) use pins_classic::*;
+#[cfg(feature = "esp32s3")]
+pub(crate) use pins_s3::*;
 
 /// 装配对账（批N9 件五，**纯函数**：只判等打印，不碰硬件不拒收）：注入快照逐键
 /// 判等具名装配真值（[`RR3_BIND_*`] 十枚）。键缺席（未注入）与值失配都点名——
