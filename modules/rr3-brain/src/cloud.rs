@@ -54,6 +54,13 @@ pub(crate) const RR3_SECRETS_FILE_ENV: &str = "RR3_SECRETS_FILE";
 pub(crate) const RR3_MOCK_TEXT_ENV: &str = "RR3_BRAIN_MOCK_ASR_TEXT";
 /// mock ASR 的固定识别文本
 pub(crate) const RR3_MOCK_TEXT: &str = "你好，今天天气怎么样";
+/// TTS 宿主兜底后端开关（`RR3_TTS_BACKEND=mac_say`）：硅基流动 /v1/audio/speech
+/// 2026-10-24 起对合法请求零字节挂死（ASR/LLM 正常），宿主开发档改走 macOS `say`
+/// 合成 WAV 再抽 PCM——只换 TTS 一跳，总线契约与 ASR/LLM 零改动。
+pub(crate) const RR3_TTS_BACKEND_ENV: &str = "RR3_TTS_BACKEND";
+const RR3_TTS_BACKEND_MAC_SAY: &str = "mac_say";
+/// 宿主合成音色（macOS 内置 zh_CN 女声）
+const RR3_SAY_VOICE: &str = "Ting-Ting";
 
 /// legacy/core/llm/src/llm_config.h 的原值移植（M4 不改人设与参数）
 pub(crate) const RR3_SYSTEM_PROMPT: &str =
@@ -359,6 +366,9 @@ impl Rr3TtsClient {
         if rr3_cloud_mode()? == Rr3CloudMode::Mock {
             return Ok(crate::tts::rr3_sine_pcm(text, sample_rate));
         }
+        if std::env::var(RR3_TTS_BACKEND_ENV).as_deref() == Ok(RR3_TTS_BACKEND_MAC_SAY) {
+            return rr3_say_pcm(text, sample_rate);
+        }
         let key = rr3_cloud_api_key()?;
         let body = json!({
             "model": self.model,
@@ -376,6 +386,42 @@ impl Rr3TtsClient {
         }
         Ok(resp)
     }
+}
+
+/// 宿主合成临时文件序号（同进程内多次合成不撞名）
+static RR3_SAY_SEQ: AtomicU32 = AtomicU32::new(0);
+
+/// 宿主 `say` 合成（仅 `RR3_TTS_BACKEND=mac_say` 档）：一次写临时 WAV（请求
+/// 采样率的 s16le 单声道）→ 抽 `data` 块 → 返回裸 PCM。退出非零/文件缺失/
+/// 无 data 块一律 Err（文案带 stderr，不静默降级）。
+fn rr3_say_pcm(text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
+    let seq = RR3_SAY_SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("rr3-tts-{}-{seq}.wav", std::process::id()));
+    let out = std::process::Command::new("/usr/bin/say")
+        .arg("-v")
+        .arg(RR3_SAY_VOICE)
+        .arg("--file-format=WAVE")
+        .arg(format!("--data-format=LEI16@{sample_rate}"))
+        .arg("-o")
+        .arg(&path)
+        .arg(text)
+        .output()
+        .map_err(|e| format!("宿主合成不可用（/usr/bin/say）: {e}"))?;
+    if !out.status.success() {
+        let _ = std::fs::remove_file(&path);
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "宿主合成失败（say {}）: {}",
+            out.status,
+            err.trim()
+        ));
+    }
+    let bytes = std::fs::read(&path);
+    let _ = std::fs::remove_file(&path);
+    let bytes = bytes.map_err(|e| format!("读宿主合成 WAV 失败: {e}"))?;
+    crate::tts::rr3_wav_data_chunk(&bytes)
+        .map(|b| b.to_vec())
+        .ok_or_else(|| "宿主合成 WAV 无 data 块".to_string())
 }
 
 /// splitmix64（纯 std 的 64bit 混淆——uuid crate 不引，裁定 5 最小依赖面）。
@@ -776,6 +822,23 @@ mod tests {
         assert_eq!(req["response_format"], "pcm");
         assert_eq!(req["sample_rate"], 16000);
         std::env::remove_var(RR3_API_KEY_ENV);
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// 宿主兜底档：真云挂死时 `RR3_TTS_BACKEND=mac_say` 走本机 say，交出非空
+    /// s16le PCM（仅 macOS；say 缺失/无 data 块即 Err，不静默降级）
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn tts_mac_say_backend_returns_pcm_without_cloud() {
+        let _g = env_lock();
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_TTS_BACKEND_ENV, RR3_TTS_BACKEND_MAC_SAY);
+        std::env::remove_var(RR3_API_KEY_ENV);
+        let client = Rr3TtsClient::new("http://127.0.0.1:9", "unused", 1.0);
+        let pcm = client.rr3_synthesize("你好", 16000).unwrap();
+        assert!(!pcm.is_empty());
+        assert_eq!(pcm.len() % 2, 0);
+        std::env::remove_var(RR3_TTS_BACKEND_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
     }
 
