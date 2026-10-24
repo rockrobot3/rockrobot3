@@ -16,7 +16,7 @@
 //! ——uds 的 endpoint trait 面是"端点可洪泛"形状的产物，硬套点对点等于撒谎。
 //!
 //! 系统调用面：手写 `extern "C"` 声明壳（open/close/read/write/tcgetattr/
-//! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl），**不引 libc crate**——
+//! tcsetattr/cfmakeraw/cfsetispeed/cfsetospeed/tcflush/ioctl/fcntl），**不引 libc crate**——
 //! 同款仓内纪律，rr-ipc 依赖表保持为空。termios 结构与常量 Linux/macOS 分
 //! `cfg` 各钉一份（数值互不相同：Linux B115200 = `0o10002`，macOS 直接用字面
 //! 波特率；O_NOCTTY、VMIN/VTIME 下标、结构布局均异）——每一份都以各自平台
@@ -97,6 +97,15 @@ mod imp {
     pub const O_NONBLOCK: i32 = 0x0004;
     /// SDK sys/fcntl.h：`#define O_CLOEXEC 0x01000000`（与 Linux 数值不同，不得混用）
     pub const O_CLOEXEC: i32 = 0x0100_0000;
+    /// SDK sys/termios.h：`#define CLOCAL 0x00008000`（忽略载波——TTL 链路无
+    /// modem，隔离型适配器 DCD 经隔离器悬空恒"无载波"，不置位则 open(2) 阻塞
+    /// 等载波永挂）
+    pub const CLOCAL: u64 = 0x0000_8000;
+    /// SDK sys/termios.h：`#define CREAD 0x00000800`（接收使能）
+    pub const CREAD: u64 = 0x0000_0800;
+    /// SDK sys/fcntl.h：`#define F_GETFL 3`、`#define F_SETFL 4`（两平台同值）
+    pub const F_GETFL: i32 = 3;
+    pub const F_SETFL: i32 = 4;
     /// SDK sys/signal.h：`struct pollfd`（int + short + short = 8B，无填充）
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -166,6 +175,14 @@ mod imp {
     /// Linux uapi asm-generic/fcntl.h：`#define O_CLOEXEC 02000000`（八进制，与
     /// macOS 数值不同，不得混用）
     pub const O_CLOEXEC: i32 = 0o2000000;
+    /// Linux uapi asm-generic/termbits.h：`#define CLOCAL 0004000`、`#define CREAD
+    /// 0000200`（八进制，与 macOS 数值不同不得混用——TTL 链路无 modem，不置
+    /// CLOCAL 则 open(2) 阻塞等载波永挂）
+    pub const CLOCAL: u32 = 0o4000;
+    pub const CREAD: u32 = 0o200;
+    /// Linux uapi fcntl.h：`#define F_GETFL 3`、`#define F_SETFL 4`（两平台同值）
+    pub const F_GETFL: i32 = 3;
+    pub const F_SETFL: i32 = 4;
     /// glibc sys/poll.h：`struct pollfd`（int + short + short = 8B，无填充）
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -214,8 +231,8 @@ mod imp {
 }
 
 use imp::{
-    NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, O_CLOEXEC, O_NOCTTY, O_NONBLOCK,
-    O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME,
+    NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, CLOCAL, CREAD, F_GETFL, F_SETFL,
+    O_CLOEXEC, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME,
 };
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
@@ -257,6 +274,9 @@ extern "C" {
     /// `poll(2)`：nfds_t 宽度平台不同（macOS u32 / Linux u64），经 [`NfdsT`] 对表。
     #[link_name = "poll"]
     fn c_poll(fds: *mut PollFd, nfds: NfdsT, timeout: i32) -> i32;
+    /// `fcntl(2)` 是变参：这里只用 (fd, F_GETFL) 与 (fd, F_SETFL, flags) 两形状。
+    #[link_name = "fcntl"]
+    fn c_fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 
 /// 波特率 → `speed_t`。只认三档：115200（默认）、9600（P3 合法降速）与 921600
@@ -381,19 +401,39 @@ impl Rr3UartConn {
         let mut cpath = path.as_os_str().as_bytes().to_vec();
         cpath.push(0);
         // SAFETY：cpath 以 NUL 结尾，open 只读它；两参形状与 open(2) 变参声明一致。
-        // O_CLOEXEC 同 excl_enter guard：通信 fd 不随 spawn 泄漏进子进程
-        // （description 副本钉住 termios 配置与队列状态，同批N21 件一根因面）。
-        let fd = unsafe { c_open(cpath.as_ptr() as *const CChar, O_RDWR | O_NOCTTY | O_CLOEXEC) };
+        // O_NONBLOCK：open(2) 自身不得在 carrier 上悬住——隔离型 USB-TTL 适配器
+        // 的 DCD 经隔离器悬空恒"无载波"，阻塞 open 永挂（2026-10-24 隔离棒现场
+        // 实锤；guard fd 同理由见 excl_enter）。O_CLOEXEC 同 excl_enter guard：
+        // 通信 fd 不随 spawn 泄漏进子进程（description 副本钉住 termios 配置与
+        // 队列状态，同批N21 件一根因面）。非阻塞位在 configure 成功后由
+        // [`rr3_uart_clear_nonblock`] 撤除，读写语义与旧阻塞版逐点等价。
+        let fd = unsafe {
+            c_open(
+                cpath.as_ptr() as *const CChar,
+                O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC,
+            )
+        };
         if fd < 0 {
             let e = std::io::Error::last_os_error();
             excl_exit(&key);
             return Err(e);
         }
         match configure(fd, speed) {
-            Ok(()) => Ok(Self {
-                fd,
-                excl_path: Some(key),
-            }),
+            Ok(()) => {
+                // 撤 O_NONBLOCK：Read/Write 是阻塞语义（VMIN=1 等 ≥1 字节），
+                // 非阻塞 fd 上 VMIN/VTIME 失效、read 缺数据返 EAGAIN，会把这些
+                // EAGAIN 当真错误抛出——开口序列收尾必须换回阻塞。
+                if let Err(e) = rr3_uart_clear_nonblock(fd) {
+                    // SAFETY：fd 是本函数 open 成功的合法描述符，收尾失败则归还。
+                    unsafe { c_close(fd) };
+                    excl_exit(&key);
+                    return Err(e);
+                }
+                Ok(Self {
+                    fd,
+                    excl_path: Some(key),
+                })
+            }
             Err(e) => {
                 // SAFETY：fd 是刚 open 成功的合法描述符，配置失败则归还。
                 unsafe { c_close(fd) };
@@ -492,6 +532,10 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
     }
     // SAFETY：合法指针；cfmakeraw 只改 termios 位面（清回显/规范化/流控）。
     unsafe { c_cfmakeraw(&mut t) };
+    // CLOCAL|CREAD：TTL 链路本无 modem，载波检测语义必须整体摘除——不置位时
+    // 阻塞 open/读写以 DCD 为闸（隔离型适配器 DCD 悬空恒"无载波"，开口即永
+    // 挂，2026-10-24 现场实锤）。置位后开口不再依赖载波，与线缆对端无关。
+    t.c_cflag |= CLOCAL | CREAD;
     t.c_cc[VMIN] = 1;
     t.c_cc[VTIME] = 0;
     // SAFETY：合法指针。
@@ -505,6 +549,22 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
     }
     // SAFETY：合法指针；冲掉开口前积压的输入队列（TCIFLUSH 只冲收不冲发）。
     if unsafe { c_tcflush(fd, TCIFLUSH) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// 撤除 fd 上的 `O_NONBLOCK` 位（开口序列收尾）：open 带 O_NONBLOCK 进场只为
+/// 不在 carrier 上悬住，配置完成后读写要走阻塞语义——非阻塞 fd 上 VMIN/VTIME
+/// 失效、read 缺数据返 EAGAIN，会把"暂无数据"当真错误抛出。
+fn rr3_uart_clear_nonblock(fd: i32) -> std::io::Result<()> {
+    // SAFETY：合法 fd；F_GETFL 无变参。
+    let flags = unsafe { c_fcntl(fd, F_GETFL) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY：合法 fd；F_SETFL 形状带一个 int 变参。
+    if unsafe { c_fcntl(fd, F_SETFL, flags & !O_NONBLOCK) } < 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
@@ -868,7 +928,10 @@ mod tests {
                 Err(e) => panic!("账退尽后重开必须成功: {e}"),
             }
         }
-        assert!(_again.is_some(), "有界重试后重开仍失败＝锁非瞬态（账本泄漏形状）");
+        assert!(
+            _again.is_some(),
+            "有界重试后重开仍失败＝锁非瞬态（账本泄漏形状）"
+        );
     }
 
     /// 排他开口·跨进程被拒（批G G0 守门用例，批E E7 实锤）：另一进程持锁时本
