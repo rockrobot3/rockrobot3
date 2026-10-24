@@ -1542,6 +1542,16 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   （§5）与每批验收四件套（§6），零 `.rs` 改动随立项落档；实施批待用户排期，
   与 brain 迁移（[ADR-0016](process/adr/ADR-0016-brain迁移路线-python转Rust渐进首裁定.md)）
   同窗、与 0.0.6 / 0.0.7 真件批不混排（R17 原义）。
+- **LLM 模型面统一 + 模型行写面落库（2026-10-24，提交 `136289a`，ADR-0023）**：换厂商从"改代码"
+  降为"改一行配置"——模型行 `base_url` 定为**完整 OpenAI 兼容 API 根**（GLM `/api/paas/v4`、
+  Qwen `/compatible-mode/v1` 各写各的，客户端只追加 `/chat/completions`；`cloud.base_url` 仍是主机根，
+  ASR/TTS 拼 `/v1/audio/*` 的语义不动）；新增 `config_store.rs`（`[[rr3-brain.model]]` 块重写，块外
+  文本含表头前导注释逐字保留、块内行间注释丢弃，`.bak` + 原子写）；三 RPC `model/list|set|test`
+  （完整 CRUD、恰一 active、拒删 active、probe 只判 2xx 不写历史）；面板端点 23→26
+  （`GET /api/brain/models` / `POST /api/brain/model[|/test]`，写口申报 `live`），前端加"模型行"
+  卡片（deepseek/glm/qwen/siliconflow 四预设 + 手填）；契约 39→42 条（request 19→22），
+  `rr-registry` 两处 + `rrd` 三处 pin 同步。`bash tools/ci/check.sh` 全绿。
+  **在制品**：ESP32 协议共享 crate `rr-periph-proto` + 固件端口层（ADR-0024）未开工。
 
 **已知偏差（有意保留，不是遗漏）：**
 
