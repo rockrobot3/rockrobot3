@@ -2,6 +2,15 @@
 # tools/espidf-std-hello/README.md）：xtensa-esp32-espidf std 目标 + build-std +
 # ldproxy + espidf_time64 + MCU=esp32。
 #
+# W1/T2 双芯片档：同一 crate 同时支持 classic 与 S3 N16R8。默认 `[build]` 仍是
+# classic（既有 runbook 不变）；S3 构建显式给 target、MCU 与芯片档 feature：
+#   MCU=esp32s3 cargo +esp build --target xtensa-esp32s3-espidf \
+#       --no-default-features --features esp32s3
+# 芯片档必须走 Cargo feature（esp-idf-sys 的 `cargo:rustc-cfg=esp32*` 不跨 crate
+# 传播，本 crate 内 `cfg(esp32*)` 恒假）。`[env]` 的 MCU=esp32 未设 force，外部
+# env 优先；esp-idf-sys 会按 MCU 自动选用 sdkconfig.defaults.esp32s3
+# （BUILD-OPTIONS.md：<path>.<mcu> 更具体者覆盖）。
+#
 # runner = espflash（0.0.7 方案 §9.3 ① 的 runner=espflash 口径）：`cargo +esp run`
 # = 烧录 + monitor（退出键 Ctrl+]）。espflash 4.x 与 espidf std 镜像兼容——std 路
 # 经 ESP-IDF 构建自带 app descriptor（批C④ 的 esp-hal 裸金属缺 appdesc 补丁不适用
@@ -15,6 +24,13 @@ target = "xtensa-esp32-espidf"
 linker = "ldproxy"
 runner = "espflash flash --monitor"
 # esp-idf-sys BUILD-OPTIONS：IDF 5.0+ 必设（libc time_t 64 位面与 C 头对齐）
+rustflags = ["--cfg", "espidf_time64"]
+
+# ESP32-S3 N16R8（8MB Octal PSRAM）。runner 与 rustflags 同 classic；
+# 芯片差异走 MCU env + sdkconfig.defaults.esp32s3。
+[target.xtensa-esp32s3-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
 rustflags = ["--cfg", "espidf_time64"]
 
 [unstable]

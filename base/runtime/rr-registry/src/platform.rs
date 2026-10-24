@@ -575,14 +575,17 @@ mod tests {
 
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const ESP32: &str = include_str!("../../../../contracts/platform/esp32.toml");
+    const ESP32S3: &str = include_str!("../../../../contracts/platform/esp32s3.toml");
     const RK3566: &str = include_str!("../../../../contracts/platform/rk3566.toml");
     const RPI4: &str = include_str!("../../../../contracts/platform/raspberry-pi-4.toml");
 
-    /// 三份在册平台表全部可解析（演练两份的"空集显式"是裁定②的形状，不是缺段）
+    /// 四份在册平台表全部可解析（演练两份的"空集显式"是裁定②的形状，不是缺段）
     #[test]
     fn contract_tables_parse() {
         let esp = rr3_registry_platform_table_from_text(ESP32).expect("esp32 表须可解析");
         assert_eq!(esp.rr3_platform_name(), "esp32");
+        let s3 = rr3_registry_platform_table_from_text(ESP32S3).expect("esp32s3 表须可解析");
+        assert_eq!(s3.rr3_platform_name(), "esp32s3");
         let rk = rr3_registry_platform_table_from_text(RK3566).expect("rk3566 表须可解析");
         assert_eq!(rk.rr3_platform_name(), "rk3566");
         let rpi = rr3_registry_platform_table_from_text(RPI4).expect("rpi4 表须可解析");
