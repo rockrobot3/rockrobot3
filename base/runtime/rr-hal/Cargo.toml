@@ -28,6 +28,9 @@ toml = { workspace = true }
 # ESP32 外设桥后端（批C）：UART 能力帧承载——帧构造/收发经 rr-ipc 传输窄缝与
 # blanket conn（Rr3UartConn 排他开口/开口即净语义同源复用，不写第二份帧层）。
 rr-ipc = { path = "../rr-ipc" }
+# 外设帧面协议共享层（ADR-0024）：task 位形/主题/信封组帧/应答门序的真值单点，
+# 与 xtensa 固件双向复用；本 crate 只消费，平台面（串口开口）仍在本 crate。
+rr-periph-proto = { path = "../rr-periph-proto" }
 # 桥 payload 的 JSON-RPC 体组包/拆包（rr3.call 请求体与 Response 应答体；
 # 依赖闭包 L1 档位，与 rr-bus/哨兵同口径）。
 serde_json = "1"

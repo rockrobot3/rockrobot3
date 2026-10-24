@@ -70,13 +70,12 @@ pub(crate) const SCAN_POINT_MS: u64 = 600;
 /// 运行面自主节拍（表情微动作 + 云台扫摆；无作业时空转一拍）。
 pub(crate) const RUNTIME_TICK_MS: u64 = 10;
 
-/// 帧面本板 task 位形（帧头 dst 门）：外设执行面占首模块池位形 2——与宿主
-/// rr-hal::esp32_uart::RR3_PERIPH_TASK 同值（本 crate 不依赖 rr-core，此位形是
-/// 两端帧头约定，宿主侧有同值锚定测试防静默分叉）。
-pub(crate) const RR3_PERIPH_TASK: u64 = 2;
-/// 帧头 magic "1ERA" 的 LE 首字节（0x31='1'）——双面分流窥视判据。行面首字节
-/// 集全为字母（HELP/OLED/PAN/...），与 0x31 无交集，分流无歧义。
-pub(crate) const RR3_MAGIC_FIRST: u8 = 0x31;
+// 帧面协议真值（ADR-0024）：task 位形/magic 单点在 rr-periph-proto（与宿主
+// rr-hal 双向复用），本固件只 re-export 保既有 board::* 路径。
+pub(crate) use rr_periph_proto::consts::{
+    RR3_MAGIC_FIRST, RR3_PERIPH_TASK, RR3_TASK_HOST as RR3_HOST_TASK,
+};
+
 // 板侧常量表生成物（主题串三枚 + 板侧表情白名单七态）——真值点（contracts/
 // topics.toml + contracts/face-expressions.toml）与生成器（tools/rr3-codegen）
 // 见 topics_gen.rs 头注。本文件不再手写副本：全案 0.0.5 增补轮六 §4.5 裁定
@@ -86,10 +85,30 @@ include!("topics_gen.rs");
 // 行程生成物（RR3_AXIS_* + rr3_axis_travel）已随批N23 件一收编迁入 servo 机制件
 // （atoms/servo/mech.rs include!）——行程是舵机机制真值，中位锚经上方 use 回流
 // 供 boot 姿态策略引用。
-/// 音频上行宿主 task 位形（帧头 dst 门）：宿主侧占位形 1——与宿主 rr-hal
-/// esp32_uart 桥后端同值帧头约定（板不依赖 rr-core，与 [`RR3_PERIPH_TASK`]
-/// 同一"两端常量自证"纪律）。Event 帧只发宿主（dst=1），trace_id=0（direct）。
-pub(crate) const RR3_HOST_TASK: u64 = 1;
+/// 生成物 ⇄ 协议 crate 同值断言（编译期）：契约改主题串而未同步 rr-periph-proto
+/// 常量即编译红——两处副本不许静默分叉（⑨-d 只管生成物⇄契约，本断言补另一条边）。
+const fn rr3_str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+const _: () = assert!(rr3_str_eq(
+    RR3_SERVO_TOPIC,
+    rr_periph_proto::consts::RR3_SERVO_TOPIC
+));
+const _: () = assert!(rr3_str_eq(
+    RR3_FACE_TOPIC,
+    rr_periph_proto::consts::RR3_FACE_TOPIC
+));
 /// 音频上行分片（每通道帧数）：2048 帧 = 128ms @16kHz = 8192B PCM/分片——b64+
 /// JSON+帧头开销摊薄后单分片上行 ≈11.1KB，7.8 分片/s ≈ 87KB/s，落 921600 有效
 /// 92.16KB/s 内（Q1=(a) 带宽账）。分片过短开销占比暴涨、过长背压延迟变大。
