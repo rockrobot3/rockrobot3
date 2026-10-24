@@ -195,9 +195,10 @@ impl Rr3BrainDispatcher {
         }
     }
 
-    /// 订阅面两臂（Python 主循环事件分支逐语义）：pcm → 状态机积累/预滚（坏
-    /// base64 上抛）；vad_start → feed_vad 判停真值触发整轮。泛型写口使事件臂
-    /// 与节拍臂纯夹具可测（[`Rr3TurnBus`]）。
+    /// 订阅面两臂（Python 主循环事件分支逐语义）：pcm → 提取事件体 pcm_b64/ms
+    /// 字段喂状态机积累/预滚（机制吃适配后的字段值——S-7 同款，坏 base64 上抛）；
+    /// vad_start → 提取 edge 字段判停真值触发整轮。泛型写口使事件臂与节拍臂纯
+    /// 夹具可测（[`Rr3TurnBus`]）。
     fn rr3_event_arm<B: Rr3TurnBus>(
         &mut self,
         topic: &str,
@@ -205,9 +206,24 @@ impl Rr3BrainDispatcher {
         bus: &B,
     ) -> Result<(), String> {
         match topic {
-            RR3_TOPIC_PCM => self.dialog.rr3_feed_pcm(body),
+            RR3_TOPIC_PCM => {
+                // Python: body.get("pcm_b64") 直取（sense 事件体保证在册）＋
+                // ms 缺席折 0（攒窗按 0ms 帧计，不虚占预滚窗）
+                let pcm_b64 = body
+                    .get("pcm_b64")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let ms = body
+                    .get("ms")
+                    .and_then(Value::as_f64)
+                    .map(|f| f as i64)
+                    .unwrap_or(0);
+                self.dialog.rr3_feed_pcm(pcm_b64, ms)
+            }
             RR3_TOPIC_VAD => {
-                if self.dialog.rr3_feed_vad(body, self.tb.rr3_now_ms()) {
+                // Python: edge = body.get("edge", "")——不认的边沿由状态机静默忽略
+                let edge = body.get("edge").and_then(Value::as_str).unwrap_or("");
+                if self.dialog.rr3_feed_vad(edge, self.tb.rr3_now_ms()) {
                     self.rr3_finish_turn(bus)?;
                 }
                 Ok(())
@@ -878,9 +894,9 @@ mod tests {
     fn played_rounds_counted_in_both_ledgers_and_timeout_injected() {
         let (mut dp, _g) = mock_dispatcher(cfg_call_timeout(12.5));
         let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
-        dp.dialog.rr3_feed_vad(&json!({"edge": "onset"}), 0);
+        dp.dialog.rr3_feed_vad("onset", 0);
         dp.dialog
-            .rr3_feed_pcm(&pcm_event_body(&pcm_bytes(320), 32))
+            .rr3_feed_pcm(&rr3_base64_encode(&pcm_bytes(320)), 32)
             .unwrap();
         dp.rr3_finish_turn(&bus).unwrap();
         let intent = dp_published_intent(&bus);
@@ -901,9 +917,9 @@ mod tests {
     fn call_failure_counts_replied_only_and_intent_still_published() {
         let (mut dp, _g) = mock_dispatcher(cfg());
         let bus = FakeTurnBus::failing_call("tts 播出 0ms（…），不得记 ok（I-21①）");
-        dp.dialog.rr3_feed_vad(&json!({"edge": "onset"}), 0);
+        dp.dialog.rr3_feed_vad("onset", 0);
         dp.dialog
-            .rr3_feed_pcm(&pcm_event_body(&pcm_bytes(320), 32))
+            .rr3_feed_pcm(&rr3_base64_encode(&pcm_bytes(320)), 32)
             .unwrap();
         dp.rr3_finish_turn(&bus).unwrap();
         assert_eq!(bus.bumps_of("rounds_replied"), 1);
@@ -919,9 +935,9 @@ mod tests {
     fn zero_played_ms_does_not_count_audible() {
         let (mut dp, _g) = mock_dispatcher(cfg());
         let bus = FakeTurnBus::reply(json!({"played_ms": 0}));
-        dp.dialog.rr3_feed_vad(&json!({"edge": "onset"}), 0);
+        dp.dialog.rr3_feed_vad("onset", 0);
         dp.dialog
-            .rr3_feed_pcm(&pcm_event_body(&pcm_bytes(320), 32))
+            .rr3_feed_pcm(&rr3_base64_encode(&pcm_bytes(320)), 32)
             .unwrap();
         dp.rr3_finish_turn(&bus).unwrap();
         assert_eq!(bus.bumps_of("rounds_replied"), 1);
@@ -937,9 +953,9 @@ mod tests {
         std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "real");
         std::env::remove_var(crate::cloud::RR3_API_KEY_ENV);
         let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
-        dp.dialog.rr3_feed_vad(&json!({"edge": "onset"}), 0);
+        dp.dialog.rr3_feed_vad("onset", 0);
         dp.dialog
-            .rr3_feed_pcm(&pcm_event_body(&pcm_bytes(320), 32))
+            .rr3_feed_pcm(&rr3_base64_encode(&pcm_bytes(320)), 32)
             .unwrap();
         dp.rr3_finish_turn(&bus).unwrap();
         std::env::remove_var(crate::cloud::RR3_CLOUD_MODE_ENV);

@@ -66,6 +66,9 @@ pub struct Rr3SimArgs {
     /// --brain 专用：真云端点（`--brain-cloud real` 时**必给**，fail-closed 不落
     /// 演练 config 的死地址；mock 模式给了即拒——演练 config 不碰网络）。
     pub brain_base_url: Option<String>,
+    /// --brain 专用：rr3-brain 的显式覆盖（缺省按仓内 target/debug 布局推，
+    /// 批N32 件四起 brain 是 Rust 模块——与其余模块同形）
+    pub brain_bin: Option<PathBuf>,
 }
 
 /// 解析 `rr3-sim` 参数。未知参数即错（脚本工具的第一错法是静默忽略拼写错误）。
@@ -87,6 +90,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         sink_backend: None,
         brain_cloud: None,
         brain_base_url: None,
+        brain_bin: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -96,8 +100,8 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
             "--brain" => a.brain = true,
             "--chain" => a.chain = true,
             "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense" | "--interact"
-            | "--act" | "--profile" | "--audio-backend" | "--sink-backend" | "--brain-cloud"
-            | "--brain-base-url" => {
+            | "--act" | "--brain-bin" | "--profile" | "--audio-backend" | "--sink-backend"
+            | "--brain-cloud" | "--brain-base-url" => {
                 let v = args
                     .get(i + 1)
                     .ok_or_else(|| format!("{flag} 缺参数"))?
@@ -114,6 +118,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
                     "--sense" => a.sense = Some(p),
                     "--interact" => a.interact = Some(p),
                     "--act" => a.act = Some(p),
+                    "--brain-bin" => a.brain_bin = Some(p),
                     "--profile" => a.profile = Some(p),
                     "--audio-backend" => a.audio_backend = Some(p.to_string_lossy().into_owned()),
                     "--sink-backend" => a.sink_backend = Some(p.to_string_lossy().into_owned()),
@@ -125,7 +130,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
             }
             other => {
                 return Err(format!(
-                    "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act --audio-backend --sink-backend --brain-cloud --brain-base-url）"
+                    "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act --brain-bin --audio-backend --sink-backend --brain-cloud --brain-base-url）"
                 ))
             }
         }

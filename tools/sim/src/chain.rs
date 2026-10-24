@@ -36,10 +36,7 @@ use rr_ipc::{
 };
 use serde_json::{json, Value};
 
-use crate::brain::{
-    make_executable, rr3_brain_config_text, rr3_brain_shim_script, wait_log_contains,
-    wait_socket_exists, which_python3,
-};
+use crate::brain::{rr3_brain_config_text, wait_log_contains, wait_socket_exists};
 use crate::drill::{
     rr3_find_repo_root, rr3_manifest_text_ext, rr3_require_bins_ext, rr3_section, rr3_wait_modules,
     Rr3SimArgs, RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN, RR3_SIM_PANEL_ADDR,
@@ -115,7 +112,7 @@ pub fn rr3_chain_manifests(
                 RR3_SIM_MODULE_BRAIN,
                 brain_entry,
                 "brain",
-                "python",
+                "rust",
                 RR3_CHAIN_HB_MS,
                 RR3_CHAIN_WD_MS,
                 "never",
@@ -361,7 +358,10 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .act
         .clone()
         .unwrap_or(repo.join("modules/rr3-act/target/debug/rr3-act"));
-    let brain_pkg = repo.join("modules/rr3-brain");
+    let brain = a
+        .brain_bin
+        .clone()
+        .unwrap_or(repo.join("modules/rr3-brain/target/debug/rr3-brain"));
     rr3_require_bins_ext(&[
         (&rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
         (&rrctl, "cargo build --manifest-path tools/rrctl/Cargo.toml"),
@@ -374,16 +374,10 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
         ),
         (&act, "cargo build -p rr3-act（在 modules/rr3-act/ 下）"),
+        (&brain, "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）"),
     ])?;
-    if !brain_pkg.join("rr3_brain").is_dir() {
-        return Err(format!(
-            "缺 Python 包 {}",
-            brain_pkg.join("rr3_brain").display()
-        ));
-    }
-    let py = which_python3()?;
 
-    // ---- 1. 夹具：套接字 + 四份 manifest + 观察者 manifest + shim + 三份 config ----
+    // ---- 1. 夹具：套接字 + 四份 manifest + 观察者 manifest + 三份 config ----
     let workdir = match &a.socket {
         Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
         None => std::env::temp_dir().join(format!("rr3-sim-chain-{}", std::process::id())),
@@ -392,11 +386,6 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
     let _ = std::fs::remove_file(&socket);
 
-    // brain 的 wire entry：workdir 里的 shim（装机时写绝对 entry 的开发等价物）
-    let shim_path = workdir.join("rr3-brain");
-    std::fs::write(&shim_path, rr3_brain_shim_script(&brain_pkg, "rr3_brain"))
-        .map_err(|e| format!("写 shim 失败: {e}"))?;
-    make_executable(&shim_path)?;
     for (name, text) in [
         (
             "brain-config.toml",
@@ -419,7 +408,7 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let mut children: Vec<(String, std::process::Child)> = Vec::new();
     let mut report = String::new();
     let outcome = (|| -> Result<(), String> {
-        for (name, text) in rr3_chain_manifests(&sense, &interact, &act, &shim_path) {
+        for (name, text) in rr3_chain_manifests(&sense, &interact, &act, &brain) {
             let p = workdir.join(format!("{name}.toml"));
             std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
         }
@@ -472,12 +461,8 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
                 (RR3_SIM_MODULE_B, c)
             },
             {
-                let mut c = Command::new(&py);
-                c.arg("-u")
-                    .arg("-m")
-                    .arg("rr3_brain")
-                    .env("PYTHONPATH", &brain_pkg)
-                    .env("RR3_BRAIN_CLOUD", "mock")
+                let mut c = Command::new(&brain);
+                c.env("RR3_BRAIN_CLOUD", "mock")
                     .env("RR3_BRAIN_MOCK_ASR_TEXT", RR3_CHAIN_ASR_TEXT)
                     .env("RR3_BRAIN_CONFIG", &brain_cfg);
                 (RR3_SIM_MODULE_BRAIN, c)
@@ -657,7 +642,7 @@ mod tests {
         );
         assert!(texts[3].contains("type = \"module\""), "{}", texts[3]);
         assert!(texts[2].contains("type = \"brain\""), "{}", texts[2]);
-        assert!(texts[2].contains("lang = \"python\""), "{}", texts[2]);
+        assert!(texts[2].contains("lang = \"rust\""), "{}", texts[2]);
         // act 的三面契约面与仓内 module.toml 同源
         assert!(
             texts[3].contains(

@@ -56,24 +56,6 @@ jobs:
         # 工程（批N8 件三）：宿主 linux 档照常进本 lint 步与门禁 ④/⑥（不整目录排除），
         # espidf 档归专用门。
 
-  # rr3-brain（Python，stdlib-only）：双矩阵单测。步②b/④只覆盖 Rust 工程，
-  # brain 的 26 条 unittest 只有这一步跑（tools/sim --brain 的四真进程 e2e 依赖
-  # 构建产物，仍属本地实跑环节，见 docs/process/conventions.md §2）。
-  brain-unittest:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: rr3-brain unittest
-        working-directory: modules/rr3-brain
-        run: python3 -m unittest discover -s tests
-
   # IPC-T-003 跨架构对拍（ADR-0006 后果项，平台条件脚本——不进门禁步序，
   # 但 ubuntu runner 恰好具备全部平台条件：x86_64 宿主 + QEMU arm64 仿真 +
   # Docker + espup 装的 esp 工具链（第④路 xtensa 对拍））。--strict：任何
@@ -130,10 +112,8 @@ jobs:
       - name: 保底轨装配冒烟（post-build.sh）
         run: bash tools/ci/buildroot-assembly-smoke.sh
 
-  # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六模块真进程（5 Rust + Python
-  # brain），判据六模块全 running + denied_publish = 0。runner 的 python3 ≥3.11
-  # 满足 brain 的 stdlib tomllib 门（macOS 本机 3.9 起不了 brain，六模块判据
-  # 归本 job 远端回执，P1 与 distro-smoke 同理）。
+  # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六 Rust 模块真进程（批N32 件四起
+  # brain 也是 Rust），判据六模块全 running + denied_publish = 0。
   sim-assemble:
     runs-on: ubuntu-latest
     steps:
@@ -144,8 +124,7 @@ jobs:
         run: bash tools/ci/sim-assemble.sh
 
   # 批F4 全链闭环演练（§5.2 判据 10 sim 档）：采集→意图→判向→转向→表情六真
-  # 进程 mock 闭环 + 总线观察者取证。runner 的 python3 ≥3.11 满足 brain 的
-  # tomllib 门（macOS 本机 3.9 起不了 brain，远端回执口径与 sim-assemble 同理）。
+  # 进程 mock 闭环 + 总线观察者取证。
   sim-chain:
     runs-on: ubuntu-latest
     steps:
