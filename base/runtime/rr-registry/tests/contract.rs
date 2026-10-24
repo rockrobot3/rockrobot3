@@ -1114,6 +1114,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "default.toml".to_string(),
             "distro.toml".to_string(),
             "esp32-mini.toml".to_string(),
+            "esp32s3-mini.toml".to_string(),
         ],
         "profiles/ 机型集合漂移（新增机型须同批改本 pin 与该机型的形状测试，C2 批K）"
     );
@@ -1785,6 +1786,105 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     }
 }
 
+/// S3 微型形态（W1/T2）：`profiles/esp32s3-mini.toml` 与 esp32-mini 同形态、异线束。
+/// 本测试只钉**差异面**（chip / [hardware] 十一键 / 双轴物理脚 / 绑定面），形态与
+/// 预算的完整形状由 esp32-mini 测试和 rrd 装载门共同覆盖；线束漂移即红。
+#[test]
+fn esp32s3_mini_profile_pins_s3_harness() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/esp32s3-mini.toml"))
+        .expect("profiles/esp32s3-mini.toml 必须存在（W1/T2）");
+    let v: toml::Value = toml::from_str(&text).expect("esp32s3-mini.toml 必须可解析");
+
+    assert_eq!(
+        v.get("schema_version").and_then(toml::Value::as_integer),
+        Some(5),
+        "esp32s3-mini schema_version 漂移"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some("rtos"),
+        "esp32s3-mini 档位漂移（F-B = rtos 经桥档）"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("chip"))
+            .and_then(toml::Value::as_str),
+        Some("esp32s3"),
+        "esp32s3-mini chip 漂移（平台表选 contracts/platform/esp32s3.toml）"
+    );
+
+    // [hardware] 十一键：与 board/pins_s3.rs、main.rs 具名装配三方同源。
+    let hardware = v
+        .get("hardware")
+        .and_then(toml::Value::as_table)
+        .expect("esp32s3-mini 缺 [hardware] 段（板侧配置十一键真值点）");
+    for (k, expected) in [
+        ("i2c_sda", "8"),
+        ("i2c_scl", "9"),
+        ("adc_rail_pin", "1"),
+        ("uart2_tx", "17"),
+        ("uart2_rx", "18"),
+        ("ledc_pan", "4"),
+        ("ledc_tilt", "5"),
+        ("i2s_bclk", "6"),
+        ("i2s_sd", "15"),
+        ("i2s_ws", "7"),
+        ("cred_store", "nvs:rr3"),
+    ] {
+        assert_eq!(
+            hardware.get(k).and_then(toml::Value::as_str),
+            Some(expected),
+            "esp32s3-mini hardware.{k} 漂移（pins_s3.rs 同源）"
+        );
+    }
+
+    // 形态面：三格绑定 + 三格在位，与 esp32-mini 同源同值。
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("esp32s3-mini 缺 [bindings]");
+    for (slot, provider) in [
+        ("act.servo", "rr3-act"),
+        ("audio.capture", "rr3-sense"),
+        ("audio.vad", "rr3-sense"),
+    ] {
+        assert_eq!(
+            bindings.get(slot).and_then(toml::Value::as_str),
+            Some(provider),
+            "esp32s3-mini bindings.{slot} 漂移"
+        );
+    }
+    let present = v
+        .get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("esp32s3-mini 缺 [slots].present");
+    assert_eq!(present.len(), 3, "esp32s3-mini 在位声明应恰三格");
+
+    // 双轴 [[pin]]：role / 通道 / 物理脚（S3 线束 4/5）。
+    assert_profile_pins_schema3(&v, &root, &["act.axis.pwm", "act.axis.pwm"]);
+    let pins = v
+        .get("pin")
+        .and_then(toml::Value::as_array)
+        .expect("esp32s3-mini 缺 [[pin]]");
+    let mut physicals: Vec<i64> = Vec::new();
+    for pin in pins {
+        let arr = pin
+            .get("physical")
+            .and_then(toml::Value::as_array)
+            .expect("[[pin]].physical 必须是数组");
+        physicals.extend(arr.iter().filter_map(toml::Value::as_integer));
+    }
+    assert_eq!(
+        physicals,
+        vec![4, 5],
+        "esp32s3-mini 双轴物理脚漂移（应为 S3 LEDC pan=4 / tilt=5）"
+    );
+}
+
 /// G4 在册表钉死（ADR-0019 修订 1 ③，批J）：九能力面 trait × 描述符键逐项点名。
 /// 两表真值源 = rr-hal-api（trait 面）/ rr-hal descriptor.rs（[hardware] 键集）；
 /// 本测试钉的是装配校验在 rr-registry 的这份副本——扩 trait/扩键都走契约级评审，
@@ -1914,6 +2014,32 @@ fn platform_tables_parse_and_shape_is_pinned() {
         .iter()
         .any(|c| c.rr3_conflict_group() == "i2c0"));
     assert!(esp.rr3_platform_construction_contains("ledc0", "act.axis.pwm", "pan"));
+
+    let s3 = rr_registry::rr3_registry_platform_table_from_text(
+        &std::fs::read_to_string(repo_root().join("contracts/platform/esp32s3.toml"))
+            .expect("contracts/platform/esp32s3.toml 必须存在（W1/T2）"),
+    )
+    .expect("esp32s3 平台表须可解析");
+    assert_eq!(s3.rr3_platform_name(), "esp32s3");
+    assert_eq!(
+        s3.rr3_platform_controller_names(),
+        vec!["adc1", "gpio0", "i2c0", "ledc0", "uart2"]
+    );
+    assert_eq!(s3.rr3_platform_controller_channels("ledc0"), Some(8));
+    assert_eq!(s3.rr3_platform_controller_channels("adc1"), Some(10));
+    assert!(s3.rr3_platform_adc_pins().contains(&1));
+    assert!(s3.rr3_platform_input_only_pins().is_empty());
+    assert!(s3
+        .rr3_platform_conflicts()
+        .iter()
+        .any(|c| c.rr3_conflict_group() == "i2c0"));
+    assert!(s3
+        .rr3_platform_conflicts()
+        .iter()
+        .any(|c| c.rr3_conflict_group() == "uart2"));
+    assert!(s3.rr3_platform_construction_contains("ledc0", "act.axis.pwm", "pan"));
+    assert!(s3.rr3_platform_construction_contains("ledc0", "act.axis.pwm", "tilt"));
+    assert!(s3.rr3_platform_wordform_map().is_empty());
 
     let rk = rr_registry::rr3_registry_platform_table_from_text(
         &std::fs::read_to_string(repo_root().join("contracts/platform/rk3566.toml"))

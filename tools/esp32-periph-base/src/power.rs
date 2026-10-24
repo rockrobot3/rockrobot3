@@ -7,6 +7,9 @@
 
 use esp_idf_hal::adc::oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver};
 use esp_idf_hal::adc::ADC1;
+#[cfg(feature = "esp32s3")]
+use esp_idf_hal::gpio::Gpio1;
+#[cfg(feature = "esp32")]
 use esp_idf_hal::gpio::Gpio34;
 use esp_idf_sys::EspError;
 
@@ -17,22 +20,30 @@ use crate::board::{
     RAIL_MILD_MV, RAIL_SEVERE_MV,
 };
 
-/// 5V 轨电压采样器（运行面独占 ADC1_CH6 @ GPIO34）。
+/// 芯片档测点引脚类型别名（W1/T2）：classic = GPIO34（ADC1_CH6），S3 = GPIO1（ADC1_CH0）。
+/// 具名装配仍由 [`crate::main`] 按档给 `peripherals.pins.gpioNN`，本别名只解耦
+/// 类型面——`Gpio34` 在 S3 上不满足 `ADCPin`（且被 Flash/PSRAM 占用）。
+#[cfg(feature = "esp32")]
+pub(crate) type Rr3RailPin = Gpio34;
+#[cfg(feature = "esp32s3")]
+pub(crate) type Rr3RailPin = Gpio1;
+
+/// 5V 轨电压采样器（运行面独占 ADC1 测点，classic CH6 / S3 CH0）。
 ///
-/// 通道驱动器**拥有** AdcDriver（`AdcChannelDriver<'static, Gpio34, AdcDriver<..>>`）——
+/// 通道驱动器**拥有** AdcDriver（`AdcChannelDriver<'static, Rr3RailPin, AdcDriver<..>>`）——
 /// 避开"通道借驱动"的自引用（两者都是 'static 具名外设 token，move 入线程后永不 drop）。
 /// `read_raw` + `raw_to_cal` 一对调用给出**同一拍**一致的 (引脚 raw, 引脚 mV)——比
 /// 分别调 `read()`/`read_raw()`（两次转换、两拍不同值）更适合对拍标定。校准由 ESP-IDF
 /// line-fitting 提供（esp32 面），故 `raw_to_cal` 直接回 mV。两驱动上游均标 `Send`，
 /// 本结构自动 Send（随 [`crate::periph::RtPeriph`] 入运行面线程）。
 pub(crate) struct RailMonitor {
-    ch: AdcChannelDriver<'static, Gpio34, AdcDriver<'static, ADC1>>,
+    ch: AdcChannelDriver<'static, Rr3RailPin, AdcDriver<'static, ADC1>>,
 }
 
 impl RailMonitor {
-    /// 装配 ADC1 单元 + GPIO34 通道（衰减/分辨率/标定全取策略面）。失败即 Err——调用方
+    /// 装配 ADC1 单元 + 测点通道（衰减/分辨率/标定全取策略面）。失败即 Err——调用方
     /// 按 OLED init 纪律"打印不 panic"（缺测点/ADC 组件未启用不拖垮其余外设面）。
-    pub(crate) fn new(adc: ADC1, pin: Gpio34) -> Result<Self, EspError> {
+    pub(crate) fn new(adc: ADC1, pin: Rr3RailPin) -> Result<Self, EspError> {
         let driver = AdcDriver::new(adc)?;
         let cfg = AdcChannelConfig {
             attenuation: ADC_ATTEN,
