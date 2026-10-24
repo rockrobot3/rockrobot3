@@ -145,11 +145,7 @@ mod tests {
             (b"foobar", "Zm9vYmFy"),
         ];
         for (want, encoded) in cases {
-            assert_eq!(
-                rr3_base64_decode(encoded).unwrap(),
-                want,
-                "encoded={encoded}"
-            );
+            assert_eq!(rr3_base64_decode(encoded).unwrap(), want, "encoded={encoded}");
             assert_eq!(rr3_base64_encode(want), encoded, "encoded={encoded}");
         }
     }
