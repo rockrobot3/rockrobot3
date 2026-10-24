@@ -30,14 +30,28 @@ pub use rr_core::control::Rr3RateGate;
 /// 单步点动＋人工确认，标定产物的落盘走 rrd 的 axis_write 写入面（批N3 件四），
 /// 不经运行命令面。形态合法性（未标定拒自动等）在
 /// [`rr_hal_api::rr3_act_motion_allowed`]，调用方持轴状态判，本判定只管词面。
-pub fn rr3_servo_check_motion(word: Option<&str>) -> Result<Rr3ActMotion, String> {
+///
+/// 错误零堆化（批N34 件二，批N24 件三同件族收尾）：词不进运行命令面交
+/// [`Rr3ServoMotionError`]（词本身是动态数据，借用进字段不落堆），人读文案由
+/// 编排层渲染（`src/rpc.rs` 的 `rr3_servo_motion_reject`，与改前逐字一致——
+/// error wire 契约字面量，面板与 legacy 依赖字面）。
+pub fn rr3_servo_check_motion(word: Option<&str>) -> Result<Rr3ActMotion, Rr3ServoMotionError<'_>> {
     match word {
         None => Ok(Rr3ActMotion::Auto),
         Some(s) => match Rr3ActMotion::rr3_act_motion_parse(s) {
             Some(m @ (Rr3ActMotion::Jog | Rr3ActMotion::Auto)) => Ok(m),
-            _ => Err(format!("不认的动作形态 {s:?}（运行命令面只认 jog/auto）")),
+            _ => Err(Rr3ServoMotionError::UnknownWord(s)),
         },
     }
+}
+
+/// [`rr3_servo_check_motion`] 的零堆错误（批N34 件二，批N24 件三同件族）：
+/// 词表外词与 calib-* 标定面词统一一变体（运行命令面只认 jog/auto），词本身
+/// 借用进字段（渲染点名的数据源），人读文案在编排层渲染（契约字面量不变）。
+#[derive(Debug, PartialEq, Eq)]
+pub enum Rr3ServoMotionError<'a> {
+    /// 词不进运行命令面：携带原词
+    UnknownWord(&'a str),
 }
 
 /// [`rr3_servo_check_travel`] 的零堆错误（批N24 件三）：越界动态值进字段，
@@ -175,11 +189,15 @@ mod tests {
             rr3_servo_check_motion(Some("auto")).unwrap(),
             Rr3ActMotion::Auto
         );
-        let e = rr3_servo_check_motion(Some("calib-openloop")).unwrap_err();
-        assert!(e.contains("只认 jog/auto"), "标定面词不进运行命令面: {e}");
-        assert!(
-            rr3_servo_check_motion(Some("walk")).is_err(),
-            "词表外点名拒"
+        assert_eq!(
+            rr3_servo_check_motion(Some("calib-openloop")).unwrap_err(),
+            Rr3ServoMotionError::UnknownWord("calib-openloop"),
+            "标定面词不进运行命令面（词随枚举走，渲染逐字由编排层单测钉）"
+        );
+        assert_eq!(
+            rr3_servo_check_motion(Some("walk")).unwrap_err(),
+            Rr3ServoMotionError::UnknownWord("walk"),
+            "词表外点名拒（词随枚举走）"
         );
     }
 
