@@ -85,6 +85,7 @@ dependencies = [
  "libc",
  "rr-hal-api",
  "rr-ipc",
+ "rr-periph-proto",
  "serde_json",
  "toml",
 ]
@@ -100,6 +101,14 @@ version = "0.0.1"
 [[package]]
 name = "rr-mech"
 version = "0.0.1"
+
+[[package]]
+name = "rr-periph-proto"
+version = "0.0.1"
+dependencies = [
+ "rr-ipc",
+ "serde_json",
+]
 
 [[package]]
 name = "rr3-connect"
