@@ -23,9 +23,10 @@ use super::boot::Rr3ActAxisState;
 use super::led::RR3_LED_EFFECT_TOPIC;
 use super::relay::{self, RR3_RELAY_SET_TOPIC};
 use super::rpc::{
-    rr3_low_power_reject, rr3_relay_apply_error_text, rr3_relay_parse_args, rr3_servo_parse_args,
+    rr3_low_power_reject, rr3_relay_apply_error_text, rr3_relay_parse_args, rr3_servo_motion_reject,
+    rr3_servo_parse_args,
 };
-use super::servo::{rr3_servo_check_motion, Rr3ServoCfg, RR3_SERVO_COMMAND_TOPIC};
+use super::servo::{rr3_servo_check_motion, Rr3ServoCfg, Rr3ServoMotionError, RR3_SERVO_COMMAND_TOPIC};
 
 /// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值；
 /// 字面量零内联，主题事实源在各自原子件的常量）
@@ -84,9 +85,11 @@ fn rr3_open_topics_join(open_topics: &[String]) -> String {
 }
 
 /// servo 动作的形态词下钻（承载层 Value 下钻，值域判定留件 mech）：词缺席 =
-/// auto（保守缺省——不申报按自动）。
+/// auto（保守缺省——不申报按自动）。拒收文案编排层渲染（批N34 件二：机制层
+/// 零堆枚举，词面文案与 RPC 路同渲染单点，契约字面量逐字不变）。
 fn servo_motion_of(args: &Value) -> Result<rr_hal_api::Rr3ActMotion, String> {
     rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))
+        .map_err(|Rr3ServoMotionError::UnknownWord(word)| rr3_servo_motion_reject(word))
 }
 
 /// 单条动作：形状裁决 → 两道门 → 执行（低电闸门只辖执行面；servo 动作再过

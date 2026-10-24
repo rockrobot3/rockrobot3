@@ -25,6 +25,13 @@ pub(crate) fn rr3_low_power_reject(what: &str) -> String {
     format!("低电禁动：{what} 拒动（回阈 + 迟滞后解禁，不自动重放）")
 }
 
+/// 动作形态词拒收文案（error wire 契约字面量——面板与 legacy 依赖字面；批N34
+/// 件二自 mech 上移：机制层零堆枚举 [`super::servo::Rr3ServoMotionError`]，
+/// 渲染归编排层与行程/时限同批N24 件三先例，字面量逐字保持）。
+pub(crate) fn rr3_servo_motion_reject(word: &str) -> String {
+    format!("不认的动作形态 {word:?}（运行命令面只认 jog/auto）")
+}
+
 /// 点名处置三元组：(应答体, servo 待发新角（servo 面才有）, relay `(生效, 前一)`
 /// （relay 面才有——A-7 同态抑制的组合件侧原料）)。Err = 业务性失败折 result.error。
 pub(crate) type Rr3CallOutcome = Result<(Value, Option<u16>, Option<(bool, bool)>), String>;
@@ -45,8 +52,10 @@ pub(crate) fn rr3_handle_servo(
         return Err(rr3_low_power_reject(servo::RR3_SERVO_COMMAND_TOPIC));
     }
     // 拒动硬约束（§6，批N3 件三）：词缺席 = auto（保守——不申报按自动）；
-    // 判据拒收回 InvalidParam，折业务性失败点名言
-    let motion = servo::rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))?;
+    // 判据拒收回 InvalidParam，折业务性失败点名言（批N34 件二：机制层零堆
+    // 枚举，词面文案在编排层渲染——契约字面量逐字不变）
+    let motion = servo::rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))
+        .map_err(|servo::Rr3ServoMotionError::UnknownWord(word)| rr3_servo_motion_reject(word))?;
     rr_hal_api::rr3_act_motion_allowed(axis.hard_stop, axis.calibrated, motion)
         .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
     let (angle, move_ms) = rr3_servo_parse_args(args, cfg)?;
@@ -256,13 +265,18 @@ mod tests {
         // 已标定 + auto：照常走位
         let v = run(&json!({"angle_deg": 90}), &calibrated).unwrap();
         assert_eq!(v.0["angle_deg"], 90);
-        // 标定面词（calib-*）不进运行命令面（mech 白名单窄化）
+        // 标定面词（calib-*）不进运行命令面（mech 白名单窄化）；拒因全链逐字
+        // （error wire 契约字面量——批N34 件二渲染归编排层，自 mech contains
+        // 断言升级为全链全等钉，面板与 legacy 依赖字面）
         let e = run(
             &json!({"angle_deg": 90, "motion": "calib-openloop"}),
             &calibrated,
         )
         .unwrap_err();
-        assert!(e.contains("只认 jog/auto"), "{e}");
+        assert_eq!(
+            e,
+            "不认的动作形态 \"calib-openloop\"（运行命令面只认 jog/auto）"
+        );
     }
 
     /// relay/set 参数裁决：只认真布尔（自 relay 原子件迁入，文案断言逐字）
