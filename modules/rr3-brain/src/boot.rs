@@ -112,6 +112,49 @@ pub(crate) fn rr3_py_float_repr(x: f64) -> String {
     }
 }
 
+/// 模型行 `base_url` 语义（ADR-0023）：**完整 OpenAI 兼容 API 根**（含版本段），
+/// 客户端只追加 `/chat/completions`。各厂商版本段各写各的——DeepSeek
+/// `https://api.deepseek.com/v1`、GLM `https://open.bigmodel.cn/api/paas/v4`、
+/// Qwen `https://dashscope.aliyuncs.com/compatible-mode/v1`——**不按主机名猜**，
+/// 否则就是换了个方式的厂商绑定。
+///
+/// cloud 段 fallback 路径的 `cloud.base_url` 是主机根（ASR/TTS 的
+/// `{base}/v1/audio/*` 同源消费），此处补成完整根：路径为空补 `/v1`，已有路径原样。
+fn rr3_model_api_root(host_or_root: &str) -> String {
+    let s = host_or_root.trim().trim_end_matches('/');
+    if s.is_empty() {
+        return String::new();
+    }
+    let has_path = match s.split_once("://") {
+        Some((_, rest)) => rest.contains('/'),
+        None => s.contains('/'),
+    };
+    if has_path {
+        s.to_string()
+    } else {
+        format!("{s}/v1")
+    }
+}
+
+/// 模型行 `base_url` 取值裁决（boot 解析与面板写面共用一档）：非空、
+/// `http(s)://` 开头、不得含 `/chat/completions`（客户端自拼，防双拼 404）。
+pub(crate) fn rr3_model_base_url_validate(base_url: &str) -> Result<(), String> {
+    if base_url.is_empty() {
+        return Err("base_url 不得为空".to_string());
+    }
+    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+        return Err(format!(
+            "base_url 须为完整 API 根（http:// 或 https:// 开头）: {base_url}"
+        ));
+    }
+    if base_url.trim_end_matches('/').ends_with("/chat/completions") {
+        return Err(format!(
+            "base_url 是完整 API 根，不得含 /chat/completions（客户端自拼）: {base_url}"
+        ));
+    }
+    Ok(())
+}
+
 /// LLM 连接行解析（自 composite.py `rr3_brain_model_row` 逐语义迁入，0.0.6 抽象批）：
 /// `[[rr3-brain.model]]` 恰一 active 行；无表 → cloud 段 fallback 四元组。
 /// fail-closed：active 数≠1、mode/api_format 不认、缺 base_url/model_id 一律
@@ -127,10 +170,11 @@ pub(crate) fn rr3_brain_model_row(doc: &Value) -> Result<Rr3ModelRow, String> {
     };
     if rows.is_empty() {
         // 无表 → 旧路径四元组（cloud 段 base_url + llm_model，key_ref=None 走
-        // 通用环境变量键，mode=None 随全局档）
+        // 通用环境变量键，mode=None 随全局档）。cloud.base_url 是主机根（ASR/TTS
+        // 亦消费），LLM 腿在此补成完整 API 根：路径为空补 `/v1`。
         let cloud = rr3_brain_sect(doc, "cloud")?;
         return Ok(Rr3ModelRow {
-            base_url: rr3_req_str(cloud, "cloud", "base_url")?.to_string(),
+            base_url: rr3_model_api_root(rr3_req_str(cloud, "cloud", "base_url")?),
             model_id: rr3_req_str(cloud, "cloud", "llm_model")?.to_string(),
             key_ref: None,
             mode: None,
@@ -188,6 +232,7 @@ pub(crate) fn rr3_brain_model_row(doc: &Value) -> Result<Rr3ModelRow, String> {
     if base_url.is_empty() || model_id.is_empty() {
         return Err(format!("模型行 {name} 缺 base_url/model_id"));
     }
+    rr3_model_base_url_validate(&base_url).map_err(|e| format!("模型行 {name} {e}"))?;
     // key_ref 双源引用：`env:变量名` → 环境变量，裸名 → 面板 secrets 文件（语义
     // 承载在 cloud/llm.py，迁移件三落）；空白串折 None（Python strip() or None）
     let key_ref = row
@@ -275,7 +320,7 @@ timeout_s = 20
 name = "DeepSeek官方"
 mode = "api"
 api_format = "openai"
-base_url = "https://api.deepseek.com"
+base_url = "https://api.deepseek.com/v1"
 model_id = "deepseek-chat"
 api_key_ref = "DeepSeek官方"
 active = true
@@ -290,8 +335,8 @@ max_utterance_ms = 8000
         assert_eq!(cfg.cloud_timeout_s, 20.0);
         assert_eq!(cfg.call_timeout_s, 30.0);
         assert_eq!(cfg.max_utterance_ms, 8000);
-        // 模型行实效：active 行覆盖 cloud fallback
-        assert_eq!(cfg.model.base_url, "https://api.deepseek.com");
+        // 模型行实效：active 行覆盖 cloud fallback（base_url 为完整 API 根）
+        assert_eq!(cfg.model.base_url, "https://api.deepseek.com/v1");
         assert_eq!(cfg.model.model_id, "deepseek-chat");
         assert_eq!(cfg.model.key_ref.as_deref(), Some("DeepSeek官方"));
         assert_eq!(cfg.model.mode, Some(Rr3LlmMode::Api));
@@ -317,7 +362,10 @@ timeout_s = 20
 max_utterance_ms = 8000
 "#;
         let cfg = rr3_brain_config_parse(text).unwrap();
-        assert_eq!(cfg.model.base_url, "https://api.siliconflow.cn");
+        assert_eq!(
+            cfg.model.base_url, "https://api.siliconflow.cn/v1",
+            "cloud 主机根 fallback 补版本段成完整 API 根"
+        );
         assert_eq!(cfg.model.model_id, "deepseek-ai/DeepSeek-V3");
         assert_eq!(cfg.model.key_ref, None);
         assert_eq!(cfg.model.mode, None, "fallback 路径随全局档（mode=None）");
@@ -439,17 +487,61 @@ timeout_s = 20
     fn model_row_key_ref_strip_and_none() {
         let cloud = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
         let blank = format!(
-            "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"u1\"\nmodel_id = \"m1\"\napi_key_ref = \"  \"\nactive = true\n"
+            "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"http://u1\"\nmodel_id = \"m1\"\napi_key_ref = \"  \"\nactive = true\n"
         );
         let cfg = rr3_brain_config_parse(&blank).unwrap();
         assert_eq!(cfg.model.key_ref, None, "空白 key_ref 折 None");
         let spaced = format!(
-            "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \" u1 \"\nmodel_id = \" m1 \"\napi_key_ref = \" 甲 \"\nactive = true\n"
+            "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \" http://u1 \"\nmodel_id = \" m1 \"\napi_key_ref = \" 甲 \"\nactive = true\n"
         );
         let cfg = rr3_brain_config_parse(&spaced).unwrap();
-        assert_eq!(cfg.model.base_url, "u1", "base_url strip");
+        assert_eq!(cfg.model.base_url, "http://u1", "base_url strip");
         assert_eq!(cfg.model.model_id, "m1", "model_id strip");
         assert_eq!(cfg.model.key_ref.as_deref(), Some("甲"), "key_ref strip");
+    }
+
+    /// API 根语义（ADR-0023）：模型行 base_url 是完整根，各厂商版本段各写各的；
+    /// cloud 主机根 fallback 只在路径为空时补 `/v1`——不按主机名猜厂商版本段
+    #[test]
+    fn api_root_appends_v1_only_when_path_absent() {
+        for (input, want) in [
+            ("https://api.deepseek.com", "https://api.deepseek.com/v1"),
+            ("https://api.deepseek.com/", "https://api.deepseek.com/v1"),
+            (" https://api.siliconflow.cn ", "https://api.siliconflow.cn/v1"),
+            (
+                "https://api.deepseek.com/v1",
+                "https://api.deepseek.com/v1",
+            ),
+            (
+                "https://open.bigmodel.cn/api/paas/v4",
+                "https://open.bigmodel.cn/api/paas/v4",
+            ),
+            (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+        ] {
+            assert_eq!(rr3_model_api_root(input), want, "input={input}");
+        }
+    }
+
+    /// 模型行 base_url 裁决：非空 / http(s) 前缀 / 不得自带 /chat/completions
+    #[test]
+    fn model_base_url_validation_rejects_malformed_roots() {
+        assert!(rr3_model_base_url_validate("").is_err());
+        assert!(rr3_model_base_url_validate("u1").is_err());
+        assert!(rr3_model_base_url_validate("ftp://x/v1").is_err());
+        assert!(rr3_model_base_url_validate("https://x/v1/chat/completions").is_err());
+        assert!(rr3_model_base_url_validate("https://x/chat/completions/").is_err());
+        assert!(rr3_model_base_url_validate("https://api.deepseek.com/v1").is_ok());
+        assert!(rr3_model_base_url_validate("http://127.0.0.1:8080/v1").is_ok());
+        // 行解析侧点名带行名（boot 拒 boot 不放行）
+        let cloud = "[rr3-brain.cloud]\nbase_url = \"https://api.siliconflow.cn\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
+        let bad = format!(
+            "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"api.deepseek.com/v1\"\nmodel_id = \"m1\"\nactive = true\n"
+        );
+        let e = rr3_brain_config_parse(&bad).unwrap_err();
+        assert!(e.starts_with("模型行 甲 base_url 须为完整 API 根"), "{e}");
     }
 
     /// Python float 打印形状（config 就绪行逐字对位的数据基础）

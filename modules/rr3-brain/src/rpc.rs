@@ -347,7 +347,7 @@ timeout_s = 20
 name = "DeepSeek官方"
 mode = "api"
 api_format = "openai"
-base_url = "https://api.deepseek.com"
+base_url = "https://api.deepseek.com/v1"
 model_id = "deepseek-chat"
 api_key_ref = "DeepSeek官方"
 active = true
@@ -379,7 +379,7 @@ max_utterance_ms = 8000
                 },
                 "llm": {
                     "llm_model": "deepseek-chat",
-                    "base_url": "https://api.deepseek.com",
+                    "base_url": "https://api.deepseek.com/v1",
                     "timeout_s": 20,
                 },
                 "tts": {
