@@ -10,6 +10,7 @@ use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
 use crate::link::{read_line, reply, UartIo};
 use crate::oled::glyph;
 use crate::periph::CtlUart;
+use crate::ports::Rr3BoardClock;
 use crate::servo::{axis_check, Axis};
 use crate::state::{
     drain_audio, drain_outbox, esp_random_u32, lock_bus, push_job, Bus, CtlState, Job,
@@ -45,7 +46,7 @@ fn frame_round(io: &mut CtlUart, bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, firs
         uart: &mut io.uart,
         pre: None,
     };
-    frame_send_response(&mut uio, &req, result);
+    frame_send_response(&mut uio, &req, result, &Rr3BoardClock);
 }
 
 /// 控制面主循环（**独占 UART2，不碰 I2C/LEDC**）：逐字节窥视首字节——0x31（帧

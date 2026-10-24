@@ -7,9 +7,10 @@ use esp_idf_hal::uart::UartDriver;
 
 use crate::board::{
     DUTY_MAX, DUTY_MIN, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_RENDER_ATTEMPTS, OLED_ROWS,
-    RAIL_GATE_ARMED, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
+    RAIL_GATE_ARMED, RR3_BIND_ADC_RAIL, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
 };
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
+use crate::ports::{Rr3AdcPort, Rr3PwmChannel, Rr3PwmPort};
 use crate::power::{RailJudge, RailMonitor, RailTier};
 use crate::servo::{axis_check, deg_to_duty, Axis};
 
@@ -77,13 +78,11 @@ impl RtPeriph {
             } else {
                 step.saturating_sub(SERVO_SLEW_STEP_DEG).max(deg)
             };
-            let driver = match axis {
-                Axis::Pan => &mut self.pan,
-                Axis::Tilt => &mut self.tilt,
+            let ch = match axis {
+                Axis::Pan => Rr3PwmChannel::Pan,
+                Axis::Tilt => Rr3PwmChannel::Tilt,
             };
-            driver
-                .set_duty(deg_to_duty(step, DUTY_MIN, DUTY_MAX))
-                .map_err(|e| format!("LEDC set_duty 失败: {e:?}"))?;
+            self.rr3_pwm_duty(ch, deg_to_duty(step, DUTY_MIN, DUTY_MAX))?;
             if step != deg {
                 thread::sleep(Duration::from_millis(SERVO_SLEW_STEP_MS));
             }
@@ -165,15 +164,15 @@ impl RtPeriph {
     /// 故除"正在移动"外一律释放两轴：把 5V 轨整段让给 OLED。运行面单线程、渲染与
     /// 移动在时间上本就串行，故本函数在**每次动作收尾**调用即可保证两者零重叠。
     pub(crate) fn servo_release(&mut self) {
-        let _ = self.pan.set_duty(0);
-        let _ = self.tilt.set_duty(0);
+        let _ = self.rr3_pwm_duty(Rr3PwmChannel::Pan, 0);
+        let _ = self.rr3_pwm_duty(Rr3PwmChannel::Tilt, 0);
     }
 
     /// 采样一次 5V 轨（**机制面**，方案A Q1）：返回 `(轨压 mV, 引脚 raw)`；未装配
     /// （ADC init 失败）返回 Err 文案（**不冒领读数**）。纯机制——不判阈值、不决策。
     pub(crate) fn rail_sample(&mut self) -> Result<(u16, u16), String> {
         match self.rail.as_mut() {
-            Some(r) => r.sample().map_err(|e| format!("ADC 读失败: {e:?}")),
+            Some(r) => r.rr3_adc_read_mv(RR3_BIND_ADC_RAIL),
             None => Err("5V 轨监测未装配（查 ADC 组件/GPIO34 接线）".into()),
         }
     }
@@ -213,5 +212,19 @@ impl RtPeriph {
             }
             Ok(())
         })
+    }
+}
+
+impl Rr3PwmPort for RtPeriph {
+    /// LEDC 两通道即 PWM 端口：按通道选驱动设占空。错误文案保留原样
+    /// （`servo_set` 的上级文案依赖 `LEDC set_duty 失败` 前缀）。
+    fn rr3_pwm_duty(&mut self, channel: Rr3PwmChannel, duty: u32) -> Result<(), String> {
+        let driver = match channel {
+            Rr3PwmChannel::Pan => &mut self.pan,
+            Rr3PwmChannel::Tilt => &mut self.tilt,
+        };
+        driver
+            .set_duty(duty)
+            .map_err(|e| format!("LEDC set_duty 失败: {e:?}"))
     }
 }

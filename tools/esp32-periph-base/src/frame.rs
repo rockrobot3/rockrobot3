@@ -11,7 +11,7 @@ use crate::board::{
     rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC,
 };
 use crate::face::expr_eye_base;
-use crate::link::{rr3_frame_now_ns, UartIo};
+use crate::ports::{Rr3ClockPort, Rr3UartPort};
 use crate::servo::{axis_check, Axis};
 use crate::state::{lock_bus, push_job, rr3_board_bindings_store, Bus, CtlState, Job};
 
@@ -25,7 +25,7 @@ pub(crate) type FrameReq = Rr3PeriphRequest;
 /// [`rr3_periph_request_parse`]，单点真值）。任一门失败回 Err = **丢弃不回帧**
 /// （fail-closed：帧级不可信的请求不作确定性应答；宿主侧重开连接即恢复）。半帧
 /// 失败后流上可能残留尾巴字节——下一轮 magic 窥视大概率落行面 ERR，自愈路径在案。
-pub(crate) fn frame_recv(io: &mut UartIo) -> Result<FrameReq, String> {
+pub(crate) fn frame_recv(io: &mut impl Rr3UartPort) -> Result<FrameReq, String> {
     let buf = io.rr3_recv_buf().map_err(|e| format!("收帧失败: {e:?}"))?;
     let frame = Rr3Frame::try_from(buf).map_err(|e| format!("帧还原失败: {e:?}"))?;
     rr3_periph_request_parse(&frame)
@@ -213,11 +213,16 @@ fn frame_handle_face(
 }
 
 /// Response 回帧：result 在位（业务失败折 {"error": 文案}——宿主解析契约），
-/// trace_id 原样回带、src=本板位形 2、dst=调用方、timestamp 单调时基。组帧单点
-/// 在 rr-periph-proto（ADR-0024）；发送失败 eprintln 点名不重试（宿主 io 失败
-/// 自会重开连接重发）。
-pub(crate) fn frame_send_response(io: &mut UartIo, req: &FrameReq, result: Result<Value, String>) {
-    let resp = rr3_periph_response_frame(req, result, rr3_frame_now_ns());
+/// trace_id 原样回带、src=本板位形 2、dst=调用方、timestamp 单调时基（时钟由端口
+/// 注入，换平台不换帧面）。组帧单点在 rr-periph-proto（ADR-0024）；发送失败
+/// eprintln 点名不重试（宿主 io 失败自会重开连接重发）。
+pub(crate) fn frame_send_response(
+    io: &mut impl Rr3UartPort,
+    req: &FrameReq,
+    result: Result<Value, String>,
+    clock: &impl Rr3ClockPort,
+) {
+    let resp = rr3_periph_response_frame(req, result, clock.rr3_now_ns());
     if let Err(e) = io.rr3_send_buf(Rr3FrameBuf::from(&resp)) {
         eprintln!("[periph] Response 发送失败: {e:?}");
     }

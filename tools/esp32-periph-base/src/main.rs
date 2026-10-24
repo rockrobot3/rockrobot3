@@ -82,6 +82,7 @@ mod link;
 mod mic;
 mod oled;
 mod periph;
+mod ports;
 mod power;
 mod runtime;
 // servo 原子件机制核（批N23 件一收编：atoms/servo/mech.rs，文件级机制/策略
@@ -291,23 +292,14 @@ fn main() {
         .resolution(LEDC_RES_BITS);
     let timer =
         LedcTimerDriver::new(peripherals.ledc.timer0, &timer_config).expect("LEDC timer0 配置失败");
-    let mut pan = LedcDriver::new(peripherals.ledc.channel0, &timer, peripherals.pins.gpio32)
+    let pan = LedcDriver::new(peripherals.ledc.channel0, &timer, peripherals.pins.gpio32)
         .expect("LEDC channel0(PAN, GPIO32) 安装失败");
-    let mut tilt = LedcDriver::new(peripherals.ledc.channel1, &timer, peripherals.pins.gpio33)
+    let tilt = LedcDriver::new(peripherals.ledc.channel1, &timer, peripherals.pins.gpio33)
         .expect("LEDC channel1(TILT, GPIO33) 安装失败");
-    // **舵机暂不激磁**：LEDC 装好后 duty=0（无脉冲=舵机松脱），待运行面把开机表情
-    // 画完再走 `Move` 激磁——板上 5V 直供下舵机一动即拉塌轨压触发 BOD 复位（真板
-    // 实录：boot 画面出后 ~0.1s 即 `Brownout detector was triggered`），"先表情上屏
-    // 再动舵机"是可见性优先的排序。
-    pan.set_duty(0).expect("pan 归零失败");
-    tilt.set_duty(0).expect("tilt 归零失败");
-    println!(
-        "[periph] LEDC ✓ pan=GPIO{RR3_BIND_LEDC_PAN} tilt=GPIO{RR3_BIND_LEDC_TILT} duty=0（待表情上屏后激磁）max={}",
-        pan.get_max_duty()
-    );
+    let max_duty = pan.get_max_duty();
     // 外设 'static 化 + 分发两平面（16KB 运行下限，哨兵纪律）：UART2 → 控制面，
     // I2C/LEDC → 运行面；共享 Bus（Arc<Mutex>）连通两面。
-    let rt = RtPeriph {
+    let mut rt = RtPeriph {
         i2c,
         pan,
         tilt,
@@ -320,6 +312,14 @@ fn main() {
         rail_judge: RailJudge::new(),
         rail_tier: RailTier::Ok,
     };
+    // **舵机暂不激磁**：装配即经端口释放两轴 duty=0（无脉冲=舵机松脱），待运行面把
+    // 开机表情画完再走 `Move` 激磁——板上 5V 直供下舵机一动即拉塌轨压触发 BOD 复位
+    // （真板实录：boot 画面出后 ~0.1s 即 `Brownout detector was triggered`），"先表情
+    // 上屏再动舵机"是可见性优先的排序。
+    rt.servo_release();
+    println!(
+        "[periph] LEDC ✓ pan=GPIO{RR3_BIND_LEDC_PAN} tilt=GPIO{RR3_BIND_LEDC_TILT} duty=0（待表情上屏后激磁）max={max_duty}"
+    );
     let ctl = CtlUart { uart };
     let bus = Arc::new(Mutex::new(Bus {
         jobs: VecDeque::new(),

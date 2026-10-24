@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::{esp_random, esp_timer_get_time};
-use rr_ipc::{Rr3BoardBindings, Rr3ByteStream};
+use rr_ipc::Rr3BoardBindings;
 
 use crate::link::{reply, UartIo};
+use crate::ports::Rr3UartPort;
 use crate::power::RailTier;
 use crate::servo::{wander_step, Axis};
 
@@ -342,7 +343,7 @@ pub(crate) fn drain_audio(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>)
     loop {
         let frame = lock_bus(bus).audio_q.pop_front();
         let Some(f) = frame else { break };
-        if uio.rr3_write_all_bytes(&f) == f.len() {
+        if uio.rr3_uart_write_all(&f) == f.len() {
             lock_bus(bus).st.audio_sent += 1;
         }
     }
