@@ -26,7 +26,7 @@ pub(crate) enum Rr3LlmMode {
 /// LLM 连接行实效（`[[rr3-brain.model]]` 恰一 active 行解析产物，或无表时
 /// cloud 段 fallback）。`mode = None` = 随全局档（RR3_BRAIN_CLOUD）——cloud
 /// fallback 路径的 Python 同形状。key_ref/mode 的消费面（LLM 客户端鉴权/免鉴权）
-/// 在 cloud.rs [`crate::cloud::Rr3LlmClient`]。
+/// 在 llm 件 mech [`crate::llm::Rr3LlmHistory`]（客户端在 [`crate::cloud`]）。
 #[derive(Debug, Clone)]
 pub(crate) struct Rr3ModelRow {
     pub(crate) base_url: String,

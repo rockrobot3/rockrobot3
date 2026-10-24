@@ -1,5 +1,8 @@
-//! rr3-brain 云端适配层（批N32 迁移件2，ADR-0017 五层表——自 Python cloud/
-//! \_\_init\_\_.py + asr.py + llm.py + tts.py 四件逐语义迁入，ADR-0014 裁定 2）。
+//! rr3-brain 云端共享原语（组合件级，批N32 件四拆分定形）：云档/密钥双源/
+//! secrets/HTTP/boundary 随机源 + asr/llm/tts 三客户端——IO/JSON/随机性是策略
+//! 面，留在组合件（⑧-b 依赖闭包纪律）；字节级纯机制（WAV 头/multipart 装配、
+//! 历史窗口、voice 命名/正弦 PCM）下沉 atoms/{asr,llm,tts} 各件 mech.rs，客户端
+//! 经 `crate::{asr,llm,tts}` 按名委托。dialog 件不触网不经此层。
 //!
 //! 线上契约逐项对齐 legacy/core/{asr,llm,tts}（SiliconFlow /v1 形状）：
 //! - ASR  POST {base}/v1/audio/transcriptions   multipart(model + WAV) → {"text": …}
@@ -27,7 +30,7 @@
 //!
 //! 错误语义一个类型（String，B-16② 承续）：业务失败（4xx/5xx/应答形状不符/缺密钥）
 //! 与传输失败（连接拒绝/超时/读断）都折 Err 文案——结局只剩两种且都有计数，由
-//! 调用方（completion 臂折 error 应答、件四编排面折日志弃轮）分派。
+//! 调用方（completion 臂折 error 应答、编排面折日志弃轮）分派。
 
 use std::io::Read;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -55,16 +58,10 @@ pub(crate) const RR3_MOCK_TEXT: &str = "你好，今天天气怎么样";
 /// legacy/core/llm/src/llm_config.h 的原值移植（M4 不改人设与参数）
 pub(crate) const RR3_SYSTEM_PROMPT: &str =
     "你是一个中文语音助手，回答要口语化、简短，一般不超过50个字，不要用列表、符号和表情。";
-/// 历史窗口轮数（一轮 = user + assistant 两条，裁剪只动最旧的成对话轮）
-pub(crate) const RR3_LLM_HISTORY_ROUNDS: usize = 4;
 /// legacy llm_config.h 原值
 pub(crate) const RR3_LLM_MAX_TOKENS: i64 = 150;
-/// TTS 女声 bella（男声改 alex——tts_config.h）
-pub(crate) const RR3_TTS_VOICE_SUFFIX: &str = ":bella";
 /// key_ref 双源语法前缀：`env:变量名` → 环境变量
 pub(crate) const RR3_KEY_REF_ENV_PREFIX: &str = "env:";
-/// mock TTS 正弦时长：每字符 80ms
-const RR3_SINE_MS_PER_CHAR: u64 = 80;
 
 // ---------- 模式与密钥（自 cloud/__init__.py 迁入） ----------
 
@@ -166,41 +163,219 @@ fn rr3_read_body(url: &str, resp: ureq::Response) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// 44B WAV 头（PCM s16le 单声道），字节序对齐 legacy asr.c 的 build_wav_header。
-pub(crate) fn rr3_wav_header(sample_rate: u32, data_len: u32) -> [u8; 44] {
-    let mut b = [0u8; 44];
-    b[0..4].copy_from_slice(b"RIFF");
-    b[4..8].copy_from_slice(&(36 + data_len).to_le_bytes());
-    b[8..16].copy_from_slice(b"WAVEfmt ");
-    b[16..20].copy_from_slice(&16u32.to_le_bytes());
-    b[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
-    b[22..24].copy_from_slice(&1u16.to_le_bytes()); // 单声道
-    b[24..28].copy_from_slice(&sample_rate.to_le_bytes());
-    b[28..32].copy_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
-    b[32..34].copy_from_slice(&2u16.to_le_bytes()); // block align
-    b[34..36].copy_from_slice(&16u16.to_le_bytes()); // bits per sample
-    b[36..40].copy_from_slice(b"data");
-    b[40..44].copy_from_slice(&data_len.to_le_bytes());
-    b
+/// 识别客户端（SenseVoice）：整段 WAV 一次上传（ADR-0014 裁定 2；流式是 legacy
+/// ESP32 内存约束的产物，本机不复刻）。WAV 头/multipart 装配机制在
+/// [`crate::asr`]，本客户端负责云档/密钥/HTTP/应答解析（策略与 IO 面）。
+pub(crate) struct Rr3AsrClient {
+    base_url: String,
+    model: String,
+    timeout_s: f64,
 }
 
-/// mock TTS 的确定性 PCM：440Hz 正弦，时长随文本长度（s16le；振幅 12000）。
-pub(crate) fn rr3_sine_pcm(text: &str, sample_rate: u32) -> Vec<u8> {
-    rr3_sine_pcm_ms(text, sample_rate, RR3_SINE_MS_PER_CHAR)
-}
-
-/// [`rr3_sine_pcm`] 的参数化底座（ms_per_char 可调——真云冒烟夹具喂 125ms）。
-pub(crate) fn rr3_sine_pcm_ms(text: &str, sample_rate: u32, ms_per_char: u64) -> Vec<u8> {
-    let n = text.trim().chars().count().max(1) as u64;
-    let total = (sample_rate as u64 * n * ms_per_char / 1000) as usize;
-    let mut pcm = Vec::with_capacity(total * 2);
-    for i in 0..total {
-        let v = (12000.0
-            * (2.0 * std::f64::consts::PI * 440.0 * i as f64 / sample_rate as f64).sin())
-            as i16;
-        pcm.extend_from_slice(&v.to_le_bytes());
+impl Rr3AsrClient {
+    /// 装配构造（Python `base_url.rstrip("/")` 同形状）。
+    pub(crate) fn new(base_url: &str, model: &str, timeout_s: f64) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            model: model.to_string(),
+            timeout_s,
+        }
     }
-    pcm
+
+    /// PCM（s16le 单声道）→ 识别文本。云端失败/非 200 折 Err（业务失败）。
+    pub(crate) fn rr3_transcribe(&self, pcm: &[u8], sample_rate: u32) -> Result<String, String> {
+        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
+            return Ok(std::env::var(RR3_MOCK_TEXT_ENV)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| RR3_MOCK_TEXT.to_string()));
+        }
+        let key = rr3_cloud_api_key()?;
+        let boundary = rr3_boundary_hex();
+        let body = crate::asr::rr3_asr_multipart_body(&self.model, pcm, sample_rate, &boundary);
+        let url = format!("{}/v1/audio/transcriptions", self.base_url);
+        let (status, resp) = rr3_http_post(
+            &url,
+            &key,
+            &body,
+            &format!("multipart/form-data; boundary={boundary}"),
+            self.timeout_s,
+        )?;
+        if status != 200 {
+            return Err(format!("识别接口 HTTP {status}"));
+        }
+        // json.loads 进护栏（B-16②）：坏 JSON 折 Err 不逃逸（Python try 同形状）
+        let data: Value = serde_json::from_slice(&resp)
+            .map_err(|e| format!("识别应答非 JSON: {e}"))?;
+        data.get("text")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string())
+            .ok_or_else(|| "识别应答缺 text 字段".to_string())
+    }
+}
+
+/// LLM 连接与历史整体（0.0.6 模型连接抽象批逐语义迁入）：OpenAI Chat
+/// Completions 形状；历史窗口机制（system 恒守首位 + 最近 N 轮 + 失败回滚）在
+/// [`crate::llm::Rr3LlmHistory`]，本客户端持之并负责 IO/JSON 面装配。
+pub(crate) struct Rr3LlmClient {
+    base_url: String,
+    model_id: String,
+    timeout_s: f64,
+    key_ref: Option<String>,
+    mode: Option<Rr3LlmMode>,
+    history: crate::llm::Rr3LlmHistory,
+}
+
+impl Rr3LlmClient {
+    /// 装配构造（历史首条固定 system 人设，文案 [`RR3_SYSTEM_PROMPT`]）。
+    pub(crate) fn new(
+        base_url: &str,
+        model_id: &str,
+        timeout_s: f64,
+        key_ref: Option<String>,
+        mode: Option<Rr3LlmMode>,
+    ) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            model_id: model_id.to_string(),
+            timeout_s,
+            key_ref,
+            mode,
+            history: crate::llm::Rr3LlmHistory::rr3_new(RR3_SYSTEM_PROMPT),
+        }
+    }
+
+    /// 本轮密钥；local 免鉴权回空串（http_post 空串 → 无 Authorization 头）。
+    /// 双源：`env:VAR` → 环境变量；裸名 → secrets 文件（每次调用现读）。错误文案
+    /// 只点名 ref/环境变量名，不回显任何凭据值。
+    fn rr3_resolve_key(&self) -> Result<String, String> {
+        if self.mode == Some(Rr3LlmMode::Local) {
+            return Ok(String::new());
+        }
+        match &self.key_ref {
+            None => rr3_cloud_api_key(), // 旧路径：通用环境变量键
+            Some(r) => {
+                if let Some(var) = r.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
+                    let val = std::env::var(var).unwrap_or_default();
+                    let val = val.trim();
+                    if val.is_empty() {
+                        return Err(format!("缺少环境变量 {var}（模型行 key_ref={r}）"));
+                    }
+                    Ok(val.to_string())
+                } else {
+                    rr3_secrets_get(r).ok_or_else(|| {
+                        format!("secrets 缺引用 {r}（面板填 key 后下一轮生效）")
+                    })
+                }
+            }
+        }
+    }
+
+    /// 一轮补全：追加 user →（带历史）请求 → 回文本并追加 assistant；失败轮
+    /// user 出列不入账（[`crate::llm::Rr3LlmHistory::rr3_rollback_last`]——
+    /// 对位 legacy：只有成功才追加 assistant）。
+    pub(crate) fn rr3_complete(&mut self, prompt: &str) -> Result<String, String> {
+        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
+            let reply = format!("（mock 回复）{prompt}");
+            self.history.rr3_user_turn(prompt);
+            self.history.rr3_assistant_turn(&reply);
+            return Ok(reply);
+        }
+        let key = self.rr3_resolve_key()?;
+        self.history.rr3_user_turn(prompt);
+        let messages: Vec<Value> = self
+            .history
+            .rr3_messages()
+            .iter()
+            .map(|(role, content)| json!({ "role": role, "content": content }))
+            .collect();
+        let body = json!({
+            "model": self.model_id,
+            "messages": messages,
+            "max_tokens": RR3_LLM_MAX_TOKENS,
+        })
+        .to_string()
+        .into_bytes();
+        let url = format!("{}/v1/chat/completions", self.base_url);
+        let (status, resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
+        if status != 200 {
+            self.history.rr3_rollback_last();
+            return Err(format!("大模型接口 HTTP {status}"));
+        }
+        // 应答形状面收敛为一档（Python KeyError/IndexError/JSONDecodeError 同一
+        // except 折同文案）：取不出 choices[0].message.content 串即形状不符
+        let reply = serde_json::from_slice::<Value>(&resp)
+            .ok()
+            .and_then(|v| {
+                v.get("choices")?
+                    .get(0)?
+                    .get("message")?
+                    .get("content")?
+                    .as_str()
+                    .map(|s| s.to_string())
+            });
+        match reply {
+            Some(t) => {
+                self.history.rr3_assistant_turn(&t);
+                Ok(t)
+            }
+            None => {
+                self.history.rr3_rollback_last();
+                Err("大模型应答形状不符: 缺 choices[0].message.content（或应答非 JSON）".to_string())
+            }
+        }
+    }
+
+    /// 对话历史在册（仅测试编译：mock/裁窗/回滚断言的观测面）。
+    #[cfg(test)]
+    fn rr3_history(&self) -> &[(String, String)] {
+        self.history.rr3_messages()
+    }
+}
+
+/// TTS 合成客户端（CosyVoice2）：文本 → PCM 字节流（s16le）。M4 的 PCM 是验证性
+/// 消费（非空 + 时长换算入日志）；真播放随 M5 板上 ALSA sink（ADR-0014 裁定 3）。
+pub(crate) struct Rr3TtsClient {
+    base_url: String,
+    model: String,
+    timeout_s: f64,
+}
+
+impl Rr3TtsClient {
+    /// 装配构造（Python `base_url.rstrip("/")` 同形状）。
+    pub(crate) fn new(base_url: &str, model: &str, timeout_s: f64) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            model: model.to_string(),
+            timeout_s,
+        }
+    }
+
+    /// 文本 → PCM 字节流。mock 档走 [`crate::tts::rr3_sine_pcm`]（正弦机制在
+    /// atoms）；real 档响应为原始 PCM 流（read-until-close，[`rr3_read_body`]
+    /// 读尽即得）。
+    pub(crate) fn rr3_synthesize(&self, text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
+        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
+            return Ok(crate::tts::rr3_sine_pcm(text, sample_rate));
+        }
+        let key = rr3_cloud_api_key()?;
+        let body = json!({
+            "model": self.model,
+            "input": text,
+            "voice": crate::tts::rr3_tts_voice(&self.model),
+            "response_format": "pcm",
+            "sample_rate": sample_rate,
+        })
+        .to_string()
+        .into_bytes();
+        let url = format!("{}/v1/audio/speech", self.base_url);
+        let (status, resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
+        if status != 200 {
+            return Err(format!("合成接口 HTTP {status}"));
+        }
+        Ok(resp)
+    }
 }
 
 /// splitmix64（纯 std 的 64bit 混淆——uuid crate 不引，裁定 5 最小依赖面）。
@@ -228,390 +403,46 @@ pub(crate) fn rr3_boundary_hex() -> String {
     format!("{a:016x}{b:016x}")
 }
 
-// ---------- ASR 适配器（自 cloud/asr.py 迁入：SenseVoice，整段 WAV 一次上传——
-// ADR-0014 裁定 2；流式是 legacy ESP32 内存约束的产物，本机不复刻——见该 ADR
-// "明确不做"第 3 条） ----------
-
-pub(crate) struct Rr3AsrClient {
-    base_url: String,
-    model: String,
-    timeout_s: f64,
-}
-
-impl Rr3AsrClient {
-    pub(crate) fn new(base_url: &str, model: &str, timeout_s: f64) -> Self {
-        Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-            model: model.to_string(),
-            timeout_s,
-        }
-    }
-
-    /// PCM（s16le 单声道）→ 识别文本。云端失败/非 200 折 Err（业务失败）。
-    pub(crate) fn rr3_transcribe(&self, pcm: &[u8], sample_rate: u32) -> Result<String, String> {
-        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
-            // 注入键取值不设/置空回落固定文本
-            let injected = std::env::var(RR3_MOCK_TEXT_ENV).unwrap_or_default();
-            let injected = injected.trim();
-            return Ok(if injected.is_empty() {
-                RR3_MOCK_TEXT.to_string()
-            } else {
-                injected.to_string()
-            });
-        }
-        let key = rr3_cloud_api_key()?;
-        let header = rr3_wav_header(sample_rate, pcm.len() as u32);
-        let boundary = rr3_boundary_hex();
-        let mut body = Vec::new();
-        body.extend_from_slice(
-            format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{}\r\n",
-                self.model
-            )
-            .as_bytes(),
-        );
-        body.extend_from_slice(
-            format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
-            )
-            .as_bytes(),
-        );
-        body.extend_from_slice(&header);
-        body.extend_from_slice(pcm);
-        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-        let (status, resp) = rr3_http_post(
-            &format!("{}/v1/audio/transcriptions", self.base_url),
-            &key,
-            &body,
-            &format!("multipart/form-data; boundary={boundary}"),
-            self.timeout_s,
-        )?;
-        if status != 200 {
-            return Err(format!("识别接口 HTTP {status}"));
-        }
-        // json 解析进护栏（B-16②）：非 JSON/非 dict/缺 text/非串一律 Err（语义
-        // 差③——Python 非 dict 体 AttributeError 逃逸，此处收敛）
-        let parsed: Value =
-            serde_json::from_slice(&resp).map_err(|e| format!("识别应答非 JSON: {e}"))?;
-        match parsed.get("text").and_then(Value::as_str) {
-            Some(t) => Ok(t.to_string()),
-            None => Err("识别应答缺 text 字段".to_string()),
-        }
-    }
-}
-
-// ---------- LLM 适配器（自 cloud/llm.py 迁入：OpenAI Chat Completions 形状，
-// 0.0.6 模型连接抽象批——连接参数由 config [[rr3-brain.model]] 行承载，换云只改
-// 配置不改码。历史策略移植 legacy/core/llm/src/llm.c：system + 最近
-// RR3_LLM_HISTORY_ROUNDS 轮，裁剪只动最旧的成对话轮） ----------
-
-pub(crate) struct Rr3LlmClient {
-    base_url: String,
-    model: String,
-    timeout_s: f64,
-    /// None = 走通用环境变量键（旧路径）；`env:VAR` → 环境变量；裸名 → secrets 文件
-    key_ref: Option<String>,
-    /// None = 随全局档（RR3_BRAIN_CLOUD）；Some(Local) = 免鉴权
-    mode: Option<Rr3LlmMode>,
-    /// 对话历史：[(role, content)]，首条固定 system 人设
-    history: Vec<(String, String)>,
-}
-
-impl Rr3LlmClient {
-    pub(crate) fn new(
-        base_url: &str,
-        model: &str,
-        timeout_s: f64,
-        key_ref: Option<String>,
-        mode: Option<Rr3LlmMode>,
-    ) -> Self {
-        Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-            model: model.to_string(),
-            timeout_s,
-            key_ref,
-            mode,
-            history: vec![("system".to_string(), RR3_SYSTEM_PROMPT.to_string())],
-        }
-    }
-
-    /// 本轮密钥；local 免鉴权回空串（http_post 空串 → 无 Authorization 头）。
-    fn rr3_resolve_key(&self) -> Result<String, String> {
-        if self.mode == Some(Rr3LlmMode::Local) {
-            return Ok(String::new());
-        }
-        match &self.key_ref {
-            None => rr3_cloud_api_key(), // 旧路径：通用环境变量键
-            Some(kr) => {
-                if let Some(var) = kr.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
-                    let val = std::env::var(var).unwrap_or_default();
-                    let val = val.trim();
-                    if val.is_empty() {
-                        return Err(format!("缺少环境变量 {var}（模型行 key_ref={kr}）"));
-                    }
-                    Ok(val.to_string())
-                } else {
-                    rr3_secrets_get(kr)
-                        .ok_or_else(|| format!("secrets 缺引用 {kr}（面板填 key 后下一轮生效）"))
-                }
-            }
-        }
-    }
-
-    /// 对话历史在册（测试面/编排面只读——完成轮回账在调用方）。
-    #[cfg(test)]
-    pub(crate) fn rr3_history(&self) -> &[(String, String)] {
-        &self.history
-    }
-
-    /// 一轮补全：追加 user →（带历史）请求 → 回文本并追加 assistant。
-    pub(crate) fn rr3_complete(&mut self, prompt: &str) -> Result<String, String> {
-        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
-            let reply = format!("（mock 回复）{prompt}");
-            self.history.push(("user".to_string(), prompt.to_string()));
-            self.history.push(("assistant".to_string(), reply.clone()));
-            return Ok(reply);
-        }
-        let key = self.rr3_resolve_key()?;
-        self.history.push(("user".to_string(), prompt.to_string()));
-        // 裁剪只动最旧的成对话轮（history[1..3]——system 恒守首位）
-        while self.history.len() > 1 + RR3_LLM_HISTORY_ROUNDS * 2 {
-            self.history.drain(1..3);
-        }
-        let messages: Vec<Value> = self
-            .history
-            .iter()
-            .map(|(role, content)| json!({"role": role, "content": content}))
-            .collect();
-        let body = json!({
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": RR3_LLM_MAX_TOKENS,
-        })
-        .to_string();
-        let (status, resp) = rr3_http_post(
-            &format!("{}/v1/chat/completions", self.base_url),
-            &key,
-            body.as_bytes(),
-            "application/json",
-            self.timeout_s,
-        )?;
-        if status != 200 {
-            self.history.pop(); // 失败轮不入账（对位 legacy：只有成功才追加 assistant）
-            return Err(format!("大模型接口 HTTP {status}"));
-        }
-        // 应答形状护栏（B-16②）：非 JSON/形状不符/非串 content 一律 Err 且不入账
-        // （语义差③——Python content 非 str 照 append，此处 fail-closed 收敛）
-        let parsed: Value = match serde_json::from_slice(&resp) {
-            Ok(v) => v,
-            Err(e) => {
-                self.history.pop();
-                return Err(format!("大模型应答形状不符: {e}"));
-            }
-        };
-        let reply = match parsed
-            .get("choices")
-            .and_then(|c| c.get(0))
-            .and_then(|c| c.get("message"))
-            .and_then(|m| m.get("content"))
-            .and_then(Value::as_str)
-        {
-            Some(t) => t.to_string(),
-            None => {
-                self.history.pop();
-                return Err("大模型应答形状不符: 缺 choices[0].message.content".to_string());
-            }
-        };
-        self.history
-            .push(("assistant".to_string(), reply.clone()));
-        Ok(reply)
-    }
-}
-
-// ---------- TTS 适配器（自 cloud/tts.py 迁入：CosyVoice2，文本 → PCM 字节流。
-// M4 的 PCM 是验证性消费（非空 + 时长换算入日志）；真播放随 M5 板上 ALSA sink
-// （ADR-0014 裁定 3）。响应无 Content-Length、服务端发完即断（read-until-close）
-// —— rr3_read_body 的按流读尽天然就是这个语义） ----------
-
-pub(crate) struct Rr3TtsClient {
-    base_url: String,
-    model: String,
-    timeout_s: f64,
-}
-
-impl Rr3TtsClient {
-    pub(crate) fn new(base_url: &str, model: &str, timeout_s: f64) -> Self {
-        Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-            model: model.to_string(),
-            timeout_s,
-        }
-    }
-
-    /// 文本 → PCM 字节流（s16le）。
-    pub(crate) fn rr3_synthesize(&self, text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
-        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
-            return Ok(rr3_sine_pcm(text, sample_rate));
-        }
-        let key = rr3_cloud_api_key()?;
-        let body = json!({
-            "model": self.model,
-            "input": text,
-            "voice": format!("{}{RR3_TTS_VOICE_SUFFIX}", self.model),
-            "response_format": "pcm",
-            "sample_rate": sample_rate,
-        })
-        .to_string();
-        let (status, resp) = rr3_http_post(
-            &format!("{}/v1/audio/speech", self.base_url),
-            &key,
-            body.as_bytes(),
-            "application/json",
-            self.timeout_s,
-        )?;
-        if status != 200 {
-            return Err(format!("合成接口 HTTP {status}"));
-        }
-        Ok(resp)
-    }
-}
-
 // ---------- 测试互斥柄（仅测试编译）：RR3_BRAIN_CLOUD 等键是进程级全局，凡动
-// 它的测试必须全 crate 一个锁串行——cloud.rs 与 dispatch.rs 两个测试域共此一柄。
+// 它的测试必须全 crate 一个锁串行——cloud.rs 与 dispatch.rs 两个测试域共此一柄
+// （env_lock 入口在下方 testkit）。
 
 #[cfg(test)]
 pub(crate) static RR3_TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+// ---------- 测试共享夹具（仅测试编译）：asr/llm/tts 三家原子件 mech 测试与本
+// 文件测试共用——云端拆件后夹具留在共享原语层，一处维护三家受益。 ----------
+
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod testkit {
+    //! 本地假端点（对位 test_cloud.py FakeSiliconFlow：记录请求、回罐头；std
+    //! TcpListener 手写微型 HTTP/1.1——仓内首个 HTTP 服务端测试夹具，仅测试编译）。
+    //! asr/llm/tts 三家原子件 mech 测试与 cloud.rs 本域测试共用。
+
     use std::collections::HashMap;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::sync::{Arc, Mutex};
 
-    /// env 动作的测试互斥（全 crate 一柄，见 RR3_TEST_ENV_LOCK）
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use serde_json::json;
+
+    use super::RR3_TEST_ENV_LOCK;
+
+    /// env 动作的测试互斥（全 crate 一柄，见 [`super::RR3_TEST_ENV_LOCK`]）
+    pub(crate) fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         RR3_TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    // ---------- 纯函数面 ----------
-
-    /// 44B WAV 头逐字段（对位 test_cloud.py test_wav_header_shape）
-    #[test]
-    fn wav_header_shape() {
-        let hdr = rr3_wav_header(16000, 3200);
-        assert_eq!(&hdr[0..4], b"RIFF");
-        assert_eq!(u32::from_le_bytes(hdr[4..8].try_into().unwrap()), 36 + 3200);
-        assert_eq!(&hdr[8..16], b"WAVEfmt ");
-        assert_eq!(u16::from_le_bytes(hdr[20..22].try_into().unwrap()), 1); // PCM
-        assert_eq!(u16::from_le_bytes(hdr[22..24].try_into().unwrap()), 1); // mono
-        assert_eq!(u32::from_le_bytes(hdr[24..28].try_into().unwrap()), 16000);
-        assert_eq!(&hdr[36..40], b"data");
-        assert_eq!(u32::from_le_bytes(hdr[40..44].try_into().unwrap()), 3200);
-    }
-
-    /// mock 正弦确定性、偶数字节长、非空、振幅不越 12000（对位 test_sine_pcm_…）
-    #[test]
-    fn sine_pcm_deterministic_and_sized() {
-        let a = rr3_sine_pcm_ms("你好", 16000, 80);
-        let b = rr3_sine_pcm_ms("你好", 16000, 80);
-        assert_eq!(a, b);
-        assert_eq!(a.len() % 2, 0);
-        assert!(!a.is_empty());
-        for chunk in a.chunks(2) {
-            let v = i16::from_le_bytes(chunk.try_into().unwrap());
-            assert!(v.unsigned_abs() <= 12000);
-        }
-    }
-
-    /// boundary 32 位小写 hex、两次调用不同
-    #[test]
-    fn boundary_hex_shape() {
-        let a = rr3_boundary_hex();
-        let b = rr3_boundary_hex();
-        assert_eq!(a.len(), 32);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
-        assert_ne!(a, b);
-    }
-
-    /// 云档解析四径：缺席 real、mock、bogus 红、空串红（Python 键在空串 not in 同红）
-    #[test]
-    fn cloud_mode_parse() {
-        let _g = env_lock();
-        std::env::remove_var(RR3_CLOUD_MODE_ENV);
-        assert_eq!(rr3_cloud_mode().unwrap(), Rr3CloudMode::Real);
-        std::env::set_var(RR3_CLOUD_MODE_ENV, "mock");
-        assert_eq!(rr3_cloud_mode().unwrap(), Rr3CloudMode::Mock);
-        std::env::set_var(RR3_CLOUD_MODE_ENV, "bogus");
-        let e = rr3_cloud_mode().unwrap_err();
-        assert_eq!(e, "RR3_BRAIN_CLOUD 取值不认: bogus（允许 real/mock）");
-        std::env::set_var(RR3_CLOUD_MODE_ENV, "");
-        let e = rr3_cloud_mode().unwrap_err();
-        assert!(e.contains("取值不认"), "空串同红: {e}");
-        std::env::remove_var(RR3_CLOUD_MODE_ENV);
-    }
-
-    /// 密钥缺失点名环境变量、不回显任何值；secrets 双源各自点名 ref
-    #[test]
-    fn key_resolution_errors_name_source_not_value() {
-        let _g = env_lock();
-        std::env::remove_var(RR3_API_KEY_ENV);
-        let e = rr3_cloud_api_key().unwrap_err();
-        assert_eq!(e, "缺少环境变量 RR3_CLOUD_API_KEY，云端链路不可用");
-        // env: 前缀缺变量 → 点名变量名与 key_ref
-        let client = Rr3LlmClient::new("http://127.0.0.1:1", "m", 1.0, Some("env:RR3_NO_SUCH_VAR".into()), None);
-        std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
-        let e = client.rr3_resolve_key().unwrap_err();
-        assert_eq!(e, "缺少环境变量 RR3_NO_SUCH_VAR（模型行 key_ref=env:RR3_NO_SUCH_VAR）");
-        // 裸名 → secrets 文件缺引用 → 点名 ref
-        let client = Rr3LlmClient::new("http://127.0.0.1:1", "m", 1.0, Some("不存在的引用".into()), None);
-        let e = client.rr3_resolve_key().unwrap_err();
-        assert!(e.contains("secrets 缺引用 不存在的引用"), "点名 ref: {e}");
-        std::env::remove_var(RR3_CLOUD_MODE_ENV);
-    }
-
-    /// secrets 现读：缺文件 None、缺键 None、有值 trim、空串 None
-    #[test]
-    fn secrets_get_reads_file_lazily() {
-        let _g = env_lock();
-        let dir = std::env::temp_dir().join(format!("rr3-brain-secrets-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("secrets.json");
-        std::fs::write(&path, r#"{"keys": {"DeepSeek官方": "  sk-test  ", "空": "  "}}"#).unwrap();
-        std::env::set_var(RR3_SECRETS_FILE_ENV, &path);
-        assert_eq!(rr3_secrets_get("DeepSeek官方").as_deref(), Some("sk-test"));
-        assert_eq!(rr3_secrets_get("空"), None, "空白值折 None");
-        assert_eq!(rr3_secrets_get("没有的"), None, "缺键 None");
-        std::env::set_var(RR3_SECRETS_FILE_ENV, dir.join("不存在.json"));
-        assert_eq!(rr3_secrets_get("任意"), None, "缺文件 None");
-        std::env::remove_var(RR3_SECRETS_FILE_ENV);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// 传输异常收敛（B-16②）：端口 1 无监听 → 连接拒绝折「云端不可达」（Python
-    /// OSError 族折 RuntimeError 同语义）
-    #[test]
-    fn http_post_folds_unreachable_endpoint() {
-        let e = rr3_http_post("http://127.0.0.1:1/v1/audio/transcriptions", "k", b"x", "text/plain", 1.0)
-            .unwrap_err();
-        assert!(e.contains("云端不可达"), "传输失败折固定文案: {e}");
-        assert!(!e.contains("Bearer"), "文案不得带出密钥");
-    }
-
-    // ---------- 本地假端点（对位 test_cloud.py FakeSiliconFlow：记录请求、回罐头；
-    // std TcpListener 手写微型 HTTP/1.1——仓内首个 HTTP 服务端测试夹具，仅测试编译） ----—
-
-    struct FakeCloud {
-        base: String,
-        requests: Arc<Mutex<Vec<(String, String, Vec<u8>)>>>, // (path, authorization, body)
-        fail_path: Arc<Mutex<Option<String>>>,
-        bad_json_path: Arc<Mutex<Option<String>>>,
-        missing_field_path: Arc<Mutex<Option<String>>>,
+    pub(crate) struct FakeCloud {
+        pub(crate) base: String,
+        pub(crate) requests: Arc<Mutex<Vec<(String, String, Vec<u8>)>>>, // (path, authorization, body)
+        pub(crate) fail_path: Arc<Mutex<Option<String>>>,
+        pub(crate) bad_json_path: Arc<Mutex<Option<String>>>,
+        pub(crate) missing_field_path: Arc<Mutex<Option<String>>>,
     }
 
     impl FakeCloud {
-        fn start() -> Self {
+        pub(crate) fn start() -> Self {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
             let requests = Arc::new(Mutex::new(Vec::new()));
@@ -670,7 +501,7 @@ mod tests {
             }
         }
 
-        fn last(&self) -> (String, String, Vec<u8>) {
+        pub(crate) fn last(&self) -> (String, String, Vec<u8>) {
             self.requests.lock().unwrap().last().unwrap().clone()
         }
     }
@@ -721,169 +552,241 @@ mod tests {
         let _ = stream.write_all(head.as_bytes());
         let _ = stream.write_all(body);
     }
+}
 
-    // ---------- 真路径（本地假端点；密钥经环境变量注入，仓里不落任何凭据） ----------
+#[cfg(test)]
+mod tests {
+    use super::testkit::{env_lock, FakeCloud};
+    use super::*;
 
-    /// ASR：multipart 形状逐项——path、Bearer 头、model 字段、WAV 头仓内自建、
+    // ---------- 纯函数面 ----------
+
+    /// boundary 32 位小写 hex、两次调用不同
+    #[test]
+    fn boundary_hex_shape() {
+        let a = rr3_boundary_hex();
+        let b = rr3_boundary_hex();
+        assert_eq!(a.len(), 32);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_ne!(a, b);
+    }
+
+    /// 云档解析四径：缺席 real、mock、bogus 红、空串红（Python 键在空串 not in 同红）
+    #[test]
+    fn cloud_mode_parse() {
+        let _g = env_lock();
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+        assert_eq!(rr3_cloud_mode().unwrap(), Rr3CloudMode::Real);
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "mock");
+        assert_eq!(rr3_cloud_mode().unwrap(), Rr3CloudMode::Mock);
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "bogus");
+        let e = rr3_cloud_mode().unwrap_err();
+        assert_eq!(e, "RR3_BRAIN_CLOUD 取值不认: bogus（允许 real/mock）");
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "");
+        let e = rr3_cloud_mode().unwrap_err();
+        assert!(e.contains("取值不认"), "空串同红: {e}");
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// secrets 现读：缺文件 None、缺键 None、有值 trim、空串 None
+    #[test]
+    fn secrets_get_reads_file_lazily() {
+        let _g = env_lock();
+        let dir = std::env::temp_dir().join(format!("rr3-brain-secrets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secrets.json");
+        std::fs::write(&path, r#"{"keys": {"DeepSeek官方": "  sk-test  ", "空": "  "}}"#).unwrap();
+        std::env::set_var(RR3_SECRETS_FILE_ENV, &path);
+        assert_eq!(rr3_secrets_get("DeepSeek官方").as_deref(), Some("sk-test"));
+        assert_eq!(rr3_secrets_get("空"), None, "空白值折 None");
+        assert_eq!(rr3_secrets_get("没有的"), None, "缺键 None");
+        std::env::set_var(RR3_SECRETS_FILE_ENV, dir.join("不存在.json"));
+        assert_eq!(rr3_secrets_get("任意"), None, "缺文件 None");
+        std::env::remove_var(RR3_SECRETS_FILE_ENV);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 传输异常收敛（B-16②）：端口 1 无监听 → 连接拒绝折「云端不可达」（Python
+    /// OSError 族折 RuntimeError 同语义）
+    #[test]
+    fn http_post_folds_unreachable_endpoint() {
+        let e = rr3_http_post("http://127.0.0.1:1/v1/audio/transcriptions", "k", b"x", "text/plain", 1.0)
+            .unwrap_err();
+        assert!(e.contains("云端不可达"), "传输失败折固定文案: {e}");
+        assert!(!e.contains("Bearer"), "文案不得带出密钥");
+    }
+
+    // ---------- 客户端面（asr/llm/tts 三家经本地假端点，对位 test_cloud.py
+    // TestRealPathAgainstFakeEndpoint / TestMockPath / B-16② 收敛三组） ----------
+
+    /// real 档 ASR 真调假端点：Bearer 鉴权、multipart 请求体带 model/WAV 头/
     /// filename="a.wav"（对位 test_asr_sends_multipart_with_model_and_wav）
     #[test]
-    fn asr_sends_multipart_with_model_and_wav() {
+    fn asr_real_sends_multipart_with_model_and_wav() {
         let _g = env_lock();
         let srv = FakeCloud::start();
-        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         let client = Rr3AsrClient::new(&srv.base, "iic/SenseVoiceSmall", 5.0);
-        let text = client.rr3_transcribe(&vec![0u8, 1].repeat(16), 16000).unwrap();
+        let text = client.rr3_transcribe(&b"\x00\x01".repeat(16), 16000).unwrap();
         assert_eq!(text, "你好");
         let (path, auth, body) = srv.last();
         assert_eq!(path, "/v1/audio/transcriptions");
         assert_eq!(auth, "Bearer test-key");
         assert!(body.windows(12).any(|w| w == b"name=\"model\""));
         assert!(body.windows(19).any(|w| w == b"iic/SenseVoiceSmall"));
-        assert!(body.windows(4).any(|w| w == b"RIFF"));
+        assert!(body.windows(4).any(|w| w == b"RIFF"), "WAV 头仓内自建");
         assert!(body.windows(16).any(|w| w == b"filename=\"a.wav\""));
         std::env::remove_var(RR3_API_KEY_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
     }
 
-    /// ASR：非 200 折「识别接口 HTTP 500」；200 坏体折「非 JSON」；200 缺字段折
-    /// 「缺 text 字段」（B-16② 三径，对位 test_asr_non_json_body_is_runtime_error…）
+    /// mock 档 ASR 不触网不读 key：固定文本；RR3_BRAIN_MOCK_ASR_TEXT 注入覆盖
+    /// （批F2 判向-转向闭环 e2e 的注入面）、空白回落固定文本
     #[test]
-    fn asr_error_folds_are_named() {
+    fn asr_mock_fixed_text_and_env_injection_without_key() {
+        let _g = env_lock();
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "mock");
+        std::env::remove_var(RR3_API_KEY_ENV);
+        let client = Rr3AsrClient::new("http://127.0.0.1:1", "m", 1.0);
+        assert_eq!(
+            client.rr3_transcribe(b"\x00\x00", 16000).unwrap(),
+            "你好，今天天气怎么样"
+        );
+        std::env::set_var(RR3_MOCK_TEXT_ENV, "向左");
+        assert_eq!(client.rr3_transcribe(b"\x00\x00", 16000).unwrap(), "向左");
+        std::env::set_var(RR3_MOCK_TEXT_ENV, "   ");
+        assert_eq!(
+            client.rr3_transcribe(b"\x00\x00", 16000).unwrap(),
+            "你好，今天天气怎么样",
+            "空白注入回落固定文本"
+        );
+        std::env::remove_var(RR3_MOCK_TEXT_ENV);
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// real 档 ASR 200 + 非 JSON 体：折「识别应答非 JSON」不逃逸（B-16②，
+    /// 对位 test_asr_non_json_body_is_runtime_error_not_escape）
+    #[test]
+    fn asr_non_json_body_folds_error() {
         let _g = env_lock();
         let srv = FakeCloud::start();
-        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
-        let client = Rr3AsrClient::new(&srv.base, "m", 5.0);
-        *srv.fail_path.lock().unwrap() = Some("/v1/audio/transcriptions".into());
-        let e = client.rr3_transcribe(&[0u8; 8], 16000).unwrap_err();
-        assert_eq!(e, "识别接口 HTTP 500");
-        *srv.fail_path.lock().unwrap() = None;
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         *srv.bad_json_path.lock().unwrap() = Some("/v1/audio/transcriptions".into());
-        let e = client.rr3_transcribe(&[0u8; 8], 16000).unwrap_err();
-        assert!(e.contains("非 JSON"), "坏体点名: {e}");
-        *srv.bad_json_path.lock().unwrap() = None;
-        *srv.missing_field_path.lock().unwrap() = Some("/v1/audio/transcriptions".into());
-        let e = client.rr3_transcribe(&[0u8; 8], 16000).unwrap_err();
-        assert_eq!(e, "识别应答缺 text 字段");
+        let client = Rr3AsrClient::new(&srv.base, "m", 5.0);
+        let e = client
+            .rr3_transcribe(&b"\x00\x00".repeat(100), 16000)
+            .unwrap_err();
+        assert!(e.contains("非 JSON"), "{e}");
         std::env::remove_var(RR3_API_KEY_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
     }
 
-    /// LLM：历史裁剪（system + 最近 4 轮）与失败轮回滚 -2（对位
-    /// test_llm_history_trim_and_failure_rollback）
+    /// real 档 LLM：多轮裁窗（system 恒守首位 + 最近 4 轮）、max_tokens=150、
+    /// 失败轮回滚（user 一并出列——裁剪 -2＋回滚 -1 = before-2，Python 同账）
     #[test]
-    fn llm_history_trim_and_failure_rollback() {
+    fn llm_real_history_trim_and_failure_rollback() {
         let _g = env_lock();
         let srv = FakeCloud::start();
-        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         let mut client = Rr3LlmClient::new(&srv.base, "deepseek-ai/DeepSeek-V3", 5.0, None, None);
-        for i in 0..RR3_LLM_HISTORY_ROUNDS + 2 {
+        for i in 0..crate::llm::RR3_LLM_HISTORY_ROUNDS + 2 {
             assert_eq!(client.rr3_complete(&format!("问{i}")).unwrap(), "好的");
         }
-        // system + 最近 4 轮（一轮两条）；最旧两条已裁（问0/问1 出列）
-        assert_eq!(client.rr3_history().len(), 1 + RR3_LLM_HISTORY_ROUNDS * 2);
-        assert_eq!(client.rr3_history()[0].0, "system");
-        assert_eq!(client.rr3_history()[1].1, "问2");
+        let h = client.rr3_history();
+        assert_eq!(h.len(), 1 + crate::llm::RR3_LLM_HISTORY_ROUNDS * 2);
+        assert_eq!(h[0].0, "system");
+        assert_eq!(h[1].1, "问2", "最旧一轮已裁");
         let (path, _, body) = srv.last();
         assert_eq!(path, "/v1/chat/completions");
-        let sent: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(sent["max_tokens"], 150);
-        // 失败轮不入账：user 先入列、失败后回滚（裁剪 -2：失败轮的 user 一并出列）
+        let req: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(req["max_tokens"], 150);
+        // 失败轮不入账：user 先入列、失败后回滚（对位 legacy：只有成功才追加 assistant）
         let before = client.rr3_history().len();
         *srv.fail_path.lock().unwrap() = Some("/v1/chat/completions".into());
-        let e = client.rr3_complete("会失败").unwrap_err();
-        assert_eq!(e, "大模型接口 HTTP 500");
+        assert!(client.rr3_complete("会失败").is_err());
         *srv.fail_path.lock().unwrap() = None;
-        assert_eq!(client.rr3_history().len(), before - 2);
+        assert_eq!(client.rr3_history().len(), before - 2, "裁剪 + 回滚共 -2");
         std::env::remove_var(RR3_API_KEY_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
     }
 
-    /// LLM：200 坏体折「形状不符」且不入账；local 行免鉴权（无 Authorization 头）
+    /// mock 档 LLM 回显且入账（history 尾条 = 回显应答；不触网不读 key）
     #[test]
-    fn llm_bad_shape_folds_and_local_mode_omits_auth() {
+    fn llm_mock_echo_and_history() {
+        let _g = env_lock();
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "mock");
+        let mut client = Rr3LlmClient::new("http://127.0.0.1:1", "m", 1.0, None, None);
+        assert_eq!(client.rr3_complete("在吗").unwrap(), "（mock 回复）在吗");
+        assert_eq!(client.rr3_history().last().unwrap().1, "（mock 回复）在吗");
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// real 档 LLM 200 + 非 JSON 体：形状不符一档折 Err 且 user 回滚
+    /// （B-16②，Python 单 except 同文案档）
+    #[test]
+    fn llm_non_json_body_folds_shape_error() {
         let _g = env_lock();
         let srv = FakeCloud::start();
-        // real 档 key 检查先于请求（对位 test_cloud.py TestTransportErrorConvergence
-        // setUp 的 os.environ[API_KEY_ENV]——坏体测试也得先有 key）
-        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         let mut client = Rr3LlmClient::new(&srv.base, "m", 5.0, None, None);
         *srv.bad_json_path.lock().unwrap() = Some("/v1/chat/completions".into());
         let e = client.rr3_complete("在吗").unwrap_err();
-        assert!(e.contains("大模型应答形状不符"), "坏体点名: {e}");
-        assert_eq!(client.rr3_history().len(), 1, "失败轮不入账（user 已回滚）");
-        *srv.bad_json_path.lock().unwrap() = None;
+        assert!(e.contains("形状不符"), "{e}");
+        assert_eq!(client.rr3_history().len(), 1, "失败轮 user 已回滚");
         std::env::remove_var(RR3_API_KEY_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
-        // local 免鉴权：请求不带 Authorization 头，key 缺席也不报
-        let mut local = Rr3LlmClient::new(&srv.base, "m", 5.0, None, Some(Rr3LlmMode::Local));
-        assert_eq!(local.rr3_complete("你好").unwrap(), "好的");
-        let (_, auth, _) = srv.last();
-        assert_eq!(auth, "", "local 行无 Authorization 头");
     }
 
-    /// TTS：请求体形状（voice 后缀/response_format/sample_rate）与 PCM 原样回传
-    /// （对位 test_tts_returns_pcm_stream）
+    /// real 档 LLM 200 + 缺字段体：形状不符同档（choices[0].message.content
+    /// 取不出即红，Python KeyError 同 except 折同文案）
     #[test]
-    fn tts_returns_pcm_stream() {
+    fn llm_missing_field_folds_shape_error() {
         let _g = env_lock();
         let srv = FakeCloud::start();
-        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
+        let mut client = Rr3LlmClient::new(&srv.base, "m", 5.0, None, None);
+        *srv.missing_field_path.lock().unwrap() = Some("/v1/chat/completions".into());
+        let e = client.rr3_complete("在吗").unwrap_err();
+        assert!(e.contains("形状不符"), "{e}");
+        assert_eq!(client.rr3_history().len(), 1, "失败轮 user 已回滚");
+        std::env::remove_var(RR3_API_KEY_ENV);
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// real 档 TTS 真调：PCM 原样回流、请求体 voice=:bella/response_format/
+    /// sample_rate（对位 test_tts_returns_pcm_stream）
+    #[test]
+    fn tts_real_returns_pcm_stream() {
+        let _g = env_lock();
+        let srv = FakeCloud::start();
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
         let client = Rr3TtsClient::new(&srv.base, "FunAudioLLM/CosyVoice2-0.5B", 5.0);
         let pcm = client.rr3_synthesize("好的", 16000).unwrap();
         assert_eq!(pcm, vec![1u8, 0].repeat(1600));
         let (path, _, body) = srv.last();
         assert_eq!(path, "/v1/audio/speech");
-        let sent: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(sent["voice"], "FunAudioLLM/CosyVoice2-0.5B:bella");
-        assert_eq!(sent["response_format"], "pcm");
-        assert_eq!(sent["sample_rate"], 16000);
+        let req: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(req["voice"], "FunAudioLLM/CosyVoice2-0.5B:bella");
+        assert_eq!(req["response_format"], "pcm");
+        assert_eq!(req["sample_rate"], 16000);
         std::env::remove_var(RR3_API_KEY_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
     }
 
-    // ---------- mock 路径（不要求 key：显式清掉，证明不静默取 key） ----------
-
+    /// mock 档 TTS 不触网不读 key：正弦 PCM 非空（机制在 atoms/tts）
     #[test]
-    fn mock_asr_fixed_text_without_key() {
-        let _g = env_lock();
-        std::env::set_var(RR3_CLOUD_MODE_ENV, "mock");
-        std::env::remove_var(RR3_API_KEY_ENV);
-        std::env::remove_var(RR3_MOCK_TEXT_ENV);
-        let client = Rr3AsrClient::new("http://127.0.0.1:1", "m", 1.0);
-        assert_eq!(client.rr3_transcribe(&[0u8; 4], 16000).unwrap(), RR3_MOCK_TEXT);
-        // 注入键优先（批F2 判向-转向闭环的注入点）
-        std::env::set_var(RR3_MOCK_TEXT_ENV, "向左");
-        assert_eq!(client.rr3_transcribe(&[0u8; 4], 16000).unwrap(), "向左");
-        std::env::remove_var(RR3_MOCK_TEXT_ENV);
-        std::env::remove_var(RR3_CLOUD_MODE_ENV);
-    }
-
-    #[test]
-    fn mock_llm_echo_and_history() {
-        let _g = env_lock();
-        std::env::set_var(RR3_CLOUD_MODE_ENV, "mock");
-        std::env::remove_var(RR3_API_KEY_ENV);
-        let mut client = Rr3LlmClient::new("http://127.0.0.1:1", "m", 1.0, None, None);
-        assert_eq!(client.rr3_complete("在吗").unwrap(), "（mock 回复）在吗");
-        let history = client.rr3_history();
-        assert_eq!(history.last().unwrap().0, "assistant");
-        assert_eq!(history.last().unwrap().1, "（mock 回复）在吗");
-        std::env::remove_var(RR3_CLOUD_MODE_ENV);
-    }
-
-    #[test]
-    fn mock_tts_sine_without_key() {
+    fn tts_mock_sine_without_key() {
         let _g = env_lock();
         std::env::set_var(RR3_CLOUD_MODE_ENV, "mock");
         std::env::remove_var(RR3_API_KEY_ENV);
         let client = Rr3TtsClient::new("http://127.0.0.1:1", "m", 1.0);
-        let pcm = client.rr3_synthesize("hi", 16000).unwrap();
-        assert!(!pcm.is_empty());
+        assert!(!client.rr3_synthesize("hi", 16000).unwrap().is_empty());
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
     }
 }

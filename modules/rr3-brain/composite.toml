@@ -6,8 +6,9 @@
 # 本轮增 handles/ops/no_injection 三键属首次定形只增不 bump（落位时无代码读本文件，
 # 校验器与数据同批落盘，不存在旧数据带病运行窗口）。
 # owner 级契约 module.toml 功能守恒不动（architecture.md §4.1 注记）。
-# Python 面（ADR-0014）：执行单元 = `python3 -m rr3_brain`（module.toml entry 的
-# 装机 shim 同款），装配 = 执行单元内 import + 函数调用。
+# Rust 面（批N32 件四，ADR-0016 收口）：执行单元 = target/debug 同名二进制
+# （module.toml entry），装配 = src/main.rs `#[path]` 原位挂载四原子件（执行单元
+# 进程内函数调用，rr3-sense 同形）；rrd 只看 entry 可执行，运行期语言不分支。
 schema_version = 1
 
 [composite]

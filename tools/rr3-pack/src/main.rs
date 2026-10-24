@@ -35,8 +35,8 @@
 //! **python 模块的 entry 装机**（`lang = "python"`，批F1）：产物不是 ELF 而是 shim 脚本，
 //! 且 shim 里的 `PYTHONPATH`/`RR3_BRAIN_CONFIG` 必须是**装机绝对路径**（只有打包器知道
 //! `RR3_INSTALL_ROOT`），故 shim 由打包器生成而非注入（`bin` 那个位置对 python 模块换成
-//! `pkg/` 包树）。shim 形状与模拟演练侧 `rr3_brain_shim_script` 同构（演练侧布局 = 仓内
-//! 布局，config 回退自洽，不注 config env）：
+//! `pkg/` 包树）。机制按 manifest.lang 数据位分派（批N32 件四起仓内六模块全 Rust，
+//! python 路径是机制保留位，仓内暂无消费模块）：
 //! `#!/bin/sh\nRR3_BRAIN_CONFIG=<装机 config> PYTHONPATH=<装机包树> exec python3 -m <包名>\n`
 //! （包名 = 目录名连字符转下划线；config env 走 brain `rr3_config_load` 的文档化优先口，
 //! python 模块 config 契约当前即 brain 契约）。
@@ -160,8 +160,8 @@ fn rr3_entry_is_installable(entry: &str, module: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// python 模块的 entry 装机产物：shim 脚本（与模拟演练侧 `rr3_brain_shim_script` 同构，
-/// 演练侧布局 = 仓内布局故不注 config——装机布局多一层 `pkg/`，config 位只有打包器知道）。
+/// python 模块的 entry 装机产物：shim 脚本（机制保留位——批N32 件四起仓内六模块
+/// 全 Rust，暂无消费模块；装机布局多一层 `pkg/`，config 位只有打包器知道）。
 /// `pkg_dir` 是**装机绝对**包树目录（其下含 `<py_module>/` 包），
 /// 包名 = 目录名连字符转下划线（`rr3-brain` → `rr3_brain`）；`config_path` 是装机绝对
 /// config 位，经 `RR3_BRAIN_CONFIG` 注入（brain rr3_config_load 的文档化优先口，

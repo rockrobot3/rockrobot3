@@ -4,12 +4,20 @@
 //! 批N32 增补裁定 4）→ config 就绪行（`connect_timeout_s` 段随键退役撤除）→
 //! Dispatcher 构造 → [`rr3mod::serve`] 主循环（poll_wait 250ms 对位 Python 主
 //! 循环 0.25s）。config 解析在 [`boot`]，ops 读写两面在 [`rpc`]，事务面三臂与
-//! 语音主链编排（pcm/vad 订阅消费＋ASR→LLM→TTS→播放→intent）在 [`dispatch`]，
-//! 话轮边界状态机在 [`dialog`]，意图词表在 [`intent`]（批N32 迁移件四全接线）。
+//! 语音主链编排（pcm/vad 订阅消费＋ASR→LLM→TTS→播放→intent）在 [`dispatch`]；
+//! 话轮边界状态机在 [`dialog`]、意图词表在 [`intent`]；云端三家客户端与共享
+//! 原语在 [`cloud`]，件四五件套拆分——asr/llm/tts 各件纯机制经 `#[path]` 原位挂载。
 
+#[path = "../atoms/dialog/dialog.rs"]
+mod dialog;
+#[path = "../atoms/asr/asr.rs"]
+mod asr;
+#[path = "../atoms/llm/llm.rs"]
+mod llm;
+#[path = "../atoms/tts/tts.rs"]
+mod tts;
 mod boot;
 mod cloud;
-mod dialog;
 mod dispatch;
 mod intent;
 mod rpc;
