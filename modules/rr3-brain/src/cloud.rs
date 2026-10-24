@@ -279,6 +279,31 @@ impl Rr3LlmClient {
         }
     }
 
+    /// 连通性测试（面板"测连"，ADR-0023）：mock 档不触网直接成功（`mock:true`、
+    /// 0ms）；real 档发一条 `max_tokens=1` 的最小补全，只判 HTTP 2xx 与耗时。
+    /// **不写对话历史**——测连是只读探针，不带任何会话副作用。
+    pub(crate) fn rr3_probe(&self) -> Result<(u64, bool), String> {
+        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
+            return Ok((0, true));
+        }
+        let key = self.rr3_resolve_key()?;
+        let body = json!({
+            "model": self.model_id,
+            "messages": [{ "role": "user", "content": "ping" }],
+            "max_tokens": 1,
+        })
+        .to_string()
+        .into_bytes();
+        let url = format!("{}/chat/completions", self.base_url);
+        let started = std::time::Instant::now();
+        let (status, _resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
+        let latency_ms = started.elapsed().as_millis() as u64;
+        if !(200..300).contains(&status) {
+            return Err(format!("连通性测试 HTTP {status}"));
+        }
+        Ok((latency_ms, false))
+    }
+
     /// 一轮补全：追加 user →（带历史）请求 → 回文本并追加 assistant；失败轮
     /// user 出列不入账（[`crate::llm::Rr3LlmHistory::rr3_rollback_last`]——
     /// 对位 legacy：只有成功才追加 assistant）。
@@ -341,6 +366,23 @@ impl Rr3LlmClient {
     #[cfg(test)]
     fn rr3_history(&self) -> &[(String, String)] {
         self.history.rr3_messages()
+    }
+}
+
+/// 模型行密钥是否就位（面板模型列表只回布尔 `key_set`，值零回显）：local 免鉴权
+/// 恒 true；`env:` 引用看环境变量非空；裸名看 secrets 现读；无引用走通用环境变量键。
+pub(crate) fn rr3_key_set_of(key_ref: &Option<String>, mode: Option<Rr3LlmMode>) -> bool {
+    if mode == Some(Rr3LlmMode::Local) {
+        return true;
+    }
+    match key_ref {
+        None => rr3_cloud_api_key().is_ok(),
+        Some(r) => match r.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
+            Some(var) => std::env::var(var)
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false),
+            None => rr3_secrets_get(r).is_some(),
+        },
     }
 }
 
