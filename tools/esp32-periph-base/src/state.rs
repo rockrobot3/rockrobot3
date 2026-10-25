@@ -5,6 +5,7 @@ use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::{esp_random, esp_timer_get_time};
 use rr_ipc::Rr3BoardBindings;
 
+use crate::face::{EyeStyle, EYE_IDLE};
 use crate::link::{reply, UartIo};
 use crate::ports::Rr3UartPort;
 use crate::power::RailTier;
@@ -75,10 +76,8 @@ pub(crate) struct PeriphState {
     /// 表情模式：true=胶囊眼 + 生命感微动作（帧面 expression 专有）；位图占屏
     /// 与行面文本模式复位 false（动画只在此模式跑）。
     pub(crate) expr_mode: bool,
-    /// 表情基态（expr_eye_base 预设）：眼开合% + 水平/垂直扫视偏移
-    pub(crate) base_open: u32,
-    pub(crate) base_dx: i16,
-    pub(crate) base_dy: i16,
+    /// 表情基态（expr_eye_base 预设）：开合% + 水平/垂直扫视偏移 + 眼高% + 眉形
+    pub(crate) base: EyeStyle,
     /// 微动作时钟（esp_timer ms）：眨眼/扫视的下一触发点与进行中截止点 +
     /// 上次渲染合成参数（变化才重绘，省 I2C）。
     pub(crate) next_blink_ms: u64,
@@ -87,7 +86,7 @@ pub(crate) struct PeriphState {
     pub(crate) glance_until_ms: u64,
     pub(crate) glance_dx: i16,
     pub(crate) glance_dy: i16,
-    pub(crate) drawn: (u32, i16, i16),
+    pub(crate) drawn: EyeStyle,
     /// 云台自主扫摆（WANDER 行面开关）：pan/tilt 缓速连续摆动不停顿。外部
     /// PAN/TILT/SERVO/SCAN 或帧面 servo 写到达即关（外部点名优先）。
     pub(crate) wander_on: bool,
@@ -141,16 +140,14 @@ impl PeriphState {
             tilt_deg: Axis::Tilt.center_deg(),
             frame_mode: false,
             expr_mode: false,
-            base_open: 100,
-            base_dx: 0,
-            base_dy: 0,
+            base: EYE_IDLE,
             next_blink_ms: 0,
             blink_until_ms: 0,
             next_glance_ms: 0,
             glance_until_ms: 0,
             glance_dx: 0,
             glance_dy: 0,
-            drawn: (100, 0, 0),
+            drawn: EYE_IDLE,
             wander_on: false,
             wander_pan_dir: 0,
             wander_tilt_dir: 0,
@@ -188,7 +185,7 @@ impl PeriphState {
     /// （2.8–5.2s 随机间隔，闭 130ms）+ 随机微扫视（4–8s 间隔，水平 ±6px、垂直
     /// ±2 行，500–900ms 回位）。返回需要重绘的合成参数（None = 与上次一致，
     /// 省 I2C 不重绘）；非表情模式恒 None。渲染由运行面脱锁执行。
-    pub(crate) fn anim_decide(&mut self) -> Option<(u32, i16, i16)> {
+    pub(crate) fn anim_decide(&mut self) -> Option<EyeStyle> {
         if !self.expr_mode {
             return None;
         }
@@ -201,13 +198,10 @@ impl PeriphState {
         } else if now >= self.blink_until_ms {
             self.blink_until_ms = 0;
         }
-        let open = if self.blink_until_ms != 0 {
-            4
-        } else {
-            self.base_open
-        };
-        let mut dx = self.base_dx;
-        let mut dy = self.base_dy;
+        let mut style = self.base;
+        if self.blink_until_ms != 0 {
+            style.open = 4;
+        }
         if self.glance_until_ms == 0 {
             if now >= self.next_glance_ms {
                 self.glance_dx = (esp_random_u32() % 13) as i16 - 6;
@@ -222,13 +216,12 @@ impl PeriphState {
         } else if now >= self.glance_until_ms {
             self.glance_until_ms = 0;
         } else {
-            dx += self.glance_dx;
-            dy += self.glance_dy;
+            style.dx += self.glance_dx;
+            style.dy += self.glance_dy;
         }
-        let key = (open, dx, dy);
-        if key != self.drawn {
-            self.drawn = key;
-            Some(key)
+        if style != self.drawn {
+            self.drawn = style;
+            Some(style)
         } else {
             None
         }

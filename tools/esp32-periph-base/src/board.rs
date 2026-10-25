@@ -76,7 +76,7 @@ pub(crate) use rr_periph_proto::consts::{
     RR3_MAGIC_FIRST, RR3_PERIPH_TASK, RR3_TASK_HOST as RR3_HOST_TASK,
 };
 
-// 板侧常量表生成物（主题串三枚 + 板侧表情白名单七态）——真值点（contracts/
+// 板侧常量表生成物（主题串三枚 + 板侧表情白名单可渲染子集）——真值点（contracts/
 // topics.toml + contracts/face-expressions.toml）与生成器（tools/rr3-codegen）
 // 见 topics_gen.rs 头注。本文件不再手写副本：全案 0.0.5 增补轮六 §4.5 裁定
 // "真值点 → 生成副本"，重跑生成器 diff 为空 = 门 f 拟 ⑨-d（check.sh 接线）。

@@ -121,6 +121,58 @@ const RR3_FRAMES_TURN: [Rr3FaceFrame; 1] = [[
     0b0000_0000,
 ]];
 
+// ---------- 4 情绪态（2026-10-25 板侧胶囊眼扩展同批：8x8 帧面兜底投影） ----------
+// 板侧胶囊眼以 EyeStyle（开合/偏移/眼高/眉形）执行，本表是帧面通道的同名投影
+// ——两条显示面同一白名单序，宿主帧表下标对齐不因扩态位移。
+
+/// sleepy：半合眼（单行细缝）+ 小哈欠嘴（单帧）
+const RR3_FRAMES_SLEEPY: [Rr3FaceFrame; 1] = [[
+    0b0000_0000,
+    0b0000_0000,
+    0b0110_0110,
+    0b0000_0000, //
+    0b0000_0000,
+    0b0001_1000,
+    0b0000_0000,
+    0b0000_0000,
+]];
+
+/// surprised：圆环大眼（三行）+ 小 O 嘴（单帧）
+const RR3_FRAMES_SURPRISED: [Rr3FaceFrame; 1] = [[
+    0b0000_0000,
+    0b0111_1110,
+    0b0100_0010,
+    0b0111_1110, //
+    0b0000_0000,
+    0b0001_1000,
+    0b0000_0000,
+    0b0000_0000,
+]];
+
+/// angry：外高内低的压眉 + 窄眼 + 紧嘴（单帧）
+const RR3_FRAMES_ANGRY: [Rr3FaceFrame; 1] = [[
+    0b0100_0010,
+    0b0110_0110,
+    0b0100_0010,
+    0b0000_0000, //
+    0b0000_0000,
+    0b0011_1100,
+    0b0000_0000,
+    0b0000_0000,
+]];
+
+/// sad：垂眼 + 嘴角下垂（单帧）
+const RR3_FRAMES_SAD: [Rr3FaceFrame; 1] = [[
+    0b0000_0000,
+    0b0110_0110,
+    0b0100_0010,
+    0b0000_0000, //
+    0b0001_1000,
+    0b0010_0100,
+    0b0100_0010,
+    0b0000_0000,
+]];
+
 // ---------- char 单字符档（2026-10-15 板上批：36 字符静态单帧，机制零改动） ----------
 // 字模 = 经典 5×7 列位图（与板上 marquee 实验同源），行 0-6 顶对齐、5 列落在
 // bit6..bit2（glyph 左列 = bit6，bit7 最左空一位）；行 7 恒空。
@@ -558,8 +610,8 @@ const RR3_FRAMES_CHAR_D9: [Rr3FaceFrame; 1] = [[
 ]];
 
 /// 白名单序 → 帧序列表（与 RR3_FACE_EXPRESSIONS 下标对齐；blink/talk 双帧，
-/// 七核心态与 char 单字符档全为单帧）
-const RR3_FACE_FRAME_TABLE: [&[Rr3FaceFrame]; 43] = [
+/// 七核心态 + 4 情绪态与 char 单字符档全为单帧）
+const RR3_FACE_FRAME_TABLE: [&[Rr3FaceFrame]; 47] = [
     &RR3_FRAMES_IDLE,
     &RR3_FRAMES_BLINK,
     &RR3_FRAMES_TALK,
@@ -603,6 +655,10 @@ const RR3_FACE_FRAME_TABLE: [&[Rr3FaceFrame]; 43] = [
     &RR3_FRAMES_CHAR_D7,
     &RR3_FRAMES_CHAR_D8,
     &RR3_FRAMES_CHAR_D9,
+    &RR3_FRAMES_SLEEPY,
+    &RR3_FRAMES_SURPRISED,
+    &RR3_FRAMES_ANGRY,
+    &RR3_FRAMES_SAD,
 ];
 
 /// 表情名 → 帧序列。未知表情回退 idle 帧（调用方已过白名单，此为兜底）。
@@ -733,10 +789,11 @@ mod tests {
     const NON_TALK: &[&str] = &["talk"];
 
     /// 白名单口径：七核心态在前（帧表下标锚点，契约字面量不动），char 单字符
-    /// 档 36 个随后（charA..charZ + char0..char9），全集 43。
+    /// 档 36 个随后（charA..charZ + char0..char9），末尾 4 情绪态（sleepy/
+    /// surprised/angry/sad），全集 47。
     #[test]
     fn whitelist_covers_core_and_char_expressions() {
-        assert_eq!(RR3_FACE_EXPRESSIONS.len(), 43);
+        assert_eq!(RR3_FACE_EXPRESSIONS.len(), 47);
         assert_eq!(
             &RR3_FACE_EXPRESSIONS[..7],
             ["idle", "blink", "talk", "think", "happy", "listen", "turn"]
@@ -749,6 +806,10 @@ mod tests {
                 "白名单位次 7+{ix}"
             );
         }
+        assert_eq!(
+            &RR3_FACE_EXPRESSIONS[43..],
+            ["sleepy", "surprised", "angry", "sad"]
+        );
         // 初始态 idle：首次切换的"切换前"就是它
         assert_eq!(
             Rr3Face::default()

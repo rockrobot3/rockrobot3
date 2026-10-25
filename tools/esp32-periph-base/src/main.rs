@@ -354,16 +354,14 @@ fn main() {
     // 串行降级）——UART2 指令链路现场劣化时的"可见性"兜底（用户现场裁定）。排队
     // RenderCapsules + Move，由运行面线程接管；姿态经 axis_check 已在本轴行程内。
     {
-        let (open, dx, dy) = expr_eye_base("idle");
+        let base = expr_eye_base("idle");
         let mut b = lock_bus(&bus);
         b.st.expr_mode = true;
         b.st.frame_mode = false;
-        b.st.base_open = open;
-        b.st.base_dx = dx;
-        b.st.base_dy = dy;
+        b.st.base = base;
         b.st.last_text = String::from("EXPR idle");
         b.st.anim_reset();
-        b.st.drawn = (open, dx, dy);
+        b.st.drawn = base;
         b.st.pan_deg = BOOT_PAN_DEG;
         b.st.tilt_deg = BOOT_TILT_DEG;
     }

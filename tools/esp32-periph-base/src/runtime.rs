@@ -112,11 +112,11 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
         }
         Job::Scan => rt_scan(ph, bus),
         Job::RenderCapsules => {
-            let (open, dx, dy) = {
+            let style = {
                 let b = lock_bus(bus);
-                (b.st.base_open, b.st.base_dx, b.st.base_dy)
+                b.st.base
             };
-            if let Err(e) = ph.capsules_degrading(open, dx, dy) {
+            if let Err(e) = ph.capsules_degrading(style) {
                 eprintln!("[periph] 胶囊眼渲染失败: {e}");
             }
         }
@@ -264,8 +264,8 @@ fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
         let (mv, refresh) = st.wander_decide();
         (render, mv, refresh)
     };
-    if let Some((open, dx, dy)) = render {
-        if let Err(e) = ph.capsules_degrading(open, dx, dy) {
+    if let Some(style) = render {
+        if let Err(e) = ph.capsules_degrading(style) {
             eprintln!("[periph] 表情微动作渲染失败: {e}");
         }
     }

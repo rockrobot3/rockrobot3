@@ -98,7 +98,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@921600，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T098)"
+                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@921600，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T098)"
                     .into(),
             ),
             "OLED" => {
@@ -187,17 +187,15 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
             // 表情无路可触发——行面直命令是可达性兜底。
             "FACE" => match parts.next() {
                 Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
-                    let (open, dx, dy) = expr_eye_base(expr);
+                    let base = expr_eye_base(expr);
                     {
                         let mut b = lock_bus(&bus);
                         b.st.expr_mode = true;
                         b.st.frame_mode = false;
-                        b.st.base_open = open;
-                        b.st.base_dx = dx;
-                        b.st.base_dy = dy;
+                        b.st.base = base;
                         b.st.last_text = format!("EXPR {expr}");
                         b.st.anim_reset();
-                        b.st.drawn = (open, dx, dy);
+                        b.st.drawn = base;
                     }
                     push_job(&bus, Job::RenderCapsules);
                     Ok(format!("OK face={expr}"))

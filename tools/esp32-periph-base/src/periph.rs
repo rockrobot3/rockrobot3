@@ -9,6 +9,7 @@ use crate::board::{
     DUTY_MAX, DUTY_MIN, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_RENDER_ATTEMPTS, OLED_ROWS,
     RAIL_GATE_ARMED, RR3_BIND_ADC_RAIL, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
 };
+use crate::face::EyeStyle;
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
 use crate::ports::{Rr3AdcPort, Rr3PwmChannel, Rr3PwmPort};
 use crate::power::{RailJudge, RailMonitor, RailTier};
@@ -147,8 +148,8 @@ impl RtPeriph {
     }
 
     /// 渲染胶囊眼（**带恢复环**：降亮阶梯 + 模块 latch 重初始化）。
-    pub(crate) fn capsules_degrading(&mut self, open: u32, dx: i16, dy: i16) -> Result<(), String> {
-        self.render_with_recovery(|i2c| oled_capsules(i2c, open, dx, dy))
+    pub(crate) fn capsules_degrading(&mut self, style: EyeStyle) -> Result<(), String> {
+        self.render_with_recovery(|i2c| oled_capsules(i2c, style))
     }
 
     /// 渲染 8x8 点阵全屏放大（**带恢复环**）。
