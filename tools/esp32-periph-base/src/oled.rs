@@ -7,7 +7,7 @@ use crate::board::{
     I2C_CHUNK_GAP_MS, I2C_PAGE_ATTEMPTS, I2C_RETRY, I2C_RETRY_DELAY_MS, OLED_ADDR, OLED_COLS,
     OLED_CONTRAST_LEVELS, OLED_ROWS,
 };
-use crate::face::{capsule_page, EyeStyle};
+use crate::face::{eye_page, EyeStyle};
 use crate::ports::Rr3I2cPort;
 use crate::state::rr3_board_bindings_i2c_pair;
 
@@ -416,14 +416,7 @@ pub(crate) fn oled_frame(i2c: &mut I2cDriver, frame: &[u8; 8]) -> Result<(), Str
 /// 批N23 件二收编），本函数逐页取图后只做页写——传输面与面目语义分离。
 pub(crate) fn oled_capsules(i2c: &mut I2cDriver, style: EyeStyle) -> Result<(), String> {
     for page in 0u8..8 {
-        let buf = capsule_page(
-            page,
-            style.open,
-            style.dx,
-            style.dy,
-            style.height_pct,
-            style.brow,
-        );
+        let buf = eye_page(page, style);
         oled_page(i2c, page, &buf)?;
     }
     Ok(())

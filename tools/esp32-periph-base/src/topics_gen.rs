@@ -12,7 +12,7 @@ pub(crate) const RR3_SERVO_TOPIC: &str = "rr3-act/servo/command";
 pub(crate) const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 /// 表情白名单（板侧可渲染子集 board_subset；契约全集在
 /// contracts/face-expressions.toml，宿主投影 face.rs RR3_FACE_EXPRESSIONS）。
-pub(crate) const RR3_FACE_EXPRS: [&str; 11] = [
+pub(crate) const RR3_FACE_EXPRS: [&str; 16] = [
     "idle",
     "blink",
     "talk",
@@ -24,6 +24,11 @@ pub(crate) const RR3_FACE_EXPRS: [&str; 11] = [
     "surprised",
     "angry",
     "sad",
+    "confused",
+    "focus",
+    "love",
+    "dizzy",
+    "scared",
 ];
 /// 音频 PCM 上行主题（在册 stream L1：contracts/topics.toml `rr3-sense/audio/pcm`；
 /// 载荷形状事实源 modules/rr3-sense composite::rr3_pcm_event_body）。
