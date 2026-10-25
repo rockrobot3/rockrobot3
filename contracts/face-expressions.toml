@@ -15,9 +15,10 @@
 
 schema_version = 1
 
-# 全集 47 态：7 基态（idle/blink/talk/think/happy/listen/turn；批F3 增 listen/turn）
+# 全集 52 态：7 基态（idle/blink/talk/think/happy/listen/turn；批F3 增 listen/turn）
 # + char 单字符档 36 态（charA..charZ / char0..char9；2026-10-15 板上批，面板真链路
-# 单字 8x8 显示）+ 4 情绪态（sleepy/surprised/angry/sad；2026-10-25 板侧胶囊眼扩展）。
+# 单字 8x8 显示）+ 4 情绪态（sleepy/surprised/angry/sad；2026-10-25 板侧胶囊眼扩展）
+# + 5 情绪/彩蛋态（confused/focus/love/dizzy/scared；2026-10-25 同批二批）。
 # 顺序即帧表序（mech.rs RR3_FACE_FRAME_TABLE 同序）。**扩态只许追加末尾**——char
 # 档按数组下标对齐帧表，中间插入会整体位移字符档。
 expressions = [
@@ -27,12 +28,14 @@ expressions = [
   "charS", "charT", "charU", "charV", "charW", "charX", "charY", "charZ",
   "char0", "char1", "char2", "char3", "char4", "char5", "char6", "char7", "char8", "char9",
   "sleepy", "surprised", "angry", "sad",
+  "confused", "focus", "love", "dizzy", "scared",
 ]
 
-# 板侧（ESP32 OLED 胶囊眼执行面）可渲染子集：11 态各有面目基态（atoms/face/mech.rs
+# 板侧（ESP32 OLED 胶囊眼执行面）可渲染子集：16 态各有面目基态（atoms/face/mech.rs
 # 预设表），char 单字符档在板侧由帧面执行（char 后缀取 8x8 字模），不占预设槽——
-# 板侧白名单只生成这 11 态（前 7 位与宿主帧表基态同序，4 情绪态追加末尾）。
+# 板侧白名单只生成这 16 态（前 7 位与宿主帧表基态同序，9 情绪/彩蛋态追加末尾）。
 board_subset = [
   "idle", "blink", "talk", "think", "happy", "listen", "turn",
   "sleepy", "surprised", "angry", "sad",
+  "confused", "focus", "love", "dizzy", "scared",
 ]
