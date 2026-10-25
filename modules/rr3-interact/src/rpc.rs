@@ -355,7 +355,7 @@ mod tests {
         let e = Rr3FaceSetError::UnknownExpression("wink");
         assert_eq!(
             rr3_face_set_error_text(&e, &["talk"]),
-            "rr3-interact/face/expression 不认表情 \"wink\"（允许 idle/blink/talk/think/happy/listen/turn/charA/charB/charC/charD/charE/charF/charG/charH/charI/charJ/charK/charL/charM/charN/charO/charP/charQ/charR/charS/charT/charU/charV/charW/charX/charY/charZ/char0/char1/char2/char3/char4/char5/char6/char7/char8/char9）"
+            "rr3-interact/face/expression 不认表情 \"wink\"（允许 idle/blink/talk/think/happy/listen/turn/charA/charB/charC/charD/charE/charF/charG/charH/charI/charJ/charK/charL/charM/charN/charO/charP/charQ/charR/charS/charT/charU/charV/charW/charX/charY/charZ/char0/char1/char2/char3/char4/char5/char6/char7/char8/char9/sleepy/surprised/angry/sad）"
         );
         let e = Rr3FaceSetError::NonPointable("talk");
         assert_eq!(
