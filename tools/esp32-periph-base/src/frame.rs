@@ -168,18 +168,16 @@ fn frame_handle_face(
         if !RR3_FACE_EXPRS.contains(&expr) {
             return Err(format!("expression 不在白名单: \"{expr}\""));
         }
-        let (base_open, base_dx, base_dy) = expr_eye_base(expr);
+        let base = expr_eye_base(expr);
         let previous = std::mem::replace(&mut ctl.prev_expr, expr.to_string());
         {
             let mut b = lock_bus(bus);
             b.st.expr_mode = true;
             b.st.frame_mode = false;
-            b.st.base_open = base_open;
-            b.st.base_dx = base_dx;
-            b.st.base_dy = base_dy;
+            b.st.base = base;
             b.st.last_text = format!("EXPR {expr}");
             b.st.anim_reset();
-            b.st.drawn = (base_open, base_dx, base_dy);
+            b.st.drawn = base;
         }
         push_job(bus, Job::RenderCapsules);
         Ok(json!({ "expression": expr, "previous": previous }))

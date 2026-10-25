@@ -23,13 +23,14 @@ pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 /// 合法表情白名单（contracts/events/interact-face-expression.schema.json 的 enum
 /// 与 contracts/topics.toml 的 note 同源；批F3 增 listen/turn——判据 9 点名的
 /// 听取/转向两态；2026-10-15 板上批增 char 单字符档 36 态——charA..charZ +
-/// char0..char9，面板真链路单字 8x8 显示，帧表随 mech.rs 同序扩容）
-pub const RR3_FACE_EXPRESSIONS: [&str; 43] = [
+/// char0..char9，面板真链路单字 8x8 显示；2026-10-25 追加 4 情绪态——sleepy/
+/// surprised/angry/sad；扩态只追加末尾，char 档帧表下标不前移）
+pub const RR3_FACE_EXPRESSIONS: [&str; 47] = [
     "idle", "blink", "talk", "think", "happy", "listen", "turn", "charA", "charB", "charC",
     "charD", "charE", "charF", "charG", "charH", "charI", "charJ", "charK", "charL", "charM",
     "charN", "charO", "charP", "charQ", "charR", "charS", "charT", "charU", "charV", "charW",
     "charX", "charY", "charZ", "char0", "char1", "char2", "char3", "char4", "char5", "char6",
-    "char7", "char8", "char9",
+    "char7", "char8", "char9", "sleepy", "surprised", "angry", "sad",
 ];
 
 /// TTS 播放期间的临时表情（模块内自动切换；"不可点名"规则由 config 注入，见下）
@@ -39,7 +40,7 @@ pub const RR3_FACE_TALK: &str = "talk";
 /// 文案面的 `join("/")` 在运行时落堆，改用本常量（编译期字面，零分配）；
 /// 下方对账单测钉死与 `join` 输出逐字一致——白名单扩员时单测红，提示同步
 /// 扩本投影（一个事实两个面的对账锚）。
-pub const RR3_FACE_EXPRESSIONS_JOINED: &str = "idle/blink/talk/think/happy/listen/turn/charA/charB/charC/charD/charE/charF/charG/charH/charI/charJ/charK/charL/charM/charN/charO/charP/charQ/charR/charS/charT/charU/charV/charW/charX/charY/charZ/char0/char1/char2/char3/char4/char5/char6/char7/char8/char9";
+pub const RR3_FACE_EXPRESSIONS_JOINED: &str = "idle/blink/talk/think/happy/listen/turn/charA/charB/charC/charD/charE/charF/charG/charH/charI/charJ/charK/charL/charM/charN/charO/charP/charQ/charR/charS/charT/charU/charV/charW/charX/charY/charZ/char0/char1/char2/char3/char4/char5/char6/char7/char8/char9/sleepy/surprised/angry/sad";
 
 /// 表情名 → 白名单里的 `&'static str`（不认返回 `None`）。config 注入值与
 /// [`RR3_FACE_EXPRESSIONS`] 的对账点（值本身是契约字面量，扩值走契约评审）。
@@ -135,10 +136,18 @@ mod tests {
             all, RR3_FACE_EXPRESSIONS,
             "契约真值点与宿主投影漂移：扩态走契约级评审，contracts/face-expressions.toml 与本常量同批"
         );
+        // 板侧可渲染子集：前 7 位与基态同序（下标对齐板侧预设表），追加项按
+        // "check 挡板"补齐 emotions——两侧同序、全集内、不重复。
         assert_eq!(
-            board_subset,
-            RR3_FACE_EXPRESSIONS[..7].to_vec(),
-            "板侧可渲染子集（board_subset）须与基态前 7 位一致（板侧生成物 rr3-codegen 用它）"
+            board_subset[..7],
+            RR3_FACE_EXPRESSIONS[..7],
+            "板侧可渲染子集前 7 位须与基态同序（板侧生成物 rr3-codegen 用它）"
         );
+        for e in &board_subset {
+            assert!(
+                RR3_FACE_EXPRESSIONS.contains(&e.as_str()),
+                "board_subset 项 \"{e}\" 须在宿主全集在册"
+            );
+        }
     }
 }
