@@ -1887,7 +1887,7 @@ fn esp32s3_mini_profile_pins_s3_harness() {
 }
 
 /// Pi 4B 宿主 × classic 板（W2/T1）：`profiles/pi4b-host-esp32-classic.toml` 钉**差异面**
-/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十六格绑定 / 无本地 [[pin]]）。
+/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十六格绑定 / 恰一条 [[pin]] = MAX7219）。
 /// 完整形状由 default/distro 测试与 rrd 装载门共同覆盖；线束与档位漂移即红。
 #[test]
 fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
@@ -1993,11 +1993,33 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         "pi4b-host-esp32-classic 在位声明应恰十六格"
     );
 
-    // 无本地 [[pin]]：Pi 本机不直连外设，板侧真值由 [hardware] 十一键经桥注入；
-    // host 档派生器只认主机词形（pwm<N>/gpiochip<N>...），板侧 ledc<N> 进派生即拒 boot。
-    assert!(
-        v.get("pin").is_none(),
-        "pi4b-host-esp32-classic 不应有 [[pin]]（板侧真值走 [hardware]，host 派生前件不适用）"
+    // [[pin]] 恰一条：Pi 本机唯一的本地外设 = MAX7219 点阵（ui.face.spi，spidev0/ch0，
+    // 装载期派生 spi_device）。其余六格（act.servo/led/relay、power.charger、
+    // sensor.env/imu）无绑定 → 校验② role_missing 降级，板侧真值走 [hardware] 桥注入。
+    let pins = v
+        .get("pin")
+        .and_then(toml::Value::as_array)
+        .expect("pi4b-host-esp32-classic 应有恰一条 [[pin]]（ui.face.spi）");
+    assert_eq!(
+        pins.len(),
+        1,
+        "pi4b-host-esp32-classic [[pin]] 应恰一条（Pi 本机只接 MAX7219 点阵）"
+    );
+    let p0 = &pins[0];
+    assert_eq!(
+        p0.get("role").and_then(toml::Value::as_str),
+        Some("ui.face.spi"),
+        "pi4b-host-esp32-classic [[pin]] role 漂移"
+    );
+    assert_eq!(
+        p0.get("controller").and_then(toml::Value::as_str),
+        Some("spidev0"),
+        "pi4b-host-esp32-classic [[pin]] controller 漂移（host 词形前缀 spidev，见平台表 [controller_wordform]）"
+    );
+    assert_eq!(
+        p0.get("channel").and_then(toml::Value::as_integer),
+        Some(0),
+        "pi4b-host-esp32-classic [[pin]] channel 漂移（CE0）"
     );
 }
 

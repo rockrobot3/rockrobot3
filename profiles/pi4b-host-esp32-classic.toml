@@ -4,13 +4,16 @@
 # 形态语义（docs/process/dev/通用底座三平台验证计划.md §7）：Pi 跑完整 Linux 底座 +
 # 五模块，ESP32 classic 板只做末梢（I2S 双麦 / LEDC 双轴 / I2C OLED / UART2 桥链）。
 # 与 esp32-mini/distro 的关键差别：
-#   1. 全部外设物理真值都在**板侧**——[hardware] 十一键与 profiles/esp32-mini.toml 逐值
-#      对齐，经 rr3.set_bindings 注入板侧；Pi 本机不直连舵机/OLED/麦，故 [[pin]] 留空
-#      （host 档派生器只认主机词形 pwm<N>/gpiochip<N>/i2c<N>/spidev<N>，板侧 ledc<N>
-#      词形进派生即拒 boot，见 rrd profile.rs 校验①；「板侧真值由 [hardware] 十键表达」
-#      与计划 §7.1 括注同口径，计划正文「[[pin]] 按 classic 板真值」按此收敛）。
-#   2. [[pin]] 缺省 ⇒ 校验② role_missing 会让相关格位降级（Degraded 可见面），这是
-#      本形态的诚实例：板在才有力，宿主不虚报本地能力。
+#   1. 外设物理真值分两处：**板侧**十一键在 [hardware]（与 profiles/esp32-mini.toml 逐值
+#      对齐，经 rr3.set_bindings 注入板侧）；**Pi 本机唯一的本地外设**是 MAX7219 双位
+#      级联点阵（链④真件档，2026-10-15 实测，SPI0 CE0），故只留一条 [[pin]] ui.face.spi。
+#      舵机/OLED/麦仍在板上，Pi 不直连（host 档派生器只认主机词形
+#      pwm<N>/gpiochip<N>/i2c<N>/spidev<N>，板侧 ledc<N> 词形进派生即拒 boot，见
+#      rrd profile.rs 校验①）。
+#   2. [[pin]] 缺 ui.face 之外六格 ⇒ 校验② role_missing 让六格降级（Degraded 可见面），
+#      这是本形态的诚实例：板在才有力，宿主不虚报本地能力。ui.face 不降级是因为
+#      rr3-interact 开机必探显示面（boot.rs rr3_interact_probe，R11③ fail-closed），
+#      无显示件时退出——Pi 本机的点阵正是这条探活的落点。
 #   3. [hardware] 同时保留宿主两键 alsa_device/link_ifname（USB 声卡回放 + Pi 网口）。
 # schema_version = 5（与 default/distro 同版：[runtime] 段必填，缺即红）。
 
@@ -117,6 +120,16 @@ i2s_bclk = "4"
 i2s_sd = "27"
 i2s_ws = "26"
 cred_store = "nvs:rr3"
+
+# Pi 本机唯一的本地外设绑定：MAX7219 双位级联点阵（链④真件档，2026-10-15 实测）。
+# spidev0 = 总线 0、channel 0 = 片选 0，装载期派生 spi_device="/dev/spidev0.0"；
+# 接线 4：DIN=脚19/CS=脚24/CLK=脚23（与 profiles/distro.toml 同格同值）。
+[[pin]]
+role = "ui.face.spi"
+controller = "spidev0"
+channel = 0
+direction = "out"
+mux_group = []
 
 [enabled_slots]
 # 与 distro 同：五模块启用其 provides 全集（T1 要验整机，不裁剪）。
