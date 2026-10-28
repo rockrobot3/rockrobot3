@@ -1,0 +1,149 @@
+# RockRobot3 装配单：pi4b-host-esp32-classic 机型（W2/T1：Pi 4B 当宿主 × ESP32 classic 板）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
+# 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
+# 形态语义（docs/process/dev/通用底座三平台验证计划.md §7）：Pi 跑完整 Linux 底座 +
+# 五模块，ESP32 classic 板只做末梢（I2S 双麦 / LEDC 双轴 / I2C OLED / UART2 桥链）。
+# 与 esp32-mini/distro 的关键差别：
+#   1. 全部外设物理真值都在**板侧**——[hardware] 十一键与 profiles/esp32-mini.toml 逐值
+#      对齐，经 rr3.set_bindings 注入板侧；Pi 本机不直连舵机/OLED/麦，故 [[pin]] 留空
+#      （host 档派生器只认主机词形 pwm<N>/gpiochip<N>/i2c<N>/spidev<N>，板侧 ledc<N>
+#      词形进派生即拒 boot，见 rrd profile.rs 校验①；「板侧真值由 [hardware] 十键表达」
+#      与计划 §7.1 括注同口径，计划正文「[[pin]] 按 classic 板真值」按此收敛）。
+#   2. [[pin]] 缺省 ⇒ 校验② role_missing 会让相关格位降级（Degraded 可见面），这是
+#      本形态的诚实例：板在才有力，宿主不虚报本地能力。
+#   3. [hardware] 同时保留宿主两键 alsa_device/link_ifname（USB 声卡回放 + Pi 网口）。
+# schema_version = 5（与 default/distro 同版：[runtime] 段必填，缺即红）。
+
+schema_version = 5
+
+[os]
+route = "distro" # Pi 4B 跑 Raspberry Pi OS（Debian 13 trixie 真机），属发行版快路轨
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
+log_ring_cap = 512
+
+[platform]
+# host 档（ADR-0018 修订 1）：完整 Linux 底座 + 五模块全跑在 Pi 上。
+tier = "host"
+# 平台事实表外键（§4.6）：contracts/platform/raspberry-pi-4.toml（BCM2711 演练实例，
+# 真机对账项进 status.md 敞口）。[controller_wordform] 四键在册，host 档派生前件成立。
+chip = "raspberry-pi-4"
+
+[supplies]
+# 平台供给声明：与 default 同口径（看门狗三键 + 时序预算三位）。
+# watchdog_feeder = "rrd"：宿主档由 rrd 喂（与 default/distro 一致）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+# [[supplies.domain]] 电力网络声明：Pi 由 5V/3A 官方电源供电、无电池与轨压测点，
+# 故只声明 rail5v/rail3v3 两域且绑定引用位一律 "none"；armed=false（未标定即不武装）。
+# 舵机走独立 UBEC（B 批验收过），其轨不在 Pi 侧计量——板侧 rail5v 口径归 esp32 档案。
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 3000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+# [supplies.budget]：host 档校验⑩不适用，"合法不适用"显式写 true（F-6）。
+[supplies.budget]
+not_applicable = true
+
+[bindings]
+# 格位 → 件：与 profiles/distro.toml 同构（十六格全绑定，认知层四格绑 rr3-brain）。
+# 板侧能力（舵机/OLED/麦）经 rr-hal 的 esp32 档走 UART 桥消费，绑定关系不变。
+"act.servo" = "rr3-act"
+"act.led" = "rr3-act"
+"act.relay" = "rr3-act"
+"net.wifi" = "rr3-connect"
+"net.bt" = "rr3-connect"
+"ui.face" = "rr3-interact"
+"audio.playback" = "rr3-interact"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+"sensor.env" = "rr3-sense"
+"sensor.imu" = "rr3-sense"
+"power.charger" = "rr3-power"
+"cognition.dialog" = "rr3-brain"
+"cognition.asr" = "rr3-brain"
+"cognition.llm" = "rr3-brain"
+"cognition.tts" = "rr3-brain"
+
+[hardware]
+# 宿主两键（schema 3 非引脚键直给）：
+# alsa_device 不钉卡号（卡号随 HDMI/USB 枚举变），按 CARD 名 —— Pi 4B 真机实测
+# CM108AH 类 USB 声卡短名 "Device"（C-Media 0d8c:0012，UAC1.0 全速）；
+# 无 pulse/pipewire 的 Lite 镜像上 "default" 会映射 PA 插件而 open 失败（distro 同教训）。
+alsa_device = "plughw:CARD=Device"
+link_ifname = "wlan0"
+
+# 板侧十一键：与 profiles/esp32-mini.toml 逐值对齐（classic 板同一块硬件、同一线束）。
+# 消费语义 = 板侧装配对账锚（键位语义见 esp32-mini 头注，此处不重复）；非 [pins]
+# 派生面，故 host 档可直给且不触门 n。
+i2c_sda = "21"
+i2c_scl = "22"
+adc_rail_pin = "34"
+uart2_tx = "18"
+uart2_rx = "19"
+ledc_pan = "32"
+ledc_tilt = "33"
+i2s_bclk = "4"
+i2s_sd = "27"
+i2s_ws = "26"
+cred_store = "nvs:rr3"
+
+[enabled_slots]
+# 与 distro 同：五模块启用其 provides 全集（T1 要验整机，不裁剪）。
+rr3-act = ["act.servo", "act.led", "act.relay"]
+rr3-connect = ["net.wifi", "net.bt"]
+rr3-interact = ["ui.face", "audio.playback"]
+rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
+rr3-power = ["power.battery", "power.charger"]
+rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[slots]
+# 本板物理在位格位声明：Pi 宿主 + classic 板合起来十六格全在位（同 distro），升序排列。
+present = [
+    "act.servo",
+    "act.led",
+    "act.relay",
+    "audio.capture",
+    "audio.playback",
+    "audio.vad",
+    "cognition.asr",
+    "cognition.dialog",
+    "cognition.llm",
+    "cognition.tts",
+    "net.bt",
+    "net.wifi",
+    "power.charger",
+    "sensor.env",
+    "sensor.imu",
+    "ui.face",
+]
