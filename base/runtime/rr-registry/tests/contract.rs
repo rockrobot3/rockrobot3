@@ -1115,6 +1115,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "distro.toml".to_string(),
             "esp32-mini.toml".to_string(),
             "esp32s3-mini.toml".to_string(),
+            "pi4b-host-esp32-classic.toml".to_string(),
         ],
         "profiles/ 机型集合漂移（新增机型须同批改本 pin 与该机型的形状测试，C2 批K）"
     );
@@ -1882,6 +1883,121 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         physicals,
         vec![4, 5],
         "esp32s3-mini 双轴物理脚漂移（应为 S3 LEDC pan=4 / tilt=5）"
+    );
+}
+
+/// Pi 4B 宿主 × classic 板（W2/T1）：`profiles/pi4b-host-esp32-classic.toml` 钉**差异面**
+/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十六格绑定 / 无本地 [[pin]]）。
+/// 完整形状由 default/distro 测试与 rrd 装载门共同覆盖；线束与档位漂移即红。
+#[test]
+fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32-classic.toml"))
+        .expect("profiles/pi4b-host-esp32-classic.toml 必须存在（W2/T1）");
+    let v: toml::Value = toml::from_str(&text).expect("pi4b-host-esp32-classic.toml 必须可解析");
+
+    assert_eq!(
+        v.get("schema_version").and_then(toml::Value::as_integer),
+        Some(5),
+        "pi4b-host-esp32-classic schema_version 漂移"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some("host"),
+        "pi4b-host-esp32-classic 档位漂移（T1 = Pi 宿主档）"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("chip"))
+            .and_then(toml::Value::as_str),
+        Some("raspberry-pi-4"),
+        "pi4b-host-esp32-classic chip 漂移（平台表选 contracts/platform/raspberry-pi-4.toml）"
+    );
+    assert_eq!(
+        v.get("os")
+            .and_then(|o| o.get("route"))
+            .and_then(toml::Value::as_str),
+        Some("distro"),
+        "pi4b-host-esp32-classic route 漂移（Raspberry Pi OS 属发行版快路轨）"
+    );
+
+    let hardware = v
+        .get("hardware")
+        .and_then(toml::Value::as_table)
+        .expect("pi4b-host-esp32-classic 缺 [hardware] 段");
+    // 宿主两键：真机实测值（USB 声卡 CARD 名 / Pi 网口）。
+    assert_eq!(
+        hardware.get("alsa_device").and_then(toml::Value::as_str),
+        Some("plughw:CARD=Device"),
+        "pi4b-host-esp32-classic alsa_device 漂移（Pi 真机 USB 声卡短名，不钉卡号）"
+    );
+    assert_eq!(
+        hardware.get("link_ifname").and_then(toml::Value::as_str),
+        Some("wlan0"),
+        "pi4b-host-esp32-classic link_ifname 漂移"
+    );
+    // 板侧十一键：与 profiles/esp32-mini.toml 逐值对齐（classic 板同一线束）。
+    for (k, expected) in [
+        ("i2c_sda", "21"),
+        ("i2c_scl", "22"),
+        ("adc_rail_pin", "34"),
+        ("uart2_tx", "18"),
+        ("uart2_rx", "19"),
+        ("ledc_pan", "32"),
+        ("ledc_tilt", "33"),
+        ("i2s_bclk", "4"),
+        ("i2s_sd", "27"),
+        ("i2s_ws", "26"),
+        ("cred_store", "nvs:rr3"),
+    ] {
+        assert_eq!(
+            hardware.get(k).and_then(toml::Value::as_str),
+            Some(expected),
+            "pi4b-host-esp32-classic hardware.{k} 漂移（应与 classic 线束同源）"
+        );
+    }
+
+    // 形态面：十六格绑定（与 distro 同构）+ 十六格在位。
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("pi4b-host-esp32-classic 缺 [bindings]");
+    assert_eq!(
+        bindings.len(),
+        16,
+        "pi4b-host-esp32-classic 绑定面应恰十六格"
+    );
+    for (slot, provider) in [
+        ("act.servo", "rr3-act"),
+        ("ui.face", "rr3-interact"),
+        ("audio.playback", "rr3-interact"),
+        ("audio.capture", "rr3-sense"),
+        ("cognition.llm", "rr3-brain"),
+    ] {
+        assert_eq!(
+            bindings.get(slot).and_then(toml::Value::as_str),
+            Some(provider),
+            "pi4b-host-esp32-classic bindings.{slot} 漂移"
+        );
+    }
+    let present = v
+        .get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("pi4b-host-esp32-classic 缺 [slots].present");
+    assert_eq!(
+        present.len(),
+        16,
+        "pi4b-host-esp32-classic 在位声明应恰十六格"
+    );
+
+    // 无本地 [[pin]]：Pi 本机不直连外设，板侧真值由 [hardware] 十一键经桥注入；
+    // host 档派生器只认主机词形（pwm<N>/gpiochip<N>...），板侧 ledc<N> 进派生即拒 boot。
+    assert!(
+        v.get("pin").is_none(),
+        "pi4b-host-esp32-classic 不应有 [[pin]]（板侧真值走 [hardware]，host 派生前件不适用）"
     );
 }
 

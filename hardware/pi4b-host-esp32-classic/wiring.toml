@@ -1,0 +1,21 @@
+# RockRobot3 装机接线档：pi4b-host-esp32-classic 机型（W2/T1，增补轮六 §4.3）。
+# 与 profiles/pi4b-host-esp32-classic.toml（host 档，[[pin]] 留空、板侧真值走 [hardware]
+# 十一键）配套的最小接线面：Pi 本体电源入一条。九字段语义、校验⑦ 判据、
+# 演练实例取值说明见 hardware/default/wiring.toml 头注。
+#
+# 为什么只有一条：本形态宿主侧不直连任何外设引脚——舵机/OLED/双麦的物理线束在
+# ESP32 classic 板上（board 侧档案归硬件目录，不进本档交叉面），Pi↔板只有一根
+# USB 线（FT232 数据链 + 板自供电），不是可控电源线组，故不立 [[wire]]。
+
+[[wire]]
+# J0 电源入：官方 5V/3A USB-C 适配器 → Pi 5V 轨（本档唯一下游线组；
+# 3A 主干 ≥ Pi 4B + USB 声卡峰值，⑦-c 的额定加总判据归批N2 消费）
+connector = "J0"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none"
+keyed = true
+rated_a = 3.0
+gnd_common = "star-1"
