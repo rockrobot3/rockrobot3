@@ -255,11 +255,15 @@ fn main() {
         // boot 画面 4 行全出（4 行扩行能力的 boot 直证；row3 由 oled_show 常刷，
         // boot 期先摆初始角度占位）
         // 行2 波特率从 board 真值拼出（批D② 起 921600，防字面量漂移）
+        // 行3 开机姿态从 board 常量拼出（同 行2 纪律：防字面量漂移）
         let boot_rows: [(String, &str); 4] = [
             ("ROCK3 PERIPH BASE".into(), "boot 行0写失败"),
             ("4-ROW OLED READY".into(), "boot 行1写失败"),
             (format!("UART2 CMD @{UART2_BAUD_HZ}"), "boot 行2写失败"),
-            ("P:060 T:098".into(), "boot 角度行写失败"),
+            (
+                format!("P:{BOOT_PAN_DEG:03} T:{BOOT_TILT_DEG:03}"),
+                "boot 角度行写失败",
+            ),
         ];
         let mut boot_ok = true;
         for (row, (text, msg)) in boot_rows.iter().enumerate() {
