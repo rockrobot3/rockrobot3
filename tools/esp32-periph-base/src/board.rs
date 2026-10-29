@@ -265,9 +265,11 @@ pub(crate) const LEDC_RES_BITS: Resolution = Resolution::Bits14;
 
 /// 5V 轨采样节拍（运行面自主节拍周期采样；占位值 **待真板标定**）。
 pub(crate) const RAIL_SAMPLE_PERIOD_MS: u64 = 500;
-/// 分压比分子：轨压 mV = 引脚 mV × NUM / DEN。**占位 1:1 待标定**——真板装上
-/// 分压网络（如 5V→≤3.3V 的 2:1 分压）后按实测比值回填。
-pub(crate) const ADC_RAIL_DIVIDER_NUM: u32 = 1;
+/// 分压比分子：轨压 mV = 引脚 mV × NUM / DEN。**2026-10-29 S3 真板装 10k/10k
+/// （舵机座 5V/GND 列 → 中点接 GPIO1）2:1 分压**：raw 4095 饱和态脱离（实测
+/// pin=2605mV ≈ 5.15V 轨/2）。无表标定（USB 名义值对拍 ±5% 档）；万用表到手
+/// ≤2% 对拍后方可接闸 [`RAIL_GATE_ARMED`]。
+pub(crate) const ADC_RAIL_DIVIDER_NUM: u32 = 2;
 /// 分压比分母（见 [`ADC_RAIL_DIVIDER_NUM`]）。
 pub(crate) const ADC_RAIL_DIVIDER_DEN: u32 = 1;
 /// ADC 衰减档（11dB：量程约 0–3.1V，配分压后覆盖 5V 轨）。
