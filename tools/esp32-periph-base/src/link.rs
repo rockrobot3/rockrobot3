@@ -113,6 +113,30 @@ fn drain_line_tail(uart: &mut UartDriver) {
     }
 }
 
+/// 帧面失败后的**残尾吞净**（[`crate::board::FRAME_DRAIN_MAX`] 上限，读到线静默一拍为止）。
+///
+/// 旧版 `frame_round` 在 `frame_recv` 失败时直接 return：失败前已消费的字节不可知
+/// （`TornHeader{got}` / `Header(..)` 都不给出"还剩多少"），剩余字节就留在 UART
+/// FIFO 里，下一轮控制面把它们当**行命令**解析——垃圾指令被执行，或刷出一串
+/// 没人请求的 `ERR`，控制面被残尾污染。
+///
+/// 唯一可靠的边界是"线静默认一拍"：帧内字节间隔是一字节时间（921600 下 10µs），
+/// 100ms 无字节即证明发送方已停手。代价是失败时最多停顿一拍；换来的是失败后
+/// 流面回到干净边界（连残尾之后紧跟的那帧一并丢弃——失败后字节流本就不可信，
+/// fail-closed 比猜帧边界安全）。
+pub(crate) fn drain_uart_quiet(uart: &mut UartDriver, max_bytes: usize) {
+    let mut scratch = [0u8; 64];
+    let mut done = 0usize;
+    while done < max_bytes {
+        let want = (max_bytes - done).min(scratch.len());
+        match uart.read(&mut scratch[..want], LINE_BYTE_TICKS) {
+            Ok(0) => return, // 静默一拍：残尾吞净
+            Ok(n) => done += n,
+            Err(_) => return,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 帧面（批C）：rr3.call 能力帧执行——宿主 rr-hal::esp32_uart 桥后端直连点名
 // ---------------------------------------------------------------------------
