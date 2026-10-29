@@ -176,7 +176,7 @@ pub(crate) const BOOT_TILT_DEG: u32 = RR3_AXIS_TILT.2 + 3;
 // 引脚真值（**注入面 + 装配对账锚**，批N4 件七(c) / 批N9 件五；批N35 件八按
 // target 分档）——接线总表已拆到 `board/pins_classic.rs` 与 `board/pins_s3.rs`：
 //   classic：UART2 18/19、I2C0 21/22、LEDC 32/33、I2S0 4/27/26、ADC 34；
-//   S3 N16R8：UART2 17/18、I2C0 8/9、LEDC 4/5、I2S0 6/15/7、ADC 1。
+//   S3 N16R8：UART2 41/42、I2C0 8/9、LEDC 4/5、I2S0 6/15/7、ADC 1。
 // **两套线束不可混用**：S3 的 GPIO26–37 被 16MB Flash / 8MB Octal PSRAM 占用。
 // **消费面数字引脚号不落常量**（批N4 件七(c) 定案维持）：I2C 自愈/轨测点的真值由
 // 宿主经 rr3.set_bindings 下发（esp32*-mini [hardware] → rrd RR3_HAL_BINDINGS →
