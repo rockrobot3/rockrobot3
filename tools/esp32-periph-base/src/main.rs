@@ -162,11 +162,12 @@ fn main() {
         .baudrate(Hertz(UART2_BAUD_HZ))
         .tx_fifo_size(UART2_TX_RING);
     // 指令面引脚按 target 分档（真值表见 board/pins_classic.rs 与 board/pins_s3.rs）：
-    // classic 18/19；S3 N16R8 17/18（26–37 被 Flash/PSRAM 占用）。
+    // classic 18/19；S3 N16R8 41/42（26–37 被 Flash/PSRAM 占用；17/18 在本板双向不通，
+    // 2026-10-29 真板订正，详见 pins_s3.rs 头注）。
     #[cfg(feature = "esp32")]
     let (uart2_tx, uart2_rx) = (peripherals.pins.gpio18, peripherals.pins.gpio19);
     #[cfg(feature = "esp32s3")]
-    let (uart2_tx, uart2_rx) = (peripherals.pins.gpio17, peripherals.pins.gpio18);
+    let (uart2_tx, uart2_rx) = (peripherals.pins.gpio41, peripherals.pins.gpio42);
     let uart = UartDriver::new(
         peripherals.uart2,
         uart2_tx,
