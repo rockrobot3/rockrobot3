@@ -67,7 +67,18 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
         }
         Job::Move { pan, tilt } => {
             let want = |v: Option<u32>| v.map_or_else(|| "-".into(), |d| d.to_string());
-            if rt_move(ph, pan, tilt) {
+            let ok = rt_move(ph, pan, tilt);
+            // **提交硬件真值**（稳健性修复，与命令面"不写前记账"配对）：无论成功
+            // 与否都把运行面 ledger（`ph.pan_deg/tilt_deg`，只有 `servo_set` 成功
+            // 才推进）镜像进共享状态——成功 = 目标角，失败 = 真实残留角。于是
+            // `INFO`/帧面读到的角永远是"已到达过的角"，且后续移动的起点与上报一致
+            // （旧版：命令面先写 `st`、失败不回滚，两份账本分裂 = 上报假姿态）。
+            {
+                let mut b = lock_bus(bus);
+                b.st.pan_deg = ph.pan_deg;
+                b.st.tilt_deg = ph.tilt_deg;
+            }
+            if ok {
                 // 姿态到位回读（**硬件侧证据**：直接读 LEDC 寄存器换算，不听记账角；
                 // 只回读本次请求的轴——未动的轴 duty 可能为 0，换算无意义）。
                 let rd = |axis: Axis| {
@@ -276,6 +287,10 @@ fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
             // 口径——不刷 outbox 打扰宿主，Move 作业失败才回包）。
             let mut b = lock_bus(bus);
             b.st.move_fail_events = b.st.move_fail_events.saturating_add(1);
+            // 决策段先推进了 `st` 角度，驱动失败即**回填真实角**（不冒领）：
+            // 与 `Job::Move` 的提交口径一致，避免自主扫摆场景的账本分裂。
+            b.st.pan_deg = ph.pan_deg;
+            b.st.tilt_deg = ph.tilt_deg;
         }
     }
     if refresh {
