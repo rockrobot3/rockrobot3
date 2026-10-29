@@ -66,6 +66,13 @@ pub(crate) const LINE_BYTE_TICKS: u32 = 10;
 /// 不把半行拼进下一条命令）。
 pub(crate) const LINE_GAP_BUDGET: u32 = 20;
 
+/// 帧面失败后的**残尾排水上限**（字节）：收帧失败时已消费的字节数不可知
+/// （`TornHeader{got}` 只知道拿到了多少、`Header(..)` 一个字节都不说明），唯一
+/// 可靠的边界是"线静默认一拍"（[`LINE_BYTE_TICKS`]）。上限只是防呆护栏——正常
+/// 一帧 ≤ 128B 头 + 数千字节载荷，4096 远大于任何合法残尾，触到上限即放弃
+/// （残尾留给控制面按行面解析也无非一串 ERR，不会挂死）。
+pub(crate) const FRAME_DRAIN_MAX: usize = 4096;
+
 /// 硬件作业队列上限（**防宿主高频指令把堆撑爆**）：满时优先折叠——同形 Move
 /// （同轴集合）就地改写目标角，`RedrawOled` 幂等折叠；仍满则丢最旧 Move（新的
 /// 目标优先，陈旧目标不再执行）并计 `job_dropped`（`INFO` 观测面）。

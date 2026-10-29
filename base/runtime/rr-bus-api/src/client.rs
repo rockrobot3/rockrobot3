@@ -45,6 +45,15 @@ use serde_json::{json, Value};
 /// 注册应答等待上界：注册是连接的第一件事，卡死在这里没有观察价值
 const RR3_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// 心跳**连续失败拍数**上界（超限才退出交给 supervisor 裁定）。
+///
+/// 旧版单拍失败即 `process::exit(1)`：一次 5s RPC 超时（rrd 瞬时负载、GC/STW、
+/// 调度抖动、对端短暂忙）就把整个模块杀掉重启——重启本身又要重注册，故障被
+/// 放大成周期性抖动。心跳的语义是"我还活着"，短时失联应由下一拍自然修复；
+/// 连丢 3 拍（≈3×心跳周期 + 3×5s 超时上界）才是真失联，此时退出仍由
+/// restart_policy 接管。
+const RR3_HEARTBEAT_MAX_MISSES: u32 = 3;
+
 /// 从 manifest 文本里取模块身份（name + heartbeat_ms）。
 /// 只取客户端自己需要的两个字段：**校验是 rrd 的事**（rr-registry 的校验器 +
 /// conn.rs 的注册门禁），客户端不重复也不抢先——manifest 非法时注册会被 rrd
@@ -340,59 +349,77 @@ impl Rr3BusClient {
             .rr3_mark_registered(task, tb.rr3_now_ms());
 
         // 心跳线程：拍点真值在机制核状态机（相对节拍，逐拍 +hb）；std 驱动器
-        // 只做平台事——sleep 等拍点、组装/发帧。被拒/超时 = 进程退出，交给
-        // supervisor 裁定。每拍先取计数快照：非空才带 `counters` 字段（可选
-        // append，旧 rrd 忽略未知字段，双向兼容；空映射不带，保持与无上报
-        // 模块同一条线上形状）。
+        // 只做平台事——sleep 等拍点、组装/发帧。被拒/超时 = 连续失败到上界才
+        // 退出，交给 supervisor 裁定（单拍抖动由下一拍自愈，见
+        // [`RR3_HEARTBEAT_MAX_MISSES`]）。每拍先取计数快照：非空才带 `counters`
+        // 字段（可选 append，旧 rrd 忽略未知字段，双向兼容；空映射不带，保持与
+        // 无上报模块同一条线上形状）。
         let hb_inner = inner.clone();
         std::thread::Builder::new()
             .name("rr3-bus-heartbeat".into())
-            .spawn(move || loop {
-                let Some(wait_ms) = hb_inner
-                    .rt
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .rr3_next_beat_wait_ms(tb.rr3_now_ms())
-                else {
-                    return; // 断开（Down）即停拍——"不装活着"同一裁定
-                };
-                std::thread::sleep(Duration::from_millis(wait_ms));
-                if hb_inner.stop.load(Ordering::Relaxed) {
-                    return;
+            .spawn(move || {
+                let mut misses: u32 = 0;
+                loop {
+                    let Some(wait_ms) = hb_inner
+                        .rt
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .rr3_next_beat_wait_ms(tb.rr3_now_ms())
+                    else {
+                        return; // 断开（Down）即停拍——"不装活着"同一裁定
+                    };
+                    std::thread::sleep(Duration::from_millis(wait_ms));
+                    if hb_inner.stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let now_ms = tb.rr3_now_ms();
+                    let due = hb_inner
+                        .rt
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .rr3_heartbeat_due(now_ms);
+                    if !due {
+                        continue; // 提前醒（信号打断等），回睡
+                    }
+                    let delta = hb_inner.rr3_counters_delta();
+                    let params = if delta.is_empty() {
+                        json!({})
+                    } else {
+                        json!({ "counters": delta })
+                    };
+                    if hb_inner
+                        .rr3_call_inner(
+                            hb_inner.rr3_task(),
+                            "rr3.heartbeat",
+                            params,
+                            Duration::from_secs(5),
+                        )
+                        .is_err()
+                        && !hb_inner.stop.load(Ordering::Relaxed)
+                    {
+                        // 宽限：连续失败到上界才退出（见 RR3_HEARTBEAT_MAX_MISSES）。
+                        // 不记 `rr3_heartbeat_sent` → 下一拍立即到期重试，间隔由 RPC
+                        // 超时（5s）兜住，不空转。
+                        misses += 1;
+                        if misses >= RR3_HEARTBEAT_MAX_MISSES {
+                            eprintln!(
+                                "rr3-bus: 心跳连续 {misses} 拍失败，退出（supervisor 按 restart_policy 裁定）"
+                            );
+                            std::process::exit(1);
+                        }
+                        eprintln!(
+                            "rr3-bus: 心跳失败 第 {misses}/{RR3_HEARTBEAT_MAX_MISSES} 拍（不退出，下拍重试）"
+                        );
+                        continue;
+                    }
+                    // 成功即清零宽限计数
+                    misses = 0;
+                    hb_inner
+                        .rt
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .rr3_heartbeat_sent(now_ms);
                 }
-                let now_ms = tb.rr3_now_ms();
-                let due = hb_inner
-                    .rt
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .rr3_heartbeat_due(now_ms);
-                if !due {
-                    continue; // 提前醒（信号打断等），回睡
-                }
-                let delta = hb_inner.rr3_counters_delta();
-                let params = if delta.is_empty() {
-                    json!({})
-                } else {
-                    json!({ "counters": delta })
-                };
-                if hb_inner
-                    .rr3_call_inner(
-                        hb_inner.rr3_task(),
-                        "rr3.heartbeat",
-                        params,
-                        Duration::from_secs(5),
-                    )
-                    .is_err()
-                    && !hb_inner.stop.load(Ordering::Relaxed)
-                {
-                    eprintln!("rr3-bus: 心跳失败，退出（supervisor 按 restart_policy 裁定）");
-                    std::process::exit(1);
-                }
-                hb_inner
-                    .rt
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .rr3_heartbeat_sent(now_ms);
             })
             .map_err(|e| format!("起心跳线程失败: {e}"))?;
 
