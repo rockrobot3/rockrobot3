@@ -125,12 +125,10 @@ fn frame_handle_servo(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, Stri
             let deg = v.as_u64().ok_or_else(|| format!("angle_deg 非法: {v}"))? as u32;
             let d = axis_check(axis, deg)?;
             {
+                // **不写前记账**：角度只由运行面在作业成功后镜像硬件真值（与行面
+                // PAN/TILT 同口径）——读 `angle_deg` 永不复述没到达的角。
                 let mut b = lock_bus(bus);
                 b.st.wander_on = false; // 外部点名优先，自主扫摆让位
-                match axis {
-                    Axis::Pan => b.st.pan_deg = d,
-                    Axis::Tilt => b.st.tilt_deg = d,
-                }
             }
             push_job(
                 bus,

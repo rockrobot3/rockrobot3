@@ -54,6 +54,22 @@ pub(crate) const OLED_COLS: usize = 21;
 pub(crate) const OLED_ROWS: usize = 4;
 /// 指令行缓冲上限（超出整行丢弃回 ERR，fail-closed 不截半执行）。
 pub(crate) const LINE_CAP: usize = 128;
+
+/// 收行**字节间超时**（FreeRTOS tick；本平台 1 tick ≈ 10ms）：`read_line` 逐字节读
+/// 用它而非 portMAX_DELAY——主机发半行后断线/复位、或线上出现孤立字节时，控制面
+/// 此后每字节最多等 100ms 即回轮首，不再永久挂死（旧版 `u32::MAX` 是唯一的整面
+/// 锁死路径）。100ms 远大于正常连续发送的字节间隔，不误伤正常收行。
+pub(crate) const LINE_BYTE_TICKS: u32 = 10;
+
+/// 半行**无进展预算**（连续超时拍数，≈2.0s）：人工逐字符敲命令的间隔远短于此；
+/// 超预算即判半行断线，丢弃残行并由控制面回 `ERR line timeout`（fail-closed，
+/// 不把半行拼进下一条命令）。
+pub(crate) const LINE_GAP_BUDGET: u32 = 20;
+
+/// 硬件作业队列上限（**防宿主高频指令把堆撑爆**）：满时优先折叠——同形 Move
+/// （同轴集合）就地改写目标角，`RedrawOled` 幂等折叠；仍满则丢最旧 Move（新的
+/// 目标优先，陈旧目标不再执行）并计 `job_dropped`（`INFO` 观测面）。
+pub(crate) const JOB_CAP: usize = 8;
 /// 指令/心跳类线程的栈面（板上实测实锤 16KB 运行下限，哨兵同款，勿再调低）。
 pub(crate) const THREAD_STACK: usize = 16384;
 /// 轴间整定（**串行降级**：先 pan 到位 → 等这么久 → 再 tilt）。SG90 空载约
@@ -134,6 +150,14 @@ pub(crate) const MIC_GAIN: i64 = 8;
 /// （[mic] 采样率 16.5kHz → 4.5kHz 崩塌实录）。16KB ≥ 单分片整帧 ≈11.4KB：
 /// write 降为 memcpy 入环、ISR/驱动任务异步排水，组帧线程不被线速拖住。
 pub(crate) const UART2_TX_RING: usize = 16384;
+
+/// UART2 接收环形缓冲字节数（rx_fifo_size）。**真板实锤（2026-10-30 稳健性审计）**：
+/// 旧版只管 TX 环，RX 环吃缺省 **256B**——宿主一次性写多条命令（60 条 ≈ 600B，脚本
+/// 回放/重连补发）时超出即**静默丢字节**：实测 60 条连发只有 45 条被解析回包（丢
+/// 15 条 ≈ 150B），且板上无任何计数可查（宿主侧只表现为'命令没生效'）。4096B ≈
+/// 400 命令字符，覆盖任何合理突发；RX 溢出本身不可枚举（IDF 简单读面无溢出计数），
+/// 故用"把窗口开到远大于突发量"的堵法 + 半行超时（[LINE_GAP_BUDGET]）兜残行。
+pub(crate) const UART2_RX_RING: usize = 4096;
 
 // ---------------------------------------------------------------------------
 // 舵机换算（50Hz / 14bit：1 tick = 20ms / 16384 = 1.2207µs）——**策略量**：

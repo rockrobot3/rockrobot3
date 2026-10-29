@@ -108,7 +108,7 @@ use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_p
 use crate::board::{
     BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, OLED_ADDR,
     RR3_BIND_LEDC_PAN, RR3_BIND_LEDC_TILT, RR3_BIND_UART2_RX, RR3_BIND_UART2_TX, THREAD_STACK,
-    UART2_BAUD_HZ, UART2_TX_RING,
+    UART2_BAUD_HZ, UART2_RX_RING, UART2_TX_RING,
 };
 use crate::commands::cmd_loop;
 use crate::face::expr_eye_base;
@@ -158,9 +158,12 @@ fn main() {
     // TX 环 = UART2_TX_RING（board 策略面）：缺省 256B 下整帧写 11.4KB 同步等线速
     // 排空 ~120ms（921600），mic 组帧线程被写调用饿死 → I2S DMA 环溢出丢数（真板
     // 实录 [mic] 采样率崩塌）。TX 环 ≥ 单帧后 write 降为 memcpy 入环、异步排水。
+    // RX 环 = UART2_RX_RING：缺省 256B 在宿主突发多命令时静默丢字节（2026-10-30
+    // 实测 60 条连发丢 15 条），开到 4096B 后突发不再溢出。
     let uart_config = UartConfig::new()
         .baudrate(Hertz(UART2_BAUD_HZ))
-        .tx_fifo_size(UART2_TX_RING);
+        .tx_fifo_size(UART2_TX_RING)
+        .rx_fifo_size(UART2_RX_RING);
     // 指令面引脚按 target 分档（真值表见 board/pins_classic.rs 与 board/pins_s3.rs）：
     // classic 18/19；S3 N16R8 41/42（26–37 被 Flash/PSRAM 占用；17/18 在本板双向不通，
     // 2026-10-29 真板订正，详见 pins_s3.rs 头注）。
