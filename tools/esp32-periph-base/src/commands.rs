@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size};
 
-use crate::board::{OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST};
+use crate::board::{FRAME_DRAIN_MAX, OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST};
 use crate::face::expr_eye_base;
 use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
-use crate::link::{read_line, reply, UartIo};
+use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
 use crate::oled::glyph;
 use crate::periph::CtlUart;
 use crate::ports::Rr3BoardClock;
@@ -24,17 +24,23 @@ use crate::state::{
 /// （校验/改状态/推作业）→ Response 回帧。UartIo 只在收/发两段活着；执行段无硬件
 /// 借用（作业已推给运行面），控制面保持轻。
 fn frame_round(io: &mut CtlUart, bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, first: u8) {
-    let req = {
+    let recv = {
         let mut uio = UartIo {
             uart: &mut io.uart,
             pre: Some(first),
         };
-        match frame_recv(&mut uio) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[periph] 帧面丢弃: {e}");
-                return;
-            }
+        frame_recv(&mut uio)
+    };
+    let req = match recv {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[periph] 帧面丢弃: {e}");
+            // **残尾吞净**（稳健性修复）：失败时已消费多少字节不可知（TornHeader/
+            // Header 都不给出剩余量），不吞净就会让残尾被下一轮当行命令解析——
+            // 垃圾指令执行 / 刷一串无人请求的 ERR。读到线静默一拍为止，上限
+            // FRAME_DRAIN_MAX 防呆（见 drain_uart_quiet 注）。
+            drain_uart_quiet(&mut io.uart, FRAME_DRAIN_MAX);
+            return;
         }
     };
     println!("[periph] 帧面 id={} topic=\"{}\"", req.id, req.topic);
