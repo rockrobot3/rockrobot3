@@ -128,6 +128,12 @@ pub(crate) struct PeriphState {
     /// `selfheal_skipped` 静默口径——Move 失败另走 outbox `ERR` 行回宿主，SCAN
     /// 失败已有 outbox 回包不重复计）。
     pub(crate) move_fail_events: u32,
+    /// 作业队列满/折叠导致的丢弃累计（稳健性观测面）：`JOB_CAP` 满时丢最旧
+    /// Move 或拒收新作业即计一次——非零且持续增长 = 宿主下指令快于舵机消化速率。
+    pub(crate) job_dropped: u32,
+    /// 应答整行未发完的累计（TX 环满/写错；`INFO` 观测）：非零即存在"宿主收不到
+    /// 回包"的静默丢应答，与 `audio` 上行抢带宽相关。
+    pub(crate) reply_drop: u64,
 }
 
 impl PeriphState {
@@ -164,6 +170,8 @@ impl PeriphState {
             selfheal_skipped: 0,
             binding_mismatch: 0,
             move_fail_events: 0,
+            job_dropped: 0,
+            reply_drop: 0,
         }
     }
 
@@ -306,8 +314,54 @@ pub(crate) fn lock_bus(bus: &Arc<Mutex<Bus>>) -> std::sync::MutexGuard<'_, Bus> 
 }
 
 /// 控制面推一件作业（唤醒运行面；运行面每轮取队列头执行）。
+///
+/// **有界 + 折叠**（稳健性修复）：宿主以快于舵机消化速率（2°/20ms，60° 需 600ms，
+/// ≈1.7 指令/s 以上）连发时，旧版无界 `VecDeque` 会一路涨到堆耗尽（alloc 失败 =
+/// panic/复位），且陈旧目标按序执行（宿主以为的当前位置几秒后才到）。规则：
+/// 1. `RedrawOled` 幂等（依 `st` 重绘）——队列里已有一件即折叠掉本件；
+/// 2. 同形 `Move`（被动的轴集合相同）就地改写目标角——后到者为准，不追加；
+/// 3. 仍到 `JOB_CAP`：丢最旧的 `Move` 给新目标让位；非 Move 则拒收本件；
+///    两者都计 `job_dropped`（`INFO` 观测）。
 pub(crate) fn push_job(bus: &Arc<Mutex<Bus>>, job: Job) {
-    lock_bus(bus).jobs.push_back(job);
+    let mut b = lock_bus(bus);
+    if matches!(job, Job::RedrawOled) && b.jobs.iter().any(|j| matches!(j, Job::RedrawOled)) {
+        return;
+    }
+    if let Job::Move { pan, tilt } = &job {
+        let same_shape = |j: &Job| match j {
+            Job::Move { pan: qp, tilt: qt } => {
+                qp.is_some() == pan.is_some() && qt.is_some() == tilt.is_some()
+            }
+            _ => false,
+        };
+        if let Some(queued) = b.jobs.iter_mut().find(|j| same_shape(j)) {
+            if let Job::Move { pan: qp, tilt: qt } = queued {
+                if pan.is_some() {
+                    *qp = *pan;
+                }
+                if tilt.is_some() {
+                    *qt = *tilt;
+                }
+            }
+            return;
+        }
+    }
+    if b.jobs.len() >= crate::board::JOB_CAP {
+        let oldest_move = b.jobs.iter().position(|j| matches!(j, Job::Move { .. }));
+        match (matches!(job, Job::Move { .. }), oldest_move) {
+            // 新目标优先：让位给新的 Move
+            (true, Some(pos)) => {
+                b.jobs.remove(pos);
+            }
+            _ => {
+                // 非 Move 且队列已满，或队里没有可让位的 Move：拒收本件
+                b.st.job_dropped = b.st.job_dropped.saturating_add(1);
+                return;
+            }
+        }
+        b.st.job_dropped = b.st.job_dropped.saturating_add(1);
+    }
+    b.jobs.push_back(job);
 }
 
 /// 运行面 → 控制面的异步回包行（SCAN 逐点等；控制面每轮取空）。
@@ -320,7 +374,13 @@ pub(crate) fn drain_outbox(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>
     loop {
         let line = lock_bus(bus).outbox.pop_front();
         match line {
-            Some(l) => reply(uart, &l),
+            Some(l) => {
+                if !reply(uart, &l) {
+                    // 整行未发完（TX 环满/写错）：计数观测，不再静默
+                    let mut b = lock_bus(bus);
+                    b.st.reply_drop = b.st.reply_drop.saturating_add(1);
+                }
+            }
             None => break,
         }
     }
@@ -336,8 +396,13 @@ pub(crate) fn drain_audio(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>)
     loop {
         let frame = lock_bus(bus).audio_q.pop_front();
         let Some(f) = frame else { break };
-        if uio.rr3_uart_write_all(&f) == f.len() {
+        let n = uio.rr3_uart_write_all(&f);
+        if n == f.len() {
             lock_bus(bus).st.audio_sent += 1;
+        } else {
+            // 写不全：线上半帧（帧层拒收 + recorder 端 seq 断档对账），此处点名，
+            // 不再"零日志地当没发生"。
+            eprintln!("[periph] 音频分片写不全 {n}/{}", f.len());
         }
     }
 }
