@@ -890,10 +890,25 @@ pub fn rr3_read_rpc(c: &mut RrdClient) -> Value {
 }
 
 /// 第一条 `rr3-runtime/module/state` 广播且 module/phase 匹配，返回体
+///
+/// **按到达序取第一帧**。要判"某一世的帧"（重启用例里同一 module/phase 会出现在
+/// 两世）必须用 [`rr3_read_state_task`]——否则队列里一条上一世的残留帧就会当成
+/// 本世的，负载下表现为偶发红（实测 `e2e_spawn_restart` 即此形态）。
 pub fn rr3_read_state(c: &mut RrdClient, module: &str, phase: &str) -> Value {
+    rr3_read_state_task(c, module, phase, None)
+}
+
+/// 同 [`rr3_read_state`]，但可要求 `src_task` 必须等于给定值（`None` = 不限定）。
+/// 这是"按身份认帧、不按到达序猜"的可执行版本：不匹配的帧被跳过而不是当成结果。
+pub fn rr3_read_state_task(
+    c: &mut RrdClient,
+    module: &str,
+    phase: &str,
+    task: Option<u64>,
+) -> Value {
     let f = rr3_read_where(
         c,
-        &format!("state 广播 {module}/{phase}"),
+        &format!("state 广播 {module}/{phase}（task={task:?}）"),
         |f| match rr3_body_split(&f.payload) {
             Ok((Rr3PayloadType::Notification, body)) => {
                 let Ok(v) = serde_json::from_slice::<Value>(&body) else {
@@ -902,6 +917,7 @@ pub fn rr3_read_state(c: &mut RrdClient, module: &str, phase: &str) -> Value {
                 v["topic"] == "rr3-runtime/module/state"
                     && v["module"] == module
                     && v["phase"] == phase
+                    && task.map_or(true, |t| v["src_task"].as_u64() == Some(t))
             }
             _ => false,
         },
