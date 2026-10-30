@@ -1746,6 +1746,19 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   + OLED 重绘）；探针自身量了两版假读数（ack 等待 1.0s / INFO 等待 1.0s 把
   全部"到位时间"抬成 1016ms）——计时口径必须让等待窗口 < 被测量，教训入探针
   注释。
+  **V7 源码审查补完（2026-10-30，部分收口）**：
+  ① 六模块**非骨架**（源码行数盘点）：rr3-brain 4274 / rr3-act 1997 /
+     rr3-sense 1406 / rr3-interact 1259 / rr3-power 1005 / rr3-connect 896，
+     均有 dispatch/boot/main 完整结构。
+  ② 音频通道契约**自洽**（批N28 记录的"缺省与实机相反"结构性闭合）：esp32
+     HAL 自带 `RR3_ESP32_AUDIO_CHANNELS=2` 常量并显式校验（esp32audio.rs:80,
+     :322），sense 对 channels≥2 分配判向窗 ring、双麦原始帧下混**前**入 ring、
+     下混 mono 进总线（dispatch.rs:130-133, 232-239, 345-346）——总线事件恒
+     channels=1，brain 消费面零改动；`RR3_AUDIO_CFG_16K_MONO16` 只是 legacy
+     缺省常量，esp32 路径不用它。
+  ③ rrd 面：conn.rs 写帧入口带 payload_crc32（与板侧 CRC32 定档一致），
+     registry/supervisor 有注册上限、重启退避、失败上限。**深度审查（锁序/
+     无界资源逐行）未完成**，归后续窗口。
   `cmd_loop`（每轮先 `drain_outbox`/`drain_audio` 再窥视一字节、1-tick 空口回轮首）、
   `read_line`（字节间超时 + 半行预算 + 超长行先吞尾再回 ERR）、`drain_line_tail`、
   `frame_round` 的残尾吞净、`push_job`（同形状 Move 合批为最新目标 + 队满优先让位新 Move）、
