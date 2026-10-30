@@ -1837,3 +1837,32 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
      ratio/ILD 供账簿积累。工程面：main() guard 可导入化，window_stats/
      loudest_window/quietest_window 可离线回放复用；full_smoke 退场 FACE idle
      （OLED 文本模式残留根治，用户观测的"Hello 字样+舵机参数"即此）。
+
+**V7 rrd 深度审查收口（2026-10-30 深夜轮：锁序 + 无界资源逐项）**：
+  - **锁序**：全守护共用一把注册表锁 + 每连接 `Mutex<UnixStream>`（一帧一次
+    write_all 整帧原子）+ counters gate 独立锁，三把锁**无嵌套获取点**——
+    fanout 走 channel send 不在注册表锁内写慢 socket（registry.rs:927-934，
+    这正是"慢连接不拖死全表"的关键构造）；match 守卫 `MutexGuard` 延寿陷阱
+    三处立牌给硬规矩（conn.rs:302/:956、supervisor.rs:266——先 let 绑再
+    match）；锁中毒单点口径（rr3_lock → into_inner，lib.rs:228）。
+  - **无界资源逐项**：日志环有界（cap 512，push/回填双路裁剪，lib.rs:148-205）；
+    落盘日志 append 不轮转（磁盘项，批N4 有意保留）；per-conn fanout channel
+    `mpsc::channel` **无界但僵尸回收路径已通**（watchdog expire 置 `tx=None`
+    → writer 终结 → fd 释放，conn.rs:1073-1081 注释把成立前提写清）；supervisor
+    计划队列无界但速率=重启事件（可忽略）。
+  - **carry 两条（不在本轮改）**：① fanout 通道有界化 + 丢弃最旧 + 断连
+    （Task 10 carry 原样在——通道形状是行为改动，需独立判据与测试，风险窗口
+    = writer 阻塞至心跳过期，量级 MB 级）；② 日志文件轮转。
+  - **结论：rrd 无生产阻碍**；V7 全部子项（六模块非骨架、音频通道契约、rrd
+    深审）至此收口。
+
+**遗留队列（白班，按优先序）**：
+  1. 阵列声学衰减 ~30dB 物理检查（V3 深夜轮⑥）：开壳目检两麦装配位/声孔
+     朝向——它同时压制定向 ILD 幅度与喊话信噪比，是拾音定向恢复转向的前提。
+  2. 定向锚点重建：白天用 voice_respond v7.2（触发器已根治）采带真值标注的
+     定向喊话（左右各 ≥3 次有效触发），ILD 锚点成形后恢复两态转向。
+  3. V5 CRC 归因（3/4691）：先给 rr3-audio-rec FrameAssembler 加 crc_bad
+     计数（现无校验，grep crc 零命中）→ build-onboard → 10min 同负载复验。
+  4. 「你好洛克」ASR/KWS 未建（喊任何响声都会回应的诚实口径不变）。
+  5. RAIL 分压测点未接线（full_smoke RAIL raw=0，硬件项）。
+  6. 表情胶囊眼观感打磨（用户反馈"表情符号做得并不好"）。
