@@ -1,6 +1,6 @@
 """写前记账 / 队列上限探针（长行程 120→60 的即时 INFO 判据）。
 
-用法: python3 probe2.py    （缺省 2M 档；换档 env `RR3_PROBE_BAUD`、换口
+用法: python3 probe2.py    （缺省 1.5M 档；换档 env `RR3_PROBE_BAUD`、换口
 env `RR3_PROBE_TTY`）
 
 A) PAN 120 稳到后发 PAN 60，1ms 内 INFO 应报 **120**（作业未写前记账则假报 60）；
@@ -20,7 +20,7 @@ def baud_of(name):
     raise SystemExit("未知波特率档名: " + name)
 
 
-BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B2000000"))
+BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B1500000"))
 
 fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
 a = termios.tcgetattr(fd)

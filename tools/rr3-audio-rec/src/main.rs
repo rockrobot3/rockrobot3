@@ -1,8 +1,8 @@
 //! rr3-audio-rec —— 批D③ 音频上行收流端（宿主；0.0.5 增补轮五 全案 §4 批D 判据①）。
 //!
 //! 链路：板面 INMP441 双麦（mic.rs 分片组帧，`rr3-sense/audio/pcm` Event @
-//! trace_id=0 / src=2 / dst=1）→ UART2 2M（板固件 `board::UART2_BAUD_HZ` 同档；
-//! 2026-10-30 自 921600 提档，音频 85KB/s 占线从 ~95% 降到 ~34%）→
+//! trace_id=0 / src=2 / dst=1）→ UART2 1.5M（板固件 `board::UART2_BAUD_HZ` 同档；
+//! 2026-10-30 自 921600 提档定档，音频 85KB/s 占线从 ~95% 降到 ~46%）→
 //! 本件收流：`AUDIO ON` 行命令起流 → dst=1 门 → Event payload → topic 门 →
 //! b64 解码 → 累积 PCM → `AUDIO OFF` → 按**实测采样率**写 wav（双通道 s16le）。
 //!
@@ -41,7 +41,7 @@
 //!   是最外层兜底；只管武装后的收流期，重连骑行期解武装不误触发。
 //!
 //! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
-//! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=2000000（板面 2026-10-30 提档
+//! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=1500000（板面 2026-10-30 定档
 //! 实测档，与固件 `board::UART2_BAUD_HZ` 同值；
 //! 波特率仍过 rr-ipc 档位表白名单，不预设动物园）。
 //! 退出码：0=收兵；1=开口/握手/0 分片；2=参数错；3=看门狗停滞恢复；4=重连失败/
@@ -109,7 +109,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut device: Option<String> = None;
     let mut out: Option<PathBuf> = None;
     let mut secs = 30u64;
-    let mut baud = 2_000_000u32;
+    let mut baud = 1_500_000u32;
     let mut doa = false;
     let mut i = 0;
     while i < argv.len() {
@@ -583,7 +583,7 @@ fn main() {
     let args = match parse_args(&argv) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("rr3-audio-rec: {e}\n\n用法: rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]\n缺省 out=rr3-audio-<unix秒>.wav secs=30 baud=2000000（板面 2026-10-30 提档档）；--doa 逐 1s 窗 ILD 出角（批D⑤ 冒烟）");
+            eprintln!("rr3-audio-rec: {e}\n\n用法: rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]\n缺省 out=rr3-audio-<unix秒>.wav secs=30 baud=1500000（板面 2026-10-30 定档）；--doa 逐 1s 窗 ILD 出角（批D⑤ 冒烟）");
             std::process::exit(2);
         }
     };
@@ -970,7 +970,7 @@ mod tests {
             parse_args(&argv.iter().map(|s| s.to_string()).collect::<Vec<_>>())
         };
         let a = ok(&["/dev/cu.usbserial-0001"]).unwrap();
-        assert_eq!(a.baud, 2_000_000, "缺省与固件 board::UART2_BAUD_HZ 同档");
+        assert_eq!(a.baud, 1_500_000, "缺省与固件 board::UART2_BAUD_HZ 同档");
         assert_eq!(a.secs, 30);
         let a = ok(&["/dev/tty", "--baud", "115200", "--secs", "5"]).unwrap();
         assert_eq!(a.baud, 115200);
