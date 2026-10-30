@@ -1736,6 +1736,16 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   阵列级定向（真 TDOA）需换麦间距或提采样率，记硬件约束（GCC-PH 类超本轮范围）。
   **系统体检同轮完成**：full_smoke 35/35、frame_probe 10/10、音频 240 帧
   CRC 不符=0——板侧全部模块正常；`RAIL raw=0` = 5V 分压测点未接线（硬件项）。
+  **V4 舵机运动正确性（2026-10-30，新增 `servo_motion.py` 探针第十支，PASS）**：
+  四相判据全绿——A 单轴到位回读（PAN/TILT 各四点扫行程，逐点轮询 INFO 至
+  `pan=/tilt=` 等于目标角；`st` 只由运行面在作业成功后镜像硬件真值，INFO 等于
+  目标 = 真到位而非控制面复述）；B 连续动作 30 条 PAN 75/105 @50ms 连发
+  ack 30/30、最终角 = 最后一条（合批语义正确）；C SERVO 双轴串行到位；
+  D WANDER 让位（外部点名后 wander 自动 off）。对账 `job_drop/reply_drop`
+  增量全零。**诚实到位时间**：常规动作 ≤264ms、60° 大行程 727ms（含作业队列
+  + OLED 重绘）；探针自身量了两版假读数（ack 等待 1.0s / INFO 等待 1.0s 把
+  全部"到位时间"抬成 1016ms）——计时口径必须让等待窗口 < 被测量，教训入探针
+  注释。
   `cmd_loop`（每轮先 `drain_outbox`/`drain_audio` 再窥视一字节、1-tick 空口回轮首）、
   `read_line`（字节间超时 + 半行预算 + 超长行先吞尾再回 ERR）、`drain_line_tail`、
   `frame_round` 的残尾吞净、`push_job`（同形状 Move 合批为最新目标 + 队满优先让位新 Move）、
