@@ -678,6 +678,7 @@ mod tests {
                                 src_task: RR3_TASK_RRD,
                                 dst_task: 7,
                                 payload_len: payload.len() as u32,
+                                payload_crc32: rr_ipc::rr3_crc32(&payload),
                             },
                             payload,
                         };
@@ -703,6 +704,7 @@ mod tests {
                             src_task: RR3_TASK_RRD,
                             dst_task: 7,
                             payload_len: payload.len() as u32,
+                            payload_crc32: rr_ipc::rr3_crc32(&payload),
                         },
                         payload,
                     };
@@ -940,6 +942,7 @@ mod tests {
                     src_task: RR3_TASK_RRD,
                     dst_task: 7,
                     payload_len: payload.len() as u32,
+                    payload_crc32: rr_ipc::rr3_crc32(&payload),
                 },
                 payload,
             };

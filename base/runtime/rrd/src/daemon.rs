@@ -159,6 +159,7 @@ pub fn rr3_state_frame(name: &str, phase: &str, src_task: u64) -> Rr3Frame {
             src_task: RR3_TASK_RRD,
             dst_task: RR3_BROADCAST_DST_TASK,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     }
@@ -187,6 +188,7 @@ pub fn rr3_system_power_frame(reason: &str, percent: u64, voltage_mv: u64) -> Rr
             src_task: RR3_TASK_RRD,
             dst_task: RR3_BROADCAST_DST_TASK,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     }

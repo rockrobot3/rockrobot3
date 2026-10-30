@@ -109,6 +109,7 @@ fn send_response(c: &mut RrdClient, trace_id: u64, src: u64, id: u64, result: &V
                 src_task: src,
                 dst_task: rr_bus::RR3_TASK_RRD,
                 payload_len: payload.len() as u32,
+                payload_crc32: rr_ipc::rr3_crc32(&payload),
             },
             payload,
         },

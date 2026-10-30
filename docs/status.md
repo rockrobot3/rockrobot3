@@ -1631,6 +1631,25 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   四探全过；`probe2` 长行程 120→60 与 30/30 回包全过；`robust_probe` 六探全过；
   `u3_capture` 两连跑 **10/10 自等**。**探针从此不再允许各写一套口径。**
 
+- **线格式启用载荷 CRC32（2026-10-30，协议硬切换）**：审查发现全仓**无任何完整性校验**——
+  128B 头预留区 84 字节全空，帧内载荷被线面误码改坏后仍能通过 magic/长度/JSON 四道门，
+  音频方向表现为**静默杂音**且无任何计数可查。处置：把预留区前 4 字节（offset 44..48）
+  改作 `payload_crc32`（IEEE 反射多项式 0xEDB88320，逐位实现零查表），余 80 字节仍须全零。
+  单点真值：`rr3_crc32`（唯一算法）、`rr3_header_bytes_with_crc`（唯一发送入口）、
+  `rr3_verify_crc`（收侧校验，`rr3_framebuf_read` 与 `FrameAssembler::pull` 均已接，
+  不符即**整帧丢弃**并计错，丢片由 seq 对账继续记账）。契约同步：`envelope.schema.json`
+  偏移表 + `x-offset-sum`、ADR-0006 决策 1 追加项、contracts/README §3 均已写明这是
+  **硬切换**（旧端按 `ReservedNotZero` 拒帧，全端须同批升级；跨生态互通再启用 flags 版本标记）。
+  **验证**：rr-ipc 单测 80 通过（新增 `crc32_known_vectors`（含 `"123456789"`→0xCBF43926`）、
+  `assembler_rejects_corrupted_payload_crc`（翻载荷 1 字节→整帧丢弃且下一真帧照常出）、
+  `framebuf_read_rejects_crc_mismatch`）；rr-hal 63 通过；base/runtime workspace 685 通过。
+  **实板**：classic 已重烧（App 1,151,952 / 27.90%，MAC 48:9d:31:01:16:d4）；1.5M 纯音频 45s
+  358 帧 **CRC 不符=0**；混跑 90s 710 帧 **CRC 不符=0**、`发=900 ok=900 err=0 mangled=0
+  missing=0`、板侧增量与宿主帧**差值 0**；Pi 端 `rr3-audio-rec` 重建后 30s 落 wav
+  `chunks=233 gaps=0 err=0`、2ch/15996Hz/29.83s、RMS 593.6。
+  探针同步升级：`probe_common.scan_frames` 现在逐帧校验 CRC 并输出 `CRC不符`（**音频方向
+  误码率第一次有了直接判据**，不再只能靠"看不出来"来断言干净）。
+
 **已知偏差（有意保留，不是遗漏）：**
 
 - 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的

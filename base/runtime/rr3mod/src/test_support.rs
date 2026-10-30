@@ -123,6 +123,7 @@ fn rr3_write(stream: &mut UnixStream, ty: Rr3PayloadType, trace_id: u64, body: V
             src_task: RR3_TASK_RRD,
             dst_task: 7,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     };

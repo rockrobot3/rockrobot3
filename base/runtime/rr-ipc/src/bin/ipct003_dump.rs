@@ -12,7 +12,10 @@
 //! 这正是 IPC-T-003 要证明的命题。对拍入口是 `tools/ci/ipct003.sh`（不进七步门，
 //! 登记在 conventions.md §2），它把宿主输出、linux/arm64 容器输出与本 golden 三方 diff。
 
-use rr_ipc::{opcode, rr3_body_encode, Rr3Header, Rr3PayloadType, RR3_CONTRACT_SCHEMA_VERSION};
+use rr_ipc::{
+    opcode, rr3_body_encode, rr3_header_bytes_with_crc, Rr3Header, Rr3PayloadType,
+    RR3_CONTRACT_SCHEMA_VERSION,
+};
 
 fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
@@ -22,8 +25,9 @@ fn hex(bytes: &[u8]) -> String {
     s
 }
 
-/// 整帧字节：128B 头（payload_len 按真实值）+ 2 字节前缀 + 体
+/// 整帧字节：128B 头（payload_len 按真实值 + 载荷 CRC32）+ 2 字节前缀 + 体
 fn frame_bytes(ty: Rr3PayloadType, body: &[u8]) -> Vec<u8> {
+    let payload = rr3_body_encode(ty, body);
     let hdr = Rr3Header {
         opcode: opcode::SEND,
         flags: 0,
@@ -31,10 +35,11 @@ fn frame_bytes(ty: Rr3PayloadType, body: &[u8]) -> Vec<u8> {
         timestamp_ns: 100,
         src_task: 7,
         dst_task: 0,
-        payload_len: rr3_body_encode(ty, body).len() as u32,
+        payload_len: payload.len() as u32,
+        payload_crc32: 0, // 由 rr3_header_bytes_with_crc 按载荷算出覆盖
     };
-    let mut out = hdr.to_bytes().to_vec();
-    out.extend_from_slice(&rr3_body_encode(ty, body));
+    let mut out = rr3_header_bytes_with_crc(&hdr, &payload).to_vec();
+    out.extend_from_slice(&payload);
     out
 }
 
@@ -48,6 +53,7 @@ fn main() {
         src_task: 7,
         dst_task: 0,
         payload_len: 96,
+        payload_crc32: 0, // golden 行是无载荷纯头（CRC 覆盖载荷，故为 0）
     };
     println!("header {}", hex(&golden_hdr.to_bytes()));
 
