@@ -69,6 +69,8 @@ pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST as RR3_HOST_TASK;
 const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 连续门失败/拆帧失败达此数记一条日志（1-2 次可能是单帧毛刺，3 次 = 帧界
 /// 成片损坏，值得点名；坏帧弃扫本身由 [`FrameAssembler`] 即时完成）。
+/// **同时是"累计"打点周期**：间歇性坏帧（各被好帧隔开）不会把连续计数堆到阈值，
+/// 若只按连续计数打日志，这类丢帧会**全程静默**——而它恰恰是线面误码的典型形态。
 const RR3_ERR_STREAK_LOG: u64 = 3;
 
 /// 板面音频流事实（板固件 mic.rs 钉定）：16kHz 采样率。open 校验配置同款，
@@ -447,6 +449,8 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
         let mut zeros = 0u32;
         let mut seen = false;
         let mut err_streak = 0u64;
+        // 累计坏帧（拆帧失败 + 未过门）：间歇性丢帧的唯一可见口径（见上注）
+        let mut err_total = 0u64;
         loop {
             if core.stop.load(Ordering::Acquire) {
                 break;
@@ -536,9 +540,10 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                                     },
                                     Err(e) => {
                                         err_streak += 1;
-                                        if err_streak == RR3_ERR_STREAK_LOG {
+                                        err_total += 1;
+                                        if err_total % RR3_ERR_STREAK_LOG == 0 {
                                             eprintln!(
-                                                "rr-hal-esp32-audio: 连续 {RR3_ERR_STREAK_LOG} 帧未过门（帧界损坏？）: {e}"
+                                                "rr-hal-esp32-audio: 累计 {err_total} 帧未过门（连续 {err_streak}；帧界损坏/载荷 CRC 不符？）: {e}"
                                             );
                                         }
                                     }
@@ -547,9 +552,10 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                             Ok(None) => break,
                             Err((discarded, why)) => {
                                 err_streak += 1;
-                                if err_streak == RR3_ERR_STREAK_LOG {
+                                err_total += 1;
+                                if err_total % RR3_ERR_STREAK_LOG == 0 {
                                     eprintln!(
-                                        "rr-hal-esp32-audio: 连续 {RR3_ERR_STREAK_LOG} 次拆帧失败（已弃 {discarded}B 重扫）: {why}"
+                                        "rr-hal-esp32-audio: 累计 {err_total} 次拆帧失败（连续 {err_streak}，已弃 {discarded}B 重扫）: {why}"
                                     );
                                 }
                             }
