@@ -129,17 +129,34 @@ def drain_until_quiet(fd, quiet=0.8, cap=4.0):
 
 
 def is_text_byte(b):
-    """该字节是否属于行面文本（可打印 ASCII + CR/LF/TAB）。"""
-    return 0x20 <= b <= 0x7E or b in (0x0A, 0x0D, 0x09)
+    """该字节是否可能属于行面文本：ASCII 可打印 + CR/LF/TAB，**或任意 >=0x80 字节**。
+
+    板面的 ERR 文案含中文（如 `ERR unknown angle 0-180（…）`、`ERR unknown cmd "NAN"（…）`），
+    纯 ASCII 判据会把整段判成乱码、连带丢掉段内全部回包行（实测凭空多出
+    `missing=136` / `乱码=2641B`）。高字节的合法性由 [`classify_segment`] 的 UTF-8 解码把关。
+    """
+    return 0x20 <= b <= 0x7E or b in (0x0A, 0x0D, 0x09) or b >= 0x80
 
 
 def classify_segment(seg):
-    """段分类：全文本 → "text"；混有非文本字节 → "noise"。
+    """段分类：线面文本 → "text"；含控制字节或非法 UTF-8 → "noise"。
 
-    行面回包（`OK pan=90\\r\\n`、`ERR ...`、`INFO ...`）全部是可打印 ASCII，
-    故「帧间字节段」里出现非文本字节才是真正的线面误码证据。
+    判据（顺序执行，任一命中即 noise）：
+    1. 出现 C0 控制字符（除 CR/LF/TAB）或 DEL(0x7F)——这类字节在协议文本里不可能出现，
+       是线面误码的典型签名（起始位误判常产生 0x00/0x7F 一类）；
+    2. 整段不能按 UTF-8 解码——中文是合法文本，随机坏字节会破坏多字节序列。
+    两条都过 = 合法行面文本，不计误码。
     """
-    return "text" if all(is_text_byte(b) for b in seg) else "noise"
+    for b in seg:
+        if b < 0x20 and b not in (0x0A, 0x0D, 0x09):
+            return "noise"
+        if b == 0x7F:
+            return "noise"
+    try:
+        bytes(seg).decode("utf-8")
+    except UnicodeDecodeError:
+        return "noise"
+    return "text"
 
 
 def _account_segment(st, seg):
