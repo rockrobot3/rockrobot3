@@ -1678,6 +1678,31 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   - **Pi 侧编译约束**：Pi 4 仅 1.8GB 内存，`cargo build --release` 单 crate 可过（rr3-audio-rec
     实测 11s 增量 / 40s 全量），但**不要并发多 crate 构建**，否则 OOM。
 
+- **全功能冒烟 + 帧面真机首验 + 空闲前导根因处置（2026-10-30，V1/V2）**：
+  **V1**：新增 `full_smoke.py`（探针第七支）一次覆盖行面 11 条命令——OLED、16 种 FACE
+  白名单逐个、PAN/TILT/SERVO、两级拒绝（>180 解析期「角度超范围」/ 0-180 出轴行程
+  「轴超出行程」）、WANDER、SCAN 五点、RAIL 异步回包、INFO 计数段、AUDIO 控制面，
+  末行给判据集 digest（跨次对拍）。首跑 32/34 的两处失败均为探针自身文案/收流窗口
+  写错，修后 **35/35**（digest `829477d49e20818d`）。顺带点名硬件项：`RAIL rail=284mV
+  raw=0` = 5V 分压测点未接线（`rail_tier=severe` 由此来），非固件问题。
+  **V2**：`frame_probe.py` 首次真机验证帧面（128B 头 + CRC + trace 回带 + dst 门 +
+  `rr3.set_bindings` 注入）——首跑 7/10，失败请求**无痕消失**：板面控制台无
+  `帧面 id=` 无 `帧面丢弃`，宿主收 `ERR line too long`。判定实验两步定位：
+  ① 加 200ms 帧间隔仍失败（排除时序竞态）；② 每帧前插 1 个 `\n` 前导 → 三轮
+  **30/30**。结论：**空闲后首突发的首字节失步**（电气层，只坏一个字节）——行面
+  只损失一条命令（unknown cmd 拒，即此前记账的 0.067–0.083% 残余误码），帧面则
+  整帧降级成行（`LINE_CAP`=128 < 帧长）无痕丢失；此前"两条路径残余误码同量级"
+  与"音频方向零 CRC 失败"（连续流无空闲）都与此机理自洽。
+  **处置（宿主单点）**：`rr-ipc Rr3UartConn::tx_idle_preamble`——空闲 >20ms 的
+  宿主→板突发先发 1 个 `\n`（板面当空行跳过）+ 2ms 再发正式字节；`write` 是全部
+  写路径的单点（帧经 std adapter、行经 write_all 都到达），桥的转发块被拆半的
+  场景因间隔远小于阈值而不触发。板侧 `read_line` 超长行加前 8 字节 hex 取证日志
+  （重烧待 devkit USB 恢复）。**验证**：rr-ipc 81（含 `tx_idle_preamble` 专测）、
+  rr3-bridge 6（恒等测试按新线上契约吃前导）、check.sh 全绿；实机 frame_probe
+  三轮 30/30、full_smoke 35/35、bw_probe 30s CRC 不符=0。
+  **遗留**：devkit USB 恢复后重烧诊断版固件；`frame_probe` 上桥/上 rr-hal 的
+  生产等价路径（`rr3_ensure` + rr3.call）后续按同判据跑。
+
 - **板固件与桥的审查结论（2026-10-30，未发现需修缺陷，三处有界风险记账）**：精读
   `cmd_loop`（每轮先 `drain_outbox`/`drain_audio` 再窥视一字节、1-tick 空口回轮首）、
   `read_line`（字节间超时 + 半行预算 + 超长行先吞尾再回 ERR）、`drain_line_tail`、
