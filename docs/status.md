@@ -1665,6 +1665,26 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   - **Pi 侧编译约束**：Pi 4 仅 1.8GB 内存，`cargo build --release` 单 crate 可过（rr3-audio-rec
     实测 11s 增量 / 40s 全量），但**不要并发多 crate 构建**，否则 OOM。
 
+- **板固件与桥的审查结论（2026-10-30，未发现需修缺陷，三处有界风险记账）**：精读
+  `cmd_loop`（每轮先 `drain_outbox`/`drain_audio` 再窥视一字节、1-tick 空口回轮首）、
+  `read_line`（字节间超时 + 半行预算 + 超长行先吞尾再回 ERR）、`drain_line_tail`、
+  `frame_round` 的残尾吞净、`push_job`（同形状 Move 合批为最新目标 + 队满优先让位新 Move）、
+  `drain_outbox`/`drain_audio`（写不全计入/点名，不静默）、`exec_job`（**失败也提交硬件真值**、
+  上报角永不冒领）、`autonomous_tick`（10ms 拍，决策段持锁纯算、驱动段脱锁慢跑）、
+  `mic` 组帧（16KB 线程栈 + 4KB 读缓冲，逐片减 DC/截 16bit/增益钳位）；`rr3-bridge` 双向转发
+  （UART 死/UDS 死各自具名退出，UDS 未就绪按 4KiB 节流计数丢弃，下行 EINTR 重试）。
+  三处**有界风险**（判断为权衡而非缺陷，故不改代码，写明触发条件供后来者复核）：
+  1. `drain_audio` 无预算：`audio_q` 满 4 片时单轮可连写 ≈4×59ms = 236ms，其间不读命令；
+     RX 环 4096B 在 1.5M 只抵 ≈22ms 入流，故理论上存在"宿主以线速连发 >4KB 命令 + Q 满"的
+     丢字节窗口，且 RX 溢出在 IDF 简单读面无计数（既有盲区）。实测混跑 900 条命令零丢失，
+     产品当前也无"线速灌命令"用法；加预算会牺牲音频平滑性，属权衡。
+  2. 每片 ≈35–40KB 堆抖动（7.8Hz：`json!` + b64 + payload + 帧 Vec）；实测 `INFO` 里
+     `free≈164KB / min_free≈100KB` 健康，缓冲复用属大改，无证据前不动。
+  3. `selfheal_skip` 在一次 300s **裸 termios 会话**里涨到 34589——**不是缺陷**：绑定只由宿主
+     `set_bindings` 注入，裸探针会话必然走 fail-closed 分支（`state.rs` 字段注释已写明
+     "非零即绑定下发链未通"）；真实宿主（rr-hal）会推绑定、自愈照跑。**此为判据澄清**，
+     防止后来者把计数当故障。
+
 **已知偏差（有意保留，不是遗漏）：**
 
 - 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的  "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
