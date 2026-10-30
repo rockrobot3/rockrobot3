@@ -1,6 +1,6 @@
 """P1 稳健性四探（帧面残尾吞净 / 行面干净 / 观测面字段 / 突发回包）。
 
-用法: python3 p1_probe.py    （缺省 2M 档；换档 env `RR3_PROBE_BAUD`、换口
+用法: python3 p1_probe.py    （缺省 1.5M 档；换档 env `RR3_PROBE_BAUD`、换口
 env `RR3_PROBE_TTY`）
 
 T1 首字节 0x31 + 128B 坏头 + 300B 残尾 → 期望 0 条 ERR（残尾被吞净而非当行执行）
@@ -18,7 +18,7 @@ def baud_of(name):
     raise SystemExit("未知波特率档名: " + name)
 
 
-BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B2000000"))
+BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B1500000"))
 
 fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
 a = termios.tcgetattr(fd)

@@ -3,7 +3,7 @@
 用法: python3 u3_capture.py <输出文件路径>
 
 串行发 10 条代表命令（HELP/OLED/4×FACE/2×SERVO 轴/SCAN），逐条抓回包并算
-「回包行集（排序后去空行）」的 sha256，用于跨次/跨档自等对拍。缺省 2M 档，
+「回包行集（排序后去空行）」的 sha256，用于跨次/跨档自等对拍。缺省 1.5M 档，
 改档用 env `RR3_PROBE_BAUD`（如 B921600），换口用 `RR3_PROBE_TTY`。
 """
 import hashlib
@@ -23,7 +23,7 @@ def baud_of(name):
     raise SystemExit("未知波特率档名: " + name)
 
 
-BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B2000000"))
+BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B1500000"))
 
 OUT = sys.argv[1]
 CMDS = ["HELP", "OLED U3-A", "FACE happy", "FACE sad", "FACE idle",

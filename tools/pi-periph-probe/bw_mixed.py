@@ -1,6 +1,6 @@
 """音频流 + 命令面混跑压测（树莓派 PL011 直连 classic 板）。
 
-用法: python3 bw_mixed.py [termios 常量名，缺省 B2000000] [总秒数，缺省 30]
+用法: python3 bw_mixed.py [termios 常量名，缺省 B1500000] [总秒数，缺省 30]
       换口用 env `RR3_PROBE_TTY`。
 
 边收音频边每 5s 打 50 条 PAN + INFO，末尾 AUDIO OFF 并统计：
@@ -18,7 +18,7 @@ def baud_of(name):
     raise SystemExit("未知波特率档名: " + name)
 
 
-BAUD = baud_of(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("RR3_PROBE_BAUD", "B2000000"))
+BAUD = baud_of(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("RR3_PROBE_BAUD", "B1500000"))
 SECS = int(sys.argv[2]) if len(sys.argv) > 2 else 30
 fd = os.open(DEV, os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK)
 a = termios.tcgetattr(fd)
