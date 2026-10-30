@@ -81,6 +81,12 @@ pub(crate) fn read_line(uart: &mut UartDriver, first: u8) -> Result<String, &'st
                     // 行尾残留在 UART FIFO 里被下一轮当成新命令解析（垃圾指令执行
                     // + 一串没人请求的 ERR 行）。
                     drain_line_tail(uart);
+                    // 帧失步取证（2026-10-30 帧面真机首验）：宿主突发首字节失步会把
+                    // 整帧降级成行。行首字节可定位失步点——0x45/0x52/0x41 = magic
+                    // 第 2-4 字节（首字节丢失），其他值 = 首字节已坏。宿主侧已加
+                    // 空闲前导（rr-ipc `Rr3UartConn::tx_idle_preamble`），正常运行
+                    // 本路径不应再触发；触发即凭这 8 字节指认。
+                    eprintln!("[periph] line too long: 前8字节 {:02x?}", &buf[..8]);
                     return Err("line too long");
                 }
                 buf.push(b);

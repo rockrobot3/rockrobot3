@@ -562,6 +562,12 @@ mod tests {
         let mut down: std::vec::Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x52, 0x52, 0x33];
         down.extend((0..600u32).map(|i| (i % 253) as u8));
         conn.write_all(&down).expect("写 conn 失败");
+        // 桥对板链路的**首个下行突发**带空闲前导 `\n`（rr-ipc Rr3UartConn
+        // tx_idle_preamble：帧失步根因处置，板面把孤立 \n 当空行跳过）——
+        // master 侧先吃掉它，再按恒等比对其余字节。
+        let mut pre = [0u8; 1];
+        read_exact_timeout(&mut master, &mut pre);
+        assert_eq!(pre[0], 0x0A, "下行首突发必须以空闲前导 \\n 开头");
         let mut got2 = vec![0u8; down.len()];
         read_exact_timeout(&mut master, &mut got2);
         assert_eq!(got2, down, "下行必须逐字节恒等（垃圾也不改写）");
