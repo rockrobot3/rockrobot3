@@ -399,7 +399,17 @@ pub struct Rr3UartConn {
     fd: i32,
     /// 排他账本键（open 路径）；`from_fd` 测试注入路径不记账，为 None。
     excl_path: Option<String>,
+    /// 上次成功写出的时刻（空闲前导判据，见 [`Self::tx_idle_preamble`]）。
+    /// `None` = 历史未知（开口后首突发），同口径加前导。
+    last_tx: Option<std::time::Instant>,
 }
+
+/// 空闲多久后的宿主→板突发需要前导字节（判据实验与机理见
+/// [`Rr3UartConn::tx_idle_preamble`]）。
+const TX_PREAMBLE_IDLE: std::time::Duration = std::time::Duration::from_millis(20);
+/// 前导字节与正式字节之间的间隔：给板面留出消费前导（空行）并回到窥视点的
+/// 时间。1.5M 下一字节 6.7µs，2ms 足够板面走完 `read_line` 空行分支。
+const TX_PREAMBLE_GAP: std::time::Duration = std::time::Duration::from_millis(2);
 
 impl Rr3UartConn {
     /// 打开串口设备并配 raw 模式（默认 115200）。开口即排他登记（见模块注记
@@ -450,6 +460,7 @@ impl Rr3UartConn {
                 Ok(Self {
                     fd,
                     excl_path: Some(key),
+                    last_tx: None,
                 })
             }
             Err(e) => {
@@ -470,6 +481,9 @@ impl Rr3UartConn {
         Ok(Self {
             fd,
             excl_path: None,
+            // 测试注入路径（pty）：显式置"刚写过"——单测按精确字节对拍，前导会
+            // 打乱；前导行为另有专测（tx_idle_preamble 用例）。
+            last_tx: Some(std::time::Instant::now()),
         })
     }
 
@@ -611,13 +625,54 @@ impl Read for Rr3UartConn {
     }
 }
 
+impl Rr3UartConn {
+    /// 空闲后首突发的**前导字节**（宿主→板方向；2026-10-30 帧面真机首验的根因处置）。
+    ///
+    /// **现象**：同一物理链路上，空闲后的宿主→板突发其**首字节**偶发失步（误码只坏
+    /// 一个字节）——行面命令表现为 `ERR unknown cmd "NAN"` 一类首字符坏（混跑实测
+    /// 0.067–0.083%），帧面则整帧被降级成行（`LINE_CAP`=128 < 帧长，板面回
+    /// `ERR line too long`，请求**无痕消失**；frame_probe 实测 10 条中 2–3 条）。
+    ///
+    /// **判定实验**（frame_probe）：每帧前插 1 个 `\n` + 10ms → 三轮 **30/30**；
+    /// 只插 200ms 帧间隔 → 仍 2–3 条失败（排除时序竞态）。前导替首字节挡枪：
+    /// 板面对孤立 `\n` 是空行静默跳过；失步（若发生）只落在前导上，正式字节在
+    /// 已同步的线上出发。
+    ///
+    /// **机理（假设，电气层）**：空闲后首突发的起始位边沿在线上振铃/反射下被
+    /// 误判，采样错位只影响该字节。物理层根治选项 = TX 线串 100–330Ω 阻尼。
+    ///
+    /// **安全性**：前导只在空闲 > [`TX_PREAMBLE_IDLE`] 时插入并隔 [`TX_PREAMBLE_GAP`]
+    /// 再发正式字节；同一 `write_all` 循环内的后续 `write` 距前次写出仅 µs 级，
+    /// 不会再触发。桥的转发块若真被拆成两半（对端一次 write 全部送达，实际
+    /// µs 级跟到），也因间隔远小于阈值而不插。
+    fn tx_idle_preamble(&mut self) {
+        let idle = self.last_tx.map_or(true, |t| t.elapsed() >= TX_PREAMBLE_IDLE);
+        if !idle {
+            return;
+        }
+        let one = [0x0Au8];
+        // SAFETY：one 活到调用返回，fd 属 self。
+        let n = unsafe { c_write(self.fd, one.as_ptr() as *const std::ffi::c_void, 1) };
+        if n == 1 {
+            std::thread::sleep(TX_PREAMBLE_GAP);
+            self.last_tx = Some(std::time::Instant::now());
+        }
+        // 前导写失败不拦路：正式字节的写出路径自会报错并交调用方处置。
+    }
+}
+
 impl Write for Rr3UartConn {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // 空闲前导（见 tx_idle_preamble）：本方法宿主→板全部写路径的单点——
+        // rr3_send_buf（帧）经 std adapter 的 write 循环到达这里，桥/收流端的
+        // write_all（行）经默认实现同样到达。
+        self.tx_idle_preamble();
         // SAFETY：buf 活到调用返回，fd 属 self。部分写交给 write_all 循环处理。
         let n = unsafe { c_write(self.fd, buf.as_ptr() as *const std::ffi::c_void, buf.len()) };
         if n < 0 {
             return Err(std::io::Error::last_os_error());
         }
+        self.last_tx = Some(std::time::Instant::now());
         Ok(n as usize)
     }
 
@@ -748,6 +803,33 @@ mod tests {
         t.c_cc[VTIME] = 1;
         // SAFETY：合法指针。
         assert_eq!(unsafe { c_tcsetattr(conn.fd, TCSANOW, &t) }, 0);
+    }
+
+    /// 空闲前导：`last_tx` 归 None（开口后首突发 / 长空闲）后首个写必须先出
+    /// 一个 `\n` 再出正式字节——帧失步根因处置的线上行为钉在这里（2026-10-30，
+    /// 判据实验与机理见 [`Rr3UartConn::tx_idle_preamble`]）。
+    #[test]
+    fn tx_idle_preamble_precedes_burst_after_idle() {
+        let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
+        // 模拟"开口后从未写过"：from_fd 出厂置 Some(now)，这里显式归 None。
+        conn.last_tx = None;
+        let back = frame(hdr(3), b"abc");
+        conn.rr3_send_buf(Rr3FrameBuf::from(&back)).unwrap();
+        use std::io::Read as _;
+        let mut pre = [0u8; 1];
+        master.read_exact(&mut pre).unwrap();
+        assert_eq!(pre[0], 0x0A, "空闲后首突发必须以 \\n 前导开头");
+        // 紧接着就是完整帧（2ms 间隔远小于 pty 读的阻塞窗）
+        let want = rr3_frame_to_bytes(&back).unwrap();
+        let mut echo = vec![0u8; want.len()];
+        master.read_exact(&mut echo).unwrap();
+        assert_eq!(echo, want, "前导之后正式帧必须逐字节完整");
+
+        // 连续第二次发送：last_tx 刚更新，不得再插前导
+        conn.rr3_send_buf(Rr3FrameBuf::from(&back)).unwrap();
+        let mut echo2 = vec![0u8; want.len()];
+        master.read_exact(&mut echo2).unwrap();
+        assert_eq!(echo2, want, "紧邻的第二次突发不得插前导");
     }
 
     /// 正常帧：整帧写入 → 整帧读回（阻塞路径）；反向发送同一条 blanket impl 面验证。
