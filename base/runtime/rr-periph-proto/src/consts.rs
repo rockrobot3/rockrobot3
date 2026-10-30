@@ -42,7 +42,7 @@ pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 /// ESP32 档设备路径 env 键（宿主侧应急覆盖口径）。
 pub const RR3_HAL_PERIPH_UART_ENV: &str = "RR3_HAL_PERIPH_UART";
 
-/// ESP32 档波特率 env 键（宿主侧；板固件钉 921600，会话须显式同档）。
+/// ESP32 档波特率 env 键（宿主侧；板固件钉 `UART2_BAUD_HZ`（2M），会话须显式同档）。
 pub const RR3_HAL_PERIPH_BAUD_ENV: &str = "RR3_HAL_PERIPH_BAUD";
 
 #[cfg(test)]

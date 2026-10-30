@@ -61,11 +61,12 @@ fn main() -> ExitCode {
 
 /// 用法文本（参数名 §5.1.2 钉死：--uart / --baud / --socket）。
 const USAGE: &str =
-    "用法: rr3-bridge --uart <串口设备> --socket <rrd套接字路径> [--baud <115200|9600|921600>]";
+    "用法: rr3-bridge --uart <串口设备> --socket <rrd套接字路径> [--baud <115200|9600|921600|1500000|2000000>]";
 
 /// CLI 解析（未知参数即错——脚本工具的第一错法是静默忽略拼写错误）。
-/// 波特率收 rr-ipc 档位表全部三档（115200 缺省 / 9600 降速档 / 921600 批D②
-/// 高速档），档位外即错：静默换档是线路事故——与 rr-ipc
+/// 波特率收 rr-ipc 档位表全部档（115200 缺省 / 9600 降速档 / 921600 批D②
+/// 高速档 / 1.5M、2M 试用档——2M 是板固件 2026-10-30 起的落板档），档位外即错：
+/// 静默换档是线路事故——与 rr-ipc
 /// `rr3_uart_baud_speed` 同一张表（真值单点），错误在解析期显形而不是深到 open 才炸。
 pub fn parse_args(args: &[String]) -> Result<link::BridgeConfig, String> {
     let mut uart: Option<PathBuf> = None;

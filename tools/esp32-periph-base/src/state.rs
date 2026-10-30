@@ -387,7 +387,7 @@ pub(crate) fn drain_outbox(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>
 }
 
 /// 取空 audio_q 并整帧写 UART2（控制面每轮首步，紧跟 [`drain_outbox`]——同线程
-/// 串行写，与行面/应答字节在线上互不交错）。单分片 ~11KB ≈ 120ms@921600（整帧
+/// 串行写，与行面/应答字节在线上互不交错）。单分片 ~11KB ≈ 44ms@2M（整帧
 /// write_all + wait_tx_done，[`UartIo`] 语义），发送期间命令面短延迟是分片粒度
 /// 的既定代价（Q1=(a) 带宽账口径）。写不全（IO 失败）不计 `audio_sent`——线上
 /// 半帧由帧层拒收自愈，recorder 端 seq 断档对账。
