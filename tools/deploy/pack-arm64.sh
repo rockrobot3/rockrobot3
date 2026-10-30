@@ -26,6 +26,11 @@ echo "== ① 交叉编译（$TARGET 静态，rust-lld）=="
 export RUSTFLAGS="-C linker=rust-lld"
 cargo build -q --locked --release --manifest-path base/runtime/Cargo.toml --target "$TARGET" -p rrd
 cargo build -q --locked --release --manifest-path tools/rrctl/Cargo.toml --target "$TARGET"
+# 六模块中五件走 musl 静态；**brain 不在此列**——其云端客户端用 ureq+rustls(ring)，
+# ring 需要 C 工具链（aarch64-linux-musl-gcc），与 alsa 同属"宿主交叉结构性不覆盖"类，
+# 归板上原生构建（build-onboard.sh，同 alsa 先例）。2026-10-31 教训：本脚本曾在
+# brain 还是 python 树时写死 cp pkg（dc9d6f4 迁移后腐化 17 天无人发现——部署链
+# 无门禁，改 module 形态必须同批扫 tools/deploy/）。
 for m in act connect interact sense power; do
   cargo build -q --locked --release --manifest-path "modules/rr3-$m/Cargo.toml" --target "$TARGET"
 done
@@ -41,47 +46,37 @@ for m in act connect interact sense power; do
   cp "$REL/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
   cp "modules/rr3-$m/module.toml" "$PAY/rr3-modules/rr3-$m/manifest.toml"
 done
-# brain（lang=python，批F1）：payload = pkg 包树 + manifest，无 bin——entry 装机产物
-# 是 rr3-pack 生成的 shim（PYTHONPATH 装机绝对，只有打包器知道 RR3_INSTALL_ROOT）。
-# 包树须纯净副本（符号链接打包器拒绝；__pycache__ 是宿主残渣，出包前清掉）。
-# cp 落位用"dst 已存在 + 尾斜杠"形式：BSD/GNU 一致落成 pkg/rr3_brain/——
-# `cp -R src dst`（dst 不存在）在 BSD 下会把 src 内容摊平成 dst/，层级丢一截。
-mkdir -p "$PAY/rr3-modules/rr3-brain/pkg"
-cp -R modules/rr3-brain/rr3_brain "$PAY/rr3-modules/rr3-brain/pkg/"
-find "$PAY/rr3-modules/rr3-brain/pkg" -name '__pycache__' -type d -exec rm -rf {} +
+# brain：manifest 先落位（bin 由板上构建步 ③ 填充——build-onboard 同步源码后原生
+# 构建 brain+sense+interact 三件回填 payload）。缺 RR3_ONBOARD_HOST 时在此点名退出，
+# 不允许静默出"缺 brain 的 deb"（boot 队列 cognition 四格会 degraded）。
+mkdir -p "$PAY/rr3-modules/rr3-brain"
 cp modules/rr3-brain/module.toml "$PAY/rr3-modules/rr3-brain/manifest.toml"
 
-echo "== ③ rr3-pack --stage-only（staging deb 布局树）=="
+echo "== ③ 板上原生构建（brain TLS/ring + sense/interact alsa——宿主交叉不覆盖的三件）=="
+if [ -z "${RR3_ONBOARD_HOST:-}" ]; then
+  echo "缺 RR3_ONBOARD_HOST（如 pi@192.168.124.52）：brain/sense/interact 必须板上构建" >&2
+  exit 2
+fi
+bash "$(dirname "$0")/build-onboard.sh" "$RR3_ONBOARD_HOST" "$OUT"
+
+echo "== ④ rr3-pack --stage-only（staging deb 布局树）=="
 mkdir -p "$OUT"
 "$RR3_PACK" --payload "$PAY" --repo "$(pwd)" --arch arm64 \
   --out "$OUT/rockrobot3_0.0.6_arm64.deb" --stage-only
 
 STAGE="$OUT/rockrobot3_0.0.6_arm64.deb.stage"
-echo "== ④ staging 布局断言（同 distro-smoke ⑤ 的 staging 版）=="
+echo "== ⑤ staging 布局断言（同 distro-smoke ⑤ 的 staging 版）=="
 test -x "$STAGE/usr/bin/rrd"
 test -x "$STAGE/usr/bin/rr3-ctl"
 test -f "$STAGE/usr/lib/systemd/system/rrd.service"
 test -f "$STAGE/usr/lib/rockrobot3/profiles/distro.toml"
 test -f "$STAGE/usr/lib/rockrobot3/contracts/topics.toml"
 test -f "$STAGE/usr/lib/rockrobot3/contracts/slots.toml"
-for m in act connect interact sense power; do
+for m in act brain connect interact sense power; do
   test -x "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/rr3-$m"
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/config.toml"
 done
-# brain（lang=python）装机面：entry = 打包器 shim（可执行），pkg 树 + config 随包
-test -x "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain"
-test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/module.toml"
-test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/config.toml"
-test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/pkg/rr3_brain/__main__.py"
-grep -q "PYTHONPATH=/usr/lib/rockrobot3/modules/rr3-brain/pkg" \
-  "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain" # shim PYTHONPATH 装机绝对
-grep -q "RR3_BRAIN_CONFIG=/usr/lib/rockrobot3/modules/rr3-brain/config.toml" \
-  "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain" # shim config 注入（pkg/ 嵌套布局修正）
-grep -q "entry = \"/usr/lib/rockrobot3/modules/rr3-brain/rr3-brain\"" \
-  "$STAGE/usr/lib/rockrobot3/modules/rr3-brain/module.toml" # entry 已装机绝对化
-grep -q "/usr/lib/rockrobot3/modules/rr3-act/rr3-act" \
-  "$STAGE/usr/lib/rockrobot3/modules/rr3-act/module.toml" # entry 已装机绝对化
 file "$STAGE/usr/bin/rrd" | grep -q "ELF 64-bit.*ARM aarch64.*statically linked" # 真板产物体检
 
 echo "staging 树就绪: $STAGE"
