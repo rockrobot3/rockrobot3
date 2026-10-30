@@ -1893,10 +1893,19 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
      （`/var/run/rock3-ipc.sock.log/<unit>.log`）只留下
      `退出: 注册失败: 总线已断开`（rr-bus-api client.rs:621 的 reader-EOF 路径）。
      手工直跑（注入 RR3_BUS_PATH/RR3_MANIFEST）同样在该点退出——**rrd 不接受
-     非受管子进程的注册**（可能是重复名 Busy 路径回码后断开，conn.rs:174-176
-     "重复名与超额 = Busy，先回错误帧再断开"）。下一步实验：用最小装配集
-     （只启 brain+interact）复跑 + strace 该进程 socket 时序；或核对
-     registry 是否残留 failed 条目造成 name Busy。
+     非受管子进程的注册**。
+     **strace 加壳取证（当日，决定性）**：以 shell 壳包住 interact 二进制跑
+     `strace -xx -e trace=network`，时间线为——19.300 发出 904B 注册帧（一次
+     write）→ 19.301657 **只收到 128B（恰为帧头）**，该帧头解析出 plen≈51 →
+     19.310 读线程 close(3) 并报「注册失败: 总线已断开」→ 进程退出；**期间没有
+     第二次 recvfrom**（即 51B 载荷从未到达）。rrd 侧同刻反复报
+     `写帧失败 dst=0: Io("Broken pipe")`。结论：**回复帧在 128B 头之后断流**
+     ——要么 rrd 的应答写在中途断（对端已关/写面竞态），要么客户端在头解析后
+     立即放弃。因帧头 magic 合法，重点转向 rrd 应答写面（`rr3_reply_ok` 与
+     writer/fanout 两条写路径共用 `Mutex<UnixStream>` 的整帧原子性）。
+     取证壳已撤除、二进制还原（生产不留调试壳）。
+     下一步实验：在 rrd 侧给 `rr3_reply_ok` 加写后长度校验（跨进程可观测），
+     或复现"注册瞬间恰好有广播帧并发写同一 socket"的竞态。
 
   ⑤ **单 UART 多消费方的结构性冲突（未修，ADR 级）**：rr-hal 的 esp32 后端
      （`RR3_HAL_BACKEND=esp32` + `RR3_HAL_PERIPH_UART` + `RR3_HAL_PERIPH_BAUD`）
