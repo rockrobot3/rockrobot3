@@ -61,8 +61,8 @@ rsync -a --delete \
 
 echo "== ③ 依赖通道（板上有外网则直连 crates.io；无外网则预置 vendor）=="
 # 仓库根无 Cargo.toml（分立 workspace 布局：base/runtime、modules/*、tools/* 各自独立，
-# 首跑真板踩实）——对本脚本 ④ 实际构建的两个 manifest 各自 fetch
-for m in sense interact; do
+# 首跑真板踩实）——对本脚本 ④ 实际构建的三个 manifest 各自 fetch
+for m in brain sense interact; do
   if ! rrun "cd $RMT_SRC/modules/rr3-$m && cargo fetch --locked"; then
     echo "cargo fetch 失败（rr3-$m）：板无外网时在宿主 \`cargo vendor --versioned-dirs <vendor_dir>\`，" >&2
     echo "把 vendor/ 与指向它的 .cargo/config.toml 一并同步上板，或改用有网环境后重跑。" >&2
@@ -70,26 +70,29 @@ for m in sense interact; do
   fi
 done
 
-echo "== ④ 板上原生构建（音频两件带 alsa feature，release）=="
+echo "== ④ 板上原生构建（sense/interact 带 alsa feature；brain 带 TLS——ureq+rustls(ring) 需要 C 工具链，宿主 musl 交叉结构性不覆盖，2026-10-31 定案归板上）=="
+rrun "cd $RMT_SRC && cargo build --locked --release --manifest-path modules/rr3-brain/Cargo.toml"
 for m in sense interact; do
   echo "-- rr3-$m"
   rrun "cd $RMT_SRC && cargo build --locked --release --features alsa --manifest-path modules/rr3-$m/Cargo.toml"
 done
 
 echo "== ⑤ 产物归位 staging（payload/rr3-modules/<name>/bin）=="
-for m in sense interact; do
+for m in brain sense interact; do
   mkdir -p "$PAY/rr3-modules/rr3-$m"
   rsync "$HOST:$RMT_SRC/modules/rr3-$m/target/release/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
 done
 
-echo "== ⑥ 板上构建件断言（动态 ELF aarch64 + ldd 含 libasound）=="
-for m in sense interact; do
+echo "== ⑥ 板上构建件断言（动态 ELF aarch64；音频两件 ldd 含 libasound）=="
+for m in brain sense interact; do
   bin="$PAY/rr3-modules/rr3-$m/bin"
   file "$bin" | grep -q "ELF 64-bit.*ARM aarch64" # 板上原生构建件是 aarch64 ELF
   if file "$bin" | grep -q "statically linked"; then
-    echo "rr3-$m 是静态产物（应为动态链 libasound——板上构建未生效？）" >&2
+    echo "rr3-$m 是静态产物（应为动态链——板上构建未生效？）" >&2
     exit 1
   fi
+done
+for m in sense interact; do
   rrun "ldd $RMT_SRC/modules/rr3-$m/target/release/rr3-$m" | grep -q libasound
 done
 
