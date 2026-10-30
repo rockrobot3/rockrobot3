@@ -1667,6 +1667,10 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
 
 **已知偏差（有意保留，不是遗漏）：**
 
-- 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的
-  "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
+- 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的  "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
   读文档时别把它们对齐；这些注释不属于本任务订正范围。
+- **门禁的 ①b 在并发构建下会假红（2026-10-30 实录）**：`check.sh` 与 `esp32s3` 专用门
+  同时运行时，`cargo test --workspace` 曾整体报红，单独复跑即全绿——`rr-ipc` 的 UART
+  时序测试（`uart_open_flushes_stale_input` 等按墙钟断言）在 CPU 争抢下会超时误判。
+  这不是产品缺陷，但**门禁与任何编译/压测必须串行**的纪律从此有了实证依据；看到
+  ①b 红灯先确认"当时机器上还有没有别的 cargo 在跑"，再谈代码。
