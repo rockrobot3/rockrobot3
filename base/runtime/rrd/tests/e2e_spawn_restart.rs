@@ -111,7 +111,7 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
     // 是两种合法时序——整个 workspace 并发跑时实测到过 `1`（旁观者尚未在册），
     // 单跑这个二进制时是 `2`。数字断言挪到第二世（下面 `run2`），那里的计数才有唯一答案。
     rrd.rr3_wait_log("rr3-sima → running（广播到");
-    let on = rr3_read_state(&mut b, "rr3-sima", "running");
+    let on = rr3_read_state_task(&mut b, "rr3-sima", "running", Some(task1));
     assert_eq!(
         on["src_task"], task1,
         "线上那条 running 必须是第一世的（按 src_task 认，不按到达序猜）"
@@ -152,7 +152,7 @@ fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
         2,
         "running 该发给当时在册的两条连接: {run2}"
     );
-    let on = rr3_read_state(&mut b, "rr3-sima", "running");
+    let on = rr3_read_state_task(&mut b, "rr3-sima", "running", Some(task2));
     assert_eq!(
         on["src_task"], task2,
         "§9 的\"重启成功后必须重新注册才恢复 running\"——线上那一帧属于第二世"
