@@ -329,6 +329,7 @@ fn rr3_obs_frame(ty: Rr3PayloadType, body: &Value) -> Rr3Frame {
             src_task: 0,
             dst_task: RR3_TASK_RRD,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     }

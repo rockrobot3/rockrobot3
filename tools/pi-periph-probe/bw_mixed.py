@@ -6,7 +6,8 @@
 边收音频边每 5s 打 50 条 PAN + INFO，末尾 AUDIO OFF 后**等静默**收尾（不再固定 2s）。
 
 判据（全部用 [`probe_common`] 的单点口径，不再本地各写一套）：
-- 帧面：0 撕裂、0 seq 断档、PCM 全 8192、无「乱码段」
+- 帧面：0 撕裂、0 seq 断档、PCM 全 8192、**CRC 不符 = 0**（载荷完整性直接判据，
+  2026-10-30 起帧头 offset 44 带载荷 CRC32）、无「乱码段」
 - 帧间字节按段分类：**行面回包文本**是合法流量，**乱码段**（含非可打印字节）
   才是线面误码证据 —— 原先把回包逐字节计成「头失配」的口径已废弃
 - 命令面四分类对账（`sent = ok + err + mangled + missing`）：
@@ -87,9 +88,11 @@ mangled = [l for l in lines
 sent = n_sent * PER_ROUND
 missing = sent - (ok + len(errs) + len(mangled))
 
-print("[混跑 %ds] 音频 %d B (%.1f KB/s) 帧=%d 撕裂=%d seq断档=%d PCM长度集=%s"
+print("[混跑 %ds] 音频 %d B (%.1f KB/s) 帧=%d 撕裂=%d CRC不符=%d seq断档=%d PCM长度集=%s"
       % (SECS, len(buf), len(buf) / 1024.0 / SECS, st["frames"], st["torn"],
-         seq_gaps(st["seqs"]), sorted(set(st["lens"]))))
+         st["crc_bad"], seq_gaps(st["seqs"]), sorted(set(st["lens"]))))
+if st["crc_bad"]:
+    print("           CRC 样本 (declared, actual):", st["crc_samples"])
 print("           帧间字节: 行面回包文本=%dB(%d 行) 乱码=%dB%s"
       % (st["text_bytes"], len(st["lines"]), st["noise_bytes"],
          (" 样本: " + " | ".join(repr(s) for s in st["noise_samples"])) if st["noise_bytes"] else ""))

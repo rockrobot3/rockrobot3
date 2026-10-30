@@ -133,6 +133,9 @@ pub fn rr3_frame_compose(
             src_task,
             dst_task,
             payload_len: payload.len() as u32,
+            // 头里的 CRC 必须与载荷一致（发送路径另会经 rr3_header_bytes_with_crc 复算，
+            // 值相同；这里填实算值保证内存帧本身自洽）
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     }

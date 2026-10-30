@@ -670,6 +670,7 @@ pub fn rr3_json_frame(ty: Rr3PayloadType, body: &Value, src_task: u64, dst_task:
             src_task,
             dst_task,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     }

@@ -26,6 +26,7 @@ import select
 import sys
 import termios
 import time
+import zlib
 
 #: 帧 magic 的线上字节序（LE u32 0x41524531 → 31 45 52 41）。
 MAGIC = b"\x31\x45\x52\x41"
@@ -33,6 +34,8 @@ MAGIC = b"\x31\x45\x52\x41"
 HEADER_LEN = 128
 #: `payload_len` 在帧头内的偏移。
 OFF_PAYLOAD_LEN = 40
+#: 载荷 CRC32 在帧头内的偏移（2026-10-30 启用，占原预留区首 4 字节）。
+OFF_CRC32 = 44
 #: 线上合法 payload 上限（防御：坏头里读出的长度不可信）。
 MAX_PAYLOAD = 20000
 
@@ -170,6 +173,7 @@ def scan_frames(buf):
     st = {
         "frames": 0, "seqs": [], "lens": [], "torn": 0, "leading": 0,
         "text_bytes": 0, "noise_bytes": 0, "noise_samples": [], "lines": [],
+        "crc_bad": 0, "crc_samples": [],
     }
     if first < 0:
         st["leading"] = n
@@ -196,6 +200,13 @@ def scan_frames(buf):
             break
         p = bytes(buf[i + HEADER_LEN:i + HEADER_LEN + plen])
         st["frames"] += 1
+        # 载荷 CRC32（与固件 `rr3_crc32` 同一算法：zlib.crc32 = IEEE 反射多项式）
+        declared = int.from_bytes(buf[i + OFF_CRC32:i + OFF_CRC32 + 4], "little")
+        actual = zlib.crc32(p) & 0xFFFF_FFFF
+        if declared != actual:
+            st["crc_bad"] += 1
+            if len(st["crc_samples"]) < 3:
+                st["crc_samples"].append((declared, actual))
         m = re.search(rb'"seq":(\d+)', p)
         if m:
             st["seqs"].append(int(m.group(1)))

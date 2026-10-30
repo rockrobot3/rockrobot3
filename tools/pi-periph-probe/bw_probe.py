@@ -9,7 +9,7 @@
 3. AUDIO ON 连续音频流的帧完整性
 
 口径（[`probe_common`] 单点定义，本脚本不再自造）：
-- 帧面：撕裂帧 / seq 断档 / PCM 长度集
+- 帧面：撕裂帧 / seq 断档 / PCM 长度集 / **CRC 不符**（载荷完整性直接判据）
 - 帧间字节按**段**分类：行面回包文本（合法）vs 乱码段（含非可打印字节 = 误码证据）。
   原先把回包逐字节计成「头失配」的旧口径已废弃——那会把合法回包算成线面噪声。
 """
@@ -60,8 +60,8 @@ if st["frames"] == 0:
 
 lens = st["lens"]
 avg = sum(lens) / len(lens) if lens else 0
-print("[4] 音频 %.1fs: %d B (%.1f KB/s) 帧=%d 撕裂=%d 前置=%dB"
-      % (el, len(buf), len(buf) / 1024.0 / el, st["frames"], st["torn"], st["leading"]))
+print("[4] 音频 %.1fs: %d B (%.1f KB/s) 帧=%d 撕裂=%d CRC不符=%d"
+      % (el, len(buf), len(buf) / 1024.0 / el, st["frames"], st["torn"], st["crc_bad"]))
 print("    帧间: 行面文本=%dB ｜ %s"
       % (st["text_bytes"], fmt_noise(st) or "乱码=0B（无段级误码）"))
 print("    seq 断档=%d 首=%s 末=%s；PCM 长度 min/max/均=%.0f/%.0f/%.0f（期望 8192）"
