@@ -113,7 +113,7 @@ heap_reserved_bytes = 98816
 # 不收），rtos 档原样直给进 RR3_HAL_BINDINGS，经桥 rr3.set_bindings 注入板侧；
 # 注入前板侧消费面 fail-closed 拒（不回退硬编码）。取值与板侧 main.rs 引脚真值段
 # 同源：I2C SDA=21/SCL=22（OLED 总线）；34 = 电池分压 ADC（输入-only 脚）；UART2
-# TX=18/RX=19（桥链路面，921600）；LEDC pan=32/tilt=33（与 [[pin]] physical 同源
+# TX=18/RX=19（桥链路面，2M）；LEDC pan=32/tilt=33（与 [[pin]] physical 同源
 # 同值）；I2S BCLK=4/SD=27/WS=26（INMP441 双麦，2026-10-21 验收档）；cred_store
 # = nvs:rr3（凭据存储源标记非凭据值——板侧读数面可见，boot 读链不消费＝批N14
 # 架构事实，与板侧 cred namespace "rr3" 单真值同源）。宿主侧两键

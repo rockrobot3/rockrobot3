@@ -32,7 +32,7 @@ kind = "i2c"
 channels = 0
 
 [[controller]]
-# UART2：板↔宿主桥（921600，批D②）。缺省引脚 GPIO16/17 一装驱动即把 I2C0 打死
+# UART2：板↔宿主桥（2M，2026-10-30 提档；批D② 曾为 921600）。缺省引脚 GPIO16/17 一装驱动即把 I2C0 打死
 # （board.rs 自述"弃用"）——该约束不进 conflicts 集（它约束的是 UART2 的选脚，
 # 不是两条已启用线的互斥），由本注记与 board.rs 单点承载；UART2 实用 GPIO18/19。
 name = "uart2"

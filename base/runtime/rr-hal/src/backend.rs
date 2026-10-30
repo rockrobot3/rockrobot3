@@ -446,7 +446,7 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
                         .and_then(|v| crate::esp32_uart::rr3_periph_axis_parse(&v))
                         .unwrap_or(rr_hal_api::RR3_PERIPH_AXIS_DEFAULT);
                     // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
-                    // 已钉 921600，会话须显式同档）
+                    // 已钉 `UART2_BAUD_HZ`（2026-10-30 起 2M），会话须显式同档）
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
@@ -609,7 +609,7 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
             {
                 Ok(p) if !p.is_empty() => {
                     // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
-                    // 已钉 921600，会话须显式同档）
+                    // 已钉 `UART2_BAUD_HZ`（2026-10-30 起 2M），会话须显式同档）
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))

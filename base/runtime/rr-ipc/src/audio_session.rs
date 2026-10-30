@@ -32,7 +32,7 @@ pub const SETTLE: Duration = Duration::from_millis(1200);
 /// 3s 无字节 = 板面哑了（握手路径点名失败，不再无限等）。
 pub const REPLY_TIMEOUT_MS: i32 = 3000;
 /// 帧读超时（毫秒，机制面 `rr3_read_timeout`）：单次等就绪时长。正常流分片
-/// 背靠背（921600 线速 ~89ms/片），200ms 静默 = 此读无数据（EOF 形状上交帧层
+/// 背靠背（2M 线速 ~44ms/片；921600 时代 ~89ms/片），200ms 静默 = 此读无数据（EOF 形状上交帧层
 /// → `Closed`/`Torn*` 报错计 err_streak）；连续 3 次 → 重同步。缺省阻塞读
 /// 语义留给其余用户，收流面全走超时档。
 pub const READ_TIMEOUT_MS: i32 = 200;
