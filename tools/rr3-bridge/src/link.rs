@@ -27,7 +27,7 @@ const WAIT_SLICE: Duration = Duration::from_millis(250);
 pub struct BridgeConfig {
     /// UART 设备路径（macOS `/dev/tty.usbserial-*`、Linux `/dev/ttyUSB0`）。
     pub uart: PathBuf,
-    /// 波特率（只收 115200/9600/921600，解析期已校验）。
+    /// 波特率（只收 115200/9600/921600/1500000/2000000，解析期已校验）。
     pub baud: u32,
     /// rrd 套接字路径（`--socket`，如 /var/run/rock3-ipc.sock）。
     pub socket: PathBuf,

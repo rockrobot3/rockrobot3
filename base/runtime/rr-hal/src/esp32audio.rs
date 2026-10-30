@@ -4,7 +4,8 @@
 //! 链路：板面 mic.rs 分片组帧（16kHz 双声道 s16le，128ms/8192B 一片，A-IPC
 //! Event 帧，topic `rr3-sense/audio/pcm`）→ UART2（[`crate::esp32_uart::
 //! RR3_HAL_PERIPH_UART_ENV`] 指定设备，[`crate::esp32_uart::
-//! RR3_HAL_PERIPH_BAUD_ENV`] 波特率——板固件已钉 921600，须显式同档）→ 本件
+//! RR3_HAL_PERIPH_BAUD_ENV`] 波特率——板固件已钉 `UART2_BAUD_HZ`（2026-10-30 起
+//! 2M），须显式同档）→ 本件
 //! 收流：开口 → `rr_ipc::audio_session::handshake`（settle/防御 OFF/ON 应答
 //! 扫描，与 rr3-audio-rec 同一机制单点）→ 读线程大块裸读（判据② 节奏）→
 //! [`FrameAssembler`](rr_ipc::FrameAssembler) 拆帧 → 四道门解析 → 环形缓冲

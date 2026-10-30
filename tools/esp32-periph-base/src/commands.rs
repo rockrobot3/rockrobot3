@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size};
 
-use crate::board::{FRAME_DRAIN_MAX, OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST};
+use crate::board::{
+    FRAME_DRAIN_MAX, OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST, UART2_BAUD_HZ,
+};
 use crate::face::expr_eye_base;
 use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
 use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
@@ -65,7 +67,9 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
     };
     let _ = reply(
         &mut io.uart,
-        "READY periph-base v0.4.0 ctrl/runtime split + serial-servo + baud921600 (type HELP for commands)",
+        &format!(
+            "READY periph-base v0.4.0 ctrl/runtime split + serial-servo + baud{UART2_BAUD_HZ} (type HELP for commands)"
+        ),
     );
     loop {
         // 先清 outbox（运行面异步回包：SCAN 逐点等）+ audio_q（批D③ 音频分片整帧
@@ -109,8 +113,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@921600，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T093)"
-                    .into(),
+                format!("CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@{UART2_BAUD_HZ}，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T093)")
             ),
             "OLED" => {
                 // 参数取原始行去指令头，保留内嵌空格（≤63 字符 = 3 行 × 21 列，row3 角度行）

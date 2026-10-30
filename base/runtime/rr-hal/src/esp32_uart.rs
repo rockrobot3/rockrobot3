@@ -167,7 +167,8 @@ struct Rr3BridgeConn {
 }
 
 impl Rr3BridgeConn {
-    /// 波特率显式档（批D②）：板固件 921600 时经 env/构造参数同档传入。
+    /// 波特率显式档（批D②）：板固件 `board::UART2_BAUD_HZ`（2026-10-30 起 2M）
+    /// 时经 env/构造参数同档传入。
     fn rr3_bridge_conn_new_with_baud(path: PathBuf, baud: u32) -> Self {
         Self {
             path,
@@ -425,13 +426,16 @@ mod tests {
         }
     }
 
-    /// 波特率 env 取值裁决（批D②）：三档内放行、trim 宽容；档位外/垃圾全拒
+    /// 波特率 env 取值裁决（批D②）：档位表内放行、trim 宽容；档位外/垃圾全拒
     /// （真值单点在 rr-ipc 档位表，本侧只做解析）。
     #[test]
     fn periph_baud_parse_accepts_whitelist_only() {
         assert_eq!(rr3_periph_baud_parse("115200"), Some(115200));
         assert_eq!(rr3_periph_baud_parse(" 921600 "), Some(921600));
         assert_eq!(rr3_periph_baud_parse("9600"), Some(9600));
+        // 1.5M/2M 试用档（2026-10-30 提档实验进白名单；2M 为当前落板档）
+        assert_eq!(rr3_periph_baud_parse("1500000"), Some(1_500_000));
+        assert_eq!(rr3_periph_baud_parse("2000000"), Some(2_000_000));
         for bad in ["", "0", "230400", "921600x", "-1"] {
             assert_eq!(rr3_periph_baud_parse(bad), None, "{bad}");
         }

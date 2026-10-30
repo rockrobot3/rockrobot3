@@ -52,11 +52,13 @@
 //! 守门用例以有界重试容忍（真泄漏锁是永久的，重试恒败照常 panic）；生产
 //! 同形状（桥进程 spawn 运维工具后并发重开同路径）同理重试即过。
 //!
-//! 波特率只收 [`rr3_uart_baud_speed`] 认识的三档（115200 默认 / 9600 降速 /
-//! 921600 高速）：9600 是 0.0.7 方案 P3 的合法降速处置；921600 是 0.0.5 增补轮五
-//! 批D② 按带宽账加的高速档（音频上行双通道 16kHz×16bit ≈ 512kbps，115200 载
-//! 不动、921600 有效 ≈ 737kbps 可承载）。缺省 115200 不变（Q1=(a) 裁定），高速
-//! 档只显式选择——不预设更大的波特率动物园。
+//! 波特率只收 [`rr3_uart_baud_speed`] 认识的档位（115200 默认 / 9600 降速 /
+//! 921600 高速 / 1.5M 与 2M 高速档）：9600 是 0.0.7 方案 P3 的合法降速处置；
+//! 921600 是 0.0.5 增补轮五批D② 按带宽账加的高速档（音频上行双通道
+//! 16kHz×16bit ≈ 512kbps，115200 载不动、921600 有效 ≈ 737kbps 可承载）；
+//! 1.5M/2M 是为"不动音频口径、只扩链路容量"加的高容量档（2026-10-30 链路
+//! 换树莓派 PL011 三线直连后实测干净，板固件落 2M，音频 85KB/s 占线降到 ~34%）。
+//! 缺省 115200 不变（Q1=(a) 裁定），高速档只显式选择——不预设更大的波特率动物园。
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -87,6 +89,10 @@ mod imp {
     pub const B9600: SpeedT = 9600;
     /// macOS 字面波特率（SDK sys/termios.h：`#define B921600 921600`，批D② 高速档）
     pub const B921600: SpeedT = 921600;
+    /// 更高档（字面值，macOS 无 `B1500000` 宏）：USB 串口驱动按字面值分频，
+    /// 上限取决于适配器（CP2102/FT232R 各档实测为准，不是编译期保证）。
+    pub const B1500000: SpeedT = 1_500_000;
+    pub const B2000000: SpeedT = 2_000_000;
     /// SDK sys/termios.h：`#define NCCS 20`、`#define VMIN 16`、`#define VTIME 17`
     pub const NCCS: usize = 20;
     pub const VMIN: usize = 16;
@@ -163,6 +169,10 @@ mod imp {
     pub const B9600: SpeedT = 0o14;
     /// Linux uapi asm-generic/termbits.h：`#define B921600 0010007`（八进制，批D②）
     pub const B921600: SpeedT = 0o10007;
+    /// Linux uapi asm-generic/termbits.h：`#define B1500000 0010012` / `B2000000 0010013`
+    /// （八进制；PL011 时钟 48MHz 下 1.5M=32 分频、2M=24 分频，均为整分频）
+    pub const B1500000: SpeedT = 0o10012;
+    pub const B2000000: SpeedT = 0o10013;
     /// Linux：`#define NCCS 32`、`#define VMIN 6`、`#define VTIME 5`
     pub const NCCS: usize = 32;
     pub const VMIN: usize = 6;
@@ -231,8 +241,8 @@ mod imp {
 }
 
 use imp::{
-    NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, CLOCAL, CREAD, F_GETFL, F_SETFL,
-    O_CLOEXEC, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME,
+    NfdsT, PollFd, SpeedT, Termios, B115200, B1500000, B2000000, B921600, B9600, CLOCAL, CREAD,
+    F_GETFL, F_SETFL, O_CLOEXEC, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME,
 };
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
@@ -279,18 +289,24 @@ extern "C" {
     fn c_fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 
-/// 波特率 → `speed_t`。只认三档：115200（默认）、9600（P3 合法降速）与 921600
-/// （批D② 音频上行高速档）。不在档位上报错——静默降到最近的档位等于把线路参数
-/// 交给运气。
+/// 波特率 → `speed_t`。115200（默认）/ 9600（P3 合法降速）/ 921600 / 1.5M / 2M
+/// 五档：音频上行 16k 双声道 b64 后 ≈ 87KB/s，921600 有效 92.16KB/s 只剩 5% 余量，
+/// 提档是唯一不动音频口径的解法（2M 有效 250KB/s = 占 34%，板固件 2026-10-30 起
+/// 落 2M）。档位只代表"软件侧认识"，**物理可行性由接线决定**（2026-10-20 杜邦线
+/// 实测 2M 滑移乱码、1.5M 间歇乱码；2026-10-30 换树莓派 PL011 三线直连后 1.5M/2M
+/// 长跑零误码——见 docs/status.md），换线/换板后须重测。不在档位上报错
+/// ——静默降到最近的档位等于把线路参数交给运气。
 pub fn rr3_uart_baud_speed(baud: u32) -> std::io::Result<SpeedT> {
     match baud {
         115200 => Ok(B115200),
         9600 => Ok(B9600),
         921600 => Ok(B921600),
+        1_500_000 => Ok(B1500000),
+        2_000_000 => Ok(B2000000),
         other => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!(
-                "不支持的波特率 {other}：只支持 115200（默认）、9600（P3 降速档）与 921600（批D② 高速档）"
+                "不支持的波特率 {other}：只支持 115200（默认）、9600（降速档）、921600/1500000/2000000（高速档）"
             ),
         )),
     }
@@ -391,7 +407,7 @@ impl Rr3UartConn {
         Self::open_with_baud(path, RR3_UART_BAUD_DEFAULT)
     }
 
-    /// 打开串口设备并配 raw 模式，波特率显式给定（只收 115200/9600/921600）。
+    /// 打开串口设备并配 raw 模式，波特率显式给定（白名单见 [`rr3_uart_baud_speed`]）。
     pub fn open_with_baud(path: &Path, baud: u32) -> std::io::Result<Self> {
         let speed = rr3_uart_baud_speed(baud)?;
         // 排他登记先行：guard 拿不到就不开数据 fd，报错点名叫人（fail-closed）。
