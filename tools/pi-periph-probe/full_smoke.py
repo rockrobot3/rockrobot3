@@ -111,6 +111,11 @@ ask("AUDIO ON", r"OK audio on", wait=0.8)
 text(1.0)  # 让真流跑一会儿（本探针不解析帧，帧完整性由 bw_probe 判）
 ask("AUDIO OFF", r"OK audio off", wait=1.2)
 
+# 退场恢复：FACE idle 回中性表情——探针跑完不给板子留下 "scared" 定格或
+# OLED 文本模式（"OLED SMOKE" 写入的文本模式会被前面的 FACE 序列重开，
+# 但最后一条 FACE 是 ERR 项不换模式，所以补一条显式 idle）
+ask("FACE idle", r"OK face=idle", wait=0.6)
+
 # ---- 汇总 ----
 passed = sum(1 for _, ok, _ in results if ok)
 total = len(results)
