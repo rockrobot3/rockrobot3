@@ -1,6 +1,6 @@
 """行面 robustness 六探（超长行 / 半行超时 / 拼接检测 / 连发 / 写前记账）。
 
-用法: python3 robust_probe.py    （缺省 2M 档；换档 env `RR3_PROBE_BAUD`、
+用法: python3 robust_probe.py    （缺省 1.5M 档；换档 env `RR3_PROBE_BAUD`、
 换口 env `RR3_PROBE_TTY`）
 
 T6a/T6b 的判据是写前记账（1.5s 稳态角），"从 PAN 90 起步测不出回退"这个
@@ -18,7 +18,7 @@ def baud_of(name):
     raise SystemExit("未知波特率档名: " + name)
 
 
-BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B2000000"))
+BAUD = baud_of(os.environ.get("RR3_PROBE_BAUD", "B1500000"))
 
 fd = os.open(DEV, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
 a = termios.tcgetattr(fd)

@@ -1,6 +1,6 @@
 """UART 带宽/误码连续性探针（树莓派 PL011 直连 classic 板）。
 
-用法: python3 bw_probe.py [termios 常量名，缺省 B2000000] [音频秒数，缺省 60]
+用法: python3 bw_probe.py [termios 常量名，缺省 B1500000] [音频秒数，缺省 60]
       换口用 env `RR3_PROBE_TTY`。
 
 测三件事：
@@ -25,7 +25,7 @@ def baud_of(name):
     raise SystemExit("未知波特率档名: " + name)
 
 
-BAUD = baud_of(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("RR3_PROBE_BAUD", "B2000000"))
+BAUD = baud_of(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("RR3_PROBE_BAUD", "B1500000"))
 SECS = int(sys.argv[2]) if len(sys.argv) > 2 else 60
 DEV = os.environ.get("RR3_PROBE_TTY", "/dev/ttyAMA0")
 MAGIC = b"\x31\x45\x52\x41"  # magic LE 线上字节 31 45 52 41
