@@ -1759,6 +1759,17 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   ③ rrd 面：conn.rs 写帧入口带 payload_crc32（与板侧 CRC32 定档一致），
      registry/supervisor 有注册上限、重启退避、失败上限。**深度审查（锁序/
      无界资源逐行）未完成**，归后续窗口。
+  **V5 长跑稳定性（2026-10-30，新增 `longrun.py` 探针第十一支，板侧判据全绿）**：
+  600s 并发（音频流全程 + INFO@5s + 全行程动作@10s）：59 动作 ack 30/30→
+  全程零 ack 缺失、背压/作业/应答丢失**增量全零**、堆 min_free 零新低
+  （100352B 稳住）——**板侧无生产阻碍**。探针自身三轮演进教训（全部入注释）：
+  ① 忘发 AUDIO ON 且拿开机累计计数当本轮值（INFO 是累计口径，判据必须取增量，
+     seq 基线 8378→13069 连续性可跨轮对账）；② `pkill -f longrun.py` 会自匹配
+     ssh 自身 bash 命令行（kill/ pgrep 都要 `[l]ongrun` 方括号模式，且 kill 与
+     启动拆两条 ssh——启动段命令行里也含同名字面量）；③ 探针 RX 消化差额
+     7/4691=0.15%（<1% 记仪器限制）。**未决**：CRC 不符 3/4691=0.064% 出现在
+     音频饱和线上，签名与"Pi 侧 RX 停顿撕裂帧"一致但归因未钉死——待 Rust 路径
+     （rr3-audio-rec/bridge）同负载复验其 CRC-bad 计数再定责。
   `cmd_loop`（每轮先 `drain_outbox`/`drain_audio` 再窥视一字节、1-tick 空口回轮首）、
   `read_line`（字节间超时 + 半行预算 + 超长行先吞尾再回 ERR）、`drain_line_tail`、
   `frame_round` 的残尾吞净、`push_job`（同形状 Move 合批为最新目标 + 队满优先让位新 Move）、
