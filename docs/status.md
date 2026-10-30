@@ -1856,13 +1856,89 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   - **结论：rrd 无生产阻碍**；V7 全部子项（六模块非骨架、音频通道契约、rrd
     深审）至此收口。
 
+**生产栈实机勘查与部署重启（2026-10-31 晨，U 轮）**：
+  背景：用户报告「喊它没反应/舵机不转/OLED 出现 Hello 字样与舵机参数」。实机
+  勘查（pi@192.168.124.52）推翻此前"探针问题"的假设——**生产栈本身在跑**
+  （rrd + 五模块 + python brain），但部署停留在 **2026-10-14**，整 17 天未更新。
+  逐条取证（全部可复现）：
+
+  ① **部署链腐化（已修，721c12f）**：`pack-arm64.sh` 仍按 python 树打包 brain
+     （`cp modules/rr3-brain/rr3_brain`），而 dc9d6f4（批N32件四）已把 brain 迁为
+     Rust 二进制并撤除 rr3-pack 的 lang=python 分支——cp 失败整链断。**部署脚本
+     无任何门禁覆盖，形态变更无人同批扫描 tools/deploy/**。同日发现 brain 的
+     ureq+rustls(ring) 需 C 工具链，musl 宿主交叉结构性不覆盖（aarch64-linux-musl-gcc
+     不存在），与 alsa 同类 → 归板上原生构建。已重组：① musl 五件 → ② payload
+     （brain 只落 manifest）→ ③ build-onboard（brain+sense+interact 三件）→
+     ④ staging → ⑤ 断言。**当日已按新链成功出包并安装**（含旧树备份
+     `/home/pi/rockrobot3-old-20261031-0703`，可回滚）。
+
+  ② **装配单与实机不符（生产级根因，未修）**：实机是 Pi4B 宿主 × ESP32 classic
+     头（舵机/OLED/双麦全在板上），但 rrd.service 指向 `profiles/distro.toml`
+      ——其 [[pin]] 把 `act.axis.pwm` 指向 **Pi PWM0 引脚12**、`ui.face.spi` 指向
+     **Pi MAX7219**，两者实机都不存在。`profiles/pi4b-host-esp32-classic.toml`
+     是更接近的档案（板侧十一键在 [hardware]），但其 [[pin]] 仍留 ui.face.spi
+     （注释写明"rr3-interact 开机必探显示面 fail-closed，无显示件时退出"）。
+
+  ③ **装载门拒启导致音频链整体缺席（「喊它没反应」的直接根因）**：新 rrd 启动后
+     `rr3-ctl status` 只有 connect/act running；日志明示
+     `拒绝启动 rr3-sense：缺格 sensor.env / sensor.imu`、
+     `拒绝启动 rr3-power：缺格 power.charger`——distro 档声明 SHTC3(0x70)/
+     ICM-42688(0x68)/INA219(0x40) 三个 I2C 器件，实机未接 → 探测不到 →
+     **fail-closed 整个模块不启动，连同 audio.capture/vad 一起没了**。
+     这是"配置声明了不存在的硬件"造成的整模块连坐，不是音频代码缺陷。
+
+  ④ **brain/interact 注册后即死（未定案，有精确证据与下一步）**：两模块在
+     rrd 日志里都能看到 `注册 rr3-xxx task=N`（分配了递增 task 号），随即
+     `连接断开（Connection reset by peer）`；模块侧 per-unit 日志
+     （`/var/run/rock3-ipc.sock.log/<unit>.log`）只留下
+     `退出: 注册失败: 总线已断开`（rr-bus-api client.rs:621 的 reader-EOF 路径）。
+     手工直跑（注入 RR3_BUS_PATH/RR3_MANIFEST）同样在该点退出——**rrd 不接受
+     非受管子进程的注册**（可能是重复名 Busy 路径回码后断开，conn.rs:174-176
+     "重复名与超额 = Busy，先回错误帧再断开"）。下一步实验：用最小装配集
+     （只启 brain+interact）复跑 + strace 该进程 socket 时序；或核对
+     registry 是否残留 failed 条目造成 name Busy。
+
+  ⑤ **单 UART 多消费方的结构性冲突（未修，ADR 级）**：rr-hal 的 esp32 后端
+     （`RR3_HAL_BACKEND=esp32` + `RR3_HAL_PERIPH_UART` + `RR3_HAL_PERIPH_BAUD`）
+     让 interact(显示)/act(舵机)/sense(音频) 各自**直开同一串口**，而 rr-ipc
+     开口是 **flock 排他**（第二个 opener 当场被拒）。三模块共存于一台 Pi 时
+     必然互斥。桥（rr3-bridge）名义上是解法，但板固件不发 register 帧
+     （全仓 grep 无 register 臂；它是纯 UART 帧对端 `RR3_PERIPH_TASK`），
+     桥接上 rrd 会在握手上失败——**桥链对当前固件不可用**。正确修法需
+     UART broker（单进程持口 + 本地代理）或 fd 传递，属架构决议。
+
+  ⑥ **硬件事实补充**：Pi 只有一块声卡（sndrpigooglevoi，Google voiceHAT，
+     capture 可用；`arecord -D hw:2,0` 当时被生产进程占用报 busy），**无 USB
+     回放卡**——`profiles/pi4b-host-esp32-classic.toml` 的
+     `alsa_device="plughw:CARD=Device"` 在本机不成立。`/dev/ttyAMA0` 存在、
+     无 ttyUSB（板走 GPIO14/15 直连而非 USB 转串）。装配手册记载 DoA 真件档
+     设计是"USB ≥2 麦阵列"（BOM #1），实机未接，与 ESP32 双麦口径并存需裁定。
+
+  ⑦ **brain 无唤醒词/KWS**：全模块 grep `你好洛克|wake|唤醒|kws` 零命中；
+     ASR 走云端（ureq，需 env 端点与密钥）。「喊它要有回应」的本地无条件
+     可达路径仍是探针侧 voice_respond v7.2（见 V3 收口）。
+
+  结论：**当前实机生产栈处于"部分模块缺席"状态**——connect/act 起、
+  sense/power 被装载门拒、brain/interact 注册后死。这不是单点 bug，而是
+  "装配单描述的是另一台机器 + 部署 17 天未更新 + 单 UART 多消费方结构冲突"
+  三者叠加。修复顺序（依赖序）：先定机型档案（②⑥，含移除不存在的 IIC 器件、
+  显示面走 esp32 后端）→ 再解单 UART 冲突（⑤，ADR 级）→ 再定 brain/interact
+  注册死因（④）→ 最后才谈「你好洛克」闭环（⑦）。
+
 **遗留队列（白班，按优先序）**：
-  1. 阵列声学衰减 ~30dB 物理检查（V3 深夜轮⑥）：开壳目检两麦装配位/声孔
+  1. 机型档案定案（U 轮②⑥）：新增/修正本机档案——移除 SHTC3/ICM-42688/INA219
+     三个不存在的 IIC 器件声明（避免 sense/power 整模块连坐）、alsa 指向
+     voiceHAT、显示/舵机/音频走 esp32 后端；须与 `[slots] present`、
+     `enabled_slots` 三处一致。
+  2. 单 UART 多消费方架构决议（U 轮⑤）：UART broker 或 fd 传递；桥链需板固件
+     补 register 臂才可用。
+  3. brain/interact 注册后死因定案（U 轮④）：最小装配集 + strace。
+  4. 阵列声学衰减 ~30dB 物理检查（V3 深夜轮⑥）：开壳目检两麦装配位/声孔
      朝向——它同时压制定向 ILD 幅度与喊话信噪比，是拾音定向恢复转向的前提。
-  2. 定向锚点重建：白天用 voice_respond v7.2（触发器已根治）采带真值标注的
+  5. 定向锚点重建：白天用 voice_respond v7.2（触发器已根治）采带真值标注的
      定向喊话（左右各 ≥3 次有效触发），ILD 锚点成形后恢复两态转向。
-  3. V5 CRC 归因（3/4691）：先给 rr3-audio-rec FrameAssembler 加 crc_bad
+  6. V5 CRC 归因（3/4691）：先给 rr3-audio-rec FrameAssembler 加 crc_bad
      计数（现无校验，grep crc 零命中）→ build-onboard → 10min 同负载复验。
-  4. 「你好洛克」ASR/KWS 未建（喊任何响声都会回应的诚实口径不变）。
-  5. RAIL 分压测点未接线（full_smoke RAIL raw=0，硬件项）。
-  6. 表情胶囊眼观感打磨（用户反馈"表情符号做得并不好"）。
+  7. 「你好洛克」ASR/KWS 未建（喊任何响声都会回应的诚实口径不变）。
+  8. RAIL 分压测点未接线（full_smoke RAIL raw=0，硬件项）。
+  9. 表情胶囊眼观感打磨（用户反馈"表情符号做得并不好"）。
