@@ -69,9 +69,10 @@ mod tests {
     use super::*;
     // no_std 显式化（0.0.7 批B）：std prelude 不再随 `#![no_std]` 隐式注入
     use crate::protocol::header::{
-        opcode, Rr3HdrError, LEN_DST_TASK, LEN_MAGIC, LEN_OPCODE, LEN_PAYLOAD_LEN, LEN_RESERVED,
-        LEN_SRC_TASK, LEN_TIMESTAMP_NS, LEN_TRACE_ID, OFF_DST_TASK, OFF_MAGIC, OFF_OPCODE,
-        OFF_PAYLOAD_LEN, OFF_RESERVED, OFF_SRC_TASK, OFF_TIMESTAMP_NS, OFF_TRACE_ID,
+        opcode, rr3_crc32, Rr3HdrError, LEN_DST_TASK, LEN_MAGIC, LEN_OPCODE, LEN_PAYLOAD_LEN,
+        LEN_RESERVED, LEN_SRC_TASK, LEN_TIMESTAMP_NS, LEN_TRACE_ID, OFF_CRC32, OFF_DST_TASK,
+        OFF_MAGIC, OFF_OPCODE, OFF_PAYLOAD_LEN, OFF_RESERVED, OFF_SRC_TASK, OFF_TIMESTAMP_NS,
+        OFF_TRACE_ID,
     };
     use std::format;
     use std::io::Cursor;
@@ -111,28 +112,60 @@ mod tests {
         let mut buf = Vec::new();
         rr3_frame_write(&mut buf, &f).expect("写帧应成功");
         assert_eq!(buf.len(), RR3_IPC_HDR_SIZE + 5);
-        assert_eq!(rr3_frame_read(Cursor::new(&buf)).expect("读帧应成功"), f);
+        // 写侧把 CRC 算进头，读回的头必须带上它（不是发送前的 0）
+        let mut want = f.clone();
+        want.header.payload_crc32 = rr3_crc32(&f.payload);
+        assert_ne!(want.header.payload_crc32, 0, "带载荷的头 CRC 必须非零");
+        assert_eq!(
+            rr3_frame_read(Cursor::new(&buf)).expect("读帧应成功"),
+            want
+        );
     }
 
     /// 帧头部必须与 golden 向量逐字节一致（Task 12 的跨架构对比用的就是这个不变量）
     #[test]
     fn frame_header_is_byte_identical_to_golden() {
         let g = golden();
+        // golden 是**无载荷**纯头（CRC 覆盖载荷，故其 CRC 字段本就为 0）
+        let pure = Rr3Header::from_bytes(&g).unwrap();
+        assert_eq!(pure.payload_crc32, 0, "golden 无载荷纯头的 CRC 字段必须为 0");
+        assert_eq!(
+            pure.to_bytes().to_vec(),
+            g,
+            "无载荷纯头与 golden 向量逐字节一致"
+        );
+
+        // 带载荷的真帧：头里 CRC 由载荷算出（非零）且接收侧校验必过；
+        // 除 CRC 字段外，其余头字节仍与 golden 逐字节一致
+        let payload = vec![0xAB; 96];
         let mut body = Vec::new();
         rr3_frame_write(
             &mut body,
             &Rr3Frame {
-                header: Rr3Header::from_bytes(&g).unwrap(),
-                payload: vec![0xAB; 96],
+                header: pure,
+                payload: payload.clone(),
             },
         )
         .unwrap();
-        assert_eq!(
-            &body[..RR3_IPC_HDR_SIZE],
-            &g[..],
-            "帧头部与 golden 向量漂移"
-        );
         assert_eq!(body.len(), 128 + 96);
+        let head = Rr3Header::from_bytes(&body[..RR3_IPC_HDR_SIZE]).unwrap();
+        assert_ne!(head.payload_crc32, 0, "带载荷的真帧头 CRC 必须非零");
+        assert_eq!(head.payload_crc32, rr3_crc32(&payload));
+        assert_eq!(
+            crate::transport::buf::rr3_verify_crc(&head, &payload),
+            Ok(()),
+            "带载荷的真帧头必须能通过接收侧 CRC 校验"
+        );
+        assert_eq!(
+            &body[..OFF_CRC32],
+            &g[..OFF_CRC32],
+            "CRC 之前的头字段与 golden 漂移"
+        );
+        assert_eq!(
+            &body[OFF_RESERVED..RR3_IPC_HDR_SIZE],
+            &g[OFF_RESERVED..],
+            "reserved 区与 golden 漂移"
+        );
     }
 
     /// 跨架构等值的**发射端**（`tools/ci/xarch-verify.sh` 在 x86-64 与 aarch64 各跑一次比对）。

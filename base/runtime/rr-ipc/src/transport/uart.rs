@@ -671,6 +671,16 @@ mod tests {
         h
     }
 
+    /// 构造与读回比对的帧：头里的 CRC 由载荷算出（线面真值，不是发送前的 0）
+    fn frame(header: Rr3Header, payload: &[u8]) -> Rr3Frame {
+        let mut f = Rr3Frame {
+            header,
+            payload: payload.to_vec(),
+        };
+        f.header.payload_crc32 = crate::protocol::header::rr3_crc32(payload);
+        f
+    }
+
     /// 伪串口对：master 是裸 fd（测试经 File 写入），slave 走与真设备同一条
     /// termios 配置路径（from_fd → cfmakeraw/VMIN/speed/tcsetattr）。
     fn pty_pair(baud: u32) -> (std::fs::File, Rr3UartConn) {
@@ -744,10 +754,7 @@ mod tests {
     #[test]
     fn uart_round_trip_normal_frame() {
         let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
-        let f = Rr3Frame {
-            header: hdr(5),
-            payload: b"hello"[..].to_vec(),
-        };
+        let f = frame(hdr(5), b"hello");
         let bytes = rr3_frame_to_bytes(&f).unwrap();
         use std::io::Write as _;
         master.write_all(&bytes).unwrap();
@@ -760,10 +767,7 @@ mod tests {
         );
 
         // 反向：conn 发送（blanket impl → write_all + flush）→ master 读回
-        let back = Rr3Frame {
-            header: hdr(3),
-            payload: b"abc"[..].to_vec(),
-        };
+        let back = frame(hdr(3), b"abc");
         conn.rr3_send_buf(Rr3FrameBuf::from(&back)).unwrap();
         let mut echo = vec![0u8; bytes_len(&back)];
         master.read_exact(&mut echo).unwrap();
@@ -791,10 +795,7 @@ mod tests {
             "坏 magic 必须被头层拒收"
         );
 
-        let f = Rr3Frame {
-            header: hdr(1),
-            payload: b"z"[..].to_vec(),
-        };
+        let f = frame(hdr(1), b"z");
         master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
         let got = conn.rr3_recv_buf().expect("拒收后必须能重新同步收帧");
         assert_eq!(Rr3Frame::try_from(got).unwrap(), f);
@@ -818,10 +819,7 @@ mod tests {
         );
 
         // 恢复阻塞语义再收完整帧（与真设备默认路径一致）
-        let f = Rr3Frame {
-            header: hdr(4),
-            payload: b"res4"[..].to_vec(),
-        };
+        let f = frame(hdr(4), b"res4");
         master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
         let got = conn.rr3_recv_buf().expect("半帧后新帧必须完整读回");
         assert_eq!(Rr3Frame::try_from(got).unwrap(), f);
@@ -844,10 +842,7 @@ mod tests {
             "必须等满超时才返回（未按时醒来 = 语义漂移）"
         );
         use std::io::Write as _;
-        let f = Rr3Frame {
-            header: hdr(3),
-            payload: b"t/o".to_vec(),
-        };
+        let f = frame(hdr(3), b"t/o");
         let bytes = rr3_frame_to_bytes(&f).unwrap();
         master.write_all(&bytes).unwrap();
         // 就绪读可能是部分读，循环收满整帧
@@ -884,10 +879,7 @@ mod tests {
         let mut conn = Rr3UartConn::open_with_baud(&slave_path, RR3_UART_BAUD_DEFAULT)
             .expect("按路径 open pty slave 失败");
         // 开口后的新帧必须整帧读回（残留不得当帧前缀混入）
-        let f = Rr3Frame {
-            header: hdr(5),
-            payload: b"fresh"[..].to_vec(),
-        };
+        let f = frame(hdr(5), b"fresh");
         master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
         let got = conn.rr3_recv_buf().expect("开口后首帧必须完整读回");
         assert_eq!(

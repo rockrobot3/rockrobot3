@@ -98,6 +98,20 @@ impl FrameAssembler {
             return Ok(None);
         }
         let payload = self.buf[RR3_IPC_HDR_SIZE..want].to_vec();
+        let actual = crate::protocol::header::rr3_crc32(&payload);
+        if actual != header.payload_crc32 {
+            // 载荷被破坏：整帧丢弃（不在坏载荷里重扫 magic——可能撞上伪帧起点）。
+            // 丢片由 seq 对账如实记账，误码本身在此显形。
+            self.buf.drain(..want);
+            self.discarded += want as u64;
+            return Err((
+                want as u64,
+                alloc::format!(
+                    "载荷 CRC32 不符 declared={} actual={actual}（整帧丢弃）",
+                    header.payload_crc32
+                ),
+            ));
+        }
         self.buf.drain(..want);
         self.discarded = 0;
         Ok(Some((header, payload)))
@@ -139,7 +153,8 @@ mod tests {
         hdr.timestamp_ns = 100;
         hdr.src_task = 2; // 板面外设执行面位形（诊断显示用；拆帧器不读）
         hdr.dst_task = 1; // 宿主位形
-        let mut bytes = hdr.to_bytes().to_vec();
+        let mut bytes =
+            crate::protocol::header::rr3_header_bytes_with_crc(&hdr, &payload).to_vec();
         bytes.extend_from_slice(&payload);
         bytes
     }
@@ -193,6 +208,31 @@ mod tests {
         let (hdr, payload) = a.pull().unwrap().expect("坏帧后续扫必须出真帧");
         assert_eq!(hdr.trace_id, 0);
         assert!(!payload.is_empty());
+    }
+
+    /// 拆帧器：载荷被改一个字节（头原样）→ CRC 不符，整帧丢弃并报错；
+    /// 丢弃后缓冲不残留，下一真帧照常出。
+    #[test]
+    fn assembler_rejects_corrupted_payload_crc() {
+        let good = board_like_frame(3);
+        let mut bad = good.clone();
+        let plen = u32::from_le_bytes(bad[40..44].try_into().unwrap()) as usize;
+        assert!(plen > 0, "构造的帧必须带载荷");
+        bad[RR3_IPC_HDR_SIZE] ^= 0x01; // 只翻转载荷首字节，头里的声明值不变
+        let mut a = FrameAssembler::new();
+        a.feed(&bad);
+        let (dropped, why) = a.pull().unwrap_err();
+        assert_eq!(
+            dropped,
+            (RR3_IPC_HDR_SIZE + plen) as u64,
+            "坏载荷的整帧（头+载荷）必须被丢弃"
+        );
+        assert!(why.contains("CRC32 不符"), "{why}");
+        assert!(a.pull().unwrap().is_none(), "坏帧丢弃后缓冲不得残留整帧");
+
+        a.feed(&good);
+        let (hdr, payload) = a.pull().unwrap().expect("坏帧丢弃后下一真帧必须照常出");
+        assert_eq!(hdr.payload_len as usize, payload.len());
     }
 
     /// 拆帧器：头层合法的 64MiB plen 越拆帧护栏——按坏帧弃 magic，不缓冲；

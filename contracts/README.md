@@ -91,7 +91,10 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
    `RR3_CONTRACT_SCHEMA_VERSION` 逐值钉住），并在 `topics.toml` 登记受影响主题。
    `topics.toml` 与 `base/runtime/rr-registry/src/module.schema.toml` 各自另有同名整型键
    `schema_version`（当前同为 1），三者不要混写
-3. 消息头扩展**只允许写 reserved 区**并经 `flags` 标记启用（保持与 A-IPC 标准逐字节兼容）
+3. 消息头扩展**只允许写 reserved 区**并经 `flags` 标记启用（保持与 A-IPC 标准逐字节兼容）；
+   **2026-10-30 已启用第一笔扩展**：reserved 前 4 字节（offset 44..48）= `payload_crc32`
+   （载荷 CRC32），余 80 字节（48..128）仍须全零。该扩展为硬切换（旧端按 reserved 非零拒帧），
+   决策与实施点见 [ADR-0006](../docs/process/adr/ADR-0006-采用AiryIPC线格式与rr-ipc分层.md) 决策 1 追加项
 4. 门禁检查以 `bash tools/ci/check.sh` 为**唯一入口**（本地与 CI 同一命令，命名沿用方案 D7 的"三检查"；
    远程在 atomgit，平台自动触发待确认，见方案 §7 遗留项）：
    ① workspace 编译（`--all-targets`，含测试目标）/ ①b workspace 全量测试 /

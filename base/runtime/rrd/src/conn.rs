@@ -97,6 +97,7 @@ fn rr3_out_frame(ty: Rr3PayloadType, dst_task: u64, body: &[u8]) -> Rr3Frame {
             src_task: RR3_TASK_RRD,
             dst_task,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     }
@@ -613,6 +614,7 @@ fn rr3_publish(
             src_task: me.task,
             dst_task: rr_bus::RR3_BROADCAST_DST_TASK,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     };
@@ -862,6 +864,7 @@ fn rr3_route_call(
                         src_task: me.task,
                         dst_task: task,
                         payload_len: payload.len() as u32,
+                        payload_crc32: rr_ipc::rr3_crc32(&payload),
                     },
                     payload,
                 };
@@ -922,6 +925,7 @@ fn rr3_route_response(
             src_task: me.task,
             dst_task: trace,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     };

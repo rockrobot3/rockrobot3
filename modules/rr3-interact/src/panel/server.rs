@@ -647,6 +647,7 @@ pub fn rr3_ctl_send(
             src_task: 0, // ctl 连接没有 task，与外部运维探针同一写法
             dst_task: rr_core::RR3_TASK_RRD,
             payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     };
@@ -1313,6 +1314,7 @@ fn rr3_fake_ctl_rrd(
                         src_task: rr_core::RR3_TASK_RRD,
                         dst_task: req.header.src_task, // 按对端自报回（注册期 rrd 同口径）
                         payload_len: payload.len() as u32,
+                        payload_crc32: rr_ipc::rr3_crc32(&payload),
                     },
                     payload,
                 };
@@ -1800,6 +1802,7 @@ mod tests {
                     src_task: rr_core::RR3_TASK_RRD,
                     dst_task: 7,
                     payload_len: payload.len() as u32,
+                    payload_crc32: rr_ipc::rr3_crc32(&payload),
                 },
                 payload,
             };

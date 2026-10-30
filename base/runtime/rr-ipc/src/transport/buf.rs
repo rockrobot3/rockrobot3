@@ -59,10 +59,14 @@ impl Rr3FrameBuf {
         self.sealed
     }
 
-    /// 原地编头：把 `hdr.to_bytes()` 写进 `[0..128)` 预留区。幂等——重复 seal 落同一串字节。
+    /// 原地编头：把带 CRC 的头写进 `[0..128)` 预留区。幂等——重复 seal 落同一串字节。
+    /// CRC 覆盖整段 payload（载荷字节可能被线面误码破坏，这是唯一的完整性判据）。
     pub fn rr3_seal(&mut self) {
-        let head = self.hdr.to_bytes();
-        self.bytes[..RR3_IPC_HDR_SIZE].copy_from_slice(&head);
+        let mut h = self.hdr;
+        h.payload_crc32 = crate::protocol::header::rr3_crc32(&self.bytes[RR3_IPC_HDR_SIZE..]);
+        // 单一序列化点仍是 `to_bytes`（golden 对拍钉的就是它）
+        self.bytes[..RR3_IPC_HDR_SIZE].copy_from_slice(&h.to_bytes());
+        self.hdr = h;
         self.sealed = true;
     }
 
@@ -139,6 +143,7 @@ pub fn rr3_framebuf_read<S: Rr3ByteStream>(s: &mut S) -> Result<Rr3FrameBuf, Rr3
             None => return Err(Rr3FrameError::TornPayload { want, got: 0 }),
         }
     }
+    rr3_verify_crc(&hdr, &bytes[RR3_IPC_HDR_SIZE..])?;
     Ok(Rr3FrameBuf {
         hdr,
         bytes,
@@ -146,9 +151,25 @@ pub fn rr3_framebuf_read<S: Rr3ByteStream>(s: &mut S) -> Result<Rr3FrameBuf, Rr3
     })
 }
 
+/// 载荷 CRC32 校验（收侧单点）：声明值与实算值不符即返回 [`Rr3FrameError::CrcMismatch`]。
+///
+/// **这是载荷完整性的唯一判据**——头部有 magic/保留区/长度护栏，但载荷本身（尤其是
+/// 音频 b64）被改坏后仍能通过 JSON 门，只能靠 CRC 拦住。
+pub fn rr3_verify_crc(hdr: &Rr3Header, payload: &[u8]) -> Result<(), Rr3FrameError> {
+    let actual = crate::protocol::header::rr3_crc32(payload);
+    if actual != hdr.payload_crc32 {
+        return Err(Rr3FrameError::CrcMismatch {
+            declared: hdr.payload_crc32,
+            actual,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::header::{rr3_crc32, OFF_CRC32};
     use std::io::Cursor;
 
     fn hdr(payload_len: u32) -> Rr3Header {
@@ -172,7 +193,12 @@ mod tests {
         buf.rr3_seal();
         assert!(buf.rr3_sealed());
         let bytes = buf.rr3_as_sealed_bytes().unwrap().to_vec();
-        assert_eq!(&bytes[..RR3_IPC_HDR_SIZE], &hdr(3).to_bytes()[..]);
+        // seal 把 CRC 按载荷算进头：期望头必须是"算过 CRC 的头"
+        let mut want = hdr(3);
+        want.payload_crc32 = rr3_crc32(b"abc");
+        assert_ne!(want.payload_crc32, 0, "带载荷的头 CRC 必须非零");
+        assert_eq!(&bytes[..RR3_IPC_HDR_SIZE], &want.to_bytes()[..]);
+        assert_eq!(buf.rr3_header().payload_crc32, want.payload_crc32);
         assert_eq!(&bytes[RR3_IPC_HDR_SIZE..], b"abc");
         // seal 幂等
         buf.rr3_seal();
@@ -182,13 +208,15 @@ mod tests {
     /// 值视图 ↔ 缓冲 双向往返不丢字段
     #[test]
     fn buf_frame_round_trip() {
-        let f = Rr3Frame {
+        let mut f = Rr3Frame {
             header: hdr(5),
             payload: b"hello"[..].to_vec(),
         };
+        f.header.payload_crc32 = rr3_crc32(&f.payload);
         let buf = Rr3FrameBuf::from(&f);
         assert!(buf.rr3_sealed());
         let back = Rr3Frame::try_from(buf).unwrap();
+        assert_eq!(back.header.payload_crc32, rr3_crc32(b"hello"));
         assert_eq!(back, f);
     }
 
@@ -210,7 +238,28 @@ mod tests {
         let back = rr3_framebuf_read(&mut Cursor::new(sent.clone())).unwrap();
         assert!(back.rr3_sealed());
         assert_eq!(back.rr3_payload(), b"wxyz");
-        assert_eq!(*back.rr3_header(), hdr(4));
+        let mut want = hdr(4);
+        want.payload_crc32 = rr3_crc32(b"wxyz");
+        assert_eq!(*back.rr3_header(), want);
+    }
+
+    /// 读侧 CRC 单点：载荷被改一个字节 → `CrcMismatch { declared, actual }`，帧不得被消费。
+    #[test]
+    fn framebuf_read_rejects_crc_mismatch() {
+        let mut buf = Rr3FrameBuf::rr3_new(hdr(4));
+        buf.rr3_payload_mut().copy_from_slice(b"wxyz");
+        buf.rr3_seal();
+        let mut sent = buf.rr3_as_sealed_bytes().unwrap().to_vec();
+        let declared = u32::from_le_bytes(
+            sent[OFF_CRC32..OFF_CRC32 + 4].try_into().unwrap(),
+        );
+        sent[RR3_IPC_HDR_SIZE] ^= 0x01; // 载荷首字节翻转，头保持原样
+        let actual = rr3_crc32(&sent[RR3_IPC_HDR_SIZE..]);
+        assert_ne!(declared, actual, "翻转载荷后实算 CRC 必须变");
+        assert_eq!(
+            rr3_framebuf_read(&mut Cursor::new(sent)),
+            Err(Rr3FrameError::CrcMismatch { declared, actual })
+        );
     }
 
     /// 读侧错误语义与帧层一致：干净关闭 / 半帧头 / 短 payload

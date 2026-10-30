@@ -20,7 +20,10 @@ pub const OFF_TIMESTAMP_NS: usize = 16;
 pub const OFF_SRC_TASK: usize = 24;
 pub const OFF_DST_TASK: usize = 32;
 pub const OFF_PAYLOAD_LEN: usize = 40;
-pub const OFF_RESERVED: usize = 44;
+/// 载荷 CRC32 偏移（预留区首 4 字节，2026-10-30 启用；见 [`rr3_crc32`]）。
+pub const OFF_CRC32: usize = 44;
+/// 预留区偏移（CRC 之后的剩余部分，仍必须全 0）。
+pub const OFF_RESERVED: usize = 48;
 
 pub const LEN_MAGIC: usize = 4;
 pub const LEN_OPCODE: usize = 2;
@@ -30,7 +33,9 @@ pub const LEN_TIMESTAMP_NS: usize = 8;
 pub const LEN_SRC_TASK: usize = 8;
 pub const LEN_DST_TASK: usize = 8;
 pub const LEN_PAYLOAD_LEN: usize = 4;
-pub const LEN_RESERVED: usize = 84;
+/// 载荷 CRC32 宽度。
+pub const LEN_CRC32: usize = 4;
+pub const LEN_RESERVED: usize = 80;
 
 // ---------------------------------------------------------------------------
 // IPC-T-003 编译期布局断言（ADR-0006 后果项）。
@@ -71,7 +76,11 @@ const _: () = assert!(
     "payload_len 偏移出现空洞/重叠"
 );
 const _: () = assert!(
-    OFF_RESERVED == OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN,
+    OFF_CRC32 == OFF_PAYLOAD_LEN + LEN_PAYLOAD_LEN,
+    "crc32 偏移出现空洞/重叠"
+);
+const _: () = assert!(
+    OFF_RESERVED == OFF_CRC32 + LEN_CRC32,
     "reserved 偏移出现空洞/重叠"
 );
 const _: () = assert!(
@@ -189,6 +198,11 @@ pub struct Rr3Header {
     pub src_task: u64,
     pub dst_task: u64,
     pub payload_len: u32,
+    /// 载荷 CRC32（`0xEDB88320` 反射多项式，初值/异或均为 `0xFFFF_FFFF`）。
+    /// **必须与 payload 一致**——发送侧由 [`rr3_header_bytes_with_crc`] 自动写入，
+    /// 接收侧在拿到 payload 后必须校验（[`rr3_crc32`]）。头部自身完整性由 magic /
+    /// 保留区全零 / payload_len 护栏三重限定，故 CRC 只覆盖载荷。
+    pub payload_crc32: u32,
 }
 
 impl Rr3Header {
@@ -202,10 +216,12 @@ impl Rr3Header {
             src_task: 0,
             dst_task: 0,
             payload_len,
+            payload_crc32: 0,
         }
     }
 
-    /// 解析 128 字节头（小端）。IPC-T-001/002/010。
+    /// 解析 128 字节头（小端）。IPC-T-001/002/010。**不校验 CRC**（此处的入参只有
+    /// 头，CRC 覆盖载荷）——校验点在拿到 payload 的调用方（见 [`rr3_crc32`]）。
     pub fn from_bytes(buf: &[u8]) -> Result<Self, Rr3HdrError> {
         if buf.len() < RR3_IPC_HDR_SIZE {
             return Err(Rr3HdrError::TooShort { got: buf.len() });
@@ -237,11 +253,15 @@ impl Rr3Header {
             src_task: u64le(OFF_SRC_TASK),
             dst_task: u64le(OFF_DST_TASK),
             payload_len,
+            payload_crc32: u32le(OFF_CRC32),
         })
     }
 
     /// 编码为 128 字节（reserved 自动全 0）。const：`cargo check` 任意目标即求值，
     /// golden 对拍（本文件末尾 `const _`）因此在每个目标编译期成立——0.0.7 批B 第④路。
+    ///
+    /// 写出的 `payload_crc32` 取结构体字段值：**发送路径不得直接用本函数**（不知道
+    /// 载荷就填不出 CRC），要用 [`rr3_header_bytes_with_crc`]。
     pub const fn to_bytes(&self) -> [u8; RR3_IPC_HDR_SIZE] {
         let mut buf = [0u8; RR3_IPC_HDR_SIZE];
         put_le(&mut buf, OFF_MAGIC, MAGIC as u64, LEN_MAGIC);
@@ -262,8 +282,44 @@ impl Rr3Header {
             self.payload_len as u64,
             LEN_PAYLOAD_LEN,
         );
+        put_le(&mut buf, OFF_CRC32, self.payload_crc32 as u64, LEN_CRC32);
         buf
     }
+}
+
+/// 载荷 CRC32（IEEE 802.3，反射多项式 `0xEDB88320`，初值与结果异或 `0xFFFF_FFFF`）。
+///
+/// 逐位实现而非查表：板侧 16KB TX 环与 8KB 级任务栈下，表驱动要多占 1KB `.rodata`
+/// 与一次查表访存；11KB 分片的逐位计算在 240MHz 上是数百微秒级，代价可接受，换来
+/// 零表、零依赖、const 可求值（测试里可直接在编译期钉向量）。
+pub const fn rr3_crc32(bytes: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    let mut i = 0;
+    while i < bytes.len() {
+        crc ^= bytes[i] as u32;
+        let mut k = 0;
+        while k < 8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+            k += 1;
+        }
+        i += 1;
+    }
+    !crc
+}
+
+/// 编出带正确 CRC 的 128B 头（**发送路径的唯一入口**）：CRC 覆盖整段 payload。
+///
+/// 头里的 `payload_len` 与载荷长度不一致时 CRC 仍会算出来，但长度门（
+/// [`Rr3FrameError::LengthMismatch`](crate::protocol::wire::Rr3FrameError::LengthMismatch)）
+/// 会先拒绝——两层各自独立，不互相代偿。
+pub fn rr3_header_bytes_with_crc(hdr: &Rr3Header, payload: &[u8]) -> [u8; RR3_IPC_HDR_SIZE] {
+    let mut h = *hdr;
+    h.payload_crc32 = rr3_crc32(payload);
+    h.to_bytes()
 }
 
 /// 小端写 `len` 字节进 `buf[off..]`（const fn：不依赖 `copy_from_slice` 的 const 稳定版本，
@@ -314,6 +370,8 @@ const fn golden_header_bytes() -> [u8; 256] {
         src_task: 7,
         dst_task: 0,
         payload_len: 96,
+        // golden 头是**无载荷**的纯头（CRC 覆盖载荷，此处填 0 与 golden 文件一致）
+        payload_crc32: 0,
     };
     let bytes = hdr.to_bytes();
     let mut out = [0u8; 256];
@@ -466,12 +524,28 @@ mod tests {
     #[test]
     fn header_rejects_dirty_reserved() {
         let mut bytes = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 0).to_bytes();
-        assert_eq!(bytes[OFF_RESERVED..].len(), 84);
-        bytes[OFF_RESERVED + 83] = 0xFF;
+        assert_eq!(bytes[OFF_RESERVED..].len(), LEN_RESERVED);
+        bytes[OFF_RESERVED + LEN_RESERVED - 1] = 0xFF;
         assert_eq!(
             Rr3Header::from_bytes(&bytes),
             Err(Rr3HdrError::ReservedNotZero)
         );
+    }
+
+    /// CRC32 已知向量（编译期钉死实现，防多项式/反射写错）：`"123456789"` → 0xCBF43926。
+    #[test]
+    fn crc32_known_vectors() {
+        assert_eq!(rr3_crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(rr3_crc32(b""), 0);
+        // 头字段 CRC 可独立序列化/还原（CRC 只覆盖载荷，头自身不参与）
+        let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, 4);
+        h.payload_crc32 = 0xDEAD_BEEF;
+        let b = h.to_bytes();
+        assert_eq!(
+            u32::from_le_bytes(b[OFF_CRC32..OFF_CRC32 + 4].try_into().unwrap()),
+            0xDEAD_BEEF
+        );
+        assert_eq!(Rr3Header::from_bytes(&b).unwrap().payload_crc32, 0xDEAD_BEEF);
     }
 
     /// IPC-T-010：未知 flags 位不得报错（前向兼容）；已定义位组合正常解析
