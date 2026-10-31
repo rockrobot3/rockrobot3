@@ -2036,3 +2036,28 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   3. DoA 锚点/双麦基线仍是旧标定（遗留 4/5 不变）；当前方向只作粗档（±30/±90）。
   4. `rr3.set_bindings` 未随音频链下发（板 `/api/board/bindings` 仍 `null`）——
      音频引脚走固件编译缺省、功能不受影响；绑定对账锚待舵机/显示接入时一并接。
+
+**U 轮续3：云凭据接入与真语音闭环（2026-10-31 晚）**：
+  凭据（值不落账，只记来源与落位）：
+  - ASR/TTS：`RR3_CLOUD_API_KEY` ← `~/.rr3/cloud_key`（51B）。**订正**：Mac
+    `.zshrc` 里同名的旧键已失效（SiliconFlow 返回 401 / code 30014），重接必须
+    用 cloud_key 这把。
+  - LLM：模型行 `api_key_ref = "DeepSeek官方"` ← secrets 文件同名键（`model/test`
+    返回 200 / 743ms）。
+  - 板端落位：`/etc/rockrobot3/cloud.env`（0600）＋
+    `/etc/rockrobot3/secrets.json`（0600）；rrd drop-in 加
+    `EnvironmentFile=-/etc/rockrobot3/cloud.env` 与
+    `RR3_SECRETS_FILE=/etc/rockrobot3/secrets.json`（root 无 HOME，缺省 secrets
+    路径不可靠）。
+  三腿直测（不经模块）：合成语音 WAV「你好，今天天气怎么样」→ 云端 ASR 正确回文；
+  TTS 200 / 78KB PCM；LLM `model/test` 200 / 743ms。
+  真闭环（实机、用户对麦说话）：
+  - brain：`对话轮完成: trace=10 user='没有啊，今天天气怎么样？经。'
+    reply='我这边看不到实时天气，你告诉我城市名，我帮你查查。'
+    tts_pcm_ms=6877 played_ms=6877`
+  - interact：`tts: 25 字符播了 6877ms（PCM 220078 字节，gain 70%）`——扬声器
+    出声，**ASR→LLM→TTS→回放全链闭合**。
+  - 噪声轮：空文本如实弃轮（`识别为空文本，弃轮`），不产生假回复；但反射环仍会
+    因底噪转头（续2 遗留 2）。
+  遗留：VAD 阈/DoA 标定（噪声轮与误转头）；「你好洛克」唤醒词仍无（任何响声都会
+  进 ASR，空文本弃轮）。
