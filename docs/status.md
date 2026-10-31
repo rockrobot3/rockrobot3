@@ -107,7 +107,7 @@
 | 8 | 发行版 deb 的 CI 真装回执（distro-smoke） | distro-smoke job 的一次远端全绿回执 | **真装语义已被真板实测补上（0.0.6 批D，`efd224f`）**：树莓派板上 `dpkg-deb --build` + `dpkg -i` 成功、五模块全 running、`rr3-ctl` 三查 + reboot 自恢复全绿——比容器路更强的真装证据已在案（见能力表 deb 打包链行）。余下的是 CI `distro-smoke` job（a95eda7，rust:bookworm 容器单步——glibc 自洽、本机产物装本机 deb，断言链 5 模块 spawn + brain 缺格点名 + 0 拒 boot + `denied_publish = 0` + counters 回写断言（0.0.6 批E' 补 ⑧：日志逐字 + counters.json 含 `"boots"`））的远端回执，**归第 1 条远端 CI 总敞口统收**；**2026-10-11 结项注记（CI 首跑修复批）**：distro-smoke job 远端全绿回执到手（run#6 38146782224 = 1c3cf41，八 job 全绿）——归第 1 条统收同步结项；本地替代证据（rr3-pack 单测 + `--stage-only` 冒烟）不变 |
 | 9 | D9 六模块真进程巡检（含 Python brain） | sim-assemble job 的一次远端全绿回执 | 本机 python3 = 3.9.6，不过 brain 的 `tomllib`（≥3.11）门，且无 brew / uv / pyenv 可装（D9 实测：`--brain` 演练在 brain 门槛处 fail-fast 点名）。本地替代证据：无 brain 子集装配单（5 Rust 模块）装配演练全链绿（装配 boot → 全 running → `denied_publish = 0` → 四命令巡检）+ default 满配单在门槛处当场点名。**六模块判据归 CI**：`sim-assemble` job（363e4ed，runner python3 ≥3.11 满足门槛），远端跑绿一次本条结项。**2026-10-11 结项注记（CI 首跑修复批）**：sim-assemble job 远端全绿回执到手（首跑即绿，run#6 38146782224 = 1c3cf41 全绿收官复核）——本条结项 |
 | 10 | M6 的板上件（U-Boot 回滚链写侧 + 实板验证） | 实板上一轮 switch→重启进对侧→校验 bootcount/altbootcmd 回滚链真生效 | 0.0.3 批D 只交付主机面（引导配置改写），U-Boot env 写侧、块设备/挂载探测、fsync 加固、vfat rename 断电窗口行为、槽位镜像写入均未做——逐条列 [`partition-layout.md`](../base/ota/partition-layout.md) 增补段板上核对项清单（七条）。判据同 M6 里程碑行：三项在位前不 claim |
-| 11 | 0.0.6 阶段二真机功能链的板上证据（语音采集 / DoA 判向 / 舵机转向 / 表情输出） | 树莓派上麦克风 / 舵机 / 显示真件到位后的一次全链实测 | **sim 档已收官**：批F2/F3 sim 段（`e4ccbaf` / `444c764`）+ 批F4 板上 `rr3-sim --chain` 全链 mock 闭环（boards §9，判据 10 sim 档过——R9 档位诚实标注：采购前档不充当真件收口证据）；批F5a 五件 HAL linux 真后端实装（musl 交叉 check 全过）。真件档随外设采购（BOM 定案 R22：PS3 Eye 或同级 ≥2 麦 UAC / SG90 / MAX7219——树莓派外设采购中、ESP32 硬件已齐）；真件到位只动 HAL 后端，云联调以 `RR3_BRAIN_CLOUD=mock` 先行（R4）——真件档验收是板上线后的第一优先敞口 |
+| 11 | 0.0.6 阶段二真机功能链的板上证据（语音采集 / DoA 判向 / 舵机转向 / 表情输出） | 树莓派上麦克风 / 舵机 / 显示真件到位后的一次全链实测 | **sim 档已收官**：批F2/F3 sim 段（`e4ccbaf` / `444c764`）+ 批F4 板上 `rr3-sim --chain` 全链 mock 闭环（boards §9，判据 10 sim 档过——R9 档位诚实标注：采购前档不充当真件收口证据）；批F5a 五件 HAL linux 真后端实装（musl 交叉 check 全过）。真件档随外设采购（BOM 定案 R22：PS3 Eye 或同级 ≥2 麦 UAC / SG90 / MAX7219——树莓派外设采购中、ESP32 硬件已齐）；真件到位只动 HAL 后端，云联调以 `RR3_BRAIN_CLOUD=mock` 先行（R4）——真件档验收是板上线后的第一优先敞口。**2026-10-28 T1 真机首验（Pi 4B 宿主 × ESP32 classic，条目 1/2/3/7/8）**：四真进程（rrd + sense(esp32) + brain + interact(linux sink)）全起、`denied_publish = 0`、3 轮 `对话轮完成` 且 Pi 扬声器出声（人耳）；OLED 写屏 + 胶囊眼 idle 与 pan/tilt 逐点落角肉眼确认；侧向说话触发 `rr3-sense` 反射环 `pan=60°/120°` 转头 + `tilt 90°→98°` 点头、板面逐条 ack（id=1..6）且**音频流未中断**——即「听声识位 → 转头」真机成立、命令下行走 `esp32audio` 命令旁路（flock 单消费者唯一通路）。余敞口：条目 6 唤醒率 9/10、7 三方向分箱 8/10、9 30 分钟滑移、4 轨压两点标定（板侧 GPIO34 分压未接，读数为悬空 395mV）、5 千次 ping |
 | 12 | 三形态的**资源事实真值**（接线档 + 能源域阈值与分压比 + `[pins]` 绑定） | 装机完成后的机器可查 `wiring.toml` + 与万用表对拍（≤2%）的域电压/分压比 + 逐形态 `[pins]` 过装载校验 | [ADR-0021](process/adr/ADR-0021-三独立形态与资源供给面-能力原子化补课.md) 本轮只立**对象与校验形状**，取值全在待标定态：ESP32 的 GPIO34 分压测点**尚未接**（`ADC_RAIL_DIVIDER_NUM/DEN` 仍是占位 1:1、`RAIL_GATE_ARMED = false` 不接闸，这条"无真板对拍前不接闸不 claim"的纪律随契约面一起搬进 `[[supplies.domain]].armed`）；树莓派与 RK3566 今天**没有任何机器可查的接线表**，批N1 只能先交演练实例。另记一条**未闭的互斥**：板侧 UART2 RX 用的 GPIO19 与点阵 VSPI 预留同脚（`board.rs` 自述"点阵立项时需再迁，已在案"）——点阵一立即撞 |
 | 13 | **微型形态（ESP32）的产线闭环四件**：烧录封装、镜像装配、OTA、回滚 | 一次"从干净机器到能出字/转动/听到声"的可复现流程记录 + 一份失败后的回滚实录 | 复盘实测：`tools/rr3-pack` 与 `tools/deploy/` 只覆盖 host aarch64，**ESP32 侧只有一条手工 `espflash` runner**（`.cargo/config.toml`），无镜像装配、无 OTA、无回滚面；`base/ota/rr3-ota-ctl` 写侧只到"改写 extlinux `root=LABEL`"，`bootcount`/`altbootcmd`/`upgrade_available` **只存在于文档表格**（`base/os/buildroot/patches/README.md` 与 `partition-layout.md` 自述未核敞口）。本机无 ESP-IDF、板不在手 ⇒ 这条**既缺码也缺载体**。裁定见 [ADR-0022](process/adr/ADR-0022-代码事实复盘-机制核纯净度与申报面逃逸与安全语义身体.md) 裁定 6，施工 = [全案](process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §17 批N5；**"该形态不可回滚"若为终态，也要写成一句结论而不是空白** ／ **2026-10-22 批N9 件二：四件之"烧录封装"半边已落**——[flash-esp32.sh](../tools/deploy/flash-esp32.sh)（版本钉 espflash 4.x＋ELF 内 app descriptor 三查：节在册/尺寸 0x120/magic 0xABCD5432，`6d3a1ee` 先例口径；`--check-only` 干跑面供无板机器），脚本面本机干跑绿，烧录全链验证挂批N9 件三上板会话；镜像装配/OTA/回滚三件仍敞 ／ **2026-10-23 批N18：三件码面与语义全落**——件一 `1f03bb5`（镜像装配件 [image-esp32.sh](../tools/deploy/image-esp32.sh)：验证面复用 flash-esp32.sh --check-only 真值单点＋espflash save-image --merge 整片装配＋布局三点 magic/整片 4MB 自校验，本机干跑全 PASS）／件二 `90ac149`（OTA 语义明文裁定＝**重烧即升级**，NVS 凭据保留＝升级后免重配网；真增量 OTA 不做三理由＋触发条件，落 [partition-layout.md](../base/ota/partition-layout.md) 批N18 段；侥幸面实测登记＝debug app image 1,130,224 B 超 factory 槽 8.2%、release 444,576 B 槽内 42.4%，产线一律 --release；可达终点表升级格改判「能做到（重烧档）」）／件三 `63255c2`（回滚语义终态裁定＝**不可回滚**（无自动回滚链）：factory 单槽＋生成 sdkconfig 实测 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is not set` ⇒ 自动回滚链为零，"回得来"两半边（重烧重试＋NVS 凭据保留）如实登记不与自动回滚混称，触发条件＝双槽分区表＋rollback enable 契约级评审——全案 §17 原文"不可回滚也是一句合格答案，但必须写进表"即本件；可达终点表回滚格改判「不能（终态裁定）」＋烧录格批N9 件二逾期补改判）；**本行维持不结项**：判据"从干净机器到能出字/转动/听到声的可复现流程记录"码面已齐（flash/image 两脚本＋本批干跑绿），"失败后的回滚实录"在不可回滚终态下语义改为重烧恢复实录，随下次上板会话取——不冒领 ／ **2026-10-23 批N20 真板实录收官，本行结项**（[批N20 计划册](process/dev/0.0.5增补轮六——批N20开发计划与产线真板实录.md) §2 逐件证据行原文）——判据两半边均取：①「从干净机器到能出字/转动/听到声」流程记录＝件一 `5222368`（image-esp32.sh --release 装配全链 PASS→`espflash write-bin 0` 直烧 merged 4MB 98s→boot 实录三达：OLED 4 行出字＋LEDC 姿态 60°/98° 回读＋双麦 16kHz rms 连续流；fail-honest 配置腿缺席点名实证＝批N13 语义真板回声）；②重烧恢复实录＝件二 `cecff5c`（POST 写口写 NVS→改横幅去注入重烧→`凭据源=nvs` 保持＋自动重连＝「重烧即升级」行为实证；`erase-flash` 全片擦→重烧→回落编译期源→重新在线＝「回得来」半边）。同批两笔事实订正（订正正文落 partition-layout.md 批N18 段＋decisions §4 批N20 行）：批N18 尺寸记录 release 444,576 B 系测量/记录错误——worktree 挂 `c6d9200` 冷构建 1,086,784 B＋esptool 段表双源验证定案 release 1,086,848 B（IDF 表语义超槽 3.66% 可跑＝bootloader 按段表加载批N9 先例；merged 模板表语义槽内 26.32%）；分区表双表事实＝espflash save-image --merge 未显式传 `--partition-table` 时用内置默认模板表（factory 0x3F0000 撑满 4MB 尾）≠ IDF 构建表 0x100000——nvs/phy 起点长度两表完全一致语义兼容，装配面「镜像表≠构建表」缺口如实登记。产线实录段落 [esp32板卡笔记](reference/esp32板卡笔记.md) |
 | 14 | **rtos 形态的配置腿载体本身**（板侧 HTTP 服务 + 堆核算），连带"直连云 API"这条认知路径 | 板侧出现一个真的 HTTP 服务器（带选型结论与内存核算），或明确记"本形态不做配置面、观测腿只有守护输出" | 2026-10-15 证伪审查实测：`tools/esp32-periph-base/src/*.rs` 与 `tools/espidf-sentinel/src` 对 `HTTP`/`https`/`TLS`/`tcp`/`BLE`/`gatt` 词界 **零命中**——板上 WiFi 只用于配网与链路读数。ADR-0021 裁定 1 与 D6 要求"每形态至少一条自己的配置/观测腿"，而全案 §7 那句"承载在 WiFi（rtos 档已在册）"里的"在册"指**格状态不是能力**。工单 connect **N-13**，列**批N4 前置**；细则见 [全案](process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §18 F-18，风险面记 architecture **RK-20**——**2026-10-19 批N4 件二：结构面已立**，载体选型 esp_http_server（TLS 不做四理由、凭据面不接 N-11，落 connect 册 N-13 行注记）、堆核算进 ⑩-b（`esp32-mini.toml` heap_reserved 16384→98816 逐项留痕：UART2_TX_RING＋audio_q 峰值＋渲染＋配置服务预留）；板上 HTTP 服务器实证与真板堆对账归真板批，本行证据半边维持敞口／**2026-10-22 对表（批N13）：板侧配置腿码面半边已收**——件一 `d274530` 服务本体落树（[httpd.rs](../tools/esp32-periph-base/src/httpd.rs)：`RR3_BOARD_ROUTES` 白名单表两行只读端点——`GET /api/board/state` 运行态快照 JSON（16 观测字段出锁组包，**不持锁出 JSON** 纪律）与 `GET /api/board/bindings` 注入绑定十键真值（批N9 件五对账锚同源读数）；路由纯函数＋`route_table_matches_dispatch` 表↔分派零漂移单测＋covers/applies 全空形制单测；WiFi STA 起栈全链 nvs_flash_init→esp_netif→esp_wifi_init（**手抄 `WIFI_INIT_CONFIG_DEFAULT` 宏**逐字段对表 v5.2.2 真值并注释留痕——bindgen `Default` 是全零不能用于该结构）→httpd_start；凭据 `option_env!` 编译期注入不落仓、缺席即 fail-honest 点名不装配；白名单外 404 fail-closed；甲面构建＋单测编译两步 PASS 本机 esp 工具链真跑非 SKIP）＋件二 `fbbc98c` 板侧 covers 申报进 ⑩（[check.sh](../tools/ci/check.sh) covers 扫描源扩入板侧 `RR3_BOARD_ROUTES` 区段（两源同扫）＋covers ⊆ 分母五路并集对拍执法位（反向 comm 分子−分母，越界即红硬红不入基线——申报面校验只挡词表外形制、本位补齐申报制语义另一半）；板侧两端点 covers/applies 全空＝门 d 数字零变动对账成立：分母 82／covers 申报 88／红账 0／gate-d-baseline.txt 零改动）；**curl 实测与 `esp_get_free_heap_size` 取值对账归真板验证窗，本行不结项**／**2026-10-22 对表（批N14）：写口与凭据面半边已收**——件一 `c28c85d` 板侧凭据存储对象落树（[cred.rs](../tools/esp32-periph-base/src/cred.rs)：connect 册 N-10 ② 主体半边——namespace `"rr3"`/`wifi.ssid`/`wifi.pass` 单真值常量（全案 §3.6 凭据行 `nvs:rr3` 板侧实现值）＋`Rr3Cred` 值类型**不派生 Debug/Display**（零回显机器墙：格式化路径编译期不可达）＋pass 私有读取窄缝＋`rr3_cred_read` 读时现取两键齐才 Some＋形制域 SSID 1..=32B/密码 ≤64B 空合法；boot 读链切换＝NVS init 前移读链前件＋**NVS 优先→编译期 `option_env!` 回落→都缺 fail-honest**——批N13 机制订正在案：码面误用 `std::env::var` 运行期读而板上 IDF newlib 把 `environ` 初始化为空数组＝配置腿真机永不装配，本批按文档口径落实）＋件二 `9d44903` HTTP 写口两枚（`POST /api/board/wifi` 事务性配网 fail-safe：读旧值→写 NVS→STA 重配置重连→有界等连 15s（500ms 步进 `esp_wifi_sta_get_ap_info` 探测）→败即回退旧值写回/erase 回原空态重连→如实应答四字段 `{ok, connected, reverted, stage}`——`connected` 永不因请求被接受而置真，全程不持 bus 锁；`POST /api/board/reboot` 动作面应答先行落链再 `esp_restart`；handler 真实 method 从 `req.method` 读＋注册面 method 映射随表行；单测扩臂四枚）；**键半边（`cred_store` 键进绑定域）缓批**（契约级三处同批＋桥上注入晚于起栈，见 decisions §4 批N14 收口行）；**2026-10-23 批N15 真板行为取证收官（[批N15 计划册](process/dev/0.0.7实现窗——批N15开发计划与真板行为取证.md)五件实录在案：缺席路径 fail-honest 点名逐字命中／编译期源 boot＋关联 WXYYBG 得 IP 192.168.0.167／curl 读面 state 零凭据字段＋404/400 形制面全命中／写口事务两回退分支实录（erase 生效＋写回自动恢复在线＝砖路径消灭真板实证）＋NVS 读链切换「凭据源=nvs」两处实锤／heap 对账：WiFi+httpd 常驻实测 42852B ＜ 预留 98816 充足不溢）＋真板抓出批N14 两枚缺陷已修（缺陷一 `745b598`：boot 起栈链缺 `esp_wifi_connect` 永不关联；缺陷二 `9b348f5`：等连判据 `esp_wifi_sta_get_ap_info` 关联瞬态误报 ESP_OK→坏凭据不回退→NVS 残留坏凭据真砖路径——改判 DHCP 得 IP 物理可靠）；余量两条如实登记不冒领：①写口/reboot 动作面应答物理不可达（reconnect/restart 杀 TCP 必然——取读数半边真板成立、送达半边不成立，是否延迟应答属行为裁定另批）；②键半边（`cred_store` 键进绑定域）缓批维持原排期——**本行结项**（行为半边取证全毕，键半边随契约级扩批评审另批自找落点） |
@@ -1562,9 +1562,589 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   门禁：`cargo test -p rr-periph-proto` 10 + `rr-hal` 63（1 ignored）；
   `tools/ci/esp32-periph-base-check.sh` xtensa 构建 + 单测编译 PASS；`bash tools/ci/check.sh` 全绿。
   **遗留**：树莓派板侧端口后端留待后续批（rr-hal 宿主后端已齐备）。
+- **音频上行链路提档 2M（2026-10-30，本提交）**：音频上行是链路容量的天花板问题——
+  16k×2ch×s16 = 64,000B/s 原始，b64 后 + JSON + 128B 帧头 ≈ 85–87KB/s；921600 8N1 有效
+  92,160B/s，**占线 ~95%、余量仅 5%**，一次握手/日志/回包抖动即挤掉分片（表现为 recorder
+  端 seq 断档/背压 drop）。处置选了"只扩链路容量、不动已验收的音频口径"：`UART2_BAUD_HZ`
+  921600 → **2M**（有效 250KB/s，占线 ~34%），rr-ipc 档位表扩至 115200/9600/921600/1.5M/2M
+  （macOS 字面值 + Linux 八进制常量各读各的），桥/audio-rec/探针/`RR3_HAL_PERIPH_BAUD` 同表。
+  **历史否决的重评依据**：2026-10-20 的 2M/1.5M 否决真凶是**杜邦线信号完整性**（2M 字节滑移
+  稳定乱码、1.5M 首包干净续包间歇乱码），本轮链路已换**树莓派 PL011 `/dev/ttyAMA0` 三线直连**
+  （GPIO18/19 ↔ UART2，无 FT232、无线长杜邦），故重评。**真板实测（Pi 探针 termios
+  `B2000000`）**：60s 音频 85.2KB/s / 469 帧 / 头失配 0 / 撕裂 0 / seq 断档 0；180s 长跑
+  15,700,468B / 1406 帧全零误码；混跑 30s（每 5s 50×PAN + INFO）回包 300/300、ERR=0；
+  U3 canonical digest 两连跑 10/10 自等（与 921600 基线 9/10 等，唯一差异 = HELP 行按
+  `UART2_BAUD_HZ` 渲染的波特率字样）；行面 robustness 全套（超长行/半行超时/拼接/20 连发/
+  写前记账 120→60）在 2M 下同样全过。classic 固件已烧（App 1,150,784/4,128,768 = 27.87%）；
+  S3 目标构建同过。**回退预案**：1.5M，再退 921600（换线/换适配器后须重跑同套探针）。
+
+- **2M 压实复测 → 根因闭环，定档 1.5M（2026-10-30 同日收口）**：15 分钟混跑（音频
+  全速上行 + 每 5s 50×PAN+INFO）暴露**低频线面误码**——板侧账干净（`sent=seq=7037`、
+  `drop=0 job_drop=0 reply_drop=0`），宿主侧却只收到 8982/9000 回包、`ERR` 5 条且全是
+  **行首被啃**的碎片（`unknown cmd "N"/"0"/"AN"`）；120s 缩短版同形（1194/1200、ERR=3）。
+  对照实验：纯命令 60s **600/600、ERR=0**；纯音频 120s（稀疏命令）**938 帧、断档 0、
+  PCM 全 8192、ERR=0**。即**只有"连续音频 TX + 命令并发"双向同时跑才掉字节**。
+  **根因排查（FT232RL 独立适配器到货后）**：Pi 上只插 FT232、PL011 三线全拔，先在
+  921600 对照组跑混跑——**也炸**（150s ERR=66/1500，`"PAN"→"PAL"/"PAJ"/"@@N"` 全是
+  单 bit 错，而音频方向零误码）→ 证明与波特率/PL011 无关。照片核对定位真凶：
+  **模块 LEVEL 跳线出厂停在 5V 档**——3.3V 信号在 5V 门限边缘抖 bit（模块 VCC 由
+  Pi USB 供电，不接板子 3V3；跳线订到 3.3V 档后 921600 混跑立即 1500/1500 ERR=0，
+  根因闭环）。**1.5M 定档实测（同板 MAC 48:9d:31:01:16:d4，`/dev/ttyUSB0`）**：
+  纯音频 60s 469 帧/零撕裂/零断档/120×PAN 全回包；混跑 300s×2 合计 **5996/6000、
+  ERR=4（0.067%）**——`"PAN"→"NAN"`×2、`"90"→"990"`×1、丢 1，全被命令面双防线
+  （unknown cmd 丢弃 / 角度范围检查）无害化；与 PL011@2M 的 5/9000（0.056%）同量级，
+  而 921600 两路径均零误码 → **残余误码公共底是杜邦线物理层**（换适配器/换档位都
+  不消除；串阻 100–330Ω + 缩短线长为可选优化）。**定档 1.5M**：占线 95%→46%；
+  2M 不取（误码率不随档位下降，余量收益换不回物理层风险）。classic 固件已重烧
+  1.5M（App 1,150,784/4,128,768 = 27.87%）；S3 构建过门。`board::UART2_BAUD_HZ`
+  落 1,500,000，全宿主缺省档/注释口径同步；rr3-audio-rec 缺省 `--baud 1500000`。
+  同批把六支探针收进 `tools/pi-periph-probe/`（缺省 1.5M，`RR3_PROBE_TTY`/
+  `RR3_PROBE_BAUD` 可换口换档），首跑还修了探针自身在流尾截断片上 b64 padding
+  的崩溃缺陷。**真实链路验收（同日补）**：Pi 上以 `rr3-audio-rec /dev/ttyUSB0 --secs 60`
+  （缺省 1.5M）落 wav——程序自述 `chunks=468 gaps=0 restarts=0 err=0 resyncs=0
+  reconnects=0 frames=958464`；wav 二进制独立解析 2ch/s16/16000Hz/59.904s、
+  3,833,900B（=3,833,856+44 头）、RMS L=587.4/R=587.8（与标定底噪 ~584 对得上）、
+  峰值 2656/2840、静音比 0、L/R 严格等长 → 判据①（音频上行落盘口径）在 1.5M
+  真实链路成立。**遗留（并行）**：杜邦线串阻 100–330Ω 为可选物理层优化（0.067%
+  残余误码已被命令面双防线无害化，非阻塞项）。
+
+- **探针口径系统性修正（2026-10-30，六支收进公共层）**：此前六支探针各自复制
+  `baud_of`/termios 开口/`pump`/帧扫描，同一判据在不同脚本里含义不同，已实测出
+  三个假象——① 混跑把**音频帧间夹着的命令回包文本**逐字节计成「头失配」（2M 时代
+  报 24012B，实为 30 轮回包 ≈24KB，纯属口径失真）；② 收尾固定 `pump(2s)` 在末轮
+  回包还压在线上时提前返回，制造「回包 OK 少 3~9 条」的假丢包；③ 起流前
+  `pump(0.8)` 白扔数据导致缓冲区**从一帧中间开始**，帧头保留区零字节被误判成
+  「乱码 11124B」（抓到 dump 离线复核定位，`first magic off=11124` 即铁证）。
+  处置不是逐个打补丁，而是抽 `probe_common.py` 作**判定口径的唯一实现**：帧面
+  magic/头长/偏移、**段分类**（帧外字节按整段判「行面文本」vs「乱码」——只有含非
+  可打印字节的段才算误码）、`drain_until_quiet` 收尾、`flush_input` 起流前清残留、
+  以及「回包行**只从帧外文本段**切」的纪律（在整条解码文本上切行会把帧载荷 JSON
+  和回包挤进同一行，制造假 mangled）。`bw_mixed` 同时补上**命令面四分类对账**
+  （`sent = ok + err + mangled + missing`，`err`=板侧拒绝含被误码破坏的命令，
+  `mangled`=回包文本本身被坏，`missing`=完全无回包）与**板侧↔宿主侧音频对账**
+  （INFO 的 `seq/sent/drop` 增量 vs 宿主解出帧数，基线必须在起流前采否则窗口错位，
+  实测差 6 帧即由此来）。回归：`bw_probe` 45s 乱码 0；`bw_mixed` 60s `发=600
+  ok=600 err=0 mangled=0 missing=0`、板侧增量与宿主帧**差值 0**；150s `发=1500
+  ok=1500 err=0 mangled=0 missing=0`、`seq/sent` 增量 +1178 = 宿主 1178 帧、
+  乱码 0（**口径诚实后该轮零误码**，与早前 300s×2 的 4/6000 合并看 ≈0.05%，
+  即误码是间歇而非恒定）；`p1_probe`
+  四探全过；`probe2` 长行程 120→60 与 30/30 回包全过；`robust_probe` 六探全过；
+  `u3_capture` 两连跑 **10/10 自等**。**探针从此不再允许各写一套口径。**
+
+- **线格式启用载荷 CRC32（2026-10-30，协议硬切换）**：审查发现全仓**无任何完整性校验**——
+  128B 头预留区 84 字节全空，帧内载荷被线面误码改坏后仍能通过 magic/长度/JSON 四道门，
+  音频方向表现为**静默杂音**且无任何计数可查。处置：把预留区前 4 字节（offset 44..48）
+  改作 `payload_crc32`（IEEE 反射多项式 0xEDB88320，逐位实现零查表），余 80 字节仍须全零。
+  单点真值：`rr3_crc32`（唯一算法）、`rr3_header_bytes_with_crc`（唯一发送入口）、
+  `rr3_verify_crc`（收侧校验，`rr3_framebuf_read` 与 `FrameAssembler::pull` 均已接，
+  不符即**整帧丢弃**并计错，丢片由 seq 对账继续记账）。契约同步：`envelope.schema.json`
+  偏移表 + `x-offset-sum`、ADR-0006 决策 1 追加项、contracts/README §3 均已写明这是
+  **硬切换**（旧端按 `ReservedNotZero` 拒帧，全端须同批升级；跨生态互通再启用 flags 版本标记）。
+  **验证**：rr-ipc 单测 80 通过（新增 `crc32_known_vectors`（含 `"123456789"`→0xCBF43926`）、
+  `assembler_rejects_corrupted_payload_crc`（翻载荷 1 字节→整帧丢弃且下一真帧照常出）、
+  `framebuf_read_rejects_crc_mismatch`）；rr-hal 63 通过；base/runtime workspace 685 通过。
+  **实板**：classic 已重烧（App 1,151,952 / 27.90%，MAC 48:9d:31:01:16:d4）；1.5M 纯音频 45s
+  358 帧 **CRC 不符=0**；混跑 90s 710 帧 **CRC 不符=0**、`发=900 ok=900 err=0 mangled=0
+  missing=0`、板侧增量与宿主帧**差值 0**；Pi 端 `rr3-audio-rec` 重建后 30s 落 wav
+  `chunks=233 gaps=0 err=0`、2ch/15996Hz/29.83s、RMS 593.6。
+  探针同步升级：`probe_common.scan_frames` 现在逐帧校验 CRC 并输出 `CRC不符`（**音频方向
+  误码率第一次有了直接判据**，不再只能靠"看不出来"来断言干净）。
+
+- **平台限制与最终链路形态（2026-10-30 定档后的账面结论）**：
+  - **宿主适配器**：板固件 1.5M 档在 macOS 上**不可用**——macOS 的 FTDI 驱动对
+    `tcsetattr` 的 1000000/1500000/2000000/3000000 全部返回 `EINVAL`（实测 921600 是
+    上限）。故 **Mac 侧开发若要与板直连，必须把板烧回 921600**（或换 Linux 宿主）。
+    Linux（Pi，USB + FT232RL 或 PL011）接受 B1500000/B2000000，是唯一能做 1.5M 验证的宿主。
+  - **适配器电平（仅备选路径适用）**：若回到"经 USB 适配器"形态，FT232RL 模块 `LEVEL`
+    跳线**必须 3.3V 档**，模块 VCC 由宿主 USB 供电、
+    不得接板子 3V3（板上有 3.3V LDO，双供电会倒灌）。这是 2026-10-30 误码的真凶，
+    已写入 `board.rs` 常数账簿。
+  - **最终链路形态：定版「Pi PL011 直连」**（2026-10-30 换线实测通过后改定）。接线只有三根
+    杜邦线：Pi GPIO14(TXD0)→板 GPIO19、Pi GPIO15(RXD0)←板 GPIO18、GND↔GND（两端均 3.3V，
+    不接 VCC、无电平转换）。**部署前提三条**（缺一即数据流被污染）：`config.txt` 加
+    `dtoverlay=disable-bt`（否则 PL011 被蓝牙占、`/dev/serial0` 落到 mini UART）、
+    `serial-getty@ttyAMA0` 停用（否则登录提示混进数据流）、`cmdline.txt` 不保留
+    `console=serial0,115200`。改完后 `ls -l /dev/serial0` 必须指向 `ttyAMA0`。
+    **判据实测（1.5M，`/dev/ttyAMA0`，板固件 1.5M + CRC）**：纯音频 45s 358 帧、撕裂 0、
+    **CRC 不符 0**、seq 断档 0、PCM 全 8192；混跑 300s×2 合计 **5995/6000**（第二轮
+    3000/3000 全绿，第一轮 5 处异常：ok=2995/err=1/missing=4），**CRC 不符 0**、
+    板侧 `seq/sent` 增量 +2350 = 宿主 2350 帧、差值 0；`rr3-audio-rec` 在 `/dev/ttyAMA0`
+    落 wav `chunks=233 gaps=0 err=0`、2ch/15995Hz/29.83s。合并误码 5/6000 ≈0.083%，
+    与 FT232 路径的 4/6000 ≈0.067% **同量级**（两条路径的错误形态同为"宿主→板短命令偶发
+    单字节坏"，音频方向均零 CRC 失败）。
+    **FT232RL 退出部署链路**，但保留为两用调试器材：Mac 侧联调（macOS FTDI 驱动上不了
+    1.5M，只能 921600）与 Pi 串口被占用时的备用接入。若未来要回到"经适配器"形态，其
+    电平约束仍然有效（`LEVEL` 跳线必须 3.3V、模块 VCC 由宿主 USB 供电、**不得**接板子 3V3）。
+  - **Pi 侧编译约束**：Pi 4 仅 1.8GB 内存，`cargo build --release` 单 crate 可过（rr3-audio-rec
+    实测 11s 增量 / 40s 全量），但**不要并发多 crate 构建**，否则 OOM。
+
+- **全功能冒烟 + 帧面真机首验 + 空闲前导根因处置（2026-10-30，V1/V2）**：
+  **V1**：新增 `full_smoke.py`（探针第七支）一次覆盖行面 11 条命令——OLED、16 种 FACE
+  白名单逐个、PAN/TILT/SERVO、两级拒绝（>180 解析期「角度超范围」/ 0-180 出轴行程
+  「轴超出行程」）、WANDER、SCAN 五点、RAIL 异步回包、INFO 计数段、AUDIO 控制面，
+  末行给判据集 digest（跨次对拍）。首跑 32/34 的两处失败均为探针自身文案/收流窗口
+  写错，修后 **35/35**（digest `829477d49e20818d`）。顺带点名硬件项：`RAIL rail=284mV
+  raw=0` = 5V 分压测点未接线（`rail_tier=severe` 由此来），非固件问题。
+  **V2**：`frame_probe.py` 首次真机验证帧面（128B 头 + CRC + trace 回带 + dst 门 +
+  `rr3.set_bindings` 注入）——首跑 7/10，失败请求**无痕消失**：板面控制台无
+  `帧面 id=` 无 `帧面丢弃`，宿主收 `ERR line too long`。判定实验两步定位：
+  ① 加 200ms 帧间隔仍失败（排除时序竞态）；② 每帧前插 1 个 `\n` 前导 → 三轮
+  **30/30**。结论：**空闲后首突发的首字节失步**（电气层，只坏一个字节）——行面
+  只损失一条命令（unknown cmd 拒，即此前记账的 0.067–0.083% 残余误码），帧面则
+  整帧降级成行（`LINE_CAP`=128 < 帧长）无痕丢失；此前"两条路径残余误码同量级"
+  与"音频方向零 CRC 失败"（连续流无空闲）都与此机理自洽。
+  **处置（宿主单点）**：`rr-ipc Rr3UartConn::tx_idle_preamble`——空闲 >20ms 的
+  宿主→板突发先发 1 个 `\n`（板面当空行跳过）+ 2ms 再发正式字节；`write` 是全部
+  写路径的单点（帧经 std adapter、行经 write_all 都到达），桥的转发块被拆半的
+  场景因间隔远小于阈值而不触发。板侧 `read_line` 超长行加前 8 字节 hex 取证日志
+  （重烧待 devkit USB 恢复）。**验证**：rr-ipc 81（含 `tx_idle_preamble` 专测）、
+  rr3-bridge 6（恒等测试按新线上契约吃前导）、check.sh 全绿；实机 frame_probe
+  三轮 30/30、full_smoke 35/35、bw_probe 30s CRC 不符=0。
+  **遗留**：devkit USB 恢复后重烧诊断版固件；`frame_probe` 上桥/上 rr-hal 的
+  生产等价路径（`rr3_ensure` + rr3.call）后续按同判据跑。
+
+- **V3 喊话回应闭环（2026-10-30，进行中——触发已验证，方向修复待复测）**：
+  新增 `voice_respond.py`（探针第八支）：AUDIO ON → 流式解析 Event 帧 → 逐窗
+  （512ms）双通道 RMS → 超自适应阈值（环境 ×1.25）→ 回应。**触发链已实机验证**：
+  100s 内 3 次喊话 3 次触发、解析失败 0 帧。过程中修了三个探针自身缺陷：
+  ① 帧跨读取块（11KB 帧 vs ~4KB/50ms 读）导致"每次清缓冲整帧解析"永远凑不齐
+  → 改流式游标解析 + 残尾保留；② `pcm_b64` 是 str，拼 bytes padding 抛
+  TypeError 被裸 except 吞掉 → encode 后拼接 + 失败计数 fail-visible；③ 退出
+  路径漏发 AUDIO OFF 留下遗留流 → 补收尾。另据用户实测反馈修三个体验缺陷：
+  舵机不动（az=−0.7° 映射回 PAN 90 原地踏步 → **ILD 只取符号**：死区 ±0.5°，
+  超出即固定偏转 ±20°，与项目 DoA"符号分离不冒领精度"口径一致）；HELLO 文字
+  盖掉表情且文本模式角度行常显（OLED 命令关 `expr_mode`，设计使然 → 回应不再
+  发 OLED）；部分喊话漏触发（阈值 1.45× 实测漏 2 次 → 降 1.25×）。
+  **诚实口径**：当前回应由声音事件触发，"你好洛克"关键词识别（ASR/KWS）未建。
+  **DoA 判定实验（2026-10-30，新增 `doa_probe.py` 探针第九支——测量先行）**：
+  v5 把判向从 ILD 换成 TDOA 后实机 3 次触发 lag 全负（-1/-3/-4），而 ~4.5cm 麦
+  间距在 16kHz（1 采样点 = 2.14cm 声程）下物理上限只有 ±2.1 采样点——观测值
+  超出物理上限，峰值必是噪声主导。判定实验（六轮带 OLED 提示：左×2/右×2/中×2，
+  每轮 AUDIO OFF 后离线分析）拿到三份证据：
+  ① **TDOA 判死**：唯一两次较强触发（2.1×/1.4×）的互相关峰值 lag=+5/-8 采样点
+     = 10.6/-17.1cm 声程，远超物理上限，|c|≈0.04-0.07 近乎零相关；另发现 v5 用
+     `abs(c)` 选峰是方法学错误（真峰应为正相关，负峰是反相关伪峰）。
+  ② **通道增益偏差可忽略**：三轮标定 ±0.04dB——ILD 判读不需要通道校准。
+  ③ **ILD 证据不足以下结论**：触发值普遍偏弱（1.2-2.1× 中位），右侧轮全窗 ILD
+     为负（-1.67/-2.79dB）但左侧轮单独补测也是负（-1.29dB）——疑似用户喊话
+     方位的参照系（"自己的左"vs"机器人的左"）混淆，需 AB 双相位实验一锤定音。
+  **实验方法学教训**：六轮连跑靠用户盯屏幕对节奏，六轮只拿到 2-5 个有效触发
+  （多数 onset 抓到的是走动声或压根没喊）——改单侧快跑模式（12s 窗 + 聊天里
+  精确协调）与 AB 双相位（先用户左手边后右手边，符号直接给映射）。
+  **未决**：AB 实验待用户配合跑完 → 依数据改 voice_respond 判向（ILD 符号 +
+  PAN 方向映射，PAN 增角对应哪侧也要用同一次实验钉死）→ 再提交 voice_respond；
+  阵列级定向（真 TDOA）需换麦间距或提采样率，记硬件约束（GCC-PH 类超本轮范围）。
+  **系统体检同轮完成**：full_smoke 35/35、frame_probe 10/10、音频 240 帧
+  CRC 不符=0——板侧全部模块正常；`RAIL raw=0` = 5V 分压测点未接线（硬件项）。
+  **V4 舵机运动正确性（2026-10-30，新增 `servo_motion.py` 探针第十支，PASS）**：
+  四相判据全绿——A 单轴到位回读（PAN/TILT 各四点扫行程，逐点轮询 INFO 至
+  `pan=/tilt=` 等于目标角；`st` 只由运行面在作业成功后镜像硬件真值，INFO 等于
+  目标 = 真到位而非控制面复述）；B 连续动作 30 条 PAN 75/105 @50ms 连发
+  ack 30/30、最终角 = 最后一条（合批语义正确）；C SERVO 双轴串行到位；
+  D WANDER 让位（外部点名后 wander 自动 off）。对账 `job_drop/reply_drop`
+  增量全零。**诚实到位时间**：常规动作 ≤264ms、60° 大行程 727ms（含作业队列
+  + OLED 重绘）；探针自身量了两版假读数（ack 等待 1.0s / INFO 等待 1.0s 把
+  全部"到位时间"抬成 1016ms）——计时口径必须让等待窗口 < 被测量，教训入探针
+  注释。
+  **V7 源码审查补完（2026-10-30，部分收口）**：
+  ① 六模块**非骨架**（源码行数盘点）：rr3-brain 4274 / rr3-act 1997 /
+     rr3-sense 1406 / rr3-interact 1259 / rr3-power 1005 / rr3-connect 896，
+     均有 dispatch/boot/main 完整结构。
+  ② 音频通道契约**自洽**（批N28 记录的"缺省与实机相反"结构性闭合）：esp32
+     HAL 自带 `RR3_ESP32_AUDIO_CHANNELS=2` 常量并显式校验（esp32audio.rs:80,
+     :322），sense 对 channels≥2 分配判向窗 ring、双麦原始帧下混**前**入 ring、
+     下混 mono 进总线（dispatch.rs:130-133, 232-239, 345-346）——总线事件恒
+     channels=1，brain 消费面零改动；`RR3_AUDIO_CFG_16K_MONO16` 只是 legacy
+     缺省常量，esp32 路径不用它。
+  ③ rrd 面：conn.rs 写帧入口带 payload_crc32（与板侧 CRC32 定档一致），
+     registry/supervisor 有注册上限、重启退避、失败上限。**深度审查（锁序/
+     无界资源逐行）未完成**，归后续窗口。
+  **V5 长跑稳定性（2026-10-30，新增 `longrun.py` 探针第十一支，板侧判据全绿）**：
+  600s 并发（音频流全程 + INFO@5s + 全行程动作@10s）：59 动作 ack 30/30→
+  全程零 ack 缺失、背压/作业/应答丢失**增量全零**、堆 min_free 零新低
+  （100352B 稳住）——**板侧无生产阻碍**。探针自身三轮演进教训（全部入注释）：
+  ① 忘发 AUDIO ON 且拿开机累计计数当本轮值（INFO 是累计口径，判据必须取增量，
+     seq 基线 8378→13069 连续性可跨轮对账）；② `pkill -f longrun.py` 会自匹配
+     ssh 自身 bash 命令行（kill/ pgrep 都要 `[l]ongrun` 方括号模式，且 kill 与
+     启动拆两条 ssh——启动段命令行里也含同名字面量）；③ 探针 RX 消化差额
+     7/4691=0.15%（<1% 记仪器限制）。**未决**：CRC 不符 3/4691=0.064% 出现在
+     音频饱和线上，签名与"Pi 侧 RX 停顿撕裂帧"一致但归因未钉死——待 Rust 路径
+     （rr3-audio-rec/bridge）同负载复验其 CRC-bad 计数再定责。
+  `cmd_loop`（每轮先 `drain_outbox`/`drain_audio` 再窥视一字节、1-tick 空口回轮首）、
+  `read_line`（字节间超时 + 半行预算 + 超长行先吞尾再回 ERR）、`drain_line_tail`、
+  `frame_round` 的残尾吞净、`push_job`（同形状 Move 合批为最新目标 + 队满优先让位新 Move）、
+  `drain_outbox`/`drain_audio`（写不全计入/点名，不静默）、`exec_job`（**失败也提交硬件真值**、
+  上报角永不冒领）、`autonomous_tick`（10ms 拍，决策段持锁纯算、驱动段脱锁慢跑）、
+  `mic` 组帧（16KB 线程栈 + 4KB 读缓冲，逐片减 DC/截 16bit/增益钳位）；`rr3-bridge` 双向转发
+  （UART 死/UDS 死各自具名退出，UDS 未就绪按 4KiB 节流计数丢弃，下行 EINTR 重试）。
+  三处**有界风险**（判断为权衡而非缺陷，故不改代码，写明触发条件供后来者复核）：
+  1. `drain_audio` 无预算：`audio_q` 满 4 片时单轮可连写 ≈4×59ms = 236ms，其间不读命令；
+     RX 环 4096B 在 1.5M 只抵 ≈22ms 入流，故理论上存在"宿主以线速连发 >4KB 命令 + Q 满"的
+     丢字节窗口，且 RX 溢出在 IDF 简单读面无计数（既有盲区）。实测混跑 900 条命令零丢失，
+     产品当前也无"线速灌命令"用法；加预算会牺牲音频平滑性，属权衡。
+  2. 每片 ≈35–40KB 堆抖动（7.8Hz：`json!` + b64 + payload + 帧 Vec）；实测 `INFO` 里
+     `free≈164KB / min_free≈100KB` 健康，缓冲复用属大改，无证据前不动。
+  3. `selfheal_skip` 在一次 300s **裸 termios 会话**里涨到 34589——**不是缺陷**：绑定只由宿主
+     `set_bindings` 注入，裸探针会话必然走 fail-closed 分支（`state.rs` 字段注释已写明
+     "非零即绑定下发链未通"）；真实宿主（rr-hal）会推绑定、自愈照跑。**此为判据澄清**，
+     防止后来者把计数当故障。
 
 **已知偏差（有意保留，不是遗漏）：**
 
-- 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的
-  "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
+- 代码注释里的 `Task N`（如 `daemon.rs` 的"Task 11b 加了唯一的 supervisor 线程"、`registry.rs` 的  "Task 7 已落地"）指的是 **rrd 实现计划**的任务号，与本轮文档重构计划无关。两者同号不同事，
   读文档时别把它们对齐；这些注释不属于本任务订正范围。
+- **门禁 ①b 偶发红的真凶（2026-10-30，先误判后取证）**：①b 报红两次，我最初归因
+  "UART 时序测试在并发构建下被 CPU 争抢"——**那是没有取证的猜测**。随后连跑 8 次门禁
+  把现场留住，抓到实际失败：`rr3mod::serve::tests::serve_dispatches_rpc_event_and_tick_in_order`
+  的 `rpcs=[]`。根因是**夹具假设**：该用例把"第 2 拍止步"当终止条件，而预推的 4 帧由
+  fake rrd 线程写 socket、再由客户端读线程投递，`poll_wait(0)` 首拍可能一帧未到，
+  循环空转两拍即退出——负载只是放大了这个窗口，不是原因。
+  修法（判据级，非加超时）：止步条件改为"两 Event + 两 RPC 都已回调 **且** 至少两圈"
+  （保留"on_tick 每圈一次"的断言），另加 3s 墙钟兜底并返回**不同文案**，让"夹具没等到帧"
+  与"被测语义错"分得开；测试侧 `poll_wait(5ms)` 仅为避免空转抢 CPU。
+  验证：rr3mod 连跑 10 次全绿；6×`yes` 负载下 workspace 三连跑全绿；门禁三连跑全绿。
+  **教训**：红灯先取证，再归因；"单跑绿"不构成结案。
+
+**V3 判向因果闭环（2026-10-30 深夜轮：触发链根治收口、方向声明诚实撤除）**：
+  用户转入"不配合实验、自主全量推进"模式，全部改为无人化验证（深夜静室实测
+  + 离线 PCM 回放）。
+  ① **转向映射钉死**（用户目视）：PAN 70 = 转向用户左、PAN 110 = 转向用户右
+     （减角=用户左，增角=用户右）。
+  ② **当日三次"定向采集"（L/R/严格R）全部作废**：onset 计量 1241-1340 全部
+     **低于深夜静室纯噪声的 16ms 窗最大值 1740**——从未录到真实喊声；据此撤回
+     "左锚 −2.52dB / 右锚 −0.89dB"（噪声涨落）。六轮实验 r3/r4（R 轮）16ms 窗
+     峰值 939/948 = 底噪，同样无喊声。
+  ③ **唯一可信喊声样本 = 六轮实验 C 轮**（r5/r6，正前 ~0.4m）：16ms 窗峰值
+     2803-3541，事件 ILD −0.16~+0.06dB——双麦对正前完全对称（增益匹配锚）；
+     但 r6 一次尾段触发 ILD=−2.31dB（ratio 1.53）证明**混响尾即可产生假左
+     签名**，按 ILD 转左会误转。
+  ④ **触发统计量定案（v7.2，「喊它没反应」根因根治）**：三代淘汰——512ms 窗
+     中位（~1m 喊话只抬 1.1-1.2×，必漏）→ 16ms 窗峰值（静室噪声自身冲 1.7×，
+     误触）→ **128ms 窗联合 RMS**（噪声窗波动 ±2%，近距喊话实测 2.1×）
+     ×1.45 滚动底噪。验证：离线回放 6/6 真喊声触发、4 个无喊声文件 0 误触；
+     实机静默 15s 零误触（底噪 587 vs 阈值 851）。DC 假设排除（实测 DC≈−4，
+     板侧 chunk_to_pcm 已逐片去 DC）。
+  ⑤ **板侧音频链定量体检（链路健康）**：深夜静室底噪与白天完全一致
+     （rms L=590 R=594，|l|+|r| median 1024）→ 底噪电气主导，等效 ~41dB SPL
+     （自噪 33dB + ~8dB 板级）；按增益链（24bit>>8 保满幅 + MIC_GAIN=8）反推
+     r5 喊话 ≈73dB SPL@mic，与 INMP441 规格（−26dBFS@94dB SPL）对表自洽。
+  ⑥ **新立案（白班物理检查项）**：0.4m 喊话对底噪能量比仅 ~5dB，自由场物理
+     预期 ~40dB——疑阵列声学衰减 ~30dB（壳体遮挡/麦口朝向/装配腔体），需开壳
+     目检两麦装配位与声孔。衰减若坐实，同时解释定向 ILD 幅度被异常压缩。
+  ⑦ voice_respond v7.2（00882d2 / a1aaa03 已推三远端）：回应 = FACE happy +
+     TILT 点头（80→100→93，俯仰示意动作）+ PAN 回中；**方向声明撤除**（待
+     白天用本版触发器采带真值标注的定向喊话重建锚点后恢复），每声照记
+     ratio/ILD 供账簿积累。工程面：main() guard 可导入化，window_stats/
+     loudest_window/quietest_window 可离线回放复用；full_smoke 退场 FACE idle
+     （OLED 文本模式残留根治，用户观测的"Hello 字样+舵机参数"即此）。
+
+**V7 rrd 深度审查收口（2026-10-30 深夜轮：锁序 + 无界资源逐项）**：
+  - **锁序**：全守护共用一把注册表锁 + 每连接 `Mutex<UnixStream>`（一帧一次
+    write_all 整帧原子）+ counters gate 独立锁，三把锁**无嵌套获取点**——
+    fanout 走 channel send 不在注册表锁内写慢 socket（registry.rs:927-934，
+    这正是"慢连接不拖死全表"的关键构造）；match 守卫 `MutexGuard` 延寿陷阱
+    三处立牌给硬规矩（conn.rs:302/:956、supervisor.rs:266——先 let 绑再
+    match）；锁中毒单点口径（rr3_lock → into_inner，lib.rs:228）。
+  - **无界资源逐项**：日志环有界（cap 512，push/回填双路裁剪，lib.rs:148-205）；
+    落盘日志 append 不轮转（磁盘项，批N4 有意保留）；per-conn fanout channel
+    `mpsc::channel` **无界但僵尸回收路径已通**（watchdog expire 置 `tx=None`
+    → writer 终结 → fd 释放，conn.rs:1073-1081 注释把成立前提写清）；supervisor
+    计划队列无界但速率=重启事件（可忽略）。
+  - **carry 两条（不在本轮改）**：① fanout 通道有界化 + 丢弃最旧 + 断连
+    （Task 10 carry 原样在——通道形状是行为改动，需独立判据与测试，风险窗口
+    = writer 阻塞至心跳过期，量级 MB 级）；② 日志文件轮转。
+  - **结论：rrd 无生产阻碍**；V7 全部子项（六模块非骨架、音频通道契约、rrd
+    深审）至此收口。
+
+**生产栈实机勘查与部署重启（2026-10-31 晨，U 轮）**：
+  **形态口径订正（用户当日纠正，以 ADR-0021 裁定 1 为源）**：ESP32 不是"外设板"
+  或 Pi 的末梢——**RK3566 / 树莓派 / ESP32 是三个并列独立载体，都是从 Rock3 底座
+  裁剪出的不同产品**（各自独立整机、零关系；ESP32 微型形态自带 OLED 表情面 +
+  双轴云台 + 双麦 + 配网，认知经桥到某台 host 形态机器，桥只是它的可选能力升级，
+  "桥的一端是一台 host 形态机器，不是一台机器的两半"）。本机只是把两台独立机器
+  用 UART 桥接运行（`pi4b-host-esp32-classic` 是该组合的装配单）——下文所有
+  "板侧/末梢"措辞仅指这台组合里的物理接线位置，不构成形态定性。
+  背景：用户报告「喊它没反应/舵机不转/OLED 出现 Hello 字样与舵机参数」。实机
+  勘查（pi@192.168.124.52）推翻此前"探针问题"的假设——**生产栈本身在跑**
+  （rrd + 五模块 + python brain），但部署停留在 **2026-10-14**，整 17 天未更新。
+  逐条取证（全部可复现）：
+
+  ① **部署链腐化（已修，721c12f）**：`pack-arm64.sh` 仍按 python 树打包 brain
+     （`cp modules/rr3-brain/rr3_brain`），而 dc9d6f4（批N32件四）已把 brain 迁为
+     Rust 二进制并撤除 rr3-pack 的 lang=python 分支——cp 失败整链断。**部署脚本
+     无任何门禁覆盖，形态变更无人同批扫描 tools/deploy/**。同日发现 brain 的
+     ureq+rustls(ring) 需 C 工具链，musl 宿主交叉结构性不覆盖（aarch64-linux-musl-gcc
+     不存在），与 alsa 同类 → 归板上原生构建。已重组：① musl 五件 → ② payload
+     （brain 只落 manifest）→ ③ build-onboard（brain+sense+interact 三件）→
+     ④ staging → ⑤ 断言。**当日已按新链成功出包并安装**（含旧树备份
+     `/home/pi/rockrobot3-old-20261031-0703`，可回滚）。
+
+  ② **装配单与实机不符（生产级根因，未修）**：实机是 Pi4B 宿主 × ESP32 classic
+     头（舵机/OLED/双麦全在板上），但 rrd.service 指向 `profiles/distro.toml`
+      ——其 [[pin]] 把 `act.axis.pwm` 指向 **Pi PWM0 引脚12**、`ui.face.spi` 指向
+     **Pi MAX7219**，两者实机都不存在。`profiles/pi4b-host-esp32-classic.toml`
+     是更接近的档案（板侧十一键在 [hardware]），但其 [[pin]] 仍留 ui.face.spi
+     （注释写明"rr3-interact 开机必探显示面 fail-closed，无显示件时退出"）。
+
+  ③ **装载门拒启导致音频链整体缺席（「喊它没反应」的直接根因）**：新 rrd 启动后
+     `rr3-ctl status` 只有 connect/act running；日志明示
+     `拒绝启动 rr3-sense：缺格 sensor.env / sensor.imu`、
+     `拒绝启动 rr3-power：缺格 power.charger`——distro 档声明 SHTC3(0x70)/
+     ICM-42688(0x68)/INA219(0x40) 三个 I2C 器件，实机未接 → 探测不到 →
+     **fail-closed 整个模块不启动，连同 audio.capture/vad 一起没了**。
+     这是"配置声明了不存在的硬件"造成的整模块连坐，不是音频代码缺陷。
+
+  ④ **brain/interact 注册后即死（未定案，有精确证据与下一步）**：两模块在
+     rrd 日志里都能看到 `注册 rr3-xxx task=N`（分配了递增 task 号），随即
+     `连接断开（Connection reset by peer）`；模块侧 per-unit 日志
+     （`/var/run/rock3-ipc.sock.log/<unit>.log`）只留下
+     `退出: 注册失败: 总线已断开`（rr-bus-api client.rs:621 的 reader-EOF 路径）。
+     手工直跑（注入 RR3_BUS_PATH/RR3_MANIFEST）同样在该点退出——**rrd 不接受
+     非受管子进程的注册**。
+     **strace 加壳取证（当日，决定性）**：以 shell 壳包住 interact 二进制跑
+     `strace -xx -e trace=network`，时间线为——19.300 发出 904B 注册帧（一次
+     write）→ 19.301657 **只收到 128B（恰为帧头）**，该帧头解析出 plen≈51 →
+     19.310 读线程 close(3) 并报「注册失败: 总线已断开」→ 进程退出；**期间没有
+     第二次 recvfrom**（即 51B 载荷从未到达）。rrd 侧同刻反复报
+     `写帧失败 dst=0: Io("Broken pipe")`。结论：**回复帧在 128B 头之后断流**
+     ——要么 rrd 的应答写在中途断（对端已关/写面竞态），要么客户端在头解析后
+     立即放弃。因帧头 magic 合法，重点转向 rrd 应答写面（`rr3_reply_ok` 与
+     writer/fanout 两条写路径共用 `Mutex<UnixStream>` 的整帧原子性）。
+     取证壳已撤除、二进制还原（生产不留调试壳）。
+     下一步实验：在 rrd 侧给 `rr3_reply_ok` 加写后长度校验（跨进程可观测），
+     或复现"注册瞬间恰好有广播帧并发写同一 socket"的竞态。
+
+  ⑤ **单 UART 多消费方的结构性冲突（未修，ADR 级）**：rr-hal 的 esp32 后端
+     （`RR3_HAL_BACKEND=esp32` + `RR3_HAL_PERIPH_UART` + `RR3_HAL_PERIPH_BAUD`）
+     让 interact(显示)/act(舵机)/sense(音频) 各自**直开同一串口**，而 rr-ipc
+     开口是 **flock 排他**（第二个 opener 当场被拒）。三模块共存于一台 Pi 时
+     必然互斥。桥（rr3-bridge）名义上是解法，但板固件不发 register 帧
+     （全仓 grep 无 register 臂；它是纯 UART 帧对端 `RR3_PERIPH_TASK`），
+     桥接上 rrd 会在握手上失败——**桥链对当前固件不可用**。正确修法需
+     UART broker（单进程持口 + 本地代理）或 fd 传递，属架构决议。
+
+  ⑥ **硬件事实补充**：Pi 只有一块声卡（sndrpigooglevoi，Google voiceHAT，
+     capture 可用；`arecord -D hw:2,0` 当时被生产进程占用报 busy），**无 USB
+     回放卡**——`profiles/pi4b-host-esp32-classic.toml` 的
+     `alsa_device="plughw:CARD=Device"` 在本机不成立。`/dev/ttyAMA0` 存在、
+     无 ttyUSB（板走 GPIO14/15 直连而非 USB 转串）。装配手册记载 DoA 真件档
+     设计是"USB ≥2 麦阵列"（BOM #1），实机未接，与 ESP32 双麦口径并存需裁定。
+
+  ⑦ **brain 无唤醒词/KWS**：全模块 grep `你好洛克|wake|唤醒|kws` 零命中；
+     ASR 走云端（ureq，需 env 端点与密钥）。「喊它要有回应」的本地无条件
+     可达路径仍是探针侧 voice_respond v7.2（见 V3 收口）。
+
+  结论：**当前实机生产栈处于"部分模块缺席"状态**——connect/act 起、
+  sense/power 被装载门拒、brain/interact 注册后死。这不是单点 bug，而是
+  "装配单描述的是另一台机器 + 部署 17 天未更新 + 单 UART 多消费方结构冲突"
+  三者叠加。修复顺序（依赖序）：先定机型档案（②⑥，含移除不存在的 IIC 器件、
+  显示面走 esp32 后端）→ 再解单 UART 冲突（⑤，ADR 级）→ 再定 brain/interact
+  注册死因（④）→ 最后才谈「你好洛克」闭环（⑦）。
+
+**遗留队列（白班，按优先序）**：
+  1. 机型档案定案（U 轮②⑥）：新增/修正本机档案——移除 SHTC3/ICM-42688/INA219
+     三个不存在的 IIC 器件声明（避免 sense/power 整模块连坐）、alsa 指向
+     voiceHAT、显示/舵机/音频走 esp32 后端；须与 `[slots] present`、
+     `enabled_slots` 三处一致。
+  2. 单 UART 多消费方架构决议（U 轮⑤）：UART broker 或 fd 传递；桥链需板固件
+     补 register 臂才可用。
+  3. brain/interact 注册后死因定案（U 轮④）：最小装配集 + strace。
+  4. 阵列声学衰减 ~30dB 物理检查（V3 深夜轮⑥）：开壳目检两麦装配位/声孔
+     朝向——它同时压制定向 ILD 幅度与喊话信噪比，是拾音定向恢复转向的前提。
+  5. 定向锚点重建：白天用 voice_respond v7.2（触发器已根治）采带真值标注的
+     定向喊话（左右各 ≥3 次有效触发），ILD 锚点成形后恢复两态转向。
+  6. V5 CRC 归因（3/4691）：先给 rr3-audio-rec FrameAssembler 加 crc_bad
+     计数（现无校验，grep crc 零命中）→ build-onboard → 10min 同负载复验。
+  7. 「你好洛克」ASR/KWS 未建（喊任何响声都会回应的诚实口径不变）。
+  8. RAIL 分压测点未接线（full_smoke RAIL raw=0，硬件项）。
+  9. 表情胶囊眼观感打磨（用户反馈"表情符号做得并不好"）。
+  10. ESP32 独立形态动作面未建（face/pan/tilt/audio 端点）——配网面已闭环，
+     动作仍走 UART 帧；要让板子单机可喊可动，需在板侧补动作端点。
+
+**U 轮续：ESP32 独立形态配网面落地（2026-10-31 午后）**：
+  ① 生产栈恢复：按新链（musl 五件 → payload → build-onboard → staging → 断言）
+  出包安装后 **五模块 running**（`rr3-ctl status`：sense/connect/act/interact/
+  brain 全 running）；rrd 装配单切 `pi4b-host-esp32-classic.toml`（drop-in
+  `rrd.service.d/profile.conf`），配套 `hardware/pi4b-host-esp32-classic/wiring.toml`
+  与 `contracts/platform/raspberry-pi-4.toml` 已归位。
+
+  ② 板侧配网面（ADR-0021 裁定 1 独立形态要求；用户口径"WiFi 会换，机器人要能
+  自己配网"）：APSTA 常开 SoftAP `RR3-BOARD`（WPA2，口令 rock3robot）＋ `GET /`
+  手机配网页＋`POST /api/board/wifi` 事务写口（读旧→写 NVS→重连→有界等 DHCP
+  →败回退旧值）＋`POST /api/board/reboot`。**真板验收（本日，固件 b15b496）**：
+  - 无凭据 boot → `凭据源=ap-only`，AP 广播（Pi `nmcli` 扫到 RR3-BOARD，ch1，
+    信号 87）；
+  - Mac 连 AP（192.168.4.2）→ `GET /`、`GET /api/board/state`、
+    `GET /api/board/bindings` 全 **200**；
+  - `POST /api/board/wifi`（真实家用凭据）→ 应答
+    `{"ok":true,"connected":true,"reverted":false,"stage":"apply"}`；UART0 实录
+    `wifi:connected with ziroom602` ＋ `sta ip: 192.168.124.10`；AP 同时仍广播
+    （ch6，信号 97）；
+  - 经 `POST /api/board/reboot` 重启后 boot 横幅 `凭据源=nvs`，STA 自动重连同
+    IP，局域网 `GET /api/board/state` 200——NVS 持久化闭环成立。
+  - 现网状态：板 STA 在 `ziroom602`，IP `192.168.124.10`；SoftAP 192.168.4.1
+    常开（换网时手机连它重配即可）。
+
+  ③ 取证方法订正（当日最贵的假象）：Mac 侧旧脚本只拉低 DTR/RTS、从不释放 EN，
+  **从未复位板子**，故"读不到 UART0／AP 未广播"是取证假象。正确序列：DTR 高
+  （IO0 正常启动）＋ RTS 先低（EN 复位）后高（释放）。UART0 可达后一次 boot 即以
+  `wifi:mode : sta + softAP` 与 `DHCP server ... 192.168.4.1` 证伪"AP 未起"。
+  另：`nmcli dev wifi connect` 依赖扫描缓存，缓存过期时报 "No network with SSID
+  found"（与 AP 广播无关）；脚本须先 `nmcli dev wifi rescan` 并等列表出现。
+
+  ④ 事故与禁令：用 Pi 的 wlan0 切到板子 AP 做端到端测试，期间 **Pi 卡死约
+  1h45m 后自行重启**（/tmp 日志被 systemd 清空、journal 无持久化、根因未定；
+  与 brcmfmac 切网强相关嫌疑）。**结论：Pi 的 wlan0 是生产链路（ssh + 栈观测），
+  禁止再把生产机 WiFi 切去测试面**；板侧配网验收改由 Mac 客户端在 AP 上直打
+  （可恢复——Mac 会自动回连首选网，实测两次均回 `ziroom602_5G`）。
+
+**U 轮续2：板侧音频上行打通（2026-10-31 傍晚，方案①）**：
+  背景：组合形态的宿主音频源此前是 voiceHAT（实机无麦＝数字静默，VAD 0 事件），
+  真实双麦在 ESP32 上而板侧 `audio_on=false`、上行未开；「喊它没反应」的音频
+  半边由此断开。
+
+  改法（代码 + 数据两层）：
+  - **能力面后端覆盖键 `RR3_HAL_AUDIO_BACKEND`**（`rr-hal/src/backend.rs`）：只被
+    音频**采集面**读取，未设/空白回落全局 `RR3_HAL_BACKEND`；两键共用白名单裁决
+    `rr3_hal_backend_parse`（单测钉死）。理由：全局设 esp32 会让同机的舵机/显示面
+    也去开同一 UART（跨进程 flock 单消费者，U 轮⑤）——采集面单独选档，其余能力
+    面维持平台缺省（act/interact 不受影响）。
+  - **`config-esp32.toml` 随包**（rr3-pack 可选件复制 + pack ⑤ 断言）：板麦档
+    channels=2 / VAD 650 / 反射环开启，装机位
+    `/usr/lib/rockrobot3/modules/rr3-sense/config-esp32.toml`。
+  - 部署 drop-in（`/etc/systemd/system/rrd.service.d/profile.conf`）：
+    `RR3_HAL_AUDIO_BACKEND=esp32`、`RR3_HAL_PERIPH_UART=/dev/ttyAMA0`、
+    `RR3_HAL_PERIPH_BAUD=1500000`、`RR3_SENSE_CONFIG=<装机 config-esp32.toml>`。
+
+  验收（真板，固件 b15b496）：
+  - 物面先证：独立收流工具 1.5M 8s，`chunks=61 gaps=0 err=0`，16001Hz 双声道，
+    实测 L rms=633 / R rms=598（环境底噪，非静默）；
+  - 生产 sense：`音频源就绪: backend=esp32 rate=16000 ch=2 frame_ms=20`；板侧
+    `/api/board/state` `audio_on=true` 且 `audio_sent` 持续增长；
+  - VAD 边沿已进总线（rrd `转发 rr3-sense/audio/vad_start`）；反射环实测下发
+    `pan=120°/114°/107°` + 点头 `tilt 90→98`，板侧 pan/tilt 同步变化；
+  - brain 收到 VAD 后起对话轮（日志 `轮次 1..9: ASR 失败…缺少环境变量
+    RR3_CLOUD_API_KEY`）——**音频通路已到 brain，只差云凭据**；
+  - 面板 `POST /api/beep` 实测 `played_ms=200`（回放面持有 ALSA 设备、可出声）。
+
+  遗留（按优先序）：
+  1. 云凭据 `RR3_CLOUD_API_KEY` 未注入（ASR/LLM/TTS 全链因此不可用）——「语音
+     对话」的最后一格；面板 secrets 面（`POST /api/model/key`）可落值。
+  2. VAD 阈 650 与当前底噪 633 太近：15 分钟内 9 轮起音（含 beep），反射环在
+     环境噪声下会误转头；需用真实嗓音重标（config-esp32 的 650 来自底噪 430 的
+     旧场地）。
+  3. DoA 锚点/双麦基线仍是旧标定（遗留 4/5 不变）；当前方向只作粗档（±30/±90）。
+  4. `rr3.set_bindings` 未随音频链下发（板 `/api/board/bindings` 仍 `null`）——
+     音频引脚走固件编译缺省、功能不受影响；绑定对账锚待舵机/显示接入时一并接。
+
+**U 轮续3：云凭据接入与真语音闭环（2026-10-31 晚）**：
+  凭据（值不落账，只记来源与落位）：
+  - ASR/TTS：`RR3_CLOUD_API_KEY` ← `~/.rr3/cloud_key`（51B）。**订正**：Mac
+    `.zshrc` 里同名的旧键已失效（SiliconFlow 返回 401 / code 30014），重接必须
+    用 cloud_key 这把。
+  - LLM：模型行 `api_key_ref = "DeepSeek官方"` ← secrets 文件同名键（`model/test`
+    返回 200 / 743ms）。
+  - 板端落位：`/etc/rockrobot3/cloud.env`（0600）＋
+    `/etc/rockrobot3/secrets.json`（0600）；rrd drop-in 加
+    `EnvironmentFile=-/etc/rockrobot3/cloud.env` 与
+    `RR3_SECRETS_FILE=/etc/rockrobot3/secrets.json`（root 无 HOME，缺省 secrets
+    路径不可靠）。
+  三腿直测（不经模块）：合成语音 WAV「你好，今天天气怎么样」→ 云端 ASR 正确回文；
+  TTS 200 / 78KB PCM；LLM `model/test` 200 / 743ms。
+  真闭环（实机、用户对麦说话）：
+  - brain：`对话轮完成: trace=10 user='没有啊，今天天气怎么样？经。'
+    reply='我这边看不到实时天气，你告诉我城市名，我帮你查查。'
+    tts_pcm_ms=6877 played_ms=6877`
+  - interact：`tts: 25 字符播了 6877ms（PCM 220078 字节，gain 70%）`——扬声器
+    出声，**ASR→LLM→TTS→回放全链闭合**。
+  - 噪声轮：空文本如实弃轮（`识别为空文本，弃轮`），不产生假回复；但反射环仍会
+    因底噪转头（续2 遗留 2）。
+  遗留：VAD 阈/DoA 标定（噪声轮与误转头）；「你好洛克」唤醒词仍无（任何响声都会
+  进 ASR，空文本弃轮）。
+
+**U 轮续4：VAD 阈值重标（2026-10-31 晚）**：
+  方法：停栈 75s，用 `rr3-audio-rec` 收真实说话（与 VAD 同域：mono=(L+R)/2、
+  20ms 帧 320 样本、整数 RMS），逐帧统计后取阈值。
+  实测：安静秒 p50=414 / p95=438 / p99=544；连续 ≥200ms 候选起音在 650 阈
+  22 段 / 11.7s、750 阈 18 段 / 8.0s、850 阈仅 8 段 / 2.3s（会漏语音）。
+  定案：`rms_start` 650→**750**、`doa_window_rms_min` 650→**750**（= 底噪 p99
+  的 1.38×，且覆盖语音主体）；`min_speech_ms` / `silence_tail_ms` 不动。
+  验收：重标后 60s 内仅 1 次起音（此前 15 分钟 9 轮）；用户真语音轮
+  `user='今天上海的天气怎么样？' reply='今天上海多云，气温大概22到28度，有点风，
+  出门还行。' tts_pcm_ms=8397 played_ms=8397`（ASR 正确 / 回复 / 8.4s 实播）。
+  注意：SiliconFlow 偶发瞬时 500 与读超时（本轮前 2/3 次弃轮，brain 如实弃轮不
+  重试）；短促响声仍会触发反射转头——根治靠唤醒词（下一项，未做）。
+
+**U 轮续5：ASR 有界重试（2026-10-31 晚）**：
+  - 改动（`rr3-brain/src/cloud.rs`）：`rr3_transcribe` 首调 + **1 次重试**
+    （`RR3_ASR_ATTEMPTS=2`、间隔 500ms）；判据 `rr3_asr_error_retryable` 只收
+    HTTP 429/5xx 与传输层「云端不可达」（4xx/坏应答/缺密钥不重试）；multipart
+    体一次装配复用。重试过的最终错误回带「（ASR 共尝试 2 次）」，首调失败文案
+    逐字不变（台账/单测依赖）。
+  - 账面：同步调用在对话轮内，上限 2×`timeout_s`（缺省 20s）——有界，不无限重试。
+  - 单测：`asr_error_retry_classification`、`asr_retries_5xx_once_then_succeeds`
+    （假端点首 500 次 200，请求数恰 2）、`asr_5xx_exhausts_bounded_attempts`；
+    既有非 JSON 用例补钉「坏应答不重试（请求数 1）」。`cargo test` 100 全绿。
+  - 部署：brain 板上重建（10.6s）后热替换装机位，五模块 running；源已提交，
+    下一次出包自动携带。
+  - 遗留：真实瞬时 500 的现场复验未做（需自然复现或临时改 base_url 造障）；
+    本轮以单测 + 部署健康为准。
+
+**U 轮续6：唤醒词闭环与音频通路深挖（2026-10-31 深夜）**：
+  ① 回放面换 USB 声卡：C-Media "Device"（`lsusb` 0d8c:0012）接入 Pi 4
+  USB3.0，`aplay -l` 见 card `Device`；profile
+  `[hardware].alsa_device = "plughw:CARD=Device"`（voiceHAT 仅留历史采集档）。
+  USB PCM 硬件音量 38%→100%（`amixer -c 3 sset PCM 100%` + `alsactl store`）；
+  interact 实测占用 `/dev/snd/pcmC3D0p`，2s 长音与滴声用户可闻——回放面通。
+
+  ② **双麦平均下混是 ASR 质量的真凶（实机取证）**：150mm 间距双麦原始 L/R
+  零延迟相关仅 +0.21（按最佳时差对齐后仍只 +0.43），平均下混 RMS 比单通道低
+  2–3dB 且带梳状滤波——同一句"你好洛克"，下混送 ASR 得"你好，外天。"，
+  单通道得"你好，洛哥。"。修法：`rr3_pcm_best_channel`（每 20ms 帧选能量最高
+  通道，不平均）替换 `rr3_pcm_downmix_mono`；DoA 仍吃原始双通道（TDOA 不变）。
+  单测 37 全绿（含选道/单声道原样/并列取首/空输入）。
+
+  ③ 唤醒词策略（**用户当日裁定**）：云端 ASR 对生僻名"洛克"不稳定——同句实测
+  识成 骆天/洛天/要是/老师/洛哥/洛师/骆师；`prompt` 热词参数被服务端忽略，
+  增益 1/2/4/8、`language=zh`、150Hz 高通均无稳定改善。故放宽为**"你好"开头
+  即唤醒**：短语表（你好洛克/你好老师）先精确剥前缀；"你好"后 ≤2 字回 ack、
+  更长当命令进 LLM；非"你好"前缀短语仍走短语表与一字符错/吞词尾。代价：任何
+  "你好…"都会唤醒（用户已接受）。
+
+  ④ VAD 参数落定：起音阈 **700**、判停尾 **700ms**、DoA 窗能量门 **700**。
+  （1200ms 判停会让环境噪声尖峰反复续窗，utterance 涨到 6.5–8.4s，整段送
+  ASR 反而返回空；700ms 片段只含语音段 ~2s。）
+
+  ⑤ 验证（用户实机）：`对话轮完成: trace=1 user='你好，骆师。'
+  reply='我在呢，有什么可以帮您？' tts_pcm_ms=2917 played_ms=2917`；
+  interact `tts: 12 字符播了 2917ms（PCM 93358 字节）`，USB 声卡出声；
+  听声转头已恢复（`reflex enable=true`，五模块 running）。
+
+  ⑤+ 完整表现验收（用户按脚本实机跑三步）：
+  - 唤醒：`user='你好，在克。'`（ASR 变体）→ ack `我在呢，有什么可以帮您？`，
+    `tts_pcm_ms=2757 played_ms=2757`；反射环同期 `pan=60°` + 点头 `90→98`（转头通）；
+  - 跟进窗：`user='今天上海的天气怎么样？'`（ASR 把"今天天气"补成"今天上海"，
+    轻度幻觉）→ 回复 18–24℃/风力不大，`tts_pcm_ms=7677 played_ms=7677`；
+  - 窗外：`user='推荐一个地方。'/'你给我推荐一个去的地方。'` → 静默丢弃
+    （无 LLM、无 TTS、无回复）——静默门控按预期生效。
+
+  ⑥ 诊断件：`RR3_BRAIN_DUMP_UTT`（env 门控，落盘送 ASR 的 utterance PCM，
+  默认关；本次取证后已移除 drop-in）。遗留：ASR 空文本轮/non-determinism 仍可
+  优化；若要恢复严格"你好洛克"唯一性，需上端侧 KWS（下一批，不在本轮）。
+
+  ⑦ ASR 输入补偿与连读用法（2026-10-31 深夜）：
+  - 云端 ASR 偶发判空/幻觉（曾把"你好洛克"判成韩语 `안녕`、或整段空文本），
+    根因是板麦语音电平偏低（RMS ~1000/32767）。修法：送 ASR 前 **×4 软件增益**
+    （`rr3_asr_boost_pcm`，带 i16 钳位）+ 显式 `language=zh`；只作用于 ASR
+    副本，VAD/DoA/总线 PCM 不变。跟进窗 15s→**30s**（"唤醒应答→想问题→开口"
+    的停顿余量）。
+  - **推荐用法（用户裁定采纳）**：唤醒词与问题**一口气说**，如
+    "你好洛克，上海有什么美食？"——走 Command 路径，不依赖后续跟进窗：
+    实测 `user='你好，那个上海有什么美食吗？'`
+    `reply='上海美食可多了，小笼包皮薄汁多，生煎包底脆肉香，还有葱油拌面和
+    蟹壳黄，都值得尝尝。' tts_pcm_ms=13517 played_ms=13517`；反射环同期
+    `pan=115°` + 点头。
+  - 部署订正（重要教训）：`rsync -a 多源文件 ... 目标目录/` 会把各源**平铺**
+    到目标根（不按相对路径），本轮早期 brain/sense 改动因此未真正上板；改为
+    逐文件指定目标绝对路径 + `grep` 命中数核对（`rr3_pcm_best_channel`=10、
+    `RR3_ASR_LANGUAGE`=2）后重建安装，五模块 running。

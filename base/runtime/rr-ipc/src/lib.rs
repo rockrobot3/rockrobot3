@@ -66,13 +66,13 @@ pub use persist::rr3_atomic_store;
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{
-    flags, opcode, Rr3HdrError, Rr3Header, Rr3PayloadType, Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN,
-    RR3_IPC_HDR_SIZE,
+    flags, opcode, rr3_crc32, rr3_header_bytes_with_crc, Rr3HdrError, Rr3Header, Rr3PayloadType,
+    Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN, RR3_IPC_HDR_SIZE,
 };
 // 窄缝与帧缓冲（no_std 可达，无条件导出）；帧数据形状（Rr3Frame / 编码）住
 // protocol::wire；io 半边（读写）依赖 std::io，随门控。
 pub use protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
-pub use transport::buf::{rr3_framebuf_read, Rr3FrameBuf};
+pub use transport::buf::{rr3_framebuf_read, rr3_verify_crc, Rr3FrameBuf};
 pub use transport::bytestream::Rr3ByteStream;
 #[cfg(not(target_os = "none"))]
 pub use transport::frame::{rr3_frame_read, rr3_frame_write};

@@ -13,7 +13,7 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::protocol::header::{Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE};
+use crate::protocol::header::{rr3_header_bytes_with_crc, Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE};
 
 /// 一帧 = 头 + payload
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +37,9 @@ pub enum Rr3FrameError {
     LengthMismatch { declares: u32, actual: usize },
     /// 缓冲未 seal 就要取整帧字节（头区还是全 0，发出去是对端眼里的坏 magic）
     Unsealed,
+    /// 载荷 CRC32 校验失败：声明的 CRC（头部 `payload_crc32`）与实算值不符。
+    /// **含义 = 载荷字节在传输中受损**（误码/截断/拼接），帧必须丢弃，不得消费。
+    CrcMismatch { declared: u32, actual: u32 },
     /// 其它 IO 错误（文案只带 os 原因，不带对端数据）
     Io(String),
 }
@@ -57,7 +60,8 @@ pub fn rr3_frame_to_bytes(f: &Rr3Frame) -> Result<Vec<u8>, Rr3FrameError> {
         });
     }
     let mut out = Vec::with_capacity(RR3_IPC_HDR_SIZE + f.payload.len());
-    out.extend_from_slice(&f.header.to_bytes());
+    // 头的 CRC 由载荷算出并写入（to_bytes 不知道载荷，不要直接用它拼发送字节）
+    out.extend_from_slice(&rr3_header_bytes_with_crc(&f.header, &f.payload));
     out.extend_from_slice(&f.payload);
     Ok(out)
 }
@@ -65,7 +69,7 @@ pub fn rr3_frame_to_bytes(f: &Rr3Frame) -> Result<Vec<u8>, Rr3FrameError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::header::opcode;
+    use crate::protocol::header::{opcode, rr3_crc32, OFF_CRC32, OFF_RESERVED};
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -95,17 +99,42 @@ mod tests {
     #[test]
     fn frame_header_is_byte_identical_to_golden() {
         let g = golden();
+        // golden 是**无载荷**纯头（CRC 覆盖载荷，故其 CRC 字段本就为 0）
+        let pure = Rr3Header::from_bytes(&g).unwrap();
+        assert_eq!(pure.payload_crc32, 0, "golden 无载荷纯头的 CRC 字段必须为 0");
+        assert_eq!(
+            pure.to_bytes().to_vec(),
+            g,
+            "无载荷纯头与 golden 向量逐字节一致"
+        );
+
+        // 带载荷的真帧：头里的 CRC 由载荷算出（非零），且接收侧校验必过；
+        // 除 CRC 字段外，其余头字节仍与 golden 逐字节一致
+        let payload = vec![0xAB; 96];
         let bytes = rr3_frame_to_bytes(&Rr3Frame {
-            header: Rr3Header::from_bytes(&g).unwrap(),
-            payload: vec![0xAB; 96],
+            header: pure,
+            payload: payload.clone(),
         })
         .unwrap();
-        assert_eq!(
-            &bytes[..RR3_IPC_HDR_SIZE],
-            &g[..],
-            "帧头部与 golden 向量漂移"
-        );
         assert_eq!(bytes.len(), 128 + 96);
+        let head = Rr3Header::from_bytes(&bytes[..RR3_IPC_HDR_SIZE]).unwrap();
+        assert_ne!(head.payload_crc32, 0, "带载荷的真帧头 CRC 必须非零");
+        assert_eq!(head.payload_crc32, rr3_crc32(&payload));
+        assert_eq!(
+            crate::transport::buf::rr3_verify_crc(&head, &payload),
+            Ok(()),
+            "带载荷的真帧头必须能通过接收侧 CRC 校验"
+        );
+        assert_eq!(
+            &bytes[..OFF_CRC32],
+            &g[..OFF_CRC32],
+            "CRC 之前的头字段与 golden 漂移"
+        );
+        assert_eq!(
+            &bytes[OFF_RESERVED..RR3_IPC_HDR_SIZE],
+            &g[OFF_RESERVED..],
+            "reserved 区与 golden 漂移"
+        );
     }
 
     /// 写侧自校验：长度不符就一个字都不许拼出去
@@ -136,7 +165,11 @@ mod tests {
         let slice: &[u8] = &bytes[..RR3_IPC_HDR_SIZE];
         let head: [u8; RR3_IPC_HDR_SIZE] = slice.try_into().unwrap();
         let header = Rr3Header::from_bytes(&head).unwrap();
-        assert_eq!(header, f.header);
+        // 头里的 CRC 由载荷算出并写入，解析回头必须带上它（不是发送前的 0）
+        let mut want = f.header;
+        want.payload_crc32 = rr3_crc32(&f.payload);
+        assert_eq!(header, want);
+        assert_ne!(want.payload_crc32, 0, "带载荷的头 CRC 必须非零");
         assert_eq!(&bytes[RR3_IPC_HDR_SIZE..], &f.payload[..]);
     }
 }

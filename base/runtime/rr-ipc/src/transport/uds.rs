@@ -55,7 +55,7 @@ impl Rr3UdsListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::header::{opcode, Rr3Header};
+    use crate::protocol::header::{opcode, rr3_crc32, Rr3Header};
     use crate::transport::buf::Rr3FrameBuf;
     use crate::transport::frame::Rr3Frame;
     use crate::transport::{Rr3TransportConn, Rr3TransportEndpoint, Rr3TransportListener};
@@ -104,7 +104,11 @@ mod tests {
         client.rr3_send_buf(buf).expect("send 应成功");
         let got = server.join().expect("服务线程不该 panic");
         assert_eq!(got.rr3_payload(), b"hello");
-        assert_eq!(*got.rr3_header(), hdr(5));
+        // send_buf 幂等 seal 时把 CRC 算进头：期望头必须带 CRC（不是 0）
+        let mut want = hdr(5);
+        want.payload_crc32 = rr3_crc32(b"hello");
+        assert_ne!(want.payload_crc32, 0, "带载荷的头 CRC 必须非零");
+        assert_eq!(*got.rr3_header(), want);
         let _ = std::fs::remove_file(&p);
     }
 
@@ -119,12 +123,14 @@ mod tests {
             Rr3Frame::try_from(conn.rr3_recv_buf().unwrap()).unwrap()
         });
         let mut client = Rr3UdsListener::rr3_connect(&p).unwrap();
-        let f = Rr3Frame {
+        let mut f = Rr3Frame {
             header: hdr(3),
             payload: b"abc"[..].to_vec(),
         };
+        f.header.payload_crc32 = rr3_crc32(&f.payload);
         client.rr3_send_buf(Rr3FrameBuf::from(&f)).unwrap();
         let back = server.join().unwrap();
+        assert_eq!(back.header.payload_crc32, rr3_crc32(b"abc"));
         assert_eq!(back, f);
         let _ = std::fs::remove_file(&p);
     }

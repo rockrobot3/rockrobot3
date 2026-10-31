@@ -1130,6 +1130,7 @@ watchdog_timeout_ms = 500
                 src_task: rr_bus::RR3_TASK_RRD,
                 dst_task: t,
                 payload_len: payload.len() as u32,
+                payload_crc32: rr_ipc::rr3_crc32(&payload),
             },
             payload,
         };

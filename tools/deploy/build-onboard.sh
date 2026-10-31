@@ -53,16 +53,27 @@ if ! rrun 'pkg-config --exists alsa && pkg-config --modversion alsa'; then
 fi
 
 echo "== ② 源码同步（rsync 排除 target/、.git/ 与四个 ESP32 宿主工具目录——板上构建闭包只含 base/+modules/，0.0.6 批F5 收口批收窄）=="
-rsync -a --delete \
+# **2026-10-31 事故与修法（本脚本最贵的一课）**：`rsync -a` 保留 mtime，而 target/
+# 被 --exclude 排除、板上旧产物**永不清理**；当仓库文件的 mtime 比板上旧产物旧
+# （git 检出/同步时间早于某次板上构建）时，cargo 的 mtime 指纹判定"源码未变"
+# → **静默复用陈旧编译物**。当日实证：payload 里的 brain/interact 是 10-26 的
+# 旧二进制，与当日新 rrd 的帧语义不兼容，表现为"注册回复到 128B 帧头即断流"
+# （strace 取证见 status.md U 轮④）——排查方向被误导了整整一轮。
+# 修法两层：① 同步后**强制刷新源码 mtime**（touch 全部 .rs/Cargo.*），让 cargo
+# 必须重算指纹；② 构建后加**新鲜度门禁**：二进制早于任一源码即点名失败。
+# 与之配套的判据：本脚本永不信任 target/ 的存在，只信任 mtime 与源码的新旧关系。
+rsync -a --checksum --delete \
   --exclude 'target/' --exclude '.git/' \
   --exclude 'tools/esp32-periph-base/' --exclude 'tools/espidf-sentinel/' \
   --exclude 'tools/espidf-std-hello/' --exclude 'tools/esp32-uart-echo/' \
   ./ "$HOST:$RMT_SRC/"
+echo "-- 刷新源码 mtime（防 cargo 复用陈旧产物）"
+rrun "find $RMT_SRC/base $RMT_SRC/modules -name '*.rs' -o -name 'Cargo.toml' -o -name 'Cargo.lock' | xargs -r touch"
 
 echo "== ③ 依赖通道（板上有外网则直连 crates.io；无外网则预置 vendor）=="
 # 仓库根无 Cargo.toml（分立 workspace 布局：base/runtime、modules/*、tools/* 各自独立，
-# 首跑真板踩实）——对本脚本 ④ 实际构建的两个 manifest 各自 fetch
-for m in sense interact; do
+# 首跑真板踩实）——对本脚本 ④ 实际构建的三个 manifest 各自 fetch
+for m in brain sense interact; do
   if ! rrun "cd $RMT_SRC/modules/rr3-$m && cargo fetch --locked"; then
     echo "cargo fetch 失败（rr3-$m）：板无外网时在宿主 \`cargo vendor --versioned-dirs <vendor_dir>\`，" >&2
     echo "把 vendor/ 与指向它的 .cargo/config.toml 一并同步上板，或改用有网环境后重跑。" >&2
@@ -70,26 +81,39 @@ for m in sense interact; do
   fi
 done
 
-echo "== ④ 板上原生构建（音频两件带 alsa feature，release）=="
+echo "== ④ 板上原生构建（sense/interact 带 alsa feature；brain 带 TLS——ureq+rustls(ring) 需要 C 工具链，宿主 musl 交叉结构性不覆盖，2026-10-31 定案归板上）=="
+rrun "cd $RMT_SRC && cargo build --locked --release --manifest-path modules/rr3-brain/Cargo.toml"
 for m in sense interact; do
   echo "-- rr3-$m"
   rrun "cd $RMT_SRC && cargo build --locked --release --features alsa --manifest-path modules/rr3-$m/Cargo.toml"
 done
 
 echo "== ⑤ 产物归位 staging（payload/rr3-modules/<name>/bin）=="
-for m in sense interact; do
+# 新鲜度门禁（2026-10-31 事故后加，见 ② 注）：产物必须比任一源文件新，否则
+# "构建成功"只是假象——cargo 复用了陈旧对象。门禁失败即点名退出，不出旧包。
+for m in brain sense interact; do
+  stale="$(rrun "find $RMT_SRC/base $RMT_SRC/modules -name '*.rs' -newer $RMT_SRC/modules/rr3-$m/target/release/rr3-$m | head -3" || true)"
+  if [ -n "$stale" ]; then
+    echo "rr3-$m 产物陈旧（比源码旧）——拒出包。新于产物的源文件：" >&2
+    printf '%s\n' "$stale" >&2
+    exit 1
+  fi
+done
+for m in brain sense interact; do
   mkdir -p "$PAY/rr3-modules/rr3-$m"
   rsync "$HOST:$RMT_SRC/modules/rr3-$m/target/release/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
 done
 
-echo "== ⑥ 板上构建件断言（动态 ELF aarch64 + ldd 含 libasound）=="
-for m in sense interact; do
+echo "== ⑥ 板上构建件断言（动态 ELF aarch64；音频两件 ldd 含 libasound）=="
+for m in brain sense interact; do
   bin="$PAY/rr3-modules/rr3-$m/bin"
   file "$bin" | grep -q "ELF 64-bit.*ARM aarch64" # 板上原生构建件是 aarch64 ELF
   if file "$bin" | grep -q "statically linked"; then
-    echo "rr3-$m 是静态产物（应为动态链 libasound——板上构建未生效？）" >&2
+    echo "rr3-$m 是静态产物（应为动态链——板上构建未生效？）" >&2
     exit 1
   fi
+done
+for m in sense interact; do
   rrun "ldd $RMT_SRC/modules/rr3-$m/target/release/rr3-$m" | grep -q libasound
 done
 

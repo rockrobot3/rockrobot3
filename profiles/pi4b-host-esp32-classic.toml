@@ -1,0 +1,165 @@
+# RockRobot3 装配单：pi4b-host-esp32-classic 机型（W2/T1：Pi 4B 当宿主 × ESP32 classic 板）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
+# 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
+# 形态语义（docs/process/dev/通用底座三平台验证计划.md §7）：Pi 跑完整 Linux 底座 +
+# 五模块，ESP32 classic 板只做末梢（I2S 双麦 / LEDC 双轴 / I2C OLED / UART2 桥链）。
+# 与 esp32-mini/distro 的关键差别：
+#   1. 外设物理真值分两处：**板侧**十一键在 [hardware]（与 profiles/esp32-mini.toml 逐值
+#      对齐，经 rr3.set_bindings 注入板侧）；**Pi 本机唯一的本地外设**是 MAX7219 双位
+#      级联点阵（链④真件档，2026-10-15 实测，SPI0 CE0），故只留一条 [[pin]] ui.face.spi。
+#      舵机/OLED/麦仍在板上，Pi 不直连（host 档派生器只认主机词形
+#      pwm<N>/gpiochip<N>/i2c<N>/spidev<N>，板侧 ledc<N> 词形进派生即拒 boot，见
+#      rrd profile.rs 校验①）。
+#   2. [[pin]] 缺 ui.face 之外六格 ⇒ 校验② role_missing 让六格降级（Degraded 可见面），
+#      这是本形态的诚实例：板在才有力，宿主不虚报本地能力。ui.face 不降级是因为
+#      rr3-interact 开机必探显示面（boot.rs rr3_interact_probe，R11③ fail-closed），
+#      无显示件时退出——Pi 本机的点阵正是这条探活的落点。
+#   3. [hardware] 同时保留宿主两键 alsa_device/link_ifname（USB 声卡回放 + Pi 网口）。
+# schema_version = 5（与 default/distro 同版：[runtime] 段必填，缺即红）。
+
+schema_version = 5
+
+[os]
+route = "distro" # Pi 4B 跑 Raspberry Pi OS（Debian 13 trixie 真机），属发行版快路轨
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
+log_ring_cap = 512
+
+[platform]
+# host 档（ADR-0018 修订 1）：完整 Linux 底座 + 五模块全跑在 Pi 上。
+tier = "host"
+# 平台事实表外键（§4.6）：contracts/platform/raspberry-pi-4.toml（BCM2711 演练实例，
+# 真机对账项进 status.md 敞口）。[controller_wordform] 四键在册，host 档派生前件成立。
+chip = "raspberry-pi-4"
+
+[supplies]
+# 平台供给声明：与 default 同口径（看门狗三键 + 时序预算三位）。
+# watchdog_feeder = "rrd"：宿主档由 rrd 喂（与 default/distro 一致）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+# [[supplies.domain]] 电力网络声明：Pi 由 5V/3A 官方电源供电、无电池与轨压测点，
+# 故只声明 rail5v/rail3v3 两域且绑定引用位一律 "none"；armed=false（未标定即不武装）。
+# 舵机走独立 UBEC（B 批验收过），其轨不在 Pi 侧计量——板侧 rail5v 口径归 esp32 档案。
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 3000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+# [supplies.budget]：host 档校验⑩不适用，"合法不适用"显式写 true（F-6）。
+[supplies.budget]
+not_applicable = true
+
+[bindings]
+# 格位 → 件（**2026-10-31 实机取证收窄**）：只保留实机真正在位的格位。原版照抄
+# distro 的十六格全集，导致装载门对"声明了但探测不到"的格位 fail-closed 拒启整
+# 模块（实测：`拒绝启动 rr3-sense：缺格 sensor.env / sensor.imu`——把 audio.capture
+# 一起连坐掉了，"喊它没反应"的直接根因）。本机事实：
+#   - SHTC3(0x70)/ICM-42688(0x68)/INA219(0x40) **均未接线**（i2cdetect 无应答）；
+#   - Pi 无电池（官方 5V 适配器供电）→ power.* 两格不在位；
+#   - act.led / act.relay 的 GPIO4/17 亦未接线 → 不在位（板侧舵机走 ESP32 UART）。
+# 保留格位：act.servo（ESP32 末梢）、net.wifi/net.bt（Pi 自带）、ui.face（MAX7219
+# 点阵，interact 开机探活已在位）、audio.playback（USB 声卡，2026-10-31 晚间接入）、
+# audio.capture/vad（ESP32 双麦；宿主音频源走 RR3_HAL_AUDIO_BACKEND=esp32，
+# voiceHAT 仅作历史采集档保留）、cognition 四格（brain）。
+"act.servo" = "rr3-act"
+"net.wifi" = "rr3-connect"
+"net.bt" = "rr3-connect"
+"ui.face" = "rr3-interact"
+"audio.playback" = "rr3-interact"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+"cognition.dialog" = "rr3-brain"
+"cognition.asr" = "rr3-brain"
+"cognition.llm" = "rr3-brain"
+"cognition.tts" = "rr3-brain"
+
+[hardware]
+# 宿主两键（schema 3 非引脚键直给）：
+# **2026-10-31 晚间订正**：USB 声卡（C-Media "Device"，`lsusb` 0d8c:0012）已接入
+# Pi 4 USB3.0，`aplay -l` 见 card `Device`（USB Audio），喇叭已在此声卡输出实测
+# 有声（2s 1kHz）。回放面按 CARD 名指向它（卡号随枚举变，名稳定）。
+# voiceHAT（sndrpigooglevoi）仍在位：其 PCM 硬件音量 100% 已在 alsactl 存档；
+# 采集当前走 ESP32 双麦（RR3_HAL_AUDIO_BACKEND=esp32），voiceHAT 仅作历史档。
+alsa_device = "plughw:CARD=Device"
+link_ifname = "wlan0"
+
+# 板侧十一键：与 profiles/esp32-mini.toml 逐值对齐（classic 板同一块硬件、同一线束）。
+# 消费语义 = 板侧装配对账锚（键位语义见 esp32-mini 头注，此处不重复）；非 [pins]
+# 派生面，故 host 档可直给且不触门 n。
+i2c_sda = "21"
+i2c_scl = "22"
+adc_rail_pin = "34"
+uart2_tx = "18"
+uart2_rx = "19"
+ledc_pan = "32"
+ledc_tilt = "33"
+i2s_bclk = "4"
+i2s_sd = "27"
+i2s_ws = "26"
+cred_store = "nvs:rr3"
+
+# Pi 本机唯一的本地外设绑定：MAX7219 双位级联点阵（链④真件档，2026-10-15 实测）。
+# spidev0 = 总线 0、channel 0 = 片选 0，装载期派生 spi_device="/dev/spidev0.0"；
+# 接线 4：DIN=脚19/CS=脚24/CLK=脚23（与 profiles/distro.toml 同格同值）。
+[[pin]]
+role = "ui.face.spi"
+controller = "spidev0"
+channel = 0
+direction = "out"
+mux_group = []
+
+[enabled_slots]
+# 启用的格位集合（**2026-10-31 收窄**，与 [bindings]/[slots] present 三处一致）：
+# 每个启用的格位都必须绑定且在位——装载门对缺格 fail-closed 拒启整模块。
+rr3-act = ["act.servo"]
+rr3-connect = ["net.wifi", "net.bt"]
+rr3-interact = ["ui.face", "audio.playback"]
+rr3-sense = ["audio.capture", "audio.vad"]
+rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[slots]
+# 本板物理在位格位声明（2026-10-31 按实机取证收窄，升序）：Pi 宿主 + ESP32 classic
+# 合起来**在位十一格**；power.*（无电池）、sensor.env/imu（未接线）、act.led/relay
+# （未接线）如实申报不在位——不在位就不启用，不用虚构配置讨好装载门。
+present = [
+    "act.servo",
+    "audio.capture",
+    "audio.playback",
+    "audio.vad",
+    "cognition.asr",
+    "cognition.dialog",
+    "cognition.llm",
+    "cognition.tts",
+    "net.bt",
+    "net.wifi",
+    "ui.face",
+]

@@ -79,12 +79,20 @@ mod tests {
 
     /// 记录型 Dispatcher（方案 §2.8-2 的 fake）：记回调序；`stop_after_ticks` 到点
     /// 由 on_tick 返 Err（测上抛路径）；`boom_event` 命中时 on_event 返 Err。
+    ///
+    /// **`stop_at: Some(..)` = "回调齐了才止步"模式**：预推帧由另一个线程写进 socket、
+    /// 再由客户端读线程投递，`serve` 的 `poll_wait(0)` 在首拍可能一个帧都拿不到。若
+    /// 终止条件仍按"第 N 拍"，夹具就隐含假设"帧已到达"，负载下随机早退（实测
+    /// `serve_dispatches_rpc_event_and_tick_in_order` 偶发 `rpcs=[]`）。故本模式下
+    /// 止步条件改为"两 Event + 两 RPC 都已回调"，并用墙钟兜底（超时返**不同文案**，
+    /// 让"夹具没等到帧"与"被测语义错"分得开）。
     struct RecordingDispatcher {
         events: Vec<String>,
         rpcs: Vec<(String, u64)>,
         ticks: AtomicU64,
         stop_after_ticks: u64,
         boom_event: &'static str,
+        stop_at: Option<Instant>,
     }
 
     impl RecordingDispatcher {
@@ -95,7 +103,15 @@ mod tests {
                 ticks: AtomicU64::new(0),
                 stop_after_ticks,
                 boom_event,
+                stop_at: None,
             }
+        }
+
+        /// 回调齐（2 Event + 2 RPC）即止步；3s 墙钟兜底。
+        fn new_until_dispatched() -> Self {
+            let mut d = Self::new(0, "");
+            d.stop_at = Some(Instant::now() + Duration::from_secs(3));
+            d
         }
     }
 
@@ -118,6 +134,20 @@ mod tests {
 
         fn on_tick(&mut self, _now: Instant, _bus: &BusHandle) -> Result<(), String> {
             let n = self.ticks.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(deadline) = self.stop_at {
+                // 至少跑两圈再止步（本用例同时钉"on_tick 每圈一次"），且四个回调齐
+                if n >= 2 && self.events.len() >= 2 && self.rpcs.len() >= 2 {
+                    return Err("节拍止步".into());
+                }
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "夹具等帧超时（events={} rpcs={}，预推帧未到达）",
+                        self.events.len(),
+                        self.rpcs.len()
+                    ));
+                }
+                return Ok(());
+            }
             if self.stop_after_ticks > 0 && n >= self.stop_after_ticks {
                 return Err("节拍止步".into());
             }
@@ -131,8 +161,10 @@ mod tests {
     #[test]
     fn serve_dispatches_rpc_event_and_tick_in_order() {
         let bus = connect_client("serve-order", FakeMode::Primed);
-        let mut d = RecordingDispatcher::new(2, "");
-        let err = serve(bus.clone(), &mut d, Duration::ZERO).unwrap_err();
+        let mut d = RecordingDispatcher::new_until_dispatched();
+        // 5ms 不是"加大超时"：止步条件已改为"回调齐 + 至少两圈"，这里只是避免
+        // poll_wait(0) 在等帧期间空转抢 CPU（并行测试下会拖慢同进程其他用例）
+        let err = serve(bus.clone(), &mut d, Duration::from_millis(5)).unwrap_err();
         assert_eq!(err, "节拍止步", "on_tick 的 Err 应原样上抛（方案 §2.5 步骤 5）");
         assert_eq!(
             d.events,
