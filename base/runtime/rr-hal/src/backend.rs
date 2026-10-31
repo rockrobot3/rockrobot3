@@ -33,6 +33,15 @@ pub const RR3_BACKEND_PLACEHOLDER: &str = "placeholder";
 /// 取值：`sim` / `linux` / `esp32` / `mac` / `placeholder`；未设或取值不认 → 走平台默认。
 pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 
+/// 音频**采集面**的后端覆盖键（能力面级，2026-10-31）：组合形态（Pi 宿主 ×
+/// ESP32 board）下，全局 `RR3_HAL_BACKEND=esp32` 会让同机的舵机/显示面也各自
+/// 去开同一 UART，而 `Rr3UartConn` 是跨进程 flock 单消费者（status.md U 轮⑤
+/// 结构冲突）——第二个 opener 必被拒、模块探活 exit(1)。音频面因此需要单独
+/// 选档：本键只被 [`rr3_hal_audio_source_with_cmd`] 读取（回放面仍走全局，
+/// 板无扬声器 TTS 恒宿主），其余能力面保持全局/平台缺省。未设/空白 → 回落
+/// 全局 [`rr3_hal_backend_resolve`]，既有行为逐点不变。
+pub const RR3_HAL_AUDIO_BACKEND_ENV: &str = "RR3_HAL_AUDIO_BACKEND";
+
 // —— 以下 `RR3_HAL_*` 键全部是**应急覆盖**（批D④ 收口，ADR-0018 裁定 4）：
 // 物理绑定的真值来自描述符（`profiles/<机>.toml` [hardware] → `RR3_HAL_BINDINGS`
 // 注入，见 [`crate::descriptor`]）；本组 env 同键覆盖描述符，供现场救场。描述符
@@ -152,8 +161,14 @@ pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
     let Some(v) = std::env::var_os(RR3_HAL_BACKEND_ENV) else {
         return Ok(rr3_hal_backend_default());
     };
-    let v = v.to_string_lossy().into_owned();
-    match v.as_str() {
+    rr3_hal_backend_parse(RR3_HAL_BACKEND_ENV, &v.to_string_lossy())
+}
+
+/// 后端名白名单裁决（纯函数，单测可钉；`key` 只用于错误点名）。全局键与
+/// 音频能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]）共用同一条白名单与
+/// 平台门语义——两键不各写一套，防静默分叉。
+fn rr3_hal_backend_parse(key: &str, v: &str) -> Result<&'static str, String> {
+    match v {
         RR3_BACKEND_SIM => Ok(RR3_BACKEND_SIM),
         RR3_BACKEND_PLACEHOLDER => Ok(RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_ESP32 => Ok(RR3_BACKEND_ESP32),
@@ -172,9 +187,22 @@ pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
             }
         }
         other => Err(format!(
-            "环境变量 {RR3_HAL_BACKEND_ENV} 取值不认: {other}（允许 sim/linux/esp32/mac/placeholder）"
+            "环境变量 {key} 取值不认: {other}（允许 sim/linux/esp32/mac/placeholder）"
         )),
     }
+}
+
+/// 音频采集面生效后端：能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]，未设/空白
+/// 视为未设）优先，否则回落全局 [`rr3_hal_backend_resolve`]。只此一处读覆盖键。
+pub fn rr3_hal_audio_backend_resolve() -> Result<&'static str, String> {
+    if let Some(v) = std::env::var_os(RR3_HAL_AUDIO_BACKEND_ENV) {
+        let s = v.to_string_lossy();
+        let s = s.trim();
+        if !s.is_empty() {
+            return rr3_hal_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, s);
+        }
+    }
+    rr3_hal_backend_resolve()
 }
 
 /// 描述符失败点名文案（R3-D3/0.0.5 批J G5）：裁决纯函数独立可单测。
@@ -244,7 +272,9 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
     Option<Rr3AudioCmdProducer>,
     &'static str,
 ) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    // 采集面走能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]）：组合形态下音频源
+    // 独占 UART，舵机/显示面不能同吃 esp32 档（见该键文档）。
+    match rr3_hal_audio_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
             return rr3_hal_bindings_effective_named("音频采集")
@@ -964,6 +994,40 @@ mod tests {
         for bad in ["", "-1", "3.5", "abc"] {
             assert_eq!(rr3_pwm_index_parse(bad), None, "{bad}");
         }
+    }
+
+    /// 后端白名单裁决（纯函数）：允许集全收、平台门落占位（linux 于非 linux、
+    /// mac 于非 macOS）、垃圾点名**所查 env 键**——全局键与音频能力面覆盖键
+    /// 共用本裁决，防两键各写一套白名单静默分叉。
+    #[test]
+    fn backend_parse_whitelist_platform_doors_and_key_naming() {
+        assert_eq!(rr3_hal_backend_parse("K", "sim").unwrap(), RR3_BACKEND_SIM);
+        assert_eq!(rr3_hal_backend_parse("K", "esp32").unwrap(), RR3_BACKEND_ESP32);
+        assert_eq!(
+            rr3_hal_backend_parse("K", "placeholder").unwrap(),
+            RR3_BACKEND_PLACEHOLDER
+        );
+        let linux = rr3_hal_backend_parse("K", "linux").unwrap();
+        if cfg!(target_os = "linux") {
+            assert_eq!(linux, RR3_BACKEND_LINUX);
+        } else {
+            assert_eq!(
+                linux, RR3_BACKEND_PLACEHOLDER,
+                "非 linux 平台显式 linux 落占位（使用时 Unsupported）"
+            );
+        }
+        let mac = rr3_hal_backend_parse("K", "mac").unwrap();
+        if cfg!(target_os = "macos") {
+            assert_eq!(mac, RR3_BACKEND_MAC);
+        } else {
+            assert_eq!(
+                mac, RR3_BACKEND_PLACEHOLDER,
+                "非 macOS 平台显式 mac 落占位（使用时 Unsupported）"
+            );
+        }
+        let e = rr3_hal_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, "bogus").unwrap_err();
+        assert!(e.contains(RR3_HAL_AUDIO_BACKEND_ENV), "错误点名所查键: {e}");
+        assert!(e.contains("bogus"), "错误含入参: {e}");
     }
 
     /// INA219 从地址键的取值裁决：只认 `0x` 前缀十六进制（裸写有十进制歧义
