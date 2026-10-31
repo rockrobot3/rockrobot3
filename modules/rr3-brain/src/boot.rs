@@ -70,6 +70,8 @@ pub(crate) struct Rr3BrainCfg {
     pub(crate) cloud_timeout_s: f64,
     pub(crate) call_timeout_s: f64,
     pub(crate) max_utterance_ms: i64,
+    /// 唤醒词门控（`[rr3-brain.wake]` 可选段；缺段 = 关闭，行为与旧版逐点等价）
+    pub(crate) wake: Rr3WakeCfg,
     /// config 文件路径（面板模型行落盘写面消费，ADR-0023）：解析器是纯函数不碰
     /// 路径解析，`main` 装配段用 `rr3mod::rr3_config_path` 投影后注入。
     /// `None` = 未注入（测试直造 cfg），落盘写面 fail-closed 拒写。
@@ -83,6 +85,87 @@ pub(crate) const RR3_BUS_CALL_TIMEOUT_DEFAULT_S: f64 = 30.0;
 /// dialog 话轮封顶缺省（`[rr3-brain.dialog].max_utterance_ms` 缺键回落；
 /// 对位 composite.py `dialog_cfg.get("max_utterance_ms", 8000)`）
 pub(crate) const RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS: i64 = 8000;
+
+/// 唤醒词段的缺省应答（`[rr3-brain.wake].ack` 缺键回落）：用户口径
+/// "我在呢 / 有什么可以帮您" 的合并版，一句话即可（TTS 合成一次）。
+pub(crate) const RR3_WAKE_ACK_DEFAULT: &str = "我在呢，有什么可以帮您？";
+/// 唤醒后跟进窗缺省（`followup_ms` 缺键回落）：唤醒应答后 15s 内继续说话
+/// 不必重复唤醒词；每接受一轮即续窗（对话式追问）。
+pub(crate) const RR3_WAKE_FOLLOWUP_DEFAULT_MS: u64 = 15_000;
+
+/// 唤醒词配置（`[rr3-brain.wake]` 段，2026-10-31）：**ASR 文本前缀匹配**，
+/// 不是本地 KWS（仓内无端侧关键词引擎；云端 ASR 已在 VAD 起音后必跑）。
+/// 语义：命中任一短语（去标点/空白归一后的前缀）→ 唤醒；命中且无后续文本 →
+/// 回固定应答（不进 LLM）；命中带后续文本 → 后续文本进 LLM；未命中但在
+/// 唤醒后的跟进窗内 → 原文本进 LLM；窗外 → 静默丢弃（不 LLM、不 TTS）。
+/// `enable=false`（缺省）= 关闭门控，行为与未加唤醒词逐点等价。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Rr3WakeCfg {
+    pub(crate) enable: bool,
+    pub(crate) phrases: Vec<String>,
+    pub(crate) ack: String,
+    pub(crate) followup_ms: u64,
+}
+
+impl Default for Rr3WakeCfg {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            phrases: vec!["你好洛克".to_string()],
+            ack: RR3_WAKE_ACK_DEFAULT.to_string(),
+            followup_ms: RR3_WAKE_FOLLOWUP_DEFAULT_MS,
+        }
+    }
+}
+
+/// `[rr3-brain.wake]` 段解析（可选段：缺段 = 关闭门控，缺省值见 [`Rr3WakeCfg`]；
+/// 类型错/短语表空/应答空一律 Err 点名——配置劣化不静默收编）。
+fn rr3_wake_cfg_of(doc: &Value) -> Result<Rr3WakeCfg, String> {
+    let mut cfg = Rr3WakeCfg::default();
+    let Some(w) = doc.get("rr3-brain").and_then(|b| b.get("wake")) else {
+        return Ok(cfg);
+    };
+    if let Some(v) = w.get("enable") {
+        cfg.enable = v
+            .as_bool()
+            .ok_or_else(|| "config [rr3-brain.wake] enable 须布尔".to_string())?;
+    }
+    if let Some(v) = w.get("phrases") {
+        let arr = v
+            .as_array()
+            .ok_or_else(|| "config [rr3-brain.wake] phrases 须字符串数组".to_string())?;
+        let mut out = Vec::new();
+        for item in arr {
+            let s = item
+                .as_str()
+                .ok_or_else(|| "config [rr3-brain.wake] phrases 项须字符串".to_string())?
+                .trim();
+            if !s.is_empty() {
+                out.push(s.to_string());
+            }
+        }
+        if out.is_empty() {
+            return Err("config [rr3-brain.wake] phrases 须至少一个非空短语".to_string());
+        }
+        cfg.phrases = out;
+    }
+    if let Some(v) = w.get("ack") {
+        let s = v
+            .as_str()
+            .ok_or_else(|| "config [rr3-brain.wake] ack 须字符串".to_string())?
+            .trim();
+        if s.is_empty() {
+            return Err("config [rr3-brain.wake] ack 不得为空".to_string());
+        }
+        cfg.ack = s.to_string();
+    }
+    if let Some(v) = w.get("followup_ms") {
+        cfg.followup_ms = v
+            .as_u64()
+            .ok_or_else(|| "config [rr3-brain.wake] followup_ms 须非负整数".to_string())?;
+    }
+    Ok(cfg)
+}
 
 // ---------- 文档树下钻助手（点名文案与 power/sense 同款中文形状） ----------
 
@@ -294,12 +377,15 @@ pub(crate) fn rr3_brain_config_parse(text: &str) -> Result<Rr3BrainCfg, String> 
             .ok_or_else(|| "config [rr3-brain.dialog] max_utterance_ms 须整数".to_string())?,
         None => RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS,
     };
+    // 唤醒词段可选（缺段 = 关闭门控；见 [`rr3_wake_cfg_of`]）
+    let wake = rr3_wake_cfg_of(&doc)?;
     Ok(Rr3BrainCfg {
         doc,
         model,
         cloud_timeout_s,
         call_timeout_s,
         max_utterance_ms,
+        wake,
         config_path: None,
     })
 }
@@ -565,6 +651,35 @@ timeout_s = 20
         );
         let e = rr3_brain_config_parse(&bad).unwrap_err();
         assert!(e.starts_with("模型行 甲 base_url 须为完整 API 根"), "{e}");
+    }
+
+    /// 唤醒段（可选，2026-10-31）：缺段 = 关闭 + 缺省值；全量注入生效；
+    /// 类型错/空短语表/空应答/负窗一律拒 boot（配置劣化不静默收编）。
+    #[test]
+    fn wake_section_defaults_off_and_parses_full() {
+        let base = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
+        let cfg = rr3_brain_config_parse(base).unwrap();
+        assert_eq!(cfg.wake, Rr3WakeCfg::default(), "缺段 = 关闭 + 缺省值");
+        let cfg = rr3_brain_config_parse(&format!(
+            "{base}[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\", \"洛克洛克\"]\nack = \"在呢\"\nfollowup_ms = 5000\n"
+        ))
+        .unwrap();
+        assert!(cfg.wake.enable);
+        assert_eq!(
+            cfg.wake.phrases,
+            vec!["你好洛克".to_string(), "洛克洛克".to_string()]
+        );
+        assert_eq!(cfg.wake.ack, "在呢");
+        assert_eq!(cfg.wake.followup_ms, 5000);
+        for bad in [
+            format!("{base}[rr3-brain.wake]\nenable = \"on\"\n"),
+            format!("{base}[rr3-brain.wake]\nphrases = []\n"),
+            format!("{base}[rr3-brain.wake]\nphrases = [1]\n"),
+            format!("{base}[rr3-brain.wake]\nack = \"\"\n"),
+            format!("{base}[rr3-brain.wake]\nfollowup_ms = -1\n"),
+        ] {
+            assert!(rr3_brain_config_parse(&bad).is_err(), "应拒: {bad}");
+        }
     }
 
     /// Python float 打印形状（config 就绪行逐字对位的数据基础）
