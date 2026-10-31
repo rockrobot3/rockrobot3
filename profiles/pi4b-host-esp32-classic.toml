@@ -87,8 +87,9 @@ not_applicable = true
 #   - Pi 无电池（官方 5V 适配器供电）→ power.* 两格不在位；
 #   - act.led / act.relay 的 GPIO4/17 亦未接线 → 不在位（板侧舵机走 ESP32 UART）。
 # 保留格位：act.servo（ESP32 末梢）、net.wifi/net.bt（Pi 自带）、ui.face（MAX7219
-# 点阵，interact 开机探活已在位）、audio.playback（voiceHAT）、audio.capture/vad
-# （voiceHAT 采集）、cognition 四格（brain）。
+# 点阵，interact 开机探活已在位）、audio.playback（USB 声卡，2026-10-31 晚间接入）、
+# audio.capture/vad（ESP32 双麦；宿主音频源走 RR3_HAL_AUDIO_BACKEND=esp32，
+# voiceHAT 仅作历史采集档保留）、cognition 四格（brain）。
 "act.servo" = "rr3-act"
 "net.wifi" = "rr3-connect"
 "net.bt" = "rr3-connect"
@@ -103,10 +104,12 @@ not_applicable = true
 
 [hardware]
 # 宿主两键（schema 3 非引脚键直给）：
-# **2026-10-31 实机取证订正**：本机只有一块声卡 sndrpigooglevoi（Google voiceHAT，
-# `aplay -l`/`arecord -l` 双向可见），**没有 USB 回放卡**（原注释的 CM108AH "Device"
-# 在实机不存在，按卡名开口必败）。故按 CARD 名指向 voiceHAT——卡号随枚举变，名稳定。
-alsa_device = "plughw:CARD=sndrpigooglevoi"
+# **2026-10-31 晚间订正**：USB 声卡（C-Media "Device"，`lsusb` 0d8c:0012）已接入
+# Pi 4 USB3.0，`aplay -l` 见 card `Device`（USB Audio），喇叭已在此声卡输出实测
+# 有声（2s 1kHz）。回放面按 CARD 名指向它（卡号随枚举变，名稳定）。
+# voiceHAT（sndrpigooglevoi）仍在位：其 PCM 硬件音量 100% 已在 alsactl 存档；
+# 采集当前走 ESP32 双麦（RR3_HAL_AUDIO_BACKEND=esp32），voiceHAT 仅作历史档。
+alsa_device = "plughw:CARD=Device"
 link_ifname = "wlan0"
 
 # 板侧十一键：与 profiles/esp32-mini.toml 逐值对齐（classic 板同一块硬件、同一线束）。

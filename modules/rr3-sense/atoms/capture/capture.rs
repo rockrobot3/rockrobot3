@@ -47,7 +47,7 @@ pub struct Rr3DoaCfg {
     pub bin_threshold_deg: i32,
 }
 
-pub(crate) use mech::rr3_pcm_downmix_mono;
+pub(crate) use mech::rr3_pcm_best_channel;
 /// `Rr3DoaBin` 仅被 composite 测试按名构造（bin 目标面无读者，pub use 在 bin 编译
 /// 单元会吃 unused_imports）——测试面专用导出。
 #[cfg(test)]
