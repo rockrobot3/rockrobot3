@@ -2148,3 +2148,40 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
     到目标根（不按相对路径），本轮早期 brain/sense 改动因此未真正上板；改为
     逐文件指定目标绝对路径 + `grep` 命中数核对（`rr3_pcm_best_channel`=10、
     `RR3_ASR_LANGUAGE`=2）后重建安装，五模块 running。
+
+**U 轮续7：S3 独立载板接入与 VAD 真根因（2026-10-31 深夜）**：
+  ① 载体与档案：S3 作独立载体（非 Pi 外设板）。Pi GPIO14(TX)→S3 GPIO42(RX)、
+  Pi GPIO15(RX)→S3 GPIO41(TX)、共地；S3 由 USB-C 供电并接 Mac 控制台。
+  新增 `profiles/pi4b-host-esp32s3.toml`（板侧十一键按 S3 真值）+
+  `hardware/pi4b-host-esp32s3/wiring.toml`；rrd drop-in
+  `profile.conf` 指向 S3 档；sense `backend=esp32`、`/dev/ttyAMA0` 1.5M；
+  五模块 running。
+
+  ② 卡点误判纠正：先前"brain 收不到 `rr3-sense/audio/vad_start`"是假象——
+  旧 brain 二进制无诊断行，且模块 stderr 落在
+  `/var/run/rock3-ipc.sock.log/<unit>.log`（非 journald）。总线是**全量扇出**，
+  rrd 不做订阅过滤；真正原因是 sense 从未发出过 vad_start。
+
+  ③ 真根因与固件修法：S3 固件"逐 128ms 分片减均值"在分片边界制造台阶，
+  频谱呈现 7.8Hz 的偶次谐波（实测峰 31/47/62/78Hz，FFT 分辨率 15.625Hz），
+  总线 mono 底噪 RMS 450–600、单帧 max 830 → VAD 700 阈永不能满足，ASR 也
+  只剩噪声。修法：`atoms/capture/mech.rs` 的逐片去均值换成**跨分片连续一阶
+  DC 阻断器**（α=0.995 ≈12.7Hz，状态跨片），附跨片连续性/分片等价/空片/
+  reset 四组回归用例；重烧 S3 后总线底噪 RMS 360–430、单帧 max 630。
+
+  ④ 定标与端到端：`config-esp32.toml` 的 `vad.rms_start` /
+  `doa.window_rms_min` 700→**500**；40s 实录（10s 静 + 两遍"你好洛克，今天
+  天气怎么样"）在阈 500 下连续 ≥200ms 起音恰 5 段（全在说话段、合计 4.5s），
+  噪声 0 段；阈 600 只剩 ≤80ms 碎段（会漏语音）。S3 档 `MIC_GAIN`=4
+  （classic 仍 8）。真机闭环：`对话轮完成: trace=2
+  user='你好，洛克，今天天气怎么样？你好，洛克，今天天气怎么样？'
+  reply='你好！我暂时查不了实时天气，建议你看看手机天气应用或问问智能音箱哦。'
+  tts_pcm_ms=8557 played_ms=8557`——唤醒/ASR/LLM/TTS/USB 声卡回放全通；
+  短促轻声或纯噪声段仍可能被 VAD 切进、由唤醒门静默丢弃（trace=1/4/5
+  实录），属预期门控行为。
+
+  ⑤ 构建与清理：S3 固件 `MCU=esp32s3 cargo +esp build --release --target
+  xtensa-esp32s3-espidf --no-default-features --features esp32s3` + espflash；
+  brain 在板上原生构建（`/home/pi/rr3src`，3m16s；契约 golden 需随源码同步）。
+  brain 诊断 eprintln / `zz-dump.conf` / 临时 WAV 已移除；仅留
+  `rr3-brain.bak-20261031` 一份回滚备份。
