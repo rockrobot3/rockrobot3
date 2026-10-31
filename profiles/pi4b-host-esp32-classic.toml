@@ -79,20 +79,23 @@ max_age_ms = 0
 not_applicable = true
 
 [bindings]
-# 格位 → 件：与 profiles/distro.toml 同构（十六格全绑定，认知层四格绑 rr3-brain）。
-# 板侧能力（舵机/OLED/麦）经 rr-hal 的 esp32 档走 UART 桥消费，绑定关系不变。
+# 格位 → 件（**2026-10-31 实机取证收窄**）：只保留实机真正在位的格位。原版照抄
+# distro 的十六格全集，导致装载门对"声明了但探测不到"的格位 fail-closed 拒启整
+# 模块（实测：`拒绝启动 rr3-sense：缺格 sensor.env / sensor.imu`——把 audio.capture
+# 一起连坐掉了，"喊它没反应"的直接根因）。本机事实：
+#   - SHTC3(0x70)/ICM-42688(0x68)/INA219(0x40) **均未接线**（i2cdetect 无应答）；
+#   - Pi 无电池（官方 5V 适配器供电）→ power.* 两格不在位；
+#   - act.led / act.relay 的 GPIO4/17 亦未接线 → 不在位（板侧舵机走 ESP32 UART）。
+# 保留格位：act.servo（ESP32 末梢）、net.wifi/net.bt（Pi 自带）、ui.face（MAX7219
+# 点阵，interact 开机探活已在位）、audio.playback（voiceHAT）、audio.capture/vad
+# （voiceHAT 采集）、cognition 四格（brain）。
 "act.servo" = "rr3-act"
-"act.led" = "rr3-act"
-"act.relay" = "rr3-act"
 "net.wifi" = "rr3-connect"
 "net.bt" = "rr3-connect"
 "ui.face" = "rr3-interact"
 "audio.playback" = "rr3-interact"
 "audio.capture" = "rr3-sense"
 "audio.vad" = "rr3-sense"
-"sensor.env" = "rr3-sense"
-"sensor.imu" = "rr3-sense"
-"power.charger" = "rr3-power"
 "cognition.dialog" = "rr3-brain"
 "cognition.asr" = "rr3-brain"
 "cognition.llm" = "rr3-brain"
@@ -100,10 +103,10 @@ not_applicable = true
 
 [hardware]
 # 宿主两键（schema 3 非引脚键直给）：
-# alsa_device 不钉卡号（卡号随 HDMI/USB 枚举变），按 CARD 名 —— Pi 4B 真机实测
-# CM108AH 类 USB 声卡短名 "Device"（C-Media 0d8c:0012，UAC1.0 全速）；
-# 无 pulse/pipewire 的 Lite 镜像上 "default" 会映射 PA 插件而 open 失败（distro 同教训）。
-alsa_device = "plughw:CARD=Device"
+# **2026-10-31 实机取证订正**：本机只有一块声卡 sndrpigooglevoi（Google voiceHAT，
+# `aplay -l`/`arecord -l` 双向可见），**没有 USB 回放卡**（原注释的 CM108AH "Device"
+# 在实机不存在，按卡名开口必败）。故按 CARD 名指向 voiceHAT——卡号随枚举变，名稳定。
+alsa_device = "plughw:CARD=sndrpigooglevoi"
 link_ifname = "wlan0"
 
 # 板侧十一键：与 profiles/esp32-mini.toml 逐值对齐（classic 板同一块硬件、同一线束）。
@@ -132,20 +135,20 @@ direction = "out"
 mux_group = []
 
 [enabled_slots]
-# 与 distro 同：五模块启用其 provides 全集（T1 要验整机，不裁剪）。
-rr3-act = ["act.servo", "act.led", "act.relay"]
+# 启用的格位集合（**2026-10-31 收窄**，与 [bindings]/[slots] present 三处一致）：
+# 每个启用的格位都必须绑定且在位——装载门对缺格 fail-closed 拒启整模块。
+rr3-act = ["act.servo"]
 rr3-connect = ["net.wifi", "net.bt"]
 rr3-interact = ["ui.face", "audio.playback"]
-rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
-rr3-power = ["power.battery", "power.charger"]
+rr3-sense = ["audio.capture", "audio.vad"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
 
 [slots]
-# 本板物理在位格位声明：Pi 宿主 + classic 板合起来十六格全在位（同 distro），升序排列。
+# 本板物理在位格位声明（2026-10-31 按实机取证收窄，升序）：Pi 宿主 + ESP32 classic
+# 合起来**在位十一格**；power.*（无电池）、sensor.env/imu（未接线）、act.led/relay
+# （未接线）如实申报不在位——不在位就不启用，不用虚构配置讨好装载门。
 present = [
     "act.servo",
-    "act.led",
-    "act.relay",
     "audio.capture",
     "audio.playback",
     "audio.vad",
@@ -155,8 +158,5 @@ present = [
     "cognition.tts",
     "net.bt",
     "net.wifi",
-    "power.charger",
-    "sensor.env",
-    "sensor.imu",
     "ui.face",
 ]
