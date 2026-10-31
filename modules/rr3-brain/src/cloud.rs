@@ -170,6 +170,29 @@ fn rr3_read_body(url: &str, resp: ureq::Response) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+/// ASR 有界重试：总尝试次数（首调 + 1 次重试，2026-10-31）。只对**瞬时**失败
+/// 重试——HTTP 429/5xx 与传输层（连接拒绝/超时/读断）；鉴权/请求形状 4xx、
+/// 坏应答、缺密钥一律不重试（重试只会重复同一结局，还把 401 拖成 2 倍时延）。
+/// 同步调用发生在对话轮内，上限 2×`timeout_s`（缺省 20s）——有界，不无限重试。
+const RR3_ASR_ATTEMPTS: u32 = 2;
+/// 两次尝试之间的固定短歇（对话轮内同步调用，不能长睡）。
+const RR3_ASR_RETRY_PAUSE: Duration = Duration::from_millis(500);
+
+/// 可重试判据（纯函数，单测钉域）：传输层「云端不可达 …」与 HTTP 429/5xx 重试；
+/// 其余（4xx/坏应答/缺密钥/缺字段）不重试。
+fn rr3_asr_error_retryable(err: &str) -> bool {
+    if err.starts_with("云端不可达") {
+        return true;
+    }
+    match err
+        .strip_prefix("识别接口 HTTP ")
+        .and_then(|s| s.parse::<u16>().ok())
+    {
+        Some(code) => code == 429 || (500..=599).contains(&code),
+        None => false,
+    }
+}
+
 /// 识别客户端（SenseVoice）：整段 WAV 一次上传（ADR-0014 裁定 2；流式是 legacy
 /// ESP32 内存约束的产物，本机不复刻）。WAV 头/multipart 装配机制在
 /// [`crate::asr`]，本客户端负责云档/密钥/HTTP/应答解析（策略与 IO 面）。
@@ -202,23 +225,49 @@ impl Rr3AsrClient {
         let boundary = rr3_boundary_hex();
         let body = crate::asr::rr3_asr_multipart_body(&self.model, pcm, sample_rate, &boundary);
         let url = format!("{}/v1/audio/transcriptions", self.base_url);
-        let (status, resp) = rr3_http_post(
-            &url,
-            &key,
-            &body,
-            &format!("multipart/form-data; boundary={boundary}"),
-            self.timeout_s,
-        )?;
-        if status != 200 {
-            return Err(format!("识别接口 HTTP {status}"));
+        let content_type = format!("multipart/form-data; boundary={boundary}");
+        // 有界重试（见 [`rr3_asr_error_retryable`]）：multipart 体一次装配、多轮
+        // 复用；只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let posted = rr3_http_post(&url, &key, &body, &content_type, self.timeout_s)
+                .and_then(|(status, resp)| {
+                    if status == 200 {
+                        Ok(resp)
+                    } else {
+                        Err(format!("识别接口 HTTP {status}"))
+                    }
+                });
+            match posted {
+                Ok(resp) => {
+                    // json.loads 进护栏（B-16②）：坏 JSON 折 Err 不逃逸（Python try 同形状）
+                    let data: Value = serde_json::from_slice(&resp)
+                        .map_err(|e| format!("识别应答非 JSON: {e}"))?;
+                    return data
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| "识别应答缺 text 字段".to_string());
+                }
+                Err(e) => {
+                    if rr3_asr_error_retryable(&e) && attempt < RR3_ASR_ATTEMPTS {
+                        eprintln!(
+                            "rr3-brain: ASR 第 {attempt}/{RR3_ASR_ATTEMPTS} 次失败（{e}），{}ms 后重试",
+                            RR3_ASR_RETRY_PAUSE.as_millis()
+                        );
+                        std::thread::sleep(RR3_ASR_RETRY_PAUSE);
+                        continue;
+                    }
+                    // 重试过的最终失败补尝试数（首调失败文案逐字不变——台账/单测依赖）
+                    return if attempt > 1 {
+                        Err(format!("{e}（ASR 共尝试 {attempt} 次）"))
+                    } else {
+                        Err(e)
+                    };
+                }
+            }
         }
-        // json.loads 进护栏（B-16②）：坏 JSON 折 Err 不逃逸（Python try 同形状）
-        let data: Value = serde_json::from_slice(&resp)
-            .map_err(|e| format!("识别应答非 JSON: {e}"))?;
-        data.get("text")
-            .and_then(Value::as_str)
-            .map(|s| s.to_string())
-            .ok_or_else(|| "识别应答缺 text 字段".to_string())
     }
 }
 
@@ -528,6 +577,8 @@ pub(crate) mod testkit {
         pub(crate) base: String,
         pub(crate) requests: Arc<Mutex<Vec<(String, String, Vec<u8>)>>>, // (path, authorization, body)
         pub(crate) fail_path: Arc<Mutex<Option<String>>>,
+        /// 一次性 5xx（首请求 500、随即复位）——ASR 有界重试的正门夹具
+        pub(crate) fail_once_path: Arc<Mutex<Option<String>>>,
         pub(crate) bad_json_path: Arc<Mutex<Option<String>>>,
         pub(crate) missing_field_path: Arc<Mutex<Option<String>>>,
     }
@@ -538,11 +589,13 @@ pub(crate) mod testkit {
             let port = listener.local_addr().unwrap().port();
             let requests = Arc::new(Mutex::new(Vec::new()));
             let fail_path = Arc::new(Mutex::new(None));
+            let fail_once_path = Arc::new(Mutex::new(None));
             let bad_json_path = Arc::new(Mutex::new(None));
             let missing_field_path = Arc::new(Mutex::new(None));
-            let (r, f, b, m) = (
+            let (r, f, fo, b, m) = (
                 requests.clone(),
                 fail_path.clone(),
+                fail_once_path.clone(),
                 bad_json_path.clone(),
                 missing_field_path.clone(),
             );
@@ -558,9 +611,13 @@ pub(crate) mod testkit {
                         body,
                     ));
                     let fail = f.lock().unwrap().clone();
+                    let fail_once = fo.lock().unwrap().clone();
                     let bad = b.lock().unwrap().clone();
                     let missing = m.lock().unwrap().clone();
-                    if Some(&path) == fail.as_ref() {
+                    if Some(&path) == fail_once.as_ref() {
+                        respond(&mut stream, "500 Internal Server Error", b"{\"error\":\"boom\"}");
+                        *fo.lock().unwrap() = None; // 一次性：下一请求恢复罐头
+                    } else if Some(&path) == fail.as_ref() {
                         respond(&mut stream, "500 Internal Server Error", b"{\"error\":\"boom\"}");
                     } else if Some(&path) == bad.as_ref() {
                         // 200 + 非 JSON 体（B-16②：云 200 坏体的静默假成功口）
@@ -587,6 +644,7 @@ pub(crate) mod testkit {
                 base: format!("http://127.0.0.1:{port}"),
                 requests,
                 fail_path,
+                fail_once_path,
                 bad_json_path,
                 missing_field_path,
             }
@@ -707,6 +765,31 @@ mod tests {
         assert!(!e.contains("Bearer"), "文案不得带出密钥");
     }
 
+    /// ASR 重试判据（2026-10-31 有界重试）：429/5xx/传输层可重试；4xx/坏应答/
+    /// 缺密钥不重试（重试只会重复同一结局，还把 401 拖成 2 倍时延）。
+    #[test]
+    fn asr_error_retry_classification() {
+        for e in [
+            "识别接口 HTTP 429",
+            "识别接口 HTTP 500",
+            "识别接口 HTTP 502",
+            "识别接口 HTTP 503",
+            "云端不可达 http://x: timed out reading response",
+        ] {
+            assert!(rr3_asr_error_retryable(e), "应重试: {e}");
+        }
+        for e in [
+            "识别接口 HTTP 400",
+            "识别接口 HTTP 401",
+            "识别接口 HTTP 403",
+            "识别应答非 JSON: expected value at line 1",
+            "识别应答缺 text 字段",
+            "缺少环境变量 RR3_CLOUD_API_KEY，云端链路不可用",
+        ] {
+            assert!(!rr3_asr_error_retryable(e), "不应重试: {e}");
+        }
+    }
+
     // ---------- 客户端面（asr/llm/tts 三家经本地假端点，对位 test_cloud.py
     // TestRealPathAgainstFakeEndpoint / TestMockPath / B-16② 收敛三组） ----------
 
@@ -770,6 +853,59 @@ mod tests {
             .rr3_transcribe(&b"\x00\x00".repeat(100), 16000)
             .unwrap_err();
         assert!(e.contains("非 JSON"), "{e}");
+        assert_eq!(
+            srv.requests.lock().unwrap().len(),
+            1,
+            "坏应答不重试（只打一次）"
+        );
+        std::env::remove_var(RR3_API_KEY_ENV);
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// ASR 有界重试（2026-10-31）：首请求 500 → 500ms 后重试一次 → 第二次 200
+    /// 成功；请求数恰 2（有界，不无限重试）。
+    #[test]
+    fn asr_retries_5xx_once_then_succeeds() {
+        let _g = env_lock();
+        let srv = FakeCloud::start();
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
+        *srv.fail_once_path.lock().unwrap() = Some("/v1/audio/transcriptions".into());
+        let client = Rr3AsrClient::new(&srv.base, "m", 5.0);
+        assert_eq!(
+            client
+                .rr3_transcribe(&b"\x00\x00".repeat(100), 16000)
+                .unwrap(),
+            "你好"
+        );
+        assert_eq!(
+            srv.requests.lock().unwrap().len(),
+            2,
+            "首调 + 1 次重试恰两次（有界）"
+        );
+        std::env::remove_var(RR3_API_KEY_ENV);
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// 5xx 持续失败：有界重试只多打一次（总 2 次），最终错误回带尝试数。
+    #[test]
+    fn asr_5xx_exhausts_bounded_attempts() {
+        let _g = env_lock();
+        let srv = FakeCloud::start();
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
+        *srv.fail_path.lock().unwrap() = Some("/v1/audio/transcriptions".into());
+        let client = Rr3AsrClient::new(&srv.base, "m", 5.0);
+        let e = client
+            .rr3_transcribe(&b"\x00\x00".repeat(100), 16000)
+            .unwrap_err();
+        assert!(e.contains("识别接口 HTTP 500"), "{e}");
+        assert!(e.contains("ASR 共尝试 2 次"), "{e}");
+        assert_eq!(
+            srv.requests.lock().unwrap().len(),
+            2,
+            "有界：总尝试 2 次后不再打"
+        );
         std::env::remove_var(RR3_API_KEY_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
     }
