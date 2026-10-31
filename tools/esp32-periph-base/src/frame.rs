@@ -91,7 +91,11 @@ fn frame_handle_set_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Valu
     );
     let bad = rr3_bindings_reconcile(&nb);
     if bad > 0 {
-        lock_bus(bus).st.binding_mismatch += bad as u32;
+        // saturating：本计数是运维观测面，宿主反复注入不符绑定也不该把它加溢出
+        // （debug 档 `+=` 溢出直接 panic 在真板上 = 复位；release 档回绕最坏让
+        // 观测账归零）。饱和到 u32::MAX 仍是"一直不符"的正确语义。
+        let mut b = lock_bus(bus);
+        b.st.binding_mismatch = b.st.binding_mismatch.saturating_add(bad as u32);
     }
     Ok(json!({ "applied": true, "mismatch": bad }))
 }
@@ -125,12 +129,10 @@ fn frame_handle_servo(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, Stri
             let deg = v.as_u64().ok_or_else(|| format!("angle_deg 非法: {v}"))? as u32;
             let d = axis_check(axis, deg)?;
             {
+                // **不写前记账**：角度只由运行面在作业成功后镜像硬件真值（与行面
+                // PAN/TILT 同口径）——读 `angle_deg` 永不复述没到达的角。
                 let mut b = lock_bus(bus);
                 b.st.wander_on = false; // 外部点名优先，自主扫摆让位
-                match axis {
-                    Axis::Pan => b.st.pan_deg = d,
-                    Axis::Tilt => b.st.tilt_deg = d,
-                }
             }
             push_job(
                 bus,

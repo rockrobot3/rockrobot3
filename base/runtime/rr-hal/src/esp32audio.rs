@@ -4,7 +4,8 @@
 //! 链路：板面 mic.rs 分片组帧（16kHz 双声道 s16le，128ms/8192B 一片，A-IPC
 //! Event 帧，topic `rr3-sense/audio/pcm`）→ UART2（[`crate::esp32_uart::
 //! RR3_HAL_PERIPH_UART_ENV`] 指定设备，[`crate::esp32_uart::
-//! RR3_HAL_PERIPH_BAUD_ENV`] 波特率——板固件已钉 921600，须显式同档）→ 本件
+//! RR3_HAL_PERIPH_BAUD_ENV`] 波特率——板固件已钉 `UART2_BAUD_HZ`（2026-10-30 起
+//! 1.5M），须显式同档）→ 本件
 //! 收流：开口 → `rr_ipc::audio_session::handshake`（settle/防御 OFF/ON 应答
 //! 扫描，与 rr3-audio-rec 同一机制单点）→ 读线程大块裸读（判据② 节奏）→
 //! [`FrameAssembler`](rr_ipc::FrameAssembler) 拆帧 → 四道门解析 → 环形缓冲
@@ -68,6 +69,8 @@ pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST as RR3_HOST_TASK;
 const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 连续门失败/拆帧失败达此数记一条日志（1-2 次可能是单帧毛刺，3 次 = 帧界
 /// 成片损坏，值得点名；坏帧弃扫本身由 [`FrameAssembler`] 即时完成）。
+/// **同时是"累计"打点周期**：间歇性坏帧（各被好帧隔开）不会把连续计数堆到阈值，
+/// 若只按连续计数打日志，这类丢帧会**全程静默**——而它恰恰是线面误码的典型形态。
 const RR3_ERR_STREAK_LOG: u64 = 3;
 
 /// 板面音频流事实（板固件 mic.rs 钉定）：16kHz 采样率。open 校验配置同款，
@@ -446,6 +449,8 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
         let mut zeros = 0u32;
         let mut seen = false;
         let mut err_streak = 0u64;
+        // 累计坏帧（拆帧失败 + 未过门）：间歇性丢帧的唯一可见口径（见上注）
+        let mut err_total = 0u64;
         loop {
             if core.stop.load(Ordering::Acquire) {
                 break;
@@ -535,9 +540,10 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                                     },
                                     Err(e) => {
                                         err_streak += 1;
-                                        if err_streak == RR3_ERR_STREAK_LOG {
+                                        err_total += 1;
+                                        if err_total % RR3_ERR_STREAK_LOG == 0 {
                                             eprintln!(
-                                                "rr-hal-esp32-audio: 连续 {RR3_ERR_STREAK_LOG} 帧未过门（帧界损坏？）: {e}"
+                                                "rr-hal-esp32-audio: 累计 {err_total} 帧未过门（连续 {err_streak}；帧界损坏/载荷 CRC 不符？）: {e}"
                                             );
                                         }
                                     }
@@ -546,9 +552,10 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                             Ok(None) => break,
                             Err((discarded, why)) => {
                                 err_streak += 1;
-                                if err_streak == RR3_ERR_STREAK_LOG {
+                                err_total += 1;
+                                if err_total % RR3_ERR_STREAK_LOG == 0 {
                                     eprintln!(
-                                        "rr-hal-esp32-audio: 连续 {RR3_ERR_STREAK_LOG} 次拆帧失败（已弃 {discarded}B 重扫）: {why}"
+                                        "rr-hal-esp32-audio: 累计 {err_total} 次拆帧失败（连续 {err_streak}，已弃 {discarded}B 重扫）: {why}"
                                     );
                                 }
                             }

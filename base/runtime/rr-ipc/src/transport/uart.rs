@@ -52,11 +52,13 @@
 //! 守门用例以有界重试容忍（真泄漏锁是永久的，重试恒败照常 panic）；生产
 //! 同形状（桥进程 spawn 运维工具后并发重开同路径）同理重试即过。
 //!
-//! 波特率只收 [`rr3_uart_baud_speed`] 认识的三档（115200 默认 / 9600 降速 /
-//! 921600 高速）：9600 是 0.0.7 方案 P3 的合法降速处置；921600 是 0.0.5 增补轮五
-//! 批D② 按带宽账加的高速档（音频上行双通道 16kHz×16bit ≈ 512kbps，115200 载
-//! 不动、921600 有效 ≈ 737kbps 可承载）。缺省 115200 不变（Q1=(a) 裁定），高速
-//! 档只显式选择——不预设更大的波特率动物园。
+//! 波特率只收 [`rr3_uart_baud_speed`] 认识的档位（115200 默认 / 9600 降速 /
+//! 921600 高速 / 1.5M 与 2M 高速档）：9600 是 0.0.7 方案 P3 的合法降速处置；
+//! 921600 是 0.0.5 增补轮五批D② 按带宽账加的高速档（音频上行双通道
+//! 16kHz×16bit ≈ 512kbps，115200 载不动、921600 有效 ≈ 737kbps 可承载）；
+//! 1.5M/2M 是为"不动音频口径、只扩链路容量"加的高容量档（2026-10-30 链路
+//! 换树莓派 PL011 三线直连后重评、压实定档 1.5M，音频 85KB/s 占线降到 ~46%）。
+//! 缺省 115200 不变（Q1=(a) 裁定），高速档只显式选择——不预设更大的波特率动物园。
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -87,6 +89,10 @@ mod imp {
     pub const B9600: SpeedT = 9600;
     /// macOS 字面波特率（SDK sys/termios.h：`#define B921600 921600`，批D② 高速档）
     pub const B921600: SpeedT = 921600;
+    /// 更高档（字面值，macOS 无 `B1500000` 宏）：USB 串口驱动按字面值分频，
+    /// 上限取决于适配器（CP2102/FT232R 各档实测为准，不是编译期保证）。
+    pub const B1500000: SpeedT = 1_500_000;
+    pub const B2000000: SpeedT = 2_000_000;
     /// SDK sys/termios.h：`#define NCCS 20`、`#define VMIN 16`、`#define VTIME 17`
     pub const NCCS: usize = 20;
     pub const VMIN: usize = 16;
@@ -163,6 +169,10 @@ mod imp {
     pub const B9600: SpeedT = 0o14;
     /// Linux uapi asm-generic/termbits.h：`#define B921600 0010007`（八进制，批D②）
     pub const B921600: SpeedT = 0o10007;
+    /// Linux uapi asm-generic/termbits.h：`#define B1500000 0010012` / `B2000000 0010013`
+    /// （八进制；PL011 时钟 48MHz 下 1.5M=32 分频、2M=24 分频，均为整分频）
+    pub const B1500000: SpeedT = 0o10012;
+    pub const B2000000: SpeedT = 0o10013;
     /// Linux：`#define NCCS 32`、`#define VMIN 6`、`#define VTIME 5`
     pub const NCCS: usize = 32;
     pub const VMIN: usize = 6;
@@ -231,8 +241,8 @@ mod imp {
 }
 
 use imp::{
-    NfdsT, PollFd, SpeedT, Termios, B115200, B921600, B9600, CLOCAL, CREAD, F_GETFL, F_SETFL,
-    O_CLOEXEC, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME,
+    NfdsT, PollFd, SpeedT, Termios, B115200, B1500000, B2000000, B921600, B9600, CLOCAL, CREAD,
+    F_GETFL, F_SETFL, O_CLOEXEC, O_NOCTTY, O_NONBLOCK, O_RDWR, POLLIN, TCIFLUSH, VMIN, VTIME,
 };
 
 // no_std 显式化（0.0.7 批B 口径）：std prelude 不随 `#![no_std]` 隐式注入
@@ -279,18 +289,26 @@ extern "C" {
     fn c_fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 
-/// 波特率 → `speed_t`。只认三档：115200（默认）、9600（P3 合法降速）与 921600
-/// （批D② 音频上行高速档）。不在档位上报错——静默降到最近的档位等于把线路参数
-/// 交给运气。
+/// 波特率 → `speed_t`。115200（默认）/ 9600（P3 合法降速）/ 921600 / 1.5M / 2M
+/// 五档：音频上行 16k 双声道 b64 后 ≈ 87KB/s，921600 有效 92.16KB/s 只剩 5% 余量，
+/// 提档是唯一不动音频口径的解法（1.5M 有效 187.5KB/s = 占 46%，板固件 2026-10-30
+/// 起定档 1.5M）。档位只代表"软件侧认识"，**物理可行性由接线决定**（2026-10-20
+/// 杜邦线实测 2M 滑移乱码、1.5M 间歇乱码；2026-10-30 换 PL011 三线直连 + FT232
+/// VCCIO 跳线订到 3.3V 后重评，1.5M 混跑 300s×2 合计 ERR=4/6000 ≈ 0.067%，与
+/// PL011@2M 同量级——残余公共底为杜邦线物理层，命令面防线无害化，见
+/// docs/status.md），换线/换板后须重测。不在档位上报错
+/// ——静默降到最近的档位等于把线路参数交给运气。
 pub fn rr3_uart_baud_speed(baud: u32) -> std::io::Result<SpeedT> {
     match baud {
         115200 => Ok(B115200),
         9600 => Ok(B9600),
         921600 => Ok(B921600),
+        1_500_000 => Ok(B1500000),
+        2_000_000 => Ok(B2000000),
         other => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!(
-                "不支持的波特率 {other}：只支持 115200（默认）、9600（P3 降速档）与 921600（批D② 高速档）"
+                "不支持的波特率 {other}：只支持 115200（默认）、9600（降速档）、921600/1500000/2000000（高速档）"
             ),
         )),
     }
@@ -381,7 +399,17 @@ pub struct Rr3UartConn {
     fd: i32,
     /// 排他账本键（open 路径）；`from_fd` 测试注入路径不记账，为 None。
     excl_path: Option<String>,
+    /// 上次成功写出的时刻（空闲前导判据，见 [`Self::tx_idle_preamble`]）。
+    /// `None` = 历史未知（开口后首突发），同口径加前导。
+    last_tx: Option<std::time::Instant>,
 }
+
+/// 空闲多久后的宿主→板突发需要前导字节（判据实验与机理见
+/// [`Rr3UartConn::tx_idle_preamble`]）。
+const TX_PREAMBLE_IDLE: std::time::Duration = std::time::Duration::from_millis(20);
+/// 前导字节与正式字节之间的间隔：给板面留出消费前导（空行）并回到窥视点的
+/// 时间。1.5M 下一字节 6.7µs，2ms 足够板面走完 `read_line` 空行分支。
+const TX_PREAMBLE_GAP: std::time::Duration = std::time::Duration::from_millis(2);
 
 impl Rr3UartConn {
     /// 打开串口设备并配 raw 模式（默认 115200）。开口即排他登记（见模块注记
@@ -391,7 +419,7 @@ impl Rr3UartConn {
         Self::open_with_baud(path, RR3_UART_BAUD_DEFAULT)
     }
 
-    /// 打开串口设备并配 raw 模式，波特率显式给定（只收 115200/9600/921600）。
+    /// 打开串口设备并配 raw 模式，波特率显式给定（白名单见 [`rr3_uart_baud_speed`]）。
     pub fn open_with_baud(path: &Path, baud: u32) -> std::io::Result<Self> {
         let speed = rr3_uart_baud_speed(baud)?;
         // 排他登记先行：guard 拿不到就不开数据 fd，报错点名叫人（fail-closed）。
@@ -432,6 +460,7 @@ impl Rr3UartConn {
                 Ok(Self {
                     fd,
                     excl_path: Some(key),
+                    last_tx: None,
                 })
             }
             Err(e) => {
@@ -452,6 +481,9 @@ impl Rr3UartConn {
         Ok(Self {
             fd,
             excl_path: None,
+            // 测试注入路径（pty）：显式置"刚写过"——单测按精确字节对拍，前导会
+            // 打乱；前导行为另有专测（tx_idle_preamble 用例）。
+            last_tx: Some(std::time::Instant::now()),
         })
     }
 
@@ -593,13 +625,54 @@ impl Read for Rr3UartConn {
     }
 }
 
+impl Rr3UartConn {
+    /// 空闲后首突发的**前导字节**（宿主→板方向；2026-10-30 帧面真机首验的根因处置）。
+    ///
+    /// **现象**：同一物理链路上，空闲后的宿主→板突发其**首字节**偶发失步（误码只坏
+    /// 一个字节）——行面命令表现为 `ERR unknown cmd "NAN"` 一类首字符坏（混跑实测
+    /// 0.067–0.083%），帧面则整帧被降级成行（`LINE_CAP`=128 < 帧长，板面回
+    /// `ERR line too long`，请求**无痕消失**；frame_probe 实测 10 条中 2–3 条）。
+    ///
+    /// **判定实验**（frame_probe）：每帧前插 1 个 `\n` + 10ms → 三轮 **30/30**；
+    /// 只插 200ms 帧间隔 → 仍 2–3 条失败（排除时序竞态）。前导替首字节挡枪：
+    /// 板面对孤立 `\n` 是空行静默跳过；失步（若发生）只落在前导上，正式字节在
+    /// 已同步的线上出发。
+    ///
+    /// **机理（假设，电气层）**：空闲后首突发的起始位边沿在线上振铃/反射下被
+    /// 误判，采样错位只影响该字节。物理层根治选项 = TX 线串 100–330Ω 阻尼。
+    ///
+    /// **安全性**：前导只在空闲 > [`TX_PREAMBLE_IDLE`] 时插入并隔 [`TX_PREAMBLE_GAP`]
+    /// 再发正式字节；同一 `write_all` 循环内的后续 `write` 距前次写出仅 µs 级，
+    /// 不会再触发。桥的转发块若真被拆成两半（对端一次 write 全部送达，实际
+    /// µs 级跟到），也因间隔远小于阈值而不插。
+    fn tx_idle_preamble(&mut self) {
+        let idle = self.last_tx.map_or(true, |t| t.elapsed() >= TX_PREAMBLE_IDLE);
+        if !idle {
+            return;
+        }
+        let one = [0x0Au8];
+        // SAFETY：one 活到调用返回，fd 属 self。
+        let n = unsafe { c_write(self.fd, one.as_ptr() as *const std::ffi::c_void, 1) };
+        if n == 1 {
+            std::thread::sleep(TX_PREAMBLE_GAP);
+            self.last_tx = Some(std::time::Instant::now());
+        }
+        // 前导写失败不拦路：正式字节的写出路径自会报错并交调用方处置。
+    }
+}
+
 impl Write for Rr3UartConn {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // 空闲前导（见 tx_idle_preamble）：本方法宿主→板全部写路径的单点——
+        // rr3_send_buf（帧）经 std adapter 的 write 循环到达这里，桥/收流端的
+        // write_all（行）经默认实现同样到达。
+        self.tx_idle_preamble();
         // SAFETY：buf 活到调用返回，fd 属 self。部分写交给 write_all 循环处理。
         let n = unsafe { c_write(self.fd, buf.as_ptr() as *const std::ffi::c_void, buf.len()) };
         if n < 0 {
             return Err(std::io::Error::last_os_error());
         }
+        self.last_tx = Some(std::time::Instant::now());
         Ok(n as usize)
     }
 
@@ -651,6 +724,16 @@ mod tests {
         h.timestamp_ns = 100;
         h.src_task = 7;
         h
+    }
+
+    /// 构造与读回比对的帧：头里的 CRC 由载荷算出（线面真值，不是发送前的 0）
+    fn frame(header: Rr3Header, payload: &[u8]) -> Rr3Frame {
+        let mut f = Rr3Frame {
+            header,
+            payload: payload.to_vec(),
+        };
+        f.header.payload_crc32 = crate::protocol::header::rr3_crc32(payload);
+        f
     }
 
     /// 伪串口对：master 是裸 fd（测试经 File 写入），slave 走与真设备同一条
@@ -722,14 +805,38 @@ mod tests {
         assert_eq!(unsafe { c_tcsetattr(conn.fd, TCSANOW, &t) }, 0);
     }
 
+    /// 空闲前导：`last_tx` 归 None（开口后首突发 / 长空闲）后首个写必须先出
+    /// 一个 `\n` 再出正式字节——帧失步根因处置的线上行为钉在这里（2026-10-30，
+    /// 判据实验与机理见 [`Rr3UartConn::tx_idle_preamble`]）。
+    #[test]
+    fn tx_idle_preamble_precedes_burst_after_idle() {
+        let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
+        // 模拟"开口后从未写过"：from_fd 出厂置 Some(now)，这里显式归 None。
+        conn.last_tx = None;
+        let back = frame(hdr(3), b"abc");
+        conn.rr3_send_buf(Rr3FrameBuf::from(&back)).unwrap();
+        use std::io::Read as _;
+        let mut pre = [0u8; 1];
+        master.read_exact(&mut pre).unwrap();
+        assert_eq!(pre[0], 0x0A, "空闲后首突发必须以 \\n 前导开头");
+        // 紧接着就是完整帧（2ms 间隔远小于 pty 读的阻塞窗）
+        let want = rr3_frame_to_bytes(&back).unwrap();
+        let mut echo = vec![0u8; want.len()];
+        master.read_exact(&mut echo).unwrap();
+        assert_eq!(echo, want, "前导之后正式帧必须逐字节完整");
+
+        // 连续第二次发送：last_tx 刚更新，不得再插前导
+        conn.rr3_send_buf(Rr3FrameBuf::from(&back)).unwrap();
+        let mut echo2 = vec![0u8; want.len()];
+        master.read_exact(&mut echo2).unwrap();
+        assert_eq!(echo2, want, "紧邻的第二次突发不得插前导");
+    }
+
     /// 正常帧：整帧写入 → 整帧读回（阻塞路径）；反向发送同一条 blanket impl 面验证。
     #[test]
     fn uart_round_trip_normal_frame() {
         let (mut master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
-        let f = Rr3Frame {
-            header: hdr(5),
-            payload: b"hello"[..].to_vec(),
-        };
+        let f = frame(hdr(5), b"hello");
         let bytes = rr3_frame_to_bytes(&f).unwrap();
         use std::io::Write as _;
         master.write_all(&bytes).unwrap();
@@ -742,10 +849,7 @@ mod tests {
         );
 
         // 反向：conn 发送（blanket impl → write_all + flush）→ master 读回
-        let back = Rr3Frame {
-            header: hdr(3),
-            payload: b"abc"[..].to_vec(),
-        };
+        let back = frame(hdr(3), b"abc");
         conn.rr3_send_buf(Rr3FrameBuf::from(&back)).unwrap();
         let mut echo = vec![0u8; bytes_len(&back)];
         master.read_exact(&mut echo).unwrap();
@@ -773,10 +877,7 @@ mod tests {
             "坏 magic 必须被头层拒收"
         );
 
-        let f = Rr3Frame {
-            header: hdr(1),
-            payload: b"z"[..].to_vec(),
-        };
+        let f = frame(hdr(1), b"z");
         master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
         let got = conn.rr3_recv_buf().expect("拒收后必须能重新同步收帧");
         assert_eq!(Rr3Frame::try_from(got).unwrap(), f);
@@ -800,10 +901,7 @@ mod tests {
         );
 
         // 恢复阻塞语义再收完整帧（与真设备默认路径一致）
-        let f = Rr3Frame {
-            header: hdr(4),
-            payload: b"res4"[..].to_vec(),
-        };
+        let f = frame(hdr(4), b"res4");
         master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
         let got = conn.rr3_recv_buf().expect("半帧后新帧必须完整读回");
         assert_eq!(Rr3Frame::try_from(got).unwrap(), f);
@@ -826,10 +924,7 @@ mod tests {
             "必须等满超时才返回（未按时醒来 = 语义漂移）"
         );
         use std::io::Write as _;
-        let f = Rr3Frame {
-            header: hdr(3),
-            payload: b"t/o".to_vec(),
-        };
+        let f = frame(hdr(3), b"t/o");
         let bytes = rr3_frame_to_bytes(&f).unwrap();
         master.write_all(&bytes).unwrap();
         // 就绪读可能是部分读，循环收满整帧
@@ -866,10 +961,7 @@ mod tests {
         let mut conn = Rr3UartConn::open_with_baud(&slave_path, RR3_UART_BAUD_DEFAULT)
             .expect("按路径 open pty slave 失败");
         // 开口后的新帧必须整帧读回（残留不得当帧前缀混入）
-        let f = Rr3Frame {
-            header: hdr(5),
-            payload: b"fresh"[..].to_vec(),
-        };
+        let f = frame(hdr(5), b"fresh");
         master.write_all(&rr3_frame_to_bytes(&f).unwrap()).unwrap();
         let got = conn.rr3_recv_buf().expect("开口后首帧必须完整读回");
         assert_eq!(

@@ -3,3 +3,11 @@
 # 哨兵 sdkconfig.defaults 同口径。
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# 2026-10-31 SoftAP 配网面（用户口径：WiFi 会换，机器人必须能自己配网——ADR-0021
+# 裁定 1 独立形态要求）。显式打开，不吃 IDF 缺省的运气：缺省值随 IDF 版本/目标变动，
+# 而配网入口是"板子能否上线"的唯一通路。
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+CONFIG_LWIP_DHCPS=y
+# 控制台回 UART0 缺省（USB 串口可观测 boot 横幅：凭据源 + SoftAP SSID 点名）。
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y

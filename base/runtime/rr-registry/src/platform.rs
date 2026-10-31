@@ -651,7 +651,8 @@ mod tests {
         assert_eq!(rpi.rr3_platform_controller_channels("pwm0"), Some(2));
         assert!(rpi
             .rr3_platform_controller_names()
-            .contains(&"spi0".to_string()));
+            .contains(&"spidev0".to_string()));
+        assert_eq!(rpi.rr3_platform_controller_channels("spidev0"), Some(1));
         // 实-6 (a)：host 形态两份词形派生表同形同值（Linux sysfs 命名习惯）——
         // rr3 派生器的词形前件真值点，四键封闭
         for t in [rk, rpi] {

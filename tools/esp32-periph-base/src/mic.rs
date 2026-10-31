@@ -56,8 +56,11 @@ const MIC_THREAD_STACK: usize = 16384;
 const MIC_I2C_TIMEOUT: TickType_t = u32::MAX;
 /// 单次 read 缓冲：4096B = 512 帧 × 2ch × 4B（≈32ms @16kHz；栈上安全）。
 const MIC_BUF: usize = 4096;
-/// 统计打印窗：16 次 read ≈ 512ms 一行。
-const MIC_WINDOW_READS: usize = 16;
+/// 统计打印窗：64 次 read ≈ 2s 一行（16 次≈512ms 时日志在 921600 上与音频上行抢
+/// 带宽、且人眼来不及看；2s 一行足够判"有没有数据/速率对不对"）。
+const MIC_WINDOW_READS: usize = 64;
+/// 诊断位图窗口：每 200 次 read（≈6.4s）看一次前 16B 原始字节。
+const MIC_DUMP_READS: u32 = 200;
 
 /// 一分片 → 整帧字节（批D③ Event 帧面，rr-bus `rr3_publish` 板侧等价形）：
 /// 采样变换算术（逐通道减**本分片** DC → 24bit 截 16bit → 增益钳位 → s16le 双
@@ -141,6 +144,10 @@ pub fn spawn_mic_smoke(
             let mut equal = 0u64;
             let mut t0 = Instant::now();
             let mut dump_count = 0u32;
+            // 上一次采样的前 16B（诊断位图对账面）：正常有数据的会话里字节窗
+            // 一次一个样，只有**卡死**（SD 三态残留/虚接/驱动停摆）才会逐窗完全
+            // 相同——故只在"与上次相同"时打印一次，正常采集全程静默。
+            let mut last_dump = [0u8; 16];
             // 组帧计时窗累计（排障定案面）：本窗各分片 audio_chunk_to_frame 耗时
             // 微秒和 + 次数，统计行 build= 均值——"组帧慢" vs "整帧写同步排水饿死"
             // 两论一测定案（b64/JSON 已被对表排除为 ms 级，此处真板实测收口）。
@@ -153,13 +160,22 @@ pub fn spawn_mic_smoke(
                     Ok(n) if n >= 8 => {
                         reads += 1;
                         dump_count += 1;
-                        // 诊断面：每 200 次 read（≈6.4s）打前 16B 原始位图——
-                        // 全程重复 0x00E0FF00/0x1E0FF00 一类固定模式 = SD 三态残留
-                        // （硬件断/虚接）；位图丰富随机 = 有数据，配置/时隙问题。
-                        if dump_count % 200 == 1 {
-                            let hex: String =
-                                buf[..16].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ");
-                            println!("[mic] dump {hex}");
+                        // 诊断面：每 ~6.4s 比一次前 16B 原始位图——**只有与上一窗
+                        // 完全相同才打印**（正常采集字节窗逐窗都在变 → 静默）。逐窗
+                        // 恒等（0x00E0FF00/0x1E0FF00 一类固定模式）= SD 三态残留
+                        // （硬件断/虚接）或驱动停摆，此时每 6.4s 一行告警即够。
+                        if dump_count % MIC_DUMP_READS == 1 {
+                            let w = 16.min(n);
+                            let now = &buf[..w];
+                            if now == &last_dump[..w] {
+                                let hex: String = now
+                                    .iter()
+                                    .map(|b| format!("{b:02X}"))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                println!("[mic] dump 逐窗不变（疑似 SD 虚接/停摆） {hex}");
+                            }
+                            last_dump[..w].copy_from_slice(now);
                         }
                         // 音频开关每 read 批读一次（不逐帧拿锁）；关时清分片，
                         // ON 起始即整片（seq/DC 基线都从零起）

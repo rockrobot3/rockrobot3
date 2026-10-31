@@ -1,7 +1,8 @@
 //! rr3-audio-rec —— 批D③ 音频上行收流端（宿主；0.0.5 增补轮五 全案 §4 批D 判据①）。
 //!
 //! 链路：板面 INMP441 双麦（mic.rs 分片组帧，`rr3-sense/audio/pcm` Event @
-//! trace_id=0 / src=2 / dst=1）→ UART2 921600（CP2102 `/dev/cu.usbserial-0001`）→
+//! trace_id=0 / src=2 / dst=1）→ UART2 1.5M（板固件 `board::UART2_BAUD_HZ` 同档；
+//! 2026-10-30 自 921600 提档定档，音频 85KB/s 占线从 ~95% 降到 ~46%）→
 //! 本件收流：`AUDIO ON` 行命令起流 → dst=1 门 → Event payload → topic 门 →
 //! b64 解码 → 累积 PCM → `AUDIO OFF` → 按**实测采样率**写 wav（双通道 s16le）。
 //!
@@ -40,7 +41,8 @@
 //!   是最外层兜底；只管武装后的收流期，重连骑行期解武装不误触发。
 //!
 //! 用法：`rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]`
-//! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=921600（板面批D② 落板档；
+//! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=1500000（板面 2026-10-30 定档
+//! 实测档，与固件 `board::UART2_BAUD_HZ` 同值；
 //! 波特率仍过 rr-ipc 档位表白名单，不预设动物园）。
 //! 退出码：0=收兵；1=开口/握手/0 分片；2=参数错；3=看门狗停滞恢复；4=重连失败/
 //! 收流线程亡（3/4 都先补恢复头保住已落盘数据再退）。
@@ -70,8 +72,13 @@ use serde_json::Value;
 
 /// 宿主 task 位形（帧头 dst 门：只收发给宿主的 Event）。
 const RR3_HOST_TASK: u64 = 1;
-/// 板面外设执行面 task 位形（帧头 src，诊断显示用）。
+/// 板面外设执行面 task 位形（帧头 src，诊断显示用）。**仅测试构造帧用**——本件
+/// 只收流落盘、不发布帧，故生产路径无消费者。
+#[cfg(test)]
 const RR3_PERIPH_TASK: u64 = 2;
+/// 采样率兜底（Hz）：只在流内**未声明** `rate` 时用（板面 `mic::MIC_SR_HZ` 缺省）。
+/// 声明的值才是真值——硬编码会让板面换采样档后宿主静默写错 wav 头。
+const NOMINAL_RATE_FALLBACK_HZ: u32 = 16000;
 /// 音频 PCM 上行主题（在册 stream L1：contracts/topics.toml）。
 const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 停滞死线（看门狗）：**武装后的收流期**内无新分片字节即判停滞。分片节拍
@@ -107,7 +114,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut device: Option<String> = None;
     let mut out: Option<PathBuf> = None;
     let mut secs = 30u64;
-    let mut baud = 921600u32;
+    let mut baud = 1_500_000u32;
     let mut doa = false;
     let mut i = 0;
     while i < argv.len() {
@@ -581,7 +588,7 @@ fn main() {
     let args = match parse_args(&argv) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("rr3-audio-rec: {e}\n\n用法: rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]\n缺省 out=rr3-audio-<unix秒>.wav secs=30 baud=921600（板面批D② 落板档）；--doa 逐 1s 窗 ILD 出角（批D⑤ 冒烟）");
+            eprintln!("rr3-audio-rec: {e}\n\n用法: rr3-audio-rec <device> [--out <path>] [--secs <n>] [--baud <n>] [--doa]\n缺省 out=rr3-audio-<unix秒>.wav secs=30 baud=1500000（板面 2026-10-30 定档）；--doa 逐 1s 窗 ILD 出角（批D⑤ 冒烟）");
             std::process::exit(2);
         }
     };
@@ -617,7 +624,7 @@ fn main() {
         ingested: AtomicU64::new(0),
         disk_bytes: AtomicU64::new(0),
         reconnects: AtomicU64::new(0),
-        rate: AtomicU32::new(16000),
+        rate: AtomicU32::new(NOMINAL_RATE_FALLBACK_HZ),
         armed: AtomicBool::new(false),
     });
     // 写线程独占 wav 文件（占位头/逐片写透全在此线程）；mpsc 解耦见 writer_run。
@@ -661,6 +668,10 @@ fn main() {
     // 不摊进实测率分母（旧版首末墙钟摊全程，断流后实测率被稀释）。重连/失步
     // 必然丢片（seq 断档或重启）→ `broke` 覆盖全部重锚场景。
     let mut rate_anchor: Option<(Instant, u64)> = None;
+    // 板侧**声明**率（流内 `rate` 字段）：wav 头的标称值与实测率退化时的兜底都以它
+    // 为准，而不是本地硬编码 16000——否则板面换采样档（MIC_SR_HZ）后宿主会静默
+    // 写错头。首片记下、中途变更告警（变更=板侧重配置，须重新对账）。
+    let mut declared_rate: Option<u32> = None;
     let deadline = Instant::now() + Duration::from_secs(args.secs);
     let mut asm = FrameAssembler::new();
     println!(
@@ -700,6 +711,21 @@ fn main() {
                         let broke = (tracker.gaps, tracker.restarts) != account_before;
                         chunks += 1;
                         err_streak = 0;
+                        match declared_rate {
+                            None => {
+                                declared_rate = Some(chunk.rate);
+                                // 首片即把声明率写成 wav 头的初值（实测率 0.5s 后才可信）
+                                watch.rate.store(chunk.rate, Ordering::Release);
+                            }
+                            Some(r) if r != chunk.rate => {
+                                eprintln!(
+                                    "rr3-audio-rec: 板侧声明率变更 {r}Hz → {}Hz（wav 头以末值/实测为准）",
+                                    chunk.rate
+                                );
+                                declared_rate = Some(chunk.rate);
+                            }
+                            _ => {}
+                        }
                         // DoA 在解码面算（纯计算）；分片移交写线程（零磁盘 I/O）
                         if args.doa {
                             if let Some(line) = doa.feed(&chunk.samples) {
@@ -781,8 +807,10 @@ fn main() {
         std::process::exit(1);
     }
     // 实测采样率改按**连续段**（锚后至最后一片的墙钟 × 段内帧数）：断流空洞
-    // 不摊进分母。段 <0.5s 或退化率（<1kHz，锚后无实流的边缘段）退标称 rate。
-    let (frames_total, nominal_rate) = (total_bytes / 4, 16000u32);
+    // 不摊进分母。段 <0.5s 或退化率（<1kHz，锚后无实流的边缘段）退标称 rate；
+    // 标称率取**板侧声明值**（未声明才退 [`NOMINAL_RATE_FALLBACK_HZ`]）。
+    let frames_total = total_bytes / 4;
+    let nominal_rate = declared_rate.unwrap_or(NOMINAL_RATE_FALLBACK_HZ);
     let measured = match rate_anchor {
         Some((t0, f0)) => {
             let end = last_frame.unwrap_or(t0);
@@ -838,7 +866,7 @@ mod tests {
             "topic": RR3_AUDIO_TOPIC,
             "seq": seq,
             "format": "s16le",
-            "rate": 16000u32,
+            "rate": NOMINAL_RATE_FALLBACK_HZ,
             "channels": 2u32,
             "ms": 128u64,
             "pcm_b64": rr3_base64_encode(pcm),
@@ -968,7 +996,7 @@ mod tests {
             parse_args(&argv.iter().map(|s| s.to_string()).collect::<Vec<_>>())
         };
         let a = ok(&["/dev/cu.usbserial-0001"]).unwrap();
-        assert_eq!(a.baud, 921600, "缺省落板档");
+        assert_eq!(a.baud, 1_500_000, "缺省与固件 board::UART2_BAUD_HZ 同档");
         assert_eq!(a.secs, 30);
         let a = ok(&["/dev/tty", "--baud", "115200", "--secs", "5"]).unwrap();
         assert_eq!(a.baud, 115200);

@@ -16,6 +16,15 @@
      `contracts/golden/event-header-128.hex` 一致；标准注释按 ASCII 序读会得 `41 52 45 31`，
      本项目采规范条目 LE 为准，歧义登记见 ADR-0004 追加复查项与 `contracts/README.md`）、
      opcode、flags、trace_id、timestamp_ns、src_task、dst_task、payload_len、reserved[84]；扩展只允许写 reserved 区
+     - **2026-10-30 追加（reserved 受控切分）**：reserved 前 4 字节（offset 44..48）改作
+       `payload_crc32`（载荷 CRC32，IEEE 反射多项式 0xEDB88320），其余 80 字节（48..128）
+       仍要求全零。动因：线面实测约 0.05% 字节误码，而帧内**载荷**被改坏后仍能通过
+       JSON/结构门（音频表现为静默杂音），旧布局对此无任何判据。**这是一次硬切换**：
+       旧端按 `ReservedNotZero` 拒帧，故全端（板固件 + 宿主 + 工具 + golden）必须同批升级；
+       跨生态互通时再启用 flags 级版本标记做协商（本仓内零外部对端，不引入协商复杂度）。
+       实施点：`rr3_header_bytes_with_crc`（发送唯一入口）/ `rr3_crc32`（唯一实现）/
+       `rr3_verify_crc`（收侧校验，`rr3_framebuf_read` 与 `FrameAssembler::pull` 均已接上，
+       不符即整帧丢弃并计错）。
    - 5 种 payload 类型全采用：REQUEST/RESPONSE（RPC）、EVENT（事件总线）、STREAM（音频/运动数据流，有序投递）、NOTIFICATION（心跳/系统通知）
    - 事务面 payload 默认 JSON-RPC 2.0（标准默认，零改动）
 2. **语义字段放置**：rock3 的 topic 字符串与 phase（normal/degraded/recovery）置于 payload 内，**不占用消息头 reserved 区**（保持与标准逐字节兼容）（v0.0.1 现状注记：落地词表以 [`registry.rs`](../../../base/runtime/rrd/src/registry.rs) 的 `Rr3Phase::as_str()` 为准——`registered`/`running`/`degraded`/`failed`，另有一条不属于该枚举的 `unregistered`（模块主动退场的下行广播）；`normal` 与 `recovery` 这两个词面在锚点树内零出现，本决策记录的是当时意图。阶段语义见 [../../architecture/architecture.md](../../architecture/architecture.md) §4.2，可照抄的字面量见 [../../reference/rrd-registry.md](../../reference/rrd-registry.md)，进度归 [../../status.md](../../status.md)）

@@ -4,10 +4,12 @@ use std::time::Duration;
 
 use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size};
 
-use crate::board::{OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST};
+use crate::board::{
+    FRAME_DRAIN_MAX, OLED_COLS, OLED_ROWS, RR3_FACE_EXPRS, RR3_MAGIC_FIRST, UART2_BAUD_HZ,
+};
 use crate::face::expr_eye_base;
 use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
-use crate::link::{read_line, reply, UartIo};
+use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
 use crate::oled::glyph;
 use crate::periph::CtlUart;
 use crate::ports::Rr3BoardClock;
@@ -24,17 +26,23 @@ use crate::state::{
 /// （校验/改状态/推作业）→ Response 回帧。UartIo 只在收/发两段活着；执行段无硬件
 /// 借用（作业已推给运行面），控制面保持轻。
 fn frame_round(io: &mut CtlUart, bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, first: u8) {
-    let req = {
+    let recv = {
         let mut uio = UartIo {
             uart: &mut io.uart,
             pre: Some(first),
         };
-        match frame_recv(&mut uio) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[periph] 帧面丢弃: {e}");
-                return;
-            }
+        frame_recv(&mut uio)
+    };
+    let req = match recv {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[periph] 帧面丢弃: {e}");
+            // **残尾吞净**（稳健性修复）：失败时已消费多少字节不可知（TornHeader/
+            // Header 都不给出剩余量），不吞净就会让残尾被下一轮当行命令解析——
+            // 垃圾指令执行 / 刷一串无人请求的 ERR。读到线静默一拍为止，上限
+            // FRAME_DRAIN_MAX 防呆（见 drain_uart_quiet 注）。
+            drain_uart_quiet(&mut io.uart, FRAME_DRAIN_MAX);
+            return;
         }
     };
     println!("[periph] 帧面 id={} topic=\"{}\"", req.id, req.topic);
@@ -57,9 +65,11 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
     let mut ctl = CtlState {
         prev_expr: String::from("none"),
     };
-    reply(
+    let _ = reply(
         &mut io.uart,
-        "READY periph-base v0.4.0 ctrl/runtime split + serial-servo + baud921600 (type HELP for commands)",
+        &format!(
+            "READY periph-base v0.4.0 ctrl/runtime split + serial-servo + baud{UART2_BAUD_HZ} (type HELP for commands)"
+        ),
     );
     loop {
         // 先清 outbox（运行面异步回包：SCAN 逐点等）+ audio_q（批D③ 音频分片整帧
@@ -69,7 +79,8 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let mut first = [0u8; 1];
         // 窥视带 1-tick（10ms）超时：空口返回 Ok(0) 即回到轮首（转手清 outbox +
         // 让出 CPU，自主行为在运行面跑，不再占用控制面）；有字节（Ok(n≥1)）照旧
-        // 双面分流（帧/行路径的后续读仍 portMAX_DELAY 阻塞）。Err 才是真读失败。
+        // 双面分流（帧/行路径的后续读带 LINE_BYTE_TICKS 字节间超时，半行也不会
+        // 让控制面永久挂住）。Err 才是真读失败。
         match io.uart.read(&mut first, 1) {
             Ok(0) => continue,
             Ok(_) => {}
@@ -86,7 +97,11 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let line = match read_line(&mut io.uart, first[0]) {
             Ok(l) => l,
             Err(why) => {
+                // 必须回 ERR：旧版只 eprintln 就 continue，宿主侧只看到"发了命令、
+                // 永远等不到应答"（静默超时），而线上已经产的残字节还可能被下一轮
+                // 当新命令解析。fail-closed 且 fail-visible。
                 eprintln!("[periph] 收行失败: {why}");
+                let _ = reply(&mut io.uart, &format!("ERR {why}"));
                 continue;
             }
         };
@@ -98,8 +113,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let head = parts.next().unwrap_or("");
         let result: Result<String, String> = match head {
             "HELP" => Ok(
-                "CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@921600，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T098)"
-                    .into(),
+                format!("CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@{UART2_BAUD_HZ}，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T093)")
             ),
             "OLED" => {
                 // 参数取原始行去指令头，保留内嵌空格（≤63 字符 = 3 行 × 21 列，row3 角度行）
@@ -128,7 +142,8 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                 {
                     let mut b = lock_bus(&bus);
                     b.st.wander_on = false; // 外部点名优先，自主扫摆让位
-                    b.st.pan_deg = d;
+                    // **不写前记账**：`st` 角度只由运行面在作业成功后镜像硬件真值
+                    // （见 runtime `exec_job`）——失败/排队时读接口不复述没到达的角。
                 }
                 push_job(
                     &bus,
@@ -145,7 +160,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                 {
                     let mut b = lock_bus(&bus);
                     b.st.wander_on = false;
-                    b.st.tilt_deg = d;
+                    // 同上：角度记账归运行面（作业成功才提交）
                 }
                 push_job(
                     &bus,
@@ -163,8 +178,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         {
                             let mut b = lock_bus(&bus);
                             b.st.wander_on = false;
-                            b.st.pan_deg = p;
-                            b.st.tilt_deg = t;
+                            // 同上：两轴角度由运行面在整条串行移动成功后提交
                         }
                         // 串行降级：运行面先 pan 到位 → 整定 → 再 tilt（削峰值电流）
                         push_job(
@@ -284,6 +298,8 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                     audio_sent,
                     audio_dropped,
                     audio_q,
+                    job_drop,
+                    reply_drop,
                 ) = {
                     let b = lock_bus(&bus);
                     (
@@ -302,10 +318,12 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         b.st.audio_sent,
                         b.st.audio_dropped,
                         b.audio_q.len(),
+                        b.st.job_dropped,
+                        b.st.reply_drop,
                     )
                 };
                 Ok(format!(
-                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} oled_last=\"{last_text}\" free={}B min_free={}B",
+                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={}B min_free={}B",
                     if wander { "on" } else { "off" },
                     rail_tier.name(),
                     if audio_on { "on" } else { "off" },
@@ -328,9 +346,15 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
             }
             other => Err(format!("unknown cmd \"{other}\"（HELP 看指令表）")),
         };
-        match result {
-            Ok(line) => reply(&mut io.uart, &line),
-            Err(e) => reply(&mut io.uart, &format!("ERR {e}")),
+        // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
+        // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
+        let dropped = match result {
+            Ok(line) => !reply(&mut io.uart, &line),
+            Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
+        };
+        if dropped {
+            let mut b = lock_bus(&bus);
+            b.st.reply_drop = b.st.reply_drop.saturating_add(1);
         }
     }
 }

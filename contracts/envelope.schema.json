@@ -15,7 +15,7 @@
       "properties": {
         "fields": {
           "type": "array",
-          "x-offset-sum": "4+2+2+8+8+8+8+4+84 = 128",
+          "x-offset-sum": "4+2+2+8+8+8+8+4+4+80 = 128",
           "x-offset-table": [
             { "name": "magic", "offset": 0, "length": 4, "type": "uint32", "value": 1095910705, "hex": "0x41524531", "wire_bytes_hex": "31455241", "stability": "L1", "note": "标准注释写作 'ARE1'，与 LE 字段值矛盾；rock3 取 LE 字段值为准，见 contracts/README.md 歧义登记" },
             { "name": "opcode", "offset": 4, "length": 2, "type": "uint16", "enum_ref": "opcode", "stability": "L1" },
@@ -25,7 +25,8 @@
             { "name": "src_task", "offset": 24, "length": 8, "type": "uint64", "stability": "L1", "note": "0 表示内核发起；rock3 由 rrd（受信运行时）在模块注册时分配并校验，用户态不得自设（ADR-0006 §4 / AOS-STD-IPC-024）" },
             { "name": "dst_task", "offset": 32, "length": 8, "type": "uint64", "stability": "L1", "note": "0 表示广播；广播不占独立标志位" },
             { "name": "payload_len", "offset": 40, "length": 4, "type": "uint32", "stability": "L1", "minimum": 0, "maximum": 67108864, "note": "0 表示无 payload；上限 64 MiB（AOS-STD-IPC-021）" },
-            { "name": "reserved", "offset": 44, "length": 84, "type": "bytes", "stability": "L1", "x-must-be": "all-zero", "note": "扩展只允许写本区并经 flags 标记启用（ADR-0006 §1）" }
+            { "name": "payload_crc32", "offset": 44, "length": 4, "type": "uint32", "stability": "L2", "note": "载荷 CRC32（IEEE 802.3 反射多项式 0xEDB88320，初值/结果异或 0xFFFFFFFF），覆盖 header 之后的整段 payload；0 且载荷非空 = 非法（必须校验不符即丢帧）。头部自身完整性由 magic / reserved 全零 / payload_len 护栏限定（2026-10-30 启用，ADR-0006 §1 预留区扩展）" },
+            { "name": "reserved", "offset": 48, "length": 80, "type": "bytes", "stability": "L1", "x-must-be": "all-zero", "note": "扩展只允许写本区并经 flags 标记启用（ADR-0006 §1）" }
           ]
         }
       }

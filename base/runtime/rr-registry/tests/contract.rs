@@ -1115,6 +1115,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "distro.toml".to_string(),
             "esp32-mini.toml".to_string(),
             "esp32s3-mini.toml".to_string(),
+            "pi4b-host-esp32-classic.toml".to_string(),
         ],
         "profiles/ 机型集合漂移（新增机型须同批改本 pin 与该机型的形状测试，C2 批K）"
     );
@@ -1825,8 +1826,8 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         ("i2c_sda", "8"),
         ("i2c_scl", "9"),
         ("adc_rail_pin", "1"),
-        ("uart2_tx", "17"),
-        ("uart2_rx", "18"),
+        ("uart2_tx", "41"),
+        ("uart2_rx", "42"),
         ("ledc_pan", "4"),
         ("ledc_tilt", "5"),
         ("i2s_bclk", "6"),
@@ -1882,6 +1883,143 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         physicals,
         vec![4, 5],
         "esp32s3-mini 双轴物理脚漂移（应为 S3 LEDC pan=4 / tilt=5）"
+    );
+}
+
+/// Pi 4B 宿主 × classic 板（W2/T1）：`profiles/pi4b-host-esp32-classic.toml` 钉**差异面**
+/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十六格绑定 / 恰一条 [[pin]] = MAX7219）。
+/// 完整形状由 default/distro 测试与 rrd 装载门共同覆盖；线束与档位漂移即红。
+#[test]
+fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32-classic.toml"))
+        .expect("profiles/pi4b-host-esp32-classic.toml 必须存在（W2/T1）");
+    let v: toml::Value = toml::from_str(&text).expect("pi4b-host-esp32-classic.toml 必须可解析");
+
+    assert_eq!(
+        v.get("schema_version").and_then(toml::Value::as_integer),
+        Some(5),
+        "pi4b-host-esp32-classic schema_version 漂移"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some("host"),
+        "pi4b-host-esp32-classic 档位漂移（T1 = Pi 宿主档）"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("chip"))
+            .and_then(toml::Value::as_str),
+        Some("raspberry-pi-4"),
+        "pi4b-host-esp32-classic chip 漂移（平台表选 contracts/platform/raspberry-pi-4.toml）"
+    );
+    assert_eq!(
+        v.get("os")
+            .and_then(|o| o.get("route"))
+            .and_then(toml::Value::as_str),
+        Some("distro"),
+        "pi4b-host-esp32-classic route 漂移（Raspberry Pi OS 属发行版快路轨）"
+    );
+
+    let hardware = v
+        .get("hardware")
+        .and_then(toml::Value::as_table)
+        .expect("pi4b-host-esp32-classic 缺 [hardware] 段");
+    // 宿主两键：真机实测值（USB 声卡 CARD 名 / Pi 网口）。
+    assert_eq!(
+        hardware.get("alsa_device").and_then(toml::Value::as_str),
+        Some("plughw:CARD=Device"),
+        "pi4b-host-esp32-classic alsa_device 漂移（Pi 真机 USB 声卡短名，不钉卡号）"
+    );
+    assert_eq!(
+        hardware.get("link_ifname").and_then(toml::Value::as_str),
+        Some("wlan0"),
+        "pi4b-host-esp32-classic link_ifname 漂移"
+    );
+    // 板侧十一键：与 profiles/esp32-mini.toml 逐值对齐（classic 板同一线束）。
+    for (k, expected) in [
+        ("i2c_sda", "21"),
+        ("i2c_scl", "22"),
+        ("adc_rail_pin", "34"),
+        ("uart2_tx", "18"),
+        ("uart2_rx", "19"),
+        ("ledc_pan", "32"),
+        ("ledc_tilt", "33"),
+        ("i2s_bclk", "4"),
+        ("i2s_sd", "27"),
+        ("i2s_ws", "26"),
+        ("cred_store", "nvs:rr3"),
+    ] {
+        assert_eq!(
+            hardware.get(k).and_then(toml::Value::as_str),
+            Some(expected),
+            "pi4b-host-esp32-classic hardware.{k} 漂移（应与 classic 线束同源）"
+        );
+    }
+
+    // 形态面：十六格绑定（与 distro 同构）+ 十六格在位。
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("pi4b-host-esp32-classic 缺 [bindings]");
+    assert_eq!(
+        bindings.len(),
+        16,
+        "pi4b-host-esp32-classic 绑定面应恰十六格"
+    );
+    for (slot, provider) in [
+        ("act.servo", "rr3-act"),
+        ("ui.face", "rr3-interact"),
+        ("audio.playback", "rr3-interact"),
+        ("audio.capture", "rr3-sense"),
+        ("cognition.llm", "rr3-brain"),
+    ] {
+        assert_eq!(
+            bindings.get(slot).and_then(toml::Value::as_str),
+            Some(provider),
+            "pi4b-host-esp32-classic bindings.{slot} 漂移"
+        );
+    }
+    let present = v
+        .get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("pi4b-host-esp32-classic 缺 [slots].present");
+    assert_eq!(
+        present.len(),
+        16,
+        "pi4b-host-esp32-classic 在位声明应恰十六格"
+    );
+
+    // [[pin]] 恰一条：Pi 本机唯一的本地外设 = MAX7219 点阵（ui.face.spi，spidev0/ch0，
+    // 装载期派生 spi_device）。其余六格（act.servo/led/relay、power.charger、
+    // sensor.env/imu）无绑定 → 校验② role_missing 降级，板侧真值走 [hardware] 桥注入。
+    let pins = v
+        .get("pin")
+        .and_then(toml::Value::as_array)
+        .expect("pi4b-host-esp32-classic 应有恰一条 [[pin]]（ui.face.spi）");
+    assert_eq!(
+        pins.len(),
+        1,
+        "pi4b-host-esp32-classic [[pin]] 应恰一条（Pi 本机只接 MAX7219 点阵）"
+    );
+    let p0 = &pins[0];
+    assert_eq!(
+        p0.get("role").and_then(toml::Value::as_str),
+        Some("ui.face.spi"),
+        "pi4b-host-esp32-classic [[pin]] role 漂移"
+    );
+    assert_eq!(
+        p0.get("controller").and_then(toml::Value::as_str),
+        Some("spidev0"),
+        "pi4b-host-esp32-classic [[pin]] controller 漂移（host 词形前缀 spidev，见平台表 [controller_wordform]）"
+    );
+    assert_eq!(
+        p0.get("channel").and_then(toml::Value::as_integer),
+        Some(0),
+        "pi4b-host-esp32-classic [[pin]] channel 漂移（CE0）"
     );
 }
 

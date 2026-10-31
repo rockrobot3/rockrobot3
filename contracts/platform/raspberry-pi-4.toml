@@ -32,10 +32,13 @@ kind = "i2c"
 channels = 0
 
 [[controller]]
-# 演练实例：SPI0（树莓派另加——MAX7219 点阵链路候选，树莓派形态外设采购在案）。
-name = "spi0"
+# SPI0 的 sysfs 设备名（真机对账 2026-10-28：Pi 4B 上 `/dev/spidev0.0` 在位，
+# MAX7219 双位级联点阵已于 2026-10-15 链④真件档实测）。名须与 [controller_wordform]
+# 的 spi_device 前缀 "spidev" 对得上——装配单 [[pin]] 的 controller 只能填本表在册名
+# （校验⑧-b），故此处按 Linux 设备名而非芯片手册的 "SPI0" 命名。
+name = "spidev0"
 kind = "spi"
-channels = 0
+channels = 1
 
 [capabilities]
 # 评审确认：本芯片无片上 ADC，模拟测点须外挂（施工图 Task 3 Step 2 原文口径，

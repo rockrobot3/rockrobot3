@@ -12,8 +12,9 @@
 //! 分流无歧义。
 //!
 //! 引脚预算（全案 §5 约束面，与 0.0.7 实测接线零冲突）：
-//! - UART2 = GPIO18→TX / GPIO19←RX（921600，CP2102 指令面；批B 行协议临时面，
-//!   批C 换能力帧——接线不变；批D② 升 921600 音频带宽档，Q1=(a) 带宽账裁定）——**订正**：原记 17→TX/16←RX
+//! - UART2 = GPIO18→TX / GPIO19←RX（1.5M，CP2102 指令面；批B 行协议临时面，
+//!   批C 换能力帧——接线不变；批D② 升 921600 音频带宽档，Q1=(a) 带宽账裁定；
+//!   2026-10-30 链路换树莓派 PL011 三线直连后重评，压实定档 1.5M）——**订正**：原记 17→TX/16←RX
 //!   已过时，GPIO16/17 一装 UART2 驱动即把 I2C0（21/22）打死，故弃用，真板钉 18/19。
 //! - I2C0  = GPIO21 SDA / GPIO22 SCL（100kHz，SSD1306 0x3C；400k 在跳线面时序边际，
 //!   真板实录页写 ESP_FAIL，降 100k 稳过——见 init 段注）
@@ -108,7 +109,7 @@ use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_p
 use crate::board::{
     BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, OLED_ADDR,
     RR3_BIND_LEDC_PAN, RR3_BIND_LEDC_TILT, RR3_BIND_UART2_RX, RR3_BIND_UART2_TX, THREAD_STACK,
-    UART2_BAUD_HZ, UART2_TX_RING,
+    UART2_BAUD_HZ, UART2_RX_RING, UART2_TX_RING,
 };
 use crate::commands::cmd_loop;
 use crate::face::expr_eye_base;
@@ -149,24 +150,28 @@ fn main() {
 
     let peripherals = Peripherals::take().unwrap();
 
-    // ---- UART2 指令面 @ GPIO18(TX)/GPIO19(RX) 921600（批D②）----
+    // ---- UART2 指令面 @ GPIO18(TX)/GPIO19(RX)，波特率见 board::UART2_BAUD_HZ ----
     // **引脚定案（真板实锤 2026-10-12）**：GPIO16/17（UART2 的 IOMUX 缺省组）在本板
     // 上**装驱动即把 I2C0（21/22）打死**——先装/后装、换序均复现全黑；换到 18/19 后
     // I2C 全绿（扫描 0x3C / init / boot 文本 / 页写全过）。故本板弃用 16/17（疑与
     // 底板走线桥接或模块 PSRAM 脚冲突），钉 18/19。接线表见 README；19 与点阵 VSPI
     // 预留同脚，点阵立项时需再迁（已在案）。
     // TX 环 = UART2_TX_RING（board 策略面）：缺省 256B 下整帧写 11.4KB 同步等线速
-    // 排空 ~120ms（921600），mic 组帧线程被写调用饿死 → I2S DMA 环溢出丢数（真板
-    // 实录 [mic] 采样率崩塌）。TX 环 ≥ 单帧后 write 降为 memcpy 入环、异步排水。
+    // 排空 ~120ms（921600）/~59ms（1.5M），mic 组帧线程被写调用饿死 → I2S DMA 环溢出
+    // 丢数（真板实录 [mic] 采样率崩塌）。TX 环 ≥ 单帧后 write 降为 memcpy 入环、异步排水。
+    // RX 环 = UART2_RX_RING：缺省 256B 在宿主突发多命令时静默丢字节（2026-10-30
+    // 实测 60 条连发丢 15 条），开到 4096B 后突发不再溢出。
     let uart_config = UartConfig::new()
         .baudrate(Hertz(UART2_BAUD_HZ))
-        .tx_fifo_size(UART2_TX_RING);
+        .tx_fifo_size(UART2_TX_RING)
+        .rx_fifo_size(UART2_RX_RING);
     // 指令面引脚按 target 分档（真值表见 board/pins_classic.rs 与 board/pins_s3.rs）：
-    // classic 18/19；S3 N16R8 17/18（26–37 被 Flash/PSRAM 占用）。
+    // classic 18/19；S3 N16R8 41/42（26–37 被 Flash/PSRAM 占用；17/18 在本板双向不通，
+    // 2026-10-29 真板订正，详见 pins_s3.rs 头注）。
     #[cfg(feature = "esp32")]
     let (uart2_tx, uart2_rx) = (peripherals.pins.gpio18, peripherals.pins.gpio19);
     #[cfg(feature = "esp32s3")]
-    let (uart2_tx, uart2_rx) = (peripherals.pins.gpio17, peripherals.pins.gpio18);
+    let (uart2_tx, uart2_rx) = (peripherals.pins.gpio41, peripherals.pins.gpio42);
     let uart = UartDriver::new(
         peripherals.uart2,
         uart2_tx,
@@ -254,12 +259,16 @@ fn main() {
     if oled_ok {
         // boot 画面 4 行全出（4 行扩行能力的 boot 直证；row3 由 oled_show 常刷，
         // boot 期先摆初始角度占位）
-        // 行2 波特率从 board 真值拼出（批D② 起 921600，防字面量漂移）
+        // 行2 波特率从 board 真值拼出（批D② 起 921600、2026-10-30 起定档 1.5M，防字面量漂移）
+        // 行3 开机姿态从 board 常量拼出（同 行2 纪律：防字面量漂移）
         let boot_rows: [(String, &str); 4] = [
             ("ROCK3 PERIPH BASE".into(), "boot 行0写失败"),
             ("4-ROW OLED READY".into(), "boot 行1写失败"),
             (format!("UART2 CMD @{UART2_BAUD_HZ}"), "boot 行2写失败"),
-            ("P:060 T:098".into(), "boot 角度行写失败"),
+            (
+                format!("P:{BOOT_PAN_DEG:03} T:{BOOT_TILT_DEG:03}"),
+                "boot 角度行写失败",
+            ),
         ];
         let mut boot_ok = true;
         for (row, (text, msg)) in boot_rows.iter().enumerate() {

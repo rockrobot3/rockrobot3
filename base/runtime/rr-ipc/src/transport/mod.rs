@@ -215,7 +215,11 @@ mod tests {
         // 把发出的字节喂回读侧，recv 应还原同一帧
         let mut back = FakeStream::new(conn.tx.clone());
         let got = back.rr3_recv_buf().expect("读帧应成功");
-        assert_eq!(crate::protocol::wire::Rr3Frame::try_from(got).unwrap(), f);
+        // 头里的 CRC 由载荷算出（线上真值），不是发送前的 0
+        let mut want = f.clone();
+        want.header.payload_crc32 = crate::protocol::header::rr3_crc32(&f.payload);
+        assert_ne!(want.header.payload_crc32, 0, "带载荷的头 CRC 必须非零");
+        assert_eq!(crate::protocol::wire::Rr3Frame::try_from(got).unwrap(), want);
     }
 
     /// 未 seal 的缓冲照走"先幂等 seal 再发"路径——rr3_seal 语义不随换底漂移。
