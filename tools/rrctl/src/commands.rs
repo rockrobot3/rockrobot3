@@ -83,6 +83,8 @@ fn rr3_ctl_query(bus: &str, method: &str) -> Result<Value, String> {
             src_task: RR3_CTL_SRC_TASK,
             dst_task: rr_bus::RR3_TASK_RRD,
             payload_len: payload.len() as u32,
+            // 载荷 CRC32 必须与体一致（线上完整性判据；发送路径另会复算，值同）
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
     };
@@ -438,6 +440,7 @@ mod tests {
                         src_task: rr_bus::RR3_TASK_RRD,
                         dst_task: 0,
                         payload_len: payload.len() as u32,
+                        payload_crc32: rr_ipc::rr3_crc32(&payload),
                     },
                     payload,
                 };

@@ -31,7 +31,7 @@ kind = "i2c"
 channels = 0
 
 [[controller]]
-# UART2：板↔宿主桥（921600 档；面包板初版可降 460800）。pins_s3.rs：GPIO17/18。
+# UART2：板↔宿主桥（2M 档，2026-10-30 提档；面包板初版可降 460800）。pins_s3.rs：GPIO17/18。
 name = "uart2"
 kind = "uart"
 channels = 0
