@@ -504,6 +504,15 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         // 装机后板上 rrd 装配段（--profile 正门）才能扫到件级注入声明。两者可选
         // （无原子件/无编排的模块形态允许缺省），在位即纯副本（pkg 同款纪律）。
         let repo_mod = cfg.repo.join("modules").join(name);
+        // 形态档配置（可选，2026-10-31）：`config-esp32.toml` 是板麦双通道档
+        // （channels=2 + 反射环开启），与默认 config.toml 同源随包——部署侧用
+        // RR3_SENSE_CONFIG 指向装机路径显式装载；默认档不读它，不存在即不随装
+        // （与 composite/atoms 同一条"在位即纯副本"可选件纪律）。
+        let config_esp32_src = repo_mod.join("config-esp32.toml");
+        if config_esp32_src.is_file() {
+            fs::copy(&config_esp32_src, staged.join("config-esp32.toml"))
+                .map_err(|e| format!("复制 {name} config-esp32.toml 失败: {e}"))?;
+        }
         let composite_src = repo_mod.join("composite.toml");
         if composite_src.is_file() {
             fs::copy(&composite_src, staged.join("composite.toml"))

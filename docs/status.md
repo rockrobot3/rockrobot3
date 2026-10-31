@@ -1997,3 +1997,42 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   与 brcmfmac 切网强相关嫌疑）。**结论：Pi 的 wlan0 是生产链路（ssh + 栈观测），
   禁止再把生产机 WiFi 切去测试面**；板侧配网验收改由 Mac 客户端在 AP 上直打
   （可恢复——Mac 会自动回连首选网，实测两次均回 `ziroom602_5G`）。
+
+**U 轮续2：板侧音频上行打通（2026-10-31 傍晚，方案①）**：
+  背景：组合形态的宿主音频源此前是 voiceHAT（实机无麦＝数字静默，VAD 0 事件），
+  真实双麦在 ESP32 上而板侧 `audio_on=false`、上行未开；「喊它没反应」的音频
+  半边由此断开。
+
+  改法（代码 + 数据两层）：
+  - **能力面后端覆盖键 `RR3_HAL_AUDIO_BACKEND`**（`rr-hal/src/backend.rs`）：只被
+    音频**采集面**读取，未设/空白回落全局 `RR3_HAL_BACKEND`；两键共用白名单裁决
+    `rr3_hal_backend_parse`（单测钉死）。理由：全局设 esp32 会让同机的舵机/显示面
+    也去开同一 UART（跨进程 flock 单消费者，U 轮⑤）——采集面单独选档，其余能力
+    面维持平台缺省（act/interact 不受影响）。
+  - **`config-esp32.toml` 随包**（rr3-pack 可选件复制 + pack ⑤ 断言）：板麦档
+    channels=2 / VAD 650 / 反射环开启，装机位
+    `/usr/lib/rockrobot3/modules/rr3-sense/config-esp32.toml`。
+  - 部署 drop-in（`/etc/systemd/system/rrd.service.d/profile.conf`）：
+    `RR3_HAL_AUDIO_BACKEND=esp32`、`RR3_HAL_PERIPH_UART=/dev/ttyAMA0`、
+    `RR3_HAL_PERIPH_BAUD=1500000`、`RR3_SENSE_CONFIG=<装机 config-esp32.toml>`。
+
+  验收（真板，固件 b15b496）：
+  - 物面先证：独立收流工具 1.5M 8s，`chunks=61 gaps=0 err=0`，16001Hz 双声道，
+    实测 L rms=633 / R rms=598（环境底噪，非静默）；
+  - 生产 sense：`音频源就绪: backend=esp32 rate=16000 ch=2 frame_ms=20`；板侧
+    `/api/board/state` `audio_on=true` 且 `audio_sent` 持续增长；
+  - VAD 边沿已进总线（rrd `转发 rr3-sense/audio/vad_start`）；反射环实测下发
+    `pan=120°/114°/107°` + 点头 `tilt 90→98`，板侧 pan/tilt 同步变化；
+  - brain 收到 VAD 后起对话轮（日志 `轮次 1..9: ASR 失败…缺少环境变量
+    RR3_CLOUD_API_KEY`）——**音频通路已到 brain，只差云凭据**；
+  - 面板 `POST /api/beep` 实测 `played_ms=200`（回放面持有 ALSA 设备、可出声）。
+
+  遗留（按优先序）：
+  1. 云凭据 `RR3_CLOUD_API_KEY` 未注入（ASR/LLM/TTS 全链因此不可用）——「语音
+     对话」的最后一格；面板 secrets 面（`POST /api/model/key`）可落值。
+  2. VAD 阈 650 与当前底噪 633 太近：15 分钟内 9 轮起音（含 beep），反射环在
+     环境噪声下会误转头；需用真实嗓音重标（config-esp32 的 650 来自底噪 430 的
+     旧场地）。
+  3. DoA 锚点/双麦基线仍是旧标定（遗留 4/5 不变）；当前方向只作粗档（±30/±90）。
+  4. `rr3.set_bindings` 未随音频链下发（板 `/api/board/bindings` 仍 `null`）——
+     音频引脚走固件编译缺省、功能不受影响；绑定对账锚待舵机/显示接入时一并接。
