@@ -2074,3 +2074,18 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   出门还行。' tts_pcm_ms=8397 played_ms=8397`（ASR 正确 / 回复 / 8.4s 实播）。
   注意：SiliconFlow 偶发瞬时 500 与读超时（本轮前 2/3 次弃轮，brain 如实弃轮不
   重试）；短促响声仍会触发反射转头——根治靠唤醒词（下一项，未做）。
+
+**U 轮续5：ASR 有界重试（2026-10-31 晚）**：
+  - 改动（`rr3-brain/src/cloud.rs`）：`rr3_transcribe` 首调 + **1 次重试**
+    （`RR3_ASR_ATTEMPTS=2`、间隔 500ms）；判据 `rr3_asr_error_retryable` 只收
+    HTTP 429/5xx 与传输层「云端不可达」（4xx/坏应答/缺密钥不重试）；multipart
+    体一次装配复用。重试过的最终错误回带「（ASR 共尝试 2 次）」，首调失败文案
+    逐字不变（台账/单测依赖）。
+  - 账面：同步调用在对话轮内，上限 2×`timeout_s`（缺省 20s）——有界，不无限重试。
+  - 单测：`asr_error_retry_classification`、`asr_retries_5xx_once_then_succeeds`
+    （假端点首 500 次 200，请求数恰 2）、`asr_5xx_exhausts_bounded_attempts`；
+    既有非 JSON 用例补钉「坏应答不重试（请求数 1）」。`cargo test` 100 全绿。
+  - 部署：brain 板上重建（10.6s）后热替换装机位，五模块 running；源已提交，
+    下一次出包自动携带。
+  - 遗留：真实瞬时 500 的现场复验未做（需自然复现或临时改 base_url 造障）；
+    本轮以单测 + 部署健康为准。
