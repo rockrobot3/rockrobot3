@@ -92,6 +92,7 @@ use crate::state::{lock_bus, Bus};
 /// 已把本表区段扩进扫描源），执法位＝未来板侧端点读五路字段而不申报即红
 /// （对拍判据 ⊆ 分母五路并集）。
 pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str)] = &[
+    ("GET", "/", &[], ""),
     ("GET", "/api/board/state", &[], ""),
     ("GET", "/api/board/bindings", &[], ""),
     ("POST", "/api/board/wifi", &[], "live"),
@@ -101,6 +102,8 @@ pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str)] = &[
 /// 路由分派产物（表内端点；`None` = 白名单外，fail-closed 回 404）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Rr3BoardRoute {
+    /// GET /——板端配网/状态网页（2026-10-31：手机连 SoftAP 即可配网，无需 curl）
+    Index,
     /// GET /api/board/state——板侧运行态观测快照（`PeriphState` 观测字段，
     /// 批N12 件一观测面含其中）
     State,
@@ -119,6 +122,7 @@ pub(crate) enum Rr3BoardRoute {
 pub(crate) fn rr3_board_route(method: &str, path: &str) -> Option<Rr3BoardRoute> {
     match (method, path) {
         ("GET", "/api/board/state") => Some(Rr3BoardRoute::State),
+        ("GET", "/") => Some(Rr3BoardRoute::Index),
         ("GET", "/api/board/bindings") => Some(Rr3BoardRoute::Bindings),
         ("POST", "/api/board/wifi") => Some(Rr3BoardRoute::WifiWrite),
         ("POST", "/api/board/reboot") => Some(Rr3BoardRoute::Reboot),
@@ -242,6 +246,43 @@ pub(crate) fn rr3_bindings_json(b: Option<&Rr3BoardBindings>) -> String {
 /// 写口 body 上界（fail-closed：形制上限 32+64B 的 JSON 富余 8 倍——超长 body
 /// 一律不读全，400 拒收）。
 const RR3_WIFI_BODY_MAX: usize = 512;
+
+/// 板端配网页（GET /，2026-10-31）：手机连上 SoftAP 后直接填 SSID/口令即可配网，
+/// 不必依赖 curl；同时轮询 `/api/board/state` 显示实时状态。页面本体零外部依赖
+/// （无 CDN、离线可用），所有请求只打本板白名单端点。
+const RR3_BOARD_INDEX_HTML: &str = r#"<!doctype html><html lang="zh"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RR3 机器人</title><style>
+body{font-family:system-ui,-apple-system,sans-serif;margin:16px;max-width:560px}
+h1{font-size:20px}h2{font-size:15px;margin-top:22px}
+input,button{font-size:16px;padding:9px;margin:5px 0;width:100%;box-sizing:border-box}
+pre{background:#f4f4f5;padding:10px;border-radius:6px;overflow:auto;font-size:12px}
+</style></head><body>
+<h1>RR3 机器人 · 板载面板</h1>
+<h2>实时状态</h2><pre id="s">加载中…</pre>
+<h2>WiFi 配置（换网后在这里重配）</h2>
+<form id="f">
+<input id="ssid" placeholder="WiFi 名称 (SSID)" required>
+<input id="pass" type="password" placeholder="WiFi 密码">
+<button>保存并连接</button></form>
+<h2>结果</h2><pre id="r">—</pre>
+<h2>动作</h2><button id="rb">重启板子</button>
+<script>
+const S=document.getElementById('s'),R=document.getElementById('r');
+async function st(){try{const j=await (await fetch('/api/board/state')).json();
+S.textContent=JSON.stringify(j,null,1)}catch(e){S.textContent='读取失败: '+e}}
+st();setInterval(st,3000);
+document.getElementById('f').onsubmit=async e=>{e.preventDefault();R.textContent='提交中…';
+try{const j=await (await fetch('/api/board/wifi',{method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({ssid:ssid.value,password:pass.value})})).json();
+R.textContent=JSON.stringify(j,null,1);
+if(j.connected){R.textContent+='\n✅ 已加入新 WiFi（本页可断开，改用新 IP 访问）'}
+else if(j.reverted){R.textContent+='\n⚠ 新凭据未连上，已回滚旧凭据'}
+}catch(e){R.textContent='请求失败: '+e}st()};
+document.getElementById('rb').onclick=async()=>{if(!confirm('确认重启？'))return;
+R.textContent='重启指令已发…';try{await fetch('/api/board/reboot',{method:'POST'})}catch(e){}};
+</script></body></html>"#;
 /// 等连有界窗（事务与回退共用；步进 [`WIFI_POLL_MS`]——15s 上限，超窗＝未连
 /// 如实应答，不猜不造）。
 const WIFI_CONNECT_WAIT_MS: u64 = 15_000;
@@ -543,6 +584,14 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
     };
     match route {
         // 出锁组 JSON（快照取窗内不组串——模块文档纪律）
+        Rr3BoardRoute::Index => {
+            httpd_resp_set_type(req, c"text/html; charset=utf-8".as_ptr());
+            httpd_resp_send(
+                req,
+                RR3_BOARD_INDEX_HTML.as_ptr() as *const _,
+                RR3_BOARD_INDEX_HTML.len() as _,
+            )
+        }
         Rr3BoardRoute::State => {
             let body = rr3_state_json(&rr3_state_snapshot(bus));
             httpd_resp_set_type(req, c"application/json".as_ptr());
@@ -811,11 +860,14 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pas
     // ② WiFi 起栈（手抄宏配置见 wifi_default_config）
     let cfg = wifi_default_config();
     chk(esp_wifi_init(&cfg))?;
-    // AP 常开（SoftAP 配网面，见 wifi_ap_configure 注）：必须在 esp_wifi_start 前
-    // 建 netif + 设 config——IDF 在 start 时才拉起 AP/DHCP 服务。失败即点名退出
-    // （配网面缺席，但不会静默半起：宁可配置腿不装配也不留不可达的半态）。
-    let ap_ssid = wifi_ap_configure()?;
+    // **模式必须先于接口配置**（2026-10-31 真板排查）：IDF 的 esp_wifi_set_config
+    // 按接口查"该接口是否已在当前模式里启用"，模式仍是缺省 STA 时配 AP 接口返回
+    // ESP_ERR_INVALID_ARG——表现为配置腿整段起不来、板侧 AP 不可见，而其它功能
+    // 全部正常（板活着但不配网，排查极易误判成 SoftAP 支持未编入）。
     chk(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA))?;
+    // AP 常开（SoftAP 配网面，见 wifi_ap_configure 注）：netif 与 config 须在
+    // esp_wifi_start 前就位——IDF 在 start 时才拉起 AP/DHCP 服务。
+    let ap_ssid = wifi_ap_configure()?;
     // STA 凭据（helper 共用——写口 apply/回退同款；位形已在 spawn 前验）；
     // ap-only 档空凭据不配置 STA，只起 AP
     if !ssid.is_empty() {
