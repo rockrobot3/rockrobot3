@@ -1958,3 +1958,42 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   7. 「你好洛克」ASR/KWS 未建（喊任何响声都会回应的诚实口径不变）。
   8. RAIL 分压测点未接线（full_smoke RAIL raw=0，硬件项）。
   9. 表情胶囊眼观感打磨（用户反馈"表情符号做得并不好"）。
+  10. ESP32 独立形态动作面未建（face/pan/tilt/audio 端点）——配网面已闭环，
+     动作仍走 UART 帧；要让板子单机可喊可动，需在板侧补动作端点。
+
+**U 轮续：ESP32 独立形态配网面落地（2026-10-31 午后）**：
+  ① 生产栈恢复：按新链（musl 五件 → payload → build-onboard → staging → 断言）
+  出包安装后 **五模块 running**（`rr3-ctl status`：sense/connect/act/interact/
+  brain 全 running）；rrd 装配单切 `pi4b-host-esp32-classic.toml`（drop-in
+  `rrd.service.d/profile.conf`），配套 `hardware/pi4b-host-esp32-classic/wiring.toml`
+  与 `contracts/platform/raspberry-pi-4.toml` 已归位。
+
+  ② 板侧配网面（ADR-0021 裁定 1 独立形态要求；用户口径"WiFi 会换，机器人要能
+  自己配网"）：APSTA 常开 SoftAP `RR3-BOARD`（WPA2，口令 rock3robot）＋ `GET /`
+  手机配网页＋`POST /api/board/wifi` 事务写口（读旧→写 NVS→重连→有界等 DHCP
+  →败回退旧值）＋`POST /api/board/reboot`。**真板验收（本日，固件 b15b496）**：
+  - 无凭据 boot → `凭据源=ap-only`，AP 广播（Pi `nmcli` 扫到 RR3-BOARD，ch1，
+    信号 87）；
+  - Mac 连 AP（192.168.4.2）→ `GET /`、`GET /api/board/state`、
+    `GET /api/board/bindings` 全 **200**；
+  - `POST /api/board/wifi`（真实家用凭据）→ 应答
+    `{"ok":true,"connected":true,"reverted":false,"stage":"apply"}`；UART0 实录
+    `wifi:connected with ziroom602` ＋ `sta ip: 192.168.124.10`；AP 同时仍广播
+    （ch6，信号 97）；
+  - 经 `POST /api/board/reboot` 重启后 boot 横幅 `凭据源=nvs`，STA 自动重连同
+    IP，局域网 `GET /api/board/state` 200——NVS 持久化闭环成立。
+  - 现网状态：板 STA 在 `ziroom602`，IP `192.168.124.10`；SoftAP 192.168.4.1
+    常开（换网时手机连它重配即可）。
+
+  ③ 取证方法订正（当日最贵的假象）：Mac 侧旧脚本只拉低 DTR/RTS、从不释放 EN，
+  **从未复位板子**，故"读不到 UART0／AP 未广播"是取证假象。正确序列：DTR 高
+  （IO0 正常启动）＋ RTS 先低（EN 复位）后高（释放）。UART0 可达后一次 boot 即以
+  `wifi:mode : sta + softAP` 与 `DHCP server ... 192.168.4.1` 证伪"AP 未起"。
+  另：`nmcli dev wifi connect` 依赖扫描缓存，缓存过期时报 "No network with SSID
+  found"（与 AP 广播无关）；脚本须先 `nmcli dev wifi rescan` 并等列表出现。
+
+  ④ 事故与禁令：用 Pi 的 wlan0 切到板子 AP 做端到端测试，期间 **Pi 卡死约
+  1h45m 后自行重启**（/tmp 日志被 systemd 清空、journal 无持久化、根因未定；
+  与 brcmfmac 切网强相关嫌疑）。**结论：Pi 的 wlan0 是生产链路（ssh + 栈观测），
+  禁止再把生产机 WiFi 切去测试面**；板侧配网验收改由 Mac 客户端在 AP 上直打
+  （可恢复——Mac 会自动回连首选网，实测两次均回 `ziroom602_5G`）。
