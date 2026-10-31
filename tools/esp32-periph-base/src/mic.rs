@@ -46,7 +46,7 @@ use crate::board::{
     AUDIO_CHUNK_FRAMES, AUDIO_Q_CAP, MIC_GAIN, MIC_SR_HZ, RR3_AUDIO_TOPIC, RR3_BIND_I2S_BCLK,
     RR3_BIND_I2S_SD, RR3_BIND_I2S_WS, RR3_HOST_TASK, RR3_PERIPH_TASK,
 };
-use crate::capture::{chunk_to_pcm, frame32_to_pair, push_bounded};
+use crate::capture::{chunk_to_pcm, frame32_to_pair, push_bounded, Rr3DcBlocker};
 use crate::link::rr3_frame_now_ns;
 use crate::state::{lock_bus, Bus};
 
@@ -70,12 +70,12 @@ const MIC_DUMP_READS: u32 = 200;
 /// ——rr3_publish 的 `body["topic"]` 同形）→ Event payload → 帧头（SEND /
 /// trace_id=0 direct / src=板上 task 2 / dst=宿主 1）→ 整帧字节。
 /// 帧构造失败回 None（调用方跳过不 panic 不冒领）。
-fn audio_chunk_to_frame(chunk: &[i32], seq: u32) -> Option<Vec<u8>> {
+fn audio_chunk_to_frame(chunk: &[i32], seq: u32, dc: &mut Rr3DcBlocker) -> Option<Vec<u8>> {
     let frames = chunk.len() / 2;
     if frames == 0 {
         return None;
     }
-    let pcm = chunk_to_pcm(chunk, MIC_GAIN);
+    let pcm = chunk_to_pcm(chunk, MIC_GAIN, dc);
     let body = json!({
         "topic": RR3_AUDIO_TOPIC,
         "seq": seq,
@@ -155,6 +155,9 @@ pub fn spawn_mic_smoke(
             let mut build_n = 0u32;
             // 批D③ 分片累积（交错 L,R 原始 24bit；堆上，16KB——栈 16KB 只放 buf 4KB）
             let mut chunk: Vec<i32> = Vec::with_capacity(AUDIO_CHUNK_FRAMES * 2);
+            // 跨分片连续的 DC 阻断器（2026-10-31 S3 订正：逐片减均值会在 128ms
+            // 边界造台阶，频谱 31/47/62/78Hz 拉链噪声压过语音——见 capture/mech.rs）
+            let mut dc = Rr3DcBlocker::new();
             loop {
                 match rx.read(&mut buf, MIC_I2C_TIMEOUT) {
                     Ok(n) if n >= 8 => {
@@ -182,6 +185,7 @@ pub fn spawn_mic_smoke(
                         let audio_on = lock_bus(&bus).st.audio_on;
                         if !audio_on {
                             chunk.clear();
+                            dc.reset();
                         }
                         let nframes = n / 8;
                         frames += nframes as u64;
@@ -211,7 +215,7 @@ pub fn spawn_mic_smoke(
                                         s
                                     };
                                     let t_build = Instant::now();
-                                    let frame = audio_chunk_to_frame(&chunk, seq);
+                                    let frame = audio_chunk_to_frame(&chunk, seq, &mut dc);
                                     build_us += t_build.elapsed().as_micros() as u64;
                                     build_n += 1;
                                     if let Some(bytes) = frame {
