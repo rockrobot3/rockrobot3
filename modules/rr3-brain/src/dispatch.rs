@@ -152,6 +152,33 @@ fn rr3_wake_norm(s: &str) -> String {
         .collect()
 }
 
+/// 编辑距离（字符级 Levenshtein）：唤醒词容错判据用（2026-10-31 实机：
+/// ASR 把 "你好洛克" 识别成 "你好洛师"，一字之差把精确前缀匹配挡在门外）。
+fn rr3_wake_edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur.push((prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// 唤醒短语的前缀容错阈值（2026-10-31）：短语 ≤4 字容 1 字（ASR 同音/近音误识），
+/// 更长短语容 2 字。过松会把 "你好老师"（距离 2）之类日常短语误唤醒，故不全局放宽。
+fn rr3_wake_max_edits(phrase_chars: usize) -> usize {
+    if phrase_chars >= 6 {
+        2
+    } else {
+        1
+    }
+}
+
 /// 唤醒判决（纯函数，单测钉域）。`enable=false` 恒 `FollowUp`（全放行，既有
 /// 行为逐点等价）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,18 +203,49 @@ pub(crate) fn rr3_wake_decide(
         return Rr3WakeAction::FollowUp;
     }
     let norm = rr3_wake_norm(text);
+    let norm_chars: Vec<char> = norm.chars().collect();
     for phrase in &cfg.phrases {
         let pn = rr3_wake_norm(phrase);
-        if pn.is_empty() {
+        let pn_chars: Vec<char> = pn.chars().collect();
+        if pn_chars.is_empty() {
             continue;
         }
-        if let Some(rest) = norm.strip_prefix(&pn) {
+        // ASR 吞词尾（实机"你好洛克"→"你好，洛。"）：文本比短语短 1 字仍按
+        // 前缀容错认（短 2 字以上不认——"你好"这类日常问候不误唤醒）。
+        if norm_chars.len() < pn_chars.len() {
+            if norm_chars.len() + 1 < pn_chars.len() {
+                continue;
+            }
+            let prefix: String = norm_chars.iter().collect();
+            let phrase_prefix: String = pn_chars[..norm_chars.len()].iter().collect();
+            if rr3_wake_edit_distance(&prefix, &phrase_prefix)
+                <= rr3_wake_max_edits(pn_chars.len())
+            {
+                return Rr3WakeAction::Ack;
+            }
+            continue;
+        }
+        let prefix: String = norm_chars[..pn_chars.len()].iter().collect();
+        if rr3_wake_edit_distance(&prefix, &pn) <= rr3_wake_max_edits(pn_chars.len()) {
+            let rest: String = norm_chars[pn_chars.len()..].iter().collect();
             let rest = rest.trim();
             if rest.is_empty() {
                 return Rr3WakeAction::Ack;
             }
             return Rr3WakeAction::Command(rest.to_string());
         }
+    }
+    // 2026-10-31 用户裁定（云端 ASR 对"洛克"不稳定，同一句每次识成骆天/洛天/
+    // 要是/老师/洛哥/洛师）：短语表之后**兜底接受"你好"开头即唤醒**——"你好"
+    // 后 ≤2 字视为名字或误识尾巴 → Ack；更长 → 当命令（去"你好"前缀）进 LLM。
+    // 放在短语表之后：已知短语能精确剥掉前缀（如"你好洛师，今天天气"→命令只留
+    // "今天天气"），兜底只处理短语表没覆盖的变体。
+    if let Some(rest) = norm.strip_prefix("你好") {
+        let rest = rest.trim();
+        if rest.chars().count() <= 2 {
+            return Rr3WakeAction::Ack;
+        }
+        return Rr3WakeAction::Command(rest.to_string());
     }
     match last_wake_ms {
         Some(last) if cfg.followup_ms > 0 && now_ms.saturating_sub(last) <= cfg.followup_ms => {
@@ -389,6 +447,16 @@ impl Rr3BrainDispatcher {
         }
         self.trace_seq += 1;
         let trace = self.trace_seq;
+        // 诊断面（2026-10-31，env 门控，默认关）：把本轮**送 ASR 的 utterance**
+        // 落盘成裸 PCM（s16le 16k mono，字节数/32 = 毫秒）——唤醒词被截断/"只识别
+        // 到你好"类问题，音频证据比转写文本可靠。空值/未设 = 零落盘。
+        if let Ok(dir) = std::env::var("RR3_BRAIN_DUMP_UTT") {
+            let dir = dir.trim();
+            if !dir.is_empty() {
+                let _ = std::fs::create_dir_all(dir);
+                let _ = std::fs::write(format!("{dir}/utt-{trace}.pcm"), &pcm);
+            }
+        }
 
         let user_text = match self
             .clients
@@ -416,7 +484,10 @@ impl Rr3BrainDispatcher {
         let mut reply_text = String::new();
         match rr3_wake_decide(&user_text, &self.cfg.wake, now, self.last_wake_ms) {
             Rr3WakeAction::Ignore => {
-                eprintln!("轮次 {trace}: 未命中唤醒词（窗外），静默");
+                // 带 ASR 原文：唤醒不中时唯一可判读面（识别变体/前置语气词/误识别）
+                eprintln!(
+                    "轮次 {trace}: 未命中唤醒词（窗外），静默（ASR='{user_text}'）"
+                );
                 return Ok(());
             }
             Rr3WakeAction::Ack => {
@@ -1159,6 +1230,45 @@ mod tests {
             rr3_wake_decide("你好，洛克！", &cfg, 0, None),
             Rr3WakeAction::Ack,
             "ASR 标点归一后仍命中"
+        );
+        // 2026-10-31 实机实录变体："你好洛克" 被识别成 "你好洛师"（一字之差）
+        assert_eq!(
+            rr3_wake_decide("你好洛师。", &cfg, 0, None),
+            Rr3WakeAction::Ack,
+            "一字误识容错命中"
+        );
+        // 2026-10-31 实机实录变体二：整段太长时 ASR 把词尾吞掉（"你好，洛。"）
+        assert_eq!(
+            rr3_wake_decide("你好，洛。", &cfg, 0, None),
+            Rr3WakeAction::Ack,
+            "短一字（吞词尾）仍命中"
+        );
+        // 2026-10-31 用户裁定：ASR 变体不可控 → "你好"开头即唤醒（含裸"你好"）
+        for t in [
+            "你好骆天。", "你好洛天。", "你好要是。", "你好老师。", "你好洛哥。", "你好",
+        ] {
+            assert_eq!(
+                rr3_wake_decide(t, &cfg, 0, None),
+                Rr3WakeAction::Ack,
+                "你好开头应唤醒: {t}"
+            );
+        }
+        assert_eq!(
+            rr3_wake_decide("你好，今天天气怎么样？", &cfg, 0, None),
+            Rr3WakeAction::Command("今天天气怎么样".to_string()),
+            "你好 + 长文本 → 命令"
+        );
+        assert_eq!(
+            rr3_wake_decide("你好洛师，今天天气怎么样？", &cfg, 0, None),
+            Rr3WakeAction::Command("今天天气怎么样".to_string()),
+            "误识 + 命令仍能区分出命令"
+        );
+        // 2026-10-31 用户裁定后，"你好老师"不再是被拒样本——"你好"开头即唤醒；
+        // 保留此断言以钉死旧"距离 2 拒绝"语义已随裁定退役。
+        assert_eq!(
+            rr3_wake_decide("你好老师", &cfg, 0, None),
+            Rr3WakeAction::Ack,
+            "你好开头即唤醒（旧距离 2 拒绝语义已退役）"
         );
         assert_eq!(
             rr3_wake_decide("你好洛克，今天天气怎么样？", &cfg, 0, None),

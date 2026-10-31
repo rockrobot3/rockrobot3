@@ -2089,3 +2089,37 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
     下一次出包自动携带。
   - 遗留：真实瞬时 500 的现场复验未做（需自然复现或临时改 base_url 造障）；
     本轮以单测 + 部署健康为准。
+
+**U 轮续6：唤醒词闭环与音频通路深挖（2026-10-31 深夜）**：
+  ① 回放面换 USB 声卡：C-Media "Device"（`lsusb` 0d8c:0012）接入 Pi 4
+  USB3.0，`aplay -l` 见 card `Device`；profile
+  `[hardware].alsa_device = "plughw:CARD=Device"`（voiceHAT 仅留历史采集档）。
+  USB PCM 硬件音量 38%→100%（`amixer -c 3 sset PCM 100%` + `alsactl store`）；
+  interact 实测占用 `/dev/snd/pcmC3D0p`，2s 长音与滴声用户可闻——回放面通。
+
+  ② **双麦平均下混是 ASR 质量的真凶（实机取证）**：150mm 间距双麦原始 L/R
+  零延迟相关仅 +0.21（按最佳时差对齐后仍只 +0.43），平均下混 RMS 比单通道低
+  2–3dB 且带梳状滤波——同一句"你好洛克"，下混送 ASR 得"你好，外天。"，
+  单通道得"你好，洛哥。"。修法：`rr3_pcm_best_channel`（每 20ms 帧选能量最高
+  通道，不平均）替换 `rr3_pcm_downmix_mono`；DoA 仍吃原始双通道（TDOA 不变）。
+  单测 37 全绿（含选道/单声道原样/并列取首/空输入）。
+
+  ③ 唤醒词策略（**用户当日裁定**）：云端 ASR 对生僻名"洛克"不稳定——同句实测
+  识成 骆天/洛天/要是/老师/洛哥/洛师/骆师；`prompt` 热词参数被服务端忽略，
+  增益 1/2/4/8、`language=zh`、150Hz 高通均无稳定改善。故放宽为**"你好"开头
+  即唤醒**：短语表（你好洛克/你好老师）先精确剥前缀；"你好"后 ≤2 字回 ack、
+  更长当命令进 LLM；非"你好"前缀短语仍走短语表与一字符错/吞词尾。代价：任何
+  "你好…"都会唤醒（用户已接受）。
+
+  ④ VAD 参数落定：起音阈 **700**、判停尾 **700ms**、DoA 窗能量门 **700**。
+  （1200ms 判停会让环境噪声尖峰反复续窗，utterance 涨到 6.5–8.4s，整段送
+  ASR 反而返回空；700ms 片段只含语音段 ~2s。）
+
+  ⑤ 验证（用户实机）：`对话轮完成: trace=1 user='你好，骆师。'
+  reply='我在呢，有什么可以帮您？' tts_pcm_ms=2917 played_ms=2917`；
+  interact `tts: 12 字符播了 2917ms（PCM 93358 字节）`，USB 声卡出声；
+  听声转头已恢复（`reflex enable=true`，五模块 running）。
+
+  ⑥ 诊断件：`RR3_BRAIN_DUMP_UTT`（env 门控，落盘送 ASR 的 utterance PCM，
+  默认关；本次取证后已移除 drop-in）。遗留：ASR 空文本轮/non-determinism 仍可
+  优化；若要恢复严格"你好洛克"唯一性，需上端侧 KWS（下一批，不在本轮）。

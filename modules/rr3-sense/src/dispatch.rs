@@ -342,11 +342,12 @@ impl Dispatcher for Rr3SenseDispatcher {
     }
 }
 
-/// 流级下混（R14）：`cfg.channels` 归 1、rate/bit_depth 不动、samples 收缩；
-/// `channels <= 1` 时原样返回（零改动，默认单麦链路逐点等价）。自 capture/mech.rs
-/// 迁入（0.0.5 批I 深挖收口：`Rr3PcmStream` 是承载层数据类型，件面只留纯切片
-/// 机制——C7 白名单外件面不得引用 rr_hal 具体类型）；纯切片下混
-/// [`capture::rr3_pcm_downmix_mono`] 仍在件内。
+/// 流级单声道化（R14 + 2026-10-31 实机订正）：`cfg.channels` 归 1、rate/bit_depth
+/// 不动、samples 收缩为**能量最高通道**（不平均——双麦平均下混实测梳状滤波，
+/// ASR 质量显著劣于单通道）；`channels <= 1` 时原样返回（零改动）。自 capture/
+/// mech.rs 迁入（0.0.5 批I 深挖收口：`Rr3PcmStream` 是承载层数据类型，件面只留
+/// 纯切片机制——C7 白名单外件面不得引用 rr_hal 具体类型）；纯切片选道
+/// [`capture::rr3_pcm_best_channel`] 仍在件内。
 fn rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream {
     if pcm.cfg.channels <= 1 {
         return pcm;
@@ -356,7 +357,7 @@ fn rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream {
             channels: 1,
             ..pcm.cfg
         },
-        samples: capture::rr3_pcm_downmix_mono(&pcm.samples, pcm.cfg.channels),
+        samples: capture::rr3_pcm_best_channel(&pcm.samples, pcm.cfg.channels),
     }
 }
 
@@ -525,7 +526,8 @@ mod tests {
         let mono = rr3_pcm_downmix_stream(stereo);
         assert_eq!(mono.cfg.channels, 1);
         assert_eq!(mono.cfg.sample_rate_hz, 16000);
-        assert_eq!(mono.samples, vec![200, -300]);
+        // 2026-10-31：单声道化取能量更高通道（ch0 = 100²+400² > ch1 = 300²+200²）
+        assert_eq!(mono.samples, vec![100, -400]);
         let one = Rr3PcmStream {
             cfg: Rr3AudioCfg {
                 sample_rate_hz: 16000,

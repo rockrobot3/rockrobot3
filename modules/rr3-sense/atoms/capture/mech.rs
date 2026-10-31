@@ -21,23 +21,39 @@ pub fn rr3_frames_per_tick(sample_rate_hz: u32, frame_ms: u64) -> usize {
 
 // ---------- 多通道下混（R14） ----------
 
-/// 多通道 PCM 下混单声道：按帧对各声道取算术平均（i32 累加后整除，不引入饱和偏差），
-/// 输出采样点数 = 帧数。`channels <= 1` 时原样克隆（单麦链路零改动）；尾部不足一帧的
-/// 余数丢弃（采集侧 samples = 帧×声道，恒整除）。
-/// 0.0.5 批I S-6：无件外读者（stream 级下混在组合件承载层，经纯切片本函数完成），
+/// 多通道 PCM → 单声道：**选能量最高的通道**（不取平均）。2026-10-31 实机取证：
+/// 双麦 150mm 间距，原始 L/R 零延迟相关仅 +0.2（按最佳时差对齐后仍只 +0.43），
+/// 平均下混 RMS 比单声道低 2–3dB 且带梳状滤波——同一句"你好洛克"，下混送 ASR
+/// 得"你好，外天。"，单取能量高的通道得"你好，洛哥。"（可被一字容错唤醒匹配）。
+/// DoA 仍吃原始双通道（TDOA 不变），本函数只决定总线 mono 送哪一路。
+/// `channels <= 1` 时原样克隆（单麦链路零改动）；尾部不足一帧的余数丢弃
+/// （采集侧 samples = 帧×声道，恒整除）。
+/// 0.0.5 批I S-6：无件外读者（stream 级选道在组合件承载层，经纯切片本函数完成），
 /// pub(crate) 不进契约面。
-pub(crate) fn rr3_pcm_downmix_mono(samples: &[i16], channels: u8) -> Vec<i16> {
+pub(crate) fn rr3_pcm_best_channel(samples: &[i16], channels: u8) -> Vec<i16> {
     if channels <= 1 {
         return samples.to_vec();
     }
     let ch = channels as usize;
-    samples
-        .chunks_exact(ch)
-        .map(|frame| {
-            let sum: i32 = frame.iter().map(|&s| s as i32).sum();
-            (sum / ch as i32) as i16
-        })
-        .collect()
+    let frames = samples.len() / ch;
+    if frames == 0 {
+        return Vec::new();
+    }
+    // 整数能量比较（sum_sq 足够，免开方）；并列取最小通道号（确定性）
+    let mut sums = vec![0i64; ch];
+    for i in 0..frames {
+        for (c, sum) in sums.iter_mut().enumerate() {
+            let v = samples[i * ch + c] as i64;
+            *sum += v * v;
+        }
+    }
+    let mut best = 0usize;
+    for c in 1..ch {
+        if sums[c] > sums[best] {
+            best = c;
+        }
+    }
+    (0..frames).map(|i| samples[i * ch + best]).collect()
 }
 
 // ---------- DoA 粗判向（B批 b3b：TDOA 时域互相关；批F2 ILD 版被 b3a 实证替换） ----------
@@ -248,22 +264,32 @@ mod tests {
         );
     }
 
-    /// 多通道下混（R14）：逐帧平均、单声道原样、多声道点数收缩。
+    /// 多通道单声道化（2026-10-31 实机订正）：选能量最高通道（不平均）、
+    /// 单声道原样、点数收缩、并列取首通道、空输入安全。
     #[test]
-    fn downmix_mono_averages_channels_per_frame() {
+    fn best_channel_picks_louder_and_mono_passthrough() {
         // 单声道原样（含负值），零改动
-        assert_eq!(rr3_pcm_downmix_mono(&[1, -2, 3], 1), vec![1, -2, 3]);
-        assert_eq!(rr3_pcm_downmix_mono(&[1, -2, 3], 0), vec![1, -2, 3]);
-        // 双声道：3 帧 × 2 → 3 点；[32767,-32768] 求和 -1、整除得 0（i32 累加不溢出）
+        assert_eq!(rr3_pcm_best_channel(&[1, -2, 3], 1), vec![1, -2, 3]);
+        assert_eq!(rr3_pcm_best_channel(&[1, -2, 3], 0), vec![1, -2, 3]);
+        // 双声道：通道 0 能量更高 → 取通道 0
         assert_eq!(
-            rr3_pcm_downmix_mono(&[100, 200, -300, -100, 32767, -32768], 2),
-            vec![150, -200, 0]
+            rr3_pcm_best_channel(&[1000, 100, 2000, 200, -500, -50], 2),
+            vec![1000, 2000, -500]
         );
-        // 四声道：2 帧 × 4 → 2 点
+        // 通道 1 能量更高 → 取通道 1
         assert_eq!(
-            rr3_pcm_downmix_mono(&[0, 0, 0, 4, 8, 8, 8, 8], 4),
-            vec![1, 8]
+            rr3_pcm_best_channel(&[100, 900, 50, 1500, -30, 700], 2),
+            vec![900, 1500, 700]
         );
+        // 并列（全 0）→ 取首通道（确定性）
+        assert_eq!(rr3_pcm_best_channel(&[0, 0, 0, 0], 2), vec![0, 0]);
+        // 四声道：2 帧 × 4 → 2 点；通道 3 能量最高（16+64）
+        assert_eq!(
+            rr3_pcm_best_channel(&[0, 0, 0, 4, 8, 8, 8, 8], 4),
+            vec![4, 8]
+        );
+        // 空输入安全
+        assert!(rr3_pcm_best_channel(&[], 2).is_empty());
     }
 
     // ---------- TDOA 判向用例（B批 b3b，golden 镜像 /tmp/rr3-b3-smoke/golden_doa.py） ----------
@@ -399,7 +425,7 @@ mod tests {
                 .collect();
             let mixed: Vec<i16> = seq
                 .iter()
-                .flat_map(|s| rr3_pcm_downmix_mono(s, 2))
+                .flat_map(|s| rr3_pcm_best_channel(s, 2))
                 .collect();
             let fixes: Vec<Option<Rr3DoaFix>> =
                 seq.iter().map(|s| rr3_doa_fix(s, 2, &cfg)).collect();
@@ -419,8 +445,8 @@ mod tests {
         // 零值：0ms 节拍与 0Hz 采样都换算出 0 帧（调用方不得拿 0 帧当 buf 死循环）
         assert_eq!(rr3_frames_per_tick(16000, 0), 0, "(16000, 0) → 0 帧");
         assert_eq!(rr3_frames_per_tick(0, 20), 0, "(0, 20) → 0 帧");
-        // 零样本下混/判向安全返回（空进空出，不 panic 不产帧）
-        assert!(rr3_pcm_downmix_mono(&[], 2).is_empty());
+        // 零样本单声道化/判向安全返回（空进空出，不 panic 不产帧）
+        assert!(rr3_pcm_best_channel(&[], 2).is_empty());
         assert_eq!(rr3_doa_fix(&[], 2, &doa_cfg()), None, "空窗无方向可判");
     }
 }
