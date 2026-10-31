@@ -6,8 +6,8 @@
 //! 断言是格主面法则，见批N23 计划册 §2「三不三立」）。
 //!
 //! **机制与策略分离**（文件级，收编落点）：本文件收拢音频采集上行面的**纯算术**
-//! ——32bit 帧解析（大端线序 → 24bit 符号幅度）、增益饱和钳位、分片变换（逐片
-//! DC 抑制 → 24bit 截 16bit → s16le 双通道交错）与有界背压入队（满丢最旧）；
+//! ——32bit 帧解析（大端线序 → 24bit 符号幅度）、增益饱和钳位、分片变换（跨片
+//! DC 阻断 → 24bit 截 16bit → s16le 双通道交错）与有界背压入队（满丢最旧）；
 //! 零 I2S、零时钟、零锁。策略量（增益标定值 [`crate::board::MIC_GAIN`]、采样率
 //! [`crate::board::MIC_SR_HZ`]、分片帧数/队列深度 `AUDIO_*`）由调用方**按参
 //! 传入**；I2S 采集线程与 Event 帧组帧（b64+JSON+帧头，依赖时钟与 topics 生成
@@ -37,26 +37,62 @@ pub(crate) fn gain_i16(v: i64, gain: i64) -> i16 {
     }
 }
 
-/// 一分片 → s16le PCM 字节流（**纯变换**）：逐通道减**本分片** DC（INMP441 近零
-/// 偏置，分片内均值即干净基线，无跨片状态）→ 24bit 截 16bit（>>8 保高位满幅）→
-/// 增益钳位 → s16le 双通道交错。零 I2S/零时钟/零锁（返回值即产物；b64+JSON 组帧
+/// 跨分片连续的 DC 阻断器（一阶 IIR 高通，逐通道独立状态）。
+///
+/// 为什么不再"逐分片减均值"（2026-10-31 S3 实机订正）：128ms 分片各自减均值，
+/// 分片边界处基线一跳一个台阶，频谱在 7.8Hz 的偶次谐波（31/47/62/78Hz）上堆出
+/// 远高于语音的"拉链噪声"——总线 mono RMS 被抬到 450–600，VAD 700 阈值永不触发，
+/// ASR 也只剩噪声。连续状态的一阶高通没有分片边界，DC 照去，台阶消失。
+/// 系数 α=0.995 @16k ≈ 12.7Hz 截止：只压直流与亚语音低频，不动 80Hz 以上语音基频。
+/// 首帧按 x 置位（y=0），避免开机瞬间一个大直流跳变进缓冲。
+#[derive(Debug)]
+pub(crate) struct Rr3DcBlocker {
+    px: [f32; 2],
+    py: [f32; 2],
+    primed: [bool; 2],
+}
+
+impl Rr3DcBlocker {
+    pub(crate) fn new() -> Self {
+        Self {
+            px: [0.0; 2],
+            py: [0.0; 2],
+            primed: [false; 2],
+        }
+    }
+
+    /// 清状态（音频关断时调用：再开时按首帧重新起算，不把旧的 py 带进新会话）
+    pub(crate) fn reset(&mut self) {
+        self.px = [0.0; 2];
+        self.py = [0.0; 2];
+        self.primed = [false; 2];
+    }
+
+    fn step(&mut self, ch: usize, x: f32) -> f32 {
+        const ALPHA: f32 = 0.995;
+        if !self.primed[ch] {
+            self.px[ch] = x;
+            self.py[ch] = 0.0;
+            self.primed[ch] = true;
+            return 0.0;
+        }
+        let y = x - self.px[ch] + ALPHA * self.py[ch];
+        self.px[ch] = x;
+        self.py[ch] = y;
+        y
+    }
+}
+
+/// 一分片 → s16le PCM 字节流（**纯变换 + 跨片 DC 状态**）：逐通道过
+/// [`Rr3DcBlocker`]（DC 照去，无分片边界台阶）→ 24bit 截 16bit（>>8 保高位满幅）
+/// → 增益钳位 → s16le 双通道交错。零 I2S/零时钟/零锁（返回值即产物；b64+JSON 组帧
 /// 面在 mic.rs）。空分片与残半帧（奇数采样）回空——组帧面 frames==0 拒收同口径。
-pub(crate) fn chunk_to_pcm(chunk: &[i32], gain: i64) -> Vec<u8> {
+pub(crate) fn chunk_to_pcm(chunk: &[i32], gain: i64, dc: &mut Rr3DcBlocker) -> Vec<u8> {
     let frames = chunk.len() / 2;
-    let mut l_dc = 0i64;
-    let mut r_dc = 0i64;
-    for f in 0..frames {
-        l_dc += chunk[f * 2] as i64;
-        r_dc += chunk[f * 2 + 1] as i64;
-    }
-    if frames > 0 {
-        l_dc /= frames as i64;
-        r_dc /= frames as i64;
-    }
     let mut pcm = Vec::with_capacity(frames * 4);
     for f in 0..frames {
-        let l = gain_i16((chunk[f * 2] as i64 - l_dc) >> 8, gain);
-        let r = gain_i16((chunk[f * 2 + 1] as i64 - r_dc) >> 8, gain);
+        let l = gain_i16((dc.step(0, chunk[f * 2] as f32) as i64) >> 8, gain);
+        let r = gain_i16((dc.step(1, chunk[f * 2 + 1] as f32) as i64) >> 8, gain);
         pcm.extend_from_slice(&l.to_le_bytes());
         pcm.extend_from_slice(&r.to_le_bytes());
     }
@@ -99,27 +135,72 @@ mod tests {
     }
 
     #[test]
-    fn chunk_to_pcm_strips_dc_and_interleaves_s16le() {
-        // 2 帧：L=[256, 512] R=[128, 384] → L_dc=384、R_dc=256
-        // 差值 >>8：L=(-128>>8, 128>>8)=(-1, 0)；R=(-1, 0)
-        let chunk = [256i32, 128, 512, 384];
-        // gain=1：[-1, -1, 0, 0] 的 s16le 交错字节流
+    fn chunk_to_pcm_interleaves_s16le_in_pairs() {
+        // 首帧只做状态置位（y=0）；随后 x 恒定 → y 恒 0，输出全 0（DC 被阻断）
+        let chunk = [1_000_000i32; 8];
+        let mut dc = Rr3DcBlocker::new();
         assert_eq!(
-            chunk_to_pcm(&chunk, 1),
-            vec![0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00]
+            chunk_to_pcm(&chunk, 1, &mut dc),
+            vec![0u8; 16],
+            "恒定直流 + 首帧置位 → 16bit 域全零"
         );
-        // gain=8：-1×8=-8 → 0xFFF8；0×8=0
-        assert_eq!(
-            chunk_to_pcm(&chunk, 8),
-            vec![0xF8, 0xFF, 0xF8, 0xFF, 0x00, 0x00, 0x00, 0x00]
-        );
+    }
+
+    /// 关键回归：恒定直流跨 128ms 分片边界不得出现台阶（旧"逐片减均值"首片
+    /// 与次片都会归零、但片间基线跳变会造出 31/47/62/78Hz 拉链噪声；连续
+    /// 阻断器的第二片必须同样收敛到 0）。
+    #[test]
+    fn dc_blocker_is_continuous_across_chunk_boundaries() {
+        let mut dc = Rr3DcBlocker::new();
+        let chunk = [1_000_000i32; 4000]; // 2000 帧 ×2ch = 两片 1000 帧
+        let a = chunk_to_pcm(&chunk[..2000], 1, &mut dc);
+        let b = chunk_to_pcm(&chunk[2000..], 1, &mut dc);
+        for pair in b.chunks(2) {
+            let l = i16::from_le_bytes([pair[0], pair[1]]);
+            let r = i16::from_le_bytes([pair[2], pair[3]]);
+            assert!(
+                l.abs() <= 2 && r.abs() <= 2,
+                "跨片后的恒定直流必须已收敛，实际 {l}/{r}"
+            );
+        }
+        assert!(!a.is_empty(), "首片仍是有效帧（首帧置位、其余归零）");
+    }
+
+    /// 分片切法不改变结果：同一序列一次喂与分两次喂输出逐字节相同（状态跨片）
+    #[test]
+    fn dc_blocker_chunking_does_not_change_output() {
+        let samples: Vec<i32> = (0..4000).map(|i| 500_000 + (i % 32) * 1000).collect();
+        let mut whole = Rr3DcBlocker::new();
+        let a = chunk_to_pcm(&samples, 1, &mut whole);
+        let mut split = Rr3DcBlocker::new();
+        let b1 = chunk_to_pcm(&samples[..2000], 1, &mut split);
+        let b2 = chunk_to_pcm(&samples[2000..], 1, &mut split);
+        assert_eq!(a, [b1, b2].concat(), "分片边界不得改变输出");
+    }
+
+    /// 空分片不推进状态；reset 回到首帧置位语义
+    #[test]
+    fn dc_blocker_empty_and_reset_keep_state_discipline() {
+        let samples: Vec<i32> = (0..800).map(|i| i as i32 * 7 - 3000).collect();
+        let mut dc = Rr3DcBlocker::new();
+        let first = chunk_to_pcm(&samples[..400], 1, &mut dc);
+        assert!(chunk_to_pcm(&[], 1, &mut dc).is_empty());
+        let second = chunk_to_pcm(&samples[400..], 1, &mut dc);
+        let mut fresh = Rr3DcBlocker::new();
+        let all = chunk_to_pcm(&samples, 1, &mut fresh);
+        assert_eq!([first, second].concat(), all, "空片不得推进状态");
+        dc.reset();
+        let mut after_reset = Rr3DcBlocker::new();
+        let again = chunk_to_pcm(&samples, 1, &mut dc);
+        assert_eq!(again, chunk_to_pcm(&samples, 1, &mut after_reset), "reset 等价于新阻断器");
     }
 
     #[test]
     fn chunk_to_pcm_empty_and_half_frame_are_empty() {
-        assert!(chunk_to_pcm(&[], 8).is_empty());
+        let mut dc = Rr3DcBlocker::new();
+        assert!(chunk_to_pcm(&[], 8, &mut dc).is_empty());
         // 残半帧（单采样）按整帧取（len/2=0）→ 空，与组帧面 frames==0 拒收同口径
-        assert!(chunk_to_pcm(&[42], 8).is_empty());
+        assert!(chunk_to_pcm(&[42], 8, &mut dc).is_empty());
     }
 
     #[test]

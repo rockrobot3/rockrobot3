@@ -1116,6 +1116,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "esp32-mini.toml".to_string(),
             "esp32s3-mini.toml".to_string(),
             "pi4b-host-esp32-classic.toml".to_string(),
+            "pi4b-host-esp32s3.toml".to_string(),
         ],
         "profiles/ 机型集合漂移（新增机型须同批改本 pin 与该机型的形状测试，C2 批K）"
     );
@@ -1887,7 +1888,7 @@ fn esp32s3_mini_profile_pins_s3_harness() {
 }
 
 /// Pi 4B 宿主 × classic 板（W2/T1）：`profiles/pi4b-host-esp32-classic.toml` 钉**差异面**
-/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十六格绑定 / 恰一条 [[pin]] = MAX7219）。
+/// （host 档 / chip / 宿主两键 + 板侧十一键同源 / 十一格绑定 / 恰一条 [[pin]] = MAX7219）。
 /// 完整形状由 default/distro 测试与 rrd 装载门共同覆盖；线束与档位漂移即红。
 #[test]
 fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
@@ -1959,15 +1960,15 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         );
     }
 
-    // 形态面：十六格绑定（与 distro 同构）+ 十六格在位。
+    // 形态面：十一格绑定 + 十一格在位（2026-10-31 实机取证收窄）。
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("pi4b-host-esp32-classic 缺 [bindings]");
     assert_eq!(
         bindings.len(),
-        16,
-        "pi4b-host-esp32-classic 绑定面应恰十六格"
+        11,
+        "pi4b-host-esp32-classic 绑定面应恰十一格"
     );
     for (slot, provider) in [
         ("act.servo", "rr3-act"),
@@ -1989,8 +1990,8 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         .expect("pi4b-host-esp32-classic 缺 [slots].present");
     assert_eq!(
         present.len(),
-        16,
-        "pi4b-host-esp32-classic 在位声明应恰十六格"
+        11,
+        "pi4b-host-esp32-classic 在位声明应恰十一格"
     );
 
     // [[pin]] 恰一条：Pi 本机唯一的本地外设 = MAX7219 点阵（ui.face.spi，spidev0/ch0，
@@ -2020,6 +2021,102 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         p0.get("channel").and_then(toml::Value::as_integer),
         Some(0),
         "pi4b-host-esp32-classic [[pin]] channel 漂移（CE0）"
+    );
+}
+
+/// Pi 4B 宿主 × ESP32-S3 N16R8 板（W2/T2）：`profiles/pi4b-host-esp32s3.toml` 钉
+/// **差异面**（板侧十一键为 S3 真值；宿主侧与 classic 档同源；十一格绑定/在位；
+/// 恰一条 [[pin]] = MAX7219）。与 classic 档的差异只允许发生在 [hardware] 板侧键。
+#[test]
+fn pi4b_host_esp32s3_profile_pins_t2_harness() {
+    let root = repo_root();
+    let text = std::fs::read_to_string(root.join("profiles/pi4b-host-esp32s3.toml"))
+        .expect("profiles/pi4b-host-esp32s3.toml 必须存在（W2/T2）");
+    let v: toml::Value = toml::from_str(&text).expect("pi4b-host-esp32s3.toml 必须可解析");
+
+    assert_eq!(
+        v.get("schema_version").and_then(toml::Value::as_integer),
+        Some(5),
+        "pi4b-host-esp32s3 schema_version 漂移"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some("host"),
+        "pi4b-host-esp32s3 档位漂移（T2 = Pi 宿主档）"
+    );
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("chip"))
+            .and_then(toml::Value::as_str),
+        Some("raspberry-pi-4"),
+        "pi4b-host-esp32s3 chip 漂移"
+    );
+    assert_eq!(
+        v.get("os")
+            .and_then(|o| o.get("route"))
+            .and_then(toml::Value::as_str),
+        Some("distro"),
+        "pi4b-host-esp32s3 route 漂移"
+    );
+
+    let hardware = v
+        .get("hardware")
+        .and_then(toml::Value::as_table)
+        .expect("pi4b-host-esp32s3 缺 [hardware] 段");
+    assert_eq!(
+        hardware.get("alsa_device").and_then(toml::Value::as_str),
+        Some("plughw:CARD=Device"),
+        "pi4b-host-esp32s3 alsa_device 漂移（Pi 真机 USB 声卡短名）"
+    );
+    assert_eq!(
+        hardware.get("link_ifname").and_then(toml::Value::as_str),
+        Some("wlan0"),
+        "pi4b-host-esp32s3 link_ifname 漂移"
+    );
+    // 板侧十一键：S3 N16R8 真值（与 profiles/esp32s3-mini.toml 逐值对齐）。
+    for (k, expected) in [
+        ("i2c_sda", "8"),
+        ("i2c_scl", "9"),
+        ("adc_rail_pin", "1"),
+        ("uart2_tx", "41"),
+        ("uart2_rx", "42"),
+        ("ledc_pan", "4"),
+        ("ledc_tilt", "5"),
+        ("i2s_bclk", "6"),
+        ("i2s_sd", "15"),
+        ("i2s_ws", "7"),
+        ("cred_store", "nvs:rr3"),
+    ] {
+        assert_eq!(
+            hardware.get(k).and_then(toml::Value::as_str),
+            Some(expected),
+            "pi4b-host-esp32s3 hardware.{k} 漂移（应与 S3 线束同源）"
+        );
+    }
+
+    let bindings = v
+        .get("bindings")
+        .and_then(toml::Value::as_table)
+        .expect("pi4b-host-esp32s3 缺 [bindings]");
+    assert_eq!(bindings.len(), 11, "pi4b-host-esp32s3 绑定面应恰十一格");
+    let present = v
+        .get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("pi4b-host-esp32s3 缺 [slots].present");
+    assert_eq!(present.len(), 11, "pi4b-host-esp32s3 在位声明应恰十一格");
+
+    let pins = v
+        .get("pin")
+        .and_then(toml::Value::as_array)
+        .expect("pi4b-host-esp32s3 应有恰一条 [[pin]]（ui.face.spi）");
+    assert_eq!(pins.len(), 1, "pi4b-host-esp32s3 [[pin]] 应恰一条");
+    assert_eq!(
+        pins[0].get("role").and_then(toml::Value::as_str),
+        Some("ui.face.spi"),
+        "pi4b-host-esp32s3 [[pin]] role 漂移"
     );
 }
 

@@ -1,0 +1,139 @@
+# RockRobot3 装配单：pi4b-host-esp32s3 机型（W2/T2：Pi 4B 当宿主 × ESP32-S3 N16R8 板）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
+# 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
+# 形态语义：Pi 跑完整 Linux 底座 + 五模块，ESP32-S3 板只做末梢（I2S 双麦 / LEDC 双轴 /
+# I2C OLED / UART2 桥链）。
+# 与 pi4b-host-esp32-classic 的**唯一差异是板侧线束**：S3 N16R8 的 GPIO26–37 被
+# 16MB Flash + 8MB Octal PSRAM 占用，classic 的 26/27/32/33/34 全部不可用；板侧
+# 十一键整体换 S3 真值（与 profiles/esp32s3-mini.toml 逐值对齐）：
+#   UART2 41/42、I2C0 8/9、LEDC 4/5、I2S0 6/15/7、ADC 1。
+# 宿主侧（[os]/[platform]/[supplies]/[bindings]/[[pin]]）与 classic 档同源同值——
+# Pi 本机硬件与线束未变；板侧真值只走 [hardware] 桥注入（非 [pins] 派生面）。
+# 真机接线（2026-10-31 实装）：Pi GPIO14(TX)→S3 42(RX)、Pi GPIO15(RX)→S3 41(TX)、
+# GND↔GND；S3 由自身 USB 供电。板侧 UART2 波特率 1.5M（两档同源常量）。
+# schema_version = 5（与 default/distro 同版：[runtime] 段必填，缺即红）。
+
+schema_version = 5
+
+[os]
+route = "distro" # Pi 4B 跑 Raspberry Pi OS（Debian 13 trixie 真机），属发行版快路轨
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
+log_ring_cap = 512
+
+[platform]
+# host 档（ADR-0018 修订 1）：完整 Linux 底座 + 五模块全跑在 Pi 上。
+tier = "host"
+# 平台事实表外键（§4.6）：contracts/platform/raspberry-pi-4.toml。
+chip = "raspberry-pi-4"
+
+[supplies]
+# 平台供给声明：与 default 同口径（看门狗三键 + 时序预算三位）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 3000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+# [supplies.budget]：host 档校验⑩不适用，"合法不适用"显式写 true（F-6）。
+[supplies.budget]
+not_applicable = true
+
+[bindings]
+# 格位 → 件（2026-10-31 实机取证收窄，与 classic 档同值）：只保留实机真正在位的格位。
+"act.servo" = "rr3-act"
+"net.wifi" = "rr3-connect"
+"net.bt" = "rr3-connect"
+"ui.face" = "rr3-interact"
+"audio.playback" = "rr3-interact"
+"audio.capture" = "rr3-sense"
+"audio.vad" = "rr3-sense"
+"cognition.dialog" = "rr3-brain"
+"cognition.asr" = "rr3-brain"
+"cognition.llm" = "rr3-brain"
+"cognition.tts" = "rr3-brain"
+
+[hardware]
+# 宿主两键（schema 3 非引脚键直给；Pi 本机硬件未变，与 classic 档同值）：
+# USB 声卡（C-Media "Device"）已接入 Pi 4 USB3.0，按 CARD 名指向（卡号随枚举变，名稳定）；
+# 网口 wlan0。
+alsa_device = "plughw:CARD=Device"
+link_ifname = "wlan0"
+
+# 板侧十一键：与 profiles/esp32s3-mini.toml 逐值对齐（S3 N16R8 同一线束）。
+# 消费语义 = 板侧装配对账锚（键位语义见 esp32s3-mini 头注，此处不重复）；非 [pins]
+# 派生面，故 host 档可直给且不触门 n。
+i2c_sda = "8"
+i2c_scl = "9"
+adc_rail_pin = "1"
+uart2_tx = "41"
+uart2_rx = "42"
+ledc_pan = "4"
+ledc_tilt = "5"
+i2s_bclk = "6"
+i2s_sd = "15"
+i2s_ws = "7"
+cred_store = "nvs:rr3"
+
+# Pi 本机唯一的本地外设绑定：MAX7219 双位级联点阵（链④真件档，2026-10-15 实测）。
+# 与 classic 档同格同值（Pi 侧硬件未变）。
+[[pin]]
+role = "ui.face.spi"
+controller = "spidev0"
+channel = 0
+direction = "out"
+mux_group = []
+
+[enabled_slots]
+# 启用的格位集合（与 [bindings]/[slots] present 三处一致；缺格 fail-closed 拒启整模块）。
+rr3-act = ["act.servo"]
+rr3-connect = ["net.wifi", "net.bt"]
+rr3-interact = ["ui.face", "audio.playback"]
+rr3-sense = ["audio.capture", "audio.vad"]
+rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[slots]
+# 本板物理在位格位声明（升序；与 classic 档同值）。
+present = [
+    "act.servo",
+    "audio.capture",
+    "audio.playback",
+    "audio.vad",
+    "cognition.asr",
+    "cognition.dialog",
+    "cognition.llm",
+    "cognition.tts",
+    "net.bt",
+    "net.wifi",
+    "ui.face",
+]
