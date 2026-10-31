@@ -780,7 +780,7 @@ pub(crate) fn rr3_board_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     let bus = Arc::clone(bus);
     // ① NVS init 前移（批N14 件一）：凭据读链前件，兼 WiFi 校准数据存储
     if unsafe { nvs_flash_init() } != ESP_OK {
-        eprintln!("[periph] 配置腿未装配（nvs_flash_init 失败）——N-13 服务面缺席，板其余功能照常");
+        println!("[periph] 配置腿未装配（nvs_flash_init 失败）——N-13 服务面缺席，板其余功能照常");
         return;
     }
     // ② 凭据读链：NVS 优先（读取窄缝 [`crate::cred::rr3_cred_read`]，读时现取）
@@ -804,7 +804,7 @@ pub(crate) fn rr3_board_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
                 // 也起 SoftAP（SSID 见 [`wifi_ap_configure`]），手机/笔记本可连上板
                 // 自己的面板完成配网（`POST /api/board/wifi`），配网成功即 STA 上线。
                 // 凭据来源如实点名 "ap-only"（boot 横幅可辨，永不冒领已配网）。
-                eprintln!(
+                println!(
                     "[periph] 无 WiFi 凭据（NVS 空且 RR3_BOARD_WIFI_SSID 未注入）→ 转 SoftAP 配网模式（AP-only，配置腿照常可达）"
                 );
                 (String::new(), String::new(), "ap-only")
@@ -815,7 +815,7 @@ pub(crate) fn rr3_board_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
     // ap-only 档无凭据可校，跳过（STA 侧不配置、不连接）。
     if !ssid.is_empty() {
         if let Err(e) = crate::cred::rr3_cred_form_check(&ssid, &pass) {
-            eprintln!(
+            println!(
                 "[periph] 配置腿装配失败（{e}：SSID {}B/密码 {}B）——缺席照常",
                 ssid.len(),
                 pass.len()
@@ -836,7 +836,7 @@ fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, 
         .stack_size(crate::board::THREAD_STACK)
         .spawn(move || unsafe {
             if let Err(e) = start_httpd(&bus, cred_source, &ssid, &pass) {
-                eprintln!("[periph] 配置腿启动失败（缺席照常）: {e:?}");
+                println!("[periph] 配置腿启动失败（缺席照常）: {e:?}");
             }
         })
         .expect("起配置腿线程失败");
