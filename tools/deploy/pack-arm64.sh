@@ -77,6 +77,9 @@ for m in act brain connect interact sense power; do
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/module.toml"
   test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-$m/config.toml"
 done
+# 板麦双通道档配置随包（2026-10-31，组合形态音频上行）：部署侧 RR3_SENSE_CONFIG
+# 指到该装机路径；缺件则 sense 退回单麦默认档（视频道=1，DoA 无从判向）。
+test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-sense/config-esp32.toml"
 file "$STAGE/usr/bin/rrd" | grep -q "ELF 64-bit.*ARM aarch64.*statically linked" # 真板产物体检
 
 echo "staging 树就绪: $STAGE"
