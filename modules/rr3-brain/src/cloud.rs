@@ -54,6 +54,13 @@ pub(crate) const RR3_SECRETS_FILE_ENV: &str = "RR3_SECRETS_FILE";
 pub(crate) const RR3_MOCK_TEXT_ENV: &str = "RR3_BRAIN_MOCK_ASR_TEXT";
 /// mock ASR 的固定识别文本
 pub(crate) const RR3_MOCK_TEXT: &str = "你好，今天天气怎么样";
+/// ASR 语言策略（2026-10-31 实机）：短中文唤醒词偶发被云端误判语种（曾返回
+/// 韩语 "안녕"），显式 `zh` 稳定中文识别；服务端若忽略该字段则无副作用。
+pub(crate) const RR3_ASR_LANGUAGE: &str = "zh";
+/// ASR 输入增益（2026-10-31 实机）：板麦语音 RMS 仅 ~1000/32767，云端 VAD 对
+/// 短句偶发判空/幻觉；×4 实测能稳定出文本（×1/×8 为空、×2/×4 出文本）。只作用
+/// 于送 ASR 的 PCM 副本，VAD/DoA/总线 PCM 均不变。
+pub(crate) const RR3_ASR_INPUT_GAIN: i32 = 4;
 /// TTS 宿主兜底后端开关（`RR3_TTS_BACKEND=mac_say`）：硅基流动 /v1/audio/speech
 /// 2026-10-24 起对合法请求零字节挂死（ASR/LLM 正常），宿主开发档改走 macOS `say`
 /// 合成 WAV 再抽 PCM——只换 TTS 一跳，总线契约与 ASR/LLM 零改动。
@@ -223,7 +230,14 @@ impl Rr3AsrClient {
         }
         let key = rr3_cloud_api_key()?;
         let boundary = rr3_boundary_hex();
-        let body = crate::asr::rr3_asr_multipart_body(&self.model, pcm, sample_rate, &boundary);
+        let boosted = crate::asr::rr3_asr_boost_pcm(pcm, RR3_ASR_INPUT_GAIN);
+        let body = crate::asr::rr3_asr_multipart_body(
+            &self.model,
+            &boosted,
+            sample_rate,
+            &boundary,
+            Some(RR3_ASR_LANGUAGE),
+        );
         let url = format!("{}/v1/audio/transcriptions", self.base_url);
         let content_type = format!("multipart/form-data; boundary={boundary}");
         // 有界重试（见 [`rr3_asr_error_retryable`]）：multipart 体一次装配、多轮
