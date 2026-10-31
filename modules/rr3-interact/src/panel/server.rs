@@ -126,7 +126,9 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 /// 由 `applies_use_declared_vocabulary_only` 单测钉死——新增端点 = 加表 + 过三门，
 /// 不再改第三处文案。
 ///
-/// 今日实况（ADR-0023 模型面后）：26 端点，读配置者 7 = `GET /api/brain/ops`
+/// 今日实况（ADR-0023 模型面后）：28 端点（26 + 2026-10-31 新增存活/版本两探针
+/// `/api/healthz`、`/api/version`——不触总线、可高频轮询，供监控与客户端判活），
+/// 读配置者 7 = `GET /api/brain/ops`
 /// （brain ops 六槽）＋ `GET /api/brain/models`（模型行快照）＋五模块 ops 读口五
 /// 端点（`GET /api/{act,connect,interact,power,sense}/ops`，BusCall 透传各模块
 /// `rr3-<mod>/ops/list`，白名单组体应答）；写口 3 =
@@ -158,6 +160,8 @@ pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/", &[], ""),
     ("GET", "/api/status", &[], ""),
+    ("GET", "/api/healthz", &[], ""),
+    ("GET", "/api/version", &[], ""),
     ("GET", "/api/data", &[], ""),
     ("GET", "/api/logs", &[], ""),
     ("POST", "/api/relay", &[], ""),
@@ -211,6 +215,10 @@ pub enum Rr3PanelDispatch {
     Html,
     /// `GET /api/status`：ctl.health + net/link 订阅缓存
     StatusQuery,
+    /// `GET /api/healthz`：进程存活探针（不触总线，零依赖）
+    HealthQuery,
+    /// `GET /api/version`：模块版本与端点计数（面板自描述）
+    VersionQuery,
     /// `GET /api/data`：ctl.counters（运维计数账）
     CountersQuery,
     /// `GET /api/logs`：ctl.logs（rrd 日志环尾部）
@@ -368,6 +376,17 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         },
         "/api/status" => match method {
             "GET" => Rr3PanelDispatch::StatusQuery,
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        // 存活/版本探针（2026-10-31 面板便捷性改进）：不触总线、零依赖——监控与
+        // 客户端"服务是否活着"的判据不该依赖 rrd 健康查询（那条会随 rrd 波动），
+        // 也不该靠 /api/status 的载荷形状。纯进程内应答，可高频轮询。
+        "/api/healthz" => match method {
+            "GET" => Rr3PanelDispatch::HealthQuery,
+            _ => Rr3PanelDispatch::MethodNotAllowed,
+        },
+        "/api/version" => match method {
+            "GET" => Rr3PanelDispatch::VersionQuery,
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         "/api/data" => match method {
@@ -945,6 +964,24 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
         Rr3PanelDispatch::BadRequest(e) => {
             Rr3PanelReply::json(400, "Bad Request", json!({ "error": e }))
         }
+        Rr3PanelDispatch::HealthQuery => Rr3PanelReply::json(
+            200,
+            "OK",
+            json!({
+                "ok": true,
+                "module": "rr3-interact",
+                "version": env!("CARGO_PKG_VERSION"),
+            }),
+        ),
+        Rr3PanelDispatch::VersionQuery => Rr3PanelReply::json(
+            200,
+            "OK",
+            json!({
+                "module": "rr3-interact",
+                "version": env!("CARGO_PKG_VERSION"),
+                "routes": RR3_PANEL_ROUTES.len(),
+            }),
+        ),
         Rr3PanelDispatch::StatusQuery => {
             // health 是 ctl 查询；link 是订阅缓存（主循环从总线收 Event 存的）
             let health = rr3_ctl_query(
