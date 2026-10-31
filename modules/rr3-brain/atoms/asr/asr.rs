@@ -13,4 +13,4 @@ mod private;
 
 /// 公开面：multipart 请求体装配（44B WAV 头由装配内部构成——mech 内 pub fn
 /// 留给件级 parity 腿与装配自用，bin 面无件外读者不进入口 re-export）
-pub use mech::rr3_asr_multipart_body;
+pub use mech::{rr3_asr_boost_pcm, rr3_asr_multipart_body};

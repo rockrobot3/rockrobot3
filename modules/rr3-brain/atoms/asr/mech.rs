@@ -26,7 +26,13 @@ pub fn rr3_wav_header(sample_rate: u32, data_len: u32) -> [u8; 44] {
 /// multipart 请求体装配：model 字段 + file 字段（filename="a.wav"，WAV 头仓内
 /// 自建）+ PCM + 收尾 boundary——对位 asr.py 上传体形状（整段 WAV 一次上传，
 /// ADR-0014 裁定 2；流式是 legacy 内存约束的产物，本机不复刻）。
-pub fn rr3_asr_multipart_body(model: &str, pcm: &[u8], sample_rate: u32, boundary: &str) -> Vec<u8> {
+pub fn rr3_asr_multipart_body(
+    model: &str,
+    pcm: &[u8],
+    sample_rate: u32,
+    boundary: &str,
+    language: Option<&str>,
+) -> Vec<u8> {
     let header = rr3_wav_header(sample_rate, pcm.len() as u32);
     let mut body = Vec::new();
     body.extend_from_slice(
@@ -35,6 +41,16 @@ pub fn rr3_asr_multipart_body(model: &str, pcm: &[u8], sample_rate: u32, boundar
         )
         .as_bytes(),
     );
+    // 语言策略段（2026-10-31 实机）：短中文唤醒词偶发被误判语种（曾返回韩语
+    // "안녕"），显式指定中文可稳定；`None` = 不传（旧体逐字节等价）。
+    if let Some(lang) = language {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{lang}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
     body.extend_from_slice(
         format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
@@ -47,6 +63,23 @@ pub fn rr3_asr_multipart_body(model: &str, pcm: &[u8], sample_rate: u32, boundar
     body
 }
 
+/// PCM 增益（s16le，带钳位）：ASR 输入电平补偿（2026-10-31 实机——ESP32 板麦
+/// 语音 RMS 仅 ~1000/32767，云端 ASR 的 VAD 对短句偶发判空/幻觉；增益实验
+/// ×1/×8 为空、×2/×4 能稳定出文本）。只作用于送 ASR 的 PCM 副本，VAD/DoA 与
+/// 总线 PCM 均不改变。`gain <= 1` 逐字节原样；奇数尾字节丢弃（WAV 数据恒偶）。
+pub fn rr3_asr_boost_pcm(pcm: &[u8], gain: i32) -> Vec<u8> {
+    if gain <= 1 {
+        return pcm.to_vec();
+    }
+    let mut out = Vec::with_capacity(pcm.len());
+    for pair in pcm.chunks_exact(2) {
+        let v = i16::from_le_bytes([pair[0], pair[1]]) as i32;
+        let s = (v * gain).clamp(-32768, 32767) as i16;
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,14 +89,46 @@ mod tests {
     /// ⑧-a 腿一：multipart 装配确定性（同输入逐字节同体，段标记齐备）
     #[test]
     fn parity_leg1_asr_multipart_body_is_deterministic() {
-        let a = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1");
-        let b = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1");
+        let a = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
+        let b = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
         assert_eq!(a, b);
         assert!(a.windows(12).any(|w| w == b"name=\"model\""));
         assert!(a.windows(2).any(|w| w == b"m\r"), "model 值在体里");
         assert!(a.windows(4).any(|w| w == b"RIFF"), "WAV 头仓内自建");
         assert!(a.windows(16).any(|w| w == b"filename=\"a.wav\""));
         assert!(a.ends_with(b"\r\n--bd1--\r\n"), "收尾 boundary");
+    }
+
+    /// ASR 输入增益（2026-10-31 实机板麦电平偏低）：×1 逐字节等同、×2 翻倍、
+    /// 钳位不溢出、奇数尾字节丢弃。
+    #[test]
+    fn asr_boost_scales_clips_and_keeps_gain_one_identical() {
+        let pcm = [0x10u8, 0x00, 0xF0, 0xFF, 0x00, 0x80]; // 16, -16, -32768
+        assert_eq!(rr3_asr_boost_pcm(&pcm, 1), pcm.to_vec());
+        let x2 = rr3_asr_boost_pcm(&pcm, 2);
+        assert_eq!(&x2[0..2], &[0x20, 0x00], "16×2=32");
+        assert_eq!(&x2[2..4], &[0xE0, 0xFF], "-16×2=-32");
+        assert_eq!(&x2[4..6], &[0x00, 0x80], "-32768×2 钳位");
+        assert!(rr3_asr_boost_pcm(&[], 4).is_empty());
+        let odd = rr3_asr_boost_pcm(&[0x01, 0x00, 0x02], 2);
+        assert_eq!(odd.len(), 2, "奇数尾字节丢弃");
+    }
+
+    /// 语言策略段（2026-10-31 实机：短中文被误判韩语）：Some 落 language 字段、
+    /// None 不落（旧体逐字节等价）。
+    #[test]
+    fn asr_multipart_language_field_optional() {
+        let none = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
+        assert!(
+            !none.windows(15).any(|w| w == b"name=\"language\""),
+            "None 不落 language"
+        );
+        let zh = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", Some("zh"));
+        assert!(
+            zh.windows(15).any(|w| w == b"name=\"language\""),
+            "Some 落 language"
+        );
+        assert!(zh.windows(4).any(|w| w == b"zh\r\n"), "语言值在体里");
     }
 
     /// ⑧-a 腿二：WAV 头逐字段对位 legacy asr.c build_wav_header（字节序/档位）
