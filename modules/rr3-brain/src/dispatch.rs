@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 
 use rr3mod::{BusHandle, Dispatcher};
 
-use crate::boot::{rr3_cloud_cfg_of, Rr3BrainCfg};
+use crate::boot::{rr3_cloud_cfg_of, Rr3BrainCfg, Rr3WakeCfg};
 use crate::cloud::{Rr3AsrClient, Rr3LlmClient, Rr3TtsClient};
 use crate::dialog::{Rr3Dialog, Rr3DialogTurn};
 use crate::intent::rr3_extract_actions;
@@ -109,6 +109,93 @@ pub(crate) const RR3_TOPIC_INTENT: &str = "rr3-brain/intent/result";
 /// 采样规格与 sense/interact 同一张表（16k/mono/16bit）。
 pub(crate) const RR3_TTS_SAMPLE_RATE: u32 = 16_000;
 pub(crate) const RR3_TTS_PCM_FRAME_BYTES: usize = 640;
+
+// ---------------------------------------------------------------------------
+// 唤醒词门控（2026-10-31，ASR 文本前缀匹配——非本地 KWS）
+// ---------------------------------------------------------------------------
+
+/// 唤醒词归一判据：空白与中英文标点一律剔除（ASR 输出常带 "你好，洛克。"
+/// 一类标点，归一后前缀匹配才稳）；ASCII 标点走通用判，中文标点显式列举。
+fn rr3_wake_is_punct(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_ascii_punctuation()
+        || matches!(
+            c,
+            '，' | '。'
+                | '！'
+                | '？'
+                | '、'
+                | '：'
+                | '；'
+                | '…'
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '（'
+                | '）'
+                | '【'
+                | '】'
+                | '《'
+                | '》'
+                | '·'
+                | '～'
+                | '—'
+        )
+}
+
+/// 归一文本（去标点/空白 + ASCII 小写），供唤醒短语前缀匹配。
+fn rr3_wake_norm(s: &str) -> String {
+    s.chars()
+        .filter(|c| !rr3_wake_is_punct(*c))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// 唤醒判决（纯函数，单测钉域）。`enable=false` 恒 `FollowUp`（全放行，既有
+/// 行为逐点等价）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Rr3WakeAction {
+    /// 命中唤醒词且无后续文本 → 回固定应答（不进 LLM）
+    Ack,
+    /// 命中唤醒词且带后续文本 → 后续文本（归一后）进 LLM
+    Command(String),
+    /// 未命中但在唤醒后的跟进窗内 → 原文本进 LLM（续窗）
+    FollowUp,
+    /// 未命中且窗外 → 静默丢弃（不 LLM、不 TTS）
+    Ignore,
+}
+
+pub(crate) fn rr3_wake_decide(
+    text: &str,
+    cfg: &Rr3WakeCfg,
+    now_ms: u64,
+    last_wake_ms: Option<u64>,
+) -> Rr3WakeAction {
+    if !cfg.enable {
+        return Rr3WakeAction::FollowUp;
+    }
+    let norm = rr3_wake_norm(text);
+    for phrase in &cfg.phrases {
+        let pn = rr3_wake_norm(phrase);
+        if pn.is_empty() {
+            continue;
+        }
+        if let Some(rest) = norm.strip_prefix(&pn) {
+            let rest = rest.trim();
+            if rest.is_empty() {
+                return Rr3WakeAction::Ack;
+            }
+            return Rr3WakeAction::Command(rest.to_string());
+        }
+    }
+    match last_wake_ms {
+        Some(last) if cfg.followup_ms > 0 && now_ms.saturating_sub(last) <= cfg.followup_ms => {
+            Rr3WakeAction::FollowUp
+        }
+        _ => Rr3WakeAction::Ignore,
+    }
+}
 
 /// 整轮编排面的总线写口窄化（Python rr3_finish_turn 首参 bus 的鸭子类型对位）：
 /// 编排只认 counter/publish/call 三动作，记录型测试夹具与生产 [`BusHandle`] 同一
@@ -217,6 +304,9 @@ pub(crate) struct Rr3BrainDispatcher {
     trace_seq: u64,
     pcm_seq: u64,
     tb: Rr3TimeBase,
+    /// 最近一次接受轮（Ack/Command/FollowUp）的时刻（ms）——唤醒后跟进窗基准；
+    /// `None` = 从未唤醒（非唤醒文本在窗外一律 Ignore）。
+    last_wake_ms: Option<u64>,
 }
 
 impl Rr3BrainDispatcher {
@@ -232,6 +322,7 @@ impl Rr3BrainDispatcher {
             trace_seq: 0,
             pcm_seq: 0,
             tb: Rr3TimeBase::rr3_time_base_new(),
+            last_wake_ms: None,
         }
     }
 
@@ -317,14 +408,40 @@ impl Rr3BrainDispatcher {
             return Ok(());
         }
 
-        let reply_text = match self.clients.llm.rr3_complete(&user_text) {
-            Ok(t) => t,
-            Err(e) => {
-                bus.counter_bump("llm_fail", 1);
-                eprintln!("轮次 {trace}: LLM 失败，弃轮（user='{user_text}'，{e}）");
+        // 唤醒门控（2026-10-31）：命中 → 固定应答/命令进 LLM；窗外未命中 → 静默
+        // 丢弃（不 LLM、不 TTS，用户听不到任何回声）；窗内未命中 → 追问续轮。
+        // `enable=false` 时 `rr3_wake_decide` 恒 FollowUp（既有行为逐点等价）。
+        let now = self.tb.rr3_now_ms();
+        let mut llm_input: Option<String> = None;
+        let mut reply_text = String::new();
+        match rr3_wake_decide(&user_text, &self.cfg.wake, now, self.last_wake_ms) {
+            Rr3WakeAction::Ignore => {
+                eprintln!("轮次 {trace}: 未命中唤醒词（窗外），静默");
                 return Ok(());
             }
-        };
+            Rr3WakeAction::Ack => {
+                self.last_wake_ms = Some(now);
+                reply_text = self.cfg.wake.ack.clone();
+            }
+            Rr3WakeAction::Command(cmd) => {
+                self.last_wake_ms = Some(now);
+                llm_input = Some(cmd);
+            }
+            Rr3WakeAction::FollowUp => {
+                self.last_wake_ms = Some(now);
+                llm_input = Some(user_text.clone());
+            }
+        }
+        if let Some(input) = llm_input {
+            reply_text = match self.clients.llm.rr3_complete(&input) {
+                Ok(t) => t,
+                Err(e) => {
+                    bus.counter_bump("llm_fail", 1);
+                    eprintln!("轮次 {trace}: LLM 失败，弃轮（user='{user_text}'，{e}）");
+                    return Ok(());
+                }
+            };
+        }
 
         let mut reply_pcm = match self
             .clients
@@ -537,6 +654,14 @@ mod tests {
     fn cfg_call_timeout(s: f64) -> Rr3BrainCfg {
         rr3_brain_config_parse(&format!(
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n[rr3-brain.bus]\ncall_timeout_s = {s}\n"
+        ))
+        .unwrap()
+    }
+
+    /// 唤醒词开启的配置夹具（2026-10-31；跟进窗可调，0 = 关窗）
+    fn cfg_wake(followup_ms: u64) -> Rr3BrainCfg {
+        rr3_brain_config_parse(&format!(
+            "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\"]\nack = \"我在呢，有什么可以帮您？\"\nfollowup_ms = {followup_ms}\n"
         ))
         .unwrap()
     }
@@ -824,6 +949,14 @@ mod tests {
         intents.into_iter().next().unwrap()
     }
 
+    /// 多轮用例取**最后一条** intent（前轮已发布过，不能用恰一次断言）
+    fn dp_last_intent(bus: &FakeTurnBus) -> Value {
+        bus.published_of(RR3_TOPIC_INTENT)
+            .last()
+            .cloned()
+            .expect("至少一轮 intent")
+    }
+
     /// 节拍臂时长判停触发整轮：0 封顶 onset 即刻到点（Python
     /// test_duration_cap_expires 同款零等待技巧）
     #[test]
@@ -1013,5 +1146,99 @@ mod tests {
         assert_eq!(bus.bumps_of("rounds_replied"), 0);
         assert_eq!(bus.bumps_of("rounds_audible"), 0);
         assert_eq!(bus.bumps_of("asr_fail"), 1, "弃轮仍有失败计数");
+    }
+
+    /// 唤醒判决（纯函数）：归一（标点/空白）＋前缀匹配；Ack/Command/FollowUp/
+    /// Ignore 四态与跟进窗边界钉死；关闭门控 = 全放行（既有行为）。
+    #[test]
+    fn wake_decision_states_and_window() {
+        let mut cfg = Rr3WakeCfg::default();
+        cfg.enable = true;
+        assert_eq!(rr3_wake_decide("你好洛克", &cfg, 0, None), Rr3WakeAction::Ack);
+        assert_eq!(
+            rr3_wake_decide("你好，洛克！", &cfg, 0, None),
+            Rr3WakeAction::Ack,
+            "ASR 标点归一后仍命中"
+        );
+        assert_eq!(
+            rr3_wake_decide("你好洛克，今天天气怎么样？", &cfg, 0, None),
+            Rr3WakeAction::Command("今天天气怎么样".to_string())
+        );
+        assert_eq!(
+            rr3_wake_decide("今天天气怎么样", &cfg, 0, None),
+            Rr3WakeAction::Ignore,
+            "从未唤醒的非唤醒文本静默"
+        );
+        assert_eq!(
+            rr3_wake_decide("今天天气怎么样", &cfg, 10_000, Some(0)),
+            Rr3WakeAction::FollowUp,
+            "跟进窗内追问放行"
+        );
+        assert_eq!(
+            rr3_wake_decide("今天天气怎么样", &cfg, cfg.followup_ms, Some(0)),
+            Rr3WakeAction::FollowUp,
+            "窗边界（<=）收"
+        );
+        assert_eq!(
+            rr3_wake_decide("今天天气怎么样", &cfg, cfg.followup_ms + 1, Some(0)),
+            Rr3WakeAction::Ignore,
+            "窗外不收"
+        );
+        let mut off = Rr3WakeCfg::default();
+        off.enable = false;
+        assert_eq!(
+            rr3_wake_decide("今天天气怎么样", &off, 0, None),
+            Rr3WakeAction::FollowUp,
+            "关闭门控 = 全放行（旧版行为）"
+        );
+    }
+
+    /// 唤醒词整轮（mock 档）：无唤醒窗外 → 静默不发布；仅唤醒 → 固定应答且
+    /// 不走 LLM；唤醒后窗内追问 → 正常应答；唤醒带命令 → 去掉唤醒词后的
+    /// 命令进 LLM。四条路径一轮内跑完。
+    #[test]
+    fn wake_gate_ack_ignore_followup_and_command() {
+        let (mut dp, _g) = mock_dispatcher(cfg_wake(15_000));
+        let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
+        let feed = |dp: &mut Rr3BrainDispatcher| {
+            dp.dialog.rr3_feed_vad("onset", 0);
+            dp.dialog
+                .rr3_feed_pcm(&rr3_base64_encode(&pcm_bytes(320)), 32)
+                .unwrap();
+        };
+
+        // 1) 从未唤醒：普通文本在窗外 → 静默（不发布 intent、不回复）
+        std::env::set_var("RR3_BRAIN_MOCK_ASR_TEXT", "今天天气怎么样");
+        feed(&mut dp);
+        dp.rr3_finish_turn(&bus).unwrap();
+        assert!(
+            bus.published_of(RR3_TOPIC_INTENT).is_empty(),
+            "窗外未命中唤醒词必须静默"
+        );
+        assert_eq!(bus.bumps_of("rounds_replied"), 0);
+
+        // 2) 仅唤醒 → 固定应答（不进 LLM：mock LLM 会回 “（mock 回复）…”）
+        std::env::set_var("RR3_BRAIN_MOCK_ASR_TEXT", "你好洛克");
+        feed(&mut dp);
+        dp.rr3_finish_turn(&bus).unwrap();
+        let intent = dp_last_intent(&bus);
+        assert_eq!(intent["reply_text"], "我在呢，有什么可以帮您？");
+        assert_eq!(intent["user_text"], "你好洛克");
+
+        // 3) 唤醒后窗内追问 → 正常进 LLM（原文本不被改写）
+        std::env::set_var("RR3_BRAIN_MOCK_ASR_TEXT", "那明天呢");
+        feed(&mut dp);
+        dp.rr3_finish_turn(&bus).unwrap();
+        let intent = dp_last_intent(&bus);
+        assert_eq!(intent["reply_text"], "（mock 回复）那明天呢");
+
+        // 4) 唤醒带命令 → 去唤醒词后的命令进 LLM
+        std::env::set_var("RR3_BRAIN_MOCK_ASR_TEXT", "你好洛克，今天天气怎么样？");
+        feed(&mut dp);
+        dp.rr3_finish_turn(&bus).unwrap();
+        let intent = dp_last_intent(&bus);
+        assert_eq!(intent["reply_text"], "（mock 回复）今天天气怎么样");
+        assert_eq!(intent["user_text"], "你好洛克，今天天气怎么样？");
+        std::env::remove_var("RR3_BRAIN_MOCK_ASR_TEXT");
     }
 }
