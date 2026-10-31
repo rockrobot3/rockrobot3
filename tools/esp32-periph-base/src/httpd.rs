@@ -60,15 +60,17 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use esp_idf_sys::{
-    esp_event_loop_create_default, esp_netif_create_default_wifi_sta, esp_netif_get_ip_info,
+    esp_event_loop_create_default, esp_netif_create_default_wifi_ap,
+    esp_netif_create_default_wifi_sta, esp_netif_get_ip_info,
     esp_netif_init, esp_netif_ip_info_t, esp_netif_t, esp_restart, esp_wifi_connect,
     esp_wifi_disconnect, esp_wifi_init, esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start,
     g_wifi_default_wpa_crypto_funcs, g_wifi_osi_funcs, httpd_config_t,
     httpd_err_code_t_HTTPD_400_BAD_REQUEST, httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t,
     httpd_register_uri_handler, httpd_req_recv, httpd_req_t, httpd_resp_send,
     httpd_resp_send_err, httpd_resp_set_type, httpd_start, httpd_uri_t, http_method_HTTP_GET,
-    http_method_HTTP_POST, nvs_flash_init, wifi_config_t, wifi_init_config_t,
-    wifi_interface_t_WIFI_IF_STA, wifi_mode_t_WIFI_MODE_STA, WIFI_INIT_CONFIG_MAGIC, ESP_OK,
+    http_method_HTTP_POST, nvs_flash_init, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t,
+    wifi_init_config_t, wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA,
+    wifi_mode_t_WIFI_MODE_APSTA, WIFI_INIT_CONFIG_MAGIC, ESP_OK,
 };
 
 use rr_ipc::Rr3BoardBindings;
@@ -598,6 +600,36 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
 /// STA 凭据装配（start_httpd 与写口 apply/回退共用；union 起底——sta 臂其余
 /// 字段零 = 默认；调用前形制已验 32/64 上限＝`sta.ssid[32]`/`sta.password[64]`
 /// 数组尺寸，copy_from_slice 不越界）。返回 esp_err。
+/// SoftAP 配置（2026-10-31 独立形态配网面）：AP 常开，SSID/口令由编译期
+/// `RR3_BOARD_AP_SSID`/`RR3_BOARD_AP_PASS` 回落缺省（"RR3-BOARD"/"rock3robot"，
+/// 非秘密、仓内公开——目的只是局域网配网入口，不承载业务凭据）。
+/// 返回 AP 实际 SSID 便于 boot 横幅点名；`Err(i32)` = 某步 ESP-IDF 拒。
+unsafe fn wifi_ap_configure() -> Result<&'static str, i32> {
+    let ssid = option_env!("RR3_BOARD_AP_SSID").unwrap_or("RR3-BOARD");
+    let pass = option_env!("RR3_BOARD_AP_PASS").unwrap_or("rock3robot");
+    let s = ssid.as_bytes();
+    let p = pass.as_bytes();
+    // 形制：SSID ≤32B（IDF 硬限）、WPA2 口令 8..=63B
+    if s.is_empty() || s.len() > 32 || p.len() < 8 || p.len() > 63 {
+        return Err(-1);
+    }
+    if esp_netif_create_default_wifi_ap().is_null() {
+        return Err(-1);
+    }
+    let mut cfg: wifi_config_t = std::mem::zeroed();
+    cfg.ap.ssid[..s.len()].copy_from_slice(s);
+    cfg.ap.password[..p.len()].copy_from_slice(p);
+    cfg.ap.ssid_len = s.len() as u8;
+    cfg.ap.channel = 1;
+    cfg.ap.authmode = wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK;
+    cfg.ap.max_connection = 4;
+    let r = esp_wifi_set_config(wifi_interface_t_WIFI_IF_AP, &mut cfg);
+    if r != ESP_OK {
+        return Err(r);
+    }
+    Ok(ssid)
+}
+
 unsafe fn wifi_sta_set_credentials(ssid: &[u8], pass: &[u8]) -> i32 {
     let mut wcfg: wifi_config_t = std::mem::zeroed();
     wcfg.sta.ssid[..ssid.len()].copy_from_slice(ssid);
@@ -717,21 +749,30 @@ pub(crate) fn rr3_board_httpd_spawn(bus: &Arc<Mutex<Bus>>) {
                 (s.to_string(), p.unwrap_or_default().to_string(), "编译期")
             }
             _ => {
+                // **2026-10-31 SoftAP 配网面**：原实现在"两源都缺"时直接返回（配置腿
+                // 缺席），板因此无法自身上线——必须先有 WiiFi 凭据才能用面板配网，
+                // 而配网入口本身要网络，构成鸡生蛋死锁。改为 AP-only 起栈：无凭据
+                // 也起 SoftAP（SSID 见 [`wifi_ap_configure`]），手机/笔记本可连上板
+                // 自己的面板完成配网（`POST /api/board/wifi`），配网成功即 STA 上线。
+                // 凭据来源如实点名 "ap-only"（boot 横幅可辨，永不冒领已配网）。
                 eprintln!(
-                    "[periph] 配置腿未装配（NVS 无存档且 RR3_BOARD_WIFI_SSID 未注入）——N-13 服务面缺席，板其余功能照常"
+                    "[periph] 无 WiFi 凭据（NVS 空且 RR3_BOARD_WIFI_SSID 未注入）→ 转 SoftAP 配网模式（AP-only，配置腿照常可达）"
                 );
-                return;
+                (String::new(), String::new(), "ap-only")
             }
         },
     };
-    // ③ 形制校验（两源同门——[`crate::cred::rr3_cred_form_check`]；错误不出值只出长度）
-    if let Err(e) = crate::cred::rr3_cred_form_check(&ssid, &pass) {
-        eprintln!(
-            "[periph] 配置腿装配失败（{e}：SSID {}B/密码 {}B）——缺席照常",
-            ssid.len(),
-            pass.len()
-        );
-        return;
+    // ③ 形制校验（两源同门——[`crate::cred::rr3_cred_form_check`]；错误不出值只出长度）。
+    // ap-only 档无凭据可校，跳过（STA 侧不配置、不连接）。
+    if !ssid.is_empty() {
+        if let Err(e) = crate::cred::rr3_cred_form_check(&ssid, &pass) {
+            eprintln!(
+                "[periph] 配置腿装配失败（{e}：SSID {}B/密码 {}B）——缺席照常",
+                ssid.len(),
+                pass.len()
+            );
+            return;
+        }
     }
     let ssid = ssid.as_bytes().to_vec();
     let pass = pass.as_bytes().to_vec();
@@ -770,14 +811,23 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pas
     // ② WiFi 起栈（手抄宏配置见 wifi_default_config）
     let cfg = wifi_default_config();
     chk(esp_wifi_init(&cfg))?;
-    chk(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_STA))?;
-    // STA 凭据（helper 共用——写口 apply/回退同款；位形已在 spawn 前验）
-    chk(wifi_sta_set_credentials(ssid, pass))?;
+    // AP 常开（SoftAP 配网面，见 wifi_ap_configure 注）：必须在 esp_wifi_start 前
+    // 建 netif + 设 config——IDF 在 start 时才拉起 AP/DHCP 服务。失败即点名退出
+    // （配网面缺席，但不会静默半起：宁可配置腿不装配也不留不可达的半态）。
+    let ap_ssid = wifi_ap_configure()?;
+    chk(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_APSTA))?;
+    // STA 凭据（helper 共用——写口 apply/回退同款；位形已在 spawn 前验）；
+    // ap-only 档空凭据不配置 STA，只起 AP
+    if !ssid.is_empty() {
+        chk(wifi_sta_set_credentials(ssid, pass))?;
+    }
     chk(esp_wifi_start())?;
     // STA 关联发起（批N15 件二真板取证实锤的缺陷修复：esp_wifi_start 只起驱动
     // 不自动连 AP——缺此步板永不关联、无 got ip；写口 apply/回退两路本就有
-    // connect，唯 boot 路漏）
-    chk(esp_wifi_connect())?;
+    // connect，唯 boot 路漏）。ap-only 档无 STA 目标，跳过。
+    if !ssid.is_empty() {
+        chk(esp_wifi_connect())?;
+    }
     // ③ httpd 起（手填 config：HTTPD_DEFAULT_CONFIG 真值——宏默认也是
     //   false/null/0 的字段由全零起底等价覆盖，差异字段逐项对表 esp_http_server.h :53）
     let mut h: httpd_handle_t = std::ptr::null_mut();
@@ -816,7 +866,7 @@ unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pas
         chk(httpd_register_uri_handler(h, &uri))?;
     }
     println!(
-        "[periph] 配置腿起（N-13，凭据源={cred_source}）: http://0.0.0.0:{}/api/board/*（白名单 {} 端点＝GET state/bindings＋POST wifi/reboot）",
+        "[periph] 配置腿起（N-13，凭据源={cred_source}）: SoftAP SSID={ap_ssid}（WPA2，口令见 wifi_ap_configure 注）+ http://0.0.0.0:{}/api/board/*（白名单 {} 端点＝GET state/bindings＋POST wifi/reboot）",
         HTTPD_SERVER_PORT,
         RR3_BOARD_ROUTES.len()
     );
