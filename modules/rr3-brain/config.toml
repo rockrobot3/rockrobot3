@@ -55,3 +55,14 @@ call_timeout_s = 30.0
 # 一轮 utterance 的时长上限：连续语音无 offset 边沿时也要有界
 # （继承 legacy asr_begin(max_seconds) 的精神，ADR-0014 裁定 3）
 max_utterance_ms = 8000
+
+[rr3-brain.wake]
+# 唤醒词（2026-10-31，ASR 文本前缀匹配——非本地 KWS；sense 的 VAD 起音后
+# 云端 ASR 必跑，本段只决定"这一轮进不进对话"）。归一化（去标点/空白）后
+# 前缀命中任一短语即唤醒；命中且无后续文本 → 回 ack；命中带文本 → 文本进
+# LLM；未命中但在 followup_ms 窗内（最近一次唤醒/接受轮起算）→ 追问放行；
+# 窗外未命中 → 静默丢弃（不 LLM、不 TTS，用户听不到回声）。
+enable = true
+phrases = ["你好洛克"]
+ack = "我在呢，有什么可以帮您？"
+followup_ms = 15000
