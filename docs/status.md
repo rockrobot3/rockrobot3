@@ -2120,6 +2120,14 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   interact `tts: 12 字符播了 2917ms（PCM 93358 字节）`，USB 声卡出声；
   听声转头已恢复（`reflex enable=true`，五模块 running）。
 
+  ⑤+ 完整表现验收（用户按脚本实机跑三步）：
+  - 唤醒：`user='你好，在克。'`（ASR 变体）→ ack `我在呢，有什么可以帮您？`，
+    `tts_pcm_ms=2757 played_ms=2757`；反射环同期 `pan=60°` + 点头 `90→98`（转头通）；
+  - 跟进窗：`user='今天上海的天气怎么样？'`（ASR 把"今天天气"补成"今天上海"，
+    轻度幻觉）→ 回复 18–24℃/风力不大，`tts_pcm_ms=7677 played_ms=7677`；
+  - 窗外：`user='推荐一个地方。'/'你给我推荐一个去的地方。'` → 静默丢弃
+    （无 LLM、无 TTS、无回复）——静默门控按预期生效。
+
   ⑥ 诊断件：`RR3_BRAIN_DUMP_UTT`（env 门控，落盘送 ASR 的 utterance PCM，
   默认关；本次取证后已移除 drop-in）。遗留：ASR 空文本轮/non-determinism 仍可
   优化；若要恢复严格"你好洛克"唯一性，需上端侧 KWS（下一批，不在本轮）。
