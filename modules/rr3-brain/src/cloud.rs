@@ -177,22 +177,26 @@ fn rr3_read_body(url: &str, resp: ureq::Response) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// ASR 有界重试：总尝试次数（首调 + 1 次重试，2026-10-31）。只对**瞬时**失败
-/// 重试——HTTP 429/5xx 与传输层（连接拒绝/超时/读断）；鉴权/请求形状 4xx、
-/// 坏应答、缺密钥一律不重试（重试只会重复同一结局，还把 401 拖成 2 倍时延）。
-/// 同步调用发生在对话轮内，上限 2×`timeout_s`（缺省 20s）——有界，不无限重试。
-const RR3_ASR_ATTEMPTS: u32 = 2;
+/// 云端调用有界重试：总尝试次数（首调 + 1 次重试，2026-10-31；TTS 同轨同批——
+/// 实机唤醒 Ack 命中后 CosyVoice 读响应超时一次即弃轮，用户侧表现为"喊了没
+/// 应答"，与 ASR 是同一类瞬时态）。只对**瞬时**失败重试——HTTP 429/5xx 与
+/// 传输层（连接拒绝/超时/读断）；鉴权/请求形状 4xx、坏应答、缺密钥一律不重试
+/// （重试只会重复同一结局，还把 401 拖成 2 倍时延）。同步调用发生在对话轮内，
+/// 上限 2×`timeout_s`（当前配置 8s）——有界，不无限重试。
+const RR3_CLOUD_ATTEMPTS: u32 = 2;
 /// 两次尝试之间的固定短歇（对话轮内同步调用，不能长睡）。
-const RR3_ASR_RETRY_PAUSE: Duration = Duration::from_millis(500);
+const RR3_CLOUD_RETRY_PAUSE: Duration = Duration::from_millis(500);
 
 /// 可重试判据（纯函数，单测钉域）：传输层「云端不可达 …」与 HTTP 429/5xx 重试；
-/// 其余（4xx/坏应答/缺密钥/缺字段）不重试。
-fn rr3_asr_error_retryable(err: &str) -> bool {
+/// 其余（4xx/坏应答/缺密钥/缺字段）不重试。`interface` 是各云端错误文案的接口
+/// 前缀词（"识别接口"/"合成接口"），用于解析 `"{interface} HTTP {code}"`。
+fn rr3_cloud_error_retryable(interface: &str, err: &str) -> bool {
     if err.starts_with("云端不可达") {
         return true;
     }
+    let prefix = format!("{interface} HTTP ");
     match err
-        .strip_prefix("识别接口 HTTP ")
+        .strip_prefix(&prefix)
         .and_then(|s| s.parse::<u16>().ok())
     {
         Some(code) => code == 429 || (500..=599).contains(&code),
@@ -240,19 +244,20 @@ impl Rr3AsrClient {
         );
         let url = format!("{}/v1/audio/transcriptions", self.base_url);
         let content_type = format!("multipart/form-data; boundary={boundary}");
-        // 有界重试（见 [`rr3_asr_error_retryable`]）：multipart 体一次装配、多轮
+        // 有界重试（见 [`rr3_cloud_error_retryable`]）：multipart 体一次装配、多轮
         // 复用；只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            let posted = rr3_http_post(&url, &key, &body, &content_type, self.timeout_s)
-                .and_then(|(status, resp)| {
+            let posted = rr3_http_post(&url, &key, &body, &content_type, self.timeout_s).and_then(
+                |(status, resp)| {
                     if status == 200 {
                         Ok(resp)
                     } else {
                         Err(format!("识别接口 HTTP {status}"))
                     }
-                });
+                },
+            );
             match posted {
                 Ok(resp) => {
                     // json.loads 进护栏（B-16②）：坏 JSON 折 Err 不逃逸（Python try 同形状）
@@ -265,12 +270,13 @@ impl Rr3AsrClient {
                         .ok_or_else(|| "识别应答缺 text 字段".to_string());
                 }
                 Err(e) => {
-                    if rr3_asr_error_retryable(&e) && attempt < RR3_ASR_ATTEMPTS {
+                    if rr3_cloud_error_retryable("识别接口", &e) && attempt < RR3_CLOUD_ATTEMPTS
+                    {
                         eprintln!(
-                            "rr3-brain: ASR 第 {attempt}/{RR3_ASR_ATTEMPTS} 次失败（{e}），{}ms 后重试",
-                            RR3_ASR_RETRY_PAUSE.as_millis()
+                            "rr3-brain: ASR 第 {attempt}/{RR3_CLOUD_ATTEMPTS} 次失败（{e}），{}ms 后重试",
+                            RR3_CLOUD_RETRY_PAUSE.as_millis()
                         );
-                        std::thread::sleep(RR3_ASR_RETRY_PAUSE);
+                        std::thread::sleep(RR3_CLOUD_RETRY_PAUSE);
                         continue;
                     }
                     // 重试过的最终失败补尝试数（首调失败文案逐字不变——台账/单测依赖）
@@ -334,9 +340,8 @@ impl Rr3LlmClient {
                     }
                     Ok(val.to_string())
                 } else {
-                    rr3_secrets_get(r).ok_or_else(|| {
-                        format!("secrets 缺引用 {r}（面板填 key 后下一轮生效）")
-                    })
+                    rr3_secrets_get(r)
+                        .ok_or_else(|| format!("secrets 缺引用 {r}（面板填 key 后下一轮生效）"))
                 }
             }
         }
@@ -403,16 +408,14 @@ impl Rr3LlmClient {
         }
         // 应答形状面收敛为一档（Python KeyError/IndexError/JSONDecodeError 同一
         // except 折同文案）：取不出 choices[0].message.content 串即形状不符
-        let reply = serde_json::from_slice::<Value>(&resp)
-            .ok()
-            .and_then(|v| {
-                v.get("choices")?
-                    .get(0)?
-                    .get("message")?
-                    .get("content")?
-                    .as_str()
-                    .map(|s| s.to_string())
-            });
+        let reply = serde_json::from_slice::<Value>(&resp).ok().and_then(|v| {
+            v.get("choices")?
+                .get(0)?
+                .get("message")?
+                .get("content")?
+                .as_str()
+                .map(|s| s.to_string())
+        });
         match reply {
             Some(t) => {
                 self.history.rr3_assistant_turn(&t);
@@ -420,7 +423,10 @@ impl Rr3LlmClient {
             }
             None => {
                 self.history.rr3_rollback_last();
-                Err("大模型应答形状不符: 缺 choices[0].message.content（或应答非 JSON）".to_string())
+                Err(
+                    "大模型应答形状不符: 缺 choices[0].message.content（或应答非 JSON）"
+                        .to_string(),
+                )
             }
         }
     }
@@ -488,11 +494,40 @@ impl Rr3TtsClient {
         .to_string()
         .into_bytes();
         let url = format!("{}/v1/audio/speech", self.base_url);
-        let (status, resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
-        if status != 200 {
-            return Err(format!("合成接口 HTTP {status}"));
+        // 有界重试（与 ASR 同轨，见 [`rr3_cloud_error_retryable`]）：CosyVoice
+        // 读响应超时是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let posted = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)
+                .and_then(|(status, resp)| {
+                    if status == 200 {
+                        Ok(resp)
+                    } else {
+                        Err(format!("合成接口 HTTP {status}"))
+                    }
+                });
+            match posted {
+                Ok(resp) => return Ok(resp),
+                Err(e) => {
+                    if rr3_cloud_error_retryable("合成接口", &e) && attempt < RR3_CLOUD_ATTEMPTS
+                    {
+                        eprintln!(
+                            "rr3-brain: TTS 第 {attempt}/{RR3_CLOUD_ATTEMPTS} 次失败（{e}），{}ms 后重试",
+                            RR3_CLOUD_RETRY_PAUSE.as_millis()
+                        );
+                        std::thread::sleep(RR3_CLOUD_RETRY_PAUSE);
+                        continue;
+                    }
+                    // 重试过的最终失败补尝试数（首调失败文案逐字不变——台账/单测依赖）
+                    return if attempt > 1 {
+                        Err(format!("{e}（TTS 共尝试 {attempt} 次）"))
+                    } else {
+                        Err(e)
+                    };
+                }
+            }
         }
-        Ok(resp)
     }
 }
 
@@ -618,7 +653,9 @@ pub(crate) mod testkit {
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     let Ok(mut stream) = stream else { break };
-                    let Some((path, headers, body)) = read_request(&mut stream) else { continue };
+                    let Some((path, headers, body)) = read_request(&mut stream) else {
+                        continue;
+                    };
                     r.lock().unwrap().push((
                         path.clone(),
                         headers.get("authorization").cloned().unwrap_or_default(),
@@ -629,10 +666,18 @@ pub(crate) mod testkit {
                     let bad = b.lock().unwrap().clone();
                     let missing = m.lock().unwrap().clone();
                     if Some(&path) == fail_once.as_ref() {
-                        respond(&mut stream, "500 Internal Server Error", b"{\"error\":\"boom\"}");
+                        respond(
+                            &mut stream,
+                            "500 Internal Server Error",
+                            b"{\"error\":\"boom\"}",
+                        );
                         *fo.lock().unwrap() = None; // 一次性：下一请求恢复罐头
                     } else if Some(&path) == fail.as_ref() {
-                        respond(&mut stream, "500 Internal Server Error", b"{\"error\":\"boom\"}");
+                        respond(
+                            &mut stream,
+                            "500 Internal Server Error",
+                            b"{\"error\":\"boom\"}",
+                        );
                     } else if Some(&path) == bad.as_ref() {
                         // 200 + 非 JSON 体（B-16②：云 200 坏体的静默假成功口）
                         respond(&mut stream, "200 OK", b"not-json-at-all");
@@ -730,7 +775,9 @@ mod tests {
         let a = rr3_boundary_hex();
         let b = rr3_boundary_hex();
         assert_eq!(a.len(), 32);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         assert_ne!(a, b);
     }
 
@@ -758,7 +805,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("rr3-brain-secrets-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("secrets.json");
-        std::fs::write(&path, r#"{"keys": {"DeepSeek官方": "  sk-test  ", "空": "  "}}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"keys": {"DeepSeek官方": "  sk-test  ", "空": "  "}}"#,
+        )
+        .unwrap();
         std::env::set_var(RR3_SECRETS_FILE_ENV, &path);
         assert_eq!(rr3_secrets_get("DeepSeek官方").as_deref(), Some("sk-test"));
         assert_eq!(rr3_secrets_get("空"), None, "空白值折 None");
@@ -773,34 +824,55 @@ mod tests {
     /// OSError 族折 RuntimeError 同语义）
     #[test]
     fn http_post_folds_unreachable_endpoint() {
-        let e = rr3_http_post("http://127.0.0.1:1/v1/audio/transcriptions", "k", b"x", "text/plain", 1.0)
-            .unwrap_err();
+        let e = rr3_http_post(
+            "http://127.0.0.1:1/v1/audio/transcriptions",
+            "k",
+            b"x",
+            "text/plain",
+            1.0,
+        )
+        .unwrap_err();
         assert!(e.contains("云端不可达"), "传输失败折固定文案: {e}");
         assert!(!e.contains("Bearer"), "文案不得带出密钥");
     }
 
-    /// ASR 重试判据（2026-10-31 有界重试）：429/5xx/传输层可重试；4xx/坏应答/
-    /// 缺密钥不重试（重试只会重复同一结局，还把 401 拖成 2 倍时延）。
+    /// 云端重试判据（2026-10-31 有界重试，ASR/TTS 同轨）：429/5xx/传输层可重试；
+    /// 4xx/坏应答/缺密钥不重试（重试只会重复同一结局，还把 401 拖成 2 倍时延）。
     #[test]
-    fn asr_error_retry_classification() {
-        for e in [
-            "识别接口 HTTP 429",
-            "识别接口 HTTP 500",
-            "识别接口 HTTP 502",
-            "识别接口 HTTP 503",
-            "云端不可达 http://x: timed out reading response",
+    fn cloud_error_retry_classification() {
+        for (iface, e) in [
+            ("识别接口", "识别接口 HTTP 429"),
+            ("识别接口", "识别接口 HTTP 500"),
+            ("识别接口", "识别接口 HTTP 502"),
+            ("识别接口", "识别接口 HTTP 503"),
+            (
+                "识别接口",
+                "云端不可达 http://x: timed out reading response",
+            ),
+            ("合成接口", "合成接口 HTTP 429"),
+            ("合成接口", "合成接口 HTTP 500"),
+            ("合成接口", "合成接口 HTTP 503"),
+            (
+                "合成接口",
+                "云端不可达 http://x: timed out reading response",
+            ),
         ] {
-            assert!(rr3_asr_error_retryable(e), "应重试: {e}");
+            assert!(rr3_cloud_error_retryable(iface, e), "应重试: {e}");
         }
-        for e in [
-            "识别接口 HTTP 400",
-            "识别接口 HTTP 401",
-            "识别接口 HTTP 403",
-            "识别应答非 JSON: expected value at line 1",
-            "识别应答缺 text 字段",
-            "缺少环境变量 RR3_CLOUD_API_KEY，云端链路不可用",
+        for (iface, e) in [
+            ("识别接口", "识别接口 HTTP 400"),
+            ("识别接口", "识别接口 HTTP 401"),
+            ("识别接口", "识别接口 HTTP 403"),
+            ("识别接口", "识别应答非 JSON: expected value at line 1"),
+            ("识别接口", "识别应答缺 text 字段"),
+            ("识别接口", "缺少环境变量 RR3_CLOUD_API_KEY，云端链路不可用"),
+            // 接口前缀词错配不重试：识别文案不能拿合成前缀解析，反之亦然
+            ("合成接口", "识别接口 HTTP 500"),
+            ("识别接口", "合成接口 HTTP 500"),
+            ("合成接口", "合成应答非 JSON: expected value at line 1"),
+            ("合成接口", "缺少环境变量 RR3_CLOUD_API_KEY，云端链路不可用"),
         ] {
-            assert!(!rr3_asr_error_retryable(e), "不应重试: {e}");
+            assert!(!rr3_cloud_error_retryable(iface, e), "不应重试: {e}");
         }
     }
 
@@ -816,7 +888,9 @@ mod tests {
         std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
         std::env::set_var(RR3_API_KEY_ENV, "test-key");
         let client = Rr3AsrClient::new(&srv.base, "iic/SenseVoiceSmall", 5.0);
-        let text = client.rr3_transcribe(&b"\x00\x01".repeat(16), 16000).unwrap();
+        let text = client
+            .rr3_transcribe(&b"\x00\x01".repeat(16), 16000)
+            .unwrap();
         assert_eq!(text, "你好");
         let (path, auth, body) = srv.last();
         assert_eq!(path, "/v1/audio/transcriptions");
