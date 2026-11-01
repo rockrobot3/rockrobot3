@@ -739,15 +739,18 @@ fn rr3_serve_request(
                 // flush 归 daemon 的 term 路径）：变化先过共享闸门，判到 flush
                 // 才取快照写盘。落盘失败不记账，窗口判据下一拍仍成立自然重试。
                 if changed && ctx.counters_path.is_some() {
-                    let flush = rr3_lock(&ctx.counters_gate).rr3_on_change(ctx.rr3_ctx_now_ms());
-                    if flush {
+                    // 整段持闸（2026-10-31 实机修复）：on_change→快照→store→on_flushed
+                    // 必须在同一临界区。旧形只把 on_change/on_flushed 各自锁一下，
+                    // 闸门又没有"flush 进行中"态——同窗两条连接都判到 true，两个
+                    // store 竞争同一个 counters.json.tmp：先 rename 者成功、后者
+                    // ENOENT（每 11s 一成一败的 journal 噪声即此）。锁序 gate→shared
+                    // 与全仓既有方向一致（merge 那手的 shared 锁在进入本段前已放）。
+                    let mut gate = rr3_lock(&ctx.counters_gate);
+                    if gate.rr3_on_change(ctx.rr3_ctx_now_ms()) {
                         let snap = rr3_lock(&ctx.shared).rr3_reg_counters_snapshot();
                         if let Some(path) = ctx.counters_path.as_deref() {
                             match crate::counters::rr3_counters_store(path, &snap) {
-                                Ok(()) => {
-                                    rr3_lock(&ctx.counters_gate)
-                                        .rr3_on_flushed(ctx.rr3_ctx_now_ms());
-                                }
+                                Ok(()) => gate.rr3_on_flushed(ctx.rr3_ctx_now_ms()),
                                 Err(e) => rr3_log(&format!(
                                     "counters 落盘失败（下一拍窗口到自然重试）: {e}"
                                 )),
