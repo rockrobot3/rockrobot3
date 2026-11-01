@@ -9,9 +9,7 @@
 //! 已上移承载层（0.0.5 批I I-8，ADR-0019 修订 4）：件面只交状态机
 //! （结构体 + 判定），组装归 `src/composite.rs`，线上字节逐字不变。
 
-use super::{
-    rr3_face_expression_lookup, RR3_FACE_EXPRESSIONS, Rr3FaceFrame, RR3_FACE_TALK, RR3_FACE_TOPIC,
-};
+use super::{rr3_face_expression_lookup, RR3_FACE_EXPRESSIONS, Rr3FaceFrame, RR3_FACE_TALK};
 
 /// idle：睁眼 + 平嘴（单帧）
 const RR3_FRAMES_IDLE: [Rr3FaceFrame; 1] = [[

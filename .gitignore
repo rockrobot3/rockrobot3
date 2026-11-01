@@ -44,3 +44,7 @@ tools/rr3-audio-rec/*.wav
 # rr3-brain 是 Python 包：编译产物随 build 再生，不入库（modules/** 白名单覆盖过宽）
 **/__pycache__/
 **/*.py[cod]
+
+# macOS 元数据与临时截图目录
+.DS_Store
+.screenshots/

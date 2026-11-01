@@ -1541,8 +1541,8 @@ mod tests {
     fn route_table_matches_dispatch() {
         assert_eq!(
             RR3_PANEL_ROUTES.len(),
-            26,
-            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（ADR-0023 23→26：增 GET /api/brain/models + POST /api/brain/model + POST /api/brain/model/test）"
+            28,
+            "端点表计数 pin：增删端点须同批改本 pin 与设计册 I-9 口径（26→28：增 GET /api/healthz + GET /api/version 探针端点，15b4556）"
         );
         for (method, path, _covers, _applies) in RR3_PANEL_ROUTES {
             let body: &[u8] = match (*method, *path) {

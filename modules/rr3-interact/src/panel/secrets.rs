@@ -109,10 +109,6 @@ pub fn rr3_secrets_upsert_at(path: &Path, ref_name: &str, value: &str) -> Result
 }
 
 /// 已存 ref 清单（`GET /api/model/keys` 的负载）：只回名字与已设标记，**无值**。
-pub fn rr3_secrets_list() -> Result<Vec<Value>, String> {
-    rr3_secrets_list_at(&rr3_secrets_path()?)
-}
-
 pub fn rr3_secrets_list_at(path: &Path) -> Result<Vec<Value>, String> {
     let keys = rr3_secrets_read(path)?;
     Ok(keys
