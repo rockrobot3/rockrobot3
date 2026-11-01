@@ -236,7 +236,10 @@ pub(crate) fn rr3_model_base_url_validate(base_url: &str) -> Result<(), String> 
             "base_url 须为完整 API 根（http:// 或 https:// 开头）: {base_url}"
         ));
     }
-    if base_url.trim_end_matches('/').ends_with("/chat/completions") {
+    if base_url
+        .trim_end_matches('/')
+        .ends_with("/chat/completions")
+    {
         return Err(format!(
             "base_url 是完整 API 根，不得含 /chat/completions（客户端自拼）: {base_url}"
         ));
@@ -300,7 +303,10 @@ pub(crate) fn rr3_brain_model_row(doc: &Value) -> Result<Rr3ModelRow, String> {
             ))
         }
     };
-    let fmt = row.get("api_format").and_then(Value::as_str).unwrap_or("openai");
+    let fmt = row
+        .get("api_format")
+        .and_then(Value::as_str)
+        .unwrap_or("openai");
     if fmt != "openai" {
         return Err(format!(
             "模型行 {name} api_format 暂不支持: {fmt}（本批仅 openai）"
@@ -346,8 +352,7 @@ fn rr3_py_list_repr(items: &[String]) -> String {
 /// TOML 文本 → Rr3BrainCfg。文档树整体进 [`Rr3BrainCfg::doc`]（ops/set 写面），
 /// boot 投影当场解析——缺段/缺键/类型不合法一律 Err 拒 boot（fail-closed）。
 pub(crate) fn rr3_brain_config_parse(text: &str) -> Result<Rr3BrainCfg, String> {
-    let doc: Value =
-        toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
+    let doc: Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
     // cloud 段必填四键 + timeout_s（Python cfg["rr3-brain"]["cloud"] 直取同义；
     // llm_model 只在无模型行表的 fallback 路径消费，由 rr3_brain_model_row 点名）
     let cloud = rr3_brain_sect(&doc, "cloud")?;
@@ -361,9 +366,9 @@ pub(crate) fn rr3_brain_config_parse(text: &str) -> Result<Rr3BrainCfg, String> 
     // connect_timeout_s 已随迁移退役（批N32 增补裁定 4），本面不读
     let call_timeout_s = match doc.get("rr3-brain").and_then(|b| b.get("bus")) {
         Some(bus) => match bus.get("call_timeout_s") {
-            Some(v) => v.as_f64().ok_or_else(|| {
-                "config [rr3-brain.bus] call_timeout_s 须数值".to_string()
-            })?,
+            Some(v) => v
+                .as_f64()
+                .ok_or_else(|| "config [rr3-brain.bus] call_timeout_s 须数值".to_string())?,
             None => RR3_BUS_CALL_TIMEOUT_DEFAULT_S,
         },
         None => RR3_BUS_CALL_TIMEOUT_DEFAULT_S,
@@ -526,7 +531,10 @@ timeout_s = 20
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n[rr3-brain.bus]\ncall_timeout_s = \"30\"\n",
         )
         .unwrap_err();
-        assert!(e.contains("call_timeout_s 须数值"), "字符串超时点名（Rust 只认数值）: {e}");
+        assert!(
+            e.contains("call_timeout_s 须数值"),
+            "字符串超时点名（Rust 只认数值）: {e}"
+        );
         let e = rr3_brain_config_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
     }
@@ -541,8 +549,7 @@ timeout_s = 20
         );
         let e = rr3_brain_config_parse(&two_active).unwrap_err();
         assert_eq!(
-            e,
-            "[[rr3-brain.model]] 须恰一行 active=true（现 2 行: ['甲', '乙']）",
+            e, "[[rr3-brain.model]] 须恰一行 active=true（现 2 行: ['甲', '乙']）",
             "两 active 红且名单逐字（Python 列表 repr 形状）"
         );
         let none_active = format!(
@@ -555,8 +562,7 @@ timeout_s = 20
         );
         let e = rr3_brain_config_parse(&bad_mode).unwrap_err();
         assert_eq!(
-            e,
-            "模型行 甲 mode 不认: ssh（允许 api/local）",
+            e, "模型行 甲 mode 不认: ssh（允许 api/local）",
             "mode 不认文案逐字"
         );
         let bad_fmt = format!(
@@ -564,8 +570,7 @@ timeout_s = 20
         );
         let e = rr3_brain_config_parse(&bad_fmt).unwrap_err();
         assert_eq!(
-            e,
-            "模型行 甲 api_format 暂不支持: anthropic（本批仅 openai）",
+            e, "模型行 甲 api_format 暂不支持: anthropic（本批仅 openai）",
             "api_format 不认文案逐字"
         );
         let missing = format!(
@@ -616,11 +621,11 @@ timeout_s = 20
         for (input, want) in [
             ("https://api.deepseek.com", "https://api.deepseek.com/v1"),
             ("https://api.deepseek.com/", "https://api.deepseek.com/v1"),
-            (" https://api.siliconflow.cn ", "https://api.siliconflow.cn/v1"),
             (
-                "https://api.deepseek.com/v1",
-                "https://api.deepseek.com/v1",
+                " https://api.siliconflow.cn ",
+                "https://api.siliconflow.cn/v1",
             ),
+            ("https://api.deepseek.com/v1", "https://api.deepseek.com/v1"),
             (
                 "https://open.bigmodel.cn/api/paas/v4",
                 "https://open.bigmodel.cn/api/paas/v4",

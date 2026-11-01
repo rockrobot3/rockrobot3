@@ -157,7 +157,10 @@ pub(crate) fn rr3_ops_write(
         .iter()
         .find(|(g, _)| *g == group)
         .ok_or_else(|| {
-            format!("组不认: '{group}'（白名单 {}）", rr3_ops_group_whitelist_text())
+            format!(
+                "组不认: '{group}'（白名单 {}）",
+                rr3_ops_group_whitelist_text()
+            )
         })?;
     if !slots.contains(&slot) {
         return Err(format!(
@@ -188,7 +191,10 @@ pub(crate) fn rr3_ops_write(
         }
         let f = value.as_f64().unwrap_or(0.0);
         if !(f > 0.0) {
-            return Err(format!("槽 {group}.{slot} 须 >0，收到 {}", rr3_py_float_str(f)));
+            return Err(format!(
+                "槽 {group}.{slot} 须 >0，收到 {}",
+                rr3_py_float_str(f)
+            ));
         }
         json!(f)
     } else {
@@ -315,7 +321,12 @@ pub(crate) fn rr3_ops_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<Val
     };
     let group = py_arg("group");
     let slot = py_arg("slot");
-    let (old, new) = rr3_ops_write(&mut cfg.doc, &group, &slot, args.get("value").unwrap_or(&Value::Null))?;
+    let (old, new) = rr3_ops_write(
+        &mut cfg.doc,
+        &group,
+        &slot,
+        args.get("value").unwrap_or(&Value::Null),
+    )?;
     Ok(json!({
         "ok": true,
         "group": group,
@@ -580,11 +591,7 @@ pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<V
         "activate" => rr3_model_activate(&mut rows, name)?,
         "delete" => rr3_model_delete(&mut rows, name)?,
         "" => return Err("缺 op（允许 upsert/activate/delete）".to_string()),
-        other => {
-            return Err(format!(
-                "op 不认: '{other}'（允许 upsert/activate/delete）"
-            ))
-        }
+        other => return Err(format!("op 不认: '{other}'（允许 upsert/activate/delete）")),
     }
     // 结构门（写面自守，不依赖 boot 兜底）：恰一 active
     let active_n = rows
@@ -768,7 +775,13 @@ max_utterance_ms = 8000
     fn ops_snapshot_llm_group_stays_at_boot_projection_after_live_write() {
         let mut cfg = repo_cfg();
         // live 写模型行 model_id（写源 = active 行）
-        rr3_ops_write(&mut cfg.doc, "llm", "llm_model", &json!("deepseek-reasoner")).unwrap();
+        rr3_ops_write(
+            &mut cfg.doc,
+            "llm",
+            "llm_model",
+            &json!("deepseek-reasoner"),
+        )
+        .unwrap();
         let v = rr3_ops_snapshot(&cfg).unwrap();
         assert_eq!(
             v["llm"]["llm_model"],
@@ -801,14 +814,12 @@ max_utterance_ms = 8000
         let mut cfg = repo_cfg();
         let e = rr3_ops_write(&mut cfg.doc, "memory", "x", &json!(1)).unwrap_err();
         assert_eq!(
-            e,
-            "组不认: 'memory'（白名单 ['asr', 'dialog', 'llm', 'tts']）",
+            e, "组不认: 'memory'（白名单 ['asr', 'dialog', 'llm', 'tts']）",
             "组不认文案逐字"
         );
         let e = rr3_ops_write(&mut cfg.doc, "asr", "sample_rate", &json!(1)).unwrap_err();
         assert_eq!(
-            e,
-            "组 asr 槽不认: 'sample_rate'（白名单 ['asr_model', 'base_url', 'timeout_s']）",
+            e, "组 asr 槽不认: 'sample_rate'（白名单 ['asr_model', 'base_url', 'timeout_s']）",
             "槽不认文案逐字"
         );
     }
@@ -818,7 +829,10 @@ max_utterance_ms = 8000
     fn ops_set_string_slots_validate() {
         let mut cfg = repo_cfg();
         let e = rr3_ops_write(&mut cfg.doc, "asr", "asr_model", &json!(42)).unwrap_err();
-        assert_eq!(e, "槽 asr.asr_model 须字符串，收到 int", "类型词 Python 对位");
+        assert_eq!(
+            e, "槽 asr.asr_model 须字符串，收到 int",
+            "类型词 Python 对位"
+        );
         let e = rr3_ops_write(&mut cfg.doc, "asr", "asr_model", &json!(null)).unwrap_err();
         assert_eq!(e, "槽 asr.asr_model 须字符串，收到 NoneType");
         let e = rr3_ops_write(&mut cfg.doc, "asr", "asr_model", &json!("   ")).unwrap_err();
@@ -840,16 +854,26 @@ max_utterance_ms = 8000
     fn ops_set_timeout_s_validates_and_writes_cloud() {
         let mut cfg = repo_cfg();
         let e = rr3_ops_write(&mut cfg.doc, "asr", "timeout_s", &json!(true)).unwrap_err();
-        assert_eq!(e, "槽 asr.timeout_s 须数值，收到 bool", "布尔先拒（Python 同序）");
+        assert_eq!(
+            e, "槽 asr.timeout_s 须数值，收到 bool",
+            "布尔先拒（Python 同序）"
+        );
         let e = rr3_ops_write(&mut cfg.doc, "llm", "timeout_s", &json!("30")).unwrap_err();
         assert_eq!(e, "槽 llm.timeout_s 须数值，收到 str");
         let e = rr3_ops_write(&mut cfg.doc, "tts", "timeout_s", &json!(0)).unwrap_err();
-        assert_eq!(e, "槽 tts.timeout_s 须 >0，收到 0.0", ">0 执法（Python float 形状）");
+        assert_eq!(
+            e, "槽 tts.timeout_s 须 >0，收到 0.0",
+            ">0 执法（Python float 形状）"
+        );
         let e = rr3_ops_write(&mut cfg.doc, "tts", "timeout_s", &json!(-1.5)).unwrap_err();
         assert_eq!(e, "槽 tts.timeout_s 须 >0，收到 -1.5");
         let (old, new) = rr3_ops_write(&mut cfg.doc, "llm", "timeout_s", &json!(25)).unwrap();
         assert_eq!(old, json!(20), "old 是 doc 原值（TOML 整数 20）");
-        assert_eq!(new, json!(25.0), "new 转 float（Python float(value) 同形状）");
+        assert_eq!(
+            new,
+            json!(25.0),
+            "new 转 float（Python float(value) 同形状）"
+        );
         assert_eq!(
             cfg.doc["rr3-brain"]["cloud"]["timeout_s"],
             json!(25.0),
@@ -866,7 +890,10 @@ max_utterance_ms = 8000
         assert_eq!(e, "槽 dialog.max_utterance_ms 须数值，收到 bool");
         let e =
             rr3_ops_write(&mut cfg.doc, "dialog", "max_utterance_ms", &json!(8000.5)).unwrap_err();
-        assert_eq!(e, "槽 dialog.max_utterance_ms 须整数，收到 8000.5", "小数拒");
+        assert_eq!(
+            e, "槽 dialog.max_utterance_ms 须整数，收到 8000.5",
+            "小数拒"
+        );
         let e = rr3_ops_write(&mut cfg.doc, "dialog", "max_utterance_ms", &json!(0)).unwrap_err();
         assert_eq!(e, "槽 dialog.max_utterance_ms 须 >0，收到 0");
         let (old, new) =
@@ -890,7 +917,11 @@ max_utterance_ms = 8000
             .remove("max_utterance_ms");
         let (old, new) =
             rr3_ops_write(&mut cfg.doc, "dialog", "max_utterance_ms", &json!(9000)).unwrap();
-        assert_eq!(old, Value::Null, "键缺席 old = null（Python dict.get 同形状）");
+        assert_eq!(
+            old,
+            Value::Null,
+            "键缺席 old = null（Python dict.get 同形状）"
+        );
         assert_eq!(new, json!(9000));
     }
 
@@ -915,8 +946,13 @@ max_utterance_ms = 8000
     #[test]
     fn ops_set_llm_write_source_two_states() {
         let mut cfg = repo_cfg();
-        let (old, new) =
-            rr3_ops_write(&mut cfg.doc, "llm", "llm_model", &json!("deepseek-reasoner")).unwrap();
+        let (old, new) = rr3_ops_write(
+            &mut cfg.doc,
+            "llm",
+            "llm_model",
+            &json!("deepseek-reasoner"),
+        )
+        .unwrap();
         assert_eq!(old, json!("deepseek-chat"));
         assert_eq!(new, json!("deepseek-reasoner"));
         assert_eq!(
@@ -935,8 +971,7 @@ max_utterance_ms = 8000
             .as_object_mut()
             .unwrap()
             .remove("model");
-        let (_, new) =
-            rr3_ops_write(&mut cfg.doc, "llm", "llm_model", &json!("new-llm")).unwrap();
+        let (_, new) = rr3_ops_write(&mut cfg.doc, "llm", "llm_model", &json!("new-llm")).unwrap();
         assert_eq!(new, json!("new-llm"));
         assert_eq!(
             cfg.doc["rr3-brain"]["cloud"]["llm_model"],
@@ -956,8 +991,7 @@ max_utterance_ms = 8000
         .unwrap();
         let e = rr3_ops_write(&mut doc, "llm", "llm_model", &json!("x")).unwrap_err();
         assert_eq!(
-            e,
-            "[[rr3-brain.model]] 须恰一行 active=true（现 2 行）——写面不修结构错误",
+            e, "[[rr3-brain.model]] 须恰一行 active=true（现 2 行）——写面不修结构错误",
             "两 active 行结构坏点名逐字（单 active 是合法结构会照写）"
         );
     }
@@ -986,9 +1020,8 @@ max_utterance_ms = 8000
             "六键应答体逐字（persisted:false 不落盘如实申报）"
         );
         // 业务失败走 Err（serve 折 {"error": …} 应答——Python try/except 同 wire）
-        let e =
-            rr3_ops_set_arm(&mut cfg, &json!({"group": "nope", "slot": "x", "value": 1}))
-                .unwrap_err();
+        let e = rr3_ops_set_arm(&mut cfg, &json!({"group": "nope", "slot": "x", "value": 1}))
+            .unwrap_err();
         assert!(e.contains("组不认"), "违规走 Err: {e}");
     }
 
@@ -999,14 +1032,12 @@ max_utterance_ms = 8000
         let mut cfg = repo_cfg();
         let e = rr3_ops_set_arm(&mut cfg, &json!({})).unwrap_err();
         assert_eq!(
-            e,
-            "组不认: ''（白名单 ['asr', 'dialog', 'llm', 'tts']）",
+            e, "组不认: ''（白名单 ['asr', 'dialog', 'llm', 'tts']）",
             "缺字段回落空串同形状"
         );
         let e = rr3_ops_set_arm(&mut cfg, &json!({"group": 5, "slot": null})).unwrap_err();
         assert_eq!(
-            e,
-            "组不认: '5'（白名单 ['asr', 'dialog', 'llm', 'tts']）",
+            e, "组不认: '5'（白名单 ['asr', 'dialog', 'llm', 'tts']）",
             "str(5)='5' coercion 同形状"
         );
     }
@@ -1015,7 +1046,13 @@ max_utterance_ms = 8000
     #[test]
     fn model_row_of_reflects_live_write() {
         let mut cfg = repo_cfg();
-        rr3_ops_write(&mut cfg.doc, "llm", "llm_model", &json!("deepseek-reasoner")).unwrap();
+        rr3_ops_write(
+            &mut cfg.doc,
+            "llm",
+            "llm_model",
+            &json!("deepseek-reasoner"),
+        )
+        .unwrap();
         let row = rr3_model_row_of(&cfg).unwrap();
         assert_eq!(row.model_id, "deepseek-reasoner", "重解析读 doc 真值");
     }
@@ -1120,7 +1157,10 @@ max_utterance_ms = 8000
         );
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("name = \"GLM\""), "{text}");
-        assert!(text.contains("base_url = \"https://open.bigmodel.cn/api/paas/v4\""), "{text}");
+        assert!(
+            text.contains("base_url = \"https://open.bigmodel.cn/api/paas/v4\""),
+            "{text}"
+        );
         assert_eq!(text.matches("active = true").count(), 1, "{text}");
         // .bak = 旧全量；内存投影同步为新 active 行
         let bak = std::fs::read_to_string(dir.join("config.toml.bak")).unwrap();
@@ -1153,8 +1193,7 @@ max_utterance_ms = 8000
         rr3_model_set_arm(&mut cfg, &json!({"op": "activate", "name": "Qwen"})).unwrap();
         assert_eq!(cfg.model.model_id, "qwen-plus");
         let reply =
-            rr3_model_set_arm(&mut cfg, &json!({"op": "delete", "name": "DeepSeek官方"}))
-                .unwrap();
+            rr3_model_set_arm(&mut cfg, &json!({"op": "delete", "name": "DeepSeek官方"})).unwrap();
         assert_eq!(reply["active"], json!("Qwen"));
         let v = rr3_model_list_snapshot(&cfg).unwrap();
         assert_eq!(v["models"].as_array().unwrap().len(), 1);
