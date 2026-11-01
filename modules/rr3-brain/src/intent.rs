@@ -126,7 +126,10 @@ mod tests {
     #[test]
     fn negative_guard_rejects() {
         for text in ["别开灯", "不要关灯", "先别开灯，等等"] {
-            assert!(rr3_extract_actions(text).is_empty(), "{text:?} 不得触发动作");
+            assert!(
+                rr3_extract_actions(text).is_empty(),
+                "{text:?} 不得触发动作"
+            );
         }
     }
 
@@ -134,7 +137,10 @@ mod tests {
     #[test]
     fn unrelated_text_yields_nothing() {
         for text in ["今天天气怎么样", "你好", "讲个故事", ""] {
-            assert!(rr3_extract_actions(text).is_empty(), "{text:?} 不得触发动作");
+            assert!(
+                rr3_extract_actions(text).is_empty(),
+                "{text:?} 不得触发动作"
+            );
         }
     }
 
@@ -190,7 +196,10 @@ mod tests {
     #[test]
     fn turn_negative_guard_rejects() {
         for text in ["别向左", "不要向右", "先别回中"] {
-            assert!(rr3_extract_actions(text).is_empty(), "{text:?} 不得触发转向");
+            assert!(
+                rr3_extract_actions(text).is_empty(),
+                "{text:?} 不得触发转向"
+            );
         }
     }
 

@@ -193,18 +193,37 @@ max_utterance_ms = 8000
     fn rewrite_replaces_block_and_keeps_outside_text() {
         let old = repo_text();
         let rows = vec![
-            row("DeepSeek官方", "https://api.deepseek.com/v1", "deepseek-chat", true),
-            row("GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4.5", false),
+            row(
+                "DeepSeek官方",
+                "https://api.deepseek.com/v1",
+                "deepseek-chat",
+                true,
+            ),
+            row(
+                "GLM",
+                "https://open.bigmodel.cn/api/paas/v4",
+                "glm-4.5",
+                false,
+            ),
         ];
         let new = rr3_model_block_rewrite(&old, &rows).unwrap();
         // 块外文本（cloud 段注释、bus/dialog 段）逐字保留
-        assert!(new.contains("# 主机根注释保留\nbase_url = \"https://api.siliconflow.cn\""), "{new}");
-        assert!(new.contains("[rr3-brain.bus]\ncall_timeout_s = 30.0\n"), "{new}");
+        assert!(
+            new.contains("# 主机根注释保留\nbase_url = \"https://api.siliconflow.cn\""),
+            "{new}"
+        );
+        assert!(
+            new.contains("[rr3-brain.bus]\ncall_timeout_s = 30.0\n"),
+            "{new}"
+        );
         assert!(new.contains("max_utterance_ms = 8000\n"), "{new}");
         // 旧行被替换、新两行都在，且 active 恰一行
         assert_eq!(new.matches("[[rr3-brain.model]]").count(), 2, "{new}");
         assert!(new.contains("name = \"GLM\""), "{new}");
-        assert!(new.contains("base_url = \"https://open.bigmodel.cn/api/paas/v4\""), "{new}");
+        assert!(
+            new.contains("base_url = \"https://open.bigmodel.cn/api/paas/v4\""),
+            "{new}"
+        );
         assert_eq!(new.matches("active = true").count(), 1, "{new}");
         // 块与下一表头之间留空行（排版与仓内一致）
         assert!(new.contains("active = false\n\n[rr3-brain.bus]"), "{new}");
@@ -223,11 +242,19 @@ max_utterance_ms = 8000
         let old = "[rr3-brain.cloud]\nbase_url = \"https://x\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n\n[rr3-brain.dialog]\nmax_utterance_ms = 8000";
         let new = rr3_model_block_rewrite(
             old,
-            &[row("Qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", true)],
+            &[row(
+                "Qwen",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "qwen-plus",
+                true,
+            )],
         )
         .unwrap();
         assert!(new.ends_with("active = true\n"), "{new}");
-        assert!(new.contains("max_utterance_ms = 8000\n\n[[rr3-brain.model]]"), "{new}");
+        assert!(
+            new.contains("max_utterance_ms = 8000\n\n[[rr3-brain.model]]"),
+            "{new}"
+        );
         assert!(crate::boot::rr3_brain_config_parse(&new).is_ok());
     }
 
@@ -261,7 +288,10 @@ max_utterance_ms = 8000
             .and_then(|v| v.get("model"))
             .and_then(toml::Value::as_array)
             .expect("块渲染后须是 model 行表");
-        assert_eq!(rows_tbl[0].get("name").and_then(toml::Value::as_str), Some("a\"b\\c"));
+        assert_eq!(
+            rows_tbl[0].get("name").and_then(toml::Value::as_str),
+            Some("a\"b\\c")
+        );
         // 缺 active 折 false（渲染面不猜"首行即 active"——那是写面策略）
         let out = rr3_model_block_render(&[json!({
             "name": "n",
@@ -280,7 +310,12 @@ max_utterance_ms = 8000
         let path = dir.join("config.toml");
         let old = repo_text();
         std::fs::write(&path, &old).unwrap();
-        let rows = vec![row("GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4.5", true)];
+        let rows = vec![row(
+            "GLM",
+            "https://open.bigmodel.cn/api/paas/v4",
+            "glm-4.5",
+            true,
+        )];
         let new = rr3_model_block_rewrite(&old, &rows).unwrap();
         rr3_config_persist(&path, &old, &new).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), new);

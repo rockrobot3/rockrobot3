@@ -9,20 +9,20 @@
 //! 词表在 [`intent`]；云端三家客户端与共享原语在 [`cloud`]，件四五件套拆分——
 //! asr/llm/tts 各件纯机制经 `#[path]` 原位挂载。
 
-#[path = "../atoms/dialog/dialog.rs"]
-mod dialog;
 #[path = "../atoms/asr/asr.rs"]
 mod asr;
-#[path = "../atoms/llm/llm.rs"]
-mod llm;
-#[path = "../atoms/tts/tts.rs"]
-mod tts;
 mod boot;
 mod cloud;
 mod config_store;
+#[path = "../atoms/dialog/dialog.rs"]
+mod dialog;
 mod dispatch;
 mod intent;
+#[path = "../atoms/llm/llm.rs"]
+mod llm;
 mod rpc;
+#[path = "../atoms/tts/tts.rs"]
+mod tts;
 
 use std::time::Duration;
 

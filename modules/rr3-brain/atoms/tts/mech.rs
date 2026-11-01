@@ -48,8 +48,7 @@ pub fn rr3_sine_pcm_ms(text: &str, sample_rate: u32, ms_per_char: u64) -> Vec<u8
     let total = (sample_rate as u64 * n * ms_per_char / 1000) as usize;
     let mut pcm = Vec::with_capacity(total * 2);
     for i in 0..total {
-        let v = (12000.0
-            * (core::f64::consts::TAU * 440.0 * i as f64 / sample_rate as f64).sin())
+        let v = (12000.0 * (core::f64::consts::TAU * 440.0 * i as f64 / sample_rate as f64).sin())
             as i16;
         pcm.extend_from_slice(&v.to_le_bytes());
     }

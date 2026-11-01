@@ -117,8 +117,7 @@ impl Rr3Dialog {
 
     /// 开轮中且时长上限到点（主循环每圈问一次）。
     pub fn rr3_utterance_expired(&self, now_ms: u64) -> bool {
-        self.active
-            && now_ms.saturating_sub(self.started_ms) as i64 >= self.max_utterance_ms
+        self.active && now_ms.saturating_sub(self.started_ms) as i64 >= self.max_utterance_ms
     }
 
     /// 交出本轮 PCM 并复位。未开轮时交空（调用方应先看判停条件）。
