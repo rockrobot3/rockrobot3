@@ -22,7 +22,7 @@
 #   （不上浮 f32）；>100 为放大，值域 0..=1000（10 倍封顶防呆），越界拒 boot。
 # 缺键回落默认（同 sense S-5 口径：代码侧默认仍是文件缺键的回落）。
 prebuffer_ms = 500
-volume_pct = 70
+volume_pct = 100
 
 [rr3-interact.face]
 # 不可点名集（I-11）：talk 由 TTS 播放自动驱动、不接受点名——规则从件内 if
