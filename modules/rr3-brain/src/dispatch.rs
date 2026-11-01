@@ -218,8 +218,7 @@ pub(crate) fn rr3_wake_decide(
             }
             let prefix: String = norm_chars.iter().collect();
             let phrase_prefix: String = pn_chars[..norm_chars.len()].iter().collect();
-            if rr3_wake_edit_distance(&prefix, &phrase_prefix)
-                <= rr3_wake_max_edits(pn_chars.len())
+            if rr3_wake_edit_distance(&prefix, &phrase_prefix) <= rr3_wake_max_edits(pn_chars.len())
             {
                 return Rr3WakeAction::Ack;
             }
@@ -365,6 +364,8 @@ pub(crate) struct Rr3BrainDispatcher {
     /// 最近一次接受轮（Ack/Command/FollowUp）的时刻（ms）——唤醒后跟进窗基准；
     /// `None` = 从未唤醒（非唤醒文本在窗外一律 Ignore）。
     last_wake_ms: Option<u64>,
+    /// 固定唤醒应答的 PCM：启动时预合成，唤醒轮直接复用，不再每次等待云端 TTS。
+    wake_ack_pcm: Option<Vec<u8>>,
 }
 
 impl Rr3BrainDispatcher {
@@ -373,7 +374,7 @@ impl Rr3BrainDispatcher {
     pub(crate) fn new(cfg: Rr3BrainCfg) -> Self {
         let clients = Rr3CloudClients::from_cfg(&cfg);
         let dialog = Rr3Dialog::rr3_new(cfg.max_utterance_ms);
-        Self {
+        let mut dispatcher = Self {
             cfg,
             clients,
             dialog,
@@ -381,6 +382,33 @@ impl Rr3BrainDispatcher {
             pcm_seq: 0,
             tb: Rr3TimeBase::rr3_time_base_new(),
             last_wake_ms: None,
+            wake_ack_pcm: None,
+        };
+        dispatcher.rr3_prewarm_wake_ack();
+        dispatcher
+    }
+
+    /// 固定唤醒语只合成一次；失败不阻断模块启动，首个唤醒轮仍会按需重试。
+    fn rr3_prewarm_wake_ack(&mut self) {
+        if !self.cfg.wake.enable || self.cfg.wake.ack.trim().is_empty() {
+            return;
+        }
+        let started = Instant::now();
+        match self
+            .clients
+            .tts
+            .rr3_synthesize(&self.cfg.wake.ack, RR3_TTS_SAMPLE_RATE)
+        {
+            Ok(pcm) if !pcm.is_empty() => {
+                eprintln!(
+                    "唤醒应答预合成就绪: {}ms pcm_bytes={}",
+                    started.elapsed().as_millis(),
+                    pcm.len()
+                );
+                self.wake_ack_pcm = Some(pcm);
+            }
+            Ok(_) => eprintln!("唤醒应答预合成返回空 PCM，首个唤醒轮将按需重试"),
+            Err(e) => eprintln!("唤醒应答预合成失败，首个唤醒轮将按需重试（{e}）"),
         }
     }
 
@@ -458,21 +486,22 @@ impl Rr3BrainDispatcher {
             }
         }
 
-        let user_text = match self
-            .clients
-            .asr
-            .rr3_transcribe(&pcm, RR3_TTS_SAMPLE_RATE)
-        {
+        let asr_started = Instant::now();
+        let user_text = match self.clients.asr.rr3_transcribe(&pcm, RR3_TTS_SAMPLE_RATE) {
             Ok(t) => t,
             Err(e) => {
                 bus.counter_bump("asr_fail", 1);
-                eprintln!("轮次 {trace}: ASR 失败，弃轮（{e}）");
+                eprintln!(
+                    "轮次 {trace}: ASR 失败，弃轮（asr_ms={}，{e}）",
+                    asr_started.elapsed().as_millis()
+                );
                 return Ok(());
             }
         };
+        let asr_cost_ms = asr_started.elapsed().as_millis();
         bus.counter_bump("asr_ok", 1);
         if user_text.trim().is_empty() {
-            eprintln!("轮次 {trace}: 识别为空文本，弃轮");
+            eprintln!("轮次 {trace}: 识别为空文本，弃轮（asr_ms={asr_cost_ms}）");
             return Ok(());
         }
 
@@ -482,15 +511,21 @@ impl Rr3BrainDispatcher {
         let now = self.tb.rr3_now_ms();
         let mut llm_input: Option<String> = None;
         let mut reply_text = String::new();
-        match rr3_wake_decide(&user_text, &self.cfg.wake, now, self.last_wake_ms) {
+        let wake_action = rr3_wake_decide(&user_text, &self.cfg.wake, now, self.last_wake_ms);
+        let is_wake_ack = matches!(wake_action, Rr3WakeAction::Ack);
+        match wake_action {
             Rr3WakeAction::Ignore => {
                 // 带 ASR 原文：唤醒不中时唯一可判读面（识别变体/前置语气词/误识别）
                 eprintln!(
-                    "轮次 {trace}: 未命中唤醒词（窗外），静默（ASR='{user_text}'）"
+                    "轮次 {trace}: 未命中唤醒词（窗外），静默（ASR='{user_text}'，asr_ms={asr_cost_ms}）"
                 );
                 return Ok(());
             }
             Rr3WakeAction::Ack => {
+                // 带 ASR 原文：Ack 轮是唯一不出"对话轮完成"user 文本的轮（固定
+                // 应答），留一行可判读面——2026-10-31 实机排查 TTS 超时静默时
+                // 曾只能靠轮次时序倒推是哪句。
+                eprintln!("轮次 {trace}: 唤醒应答（ASR='{user_text}'）");
                 self.last_wake_ms = Some(now);
                 reply_text = self.cfg.wake.ack.clone();
             }
@@ -503,29 +538,52 @@ impl Rr3BrainDispatcher {
                 llm_input = Some(user_text.clone());
             }
         }
+        let mut llm_cost_ms = "-".to_string();
         if let Some(input) = llm_input {
-            reply_text = match self.clients.llm.rr3_complete(&input) {
+            let llm_started = Instant::now();
+            let completed = self.clients.llm.rr3_complete(&input);
+            llm_cost_ms = llm_started.elapsed().as_millis().to_string();
+            reply_text = match completed {
                 Ok(t) => t,
                 Err(e) => {
                     bus.counter_bump("llm_fail", 1);
-                    eprintln!("轮次 {trace}: LLM 失败，弃轮（user='{user_text}'，{e}）");
+                    eprintln!(
+                        "轮次 {trace}: LLM 失败，弃轮（user='{user_text}'，llm_ms={llm_cost_ms}，{e}）"
+                    );
                     return Ok(());
                 }
             };
         }
 
-        let mut reply_pcm = match self
-            .clients
-            .tts
-            .rr3_synthesize(&reply_text, RR3_TTS_SAMPLE_RATE)
-        {
-            Ok(p) => p,
-            Err(e) => {
-                bus.counter_bump("tts_fail", 1);
-                eprintln!("轮次 {trace}: TTS 失败，弃轮（{e}）");
-                return Ok(());
-            }
+        let tts_started = Instant::now();
+        let cached_ack = if is_wake_ack {
+            self.wake_ack_pcm.clone()
+        } else {
+            None
         };
+        let mut reply_pcm = match cached_ack {
+            Some(pcm) => pcm,
+            None => match self
+                .clients
+                .tts
+                .rr3_synthesize(&reply_text, RR3_TTS_SAMPLE_RATE)
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    bus.counter_bump("tts_fail", 1);
+                    eprintln!(
+                        "轮次 {trace}: TTS 失败，弃轮（tts_cost_ms={}，{e}）",
+                        tts_started.elapsed().as_millis()
+                    );
+                    return Ok(());
+                }
+            },
+        };
+        let tts_cost_ms = tts_started.elapsed().as_millis();
+        if is_wake_ack && self.wake_ack_pcm.is_none() && !reply_pcm.is_empty() {
+            self.wake_ack_pcm = Some(reply_pcm.clone());
+        }
+        let ready_ms = asr_started.elapsed().as_millis();
         if reply_pcm.len() % 2 == 1 {
             reply_pcm.pop(); // 奇数长度截尾（Python reply_pcm[:-1] 同形状）
         }
@@ -549,8 +607,7 @@ impl Rr3BrainDispatcher {
                 // (int, float) 且非 bool 同形状（Null/串不进账）。
                 let played_ms = reply.get("played_ms").cloned().unwrap_or(Value::Null);
                 played = format!(" played_ms={}", rr3_py_str(&played_ms));
-                if matches!(played_ms, Value::Number(_))
-                    && played_ms.as_f64().unwrap_or(0.0) > 0.0
+                if matches!(played_ms, Value::Number(_)) && played_ms.as_f64().unwrap_or(0.0) > 0.0
                 {
                     bus.counter_bump("rounds_audible", 1);
                 }
@@ -582,8 +639,13 @@ impl Rr3BrainDispatcher {
         // （B-16①）：chat_rounds 一个词盖"应答"与"听见"两件事，退役拆两本
         bus.counter_bump("rounds_replied", 1);
         eprintln!(
-            "对话轮完成: trace={trace} user='{user_text}' reply='{reply_text}' tts_pcm_ms={tts_ms}{played} actions={actions_n}"
+            "对话轮完成: trace={trace} user='{user_text}' reply='{reply_text}' asr_ms={asr_cost_ms} llm_ms={llm_cost_ms} tts_cost_ms={tts_cost_ms} ready_ms={ready_ms} tts_pcm_ms={tts_ms}{played} actions={actions_n}"
         );
+        // 跟进窗基准 = 本轮完成（播放回执后）时刻：基准若停在轮内 ASR 完成点，
+        // LLM/TTS/整段播放会吃掉用户的 30s 窗——2026-10-31 实机两轮紧邻追问
+        // （"再说一下…"/"…推荐一下？"）因此被误判窗外静默。完成时刻起算，
+        // 用户在机器人说完后拥有完整 followup_ms。
+        self.last_wake_ms = Some(self.tb.rr3_now_ms());
         Ok(())
     }
 }
@@ -748,7 +810,9 @@ mod tests {
 
     /// mock 档整装 Dispatcher 夹具（编排面测试用：三客户端 mock 档＋config 话轮
     /// 封顶入状态机）。锁柄随测试全程持有（env 纪律同 mock_clients）。
-    fn mock_dispatcher(cfg: Rr3BrainCfg) -> (Rr3BrainDispatcher, std::sync::MutexGuard<'static, ()>) {
+    fn mock_dispatcher(
+        cfg: Rr3BrainCfg,
+    ) -> (Rr3BrainDispatcher, std::sync::MutexGuard<'static, ()>) {
         let g = env_lock();
         std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "mock");
         (Rr3BrainDispatcher::new(cfg), g)
@@ -828,7 +892,9 @@ mod tests {
         }
 
         fn call(&self, topic: &str, args: &Value, timeout: Duration) -> Result<Value, String> {
-            self.calls.borrow_mut().push((topic.to_string(), args.clone(), timeout));
+            self.calls
+                .borrow_mut()
+                .push((topic.to_string(), args.clone(), timeout));
             match &self.call_error {
                 Some(e) => Err(e.clone()),
                 None => Ok(self.reply.clone()),
@@ -843,8 +909,7 @@ mod tests {
         let mut c = cfg();
         let (mut cl, _g) = mock_clients(&c);
         let mut d = Rr3Dialog::rr3_new(8000);
-        let e = rr3_rpc_arm(&mut c, &mut cl, &mut d, "rr3-brain/other", &Value::Null)
-            .unwrap_err();
+        let e = rr3_rpc_arm(&mut c, &mut cl, &mut d, "rr3-brain/other", &Value::Null).unwrap_err();
         assert_eq!(
             e,
             "rr3-brain 只 exposes ['rr3-brain/llm/completion', 'rr3-brain/ops/list', 'rr3-brain/ops/set', 'rr3-brain/model/list', 'rr3-brain/model/set', 'rr3-brain/model/test']，收到 rr3-brain/other"
@@ -876,9 +941,19 @@ mod tests {
         let mut c = cfg();
         let (mut cl, _g) = mock_clients(&c);
         let mut d = Rr3Dialog::rr3_new(8000);
-        let v = rr3_rpc_arm(&mut c, &mut cl, &mut d, RR3_COMPLETION_TOPIC, &serde_json::json!({}))
-            .unwrap();
-        assert_eq!(v, serde_json::json!({"text": "（mock 回复）"}), "缺 text 回落空串");
+        let v = rr3_rpc_arm(
+            &mut c,
+            &mut cl,
+            &mut d,
+            RR3_COMPLETION_TOPIC,
+            &serde_json::json!({}),
+        )
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"text": "（mock 回复）"}),
+            "缺 text 回落空串"
+        );
         let v = rr3_rpc_arm(
             &mut c,
             &mut cl,
@@ -887,7 +962,11 @@ mod tests {
             &serde_json::json!({"text": 5}),
         )
         .unwrap();
-        assert_eq!(v, serde_json::json!({"text": "（mock 回复）5"}), "str(5)='5' coercion");
+        assert_eq!(
+            v,
+            serde_json::json!({"text": "（mock 回复）5"}),
+            "str(5)='5' coercion"
+        );
     }
 
     /// completion 臂 real 档缺密钥：业务失败 Err 折 error 应答（Python try/except
@@ -980,7 +1059,8 @@ mod tests {
     fn event_arm_ignores_unsubscribed_topics() {
         let (mut dp, _g) = mock_dispatcher(cfg());
         let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
-        dp.rr3_event_arm("rr3-other/topic", &json!({"x": 1}), &bus).unwrap();
+        dp.rr3_event_arm("rr3-other/topic", &json!({"x": 1}), &bus)
+            .unwrap();
         assert!(bus.published.borrow().is_empty());
         assert!(bus.bumps.borrow().is_empty());
     }
@@ -993,10 +1073,12 @@ mod tests {
         let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
         dp.rr3_event_arm(RR3_TOPIC_PCM, &pcm_event_body(b"\x01\x02", 200), &bus)
             .unwrap(); // onset 前判据段（预滚）
-        dp.rr3_event_arm(RR3_TOPIC_VAD, &json!({"edge": "onset"}), &bus).unwrap();
+        dp.rr3_event_arm(RR3_TOPIC_VAD, &json!({"edge": "onset"}), &bus)
+            .unwrap();
         dp.rr3_event_arm(RR3_TOPIC_PCM, &pcm_event_body(b"\x03\x04", 32), &bus)
             .unwrap();
-        dp.rr3_event_arm(RR3_TOPIC_VAD, &json!({"edge": "offset"}), &bus).unwrap();
+        dp.rr3_event_arm(RR3_TOPIC_VAD, &json!({"edge": "offset"}), &bus)
+            .unwrap();
         // intent 发布 = 整轮走通的观测面（trace 从 1 起）
         let intent = &dp_published_intent(&bus);
         assert_eq!(intent["trace"], 1);
@@ -1038,7 +1120,8 @@ mod tests {
         let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
         dp.rr3_event_arm(RR3_TOPIC_PCM, &pcm_event_body(b"\x01\x02", 32), &bus)
             .unwrap();
-        dp.rr3_event_arm(RR3_TOPIC_VAD, &json!({"edge": "onset"}), &bus).unwrap();
+        dp.rr3_event_arm(RR3_TOPIC_VAD, &json!({"edge": "onset"}), &bus)
+            .unwrap();
         dp.rr3_tick_arm(&bus).unwrap();
         assert!(
             !bus.published_of(RR3_TOPIC_INTENT).is_empty(),
@@ -1069,7 +1152,10 @@ mod tests {
     fn frames_exact_multiple_is_split_at_20ms_blocks() {
         let (frames, seq) = rr3_tts_pcm_frames(&pcm_bytes(RR3_TTS_PCM_FRAME_BYTES * 3), 0);
         assert_eq!(
-            frames.iter().map(|f| f["seq"].as_u64().unwrap()).collect::<Vec<_>>(),
+            frames
+                .iter()
+                .map(|f| f["seq"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
         assert_eq!(seq, 3);
@@ -1078,7 +1164,12 @@ mod tests {
             assert_eq!(f["rate"], 16000);
             assert_eq!(f["channels"], 1);
             assert_eq!(f["ms"], 20, "320 样点 @16k");
-            assert_eq!(rr3_base64_decode(f["pcm_b64"].as_str().unwrap()).unwrap().len(), RR3_TTS_PCM_FRAME_BYTES);
+            assert_eq!(
+                rr3_base64_decode(f["pcm_b64"].as_str().unwrap())
+                    .unwrap()
+                    .len(),
+                RR3_TTS_PCM_FRAME_BYTES
+            );
         }
     }
 
@@ -1104,7 +1195,10 @@ mod tests {
         let (_, seq) = rr3_tts_pcm_frames(&pcm_bytes(RR3_TTS_PCM_FRAME_BYTES), 5);
         let (frames, seq) = rr3_tts_pcm_frames(&pcm_bytes(RR3_TTS_PCM_FRAME_BYTES * 2), seq);
         assert_eq!(
-            frames.iter().map(|f| f["seq"].as_u64().unwrap()).collect::<Vec<_>>(),
+            frames
+                .iter()
+                .map(|f| f["seq"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
             vec![7, 8]
         );
         assert_eq!(seq, 8);
@@ -1117,8 +1211,7 @@ mod tests {
     fn frames_match_shared_golden_vector() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../contracts/golden/tts-pcm-frames.json");
-        let golden: Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let golden: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let raw = hex_to_bytes(golden["pcm_hex"].as_str().unwrap());
         let (frames, seq) = rr3_tts_pcm_frames(&raw, 0);
         assert_eq!(
@@ -1225,7 +1318,10 @@ mod tests {
     fn wake_decision_states_and_window() {
         let mut cfg = Rr3WakeCfg::default();
         cfg.enable = true;
-        assert_eq!(rr3_wake_decide("你好洛克", &cfg, 0, None), Rr3WakeAction::Ack);
+        assert_eq!(
+            rr3_wake_decide("你好洛克", &cfg, 0, None),
+            Rr3WakeAction::Ack
+        );
         assert_eq!(
             rr3_wake_decide("你好，洛克！", &cfg, 0, None),
             Rr3WakeAction::Ack,
@@ -1245,7 +1341,12 @@ mod tests {
         );
         // 2026-10-31 用户裁定：ASR 变体不可控 → "你好"开头即唤醒（含裸"你好"）
         for t in [
-            "你好骆天。", "你好洛天。", "你好要是。", "你好老师。", "你好洛哥。", "你好",
+            "你好骆天。",
+            "你好洛天。",
+            "你好要是。",
+            "你好老师。",
+            "你好洛哥。",
+            "你好",
         ] {
             assert_eq!(
                 rr3_wake_decide(t, &cfg, 0, None),
@@ -1301,6 +1402,47 @@ mod tests {
             Rr3WakeAction::FollowUp,
             "关闭门控 = 全放行（旧版行为）"
         );
+    }
+
+    /// 固定唤醒应答在启动时预合成；第一轮 Ack 只请求 ASR，不再请求 TTS。
+    #[test]
+    fn wake_ack_pcm_prewarmed_and_reused() {
+        let _g = env_lock();
+        let srv = crate::cloud::testkit::FakeCloud::start();
+        std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(crate::cloud::RR3_API_KEY_ENV, "test-key");
+        std::env::remove_var(crate::cloud::RR3_TTS_BACKEND_ENV);
+        let cfg = rr3_brain_config_parse(&format!(
+            "[rr3-brain.cloud]\nbase_url = \"{}\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 1\n[rr3-brain.dialog]\n[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\"]\nack = \"我在呢\"\nfollowup_ms = 30000\n",
+            srv.base
+        ))
+        .unwrap();
+        let mut dp = Rr3BrainDispatcher::new(cfg);
+        assert!(dp.wake_ack_pcm.is_some(), "启动即备好固定应答 PCM");
+        assert_eq!(srv.requests.lock().unwrap().len(), 1, "预合成只打一次 TTS");
+
+        dp.dialog.rr3_feed_vad("onset", 0);
+        dp.dialog
+            .rr3_feed_pcm(&rr3_base64_encode(&pcm_bytes(320)), 32)
+            .unwrap();
+        let bus = FakeTurnBus::reply(json!({"played_ms": 120}));
+        dp.rr3_finish_turn(&bus).unwrap();
+
+        let paths: Vec<String> = srv
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(path, _, _)| path.clone())
+            .collect();
+        assert_eq!(
+            paths,
+            vec!["/v1/audio/speech", "/v1/audio/transcriptions"],
+            "首个唤醒轮复用预合成 PCM，不再等第二次 TTS"
+        );
+        assert_eq!(dp_last_intent(&bus)["reply_text"], "我在呢");
+        std::env::remove_var(crate::cloud::RR3_API_KEY_ENV);
+        std::env::remove_var(crate::cloud::RR3_CLOUD_MODE_ENV);
     }
 
     /// 唤醒词整轮（mock 档）：无唤醒窗外 → 静默不发布；仅唤醒 → 固定应答且

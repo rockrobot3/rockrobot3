@@ -13,7 +13,8 @@ base_url = "https://api.siliconflow.cn"
 asr_model = "iic/SenseVoiceSmall"
 llm_model = "deepseek-ai/DeepSeek-V3"
 tts_model = "FunAudioLLM/CosyVoice2-0.5B"
-timeout_s = 20
+# 单次云端 HTTP 上界；ASR/TTS 瞬时失败最多重试一次，避免故障轮拖到 40 秒级。
+timeout_s = 8
 
 # 模型连接表（0.0.6 抽象批，LLM 腿）：每行一个连接，填"格式/地址/模型名"即可接
 # 任意云端或本地 OpenAI 兼容服务（DeepSeek 官方 / SiliconFlow / GLM / Qwen / Ollama…），
