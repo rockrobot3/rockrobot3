@@ -22,6 +22,10 @@
 // 越程拒收的判据全部读生成表）。include! 路径相对本文件（atoms/servo/）。
 include!("../../src/axis_gen.rs");
 
+// 换算与行程判定的机制体在 periph-mech（P0-A A3）：本件只持本板生成表（策略面 →
+// 机制单向依赖），判据/文案/公式零副本。
+use periph_mech::periph_core::{rr3_axis_check, rr3_deg_to_duty, rr3_duty_to_deg};
+
 /// 轴身份（行程/中位/点名都从生成表查得——机制不写字面量；查无此轴 panic =
 /// 生成物与本枚举失配，fail-closed 不静默）。
 #[derive(Clone, Copy)]
@@ -67,33 +71,24 @@ impl Axis {
 /// 角度 → duty ticks（线性 0–180 ↦ duty_min–duty_max；入参已由调用方 clamp
 /// 0–180）。duty 锚点由调用方按参传入（策略量，见模块文档）。
 pub(crate) fn deg_to_duty(deg: u32, duty_min: u32, duty_max: u32) -> u32 {
-    duty_min + (deg * (duty_max - duty_min)) / 180
+    rr3_deg_to_duty(deg, duty_min, duty_max)
 }
 
 /// duty ticks → 角度（回读换算，与 [`deg_to_duty`] 互逆的整数近似，±1° 内）。
 pub(crate) fn duty_to_deg(duty: u32, duty_min: u32, duty_max: u32) -> u32 {
-    ((duty.saturating_sub(duty_min)) * 180 + (duty_max - duty_min) / 2) / (duty_max - duty_min)
+    rr3_duty_to_deg(duty, duty_min, duty_max)
 }
 
 /// 轴行程校验（**纯函数**：只算不碰硬件，控制面能在下发作业前即时拒）。
 /// 与运行面 [`crate::periph::RtPeriph::servo_set`] 共用同一判据、同一文案。
 pub(crate) fn axis_check(axis: Axis, deg: u32) -> Result<u32, String> {
-    if deg > 180 {
-        return Err(format!("角度超范围 0-180: {deg}"));
-    }
     let Some((lo, hi, center)) = rr3_axis_travel(axis.name()) else {
         return Err(format!(
             "{} 轴无行程表（axis_gen.rs 生成物缺轴）",
             axis.name()
         ));
     };
-    if !(lo..=hi).contains(&deg) {
-        return Err(format!(
-            "{} 轴超出行程 [{lo}, {hi}]（中位 {center}°）: {deg}",
-            axis.name()
-        ));
-    }
-    Ok(deg)
+    rr3_axis_check(axis.name(), lo, hi, center, deg)
 }
 
 /// 轴行程五等分判据点（SCAN 判据：端点 + 三分点，全部落在本轴行程内——

@@ -115,9 +115,8 @@ use crate::commands::cmd_loop;
 use crate::face::expr_eye_base;
 use crate::oled::{i2c_bus_unstick, i2c_scan, oled_init, oled_text};
 use crate::periph::{CtlUart, RtPeriph};
-use crate::power::{RailJudge, RailMonitor, RailTier};
+use crate::power::RailMonitor;
 use crate::runtime::runtime_loop;
-use crate::servo::Axis;
 use crate::state::{lock_bus, push_job, Bus, Job, PeriphState};
 
 // ---------------------------------------------------------------------------
@@ -331,19 +330,8 @@ fn main() {
     let max_duty = pan.get_max_duty();
     // 外设 'static 化 + 分发两平面（16KB 运行下限，哨兵纪律）：UART2 → 控制面，
     // I2C/LEDC → 运行面；共享 Bus（Arc<Mutex>）连通两面。
-    let mut rt = RtPeriph {
-        i2c,
-        pan,
-        tilt,
-        // 初始姿态 = 各轴中位锚（生成表 center，批N3 件五：行程真值收敛档案）
-        pan_deg: Axis::Pan.center_deg(),
-        tilt_deg: Axis::Tilt.center_deg(),
-        contrast_idx: 0,
-        rail,
-        next_rail_ms: 0,
-        rail_judge: RailJudge::new(),
-        rail_tier: RailTier::Ok,
-    };
+    // 装配移交：初始账角 = 各轴中位锚、判定核两线阈值取策略面（RtPeriph::new 单点）。
+    let mut rt = RtPeriph::new(i2c, pan, tilt, rail);
     // **舵机暂不激磁**：装配即经端口释放两轴 duty=0（无脉冲=舵机松脱），待运行面把
     // 开机表情画完再走 `Move` 激磁——板上 5V 直供下舵机一动即拉塌轨压触发 BOD 复位
     // （真板实录：boot 画面出后 ~0.1s 即 `Brownout detector was triggered`），"先表情
