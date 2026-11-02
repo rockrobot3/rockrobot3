@@ -54,6 +54,10 @@ pub(crate) struct RtPeriph {
     pub(crate) rail_judge: RailJudge,
     /// 5V 轨当前档位（快门值；`servo_set` 拒动判据，由运行面采样刷新）。boot 初值 `Ok`。
     pub(crate) rail_tier: RailTier,
+    /// I2C 自愈连续失败计数（成功清零；到 5 次进入退避，防硬拉死时每拍强驱）。
+    pub(crate) selfheal_fail_streak: u32,
+    /// I2C 自愈退避截止时刻（esp_timer ms；未到则不再强驱）。
+    pub(crate) selfheal_holdoff_until_ms: u64,
 }
 
 impl RtPeriph {
@@ -75,6 +79,8 @@ impl RtPeriph {
             next_rail_ms: 0,
             rail_judge: RailJudge::new(RAIL_MILD_MV, RAIL_SEVERE_MV),
             rail_tier: RailTier::Ok,
+            selfheal_fail_streak: 0,
+            selfheal_holdoff_until_ms: 0,
         }
     }
 
