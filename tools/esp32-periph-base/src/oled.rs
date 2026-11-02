@@ -37,8 +37,9 @@ fn i2c_write_retry(i2c: &mut impl Rr3I2cPort, addr: u8, bytes: &[u8]) -> Result<
             Err(e) => {
                 last = e;
                 if attempt < I2C_RETRY {
-                    // 失败即先自愈总线再退避重发（丢拍锁死是本工程主故障模式）
-                    let _ = i2c_bus_recover(false);
+                    // 失败即先**强制**重同步再退避重发（丢拍/半途态是本工程主故障模式；
+                    // 成功路径不再每拍 force，避免反复夺脚扰动 I2C/SCAN）。
+                    let _ = i2c_bus_recover(true);
                     thread::sleep(Duration::from_millis(I2C_RETRY_DELAY_MS));
                 }
             }
@@ -57,10 +58,10 @@ fn i2c_write_retry(i2c: &mut impl Rr3I2cPort, addr: u8, bytes: &[u8]) -> Result<
 /// 3) `i2c_set_pin` 把两脚**交还 I2C 外设**（否则位置留在 GPIO 功能，后续事务全废）。
 /// 与启动期版本唯一差别就是第 3 步（启动期驱动尚未装，不需要交还）。
 ///
-/// `force` 参数：**无条件**打 9 时钟 + STOP。真板实锤（2026-10-12 第二批）：舵机电机
-/// 换向噪声会在**空闲期**（两笔事务之间）把 SSD1306 的 I2C 状态机顶进"半途态"——此后
-/// 恒 NACK，而**此刻 SDA 是高电平**（不是被拉低的"锁死"），故条件版（只在 SDA 低时打
-/// 时钟）根本不触发、救不回来。故在每次动作收尾（尤其舵机动作后）**强制**重同步一次。
+/// `force` 参数：写失败路径用 `true` 做**无条件** 9 时钟 + STOP 重同步——舵机换向噪声
+/// 可在两笔事务之间把 SSD1306 顶进"半途态"（此后恒 NACK 而 SDA 仍高，条件版不触发）；
+/// 运行面每拍用 `false`，只在 SDA 低时动作，空闲 SDA 高直接返回、不夺脚（避免每拍
+/// 把 I2C 引脚切到 GPIO 再交还，SCAN/密集动作中反复扰动可触发复位）。
 ///
 /// **引脚真值（批N41 件一修订批N4 件七(c)）**：SDA/SCL 取注入态；未注入回编译期
 /// 装配锚（[`rr3_i2c_pins_for_recovery`]）——独立部署（音频独占 UART、无 act 桥）下
@@ -74,6 +75,12 @@ pub(crate) fn i2c_bus_recover(force: bool) -> bool {
     let (sda, scl) = (sda as i32, scl as i32);
     let mut clear = true;
     unsafe {
+        // **空闲快路（批N41 件二修订）**：非强制且 SDA 高 → 直接返回，不夺脚、不
+        // `i2c_set_pin`。旧版每拍 force 会在 SCAN/密集动作中反复把 I2C 引脚切到
+        // GPIO 再交还，真板实测可触发复位；半途态改由 I2C 写失败路径 force 处理。
+        if !force && sys::gpio_get_level(sda) != 0 {
+            return true;
+        }
         sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
         sys::gpio_set_pull_mode(sda, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
         sys::gpio_set_direction(scl, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
