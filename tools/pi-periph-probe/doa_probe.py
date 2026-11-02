@@ -33,8 +33,11 @@ import json
 import math
 import os
 import statistics
+import struct
+import subprocess
 import sys
 import time
+import wave
 
 from probe_common import (
     MAGIC, HEADER_LEN, OFF_PAYLOAD_LEN,
@@ -49,8 +52,24 @@ BAUD = baud_from_argv_or_env(1)
 #: 实验只拿到 2-5/6 有效触发）；标定跳过（三轮实测通道偏差 ≤0.04dB，可忽略）。
 #: `AB` = 双相位 A/B：先用户左手边 12s、隔 8s 再右手边 12s——两段 ILD 符号
 #: 一锤定音钉死「用户方位→通道」映射（此前 L/R 轮各自为负，疑似参照系混淆）。
+#: 3×10 形式验收模式：`doa_probe.py B1500000 ACCEPT [每侧轮数=10] [每轮秒=6]`。
+#: 轮次块 = 左×N → 中×N → 右×N（换块留 8s 走位）；判据 = xcorr 分数 lag（镜像映射，
+#: 由 2026-11-02 AB 双相位实录钉死：neg=左 / pos=右 / |lag|≤0.5=中），每侧 ≥8/10。
+ACC = len(sys.argv) > 2 and sys.argv[2] == "ACCEPT"
 FAST = len(sys.argv) > 2 and sys.argv[2] in ("L", "R", "C", "AB")
-if FAST:
+if ACC:
+    # 可选单侧块：`ACCEPT L 10 8`（先逐侧验收，便于现场聚焦站位）；
+    # 无侧别参数则三侧全跑：`ACCEPT [每侧N=10] [每轮秒=8]`。
+    if len(sys.argv) > 3 and sys.argv[3] in ("L", "C", "R"):
+        ACC_SIDES = [sys.argv[3]]
+        TRIALS = int(sys.argv[4]) if len(sys.argv) > 4 else 10
+        SHOT_SECS = float(sys.argv[5]) if len(sys.argv) > 5 else 8.0
+    else:
+        ACC_SIDES = ["L", "C", "R"]
+        TRIALS = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+        SHOT_SECS = float(sys.argv[4]) if len(sys.argv) > 4 else 8.0
+    ROUNDS = [s for s in ACC_SIDES for _ in range(TRIALS)]
+elif FAST:
     ROUNDS = [sys.argv[2]] if sys.argv[2] != "AB" else ["L", "R"]
     SHOT_SECS = float(sys.argv[3]) if len(sys.argv) > 3 else 12.0
 else:
@@ -59,12 +78,36 @@ else:
     ROUNDS = ["L", "L", "R", "R", "C", "C"]
 #: AB 双相位间的换位间隔秒。
 AB_GAP_SECS = 8.0
+#: ACCEPT 换块走位间隔 / 每轮起喊前的 3-2-1 倒数秒（OLED 逐秒更新，避免错过 6s 窗）。
+ACC_BLOCK_GAP_SECS = 10.0
+ACC_COUNTDOWN = (3, 2, 1)
+#: xcorr 主峰最低置信（ACC 模式）：低于此值判"无效/噪声"，不计入有效轮。
+ACC_MIN_PEAK = 0.06
+#: ACCEPT 判向映射：1=镜像（neg=左，AB 2026-11-02 实录），0=直读（pos=左）。
+MIRROR = os.environ.get("RR3_DOA_MIRROR", "1") != "0"
 #: 1 采样点 @16kHz 的声程（343 m/s / 16000）。互相关 lag 换算物理量用。
 CM_PER_SAMPLE = 34300.0 / 16000.0
 #: onset 检出：轮内全轮中位 × 1.2（v5 实测喊话窗只有 1.25-1.4× 中位，1.3 会漏）
 ONSET_RATIO = 1.2
 
 parse_errors = 0
+
+
+BEEP_WAV = "/tmp/doa_beep.wav"
+
+
+def rr3_beep(times=1):
+    """ACC 验收的可听节拍（Pi USB 扬声器）：侧别=1/2/3 声，开场长一声。
+    只在 AUDIO ON 之前播放，避免提示音被麦克风收进本轮样本。"""
+    if not os.path.exists(BEEP_WAV):
+        with wave.open(BEEP_WAV, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            for i in range(int(16000 * 0.12)):
+                w.writeframes(struct.pack("<h", int(12000 * math.sin(2 * math.pi * 880 * i / 16000))))
+    for _ in range(times):
+        subprocess.run(["aplay", "-q", BEEP_WAV], check=False)
 
 
 def line(fd, cmd, wait=0.8):
@@ -209,7 +252,9 @@ def xcorr_profile(L, R, start, nwin=2048, max_lag=8):
 def main():
     fd = open_tty(DEV, BAUD)
     drain_until_quiet(fd, 0.5, 2.0)
-    mode = f"快跑单侧 {ROUNDS}" if FAST else f"{len(ROUNDS)} 轮（计划 {'→'.join(ROUNDS)}）"
+    mode = (f"3×{TRIALS} 验收（{'→'.join(ACC_SIDES)}）" if ACC
+            else f"快跑单侧 {ROUNDS}" if FAST
+            else f"{len(ROUNDS)} 轮（计划 {'→'.join(ROUNDS)}）")
     print(f"=== DoA 判定实验：{mode}，每轮 {SHOT_SECS}s ===")
     line(fd, "AUDIO OFF", 0.5)  # 杜绝上一会话遗留流
     if FAST:
@@ -228,17 +273,30 @@ def main():
         print(f"  底噪 {len(noise)} 对：rms L={ambL:.0f} R={ambR:.0f} → 通道偏差 {bias_db:+.2f} dB（ILD 判读一律减它）")
 
     rows = []
+    prev_side = None
     for idx, side in enumerate(ROUNDS, 1):
-        if FAST:
+        if ACC:
+            if prev_side is not None and side != prev_side:
+                where = {"L": "左", "C": "中间", "R": "右"}[side]
+                print(f"  （{ACC_BLOCK_GAP_SECS:.0f}s 换位：请走到【{where}】）")
+                time.sleep(ACC_BLOCK_GAP_SECS)
+            print(f"--- 第 {idx}/{len(ROUNDS)} 轮：真值 = {side}（可听提示：{ {'L':1,'C':2,'R':3}[side] } 声 + 长开场）---")
+            rr3_beep({"L": 1, "C": 2, "R": 3}[side])  # 侧别节拍
+            for n in ACC_COUNTDOWN:
+                line(fd, f"OLED T{idx}:{side} {n}", 0.25)
+                time.sleep(0.75)
+            rr3_beep(1)  # 开场长一声：听到即喊
+            time.sleep(0.25)
+            prev_side = side
+        elif FAST:
             print(f"--- 第 {idx} 轮：你的【{'左' if side == 'L' else '右'}】手边"
                   f"（12s 内任意时刻喊两声）---")
+            if len(ROUNDS) > 1 and idx > 1:
+                print(f"  （{AB_GAP_SECS:.0f}s 换位：请走到你的【右】手边）")
+                time.sleep(AB_GAP_SECS)
         else:
             print(f"--- 第 {idx} 轮：真值方位 = {side}（OLED 已亮提示，请喊两声）---")
-        if not FAST:
             line(fd, f"OLED R{idx}:{side}", 0.6)
-        elif len(ROUNDS) > 1 and idx > 1:
-            print(f"  （{AB_GAP_SECS:.0f}s 换位：请走到你的【右】手边）")
-            time.sleep(AB_GAP_SECS)
         flush_input(fd)
         line(fd, "AUDIO ON", 0.5)
         pairs = collect(fd, SHOT_SECS)
@@ -271,8 +329,19 @@ def main():
         # 最响窗 ILD（onset 可能抓到走动声；最响窗更可能是真喊声峰值段）
         m2 = min(imax + 4096, n)
         ild_max = db(rms(L[imax:m2])) - db(rms(R[imax:m2])) - bias_db
-        # 互相关：跳过起始 16ms（上升沿混响未稳），128ms 窗
-        lags, cs, kmax, kmin, kabs, frac = xcorr_profile(L, R, on + 256)
+        # 互相关：常规用 onset 后 16ms（上升沿混响未稳）；ACC 验收改用**最响窗**起点
+        # （短促喊声的低 SNR 下，onset 落在辅音/碰桌瞬态会让相关峰落在噪声上）。
+        xc_start = imax if ACC else on + 256
+        xc_start = max(0, min(xc_start, n - 2048))
+        lags, cs, kmax, kmin, kabs, frac = xcorr_profile(L, R, xc_start)
+        # 主峰（argmax）分数 lag：ACC 验收用真峰，不用 |c|（负相关伪峰会抬 lag）。
+        # 注意 kmax 是 **lag 值**不是下标；抛物线插值须先换回下标。
+        ki = lags.index(kmax)
+        frac_max = float(kmax)
+        if 0 < ki < len(cs) - 1:
+            den = cs[ki - 1] - 2 * cs[ki] + cs[ki + 1]
+            if den < 0:
+                frac_max = kmax + 0.5 * (cs[ki - 1] - cs[ki + 1]) / den
         print(f"  onset@{on / 16000.0:.2f}s 基线={base:.0f} 触发值={v:.0f} 最响窗@{imax / 16000.0:.2f}s")
         print(f"  起始ILD={ild_on:+.2f}dB 全窗ILD={ild_full:+.2f}dB 最响窗ILD={ild_max:+.2f}dB")
         print(f"  xcorr: argmax={kmax:+d}({cs[lags.index(kmax)]:+.3f}) "
@@ -280,7 +349,52 @@ def main():
               f"argmax|c|={kabs:+d} |c|={abs(cs[lags.index(kabs)]):.3f} frac={frac:+.2f} "
               f"声程={frac * CM_PER_SAMPLE:+.1f}cm")
         print(f"  剖面: {' '.join(f'{lag:+d}:{c:+.3f}' for lag, c in zip(lags, cs))}")
-        rows.append((side, ild_on, ild_full, ild_max, frac, abs(cs[lags.index(kabs)])))
+        if ACC:
+            print(f"  主峰 frac={frac_max:+.2f} c={cs[ki]:+.3f}（ACC 判据用主峰）")
+            rows.append((side, ild_on, ild_full, ild_max, frac_max, cs[ki]))
+        else:
+            rows.append((side, ild_on, ild_full, ild_max, frac, abs(cs[lags.index(kabs)])))
+
+    if ACC:
+        # ---- 3×N 形式验收：只用 xcorr 分数 lag；映射由 AB 实录钉死（MIRROR）----
+        def judge_xc(frac):
+            if abs(frac) < 0.5:
+                return "C"
+            if MIRROR:
+                return "L" if frac < 0 else "R"
+            return "L" if frac > 0 else "R"
+
+        need = (TRIALS * 8 + 9) // 10
+        stat = {s: {"total": 0, "valid": 0, "ok": 0} for s in ("L", "C", "R")}
+        print("=== 3×N 验收（xcorr 镜像映射，阈值 |lag|≤0.5 判中；每侧 ≥%d/%d 通过）===" % (need, TRIALS))
+        for i, (side, io, ifu, imx, frac, cabs) in enumerate(rows, 1):
+            st = stat[side]
+            st["total"] += 1
+            if frac is None:
+                print(f"T{i:<2}{side:<3}（无触发/作废）")
+                continue
+            if cabs < ACC_MIN_PEAK:
+                print(f"T{i:<2}{side:<3} frac={frac:+6.2f} c={cabs:.3f}（主峰置信不足，记无效）")
+                continue
+            st["valid"] += 1
+            j = judge_xc(frac)
+            ok = j == side
+            st["ok"] += int(ok)
+            print(f"T{i:<2}{side:<3} frac={frac:+6.2f} c={cabs:.3f} 判={j} {'✓' if ok else '✗'}")
+        all_ok = True
+        for s in ACC_SIDES:
+            st = stat[s]
+            ok = st["ok"] >= need
+            all_ok = all_ok and ok
+            print("  %s: %d/%d 正确（有效 %d/%d）%s" % (
+                {"L": "左", "C": "中", "R": "右"}[s], st["ok"], st["total"],
+                st["valid"], st["total"], "PASS" if ok else "FAIL"))
+        print("[%s] %s×%d DoA 验收（镜像映射=%s）" % (
+            "PASS" if all_ok else "FAIL", "/".join(ACC_SIDES), TRIALS,
+            "是" if MIRROR else "否"))
+        print(f"解析失败 {parse_errors} 次")
+        line(fd, "FACE idle", 0.5)
+        return
 
     # ---- 汇总：真值一致率（H1=正证据判左；H2=镜像）----
     print("=== 汇总（真值 → 各特征判读；判读阈值 ILD ±0.5dB / xcorr ±0.5 采样点）===")
