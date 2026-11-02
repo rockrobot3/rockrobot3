@@ -23,6 +23,7 @@
 pub mod cmd;
 pub mod consts;
 pub mod host_call;
+pub mod ports;
 pub mod request;
 pub mod response;
 

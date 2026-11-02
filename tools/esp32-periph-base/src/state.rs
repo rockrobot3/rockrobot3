@@ -7,7 +7,7 @@ use rr_ipc::Rr3BoardBindings;
 
 use crate::face::{EyeStyle, EYE_IDLE};
 use crate::link::{reply, UartIo};
-use crate::ports::Rr3UartPort;
+use rr_periph_proto::ports::Rr3UartPort;
 use crate::power::RailTier;
 use crate::servo::{wander_step, Axis};
 
