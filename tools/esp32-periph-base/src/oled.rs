@@ -8,7 +8,9 @@ use crate::board::{
     OLED_CONTRAST_LEVELS, OLED_ROWS,
 };
 use crate::face::{eye_page, EyeStyle};
-use crate::ports::Rr3I2cPort;
+use rr_periph_proto::ports::Rr3I2cPort;
+
+use crate::ports_impl::rr3_esp_i2c;
 use crate::state::rr3_board_bindings_i2c_pair;
 
 // ---------------------------------------------------------------------------
@@ -272,7 +274,7 @@ pub(crate) fn oled_cmd(i2c: &mut I2cDriver, cmds: &[u8]) -> Result<(), String> {
         return Err("命令序列超长".into());
     }
     buf[1..=cmds.len()].copy_from_slice(cmds);
-    i2c_write_retry(i2c, OLED_ADDR, &buf[..=cmds.len()]).map_err(|e| format!("I2C 命令写失败: {e}"))
+    i2c_write_retry(&mut rr3_esp_i2c(i2c), OLED_ADDR, &buf[..=cmds.len()]).map_err(|e| format!("I2C 命令写失败: {e}"))
 }
 
 /// 写一页 GDDRAM（128 列）。**分块写**：每笔 ≤33 字节（1 控制字节 + 32 数据），
@@ -310,7 +312,7 @@ fn oled_page_once(
     while off < data.len() {
         let n = chunk.min(data.len() - off);
         buf[1..1 + n].copy_from_slice(&data[off..off + n]);
-        i2c_write_retry(i2c, OLED_ADDR, &buf[..1 + n])
+        i2c_write_retry(&mut rr3_esp_i2c(i2c), OLED_ADDR, &buf[..1 + n])
             .map_err(|e| format!("I2C 页数据写失败 page={page} off={off} n={n}: {e}"))?;
         off += n;
         if off < data.len() {

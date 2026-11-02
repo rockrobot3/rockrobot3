@@ -83,7 +83,7 @@ mod link;
 mod mic;
 mod oled;
 mod periph;
-mod ports;
+mod ports_impl;
 mod power;
 mod runtime;
 // servo 原子件机制核（批N23 件一收编：atoms/servo/mech.rs，文件级机制/策略
@@ -228,7 +228,7 @@ fn main() {
     let (i2c_sda, i2c_scl) = (peripherals.pins.gpio8, peripherals.pins.gpio9);
     let mut i2c = I2cDriver::new(peripherals.i2c0, i2c_sda, i2c_scl, &i2c_config)
     .expect("I2C0 驱动安装失败");
-    let found = i2c_scan(&mut i2c);
+    let found = i2c_scan(&mut crate::ports_impl::rr3_esp_i2c(&mut i2c));
     if found.contains(&OLED_ADDR) {
         println!(
             "[periph] I2C 扫描应答: {:02X?} —— OLED 0x{OLED_ADDR:02X} 在列 ✓",
