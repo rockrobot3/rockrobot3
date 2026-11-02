@@ -1,0 +1,44 @@
+# RockRobot3 装机接线档：pi4b-board 机型（W4/P0-C：Mac 宿主 × Pi 4B 当板）。
+# 装载期按 profiles/<形态> 推导本档定位（与 default/distro 同一条布局纪律）；
+# 九字段语义、校验⑦ 判据见 hardware/default/wiring.toml 头注。
+#
+# 本档只记板侧双轴舵机与 5V 供电主干：OLED/ADS1115 是板侧程序直驱的 I2C
+# 末梢（0x3C / 0x48），其总线引脚已在 profiles/pi4b-board.toml [hardware]
+# 登记，不在这里造宿主侧 pin_id。舵机电源 = 独立 5V/3A UBEC（禁接 Pi 5V，
+# UBEC/Pi/舵机单点共地），故 J-UBEC 与两条舵机线的 net 都挂 rail5v。
+
+[[wire]]
+# 5V 主干：UBEC 输出 → 舵机电源母线（Pi 自身由官方 5V 电源独立供电，不并接）。
+connector = "J-UBEC"
+hdr_pin = [1, 2]
+signal = ["vcc", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "none" # UBEC 焊线直出，无对端连接器型号
+keyed = true   # 主干防反插；额定 3A ≥ 双 SG90 堵转 2×0.7A + 余量
+rated_a = 3.0
+gnd_common = "star-1"
+
+[[wire]]
+# pan 舵机：SG90 三线（vcc 挂 rail5v，信号线写 [pins] pin_id）。
+connector = "J-PAN"
+hdr_pin = [1, 2, 3]
+signal = ["vcc", "act.axis.pwm.pan", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P" # devices.toml 在册（校验⑦-d）
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"
+
+[[wire]]
+# tilt 舵机：同 pan 形状，信号线为另一枚 pin_id（双轴成对登记）。
+connector = "J-TILT"
+hdr_pin = [1, 2, 3]
+signal = ["vcc", "act.axis.pwm.tilt", "gnd"]
+net = "rail5v"
+feeds = []
+mate = "SG90-3P"
+keyed = true
+rated_a = 1.0
+gnd_common = "star-1"
