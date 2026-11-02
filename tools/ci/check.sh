@@ -191,6 +191,12 @@ if [ "$found_mod" -eq 0 ]; then
   fail=1
 fi
 
+# ⑥b 部署面配置漂移门的**工具自检**（批N38 件二）。真板比对要 ssh 与装机树，CI/本机
+# 不可达；可机械判的是**判据本身**——工具用临时夹具跑三例（干净过／改一字节红／缺件红），
+# 判据腐化即红。漂移的现场比对归板上线 runbook（boards §10 步④）与 build-onboard 报告段。
+step "⑥b 部署面配置漂移门·工具自检（verify-board-config --self-test）"
+run bash tools/deploy/verify-board-config.sh --self-test
+
 # ⑦ §13 静态断言（0.0.5 批E：零策略载荷 / F⊗F / 五件套 / 入口体量；全 fail-closed，
 #    逐条点名后整步 FAIL）。"每格一件·不留空格"的反向断言在 rr-registry 契约测试
 #    （② 步仓扫描 repo_atoms_compliant_and_every_slot_uniquely_covered）——查册真值处
