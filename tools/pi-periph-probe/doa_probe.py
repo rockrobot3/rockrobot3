@@ -280,13 +280,11 @@ def main():
                 where = {"L": "左", "C": "中间", "R": "右"}[side]
                 print(f"  （{ACC_BLOCK_GAP_SECS:.0f}s 换位：请走到【{where}】）")
                 time.sleep(ACC_BLOCK_GAP_SECS)
-            print(f"--- 第 {idx}/{len(ROUNDS)} 轮：真值 = {side}（可听提示：{ {'L':1,'C':2,'R':3}[side] } 声 + 长开场）---")
-            rr3_beep({"L": 1, "C": 2, "R": 3}[side])  # 侧别节拍
+            print(f"--- 第 {idx}/{len(ROUNDS)} 轮：真值 = {side}（可听侧别 { {'L':1,'C':2,'R':3}[side] } 声 + OLED 倒数 3..1）---")
+            rr3_beep({"L": 1, "C": 2, "R": 3}[side])  # 侧别节拍（距采集 3s，已衰减）
             for n in ACC_COUNTDOWN:
                 line(fd, f"OLED T{idx}:{side} {n}", 0.25)
                 time.sleep(0.75)
-            rr3_beep(1)  # 开场长一声：听到即喊
-            time.sleep(0.25)
             prev_side = side
         elif FAST:
             print(f"--- 第 {idx} 轮：你的【{'左' if side == 'L' else '右'}】手边"
@@ -299,6 +297,10 @@ def main():
             line(fd, f"OLED R{idx}:{side}", 0.6)
         flush_input(fd)
         line(fd, "AUDIO ON", 0.5)
+        if ACC:
+            # 丢弃起流瞬态（AUDIO ON 的 pop/首帧），避免 onset 落在 0.00s 的假触发。
+            time.sleep(0.5)
+            flush_input(fd)
         pairs = collect(fd, SHOT_SECS)
         line(fd, "AUDIO OFF", 0.8)
         drain_until_quiet(fd, 0.4, 1.5)
