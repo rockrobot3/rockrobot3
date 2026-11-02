@@ -1,35 +1,18 @@
 use std::sync::{Arc, Mutex};
 
-use rr_ipc::{
-    rr3_board_binding_entry, Rr3BoardBindings, Rr3Frame, Rr3FrameBuf, Rr3TransportConn,
-    RR3_METHOD_SET_BINDINGS,
-};
-use rr_periph_proto::{rr3_periph_request_parse, rr3_periph_response_frame, Rr3PeriphRequest};
+use rr_ipc::{rr3_board_binding_entry, Rr3BoardBindings, RR3_METHOD_SET_BINDINGS};
+use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
 use serde_json::{json, Value};
 
 use crate::board::{
     rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC,
 };
 use crate::face::expr_eye_base;
-use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
 use crate::servo::{axis_check, Axis};
 use crate::state::{lock_bus, push_job, rr3_board_bindings_store, Bus, CtlState, Job};
 
-/// 帧面请求（协议门全过后的视图）：id/method/params 摘出，帧头位形随行携带
-/// （应答回带 trace_id / dst=src_task 用）。形状真值单点在 rr-periph-proto
-/// （ADR-0024，宿主与固件双向复用）。
-pub(crate) type FrameReq = Rr3PeriphRequest;
-
-/// 收帧 + 协议门（全过才返回 Ok）：`rr3_framebuf_read` 整帧收 → 帧还原（magic/
-/// 长度校验在 rr-ipc）→ 协议门（dst/payload 前缀/JSON/id 在 rr-periph-proto
-/// [`rr3_periph_request_parse`]，单点真值）。任一门失败回 Err = **丢弃不回帧**
-/// （fail-closed：帧级不可信的请求不作确定性应答；宿主侧重开连接即恢复）。半帧
-/// 失败后流上可能残留尾巴字节——下一轮 magic 窥视大概率落行面 ERR，自愈路径在案。
-pub(crate) fn frame_recv(io: &mut impl Rr3UartPort) -> Result<FrameReq, String> {
-    let buf = io.rr3_recv_buf().map_err(|e| format!("收帧失败: {e:?}"))?;
-    let frame = Rr3Frame::try_from(buf).map_err(|e| format!("帧还原失败: {e:?}"))?;
-    rr3_periph_request_parse(&frame)
-}
+// 收帧/应答组帧的机制体已迁 periph-mech（P0-A A3）：本档只留控制面分发与状态机。
+pub(crate) use periph_mech::frame::{frame_recv, FrameReq};
 
 /// 主题分发（**控制面**：只解析/校验/改状态/推作业，不碰硬件）：method 两面——
 /// `rr3.set_bindings`（绑定注入，宿主桥连接建立即推）与 rr3.call（rrd 转发形状，
@@ -212,18 +195,17 @@ fn frame_handle_face(
     }
 }
 
-/// Response 回帧：result 在位（业务失败折 {"error": 文案}——宿主解析契约），
-/// trace_id 原样回带、src=本板位形 2、dst=调用方、timestamp 单调时基（时钟由端口
-/// 注入，换平台不换帧面）。组帧单点在 rr-periph-proto（ADR-0024）；发送失败
-/// eprintln 点名不重试（宿主 io 失败自会重开连接重发）。
+/// Response 回帧（组帧机制在 periph-mech，平台面只做"失败点名不重试"）：result
+/// 在位（业务失败折 {"error": 文案}——宿主解析契约），trace_id 原样回带、src=本板
+/// 位形、dst=调用方、timestamp 单调时基。发送失败 eprintln 点名——宿主 io 失败
+/// 自会重开连接重发。
 pub(crate) fn frame_send_response(
     io: &mut impl Rr3UartPort,
     req: &FrameReq,
     result: Result<Value, String>,
     clock: &impl Rr3ClockPort,
 ) {
-    let resp = rr3_periph_response_frame(req, result, clock.rr3_now_ns());
-    if let Err(e) = io.rr3_send_buf(Rr3FrameBuf::from(&resp)) {
-        eprintln!("[periph] Response 发送失败: {e:?}");
+    if let Err(e) = periph_mech::frame::frame_send_response(io, req, result, clock) {
+        eprintln!("[periph] {e}");
     }
 }
