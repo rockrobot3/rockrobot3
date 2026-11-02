@@ -1,20 +1,19 @@
-# contracts/platform/raspberry-pi-4.toml —— 树莓派 4 芯片事实登记表（**演练实例**）。
-# 树莓派 = 0.0.6 真板批的独立形态（architecture §12.7 三形态两两零关系），其
-# profiles 装配单尚未立——本表只立形状与芯片手册在案事实的最小集，取值待真板
-# 对账（施工图 Task 3 Step 2"演练实例"纪律，进 status.md 敞口）。
+# contracts/platform/raspberry-pi-4.toml —— 树莓派 4 芯片事实登记表。
+# 树莓派 = 0.0.6 真板批的独立形态（architecture §12.7 三形态两两零关系）；
+# W4/P0-C（批N43）起由 profiles/pi4b-board.toml 作板端点装配单，W2/T1 由
+# profiles/pi4b-host-esp32-classic.toml 作 Pi 宿主档。芯片侧取值仍按演练实例
+# 纪律登记（施工图 Task 3 Step 2，进 status.md 敞口），真机对账归后续板批。
 schema_version = 1
 platform = "raspberry-pi-4"
 
 # 评审确认无冲突矩阵（演练实例，待器件核对）——§4.6 裁定②：空数组必须显式写。
-# 组合件尚未立装配单（树莓派形态 profiles 未立），构造表空表显式——§4.6 裁定①
-# 只判"段缺"不判"空"；首个绑定随 0.0.7 对账回填。
 # （顶层键须落在任何 [段头] 之前，否则被 TOML 归入前一段表内。）
 conflict = []
-construction = {}
 
 [[controller]]
-# 演练实例：BCM2711 硬件 PWM 两通道（PWM0/PWM1），树莓派形态现役绑定待 profile
-# 立档后回填。
+# BCM2711 硬件 PWM 两通道（PWM0/PWM1）：dtoverlay=pwm-2chan 落成
+# /sys/class/pwm/pwmchip0 下的 pwm0/pwm1 两个通道目录。W4 起 pan = channel 0
+# （GPIO12）、tilt = channel 1（GPIO13），见 profiles/pi4b-board.toml [[pin]]。
 name = "pwm0"
 kind = "pwm"
 channels = 2
@@ -39,6 +38,16 @@ channels = 0
 name = "spidev0"
 kind = "spi"
 channels = 1
+
+[construction]
+# 具名构造表（W4/P0-C 回填，批N43）：键 = (controller, role, instance) 三元串
+# （⑧-a 定形；非 per_instance 角色第三段留空）。值 = 板侧具名构造路径。
+# Pi-as-board 只有双轴舵机一条构造：pwmchip0 的 channel 0/1（见 profiles/
+# pi4b-board.toml [[pin]]），板侧由 tools/pi-periph-base 的 Linux sysfs PWM
+# 端口实现（"sysfs-pwm" = rr-hal linux_pwm 同形路径：period 20ms、先 export
+# 再 enable；构造名不是 rr-hal 符号，rtos 档不经宿主派生、不混淆两档）。
+"pwm0:act.axis.pwm:pan" = "sysfs-pwm"
+"pwm0:act.axis.pwm:tilt" = "sysfs-pwm"
 
 [capabilities]
 # 评审确认：本芯片无片上 ADC，模拟测点须外挂（施工图 Task 3 Step 2 原文口径，

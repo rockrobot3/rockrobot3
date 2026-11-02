@@ -1,0 +1,152 @@
+# RockRobot3 装配单：pi4b-board 机型（W4/P0-C：Mac 宿主 × Pi 4B 当板）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
+# 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
+#
+# 形态语义（docs/process/dev/通用底座三平台验证计划.md §9 / §10）：Mac 跑宿主栈，
+# Pi 4B 只做**末梢板**——五端口（UART/I2C/PWM/ADC/Clock）由 tools/pi-periph-base
+# 直连 Linux 设备；本档登记板侧的物理绑定真值（双轴舵机成对 + 板侧总线引脚），
+# 不登记宿主本地外设。W4 只把 Pi 当板，不混用 pi4b-host-* 组合档。
+#
+# 档位取 rtos（而不是 host）——这是 N43-1 审查裁定（2026-11-02）：
+#   1. host 档的 rrd 派生面是**单轴**描述符（rr-hal Rr3HalBindings 只有一组
+#      pwm_chip/pwm_channel，rr3-act 的 Rr3PwmServo 也是单轴 trait），而本档必须
+#      登记 pan/tilt 两枚同角色 pin；host 派生会以"多实例共键须同值"拒绝第二轴
+#      （双通道同 chip 时 pwm_channel 不同、双 chip 时 pwm_chip 不同，两路皆红）。
+#      rtos 是"薄板端点经桥"档（esp32-mini/esp32s3-mini 同档），rrd 不派生、
+#      板侧按 [[pin]] 自行装配——双轴正是板侧机制、不是宿主机制。
+#   2. Mac 宿主在 W5/T3 走 `rr3-sim --brain`（无装配档，见 §10.1）；本档因此
+#      **不承担宿主 boot 语义**，只承载板侧物理真值与契约校验。
+#   3. 计划原文的 `distro.toml` 补 tilt 同批**撤登**：distro 是 host 档参考机
+#      装配单，单轴描述符不能容纳第二轴；Pi 板双轴真值由本档承载（审查记录见
+#      计划册 N43-1 行）。
+#
+# 与 esp32-mini 的差别：
+#   - 控制器词形是 Linux sysfs 名（pwm0 = pwmchip0，channel 0/1 = pwm0/pwm1
+#     子目录；见 contracts/platform/raspberry-pi-4.toml 的 pwm0 channels = 2）；
+#   - 没有 on-chip ADC（ADS1115 外挂 I2C，A0 + 2×10k 分压量 5V 轨），ADC 读面
+#     归板侧程序，不进宿主 [[pin]]（roles.toml 无 ADS1115 角色，且 Rr3Power
+#     句柄语义是 INA219 寄存器路——不冒充）；
+#   - OLED（SSD1306 0x3C）同理由板侧程序直驱，不进宿主 [[pin]]：host 侧没有
+#     I2C 显示角色（roles.toml 只有 ui.face.spi 的 SPI 点阵面）。
+#
+# schema_version = 5（与 default/distro 同版：[runtime] 段必填，缺即红）。
+
+schema_version = 5
+
+[os]
+route = "distro" # Raspberry Pi OS（Debian 13 trixie 真机），发行版快路轨
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
+# 本档不承担宿主 boot 语义，但 schema 5 要求该段在册（缺即红）。
+log_ring_cap = 512
+
+[platform]
+# 板端点薄档（见文件头 1.）：rrd 不派生注入键，板侧按 [[pin]] 自行装配。
+tier = "rtos"
+# 平台事实表外键（§4.6）：contracts/platform/raspberry-pi-4.toml。pwm0 = pwmchip0，
+# channels = 2（pwm-2chan overlay 的两个通道），故双轴用同一 controller 的两个 channel。
+chip = "raspberry-pi-4"
+
+[supplies]
+# 平台供给声明：本档描述板端点，看门狗由宿主/Pi 发行版负责，板侧程序不喂——
+# "无喂食面"显式写 false / "none"，不虚构一个喂食者。
+watchdog_present = false
+watchdog_timeout_ms = 15000
+watchdog_feeder = "none"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+# [[supplies.domain]] 电力网络声明：舵机由独立 5V/3A UBEC 供电（禁接 Pi 5V，
+# 单点共地），故 rail5v 上限取 3000 mA；Pi 板载 3V3 轨只做声明位。
+# 板侧没有 host [[pins]] 测点（ADS1115 读数归板侧程序，见文件头），绑定引用位
+# 一律 "none"；全域 armed=false（未标定即不武装）。
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 3000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+# [supplies.budget] 内存预算声明（校验⑩ 分母，schema 4）：rtos 档必须给三数键。
+# 取值 = **校验⑩ 的声明预算位**（Pi std 进程无内存硬约束；三数为保守下界，
+# 只服务装载门分母，不作为板侧资源承诺）。
+[supplies.budget]
+not_applicable = false
+task_stack_budget_bytes = 65536
+heap_total_bytes = 262144
+heap_reserved_bytes = 0
+
+[bindings]
+# 板端点只承载舵机格；Mac 宿主的 face/audio/net/cognition 不在本档（宿主无装配档，
+# W5 走 --brain + env，见文件头 2.）。
+"act.servo" = "rr3-act"
+
+[hardware]
+# 板侧总线真值（非 [pins] 派生键；rtos 档原样进 RR3_HAL_BINDINGS，经桥
+# rr3.set_bindings 注入板侧）：Pi 40-pin 排针 GPIO2/3 = I2C1（OLED 0x3C +
+# ADS1115 0x48 同总线），GPIO14/15 = UART0（/dev/serial0 → ttyAMA0，与宿主
+# CP2102 交叉接、GND 共地）。取值 = W4 接线表 §9.2 真值。
+i2c_sda = "2"
+i2c_scl = "3"
+uart2_tx = "14"
+uart2_rx = "15"
+
+[[pin]]
+# pan（水平）轴：pwmchip0 通道 0 → GPIO12 / pin 32（§9.2 接线表）。controller
+# 词形 pwm0 = pwmchip0；channel = sysfs 通道号（本档 rtos 不派生，板侧按
+# pwmchip<chip>/pwm<channel> 装配）。
+role = "act.axis.pwm"
+instance = "pan"
+controller = "pwm0"
+channel = 0
+physical = [12]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[[pin]]
+# tilt（俯仰）轴：pwmchip0 通道 1 → GPIO13 / pin 33。计划册 §9.2 写的 "pwm1"
+# 是 sysfs 通道目录名，按平台表 pwm0 channels = 2 的语义登记为 pwm0/channel 1
+# （N43-1 审查裁定；两轴成对登记，校验①/per_instance 与板侧双轴机制一致）。
+role = "act.axis.pwm"
+instance = "tilt"
+controller = "pwm0"
+channel = 1
+physical = [13]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []
+
+[enabled_slots]
+# 板端点只启用舵机格（理由同 [bindings]）。
+rr3-act = ["act.servo"]
+
+[slots]
+# 物理在位声明：板端点在位的宿主可见格只有 act.servo（双轴舵机）；OLED/ADS1115
+# 是板侧程序直驱的末梢动作面，不走宿主 [bindings]（见文件头）。
+present = ["act.servo"]

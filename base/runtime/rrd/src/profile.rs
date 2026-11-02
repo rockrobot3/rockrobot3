@@ -4760,6 +4760,56 @@ gnd_common = "star-1"
         );
     }
 
+    /// Pi 4B 板端点装配演练（W4/P0-C，批N43）：`profiles/pi4b-board.toml` + 真契约走
+    /// 完整 boot 输入装配——校验①②⑨ 全过（N43-1 判据）；板端点恰 rr3-act 一模块、
+    /// act.servo 一格；[[pin]] pan/tilt 双轴成对（role_missing 空 = 校验②无缺角色）；
+    /// [hardware] 板侧四键原样进 RR3_HAL_BINDINGS 注入文本（rtos 档直给）。
+    #[test]
+    fn pi4b_board_profile_boot_inputs_drill() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let p = repo.join("profiles/pi4b-board.toml");
+        let boot = boot_inputs(&p).expect("pi4b-board 装配单必须过完整装载门（rtos 薄板档）");
+        let mods: Vec<String> = boot
+            .manifests
+            .iter()
+            .map(|m| {
+                m.parent()
+                    .and_then(Path::file_name)
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            mods,
+            vec!["rr3-act"],
+            "板端点 boot 队列应恰为 rr3-act（enabled_slots 升序，BTreeMap 确定性）"
+        );
+        assert!(
+            boot.missing.is_empty(),
+            "present/bindings/enabled_slots 三源一致（act.servo 一格）: {:?}",
+            boot.missing
+        );
+        assert!(
+            boot.assemble_broken.is_empty(),
+            "rr3-act 真件装配段扫描零缺口: {:?}",
+            boot.assemble_broken
+        );
+        assert!(
+            boot.role_missing.is_empty(),
+            "双轴 [[pin]] 成对（校验②无缺角色）: {:?}",
+            boot.role_missing
+        );
+        assert!(
+            boot.hal_bindings.contains("i2c_sda = \"2\"")
+                && boot.hal_bindings.contains("i2c_scl = \"3\"")
+                && boot.hal_bindings.contains("uart2_tx = \"14\"")
+                && boot.hal_bindings.contains("uart2_rx = \"15\""),
+            "pi4b-board [hardware] 板侧四键必须进 RR3_HAL_BINDINGS 注入文本: {:?}",
+            boot.hal_bindings
+        );
+    }
+
     /// [slots].present 声明缺是缺格三源合一第一源：present 移除某格 →
     /// (模块, 格位) 进缺格清单（缺格不是致命项，其余模块不牵连）
     #[test]
