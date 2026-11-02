@@ -647,7 +647,13 @@ mod tests {
         let rpi = rr3_registry_platform_table_from_text(RPI4).expect("rpi4 表须可解析");
         assert!(rpi.rr3_platform_adc_pins().is_empty());
         assert!(rpi.rr3_platform_conflicts().is_empty());
-        assert!(rpi.rr3_platform_construction_keys().is_empty());
+        // W4/P0-C 回填（批N43）：Pi-as-board 双轴舵机两枚构造（pwmchip0 通道 0/1）
+        assert!(rpi.rr3_platform_construction_contains("pwm0", "act.axis.pwm", "pan"));
+        assert!(rpi.rr3_platform_construction_contains("pwm0", "act.axis.pwm", "tilt"));
+        assert_eq!(
+            rpi.rr3_platform_construction_get("pwm0:act.axis.pwm:tilt"),
+            Some("sysfs-pwm")
+        );
         assert_eq!(rpi.rr3_platform_controller_channels("pwm0"), Some(2));
         assert!(rpi
             .rr3_platform_controller_names()
