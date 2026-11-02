@@ -85,6 +85,10 @@ ACC_COUNTDOWN = (3, 2, 1)
 ACC_MIN_PEAK = 0.06
 #: ACCEPT 判向映射：1=镜像（neg=左，AB 2026-11-02 实录），0=直读（pos=左）。
 MIRROR = os.environ.get("RR3_DOA_MIRROR", "1") != "0"
+#: 通道固定偏置（采样点）与中位死区：2026-11-02 三段现场实测，中段 10 轮 frac 中位
+#: ≈ -1.115（ILD≈0 证明站位正中）⇒ 先把偏置减掉再判；死区 ±0.7 覆盖中段实测散布。
+BIAS = float(os.environ.get("RR3_DOA_BIAS", "0.0"))
+CENTER_BAND = float(os.environ.get("RR3_DOA_CENTER_BAND", "0.7"))
 #: 1 采样点 @16kHz 的声程（343 m/s / 16000）。互相关 lag 换算物理量用。
 CM_PER_SAMPLE = 34300.0 / 16000.0
 #: onset 检出：轮内全轮中位 × 1.2（v5 实测喊话窗只有 1.25-1.4× 中位，1.3 会漏）
@@ -304,7 +308,8 @@ def main():
         pairs = collect(fd, SHOT_SECS)
         line(fd, "AUDIO OFF", 0.8)
         drain_until_quiet(fd, 0.4, 1.5)
-        with open(f"/tmp/doa_r{idx}.pcm", "wb") as f:
+        # 分侧落盘：逐侧块重跑时不再互相覆盖（L/C/R 各保留自己的 1..N）。
+        with open(f"/tmp/doa_{side}_r{idx}.pcm", "wb") as f:
             f.write(b"".join(
                 p[0].to_bytes(2, "little", signed=True) + p[1].to_bytes(2, "little", signed=True)
                 for p in pairs
@@ -359,16 +364,19 @@ def main():
 
     if ACC:
         # ---- 3×N 形式验收：只用 xcorr 分数 lag；映射由 AB 实录钉死（MIRROR）----
+        # 先减通道固定偏置 BIAS，再用中位死区 CENTER_BAND 判 C（两侧仍按符号判 L/R）。
         def judge_xc(frac):
-            if abs(frac) < 0.5:
+            r = frac - BIAS
+            if abs(r) <= CENTER_BAND:
                 return "C"
             if MIRROR:
-                return "L" if frac < 0 else "R"
-            return "L" if frac > 0 else "R"
+                return "L" if r < 0 else "R"
+            return "L" if r > 0 else "R"
 
         need = (TRIALS * 8 + 9) // 10
         stat = {s: {"total": 0, "valid": 0, "ok": 0} for s in ("L", "C", "R")}
-        print("=== 3×N 验收（xcorr 镜像映射，阈值 |lag|≤0.5 判中；每侧 ≥%d/%d 通过）===" % (need, TRIALS))
+        print("=== 3×N 验收（xcorr 镜像映射；偏置 %.3f、中位死区 ±%.2f；每侧 ≥%d/%d 通过）===" % (
+            BIAS, CENTER_BAND, need, TRIALS))
         for i, (side, io, ifu, imx, frac, cabs) in enumerate(rows, 1):
             st = stat[side]
             st["total"] += 1
@@ -382,7 +390,7 @@ def main():
             j = judge_xc(frac)
             ok = j == side
             st["ok"] += int(ok)
-            print(f"T{i:<2}{side:<3} frac={frac:+6.2f} c={cabs:.3f} 判={j} {'✓' if ok else '✗'}")
+            print(f"T{i:<2}{side:<3} frac={frac:+6.2f} adj={frac - BIAS:+6.2f} c={cabs:.3f} 判={j} {'✓' if ok else '✗'}")
         all_ok = True
         for s in ACC_SIDES:
             st = stat[s]
