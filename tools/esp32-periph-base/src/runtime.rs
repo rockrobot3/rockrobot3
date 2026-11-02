@@ -8,7 +8,7 @@ use crate::board::{
 use crate::oled::i2c_bus_recover;
 use crate::periph::RtPeriph;
 use crate::servo::{axis_scan_points, duty_to_deg, Axis};
-use crate::state::{lock_bus, now_ms, outbox_push, rr3_board_bindings_i2c_pair, Bus, Job};
+use crate::state::{lock_bus, now_ms, outbox_push, Bus, Job};
 
 // ---------------------------------------------------------------------------
 // 运行面（独占 I2C0 + LEDC）：执行硬件作业 + 自主节拍（表情微动作 / 云台扫摆）
@@ -35,13 +35,22 @@ pub(crate) fn runtime_loop(mut ph: RtPeriph, bus: Arc<Mutex<Bus>>) {
         // 紧接着**强制重同步** I2C 从机：舵机电机换向噪声会在空闲期把 SSD1306 的
         // I2C 状态机顶进半途态（此后恒 NACK 且 SDA 仍高，条件版自愈不触发）——
         // 见 [`i2c_bus_recover`] 的 `force` 说明。每拍一次 9 时钟 + STOP，代价 ~100µs。
-        // fail-closed（批N4 件七(c)）：绑定未注入 → 跳过并计 `selfheal_skipped`
-        // （`INFO` 观测面，静默不刷屏——注入到达即恢复自愈）。
-        if rr3_board_bindings_i2c_pair().is_some() {
-            i2c_bus_recover(true);
-        } else {
-            let mut b = lock_bus(&bus);
-            b.st.selfheal_skipped = b.st.selfheal_skipped.saturating_add(1);
+        // 批N41：引脚注入优先、缺席回装配锚（独立部署不再永久跳过）；自愈返回
+        // false（9 时钟后 SDA 仍低）连续 5 次即退避 5s，防硬拉死时每拍强驱。
+        let now = now_ms();
+        if now >= ph.selfheal_holdoff_until_ms {
+            if i2c_bus_recover(true) {
+                ph.selfheal_fail_streak = 0;
+            } else {
+                ph.selfheal_fail_streak = ph.selfheal_fail_streak.saturating_add(1);
+                if ph.selfheal_fail_streak >= 5 {
+                    ph.selfheal_holdoff_until_ms = now.saturating_add(5_000);
+                    ph.selfheal_fail_streak = 0;
+                    let mut b = lock_bus(&bus);
+                    b.st.selfheal_skipped = b.st.selfheal_skipped.saturating_add(1);
+                    eprintln!("[periph] I2C 自愈连续失败，退避 5s（SDA 疑似硬拉死）");
+                }
+            }
         }
     }
 }

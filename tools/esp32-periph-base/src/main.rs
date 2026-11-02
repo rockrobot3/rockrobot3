@@ -213,13 +213,12 @@ fn main() {
         .sda_enable_pullup(true)
         .scl_enable_pullup(true);
     // 欠压复位后 SSD1306 常抱死 SDA→总线全黑；装驱动前先解卡（见 i2c_bus_unstick）。
-    // fail-closed（批N4 件七(c)）：引脚真值经 rr3.set_bindings 注入，boot 期桥未连
-    // 必缺席 → 拒解卡并点名（v3 拍板：消费面级 fail-closed，不做板级等宿主的启动
-    // 时序重构；启动期解卡能力随 0.0.7 批G/D1 主驱动具名引脚改造回归）。
+    // 批N41：注入优先、缺席回编译期装配锚（独立部署下 boot 期桥必未连，不能因此
+    // 永久拒解）；false 只代表 9 时钟后 SDA 仍低（模块未上电/硬短/线松），不阻断 boot。
     if unsafe { i2c_bus_unstick() } {
-        println!("[periph] I2C boot 解卡 ✓（绑定已注入；SDA 高则本无需）");
+        println!("[periph] I2C boot 解卡 ✓（SDA 本已高或已释放）");
     } else {
-        eprintln!("[periph] I2C boot 解卡拒（绑定未注入）——欠压复位致总线抱死的自愈待 rr3.set_bindings 后由运行面接管");
+        eprintln!("[periph] I2C boot 解卡未释（9 时钟后 SDA 仍低：模块未上电/硬短/线松）——继续 boot，运行面自愈将退避重试");
     }
     #[cfg(feature = "esp32")]
     let (i2c_sda, i2c_scl) = (peripherals.pins.gpio21, peripherals.pins.gpio22);

@@ -52,6 +52,18 @@ pub(crate) fn rr3_board_bindings_i2c_pair() -> Option<(u8, u8)> {
         .and_then(Rr3BoardBindings::rr3_board_bindings_i2c)
 }
 
+/// 自愈路径的 I2C 引脚对：**注入优先，缺席回编译期装配锚**（批N41 件一）。
+///
+/// 独立部署形态（音频独占 UART、无 act 桥）下宿主永远不会推 `rr3.set_bindings`；
+/// boot 解卡与运行面自愈若继续 fail-closed，就会永久停摆（真板实录 `selfheal_skipped`
+/// 293176）——OLED 一旦在冷启动/舵机噪声中丢拍就再也回不来。本函数只服务**自愈动作**：
+/// 编译期装配常量是当前 bin 的板级真值（classic 21/22、S3 8/9），注入值仍优先；
+/// 消费面（帧面绑定/读数）的 fail-closed 语义不变。
+pub(crate) fn rr3_i2c_pins_for_recovery() -> (u8, u8) {
+    rr3_board_bindings_i2c_pair()
+        .unwrap_or((crate::board::RR3_BIND_I2C_SDA, crate::board::RR3_BIND_I2C_SCL))
+}
+
 /// 读全量绑定快照（批N13 件一配置腿 `/api/board/bindings` 读数用；Clone 出锁，
 /// 不持锁组 JSON——与 [`rr3_board_bindings_i2c_pair`] 同一单点）。
 pub(crate) fn rr3_board_bindings_snapshot() -> Option<Rr3BoardBindings> {
@@ -114,9 +126,9 @@ pub(crate) struct PeriphState {
     pub(crate) audio_sent: u64,
     /// 音频背压丢弃分片数（audio_q 满丢最旧即计；`INFO` 观测）。
     pub(crate) audio_dropped: u64,
-    /// I2C 自愈因绑定未注入而跳过的拍数（运行面每拍 force 重同步遇
-    /// `rr3_board_bindings_i2c_pair()` 缺席即计，`INFO` 观测；非零即绑定下发链
-    /// 未通——fail-closed 的观测面，注入到达即停增、恢复自愈）。
+    /// I2C 自愈被护栏压住的次数（批N41 语义：运行面 force 自愈连续 5 次报“SDA
+    /// 仍低”即退避 5s 并计一次；`INFO` 观测——非零即总线被硬拉死/模块未上电，
+    /// 不再每拍强驱；此前“绑定未注入即计”的语义已随板侧回退退役）。
     pub(crate) selfheal_skipped: u32,
     /// 绑定对账不齐键数累计（批N9 件五装配对账锚观测面）：set_bindings 注入到达
     /// 时逐键判等板侧具名装配真值（[`crate::board::rr3_bindings_reconcile`]），

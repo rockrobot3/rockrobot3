@@ -14,7 +14,7 @@ use periph_mech::oled_codec::{
 use rr_periph_proto::ports::Rr3I2cPort;
 
 use crate::ports_impl::rr3_esp_i2c;
-use crate::state::rr3_board_bindings_i2c_pair;
+use crate::state::rr3_i2c_pins_for_recovery;
 
 // 字模与编码真值已迁 periph-mech（P0-A A3）：本档只留 I2C 事务/重试/总线自愈。
 // 保留 `glyph` 别名供行面 FONT 自检直接取字模（与编码面同一张表，无第二份）。
@@ -38,7 +38,7 @@ fn i2c_write_retry(i2c: &mut impl Rr3I2cPort, addr: u8, bytes: &[u8]) -> Result<
                 last = e;
                 if attempt < I2C_RETRY {
                     // 失败即先自愈总线再退避重发（丢拍锁死是本工程主故障模式）
-                    i2c_bus_recover(false);
+                    let _ = i2c_bus_recover(false);
                     thread::sleep(Duration::from_millis(I2C_RETRY_DELAY_MS));
                 }
             }
@@ -62,16 +62,17 @@ fn i2c_write_retry(i2c: &mut impl Rr3I2cPort, addr: u8, bytes: &[u8]) -> Result<
 /// 恒 NACK，而**此刻 SDA 是高电平**（不是被拉低的"锁死"），故条件版（只在 SDA 低时打
 /// 时钟）根本不触发、救不回来。故在每次动作收尾（尤其舵机动作后）**强制**重同步一次。
 ///
-/// **引脚真值 fail-closed（批N4 件七(c)）**：SDA/SCL 号取注入态
-/// ([`crate::state::rr3_board_bindings_i2c_pair`]，宿主经 `rr3.set_bindings` 下发）；
-/// 未注入即**静默拒**（不碰 GPIO——引脚号未知时任何位打操作都是越权）。运行期每拍
-/// 调用方的 `selfheal_skipped` 计数与本路径重试终败的 Err 冒泡各自是观测面。
-pub(crate) fn i2c_bus_recover(force: bool) {
+/// **引脚真值（批N41 件一修订批N4 件七(c)）**：SDA/SCL 取注入态；未注入回编译期
+/// 装配锚（[`rr3_i2c_pins_for_recovery`]）——独立部署（音频独占 UART、无 act 桥）下
+/// 无人推 `rr3.set_bindings`，自愈不能永久停摆。注入值仍优先。
+///
+/// **返回**：`true` = 动作后 SDA 已释放（或本就不需要动作）；`false` = 9 时钟后仍
+/// 被拉低（模块未上电/硬短/线松）——调用方据此退避，**不要每拍强驱**。
+pub(crate) fn i2c_bus_recover(force: bool) -> bool {
     use esp_idf_sys as sys;
-    let Some((sda, scl)) = rr3_board_bindings_i2c_pair() else {
-        return;
-    };
+    let (sda, scl) = rr3_i2c_pins_for_recovery();
     let (sda, scl) = (sda as i32, scl as i32);
+    let mut clear = true;
     unsafe {
         sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
         sys::gpio_set_pull_mode(sda, sys::gpio_pull_mode_t_GPIO_PULLUP_ONLY);
@@ -92,14 +93,23 @@ pub(crate) fn i2c_bus_recover(force: bool) {
                 sys::gpio_set_level(scl, 1);
                 sys::esp_rom_delay_us(5);
             }
-            sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
-            sys::gpio_set_level(sda, 0);
-            sys::esp_rom_delay_us(5);
-            sys::gpio_set_level(scl, 1);
-            sys::esp_rom_delay_us(5);
-            sys::gpio_set_level(sda, 1);
-            sys::esp_rom_delay_us(5);
-            sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
+            // **护栏（批N41 件二）**：9 时钟后 SDA 仍低 → 模块未上电/硬短/线松，
+            // 不把 SDA 驱高打 STOP（对着被拉住的线硬灌电流，真板可触发 BOD 复位）。
+            clear = sys::gpio_get_level(sda) != 0;
+            if clear {
+                sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
+                sys::gpio_set_level(sda, 0);
+                sys::esp_rom_delay_us(5);
+                sys::gpio_set_level(scl, 1);
+                sys::esp_rom_delay_us(5);
+                sys::gpio_set_level(sda, 1);
+                sys::esp_rom_delay_us(5);
+                sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
+            } else {
+                eprintln!(
+                    "[periph] I2C 自愈：9 时钟后 SDA 仍低（疑似模块未上电/硬短/线松），不硬打 STOP"
+                );
+            }
         }
         // 交还 I2C 外设（IOMUX 复位为 I2C 功能 + 内部上拉），驱动内部状态不受影响
         sys::i2c_set_pin(
@@ -111,6 +121,7 @@ pub(crate) fn i2c_bus_recover(force: bool) {
             sys::i2c_mode_t_I2C_MODE_MASTER,
         );
     }
+    clear
 }
 
 /// I2C 总线解卡（**欠压复位后的自愈**）：ESP32 在 SSD1306 事务中途被 BOD 复位时，
@@ -119,18 +130,14 @@ pub(crate) fn i2c_bus_recover(force: bool) {
 /// 前先用 GPIO 手动发 9 个 SCL 时钟把从机的位计数器走完、再补一个 STOP，SDA 即
 /// 释放。裸寄存器操作（不进 HAL 驱动状态机），随后 I2cDriver::new 会重配这两脚。
 ///
-/// **引脚真值 fail-closed（批N4 件七(c)）**：引脚号取注入态（同
-/// [`i2c_bus_recover`]）；未注入回 `false` 拒不动作（boot 期桥未连、注入必缺席
-/// ——v3 拍板：消费面级 fail-closed，不做板级等宿主的启动时序重构，启动期解卡
-/// 缺席的取舍与点名归调用方），调用方据此打站。
+/// **引脚真值（批N41 件一修订批N4 件七(c)）**：注入优先，未注入回编译期装配锚
+/// ——boot 期桥必未连，独立部署下若不回退就永远解不了卡。注入值仍优先。
 ///
-/// 返回：`true` = 已注入且解卡动作走完（SDA 高则本就无事可做，同回 true）；
-/// `false` = 绑定未注入，拒。
+/// 返回：`true` = SDA 本已高（无需动作）或 9 时钟后已释放；`false` = 9 时钟后
+/// 仍被拉低（模块未上电/硬短/线松）——**不硬打 STOP**，由调用方点名、继续 boot。
 pub(crate) unsafe fn i2c_bus_unstick() -> bool {
     use esp_idf_sys as sys;
-    let Some((sda, scl)) = rr3_board_bindings_i2c_pair() else {
-        return false;
-    };
+    let (sda, scl) = rr3_i2c_pins_for_recovery();
     let (sda, scl) = (sda as i32, scl as i32);
     // SDA 输入上拉（读电平）、SCL 开漏输出上拉
     sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);
@@ -146,6 +153,14 @@ pub(crate) unsafe fn i2c_bus_unstick() -> bool {
             sys::esp_rom_delay_us(5);
             sys::gpio_set_level(scl, 1);
             sys::esp_rom_delay_us(5);
+        }
+        // 护栏：9 时钟后仍低 → 模块未上电/硬短，不硬打 STOP（同运行面）。
+        let released = sys::gpio_get_level(sda) != 0;
+        if !released {
+            eprintln!(
+                "[periph] I2C 总线解卡：9 时钟后 SDA 仍低（疑似模块未上电/硬短/线松），不硬打 STOP"
+            );
+            return false;
         }
         // 补一个 STOP：SCL 高时 SDA 由低→高
         sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT_OUTPUT_OD);
