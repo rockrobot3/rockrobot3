@@ -126,9 +126,9 @@ pub(crate) struct PeriphState {
     pub(crate) audio_sent: u64,
     /// 音频背压丢弃分片数（audio_q 满丢最旧即计；`INFO` 观测）。
     pub(crate) audio_dropped: u64,
-    /// I2C 自愈被护栏压住的次数（批N41 语义：运行面 force 自愈连续 5 次报“SDA
-    /// 仍低”即退避 5s 并计一次；`INFO` 观测——非零即总线被硬拉死/模块未上电，
-    /// 不再每拍强驱；此前“绑定未注入即计”的语义已随板侧回退退役）。
+    /// I2C 自愈被运行面压住的次数（批N41：运行面每拍自愈已退役——真板 SCAN 中
+    /// 反复夺脚会触发复位；自愈只在 boot 解卡与 I2C 写失败路径发生。本字段保留为
+    /// 0 的兼容观测位，`INFO`/httpd 可继续读；未来加运行面护栏时再复用）。
     pub(crate) selfheal_skipped: u32,
     /// 绑定对账不齐键数累计（批N9 件五装配对账锚观测面）：set_bindings 注入到达
     /// 时逐键判等板侧具名装配真值（[`crate::board::rr3_bindings_reconcile`]），
