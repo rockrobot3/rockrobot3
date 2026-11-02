@@ -19,11 +19,18 @@
 | ② | manifest schema + 注册表形状 pin | `cargo test -p rr-registry --test contract` |
 | ②b | mkmod 输出即契约用例（方案 P3） | `cargo test --manifest-path tools/mkmodule/Cargo.toml` |
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
-| ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`） |
+| ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*` 与 esp 条件工程 `tools/esp32-uart-echo`/`tools/espidf-std-hello`/`tools/espidf-sentinel`/`tools/esp32-periph-base`——后者由各自专用门执法） |
 | ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（全集进门，无任何排除），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
-| ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与两个 esp 条件工程）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
+| ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与 esp 条件工程 `tools/esp32-uart-echo`/`tools/espidf-std-hello`/`tools/espidf-sentinel`/`tools/esp32-periph-base`）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
 | ⑦ | **§13 静态断言五件**（全 fail-closed，逐条点名） | ⑦-a 机制核与件面零策略载荷（禁词扫 `rr-mech/src/*.rs`（0.0.5 批M 控制原语叶子件下沉，MC-10 L-4 补）+ `rr-core/src/*.rs` + `rr-hal-api/src/*.rs`（0.0.5 批I C8 起）+ `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，**0.0.5 批K H2 起再加 `modules/*/atoms/*/*.rs`**——件声明面同样不许带厂商/芯片/器件名，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（件形按 `module.toml` 的 `lang` 数据位选：rust 五件 / python 两件式 / 组合件实体按 lang 推导——零件名零硬编码，批M MC-10 L-2）· ⑦-d 入口体量 ≤80 行（入口路径亦按 `lang` 推导）· ⑦-e 门禁清单自指判等（⑦-a 扫面名集 A 逐名须在 §2 本行与 `tools/ci/README.md` 的 ⑦ 行齐 + `tools/ci/rr-core-xtensa-check.sh` 的 `-p` 目标集 ⊆ A；代码为唯一真值、文档向代码看齐；0.0.5 批M MC-10 L-4）。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
 | ⑧ | **件级判据三门**（0.0.5 批K H2 接入；全 fail-closed，上线即全绿） | ⑧-a 两腿对拍计数门：格两轴读 `contracts/slots.toml`——`status` 判分母（C9 门只读这一处）+ `tier_scope` 记档位适用并校验非空/档名在册（批M MC-10 L-2 扩读，收 R-8）——normal 格落点件须 mech.rs + 模块 composite.rs 两腿各 ≥1（腿一 `fn parity_leg1_*`、腿二 `fn parity_leg2_*`，命名即机器锚），只有腿一记未达标；placeholder 记"不适用"、retired 退出分母；件形按 `module.toml` 的 `lang` 判（lang=python 两件式记不适用，不再用 `[ ! -f mech.rs ]` 存在性启发式）；C10 stub 反例自证内置（须由**对拍计数**拦下，拦不住空件则门自身 FAIL）· ⑧-b 依赖闭包 grep 门（C7 分级执法）：扫 `modules/*/atoms/*/*.rs` 非 test 面（行注释与 `#[cfg(test)]` 块先剥）——L0 = `std::`（含 `use std::`/`extern crate std`/全限定内联），L1 = L0 + `serde_json` · ⑧-c 注入面校验门：rr-registry contract 的 injection 用例**显式过滤器**，打空即红（run_tests ≥1 断言），封"用例被改名/删除"的 fail-open；形状级含 **L-5 空面规则**（`handles`/`ops` 两数组**均空**须明写 `no_injection = true`，否则与"漏填"不可区分判红——0.0.5 批M MC-10 L-5） |
+
+**2026-11-02 批N43 对表**：新增独立 std 工程 `tools/pi-periph-base`（W4/P0-C Pi 板侧
+五端口后端）**进 ④/⑥ 扫面**（非 esp 条件工程，不 SKIP；⑥ 跑 24 测）；前置条件 =
+`rg esp_idf` 本 crate 零命中、`cargo tree` 无 esp-*。同批 `profiles/` 机型集新增
+`pi4b-board.toml`（板端点 rtos 档；host 单轴描述符不能容纳双轴，审查裁定记
+批N43 计划册 §1.1），由 `rr-registry/tests/contract.rs` 机型集 pin、形状 pin
+与 rrd `pi4b_board_profile_boot_inputs_drill` 双向执法。
 
 **拟增三步（2026-10-14 增补轮六登记，尚未建成——建成前不得当作现有强度引用）**：
 **第八轮实测（2026-10-15）把"尚未建成"从声明变成计数**：`tools/ci/check.sh` 里可数的 step 只有
