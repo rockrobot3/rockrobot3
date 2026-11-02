@@ -1,0 +1,25 @@
+[package]
+name = "periph-mech"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "外设机制核（P0-A A2）：帧面收发 / OLED 编码 / 舵机与降档核心 / 轨压判定——泛型于五端口，零 esp-idf、零睡眠、零策略量"
+
+# 独立 workspace：宿主与各板档适配层按 path 依赖本 crate；不进 base/runtime 主
+# workspace（机制核不是运行时成员，也不绑任何平台构建面）。
+[workspace]
+
+[lib]
+name = "periph_mech"
+path = "src/lib.rs"
+
+# 依赖方向纪律（ADR-0024，与 rr-periph-proto 同一条）：本 crate 只允许依赖
+# 三类零平台叶子——rr-ipc（字节契约/帧缓冲）、rr-periph-proto（协议面与端口
+# 契约）、rr-mech（安全核边沿原语）。**零 esp-idf**：宿主与板档双向引用。
+[dependencies]
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+rr-mech = { path = "../../base/runtime/rr-mech" }
+rr-periph-proto = { path = "../../base/runtime/rr-periph-proto" }
+serde_json = "1"
