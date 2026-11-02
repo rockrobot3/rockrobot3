@@ -1,0 +1,20 @@
+[package]
+name = "pi-periph-base"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "UNLICENSED"
+publish = false
+description = "W4/P0-C 树莓派 4B 板侧五端口后端（std/Linux：UART/I2C/sysfs PWM/ADS1115/单调时钟）"
+
+# 独立 workspace：本工程是宿主可编的 std 工程（Linux 设备面 + macOS 可编译的纯逻辑单测），
+# 与 base/runtime 主 workspace 的依赖树互不牵连；门禁 ④/⑥ 照常扫本目录。
+[workspace]
+
+[dependencies]
+# 线上契约（帧 + 字节流）与端口契约：与 esp32 板档共用同一份真值，本 crate 只写端口实现。
+rr-ipc = { path = "../../base/runtime/rr-ipc" }
+rr-periph-proto = { path = "../../base/runtime/rr-periph-proto" }
+# 机制核（帧收发 / OLED 编码 / 舵机缓速与轨压判定）：P0-A 析出，换平台零改动。
+periph-mech = { path = "../periph-mech" }
+serde_json = "1"
