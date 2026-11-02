@@ -46,7 +46,7 @@
 - **策略不外溢**：音频载荷四道门与解码、行程/步进/栈/分片大小等策略量仍留各自消费面
   （rr-hal / 固件 `board.rs`）；crate 只收"宿主与固件必须逐字节一致"的协议机制。
 
-### 裁定 2：固件端口层五 trait（`tools/esp32-periph-base/src/ports.rs`）
+### 裁定 2：五端口 trait（P0-A A1 起住 `base/runtime/rr-periph-proto/src/ports.rs`）
 
 | trait | 方法 | 语义 |
 |---|---|---|
@@ -80,6 +80,34 @@
 `rr-hal` 已是宿主实现层（linux/macos/sim 后端齐备），本批**不做**树莓派板侧端口实现。
 端口 trait 定义即接缝契约：后续 Pi 后端按同一五 trait 写一份实现，上层机制件零改动。
 
+### 裁定 5：机制核与适配层边界（P0-A A2/A3 落地）
+
+新增 `tools/periph-mech/`（独立 workspace，lib `periph_mech`）：四模块收"换平台不换"的
+外设机制。依赖仅 `rr-ipc` + `rr-periph-proto` + `rr-mech` + `serde_json`，**零 esp-idf**、
+**不读墙上时钟、不睡眠、不持线程**、零策略量（阈值/行程/亮度阶梯/步进/行列数一律按参传入）。
+
+**搬运清单（真值从此只在机制核）**：
+
+| 机制核模块 | 搬运内容 | 原落点（适配层只留薄壳） |
+|---|---|---|
+| `frame.rs` | `frame_recv` / `frame_send_response` / `FrameReq`（泛型于 UART/时钟端口） | 固件 `src/frame.rs`（余分发与状态机） |
+| `oled_codec.rs` | 5×7 字模、文本页、8×8 点阵放大页、初始化命令序、亮度命令、文本 3 行+角度行排版 | 固件 `src/oled.rs`（余 I2C 事务/分块/重试/总线自愈） |
+| `periph_core.rs` | 行程校验与文案、deg↔duty 换算、缓速步进序列、重度欠压拒动闸、两轴记账核、OLED 降亮阶梯 | 固件 `src/periph.rs`（余驱动字段、写 duty 与步间等待）、`atoms/servo/mech.rs`（余本板行程生成表） |
+| `rail_judge.rs` | 分压换算、双阈值电平分类、迟滞边沿判定核（复用 rr-mech `Rr3LowEdge`） | 固件 `src/power.rs`（余 ADC 通道装配与一次采样） |
+
+**不搬清单（归各平台适配层，换平台各写一份）**：
+
+- 驱动构造与释放：`UartDriver` / `I2cDriver` / `LedcDriver` / `AdcChannelDriver`；
+- 线程、`Arc<Mutex<Bus>>`、作业队列、控制面分发与状态机（`state.rs`、`frame_dispatch`）；
+  `runtime_loop`、`httpd`、`mic`、`link`、`cred`；
+- I2C 分块写、整页重写、重试退避、GPIO 位打总线自愈（操作引脚，不是事务）；
+- 板策略面：`board.rs` 常量、`atoms/*/mech.rs` 的本板行程生成表；
+- 等待/睡眠：机制只产步进序列与判定，时序由适配层执行。
+
+**判据**：`rg "esp_idf" tools/periph-mech` 为 0、`cargo tree -p periph-mech` 无 esp-idf、
+机制核自带单测；适配层 xtensa 构建与单测编译 PASS。行为等价以线上 canonical digest
+（U3）对拍为准，不以"编译过"为准。
+
 ## 登记（写进代码注释与测试）
 
 1. **波特率 cfg 双定义**：`rr_ipc::RR3_UART_BAUD_DEFAULT`/`rr3_uart_baud_speed` 受
@@ -103,8 +131,11 @@
 
 ## 回写清单
 
-- `base/runtime/rr-periph-proto/`（新 crate：`consts/request/response/host_call/cmd`）+
+- `base/runtime/rr-periph-proto/`（新 crate：`consts/request/response/host_call/cmd/ports`）+
   `base/runtime/Cargo.toml` members；
 - `base/runtime/rr-hal`：`Cargo.toml`、`src/esp32_uart.rs`、`src/esp32audio.rs`（改 `pub use`）；
-- `tools/esp32-periph-base`：`Cargo.toml`、`src/board.rs`、`src/frame.rs`、`src/ports.rs`（新）、
-  `src/periph.rs`、`src/oled.rs`、`src/state.rs`、`src/commands.rs`、`src/main.rs`。
+- `tools/esp32-periph-base`：`Cargo.toml`、`src/board.rs`、`src/frame.rs`、`src/ports_impl.rs`
+  （原 `src/ports.rs` 随 A1 迁入协议 crate，本档只留实现）、`src/periph.rs`、`src/oled.rs`、
+  `src/power.rs`、`src/runtime.rs`、`src/state.rs`、`src/commands.rs`、`src/main.rs`、
+  `atoms/servo/mech.rs`；
+- `tools/periph-mech/`（新 crate：`frame/oled_codec/periph_core/rail_judge`，独立 workspace）。
