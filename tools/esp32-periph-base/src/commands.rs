@@ -12,7 +12,7 @@ use crate::frame::{frame_dispatch, frame_recv, frame_send_response};
 use crate::link::{drain_uart_quiet, read_line, reply, UartIo};
 use crate::oled::glyph;
 use crate::periph::CtlUart;
-use crate::ports::Rr3BoardClock;
+use crate::ports_impl::Rr3BoardClock;
 use crate::servo::{axis_check, Axis};
 use crate::state::{
     drain_audio, drain_outbox, esp_random_u32, lock_bus, push_job, Bus, CtlState, Job,

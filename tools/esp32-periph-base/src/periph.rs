@@ -11,7 +11,7 @@ use crate::board::{
 };
 use crate::face::EyeStyle;
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
-use crate::ports::{Rr3AdcPort, Rr3PwmChannel, Rr3PwmPort};
+use rr_periph_proto::ports::{Rr3AdcPort, Rr3PwmChannel, Rr3PwmPort};
 use crate::power::{RailJudge, RailMonitor, RailTier};
 use crate::servo::{axis_check, deg_to_duty, Axis};
 
