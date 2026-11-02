@@ -7,10 +7,15 @@ use esp_idf_hal::uart::UartDriver;
 
 use crate::board::{
     DUTY_MAX, DUTY_MIN, OLED_COLS, OLED_CONTRAST_LEVELS, OLED_RENDER_ATTEMPTS, OLED_ROWS,
-    RAIL_GATE_ARMED, RR3_BIND_ADC_RAIL, SERVO_SLEW_STEP_DEG, SERVO_SLEW_STEP_MS,
+    RAIL_GATE_ARMED, RAIL_MILD_MV, RAIL_SEVERE_MV, RR3_BIND_ADC_RAIL, SERVO_SLEW_STEP_DEG,
+    SERVO_SLEW_STEP_MS,
 };
 use crate::face::EyeStyle;
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
+use periph_mech::oled_codec::{rr3_contrast_command, rr3_oled_lines};
+use periph_mech::periph_core::{
+    rr3_servo_gate, rr3_servo_release, rr3_slew_steps, Rr3OledLadder, Rr3ServoCore,
+};
 use rr_periph_proto::ports::{Rr3AdcPort, Rr3PwmChannel, Rr3PwmPort};
 use crate::power::{RailJudge, RailMonitor, RailTier};
 use crate::servo::{axis_check, deg_to_duty, Axis};
@@ -33,12 +38,12 @@ pub(crate) struct RtPeriph {
     pub(crate) i2c: I2cDriver<'static>,
     pub(crate) pan: LedcDriver<'static>,
     pub(crate) tilt: LedcDriver<'static>,
-    /// 各轴**记账角**（缓速步进的起点：只有本面驱动舵机，故本面记账即真值；duty=0
-    /// 未激磁期以中位起算，避免首帧从 0° 起跳的假行程）。
-    pub(crate) pan_deg: u32,
-    pub(crate) tilt_deg: u32,
-    /// 当前 OLED 亮度档下标（整板电压降级用；见 [`OLED_CONTRAST_LEVELS`]）。
-    pub(crate) contrast_idx: usize,
+    /// 两轴**记账角**（缓速步进的起点：只有本面驱动舵机，故本面记账即真值；duty=0
+    /// 未激磁期以中位起算，避免首帧从 0° 起跳的假行程）——机制核 [`Rr3ServoCore`]。
+    pub(crate) servo: Rr3ServoCore,
+    /// 当前 OLED 亮度档（整板电压降级用；见 [`OLED_CONTRAST_LEVELS`]）——机制核
+    /// [`Rr3OledLadder`] 只管阶梯，档值真值仍在策略面。
+    pub(crate) oled: Rr3OledLadder,
     /// 5V 轨采样器（方案A Q1）：装配失败为 `None`——按"打印不 panic"纪律不拖垮其余
     /// 外设面；采样路径据此回 Err（不冒领读数）。
     pub(crate) rail: Option<RailMonitor>,
@@ -52,62 +57,73 @@ pub(crate) struct RtPeriph {
 }
 
 impl RtPeriph {
-    /// 舵机转角（先过本轴行程裁决 → **缓速步进**逼近 → 返回实际设定角）。
-    /// 协议级 0–180 之外的角先被拒；轴行程（中位 ± 摆幅）之外**点名拒收**，
-    /// 不静默钳位——见文件头"分轴行程"段。缓速步进见 [`SERVO_SLEW_STEP_DEG`]
-    /// （极限电源下的软启动：把整段跳变的电流尖峰摊成涓流）。
+    /// 装配套（驱动由 `main` 装好后移交；本构造只初始化机制核状态与判定核）。
+    /// 记账角初值 = 各轴中位锚（策略面生成表），避免首帧从 0° 起跳的假行程。
+    pub(crate) fn new(
+        i2c: I2cDriver<'static>,
+        pan: LedcDriver<'static>,
+        tilt: LedcDriver<'static>,
+        rail: Option<RailMonitor>,
+    ) -> Self {
+        Self {
+            i2c,
+            pan,
+            tilt,
+            servo: Rr3ServoCore::new(Axis::Pan.center_deg(), Axis::Tilt.center_deg()),
+            oled: Rr3OledLadder::new(),
+            rail,
+            next_rail_ms: 0,
+            rail_judge: RailJudge::new(RAIL_MILD_MV, RAIL_SEVERE_MV),
+            rail_tier: RailTier::Ok,
+        }
+    }
+
+    /// 本面记账角（运行面回写共享状态时用：只有成功移动才推进，读角永不复述
+    /// 没到达的角）。
+    pub(crate) fn pan_deg(&self) -> u32 {
+        self.servo.deg(Rr3PwmChannel::Pan)
+    }
+
+    /// 见 [`Self::pan_deg`]。
+    pub(crate) fn tilt_deg(&self) -> u32 {
+        self.servo.deg(Rr3PwmChannel::Tilt)
+    }
+
+    /// 舵机转角（先过本轴行程裁决 → 轨压拒动闸 → **缓速步进**逼近 → 返回实际
+    /// 设定角）。协议级 0–180 之外的角先被拒；轴行程（中位 ± 摆幅）之外**点名
+    /// 拒收**，不静默钳位。缓速步进见 [`SERVO_SLEW_STEP_DEG`]（极限电源下的软启动：
+    /// 把整段跳变的电流尖峰摊成涓流）；步进序列由机制核产出，本面只管写 duty 与
+    /// 步间等待。
     pub(crate) fn servo_set(&mut self, axis: Axis, deg: u32) -> Result<u32, String> {
         let deg = axis_check(axis, deg)?;
         // 5V 轨**重度欠压 → 执行面拒动**（方案A Q2 / MC-5 语义）：已接闸（真板标定后）
         // 且档位为 `severe` 时拒收本次动作——fail-closed，绝不带着欠压去驱舵机、不去撞
         // BOD 复位。**妆面（OLED）不受影响**；**回阈后不自动重放**（调用方须重发）。
         // `RAIL_GATE_ARMED=false`（占位未标定）时不接闸，仅观测。
-        if RAIL_GATE_ARMED && self.rail_tier == RailTier::Severe {
-            return Err(format!(
-                "5V 轨重度欠压（tier=severe）执行面拒动：{} 轴 {deg}° 拒收（回阈后请重发）",
-                axis.name()
-            ));
-        }
-        let cur = match axis {
-            Axis::Pan => self.pan_deg,
-            Axis::Tilt => self.tilt_deg,
+        rr3_servo_gate(RAIL_GATE_ARMED, self.rail_tier, axis.name(), deg)?;
+        let ch = match axis {
+            Axis::Pan => Rr3PwmChannel::Pan,
+            Axis::Tilt => Rr3PwmChannel::Tilt,
         };
-        let mut step = cur;
-        while step != deg {
-            step = if deg > step {
-                (step + SERVO_SLEW_STEP_DEG).min(deg)
-            } else {
-                step.saturating_sub(SERVO_SLEW_STEP_DEG).max(deg)
-            };
-            let ch = match axis {
-                Axis::Pan => Rr3PwmChannel::Pan,
-                Axis::Tilt => Rr3PwmChannel::Tilt,
-            };
+        for step in rr3_slew_steps(self.servo.deg(ch), deg, SERVO_SLEW_STEP_DEG) {
             self.rr3_pwm_duty(ch, deg_to_duty(step, DUTY_MIN, DUTY_MAX))?;
             if step != deg {
                 thread::sleep(Duration::from_millis(SERVO_SLEW_STEP_MS));
             }
         }
-        match axis {
-            Axis::Pan => self.pan_deg = deg,
-            Axis::Tilt => self.tilt_deg = deg,
-        }
+        self.servo.commit(ch, deg);
         Ok(deg)
     }
 
     /// 下调一档 OLED 亮度（**整板电压降级**：见 [`OLED_CONTRAST_LEVELS`]）。已到地板
-    /// 返回 false（调用方据此收手）；未到则写新档并返回 true。
+    /// 返回 false（调用方据此收手）；未到则写新档并返回 true。阶梯推进在机制核。
     pub(crate) fn degrade_contrast(&mut self) -> bool {
-        if self.contrast_idx + 1 >= OLED_CONTRAST_LEVELS.len() {
+        let Some(idx) = self.oled.degrade(OLED_CONTRAST_LEVELS.len()) else {
             return false;
-        }
-        self.contrast_idx += 1;
-        let lv = OLED_CONTRAST_LEVELS[self.contrast_idx];
-        match oled_cmd(&mut self.i2c, &[0x81, lv]) {
-            Ok(()) => println!(
-                "[periph] OLED 降亮 → 0x{lv:02X}（轨压降级第 {} 档）",
-                self.contrast_idx
-            ),
+        };
+        let lv = OLED_CONTRAST_LEVELS[idx];
+        match oled_cmd(&mut self.i2c, &rr3_contrast_command(lv)) {
+            Ok(()) => println!("[periph] OLED 降亮 → 0x{lv:02X}（轨压降级第 {idx} 档）"),
             Err(e) => eprintln!("[periph] 降亮写失败: {e}"),
         }
         true
@@ -141,7 +157,7 @@ impl RtPeriph {
             // 已到亮度地板：重初始化复位模块一次，再试一次即收手
             eprintln!("[periph] OLED 渲染到亮度地板仍败 → 重走 oled_init 复位模块（每轮至多一次）");
             let _ = oled_init(&mut self.i2c);
-            self.contrast_idx = 0;
+            self.oled.reset();
             return f(&mut self.i2c);
         }
         Err(last)
@@ -165,8 +181,7 @@ impl RtPeriph {
     /// 故除"正在移动"外一律释放两轴：把 5V 轨整段让给 OLED。运行面单线程、渲染与
     /// 移动在时间上本就串行，故本函数在**每次动作收尾**调用即可保证两者零重叠。
     pub(crate) fn servo_release(&mut self) {
-        let _ = self.rr3_pwm_duty(Rr3PwmChannel::Pan, 0);
-        let _ = self.rr3_pwm_duty(Rr3PwmChannel::Tilt, 0);
+        rr3_servo_release(self);
     }
 
     /// 采样一次 5V 轨（**机制面**，方案A Q1）：返回 `(轨压 mV, 引脚 raw)`；未装配
@@ -185,28 +200,9 @@ impl RtPeriph {
         pan_deg: u32,
         tilt_deg: u32,
     ) -> Result<(), String> {
-        // 先过滤成可见 ASCII（其余转空格，与 glyph 行为一致）再按 21 列硬切
-        // 3 行——字节切片不劈多字节字符（char boundary 安全），行对齐不漂移。
-        let ascii: Vec<u8> = text
-            .chars()
-            .map(|c| {
-                if (0x20..=0x7E).contains(&(c as u32)) {
-                    c as u8
-                } else {
-                    b' '
-                }
-            })
-            .collect();
-        let mut lines: Vec<Vec<u8>> = Vec::with_capacity(OLED_ROWS);
-        for row in 0..(OLED_ROWS - 1) {
-            let start = row * OLED_COLS;
-            lines.push(if start < ascii.len() {
-                ascii[start..(start + OLED_COLS).min(ascii.len())].to_vec()
-            } else {
-                Vec::new()
-            });
-        }
-        lines.push(format!("P:{pan_deg:03} T:{tilt_deg:03}").into_bytes());
+        // 排版机制在 periph-mech（P0-A A3：可见 ASCII 过滤 + 21 列硬切 + 角度行），
+        // 列数/行数策略量按参喂入；本面只做逐行传输。
+        let lines = rr3_oled_lines(text, pan_deg, tilt_deg, OLED_ROWS, OLED_COLS);
         self.render_with_recovery(|i2c| {
             for (row, line) in lines.iter().enumerate() {
                 oled_text(i2c, row, line)?;

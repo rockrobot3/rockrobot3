@@ -49,6 +49,9 @@ rr-ipc = { path = "../../base/runtime/rr-ipc" }
 # 单点，与宿主 rr-hal 双向复用；本固件只消费协议件，平台面（UART/I2C/LEDC/I2S）
 # 仍在本 crate 的端口层。
 rr-periph-proto = { path = "../../base/runtime/rr-periph-proto" }
+# 外设机制核（P0-A A3）：帧面收发/OLED 编码/舵机与降档核心/轨压判定的单点真值
+# （零 esp-idf，宿主与板档共用）；本档只剩驱动构造与端口实现。
+periph-mech = { path = "../periph-mech" }
 # 判定核（方案A Q2）：欠压迟滞边沿 `Rr3LowEdge` 取用 rr-mech 安全核下沉件——板档
 # 直接消费判定核（安全核离线仍须成立），rr-mech 是零依赖 no_std 叶子（不牵总线栈，
 # 故不违反本 crate"不依赖 rr-core"的裁线）。
