@@ -276,6 +276,29 @@ act: intent: trace=1 servo angle=45，state#1 已发
    不是 5 针信号排，认丝印 VCC/GND/DIN/CS/CLK；MAX7219（SPI 移位寄存器无
    应答）与 OLED（I2C SSD1306）不可互代。
 
+## 装配单选择（组合形态 vs 独立平台，2026-11-02 订正）
+
+Pi 4B **既可独立运行，也可当宿主带板**；两种形态的装配单不能混用：
+
+| 形态 | profile | 说明 |
+|---|---|---|
+| Pi4 + classic 快速部署 | `pi4b-host-esp32-classic.toml` | classic 板只做末梢（麦/舵机/OLED/UART2），用于无完整底座依赖的快速验证 |
+| Pi4 独立 | `distro.toml` | Pi 完整 Linux 底座，本地 MAX7219/USB 声卡 |
+| Pi4 + S3 | `pi4b-host-esp32s3.toml` | S3 独立平台组合；板侧线束 41/42、8/9、4/5、6/15/7、1 |
+| S3 单板 | `esp32s3-mini.toml` | 板侧独立固件 |
+| RK3566（未来） | 待立 profile | 独立 Linux 平台 |
+
+**2026-11-02 实机订正**：Pi4 + classic 的 `rrd.service.d/profile.conf` 曾误指 S3 档；
+已切 classic（备份 `.bak-n42`），五模块 running、sense 板面流就绪；S3 档保留不动。
+
+```bash
+sudo cp /etc/systemd/system/rrd.service.d/profile.conf{,.bak}
+sudo sed -i 's#pi4b-host-esp32s3.toml#pi4b-host-esp32-classic.toml#' \
+  /etc/systemd/system/rrd.service.d/profile.conf
+sudo systemctl daemon-reload && sudo systemctl restart rrd
+rr3-ctl status
+```
+
 **判据对账（0.0.6 方案 §5.2）**：
 
 ```
