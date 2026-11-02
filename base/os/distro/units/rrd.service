@@ -17,6 +17,12 @@ Environment=RR3_DATA_DIR=/var/lib/rockrobot3
 # 真 reboot 解锁面（0.0.6 批F5b R12）：conn.rs 双重门（cfg(linux) + 本变量）缺省恒拒，
 # 发行版装机注入即解锁——sim/容器直跑无此变量仍恒拒，运维面不随包裸奔
 Environment=RR3_REBOOT_OK=1
+# 硬件音量下限预置（批N38 件一，2026-11-02）：ALSA 混音器电平是**易失状态**——批N37
+# 真板实测重启回落 38%（-23dB，硬件混音器默认），软件侧 volume_pct 之上还需这条下限。
+# `-` 前缀 = 失败不阻断启动（**有界 fail-open**：音量下限失守 ≠ 服务不可用；与 rrd
+# 装载门的 fail-closed 是两个层次，勿混）。amixer 缺席或卡名 `Device` 不在（换声卡）时
+# 静默跳过，失败原因进 journal 可查。出厂轨 S99rrd 的 start 段同语义同源（件一）。
+ExecStartPre=-/usr/bin/amixer -c Device sset PCM 100%
 ExecStart=/usr/bin/rrd --socket /var/run/rock3-ipc.sock --contracts /usr/lib/rockrobot3/contracts --profile /usr/lib/rockrobot3/profiles/distro.toml
 # always（0.0.6 批F5b R12 与方案目标形态同批落）：reboot 自身退出也拉起；判死重启
 # 退避由 rrd 内层 watchdog/supervisor 管，systemd 这层只兜底，2s 足够
