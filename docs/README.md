@@ -116,6 +116,7 @@ README、什么时候该点开它"；小节名以文档自身为准，本表只�
 | [`../tools/espidf-sentinel/README.md`](../tools/espidf-sentinel/README.md) | 层③ 哨兵（0.0.7 批D1）：内跑 `rr-core::runtime` 的真板消费者，板上 runbook（双证/三点堆采样/批D2 触发判据） |
 | [`../tools/esp32-periph-base/README.md`](../tools/esp32-periph-base/README.md) | 批B 外设底座档（0.0.5 增补轮五）：OLED+舵机独立固件接线表、烧录 runbook、验收判据四件套 |
 | [`../tools/sim/README.md`](../tools/sim/README.md) | 没有板子要跑全链路时（`rr3-sim`） |
+| [`../tools/pi-periph-probe/README.md`](../tools/pi-periph-probe/README.md) | 板上线取证工具集（15 支探针用法表＋三支判据对表速查） |
 | [`../tools/rrctl/README.md`](../tools/rrctl/README.md) | 总线侧运维 CLI 的命令面（`rr3-ctl`） |
 | [`../.github/README.md`](../.github/README.md) | GitHub 侧工作流声明与它的实际地位 |
 
