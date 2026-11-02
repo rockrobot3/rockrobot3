@@ -117,5 +117,13 @@ for m in sense interact; do
   rrun "ldd $RMT_SRC/modules/rr3-$m/target/release/rr3-$m" | grep -q libasound
 done
 
+echo "== ⑦ 装机面 config 漂移报告（非阻断；批N38 件二）=="
+# 为什么非阻断：本脚本只出 payload，装机（dpkg -i）在其后——此刻漂移属正常。判据单点
+# 在 verify-board-config.sh（sha256 逐文件），本处只作**报告**；装机完成后按 boards §10
+# 步④ 重跑同一工具，那时漂移即真问题（仓内 config 已改而板上没铺 → 静默旧档生效）。
+set +e
+bash tools/deploy/verify-board-config.sh --repo . --remote "$HOST"
+set -e
+
 echo "payload 音频件已换成板上原生构建件: $PAY"
 echo "下一步：在主 staging 树合流后板上 dpkg-deb --build（见 boards/raspberry-pi-64.md）"
