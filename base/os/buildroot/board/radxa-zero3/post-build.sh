@@ -174,6 +174,15 @@ case "$1" in
 		# 装配单路径上两级）推导，模块装机布局见本脚本第 4 件。
 		# 机型档选型：distro.toml = RK3566 参考机 host 档（chip=rk3566，与 rrd.service
 		# 缺省锚点同源）；机型专属装配单归真板档（M1）另立后此处随改。
+		# 硬件音量下限预置（批N38 件一，与发行版 rrd.service 的 ExecStartPre 同语义同源）：
+		# ALSA 混音器电平易失——重启回落 38%（-23dB，批N37 真板实测）；无 amixer 或卡名
+		# 不在则点名跳过，**不阻断启动**（有界 fail-open，与装载门 fail-closed 不同面）。
+		if command -v amixer >/dev/null 2>&1; then
+			amixer -c Device sset PCM 100% >/dev/null 2>&1 || \
+				echo "S99rrd: amixer 预置跳过（卡名 Device 不在）"
+		else
+			echo "S99rrd: amixer 缺席，跳过硬件电平预置"
+		fi
 		start-stop-daemon -S -b -m -p /var/run/rrd.pid \
 			-x /usr/bin/rrd -- --socket /var/run/rock3-ipc.sock \
 			--contracts /usr/lib/rockrobot3/contracts \
