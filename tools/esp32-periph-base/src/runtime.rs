@@ -5,7 +5,6 @@ use std::time::Duration;
 use crate::board::{
     AXIS_SETTLE_MS, DUTY_MAX, DUTY_MIN, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS, SCAN_POINT_MS,
 };
-use crate::oled::i2c_bus_recover;
 use crate::periph::RtPeriph;
 use crate::servo::{axis_scan_points, duty_to_deg, Axis};
 use crate::state::{lock_bus, now_ms, outbox_push, Bus, Job};
@@ -32,26 +31,10 @@ pub(crate) fn runtime_loop(mut ph: RtPeriph, bus: Arc<Mutex<Bus>>) {
         // 让给 OLED——见 [`RtPeriph::servo_release`]。这一步是"OLED 表情稳定"的根因
         // 修复点：舵机只在"正在移动/扫描"的窗口里激磁，其余时间不占轨。
         ph.servo_release();
-        // 紧接着**强制重同步** I2C 从机：舵机电机换向噪声会在空闲期把 SSD1306 的
-        // I2C 状态机顶进半途态（此后恒 NACK 且 SDA 仍高，条件版自愈不触发）——
-        // 见 [`i2c_bus_recover`] 的 `force` 说明。每拍一次 9 时钟 + STOP，代价 ~100µs。
-        // 批N41：引脚注入优先、缺席回装配锚（独立部署不再永久跳过）；自愈返回
-        // false（9 时钟后 SDA 仍低）连续 5 次即退避 5s，防硬拉死时每拍强驱。
-        let now = now_ms();
-        if now >= ph.selfheal_holdoff_until_ms {
-            if i2c_bus_recover(true) {
-                ph.selfheal_fail_streak = 0;
-            } else {
-                ph.selfheal_fail_streak = ph.selfheal_fail_streak.saturating_add(1);
-                if ph.selfheal_fail_streak >= 5 {
-                    ph.selfheal_holdoff_until_ms = now.saturating_add(5_000);
-                    ph.selfheal_fail_streak = 0;
-                    let mut b = lock_bus(&bus);
-                    b.st.selfheal_skipped = b.st.selfheal_skipped.saturating_add(1);
-                    eprintln!("[periph] I2C 自愈连续失败，退避 5s（SDA 疑似硬拉死）");
-                }
-            }
-        }
+        // 批N41：**运行面不再每拍 bit-bang I2C**。真板实测 SCAN/密集动作中反复
+        // 把 I2C 引脚切 GPIO 再交还可触发复位；自愈收口到两条真需要的路径：
+        // boot 解卡（i2c_bus_unstick）与 I2C 写失败（i2c_write_retry → force recover）。
+        // 没有 OLED 写失败就不需要动总线；下一次写失败会自动 force 恢复并重试。
     }
 }
 
