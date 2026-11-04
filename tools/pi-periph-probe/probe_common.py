@@ -20,9 +20,11 @@
     from probe_common import baud_of, open_tty, pump, drain_until_quiet, scan_frames
 """
 import base64
+import fcntl
 import os
 import re
 import select
+import struct
 import sys
 import termios
 import time
@@ -61,18 +63,34 @@ def baud_from_argv_or_env(argv_index=1, env_key="RR3_PROBE_BAUD", default="B1500
 
 
 def open_tty(dev, baud):
-    """裸 termios 开口（8N1，无流控，非阻塞，VMIN=0/VTIME=0）。返回 fd。"""
+    """裸 termios 开口（8N1，无流控，非阻塞，VMIN=0/VTIME=0）。返回 fd。
+
+    macOS 的 termios 只认到 B230400（更高档没有常量，直接传 1500000 会
+    `tcsetattr: Invalid argument`）；FTDI/部分 VCP 驱动用 `IOSSIOSPEED` 设
+    非标波特率。故 Darwin 上 >230400 档：先用 B230400 过 termios 配置，
+    再 ioctl 到目标档。Linux 不受影响（termios 有 B1500000 等常量）。
+    """
     fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     a = termios.tcgetattr(fd)
     a[0] = 0  # iflag
     a[1] = 0  # oflag
     a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
     a[3] = 0  # lflag
-    a[4] = baud
-    a[5] = baud
+    speed = baud
+    if sys.platform == "darwin" and int(baud) > 230400:
+        speed = termios.B230400
+    a[4] = speed
+    a[5] = speed
     a[6][termios.VMIN] = 0
     a[6][termios.VTIME] = 0
     termios.tcsetattr(fd, termios.TCSANOW, a)
+    if sys.platform == "darwin" and int(baud) > 230400:
+        # ioss.h：IOSSIOSPEED = _IOW('T', 2, speed_t)；speed_t 64 位为 unsigned long，
+        # 32 位变体走 IOSSIOSPEED_32。FTDI 驱动实测 64 位路径可用。
+        try:
+            fcntl.ioctl(fd, 0x80085402, struct.pack("@Q", int(baud)))
+        except OSError:
+            fcntl.ioctl(fd, 0x80045402, struct.pack("@I", int(baud)))
     termios.tcflush(fd, termios.TCIOFLUSH)
     return fd
 
