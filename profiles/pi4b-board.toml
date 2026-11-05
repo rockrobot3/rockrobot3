@@ -24,8 +24,8 @@
 #   - 控制器词形是 Linux sysfs 名（pwm0 = pwmchip0，channel 0/1 = pwm0/pwm1
 #     子目录；见 contracts/platform/raspberry-pi-4.toml 的 pwm0 channels = 2）；
 #   - 没有 on-chip ADC（ADS1115 外挂 I2C，外部 A0 + 2×10k 分压量 5V 轨；2026-11-05
-#     实测本机模块输入端 0.727 衰减，板侧代码按有效 2.78:1 标定——换直入型模块
-#     须改回 2:1 并重跑 rail 判据），ADC 读面
+#     实物模块输入端不跟踪中点（重复 RAIL 4544–4595mV vs DMM 5.25V），不用于验收；
+#     换直入型模块后按 2:1 重测），ADC 读面
 #     归板侧程序，不进宿主 [[pin]]（roles.toml 无 ADS1115 角色，且 Rr3Power
 #     句柄语义是 INA219 寄存器路——不冒充）；
 #   - OLED（SSD1306 0x3C）同理由板侧程序直驱，不进宿主 [[pin]]：host 侧没有
