@@ -51,11 +51,12 @@ pub const ADS1115_RAIL_CHANNEL: u8 = 0;
 pub const ADS1115_CONFIG: [u8; 2] = [0x83, 0x83];
 /// 单次转换等待（128SPS ≈ 7.8ms；取 12ms 留裕量）。
 pub const ADS1115_WAIT_MS: u64 = 12;
-/// 5V 轨有效分压比：外部 2×10k = 2:1，本机 ADS1115 模块输入端实测 0.727 衰减
-/// （2026-11-05：5.25V→中点 2.60V→AIN0 1.89V），有效 = 2 / 0.727 ≈ 2.78。
-/// 换直入型模块须改回 2/1，并重跑 rail 判据（本值只对当前模块成立）。
-pub const RAIL_DIVIDER_NUM: u32 = 2_780;
-pub const RAIL_DIVIDER_DEN: u32 = 1_000;
+/// 5V 轨 2:1 分压比（外部 2×10k）。
+/// 2026-11-05 实测本机 ADS1115 模块输入端不跟踪中点：中点 2.62V 稳定，芯片重复
+/// 读数对应 AIN0 1.69–1.71V（RAIL 4544–4595mV），与 DMM 5.25V 不符；该模块不用于
+/// N43-4 验收。换直入型模块后按本 2:1 重测。
+pub const RAIL_DIVIDER_NUM: u32 = 2;
+pub const RAIL_DIVIDER_DEN: u32 = 1;
 /// 轨压阈值（声明预算位，标定后回填）。
 pub const RAIL_MILD_MV: u16 = 4_600;
 pub const RAIL_SEVERE_MV: u16 = 4_400;
