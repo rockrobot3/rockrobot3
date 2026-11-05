@@ -13,9 +13,12 @@ payload = 2 字节 LE 类型前缀（Request=1）+ JSON。应答 = Response(2) /
 判据：
 - 六个 rr3.call（舵机读/写/越界、表情写/非法、未知主题）必须逐条回 Response，
   且 `id` 回带、`payload_crc32` 与实算一致；
-- `rr3.set_bindings` 十键注入必须 applied；随后行面 INFO 的 `selfheal_skip` 增量
-  归零（注入前每拍必增，注入后立即停增——这是绑定链真正接通的判据）。
+- `rr3.set_bindings` 十键注入必须 applied；经典板随后行面 INFO 的 `selfheal_skip`
+  增量归零（绑定链真正接通的判据）；Pi 板 INFO 无该字段，记 SKIP（不冒充通过）。
+- 末尾输出 `U3_FRAME_DIGEST`：仅对平台中立的 rr3.call 回包做 canonical JSON
+  （`set_bindings` 的 mismatch 是板级真值差，不纳入跨板 digest）。
 """
+import hashlib
 import json
 import os
 import re
@@ -44,12 +47,23 @@ BINDINGS = {
     "ledc_pan": "32", "ledc_tilt": "33",
     "i2s_bclk": "4", "i2s_sd": "27", "i2s_ws": "26",
 }
+#: Pi 板四键真值（board.rs BIND_*）；其余六键沿用经典板词表但 Pi 不对账。
+if os.environ.get("RR3_PROBE_BOARD") == "pi":
+    BINDINGS.update({
+        "i2c_sda": "2", "i2c_scl": "3", "uart2_tx": "14", "uart2_rx": "15",
+    })
 
 fd = open_tty(DEV, BAUD)
 flush_input(fd)
 pump(fd, 1.2)
+#: U3 只认命令面回包；先把双轴/表情压到已知中位，避免上一会话状态污染
+#: `previous`/舵机读角度。行面复位与帧面共用同一首字节分流。
+os.write(fd, b"SERVO 90 90\nFACE idle\n")
+pump(fd, 0.5)
 
 results = []
+#: U3 帧面 canonical digest（不含平台相关的 set_bindings）：note|canonical(result)。
+u3_lines = []
 
 
 def build_frame(ty, body_obj, trace_id=0, dst=DST_PERIPH, src=SRC_HOST):
@@ -140,6 +154,13 @@ def call(id_, method, params, expect, cap=6.0, note=""):
             lat, id_, seen, len(raw), bytes(raw[:60]))
     else:
         v, crc_ok, h = resp
+        if id_ != 19:
+            u3_lines.append(
+                (note or method) + "|" + json.dumps(
+                    v.get("result"), sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+            )
         if isinstance(expect, dict):
             ok = all(v.get("result", {}).get(k) == val for k, val in expect.items())
         else:
@@ -194,10 +215,16 @@ if before and after:
     results.append(("selfheal 停增", ok, "增量 %d（注入后应 0）" % d))
     print("[%s] selfheal_skip 增量=%d（注入后应 0；注入前每拍必增）" % ("PASS" if ok else "FAIL", d))
 else:
-    results.append(("selfheal 停增", False, "INFO 缺字段"))
-    print("[FAIL] INFO 缺 selfheal_skip 字段")
+    if os.environ.get("RR3_PROBE_BOARD") == "pi":
+        results.append(("selfheal 停增", True, "SKIP（Pi INFO 无 selfheal_skip）"))
+        print("[SKIP] Pi 板 INFO 无 selfheal_skip（经典自愈字段不适用）")
+    else:
+        results.append(("selfheal 停增", False, "INFO 缺字段"))
+        print("[FAIL] INFO 缺 selfheal_skip 字段")
 
+digest = hashlib.sha256("\n".join(u3_lines).encode()).hexdigest()
+print("\nU3_FRAME_DIGEST " + digest)
 passed = sum(1 for _, ok, _ in results if ok)
-print("\n通过 %d/%d" % (passed, len(results)))
+print("通过 %d/%d" % (passed, len(results)))
 os.close(fd)
 sys.exit(0 if passed == len(results) else 1)
