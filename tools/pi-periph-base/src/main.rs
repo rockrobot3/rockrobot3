@@ -74,6 +74,7 @@ struct State {
     rail_mv: u16,
     rail_raw: u16,
     rail_tier: RailTier,
+    rail_valid: bool,
     rail_low_events: u32,
     binding_mismatch: u32,
     next_rail_ms: u64,
@@ -91,6 +92,7 @@ impl State {
             rail_mv: 0,
             rail_raw: 0,
             rail_tier: RailTier::Ok,
+            rail_valid: false,
             rail_low_events: 0,
             binding_mismatch: 0,
             next_rail_ms: 0,
@@ -454,6 +456,7 @@ impl Board {
         self.state.rail_mv = mv;
         self.state.rail_raw = raw;
         self.state.rail_tier = tier;
+        self.state.rail_valid = true;
         self.rail_err_logged = false;
         Ok((mv, raw))
     }
@@ -529,22 +532,30 @@ impl Board {
     }
 
     fn info_line(&self) -> String {
-        let pan = self.state.servo.deg(Rr3PwmChannel::Pan);
-        let tilt = self.state.servo.deg(Rr3PwmChannel::Tilt);
-        let (plo, phi) = Axis::Pan.range();
-        let (tlo, thi) = Axis::Tilt.range();
-        format!(
-            "INFO pan={pan:03} tilt={tilt:03} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] \
-             wander=off phase=0 rail={}mV raw={} rail_tier={} low_events={} \
-             binding_mismatch={} oled_last=\"{}\"",
-            self.state.rail_mv,
-            self.state.rail_raw,
-            self.state.rail_tier.name(),
-            self.state.rail_low_events,
-            self.state.binding_mismatch,
-            self.state.last_text
-        )
+        info_of(&self.state)
     }
+}
+
+fn info_of(state: &State) -> String {
+    let pan = state.servo.deg(Rr3PwmChannel::Pan);
+    let tilt = state.servo.deg(Rr3PwmChannel::Tilt);
+    let (plo, phi) = Axis::Pan.range();
+    let (tlo, thi) = Axis::Tilt.range();
+    let rail = if state.rail_valid {
+        format!(
+            "rail={}mV raw={} rail_tier={}",
+            state.rail_mv,
+            state.rail_raw,
+            state.rail_tier.name()
+        )
+    } else {
+        String::from("rail=absent")
+    };
+    format!(
+        "INFO pan={pan:03} tilt={tilt:03} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] \
+         wander=off phase=0 {rail} low_events={} binding_mismatch={} oled_last=\"{}\"",
+        state.rail_low_events, state.binding_mismatch, state.last_text
+    )
 }
 
 fn channel_of(axis: Axis) -> Rr3PwmChannel {
@@ -639,5 +650,23 @@ mod tests {
         b.i2c_sda = Some(9);
         b.uart2_rx = Some(20);
         assert_eq!(reconcile_bindings(&b), 2, "两键失配逐条计数");
+    }
+
+    /// INFO 对无 ADS 的板子必须显式 rail=absent，不得把默认 0mV/Ok 冒领成有效采样。
+    #[test]
+    fn info_marks_absent_rail_explicitly() {
+        let absent = info_of(&State::boot());
+        assert!(absent.contains("rail=absent"), "{absent}");
+        assert!(!absent.contains("rail=0mV"), "{absent}");
+
+        let mut ok = State::boot();
+        ok.rail_valid = true;
+        ok.rail_mv = 5_240;
+        ok.rail_raw = 20_960;
+        let line = info_of(&ok);
+        assert!(
+            line.contains("rail=5240mV raw=20960 rail_tier=ok"),
+            "{line}"
+        );
     }
 }
