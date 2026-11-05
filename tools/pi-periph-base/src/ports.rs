@@ -5,7 +5,7 @@
 //! | UART | 复用 [`rr_ipc::Rr3UartConn`]（raw termios + 排他开口） | 帧面/重试全在上层 |
 //! | I2C | Linux `i2c-dev` + `I2C_RDWR` ioctl | 一笔写/一笔读；重试与 OLED 分块在上层 |
 //! | PWM | sysfs `/sys/class/pwm/pwmchip0/pwm{0,1}` | 只换算并写 duty/enable；export/period 在 `ensure` |
-//! | ADC | ADS1115（i2c1, 0x48）单端 A0，2:1 分压，±4.096V | 无器件如实 Err 且点名，不冒领读数 |
+//! | ADC | ADS1115（i2c1, 0x48）单端 A0，外部 2:1 分压；本机模块输入 0.727 衰减，有效 2.78:1，±4.096V | 无器件如实 Err 且点名，不冒领读数 |
 //! | Clock | `CLOCK_MONOTONIC`（Linux）/ `Instant`（非 Linux 编译面） | 帧头 timestamp 用 |
 //!
 //! 平台可编面：Linux 设备代码用 `#[cfg(target_os = "linux")]` 隔离；纯换算、
@@ -601,16 +601,17 @@ mod tests {
         assert_eq!(f.borrow().writes, vec![(0x3C, vec![0x00, 0xAE])]);
     }
 
-    /// ADS1115：配置字 = 0x8383（A0/±4.096V/单次/128SPS/比较器关）；raw 20000
-    /// （A0=2.5V）→ 轨压 5000mV（2:1 分压）。
+    /// ADS1115：配置字 = 0x8383（A0/±4.096V/单次/128SPS/比较器关）；raw 15136
+    /// （A0=1.892V，2026-11-05 实测 5.25V 轨）→ 轨压 5259mV（外部 2:1 × 模块 0.727
+    /// 衰减 = 有效 2.78:1）。
     #[test]
     fn ads1115_config_and_conversion() {
         let (bus, f) = fake();
-        f.borrow_mut().read_data = vec![0x4E, 0x20];
+        f.borrow_mut().read_data = vec![0x3B, 0x20];
         let mut ads = Ads1115::new(bus, ADS1115_ADDR);
         let (rail_mv, raw) = ads.read_rail().expect("在位件必须读回");
-        assert_eq!(raw, 20_000);
-        assert_eq!(rail_mv, 5_000);
+        assert_eq!(raw, 15_136);
+        assert_eq!(rail_mv, 5_259);
         {
             let f = f.borrow();
             assert_eq!(f.writes[0].0, ADS1115_ADDR);
