@@ -47,11 +47,18 @@ BINDINGS = {
     "ledc_pan": "32", "ledc_tilt": "33",
     "i2s_bclk": "4", "i2s_sd": "27", "i2s_ws": "26",
 }
-#: Pi 板四键真值（board.rs BIND_*）；其余六键沿用经典板词表但 Pi 不对账。
-if os.environ.get("RR3_PROBE_BOARD") == "pi":
-    BINDINGS.update({
-        "i2c_sda": "2", "i2c_scl": "3", "uart2_tx": "14", "uart2_rx": "15",
-    })
+#: 板型 → 真值覆盖（与 board/pins_*.rs 同值）：换板只换表，判据不动。未列出的键
+#: 沿用经典板词表；Pi 只对四键（其余六键是真值差、不入跨板 digest），S3 十键全换。
+BOARD_PINS = {
+    "pi": {"i2c_sda": "2", "i2c_scl": "3", "uart2_tx": "14", "uart2_rx": "15"},
+    "s3": {
+        "i2c_sda": "8", "i2c_scl": "9", "adc_rail_pin": "1",
+        "uart2_tx": "41", "uart2_rx": "42",
+        "ledc_pan": "4", "ledc_tilt": "5",
+        "i2s_bclk": "6", "i2s_sd": "15", "i2s_ws": "7",
+    },
+}
+BINDINGS.update(BOARD_PINS.get(os.environ.get("RR3_PROBE_BOARD", "classic"), {}))
 
 fd = open_tty(DEV, BAUD)
 flush_input(fd)
