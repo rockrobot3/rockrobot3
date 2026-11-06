@@ -783,9 +783,9 @@ v0.8 的"六段"漏了既有的 `[os]`——`rrd/src/profile.rs` 与查册门测
 [增补轮六全案](../process/dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) 批N1。
 
 **机型集是钉死的（v0.9 写实，防漂移）**：查册门测试 `rr-registry/tests/contract.rs` 断言
-`profiles/` 目录的 `.toml` 集合逐名在册（"profiles/ 机型集合漂移"即红；当前 7 份 =
+`profiles/` 目录的 `.toml` 集合逐名在册（"profiles/ 机型集合漂移"即红；当前 8 份 =
 `default`／`distro`／`esp32-mini`／`esp32s3-mini`／`pi4b-board`／`pi4b-host-esp32-classic`／
-`pi4b-host-esp32s3`）。
+`pi4b-host-esp32s3`／`pi4b-host`）。
 所以新增任何机型文件**必须同批改这条 pin**——它不是"数据新增"，它是契约面变更。
 `tools/rr3-pack` 已随批K C2 参数化（`--profile <name>`，缺省 distro 不破坏既有调用方），出包链
 不再只认一份装配单；第二形态样例 `profiles/esp32-mini.toml`（F-B 桥接微型形态，模块设计索引 §10）

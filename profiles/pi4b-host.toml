@@ -1,0 +1,119 @@
+# RockRobot3 装配单：pi4b-host 机型（N44：Pi 4B 独立 host-only）
+# 纯数据、零逻辑，门禁与 profiles/default.toml 完全同一套（ADR-0012 裁定 5② 查册门；
+# 机型集 pin 在 rr-registry contract.rs，新增/删除本文件须同批改那条 pin）。
+#
+# 形态语义（docs/process/dev/通用底座三平台验证计划.md §9 / 批N43 §3）：
+# Pi 4B 自己跑完整 Linux 底座，**不依赖任何外部板**。与
+# pi4b-host-esp32-classic / -s3 的差别是“末梢在哪”：
+#   - 本档没有外部板，故没有板侧十一键与 rr3.set_bindings 注入面；
+#   - 本地显示面 = MAX7219 双位级联点阵（SPI0 CE0，与 profiles/distro.toml 同格同值）；
+#   - 本地回放面 = USB 声卡（C-Media "Device"，按 CARD 名不钉卡号）；
+#   - 本机没有麦克风/舵机/OLED 的宿主角色：OLED 与双轴舵机是 pi4b-board
+#     （板端点）+ tools/pi-periph-base 的末梢面（W4/W6），不进本档；
+#     audio.capture/vad 与 act.servo 如实不启用，不用虚构配置讨好装载门。
+# schema_version = 5（与 default/distro 同版：[runtime] 段必填，缺即红）。
+
+schema_version = 5
+
+[os]
+route = "distro" # Pi 4B 跑 Raspberry Pi OS（Debian 13 trixie 真机），发行版快路轨
+
+[runtime]
+# rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
+log_ring_cap = 512
+
+[platform]
+# host 档（ADR-0018 修订 1）：完整 Linux 底座 + 本机模块全跑在 Pi 上。
+tier = "host"
+# 平台事实表外键（§4.6）：contracts/platform/raspberry-pi-4.toml。
+chip = "raspberry-pi-4"
+
+[supplies]
+# 平台供给声明：与 default 同口径（看门狗三键 + 时序预算三位）。
+watchdog_present = true
+watchdog_timeout_ms = 15000
+watchdog_feeder = "rrd"
+tick_period_ms = 200
+tick_jitter_ms = 100
+safety_core_interval_ms = 1000
+
+# [[supplies.domain]]：Pi 由官方 5V/3A 电源供电，无电池与轨压测点；
+# 舵机不属本档（见文件头），故 rail5v 上限取 Pi + USB 声卡的保守值。
+[[supplies.domain]]
+name = "rail5v"
+nominal_mv = 5000
+mild_mv = 4600
+severe_mv = 4400
+current_cap_ma = 3000
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+[[supplies.domain]]
+name = "rail3v3"
+nominal_mv = 3300
+mild_mv = 3100
+severe_mv = 3000
+current_cap_ma = 600
+sense = "none"
+current_sense = "none"
+switch = "none"
+switchable = false
+armed = false
+evidence = "none"
+max_age_ms = 0
+
+# [supplies.budget]：host 档校验⑩不适用，"合法不适用"显式写 true（F-6）。
+[supplies.budget]
+not_applicable = true
+
+[bindings]
+# 只绑定本机真实在位的格位：MAX7219（ui.face）、USB 声卡回放、WiFi/BT、认知四格。
+# 无 act.servo / audio.capture / audio.vad（本机无对应末梢，见文件头）。
+"audio.playback" = "rr3-interact"
+"net.wifi" = "rr3-connect"
+"net.bt" = "rr3-connect"
+"ui.face" = "rr3-interact"
+"cognition.dialog" = "rr3-brain"
+"cognition.asr" = "rr3-brain"
+"cognition.llm" = "rr3-brain"
+"cognition.tts" = "rr3-brain"
+
+[hardware]
+# 宿主两键（schema 3 非引脚键直给）：USB 声卡按 CARD 名指向（卡号随枚举变，名稳定）；
+# 网口 wlan0。板侧键一律不出现（本档无外部板）。
+alsa_device = "plughw:CARD=Device"
+link_ifname = "wlan0"
+
+[[pin]]
+# Pi 本机唯一的本地外设绑定：MAX7219 双位级联点阵（spidev0 = 总线 0、
+# channel 0 = 片选 0，装载期派生 spi_device="/dev/spidev0.0"）。
+role = "ui.face.spi"
+controller = "spidev0"
+channel = 0
+direction = "out"
+mux_group = []
+
+[enabled_slots]
+# 本机启用的格位集合（与 [bindings]/[slots] present 三处一致）：
+# connect / interact / brain 三模块；act 与 sense 无末梢，不启用。
+rr3-connect = ["net.wifi", "net.bt"]
+rr3-interact = ["ui.face", "audio.playback"]
+rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
+
+[slots]
+# 本机物理在位格位声明（升序）：八格，与 [bindings] 键集逐项一致。
+present = [
+    "audio.playback",
+    "cognition.asr",
+    "cognition.dialog",
+    "cognition.llm",
+    "cognition.tts",
+    "net.bt",
+    "net.wifi",
+    "ui.face",
+]
