@@ -202,6 +202,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
             "FACE" => match parts.next() {
                 Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
                     let base = expr_eye_base(expr);
+                    ctl.prev_expr = expr.to_string();
                     {
                         let mut b = lock_bus(&bus);
                         b.st.expr_mode = true;
