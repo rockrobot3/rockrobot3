@@ -4810,6 +4810,55 @@ gnd_common = "star-1"
         );
     }
 
+    /// Pi 4B 独立 host-only 装配演练（N44）：`profiles/pi4b-host.toml` + 真契约走
+    /// 完整 boot 输入装配——host 档三模块（connect/interact/brain，升序）、八格在位、
+    /// [[pin]] 仅 MAX7219；[hardware] 两键 + SPI 派生键进注入文本；本机无 act/sense
+    /// 末梢，故不出现板侧十一键。
+    #[test]
+    fn pi4b_host_profile_boot_inputs_drill() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let p = repo.join("profiles/pi4b-host.toml");
+        let boot = boot_inputs(&p).expect("pi4b-host 装配单必须过完整装载门（host 档）");
+        let mods: Vec<String> = boot
+            .manifests
+            .iter()
+            .map(|m| {
+                m.parent()
+                    .and_then(Path::file_name)
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            mods,
+            vec!["rr3-brain", "rr3-connect", "rr3-interact"],
+            "host-only boot 队列应恰 connect/interact/brain（enabled_slots 升序）"
+        );
+        assert!(
+            boot.missing.is_empty(),
+            "present/bindings/enabled_slots 三源一致（八格）: {:?}",
+            boot.missing
+        );
+        assert!(
+            boot.assemble_broken.is_empty(),
+            "三模块真件装配段扫描零缺口: {:?}",
+            boot.assemble_broken
+        );
+        assert!(
+            boot.role_missing.is_empty(),
+            "ui.face.spi 的 [[pin]] 真值点在位（校验②无缺角色）: {:?}",
+            boot.role_missing
+        );
+        assert!(
+            boot.hal_bindings.contains("alsa_device = \"plughw:CARD=Device\"")
+                && boot.hal_bindings.contains("link_ifname = \"wlan0\"")
+                && boot.hal_bindings.contains("spi_device = \"/dev/spidev0.0\""),
+            "pi4b-host [hardware] 两键与 SPI 派生键必须进注入文本: {:?}",
+            boot.hal_bindings
+        );
+    }
+
     /// [slots].present 声明缺是缺格三源合一第一源：present 移除某格 →
     /// (模块, 格位) 进缺格清单（缺格不是致命项，其余模块不牵连）
     #[test]
