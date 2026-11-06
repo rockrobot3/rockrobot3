@@ -56,10 +56,25 @@ if os.environ.get("RR3_PROBE_BOARD") == "pi":
 fd = open_tty(DEV, BAUD)
 flush_input(fd)
 pump(fd, 1.2)
+
+
+def wait_ready(cap=8.0):
+    """等板面行面可应答：板可能刚上电（READY 横幅占线、控制面未起），
+    此时立刻发帧会整段落空并误判首条失败。"""
+    t0 = time.time()
+    while time.time() - t0 < cap:
+        os.write(fd, b"\nINFO\n")
+        if re.search(rb"INFO pan=\d+", pump(fd, 0.4)):
+            return True
+    return False
+
+
+if not wait_ready():
+    print("[WARN] 8s 内未见 INFO 应答（板未启动/接线未通），继续按失败取证")
 #: U3 只认命令面回包；先把双轴/表情压到已知中位，避免上一会话状态污染
 #: `previous`/舵机读角度。行面复位与帧面共用同一首字节分流。
 os.write(fd, b"SERVO 90 90\nFACE idle\n")
-pump(fd, 0.5)
+pump(fd, 0.6)
 
 results = []
 #: U3 帧面 canonical digest（不含平台相关的 set_bindings）：note|canonical(result)。
@@ -223,6 +238,9 @@ else:
         print("[FAIL] INFO 缺 selfheal_skip 字段")
 
 digest = hashlib.sha256("\n".join(u3_lines).encode()).hexdigest()
+for line in u3_lines:
+    print("U3_CALL %s %s" % (line.split("|")[0],
+                             hashlib.sha256(line.encode()).hexdigest()[:16]))
 print("\nU3_FRAME_DIGEST " + digest)
 passed = sum(1 for _, ok, _ in results if ok)
 print("通过 %d/%d" % (passed, len(results)))
