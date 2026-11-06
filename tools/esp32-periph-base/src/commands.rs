@@ -291,6 +291,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                     last_text,
                     rail_mv,
                     rail_raw,
+                    rail_valid,
                     rail_tier,
                     rail_low,
                     selfheal_skip,
@@ -311,6 +312,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         b.st.last_text.clone(),
                         b.st.rail_mv,
                         b.st.rail_raw,
+                        b.st.rail_valid,
                         b.st.rail_tier,
                         b.st.rail_low_events,
                         b.st.selfheal_skipped,
@@ -323,10 +325,15 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                         b.st.reply_drop,
                     )
                 };
+                let rail = if rail_valid {
+                    format!("{rail_mv}mV raw={rail_raw}")
+                } else {
+                    format!("absent raw={rail_raw}")
+                };
+                let rail_tier_name = if rail_valid { rail_tier.name() } else { "unknown" };
                 Ok(format!(
-                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail_mv}mV raw={rail_raw} rail_tier={} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={}B min_free={}B",
+                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail} rail_tier={rail_tier_name} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={}B min_free={}B",
                     if wander { "on" } else { "off" },
-                    rail_tier.name(),
                     if audio_on { "on" } else { "off" },
                     unsafe { esp_get_free_heap_size() },
                     unsafe { esp_get_minimum_free_heap_size() }

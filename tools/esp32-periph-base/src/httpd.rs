@@ -139,6 +139,7 @@ pub(crate) struct Rr3BoardStateSnapshot {
     pub(crate) wander_on: bool,
     pub(crate) rail_mv: u16,
     pub(crate) rail_raw: u16,
+    pub(crate) rail_valid: bool,
     pub(crate) rail_tier: &'static str,
     pub(crate) rail_low_events: u32,
     pub(crate) move_fail_events: u32,
@@ -162,7 +163,12 @@ fn rr3_state_snapshot(bus: &Arc<Mutex<Bus>>) -> Rr3BoardStateSnapshot {
         wander_on: st.wander_on,
         rail_mv: st.rail_mv,
         rail_raw: st.rail_raw,
-        rail_tier: st.rail_tier.name(),
+        rail_valid: st.rail_valid,
+        rail_tier: if st.rail_valid {
+            st.rail_tier.name()
+        } else {
+            "unknown"
+        },
         rail_low_events: st.rail_low_events,
         move_fail_events: st.move_fail_events,
         selfheal_skipped: st.selfheal_skipped,
@@ -184,6 +190,7 @@ pub(crate) fn rr3_state_json(s: &Rr3BoardStateSnapshot) -> String {
         "wander_on": s.wander_on,
         "rail_mv": s.rail_mv,
         "rail_raw": s.rail_raw,
+        "rail_valid": s.rail_valid,
         "rail_tier": s.rail_tier,
         "rail_low_events": s.rail_low_events,
         "move_fail_events": s.move_fail_events,
@@ -437,6 +444,7 @@ mod tests {
             wander_on: false,
             rail_mv: 5123,
             rail_raw: 2048,
+            rail_valid: true,
             rail_tier: "Ok",
             rail_low_events: 0,
             move_fail_events: 2,
@@ -450,11 +458,12 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&rr3_state_json(&s)).unwrap();
         assert_eq!(v["pan_deg"], 90);
         assert_eq!(v["rail_tier"], "Ok");
+        assert_eq!(v["rail_valid"], true);
         assert_eq!(v["move_fail_events"], 2);
         assert_eq!(v["binding_mismatch"], 1);
         assert_eq!(v["audio_sent"], 100);
         assert_eq!(v["expr_mode"], true);
-        assert_eq!(v.as_object().unwrap().len(), 16);
+        assert_eq!(v.as_object().unwrap().len(), 17);
     }
 
     /// bindings JSON 形状：未注入整体 null；注入态十一键全名＋None→null；GPIO
