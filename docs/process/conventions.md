@@ -32,6 +32,12 @@
 批N43 计划册 §1.1），由 `rr-registry/tests/contract.rs` 机型集 pin、形状 pin
 与 rrd `pi4b_board_profile_boot_inputs_drill` 双向执法。
 
+**2026-11-06 N44 对表**：`profiles/` 机型集新增 `pi4b-host.toml`（Pi 4B 独立
+host-only；本机末梢只有 MAX7219/USB 声卡回放，act/sense 不启用），由
+`rr-registry/tests/contract.rs` 机型集 pin、形状 pin
+`pi4b_host_profile_shape_n44_harness` 与 rrd `pi4b_host_profile_boot_inputs_drill`
+双向执法。
+
 **拟增三步（2026-10-14 增补轮六登记，尚未建成——建成前不得当作现有强度引用）**：
 **第八轮实测（2026-10-15）把"尚未建成"从声明变成计数**：`tools/ci/check.sh` 里可数的 step 只有
 ①/①b/②/②b/③/④/⑤/⑥/⑦/⑧ 共 **10** 行，⑨/⑩/⑪ **零命中** ⇒ 待建门 **20 把、专属执法位建成 0 把**（全案 §22.1，基线 `b11dd2f`）。
