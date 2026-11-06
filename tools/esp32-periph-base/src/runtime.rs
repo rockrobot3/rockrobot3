@@ -6,6 +6,7 @@ use crate::board::{
     AXIS_SETTLE_MS, DUTY_MAX, DUTY_MIN, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS, SCAN_POINT_MS,
 };
 use crate::periph::RtPeriph;
+use crate::power::rr3_rail_raw_valid;
 use crate::servo::{axis_scan_points, duty_to_deg, Axis};
 use crate::state::{lock_bus, now_ms, outbox_push, Bus, Job};
 
@@ -130,8 +131,17 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
         }
         Job::SampleRail => match sample_rail(ph, bus) {
             Ok((mv, raw)) => {
-                println!("[periph] RAIL 采样 rail={mv}mV pin_raw={raw}");
-                outbox_push(bus, format!("RAIL rail={mv}mV raw={raw}"));
+                let valid = { lock_bus(bus).st.rail_valid };
+                if valid {
+                    println!("[periph] RAIL 采样 rail={mv}mV pin_raw={raw}");
+                    outbox_push(bus, format!("RAIL rail={mv}mV raw={raw}"));
+                } else {
+                    println!("[periph] RAIL 采样: ADC 悬空/饱和 raw={raw}");
+                    outbox_push(
+                        bus,
+                        format!("ERR RAIL ADC 悬空/饱和 raw={raw}（检查 2:1 分压）"),
+                    );
+                }
             }
             Err(e) => {
                 eprintln!("[periph] RAIL 采样失败: {e}");
@@ -141,16 +151,26 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
     }
 }
 
-/// 采样一次 5V 轨 → 判欠压档 → 写共享状态（**机制面**，方案A Q1/Q2）：成功即更新
-/// `st.rail_mv/rail_raw/rail_tier`（越阈事件另计 `st.rail_low_events` 并打站）；失败只
-/// 回 Err（**不改状态**——stale 旧值不冒充新鲜读数）。判定核 [`crate::power::RailJudge`]
-/// 在此喂一拍：边沿产**一次性越阈事件**（打站/计数），电平产**档位**（驱动面拒动/降级）。
+/// 采样一次 5V 轨 → 判欠压档 → 写共享状态（**机制面**，方案A Q1/Q2）：有效采样
+/// 才更新 `st.rail_valid/rail_mv/rail_raw/rail_tier`（越阈事件另计
+/// `st.rail_low_events` 并打站）；ADC 悬空/饱和（raw 0/4090..=4095）只记
+/// `rail_valid=false` 并回 absent，不喂判定核；ADC 读失败仍只回 Err（不改状态）。
+/// 判定核 [`crate::power::RailJudge`] 在此喂一拍：边沿产**一次性越阈事件**
+/// （打站/计数），电平产**档位**（驱动面拒动/降级）。
 fn sample_rail(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) -> Result<(u16, u16), String> {
     let (mv, raw) = ph.rail_sample()?;
+    if !rr3_rail_raw_valid(raw) {
+        let mut b = lock_bus(bus);
+        b.st.rail_valid = false;
+        b.st.rail_mv = 0;
+        b.st.rail_raw = raw;
+        return Ok((0, raw));
+    }
     let (tier, event) = ph.rail_judge.feed(mv);
     ph.rail_tier = tier;
     {
         let mut b = lock_bus(bus);
+        b.st.rail_valid = true;
         b.st.rail_mv = mv;
         b.st.rail_raw = raw;
         b.st.rail_tier = tier;

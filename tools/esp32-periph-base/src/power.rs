@@ -18,7 +18,7 @@ use crate::board::{
     ADC_ATTEN, ADC_CALIBRATION, ADC_RAIL_DIVIDER_DEN, ADC_RAIL_DIVIDER_NUM, ADC_RESOLUTION,
 };
 
-pub(crate) use periph_mech::rail_judge::{RailJudge, RailTier};
+pub(crate) use periph_mech::rail_judge::{rr3_rail_raw_valid, RailJudge, RailTier};
 
 /// 芯片档测点引脚类型别名（W1/T2）：classic = GPIO34（ADC1_CH6），S3 = GPIO1（ADC1_CH0）。
 /// 具名装配仍由 [`crate::main`] 按档给 `peripherals.pins.gpioNN`，本别名只解耦

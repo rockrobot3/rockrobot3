@@ -111,6 +111,9 @@ pub(crate) struct PeriphState {
     /// `0` = 尚未采样（boot 初值/未装配）。
     pub(crate) rail_mv: u16,
     pub(crate) rail_raw: u16,
+    /// 最近一次轨压采样是否有效：`raw=0` 或 `4090..=4095` 是悬空/饱和，
+    /// `INFO`/httpd 显式报 absent，不把浮空 ADC 冒充轨压。
+    pub(crate) rail_valid: bool,
     /// 5V 轨最近档位（方案A Q2，由**运行面**采样算出；`INFO` 观测 + 驱动面拒动判据）。
     /// boot 初值 `Ok`（未采样前不误判拒动）。
     pub(crate) rail_tier: RailTier,
@@ -173,6 +176,7 @@ impl PeriphState {
             next_wander_ms: 0,
             rail_mv: 0,
             rail_raw: 0,
+            rail_valid: false,
             rail_tier: RailTier::Ok,
             rail_low_events: 0,
             audio_on: false,

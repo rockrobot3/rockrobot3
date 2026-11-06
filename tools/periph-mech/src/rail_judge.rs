@@ -36,6 +36,13 @@ pub fn rr3_rail_mv_from_pin(pin_mv: u16, num: u32, den: u32) -> u16 {
     ((pin_mv as u32) * num / den) as u16
 }
 
+/// 直接 ADC 档 raw 有效性（classic GPIO34 / S3 GPIO1）：`0` 与 `4090..=4095`
+/// 是悬空/饱和态，不得当轨压读数。有效 5V 轨经 2:1 分压落在约 2700–3300；
+/// 本函数只做机制面有效性判定，分压比/阈值仍由策略面给。
+pub fn rr3_rail_raw_valid(raw: u16) -> bool {
+    raw > 0 && raw < 4090
+}
+
 /// 电平分类（**纯函数**，机制面）：轨压 mV → 档位。阈值按参传入；本函数只做
 /// 比较、不含迟滞/事件语义（越阈事件走 [`RailJudge`] 的迟滞边沿）。
 pub fn rr3_rail_tier_of(mv: u16, mild_mv: u16, severe_mv: u16) -> RailTier {
@@ -94,6 +101,16 @@ mod tests {
     fn rail_mv_from_pin_scales_by_divider() {
         assert_eq!(rr3_rail_mv_from_pin(2_605, 2, 1), 5_210);
         assert_eq!(rr3_rail_mv_from_pin(2_605, 1, 1), 2_605);
+    }
+
+    #[test]
+    fn raw_validity_rejects_zero_and_saturation() {
+        assert!(!rr3_rail_raw_valid(0));
+        assert!(rr3_rail_raw_valid(1));
+        assert!(rr3_rail_raw_valid(3_100));
+        assert!(rr3_rail_raw_valid(4_089));
+        assert!(!rr3_rail_raw_valid(4_090));
+        assert!(!rr3_rail_raw_valid(4_095));
     }
 
     #[test]
