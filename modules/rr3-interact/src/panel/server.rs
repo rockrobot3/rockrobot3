@@ -1079,28 +1079,57 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             if let Some(e) = reason {
                 legs.last_mut().unwrap()["reason"] = json!(e);
             }
-            // 腿2 relay：开→关两步复位验证；on 失败 = 腿 fail（off 未执行）
-            let relay_on = shared.bus.call(
-                "rr3-act/relay/set",
-                &json!({ "on": true }),
-                shared.limits.call_timeout,
-            );
-            let (relay_pass, relay_reason) = match relay_on {
-                Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
-                Ok(_) => match shared.bus.call(
-                    "rr3-act/relay/set",
-                    &json!({ "on": false }),
-                    shared.limits.call_timeout,
-                ) {
-                    Ok(_) => ("pass", None),
-                    Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
-                },
+            // 腿2 relay：能力面先判——`rr3-act` 不在册（host-only 三模块形态）
+            // 即 n-a，不向总线发无人接的 on/off；配置 expect.relay=n-a 同样跳过。
+            // 能力缺席优先于预期表（避免无末梢形态被共享 config 的 relay=pass
+            // 拖红）；ctl 取数失败仍 fail-closed 记 fail，不把系统面故障伪装成 n-a。
+            let relay_expect = match rr3_selftest_act_enabled(
+                &shared.bus_path,
+                shared.limits.read_timeout,
+            ) {
+                Ok(enabled) => {
+                    let want = rr3_selftest_relay_expect(enabled, shared.selftest_expect.relay);
+                    if want == "n-a" {
+                        let why = if enabled {
+                            "expect.relay=n-a（配置声明不适用）"
+                        } else {
+                            "rr3-act 未启用（host-only 能力面 n-a）"
+                        };
+                        legs.push(json!({ "leg": "relay", "pass": "n-a", "reason": why }));
+                    } else {
+                        let relay_on = shared.bus.call(
+                            "rr3-act/relay/set",
+                            &json!({ "on": true }),
+                            shared.limits.call_timeout,
+                        );
+                        let (relay_pass, relay_reason) = match relay_on {
+                            Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
+                            Ok(_) => match shared.bus.call(
+                                "rr3-act/relay/set",
+                                &json!({ "on": false }),
+                                shared.limits.call_timeout,
+                            ) {
+                                Ok(_) => ("pass", None),
+                                Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
+                            },
+                        };
+                        let mut relay_leg =
+                            json!({ "leg": "relay", "pass": relay_pass });
+                        if let Some(e) = relay_reason {
+                            relay_leg["reason"] = json!(e);
+                        }
+                        legs.push(relay_leg);
+                    }
+                    want
+                }
+                Err(e) => {
+                    legs.push(json!({
+                        "leg": "relay", "pass": "fail",
+                        "reason": format!("ctl.status 取数失败: {e}"),
+                    }));
+                    "fail"
+                }
             };
-            let mut relay_leg = json!({ "leg": "relay", "pass": relay_pass });
-            if let Some(e) = relay_reason {
-                relay_leg["reason"] = json!(e);
-            }
-            legs.push(relay_leg);
             // 腿3 face：切到期望表情（I-17/M-10：期望值 config 数据化，产线
             // 按形态改 [rr3-interact.selftest].face_expect）
             let reason = match rr3_panel_act(shared, Rr3PanelAction::Face {
@@ -1214,8 +1243,13 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // verdict = 结果集与预期集等值（批N5 件五 F-31）：固定腿逐名三态
             // 等值（缺腿即红、腿册外多腿 fail-closed 红），wiring/* 与
             // contracts/* 组内零 fail 即组过（n-a 不拖累）。整体红绿是派生量，
-            // 预期表 config 数据化。
-            let verdict = rr3_selftest_verdict(&legs, &shared.selftest_expect);
+            // 预期表 config 数据化；relay 腿的期望按能力面局部覆盖（host-only
+            // 无 rr3-act 即 n-a），不改共享 config 的 pass 默认。
+            let expect = Rr3SelftestExpect {
+                relay: relay_expect,
+                ..shared.selftest_expect
+            };
+            let verdict = rr3_selftest_verdict(&legs, &expect);
             Rr3PanelReply::json(200, "OK", json!({ "legs": legs, "verdict": verdict }))
         }
         Rr3PanelDispatch::Reboot => match rr3_ctl_query(
@@ -1267,6 +1301,30 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             },
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
         },
+    }
+}
+
+/// 自检 relay 腿的能力面：`rr3-act` 是否在册（按 ctl.status 模块表）。
+/// 只判“在册”，不判 phase——在册但未 running 的 relay 仍应走 on/off 如实
+/// fail，不能把“模块起了但坏了”误判成 host-only 的 n-a。
+fn rr3_selftest_act_enabled(bus_path: &str, timeout: Duration) -> Result<bool, String> {
+    let v = rr3_ctl_query(bus_path, "rr3.ctl.status", 6, timeout)?;
+    let modules = v
+        .get("modules")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "ctl.status 应答缺 modules".to_string())?;
+    Ok(modules
+        .iter()
+        .any(|m| m.get("name").and_then(Value::as_str) == Some("rr3-act")))
+}
+
+/// relay 腿的期望态：能力缺席或配置显式 n-a 即 n-a；其余沿用预期表。
+/// 能力缺席优先于配置，避免 host-only 被共享 config 的 relay=pass 拖红。
+fn rr3_selftest_relay_expect(enabled: bool, configured: &'static str) -> &'static str {
+    if !enabled || configured == "n-a" {
+        "n-a"
+    } else {
+        configured
     }
 }
 
@@ -1821,6 +1879,12 @@ mod tests {
                 }
                 "rr3.ctl.wiring" => wiring.clone(),
                 "rr3.ctl.contracts" => contracts.clone(),
+                // 夹具按 classic 形态在册 rr3-act：relay 腿应走 on/off 真调用；
+                // host-only 的 n-a 分支由纯函数单测覆盖。
+                "rr3.ctl.status" => json!({
+                    "modules": [{"name": "rr3-act", "task": 5, "phase": "running"}],
+                    "denied_publish": 0,
+                }),
                 _ => json!({ "noop": true }),
             };
             let id = v["id"].as_u64().unwrap_or(0);
@@ -2283,6 +2347,33 @@ mod tests {
             "fail",
             "腿册外未知腿名 fail-closed"
         );
+    }
+
+    /// relay 腿能力面（N44 后续）：rr3-act 缺席或配置显式 n-a → n-a；
+    /// 在册且未显式 n-a → 沿用预期表（classic 仍 pass/fail 照跑）。
+    #[test]
+    fn selftest_relay_expect_n_a_when_capability_absent_or_configured() {
+        assert_eq!(rr3_selftest_relay_expect(false, "pass"), "n-a");
+        assert_eq!(rr3_selftest_relay_expect(false, "fail"), "n-a");
+        assert_eq!(rr3_selftest_relay_expect(true, "pass"), "pass");
+        assert_eq!(rr3_selftest_relay_expect(true, "fail"), "fail");
+        assert_eq!(rr3_selftest_relay_expect(true, "n-a"), "n-a");
+    }
+
+    /// verdict 对 relay=n-a 的 host-only 形态等值即过（n-a 不拖累）。
+    #[test]
+    fn selftest_verdict_accepts_n_a_relay_for_host_only() {
+        let legs = vec![
+            json!({ "leg": "speaker", "pass": "pass" }),
+            json!({ "leg": "relay", "pass": "n-a" }),
+            json!({ "leg": "face", "pass": "pass" }),
+            json!({ "leg": "wiring/net:J0:rail5v", "pass": "pass" }),
+        ];
+        let expect = Rr3SelftestExpect {
+            relay: "n-a",
+            ..Default::default()
+        };
+        assert_eq!(rr3_selftest_verdict(&legs, &expect), "pass");
     }
 
     /// 接线图 HTTP 透传（批N4 件九笔4）：GET /api/wiring → ctl.wiring 一问一答，
