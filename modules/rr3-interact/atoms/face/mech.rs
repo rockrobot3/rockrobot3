@@ -9,7 +9,7 @@
 //! 已上移承载层（0.0.5 批I I-8，ADR-0019 修订 4）：件面只交状态机
 //! （结构体 + 判定），组装归 `src/composite.rs`，线上字节逐字不变。
 
-use super::{rr3_face_expression_lookup, RR3_FACE_EXPRESSIONS, Rr3FaceFrame, RR3_FACE_TALK};
+use super::{rr3_face_expression_lookup, Rr3FaceFrame, RR3_FACE_EXPRESSIONS, RR3_FACE_TALK};
 
 /// idle：睁眼 + 平嘴（单帧）
 const RR3_FRAMES_IDLE: [Rr3FaceFrame; 1] = [[
@@ -797,8 +797,8 @@ impl Rr3Face {
         expr: &'a str,
         non_pointable: &[&str],
     ) -> Result<(&'static str, &'static str), Rr3FaceSetError<'a>> {
-        let expr = rr3_face_expression_lookup(expr)
-            .ok_or(Rr3FaceSetError::UnknownExpression(expr))?;
+        let expr =
+            rr3_face_expression_lookup(expr).ok_or(Rr3FaceSetError::UnknownExpression(expr))?;
         if non_pointable.contains(&expr) {
             return Err(Rr3FaceSetError::NonPointable(expr));
         }
@@ -873,7 +873,14 @@ mod tests {
         assert_eq!(
             &RR3_FACE_EXPRESSIONS[43..],
             [
-                "sleepy", "surprised", "angry", "sad", "confused", "focus", "love", "dizzy",
+                "sleepy",
+                "surprised",
+                "angry",
+                "sad",
+                "confused",
+                "focus",
+                "love",
+                "dizzy",
                 "scared"
             ]
         );

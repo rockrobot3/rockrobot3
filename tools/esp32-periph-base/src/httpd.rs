@@ -61,17 +61,16 @@ use std::time::Duration;
 
 use esp_idf_sys::{
     esp_event_loop_create_default, esp_netif_create_default_wifi_ap,
-    esp_netif_create_default_wifi_sta, esp_netif_get_ip_info,
-    esp_netif_init, esp_netif_ip_info_t, esp_netif_t, esp_restart, esp_wifi_connect,
-    esp_wifi_disconnect, esp_wifi_init, esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start,
-    g_wifi_default_wpa_crypto_funcs, g_wifi_osi_funcs, httpd_config_t,
+    esp_netif_create_default_wifi_sta, esp_netif_get_ip_info, esp_netif_init, esp_netif_ip_info_t,
+    esp_netif_t, esp_restart, esp_wifi_connect, esp_wifi_disconnect, esp_wifi_init,
+    esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start, g_wifi_default_wpa_crypto_funcs,
+    g_wifi_osi_funcs, http_method_HTTP_GET, http_method_HTTP_POST, httpd_config_t,
     httpd_err_code_t_HTTPD_400_BAD_REQUEST, httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
-    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t,
-    httpd_register_uri_handler, httpd_req_recv, httpd_req_t, httpd_resp_send,
-    httpd_resp_send_err, httpd_resp_set_type, httpd_start, httpd_uri_t, http_method_HTTP_GET,
-    http_method_HTTP_POST, nvs_flash_init, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t,
+    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t, httpd_register_uri_handler,
+    httpd_req_recv, httpd_req_t, httpd_resp_send, httpd_resp_send_err, httpd_resp_set_type,
+    httpd_start, httpd_uri_t, nvs_flash_init, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t,
     wifi_init_config_t, wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA,
-    wifi_mode_t_WIFI_MODE_APSTA, WIFI_INIT_CONFIG_MAGIC, ESP_OK,
+    wifi_mode_t_WIFI_MODE_APSTA, ESP_OK, WIFI_INIT_CONFIG_MAGIC,
 };
 
 use rr_ipc::Rr3BoardBindings;
@@ -266,9 +265,9 @@ pub(crate) fn rr3_bindings_json(b: Option<&Rr3BoardBindings>) -> String {
     put_gpio(RR3_BOARD_BINDING_I2S_WS, b.i2s_ws);
     obj.insert(
         RR3_BOARD_BINDING_CRED_STORE.to_string(),
-        b.cred_store
-            .as_ref()
-            .map_or(serde_json::Value::Null, |s| serde_json::Value::from(s.as_str())),
+        b.cred_store.as_ref().map_or(serde_json::Value::Null, |s| {
+            serde_json::Value::from(s.as_str())
+        }),
     );
     serde_json::Value::Object(obj).to_string()
 }
@@ -400,16 +399,36 @@ mod tests {
             assert!(hit.is_some(), "表内行未命中分派: {method} {path}");
         }
         assert_eq!(rr3_board_route("GET", "/api/board/nope"), None);
-        assert_eq!(rr3_board_route("POST", "/api/board/state"), None, "读端点不受 POST——写口白名单外 fail-closed");
-        assert_eq!(rr3_board_route("GET", "/api/board/wifi"), None, "写端点不受 GET");
+        assert_eq!(
+            rr3_board_route("POST", "/api/board/state"),
+            None,
+            "读端点不受 POST——写口白名单外 fail-closed"
+        );
+        assert_eq!(
+            rr3_board_route("GET", "/api/board/wifi"),
+            None,
+            "写端点不受 GET"
+        );
         assert_eq!(rr3_board_route("PUT", "/api/board/wifi"), None);
         assert_eq!(rr3_board_route("GET", "/api/brain/ops"), None);
         assert_eq!(rr3_board_route("GET", "/api/board/state/extra"), None);
         // 分派产物点名（enum 变体 ↔ 表行一一对应）
-        assert_eq!(rr3_board_route("GET", "/api/board/state"), Some(Rr3BoardRoute::State));
-        assert_eq!(rr3_board_route("GET", "/api/board/bindings"), Some(Rr3BoardRoute::Bindings));
-        assert_eq!(rr3_board_route("POST", "/api/board/wifi"), Some(Rr3BoardRoute::WifiWrite));
-        assert_eq!(rr3_board_route("POST", "/api/board/reboot"), Some(Rr3BoardRoute::Reboot));
+        assert_eq!(
+            rr3_board_route("GET", "/api/board/state"),
+            Some(Rr3BoardRoute::State)
+        );
+        assert_eq!(
+            rr3_board_route("GET", "/api/board/bindings"),
+            Some(Rr3BoardRoute::Bindings)
+        );
+        assert_eq!(
+            rr3_board_route("POST", "/api/board/wifi"),
+            Some(Rr3BoardRoute::WifiWrite)
+        );
+        assert_eq!(
+            rr3_board_route("POST", "/api/board/reboot"),
+            Some(Rr3BoardRoute::Reboot)
+        );
     }
 
     /// covers 形制（同 check.sh ⑩ 扫描执法语义）：带斜杠且不以 `/` 开头；
@@ -442,11 +461,23 @@ mod tests {
     fn wifi_write_body_domain() {
         let (s, p) = rr3_wifi_write_body(br#"{"ssid":"ap","pass":"pw"}"#).unwrap();
         assert_eq!((s.as_str(), p.as_str()), ("ap", "pw"));
-        assert!(rr3_wifi_write_body(br#"{"ssid":"ap","pass":""}"#).is_ok(), "空密码合法（开放网络）");
+        assert!(
+            rr3_wifi_write_body(br#"{"ssid":"ap","pass":""}"#).is_ok(),
+            "空密码合法（开放网络）"
+        );
         assert!(rr3_wifi_write_body(b"not json").is_err(), "坏 JSON 必须红");
-        assert!(rr3_wifi_write_body(br#"{"ssid":"ap"}"#).is_err(), "pass 缺席必须红");
-        assert!(rr3_wifi_write_body(br#"{"pass":"pw"}"#).is_err(), "ssid 缺席必须红");
-        assert!(rr3_wifi_write_body(br#"{"ssid":1,"pass":"pw"}"#).is_err(), "非串字段必须红");
+        assert!(
+            rr3_wifi_write_body(br#"{"ssid":"ap"}"#).is_err(),
+            "pass 缺席必须红"
+        );
+        assert!(
+            rr3_wifi_write_body(br#"{"pass":"pw"}"#).is_err(),
+            "ssid 缺席必须红"
+        );
+        assert!(
+            rr3_wifi_write_body(br#"{"ssid":1,"pass":"pw"}"#).is_err(),
+            "非串字段必须红"
+        );
     }
 
     /// 写口应答 JSON 形状：四字段名/类型钉死（拒绝态与成功态同形状——
@@ -581,25 +612,25 @@ unsafe fn wifi_default_config() -> wifi_init_config_t {
         osi_funcs: std::ptr::addr_of_mut!(g_wifi_osi_funcs),
         // g_wifi_default_wpa_crypto_funcs（:254）
         wpa_crypto_funcs: g_wifi_default_wpa_crypto_funcs,
-        static_rx_buf_num: 10,   // CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM
-        dynamic_rx_buf_num: 32,  // CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM
-        tx_buf_type: 1,          // CONFIG_ESP_WIFI_TX_BUFFER_TYPE（动态）
-        static_tx_buf_num: 0,    // CONFIG_ESP_WIFI_STATIC_TX_BUFFER 未设（动态模式，宏 → 0）
-        dynamic_tx_buf_num: 32,  // CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM
-        rx_mgmt_buf_type: 0,     // CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUF=0（静态）
-        rx_mgmt_buf_num: 5,      // CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF
-        cache_tx_buf_num: 0,     // ESP32 无 CACHE_TX（宏 → 0）
-        csi_enable: 0,           // CONFIG_ESP_WIFI_CSI_ENABLED 未设
-        ampdu_rx_enable: 1,      // CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
-        ampdu_tx_enable: 1,      // CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=y
-        amsdu_tx_enable: 0,      // CONFIG_ESP_WIFI_AMSDU_TX_ENABLED 未设
-        nvs_enable: 1,           // CONFIG_ESP_WIFI_NVS_ENABLED=y
-        nano_enable: 0,          // CONFIG_ESP_WIFI_NANO_FORMAT_ENABLED 未设
-        rx_ba_win: 6,            // CONFIG_ESP_WIFI_RX_BA_WIN
-        wifi_task_core_id: 0,    // CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y（宏 :196）
-        beacon_max_len: 752,     // CONFIG_ESP_WIFI_SOFTAP_BEACON_MAX_LEN
-        mgmt_sbuf_num: 32,       // CONFIG_ESP_WIFI_MGMT_SBUF_NUM
-        feature_caps: 1,         // WIFI_FEATURE_CAPS = WPA3_SAE(1<<0)｜SPIRAM 0｜FTM×2 0
+        static_rx_buf_num: 10,     // CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM
+        dynamic_rx_buf_num: 32,    // CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM
+        tx_buf_type: 1,            // CONFIG_ESP_WIFI_TX_BUFFER_TYPE（动态）
+        static_tx_buf_num: 0,      // CONFIG_ESP_WIFI_STATIC_TX_BUFFER 未设（动态模式，宏 → 0）
+        dynamic_tx_buf_num: 32,    // CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM
+        rx_mgmt_buf_type: 0,       // CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUF=0（静态）
+        rx_mgmt_buf_num: 5,        // CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF
+        cache_tx_buf_num: 0,       // ESP32 无 CACHE_TX（宏 → 0）
+        csi_enable: 0,             // CONFIG_ESP_WIFI_CSI_ENABLED 未设
+        ampdu_rx_enable: 1,        // CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
+        ampdu_tx_enable: 1,        // CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=y
+        amsdu_tx_enable: 0,        // CONFIG_ESP_WIFI_AMSDU_TX_ENABLED 未设
+        nvs_enable: 1,             // CONFIG_ESP_WIFI_NVS_ENABLED=y
+        nano_enable: 0,            // CONFIG_ESP_WIFI_NANO_FORMAT_ENABLED 未设
+        rx_ba_win: 6,              // CONFIG_ESP_WIFI_RX_BA_WIN
+        wifi_task_core_id: 0,      // CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y（宏 :196）
+        beacon_max_len: 752,       // CONFIG_ESP_WIFI_SOFTAP_BEACON_MAX_LEN
+        mgmt_sbuf_num: 32,         // CONFIG_ESP_WIFI_MGMT_SBUF_NUM
+        feature_caps: 1,           // WIFI_FEATURE_CAPS = WPA3_SAE(1<<0)｜SPIRAM 0｜FTM×2 0
         sta_disconnected_pm: true, // CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=y
         espnow_max_encrypt_num: 7, // CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM
         magic: WIFI_INIT_CONFIG_MAGIC as i32, // 0x1F2F3F4F——esp_wifi_init 魔法校验
@@ -792,7 +823,7 @@ unsafe fn wifi_sta_wait_connected() -> bool {
 /// 重试，AP 不可达则掉网）：NVS 写败罕见链，如实点名 stage 不冒领。
 unsafe fn rr3_wifi_write_apply(ssid: &str, pass: &str) -> Rr3WifiWriteResult {
     let old = crate::cred::rr3_cred_read(); // None＝原空态（回退目标＝erase）
-    // 写 NVS（cred 模块内复验形制——毒不双入；败＝NVS 未动无需回退）
+                                            // 写 NVS（cred 模块内复验形制——毒不双入；败＝NVS 未动无需回退）
     if crate::cred::rr3_cred_write(ssid, pass).is_err() {
         return Rr3WifiWriteResult::rejected("nvs");
     }
@@ -920,7 +951,12 @@ fn thread_spawn(bus: Arc<Mutex<Bus>>, cred_source: &'static str, ssid: Vec<u8>, 
 
 /// WiFi STA 起栈 + httpd_start + 白名单注册（unsafe 集中段；逐步 fail-honest；
 /// NVS init 已前移到 [`rr3_board_httpd_spawn`]——本段只做起栈链）。
-unsafe fn start_httpd(bus: &Arc<Mutex<Bus>>, cred_source: &str, ssid: &[u8], pass: &[u8]) -> Result<(), i32> {
+unsafe fn start_httpd(
+    bus: &Arc<Mutex<Bus>>,
+    cred_source: &str,
+    ssid: &[u8],
+    pass: &[u8],
+) -> Result<(), i32> {
     // 逐步 helper：非 ESP_OK 即 Err（fail-honest，点名在调用方）
     fn chk(r: i32) -> Result<(), i32> {
         if r == ESP_OK {

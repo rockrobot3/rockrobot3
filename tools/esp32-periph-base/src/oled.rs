@@ -20,7 +20,6 @@ use crate::state::rr3_i2c_pins_for_recovery;
 // 保留 `glyph` 别名供行面 FONT 自检直接取字模（与编码面同一张表，无第二份）。
 pub(crate) use periph_mech::oled_codec::rr3_glyph as glyph;
 
-
 // ---------------------------------------------------------------------------
 // SSD1306 原语驱动（命令流 0x00 控制字节 / 数据流 0x40 控制字节；页寻址模式）
 // ---------------------------------------------------------------------------
@@ -193,7 +192,8 @@ pub(crate) fn oled_cmd(i2c: &mut I2cDriver, cmds: &[u8]) -> Result<(), String> {
         return Err("命令序列超长".into());
     }
     buf[1..=cmds.len()].copy_from_slice(cmds);
-    i2c_write_retry(&mut rr3_esp_i2c(i2c), OLED_ADDR, &buf[..=cmds.len()]).map_err(|e| format!("I2C 命令写失败: {e}"))
+    i2c_write_retry(&mut rr3_esp_i2c(i2c), OLED_ADDR, &buf[..=cmds.len()])
+        .map_err(|e| format!("I2C 命令写失败: {e}"))
 }
 
 /// 写一页 GDDRAM（128 列）。**分块写**：每笔 ≤33 字节（1 控制字节 + 32 数据），

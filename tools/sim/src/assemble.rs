@@ -175,9 +175,7 @@ pub fn rr3_assemble_layout(
         let dst_config = dst_dir.join("config.toml");
         let src_config = src_dir.join("config.toml");
         std::fs::copy(&src_config, &dst_config).map_err(|e| {
-            format!(
-                "仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环"
-            )
+            format!("仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环")
         })?;
         entries.push((module.clone(), entry_abs));
     }

@@ -243,9 +243,8 @@ mod tests {
         assert_eq!(ssid, "home", "恰好 8 位放行（等号边界）");
         let e = rr3_wifi_connect_parse_args(&json!({"pass": "password8"}), 8).unwrap_err();
         assert!(e.contains("ssid"), "缺 ssid 点名: {e}");
-        let e =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "  ", "pass": "password8"}), 8)
-                .unwrap_err();
+        let e = rr3_wifi_connect_parse_args(&json!({"ssid": "  ", "pass": "password8"}), 8)
+            .unwrap_err();
         assert!(e.contains("ssid"), "空 ssid 点名: {e}");
         let e = rr3_wifi_connect_parse_args(&json!({"ssid": "home"}), 8).unwrap_err();
         assert!(e.contains("8 位"), "缺 pass 点名: {e}");

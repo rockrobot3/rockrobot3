@@ -16,7 +16,9 @@
 use std::time::{Duration, Instant};
 
 use rr3mod::{BusHandle, Dispatcher};
-use rr_hal_api::{rr3_rail_tier_effective, Rr3BatteryState, Rr3Power, Rr3Rail, Rr3RailState, Rr3RailTier};
+use rr_hal_api::{
+    rr3_rail_tier_effective, Rr3BatteryState, Rr3Power, Rr3Rail, Rr3RailState, Rr3RailTier,
+};
 use serde_json::{json, Value};
 
 use crate::battery::{
@@ -95,7 +97,9 @@ impl Dispatcher for Rr3PowerDispatcher {
         if topic == RR3_OPS_LIST_TOPIC {
             Ok(json!({ "ops": rr3_power_ops_snapshot(&self.cfg) }))
         } else {
-            Err(format!("rr3-power 只 exposes {RR3_OPS_LIST_TOPIC}，收到 {topic}"))
+            Err(format!(
+                "rr3-power 只 exposes {RR3_OPS_LIST_TOPIC}，收到 {topic}"
+            ))
         }
     }
 
@@ -137,7 +141,10 @@ impl Dispatcher for Rr3PowerDispatcher {
             }
             if self.low_edge.rr3_low_edge_cross(st.voltage_mv) {
                 self.low_seq += 1;
-                bus.publish(RR3_BATTERY_LOW_TOPIC, rr3_battery_low_body(self.low_seq, st))?;
+                bus.publish(
+                    RR3_BATTERY_LOW_TOPIC,
+                    rr3_battery_low_body(self.low_seq, st),
+                )?;
                 eprintln!(
                     "battery/low: {}% {}mV（越阈首拍，段内不重发）",
                     st.percent, st.voltage_mv
@@ -582,13 +589,13 @@ mod tests {
         let mut j = Rr3RailJudge::rr3_rail_judge_new(4600, 4400);
         let seq = [
             (4700u16, Rr3RailTier::Ok, false),
-            (4600, Rr3RailTier::Mild, true),   // 轻度线首发（Ok→Mild）
-            (4500, Rr3RailTier::Mild, false),  // 段内不重发
+            (4600, Rr3RailTier::Mild, true),  // 轻度线首发（Ok→Mild）
+            (4500, Rr3RailTier::Mild, false), // 段内不重发
             (4400, Rr3RailTier::Severe, true), // 重度线首发（Mild→Severe）
-            (4500, Rr3RailTier::Mild, false),  // 回阈不报（severe 线再武装）
+            (4500, Rr3RailTier::Mild, false), // 回阈不报（severe 线再武装）
             (4300, Rr3RailTier::Severe, true), // severe 新段首发（4500 已严格回阈）
-            (4700, Rr3RailTier::Ok, false),    // 回 Ok（mild 线再武装）
-            (4600, Rr3RailTier::Mild, true),   // 再武装后越阈再发
+            (4700, Rr3RailTier::Ok, false),   // 回 Ok（mild 线再武装）
+            (4600, Rr3RailTier::Mild, true),  // 再武装后越阈再发
         ];
         for (mv, want_tier, want_event) in seq {
             let (tier, event) = j.rr3_rail_feed(mv);

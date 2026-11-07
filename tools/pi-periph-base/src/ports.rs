@@ -597,7 +597,8 @@ mod tests {
     fn i2c_port_forwards_write_transaction() {
         let (bus, f) = fake();
         let mut port = bus.clone();
-        port.rr3_i2c_write(0x3C, &[0x00, 0xAE]).expect("写事务应转发");
+        port.rr3_i2c_write(0x3C, &[0x00, 0xAE])
+            .expect("写事务应转发");
         assert_eq!(f.borrow().writes, vec![(0x3C, vec![0x00, 0xAE])]);
     }
 
@@ -631,7 +632,9 @@ mod tests {
 
         let absent = RailSensor::Absent("总线不可用".into());
         let mut sensor = absent;
-        let e = sensor.rr3_adc_read_mv(ADS1115_RAIL_CHANNEL).expect_err("缺席必须 Err");
+        let e = sensor
+            .rr3_adc_read_mv(ADS1115_RAIL_CHANNEL)
+            .expect_err("缺席必须 Err");
         assert!(e.contains("ADS1115 未装配"), "{e}");
         let e = sensor.rr3_adc_read_mv(34).expect_err("错通道必须拒");
         assert!(e.contains("拒绝通道 34"), "{e}");
@@ -665,7 +668,8 @@ mod tests {
         assert_eq!(pwm_ticks_to_ns(DUTY_MIN_TICKS), 500_488);
         assert_eq!(pwm_ticks_to_ns(DUTY_MAX_TICKS), 2_500_000);
 
-        pwm.rr3_pwm_duty(Rr3PwmChannel::Pan, 1229).expect("pan 写占空失败");
+        pwm.rr3_pwm_duty(Rr3PwmChannel::Pan, 1229)
+            .expect("pan 写占空失败");
         let duty = read_u64(&root.join("pwm0").join("duty_cycle")).unwrap_or(0);
         assert_eq!(duty, 1_500_244, "90° 应为 1.500244ms");
         assert_eq!(
@@ -674,8 +678,12 @@ mod tests {
         );
         assert_eq!(read_u64(&root.join("pwm0").join("enable")).unwrap_or(0), 1);
 
-        pwm.rr3_pwm_duty(Rr3PwmChannel::Tilt, 0).expect("tilt 释放失败");
-        assert_eq!(read_u64(&root.join("pwm1").join("duty_cycle")).unwrap_or(1), 0);
+        pwm.rr3_pwm_duty(Rr3PwmChannel::Tilt, 0)
+            .expect("tilt 释放失败");
+        assert_eq!(
+            read_u64(&root.join("pwm1").join("duty_cycle")).unwrap_or(1),
+            0
+        );
         assert_eq!(read_u64(&root.join("pwm1").join("enable")).unwrap_or(1), 0);
         let _ = fs::remove_dir_all(&root);
     }

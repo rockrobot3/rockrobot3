@@ -545,7 +545,10 @@ mod tests {
             u32::from_le_bytes(b[OFF_CRC32..OFF_CRC32 + 4].try_into().unwrap()),
             0xDEAD_BEEF
         );
-        assert_eq!(Rr3Header::from_bytes(&b).unwrap().payload_crc32, 0xDEAD_BEEF);
+        assert_eq!(
+            Rr3Header::from_bytes(&b).unwrap().payload_crc32,
+            0xDEAD_BEEF
+        );
     }
 
     /// IPC-T-010：未知 flags 位不得报错（前向兼容）；已定义位组合正常解析

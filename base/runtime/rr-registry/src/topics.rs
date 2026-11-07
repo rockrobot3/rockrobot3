@@ -171,7 +171,11 @@ mod tests {
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let set = rr3_registry_topic_set_from_text(CONTRACT);
-        assert_eq!(set.topics.len(), 42, "契约 topic 数（ADR-0023 39→42：append rr3-brain/model list/set/test 模型行面）");
+        assert_eq!(
+            set.topics.len(),
+            42,
+            "契约 topic 数（ADR-0023 39→42：append rr3-brain/model list/set/test 模型行面）"
+        );
         assert_eq!(set.owners.len(), 8, "契约 owner 数");
         assert!(!set.rr3_topic_set_is_empty());
         assert!(set.rr3_topic_set_contains("rr3-runtime/module/state"));

@@ -13,7 +13,9 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::protocol::header::{rr3_header_bytes_with_crc, Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE};
+use crate::protocol::header::{
+    rr3_header_bytes_with_crc, Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE,
+};
 
 /// 一帧 = 头 + payload
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +103,10 @@ mod tests {
         let g = golden();
         // golden 是**无载荷**纯头（CRC 覆盖载荷，故其 CRC 字段本就为 0）
         let pure = Rr3Header::from_bytes(&g).unwrap();
-        assert_eq!(pure.payload_crc32, 0, "golden 无载荷纯头的 CRC 字段必须为 0");
+        assert_eq!(
+            pure.payload_crc32, 0,
+            "golden 无载荷纯头的 CRC 字段必须为 0"
+        );
         assert_eq!(
             pure.to_bytes().to_vec(),
             g,

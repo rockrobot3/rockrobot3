@@ -51,7 +51,8 @@ pub fn serve(
                     let reply = dispatcher
                         .on_rpc(topic, &args, &bus)
                         .unwrap_or_else(|e| json!({ "error": e }));
-                    bus.client.rr3_reply_call(frame.header.trace_id, id, reply)?;
+                    bus.client
+                        .rr3_reply_call(frame.header.trace_id, id, reply)?;
                 }
                 // 步骤 4：订阅面——Event 交 on_event（topic 本地过滤是 Dispatcher
                 // 的职责）；其余 payload（Notification/Stream 等）只排空。
@@ -116,7 +117,12 @@ mod tests {
     }
 
     impl Dispatcher for RecordingDispatcher {
-        fn on_rpc(&mut self, topic: &str, _args: &Value, _bus: &BusHandle) -> Result<Value, String> {
+        fn on_rpc(
+            &mut self,
+            topic: &str,
+            _args: &Value,
+            _bus: &BusHandle,
+        ) -> Result<Value, String> {
             self.rpcs.push((topic.to_string(), self.rpcs.len() as u64));
             if topic == REQ_BAD_TOPIC {
                 return Err(RESP_ERROR_TEXT.into());
@@ -165,7 +171,10 @@ mod tests {
         // 5ms 不是"加大超时"：止步条件已改为"回调齐 + 至少两圈"，这里只是避免
         // poll_wait(0) 在等帧期间空转抢 CPU（并行测试下会拖慢同进程其他用例）
         let err = serve(bus.clone(), &mut d, Duration::from_millis(5)).unwrap_err();
-        assert_eq!(err, "节拍止步", "on_tick 的 Err 应原样上抛（方案 §2.5 步骤 5）");
+        assert_eq!(
+            err, "节拍止步",
+            "on_tick 的 Err 应原样上抛（方案 §2.5 步骤 5）"
+        );
         assert_eq!(
             d.events,
             vec!["rr3mod-t/echo".to_string(), "rr3mod-t/boom".to_string()],
@@ -225,8 +234,7 @@ mod tests {
         let mut d = RecordingDispatcher::new(0, "");
         let err = serve(bus, &mut d, Duration::ZERO).unwrap_err();
         assert_eq!(
-            err,
-            "总线已断开（reader EOF）：交 supervisor 按 restart_policy 裁定",
+            err, "总线已断开（reader EOF）：交 supervisor 按 restart_policy 裁定",
             "死亡探针文案逐字（方案 §2.5 步骤 1）"
         );
     }

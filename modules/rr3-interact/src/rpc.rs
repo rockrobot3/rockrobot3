@@ -82,8 +82,7 @@ pub(crate) fn rr3_handle_tts(
     // 播放增益（MC-2）：config 注入的 volume_pct 整型饱和缩放，播放前就地生效
     player::rr3_tts_apply_gain(&mut samples, player.volume_pct);
     let suspended = face.rr3_face_begin_talk();
-    let played_ms = player::rr3_tts_play(sink, &samples)
-        .map_err(|e| rr3_tts_play_error_text(&e));
+    let played_ms = player::rr3_tts_play(sink, &samples).map_err(|e| rr3_tts_play_error_text(&e));
     face.rr3_face_end_talk();
     let played_ms = played_ms?;
     // played_ms==0 不得记 ok（批N4 件六 I-21①）：对账通过但样点不足一个毫秒窗
@@ -285,7 +284,10 @@ mod tests {
         let e = rr3_tts_pcm_integrity(1920, 0).unwrap_err();
         assert!(e.contains("半流"), "空缓冲必拒（无流不静默）: {e}");
         let e = rr3_tts_pcm_integrity(0, 0).unwrap_err();
-        assert!(e.contains("0 字节"), "(0,0) 恒拒（I-21① 静默假成功口）: {e}");
+        assert!(
+            e.contains("0 字节"),
+            "(0,0) 恒拒（I-21① 静默假成功口）: {e}"
+        );
         let e = rr3_tts_pcm_integrity(0, 640).unwrap_err();
         assert!(e.contains("0 字节"), "零申报有残留同样拒: {e}");
     }

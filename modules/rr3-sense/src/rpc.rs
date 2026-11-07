@@ -143,7 +143,11 @@ mod tests {
         assert_eq!(v["vad"]["rms_start"], 1500);
         assert_eq!(v["vad"]["silence_tail_ms"], 700);
         assert_eq!(v["vad"]["min_speech_ms"], 200);
-        assert_eq!(v["doa"].as_object().unwrap().len(), 4, "doa 组恰好四槽: {v}");
+        assert_eq!(
+            v["doa"].as_object().unwrap().len(),
+            4,
+            "doa 组恰好四槽: {v}"
+        );
     }
 
     // ---------- 载荷组装用例（随 S-7 自原子面随迁） ----------

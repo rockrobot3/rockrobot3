@@ -646,7 +646,9 @@ impl Rr3UartConn {
     /// 不会再触发。桥的转发块若真被拆成两半（对端一次 write 全部送达，实际
     /// µs 级跟到），也因间隔远小于阈值而不插。
     fn tx_idle_preamble(&mut self) {
-        let idle = self.last_tx.map_or(true, |t| t.elapsed() >= TX_PREAMBLE_IDLE);
+        let idle = self
+            .last_tx
+            .map_or(true, |t| t.elapsed() >= TX_PREAMBLE_IDLE);
         if !idle {
             return;
         }
