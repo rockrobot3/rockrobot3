@@ -147,7 +147,8 @@ fn main() {
     // 上板实证；同屏「凭据源=nvs」＝NVS 凭据跨重烧保留实证（升级即重烧语义）。
     ram_point("1-boot");
 
-    let peripherals = Peripherals::take().unwrap();
+    let peripherals = Peripherals::take()
+        .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
 
     // ---- UART2 指令面 @ GPIO18(TX)/GPIO19(RX)，波特率见 board::UART2_BAUD_HZ ----
     // **引脚定案（真板实锤 2026-10-12）**：GPIO16/17（UART2 的 IOMUX 缺省组）在本板
