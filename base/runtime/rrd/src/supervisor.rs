@@ -302,6 +302,8 @@ fn rr3_absorb_exit(
 /// lib.rs 的 `rr3_unit_log_dir`（批N5 件二笔2 迁入）：rrd 自身日志落盘与 per-unit
 /// 文件同目录同规则，路径规则一处定形。这里只负责"打开"；
 /// 打不开的错误交调用方裁决（回退 inherit，不挡起跑）。
+/// 超上界单代轮转（0.0.8c 审计 B-8）在打开前做——子进程持 fd 直写，rrd 只能在
+/// spawn 窗口收口体量；长跑期间体量由模块侧留痕纪律（事件级频率）约束。
 fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::File> {
     // fail-closed：bus_path 由 daemon 侧绝对化（cli.rs 的 rr3_socket_absolute_path），
     // 相对/空路径到这里就是链条上游破了——拒开，绝不相对 CWD 悄悄建目录
@@ -313,10 +315,12 @@ fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::Fi
     }
     let dir = crate::rr3_unit_log_dir(bus_path);
     std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{unit}.log"));
+    crate::rr3_log_rotate_if_over(&path);
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join(format!("{unit}.log")))
+        .open(path)
 }
 
 /// 起进程的唯一漏斗：boot 与到期重启都过这里（Task 10 的 D-7 同一条教训——

@@ -72,8 +72,29 @@ pub fn rr3_log_sink_set(bus_path: &Path) -> Result<(), String> {
         .map_err(|_| "落盘路径已定格过（首份胜出，重复定格被拒）".to_string())
 }
 
+/// 单日志文件体量上界（0.0.8c 审计 B-8）：SD 卡设备上 append 无界 = 磁盘耗尽
+/// 炸弹（错误循环模块 10KB/s ≈ 900MB/天，盘满后 journal/OTA/配置写全灭）。
+/// 2MiB×（rrd + ≤16 单元）×2 代 ≈ 68MB 最坏驻留，装机可承受。
+pub(crate) const RR3_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// 单代轮转：文件超上界即 rename 到 `<名>.1`（旧 `.1` 被覆盖），下一段写新文件。
+/// 失败只留痕不阻断——观测通道绝不允许因磁盘抖动打断业务主路；容量判据是尽力
+/// 而为的防线，不是事务。
+pub(crate) fn rr3_log_rotate_if_over(path: &std::path::Path) {
+    let Ok(md) = std::fs::metadata(path) else {
+        return;
+    };
+    if md.len() <= RR3_LOG_MAX_BYTES {
+        return;
+    }
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let _ = std::fs::rename(path, path.with_file_name(format!("{name}.1")));
+}
+
 /// `rr3_log` 的落盘臂：一行同步 append，不缓冲不批写——"崩溃前最后 N 行"的判据
-/// 要求打过的行当场就在文件里。append 不 truncate 不轮转（批N4 件八同轨纪律）。
+/// 要求打过的行当场就在文件里。超上界单代轮转（B-8，修订批N4 件八"不轮转"纪律）。
 /// 每行现开现写：运维留痕是事件级频率，不值得常持句柄。打开或写失败 = 点名
 /// 一次后置降级位，之后静默退纯内存。
 fn rr3_log_sink_append(line: &str) {
@@ -83,6 +104,7 @@ fn rr3_log_sink_append(line: &str) {
     if RR3_LOG_SINK_DEAD.load(Ordering::Relaxed) {
         return;
     }
+    rr3_log_rotate_if_over(path);
     let res = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -289,6 +311,31 @@ mod tests {
         assert!(rr3_log_ring_cap_set(8), "首次 set 必须成功");
         assert!(!rr3_log_ring_cap_set(999), "重复 set 必须失败（首份胜出）");
         assert_eq!(rr3_log_ring_cap(), 8);
+    }
+
+    /// 单代轮转（B-8）：超上界 rename 到 `.1`（旧 `.1` 覆盖），未超界不动；
+    /// 文件不存在 = 静默返回。
+    #[test]
+    fn log_rotate_triggers_only_over_cap() {
+        let dir = std::env::temp_dir().join(format!("rr3-rrd-rot-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("u.log");
+        // 未超界：不轮转
+        std::fs::write(&f, b"short").unwrap();
+        rr3_log_rotate_if_over(&f);
+        assert!(f.exists() && !dir.join("u.log.1").exists(), "界内不轮转");
+        // 超界：轮转（不预建 .1——Windows 的 rename 不覆盖既有目标，产线语义为
+        // 尽力而为：覆盖失败 = 下拍再试，容量判据不是事务）
+        std::fs::write(&f, vec![b'x'; (RR3_LOG_MAX_BYTES + 1) as usize]).unwrap();
+        rr3_log_rotate_if_over(&f);
+        assert!(!f.exists(), "超界原文件已让位");
+        assert_eq!(
+            std::fs::read(dir.join("u.log.1")).unwrap().len(),
+            RR3_LOG_MAX_BYTES as usize + 1
+        );
+        // 不存在：静默
+        rr3_log_rotate_if_over(&f);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// 回填行集（批N5 件二笔2）：取尾 cap 行、push_front 消费序（最新在前）；
