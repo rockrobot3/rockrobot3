@@ -729,10 +729,13 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
         // 动作面：应答先行落链再重启（esp_restart 不返回——重启即断链，应答
         // 不可达＝客户端误判超时，故先 send 后 restart）
         Rr3BoardRoute::Reboot => {
-            // P1-3 写口鉴权：reboot 是高权动作，body 须带合法 token
+            // P1-3 写口鉴权：reboot 是高权动作，body 须带合法 token。
+            // body 上限同 [`RR3_WIFI_BODY_MAX`]：content_len 是客户端可控的
+            // Content-Length，无上限的 `vec![0u8; clen]` 在 4MB RAM 板上即
+            // OOM abort——同网段一个请求打挂 httpd（静态审计 0.0.8b 实锤）。
             let clen = (*req).content_len;
-            let authed = if clen > 0 {
-                let mut buf = vec![0u8; clen as usize];
+            let authed = if clen > 0 && clen <= RR3_WIFI_BODY_MAX {
+                let mut buf = vec![0u8; clen];
                 let got = httpd_req_recv(req, buf.as_mut_ptr() as *mut _, buf.len());
                 got > 0 && got as usize == buf.len() && rr3_admin_token_check(&buf)
             } else {
