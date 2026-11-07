@@ -199,7 +199,10 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             &interact,
             "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
         ),
-        (&brain, "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）"),
+        (
+            &brain,
+            "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
+        ),
     ])?;
 
     // 音频后端与云模式（缺省行为零改动：sim + mock——CI/无头纪律；真件只显式启用）

@@ -22,7 +22,11 @@ pub fn bootstrap<C>(cfg: Rr3ModConfig<C>) -> Result<(BusHandle, C), String> {
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
     let client = Rr3BusClient::rr3_connect(&manifest_text)?;
-    eprintln!("总线就绪: name={} task={}", client.rr3_name(), client.rr3_task());
+    eprintln!(
+        "总线就绪: name={} task={}",
+        client.rr3_name(),
+        client.rr3_task()
+    );
     let text = load_config_text(cfg.config_env, &manifest_path)?;
     let parsed = (cfg.parse_config)(&text)?;
     Ok((BusHandle { client }, parsed))
@@ -104,8 +108,7 @@ mod tests {
     /// io error 尾巴是动态文案，按 repo 口径 contains 断言）。
     #[test]
     fn load_config_missing_file_names_path() {
-        let err =
-            load_config_text(None, "/nonexistent-rr3mod/manifest.toml").unwrap_err();
+        let err = load_config_text(None, "/nonexistent-rr3mod/manifest.toml").unwrap_err();
         assert!(err.starts_with("读 config "), "{err}");
         assert!(
             err.contains("/nonexistent-rr3mod/config.toml"),
@@ -152,8 +155,7 @@ mod tests {
             Ok(_) => panic!("缺 RR3_MANIFEST 应失败"),
         };
         assert_eq!(
-            err,
-            "缺环境变量 RR3_MANIFEST（rrd spawn 注入；直跑请指向 module.toml）",
+            err, "缺环境变量 RR3_MANIFEST（rrd spawn 注入；直跑请指向 module.toml）",
             "缺 manifest 文案逐字（方案 §2.8-3）"
         );
     }

@@ -30,12 +30,12 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rr3mod::BusHandle;
 use rr_bus_api::Rr3BusClient;
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_frame_read, rr3_frame_write, Rr3Frame, Rr3Header, Rr3PayloadType,
     RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT,
 };
-use rr3mod::BusHandle;
 use serde_json::{json, Value};
 
 use super::secrets::{rr3_secrets_list_at, rr3_secrets_path, rr3_secrets_upsert_at};
@@ -174,18 +174,165 @@ pub const RR3_PANEL_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("POST", "/api/wifi/forget", &[], ""),
     ("GET", "/api/model/keys", &[], ""),
     ("POST", "/api/model/key", &[], "live"),
-    ("GET", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], ""),
-    ("POST", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"], "live"),
+    (
+        "GET",
+        "/api/brain/ops",
+        &[
+            "ops/asr_model",
+            "ops/base_url",
+            "ops/llm_model",
+            "ops/max_utterance_ms",
+            "ops/timeout_s",
+            "ops/tts_model",
+        ],
+        "",
+    ),
+    (
+        "POST",
+        "/api/brain/ops",
+        &[
+            "ops/asr_model",
+            "ops/base_url",
+            "ops/llm_model",
+            "ops/max_utterance_ms",
+            "ops/timeout_s",
+            "ops/tts_model",
+        ],
+        "live",
+    ),
     ("GET", "/api/brain/models", &[], ""),
     ("POST", "/api/brain/model", &[], "live"),
     ("POST", "/api/brain/model/test", &[], ""),
-    ("GET", "/api/act/ops", &["ops/blink_period_ms", "ops/led_effects", "ops/move_timeout_ms", "ops/state_min_interval_ms"], ""),
-    ("GET", "/api/connect/ops", &["ops/up", "ops/link_report_period_ms", "ops/timeout_ms", "ops/min_pass_len"], ""),
-    ("GET", "/api/interact/ops", &["ops/non_pointable", "ops/default_expression", "ops/face_tick_ms", "ops/selftest_face_expect", "ops/panel_max_conns", "ops/panel_read_timeout_ms", "ops/panel_header_limit", "ops/panel_body_limit", "ops/panel_call_timeout_ms", "ops/prebuffer_ms", "ops/volume_pct"], ""),
-    ("GET", "/api/power/ops", &["ops/sample_period_ms", "ops/low_voltage_mv", "ops/cutoff_voltage_mv", "ops/state_period_ms"], ""),
-    ("GET", "/api/sense/ops", &["ops/sample_rate", "ops/channels", "ops/frame_ms", "ops/doa_bin_threshold_deg", "ops/doa_window_ms", "ops/doa_window_rms_min", "ops/doa_mic_baseline_mm", "ops/rms_start", "ops/silence_tail_ms", "ops/min_speech_ms"], ""),
-    ("GET", "/api/wiring", &["pin/role", "pin/instance", "pin/controller", "pin/channel", "pin/physical", "pin/direction", "pin/rail", "pin/addr", "pin/device", "pin/failsafe", "pin/mux_group", "role/controller", "role/channel", "role/physical", "role/rail", "role/failsafe", "role/addr", "role/device", "domain/name", "domain/nominal_mv", "domain/mild_mv", "domain/severe_mv", "domain/current_cap_ma", "domain/sense", "domain/current_sense", "domain/switch", "domain/switchable", "domain/armed", "domain/max_age_ms", "domain/evidence", "axis/schema", "axis/pin", "axis/center_deg", "axis/lo_deg", "axis/hi_deg", "axis/dir_sign", "axis/slew_deg_s", "axis/settle_ms", "axis/hold", "axis/current_ceil_ma", "axis/warmup_ms", "axis/hard_stop", "axis/calibrated", "axis/source"], ""),
-    ("POST", "/api/profile/domain", &["domain/armed", "domain/evidence", "domain/severe_mv", "axis/current_ceil_ma"], "reboot"),
+    (
+        "GET",
+        "/api/act/ops",
+        &[
+            "ops/blink_period_ms",
+            "ops/led_effects",
+            "ops/move_timeout_ms",
+            "ops/state_min_interval_ms",
+        ],
+        "",
+    ),
+    (
+        "GET",
+        "/api/connect/ops",
+        &[
+            "ops/up",
+            "ops/link_report_period_ms",
+            "ops/timeout_ms",
+            "ops/min_pass_len",
+        ],
+        "",
+    ),
+    (
+        "GET",
+        "/api/interact/ops",
+        &[
+            "ops/non_pointable",
+            "ops/default_expression",
+            "ops/face_tick_ms",
+            "ops/selftest_face_expect",
+            "ops/panel_max_conns",
+            "ops/panel_read_timeout_ms",
+            "ops/panel_header_limit",
+            "ops/panel_body_limit",
+            "ops/panel_call_timeout_ms",
+            "ops/prebuffer_ms",
+            "ops/volume_pct",
+        ],
+        "",
+    ),
+    (
+        "GET",
+        "/api/power/ops",
+        &[
+            "ops/sample_period_ms",
+            "ops/low_voltage_mv",
+            "ops/cutoff_voltage_mv",
+            "ops/state_period_ms",
+        ],
+        "",
+    ),
+    (
+        "GET",
+        "/api/sense/ops",
+        &[
+            "ops/sample_rate",
+            "ops/channels",
+            "ops/frame_ms",
+            "ops/doa_bin_threshold_deg",
+            "ops/doa_window_ms",
+            "ops/doa_window_rms_min",
+            "ops/doa_mic_baseline_mm",
+            "ops/rms_start",
+            "ops/silence_tail_ms",
+            "ops/min_speech_ms",
+        ],
+        "",
+    ),
+    (
+        "GET",
+        "/api/wiring",
+        &[
+            "pin/role",
+            "pin/instance",
+            "pin/controller",
+            "pin/channel",
+            "pin/physical",
+            "pin/direction",
+            "pin/rail",
+            "pin/addr",
+            "pin/device",
+            "pin/failsafe",
+            "pin/mux_group",
+            "role/controller",
+            "role/channel",
+            "role/physical",
+            "role/rail",
+            "role/failsafe",
+            "role/addr",
+            "role/device",
+            "domain/name",
+            "domain/nominal_mv",
+            "domain/mild_mv",
+            "domain/severe_mv",
+            "domain/current_cap_ma",
+            "domain/sense",
+            "domain/current_sense",
+            "domain/switch",
+            "domain/switchable",
+            "domain/armed",
+            "domain/max_age_ms",
+            "domain/evidence",
+            "axis/schema",
+            "axis/pin",
+            "axis/center_deg",
+            "axis/lo_deg",
+            "axis/hi_deg",
+            "axis/dir_sign",
+            "axis/slew_deg_s",
+            "axis/settle_ms",
+            "axis/hold",
+            "axis/current_ceil_ma",
+            "axis/warmup_ms",
+            "axis/hard_stop",
+            "axis/calibrated",
+            "axis/source",
+        ],
+        "",
+    ),
+    (
+        "POST",
+        "/api/profile/domain",
+        &[
+            "domain/armed",
+            "domain/evidence",
+            "domain/severe_mv",
+            "axis/current_ceil_ma",
+        ],
+        "reboot",
+    ),
 ];
 
 /// 启动自述（端点数由 [`RR3_PANEL_ROUTES`] 长度推导——I-9/I-12 同一真值）。
@@ -1083,58 +1230,58 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 即 n-a，不向总线发无人接的 on/off；配置 expect.relay=n-a 同样跳过。
             // 能力缺席优先于预期表（避免无末梢形态被共享 config 的 relay=pass
             // 拖红）；ctl 取数失败仍 fail-closed 记 fail，不把系统面故障伪装成 n-a。
-            let relay_expect = match rr3_selftest_act_enabled(
-                &shared.bus_path,
-                shared.limits.read_timeout,
-            ) {
-                Ok(enabled) => {
-                    let want = rr3_selftest_relay_expect(enabled, shared.selftest_expect.relay);
-                    if want == "n-a" {
-                        let why = if enabled {
-                            "expect.relay=n-a（配置声明不适用）"
+            let relay_expect =
+                match rr3_selftest_act_enabled(&shared.bus_path, shared.limits.read_timeout) {
+                    Ok(enabled) => {
+                        let want = rr3_selftest_relay_expect(enabled, shared.selftest_expect.relay);
+                        if want == "n-a" {
+                            let why = if enabled {
+                                "expect.relay=n-a（配置声明不适用）"
+                            } else {
+                                "rr3-act 未启用（host-only 能力面 n-a）"
+                            };
+                            legs.push(json!({ "leg": "relay", "pass": "n-a", "reason": why }));
                         } else {
-                            "rr3-act 未启用（host-only 能力面 n-a）"
-                        };
-                        legs.push(json!({ "leg": "relay", "pass": "n-a", "reason": why }));
-                    } else {
-                        let relay_on = shared.bus.call(
-                            "rr3-act/relay/set",
-                            &json!({ "on": true }),
-                            shared.limits.call_timeout,
-                        );
-                        let (relay_pass, relay_reason) = match relay_on {
-                            Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
-                            Ok(_) => match shared.bus.call(
+                            let relay_on = shared.bus.call(
                                 "rr3-act/relay/set",
-                                &json!({ "on": false }),
+                                &json!({ "on": true }),
                                 shared.limits.call_timeout,
-                            ) {
-                                Ok(_) => ("pass", None),
-                                Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
-                            },
-                        };
-                        let mut relay_leg =
-                            json!({ "leg": "relay", "pass": relay_pass });
-                        if let Some(e) = relay_reason {
-                            relay_leg["reason"] = json!(e);
+                            );
+                            let (relay_pass, relay_reason) = match relay_on {
+                                Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
+                                Ok(_) => match shared.bus.call(
+                                    "rr3-act/relay/set",
+                                    &json!({ "on": false }),
+                                    shared.limits.call_timeout,
+                                ) {
+                                    Ok(_) => ("pass", None),
+                                    Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
+                                },
+                            };
+                            let mut relay_leg = json!({ "leg": "relay", "pass": relay_pass });
+                            if let Some(e) = relay_reason {
+                                relay_leg["reason"] = json!(e);
+                            }
+                            legs.push(relay_leg);
                         }
-                        legs.push(relay_leg);
+                        want
                     }
-                    want
-                }
-                Err(e) => {
-                    legs.push(json!({
-                        "leg": "relay", "pass": "fail",
-                        "reason": format!("ctl.status 取数失败: {e}"),
-                    }));
-                    "fail"
-                }
-            };
+                    Err(e) => {
+                        legs.push(json!({
+                            "leg": "relay", "pass": "fail",
+                            "reason": format!("ctl.status 取数失败: {e}"),
+                        }));
+                        "fail"
+                    }
+                };
             // 腿3 face：切到期望表情（I-17/M-10：期望值 config 数据化，产线
             // 按形态改 [rr3-interact.selftest].face_expect）
-            let reason = match rr3_panel_act(shared, Rr3PanelAction::Face {
-                expression: shared.selftest_face_expect.to_string(),
-            }) {
+            let reason = match rr3_panel_act(
+                shared,
+                Rr3PanelAction::Face {
+                    expression: shared.selftest_face_expect.to_string(),
+                },
+            ) {
                 Ok(_) => None,
                 Err(e) => Some(e),
             };
@@ -1149,8 +1296,12 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 腿4 wiring（批N4 件九笔4）：ctl 取数失败/快照不可得 = 单腿 fail
             // 如实点名；取到即把 rrd 三态判果逐条转述（"not-applicable" → n-a，
             // 其余未知值 fail-closed 折 fail——失败腿不得折算通过）
-            match rr3_ctl_query(&shared.bus_path, "rr3.ctl.wiring", 5, shared.limits.read_timeout)
-            {
+            match rr3_ctl_query(
+                &shared.bus_path,
+                "rr3.ctl.wiring",
+                5,
+                shared.limits.read_timeout,
+            ) {
                 Err(e) => legs.push(json!({
                     "leg": "wiring/取数", "pass": "fail", "reason": e,
                 })),
@@ -1180,8 +1331,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                                 Some("not-applicable") => "n-a",
                                 _ => "fail",
                             };
-                            let mut leg =
-                                json!({ "leg": format!("wiring/{item}"), "pass": pass });
+                            let mut leg = json!({ "leg": format!("wiring/{item}"), "pass": pass });
                             if let Some(r) = c.get("reason") {
                                 leg["reason"] = r.clone();
                             }
@@ -1691,9 +1841,31 @@ mod tests {
             declared,
             vec![
                 &("POST", "/api/model/key", &[][..], "live"),
-                &("POST", "/api/brain/ops", &["ops/asr_model", "ops/base_url", "ops/llm_model", "ops/max_utterance_ms", "ops/timeout_s", "ops/tts_model"][..], "live"),
+                &(
+                    "POST",
+                    "/api/brain/ops",
+                    &[
+                        "ops/asr_model",
+                        "ops/base_url",
+                        "ops/llm_model",
+                        "ops/max_utterance_ms",
+                        "ops/timeout_s",
+                        "ops/tts_model"
+                    ][..],
+                    "live"
+                ),
                 &("POST", "/api/brain/model", &[][..], "live"),
-                &("POST", "/api/profile/domain", &["domain/armed", "domain/evidence", "domain/severe_mv", "axis/current_ceil_ma"][..], "reboot"),
+                &(
+                    "POST",
+                    "/api/profile/domain",
+                    &[
+                        "domain/armed",
+                        "domain/evidence",
+                        "domain/severe_mv",
+                        "axis/current_ceil_ma"
+                    ][..],
+                    "reboot"
+                ),
             ],
             "applies 申报面漂移：新增写口申报须同批改本 pin"
         );
@@ -2078,7 +2250,12 @@ mod tests {
         let bus_path = dir.join("st.sock");
         let listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
         std::thread::spawn(move || {
-            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), json!({}), json!({}))
+            rr3_i4_fake_rrd(
+                listener,
+                Arc::new(Mutex::new(Vec::new())),
+                json!({}),
+                json!({}),
+            )
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
@@ -2117,7 +2294,10 @@ mod tests {
         let legs = v["legs"].as_array().expect("逐腿数组");
         assert_eq!(legs.len(), 5, "并列五腿（三调＋wiring 腿＋contracts 腿）");
         assert_eq!(legs[0]["leg"], "speaker");
-        assert_eq!(legs[0]["pass"], "fail", "主循环缺席腿如实 fail，不折算通过（D15）");
+        assert_eq!(
+            legs[0]["pass"], "fail",
+            "主循环缺席腿如实 fail，不折算通过（D15）"
+        );
         assert!(
             legs[0]["reason"].as_str().unwrap().contains("主循环"),
             "失败原因进 reason（本场景主循环缺席；内置测试音的播放结果由活主循环回）"
@@ -2176,7 +2356,12 @@ mod tests {
             ]
         });
         std::thread::spawn(move || {
-            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned, canned_contracts)
+            rr3_i4_fake_rrd(
+                listener,
+                Arc::new(Mutex::new(Vec::new())),
+                canned,
+                canned_contracts,
+            )
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
@@ -2227,7 +2412,10 @@ mod tests {
         assert_eq!(legs[3]["leg"], "wiring/net:J-T:rail5v");
         assert_eq!(legs[3]["pass"], "pass", "rrd 判 pass 如实转述");
         assert_eq!(legs[4]["leg"], "wiring/signal:J-T[1]:gnd");
-        assert_eq!(legs[4]["pass"], "n-a", "not-applicable 映射 n-a，不折算 fail");
+        assert_eq!(
+            legs[4]["pass"], "n-a",
+            "not-applicable 映射 n-a，不折算 fail"
+        );
         assert_eq!(legs[4]["reason"], "gnd-only 单线组不判导体", "reason 透传");
         assert_eq!(legs[5]["leg"], "wiring/pin:J-T[2]:vcc");
         assert_eq!(legs[5]["pass"], "fail", "未知 pass 值 fail-closed 折 fail");
@@ -2395,7 +2583,12 @@ mod tests {
         });
         let expect = canned.clone();
         std::thread::spawn(move || {
-            rr3_i4_fake_rrd(listener, Arc::new(Mutex::new(Vec::new())), canned, json!({}))
+            rr3_i4_fake_rrd(
+                listener,
+                Arc::new(Mutex::new(Vec::new())),
+                canned,
+                json!({}),
+            )
         });
         std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
         let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
@@ -2447,9 +2640,21 @@ mod tests {
         assert_eq!(covers.len(), 44, "四族全集 44 项: {covers:?}");
         let count = |prefix: &str| covers.iter().filter(|c| c.starts_with(prefix)).count();
         assert_eq!(count("pin/"), 11, "pin 族 11 字段（RR3_PIN_KEYS 同源）");
-        assert_eq!(count("role/"), 7, "role 族 7 字段（roles.toml requires 同源）");
-        assert_eq!(count("domain/"), 12, "domain 族 12 字段（RR3_DOMAIN_KEYS 同源）");
-        assert_eq!(count("axis/"), 14, "axis 族 14 字段（RR3_ACT_PROFILE_FIELDS 同源）");
+        assert_eq!(
+            count("role/"),
+            7,
+            "role 族 7 字段（roles.toml requires 同源）"
+        );
+        assert_eq!(
+            count("domain/"),
+            12,
+            "domain 族 12 字段（RR3_DOMAIN_KEYS 同源）"
+        );
+        assert_eq!(
+            count("axis/"),
+            14,
+            "axis 族 14 字段（RR3_ACT_PROFILE_FIELDS 同源）"
+        );
         let mut sorted = covers.clone();
         sorted.sort_unstable();
         sorted.dedup();

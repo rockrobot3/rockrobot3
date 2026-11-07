@@ -5,17 +5,17 @@
 //! led 节拍），协议面在 [`rpc`]；intent/reflex 宿主留本模块（0.0.5 方案 §12.1），原子件
 //! 在 `atoms/` 原位不动。
 
-#[path = "../atoms/servo/servo.rs"]
-mod servo;
-#[path = "../atoms/led/led.rs"]
-mod led;
-#[path = "../atoms/relay/relay.rs"]
-mod relay;
 mod boot;
 mod dispatch;
 mod intent;
+#[path = "../atoms/led/led.rs"]
+mod led;
 mod reflex;
+#[path = "../atoms/relay/relay.rs"]
+mod relay;
 mod rpc;
+#[path = "../atoms/servo/servo.rs"]
+mod servo;
 
 use std::time::Duration;
 
@@ -38,7 +38,9 @@ fn main() {
 fn rr3_act_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
     eprintln!("rr3-act 0.0.1 (0.0.2 T4a 实装，0.0.3 T3 意图执行)");
-    let lines = servo::SURFACE.iter().copied()
+    let lines = servo::SURFACE
+        .iter()
+        .copied()
         .chain(led::SURFACE.iter().copied())
         .chain(relay::SURFACE.iter().copied())
         .chain(reflex::SURFACE.iter().copied());
@@ -59,7 +61,11 @@ fn rr3_act_run() -> Result<(), String> {
     cfg.servo.angle_max_deg = axis.hi_deg;
     // 注入的策略面在启动自述里可见（A-9：改数据即改行为，日志是第一证据）
     let open = &cfg.intent.open_topics;
-    let intent_open = if open.is_empty() { "(空)".to_string() } else { open.join("/") };
+    let intent_open = if open.is_empty() {
+        "(空)".to_string()
+    } else {
+        open.join("/")
+    };
     eprintln!(
         "config 就绪: servo [{}, {}]（行程=轴档案）/{}/ms state>={}ms blink={}ms led_effects={} intent_open={intent_open} reflex {}Hz",
         cfg.servo.angle_min_deg, cfg.servo.angle_max_deg, cfg.servo.move_timeout_ms,
@@ -75,6 +81,7 @@ fn rr3_act_run() -> Result<(), String> {
     boot::rr3_act_spawn_reflex(cfg.reflex, &bus)?;
 
     // 机制层注册面构造 + 主循环骨架（rr3mod serve：死亡探针/分帧/RPC/订阅/节拍）
-    let mut dispatcher = dispatch::Rr3ActDispatcher::new(servo_dev, led_gpio, relay_gpio, cfg, axis);
+    let mut dispatcher =
+        dispatch::Rr3ActDispatcher::new(servo_dev, led_gpio, relay_gpio, cfg, axis);
     serve(bus, &mut dispatcher, RR3_POLL_WAIT)
 }

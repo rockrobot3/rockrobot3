@@ -219,7 +219,10 @@ mod tests {
         let mut want = f.clone();
         want.header.payload_crc32 = crate::protocol::header::rr3_crc32(&f.payload);
         assert_ne!(want.header.payload_crc32, 0, "带载荷的头 CRC 必须非零");
-        assert_eq!(crate::protocol::wire::Rr3Frame::try_from(got).unwrap(), want);
+        assert_eq!(
+            crate::protocol::wire::Rr3Frame::try_from(got).unwrap(),
+            want
+        );
     }
 
     /// 未 seal 的缓冲照走"先幂等 seal 再发"路径——rr3_seal 语义不随换底漂移。

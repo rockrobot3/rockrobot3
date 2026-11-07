@@ -224,8 +224,8 @@ fn main() {
     let (i2c_sda, i2c_scl) = (peripherals.pins.gpio21, peripherals.pins.gpio22);
     #[cfg(feature = "esp32s3")]
     let (i2c_sda, i2c_scl) = (peripherals.pins.gpio8, peripherals.pins.gpio9);
-    let mut i2c = I2cDriver::new(peripherals.i2c0, i2c_sda, i2c_scl, &i2c_config)
-    .expect("I2C0 驱动安装失败");
+    let mut i2c =
+        I2cDriver::new(peripherals.i2c0, i2c_sda, i2c_scl, &i2c_config).expect("I2C0 驱动安装失败");
     let found = i2c_scan(&mut crate::ports_impl::rr3_esp_i2c(&mut i2c));
     if found.contains(&OLED_ADDR) {
         println!(

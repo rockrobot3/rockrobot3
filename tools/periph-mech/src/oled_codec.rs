@@ -175,22 +175,22 @@ pub fn rr3_page_cmd(page: u8) -> [u8; 3] {
 /// 初始化命令序（面板数据手册标准序；`contrast` 由策略面按当前档传入）。
 pub fn rr3_init_commands(contrast: u8) -> [u8; 25] {
     [
-        0xAE,     // display off
+        0xAE, // display off
         0xD5, 0x80, // clock div
         0xA8, 0x3F, // multiplex 64
         0xD3, 0x00, // display offset
-        0x40,     // start line 0
+        0x40, // start line 0
         0x8D, 0x14, // charge pump on
         0x20, 0x02, // page addressing mode
-        0xA1,     // segment remap
-        0xC8,     // COM scan dec
+        0xA1, // segment remap
+        0xC8, // COM scan dec
         0xDA, 0x12, // COM pins
         0x81, contrast, // contrast
         0xD9, 0xF1, // precharge
         0xDB, 0x40, // VCOM detect
-        0xA4,     // resume from RAM
-        0xA6,     // normal display
-        0xAF,     // display on
+        0xA4, // resume from RAM
+        0xA6, // normal display
+        0xAF, // display on
     ]
 }
 

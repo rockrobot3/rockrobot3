@@ -317,11 +317,11 @@ mod tests {
         let text = concat!(
             "pwm_chip = \"abc\"\n",
             "i2c_bus = \"-1\"\n",
-            "ina219_addr = \"40\"\n",    // 裸写有十进制歧义，只认 0x 前缀
-            "alsa_device = \"  \"\n",    // trim 后空 = 不认
+            "ina219_addr = \"40\"\n", // 裸写有十进制歧义，只认 0x 前缀
+            "alsa_device = \"  \"\n", // trim 后空 = 不认
             "mystery_key = \"x\"\n",
-            "link_ifname = 3\n",         // 非字符串标量
-            "i2c_sda = \"256\"\n",       // 板侧键取值域 = u8，越域即红
+            "link_ifname = 3\n",             // 非字符串标量
+            "i2c_sda = \"256\"\n",           // 板侧键取值域 = u8，越域即红
             "cred_store = \"flash:boot\"\n", // 非 nvs: 前缀，批N17 件二
         );
         let errs = rr3_hal_bindings_from_text(text).expect_err("坏值必须报错");

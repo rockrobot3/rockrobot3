@@ -166,8 +166,14 @@ pub(crate) fn rr3_act_axis_state_load() -> Rr3ActAxisState {
 /// 执行器"的假活。探活全是读面 &self（批I F1 同步化后无需 block_on）。自原
 /// composite.rs 逐字迁入（失败文案三条与「执行面就绪」回显逐字）；backend 名
 /// 回显后丢弃（错误文案复用点在三条 map_err）。
-pub(crate) fn rr3_act_probe(
-) -> Result<(Box<dyn Rr3PwmServo>, Box<dyn Rr3GpioOut>, Box<dyn Rr3GpioOut>), String> {
+pub(crate) fn rr3_act_probe() -> Result<
+    (
+        Box<dyn Rr3PwmServo>,
+        Box<dyn Rr3GpioOut>,
+        Box<dyn Rr3GpioOut>,
+    ),
+    String,
+> {
     let (servo_dev, servo_backend) = rr3_hal_servo();
     let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
     let (relay_gpio, relay_backend) = rr3_hal_gpio_out("relay");

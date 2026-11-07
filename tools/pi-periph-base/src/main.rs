@@ -29,8 +29,7 @@ use std::time::Duration;
 use periph_mech::periph_core::{rr3_servo_gate, rr3_slew_steps, Rr3ServoCore};
 use periph_mech::rail_judge::{RailJudge, RailTier};
 use rr_ipc::{
-    rr3_board_binding_entry, Rr3BoardBindings, Rr3ByteStream, Rr3UartConn,
-    RR3_METHOD_SET_BINDINGS,
+    rr3_board_binding_entry, Rr3BoardBindings, Rr3ByteStream, Rr3UartConn, RR3_METHOD_SET_BINDINGS,
 };
 use rr_periph_proto::ports::{Rr3ClockPort, Rr3PwmChannel, Rr3PwmPort};
 use serde_json::{json, Value};
@@ -152,7 +151,10 @@ impl Board {
         loop {
             self.maybe_sample_rail();
             let mut first = [0u8; 1];
-            match self.uart.rr3_read_timeout(&mut first, FIRST_BYTE_TIMEOUT_MS) {
+            match self
+                .uart
+                .rr3_read_timeout(&mut first, FIRST_BYTE_TIMEOUT_MS)
+            {
                 Ok(0) => continue,
                 Ok(_) => {}
                 Err(e) => {
@@ -385,18 +387,9 @@ impl Board {
     /// 舵机移动（机制核：行程校验 + 轨压闸 + 缓速步进；本面只管写端口与等待）。
     fn servo_move(&mut self, axis: Axis, deg: u32) -> Result<u32, String> {
         let d = axis_check(axis, deg)?;
-        rr3_servo_gate(
-            RAIL_GATE_ARMED,
-            self.state.rail_tier,
-            axis.name(),
-            d,
-        )?;
+        rr3_servo_gate(RAIL_GATE_ARMED, self.state.rail_tier, axis.name(), d)?;
         let ch = channel_of(axis);
-        for step in rr3_slew_steps(
-            self.state.servo.deg(ch),
-            d,
-            SERVO_SLEW_STEP_DEG,
-        ) {
+        for step in rr3_slew_steps(self.state.servo.deg(ch), d, SERVO_SLEW_STEP_DEG) {
             let ticks = deg_to_duty(step, DUTY_MIN_TICKS, DUTY_MAX_TICKS);
             self.pwm.rr3_pwm_duty(ch, ticks)?;
             if step != d {
@@ -611,9 +604,7 @@ fn main() {
     };
     let i2c = ports::open_default_i2c();
     let mut board = Board::new(uart, i2c);
-    println!(
-        "READY periph-base(pi) v0.1.0 五端口（UART/I2C/PWM/ADS1115/CLOCK_MONOTONIC）"
-    );
+    println!("READY periph-base(pi) v0.1.0 五端口（UART/I2C/PWM/ADS1115/CLOCK_MONOTONIC）");
     board.boot_surfaces();
     board.run();
 }

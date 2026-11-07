@@ -23,10 +23,12 @@ use super::boot::Rr3ActAxisState;
 use super::led::RR3_LED_EFFECT_TOPIC;
 use super::relay::{self, RR3_RELAY_SET_TOPIC};
 use super::rpc::{
-    rr3_low_power_reject, rr3_relay_apply_error_text, rr3_relay_parse_args, rr3_servo_motion_reject,
-    rr3_servo_parse_args,
+    rr3_low_power_reject, rr3_relay_apply_error_text, rr3_relay_parse_args,
+    rr3_servo_motion_reject, rr3_servo_parse_args,
 };
-use super::servo::{rr3_servo_check_motion, Rr3ServoCfg, Rr3ServoMotionError, RR3_SERVO_COMMAND_TOPIC};
+use super::servo::{
+    rr3_servo_check_motion, Rr3ServoCfg, Rr3ServoMotionError, RR3_SERVO_COMMAND_TOPIC,
+};
 
 /// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值；
 /// 字面量零内联，主题事实源在各自原子件的常量）
@@ -127,8 +129,8 @@ fn rr3_intent_action_handle(
                 return Err(rr3_low_power_reject(RR3_RELAY_SET_TOPIC));
             }
             let on = rr3_relay_parse_args(args)?;
-            let (on, prev) = relay::rr3_relay_apply(gpio, on)
-                .map_err(|e| rr3_relay_apply_error_text(&e))?;
+            let (on, prev) =
+                relay::rr3_relay_apply(gpio, on).map_err(|e| rr3_relay_apply_error_text(&e))?;
             Ok(Rr3IntentOutcome::Relay(on, prev))
         }
         RR3_SERVO_COMMAND_TOPIC => {

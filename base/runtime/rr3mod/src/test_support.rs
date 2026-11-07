@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rr_core::RR3_TASK_RRD;
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
-    Rr3Header, Rr3PayloadType, RR3_BUS_PATH_ENV,
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame, Rr3Header,
+    Rr3PayloadType, RR3_BUS_PATH_ENV,
 };
 use serde_json::{json, Value};
 
@@ -169,7 +169,10 @@ fn fake_rrd(listener: UnixListener, log: Arc<Mutex<Vec<Value>>>, mode: FakeMode)
     let Ok((mut stream, _)) = listener.accept() else {
         return;
     };
-    if stream.set_read_timeout(Some(Duration::from_secs(5))).is_err() {
+    if stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .is_err()
+    {
         return;
     }
     loop {

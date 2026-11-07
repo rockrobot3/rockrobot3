@@ -6,14 +6,14 @@
 //! 载荷组装面），原子件在 `atoms/` 原位不动；session 云会话事务面留本模块
 //! （0.0.5 方案 §12.2——request 事务接入/运行面成分）。
 
+mod boot;
 #[path = "../atoms/bt/bt.rs"]
 mod bt;
-#[path = "../atoms/wifi/wifi.rs"]
-mod wifi;
-mod boot;
 mod dispatch;
 mod rpc;
 mod session;
+#[path = "../atoms/wifi/wifi.rs"]
+mod wifi;
 
 use std::time::Duration;
 

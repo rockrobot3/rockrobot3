@@ -15,8 +15,8 @@ use crate::charger::Rr3ChargerCfg;
 /// HAL 电源面选择 + 开机探活：首读即探活（Unsupported / 读数失败显式回错），
 /// 「电源面就绪」回显归本编排（方案 §4.1 映射表字面）。返回三元——句柄半、
 /// 后端名（"电池读数失败（{backend}）"文案复用）、首读（Dispatcher.last 种子）。
-pub(crate) fn rr3_power_probe(
-) -> Result<(Box<dyn Rr3Power>, &'static str, Rr3BatteryState), String> {
+pub(crate) fn rr3_power_probe() -> Result<(Box<dyn Rr3Power>, &'static str, Rr3BatteryState), String>
+{
     let (dev, backend) = rr3_hal_power();
     let first = dev
         .battery()
@@ -191,7 +191,10 @@ max_age_ms = 0
     #[test]
     fn config_parse_rejects_missing_sections_and_fields() {
         let e = rr3_power_config_parse("[rr3-power]\nlog_level = \"info\"\n").unwrap_err();
-        assert!(e.contains("[rr3-power.battery]"), "缺段点名（battery 先解析）: {e}");
+        assert!(
+            e.contains("[rr3-power.battery]"),
+            "缺段点名（battery 先解析）: {e}"
+        );
         let e = rr3_power_config_parse(
             "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n[rr3-power.charger]\nstate_period_ms = 2000\n",
         )

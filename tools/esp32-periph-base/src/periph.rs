@@ -12,13 +12,13 @@ use crate::board::{
 };
 use crate::face::EyeStyle;
 use crate::oled::{oled_capsules, oled_cmd, oled_frame, oled_init, oled_text};
+use crate::power::{RailJudge, RailMonitor, RailTier};
+use crate::servo::{axis_check, deg_to_duty, Axis};
 use periph_mech::oled_codec::{rr3_contrast_command, rr3_oled_lines};
 use periph_mech::periph_core::{
     rr3_servo_gate, rr3_servo_release, rr3_slew_steps, Rr3OledLadder, Rr3ServoCore,
 };
 use rr_periph_proto::ports::{Rr3AdcPort, Rr3PwmChannel, Rr3PwmPort};
-use crate::power::{RailJudge, RailMonitor, RailTier};
-use crate::servo::{axis_check, deg_to_duty, Axis};
 
 // ---------------------------------------------------------------------------
 // 外设面（控制面/运行面分离）：控制面独占 UART2，运行面独占 I2C0 + LEDC

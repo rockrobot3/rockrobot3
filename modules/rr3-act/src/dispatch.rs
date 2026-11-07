@@ -120,15 +120,13 @@ impl Dispatcher for Rr3ActDispatcher {
         // 意图两路同判），**妆面 led 不禁**（禁动它只增加卡死面积）。
         let blocked = self.low_gate.rr3_low_gate_is_blocked();
         let outcome = match topic {
-            servo::RR3_SERVO_COMMAND_TOPIC => {
-                rpc::rr3_handle_servo(
-                    &mut *self.servo_dev,
-                    &self.cfg.servo,
-                    args,
-                    blocked,
-                    &self.axis,
-                )
-            }
+            servo::RR3_SERVO_COMMAND_TOPIC => rpc::rr3_handle_servo(
+                &mut *self.servo_dev,
+                &self.cfg.servo,
+                args,
+                blocked,
+                &self.axis,
+            ),
             led::RR3_LED_EFFECT_TOPIC => rpc::rr3_handle_led(
                 &mut self.led_ctrl,
                 &mut *self.led_gpio,
@@ -248,9 +246,7 @@ impl Dispatcher for Rr3ActDispatcher {
                                     self.relay_seq
                                 );
                             } else {
-                                eprintln!(
-                                    "intent: trace={trace} relay on={on}（同态不续发）"
-                                );
+                                eprintln!("intent: trace={trace} relay on={on}（同态不续发）");
                             }
                         }
                         Ok(intent::Rr3IntentOutcome::Servo(angle)) => {

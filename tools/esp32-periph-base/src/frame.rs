@@ -4,9 +4,7 @@ use rr_ipc::{rr3_board_binding_entry, Rr3BoardBindings, RR3_METHOD_SET_BINDINGS}
 use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
 use serde_json::{json, Value};
 
-use crate::board::{
-    rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC,
-};
+use crate::board::{rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC};
 use crate::face::expr_eye_base;
 use crate::servo::{axis_check, Axis};
 use crate::state::{lock_bus, push_job, rr3_board_bindings_store, Bus, CtlState, Job};

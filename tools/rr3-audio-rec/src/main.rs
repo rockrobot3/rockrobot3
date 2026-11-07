@@ -747,8 +747,7 @@ fn main() {
                         if let Some((t0, f0)) = rate_anchor {
                             let d = now.duration_since(t0);
                             if d.as_secs_f64() > 0.5 {
-                                let r =
-                                    (((frames - f0) as f64) / d.as_secs_f64()).round() as u32;
+                                let r = (((frames - f0) as f64) / d.as_secs_f64()).round() as u32;
                                 if r > 0 {
                                     watch.rate.store(r, Ordering::Release);
                                 }
@@ -986,7 +985,9 @@ mod tests {
         assert!(s.contains("左右符号分离 ✓"), "{s}");
         // 跨窗边界：半窗不回行（None），补满才出
         let mut d2 = DoaTracker::new();
-        assert!(d2.feed(&synth_stereo(8000, 800)[..DOA_WIN_FRAMES * 2]).is_none());
+        assert!(d2
+            .feed(&synth_stereo(8000, 800)[..DOA_WIN_FRAMES * 2])
+            .is_none());
         assert!(d2.feed(&synth_stereo(8000, 800)).is_some(), "补满即出");
     }
 

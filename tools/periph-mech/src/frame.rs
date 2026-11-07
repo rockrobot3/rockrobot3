@@ -5,8 +5,8 @@
 //! 换平台只需实现 [`Rr3UartPort`]/[`Rr3ClockPort`]，帧面字节零改动。
 
 use rr_ipc::{Rr3Frame, Rr3FrameBuf, Rr3TransportConn};
-use rr_periph_proto::{rr3_periph_request_parse, rr3_periph_response_frame, Rr3PeriphRequest};
 use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
+use rr_periph_proto::{rr3_periph_request_parse, rr3_periph_response_frame, Rr3PeriphRequest};
 use serde_json::Value;
 
 /// 帧面请求视图别名：id/method/params 摘出，帧头位形随行携带（应答回带
@@ -117,8 +117,13 @@ mod tests {
             frame_recv(&mut io).expect("请求可解析")
         };
         let mut io = FakeIo::new(Vec::new());
-        frame_send_response(&mut io, &req, Ok(json!({ "angle_deg": 95 })), &FakeClock(1234))
-            .expect("写侧整段成功");
+        frame_send_response(
+            &mut io,
+            &req,
+            Ok(json!({ "angle_deg": 95 })),
+            &FakeClock(1234),
+        )
+        .expect("写侧整段成功");
 
         let mut back = FakeIo::new(io.wr);
         let frame = Rr3Frame::try_from(back.rr3_recv_buf().expect("回读整帧")).expect("帧还原");

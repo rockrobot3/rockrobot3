@@ -7,9 +7,9 @@ use rr_ipc::Rr3BoardBindings;
 
 use crate::face::{EyeStyle, EYE_IDLE};
 use crate::link::{reply, UartIo};
-use rr_periph_proto::ports::Rr3UartPort;
 use crate::power::RailTier;
 use crate::servo::{wander_step, Axis};
+use rr_periph_proto::ports::Rr3UartPort;
 
 /// esp_timer 毫秒（单调时基，微动作时钟源；u64 毫秒 58 万年不回绕）。
 pub(crate) fn now_ms() -> u64 {
@@ -60,8 +60,10 @@ pub(crate) fn rr3_board_bindings_i2c_pair() -> Option<(u8, u8)> {
 /// 编译期装配常量是当前 bin 的板级真值（classic 21/22、S3 8/9），注入值仍优先；
 /// 消费面（帧面绑定/读数）的 fail-closed 语义不变。
 pub(crate) fn rr3_i2c_pins_for_recovery() -> (u8, u8) {
-    rr3_board_bindings_i2c_pair()
-        .unwrap_or((crate::board::RR3_BIND_I2C_SDA, crate::board::RR3_BIND_I2C_SCL))
+    rr3_board_bindings_i2c_pair().unwrap_or((
+        crate::board::RR3_BIND_I2C_SDA,
+        crate::board::RR3_BIND_I2C_SCL,
+    ))
 }
 
 /// 读全量绑定快照（批N13 件一配置腿 `/api/board/bindings` 读数用；Clone 出锁，

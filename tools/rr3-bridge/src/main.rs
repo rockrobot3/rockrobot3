@@ -156,10 +156,13 @@ mod tests {
         ]))
         .expect("921600 是批D② 合法高速档");
         assert_eq!(hi.baud, 921600);
-        assert!(parse_args(&args(&[
-            "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "230400"
-        ]))
-        .is_err(), "档位外必须在解析期报错（静默换档是线路事故）");
+        assert!(
+            parse_args(&args(&[
+                "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "230400"
+            ]))
+            .is_err(),
+            "档位外必须在解析期报错（静默换档是线路事故）"
+        );
         assert!(parse_args(&args(&[
             "--uart", "/dev/x", "--socket", "/tmp/s", "--baud", "abc"
         ]))

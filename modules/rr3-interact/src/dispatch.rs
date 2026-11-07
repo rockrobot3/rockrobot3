@@ -81,10 +81,7 @@ fn rr3_beep_samples() -> Vec<i16> {
 /// MC-2 同一播放参数面）→ 直喂播放面，回 `{"played_ms"}`。波形长度编译期
 /// 固定 3200 样点 = 200ms ≥ 1ms 窗口，`played_ms == 0` 恒不触（I-21① 同口径
 /// 由构造保证）；写播放面失败原样上抛折 error 应答（同 tts 口径）。
-fn rr3_beep_play(
-    sink: &mut dyn Rr3AudioSink,
-    volume_pct: u32,
-) -> Result<Value, String> {
+fn rr3_beep_play(sink: &mut dyn Rr3AudioSink, volume_pct: u32) -> Result<Value, String> {
     let mut samples = rr3_beep_samples();
     player::rr3_tts_apply_gain(&mut samples, volume_pct);
     player::rr3_tts_play(sink, &samples)
@@ -192,7 +189,9 @@ impl Dispatcher for Rr3InteractDispatcher {
     fn on_tick(&mut self, now: Instant, _bus: &BusHandle) -> Result<(), String> {
         while let Ok((action, tx)) = self.act_rx.try_recv() {
             let result = match action {
-                Rr3PanelAction::Beep => rr3_beep_play(self.sink.as_mut(), self.cfg.player.volume_pct),
+                Rr3PanelAction::Beep => {
+                    rr3_beep_play(self.sink.as_mut(), self.cfg.player.volume_pct)
+                }
                 Rr3PanelAction::Face { expression } => self
                     .face
                     .rr3_face_set(&expression, &self.cfg.face.non_pointable)
@@ -259,10 +258,18 @@ mod tests {
         sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
         let v = rr3_beep_play(&mut sink, 100).unwrap();
         assert_eq!(v["played_ms"], 200);
-        assert_eq!(v.as_object().unwrap().len(), 1, "beep 应答单字段无加戏: {v}");
+        assert_eq!(
+            v.as_object().unwrap().len(),
+            1,
+            "beep 应答单字段无加戏: {v}"
+        );
         let mut want = rr3_beep_samples();
         player::rr3_tts_apply_gain(&mut want, 100);
-        assert_eq!(sink.rr3_sim_sink_played(), want, "播出流 = 合成样点过同径增益");
+        assert_eq!(
+            sink.rr3_sim_sink_played(),
+            want,
+            "播出流 = 合成样点过同径增益"
+        );
 
         let mut sink = rr_hal::sim::Rr3SimAudioSink::rr3_sim_sink_new(16_000 * 2);
         sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();

@@ -378,37 +378,35 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
         // 不猜设备不静默换 sim）。
         // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        RR3_BACKEND_ESP32 => {
-            match rr3_hal_periph_uart_path() {
-                Some(p) => {
-                    let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
-                        .ok()
-                        .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
-                        .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
-                    let (src, producer) =
-                        crate::esp32audio::Rr3Esp32UartAudioSource::rr3_esp32_audio_source_new_with_cmd(
-                            std::path::PathBuf::from(p),
-                            baud,
-                        );
-                    (
-                        Box::new(src) as Box<dyn Rr3AudioSource>,
-                        Some(producer),
-                        RR3_BACKEND_ESP32,
-                    )
-                }
-                None => {
-                    eprintln!(
+        RR3_BACKEND_ESP32 => match rr3_hal_periph_uart_path() {
+            Some(p) => {
+                let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
+                    .ok()
+                    .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
+                    .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+                let (src, producer) =
+                    crate::esp32audio::Rr3Esp32UartAudioSource::rr3_esp32_audio_source_new_with_cmd(
+                        std::path::PathBuf::from(p),
+                        baud,
+                    );
+                (
+                    Box::new(src) as Box<dyn Rr3AudioSource>,
+                    Some(producer),
+                    RR3_BACKEND_ESP32,
+                )
+            }
+            None => {
+                eprintln!(
                         "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），音频采集面落占位（使用时以 Unsupported 回错）",
                         crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
                     );
-                    (
-                        Box::new(Rr3UnavailableSource),
-                        None,
-                        RR3_BACKEND_PLACEHOLDER,
-                    )
-                }
+                (
+                    Box::new(Rr3UnavailableSource),
+                    None,
+                    RR3_BACKEND_PLACEHOLDER,
+                )
             }
-        }
+        },
         RR3_BACKEND_PLACEHOLDER => (
             Box::new(Rr3UnavailableSource),
             None,
@@ -1054,7 +1052,10 @@ mod tests {
     #[test]
     fn backend_parse_whitelist_platform_doors_and_key_naming() {
         assert_eq!(rr3_hal_backend_parse("K", "sim").unwrap(), RR3_BACKEND_SIM);
-        assert_eq!(rr3_hal_backend_parse("K", "esp32").unwrap(), RR3_BACKEND_ESP32);
+        assert_eq!(
+            rr3_hal_backend_parse("K", "esp32").unwrap(),
+            RR3_BACKEND_ESP32
+        );
         assert_eq!(
             rr3_hal_backend_parse("K", "placeholder").unwrap(),
             RR3_BACKEND_PLACEHOLDER

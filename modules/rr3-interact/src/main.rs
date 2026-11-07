@@ -5,14 +5,14 @@
 //! （收流缓冲＋beep＋动作排空＋表情帧节拍），协议面在 [`rpc`]（载荷组装＋错误
 //! 文案＋点名执行）；face/player 两原子与 panel 三件原位不动，功能守恒零改动。
 
+mod boot;
+mod dispatch;
 #[path = "../atoms/face/face.rs"]
 mod face;
 #[path = "panel/mod.rs"]
 mod panel;
 #[path = "../atoms/player/player.rs"]
 mod player;
-mod boot;
-mod dispatch;
 mod rpc;
 
 use std::time::Duration;
@@ -38,7 +38,11 @@ fn main() {
 fn rr3_interact_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
     eprintln!("rr3-interact 0.0.1 (M3 实装)");
-    for line in face::SURFACE.iter().copied().chain(player::SURFACE.iter().copied()) {
+    for line in face::SURFACE
+        .iter()
+        .copied()
+        .chain(player::SURFACE.iter().copied())
+    {
         eprintln!("  {line}");
     }
     // panel 自述是推导文案（端点数由 RR3_PANEL_ROUTES 推导，MC-8③），String 面单独成段

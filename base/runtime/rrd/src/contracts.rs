@@ -103,7 +103,10 @@ pub fn rr3_contracts_snapshot_replace(snapshot: Rr3ContractsSnapshot) -> Result<
 /// 快照只读口（conn.rs `rr3.ctl.contracts` 渲染源）。None = 未以 `--profile`
 /// 启动（`--manifest` 调试路径无契约记账）。
 pub fn rr3_contracts_snapshot() -> Option<Rr3ContractsSnapshot> {
-    RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒").clone()
+    RR3_CONTRACTS_SNAPSHOT
+        .lock()
+        .expect("契约记账锁中毒")
+        .clone()
 }
 
 /// 对一份契约目录记账四册 + 真值集七成员（基-40 件一②）：逐条读 + sha256。
@@ -411,8 +414,11 @@ mod tests {
         ] {
             std::fs::write(contracts.join(f), body).expect("写契约册");
         }
-        std::fs::write(contracts.join("platform").join(format!("{chip}.toml")), "# p1\n")
-            .expect("写平台事实表");
+        std::fs::write(
+            contracts.join("platform").join(format!("{chip}.toml")),
+            "# p1\n",
+        )
+        .expect("写平台事实表");
         let wiring_path = root.join("hardware").join(stem).join("wiring.toml");
         std::fs::create_dir_all(wiring_path.parent().unwrap()).expect("建 hardware 目录");
         std::fs::write(&wiring_path, "# w1\n").expect("写接线档");
@@ -434,8 +440,14 @@ mod tests {
         // 基-40：七成员逐条点名（成员名 = 装载面真值集相对名，顺序 = 成员名单点序）
         assert_eq!(snap.truth_set.len(), 7);
         assert_eq!(snap.truth_set[0].member, format!("profiles/{stem}.toml"));
-        assert_eq!(snap.truth_set[5].member, format!("contracts/platform/{chip}.toml"));
-        assert_eq!(snap.truth_set[6].member, format!("hardware/{stem}/wiring.toml"));
+        assert_eq!(
+            snap.truth_set[5].member,
+            format!("contracts/platform/{chip}.toml")
+        );
+        assert_eq!(
+            snap.truth_set[6].member,
+            format!("hardware/{stem}/wiring.toml")
+        );
 
         // OnceLock 进程级：本测试进程只这一份定格（首份胜出），三形全在同快照上判
         assert!(rr3_contracts_snapshot_set(snap));
@@ -493,7 +505,10 @@ mod tests {
         assert_eq!(v["available"], true, "{v}");
         assert_eq!(v["contracts"].as_array().map(Vec::len), Some(4));
         assert_eq!(v["truth_set"].as_array().map(Vec::len), Some(7));
-        assert_eq!(v["truth_set"][5]["member"], format!("contracts/platform/{chip}.toml"));
+        assert_eq!(
+            v["truth_set"][5]["member"],
+            format!("contracts/platform/{chip}.toml")
+        );
         assert_eq!(v["checks"].as_array().map(Vec::len), Some(5));
 
         let _ = std::fs::remove_dir_all(&root);

@@ -362,7 +362,11 @@ mod tests {
     #[test]
     fn tdoa_returns_none_for_mono_silence_and_quiet() {
         let cfg = doa_cfg();
-        assert_eq!(rr3_doa_fix(&[10, -10, 20, -20], 1, &cfg), None, "mono 无方向");
+        assert_eq!(
+            rr3_doa_fix(&[10, -10, 20, -20], 1, &cfg),
+            None,
+            "mono 无方向"
+        );
         assert_eq!(rr3_doa_fix(&[], 2, &cfg), None, "空窗");
         assert_eq!(rr3_doa_fix(&[0; 640], 2, &cfg), None, "全静音");
         // amp 375 峰值 → 帧 rms ~216 < 800：整窗欠能量（golden：fmax=224 → None）

@@ -5,17 +5,17 @@
 //! 切片＋三臂点名分发），协议面在 [`rpc`]（载荷组装＋dump/ops 快照体），原子件
 //! 在 `atoms/` 原位不动（capture/env/imu/vad 四件）；三份清单功能守恒零改动。
 
+mod boot;
 #[path = "../atoms/capture/capture.rs"]
 mod capture;
+mod dispatch;
 #[path = "../atoms/env/env.rs"]
 mod env;
 #[path = "../atoms/imu/imu.rs"]
 mod imu;
+mod rpc;
 #[path = "../atoms/vad/vad.rs"]
 mod vad;
-mod boot;
-mod dispatch;
-mod rpc;
 
 use std::time::Duration;
 
@@ -52,7 +52,10 @@ fn rr3_sense_run() -> Result<(), String> {
     // manifest 路径（rrd spawn 契约环境变量；装配段先取一份供 config 来源回显
     // 投影，文案与 rr3mod bootstrap 同款逐字——bootstrap 内部自读同源）
     let manifest_path = std::env::var(rr3mod::RR3_MANIFEST_ENV).map_err(|_| {
-        format!("缺环境变量 {}（rrd spawn 注入；直跑请指向 module.toml）", rr3mod::RR3_MANIFEST_ENV)
+        format!(
+            "缺环境变量 {}（rrd spawn 注入；直跑请指向 module.toml）",
+            rr3mod::RR3_MANIFEST_ENV
+        )
     })?;
 
     // 总线接入 + config 读取解析（收敛序列前四段在 rr3mod bootstrap，文案逐字；

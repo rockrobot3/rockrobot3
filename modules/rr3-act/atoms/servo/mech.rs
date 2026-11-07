@@ -153,7 +153,10 @@ mod tests {
         assert_eq!(rr3_servo_check_timeout(Some(800), &cfg()).unwrap(), 800);
         assert_eq!(
             rr3_servo_check_timeout(Some(801), &cfg()).unwrap_err(),
-            Rr3ServoTimeoutError::BeyondLimit { ms: 801, limit: 800 },
+            Rr3ServoTimeoutError::BeyondLimit {
+                ms: 801,
+                limit: 800
+            },
             "超上限携带命令毫秒与上限（编排层渲染点名的数据源）"
         );
         assert_eq!(

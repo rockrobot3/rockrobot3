@@ -36,7 +36,9 @@ fn main() -> std::process::ExitCode {
     #[cfg(not(unix))]
     {
         let _ = cfg;
-        eprintln!("axis_write: 写入编排面仅 unix 在册（rr3_atomic_store 的 std::fs 原子序 cfg 门）");
+        eprintln!(
+            "axis_write: 写入编排面仅 unix 在册（rr3_atomic_store 的 std::fs 原子序 cfg 门）"
+        );
         std::process::ExitCode::FAILURE
     }
 }

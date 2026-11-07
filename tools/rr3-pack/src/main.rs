@@ -984,7 +984,11 @@ mod tests {
         let (payload, repo) = fixture();
         fs::write(repo.join("profiles/esp32-mini.toml"), ESP32_MINI_PROFILE).unwrap();
         // chip 选册的平台事实表随 --profile 机型（基-25 清单成员）
-        fs::write(repo.join("contracts/platform/esp32.toml"), "# platform esp32\n").unwrap();
+        fs::write(
+            repo.join("contracts/platform/esp32.toml"),
+            "# platform esp32\n",
+        )
+        .unwrap();
         // 机型接线档随 --profile 同名落位（基-25 清单成员）
         fs::create_dir_all(repo.join("hardware/esp32-mini")).unwrap();
         fs::write(
@@ -1005,10 +1009,8 @@ mod tests {
             "指定机型装配单零改写落位"
         );
         assert_eq!(
-            fs::read_to_string(
-                stage.join("usr/lib/rockrobot3/contracts/platform/esp32.toml")
-            )
-            .unwrap(),
+            fs::read_to_string(stage.join("usr/lib/rockrobot3/contracts/platform/esp32.toml"))
+                .unwrap(),
             "# platform esp32\n",
             "平台事实表按机型 chip 选册随包（基-25）"
         );

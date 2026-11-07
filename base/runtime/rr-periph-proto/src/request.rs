@@ -65,8 +65,8 @@ pub fn rr3_periph_request_parse(frame: &Rr3Frame) -> Result<Rr3PeriphRequest, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host_call::rr3_bridge_call_frame;
     use crate::consts::RR3_SERVO_TOPIC;
+    use crate::host_call::rr3_bridge_call_frame;
     use rr_ipc::{opcode, rr3_body_encode, Rr3Header};
     use serde_json::json;
 
@@ -92,12 +92,14 @@ mod tests {
         assert!(e.contains("非本板位形"), "{e}");
         // payload 前缀门
         let mut wrong_ty = frame.clone();
-        wrong_ty.payload =
-            rr3_body_encode(Rr3PayloadType::Event, br#"{"jsonrpc":"2.0","id":1}"#);
+        wrong_ty.payload = rr3_body_encode(Rr3PayloadType::Event, br#"{"jsonrpc":"2.0","id":1}"#);
         let e = rr3_periph_request_parse(&wrong_ty).unwrap_err();
         assert!(e.contains("非 Request"), "{e}");
         // id 门
-        let payload = rr3_body_encode(Rr3PayloadType::Request, br#"{"jsonrpc":"2.0","method":"rr3.call"}"#);
+        let payload = rr3_body_encode(
+            Rr3PayloadType::Request,
+            br#"{"jsonrpc":"2.0","method":"rr3.call"}"#,
+        );
         let mut no_id = frame.clone();
         no_id.payload = payload;
         let e = rr3_periph_request_parse(&no_id).unwrap_err();
@@ -113,7 +115,10 @@ mod tests {
         let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
         hdr.dst_task = RR3_PERIPH_TASK;
         hdr.src_task = crate::consts::RR3_TASK_HOST;
-        let frame = Rr3Frame { header: hdr, payload };
+        let frame = Rr3Frame {
+            header: hdr,
+            payload,
+        };
         let req = rr3_periph_request_parse(&frame).expect("最小信封可解析");
         assert_eq!(req.id, 5);
         assert_eq!(req.method, "");

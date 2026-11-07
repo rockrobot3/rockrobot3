@@ -166,9 +166,7 @@ pub fn rr3_board_binding_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Re
         RR3_BOARD_BINDING_LEDC_TILT => {
             b.ledc_tilt = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?)
         }
-        RR3_BOARD_BINDING_I2S_BCLK => {
-            b.i2s_bclk = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?)
-        }
+        RR3_BOARD_BINDING_I2S_BCLK => b.i2s_bclk = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
         RR3_BOARD_BINDING_I2S_SD => b.i2s_sd = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
         RR3_BOARD_BINDING_I2S_WS => b.i2s_ws = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
         RR3_BOARD_BINDING_CRED_STORE => {
@@ -257,10 +255,7 @@ mod tests {
     /// 全拒（fail-closed）。
     #[test]
     fn cred_store_parse_domain() {
-        assert_eq!(
-            rr3_cred_store_parse("nvs:rr3").as_deref(),
-            Some("nvs:rr3")
-        );
+        assert_eq!(rr3_cred_store_parse("nvs:rr3").as_deref(), Some("nvs:rr3"));
         assert_eq!(
             rr3_cred_store_parse(" nvs:rr3 ").as_deref(),
             Some("nvs:rr3"),
@@ -271,7 +266,16 @@ mod tests {
             Some("nvs:rr3-cred"),
             "namespace 含连字符合法"
         );
-        for bad in ["", " ", "nvs:", "nvs: ", "NVS:rr3", "flash:boot", "rr3", "nvs"] {
+        for bad in [
+            "",
+            " ",
+            "nvs:",
+            "nvs: ",
+            "NVS:rr3",
+            "flash:boot",
+            "rr3",
+            "nvs",
+        ] {
             assert_eq!(rr3_cred_store_parse(bad), None, "{bad}");
         }
     }

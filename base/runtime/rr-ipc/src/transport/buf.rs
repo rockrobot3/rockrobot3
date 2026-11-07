@@ -250,9 +250,7 @@ mod tests {
         buf.rr3_payload_mut().copy_from_slice(b"wxyz");
         buf.rr3_seal();
         let mut sent = buf.rr3_as_sealed_bytes().unwrap().to_vec();
-        let declared = u32::from_le_bytes(
-            sent[OFF_CRC32..OFF_CRC32 + 4].try_into().unwrap(),
-        );
+        let declared = u32::from_le_bytes(sent[OFF_CRC32..OFF_CRC32 + 4].try_into().unwrap());
         sent[RR3_IPC_HDR_SIZE] ^= 0x01; // 载荷首字节翻转，头保持原样
         let actual = rr3_crc32(&sent[RR3_IPC_HDR_SIZE..]);
         assert_ne!(declared, actual, "翻转载荷后实算 CRC 必须变");

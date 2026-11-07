@@ -192,7 +192,11 @@ mod tests {
         dc.reset();
         let mut after_reset = Rr3DcBlocker::new();
         let again = chunk_to_pcm(&samples, 1, &mut dc);
-        assert_eq!(again, chunk_to_pcm(&samples, 1, &mut after_reset), "reset 等价于新阻断器");
+        assert_eq!(
+            again,
+            chunk_to_pcm(&samples, 1, &mut after_reset),
+            "reset 等价于新阻断器"
+        );
     }
 
     #[test]

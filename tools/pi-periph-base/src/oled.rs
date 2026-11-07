@@ -4,16 +4,16 @@
 //! 分块字节数/重试轮数/块间隔等策略量一律来自 [`crate::board`]；与经典板同口径的
 //! 分块（1 控制字节 + 32 数据）保证 OLED 线上字节流逐字节相同（U5 判据）。
 
-use periph_mech::oled_codec::{
-    rr3_frame_pages, rr3_init_commands, rr3_oled_lines, rr3_page_cmd, rr3_text_page,
-    RR3_OLED_ZERO_PAGE,
-};
 use crate::board::{
     I2C_CHUNK_GAP_MS, I2C_PAGE_ATTEMPTS, I2C_PAGE_CHUNK, I2C_RETRY, I2C_RETRY_DELAY_MS, OLED_ADDR,
     OLED_COLS, OLED_CONTRAST, OLED_ROWS,
 };
 use crate::face::{eye_page, EyeStyle};
 use crate::ports::SharedI2c;
+use periph_mech::oled_codec::{
+    rr3_frame_pages, rr3_init_commands, rr3_oled_lines, rr3_page_cmd, rr3_text_page,
+    RR3_OLED_ZERO_PAGE,
+};
 
 /// OLED 渲染器：持有共享 I2C 总线；页寻址模式，整页从确定性起点写。
 pub struct OledRenderer {

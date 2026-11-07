@@ -54,13 +54,17 @@ mod tests {
     #[test]
     fn consts_match_protocol_truth() {
         assert_eq!(RR3_TASK_HOST, 1, "宿主位形=rrd（rr-core::RR3_TASK_RRD）");
-        assert_eq!(RR3_TRACE_DIRECT, 0, "直连 trace（rr-core::RR3_TRACE_ID_DIRECT）");
+        assert_eq!(
+            RR3_TRACE_DIRECT, 0,
+            "直连 trace（rr-core::RR3_TRACE_ID_DIRECT）"
+        );
         assert_eq!(RR3_PERIPH_TASK, 2, "板上执行面占首模块池位形");
         assert_eq!(RR3_MAGIC_FIRST, 0x31, "magic \"1ERA\" 的 LE 首字节");
         assert_eq!(RR3_MAGIC_FIRST, rr_ipc::RR3_MAGIC_LE[0]);
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         assert_eq!(
-            RR3_BRIDGE_BAUD, rr_ipc::RR3_UART_BAUD_DEFAULT,
+            RR3_BRIDGE_BAUD,
+            rr_ipc::RR3_UART_BAUD_DEFAULT,
             "缺省档真值单点在 rr-ipc"
         );
         assert!(!RR3_SERVO_TOPIC.is_empty());

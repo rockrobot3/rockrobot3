@@ -11,7 +11,7 @@ use rr_hal_api::{Rr3GpioOut, Rr3PwmServo};
 use serde_json::{json, Value};
 
 use crate::boot::{Rr3ActAxisState, Rr3ActCfg};
-use crate::led::{Rr3Led, Rr3LedEffect, rr3_led_effects_join};
+use crate::led::{rr3_led_effects_join, Rr3Led, Rr3LedEffect};
 use crate::relay;
 use crate::servo::{self, Rr3ServoCfg};
 
