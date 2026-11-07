@@ -314,8 +314,8 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
             .iter()
             .map(|b| b["file"].as_str().unwrap_or_default())
             .collect::<Vec<_>>(),
-        vec!["topics.toml", "slots.toml", "roles.toml", "devices.toml"],
-        "四册点名 = RR3_CONTRACT_FILES 清单序: {books:?}"
+        rrd::profile::RR3_CONTRACT_BOOKS.to_vec(),
+        "四册点名 = RR3_CONTRACT_BOOKS 清单序: {books:?}"
     );
     assert!(
         books
