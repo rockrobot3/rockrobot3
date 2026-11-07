@@ -25,9 +25,10 @@ COLS = 21
 
 
 def sh(cmd: str) -> str:
+    # 参数一律常量拆分传参（无 shell，注入面=0）；失败回空串由调用处落 "n/a" 展示
     try:
         out = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=3
+            cmd.split(), capture_output=True, text=True, timeout=3
         ).stdout.strip()
         return out
     except Exception:
