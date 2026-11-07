@@ -18,7 +18,7 @@
 //! 板侧配置三键批（批N4 件七(b) 基-24 桥上配置腿）：`i2c_sda`/`i2c_scl`/
 //! `adc_rail_pin` 进场——板侧裸寄存器自愈路径（I2C unstick）与打印面的引脚真值，
 //! rtos 档 `[hardware]` 原样直给、经桥 `rr3.set_bindings` 注入板侧（载荷键域/取值域
-//! 真值单点 = rr-ipc bindings 模块，本表解析共用其 `rr3_gpio_number_parse`）。
+//! 真值单点 = rr-ipc bindings 模块，本表解析共用其 `rr3_gpio_num_parse`）。
 //! 三键不在 [pins] 派生键集（无 role 对应——自愈路径没有能力面角色，rrd 门 n 不收）；
 //! 扩键裁定与批N3 件六 `spi_device` 同款：契约级评审、rr-registry 在册表两处同批、
 //! contract.rs 机判钉死。三键不设 `RR3_HAL_*` 应急 env 覆盖位（板侧配置随描述符
@@ -39,7 +39,7 @@
 
 use std::collections::BTreeMap;
 
-use rr_ipc::{rr3_cred_store_parse, rr3_gpio_number_parse};
+use rr_ipc::{rr3_cred_store_parse, rr3_gpio_num_parse};
 
 use crate::backend::{rr3_ina219_addr_parse, rr3_pwm_index_parse};
 
@@ -130,16 +130,16 @@ impl Rr3HalBindings {
                 self.gpio_relay_line = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?)
             }
             "i2c_bus" => self.i2c_bus = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
-            "i2c_sda" => self.i2c_sda = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "i2c_scl" => self.i2c_scl = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "adc_rail_pin" => self.adc_rail_pin = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "uart2_tx" => self.uart2_tx = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "uart2_rx" => self.uart2_rx = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "ledc_pan" => self.ledc_pan = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "ledc_tilt" => self.ledc_tilt = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "i2s_bclk" => self.i2s_bclk = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "i2s_sd" => self.i2s_sd = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
-            "i2s_ws" => self.i2s_ws = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
+            "i2c_sda" => self.i2c_sda = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "i2c_scl" => self.i2c_scl = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "adc_rail_pin" => self.adc_rail_pin = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "uart2_tx" => self.uart2_tx = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "uart2_rx" => self.uart2_rx = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "ledc_pan" => self.ledc_pan = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "ledc_tilt" => self.ledc_tilt = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "i2s_bclk" => self.i2s_bclk = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "i2s_sd" => self.i2s_sd = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "i2s_ws" => self.i2s_ws = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
             "cred_store" => self.cred_store = Some(rr3_cred_store_parse(raw).ok_or_else(bad)?),
             "ina219_addr" => self.ina219_addr = Some(rr3_ina219_addr_parse(raw).ok_or_else(bad)?),
             // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值），与 alsa_device

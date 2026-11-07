@@ -13,7 +13,7 @@
 //! 登记在 conventions.md §2），它把宿主输出、linux/arm64 容器输出与本 golden 三方 diff。
 
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_header_bytes_with_crc, Rr3Header, Rr3PayloadType,
+    opcode, rr3_body_encode, rr3_header_encode, Rr3Header, Rr3PayloadType,
     RR3_CONTRACT_SCHEMA_VERSION,
 };
 
@@ -36,9 +36,9 @@ fn frame_bytes(ty: Rr3PayloadType, body: &[u8]) -> Vec<u8> {
         src_task: 7,
         dst_task: 0,
         payload_len: payload.len() as u32,
-        payload_crc32: 0, // 由 rr3_header_bytes_with_crc 按载荷算出覆盖
+        payload_crc32: 0, // 由 rr3_header_encode 按载荷算出覆盖
     };
-    let mut out = rr3_header_bytes_with_crc(&hdr, &payload).to_vec();
+    let mut out = rr3_header_encode(&hdr, &payload).to_vec();
     out.extend_from_slice(&payload);
     out
 }

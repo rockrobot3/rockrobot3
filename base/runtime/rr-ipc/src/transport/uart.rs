@@ -434,7 +434,7 @@ impl Rr3UartConn {
         // 实锤；guard fd 同理由见 excl_enter）。O_CLOEXEC 同 excl_enter guard：
         // 通信 fd 不随 spawn 泄漏进子进程（description 副本钉住 termios 配置与
         // 队列状态，同批N21 件一根因面）。非阻塞位在 configure 成功后由
-        // [`rr3_uart_clear_nonblock`] 撤除，读写语义与旧阻塞版逐点等价。
+        // [`rr3_uart_clear_nb`] 撤除，读写语义与旧阻塞版逐点等价。
         let fd = unsafe {
             c_open(
                 cpath.as_ptr() as *const CChar,
@@ -451,7 +451,7 @@ impl Rr3UartConn {
                 // 撤 O_NONBLOCK：Read/Write 是阻塞语义（VMIN=1 等 ≥1 字节），
                 // 非阻塞 fd 上 VMIN/VTIME 失效、read 缺数据返 EAGAIN，会把这些
                 // EAGAIN 当真错误抛出——开口序列收尾必须换回阻塞。
-                if let Err(e) = rr3_uart_clear_nonblock(fd) {
+                if let Err(e) = rr3_uart_clear_nb(fd) {
                     // SAFETY：fd 是本函数 open 成功的合法描述符，收尾失败则归还。
                     unsafe { c_close(fd) };
                     excl_exit(&key);
@@ -589,7 +589,7 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
 /// 撤除 fd 上的 `O_NONBLOCK` 位（开口序列收尾）：open 带 O_NONBLOCK 进场只为
 /// 不在 carrier 上悬住，配置完成后读写要走阻塞语义——非阻塞 fd 上 VMIN/VTIME
 /// 失效、read 缺数据返 EAGAIN，会把"暂无数据"当真错误抛出。
-fn rr3_uart_clear_nonblock(fd: i32) -> std::io::Result<()> {
+fn rr3_uart_clear_nb(fd: i32) -> std::io::Result<()> {
     // SAFETY：合法 fd；F_GETFL 无变参。
     let flags = unsafe { c_fcntl(fd, F_GETFL) };
     if flags < 0 {

@@ -13,9 +13,7 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::protocol::header::{
-    rr3_header_bytes_with_crc, Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE,
-};
+use crate::protocol::header::{rr3_header_encode, Rr3HdrError, Rr3Header, RR3_IPC_HDR_SIZE};
 
 /// 一帧 = 头 + payload
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +61,7 @@ pub fn rr3_frame_to_bytes(f: &Rr3Frame) -> Result<Vec<u8>, Rr3FrameError> {
     }
     let mut out = Vec::with_capacity(RR3_IPC_HDR_SIZE + f.payload.len());
     // 头的 CRC 由载荷算出并写入（to_bytes 不知道载荷，不要直接用它拼发送字节）
-    out.extend_from_slice(&rr3_header_bytes_with_crc(&f.header, &f.payload));
+    out.extend_from_slice(&rr3_header_encode(&f.header, &f.payload));
     out.extend_from_slice(&f.payload);
     Ok(out)
 }
