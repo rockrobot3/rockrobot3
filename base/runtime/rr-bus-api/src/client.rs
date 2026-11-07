@@ -403,9 +403,19 @@ impl Rr3BusClient {
                         misses += 1;
                         if misses >= RR3_HEARTBEAT_MAX_MISSES {
                             eprintln!(
-                                "rr3-bus: 心跳连续 {misses} 拍失败，退出（supervisor 按 restart_policy 裁定）"
+                                "rr3-bus: 心跳连续 {misses} 拍失败，标记总线死亡（supervisor 按 restart_policy 裁定）"
                             );
-                            std::process::exit(1);
+                            // 库内不 process::exit：设 stop 让宿主 serve 循环的
+                            // rr3_connected 死亡探针翻假，由宿主自行以 exit code 1
+                            // 退出（库不得杀宿主进程）。关 socket 解阻塞 reader
+                            // 与 pending 等待者，与 Drop 同形。
+                            hb_inner.stop.store(true, Ordering::Relaxed);
+                            let _ = hb_inner
+                                .sock
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .shutdown(std::net::Shutdown::Both);
+                            break;
                         }
                         eprintln!(
                             "rr3-bus: 心跳失败 第 {misses}/{RR3_HEARTBEAT_MAX_MISSES} 拍（不退出，下拍重试）"
