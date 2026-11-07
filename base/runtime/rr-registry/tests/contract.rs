@@ -1994,11 +1994,7 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("pi4b-host-esp32-classic 缺 [bindings]");
-    assert_eq!(
-        bindings.len(),
-        10,
-        "pi4b-host-esp32-classic 绑定面应恰十格"
-    );
+    assert_eq!(bindings.len(), 10, "pi4b-host-esp32-classic 绑定面应恰十格");
     for (slot, provider) in [
         ("act.servo", "rr3-act"),
         ("ui.face", "rr3-interact"),
@@ -2129,7 +2125,11 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("pi4b-host-esp32s3 缺 [bindings]");
-    assert_eq!(bindings.len(), 10, "pi4b-host-esp32s3 绑定面应恰十格（net.bt placeholder 不进生产装配面）");
+    assert_eq!(
+        bindings.len(),
+        10,
+        "pi4b-host-esp32s3 绑定面应恰十格（net.bt placeholder 不进生产装配面）"
+    );
     let present = v
         .get("slots")
         .and_then(|s| s.get("present"))
@@ -2203,8 +2203,17 @@ fn pi4b_host_profile_shape_n44_harness() {
         "pi4b-host link_ifname 漂移"
     );
     for k in [
-        "i2c_sda", "i2c_scl", "adc_rail_pin", "uart2_tx", "uart2_rx", "ledc_pan",
-        "ledc_tilt", "i2s_bclk", "i2s_sd", "i2s_ws", "cred_store",
+        "i2c_sda",
+        "i2c_scl",
+        "adc_rail_pin",
+        "uart2_tx",
+        "uart2_rx",
+        "ledc_pan",
+        "ledc_tilt",
+        "i2s_bclk",
+        "i2s_sd",
+        "i2s_ws",
+        "cred_store",
     ] {
         assert!(
             hardware.get(k).is_none(),
@@ -2216,7 +2225,11 @@ fn pi4b_host_profile_shape_n44_harness() {
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("pi4b-host 缺 [bindings]");
-    assert_eq!(bindings.len(), 7, "pi4b-host 绑定面应恰七格（net.bt placeholder 不进生产装配面）");
+    assert_eq!(
+        bindings.len(),
+        7,
+        "pi4b-host 绑定面应恰七格（net.bt placeholder 不进生产装配面）"
+    );
     for slot in ["act.servo", "audio.capture", "audio.vad"] {
         assert!(
             bindings.get(slot).is_none(),

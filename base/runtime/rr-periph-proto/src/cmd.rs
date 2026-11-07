@@ -29,10 +29,9 @@ pub enum Rr3PeriphCmd {
 /// 语义命令 → 整帧（纯函数）：桥同形单点，见模块文档。
 pub fn rr3_esp32_cmd_frame(id: u64, cmd: &Rr3PeriphCmd) -> Rr3Frame {
     let (topic, args) = match cmd {
-        Rr3PeriphCmd::ServoPan(deg) => (
-            RR3_SERVO_TOPIC,
-            json!({ "angle_deg": *deg, "axis": "pan" }),
-        ),
+        Rr3PeriphCmd::ServoPan(deg) => {
+            (RR3_SERVO_TOPIC, json!({ "angle_deg": *deg, "axis": "pan" }))
+        }
         Rr3PeriphCmd::ServoTilt(deg) => (
             RR3_SERVO_TOPIC,
             json!({ "angle_deg": *deg, "axis": "tilt" }),
@@ -52,10 +51,7 @@ pub enum Rr3BoardFrame {
 }
 
 /// 板帧分类（门序：`dst` 门 → payload 前缀门 → Response 判别）。
-pub fn rr3_board_frame_classify(
-    hdr: &Rr3Header,
-    payload: &[u8],
-) -> Result<Rr3BoardFrame, String> {
+pub fn rr3_board_frame_classify(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3BoardFrame, String> {
     if hdr.dst_task != RR3_TASK_HOST {
         return Err(format!(
             "dst_task={} 非宿主位形 {RR3_TASK_HOST}",
@@ -95,7 +91,10 @@ mod tests {
         hdr.timestamp_ns = 100;
         hdr.src_task = crate::consts::RR3_PERIPH_TASK;
         hdr.dst_task = RR3_TASK_HOST;
-        Rr3Frame { header: hdr, payload }
+        Rr3Frame {
+            header: hdr,
+            payload,
+        }
     }
 
     /// 命令帧与桥帧字节级同形（payload 逐字节；帧头位形同值，时间戳不参与对拍）。
@@ -112,7 +111,10 @@ mod tests {
             RR3_SERVO_TOPIC,
             &json!({ "angle_deg": 98, "axis": "tilt" }),
         );
-        assert_eq!(tilt_frame.payload, tilt_bridge.payload, "tilt payload 字节级同形");
+        assert_eq!(
+            tilt_frame.payload, tilt_bridge.payload,
+            "tilt payload 字节级同形"
+        );
 
         let bridge = rr3_bridge_call_frame(
             7,
@@ -149,7 +151,10 @@ mod tests {
             let payload = rr3_body_encode(Rr3PayloadType::Event, br#"{"topic":"x"}"#);
             let mut hdr = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload.len() as u32);
             hdr.dst_task = RR3_TASK_HOST;
-            Rr3Frame { header: hdr, payload }
+            Rr3Frame {
+                header: hdr,
+                payload,
+            }
         };
         assert_eq!(
             rr3_board_frame_classify(&ev.header, &ev.payload),

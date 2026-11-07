@@ -11,13 +11,7 @@ use crate::rail_judge::RailTier;
 /// 轴行程校验（**纯函数**：只算不碰硬件，控制面能在下发作业前即时拒）。
 /// 协议级 0–180 之外的角先拒；轴行程 `[lo, hi]` 之外**点名拒收**，不静默钳位
 /// （静默钳到边界会让调用方误以为按给值生效）。`center` 只进文案。
-pub fn rr3_axis_check(
-    name: &str,
-    lo: u32,
-    hi: u32,
-    center: u32,
-    deg: u32,
-) -> Result<u32, String> {
+pub fn rr3_axis_check(name: &str, lo: u32, hi: u32, center: u32, deg: u32) -> Result<u32, String> {
     if deg > 180 {
         return Err(format!("角度超范围 0-180: {deg}"));
     }
@@ -191,7 +185,8 @@ mod tests {
         assert_eq!(rr3_deg_to_duty(180, DUTY_MIN, DUTY_MAX), DUTY_MAX);
         assert_eq!(rr3_deg_to_duty(90, DUTY_MIN, DUTY_MAX), 1229);
         for deg in [0u32, 60, 90, 120, 180] {
-            let back = rr3_duty_to_deg(rr3_deg_to_duty(deg, DUTY_MIN, DUTY_MAX), DUTY_MIN, DUTY_MAX);
+            let back =
+                rr3_duty_to_deg(rr3_deg_to_duty(deg, DUTY_MIN, DUTY_MAX), DUTY_MIN, DUTY_MAX);
             assert!(
                 (back as i32 - deg as i32).abs() <= 1,
                 "{deg}° 往返漂移超 ±1°: {back}°"

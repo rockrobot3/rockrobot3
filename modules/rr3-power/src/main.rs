@@ -4,11 +4,11 @@
 //! Dispatcher 构造 → [`rr3mod::serve`] 主循环。机制在 [`dispatch`]（三节拍＋
 //! ops/list 点名＋载荷组装面＋轨压判定核），原子件在 `atoms/` 原位不动。
 
-#[path = "../atoms/charger/charger.rs"]
-mod charger;
 #[path = "../atoms/battery/battery.rs"]
 mod battery;
 mod boot;
+#[path = "../atoms/charger/charger.rs"]
+mod charger;
 mod dispatch;
 
 use std::time::Duration;

@@ -33,11 +33,10 @@ use std::time::Duration;
 
 use rr_ipc::{
     rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3TransportConn, Rr3UartConn,
-    RR3_BOARD_BINDING_ADC_RAIL_PIN,
-    RR3_BOARD_BINDING_CRED_STORE, RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA,
-    RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS,
-    RR3_BOARD_BINDING_LEDC_PAN, RR3_BOARD_BINDING_LEDC_TILT, RR3_BOARD_BINDING_UART2_RX,
-    RR3_BOARD_BINDING_UART2_TX, RR3_METHOD_SET_BINDINGS,
+    RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_CRED_STORE, RR3_BOARD_BINDING_I2C_SCL,
+    RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD,
+    RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_LEDC_PAN, RR3_BOARD_BINDING_LEDC_TILT,
+    RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX, RR3_METHOD_SET_BINDINGS,
 };
 use serde_json::{json, Map, Value};
 
@@ -47,11 +46,11 @@ use crate::{Rr3Display, Rr3FaceFrame, Rr3HalError, Rr3PwmServo};
 // 协议共享面（ADR-0024）：task 位形/主题/magic/波特率缺省/env 名/请求组帧/应答
 // 解析的真值单点在 rr-periph-proto（宿主与固件双向复用）；本模块 re-export 保
 // 既有 `rr_hal::esp32_uart::*` 路径——调用方与测试零改动。
+pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST;
 pub use rr_periph_proto::consts::{
     RR3_BRIDGE_BAUD, RR3_FACE_TOPIC, RR3_HAL_PERIPH_BAUD_ENV, RR3_HAL_PERIPH_UART_ENV,
     RR3_PERIPH_TASK, RR3_SERVO_TOPIC,
 };
-pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST;
 pub use rr_periph_proto::host_call::{
     rr3_bridge_call_frame, rr3_bridge_request_body_params, rr3_bridge_request_frame,
 };
@@ -111,7 +110,10 @@ fn rr3_board_bindings_payload(b: &Rr3HalBindings) -> Option<Value> {
         m.insert(RR3_BOARD_BINDING_LEDC_PAN.to_string(), json!(v.to_string()));
     }
     if let Some(v) = b.ledc_tilt {
-        m.insert(RR3_BOARD_BINDING_LEDC_TILT.to_string(), json!(v.to_string()));
+        m.insert(
+            RR3_BOARD_BINDING_LEDC_TILT.to_string(),
+            json!(v.to_string()),
+        );
     }
     if let Some(v) = b.i2s_bclk {
         m.insert(RR3_BOARD_BINDING_I2S_BCLK.to_string(), json!(v.to_string()));
@@ -485,7 +487,10 @@ mod tests {
         assert_eq!(p["i2c_sda"], "21", "值保持字符串（描述符同形纪律）");
         assert_eq!(p["adc_rail_pin"], "34");
         assert!(p.get("i2c_scl").is_none(), "未注入键不入载荷");
-        assert!(p.get("cred_store").is_none(), "未注入键不入载荷（cred_store 同）");
+        assert!(
+            p.get("cred_store").is_none(),
+            "未注入键不入载荷（cred_store 同）"
+        );
         b.cred_store = Some("nvs:rr3".to_string());
         let p = rr3_board_bindings_payload(&b).expect("有键必须有载荷");
         assert_eq!(p["cred_store"], "nvs:rr3", "cred_store 字符串值随键");

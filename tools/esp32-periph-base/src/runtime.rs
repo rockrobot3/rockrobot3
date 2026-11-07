@@ -110,7 +110,11 @@ fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
                 );
                 outbox_push(
                     bus,
-                    format!("ERR Move 失败 pan={} tilt={}（累计 {n}）", want(pan), want(tilt)),
+                    format!(
+                        "ERR Move 失败 pan={} tilt={}（累计 {n}）",
+                        want(pan),
+                        want(tilt)
+                    ),
                 );
             }
         }

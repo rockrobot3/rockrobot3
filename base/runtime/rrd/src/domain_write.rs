@@ -77,7 +77,9 @@ pub struct Rr3DomainWriteParams {
 
 /// params 拆包＋形状核（跨平台纯函数）。confirm 门不在本层（它是权限语义，
 /// 归 execute 的门序；parse 只裁"形状合不合法"）。错误码全 Invalid（参数形状病）。
-pub fn rr3_domain_write_parse(params: &Value) -> Result<Rr3DomainWriteParams, (Rr3StatusCode, String)> {
+pub fn rr3_domain_write_parse(
+    params: &Value,
+) -> Result<Rr3DomainWriteParams, (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let target = match params.get("target").and_then(Value::as_str) {
         Some("domain") => Rr3WriteTarget::Domain,
@@ -242,12 +244,11 @@ pub fn rr3_domain_write_execute(
 ) -> Result<Value, (Rr3StatusCode, String)> {
     let perm = |msg: String| (Rr3StatusCode::Permission, msg);
     // ① confirm 门（ADR-0021 裁定 6：拒动类阈值写必须二次确认——缺/false 一律拒）
-    let confirmed = params
-        .confirm
-        .unwrap_or(false);
+    let confirmed = params.confirm.unwrap_or(false);
     if !confirmed {
         return Err(perm(
-            "缺二次确认 params.confirm = true（ADR-0021 裁定 6——拒动类阈值写必须二次确认与留痕）".to_string(),
+            "缺二次确认 params.confirm = true（ADR-0021 裁定 6——拒动类阈值写必须二次确认与留痕）"
+                .to_string(),
         ));
     }
     match params.target {
@@ -272,12 +273,8 @@ fn rr3_domain_write_domain(
 ) -> Result<Value, (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let perm = |msg: String| (Rr3StatusCode::Permission, msg);
-    let text = std::fs::read_to_string(&paths.profile).map_err(|e| {
-        invalid(format!(
-            "读不到装配单 {}: {e}",
-            paths.profile.display()
-        ))
-    })?;
+    let text = std::fs::read_to_string(&paths.profile)
+        .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
     // 旧值提取（域缺拒——写面不做新域注册）：从装载域拿（与 boot 同一解析器）
     let profile = crate::profile::rr3_profile_from_text(&text).map_err(|errs| {
         invalid(format!(
@@ -297,7 +294,10 @@ fn rr3_domain_write_domain(
                 params.name
             ))
         })?;
-    let (old_value, updates): (Value, Vec<(&str, String)>) = match (params.key.as_str(), &params.value) {
+    let (old_value, updates): (Value, Vec<(&str, String)>) = match (
+        params.key.as_str(),
+        &params.value,
+    ) {
         // armed 写：evidence 联动（成对纪律——写面直接落出⑥-e 要求的档内形状）
         ("armed", Rr3WriteValue::Bool(true)) => {
             let ev = params.evidence.clone().ok_or_else(|| {
@@ -309,12 +309,18 @@ fn rr3_domain_write_domain(
             rr3_write_evidence_gate(&paths.profile, &ev)?;
             (
                 json!(dom.armed),
-                vec![("armed", "true".to_string()), ("evidence", format!("\"{ev}\""))],
+                vec![
+                    ("armed", "true".to_string()),
+                    ("evidence", format!("\"{ev}\"")),
+                ],
             )
         }
         ("armed", Rr3WriteValue::Bool(false)) => (
             json!(dom.armed),
-            vec![("armed", "false".to_string()), ("evidence", "\"none\"".to_string())],
+            vec![
+                ("armed", "false".to_string()),
+                ("evidence", "\"none\"".to_string()),
+            ],
         ),
         ("severe_mv", Rr3WriteValue::Num(n)) => {
             let ev = params.evidence.clone().ok_or_else(|| {
@@ -326,8 +332,7 @@ fn rr3_domain_write_domain(
         _ => unreachable!("parse 层白名单已裁，值型与键必配"),
     };
     // 手术 → tmp 落盘 → 装载链全量预核（与 boot 正门同一份裁决；Err 即拒写清 tmp）
-    let update_refs: Vec<(&str, &str)> =
-        updates.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let update_refs: Vec<(&str, &str)> = updates.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let new_text = crate::profile::rr3_domain_keys_apply(&text, &params.name, &update_refs)
         .map_err(invalid)?;
     let stem = paths
@@ -335,7 +340,9 @@ fn rr3_domain_write_domain(
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .ok_or_else(|| invalid("装配单无文件名".to_string()))?;
-    let tmp = paths.profile.with_file_name(format!("{stem}.tmp-write.toml"));
+    let tmp = paths
+        .profile
+        .with_file_name(format!("{stem}.tmp-write.toml"));
     std::fs::write(&tmp, new_text.as_bytes())
         .map_err(|e| invalid(format!("写临时档 {} 失败: {e}", tmp.display())))?;
     let boot = match crate::profile::rr3_profile_boot_inputs(
@@ -357,7 +364,10 @@ fn rr3_domain_write_domain(
     // 原子写回（机制单点 tmp→fsync→rename；失败清 tmp 旧档原封）
     crate::counters::rr3_atomic_store(&paths.profile, &tmp, new_text.as_bytes()).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
-        invalid(format!("装配单 {} 原子写回失败: {e}", paths.profile.display()))
+        invalid(format!(
+            "装配单 {} 原子写回失败: {e}",
+            paths.profile.display()
+        ))
     })?;
     // 契约记账重记（写口的 tmp 产物已过装载链全量预核 = 新验收事实；重记失败
     // 不回滚落盘——主事实已发生，点名让下次 boot 重定格）
@@ -435,9 +445,8 @@ fn rr3_domain_write_axis(
     }
     // 旧值提取：装载域拿（pin 外键核同一份判据；装载红 = 坏档，拒——
     // axis_write_run 的"坏目标不覆盖"在下游还会挡一道，这里先点名）
-    let text = std::fs::read_to_string(&paths.profile).map_err(|e| {
-        invalid(format!("读不到装配单 {}: {e}", paths.profile.display()))
-    })?;
+    let text = std::fs::read_to_string(&paths.profile)
+        .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
     let profile = crate::profile::rr3_profile_from_text(&text).map_err(|errs| {
         invalid(format!(
             "装配单 {} 形状不合: {}",
@@ -447,11 +456,14 @@ fn rr3_domain_write_axis(
     })?;
     let pin_ids: std::collections::BTreeSet<String> =
         profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
-    let existing = crate::axis::rr3_act_profile_load(&axis_path, &pin_ids)
-        .map_err(|errs| invalid(format!("轴档 {} 装载红: {}", axis_path.display(), errs.join("; "))))?;
-    let file = existing.ok_or_else(|| {
-        invalid(format!("轴档 {} 不在场", axis_path.display()))
+    let existing = crate::axis::rr3_act_profile_load(&axis_path, &pin_ids).map_err(|errs| {
+        invalid(format!(
+            "轴档 {} 装载红: {}",
+            axis_path.display(),
+            errs.join("; ")
+        ))
     })?;
+    let file = existing.ok_or_else(|| invalid(format!("轴档 {} 不在场", axis_path.display())))?;
     let old = json!(file.profile.current_ceil_ma);
     // 证据引用门（仅留痕——轴档十四键无 evidence 键，写动作证据住审计留痕）
     let ev = params.evidence.clone().ok_or_else(|| {
@@ -512,11 +524,11 @@ pub fn rr3_domain_write_run(params: &Value) -> Result<Value, (Rr3StatusCode, Str
     let Some(snap) = crate::contracts::rr3_contracts_snapshot() else {
         return Err((
             Rr3StatusCode::Permission,
-            "契约记账未在册（--manifest 调试路径无装配单），写口不可得——请以 --profile 启动".to_string(),
+            "契约记账未在册（--manifest 调试路径无装配单），写口不可得——请以 --profile 启动"
+                .to_string(),
         ));
     };
-    let paths = rr3_domain_write_paths(&snap.truth_set)
-        .map_err(|e| (Rr3StatusCode::Invalid, e))?;
+    let paths = rr3_domain_write_paths(&snap.truth_set).map_err(|e| (Rr3StatusCode::Invalid, e))?;
     rr3_domain_write_execute(&paths, &p)
 }
 
@@ -559,7 +571,10 @@ mod tests {
     fn parse_rejects_bad_shapes_fail_closed() {
         for (v, hint) in [
             (json!({"name":"x","key":"armed","value":true}), "target"),
-            (json!({"target":"domain","key":"armed","value":true}), "name"),
+            (
+                json!({"target":"domain","key":"armed","value":true}),
+                "name",
+            ),
             (json!({"target":"domain","name":"x","value":true}), "key"),
             (
                 json!({"target":"domain","name":"x","key":"nominal_mv","value":1}),
@@ -597,8 +612,14 @@ mod tests {
             ts_entry("contracts/slots.toml", "/x/contracts/slots.toml"),
             ts_entry("contracts/roles.toml", "/x/contracts/roles.toml"),
             ts_entry("contracts/devices.toml", "/x/contracts/devices.toml"),
-            ts_entry("contracts/platform/esp32.toml", "/x/contracts/platform/esp32.toml"),
-            ts_entry("hardware/esp32-mini/wiring.toml", "/x/hardware/esp32-mini/wiring.toml"),
+            ts_entry(
+                "contracts/platform/esp32.toml",
+                "/x/contracts/platform/esp32.toml",
+            ),
+            ts_entry(
+                "hardware/esp32-mini/wiring.toml",
+                "/x/hardware/esp32-mini/wiring.toml",
+            ),
         ];
         let p = rr3_domain_write_paths(&ts).expect("七成员应推全六路");
         assert_eq!(p.profile, PathBuf::from("/x/profiles/esp32-mini.toml"));
@@ -716,11 +737,11 @@ rr3-act = ["act.servo", "power.charger"]
 present = ["act.servo", "power.charger"]
 "#;
 
-    /// 接线档夹具（§4.3 九字段，profile.rs 测试区 GOOD_WIRING 同形状）：单线组只挂
-    /// vcc/gnd（对 [[pin]] 增删免疫——⑦-a 不点名 pin_id），net=rail5v 在夹具域在册
-    /// （⑦-b）。不复制真仓 default/wiring.toml——它引 batt/rail3v3 域与真机 pin 集，
-    /// 与最小装配单必然失配，写口预核红例必须由真实判据产生、不由夹具失配产生。
-    const WIRING: &str = r#"
+        /// 接线档夹具（§4.3 九字段，profile.rs 测试区 GOOD_WIRING 同形状）：单线组只挂
+        /// vcc/gnd（对 [[pin]] 增删免疫——⑦-a 不点名 pin_id），net=rail5v 在夹具域在册
+        /// （⑦-b）。不复制真仓 default/wiring.toml——它引 batt/rail3v3 域与真机 pin 集，
+        /// 与最小装配单必然失配，写口预核红例必须由真实判据产生、不由夹具失配产生。
+        const WIRING: &str = r#"
 [[wire]]
 connector = "J-T"
 hdr_pin = [1, 2]
@@ -733,10 +754,10 @@ rated_a = 1.0
 gnd_common = "star-1"
 "#;
 
-    /// rr3-act 的 servo 件装配清单（profile.rs 测试区 stage_servo_module 同形状）：
-    /// 装载链门 c 对 kind=power 挂轨角色执法⑨ 覆盖判据——无 stage 件则一切
-    /// "合法过写"用例被 ⑨ 误红（写口预核要全链过，夹具必须供件申报面）。
-    const ASSEMBLE: &str = concat!(
+        /// rr3-act 的 servo 件装配清单（profile.rs 测试区 stage_servo_module 同形状）：
+        /// 装载链门 c 对 kind=power 挂轨角色执法⑨ 覆盖判据——无 stage 件则一切
+        /// "合法过写"用例被 ⑨ 误红（写口预核要全链过，夹具必须供件申报面）。
+        const ASSEMBLE: &str = concat!(
         "schema_version = 2\n\n[assemble]\n",
         "handles = [\n",
         "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n",
@@ -884,10 +905,7 @@ gnd_common = "star-1"
             // 武装前提：域 sense 绑在册测点 pin + max_age_ms > 0（⑥-c 两前件）
             let base = std::fs::read_to_string(&fx.paths.profile).unwrap();
             let text = base
-                .replace(
-                    "sense = \"none\"",
-                    "sense = \"power.charger.meter\"",
-                )
+                .replace("sense = \"none\"", "sense = \"power.charger.meter\"")
                 .replace("max_age_ms = 0", "max_age_ms = 30000");
             std::fs::write(&fx.paths.profile, text).unwrap();
             let mut p = rr3_domain_write_parse(&params_armed_true()).unwrap();
@@ -919,7 +937,10 @@ gnd_common = "star-1"
             assert_eq!(v["new"], 4300);
             let after = std::fs::read_to_string(&fx.paths.profile).unwrap();
             assert!(after.contains("severe_mv = 4300"), "{after}");
-            assert!(after.contains("evidence = \"none\""), "evidence 不入档: {after}");
+            assert!(
+                after.contains("evidence = \"none\""),
+                "evidence 不入档: {after}"
+            );
         }
 
         /// 红三：手术后装载预核不过拒落盘——未标定域（sense=none、max_age_ms=0）
@@ -945,11 +966,13 @@ gnd_common = "star-1"
             );
             // tmp 不残留
             let stem = fx.paths.profile.file_stem().unwrap().to_str().unwrap();
-            assert!(!fx
-                .paths
-                .profile
-                .with_file_name(format!("{stem}.tmp-write.toml"))
-                .exists(), "拒写须清 tmp");
+            assert!(
+                !fx.paths
+                    .profile
+                    .with_file_name(format!("{stem}.tmp-write.toml"))
+                    .exists(),
+                "拒写须清 tmp"
+            );
         }
 
         /// axis 落点：合法过写复用产线写入面——轴档 current_ceil_ma 变更落盘
@@ -974,8 +997,8 @@ gnd_common = "star-1"
             assert_eq!(v["old"], 750);
             assert_eq!(v["new"], 700);
             assert_eq!(v["effective"], "boot");
-            let after = std::fs::read_to_string(fx.dir.join("hardware/test/axis/pan.toml"))
-                .unwrap();
+            let after =
+                std::fs::read_to_string(fx.dir.join("hardware/test/axis/pan.toml")).unwrap();
             assert!(after.contains("current_ceil_ma = 700"), "{after}");
         }
 

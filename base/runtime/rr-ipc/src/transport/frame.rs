@@ -116,10 +116,7 @@ mod tests {
         let mut want = f.clone();
         want.header.payload_crc32 = rr3_crc32(&f.payload);
         assert_ne!(want.header.payload_crc32, 0, "带载荷的头 CRC 必须非零");
-        assert_eq!(
-            rr3_frame_read(Cursor::new(&buf)).expect("读帧应成功"),
-            want
-        );
+        assert_eq!(rr3_frame_read(Cursor::new(&buf)).expect("读帧应成功"), want);
     }
 
     /// 帧头部必须与 golden 向量逐字节一致（Task 12 的跨架构对比用的就是这个不变量）
@@ -128,7 +125,10 @@ mod tests {
         let g = golden();
         // golden 是**无载荷**纯头（CRC 覆盖载荷，故其 CRC 字段本就为 0）
         let pure = Rr3Header::from_bytes(&g).unwrap();
-        assert_eq!(pure.payload_crc32, 0, "golden 无载荷纯头的 CRC 字段必须为 0");
+        assert_eq!(
+            pure.payload_crc32, 0,
+            "golden 无载荷纯头的 CRC 字段必须为 0"
+        );
         assert_eq!(
             pure.to_bytes().to_vec(),
             g,

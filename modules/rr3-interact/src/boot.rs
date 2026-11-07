@@ -186,9 +186,9 @@ pub(crate) fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, St
             })?;
         }
         if let Some(e) = s.get("expect") {
-            let table = e
-                .as_table()
-                .ok_or_else(|| format!("config [rr3-interact.selftest] expect 段必须是表，收到 {e}"))?;
+            let table = e.as_table().ok_or_else(|| {
+                format!("config [rr3-interact.selftest] expect 段必须是表，收到 {e}")
+            })?;
             for (k, val) in table {
                 let sval = val.as_str().ok_or_else(|| {
                     format!("config [rr3-interact.selftest.expect] {k} 必须是字符串，收到 {val}")
@@ -277,8 +277,7 @@ pub(crate) fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, St
                 )
             })?
         }
-        None => rr3_face_expression_lookup("idle")
-            .expect("在册白名单恒含 idle，lookup 必中"),
+        None => rr3_face_expression_lookup("idle").expect("在册白名单恒含 idle，lookup 必中"),
     };
     Ok(Rr3InteractCfg {
         player,
@@ -304,11 +303,11 @@ fn rr3_cfg_u64(
     let Some(v) = sect.get(key) else {
         return Ok(());
     };
-    let t = v.as_integer().ok_or_else(|| {
-        format!("[rr3-interact.{sect_name}] {key} 必须是整数，收到 {v}")
-    })?;
-    *out = u64::try_from(t)
-        .map_err(|_| format!("[rr3-interact.{sect_name}] {key} 不得为负: {t}"))?;
+    let t = v
+        .as_integer()
+        .ok_or_else(|| format!("[rr3-interact.{sect_name}] {key} 必须是整数，收到 {v}"))?;
+    *out =
+        u64::try_from(t).map_err(|_| format!("[rr3-interact.{sect_name}] {key} 不得为负: {t}"))?;
     Ok(())
 }
 
@@ -346,7 +345,10 @@ face_expect = "happy"
         assert_eq!(cfg.face.face_tick_ms, 250, "表情节拍注入（I-17/M-2）");
         assert_eq!(cfg.face.default_expr, "idle", "兜底表情注入（I-17/M-3）");
         assert_eq!(cfg.panel.max_conns, 8, "面板限额注入（I-18②）");
-        assert_eq!(cfg.selftest.face_expect, "happy", "自检期望注入（I-17/M-10）");
+        assert_eq!(
+            cfg.selftest.face_expect, "happy",
+            "自检期望注入（I-17/M-10）"
+        );
     }
 
     /// face/panel/selftest 新键（批N4 件五 I-17/I-18②）：键/段缺省回落 legacy
@@ -457,7 +459,10 @@ face_expect = "happy"
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\narm = \"pass\"\n",
         )
         .unwrap_err();
-        assert!(e.contains("未知腿名") && e.contains("arm"), "腿名册点名: {e}");
+        assert!(
+            e.contains("未知腿名") && e.contains("arm"),
+            "腿名册点名: {e}"
+        );
         // 非字符串值拒
         let e = rr3_interact_config_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = 3\n",

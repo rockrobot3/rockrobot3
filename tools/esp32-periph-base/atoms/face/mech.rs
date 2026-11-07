@@ -199,13 +199,13 @@ pub(crate) fn eye_page(page: u8, style: EyeStyle) -> [u8; 128] {
                     // 斜率位：t=0 外端 → t=BROW_TILT 内端（左眼）／反之（右眼）
                     let t = ((x - (cx - W2)) * BROW_TILT) / (2 * W2);
                     let off = match (style.brow, ix) {
-                        (Brow::Angry, 0) => t,              // 左眼内端低
-                        (Brow::Angry, _) => BROW_TILT - t,  // 右眼内端低
-                        (Brow::Sad, 0) => BROW_TILT - t,    // 左眼外端低
-                        (Brow::Sad, _) => t,                // 右眼外端低
-                        (Brow::Focus, _) => 1,              // 平直略压
-                        (Brow::Confused, 0) => -2,          // 左眉抬高
-                        (Brow::Confused, _) => 2,           // 右眉压低
+                        (Brow::Angry, 0) => t,             // 左眼内端低
+                        (Brow::Angry, _) => BROW_TILT - t, // 右眼内端低
+                        (Brow::Sad, 0) => BROW_TILT - t,   // 左眼外端低
+                        (Brow::Sad, _) => t,               // 右眼外端低
+                        (Brow::Focus, _) => 1,             // 平直略压
+                        (Brow::Confused, 0) => -2,         // 左眉抬高
+                        (Brow::Confused, _) => 2,          // 右眉压低
                         (Brow::None, _) => 0,
                     };
                     let by = y - (BROW_Y + style.dy as i32 + off);
@@ -255,7 +255,7 @@ pub(crate) fn expr_eye_base(expr: &str) -> EyeStyle {
         "love" => EyeStyle::new(100, 0, 0, 100, Brow::None).art(EyeShape::Heart), // 心形眼
         "dizzy" => EyeStyle::new(100, 0, 0, 100, Brow::None).art(EyeShape::Spiral), // 同心环
         "scared" => EyeStyle::new(100, 0, 0, 110, Brow::Sad).art(EyeShape::Ring), // 空心大眼
-        _ => EYE_IDLE, // idle 与兜底：正目全开
+        _ => EYE_IDLE,                                      // idle 与兜底：正目全开
     }
 }
 

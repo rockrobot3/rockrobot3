@@ -375,7 +375,10 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
         ),
         (&act, "cargo build -p rr3-act（在 modules/rr3-act/ 下）"),
-        (&brain, "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）"),
+        (
+            &brain,
+            "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
+        ),
     ])?;
 
     // ---- 1. 夹具：套接字 + 四份 manifest + 观察者 manifest + 三份 config ----
@@ -682,10 +685,7 @@ mod tests {
         // 行程键已撤（批N3 件五门 g），断言改锚存活键——servo 节时限仍在
         assert!(act.contains("move_timeout_ms = 800"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
-        assert!(
-            !act.contains("limit_deg"),
-            "行程键不得回流 config: {act}"
-        );
+        assert!(!act.contains("limit_deg"), "行程键不得回流 config: {act}");
         let interact = rr3_chain_interact_config_text();
         assert!(
             interact.contains("non_pointable = [\"talk\"]"),

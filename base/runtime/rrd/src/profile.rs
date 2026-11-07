@@ -107,8 +107,7 @@ const RR3_RUNTIME_KEYS: [&str; 5] = [
 
 /// HAL 后端名白名单（与 rr-hal backend.rs 的 RR3_BACKEND_* 常量同域；rrd 不直接
 /// 依赖 rr-hal 符号以保持基座轻量，此处独立钉合法取值集，装载期 fail-closed）。
-const RR3_HAL_BACKEND_LEGAL: [&str; 5] =
-    ["sim", "linux", "esp32", "mac", "placeholder"];
+const RR3_HAL_BACKEND_LEGAL: [&str; 5] = ["sim", "linux", "esp32", "mac", "placeholder"];
 
 /// [supplies] 六键（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）——
 /// 未知键点名与解析白名单共用（budget 子段单独成块解析，同 domain）
@@ -1276,7 +1275,8 @@ fn rr3_platform_table_file_name(chip: &str) -> String {
 /// 装载真值集（[`rr3_runtime_truth_set`]）、contracts.rs 的 `RR3_CONTRACT_FILES`、
 /// 打包/装机等消费方一律引用本常量；新增/改名册只改这里，成员判等（基-40 单测
 /// ＋规约 ⑨-z 门）随之生效。顺序＝topics/slots/roles/devices（Z-4 记账点名序）。
-pub const RR3_CONTRACT_BOOKS: [&str; 4] = ["topics.toml", "slots.toml", "roles.toml", "devices.toml"];
+pub const RR3_CONTRACT_BOOKS: [&str; 4] =
+    ["topics.toml", "slots.toml", "roles.toml", "devices.toml"];
 
 /// 装载消费真值集清单（增补轮六 基-25／实-12：全仓唯一一份，三处消费方判等——
 /// `rr3-pack` 打包 / buildroot `post-build.sh` 装机 / OTA 模块级更新）。清单由装载面
@@ -1302,11 +1302,7 @@ pub struct Rr3RuntimeTruthSet {
 /// 手写即漂移温床，收在这里后成员集判等只差"函数返回值相等"一条单测（⑨-z 判据）。
 fn rr3_truth_set_member_names(profile_stem: &str, chip: &str) -> Vec<String> {
     let mut names = vec![format!("profiles/{profile_stem}.toml")];
-    names.extend(
-        RR3_CONTRACT_BOOKS
-            .iter()
-            .map(|b| format!("contracts/{b}")),
-    );
+    names.extend(RR3_CONTRACT_BOOKS.iter().map(|b| format!("contracts/{b}")));
     names.push(format!(
         "contracts/platform/{}",
         rr3_platform_table_file_name(chip)
@@ -1918,7 +1914,10 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 证据容器根复用 modules-root 同一条 <root>/profiles/ 布局纪律 → <root>/docs/evidence；
     // 装配单不在仓布局时容器缺＋有武装申报即红（不静默放行），无武装申报（evidence
     // 恒 "none"）零波及。
-    errs.extend(rr3_profile_domain_evidence_check(&root.join("docs/evidence"), &profile));
+    errs.extend(rr3_profile_domain_evidence_check(
+        &root.join("docs/evidence"),
+        &profile,
+    ));
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -2127,15 +2126,18 @@ fn rr3_key_line_replace(lines: &mut [String], key: &str, new_raw: &str) -> Resul
         }
     }
     match hits.len() {
-        0 => Err(format!("键行 {key} 缺失（装配期全键必填保证在场，缺失说明档已被改病），拒绝手术")),
+        0 => Err(format!(
+            "键行 {key} 缺失（装配期全键必填保证在场，缺失说明档已被改病），拒绝手术"
+        )),
         1 => {
-            let indent = lines[hits[0]][..lines[hits[0]].len()
-                - lines[hits[0]].trim_start().len()]
-            .to_string();
+            let indent = lines[hits[0]][..lines[hits[0]].len() - lines[hits[0]].trim_start().len()]
+                .to_string();
             lines[hits[0]] = format!("{indent}{key} = {new_raw}");
             Ok(())
         }
-        n => Err(format!("键行 {key} 出现 {n} 次（TOML 重复键是解析期红），拒绝手术")),
+        n => Err(format!(
+            "键行 {key} 出现 {n} 次（TOML 重复键是解析期红），拒绝手术"
+        )),
     }
 }
 
@@ -2143,8 +2145,7 @@ fn rr3_key_line_replace(lines: &mut [String], key: &str, new_raw: &str) -> Resul
 /// 唯一（轴档案十四键每键一行）时替换为 `key = new_raw`，注释与其余行原封。
 pub fn rr3_toml_key_line_apply(text: &str, key: &str, new_raw: &str) -> Result<String, String> {
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    rr3_key_line_replace(&mut lines, key, new_raw)
-        .map_err(|e| format!("键行手术拒: {e}"))?;
+    rr3_key_line_replace(&mut lines, key, new_raw).map_err(|e| format!("键行手术拒: {e}"))?;
     Ok(lines.join("\n") + if text.ends_with('\n') { "\n" } else { "" })
 }
 
@@ -3934,7 +3935,10 @@ mux_group = []
     #[test]
     fn binding_claimed_by_another_module_is_fatal() {
         let root = Root::new("cross");
-        let text = GOOD.replace("\"power.charger\" = \"rr3-pb\"", "\"power.charger\" = \"rr3-pc\"");
+        let text = GOOD.replace(
+            "\"power.charger\" = \"rr3-pb\"",
+            "\"power.charger\" = \"rr3-pc\"",
+        );
         let p = root.write_profile("cross.toml", &text);
         let e = boot_inputs(&p).expect_err("binding 被他人认领必须致命");
         assert!(e.contains("未被 enabled_slots 认领"), "{e}");
@@ -4442,8 +4446,8 @@ evidence = "none"
     #[test]
     fn domain_keys_apply_rejects_ambiguous_domain() {
         let dup = format!("{SURGERY_TEXT}\n[[supplies.domain]]\nname = \"batt\"\nnominal_mv = 1\nsevere_mv = 2\narmed = false\nevidence = \"none\"\n");
-        let e = rr3_domain_keys_apply(&dup, "batt", &[("severe_mv", "1")])
-            .expect_err("同名多义必须拒");
+        let e =
+            rr3_domain_keys_apply(&dup, "batt", &[("severe_mv", "1")]).expect_err("同名多义必须拒");
         assert!(e.contains("命中 2 个"), "{e}");
     }
 
@@ -4975,9 +4979,12 @@ gnd_common = "star-1"
             boot.role_missing
         );
         assert!(
-            boot.hal_bindings.contains("alsa_device = \"plughw:CARD=Device\"")
+            boot.hal_bindings
+                .contains("alsa_device = \"plughw:CARD=Device\"")
                 && boot.hal_bindings.contains("link_ifname = \"wlan0\"")
-                && boot.hal_bindings.contains("spi_device = \"/dev/spidev0.0\""),
+                && boot
+                    .hal_bindings
+                    .contains("spi_device = \"/dev/spidev0.0\""),
             "pi4b-host [hardware] 两键与 SPI 派生键必须进注入文本: {:?}",
             boot.hal_bindings
         );

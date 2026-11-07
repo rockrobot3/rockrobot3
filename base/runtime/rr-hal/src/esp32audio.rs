@@ -98,9 +98,9 @@ const RR3_AUDIO_CMD_CAP: usize = 2;
 
 // 板外设语义命令 + 帧构造：真值单点在 rr-periph-proto（ADR-0024，宿主与固件
 // 双向复用），本地 re-export 保既有 `rr_hal::esp32audio::Rr3PeriphCmd` 路径。
-pub use rr_periph_proto::cmd::Rr3PeriphCmd;
 pub(crate) use rr_periph_proto::cmd::rr3_esp32_cmd_frame;
 use rr_periph_proto::cmd::Rr3BoardFrame;
+pub use rr_periph_proto::cmd::Rr3PeriphCmd;
 
 /// 命令旁路盒（Mutex 内纯数据）：有界、满丢最旧 + 溢丢计数（板侧 audio_q
 /// 同款背压口径）。产面归构造方（rr3-sense 反射环），耗面归读线程独占。

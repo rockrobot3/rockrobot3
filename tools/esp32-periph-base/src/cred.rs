@@ -19,9 +19,9 @@
 use std::ffi::CString;
 
 use esp_idf_sys::{
-    nvs_close, nvs_commit, nvs_erase_key, nvs_get_str, nvs_open, nvs_open_mode_t_NVS_READONLY,
-    nvs_open_mode_t_NVS_READWRITE, nvs_set_str, nvs_handle_t, ESP_ERR_NVS_INVALID_LENGTH,
-    ESP_ERR_NVS_NOT_FOUND, ESP_OK,
+    nvs_close, nvs_commit, nvs_erase_key, nvs_get_str, nvs_handle_t, nvs_open,
+    nvs_open_mode_t_NVS_READONLY, nvs_open_mode_t_NVS_READWRITE, nvs_set_str,
+    ESP_ERR_NVS_INVALID_LENGTH, ESP_ERR_NVS_NOT_FOUND, ESP_OK,
 };
 
 /// NVS namespace 单真值（全案 §3.6 凭据行 `nvs:rr3` 的板侧实现值；消费面禁止抄第二份）。
@@ -186,7 +186,9 @@ pub(crate) fn rr3_cred_erase() -> Result<(), i32> {
             // ESP_ERR_NVS_NOT_FOUND＝键本就不在——幂等语义，不算错
             let e1 = nvs_erase_key(h, k_ssid.as_ptr());
             let e2 = nvs_erase_key(h, k_pass.as_ptr());
-            let bad = [e1, e2].into_iter().any(|e| e != ESP_OK && e != ESP_ERR_NVS_NOT_FOUND);
+            let bad = [e1, e2]
+                .into_iter()
+                .any(|e| e != ESP_OK && e != ESP_ERR_NVS_NOT_FOUND);
             if bad {
                 return Err(-5);
             }
@@ -214,8 +216,14 @@ mod tests {
         assert_eq!(rr3_cred_form_check(&ok_ssid, ""), Ok(()));
         assert_eq!(rr3_cred_form_check(&ok_ssid, &ok_pass), Ok(()));
         assert!(rr3_cred_form_check("", "x").is_err(), "SSID 空必须红");
-        assert!(rr3_cred_form_check(&bad_ssid, "x").is_err(), "SSID 33B 必须红");
-        assert!(rr3_cred_form_check(&ok_ssid, &bad_pass).is_err(), "密码 65B 必须红");
+        assert!(
+            rr3_cred_form_check(&bad_ssid, "x").is_err(),
+            "SSID 33B 必须红"
+        );
+        assert!(
+            rr3_cred_form_check(&ok_ssid, &bad_pass).is_err(),
+            "密码 65B 必须红"
+        );
     }
 
     /// namespace/键名单真值（全案 §3.6 `nvs:rr3` 的板侧实现值——键半边进绑定域

@@ -153,8 +153,7 @@ mod tests {
         hdr.timestamp_ns = 100;
         hdr.src_task = 2; // 板面外设执行面位形（诊断显示用；拆帧器不读）
         hdr.dst_task = 1; // 宿主位形
-        let mut bytes =
-            crate::protocol::header::rr3_header_bytes_with_crc(&hdr, &payload).to_vec();
+        let mut bytes = crate::protocol::header::rr3_header_bytes_with_crc(&hdr, &payload).to_vec();
         bytes.extend_from_slice(&payload);
         bytes
     }
