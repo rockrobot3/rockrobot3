@@ -116,7 +116,7 @@ impl Rr3Dialog {
     }
 
     /// 开轮中且时长上限到点（主循环每圈问一次）。
-    pub fn rr3_utterance_expired(&self, now_ms: u64) -> bool {
+    pub fn rr3_utt_expired(&self, now_ms: u64) -> bool {
         self.active && now_ms.saturating_sub(self.started_ms) as i64 >= self.max_utterance_ms
     }
 
@@ -282,8 +282,8 @@ mod tests {
         let mut d = Rr3Dialog::rr3_new(0);
         d.rr3_feed_vad("onset", 50);
         feed_pcm(&mut d, b"\x01\x02", 32);
-        assert!(d.rr3_utterance_expired(50));
+        assert!(d.rr3_utt_expired(50));
         assert_eq!(d.rr3_take_utterance(), b"\x01\x02");
-        assert!(!d.rr3_utterance_expired(50));
+        assert!(!d.rr3_utt_expired(50));
     }
 }

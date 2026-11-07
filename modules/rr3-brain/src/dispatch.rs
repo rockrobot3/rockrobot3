@@ -8,7 +8,7 @@
 //! 快照（[`rpc::rr3_ops_snapshot`] 白名单组体）、`ops/set` 写臂（[`rpc::rr3_ops_set_arm`]
 //! 全语义：白名单/类型域校验 → live 内存生效不落盘 → 按组重建受影响客户端——
 //! asr/tts/llm 三组各重建、dialog 组就地改参 [`dialog::Rr3Dialog::max_utterance_ms`]）；
-//! `model/list|set|test` 模型行面（[`rpc::rr3_model_list_snapshot`] /
+//! `model/list|set|test` 模型行面（[`rpc::rr3_model_list`] /
 //! [`rpc::rr3_model_set_arm`] 落盘 + llm 组重建 / [`rpc::rr3_model_test_arm`] 单次探测）；
 //! 未知 topic 返 Err 由 serve 折 `{"error": …}` 应答（Python 主循环兜底分支同 wire）。
 //!
@@ -37,8 +37,8 @@ use crate::cloud::{Rr3AsrClient, Rr3LlmClient, Rr3TtsClient};
 use crate::dialog::{Rr3Dialog, Rr3DialogTurn};
 use crate::intent::rr3_extract_actions;
 use crate::rpc::{
-    rr3_model_list_snapshot, rr3_model_row_of, rr3_model_set_arm, rr3_model_test_arm,
-    rr3_ops_set_arm, rr3_ops_snapshot, rr3_py_str,
+    rr3_model_list, rr3_model_row_of, rr3_model_set_arm, rr3_model_test_arm, rr3_ops_set_arm,
+    rr3_ops_snapshot, rr3_py_str,
 };
 
 /// 本模块 exposes 的 completion 点名（module.toml [rpc].exposes 同源）
@@ -154,7 +154,7 @@ fn rr3_wake_norm(s: &str) -> String {
 
 /// 编辑距离（字符级 Levenshtein）：唤醒词容错判据用（2026-10-31 实机：
 /// ASR 把 "你好洛克" 识别成 "你好洛师"，一字之差把精确前缀匹配挡在门外）。
-fn rr3_wake_edit_distance(a: &str, b: &str) -> usize {
+fn rr3_wake_edit_dist(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let mut prev: Vec<usize> = (0..=b.len()).collect();
@@ -218,14 +218,13 @@ pub(crate) fn rr3_wake_decide(
             }
             let prefix: String = norm_chars.iter().collect();
             let phrase_prefix: String = pn_chars[..norm_chars.len()].iter().collect();
-            if rr3_wake_edit_distance(&prefix, &phrase_prefix) <= rr3_wake_max_edits(pn_chars.len())
-            {
+            if rr3_wake_edit_dist(&prefix, &phrase_prefix) <= rr3_wake_max_edits(pn_chars.len()) {
                 return Rr3WakeAction::Ack;
             }
             continue;
         }
         let prefix: String = norm_chars[..pn_chars.len()].iter().collect();
-        if rr3_wake_edit_distance(&prefix, &pn) <= rr3_wake_max_edits(pn_chars.len()) {
+        if rr3_wake_edit_dist(&prefix, &pn) <= rr3_wake_max_edits(pn_chars.len()) {
             let rest: String = norm_chars[pn_chars.len()..].iter().collect();
             let rest = rest.trim();
             if rest.is_empty() {
@@ -453,7 +452,7 @@ impl Rr3BrainDispatcher {
     /// 节拍面一臂：utterance_expired 时长判停触发整轮（与 offset 臂共用
     /// rr3_finish_turn——连续语音无 offset 时也要有界）。
     fn rr3_tick_arm<B: Rr3TurnBus>(&mut self, bus: &B) -> Result<(), String> {
-        if self.dialog.rr3_utterance_expired(self.tb.rr3_now_ms()) {
+        if self.dialog.rr3_utt_expired(self.tb.rr3_now_ms()) {
             self.rr3_finish_turn(bus)?;
         }
         Ok(())
@@ -709,7 +708,7 @@ pub(crate) fn rr3_rpc_arm(
         // 模型行三臂（ADR-0023）：列表只读；set 落盘后按 llm 组重建客户端
         // （写面已自守结构门，重建取数不可达失败面如实上抛）；test 只探测一次，
         // 业务失败用 `ok:false` 表达（面板要区分"接口通"与"RPC 出错"）
-        RR3_MODEL_LIST_TOPIC => rr3_model_list_snapshot(cfg),
+        RR3_MODEL_LIST_TOPIC => rr3_model_list(cfg),
         RR3_MODEL_SET_TOPIC => {
             let reply = rr3_model_set_arm(cfg, args)?;
             rr3_rebuild_clients(cfg, "llm", &Value::Null, dialog, clients)?;
@@ -764,7 +763,7 @@ fn rr3_publish_tts_pcm<B: Rr3TurnBus>(bus: &B, pcm: &[u8], seq: u64) -> Result<u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boot::rr3_brain_config_parse;
+    use crate::boot::rr3_brain_cfg_parse;
     use rr_ipc::rr3_base64_decode;
 
     /// env 动作的测试互斥（全 crate 一柄，与 cloud.rs tests 共享——RR3_BRAIN_CLOUD
@@ -777,7 +776,7 @@ mod tests {
 
     /// 与仓内 config.toml 同形状的最小配置夹具
     fn cfg() -> Rr3BrainCfg {
-        rr3_brain_config_parse(
+        rr3_brain_cfg_parse(
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n",
         )
         .unwrap()
@@ -785,7 +784,7 @@ mod tests {
 
     /// 带点名超时的配置夹具（B-13① 超时注入判据用）
     fn cfg_call_timeout(s: f64) -> Rr3BrainCfg {
-        rr3_brain_config_parse(&format!(
+        rr3_brain_cfg_parse(&format!(
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n[rr3-brain.bus]\ncall_timeout_s = {s}\n"
         ))
         .unwrap()
@@ -793,7 +792,7 @@ mod tests {
 
     /// 唤醒词开启的配置夹具（2026-10-31；跟进窗可调，0 = 关窗）
     fn cfg_wake(followup_ms: u64) -> Rr3BrainCfg {
-        rr3_brain_config_parse(&format!(
+        rr3_brain_cfg_parse(&format!(
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\"]\nack = \"我在呢，有什么可以帮您？\"\nfollowup_ms = {followup_ms}\n"
         ))
         .unwrap()
@@ -1416,7 +1415,7 @@ mod tests {
         std::env::set_var(crate::cloud::RR3_CLOUD_MODE_ENV, "real");
         std::env::set_var(crate::cloud::RR3_API_KEY_ENV, "test-key");
         std::env::remove_var(crate::cloud::RR3_TTS_BACKEND_ENV);
-        let cfg = rr3_brain_config_parse(&format!(
+        let cfg = rr3_brain_cfg_parse(&format!(
             "[rr3-brain.cloud]\nbase_url = \"{}\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 1\n[rr3-brain.dialog]\n[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\"]\nack = \"我在呢\"\nfollowup_ms = 30000\n",
             srv.base
         ))

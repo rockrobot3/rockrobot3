@@ -16,11 +16,11 @@
 use serde_json::{json, Value};
 
 use crate::boot::{
-    rr3_brain_config_parse, rr3_brain_model_row, rr3_cloud_cfg_of, rr3_model_base_url_validate,
-    Rr3BrainCfg, Rr3LlmMode,
+    rr3_base_url_check, rr3_brain_cfg_parse, rr3_brain_model_row, rr3_cloud_cfg_of, Rr3BrainCfg,
+    Rr3LlmMode,
 };
 use crate::cloud::{rr3_key_set_of, Rr3LlmClient};
-use crate::config_store::{rr3_config_persist, rr3_model_block_rewrite};
+use crate::config_store::{rr3_block_rewrite, rr3_config_persist};
 
 /// ops 槽快照（自 composite.py `rr3_ops_snapshot` 逐语义迁入，批N4 件六二 B-12：
 /// `rr3-brain/ops/list` 应答体，面板脑面读口）。按原子分组、槽名与 assemble.toml
@@ -88,7 +88,7 @@ const RR3_OPS_WRITE_GROUPS: &[(&str, &[&str])] = &[
 const RR3_OPS_STRING_SLOTS: &[&str] = &["asr_model", "llm_model", "tts_model", "base_url"];
 
 /// 组名单 Python sorted() 形状（错误文案逐字对位：`['asr', 'dialog', 'llm', 'tts']`）
-fn rr3_ops_group_whitelist_text() -> String {
+fn rr3_ops_groups_text() -> String {
     let mut names: Vec<&str> = RR3_OPS_WRITE_GROUPS.iter().map(|(g, _)| *g).collect();
     names.sort_unstable();
     let quoted: Vec<String> = names.iter().map(|g| format!("'{g}'")).collect();
@@ -96,7 +96,7 @@ fn rr3_ops_group_whitelist_text() -> String {
 }
 
 /// 某组槽名单 Python sorted() 形状（`['asr_model', 'base_url', 'timeout_s']`）
-fn rr3_ops_slot_whitelist_text(group: &str) -> String {
+fn rr3_ops_slots_text(group: &str) -> String {
     let mut slots: Vec<&str> = RR3_OPS_WRITE_GROUPS
         .iter()
         .find(|(g, _)| *g == group)
@@ -156,16 +156,11 @@ pub(crate) fn rr3_ops_write(
     let (_, slots) = RR3_OPS_WRITE_GROUPS
         .iter()
         .find(|(g, _)| *g == group)
-        .ok_or_else(|| {
-            format!(
-                "组不认: '{group}'（白名单 {}）",
-                rr3_ops_group_whitelist_text()
-            )
-        })?;
+        .ok_or_else(|| format!("组不认: '{group}'（白名单 {}）", rr3_ops_groups_text()))?;
     if !slots.contains(&slot) {
         return Err(format!(
             "组 {group} 槽不认: '{slot}'（白名单 {}）",
-            rr3_ops_slot_whitelist_text(group)
+            rr3_ops_slots_text(group)
         ));
     }
 
@@ -348,7 +343,7 @@ pub(crate) fn rr3_model_row_of(cfg: &Rr3BrainCfg) -> Result<crate::boot::Rr3Mode
 // ---------- 模型行面（ADR-0023：面板 CRUD + 切换 active + 连通性测试） ----------
 
 /// 模型行表快照（doc 内，缺表 = 空表；非数组点名拒——与 boot 同一文案）
-fn rr3_model_rows_cloned(doc: &Value) -> Result<Vec<Value>, String> {
+fn rr3_model_rows(doc: &Value) -> Result<Vec<Value>, String> {
     match doc.get("rr3-brain").and_then(|b| b.get("model")) {
         None | Some(Value::Null) => Ok(Vec::new()),
         Some(Value::Array(rows)) => Ok(rows.clone()),
@@ -375,8 +370,8 @@ fn rr3_row_active_name(rows: &[Value]) -> Option<String> {
 
 /// 模型行列表（`rr3-brain/model/list` 应答体）：每行回 名称/API 根/模型/格式/
 /// 模式/key_ref/key 是否就位/active——**只回 `key_set` 布尔，永无密钥明文**。
-pub(crate) fn rr3_model_list_snapshot(cfg: &Rr3BrainCfg) -> Result<Value, String> {
-    let rows = rr3_model_rows_cloned(&cfg.doc)?;
+pub(crate) fn rr3_model_list(cfg: &Rr3BrainCfg) -> Result<Value, String> {
+    let rows = rr3_model_rows(&cfg.doc)?;
     let mut models = Vec::with_capacity(rows.len());
     for (i, row) in rows.iter().enumerate() {
         let name = rr3_row_str(row, "name", i)?;
@@ -428,7 +423,7 @@ fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(
     if base_url.is_empty() || model_id.is_empty() {
         return Err("upsert 须同时给 base_url 与 model_id（非空）".to_string());
     }
-    rr3_model_base_url_validate(base_url).map_err(|e| format!("模型行 {name} {e}"))?;
+    rr3_base_url_check(base_url).map_err(|e| format!("模型行 {name} {e}"))?;
     let api_format = args
         .get("api_format")
         .and_then(Value::as_str)
@@ -586,7 +581,7 @@ pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<V
     if name.is_empty() {
         return Err("模型行 name 不得为空".to_string());
     }
-    let mut rows = rr3_model_rows_cloned(&cfg.doc)?;
+    let mut rows = rr3_model_rows(&cfg.doc)?;
     match op {
         "upsert" => rr3_model_upsert(&mut rows, name, args)?,
         "activate" => rr3_model_activate(&mut rows, name)?,
@@ -607,9 +602,9 @@ pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<V
     })?;
     let old_text = std::fs::read_to_string(&path)
         .map_err(|e| format!("读 config {} 失败: {e}", path.display()))?;
-    let new_text = rr3_model_block_rewrite(&old_text, &rows)?;
+    let new_text = rr3_block_rewrite(&old_text, &rows)?;
     // 落盘前验证：新文本必须被 boot 解析器吃下（恰一 active/格式/URL 全过）
-    let parsed = rr3_brain_config_parse(&new_text)?;
+    let parsed = rr3_brain_cfg_parse(&new_text)?;
     rr3_config_persist(&path, &old_text, &new_text)?;
     // 提交内存（解析产物与行表同源；失败面已在落盘前全部走完）
     let mut doc = cfg.doc.clone();
@@ -641,7 +636,7 @@ pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Valu
     if name.is_empty() {
         return Err("模型行 name 不得为空".to_string());
     }
-    let rows = rr3_model_rows_cloned(&cfg.doc)?;
+    let rows = rr3_model_rows(&cfg.doc)?;
     let Some(row) = rows
         .iter()
         .find(|r| r.get("name").and_then(Value::as_str) == Some(name))
@@ -693,7 +688,7 @@ pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boot::rr3_brain_config_parse;
+    use crate::boot::rr3_brain_cfg_parse;
 
     /// 与仓内 config.toml 同形状的文档树夹具（boot 解析产出，写面真载体）
     fn repo_cfg() -> Rr3BrainCfg {
@@ -720,7 +715,7 @@ call_timeout_s = 30.0
 [rr3-brain.dialog]
 max_utterance_ms = 8000
 "#;
-        rr3_brain_config_parse(text).unwrap()
+        rr3_brain_cfg_parse(text).unwrap()
     }
 
     // ---------- ops/list 读面 ----------
@@ -1095,7 +1090,7 @@ max_utterance_ms = 8000
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         std::fs::write(&path, text).unwrap();
-        let mut cfg = rr3_brain_config_parse(text).unwrap();
+        let mut cfg = rr3_brain_cfg_parse(text).unwrap();
         cfg.config_path = Some(path.clone());
         (dir, path, cfg)
     }
@@ -1104,7 +1099,7 @@ max_utterance_ms = 8000
     #[test]
     fn model_list_snapshot_reports_rows_without_secret() {
         let cfg = repo_cfg();
-        let v = rr3_model_list_snapshot(&cfg).unwrap();
+        let v = rr3_model_list(&cfg).unwrap();
         assert_eq!(v["active"], json!("DeepSeek官方"));
         let row = &v["models"][0];
         assert_eq!(row["name"], json!("DeepSeek官方"));
@@ -1125,7 +1120,7 @@ max_utterance_ms = 8000
             .as_object_mut()
             .unwrap()
             .remove("model");
-        let v = rr3_model_list_snapshot(&cfg).unwrap();
+        let v = rr3_model_list(&cfg).unwrap();
         assert_eq!(v, json!({ "models": [], "active": null }));
     }
 
@@ -1196,7 +1191,7 @@ max_utterance_ms = 8000
         let reply =
             rr3_model_set_arm(&mut cfg, &json!({"op": "delete", "name": "DeepSeek官方"})).unwrap();
         assert_eq!(reply["active"], json!("Qwen"));
-        let v = rr3_model_list_snapshot(&cfg).unwrap();
+        let v = rr3_model_list(&cfg).unwrap();
         assert_eq!(v["models"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }

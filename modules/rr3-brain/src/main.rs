@@ -48,10 +48,10 @@ fn rr3_brain_run() -> Result<(), String> {
     // 总线接入 + config 读取解析（收敛序列前四段在 rr3mod bootstrap，文案逐字）
     let (bus, mut cfg) = bootstrap(Rr3ModConfig {
         config_env: Some(RR3_BRAIN_CONFIG_ENV),
-        parse_config: boot::rr3_brain_config_parse,
+        parse_config: boot::rr3_brain_cfg_parse,
     })?;
     // config 路径投影（ADR-0023 模型行落盘）：与 bootstrap 实读同一解析单点
-    cfg.config_path = Some(boot::rr3_brain_config_path(Some(RR3_BRAIN_CONFIG_ENV))?);
+    cfg.config_path = Some(boot::rr3_brain_cfg_path(Some(RR3_BRAIN_CONFIG_ENV))?);
     eprintln!(
         "config 就绪: cloud timeout_s={} bus call={}s dialog max_utterance_ms={}",
         boot::rr3_py_float_repr(cfg.cloud_timeout_s),

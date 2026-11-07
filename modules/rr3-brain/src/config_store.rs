@@ -1,7 +1,7 @@
 //! 模型行落盘写面（ADR-0023，面板模型面 `rr3-brain/model/set` 的写盘半边）。
 //!
 //! 两条职责严格分开：
-//! - **块重写是纯函数**（[`rr3_model_block_rewrite`]）：只替换
+//! - **块重写是纯函数**（[`rr3_block_rewrite`]）：只替换
 //!   `[[rr3-brain.model]]` 块，块外文本逐字保留（cloud/bus/dialog 段与所有注释
 //!   不动，含表头前导小节注释）；无表时 EOF 追加。块内行间注释无处存放（模型行
 //!   是面板 CRUD 的对象），重写时随之丢弃。
@@ -10,7 +10,7 @@
 //!   rename）——断电时目标要么旧全量、要么新全量，无半截态。
 //!
 //! 落盘前的"新文本必须能被 boot 解析器吃下"由调用方（[`crate::rpc`]）先过
-//! [`crate::boot::rr3_brain_config_parse`]；本模块只负责文本形状与字节落地。
+//! [`crate::boot::rr3_brain_cfg_parse`]；本模块只负责文本形状与字节落地。
 
 use std::path::{Path, PathBuf};
 
@@ -34,7 +34,7 @@ fn rr3_toml_encode_str(s: &str) -> String {
 
 /// 渲染 `[[rr3-brain.model]]` 块（纯函数，行序即表序）。字符串字段缺失即跳过
 /// （`api_key_ref` 可空/可缺）；非字符串形状 Err 点名行号与键名。
-pub(crate) fn rr3_model_block_render(rows: &[Value]) -> Result<String, String> {
+pub(crate) fn rr3_block_render(rows: &[Value]) -> Result<String, String> {
     let mut blocks = Vec::with_capacity(rows.len());
     for (i, row) in rows.iter().enumerate() {
         let obj = row
@@ -60,7 +60,7 @@ pub(crate) fn rr3_model_block_render(rows: &[Value]) -> Result<String, String> {
 /// 定位 `[[rr3-brain.model]]` 块的字节区间 `[start, end)`：从首个行首
 /// `[[rr3-brain.model]]` 到下一个**别的**表头行（`[...]` 开头）之前；表到文件尾
 /// 则 end = 文本长度。无表返 None。多行表头本身不算块边界。
-fn rr3_model_block_bounds(text: &str) -> Option<(usize, usize)> {
+fn rr3_block_bounds(text: &str) -> Option<(usize, usize)> {
     let mut start: Option<usize> = None;
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {
@@ -85,9 +85,9 @@ fn rr3_model_block_bounds(text: &str) -> Option<(usize, usize)> {
 
 /// 用 `rows` 渲染的块替换 `full_text` 里的模型行块（纯函数）。无表 → EOF 追加
 /// （空行分隔，保证 TOML 合法）。块外文本逐字保留。
-pub(crate) fn rr3_model_block_rewrite(full_text: &str, rows: &[Value]) -> Result<String, String> {
-    let block = rr3_model_block_render(rows)?;
-    let Some((start, end)) = rr3_model_block_bounds(full_text) else {
+pub(crate) fn rr3_block_rewrite(full_text: &str, rows: &[Value]) -> Result<String, String> {
+    let block = rr3_block_render(rows)?;
+    let Some((start, end)) = rr3_block_bounds(full_text) else {
         let mut out = full_text.to_string();
         if !out.is_empty() && !out.ends_with('\n') {
             out.push('\n');
@@ -112,7 +112,7 @@ pub(crate) fn rr3_model_block_rewrite(full_text: &str, rows: &[Value]) -> Result
 
 /// 备份路径 = 原路径字面追加 `.bak`（`config.toml` → `config.toml.bak`；不用
 /// `with_extension`——它会把 `.toml` 换掉而不是追加）
-fn rr3_config_backup_path(path: &Path) -> PathBuf {
+fn rr3_cfg_backup_path(path: &Path) -> PathBuf {
     let mut s = path.as_os_str().to_os_string();
     s.push(".bak");
     PathBuf::from(s)
@@ -128,7 +128,7 @@ pub(crate) fn rr3_config_persist(
     if old_text == new_text {
         return Ok(());
     }
-    let bak = rr3_config_backup_path(path);
+    let bak = rr3_cfg_backup_path(path);
     std::fs::write(&bak, old_text).map_err(|e| format!("写备份 {} 失败: {e}", bak.display()))?;
     let file_name = path
         .file_name()
@@ -206,7 +206,7 @@ max_utterance_ms = 8000
                 false,
             ),
         ];
-        let new = rr3_model_block_rewrite(&old, &rows).unwrap();
+        let new = rr3_block_rewrite(&old, &rows).unwrap();
         // 块外文本（cloud 段注释、bus/dialog 段）逐字保留
         assert!(
             new.contains("# 主机根注释保留\nbase_url = \"https://api.siliconflow.cn\""),
@@ -232,7 +232,7 @@ max_utterance_ms = 8000
         // 但原来的"一行"（旧表体）被整体换掉，不会残留旧字段
         assert!(new.contains("# 模型行表头注释（块边界外，重写保留）\n[[rr3-brain.model]]\nname = \"DeepSeek官方\""), "{new}");
         // 结果可被 boot 解析（写盘前的最后一道门）
-        let cfg = crate::boot::rr3_brain_config_parse(&new).unwrap();
+        let cfg = crate::boot::rr3_brain_cfg_parse(&new).unwrap();
         assert_eq!(cfg.model.model_id, "deepseek-chat");
     }
 
@@ -240,7 +240,7 @@ max_utterance_ms = 8000
     #[test]
     fn rewrite_appends_table_when_absent() {
         let old = "[rr3-brain.cloud]\nbase_url = \"https://x\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n\n[rr3-brain.dialog]\nmax_utterance_ms = 8000";
-        let new = rr3_model_block_rewrite(
+        let new = rr3_block_rewrite(
             old,
             &[row(
                 "Qwen",
@@ -255,24 +255,24 @@ max_utterance_ms = 8000
             new.contains("max_utterance_ms = 8000\n\n[[rr3-brain.model]]"),
             "{new}"
         );
-        assert!(crate::boot::rr3_brain_config_parse(&new).is_ok());
+        assert!(crate::boot::rr3_brain_cfg_parse(&new).is_ok());
     }
 
     /// 空行表（删到零行）→ 块被整段摘除，文件仍合法（boot 走 cloud fallback）
     #[test]
     fn rewrite_removes_block_when_rows_empty() {
         let old = repo_text();
-        let new = rr3_model_block_rewrite(&old, &[]).unwrap();
+        let new = rr3_block_rewrite(&old, &[]).unwrap();
         assert!(!new.contains("[[rr3-brain.model]]"), "{new}");
         assert!(new.contains("[rr3-brain.bus]"), "{new}");
-        assert!(crate::boot::rr3_brain_config_parse(&new).is_ok());
+        assert!(crate::boot::rr3_brain_cfg_parse(&new).is_ok());
     }
 
     /// 字符串转义交给 toml 库（引号/反斜杠值不破坏 TOML），无表渲染为空串
     #[test]
     fn render_escapes_strings_and_handles_empty() {
-        assert_eq!(rr3_model_block_render(&[]).unwrap(), "");
-        let out = rr3_model_block_render(&[json!({
+        assert_eq!(rr3_block_render(&[]).unwrap(), "");
+        let out = rr3_block_render(&[json!({
             "name": "a\"b\\c",
             "mode": "api",
             "api_format": "openai",
@@ -293,7 +293,7 @@ max_utterance_ms = 8000
             Some("a\"b\\c")
         );
         // 缺 active 折 false（渲染面不猜"首行即 active"——那是写面策略）
-        let out = rr3_model_block_render(&[json!({
+        let out = rr3_block_render(&[json!({
             "name": "n",
             "base_url": "https://x/v1",
             "model_id": "m",
@@ -316,7 +316,7 @@ max_utterance_ms = 8000
             "glm-4.5",
             true,
         )];
-        let new = rr3_model_block_rewrite(&old, &rows).unwrap();
+        let new = rr3_block_rewrite(&old, &rows).unwrap();
         rr3_config_persist(&path, &old, &new).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), new);
         let bak = dir.join("config.toml.bak");
