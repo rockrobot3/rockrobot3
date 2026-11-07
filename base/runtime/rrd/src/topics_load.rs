@@ -1,7 +1,7 @@
 //! 所有权表装载：`contracts/topics.toml` 全集（生产真相）+ 仅测试的叠加层。
 //!
 //! 叠加层不是生产放行口（spec §6 / R6）：默认不加载；加载时由 main 打印绝对路径
-//! （`rr3_topics_absolute_path` 一次解析，装载与横幅共用）与新增条目清单；
+//! （`rr3_topics_abs` 一次解析，装载与横幅共用）与新增条目清单；
 //! 与契约 topic 撞名 → 拒绝启动；声明内建命名空间 `rr3-runtime/*` 的 topic → 同样拒绝。
 //! 两条路径（契约、叠加层）都在**本入口内**各自规范化一次（CF-4 / 遗留 ③），所以调用方
 //! 传相对原词也改不了"致命文案回显绝对路径"这一条；main 那次解析服务的是横幅凭证。
@@ -60,14 +60,14 @@ fn read_set(path: &Path, role: &str) -> Result<Rr3TopicSet, Vec<String>> {
 /// 只做一次，装载与横幅共用——横幅那行是"叠加层已生效"的可见凭证（spec §6），
 /// 按 CLI 原词回显会让凭证的内容依赖 CWD，等于没留。解析失败（路径不存在/不可读）
 /// 如实报错，绝不静默回落到原词。
-pub fn rr3_topics_absolute_path(path: &Path) -> Result<PathBuf, String> {
+pub fn rr3_topics_abs(path: &Path) -> Result<PathBuf, String> {
     std::fs::canonicalize(path)
         .map_err(|e| format!("路径 {} 无法解析为绝对路径: {e}", path.display()))
 }
 
 /// 契约路径进装载前先规范化（Task 7 评审遗留 CF-4）。
 ///
-/// **为什么这里用 `fs::canonicalize`，而套接字路径（`cli::rr3_socket_absolute_path`）用的是
+/// **为什么这里用 `fs::canonicalize`，而套接字路径（`cli::rr3_socket_abs`）用的是
 /// `std::path::absolute`**：契约主题表**必须已经存在**——它是 spec §6 的生产真相，
 /// `missing_contract_is_fatal` 钉死了"文件丢了就拒启动"。"不存在"在这条路径上是错误，
 /// 不是像待创建套接字那样的合法常态，所以 ENOENT 正是该如实报的那一条；反过来在套接字那边
@@ -75,11 +75,11 @@ pub fn rr3_topics_absolute_path(path: &Path) -> Result<PathBuf, String> {
 ///
 /// **为什么非规范化不可**：`RR3_CONTRACT_TOPICS_PATH` 由 `CARGO_MANIFEST_DIR` 拼出，字面就带
 /// `..`（`…/rrd/../../../contracts/topics.toml`），而 `main.rs` 只把**叠加层**路径绝对化
-/// （`rr3_topics_absolute_path`）、契约这条没走那一步——于是装载失败的致命文案里漏出 `..`：
+/// （`rr3_topics_abs`）、契约这条没走那一步——于是装载失败的致命文案里漏出 `..`：
 /// 运维照报错里的路径去查，那串 `..` 是按**他自己**的 CWD 展开的，指向的往往不是 rrd 刚读的那一份。
 /// 放在装载入口而不是 main，是为了让**每个**调用方（含测试与后续 sim 侧）都在同一口径上。
 /// canonicalize 失败与"读不到契约"是同一个前提、同一句文案，不静默回落原词。
-fn rr3_contract_resolved(contract: &Path) -> Result<PathBuf, Vec<String>> {
+fn rr3_contract_abs(contract: &Path) -> Result<PathBuf, Vec<String>> {
     std::fs::canonicalize(contract)
         .map_err(|e| vec![format!("读不到主题契约 {}: {e}", contract.display())])
 }
@@ -91,14 +91,14 @@ fn rr3_contract_resolved(contract: &Path) -> Result<PathBuf, Vec<String>> {
 /// 可能漏出相对原词（带 `..` 或裸文件名）：运维照报错里的路径去查，展开的是他自己的 CWD。
 /// 与契约那一条同理，"不存在"在叠加层这条路径上也是错误（它必须读得出来），所以
 /// `canonicalize` 的 ENOENT 正是该如实报的那一条，文案措辞与 `read_set` 的读失败保持一致。
-fn rr3_overlay_resolved(overlay: &Path) -> Result<PathBuf, Vec<String>> {
+fn rr3_overlay_abs(overlay: &Path) -> Result<PathBuf, Vec<String>> {
     std::fs::canonicalize(overlay)
         .map_err(|e| vec![format!("读不到主题叠加层 {}: {e}", overlay.display())])
 }
 
 /// 叠加层里出现内建命名空间的名字 = 冒充 rrd 的下行广播（spec §5.0）。
 /// 逐条点名；不命中的条目不受牵连。
-fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<String>> {
+fn rr3_reject_reserved(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<String>> {
     let errs: Vec<String> = set
         .rr3_topic_names()
         .iter()
@@ -133,7 +133,7 @@ fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<S
 /// 比对才抓得到（访问器 `Rr3TopicSet::rr3_topic_kind` 即为此而加）。
 /// 复验范围到 kind 为止：主题集只存 name→owner、name→kind 与 owner 名单，`stable`、
 /// `note` 那类注释性字段不在它的视图里，故本注释不称"全字段复验"。
-/// 与 `reject_reserved_namespace` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
+/// 与 `rr3_reject_reserved` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
 fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
     let mut errs: Vec<String> = merged
         .rr3_topic_check()
@@ -170,21 +170,21 @@ fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result
 
 /// 装载：契约 →（可选）叠加层合并。返回主题集与"叠加层新增的条目清单"。
 /// 两条路径都在进装载入口时被规范化（CF-4 契约 / 遗留 ③ 叠加层），后续所有文案都取
-/// 规范化后的那一个：`rr3_contract_resolved` 与 `rr3_overlay_resolved` 各管一条。
+/// 规范化后的那一个：`rr3_contract_abs` 与 `rr3_overlay_abs` 各管一条。
 /// 叠加层两道拒绝：撞名 → 点名冲突条目；声明 `rr3-runtime/*` → 点名冒充条目。
 /// 合并后还有一道：见 `reject_inconsistent_merge`。
 pub fn rr3_topics_load(
     contract: &Path,
     overlay: Option<&Path>,
 ) -> Result<(Rr3TopicSet, Vec<String>), Vec<String>> {
-    let contract = rr3_contract_resolved(contract)?;
+    let contract = rr3_contract_abs(contract)?;
     let base = read_set(&contract, "主题契约")?;
     let Some(ov) = overlay else {
         return Ok((base, Vec::new()));
     };
-    let ov = rr3_overlay_resolved(ov)?;
+    let ov = rr3_overlay_abs(ov)?;
     let ov_set = read_set(&ov, "主题叠加层")?;
-    reject_reserved_namespace(&ov_set, &ov)?;
+    rr3_reject_reserved(&ov_set, &ov)?;
     let added = ov_set.rr3_topic_names();
     let merged = base.rr3_topic_merge(&ov_set)?; // 撞名 → Err(冲突条目)
     reject_inconsistent_merge(&base, &merged)?;
@@ -361,7 +361,7 @@ owner = "rr3-sense"
     /// 那串 `..` 是按**他自己**的 CWD 展开的，指向的不是 rrd 刚读的那一份。
     /// 前提两条各自钉住，免得这条修法对着假想敌：① 生产常量 `RR3_CONTRACT_TOPICS_PATH`
     /// 字面就带 `..`（它由 `CARGO_MANIFEST_DIR` 拼出）；② 喂进装载入口的路径确实绕了 `..`。
-    /// 与 CF-3（套接字用 `std::path::absolute`）的分工见 `rr3_contract_resolved` 的注释：
+    /// 与 CF-3（套接字用 `std::path::absolute`）的分工见 `rr3_contract_abs` 的注释：
     /// 契约**必须已存在**，所以 canonicalize 在这里恰是对的工具，而 bind 前的套接字用它会误拒。
     #[test]
     fn contract_path_is_normalised_before_it_reaches_the_error_text() {
@@ -539,7 +539,7 @@ owner = "rr3-sima"
             "用例前提：喂进去的必须真是相对路径，收到 {rel:?}"
         );
 
-        let got = rr3_topics_absolute_path(&rel).expect("相对叠加层路径必须能解析");
+        let got = rr3_topics_abs(&rel).expect("相对叠加层路径必须能解析");
         assert!(
             got.is_absolute(),
             "横幅凭证必须是绝对路径，否则内容依赖 CWD，收到 {got:?}"
@@ -562,7 +562,7 @@ owner = "rr3-sima"
     /// 解析不了的路径要如实报错，不许悄悄回显原词（否则路径绝对化形同虚设）
     #[test]
     fn unresolvable_path_reports_instead_of_echoing() {
-        let e = rr3_topics_absolute_path(Path::new("no-such-dir/rr3-nope.toml"))
+        let e = rr3_topics_abs(Path::new("no-such-dir/rr3-nope.toml"))
             .expect_err("不存在的路径必须报错");
         assert!(
             e.contains("无法解析为绝对路径") && e.contains("rr3-nope.toml"),
@@ -575,7 +575,7 @@ owner = "rr3-sima"
     /// 故拦下它的只可能是保留命名空间规则，不是形状规则——两条规则各测各的。
     ///
     /// 遗留 ③ 的另一半实证：喂进去的是**带 `..` 的相对原词**，而致命文案里的路径必须是
-    /// 规范化后的那一份（`rr3_overlay_resolved`）。原先只有 `main.rs` 绝对化叠加层，装载入口
+    /// 规范化后的那一份（`rr3_overlay_abs`）。原先只有 `main.rs` 绝对化叠加层，装载入口
     /// 直接拿调用方给的原词做文案 → 运维照报错里的路径去查，展开的是他自己的 CWD。
     /// 与 `contract_path_is_normalised_before_it_reaches_the_error_text`（CF-4）同口径、同工具。
     #[test]

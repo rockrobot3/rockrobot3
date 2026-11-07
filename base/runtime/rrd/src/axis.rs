@@ -3,7 +3,7 @@
 //! 档案是行程的真值点（§1 坑 8 的收敛终点：config 侧字面量与板侧分轴字面量都要
 //! 改读这里，收敛接线在件五/件六）。本模块只做**装载机制**——白名单、全键必填
 //! （F-6）、类型派发、外键对账（F-4）、错误全收集；键级域界与自洽判据是策略，
-//! 逐键显式写在 [`rr3_act_profile_from_text`] 一处。角域 0..=180 这类**器件事实
+//! 逐键显式写在 [`rr3_act_prof_parse`] 一处。角域 0..=180 这类**器件事实
 //! 不硬编码进装载器**（F-5：文档示例值不进代码）。
 //!
 //! 键真值源 = `rr-hal-api` 的 [`rr_hal_api::RR3_ACT_PROFILE_FIELDS`] 十四键词表
@@ -98,7 +98,7 @@ fn rr3_bool_field(v: &toml::Value, errs: &mut Vec<String>, path: &str, key: &str
 /// 从档案文本装载一个轴（**机制面**：白名单 + F-6 全键必填 + 类型派发 + 外键
 /// 对账 + 错误全收集）。`path` 只进错误点名文案。红 = 返回全量错误清单
 /// （一次装载点名所有病灶，不挤牙膏）。
-pub fn rr3_act_profile_from_text(
+pub fn rr3_act_prof_parse(
     text: &str,
     path: &str,
     pin_ids: &BTreeSet<String>,
@@ -257,7 +257,7 @@ pub fn rr3_act_profile_from_text(
 /// 序列化：键序 = 十四键词表序（与 [`RR3_ACT_PROFILE_FIELDS`] 同序发射，测试
 /// 钉死）。平表、无注释——档案是机器读写的数据（面板 / 标定写入面），词表
 /// 注释归 rr-hal-api，这里不复制第二份。
-pub fn rr3_act_profile_to_toml(file: &Rr3AxisFile) -> String {
+pub fn rr3_act_prof_toml(file: &Rr3AxisFile) -> String {
     let p = &file.profile;
     let lines = [
         "schema = 1".to_string(),
@@ -285,8 +285,8 @@ pub fn rr3_act_profile_to_toml(file: &Rr3AxisFile) -> String {
 /// `.tmp` 后缀（counters 的 `counters.json.tmp` 同形）。消费面（产线写入
 /// axis_write / 测试）随写盘面 unix 门（批N9 件一补钉，counters.rs 同径）。
 #[cfg(unix)]
-pub fn rr3_act_profile_store(path: &Path, file: &Rr3AxisFile) -> Result<(), String> {
-    let body = rr3_act_profile_to_toml(file);
+pub fn rr3_act_prof_store(path: &Path, file: &Rr3AxisFile) -> Result<(), String> {
+    let body = rr3_act_prof_toml(file);
     let mut os = path.as_os_str().to_os_string();
     os.push(".tmp");
     rr3_atomic_store(path, &PathBuf::from(os), body.as_bytes())
@@ -304,7 +304,7 @@ pub fn rr3_act_profile_load(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(vec![format!("读 {} 失败: {e}", path.display())]),
     };
-    rr3_act_profile_from_text(&text, &path.display().to_string(), pin_ids).map(Some)
+    rr3_act_prof_parse(&text, &path.display().to_string(), pin_ids).map(Some)
 }
 
 #[cfg(test)]
@@ -356,7 +356,7 @@ mod tests {
     /// 解析 → 逐键值面断言；序列化键序 = 词表序；再装载 round-trip 逐键相等
     #[test]
     fn parse_and_serialize_round_trip_in_vocabulary_order() {
-        let f = rr3_act_profile_from_text(&sample_text(), "axis.toml", &sample_pin_ids())
+        let f = rr3_act_prof_parse(&sample_text(), "axis.toml", &sample_pin_ids())
             .expect("示例档应全绿");
         assert_eq!(f.pin, "act.axis.pwm.pan");
         let p = &f.profile;
@@ -371,7 +371,7 @@ mod tests {
         assert!(!p.calibrated);
         assert_eq!(p.source, Rr3ActSource::Manual);
 
-        let text = rr3_act_profile_to_toml(&f);
+        let text = rr3_act_prof_toml(&f);
         let keys: Vec<&str> = text
             .lines()
             .filter_map(|l| l.split('=').next())
@@ -379,8 +379,7 @@ mod tests {
             .collect();
         let vocab: Vec<&str> = RR3_ACT_PROFILE_FIELDS.iter().map(|f| f.key).collect();
         assert_eq!(keys, vocab, "发射键序必须与十四键词表同序");
-        let f2 =
-            rr3_act_profile_from_text(&text, "axis.toml", &sample_pin_ids()).expect("回读应全绿");
+        let f2 = rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect("回读应全绿");
         assert_eq!(f2, f, "round-trip 逐键一致");
     }
 
@@ -394,7 +393,7 @@ mod tests {
             .position(|l| l.starts_with("calibrated"))
             .unwrap();
         lines.remove(idx);
-        let errs = rr3_act_profile_from_text(&lines.join("\n"), "axis.toml", &sample_pin_ids())
+        let errs = rr3_act_prof_parse(&lines.join("\n"), "axis.toml", &sample_pin_ids())
             .expect_err("未知键 + 缺键应全数点名");
         assert_eq!(errs.len(), 2, "错误全收集：{errs:?}");
         assert!(errs.iter().any(|e| e.contains("未知键 extra_key")));
@@ -405,8 +404,8 @@ mod tests {
     #[test]
     fn pin_foreign_key_miss_is_red() {
         let text = sample_text().replace("act.axis.pwm.pan", "act.axis.pwm.unknown");
-        let errs = rr3_act_profile_from_text(&text, "axis.toml", &sample_pin_ids())
-            .expect_err("外键未命中应红");
+        let errs =
+            rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect_err("外键未命中应红");
         assert_eq!(errs.len(), 1);
         assert!(
             errs[0].contains("pin = \"act.axis.pwm.unknown\"") && errs[0].contains("F-4"),
@@ -418,7 +417,7 @@ mod tests {
     #[test]
     fn schema_mismatch_is_red() {
         let text = sample_text().replace("schema = 1", "schema = 2");
-        let errs = rr3_act_profile_from_text(&text, "axis.toml", &sample_pin_ids())
+        let errs = rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids())
             .expect_err("schema 版本不对应红");
         assert_eq!(errs.len(), 1);
         assert!(errs[0].contains("schema"), "{errs:?}");
@@ -428,7 +427,7 @@ mod tests {
     #[test]
     fn window_self_consistency_is_red() {
         let text = sample_text().replace("lo_deg = 60", "lo_deg = 90");
-        let errs = rr3_act_profile_from_text(&text, "axis.toml", &sample_pin_ids())
+        let errs = rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids())
             .expect_err("行程窗口自洽破应红");
         assert!(errs[0].contains("行程窗口自洽破"), "{errs:?}");
     }
@@ -437,11 +436,11 @@ mod tests {
     #[test]
     fn dir_sign_zero_and_out_of_domain_are_red() {
         let text = sample_text().replace("dir_sign = 1", "dir_sign = 0");
-        let errs = rr3_act_profile_from_text(&text, "axis.toml", &sample_pin_ids())
+        let errs = rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids())
             .expect_err("dir_sign = 0 应红");
         assert!(errs[0].contains("dir_sign = 0"), "{errs:?}");
         let text = sample_text().replace("dir_sign = 1", "dir_sign = 2");
-        let errs = rr3_act_profile_from_text(&text, "axis.toml", &sample_pin_ids())
+        let errs = rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids())
             .expect_err("dir_sign = 2 应红");
         assert!(errs[0].contains("越域"), "{errs:?}");
     }
@@ -450,8 +449,8 @@ mod tests {
     #[test]
     fn hold_word_out_of_vocabulary_is_red() {
         let text = sample_text().replace("hold = \"release\"", "hold = \"auto\"");
-        let errs = rr3_act_profile_from_text(&text, "axis.toml", &sample_pin_ids())
-            .expect_err("词表外应红");
+        let errs =
+            rr3_act_prof_parse(&text, "axis.toml", &sample_pin_ids()).expect_err("词表外应红");
         assert!(errs[0].contains("hold = \"auto\" 不在册"), "{errs:?}");
     }
 
@@ -460,8 +459,8 @@ mod tests {
     fn store_then_load_round_trips_without_tmp_leftover() {
         let dir = tmpdir("round");
         let path = dir.join("pan.toml");
-        let f = rr3_act_profile_from_text(&sample_text(), "axis.toml", &sample_pin_ids()).unwrap();
-        rr3_act_profile_store(&path, &f).expect("落盘应成功");
+        let f = rr3_act_prof_parse(&sample_text(), "axis.toml", &sample_pin_ids()).unwrap();
+        rr3_act_prof_store(&path, &f).expect("落盘应成功");
         assert!(
             !dir.join("pan.toml.tmp").exists(),
             "原子写序走完不得留 tmp 残留"

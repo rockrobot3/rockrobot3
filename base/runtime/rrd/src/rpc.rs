@@ -110,7 +110,7 @@ pub struct Rr3RpcRequest {
 }
 
 /// 解析上行 RPC。错误码走契约的 AIRY_E* 子集，不自造。
-pub fn rr3_rpc_parse_request(payload: &[u8]) -> Result<Rr3RpcRequest, (i32, String)> {
+pub fn rr3_rpc_parse(payload: &[u8]) -> Result<Rr3RpcRequest, (i32, String)> {
     let text = std::str::from_utf8(payload).map_err(|e| {
         (
             Rr3StatusCode::Invalid as i32,
@@ -168,7 +168,7 @@ fn param_str(params: &Value, key: &str) -> Result<String, (i32, String)> {
         })
 }
 
-pub fn rr3_rpc_manifest_param(params: &Value) -> Result<String, (i32, String)> {
+pub fn rr3_rpc_manifest(params: &Value) -> Result<String, (i32, String)> {
     param_str(params, "manifest")
 }
 
@@ -191,7 +191,7 @@ pub fn rr3_rpc_call_params(params: &Value) -> Result<(String, Value), (i32, Stri
 /// - 合法键值（非空字符串键 + `as_u64`）逐对收；**非法值静默跳过**——计数是运维账，
 ///   脏键值不值得让一拍心跳折错误（心跳失败 = 模块 exit，客户端侧语义太重）。
 ///   聚合与键归属归 conn/registry，这里只做形状拆包。
-pub fn rr3_rpc_heartbeat_counters(params: &Value) -> Option<BTreeMap<String, u64>> {
+pub fn rr3_rpc_counters(params: &Value) -> Option<BTreeMap<String, u64>> {
     let obj = params.get("counters")?.as_object()?;
     let mut out = BTreeMap::new();
     for (k, v) in obj {
@@ -223,7 +223,7 @@ pub fn rr3_rpc_build_error(id: u64, code: Rr3StatusCode, message: &str) -> Vec<u
     .expect("serde_json 序列化自身构造的值不会失败")
 }
 
-pub fn rr3_rpc_status_for_register(e: &Rr3RegisterError) -> Rr3StatusCode {
+pub fn rr3_rpc_reg_status(e: &Rr3RegisterError) -> Rr3StatusCode {
     match e {
         Rr3RegisterError::Duplicate { .. } | Rr3RegisterError::Capacity { .. } => {
             Rr3StatusCode::Busy
@@ -232,7 +232,7 @@ pub fn rr3_rpc_status_for_register(e: &Rr3RegisterError) -> Rr3StatusCode {
     }
 }
 
-pub fn rr3_rpc_status_for_publish_deny(e: &Rr3PublishDeny) -> Rr3StatusCode {
+pub fn rr3_rpc_deny_status(e: &Rr3PublishDeny) -> Rr3StatusCode {
     match e {
         Rr3PublishDeny::ReservedNamespace { .. } | Rr3PublishDeny::ForeignPrefix { .. } => {
             Rr3StatusCode::Permission
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn parses_three_upstream_methods() {
         for m in ["rr3.register", "rr3.heartbeat", "rr3.unregister"] {
-            let got = rr3_rpc_parse_request(&bytes(
+            let got = rr3_rpc_parse(&bytes(
                 json!({"jsonrpc":"2.0","id":7,"method":m,"params":{}}),
             ))
             .unwrap_or_else(|e| panic!("{m} 应能解析: {e:?}"));
@@ -282,7 +282,7 @@ mod tests {
         ] {
             // `bytes` 按值收 Value，而下一行的断言消息还要用 `{v}` 指名是哪一样，
             // 故此处传克隆（不克隆就是 E0382 borrow-after-move）。
-            let (code, msg) = rr3_rpc_parse_request(&bytes(v.clone())).expect_err("畸形必须拒");
+            let (code, msg) = rr3_rpc_parse(&bytes(v.clone())).expect_err("畸形必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid as i32, "{v}");
             assert!(msg.contains(hint), "文案缺 {hint}: {msg}");
         }
@@ -291,7 +291,7 @@ mod tests {
     /// 未知方法必须拒（不许当 no-op 放行）
     #[test]
     fn rejects_unknown_method() {
-        let (code, msg) = rr3_rpc_parse_request(&bytes(
+        let (code, msg) = rr3_rpc_parse(&bytes(
             json!({"jsonrpc":"2.0","id":1,"method":"rr3.shUTDOWN","params":{}}),
         ))
         .expect_err("未知方法必须拒");
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn rejects_bad_payloads() {
         for bad in [vec![0xFFu8, 0xFE], b"{".to_vec(), Vec::new()] {
-            let (code, _) = rr3_rpc_parse_request(&bad).expect_err("坏 payload 必须拒");
+            let (code, _) = rr3_rpc_parse(&bad).expect_err("坏 payload 必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid as i32);
         }
     }
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn manifest_param_is_strict() {
         assert_eq!(
-            rr3_rpc_manifest_param(&json!({"name":"rr3-sima","manifest":"[manifest]\n"})).unwrap(),
+            rr3_rpc_manifest(&json!({"name":"rr3-sima","manifest":"[manifest]\n"})).unwrap(),
             "[manifest]\n"
         );
         for v in [
@@ -320,7 +320,7 @@ mod tests {
             json!({"manifest":5}),
             json!({"manifest":""}),
         ] {
-            let (code, msg) = rr3_rpc_manifest_param(&v).expect_err("{v} 必须拒");
+            let (code, msg) = rr3_rpc_manifest(&v).expect_err("{v} 必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid as i32);
             assert!(msg.contains("params.manifest"), "{msg}");
         }
@@ -340,7 +340,7 @@ mod tests {
     /// 第 4 个上行方法：rr3.call 能解析（方法名走 rr-bus 的唯一真值点）
     #[test]
     fn parses_call_method() {
-        let got = rr3_rpc_parse_request(&bytes(json!({
+        let got = rr3_rpc_parse(&bytes(json!({
             "jsonrpc":"2.0","id":3,"method":rr_bus::RR3_METHOD_CALL,
             "params":{"topic":"rr3-interact/tts/text","args":{"text":"hi"}}
         })))
@@ -366,7 +366,7 @@ mod tests {
             "rr3.ctl.contracts",
             "rr3.ctl.domain.set",
         ] {
-            let got = rr3_rpc_parse_request(&bytes(
+            let got = rr3_rpc_parse(&bytes(
                 json!({"jsonrpc":"2.0","id":5,"method":m,"params":{}}),
             ))
             .unwrap_or_else(|e| panic!("{m} 应能解析: {e:?}"));
@@ -383,22 +383,22 @@ mod tests {
     /// 合法键值逐对收；非法值与空键静默跳过（脏拍不折心跳错误）
     #[test]
     fn heartbeat_counters_param_is_optional_and_lenient() {
-        assert!(rr3_rpc_heartbeat_counters(&json!({})).is_none(), "缺省字段");
+        assert!(rr3_rpc_counters(&json!({})).is_none(), "缺省字段");
         assert!(
-            rr3_rpc_heartbeat_counters(&json!({"counters": {}})).is_none(),
+            rr3_rpc_counters(&json!({"counters": {}})).is_none(),
             "空映射等价无上报"
         );
         assert!(
-            rr3_rpc_heartbeat_counters(&json!({"counters": 3})).is_none(),
+            rr3_rpc_counters(&json!({"counters": 3})).is_none(),
             "非对象忽略"
         );
-        let got = rr3_rpc_heartbeat_counters(&json!({
+        let got = rr3_rpc_counters(&json!({
             "counters": {"asr_ok": 2, "asr_fail": 0}
         }))
         .expect("合法映射应拆出");
         assert_eq!(got["asr_ok"], 2);
         assert_eq!(got["asr_fail"], 0, "0 也是合法计数值");
-        let got = rr3_rpc_heartbeat_counters(&json!({
+        let got = rr3_rpc_counters(&json!({
             "counters": {"ok": 1, "bad": "x", "": 5, "neg": -3}
         }))
         .expect("有合法键值即拆出");
@@ -458,18 +458,18 @@ mod tests {
     fn register_error_maps_to_status_code() {
         use crate::registry::Rr3RegisterError;
         assert_eq!(
-            rr3_rpc_status_for_register(&Rr3RegisterError::Duplicate {
+            rr3_rpc_reg_status(&Rr3RegisterError::Duplicate {
                 name: "a".into(),
                 src_task: 2
             }),
             Rr3StatusCode::Busy
         );
         assert_eq!(
-            rr3_rpc_status_for_register(&Rr3RegisterError::Capacity { limit: 16 }),
+            rr3_rpc_reg_status(&Rr3RegisterError::Capacity { limit: 16 }),
             Rr3StatusCode::Busy
         );
         assert_eq!(
-            rr3_rpc_status_for_register(&Rr3RegisterError::ReservedName {
+            rr3_rpc_reg_status(&Rr3RegisterError::ReservedName {
                 name: "rr3-runtime".into()
             }),
             Rr3StatusCode::Permission
@@ -481,13 +481,11 @@ mod tests {
     fn publish_deny_maps_to_status_code() {
         use crate::registry::Rr3PublishDeny;
         assert_eq!(
-            rr3_rpc_status_for_publish_deny(&Rr3PublishDeny::ReservedNamespace {
-                topic: "t".into()
-            }),
+            rr3_rpc_deny_status(&Rr3PublishDeny::ReservedNamespace { topic: "t".into() }),
             Rr3StatusCode::Permission
         );
         assert_eq!(
-            rr3_rpc_status_for_publish_deny(&Rr3PublishDeny::ForeignPrefix {
+            rr3_rpc_deny_status(&Rr3PublishDeny::ForeignPrefix {
                 topic: "t".into(),
                 owner: "o".into(),
                 sender: "s".into()
@@ -495,7 +493,7 @@ mod tests {
             Rr3StatusCode::Permission
         );
         assert_eq!(
-            rr3_rpc_status_for_publish_deny(&Rr3PublishDeny::NotRegistered { topic: "t".into() }),
+            rr3_rpc_deny_status(&Rr3PublishDeny::NotRegistered { topic: "t".into() }),
             Rr3StatusCode::Invalid
         );
     }

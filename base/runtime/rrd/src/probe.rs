@@ -15,7 +15,7 @@
 //!   格位恒缺（不冒充在位，fail-closed）；无硬件面可反证的格位与真值探测同判"在位"。
 //! - [`Rr3SimProbe`]：**显式档，不再当缺省构造**——sim 机无硬件可探，只在 test 面、
 //!   显式 env（`RR3_PROBE=sim`，e2e/开发机用）与显式注入
-//!   （`rr3_profile_boot_inputs_with_probe`）里用。
+//!   （`rr3_boot_with_probe`）里用。
 //!
 //! 选择口（[`rr3_probe_default`]）与 `RR3_HAL_BACKEND` 同一条纪律：**env 显式取值优先**
 //! （`RR3_PROBE=sim|linux|absent`，取值不认当场 `eprintln!` 点名后回落平台默认），
@@ -108,7 +108,7 @@ impl Rr3LinuxProbe {
     /// 装机档 `addr` → sysfs 器件节点词形（内核约定：`<bus>-<7位地址4位小写16进制>`，
     /// 如 `1-0040`）。"0x" 前缀认、越出 7 位地址域（>0x7F）不认——词形解析失败
     /// = 拿不到答案 = 缺（fail-closed，不回落总线级冒充在位）。
-    fn rr3_i2c_addr_sysfs_word(addr: &str) -> Option<String> {
+    fn rr3_i2c_addr_word(addr: &str) -> Option<String> {
         let hex = addr
             .strip_prefix("0x")
             .or_else(|| addr.strip_prefix("0X"))?;
@@ -152,7 +152,7 @@ impl Rr3Probe for Rr3LinuxProbe {
     fn rr3_probe_slot_bound(&self, slot: &str, bus: Option<u32>, addr: Option<&str>) -> bool {
         match (rr3_slot_probe_face(slot), bus, addr) {
             (Some(Rr3ProbeFace::I2c), Some(n), Some(a)) => {
-                let Some(word) = Self::rr3_i2c_addr_sysfs_word(a) else {
+                let Some(word) = Self::rr3_i2c_addr_word(a) else {
                     return false; // 词形解析失败 = 拿不到答案 = 缺（fail-closed）
                 };
                 // 前置条件：该具体总线的设备节点在（n 由装机档 controller 词形

@@ -3,10 +3,10 @@
 //! 必须携带证据引用"）。
 //!
 //! 职责边界（机制与策略分离）：**机制**全在别处单点——文本手术在
-//! [`crate::profile::rr3_domain_keys_apply`] / [`crate::profile::rr3_toml_key_line_apply`]，
+//! [`crate::profile::rr3_domain_apply`] / [`crate::profile::rr3_key_line_apply`]，
 //! 原子落盘在 `rr_ipc::persist::rr3_atomic_store`（re-export 单点
 //! [`crate::counters::rr3_atomic_store`]），装载判据在 [`crate::profile::
-//! rr3_profile_boot_inputs`]（与 boot 正门同一份裁决，写面不重复判业务合法性），
+//! rr3_boot_inputs`]（与 boot 正门同一份裁决，写面不重复判业务合法性），
 //! 证据四道核在 `rr_ipc::evidence`（唯一实现，§6.1 纪律），轴档全判据＋落盘在
 //! [`crate::axis_write::rr3_axis_write_run`]（§7"落盘只许有一份实现"，第二条写
 //! 路径即红——本模块是它的第二个接线位，不是第二份实现）。**本模块只持写编排
@@ -77,9 +77,7 @@ pub struct Rr3DomainWriteParams {
 
 /// params 拆包＋形状核（跨平台纯函数）。confirm 门不在本层（它是权限语义，
 /// 归 execute 的门序；parse 只裁"形状合不合法"）。错误码全 Invalid（参数形状病）。
-pub fn rr3_domain_write_parse(
-    params: &Value,
-) -> Result<Rr3DomainWriteParams, (Rr3StatusCode, String)> {
+pub fn rr3_write_parse(params: &Value) -> Result<Rr3DomainWriteParams, (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let target = match params.get("target").and_then(Value::as_str) {
         Some("domain") => Rr3WriteTarget::Domain,
@@ -157,9 +155,7 @@ pub struct Rr3DomainWritePaths {
 
 /// 从真值集记账行推导写口路径集（跨平台纯函数）。topics.toml 不取（装载链
 /// 内部按 contracts 目录读）。
-pub fn rr3_domain_write_paths(
-    truth_set: &[Rr3TruthSetEntry],
-) -> Result<Rr3DomainWritePaths, String> {
+pub fn rr3_write_paths(truth_set: &[Rr3TruthSetEntry]) -> Result<Rr3DomainWritePaths, String> {
     let mut profile = None;
     let mut slots = None;
     let mut roles = None;
@@ -218,7 +214,7 @@ fn rr3_evidence_root(profile_path: &std::path::Path) -> PathBuf {
 
 /// 证据引用门（B-15 ③）：必填形状 + 四道核（`rr-ipc::evidence` 唯一实现）。
 /// 核败 = Permission 拒写（安全写不带合法证据就是无权写）。
-fn rr3_write_evidence_gate(
+fn rr3_write_evidence(
     profile_path: &std::path::Path,
     reference: &str,
 ) -> Result<(), (Rr3StatusCode, String)> {
@@ -238,7 +234,7 @@ fn rr3_write_evidence_gate(
 /// 证据引用门 → 文本手术 → tmp 落盘 → 装载链全量预核（Err 即拒写清 tmp，
 /// 零字节进正档）→ 原子写回 → 契约记账重记 → 审计留痕。
 #[cfg(unix)]
-pub fn rr3_domain_write_execute(
+pub fn rr3_write_execute(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
 ) -> Result<Value, (Rr3StatusCode, String)> {
@@ -252,8 +248,8 @@ pub fn rr3_domain_write_execute(
         ));
     }
     match params.target {
-        Rr3WriteTarget::Domain => rr3_domain_write_domain(paths, params),
-        Rr3WriteTarget::Axis => rr3_domain_write_axis(paths, params),
+        Rr3WriteTarget::Domain => rr3_write_domain(paths, params),
+        Rr3WriteTarget::Axis => rr3_write_axis(paths, params),
     }
 }
 
@@ -267,7 +263,7 @@ impl Rr3DomainWriteParams {
 /// domain 落点写编排（`[[supplies.domain]]` 域块键行手术 → 装载预核 → 原子写回
 /// → 记账重记）。
 #[cfg(unix)]
-fn rr3_domain_write_domain(
+fn rr3_write_domain(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
 ) -> Result<Value, (Rr3StatusCode, String)> {
@@ -276,7 +272,7 @@ fn rr3_domain_write_domain(
     let text = std::fs::read_to_string(&paths.profile)
         .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
     // 旧值提取（域缺拒——写面不做新域注册）：从装载域拿（与 boot 同一解析器）
-    let profile = crate::profile::rr3_profile_from_text(&text).map_err(|errs| {
+    let profile = crate::profile::rr3_profile_parse(&text).map_err(|errs| {
         invalid(format!(
             "装配单 {} 形状不合: {}",
             paths.profile.display(),
@@ -306,7 +302,7 @@ fn rr3_domain_write_domain(
                         .to_string(),
                 )
             })?;
-            rr3_write_evidence_gate(&paths.profile, &ev)?;
+            rr3_write_evidence(&paths.profile, &ev)?;
             (
                 json!(dom.armed),
                 vec![
@@ -326,15 +322,15 @@ fn rr3_domain_write_domain(
             let ev = params.evidence.clone().ok_or_else(|| {
                 perm("severe_mv 安全写必携证据引用 params.evidence（B-15 ③）".to_string())
             })?;
-            rr3_write_evidence_gate(&paths.profile, &ev)?;
+            rr3_write_evidence(&paths.profile, &ev)?;
             (json!(dom.severe_mv), vec![("severe_mv", n.to_string())])
         }
         _ => unreachable!("parse 层白名单已裁，值型与键必配"),
     };
     // 手术 → tmp 落盘 → 装载链全量预核（与 boot 正门同一份裁决；Err 即拒写清 tmp）
     let update_refs: Vec<(&str, &str)> = updates.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let new_text = crate::profile::rr3_domain_keys_apply(&text, &params.name, &update_refs)
-        .map_err(invalid)?;
+    let new_text =
+        crate::profile::rr3_domain_apply(&text, &params.name, &update_refs).map_err(invalid)?;
     let stem = paths
         .profile
         .file_stem()
@@ -345,7 +341,7 @@ fn rr3_domain_write_domain(
         .with_file_name(format!("{stem}.tmp-write.toml"));
     std::fs::write(&tmp, new_text.as_bytes())
         .map_err(|e| invalid(format!("写临时档 {} 失败: {e}", tmp.display())))?;
-    let boot = match crate::profile::rr3_profile_boot_inputs(
+    let boot = match crate::profile::rr3_boot_inputs(
         &tmp,
         &paths.slots,
         &paths.roles,
@@ -374,13 +370,13 @@ fn rr3_domain_write_domain(
     let contracts_dir = paths.slots.parent().map(PathBuf::from);
     let mut relogged = true;
     if let Some(dir) = contracts_dir {
-        match crate::contracts::rr3_contracts_snapshot_capture(
+        match crate::contracts::rr3_contracts_scan(
             &paths.profile,
             &dir,
             &paths.wiring,
             &boot.platform_chip,
         )
-        .and_then(crate::contracts::rr3_contracts_snapshot_replace)
+        .and_then(crate::contracts::rr3_contracts_rebook)
         {
             Ok(()) => {}
             Err(e) => {
@@ -421,7 +417,7 @@ fn rr3_domain_write_domain(
 /// 路径即红"）——本函数只做"读旧档 → 单键手术 → 产 tmp 候选档"，十四键全判据、
 /// 原子落盘、副本拒全部归它。
 #[cfg(unix)]
-fn rr3_domain_write_axis(
+fn rr3_write_axis(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
 ) -> Result<Value, (Rr3StatusCode, String)> {
@@ -447,7 +443,7 @@ fn rr3_domain_write_axis(
     // axis_write_run 的"坏目标不覆盖"在下游还会挡一道，这里先点名）
     let text = std::fs::read_to_string(&paths.profile)
         .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
-    let profile = crate::profile::rr3_profile_from_text(&text).map_err(|errs| {
+    let profile = crate::profile::rr3_profile_parse(&text).map_err(|errs| {
         invalid(format!(
             "装配单 {} 形状不合: {}",
             paths.profile.display(),
@@ -472,9 +468,9 @@ fn rr3_domain_write_axis(
             "current_ceil_ma 安全写必携证据引用 params.evidence（B-15 ③）".to_string(),
         )
     })?;
-    rr3_write_evidence_gate(&paths.profile, &ev)?;
+    rr3_write_evidence(&paths.profile, &ev)?;
     // 单键手术 → tmp 候选档 → 复用产线写入面（全判据＋原子落盘＋副本拒单点）
-    let new_text = crate::profile::rr3_toml_key_line_apply(
+    let new_text = crate::profile::rr3_key_line_apply(
         &std::fs::read_to_string(&axis_path)
             .map_err(|e| invalid(format!("读不到轴档 {}: {e}", axis_path.display())))?,
         "current_ceil_ma",
@@ -518,18 +514,18 @@ fn rr3_domain_write_axis(
 /// 调试路径）如实回不可得——无记账即无路径依据，写口不猜路径。
 #[cfg(unix)]
 pub fn rr3_domain_write_run(params: &Value) -> Result<Value, (Rr3StatusCode, String)> {
-    let parsed = rr3_domain_write_parse(params)?;
+    let parsed = rr3_write_parse(params)?;
     let mut p = parsed.clone();
     p.confirm = Rr3DomainWriteParams::confirm_from(params);
-    let Some(snap) = crate::contracts::rr3_contracts_snapshot() else {
+    let Some(snap) = crate::contracts::rr3_contracts_snap() else {
         return Err((
             Rr3StatusCode::Permission,
             "契约记账未在册（--manifest 调试路径无装配单），写口不可得——请以 --profile 启动"
                 .to_string(),
         ));
     };
-    let paths = rr3_domain_write_paths(&snap.truth_set).map_err(|e| (Rr3StatusCode::Invalid, e))?;
-    rr3_domain_write_execute(&paths, &p)
+    let paths = rr3_write_paths(&snap.truth_set).map_err(|e| (Rr3StatusCode::Invalid, e))?;
+    rr3_write_execute(&paths, &p)
 }
 
 #[cfg(test)]
@@ -540,7 +536,7 @@ mod tests {
     /// parse 正例：三写口各自合法形状全收（armed 布尔、severe_mv/current_ceil_ma 正整数）
     #[test]
     fn parse_accepts_three_named_writes() {
-        let p = rr3_domain_write_parse(&json!({
+        let p = rr3_write_parse(&json!({
             "target": "domain", "name": "rail5v", "key": "armed",
             "value": true, "confirm": true, "evidence": "实测/0002"
         }))
@@ -550,14 +546,14 @@ mod tests {
         assert_eq!(p.value, Rr3WriteValue::Bool(true));
         assert_eq!(p.evidence.as_deref(), Some("实测/0002"));
 
-        let p = rr3_domain_write_parse(&json!({
+        let p = rr3_write_parse(&json!({
             "target": "domain", "name": "rail5v", "key": "severe_mv",
             "value": 4200, "confirm": true, "evidence": "实测/0001"
         }))
         .expect("severe_mv 写应过");
         assert_eq!(p.value, Rr3WriteValue::Num(4200));
 
-        let p = rr3_domain_write_parse(&json!({
+        let p = rr3_write_parse(&json!({
             "target": "axis", "name": "pan", "key": "current_ceil_ma",
             "value": 700, "confirm": true, "evidence": "对拍/0001"
         }))
@@ -597,7 +593,7 @@ mod tests {
                 "正整数",
             ),
         ] {
-            let (code, msg) = rr3_domain_write_parse(&v).expect_err("坏形状必须拒");
+            let (code, msg) = rr3_write_parse(&v).expect_err("坏形状必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid, "{v}");
             assert!(msg.contains(hint), "文案缺 {hint}: {msg}");
         }
@@ -621,7 +617,7 @@ mod tests {
                 "/x/hardware/esp32-mini/wiring.toml",
             ),
         ];
-        let p = rr3_domain_write_paths(&ts).expect("七成员应推全六路");
+        let p = rr3_write_paths(&ts).expect("七成员应推全六路");
         assert_eq!(p.profile, PathBuf::from("/x/profiles/esp32-mini.toml"));
         assert_eq!(p.slots, PathBuf::from("/x/contracts/slots.toml"));
         assert_eq!(p.platform_dir, PathBuf::from("/x/contracts/platform"));
@@ -634,13 +630,13 @@ mod tests {
     /// 路径推导缺员逐条点名（fail-closed——记账形状破不猜路径）
     #[test]
     fn paths_reject_missing_members_by_name() {
-        let e = rr3_domain_write_paths(&[]).expect_err("空记账必须拒");
+        let e = rr3_write_paths(&[]).expect_err("空记账必须拒");
         assert!(e.contains("profiles/<stem>.toml"), "{e}");
         let ts = vec![ts_entry(
             "profiles/esp32-mini.toml",
             "/x/profiles/esp32-mini.toml",
         )];
-        let e = rr3_domain_write_paths(&ts).expect_err("缺契约册必须拒");
+        let e = rr3_write_paths(&ts).expect_err("缺契约册必须拒");
         assert!(e.contains("contracts/slots.toml"), "{e}");
     }
 
@@ -858,9 +854,9 @@ gnd_common = "star-1"
         fn rejects_without_confirm_and_writes_nothing() {
             let fx = fixture();
             let before = std::fs::read_to_string(&fx.paths.profile).unwrap();
-            let mut p = rr3_domain_write_parse(&params_armed_true()).unwrap();
+            let mut p = rr3_write_parse(&params_armed_true()).unwrap();
             p.confirm = None;
-            let (code, msg) = rr3_domain_write_execute(&fx.paths, &p).expect_err("无确认必须拒");
+            let (code, msg) = rr3_write_execute(&fx.paths, &p).expect_err("无确认必须拒");
             assert_eq!(code, Rr3StatusCode::Permission);
             assert!(msg.contains("二次确认"), "{msg}");
             let after = std::fs::read_to_string(&fx.paths.profile).unwrap();
@@ -874,19 +870,19 @@ gnd_common = "star-1"
             let fx = fixture();
             let before = std::fs::read_to_string(&fx.paths.profile).unwrap();
             // 文件缺（形制合法但四道核第二道红）
-            let mut p = rr3_domain_write_parse(&params_armed_true()).unwrap();
+            let mut p = rr3_write_parse(&params_armed_true()).unwrap();
             p.confirm = Some(true);
-            let (code, msg) = rr3_domain_write_execute(&fx.paths, &p).expect_err("证据缺必须拒");
+            let (code, msg) = rr3_write_execute(&fx.paths, &p).expect_err("证据缺必须拒");
             assert_eq!(code, Rr3StatusCode::Permission);
             assert!(msg.contains("证据引用核验不过"), "{msg}");
             // 形制坏
-            let mut p = rr3_domain_write_parse(&json!({
+            let mut p = rr3_write_parse(&json!({
                 "target": "domain", "name": "rail5v", "key": "armed",
                 "value": true, "evidence": "not-a-ref"
             }))
             .unwrap();
             p.confirm = Some(true);
-            let (code, _) = rr3_domain_write_execute(&fx.paths, &p).expect_err("形制坏必须拒");
+            let (code, _) = rr3_write_execute(&fx.paths, &p).expect_err("形制坏必须拒");
             assert_eq!(code, Rr3StatusCode::Permission);
             assert_eq!(
                 before,
@@ -910,9 +906,9 @@ gnd_common = "star-1"
                 .replace("sense = \"none\"", "sense = \"power.charger.meter\"")
                 .replace("max_age_ms = 0", "max_age_ms = 30000");
             std::fs::write(&fx.paths.profile, text).unwrap();
-            let mut p = rr3_domain_write_parse(&params_armed_true()).unwrap();
+            let mut p = rr3_write_parse(&params_armed_true()).unwrap();
             p.confirm = Some(true);
-            let v = rr3_domain_write_execute(&fx.paths, &p).expect("合法过写应成功");
+            let v = rr3_write_execute(&fx.paths, &p).expect("合法过写应成功");
             assert_eq!(v["ok"], true);
             assert_eq!(v["old"], false);
             assert_eq!(v["new"], true);
@@ -928,13 +924,13 @@ gnd_common = "star-1"
         fn severe_mv_write_touches_target_line_only() {
             let fx = fixture();
             write_evidence(&fx.dir, "实测", 1);
-            let mut p = rr3_domain_write_parse(&json!({
+            let mut p = rr3_write_parse(&json!({
                 "target": "domain", "name": "rail5v", "key": "severe_mv",
                 "value": 4300, "evidence": "实测/0001"
             }))
             .unwrap();
             p.confirm = Some(true);
-            let v = rr3_domain_write_execute(&fx.paths, &p).expect("合法过写应成功");
+            let v = rr3_write_execute(&fx.paths, &p).expect("合法过写应成功");
             assert_eq!(v["old"], 4400);
             assert_eq!(v["new"], 4300);
             let after = std::fs::read_to_string(&fx.paths.profile).unwrap();
@@ -955,9 +951,9 @@ gnd_common = "star-1"
             let fx = fixture();
             write_evidence(&fx.dir, "实测", 1);
             let before = std::fs::read_to_string(&fx.paths.profile).unwrap();
-            let mut p = rr3_domain_write_parse(&params_armed_true()).unwrap();
+            let mut p = rr3_write_parse(&params_armed_true()).unwrap();
             p.confirm = Some(true);
-            let (code, msg) = rr3_domain_write_execute(&fx.paths, &p).expect_err("预核红必须拒");
+            let (code, msg) = rr3_write_execute(&fx.paths, &p).expect_err("预核红必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid);
             assert!(msg.contains("预核不过"), "{msg}");
             assert!(msg.contains("⑥-c"), "预核红须点名装载链判据: {msg}");
@@ -989,13 +985,13 @@ gnd_common = "star-1"
                 "schema = 1\npin = \"act.axis.pwm.pan\"\ncenter_deg = 90\nlo_deg = 60\nhi_deg = 120\ndir_sign = 1\nslew_deg_s = 100\nsettle_ms = 200\nhold = \"release\"\ncurrent_ceil_ma = 750\nwarmup_ms = 0\nhard_stop = \"yes\"\ncalibrated = true\nsource = \"manual\"\n",
             )
             .unwrap();
-            let mut p = rr3_domain_write_parse(&json!({
+            let mut p = rr3_write_parse(&json!({
                 "target": "axis", "name": "pan", "key": "current_ceil_ma",
                 "value": 700, "evidence": "对拍/0001"
             }))
             .unwrap();
             p.confirm = Some(true);
-            let v = rr3_domain_write_execute(&fx.paths, &p).expect("axis 过写应成功");
+            let v = rr3_write_execute(&fx.paths, &p).expect("axis 过写应成功");
             assert_eq!(v["old"], 750);
             assert_eq!(v["new"], 700);
             assert_eq!(v["effective"], "boot");
@@ -1010,13 +1006,13 @@ gnd_common = "star-1"
         fn axis_write_rejects_missing_axis_file() {
             let fx = fixture();
             write_evidence(&fx.dir, "对拍", 1);
-            let mut p = rr3_domain_write_parse(&json!({
+            let mut p = rr3_write_parse(&json!({
                 "target": "axis", "name": "pan", "key": "current_ceil_ma",
                 "value": 700, "evidence": "对拍/0001"
             }))
             .unwrap();
             p.confirm = Some(true);
-            let (code, msg) = rr3_domain_write_execute(&fx.paths, &p).expect_err("档缺必须拒");
+            let (code, msg) = rr3_write_execute(&fx.paths, &p).expect_err("档缺必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid);
             assert!(msg.contains("不在场"), "{msg}");
         }

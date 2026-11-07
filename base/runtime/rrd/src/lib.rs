@@ -58,7 +58,7 @@ static RR3_LOG_SINK_DEAD: AtomicBool = AtomicBool::new(false);
 /// 定格 rrd 自身日志落盘（批N5 件二笔2）：`<socket>.log/rrd.log`，与 per-unit
 /// 文件同目录同派生单点（[`rr3_unit_log_dir`]）。目录建不出 = 返回 Err，调用方
 /// 点名降级纯内存——观测通道故障降级、不放大成可用性故障。`bus_path` 必须已
-/// 绝对化（main 的 [`crate::cli::rr3_socket_absolute_path`]）——相对路径就是链条
+/// 绝对化（main 的 [`crate::cli::rr3_socket_abs`]）——相对路径就是链条
 /// 上游破了，fail-closed 拒定格（与 supervisor 的 `rr3_open_unit_log` 同一口径）。
 #[cfg(unix)]
 pub fn rr3_log_sink_set(bus_path: &Path) -> Result<(), String> {
@@ -80,7 +80,7 @@ pub(crate) const RR3_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// 单代轮转：文件超上界即 rename 到 `<名>.1`（旧 `.1` 被覆盖），下一段写新文件。
 /// 失败只留痕不阻断——观测通道绝不允许因磁盘抖动打断业务主路；容量判据是尽力
 /// 而为的防线，不是事务。
-pub(crate) fn rr3_log_rotate_if_over(path: &std::path::Path) {
+pub(crate) fn rr3_log_rotate(path: &std::path::Path) {
     let Ok(md) = std::fs::metadata(path) else {
         return;
     };
@@ -104,7 +104,7 @@ fn rr3_log_sink_append(line: &str) {
     if RR3_LOG_SINK_DEAD.load(Ordering::Relaxed) {
         return;
     }
-    rr3_log_rotate_if_over(path);
+    rr3_log_rotate(path);
     let res = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -322,19 +322,19 @@ mod tests {
         let f = dir.join("u.log");
         // 未超界：不轮转
         std::fs::write(&f, b"short").unwrap();
-        rr3_log_rotate_if_over(&f);
+        rr3_log_rotate(&f);
         assert!(f.exists() && !dir.join("u.log.1").exists(), "界内不轮转");
         // 超界：轮转（不预建 .1——Windows 的 rename 不覆盖既有目标，产线语义为
         // 尽力而为：覆盖失败 = 下拍再试，容量判据不是事务）
         std::fs::write(&f, vec![b'x'; (RR3_LOG_MAX_BYTES + 1) as usize]).unwrap();
-        rr3_log_rotate_if_over(&f);
+        rr3_log_rotate(&f);
         assert!(!f.exists(), "超界原文件已让位");
         assert_eq!(
             std::fs::read(dir.join("u.log.1")).unwrap().len(),
             RR3_LOG_MAX_BYTES as usize + 1
         );
         // 不存在：静默
-        rr3_log_rotate_if_over(&f);
+        rr3_log_rotate(&f);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

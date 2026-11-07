@@ -23,7 +23,7 @@
 //! `hdr_pin` 与 `signal` 按位序对应（`hdr_pin[k] ↔ signal[k]`，丝印序即信号序）；
 //! 同一逻辑信号占多个导体（如 I2C 的 SDA/SCL 同属一个 pin_id）按导体数重复写。
 //!
-//! 接线路径推导（[`rr3_wiring_path_for_profile`])与 modules-root 同一条布局纪律：
+//! 接线路径推导（[`rr3_wiring_path`])与 modules-root 同一条布局纪律：
 //! `<root>/profiles/<机>.toml` 的上两级即 modules-root，接线档在
 //! `<root>/hardware/<机>/wiring.toml`——daemon 由 `--profile` 推导，单点真值。
 
@@ -62,9 +62,9 @@ pub struct Rr3Wiring {
 
 /// 由装配单路径推导接线档路径（daemon 的接线；与 modules-root 同一布局纪律，
 /// 见模块头注释）。装配单必须已存在（canonicalize 同 [`crate::profile::
-/// rr3_profile_absolute_path`] 口径——装机现场读不到装配单，接线路径无从谈起）。
-pub fn rr3_wiring_path_for_profile(profile: &std::path::Path) -> Result<PathBuf, String> {
-    let abs = crate::profile::rr3_profile_absolute_path(profile)?;
+/// rr3_profile_abs`] 口径——装机现场读不到装配单，接线路径无从谈起）。
+pub fn rr3_wiring_path(profile: &std::path::Path) -> Result<PathBuf, String> {
+    let abs = crate::profile::rr3_profile_abs(profile)?;
     let stem = abs
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
@@ -493,9 +493,9 @@ gnd_common = "star-1"
         // /private/tmp 的符号链接），拿夹具原始路径比对会红在系统布局上
         let root_canon = std::fs::canonicalize(&dir).unwrap();
         let want = root_canon.join("hardware").join("mini").join("wiring.toml");
-        assert_eq!(rr3_wiring_path_for_profile(&p).unwrap(), want);
-        let e = rr3_wiring_path_for_profile(Path::new("/nonexistent/nope.toml"))
-            .expect_err("读不到装配单必须致命");
+        assert_eq!(rr3_wiring_path(&p).unwrap(), want);
+        let e =
+            rr3_wiring_path(Path::new("/nonexistent/nope.toml")).expect_err("读不到装配单必须致命");
         assert!(e.contains("无法解析为绝对路径"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }

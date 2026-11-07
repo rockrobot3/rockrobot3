@@ -4,7 +4,7 @@
 //! supervisor 线程（`supervisor::rr3_spawn_supervisor`）与 boot 序。除这两条外本文件不养
 //! 其它常驻线程——收尸、退避、重启全部串行在那一条上（E-5）。例外（0.0.5 增补轮四
 //! 批W3，R26）：`counters-term-flush` 一条——SIGTERM/SIGINT 强制 flush 的 sleep-and-wake
-//! 线程（self-pipe，见 [`rr3_install_term_counters_flush`]），平时不醒，不算常驻负载，
+//! 线程（self-pipe，见 [`rr3_flush_on_term`]），平时不醒，不算常驻负载，
 //! 进程账按 +1 线程 +1 fd 记。
 //! 本任务做的：清残留套接字 → bind → 起 supervisor → 起监视线程 → 投 boot 队列 → accept 循环。
 //! 连接账（M-1）：每连接 **2 条线程 + 2 个 fd**，不是一条——accept 处 spawn 的 reader 线程，
@@ -29,7 +29,7 @@ use crate::cli::RrdConfig;
 use crate::conn::{rr3_conn_serve, Rr3ConnCtx};
 use crate::registry::{Rr3Phase, RrdRegistry};
 use crate::supervisor::{
-    rr3_boot_job_from_manifest, rr3_spawn_supervisor, Rr3SpawnJob, Rr3SuperMsg, Rr3Supervisor,
+    rr3_boot_job_parse, rr3_spawn_supervisor, Rr3SpawnJob, Rr3SuperMsg, Rr3Supervisor,
 };
 use crate::{rr3_lock, rr3_log};
 
@@ -166,7 +166,7 @@ pub fn rr3_state_frame(name: &str, phase: &str, src_task: u64) -> Rr3Frame {
 /// D3 随批 append 的内建命名空间主题）。owner 是内建命名空间，只许 rrd 发；
 /// `reason` 由调用方给词（"battery-low" 置旗 / "battery-ok" 解除，批N5 件二笔3），
 /// percent/voltage_mv 从触发它的 battery 事件体透传（取不到按 0 回缺省）。
-pub fn rr3_system_power_frame(reason: &str, percent: u64, voltage_mv: u64) -> Rr3Frame {
+pub fn rr3_power_frame(reason: &str, percent: u64, voltage_mv: u64) -> Rr3Frame {
     let body = json!({
         "topic": "rr3-runtime/system/power",
         "reason": reason,
@@ -228,10 +228,9 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             let roles = contracts.join("roles.toml");
             let devices = contracts.join("devices.toml");
             let platform = contracts.join("platform");
-            let wiring = crate::wiring::rr3_wiring_path_for_profile(p)?;
-            let boot = crate::profile::rr3_profile_boot_inputs(
-                p, &slots, &roles, &devices, &wiring, &platform,
-            )?;
+            let wiring = crate::wiring::rr3_wiring_path(p)?;
+            let boot =
+                crate::profile::rr3_boot_inputs(p, &slots, &roles, &devices, &wiring, &platform)?;
             // 日志环容量一次定格（批N5 件二 F-30）：装配单 [runtime].log_ring_cap——
             // 装载期缺键已在 parse 层拒（缺即红），到这里必是合法正整数。首份胜出
             // （OnceLock，与装配快照同语义）；--manifest 调试路径不读装配单，环按
@@ -277,21 +276,17 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             // 的渲染源。首份胜出语义下重复 boot 不覆盖；--manifest 调试路径
             // （None 臂）无快照，ctl.wiring 如实回不可得。
             if let Some(s) = boot.snapshot.clone() {
-                crate::assembly::rr3_assembly_snapshot_set(s);
+                crate::assembly::rr3_assembly_set(s);
             }
             // 契约记账快照定格（批N5 件五笔4，Z-4；批N8 件一②扩面，基-40）：boot
             // 链验收通过后对装载消费真值集记账（contracts.rs 单点）——契约四册
             // sha256 记账（Z-4 判据）＋真值集七成员记账（基-40 成员完整性判据，
-            // 定位由装载面 rr3_runtime_truth_set_locations 派生），`rr3.ctl.contracts`
+            // 定位由装载面 rr3_truth_locations 派生），`rr3.ctl.contracts`
             // 的渲染源 + 自检"齐全且 sha 对"的对比锚。此刻七册刚被装载面读过一遍，
             // 记账重读失败 = 文件系统级异常，fail-closed 带因拒 boot（不带病定格）。
-            let cs = crate::contracts::rr3_contracts_snapshot_capture(
-                p,
-                &contracts,
-                &wiring,
-                &boot.platform_chip,
-            )?;
-            if crate::contracts::rr3_contracts_snapshot_set(cs) {
+            let cs =
+                crate::contracts::rr3_contracts_scan(p, &contracts, &wiring, &boot.platform_chip)?;
+            if crate::contracts::rr3_contracts_set(cs) {
                 rr3_log("真值集记账定格：契约四册 Z-4 账＋真值集七成员基-40 账（rr3.ctl.contracts 自检判据锚）");
             }
             (
@@ -388,10 +383,10 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // SIGTERM/SIGINT 强制 flush 在此一并装上——合并写窗口内未落盘的尾部计数
     // 靠关停路径兜底，缺了它 R26 的"最多丢 M 秒"只在断电时成立、正常关停会白丢。
     let counters_gate = Arc::new(Mutex::new(crate::counters::Rr3CountersGate::rr3_new(
-        crate::counters::rr3_counters_flush_interval_ms(),
-        crate::counters::rr3_counters_flush_max_pending(),
+        crate::counters::rr3_flush_ms(),
+        crate::counters::rr3_flush_max(),
     )));
-    rr3_install_term_counters_flush(shared.clone(), counters_path.clone());
+    rr3_flush_on_term(shared.clone(), counters_path.clone());
 
     // `Rr3Supervisor` 是 `Sender` 的一层薄壳（可 clone）：一份进 conn 收尾、一份进 watchdog，
     // 两条路交出的重启计划在这里汇成一条队列。
@@ -419,7 +414,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 可言（先装载后投递让这两段各自连续）。
     let mut jobs: Vec<Rr3SpawnJob> = Vec::new();
     for manifest in &boot_manifests {
-        if let Some(mut job) = rr3_boot_job_from_manifest(manifest) {
+        if let Some(mut job) = rr3_boot_job_parse(manifest) {
             // 物理绑定描述符（ADR-0018 裁定 4、批D④）：装配链解析出的 [hardware]
             // 文本随每个 job 透传，supervisor spawn 时注入 RR3_HAL_BINDINGS；
             // --manifest 调试后门无装配单 → 空串（不注入，fail-closed + 应急 env）。
@@ -570,7 +565,7 @@ extern "C" fn rr3_term_pipe_wake(_sig: i32) {
 /// flush 完成 `exit(0)`——装了处理器信号就不再杀进程，必须自己退；flush 失败
 /// 只落日志不挡关停（运维账不许挡产品路，与启动装载同一口径）。未装上（pipe
 /// 失败/线程起不来）留痕跳过，SIGTERM 回落默认杀进程语义，不致命。
-fn rr3_install_term_counters_flush(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
+fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
     use std::io::Read;
     use std::os::unix::io::IntoRawFd;
     let (tx, rx) = match std::os::unix::net::UnixStream::pair() {
@@ -677,7 +672,7 @@ mod tests {
     /// reason 两值各钉（批N5 件二笔3）：置旗 battery-low / 解除 battery-ok。
     #[test]
     fn system_power_frame_shape_is_pinned() {
-        let f = rr3_system_power_frame("battery-low", 5, 3250);
+        let f = rr3_power_frame("battery-low", 5, 3250);
         assert_eq!(f.header.src_task, RR3_TASK_RRD, "点名是 rrd 自己发的");
         assert_eq!(f.header.dst_task, RR3_BROADCAST_DST_TASK, "全量扇出");
         let (ty, body) = rr3_body_split(&f.payload).expect("前缀合法");
@@ -693,7 +688,7 @@ mod tests {
             "体恰四字段，不得私加: {v}"
         );
         // 解除点名同形（批N5 件二笔3）：reason 换词、其余字段同账
-        let f = rr3_system_power_frame("battery-ok", 80, 3900);
+        let f = rr3_power_frame("battery-ok", 80, 3900);
         let (_, body) = rr3_body_split(&f.payload).expect("前缀合法");
         let v: serde_json::Value = serde_json::from_slice(&body).expect("体是 JSON");
         assert_eq!(v["reason"], "battery-ok", "解除点名 reason=battery-ok");

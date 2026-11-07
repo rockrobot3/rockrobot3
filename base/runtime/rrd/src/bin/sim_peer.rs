@@ -34,7 +34,7 @@ mod peer {
         opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
         Rr3Header, Rr3PayloadType,
     };
-    use rrd::manifest::rr3_manifest_facts_from_text;
+    use rrd::manifest::rr3_manifest_parse;
     use serde_json::{json, Value};
 
     /// 一次"挑自己的应答"最多扫多少帧。与集成测试夹具同口径，理由也相同：
@@ -64,7 +64,7 @@ mod peer {
 
         let text = std::fs::read_to_string(&manifest_path)
             .map_err(|e| format!("读 {manifest_path} 失败: {e}"))?;
-        let facts = rr3_manifest_facts_from_text(&text).map_err(|errs| errs.join("; "))?;
+        let facts = rr3_manifest_parse(&text).map_err(|errs| errs.join("; "))?;
 
         let mut stream = UnixStream::connect(&bus).map_err(|e| format!("连 {bus} 失败: {e}"))?;
         // 有超时：卡住要成为"夹具退出并打一行原因"，而不是把整个 cargo test 挂住

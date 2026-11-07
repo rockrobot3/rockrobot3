@@ -37,11 +37,11 @@
 //!    打包步骤保证（modules/README.md 装机约定 + 0.0.2 T5 deb 打包同一布局）；
 //! 8. 器件词表与接线档装载（增补轮六 §4.1b/§4.3）：`contracts/devices.toml` 的
 //!    mate 集 + `hardware/<形态>/wiring.toml`（路径由 [`crate::wiring::
-//!    rr3_wiring_path_for_profile`] 按装配单推导）——校验⑦-a/b/d 的跨档判据在
+//!    rr3_wiring_path`] 按装配单推导）——校验⑦-a/b/d 的跨档判据在
 //!    boot 链合龙（⑦-c 待件 demands 数据面，批N2），接线档形状与闭合面在
 //!    [`crate::wiring`] 裁；
 //! 9. 装载期校验⑨⑩（批N2 本体）：装配扫描一次两用——⑨ 电流预算与覆盖判据
-//!    （门 c）+ ⑩ 内存预算判据（[`rr3_memory_budget_check`]，分子 = [assemble]
+//!    （门 c）+ ⑩ 内存预算判据（[`rr3_memory_budget`]，分子 = [assemble]
 //!    内存申报件级直加，分母 = [supplies.budget]），超限即拒 boot（§5 后果 = 拒）。
 //!
 //! 基础层格位（`net.online` / `power.battery`）**恒在位**（slots.toml 2026-10-03 注记）：
@@ -172,7 +172,7 @@ pub(crate) const RR3_PIN_KEYS: [&str; 11] = [
 /// 显式写 `none`/`false`/`0`，留空即红
 /// （§5 缺失语义列，同 no_injection 范式）；`max_age_ms = 0` 且 `armed = true`
 /// 无运行期读者，由校验⑥-c 拒；`evidence` 与 `armed` 成对：未武装显式写 `"none"`、
-/// 武装必须携形制合法的证据引用（文件侧四道核在 [`rr3_profile_domain_evidence_check`]，
+/// 武装必须携形制合法的证据引用（文件侧四道核在 [`rr3_evidence_check`]，
 /// 由 boot 装载链持仓内容器根调用）。crate 内可见：同 [`RR3_PIN_KEYS`]（assembly.rs
 /// 渲染完整性测试同源引用）。
 pub(crate) const RR3_DOMAIN_KEYS: [&str; 12] = [
@@ -212,7 +212,7 @@ pub struct Rr3Supplies {
     /// 不携带顺序语义；查册用名字，无序消费。
     pub domains: Vec<Rr3Domain>,
     /// [supplies.budget] 内存预算（校验⑩ 分母，schema 4；⑩-a/⑩-b 的判据分母，
-    /// 分子 = [assemble] 内存申报，见 [`rr3_memory_budget_check`]）
+    /// 分子 = [assemble] 内存申报，见 [`rr3_memory_budget`]）
     pub budget: Rr3Budget,
 }
 
@@ -264,7 +264,7 @@ pub struct Rr3Domain {
     /// 武装证据引用（⑥-e，批N21 件二：D11 界面门的装载期半边）——`<形态>/<四位编号>`
     /// 形制（规则住 conventions §6.1，机制真值 rr-ipc::evidence）。与 `armed` 成对：
     /// 未武装显式写 `"none"`；武装必须携引用——形制核在解析期（本模块 ⑥-e），文件侧
-    /// 四道核（存在/frontmatter/form 一致）在 [`rr3_profile_domain_evidence_check`]，
+    /// 四道核（存在/frontmatter/form 一致）在 [`rr3_evidence_check`]，
     /// boot 装载链持仓内容器根（仓内 `docs/evidence`）调用。
     pub evidence: String,
 }
@@ -419,7 +419,7 @@ pub struct Rr3ProfileBoot {
     /// daemon 注入子进程 `RR3_HAL_DISPLAY_BACKEND`；None 不注入（显示面回落全局）。
     pub display_backend: Option<String>,
     /// [platform].chip（基-40 boot 底账）：boot 链验收通过的选册 chip，真值集
-    /// 记账（[`rr3_runtime_truth_set_locations`] 消费）按它定位平台事实表——
+    /// 记账（[`rr3_truth_locations`] 消费）按它定位平台事实表——
     /// daemon 臂不再二次解析装配单拿 chip（双真值即漂移温床）。
     pub platform_chip: String,
     /// 装配快照（批N4 件九笔4，`rr3.ctl.wiring` 判据源）：boot 装载链验收通过后
@@ -432,15 +432,15 @@ pub struct Rr3ProfileBoot {
 
 /// 装配单路径解析成绝对路径：装载与横幅凭证共用同一个解析结果。
 /// 装配单**必须已存在**才可装载，所以用 `fs::canonicalize`（与主题契约/叠加层同工具、
-/// 同一条"致命文案不漏 `..`"的理据，见 `topics_load::rr3_contract_resolved`）。
-pub fn rr3_profile_absolute_path(path: &Path) -> Result<PathBuf, String> {
+/// 同一条"致命文案不漏 `..`"的理据，见 `topics_load::rr3_contract_abs`）。
+pub fn rr3_profile_abs(path: &Path) -> Result<PathBuf, String> {
     std::fs::canonicalize(path)
         .map_err(|e| format!("路径 {} 无法解析为绝对路径: {e}", path.display()))
 }
 
 /// 解析装配单文本。形状错误全部收集完才返回（运维一次改对），逐条点名、不静默放行。
 /// 各段解析下沉到 `rr3_*_parse`（错误追加顺序＝段序，文案逐字不变）。
-pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
+pub fn rr3_profile_parse(text: &str) -> Result<Rr3Profile, Vec<String>> {
     let root: toml::Value = match toml::from_str(text) {
         Ok(v) => v,
         Err(e) => return Err(vec![format!("装配单 TOML 解析失败: {e}")]),
@@ -1093,7 +1093,7 @@ fn supplies_int(v: Option<&toml::Value>, key: &str) -> Result<i64, String> {
 /// 编号串——roles.toml 注记的取值语义（pwm<N> 派生 pwm_chip=N）。前缀**住平台表**
 /// `[controller_wordform]` 段（实-6 (a)，批N4 件七下移：rrd 零硬编码词形规则，
 /// 换平台 = 改数据），本函数只做词形匹配机制。
-fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
+fn rr3_wordform_tail(controller: &str, prefix: &str) -> Option<String> {
     let rest = controller.strip_prefix(prefix)?;
     if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -1103,7 +1103,7 @@ fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
 
 /// 词形前缀查询 + fail-closed 守卫（实-6 (a)）：派生键查平台表词形前缀，查不到
 /// 红——不许回退硬编码（回退 = 策略重新住回机制侧，下移作废）。
-fn rr3_platform_wordform_prefix(platform: &Rr3PlatformTable, key: &str) -> Result<String, String> {
+fn rr3_wordform_prefix(platform: &Rr3PlatformTable, key: &str) -> Result<String, String> {
     platform
         .rr3_wordform(key)
         .map(str::to_string)
@@ -1127,8 +1127,8 @@ fn rr3_pin_derive_value(
 ) -> Result<String, String> {
     match key {
         "pwm_chip" | "gpio_chip" | "i2c_bus" => {
-            let prefix = rr3_platform_wordform_prefix(platform, key)?;
-            rr3_controller_wordform(&pin.controller, &prefix)
+            let prefix = rr3_wordform_prefix(platform, key)?;
+            rr3_wordform_tail(&pin.controller, &prefix)
                 .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))
         }
         "pwm_channel" => pin
@@ -1148,8 +1148,8 @@ fn rr3_pin_derive_value(
             }
         }
         "spi_device" => {
-            let prefix = rr3_platform_wordform_prefix(platform, key)?;
-            let bus = rr3_controller_wordform(&pin.controller, &prefix)
+            let prefix = rr3_wordform_prefix(platform, key)?;
+            let bus = rr3_wordform_tail(&pin.controller, &prefix)
                 .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))?;
             let cs = pin
                 .channel
@@ -1164,7 +1164,7 @@ fn rr3_pin_derive_value(
 /// 校验①-b 的"字段在场"判定（§5 缺失语义列）：String 空串 = 缺、channel 以 None =
 /// 缺、physical 以空数组 = 缺。mux_group 不进 requires（互斥组由平台 conflicts 表
 /// 反推，批N7 已立册）；词表外字段名由调用方点名（门 a 六表对账第 5 张的漂移）。
-fn rr3_pin_field_present(pin: &Rr3PinEntry, field: &str) -> bool {
+fn rr3_pin_has(pin: &Rr3PinEntry, field: &str) -> bool {
     match field {
         "role" => !pin.role.is_empty(),
         "instance" => !pin.instance.is_empty(),
@@ -1183,7 +1183,7 @@ fn rr3_pin_field_present(pin: &Rr3PinEntry, field: &str) -> bool {
 /// [hardware] 段序列化成注入文本：每行 `键 = "值"`（值已字符串化，TOML 基本
 /// 字符串转义只涉及反斜杠与双引号）。BTreeMap 升序 = 确定性；空表 → 空串
 /// （调用方见空不注入，模块侧维持"无描述符"状态）。
-fn rr3_hardware_bindings_text(hardware: &BTreeMap<String, String>) -> String {
+fn rr3_bindings_text(hardware: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
     for (k, v) in hardware {
         out.push_str(&format!(
@@ -1235,7 +1235,7 @@ fn rr3_axis_files_load(
 ///
 /// 消歧裁决（件五，收"多轴未消歧"挂账）：模块面是单轴 trait——rr-hal 桥后端按
 /// `RR3_HAL_PERIPH_AXIS` env（缺省 [`rr_hal_api::RR3_PERIPH_AXIS_DEFAULT`]）选轴；
-/// 本函数的 `axis` 参数即该 env 的读数（env 读取在 [`rr3_profile_boot_inputs`]
+/// 本函数的 `axis` 参数即该 env 的读数（env 读取在 [`rr3_boot_inputs`]
 /// 调用点，本函数吃值不吃全局态——cli.rs 先例，测试不碰进程环境），选 pin 末段
 /// （instance）与之**相等**的恰一份合法档案投影——注入的行程真值必须属于被驱动
 /// 的那根轴。单份也对轴：env 指了 tilt 而档案只有 pan 时，"注入 pan 行程、驱动
@@ -1302,13 +1302,13 @@ fn rr3_axis_state_text(found: &[crate::axis::Rr3AxisFile], axis: &str) -> (Strin
 }
 
 /// 平台事实表文件名（选册格式化单点）：清单成员与 boot 选册（
-/// [`rr3_profile_boot_inputs_with_probe`] 的 `platform_dir` join）两处共用，防字面漂移。
-fn rr3_platform_table_file_name(chip: &str) -> String {
+/// [`rr3_boot_with_probe`] 的 `platform_dir` join）两处共用，防字面漂移。
+fn rr3_platform_file(chip: &str) -> String {
     format!("{chip}.toml")
 }
 
 /// 契约四册名单（基-40：字面唯一份）。全仓"契约四册文件名"只在这里写字面——
-/// 装载真值集（[`rr3_runtime_truth_set`]）、contracts.rs 的 `RR3_CONTRACT_FILES`、
+/// 装载真值集（[`rr3_truth_set`]）、contracts.rs 的 `RR3_CONTRACT_FILES`、
 /// 打包/装机等消费方一律引用本常量；新增/改名册只改这里，成员判等（基-40 单测
 /// ＋规约 ⑨-z 门）随之生效。顺序＝topics/slots/roles/devices（Z-4 记账点名序）。
 #[rustfmt::skip]
@@ -1333,29 +1333,26 @@ pub struct Rr3RuntimeTruthSet {
 }
 
 /// 真值集成员名生成单点（基-40：相对名唯一生成处）。相对名以仓根／装机安装根为
-/// 基准（包内布局口径），`rr3_runtime_truth_set`（装载面清单）与
-/// [`rr3_runtime_truth_set_locations`]（boot 记账定位）都消费它——成员名两处各自
+/// 基准（包内布局口径），`rr3_truth_set`（装载面清单）与
+/// [`rr3_truth_locations`]（boot 记账定位）都消费它——成员名两处各自
 /// 手写即漂移温床，收在这里后成员集判等只差"函数返回值相等"一条单测（⑨-z 判据）。
-fn rr3_truth_set_member_names(profile_stem: &str, chip: &str) -> Vec<String> {
+fn rr3_truth_names(profile_stem: &str, chip: &str) -> Vec<String> {
     let mut names = vec![format!("profiles/{profile_stem}.toml")];
     names.extend(RR3_CONTRACT_BOOKS.iter().map(|b| format!("contracts/{b}")));
-    names.push(format!(
-        "contracts/platform/{}",
-        rr3_platform_table_file_name(chip)
-    ));
+    names.push(format!("contracts/platform/{}", rr3_platform_file(chip)));
     names.push(format!("hardware/{profile_stem}/wiring.toml"));
     names
 }
 
 /// 按装配单解析结果与机型 stem 列装载消费真值集（清单真值点，见 [`Rr3RuntimeTruthSet`]）。
-pub fn rr3_runtime_truth_set(p: &Rr3Profile, profile_stem: &str) -> Rr3RuntimeTruthSet {
+pub fn rr3_truth_set(p: &Rr3Profile, profile_stem: &str) -> Rr3RuntimeTruthSet {
     Rr3RuntimeTruthSet {
-        files: rr3_truth_set_member_names(profile_stem, &p.platform_chip),
+        files: rr3_truth_names(profile_stem, &p.platform_chip),
         dirs: vec![format!("hardware/{profile_stem}/axis")],
     }
 }
 
-/// boot 真值集记账行：成员相对名（[`rr3_truth_set_member_names`] 生成，包内布局
+/// boot 真值集记账行：成员相对名（[`rr3_truth_names`] 生成，包内布局
 /// 口径）+ boot 实际定位路径（本机口径，自检复演重读的就是它）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rr3TruthSetLocation {
@@ -1369,22 +1366,22 @@ pub struct Rr3TruthSetLocation {
 /// boot 臂真值集定位派生（基-40 件一②，机制面）：按成员名单点生成七条相对名，
 /// 再按 boot 臂输入映射本机实际路径——装配单本体 = `--profile` 定位、契约四册与
 /// 平台事实表 = `--contracts` join、接线档 = 接线布局推导产物。stem 提取与
-/// [`crate::wiring::rr3_wiring_path_for_profile`] 同法（canonicalize 后取
+/// [`crate::wiring::rr3_wiring_path`] 同法（canonicalize 后取
 /// file_stem），保证成员名 `profiles/<stem>.toml` 与 `hardware/<stem>/wiring.toml`
 /// 的 stem 同源。任何一条定位失败都带因报 Err（调用点在 boot 链验收之后，正常
 /// 到不了这里——失败即文件系统级异常，fail-closed 不带病记账）。
-pub fn rr3_runtime_truth_set_locations(
+pub fn rr3_truth_locations(
     profile_path: &Path,
     contracts_dir: &Path,
     wiring_path: &Path,
     chip: &str,
 ) -> Result<Vec<Rr3TruthSetLocation>, String> {
-    let abs = rr3_profile_absolute_path(profile_path)?;
+    let abs = rr3_profile_abs(profile_path)?;
     let stem = abs
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .ok_or_else(|| format!("装配单 {} 无文件名", abs.display()))?;
-    let names = rr3_truth_set_member_names(stem, chip);
+    let names = rr3_truth_names(stem, chip);
     // 与 names 同序逐条映射（成员名生成与定位映射一一对应，错位即成员集判等红）
     let paths = [
         vec![abs.clone()],
@@ -1392,9 +1389,7 @@ pub fn rr3_runtime_truth_set_locations(
             .iter()
             .map(|b| contracts_dir.join(b))
             .collect::<Vec<_>>(),
-        vec![contracts_dir
-            .join("platform")
-            .join(rr3_platform_table_file_name(chip))],
+        vec![contracts_dir.join("platform").join(rr3_platform_file(chip))],
         vec![wiring_path.to_path_buf()],
     ]
     .concat();
@@ -1411,10 +1406,10 @@ pub fn rr3_runtime_truth_set_locations(
 /// 缺格**不是**致命项（P2：缺格只降点名模块，缺格≠拒 boot），进 [`Rr3ProfileBoot::missing`]；
 /// 缺角色同样不是致命项（校验②后果 = 降），进 [`Rr3ProfileBoot::role_missing`]。
 /// `slots_path`/`roles_path`/`devices_path`/`wiring_path` 由调用方给定（`--contracts`
-/// 运行期定位或编译期仓内路径；接线档由 [`crate::wiring::rr3_wiring_path_for_profile`]
+/// 运行期定位或编译期仓内路径；接线档由 [`crate::wiring::rr3_wiring_path`]
 /// 按 `hardware/<形态>/wiring.toml` 布局推导）——查册真值仍只有 rr-registry 那几册
 /// 与接线档本体，这里只管从哪读。
-pub fn rr3_profile_boot_inputs(
+pub fn rr3_boot_inputs(
     profile_path: &Path,
     slots_path: &Path,
     roles_path: &Path,
@@ -1423,7 +1418,7 @@ pub fn rr3_profile_boot_inputs(
     platform_dir: &Path,
 ) -> Result<Rr3ProfileBoot, String> {
     let probe = crate::probe::rr3_probe_default();
-    rr3_profile_boot_inputs_with_probe(
+    rr3_boot_with_probe(
         profile_path,
         slots_path,
         roles_path,
@@ -1434,11 +1429,11 @@ pub fn rr3_profile_boot_inputs(
     )
 }
 
-/// 同 [`rr3_profile_boot_inputs`]，但探测件由调用方注入（MC-4 接缝）：生产走
+/// 同 [`rr3_boot_inputs`]，但探测件由调用方注入（MC-4 接缝）：生产走
 /// [`crate::probe::rr3_probe_default`]（非 test 面按目标分流），门禁用例注入
 /// 恒缺/假根探针钉"缺格 → Degraded 点名件与键"。探测是纯读面、无状态，注入
 /// 不改变 boot 前的单次消费语义（ADR-0012 裁定 4）。
-pub fn rr3_profile_boot_inputs_with_probe(
+pub fn rr3_boot_with_probe(
     profile_path: &Path,
     slots_path: &Path,
     roles_path: &Path,
@@ -1447,10 +1442,10 @@ pub fn rr3_profile_boot_inputs_with_probe(
     platform_dir: &Path,
     probe: &dyn crate::probe::Rr3Probe,
 ) -> Result<Rr3ProfileBoot, String> {
-    let abs = rr3_profile_absolute_path(profile_path)?;
+    let abs = rr3_profile_abs(profile_path)?;
     let text = std::fs::read_to_string(&abs)
         .map_err(|e| format!("读不到装配单 {}: {e}", abs.display()))?;
-    let profile = rr3_profile_from_text(&text).map_err(|errs| {
+    let profile = rr3_profile_parse(&text).map_err(|errs| {
         errs.iter()
             .map(|e| format!("装配单 {} 形状不合: {e}", abs.display()))
             .collect::<Vec<_>>()
@@ -1546,7 +1541,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // roles/devices 同源）。fail-closed 与 roles 同口径但更严——platform.rs 解析本就
     // 回 Err 版（roles/devices 宽容回空表走"表为空"点名，那是集合词表；平台表宽容 =
     // ④⑤⑧ 静默不判，§18 F-6 同病），读不到/形状坏都逐条点名拒 boot，不降级。
-    let platform_path = platform_dir.join(rr3_platform_table_file_name(&profile.platform_chip));
+    let platform_path = platform_dir.join(rr3_platform_file(&profile.platform_chip));
     let platform_text = std::fs::read_to_string(&platform_path).map_err(|e| {
         format!(
             "读不到平台事实表 {}（[platform].chip = {} 的选册）: {e}",
@@ -1675,7 +1670,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 0.0.7 批G/批D1——pins 的校验照跑（物理真值不分档）。
     // host 档词形前件守卫（实-6 (a)，批N4 件七）：词形派生表空 = 平台没提供派生
     // 前件——host 档必须选带词形表的主机平台册（rtos/bare 册空表显式，esp32 形状）。
-    // 逐键 fail-closed 由 rr3_platform_wordform_prefix 承担，此处总守卫一条。
+    // 逐键 fail-closed 由 rr3_wordform_prefix 承担，此处总守卫一条。
     let mut derived: BTreeMap<String, String> = BTreeMap::new();
     if profile.platform_tier == "host" && platform.rr3_wordform_map().is_empty() {
         errs.push(
@@ -1715,7 +1710,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
                     "角色 {} 的 requires 引用未知字段 {f}（[pins] 字段词表外——门 a 六表对账第 5 张的漂移）",
                     pin.role
                 ));
-            } else if !rr3_pin_field_present(pin, &f) {
+            } else if !rr3_pin_has(pin, &f) {
                 errs.push(format!(
                     "{label} 缺 {f}（角色 {} requires 必填，留空即红——§5 缺失语义；\"合法不适用\"须显式写 none）",
                     pin.role
@@ -1767,7 +1762,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         // "不派生"是声明不是漏声明，见 roles.toml 器件三角色注记）
         if !derives.is_empty() {
             for (key, prefix) in platform.rr3_wordform_map() {
-                if rr3_controller_wordform(&pin.controller, prefix).is_some()
+                if rr3_wordform_tail(&pin.controller, prefix).is_some()
                     && !derives.iter().any(|d| d == key)
                 {
                     errs.push(format!(
@@ -1796,10 +1791,10 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；Task 4）：方向/能力/词表
     // 三面接平台表——判据真值只有 contracts/platform/<chip>.toml 一册，不推断、
     // 不运行期回退；表在上方已 fail-closed 装载，此处只判。
-    errs.extend(rr3_check_pin_capabilities(&profile, &roles, &platform));
+    errs.extend(rr3_pin_capabilities(&profile, &roles, &platform));
     // 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；Task 5）：三个资源
     // 空间各自不双占 + 平台 conflicts 反推互斥（组名取自平台表，漏声明即红）。
-    errs.extend(rr3_check_pin_occupancy(&profile, &platform, &devices));
+    errs.extend(rr3_pin_occupancy(&profile, &platform, &devices));
     // 装载期校验⑥（增补轮六 §5，后果 = 拒）：有轨、轨在册、绑定归一。
     // ⑥-a pins.rail ∈ supplies.domain.names；⑥-b kind=power 角色必有在册轨
     // （"none" 只对 signal 侧控制线合法）；⑥-c armed=true 必有测点且龄期上界 > 0
@@ -1845,7 +1840,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         // 武装必须携证据引用且形制合法（`<形态>/<四位编号>`，规则 conventions §6.1）；
         // 未武装显式写 "none"（同 switch/switchable 成对范式）。文件侧四道核
         // （存在/frontmatter/form 一致）需要证据容器根，归
-        // [`rr3_profile_domain_evidence_check`]，由 boot 装载链调用——解析期只持
+        // [`rr3_evidence_check`]，由 boot 装载链调用——解析期只持
         // 无文件面判据（机制与策略分离：哪里需要文件系统，哪里才碰 fs）。
         if d.armed {
             if d.evidence == "none" || d.evidence.is_empty() {
@@ -1916,14 +1911,11 @@ pub fn rr3_profile_boot_inputs_with_probe(
         }
     }
     // 申报分子：每实例扩算（条目 × 该件经 iface 归因服务到的角色 pin 数，地板 1）
-    let declared = rr3_demand_declared_expand(&profile, &roles, &scanned);
+    let declared = rr3_demand_expand(&profile, &roles, &scanned);
     // 校验⑨ 本判（F-12 加总口径：缺省全部同时，收窄只认 concurrency_group 数据）
-    errs.extend(rr3_demand_budget_check(
-        &declared,
-        &profile.supplies.domains,
-    ));
+    errs.extend(rr3_demand_budget(&declared, &profile.supplies.domains));
     // 校验⑨ 缺失语义另一半：kind=power 角色挂轨，绑定模块的件申报面必须覆盖
-    errs.extend(rr3_demand_kind_power_gaps(&profile, &roles, &scanned));
+    errs.extend(rr3_power_gaps(&profile, &roles, &scanned));
     // 校验⑩ 内存预算（批N2 n2c-v10，全案 §5 判据⑩ / F-13）：分子 = 装配扫描
     // facts 的内存申报**件级直加**（非每实例扩算，assemble.rs 头注同源；坏形件
     // 不进加总——可见面 = assemble_broken 点名，不 claim 全覆盖，同⑨ 诚实注记）；
@@ -1938,7 +1930,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         .flat_map(|(_, atoms)| atoms.iter())
         .map(|(_, f)| f.heap_peak_bytes)
         .sum();
-    errs.extend(rr3_memory_budget_check(
+    errs.extend(rr3_memory_budget(
         stack_sum,
         heap_sum,
         &profile.supplies.budget,
@@ -1949,10 +1941,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 证据容器根复用 modules-root 同一条 <root>/profiles/ 布局纪律 → <root>/docs/evidence；
     // 装配单不在仓布局时容器缺＋有武装申报即红（不静默放行），无武装申报（evidence
     // 恒 "none"）零波及。
-    errs.extend(rr3_profile_domain_evidence_check(
-        &root.join("docs/evidence"),
-        &profile,
-    ));
+    errs.extend(rr3_evidence_check(&root.join("docs/evidence"), &profile));
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
@@ -2047,7 +2036,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     for (k, v) in &profile.hardware {
         merged.insert(k.clone(), v.clone());
     }
-    let hal_bindings = rr3_hardware_bindings_text(&merged);
+    let hal_bindings = rr3_bindings_text(&merged);
 
     // 执行轴状态投影（批N3 件三，件五消歧）：目录 = 接线档同级的 axis/（hardware/
     // <形态>/axis/*.toml，件二装载器落位）；pin_ids 复用校验⑦段的同一集合（[[pin]]
@@ -2112,11 +2101,11 @@ pub fn rr3_profile_boot_inputs_with_probe(
 /// 全部 `armed = true` 域的 evidence 引用跑
 /// [`rr_ipc::evidence::rr3_evidence_verify`](rr_ipc::evidence::rr3_evidence_verify)
 /// 四道核（形制 → 文件存在 → frontmatter 六键 → form 与目录一致；形制半边已在
-/// [`rr3_profile_from_text`] 的 ⑥-e 拒，此处只补需要文件系统的后三道）。`root` =
+/// [`rr3_profile_parse`] 的 ⑥-e 拒，此处只补需要文件系统的后三道）。`root` =
 /// 证据容器根（仓内上下文为 `docs/evidence`）。armed=false 域零波及（evidence 恒为
 /// 显式 `"none"`，形状半边已保证成对）。返回逐条点名文案，调用方 fail-closed
 /// （任一条即拒装载，无豁免通道——§6.1 校验纪律）。
-pub fn rr3_profile_domain_evidence_check(root: &Path, profile: &Rr3Profile) -> Vec<String> {
+pub fn rr3_evidence_check(root: &Path, profile: &Rr3Profile) -> Vec<String> {
     let mut errs = Vec::new();
     for d in &profile.supplies.domains {
         if !d.armed {
@@ -2135,7 +2124,7 @@ pub fn rr3_profile_domain_evidence_check(root: &Path, profile: &Rr3Profile) -> V
 // ── TOML 键行手术面（批N22 件一，敞口 15 写面半边的机制层）────────────────────
 //
 // 写口的落盘语义 = "下次 boot 生效"：写面只做**文本手术**（保留注释与其余行原封，
-// 只动目标键行），手术后由调用方对手术产物跑装载链预核（[`rr3_profile_boot_inputs`]
+// 只动目标键行），手术后由调用方对手术产物跑装载链预核（[`rr3_boot_inputs`]
 // ——与 boot 正门同一份裁决，写面不重复判业务合法性，判了就是第二份裁决点）。手术
 // 判据 fail-closed：目标键行缺失 / 重复 / 目标域不唯一 / 缺域一律拒，不猜不插——
 // 键行缺失说明档已被改病（装载期十二键全键必填保证在场），写入面把病灶誊进新值
@@ -2178,7 +2167,7 @@ fn rr3_key_line_replace(lines: &mut [String], key: &str, new_raw: &str) -> Resul
 
 /// 平铺 TOML 键行手术（轴档案等无块头平表用，批N22 件一）：全文本内 `key` 键行
 /// 唯一（轴档案十四键每键一行）时替换为 `key = new_raw`，注释与其余行原封。
-pub fn rr3_toml_key_line_apply(text: &str, key: &str, new_raw: &str) -> Result<String, String> {
+pub fn rr3_key_line_apply(text: &str, key: &str, new_raw: &str) -> Result<String, String> {
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     rr3_key_line_replace(&mut lines, key, new_raw).map_err(|e| format!("键行手术拒: {e}"))?;
     Ok(lines.join("\n") + if text.ends_with('\n') { "\n" } else { "" })
@@ -2189,7 +2178,7 @@ pub fn rr3_toml_key_line_apply(text: &str, key: &str, new_raw: &str) -> Result<S
 /// fail-closed 四拒：缺域（域名不在册——写面不做注册新域，新域是契约事件）、
 /// 同名多义（域名唯一是装载期判据，多义 = 档已病）、键行缺失/重复（同上）。
 /// 其余域块与其余行（含注释）原封。
-pub fn rr3_domain_keys_apply(
+pub fn rr3_domain_apply(
     text: &str,
     domain: &str,
     updates: &[(&str, &str)],
@@ -2261,7 +2250,7 @@ pub fn rr3_domain_keys_apply(
 /// - ⑤-b 模拟测点必须落平台 ADC 能力集——测点 = 域 `sense`/`current_sense` 按
 ///   pin_id 引用的条目（⑥-d 的同一外键语法），其 `physical` 元素逐个对 ADC 集；
 ///   I2C 测点无直接脚（INA219 在片上量），`physical` 空即无判据对象，不算红。
-fn rr3_check_pin_capabilities(
+fn rr3_pin_capabilities(
     profile: &Rr3Profile,
     roles: &Rr3RoleTable,
     platform: &Rr3PlatformTable,
@@ -2333,7 +2322,7 @@ fn rr3_check_pin_capabilities(
 ///   `[[conflict]].group`，装机档不得自起名（否则 `mux_group` 退回自愿填写）；命中
 ///   是单向含入：构造/冲突表按芯片事实收全，profile 现役绑定只是子集，平台表超出
 ///   现役的部分不算红（芯片事实 ≠ 现役占用）。
-fn rr3_check_pin_occupancy(
+fn rr3_pin_occupancy(
     profile: &Rr3Profile,
     platform: &Rr3PlatformTable,
     devices: &Rr3DeviceTable,
@@ -2512,9 +2501,9 @@ fn rr3_assemble_scan(module_dir: &Path) -> (Vec<(String, Rr3AssembleFacts)>, Vec
 /// `concurrency_group` **恰一组**归属的条目同组互斥（至多一个同时取流）⇒ 组内取
 /// max；显式空数组（不分组）与**多组**归属按不收窄计（宁超算不漏算），不许运行期
 /// 推断。收窄是申报者的自证声明，判据只认数据不验物理——错报收窄即假绿，归申报者。
-/// `critical=false` 不进 Σ；输入条目应已经 [`rr3_demand_declared_expand`] 按角色
+/// `critical=false` 不进 Σ；输入条目应已经 [`rr3_demand_expand`] 按角色
 /// 实例数扩算（每实例语义，assemble.rs 头注同源）。
-fn rr3_demand_budget_check(
+fn rr3_demand_budget(
     declared: &[(String, Vec<Rr3AssembleDemand>)],
     domains: &[Rr3Domain],
 ) -> Vec<String> {
@@ -2569,7 +2558,7 @@ fn rr3_demand_budget_check(
 /// 本模块"的 pin 数（归因链 pin→role→iface→件 handles）；归因打空的地板 = 1（模块
 /// 启用件即运行，取流不因归因失配而消失，宁超算不漏算）；同模块多件声明同一 trait
 /// 时各按全额计（互相不知情，fail-closed 向红）。owner = "模块/件"（红例点名到件）。
-fn rr3_demand_declared_expand(
+fn rr3_demand_expand(
     profile: &Rr3Profile,
     roles: &Rr3RoleTable,
     scanned: &[(String, Vec<(String, Rr3AssembleFacts)>)],
@@ -2619,7 +2608,7 @@ fn rr3_demand_declared_expand(
 /// kind=power → 红"）：角色 kind=power 的每个 pin，其绑定模块的件申报面必须覆盖
 /// 该 pin 的 rail（≥1 条 rail 相同的申报，跨件合计）。绑定缺失由缺格/结构自洽判
 /// 点名，此处不重复报；rail 空/none 由校验⑥-b 点名，此处跳过不双报。
-fn rr3_demand_kind_power_gaps(
+fn rr3_power_gaps(
     profile: &Rr3Profile,
     roles: &Rr3RoleTable,
     scanned: &[(String, Vec<(String, Rr3AssembleFacts)>)],
@@ -2668,12 +2657,7 @@ fn rr3_demand_kind_power_gaps(
 /// 分子是**件级直加**非每实例扩算（assemble.rs 头注同源：件全部实例共享一个任务
 /// 栈/一条堆账）；输入由装载链对扫描成功的件直加，坏形件不进加总（可见面 =
 /// assemble_broken 点名，不 claim 全覆盖，同校验⑨ 诚实注记）。
-fn rr3_memory_budget_check(
-    stack_sum: i64,
-    heap_sum: i64,
-    budget: &Rr3Budget,
-    tier: &str,
-) -> Vec<String> {
+fn rr3_memory_budget(stack_sum: i64, heap_sum: i64, budget: &Rr3Budget, tier: &str) -> Vec<String> {
     let mut errs = Vec::new();
     if budget.not_applicable {
         return errs;
@@ -2701,12 +2685,12 @@ mod tests {
     /// 装载消费真值集清单逐成员钉死（基-25／实-12：清单真值点的成员判据反例面）。
     /// 以真仓两份装配单为源（chip 选册成员随装配单变——distro→rk3566、
     /// esp32-mini→esp32），轴档案目录成员恒在清单（在则随装、缺目录合法由消费方裁）。
-    /// 成员名单有变必须改 [`rr3_runtime_truth_set`] 本体并同步三处消费方，本用例红即拦截。
+    /// 成员名单有变必须改 [`rr3_truth_set`] 本体并同步三处消费方，本用例红即拦截。
     #[test]
     fn runtime_truth_set_members_are_pinned() {
-        let distro = rr3_profile_from_text(include_str!("../../../../profiles/distro.toml"))
+        let distro = rr3_profile_parse(include_str!("../../../../profiles/distro.toml"))
             .expect("真仓 distro 装配单必须合法");
-        let t = rr3_runtime_truth_set(&distro, "distro");
+        let t = rr3_truth_set(&distro, "distro");
         assert_eq!(
             t.files,
             vec![
@@ -2720,9 +2704,9 @@ mod tests {
             ]
         );
         assert_eq!(t.dirs, vec!["hardware/distro/axis"]);
-        let rtos = rr3_profile_from_text(include_str!("../../../../profiles/esp32-mini.toml"))
+        let rtos = rr3_profile_parse(include_str!("../../../../profiles/esp32-mini.toml"))
             .expect("真仓 esp32-mini 装配单必须合法");
-        let t2 = rr3_runtime_truth_set(&rtos, "esp32-mini");
+        let t2 = rr3_truth_set(&rtos, "esp32-mini");
         assert!(
             t2.files
                 .contains(&"contracts/platform/esp32.toml".to_string()),
@@ -2732,21 +2716,21 @@ mod tests {
     }
 
     /// 真值集三方成员判等（基-40／⑨-z 判据实体）：装载面清单
-    /// （[`rr3_runtime_truth_set`]）与 boot 记账定位（[`rr3_runtime_truth_set_locations`]
-    /// 的成员名）逐条相等——成员名单点生成（[`rr3_truth_set_member_names`]），两
+    /// （[`rr3_truth_set`]）与 boot 记账定位（[`rr3_truth_locations`]
+    /// 的成员名）逐条相等——成员名单点生成（[`rr3_truth_names`]），两
     /// 消费方手抄即漂移温床，本用例红即拦截。定位形状一并钉死：装配单本体 =
     /// `--profile` canonicalize 产物、契约四册 = `--contracts` join、平台事实表 =
     /// platform/ join 选册、接线档 = 接线布局推导原样记账。
     #[test]
     fn truth_set_members_and_boot_locations_are_the_same_set() {
-        let distro = rr3_profile_from_text(include_str!("../../../../profiles/distro.toml"))
+        let distro = rr3_profile_parse(include_str!("../../../../profiles/distro.toml"))
             .expect("真仓 distro 装配单必须合法");
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let profile_path = repo.join("profiles/distro.toml");
         let contracts_dir = repo.join("contracts");
         let wiring_path = repo.join("hardware/distro/wiring.toml");
-        let t = rr3_runtime_truth_set(&distro, "distro");
-        let locs = rr3_runtime_truth_set_locations(
+        let t = rr3_truth_set(&distro, "distro");
+        let locs = rr3_truth_locations(
             &profile_path,
             &contracts_dir,
             &wiring_path,
@@ -2794,7 +2778,7 @@ mod tests {
             vec![d("rail5v", 700, true, &[])],
         )];
         assert!(
-            rr3_demand_budget_check(&ok, &[rail5v()]).is_empty(),
+            rr3_demand_budget(&ok, &[rail5v()]).is_empty(),
             "Σ700 ≤ cap 2000 必须绿"
         );
 
@@ -2809,7 +2793,7 @@ mod tests {
                 vec![d("rail5v", 1700, true, &[])],
             ),
         ];
-        let errs = rr3_demand_budget_check(&over, &[rail5v()]);
+        let errs = rr3_demand_budget(&over, &[rail5v()]);
         assert!(
             errs.iter().any(|e| e.contains("电流预算超限")
                 && e.contains("rail5v")
@@ -2822,7 +2806,7 @@ mod tests {
 
         // 反例②：rail 不在 domains ⇒ 红（域缺即 cap 缺，预算无分母）
         let ghost = vec![("rr3-x/dummy".to_string(), vec![d("rail9v", 1, true, &[])])];
-        let errs = rr3_demand_budget_check(&ghost, &[rail5v()]);
+        let errs = rr3_demand_budget(&ghost, &[rail5v()]);
         assert!(
             errs.iter()
                 .any(|e| e.contains("rail9v") && e.contains("不在 [[supplies.domain]]")),
@@ -2835,7 +2819,7 @@ mod tests {
             vec![d("rail5v", 5000, false, &[])],
         )];
         assert!(
-            rr3_demand_budget_check(&noncrit, &[rail5v()]).is_empty(),
+            rr3_demand_budget(&noncrit, &[rail5v()]).is_empty(),
             "critical=false 不得进加总"
         );
 
@@ -2856,7 +2840,7 @@ mod tests {
             ),
         ];
         assert!(
-            rr3_demand_budget_check(&grouped, &[rail5v()]).is_empty(),
+            rr3_demand_budget(&grouped, &[rail5v()]).is_empty(),
             "同组互斥按 max 计（700 ≤ 2000）必须绿"
         );
         // 多组归属 = 不收窄（宁超算不漏算）：条目同时挂两组 ⇒ 全额进 Σ
@@ -2868,7 +2852,7 @@ mod tests {
             ("rr3-b/y".to_string(), vec![d("rail5v", 700, true, &["g1"])]),
             ("rr3-c/z".to_string(), vec![d("rail5v", 700, true, &["g2"])]),
         ];
-        let errs = rr3_demand_budget_check(&multi, &[rail5v()]);
+        let errs = rr3_demand_budget(&multi, &[rail5v()]);
         assert!(
             errs.iter().any(|e| e.contains("2100")),
             "多组归属不收窄，全额加总 2100 > 2000 ⇒ 红 {errs:?}"
@@ -3067,7 +3051,7 @@ gnd_common = "star-1"
         }
 
         /// 落装配单并同批 stage 接线档（`hardware/<形态>/wiring.toml`，与
-        /// [`crate::wiring::rr3_wiring_path_for_profile`] 推导同一布局）——装载期
+        /// [`crate::wiring::rr3_wiring_path`] 推导同一布局）——装载期
         /// 校验⑦要求装机档必在，缺省给 GOOD_WIRING，反例随后覆写。
         fn write_profile(&self, name: &str, text: &str) -> PathBuf {
             let p = self.dir.join("profiles").join(name);
@@ -3118,9 +3102,8 @@ gnd_common = "star-1"
     /// 顺带把路径推导钉进每条用例。平台表目录同样走编译期真值（rr-registry 常量，
     /// 与真仓 contracts/platform 同一册——夹具不复制契约，真值同源纪律）。
     fn boot_inputs(p: &Path) -> Result<Rr3ProfileBoot, String> {
-        let wiring =
-            crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
-        rr3_profile_boot_inputs(
+        let wiring = crate::wiring::rr3_wiring_path(p).expect("夹具装配单必须能推导接线档");
+        rr3_boot_inputs(
             p,
             Path::new(RR3_CONTRACT_SLOTS_PATH),
             Path::new(RR3_CONTRACT_ROLES_PATH),
@@ -3135,9 +3118,8 @@ gnd_common = "star-1"
         p: &Path,
         probe: &dyn crate::probe::Rr3Probe,
     ) -> Result<Rr3ProfileBoot, String> {
-        let wiring =
-            crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
-        rr3_profile_boot_inputs_with_probe(
+        let wiring = crate::wiring::rr3_wiring_path(p).expect("夹具装配单必须能推导接线档");
+        rr3_boot_with_probe(
             p,
             Path::new(RR3_CONTRACT_SLOTS_PATH),
             Path::new(RR3_CONTRACT_ROLES_PATH),
@@ -3177,9 +3159,8 @@ gnd_common = "star-1"
         platform_dir: &Path,
     ) -> Result<Rr3ProfileBoot, String> {
         let _ = root; // Root 只为临时目录的生命周期在场（Drop 清树）
-        let wiring =
-            crate::wiring::rr3_wiring_path_for_profile(p).expect("夹具装配单必须能推导接线档");
-        rr3_profile_boot_inputs(
+        let wiring = crate::wiring::rr3_wiring_path(p).expect("夹具装配单必须能推导接线档");
+        rr3_boot_inputs(
             p,
             Path::new(RR3_CONTRACT_SLOTS_PATH),
             Path::new(RR3_CONTRACT_ROLES_PATH),
@@ -3407,11 +3388,11 @@ mux_group = []
             not_applicable: true,
             ..Rr3Budget::default()
         };
-        assert!(rr3_memory_budget_check(i64::MAX, i64::MAX, &host, "host").is_empty());
+        assert!(rr3_memory_budget(i64::MAX, i64::MAX, &host, "host").is_empty());
         // 边界等号 ⇒ 绿（≤ 判，> 才红）；栈绿堆不超
-        assert!(rr3_memory_budget_check(65536, 311296, &budget, "rtos").is_empty());
+        assert!(rr3_memory_budget(65536, 311296, &budget, "rtos").is_empty());
         // ⑩-a 栈超红：点名判据号、两侧数值与档位
-        let e = rr3_memory_budget_check(65537, 0, &budget, "rtos");
+        let e = rr3_memory_budget(65537, 0, &budget, "rtos");
         assert_eq!(e.len(), 1, "{e:?}");
         assert!(
             e[0].contains("校验⑩-a")
@@ -3421,7 +3402,7 @@ mux_group = []
             "{e:?}"
         );
         // ⑩-b 堆超红（F-13 形状：栈值不超 ⇒ 栈绿，只红堆）：可用堆 = 327680 − 16384
-        let e = rr3_memory_budget_check(0, 311297, &budget, "rtos");
+        let e = rr3_memory_budget(0, 311297, &budget, "rtos");
         assert_eq!(e.len(), 1, "{e:?}");
         assert!(
             e[0].contains("校验⑩-b")
@@ -3431,7 +3412,7 @@ mux_group = []
             "{e:?}"
         );
         // 双超各一条，互不遮蔽
-        let e = rr3_memory_budget_check(70000, 400000, &budget, "rtos");
+        let e = rr3_memory_budget(70000, 400000, &budget, "rtos");
         assert_eq!(e.len(), 2, "{e:?}");
     }
 
@@ -3443,7 +3424,7 @@ mux_group = []
     fn budget_tier_consistency_errors_are_named() {
         // host 档 not_applicable 写 false（合法不适用不显式写 = 留空即红）
         let bad = GOOD.replace("not_applicable = true", "not_applicable = false");
-        let errs = rr3_profile_from_text(&bad).expect_err("host 档不写不适用必须红");
+        let errs = rr3_profile_parse(&bad).expect_err("host 档不写不适用必须红");
         assert!(
             errs.iter()
                 .any(|e| e.contains("分档自洽校验失败") && e.contains("not_applicable = false")),
@@ -3455,7 +3436,7 @@ mux_group = []
             "[supplies.budget]\nnot_applicable = true",
             "[supplies.budget]\nnot_applicable = true\ntask_stack_budget_bytes = 65536",
         );
-        let errs = rr3_profile_from_text(&bad).expect_err("host 档并存数字键必须红");
+        let errs = rr3_profile_parse(&bad).expect_err("host 档并存数字键必须红");
         assert!(
             errs.iter()
                 .any(|e| e.contains("并存数字预算键") && e.contains("task_stack_budget_bytes")),
@@ -3464,7 +3445,7 @@ mux_group = []
 
         // rtos 档 not_applicable = true（有真栈/堆预算却写不适用）
         let bad = ESP32_GOOD.replace("not_applicable = false", "not_applicable = true");
-        let errs = rr3_profile_from_text(&bad).expect_err("rtos 档写不适用必须红");
+        let errs = rr3_profile_parse(&bad).expect_err("rtos 档写不适用必须红");
         assert!(
             errs.iter().any(|e| e.contains("tier = rtos/bare 但")),
             "{errs:?}"
@@ -3475,7 +3456,7 @@ mux_group = []
             .replace("task_stack_budget_bytes = 65536\n", "")
             .replace("heap_total_bytes = 327680\n", "")
             .replace("heap_reserved_bytes = 98816\n", "");
-        let errs = rr3_profile_from_text(&bad).expect_err("rtos 档缺数键必须红");
+        let errs = rr3_profile_parse(&bad).expect_err("rtos 档缺数键必须红");
         assert!(
             errs.iter()
                 .any(|e| e.contains("task_stack_budget_bytes 缺失")),
@@ -3486,7 +3467,7 @@ mux_group = []
 
         // 段缺（schema 4 起必填，不许整个子段留空）
         let bad = GOOD.replace("[supplies.budget]\nnot_applicable = true\n\n", "");
-        let errs = rr3_profile_from_text(&bad).expect_err("缺 [supplies.budget] 必须红");
+        let errs = rr3_profile_parse(&bad).expect_err("缺 [supplies.budget] 必须红");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [supplies.budget]")),
             "{errs:?}"
@@ -3497,7 +3478,7 @@ mux_group = []
             "[supplies.budget]\nnot_applicable = true",
             "[supplies.budget]\nnot_applicable = true\nstack_budget = 1",
         );
-        let errs = rr3_profile_from_text(&bad).expect_err("budget 未知键必须红");
+        let errs = rr3_profile_parse(&bad).expect_err("budget 未知键必须红");
         assert!(
             errs.iter()
                 .any(|e| e.contains("[supplies.budget] 未知键 stack_budget")),
@@ -3506,7 +3487,7 @@ mux_group = []
 
         // rtos 档物理矛盾：total ≤ reserved（可用堆 ≤ 0，⑩-b 无分母）
         let bad = ESP32_GOOD.replace("heap_total_bytes = 327680", "heap_total_bytes = 8192");
-        let errs = rr3_profile_from_text(&bad).expect_err("total ≤ reserved 必须红");
+        let errs = rr3_profile_parse(&bad).expect_err("total ≤ reserved 必须红");
         assert!(
             errs.iter()
                 .any(|e| e.contains("可用堆 = total − reserved ≤ 0")),
@@ -3558,7 +3539,7 @@ mux_group = []
     /// 件级直加语义钉子（非每实例扩算，assemble.rs 头注同源）：同一内存申报件
     /// 在多实例角色下不扩算——GOOD（host）换 ESP32_GOOD 载体不便，此处以
     /// ESP32_GOOD 单轴（实例 1）+ 双件同值申报对照红例①直接钉数值（98304 =
-    /// 件级两件直加），扩算语义由 rr3_demand_declared_expand 的 ⑨ 用例反向对照。
+    /// 件级两件直加），扩算语义由 rr3_demand_expand 的 ⑨ 用例反向对照。
     #[test]
     fn memory_budget_sums_are_per_atom_not_per_instance() {
         let root = Root::new("mem-peratom");
@@ -3571,7 +3552,7 @@ mux_group = []
 
     #[test]
     fn good_profile_parses() {
-        let p = rr3_profile_from_text(GOOD).expect("应能解析");
+        let p = rr3_profile_parse(GOOD).expect("应能解析");
         assert_eq!(p.bindings.len(), 3);
         assert_eq!(p.enabled_slots.len(), 3);
         assert_eq!(p.enabled_slots["rr3-pa"], vec!["act.servo".to_string()]);
@@ -3628,7 +3609,7 @@ mux_group = []
             .replace("\"act.servo\" = \"rr3-pa\"", "\"act.servo\" = \"\"")
             .replace("rr3-pb = [\"power.charger\"]", "rr3-pb = [\"\"]")
             .replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = 3");
-        let errs = rr3_profile_from_text(&text).expect_err("形状不合必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("形状不合必须报错");
         assert_eq!(errs.len(), 4, "{errs:?}");
         assert!(
             errs.iter().any(|e| e.contains("schema_version")),
@@ -3652,7 +3633,7 @@ mux_group = []
 
     #[test]
     fn missing_sections_and_empty_enabled_slots_are_errors() {
-        let errs = rr3_profile_from_text("schema_version = 5\n").expect_err("缺段必须报错");
+        let errs = rr3_profile_parse("schema_version = 5\n").expect_err("缺段必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [bindings]")),
             "{errs:?}"
@@ -3669,7 +3650,7 @@ mux_group = []
         // supplies 段在场时裁）——budget 段缺的留空反例归
         // budget_tier_consistency_errors_are_named。
 
-        let errs = rr3_profile_from_text("schema_version = 5\n[bindings]\n\n[enabled_slots]\n")
+        let errs = rr3_profile_parse("schema_version = 5\n[bindings]\n\n[enabled_slots]\n")
             .expect_err("空 enabled_slots 必须报错");
         assert!(
             errs.iter().any(|e| e.contains("[enabled_slots] 为空")),
@@ -3683,14 +3664,14 @@ mux_group = []
     #[test]
     fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
         // 段缺（GOOD 定点删除）
-        let errs = rr3_profile_from_text(&GOOD.replace("[runtime]\nlog_ring_cap = 512\n", ""))
+        let errs = rr3_profile_parse(&GOOD.replace("[runtime]\nlog_ring_cap = 512\n", ""))
             .expect_err("缺 [runtime] 必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [runtime]")),
             "{errs:?}"
         );
         // 键缺
-        let errs = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", ""))
+        let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", ""))
             .expect_err("缺 log_ring_cap 必须报错");
         assert!(
             errs.iter()
@@ -3699,7 +3680,7 @@ mux_group = []
         );
         // 0 与负数（正整数判据）
         for bad in ["log_ring_cap = 0", "log_ring_cap = -8"] {
-            let errs = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", bad))
+            let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", bad))
                 .expect_err("非正容量必须报错");
             assert!(
                 errs.iter().any(|e| e.contains("须为正整数")),
@@ -3708,7 +3689,7 @@ mux_group = []
         }
         // 类型错（字符串不是整数）
         let errs =
-            rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = \"many\""))
+            rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = \"many\""))
                 .expect_err("字符串容量必须报错");
         assert!(
             errs.iter()
@@ -3717,7 +3698,7 @@ mux_group = []
         );
         // 未知键点名
         let errs =
-            rr3_profile_from_text(&GOOD.replace("[runtime]", "[runtime]\nlog_level = \"debug\""))
+            rr3_profile_parse(&GOOD.replace("[runtime]", "[runtime]\nlog_level = \"debug\""))
                 .expect_err("未知键必须报错");
         assert!(
             errs.iter()
@@ -3725,18 +3706,18 @@ mux_group = []
             "{errs:?}"
         );
         // 合法值如实收进结构体（64 ≠ 编译期兜底 512——数据流证明）
-        let p = rr3_profile_from_text(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 64"))
+        let p = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 64"))
             .expect("64 是合法容量");
         assert_eq!(p.log_ring_cap, 64, "容量必须来自装配单数据");
         assert_eq!(
-            rr3_profile_from_text(GOOD).expect("GOOD 合法").log_ring_cap,
+            rr3_profile_parse(GOOD).expect("GOOD 合法").log_ring_cap,
             512
         );
     }
 
     #[test]
     fn unparsable_toml_is_single_error() {
-        let errs = rr3_profile_from_text("[bindings\n").expect_err("必须报错");
+        let errs = rr3_profile_parse("[bindings\n").expect_err("必须报错");
         assert_eq!(errs.len(), 1);
         assert!(errs[0].starts_with("装配单 TOML 解析失败"), "{errs:?}");
     }
@@ -4023,14 +4004,14 @@ mux_group = []
     #[test]
     fn hardware_section_is_optional_scalars_stringified() {
         // 缺段：合法（纯 sim/无硬件格形态），hal_bindings 为空文本
-        let p = rr3_profile_from_text(GOOD).expect("缺 [hardware] 段必须合法");
+        let p = rr3_profile_parse(GOOD).expect("缺 [hardware] 段必须合法");
         assert!(p.hardware.is_empty(), "{:?}", p.hardware);
 
         // 字符串 + 整数混合：整数按十进制字符串化（[hardware] 不设键白名单，
         // 键位语义归 rr-hal 描述符解析，rrd 只管装配形状）
         let text =
             format!("{GOOD}\n[hardware]\nspi_device = \"/dev/spidev0.0\"\nlink_metric = 100\n");
-        let p = rr3_profile_from_text(&text).expect("标量 [hardware] 必须合法");
+        let p = rr3_profile_parse(&text).expect("标量 [hardware] 必须合法");
         assert_eq!(
             p.hardware.get("spi_device").map(String::as_str),
             Some("/dev/spidev0.0")
@@ -4044,7 +4025,7 @@ mux_group = []
         let text = format!(
             "{GOOD}\n[hardware]\nflag = true\nratio = 0.5\nlines = [4]\nsub = {{ k = 1 }}\n"
         );
-        let errs = rr3_profile_from_text(&text).expect_err("坏类型必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("坏类型必须报错");
         assert_eq!(errs.len(), 4, "{errs:?}");
         for key in ["flag", "ratio", "lines", "sub"] {
             assert!(
@@ -4055,22 +4036,18 @@ mux_group = []
 
         // 空键点名
         let text = format!("{GOOD}\n[hardware]\n\"\" = 1\n");
-        let errs = rr3_profile_from_text(&text).expect_err("空键必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("空键必须报错");
         assert!(errs.iter().any(|e| e.contains("键不得为空串")), "{errs:?}");
     }
 
     /// [hardware] → 注入文本：BTreeMap 升序确定性、整数已是字符串形状、空表空串。
     #[test]
     fn hardware_bindings_text_is_sorted_and_escaped() {
-        assert_eq!(
-            rr3_hardware_bindings_text(&BTreeMap::new()),
-            "",
-            "空表 → 空串"
-        );
+        assert_eq!(rr3_bindings_text(&BTreeMap::new()), "", "空表 → 空串");
         let mut hw = BTreeMap::new();
         hw.insert("spi_device".to_string(), "0".to_string());
         hw.insert("link_ifname".to_string(), "wl\"x\\".to_string());
-        let text = rr3_hardware_bindings_text(&hw);
+        let text = rr3_bindings_text(&hw);
         // BTreeMap 升序：link_ifname < spi_device
         assert_eq!(
             text, "link_ifname = \"wl\\\"x\\\\\"\nspi_device = \"0\"\n",
@@ -4197,7 +4174,7 @@ mux_group = []
             "{GOOD}\n[[pin]]\nrole = \"\"\ndirection = \"out\"\nwat = 1\nphysical = [\"x\"]\n"
         );
         // GOOD 现役两条 pin，追加的坏 pin 序号 = #2
-        let errs = rr3_profile_from_text(&text).expect_err("形状不合必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("形状不合必须报错");
         assert!(
             errs.iter().any(|e| e.contains("pin #2.role 缺失或为空")),
             "{errs:?}"
@@ -4212,9 +4189,8 @@ mux_group = []
             "{errs:?}"
         );
         // 缺 role / 缺 direction（身份键缺席，解析期即红）
-        let errs =
-            rr3_profile_from_text(format!("{GOOD}\n[[pin]]\ncontroller = \"pwm1\"\n").as_str())
-                .expect_err("缺 role/direction 必须报错");
+        let errs = rr3_profile_parse(format!("{GOOD}\n[[pin]]\ncontroller = \"pwm1\"\n").as_str())
+            .expect_err("缺 role/direction 必须报错");
         assert!(
             errs.iter().any(|e| e.contains("pin #2 缺 role")),
             "{errs:?}"
@@ -4376,14 +4352,14 @@ mux_group = []
     fn domain_section_shape_errors_are_named() {
         // 缺整个域数组（schema 3 起必填）：取 GOOD 的 [supplies] 段头做最小文本
         let minimal_head = GOOD.split("[[supplies.domain]]").next().unwrap_or(GOOD);
-        let errs = rr3_profile_from_text(minimal_head).expect_err("缺域数组必须报错");
+        let errs = rr3_profile_parse(minimal_head).expect_err("缺域数组必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 [[supplies.domain]]")),
             "{errs:?}"
         );
 
         // 域条目缺键 + 未知键逐条点名
-        let errs = rr3_profile_from_text(&format!(
+        let errs = rr3_profile_parse(&format!(
             "{minimal_head}[[supplies.domain]]\nname = \"batt\"\nnominal_mv = 3700\nghost = 1\n"
         ))
         .expect_err("缺键/未知键必须报错");
@@ -4437,8 +4413,8 @@ evidence = "none"
     /// 正例：只动目标域的目标键行——注释保留、邻域同名键行原封、块序不变
     #[test]
     fn domain_keys_apply_touches_target_block_only() {
-        let out = rr3_domain_keys_apply(SURGERY_TEXT, "batt", &[("severe_mv", "3200")])
-            .expect("合法手术应过");
+        let out =
+            rr3_domain_apply(SURGERY_TEXT, "batt", &[("severe_mv", "3200")]).expect("合法手术应过");
         // 目标行已改
         assert!(out.contains("severe_mv = 3200"), "{out}");
         // 邻域同名键行原封
@@ -4457,7 +4433,7 @@ evidence = "none"
     /// 正例：armed + evidence 两键行一次手术（写口联动写形状）
     #[test]
     fn domain_keys_apply_pairs_armed_and_evidence() {
-        let out = rr3_domain_keys_apply(
+        let out = rr3_domain_apply(
             SURGERY_TEXT,
             "rail5v",
             &[("armed", "true"), ("evidence", "\"实测/0002\"")],
@@ -4474,7 +4450,7 @@ evidence = "none"
     /// 缺域拒：域名不在册不带病落盘
     #[test]
     fn domain_keys_apply_rejects_missing_domain() {
-        let e = rr3_domain_keys_apply(SURGERY_TEXT, "rail9v", &[("severe_mv", "1")])
+        let e = rr3_domain_apply(SURGERY_TEXT, "rail9v", &[("severe_mv", "1")])
             .expect_err("缺域必须拒");
         assert!(e.contains("rail9v") && e.contains("缺域拒"), "{e}");
     }
@@ -4483,8 +4459,7 @@ evidence = "none"
     #[test]
     fn domain_keys_apply_rejects_ambiguous_domain() {
         let dup = format!("{SURGERY_TEXT}\n[[supplies.domain]]\nname = \"batt\"\nnominal_mv = 1\nsevere_mv = 2\narmed = false\nevidence = \"none\"\n");
-        let e =
-            rr3_domain_keys_apply(&dup, "batt", &[("severe_mv", "1")]).expect_err("同名多义必须拒");
+        let e = rr3_domain_apply(&dup, "batt", &[("severe_mv", "1")]).expect_err("同名多义必须拒");
         assert!(e.contains("命中 2 个"), "{e}");
     }
 
@@ -4492,7 +4467,7 @@ evidence = "none"
     #[test]
     fn domain_keys_apply_rejects_missing_key_line() {
         let broken = SURGERY_TEXT.replace("severe_mv = 3300\n", "");
-        let e = rr3_domain_keys_apply(&broken, "batt", &[("severe_mv", "3200")])
+        let e = rr3_domain_apply(&broken, "batt", &[("severe_mv", "3200")])
             .expect_err("键行缺失必须拒");
         assert!(e.contains("severe_mv 缺失"), "{e}");
     }
@@ -4502,14 +4477,14 @@ evidence = "none"
     #[test]
     fn toml_key_line_apply_flat_and_word_boundary() {
         let axis = "schema = 1\npin = \"act.axis.pwm.pan\"\nhi_deg = 120\nslew_deg_s = 100\n";
-        let out = rr3_toml_key_line_apply(axis, "hi_deg", "135").expect("平铺手术应过");
+        let out = rr3_key_line_apply(axis, "hi_deg", "135").expect("平铺手术应过");
         assert!(out.contains("hi_deg = 135"), "{out}");
         assert!(out.contains("slew_deg_s = 100"), "{out}");
         // 词边界：后随非 '=' 不命中——"deg" 无命中即拒而非误伤
-        let e = rr3_toml_key_line_apply(axis, "deg", "1").expect_err("无命中必须拒");
+        let e = rr3_key_line_apply(axis, "deg", "1").expect_err("无命中必须拒");
         assert!(e.contains("deg 缺失"), "{e}");
         // 尾行替换保尾换行
-        let out = rr3_toml_key_line_apply(axis, "slew_deg_s", "90").expect("应过");
+        let out = rr3_key_line_apply(axis, "slew_deg_s", "90").expect("应过");
         assert!(out.ends_with('\n'), "尾换行须保留: {out:?}");
     }
 
@@ -4617,9 +4592,8 @@ tier_scope = ["quantum"]
         let p = root.write_profile("ok.toml", GOOD);
         // slots 册由本用例自备（被测对象就是它），其余各册照常走真值——接线档由
         // 推导函数定位（write_profile 已同批 stage）
-        let wiring =
-            crate::wiring::rr3_wiring_path_for_profile(&p).expect("夹具装配单必须能推导接线档");
-        let errs = rr3_profile_boot_inputs(
+        let wiring = crate::wiring::rr3_wiring_path(&p).expect("夹具装配单必须能推导接线档");
+        let errs = rr3_boot_inputs(
             &p,
             &bad_slots,
             Path::new(RR3_CONTRACT_ROLES_PATH),
@@ -4635,7 +4609,7 @@ tier_scope = ["quantum"]
     /// schema_version=2 三新段必填：缺段逐条点名（fail-closed，一次收集完）
     #[test]
     fn new_sections_are_required_and_named() {
-        let errs = rr3_profile_from_text("schema_version = 2\n").expect_err("缺新段必须报错");
+        let errs = rr3_profile_parse("schema_version = 2\n").expect_err("缺新段必须报错");
         for want in [
             "缺少 [platform]",
             "缺少 [supplies]",
@@ -4658,7 +4632,7 @@ tier_scope = ["quantum"]
                 "watchdog_timeout_ms = \"15s\"",
             )
             .replace("watchdog_feeder = \"rrd\"", "watchdog_feeder = \"\"");
-        let errs = rr3_profile_from_text(&text).expect_err("形状不合必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("形状不合必须报错");
         assert_eq!(errs.len(), 4, "{errs:?}");
         for want in [
             "platform.tier",
@@ -4680,7 +4654,7 @@ tier_scope = ["quantum"]
                 "watchdog_present = true\nbar = 1",
             )
             .replace("[slots]\n", "[slots]\nbaz = []\n");
-        let errs = rr3_profile_from_text(&text).expect_err("未知键必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("未知键必须报错");
         assert_eq!(errs.len(), 3, "{errs:?}");
         for want in [
             "[platform] 未知键 foo",
@@ -4848,7 +4822,7 @@ gnd_common = "star-1"
     fn default_profile_wiring_drill() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let p = repo.join("profiles/default.toml");
-        let wiring = crate::wiring::rr3_wiring_path_for_profile(&p).expect("真仓装配单可推导");
+        let wiring = crate::wiring::rr3_wiring_path(&p).expect("真仓装配单可推导");
         assert!(
             wiring.exists(),
             "真仓接线档必须随批N1 落位: {}",
@@ -5076,7 +5050,7 @@ gnd_common = "star-1"
         let p = root.write_profile("absent-ok.toml", &ok);
         let boot = boot_inputs(&p).expect("base 层格带理由登记缺席必须过");
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
-        let parsed = rr3_profile_from_text(&ok).expect("正例文本应能解析");
+        let parsed = rr3_profile_parse(&ok).expect("正例文本应能解析");
         assert_eq!(
             parsed
                 .slots_device_absent
@@ -5127,7 +5101,7 @@ gnd_common = "star-1"
     /// 走真推导，本条只钉读不到装配单的文案口径）。
     #[test]
     fn missing_profile_file_is_fatal() {
-        let e = rr3_profile_boot_inputs(
+        let e = rr3_boot_inputs(
             Path::new("/nonexistent/rr3-nope.toml"),
             Path::new(RR3_CONTRACT_SLOTS_PATH),
             Path::new(RR3_CONTRACT_ROLES_PATH),
@@ -5145,9 +5119,8 @@ gnd_common = "star-1"
     fn platform_table_missing_for_chip_is_fatal() {
         let root = Root::new("plat-missing");
         let p = root.write_profile("plat-missing.toml", GOOD);
-        let wiring =
-            crate::wiring::rr3_wiring_path_for_profile(&p).expect("夹具装配单必须能推导接线档");
-        let e = rr3_profile_boot_inputs(
+        let wiring = crate::wiring::rr3_wiring_path(&p).expect("夹具装配单必须能推导接线档");
+        let e = rr3_boot_inputs(
             &p,
             Path::new(RR3_CONTRACT_SLOTS_PATH),
             Path::new(RR3_CONTRACT_ROLES_PATH),
@@ -5210,11 +5183,11 @@ gnd_common = "star-1"
     #[test]
     fn platform_chip_left_blank_is_fatal() {
         let text = GOOD.replace("chip = \"rk3566\"", "");
-        let errs = rr3_profile_from_text(&text).expect_err("chip 留空必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("chip 留空必须报错");
         assert!(errs.iter().any(|e| e.contains("缺 chip")), "{errs:?}");
 
         let text = GOOD.replace("chip = \"rk3566\"", "chip = \"\"");
-        let errs = rr3_profile_from_text(&text).expect_err("chip 空串必须报错");
+        let errs = rr3_profile_parse(&text).expect_err("chip 空串必须报错");
         assert!(
             errs.iter().any(|e| e.contains("chip 不得为空串")),
             "{errs:?}"

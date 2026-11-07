@@ -16,7 +16,7 @@
 //! - `RR3_COUNTERS_FLUSH_MAX`：拍数兜底（缺省 64——高频心跳下 M 窗口拦不住的
 //!   场景按拍数强制透一次）。
 //!
-//! 路径判定（[`rr3_counters_path_with`]，纯函数便于测试）：
+//! 路径判定（[`rr3_path_with`]，纯函数便于测试）：
 //! - env `RR3_DATA_DIR` 有值 → `$RR3_DATA_DIR/counters.json`（sim 侧注入口，
 //!   装配单 / CI 显式给定）；
 //! - env 无值 + cfg(linux) → 缺省 `/data/rr3/counters.json`（rr_data 分区挂载点，
@@ -43,12 +43,12 @@ pub fn rr3_counters_path() -> Option<PathBuf> {
     let default: Option<&str> = Some("/data/rr3");
     #[cfg(not(target_os = "linux"))]
     let default: Option<&str> = None;
-    rr3_counters_path_with(env.as_deref(), default).map(PathBuf::from)
+    rr3_path_with(env.as_deref(), default).map(PathBuf::from)
 }
 
 /// 路径判定的纯函数核心（env 与平台缺省都显式传入，测试不碰进程 env）。
 /// 空串 env 视同未设置（与线上入口 `rr3_counters_path` 的 filter 同一口径）。
-pub fn rr3_counters_path_with(env: Option<&str>, linux_default: Option<&str>) -> Option<String> {
+pub fn rr3_path_with(env: Option<&str>, linux_default: Option<&str>) -> Option<String> {
     match env.filter(|s| !s.is_empty()) {
         Some(dir) => Some(
             Path::new(dir)
@@ -131,7 +131,7 @@ const RR3_COUNTERS_FLUSH_MS_DEFAULT: u64 = 10_000;
 const RR3_COUNTERS_FLUSH_MAX_DEFAULT: u32 = 64;
 
 /// 合并写窗口毫秒数（env `RR3_COUNTERS_FLUSH_MS`，非法值/未设回缺省）
-pub fn rr3_counters_flush_interval_ms() -> u64 {
+pub fn rr3_flush_ms() -> u64 {
     std::env::var("RR3_COUNTERS_FLUSH_MS")
         .ok()
         .and_then(|s| s.trim().parse().ok())
@@ -139,7 +139,7 @@ pub fn rr3_counters_flush_interval_ms() -> u64 {
 }
 
 /// 拍数兜底（env `RR3_COUNTERS_FLUSH_MAX`，非法值/未设回缺省）
-pub fn rr3_counters_flush_max_pending() -> u32 {
+pub fn rr3_flush_max() -> u32 {
     std::env::var("RR3_COUNTERS_FLUSH_MAX")
         .ok()
         .and_then(|s| s.trim().parse().ok())
@@ -211,18 +211,18 @@ mod tests {
     #[test]
     fn path_decision_prefers_env_then_platform_default() {
         assert_eq!(
-            rr3_counters_path_with(Some("/tmp/rr3data"), Some("/data/rr3")),
+            rr3_path_with(Some("/tmp/rr3data"), Some("/data/rr3")),
             Some("/tmp/rr3data/counters.json".to_string()),
             "env 有值时优先于平台缺省"
         );
         assert_eq!(
-            rr3_counters_path_with(None, Some("/data/rr3")),
+            rr3_path_with(None, Some("/data/rr3")),
             Some("/data/rr3/counters.json".to_string()),
             "env 无值吃平台缺省（linux rr_data 分区）"
         );
-        assert_eq!(rr3_counters_path_with(None, None), None, "皆无不持久化");
+        assert_eq!(rr3_path_with(None, None), None, "皆无不持久化");
         // 空 env 等价于无 env（线上入口 filter 掉）
-        assert_eq!(rr3_counters_path_with(Some(""), None), None);
+        assert_eq!(rr3_path_with(Some(""), None), None);
     }
 
     /// 存取 round-trip：键序确定（BTreeMap）、值逐键一致

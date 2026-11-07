@@ -270,7 +270,7 @@ pub fn rr3_require_bins_ext(bins: &[(&Path, &str)]) -> Result<(), String> {
 
 /// 演练用 manifest 文本。与 rrd/tests/support 的 `rr3_manifest` 同形但**不共用**：
 /// 那是 base/runtime 的测试夹具，tools/ 不能反向依赖测试代码。
-/// `entry` 由调用方传**绝对路径**（sim_peer 二进制），注册门禁（`rr3_manifest_entry_is_absolute`）要求它。
+/// `entry` 由调用方传**绝对路径**（sim_peer 二进制），注册门禁（`rr3_manifest_abs`）要求它。
 pub fn rr3_manifest_text(
     name: &str,
     entry_abs: &Path,

@@ -31,7 +31,7 @@
 //! 门 c 补齐五键定形＝ADR-0021 裁定 2）：每条
 //! `{ rail, peak_ma, sustained_ma, critical, concurrency_group }`——件在 `rail` 域上的
 //! 电流需求（mA）。**每实例语义**：条目是"该件服务的每个角色实例"的需求，装载读者
-//! （rrd `profile::rr3_demand_budget_check`）按角色实例数扩算后再加总比对域 cap
+//! （rrd `profile::rr3_demand_budget`）按角色实例数扩算后再加总比对域 cap
 //! （校验⑨，全案 §5），本模块只管形状：rail 非空、peak_ma/sustained_ma 正整数且
 //! sustained ≤ peak、critical 显式布尔（不给缺省）、concurrency_group 必须显式写
 //! （T-5：显式空数组 = 不分组 = 全体并发最坏口径，合法；缺键即红——同 no_injection
@@ -44,7 +44,7 @@
 //! **内存需求申报面**（`[assemble].task_stack_bytes` / `[assemble].heap_peak_bytes`，
 //! 校验⑩ 分子面，批N2 n2c-v10 = 全案 §5 判据⑩ / F-13）：件级语义**非每实例**——
 //! 件全部实例共享一个任务栈、一条堆账（如双轴共享同一任务栈），装载读者
-//! （rrd `rr3_memory_budget_check`）直加不扩算，与 demands 的每实例扩算语义相反。
+//! （rrd `rr3_memory_budget`）直加不扩算，与 demands 的每实例扩算语义相反。
 //! 缺省 0 = 未申报不进 Σ：申报义务未触发（板侧任务映射未建模，归 0.0.7 批G/批D1），
 //! 本批立判据实体与装载拒链，红例用合成申报；给键必须是非负整数（负数 = 物理矛盾）。
 //! 两键同样**件级专用**：组合件级 [assemble] 不认，未知键点名即拦（同 demands）。
@@ -164,7 +164,7 @@ pub struct Rr3AssembleFacts {
     /// 内存需求申报（校验⑩ 分子面，批N2 n2c-v10）：本件任务栈占用字节数。
     /// **件级语义非每实例**（与 demands 的每实例语义相反）：件全部实例共享一个
     /// 任务栈（如双轴共享同一任务栈），装载读者 [`crate::assemble`] 消费方
-    /// （rrd `rr3_memory_budget_check`）直加不扩算。缺省 0 = 未申报不进 Σ
+    /// （rrd `rr3_memory_budget`）直加不扩算。缺省 0 = 未申报不进 Σ
     /// （申报义务未触发——板侧任务映射未建模，归 0.0.7 批G/批D1；立判据实体
     /// 与执法链在先，数据申报随后）。
     pub task_stack_bytes: i64,
@@ -502,7 +502,7 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
     // 缺键 = 未申报 = 0 不进 Σ（申报义务未触发——板侧任务映射未建模，0.0.7 批G/批D1；
     // 形状层不强制，同 demands 的"缺键 = 空申报合法"）；给键必须是非负整数
     // （负数 = 物理矛盾，fail-closed）。件级语义非每实例——判据消费在
-    // rrd `rr3_memory_budget_check`，直加不扩算。
+    // rrd `rr3_memory_budget`，直加不扩算。
     for (key, slot) in [
         ("task_stack_bytes", &mut facts.task_stack_bytes),
         ("heap_peak_bytes", &mut facts.heap_peak_bytes),
@@ -750,7 +750,7 @@ ops = [
     }
 
     /// 电流需求申报面（基-36 首件）：正例解析 + 缺键 = 空申报合法 + 坏形逐条点名。
-    /// 判据本体（Σ ≤ cap）不在本模块——读者在 rrd rr3_demand_budget_check。
+    /// 判据本体（Σ ≤ cap）不在本模块——读者在 rrd rr3_demand_budget。
     #[test]
     fn demands_parse_and_shape_errors_are_named() {
         // 正例：servo 真实申报形状（五键定形 = ADR-0021 裁定 2；handles 同 servo 真实
@@ -834,7 +834,7 @@ ops = [
 
     /// 内存需求申报面（校验⑩ 分子，批N2 n2c-v10）：正例解析 + 缺键 = 未申报 0
     /// 合法 + 负数/非整数红。判据本体（Σ ≤ 预算）不在本模块——读者在
-    /// rrd `rr3_memory_budget_check`（分母住 [supplies].budget）。
+    /// rrd `rr3_memory_budget`（分母住 [supplies].budget）。
     #[test]
     fn memory_bytes_parse_and_shape_errors_are_named() {
         // 正例：两键显式给出（件级语义非每实例，直加不扩算——头注同源）
