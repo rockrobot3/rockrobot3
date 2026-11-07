@@ -275,7 +275,7 @@ fn main() {
     // 堆采样①：启动后（runbook §9.3 ③ 第一点）
     ram_point("1-boot");
 
-    let peripherals = Peripherals::take().unwrap();
+    let peripherals = Peripherals::take().expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
     // UART2：GPIO17→TX / GPIO16←RX，115200（批C 载体同款接线与波特率硬约束）。
     // cts/rts 不用（None）；TX/RX 半体的独立 new() 会对同口二次
     // uart_driver_install（IDF 一口一装），故整装 UartDriver 一次。
