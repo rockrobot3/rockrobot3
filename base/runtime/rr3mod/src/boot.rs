@@ -50,14 +50,14 @@ pub fn load_config_text(
 /// 逐字文案的通路（新增不改旧签名，power/connect 已落地面零返工）。
 pub fn rr3_config_path(config_env: Option<&'static str>, manifest_path: &str) -> String {
     match config_env {
-        Some(env) => std::env::var(env).unwrap_or_else(|_| rr3_config_default_path(manifest_path)),
-        None => rr3_config_default_path(manifest_path),
+        Some(env) => std::env::var(env).unwrap_or_else(|_| rr3_cfg_default_path(manifest_path)),
+        None => rr3_cfg_default_path(manifest_path),
     }
 }
 
 /// 缺省路径：manifest 同目录 config.toml（现行三模块逐字形状，
 /// rr3-act composite `rr3_config_load` 同款）。
-fn rr3_config_default_path(manifest_path: &str) -> String {
+fn rr3_cfg_default_path(manifest_path: &str) -> String {
     std::path::Path::new(manifest_path)
         .parent()
         .unwrap_or(std::path::Path::new("."))

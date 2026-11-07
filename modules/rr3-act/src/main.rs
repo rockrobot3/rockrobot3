@@ -53,7 +53,7 @@ fn rr3_act_run() -> Result<(), String> {
     })?;
 
     // 轴状态（坏形/缺席折保守缺省；先于 config 就绪行——行程真值随路，批N3 件五门 g）
-    let axis = boot::rr3_act_axis_state_load();
+    let axis = boot::rr3_axis_state_load();
     cfg.servo.angle_min_deg = axis.lo_deg;
     cfg.servo.angle_max_deg = axis.hi_deg;
     let open = &cfg.intent.open_topics;

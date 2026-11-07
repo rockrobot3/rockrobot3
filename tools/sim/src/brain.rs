@@ -239,7 +239,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
     // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
     let interact_cfg = workdir.join("interact-config.toml");
-    std::fs::write(&interact_cfg, crate::chain::rr3_chain_interact_cfg())
+    std::fs::write(&interact_cfg, crate::chain::rr3_chain_itact_cfg())
         .map_err(|e| format!("写 interact config 失败: {e}"))?;
 
     let mut children: Vec<(String, Child)> = Vec::new();

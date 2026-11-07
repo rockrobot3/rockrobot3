@@ -28,7 +28,7 @@ pub(crate) fn rr3_low_power_reject(what: &str) -> String {
 /// 动作形态词拒收文案（error wire 契约字面量——面板与 legacy 依赖字面；批N34
 /// 件二自 mech 上移：机制层零堆枚举 [`super::servo::Rr3ServoMotionError`]，
 /// 渲染归编排层与行程/时限同批N24 件三先例，字面量逐字保持）。
-pub(crate) fn rr3_servo_motion_reject(word: &str) -> String {
+pub(crate) fn rr3_motion_reject(word: &str) -> String {
     format!("不认的动作形态 {word:?}（运行命令面只认 jog/auto）")
 }
 
@@ -55,7 +55,7 @@ pub(crate) fn rr3_handle_servo(
     // 判据拒收回 InvalidParam，折业务性失败点名言（批N34 件二：机制层零堆
     // 枚举，词面文案在编排层渲染——契约字面量逐字不变）
     let motion = servo::rr3_servo_motion(args.get("motion").and_then(Value::as_str))
-        .map_err(|servo::Rr3ServoMotionError::UnknownWord(word)| rr3_servo_motion_reject(word))?;
+        .map_err(|servo::Rr3ServoMotionError::UnknownWord(word)| rr3_motion_reject(word))?;
     rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
         .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
     let (angle, move_ms) = rr3_servo_parse_args(args, cfg)?;
@@ -124,7 +124,7 @@ pub fn rr3_relay_result(on: bool) -> Value {
 /// relay 机制错误的人读文案（批N24 件三，L-3 形状清理）：机制层零堆枚举
 /// （`Rr3RelayApplyError`，HAL 错原样随行），文案在编排层渲染——act 册 §9
 /// 契约字面量逐字保持（面板与 legacy 依赖字面），每句落在唯一一处。
-pub fn rr3_relay_apply_error_text(e: &relay::Rr3RelayApplyError) -> String {
+pub fn rr3_relay_err_text(e: &relay::Rr3RelayApplyError) -> String {
     match e {
         relay::Rr3RelayApplyError::ReadBack(e) => format!("继电器读回失败: {e}"),
         relay::Rr3RelayApplyError::Write(e) => format!("继电器写入失败: {e}"),
@@ -384,9 +384,9 @@ mod tests {
     fn relay_apply_error_text_is_verbatim() {
         use rr_hal_api::Rr3HalError;
         let e = relay::Rr3RelayApplyError::ReadBack(Rr3HalError::Busy);
-        assert_eq!(rr3_relay_apply_error_text(&e), "继电器读回失败: HAL 设备忙");
+        assert_eq!(rr3_relay_err_text(&e), "继电器读回失败: HAL 设备忙");
         let e = relay::Rr3RelayApplyError::Write(Rr3HalError::Busy);
-        assert_eq!(rr3_relay_apply_error_text(&e), "继电器写入失败: HAL 设备忙");
+        assert_eq!(rr3_relay_err_text(&e), "继电器写入失败: HAL 设备忙");
     }
 
     /// servo/state 体 seq/angle 两键钉死（自 servo 原子件迁入）

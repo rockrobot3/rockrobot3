@@ -1957,7 +1957,7 @@ xtensa-esp32-none-elf -p rr-core` 绿（runtime 随 lib 入 no_std 面）。同�
 `rr-core` 新增 `control` 模块（no_std，纯函数 + `u64` 毫秒注入时钟）：四件原语真值
 自模块面迁入——`Rr3RateGate`（rr3-act servo/state 限速门，Instant→注入 ms）、
 `Rr3LowEdge`（rr3-power battery/low 边沿机）、饱和检测三件（`Rr3ReflexCfg`/
-`rr3_reflex_window_plan`/`Rr3SaturationDetector`，另拆 `rr3_reflex_window_saturated`/
+`rr3_reflex_plan`/`Rr3SaturationDetector`，另拆 `rr3_reflex_saturated`/
 `rr3_reflex_rate_hz` 两纯函数供 std 主循环窗结算调用）+ 安全核新原语
 `rr3_travel_clamp`（限位钳位：上游裁决被绕过也不越行程，行程端点颠倒收敛到有效
 区间、绝不 panic）。9 测试含逐拍一致性判据 `same_control_graph_beat_for_beat_
@@ -2585,7 +2585,7 @@ power P-11（细则只在全案里，册内挂单号 + 指针，避免第二真�
 取证方式：四路并行审查（六单元 / 基座九 crate / 板侧与工具链门禁 / 契约与装机运维面），
 **每条要写进设计的断言我都自己 grep 或读码复核**，撤回与收窄项单列在
 [全案](dev/0.0.5增补轮六——底座资源模型与能力面抽象补课全案.md) §16.2。
-核实成立的主线违例五组（索引 §11 **L-17…L-21**）：机制核携策略窗（`rr-mech` 的 `rr3_reflex_window_plan`
+核实成立的主线违例五组（索引 §11 **L-17…L-21**）：机制核携策略窗（`rr-mech` 的 `rr3_reflex_plan`
 内 `250u64`）、契约层携部署缺省（`rr-ipc` 的 `RR3_UDS_PATH_DEFAULT`/`RR3_SHM_NAME_DEFAULT` 对 none 目标
 仍无条件再导出）、跨形态契约携器件缺省（`RR3_AUDIO_CFG_16K_MONO16` 的 `channels: 1` 对上实机双麦）、
 基座 crate 钉某块板（`rr-ota` 两处 `include_str!(…radxa-zero3…)`）、**申报面可内联逃逸**

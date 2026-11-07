@@ -118,7 +118,7 @@ impl Dispatcher for Rr3ActDispatcher {
         // 业务性失败折 error 应答（请求-应答语义），不当致命错误。
         // 低电禁动闸门（MC-5 §20 ② ②）：只辖**执行面** servo/relay（点名与
         // 意图两路同判），**妆面 led 不禁**（禁动它只增加卡死面积）。
-        let blocked = self.low_gate.rr3_low_gate_is_blocked();
+        let blocked = self.low_gate.rr3_low_gate_blocked();
         let outcome = match topic {
             servo::RR3_SERVO_COMMAND_TOPIC => rpc::rr3_handle_servo(
                 &mut *self.servo_dev,
@@ -141,7 +141,7 @@ impl Dispatcher for Rr3ActDispatcher {
                     rpc::rr3_relay_parse_args(args)
                         .and_then(|on| {
                             relay::rr3_relay_apply(&mut *self.relay_gpio, on)
-                                .map_err(|e| rpc::rr3_relay_apply_error_text(&e))
+                                .map_err(|e| rpc::rr3_relay_err_text(&e))
                         })
                         .map(|(on, prev)| (rpc::rr3_relay_result(on), None, Some((on, prev))))
                 }
@@ -222,12 +222,12 @@ impl Dispatcher for Rr3ActDispatcher {
                 eprintln!("intent: trace={trace}（纯对话轮，无动作）");
             }
             Some(actions) => {
-                for r in intent::rr3_intent_actions_handle(
+                for r in intent::rr3_actions_handle(
                     actions,
                     &mut *self.relay_gpio,
                     &mut *self.servo_dev,
                     &self.cfg.servo,
-                    self.low_gate.rr3_low_gate_is_blocked(),
+                    self.low_gate.rr3_low_gate_blocked(),
                     &self.axis,
                     &self.cfg.intent.open_topics,
                 ) {

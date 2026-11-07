@@ -183,7 +183,7 @@ pub fn rr3_chain_act_cfg() -> String {
 
 /// interact 演练 config（I-11 起 interact 必读 config：不可点名集注入；与仓内
 /// `modules/rr3-interact/config.toml` 同形状，缺键/在册外值由 main.rs 解析红）
-pub fn rr3_chain_interact_cfg() -> String {
+pub fn rr3_chain_itact_cfg() -> String {
     "[rr3-interact]\nlog_level = \"info\"\n\n[rr3-interact.face]\nnon_pointable = [\"talk\"]\n"
         .to_string()
 }
@@ -396,7 +396,7 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             rr3_brain_cfg_text(false, "http://127.0.0.1:9/v1"),
         ),
         ("sense-config.toml", rr3_chain_sense_cfg()),
-        ("interact-config.toml", rr3_chain_interact_cfg()),
+        ("interact-config.toml", rr3_chain_itact_cfg()),
         ("act-config.toml", rr3_chain_act_cfg()),
         ("rr3-obs.toml", rr3_chain_obs(&act)),
     ] {
@@ -686,7 +686,7 @@ mod tests {
         assert!(act.contains("move_timeout_ms = 800"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
         assert!(!act.contains("limit_deg"), "行程键不得回流 config: {act}");
-        let interact = rr3_chain_interact_cfg();
+        let interact = rr3_chain_itact_cfg();
         assert!(
             interact.contains("non_pointable = [\"talk\"]"),
             "{interact}"

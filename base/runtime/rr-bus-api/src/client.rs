@@ -70,7 +70,7 @@ pub struct Rr3BusIdentity {
     pub heartbeat_ms: u64,
 }
 
-pub fn rr3_manifest_identity(text: &str) -> Result<Rr3BusIdentity, String> {
+pub fn rr3_manifest_ident(text: &str) -> Result<Rr3BusIdentity, String> {
     let root: toml::Value = text
         .parse()
         .map_err(|e| format!("manifest 不是合法 TOML: {e}"))?;
@@ -93,7 +93,7 @@ pub fn rr3_manifest_identity(text: &str) -> Result<Rr3BusIdentity, String> {
 /// 契约工件、entry 由装机安装步骤写入。模块直跑（测试 / 开发）时走本助手：把
 /// entry 改写成进程自己的可执行文件路径再注册——对应"装机时写绝对 entry"的
 /// 生产路径的等价物。
-pub fn rr3_manifest_entry_absolutize(text: &str, exe: &Path) -> Result<String, String> {
+pub fn rr3_entry_absolutize(text: &str, exe: &Path) -> Result<String, String> {
     let exe = exe
         .to_str()
         .ok_or_else(|| "可执行文件路径不是合法 UTF-8".to_string())?
@@ -277,9 +277,9 @@ impl Rr3BusClient {
     pub fn rr3_connect(manifest_text: &str) -> Result<Self, String> {
         let path =
             std::env::var(RR3_BUS_PATH_ENV).unwrap_or_else(|_| RR3_UDS_PATH_DEFAULT.to_string());
-        let identity = rr3_manifest_identity(manifest_text)?;
+        let identity = rr3_manifest_ident(manifest_text)?;
         let exe = std::env::current_exe().map_err(|e| format!("取 current_exe 失败: {e}"))?;
-        let wire = rr3_manifest_entry_absolutize(manifest_text, &exe)?;
+        let wire = rr3_entry_absolutize(manifest_text, &exe)?;
         Self::rr3_connect_with(&path, identity, &wire)
     }
 
@@ -758,7 +758,7 @@ mod tests {
         std::thread::spawn(move || fake_rrd(listener, log));
         let client = Rr3BusClient::rr3_connect_with(
             path.to_str().unwrap(),
-            rr3_manifest_identity(MANIFEST).unwrap(),
+            rr3_manifest_ident(MANIFEST).unwrap(),
             MANIFEST,
         )
         .expect("连假 rrd 应成功");
@@ -767,19 +767,19 @@ mod tests {
 
     #[test]
     fn manifest_identity_takes_name_and_heartbeat() {
-        let id = rr3_manifest_identity(MANIFEST).unwrap();
+        let id = rr3_manifest_ident(MANIFEST).unwrap();
         assert_eq!(id.name, "rr3-bus-t");
         assert_eq!(id.heartbeat_ms, 50);
-        assert!(rr3_manifest_identity("no-toml-here [").is_err());
+        assert!(rr3_manifest_ident("no-toml-here [").is_err());
         assert!(
-            rr3_manifest_identity("[manifest]\nname=\"x\"\n").is_err(),
+            rr3_manifest_ident("[manifest]\nname=\"x\"\n").is_err(),
             "缺 heartbeat_ms 必须报错"
         );
     }
 
     #[test]
     fn entry_absolutize_rewrites_entry_and_keeps_rest() {
-        let out = rr3_manifest_entry_absolutize(MANIFEST, Path::new("/opt/rr3/rr3-sense")).unwrap();
+        let out = rr3_entry_absolutize(MANIFEST, Path::new("/opt/rr3/rr3-sense")).unwrap();
         let root: toml::Value = out.parse().unwrap();
         assert_eq!(
             root["manifest"]["entry"].as_str(),
@@ -787,7 +787,7 @@ mod tests {
         );
         assert_eq!(root["manifest"]["name"].as_str(), Some("rr3-bus-t"));
         assert_eq!(root["health"]["heartbeat_ms"].as_integer(), Some(50));
-        assert!(rr3_manifest_entry_absolutize(MANIFEST, Path::new("rel/bin")).is_err());
+        assert!(rr3_entry_absolutize(MANIFEST, Path::new("rel/bin")).is_err());
     }
 
     #[test]
@@ -977,7 +977,7 @@ mod tests {
         let manifest = MANIFEST.replace("heartbeat_ms = 50", "heartbeat_ms = 3600000");
         let client = Rr3BusClient::rr3_connect_with(
             path.to_str().unwrap(),
-            rr3_manifest_identity(&manifest).unwrap(),
+            rr3_manifest_ident(&manifest).unwrap(),
             &manifest,
         )
         .expect("注册握手应成功");

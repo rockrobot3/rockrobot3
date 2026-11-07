@@ -137,7 +137,7 @@ fn rr3_write(stream: &mut UnixStream, ty: Rr3PayloadType, trace_id: u64, body: V
 
 /// 注册应答后的预推帧：echo/boom Event（on_event 路）+ 两枚 rr3.call（Ok / Err
 /// 折返两形状；trace_id=9 ≠ 0，serve 的 rr3_reply_call 才有回路）
-fn prime_dispatch_frames(stream: &mut UnixStream) {
+fn rr3_prime_frames(stream: &mut UnixStream) {
     rr3_write(
         stream,
         Rr3PayloadType::Event,
@@ -208,7 +208,7 @@ fn fake_rrd(listener: UnixListener, log: Arc<Mutex<Vec<Value>>>, mode: FakeMode)
                         return; // 关流 → reader EOF → stop 位 → serve 探针返
                     }
                     if primed {
-                        prime_dispatch_frames(&mut stream);
+                        rr3_prime_frames(&mut stream);
                     }
                 }
                 // 心跳与其他上行方法只记账不应答（heartbeat_ms=50000 测试窗口内不拍）

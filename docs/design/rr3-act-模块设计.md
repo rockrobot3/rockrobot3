@@ -30,7 +30,7 @@
 
 - **`Rr3LedEffect`**：`Off | On | Blink`（无隐式态）；不变式：`apply` 立即落目标电平，blink 从**亮相**起步，不等下一半拍。
 - **`Rr3RateGate`**（机制核）：不变式"状态变化必发布，两次发布至少隔 `min_interval_ms`"；被限掉的这次**不缓存不补发**（流是摘要不是逐拍镜像）。
-- **饱和检测 `Rr3SaturationDetector`**（机制核）：`run >= need` 且 episode 首报恰一次；任一非饱和窗清零复位。`Rr3ReflexCfg{loop_hz, saturate_notice_ms}` → `rr3_reflex_window_plan` 出 `(window_ms=250, need, expect_ticks)`；窗内实跑 tick `< expect/2` 才算饱和（sleep 粒度的系统性超期不算）。
+- **饱和检测 `Rr3SaturationDetector`**（机制核）：`run >= need` 且 episode 首报恰一次；任一非饱和窗清零复位。`Rr3ReflexCfg{loop_hz, saturate_notice_ms}` → `rr3_reflex_plan` 出 `(window_ms=250, need, expect_ticks)`；窗内实跑 tick `< expect/2` 才算饱和（sleep 粒度的系统性超期不算）。
 - 非法输入收敛方向：角度越程 → **点名拒收**（件面 `rr3_servo_check_travel` 出 error、不落角；与板侧 `servo_set` 同口径 fail-closed）——安全核 `rr3_travel_clamp` 只是裁决被绕过时的兜底（合法输入恒等，不是 RPC 语义）；参数缺/类型错 → 拒绝且不落电平。
 
 ## §3 注入面
@@ -48,7 +48,7 @@
 | 常量 | 值 | 位置 |
 |---|---|---|
 | `RR3_POLL_WAIT` | 250 ms | `src/composite.rs` |
-| 反射环名义 | `loop_hz = 1000` → 1 ms/拍，窗 250 ms、通告 500 ms | `reflex.rs` + `rr3_reflex_window_plan` |
+| 反射环名义 | `loop_hz = 1000` → 1 ms/拍，窗 250 ms、通告 500 ms | `reflex.rs` + `rr3_reflex_plan` |
 | 心跳 | 1000 ms（`rr-bus` 独立线程，`SystemTime` 喂拍点） | client |
 | 看门狗 | 5000 ms | `[health]` |
 
@@ -160,7 +160,7 @@
 | 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
 |---|---|---|---|---|
 | `src/composite.rs : rr3_act_run` | `rr3_hal_gpio_out("led")` / `("relay")` | **GPIO role token**（白名单在 `rr-hal/backend.rs` 的 `match role`，白名单外 `None` → fail-closed） | 有 | role 词留在件/组合件是对的（它是格位语义），但 `gpio_led_line`/`gpio_relay_line` 的**引脚**必须在描述符 `[hardware]`（批D④ 已落，此处只登记不重做） |
-| `src/intent.rs : rr3_intent_action_handle` 的开放门 | 执行臂 `match` 只落 `relay/set` + `servo/command`；已归属但不在开放集者走 `"已归属但意图执行面未开放 {topic}（当前开放集 {}）"` | **意图开放门 = 纯业务策略**（led 故意不开放） | 有，且被单测逐字断言 | **0.0.5 批M MC-10 A-9 已落**：开放集 = config 键 `[rr3-act.intent] open_topics`（组合件读入透传），换形态删一条即改行为、裁剪=改数据（⑧-c 只扫 atoms 故不进 assemble.toml） |
+| `src/intent.rs : rr3_action_handle` 的开放门 | 执行臂 `match` 只落 `relay/set` + `servo/command`；已归属但不在开放集者走 `"已归属但意图执行面未开放 {topic}（当前开放集 {}）"` | **意图开放门 = 纯业务策略**（led 故意不开放） | 有，且被单测逐字断言 | **0.0.5 批M MC-10 A-9 已落**：开放集 = config 键 `[rr3-act.intent] open_topics`（组合件读入透传），换形态删一条即改行为、裁剪=改数据（⑧-c 只扫 atoms 故不进 assemble.toml） |
 | `src/intent.rs : EXPOSED` | 内联 `"rr3-act/led/effect"` 字面量（同文件另有两枚引常量） | 归属门白名单 | 有 | **双写即债**：改引 `led::RR3_LED_EFFECT_TOPIC` 单点（A-10） |
 | `src/composite.rs : RR3_POLL_WAIT` | `250ms` | 收帧空转代价 | **无键无读者**（代码常量） | ops/config 键（与 sense/interact/power/connect 的 `POLL_WAIT` 同批处理，避免五册各说各话） |
 | `src/reflex.rs : rr3_reflex_loop` | `1_000_000`（µs/s）、`cfg.loop_hz.max(1)`、`"saturate"`、topic `"rr3-act/motor/reflex"`、线程名 `"rr3-act-reflex"` | 环换算 / reason 词 / 主题 | `loop_hz` 有 config；`"saturate"` 是对外词汇 | `1_000_000` 与换算归 `rr-core::runtime` 时基面；**`"saturate"` = 契约字面量—不许动**（订阅方与面板按它分派）；线程名留 host 档 |
@@ -181,7 +181,7 @@
 | §1 目标签名"载荷上移承载层（A-8）" | `rr3_servo_state_body`、`rr3_relay_result`、`rr3_led_parse_args`、`rr3_relay_parse_args` 全在 `src/composite.rs`；件面 `serde_json` 零命中 | **A-8 已结** |
 | §1 "`use rr_hal::` → `rr_hal_api`（A-4）" | 契约面已同步化；件内 import 源为 `rr_hal_api`（经 re-export 保路径），`rr3_block_on` 不存在 | **A-4 已结** |
 | §12 bare 档"`Arc<dyn Rr3GpioOut>` 需改泛型（禁 trait 对象）" | `led` 已无 `Arc`；`rr3_relay_apply` 与 `rr3_tts_play` 均已泛型化（`G: Rr3GpioOut + ?Sized` / `S: Rr3AudioSink + ?Sized`，批N24 件三 `b92e767` / 件四 `0272363`，调用点字面零改动） | **L-3 已结**（act 半边；`rr3_tts_play` 半边同族随件四收） |
-| §1 错型面 | 三签名已枚举化（批N24 件三，2026-10-23，`b92e767`）：`rr3_servo_check_travel` → `Rr3ServoTravelError::OutOfRange`、`rr3_servo_check_timeout` → `Rr3ServoTimeoutError`（`ZeroMs`/`BeyondLimit`）、`rr3_relay_apply` → `Rr3RelayApplyError`（`Rr3HalError` 包装），文案渲染归编排层逐字；**新余数如实登记**：`rr3_servo_check_motion` 仍 `Result<_, String>`（批N3 新增、不在 L-3 册面实证集，按 R-13 不扩工单随批补记，归后续批次收——**已收（批N34 件二 `b7545cc`，2026-10-24）**：`Rr3ServoMotionError<'a>` 零堆枚举＋`rr3_servo_motion_reject` 编排层渲染逐字，四签名枚举化齐） | **L-3 已结**（act 半边＋一项新余数登记——余数已收批N34，错型面全清） |
+| §1 错型面 | 三签名已枚举化（批N24 件三，2026-10-23，`b92e767`）：`rr3_servo_check_travel` → `Rr3ServoTravelError::OutOfRange`、`rr3_servo_check_timeout` → `Rr3ServoTimeoutError`（`ZeroMs`/`BeyondLimit`）、`rr3_relay_apply` → `Rr3RelayApplyError`（`Rr3HalError` 包装），文案渲染归编排层逐字；**新余数如实登记**：`rr3_servo_check_motion` 仍 `Result<_, String>`（批N3 新增、不在 L-3 册面实证集，按 R-13 不扩工单随批补记，归后续批次收——**已收（批N34 件二 `b7545cc`，2026-10-24）**：`Rr3ServoMotionError<'a>` 零堆枚举＋`rr3_motion_reject` 编排层渲染逐字，四签名枚举化齐） | **L-3 已结**（act 半边＋一项新余数登记——余数已收批N34，错型面全清） |
 | §13 "`intent.rs : EXPOSED` 内联 led 主题串（A-10 双写）" | `const EXPOSED: [&str; 3]` 与 `"已归属但意图执行面未开放 …"` 仍在，led 通路仍封闭（注释写明"扩面随真实需要 append"） | **未结** → 批L **L-7**（串值单点），封闭本身按 R-3 不变 |
 | §13 策略申报位 | `atoms/{servo,led,relay}/assemble.toml` **已填**（批M MC-10 L-5，2026-10-13）：servo 报 `Rr3PwmServo`←`pwm_chip`/`pwm_channel` 句柄 + `angle_min_deg`/`angle_max_deg`/`move_timeout_ms`/`state_min_interval_ms` ops；led 报 `Rr3GpioOut`←`gpio_chip`/`gpio_led_line` + `blink_period_ms`；relay 报 `Rr3GpioOut`←`gpio_relay_line` | **L-5 已结**（白名单 ops 续做见 A-9） |
 | §11/框架通用约定 1 "妆面件失败语义例外" | 代码未变（led 写失败仍 `eprintln` 不退） | **A-12 未结**（D8 范围仍待你定） |

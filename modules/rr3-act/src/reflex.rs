@@ -17,8 +17,7 @@ use rr3mod::BusHandle;
 use serde_json::json;
 
 pub use rr_core::control::{
-    rr3_reflex_rate_hz, rr3_reflex_window_plan, rr3_reflex_window_saturated, Rr3ReflexCfg,
-    Rr3SaturationDetector,
+    rr3_reflex_plan, rr3_reflex_rate_hz, rr3_reflex_saturated, Rr3ReflexCfg, Rr3SaturationDetector,
 };
 
 pub const RR3_REFLEX_NOTICE_TOPIC: &str = "rr3-act/motor/reflex";
@@ -40,7 +39,7 @@ pub const SURFACE: &[&str] =
 pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
     let loop_hz = cfg.loop_hz.max(1);
     let period = Duration::from_micros(1_000_000 / loop_hz as u64);
-    let (window_ms, need, expect) = rr3_reflex_window_plan(&cfg);
+    let (window_ms, need, expect) = rr3_reflex_plan(&cfg);
     let window = Duration::from_millis(window_ms);
     let mut det = Rr3SaturationDetector::rr3_detector_new(need);
     let mut seq: u64 = 0;
@@ -52,7 +51,7 @@ pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
         ticks += 1;
         let now = Instant::now();
         if now.duration_since(window_start) >= window {
-            let saturated = rr3_reflex_window_saturated(ticks, expect);
+            let saturated = rr3_reflex_saturated(ticks, expect);
             if det.rr3_detector_feed(saturated) {
                 seq += 1;
                 let rate_hz = rr3_reflex_rate_hz(ticks, window_ms);
@@ -83,7 +82,7 @@ mod tests {
             loop_hz: 1000,
             saturate_notice_ms: 500,
         };
-        let (window_ms, need, expect) = rr3_reflex_window_plan(&cfg);
+        let (window_ms, need, expect) = rr3_reflex_plan(&cfg);
         assert_eq!(
             (window_ms, need, expect),
             (250, 2, 250),
@@ -99,7 +98,7 @@ mod tests {
             "第 2 个连续饱和窗：episode 首报（rr-core 判定）"
         );
         assert!(
-            rr3_reflex_window_saturated(124, 250) && !rr3_reflex_window_saturated(125, 250),
+            rr3_reflex_saturated(124, 250) && !rr3_reflex_saturated(125, 250),
             "半拍线（rr-core 判定）"
         );
         assert_eq!(rr3_reflex_rate_hz(250, 250), 1000);

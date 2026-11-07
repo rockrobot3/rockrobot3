@@ -139,7 +139,7 @@ impl Rr3ActAxisState {
 /// 执行轴状态装载：env 读 + 坏形/缺席折保守缺省并点名（安全向，不退），回显注入
 /// 的策略面（A-9：改数据即改行为，日志是第一证据）。自原 composite.rs 逐字迁入
 /// （缺席/坏形/回显三文案逐字）。
-pub(crate) fn rr3_act_axis_state_load() -> Rr3ActAxisState {
+pub(crate) fn rr3_axis_state_load() -> Rr3ActAxisState {
     let axis = match std::env::var(RR3_ACT_AXIS_STATE_ENV) {
         Ok(text) => Rr3ActAxisState::rr3_from_env(&text).unwrap_or_else(|e| {
             eprintln!("rr3-act: {e}，按保守缺省起跑（未标定，只受点动）");
