@@ -6,7 +6,7 @@
 
 use rr_ipc::{Rr3Frame, Rr3FrameBuf, Rr3TransportConn};
 use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
-use rr_periph_proto::{rr3_periph_request_parse, rr3_periph_response_frame, Rr3PeriphRequest};
+use rr_periph_proto::{rr3_req_parse, rr3_resp_frame, Rr3PeriphRequest};
 use serde_json::Value;
 
 /// 帧面请求视图别名：id/method/params 摘出，帧头位形随行携带（应答回带
@@ -14,14 +14,14 @@ use serde_json::Value;
 pub type FrameReq = Rr3PeriphRequest;
 
 /// 收帧 + 协议门（全过才返回 Ok）：整帧收 → 帧还原（magic/长度校验在 rr-ipc）
-/// → 协议门（dst/payload 前缀/JSON/id 在 [`rr_periph_proto::rr3_periph_request_parse`]，
+/// → 协议门（dst/payload 前缀/JSON/id 在 [`rr_periph_proto::rr3_req_parse`]，
 /// 单点真值）。任一门失败回 Err = **丢弃不回帧**（fail-closed：帧级不可信的请求
 /// 不作确定性应答；对端侧重开连接即恢复）。半帧失败后流上可能残留尾巴字节——
 /// 下一轮 magic 窥视大概率落错误面，自愈路径由适配层负责。
 pub fn frame_recv(io: &mut impl Rr3UartPort) -> Result<FrameReq, String> {
     let buf = io.rr3_recv_buf().map_err(|e| format!("收帧失败: {e:?}"))?;
     let frame = Rr3Frame::try_from(buf).map_err(|e| format!("帧还原失败: {e:?}"))?;
-    rr3_periph_request_parse(&frame)
+    rr3_req_parse(&frame)
 }
 
 /// Response 回帧：result 在位（业务失败折 `{"error": 文案}`——宿主解析契约），
@@ -34,7 +34,7 @@ pub fn frame_send_response(
     result: Result<Value, String>,
     clock: &impl Rr3ClockPort,
 ) -> Result<(), String> {
-    let resp = rr3_periph_response_frame(req, result, clock.rr3_now_ns());
+    let resp = rr3_resp_frame(req, result, clock.rr3_now_ns());
     io.rr3_send_buf(Rr3FrameBuf::from(&resp))
         .map_err(|e| format!("Response 发送失败: {e:?}"))
 }
@@ -44,8 +44,8 @@ mod tests {
     use super::*;
     use rr_ipc::{rr3_body_split, Rr3ByteStream};
     use rr_periph_proto::consts::{RR3_SERVO_TOPIC, RR3_TASK_HOST};
-    use rr_periph_proto::host_call::rr3_bridge_call_frame;
-    use rr_periph_proto::rr3_bridge_parse_response;
+    use rr_periph_proto::host_call::rr3_bridge_call;
+    use rr_periph_proto::rr3_bridge_decode;
     use serde_json::json;
 
     /// 测试字节流：读侧按序吐 `rd`，写侧累积到 `wr`（端口契约的两个 usize 方法）。
@@ -89,7 +89,7 @@ mod tests {
 
     /// 合法宿主请求帧 → 收帧 → 协议门 → 视图（为应答测试提供 req）。
     fn recv_host_call(id: u64) -> FakeIo {
-        let frame = rr3_bridge_call_frame(id, RR3_SERVO_TOPIC, &json!({ "angle_deg": 95 }));
+        let frame = rr3_bridge_call(id, RR3_SERVO_TOPIC, &json!({ "angle_deg": 95 }));
         let buf = Rr3FrameBuf::from(&frame);
         FakeIo::new(buf.rr3_as_sealed_bytes().expect("已 seal").to_vec())
     }
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(frame.header.trace_id, req.trace_id);
         assert_eq!(frame.header.timestamp_ns, 1234);
         let (ty, body) = rr3_body_split(&frame.payload).expect("payload 前缀合法");
-        let v = rr3_bridge_parse_response(ty, &body, 11).expect("宿主应答门全过");
+        let v = rr3_bridge_decode(ty, &body, 11).expect("宿主应答门全过");
         assert_eq!(v["angle_deg"], 95);
         // 读侧已耗尽（供知识面自证：back 只作帧还原，不再有字节）
         assert_eq!(back.pos, back.rd.len());

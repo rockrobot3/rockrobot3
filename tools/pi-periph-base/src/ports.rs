@@ -488,7 +488,7 @@ mod tests {
     use std::os::unix::io::FromRawFd;
 
     use rr_ipc::{Rr3Frame, Rr3FrameBuf};
-    use rr_periph_proto::{rr3_bridge_call_frame, rr3_bridge_parse_response, RR3_SERVO_TOPIC};
+    use rr_periph_proto::{rr3_bridge_call, rr3_bridge_decode, RR3_SERVO_TOPIC};
     use serde_json::json;
 
     use super::test_support::fake;
@@ -548,7 +548,7 @@ mod tests {
 
         let (mut master, _slave_keepalive, path) = pty_pair();
         let mut conn = Rr3UartConn::open_with_baud(&path, 115_200).expect("pty slave 打开失败");
-        let req_frame = rr3_bridge_call_frame(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 95 }));
+        let req_frame = rr3_bridge_call(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 95 }));
         let req_bytes = Rr3FrameBuf::from(&req_frame)
             .rr3_as_sealed_bytes()
             .expect("请求帧须已 seal")
@@ -572,7 +572,7 @@ mod tests {
         master.read_exact(&mut pre).expect("读前导失败");
         assert_eq!(pre[0], 0x0A, "空闲后首发必须带 \\n 前导");
         let resp_frame_len = {
-            let resp = rr_periph_proto::rr3_periph_response_frame(
+            let resp = rr_periph_proto::rr3_resp_frame(
                 &req,
                 Ok(json!({ "angle_deg": 95, "move_ms": 0 })),
                 0,
@@ -587,7 +587,7 @@ mod tests {
         let frame_buf = rr_ipc::rr3_framebuf_read(&mut cursor).expect("应答字节须能进帧缓冲");
         let frame = Rr3Frame::try_from(frame_buf).expect("应答帧还原失败");
         let (ty, body) = rr_ipc::rr3_body_split(&frame.payload).expect("payload 前缀合法");
-        let v = rr3_bridge_parse_response(ty, &body, 7).expect("宿主应答门必须过");
+        let v = rr3_bridge_decode(ty, &body, 7).expect("宿主应答门必须过");
         assert_eq!(v["angle_deg"], 95);
     }
 

@@ -1,7 +1,7 @@
 //! 板外设语义命令 + 板帧分类（自 `rr-hal::esp32audio` 平迁）。
 //!
 //! - 命令面：[`Rr3PeriphCmd`] 语义命令 → 整帧，走 [`crate::host_call::
-//!   rr3_bridge_call_frame`] 桥同形单点（`rr3.call` 信封、`src`=宿主 / `dst`=板、
+//!   rr3_bridge_call`] 桥同形单点（`rr3.call` 信封、`src`=宿主 / `dst`=板、
 //!   direct trace）——与舵机/显示桥逐字同源。
 //! - 板帧分类：宿主收流把 Response（命令旁路回执）与 Event（音频上行）分流；
 //!   音频载荷的门序与解码留在宿主消费面，本层只做协议级判别。
@@ -10,7 +10,7 @@ use rr_ipc::{rr3_body_split, Rr3Frame, Rr3Header, Rr3PayloadType};
 use serde_json::{json, Value};
 
 use crate::consts::{RR3_SERVO_TOPIC, RR3_TASK_HOST};
-use crate::host_call::rr3_bridge_call_frame;
+use crate::host_call::rr3_bridge_call;
 
 /// 板外设语义命令（旁路载荷；帧构造在生产/消费任一侧的单点，id/帧头/信封
 /// 全走桥形状）。
@@ -37,7 +37,7 @@ pub fn rr3_esp32_cmd_frame(id: u64, cmd: &Rr3PeriphCmd) -> Rr3Frame {
             json!({ "angle_deg": *deg, "axis": "tilt" }),
         ),
     };
-    rr3_bridge_call_frame(id, topic, &args)
+    rr3_bridge_call(id, topic, &args)
 }
 
 /// 板帧协议级分类：Response = 命令旁路回执（板侧执行**前**回成功），其余
@@ -51,7 +51,7 @@ pub enum Rr3BoardFrame {
 }
 
 /// 板帧分类（门序：`dst` 门 → payload 前缀门 → Response 判别）。
-pub fn rr3_board_frame_classify(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3BoardFrame, String> {
+pub fn rr3_board_classify(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3BoardFrame, String> {
     if hdr.dst_task != RR3_TASK_HOST {
         return Err(format!(
             "dst_task={} 非宿主位形 {RR3_TASK_HOST}",
@@ -106,7 +106,7 @@ mod tests {
         assert_eq!(frame.header.trace_id, RR3_TRACE_DIRECT);
 
         let tilt_frame = rr3_esp32_cmd_frame(8, &Rr3PeriphCmd::ServoTilt(98));
-        let tilt_bridge = rr3_bridge_call_frame(
+        let tilt_bridge = rr3_bridge_call(
             8,
             RR3_SERVO_TOPIC,
             &json!({ "angle_deg": 98, "axis": "tilt" }),
@@ -116,7 +116,7 @@ mod tests {
             "tilt payload 字节级同形"
         );
 
-        let bridge = rr3_bridge_call_frame(
+        let bridge = rr3_bridge_call(
             7,
             RR3_SERVO_TOPIC,
             &json!({ "angle_deg": 105, "axis": "pan" }),
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn classify_routes_reply_and_event() {
         let ok = board_reply_frame(7, None);
-        match rr3_board_frame_classify(&ok.header, &ok.payload) {
+        match rr3_board_classify(&ok.header, &ok.payload) {
             Ok(Rr3BoardFrame::Reply { id, err }) => {
                 assert_eq!(id, 7);
                 assert_eq!(err, None);
@@ -139,7 +139,7 @@ mod tests {
             other => panic!("应答帧须落 Reply 臂: {other:?}"),
         }
         let bad = board_reply_frame(8, Some("越程拒收"));
-        match rr3_board_frame_classify(&bad.header, &bad.payload) {
+        match rr3_board_classify(&bad.header, &bad.payload) {
             Ok(Rr3BoardFrame::Reply { id, err }) => {
                 assert_eq!(id, 8);
                 assert_eq!(err.as_deref(), Some("越程拒收"));
@@ -157,12 +157,12 @@ mod tests {
             }
         };
         assert_eq!(
-            rr3_board_frame_classify(&ev.header, &ev.payload),
+            rr3_board_classify(&ev.header, &ev.payload),
             Ok(Rr3BoardFrame::Event)
         );
         // dst 门：非宿主位形拒收
         let mut other_dst = board_reply_frame(9, None);
         other_dst.header.dst_task = 9;
-        assert!(rr3_board_frame_classify(&other_dst.header, &other_dst.payload).is_err());
+        assert!(rr3_board_classify(&other_dst.header, &other_dst.payload).is_err());
     }
 }

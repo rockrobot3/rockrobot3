@@ -23,7 +23,7 @@ pub struct Rr3PeriphRequest {
 }
 
 /// 请求帧解析（纯函数，不碰 io）：协议门全过才返回视图。
-pub fn rr3_periph_request_parse(frame: &Rr3Frame) -> Result<Rr3PeriphRequest, String> {
+pub fn rr3_req_parse(frame: &Rr3Frame) -> Result<Rr3PeriphRequest, String> {
     if frame.header.dst_task != RR3_PERIPH_TASK {
         return Err(format!(
             "dst_task={} 非本板位形 {RR3_PERIPH_TASK}",
@@ -66,14 +66,14 @@ pub fn rr3_periph_request_parse(frame: &Rr3Frame) -> Result<Rr3PeriphRequest, St
 mod tests {
     use super::*;
     use crate::consts::RR3_SERVO_TOPIC;
-    use crate::host_call::rr3_bridge_call_frame;
+    use crate::host_call::rr3_bridge_call;
     use rr_ipc::{opcode, rr3_body_encode, Rr3Header};
     use serde_json::json;
 
     #[test]
     fn parse_extracts_envelope_from_host_call_frame() {
-        let frame = rr3_bridge_call_frame(11, RR3_SERVO_TOPIC, &json!({ "angle_deg": 95 }));
-        let req = rr3_periph_request_parse(&frame).expect("宿主桥帧必须过全部门");
+        let frame = rr3_bridge_call(11, RR3_SERVO_TOPIC, &json!({ "angle_deg": 95 }));
+        let req = rr3_req_parse(&frame).expect("宿主桥帧必须过全部门");
         assert_eq!(req.id, 11);
         assert_eq!(req.method, "rr3.call");
         assert_eq!(req.topic, RR3_SERVO_TOPIC);
@@ -84,16 +84,16 @@ mod tests {
 
     #[test]
     fn parse_gates_reject_dst_type_and_missing_id() {
-        let frame = rr3_bridge_call_frame(1, RR3_SERVO_TOPIC, &json!({}));
+        let frame = rr3_bridge_call(1, RR3_SERVO_TOPIC, &json!({}));
         // dst 门
         let mut wrong_dst = frame.clone();
         wrong_dst.header.dst_task = 9;
-        let e = rr3_periph_request_parse(&wrong_dst).unwrap_err();
+        let e = rr3_req_parse(&wrong_dst).unwrap_err();
         assert!(e.contains("非本板位形"), "{e}");
         // payload 前缀门
         let mut wrong_ty = frame.clone();
         wrong_ty.payload = rr3_body_encode(Rr3PayloadType::Event, br#"{"jsonrpc":"2.0","id":1}"#);
-        let e = rr3_periph_request_parse(&wrong_ty).unwrap_err();
+        let e = rr3_req_parse(&wrong_ty).unwrap_err();
         assert!(e.contains("非 Request"), "{e}");
         // id 门
         let payload = rr3_body_encode(
@@ -102,7 +102,7 @@ mod tests {
         );
         let mut no_id = frame.clone();
         no_id.payload = payload;
-        let e = rr3_periph_request_parse(&no_id).unwrap_err();
+        let e = rr3_req_parse(&no_id).unwrap_err();
         assert!(e.contains("缺 id"), "{e}");
     }
 
@@ -119,7 +119,7 @@ mod tests {
             header: hdr,
             payload,
         };
-        let req = rr3_periph_request_parse(&frame).expect("最小信封可解析");
+        let req = rr3_req_parse(&frame).expect("最小信封可解析");
         assert_eq!(req.id, 5);
         assert_eq!(req.method, "");
         assert_eq!(req.topic, "");
