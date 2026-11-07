@@ -289,11 +289,17 @@ pub fn rr3_http_read_request(
             .map_err(|e| format!("try_clone 失败: {e}"))?,
     );
 
-    // 请求行："METHOD /path HTTP/1.1"
+    // 请求行："METHOD /path HTTP/1.1"。请求行与头区共用同一总额预算——请求行
+    // 不设界的话，单行无 \n 的慢发可让 read_line 无界增长（局域网 DoS 面，
+    // 静态审计 0.0.8b 收口）。
     let mut line = String::new();
     reader
         .read_line(&mut line)
         .map_err(|e| format!("读请求行失败: {e}"))?;
+    let mut header_bytes = line.len();
+    if header_bytes > limits.header_limit {
+        return Err(format!("请求行超界（>{0}B）", limits.header_limit));
+    }
     let mut parts = line.split_whitespace();
     let method = parts
         .next()
@@ -304,9 +310,8 @@ pub fn rr3_http_read_request(
         .ok_or_else(|| format!("请求行缺路径: {line:?}"))?
         .to_string();
 
-    // 头区：只认 Content-Length，其余忽略；空行收尾，总量超界即断
+    // 头区：只认 Content-Length，其余忽略；空行收尾，总量（含请求行）超界即断
     let mut content_length = 0usize;
-    let mut header_bytes = 0usize;
     loop {
         let mut head = String::new();
         reader
