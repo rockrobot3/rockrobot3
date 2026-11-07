@@ -29,7 +29,7 @@ pub fn rr3_contracts_dir(contracts: Option<&Path>) -> PathBuf {
     contracts.map(Path::to_path_buf).unwrap_or_else(|| {
         Path::new(RR3_CONTRACT_TOPICS_PATH)
             .parent()
-            .unwrap()
+            .expect("编译期常量路径必有父目录")
             .to_path_buf()
     })
 }
