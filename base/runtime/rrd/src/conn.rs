@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use rr_bus::RR3_TASK_RRD;
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
-    Rr3FrameError, Rr3Header, Rr3PayloadType, Rr3StatusCode,
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read_cap, rr3_frame_write, Rr3Frame,
+    Rr3FrameError, Rr3Header, Rr3PayloadType, Rr3StatusCode, RR3_FRAMING_PLEN_CAP_DEFAULT,
 };
 use rr_registry::{rr3_registry_validate_manifest_text, Rr3TopicSet};
 use serde_json::{json, Value};
@@ -190,7 +190,7 @@ fn rr3_handshake(
     ctx: &Rr3ConnCtx,
     fan_tx: SyncSender<Rr3Frame>,
 ) -> Result<Rr3Peer, String> {
-    let frame = match rr3_frame_read(&mut *reader) {
+    let frame = match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
         Ok(f) => f,
         // 连首帧都没读到：无从应答，只把原因交回上层记一条
         Err(e) => return Err(format!("首帧读取失败: {e:?}")),
@@ -1076,7 +1076,7 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         .map_err(|e| format!("清读超时失败: {e}"))?;
 
     let outcome: Result<Rr3Flow, String> = loop {
-        match rr3_frame_read(&mut reader) {
+        match rr3_frame_read_cap(&mut reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
             Ok(frame) => match rr3_serve_frame(&out, &ctx, &me, &frame) {
                 Ok(Rr3Flow::Keep) => {}
                 Ok(Rr3Flow::QuitClean) => break Ok(Rr3Flow::QuitClean),

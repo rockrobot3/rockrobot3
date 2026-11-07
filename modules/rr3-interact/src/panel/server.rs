@@ -33,8 +33,8 @@ use std::time::Duration;
 use rr3mod::BusHandle;
 use rr_bus_api::Rr3BusClient;
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_frame_read, rr3_frame_write, Rr3Frame, Rr3Header, Rr3PayloadType,
-    RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT,
+    opcode, rr3_body_encode, rr3_frame_read_cap, rr3_frame_write, Rr3Frame, Rr3Header,
+    Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_UDS_PATH_DEFAULT,
 };
 use serde_json::{json, Value};
 
@@ -641,7 +641,8 @@ pub fn rr3_ctl_send(
         payload,
     };
     rr3_frame_write(&mut stream, &frame).map_err(|e| format!("写 ctl 请求失败: {e:?}"))?;
-    let frame = rr3_frame_read(&mut stream).map_err(|e| format!("读 ctl 应答失败: {e:?}"))?;
+    let frame = rr3_frame_read_cap(&mut stream, RR3_FRAMING_PLEN_CAP_DEFAULT)
+        .map_err(|e| format!("读 ctl 应答失败: {e:?}"))?;
     let (ty, payload) = Rr3BusClient::rr3_frame_body(&frame)?;
     if ty != Rr3PayloadType::Response {
         return Err(format!("ctl 应答类型错误: {ty:?}"));
@@ -1369,7 +1370,7 @@ fn rr3_fake_ctl_rrd(
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
-            if let Ok(req) = rr3_frame_read(&mut stream) {
+            if let Ok(req) = rr_ipc::rr3_frame_read(&mut stream) {
                 let payload = rr3_body_encode(Rr3PayloadType::Response, rpc.to_string().as_bytes());
                 let frame = Rr3Frame {
                     header: Rr3Header {
@@ -1393,6 +1394,7 @@ fn rr3_fake_ctl_rrd(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rr_ipc::rr3_frame_read;
 
     /// BusCall 应答状态码裁定（I-21③）：载荷含 error = 422 业务失败，其余 200
     #[test]

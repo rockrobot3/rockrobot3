@@ -13,7 +13,7 @@ use std::string::ToString;
 use std::vec;
 use std::vec::Vec;
 
-use crate::protocol::header::{Rr3Header, RR3_IPC_HDR_SIZE};
+use crate::protocol::header::{Rr3HdrError, Rr3Header, MAX_PAYLOAD_LEN, RR3_IPC_HDR_SIZE};
 pub use crate::protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
 
 /// 读满 `buf`。返回 `Ok(Some(已读字节数))`；`Ok(None)` = 第一个字节都没读到（对端关闭）。
@@ -32,8 +32,18 @@ pub(crate) fn read_fill(r: &mut impl Read, buf: &mut [u8]) -> Result<Option<usiz
     Ok(Some(done))
 }
 
-/// 读一帧（阻塞至读满，或 EOF/坏帧报错）
-pub fn rr3_frame_read(mut r: impl Read) -> Result<Rr3Frame, Rr3FrameError> {
+/// 读一帧（阻塞至读满，或 EOF/坏帧报错）。分配上界＝协议规格 [`MAX_PAYLOAD_LEN`]。
+/// 面向**不可信流**的读侧请走 [`rr3_frame_read_cap`] 带策略帽（0.0.8b 审计 B-7）。
+pub fn rr3_frame_read(r: impl Read) -> Result<Rr3Frame, Rr3FrameError> {
+    rr3_frame_read_cap(r, MAX_PAYLOAD_LEN as usize)
+}
+
+/// 带策略帽的读帧：`payload_len > cap` 在**分配之前**拒收（复用
+/// `PayloadTooLarge` 错误形——语义同为"plen 超出可接受上界"）。
+/// 动机：坏 plen（撕裂帧/模块内存 bug 写错长度）会让读侧按声明值直接
+/// `vec![0u8; want]`，协议规格 64MB 上界对守护进程仍是单连接可打穿的
+/// 分配面；消费方按自身最大合法帧给策略帽（总线/面板 = 1MB 档）。
+pub fn rr3_frame_read_cap(mut r: impl Read, cap: usize) -> Result<Rr3Frame, Rr3FrameError> {
     let mut head = [0u8; RR3_IPC_HDR_SIZE];
     match read_fill(&mut r, &mut head)? {
         None => return Err(Rr3FrameError::Closed),
@@ -42,6 +52,11 @@ pub fn rr3_frame_read(mut r: impl Read) -> Result<Rr3Frame, Rr3FrameError> {
     }
     let header = Rr3Header::from_bytes(&head).map_err(Rr3FrameError::Header)?;
     let want = header.payload_len as usize;
+    if want > cap {
+        return Err(Rr3FrameError::Header(Rr3HdrError::PayloadTooLarge {
+            len: header.payload_len,
+        }));
+    }
     if want == 0 {
         return Ok(Rr3Frame {
             header,
@@ -78,6 +93,25 @@ mod tests {
     use std::io::Cursor;
     use std::println;
     use std::string::String;
+
+    /// B-7（0.0.8b 审计）：策略帽在**分配之前**拒超限 plen——合法头、长度过帽，
+    /// 错误形复用 PayloadTooLarge；帽内同帧照常通过。
+    #[test]
+    fn read_cap_rejects_plen_over_cap_before_alloc() {
+        let f = Rr3Frame {
+            header: hdr(1024),
+            payload: vec![7u8; 1024],
+        };
+        let buf = rr3_frame_to_bytes(&f).unwrap();
+        assert!(matches!(
+            rr3_frame_read_cap(Cursor::new(&buf), 512),
+            Err(Rr3FrameError::Header(Rr3HdrError::PayloadTooLarge {
+                len: 1024
+            }))
+        ));
+        assert!(rr3_frame_read_cap(Cursor::new(&buf), 1024).is_ok());
+        assert!(rr3_frame_read(Cursor::new(&buf)).is_ok());
+    }
 
     fn hdr(payload_len: u32) -> Rr3Header {
         let mut h = Rr3Header::rr3_hdr_broadcast(opcode::SEND, payload_len);
