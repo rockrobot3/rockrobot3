@@ -90,7 +90,7 @@ impl Rr3Provision {
     /// 存凭据并转入 station（参数合法性由承载层 `rr3_wifi_conn_args`
     /// 裁决（N-7 上移），状态机只管转移）。pass 不入态（批N24 件五 pass 去存储
     /// ：持久化归 `Rr3WifiStore`，状态机只记 SSID 以出 `mode`）。
-    pub fn rr3_provision_connect(&mut self, ssid: &str, _pass: &str) {
+    pub fn rr3_prov_connect(&mut self, ssid: &str, _pass: &str) {
         self.credentials = Some(Rr3SsidText::rr3_ssid_text_new(ssid));
     }
 
@@ -124,7 +124,7 @@ mod tests {
     fn provision_roundtrips_ap_station() {
         let mut p = Rr3Provision::rr3_provision_new();
         assert_eq!(p.rr3_provision_mode(), "ap", "出厂无凭据 = 配网热点在开");
-        p.rr3_provision_connect("home", "password8");
+        p.rr3_prov_connect("home", "password8");
         assert_eq!(
             p.rr3_provision_mode(),
             "station",
@@ -190,7 +190,7 @@ mod tests {
             "未连先忘 = 幂等回 ap（§8 边界）"
         );
         // connect 成功不置真：配网转移后链路边沿机的发射语义原样（真值单点 = HAL 读数）
-        p.rr3_provision_connect("home", "password8");
+        p.rr3_prov_connect("home", "password8");
         assert_eq!(p.rr3_provision_mode(), "station");
         assert!(
             !e.rr3_link_edge_cross(true),

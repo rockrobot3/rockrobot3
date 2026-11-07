@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | wifi | `Rr3LinkEdge::rr3_link_edge_new()` / `rr3_link_edge_cross(&mut self, up: bool) -> bool` | 链路读数 → 翻转判定 | `last: Option<bool>`（**不是** `last_up: bool`）——首读无基线，`None` 时**第一次读数即算一次翻转**返回 true，用例喂的序列也带这一拍 | — |
 | wifi | `rr3_link_body(seq: u64, st: &Rr3LinkState, mode: &str) -> Value` | 读数 + 配网态 → 流载荷 | 无 | — |
-| wifi | `Rr3Provision::{rr3_provision_new, rr3_provision_mode() -> &'static str, rr3_provision_connect(ssid: String, pass: String), rr3_provision_forget()}` | 配网事务 | `mode: ap\|station` | 件内不写文件；凭据由后端承载持久化（MC-6） |
+| wifi | `Rr3Provision::{rr3_provision_new, rr3_provision_mode() -> &'static str, rr3_prov_connect(ssid: String, pass: String), rr3_provision_forget()}` | 配网事务 | `mode: ap\|station` | 件内不写文件；凭据由后端承载持久化（MC-6） |
 | wifi | `rr3_wifi_{scan,connect,forget}_parse_args(...) -> Result<…,_>` + 三个 `*_result(...) -> Value` | 点名参数/应答 | 无 | 参数错 → 业务 error |
 | bt | `Rr3BtPhase`（`off`/`discoverable`/`connected`）+ `rr3_bt_phase_name` | — | — | — |
 | bt | `rr3_bt_phase(&self) -> Rr3BtPhase`（**不返 bool**）+ `rr3_bt_power_on/link_up/link_down/power_off -> bool`（四个转移事件才返"是否发生转移"） | 事件 → 是否发生转移 | `phase` | 非法转移 → `false` 且**状态不动** |
@@ -138,7 +138,7 @@
 
 | 件 | host（今天） | rtos（esp-rs std + FreeRTOS） | bare（no_std 自足） | 卡住它的**具体那一行依赖** → 动作 |
 |---|---|---|---|---|
-| wifi | ✅（sim 与 nmcli 两后端） | ⚠️ HAL 形状 + 载荷面 | ❌ 两处硬点 | ① `Rr3LinkState.ssid: Option<String>` 把 alloc 焊进值类型 → 批I F1 改"定长 + 长度"（`⊙` 跨片形状，N-3）；② `rr3_provision_connect(ssid: String, pass: String)` 与凭据字段 `Option<(String,String)>` → bare 档若真要本地存凭据，改固定槽 `[u8; N]` + 长度（N 由契约定，不是随手 32）；③ `rr3_link_body -> Value`（`json!` 五处）→ P-7 同法上移承载层（N-7）；④ `&dyn`/`rr3_block_on` 清零 |
+| wifi | ✅（sim 与 nmcli 两后端） | ⚠️ HAL 形状 + 载荷面 | ❌ 两处硬点 | ① `Rr3LinkState.ssid: Option<String>` 把 alloc 焊进值类型 → 批I F1 改"定长 + 长度"（`⊙` 跨片形状，N-3）；② `rr3_prov_connect(ssid: String, pass: String)` 与凭据字段 `Option<(String,String)>` → bare 档若真要本地存凭据，改固定槽 `[u8; N]` + 长度（N 由契约定，不是随手 32）；③ `rr3_link_body -> Value`（`json!` 五处）→ P-7 同法上移承载层（N-7）；④ `&dyn`/`rr3_block_on` 清零 |
 | bt | ✅（骨架，BlueZ 后端未建） | ✅ **13 件里最干净的一件** | ✅ 同左 | 原唯一硬点 `rr3_bt_backend_up_default()` 里的 `std::env::var` **已随 0.0.5 批I N-1 清零**（函数删除，初值经 config `[rr3-connect.bt]` up 数据化注入——全仓 13 件唯一非 test 面 env 读自此不存在；批J G4 落 ops 槽时再迁数据载体）。状态机三态与矩阵本身零依赖，`#[allow(dead_code)]` 只说明主题面未登记（D5），不构成跨档障碍 |
 | session（组合件成分，非件） | ✅ mock 云 | **不适用**：云会话属主承载层能力 | **不适用** | `tls_min_version`/`timeout_ms` 零读者在这里最刺眼：它属于"主承载层的对外承诺"，却写在 bare 档根本不会编译的代码里。去处 = 随 ADR-0016 Rust 化时落进真 HTTP 客户端配置，今天标"声明未生效"（N-6） |
 
@@ -168,7 +168,7 @@
 | 本册旧断言 | 现在的事实（符号为证） | 判定 |
 |---|---|---|
 | §12 "bt 唯一硬点是件内 `std::env::var`（N-1）" | 函数与 env 键双双退役，件面改 `rr3_bt_state_new(up: bool)`，初值经 **ops 申报**注入（`atoms/bt/assemble.toml`：`up` ← `rr3-connect.bt.up`） | **N-1 已结**，且 bt 从"零申报"变成**已申报的三件之一** |
-| §12/§13 wifi 凭据 `String`（N-3） | `Rr3LinkState.ssid` 改 `Option<Rr3SsidText { bytes: [u8; 32], len: u8 }`（契约面）；件内 `rr3_provision_connect(&mut self, ssid: &str, _pass: &str)` / `rr3_provision_restored(ssid: &str)` 入参 `&str` 化、`credentials: Option<Rr3SsidText>` 值类型化——**已结（批N24 件五，2026-10-23，`e3f8bf4`）**：pass 去存储（由后端 `Rr3WifiStore` 承载持久化，状态机不持有），mode 转移单测原样过 | **L-3 已结**（connect 半边） |
+| §12/§13 wifi 凭据 `String`（N-3） | `Rr3LinkState.ssid` 改 `Option<Rr3SsidText { bytes: [u8; 32], len: u8 }`（契约面）；件内 `rr3_prov_connect(&mut self, ssid: &str, _pass: &str)` / `rr3_provision_restored(ssid: &str)` 入参 `&str` 化、`credentials: Option<Rr3SsidText>` 值类型化——**已结（批N24 件五，2026-10-23，`e3f8bf4`）**：pass 去存储（由后端 `Rr3WifiStore` 承载持久化，状态机不持有），mode 转移单测原样过 | **L-3 已结**（connect 半边） |
 | §12 "`&dyn`/`rr3_block_on` 清零（I-3/N-3 同族）" | 契约面同步、`rr3_block_on` 不存在；本册件面不持句柄（调用在 `composite.rs`） | 已结 |
 | §0/§13 三个零读者配置项（N-6/N-2） | `roam_probe_enabled` 与 `tls_min_version` **删除**；`timeout_ms` **实装为 nmcli 子进程超时**并迁入 wifi 段 | **N-2、N-6 已结**（三选一的"实装/删除"两条各用一次） |
 | §13 sim 假 AP 表在件里（N-9） | `rr3_wifi_scan_result` 的三条假 AP **仍在 `atoms/wifi/mech.rs`** | **已结（批I N-9 迁入 rr-hal sim 后端；批N24 件二核实 2026-10-23）**：`rr3_sim_scan_list` 住 rr-hal sim.rs（首行 SSID 与 `RR3_HAL_SIM_LINK_SSID_DEFAULT` 合流一处真值＋单测钉死），composite 只组装形状——下两行判定过时随批N24 件二改判，原记"未结 → 批L L-9"失效 |

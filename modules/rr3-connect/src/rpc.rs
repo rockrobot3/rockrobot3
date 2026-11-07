@@ -52,7 +52,7 @@ pub(crate) fn rr3_wifi_connect(
     store
         .rr3_wifi_connect(&ssid, &pass)
         .map_err(|e| format!("凭据持久化失败: {e}"))?;
-    prov.rr3_provision_connect(&ssid, &pass);
+    prov.rr3_prov_connect(&ssid, &pass);
     eprintln!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
     Ok(rr3_wifi_conn_result(&st, &ssid))
 }

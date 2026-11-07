@@ -395,7 +395,7 @@ fn heartbeat_loop(sh: Arc<Shared>) {
             .rt
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .rr3_next_beat_wait_ms(sh.now_ms())
+            .rr3_beat_wait_ms(sh.now_ms())
         else {
             return; // Down 即停拍——"不装活着"同一裁定
         };

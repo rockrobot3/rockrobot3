@@ -59,7 +59,7 @@ fn rr3_connect_run() -> Result<(), String> {
     // HAL 链路面探活 + 配网凭据在册编排（接入层，Unsupported / 在册查询失败即
     // 致命——fail-closed 显式回错，不静默带病常驻也不假活）
     let (dev, backend) = boot::rr3_connect_probe(cfg.0.timeout_ms)?;
-    let (store, prov) = boot::rr3_connect_provision(cfg.0.timeout_ms)?;
+    let (store, prov) = boot::rr3_wifi_provision(cfg.0.timeout_ms)?;
 
     // 蓝牙骨架（0.0.4 批E）：Off → Discoverable 的上电由构造初值承接（不走
     // 转移矩阵——装配期注入）。本进程暂无蓝牙事件面（主题不登记），相位只进

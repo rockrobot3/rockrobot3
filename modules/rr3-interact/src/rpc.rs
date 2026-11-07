@@ -61,7 +61,7 @@ pub(crate) fn rr3_handle_tts(
     player: &Rr3PlayerCfg,
 ) -> Result<Value, String> {
     let (text, pcm_bytes) = rr3_tts_parse_args(args)?;
-    if let Err(e) = rr3_tts_pcm_integrity(pcm_bytes, tts_pcm.rr3_tts_buf_len()) {
+    if let Err(e) = rr3_pcm_integrity(pcm_bytes, tts_pcm.rr3_tts_buf_len()) {
         bus.counter_bump("tts_play_reject", 1);
         tts_pcm.rr3_tts_buf_take();
         return Err(e);
@@ -146,7 +146,7 @@ pub(crate) fn rr3_tts_parse_args(args: &Value) -> Result<(String, u64), String> 
 /// 的等式判据会把"什么都没发"当"全发到了"（云 200 空体 → (0,0) → Ok →
 /// `played_ms=0` → 计 ok 的静默假成功口），无流不静默。判定纯函数化：记账
 /// （tts_play_reject）与清缓冲归调用方。
-pub(crate) fn rr3_tts_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(), String> {
+pub(crate) fn rr3_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(), String> {
     if pcm_bytes == 0 {
         return Err("tts PCM 点名申报 0 字节（空体无流，I-21① 下界拒），弃播".to_string());
     }
@@ -276,19 +276,19 @@ mod tests {
     /// 零字节申报一律拒（I-21① 下界：(0,0) 不再是合法通过态）
     #[test]
     fn tts_pcm_integrity_rejects_half_and_residual_streams() {
-        assert_eq!(rr3_tts_pcm_integrity(640, 640), Ok(()));
-        let e = rr3_tts_pcm_integrity(1920, 640).unwrap_err();
+        assert_eq!(rr3_pcm_integrity(640, 640), Ok(()));
+        let e = rr3_pcm_integrity(1920, 640).unwrap_err();
         assert!(e.contains("半流") && e.contains("1280"), "{e}");
-        let e = rr3_tts_pcm_integrity(640, 1280).unwrap_err();
+        let e = rr3_pcm_integrity(640, 1280).unwrap_err();
         assert!(e.contains("残留") && e.contains("640"), "{e}");
-        let e = rr3_tts_pcm_integrity(1920, 0).unwrap_err();
+        let e = rr3_pcm_integrity(1920, 0).unwrap_err();
         assert!(e.contains("半流"), "空缓冲必拒（无流不静默）: {e}");
-        let e = rr3_tts_pcm_integrity(0, 0).unwrap_err();
+        let e = rr3_pcm_integrity(0, 0).unwrap_err();
         assert!(
             e.contains("0 字节"),
             "(0,0) 恒拒（I-21① 静默假成功口）: {e}"
         );
-        let e = rr3_tts_pcm_integrity(0, 640).unwrap_err();
+        let e = rr3_pcm_integrity(0, 640).unwrap_err();
         assert!(e.contains("0 字节"), "零申报有残留同样拒: {e}");
     }
 

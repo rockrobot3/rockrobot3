@@ -312,7 +312,7 @@
    六单元里只有 brain 看得见（新门 **⑨-r**）；板侧控制面在物理执行**之前**回成功、回显记账角、
    `move_ms` 恒 0 ⇒ 宿主"回显一致性"门**结构性地发现不了拒动**；`rr3_low_gate_release` **零调用方**
    ⇒ 低电闸门一旦置位永不解除（与第五轮"复位即开闸"合起来 = 同一闸门两端都错）；
-   播放点名失败被吞成一行 print 后照常 `chat_rounds+1`、`integrity(0,0)=Ok` ⇒ **"完成一轮"与"播出声"解耦**（2026-10-20 对表：两处假通过口已随批N4 件六一笔闭合——`chat_rounds` 拆账 `rounds_replied`/`rounds_audible`、零字节下界进 `rr3_tts_pcm_integrity`，本行取证时点写法保留）。
+   播放点名失败被吞成一行 print 后照常 `chat_rounds+1`、`integrity(0,0)=Ok` ⇒ **"完成一轮"与"播出声"解耦**（2026-10-20 对表：两处假通过口已随批N4 件六一笔闭合——`chat_rounds` 拆账 `rounds_replied`/`rounds_audible`、零字节下界进 `rr3_pcm_integrity`，本行取证时点写法保留）。
    **一处宣称订正**：**"板侧双麦 → 宿主 VAD"这一跳结构上不存在**（`rr3-audio-rec` 只依赖 `rr-ipc`+`serde_json`
    不落总线、`rr3_audio_source()` 无 esp32 分支）⇒ §2 表"四件已在板上真跑"已改为如实表述，
    可达终点表 rtos 行"拾音"按此填。**面板也没有舵机端点**（14 端点无 servo、interact 全目录 `servo` 零命中），
@@ -733,7 +733,7 @@ assemble.toml ∪ 组合件 composite.toml），ops 27→36、分母 70→79 双
 
 **2026-10-19～20 批N4 件六～件九笔4（批次N4 收官，门 d 转绿终点达成）**（六笔分立提交，逐笔对表
 见 conventions §2）：①件六一笔 `09df07e`（I-21①③＋B-13①＋B-16①②）——"成功"的假通过口两道
-闭合（`rr3_tts_pcm_integrity` 零字节下界＋`played_ms==0` 折 `tts_play_reject`；面板 `BusCall` 载荷
+闭合（`rr3_pcm_integrity` 零字节下界＋`played_ms==0` 折 `tts_play_reject`；面板 `BusCall` 载荷
 判等 `rr3_bus_reply_status` 业务错误折 422 与 502 传输失败分码）＋brain 计账拆账
 `rounds_replied`/`rounds_audible`（`chat_rounds` 退役）＋总线 RPC 超时数据化
 `[rr3-brain.bus].call_timeout_s=30/connect_timeout_s=5`（legacy 两常量退役）＋云面异常收敛一个
