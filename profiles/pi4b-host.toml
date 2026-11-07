@@ -72,11 +72,11 @@ max_age_ms = 0
 not_applicable = true
 
 [bindings]
-# 只绑定本机真实在位的格位：MAX7219（ui.face）、USB 声卡回放、WiFi/BT、认知四格。
+# 只绑定本机真实在位的格位：MAX7219（ui.face）、USB 声卡回放、WiFi、认知四格。
+# net.bt 是 placeholder（BlueZ 真后端未落地），不进生产装配面。
 # 无 act.servo / audio.capture / audio.vad（本机无对应末梢，见文件头）。
 "audio.playback" = "rr3-interact"
 "net.wifi" = "rr3-connect"
-"net.bt" = "rr3-connect"
 "ui.face" = "rr3-interact"
 "cognition.dialog" = "rr3-brain"
 "cognition.asr" = "rr3-brain"
@@ -101,19 +101,18 @@ mux_group = []
 [enabled_slots]
 # 本机启用的格位集合（与 [bindings]/[slots] present 三处一致）：
 # connect / interact / brain 三模块；act 与 sense 无末梢，不启用。
-rr3-connect = ["net.wifi", "net.bt"]
+rr3-connect = ["net.wifi"]
 rr3-interact = ["ui.face", "audio.playback"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
 
 [slots]
-# 本机物理在位格位声明（升序）：八格，与 [bindings] 键集逐项一致。
+# 本机物理在位格位声明（升序）：七格，与 [bindings] 键集逐项一致。
 present = [
     "audio.playback",
     "cognition.asr",
     "cognition.dialog",
     "cognition.llm",
     "cognition.tts",
-    "net.bt",
     "net.wifi",
     "ui.face",
 ]

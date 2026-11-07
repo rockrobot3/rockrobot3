@@ -1222,13 +1222,17 @@ fn default_profile_binds_module_slots_to_real_modules() {
         .rr3_slot_table_names()
         .into_iter()
         .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| {
+            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            s != "placeholder" && s != "retired"
+        })
         .collect();
     expected_present.sort();
     let mut present_sorted = present.clone();
     present_sorted.sort();
     assert_eq!(
         present_sorted, expected_present,
-        "[slots].present 与非 base 格位全集漂移（参考机 16 格全在位）"
+        "[slots].present 与非 base 且非 placeholder/retired 格位全集漂移（参考机 normal 格全在位）"
     );
     assert_profile_pins_schema3(
         &v,
@@ -1239,8 +1243,6 @@ fn default_profile_binds_module_slots_to_real_modules() {
             "act.relay.gpio",
             "power.battery.meter",
             "power.charger.meter",
-            "sensor.env.meter",
-            "sensor.imu.meter",
             "ui.face.spi",
         ],
     );
@@ -1279,12 +1281,16 @@ fn default_profile_binds_module_slots_to_real_modules() {
         bound.push(slot.clone());
     }
 
-    // 全部非 base 格位恰好绑定一次（配合 BTreeMap 键唯一即"不多不少"）
+    // 全部 normal 格位恰好绑定一次（placeholder/retired 格不进生产装配面；配合 BTreeMap 键唯一即"不多不少"）
     bound.sort();
     let mut unbound: Vec<String> = table
         .rr3_slot_table_names()
         .into_iter()
         .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| {
+            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            s != "placeholder" && s != "retired"
+        })
         .filter(|n| !bound.iter().any(|b| b == n))
         .collect();
     assert!(
@@ -1315,11 +1321,19 @@ fn default_profile_binds_module_slots_to_real_modules() {
             .map(String::from)
             .collect();
         slots.sort();
-        let mut caps = str_list(&manifests[module], "provides.capabilities");
+        // manifest provides 可能含 placeholder/retired 格（模块"能提供"≠"装配单启用"），
+        // 装配面只启用 normal 格；此处对 caps 做同口径过滤再判等。
+        let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
+            .into_iter()
+            .filter(|c| {
+                let s = table.rr3_slot_table_status(c).unwrap_or_default();
+                s != "placeholder" && s != "retired"
+            })
+            .collect();
         caps.sort();
         assert_eq!(
             slots, caps,
-            "{module} 的 [enabled_slots] 与 manifest provides 漂移"
+            "{module} 的 [enabled_slots] 与 manifest provides（normal 格）漂移"
         );
         for s in &slots {
             assert!(
@@ -1352,8 +1366,8 @@ fn distro_profile_binds_exactly_the_body_layer() {
     assert_eq!(route, "distro", "distro 机 route 必须是快路");
 
     // schema_version=5 三新段 + [pins] + [supplies.budget] + [runtime]（批N5 件二）：
-    // 与 default 同一块参考机，[platform]/[supplies]/[slots] 逐值一致（present 仍为
-    // 16 格全集——distro 缺格是"不绑定"，不是"物理缺"）。
+    // 与 default 同一块参考机，[platform]/[supplies]/[slots] 逐值一致（present 为
+    // normal 格全集——placeholder/retired 格不进生产装配面）。
     assert_eq!(
         v.get("schema_version").and_then(toml::Value::as_integer),
         Some(5),
@@ -1425,13 +1439,17 @@ fn distro_profile_binds_exactly_the_body_layer() {
         .rr3_slot_table_names()
         .into_iter()
         .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| {
+            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            s != "placeholder" && s != "retired"
+        })
         .collect();
     expected_present.sort();
     let mut present_sorted = present;
     present_sorted.sort();
     assert_eq!(
         present_sorted, expected_present,
-        "[slots].present 与非 base 格位全集漂移"
+        "[slots].present 与非 base 且非 placeholder/retired 格位全集漂移"
     );
     assert_profile_pins_schema3(
         &v,
@@ -1442,8 +1460,6 @@ fn distro_profile_binds_exactly_the_body_layer() {
             "act.relay.gpio",
             "power.battery.meter",
             "power.charger.meter",
-            "sensor.env.meter",
-            "sensor.imu.meter",
             "ui.face.spi",
         ],
     );
@@ -1476,19 +1492,22 @@ fn distro_profile_binds_exactly_the_body_layer() {
         );
     }
 
-    // 未绑定的非 base 格位必须为空（0.0.6 批F1：brain 随 deb 装机、cognition 四格
-    // 绑定兑现——0.0.2 快路"缺格恰为 brain provides 全集"的边界钉随绑定落位退役；
-    // 快路满配 = 身体层 + 认知层一格不缺。将来新增格位而 distro 不绑时，此钉强制
-    // 显式重审，不许装配单静默漂移）
+    // 未绑定的 normal 格位必须为空（placeholder/retired 格不进生产装配面；
+    // 0.0.6 批F1：brain 随 deb 装机、cognition 四格绑定兑现——快路满配 = 身体层 +
+    // 认知层 normal 格一格不缺。将来新增格位而 distro 不绑时，此钉强制显式重审）
     let unbound: Vec<String> = table
         .rr3_slot_table_names()
         .into_iter()
         .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| {
+            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            s != "placeholder" && s != "retired"
+        })
         .filter(|n| !bindings.contains_key(n))
         .collect();
     assert!(
         unbound.is_empty(),
-        "distro 机快路满配后仍有未绑格位 {unbound:?}（装配单漂移，须显式绑定或重审边界）"
+        "distro 机快路满配后仍有未绑 normal 格位 {unbound:?}（装配单漂移，须显式绑定或重审边界）"
     );
 
     // enabled_slots 仍覆盖全部在册模块（含 brain——enabled_slots 决定起谁，brain 现在实际进 boot 队列），且与 provides 全集相等
@@ -1513,11 +1532,19 @@ fn distro_profile_binds_exactly_the_body_layer() {
             .map(String::from)
             .collect();
         slots.sort();
-        let mut caps = str_list(&manifests[module], "provides.capabilities");
+        // manifest provides 可能含 placeholder/retired 格（模块"能提供"≠"装配单启用"），
+        // 装配面只启用 normal 格；此处对 caps 做同口径过滤再判等。
+        let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
+            .into_iter()
+            .filter(|c| {
+                let s = table.rr3_slot_table_status(c).unwrap_or_default();
+                s != "placeholder" && s != "retired"
+            })
+            .collect();
         caps.sort();
         assert_eq!(
             slots, caps,
-            "{module} 的 [enabled_slots] 与 manifest provides 漂移"
+            "{module} 的 [enabled_slots] 与 manifest provides（normal 格）漂移"
         );
         for s in &slots {
             assert!(
@@ -1962,15 +1989,15 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         );
     }
 
-    // 形态面：十一格绑定 + 十一格在位（2026-10-31 实机取证收窄）。
+    // 形态面：十格绑定 + 十格在位（2026-10-31 实机取证收窄；net.bt 是 placeholder 不进生产装配面）。
     let bindings = v
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("pi4b-host-esp32-classic 缺 [bindings]");
     assert_eq!(
         bindings.len(),
-        11,
-        "pi4b-host-esp32-classic 绑定面应恰十一格"
+        10,
+        "pi4b-host-esp32-classic 绑定面应恰十格"
     );
     for (slot, provider) in [
         ("act.servo", "rr3-act"),
@@ -1992,13 +2019,13 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         .expect("pi4b-host-esp32-classic 缺 [slots].present");
     assert_eq!(
         present.len(),
-        11,
-        "pi4b-host-esp32-classic 在位声明应恰十一格"
+        10,
+        "pi4b-host-esp32-classic 在位声明应恰十格"
     );
 
     // [[pin]] 恰一条：Pi 本机唯一的本地外设 = MAX7219 点阵（ui.face.spi，spidev0/ch0，
-    // 装载期派生 spi_device）。其余六格（act.servo/led/relay、power.charger、
-    // sensor.env/imu）无绑定 → 校验② role_missing 降级，板侧真值走 [hardware] 桥注入。
+    // 装载期派生 spi_device）。其余格（act.servo 等）无本地 pin → 校验② role_missing 降级，
+    // 板侧真值走 [hardware] 桥注入。
     let pins = v
         .get("pin")
         .and_then(toml::Value::as_array)
@@ -2102,13 +2129,13 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("pi4b-host-esp32s3 缺 [bindings]");
-    assert_eq!(bindings.len(), 11, "pi4b-host-esp32s3 绑定面应恰十一格");
+    assert_eq!(bindings.len(), 10, "pi4b-host-esp32s3 绑定面应恰十格（net.bt placeholder 不进生产装配面）");
     let present = v
         .get("slots")
         .and_then(|s| s.get("present"))
         .and_then(toml::Value::as_array)
         .expect("pi4b-host-esp32s3 缺 [slots].present");
-    assert_eq!(present.len(), 11, "pi4b-host-esp32s3 在位声明应恰十一格");
+    assert_eq!(present.len(), 10, "pi4b-host-esp32s3 在位声明应恰十格");
 
     let pins = v
         .get("pin")
@@ -2124,8 +2151,9 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
 
 /// Pi 4B 独立 host-only（N44）：`profiles/pi4b-host.toml` 钉**差异面**——host 档、
 /// 无外部板（[hardware] 零板侧键）、本地末梢只有 MAX7219（[[pin]] ui.face.spi）
-/// 与 USB 声卡回放；act/sense 无末梢，bindings/enabled/present 三源一致为八格
-/// 三模块（connect/interact/brain）。完整装载链由 rrd 的 boot drill 覆盖。
+/// 与 USB 声卡回放；act/sense 无末梢，bindings/enabled/present 三源一致为七格
+/// 三模块（connect/interact/brain）。net.bt 是 placeholder 不进生产装配面。
+/// 完整装载链由 rrd 的 boot drill 覆盖。
 #[test]
 fn pi4b_host_profile_shape_n44_harness() {
     let root = repo_root();
@@ -2188,7 +2216,7 @@ fn pi4b_host_profile_shape_n44_harness() {
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("pi4b-host 缺 [bindings]");
-    assert_eq!(bindings.len(), 8, "pi4b-host 绑定面应恰八格");
+    assert_eq!(bindings.len(), 7, "pi4b-host 绑定面应恰七格（net.bt placeholder 不进生产装配面）");
     for slot in ["act.servo", "audio.capture", "audio.vad"] {
         assert!(
             bindings.get(slot).is_none(),
@@ -2212,7 +2240,7 @@ fn pi4b_host_profile_shape_n44_harness() {
         .and_then(|s| s.get("present"))
         .and_then(toml::Value::as_array)
         .expect("pi4b-host 缺 [slots].present");
-    assert_eq!(present.len(), 8, "pi4b-host 在位声明应恰八格");
+    assert_eq!(present.len(), 7, "pi4b-host 在位声明应恰七格");
 
     let pins = v
         .get("pin")

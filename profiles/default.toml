@@ -103,18 +103,15 @@ not_applicable = true
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
-# 本节绑定全部身体层与认知层格位（16 格，default 机不留缺格）。
+# placeholder 格（net.bt/sensor.env/sensor.imu，真件未落地）不进生产装配面。
 "act.servo" = "rr3-act"
 "act.led" = "rr3-act"
 "act.relay" = "rr3-act"
 "net.wifi" = "rr3-connect"
-"net.bt" = "rr3-connect"
 "ui.face" = "rr3-interact"
 "audio.playback" = "rr3-interact"
 "audio.capture" = "rr3-sense"
 "audio.vad" = "rr3-sense"
-"sensor.env" = "rr3-sense"
-"sensor.imu" = "rr3-sense"
 "power.charger" = "rr3-power"
 "cognition.dialog" = "rr3-brain"
 "cognition.asr" = "rr3-brain"
@@ -186,9 +183,6 @@ mux_group = []
 # —— 批N3 件八（器件角色进场）：charger 与 battery.meter 共用同一 INA219 读数源
 # （P-5 裁定：同 (i2c1, 0x40) 同 device 共址合法，校验③-c 精化判据的正例形状；
 # derives=[] 不派生注入键——读数面句柄仍是 battery.meter 一份，无第二真值点）。
-# env/imu 两格 status=placeholder（升格等真后端，D9），角色面先行 + probe 探测面
-# 生效：bus/addr 进 pin 即被器件级在位探测消费（L-14）；演练实例取值待器件核对
-# （与 devices.toml 演练行对表——SHTC3@0x70、ICM-42688@0x68，AD0 接地）。
 [[pin]]
 role = "power.charger.meter"
 controller = "i2c1"
@@ -197,35 +191,20 @@ device = "INA219"
 direction = "in"
 mux_group = []
 
-[[pin]]
-role = "sensor.env.meter"
-controller = "i2c1"
-addr = "0x70"
-device = "SHTC3"
-direction = "in"
-mux_group = []
-
-[[pin]]
-role = "sensor.imu.meter"
-controller = "i2c1"
-addr = "0x68"
-device = "ICM-42688"
-direction = "in"
-mux_group = []
-
 [enabled_slots]
 # 模块 → 本形态启用的格位集合。default 机各模块启用其 manifest provides 全集；
 # 换机型裁剪模块能力面 = 只改本文件，不改代码。
 rr3-act = ["act.servo", "act.led", "act.relay"]
-rr3-connect = ["net.wifi", "net.bt"]
+rr3-connect = ["net.wifi"]
 rr3-interact = ["ui.face", "audio.playback"]
-rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
+rr3-sense = ["audio.capture", "audio.vad"]
 rr3-power = ["power.battery", "power.charger"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
 
 [slots]
 # 本板物理在位格位声明（ADR-0018 修订 1 ④ 七段之一；缺格三源合一第一源——声明缺）。
-# 基础层由基座内建承载、恒在位，不进本声明；参考机 16 格全在位，升序排列。
+# 基础层由基座内建承载、恒在位，不进本声明；placeholder 格（net.bt/sensor.env/
+# sensor.imu）不进生产装配面；参考机 13 格在位，升序排列。
 present = [
     "act.servo",
     "act.led",
@@ -237,10 +216,7 @@ present = [
     "cognition.dialog",
     "cognition.llm",
     "cognition.tts",
-    "net.bt",
     "net.wifi",
     "power.charger",
-    "sensor.env",
-    "sensor.imu",
     "ui.face",
 ]

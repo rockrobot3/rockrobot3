@@ -69,14 +69,13 @@ max_age_ms = 0
 not_applicable = true
 
 [slots]
-present = ["net.wifi", "net.bt"]
+present = ["net.wifi"]
 
 [bindings]
 "net.wifi" = "rr3-connect"
-"net.bt" = "rr3-connect"
 
 [enabled_slots]
-rr3-connect = ["net.wifi", "net.bt"]
+rr3-connect = ["net.wifi"]
 "#;
 
 /// config 夹具：与仓内 `modules/rr3-connect/config.toml` 同形状（main.rs 的

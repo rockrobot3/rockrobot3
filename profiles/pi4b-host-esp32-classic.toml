@@ -86,13 +86,13 @@ not_applicable = true
 #   - SHTC3(0x70)/ICM-42688(0x68)/INA219(0x40) **均未接线**（i2cdetect 无应答）；
 #   - Pi 无电池（官方 5V 适配器供电）→ power.* 两格不在位；
 #   - act.led / act.relay 的 GPIO4/17 亦未接线 → 不在位（板侧舵机走 ESP32 UART）。
-# 保留格位：act.servo（ESP32 末梢）、net.wifi/net.bt（Pi 自带）、ui.face（MAX7219
+# 保留格位：act.servo（ESP32 末梢）、net.wifi（Pi 自带）、ui.face（MAX7219
 # 点阵，interact 开机探活已在位）、audio.playback（USB 声卡，2026-10-31 晚间接入）、
 # audio.capture/vad（ESP32 双麦；宿主音频源走 RR3_HAL_AUDIO_BACKEND=esp32，
 # voiceHAT 仅作历史采集档保留）、cognition 四格（brain）。
+# net.bt 是 placeholder（BlueZ 真后端未落地），不进生产装配面。
 "act.servo" = "rr3-act"
 "net.wifi" = "rr3-connect"
-"net.bt" = "rr3-connect"
 "ui.face" = "rr3-interact"
 "audio.playback" = "rr3-interact"
 "audio.capture" = "rr3-sense"
@@ -141,7 +141,7 @@ mux_group = []
 # 启用的格位集合（**2026-10-31 收窄**，与 [bindings]/[slots] present 三处一致）：
 # 每个启用的格位都必须绑定且在位——装载门对缺格 fail-closed 拒启整模块。
 rr3-act = ["act.servo"]
-rr3-connect = ["net.wifi", "net.bt"]
+rr3-connect = ["net.wifi"]
 rr3-interact = ["ui.face", "audio.playback"]
 rr3-sense = ["audio.capture", "audio.vad"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
@@ -159,7 +159,6 @@ present = [
     "cognition.dialog",
     "cognition.llm",
     "cognition.tts",
-    "net.bt",
     "net.wifi",
     "ui.face",
 ]
