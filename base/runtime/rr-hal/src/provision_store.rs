@@ -33,10 +33,40 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::nmcli_support::{rr3_nm_field, rr3_nm_run, rr3_nm_unescape};
-use crate::{Rr3HalError, Rr3SsidText};
+use crate::{Rr3ErrText, Rr3HalError, Rr3SsidText};
 
 /// 配网连接的固定 profile 名（本后端的在册锚，见模块 doc）
 pub const RR3_NM_PROVISION_CON: &str = "rr3-provision";
+
+/// 配网凭据形制校验（fail-closed）：nmcli 用 GOption 解析 argv，值位置以 `-`
+/// 开头的串会被当选项——这是本后端唯一"用户数据进 argv"的面，必须在入口挡。
+/// 其余规则取 802.11/WPA2-PSK 物理上限（SSID ≤32 字节、psk ≤63 字符）与
+/// 控制字符拒（argv 里 NUL 会截断）。密码强度（≥8）归模块侧 legacy 语义，
+/// 本层不重复策略。
+fn rr3_wifi_cred_check(ssid: &str, pass: &str) -> Result<(), Rr3HalError> {
+    let bad = |why: &str| Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(why)));
+    if ssid.is_empty() {
+        return bad("SSID 为空（配网凭据拒存）");
+    }
+    if ssid.len() > 32 {
+        return bad("SSID 超 32 字节（802.11 上限，配网凭据拒存）");
+    }
+    if pass.is_empty() {
+        return bad("密码为空（配网凭据拒存）");
+    }
+    if pass.chars().count() > 63 {
+        return bad("密码超 63 字符（WPA2-PSK 上限，配网凭据拒存）");
+    }
+    for (what, v) in [("SSID", ssid), ("密码", pass)] {
+        if v.starts_with('-') {
+            return bad(&format!("{what} 以 '-' 开头会被 nmcli 当选项（拒存）"));
+        }
+        if v.chars().any(|c| c.is_control()) {
+            return bad(&format!("{what} 含控制字符（拒存）"));
+        }
+    }
+    Ok(())
+}
 
 /// 配网凭据存储面（MC-6）：三动作——connect 落盘、forget 真删、在册查询。
 /// 全部由后端承载（linux = NM 连接配置）；实现方构造不触设备（选择函数
@@ -111,6 +141,7 @@ impl Rr3NmWifiStore {
 
 impl Rr3WifiStore for Rr3NmWifiStore {
     fn rr3_wifi_store_connect(&self, ssid: &str, pass: &str) -> Result<(), Rr3HalError> {
+        rr3_wifi_cred_check(ssid, pass)?;
         let verb = if self.in_register()? { "modify" } else { "add" };
         let args = self.upsert_args(verb, ssid, pass);
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -204,6 +235,35 @@ mod tests {
     // 非计时用例的夹具超时档（生产 config 同档），见 nmcli_support 常量 doc——
     // 逻辑用例不因 spawn 负载抖动而假红；100 ms 档由超时守护用例自带
     use crate::nmcli_support::RR3_TEST_NM_TIMEOUT;
+
+    /// 凭据形制校验：合法边界通过，超限/前导 '-'/控制字符/空值逐条拒。
+    #[test]
+    fn wifi_cred_check_rejects_unsafe_shapes() {
+        assert!(rr3_wifi_cred_check("Home-5G", "password8").is_ok());
+        assert!(rr3_wifi_cred_check(&"s".repeat(32), &"p".repeat(63)).is_ok());
+        assert!(rr3_wifi_cred_check("", "password8").is_err(), "空 SSID");
+        assert!(
+            rr3_wifi_cred_check(&"s".repeat(33), "password8").is_err(),
+            "SSID 超限"
+        );
+        assert!(rr3_wifi_cred_check("Home", "").is_err(), "空密码");
+        assert!(
+            rr3_wifi_cred_check("Home", &"p".repeat(64)).is_err(),
+            "密码超限"
+        );
+        assert!(
+            rr3_wifi_cred_check("-t", "password8").is_err(),
+            "SSID 前导 '-'"
+        );
+        assert!(
+            rr3_wifi_cred_check("Home", "--help").is_err(),
+            "密码前导 '-'"
+        );
+        assert!(
+            rr3_wifi_cred_check("Ho\u{1}me", "password8").is_err(),
+            "控制字符"
+        );
+    }
 
     /// 唯一 temp 目录（pid + 纳秒后缀，批H5 教训：只 pid 会撞上一轮遗留目录）
     fn rr3_test_prov_dir(tag: &str) -> PathBuf {
