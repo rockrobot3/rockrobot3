@@ -42,6 +42,16 @@ pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 /// 全局 [`rr3_hal_backend_resolve`]，既有行为逐点不变。
 pub const RR3_HAL_AUDIO_BACKEND_ENV: &str = "RR3_HAL_AUDIO_BACKEND";
 
+/// 舵机面后端覆盖键（P0-4 组合档归属）：与 [`RR3_HAL_AUDIO_BACKEND_ENV`] 同语义——
+/// 组合形态（Pi 宿主 × ESP32 board）下，全局 `RR3_HAL_BACKEND=linux` 让舵机面走
+/// sysfs PWM，但舵机实际在 ESP32 板上。本键只被 [`rr3_hal_servo`] 读取，未设/
+/// 空白 → 回落全局。
+pub const RR3_HAL_SERVO_BACKEND_ENV: &str = "RR3_HAL_SERVO_BACKEND";
+
+/// 显示面后端覆盖键（P0-4 组合档归属）：同舵机面——组合档显示（OLED/点阵）在
+/// ESP32 板上，全局 linux 会让显示面走 spidev。本键只被 [`rr3_hal_display`] 读取。
+pub const RR3_HAL_DISPLAY_BACKEND_ENV: &str = "RR3_HAL_DISPLAY_BACKEND";
+
 // —— 以下 `RR3_HAL_*` 键全部是**应急覆盖**（批D④ 收口，ADR-0018 裁定 4）：
 // 物理绑定的真值来自描述符（`profiles/<机>.toml` [hardware] → `RR3_HAL_BINDINGS`
 // 注入，见 [`crate::descriptor`]）；本组 env 同键覆盖描述符，供现场救场。描述符
@@ -200,6 +210,32 @@ pub fn rr3_hal_audio_backend_resolve() -> Result<&'static str, String> {
         let s = s.trim();
         if !s.is_empty() {
             return rr3_hal_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, s);
+        }
+    }
+    rr3_hal_backend_resolve()
+}
+
+/// 舵机面生效后端（P0-4）：能力面覆盖键 [`RR3_HAL_SERVO_BACKEND_ENV`] 优先，否则
+/// 回落全局。组合档舵机在 ESP32 板上时设 `esp32`，host-only 档不设回落全局。
+pub fn rr3_hal_servo_backend_resolve() -> Result<&'static str, String> {
+    if let Some(v) = std::env::var_os(RR3_HAL_SERVO_BACKEND_ENV) {
+        let s = v.to_string_lossy();
+        let s = s.trim();
+        if !s.is_empty() {
+            return rr3_hal_backend_parse(RR3_HAL_SERVO_BACKEND_ENV, s);
+        }
+    }
+    rr3_hal_backend_resolve()
+}
+
+/// 显示面生效后端（P0-4）：能力面覆盖键 [`RR3_HAL_DISPLAY_BACKEND_ENV`] 优先，否则
+/// 回落全局。组合档 OLED/点阵在 ESP32 板上时设 `esp32`，host-only 档不设回落全局。
+pub fn rr3_hal_display_backend_resolve() -> Result<&'static str, String> {
+    if let Some(v) = std::env::var_os(RR3_HAL_DISPLAY_BACKEND_ENV) {
+        let s = v.to_string_lossy();
+        let s = s.trim();
+        if !s.is_empty() {
+            return rr3_hal_backend_parse(RR3_HAL_DISPLAY_BACKEND_ENV, s);
         }
     }
     rr3_hal_backend_resolve()
@@ -456,7 +492,9 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
 /// 合成失败 → 占位件使用时以 `Unsupported` 回错（fail-closed，不回落参考机引脚），
 /// 非 linux 平台显式要 `linux` 时同落占位件，不静默换 sim。
 pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    // 舵机面走能力面覆盖键（[`RR3_HAL_SERVO_BACKEND_ENV`]）：组合档舵机在 ESP32
+    // 板上时设 esp32，全局 hal_backend 仍 linux（其余能力面走宿主）。
+    match rr3_hal_servo_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
             return rr3_hal_bindings_effective_named("舵机")
@@ -614,7 +652,9 @@ pub fn rr3_pwm_index_parse(s: &str) -> Option<u32> {
 /// 静默换 sim。mac 宿主档（C4 修正）：Mac 天然无 LED 矩阵，显示面落 sim 同
 /// 款虚拟点阵（内存记录，机制同源）——宿主开发档不因显示件缺席整体判死。
 pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    // 显示面走能力面覆盖键（[`RR3_HAL_DISPLAY_BACKEND_ENV`]）：组合档 OLED/点阵在
+    // ESP32 板上时设 esp32，全局 hal_backend 仍 linux（其余能力面走宿主）。
+    match rr3_hal_display_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
             return rr3_hal_bindings_effective_named("显示")

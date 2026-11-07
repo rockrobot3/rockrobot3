@@ -93,7 +93,17 @@ const RR3_PROFILE_SCHEMA_VERSION: i64 = 5;
 ///   `audio_backend` 覆盖）。
 /// - `audio_backend`：可选，音频采集面后端覆盖（组合档 Pi×ESP32 用 `esp32`，
 ///   注入子进程 `RR3_HAL_AUDIO_BACKEND`；host-only 档不设，回落全局 `hal_backend`）。
-const RR3_RUNTIME_KEYS: [&str; 3] = ["log_ring_cap", "hal_backend", "audio_backend"];
+/// - `servo_backend`：可选，舵机面后端覆盖（组合档舵机在 ESP32 板上用 `esp32`，
+///   注入子进程 `RR3_HAL_SERVO_BACKEND`；host-only 档不设回落全局）。
+/// - `display_backend`：可选，显示面后端覆盖（组合档 OLED/点阵在 ESP32 板上用
+///   `esp32`，注入子进程 `RR3_HAL_DISPLAY_BACKEND`；host-only 档不设回落全局）。
+const RR3_RUNTIME_KEYS: [&str; 5] = [
+    "log_ring_cap",
+    "hal_backend",
+    "audio_backend",
+    "servo_backend",
+    "display_backend",
+];
 
 /// HAL 后端名白名单（与 rr-hal backend.rs 的 RR3_BACKEND_* 常量同域；rrd 不直接
 /// 依赖 rr-hal 符号以保持基座轻量，此处独立钉合法取值集，装载期 fail-closed）。
@@ -352,6 +362,14 @@ pub struct Rr3Profile {
     /// `esp32`（注入子进程 `RR3_HAL_AUDIO_BACKEND`，音频面独占 UART）；host-only
     /// 档不设，音频面回落全局 hal_backend。
     pub audio_backend: Option<String>,
+    /// [runtime].servo_backend：可选，舵机面后端覆盖（P0-4 组合档归属）。组合档
+    /// 舵机在 ESP32 板上时设 `esp32`（注入子进程 `RR3_HAL_SERVO_BACKEND`）；
+    /// host-only 档不设，舵机面回落全局 hal_backend。
+    pub servo_backend: Option<String>,
+    /// [runtime].display_backend：可选，显示面后端覆盖（P0-4 组合档归属）。组合档
+    /// OLED/点阵在 ESP32 板上时设 `esp32`（注入子进程 `RR3_HAL_DISPLAY_BACKEND`）；
+    /// host-only 档不设，显示面回落全局 hal_backend。
+    pub display_backend: Option<String>,
     /// [[pin]]：物理绑定（引脚侧唯一真值点，增补轮六 §4.2）。可选段（纯 sim/无硬件
     /// 格形态不给——此时校验②不判，sim 形态无物理面可绑）
     pub pins: Vec<Rr3PinEntry>,
@@ -396,6 +414,12 @@ pub struct Rr3ProfileBoot {
     /// [runtime].audio_backend：可选，音频采集面后端覆盖。Some 时 daemon 注入
     /// 子进程 `RR3_HAL_AUDIO_BACKEND`；None 不注入（音频面回落全局 hal_backend）。
     pub audio_backend: Option<String>,
+    /// [runtime].servo_backend：可选，舵机面后端覆盖（P0-4 组合档归属）。Some 时
+    /// daemon 注入子进程 `RR3_HAL_SERVO_BACKEND`；None 不注入（舵机面回落全局）。
+    pub servo_backend: Option<String>,
+    /// [runtime].display_backend：可选，显示面后端覆盖（P0-4 组合档归属）。Some 时
+    /// daemon 注入子进程 `RR3_HAL_DISPLAY_BACKEND`；None 不注入（显示面回落全局）。
+    pub display_backend: Option<String>,
     /// [platform].chip（基-40 boot 底账）：boot 链验收通过的选册 chip，真值集
     /// 记账（[`rr3_runtime_truth_set_locations`] 消费）按它定位平台事实表——
     /// daemon 臂不再二次解析装配单拿 chip（双真值即漂移温床）。
@@ -660,6 +684,8 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
     let mut log_ring_cap: usize = 0;
     let mut hal_backend: String = String::new();
     let mut audio_backend: Option<String> = None;
+    let mut servo_backend: Option<String> = None;
+    let mut display_backend: Option<String> = None;
     match root.get("runtime").and_then(toml::Value::as_table) {
         None => errs
             .push("缺少 [runtime]（rrd 运行参数；schema_version=5 起必填，批N5 件二）".to_string()),
@@ -695,6 +721,30 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                 } else {
                     errs.push(format!(
                         "runtime.audio_backend 取值不认: {v}（允许 {}）",
+                        RR3_HAL_BACKEND_LEGAL.join("/")
+                    ));
+                }
+            }
+            // servo_backend 可选（P0-4 组合档归属）：组合档舵机在 ESP32 板上设 esp32；
+            // 不设 → 舵机面回落全局 hal_backend。取值域同 hal_backend。
+            if let Some(v) = t.get("servo_backend").and_then(toml::Value::as_str) {
+                if RR3_HAL_BACKEND_LEGAL.contains(&v) {
+                    servo_backend = Some(v.to_string());
+                } else {
+                    errs.push(format!(
+                        "runtime.servo_backend 取值不认: {v}（允许 {}）",
+                        RR3_HAL_BACKEND_LEGAL.join("/")
+                    ));
+                }
+            }
+            // display_backend 可选（P0-4 组合档归属）：组合档 OLED/点阵在 ESP32 板上设 esp32；
+            // 不设 → 显示面回落全局 hal_backend。取值域同 hal_backend。
+            if let Some(v) = t.get("display_backend").and_then(toml::Value::as_str) {
+                if RR3_HAL_BACKEND_LEGAL.contains(&v) {
+                    display_backend = Some(v.to_string());
+                } else {
+                    errs.push(format!(
+                        "runtime.display_backend 取值不认: {v}（允许 {}）",
                         RR3_HAL_BACKEND_LEGAL.join("/")
                     ));
                 }
@@ -992,6 +1042,8 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         log_ring_cap,
         hal_backend,
         audio_backend,
+        servo_backend,
+        display_backend,
         pins,
     })
 }
@@ -2015,6 +2067,8 @@ pub fn rr3_profile_boot_inputs_with_probe(
         log_ring_cap: profile.log_ring_cap,
         hal_backend: profile.hal_backend.clone(),
         audio_backend: profile.audio_backend.clone(),
+        servo_backend: profile.servo_backend.clone(),
+        display_backend: profile.display_backend.clone(),
         platform_chip: profile.platform_chip.clone(),
         snapshot: Some(snapshot),
     })

@@ -29,6 +29,10 @@ log_ring_cap = 512
 # 组合档全局 = linux（宿主侧链路/回放）；音频采集面 = esp32（板侧双麦独占 UART）。
 hal_backend = "linux"
 audio_backend = "esp32"
+# P0-4 组合档归属：舵机（双轴云台）在 ESP32 板上，单独覆盖到 esp32，不走宿主 sysfs PWM。
+servo_backend = "esp32"
+# 显示面（ui.face）= Pi 本机 MAX7219 点阵（[[pin]] ui.face.spi → spidev0.0），
+# 回落全局 linux；板侧 OLED 经 frame_probe 直命，不进 rrd face 槽。
 
 [platform]
 # host 档（ADR-0018 修订 1）：完整 Linux 底座 + 五模块全跑在 Pi 上。
