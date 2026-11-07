@@ -8,5 +8,8 @@ target-dir = "/tmp/rr3-build"
 
 # esp-idf 构建缓存（.embuild）同样移出源码区。EMBUILD_ROOT 由 esp-idf-sys 读取，
 # 默认落在 crate 根；此处统一到 /tmp/rr3-embuild。force=false 尊重外部 env。
+# ESP_IDF_TOOLS_INSTALL_DIR=global：工具链用全局 ~/.espressif（已有），避免
+#   在 workspace 内重新下载（embuild 默认 workspace 模式会把工具放进 .embuild）。
 [env]
 EMBUILD_ROOT = "/tmp/rr3-embuild"
+ESP_IDF_TOOLS_INSTALL_DIR = "global"

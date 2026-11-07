@@ -66,7 +66,7 @@ export PIP_DEFAULT_TIMEOUT=60
 export MCU=esp32s3
 
 # ⑦ venv dist-info 兼容（同 classic 门 ⑥）
-venv_sp=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
+venv_sp="/tmp/rr3-embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
 for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   if [ -d "$d" ]; then
     mv "$d" "${d/ruamel_yaml-/ruamel.yaml-}"
@@ -74,7 +74,8 @@ for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   fi
 done
 
-elf="target/xtensa-esp32s3-espidf/debug/esp32-periph-base"
+# target-dir 由仓根 .cargo/config.toml 统一到 /tmp/rr3-build（P0-5）
+elf="/tmp/rr3-build/xtensa-esp32s3-espidf/debug/esp32-periph-base"
 if cargo +esp build \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3 \

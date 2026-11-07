@@ -65,7 +65,8 @@ use esp_idf_sys::{
     esp_netif_init, esp_netif_ip_info_t, esp_netif_t, esp_restart, esp_wifi_connect,
     esp_wifi_disconnect, esp_wifi_init, esp_wifi_set_config, esp_wifi_set_mode, esp_wifi_start,
     g_wifi_default_wpa_crypto_funcs, g_wifi_osi_funcs, httpd_config_t,
-    httpd_err_code_t_HTTPD_400_BAD_REQUEST, httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t,
+    httpd_err_code_t_HTTPD_400_BAD_REQUEST, httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+    httpd_err_code_t_HTTPD_404_NOT_FOUND, httpd_handle_t,
     httpd_register_uri_handler, httpd_req_recv, httpd_req_t, httpd_resp_send,
     httpd_resp_send_err, httpd_resp_set_type, httpd_start, httpd_uri_t, http_method_HTTP_GET,
     http_method_HTTP_POST, nvs_flash_init, wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK, wifi_config_t,
@@ -76,6 +77,28 @@ use esp_idf_sys::{
 use rr_ipc::Rr3BoardBindings;
 
 use crate::state::{lock_bus, Bus};
+
+/// 板侧 HTTP 写口管理令牌（P1-3）：POST /api/board/wifi 与 /api/board/reboot
+/// 须在 JSON body 带 `token` 字段且与本值相等，否则 401。生产构建须通过
+/// `RR3_BOARD_ADMIN_TOKEN` 编译期环境变量覆盖缺省值；缺省值仅适用于开发，
+/// 与 SoftAP 口令（仓内公开）不同面——AP 口令是"接进来"的门槛，令牌是"改
+/// 配置/动作面"的门槛。
+const RR3_BOARD_ADMIN_TOKEN: &str = match option_env!("RR3_BOARD_ADMIN_TOKEN") {
+    Some(t) if !t.is_empty() => t,
+    _ => "rock3-board-admin-dev",
+};
+
+/// 写口令牌校验：body JSON 须含 `token` 字段且等于 [`RR3_BOARD_ADMIN_TOKEN`]。
+/// 纯函数，单测可钉；不读 env、不碰全局。
+fn rr3_admin_token_check(body: &[u8]) -> bool {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    v.get("token")
+        .and_then(|t| t.as_str())
+        .map(|t| t == RR3_BOARD_ADMIN_TOKEN)
+        .unwrap_or(false)
+}
 
 // ---------------------------------------------------------------------------
 // 纯逻辑层：白名单路由表 + 路由纯函数 + 快照 JSON 组包（单测可钉）
@@ -269,6 +292,7 @@ pre{background:#f4f4f5;padding:10px;border-radius:6px;overflow:auto;font-size:12
 <h2>实时状态</h2><pre id="s">加载中…</pre>
 <h2>WiFi 配置（换网后在这里重配）</h2>
 <form id="f">
+<input id="tok" type="password" placeholder="管理令牌 (token)" required>
 <input id="ssid" placeholder="WiFi 名称 (SSID)" required>
 <input id="pass" type="password" placeholder="WiFi 密码">
 <button>保存并连接</button></form>
@@ -282,13 +306,15 @@ st();setInterval(st,3000);
 document.getElementById('f').onsubmit=async e=>{e.preventDefault();R.textContent='提交中…';
 try{const j=await (await fetch('/api/board/wifi',{method:'POST',
 headers:{'Content-Type':'application/json'},
-body:JSON.stringify({ssid:ssid.value,password:pass.value})})).json();
+body:JSON.stringify({token:tok.value,ssid:ssid.value,password:pass.value})})).json();
 R.textContent=JSON.stringify(j,null,1);
 if(j.connected){R.textContent+='\n✅ 已加入新 WiFi（本页可断开，改用新 IP 访问）'}
 else if(j.reverted){R.textContent+='\n⚠ 新凭据未连上，已回滚旧凭据'}
 }catch(e){R.textContent='请求失败: '+e}st()};
 document.getElementById('rb').onclick=async()=>{if(!confirm('确认重启？'))return;
-R.textContent='重启指令已发…';try{await fetch('/api/board/reboot',{method:'POST'})}catch(e){}};
+R.textContent='重启指令已发…';try{await fetch('/api/board/reboot',{method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({token:tok.value})})}catch(e){}};
 </script></body></html>"#;
 /// 等连有界窗（事务与回退共用；步进 [`WIFI_POLL_MS`]——15s 上限，超窗＝未连
 /// 如实应答，不猜不造）。
@@ -347,6 +373,23 @@ pub(crate) fn rr3_wifi_write_json(r: &Rr3WifiWriteResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P1-3 写口令牌校验：合法 token 通过、缺/错/坏 JSON 拒绝。
+    #[test]
+    fn admin_token_check() {
+        let ok = format!("{{\"token\":\"{}\"}}", RR3_BOARD_ADMIN_TOKEN);
+        assert!(rr3_admin_token_check(ok.as_bytes()), "合法 token 应通过");
+        assert!(
+            !rr3_admin_token_check(b"{\"token\":\"wrong\"}"),
+            "错 token 应拒"
+        );
+        assert!(!rr3_admin_token_check(b"{}"), "缺 token 应拒");
+        assert!(!rr3_admin_token_check(b"not json"), "坏 JSON 应拒");
+        assert!(
+            !rr3_admin_token_check(br#"{"token":123}"#),
+            "非串 token 应拒"
+        );
+    }
 
     /// 表 ↔ 分派零漂移（同 host `route_table_matches_dispatch` 形状）：表内每行
     /// 必命中、表外 path/method 必 None——防"表加行忘加臂/臂漂移"。
@@ -632,6 +675,14 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
                     b"wifi body recv failed\0".as_ptr() as *const _,
                 );
             }
+            // P1-3 写口鉴权：body 须带合法 token，否则 401（配网是改活配置的高权动作）
+            if !rr3_admin_token_check(&buf) {
+                return httpd_resp_send_err(
+                    req,
+                    httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+                    b"admin token missing or invalid\0".as_ptr() as *const _,
+                );
+            }
             let result = match rr3_wifi_write_body(&buf) {
                 Ok((s, p)) => match crate::cred::rr3_cred_form_check(&s, &p) {
                     Ok(()) => rr3_wifi_write_apply(&s, &p),
@@ -646,6 +697,22 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
         // 动作面：应答先行落链再重启（esp_restart 不返回——重启即断链，应答
         // 不可达＝客户端误判超时，故先 send 后 restart）
         Rr3BoardRoute::Reboot => {
+            // P1-3 写口鉴权：reboot 是高权动作，body 须带合法 token
+            let clen = (*req).content_len;
+            let authed = if clen > 0 {
+                let mut buf = vec![0u8; clen as usize];
+                let got = httpd_req_recv(req, buf.as_mut_ptr() as *mut _, buf.len());
+                got > 0 && got as usize == buf.len() && rr3_admin_token_check(&buf)
+            } else {
+                false
+            };
+            if !authed {
+                return httpd_resp_send_err(
+                    req,
+                    httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
+                    b"admin token missing or invalid\0".as_ptr() as *const _,
+                );
+            }
             let body = "{\"ok\":true}".to_string();
             httpd_resp_set_type(req, c"application/json".as_ptr());
             let _ = httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _);
