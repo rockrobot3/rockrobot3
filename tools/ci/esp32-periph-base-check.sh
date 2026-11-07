@@ -59,7 +59,7 @@ export PIP_DEFAULT_TIMEOUT=60
 #    importlib.metadata 按 dir stem 严格匹配点号名 → idf-component-manager 依赖
 #    检查误报 not found → CMake Python 检查退 255。venv 落本工程 .embuild 下，
 #    构建前改名兜底。
-venv_sp=".embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
+venv_sp="/tmp/rr3-embuild/espressif/python_env/idf5.2_py3.9_env/lib/python3.9/site-packages"
 for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   if [ -d "$d" ]; then
     mv "$d" "${d/ruamel_yaml-/ruamel.yaml-}"
@@ -67,7 +67,9 @@ for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   fi
 done
 
-elf="target/xtensa-esp32-espidf/debug/esp32-periph-base"
+# target-dir 由仓根 .cargo/config.toml 统一到 /tmp/rr3-build（P0-5），
+# 严禁在源码区留构建产物；CI 与本地同口径。
+elf="/tmp/rr3-build/xtensa-esp32-espidf/debug/esp32-periph-base"
 if cargo +esp build \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
