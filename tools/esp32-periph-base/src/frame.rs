@@ -1,3 +1,8 @@
+//! 帧级请求分派：`set_bindings` / `servo` / `face` 三臂的解码与应答组装。
+//!
+//! 上行帧按 topic 分派到本文件，参数裁决与状态迁移在 `state.rs`（机制/策略
+//! 分离）；应答体形状是宿主侧 `rr3.call` 的契约面，错误文案带根因点名。
+
 use std::sync::{Arc, Mutex};
 
 use rr_ipc::{rr3_board_binding_entry, Rr3BoardBindings, RR3_METHOD_SET_BINDINGS};

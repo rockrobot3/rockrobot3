@@ -1,3 +1,8 @@
+//! U5 共享机制 digest 的跨平台稳定性用例（FNV-1a 64）。
+//!
+//! 像素编码/占空比换算/轨道判定三组机制在宿主与板侧共用同一份实现，本用例
+//! 钉其输出字节与摘要不变——改机制即改 digest，跨平台漂移当场红。
+
 use periph_mech::oled_codec::{rr3_frame_pages, rr3_page_cmd};
 use periph_mech::periph_core::rr3_deg_to_duty;
 use periph_mech::rail_judge::RailJudge;

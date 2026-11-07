@@ -1,3 +1,8 @@
+//! OLED（SSD1306，I2C）页面写实现：重试、分页与清屏。
+//!
+//! I2C 单次写有超时/重试策略（`board.rs` 常量），页写失败按整页重试；像素到
+//! 页字节的编码在 `periph-mech` 的 `oled_codec`（共享机制单点，板宿主同源）。
+
 use std::thread;
 use std::time::Duration;
 

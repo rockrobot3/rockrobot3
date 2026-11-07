@@ -1,3 +1,8 @@
+//! 外设句柄聚合：控制串口与运行期外设两套句柄的构造。
+//!
+//! `CtlUart` 是命令面 UART，`RtPeriph` 持有 I2C/舵机/UART2/ADC 四类驱动；
+//! 句柄生命周期与 pin 归属由 `board.rs` 事实表决定，本文件只做装配。
+
 use std::thread;
 use std::time::Duration;
 

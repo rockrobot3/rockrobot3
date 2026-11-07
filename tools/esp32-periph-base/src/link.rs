@@ -1,3 +1,8 @@
+//! UART 行链路收发：应答行回写与线路尾字节排空。
+//!
+//! 只做字节搬运与 TX 环背压的真实返回（不允许 `let _ =` 吞写结果）；行间隙
+//! 预算与容量常量住 `board.rs`。协议语义（何时应答/应答什么）在 `frame.rs`。
+
 use esp_idf_hal::uart::UartDriver;
 use esp_idf_sys::esp_timer_get_time;
 use rr_ipc::Rr3ByteStream;

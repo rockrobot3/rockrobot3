@@ -1,3 +1,8 @@
+//! 生成器形状用例：模块骨架与原子件五件套的落盘成员/内容判据（临时根隔离）。
+//!
+//! 每个用例在 `std::env::temp_dir()` 下建 pid 唯一的根，只断言"生成器产出
+//! 什么"；消费侧（装载/门禁）的形状判据不在此处重复。
+
 use rr3_mkmod::rr3_mkmod_generate;
 use std::path::{Path, PathBuf};
 

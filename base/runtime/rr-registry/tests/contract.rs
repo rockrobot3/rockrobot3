@@ -1,3 +1,9 @@
+//! 契约册形状的对拍用例：slots/roles/devices/topics/platform/wiring 的成员与判据。
+//!
+//! 判据源一律取仓内真册（`contracts/`、`profiles/`、`hardware/`），不手抄第二份；
+//! 每个用例钉一类跨表判等（如 tier↔tier_scope、pin↔角色、平台词表），改了契约
+//! 册或解析器都会在这里显形。
+
 use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {

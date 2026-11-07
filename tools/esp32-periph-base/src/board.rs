@@ -1,3 +1,10 @@
+//! 板侧事实表与引脚/时序常量（S3 形态的唯一数据面）。
+//!
+//! 行程表与主题表由 `tools/rr3-codegen` 生成后 `include!` 进本文件条目流
+//! （`axis_gen.rs`/`topics_gen.rs`，生成物禁手改）；本文件另持 I2C/OLED/UART/
+//! 舵机/PWM 的面板常量与 `rr3_bindings_reconcile` 绑定对账。改硬件参数只改
+//! 契约真值点并重跑生成器，不在板侧抄第二份。
+
 use rr_ipc::Rr3BoardBindings;
 
 use esp_idf_hal::adc::{attenuation, Resolution as AdcResolution};

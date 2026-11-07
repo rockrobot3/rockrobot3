@@ -1,3 +1,9 @@
+//! 运行期任务面：作业执行、轨道采样、舵机动作与自主节拍。
+//!
+//! `exec_job` 是帧分派落地的唯一执行入口；`sample_rail` 按 `RAIL_SAMPLE_PERIOD_MS`
+//! 采 ADC 并发布电量；`rt_move`/`rt_scan`/`autonomous_tick` 是舵机与扫描策略。
+//! 安全/限幅判据在 `board.rs` 与共享机制件，本文件只编排。
+
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
