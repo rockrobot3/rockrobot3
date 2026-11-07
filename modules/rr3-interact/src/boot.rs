@@ -15,7 +15,7 @@
 use rr_hal::backend::{rr3_hal_audio_sink, rr3_hal_display};
 use rr_hal_api::{Rr3AudioSink, Rr3Display, RR3_AUDIO_CFG_16K_MONO16};
 
-use crate::face::{rr3_face_expression_lookup, RR3_FACE_EXPRESSIONS_JOINED};
+use crate::face::{rr3_face_expr_lookup, RR3_FACE_EXPRESSIONS_JOINED};
 use crate::panel::server::{
     Rr3SelftestExpect, RR3_SELFTEST_CONTRACTS_EXPECTS, RR3_SELFTEST_LEG_STATES,
     RR3_SELFTEST_WIRING_EXPECTS,
@@ -133,7 +133,7 @@ impl Default for Rr3SelftestCfg {
 
 /// TOML 文本 → Rr3InteractCfg（bootstrap 的 parse_config 入口）。手工下钻不引
 /// serde derive：字段个位数，点名缺字段的文案比派生宏的默认报错可读。
-pub(crate) fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, String> {
+pub(crate) fn rr3_itact_cfg_parse(text: &str) -> Result<Rr3InteractCfg, String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
     // player 段（MC-2）：段/键缺省回落默认（S-5 口径）；类型错或越界逐键点名
     // 拒 boot（fail-closed）。volume_pct 值域 0..=1000（10 倍封顶防呆，>100
@@ -181,7 +181,7 @@ pub(crate) fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, St
     let mut selftest = Rr3SelftestCfg::default();
     if let Some(s) = v.get("rr3-interact").and_then(|x| x.get("selftest")) {
         if let Some(name) = s.get("face_expect").and_then(toml::Value::as_str) {
-            selftest.face_expect = rr3_face_expression_lookup(name).ok_or_else(|| {
+            selftest.face_expect = rr3_face_expr_lookup(name).ok_or_else(|| {
                 format!(
                     "config [rr3-interact.selftest] face_expect 非在册表情 {name:?}（在册值 {}）",
                     RR3_FACE_EXPRESSIONS_JOINED
@@ -255,7 +255,7 @@ pub(crate) fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, St
         let s = e.as_str().ok_or_else(|| {
             format!("config [rr3-interact.face] non_pointable[{i}] 必须是字符串，收到 {e}")
         })?;
-        let expr = rr3_face_expression_lookup(s).ok_or_else(|| {
+        let expr = rr3_face_expr_lookup(s).ok_or_else(|| {
             format!(
                 "config [rr3-interact.face] non_pointable[{i}] 非在册表情 {s:?}（在册值 {}）",
                 RR3_FACE_EXPRESSIONS_JOINED
@@ -273,14 +273,14 @@ pub(crate) fn rr3_interact_config_parse(text: &str) -> Result<Rr3InteractCfg, St
             let s = name.as_str().ok_or_else(|| {
                 format!("config [rr3-interact.face] default_expression 必须是字符串，收到 {name}")
             })?;
-            rr3_face_expression_lookup(s).ok_or_else(|| {
+            rr3_face_expr_lookup(s).ok_or_else(|| {
                 format!(
                     "config [rr3-interact.face] default_expression 非在册表情 {s:?}（在册值 {}）",
                     RR3_FACE_EXPRESSIONS_JOINED
                 )
             })?
         }
-        None => rr3_face_expression_lookup("idle").expect("在册白名单恒含 idle，lookup 必中"),
+        None => rr3_face_expr_lookup("idle").expect("在册白名单恒含 idle，lookup 必中"),
     };
     Ok(Rr3InteractCfg {
         player,
@@ -341,7 +341,7 @@ call_timeout_ms = 5000
 [rr3-interact.selftest]
 face_expect = "happy"
 "#;
-        let cfg = rr3_interact_config_parse(text).unwrap();
+        let cfg = rr3_itact_cfg_parse(text).unwrap();
         assert_eq!(cfg.face.non_pointable, vec!["talk"], "不可点名集注入");
         assert_eq!(cfg.player.prebuffer_ms, 500, "起播水位注入（MC-2）");
         assert_eq!(cfg.player.volume_pct, 70, "播放增益注入（MC-2）");
@@ -361,7 +361,7 @@ face_expect = "happy"
         let minimal = "[rr3-interact.face]\nnon_pointable = []\n";
         // 全缺省：face 节拍/兜底回落 250/idle，panel 五值回落 legacy，
         // selftest 回落 happy
-        let cfg = rr3_interact_config_parse(minimal).unwrap();
+        let cfg = rr3_itact_cfg_parse(minimal).unwrap();
         assert_eq!(cfg.face.face_tick_ms, 250);
         assert_eq!(cfg.face.default_expr, "idle");
         assert_eq!(cfg.panel.max_conns, 8);
@@ -371,7 +371,7 @@ face_expect = "happy"
         assert_eq!(cfg.panel.call_timeout_ms, 5000);
         assert_eq!(cfg.selftest.face_expect, "happy");
         // 显式值合法读入：非 legacy 取值同样放行（在册表情任选）
-        let cfg = rr3_interact_config_parse(
+        let cfg = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\nface_tick_ms = 120\ndefault_expression = \"happy\"\n[rr3-interact.panel]\nmax_conns = 2\n[rr3-interact.selftest]\nface_expect = \"blink\"\n",
         )
         .unwrap();
@@ -380,30 +380,30 @@ face_expect = "happy"
         assert_eq!(cfg.panel.max_conns, 2);
         assert_eq!(cfg.selftest.face_expect, "blink");
         // 0 值自残拒放：节拍/限额折 1 下界——0 不当合法配置
-        let cfg = rr3_interact_config_parse(
+        let cfg = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\nface_tick_ms = 0\n[rr3-interact.panel]\nmax_conns = 0\n",
         )
         .unwrap();
         assert_eq!(cfg.face.face_tick_ms, 1, "节拍 0 折 1");
         assert_eq!(cfg.panel.max_conns, 1, "并发 0 折 1");
         // 类型错拒：字符串进整数键、整数进字符串键
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\nface_tick_ms = \"soon\"\n",
         )
         .unwrap_err();
         assert!(e.contains("face_tick_ms"), "类型错点名: {e}");
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\ndefault_expression = 3\n",
         )
         .unwrap_err();
         assert!(e.contains("default_expression"), "非字符串点名: {e}");
         // 在册外值拒：表情名必须过白名单对账
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\ndefault_expression = \"wink\"\n",
         )
         .unwrap_err();
         assert!(e.contains("非在册表情"), "兜底表情在册外点名: {e}");
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest]\nface_expect = \"wink\"\n",
         )
         .unwrap_err();
@@ -417,14 +417,14 @@ face_expect = "happy"
     fn selftest_expect_table_falls_back_and_rejects_unknown_legs_and_states() {
         let minimal = "[rr3-interact.face]\nnon_pointable = []\n";
         // 段/键缺省：预期表回落固定腿全 pass + 两组零 fail
-        let cfg = rr3_interact_config_parse(minimal).unwrap();
+        let cfg = rr3_itact_cfg_parse(minimal).unwrap();
         assert_eq!(cfg.selftest.expect.speaker, "pass");
         assert_eq!(cfg.selftest.expect.relay, "pass");
         assert_eq!(cfg.selftest.expect.face, "pass");
         assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
         assert_eq!(cfg.selftest.expect.contracts, "zero-fail");
         // 显式值合法读入：在册三态任选（恒败形态可如实申报期望 fail/n-a）
-        let cfg = rr3_interact_config_parse(
+        let cfg = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"fail\"\nrelay = \"pass\"\nface = \"n-a\"\nwiring = \"zero-fail\"\ncontracts = \"zero-fail\"\n",
         )
         .unwrap();
@@ -434,7 +434,7 @@ face_expect = "happy"
         assert_eq!(cfg.selftest.expect.wiring, "zero-fail");
         assert_eq!(cfg.selftest.expect.contracts, "zero-fail");
         // 三态值域外拒：非在册判值点名
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = \"ok\"\n",
         )
         .unwrap_err();
@@ -443,13 +443,13 @@ face_expect = "happy"
             "值域闭集点名: {e}"
         );
         // wiring 组预期词表外拒（单值词表也是闭集，拼错当场红）
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nwiring = \"zero_fail\"\n",
         )
         .unwrap_err();
         assert!(e.contains("非在册组预期"), "组预期词表点名: {e}");
         // contracts 组预期词表外拒（批N5 件五笔4，同闭集）
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\ncontracts = \"zero_fail\"\n",
         )
         .unwrap_err();
@@ -458,7 +458,7 @@ face_expect = "happy"
             "组预期词表点名: {e}"
         );
         // 未知腿名拒：腿册外预期不容静默（fail-closed）
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\narm = \"pass\"\n",
         )
         .unwrap_err();
@@ -467,13 +467,13 @@ face_expect = "happy"
             "腿名册点名: {e}"
         );
         // 非字符串值拒
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest.expect]\nspeaker = 3\n",
         )
         .unwrap_err();
         assert!(e.contains("必须是字符串"), "类型错点名: {e}");
         // expect 段非表拒
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.face]\nnon_pointable = []\n[rr3-interact.selftest]\nexpect = 3\n",
         )
         .unwrap_err();
@@ -484,37 +484,36 @@ face_expect = "happy"
     #[test]
     fn player_keys_fall_back_to_defaults_and_reject_bad_values() {
         // 整段缺省（I-11 最小形状）→ 回落 legacy 默认 500/70
-        let cfg = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = []\n").unwrap();
+        let cfg = rr3_itact_cfg_parse("[rr3-interact.face]\nnon_pointable = []\n").unwrap();
         assert_eq!(cfg.player.prebuffer_ms, 500, "缺段回落默认水位");
         assert_eq!(cfg.player.volume_pct, 70, "缺段回落默认增益");
         // 段在键缺 → 同样回落
-        let cfg = rr3_interact_config_parse(
-            "[rr3-interact.player]\n[rr3-interact.face]\nnon_pointable = []\n",
-        )
-        .unwrap();
+        let cfg =
+            rr3_itact_cfg_parse("[rr3-interact.player]\n[rr3-interact.face]\nnon_pointable = []\n")
+                .unwrap();
         assert_eq!(cfg.player.prebuffer_ms, 500);
         assert_eq!(cfg.player.volume_pct, 70);
         // 越界策略值合法读入：水位 0（无预缓冲）与增益 1000（封顶）
-        let cfg = rr3_interact_config_parse(
+        let cfg = rr3_itact_cfg_parse(
             "[rr3-interact.player]\nprebuffer_ms = 0\nvolume_pct = 1000\n[rr3-interact.face]\nnon_pointable = []\n",
         )
         .unwrap();
         assert_eq!(cfg.player.prebuffer_ms, 0);
         assert_eq!(cfg.player.volume_pct, 1000);
         // 类型错拒：字符串进整数键
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.player]\nprebuffer_ms = \"soon\"\n[rr3-interact.face]\nnon_pointable = []\n",
         )
         .unwrap_err();
         assert!(e.contains("prebuffer_ms"), "类型错点名: {e}");
         // 负数拒：水位不得为负
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.player]\nprebuffer_ms = -1\n[rr3-interact.face]\nnon_pointable = []\n",
         )
         .unwrap_err();
         assert!(e.contains("不得为负"), "负数点名: {e}");
         // 增益越界拒：值域 0..=1000
-        let e = rr3_interact_config_parse(
+        let e = rr3_itact_cfg_parse(
             "[rr3-interact.player]\nvolume_pct = 1001\n[rr3-interact.face]\nnon_pointable = []\n",
         )
         .unwrap_err();
@@ -523,17 +522,17 @@ face_expect = "happy"
 
     #[test]
     fn config_parse_rejects_missing_sections_and_fields() {
-        let e = rr3_interact_config_parse("").unwrap_err();
+        let e = rr3_itact_cfg_parse("").unwrap_err();
         assert!(e.contains("[rr3-interact.face]"), "缺段点名: {e}");
-        let e = rr3_interact_config_parse("[rr3-interact.face]\n").unwrap_err();
+        let e = rr3_itact_cfg_parse("[rr3-interact.face]\n").unwrap_err();
         assert!(e.contains("non_pointable"), "缺键点名: {e}");
-        let e = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = 3\n").unwrap_err();
+        let e = rr3_itact_cfg_parse("[rr3-interact.face]\nnon_pointable = 3\n").unwrap_err();
         assert!(e.contains("non_pointable"), "非数组点名: {e}");
-        let e = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = [\"wink\"]\n")
-            .unwrap_err();
+        let e =
+            rr3_itact_cfg_parse("[rr3-interact.face]\nnon_pointable = [\"wink\"]\n").unwrap_err();
         assert!(e.contains("非在册"), "在册外值点名: {e}");
         // 空数组合法：本形态不排除任何表情点名（fail-closed 的键必填 + 空值合法）
-        let cfg = rr3_interact_config_parse("[rr3-interact.face]\nnon_pointable = []\n").unwrap();
+        let cfg = rr3_itact_cfg_parse("[rr3-interact.face]\nnon_pointable = []\n").unwrap();
         assert!(cfg.face.non_pointable.is_empty());
     }
 }

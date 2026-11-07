@@ -9,7 +9,7 @@
 //! 已上移承载层（0.0.5 批I I-8，ADR-0019 修订 4）：件面只交状态机
 //! （结构体 + 判定），组装归 `src/composite.rs`，线上字节逐字不变。
 
-use super::{rr3_face_expression_lookup, Rr3FaceFrame, RR3_FACE_EXPRESSIONS, RR3_FACE_TALK};
+use super::{rr3_face_expr_lookup, Rr3FaceFrame, RR3_FACE_EXPRESSIONS, RR3_FACE_TALK};
 
 /// idle：睁眼 + 平嘴（单帧）
 const RR3_FRAMES_IDLE: [Rr3FaceFrame; 1] = [[
@@ -746,7 +746,7 @@ pub struct Rr3Face {
     frame_ix: usize,
     /// 兜底表情（批N4 件五 I-17/M-3 数据化）：各回落点（end_talk 无挂起、
     /// begin_talk 幂等分支）的去处——装配期自 config `default_expression`
-    /// 注入，构造器 [`Rr3Face::rr3_face_with_default`]；Default 是 legacy 回落
+    /// 注入，构造器 [`Rr3Face::rr3_face_default`]；Default 是 legacy 回落
     /// （S-5 口径），不再是唯一真值点
     default_expr: &'static str,
 }
@@ -755,7 +755,7 @@ impl Rr3Face {
     /// 带兜底表情的构造器（批N4 件五 I-17/M-3）：`default_expr` 须为在册值
     /// （装配期 parse 已对账白名单；此处机制面不再复检，值域由调用方保证）。
     /// 初态即兜底表情——新机器当前态就是人格取向本身。
-    pub fn rr3_face_with_default(default_expr: &'static str) -> Self {
+    pub fn rr3_face_default(default_expr: &'static str) -> Self {
         Self {
             current: default_expr,
             suspended: None,
@@ -769,13 +769,13 @@ impl Default for Rr3Face {
     fn default() -> Self {
         // legacy 兜底 idle（一个事实一个真值点：legacy 值只在此处与 config.toml
         // 注释对表）
-        Self::rr3_face_with_default("idle")
+        Self::rr3_face_default("idle")
     }
 }
 
 /// [`Rr3Face::rr3_face_set`] 的零堆错误（批N24 件四）：两拒因各占一变体，
 /// 动态数据（原始输入 / 在册名）随枚举走，机制层不落 `String` 堆——人读
-/// 文案由编排层渲染（`src/composite.rs` 的 `rr3_face_set_error_text`，与
+/// 文案由编排层渲染（`src/rpc.rs` 的 `rr3_face_err_text`，与
 /// 改前逐字一致；白名单连接串用 [`super::RR3_FACE_EXPRESSIONS_JOINED`] 常量
 /// 投影，渲染不再运行时 join）。
 #[derive(Debug, PartialEq, Eq)]
@@ -797,8 +797,7 @@ impl Rr3Face {
         expr: &'a str,
         non_pointable: &[&str],
     ) -> Result<(&'static str, &'static str), Rr3FaceSetError<'a>> {
-        let expr =
-            rr3_face_expression_lookup(expr).ok_or(Rr3FaceSetError::UnknownExpression(expr))?;
+        let expr = rr3_face_expr_lookup(expr).ok_or(Rr3FaceSetError::UnknownExpression(expr))?;
         if non_pointable.contains(&expr) {
             return Err(Rr3FaceSetError::NonPointable(expr));
         }
@@ -894,12 +893,12 @@ mod tests {
         );
     }
 
-    /// 兜底表情注入（批N4 件五 I-17/M-3）：`rr3_face_with_default` 注入后，
+    /// 兜底表情注入（批N4 件五 I-17/M-3）：`rr3_face_default` 注入后，
     /// 各回落点（end_talk 无挂起、begin_talk 幂等分支、切换前值）取注入值
     /// 而非硬编码 idle——机制零策略载荷的 mech 侧钉子。
     #[test]
     fn default_expression_injection_drives_fallbacks() {
-        let mut f = Rr3Face::rr3_face_with_default("happy");
+        let mut f = Rr3Face::rr3_face_default("happy");
         // 初态即兜底表情：首次切换的"切换前"就是注入值
         assert_eq!(f.rr3_face_set("blink", NON_TALK).unwrap().1, "happy");
         // end_talk 无挂起：回落注入值（连续调用同样回落，不折 idle）

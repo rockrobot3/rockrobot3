@@ -85,7 +85,7 @@ fn rr3_beep_play(sink: &mut dyn Rr3AudioSink, volume_pct: u32) -> Result<Value, 
     let mut samples = rr3_beep_samples();
     player::rr3_tts_apply_gain(&mut samples, volume_pct);
     player::rr3_tts_play(sink, &samples)
-        .map_err(|e| rpc::rr3_tts_play_error_text(&e))
+        .map_err(|e| rpc::rr3_tts_err_text(&e))
         .map(|played_ms| json!({ "played_ms": played_ms }))
 }
 
@@ -118,7 +118,7 @@ impl Rr3InteractDispatcher {
         link: Arc<Mutex<Option<Value>>>,
         act_rx: mpsc::Receiver<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>,
     ) -> Self {
-        let face = face::rr3_face_with_default(cfg.face.default_expr);
+        let face = face::rr3_face_new(cfg.face.default_expr);
         Self {
             sink,
             face,
@@ -148,9 +148,7 @@ impl Dispatcher for Rr3InteractDispatcher {
             face::RR3_FACE_TOPIC => {
                 rpc::rr3_handle_face(&mut self.face, args, &self.cfg.face.non_pointable)
             }
-            rpc::RR3_OPS_LIST_TOPIC => {
-                Ok(json!({ "ops": rpc::rr3_interact_ops_snapshot(&self.cfg) }))
-            }
+            rpc::RR3_OPS_LIST_TOPIC => Ok(json!({ "ops": rpc::rr3_interact_ops(&self.cfg) })),
             other => Err(format!(
                 "rr3-interact 只 exposes {}/{}/{}，收到 {other}",
                 player::RR3_TTS_TOPIC,
@@ -196,7 +194,7 @@ impl Dispatcher for Rr3InteractDispatcher {
                     .face
                     .rr3_face_set(&expression, &self.cfg.face.non_pointable)
                     .map(|(c, p)| rpc::rr3_face_result(c, p))
-                    .map_err(|e| rpc::rr3_face_set_error_text(&e, &self.cfg.face.non_pointable)),
+                    .map_err(|e| rpc::rr3_face_err_text(&e, &self.cfg.face.non_pointable)),
             };
             let _ = tx.send(result);
         }

@@ -38,7 +38,7 @@ use rr_ipc::{
 };
 use serde_json::{json, Value};
 
-use super::secrets::{rr3_secrets_list_at, rr3_secrets_path, rr3_secrets_upsert_at};
+use super::secrets::{rr3_secrets_list_at, rr3_secrets_path, rr3_secrets_upsert};
 use super::RR3_PANEL_INDEX_HTML;
 
 /// 面板监听面：env `RR3_PANEL_ADDR` 优先，缺省只绑回环（Q3 裁定）。
@@ -276,7 +276,7 @@ pub struct Rr3HttpRequest {
 /// 从连接上读一个请求：请求行 → 头（找 Content-Length）→ 读满 body。
 /// 半包/慢客户端按 [`Rr3PanelLimits::read_timeout`] 折 Err，不 panic 不占线程；
 /// 头区/body 上界同取 [`Rr3PanelLimits`]（I-18②：限额经 shared 贯穿）。
-pub fn rr3_http_read_request(
+pub fn rr3_http_read_req(
     stream: &TcpStream,
     limits: &Rr3PanelLimits,
 ) -> Result<Rr3HttpRequest, String> {
@@ -751,7 +751,7 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
         "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
         RR3_PANEL_ROUTES.len()
     );
-    rr3_panel_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
+    rr3_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
         std::thread::Builder::new().name("rr3-panel-conn".into())
     })
 }
@@ -814,7 +814,7 @@ pub fn spawn_host(
 /// 静默 clamp 成功，不可作注入）注入 spawn 失败，钉"起不来一个连接后面板
 /// 仍可访问"（工单回归判据）。生产路径工厂返回普通 builder，行为与旧 serve
 /// 零漂移。
-fn rr3_panel_accept_loop(
+fn rr3_accept_loop(
     listener: TcpListener,
     shared: Arc<Rr3PanelShared>,
     live: Arc<AtomicUsize>,
@@ -888,7 +888,7 @@ impl Rr3PanelReply {
 /// 单连接处理：读请求 → 路由 → 执行 → 应答。任何错误都折 JSON 应答——
 /// 面板连接没有"协议违规掉线"语义，坏请求回 400 就是它的全部惩罚。
 fn rr3_panel_handle(stream: &mut TcpStream, shared: &Rr3PanelShared) {
-    let req = match rr3_http_read_request(stream, &shared.limits) {
+    let req = match rr3_http_read_req(stream, &shared.limits) {
         Ok(r) => r,
         Err(e) => {
             let reply = Rr3PanelReply::json(400, "Bad Request", json!({ "error": e }));
@@ -1054,50 +1054,49 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             // 即 n-a，不向总线发无人接的 on/off；配置 expect.relay=n-a 同样跳过。
             // 能力缺席优先于预期表（避免无末梢形态被共享 config 的 relay=pass
             // 拖红）；ctl 取数失败仍 fail-closed 记 fail，不把系统面故障伪装成 n-a。
-            let relay_expect =
-                match rr3_selftest_act_enabled(&shared.bus_path, shared.limits.read_timeout) {
-                    Ok(enabled) => {
-                        let want = rr3_selftest_relay_expect(enabled, shared.selftest_expect.relay);
-                        if want == "n-a" {
-                            let why = if enabled {
-                                "expect.relay=n-a（配置声明不适用）"
-                            } else {
-                                "rr3-act 未启用（host-only 能力面 n-a）"
-                            };
-                            legs.push(json!({ "leg": "relay", "pass": "n-a", "reason": why }));
+            let relay_expect = match rr3_act_enabled(&shared.bus_path, shared.limits.read_timeout) {
+                Ok(enabled) => {
+                    let want = rr3_relay_expect(enabled, shared.selftest_expect.relay);
+                    if want == "n-a" {
+                        let why = if enabled {
+                            "expect.relay=n-a（配置声明不适用）"
                         } else {
-                            let relay_on = shared.bus.call(
+                            "rr3-act 未启用（host-only 能力面 n-a）"
+                        };
+                        legs.push(json!({ "leg": "relay", "pass": "n-a", "reason": why }));
+                    } else {
+                        let relay_on = shared.bus.call(
+                            "rr3-act/relay/set",
+                            &json!({ "on": true }),
+                            shared.limits.call_timeout,
+                        );
+                        let (relay_pass, relay_reason) = match relay_on {
+                            Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
+                            Ok(_) => match shared.bus.call(
                                 "rr3-act/relay/set",
-                                &json!({ "on": true }),
+                                &json!({ "on": false }),
                                 shared.limits.call_timeout,
-                            );
-                            let (relay_pass, relay_reason) = match relay_on {
-                                Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
-                                Ok(_) => match shared.bus.call(
-                                    "rr3-act/relay/set",
-                                    &json!({ "on": false }),
-                                    shared.limits.call_timeout,
-                                ) {
-                                    Ok(_) => ("pass", None),
-                                    Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
-                                },
-                            };
-                            let mut relay_leg = json!({ "leg": "relay", "pass": relay_pass });
-                            if let Some(e) = relay_reason {
-                                relay_leg["reason"] = json!(e);
-                            }
-                            legs.push(relay_leg);
+                            ) {
+                                Ok(_) => ("pass", None),
+                                Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
+                            },
+                        };
+                        let mut relay_leg = json!({ "leg": "relay", "pass": relay_pass });
+                        if let Some(e) = relay_reason {
+                            relay_leg["reason"] = json!(e);
                         }
-                        want
+                        legs.push(relay_leg);
                     }
-                    Err(e) => {
-                        legs.push(json!({
-                            "leg": "relay", "pass": "fail",
-                            "reason": format!("ctl.status 取数失败: {e}"),
-                        }));
-                        "fail"
-                    }
-                };
+                    want
+                }
+                Err(e) => {
+                    legs.push(json!({
+                        "leg": "relay", "pass": "fail",
+                        "reason": format!("ctl.status 取数失败: {e}"),
+                    }));
+                    "fail"
+                }
+            };
             // 腿3 face：切到期望表情（I-17/M-10：期望值 config 数据化，产线
             // 按形态改 [rr3-interact.selftest].face_expect）
             let reason = rr3_panel_act(
@@ -1258,7 +1257,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
         },
         Rr3PanelDispatch::ModelKeySet { ref_name, value } => match rr3_secrets_path() {
-            Ok(path) => match rr3_secrets_upsert_at(&path, &ref_name, &value) {
+            Ok(path) => match rr3_secrets_upsert(&path, &ref_name, &value) {
                 // 应答只回 ref——值永不进任何负载/日志（secrets 模块铁律）；
                 // applies=live 机器可读申报（I-20）：secrets 落盘后 brain 每次现读，
                 // 前端文案"brain 下一轮对话生效"与这里的字面同源同义。
@@ -1279,7 +1278,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
 /// 自检 relay 腿的能力面：`rr3-act` 是否在册（按 ctl.status 模块表）。
 /// 只判“在册”，不判 phase——在册但未 running 的 relay 仍应走 on/off 如实
 /// fail，不能把“模块起了但坏了”误判成 host-only 的 n-a。
-fn rr3_selftest_act_enabled(bus_path: &str, timeout: Duration) -> Result<bool, String> {
+fn rr3_act_enabled(bus_path: &str, timeout: Duration) -> Result<bool, String> {
     let v = rr3_ctl_query(bus_path, "rr3.ctl.status", 6, timeout)?;
     let modules = v
         .get("modules")
@@ -1292,7 +1291,7 @@ fn rr3_selftest_act_enabled(bus_path: &str, timeout: Duration) -> Result<bool, S
 
 /// relay 腿的期望态：能力缺席或配置显式 n-a 即 n-a；其余沿用预期表。
 /// 能力缺席优先于配置，避免 host-only 被共享 config 的 relay=pass 拖红。
-fn rr3_selftest_relay_expect(enabled: bool, configured: &'static str) -> &'static str {
+fn rr3_relay_expect(enabled: bool, configured: &'static str) -> &'static str {
     if !enabled || configured == "n-a" {
         "n-a"
     } else {
@@ -1743,7 +1742,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let t = std::thread::spawn(move || {
             let (sock, _) = listener.accept().unwrap();
-            rr3_http_read_request(&sock, &Rr3PanelLimits::default()).unwrap()
+            rr3_http_read_req(&sock, &Rr3PanelLimits::default()).unwrap()
         });
         let mut c = TcpStream::connect(addr).unwrap();
         let full = b"POST /api/relay HTTP/1.1\r\nContent-Length: 11\r\n\r\n{\"on\":true}";
@@ -1758,7 +1757,7 @@ mod tests {
         let addr2 = listener2.local_addr().unwrap();
         let t2 = std::thread::spawn(move || {
             let (sock, _) = listener2.accept().unwrap();
-            rr3_http_read_request(&sock, &Rr3PanelLimits::default())
+            rr3_http_read_req(&sock, &Rr3PanelLimits::default())
         });
         let mut c2 = TcpStream::connect(addr2).unwrap();
         c2.write_all(b"POST /api/relay HTTP/1.1\r\nContent-Length: 11\r\n\r\n{\"on")
@@ -1979,7 +1978,7 @@ mod tests {
         let shared2 = shared.clone();
         let live2 = live.clone();
         let loop_jh = std::thread::spawn(move || {
-            rr3_panel_accept_loop(tcp, shared2, live2, move || {
+            rr3_accept_loop(tcp, shared2, live2, move || {
                 if calls2.fetch_add(1, Ordering::Relaxed) == 0 {
                     std::thread::Builder::new().stack_size(usize::MAX) // 第 1 次：必败注入
                 } else {
@@ -2361,11 +2360,11 @@ mod tests {
     /// 在册且未显式 n-a → 沿用预期表（classic 仍 pass/fail 照跑）。
     #[test]
     fn selftest_relay_expect_n_a_when_capability_absent_or_configured() {
-        assert_eq!(rr3_selftest_relay_expect(false, "pass"), "n-a");
-        assert_eq!(rr3_selftest_relay_expect(false, "fail"), "n-a");
-        assert_eq!(rr3_selftest_relay_expect(true, "pass"), "pass");
-        assert_eq!(rr3_selftest_relay_expect(true, "fail"), "fail");
-        assert_eq!(rr3_selftest_relay_expect(true, "n-a"), "n-a");
+        assert_eq!(rr3_relay_expect(false, "pass"), "n-a");
+        assert_eq!(rr3_relay_expect(false, "fail"), "n-a");
+        assert_eq!(rr3_relay_expect(true, "pass"), "pass");
+        assert_eq!(rr3_relay_expect(true, "fail"), "fail");
+        assert_eq!(rr3_relay_expect(true, "n-a"), "n-a");
     }
 
     /// verdict 对 relay=n-a 的 host-only 形态等值即过（n-a 不拖累）。

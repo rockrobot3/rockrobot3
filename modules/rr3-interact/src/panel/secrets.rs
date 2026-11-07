@@ -21,14 +21,14 @@ pub const RR3_SECRETS_FILE_ENV: &str = "RR3_SECRETS_FILE";
 
 /// secrets 文件路径：env 优先，缺省 `$HOME/.rr3/secrets.json`；无 HOME 回错。
 pub fn rr3_secrets_path() -> Result<PathBuf, String> {
-    rr3_secrets_path_with(
+    rr3_secrets_resolve(
         std::env::var(RR3_SECRETS_FILE_ENV).ok(),
         std::env::var("HOME").ok(),
     )
 }
 
 /// 路径解析纯函数（tests 直测，免 env 竞争）：env 非空优先，否则 HOME 拼接。
-fn rr3_secrets_path_with(
+fn rr3_secrets_resolve(
     secrets_env: Option<String>,
     home: Option<String>,
 ) -> Result<PathBuf, String> {
@@ -77,7 +77,7 @@ fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
 /// （批N4 件四 I-20：原 `truncate(true)` 原地覆盖无 tmp/无 fsync，掉电卡写中间
 /// ⇒ 凭据文件恒 Err 且写侧不能自愈——全案 §19.2 Y-2 判据 2"落盘原子序单点"），
 /// 父目录 0700（tmp 窗口的护城河），rename 后收 0600（敏感面铁律）。
-pub fn rr3_secrets_upsert_at(path: &Path, ref_name: &str, value: &str) -> Result<(), String> {
+pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<(), String> {
     let ref_name = ref_name.trim();
     if ref_name.is_empty() {
         return Err("ref 不能为空".to_string());
@@ -128,31 +128,31 @@ mod tests {
     fn path_resolution_env_wins_then_home() {
         // env 非空优先
         assert_eq!(
-            rr3_secrets_path_with(Some("/tmp/x.json".into()), Some("/home/u".into())).unwrap(),
+            rr3_secrets_resolve(Some("/tmp/x.json".into()), Some("/home/u".into())).unwrap(),
             PathBuf::from("/tmp/x.json")
         );
         // env 空串回退 HOME
         assert_eq!(
-            rr3_secrets_path_with(Some("  ".into()), Some("/home/u".into())).unwrap(),
+            rr3_secrets_resolve(Some("  ".into()), Some("/home/u".into())).unwrap(),
             PathBuf::from("/home/u/.rr3/secrets.json")
         );
         // 无 HOME 且无 env → 显式回错（板上裸环境面）
-        assert!(rr3_secrets_path_with(None, None).is_err());
-        assert!(rr3_secrets_path_with(None, Some("".into())).is_err());
+        assert!(rr3_secrets_resolve(None, None).is_err());
+        assert!(rr3_secrets_resolve(None, Some("".into())).is_err());
     }
 
     #[test]
     fn upsert_insert_overwrite_and_delete_with_mode_0600() {
         let path = tmp_secrets("upsert");
-        rr3_secrets_upsert_at(&path, "DeepSeek官方", "sk-a").unwrap();
-        rr3_secrets_upsert_at(&path, "SiliconFlow", "sk-b").unwrap();
+        rr3_secrets_upsert(&path, "DeepSeek官方", "sk-a").unwrap();
+        rr3_secrets_upsert(&path, "SiliconFlow", "sk-b").unwrap();
         // 权限 0600（敏感面铁律）
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "secrets 文件必须 0600");
         // 覆盖同名 ref
-        rr3_secrets_upsert_at(&path, "DeepSeek官方", "sk-a2").unwrap();
+        rr3_secrets_upsert(&path, "DeepSeek官方", "sk-a2").unwrap();
         // 空值 = 删除
-        rr3_secrets_upsert_at(&path, "SiliconFlow", "").unwrap();
+        rr3_secrets_upsert(&path, "SiliconFlow", "").unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("sk-a2"));
         assert!(!text.contains("sk-b"));
@@ -163,9 +163,9 @@ mod tests {
     #[test]
     fn upsert_rejects_blank_or_spaced_ref() {
         let path = tmp_secrets("refs");
-        assert!(rr3_secrets_upsert_at(&path, "", "v").is_err());
-        assert!(rr3_secrets_upsert_at(&path, "  ", "v").is_err());
-        assert!(rr3_secrets_upsert_at(&path, "a b", "v").is_err());
+        assert!(rr3_secrets_upsert(&path, "", "v").is_err());
+        assert!(rr3_secrets_upsert(&path, "  ", "v").is_err());
+        assert!(rr3_secrets_upsert(&path, "a b", "v").is_err());
         // 文件未被创建（fail 早于落盘）
         assert!(!path.exists());
     }
@@ -174,19 +174,19 @@ mod tests {
     fn corrupt_existing_file_errors_instead_of_overwrite() {
         let path = tmp_secrets("corrupt");
         std::fs::write(&path, "不是json").unwrap();
-        let err = rr3_secrets_upsert_at(&path, "r", "v").unwrap_err();
+        let err = rr3_secrets_upsert(&path, "r", "v").unwrap_err();
         assert!(err.contains("JSON"), "坏文件必须回错保护既有 key: {err}");
         // 误形状同罚
         std::fs::write(&path, r#"{"keys": "不是字典"}"#).unwrap();
-        assert!(rr3_secrets_upsert_at(&path, "r", "v").is_err());
+        assert!(rr3_secrets_upsert(&path, "r", "v").is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
     fn list_returns_names_only_never_values() {
         let path = tmp_secrets("list");
-        rr3_secrets_upsert_at(&path, "r1", "sk-secret-value").unwrap();
-        rr3_secrets_upsert_at(&path, "r2", "sk-other").unwrap();
+        rr3_secrets_upsert(&path, "r1", "sk-secret-value").unwrap();
+        rr3_secrets_upsert(&path, "r2", "sk-other").unwrap();
         let out = rr3_secrets_list_at(&path).unwrap();
         let text = json!(out).to_string();
         assert!(!text.contains("sk-secret-value"), "清单永不回显值: {text}");
