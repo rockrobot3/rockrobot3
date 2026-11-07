@@ -26,6 +26,9 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 # rrd 自身运维参数（批N5 件二，F-30）：日志环容量（行数）。满了丢最旧（环形语义），
 # `rr3.ctl.logs` 读环尾；daemon 启动一次定格，装载期缺键即拒 boot。
 log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim =
+# 生产假验证）。参考机全局 = linux（ALSA 采集/回放、sysfs PWM、nmcli 链路、I2C 电源）。
+hal_backend = "linux"
 
 [platform]
 # 平台档位（ADR-0018 修订 1：host / rtos / bare 三档）。参考机跑完整 Linux 底座 = host。

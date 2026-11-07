@@ -42,6 +42,9 @@ route = "distro" # Raspberry Pi OS（Debian 13 trixie 真机），发行版快�
 # rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
 # 本档不承担宿主 boot 语义，但 schema 5 要求该段在册（缺即红）。
 log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据。rtos 板端点档 = linux（Pi 板侧
+# 跑 sysfs PWM 双轴，不经过 rrd 模块注入；此处仅满足 schema 校验一致性）。
+hal_backend = "linux"
 
 [platform]
 # 板端点薄档（见文件头 1.）：rrd 不派生注入键，板侧按 [[pin]] 自行装配。

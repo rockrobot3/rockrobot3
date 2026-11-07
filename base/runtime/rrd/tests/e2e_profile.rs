@@ -53,6 +53,7 @@ route = "distro"
 
 [runtime]
 log_ring_cap = 512
+hal_backend = "sim"
 
 [platform]
 tier = "host"

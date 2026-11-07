@@ -21,6 +21,10 @@ route = "distro" # Pi 4B 跑 Raspberry Pi OS（Debian 13 trixie 真机），属�
 [runtime]
 # rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
 log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据，不靠隐式缺省。
+# 组合档全局 = linux（宿主侧链路/回放）；音频采集面 = esp32（板侧双麦独占 UART）。
+hal_backend = "linux"
+audio_backend = "esp32"
 
 [platform]
 # host 档（ADR-0018 修订 1）：完整 Linux 底座 + 五模块全跑在 Pi 上。
@@ -83,11 +87,12 @@ not_applicable = true
 "cognition.tts" = "rr3-brain"
 
 [hardware]
-# 宿主两键（schema 3 非引脚键直给；Pi 本机硬件未变，与 classic 档同值）：
+# 宿主三键（schema 3 非引脚键直给；Pi 本机硬件未变，与 classic 档同值）：
 # USB 声卡（C-Media "Device"）已接入 Pi 4 USB3.0，按 CARD 名指向（卡号随枚举变，名稳定）；
-# 网口 wlan0。
+# 网口 wlan0；ESP32 外设桥 UART 设备路径（Pi pin8=GPIO14→S3 GPIO42，pin10=GPIO15→S3 GPIO41）。
 alsa_device = "plughw:CARD=Device"
 link_ifname = "wlan0"
+periph_uart = "/dev/ttyAMA0"
 
 # 板侧十一键：与 profiles/esp32s3-mini.toml 逐值对齐（S3 N16R8 同一线束）。
 # 消费语义 = 板侧装配对账锚（键位语义见 esp32s3-mini 头注，此处不重复）；非 [pins]

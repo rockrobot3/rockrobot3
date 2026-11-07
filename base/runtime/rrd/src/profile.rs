@@ -85,10 +85,20 @@ pub const RR3_CONTRACT_DEVICES_PATH: &str = concat!(
 const RR3_PROFILE_SCHEMA_VERSION: i64 = 5;
 
 /// [runtime] 键（rrd 运行参数段，批N5 件二）——未知键点名与解析白名单共用。
-/// 只收 rrd 自身的运维参数：外设绑定住 [hardware]/[[pin]]（经桥注入板侧），
-/// 环容量这类宿主运维参数不混装上桥（描述符键集 ↔ Rr3HalBindings 有契约测试
-/// 逐名钉死，多一个键就红）。
-const RR3_RUNTIME_KEYS: [&str; 1] = ["log_ring_cap"];
+/// - `log_ring_cap`：日志环容量（行数），rrd 自身运维参数。
+/// - `hal_backend`：**必填**，装配单声明的全局 HAL 后端（sim/linux/esp32/mac/
+///   placeholder）。P0-3 根因门：后端选择是部署事实，必须进装配单显式数据，
+///   rrd 装载期校验并注入子进程 `RR3_HAL_BACKEND`——消除"漏 env 静默落 sim"
+///   的生产假验证。host 档须 `linux`，组合档全局仍 `linux`（音频面另由
+///   `audio_backend` 覆盖）。
+/// - `audio_backend`：可选，音频采集面后端覆盖（组合档 Pi×ESP32 用 `esp32`，
+///   注入子进程 `RR3_HAL_AUDIO_BACKEND`；host-only 档不设，回落全局 `hal_backend`）。
+const RR3_RUNTIME_KEYS: [&str; 3] = ["log_ring_cap", "hal_backend", "audio_backend"];
+
+/// HAL 后端名白名单（与 rr-hal backend.rs 的 RR3_BACKEND_* 常量同域；rrd 不直接
+/// 依赖 rr-hal 符号以保持基座轻量，此处独立钉合法取值集，装载期 fail-closed）。
+const RR3_HAL_BACKEND_LEGAL: [&str; 5] =
+    ["sim", "linux", "esp32", "mac", "placeholder"];
 
 /// [supplies] 六键（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）——
 /// 未知键点名与解析白名单共用（budget 子段单独成块解析，同 domain）
@@ -333,6 +343,15 @@ pub struct Rr3Profile {
     /// 运维参数——daemon 启动一次定格进日志环（lib.rs `rr3_log_ring_cap_set`），
     /// 不进 [hardware] 注入面（不上桥）。正整数必填，缺即红。
     pub log_ring_cap: usize,
+    /// [runtime].hal_backend：**必填**，装配单声明的全局 HAL 后端（P0-3 根因门）。
+    /// daemon 注入子进程 `RR3_HAL_BACKEND`——后端选择是部署事实，必须进装配单
+    /// 显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产假验证）。host 档须
+    /// `linux`，组合档全局仍 `linux`（音频面另由 audio_backend 覆盖）。
+    pub hal_backend: String,
+    /// [runtime].audio_backend：可选，音频采集面后端覆盖。组合档 Pi×ESP32 设
+    /// `esp32`（注入子进程 `RR3_HAL_AUDIO_BACKEND`，音频面独占 UART）；host-only
+    /// 档不设，音频面回落全局 hal_backend。
+    pub audio_backend: Option<String>,
     /// [[pin]]：物理绑定（引脚侧唯一真值点，增补轮六 §4.2）。可选段（纯 sim/无硬件
     /// 格形态不给——此时校验②不判，sim 形态无物理面可绑）
     pub pins: Vec<Rr3PinEntry>,
@@ -370,6 +389,13 @@ pub struct Rr3ProfileBoot {
     /// 一次定格进 lib.rs 的 OnceLock（`rr3_log_ring_cap_set`，首份胜出）——
     /// `--manifest` 调试路径不读装配单，环按 512 兜底。
     pub log_ring_cap: usize,
+    /// [runtime].hal_backend（P0-3 根因门）：装配单声明的全局 HAL 后端，daemon
+    /// 注入子进程 `RR3_HAL_BACKEND`。空串 = --manifest 调试路径不注入（模块侧
+    /// 走平台缺省，CI/本地开发可显式 env 覆盖）。
+    pub hal_backend: String,
+    /// [runtime].audio_backend：可选，音频采集面后端覆盖。Some 时 daemon 注入
+    /// 子进程 `RR3_HAL_AUDIO_BACKEND`；None 不注入（音频面回落全局 hal_backend）。
+    pub audio_backend: Option<String>,
     /// [platform].chip（基-40 boot 底账）：boot 链验收通过的选册 chip，真值集
     /// 记账（[`rr3_runtime_truth_set_locations`] 消费）按它定位平台事实表——
     /// daemon 臂不再二次解析装配单拿 chip（双真值即漂移温床）。
@@ -629,9 +655,11 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         }
     }
     // [runtime]：必填段（schema 5 起必填，批N5 件二 F-30——"环容量 ∈ 装配单键集，
-    // 装载期缺即红"与 F-6 缺失语义同一列）。单键 log_ring_cap 正整数必填：0 行环 =
-    // 运维留痕无环（rr3.ctl.logs 恒空），负数非物理；未知键逐条点名。
+    // 装载期缺即红"与 F-6 缺失语义同一列）。三键：log_ring_cap 正整数必填、
+    // hal_backend 后端名必填（P0-3 根因门）、audio_backend 可选（组合档音频面覆盖）。
     let mut log_ring_cap: usize = 0;
+    let mut hal_backend: String = String::new();
+    let mut audio_backend: Option<String> = None;
     match root.get("runtime").and_then(toml::Value::as_table) {
         None => errs
             .push("缺少 [runtime]（rrd 运行参数；schema_version=5 起必填，批N5 件二）".to_string()),
@@ -645,6 +673,31 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                     "runtime.log_ring_cap 缺失或不是整数（日志环容量，行数；批N5 件二）"
                         .to_string(),
                 ),
+            }
+            // P0-3 根因门：hal_backend 必填且须在白名单内——后端选择是部署事实，
+            // 必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产假验证）。
+            match t.get("hal_backend").and_then(toml::Value::as_str) {
+                Some(v) if RR3_HAL_BACKEND_LEGAL.contains(&v) => hal_backend = v.to_string(),
+                Some(v) => errs.push(format!(
+                    "runtime.hal_backend 取值不认: {v}（允许 {}）",
+                    RR3_HAL_BACKEND_LEGAL.join("/")
+                )),
+                None => errs.push(
+                    "runtime.hal_backend 缺失（P0-3：后端选择必须进装配单显式数据，不靠隐式缺省）"
+                        .to_string(),
+                ),
+            }
+            // audio_backend 可选：仅组合档 Pi×ESP32 设 esp32（音频面单独走 UART）；
+            // 不设 → 音频面回落全局 hal_backend。取值域同 hal_backend。
+            if let Some(v) = t.get("audio_backend").and_then(toml::Value::as_str) {
+                if RR3_HAL_BACKEND_LEGAL.contains(&v) {
+                    audio_backend = Some(v.to_string());
+                } else {
+                    errs.push(format!(
+                        "runtime.audio_backend 取值不认: {v}（允许 {}）",
+                        RR3_HAL_BACKEND_LEGAL.join("/")
+                    ));
+                }
             }
             for k in t.keys() {
                 if !RR3_RUNTIME_KEYS.contains(&k.as_str()) {
@@ -937,6 +990,8 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
         supplies,
         hardware,
         log_ring_cap,
+        hal_backend,
+        audio_backend,
         pins,
     })
 }
@@ -1958,6 +2013,8 @@ pub fn rr3_profile_boot_inputs_with_probe(
         axis_state,
         axis_notes,
         log_ring_cap: profile.log_ring_cap,
+        hal_backend: profile.hal_backend.clone(),
+        audio_backend: profile.audio_backend.clone(),
         platform_chip: profile.platform_chip.clone(),
         snapshot: Some(snapshot),
     })
@@ -2740,6 +2797,7 @@ route = "distro"
 
 [runtime]
 log_ring_cap = 512
+hal_backend = "sim"
 
 [platform]
 tier = "host"
@@ -3048,6 +3106,7 @@ schema_version = 5
 
 [runtime]
 log_ring_cap = 512
+hal_backend = "sim"
 
 [platform]
 tier = "rtos"

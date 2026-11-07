@@ -25,6 +25,10 @@ route = "distro" # Pi 4B 跑 Raspberry Pi OS（Debian 13 trixie 真机），属�
 [runtime]
 # rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
 log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据，不靠隐式缺省。
+# 组合档全局 = linux（宿主侧链路/回放）；音频采集面 = esp32（板侧双麦独占 UART）。
+hal_backend = "linux"
+audio_backend = "esp32"
 
 [platform]
 # host 档（ADR-0018 修订 1）：完整 Linux 底座 + 五模块全跑在 Pi 上。
@@ -111,6 +115,8 @@ not_applicable = true
 # 采集当前走 ESP32 双麦（RR3_HAL_AUDIO_BACKEND=esp32），voiceHAT 仅作历史档。
 alsa_device = "plughw:CARD=Device"
 link_ifname = "wlan0"
+# ESP32 外设桥 UART 设备路径（Pi pin8=GPIO14→classic GPIO13, pin10=GPIO15→classic GPIO3）。
+periph_uart = "/dev/ttyAMA0"
 
 # 板侧十一键：与 profiles/esp32-mini.toml 逐值对齐（classic 板同一块硬件、同一线束）。
 # 消费语义 = 板侧装配对账锚（键位语义见 esp32-mini 头注，此处不重复）；非 [pins]

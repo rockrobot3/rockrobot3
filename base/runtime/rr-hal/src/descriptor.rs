@@ -95,6 +95,12 @@ pub struct Rr3HalBindings {
     /// 凭据存储源标记 `nvs:<namespace>`（板侧读数面可见；esp32-mini = `nvs:rr3`，
     /// 批N17 件二——非 GPIO 字符串键，取值域裁决真值单点在 rr-ipc）
     pub cred_store: Option<String>,
+    /// ESP32 外设桥 UART 设备路径（组合档 Pi×ESP32 宿主侧真值；如 `/dev/ttyAMA0`）。
+    /// P0-3/P0-4：后端选择是部署事实，必须进装配单显式数据，不靠隐式 env。
+    /// 舵机/显示/音频采集面的 esp32 后端共用此路径（Rr3UartConn flock 单消费者
+    /// 纪律下由音频面独占持有，其余面走桥命令帧）。None → 应急 env
+    /// `RR3_HAL_PERIPH_UART` 仍可救场（fail-closed，不猜设备）。
+    pub periph_uart: Option<String>,
 }
 
 /// 非空串裁决（trim 后空 = 不认）。
@@ -136,6 +142,9 @@ impl Rr3HalBindings {
             "i2s_ws" => self.i2s_ws = Some(rr3_gpio_number_parse(raw).ok_or_else(bad)?),
             "cred_store" => self.cred_store = Some(rr3_cred_store_parse(raw).ok_or_else(bad)?),
             "ina219_addr" => self.ina219_addr = Some(rr3_ina219_addr_parse(raw).ok_or_else(bad)?),
+            // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值），与 alsa_device
+            // 同一条非空串裁决（trim 后空 = 不认）。
+            "periph_uart" => self.periph_uart = Some(rr3_non_empty(raw).ok_or_else(bad)?),
             other => {
                 return Err(format!(
                     "描述符键 {other} 未在册（[hardware] 不得自造键位，在册键集见 descriptor.rs）"
@@ -231,6 +240,15 @@ pub fn rr3_hal_env_override_map() -> BTreeMap<String, String> {
         crate::backend::RR3_HAL_LINK_IFNAME_ENV,
     );
     put(&mut m, "spi_device", crate::backend::RR3_HAL_SPI_DEVICE_ENV);
+    // P0-3/P0-4：ESP32 外设桥 UART 设备路径——描述符 [hardware].periph_uart 为主，
+    // 应急 env RR3_HAL_PERIPH_UART 可覆盖（同"描述符为底、env 应急"纪律）。
+    // 常量从 rr-periph-proto 直引（不经过 cfg 门控的 esp32_uart 模块），保证 Windows
+    // 等非宿主平台也能编译描述符。
+    put(
+        &mut m,
+        "periph_uart",
+        rr_periph_proto::consts::RR3_HAL_PERIPH_UART_ENV,
+    );
     m
 }
 

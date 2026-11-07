@@ -15,6 +15,9 @@ schema_version = 5
 
 [runtime]
 log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据。rtos 板端档 = esp32（板侧跑 esp32
+# periph-mech，不经过 rrd 模块注入；此处仅满足 schema 校验一致性）。
+hal_backend = "esp32"
 
 [platform]
 # ESP32-S3 跑 RTOS 底座、经桥上主承载层 = rtos。

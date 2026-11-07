@@ -23,6 +23,9 @@ route = "distro" # distro | buildroot（双轨见 ADR-0013）
 [runtime]
 # rrd 自身运维参数（批N5 件二，F-30）：日志环容量（行数），取值与 default 同源同值。
 log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据，不靠隐式缺省。发行版全局 = linux
+# （ALSA 采集/回放、sysfs PWM、nmcli 链路、I2C 电源）。
+hal_backend = "linux"
 
 [platform]
 # 平台档位（ADR-0018 修订 1）：与 default 同一块参考机 = host。取值依据同 default 注释。

@@ -97,6 +97,8 @@ pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "ina219_addr",
     "link_ifname",
     "spi_device",
+    // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值，描述符 [hardware].periph_uart）
+    "periph_uart",
     "i2c_sda",
     "i2c_scl",
     "adc_rail_pin",
