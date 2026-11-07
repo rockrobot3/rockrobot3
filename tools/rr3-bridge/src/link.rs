@@ -259,7 +259,14 @@ fn upstream_loop(
         let chunk = &buf[..n];
         match cur.as_mut() {
             Some(s) => {
-                discarding = false;
+                if discarding {
+                    discarding = false;
+                    // 恢复点：丢弃期结束必须报累计，运维据此判断"看起来在跑"是否真在跑
+                    log(&format!(
+                        "uds 上行恢复：此前丢弃累计 {} 字节（帧撕裂面由哨兵超时自愈）",
+                        dropped.load(Ordering::Relaxed)
+                    ));
+                }
                 if let Err(e) = s.write_all(chunk) {
                     cur = None;
                     let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
