@@ -44,8 +44,8 @@
 //! 缺省 out=`rr3-audio-<unix秒>.wav`、secs=30、baud=1500000（板面 2026-10-30 定档
 //! 实测档，与固件 `board::UART2_BAUD_HZ` 同值；
 //! 波特率仍过 rr-ipc 档位表白名单，不预设动物园）。
-//! 退出码：0=收兵；1=开口/握手/0 分片；2=参数错；3=看门狗停滞恢复；4=重连失败/
-//! 收流线程亡（3/4 都先补恢复头保住已落盘数据再退）。
+//! 退出码：0=收兵；1=开口/握手/0 分片/磁盘写失败；2=参数错；3=看门狗停滞恢复；
+//! 4=重连失败/收流线程亡（1/3/4 都先补恢复头保住已落盘数据再退）。
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write as _};
@@ -379,22 +379,27 @@ impl SeqTracker {
 // 诊断日志前缀由 "[rec]" 改 "[audio]"（机制面属主中立，线上字节零变化）。
 
 /// fail-honest 退出（重连失败路径）：已落盘数据补恢复头保住，exit(4) 点名。
-/// data_len 用盘侧真相 [`WatchState::disk_bytes`]（写线程只在实际写透后推进，
-/// 进程即退时 BufWriter 未刷尾不虚计）；`FileExt::write_at` 位置写不动游标、
-/// 与写线程 payload 写无交叠（44B 头 @0 vs ≥44 偏移的数据），活线程下也安全。
-/// （看门狗 exit(3) 同款恢复头逻辑——两路独立小段，不抽象共享。）
 fn bail_with_recovery(out_path: &std::path::Path, watch: &WatchState) -> ! {
+    exit_with_recovery(out_path, watch, 4)
+}
+
+/// 收流异常统一收口：按盘侧真相补 wav 恢复头，再按 `code` 退出。data_len 用
+/// [`WatchState::disk_bytes`]（写线程只在实际写透后推进，进程即退时 BufWriter
+/// 未刷尾不虚计）；`FileExt::write_at` 位置写不动游标、与写线程 payload 写无
+/// 交叠（44B 头 @0 vs ≥44 偏移的数据），活线程下也安全。三路（重连失败/看门狗
+/// 停滞/磁盘写失败）共用——残片在任何退出路径都可解码。
+fn exit_with_recovery(out: &std::path::Path, watch: &WatchState, code: i32) -> ! {
     let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
     let rate = watch.rate.load(Ordering::Acquire);
     let head = wav_header(data_len, 2, rate, 16);
     if let Err(e) = OpenOptions::new()
         .write(true)
-        .open(out_path)
+        .open(out)
         .and_then(|f| f.write_all_at(&head, 0))
     {
-        eprintln!("[rec] 恢复头补写失败 {}: {e}", out_path.display());
+        eprintln!("[rec] 恢复头补写失败 {}: {e}", out.display());
     }
-    std::process::exit(4);
+    std::process::exit(code);
 }
 
 /// 读线程（收流端机制面，判据② A/B 定案改造）：**只做大块裸读**——单次
@@ -541,29 +546,19 @@ fn watchdog_run(w: Arc<WatchState>, out: String) {
         eprintln!(
             "[rec] ✗ 收流停滞 ≥{STALL:?} 无新分片字节（楔死防护触发）：入队 {last_seen}B/盘侧 {disk}B，补恢复头后退出"
         );
-        let data_len = disk as u32;
-        let rate = w.rate.load(Ordering::Acquire);
-        let head = wav_header(data_len, 2, rate, 16);
-        if let Err(e) = OpenOptions::new()
-            .write(true)
-            .open(&out)
-            .and_then(|f| f.write_all_at(&head, 0))
-        {
-            eprintln!("[rec] 恢复头补写失败 {out}: {e}");
-        }
-        std::process::exit(3);
+        exit_with_recovery(std::path::Path::new(&out), &w, 3);
     }
 }
 
 /// 写线程（落盘独占面）：占位头 → 逐片写透（write_all + flush，崩溃面数据风险
 /// 与旧逐片同步落盘等价）→ 通道关闭即收兵退出。错误即整进程退（fail-honest，
-/// 不带病续跑冒领数据）；`disk_bytes` 只在实际写透后推进——恢复头 data_len 的
-/// 事实源。最终头（write_at(0)）由主线程 join 后补，无并发窗口。无界通道：写
-/// 线程被磁盘反压时分片在内存排队（87.5KB/s 流速下秒级尖峰至多 MB 级），收流面
-/// 不被磁盘 I/O 拖住（冻结放大器解耦的落点）。
-fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>) {
+/// 不带病续跑冒领数据），退出前补恢复头（磁盘满残片也可解码）；`disk_bytes` 只
+/// 在实际写透后推进——恢复头 data_len 的事实源。最终头（write_at(0)）由主线程
+/// join 后补，无并发窗口。无界通道：写线程被磁盘反压时分片在内存排队（87.5KB/s
+/// 流速下秒级尖峰至多 MB 级），收流面不被磁盘 I/O 拖住（冻结放大器解耦的落点）。
+fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>, out_path: PathBuf) {
     let mut w = BufWriter::new(file);
-    // 占位头（data_len=0）：正常收兵与看门狗/重连失败两路都回头 write_at(0) 补
+    // 占位头（data_len=0）：正常收兵与看门狗/重连/写失败三路都回头 write_at(0) 补
     // 真头。**立即 flush**：磁盘恒有合法头，恢复路径不依赖 BufWriter 析构刷出。
     if let Err(e) = w
         .write_all(&wav_header(0, 2, 16000, 16))
@@ -575,8 +570,8 @@ fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>) {
     let mut written = 0u64;
     for buf in rx {
         if let Err(e) = w.write_all(&buf).and_then(|()| w.flush()) {
-            eprintln!("rr3-audio-rec: wav 写线程写失败: {e}");
-            std::process::exit(1);
+            eprintln!("rr3-audio-rec: wav 写线程写失败（磁盘满/IO 错）: {e}");
+            exit_with_recovery(&out_path, &watch, 1);
         }
         written += buf.len() as u64;
         watch.disk_bytes.store(written, Ordering::Release);
@@ -631,7 +626,8 @@ fn main() {
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
     let writer_thread = {
         let w = Arc::clone(&watch);
-        std::thread::spawn(move || writer_run(wav_file, rx, w))
+        let out = out_path.clone();
+        std::thread::spawn(move || writer_run(wav_file, rx, w, out))
     };
     {
         let w = Arc::clone(&watch);
