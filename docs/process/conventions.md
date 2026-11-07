@@ -10,6 +10,20 @@
 - 涉及架构决策的提交 body **必须**引用 ADR 编号（`引用：ADR-0006`）
 - 一次提交只做一件事；`git mv` 类纯移动不得混入内容改动
 
+### 1.1 仓库追踪策略（默认忽略所有＋白名单）
+
+- `.gitignore` 以 `*` 默认忽略一切，只白名单放行 `.gitignore`/`README*`/`LICENSE`/
+  `.dockerignore`/`.cargo/`/`.github/`/`docs/`/`base/`/`modules/`/`contracts/`/
+  `profiles/`/`hardware/`/`tools/`——**新增顶层路径必须先来 `.gitignore` 挂白名单**，
+  否则文件根本不会出现在 `git status`，静默丢件
+- **产物面一律不追踪**（白名单目录内的再排除）：`target/`/`build/`/`__pycache__/`/
+  `*.wav`/`*.log`/`*.tmp`/`*.bak`/`*.swp`/`.DS_Store`/`.trae/`——源码区严禁任何
+  编译/集成/构建产物（铁律），构建统一走源码区外（P0-5：`target-dir=/tmp/rr3-build`）
+- **本地路径不入库**：不提交任何 `/Users/...`、`$HOME/...` 绝对路径（含注释与配置）；
+  环境差异一律走 env/CI 注入，不烘进源码
+- 验收实录数据（wav/日志）结论摘要进 `docs/status.md` 与 `docs/evidence/`，
+  原始文件属会话产物，不追库
+
 ## 2 机器可检查项（CI 门禁十步，见 `tools/ci/check.sh`）
 
 | 步 | 检查 | 命令 |

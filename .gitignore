@@ -1,6 +1,6 @@
 # Rockrobot3 项目仓
-# 策略：非必要不追踪
-# 默认忽略所有文件
+# 策略：默认忽略所有——任何新增顶层路径**必须**来这里挂白名单，否则不入库
+# （策略正文见 docs/process/conventions.md §1"仓库追踪策略"）
 *
 # 项目仓必要文件（白名单）
 !.gitignore
@@ -23,6 +23,10 @@
 # Agent 工作产物不入库：实施计划/账本属会话副产物，不是项目交付物
 docs/superpowers/
 .superpowers/
+# IDE 会话目录（本机工作区状态，永不属于交付物）
+.trae/
+.idea/
+.vscode/
 
 # ---- v0.0.1 结构化改造：新骨架必须可追踪 ----
 !base/
@@ -40,14 +44,21 @@ docs/superpowers/
 !tools/
 !tools/**
 
+# ---- 产物面：一律不追踪（含白名单目录内的再排除） ----
 **/target/
 **/build/
-# 实录证据件（rr3-audio-rec 录音 wav）不入库：验收时随收流落盘，落档路径见 status.md 批D③
-tools/rr3-audio-rec/*.wav
+# 实录证据件（rr3-audio-rec 录音 wav）随收流落盘不入库：结论已摘要进 status.md，
+# 数据本身属会话产物（全仓任何目录的 wav 同规则，防换 cwd 落盘漏网）
+*.wav
+# 日志与临时件：运行期产物（rrd/模块留痕走 <socket>.log 目录、录屏截图）
+*.log
+*.tmp
+*.bak
+*.swp
 # rr3-brain 是 Python 包：编译产物随 build 再生，不入库（modules/** 白名单覆盖过宽）
 **/__pycache__/
 **/*.py[cod]
 
-# macOS 元数据与临时截图目录
+# macOS 元数据（无目录前缀 = 匹配任意层级）
 .DS_Store
 .screenshots/
