@@ -36,11 +36,11 @@ use serde_json::json;
 use support::*;
 
 /// 满配装配单（P1/P2/P3 的底稿）：三个格位各绑一件、bindings 与 enabled_slots 互认领。
-/// 格位名取自真 `contracts/slots.toml`（act.servo / sensor.env / cognition.llm）——
+/// 格位名取自真 `contracts/slots.toml`（act.servo / power.charger / cognition.llm）——
 /// 查册真值与 CI 全集层同源，夹具不得自造格位。`[os]` 段运行期不读（ADR-0012 裁定 3），
 /// 放在这里恰恰是为了证明"带着它也能过"。schema_version=2 起三新段必填
 ///（[platform]/[supplies]/[slots]，ADR-0018 修订 1）；present 只声明 bindings 用的
-/// 非 base 格位——P2 删 binding 行后 sensor.env 仍 declared present，缺格判定照走注入缺。
+/// 非 base 格位——P2 删 binding 行后 power.charger 仍 declared present，缺格判定照走注入缺。
 /// schema_version=3 起 [[pin]] 进场（增补轮六批N1）——本夹具不声明 [pins]，
 /// 校验②只记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
 /// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。schema_version=5
@@ -84,16 +84,16 @@ max_age_ms = 0
 not_applicable = true
 
 [slots]
-present = ["act.servo", "sensor.env", "cognition.llm"]
+present = ["act.servo", "power.charger", "cognition.llm"]
 
 [bindings]
 "act.servo" = "rr3-pa"
-"sensor.env" = "rr3-pb"
+"power.charger" = "rr3-pb"
 "cognition.llm" = "rr3-pc"
 
 [enabled_slots]
 rr3-pa = ["act.servo"]
-rr3-pb = ["sensor.env"]
+rr3-pb = ["power.charger"]
 rr3-pc = ["cognition.llm"]
 "#;
 
@@ -226,7 +226,7 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
         root.write_module(name);
     }
     let profile = root.write_profile(GOOD);
-    // env 显式钉 sim 探针（MC-4：非 test 面不再默认 sim）：act.servo/sensor.env 归
+    // env 显式钉 sim 探针（MC-4：非 test 面不再默认 sim）：act.servo/power.charger 归
     // PWM/I2C 硬件面，开发机与 CI runner 无这些 linux sysfs 设备，不显式选 sim 会被
     // fail-closed 判缺格、模块不 spawn（被测行为之外的夹具前提）。
     let mut rrd =
@@ -353,7 +353,7 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
     );
 }
 
-/// P2 — 缺格：enabled_slots 声明的 sensor.env 没有指向 rr3-pb 的 binding → 逐条点名
+/// P2 — 缺格：enabled_slots 声明的 power.charger 没有指向 rr3-pb 的 binding → 逐条点名
 /// "拒绝启动"、boot 队列跳过；pa/pc 照常起（缺格≠拒 boot，不连坐）。
 #[test]
 fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
@@ -361,9 +361,9 @@ fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
     for name in ["rr3-pa", "rr3-pb", "rr3-pc"] {
         root.write_module(name);
     }
-    // 只删 bindings 里的 sensor.env 一行：enabled_slots 的 rr3-pb 声明还在 → 缺格判定命中它。
+    // 只删 bindings 里的 power.charger 一行：enabled_slots 的 rr3-pb 声明还在 → 缺格判定命中它。
     // （删 enabled_slots 侧则是另一条路径：binding 未被认领 = 结构不自洽 = 致命，库层单测已钉。）
-    let profile = root.write_profile(&GOOD.replace("\"sensor.env\" = \"rr3-pb\"\n", ""));
+    let profile = root.write_profile(&GOOD.replace("\"power.charger\" = \"rr3-pb\"\n", ""));
     // env 显式钉 sim 探针（同 prof-full：缺格来自被删的 binding，不由探测缺引入——
     // 若默认恒缺会把 pa/pc 也一起判缺，用例语义被污染）。
     let mut rrd = RrdTest::rr3_start_profile_env(
@@ -374,7 +374,7 @@ fn missing_slot_module_is_refused_by_name_while_others_still_boot() {
     );
 
     // 缺格点名在 bind 之前（装配链先于监听行），到达序与 spawn 行无关——内容判据。
-    rrd.rr3_wait_log("拒绝启动 rr3-pb：缺格 sensor.env");
+    rrd.rr3_wait_log("拒绝启动 rr3-pb：缺格 power.charger");
 
     // 其余两件照常走完整 boot（entry 回显的断言 P1 已钉，这里只认"起过的是谁"）。
     rrd.rr3_wait_log("spawn rr3-pa pid=");

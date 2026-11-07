@@ -93,18 +93,15 @@ not_applicable = true
 
 [bindings]
 # 格位 → 件。基础层（slots.toml layer=base）由基座内建承载，不在此绑定；
-# 认知层四格绑定 rr3-brain（0.0.6 批F1：brain 随 deb 装机、经装配单进 boot）。
+# placeholder 格（net.bt/sensor.env/sensor.imu，真件未落地）不进生产装配面。
 "act.servo" = "rr3-act"
 "act.led" = "rr3-act"
 "act.relay" = "rr3-act"
 "net.wifi" = "rr3-connect"
-"net.bt" = "rr3-connect"
 "ui.face" = "rr3-interact"
 "audio.playback" = "rr3-interact"
 "audio.capture" = "rr3-sense"
 "audio.vad" = "rr3-sense"
-"sensor.env" = "rr3-sense"
-"sensor.imu" = "rr3-sense"
 "power.charger" = "rr3-power"
 "cognition.dialog" = "rr3-brain"
 "cognition.asr" = "rr3-brain"
@@ -170,8 +167,7 @@ direction = "out"
 mux_group = []
 
 # —— 批N3 件八（器件角色进场）：与 default 同板同取值（P-5 共读源 + 演练实例，
-# 语义见 default.toml 同段注记——charger 同 (i2c1, 0x40) 同 device 共址合法；
-# env/imu placeholder 格角色面先行，probe 探测面生效）。
+# 语义见 default.toml 同段注记——charger 同 (i2c1, 0x40) 同 device 共址合法）。
 [[pin]]
 role = "power.charger.meter"
 controller = "i2c1"
@@ -180,33 +176,18 @@ device = "INA219"
 direction = "in"
 mux_group = []
 
-[[pin]]
-role = "sensor.env.meter"
-controller = "i2c1"
-addr = "0x70"
-device = "SHTC3"
-direction = "in"
-mux_group = []
-
-[[pin]]
-role = "sensor.imu.meter"
-controller = "i2c1"
-addr = "0x68"
-device = "ICM-42688"
-direction = "in"
-mux_group = []
-
 [enabled_slots]
 # 模块 → 本形态启用的格位集合。enabled_slots 决定起谁（Q3 裁定）。
 rr3-act = ["act.servo", "act.led", "act.relay"]
-rr3-connect = ["net.wifi", "net.bt"]
+rr3-connect = ["net.wifi"]
 rr3-interact = ["ui.face", "audio.playback"]
-rr3-sense = ["audio.capture", "audio.vad", "sensor.env", "sensor.imu"]
+rr3-sense = ["audio.capture", "audio.vad"]
 rr3-power = ["power.battery", "power.charger"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
 
 [slots]
-# 本板物理在位格位声明：与 default 同一块板 = 16 格全在位，升序排列（注释见 default）。
+# 本板物理在位格位声明：与 default 同一块板；placeholder 格（net.bt/sensor.env/
+# sensor.imu）不进生产装配面；13 格在位，升序排列（注释见 default）。
 present = [
     "act.servo",
     "act.led",
@@ -218,10 +199,7 @@ present = [
     "cognition.dialog",
     "cognition.llm",
     "cognition.tts",
-    "net.bt",
     "net.wifi",
     "power.charger",
-    "sensor.env",
-    "sensor.imu",
     "ui.face",
 ]

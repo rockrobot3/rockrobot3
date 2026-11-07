@@ -1498,6 +1498,17 @@ pub fn rr3_profile_boot_inputs_with_probe(
         if !table.rr3_slot_table_contains(slot) {
             continue;
         }
+        // P0-2 根因门：占位/退役格不得进生产装配面。status=placeholder 表示该格
+        // 无真件（骨架占位），retired 表示已退役；装配单声称在位/绑定 = 假账，
+        // 与"严禁演示性功能"直接冲突 → 拒 boot。真件落地后把 contracts/slots.toml
+        // 的 status 改回 normal 再恢复绑定。
+        if let Some(status) = table.rr3_slot_table_status(slot) {
+            if status == "placeholder" || status == "retired" {
+                errs.push(format!(
+                    "装配面引用 {status} 格 {slot}（占位/退役格不得进生产装配面；真件落地后改 contracts/slots.toml status=normal 再绑定）"
+                ));
+            }
+        }
         let scope = table.rr3_slot_table_tier_scope(slot).unwrap_or_default();
         if !scope.iter().any(|t| t == &profile.platform_tier) {
             errs.push(format!(
@@ -2776,16 +2787,16 @@ not_applicable = true
 
 [bindings]
 "act.servo" = "rr3-pa"
-"sensor.env" = "rr3-pb"
+"power.charger" = "rr3-pb"
 "cognition.llm" = "rr3-pc"
 
 [enabled_slots]
 rr3-pa = ["act.servo"]
-rr3-pb = ["sensor.env"]
+rr3-pb = ["power.charger"]
 rr3-pc = ["cognition.llm"]
 
 [slots]
-present = ["act.servo", "cognition.llm", "sensor.env"]
+present = ["act.servo", "cognition.llm", "power.charger"]
 
 [[pin]]
 role = "act.axis.pwm"
@@ -2799,10 +2810,10 @@ failsafe = "release"
 mux_group = []
 
 [[pin]]
-role = "sensor.env.meter"
+role = "power.charger.meter"
 controller = "i2c1"
 addr = "0x70"
-device = "SHTC3"
+device = "INA219"
 direction = "in"
 mux_group = []
 "#;
@@ -3091,16 +3102,16 @@ heap_reserved_bytes = 98816
 
 [bindings]
 "act.servo" = "rr3-pa"
-"sensor.env" = "rr3-pb"
+"power.charger" = "rr3-pb"
 "cognition.llm" = "rr3-pc"
 
 [enabled_slots]
 rr3-pa = ["act.servo"]
-rr3-pb = ["sensor.env"]
+rr3-pb = ["power.charger"]
 rr3-pc = ["cognition.llm"]
 
 [slots]
-present = ["act.servo", "cognition.llm", "sensor.env"]
+present = ["act.servo", "cognition.llm", "power.charger"]
 
 [[pin]]
 role = "act.axis.pwm"
@@ -3430,7 +3441,7 @@ mux_group = []
         assert_eq!(p.supplies.budget.heap_reserved_bytes, 0);
         assert_eq!(
             p.slots_present,
-            ["act.servo", "cognition.llm", "sensor.env"]
+            ["act.servo", "cognition.llm", "power.charger"]
         );
         assert!(
             p.slots_device_absent.is_empty(),
@@ -3449,12 +3460,12 @@ mux_group = []
         assert_eq!(pin.failsafe, "release");
         assert!(pin.mux_group.is_empty());
         assert_eq!(pin.device, "", "GOOD servo pin 无器件面，device = 空串");
-        // 第二条 pin：sensor.env.meter（I2C 满配，device 键非空）
+        // 第二条 pin：power.charger.meter（I2C 满配，device 键非空）
         let env = &p.pins[1];
-        assert_eq!(env.role, "sensor.env.meter");
+        assert_eq!(env.role, "power.charger.meter");
         assert_eq!(env.controller, "i2c1");
         assert_eq!(env.addr, "0x70");
-        assert_eq!(env.device, "SHTC3");
+        assert_eq!(env.device, "INA219");
         assert_eq!(env.direction, "in");
         // [os].route 被无视（运行期不读），但它的存在不构成错误
     }
@@ -3464,7 +3475,7 @@ mux_group = []
         let text = GOOD
             .replace("schema_version = 5", "schema_version = 9")
             .replace("\"act.servo\" = \"rr3-pa\"", "\"act.servo\" = \"\"")
-            .replace("rr3-pb = [\"sensor.env\"]", "rr3-pb = [\"\"]")
+            .replace("rr3-pb = [\"power.charger\"]", "rr3-pb = [\"\"]")
             .replace("rr3-pc = [\"cognition.llm\"]", "rr3-pc = 3");
         let errs = rr3_profile_from_text(&text).expect_err("形状不合必须报错");
         assert_eq!(errs.len(), 4, "{errs:?}");
@@ -3756,7 +3767,7 @@ mux_group = []
             boot.missing,
             vec![
                 ("rr3-pa".to_string(), "act.servo".to_string()),
-                ("rr3-pb".to_string(), "sensor.env".to_string()),
+                ("rr3-pb".to_string(), "power.charger".to_string()),
             ],
             "有硬件面的格位必须点名件与键、升序去重（软件格 cognition.llm 不在内）: {:?}",
             boot.missing
@@ -3790,12 +3801,12 @@ mux_group = []
         let root = Root::new("missing");
         let p = root.write_profile(
             "missing.toml",
-            &GOOD.replace("\"sensor.env\" = \"rr3-pb\"\n", ""),
+            &GOOD.replace("\"power.charger\" = \"rr3-pb\"\n", ""),
         );
         let boot = boot_inputs(&p).expect("缺格不是致命项");
         assert_eq!(
             boot.missing,
-            vec![("rr3-pb".to_string(), "sensor.env".to_string())],
+            vec![("rr3-pb".to_string(), "power.charger".to_string())],
             "只有点名模块缺格"
         );
         assert_eq!(
@@ -3810,7 +3821,7 @@ mux_group = []
     #[test]
     fn binding_claimed_by_another_module_is_fatal() {
         let root = Root::new("cross");
-        let text = GOOD.replace("\"sensor.env\" = \"rr3-pb\"", "\"sensor.env\" = \"rr3-pc\"");
+        let text = GOOD.replace("\"power.charger\" = \"rr3-pb\"", "\"power.charger\" = \"rr3-pc\"");
         let p = root.write_profile("cross.toml", &text);
         let e = boot_inputs(&p).expect_err("binding 被他人认领必须致命");
         assert!(e.contains("未被 enabled_slots 认领"), "{e}");
@@ -4165,7 +4176,7 @@ mux_group = []
         let root = Root::new("evid-file-gate");
         let text = GOOD.replace(
             "sense = \"none\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = false\nevidence = \"none\"\nmax_age_ms = 0\n\n[[supplies.domain]]\nname = \"rail5v\"",
-            "sense = \"sensor.env.meter\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = true\nevidence = \"实测/0001\"\nmax_age_ms = 30000\n\n[[supplies.domain]]\nname = \"rail5v\"",
+            "sense = \"power.charger.meter\"\ncurrent_sense = \"none\"\nswitch = \"none\"\nswitchable = false\narmed = true\nevidence = \"实测/0001\"\nmax_age_ms = 30000\n\n[[supplies.domain]]\nname = \"rail5v\"",
         );
         let p = root.write_profile("evid-file.toml", &text);
 
@@ -4412,8 +4423,8 @@ evidence = "none"
 
     /// 校验②（后果 = 降不拒）：格位在位且被启用但角色无 [[pin]] 绑定 → (格位, 角色)
     /// 进 role_missing 清单随 boot 带出，模块照常起——缺角色是缺能力，不是拒 boot。
-    /// GOOD 补了 sensor.env.meter pin（批N3 件八：sensor.env 有归属角色了，满配须有
-    /// pin——本测试删 servo pin 后清单纯 act.servo 一条；sensor.env pin 在场不误报）
+    /// GOOD 补了 power.charger.meter pin（批N3 件八：power.charger 有归属角色了，满配须有
+    /// pin——本测试删 servo pin 后清单纯 act.servo 一条；power.charger pin 在场不误报）
     #[test]
     fn role_missing_is_listed_not_fatal() {
         let root = Root::new("role-missing");
@@ -4426,7 +4437,7 @@ evidence = "none"
         assert_eq!(
             boot.role_missing,
             vec![("act.servo".to_string(), "act.axis.pwm".to_string()),],
-            "present ∩ enabled_slots 的格位缺角色逐条点名（sensor.env pin 在场不误报）"
+            "present ∩ enabled_slots 的格位缺角色逐条点名（power.charger pin 在场不误报）"
         );
         assert!(boot.missing.is_empty(), "{:?}", boot.missing);
     }
@@ -4864,12 +4875,12 @@ gnd_common = "star-1"
     #[test]
     fn absent_slot_declaration_is_missing_source() {
         let root = Root::new("present");
-        let text = GOOD.replace(", \"sensor.env\"", "");
+        let text = GOOD.replace(", \"power.charger\"", "");
         let p = root.write_profile("absent.toml", &text);
         let boot = boot_inputs(&p).expect("声明缺不是致命项");
         assert_eq!(
             boot.missing,
-            vec![("rr3-pb".to_string(), "sensor.env".to_string())],
+            vec![("rr3-pb".to_string(), "power.charger".to_string())],
             "present 声明缺的格位对点名模块记缺格"
         );
     }
@@ -4902,8 +4913,8 @@ gnd_common = "star-1"
     fn device_absent_declares_base_slot_absence_legally() {
         let root = Root::new("absent-ok");
         let ok = GOOD.replace(
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"power.battery\" = \"无电池形态（市电/桥上灌供电），校验⑥认它为合法态\"",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]\n\n[slots.device_absent]\n\"power.battery\" = \"无电池形态（市电/桥上灌供电），校验⑥认它为合法态\"",
         );
         let p = root.write_profile("absent-ok.toml", &ok);
         let boot = boot_inputs(&p).expect("base 层格带理由登记缺席必须过");
@@ -4925,8 +4936,8 @@ gnd_common = "star-1"
     fn device_absent_gate_rejects_unknown_nonbase_and_empty_reason() {
         let root = Root::new("absent-unknown");
         let unknown = GOOD.replace(
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"sensor.nope\" = \"不存在的格\"",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]\n\n[slots.device_absent]\n\"sensor.nope\" = \"不存在的格\"",
         );
         let p = root.write_profile("absent-unknown.toml", &unknown);
         let e = boot_inputs(&p).expect_err("device_absent 未在册格位必须致命");
@@ -4934,8 +4945,8 @@ gnd_common = "star-1"
 
         let root = Root::new("absent-body");
         let body = GOOD.replace(
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"act.servo\" = \"板上无舵机\"",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]\n\n[slots.device_absent]\n\"act.servo\" = \"板上无舵机\"",
         );
         let p = root.write_profile("absent-body.toml", &body);
         let e = boot_inputs(&p).expect_err("device_absent 声明非 base 层格必须致命");
@@ -4946,8 +4957,8 @@ gnd_common = "star-1"
 
         let root = Root::new("absent-empty");
         let empty = GOOD.replace(
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]",
-            "present = [\"act.servo\", \"cognition.llm\", \"sensor.env\"]\n\n[slots.device_absent]\n\"power.battery\" = \"\"",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]",
+            "present = [\"act.servo\", \"cognition.llm\", \"power.charger\"]\n\n[slots.device_absent]\n\"power.battery\" = \"\"",
         );
         let p = root.write_profile("absent-empty.toml", &empty);
         let e = boot_inputs(&p).expect_err("device_absent 理由留空必须致命");

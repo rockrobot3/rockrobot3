@@ -73,7 +73,6 @@ not_applicable = true
 # 格位 → 件（2026-10-31 实机取证收窄，与 classic 档同值）：只保留实机真正在位的格位。
 "act.servo" = "rr3-act"
 "net.wifi" = "rr3-connect"
-"net.bt" = "rr3-connect"
 "ui.face" = "rr3-interact"
 "audio.playback" = "rr3-interact"
 "audio.capture" = "rr3-sense"
@@ -117,7 +116,7 @@ mux_group = []
 [enabled_slots]
 # 启用的格位集合（与 [bindings]/[slots] present 三处一致；缺格 fail-closed 拒启整模块）。
 rr3-act = ["act.servo"]
-rr3-connect = ["net.wifi", "net.bt"]
+rr3-connect = ["net.wifi"]
 rr3-interact = ["ui.face", "audio.playback"]
 rr3-sense = ["audio.capture", "audio.vad"]
 rr3-brain = ["cognition.dialog", "cognition.asr", "cognition.llm", "cognition.tts"]
@@ -133,7 +132,6 @@ present = [
     "cognition.dialog",
     "cognition.llm",
     "cognition.tts",
-    "net.bt",
     "net.wifi",
     "ui.face",
 ]
