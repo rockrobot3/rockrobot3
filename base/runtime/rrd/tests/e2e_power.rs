@@ -260,16 +260,17 @@ fn power_module_low_battery_fallback_end_to_end() {
     );
 
     // ---------- ③ 杀模块 → spawn 漏斗必须拒绝重启（Q4 的"停止新 spawn"） ----------
-    // pkill 按二进制绝对路径点名（路径无正则元字符）；SIGTERM 后 supervisor 扫尸 →
-    // plan 重启 → rr3_boot_spawn 撞上低电旗 → 拒绝日志。
-    let status = Command::new("pkill")
-        .args(["-f", &bin.display().to_string()])
+    // SIGTERM 后 supervisor 扫尸 → plan 重启 → rr3_boot_spawn 撞上低电旗 → 拒绝日志。
+    // 定点杀：从 supervisor 的 spawn 行取 pid 直接 kill——不用 pkill -f：macOS 上它
+    // 扫全进程表做 regex 匹配，撞上无关进程的非法字节串会整批报 "illegal byte
+    // sequence" 而失配（0.0.8e 审计实锤的夹具脆弱点）；pid 定点同时把"模块必须
+    // 仍是首实例"变成显式断言。
+    let pid_s = rr3_field_from_log(&spawn, "pid=").to_string();
+    let status = Command::new("kill")
+        .args(["-TERM", &pid_s])
         .status()
-        .expect("起 pkill");
-    assert!(
-        status.success(),
-        "pkill 没匹配到模块进程（{bin:?}）——夹具错"
-    );
+        .expect("起 kill");
+    assert!(status.success(), "kill -TERM {pid_s} 失败——模块应仍在运行");
     rrd.rr3_wait_log("低电兜底：拒绝 spawn rr3-power");
     // 否定断言窗口：不得出现**真的** spawn 行。拒绝行是"拒绝 spawn rr3-power（全局…"，
     // 不含 " pid="，不会误触；真重启了必在这里现形。
