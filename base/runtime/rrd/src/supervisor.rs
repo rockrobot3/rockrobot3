@@ -97,6 +97,12 @@ pub struct Rr3SpawnJob {
     /// daemon 透传，spawn 时注入子进程 `RR3_HAL_AUDIO_BACKEND`；None 不注入
     /// （音频面回落全局 hal_backend）。
     pub audio_backend: Option<String>,
+    /// 舵机面后端覆盖（P0-4 组合档归属）：装配单 [runtime].servo_backend，daemon
+    /// 透传，spawn 时注入子进程 `RR3_HAL_SERVO_BACKEND`；None 不注入（舵机面回落全局）。
+    pub servo_backend: Option<String>,
+    /// 显示面后端覆盖（P0-4 组合档归属）：装配单 [runtime].display_backend，daemon
+    /// 透传，spawn 时注入子进程 `RR3_HAL_DISPLAY_BACKEND`；None 不注入（显示面回落全局）。
+    pub display_backend: Option<String>,
 }
 
 /// supervisor 的两种请求。`Boot` 来自 daemon 的启动序（E-7），`Restart` 来自
@@ -200,6 +206,8 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
         axis_state: String::new(),
         hal_backend: String::new(),
         audio_backend: None,
+        servo_backend: None,
+        display_backend: None,
     })
 }
 
@@ -373,6 +381,16 @@ fn rr3_boot_spawn(
     // 让音频面独占 UART 而不影响全局后端。None 不注入（音频面回落全局 hal_backend）。
     if let Some(ab) = &job.audio_backend {
         cmd.env("RR3_HAL_AUDIO_BACKEND", ab);
+    }
+    // 舵机面后端覆盖（P0-4 组合档归属）：组合档舵机在 ESP32 板上时设 esp32。
+    // None 不注入（舵机面回落全局 hal_backend）。
+    if let Some(sb) = &job.servo_backend {
+        cmd.env("RR3_HAL_SERVO_BACKEND", sb);
+    }
+    // 显示面后端覆盖（P0-4 组合档归属）：组合档 OLED/点阵在 ESP32 板上时设 esp32。
+    // None 不注入（显示面回落全局 hal_backend）。
+    if let Some(db) = &job.display_backend {
+        cmd.env("RR3_HAL_DISPLAY_BACKEND", db);
     }
     // 执行轴状态（批N3 件三）：空值不注入——模块侧折保守缺省（未标定不得自动），
     // 与 hal_bindings 同一条"空 = 无真值，fail-closed"纪律

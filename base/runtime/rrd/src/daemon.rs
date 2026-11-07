@@ -209,7 +209,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
     // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
     // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
-    let (boot_manifests, degraded, hal_bindings, axis_state, predegraded, hal_backend, audio_backend) = match &cfg.profile {
+    let (boot_manifests, degraded, hal_bindings, axis_state, predegraded, hal_backend, audio_backend, servo_backend, display_backend) = match &cfg.profile {
         Some(p) => {
             // 格位/角色/器件契约与主题契约同目录（--contracts 运行期落点，T5；roles.toml
             // 是校验①②判据源、devices.toml 是校验⑦-d 的 mate 集判定源、platform/ 是
@@ -295,6 +295,8 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 predegraded,
                 boot.hal_backend,
                 boot.audio_backend,
+                boot.servo_backend,
+                boot.display_backend,
             )
         }
         // None 臂 = **仅 --manifest 调试后门**（基-23）：裸起（既无 --profile 又无
@@ -308,6 +310,8 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             String::new(),
             BTreeSet::new(),
             String::new(),
+            None,
+            None,
             None,
         ),
     };
@@ -422,6 +426,9 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             // 必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产假验证）。
             job.hal_backend = hal_backend.clone();
             job.audio_backend = audio_backend.clone();
+            // P0-4 组合档归属：舵机/显示面后端覆盖（组合档在 ESP32 板上）注入子进程
+            job.servo_backend = servo_backend.clone();
+            job.display_backend = display_backend.clone();
             jobs.push(job);
         }
     }
