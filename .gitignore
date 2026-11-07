@@ -10,6 +10,9 @@
 !LICENSE
 # 项目仓必要文档（社区/安全/Docker 构建依赖，须入库）
 !.dockerignore
+# 仓根统一构建配置（P0-5）：target-dir / EMBUILD_ROOT 指向源码区外，须入库
+!.cargo/
+!.cargo/**
 # 项目仓直属模块（非 submodule，需完整追踪）
 !.github/
 !.github/**

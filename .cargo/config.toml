@@ -1,0 +1,12 @@
+# 仓根统一构建产物落点：target-dir 指向源码区外（/tmp/rr3-build），
+# 严禁在 rock3 源码区路径内残留任何编译/集成/构建产物（工程铁律）。
+# cargo 自当前目录向上查找 .cargo/config.toml，故本配置对仓内所有
+# workspace/crate 生效；子 workspace 若另设 [build] target-dir 则以近者为准。
+# 开发者可通过 CARGO_TARGET_DIR 环境变量覆盖（env 优先级高于 config）。
+[build]
+target-dir = "/tmp/rr3-build"
+
+# esp-idf 构建缓存（.embuild）同样移出源码区。EMBUILD_ROOT 由 esp-idf-sys 读取，
+# 默认落在 crate 根；此处统一到 /tmp/rr3-embuild。force=false 尊重外部 env。
+[env]
+EMBUILD_ROOT = "/tmp/rr3-embuild"
