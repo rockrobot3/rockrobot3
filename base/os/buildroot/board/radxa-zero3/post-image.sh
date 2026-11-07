@@ -17,11 +17,23 @@ set -eu
 
 BOARD_DIR="$(dirname "$0")"
 OUT="${BUILD_DIR:-/tmp}/genimage-rock3.cfg"
+if [ ! -d "$(dirname "$OUT")" ]; then
+	echo "ERROR: 输出目录不存在: $(dirname "$OUT")（BUILD_DIR=${BUILD_DIR:-<未设>}；Buildroot post-image 会提供）" >&2
+	exit 1
+fi
 
 SED_ARGS=""
 # $1 = 占位名, $2 = 环境变量名, $3 = 保守缺省（板上定型前不得当作权威值）
+# 不用 eval 间接展开：环境变量值进 eval 等于把构建环境的字符串当代码执行
+# （值含 ; $() 空格即改脚本行为）。printenv 只取值不求值；容量形制再过一道
+# 白名单（<数字>[KMG]）——非法即点名拒，不把坏值揉进 sed 表达式。
 inject() {
-	eval "val=\${$2:-$3}"
+	val="$(printenv "$2" 2>/dev/null || true)"
+	[ -n "$val" ] || val="$3"
+	if ! printf '%s' "$val" | grep -Eq '^[0-9]+[KMG]$'; then
+		echo "ERROR: \$$2 形制非法: '$val'（只认 <数字>[KMG]，如 256M / 1G）" >&2
+		exit 1
+	fi
 	SED_ARGS="$SED_ARGS -e s|@$1@|$val|g"
 }
 
