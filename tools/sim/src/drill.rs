@@ -240,6 +240,21 @@ pub fn rr3_default_bins(repo: &Path) -> (PathBuf, PathBuf, PathBuf) {
     )
 }
 
+/// 各演练共用的仓根定位（main/chain/brain/assemble 四处同款底座）：
+/// `--repo` 优先，缺省从当前目录向上找 [`rr3_find_repo_root`]。
+pub fn rr3_repo_locate(a: &Rr3SimArgs) -> Result<PathBuf, String> {
+    match &a.repo {
+        Some(p) => Ok(p.clone()),
+        None => std::env::current_dir()
+            .ok()
+            .and_then(|cwd| rr3_find_repo_root(&cwd))
+            .ok_or(
+                "找不到仓根（缺 contracts/topics.toml）：请在仓内运行，或 --repo <路径>"
+                    .to_string(),
+            ),
+    }
+}
+
 /// 二进制就位检查：缺了就点名 `cargo build` 命令，不让人对着 ENOENT 猜
 pub fn rr3_require_bins(rrd: &Path, peer: &Path, rrctl: &Path) -> Result<(), String> {
     for (p, build) in [

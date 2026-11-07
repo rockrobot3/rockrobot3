@@ -44,10 +44,12 @@ mod run {
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
+    use crate::assemble::{
+        rr3_ctl_maybe_fail, rr3_ctl_out, rr3_ctl_status_rows as rr3_ctl_rows, rr3_with_log_tail,
+    };
     use crate::drill::{
-        rr3_default_bins, rr3_find_repo_root, rr3_manifest_text, rr3_parse_status,
-        rr3_require_bins, rr3_section, rr3_wait_modules, RR3_DRILL_PUBLISHER, RR3_DRILL_RESIDENT,
-        RR3_SIM_B_TOPIC,
+        rr3_default_bins, rr3_find_repo_root, rr3_manifest_text, rr3_require_bins, rr3_section,
+        rr3_wait_modules, RR3_DRILL_PUBLISHER, RR3_DRILL_RESIDENT, RR3_SIM_B_TOPIC,
     };
 
     /// 巡检轮询的上界：冷启动（首次加载契约 + 起子进程）在慢机器上也要够用
@@ -66,44 +68,22 @@ mod run {
         };
         // --chain 走批F4 全链闭环演练（判据 10 的 sim 档），与前两者互斥
         if a.chain {
-            return match crate::chain::rr3_chain_drill(&a) {
-                Ok(report) => {
-                    println!("{report}");
-                    0
-                }
-                Err(e) => {
-                    eprintln!("rr3-sim: {e}");
-                    1
-                }
-            };
+            return rr3_drill_exit(crate::chain::rr3_chain_drill(&a));
         }
         // --brain 走 M4 四真进程演练（ADR-0014 裁定 4），与两面演练互斥
         if a.brain {
-            return match crate::brain::rr3_brain_drill(&a) {
-                Ok(report) => {
-                    println!("{report}");
-                    0
-                }
-                Err(e) => {
-                    eprintln!("rr3-sim: {e}");
-                    1
-                }
-            };
+            return rr3_drill_exit(crate::brain::rr3_brain_drill(&a));
         }
         // --profile 走 D9 装配演练（装配单驱动 boot + 全模块真进程巡检），与前两者互斥
         if a.profile.is_some() {
-            return match crate::assemble::rr3_assemble_drill(&a) {
-                Ok(report) => {
-                    println!("{report}");
-                    0
-                }
-                Err(e) => {
-                    eprintln!("rr3-sim: {e}");
-                    1
-                }
-            };
+            return rr3_drill_exit(crate::assemble::rr3_assemble_drill(&a));
         }
-        match rr3_sim_drill(&a) {
+        rr3_drill_exit(rr3_sim_drill(&a))
+    }
+
+    /// 演练报告统一出口（各演练分支同款底座）：报告上 stdout 退 0，报错上 stderr 退 1。
+    fn rr3_drill_exit(r: Result<String, String>) -> i32 {
+        match r {
             Ok(report) => {
                 println!("{report}");
                 0
@@ -117,13 +97,7 @@ mod run {
 
     fn rr3_sim_drill(a: &crate::drill::Rr3SimArgs) -> Result<String, String> {
         // ---- 0. 定位：仓根与三个二进制 ----
-        let repo = match &a.repo {
-            Some(p) => p.clone(),
-            None => std::env::current_dir()
-                .ok()
-                .and_then(|cwd| rr3_find_repo_root(&cwd))
-                .ok_or("找不到仓根（缺 contracts/topics.toml）：请在仓内运行，或 --repo <路径>")?,
-        };
+        let repo = crate::drill::rr3_repo_locate(a)?;
         let (d_rrd, d_peer, d_rrctl) = rr3_default_bins(&repo);
         let rrd = a.rrd.clone().unwrap_or(d_rrd);
         let peer = a.sim_peer.clone().unwrap_or(d_peer);
@@ -297,69 +271,6 @@ mod run {
             let _ = rrd_child.wait();
         }
         result.map(|()| report)
-    }
-
-    /// 跑一次 rr3-ctl 子命令，stdout 原样带回（巡检报告的素材）
-    fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, String> {
-        let out = Command::new(rrctl)
-            .arg("--bus-path")
-            .arg(socket)
-            .arg(cmd)
-            .output()
-            .map_err(|e| format!("跑 rr3-ctl {cmd} 失败: {e}"))?;
-        let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
-        if !out.status.success() {
-            s.push_str(&String::from_utf8_lossy(&out.stderr));
-            return Err(format!(
-                "rr3-ctl {cmd} 意外失败（exit {}）:\n{s}",
-                out.status
-            ));
-        }
-        if !s.ends_with('\n') {
-            s.push('\n');
-        }
-        Ok(s)
-    }
-
-    /// 预期会失败的那一类（ota）：把 (退出码, 合并输出) 带回来由调用方裁定
-    fn rr3_ctl_maybe_fail(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, (i32, String)> {
-        let out = Command::new(rrctl)
-            .arg("--bus-path")
-            .arg(socket)
-            .arg(cmd)
-            .output()
-            .map_err(|e| (1, format!("跑 rr3-ctl {cmd} 失败: {e}")))?;
-        let code = out.status.code().unwrap_or(1);
-        let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
-        s.push_str(&String::from_utf8_lossy(&out.stderr));
-        if out.status.success() {
-            Ok(s)
-        } else {
-            Err((code, s))
-        }
-    }
-
-    /// 轮询用的"一次快照"：连接失败（rrd 还没起）当空表处理，由 deadline 收口
-    fn rr3_ctl_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)> {
-        Command::new(rrctl)
-            .arg("--bus-path")
-            .arg(socket)
-            .arg("status")
-            .output()
-            .map(|o| rr3_parse_status(&String::from_utf8_lossy(&o.stdout)))
-            .unwrap_or_default()
-    }
-
-    /// 失败时带上 rrd.log 尾部（排查起点，不让人再跑一遍去找日志）
-    fn rr3_with_log_tail(msg: &str, log_path: &Path) -> String {
-        let tail = std::fs::read_to_string(log_path)
-            .map(|s| {
-                let lines: Vec<&str> = s.lines().collect();
-                let start = lines.len().saturating_sub(15);
-                lines[start..].join("\n")
-            })
-            .unwrap_or_else(|e| format!("（读日志失败: {e}）"));
-        format!("{msg}\nrrd.log 尾部（{}）:\n{tail}", log_path.display())
     }
 }
 

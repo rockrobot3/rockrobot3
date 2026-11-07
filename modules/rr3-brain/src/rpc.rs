@@ -688,34 +688,19 @@ pub(crate) fn rr3_model_test_arm(cfg: &Rr3BrainCfg, args: &Value) -> Result<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boot::rr3_brain_cfg_parse;
+    use crate::boot::{
+        rr3_brain_cfg_parse, rr3_repo_cfg_fixture, RR3_CFG_TAIL_TOML, RR3_CLOUD_TOML,
+        RR3_MODEL_ROWS_TOML,
+    };
 
     /// 与仓内 config.toml 同形状的文档树夹具（boot 解析产出，写面真载体）
     fn repo_cfg() -> Rr3BrainCfg {
-        let text = r#"
-[rr3-brain.cloud]
-base_url = "https://api.siliconflow.cn"
-asr_model = "iic/SenseVoiceSmall"
-llm_model = "deepseek-ai/DeepSeek-V3"
-tts_model = "FunAudioLLM/CosyVoice2-0.5B"
-timeout_s = 20
+        rr3_brain_cfg_parse(&rr3_repo_cfg_fixture()).unwrap()
+    }
 
-[[rr3-brain.model]]
-name = "DeepSeek官方"
-mode = "api"
-api_format = "openai"
-base_url = "https://api.deepseek.com/v1"
-model_id = "deepseek-chat"
-api_key_ref = "DeepSeek官方"
-active = true
-
-[rr3-brain.bus]
-call_timeout_s = 30.0
-
-[rr3-brain.dialog]
-max_utterance_ms = 8000
-"#;
-        rr3_brain_cfg_parse(text).unwrap()
+    /// live 写模型行 model_id 的公共底座（快照不回填 vs doc 真值两用例同款）
+    fn write_llm_model(cfg: &mut Rr3BrainCfg, v: serde_json::Value) {
+        rr3_ops_write(&mut cfg.doc, "llm", "llm_model", &v).unwrap();
     }
 
     // ---------- ops/list 读面 ----------
@@ -771,13 +756,7 @@ max_utterance_ms = 8000
     fn ops_snapshot_llm_group_stays_at_boot_projection_after_live_write() {
         let mut cfg = repo_cfg();
         // live 写模型行 model_id（写源 = active 行）
-        rr3_ops_write(
-            &mut cfg.doc,
-            "llm",
-            "llm_model",
-            &json!("deepseek-reasoner"),
-        )
-        .unwrap();
+        write_llm_model(&mut cfg, json!("deepseek-reasoner"));
         let v = rr3_ops_snapshot(&cfg).unwrap();
         assert_eq!(
             v["llm"]["llm_model"],
@@ -1042,13 +1021,7 @@ max_utterance_ms = 8000
     #[test]
     fn model_row_of_reflects_live_write() {
         let mut cfg = repo_cfg();
-        rr3_ops_write(
-            &mut cfg.doc,
-            "llm",
-            "llm_model",
-            &json!("deepseek-reasoner"),
-        )
-        .unwrap();
+        write_llm_model(&mut cfg, json!("deepseek-reasoner"));
         let row = rr3_model_row_of(&cfg).unwrap();
         assert_eq!(row.model_id, "deepseek-reasoner", "重解析读 doc 真值");
     }
@@ -1057,28 +1030,11 @@ max_utterance_ms = 8000
 
     /// set 臂的真载体：磁盘上一份与 repo_cfg 同文本的 config.toml + 注入路径
     fn temp_cfg() -> (std::path::PathBuf, std::path::PathBuf, Rr3BrainCfg) {
-        let text = r#"[rr3-brain.cloud]
-base_url = "https://api.siliconflow.cn"
-asr_model = "iic/SenseVoiceSmall"
-llm_model = "deepseek-ai/DeepSeek-V3"
-tts_model = "FunAudioLLM/CosyVoice2-0.5B"
-timeout_s = 20
-
-[[rr3-brain.model]]
-name = "DeepSeek官方"
-mode = "api"
-api_format = "openai"
-base_url = "https://api.deepseek.com/v1"
-model_id = "deepseek-chat"
-api_key_ref = "DeepSeek官方"
-active = true
-
-[rr3-brain.bus]
-call_timeout_s = 30.0
-
-[rr3-brain.dialog]
-max_utterance_ms = 8000
-"#;
+        // 无 [rr3-brain] 头：三段常量拼装（与 boot 夹具同一份文本判据）
+        let text = format!(
+            "{}\n{}\n{}",
+            RR3_CLOUD_TOML, RR3_MODEL_ROWS_TOML, RR3_CFG_TAIL_TOML
+        );
         let dir = std::env::temp_dir().join(format!(
             "rr3-model-{}-{}",
             std::process::id(),
@@ -1089,8 +1045,8 @@ max_utterance_ms = 8000
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
-        std::fs::write(&path, text).unwrap();
-        let mut cfg = rr3_brain_cfg_parse(text).unwrap();
+        std::fs::write(&path, &text).unwrap();
+        let mut cfg = rr3_brain_cfg_parse(&text).unwrap();
         cfg.config_path = Some(path.clone());
         (dir, path, cfg)
     }

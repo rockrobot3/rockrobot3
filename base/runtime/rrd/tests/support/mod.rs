@@ -64,45 +64,13 @@ pub const E2E_TICK_MS: u64 = 20;
 /// **缺格点名行含"拒绝启动"**（监听面用例的否定 needle 不得用裸"拒绝"——见
 /// register_publish.rs 那处收窄）。空装配还免探针：缺格判定先于探测，零格位零探测，
 /// 不需要 P1 那样的 `RR3_PROBE=sim` 前提。
-const RR3_LISTEN_PROFILE: &str = r#"
-schema_version = 5
-
-[os]
-route = "distro"
-
-[runtime]
-log_ring_cap = 512
-hal_backend = "sim"
-
-[platform]
-tier = "host"
-chip = "rk3566"
-
-[supplies]
-watchdog_present = false
-watchdog_timeout_ms = 15000
-watchdog_feeder = "rrd"
-tick_period_ms = 200
-tick_jitter_ms = 100
-safety_core_interval_ms = 1000
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[supplies.budget]
-not_applicable = true
-
+/// 装配单文本 = 数据夹具单一真值（`src/testdata/profile_host_prefix.toml`：schema/os/
+/// runtime/platform/supplies+rail5v 域/budget 五段公共前缀）+ 本夹具独有的尾部三段。
+/// 语义不变：**空 enabled_slots 在 parse 层即拒**、stub manifest 必须真实落盘等约束
+/// 见下方函数文档。
+const RR3_LISTEN_PROFILE: &str = concat!(
+    include_str!("../../src/testdata/profile_host_prefix.toml"),
+    r#"
 [slots]
 present = []
 
@@ -110,23 +78,13 @@ present = []
 
 [enabled_slots]
 rr3-listenstub = ["act.servo"]
-"#;
+"#,
+);
 
-/// 监听面夹具的接线档底稿（与 `e2e_profile.rs` 的 WIRING 同一底稿，两份独立存在——
-/// support 不引测试文件的常量）：装载期校验⑦要求装机档必在——vcc/gnd-only 单线组
+/// 监听面夹具的接线档底稿（单一真值 `src/testdata/wiring_bottom.toml`，e2e 各装机档
+/// 与 profile.rs 测试区同一底稿）：装载期校验⑦要求装机档必在——vcc/gnd-only 单线组
 ///（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
-const RR3_LISTEN_WIRING: &str = r#"
-[[wire]]
-connector = "J-T"
-hdr_pin = [1, 2]
-signal = ["vcc", "gnd"]
-net = "rail5v"
-feeds = []
-mate = "none"
-keyed = false
-rated_a = 1.0
-gnd_common = "star-1"
-"#;
+const RR3_LISTEN_WIRING: &str = include_str!("../../src/testdata/wiring_bottom.toml");
 
 /// 造一份监听面夹具（`e2e_profile.rs` 的 Root 同一装机布局）：
 /// `<root>/profiles/default.toml`、`<root>/hardware/default/wiring.toml`、
@@ -932,6 +890,52 @@ pub fn rr3_read_state_task(
 /// 仓根（CARGO_MANIFEST_DIR = base/runtime/rrd，上溯三级）
 pub fn rr3_repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+/// e2e 装机档共用的接线档底稿（单一真值 `src/testdata/wiring_bottom.toml`）：
+/// vcc/gnd-only 单线组（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
+pub const RR3_E2E_WIRING: &str = include_str!("../../src/testdata/wiring_bottom.toml");
+
+/// 装机布局夹具根（e2e_power / e2e_act / e2e_connect 同款，三处各写一份迟早分叉）：
+/// `<root>/profiles/default.toml` + `<root>/hardware/default/wiring.toml`——
+/// rr3_wiring_path 推导的同一棵树。`scenario` 拼目录名（power/act/connect →
+/// `rr3-<scenario>-e2e-<pid>-<tag>`，pid 级唯一）。Drop 清整树——断言 panic 后
+/// /tmp 不许留残迹（Task 7 评审 N-1 教训，`e2e_profile.rs` 的 Root 同一条纪律；
+/// 那份 Root 行为更多，保持独立不并入）。
+pub struct E2eRoot {
+    pub dir: PathBuf,
+}
+
+impl E2eRoot {
+    /// 建根：清 pid 复用留下的上次残根，铺 profiles/ 一级。
+    pub fn rr3_new(scenario: &str, tag: &str) -> E2eRoot {
+        let dir =
+            std::env::temp_dir().join(format!("rr3-{scenario}-e2e-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir); // pid 复用留下的上次残根不许干扰本次
+        std::fs::create_dir_all(dir.join("profiles")).expect("建 profiles 目录");
+        E2eRoot { dir }
+    }
+
+    /// 落一份装配单，并同批 stage 接线档（hardware/<形态>/wiring.toml）：
+    /// 装载期校验⑦要求装机档必在。
+    pub fn rr3_write_profile(&self, text: &str) -> PathBuf {
+        let p = self.dir.join("profiles").join("default.toml");
+        std::fs::write(&p, text).expect("写装配单");
+        let w = self
+            .dir
+            .join("hardware")
+            .join("default")
+            .join("wiring.toml");
+        std::fs::create_dir_all(w.parent().unwrap()).expect("建 hardware 目录");
+        std::fs::write(&w, RR3_E2E_WIRING).expect("写接线档");
+        p
+    }
+}
+
+impl Drop for E2eRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
 }
 
 /// 现场编译一个独立工程模块，返回其二进制绝对路径。

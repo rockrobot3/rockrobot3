@@ -196,6 +196,25 @@ mod tests {
         }
     }
 
+    /// 整包调用（十余处同款实参表）：servo_cfg/开放集/轴态三实参固定，仅低电
+    /// 闸门位与载荷随用例变化
+    fn act_call(
+        payload: &Value,
+        low_blocked: bool,
+        gpio: &mut Rr3SimGpioOut,
+        servo: &mut Rr3SimServo,
+    ) -> Vec<Result<Rr3IntentOutcome, String>> {
+        rr3_actions_handle(
+            payload,
+            gpio,
+            servo,
+            &servo_cfg(),
+            low_blocked,
+            &axis_calibrated(),
+            &open_all(),
+        )
+    }
+
     /// 拒动硬约束·intent 路（§6，批N3 件三）：未标定轴的 servo 广播（无 motion
     /// 键 = auto 保守缺省）被代码拒动不落角、拒因点名"未标定"；显式 jog 放行；
     /// 已标定轴 auto 照常（既有基线不动）。
@@ -245,14 +264,11 @@ mod tests {
     fn valid_relay_action_drives_gpio() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
-        let out = rr3_actions_handle(
+        let out = act_call(
             &json!([{"topic": "rr3-act/relay/set", "args": {"on": true}}]),
+            LOW_OPEN,
             &mut gpio,
             &mut servo,
-            &servo_cfg(),
-            LOW_OPEN,
-            &axis_calibrated(),
-            &open_all(),
         );
         assert_eq!(
             out,
@@ -261,14 +277,11 @@ mod tests {
         );
         assert!(gpio.rr3_sim_gpio_level(), "吸合必须落到 GPIO 电平");
 
-        let out = rr3_actions_handle(
+        let out = act_call(
             &json!([{"topic": "rr3-act/relay/set", "args": {"on": false}}]),
+            LOW_OPEN,
             &mut gpio,
             &mut servo,
-            &servo_cfg(),
-            LOW_OPEN,
-            &axis_calibrated(),
-            &open_all(),
         );
         assert_eq!(out, vec![Ok(Rr3IntentOutcome::Relay(false, true))]);
         assert!(!gpio.rr3_sim_gpio_level(), "断开必须落到 GPIO 电平");
@@ -284,14 +297,11 @@ mod tests {
             (90, Rr3IntentOutcome::Servo(90)),
             (135, Rr3IntentOutcome::Servo(135)),
         ] {
-            let out = rr3_actions_handle(
+            let out = act_call(
                 &json!([{"topic": "rr3-act/servo/command", "args": {"angle_deg": deg}}]),
+                LOW_OPEN,
                 &mut gpio,
                 &mut servo,
-                &servo_cfg(),
-                LOW_OPEN,
-                &axis_calibrated(),
-                &open_all(),
             );
             assert_eq!(out, vec![Ok(want)], "deg={deg}");
         }
@@ -309,15 +319,7 @@ mod tests {
             json!({"topic": "rr3-act/servo/command", "args": {"angle_deg": "45"}}),
             json!({"topic": "rr3-act/servo/command", "args": {}}),
         ] {
-            let out = rr3_actions_handle(
-                &json!([bad]),
-                &mut gpio,
-                &mut servo,
-                &servo_cfg(),
-                false,
-                &axis_calibrated(),
-                &open_all(),
-            );
+            let out = act_call(&json!([bad]), false, &mut gpio, &mut servo);
             assert!(out[0].is_err(), "非法 servo 动作必须拒: {out:?}");
         }
         assert_eq!(servo.rr3_sim_servo_angle(), 90, "全部被拒，舵机不得动");
@@ -327,14 +329,11 @@ mod tests {
     fn foreign_topic_is_rejected_by_exposes_gate() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
-        let out = rr3_actions_handle(
+        let out = act_call(
             &json!([{"topic": "rr3-power/battery/state", "args": {}}]),
+            LOW_OPEN,
             &mut gpio,
             &mut servo,
-            &servo_cfg(),
-            LOW_OPEN,
-            &axis_calibrated(),
-            &open_all(),
         );
         let err = out[0].as_ref().unwrap_err();
         assert!(err.contains("越权"), "归属门拒因要点名越权: {err}");
@@ -348,14 +347,11 @@ mod tests {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         // led/effect 未列开放集（本形态不开 led 意图路）；relay/servo 在开放集内
-        let out = rr3_actions_handle(
+        let out = act_call(
             &json!([{ "topic": "rr3-act/led/effect", "args": {} }]),
+            LOW_OPEN,
             &mut gpio,
             &mut servo,
-            &servo_cfg(),
-            LOW_OPEN,
-            &axis_calibrated(),
-            &open_all(),
         );
         let err = out[0].as_ref().unwrap_err();
         assert!(
@@ -430,46 +426,24 @@ mod tests {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
         // actions 不是数组
-        let out = rr3_actions_handle(
-            &json!("开灯"),
-            &mut gpio,
-            &mut servo,
-            &servo_cfg(),
-            false,
-            &axis_calibrated(),
-            &open_all(),
-        );
+        let out = act_call(&json!("开灯"), false, &mut gpio, &mut servo);
         assert!(out[0].as_ref().unwrap_err().contains("数组"));
         // 元素缺 topic / 缺 args
-        let out = rr3_actions_handle(
-            &json!([{"args": {}}]),
-            &mut gpio,
-            &mut servo,
-            &servo_cfg(),
-            false,
-            &axis_calibrated(),
-            &open_all(),
-        );
+        let out = act_call(&json!([{"args": {}}]), false, &mut gpio, &mut servo);
         assert!(out[0].as_ref().unwrap_err().contains("topic"));
-        let out = rr3_actions_handle(
+        let out = act_call(
             &json!([{"topic": "rr3-act/relay/set"}]),
+            LOW_OPEN,
             &mut gpio,
             &mut servo,
-            &servo_cfg(),
-            LOW_OPEN,
-            &axis_calibrated(),
-            &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("args"));
         // 参数裁决照常把门（非真布尔）
-        let out = rr3_actions_handle(
+        let out = act_call(
             &json!([{"topic": "rr3-act/relay/set", "args": {"on": 1}}]),
+            LOW_OPEN,
             &mut gpio,
             &mut servo,
-            &servo_cfg(),
-            LOW_OPEN,
-            &axis_calibrated(),
-            &open_all(),
         );
         assert!(out[0].as_ref().unwrap_err().contains("布尔"));
         assert!(!gpio.rr3_sim_gpio_level(), "全部被拒，GPIO 不得变化");
@@ -480,18 +454,15 @@ mod tests {
     fn multiple_actions_execute_in_order() {
         let mut gpio = Rr3SimGpioOut::rr3_sim_gpio_new(false);
         let mut servo = Rr3SimServo::rr3_sim_servo_new(90);
-        let out = rr3_actions_handle(
+        let out = act_call(
             &json!([
                 {"topic": "rr3-act/relay/set", "args": {"on": true}},
                 {"topic": "rr3-act/servo/command", "args": {"angle_deg": 45}},
                 {"topic": "rr3-act/relay/set", "args": {"on": false}},
             ]),
+            LOW_OPEN,
             &mut gpio,
             &mut servo,
-            &servo_cfg(),
-            LOW_OPEN,
-            &axis_calibrated(),
-            &open_all(),
         );
         assert_eq!(out.len(), 3);
         assert_eq!(out[0], Ok(Rr3IntentOutcome::Relay(true, false)));

@@ -222,45 +222,10 @@ mod tests {
 
     /// 装配单最小夹具（schema_version = 5，与 e2e_act PROFILE 同形状缩减到
     /// 一条舵机轴 pin）——写入面的输入只有它，接线档与模块装配都不需要。
-    const PROFILE: &str = r#"
-schema_version = 5
-
-[os]
-route = "distro"
-
-[runtime]
-log_ring_cap = 512
-hal_backend = "sim"
-
-[platform]
-tier = "host"
-chip = "rk3566"
-
-[supplies]
-watchdog_present = false
-watchdog_timeout_ms = 15000
-watchdog_feeder = "rrd"
-tick_period_ms = 200
-tick_jitter_ms = 100
-safety_core_interval_ms = 1000
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[supplies.budget]
-not_applicable = true
-
+    /// 文本 = 数据夹具单一真值（src/testdata/）+ 本夹具独有的 slots/bindings 尾段。
+    const PROFILE: &str = concat!(
+        include_str!("testdata/profile_host_prefix.toml"),
+        r#"
 [slots]
 present = ["act.servo"]
 
@@ -270,51 +235,18 @@ present = ["act.servo"]
 [enabled_slots]
 rr3-act = ["act.servo"]
 
-[[pin]]
-role = "act.axis.pwm"
-instance = "pan"
-controller = "pwm0"
-channel = 0
-physical = [12]
-direction = "out"
-rail = "rail5v"
-failsafe = "release"
-mux_group = []
-"#;
+"#,
+        include_str!("testdata/pin_servo_pan.toml"),
+    );
 
     /// 合法候选（§4.4 示例档值面，与 axis.rs 单测 sample_text 同形状）：
     /// 手工标定产物——calibrated=true + hard_stop=yes + source=manual。
     fn candidate_text(center: u16) -> String {
-        [
-            "schema = 1",
-            "pin = \"act.axis.pwm.pan\"",
-            &format!("center_deg = {center}"),
-            "lo_deg = 60",
-            "hi_deg = 120",
-            "dir_sign = 1",
-            "slew_deg_s = 100",
-            "settle_ms = 200",
-            "hold = \"release\"",
-            "current_ceil_ma = 750",
-            "warmup_ms = 0",
-            "hard_stop = \"yes\"",
-            "calibrated = true",
-            "source = \"manual\"",
-        ]
-        .join("\n")
+        crate::test_fixtures::axis_sample_text(center, "yes", true)
     }
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "rrd-axis-write-t-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .subsec_nanos()
-        ));
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        crate::test_fixtures::tmpdir_ns("rrd-axis-write-t-", tag)
     }
 
     /// 装机布局夹具：profiles/default.toml（形态名 = 文件名 stem）。Drop 清树，

@@ -73,6 +73,17 @@ fn register(c: &mut RrdClient, manifest: &str, name: &str) -> u64 {
         .unwrap_or_else(|| panic!("注册应答缺 src_task: {v}"))
 }
 
+/// 调用方上线（两处同款）：空 exposes 的 rr3-sense 注册并带回 task
+fn register_caller(rrd: &RrdTest) -> (RrdClient, u64) {
+    let mut caller = rrd.rr3_connect();
+    let task_r = register(
+        &mut caller,
+        &manifest_exposes("rr3-sense", &[]),
+        "rr3-sense",
+    );
+    (caller, task_r)
+}
+
 /// 被调方视角：等转发来的 rr3.call（Request + method=rr3.call），返回 (帧, 体)
 fn read_forwarded_call(c: &mut RrdClient) -> (Rr3Frame, Value) {
     let f = rr3_read_where(c, " 转发的 rr3.call", |f| {
@@ -126,12 +137,7 @@ fn call_routes_to_callee_and_response_comes_back() {
         &manifest_exposes("rr3-interact", &["rr3-interact/tts/text"]),
         "rr3-interact",
     );
-    let mut caller = rrd.rr3_connect();
-    let task_r = register(
-        &mut caller,
-        &manifest_exposes("rr3-sense", &[]),
-        "rr3-sense",
-    );
+    let (mut caller, task_r) = register_caller(&rrd);
 
     rr3_send(
         &mut caller,
@@ -186,12 +192,7 @@ fn call_routes_to_callee_and_response_comes_back() {
 #[test]
 fn call_unknown_topic_is_rejected_and_connection_survives() {
     let rrd = RrdTest::rr3_start("mcall-unknown");
-    let mut caller = rrd.rr3_connect();
-    let task_r = register(
-        &mut caller,
-        &manifest_exposes("rr3-sense", &[]),
-        "rr3-sense",
-    );
+    let (mut caller, task_r) = register_caller(&rrd);
 
     rr3_send(
         &mut caller,

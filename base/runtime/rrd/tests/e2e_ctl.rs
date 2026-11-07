@@ -31,6 +31,19 @@ fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
     rr3_json_of(&f)
 }
 
+/// 夹具注册（两处同款）：sima 以 always/100/500 上册，带回注册分到的 src_task
+fn register_sima_task(t: &RrdTest) -> (RrdClient, u64) {
+    let mut a = t.rr3_connect();
+    rr3_send(
+        &mut a,
+        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
+    );
+    let task = rr3_read_rpc(&mut a)["result"]["src_task"]
+        .as_u64()
+        .expect("注册应答带 src_task");
+    (a, task)
+}
+
 /// ctl 一问一答即断：应答之后这条连接读不到更多帧（EOF / 读超时收尾）
 fn rr3_assert_ctl_closed(c: &mut RrdClient) {
     let rest = rr3_drain_until_closed(c);
@@ -184,14 +197,7 @@ fn ctl_wiring_reports_unavailable_without_profile_boot() {
 #[test]
 fn registered_module_uplink_ctl_is_refused_but_connection_survives() {
     let t = RrdTest::rr3_start_no_overlay("ctl-uplink-deny");
-    let mut a = t.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    let task = rr3_read_rpc(&mut a)["result"]["src_task"]
-        .as_u64()
-        .expect("注册应答带 src_task");
+    let (mut a, task) = register_sima_task(&t);
 
     // 注册后上行帧的 src_task 必须等于分配值（AOS-STD-IPC-024），ctl 上行也不例外
     rr3_send(
@@ -355,14 +361,7 @@ fn counters_persist_across_restart_and_boots_accumulate() {
         let mut t = RrdTest::rr3_start_env("counters-gen2", &envs);
         let line = t.rr3_wait_log("counters 持久化已启用");
         assert!(line.contains("boots 自增已回写"), "{line}");
-        let mut a = t.rr3_connect();
-        rr3_send(
-            &mut a,
-            &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-        );
-        let task = rr3_read_rpc(&mut a)["result"]["src_task"]
-            .as_u64()
-            .expect("注册应答带 src_task");
+        let (mut a, task) = register_sima_task(&t);
         rr3_send(
             &mut a,
             &rr3_rpc_frame(

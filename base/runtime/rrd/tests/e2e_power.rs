@@ -15,7 +15,6 @@
 
 mod support;
 
-use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
@@ -31,45 +30,9 @@ use support::*;
 /// 校验②只记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
 /// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。
 /// schema_version=5 起 [runtime] 必填（批N5 件二 F-30）——log_ring_cap 进场。
-const PROFILE: &str = r#"
-schema_version = 5
-
-[os]
-route = "distro"
-
-[runtime]
-log_ring_cap = 512
-hal_backend = "sim"
-
-[platform]
-tier = "host"
-chip = "rk3566"
-
-[supplies]
-watchdog_present = false
-watchdog_timeout_ms = 15000
-watchdog_feeder = "rrd"
-tick_period_ms = 200
-tick_jitter_ms = 100
-safety_core_interval_ms = 1000
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[supplies.budget]
-not_applicable = true
-
+const PROFILE: &str = concat!(
+    include_str!("../src/testdata/profile_host_prefix.toml"),
+    r#"
 [slots]
 present = ["power.charger"]
 
@@ -78,7 +41,8 @@ present = ["power.charger"]
 
 [enabled_slots]
 rr3-power = ["power.charger"]
-"#;
+"#,
+);
 
 /// config 夹具：字段名与仓内 `modules/rr3-power/config.toml` 同形状（main.rs 的
 /// `config_parse_covers_repo_shape` 钉过同形状解析，漂移当场红）。周期压短让观察者
@@ -106,55 +70,8 @@ severe_mv = 4400
 max_age_ms = 0
 "#;
 
-/// 接线档底稿（增补轮六 §4.3）：装载期校验⑦要求装机档必在——vcc/gnd-only
-/// 单线组（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
-const WIRING: &str = r#"
-[[wire]]
-connector = "J-T"
-hdr_pin = [1, 2]
-signal = ["vcc", "gnd"]
-net = "rail5v"
-feeds = []
-mate = "none"
-keyed = false
-rated_a = 1.0
-gnd_common = "star-1"
-"#;
-
-/// 装机布局夹具（e2e_act 同款）：Drop 清整树——断言 panic 后 /tmp 不许留残迹。
-struct Root {
-    dir: PathBuf,
-}
-
-impl Root {
-    fn new(tag: &str) -> Root {
-        let dir = std::env::temp_dir().join(format!("rr3-power-e2e-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir); // pid 复用留下的上次残根不许干扰本次
-        std::fs::create_dir_all(dir.join("profiles")).expect("建 profiles 目录");
-        Root { dir }
-    }
-
-    fn write_profile(&self, text: &str) -> PathBuf {
-        let p = self.dir.join("profiles").join("default.toml");
-        std::fs::write(&p, text).expect("写装配单");
-        // 同批 stage 接线档（hardware/<形态>/wiring.toml，rr3_wiring_path
-        // 推导的同一布局）：装载期校验⑦要求装机档必在
-        let w = self
-            .dir
-            .join("hardware")
-            .join("default")
-            .join("wiring.toml");
-        std::fs::create_dir_all(w.parent().unwrap()).expect("建 hardware 目录");
-        std::fs::write(&w, WIRING).expect("写接线档");
-        p
-    }
-}
-
-impl Drop for Root {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
+/// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_act/e2e_connect 同款：
+/// profiles/default.toml + hardware/default/wiring.toml，Drop 清整树）。
 
 /// 帧的 (载荷类型, topic) 摘要：谓词与计数共用的纯函数底座。非 JSON / 坏前缀 /
 /// 非 object 体一律 None——谓词里不许 panic（SCAN_BUDGET 的硬前提），`get` 而非
@@ -169,7 +86,7 @@ fn frame_topic(f: &Rr3Frame) -> Option<(Rr3PayloadType, String)> {
 fn power_module_low_battery_fallback_end_to_end() {
     // ---------- 夹具：真二进制 + 真 manifest + config 同树 ----------
     let bin = rr3_build_module_bin("rr3-power");
-    let root = Root::new("power");
+    let root = E2eRoot::rr3_new("power", "power");
     let mod_dir = root.dir.join("modules").join("rr3-power");
     std::fs::create_dir_all(&mod_dir).expect("建模块目录");
     std::fs::write(
@@ -178,7 +95,7 @@ fn power_module_low_battery_fallback_end_to_end() {
     )
     .expect("写模块 manifest");
     std::fs::write(mod_dir.join("config.toml"), CONFIG).expect("写模块 config");
-    let profile = root.write_profile(PROFILE);
+    let profile = root.rr3_write_profile(PROFILE);
 
     // ---------- ① 正门 boot：spawn → 注册 → running → 兜底触发 ----------
     // env 显式钉 sim 后端（不赌平台默认）+ sim 探针（MC-4：非 test 面不再默认 sim，

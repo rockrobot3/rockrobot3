@@ -14,6 +14,17 @@ use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use std::time::Duration;
 use support::*;
 
+/// simb 旁观连接上线（两处同款）：注册旁观者并消费注册回执
+fn connect_simb(rrd: &RrdTest) -> RrdClient {
+    let mut b = rrd.rr3_connect();
+    rr3_send(
+        &mut b,
+        &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
+    );
+    rr3_read_rpc(&mut b);
+    b
+}
+
 /// 真进程完成握手、task 取自 rrd 的应答（不是自设），心跳被连续接受
 #[test]
 fn sim_peer_registers_and_beats_are_accepted() {
@@ -50,12 +61,7 @@ fn sim_peer_publish_reaches_another_connection() {
     // 旁观连接必须先上线：转发只发给"当时在册"的连接，晚注册的收不到（Task 7 的 fanout 语义）。
     // 这也决定了 task 号：b 先到拿 2，夹具稍后拿 3 —— 所以断言比对的是 rrd 日志里那个分配值，
     // 不是写死的 2。
-    let mut b = rrd.rr3_connect();
-    rr3_send(
-        &mut b,
-        &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
-    );
-    rr3_read_rpc(&mut b);
+    let mut b = connect_simb(&rrd);
 
     let manifest = rr3_fixture_manifest("pub", "sima");
     let mut peer = SimPeer::rr3_start(&rrd.socket, &manifest, "publish_once");
@@ -111,12 +117,7 @@ fn sim_peer_clean_exit_broadcasts_unregistered_and_never_restarts() {
 fn killed_foreign_peer_is_only_an_eof_and_its_plan_is_skipped() {
     let mut rrd = RrdTest::rr3_start("e2e-abort");
 
-    let mut b = rrd.rr3_connect();
-    rr3_send(
-        &mut b,
-        &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
-    );
-    rr3_read_rpc(&mut b);
+    let mut b = connect_simb(&rrd);
 
     let manifest = rr3_fixture_manifest("abort", "sima"); // always 策略
     let mut peer = SimPeer::rr3_start(&rrd.socket, &manifest, "abort");

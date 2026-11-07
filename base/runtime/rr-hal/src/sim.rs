@@ -578,6 +578,13 @@ mod tests {
         Rr3SimAudioSource::rr3_sim_source_new(wave)
     }
 
+    /// 双麦 DoA 回归共用：16k/立体声/16bit（三处 open 同口径）
+    const CFG_16K_STEREO: Rr3AudioCfg = Rr3AudioCfg {
+        sample_rate_hz: 16000,
+        channels: 2,
+        bit_depth: 16,
+    };
+
     #[test]
     fn wave_parse_covers_three_modes_and_rejects_garbage() {
         for (s, want) in [
@@ -776,12 +783,7 @@ mod tests {
                 Rr3SimWave::Sine,
                 Rr3SimDoa::rr3_sim_doa_new(deg),
             );
-            s.open(Rr3AudioCfg {
-                sample_rate_hz: 16000,
-                channels: 2,
-                bit_depth: 16,
-            })
-            .unwrap();
+            s.open(CFG_16K_STEREO).unwrap();
             // 读 16000 帧（1 秒）：ITD 相移对 1s 整周期数平均后不扰 RMS 比值
             let mut pcm = [0i16; 32000];
             let n = s.read(&mut pcm).unwrap();
@@ -816,12 +818,7 @@ mod tests {
                 Rr3SimWave::Sine,
                 Rr3SimDoa::rr3_sim_doa_new(deg),
             );
-            s.open(Rr3AudioCfg {
-                sample_rate_hz: 16000,
-                channels: 2,
-                bit_depth: 16,
-            })
-            .unwrap();
+            s.open(CFG_16K_STEREO).unwrap();
             // 读 200ms 双通道（3200 帧——覆盖整周期多圈，互相关峰稳定）
             let n_frames = 3200;
             let mut pcm = vec![0i16; n_frames * 2];
@@ -872,12 +869,7 @@ mod tests {
             Rr3SimWave::Burst,
             Rr3SimDoa::rr3_sim_doa_new(-60.0),
         );
-        s.open(Rr3AudioCfg {
-            sample_rate_hz: 16000,
-            channels: 2,
-            bit_depth: 16,
-        })
-        .unwrap();
+        s.open(CFG_16K_STEREO).unwrap();
         // 第 1 秒（16000 帧）有声
         let mut loud = [0i16; 32000];
         let n = s.read(&mut loud).unwrap();

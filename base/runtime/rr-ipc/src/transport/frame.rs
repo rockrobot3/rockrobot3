@@ -89,6 +89,7 @@ mod tests {
         OFF_MAGIC, OFF_OPCODE, OFF_PAYLOAD_LEN, OFF_RESERVED, OFF_SRC_TASK, OFF_TIMESTAMP_NS,
         OFF_TRACE_ID,
     };
+    use crate::protocol::wire::rr3_golden_pure;
     use std::format;
     use std::io::Cursor;
     use std::println;
@@ -157,17 +158,7 @@ mod tests {
     #[test]
     fn frame_header_is_byte_identical_to_golden() {
         let g = golden();
-        // golden 是**无载荷**纯头（CRC 覆盖载荷，故其 CRC 字段本就为 0）
-        let pure = Rr3Header::from_bytes(&g).unwrap();
-        assert_eq!(
-            pure.payload_crc32, 0,
-            "golden 无载荷纯头的 CRC 字段必须为 0"
-        );
-        assert_eq!(
-            pure.to_bytes().to_vec(),
-            g,
-            "无载荷纯头与 golden 向量逐字节一致"
-        );
+        let pure = rr3_golden_pure(&g);
 
         // 带载荷的真帧：头里 CRC 由载荷算出（非零）且接收侧校验必过；
         // 除 CRC 字段外，其余头字节仍与 golden 逐字节一致

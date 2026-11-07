@@ -22,6 +22,10 @@ pub mod rpc;
 pub mod topics_load;
 pub mod wiring;
 
+/// 测试夹具（rrd 各单测共享的临时目录与样例文本，仅测试面编入）
+#[cfg(test)]
+mod test_fixtures;
+
 #[cfg(unix)]
 pub mod conn;
 #[cfg(unix)]

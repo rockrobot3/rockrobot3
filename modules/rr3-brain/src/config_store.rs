@@ -143,9 +143,12 @@ mod tests {
     use serde_json::json;
 
     /// 与仓内 config.toml 同形状的文本（模型块在 bus/dialog 段之前——块尾边界
-    /// 必须认 `[rr3-brain.bus]` 表头，而不是被下一行 model 表头误截）
+    /// 必须认 `[rr3-brain.bus]` 表头，而不是被下一行 model 表头误截）。
+    /// head（[rr3-brain] 头 + cloud 注释/短值 + 块外注释行）内联——"重写保留块外
+    /// 逐字文本"的判据在这里；model 行表与尾段引用 boot 夹具常量（一份文本一份判据）
     fn repo_text() -> String {
-        r#"[rr3-brain]
+        format!(
+            r#"[rr3-brain]
 log_level = "info"
 
 [rr3-brain.cloud]
@@ -157,22 +160,11 @@ tts_model = "t"
 timeout_s = 20
 
 # 模型行表头注释（块边界外，重写保留）
-[[rr3-brain.model]]
-name = "DeepSeek官方"
-mode = "api"
-api_format = "openai"
-base_url = "https://api.deepseek.com/v1"
-model_id = "deepseek-chat"
-api_key_ref = "DeepSeek官方"
-active = true
-
-[rr3-brain.bus]
-call_timeout_s = 30.0
-
-[rr3-brain.dialog]
-max_utterance_ms = 8000
-"#
-        .to_string()
+{}
+{}"#,
+            crate::boot::RR3_MODEL_ROWS_TOML,
+            crate::boot::RR3_CFG_TAIL_TOML
+        )
     }
 
     fn row(name: &str, base: &str, model: &str, active: bool) -> Value {

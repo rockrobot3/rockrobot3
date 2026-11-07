@@ -21,9 +21,10 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::assemble::rr3_ctl_status_rows;
 use crate::drill::{
-    rr3_find_repo_root, rr3_manifest_ext, rr3_parse_status, rr3_require_bins_ext, rr3_wait_modules,
-    RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN,
+    rr3_manifest_ext, rr3_require_bins_ext, rr3_wait_modules, RR3_SIM_MODULE_A, RR3_SIM_MODULE_B,
+    RR3_SIM_MODULE_BRAIN,
 };
 
 use crate::drill::Rr3SimArgs;
@@ -166,13 +167,7 @@ fn rr3_llm_root_of(base_url: &str) -> String {
 
 pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     // ---- 0. 定位：仓根与二进制 ----
-    let repo = match &a.repo {
-        Some(p) => p.clone(),
-        None => std::env::current_dir()
-            .ok()
-            .and_then(|cwd| rr3_find_repo_root(&cwd))
-            .ok_or("找不到仓根（缺 contracts/topics.toml）：请在仓内运行，或 --repo <路径>")?,
-    };
+    let repo = crate::drill::rr3_repo_locate(a)?;
     let (d_rrd, _peer, d_rrctl) = crate::drill::rr3_default_bins(&repo);
     let rrd = a.rrd.clone().unwrap_or(d_rrd);
     let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
@@ -401,12 +396,8 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             Err(e) => Err(e),
         };
     }
-    for (name, mut child) in children {
-        let _ = child.kill();
-        let _ = child.wait();
-        let _ = name;
-    }
-    let _ = std::fs::remove_file(&socket);
+    // 收尾：杀子进程 + 删套接字，随后出演练结论
+    rr3_teardown_procs(children, &socket);
     match outcome {
         Ok(()) => {
             report.push_str(&format!(
@@ -418,16 +409,14 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     }
 }
 
-/// 轮询用的 status 快照（与 main.rs run 模块的 rr3_ctl_rows 同一真值）：
-/// 连接失败（rrd 尚未就绪）当空表处理，由 deadline 收口
-fn rr3_ctl_status_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)> {
-    Command::new(rrctl)
-        .arg("--bus-path")
-        .arg(socket)
-        .arg("status")
-        .output()
-        .map(|o| rr3_parse_status(&String::from_utf8_lossy(&o.stdout)))
-        .unwrap_or_default()
+/// 收尾共用：杀光子进程、删总线套接字（--keep 保留现场分支不走这里）
+pub(crate) fn rr3_teardown_procs(children: Vec<(String, Child)>, socket: &Path) {
+    for (name, mut child) in children {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = name;
+    }
+    let _ = std::fs::remove_file(socket);
 }
 
 /// 有界等套接字文件出现（rrd bind 的时序闸门；超时是 drill 自身故障）

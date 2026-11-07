@@ -2865,7 +2865,8 @@ mod tests {
         dir: PathBuf,
     }
 
-    const GOOD: &str = r#"
+    const GOOD: &str = concat!(
+        r#"
 schema_version = 5
 
 [os]
@@ -2887,62 +2888,23 @@ tick_period_ms = 200
 tick_jitter_ms = 100
 safety_core_interval_ms = 1000
 
-[[supplies.domain]]
-name = "batt"
-nominal_mv = 3700
-mild_mv = 3500
-severe_mv = 3300
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
+"#,
+        include_str!("testdata/domain_batt_none.toml"),
+        include_str!("testdata/domain_rail5v.toml"),
+        r#"
 # [supplies.budget]（schema 4，校验⑩ 分母）：host 档合法不适用必须显式写，不许留空
 [supplies.budget]
 not_applicable = true
 
-[bindings]
-"act.servo" = "rr3-pa"
-"power.charger" = "rr3-pb"
-"cognition.llm" = "rr3-pc"
-
-[enabled_slots]
-rr3-pa = ["act.servo"]
-rr3-pb = ["power.charger"]
-rr3-pc = ["cognition.llm"]
-
+"#,
+        include_str!("testdata/mod3_bindings_enabled.toml"),
+        r#"
 [slots]
 present = ["act.servo", "cognition.llm", "power.charger"]
 
-[[pin]]
-role = "act.axis.pwm"
-instance = "pan"
-controller = "pwm0"
-channel = 0
-physical = [12]
-direction = "out"
-rail = "rail5v"
-failsafe = "release"
-mux_group = []
-
+"#,
+        include_str!("testdata/pin_servo_pan.toml"),
+        r#"
 [[pin]]
 role = "power.charger.meter"
 controller = "i2c1"
@@ -2950,23 +2912,14 @@ addr = "0x70"
 device = "INA219"
 direction = "in"
 mux_group = []
-"#;
+"#,
+    );
 
-    /// 接线档底稿（§4.3 九字段，与 wiring.rs 测试区 GOOD 同形状）：单线组只挂
-    /// vcc/gnd 与电力导体（net=rail5v 在 GOOD 两域在册）——对 [[pin]] 增删免疫，
-    /// 删 pin 的用例不因 ⑦-a 误红。校验⑦ 反例用 `write_wiring` 覆写。
-    const GOOD_WIRING: &str = r#"
-[[wire]]
-connector = "J-T"
-hdr_pin = [1, 2]
-signal = ["vcc", "gnd"]
-net = "rail5v"
-feeds = []
-mate = "none"
-keyed = false
-rated_a = 1.0
-gnd_common = "star-1"
-"#;
+    /// 接线档底稿（§4.3 九字段，与 wiring.rs 测试区 GOOD 同形状）：单一真值
+    /// `testdata/wiring_bottom.toml`。单线组只挂 vcc/gnd 与电力导体（net=rail5v
+    /// 在 GOOD 两域在册）——对 [[pin]] 增删免疫，删 pin 的用例不因 ⑦-a 误红。
+    /// 校验⑦ 反例用 `write_wiring` 覆写。
+    const GOOD_WIRING: &str = include_str!("testdata/wiring_bottom.toml");
 
     impl Root {
         fn new(tag: &str) -> Root {
@@ -2985,21 +2938,10 @@ gnd_common = "star-1"
         fn stage_servo_module(&self) {
             let a = self.dir.join("modules/rr3-pa/atoms/servo/assemble.toml");
             std::fs::create_dir_all(a.parent().expect("必有父目录")).expect("建 atoms 目录");
-            std::fs::write(
-                &a,
-                concat!(
-                    "schema_version = 2\n\n[assemble]\n",
-                    "handles = [\n",
-                    "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n",
-                    "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_channel\" },\n",
-                    "]\n",
-                    "ops = []\n",
-                    "demands = [\n",
-                    "  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n",
-                    "]\n",
-                ),
-            )
-            .expect("stage servo assemble.toml");
+            // 件装配清单单一真值（testdata/servo_assemble.toml，与 e2e_act /
+            // domain_write 测试区同一底稿）
+            std::fs::write(&a, include_str!("testdata/servo_assemble.toml"))
+                .expect("stage servo assemble.toml");
         }
 
         /// 覆写 stage 件申报面为"未申报"（⑨ 覆盖判据红例的构造器）
@@ -3174,7 +3116,8 @@ gnd_common = "star-1"
     /// 电表 pin（controller = adc1、physical = [34]）是 batt 域的模拟测点
     /// （sense 按 pin_id 引用，⑥-d 同一语法），34 ∈ esp32 adc_pins ⇒ 全绿基线；
     /// 反例经定点替换构造。rtos 档不派生（host 档派生器不识别板侧词形）。
-    const ESP32_GOOD: &str = r#"
+    const ESP32_GOOD: &str = concat!(
+        r#"
 schema_version = 5
 
 [runtime]
@@ -3193,34 +3136,10 @@ tick_period_ms = 200
 tick_jitter_ms = 100
 safety_core_interval_ms = 1000
 
-[[supplies.domain]]
-name = "batt"
-nominal_mv = 3700
-mild_mv = 3500
-severe_mv = 3300
-current_cap_ma = 2000
-sense = "power.battery.meter"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
+"#,
+        include_str!("testdata/domain_batt_meter.toml"),
+        include_str!("testdata/domain_rail5v.toml"),
+        r#"
 # [supplies.budget]（schema 4，校验⑩ 分母）：栈预算 = 2× 现役 16KB 任务 + 余量
 # （board.rs THREAD_STACK/MIC_THREAD_STACK 同源）；堆三键 = ESP32-S3 数据表推算
 # 的演练实例，对账归 0.0.7 真板。heap_reserved_bytes 与 profiles/esp32-mini.toml
@@ -3232,16 +3151,9 @@ task_stack_budget_bytes = 65536
 heap_total_bytes = 327680
 heap_reserved_bytes = 98816
 
-[bindings]
-"act.servo" = "rr3-pa"
-"power.charger" = "rr3-pb"
-"cognition.llm" = "rr3-pc"
-
-[enabled_slots]
-rr3-pa = ["act.servo"]
-rr3-pb = ["power.charger"]
-rr3-pc = ["cognition.llm"]
-
+"#,
+        include_str!("testdata/mod3_bindings_enabled.toml"),
+        r#"
 [slots]
 present = ["act.servo", "cognition.llm", "power.charger"]
 
@@ -3263,7 +3175,8 @@ addr = "none"
 physical = [34]
 direction = "in"
 mux_group = []
-"#;
+"#,
+    );
 
     /// G4 装配段扫描直测（ADR-0019 修订 1 ③）：缺文件/坏形/注入缺逐条点名，
     /// 无 atoms 目录与合法空数组不产生缺口
