@@ -75,7 +75,7 @@ pub use protocol::wire::{rr3_frame_to_bytes, Rr3Frame, Rr3FrameError};
 pub use transport::buf::{rr3_framebuf_read, rr3_verify_crc, Rr3FrameBuf};
 pub use transport::bytestream::Rr3ByteStream;
 #[cfg(not(target_os = "none"))]
-pub use transport::frame::{rr3_frame_read, rr3_frame_write};
+pub use transport::frame::{rr3_frame_read, rr3_frame_read_cap, rr3_frame_write};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use transport::uart::{rr3_uart_baud_speed, Rr3UartConn, RR3_UART_BAUD_DEFAULT};
 #[cfg(unix)]
