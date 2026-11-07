@@ -1,7 +1,9 @@
 //! 本地落盘原子序（全仓唯一实现，批N4 件四 I-20 下沉共享）。
 //!
-//! 写序：tmp 写全量 → `sync_all()` → 同目录 `rename` → rename 失败清 tmp——
-//! 断电卡在写中间时目标文件要么是旧全量、要么是新全量，不存在半截。
+//! 写序：tmp 写全量 → `sync_all()` → 同目录 `rename` → 父目录 fsync（尽力而为）
+//! → rename 失败清 tmp——断电卡在写中间时目标文件要么是旧全量、要么是新全量，
+//! 不存在半截；目录 fsync 保证"新全量可见"在掉电后仍是事实（POSIX 崩溃一致
+//! 性：只 fsync 文件不 fsync 目录，rename 可能在掉电后回旧态）。
 //!
 //! 为什么住在 rr-ipc：裁定（全案 §19.2 Y-2 / interact I-20，索引 L-26）——
 //! **轴档案、域阈值、`armed`、凭据的落盘一律复用同一份原子序，出现第二条写
@@ -41,7 +43,17 @@ pub fn rr3_atomic_store(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), Stri
     std::fs::rename(tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(tmp);
         format!("rename {} → {} 失败: {e}", tmp.display(), path.display())
-    })
+    })?;
+    // 目录 fsync（尽力而为）：POSIX 只保证文件 fsync 后内容在掉电后可见，
+    // rename 的目录项持久化要父目录 fsync 才成立——不刷则掉电可能静默回旧值
+    // （凭据/标定/计数全受影响）。失败不致命（tmpfs 等不支持时 EINVAL）：
+    // 文件级保证仍在，比没有强；调用方无需感知。
+    if let Some(parent) = path.parent() {
+        if let Ok(d) = File::open(parent) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

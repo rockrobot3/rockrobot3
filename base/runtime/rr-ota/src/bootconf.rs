@@ -130,9 +130,11 @@ pub fn rr3_bootconf_factory(text: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// 原子落盘：同目录临时文件写满后 rename 覆盖（同文件系统内 rename 原子，
-/// 断电只得到旧文本或新文本，不存在半截文件）。板上加固（写后 fsync）列
-/// partition-layout.md 板上核对项，主机可测面不含。
+/// 原子落盘：同目录临时文件写满 → 文件 fsync → rename 覆盖（同文件系统内
+/// rename 原子，断电只得到旧文本或新文本，不存在半截文件）→ 父目录 fsync
+/// （尽力而为）——POSIX 下 rename 的目录项持久化要目录 fsync 才成立，不刷
+/// 则掉电可能"引导标志看似已翻、重启回旧槽"。vfat（boot 分区）rename 原子
+/// 性弱于 unix 文件系统的残余风险仍列 partition-layout.md 板上核对项。
 pub fn rr3_bootconf_write_atomic(path: &Path, text: &str) -> io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
@@ -140,8 +142,17 @@ pub fn rr3_bootconf_write_atomic(path: &Path, text: &str) -> io::Result<()> {
         .and_then(|s| s.to_str())
         .unwrap_or("extlinux.conf");
     let tmp = dir.join(format!(".{name}.rr3-ota-tmp"));
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, path)
+    {
+        use std::io::Write as _;
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp, path)?;
+    if let Ok(d) = fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    Ok(())
 }
 
 /// 从内核 cmdline 文本解析运行槽（板上"当前槽"的权威来源——extlinux.conf
