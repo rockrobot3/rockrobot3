@@ -134,7 +134,7 @@ impl Rr3DeviceTable {
     /// 装载表，非第二真值点。
     pub fn rr3_device_table_peak_by_mate(&self) -> BTreeMap<String, i64> {
         let mut out: BTreeMap<String, i64> = BTreeMap::new();
-        for (_, e) in &self.devices {
+        for e in self.devices.values() {
             if e.mate.is_empty() {
                 continue;
             }

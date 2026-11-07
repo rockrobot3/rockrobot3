@@ -108,7 +108,7 @@ pub struct Rr3SpawnJob {
 /// supervisor 的两种请求。`Boot` 来自 daemon 的启动序（E-7），`Restart` 来自
 /// conn 收尾与 watchdog 到期那两路交出的计划（`Rr3Death::Broadcast` / `Rr3Expiry.restart`）。
 pub enum Rr3SuperMsg {
-    Boot(Rr3SpawnJob),
+    Boot(Box<Rr3SpawnJob>),
     Restart(Rr3RestartPlan),
 }
 
@@ -129,7 +129,7 @@ impl Rr3Supervisor {
         // 失败分支要点名是谁：`send` 吞掉的是整个消息，投递之后再读 `job` 已经晚了。
         // 一次 String clone 换"投递失败也报得出对象"，值得——这条路只在守护正在收尾时走。
         let name = job.facts.name.clone();
-        if self.tx.send(Rr3SuperMsg::Boot(job)).is_err() {
+        if self.tx.send(Rr3SuperMsg::Boot(Box::new(job))).is_err() {
             rr3_log(&format!("supervisor 已退出，boot 投递丢弃: {name}"));
         }
     }
@@ -561,6 +561,7 @@ pub fn rr3_spawn_supervisor(
                     // 必有 job")` 就建立在这个顺序上（`children` 的键只可能来自这里）。
                     // 这里不打日志：可见证据是 `rr3_boot_spawn` 的 `spawn …` 那一行，
                     // 多打一条"登记了"只是把同一件事说两遍（日志面每多一行就要多审一次 needle）。
+                    let job = *job;
                     let for_spawn = job.clone();
                     jobs.insert(job.facts.name.clone(), job);
                     rr3_boot_spawn(

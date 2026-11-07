@@ -86,9 +86,9 @@ const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
 /// 与重同步窗口（1.6s）看门狗解武装不计停滞，否则长骑行必被误杀；触发即实锤
 /// "武装收流中，分片字节 10s 未确认入队"。
 const STALL: Duration = Duration::from_secs(10);
-/// 开口 settle/应答超时/断流判据/大块裸读窗/重连预算七常量与握手三函数已上提
-/// rr-ipc 单点（`rr_ipc::audio_session`，A 批 c2 随 rr-hal esp32 音频源后端共用；
-/// 本件 import 接线，不再持第二份会话机制）。
+// 开口 settle/应答超时/断流判据/大块裸读窗/重连预算七常量与握手三函数已上提
+// rr-ipc 单点（`rr_ipc::audio_session`，A 批 c2 随 rr-hal esp32 音频源后端共用；
+// 本件 import 接线，不再持第二份会话机制）。
 
 /// 连续拆帧失败达此数记一次失步重同步账（日志对账；坏帧弃扫本身由
 /// [`FrameAssembler`] 在内存里即时完成，无独立扫描动作——1-2 次可能是单帧毛刺，
@@ -181,7 +181,7 @@ fn default_out() -> PathBuf {
 
 /// wav 头（44B PCM RIFF；s16le 双通道，rate 由调用方按**实测率**给定）。
 fn wav_header(data_len: u32, channels: u16, rate: u32, bits: u16) -> [u8; 44] {
-    let byte_rate = rate as u32 * channels as u32 * bits as u32 / 8;
+    let byte_rate = rate * channels as u32 * bits as u32 / 8;
     let block_align = channels * bits / 8;
     let mut h = [0u8; 44];
     h[0..4].copy_from_slice(b"RIFF");

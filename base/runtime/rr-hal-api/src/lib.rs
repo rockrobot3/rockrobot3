@@ -401,6 +401,7 @@ impl Rr3ActMotion {
 /// 2. `hard_stop = unknown` ⇒ [`Rr3ActMotion::CalibOpenLoop`] /
 ///    [`Rr3ActMotion::CalibStallSearch`] 拒；`hard_stop = no` ⇒
 ///    [`Rr3ActMotion::CalibStallSearch`] 拒（无硬挡块可找）。
+///
 /// [`Rr3ActMotion::Jog`] 永远放行。
 ///
 /// 单真值点：产出侧（rr3-act 组合件执行面）与判据用例共用本函数，不许各自
@@ -1064,13 +1065,9 @@ mod tests {
     #[test]
     fn act_profile_fields_pinned_shape_and_reader_annotations() {
         assert_eq!(RR3_ACT_PROFILE_FIELDS.len(), 14);
-        for i in 0..RR3_ACT_PROFILE_FIELDS.len() {
-            for j in (i + 1)..RR3_ACT_PROFILE_FIELDS.len() {
-                assert_ne!(
-                    RR3_ACT_PROFILE_FIELDS[i].key, RR3_ACT_PROFILE_FIELDS[j].key,
-                    "档案键名重复：{}",
-                    RR3_ACT_PROFILE_FIELDS[i].key
-                );
+        for (i, a) in RR3_ACT_PROFILE_FIELDS.iter().enumerate() {
+            for b in RR3_ACT_PROFILE_FIELDS.iter().skip(i + 1) {
+                assert_ne!(a.key, b.key, "档案键名重复：{}", a.key);
             }
         }
         let echo_keys: Vec<_> = RR3_ACT_PROFILE_FIELDS

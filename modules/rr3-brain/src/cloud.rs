@@ -622,14 +622,19 @@ pub(crate) mod testkit {
         RR3_TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// 测试 HTTP 服务收帧记账：(path, authorization, body)
+    pub(crate) type FakeReqs = Arc<Mutex<Vec<(String, String, Vec<u8>)>>>;
+    /// 可选路径开关（一次性 5xx / 坏 JSON / 缺字段夹具共用）
+    pub(crate) type FakePath = Arc<Mutex<Option<String>>>;
+
     pub(crate) struct FakeCloud {
         pub(crate) base: String,
-        pub(crate) requests: Arc<Mutex<Vec<(String, String, Vec<u8>)>>>, // (path, authorization, body)
-        pub(crate) fail_path: Arc<Mutex<Option<String>>>,
+        pub(crate) requests: FakeReqs,
+        pub(crate) fail_path: FakePath,
         /// 一次性 5xx（首请求 500、随即复位）——ASR 有界重试的正门夹具
-        pub(crate) fail_once_path: Arc<Mutex<Option<String>>>,
-        pub(crate) bad_json_path: Arc<Mutex<Option<String>>>,
-        pub(crate) missing_field_path: Arc<Mutex<Option<String>>>,
+        pub(crate) fail_once_path: FakePath,
+        pub(crate) bad_json_path: FakePath,
+        pub(crate) missing_field_path: FakePath,
     }
 
     impl FakeCloud {
@@ -695,7 +700,7 @@ pub(crate) mod testkit {
                         );
                     } else {
                         // /v1/audio/speech → 原始 PCM
-                        respond(&mut stream, "200 OK", &vec![1u8, 0].repeat(1600));
+                        respond(&mut stream, "200 OK", &[1u8, 0].repeat(1600));
                     }
                 }
             });
@@ -1087,7 +1092,7 @@ mod tests {
         std::env::set_var(RR3_API_KEY_ENV, "test-key");
         let client = Rr3TtsClient::new(&srv.base, "FunAudioLLM/CosyVoice2-0.5B", 5.0);
         let pcm = client.rr3_synthesize("好的", 16000).unwrap();
-        assert_eq!(pcm, vec![1u8, 0].repeat(1600));
+        assert_eq!(pcm, [1u8, 0].repeat(1600));
         let (path, _, body) = srv.last();
         assert_eq!(path, "/v1/audio/speech");
         let req: Value = serde_json::from_slice(&body).unwrap();

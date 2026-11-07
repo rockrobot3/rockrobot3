@@ -304,8 +304,8 @@ mod tests {
     fn capsule_full_open_center_row_geometry() {
         // y=32（页 4 bit0）= 满开眼中心行（CY=32）
         let buf = eye_page(4, EyeStyle::new(100, 0, 0, 100, Brow::None));
-        for x in 0..128 {
-            let lit = buf[x] & 1 == 1;
+        for (x, b) in buf.iter().enumerate() {
+            let lit = b & 1 == 1;
             let expect = (33..=51).contains(&x) || (77..=95).contains(&x);
             assert_eq!(lit, expect, "列 {x} 置位不符（满开中心行几何）");
         }

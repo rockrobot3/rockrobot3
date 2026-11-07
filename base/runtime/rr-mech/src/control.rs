@@ -312,7 +312,7 @@ mod tests {
         assert!(!e.rr3_low_edge_recover(3300), "恰等阈值仍是低电段内");
         assert!(e.rr3_low_edge_recover(3301), "严格大于阈值：恢复首拍");
         assert!(!e.rr3_low_edge_recover(3301), "恢复后不再报（armed 已回）");
-        assert!(e.rr3_low_edge_is_low() == false, "恢复即出段");
+        assert!(!e.rr3_low_edge_is_low(), "恢复即出段");
     }
 
     /// 喂入次序契约（钉 doc 那句"先 recover 后 cross"）：同拍先 cross 会把恢复沿

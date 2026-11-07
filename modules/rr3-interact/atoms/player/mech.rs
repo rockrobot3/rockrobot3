@@ -17,6 +17,12 @@
 //! 不落 `String` 堆），人读文案由编排层渲染（`src/composite.rs` 的
 //! `rr3_tts_play_error_text`，与改前逐字一致）；HAL 句柄入参改泛型
 //! （`S: Rr3AudioSink + ?Sized`，调用点单态化不改行为）。
+//!
+//! clippy `result_large_err` 模块级豁免：`Rr3ErrText` 内联 128B 是 no_std 面
+//! 定长契约（无堆可 Box），错误变体随行 HAL 错即必然 >128B——缩容会破坏零堆
+//! 契约，不属可清的临时债。
+
+#![allow(clippy::result_large_err)]
 
 use rr_hal_api::{Rr3AudioSink, Rr3HalError};
 
@@ -148,7 +154,7 @@ mod tests {
     #[test]
     fn play_passes_samples_through_in_20ms_blocks() {
         let mut sink = ChunkSpySink::new();
-        let input: Vec<i16> = (0..700).map(|i| (i as i32 * 37 - 5000) as i16).collect();
+        let input: Vec<i16> = (0..700).map(|i| (i * 37 - 5000) as i16).collect();
         let played = rr3_tts_play(&mut sink, &input).unwrap();
         // 700 样点 = 320 + 320 + 60：满块 20ms、尾块如实
         assert_eq!(sink.lens, vec![320, 320, 60]);
@@ -186,7 +192,7 @@ mod tests {
         fn run() -> (u64, Vec<i16>) {
             let mut sink = Rr3SimAudioSink::rr3_sim_sink_new(16000 * 10);
             sink.open(RR3_AUDIO_CFG_16K_MONO16).unwrap();
-            let input: Vec<i16> = (0..1000).map(|i| (i as i32 * 13 - 3000) as i16).collect();
+            let input: Vec<i16> = (0..1000).map(|i| (i * 13 - 3000) as i16).collect();
             let played = rr3_tts_play(&mut sink, &input).unwrap();
             (played, sink.rr3_sim_sink_played().to_vec())
         }

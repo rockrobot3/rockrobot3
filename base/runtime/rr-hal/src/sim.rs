@@ -88,6 +88,7 @@ pub struct Rr3SimAudioSource {
 /// - **ITD（相位差）**：双路按基线时差 `Δt = d·sinθ/c` 做音调相位偏移（B批 b3b
 ///   TDOA 起它是判据不是保真项：sense 互相关按时延反演，ITD 量级由
 ///   [`RR3_SIM_MIC_BASELINE_M`] 与反演基线同源保证）。
+///
 /// 通道序对齐板端口径（B批 b3 定案：frame[0] = 物理右、frame[1] = 物理左）——
 /// 本源 ch0 输出物理右、ch1 物理左，θ>0（右）时 ch0 近且先到（增益高、相位超前），
 /// sense 侧 `lag>0 = 右` 同号直通，注入角即反演角。

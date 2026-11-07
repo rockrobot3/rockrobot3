@@ -180,6 +180,7 @@ impl Rr3RoleTable {
 
     /// 自身形状检查：非空 + kind/direction 词域封闭 + slot/iface/requires 键必在
     /// + 布尔三键必在（缺省 = 误写 false 不可区分，同 no_injection 的显式范式）。
+    ///
     /// slot ∈ slots.toml 与 iface ∈ HANDLE_TRAITS 两条跨表判等**不在此处**
     /// （真值在对方表，调用方携带判定——见模块头注释）。
     pub fn rr3_role_table_check(&self) -> Vec<String> {
@@ -269,7 +270,7 @@ mod tests {
             table.rr3_role_table_per_instance("act.led.gpio"),
             Some(false)
         );
-        assert_eq!(table.rr3_role_table_contains("act.axis.enc"), false);
+        assert!(!table.rr3_role_table_contains("act.axis.enc"));
         // requires / derives 与派生器对账
         assert_eq!(
             table.rr3_role_table_requires("act.axis.pwm"),
@@ -319,7 +320,7 @@ mod tests {
             table.rr3_role_table_names_for_slot("power.rail"),
             vec!["power.current.sense", "power.rail.sense"]
         );
-        assert_eq!(table.rr3_role_table_contains("power.switch"), false);
+        assert!(!table.rr3_role_table_contains("power.switch"));
         // 批N3 件六新角色：SPI 显示面词形（slot=ui.face，iface=Rr3Display，
         // requires=controller+channel → derives=spi_device 派生对——敞口 18 行收口）
         assert_eq!(

@@ -190,7 +190,8 @@ pub(crate) fn rr3_ops_write(
             ));
         }
         let f = value.as_f64().unwrap_or(0.0);
-        if !(f > 0.0) {
+        // NaN 不可比：显式拒（判据"必须 >0"不得让 NaN 漏过）
+        if f.is_nan() || f <= 0.0 {
             return Err(format!(
                 "槽 {group}.{slot} 须 >0，收到 {}",
                 rr3_py_float_str(f)

@@ -240,16 +240,16 @@ pub fn rr3_registry_platform_table_from_text(text: &str) -> Result<Rr3PlatformTa
         None => errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into()),
     }
     for (n, k, ch) in entries {
-        if table.controllers.contains_key(&n) {
-            errs.push(format!("controller {n} 重复（词表一名一条）"));
-        } else {
-            table.controllers.insert(
-                n,
-                Rr3ControllerEntry {
+        match table.controllers.entry(n) {
+            std::collections::btree_map::Entry::Occupied(e) => {
+                errs.push(format!("controller {} 重复（词表一名一条）", e.key()));
+            }
+            std::collections::btree_map::Entry::Vacant(v) => {
+                v.insert(Rr3ControllerEntry {
                     kind: k,
                     channels: ch,
-                },
-            );
+                });
+            }
         }
     }
 

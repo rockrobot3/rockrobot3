@@ -21,12 +21,15 @@ use crate::panel::server::{
     RR3_SELFTEST_WIRING_EXPECTS,
 };
 
+/// 播放面 + 显示面句柄对（探活返回的观测面句柄）
+pub(crate) type Rr3PlayDispDevs = (Box<dyn Rr3AudioSink>, Box<dyn Rr3Display>);
+
 /// 播放面 + 显示面选择与开机探活编排：[`rr3_hal_audio_sink`] 选择＋ open 探活
 /// （打开失败 Err 上抛）＋「播放面就绪」回显 → [`rr3_hal_display`] 选择＋ frame()
 /// 探活（失败 Err，R11③ 显式回错不静默退化——真件档板显式 linux 时 MAX7219
 /// 后端未实装，探活 exit(1) 是预期语义）＋「显示面就绪」回显。返回两元句柄，
 /// backend 名回显后丢弃（回显已尽的观测面不随行）。
-pub(crate) fn rr3_interact_probe() -> Result<(Box<dyn Rr3AudioSink>, Box<dyn Rr3Display>), String> {
+pub(crate) fn rr3_interact_probe() -> Result<Rr3PlayDispDevs, String> {
     let (mut sink, backend) = rr3_hal_audio_sink();
     sink.open(RR3_AUDIO_CFG_16K_MONO16)
         .map_err(|e| format!("打开播放面({backend})失败: {e}"))?;

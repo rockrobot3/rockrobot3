@@ -2429,7 +2429,8 @@ fn pi4b_board_profile_pins_w4_harness() {
     }
 
     // L-10 tier↔tier_scope：rtos 档引用的格其 tier_scope 必须含 rtos。
-    for slot in ["act.servo"] {
+    {
+        let slot = "act.servo";
         let scope = table.rr3_slot_table_tier_scope(slot).unwrap_or_default();
         assert!(
             scope.iter().any(|t| t == "rtos"),
@@ -2708,7 +2709,7 @@ fn composite_declaration_face_is_pinned() {
     // 反例 3：写件级域的版本值 2 → 红，且点名"同名不同域"（schema 位裁定）
     assert_eq!(rr_registry::RR3_COMPOSITE_SCHEMA_VERSION, 1);
     let errs = rr_registry::rr3_registry_composite_from_text(
-        &"schema_version = 2\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n",
+        "schema_version = 2\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n",
     )
     .expect_err("组合件面写件级版本值必须红");
     assert!(errs.iter().any(|e| e.contains("同名不同域")), "{errs:?}");

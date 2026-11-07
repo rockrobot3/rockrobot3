@@ -161,19 +161,19 @@ pub(crate) fn rr3_act_axis_state_load() -> Rr3ActAxisState {
     axis
 }
 
+/// 执行面三句柄：舵机 + 灯 + 继电器
+pub(crate) type Rr3ActDevs = (
+    Box<dyn Rr3PwmServo>,
+    Box<dyn Rr3GpioOut>,
+    Box<dyn Rr3GpioOut>,
+);
+
 /// HAL 执行面三面选择 + 开机探活：servo/led/relay 各读回一次，Unsupported /
 /// 探活读失败即致命——显式回错不静默退化（rr-hal 占位件的契约），也不给"半个
 /// 执行器"的假活。探活全是读面 &self（批I F1 同步化后无需 block_on）。自原
 /// composite.rs 逐字迁入（失败文案三条与「执行面就绪」回显逐字）；backend 名
 /// 回显后丢弃（错误文案复用点在三条 map_err）。
-pub(crate) fn rr3_act_probe() -> Result<
-    (
-        Box<dyn Rr3PwmServo>,
-        Box<dyn Rr3GpioOut>,
-        Box<dyn Rr3GpioOut>,
-    ),
-    String,
-> {
+pub(crate) fn rr3_act_probe() -> Result<Rr3ActDevs, String> {
     let (servo_dev, servo_backend) = rr3_hal_servo();
     let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
     let (relay_gpio, relay_backend) = rr3_hal_gpio_out("relay");

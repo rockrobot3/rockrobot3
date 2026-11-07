@@ -57,7 +57,11 @@ fn rr3_act_run() -> Result<(), String> {
     cfg.servo.angle_min_deg = axis.lo_deg;
     cfg.servo.angle_max_deg = axis.hi_deg;
     let open = &cfg.intent.open_topics;
-    let intent_open = if open.is_empty() { "(空)".to_string() } else { open.join("/") };
+    let intent_open = if open.is_empty() {
+        "(空)".to_string()
+    } else {
+        open.join("/")
+    };
     eprintln!(
         "config 就绪: servo [{}, {}]（行程=轴档案）/{}/ms state>={}ms blink={}ms led_effects={} intent_open={intent_open} reflex {}Hz",
         cfg.servo.angle_min_deg, cfg.servo.angle_max_deg, cfg.servo.move_timeout_ms,
