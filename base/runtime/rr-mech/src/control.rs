@@ -11,7 +11,7 @@
 //! 四件原语的真值自模块面迁入（0.0.5 批D₃；模块侧 re-export 保既有路径）：
 //! `Rr3RateGate`（rr3-act servo/state 限速流）、`Rr3LowEdge`（rr3-power
 //! battery/low 边沿）、饱和检测三件（rr3-act 反射环：`Rr3ReflexCfg`/
-//! `rr3_reflex_window_plan`/`Rr3SaturationDetector`）+ 限位钳位
+//! `rr3_reflex_plan`/`Rr3SaturationDetector`）+ 限位钳位
 //! [`rr3_travel_clamp`]（安全核新原语，rr3-act 两路落角前接线）。
 //! 时钟一律 `u64` 毫秒注入（std `Instant` 到不了机制核）；零策略载荷。
 
@@ -165,7 +165,7 @@ impl Rr3LowGate {
         flip
     }
 
-    pub fn rr3_low_gate_is_blocked(&self) -> bool {
+    pub fn rr3_low_gate_blocked(&self) -> bool {
         self.blocked
     }
 }
@@ -183,7 +183,7 @@ pub struct Rr3ReflexCfg {
 /// notice 更小时压到与它同宽，保证"连续 need 窗"不越过 notice 承诺）；
 /// 窗内实跑 tick 数低于半拍才算饱和（sleep 粒度的系统性超期不算）。
 /// 返回 (window_ms, need_windows, expect_ticks_per_window)。
-pub fn rr3_reflex_window_plan(cfg: &Rr3ReflexCfg) -> (u64, u32, u64) {
+pub fn rr3_reflex_plan(cfg: &Rr3ReflexCfg) -> (u64, u32, u64) {
     let loop_hz = cfg.loop_hz.max(1) as u64;
     let window_ms = 250u64.min(cfg.saturate_notice_ms.max(1));
     let need = cfg.saturate_notice_ms.max(1).div_ceil(window_ms) as u32;
@@ -192,7 +192,7 @@ pub fn rr3_reflex_window_plan(cfg: &Rr3ReflexCfg) -> (u64, u32, u64) {
 }
 
 /// 一窗的饱和判定（纯函数）：实跑 tick 数低于期望半拍即饱和。
-pub fn rr3_reflex_window_saturated(ticks: u64, expect_ticks: u64) -> bool {
+pub fn rr3_reflex_saturated(ticks: u64, expect_ticks: u64) -> bool {
     ticks < expect_ticks / 2
 }
 
@@ -358,12 +358,12 @@ mod tests {
     #[test]
     fn low_gate_trips_and_releases_with_single_flip() {
         let mut g = Rr3LowGate::rr3_low_gate_new();
-        assert!(g.rr3_low_gate_is_blocked(), "复位即闭锁（§6 复位语义④）");
+        assert!(g.rr3_low_gate_blocked(), "复位即闭锁（§6 复位语义④）");
         assert!(!g.rr3_low_gate_release(), "未武装解禁被拒，保持闭锁");
-        assert!(g.rr3_low_gate_is_blocked());
+        assert!(g.rr3_low_gate_blocked());
         g.rr3_low_gate_arm();
         assert!(g.rr3_low_gate_release(), "武装后解禁是真边沿");
-        assert!(!g.rr3_low_gate_is_blocked());
+        assert!(!g.rr3_low_gate_blocked());
         assert!(!g.rr3_low_gate_release(), "重复解禁不再翻转");
     }
 
@@ -376,10 +376,10 @@ mod tests {
         assert!(g.rr3_low_gate_release(), "先武装解禁（起手健康开局）");
         assert!(g.rr3_low_gate_trip(), "低电闭锁是真边沿");
         assert!(!g.rr3_low_gate_release(), "旧武装已随 trip 撤销：解禁被拒");
-        assert!(g.rr3_low_gate_is_blocked(), "trip 撤了武装：闭锁保持");
+        assert!(g.rr3_low_gate_blocked(), "trip 撤了武装：闭锁保持");
         g.rr3_low_gate_arm();
         assert!(g.rr3_low_gate_release(), "闭锁后的新样本（re-arm）才解禁");
-        assert!(!g.rr3_low_gate_is_blocked());
+        assert!(!g.rr3_low_gate_blocked());
     }
 
     /// bare 本地兜底合成（MC-5 ④）：安全核段本地采样 → `Rr3LowEdge` 回阈 + 迟滞
@@ -400,7 +400,7 @@ mod tests {
                 gate.rr3_low_gate_arm();
                 gate.rr3_low_gate_release();
             }
-            gate.rr3_low_gate_is_blocked()
+            gate.rr3_low_gate_blocked()
         };
         assert!(!feed(3900), "高电压：开（首拍样本即武装）");
         assert!(feed(3300), "越阈：闭锁（拒动）");
@@ -415,17 +415,17 @@ mod tests {
             loop_hz: 1000,
             saturate_notice_ms: 500,
         };
-        assert_eq!(rr3_reflex_window_plan(&cfg), (250, 2, 250));
+        assert_eq!(rr3_reflex_plan(&cfg), (250, 2, 250));
         let cfg = Rr3ReflexCfg {
             loop_hz: 1000,
             saturate_notice_ms: 100,
         };
-        assert_eq!(rr3_reflex_window_plan(&cfg), (100, 1, 100));
+        assert_eq!(rr3_reflex_plan(&cfg), (100, 1, 100));
         let cfg = Rr3ReflexCfg {
             loop_hz: 100,
             saturate_notice_ms: 500,
         };
-        assert_eq!(rr3_reflex_window_plan(&cfg), (250, 2, 25));
+        assert_eq!(rr3_reflex_plan(&cfg), (250, 2, 25));
     }
 
     /// episode 语义：连续 need 窗饱和才翻 true 且只翻一次；非饱和窗复位
@@ -458,9 +458,9 @@ mod tests {
     /// 窗结算判定与速率折算的边界（半拍线 / 零除防御）
     #[test]
     fn window_saturated_and_rate_hz_boundaries() {
-        assert!(!rr3_reflex_window_saturated(125, 250), "恰半拍不算饱和");
-        assert!(rr3_reflex_window_saturated(124, 250), "低于半拍即饱和");
-        assert!(rr3_reflex_window_saturated(0, 250));
+        assert!(!rr3_reflex_saturated(125, 250), "恰半拍不算饱和");
+        assert!(rr3_reflex_saturated(124, 250), "低于半拍即饱和");
+        assert!(rr3_reflex_saturated(0, 250));
         assert_eq!(rr3_reflex_rate_hz(250, 250), 1000);
         assert_eq!(rr3_reflex_rate_hz(0, 250), 0);
         assert_eq!(rr3_reflex_rate_hz(10, 0), 0, "window_ms=0 不炸除零");
@@ -539,8 +539,8 @@ pub mod parity {
     //! （serde_json::json! 手工展开——机制核零 serde 依赖是 ⑧-b 依赖闭包门硬项）。
 
     use super::{
-        rr3_reflex_rate_hz, rr3_reflex_window_plan, rr3_reflex_window_saturated, rr3_travel_clamp,
-        Rr3LowEdge, Rr3RateGate, Rr3ReflexCfg, Rr3SaturationDetector,
+        rr3_reflex_plan, rr3_reflex_rate_hz, rr3_reflex_saturated, rr3_travel_clamp, Rr3LowEdge,
+        Rr3RateGate, Rr3ReflexCfg, Rr3SaturationDetector,
     };
 
     /// 套件版本（响应体 `v` 字段；向量/语义改动即 bump，防新旧错配误对拍）。
@@ -627,7 +627,7 @@ pub mod parity {
         for (i, mv) in RR3_LOW_VOLTAGES.iter().enumerate() {
             low[i] = edge.rr3_low_edge_cross(*mv);
         }
-        let (window_ms, need, _expect) = rr3_reflex_window_plan(&RR3_SAT_CFGS[0]);
+        let (window_ms, need, _expect) = rr3_reflex_plan(&RR3_SAT_CFGS[0]);
         let _ = window_ms;
         let mut det = Rr3SaturationDetector::rr3_detector_new(need);
         let mut sat = [false; 6];
@@ -636,11 +636,11 @@ pub mod parity {
         }
         let mut plan = [(0u64, 0u32, 0u64); 3];
         for (i, cfg) in RR3_SAT_CFGS.iter().enumerate() {
-            plan[i] = rr3_reflex_window_plan(cfg);
+            plan[i] = rr3_reflex_plan(cfg);
         }
         let mut wsat = [false; 3];
         for (i, (ticks, expect)) in RR3_WSAT_TICKS.iter().enumerate() {
-            wsat[i] = rr3_reflex_window_saturated(*ticks, *expect);
+            wsat[i] = rr3_reflex_saturated(*ticks, *expect);
         }
         let mut rhz = [0u64; 3];
         for (i, (ticks, window)) in RR3_RHZ_CASES.iter().enumerate() {
