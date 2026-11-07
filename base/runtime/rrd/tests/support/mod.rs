@@ -933,26 +933,45 @@ pub fn rr3_repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
-/// 现场编译一个独立工程模块，返回其二进制绝对路径（`modules/<name>/target/debug/<name>`）。
+/// 现场编译一个独立工程模块，返回其二进制绝对路径。
 /// 模块二进制**由测试现场 cargo build**（独立工程，`CARGO_BIN_EXE` 够不着它们）：
 /// 增量编译下缓存命中，代价只在首次全量。编译失败把 cargo 输出原样 panic 出来——
 /// 夹具烂和被测行为红必须分得开。
+/// 产物路径从 `--message-format=json` 的 `compiler-artifact.executable` 字段取，
+/// 不假设 `target/debug/<name>`——仓根 `.cargo/config.toml` 可把 target-dir 外移到
+/// `/tmp/rr3-build`，硬编码相对路径会找不到产物（P0-5 后回归门）。
 pub fn rr3_build_module_bin(name: &str) -> PathBuf {
     let dir = rr3_repo_root().join("modules").join(name);
     let manifest = dir.join("Cargo.toml");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let out = Command::new(&cargo)
-        .args(["build", "-q", "--manifest-path"])
+        .args(["build", "--message-format=json", "--manifest-path"])
         .arg(&manifest)
         .output()
         .unwrap_or_else(|e| panic!("起 {cargo} 失败: {e}"));
-    assert!(
-        out.status.success(),
-        "编译 {name} 失败:\n{}\n{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let bin = dir.join("target/debug").join(name);
+    if !out.status.success() {
+        panic!(
+            "编译 {name} 失败:\n{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let bin = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|v| {
+            v.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact")
+                && v.get("target")
+                    .and_then(|t| t.get("name"))
+                    .and_then(|n| n.as_str())
+                    == Some(name)
+        })
+        .and_then(|v| {
+            v.get("executable")
+                .and_then(|e| e.as_str())
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| panic!("编译 {name} 成功但 JSON 输出里没有 executable 字段"));
     let bin = bin
         .canonicalize()
         .unwrap_or_else(|e| panic!("编译产物 {} 不存在: {e}", bin.display()));

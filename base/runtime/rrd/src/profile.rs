@@ -1275,8 +1275,8 @@ fn rr3_platform_table_file_name(chip: &str) -> String {
 /// 装载真值集（[`rr3_runtime_truth_set`]）、contracts.rs 的 `RR3_CONTRACT_FILES`、
 /// 打包/装机等消费方一律引用本常量；新增/改名册只改这里，成员判等（基-40 单测
 /// ＋规约 ⑨-z 门）随之生效。顺序＝topics/slots/roles/devices（Z-4 记账点名序）。
-pub const RR3_CONTRACT_BOOKS: [&str; 4] =
-    ["topics.toml", "slots.toml", "roles.toml", "devices.toml"];
+#[rustfmt::skip]
+pub const RR3_CONTRACT_BOOKS: [&str; 4] = ["topics.toml", "slots.toml", "roles.toml", "devices.toml"];
 
 /// 装载消费真值集清单（增补轮六 基-25／实-12：全仓唯一一份，三处消费方判等——
 /// `rr3-pack` 打包 / buildroot `post-build.sh` 装机 / OTA 模块级更新）。清单由装载面
