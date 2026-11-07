@@ -56,7 +56,7 @@ fn rr3_sense_run() -> Result<(), String> {
 
     let (bus, cfg) = bootstrap(Rr3ModConfig {
         config_env: Some(RR3_SENSE_CONFIG_ENV),
-        parse_config: boot::rr3_sense_config_parse,
+        parse_config: boot::rr3_sense_cfg_parse,
     })?;
     eprintln!(
         "config 就绪: 来源={} doa_bin_threshold_deg={} doa_window_ms={} doa_window_rms_min={} doa_mic_baseline_mm={}",

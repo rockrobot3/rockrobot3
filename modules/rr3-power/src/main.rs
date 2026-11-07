@@ -44,7 +44,7 @@ fn rr3_power_run() -> Result<(), String> {
     // 总线接入 + config 读取解析（收敛序列前四段在 rr3mod bootstrap，文案逐字）
     let (bus, cfg) = bootstrap(Rr3ModConfig {
         config_env: Some(RR3_POWER_CONFIG_ENV),
-        parse_config: boot::rr3_power_config_parse,
+        parse_config: boot::rr3_power_cfg_parse,
     })?;
     // cutoff 显式标注"声明未生效"（MC-8① 裁定 (c)）：回显 ≠ 读者，关断动作归 M6。
     eprintln!(

@@ -26,9 +26,7 @@ use super::rpc::{
     rr3_low_power_reject, rr3_relay_apply_error_text, rr3_relay_parse_args,
     rr3_servo_motion_reject, rr3_servo_parse_args,
 };
-use super::servo::{
-    rr3_servo_check_motion, Rr3ServoCfg, Rr3ServoMotionError, RR3_SERVO_COMMAND_TOPIC,
-};
+use super::servo::{rr3_servo_motion, Rr3ServoCfg, Rr3ServoMotionError, RR3_SERVO_COMMAND_TOPIC};
 
 /// 本模块 exposes 的全集（module.toml [rpc].exposes 同源——归属门的真值；
 /// 字面量零内联，主题事实源在各自原子件的常量）
@@ -90,7 +88,7 @@ fn rr3_open_topics_join(open_topics: &[String]) -> String {
 /// auto（保守缺省——不申报按自动）。拒收文案编排层渲染（批N34 件二：机制层
 /// 零堆枚举，词面文案与 RPC 路同渲染单点，契约字面量逐字不变）。
 fn servo_motion_of(args: &Value) -> Result<rr_hal_api::Rr3ActMotion, String> {
-    rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))
+    rr3_servo_motion(args.get("motion").and_then(Value::as_str))
         .map_err(|Rr3ServoMotionError::UnknownWord(word)| rr3_servo_motion_reject(word))
 }
 

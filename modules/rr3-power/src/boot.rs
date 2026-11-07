@@ -66,7 +66,7 @@ pub(crate) struct Rr3RailCfg {
 
 /// TOML 文本 → Rr3PowerCfg。手工下钻不引 serde derive：字段个位数，
 /// 点名缺字段的文案比派生宏的默认报错可读（rr3-act 同款）。
-pub(crate) fn rr3_power_config_parse(text: &str) -> Result<Rr3PowerCfg, String> {
+pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
     let sect = |name: &str| -> Result<&toml::Value, String> {
         v.get("rr3-power")
@@ -174,7 +174,7 @@ mild_mv = 4600
 severe_mv = 4400
 max_age_ms = 0
 "#;
-        let cfg = rr3_power_config_parse(text).unwrap();
+        let cfg = rr3_power_cfg_parse(text).unwrap();
         assert_eq!(cfg.battery.sample_period_ms, 5000);
         assert_eq!(cfg.battery.low_voltage_mv, 3300);
         assert_eq!(cfg.battery.cutoff_voltage_mv, 3150);
@@ -190,28 +190,28 @@ max_age_ms = 0
 
     #[test]
     fn config_parse_rejects_missing_sections_and_fields() {
-        let e = rr3_power_config_parse("[rr3-power]\nlog_level = \"info\"\n").unwrap_err();
+        let e = rr3_power_cfg_parse("[rr3-power]\nlog_level = \"info\"\n").unwrap_err();
         assert!(
             e.contains("[rr3-power.battery]"),
             "缺段点名（battery 先解析）: {e}"
         );
-        let e = rr3_power_config_parse(
+        let e = rr3_power_cfg_parse(
             "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n[rr3-power.charger]\nstate_period_ms = 2000\n",
         )
         .unwrap_err();
         assert!(e.contains("cutoff_voltage_mv"), "缺字段点名: {e}");
         // rail 段缺段点名（批N2 件五：段必填）＋缺 up 键点名（全键必填）
-        let e = rr3_power_config_parse(
+        let e = rr3_power_cfg_parse(
             "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n",
         )
         .unwrap_err();
         assert!(e.contains("[rr3-power.rail]"), "rail 缺段点名: {e}");
-        let e = rr3_power_config_parse(
+        let e = rr3_power_cfg_parse(
             "[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\ndomain = \"rail5v\"\nsample_period_ms = 1000\nmild_mv = 4600\nsevere_mv = 4400\nmax_age_ms = 0\n",
         )
         .unwrap_err();
         assert!(e.contains("缺 up"), "rail 缺 up 键点名: {e}");
-        let e = rr3_power_config_parse("garbage =\n").unwrap_err();
+        let e = rr3_power_cfg_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
     }
 
@@ -220,12 +220,12 @@ max_age_ms = 0
     #[test]
     fn config_parse_rejects_inverted_rail_thresholds() {
         let base = "\ncutoff_voltage_mv = 3150\n[rr3-power.charger]\nstate_period_ms = 2000\n[rr3-power.rail]\nup = false\ndomain = \"rail5v\"\nsample_period_ms = 1000\n";
-        let e = rr3_power_config_parse(
+        let e = rr3_power_cfg_parse(
             &format!("[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n{base}mild_mv = 4400\nsevere_mv = 4400\nmax_age_ms = 0\n"),
         )
         .unwrap_err();
         assert!(e.contains("阈值倒挂"), "相等也红: {e}");
-        let e = rr3_power_config_parse(
+        let e = rr3_power_cfg_parse(
             &format!("[rr3-power.battery]\nsample_period_ms = 5000\nlow_voltage_mv = 3300\n{base}mild_mv = 4400\nsevere_mv = 4500\nmax_age_ms = 0\n"),
         )
         .unwrap_err();
@@ -253,7 +253,7 @@ mild_mv = 4600
 severe_mv = 4400
 max_age_ms = 0
 "#;
-        let cfg = rr3_power_config_parse(text).unwrap();
+        let cfg = rr3_power_cfg_parse(text).unwrap();
         assert_eq!(cfg.battery.sample_period_ms, 1, "0 周期钳到 1ms");
         assert_eq!(cfg.charger.state_period_ms, 1, "0 周期钳到 1ms");
         assert_eq!(cfg.rail.sample_period_ms, 1, "rail 0 周期同钳 1ms");

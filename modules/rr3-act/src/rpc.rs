@@ -54,7 +54,7 @@ pub(crate) fn rr3_handle_servo(
     // 拒动硬约束（§6，批N3 件三）：词缺席 = auto（保守——不申报按自动）；
     // 判据拒收回 InvalidParam，折业务性失败点名言（批N34 件二：机制层零堆
     // 枚举，词面文案在编排层渲染——契约字面量逐字不变）
-    let motion = servo::rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))
+    let motion = servo::rr3_servo_motion(args.get("motion").and_then(Value::as_str))
         .map_err(|servo::Rr3ServoMotionError::UnknownWord(word)| rr3_servo_motion_reject(word))?;
     rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
         .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
@@ -160,8 +160,8 @@ pub(crate) fn rr3_act_ops_snapshot(cfg: &Rr3ActCfg) -> Value {
 }
 
 /// servo/command 参数下钻（Value→纯值）：缺参/类型错/越 u16 在这里点名；
-/// 行程与时限的值域判定留件（`servo::rr3_servo_check_travel` /
-/// `servo::rr3_servo_check_timeout`），点名顺序与上移前逐字同序。
+/// 行程与时限的值域判定留件（`servo::rr3_servo_travel` /
+/// `servo::rr3_servo_timeout`），点名顺序与上移前逐字同序。
 pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64), String> {
     let angle = args
         .get("angle_deg")
@@ -172,7 +172,7 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
     let angle = u16::try_from(angle).map_err(|_| format!("angle_deg 超出 u16 范围: {angle}"))?;
     // 行程/时限的值域判定留件（零堆枚举，批N24 件三），文案在此渲染逐字
     // （act 册 §9 契约字面量，每句落在唯一一处）
-    servo::rr3_servo_check_travel(angle, cfg).map_err(|e| match e {
+    servo::rr3_servo_travel(angle, cfg).map_err(|e| match e {
         servo::Rr3ServoTravelError::OutOfRange {
             angle_deg,
             min_deg,
@@ -186,7 +186,7 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
                 .ok_or_else(|| format!("move_ms 必须是非负整数，收到 {v}"))?,
         ),
     };
-    let move_ms = servo::rr3_servo_check_timeout(move_ms, cfg).map_err(|e| match e {
+    let move_ms = servo::rr3_servo_timeout(move_ms, cfg).map_err(|e| match e {
         servo::Rr3ServoTimeoutError::ZeroMs => "move_ms 必须大于 0".to_string(),
         servo::Rr3ServoTimeoutError::BeyondLimit { ms, limit } => {
             format!("move_ms={ms} 超出时限上限 {limit}（不给堵转留机会）")

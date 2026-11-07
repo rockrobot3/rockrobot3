@@ -95,7 +95,7 @@ impl Dispatcher for Rr3PowerDispatcher {
     /// serve 折 `{"error": e}` 应答，与现行 wire 形状逐字等价。
     fn on_rpc(&mut self, topic: &str, _args: &Value, _bus: &BusHandle) -> Result<Value, String> {
         if topic == RR3_OPS_LIST_TOPIC {
-            Ok(json!({ "ops": rr3_power_ops_snapshot(&self.cfg) }))
+            Ok(json!({ "ops": rr3_power_ops(&self.cfg) }))
         } else {
             Err(format!(
                 "rr3-power 只 exposes {RR3_OPS_LIST_TOPIC}，收到 {topic}"
@@ -125,7 +125,7 @@ impl Dispatcher for Rr3PowerDispatcher {
             self.battery_seq += 1;
             bus.publish(
                 RR3_BATTERY_STATE_TOPIC,
-                rr3_battery_state_body(self.battery_seq, st),
+                rr3_battery_body(self.battery_seq, st),
             )?;
             // 低电两个沿、同一采样值，喂入次序是契约（Rr3LowEdge doc 钉死）：
             // **先 recover 后 cross**——cross 的再武装分支会悄悄置回 armed，先喂它
@@ -160,7 +160,7 @@ impl Dispatcher for Rr3PowerDispatcher {
                 self.charger_seq += 1;
                 bus.publish(
                     RR3_CHARGER_STATE_TOPIC,
-                    rr3_charger_state_body(self.charger_seq, st.charging),
+                    rr3_charger_body(self.charger_seq, st.charging),
                 )?;
             }
             self.next_charger = now + Duration::from_millis(self.cfg.charger.state_period_ms);
@@ -202,7 +202,7 @@ impl Dispatcher for Rr3PowerDispatcher {
 // 线上字节逐字不变（schema/golden 用例随迁到本文件，继续守字节面）。
 
 /// battery/state 流体：seq 是本流自己的计数（envelope 惯例，从 1 起）
-fn rr3_battery_state_body(seq: u64, st: Rr3BatteryState) -> Value {
+fn rr3_battery_body(seq: u64, st: Rr3BatteryState) -> Value {
     json!({
         "seq": seq,
         "voltage_mv": st.voltage_mv,
@@ -233,7 +233,7 @@ fn rr3_battery_ok_body(seq: u64, st: Rr3BatteryState) -> Value {
 }
 
 /// charger/state 流体：charging 是最近一次 battery 读数的派生值
-fn rr3_charger_state_body(seq: u64, charging: bool) -> Value {
+fn rr3_charger_body(seq: u64, charging: bool) -> Value {
     json!({ "seq": seq, "charging": charging })
 }
 
@@ -241,7 +241,7 @@ fn rr3_charger_state_body(seq: u64, charging: bool) -> Value {
 /// 快照，**白名单组体**——槽名与 assemble.toml 槽表申报同源（battery/charger 两组，
 /// 门 d covers 申报的对账面），rail 段键不在槽表不在快照面。cutoff_voltage_mv
 /// 如实进快照（策略数据在册），"声明未生效"语义由启动日志与文档承载、不在此折算。
-fn rr3_power_ops_snapshot(cfg: &Rr3PowerCfg) -> Value {
+fn rr3_power_ops(cfg: &Rr3PowerCfg) -> Value {
     json!({
         "battery": {
             "sample_period_ms": cfg.battery.sample_period_ms,
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn state_body_carries_full_summary_with_own_seq() {
-        let v = rr3_battery_state_body(7, st(3700, 50));
+        let v = rr3_battery_body(7, st(3700, 50));
         assert_eq!(v["seq"], 7);
         assert_eq!(v["voltage_mv"], 3700);
         assert_eq!(v["percent"], 50);
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn charger_body_carries_own_seq_and_charging() {
-        let v = rr3_charger_state_body(3, true);
+        let v = rr3_charger_body(3, true);
         assert_eq!(v["seq"], 3);
         assert_eq!(v["charging"], true);
         assert_eq!(v.as_object().unwrap().len(), 2, "两字段，不加戏: {v}");
@@ -413,7 +413,7 @@ mod tests {
                         charging: false,
                     };
                     let low = edge.rr3_low_edge_cross(mv);
-                    (rr3_battery_state_body(1, st), low)
+                    (rr3_battery_body(1, st), low)
                 })
                 .collect()
         }
@@ -431,7 +431,7 @@ mod tests {
         assert!(!e.rr3_low_edge_cross(3310), "回充不返回 true（只是再武装）");
         assert!(e.rr3_low_edge_cross(3299), "再武装后再次越阈才再发");
         // state 体四字段、low 体三必填无加戏（schema additionalProperties=false）
-        let v = rr3_battery_state_body(9, st(3700, 50));
+        let v = rr3_battery_body(9, st(3700, 50));
         assert_eq!(v["seq"], 9);
         assert_eq!(v["voltage_mv"], 3700);
         assert_eq!(v["percent"], 50);
@@ -454,7 +454,7 @@ mod tests {
                     seq += 1;
                     (
                         seq,
-                        rr3_charger_state_body(seq, charging)["charging"]
+                        rr3_charger_body(seq, charging)["charging"]
                             .as_bool()
                             .unwrap(),
                     )
@@ -468,13 +468,13 @@ mod tests {
     fn parity_leg2_charger_matches_ruling_semantics() {
         // 腿二·正确性：seq 本流自计数（与 battery/state 的 seq 独立）+ 两字段体
         // + 派生语义（charging 位来自最近一次 battery 读数，body 原样透传）
-        let v = rr3_charger_state_body(3, true);
+        let v = rr3_charger_body(3, true);
         assert_eq!(v["seq"], 3);
         assert_eq!(v["charging"], true, "charging 位是 battery 读数的派生透传");
         assert_eq!(v.as_object().unwrap().len(), 2, "两字段不加戏: {v}");
         assert_ne!(
-            rr3_charger_state_body(1, false)["charging"],
-            rr3_charger_state_body(2, true)["charging"],
+            rr3_charger_body(1, false)["charging"],
+            rr3_charger_body(2, true)["charging"],
             "派生值随读数变，不受 seq 影响"
         );
     }

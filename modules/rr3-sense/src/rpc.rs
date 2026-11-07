@@ -86,7 +86,7 @@ pub(crate) fn rr3_dump_result(seq: u64, backend: &str, cfg: &Rr3SenseConfig) -> 
 /// 快照，**白名单组体**——槽名与 assemble.toml 槽表申报同源（audio/doa/vad 三组，
 /// 门 d covers 申报的对账面），config 其余键一律不进应答。槽名 doa_* 与 config 键
 /// 的映射是装配清单 src_key 的事（槽表申报同源；b3b 起 doa 组扩到四槽）。
-pub(crate) fn rr3_sense_ops_snapshot(cfg: &Rr3SenseConfig) -> Value {
+pub(crate) fn rr3_sense_ops(cfg: &Rr3SenseConfig) -> Value {
     json!({
         "audio": {
             "sample_rate": cfg.audio.sample_rate,
@@ -132,7 +132,7 @@ mod tests {
     /// 槽表申报同源；白名单纪律 = 组内恰好这些槽，config 其余键不进应答。
     #[test]
     fn ops_snapshot_carries_whitelisted_slots_including_doa_window() {
-        let v = rr3_sense_ops_snapshot(&Rr3SenseConfig::default());
+        let v = rr3_sense_ops(&Rr3SenseConfig::default());
         assert_eq!(v["audio"]["sample_rate"], 16000);
         assert_eq!(v["audio"]["channels"], 1);
         assert_eq!(v["audio"]["frame_ms"], 20);

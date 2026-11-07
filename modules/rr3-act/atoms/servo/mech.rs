@@ -1,8 +1,8 @@
 //! servo 原子件机制主体（五件套③，自原 src/servo.rs 逐字迁入，逻辑零改动）。
 //!
 //! servo/command 的 Value 下钻（缺参/类型错/越 u16）已上移承载层（0.0.5 批I
-//! A-8，ADR-0019 修订 4）：行程（[`rr3_servo_check_travel`]）与时限
-//! （[`rr3_servo_check_timeout`]，缺 move_ms 回落 config 上限——实机后端按它
+//! A-8，ADR-0019 修订 4）：行程（[`rr3_servo_travel`]）与时限
+//! （[`rr3_servo_timeout`]，缺 move_ms 回落 config 上限——实机后端按它
 //! 限时驱动，堵转由反射环兜）的值域判定留件，文案契约由编排层渲染、逐字
 //! 保持（0.0.8 批N24 件三零堆化，见下）。servo/state 限速门：状态变化必发布，
 //! 但两次发布至少隔 min_interval
@@ -35,7 +35,7 @@ pub use rr_core::control::Rr3RateGate;
 /// [`Rr3ServoMotionError`]（词本身是动态数据，借用进字段不落堆），人读文案由
 /// 编排层渲染（`src/rpc.rs` 的 `rr3_servo_motion_reject`，与改前逐字一致——
 /// error wire 契约字面量，面板与 legacy 依赖字面）。
-pub fn rr3_servo_check_motion(word: Option<&str>) -> Result<Rr3ActMotion, Rr3ServoMotionError<'_>> {
+pub fn rr3_servo_motion(word: Option<&str>) -> Result<Rr3ActMotion, Rr3ServoMotionError<'_>> {
     match word {
         None => Ok(Rr3ActMotion::Auto),
         Some(s) => match Rr3ActMotion::rr3_act_motion_parse(s) {
@@ -45,7 +45,7 @@ pub fn rr3_servo_check_motion(word: Option<&str>) -> Result<Rr3ActMotion, Rr3Ser
     }
 }
 
-/// [`rr3_servo_check_motion`] 的零堆错误（批N34 件二，批N24 件三同件族）：
+/// [`rr3_servo_motion`] 的零堆错误（批N34 件二，批N24 件三同件族）：
 /// 词表外词与 calib-* 标定面词统一一变体（运行命令面只认 jog/auto），词本身
 /// 借用进字段（渲染点名的数据源），人读文案在编排层渲染（契约字面量不变）。
 #[derive(Debug, PartialEq, Eq)]
@@ -54,7 +54,7 @@ pub enum Rr3ServoMotionError<'a> {
     UnknownWord(&'a str),
 }
 
-/// [`rr3_servo_check_travel`] 的零堆错误（批N24 件三）：越界动态值进字段，
+/// [`rr3_servo_travel`] 的零堆错误（批N24 件三）：越界动态值进字段，
 /// 人读文案在编排层渲染（契约字面量不变）。
 #[derive(Debug, PartialEq, Eq)]
 pub enum Rr3ServoTravelError {
@@ -69,7 +69,7 @@ pub enum Rr3ServoTravelError {
     },
 }
 
-/// [`rr3_servo_check_timeout`] 的零堆错误（批N24 件三）：零时限与超上限各一
+/// [`rr3_servo_timeout`] 的零堆错误（批N24 件三）：零时限与超上限各一
 /// 变体，动态值进字段，人读文案在编排层渲染（契约字面量不变）。
 #[derive(Debug, PartialEq, Eq)]
 pub enum Rr3ServoTimeoutError {
@@ -86,7 +86,7 @@ pub enum Rr3ServoTimeoutError {
 
 /// servo/command 行程判定（值域留件，批I A-8 拆层）：越行程携带命令角与区间。
 /// 缺参/类型错/越 u16 的下钻文案在承载层（每句落在唯一一处）。
-pub fn rr3_servo_check_travel(angle: u16, cfg: &Rr3ServoCfg) -> Result<(), Rr3ServoTravelError> {
+pub fn rr3_servo_travel(angle: u16, cfg: &Rr3ServoCfg) -> Result<(), Rr3ServoTravelError> {
     if !(cfg.angle_min_deg..=cfg.angle_max_deg).contains(&angle) {
         return Err(Rr3ServoTravelError::OutOfRange {
             angle_deg: angle,
@@ -99,7 +99,7 @@ pub fn rr3_servo_check_travel(angle: u16, cfg: &Rr3ServoCfg) -> Result<(), Rr3Se
 
 /// servo/command 时限判定（值域留件，批I A-8 拆层）：`None` 回落 config 上限，
 /// 零时限与超上限拒收——"超时即停，不给堵转留机会"。
-pub fn rr3_servo_check_timeout(
+pub fn rr3_servo_timeout(
     move_ms: Option<u64>,
     cfg: &Rr3ServoCfg,
 ) -> Result<u64, Rr3ServoTimeoutError> {
@@ -129,10 +129,10 @@ mod tests {
 
     #[test]
     fn check_travel_accepts_bounds_and_rejects_out_of_range() {
-        assert!(rr3_servo_check_travel(0, &cfg()).is_ok(), "行程下界合法");
-        assert!(rr3_servo_check_travel(180, &cfg()).is_ok(), "行程上界合法");
+        assert!(rr3_servo_travel(0, &cfg()).is_ok(), "行程下界合法");
+        assert!(rr3_servo_travel(180, &cfg()).is_ok(), "行程上界合法");
         assert_eq!(
-            rr3_servo_check_travel(181, &cfg()).unwrap_err(),
+            rr3_servo_travel(181, &cfg()).unwrap_err(),
             Rr3ServoTravelError::OutOfRange {
                 angle_deg: 181,
                 min_deg: 0,
@@ -145,14 +145,14 @@ mod tests {
     #[test]
     fn check_timeout_defaults_to_cfg_and_rejects_zero_beyond_limit() {
         assert_eq!(
-            rr3_servo_check_timeout(None, &cfg()).unwrap(),
+            rr3_servo_timeout(None, &cfg()).unwrap(),
             800,
             "缺 move_ms 取 config 上限"
         );
-        assert_eq!(rr3_servo_check_timeout(Some(200), &cfg()).unwrap(), 200);
-        assert_eq!(rr3_servo_check_timeout(Some(800), &cfg()).unwrap(), 800);
+        assert_eq!(rr3_servo_timeout(Some(200), &cfg()).unwrap(), 200);
+        assert_eq!(rr3_servo_timeout(Some(800), &cfg()).unwrap(), 800);
         assert_eq!(
-            rr3_servo_check_timeout(Some(801), &cfg()).unwrap_err(),
+            rr3_servo_timeout(Some(801), &cfg()).unwrap_err(),
             Rr3ServoTimeoutError::BeyondLimit {
                 ms: 801,
                 limit: 800
@@ -160,7 +160,7 @@ mod tests {
             "超上限携带命令毫秒与上限（编排层渲染点名的数据源）"
         );
         assert_eq!(
-            rr3_servo_check_timeout(Some(0), &cfg()).unwrap_err(),
+            rr3_servo_timeout(Some(0), &cfg()).unwrap_err(),
             Rr3ServoTimeoutError::ZeroMs,
             "零时限拒收"
         );
@@ -180,25 +180,19 @@ mod tests {
     #[test]
     fn check_motion_defaults_to_auto_and_narrows_to_runface_words() {
         assert_eq!(
-            rr3_servo_check_motion(None).unwrap(),
+            rr3_servo_motion(None).unwrap(),
             Rr3ActMotion::Auto,
             "词缺席 = auto（保守）"
         );
+        assert_eq!(rr3_servo_motion(Some("jog")).unwrap(), Rr3ActMotion::Jog);
+        assert_eq!(rr3_servo_motion(Some("auto")).unwrap(), Rr3ActMotion::Auto);
         assert_eq!(
-            rr3_servo_check_motion(Some("jog")).unwrap(),
-            Rr3ActMotion::Jog
-        );
-        assert_eq!(
-            rr3_servo_check_motion(Some("auto")).unwrap(),
-            Rr3ActMotion::Auto
-        );
-        assert_eq!(
-            rr3_servo_check_motion(Some("calib-openloop")).unwrap_err(),
+            rr3_servo_motion(Some("calib-openloop")).unwrap_err(),
             Rr3ServoMotionError::UnknownWord("calib-openloop"),
             "标定面词不进运行命令面（词随枚举走，渲染逐字由编排层单测钉）"
         );
         assert_eq!(
-            rr3_servo_check_motion(Some("walk")).unwrap_err(),
+            rr3_servo_motion(Some("walk")).unwrap_err(),
             Rr3ServoMotionError::UnknownWord("walk"),
             "词表外点名拒（词随枚举走）"
         );
@@ -231,8 +225,8 @@ mod tests {
                 (90, Some(0)),
                 (45, Some(801)),
             ] {
-                let travel = rr3_servo_check_travel(angle, &cfg());
-                let timeout = rr3_servo_check_timeout(ms, &cfg());
+                let travel = rr3_servo_travel(angle, &cfg());
+                let timeout = rr3_servo_timeout(ms, &cfg());
                 out.push((
                     (travel.is_ok(), travel.err()),
                     (timeout.is_ok(), timeout.err()),
@@ -248,17 +242,11 @@ mod tests {
     /// 腿二：裁定语义逐点断言（含文案点名区间/上限——面板与 legacy 依赖字面）
     #[test]
     fn parity_leg2_servo_matches_ruling_semantics() {
-        assert!(
-            rr3_servo_check_travel(0, &cfg()).is_ok(),
-            "行程下界等号合法"
-        );
-        assert!(
-            rr3_servo_check_travel(180, &cfg()).is_ok(),
-            "行程上界等号合法"
-        );
-        assert!(rr3_servo_check_travel(181, &cfg()).is_err(), "越界拒收");
+        assert!(rr3_servo_travel(0, &cfg()).is_ok(), "行程下界等号合法");
+        assert!(rr3_servo_travel(180, &cfg()).is_ok(), "行程上界等号合法");
+        assert!(rr3_servo_travel(181, &cfg()).is_err(), "越界拒收");
         assert_eq!(
-            rr3_servo_check_travel(181, &cfg()).unwrap_err(),
+            rr3_servo_travel(181, &cfg()).unwrap_err(),
             Rr3ServoTravelError::OutOfRange {
                 angle_deg: 181,
                 min_deg: 0,
@@ -267,20 +255,20 @@ mod tests {
             "越界点名行程区间（区间随枚举走，渲染逐字由编排层单测钉）"
         );
         assert_eq!(
-            rr3_servo_check_timeout(None, &cfg()).unwrap(),
+            rr3_servo_timeout(None, &cfg()).unwrap(),
             800,
             "缺 move_ms 回落 config 上限（裁定）"
         );
         assert!(
-            rr3_servo_check_timeout(Some(0), &cfg()).is_err(),
+            rr3_servo_timeout(Some(0), &cfg()).is_err(),
             "零时限拒收（超时即停）"
         );
         assert!(
-            rr3_servo_check_timeout(Some(801), &cfg()).is_err(),
+            rr3_servo_timeout(Some(801), &cfg()).is_err(),
             "超上限拒收（不给堵转留机会）"
         );
         assert_eq!(
-            rr3_servo_check_timeout(Some(800), &cfg()).unwrap(),
+            rr3_servo_timeout(Some(800), &cfg()).unwrap(),
             800,
             "上限等号合法"
         );
