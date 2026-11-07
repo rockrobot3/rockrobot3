@@ -124,7 +124,7 @@ impl Default for Rr3SenseConfig {
 }
 
 /// 解析配置文本：缺键回落默认，类型错显式报错（不静默吞）。
-pub(crate) fn rr3_sense_config_parse(text: &str) -> Result<Rr3SenseConfig, String> {
+pub(crate) fn rr3_sense_cfg_parse(text: &str) -> Result<Rr3SenseConfig, String> {
     let root: toml::Value = text
         .parse()
         .map_err(|e| format!("配置不是合法 TOML: {e}"))?;
@@ -250,17 +250,14 @@ mod tests {
     #[test]
     fn config_parse_defaults_on_empty_and_fills_partial() {
         // 空文本 = 全默认
-        assert_eq!(
-            rr3_sense_config_parse("").unwrap(),
-            Rr3SenseConfig::default()
-        );
+        assert_eq!(rr3_sense_cfg_parse("").unwrap(), Rr3SenseConfig::default());
         // 只给部分键：给的生效，缺的回落默认
-        let cfg = rr3_sense_config_parse("[rr3-sense.vad]\nrms_start = 900\n").unwrap();
+        let cfg = rr3_sense_cfg_parse("[rr3-sense.vad]\nrms_start = 900\n").unwrap();
         assert_eq!(cfg.vad.rms_start, 900);
         assert_eq!(cfg.vad.silence_tail_ms, 700);
         assert_eq!(cfg.audio.sample_rate, 16000);
         // 全量
-        let full = rr3_sense_config_parse(
+        let full = rr3_sense_cfg_parse(
             "[rr3-sense.audio]\nsample_rate = 48000\nchannels = 2\nframe_ms = 10\n\n\
              [rr3-sense.vad]\nrms_start = 2000\nsilence_tail_ms = 500\nmin_speech_ms = 150\n\n\
              [rr3-sense.doa]\nbin_threshold_deg = 20\n",
@@ -278,26 +275,26 @@ mod tests {
     #[test]
     fn config_parse_rejects_wrong_types_and_broken_toml() {
         // 类型错显式报错，不静默吞
-        assert!(rr3_sense_config_parse("[rr3-sense.vad]\nrms_start = \"loud\"\n").is_err());
-        assert!(rr3_sense_config_parse("[rr3-sense.audio]\nframe_ms = -20\n").is_err());
-        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nbin_threshold_deg = \"wide\"\n").is_err());
-        assert!(rr3_sense_config_parse("not toml at all [").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.vad]\nrms_start = \"loud\"\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = -20\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.doa]\nbin_threshold_deg = \"wide\"\n").is_err());
+        assert!(rr3_sense_cfg_parse("not toml at all [").is_err());
     }
 
     /// 0.0.5 批I S-1：frame_ms=0 无节拍意义，收敛 20 留痕（eprintln 进测试输出无害）；
     /// 负值仍被 rr3_cfg_u64 显式拒收，不参与收敛。
     #[test]
     fn config_parse_clamps_zero_frame_ms_to_registered_20() {
-        let cfg = rr3_sense_config_parse("[rr3-sense.audio]\nframe_ms = 0\n").unwrap();
+        let cfg = rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = 0\n").unwrap();
         assert_eq!(cfg.audio.frame_ms, 20);
-        assert!(rr3_sense_config_parse("[rr3-sense.audio]\nframe_ms = -5\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = -5\n").is_err());
     }
 
     /// reflex 段解析：缺段 = enable 缺省 false（不开与旧版逐点等价）；全量注入
     /// 生效；类型错显式拒收（bool 有专属 helper，字符串 "on" 不认）。
     #[test]
     fn config_parse_reflex_section_defaults_disabled() {
-        let cfg = rr3_sense_config_parse("").unwrap();
+        let cfg = rr3_sense_cfg_parse("").unwrap();
         assert!(!cfg.reflex.enable);
         assert_eq!(cfg.reflex.deadband_deg, 10);
         assert_eq!(cfg.reflex.gate_tail_ms, 1000);
@@ -305,7 +302,7 @@ mod tests {
         assert_eq!(cfg.reflex.nod_deg, 0, "缺键 = 不做点头手势（旧版逐点等价）");
         assert_eq!(cfg.reflex.nod_delay_ms, 500);
         assert_eq!(cfg.reflex.nod_hold_ms, 200);
-        let cfg = rr3_sense_config_parse(
+        let cfg = rr3_sense_cfg_parse(
             "[rr3-sense.reflex]\nenable = true\ndeadband_deg = 15\ngate_tail_ms = 800\ngate_gap_ms = 300\nnod_deg = 8\nnod_delay_ms = 400\nnod_hold_ms = 150\n",
         )
         .unwrap();
@@ -316,9 +313,9 @@ mod tests {
         assert_eq!(cfg.reflex.nod_deg, 8);
         assert_eq!(cfg.reflex.nod_delay_ms, 400);
         assert_eq!(cfg.reflex.nod_hold_ms, 150);
-        assert!(rr3_sense_config_parse("[rr3-sense.reflex]\nenable = \"on\"\n").is_err());
-        assert!(rr3_sense_config_parse("[rr3-sense.reflex]\ndeadband_deg = \"wide\"\n").is_err());
-        assert!(rr3_sense_config_parse("[rr3-sense.reflex]\nnod_delay_ms = -1\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.reflex]\nenable = \"on\"\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.reflex]\ndeadband_deg = \"wide\"\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.reflex]\nnod_delay_ms = -1\n").is_err());
     }
 
     /// doa 段解析：缺段 = 全默认；全量注入生效；window_ms=0 收敛 1000 留痕
@@ -326,12 +323,12 @@ mod tests {
     /// mic_baseline_mm=0 无几何），类型错走 rr3_cfg_* 通用报错。
     #[test]
     fn config_parse_doa_section_defaults_full_and_rejects() {
-        let cfg = rr3_sense_config_parse("").unwrap();
+        let cfg = rr3_sense_cfg_parse("").unwrap();
         assert_eq!(cfg.doa.bin_threshold_deg, 30);
         assert_eq!(cfg.doa.window_ms, 1000);
         assert_eq!(cfg.doa.window_rms_min, 800);
         assert_eq!(cfg.doa.mic_baseline_mm, 150);
-        let cfg = rr3_sense_config_parse(
+        let cfg = rr3_sense_cfg_parse(
             "[rr3-sense.doa]\nbin_threshold_deg = 20\nwindow_ms = 500\nwindow_rms_min = 1200\nmic_baseline_mm = 180\n",
         )
         .unwrap();
@@ -339,12 +336,12 @@ mod tests {
         assert_eq!(cfg.doa.window_ms, 500);
         assert_eq!(cfg.doa.window_rms_min, 1200);
         assert_eq!(cfg.doa.mic_baseline_mm, 180);
-        let cfg = rr3_sense_config_parse("[rr3-sense.doa]\nwindow_ms = 0\n").unwrap();
+        let cfg = rr3_sense_cfg_parse("[rr3-sense.doa]\nwindow_ms = 0\n").unwrap();
         assert_eq!(cfg.doa.window_ms, 1000, "0 窗无意义收敛默认");
-        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nwindow_rms_min = -1\n").is_err());
-        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nwindow_rms_min = 32768\n").is_err());
-        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nmic_baseline_mm = 0\n").is_err());
-        assert!(rr3_sense_config_parse("[rr3-sense.doa]\nwindow_ms = \"long\"\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.doa]\nwindow_rms_min = -1\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.doa]\nwindow_rms_min = 32768\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.doa]\nmic_baseline_mm = 0\n").is_err());
+        assert!(rr3_sense_cfg_parse("[rr3-sense.doa]\nwindow_ms = \"long\"\n").is_err());
     }
 
     /// 前置核对件漂移钉子（方案 §2.7 改形，批N28 册裁定 3）：config.toml 全量
@@ -355,7 +352,7 @@ mod tests {
     #[test]
     fn config_toml_matches_registered_values() {
         let text = include_str!("../config.toml");
-        let cfg = rr3_sense_config_parse(text).unwrap();
+        let cfg = rr3_sense_cfg_parse(text).unwrap();
         assert_eq!(cfg.audio.sample_rate, 16000);
         assert_eq!(cfg.audio.channels, 1);
         assert_eq!(cfg.audio.frame_ms, 20);

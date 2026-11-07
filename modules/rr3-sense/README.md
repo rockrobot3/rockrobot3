@@ -19,7 +19,7 @@ modules/rr3-sense/
 └── src/
     ├── main.rs          ← 入口：只装配与启动（mod composite + main）
     └── composite.rs     ← 组合件：config 加载 + 事务面 dump 应答 + 采集主循环
-                           （流级下混 rr3_pcm_downmix_stream 与 pcm 事件体构造在此——批I 上移）
+                           （流级下混 rr3_pcm_downmix 与 pcm 事件体构造在此——批I 上移）
 ```
 
 ## 总线面

@@ -190,7 +190,7 @@ impl Dispatcher for Rr3SenseDispatcher {
         if topic == RR3_DUMP_TOPIC {
             Ok(rpc::rr3_dump_result(self.seq, self.backend, &self.cfg))
         } else if topic == RR3_OPS_LIST_TOPIC {
-            Ok(json!({ "ops": rpc::rr3_sense_ops_snapshot(&self.cfg) }))
+            Ok(json!({ "ops": rpc::rr3_sense_ops(&self.cfg) }))
         } else {
             Err(format!(
                 "rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}，收到 {topic}"
@@ -236,7 +236,7 @@ impl Dispatcher for Rr3SenseDispatcher {
         }
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
-        let pcm = rr3_pcm_downmix_stream(raw);
+        let pcm = rr3_pcm_downmix(raw);
         // 采集新鲜度记账（批M M-β S-3）：空帧另账（欠载饿死信号），帧账在发布
         // 成功后 +1——记账 = 真上了总线的帧数（发布失败即 exit，临死一帧不入账）
         if done == 0 {
@@ -288,7 +288,7 @@ impl Dispatcher for Rr3SenseDispatcher {
                     match &edge {
                         Rr3VadEdge::Onset { .. } => {
                             if let Some(deg) = doa_deg {
-                                self.pending_pan = rr3_reflex_pan_target(
+                                self.pending_pan = rr3_reflex_pan(
                                     self.cfg.reflex.enable,
                                     self.cfg.reflex.deadband_deg,
                                     deg,
@@ -348,7 +348,7 @@ impl Dispatcher for Rr3SenseDispatcher {
 /// mech.rs 迁入（0.0.5 批I 深挖收口：`Rr3PcmStream` 是承载层数据类型，件面只留
 /// 纯切片机制——C7 白名单外件面不得引用 rr_hal 具体类型）；纯切片选道
 /// [`capture::rr3_pcm_best_channel`] 仍在件内。
-fn rr3_pcm_downmix_stream(pcm: Rr3PcmStream) -> Rr3PcmStream {
+fn rr3_pcm_downmix(pcm: Rr3PcmStream) -> Rr3PcmStream {
     if pcm.cfg.channels <= 1 {
         return pcm;
     }
@@ -419,12 +419,7 @@ struct Rr3NodState {
 /// （不转头）：未启用 / 门开（播放回声）/ 死区内（正前方说话免抖动）。
 /// 目标 = 中位 + clamp(deg, ±摆幅)——正负号直通（右声源右转头），板侧行程
 /// fail-closed 之外这里是第二道软件限幅。
-fn rr3_reflex_pan_target(
-    enable: bool,
-    deadband_deg: i32,
-    doa_deg: i32,
-    gate_open: bool,
-) -> Option<u16> {
+fn rr3_reflex_pan(enable: bool, deadband_deg: i32, doa_deg: i32, gate_open: bool) -> Option<u16> {
     if !enable || gate_open || doa_deg.abs() < deadband_deg {
         return None;
     }
@@ -523,7 +518,7 @@ mod tests {
             },
             samples: vec![100, 300, -400, -200],
         };
-        let mono = rr3_pcm_downmix_stream(stereo);
+        let mono = rr3_pcm_downmix(stereo);
         assert_eq!(mono.cfg.channels, 1);
         assert_eq!(mono.cfg.sample_rate_hz, 16000);
         // 2026-10-31：单声道化取能量更高通道（ch0 = 100²+400² > ch1 = 300²+200²）
@@ -536,7 +531,7 @@ mod tests {
             },
             samples: vec![7, 8, 9],
         };
-        assert_eq!(rr3_pcm_downmix_stream(one.clone()), one);
+        assert_eq!(rr3_pcm_downmix(one.clone()), one);
     }
 
     // ---------- B批 b2：播放期门控与反射环用例 ----------
@@ -580,23 +575,15 @@ mod tests {
     /// = 中位 90 + clamp(deg, ±30)，左右号直通、双端限幅。
     #[test]
     fn reflex_pan_target_respects_enable_gate_and_deadband() {
-        assert_eq!(rr3_reflex_pan_target(false, 10, -60, false), None, "未启用");
-        assert_eq!(rr3_reflex_pan_target(true, 10, -60, true), None, "门开");
-        assert_eq!(rr3_reflex_pan_target(true, 10, 5, false), None, "死区内");
-        assert_eq!(rr3_reflex_pan_target(true, 10, -9, false), None, "死区负侧");
+        assert_eq!(rr3_reflex_pan(false, 10, -60, false), None, "未启用");
+        assert_eq!(rr3_reflex_pan(true, 10, -60, true), None, "门开");
+        assert_eq!(rr3_reflex_pan(true, 10, 5, false), None, "死区内");
+        assert_eq!(rr3_reflex_pan(true, 10, -9, false), None, "死区负侧");
         // 死区边界恰过：|deg| >= deadband 即动作
-        assert_eq!(rr3_reflex_pan_target(true, 10, 10, false), Some(100));
-        assert_eq!(rr3_reflex_pan_target(true, 10, -15, false), Some(75));
-        assert_eq!(
-            rr3_reflex_pan_target(true, 10, 60, false),
-            Some(120),
-            "右摆限幅"
-        );
-        assert_eq!(
-            rr3_reflex_pan_target(true, 10, -60, false),
-            Some(60),
-            "左摆限幅"
-        );
+        assert_eq!(rr3_reflex_pan(true, 10, 10, false), Some(100));
+        assert_eq!(rr3_reflex_pan(true, 10, -15, false), Some(75));
+        assert_eq!(rr3_reflex_pan(true, 10, 60, false), Some(120), "右摆限幅");
+        assert_eq!(rr3_reflex_pan(true, 10, -60, false), Some(60), "左摆限幅");
     }
 
     /// 点头计划：nod_deg=0 不生成（旧版逐点等价）；两段目标 = 中位 → 中位+deg，
