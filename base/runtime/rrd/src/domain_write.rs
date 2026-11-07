@@ -701,18 +701,18 @@ failsafe = "release"
 mux_group = []
 
 [[pin]]
-role = "sensor.env.meter"
+role = "power.charger.meter"
 controller = "i2c1"
 addr = "0x70"
-device = "SHTC3"
+device = "INA219"
 direction = "in"
 mux_group = []
 
 [enabled_slots]
-rr3-act = ["act.servo", "sensor.env"]
+rr3-act = ["act.servo", "power.charger"]
 
 [slots]
-present = ["act.servo", "sensor.env"]
+present = ["act.servo", "power.charger"]
 "#;
 
     /// 接线档夹具（§4.3 九字段，profile.rs 测试区 GOOD_WIRING 同形状）：单线组只挂
@@ -885,7 +885,7 @@ gnd_common = "star-1"
             let text = base
                 .replace(
                     "sense = \"none\"",
-                    "sense = \"sensor.env.meter\"",
+                    "sense = \"power.charger.meter\"",
                 )
                 .replace("max_age_ms = 0", "max_age_ms = 30000");
             std::fs::write(&fx.paths.profile, text).unwrap();
