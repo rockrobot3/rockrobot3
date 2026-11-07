@@ -50,12 +50,12 @@ pub(crate) fn rr3_board_bindings_store(b: Rr3BoardBindings) {
 }
 
 /// 读 I2C 引脚对 `(sda, scl)`（自愈路径消费点用；缺任一键或未注入回 None）。
-pub(crate) fn rr3_board_bindings_i2c_pair() -> Option<(u8, u8)> {
+pub(crate) fn rr3_board_i2c_binds_pair() -> Option<(u8, u8)> {
     BOARD_BINDINGS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .as_ref()
-        .and_then(Rr3BoardBindings::rr3_board_bindings_i2c)
+        .and_then(Rr3BoardBindings::rr3_board_i2c_binds)
 }
 
 /// 自愈路径的 I2C 引脚对：**注入优先，缺席回编译期装配锚**（批N41 件一）。
@@ -66,14 +66,14 @@ pub(crate) fn rr3_board_bindings_i2c_pair() -> Option<(u8, u8)> {
 /// 编译期装配常量是当前 bin 的板级真值（classic 21/22、S3 8/9），注入值仍优先；
 /// 消费面（帧面绑定/读数）的 fail-closed 语义不变。
 pub(crate) fn rr3_i2c_pins_for_recovery() -> (u8, u8) {
-    rr3_board_bindings_i2c_pair().unwrap_or((
+    rr3_board_i2c_binds_pair().unwrap_or((
         crate::board::RR3_BIND_I2C_SDA,
         crate::board::RR3_BIND_I2C_SCL,
     ))
 }
 
 /// 读全量绑定快照（批N13 件一配置腿 `/api/board/bindings` 读数用；Clone 出锁，
-/// 不持锁组 JSON——与 [`rr3_board_bindings_i2c_pair`] 同一单点）。
+/// 不持锁组 JSON——与 [`rr3_board_i2c_binds_pair`] 同一单点）。
 pub(crate) fn rr3_board_bindings_snapshot() -> Option<Rr3BoardBindings> {
     BOARD_BINDINGS
         .lock()
