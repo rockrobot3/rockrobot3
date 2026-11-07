@@ -51,10 +51,8 @@ pub use rr_periph_proto::consts::{
     RR3_BRIDGE_BAUD, RR3_FACE_TOPIC, RR3_HAL_PERIPH_BAUD_ENV, RR3_HAL_PERIPH_UART_ENV,
     RR3_PERIPH_TASK, RR3_SERVO_TOPIC,
 };
-pub use rr_periph_proto::host_call::{
-    rr3_bridge_call_frame, rr3_bridge_request_body_params, rr3_bridge_request_frame,
-};
-pub use rr_periph_proto::response::rr3_bridge_parse_response;
+pub use rr_periph_proto::host_call::{rr3_bridge_call, rr3_bridge_req_body, rr3_bridge_req_frame};
+pub use rr_periph_proto::response::rr3_bridge_decode;
 
 /// open 后的启动窗口：DTR/RTS 翻转复位板子（E7），ESP32 上电到帧面就绪的
 /// 等待（esp-idf 启动 + OLED init 的实测时长量级，1.2s 留裕量）。
@@ -240,7 +238,7 @@ impl Rr3BridgeConn {
         };
         let id = self.next_id;
         self.next_id += 1;
-        let req = rr3_bridge_request_frame(id, method, params);
+        let req = rr3_bridge_req_frame(id, method, params);
         if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
             eprintln!("rr-hal-esp32: Request 写出失败: {e:?}");
             self.conn = None;
@@ -280,7 +278,7 @@ impl Rr3BridgeConn {
                 return Err(Rr3HalError::Busy);
             }
         };
-        rr3_bridge_parse_response(ty, &body, id).map_err(|e| {
+        rr3_bridge_decode(ty, &body, id).map_err(|e| {
             eprintln!("rr-hal-esp32: 应答门拒绝: {e}");
             Rr3HalError::Busy
         })
@@ -443,12 +441,12 @@ mod tests {
         }
     }
 
-    /// 请求帧信封形状（B批 b1 起 `rr3_bridge_call_frame` 是 rr3.call 的生产单点，
+    /// 请求帧信封形状（B批 b1 起 `rr3_bridge_call` 是 rr3.call 的生产单点，
     /// 原 `rr3_bridge_request_body` 已并入）：method 恒 rr3.call、主题在
     /// params.topic、args 原样内嵌（conn.rs 转发形状的分发依据；漂移此处即红）。
     #[test]
     fn bridge_request_body_is_rr3_call_with_topic_in_params() {
-        let frame = rr3_bridge_call_frame(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 90 }));
+        let frame = rr3_bridge_call(7, RR3_SERVO_TOPIC, &json!({ "angle_deg": 90 }));
         assert_eq!(frame.header.src_task, RR3_TASK_HOST);
         assert_eq!(frame.header.dst_task, RR3_PERIPH_TASK);
         assert_eq!(frame.header.trace_id, RR3_TRACE_DIRECT);
@@ -466,7 +464,7 @@ mod tests {
     /// 锚——载荷住 params.args，rr-ipc bindings 模块定形）。
     #[test]
     fn bridge_request_body_params_is_generic_method_envelope() {
-        let s = rr3_bridge_request_body_params(9, "rr3.set_bindings", &json!({ "args": {} }));
+        let s = rr3_bridge_req_body(9, "rr3.set_bindings", &json!({ "args": {} }));
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["jsonrpc"], "2.0");
         assert_eq!(v["id"], 9);
@@ -505,23 +503,23 @@ mod tests {
             Rr3PayloadType::Response,
             rr3_body_encode(Rr3PayloadType::Response, ok.to_string().as_bytes()),
         );
-        let v = rr3_bridge_parse_response(ty, &raw[2..], 3).unwrap();
+        let v = rr3_bridge_decode(ty, &raw[2..], 3).unwrap();
         assert_eq!(v["angle_deg"], 90);
 
         // 类型错
         let ev = rr3_body_encode(Rr3PayloadType::Event, ok.to_string().as_bytes());
-        assert!(rr3_bridge_parse_response(Rr3PayloadType::Event, &ev[2..], 3).is_err());
+        assert!(rr3_bridge_decode(Rr3PayloadType::Event, &ev[2..], 3).is_err());
         // id 错
-        assert!(rr3_bridge_parse_response(ty, &raw[2..], 4).is_err());
+        assert!(rr3_bridge_decode(ty, &raw[2..], 4).is_err());
         // 缺 result
         let no_res = json!({"jsonrpc": "2.0", "id": 3});
         let nr = rr3_body_encode(ty, no_res.to_string().as_bytes());
-        assert!(rr3_bridge_parse_response(ty, &nr[2..], 3).is_err());
+        assert!(rr3_bridge_decode(ty, &nr[2..], 3).is_err());
         // result.error 折 Err
         let err_body =
             json!({"jsonrpc": "2.0", "id": 3, "result": {"error": "角度超范围 0-180: 200"}});
         let eb = rr3_body_encode(ty, err_body.to_string().as_bytes());
-        let e = rr3_bridge_parse_response(ty, &eb[2..], 3).unwrap_err();
+        let e = rr3_bridge_decode(ty, &eb[2..], 3).unwrap_err();
         assert!(e.contains("板侧业务失败"), "{e}");
         assert!(e.contains("角度超范围"), "{e}");
     }
