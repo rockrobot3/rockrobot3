@@ -57,7 +57,7 @@ impl Rr3LinkEdge {
 /// 就这两步转移——"AP 态可模拟进出"由纯函数单测钉死（方案 D4 判据）。
 /// 凭据本体由后端承载持久化（MC-6：`Rr3WifiStore`，linux = NM 连接配置），
 /// 本状态机只管态不管存；重启后由承载层查在册、经
-/// [`Self::rr3_provision_restored`] 恢复 station。批N24 件五值类型化：
+/// [`Self::rr3_prov_restored`] 恢复 station。批N24 件五值类型化：
 /// 在册面只记 SSID（[`Rr3SsidText`] 定长值，零堆）——**pass 由后端承载持久化，
 /// 状态机不持有**（connect 的 pass 入参只表"携口令连入"的转移语义，存取归
 /// `Rr3WifiStore`）。
@@ -73,7 +73,7 @@ impl Rr3Provision {
     /// 重启恢复：承载层查得在册 SSID 时以它起态（直接 `station`；psk 不回读
     /// ——NM 配置里的 psk 是 NM 私有面，模块不靠它做任何判定，见 MC-6"只管态
     /// 不管存"）。凭据本体仍在后端承载，本状态机只记 SSID 以出 `mode`。
-    pub fn rr3_provision_restored(ssid: &str) -> Self {
+    pub fn rr3_prov_restored(ssid: &str) -> Self {
         Self {
             credentials: Some(Rr3SsidText::rr3_ssid_text_new(ssid)),
         }
@@ -87,7 +87,7 @@ impl Rr3Provision {
         }
     }
 
-    /// 存凭据并转入 station（参数合法性由承载层 `rr3_wifi_connect_parse_args`
+    /// 存凭据并转入 station（参数合法性由承载层 `rr3_wifi_conn_args`
     /// 裁决（N-7 上移），状态机只管转移）。pass 不入态（批N24 件五 pass 去存储
     /// ：持久化归 `Rr3WifiStore`，状态机只记 SSID 以出 `mode`）。
     pub fn rr3_provision_connect(&mut self, ssid: &str, _pass: &str) {
@@ -139,7 +139,7 @@ mod tests {
     /// ——另一半（凭据真落盘承载）在 `rr-hal::provision_store` 的用例钉。
     #[test]
     fn provision_restored_starts_in_station() {
-        let p = Rr3Provision::rr3_provision_restored("home");
+        let p = Rr3Provision::rr3_prov_restored("home");
         assert_eq!(
             p.rr3_provision_mode(),
             "station",

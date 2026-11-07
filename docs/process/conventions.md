@@ -2415,7 +2415,7 @@ A-7 守恒核清：`tools/sim/chain.rs` 观察者只收 vad/servo、legacy 面�
 nmcli 机制：`rr3_nm_unescape`/`rr3_nm_field`/超时守护 `rr3_nm_run`/capped read，全平台
 编译）+ `provision_store`（`Rr3WifiStore` trait 三后端 Nm/Sim/Unavailable + 选择函数
 `rr3_hal_wifi_store`）；`rr3-connect` 的 connect/forget handler 先过 store 再转状态机
-（fail-closed），`Rr3Provision` 只管态不管存，新增 `rr3_provision_restored` 重启恢复
+（fail-closed），`Rr3Provision` 只管态不管存，新增 `rr3_prov_restored` 重启恢复
 station（psk 不回读——NM 私有面）；主判据 `nm_store_persists_across_reconstruct`（临时
 `NMCONF_HOME` 假 nmcli 夹具，主机可测）。**MC-4**：`Rr3LinuxProbe` 五面在位性实装
 （sysfs `pwmchip*`/`gpiochip*`、`/dev/i2c-*`、`/dev/spidev*`、`/proc/asound/cards` 非空），
