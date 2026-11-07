@@ -9,10 +9,10 @@ use rr_ipc::{rr3_board_bind_entry, Rr3BoardBindings, RR3_METHOD_SET_BINDINGS};
 use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
 use serde_json::{json, Value};
 
-use crate::board::{rr3_bindings_reconcile, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC};
+use crate::board::{rr3_bindings_check, RR3_FACE_EXPRS, RR3_FACE_TOPIC, RR3_SERVO_TOPIC};
 use crate::face::expr_eye_base;
 use crate::servo::{axis_check, Axis};
-use crate::state::{lock_bus, push_job, rr3_board_bindings_store, Bus, CtlState, Job};
+use crate::state::{lock_bus, push_job, rr3_board_binds_set, Bus, CtlState, Job};
 
 // 收帧/应答组帧的机制体已迁 periph-mech（P0-A A3）：本档只留控制面分发与状态机。
 pub(crate) use periph_mech::frame::{frame_recv, FrameReq};
@@ -28,7 +28,7 @@ pub(crate) fn frame_dispatch(
     req: &FrameReq,
 ) -> Result<Value, String> {
     if req.method == RR3_METHOD_SET_BINDINGS {
-        return frame_handle_set_bindings(bus, &req.args);
+        return rr3_handle_bindings(bus, &req.args);
     }
     if req.method != "rr3.call" {
         return Err(format!("method 非法: \"{}\"（恒 rr3.call）", req.method));
@@ -44,13 +44,13 @@ pub(crate) fn frame_dispatch(
 /// 建立时下发描述符解析的引脚真值（`{"i2c_sda": "21", ...}`——值全字符串，rr-hal/
 /// rr-registry 契约同形）。逐键过 [`rr3_board_bind_entry`] 键域/值域校验：未知键/
 /// 坏值 fail-closed 整体不落（暂存区不半写入，Err 折 result.error 回帧）；全过才
-/// 覆盖写板侧单点（[`crate::state::rr3_board_bindings_store`]）。部分注入合法（缺键 =
+/// 覆盖写板侧单点（[`crate::state::rr3_board_binds_set`]）。部分注入合法（缺键 =
 /// None，消费点各自判齐）。成功即打印十键值——板侧引脚真值的**观测面**（boot 横幅
 /// 已去引脚号，此打印是唯一真值观测点）。随后**装配对账**（批N9 件五）：注入值逐键
-/// 判等具名装配真值（[`crate::board::rr3_bindings_reconcile`]），不齐 eprintln 点名
+/// 判等具名装配真值（[`crate::board::rr3_bindings_check`]），不齐 eprintln 点名
 /// ＋累计 `binding_mismatch`（fail-visible，不拒收不拒 boot），不齐数随应答
 /// `mismatch` 字段回带供宿主实录判读。
-fn frame_handle_set_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, String> {
+fn rr3_handle_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, String> {
     let obj = args
         .as_object()
         .ok_or_else(|| format!("args 非法: {args}（须对象）"))?;
@@ -61,7 +61,7 @@ fn frame_handle_set_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Valu
             .ok_or_else(|| format!("{k} 值非法: {v}（须字符串）"))?;
         rr3_board_bind_entry(&mut nb, k, s)?;
     }
-    rr3_board_bindings_store(nb.clone());
+    rr3_board_binds_set(nb.clone());
     println!(
         "[periph] 绑定注入 ✓ i2c_sda={} i2c_scl={} adc_rail_pin={} uart2_tx={} uart2_rx={} ledc_pan={} ledc_tilt={} i2s_bclk={} i2s_sd={} i2s_ws={}",
         nb.i2c_sda.map_or("-".into(), |v| v.to_string()),
@@ -75,7 +75,7 @@ fn frame_handle_set_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Valu
         nb.i2s_sd.map_or("-".into(), |v| v.to_string()),
         nb.i2s_ws.map_or("-".into(), |v| v.to_string()),
     );
-    let bad = rr3_bindings_reconcile(&nb);
+    let bad = rr3_bindings_check(&nb);
     if bad > 0 {
         // saturating：本计数是运维观测面，宿主反复注入不符绑定也不该把它加溢出
         // （debug 档 `+=` 溢出直接 panic 在真板上 = 复位；release 档回绕最坏让

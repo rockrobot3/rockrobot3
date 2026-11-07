@@ -2,7 +2,7 @@
 //!
 //! 行程表与主题表由 `tools/rr3-codegen` 生成后 `include!` 进本文件条目流
 //! （`axis_gen.rs`/`topics_gen.rs`，生成物禁手改）；本文件另持 I2C/OLED/UART/
-//! 舵机/PWM 的面板常量与 `rr3_bindings_reconcile` 绑定对账。改硬件参数只改
+//! 舵机/PWM 的面板常量与 `rr3_bindings_check` 绑定对账。改硬件参数只改
 //! 契约真值点并重跑生成器，不在板侧抄第二份。
 
 use rr_ipc::Rr3BoardBindings;
@@ -251,7 +251,7 @@ pub(crate) use pins_s3::*;
 /// 判等具名装配真值（[`RR3_BIND_*`] 十枚）。键缺席（未注入）与值失配都点名——
 /// 部分注入合法（缺键消费点各自判齐），但对账如实记"不齐"，非零即装配单/下发链
 /// 漂移（fail-visible）。返回不齐键数（0 = 十键全齐）。
-pub(crate) fn rr3_bindings_reconcile(b: &Rr3BoardBindings) -> usize {
+pub(crate) fn rr3_bindings_check(b: &Rr3BoardBindings) -> usize {
     let table: [(&str, Option<u8>, u8); 10] = [
         ("i2c_sda", b.i2c_sda, RR3_BIND_I2C_SDA),
         ("i2c_scl", b.i2c_scl, RR3_BIND_I2C_SCL),

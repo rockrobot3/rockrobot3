@@ -134,7 +134,7 @@ fn main() {
 
     println!(
         // 引脚号不上横幅（批N4 件七(c)）：I2C/轨测点真值经 rr3.set_bindings 注入
-        // （成功打印见 frame_handle_set_bindings），装配面引脚号在各装配打印自证。
+        // （成功打印见 rr3_handle_bindings），装配面引脚号在各装配打印自证。
         "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0 servo=ledc rail=adc1 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo n20-live"
     );
     // 芯片档自证行（W1/T2 §6.4 件四）：证据记录里直接可辨 classic / S3；引脚真值

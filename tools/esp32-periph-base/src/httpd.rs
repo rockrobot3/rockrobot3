@@ -89,7 +89,7 @@ const RR3_BOARD_ADMIN_TOKEN: &str = match option_env!("RR3_BOARD_ADMIN_TOKEN") {
 
 /// 写口令牌校验：body JSON 须含 `token` 字段且等于 [`RR3_BOARD_ADMIN_TOKEN`]。
 /// 纯函数，单测可钉；不读 env、不碰全局。
-fn rr3_admin_token_check(body: &[u8]) -> bool {
+fn rr3_token_check(body: &[u8]) -> bool {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
         return false;
     };
@@ -229,8 +229,8 @@ pub(crate) fn rr3_state_json(s: &Rr3BoardStateSnapshot) -> String {
 
 /// 注入绑定快照（state.rs 读窄缝自持锁、Clone 出整体 [`Rr3BoardBindings`]——
 /// 批N17 件四起 cred_store 随 struct 透传，键名不再本侧手抄第二份）。
-fn rr3_bindings_snapshot() -> Option<Rr3BoardBindings> {
-    crate::state::rr3_board_bindings_snapshot()
+fn rr3_bindings_snap() -> Option<Rr3BoardBindings> {
+    crate::state::rr3_board_binds_snap()
 }
 
 /// 绑定快照 → JSON（纯函数；未注入整体 `null`，对账锚读数语义同源）。键名用
@@ -378,17 +378,11 @@ mod tests {
     #[test]
     fn admin_token_check() {
         let ok = format!("{{\"token\":\"{}\"}}", RR3_BOARD_ADMIN_TOKEN);
-        assert!(rr3_admin_token_check(ok.as_bytes()), "合法 token 应通过");
-        assert!(
-            !rr3_admin_token_check(b"{\"token\":\"wrong\"}"),
-            "错 token 应拒"
-        );
-        assert!(!rr3_admin_token_check(b"{}"), "缺 token 应拒");
-        assert!(!rr3_admin_token_check(b"not json"), "坏 JSON 应拒");
-        assert!(
-            !rr3_admin_token_check(br#"{"token":123}"#),
-            "非串 token 应拒"
-        );
+        assert!(rr3_token_check(ok.as_bytes()), "合法 token 应通过");
+        assert!(!rr3_token_check(b"{\"token\":\"wrong\"}"), "错 token 应拒");
+        assert!(!rr3_token_check(b"{}"), "缺 token 应拒");
+        assert!(!rr3_token_check(b"not json"), "坏 JSON 应拒");
+        assert!(!rr3_token_check(br#"{"token":123}"#), "非串 token 应拒");
     }
 
     /// 表 ↔ 分派零漂移（同 host `route_table_matches_dispatch` 形状）：表内每行
@@ -682,7 +676,7 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
             httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
         }
         Rr3BoardRoute::Bindings => {
-            let snap = rr3_bindings_snapshot();
+            let snap = rr3_bindings_snap();
             let body = rr3_bindings_json(snap.as_ref());
             httpd_resp_set_type(req, c"application/json".as_ptr());
             httpd_resp_send(req, body.as_ptr() as *const _, body.len() as _)
@@ -708,7 +702,7 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
                 );
             }
             // P1-3 写口鉴权：body 须带合法 token，否则 401（配网是改活配置的高权动作）
-            if !rr3_admin_token_check(&buf) {
+            if !rr3_token_check(&buf) {
                 return httpd_resp_send_err(
                     req,
                     httpd_err_code_t_HTTPD_401_UNAUTHORIZED,
@@ -737,7 +731,7 @@ unsafe extern "C" fn rr3_board_httpd_handler(req: *mut httpd_req_t) -> i32 {
             let authed = if clen > 0 && clen <= RR3_WIFI_BODY_MAX {
                 let mut buf = vec![0u8; clen];
                 let got = httpd_req_recv(req, buf.as_mut_ptr() as *mut _, buf.len());
-                got > 0 && got as usize == buf.len() && rr3_admin_token_check(&buf)
+                got > 0 && got as usize == buf.len() && rr3_token_check(&buf)
             } else {
                 false
             };

@@ -35,7 +35,7 @@ pub(crate) fn esp_random_u32() -> u32 {
 // （[`crate::oled`]，够不到 `Bus`）——故不随 `PeriphState` 走，单点存取。
 // **消费面 fail-closed：未注入（None）即拒不动作**，观测面在调用方
 // （boot 解卡点名 / 运行面 `selfheal_skipped` 计数 / 注入到达时装配对账
-// `binding_mismatch` 计数，见 [`crate::board::rr3_bindings_reconcile`]）。
+// `binding_mismatch` 计数，见 [`crate::board::rr3_bindings_check`]）。
 // ---------------------------------------------------------------------------
 
 /// 板侧绑定单点（`None` = 未注入）。毒锁不失效（同 [`lock_bus`] 纪律）。
@@ -43,14 +43,14 @@ static BOARD_BINDINGS: Mutex<Option<Rr3BoardBindings>> = Mutex::new(None);
 
 /// 覆盖写板侧绑定单点（set_bindings 分发面用；全量覆盖语义，与宿主
 /// `rr3_push_bindings` 每次连接重推全量一致）。
-pub(crate) fn rr3_board_bindings_store(b: Rr3BoardBindings) {
+pub(crate) fn rr3_board_binds_set(b: Rr3BoardBindings) {
     *BOARD_BINDINGS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(b);
 }
 
 /// 读 I2C 引脚对 `(sda, scl)`（自愈路径消费点用；缺任一键或未注入回 None）。
-pub(crate) fn rr3_board_i2c_binds_pair() -> Option<(u8, u8)> {
+pub(crate) fn rr3_i2c_binds_pair() -> Option<(u8, u8)> {
     BOARD_BINDINGS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -65,16 +65,16 @@ pub(crate) fn rr3_board_i2c_binds_pair() -> Option<(u8, u8)> {
 /// 293176）——OLED 一旦在冷启动/舵机噪声中丢拍就再也回不来。本函数只服务**自愈动作**：
 /// 编译期装配常量是当前 bin 的板级真值（classic 21/22、S3 8/9），注入值仍优先；
 /// 消费面（帧面绑定/读数）的 fail-closed 语义不变。
-pub(crate) fn rr3_i2c_pins_for_recovery() -> (u8, u8) {
-    rr3_board_i2c_binds_pair().unwrap_or((
+pub(crate) fn rr3_i2c_recovery() -> (u8, u8) {
+    rr3_i2c_binds_pair().unwrap_or((
         crate::board::RR3_BIND_I2C_SDA,
         crate::board::RR3_BIND_I2C_SCL,
     ))
 }
 
 /// 读全量绑定快照（批N13 件一配置腿 `/api/board/bindings` 读数用；Clone 出锁，
-/// 不持锁组 JSON——与 [`rr3_board_i2c_binds_pair`] 同一单点）。
-pub(crate) fn rr3_board_bindings_snapshot() -> Option<Rr3BoardBindings> {
+/// 不持锁组 JSON——与 [`rr3_i2c_binds_pair`] 同一单点）。
+pub(crate) fn rr3_board_binds_snap() -> Option<Rr3BoardBindings> {
     BOARD_BINDINGS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -142,7 +142,7 @@ pub(crate) struct PeriphState {
     /// 0 的兼容观测位，`INFO`/httpd 可继续读；未来加运行面护栏时再复用）。
     pub(crate) selfheal_skipped: u32,
     /// 绑定对账不齐键数累计（批N9 件五装配对账锚观测面）：set_bindings 注入到达
-    /// 时逐键判等板侧具名装配真值（[`crate::board::rr3_bindings_reconcile`]），
+    /// 时逐键判等板侧具名装配真值（[`crate::board::rr3_bindings_check`]），
     /// 缺席/失配逐键点名并累计，`INFO` 观测；非零即装配单/下发链漂移（fail-visible，
     /// 不拒收不拒 boot），注入值 = 装配时计数不增。
     pub(crate) binding_mismatch: u32,

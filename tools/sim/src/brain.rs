@@ -22,8 +22,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::drill::{
-    rr3_find_repo_root, rr3_manifest_text_ext, rr3_parse_status, rr3_require_bins_ext,
-    rr3_wait_modules, RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN,
+    rr3_find_repo_root, rr3_manifest_ext, rr3_parse_status, rr3_require_bins_ext, rr3_wait_modules,
+    RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN,
 };
 
 use crate::drill::Rr3SimArgs;
@@ -31,7 +31,7 @@ use crate::drill::Rr3SimArgs;
 /// 演练就绪上界：冷启动 + 第一轮对话（max_utterance_ms=1500 判停）也要够用。
 /// 真板档（`--audio-backend esp32`）等真人说话，节奏不可预置——env
 /// `RR3_BRAIN_READY_DEADLINE_MS` 可拉长（解析失败/缺省回 60s，不动 sim 档节奏）。
-fn rr3_brain_ready_deadline() -> Duration {
+fn rr3_brain_ready_at() -> Duration {
     const DEFAULT_S: u64 = 60;
     Duration::from_secs(
         std::env::var("RR3_BRAIN_READY_DEADLINE_MS")
@@ -68,7 +68,7 @@ pub fn rr3_brain_manifests(
     vec![
         (
             RR3_SIM_MODULE_A.to_string(),
-            rr3_manifest_text_ext(
+            rr3_manifest_ext(
                 RR3_SIM_MODULE_A,
                 sense_entry,
                 "module",
@@ -83,7 +83,7 @@ pub fn rr3_brain_manifests(
         ),
         (
             RR3_SIM_MODULE_B.to_string(),
-            rr3_manifest_text_ext(
+            rr3_manifest_ext(
                 RR3_SIM_MODULE_B,
                 interact_entry,
                 "module",
@@ -98,7 +98,7 @@ pub fn rr3_brain_manifests(
         ),
         (
             RR3_SIM_MODULE_BRAIN.to_string(),
-            rr3_manifest_text_ext(
+            rr3_manifest_ext(
                 RR3_SIM_MODULE_BRAIN,
                 brain_entry,
                 "brain",
@@ -123,7 +123,7 @@ pub fn rr3_brain_manifests(
 /// 连接行——`--brain-base-url` 旗标按主机根传入，行 base_url 补成完整 API 根
 /// （ADR-0023：LLM 只拼 /chat/completions），LLM 腿走 openai 格式，密钥引用
 /// `env:RR3_CLOUD_API_KEY`（演练面沿用旧环境变量契约，面板 secrets 是板上/宿主面）。
-pub fn rr3_brain_config_text(cloud_real: bool, base_url: &str) -> String {
+pub fn rr3_brain_cfg_text(cloud_real: bool, base_url: &str) -> String {
     if cloud_real {
         const ASR_MODEL: &str = "iic/SenseVoiceSmall";
         const LLM_MODEL: &str = "deepseek-ai/DeepSeek-V3";
@@ -232,18 +232,15 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let manifest_path = workdir.join("config.toml");
     std::fs::write(
         &manifest_path,
-        rr3_brain_config_text(cloud_real, &brain_base_url),
+        rr3_brain_cfg_text(cloud_real, &brain_base_url),
     )
     .map_err(|e| format!("写演练 config 失败: {e}"))?;
     // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
     // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
     // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
     let interact_cfg = workdir.join("interact-config.toml");
-    std::fs::write(
-        &interact_cfg,
-        crate::chain::rr3_chain_interact_config_text(),
-    )
-    .map_err(|e| format!("写 interact config 失败: {e}"))?;
+    std::fs::write(&interact_cfg, crate::chain::rr3_chain_interact_cfg())
+        .map_err(|e| format!("写 interact config 失败: {e}"))?;
 
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
@@ -286,7 +283,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
 
         // ---- 2.5 等 rrd bind 完套接字再起外部模块：sense 由 rrd spawn（bind 后），
         //      interact/brain 是外部进程，抢跑会撞 ENOENT（模块按契约快速退，不重试） ----
-        wait_socket_exists(&socket, rr3_brain_ready_deadline())?;
+        wait_socket_exists(&socket, rr3_brain_ready_at())?;
 
         // ---- 3. 外部起 interact 与 brain ----
         let interact_log = workdir.join("interact.log");
@@ -349,18 +346,14 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
                 (RR3_SIM_MODULE_B, "running"),
                 (RR3_SIM_MODULE_BRAIN, "running"),
             ],
-            rr3_brain_ready_deadline(),
+            rr3_brain_ready_at(),
         )?;
         report.push_str("\n=== 三模块 running ===\n");
-        wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, rr3_brain_ready_deadline())?;
+        wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, rr3_brain_ready_at())?;
         report.push_str(&format!(
             "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
         ));
-        wait_log_contains(
-            &interact_log,
-            RR3_INTERACT_TTS_MARK,
-            rr3_brain_ready_deadline(),
-        )?;
+        wait_log_contains(&interact_log, RR3_INTERACT_TTS_MARK, rr3_brain_ready_at())?;
         report.push_str(&format!(
             "interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"
         ));
@@ -534,7 +527,7 @@ mod tests {
     #[test]
     fn config_shapes() {
         // mock 档（缺省）：死地址 + mock 模型 + burst 短判停
-        let cfg = rr3_brain_config_text(false, "http://127.0.0.1:9/v1");
+        let cfg = rr3_brain_cfg_text(false, "http://127.0.0.1:9/v1");
         assert!(cfg.contains("max_utterance_ms = 1500"), "{cfg}");
         assert!(
             cfg.contains("base_url = \"http://127.0.0.1:9/v1\""),
@@ -547,7 +540,7 @@ mod tests {
     fn real_cloud_config_carries_production_models_and_endpoint() {
         // 真值镜像 modules/rr3-brain/config.toml：cloud.base_url 是主机根（ASR/TTS
         // 自拼 /v1/audio/*）；模型行 base_url 是完整 API 根（LLM 只拼 /chat/completions）
-        let cfg = rr3_brain_config_text(true, "https://api.siliconflow.cn");
+        let cfg = rr3_brain_cfg_text(true, "https://api.siliconflow.cn");
         assert!(
             cfg.contains("base_url = \"https://api.siliconflow.cn\""),
             "{cfg}"
@@ -557,7 +550,7 @@ mod tests {
             "模型行补版本段: {cfg}"
         );
         // 已带路径的 API 根原样（GLM / Qwen 各写各的版本段，不按主机名猜）
-        let glm = rr3_brain_config_text(true, "https://open.bigmodel.cn/api/paas/v4");
+        let glm = rr3_brain_cfg_text(true, "https://open.bigmodel.cn/api/paas/v4");
         assert!(
             glm.contains("base_url = \"https://open.bigmodel.cn/api/paas/v4\""),
             "{glm}"

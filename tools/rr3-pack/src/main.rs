@@ -143,7 +143,7 @@ pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
 /// staging 按字面 join，含逃逸段的 entry 会把二进制写进安装根之外）。
 /// 在仓六份 manifest 全是生成器落盘的裸模块名，这条门禁只为把"装机约定"从
 /// 口头变成打包期硬门：绝对/逃逸 entry 一律点名拒绝，不猜测意图。
-fn rr3_entry_is_installable(entry: &str, module: &str) -> Result<(), String> {
+fn rr3_entry_ok(entry: &str, module: &str) -> Result<(), String> {
     let p = Path::new(entry);
     if p.is_absolute() {
         return Err(format!(
@@ -205,7 +205,7 @@ fn rr3_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
 /// 重序列化会重排/丢注释，违反"只动一个值"的承诺。
 /// 门禁三道：entry 行恰一条（0 或多条 = 歧义契约事故）；旧行值与 facts.entry
 /// 交叉核验（防扫到别的表的同名键）；改写完重新解析 facts 复核新值已生效。
-fn rr3_manifest_install_rewrite(
+fn rr3_manifest_rewrite(
     text: &str,
     installed_entry: &str,
     facts_entry: &str,
@@ -438,14 +438,14 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
                 facts.name
             ));
         }
-        rr3_entry_is_installable(&facts.entry, name)?;
+        rr3_entry_ok(&facts.entry, name)?;
         let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
         let staged = root.join("modules").join(name);
         fs::create_dir_all(&staged)
             .map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
         fs::write(
             staged.join("module.toml"),
-            rr3_manifest_install_rewrite(&text, &installed_entry, &facts.entry, name)?,
+            rr3_manifest_rewrite(&text, &installed_entry, &facts.entry, name)?,
         )
         .map_err(|e| format!("写 {}/module.toml 失败: {e}", staged.display()))?;
         let entry_path = staged.join(&facts.entry);

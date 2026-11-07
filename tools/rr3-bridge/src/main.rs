@@ -54,7 +54,7 @@ fn main() -> ExitCode {
     // UART 设备节点，退出码 0）。句柄经 OnceSlot 转交信号处理函数——C-ABI
     // 回调不能捕获环境，Async-signal-safety 上 AtomicBool::store 是合法操作。
     let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    link::register_signal_handlers(Arc::clone(&shutdown));
+    link::rr3_signal_handlers(Arc::clone(&shutdown));
     let code = link::run(cfg, shutdown);
     ExitCode::from(code)
 }

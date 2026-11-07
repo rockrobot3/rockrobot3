@@ -52,7 +52,7 @@ done
 #   a. manifest 不再平铺 /usr/lib/rockrobot3/manifest/<name>.toml——模块 rr3_config_load 读
 #      manifest 同目录 config.toml，平铺下各模块 config 全部撞同一文件名，且 bin 的
 #      相对 entry 解析到 manifest 所在目录必错位；
-#   b. entry 改写为装机绝对路径（rr3-pack rr3_manifest_install_rewrite 同语义）：
+#   b. entry 改写为装机绝对路径（rr3-pack rr3_manifest_rewrite 同语义）：
 #      模块开机读装机 manifest 原文上报，线上注册门禁拒绝相对值；
 #   c. config 源真值从仓 modules/<name>/config.toml 随装（不是构建产物，不进注入格式；
 #      仓根定位可用环境变量 RR3_REPO_ROOT 覆盖，缺省按脚本位置上溯五级）。

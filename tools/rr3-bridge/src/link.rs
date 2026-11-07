@@ -59,7 +59,7 @@ extern "C" fn on_signal(_sig: i32) {
 }
 
 /// 安装 SIGTERM/SIGINT 处理（main 用；测试自建标志不经此）。
-pub fn register_signal_handlers(shutdown: Arc<AtomicBool>) {
+pub fn rr3_signal_handlers(shutdown: Arc<AtomicBool>) {
     let _ = SIGNAL_SLOT.set(shutdown);
     // SAFETY：handler 是 C-ABI 且只做原子置位；signal(3) 本身可重入性无要求。
     unsafe {
