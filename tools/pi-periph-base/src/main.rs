@@ -29,7 +29,7 @@ use std::time::Duration;
 use periph_mech::periph_core::{rr3_servo_gate, rr3_slew_steps, Rr3ServoCore};
 use periph_mech::rail_judge::{RailJudge, RailTier};
 use rr_ipc::{
-    rr3_board_binding_entry, Rr3BoardBindings, Rr3ByteStream, Rr3UartConn, RR3_METHOD_SET_BINDINGS,
+    rr3_board_bind_entry, Rr3BoardBindings, Rr3ByteStream, Rr3UartConn, RR3_METHOD_SET_BINDINGS,
 };
 use rr_periph_proto::ports::{Rr3ClockPort, Rr3PwmChannel, Rr3PwmPort};
 use serde_json::{json, Value};
@@ -307,7 +307,7 @@ impl Board {
             let s = v
                 .as_str()
                 .ok_or_else(|| format!("{k} 值非法: {v}（须字符串）"))?;
-            rr3_board_binding_entry(&mut nb, k, s)?;
+            rr3_board_bind_entry(&mut nb, k, s)?;
         }
         println!(
             "[periph] 绑定注入 ✓ i2c_sda={} i2c_scl={} uart2_tx={} uart2_rx={}",

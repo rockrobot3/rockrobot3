@@ -51,7 +51,7 @@ pub use audio_session::{
     READ_TIMEOUT_MS, REPLY_TIMEOUT_MS, RESYNC_ZERO_BAIL, SETTLE,
 };
 pub use bindings::{
-    rr3_board_binding_entry, rr3_cred_store_parse, rr3_gpio_number_parse, Rr3BoardBindings,
+    rr3_board_bind_entry, rr3_cred_store_parse, rr3_gpio_num_parse, Rr3BoardBindings,
     RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_CRED_STORE, RR3_BOARD_BINDING_I2C_SCL,
     RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD,
     RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_KEYS, RR3_BOARD_BINDING_LEDC_PAN,
@@ -59,14 +59,14 @@ pub use bindings::{
     RR3_METHOD_SET_BINDINGS,
 };
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use evidence::{rr3_evidence_ref_wellformed, rr3_evidence_verify};
+pub use evidence::{rr3_evidence_ref_ok, rr3_evidence_verify};
 pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use persist::rr3_atomic_store;
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{
-    flags, opcode, rr3_crc32, rr3_header_bytes_with_crc, Rr3HdrError, Rr3Header, Rr3PayloadType,
+    flags, opcode, rr3_crc32, rr3_header_encode, Rr3HdrError, Rr3Header, Rr3PayloadType,
     Rr3StatusCode, MAGIC, MAX_PAYLOAD_LEN, RR3_IPC_HDR_SIZE,
 };
 // 窄缝与帧缓冲（no_std 可达，无条件导出）；帧数据形状（Rr3Frame / 编码）住

@@ -199,7 +199,7 @@ pub struct Rr3Header {
     pub dst_task: u64,
     pub payload_len: u32,
     /// 载荷 CRC32（`0xEDB88320` 反射多项式，初值/异或均为 `0xFFFF_FFFF`）。
-    /// **必须与 payload 一致**——发送侧由 [`rr3_header_bytes_with_crc`] 自动写入，
+    /// **必须与 payload 一致**——发送侧由 [`rr3_header_encode`] 自动写入，
     /// 接收侧在拿到 payload 后必须校验（[`rr3_crc32`]）。头部自身完整性由 magic /
     /// 保留区全零 / payload_len 护栏三重限定，故 CRC 只覆盖载荷。
     pub payload_crc32: u32,
@@ -261,7 +261,7 @@ impl Rr3Header {
     /// golden 对拍（本文件末尾 `const _`）因此在每个目标编译期成立——0.0.7 批B 第④路。
     ///
     /// 写出的 `payload_crc32` 取结构体字段值：**发送路径不得直接用本函数**（不知道
-    /// 载荷就填不出 CRC），要用 [`rr3_header_bytes_with_crc`]。
+    /// 载荷就填不出 CRC），要用 [`rr3_header_encode`]。
     pub const fn to_bytes(&self) -> [u8; RR3_IPC_HDR_SIZE] {
         let mut buf = [0u8; RR3_IPC_HDR_SIZE];
         put_le(&mut buf, OFF_MAGIC, MAGIC as u64, LEN_MAGIC);
@@ -316,7 +316,7 @@ pub const fn rr3_crc32(bytes: &[u8]) -> u32 {
 /// 头里的 `payload_len` 与载荷长度不一致时 CRC 仍会算出来，但长度门（
 /// [`Rr3FrameError::LengthMismatch`](crate::protocol::wire::Rr3FrameError::LengthMismatch)）
 /// 会先拒绝——两层各自独立，不互相代偿。
-pub fn rr3_header_bytes_with_crc(hdr: &Rr3Header, payload: &[u8]) -> [u8; RR3_IPC_HDR_SIZE] {
+pub fn rr3_header_encode(hdr: &Rr3Header, payload: &[u8]) -> [u8; RR3_IPC_HDR_SIZE] {
     let mut h = *hdr;
     h.payload_crc32 = rr3_crc32(payload);
     h.to_bytes()
@@ -349,7 +349,7 @@ const GOLDEN_HEADER_HEX: &str = include_str!(concat!(
 ));
 
 /// golden 文件前 256 hex 字符（文件 257 字节含尾换行，运行期测试另有全文校验）。
-const fn golden_header_hex_first_256() -> [u8; 256] {
+const fn rr3_golden_hdr_hex() -> [u8; 256] {
     let raw: &[u8] = GOLDEN_HEADER_HEX.as_bytes();
     let mut out = [0u8; 256];
     let mut i = 0;
@@ -401,7 +401,7 @@ const fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 const _: () = assert!(
-    bytes_eq(&golden_header_bytes(), &golden_header_hex_first_256()),
+    bytes_eq(&golden_header_bytes(), &rr3_golden_hdr_hex()),
     "rr-ipc 编码器输出与 contracts/golden/event-header-128.hex 不一致——契约字节冻结被破坏（改动编码器或头布局必须同步重出 golden）"
 );
 

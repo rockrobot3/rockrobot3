@@ -1854,7 +1854,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
                 errs.push(format!(
                     "{label} armed = true 但 evidence = none（校验⑥-e：武装拒动必须引用一条真板实测证据，规则住 conventions §6.1；未标定即 armed = false）"
                 ));
-            } else if !rr_ipc::evidence::rr3_evidence_ref_wellformed(&d.evidence) {
+            } else if !rr_ipc::evidence::rr3_evidence_ref_ok(&d.evidence) {
                 errs.push(format!(
                     "{label}.evidence = {} 形制不合法（校验⑥-e：应为 <形态>/<四位编号>，如 实测/0001）",
                     d.evidence

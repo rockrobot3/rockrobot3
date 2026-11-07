@@ -25,7 +25,7 @@
 //! ERROR 点名＋计数）；批N17 件一 `cred_store` 键（**非 GPIO**——存储源标记
 //! `nvs:<namespace>`，全案 §3.6 凭据行；消费语义 = 板侧读数面可见，boot 读链
 //! 不消费＝批N14 架构事实注入晚于 WiFi 起栈，无装配对账语义＝非引脚不进对账
-//! 锚）。十键是 GPIO 编号（取值域共用 [`rr3_gpio_number_parse`]），cred_store
+//! 锚）。十键是 GPIO 编号（取值域共用 [`rr3_gpio_num_parse`]），cred_store
 //! 取值域独立裁决 [`rr3_cred_store_parse`]（同在本模块——键集与取值域真值单点
 //! 纪律不变）。
 
@@ -125,14 +125,14 @@ pub struct Rr3BoardBindings {
 impl Rr3BoardBindings {
     /// I2C 自愈成对引脚：sda/scl 都注入才成对（缺一即 `None`——半份配置不构成
     /// 可执行的自愈前件，fail-closed 交给消费面点名，不猜不造）。
-    pub fn rr3_board_bindings_i2c(&self) -> Option<(u8, u8)> {
+    pub fn rr3_board_i2c_binds(&self) -> Option<(u8, u8)> {
         Some((self.i2c_sda?, self.i2c_scl?))
     }
 }
 
 /// GPIO 编号取值域裁决：十进制 u8（trim 宽容）。真值单点——rr-hal 描述符解析
 /// （`i2c_sda` 等三键）与板侧载荷解析共用，两侧取值域漂移即此处单改。
-pub fn rr3_gpio_number_parse(s: &str) -> Option<u8> {
+pub fn rr3_gpio_num_parse(s: &str) -> Option<u8> {
     s.trim().parse::<u8>().ok()
 }
 
@@ -152,23 +152,21 @@ pub fn rr3_cred_store_parse(s: &str) -> Option<String> {
 
 /// 单条目写入（载荷遍历侧逐条调用）：键必须在册、值过取值域裁决；坏条目**不
 /// 半写入**（先裁决后赋值）。独立纯函数：键域/值域可单测。
-pub fn rr3_board_binding_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Result<(), String> {
+pub fn rr3_board_bind_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Result<(), String> {
     let bad = || format!("板侧绑定键 {k} 取值不认: {v:?}");
     match k {
-        RR3_BOARD_BINDING_I2C_SDA => b.i2c_sda = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_I2C_SCL => b.i2c_scl = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_I2C_SDA => b.i2c_sda = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_I2C_SCL => b.i2c_scl = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
         RR3_BOARD_BINDING_ADC_RAIL_PIN => {
-            b.adc_rail_pin = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?)
+            b.adc_rail_pin = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?)
         }
-        RR3_BOARD_BINDING_UART2_TX => b.uart2_tx = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_UART2_RX => b.uart2_rx = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_LEDC_PAN => b.ledc_pan = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_LEDC_TILT => {
-            b.ledc_tilt = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?)
-        }
-        RR3_BOARD_BINDING_I2S_BCLK => b.i2s_bclk = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_I2S_SD => b.i2s_sd = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_I2S_WS => b.i2s_ws = Some(rr3_gpio_number_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_UART2_TX => b.uart2_tx = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_UART2_RX => b.uart2_rx = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_LEDC_PAN => b.ledc_pan = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_LEDC_TILT => b.ledc_tilt = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_I2S_BCLK => b.i2s_bclk = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_I2S_SD => b.i2s_sd = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+        RR3_BOARD_BINDING_I2S_WS => b.i2s_ws = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
         RR3_BOARD_BINDING_CRED_STORE => {
             b.cred_store = Some(rr3_cred_store_parse(v).ok_or_else(bad)?)
         }
@@ -188,17 +186,17 @@ mod tests {
     /// GPIO 编号取值域：十进制 u8、trim 宽容；负数/越域/非十进制全拒。
     #[test]
     fn gpio_number_parse_domain() {
-        assert_eq!(rr3_gpio_number_parse("21"), Some(21));
-        assert_eq!(rr3_gpio_number_parse(" 34 "), Some(34));
-        assert_eq!(rr3_gpio_number_parse("0"), Some(0));
-        assert_eq!(rr3_gpio_number_parse("255"), Some(255));
+        assert_eq!(rr3_gpio_num_parse("21"), Some(21));
+        assert_eq!(rr3_gpio_num_parse(" 34 "), Some(34));
+        assert_eq!(rr3_gpio_num_parse("0"), Some(0));
+        assert_eq!(rr3_gpio_num_parse("255"), Some(255));
         assert_eq!(
-            rr3_gpio_number_parse("+2"),
+            rr3_gpio_num_parse("+2"),
             Some(2),
             "u8 parse 标准语义收前导加号"
         );
         for bad in ["", " ", "-1", "256", "0x15", "21x", "1.5"] {
-            assert_eq!(rr3_gpio_number_parse(bad), None, "{bad}");
+            assert_eq!(rr3_gpio_num_parse(bad), None, "{bad}");
         }
     }
 
@@ -207,21 +205,19 @@ mod tests {
     #[test]
     fn entry_fills_known_keys_and_names_unknown() {
         let mut b = Rr3BoardBindings::default();
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2C_SDA, "21").expect("sda 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2C_SCL, " 22 ")
-            .expect("trim 宽容必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_ADC_RAIL_PIN, "34")
-            .expect("rail 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_UART2_TX, "18").expect("tx 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_UART2_RX, "19").expect("rx 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_LEDC_PAN, "32").expect("pan 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_LEDC_TILT, "33").expect("tilt 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2S_BCLK, "4").expect("bclk 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2S_SD, "27").expect("sd 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_I2S_WS, "26").expect("ws 必须入位");
-        rr3_board_binding_entry(&mut b, RR3_BOARD_BINDING_CRED_STORE, "nvs:rr3")
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_I2C_SDA, "21").expect("sda 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_I2C_SCL, " 22 ").expect("trim 宽容必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_ADC_RAIL_PIN, "34").expect("rail 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_UART2_TX, "18").expect("tx 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_UART2_RX, "19").expect("rx 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_LEDC_PAN, "32").expect("pan 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_LEDC_TILT, "33").expect("tilt 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_I2S_BCLK, "4").expect("bclk 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_I2S_SD, "27").expect("sd 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_I2S_WS, "26").expect("ws 必须入位");
+        rr3_board_bind_entry(&mut b, RR3_BOARD_BINDING_CRED_STORE, "nvs:rr3")
             .expect("cred_store 必须入位");
-        assert_eq!(b.rr3_board_bindings_i2c(), Some((21, 22)));
+        assert_eq!(b.rr3_board_i2c_binds(), Some((21, 22)));
         assert_eq!(b.adc_rail_pin, Some(34));
         assert_eq!(b.uart2_tx, Some(18));
         assert_eq!(b.uart2_rx, Some(19));
@@ -233,18 +229,18 @@ mod tests {
         assert_eq!(b.cred_store.as_deref(), Some("nvs:rr3"));
 
         let mut b2 = Rr3BoardBindings::default();
-        let e = rr3_board_binding_entry(&mut b2, "gpio_line", "4").expect_err("键出域必须红");
+        let e = rr3_board_bind_entry(&mut b2, "gpio_line", "4").expect_err("键出域必须红");
         assert!(e.contains("gpio_line 未在册"), "{e}");
-        let e = rr3_board_binding_entry(&mut b2, RR3_BOARD_BINDING_I2C_SDA, "0x15")
+        let e = rr3_board_bind_entry(&mut b2, RR3_BOARD_BINDING_I2C_SDA, "0x15")
             .expect_err("坏值必须红");
         assert!(e.contains("i2c_sda 取值不认"), "{e}");
-        let e = rr3_board_binding_entry(&mut b2, RR3_BOARD_BINDING_I2C_SCL, "256")
+        let e = rr3_board_bind_entry(&mut b2, RR3_BOARD_BINDING_I2C_SCL, "256")
             .expect_err("越 u8 必须红");
         assert!(e.contains("i2c_scl 取值不认"), "{e}");
-        let e = rr3_board_binding_entry(&mut b2, RR3_BOARD_BINDING_CRED_STORE, "flash:boot")
+        let e = rr3_board_bind_entry(&mut b2, RR3_BOARD_BINDING_CRED_STORE, "flash:boot")
             .expect_err("非 nvs: 前缀必须红");
         assert!(e.contains("cred_store 取值不认"), "{e}");
-        let e = rr3_board_binding_entry(&mut b2, RR3_BOARD_BINDING_CRED_STORE, "nvs:")
+        let e = rr3_board_bind_entry(&mut b2, RR3_BOARD_BINDING_CRED_STORE, "nvs:")
             .expect_err("空 namespace 必须红");
         assert!(e.contains("cred_store 取值不认"), "{e}");
         assert_eq!(b2, Rr3BoardBindings::default(), "红条目不得半写入");
@@ -285,11 +281,11 @@ mod tests {
     #[test]
     fn i2c_pair_requires_both_sides() {
         let mut b = Rr3BoardBindings::default();
-        assert_eq!(b.rr3_board_bindings_i2c(), None);
+        assert_eq!(b.rr3_board_i2c_binds(), None);
         b.i2c_sda = Some(21);
-        assert_eq!(b.rr3_board_bindings_i2c(), None, "半份配置不成对");
+        assert_eq!(b.rr3_board_i2c_binds(), None, "半份配置不成对");
         b.i2c_scl = Some(22);
-        assert_eq!(b.rr3_board_bindings_i2c(), Some((21, 22)));
+        assert_eq!(b.rr3_board_i2c_binds(), Some((21, 22)));
     }
 
     /// 在册表覆盖十一常量且恰十一键（键域封闭的表级锚——扩键先扩本表再扩消费面；

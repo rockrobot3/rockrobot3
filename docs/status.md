@@ -1662,7 +1662,7 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   128B 头预留区 84 字节全空，帧内载荷被线面误码改坏后仍能通过 magic/长度/JSON 四道门，
   音频方向表现为**静默杂音**且无任何计数可查。处置：把预留区前 4 字节（offset 44..48）
   改作 `payload_crc32`（IEEE 反射多项式 0xEDB88320，逐位实现零查表），余 80 字节仍须全零。
-  单点真值：`rr3_crc32`（唯一算法）、`rr3_header_bytes_with_crc`（唯一发送入口）、
+  单点真值：`rr3_crc32`（唯一算法）、`rr3_header_encode`（唯一发送入口）、
   `rr3_verify_crc`（收侧校验，`rr3_framebuf_read` 与 `FrameAssembler::pull` 均已接，
   不符即**整帧丢弃**并计错，丢片由 seq 对账继续记账）。契约同步：`envelope.schema.json`
   偏移表 + `x-offset-sum`、ADR-0006 决策 1 追加项、contracts/README §3 均已写明这是

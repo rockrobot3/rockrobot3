@@ -38,7 +38,7 @@ const RR3_EVIDENCE_KEYS: [&str; 6] = [
 /// 证据引用形制判定：`<形态>/<编号>`——形态段非空且不含空白；编号段恰好
 /// 四位十进制数字（0001 起，四位零填充）。形制不合的引用在任何消费面直接拒，
 /// 不到"查文件"那一步。
-pub fn rr3_evidence_ref_wellformed(reference: &str) -> bool {
+pub fn rr3_evidence_ref_ok(reference: &str) -> bool {
     let Some((form, num)) = reference.split_once('/') else {
         return false;
     };
@@ -53,7 +53,7 @@ pub fn rr3_evidence_ref_wellformed(reference: &str) -> bool {
 /// 证据引用完整校验：`root`＝证据容器根（仓内上下文为 `docs/evidence`），
 /// `reference`＝`<形态>/<编号>`。四道判据全过才返回 `Ok(())`：
 ///
-/// 1. 形制（[`rr3_evidence_ref_wellformed`]）；
+/// 1. 形制（[`rr3_evidence_ref_ok`]）；
 /// 2. 文件存在且可读（`<root>/<形态>/<编号>.md`）；
 /// 3. frontmatter 合法（`+++` 定界、六键齐、无未知键、值为一行双引号文本）；
 /// 4. `form` 值与引用中的形态目录名一致（文件搬家不改 form = 立刻红）。
@@ -61,7 +61,7 @@ pub fn rr3_evidence_ref_wellformed(reference: &str) -> bool {
 /// fail-closed：任一道不过即点名拒绝，无豁免通道——与"缺键即红"同列语义
 /// （B-15 ②）。
 pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
-    if !rr3_evidence_ref_wellformed(reference) {
+    if !rr3_evidence_ref_ok(reference) {
         return Err(format!(
             "证据引用 {reference:?} 形制不合法（应为 <形态>/<四位编号>，形态段不含空白）"
         ));
@@ -70,7 +70,7 @@ pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
     let path = root.join(format!("{reference}.md"));
     let text = fs::read_to_string(&path)
         .map_err(|e| format!("证据文件读不到（{}）: {e}", path.display()))?;
-    let fields = rr3_evidence_frontmatter(&text)
+    let fields = rr3_evidence_head(&text)
         .map_err(|e| format!("证据文件 {} frontmatter 不合法: {e}", path.display()))?;
     let declared = fields
         .iter()
@@ -89,7 +89,7 @@ pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
 /// frontmatter 解析（TOML 子集，手切零依赖——本 crate 主依赖保持为零）：
 /// 首行 `+++` 开、下一行 `+++` 收，之间每行 `key = "value"`；key 须在册、
 /// value 为一行双引号文本（内部不许出现双引号）；六键齐、缺一红、未知键红。
-fn rr3_evidence_frontmatter(text: &str) -> Result<Vec<(&str, &str)>, String> {
+fn rr3_evidence_head(text: &str) -> Result<Vec<(&str, &str)>, String> {
     let mut lines = text.lines();
     match lines.next() {
         Some(l) if l.trim() == "+++" => {}
@@ -161,20 +161,17 @@ mod tests {
 
     #[test]
     fn ref_wellformed_accepts_form_plus_four_digits() {
-        assert!(rr3_evidence_ref_wellformed("对拍/0001"));
-        assert!(rr3_evidence_ref_wellformed("实测/9999"));
-        assert!(
-            !rr3_evidence_ref_wellformed("对拍/0001/x"),
-            "编号段含斜杠红"
-        );
-        assert!(!rr3_evidence_ref_wellformed("对拍/001"), "三位编号红");
-        assert!(!rr3_evidence_ref_wellformed("对拍/00001"), "五位编号红");
-        assert!(!rr3_evidence_ref_wellformed("对拍/00a1"), "编号含字母红");
-        assert!(!rr3_evidence_ref_wellformed("对拍0001"), "缺斜杠红");
-        assert!(!rr3_evidence_ref_wellformed("/0001"), "形态段空红");
-        assert!(!rr3_evidence_ref_wellformed("对 拍/0001"), "形态段含空白红");
-        assert!(!rr3_evidence_ref_wellformed("对拍/"), "编号段空红");
-        assert!(!rr3_evidence_ref_wellformed("对拍"), "整体缺编号红");
+        assert!(rr3_evidence_ref_ok("对拍/0001"));
+        assert!(rr3_evidence_ref_ok("实测/9999"));
+        assert!(!rr3_evidence_ref_ok("对拍/0001/x"), "编号段含斜杠红");
+        assert!(!rr3_evidence_ref_ok("对拍/001"), "三位编号红");
+        assert!(!rr3_evidence_ref_ok("对拍/00001"), "五位编号红");
+        assert!(!rr3_evidence_ref_ok("对拍/00a1"), "编号含字母红");
+        assert!(!rr3_evidence_ref_ok("对拍0001"), "缺斜杠红");
+        assert!(!rr3_evidence_ref_ok("/0001"), "形态段空红");
+        assert!(!rr3_evidence_ref_ok("对 拍/0001"), "形态段含空白红");
+        assert!(!rr3_evidence_ref_ok("对拍/"), "编号段空红");
+        assert!(!rr3_evidence_ref_ok("对拍"), "整体缺编号红");
     }
 
     #[test]

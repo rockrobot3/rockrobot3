@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use rr_ipc::{rr3_board_binding_entry, Rr3BoardBindings, RR3_METHOD_SET_BINDINGS};
+use rr_ipc::{rr3_board_bind_entry, Rr3BoardBindings, RR3_METHOD_SET_BINDINGS};
 use rr_periph_proto::ports::{Rr3ClockPort, Rr3UartPort};
 use serde_json::{json, Value};
 
@@ -42,7 +42,7 @@ pub(crate) fn frame_dispatch(
 
 /// 绑定注入（rr3.set_bindings，**控制面**，批N4 件七(c) / 批N9 件五）：宿主桥连接
 /// 建立时下发描述符解析的引脚真值（`{"i2c_sda": "21", ...}`——值全字符串，rr-hal/
-/// rr-registry 契约同形）。逐键过 [`rr3_board_binding_entry`] 键域/值域校验：未知键/
+/// rr-registry 契约同形）。逐键过 [`rr3_board_bind_entry`] 键域/值域校验：未知键/
 /// 坏值 fail-closed 整体不落（暂存区不半写入，Err 折 result.error 回帧）；全过才
 /// 覆盖写板侧单点（[`crate::state::rr3_board_bindings_store`]）。部分注入合法（缺键 =
 /// None，消费点各自判齐）。成功即打印十键值——板侧引脚真值的**观测面**（boot 横幅
@@ -59,7 +59,7 @@ fn frame_handle_set_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Valu
         let s = v
             .as_str()
             .ok_or_else(|| format!("{k} 值非法: {v}（须字符串）"))?;
-        rr3_board_binding_entry(&mut nb, k, s)?;
+        rr3_board_bind_entry(&mut nb, k, s)?;
     }
     rr3_board_bindings_store(nb.clone());
     println!(
