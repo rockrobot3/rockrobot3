@@ -42,7 +42,7 @@ impl Rr3LedEffect {
         }
     }
 
-    pub fn rr3_led_effect_as_str(&self) -> &'static str {
+    pub fn rr3_led_effect_str(&self) -> &'static str {
         match self {
             Self::On => "on",
             Self::Off => "off",
@@ -59,7 +59,7 @@ pub fn rr3_led_effects_join(effects: &[Rr3LedEffect]) -> String {
     }
     effects
         .iter()
-        .map(Rr3LedEffect::rr3_led_effect_as_str)
+        .map(Rr3LedEffect::rr3_led_effect_str)
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -76,10 +76,10 @@ mod tests {
         for s in RR3_LED_EFFECT_VALUES {
             let e = Rr3LedEffect::rr3_led_effect_parse(s)
                 .unwrap_or_else(|| panic!("在册值必须可解析: {s}"));
-            assert_eq!(e.rr3_led_effect_as_str(), s, "值↔枚举↔串三相一致");
+            assert_eq!(e.rr3_led_effect_str(), s, "值↔枚举↔串三相一致");
         }
         let listed = [Rr3LedEffect::On, Rr3LedEffect::Off, Rr3LedEffect::Blink]
-            .map(|e| e.rr3_led_effect_as_str());
+            .map(|e| e.rr3_led_effect_str());
         assert_eq!(listed, RR3_LED_EFFECT_VALUES, "枚举全集与值集常量漂移");
     }
 

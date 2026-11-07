@@ -23,7 +23,7 @@
 | led | `rr3_led_parse_args(args: &Value) -> Result<Rr3LedEffect, String>`（白名单 on/off/blink） | → 枚举 | 无 | 业务 error |
 | led | `Rr3Led::rr3_led_new(gpio: Arc<dyn Rr3GpioOut>, blink_period_ms: u64) -> Self` | 句柄 + 周期 → 控件 | **自持 worker 线程** + `current` | `spawn` 失败 → **`expect` panic** |
 | led | `Rr3Led::rr3_led_apply(e: Rr3LedEffect) -> Result<(Rr3LedEffect, Rr3LedEffect), String>` | 效果 → `(生效, 前一)` | `current` | worker 已退 → 业务 error（进程不亡） |
-| relay | `rr3_relay_parse_args(args) -> Result<bool,_>` · `rr3_relay_apply(gpio: &dyn Rr3GpioOut, on) -> Result<bool,_>` · `rr3_relay_result` · `rr3_relay_counter_key(on)` · `rr3_relay_state_body(seq, on)` | 参数 → 落电平 → 应答 / 计数键 / 流载荷 | 无（`relay_seq` 在组合件） | 业务 error |
+| relay | `rr3_relay_parse_args(args) -> Result<bool,_>` · `rr3_relay_apply(gpio: &dyn Rr3GpioOut, on) -> Result<bool,_>` · `rr3_relay_result` · `rr3_relay_count_key(on)` · `rr3_relay_state_body(seq, on)` | 参数 → 落电平 → 应答 / 计数键 / 流载荷 | 无（`relay_seq` 在组合件） | 业务 error |
 | 共同目标签名 | `use rr_hal::…` **全部 → `rr_hal_api`（同步、无 `Arc<dyn>`、无 `rr3_block_on`）**；led → `rr3_led_tick(now_ms, state) -> Option<bool>`（线程上收到组合件） | | | |
 
 ## §2 状态机
@@ -149,7 +149,7 @@
 |---|---|---|---|---|
 | servo | ✅（`rr3_servo_*` + `Rr3RateGate` 已复用 `rr-core::control`） | ⚠️ 不能 | ⚠️ 不能 | ① `rr3_servo_parse_args(&Value, …) -> Result<_, String>`：`Value` 是 serde 类型、`String` 是 alloc 错型 → 改 `Rr3ServoCmd { angle_deg: u16, move_ms: u64 }` + `Rr3ServoErr` 枚举（错型面与 `Rr3HalError` 同族）；② 舵机句柄今天从 `rr3_hal_servo()` 拿 `Box<dyn>`（在 `composite.rs`），件签名里的 `Rr3PwmServo` 是 `#[async_trait]` + `Send + Sync`，落角经 `rr3_block_on` → 批I F1 换 `rr-hal-api` 同步 trait；③ 载荷 `rr3_servo_state_body -> Value` 上移承载层（A-8） |
 | led | ✅（但**件内自持 worker 线程 + mpsc**） | ⚠️ 不能按现形状（`std::sync::mpsc` + `thread::Builder::spawn`；FreeRTOS 下要换队列） | ❌ 最重的一件 | ① 去线程：`rr3_led_tick(now_ms, state) -> Option<bool>`，节拍归组合件（A-1，且**先**把三条真等用例改合成时钟——R-4）；② `Arc<dyn Rr3GpioOut>` → bare 档禁 trait 对象（ADR-0018 修订 2 ②）→ 泛型 `<G: Rr3GpioOut>` 或由承载层持有；③ `recv_timeout(Duration::from_secs(3600))` 的"长眠"语义消失后，非 blink 态必须显式表示（件内 `mode/level/next_toggle_ms` 三字段），不许用超时兜；④ `rr3_block_on` 清零 |
-| relay | ✅ | ⚠️ 只差 HAL 形状 | ⚠️ 只差 HAL 形状 + dyn | ① `rr3_relay_apply(&dyn Rr3GpioOut, on)` → bare 禁 `dyn` → 泛型；② 同样去 `rr3_block_on`；③ `&Value` 解析 → `bool`/结构体；④ `rr3_relay_counter_key(on) -> "relay_on"/"relay_off"` 是**运维词汇**，留在件面但进 §13 豁免清单（counters 面按这两个字符串聚合） |
+| relay | ✅ | ⚠️ 只差 HAL 形状 | ⚠️ 只差 HAL 形状 + dyn | ① `rr3_relay_apply(&dyn Rr3GpioOut, on)` → bare 禁 `dyn` → 泛型；② 同样去 `rr3_block_on`；③ `&Value` 解析 → `bool`/结构体；④ `rr3_relay_count_key(on) -> "relay_on"/"relay_off"` 是**运维词汇**，留在件面但进 §13 豁免清单（counters 面按这两个字符串聚合） |
 | reflex（组合件成分，非件） | ✅ | ✅ 纯 `rr-core::control` + 注入 `now_ms` | ✅ 同左（这是全项目**唯一今天就能 bare 跑的回路**，也是"微型形态仍有限位/饱和守护"的依据） | 无跨档障碍；只两条小动作：`loop_hz` 的 `as u32` 裸截断 → `try_from` + 拒 boot（A-3）、`1_000_000` µs 换算常数进 `rr-core::runtime` 的时基面 |
 
 **动作序**：批I F1（`rr-hal-api`）→ A-4（servo/relay 同步句柄）→ A-1（led 去线程，先建合成时钟护栏）→ A-8（载荷上移，新工单）。

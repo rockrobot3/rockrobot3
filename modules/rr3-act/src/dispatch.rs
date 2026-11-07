@@ -177,7 +177,7 @@ impl Dispatcher for Rr3ActDispatcher {
         if let Some((on, prev)) = relay_applied {
             if relay::rr3_relay_state_due(prev, on) {
                 self.relay_seq += 1;
-                bus.counter_bump(relay::rr3_relay_counter_key(on), 1);
+                bus.counter_bump(relay::rr3_relay_count_key(on), 1);
                 bus.publish(
                     relay::RR3_RELAY_STATE_TOPIC,
                     rpc::rr3_relay_state_body(self.relay_seq, on),
@@ -236,7 +236,7 @@ impl Dispatcher for Rr3ActDispatcher {
                             // 变化即发（0.0.5 批I A-7）：同态命令折日志不发布
                             if relay::rr3_relay_state_due(prev, on) {
                                 self.relay_seq += 1;
-                                bus.counter_bump(relay::rr3_relay_counter_key(on), 1);
+                                bus.counter_bump(relay::rr3_relay_count_key(on), 1);
                                 bus.publish(
                                     relay::RR3_RELAY_STATE_TOPIC,
                                     rpc::rr3_relay_state_body(self.relay_seq, on),

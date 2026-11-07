@@ -90,13 +90,13 @@ pub(crate) fn rr3_handle_led(
         .unwrap_or_else(|e| eprintln!("rr3-act-led: 写电平失败: {e}"));
     eprintln!(
         "led: {}（前态 {}）",
-        applied.rr3_led_effect_as_str(),
-        previous.rr3_led_effect_as_str()
+        applied.rr3_led_effect_str(),
+        previous.rr3_led_effect_str()
     );
     Ok((
         json!({
-            "effect": applied.rr3_led_effect_as_str(),
-            "previous": previous.rr3_led_effect_as_str(),
+            "effect": applied.rr3_led_effect_str(),
+            "previous": previous.rr3_led_effect_str(),
         }),
         None,
         None,
@@ -149,7 +149,7 @@ pub(crate) fn rr3_act_ops_snapshot(cfg: &Rr3ActCfg) -> Value {
                 .led
                 .effects
                 .iter()
-                .map(Rr3LedEffect::rr3_led_effect_as_str)
+                .map(Rr3LedEffect::rr3_led_effect_str)
                 .collect::<Vec<_>>(),
         },
         "servo": {

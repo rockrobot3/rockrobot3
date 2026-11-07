@@ -80,7 +80,7 @@ mod tests {
             ("blink", Rr3LedEffect::Blink),
         ] {
             assert_eq!(Rr3LedEffect::rr3_led_effect_parse(s), Some(want));
-            assert_eq!(want.rr3_led_effect_as_str(), s);
+            assert_eq!(want.rr3_led_effect_str(), s);
         }
         for bad in ["", "ON", "pulse", "呼吸"] {
             assert_eq!(Rr3LedEffect::rr3_led_effect_parse(bad), None, "{bad}");

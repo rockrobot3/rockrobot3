@@ -185,7 +185,7 @@ stdout `print`（多行调用按行 grep 会误报起始行；python3 缺失/解
 mkmodule 骨架模板同步改 `eprintln!`（新生成模块生来合规）。sim 夹具两处 spawn（brain.rs/
 chain.rs）本就 stdout/stderr 双流同文件，brain print 改 stderr 不破 `wait_log_contains` 消费。
 **2026-10-19 对表（批N4 件六第一笔，I-21①③＋B-13①＋B-16①②——"成功"的假通过口与超时数据化）**：
-三处假通过口同笔闭合——interact `rr3_tts_pcm_integrity` 加零字节下界（(0,0) 不再是合法通过态，
+三处假通过口同笔闭合——interact `rr3_pcm_integrity` 加零字节下界（(0,0) 不再是合法通过态，
 云 200 空体的静默假成功口关死）且 `played_ms==0` 折 `tts_play_reject`＋error 应答不记
 `tts_play_ok`；面板 `BusCall` 出口加载荷判等（`rr3_bus_reply_status`：应答含 `error` 即
 422+`ok:false`，与 502 传输失败分码——脚本按状态码判成败不再恒真，前端 `r.ok` 失败即
@@ -2692,7 +2692,7 @@ power 6 / sense 5）、`eprintln!` 只有 13 处 ⇒ **舵机写入失败、配�
 （`rr3-audio-rec` 只依赖 `rr-ipc`+`serde_json`、不落总线；`rr3_hal_audio_source()` 无 esp32 分支
 ⇒ **"板侧双麦 → 宿主 VAD"这一跳结构上不存在**，§2 那句"四件已在板上真跑"说过头，已订正）；
 播放点名失败只 print 一行就照常 `chat_rounds+1`（**轮次完成与出声解耦**——2026-10-20 对表（批N4 件六一笔 B-16）：`chat_rounds` 已退役拆账 `rounds_replied`/`rounds_audible`，本行为取证时点写法）；
-`rr3_tts_pcm_integrity(0,0)` 判 `Ok` ⇒ 云返回空体时**静默记 `tts_play_ok`**。
+`rr3_pcm_integrity(0,0)` 判 `Ok` ⇒ 云返回空体时**静默记 `tts_play_ok`**。
 待建门 **17→20 把**；索引 §11 新增 **L-27**；六册新工单 **A-19 / I-21 / B-16**；
 全案新增 §20（Z 类 7 条 + 流 类 5 条 + 两条逐跳表）。**不产任何板上证据**；
 板侧运行面失败是否发生过、gaps/restarts 的真实量级，都归 0.0.7 验证窗。

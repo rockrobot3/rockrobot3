@@ -371,7 +371,7 @@ impl Rr3BusClient {
                         .rt
                         .lock()
                         .unwrap_or_else(|p| p.into_inner())
-                        .rr3_next_beat_wait_ms(tb.rr3_now_ms())
+                        .rr3_beat_wait_ms(tb.rr3_now_ms())
                     else {
                         return; // 断开（Down）即停拍——"不装活着"同一裁定
                     };

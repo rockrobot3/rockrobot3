@@ -40,7 +40,7 @@ pub(crate) fn rr3_connect_probe(
 /// 在册则经 `rr3_prov_restored` 直接起 station（重启仍在册），失败即致命
 /// （fail-closed，不静默当"没配过网"）。「配网面就绪」回显归本编排。返回二元
 /// ——凭据存储（on_rpc connect/forget 运行期需要）与配网状态机初值。
-pub(crate) fn rr3_connect_provision(
+pub(crate) fn rr3_wifi_provision(
     timeout_ms: u64,
 ) -> Result<(Box<dyn Rr3WifiStore>, Rr3Provision), String> {
     let (store, store_backend) = rr3_hal_wifi_store(Duration::from_millis(timeout_ms));

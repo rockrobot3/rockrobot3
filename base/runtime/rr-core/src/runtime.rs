@@ -104,7 +104,7 @@ impl Rr3ModuleRuntime {
 
     /// 距下一拍的等待时长（ms）：仅 Online 态给出（饱和下界 0）；
     /// 非 Online 返回 `None`——运行环据此停拍（std 心跳线程据此退出）。
-    pub fn rr3_next_beat_wait_ms(&self, now_ms: u64) -> Option<u64> {
+    pub fn rr3_beat_wait_ms(&self, now_ms: u64) -> Option<u64> {
         if !matches!(self.link, Rr3LinkState::Online { .. }) {
             return None;
         }
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(rt.rr3_link_state(), Rr3LinkState::Registering);
         assert!(!rt.rr3_link_online());
         assert!(!rt.rr3_heartbeat_due(1_000));
-        assert_eq!(rt.rr3_next_beat_wait_ms(1_000), None);
+        assert_eq!(rt.rr3_beat_wait_ms(1_000), None);
         assert_eq!(rt.rr3_heartbeat_ms(), 50);
     }
 
@@ -309,9 +309,9 @@ mod tests {
         assert!(rt.rr3_link_online());
         assert!(!rt.rr3_heartbeat_due(1_049), "到期前一毫秒不算到期");
         assert!(rt.rr3_heartbeat_due(1_050), "拍点整点到期");
-        assert_eq!(rt.rr3_next_beat_wait_ms(1_000), Some(50));
-        assert_eq!(rt.rr3_next_beat_wait_ms(1_030), Some(20));
-        assert_eq!(rt.rr3_next_beat_wait_ms(1_050), Some(0));
+        assert_eq!(rt.rr3_beat_wait_ms(1_000), Some(50));
+        assert_eq!(rt.rr3_beat_wait_ms(1_030), Some(20));
+        assert_eq!(rt.rr3_beat_wait_ms(1_050), Some(0));
     }
 
     /// 相对节拍：下一拍 = 本拍发出时刻 + 间隔（drift 语义，与 std 行为一致；
@@ -337,9 +337,9 @@ mod tests {
         assert_eq!(rt.rr3_link_state(), Rr3LinkState::Down);
         assert!(!rt.rr3_link_online());
         assert!(!rt.rr3_heartbeat_due(9_999));
-        assert_eq!(rt.rr3_next_beat_wait_ms(9_999), None);
+        assert_eq!(rt.rr3_beat_wait_ms(9_999), None);
         rt.rr3_heartbeat_sent(9_999); // 无操作：断开后不得再排拍
-        assert_eq!(rt.rr3_next_beat_wait_ms(9_999), None);
+        assert_eq!(rt.rr3_beat_wait_ms(9_999), None);
     }
 
     /// 逐拍一致性：注入时钟推进，拍点序列 = 注册点 + k·间隔（std 心跳线程的
