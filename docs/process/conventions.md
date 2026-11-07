@@ -2396,7 +2396,7 @@ fetch 端点字面量是功能调用非文案，保留）。教训三条：① `
 经 `rr3.ctl.counters` 有界轮询点验（先红后绿）。**S-3**——`rr3-sense/composite.rs`
 `pcm_frames`（发布成功一帧 +1）/ `pcm_empty_frames`（空帧另账）两键，`e2e_audio_chain`
 ⑤ 同法点验（先红后绿）。**I-4**——panel spawn 失败改"弃置该连接 + `panel_spawn_fail`
-点账，accept 循环继续服务"（旧语义 `?` 上抛使面板静默消失），`rr3_panel_accept_loop`
+点账，accept 循环继续服务"（旧语义 `?` 上抛使面板静默消失），`rr3_accept_loop`
 抽缝 + `Rr3ConnSlot` RAII 守卫管 `live` 计数（Drop 归还，panic 展开不泄漏）。教训五条：
 ① macOS 对 `thread::Builder::stack_size(1)` **静默 clamp 使 spawn 成功**（线程带极小栈
 一跑即溢出 SIGABRT），确定性必败注入须 `stack_size(usize::MAX)`（EINVAL）；② `matches!`

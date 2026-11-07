@@ -15,7 +15,7 @@
 //! 错误面零堆化（0.0.8 批N24 件四，L-3 形状清理）：`rr3_tts_play` 返回
 //! [`Rr3TtsPlayError`] 零堆枚举（写腿失败携 `Rr3HalError` 原样随行，机制层
 //! 不落 `String` 堆），人读文案由编排层渲染（`src/composite.rs` 的
-//! `rr3_tts_play_error_text`，与改前逐字一致）；HAL 句柄入参改泛型
+//! `rr3_tts_err_text`，与改前逐字一致）；HAL 句柄入参改泛型
 //! （`S: Rr3AudioSink + ?Sized`，调用点单态化不改行为）。
 //!
 //! clippy `result_large_err` 模块级豁免：`Rr3ErrText` 内联 128B 是 no_std 面
@@ -47,7 +47,7 @@ pub fn rr3_tts_apply_gain(samples: &mut [i16], volume_pct: u32) {
 /// - `buffered_ms` 起播时刻缓冲实收时长；
 /// - `total_ms` 本轮流总时长（点名 `pcm_bytes` 对账一侧导出）；
 /// - `prebuffer_ms` 策略水位（config 注入）。
-pub fn rr3_tts_prebuffer_ready(buffered_ms: u64, total_ms: u64, prebuffer_ms: u64) -> bool {
+pub fn rr3_prebuffer_ready(buffered_ms: u64, total_ms: u64, prebuffer_ms: u64) -> bool {
     buffered_ms >= prebuffer_ms.min(total_ms)
 }
 
@@ -137,18 +137,18 @@ mod tests {
     #[test]
     fn prebuffer_ready_gate_min_semantics() {
         // 达水位：缓冲 800ms ≥ 水位 500ms → 播
-        assert!(rr3_tts_prebuffer_ready(800, 800, 500));
+        assert!(rr3_prebuffer_ready(800, 800, 500));
         // 恰好等于水位（边界含等号）→ 播
-        assert!(rr3_tts_prebuffer_ready(500, 800, 500));
+        assert!(rr3_prebuffer_ready(500, 800, 500));
         // 未达水位且流长于水位 → 不播（抗抖动：水位未满不起播）
-        assert!(!rr3_tts_prebuffer_ready(200, 1000, 500));
+        assert!(!rr3_prebuffer_ready(200, 1000, 500));
         // 短回答放行：流总长 300ms < 水位 500ms，缓冲已完整（300ms）→ 播
         // （legacy："短回答没攒满也播"）
-        assert!(rr3_tts_prebuffer_ready(300, 300, 500));
+        assert!(rr3_prebuffer_ready(300, 300, 500));
         // 短回答未攒满：缓冲 200ms < 总长 300ms < 水位 500ms → 不播（流未完整）
-        assert!(!rr3_tts_prebuffer_ready(200, 300, 500));
+        assert!(!rr3_prebuffer_ready(200, 300, 500));
         // 水位 0 = 无预缓冲：缓冲非零即播
-        assert!(rr3_tts_prebuffer_ready(1, 1000, 0));
+        assert!(rr3_prebuffer_ready(1, 1000, 0));
     }
 
     #[test]

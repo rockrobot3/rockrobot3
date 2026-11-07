@@ -24,8 +24,8 @@ pub(crate) const RR3_OPS_LIST_TOPIC: &str = "rr3-interact/ops/list";
 /// （`Rr3FaceSetError`，拒因数据随枚举走），文案在编排层渲染——线上字节
 /// 与改前逐字一致（契约面）。白名单连接串用常量投影（渲染不再 join 落堆）；
 /// 不可点名集是 config 注入的运行时数据，渲染面经
-/// `rr3_face_non_pointable_join` 组装（每句落在唯一一处）。
-pub(crate) fn rr3_face_set_error_text(e: &face::Rr3FaceSetError, non_pointable: &[&str]) -> String {
+/// `rr3_unpointable_join` 组装（每句落在唯一一处）。
+pub(crate) fn rr3_face_err_text(e: &face::Rr3FaceSetError, non_pointable: &[&str]) -> String {
     match e {
         face::Rr3FaceSetError::UnknownExpression(expr) => format!(
             "{} 不认表情 {expr:?}（允许 {}）",
@@ -34,7 +34,7 @@ pub(crate) fn rr3_face_set_error_text(e: &face::Rr3FaceSetError, non_pointable: 
         ),
         face::Rr3FaceSetError::NonPointable(expr) => format!(
             "{expr} 不可被点名（本形态不可点名集 {}）",
-            face::rr3_face_non_pointable_join(non_pointable)
+            face::rr3_unpointable_join(non_pointable)
         ),
     }
 }
@@ -42,7 +42,7 @@ pub(crate) fn rr3_face_set_error_text(e: &face::Rr3FaceSetError, non_pointable: 
 /// player 机制错误的人读文案（批N24 件四，L-3 形状清理）：机制层零堆枚举
 /// （`Rr3TtsPlayError`，HAL 错原样随行），文案在编排层渲染——`{e}` 走
 /// `Rr3HalError` Display，与改前逐字一致（每句落在唯一一处）。
-pub(crate) fn rr3_tts_play_error_text(e: &player::Rr3TtsPlayError) -> String {
+pub(crate) fn rr3_tts_err_text(e: &player::Rr3TtsPlayError) -> String {
     match e {
         player::Rr3TtsPlayError::Write(e) => format!("写播放面失败: {e}"),
     }
@@ -66,13 +66,13 @@ pub(crate) fn rr3_handle_tts(
         tts_pcm.rr3_tts_buf_take();
         return Err(e);
     }
-    let mut samples = rr3_pcm_bytes_to_samples(&tts_pcm.rr3_tts_buf_take());
+    let mut samples = rr3_pcm_to_samples(&tts_pcm.rr3_tts_buf_take());
     // 起播水位（MC-2）：对账通过即缓冲完整——`buffered == total` 是对账蕴含的
     // 架构事实，两处如实传同一值。判据显式在场（legacy 0cf029e 语义：达水位
     // 才起播、流完整未攒满也播）；流式化（增补轮五批E）后 buffered < total 的
     // 真分支接管起播时机。fail-closed：不过即拒（拒因点名水位）。
     let total_ms = samples.len() as u64 * 1000 / player::RR3_TTS_SAMPLE_RATE as u64;
-    if !player::rr3_tts_prebuffer_ready(total_ms, total_ms, player.prebuffer_ms) {
+    if !player::rr3_prebuffer_ready(total_ms, total_ms, player.prebuffer_ms) {
         bus.counter_bump("tts_play_reject", 1);
         return Err(format!(
             "起播水位未达：缓冲 {total_ms}ms < 水位 {}ms（prebuffer_ms），弃播",
@@ -82,7 +82,7 @@ pub(crate) fn rr3_handle_tts(
     // 播放增益（MC-2）：config 注入的 volume_pct 整型饱和缩放，播放前就地生效
     player::rr3_tts_apply_gain(&mut samples, player.volume_pct);
     let suspended = face.rr3_face_begin_talk();
-    let played_ms = player::rr3_tts_play(sink, &samples).map_err(|e| rr3_tts_play_error_text(&e));
+    let played_ms = player::rr3_tts_play(sink, &samples).map_err(|e| rr3_tts_err_text(&e));
     face.rr3_face_end_talk();
     let played_ms = played_ms?;
     // played_ms==0 不得记 ok（批N4 件六 I-21①）：对账通过但样点不足一个毫秒窗
@@ -114,7 +114,7 @@ pub(crate) fn rr3_handle_face(
     let expr = rr3_face_parse_args(args)?;
     let (current, previous) = face
         .rr3_face_set(&expr, non_pointable)
-        .map_err(|e| rr3_face_set_error_text(&e, non_pointable))?;
+        .map_err(|e| rr3_face_err_text(&e, non_pointable))?;
     Ok(rr3_face_result(current, previous))
 }
 
@@ -166,7 +166,7 @@ pub(crate) fn rr3_tts_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(
 
 /// s16le 字节列 → i16 样点：小端两两成对。brain 分帧保证偶数字节，尾部奇数
 /// 字节不成样点，防御性丢弃（as_chunks 自带该语义）。
-pub(crate) fn rr3_pcm_bytes_to_samples(bytes: &[u8]) -> Vec<i16> {
+pub(crate) fn rr3_pcm_to_samples(bytes: &[u8]) -> Vec<i16> {
     bytes
         .as_chunks::<2>()
         .0
@@ -200,7 +200,7 @@ pub(crate) fn rr3_face_result(current: &str, previous: &str) -> Value {
 /// 同源（face/player/panel/selftest 四组，门 d covers 申报的对账面），config
 /// 其余键一律不进应答。组合件级七槽（件五 I-17/I-18② 数据化）住 face_tick_ms/
 /// selftest_face_expect/panel 五限额，键 = 槽名逐字。
-pub(crate) fn rr3_interact_ops_snapshot(cfg: &Rr3InteractCfg) -> Value {
+pub(crate) fn rr3_interact_ops(cfg: &Rr3InteractCfg) -> Value {
     json!({
         "face": {
             "non_pointable": cfg.face.non_pointable,
@@ -295,9 +295,9 @@ mod tests {
     /// s16le 字节列 → i16 样点：小端两两成对，奇数尾字节防御性丢弃
     #[test]
     fn pcm_bytes_to_samples_is_little_endian_pairs() {
-        assert_eq!(rr3_pcm_bytes_to_samples(&[0x34, 0x12]), vec![0x1234]);
-        assert_eq!(rr3_pcm_bytes_to_samples(&[0x00, 0x80]), vec![i16::MIN]);
-        assert!(rr3_pcm_bytes_to_samples(&[0x01]).is_empty());
+        assert_eq!(rr3_pcm_to_samples(&[0x34, 0x12]), vec![0x1234]);
+        assert_eq!(rr3_pcm_to_samples(&[0x00, 0x80]), vec![i16::MIN]);
+        assert!(rr3_pcm_to_samples(&[0x01]).is_empty());
     }
 
     /// 跨语言一致性（MC-1③）：`contracts/golden/tts-pcm-frames.json` 是 Python
@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(buf.rr3_tts_buf_len(), want.len(), "收流字节数 == 基准 PCM");
         assert_eq!(buf.rr3_tts_buf_take(), want, "收流拼接逐字节还原基准 PCM");
         // 1600 字节 = 800 样点 = 50ms（20ms×2 + 10ms）：解码产物可直接喂播放面
-        let samples = rr3_pcm_bytes_to_samples(&want);
+        let samples = rr3_pcm_to_samples(&want);
         assert_eq!(samples.len(), 800);
         assert_eq!(samples.len() as u64 * 1000 / 16000, 50);
     }
@@ -358,19 +358,19 @@ mod tests {
     fn face_set_error_texts_are_verbatim() {
         let e = Rr3FaceSetError::UnknownExpression("wink");
         assert_eq!(
-            rr3_face_set_error_text(&e, &["talk"]),
+            rr3_face_err_text(&e, &["talk"]),
             "rr3-interact/face/expression 不认表情 \"wink\"（允许 idle/blink/talk/think/happy/listen/turn/charA/charB/charC/charD/charE/charF/charG/charH/charI/charJ/charK/charL/charM/charN/charO/charP/charQ/charR/charS/charT/charU/charV/charW/charX/charY/charZ/char0/char1/char2/char3/char4/char5/char6/char7/char8/char9/sleepy/surprised/angry/sad/confused/focus/love/dizzy/scared）"
         );
         let e = Rr3FaceSetError::NonPointable("talk");
         assert_eq!(
-            rr3_face_set_error_text(&e, &["talk"]),
+            rr3_face_err_text(&e, &["talk"]),
             "talk 不可被点名（本形态不可点名集 talk）"
         );
         let e = Rr3FaceSetError::NonPointable("talk");
         assert_eq!(
-            rr3_face_set_error_text(&e, &[]),
+            rr3_face_err_text(&e, &[]),
             "talk 不可被点名（本形态不可点名集 (空)）",
-            "空集渲染 (空)（rr3_face_non_pointable_join 同款口径）"
+            "空集渲染 (空)（rr3_unpointable_join 同款口径）"
         );
     }
 
@@ -379,6 +379,6 @@ mod tests {
     #[test]
     fn tts_play_error_text_is_verbatim() {
         let e = Rr3TtsPlayError::Write(rr_hal_api::Rr3HalError::Busy);
-        assert_eq!(rr3_tts_play_error_text(&e), "写播放面失败: HAL 设备忙");
+        assert_eq!(rr3_tts_err_text(&e), "写播放面失败: HAL 设备忙");
     }
 }

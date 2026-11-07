@@ -716,7 +716,7 @@ connect 配网最短密码位出码——`min_pass_len` 进 `config.toml [rr3-co
 语义回落）＋`atoms/wifi/assemble.toml` 第 3 槽，`rr3_wifi_connect_parse_args` 加参、文案模板化
 （"密码至少 N 位（legacy 配网语义）"）。②I-17/I-18② interact 四组出码——`RR3_FACE_TICK` 节拍
 （composite.toml 组合件级槽 face_tick_ms）、SelfTest 期望表情（selftest_face_expect）、face 兜底
-"idle"（`rr3_face_with_default` 件级槽 default_expression，Default 真值点唯一）、面板五限额
+"idle"（`rr3_face_default` 件级槽 default_expression，Default 真值点唯一）、面板五限额
 （`Rr3PanelLimits` 结构 max_conns/read_timeout/header_limit/body_limit/call_timeout，Default=
 legacy 8/5s/8KiB/4KiB/5s；`RR3_PANEL_ADDR` 按批I I-1 同口径保持 env+常量双真值不进 config）；
 composite.toml 删 `no_injection`、ops 七槽首启用＝**组合件级申报面首次有内容**。③I-18③ 自检
@@ -1494,7 +1494,7 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   **mz-dod 收口台账已结**（§22 DoD 勾点 + §18.2 站替台账清零核对 + 本锚重写 + 敞口登记）。
   十步门禁 `bash tools/ci/check.sh` 全绿（尾行"所有规约检查通过"），推三远端四端 `ls-remote` 核对一致。
   **批M 余数如实登记（批次未收口）**：**MC-1 已结（2026-10-13，四提交 `eefc0de`/`ed8fb2f`/`f959e3a`/`70e8fb6`）**——brain 分帧发布 `rr3-brain/audio/tts_pcm` + interact 收流对账排空播放 + `contracts/golden/tts-pcm-frames.json` 两腿对拍，占位正弦与 `RR3_TTS_MS_PER_CHAR` 退役（**台-2 已清零**）；
-  MC-2 已结（2026-10-13，`1930956`）——`volume_pct`/`prebuffer_ms` 经 config `[rr3-interact.player]` + ops 槽实装（`rr3_tts_apply_gain` i64 整型饱和、`rr3_tts_prebuffer_ready` 起播水位 legacy 0cf029e min 语义，interact 42 用例全绿）；
+  MC-2 已结（2026-10-13，`1930956`）——`volume_pct`/`prebuffer_ms` 经 config `[rr3-interact.player]` + ops 槽实装（`rr3_tts_apply_gain` i64 整型饱和、`rr3_prebuffer_ready` 起播水位 legacy 0cf029e min 语义，interact 42 用例全绿）；
   MC-3 复核（2026-10-13）——判据三条全兑现（`RR3_BACKEND_ESP32` 桥后端支 fail-closed + 开机自述真后端名 + 格位三源一致），**台-3 清零、F-2 改「可达」**；余数 = 帧表 R-12 迁移（`RR3_FRAMES_*` 件内唯一真值、板侧 `expr_eye_base` 已落而生产链未切 `expression` 变体），MC-3 不勾整单、归属待裁；
   MC-7 复核（2026-10-13）——**不勾，缺什么已写**：装配演练面在位（esp32-mini.toml + contract.rs pin + rr3-pack 正例），件承载三缺（件模块未进 xtensa 门 / 板侧仍专用固件 crate / `[hardware]` 进位未补），F-8 维持不可达。**批N9 件五（2026-10-22）：三缺之缺③ `[hardware]` 进位收**——`[hardware]` 三键→十键（uart2/ledc/i2s 七键进场）＋宿主 rr-ipc/rr-hal/rr-registry 三 crate 扩位＋板侧十键装配对账锚＋**真板三连实证**（正向注入✓对账✓五轮稳定／失配 ledc_pan=30 对账✗ fail-visible 点名／抽注入零注入态＋boot 解卡拒 fail-closed——实录见 [批N9 计划册件五行](process/dev/0.0.5增补轮六——批N9开发计划与真板收尾.md)）；缺①xtensa 门已随批N8 件三收，缺②固件 crate 收编归 0.0.7 余量，**MC-7 维持不勾整单**；**批N23（2026-10-23，四提交 `75532f1`/`9ef77d1`/`9158612`/`233707d`＋收口本提交）：三缺之缺② 板侧固件 crate 收编收码面半边**——`tools/esp32-periph-base` 立 `atoms/{servo,face,capture}/mech.rs` 三原子件目录形态（文件级机制/策略分离：机制纯函数＋行程生成物 `include!` 在件内，策略量 DUTY_MIN/MAX·BOOT_*·AXIS_SETTLE_MS·MIC_SR_HZ·MIC_GAIN·AUDIO_* 留 board.rs 按参传入，策略→机制单向依赖反向禁）；格位对齐头注申报 servo↔act.servo / face↔ui.face / capture↔audio.capture、不立 atom.toml 不冒领格主（计划册 §2 三不三立：不冒领格主／不扩契约词域／不 fork 校验器＋立件目录形态／立策略集中点显式化／立格位申报）；板侧纯函数单测 13 条宿主实跑（servo 4＋face 4＋capture 5）、xtensa 门两步绿×3、check.sh 87 PASS×3。**真跑半边不冒领**：件与装配单真跑未发生，0.0.7 余量如实归真板窗，**MC-7 维持不勾整单**；
   §22 DoD 相应条目：站替台账五条全部清零（**已勾**）；F 组条目仅剩 F-8 不勾，缺项与触发条件见

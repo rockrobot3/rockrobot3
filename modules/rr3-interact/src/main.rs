@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use rr3mod::{bootstrap, serve, Rr3ModConfig};
 
-use face::rr3_face_non_pointable_join;
+use face::rr3_unpointable_join;
 
 /// config 覆盖入口（缺省取 manifest 同目录的 config.toml；契约环境变量名不变）
 const RR3_INTERACT_CONFIG_ENV: &str = "RR3_INTERACT_CONFIG";
@@ -54,13 +54,13 @@ fn rr3_interact_run() -> Result<(), String> {
     // 路径段 RR3_INTERACT_CONFIG_ENV 覆盖 + manifest 同目录缺省归 load_config_text）
     let (bus, cfg) = bootstrap(Rr3ModConfig {
         config_env: Some(RR3_INTERACT_CONFIG_ENV),
-        parse_config: boot::rr3_interact_config_parse,
+        parse_config: boot::rr3_itact_cfg_parse,
     })?;
     // config 就绪行（注入的策略面在启动自述里可见：I-11 改数据即改行为，
     // 日志是第一证据；I-17/I-18②/F-31 新增键随行）
     eprintln!(
         "config 就绪: face non_pointable={} tick_ms={} default={} player prebuffer_ms={} volume_pct={} panel max_conns={} selftest face_expect={} expect[speaker={},relay={},face={},wiring={},contracts={}]",
-        rr3_face_non_pointable_join(&cfg.face.non_pointable), cfg.face.face_tick_ms,
+        rr3_unpointable_join(&cfg.face.non_pointable), cfg.face.face_tick_ms,
         cfg.face.default_expr, cfg.player.prebuffer_ms, cfg.player.volume_pct,
         cfg.panel.max_conns, cfg.selftest.face_expect, cfg.selftest.expect.speaker,
         cfg.selftest.expect.relay, cfg.selftest.expect.face, cfg.selftest.expect.wiring,

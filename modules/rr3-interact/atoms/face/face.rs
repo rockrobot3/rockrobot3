@@ -92,13 +92,13 @@ pub const RR3_FACE_EXPRESSIONS_JOINED: &str = "idle/blink/talk/think/happy/liste
 
 /// 表情名 → 白名单里的 `&'static str`（不认返回 `None`）。config 注入值与
 /// [`RR3_FACE_EXPRESSIONS`] 的对账点（值本身是契约字面量，扩值走契约评审）。
-pub fn rr3_face_expression_lookup(name: &str) -> Option<&'static str> {
+pub fn rr3_face_expr_lookup(name: &str) -> Option<&'static str> {
     RR3_FACE_EXPRESSIONS.iter().find(|&&e| e == name).copied()
 }
 
 /// 不可点名集的展示串（`talk`；错误文案的唯一渲染点）。空集显示为 `(空)`——
 /// "本形态不排除任何表情点名"是合法数据，不是错。
-pub fn rr3_face_non_pointable_join(non_pointable: &[&str]) -> String {
+pub fn rr3_unpointable_join(non_pointable: &[&str]) -> String {
     if non_pointable.is_empty() {
         return "(空)".to_string();
     }
@@ -113,8 +113,8 @@ pub use mech::{rr3_face_frames, Rr3Face, Rr3FaceSetError};
 
 /// 带兜底表情的构造器（批N4 件五 I-17/M-3）：mech 状态机各回落点的表情
 /// 数据化注入面（config `default_expression` → 组合件装配 → 此处转出）。
-pub fn rr3_face_with_default(default_expr: &'static str) -> Rr3Face {
-    Rr3Face::rr3_face_with_default(default_expr)
+pub fn rr3_face_new(default_expr: &'static str) -> Rr3Face {
+    Rr3Face::rr3_face_default(default_expr)
 }
 
 #[cfg(test)]
@@ -125,24 +125,17 @@ mod tests {
     #[test]
     fn expression_lookup_covers_whitelist() {
         for e in RR3_FACE_EXPRESSIONS {
-            assert_eq!(
-                rr3_face_expression_lookup(e),
-                Some(e),
-                "在册名必须查得回: {e}"
-            );
+            assert_eq!(rr3_face_expr_lookup(e), Some(e), "在册名必须查得回: {e}");
         }
-        assert_eq!(rr3_face_expression_lookup("wink"), None, "非在册名不认");
+        assert_eq!(rr3_face_expr_lookup("wink"), None, "非在册名不认");
     }
 
     /// 不可点名集展示串：常规集 / 单元素 / 空集（空集是合法数据选择，非错）
     #[test]
     fn non_pointable_join_renders_set_and_empty() {
-        assert_eq!(rr3_face_non_pointable_join(&["talk"]), "talk");
-        assert_eq!(
-            rr3_face_non_pointable_join(&["talk", "blink"]),
-            "talk/blink"
-        );
-        assert_eq!(rr3_face_non_pointable_join(&[]), "(空)");
+        assert_eq!(rr3_unpointable_join(&["talk"]), "talk");
+        assert_eq!(rr3_unpointable_join(&["talk", "blink"]), "talk/blink");
+        assert_eq!(rr3_unpointable_join(&[]), "(空)");
     }
 
     /// 连接串常量投影对账（批N24 件四）：投影与 `join("/")` 输出逐字一致——
