@@ -718,7 +718,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("acl.sock");
         let _ = std::fs::remove_file(&sock);
-        let listener = Rr3UdsListener::rr3_bind(&sock).unwrap();
+        // 独占 bind：与生产同一条入口（B-9），测 acl 的同时顺带复测探测-清-bind 语义
+        let listener = Rr3UdsListener::rr3_bind_exclusive(&sock).unwrap();
         rr3_socket_acl_grant(&sock);
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&sock).unwrap().permissions().mode();
