@@ -40,7 +40,7 @@ use rr_ipc::{
 };
 use serde_json::{json, Map, Value};
 
-use crate::descriptor::{rr3_hal_bindings_from_text, Rr3HalBindings, RR3_HAL_BINDINGS_ENV};
+use crate::descriptor::{rr3_bindings_parse, Rr3HalBindings, RR3_HAL_BINDINGS_ENV};
 use crate::{Rr3Display, Rr3FaceFrame, Rr3HalError, Rr3PwmServo};
 
 // 协议共享面（ADR-0024）：task 位形/主题/magic/波特率缺省/env 名/请求组帧/应答
@@ -65,7 +65,7 @@ const RR3_OPEN_SETTLE_MS: u64 = 1200;
 pub use rr_hal_api::RR3_PERIPH_AXIS_ENV as RR3_HAL_PERIPH_AXIS_ENV;
 
 /// 轴 env 取值裁决：只认 `pan` / `tilt`（trim 后）。独立纯函数：裁决可单测。
-pub fn rr3_periph_axis_parse(s: &str) -> Option<&'static str> {
+pub fn rr3_axis_parse(s: &str) -> Option<&'static str> {
     match s.trim() {
         "pan" => Some("pan"),
         "tilt" => Some("tilt"),
@@ -75,7 +75,7 @@ pub fn rr3_periph_axis_parse(s: &str) -> Option<&'static str> {
 
 /// 波特率 env 取值裁决（批D②）：十进制解析后过 rr-ipc 档位表
 /// （[`rr3_uart_baud_speed`]）——档位真值单点在 rr-ipc，本侧不抄第二份白名单。
-pub fn rr3_periph_baud_parse(s: &str) -> Option<u32> {
+pub fn rr3_baud_parse(s: &str) -> Option<u32> {
     let baud = s.trim().parse::<u32>().ok()?;
     rr3_uart_baud_speed(baud).ok()?;
     Some(baud)
@@ -84,7 +84,7 @@ pub fn rr3_periph_baud_parse(s: &str) -> Option<u32> {
 /// 板侧绑定载荷（纯函数，批N4 件七(b) 基-24 桥上配置腿宿主半边）：描述符板侧
 /// 键 `Some` 者逐键入载荷，值保持字符串（描述符同形纪律：注入文本值全字符串，JSON
 /// 侧不换形）；全缺 = `None`（无板侧配置可注）。独立纯函数：键位/换形可单测。
-fn rr3_board_bindings_payload(b: &Rr3HalBindings) -> Option<Value> {
+fn rr3_board_payload(b: &Rr3HalBindings) -> Option<Value> {
     let mut m = Map::new();
     if let Some(v) = b.i2c_sda {
         m.insert(RR3_BOARD_BINDING_I2C_SDA.to_string(), json!(v.to_string()));
@@ -141,9 +141,9 @@ fn rr3_board_bindings_payload(b: &Rr3HalBindings) -> Option<Value> {
 /// - 文本解析失败 = 配置坏，eprintln 点名后跳过（fail-visible；后端选择侧已
 ///   fail-closed，此处兜底点名不静默放行坏值）；
 /// - 三键全缺 = 无板侧配置可注（host 档描述符本就无板侧键）。
-fn rr3_board_bindings_payload_from_env() -> Option<Value> {
+fn rr3_env_bindings() -> Option<Value> {
     let text = std::env::var(RR3_HAL_BINDINGS_ENV).ok()?;
-    let b = match rr3_hal_bindings_from_text(&text) {
+    let b = match rr3_bindings_parse(&text) {
         Ok(b) => b,
         Err(errs) => {
             eprintln!(
@@ -154,7 +154,7 @@ fn rr3_board_bindings_payload_from_env() -> Option<Value> {
             return None;
         }
     };
-    rr3_board_bindings_payload(&b)
+    rr3_board_payload(&b)
 }
 
 /// UART 长连接 + 请求 id 计数（servo/display 两实例面共用的连接盒）。
@@ -169,7 +169,7 @@ struct Rr3BridgeConn {
 impl Rr3BridgeConn {
     /// 波特率显式档（批D②）：板固件 `board::UART2_BAUD_HZ`（2026-10-30 起 1.5M）
     /// 时经 env/构造参数同档传入。
-    fn rr3_bridge_conn_new_with_baud(path: PathBuf, baud: u32) -> Self {
+    fn rr3_bridge_conn_new(path: PathBuf, baud: u32) -> Self {
         Self {
             path,
             baud,
@@ -213,7 +213,7 @@ impl Rr3BridgeConn {
     /// 不上抛不重试：绑定推送不挡能力面（执法点在板侧消费面 fail-closed）；
     /// io 失败时连接已由 rr3_method_call 报废，下次重开重推。
     fn rr3_push_bindings(&mut self) {
-        let Some(payload) = rr3_board_bindings_payload_from_env() else {
+        let Some(payload) = rr3_env_bindings() else {
             return;
         };
         if let Err(e) = self.rr3_method_call(RR3_METHOD_SET_BINDINGS, &json!({ "args": payload })) {
@@ -303,18 +303,14 @@ pub struct Rr3Esp32UartServo {
 }
 
 impl Rr3Esp32UartServo {
-    pub fn rr3_esp32_uart_servo_new(path: PathBuf, axis: &'static str) -> Self {
-        Self::rr3_esp32_uart_servo_new_with_baud(path, axis, RR3_BRIDGE_BAUD)
+    pub fn rr3_esp32_servo_new(path: PathBuf, axis: &'static str) -> Self {
+        Self::rr3_esp32_servo_baud(path, axis, RR3_BRIDGE_BAUD)
     }
 
     /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
-    pub fn rr3_esp32_uart_servo_new_with_baud(
-        path: PathBuf,
-        axis: &'static str,
-        baud: u32,
-    ) -> Self {
+    pub fn rr3_esp32_servo_baud(path: PathBuf, axis: &'static str, baud: u32) -> Self {
         Self {
-            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new_with_baud(path, baud)),
+            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new(path, baud)),
             axis,
         }
     }
@@ -364,14 +360,14 @@ pub struct Rr3Esp32UartDisplay {
 }
 
 impl Rr3Esp32UartDisplay {
-    pub fn rr3_esp32_uart_display_new(path: PathBuf) -> Self {
-        Self::rr3_esp32_uart_display_new_with_baud(path, RR3_BRIDGE_BAUD)
+    pub fn rr3_esp32_disp_new(path: PathBuf) -> Self {
+        Self::rr3_esp32_disp_baud(path, RR3_BRIDGE_BAUD)
     }
 
     /// 波特率显式档（批D②）：env [`RR3_HAL_PERIPH_BAUD_ENV`] 的解析结果经此处入 conn。
-    pub fn rr3_esp32_uart_display_new_with_baud(path: PathBuf, baud: u32) -> Self {
+    pub fn rr3_esp32_disp_baud(path: PathBuf, baud: u32) -> Self {
         Self {
-            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new_with_baud(path, baud)),
+            conn: Mutex::new(Rr3BridgeConn::rr3_bridge_conn_new(path, baud)),
             last: Mutex::new([0; 8]),
             probed: Mutex::new(false),
         }
@@ -418,11 +414,11 @@ mod tests {
     /// 轴 env 取值裁决：两档内放行，trim 宽容；其余全拒（落缺省 pan 的正门）。
     #[test]
     fn periph_axis_parse_accepts_pan_tilt_only() {
-        assert_eq!(rr3_periph_axis_parse("pan"), Some("pan"));
-        assert_eq!(rr3_periph_axis_parse("tilt"), Some("tilt"));
-        assert_eq!(rr3_periph_axis_parse(" pan "), Some("pan"));
+        assert_eq!(rr3_axis_parse("pan"), Some("pan"));
+        assert_eq!(rr3_axis_parse("tilt"), Some("tilt"));
+        assert_eq!(rr3_axis_parse(" pan "), Some("pan"));
         for bad in ["", "PAN", "roll", "yaw", "1"] {
-            assert_eq!(rr3_periph_axis_parse(bad), None, "{bad}");
+            assert_eq!(rr3_axis_parse(bad), None, "{bad}");
         }
     }
 
@@ -430,14 +426,14 @@ mod tests {
     /// （真值单点在 rr-ipc 档位表，本侧只做解析）。
     #[test]
     fn periph_baud_parse_accepts_whitelist_only() {
-        assert_eq!(rr3_periph_baud_parse("115200"), Some(115200));
-        assert_eq!(rr3_periph_baud_parse(" 921600 "), Some(921600));
-        assert_eq!(rr3_periph_baud_parse("9600"), Some(9600));
+        assert_eq!(rr3_baud_parse("115200"), Some(115200));
+        assert_eq!(rr3_baud_parse(" 921600 "), Some(921600));
+        assert_eq!(rr3_baud_parse("9600"), Some(9600));
         // 1.5M/2M 高速档（2026-10-30 提档实验进白名单；1.5M 为当前定档）
-        assert_eq!(rr3_periph_baud_parse("1500000"), Some(1_500_000));
-        assert_eq!(rr3_periph_baud_parse("2000000"), Some(2_000_000));
+        assert_eq!(rr3_baud_parse("1500000"), Some(1_500_000));
+        assert_eq!(rr3_baud_parse("2000000"), Some(2_000_000));
         for bad in ["", "0", "230400", "921600x", "-1"] {
-            assert_eq!(rr3_periph_baud_parse(bad), None, "{bad}");
+            assert_eq!(rr3_baud_parse(bad), None, "{bad}");
         }
     }
 
@@ -478,10 +474,10 @@ mod tests {
     #[test]
     fn board_bindings_payload_carries_string_values_only() {
         let mut b = Rr3HalBindings::default();
-        assert_eq!(rr3_board_bindings_payload(&b), None, "三键全缺 = 无载荷");
+        assert_eq!(rr3_board_payload(&b), None, "三键全缺 = 无载荷");
         b.i2c_sda = Some(21);
         b.adc_rail_pin = Some(34);
-        let p = rr3_board_bindings_payload(&b).expect("有键必须有载荷");
+        let p = rr3_board_payload(&b).expect("有键必须有载荷");
         assert_eq!(p["i2c_sda"], "21", "值保持字符串（描述符同形纪律）");
         assert_eq!(p["adc_rail_pin"], "34");
         assert!(p.get("i2c_scl").is_none(), "未注入键不入载荷");
@@ -490,7 +486,7 @@ mod tests {
             "未注入键不入载荷（cred_store 同）"
         );
         b.cred_store = Some("nvs:rr3".to_string());
-        let p = rr3_board_bindings_payload(&b).expect("有键必须有载荷");
+        let p = rr3_board_payload(&b).expect("有键必须有载荷");
         assert_eq!(p["cred_store"], "nvs:rr3", "cred_store 字符串值随键");
     }
 

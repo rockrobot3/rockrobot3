@@ -8,7 +8,7 @@
 | 格 | `audio.capture` · `audio.vad` · `sensor.env`（占位）· `sensor.imu`（占位） | `contracts/slots.toml`、`atoms/*/atom.toml` |
 | 件 | `capture` · `vad` · `env` · `imu`；组合件成分：采集主循环 + 配置解析（`src/composite.rs`） | `atoms/` |
 | 主题 | 发布 `audio/pcm`(stream)、`audio/vad_start`(event)、`env/temperature`、`imu/state`（后两条**无生产者**）；RPC `capture/dump`；订阅面为空 | `module.toml` |
-| 句柄 | `rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str)`（第二元是**后端名**，是诚实面，载荷/日志都要带） | `src/composite.rs`、`rr-hal/src/backend.rs` |
+| 句柄 | `rr3_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str)`（第二元是**后端名**，是诚实面，载荷/日志都要带） | `src/composite.rs`、`rr-hal/src/backend.rs` |
 | 参数 | `sample_rate=16000`、`channels=1`、`frame_ms=20`、`rms_start=1500`、`silence_tail_ms=700`、`min_speech_ms=200` | `config.toml`，**仅当 `RR3_SENSE_CONFIG` 已设时才读** |
 | 健康 | 心跳 1000 / 看门狗 5000 ms | `[health]` |
 

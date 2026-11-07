@@ -37,9 +37,9 @@ pub const RR3_HAL_BACKEND_ENV: &str = "RR3_HAL_BACKEND";
 /// ESP32 board）下，全局 `RR3_HAL_BACKEND=esp32` 会让同机的舵机/显示面也各自
 /// 去开同一 UART，而 `Rr3UartConn` 是跨进程 flock 单消费者（status.md U 轮⑤
 /// 结构冲突）——第二个 opener 必被拒、模块探活 exit(1)。音频面因此需要单独
-/// 选档：本键只被 [`rr3_hal_audio_source_with_cmd`] 读取（回放面仍走全局，
+/// 选档：本键只被 [`rr3_audio_source_cmd`] 读取（回放面仍走全局，
 /// 板无扬声器 TTS 恒宿主），其余能力面保持全局/平台缺省。未设/空白 → 回落
-/// 全局 [`rr3_hal_backend_resolve`]，既有行为逐点不变。
+/// 全局 [`rr3_backend_resolve`]，既有行为逐点不变。
 pub const RR3_HAL_AUDIO_BACKEND_ENV: &str = "RR3_HAL_AUDIO_BACKEND";
 
 /// 舵机面后端覆盖键（P0-4 组合档归属）：与 [`RR3_HAL_AUDIO_BACKEND_ENV`] 同语义——
@@ -105,7 +105,7 @@ pub const RR3_HAL_SPI_DEVICE_ENV: &str = "RR3_HAL_SPI_DEVICE";
 
 /// INA219 从地址键的取值裁决（只认 `0x` 前缀十六进制——裸写有十进制歧义
 /// （"40" 是 0x28 还是 40？），不收；7-bit 可寻址域 0x08..=0x77 外不认）。
-pub fn rr3_ina219_addr_parse(s: &str) -> Option<u8> {
+pub fn rr3_ina219_parse(s: &str) -> Option<u8> {
     let s = s.trim();
     let v = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))?;
     u8::from_str_radix(v, 16)
@@ -120,7 +120,7 @@ pub fn rr3_ina219_addr_parse(s: &str) -> Option<u8> {
 /// R8 预算表参考机 GPIO4/17）——本组 env 只是应急覆盖，两处都没给时数字输出面
 /// 落占位显式回错（fail-closed，批D④ 收口，不再有代码缺省）。白名单外的 role
 /// 无键无绑定（`None`）。独立成纯函数：键拼装可单测，选择函数里只留合成与选路。
-pub fn rr3_gpio_line_env_key(role: &str) -> Option<String> {
+pub fn rr3_gpio_line_key(role: &str) -> Option<String> {
     if role.is_empty() || !role.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return None;
     }
@@ -152,7 +152,7 @@ pub const RR3_HAL_SIM_LINK_RSSI_DEFAULT: i8 = -50;
 
 /// 平台默认后端：linux + `alsa` feature 编进来了就是 `linux`，否则 `sim`。
 /// macOS 平台缺省同为 `sim`（真麦走显式 `mac`——CI/无头不真开设备，见 [`RR3_BACKEND_MAC`]）。
-pub const fn rr3_hal_backend_default() -> &'static str {
+pub const fn rr3_backend_default() -> &'static str {
     if cfg!(all(target_os = "linux", feature = "alsa")) {
         RR3_BACKEND_LINUX
     } else {
@@ -167,17 +167,17 @@ pub const fn rr3_hal_backend_default() -> &'static str {
 /// 各能力面是否编进了对应 linux 后端由各选择函数自判（音频按 `alsa` feature，
 /// 舵机按 sysfs PWM 模块编译门），选了 `linux` 但该能力后端没编进 → 选择函数落
 /// `placeholder`（使用时以 `Unsupported` 显式回错，不静默换 sim）。
-pub fn rr3_hal_backend_resolve() -> Result<&'static str, String> {
+pub fn rr3_backend_resolve() -> Result<&'static str, String> {
     let Some(v) = std::env::var_os(RR3_HAL_BACKEND_ENV) else {
-        return Ok(rr3_hal_backend_default());
+        return Ok(rr3_backend_default());
     };
-    rr3_hal_backend_parse(RR3_HAL_BACKEND_ENV, &v.to_string_lossy())
+    rr3_backend_parse(RR3_HAL_BACKEND_ENV, &v.to_string_lossy())
 }
 
 /// 后端名白名单裁决（纯函数，单测可钉；`key` 只用于错误点名）。全局键与
 /// 音频能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]）共用同一条白名单与
 /// 平台门语义——两键不各写一套，防静默分叉。
-fn rr3_hal_backend_parse(key: &str, v: &str) -> Result<&'static str, String> {
+fn rr3_backend_parse(key: &str, v: &str) -> Result<&'static str, String> {
     match v {
         RR3_BACKEND_SIM => Ok(RR3_BACKEND_SIM),
         RR3_BACKEND_PLACEHOLDER => Ok(RR3_BACKEND_PLACEHOLDER),
@@ -203,49 +203,49 @@ fn rr3_hal_backend_parse(key: &str, v: &str) -> Result<&'static str, String> {
 }
 
 /// 音频采集面生效后端：能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]，未设/空白
-/// 视为未设）优先，否则回落全局 [`rr3_hal_backend_resolve`]。只此一处读覆盖键。
-pub fn rr3_hal_audio_backend_resolve() -> Result<&'static str, String> {
+/// 视为未设）优先，否则回落全局 [`rr3_backend_resolve`]。只此一处读覆盖键。
+pub fn rr3_audio_backend() -> Result<&'static str, String> {
     if let Some(v) = std::env::var_os(RR3_HAL_AUDIO_BACKEND_ENV) {
         let s = v.to_string_lossy();
         let s = s.trim();
         if !s.is_empty() {
-            return rr3_hal_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, s);
+            return rr3_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, s);
         }
     }
-    rr3_hal_backend_resolve()
+    rr3_backend_resolve()
 }
 
 /// 舵机面生效后端（P0-4）：能力面覆盖键 [`RR3_HAL_SERVO_BACKEND_ENV`] 优先，否则
 /// 回落全局。组合档舵机在 ESP32 板上时设 `esp32`，host-only 档不设回落全局。
-pub fn rr3_hal_servo_backend_resolve() -> Result<&'static str, String> {
+pub fn rr3_servo_backend() -> Result<&'static str, String> {
     if let Some(v) = std::env::var_os(RR3_HAL_SERVO_BACKEND_ENV) {
         let s = v.to_string_lossy();
         let s = s.trim();
         if !s.is_empty() {
-            return rr3_hal_backend_parse(RR3_HAL_SERVO_BACKEND_ENV, s);
+            return rr3_backend_parse(RR3_HAL_SERVO_BACKEND_ENV, s);
         }
     }
-    rr3_hal_backend_resolve()
+    rr3_backend_resolve()
 }
 
 /// 显示面生效后端（P0-4）：能力面覆盖键 [`RR3_HAL_DISPLAY_BACKEND_ENV`] 优先，否则
 /// 回落全局。组合档 OLED/点阵在 ESP32 板上时设 `esp32`，host-only 档不设回落全局。
-pub fn rr3_hal_display_backend_resolve() -> Result<&'static str, String> {
+pub fn rr3_display_backend() -> Result<&'static str, String> {
     if let Some(v) = std::env::var_os(RR3_HAL_DISPLAY_BACKEND_ENV) {
         let s = v.to_string_lossy();
         let s = s.trim();
         if !s.is_empty() {
-            return rr3_hal_backend_parse(RR3_HAL_DISPLAY_BACKEND_ENV, s);
+            return rr3_backend_parse(RR3_HAL_DISPLAY_BACKEND_ENV, s);
         }
     }
-    rr3_hal_backend_resolve()
+    rr3_backend_resolve()
 }
 
 /// 描述符失败点名文案（R3-D3/0.0.5 批J G5）：裁决纯函数独立可单测。
-/// 生产消费方只有 cfg(linux) 的 [`rr3_hal_bindings_effective_named`]，故生产门
+/// 生产消费方只有 cfg(linux) 的 [`rr3_bindings_eff_log`]，故生产门
 /// 收 linux；test 门留给文案形状单测（macOS 主机也要跑）。
 #[cfg(any(target_os = "linux", test))]
-fn rr3_hal_bindings_failure_note(facet: &str, err: &str) -> String {
+fn rr3_desc_fail_note(facet: &str, err: &str) -> String {
     format!("rr-hal: 描述符解析失败，{facet}落占位（使用时以 Unsupported 回错）: {err}")
 }
 
@@ -255,11 +255,11 @@ fn rr3_hal_bindings_failure_note(facet: &str, err: &str) -> String {
 /// 实例 stderr 进 journal），随后照旧落占位——失败语义不变，只补"错误当场可见"。
 /// 仅 linux 分支调用（非 linux 平台无人消费），故 cfg 门收进本平台。
 #[cfg(target_os = "linux")]
-fn rr3_hal_bindings_effective_named(facet: &str) -> Option<crate::descriptor::Rr3HalBindings> {
-    match crate::descriptor::rr3_hal_bindings_effective() {
+fn rr3_bindings_eff_log(facet: &str) -> Option<crate::descriptor::Rr3HalBindings> {
+    match crate::descriptor::rr3_bindings_eff() {
         Ok(b) => Some(b),
         Err(e) => {
-            eprintln!("{}", rr3_hal_bindings_failure_note(facet, &e));
+            eprintln!("{}", rr3_desc_fail_note(facet, &e));
             None
         }
     }
@@ -276,8 +276,8 @@ fn rr3_hal_sim_wave() -> crate::sim::Rr3SimWave {
 /// （描述符 [hardware].periph_uart + 应急 env RR3_HAL_PERIPH_UART 覆盖）取，
 /// 回落直接读 env；都没有 → None（调用方 fail-closed 落 placeholder）。
 /// 跨平台（linux/mac 宿主档都消费），故不用 cfg 门。
-fn rr3_hal_periph_uart_path() -> Option<String> {
-    if let Ok(b) = crate::descriptor::rr3_hal_bindings_effective() {
+fn rr3_periph_uart_path() -> Option<String> {
+    if let Ok(b) = crate::descriptor::rr3_bindings_eff() {
         if let Some(p) = b.periph_uart {
             return Some(p);
         }
@@ -290,7 +290,7 @@ fn rr3_hal_periph_uart_path() -> Option<String> {
 
 /// sim 方位角键的取值裁决（-90..=90 的有限十进制小数）。独立成纯函数：裁决可单测，
 /// 选择函数里只留"读环境 + 裁决 + 缺省"。
-pub fn rr3_sim_doa_deg_parse(s: &str) -> Option<f64> {
+pub fn rr3_sim_doa_parse(s: &str) -> Option<f64> {
     s.trim()
         .parse::<f64>()
         .ok()
@@ -299,16 +299,16 @@ pub fn rr3_sim_doa_deg_parse(s: &str) -> Option<f64> {
 
 /// 按环境选音频源。解析失败（环境变量取值不认）或显式 `placeholder` 时返回
 /// 占位后端——它会在使用处以 `Unsupported` 显式回错，**不静默换后端**。
-/// linux 档的设备名来自生效绑定（[`crate::descriptor::rr3_hal_bindings_effective`]：
+/// linux 档的设备名来自生效绑定（[`crate::descriptor::rr3_bindings_eff`]：
 /// 描述符为底、env 应急覆盖）；键缺失/合成失败 → 占位显式回错（fail-closed，批D④）。
-pub fn rr3_hal_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
-    let (src, _, backend) = rr3_hal_audio_source_with_cmd();
+pub fn rr3_audio_source() -> (Box<dyn Rr3AudioSource>, &'static str) {
+    let (src, _, backend) = rr3_audio_source_cmd();
     (src, backend)
 }
 
 /// 板外设命令帧承载符号经 backend 装配面 re-export（⑨-w 依赖面白名单：单元侧
 /// `rr_hal::` 引用只许四类，命令旁路消费方走 `rr_hal::backend::` 同面引用——
-/// backend 面就是板外设命令下行的职责面，见 [`rr3_hal_audio_source_with_cmd`]）。
+/// backend 面就是板外设命令下行的职责面，见 [`rr3_audio_source_cmd`]）。
 /// 宿主档门（批N8 件三）：桥旁路面是宿主档符号；espidf 档类型名经空枚举承载
 /// （不可构造，`Option` 恒 `None`——装配面天然落 `None` 走 fail-closed，不静默）。
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -319,17 +319,17 @@ pub enum Rr3AudioCmdProducer {}
 /// 音频源 + 板外设命令旁路产面（B 批 b1）：esp32 档返 `Some`——flock 单消费者
 /// 纪律下板外设命令下行唯一通路 = 持 conn 的音频源旁路（esp32audio.rs）；
 /// 其余档 `None`（无旁路面，消费方按 None fail-closed 关闭反射环）。
-pub fn rr3_hal_audio_source_with_cmd() -> (
+pub fn rr3_audio_source_cmd() -> (
     Box<dyn Rr3AudioSource>,
     Option<Rr3AudioCmdProducer>,
     &'static str,
 ) {
     // 采集面走能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]）：组合形态下音频源
     // 独占 UART，舵机/显示面不能同吃 esp32 档（见该键文档）。
-    match rr3_hal_audio_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_audio_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return rr3_hal_bindings_effective_named("音频采集")
+            return rr3_bindings_eff_log("音频采集")
                 .and_then(|b| {
                     b.alsa_device.map(|dev| {
                         (
@@ -378,14 +378,14 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
         // 不猜设备不静默换 sim）。
         // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        RR3_BACKEND_ESP32 => match rr3_hal_periph_uart_path() {
+        RR3_BACKEND_ESP32 => match rr3_periph_uart_path() {
             Some(p) => {
                 let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                     .ok()
-                    .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
+                    .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
                     .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
                 let (src, producer) =
-                    crate::esp32audio::Rr3Esp32UartAudioSource::rr3_esp32_audio_source_new_with_cmd(
+                    crate::esp32audio::Rr3Esp32UartAudioSource::rr3_esp32_source_cmd(
                         std::path::PathBuf::from(p),
                         baud,
                     );
@@ -415,10 +415,10 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
         RR3_BACKEND_SIM => {
             let doa = std::env::var(RR3_HAL_SIM_DOA_DEG_ENV)
                 .ok()
-                .and_then(|v| rr3_sim_doa_deg_parse(&v))
+                .and_then(|v| rr3_sim_doa_parse(&v))
                 .and_then(crate::sim::Rr3SimDoa::rr3_sim_doa_new);
             (
-                Box::new(crate::sim::Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+                Box::new(crate::sim::Rr3SimAudioSource::rr3_sim_source_doa(
                     rr3_hal_sim_wave(),
                     doa,
                 )),
@@ -427,7 +427,7 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
             )
         }
         // `&str` 模式编译器裁定无法穷举（E0004）：白名单收敛在
-        // [`rr3_hal_backend_resolve`] 单点，此臂不可达；防御性落占位
+        // [`rr3_backend_resolve`] 单点，此臂不可达；防御性落占位
         // （使用时 Unsupported 显式回错），不静默换 sim。
         _ => (
             Box::new(Rr3UnavailableSource),
@@ -437,12 +437,12 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
     }
 }
 
-/// 按环境选音频播放面（与 [`rr3_hal_audio_source`] 同一套规则）
+/// 按环境选音频播放面（与 [`rr3_audio_source`] 同一套规则）
 pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return rr3_hal_bindings_effective_named("音频回放")
+            return rr3_bindings_eff_log("音频回放")
                 .and_then(|b| {
                     b.alsa_device.map(|dev| {
                         (
@@ -484,7 +484,7 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
     }
 }
 
-/// 按环境选舵机（与 [`rr3_hal_audio_source`] 同一套规则）。linux 平台走 sysfs PWM
+/// 按环境选舵机（与 [`rr3_audio_source`] 同一套规则）。linux 平台走 sysfs PWM
 /// 后端（[`crate::linux_pwm`]，R11①/R22 定案档），芯片/通道来自生效绑定
 /// （描述符 `pwm_chip`/`pwm_channel`，`RR3_HAL_PWM_*` env 应急覆盖）；键缺失或
 /// 合成失败 → 占位件使用时以 `Unsupported` 回错（fail-closed，不回落参考机引脚），
@@ -492,13 +492,13 @@ pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
 pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
     // 舵机面走能力面覆盖键（[`RR3_HAL_SERVO_BACKEND_ENV`]）：组合档舵机在 ESP32
     // 板上时设 esp32，全局 hal_backend 仍 linux（其余能力面走宿主）。
-    match rr3_hal_servo_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_servo_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return rr3_hal_bindings_effective_named("舵机")
+            return rr3_bindings_eff_log("舵机")
                 .and_then(|b| {
                     Some((
-                        Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(
+                        Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_pwm_servo_new(
                             std::path::Path::new(crate::linux_pwm::RR3_PWM_SYSFS_ROOT_DEFAULT),
                             b.pwm_chip?,
                             b.pwm_channel?,
@@ -518,26 +518,24 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
         // 下方 `_` 兜底臂占位回错（resolve 白名单单点不裁）。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
-            match rr3_hal_periph_uart_path() {
+            match rr3_periph_uart_path() {
                 Some(p) => {
                     let axis = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_AXIS_ENV)
                         .ok()
-                        .and_then(|v| crate::esp32_uart::rr3_periph_axis_parse(&v))
+                        .and_then(|v| crate::esp32_uart::rr3_axis_parse(&v))
                         .unwrap_or(rr_hal_api::RR3_PERIPH_AXIS_DEFAULT);
                     // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
                     // 已钉 `UART2_BAUD_HZ`（2026-10-30 起定档 1.5M），会话须显式同档）
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                         .ok()
-                        .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
+                        .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
                         .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
                     (
-                        Box::new(
-                            crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_uart_servo_new_with_baud(
-                                std::path::PathBuf::from(p),
-                                axis,
-                                baud,
-                            ),
-                        ) as Box<dyn Rr3PwmServo>,
+                        Box::new(crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_servo_baud(
+                            std::path::PathBuf::from(p),
+                            axis,
+                            baud,
+                        )) as Box<dyn Rr3PwmServo>,
                         RR3_BACKEND_ESP32,
                     )
                 }
@@ -572,10 +570,10 @@ pub fn rr3_hal_gpio_out(
     // 编译面上未使用是结构性的，不是疏漏（linux 上它决定线偏移绑定键）
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] role: &str,
 ) -> (Box<dyn Rr3GpioOut>, &'static str) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return rr3_hal_bindings_effective_named("数字输出")
+            return rr3_bindings_eff_log("数字输出")
                 .and_then(|b| {
                     let line = match role {
                         "led" => b.gpio_led_line,
@@ -583,7 +581,7 @@ pub fn rr3_hal_gpio_out(
                         _ => None, // 白名单外：无键无绑定，fail-closed
                     };
                     Some((
-                        Box::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_linux_gpio_out_new(
+                        Box::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_gpio_out_new(
                             std::path::Path::new(crate::linux_gpio::RR3_GPIO_DEV_ROOT_DEFAULT),
                             b.gpio_chip?,
                             line?,
@@ -606,12 +604,12 @@ pub fn rr3_hal_gpio_out(
 
 /// sim 电量键的取值裁决（0–100 十进制整数）。独立成纯函数：裁决可单测，
 /// 选择函数里只留"读环境 + 裁决 + 缺省"。
-pub fn rr3_sim_battery_percent_parse(s: &str) -> Option<u8> {
+pub fn rr3_sim_batt_parse(s: &str) -> Option<u8> {
     s.trim().parse::<u8>().ok().filter(|p| *p <= 100)
 }
 
 /// sim 充电态键的取值裁决（只认 `1` / `0`）。
-pub fn rr3_sim_battery_charging_parse(s: &str) -> Option<bool> {
+pub fn rr3_sim_chg_parse(s: &str) -> Option<bool> {
     match s.trim() {
         "1" => Some(true),
         "0" => Some(false),
@@ -620,7 +618,7 @@ pub fn rr3_sim_battery_charging_parse(s: &str) -> Option<bool> {
 }
 
 /// sim 链路在线态键的取值裁决（只认 `1` / `0`）。
-pub fn rr3_sim_link_up_parse(s: &str) -> Option<bool> {
+pub fn rr3_sim_up_parse(s: &str) -> Option<bool> {
     match s.trim() {
         "1" => Some(true),
         "0" => Some(false),
@@ -630,7 +628,7 @@ pub fn rr3_sim_link_up_parse(s: &str) -> Option<bool> {
 
 /// sim 链路信号强度键的取值裁决（-100..=-1 的十进制整数 dBm；0 与正值、
 /// 越界、垃圾一律不认，落缺省 -50）。
-pub fn rr3_sim_link_rssi_parse(s: &str) -> Option<i8> {
+pub fn rr3_sim_rssi_parse(s: &str) -> Option<i8> {
     s.trim()
         .parse::<i8>()
         .ok()
@@ -642,7 +640,7 @@ pub fn rr3_pwm_index_parse(s: &str) -> Option<u32> {
     s.trim().parse::<u32>().ok()
 }
 
-/// 按环境选显示面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 档走
+/// 按环境选显示面（与 [`rr3_audio_source`] 同一套规则）。linux 档走
 /// MAX7219 spidev 后端（[`crate::linux_display`]，链④真件档实装），设备路径
 /// 来自生效绑定（描述符 `spi_device`，`RR3_HAL_SPI_DEVICE` env 应急覆盖）；
 /// 键缺失、合成失败或开口失败 → 占位件使用时以 `Unsupported` 回错
@@ -652,17 +650,15 @@ pub fn rr3_pwm_index_parse(s: &str) -> Option<u32> {
 pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
     // 显示面走能力面覆盖键（[`RR3_HAL_DISPLAY_BACKEND_ENV`]）：组合档 OLED/点阵在
     // ESP32 板上时设 esp32，全局 hal_backend 仍 linux（其余能力面走宿主）。
-    match rr3_hal_display_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_display_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return rr3_hal_bindings_effective_named("显示")
+            return rr3_bindings_eff_log("显示")
                 .and_then(|b| {
                     Some((
-                        Box::new(
-                            crate::linux_display::Rr3Max7219SpiDisplay::rr3_max7219_display_new(
-                                std::path::Path::new(b.spi_device.as_deref()?),
-                            ),
-                        ) as Box<dyn crate::Rr3Display>,
+                        Box::new(crate::linux_display::Rr3Max7219SpiDisplay::rr3_max7219_new(
+                            std::path::Path::new(b.spi_device.as_deref()?),
+                        )) as Box<dyn crate::Rr3Display>,
                         RR3_BACKEND_LINUX,
                     ))
                 })
@@ -686,21 +682,19 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
         // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
-            match rr3_hal_periph_uart_path() {
+            match rr3_periph_uart_path() {
                 Some(p) => {
                     // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
                     // 已钉 `UART2_BAUD_HZ`（2026-10-30 起定档 1.5M），会话须显式同档）
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                         .ok()
-                        .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
+                        .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
                         .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
                     (
-                        Box::new(
-                            crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_uart_display_new_with_baud(
-                                std::path::PathBuf::from(p),
-                                baud,
-                            ),
-                        ) as Box<dyn crate::Rr3Display>,
+                        Box::new(crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_disp_baud(
+                            std::path::PathBuf::from(p),
+                            baud,
+                        )) as Box<dyn crate::Rr3Display>,
                         RR3_BACKEND_ESP32,
                     )
                 }
@@ -717,16 +711,16 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
     }
 }
 
-/// 按环境选电源读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux 走
+/// 按环境选电源读数面（与 [`rr3_audio_source`] 同一套规则）。linux 走
 /// INA219 I2C 后端（[`crate::linux_power`]，R18），总线/地址来自生效绑定
 /// （描述符 `i2c_bus`/`ina219_addr`，`RR3_HAL_*` env 应急覆盖）；键缺失或合成
 /// 失败 → 占位件使用时以 `Unsupported` 回错（fail-closed）——rr3-power 开机
 /// 探活会按"能力缺失显式回错"退出，不静默换 sim。
 pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return rr3_hal_bindings_effective_named("电源读数")
+            return rr3_bindings_eff_log("电源读数")
                 .and_then(|b| {
                     Some((
                         Box::new(crate::linux_power::Rr3LinuxIna219::rr3_linux_power_new(
@@ -744,11 +738,11 @@ pub fn rr3_hal_power() -> (Box<dyn Rr3Power>, &'static str) {
         RR3_BACKEND_SIM => {
             let percent = std::env::var(RR3_HAL_SIM_BATTERY_PERCENT_ENV)
                 .ok()
-                .and_then(|v| rr3_sim_battery_percent_parse(&v))
+                .and_then(|v| rr3_sim_batt_parse(&v))
                 .unwrap_or(80);
             let charging = std::env::var(RR3_HAL_SIM_BATTERY_CHARGING_ENV)
                 .ok()
-                .and_then(|v| rr3_sim_battery_charging_parse(&v))
+                .and_then(|v| rr3_sim_chg_parse(&v))
                 .unwrap_or(false);
             let dev = crate::sim::Rr3SimBattery::rr3_sim_battery_new(percent, charging);
             (Box::new(dev), RR3_BACKEND_SIM)
@@ -768,7 +762,7 @@ pub fn rr3_hal_rail() -> (Box<dyn Rr3Rail>, &'static str) {
     (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
 }
 
-/// 按环境选网络链路读数面（与 [`rr3_hal_audio_source`] 同一套规则）。linux
+/// 按环境选网络链路读数面（与 [`rr3_audio_source`] 同一套规则）。linux
 /// 分支走 NetworkManager 后端（批F5a⑤，`linux_link.rs` nmcli 子进程承载；
 /// 配网/断链重连是 NM 自身行为，HAL 只如实报数），接口名来自生效绑定（描述符
 /// `link_ifname`，`RR3_HAL_LINK_IFNAME` env 应急覆盖）；键缺失或合成失败 →
@@ -785,10 +779,10 @@ pub fn rr3_hal_link(
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     nmcli_timeout: std::time::Duration,
 ) -> (Box<dyn crate::Rr3Link>, &'static str) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
-            return rr3_hal_bindings_effective_named("链路读数")
+            return rr3_bindings_eff_log("链路读数")
                 .and_then(|b| {
                     Some((
                         Box::new(crate::linux_link::Rr3LinuxNmLink::rr3_linux_link_new(
@@ -806,7 +800,7 @@ pub fn rr3_hal_link(
         RR3_BACKEND_SIM => {
             let up = std::env::var(RR3_HAL_SIM_LINK_UP_ENV)
                 .ok()
-                .and_then(|v| rr3_sim_link_up_parse(&v))
+                .and_then(|v| rr3_sim_up_parse(&v))
                 .unwrap_or(true);
             let ssid = std::env::var(RR3_HAL_SIM_LINK_SSID_ENV)
                 .ok()
@@ -814,7 +808,7 @@ pub fn rr3_hal_link(
                 .unwrap_or_else(|| RR3_HAL_SIM_LINK_SSID_DEFAULT.to_string());
             let rssi = std::env::var(RR3_HAL_SIM_LINK_RSSI_ENV)
                 .ok()
-                .and_then(|v| rr3_sim_link_rssi_parse(&v))
+                .and_then(|v| rr3_sim_rssi_parse(&v))
                 .unwrap_or(RR3_HAL_SIM_LINK_RSSI_DEFAULT);
             let dev = crate::sim::Rr3SimLink::rr3_sim_link_new(up, &ssid, rssi);
             (Box::new(dev), RR3_BACKEND_SIM)
@@ -838,16 +832,14 @@ pub fn rr3_hal_wifi_store(
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     store_timeout: std::time::Duration,
 ) -> (Box<dyn Rr3WifiStore>, &'static str) {
-    match rr3_hal_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
+    match rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
         RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
             #[cfg(target_os = "linux")]
             return (
-                Box::new(
-                    crate::provision_store::Rr3NmWifiStore::rr3_nm_wifi_store_new(
-                        "nmcli",
-                        store_timeout,
-                    ),
-                ),
+                Box::new(crate::provision_store::Rr3NmWifiStore::rr3_nm_wifi_new(
+                    "nmcli",
+                    store_timeout,
+                )),
                 RR3_BACKEND_LINUX,
             );
             #[cfg(not(target_os = "linux"))]
@@ -876,7 +868,7 @@ mod tests {
     #[test]
     fn default_backend_is_sim_off_linux_alsa() {
         let env_set = std::env::var_os(RR3_HAL_BACKEND_ENV).is_some();
-        match rr3_hal_backend_resolve() {
+        match rr3_backend_resolve() {
             Ok(resolved) => {
                 assert!(
                     [
@@ -906,7 +898,7 @@ mod tests {
     /// 的形状钉死（文案改动此处即红，防止退回无声吞错）。
     #[test]
     fn descriptor_failure_note_names_facet_and_reason() {
-        let note = rr3_hal_bindings_failure_note(
+        let note = rr3_desc_fail_note(
             "音频采集",
             "描述符解析失败: 描述符键 gpio_led_line 取值不认: \"four\"",
         );
@@ -980,7 +972,7 @@ mod tests {
     /// （esp32 源 open 才真开 UART），环境变量缺席时本机缺省档合法即可。
     #[test]
     fn audio_selectors_return_legal_backend_objects() {
-        let (src, src_backend) = rr3_hal_audio_source();
+        let (src, src_backend) = rr3_audio_source();
         assert!(
             [
                 RR3_BACKEND_SIM,
@@ -1017,17 +1009,17 @@ mod tests {
     #[test]
     fn gpio_role_env_key_matches_whitelist() {
         assert_eq!(
-            rr3_gpio_line_env_key("led").as_deref(),
+            rr3_gpio_line_key("led").as_deref(),
             Some("RR3_HAL_GPIO_LED_LINE")
         );
         assert_eq!(
-            rr3_gpio_line_env_key("relay").as_deref(),
+            rr3_gpio_line_key("relay").as_deref(),
             Some("RR3_HAL_GPIO_RELAY_LINE")
         );
-        assert_eq!(rr3_gpio_line_env_key(""), None, "空串不拼键");
-        assert_eq!(rr3_gpio_line_env_key("led-1"), None, "怪字符不拼键");
+        assert_eq!(rr3_gpio_line_key(""), None, "空串不拼键");
+        assert_eq!(rr3_gpio_line_key("led-1"), None, "怪字符不拼键");
         assert_eq!(
-            rr3_gpio_line_env_key("fan").as_deref(),
+            rr3_gpio_line_key("fan").as_deref(),
             Some("RR3_HAL_GPIO_FAN_LINE"),
             "键拼装通用；fan 不在选择面白名单，无绑定 fail-closed"
         );
@@ -1051,16 +1043,13 @@ mod tests {
     /// 共用本裁决，防两键各写一套白名单静默分叉。
     #[test]
     fn backend_parse_whitelist_platform_doors_and_key_naming() {
-        assert_eq!(rr3_hal_backend_parse("K", "sim").unwrap(), RR3_BACKEND_SIM);
+        assert_eq!(rr3_backend_parse("K", "sim").unwrap(), RR3_BACKEND_SIM);
+        assert_eq!(rr3_backend_parse("K", "esp32").unwrap(), RR3_BACKEND_ESP32);
         assert_eq!(
-            rr3_hal_backend_parse("K", "esp32").unwrap(),
-            RR3_BACKEND_ESP32
-        );
-        assert_eq!(
-            rr3_hal_backend_parse("K", "placeholder").unwrap(),
+            rr3_backend_parse("K", "placeholder").unwrap(),
             RR3_BACKEND_PLACEHOLDER
         );
-        let linux = rr3_hal_backend_parse("K", "linux").unwrap();
+        let linux = rr3_backend_parse("K", "linux").unwrap();
         if cfg!(target_os = "linux") {
             assert_eq!(linux, RR3_BACKEND_LINUX);
         } else {
@@ -1069,7 +1058,7 @@ mod tests {
                 "非 linux 平台显式 linux 落占位（使用时 Unsupported）"
             );
         }
-        let mac = rr3_hal_backend_parse("K", "mac").unwrap();
+        let mac = rr3_backend_parse("K", "mac").unwrap();
         if cfg!(target_os = "macos") {
             assert_eq!(mac, RR3_BACKEND_MAC);
         } else {
@@ -1078,7 +1067,7 @@ mod tests {
                 "非 macOS 平台显式 mac 落占位（使用时 Unsupported）"
             );
         }
-        let e = rr3_hal_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, "bogus").unwrap_err();
+        let e = rr3_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, "bogus").unwrap_err();
         assert!(e.contains(RR3_HAL_AUDIO_BACKEND_ENV), "错误点名所查键: {e}");
         assert!(e.contains("bogus"), "错误含入参: {e}");
     }
@@ -1088,11 +1077,11 @@ mod tests {
     /// 垃圾不认。
     #[test]
     fn ina219_addr_parse_accepts_hex_within_7bit() {
-        assert_eq!(rr3_ina219_addr_parse("0x40"), Some(0x40), "BOM #5 定案档");
-        assert_eq!(rr3_ina219_addr_parse("0X48"), Some(0x48), "大写前缀");
-        assert_eq!(rr3_ina219_addr_parse(" 0x48 "), Some(0x48), "trim");
+        assert_eq!(rr3_ina219_parse("0x40"), Some(0x40), "BOM #5 定案档");
+        assert_eq!(rr3_ina219_parse("0X48"), Some(0x48), "大写前缀");
+        assert_eq!(rr3_ina219_parse(" 0x48 "), Some(0x48), "trim");
         for bad in ["0x00", "0x07", "0x78", "0xFF", "16", "40", "", "zz"] {
-            assert_eq!(rr3_ina219_addr_parse(bad), None, "{bad}");
+            assert_eq!(rr3_ina219_parse(bad), None, "{bad}");
         }
     }
 
@@ -1100,16 +1089,16 @@ mod tests {
     /// 环境注入低电量的正门靠这两个裁决，取值不认一律落缺省（80% / 未充电）。
     #[test]
     fn sim_battery_env_values_parse_or_default() {
-        assert_eq!(rr3_sim_battery_percent_parse("0"), Some(0));
-        assert_eq!(rr3_sim_battery_percent_parse("100"), Some(100));
-        assert_eq!(rr3_sim_battery_percent_parse(" 5 "), Some(5));
-        assert_eq!(rr3_sim_battery_percent_parse("101"), None, "越界不认");
-        assert_eq!(rr3_sim_battery_percent_parse("-1"), None, "u8 负数不认");
-        assert_eq!(rr3_sim_battery_percent_parse("abc"), None, "垃圾不认");
-        assert_eq!(rr3_sim_battery_charging_parse("1"), Some(true));
-        assert_eq!(rr3_sim_battery_charging_parse("0"), Some(false));
+        assert_eq!(rr3_sim_batt_parse("0"), Some(0));
+        assert_eq!(rr3_sim_batt_parse("100"), Some(100));
+        assert_eq!(rr3_sim_batt_parse(" 5 "), Some(5));
+        assert_eq!(rr3_sim_batt_parse("101"), None, "越界不认");
+        assert_eq!(rr3_sim_batt_parse("-1"), None, "u8 负数不认");
+        assert_eq!(rr3_sim_batt_parse("abc"), None, "垃圾不认");
+        assert_eq!(rr3_sim_chg_parse("1"), Some(true));
+        assert_eq!(rr3_sim_chg_parse("0"), Some(false));
         for bad in ["", "true", "2", "01x"] {
-            assert_eq!(rr3_sim_battery_charging_parse(bad), None, "{bad}");
+            assert_eq!(rr3_sim_chg_parse(bad), None, "{bad}");
         }
     }
 
@@ -1118,33 +1107,33 @@ mod tests {
     /// 的正门靠这两个裁决，取值不认一律落缺省（在线 / -50）。
     #[test]
     fn sim_link_env_values_parse_or_default() {
-        assert_eq!(rr3_sim_link_up_parse("1"), Some(true));
-        assert_eq!(rr3_sim_link_up_parse(" 0 "), Some(false));
+        assert_eq!(rr3_sim_up_parse("1"), Some(true));
+        assert_eq!(rr3_sim_up_parse(" 0 "), Some(false));
         for bad in ["", "true", "2", "on"] {
-            assert_eq!(rr3_sim_link_up_parse(bad), None, "{bad}");
+            assert_eq!(rr3_sim_up_parse(bad), None, "{bad}");
         }
-        assert_eq!(rr3_sim_link_rssi_parse("-50"), Some(-50));
-        assert_eq!(rr3_sim_link_rssi_parse("-100"), Some(-100), "下界在域内");
-        assert_eq!(rr3_sim_link_rssi_parse("-1"), Some(-1), "上界在域内");
-        assert_eq!(rr3_sim_link_rssi_parse("0"), None, "0 dBm 不是合法读数");
-        assert_eq!(rr3_sim_link_rssi_parse("-101"), None, "越下界不认");
-        assert_eq!(rr3_sim_link_rssi_parse("abc"), None, "垃圾不认");
+        assert_eq!(rr3_sim_rssi_parse("-50"), Some(-50));
+        assert_eq!(rr3_sim_rssi_parse("-100"), Some(-100), "下界在域内");
+        assert_eq!(rr3_sim_rssi_parse("-1"), Some(-1), "上界在域内");
+        assert_eq!(rr3_sim_rssi_parse("0"), None, "0 dBm 不是合法读数");
+        assert_eq!(rr3_sim_rssi_parse("-101"), None, "越下界不认");
+        assert_eq!(rr3_sim_rssi_parse("abc"), None, "垃圾不认");
     }
 
     /// sim 方位角 env 键的取值裁决：±90 闭区间内的有限小数才收，越界/垃圾不认
     /// （落"不注入"）。批F2 判向 e2e（RR3_HAL_SIM_DOA_DEG=-60）的正门靠它。
     #[test]
     fn sim_doa_deg_env_values_parse_or_default() {
-        assert_eq!(rr3_sim_doa_deg_parse("-60"), Some(-60.0));
-        assert_eq!(rr3_sim_doa_deg_parse(" 45.5 "), Some(45.5));
-        assert_eq!(rr3_sim_doa_deg_parse("-90"), Some(-90.0), "下界在域内");
-        assert_eq!(rr3_sim_doa_deg_parse("90"), Some(90.0), "上界在域内");
-        assert_eq!(rr3_sim_doa_deg_parse("0"), Some(0.0));
-        assert_eq!(rr3_sim_doa_deg_parse("90.1"), None, "越上界不认");
-        assert_eq!(rr3_sim_doa_deg_parse("-90.5"), None, "越下界不认");
-        assert_eq!(rr3_sim_doa_deg_parse("abc"), None, "垃圾不认");
-        assert_eq!(rr3_sim_doa_deg_parse(""), None, "空串不认");
-        assert_eq!(rr3_sim_doa_deg_parse("nan"), None, "NaN 不认");
-        assert_eq!(rr3_sim_doa_deg_parse("inf"), None, "inf 不认");
+        assert_eq!(rr3_sim_doa_parse("-60"), Some(-60.0));
+        assert_eq!(rr3_sim_doa_parse(" 45.5 "), Some(45.5));
+        assert_eq!(rr3_sim_doa_parse("-90"), Some(-90.0), "下界在域内");
+        assert_eq!(rr3_sim_doa_parse("90"), Some(90.0), "上界在域内");
+        assert_eq!(rr3_sim_doa_parse("0"), Some(0.0));
+        assert_eq!(rr3_sim_doa_parse("90.1"), None, "越上界不认");
+        assert_eq!(rr3_sim_doa_parse("-90.5"), None, "越下界不认");
+        assert_eq!(rr3_sim_doa_parse("abc"), None, "垃圾不认");
+        assert_eq!(rr3_sim_doa_parse(""), None, "空串不认");
+        assert_eq!(rr3_sim_doa_parse("nan"), None, "NaN 不认");
+        assert_eq!(rr3_sim_doa_parse("inf"), None, "inf 不认");
     }
 }

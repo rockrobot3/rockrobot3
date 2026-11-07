@@ -35,7 +35,7 @@ OS 双轨的**快路**：不自己构建 OS，用现成发行版（Armbian / Deb
 （常量定义 `base/runtime/rr-hal/src/backend.rs`，符号名锚定；真件档装配单
 env 覆写、service 注入、e2e 注入均照此表，不读代码不另猜）。取值不认一律
 回落缺省（不报错）；显式 `RR3_HAL_BACKEND=linux` 在 sim-only 构建上会被
-误落 placeholder——R11 boot 语义，见 backend.rs `rr3_hal_backend_resolve` 注。
+误落 placeholder——R11 boot 语义，见 backend.rs `rr3_backend_resolve` 注。
 
 ### 后端选择
 
@@ -58,7 +58,7 @@ env 覆写、service 注入、e2e 注入均照此表，不读代码不另猜）�
 | `RR3_HAL_LINK_IFNAME` | 任意非空串 | `wlan0` | NetworkManager 链路读数接口名（`RR3_HAL_LINK_IFNAME_ENV`） |
 
 GPIO 线偏移按 **role 泛化**：`rr3_hal_gpio_out` 的 role 参数拼键
-`RR3_HAL_GPIO_<ROLE>_LINE`（`rr3_gpio_line_env_key`，role 只认非空 ASCII
+`RR3_HAL_GPIO_<ROLE>_LINE`（`rr3_gpio_line_key`，role 只认非空 ASCII
 字母数字）；代码缺省只备 `led`→4 / `relay`→17 两档（R8 引脚预算表软件路），
 白名单外 role 无缺省——env 也没给时 ensure 显式回错，不静默选脚。
 

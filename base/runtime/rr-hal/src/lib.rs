@@ -34,7 +34,7 @@ pub mod descriptor;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod esp32_uart;
 /// ESP32-UART 板面音频源后端（A 批 c3）：板面 INMP441 双麦流（AUDIO ON 起流 →
-/// A-IPC Event 帧）→ 宿主环形缓冲 → `rr3_hal_audio_source()` esp32 档。flock
+/// A-IPC Event 帧）→ 宿主环形缓冲 → `rr3_audio_source()` esp32 档。flock
 /// 排他与舵机/显示同源——流期间外设面/收流工具互斥（fail-closed）。
 /// 宿主档门（批N8 件三）：同 [`crate::esp32_uart`]。
 #[cfg(any(target_os = "linux", target_os = "macos"))]

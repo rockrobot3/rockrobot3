@@ -9,7 +9,7 @@
 //! `load_config_text` 单点，本层不再持有路径段（0.0.5 批I S-1 与 power/connect
 //! 同口径，批N28 单点收口）。
 
-use rr_hal::backend::rr3_hal_audio_source_with_cmd;
+use rr_hal::backend::rr3_audio_source_cmd;
 use rr_hal::backend::Rr3AudioCmdProducer;
 use rr_hal_api::Rr3AudioCfg;
 use rr_hal_api::Rr3AudioSource;
@@ -25,13 +25,13 @@ pub(crate) type Rr3SenseProbe = (
     Rr3AudioCfg,
 );
 
-/// 音频源选择 + 开机探活编排：[`rr3_hal_audio_source_with_cmd`] 后端选择
+/// 音频源选择 + 开机探活编排：[`rr3_audio_source_cmd`] 后端选择
 /// （反射环命令旁路随源给出，None = 后端无旁路）＋ open 探活（打开失败 Err
 /// 上抛）。「音频源就绪」回显归本编排（方案 §4.3 映射表字面）。返回四元——
 /// 源、命令旁路、后端名（"读帧失败({backend})"文案复用）、开源形状（采集拍
 /// 构造 `Rr3PcmStream` 复用）。
 pub(crate) fn rr3_sense_probe(cfg: &Rr3SenseConfig) -> Result<Rr3SenseProbe, String> {
-    let (mut source, cmd_tx, backend) = rr3_hal_audio_source_with_cmd();
+    let (mut source, cmd_tx, backend) = rr3_audio_source_cmd();
     if cfg.reflex.enable && cmd_tx.is_none() {
         eprintln!(
             "rr3-sense: 反射环已启用但后端 {backend} 无命令旁路，转头指令无处可去（仅 esp32 档承载）"

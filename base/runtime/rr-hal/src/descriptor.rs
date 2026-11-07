@@ -8,7 +8,7 @@
 //! 分层与真值：`profiles/<机>.toml` 是人写的数据事实源（rrd 解析并点名形状错误）；
 //! 本模块是运行期消费端——解析注入文本、合成生效绑定，键位语义与取值域在这里裁。
 //! 键集与白名单闭合（R11）：`led`/`relay` 两角色，扩 role 走契约级评审，届时同步
-//! 本处、`rr3_hal_env_override_map` 与 profiles 键位。
+//! 本处、`rr3_env_override_map` 与 profiles 键位。
 //! 键集冻结裁定（0.0.5 方案 §13.1 C4，评审已批J 在册）：[hardware] **不扩键**，
 //! 九键维持现状——后续扩键/扩 role 同走契约级评审，届时本处与
 //! rr-registry `RR3_ASSEMBLE_DESC_KEYS` 在册表**两处同批**（副本滞后 = fail-closed
@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 
 use rr_ipc::{rr3_cred_store_parse, rr3_gpio_num_parse};
 
-use crate::backend::{rr3_ina219_addr_parse, rr3_pwm_index_parse};
+use crate::backend::{rr3_ina219_parse, rr3_pwm_index_parse};
 
 /// 描述符 env 键：rrd spawn 注入（装配单 `[hardware]` 的序列化文本，每行
 /// `键 = "值"`）。未设 = 无描述符（`--manifest` 调试后门或纯 sim 形态）。
@@ -115,7 +115,7 @@ fn rr3_non_empty(s: &str) -> Option<String> {
 
 impl Rr3HalBindings {
     /// 单键写入：key 必须在册，raw 按该键取值域裁决。`from_text` 与
-    /// [`rr3_hal_bindings_compose`] 共用——同一套键位真值，两处不各说一套。
+    /// [`rr3_bindings_compose`] 共用——同一套键位真值，两处不各说一套。
     fn rr3_binding_set(&mut self, key: &str, raw: &str) -> Result<(), String> {
         let bad = || format!("描述符键 {key} 取值不认: {raw:?}");
         match key {
@@ -141,7 +141,7 @@ impl Rr3HalBindings {
             "i2s_sd" => self.i2s_sd = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
             "i2s_ws" => self.i2s_ws = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
             "cred_store" => self.cred_store = Some(rr3_cred_store_parse(raw).ok_or_else(bad)?),
-            "ina219_addr" => self.ina219_addr = Some(rr3_ina219_addr_parse(raw).ok_or_else(bad)?),
+            "ina219_addr" => self.ina219_addr = Some(rr3_ina219_parse(raw).ok_or_else(bad)?),
             // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值），与 alsa_device
             // 同一条非空串裁决（trim 后空 = 不认）。
             "periph_uart" => self.periph_uart = Some(rr3_non_empty(raw).ok_or_else(bad)?),
@@ -158,7 +158,7 @@ impl Rr3HalBindings {
 /// 描述符文本解析（fail-closed：坏值/未知键/非字符串逐条点名，一条不静默放行）。
 /// 输入形状 = rrd 注入器产物（TOML 平表、值全字符串）；空文本 = 空绑定（合法，
 /// 对应装配单未给 `[hardware]` 段）。
-pub fn rr3_hal_bindings_from_text(text: &str) -> Result<Rr3HalBindings, Vec<String>> {
+pub fn rr3_bindings_parse(text: &str) -> Result<Rr3HalBindings, Vec<String>> {
     let v: toml::Value = match toml::from_str(text) {
         Ok(v) => v,
         Err(e) => return Err(vec![format!("描述符 TOML 解析失败: {e}")]),
@@ -189,13 +189,13 @@ pub fn rr3_hal_bindings_from_text(text: &str) -> Result<Rr3HalBindings, Vec<Stri
 /// 生效绑定合成（ADR-0018 裁定 4 的字面分层）：描述符为底，`overrides` 应急覆盖
 /// （键 = 描述符键名、值 = 原始文本，同键覆盖赢）。覆盖键未在册或取值不认 →
 /// `Err` 点名——应急写错必须当场听见，绝不静默落描述符值。描述符解析失败同败。
-pub fn rr3_hal_bindings_compose(
+pub fn rr3_bindings_compose(
     descriptor: Option<&str>,
     overrides: &BTreeMap<String, String>,
 ) -> Result<Rr3HalBindings, String> {
     let mut b = match descriptor {
         None | Some("") => Rr3HalBindings::default(),
-        Some(text) => rr3_hal_bindings_from_text(text)
+        Some(text) => rr3_bindings_parse(text)
             .map_err(|errs| format!("描述符解析失败: {}", errs.join("; ")))?,
     };
     for (k, raw) in overrides {
@@ -207,7 +207,7 @@ pub fn rr3_hal_bindings_compose(
 
 /// 读进程环境的 `RR3_HAL_*` 应急键，映射成描述符键名（compose 的 overrides 供数）。
 /// role 线偏移只认白名单 `led`/`relay`（与 `[hardware]` 键集一致，R11 闭合）。
-pub fn rr3_hal_env_override_map() -> BTreeMap<String, String> {
+pub fn rr3_env_override_map() -> BTreeMap<String, String> {
     fn put(m: &mut BTreeMap<String, String>, key: &str, env: &str) {
         if let Some(v) = std::env::var_os(env) {
             m.insert(key.to_string(), v.to_string_lossy().into_owned());
@@ -254,9 +254,9 @@ pub fn rr3_hal_env_override_map() -> BTreeMap<String, String> {
 
 /// 进程外壳：`RR3_HAL_BINDINGS` 描述符 + `RR3_HAL_*` 应急 env 一次合成生效绑定。
 /// 选择函数在 linux 分支调用它；`Err` 或键缺失 → 落占位后端显式回错（fail-closed）。
-pub fn rr3_hal_bindings_effective() -> Result<Rr3HalBindings, String> {
+pub fn rr3_bindings_eff() -> Result<Rr3HalBindings, String> {
     let descriptor = std::env::var(RR3_HAL_BINDINGS_ENV).ok();
-    rr3_hal_bindings_compose(descriptor.as_deref(), &rr3_hal_env_override_map())
+    rr3_bindings_compose(descriptor.as_deref(), &rr3_env_override_map())
 }
 
 #[cfg(test)]
@@ -284,7 +284,7 @@ mod tests {
             "adc_rail_pin = \"34\"\n",
             "cred_store = \"nvs:rr3\"\n",
         );
-        let b = rr3_hal_bindings_from_text(text).expect("全键正例必须解析");
+        let b = rr3_bindings_parse(text).expect("全键正例必须解析");
         assert_eq!(b.alsa_device.as_deref(), Some("default"));
         assert_eq!(b.pwm_chip, Some(0));
         assert_eq!(b.pwm_channel, Some(0));
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn empty_text_is_empty_bindings() {
         assert_eq!(
-            rr3_hal_bindings_from_text("").expect("空文本必须合法"),
+            rr3_bindings_parse("").expect("空文本必须合法"),
             Rr3HalBindings::default()
         );
     }
@@ -324,7 +324,7 @@ mod tests {
             "i2c_sda = \"256\"\n",           // 板侧键取值域 = u8，越域即红
             "cred_store = \"flash:boot\"\n", // 非 nvs: 前缀，批N17 件二
         );
-        let errs = rr3_hal_bindings_from_text(text).expect_err("坏值必须报错");
+        let errs = rr3_bindings_parse(text).expect_err("坏值必须报错");
         assert_eq!(errs.len(), 8, "{errs:?}");
         assert!(
             errs.iter().any(|e| e.contains("pwm_chip 取值不认")),
@@ -368,7 +368,7 @@ mod tests {
         let mut ov = BTreeMap::new();
         ov.insert("pwm_chip".to_string(), "1".to_string());
         ov.insert("link_ifname".to_string(), "mlan0".to_string());
-        let b = rr3_hal_bindings_compose(Some(desc), &ov).expect("合成必须成功");
+        let b = rr3_bindings_compose(Some(desc), &ov).expect("合成必须成功");
         assert_eq!(b.pwm_chip, Some(1), "同键应急覆盖赢");
         assert_eq!(b.gpio_led_line, Some(4), "描述符未被覆盖的键原样保留");
         assert_eq!(
@@ -382,7 +382,7 @@ mod tests {
     /// 无描述符 + 空 overrides = 空绑定（不是某板缺省）。
     #[test]
     fn compose_fails_closed_and_names_the_cause() {
-        let e = rr3_hal_bindings_compose(Some("pwm_chip = \"x\"\n"), &BTreeMap::new())
+        let e = rr3_bindings_compose(Some("pwm_chip = \"x\"\n"), &BTreeMap::new())
             .expect_err("坏描述符必须败");
         assert!(
             e.contains("描述符解析失败") && e.contains("pwm_chip"),
@@ -391,7 +391,7 @@ mod tests {
 
         let mut ov = BTreeMap::new();
         ov.insert("nope".to_string(), "1".to_string());
-        let e = rr3_hal_bindings_compose(None, &ov).expect_err("未知覆盖键必须败");
+        let e = rr3_bindings_compose(None, &ov).expect_err("未知覆盖键必须败");
         assert!(
             e.contains("应急覆盖无效") && e.contains("nope 未在册"),
             "{e}"
@@ -399,13 +399,13 @@ mod tests {
 
         let mut ov = BTreeMap::new();
         ov.insert("pwm_chip".to_string(), "1.5".to_string());
-        let e = rr3_hal_bindings_compose(None, &ov).expect_err("坏覆盖值必须败");
+        let e = rr3_bindings_compose(None, &ov).expect_err("坏覆盖值必须败");
         assert!(
             e.contains("应急覆盖无效") && e.contains("pwm_chip 取值不认"),
             "{e}"
         );
 
-        let b = rr3_hal_bindings_compose(None, &BTreeMap::new()).expect("空合成必须合法");
+        let b = rr3_bindings_compose(None, &BTreeMap::new()).expect("空合成必须合法");
         assert_eq!(
             b,
             Rr3HalBindings::default(),

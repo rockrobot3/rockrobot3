@@ -128,7 +128,7 @@ impl Rr3SimAudioSource {
     }
 
     /// 带方位注入的构造（`doa` 为 `None` 等价 [`Self::rr3_sim_source_new`]）
-    pub fn rr3_sim_source_new_with_doa(wave: Rr3SimWave, doa: Option<Rr3SimDoa>) -> Self {
+    pub fn rr3_sim_source_doa(wave: Rr3SimWave, doa: Option<Rr3SimDoa>) -> Self {
         Self {
             wave,
             doa,
@@ -257,7 +257,7 @@ impl Rr3SimAudioSink {
             .clone()
     }
 
-    pub fn rr3_sim_sink_written_count(&self) -> usize {
+    pub fn rr3_sim_sink_count(&self) -> usize {
         self.played.lock().unwrap_or_else(|p| p.into_inner()).len()
     }
 }
@@ -406,7 +406,7 @@ impl Rr3SimDisplay {
     }
 
     /// 同步读当前帧（测试与诊断用；trait 的 `frame` 是 async 面）
-    pub fn rr3_sim_display_frame(&self) -> crate::Rr3FaceFrame {
+    pub fn rr3_sim_frame(&self) -> crate::Rr3FaceFrame {
         *self.frame.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
@@ -418,7 +418,7 @@ impl crate::Rr3Display for Rr3SimDisplay {
     }
 
     fn frame(&self) -> Result<crate::Rr3FaceFrame, Rr3HalError> {
-        Ok(self.rr3_sim_display_frame())
+        Ok(self.rr3_sim_frame())
     }
 }
 
@@ -450,28 +450,28 @@ impl Rr3SimBattery {
     }
 
     /// 同步读电量（测试与诊断用；trait 的 `battery` 是 async 面）
-    pub fn rr3_sim_battery_percent(&self) -> u8 {
+    pub fn rr3_sim_batt_pct(&self) -> u8 {
         self.percent.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub fn rr3_sim_battery_charging(&self) -> bool {
+    pub fn rr3_sim_batt_chg(&self) -> bool {
         self.charging.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// 电量 → 电压（毫伏）的唯一映射。放关联函数而不是方法：它是"这颗虚拟电芯的
     /// 特性曲线"，不随实例状态变——e2e 断言与实现引用同一处，改曲线这里当场红。
-    pub fn rr3_sim_battery_voltage_mv(percent: u8) -> u16 {
+    pub fn rr3_sim_batt_mv(percent: u8) -> u16 {
         3200 + percent as u16 * 10
     }
 }
 
 impl crate::Rr3Power for Rr3SimBattery {
     fn battery(&self) -> Result<crate::Rr3BatteryState, Rr3HalError> {
-        let percent = self.rr3_sim_battery_percent();
+        let percent = self.rr3_sim_batt_pct();
         Ok(crate::Rr3BatteryState {
-            voltage_mv: Self::rr3_sim_battery_voltage_mv(percent),
+            voltage_mv: Self::rr3_sim_batt_mv(percent),
             percent,
-            charging: self.rr3_sim_battery_charging(),
+            charging: self.rr3_sim_batt_chg(),
         })
     }
 }
@@ -529,7 +529,7 @@ impl crate::Rr3Link for Rr3SimLink {
 /// （`crate::backend::RR3_HAL_SIM_LINK_SSID_DEFAULT`，合流一处真值）。
 /// 只保证形状与确定性，不保证"周围真有这些网"——诚实标注由承载层的
 /// `backend:"sim"` 承担，板上换 NetworkManager 真扫描。
-pub fn rr3_sim_link_scan_list() -> [(&'static str, i8, bool); 3] {
+pub fn rr3_sim_scan_list() -> [(&'static str, i8, bool); 3] {
     [
         (crate::backend::RR3_HAL_SIM_LINK_SSID_DEFAULT, -42, true),
         ("rock-sim-guest", -58, true),
@@ -565,7 +565,7 @@ mod tests {
     /// 扫描列表（N-9 迁入）：首行 SSID 与 sim 链路缺省 SSID 同一真值
     #[test]
     fn scan_list_first_ssid_ties_to_link_default() {
-        let list = rr3_sim_link_scan_list();
+        let list = rr3_sim_scan_list();
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].0, crate::backend::RR3_HAL_SIM_LINK_SSID_DEFAULT);
         assert_eq!(list[0].1, -42);
@@ -731,7 +731,7 @@ mod tests {
         assert_eq!(&played[..20], &[4i16; 20], "最旧部分被挤出");
         assert_eq!(&played[20..60], &[5i16; 40]);
         assert_eq!(&played[60..], &[6i16; 40], "最新一块保留");
-        assert_eq!(sink.rr3_sim_sink_written_count(), 100);
+        assert_eq!(sink.rr3_sim_sink_count(), 100);
     }
 
     /// sim 舵机：初始角即构造值，set 后读回最后一次的值——设备面只记录不裁决，
@@ -772,7 +772,7 @@ mod tests {
     #[test]
     fn sim_doa_stereo_ild_matches_injected_direction() {
         for deg in [-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0] {
-            let mut s = Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+            let mut s = Rr3SimAudioSource::rr3_sim_source_doa(
                 Rr3SimWave::Sine,
                 Rr3SimDoa::rr3_sim_doa_new(deg),
             );
@@ -812,7 +812,7 @@ mod tests {
         // 无时延可测，TDOA 在该角退化（sense 侧互相关全零峰退 0°，物理同构），
         // 不属判据域。
         for deg in [-60.0, -30.0, 0.0, 30.0, 60.0] {
-            let mut s = Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+            let mut s = Rr3SimAudioSource::rr3_sim_source_doa(
                 Rr3SimWave::Sine,
                 Rr3SimDoa::rr3_sim_doa_new(deg),
             );
@@ -868,7 +868,7 @@ mod tests {
     /// 60s 只见一次 onset 的根因）。
     #[test]
     fn burst_gate_counts_frames_so_stereo_keeps_one_second_windows() {
-        let mut s = Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+        let mut s = Rr3SimAudioSource::rr3_sim_source_doa(
             Rr3SimWave::Burst,
             Rr3SimDoa::rr3_sim_doa_new(-60.0),
         );
@@ -897,7 +897,7 @@ mod tests {
     #[test]
     fn sim_doa_is_deterministic_and_mono_is_invariant() {
         let mk = || {
-            Rr3SimAudioSource::rr3_sim_source_new_with_doa(
+            Rr3SimAudioSource::rr3_sim_source_doa(
                 Rr3SimWave::Sine,
                 Rr3SimDoa::rr3_sim_doa_new(-60.0),
             )
@@ -948,16 +948,16 @@ mod tests {
     #[test]
     fn sim_display_draws_and_reads_back() {
         let mut d = Rr3SimDisplay::rr3_sim_display_new([0; 8]);
-        assert_eq!(d.rr3_sim_display_frame(), [0; 8], "构造初始黑屏");
+        assert_eq!(d.rr3_sim_frame(), [0; 8], "构造初始黑屏");
         d.draw(&[0b1111_1111, 0, 0, 0, 0, 0, 0, 0b1010_1010])
             .unwrap();
         assert_eq!(
-            d.rr3_sim_display_frame(),
+            d.rr3_sim_frame(),
             [0b1111_1111, 0, 0, 0, 0, 0, 0, 0b1010_1010],
             "draw 即整帧替换"
         );
         d.draw(&[1; 8]).unwrap();
-        assert_eq!(d.rr3_sim_display_frame(), [1; 8], "覆写读回一致");
+        assert_eq!(d.rr3_sim_frame(), [1; 8], "覆写读回一致");
     }
 
     /// sim 电池：trait battery 读回构造/覆写后的三元组，电压曲线按
@@ -979,8 +979,8 @@ mod tests {
             "覆写后读回同一真值"
         );
         // 特性曲线两端钉死：e2e 的低电断言（5% → 3250 ≤ low_voltage_mv=3300）靠它成立
-        assert_eq!(Rr3SimBattery::rr3_sim_battery_voltage_mv(0), 3200);
-        assert_eq!(Rr3SimBattery::rr3_sim_battery_voltage_mv(100), 4200);
+        assert_eq!(Rr3SimBattery::rr3_sim_batt_mv(0), 3200);
+        assert_eq!(Rr3SimBattery::rr3_sim_batt_mv(100), 4200);
     }
 
     /// sim 链路：trait state 读回构造/覆写后的三元组；断链时

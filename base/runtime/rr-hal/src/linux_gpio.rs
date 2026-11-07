@@ -107,7 +107,7 @@ impl Rr3LinuxGpioOut {
     /// 指定根/芯片/线/角色构造（选择函数从生效物理绑定取 `gpio_chip` 与该角色的
     /// `gpio_<role>_line`，批D④ fail-closed——芯片/线偏移没有代码缺省，描述符/
     /// env 都没给就在选择面点名；测试用 temp 树也走这里，不触真硬件）
-    pub fn rr3_linux_gpio_out_new(dev_root: &Path, chip: u32, line: u32, role: &str) -> Self {
+    pub fn rr3_gpio_out_new(dev_root: &Path, chip: u32, line: u32, role: &str) -> Self {
         Self {
             dev_root: dev_root.to_path_buf(),
             chip,
@@ -277,7 +277,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("rr3-hal-gpio-{}-err", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("gpiochip0"), "").unwrap();
-        let mut out = Rr3LinuxGpioOut::rr3_linux_gpio_out_new(&root, 0, 4, "led");
+        let mut out = Rr3LinuxGpioOut::rr3_gpio_out_new(&root, 0, 4, "led");
         // 探活读面 &self；写面 set 是 &mut self，绑定取 mut
         let err = out.level().unwrap_err();
         assert!(
@@ -296,7 +296,7 @@ mod tests {
     fn drop_without_ensure_is_noop() {
         let root = std::env::temp_dir().join(format!("rr3-hal-gpio-{}-drop", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let out = Rr3LinuxGpioOut::rr3_linux_gpio_out_new(&root, 0, 4, "relay");
+        let out = Rr3LinuxGpioOut::rr3_gpio_out_new(&root, 0, 4, "relay");
         drop(out);
         let _ = std::fs::remove_dir_all(&root);
     }

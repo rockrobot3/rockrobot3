@@ -74,12 +74,12 @@ fn rr3_wifi_cred_check(ssid: &str, pass: &str) -> Result<(), Rr3HalError> {
 pub trait Rr3WifiStore: Send + Sync {
     /// 存凭据进持久化承载（在册则更新，不在册则新建；调用方在成功后自行
     /// 转移配网态——失败时状态机不动，fail-closed）
-    fn rr3_wifi_store_connect(&self, ssid: &str, pass: &str) -> Result<(), Rr3HalError>;
+    fn rr3_wifi_connect(&self, ssid: &str, pass: &str) -> Result<(), Rr3HalError>;
     /// 删除在册凭据（不在册 = 幂等 Ok；删除失败显式回错——"forget 后配置
     /// 真消失"要求失败不得静默装成功）
-    fn rr3_wifi_store_forget(&self) -> Result<(), Rr3HalError>;
+    fn rr3_wifi_forget(&self) -> Result<(), Rr3HalError>;
     /// 在册 SSID（None = 不在册）：重启后模块据此恢复配网态
-    fn rr3_wifi_store_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError>;
+    fn rr3_wifi_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError>;
 }
 
 /// linux NetworkManager 凭据存储（[`Rr3WifiStore`] 的 linux 后端，nmcli 子进程
@@ -94,7 +94,7 @@ impl Rr3NmWifiStore {
     /// 指定 nmcli 程序路径与子进程超时构造（选择函数从模块 config 的
     /// `timeout_ms` 传入超时——与链路读数后端同一档，没有代码缺省；测试传
     /// 假脚本绝对路径注入编排，零全局环境污染）
-    pub fn rr3_nm_wifi_store_new(nmcli: impl Into<PathBuf>, nmcli_timeout: Duration) -> Self {
+    pub fn rr3_nm_wifi_new(nmcli: impl Into<PathBuf>, nmcli_timeout: Duration) -> Self {
         Self {
             nmcli: nmcli.into(),
             nmcli_timeout,
@@ -140,7 +140,7 @@ impl Rr3NmWifiStore {
 }
 
 impl Rr3WifiStore for Rr3NmWifiStore {
-    fn rr3_wifi_store_connect(&self, ssid: &str, pass: &str) -> Result<(), Rr3HalError> {
+    fn rr3_wifi_connect(&self, ssid: &str, pass: &str) -> Result<(), Rr3HalError> {
         rr3_wifi_cred_check(ssid, pass)?;
         let verb = if self.in_register()? { "modify" } else { "add" };
         let args = self.upsert_args(verb, ssid, pass);
@@ -148,7 +148,7 @@ impl Rr3WifiStore for Rr3NmWifiStore {
         rr3_nm_run(&self.nmcli, &refs, self.nmcli_timeout).map(|_| ())
     }
 
-    fn rr3_wifi_store_forget(&self) -> Result<(), Rr3HalError> {
+    fn rr3_wifi_forget(&self) -> Result<(), Rr3HalError> {
         if !self.in_register()? {
             return Ok(()); // 未连先忘幂等：不在册时连 delete 都不用发
         }
@@ -160,7 +160,7 @@ impl Rr3WifiStore for Rr3NmWifiStore {
         .map(|_| ())
     }
 
-    fn rr3_wifi_store_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError> {
+    fn rr3_wifi_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError> {
         if !self.in_register()? {
             return Ok(None);
         }
@@ -193,17 +193,17 @@ pub struct Rr3SimWifiStore {
 }
 
 impl Rr3WifiStore for Rr3SimWifiStore {
-    fn rr3_wifi_store_connect(&self, ssid: &str, _pass: &str) -> Result<(), Rr3HalError> {
+    fn rr3_wifi_connect(&self, ssid: &str, _pass: &str) -> Result<(), Rr3HalError> {
         *self.ssid.lock().unwrap_or_else(|e| e.into_inner()) = Some(ssid.to_string());
         Ok(())
     }
 
-    fn rr3_wifi_store_forget(&self) -> Result<(), Rr3HalError> {
+    fn rr3_wifi_forget(&self) -> Result<(), Rr3HalError> {
         *self.ssid.lock().unwrap_or_else(|e| e.into_inner()) = None;
         Ok(())
     }
 
-    fn rr3_wifi_store_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError> {
+    fn rr3_wifi_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError> {
         Ok(self
             .ssid
             .lock()
@@ -218,13 +218,13 @@ impl Rr3WifiStore for Rr3SimWifiStore {
 pub struct Rr3WifiStoreUnavailable;
 
 impl Rr3WifiStore for Rr3WifiStoreUnavailable {
-    fn rr3_wifi_store_connect(&self, _ssid: &str, _pass: &str) -> Result<(), Rr3HalError> {
+    fn rr3_wifi_connect(&self, _ssid: &str, _pass: &str) -> Result<(), Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/wifi-store"))
     }
-    fn rr3_wifi_store_forget(&self) -> Result<(), Rr3HalError> {
+    fn rr3_wifi_forget(&self) -> Result<(), Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/wifi-store"))
     }
-    fn rr3_wifi_store_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError> {
+    fn rr3_wifi_ssid(&self) -> Result<Option<Rr3SsidText>, Rr3HalError> {
         Err(Rr3HalError::Unsupported("placeholder/wifi-store"))
     }
 }
@@ -349,9 +349,9 @@ exit 9
     #[test]
     fn nm_store_persists_across_reconstruct() {
         let (script, conf_file) = rr3_test_nm_script("persist", "");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
+        let store = Rr3NmWifiStore::rr3_nm_wifi_new(&script, RR3_TEST_NM_TIMEOUT);
 
-        rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("home", "password8")).unwrap();
+        rr3_test_txtbsy_retry(|| store.rr3_wifi_connect("home", "password8")).unwrap();
         let on_disk = std::fs::read_to_string(&conf_file).unwrap();
         assert_eq!(
             on_disk.trim(),
@@ -360,8 +360,8 @@ exit 9
         );
 
         // "重启"：丢弃旧句柄，凭同一夹具重新构造后端——凭据仍在册
-        let store2 = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
-        let ssid = rr3_test_txtbsy_retry(|| store2.rr3_wifi_store_ssid()).unwrap();
+        let store2 = Rr3NmWifiStore::rr3_nm_wifi_new(&script, RR3_TEST_NM_TIMEOUT);
+        let ssid = rr3_test_txtbsy_retry(|| store2.rr3_wifi_ssid()).unwrap();
         assert_eq!(
             ssid.as_ref().map(|s| s.rr3_ssid_text_as_str()),
             Some("home"),
@@ -369,10 +369,10 @@ exit 9
         );
 
         // forget 真删：配置文件消失，新构造的"重启"视角查不在册
-        rr3_test_txtbsy_retry(|| store2.rr3_wifi_store_forget()).unwrap();
+        rr3_test_txtbsy_retry(|| store2.rr3_wifi_forget()).unwrap();
         assert!(!conf_file.exists(), "forget 后连接配置真消失");
-        let store3 = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
-        let ssid = rr3_test_txtbsy_retry(|| store3.rr3_wifi_store_ssid()).unwrap();
+        let store3 = Rr3NmWifiStore::rr3_nm_wifi_new(&script, RR3_TEST_NM_TIMEOUT);
+        let ssid = rr3_test_txtbsy_retry(|| store3.rr3_wifi_ssid()).unwrap();
         assert!(ssid.is_none(), "forget 后重启查不在册");
 
         let _ = std::fs::remove_dir_all(conf_file.parent().unwrap().parent().unwrap());
@@ -382,12 +382,12 @@ exit 9
     #[test]
     fn nm_store_second_connect_updates_same_profile() {
         let (script, conf_file) = rr3_test_nm_script("update", "");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
-        rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("first", "password1")).unwrap();
-        rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("second", "password2")).unwrap();
+        let store = Rr3NmWifiStore::rr3_nm_wifi_new(&script, RR3_TEST_NM_TIMEOUT);
+        rr3_test_txtbsy_retry(|| store.rr3_wifi_connect("first", "password1")).unwrap();
+        rr3_test_txtbsy_retry(|| store.rr3_wifi_connect("second", "password2")).unwrap();
         let on_disk = std::fs::read_to_string(&conf_file).unwrap();
         assert_eq!(on_disk.trim(), "second|password2", "换网更新同一 profile");
-        let ssid = rr3_test_txtbsy_retry(|| store.rr3_wifi_store_ssid()).unwrap();
+        let ssid = rr3_test_txtbsy_retry(|| store.rr3_wifi_ssid()).unwrap();
         assert_eq!(
             ssid.as_ref().map(|s| s.rr3_ssid_text_as_str()),
             Some("second")
@@ -399,8 +399,8 @@ exit 9
     #[test]
     fn nm_store_forget_is_idempotent_when_absent() {
         let (script, conf_file) = rr3_test_nm_script("forget-empty", "");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
-        rr3_test_txtbsy_retry(|| store.rr3_wifi_store_forget()).unwrap();
+        let store = Rr3NmWifiStore::rr3_nm_wifi_new(&script, RR3_TEST_NM_TIMEOUT);
+        rr3_test_txtbsy_retry(|| store.rr3_wifi_forget()).unwrap();
         assert!(!conf_file.exists());
         let _ = std::fs::remove_dir_all(conf_file.parent().unwrap().parent().unwrap());
     }
@@ -411,8 +411,8 @@ exit 9
         let (script, conf_file) = rr3_test_nm_script("empty-ssid", "");
         // 手工把 profile 写成空 SSID（模拟 open 网络 profile 无 ssid 域值）
         std::fs::write(&conf_file, "|x\n").unwrap();
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
-        let ssid = rr3_test_txtbsy_retry(|| store.rr3_wifi_store_ssid()).unwrap();
+        let store = Rr3NmWifiStore::rr3_nm_wifi_new(&script, RR3_TEST_NM_TIMEOUT);
+        let ssid = rr3_test_txtbsy_retry(|| store.rr3_wifi_ssid()).unwrap();
         assert!(ssid.is_none(), "空 SSID 域如实 None: {ssid:?}");
         let _ = std::fs::remove_dir_all(conf_file.parent().unwrap().parent().unwrap());
     }
@@ -421,9 +421,9 @@ exit 9
     #[test]
     fn nm_store_timeout_kills_slow_child() {
         let (script, conf_file) = rr3_test_nm_script("tmo", "sleep 3\n");
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, Duration::from_millis(100));
+        let store = Rr3NmWifiStore::rr3_nm_wifi_new(&script, Duration::from_millis(100));
         let started = std::time::Instant::now();
-        let err = rr3_test_txtbsy_retry(|| store.rr3_wifi_store_ssid()).unwrap_err();
+        let err = rr3_test_txtbsy_retry(|| store.rr3_wifi_ssid()).unwrap_err();
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "超时必须提前杀掉，不许等满子进程时长"
@@ -442,9 +442,9 @@ exit 9
             "fail",
             "if [ \"$2\" = \"delete\" ]; then echo nm no such profile >&2; exit 4; fi\n",
         );
-        let store = Rr3NmWifiStore::rr3_nm_wifi_store_new(&script, RR3_TEST_NM_TIMEOUT);
-        rr3_test_txtbsy_retry(|| store.rr3_wifi_store_connect("home", "password8")).unwrap();
-        let err = rr3_test_txtbsy_retry(|| store.rr3_wifi_store_forget()).unwrap_err();
+        let store = Rr3NmWifiStore::rr3_nm_wifi_new(&script, RR3_TEST_NM_TIMEOUT);
+        rr3_test_txtbsy_retry(|| store.rr3_wifi_connect("home", "password8")).unwrap();
+        let err = rr3_test_txtbsy_retry(|| store.rr3_wifi_forget()).unwrap_err();
         assert!(
             err.to_string().contains("退出非零") && err.to_string().contains("no such profile"),
             "错误要点名退出非零与 stderr: {err}"
@@ -457,25 +457,25 @@ exit 9
     #[test]
     fn sim_store_roundtrips_in_process() {
         let store = Rr3SimWifiStore::default();
-        assert!(store.rr3_wifi_store_ssid().unwrap().is_none(), "出厂不在册");
-        store.rr3_wifi_store_connect("home", "password8").unwrap();
+        assert!(store.rr3_wifi_ssid().unwrap().is_none(), "出厂不在册");
+        store.rr3_wifi_connect("home", "password8").unwrap();
         assert_eq!(
             store
-                .rr3_wifi_store_ssid()
+                .rr3_wifi_ssid()
                 .unwrap()
                 .map(|s| s.rr3_ssid_text_as_str().to_string()),
             Some("home".to_string())
         );
-        store.rr3_wifi_store_forget().unwrap();
-        assert!(store.rr3_wifi_store_ssid().unwrap().is_none());
+        store.rr3_wifi_forget().unwrap();
+        assert!(store.rr3_wifi_ssid().unwrap().is_none());
     }
 
     /// 占位存储：三动作全 Unsupported 点名，不静默装成功
     #[test]
     fn unavailable_store_errors_loudly() {
         let store = Rr3WifiStoreUnavailable;
-        assert!(store.rr3_wifi_store_connect("h", "password8").is_err());
-        assert!(store.rr3_wifi_store_forget().is_err());
-        assert!(store.rr3_wifi_store_ssid().is_err());
+        assert!(store.rr3_wifi_connect("h", "password8").is_err());
+        assert!(store.rr3_wifi_forget().is_err());
+        assert!(store.rr3_wifi_ssid().is_err());
     }
 }

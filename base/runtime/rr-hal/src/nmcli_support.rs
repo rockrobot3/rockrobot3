@@ -64,7 +64,7 @@ pub(crate) fn rr3_nm_field<'a>(out: &'a str, key: &str) -> Option<&'a str> {
 /// 一直等到孙退出——超时对管道面就设不了防（批H5 审查补档）。
 /// 非阻塞位不切回去也无妨：fd 随 ChildStdout 丢弃即销毁，无跨调用状态。
 #[cfg(target_os = "linux")]
-pub(crate) fn rr3_nm_read_to_end_capped(
+pub(crate) fn rr3_nm_read_capped(
     s: &mut (impl Read + std::os::fd::AsRawFd),
     deadline: Instant,
 ) -> Vec<u8> {
@@ -81,7 +81,7 @@ pub(crate) fn rr3_nm_read_to_end_capped(
 /// fork 孙进程，EOF 立到，退化版等价。超时守护本体（try_wait 轮询 + kill）
 /// 是纯 std，两平台同一份。
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn rr3_nm_read_to_end_capped(s: &mut impl Read, deadline: Instant) -> Vec<u8> {
+pub(crate) fn rr3_nm_read_capped(s: &mut impl Read, deadline: Instant) -> Vec<u8> {
     capped_loop(s, deadline)
 }
 
@@ -111,7 +111,7 @@ fn capped_loop(s: &mut impl Read, deadline: Instant) -> Vec<u8> {
 /// **回错在前、不读管道**——kill 只收直子进程，其孙进程（如 shell fork 的
 /// sleep）仍持管道写端，read_to_end 会等到孙退出才返回，超时兜底反被拖垮；
 /// 超时回错本就不需要输出。正常退出后读管道也套同一档 deadline（见
-/// [`rr3_nm_read_to_end_capped`]）：真 nmcli 不 fork 幸存孙进程，读立即到
+/// [`rr3_nm_read_capped`]）：真 nmcli 不 fork 幸存孙进程，读立即到
 /// EOF，守护只对"假脚本 fork 出幸存孙进程"一类旁路兜底。
 pub(crate) fn rr3_nm_run(
     nmcli: &Path,
@@ -163,17 +163,17 @@ pub(crate) fn rr3_nm_run(
         )));
     }
     // 超时路径已在上面回错——这里只在正常退出后走到。读管道各挂一档
-    // deadline（rr3_nm_read_to_end_capped）：真 nmcli 毫秒级 EOF，守护只对
+    // deadline（rr3_nm_read_capped）：真 nmcli 毫秒级 EOF，守护只对
     // "脚本被替换成 fork 幸存孙进程的假件"一类旁路兜底，不让调用面被拖住
     let stdout = child
         .stdout
         .take()
-        .map(|mut s| rr3_nm_read_to_end_capped(&mut s, Instant::now() + timeout))
+        .map(|mut s| rr3_nm_read_capped(&mut s, Instant::now() + timeout))
         .unwrap_or_default();
     let stderr = child
         .stderr
         .take()
-        .map(|mut s| rr3_nm_read_to_end_capped(&mut s, Instant::now() + timeout))
+        .map(|mut s| rr3_nm_read_capped(&mut s, Instant::now() + timeout))
         .unwrap_or_default();
     if !status.map(|s| s.success()).unwrap_or(false) {
         return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(

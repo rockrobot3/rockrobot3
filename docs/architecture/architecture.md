@@ -1348,7 +1348,7 @@ pub trait Rr3ByteStream {                     // 4. 传输实现（§12.8 接缝
   `schema_version = 2` 起把 `[platform]`/`[supplies]`/`[slots]` 三段判为必填、键位与类型逐键校验，
   并有"tier 与 watchdog 不自洽即拒 boot"的装载门——§3 规划落点表同批划线）。**现在还成立的缺口只有半条**：
   能力面后端族的选择仍由 `RR3_HAL_BACKEND` 环境变量决定（`rr-hal/src/backend.rs` 的
-  `rr3_hal_backend_resolve`），`[platform]` 那一段**没有被选择函数读过**，所以"换芯片平台"仍要动 env
+  `rr3_backend_resolve`），`[platform]` 那一段**没有被选择函数读过**，所以"换芯片平台"仍要动 env
   或动码，而不是改装配单。**"板 = 数据"的成立范围到"底板走线 + 供给声明"这一层为止，平台档那一层未闭**
   （v0.7 那句"换板只改数据"写得过满，v0.8 收到实况，v0.11 再按实现订正一次）。
   另：`[supplies]` 今天在册的是六位（看门狗三 + 时序三），**第七位能源域 `[[supplies.domain]]` 尚无

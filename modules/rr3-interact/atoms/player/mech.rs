@@ -211,7 +211,7 @@ mod tests {
         input[960] = i16::MAX; // 尾块（1 样点）上的极值
         let played = rr3_tts_play(&mut sink, &input).unwrap();
         assert_eq!(played, 961 * 1000 / 16000, "毫秒 = 样点数×1000/16000 截断");
-        assert_eq!(sink.rr3_sim_sink_written_count(), input.len());
+        assert_eq!(sink.rr3_sim_sink_count(), input.len());
         assert_eq!(
             sink.rr3_sim_sink_played(),
             &input[..],

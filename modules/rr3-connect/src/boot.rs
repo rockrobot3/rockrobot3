@@ -45,7 +45,7 @@ pub(crate) fn rr3_connect_provision(
 ) -> Result<(Box<dyn Rr3WifiStore>, Rr3Provision), String> {
     let (store, store_backend) = rr3_hal_wifi_store(Duration::from_millis(timeout_ms));
     let prov = match store
-        .rr3_wifi_store_ssid()
+        .rr3_wifi_ssid()
         .map_err(|e| format!("配网凭据在册查询失败（{store_backend}）: {e}"))?
     {
         Some(ssid) => {

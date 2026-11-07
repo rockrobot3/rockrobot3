@@ -116,7 +116,7 @@ impl Rr3LinuxPwmServo {
     /// 指定根/芯片/通道构造（选择函数从生效物理绑定取 `pwm_chip`/`pwm_channel`，
     /// 批D④ fail-closed——芯片/通道没有代码缺省，描述符/env 都没给就在选择面
     /// 点名；测试用假 sysfs 树也走这里，不触真硬件）
-    pub fn rr3_linux_pwm_servo_new(root: &Path, chip: u32, channel: u32) -> Self {
+    pub fn rr3_pwm_servo_new(root: &Path, chip: u32, channel: u32) -> Self {
         Self {
             root: root.to_path_buf(),
             chip,
@@ -302,7 +302,7 @@ mod tests {
     fn ensure_configures_and_probe_reads_neutral() {
         let root = temp_root("in-place");
         let pwm_dir = fake_chip_in_place(&root, 0, 0);
-        let dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 0, 0);
+        let dev = Rr3LinuxPwmServo::rr3_pwm_servo_new(&root, 0, 0);
         assert_eq!(
             dev.angle().unwrap(),
             90,
@@ -334,7 +334,7 @@ mod tests {
     fn set_angle_writes_duty_and_reads_back() {
         let root = temp_root("set");
         let pwm_dir = fake_chip_in_place(&root, 0, 1);
-        let mut dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 0, 1);
+        let mut dev = Rr3LinuxPwmServo::rr3_pwm_servo_new(&root, 0, 1);
         dev.set_angle(45).unwrap();
         assert_eq!(read_u64(&pwm_dir.join("duty_cycle")), 1_000_000);
         assert_eq!(dev.angle().unwrap(), 45);
@@ -380,7 +380,7 @@ mod tests {
             }
             panic!("看护线程: export 未被写入");
         });
-        let dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 0, 0);
+        let dev = Rr3LinuxPwmServo::rr3_pwm_servo_new(&root, 0, 0);
         assert_eq!(dev.angle().unwrap(), 90);
         watcher.join().unwrap();
         assert_eq!(
@@ -405,7 +405,7 @@ mod tests {
     fn drop_without_use_touches_nothing() {
         let root = temp_root("unused");
         let pwm_dir = fake_chip_in_place(&root, 2, 0);
-        let dev = Rr3LinuxPwmServo::rr3_linux_pwm_servo_new(&root, 2, 0);
+        let dev = Rr3LinuxPwmServo::rr3_pwm_servo_new(&root, 2, 0);
         drop(dev);
         assert_eq!(read_u64(&pwm_dir.join("enable")), 0, "空文件解析为 0");
         std::fs::remove_dir_all(&root).unwrap();

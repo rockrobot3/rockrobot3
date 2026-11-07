@@ -50,7 +50,7 @@ pub(crate) fn rr3_wifi_connect(
     let (ssid, pass) = rr3_wifi_conn_args(args, min_pass_len)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
     store
-        .rr3_wifi_store_connect(&ssid, &pass)
+        .rr3_wifi_connect(&ssid, &pass)
         .map_err(|e| format!("凭据持久化失败: {e}"))?;
     prov.rr3_provision_connect(&ssid, &pass);
     eprintln!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
@@ -66,7 +66,7 @@ pub(crate) fn rr3_wifi_forget(
 ) -> Result<Value, String> {
     rr3_wifi_forget_args(args)?;
     store
-        .rr3_wifi_store_forget()
+        .rr3_wifi_forget()
         .map_err(|e| format!("凭据删除失败: {e}"))?;
     prov.rr3_provision_forget();
     eprintln!("wifi: forget mode=ap（连接配置已真删）");
@@ -116,7 +116,7 @@ pub fn rr3_wifi_scan_args(args: &Value) -> Result<(), String> {
 pub fn rr3_wifi_scan_result() -> Value {
     json!({
         "backend": "sim",
-        "items": rr_hal::sim::rr3_sim_link_scan_list()
+        "items": rr_hal::sim::rr3_sim_scan_list()
             .iter()
             .map(|(ssid, rssi, auth)| json!({ "ssid": ssid, "rssi": rssi, "auth": auth }))
             .collect::<Vec<Value>>(),
@@ -318,7 +318,7 @@ mod tests {
         assert_eq!(prov.rr3_provision_mode(), "station", "状态机随存储同向转");
         assert_eq!(
             store
-                .rr3_wifi_store_ssid()
+                .rr3_wifi_ssid()
                 .unwrap()
                 .map(|s| s.rr3_ssid_text_as_str().to_string()),
             Some("home".to_string()),
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(v["mode"], "ap");
         assert_eq!(prov.rr3_provision_mode(), "ap");
         assert!(
-            store.rr3_wifi_store_ssid().unwrap().is_none(),
+            store.rr3_wifi_ssid().unwrap().is_none(),
             "forget 后端配置真删"
         );
     }
@@ -340,17 +340,17 @@ mod tests {
     fn store_failure_leaves_provision_state_untouched() {
         struct Rr3FailingStore;
         impl Rr3WifiStore for Rr3FailingStore {
-            fn rr3_wifi_store_connect(
+            fn rr3_wifi_connect(
                 &self,
                 _ssid: &str,
                 _pass: &str,
             ) -> Result<(), rr_hal_api::Rr3HalError> {
                 Err(rr_hal_api::Rr3HalError::Unsupported("test/failing-store"))
             }
-            fn rr3_wifi_store_forget(&self) -> Result<(), rr_hal_api::Rr3HalError> {
+            fn rr3_wifi_forget(&self) -> Result<(), rr_hal_api::Rr3HalError> {
                 Err(rr_hal_api::Rr3HalError::Unsupported("test/failing-store"))
             }
-            fn rr3_wifi_store_ssid(
+            fn rr3_wifi_ssid(
                 &self,
             ) -> Result<Option<rr_hal_api::Rr3SsidText>, rr_hal_api::Rr3HalError> {
                 Err(rr_hal_api::Rr3HalError::Unsupported("test/failing-store"))

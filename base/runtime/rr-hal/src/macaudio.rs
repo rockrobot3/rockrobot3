@@ -285,7 +285,7 @@ impl Rr3MacAudioSource {
 
     /// 诊断面（真件探针用）：队列协商出的流格式。请求 16k/mono/s16 与协商值
     /// 不一致 = 转换/路由问题第一证据（acc② 排障加）。
-    pub fn rr3_mac_source_stream_format_debug(&self) -> String {
+    pub fn rr3_mac_stream_fmt(&self) -> String {
         let guard = rr3_mac_lock(&self.inner);
         let Some(st) = guard.as_ref() else {
             return "未 open".into();
@@ -654,10 +654,7 @@ mod tests {
     fn mac_source_real_device_reads_nonzero_audio() {
         let mut src = Rr3MacAudioSource::rr3_mac_source_new();
         src.open(RR3_AUDIO_CFG_16K_MONO16).expect("mac 源 open");
-        println!(
-            "queue 协商流格式: {}",
-            src.rr3_mac_source_stream_format_debug()
-        );
+        println!("queue 协商流格式: {}", src.rr3_mac_stream_fmt());
         println!("--- 10s 拾音包络（请对麦克风说话，块峰 >3000 即语音级）---");
         let mut buf = [0i16; 8000]; // 0.5s @16k
         for b in 0..20 {
