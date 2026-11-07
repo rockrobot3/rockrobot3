@@ -1251,7 +1251,7 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   ①**b1 命令旁路（`971bdb6`+收尾 `9dcad5c`、红账 `6965484`）**：flock 单消费者纪律下音频源
   持 conn 者即板外设命令下行唯一通路——`Rr3PeriphCmd` 语义命令入有界队列（cap=2 满丢最旧+
   溢丢计数）、读循环顶拍逐条弹出写出（io 失败回插队首转重连不丢命令）、板帧分类面 Response
-  放行记账不污 err_streak；帧构造与舵机桥同单点（`rr3_bridge_call_frame`）逐字同源。
+  放行记账不污 err_streak；帧构造与舵机桥同单点（`rr3_bridge_call`）逐字同源。
   ②**b2 反射环 + 播放期 VAD 门控（`3febbb9`）**：sense 订阅 `tts_pcm` 喂门（帧体 ms 累计外推
   +gap 轮分隔+tail 尾窗）抑制外放回捕，门开只弃 onset 发布（状态机照喂）；onset 带判向换算
   pan 目标（中位 90+clamp ±30）走 b1 旁路 fire-and-forget；策略量 `[rr3-sense.reflex]`

@@ -27,13 +27,11 @@ pub mod ports;
 pub mod request;
 pub mod response;
 
-pub use cmd::{rr3_board_frame_classify, rr3_esp32_cmd_frame, Rr3BoardFrame, Rr3PeriphCmd};
+pub use cmd::{rr3_board_classify, rr3_esp32_cmd_frame, Rr3BoardFrame, Rr3PeriphCmd};
 pub use consts::{
     RR3_BRIDGE_BAUD, RR3_FACE_TOPIC, RR3_HAL_PERIPH_BAUD_ENV, RR3_HAL_PERIPH_UART_ENV,
     RR3_MAGIC_FIRST, RR3_PERIPH_TASK, RR3_SERVO_TOPIC, RR3_TASK_HOST, RR3_TRACE_DIRECT,
 };
-pub use host_call::{
-    rr3_bridge_call_frame, rr3_bridge_request_body_params, rr3_bridge_request_frame,
-};
-pub use request::{rr3_periph_request_parse, Rr3PeriphRequest};
-pub use response::{rr3_bridge_parse_response, rr3_periph_response_frame};
+pub use host_call::{rr3_bridge_call, rr3_bridge_req_body, rr3_bridge_req_frame};
+pub use request::{rr3_req_parse, Rr3PeriphRequest};
+pub use response::{rr3_bridge_decode, rr3_resp_frame};

@@ -20,7 +20,7 @@ pub(crate) use periph_mech::frame::{frame_recv, FrameReq};
 /// 主题分发（**控制面**：只解析/校验/改状态/推作业，不碰硬件）：method 两面——
 /// `rr3.set_bindings`（绑定注入，宿主桥连接建立即推）与 rr3.call（rrd 转发形状，
 /// 宿主桥同款；主题只认两条在册能力面）。method/主题/args 层面的失败是**业务性
-/// 失败**——折 result.error 点名回帧（模块面同款形状，宿主 rr3_bridge_parse_response
+/// 失败**——折 result.error 点名回帧（模块面同款形状，宿主 rr3_bridge_decode
 /// 的解析契约）。
 pub(crate) fn frame_dispatch(
     bus: &Arc<Mutex<Bus>>,

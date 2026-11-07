@@ -15,7 +15,7 @@
 //! - flock 单消费者（`Rr3UartConn` 开口即跨进程排他）：**宿主侧唯一持 conn 者
 //!   = 本件**，板外设命令下行唯一通路 = 本件命令旁路（B 批 b1：语义命令入
 //!   有界队列 → 读线程单写者逐帧写出，帧构造走
-//!   [`crate::esp32_uart::rr3_bridge_request_frame`] 桥同形单点）；rr3-audio-rec
+//!   [`crate::esp32_uart::rr3_bridge_req_frame`] 桥同形单点）；rr3-audio-rec
 //!   等第二 opener 仍 fail-closed 点名，不是静默截流；A 链回放恒宿主扬声器
 //!   （backend.rs sink 侧 esp32 档显式落占位），互斥面天然不成立。
 //! - 旁路 fire-and-forget：板侧执行**前**回成功（status.md 对表实录），回执由
@@ -93,7 +93,7 @@ const RR3_AUDIO_CMD_CAP: usize = 2;
 // 板外设命令旁路（B 批 b1）：flock 单消费者纪律下的命令下行唯一通路——
 // 音频源持有 conn，舵机命令不再另开连接（跨进程第二 opener 必被拒），改为
 // 语义命令入有界队列、读线程单写者逐帧写出。帧构造单点在
-// [`crate::esp32_uart::rr3_bridge_request_frame`]（与舵机/显示桥同形零重复）。
+// [`crate::esp32_uart::rr3_bridge_req_frame`]（与舵机/显示桥同形零重复）。
 // ---------------------------------------------------------------------------
 
 // 板外设语义命令 + 帧构造：真值单点在 rr-periph-proto（ADR-0024，宿主与固件
@@ -185,7 +185,7 @@ fn rr3_esp32_classify_board_frame(
     hdr: &Rr3Header,
     payload: &[u8],
 ) -> Result<Rr3BoardFrameIn, String> {
-    match rr_periph_proto::cmd::rr3_board_frame_classify(hdr, payload)? {
+    match rr_periph_proto::cmd::rr3_board_classify(hdr, payload)? {
         Rr3BoardFrame::Reply { id, err } => Ok(Rr3BoardFrameIn::Reply { id, err }),
         Rr3BoardFrame::Event => {
             rr3_esp32_parse_audio_event(hdr, payload).map(Rr3BoardFrameIn::Audio)
@@ -891,7 +891,7 @@ mod tests {
         assert_eq!(tv["params"]["topic"], crate::esp32_uart::RR3_SERVO_TOPIC);
         assert_eq!(tv["params"]["args"]["angle_deg"], 98);
         assert_eq!(tv["params"]["args"]["axis"], "tilt");
-        let tilt_bridge = crate::esp32_uart::rr3_bridge_call_frame(
+        let tilt_bridge = crate::esp32_uart::rr3_bridge_call(
             8,
             crate::esp32_uart::RR3_SERVO_TOPIC,
             &serde_json::json!({ "angle_deg": 98, "axis": "tilt" }),
@@ -902,7 +902,7 @@ mod tests {
         );
         // 与桥侧 golden 同值锚定（esp32_uart 测试 rr3_bridge_request_body(7, ...) 同形）；
         // timestamp_ns 是构造时刻、两帧天然不同，不参与对拍
-        let bridge = crate::esp32_uart::rr3_bridge_call_frame(
+        let bridge = crate::esp32_uart::rr3_bridge_call(
             7,
             crate::esp32_uart::RR3_SERVO_TOPIC,
             &serde_json::json!({ "angle_deg": 105, "axis": "pan" }),
