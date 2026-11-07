@@ -15,7 +15,7 @@
 //! ③ **不持有 `SIGCHLD` 处理、不靠 `waitpid` 阻塞**：收尸靠 `try_wait` + 扫尸节拍（E-5 复用
 //!    `--watchdog-tick-ms`），故"进程已死"到"rrd 知道"之间有**至多一个 sweep 的延迟**（生产 200ms）。
 //! ④ **depends / degraded 不在本文件裁定**（原"两条不做"随 F2/ADR-0009 解除，但裁定权不在这）：
-//!    boot 启动序由 `rr3_registry_plan_boot` 在 `daemon.rs` 仲裁后投递（环 / 不可满足都在
+//!    boot 启动序由 `rr3_plan_boot` 在 `daemon.rs` 仲裁后投递（环 / 不可满足都在
 //!    那里拒）；降级传播只在本文件收尸那一路"记账之后"被动触发——置位/解除的账本在
 //!    `registry.rs`（`rr3_reg_degrade_after` / `rr3_reg_undegrade_after`），本文件不判
 //!    "谁该降级"，只把收尸事实交出去。降级不出重启计划、不吃预算（裁定 4）。

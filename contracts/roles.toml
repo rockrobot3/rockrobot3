@@ -144,7 +144,7 @@ note = "SPI 显示器件（链④真件档 MAX7219 点阵类）；host 侧 contr
 #    精化判据——同 (bus, addr) 的多条 pin 须同 device 且型号在册——的字段）。
 #    derives 一律显式 []：三格共用既有读数源句柄（P-5：charger 与 battery.meter
 #    共用 INA219 同一读数面，env/imu 是 status=placeholder 格无句柄消费），不派生
-#    注入键维持"无第二真值点"——rr3_role_table_check 的"derives 空"判据随本件放宽
+#    注入键维持"无第二真值点"——rr3_role_check 的"derives 空"判据随本件放宽
 #    （显式空 = 不派生，合法；显式性由 CI 契约测试逐条点名钉住）。iface=Rr3Sensor
 #    为批N3 契约面先行（rr-hal-api 无实现件，件一 Rr3Actuator 先例）。
 [[role]]

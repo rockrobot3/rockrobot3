@@ -285,8 +285,8 @@ supervisor 已退出，重启投递丢弃: {name}
 |---|---|---|---|
 | ① | `rr3_topics_is_reserved_topic(topic)`（首段 == `RR3_RESERVED_OWNER`） | `Rr3PublishDeny::ReservedNamespace { topic }` | `Permission` |
 | ② | 主题首段 != `sender_name` | `Rr3PublishDeny::ForeignPrefix { topic, owner, sender }` | `Permission` |
-| ③ | `topics.rr3_topic_set_contains(topic)` 为假 | `Rr3PublishDeny::NotRegistered { topic }` | `Invalid` |
-| ④ | `topics.rr3_topic_set_owner(topic) != Some(sender_name)`（含取不到 owner） | `Rr3PublishDeny::ForeignPrefix { topic, owner, sender }` | `Permission` |
+| ③ | `topics.rr3_topic_contains(topic)` 为假 | `Rr3PublishDeny::NotRegistered { topic }` | `Invalid` |
+| ④ | `topics.rr3_topic_owner(topic) != Some(sender_name)`（含取不到 owner） | `Rr3PublishDeny::ForeignPrefix { topic, owner, sender }` | `Permission` |
 
 三条不可互换的理由：
 
@@ -294,8 +294,8 @@ supervisor 已退出，重启投递丢弃: {name}
   `rr3-runtime`），先查前缀或先查在册会把它判成 `ForeignPrefix` / `Ok` 而不是"冒充"这条
   最严重的定性。rrd 自己是该命名空间唯一合法发布者，走下行广播路径，**不调本函数**（`rr3_reg_publish_check` 的文档注释）。
 - **④ 不是重复劳动**：首段 == `sender_name` 只是主题串的**语法**事实，登记 `owner` ==
-  `sender_name` 才是**在册事实**。`rr3_topic_set_check` 的"首段 == owner"前置只在
-  `rr3_topics_load` 的装载路径上强制，而 `rr3_registry_topic_set_from_text` 本身是 public，
+  `sender_name` 才是**在册事实**。`rr3_topic_check` 的"首段 == owner"前置只在
+  `rr3_topics_load` 的装载路径上强制，而 `rr3_topic_parse` 本身是 public，
   绕开 check 造一张"首段是 rr3-sima、登记 owner 是 rr3-simb"的表并不费力——安全判定不押在
   "上游一定查过"上（`rr3_reg_publish_check` 的末段 owner 比对）。
 - **③ 指的是主题不在册**（首段与发送方相符、名字拼错或没登记），**不是**指发送方那个模块

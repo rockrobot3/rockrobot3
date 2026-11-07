@@ -18,8 +18,8 @@ fn topics_toml() -> String {
 
 #[test]
 fn topics_prefix_accepts_canonical_topic() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
+    let owners = rr_registry::rr3_topics_owners(&topics_toml());
+    let errs = rr_registry::rr3_topics_chk(
         r#"
 [[topic]]
 name = "rr3-sense/audio/vad_start"
@@ -33,8 +33,8 @@ kind = "event"
 
 #[test]
 fn topics_prefix_rejects_foreign_owner() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
+    let owners = rr_registry::rr3_topics_owners(&topics_toml());
+    let errs = rr_registry::rr3_topics_chk(
         r#"
 [[topic]]
 name = "rr3-power/audio/vad"
@@ -48,8 +48,8 @@ kind = "event"
 
 #[test]
 fn topics_prefix_rejects_topic_outside_owner_namespace() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
+    let owners = rr_registry::rr3_topics_owners(&topics_toml());
+    let errs = rr_registry::rr3_topics_chk(
         r#"
 [[topic]]
 name = "rr3-sense/audio/vad_start/extra"
@@ -64,8 +64,8 @@ kind = "event"
 
 #[test]
 fn topics_prefix_rejects_unregistered_owner() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
-    let errs = rr_registry::rr3_registry_validate_topics(
+    let owners = rr_registry::rr3_topics_owners(&topics_toml());
+    let errs = rr_registry::rr3_topics_chk(
         r#"
 [[topic]]
 name = "rr3-ghost/x/y"
@@ -79,13 +79,13 @@ kind = "event"
 
 #[test]
 fn topics_prefix_contract_self_consistency() {
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
+    let owners = rr_registry::rr3_topics_owners(&topics_toml());
     assert_eq!(
         owners.len(),
         8,
         "契约 8 个 owner（5+1 模块 + rrd + rr3-sentinel，0.0.7 批E append）"
     );
-    let errs = rr_registry::rr3_registry_validate_topics(&topics_toml(), &owners);
+    let errs = rr_registry::rr3_topics_chk(&topics_toml(), &owners);
     assert!(
         errs.is_empty(),
         "contracts/topics.toml 自身必须自洽: {errs:?}"
@@ -94,7 +94,7 @@ fn topics_prefix_contract_self_consistency() {
 
 #[test]
 fn schema_embedded_has_expected_field_count() {
-    let specs = rr_registry::rr3_registry_field_specs();
+    let specs = rr_registry::rr3_field_specs();
     assert_eq!(
         specs.len(),
         19,
@@ -133,14 +133,14 @@ fn staged(tag: &str, text: String) -> PathBuf {
 #[test]
 fn manifest_fixture_passes_validation() {
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
-    let report = rr_registry::rr3_registry_validate_manifest(&p);
+    let report = rr_registry::rr3_manifest_gate(&p);
     assert!(report.ok(), "合法 manifest 必须通过: {:?}", report.errors);
 }
 
 #[test]
 fn manifest_missing_required_field_fails() {
     let m = staged("miss", fixture_text().replace("type = \"module\"\n", ""));
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report
             .errors
@@ -163,7 +163,7 @@ fn manifest_bad_name_version_policy_fails() {
                 "restart_policy = \"always!\"",
             ),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     // 三个原始违规；name 非法还会连带让 publishes 的前缀归属失败（≥1 条），故只断言包含关系
     for want in ["manifest.name 非法", "semver 非法", "restart_policy 越界"] {
         assert!(
@@ -180,7 +180,7 @@ fn manifest_heartbeat_must_be_below_watchdog() {
         "health",
         fixture_text().replace("heartbeat_ms = 2000", "heartbeat_ms = 20000"),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report
             .errors
@@ -201,7 +201,7 @@ fn manifest_publish_prefix_ownership_enforced() {
             "publishes = [\"rr3-power/battery/state\"]",
         ),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report.errors.iter().any(|e| e.contains("越权主题")),
         "{:?}",
@@ -218,7 +218,7 @@ fn manifest_unregistered_topic_rejected() {
             "publishes = [\"rr3-sense/audio/ghost\"]",
         ),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report.errors.iter().any(|e| e.contains("未注册主题")),
         "{:?}",
@@ -238,14 +238,12 @@ fn manifest_unknown_dependency_moved_to_resolution_layer() {
             "required = [\"motor.foc\"]",
         ),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(report.ok(), "单件层不再判可满足性: {:?}", report.errors);
 
-    let facts =
-        rr_registry::rr3_registry_depends_facts_from_text(&std::fs::read_to_string(&m).unwrap())
-            .expect("事实提取不应失败");
-    let errs =
-        rr_registry::rr3_registry_resolve_boot_order(&[facts]).expect_err("未知能力必须被仲裁层拒");
+    let facts = rr_registry::rr3_depends_parse(&std::fs::read_to_string(&m).unwrap())
+        .expect("事实提取不应失败");
+    let errs = rr_registry::rr3_boot_order(&[facts]).expect_err("未知能力必须被仲裁层拒");
     assert!(
         errs.iter().any(|e| e.contains("未知能力 motor.foc")),
         "{errs:?}"
@@ -265,7 +263,7 @@ fn manifest_capability_shape_and_type_and_bool_enforced() {
             .replace("lang = \"rust\"", "lang = \"cpp\"")
             .replace("staging = true", "staging = \"true\""),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert_eq!(report.errors.len(), 3, "{:?}", report.errors);
 }
 
@@ -321,7 +319,7 @@ fn manifest_non_string_publish_item_is_rejected() {
             "publishes = [\"rr3-sense/audio/vad_start\", 42]",
         ),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report.errors.iter().any(|e| e.contains("events.publishes")
             && e.contains("应为字符串")
@@ -339,7 +337,7 @@ fn manifest_non_string_dependency_item_is_rejected() {
         "f1dep",
         fixture_text().replace("required = [\"bus.subscribe\"]", "required = [42]"),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report
             .errors
@@ -360,7 +358,7 @@ fn manifest_rpc_exposes_must_be_registered() {
             "exposes = [\"rr3-sense/capture/typooo\"]",
         ),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report
             .errors
@@ -375,7 +373,7 @@ fn manifest_rpc_exposes_must_be_registered() {
 fn manifest_fixture_rpc_exposes_still_accepted() {
     // F2：新增 rr3-sense/capture/dump 后，合法 fixture 的 rpc.exposes 仍须通过
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rr3-sense.toml");
-    let report = rr_registry::rr3_registry_validate_manifest(&p);
+    let report = rr_registry::rr3_manifest_gate(&p);
     assert!(
         report.ok(),
         "含已注册 RPC 的合法 manifest 必须通过: {:?}",
@@ -386,14 +384,14 @@ fn manifest_fixture_rpc_exposes_still_accepted() {
 #[test]
 fn topics_registry_zero_topics_is_rejected() {
     // F3：8 owner / 0 topic 的空注册表必须被拒——空表不是放行许可证
-    let owners = rr_registry::rr3_registry_topic_owners(&topics_toml());
+    let owners = rr_registry::rr3_topics_owners(&topics_toml());
     assert_eq!(owners.len(), 8);
     let owners_only: String = topics_toml()
         .lines()
         .take_while(|l| !l.trim_start().starts_with("[[topic]]"))
         .collect::<Vec<_>>()
         .join("\n");
-    let errs = rr_registry::rr3_registry_validate_topics(&owners_only, &owners);
+    let errs = rr_registry::rr3_topics_chk(&owners_only, &owners);
     assert!(
         errs.iter().any(|e| e.contains("主题注册表为空")),
         "空注册表必须被拒: {errs:?}"
@@ -419,7 +417,7 @@ fn topics_registry_zero_topics_is_rejected() {
             ),
     )
     .unwrap();
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         !report.ok(),
         "空注册表不得放行未注册主题: {:?}",
@@ -528,7 +526,7 @@ fn registry_shape_is_pinned() {
     let text = topics_toml();
 
     // 1) owner 侧：8 个，且不重名
-    let owners = rr_registry::rr3_registry_topic_owners(&text);
+    let owners = rr_registry::rr3_topics_owners(&text);
     assert_eq!(
         owners.len(),
         8,
@@ -593,20 +591,19 @@ fn registry_shape_is_pinned() {
 #[test]
 fn retired_topics_are_pinned_and_undeclarable() {
     // ① 号位保留：两条 retired 主题仍在册；普通主题未标记 = None
-    let set = rr_registry::rr3_registry_topic_set_from_text(&topics_toml());
+    let set = rr_registry::rr3_topic_parse(&topics_toml());
     assert_eq!(
-        set.rr3_topic_set_status("rr3-interact/asr/text").as_deref(),
+        set.rr3_topic_status("rr3-interact/asr/text").as_deref(),
         Some("retired"),
         "asr/text 的 retired 标记漂移"
     );
     assert_eq!(
-        set.rr3_topic_set_status("rr3-interact/dialog/turn")
-            .as_deref(),
+        set.rr3_topic_status("rr3-interact/dialog/turn").as_deref(),
         Some("retired"),
         "dialog/turn 的 retired 标记漂移"
     );
     assert_eq!(
-        set.rr3_topic_set_status("rr3-sense/audio/pcm"),
+        set.rr3_topic_status("rr3-sense/audio/pcm"),
         None,
         "未标记主题必须读出 None（正常语义）"
     );
@@ -622,7 +619,7 @@ fn retired_topics_are_pinned_and_undeclarable() {
                 "publishes = [\"rr3-interact/asr/text\"]",
             ),
     );
-    let report = rr_registry::rr3_registry_validate_manifest(&m);
+    let report = rr_registry::rr3_manifest_gate(&m);
     assert!(
         report.errors.iter().any(|e| e.contains("retired 主题")),
         "发布 retired 主题必须被拒: {:?}",
@@ -659,8 +656,7 @@ fn every_module_manifest_passes_contract() {
         "modules/ 的模块集合漂移：新增须走 rr3-mkmod，删除须走 ADR"
     );
     for name in names {
-        let report =
-            rr_registry::rr3_registry_validate_manifest(&modules.join(name).join("module.toml"));
+        let report = rr_registry::rr3_manifest_gate(&modules.join(name).join("module.toml"));
         assert!(
             report.ok(),
             "{name} 的 module.toml 不合契约: {:?}",
@@ -728,9 +724,7 @@ fn depends_manifest(name: &str, provides: &[&str], requires: &[&str], prio: i64)
 fn facts_of(texts: &[String]) -> Vec<rr_registry::Rr3DependsFacts> {
     texts
         .iter()
-        .map(|t| {
-            rr_registry::rr3_registry_depends_facts_from_text(t).expect("夹具事实提取不该失败")
-        })
+        .map(|t| rr_registry::rr3_depends_parse(t).expect("夹具事实提取不该失败"))
         .collect()
 }
 
@@ -738,7 +732,7 @@ fn facts_of(texts: &[String]) -> Vec<rr_registry::Rr3DependsFacts> {
 fn depends_chain_boots_providers_first_with_priority_tie_break() {
     // 链式：c 依赖 b 提供的能力、b 依赖 a 提供的能力 → a、b 必须排在 c 前；
     // 就绪集合里 priority 小者先行（d=40 先于 a=50），同层排序与装载顺序无关
-    let order = rr_registry::rr3_registry_resolve_boot_order(&facts_of(&[
+    let order = rr_registry::rr3_boot_order(&facts_of(&[
         depends_manifest("rr3-cc", &[], &["cap.mid"], 10),
         depends_manifest("rr3-bb", &["cap.mid"], &["cap.low"], 60),
         depends_manifest("rr3-aa", &["cap.low"], &[], 50),
@@ -751,7 +745,7 @@ fn depends_chain_boots_providers_first_with_priority_tie_break() {
 #[test]
 fn depends_cycle_rejects_whole_batch() {
     // 环（loop1↔loop2）+ 环下游（down）→ 整批拒且逐个点名；无辜者不得被点名
-    let errs = rr_registry::rr3_registry_resolve_boot_order(&facts_of(&[
+    let errs = rr_registry::rr3_boot_order(&facts_of(&[
         depends_manifest("rr3-loop1", &["cap.p"], &["cap.q"], 100),
         depends_manifest("rr3-loop2", &["cap.q"], &["cap.p"], 100),
         depends_manifest("rr3-down", &[], &["cap.p"], 100),
@@ -769,7 +763,7 @@ fn depends_cycle_rejects_whole_batch() {
 #[test]
 fn depends_base_capability_needs_no_module_provider() {
     // base_capabilities 永远在位（基座不在 boot 序里），不建边、不需要提供者
-    let order = rr_registry::rr3_registry_resolve_boot_order(&facts_of(&[depends_manifest(
+    let order = rr_registry::rr3_boot_order(&facts_of(&[depends_manifest(
         "rr3-solo",
         &[],
         &["bus.publish", "net.online"],
@@ -782,7 +776,7 @@ fn depends_base_capability_needs_no_module_provider() {
 #[test]
 fn depends_multiple_providers_all_boot_before_consumer() {
     // 两个提供者并存：启动期全部排前（裁定 2 的保守全序），层内按 priority
-    let order = rr_registry::rr3_registry_resolve_boot_order(&facts_of(&[
+    let order = rr_registry::rr3_boot_order(&facts_of(&[
         depends_manifest("rr3-use", &[], &["cap.x"], 10),
         depends_manifest("rr3-p2", &["cap.x"], &[], 60),
         depends_manifest("rr3-p1", &["cap.x"], &[], 50),
@@ -804,16 +798,13 @@ fn every_module_dependency_set_is_satisfiable_and_acyclic() {
         let m = entry.path().join("module.toml");
         if m.is_file() {
             facts.push(
-                rr_registry::rr3_registry_depends_facts_from_text(
-                    &std::fs::read_to_string(&m).unwrap(),
-                )
-                .expect("模块 manifest 事实提取不该失败"),
+                rr_registry::rr3_depends_parse(&std::fs::read_to_string(&m).unwrap())
+                    .expect("模块 manifest 事实提取不该失败"),
             );
         }
     }
     assert_eq!(facts.len(), 6, "modules/ 模块集合漂移");
-    let order =
-        rr_registry::rr3_registry_resolve_boot_order(&facts).expect("六模块依赖面必须可满足且无环");
+    let order = rr_registry::rr3_boot_order(&facts).expect("六模块依赖面必须可满足且无环");
     assert_eq!(order.len(), 6, "{order:?}");
 }
 
@@ -868,10 +859,9 @@ fn str_list(v: &toml::Value, path: &str) -> Vec<String> {
 /// 两份名单逐条钉死等价——第二份白名单不存在，仲裁与查册共用同一 base 真值。
 #[test]
 fn slots_base_layer_is_pinned_to_base_capabilities() {
-    let mut base =
-        rr_registry::rr3_registry_slot_table_from_text(&slots_toml()).rr3_slot_table_base();
+    let mut base = rr_registry::rr3_slot_parse(&slots_toml()).rr3_slot_base();
     base.sort();
-    let mut caps = rr_registry::rr3_registry_rule_list("base_capabilities")
+    let mut caps = rr_registry::rr3_rule_list("base_capabilities")
         .expect("module.schema.toml 必须登记 base_capabilities 规则");
     caps.sort();
     assert_eq!(base, caps, "slots 基础层与 base_capabilities 漂移");
@@ -911,25 +901,25 @@ const RR3_PINNED_SLOTS: [(&str, &str); 23] = [
 fn slots_registry_shape_is_pinned() {
     use std::collections::BTreeMap;
 
-    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let table = rr_registry::rr3_slot_parse(&slots_toml());
     assert!(
-        table.rr3_slot_table_check().is_empty(),
+        table.rr3_slot_check().is_empty(),
         "{:?}",
-        table.rr3_slot_table_check()
+        table.rr3_slot_check()
     );
 
     // 1) 23 格、逐条 (name, layer) 在册且不多不少（配合唯一性与等长断言）
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for (name, layer) in RR3_PINNED_SLOTS {
         assert_eq!(
-            table.rr3_slot_table_layer(name).as_deref(),
+            table.rr3_slot_layer(name).as_deref(),
             Some(layer),
             "格位缺失或层漂移: {name}"
         );
         *counts.entry(layer).or_insert(0) += 1;
     }
     assert_eq!(
-        table.rr3_slot_table_names().len(),
+        table.rr3_slot_names().len(),
         RR3_PINNED_SLOTS.len(),
         "格位总数漂移"
     );
@@ -944,7 +934,7 @@ fn slots_registry_shape_is_pinned() {
 /// 单件校验只保语法（ADR-0009 裁定 1），"是否在册"只在全集层判——本用例就是那道全集门。
 #[test]
 fn every_manifest_capability_is_a_registered_slot() {
-    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let table = rr_registry::rr3_slot_parse(&slots_toml());
     let manifests = module_manifest_values();
     assert_eq!(manifests.len(), 6, "modules/ 模块集合漂移");
     for (name, v) in &manifests {
@@ -957,7 +947,7 @@ fn every_manifest_capability_is_a_registered_slot() {
         );
         for cap in caps {
             assert!(
-                table.rr3_slot_table_contains(&cap),
+                table.rr3_slot_contains(&cap),
                 "{name} 引用了表外能力 {cap}（新能力先立格再用，ADR-0012 裁定 1）"
             );
         }
@@ -969,7 +959,7 @@ fn every_manifest_capability_is_a_registered_slot() {
 /// per_instance 相符；[hardware] 不得出现八物理键（门 n 稳态判据的 CI 侧 pin——
 /// 运行期判在 rrd 装载，两轴缺一即带病；spi_device 批N3 件六随 SPI 词形进表）。
 fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_pin_roles: &[&str]) {
-    let roles = rr_registry::rr3_registry_role_table_from_text(
+    let roles = rr_registry::rr3_role_parse(
         &std::fs::read_to_string(root.join("contracts/roles.toml"))
             .expect("读 contracts/roles.toml"),
     );
@@ -995,16 +985,16 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
     for p in pins {
         let role = p.get("role").and_then(toml::Value::as_str).unwrap();
         assert!(
-            roles.rr3_role_table_contains(role),
+            roles.rr3_role_contains(role),
             "[[pin]] 角色 {role} 未在 roles.toml 在册（校验①-a）"
         );
         if let (Some(pd), Some(rd)) = (
             p.get("direction").and_then(toml::Value::as_str),
-            roles.rr3_role_table_direction(role),
+            roles.rr3_role_direction(role),
         ) {
             assert_eq!(pd, rd, "pin {role} direction 与角色不一致（校验①）");
         }
-        let per = roles.rr3_role_table_per_instance(role).unwrap_or(false);
+        let per = roles.rr3_role_per_inst(role).unwrap_or(false);
         let has_inst = p
             .get("instance")
             .and_then(toml::Value::as_str)
@@ -1068,18 +1058,18 @@ fn assert_profile_pins_schema3(v: &toml::Value, root: &std::path::Path, expect_p
 #[test]
 fn devices_table_shape_and_mates_are_pinned() {
     let root = repo_root();
-    let devices = rr_registry::rr3_registry_device_table_from_text(
+    let devices = rr_registry::rr3_dev_parse(
         &std::fs::read_to_string(root.join("contracts/devices.toml"))
             .expect("读 contracts/devices.toml"),
     );
     assert!(
-        !devices.rr3_device_table_is_empty(),
+        !devices.rr3_dev_is_empty(),
         "器件词表解析后为空（契约事故）"
     );
-    let errs = devices.rr3_device_table_check();
+    let errs = devices.rr3_dev_check();
     assert!(errs.is_empty(), "devices.toml 形状越界: {errs:?}");
     assert_eq!(
-        devices.rr3_device_table_names(),
+        devices.rr3_dev_names(),
         vec![
             "ICM-42688".to_string(),
             "INA219".to_string(),
@@ -1090,7 +1080,7 @@ fn devices_table_shape_and_mates_are_pinned() {
         ],
         "器件型号集漂移（加器件 = append 同批改本 pin；改/删型号 = 契约级变更；批N3 件八起 SHTC3/ICM-42688 演练行）"
     );
-    let mates = devices.rr3_device_table_mates();
+    let mates = devices.rr3_dev_mates();
     for mate in ["0.96in-OLED-FPC", "MAX7219-DIP24", "SG90-3P"] {
         assert!(
             mates.contains(mate),
@@ -1105,7 +1095,7 @@ fn devices_table_shape_and_mates_are_pinned() {
 #[test]
 fn default_profile_binds_module_slots_to_real_modules() {
     let root = repo_root();
-    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let table = rr_registry::rr3_slot_parse(&slots_toml());
     let profiles = root.join("profiles");
     let mut profile_files: Vec<String> = std::fs::read_dir(&profiles)
         .expect("profiles/ 目录必须存在（ADR-0012 裁定 3 产物）")
@@ -1225,11 +1215,11 @@ fn default_profile_binds_module_slots_to_real_modules() {
         .map(String::from)
         .collect();
     let mut expected_present: Vec<String> = table
-        .rr3_slot_table_names()
+        .rr3_slot_names()
         .into_iter()
-        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
         .filter(|n| {
-            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            let s = table.rr3_slot_status(n).unwrap_or_default();
             s != "placeholder" && s != "retired"
         })
         .collect();
@@ -1267,10 +1257,10 @@ fn default_profile_binds_module_slots_to_real_modules() {
             .as_str()
             .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
         assert!(
-            table.rr3_slot_table_contains(slot),
+            table.rr3_slot_contains(slot),
             "bindings 引用表外格位 {slot}"
         );
-        let layer = table.rr3_slot_table_layer(slot).unwrap();
+        let layer = table.rr3_slot_layer(slot).unwrap();
         assert_ne!(
             layer, "base",
             "基础层格位 {slot} 由基座内建承载，不得绑定模块"
@@ -1290,11 +1280,11 @@ fn default_profile_binds_module_slots_to_real_modules() {
     // 全部 normal 格位恰好绑定一次（placeholder/retired 格不进生产装配面；配合 BTreeMap 键唯一即"不多不少"）
     bound.sort();
     let mut unbound: Vec<String> = table
-        .rr3_slot_table_names()
+        .rr3_slot_names()
         .into_iter()
-        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
         .filter(|n| {
-            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            let s = table.rr3_slot_status(n).unwrap_or_default();
             s != "placeholder" && s != "retired"
         })
         .filter(|n| !bound.iter().any(|b| b == n))
@@ -1332,7 +1322,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
         let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
             .into_iter()
             .filter(|c| {
-                let s = table.rr3_slot_table_status(c).unwrap_or_default();
+                let s = table.rr3_slot_status(c).unwrap_or_default();
                 s != "placeholder" && s != "retired"
             })
             .collect();
@@ -1343,7 +1333,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
         );
         for s in &slots {
             assert!(
-                table.rr3_slot_table_contains(s),
+                table.rr3_slot_contains(s),
                 "[enabled_slots] 引用表外格位 {s}"
             );
         }
@@ -1358,7 +1348,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
 #[test]
 fn distro_profile_binds_exactly_the_body_layer() {
     let root = repo_root();
-    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let table = rr_registry::rr3_slot_parse(&slots_toml());
     let manifests: std::collections::BTreeMap<String, toml::Value> =
         module_manifest_values().into_iter().collect();
     let text = std::fs::read_to_string(root.join("profiles/distro.toml")).unwrap();
@@ -1442,11 +1432,11 @@ fn distro_profile_binds_exactly_the_body_layer() {
         .map(String::from)
         .collect();
     let mut expected_present: Vec<String> = table
-        .rr3_slot_table_names()
+        .rr3_slot_names()
         .into_iter()
-        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
         .filter(|n| {
-            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            let s = table.rr3_slot_status(n).unwrap_or_default();
             s != "placeholder" && s != "retired"
         })
         .collect();
@@ -1479,11 +1469,11 @@ fn distro_profile_binds_exactly_the_body_layer() {
             .as_str()
             .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
         assert!(
-            table.rr3_slot_table_contains(slot),
+            table.rr3_slot_contains(slot),
             "bindings 引用表外格位 {slot}"
         );
         assert_ne!(
-            table.rr3_slot_table_layer(slot).unwrap(),
+            table.rr3_slot_layer(slot).unwrap(),
             "base",
             "基础层格位 {slot} 由基座内建承载，不得绑定模块"
         );
@@ -1502,11 +1492,11 @@ fn distro_profile_binds_exactly_the_body_layer() {
     // 0.0.6 批F1：brain 随 deb 装机、cognition 四格绑定兑现——快路满配 = 身体层 +
     // 认知层 normal 格一格不缺。将来新增格位而 distro 不绑时，此钉强制显式重审）
     let unbound: Vec<String> = table
-        .rr3_slot_table_names()
+        .rr3_slot_names()
         .into_iter()
-        .filter(|n| table.rr3_slot_table_layer(n).as_deref() != Some("base"))
+        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
         .filter(|n| {
-            let s = table.rr3_slot_table_status(n).unwrap_or_default();
+            let s = table.rr3_slot_status(n).unwrap_or_default();
             s != "placeholder" && s != "retired"
         })
         .filter(|n| !bindings.contains_key(n))
@@ -1543,7 +1533,7 @@ fn distro_profile_binds_exactly_the_body_layer() {
         let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
             .into_iter()
             .filter(|c| {
-                let s = table.rr3_slot_table_status(c).unwrap_or_default();
+                let s = table.rr3_slot_status(c).unwrap_or_default();
                 s != "placeholder" && s != "retired"
             })
             .collect();
@@ -1554,7 +1544,7 @@ fn distro_profile_binds_exactly_the_body_layer() {
         );
         for s in &slots {
             assert!(
-                table.rr3_slot_table_contains(s),
+                table.rr3_slot_contains(s),
                 "[enabled_slots] 引用表外格位 {s}"
             );
         }
@@ -1571,7 +1561,7 @@ fn distro_profile_binds_exactly_the_body_layer() {
 #[test]
 fn esp32_mini_profile_binds_bridged_minimal_shape() {
     let root = repo_root();
-    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let table = rr_registry::rr3_slot_parse(&slots_toml());
     let manifests: std::collections::BTreeMap<String, toml::Value> =
         module_manifest_values().into_iter().collect();
     let text = std::fs::read_to_string(root.join("profiles/esp32-mini.toml")).unwrap();
@@ -1697,11 +1687,11 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             .as_str()
             .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
         assert!(
-            table.rr3_slot_table_contains(slot),
+            table.rr3_slot_contains(slot),
             "bindings 引用表外格位 {slot}"
         );
         assert_ne!(
-            table.rr3_slot_table_layer(slot).unwrap(),
+            table.rr3_slot_layer(slot).unwrap(),
             "base",
             "基础层格位 {slot} 由基座内建承载，不得绑定模块"
         );
@@ -1753,7 +1743,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
                 "{module} enabled_slots 格位 {s} 不在其 manifest provides（裁剪只能收窄，不能自造）"
             );
             assert!(
-                table.rr3_slot_table_contains(s),
+                table.rr3_slot_contains(s),
                 "[enabled_slots] 引用表外格位 {s}"
             );
             assert!(
@@ -1792,8 +1782,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     );
     for s in &present {
         assert!(
-            table.rr3_slot_table_contains(s)
-                && table.rr3_slot_table_layer(s).as_deref() != Some("base"),
+            table.rr3_slot_contains(s) && table.rr3_slot_layer(s).as_deref() != Some("base"),
             "[slots].present 格位 {s} 必须在册且非 base"
         );
     }
@@ -1815,7 +1804,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     }
     referenced.extend(present.iter().cloned());
     for slot in &referenced {
-        let scope = table.rr3_slot_table_tier_scope(slot).unwrap_or_default();
+        let scope = table.rr3_slot_tier_scope(slot).unwrap_or_default();
         assert!(
             scope.iter().any(|t| t == "rtos"),
             "esp32-mini（rtos 档）引用格 {slot} 的 tier_scope = {scope:?} 不含 rtos（L-10 交叉校验）"
@@ -2291,7 +2280,7 @@ fn pi4b_host_profile_shape_n44_harness() {
 #[test]
 fn pi4b_board_profile_pins_w4_harness() {
     let root = repo_root();
-    let table = rr_registry::rr3_registry_slot_table_from_text(&slots_toml());
+    let table = rr_registry::rr3_slot_parse(&slots_toml());
     let text = std::fs::read_to_string(root.join("profiles/pi4b-board.toml"))
         .expect("profiles/pi4b-board.toml 必须存在（W4/P0-C）");
     let v: toml::Value = toml::from_str(&text).expect("pi4b-board.toml 必须可解析");
@@ -2437,7 +2426,7 @@ fn pi4b_board_profile_pins_w4_harness() {
     // L-10 tier↔tier_scope：rtos 档引用的格其 tier_scope 必须含 rtos。
     {
         let slot = "act.servo";
-        let scope = table.rr3_slot_table_tier_scope(slot).unwrap_or_default();
+        let scope = table.rr3_slot_tier_scope(slot).unwrap_or_default();
         assert!(
             scope.iter().any(|t| t == "rtos"),
             "pi4b-board（rtos 档）引用格 {slot} 的 tier_scope = {scope:?} 不含 rtos（L-10）"
@@ -2531,7 +2520,7 @@ fn repo_assemble_manifests_validate_and_injection_complete() {
             let path = atom.join("assemble.toml");
             let text = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("{} 读不到: {e}（五件套④缺件）", path.display()));
-            let facts = rr_registry::rr3_registry_assemble_from_text(&text)
+            let facts = rr_registry::rr3_assemble_parse(&text)
                 .unwrap_or_else(|errs| panic!("{} 坏形: {errs:?}", path.display()));
             let cfg = std::fs::read_to_string(m.join("config.toml")).unwrap_or_else(|e| {
                 panic!(
@@ -2539,7 +2528,7 @@ fn repo_assemble_manifests_validate_and_injection_complete() {
                     m.display()
                 )
             });
-            let gaps = rr_registry::rr3_registry_assemble_injection_gaps(&facts, &cfg);
+            let gaps = rr_registry::rr3_injection_gaps(&facts, &cfg);
             assert!(
                 gaps.is_empty(),
                 "{} 注入缺: {gaps:?}（config 键与装配声明漂移）",
@@ -2559,74 +2548,74 @@ fn repo_assemble_manifests_validate_and_injection_complete() {
 /// 任一侧漂移即红）。演练两份的"空集显式"是裁定②的形状，不是缺段。
 #[test]
 fn platform_tables_parse_and_shape_is_pinned() {
-    let esp = rr_registry::rr3_registry_platform_table_from_text(
+    let esp = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/esp32.toml"))
             .expect("contracts/platform/esp32.toml 必须存在（批N1 基-22 产物）"),
     )
     .expect("esp32 平台表须可解析");
     assert_eq!(esp.rr3_platform_name(), "esp32");
     assert_eq!(
-        esp.rr3_platform_controller_names(),
+        esp.rr3_ctl_names(),
         vec!["adc1", "gpio0", "i2c0", "ledc0", "uart2", "vspi"]
     );
-    assert!(esp.rr3_platform_adc_pins().contains(&34));
-    assert!(esp.rr3_platform_input_only_pins().contains(&34));
+    assert!(esp.rr3_adc_pins().contains(&34));
+    assert!(esp.rr3_input_only_pins().contains(&34));
     assert!(esp
-        .rr3_platform_conflicts()
+        .rr3_conflicts()
         .iter()
         .any(|c| c.rr3_conflict_group() == "i2c0"));
-    assert!(esp.rr3_platform_construction_contains("ledc0", "act.axis.pwm", "pan"));
+    assert!(esp.rr3_ctor_contains("ledc0", "act.axis.pwm", "pan"));
 
-    let s3 = rr_registry::rr3_registry_platform_table_from_text(
+    let s3 = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/esp32s3.toml"))
             .expect("contracts/platform/esp32s3.toml 必须存在（W1/T2）"),
     )
     .expect("esp32s3 平台表须可解析");
     assert_eq!(s3.rr3_platform_name(), "esp32s3");
     assert_eq!(
-        s3.rr3_platform_controller_names(),
+        s3.rr3_ctl_names(),
         vec!["adc1", "gpio0", "i2c0", "ledc0", "uart2"]
     );
-    assert_eq!(s3.rr3_platform_controller_channels("ledc0"), Some(8));
-    assert_eq!(s3.rr3_platform_controller_channels("adc1"), Some(10));
-    assert!(s3.rr3_platform_adc_pins().contains(&1));
-    assert!(s3.rr3_platform_input_only_pins().is_empty());
+    assert_eq!(s3.rr3_ctl_channels("ledc0"), Some(8));
+    assert_eq!(s3.rr3_ctl_channels("adc1"), Some(10));
+    assert!(s3.rr3_adc_pins().contains(&1));
+    assert!(s3.rr3_input_only_pins().is_empty());
     assert!(s3
-        .rr3_platform_conflicts()
+        .rr3_conflicts()
         .iter()
         .any(|c| c.rr3_conflict_group() == "i2c0"));
     assert!(s3
-        .rr3_platform_conflicts()
+        .rr3_conflicts()
         .iter()
         .any(|c| c.rr3_conflict_group() == "uart2"));
-    assert!(s3.rr3_platform_construction_contains("ledc0", "act.axis.pwm", "pan"));
-    assert!(s3.rr3_platform_construction_contains("ledc0", "act.axis.pwm", "tilt"));
-    assert!(s3.rr3_platform_wordform_map().is_empty());
+    assert!(s3.rr3_ctor_contains("ledc0", "act.axis.pwm", "pan"));
+    assert!(s3.rr3_ctor_contains("ledc0", "act.axis.pwm", "tilt"));
+    assert!(s3.rr3_wordform_map().is_empty());
 
-    let rk = rr_registry::rr3_registry_platform_table_from_text(
+    let rk = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/rk3566.toml"))
             .expect("contracts/platform/rk3566.toml 必须存在（演练实例，取值待器件核对）"),
     )
     .expect("rk3566 平台表须可解析");
     assert_eq!(rk.rr3_platform_name(), "rk3566");
-    assert!(rk.rr3_platform_adc_pins().is_empty());
-    assert!(rk.rr3_platform_conflicts().is_empty());
-    assert!(rk.rr3_platform_construction_contains("pwm0", "act.axis.pwm", "pan"));
-    assert!(rk.rr3_platform_construction_contains("i2c1", "power.battery.meter", ""));
+    assert!(rk.rr3_adc_pins().is_empty());
+    assert!(rk.rr3_conflicts().is_empty());
+    assert!(rk.rr3_ctor_contains("pwm0", "act.axis.pwm", "pan"));
+    assert!(rk.rr3_ctor_contains("i2c1", "power.battery.meter", ""));
 
-    let rpi = rr_registry::rr3_registry_platform_table_from_text(
+    let rpi = rr_registry::rr3_plat_parse(
         &std::fs::read_to_string(repo_root().join("contracts/platform/raspberry-pi-4.toml"))
             .expect("contracts/platform/raspberry-pi-4.toml 必须存在（演练实例，待真板对账）"),
     )
     .expect("rpi4 平台表须可解析");
     assert_eq!(rpi.rr3_platform_name(), "raspberry-pi-4");
-    assert!(rpi.rr3_platform_adc_pins().is_empty());
-    assert!(rpi.rr3_platform_conflicts().is_empty());
+    assert!(rpi.rr3_adc_pins().is_empty());
+    assert!(rpi.rr3_conflicts().is_empty());
     // W4/P0-C 回填（批N43）：Pi-as-board 双轴舵机的具名构造两枚（pwm0 通道 0/1）。
-    assert!(rpi.rr3_platform_construction_contains("pwm0", "act.axis.pwm", "pan"));
-    assert!(rpi.rr3_platform_construction_contains("pwm0", "act.axis.pwm", "tilt"));
-    assert_eq!(rpi.rr3_platform_construction_keys().len(), 2);
-    assert_eq!(rpi.rr3_platform_controller_channels("pwm0"), Some(2));
+    assert!(rpi.rr3_ctor_contains("pwm0", "act.axis.pwm", "pan"));
+    assert!(rpi.rr3_ctor_contains("pwm0", "act.axis.pwm", "tilt"));
+    assert_eq!(rpi.rr3_ctor_keys().len(), 2);
+    assert_eq!(rpi.rr3_ctl_channels("pwm0"), Some(2));
 }
 
 /// 六份组合件清单真文件：申报面定形 pin（N-11，§8 门 j 前件）——schema 位（组合件
@@ -2649,7 +2638,7 @@ fn composite_declaration_face_is_pinned() {
         let path = repo_root().join(format!("modules/{name}/composite.toml"));
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("{} 读不到: {e}", path.display()));
-        let facts = rr_registry::rr3_registry_composite_from_text(&text)
+        let facts = rr_registry::rr3_composite_parse(&text)
             .unwrap_or_else(|errs| panic!("{} 坏形: {errs:?}", path.display()));
         assert_eq!(facts.name, *name, "{}: name 与目录名不同源", path.display());
         assert_eq!(facts.unit, "process");
@@ -2694,16 +2683,14 @@ fn composite_declaration_face_is_pinned() {
     let prologue =
         "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\n";
     // 反例 1：两数组均空却漏写 no_injection → L-5 红
-    let errs = rr_registry::rr3_registry_composite_from_text(&format!(
-        "{prologue}handles = []\nops = []\n"
-    ))
-    .expect_err("空面漏写声明必须红");
+    let errs = rr_registry::rr3_composite_parse(&format!("{prologue}handles = []\nops = []\n"))
+        .expect_err("空面漏写声明必须红");
     assert!(
         errs.iter().any(|e| e.contains("未明写 no_injection")),
         "{errs:?}"
     );
     // 反例 2：unit 出域 → 红
-    let errs = rr_registry::rr3_registry_composite_from_text(
+    let errs = rr_registry::rr3_composite_parse(
         &prologue.replace("unit = \"process\"", "unit = \"thread\""),
     )
     .expect_err("unit 出域必须红");
@@ -2714,7 +2701,7 @@ fn composite_declaration_face_is_pinned() {
     );
     // 反例 3：写件级域的版本值 2 → 红，且点名"同名不同域"（schema 位裁定）
     assert_eq!(rr_registry::RR3_COMPOSITE_SCHEMA_VERSION, 1);
-    let errs = rr_registry::rr3_registry_composite_from_text(
+    let errs = rr_registry::rr3_composite_parse(
         "schema_version = 2\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n",
     )
     .expect_err("组合件面写件级版本值必须红");

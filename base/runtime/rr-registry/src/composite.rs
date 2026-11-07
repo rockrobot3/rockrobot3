@@ -38,11 +38,10 @@
 //!   MC-10 同一条规则），组合件也必须把"漏填"与"本组合件确无注入面"分开。
 //!
 //! fail-closed：任何键缺、任何取值出域逐条点名回 `Err`（与件级
-//! [`crate::assemble::rr3_registry_assemble_from_text`] 同一口径）。
+//! [`crate::assemble::rr3_assemble_parse`] 同一口径）。
 
 use crate::assemble::{
-    rr3_empty_surface_errors, rr3_handles_from_array, rr3_ops_from_array, Rr3AssembleHandle,
-    Rr3AssembleOp,
+    rr3_handles_parse, rr3_no_injection_err, rr3_ops_parse, Rr3AssembleHandle, Rr3AssembleOp,
 };
 use toml::Value;
 
@@ -72,7 +71,7 @@ pub struct Rr3CompositeFacts {
 
 /// 解析 + 全量形状校验一份组合件清单文本。fail-closed：一条不静默放行，
 /// 全部错误逐条点名（与件级装配清单同一口径）。
-pub fn rr3_registry_composite_from_text(text: &str) -> Result<Rr3CompositeFacts, Vec<String>> {
+pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>> {
     let root: Value = match toml::from_str(text) {
         Ok(v) => v,
         Err(e) => return Err(vec![format!("组合件清单 TOML 解析失败: {e}")]),
@@ -189,7 +188,7 @@ pub fn rr3_registry_composite_from_text(text: &str) -> Result<Rr3CompositeFacts,
         Some(Value::Array(items)) => {
             handles_present = true;
             handles_empty = items.is_empty();
-            let (parsed, mut item_errs) = rr3_handles_from_array(items);
+            let (parsed, mut item_errs) = rr3_handles_parse(items);
             facts.handles = parsed;
             errs.append(&mut item_errs);
         }
@@ -202,7 +201,7 @@ pub fn rr3_registry_composite_from_text(text: &str) -> Result<Rr3CompositeFacts,
         Some(Value::Array(items)) => {
             ops_present = true;
             ops_empty = items.is_empty();
-            let (parsed, mut item_errs) = rr3_ops_from_array(items);
+            let (parsed, mut item_errs) = rr3_ops_parse(items);
             facts.ops = parsed;
             errs.append(&mut item_errs);
         }
@@ -221,7 +220,7 @@ pub fn rr3_registry_composite_from_text(text: &str) -> Result<Rr3CompositeFacts,
     }
 
     // L-5 空面规则（共用件级同一条判据）
-    errs.extend(rr3_empty_surface_errors(
+    errs.extend(rr3_no_injection_err(
         handles_present,
         handles_empty,
         ops_present,
@@ -243,7 +242,7 @@ mod tests {
     /// 正例：满配组合件（atoms + 空面明写）与带注入面组合件都过
     #[test]
     fn full_and_empty_surface_parse() {
-        let f = rr3_registry_composite_from_text(
+        let f = rr3_composite_parse(
             "schema_version = 1\n\n[composite]\nname = \"rr3-x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\", \"b\"]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .expect("空面明写必须过");
@@ -252,7 +251,7 @@ mod tests {
         assert_eq!(f.atoms, vec!["a", "b"]);
         assert!(f.handles.is_empty() && f.ops.is_empty() && f.no_injection);
 
-        let f = rr3_registry_composite_from_text(
+        let f = rr3_composite_parse(
             "schema_version = 1\n\n[composite]\nname = \"rr3-x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = [ { trait = \"Rr3Power\", desc_key = \"i2c_bus\" } ]\nops = [ { slot = \"s\", src_key = \"k.v\" } ]\n",
         )
         .expect("带注入面必须过");
@@ -264,7 +263,7 @@ mod tests {
     /// schema 位裁定：写 2（件级域的值）必须红，且点名"同名不同域"
     #[test]
     fn schema_version_domain_is_named() {
-        let errs = rr3_registry_composite_from_text(
+        let errs = rr3_composite_parse(
             "schema_version = 2\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .expect_err("组合件面写件级版本值必须红");
@@ -277,46 +276,40 @@ mod tests {
     fn bad_shapes_are_all_named() {
         let base = "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n";
 
-        let errs = rr3_registry_composite_from_text(
-            &base.replace("unit = \"process\"", "unit = \"thread\""),
-        )
-        .expect_err("unit 出域须红");
+        let errs = rr3_composite_parse(&base.replace("unit = \"process\"", "unit = \"thread\""))
+            .expect_err("unit 出域须红");
         assert!(
             errs.iter()
                 .any(|e| e.contains("unit") && e.contains("thread")),
             "{errs:?}"
         );
 
-        let errs = rr3_registry_composite_from_text(&base.replace("atoms = [\"a\"]", "atoms = []"))
+        let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = []"))
             .expect_err("atoms 空须红");
         assert!(
             errs.iter().any(|e| e.contains("atoms 不得为空")),
             "{errs:?}"
         );
 
-        let errs = rr3_registry_composite_from_text(
-            &base.replace("atoms = [\"a\"]", "atoms = [\"a\", \"a\"]"),
-        )
-        .expect_err("atoms 重复须红");
+        let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = [\"a\", \"a\"]"))
+            .expect_err("atoms 重复须红");
         assert!(errs.iter().any(|e| e.contains("重复")), "{errs:?}");
 
-        let errs =
-            rr3_registry_composite_from_text(&base.replace("atoms = [\"a\"]", "atoms = [\"\"]"))
-                .expect_err("atoms 空串须红");
+        let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = [\"\"]"))
+            .expect_err("atoms 空串须红");
         assert!(
             errs.iter().any(|e| e.contains("atoms[0] 不得为空串")),
             "{errs:?}"
         );
 
-        let errs =
-            rr3_registry_composite_from_text(&base.replace("atoms = [\"a\"]", "atoms = [1]"))
-                .expect_err("atoms 非串须红");
+        let errs = rr3_composite_parse(&base.replace("atoms = [\"a\"]", "atoms = [1]"))
+            .expect_err("atoms 非串须红");
         assert!(
             errs.iter().any(|e| e.contains("atoms[0] 应为字符串")),
             "{errs:?}"
         );
 
-        let errs = rr3_registry_composite_from_text(
+        let errs = rr3_composite_parse(
             &base.replace("no_injection = true", "no_injection = true\nextra = 1"),
         )
         .expect_err("[assemble] 未知键须红");
@@ -325,14 +318,13 @@ mod tests {
             "{errs:?}"
         );
 
-        let errs = rr3_registry_composite_from_text("mystery = 1\n").expect_err("顶层未知键须红");
+        let errs = rr3_composite_parse("mystery = 1\n").expect_err("顶层未知键须红");
         assert!(
             errs.iter().any(|e| e.contains("顶层未知键 mystery")),
             "{errs:?}"
         );
 
-        let errs =
-            rr3_registry_composite_from_text("schema_version = 1\n").expect_err("缺两段须红");
+        let errs = rr3_composite_parse("schema_version = 1\n").expect_err("缺两段须红");
         assert!(
             errs.iter().any(|e| e.contains("缺 [composite] 表")),
             "{errs:?}"
@@ -343,7 +335,7 @@ mod tests {
         );
 
         // L-5 漏写（与件级同一判据）
-        let errs = rr3_registry_composite_from_text(
+        let errs = rr3_composite_parse(
             "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\n",
         )
         .expect_err("空面漏写声明须红");
@@ -353,7 +345,7 @@ mod tests {
         );
 
         // L-5 并存红
-        let errs = rr3_registry_composite_from_text(&base.replace(
+        let errs = rr3_composite_parse(&base.replace(
             "handles = []",
             "handles = [ { trait = \"Rr3Nope\", desc_key = \"nope_key\" } ]",
         ))
@@ -374,7 +366,7 @@ mod tests {
     #[test]
     fn composite_assemble_rejects_memory_keys() {
         for key in ["task_stack_bytes", "heap_peak_bytes"] {
-            let errs = rr3_registry_composite_from_text(&format!(
+            let errs = rr3_composite_parse(&format!(
                 "schema_version = 1\n\n[composite]\nname = \"x\"\nunit = \"process\"\n\n[assemble]\natoms = [\"a\"]\nhandles = []\nops = []\nno_injection = true\n{key} = 4096\n"
             ))
             .expect_err("组合件级内存申报键必须拦");

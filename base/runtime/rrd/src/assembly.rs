@@ -171,7 +171,7 @@ pub fn rr3_assembly_cross_checks(
         // 按 0 计——诚实边界），Σ peak_ma ≤ rated_a × 1000。裕量 = 1（F-10 峰值
         // 直加口径；带裕量的装载期语义归其批，取值须数据承载、不入机制）。
         // mate 非 none 必在器件 mate 集（装载期⑦-d 已判），查不到只会是契约坏形
-        // （rr3_device_table_check 点名 peak_ma 缺失），按 0 计不隐藏也不炸。
+        // （rr3_dev_check 点名 peak_ma 缺失），按 0 计不隐藏也不炸。
         let item = format!("rated:{}", w.connector);
         if w.net == "none" {
             out.push(Rr3AssemblyCheck {
@@ -347,12 +347,12 @@ pub fn rr3_assembly_render(s: &Rr3AssemblySnapshot) -> Value {
                 "source": a.source.rr3_act_source_name(),
             })
         }).collect::<Vec<Value>>(),
-        "roles": s.roles.rr3_role_table_names().iter().map(|name| json!({
+        "roles": s.roles.rr3_role_names().iter().map(|name| json!({
             "name": name,
-            "slot": s.roles.rr3_role_table_slot(name),
-            "requires": s.roles.rr3_role_table_requires(name),
-            "derives": s.roles.rr3_role_table_derives(name),
-            "direction": s.roles.rr3_role_table_direction(name),
+            "slot": s.roles.rr3_role_slot(name),
+            "requires": s.roles.rr3_role_requires(name),
+            "derives": s.roles.rr3_role_derives(name),
+            "direction": s.roles.rr3_role_direction(name),
         })).collect::<Vec<Value>>(),
         "checks": rr3_assembly_cross_checks(p, &s.wiring, &s.peak_by_mate).iter().map(|c| {
             json!({ "item": c.item, "pass": c.pass, "reason": c.reason })
@@ -383,7 +383,7 @@ pub fn rr3_assembly_wiring_json() -> Value {
 mod tests {
     use super::*;
     use rr_hal_api::{Rr3ActHardStop, Rr3ActHold, Rr3ActProfile, Rr3ActSource};
-    use rr_registry::rr3_registry_role_table_from_text;
+    use rr_registry::rr3_role_parse;
 
     /// 最小快照：一 pin（有落点）+ 一 pin（零引用）+ 一域 + 一线组 + 一轴 + 一角色
     fn snapshot() -> Rr3AssemblySnapshot {
@@ -467,7 +467,7 @@ mod tests {
                 source: Rr3ActSource::Manual,
             },
         }];
-        let roles = rr3_registry_role_table_from_text(
+        let roles = rr3_role_parse(
             "[[role]]\nname = \"act.axis.pwm\"\nslot = \"act.servo\"\nrequires = [\"controller\", \"channel\"]\nderives = [\"pwm_chip\"]\n",
         );
         Rr3AssemblySnapshot {

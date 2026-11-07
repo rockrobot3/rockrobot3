@@ -18,11 +18,11 @@
 //! ```
 //!
 //! 两级真值、两处消费（`rrd` 与裸机装配段共用本模块，不各说一套）：
-//! - **形状级**（[`rr3_registry_assemble_from_text`]）：schema 版本、未知字段点名、
+//! - **形状级**（[`rr3_assemble_parse`]）：schema 版本、未知字段点名、
 //!   trait ∈ 九能力面在册表、desc_key ∈ 九描述符键在册表、参数槽与来源键非空点路径。
 //!   空数组**合法**，但**两数组均空时须明写 `no_injection = true`**（0.0.5 批M MC-10 L-5：
 //!   把"漏填"与"本件确无注入面"分开——否则空申报与漏填不可区分，门里无内容可校验）。
-//! - **注入缺级**（[`rr3_registry_assemble_injection_gaps`]）：ops 的 `src_key`
+//! - **注入缺级**（[`rr3_injection_gaps`]）：ops 的 `src_key`
 //!   解析域 = 模块 `config.toml`（点路径游走），取不到 = 注入缺。handles 的
 //!   desc_key 存在性**不在本模块判**——描述符注入是 spawn 时 `RR3_HAL_BINDINGS`
 //!   env 的事，存在性归探测面（实测缺），与 rr-hal 后端选择的 fail-closed 同一路。
@@ -180,7 +180,7 @@ fn rr3_dotted_key_ok(s: &str) -> bool {
 
 /// handles 数组条目级解析与校验（件级与组合件级**同形同规则**，composite.rs 共用；
 /// 点名文案两处一致——一份判据一份真值）
-pub(crate) fn rr3_handles_from_array(items: &[Value]) -> (Vec<Rr3AssembleHandle>, Vec<String>) {
+pub(crate) fn rr3_handles_parse(items: &[Value]) -> (Vec<Rr3AssembleHandle>, Vec<String>) {
     let mut handles = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
@@ -220,7 +220,7 @@ pub(crate) fn rr3_handles_from_array(items: &[Value]) -> (Vec<Rr3AssembleHandle>
 }
 
 /// ops 数组条目级解析与校验（同上：件级与组合件级共用）
-pub(crate) fn rr3_ops_from_array(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<String>) {
+pub(crate) fn rr3_ops_parse(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<String>) {
     let mut ops = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
@@ -261,7 +261,7 @@ pub(crate) fn rr3_ops_from_array(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<St
 /// 电流需求是原子件的物理属性，不随组合件申报，组合件清单未知键点名即拦）。
 /// 五键全部显式（T-5 / ADR-0021 裁定 2）：`concurrency_group` 缺键即红（同 no_injection
 /// 范式——缺省与漏填不可区分），显式空数组 = 不分组 = 全体并发最坏口径，合法。
-pub(crate) fn rr3_demands_from_array(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec<String>) {
+pub(crate) fn rr3_demands_parse(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec<String>) {
     let mut demands = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
@@ -367,7 +367,7 @@ pub(crate) fn rr3_demands_from_array(items: &[Value]) -> (Vec<Rr3AssembleDemand>
 
 /// L-5 空面规则（0.0.5 批M MC-10）：两数组均在文本中出现且均为空 ⇒ 必须明写
 /// no_injection = true；明写 no_injection 时两数组必须都空。件级与组合件级共用。
-pub(crate) fn rr3_empty_surface_errors(
+pub(crate) fn rr3_no_injection_err(
     handles_present: bool,
     handles_empty: bool,
     ops_present: bool,
@@ -389,7 +389,7 @@ pub(crate) fn rr3_empty_surface_errors(
 
 /// 解析 + 形状级校验一份装配清单文本。fail-closed：一条不静默放行，全部错误
 /// 逐条点名（与 manifest/描述符校验同一口径）。空 `[assemble]` 数组合法。
-pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
+pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
     let root: Value = match toml::from_str(text) {
         Ok(v) => v,
         Err(e) => return Err(vec![format!("装配清单 TOML 解析失败: {e}")]),
@@ -465,7 +465,7 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
         Some(Value::Array(items)) => {
             handles_present = true;
             handles_empty = items.is_empty();
-            let (parsed, mut item_errs) = rr3_handles_from_array(items);
+            let (parsed, mut item_errs) = rr3_handles_parse(items);
             facts.handles = parsed;
             errs.append(&mut item_errs);
         }
@@ -478,7 +478,7 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
         Some(Value::Array(items)) => {
             ops_present = true;
             ops_empty = items.is_empty();
-            let (parsed, mut item_errs) = rr3_ops_from_array(items);
+            let (parsed, mut item_errs) = rr3_ops_parse(items);
             facts.ops = parsed;
             errs.append(&mut item_errs);
         }
@@ -490,7 +490,7 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
     // 不在形状层强制——L-5 空面规则只管注入面 handles/ops，不涉 demands）。
     match asm.get("demands") {
         Some(Value::Array(items)) => {
-            let (parsed, mut item_errs) = rr3_demands_from_array(items);
+            let (parsed, mut item_errs) = rr3_demands_parse(items);
             facts.demands = parsed;
             errs.append(&mut item_errs);
         }
@@ -520,7 +520,7 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
     // 空面规则（L-5）：两数组均在文本中出现且均为空 ⇒ 必须明写 no_injection = true；
     // 反之，明写 no_injection 时两数组必须都空。这条把"漏填"与"本件确无注入面"分开——
     // 光看空数组分不清，于是此前 14 份空申报在门里无内容可校验（方案 §12.4 C3）。
-    errs.extend(rr3_empty_surface_errors(
+    errs.extend(rr3_no_injection_err(
         handles_present,
         handles_empty,
         ops_present,
@@ -539,10 +539,7 @@ pub fn rr3_registry_assemble_from_text(text: &str) -> Result<Rr3AssembleFacts, V
 /// 按点路径取到值；取不到 = 注入缺，逐条点名（参数槽 + 来源键）。config 文本
 /// 解析失败 = 全部来源键不可证，逐条点同名缺口。handles 不在此判（见模块头注）。
 /// 返回空 = 无缺口。
-pub fn rr3_registry_assemble_injection_gaps(
-    facts: &Rr3AssembleFacts,
-    config_text: &str,
-) -> Vec<String> {
+pub fn rr3_injection_gaps(facts: &Rr3AssembleFacts, config_text: &str) -> Vec<String> {
     let cfg: Value = match toml::from_str(config_text) {
         Ok(v) => v,
         Err(e) => {
@@ -599,7 +596,7 @@ ops = [
 
     #[test]
     fn sample_and_empty_arrays_parse() {
-        let f = rr3_registry_assemble_from_text(OK_SAMPLE).expect("正例必须过");
+        let f = rr3_assemble_parse(OK_SAMPLE).expect("正例必须过");
         assert_eq!(f.handles.len(), 2);
         assert_eq!(f.handles[0].trait_name, "Rr3Power");
         assert_eq!(f.handles[0].desc_key, "i2c_bus");
@@ -607,7 +604,7 @@ ops = [
         assert_eq!(f.ops[0].slot, "low_voltage_mv");
 
         // 空数组合法，但须明写 no_injection（L-5）
-        let f = rr3_registry_assemble_from_text(
+        let f = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .expect("明写不需注入面的空数组必须合法");
@@ -618,17 +615,15 @@ ops = [
     #[test]
     fn empty_surface_requires_no_injection_marker() {
         // 漏写 → 点名"未明写 no_injection"
-        let errs = rr3_registry_assemble_from_text(
-            "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n",
-        )
-        .expect_err("空面漏写声明必须红");
+        let errs = rr3_assemble_parse("schema_version = 2\n\n[assemble]\nhandles = []\nops = []\n")
+            .expect_err("空面漏写声明必须红");
         assert!(
             errs.iter().any(|e| e.contains("未明写 no_injection")),
             "{errs:?}"
         );
 
         // 写了 no_injection 却又给了 handles → 互斥，红
-        let errs = rr3_registry_assemble_from_text(
+        let errs = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nno_injection = true\nhandles = [ { trait = \"Rr3Power\", desc_key = \"i2c_bus\" } ]\nops = []\n",
         )
         .expect_err("声明与注入面并存必须红");
@@ -639,7 +634,7 @@ ops = [
         );
 
         // no_injection = false 不认（只认 true）
-        let errs = rr3_registry_assemble_from_text(
+        let errs = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = false\n",
         )
         .expect_err("no_injection=false 必须红");
@@ -662,7 +657,7 @@ ops = [
             "  { slot = \"s\", src_key = 3 },\n",       // 非字符串
             "]\n",
         );
-        let errs = rr3_registry_assemble_from_text(text).expect_err("坏形必须报错");
+        let errs = rr3_assemble_parse(text).expect_err("坏形必须报错");
         assert!(
             errs.iter().any(|e| e.contains("schema_version 必须为 2")),
             "{errs:?}"
@@ -706,18 +701,17 @@ ops = [
     #[test]
     fn missing_required_keys_are_named() {
         // 缺 schema_version / 缺 [assemble] / 缺两键
-        let errs = rr3_registry_assemble_from_text("[assemble]\nhandles = []\nops = []\n")
-            .expect_err("缺版本必须点名");
+        let errs =
+            rr3_assemble_parse("[assemble]\nhandles = []\nops = []\n").expect_err("缺版本必须点名");
         assert!(errs[0].contains("缺 schema_version"), "{errs:?}");
 
-        let errs = rr3_registry_assemble_from_text("schema_version = 2\n")
-            .expect_err("缺 [assemble] 必须点名");
+        let errs = rr3_assemble_parse("schema_version = 2\n").expect_err("缺 [assemble] 必须点名");
         assert!(
             errs.iter().any(|e| e.contains("缺 [assemble] 表")),
             "{errs:?}"
         );
 
-        let errs = rr3_registry_assemble_from_text("schema_version = 2\n[assemble]\n")
+        let errs = rr3_assemble_parse("schema_version = 2\n[assemble]\n")
             .expect_err("缺 handles/ops 必须点名");
         assert!(errs.iter().any(|e| e.contains("缺 handles 键")), "{errs:?}");
         assert!(errs.iter().any(|e| e.contains("缺 ops 键")), "{errs:?}");
@@ -725,17 +719,17 @@ ops = [
 
     #[test]
     fn injection_gaps_walk_config_paths() {
-        let facts = rr3_registry_assemble_from_text(OK_SAMPLE).expect("正例必须过");
+        let facts = rr3_assemble_parse(OK_SAMPLE).expect("正例必须过");
         let cfg = "[rr3-power.battery]\nlow_voltage_mv = 3300\n";
         // i2c 句柄不参与注入缺；ops 的一条在、一条缺 → 恰一条缺口
-        let gaps = rr3_registry_assemble_injection_gaps(&facts, cfg);
+        let gaps = rr3_injection_gaps(&facts, cfg);
         assert_eq!(gaps.len(), 0, "{gaps:?}");
 
-        let facts2 = rr3_registry_assemble_from_text(
+        let facts2 = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = [\n  { slot = \"a\", src_key = \"rr3-power.battery.low_voltage_mv\" },\n  { slot = \"b\", src_key = \"rr3-power.battery.missing_key\" },\n  { slot = \"c\", src_key = \"no.such.path\" },\n]\n",
         )
         .expect("必须过形状级");
-        let gaps = rr3_registry_assemble_injection_gaps(&facts2, cfg);
+        let gaps = rr3_injection_gaps(&facts2, cfg);
         assert_eq!(gaps.len(), 2, "{gaps:?}");
         assert!(
             gaps[0].contains("missing_key") && gaps[0].contains("注入缺"),
@@ -743,16 +737,16 @@ ops = [
         );
 
         // config 解析失败 = 全部来源键不可证
-        let gaps = rr3_registry_assemble_injection_gaps(&facts, "garbage =\n");
+        let gaps = rr3_injection_gaps(&facts, "garbage =\n");
         assert_eq!(gaps.len(), 1, "{gaps:?}");
         assert!(gaps[0].contains("解析失败"), "{gaps:?}");
 
         // ops 为空 → 永无缺口（config 坏也不点名）；空面须明写 no_injection（L-5）
-        let empty = rr3_registry_assemble_from_text(
+        let empty = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\n",
         )
         .unwrap();
-        assert!(rr3_registry_assemble_injection_gaps(&empty, "garbage =\n").is_empty());
+        assert!(rr3_injection_gaps(&empty, "garbage =\n").is_empty());
     }
 
     /// 电流需求申报面（基-36 首件）：正例解析 + 缺键 = 空申报合法 + 坏形逐条点名。
@@ -761,7 +755,7 @@ ops = [
     fn demands_parse_and_shape_errors_are_named() {
         // 正例：servo 真实申报形状（五键定形 = ADR-0021 裁定 2；handles 同 servo 真实
         // 句柄，demands 不豁免 L-5 空面规则——它不是注入面）
-        let f = rr3_registry_assemble_from_text(
+        let f = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n]\n",
         )
         .expect("正例必须过");
@@ -773,13 +767,13 @@ ops = [
         assert!(f.demands[0].concurrency_group.is_empty());
 
         // 缺 demands 键 = 空申报合法（执法面归门 c）
-        let f = rr3_registry_assemble_from_text(OK_SAMPLE).expect("无 demands 必须过");
+        let f = rr3_assemble_parse(OK_SAMPLE).expect("无 demands 必须过");
         assert!(f.demands.is_empty());
 
         // 坏形逐条点名（五键全显式，T-5）：空 rail / 峰值非正 / 缺 sustained_ma /
         // sustained>peak 物理矛盾 / critical 缺失 / concurrency_group 缺键 / 非数组 /
         // 空组名与非串元素 / 未知键 / 非表条目
-        let errs = rr3_registry_assemble_from_text(
+        let errs = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n]\nops = []\ndemands = [\n  { rail = \"\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 0, sustained_ma = 120, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 800, critical = true, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, concurrency_group = [] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = \"axis\" },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [\"\", 1] },\n  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [], wat = 1 },\n  \"bare\",\n]\n",
         )
         .expect_err("坏形必须报错");
@@ -844,7 +838,7 @@ ops = [
     #[test]
     fn memory_bytes_parse_and_shape_errors_are_named() {
         // 正例：两键显式给出（件级语义非每实例，直加不扩算——头注同源）
-        let f = rr3_registry_assemble_from_text(
+        let f = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = [\n  { trait = \"Rr3Display\", desc_key = \"spi_device\" },\n]\nops = []\ntask_stack_bytes = 8192\nheap_peak_bytes = 24576\n",
         )
         .expect("正例必须过");
@@ -852,12 +846,12 @@ ops = [
         assert_eq!(f.heap_peak_bytes, 24576);
 
         // 缺两键 = 未申报 = 0 不进 Σ（申报义务未触发，同 demands 缺键合法）
-        let f = rr3_registry_assemble_from_text(OK_SAMPLE).expect("无内存键必须过");
+        let f = rr3_assemble_parse(OK_SAMPLE).expect("无内存键必须过");
         assert_eq!(f.task_stack_bytes, 0);
         assert_eq!(f.heap_peak_bytes, 0);
 
         // 坏形逐条点名：负数（物理矛盾）/ 非整数 / 未知键拼错（词表封闭）
-        let errs = rr3_registry_assemble_from_text(
+        let errs = rr3_assemble_parse(
             "schema_version = 2\n\n[assemble]\nhandles = []\nops = []\nno_injection = true\ntask_stack_bytes = -1\nheap_peak_bytes = \"16k\"\nstack_bytes = 4096\n",
         )
         .expect_err("坏形必须报错");

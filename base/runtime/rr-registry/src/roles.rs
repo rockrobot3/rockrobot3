@@ -41,8 +41,8 @@ pub struct Rr3RoleTable {
 }
 
 /// 解析一份角色表文本（生产契约与测试叠加同构，共用同一解析器，不写第二套）。
-/// 解析失败给空表（`rr3_role_table_check` 会点名"表为空"，fail-closed 护栏同 slots）。
-pub fn rr3_registry_role_table_from_text(text: &str) -> Rr3RoleTable {
+/// 解析失败给空表（`rr3_role_check` 会点名"表为空"，fail-closed 护栏同 slots）。
+pub fn rr3_role_parse(text: &str) -> Rr3RoleTable {
     let Ok(root) = toml::from_str::<Value>(text) else {
         return Rr3RoleTable::default();
     };
@@ -115,62 +115,62 @@ pub fn rr3_registry_role_table_from_text(text: &str) -> Rr3RoleTable {
 }
 
 impl Rr3RoleTable {
-    pub fn rr3_role_table_is_empty(&self) -> bool {
+    pub fn rr3_role_is_empty(&self) -> bool {
         self.roles.is_empty()
     }
 
     /// 查册：角色名是否在册（校验①-a 的判定入口）
-    pub fn rr3_role_table_contains(&self, role: &str) -> bool {
+    pub fn rr3_role_contains(&self, role: &str) -> bool {
         self.roles.contains_key(role)
     }
 
     /// 该角色归属的格位（校验② 的 role→slot 归并键；不在册 = None）
-    pub fn rr3_role_table_slot(&self, role: &str) -> Option<String> {
+    pub fn rr3_role_slot(&self, role: &str) -> Option<String> {
         self.roles.get(role).map(|e| e.slot.clone())
     }
 
-    pub fn rr3_role_table_kind(&self, role: &str) -> Option<String> {
+    pub fn rr3_role_kind(&self, role: &str) -> Option<String> {
         self.roles.get(role).map(|e| e.kind.clone())
     }
 
-    pub fn rr3_role_table_iface(&self, role: &str) -> Option<String> {
+    pub fn rr3_role_iface(&self, role: &str) -> Option<String> {
         self.roles.get(role).map(|e| e.iface.clone())
     }
 
     /// 该角色的 [pins] 必填字段集（校验①-b "requires 每项必须在场"的判据源）
-    pub fn rr3_role_table_requires(&self, role: &str) -> Option<Vec<String>> {
+    pub fn rr3_role_requires(&self, role: &str) -> Option<Vec<String>> {
         self.roles.get(role).map(|e| e.requires.clone())
     }
 
     /// 该角色向描述符派生视图供给的键集（rrd 派生器的一致性对账面）
-    pub fn rr3_role_table_derives(&self, role: &str) -> Option<Vec<String>> {
+    pub fn rr3_role_derives(&self, role: &str) -> Option<Vec<String>> {
         self.roles.get(role).map(|e| e.derives.clone())
     }
 
-    pub fn rr3_role_table_direction(&self, role: &str) -> Option<String> {
+    pub fn rr3_role_direction(&self, role: &str) -> Option<String> {
         self.roles.get(role).map(|e| e.direction.clone())
     }
 
-    pub fn rr3_role_table_droppable(&self, role: &str) -> Option<bool> {
+    pub fn rr3_role_droppable(&self, role: &str) -> Option<bool> {
         self.roles.get(role).map(|e| e.droppable)
     }
 
-    pub fn rr3_role_table_input_only_ok(&self, role: &str) -> Option<bool> {
+    pub fn rr3_role_input_only(&self, role: &str) -> Option<bool> {
         self.roles.get(role).map(|e| e.input_only_ok)
     }
 
     /// per_instance：true ⇒ [pins] 条目必须带 instance（pin_id = role.instance），
     /// false ⇒ 禁填 instance（填即红，校验①-b）
-    pub fn rr3_role_table_per_instance(&self, role: &str) -> Option<bool> {
+    pub fn rr3_role_per_inst(&self, role: &str) -> Option<bool> {
         self.roles.get(role).map(|e| e.per_instance)
     }
 
-    pub fn rr3_role_table_names(&self) -> Vec<String> {
+    pub fn rr3_role_names(&self) -> Vec<String> {
         self.roles.keys().cloned().collect()
     }
 
     /// 归入某格位的全部角色名（校验② 的 `roles(slot=g) ⊆ pins.role` 判据源）
-    pub fn rr3_role_table_names_for_slot(&self, slot: &str) -> Vec<String> {
+    pub fn rr3_role_slot_names(&self, slot: &str) -> Vec<String> {
         self.roles
             .iter()
             .filter(|(_, e)| e.slot == slot)
@@ -183,8 +183,8 @@ impl Rr3RoleTable {
     ///
     /// slot ∈ slots.toml 与 iface ∈ HANDLE_TRAITS 两条跨表判等**不在此处**
     /// （真值在对方表，调用方携带判定——见模块头注释）。
-    pub fn rr3_role_table_check(&self) -> Vec<String> {
-        if self.rr3_role_table_is_empty() {
+    pub fn rr3_role_check(&self) -> Vec<String> {
+        if self.rr3_role_is_empty() {
             return vec!["角色表为空：必须至少登记一个 [[role]]（增补轮六 §4.1）".to_string()];
         }
         let mut errs = Vec::new();
@@ -236,14 +236,14 @@ mod tests {
     /// 契约必须解析成 10 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
-        let table = rr3_registry_role_table_from_text(CONTRACT);
+        let table = rr3_role_parse(CONTRACT);
         assert_eq!(
             table.roles.len(),
             10,
             "契约角色数（批N3 件八器件三角色进场后十条）"
         );
         assert_eq!(
-            table.rr3_role_table_names(),
+            table.rr3_role_names(),
             vec![
                 "act.axis.pwm",
                 "act.led.gpio",
@@ -259,21 +259,15 @@ mod tests {
         );
         // slot 外键与 per_instance 语义（校验①-b 的两侧）
         assert_eq!(
-            table.rr3_role_table_slot("act.axis.pwm").as_deref(),
+            table.rr3_role_slot("act.axis.pwm").as_deref(),
             Some("act.servo")
         );
-        assert_eq!(
-            table.rr3_role_table_per_instance("act.axis.pwm"),
-            Some(true)
-        );
-        assert_eq!(
-            table.rr3_role_table_per_instance("act.led.gpio"),
-            Some(false)
-        );
-        assert!(!table.rr3_role_table_contains("act.axis.enc"));
+        assert_eq!(table.rr3_role_per_inst("act.axis.pwm"), Some(true));
+        assert_eq!(table.rr3_role_per_inst("act.led.gpio"), Some(false));
+        assert!(!table.rr3_role_contains("act.axis.enc"));
         // requires / derives 与派生器对账
         assert_eq!(
-            table.rr3_role_table_requires("act.axis.pwm"),
+            table.rr3_role_requires("act.axis.pwm"),
             Some(vec![
                 "controller".to_string(),
                 "channel".to_string(),
@@ -283,144 +277,115 @@ mod tests {
             ])
         );
         assert_eq!(
-            table.rr3_role_table_derives("act.led.gpio"),
+            table.rr3_role_derives("act.led.gpio"),
             Some(vec!["gpio_chip".to_string(), "gpio_led_line".to_string(),])
         );
         assert_eq!(
-            table.rr3_role_table_kind("power.battery.meter").as_deref(),
+            table.rr3_role_kind("power.battery.meter").as_deref(),
             Some("signal")
         );
-        assert_eq!(
-            table.rr3_role_table_droppable("act.relay.gpio"),
-            Some(false)
-        );
-        assert_eq!(
-            table.rr3_role_table_names_for_slot("act.servo"),
-            vec!["act.axis.pwm"]
-        );
+        assert_eq!(table.rr3_role_droppable("act.relay.gpio"), Some(false));
+        assert_eq!(table.rr3_role_slot_names("act.servo"), vec!["act.axis.pwm"]);
         // 批N2 件六新角色：域测点两角色同挂 power.rail（per_instance 语义、
         // requires/derives 同 power.battery.meter 形状）
         assert_eq!(
-            table.rr3_role_table_slot("power.rail.sense").as_deref(),
+            table.rr3_role_slot("power.rail.sense").as_deref(),
             Some("power.rail")
         );
+        assert_eq!(table.rr3_role_per_inst("power.rail.sense"), Some(true));
+        assert_eq!(table.rr3_role_droppable("power.current.sense"), Some(false));
         assert_eq!(
-            table.rr3_role_table_per_instance("power.rail.sense"),
-            Some(true)
-        );
-        assert_eq!(
-            table.rr3_role_table_droppable("power.current.sense"),
-            Some(false)
-        );
-        assert_eq!(
-            table.rr3_role_table_requires("power.rail.sense"),
+            table.rr3_role_requires("power.rail.sense"),
             Some(vec!["controller".to_string(), "addr".to_string()])
         );
         assert_eq!(
-            table.rr3_role_table_names_for_slot("power.rail"),
+            table.rr3_role_slot_names("power.rail"),
             vec!["power.current.sense", "power.rail.sense"]
         );
-        assert!(!table.rr3_role_table_contains("power.switch"));
+        assert!(!table.rr3_role_contains("power.switch"));
         // 批N3 件六新角色：SPI 显示面词形（slot=ui.face，iface=Rr3Display，
         // requires=controller+channel → derives=spi_device 派生对——敞口 18 行收口）
         assert_eq!(
-            table.rr3_role_table_slot("ui.face.spi").as_deref(),
+            table.rr3_role_slot("ui.face.spi").as_deref(),
             Some("ui.face")
         );
+        assert_eq!(table.rr3_role_per_inst("ui.face.spi"), Some(false));
+        assert_eq!(table.rr3_role_droppable("ui.face.spi"), Some(true));
         assert_eq!(
-            table.rr3_role_table_per_instance("ui.face.spi"),
-            Some(false)
-        );
-        assert_eq!(table.rr3_role_table_droppable("ui.face.spi"), Some(true));
-        assert_eq!(
-            table.rr3_role_table_requires("ui.face.spi"),
+            table.rr3_role_requires("ui.face.spi"),
             Some(vec!["controller".to_string(), "channel".to_string()])
         );
         assert_eq!(
-            table.rr3_role_table_derives("ui.face.spi"),
+            table.rr3_role_derives("ui.face.spi"),
             Some(vec!["spi_device".to_string()])
         );
         assert_eq!(
-            table.rr3_role_table_direction("ui.face.spi").as_deref(),
+            table.rr3_role_direction("ui.face.spi").as_deref(),
             Some("out")
         );
         // 批N3 件八新角色：I2C 读数器件三角色（requires 首引 device 键、derives
         // 显式空 = 不派生注入键——P-5 共读源与 placeholder 格两形态，见 roles.toml 注记）
         assert_eq!(
-            table.rr3_role_table_slot("power.charger.meter").as_deref(),
+            table.rr3_role_slot("power.charger.meter").as_deref(),
             Some("power.charger")
         );
         assert_eq!(
-            table.rr3_role_table_iface("power.charger.meter").as_deref(),
+            table.rr3_role_iface("power.charger.meter").as_deref(),
             Some("Rr3Power")
         );
         assert_eq!(
-            table.rr3_role_table_requires("power.charger.meter"),
+            table.rr3_role_requires("power.charger.meter"),
             Some(vec![
                 "controller".to_string(),
                 "addr".to_string(),
                 "device".to_string()
             ])
         );
+        assert_eq!(table.rr3_role_derives("power.charger.meter"), Some(vec![]));
+        assert_eq!(table.rr3_role_droppable("power.charger.meter"), Some(false));
+        assert_eq!(table.rr3_role_per_inst("power.charger.meter"), Some(false));
         assert_eq!(
-            table.rr3_role_table_derives("power.charger.meter"),
-            Some(vec![])
-        );
-        assert_eq!(
-            table.rr3_role_table_droppable("power.charger.meter"),
-            Some(false)
-        );
-        assert_eq!(
-            table.rr3_role_table_per_instance("power.charger.meter"),
-            Some(false)
-        );
-        assert_eq!(
-            table.rr3_role_table_slot("sensor.env.meter").as_deref(),
+            table.rr3_role_slot("sensor.env.meter").as_deref(),
             Some("sensor.env")
         );
         assert_eq!(
-            table.rr3_role_table_iface("sensor.env.meter").as_deref(),
+            table.rr3_role_iface("sensor.env.meter").as_deref(),
             Some("Rr3Sensor")
         );
         assert_eq!(
-            table.rr3_role_table_slot("sensor.imu.meter").as_deref(),
+            table.rr3_role_slot("sensor.imu.meter").as_deref(),
             Some("sensor.imu")
         );
         assert_eq!(
-            table.rr3_role_table_iface("sensor.imu.meter").as_deref(),
+            table.rr3_role_iface("sensor.imu.meter").as_deref(),
             Some("Rr3Sensor")
         );
+        assert_eq!(table.rr3_role_derives("sensor.imu.meter"), Some(vec![]));
         assert_eq!(
-            table.rr3_role_table_derives("sensor.imu.meter"),
-            Some(vec![])
-        );
-        assert_eq!(
-            table
-                .rr3_role_table_direction("sensor.env.meter")
-                .as_deref(),
+            table.rr3_role_direction("sensor.env.meter").as_deref(),
             Some("in")
         );
         assert!(
-            table.rr3_role_table_check().is_empty(),
+            table.rr3_role_check().is_empty(),
             "{:?}",
-            table.rr3_role_table_check()
+            table.rr3_role_check()
         );
     }
 
     /// 坏文本给空表，空表必须报错（fail-open 护栏）
     #[test]
     fn unparsable_text_is_not_a_pass_port() {
-        let table = rr3_registry_role_table_from_text("this = is not = valid = toml");
-        assert!(table.rr3_role_table_is_empty());
-        assert!(!table.rr3_role_table_check().is_empty());
+        let table = rr3_role_parse("this = is not = valid = toml");
+        assert!(table.rr3_role_is_empty());
+        assert!(!table.rr3_role_check().is_empty());
     }
 
     /// 形状检查：kind 越界 / direction 越界 / 缺 slot / 缺 iface / requires 空
     /// 逐条点名（§4.1 字段域封闭判据的装载侧实现；derives 空 = 显式不派生合法，
-    /// 批N3 件八放宽——见 rr3_role_table_check 注记，无对应红例）
+    /// 批N3 件八放宽——见 rr3_role_check 注记，无对应红例）
     #[test]
     fn shape_violations_are_named() {
-        let bad = rr3_registry_role_table_from_text(
+        let bad = rr3_role_parse(
             r#"
 [[role]]
 name = "act.axis.pwm"
@@ -444,7 +409,7 @@ input_only_ok = false
 per_instance = false
 "#,
         );
-        let errs = bad.rr3_role_table_check();
+        let errs = bad.rr3_role_check();
         assert!(
             errs.iter().any(|e| e.contains("act.axis.pwm 缺 slot 外键")),
             "{errs:?}"

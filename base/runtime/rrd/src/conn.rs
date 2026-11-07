@@ -28,7 +28,7 @@ use rr_ipc::{
     opcode, rr3_body_encode, rr3_body_split, rr3_frame_read_cap, rr3_frame_write, Rr3Frame,
     Rr3FrameError, Rr3Header, Rr3PayloadType, Rr3StatusCode, RR3_FRAMING_PLEN_CAP_DEFAULT,
 };
-use rr_registry::{rr3_registry_validate_manifest_text, Rr3TopicSet};
+use rr_registry::{rr3_manifest_chk, Rr3TopicSet};
 use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
@@ -283,7 +283,7 @@ fn rr3_handshake(
             ))
         }
     };
-    let report = rr3_registry_validate_manifest_text(&text, &ctx.topics);
+    let report = rr3_manifest_chk(&text, &ctx.topics);
     if !report.ok() {
         return Err(rr3_refuse(
             out,

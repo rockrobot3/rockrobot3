@@ -578,9 +578,9 @@ impl RrdRegistry {
     /// 此后 Task 8 的发布分支都必须照此接线。
     ///
     /// 末段的 owner 比对不是重复劳动：首段 == `sender_name` 只是主题串的**语法**事实，
-    /// `rr3_topic_set_owner(topic) == sender_name` 才是**在册表登记的事实**。二者今天恒等，
-    /// 是因为 `rr3_topic_set_check` 强制"首段 == owner"，而那条前置只在 `rr3_topics_load`
-    /// 的装载路径上被强制；`rr3_registry_topic_set_from_text` 本身是 public，绕开 check
+    /// `rr3_topic_owner(topic) == sender_name` 才是**在册表登记的事实**。二者今天恒等，
+    /// 是因为 `rr3_topic_check` 强制"首段 == owner"，而那条前置只在 `rr3_topics_load`
+    /// 的装载路径上被强制；`rr3_topic_parse` 本身是 public，绕开 check
     /// 造一张"首段是 rr3-sima、登记 owner 是 rr3-simb"的表并不费力。安全判定不该押在
     /// "上游一定查过"上，故这里就地把两条都查一遍（多一次 O(log n) 查表，无副作用）。
     pub fn rr3_reg_publish_check(
@@ -597,11 +597,11 @@ impl RrdRegistry {
         if head != sender_name {
             return Err(Rr3PublishDeny::ForeignPrefix {
                 topic: topic.to_string(),
-                owner: owner_for_echo(topics.rr3_topic_set_owner(topic)),
+                owner: owner_for_echo(topics.rr3_topic_owner(topic)),
                 sender: sender_name.to_string(),
             });
         }
-        if !topics.rr3_topic_set_contains(topic) {
+        if !topics.rr3_topic_contains(topic) {
             return Err(Rr3PublishDeny::NotRegistered {
                 topic: topic.to_string(),
             });
@@ -610,7 +610,7 @@ impl RrdRegistry {
         // 取不到 owner（登记表里 owner 缺失 = 没写这个键，解析成空串）同样按越权拒，
         // 绝不因"查不到"而放行；回显与另一条 ForeignPrefix 分支一致地写 `?`（同走
         // `owner_for_echo`）。
-        let owner = topics.rr3_topic_set_owner(topic);
+        let owner = topics.rr3_topic_owner(topic);
         if owner.as_deref() != Some(sender_name) {
             return Err(Rr3PublishDeny::ForeignPrefix {
                 topic: topic.to_string(),
@@ -1738,14 +1738,14 @@ watchdog_timeout_ms = 500
     }
 
     /// 归属判定的**最后一道**看的是主题集里登记的 owner，而不是主题串的首段：
-    /// 首段相等只可能来自"表没被 `rr3_topic_set_check` 复验过"（check 强制首段 == owner，
-    /// `rr-registry/src/topics.rs` 的 `rr3_topic_set_check`），而那条前置只在
-    /// `rr3_topics_load` 的装载路径上成立。`rr3_registry_topic_set_from_text` 是 public，
+    /// 首段相等只可能来自"表没被 `rr3_topic_check` 复验过"（check 强制首段 == owner，
+    /// `rr-registry/src/topics.rs` 的 `rr3_topic_check`），而那条前置只在
+    /// `rr3_topics_load` 的装载路径上成立。`rr3_topic_parse` 是 public，
     /// 任何绕开 check 造出来的表都可能带着"首段是 rr3-sima、owner 登记的是 rr3-simb"的条目。
     /// 故本用例**刻意不用** `topic_set()`（它 assert 过 check，结构上造不出这张表）。
     #[test]
     fn publish_check_uses_the_registered_owner_not_just_the_first_segment() {
-        let set = rr_registry::rr3_registry_topic_set_from_text(
+        let set = rr_registry::rr3_topic_parse(
             r#"schema_version = 1
 [[owner]]
 name = "rr3-simb"
@@ -1757,12 +1757,12 @@ owner = "rr3-simb"
         );
         // 夹具前提三条：首段就是发送方自己、主题确实在册、owner 登记的却是别人。
         assert_eq!(
-            set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(),
+            set.rr3_topic_owner("rr3-sima/ping/state").as_deref(),
             Some("rr3-simb")
         );
-        assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
+        assert!(set.rr3_topic_contains("rr3-sima/ping/state"));
         assert!(
-            !set.rr3_topic_set_check().is_empty(),
+            !set.rr3_topic_check().is_empty(),
             "前提：这张表本来就形状不合法（首段 ≠ owner），装载路径永不产出它，只用于验第三道防线"
         );
         assert_eq!(
@@ -1784,15 +1784,15 @@ owner = "rr3-simb"
     /// （登记 owner 与发送方比对）能拒——本用例钉的就是它的回显值。
     #[test]
     fn publish_foreign_prefix_echoes_question_mark_when_owner_is_missing() {
-        let set = rr_registry::rr3_registry_topic_set_from_text(
+        let set = rr_registry::rr3_topic_parse(
             "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"event\"\n",
         );
         assert!(
-            set.rr3_topic_set_contains("rr3-sima/ping/state"),
+            set.rr3_topic_contains("rr3-sima/ping/state"),
             "用例前提：主题在册"
         );
         assert_eq!(
-            set.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(),
+            set.rr3_topic_owner("rr3-sima/ping/state").as_deref(),
             Some("")
         );
         assert_eq!(
@@ -1814,10 +1814,10 @@ owner = "rr3-simb"
     #[test]
     fn foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites() {
         // 第一处构造点：主题 rr3-sima/x/y 在册且 owner 键缺失，发送方 rr3-simb → 前缀不符分支
-        let set = rr_registry::rr3_registry_topic_set_from_text(
+        let set = rr_registry::rr3_topic_parse(
             "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/x/y\"\nkind = \"event\"\n",
         );
-        assert_eq!(set.rr3_topic_set_owner("rr3-sima/x/y").as_deref(), Some(""));
+        assert_eq!(set.rr3_topic_owner("rr3-sima/x/y").as_deref(), Some(""));
         assert_eq!(
             RrdRegistry::rr3_reg_publish_check("rr3-simb", "rr3-sima/x/y", &set),
             Err(Rr3PublishDeny::ForeignPrefix {
@@ -1828,7 +1828,7 @@ owner = "rr3-simb"
             "前缀不符分支在 owner 键缺失时必须回显 ?，不得回显登记的空串"
         );
         // 第三道分支：首段与发送方相符、主题在册、owner 键缺失 → 只有 owner 比对能拒
-        let set2 = rr_registry::rr3_registry_topic_set_from_text(
+        let set2 = rr_registry::rr3_topic_parse(
             "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"event\"\n",
         );
         assert_eq!(
@@ -1872,7 +1872,7 @@ owner = "rr3-simb"
         );
         // 该主题既在册、owner 又是 rr3-runtime：若顺序颠倒会先撞上"在册"或"前缀"两层，
         // 得到 Ok / ForeignPrefix 而不是"冒充"这条定性
-        assert!(set.rr3_topic_set_contains("rr3-runtime/module/state"));
+        assert!(set.rr3_topic_contains("rr3-runtime/module/state"));
     }
 
     /// `rr3-runtime/*` 对任何模块都是禁区，与它在主题集里有没有条目无关
@@ -2786,11 +2786,11 @@ watchdog_timeout_ms = 60000
                 "\n[[topic]]\nname = \"{t}\"\nkind = \"event\"\nowner = \"{o}\"\n"
             ));
         }
-        let set = rr_registry::rr3_registry_topic_set_from_text(&text);
+        let set = rr_registry::rr3_topic_parse(&text);
         assert!(
-            set.rr3_topic_set_check().is_empty(),
+            set.rr3_topic_check().is_empty(),
             "测试主题集自身必须合法: {:?}",
-            set.rr3_topic_set_check()
+            set.rr3_topic_check()
         );
         set
     }

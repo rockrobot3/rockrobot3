@@ -82,7 +82,7 @@ fn rr3_mkmod_generated_manifest_passes_contract() {
     let root = tmp("manifest");
     with_contract(&root);
     rr3_mkmod_generate("rr3-tmpdemo", &root).unwrap();
-    let report = rr_registry::rr3_registry_validate_manifest(&root.join("rr3-tmpdemo/module.toml"));
+    let report = rr_registry::rr3_manifest_gate(&root.join("rr3-tmpdemo/module.toml"));
     assert!(
         report.ok(),
         "生成的 manifest 必须直接合规: {:?}",

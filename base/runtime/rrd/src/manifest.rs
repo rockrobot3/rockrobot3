@@ -1,7 +1,7 @@
 //! 从 manifest 文本里取 rrd 运行期要用的"事实"（health / policy / entry / priority /
 //! depends / provides）。
 //!
-//! 字段合法性由 `rr-registry::rr3_registry_validate_manifest_text` 负责（Task 2）。
+//! 字段合法性由 `rr-registry::rr3_manifest_chk` 负责（Task 2）。
 //! 本模块**不校验规则**，只做"取不到就点名"的读取，供状态机与 spawn 使用。
 
 use toml::Value;

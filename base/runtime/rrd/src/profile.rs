@@ -56,8 +56,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rr_registry::{
-    rr3_registry_device_table_from_text, rr3_registry_platform_table_from_text,
-    rr3_registry_role_table_from_text, rr3_registry_slot_table_from_text, Rr3AssembleDemand,
+    rr3_dev_parse, rr3_plat_parse, rr3_role_parse, rr3_slot_parse, Rr3AssembleDemand,
     Rr3AssembleFacts, Rr3DeviceTable, Rr3PlatformTable, Rr3RoleTable, Rr3SlotTable,
 };
 
@@ -1106,7 +1105,7 @@ fn rr3_controller_wordform(controller: &str, prefix: &str) -> Option<String> {
 /// 红——不许回退硬编码（回退 = 策略重新住回机制侧，下移作废）。
 fn rr3_platform_wordform_prefix(platform: &Rr3PlatformTable, key: &str) -> Result<String, String> {
     platform
-        .rr3_platform_wordform(key)
+        .rr3_wordform(key)
         .map(str::to_string)
         .ok_or_else(|| {
             format!(
@@ -1463,17 +1462,17 @@ pub fn rr3_profile_boot_inputs_with_probe(
         .map_err(|e| format!("读不到格位契约 {}: {e}", slots_path.display()))?;
     let slots_text = std::fs::read_to_string(&slots_abs)
         .map_err(|e| format!("读不到格位契约 {}: {e}", slots_abs.display()))?;
-    let table: Rr3SlotTable = rr3_registry_slot_table_from_text(&slots_text);
-    if table.rr3_slot_table_is_empty() {
+    let table: Rr3SlotTable = rr3_slot_parse(&slots_text);
+    if table.rr3_slot_is_empty() {
         return Err(format!(
             "格位契约 {} 解析后为空，拒绝启动（空格位表是契约事故）",
             slots_abs.display()
         ));
     }
-    // 形状门（0.0.5 批J 深挖收口；与 topics 装载的 rr3_topic_set_check 同构——
+    // 形状门（0.0.5 批J 深挖收口；与 topics 装载的 rr3_topic_check 同构——
     // CI 契约测试钉 23 格是全集层门，这里是运行期门，两轴缺一即带病）：
     // 格名规则、层名、status/tier_scope 白名单逐条点名。
-    let slot_errs = table.rr3_slot_table_check();
+    let slot_errs = table.rr3_slot_check();
     if !slot_errs.is_empty() {
         return Err(format!(
             "格位契约 {} 形状不合，拒绝启动: {}",
@@ -1488,14 +1487,14 @@ pub fn rr3_profile_boot_inputs_with_probe(
         .map_err(|e| format!("读不到角色契约 {}: {e}", roles_path.display()))?;
     let roles_text = std::fs::read_to_string(&roles_abs)
         .map_err(|e| format!("读不到角色契约 {}: {e}", roles_abs.display()))?;
-    let roles: Rr3RoleTable = rr3_registry_role_table_from_text(&roles_text);
-    if roles.rr3_role_table_is_empty() {
+    let roles: Rr3RoleTable = rr3_role_parse(&roles_text);
+    if roles.rr3_role_is_empty() {
         return Err(format!(
             "角色契约 {} 解析后为空，拒绝启动（空角色表是契约事故）",
             roles_abs.display()
         ));
     }
-    let role_errs = roles.rr3_role_table_check();
+    let role_errs = roles.rr3_role_check();
     if !role_errs.is_empty() {
         return Err(format!(
             "角色契约 {} 形状不合，拒绝启动: {}",
@@ -1511,14 +1510,14 @@ pub fn rr3_profile_boot_inputs_with_probe(
         .map_err(|e| format!("读不到器件词表 {}: {e}", devices_path.display()))?;
     let devices_text = std::fs::read_to_string(&devices_abs)
         .map_err(|e| format!("读不到器件词表 {}: {e}", devices_abs.display()))?;
-    let devices: Rr3DeviceTable = rr3_registry_device_table_from_text(&devices_text);
-    if devices.rr3_device_table_is_empty() {
+    let devices: Rr3DeviceTable = rr3_dev_parse(&devices_text);
+    if devices.rr3_dev_is_empty() {
         return Err(format!(
             "器件词表 {} 解析后为空，拒绝启动（空器件表是契约事故）",
             devices_abs.display()
         ));
     }
-    let device_errs = devices.rr3_device_table_check();
+    let device_errs = devices.rr3_dev_check();
     if !device_errs.is_empty() {
         return Err(format!(
             "器件词表 {} 形状不合，拒绝启动: {}",
@@ -1555,23 +1554,22 @@ pub fn rr3_profile_boot_inputs_with_probe(
             profile.platform_chip
         )
     })?;
-    let platform: Rr3PlatformTable = rr3_registry_platform_table_from_text(&platform_text)
-        .map_err(|errs| {
-            format!(
-                "平台事实表 {} 形状不合，拒绝启动: {}",
-                platform_path.display(),
-                errs.join("; ")
-            )
-        })?;
+    let platform: Rr3PlatformTable = rr3_plat_parse(&platform_text).map_err(|errs| {
+        format!(
+            "平台事实表 {} 形状不合，拒绝启动: {}",
+            platform_path.display(),
+            errs.join("; ")
+        )
+    })?;
 
     let mut errs: Vec<String> = Vec::new();
     // bindings 的格位必须查册命中，且不得是基础层（基础层由基座内建承载，slots.toml 注记）
     for slot in profile.bindings.keys() {
-        if !table.rr3_slot_table_contains(slot) {
+        if !table.rr3_slot_contains(slot) {
             errs.push(format!(
                 "bindings 格位 {slot} 未在册（contracts/slots.toml 无此格，装配单不得自造格位）"
             ));
-        } else if table.rr3_slot_table_layer(slot).as_deref() == Some("base") {
+        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
             errs.push(format!(
                 "bindings 不得绑定基础层格位 {slot}（基础层由基座内建承载，恒在位）"
             ));
@@ -1580,7 +1578,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // enabled_slots 的格位必须查册命中（基础层允许——恒在位，只记账不绑定）
     for (module, slots) in &profile.enabled_slots {
         for slot in slots {
-            if !table.rr3_slot_table_contains(slot) {
+            if !table.rr3_slot_contains(slot) {
                 errs.push(format!(
                     "enabled_slots 模块 {module} 的格位 {slot} 未在册（contracts/slots.toml 无此格）"
                 ));
@@ -1590,11 +1588,11 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // [slots].present 查册门：声明集同样只认 rr-registry 那一册；基础层格位恒在位
     // （slots.toml 注记），进 present 属自相矛盾 → 点名拒。
     for slot in &profile.slots_present {
-        if !table.rr3_slot_table_contains(slot) {
+        if !table.rr3_slot_contains(slot) {
             errs.push(format!(
                 "[slots].present 格位 {slot} 未在册（contracts/slots.toml 无此格）"
             ));
-        } else if table.rr3_slot_table_layer(slot).as_deref() == Some("base") {
+        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
             errs.push(format!(
                 "[slots].present 不得声明基础层格位 {slot}（基础层由基座内建承载，恒在位）"
             ));
@@ -1605,11 +1603,11 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 器件缺席登记，非 base 格的缺席表达 = 不进 present（缺格判定自然红），写进本表
     // 属第二套语法即红（F-2 同型：一个语义不许两条语法）；③ 理由非空已在解析段判。
     for slot in profile.slots_device_absent.keys() {
-        if !table.rr3_slot_table_contains(slot) {
+        if !table.rr3_slot_contains(slot) {
             errs.push(format!(
                 "[slots].device_absent 格位 {slot} 未在册（contracts/slots.toml 无此格）"
             ));
-        } else if table.rr3_slot_table_layer(slot).as_deref() != Some("base") {
+        } else if table.rr3_slot_layer(slot).as_deref() != Some("base") {
             errs.push(format!(
                 "[slots].device_absent 只登记基础层格位，{slot} 非 base 层（非基础层格的缺席表达 = 不进 [slots].present，写进本表属第二套语法）"
             ));
@@ -1635,21 +1633,21 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     referenced.extend(profile.slots_present.iter().cloned());
     for slot in &referenced {
-        if !table.rr3_slot_table_contains(slot) {
+        if !table.rr3_slot_contains(slot) {
             continue;
         }
         // P0-2 根因门：占位/退役格不得进生产装配面。status=placeholder 表示该格
         // 无真件（骨架占位），retired 表示已退役；装配单声称在位/绑定 = 假账，
         // 与"严禁演示性功能"直接冲突 → 拒 boot。真件落地后把 contracts/slots.toml
         // 的 status 改回 normal 再恢复绑定。
-        if let Some(status) = table.rr3_slot_table_status(slot) {
+        if let Some(status) = table.rr3_slot_status(slot) {
             if status == "placeholder" || status == "retired" {
                 errs.push(format!(
                     "装配面引用 {status} 格 {slot}（占位/退役格不得进生产装配面；真件落地后改 contracts/slots.toml status=normal 再绑定）"
                 ));
             }
         }
-        let scope = table.rr3_slot_table_tier_scope(slot).unwrap_or_default();
+        let scope = table.rr3_slot_tier_scope(slot).unwrap_or_default();
         if !scope.iter().any(|t| t == &profile.platform_tier) {
             errs.push(format!(
                 "tier↔tier_scope 交叉校验失败：装配档 {tier} 引用格 {slot}，其 tier_scope = {scope:?} 不含 {tier}（该档不适用此格，ADR-0012 增补注记分族），拒绝启动",
@@ -1679,7 +1677,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 前件——host 档必须选带词形表的主机平台册（rtos/bare 册空表显式，esp32 形状）。
     // 逐键 fail-closed 由 rr3_platform_wordform_prefix 承担，此处总守卫一条。
     let mut derived: BTreeMap<String, String> = BTreeMap::new();
-    if profile.platform_tier == "host" && platform.rr3_platform_wordform_map().is_empty() {
+    if profile.platform_tier == "host" && platform.rr3_wordform_map().is_empty() {
         errs.push(
             "host 档平台事实表 controller_wordform 为空（词形派生前件缺失，host 档必须选带词形表的主机平台册，fail-closed）"
                 .into(),
@@ -1688,7 +1686,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     for pin in &profile.pins {
         let label = format!("pins[{}]", pin.rr3_pin_id());
         // ①-a 角色在册（未在册的角色后续判据无从谈起，点名后跳过该条，不级联刷屏）
-        let Some(derives) = roles.rr3_role_table_derives(&pin.role) else {
+        let Some(derives) = roles.rr3_role_derives(&pin.role) else {
             errs.push(format!(
                 "{label} 角色 {} 未在册（contracts/roles.toml 无此角色，装配单不得自造角色）",
                 pin.role
@@ -1697,7 +1695,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         };
         // ①-b per_instance 规则：true ⇒ instance 必填（pin_id = role.instance），
         // false ⇒ instance 禁填（pin_id = role）
-        match roles.rr3_role_table_per_instance(&pin.role) {
+        match roles.rr3_role_per_inst(&pin.role) {
             Some(true) if pin.instance.is_empty() => errs.push(format!(
                 "{label} 角色 {} per_instance = true，instance 必填（多实例角色的身份一半在 instance）",
                 pin.role
@@ -1711,7 +1709,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         // ①-b requires 逐项在场（§5 缺失语义：String 空串 = 缺、channel None = 缺、
         // physical 空数组 = 缺；rail/addr 的合法显式值 "none" 照常算在场——
         // "合法不适用"必须显式写，留空即红）
-        for f in roles.rr3_role_table_requires(&pin.role).unwrap_or_default() {
+        for f in roles.rr3_role_requires(&pin.role).unwrap_or_default() {
             if !RR3_PIN_KEYS.contains(&f.as_str()) {
                 errs.push(format!(
                     "角色 {} 的 requires 引用未知字段 {f}（[pins] 字段词表外——门 a 六表对账第 5 张的漂移）",
@@ -1725,7 +1723,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
             }
         }
         // ① direction 相等（pin 的物理方向与角色声明的方向各说一套 = 数据矛盾）
-        if let Some(d) = roles.rr3_role_table_direction(&pin.role) {
+        if let Some(d) = roles.rr3_role_direction(&pin.role) {
             if pin.direction != d {
                 errs.push(format!(
                     "{label} direction = {} 与角色 {} direction = {d} 不一致（校验①）",
@@ -1734,8 +1732,8 @@ pub fn rr3_profile_boot_inputs_with_probe(
             }
         }
         // ① role.slot ∈ slots（roles/slots 两表对账的装载侧执法——真值各在对方表）
-        if let Some(slot) = roles.rr3_role_table_slot(&pin.role) {
-            if !table.rr3_slot_table_contains(&slot) {
+        if let Some(slot) = roles.rr3_role_slot(&pin.role) {
+            if !table.rr3_slot_contains(&slot) {
                 errs.push(format!(
                     "角色 {} 的 slot {slot} 未在格位契约在册（roles/slots 两表对账）",
                     pin.role
@@ -1768,7 +1766,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         // 显式空的角色跳过（批N3 件八：P-5 共读源/placeholder 格不派生注入键——
         // "不派生"是声明不是漏声明，见 roles.toml 器件三角色注记）
         if !derives.is_empty() {
-            for (key, prefix) in platform.rr3_platform_wordform_map() {
+            for (key, prefix) in platform.rr3_wordform_map() {
                 if rr3_controller_wordform(&pin.controller, prefix).is_some()
                     && !derives.iter().any(|d| d == key)
                 {
@@ -1817,7 +1815,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         // rail 缺省的合法性与角色 kind 挂钩：power 面（⑥-b）必须有在册轨；
         // signal 面（meter 类，requires 无 rail）不写 rail 合法——写了非 none 的
         // 名字则一律查在册（⑥-a）。"none" 是 signal 侧控制线的显式不适值。
-        let kind = roles.rr3_role_table_kind(&pin.role);
+        let kind = roles.rr3_role_kind(&pin.role);
         let rail_unlisted = pin.rail.is_empty() || pin.rail == "none";
         if rail_unlisted {
             if kind.as_deref() == Some("power") {
@@ -1893,7 +1891,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // 的自检时点判已随 assembly.rs 额定加总族先行（批N5 件五）；⑦-c2（件侧）的
     // 判据对象是件 demands 申报（n1-7 才立数据面），批N2 同链补。
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
-    let mate_set = devices.rr3_device_table_mates();
+    let mate_set = devices.rr3_dev_mates();
     errs.extend(wiring.rr3_wiring_check(&pin_ids, &domain_names, &mate_set));
 
     // 门 c 装载执法（批N2 本体 ⑨-c，校验⑨ 后果 = 拒）：装配扫描一次两用——形状/
@@ -1967,7 +1965,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
         if !profile.slots_present.contains(slot) {
             continue;
         }
-        for role in roles.rr3_role_table_names_for_slot(slot) {
+        for role in roles.rr3_role_slot_names(slot) {
             if !profile.pins.iter().any(|p| p.role == role) {
                 role_missing.push((slot.clone(), role));
             }
@@ -1983,7 +1981,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // / 该格无 I2C 绑定 → 传 None → 探针回落总线级五面判据（无 [pins] 形态兼容面）。
     let mut i2c_bind: BTreeMap<String, (u32, String)> = BTreeMap::new();
     for slot in &enabled_all {
-        for role in roles.rr3_role_table_names_for_slot(slot) {
+        for role in roles.rr3_role_slot_names(slot) {
             for pin in profile.pins.iter().filter(|p| p.role == role) {
                 let Some(n) = pin
                     .controller
@@ -2014,7 +2012,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     }
     for (module, slots) in &profile.enabled_slots {
         for slot in slots {
-            let base = table.rr3_slot_table_layer(slot).as_deref() == Some("base");
+            let base = table.rr3_slot_layer(slot).as_deref() == Some("base");
             if base {
                 continue;
             }
@@ -2087,7 +2085,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
             .to_string(),
         profile: profile.clone(),
         wiring: wiring.clone(),
-        peak_by_mate: devices.rr3_device_table_peak_by_mate(),
+        peak_by_mate: devices.rr3_dev_peak_by_mate(),
         axis: axis_files,
         roles: roles.clone(),
     };
@@ -2275,7 +2273,7 @@ fn rr3_check_pin_capabilities(
         // ⑧-b 控制器在册（词表随平台表，装配单不得自造控制器）
         if !pin.controller.is_empty()
             && !platform
-                .rr3_platform_controller_names()
+                .rr3_ctl_names()
                 .iter()
                 .any(|c| c == &pin.controller)
         {
@@ -2285,9 +2283,9 @@ fn rr3_check_pin_capabilities(
             ));
         }
         // ⑤-a output 落 input-only 集（角色 input_only_ok 的另一侧输入取 roles 表）
-        if pin.direction == "out" && roles.rr3_role_table_input_only_ok(&pin.role) == Some(false) {
+        if pin.direction == "out" && roles.rr3_role_input_only(&pin.role) == Some(false) {
             for p in &pin.physical {
-                if platform.rr3_platform_input_only_pins().contains(p) {
+                if platform.rr3_input_only_pins().contains(p) {
                     errs.push(format!(
                         "{label} physical 元素 {p} 落在平台 {plat} 的 input-only 脚集（校验⑤-a：direction = out 且角色 {} input_only_ok = false，input-only 脚无输出驱动能力）",
                         pin.role
@@ -2306,7 +2304,7 @@ fn rr3_check_pin_capabilities(
                 continue; // 悬空 pin_id 由 ⑥-d 点名，此处不重复报
             };
             for p in &pin.physical {
-                if !platform.rr3_platform_adc_pins().contains(p) {
+                if !platform.rr3_adc_pins().contains(p) {
                     errs.push(format!(
                         "pins[{}] 是域 {} 的模拟测点（{key} 绑定），physical 元素 {p} 不在平台 {plat} 的 ADC 能力集（校验⑤-b：测点落非 ADC 脚读回恒值，档位恒真或恒假——F-9）",
                         pin.rr3_pin_id(),
@@ -2354,7 +2352,7 @@ fn rr3_check_pin_occupancy(
         let label = format!("pins[{}]", pin.rr3_pin_id());
         // device 非空即在册（门 o 装载侧执法：装配单不得自造型号词——型号词的
         // 取值域 = contracts/devices.toml 在册名单，单条 pin 也判，与共址无关）
-        if !pin.device.is_empty() && !devices.rr3_device_table_contains(&pin.device) {
+        if !pin.device.is_empty() && !devices.rr3_dev_contains(&pin.device) {
             errs.push(format!(
                 "{label} device \"{}\" 未在器件词表在册（门 o：device 外键 → contracts/devices.toml，装配单不得自造型号词）",
                 pin.device
@@ -2418,7 +2416,7 @@ fn rr3_check_pin_occupancy(
         }
     }
     // ④-b conflicts 反推互斥：同一条冲突登记面的命中者 ≥ 2 且任一未申报该组 → 红
-    for entry in platform.rr3_platform_conflicts() {
+    for entry in platform.rr3_conflicts() {
         let group = entry.rr3_conflict_group();
         let hits: Vec<&Rr3PinEntry> = profile
             .pins
@@ -2428,7 +2426,7 @@ fn rr3_check_pin_occupancy(
                     .iter()
                     .any(|x| entry.rr3_conflict_pins().contains(x))
                     || (!p.controller.is_empty()
-                        && entry.rr3_conflict_controllers().contains(&p.controller))
+                        && entry.rr3_conflict_ctls().contains(&p.controller))
             })
             .collect();
         if hits.len() < 2 {
@@ -2475,7 +2473,7 @@ fn rr3_assemble_scan(module_dir: &Path) -> (Vec<(String, Rr3AssembleFacts)>, Vec
                 continue;
             }
         };
-        let facts = match rr_registry::rr3_registry_assemble_from_text(&text) {
+        let facts = match rr_registry::rr3_assemble_parse(&text) {
             Ok(f) => f,
             Err(errs) => {
                 for e in errs {
@@ -2491,7 +2489,7 @@ fn rr3_assemble_scan(module_dir: &Path) -> (Vec<(String, Rr3AssembleFacts)>, Vec
         // 注入缺：ops 声明的参数槽必须能从模块 config.toml 按点路径取到
         match std::fs::read_to_string(module_dir.join("config.toml")) {
             Ok(cfg) => {
-                for gap in rr_registry::rr3_registry_assemble_injection_gaps(&facts, &cfg) {
+                for gap in rr_registry::rr3_injection_gaps(&facts, &cfg) {
                     out.push(format!("件 {atom} {gap}"));
                 }
             }
@@ -2590,10 +2588,10 @@ fn rr3_demand_declared_expand(
             let mut instances: i64 = 0;
             for pin in &profile.pins {
                 let served = roles
-                    .rr3_role_table_iface(&pin.role)
+                    .rr3_role_iface(&pin.role)
                     .is_some_and(|i| traits.contains(i.as_str()));
                 let bound = roles
-                    .rr3_role_table_slot(&pin.role)
+                    .rr3_role_slot(&pin.role)
                     .and_then(|s| profile.bindings.get(&s))
                     .is_some_and(|m| m == module);
                 if served && bound {
@@ -2628,14 +2626,14 @@ fn rr3_demand_kind_power_gaps(
 ) -> Vec<String> {
     let mut errs = Vec::new();
     for pin in &profile.pins {
-        if roles.rr3_role_table_kind(&pin.role).as_deref() != Some("power") {
+        if roles.rr3_role_kind(&pin.role).as_deref() != Some("power") {
             continue;
         }
         if pin.rail.is_empty() || pin.rail == "none" {
             continue; // ⑥-b 已点名功率面缺轨，不双报
         }
         let Some(module) = roles
-            .rr3_role_table_slot(&pin.role)
+            .rr3_role_slot(&pin.role)
             .and_then(|s| profile.bindings.get(&s))
         else {
             continue;
