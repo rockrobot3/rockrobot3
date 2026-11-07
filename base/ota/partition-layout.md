@@ -65,7 +65,7 @@ workspace 内，字节级单测钉死，含 extlinux.conf 真工件对拍）：
 - 退出码：0 成功 / 1 业务拒 / 2 用法错。`--bootconf` 必传，CLI 不缺省碰任何路径。
 - 运行槽的权威判定来源是**内核 cmdline**（`/proc/cmdline`），不是
   extlinux.conf 文本——后者只是引导配置，真正生效的是启动时注入的命令行。
-  `rr-ota::bootconf::rr3_cmdline_current_slot` 只认 `root=LABEL=rr_` 形态，
+  `rr-ota::bootconf::rr3_cmdline_slot` 只认 `root=LABEL=rr_` 形态，
   裸设备形态（root=/dev/…）明确不覆盖、报"板上核对项"。
 
 ### 回滚链（U-Boot 标准语义；本版本未实装，属板上件）
@@ -98,7 +98,7 @@ A/B 切换的断电安全不靠"翻标志不失败"，靠**失败可回**。U-Bo
    搜索路径上，不会被误读；最坏情形 = extlinux.conf 缺失，U-Boot 落回默认
    bootcmd 或需 maskrom 人工恢复。板上需实测 rename 行为，必要时改
    "写副本 + 验读 + 原位覆盖"序。
-2. `rr3_bootconf_write_atomic` 落盘后补 **fsync（文件与目录）**——主机面
+2. `rr3_bootconf_store` 落盘后补 **fsync（文件与目录）**——主机面
    未做，板上加固项。
 3. U-Boot defconfig 是否启用 `CONFIG_BOOTCOUNT_LIMIT` 及其计数载体
    （env / RTC / I2C EEPROM）；无载体则 altbootcmd 链不生效，回滚退化为人工。

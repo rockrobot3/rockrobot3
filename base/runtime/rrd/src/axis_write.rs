@@ -21,7 +21,7 @@
 //!
 //! 标定动作纪律（本工具不越权）：N2 收口前只准单步点动＋人工确认（施工计划
 //! §3 批N3 行）；本工具只落盘**人工流程的产物**，不驱动任何运动——标定动作
-//! 的拒动判据在 [`rr_hal_api::rr3_act_motion_allowed`]，写入面与运动面零交叠。
+//! 的拒动判据在 [`rr_hal_api::rr3_motion_allowed`]，写入面与运动面零交叠。
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -210,7 +210,7 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
         target.display(),
         file.pin,
         p.calibrated,
-        p.hard_stop.rr3_act_hard_stop_name(),
+        p.hard_stop.rr3_hard_stop_name(),
         p.source.rr3_act_source_name(),
     ))
 }

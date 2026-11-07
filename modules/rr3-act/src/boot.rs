@@ -27,7 +27,7 @@ use crate::servo::{Rr3ServoCfg, RR3_SERVO_COMMAND_TOPIC};
 /// 缺真相就按最窄面起跑（行程窄域除外：保守行程 = 器件全域，点动面必须活着）。
 const RR3_ACT_AXIS_STATE_ENV: &str = "RR3_ACT_AXIS_STATE";
 
-/// 执行轴状态（批N3 件三建，件五扩形）：拒动判据 [`rr_hal_api::rr3_act_motion_allowed`]
+/// 执行轴状态（批N3 件三建，件五扩形）：拒动判据 [`rr_hal_api::rr3_motion_allowed`]
 /// 的输入面＋**行程真值**（门 g 收敛：模块行程改读档案——config 键撤除，`lo/hi`
 /// 两键就是 `Rr3ServoCfg` 行程的填值来源，`center` 是档案中位锚的随路真值）。五键
 /// 都来自档案（件二装载器真值），模块侧零判定载荷——只解析不判域（行程窗口自洽
@@ -91,9 +91,9 @@ impl Rr3ActAxisState {
                         return Err("执行轴状态 hard_stop 重复".into());
                     }
                     hard_stop = Some(
-                        rr_hal_api::Rr3ActHardStop::rr3_act_hard_stop_parse(v).ok_or_else(
-                            || format!("执行轴状态 hard_stop={v:?} 不在档案词表（unknown/yes/no）"),
-                        )?,
+                        rr_hal_api::Rr3ActHardStop::rr3_hard_stop_parse(v).ok_or_else(|| {
+                            format!("执行轴状态 hard_stop={v:?} 不在档案词表（unknown/yes/no）")
+                        })?,
                     );
                 }
                 "lo" => {
@@ -153,7 +153,7 @@ pub(crate) fn rr3_act_axis_state_load() -> Rr3ActAxisState {
     eprintln!(
         "执行轴状态: calibrated={} hard_stop={} 行程=[{}, {}] 中位={}（注入策略面在启动自述可见，A-9）",
         axis.calibrated,
-        axis.hard_stop.rr3_act_hard_stop_name(),
+        axis.hard_stop.rr3_hard_stop_name(),
         axis.lo_deg,
         axis.hi_deg,
         axis.center_deg

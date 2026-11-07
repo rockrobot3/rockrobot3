@@ -80,11 +80,11 @@ fn rr3_parse_switch(args: &[String]) -> Result<(Rr3Slot, PathBuf), ExitCode> {
 fn rr3_cmd_switch(target: Rr3Slot, path: &PathBuf) -> Result<String, (String, ExitCode)> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| (format!("读引导配置 {path:?} 失败: {e}"), ExitCode::from(1)))?;
-    let from = bootconf::rr3_bootconf_current_slot(&text)
+    let from = bootconf::rr3_bootconf_slot(&text)
         .map_err(|e| (format!("拒绝切换：{e}"), ExitCode::from(1)))?;
     let out = bootconf::rr3_bootconf_switch(&text, target)
         .map_err(|e| (format!("拒绝切换：{e}"), ExitCode::from(1)))?;
-    bootconf::rr3_bootconf_write_atomic(path, &out)
+    bootconf::rr3_bootconf_store(path, &out)
         .map_err(|e| (format!("原子落盘失败: {e}"), ExitCode::from(1)))?;
     Ok(format!(
         "引导配置已改写：root=LABEL={} → {}（持久切换，重启后生效）",
@@ -97,11 +97,11 @@ fn rr3_cmd_switch(target: Rr3Slot, path: &PathBuf) -> Result<String, (String, Ex
 fn rr3_cmd_factory(path: &PathBuf) -> Result<String, (String, ExitCode)> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| (format!("读引导配置 {path:?} 失败: {e}"), ExitCode::from(1)))?;
-    let from = bootconf::rr3_bootconf_current_slot(&text)
+    let from = bootconf::rr3_bootconf_slot(&text)
         .map_err(|e| (format!("拒绝恢复出厂：{e}"), ExitCode::from(1)))?;
     let out = bootconf::rr3_bootconf_factory(&text)
         .map_err(|e| (format!("拒绝恢复出厂：{e}"), ExitCode::from(1)))?;
-    bootconf::rr3_bootconf_write_atomic(path, &out)
+    bootconf::rr3_bootconf_store(path, &out)
         .map_err(|e| (format!("原子落盘失败: {e}"), ExitCode::from(1)))?;
     Ok(format!(
         "引导配置已改写：root=LABEL={} → rr_factory（一次性出厂引导，重启后生效；rr_factory 分区本体不写）",

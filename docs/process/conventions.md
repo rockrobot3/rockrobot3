@@ -2912,7 +2912,7 @@ base_capabilities 5→**7**（与 slots 基础层钉死等价，`slots_base_laye
 
 2026-10-18（**批N2 件三：校验⑥-c2 运行期判据实体 ＋ D3 无器件合法态**，decisions.md 裁定 5）：
 ①判据实体落 rr-hal-api 契约面（单真值点——产出侧与消费侧共用，不许各自手抄 `>` 判据）：
-`rr3_rail_tier_effective(tier, age_ms: Option<u32>, max_age_ms: u32) -> Rr3RailTier`——判据一条写完：
+`rr3_rail_tier_fold(tier, age_ms: Option<u32>, max_age_ms: u32) -> Rr3RailTier`——判据一条写完：
 `age_ms > max_age_ms` **或** 时基取不到基准（`Option::None`，零新类型表达"取不到 epoch 就不编造
 龄期"，Y-4 同线）⇒ 折 `Unknown`；边界 `age == max_age_ms` 不折（新鲜度上界闭区间内）；红例五断言
 （新鲜原样 / 边界不折 / 超龄 Ok ⇒ Unknown / 超龄 Severe ⇒ Unknown——陈旧 Severe 不许冒充新鲜，

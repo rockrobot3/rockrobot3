@@ -395,7 +395,7 @@ pub struct Rr3ProfileBoot {
     pub role_missing: Vec<(String, String)>,
     /// 执行轴状态注入文本（批N3 件三，`RR3_ACT_AXIS_STATE`）：`calibrated=<bool>,hard_stop=<词>`
     /// ——轴档案（`hardware/<形态>/axis/*.toml`，件二装载器真值）**恰一份**合法装载时
-    /// 的投影，是 rr3-act 拒动判据 [`rr_hal_api::rr3_act_motion_allowed`] 的输入面。
+    /// 的投影，是 rr3-act 拒动判据 [`rr_hal_api::rr3_motion_allowed`] 的输入面。
     /// 空串 = 不注入（无档案/坏件/多轴未消歧），模块侧折保守缺省——§6 复位语义④：
     /// 缺真相就按最窄面起跑（未标定不得自动），拒绝不是安全向、保守才是。
     pub axis_state: String,
@@ -1284,7 +1284,7 @@ fn rr3_axis_state_text(found: &[crate::axis::Rr3AxisFile], axis: &str) -> (Strin
                 format!(
                     "calibrated={},hard_stop={},lo={},hi={},center={}",
                     p.calibrated,
-                    p.hard_stop.rr3_act_hard_stop_name(),
+                    p.hard_stop.rr3_hard_stop_name(),
                     p.lo_deg,
                     p.hi_deg,
                     p.center_deg

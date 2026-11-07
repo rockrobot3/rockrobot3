@@ -178,7 +178,7 @@ pub fn rr3_act_profile_from_text(
         None => None,
     };
     let hard_stop = match rr3_text_field(&v, &mut errs, path, "hard_stop") {
-        Some(s) => match Rr3ActHardStop::rr3_act_hard_stop_parse(s) {
+        Some(s) => match Rr3ActHardStop::rr3_hard_stop_parse(s) {
             Some(h) => Some(h),
             None => {
                 errs.push(format!(
@@ -271,7 +271,7 @@ pub fn rr3_act_profile_to_toml(file: &Rr3AxisFile) -> String {
         format!("hold = \"{}\"", p.hold.rr3_act_hold_name()),
         format!("current_ceil_ma = {}", p.current_ceil_ma),
         format!("warmup_ms = {}", p.warmup_ms),
-        format!("hard_stop = \"{}\"", p.hard_stop.rr3_act_hard_stop_name()),
+        format!("hard_stop = \"{}\"", p.hard_stop.rr3_hard_stop_name()),
         format!("calibrated = {}", p.calibrated),
         format!("source = \"{}\"", p.source.rr3_act_source_name()),
     ];

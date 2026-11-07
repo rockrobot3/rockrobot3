@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use rr3mod::{BusHandle, Dispatcher};
 use rr_hal_api::{
-    rr3_rail_tier_effective, Rr3BatteryState, Rr3Power, Rr3Rail, Rr3RailState, Rr3RailTier,
+    rr3_rail_tier_fold, Rr3BatteryState, Rr3Power, Rr3Rail, Rr3RailState, Rr3RailTier,
 };
 use serde_json::{json, Value};
 
@@ -328,7 +328,7 @@ fn rr3_rail_beat(
     st: Rr3RailState,
     max_age_ms: u32,
 ) -> (Rr3RailTier, Option<bool>) {
-    let effective = rr3_rail_tier_effective(st.tier, Some(st.age_ms), max_age_ms);
+    let effective = rr3_rail_tier_fold(st.tier, Some(st.age_ms), max_age_ms);
     if effective == Rr3RailTier::Unknown {
         return (Rr3RailTier::Unknown, None);
     }
@@ -480,7 +480,7 @@ mod tests {
     }
 
     // ---------- 轨压档位对拍（批N2 件四，⑥-c2 真值面） ----------
-    // rr_hal_api 的 rr3_rail_tier_effective 是契约层纯函数（无原子件 mech.rs，⑥-c2
+    // rr_hal_api 的 rr3_rail_tier_fold 是契约层纯函数（无原子件 mech.rs，⑥-c2
     // 判据单真值点），对拍随其运行期唯一消费模块 rr3-power 落本文件。power 不是
     // atom 名（本模块原子 = battery/charger），⑧-a 计数门不数这两条（不占原子门
     // 分母，命名前缀照模块名走）。
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn parity_leg1_power_rail_tier_effective_train_is_deterministic() {
         // 腿一·确定性：同一 (档位, 龄期, 上界) 合成序列喂两跑，输出档位序列逐拍相等
-        use rr_hal_api::{rr3_rail_tier_effective, Rr3RailTier};
+        use rr_hal_api::{rr3_rail_tier_fold, Rr3RailTier};
         fn run() -> Vec<Rr3RailTier> {
             let max = 250u32;
             [
@@ -503,7 +503,7 @@ mod tests {
                 (Rr3RailTier::Unknown, None),
             ]
             .iter()
-            .map(|&(tier, age)| rr3_rail_tier_effective(tier, age, max))
+            .map(|&(tier, age)| rr3_rail_tier_fold(tier, age, max))
             .collect()
         }
         assert_eq!(run(), run(), "同输入序列两跑逐拍相等（腿一·确定性）");
@@ -511,39 +511,39 @@ mod tests {
 
     #[test]
     fn parity_leg2_power_rail_tier_effective_matches_ruling_semantics() {
-        // 腿二·正确性：裁定语义逐条点名（真值 = rr_hal_api rr3_rail_tier_effective，
+        // 腿二·正确性：裁定语义逐条点名（真值 = rr_hal_api rr3_rail_tier_fold，
         // 全案 §6 T-6 运行期读数可信度 + Y-4 如实申报）
-        use rr_hal_api::{rr3_rail_tier_effective, Rr3RailTier};
+        use rr_hal_api::{rr3_rail_tier_fold, Rr3RailTier};
         let max = 250u32;
         // 取不到基准（None）⇒ Unknown，与档位无关——新鲜 Ok 也折不出"可信"
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Ok, None, max),
+            rr3_rail_tier_fold(Rr3RailTier::Ok, None, max),
             Rr3RailTier::Unknown,
             "时基取不到基准 ⇒ Unknown（Y-4：None 是如实申报，不许编龄期冒充新鲜）"
         );
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Severe, None, max),
+            rr3_rail_tier_fold(Rr3RailTier::Severe, None, max),
             Rr3RailTier::Unknown,
             "None 折档与输入档位无关"
         );
         // 越上界 ⇒ Unknown：陈旧的 Severe 与新鲜的 Severe 必须可区分（T-6）
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(max + 1), max),
+            rr3_rail_tier_fold(Rr3RailTier::Severe, Some(max + 1), max),
             Rr3RailTier::Unknown,
             "age > max ⇒ Unknown（陈旧 Severe ≠ 新鲜 Severe，T-6）"
         );
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(max + 1), max),
+            rr3_rail_tier_fold(Rr3RailTier::Ok, Some(max + 1), max),
             Rr3RailTier::Unknown
         );
         // 边界 age == max 不折（新鲜度上界是闭区间内）；龄期内原样透传
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(max), max),
+            rr3_rail_tier_fold(Rr3RailTier::Severe, Some(max), max),
             Rr3RailTier::Severe,
             "age == max 边界不折（闭区间内）"
         );
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(0), max),
+            rr3_rail_tier_fold(Rr3RailTier::Ok, Some(0), max),
             Rr3RailTier::Ok,
             "新鲜读数原样透传"
         );
@@ -555,12 +555,12 @@ mod tests {
         // 是独立第四态（执行面 match 得到独立臂按 Severe 那一侧处置），且折档结果
         // 不许再折成 Ok（展示面原样）
         assert_ne!(
-            rr3_rail_tier_effective(Rr3RailTier::Severe, None, max),
+            rr3_rail_tier_fold(Rr3RailTier::Severe, None, max),
             Rr3RailTier::Severe,
             "折出的 Unknown 与 Severe 可区分（执行面独立处置的判据基础）"
         );
         assert_ne!(
-            rr3_rail_tier_effective(Rr3RailTier::Severe, None, max),
+            rr3_rail_tier_fold(Rr3RailTier::Severe, None, max),
             Rr3RailTier::Ok,
             "Unknown 不许折算成 Ok（展示面原样不折）"
         );

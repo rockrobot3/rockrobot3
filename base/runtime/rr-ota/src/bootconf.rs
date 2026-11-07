@@ -71,7 +71,7 @@ fn rr3_root_span_unique(text: &str) -> Result<Rr3RootSpan, String> {
 }
 
 /// 恰好一处且标签在册（rr_a / rr_b / rr_factory），返回（当前槽，区间）
-fn rr3_root_span_current(text: &str) -> Result<(Rr3Slot, Rr3RootSpan), String> {
+fn rr3_root_span_get(text: &str) -> Result<(Rr3Slot, Rr3RootSpan), String> {
     let span = rr3_root_span_unique(text)?;
     let slot = Rr3Slot::rr3_slot_from_label(&span.label).ok_or_else(|| {
         format!(
@@ -85,7 +85,7 @@ fn rr3_root_span_current(text: &str) -> Result<(Rr3Slot, Rr3RootSpan), String> {
 /// 改写核心：把唯一生效的 root=LABEL 标签换成 target 的标签，其余字节一字不动
 /// （含注释——工具不碰解说文字）
 fn rr3_bootconf_rewrite(text: &str, target: Rr3Slot) -> Result<(String, Rr3Slot), String> {
-    let (current, span) = rr3_root_span_current(text)?;
+    let (current, span) = rr3_root_span_get(text)?;
     let mut out = String::with_capacity(text.len());
     out.push_str(&text[..span.start]);
     out.push_str(target.rr3_slot_label());
@@ -94,8 +94,8 @@ fn rr3_bootconf_rewrite(text: &str, target: Rr3Slot) -> Result<(String, Rr3Slot)
 }
 
 /// 当前槽判定：引导配置里唯一的 root=LABEL=rr_ token 反查槽位
-pub fn rr3_bootconf_current_slot(text: &str) -> Result<Rr3Slot, String> {
-    rr3_root_span_current(text).map(|(slot, _)| slot)
+pub fn rr3_bootconf_slot(text: &str) -> Result<Rr3Slot, String> {
+    rr3_root_span_get(text).map(|(slot, _)| slot)
 }
 
 /// 持久切换：目标只收 rr_a/rr_b。同槽幂等拒（改写请求必须移动到对侧，
@@ -135,7 +135,7 @@ pub fn rr3_bootconf_factory(text: &str) -> Result<String, String> {
 /// （尽力而为）——POSIX 下 rename 的目录项持久化要目录 fsync 才成立，不刷
 /// 则掉电可能"引导标志看似已翻、重启回旧槽"。vfat（boot 分区）rename 原子
 /// 性弱于 unix 文件系统的残余风险仍列 partition-layout.md 板上核对项。
-pub fn rr3_bootconf_write_atomic(path: &Path, text: &str) -> io::Result<()> {
+pub fn rr3_bootconf_store(path: &Path, text: &str) -> io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
         .file_name()
@@ -158,7 +158,7 @@ pub fn rr3_bootconf_write_atomic(path: &Path, text: &str) -> io::Result<()> {
 /// 从内核 cmdline 文本解析运行槽（板上"当前槽"的权威来源——extlinux.conf
 /// 只写进引导配置，真正生效的是启动时的 cmdline）。只认 `root=LABEL=rr_`
 /// token 形态；root=/dev/mmcblk… 裸设备形态不覆盖，如实报"板上核对项"。
-pub fn rr3_cmdline_current_slot(text: &str) -> Result<Rr3Slot, String> {
+pub fn rr3_cmdline_slot(text: &str) -> Result<Rr3Slot, String> {
     let mut found: Option<Rr3Slot> = None;
     for tok in text.split_whitespace() {
         let Some(rest) = tok.strip_prefix(RR3_ROOT_TOKEN) else {
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn current_slot_reads_the_real_artifact() {
         assert_eq!(
-            rr3_bootconf_current_slot(REAL).unwrap(),
+            rr3_bootconf_slot(REAL).unwrap(),
             Rr3Slot::SlotA,
             "真工件当前槽判定漂移"
         );
@@ -282,7 +282,7 @@ mod tests {
         let e = rr3_bootconf_switch(&two, Rr3Slot::SlotB).unwrap_err();
         assert!(e.contains("歧义"), "多 token 要报歧义: {e}");
         let foreign = REAL.replace("root=LABEL=rr_a", "root=LABEL=rr_x");
-        let e = rr3_bootconf_current_slot(&foreign).unwrap_err();
+        let e = rr3_bootconf_slot(&foreign).unwrap_err();
         assert!(e.contains("不在 rr-ota 在册标签"), "杂牌标签要拒: {e}");
     }
 
@@ -294,7 +294,7 @@ mod tests {
         fs::write(&path, "root=LABEL=rr_a").expect("写初版");
         let text =
             rr3_bootconf_switch(&fs::read_to_string(&path).unwrap(), Rr3Slot::SlotB).expect("改写");
-        rr3_bootconf_write_atomic(&path, &text).expect("原子落盘");
+        rr3_bootconf_store(&path, &text).expect("原子落盘");
         assert_eq!(fs::read_to_string(&path).unwrap(), "root=LABEL=rr_b");
         let leftovers: Vec<_> = fs::read_dir(&tmp.0)
             .unwrap()
@@ -310,12 +310,11 @@ mod tests {
     #[test]
     fn cmdline_parse_covers_label_form_and_names_the_gap() {
         let slot =
-            rr3_cmdline_current_slot("console=ttyS2,1500000 root=LABEL=rr_b rootwait rw quiet\n")
-                .unwrap();
+            rr3_cmdline_slot("console=ttyS2,1500000 root=LABEL=rr_b rootwait rw quiet\n").unwrap();
         assert_eq!(slot, Rr3Slot::SlotB);
-        let e = rr3_cmdline_current_slot("root=/dev/mmcblk0p3 rootwait\n").unwrap_err();
+        let e = rr3_cmdline_slot("root=/dev/mmcblk0p3 rootwait\n").unwrap_err();
         assert!(e.contains("板上核对项"), "裸设备形态要点名不覆盖: {e}");
-        let e = rr3_cmdline_current_slot("quiet\n").unwrap_err();
+        let e = rr3_cmdline_slot("quiet\n").unwrap_err();
         assert!(e.contains("板上核对项"), "无 token 同样不覆盖: {e}");
     }
 }
