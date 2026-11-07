@@ -19,7 +19,7 @@ use periph_mech::oled_codec::{
 use rr_periph_proto::ports::Rr3I2cPort;
 
 use crate::ports_impl::rr3_esp_i2c;
-use crate::state::rr3_i2c_pins_for_recovery;
+use crate::state::rr3_i2c_recovery;
 
 // 字模与编码真值已迁 periph-mech（P0-A A3）：本档只留 I2C 事务/重试/总线自愈。
 // 保留 `glyph` 别名供行面 FONT 自检直接取字模（与编码面同一张表，无第二份）。
@@ -68,14 +68,14 @@ fn i2c_write_retry(i2c: &mut impl Rr3I2cPort, addr: u8, bytes: &[u8]) -> Result<
 /// 把 I2C 引脚切到 GPIO 再交还，SCAN/密集动作中反复扰动可触发复位）。
 ///
 /// **引脚真值（批N41 件一修订批N4 件七(c)）**：SDA/SCL 取注入态；未注入回编译期
-/// 装配锚（[`rr3_i2c_pins_for_recovery`]）——独立部署（音频独占 UART、无 act 桥）下
+/// 装配锚（[`rr3_i2c_recovery`]）——独立部署（音频独占 UART、无 act 桥）下
 /// 无人推 `rr3.set_bindings`，自愈不能永久停摆。注入值仍优先。
 ///
 /// **返回**：`true` = 动作后 SDA 已释放（或本就不需要动作）；`false` = 9 时钟后仍
 /// 被拉低（模块未上电/硬短/线松）——调用方据此退避，**不要每拍强驱**。
 pub(crate) fn i2c_bus_recover(force: bool) -> bool {
     use esp_idf_sys as sys;
-    let (sda, scl) = rr3_i2c_pins_for_recovery();
+    let (sda, scl) = rr3_i2c_recovery();
     let (sda, scl) = (sda as i32, scl as i32);
     let mut clear = true;
     unsafe {
@@ -148,7 +148,7 @@ pub(crate) fn i2c_bus_recover(force: bool) -> bool {
 /// 仍被拉低（模块未上电/硬短/线松）——**不硬打 STOP**，由调用方点名、继续 boot。
 pub(crate) unsafe fn i2c_bus_unstick() -> bool {
     use esp_idf_sys as sys;
-    let (sda, scl) = rr3_i2c_pins_for_recovery();
+    let (sda, scl) = rr3_i2c_recovery();
     let (sda, scl) = (sda as i32, scl as i32);
     // SDA 输入上拉（读电平）、SCL 开漏输出上拉
     sys::gpio_set_direction(sda, sys::gpio_mode_t_GPIO_MODE_INPUT);

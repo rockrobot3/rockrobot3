@@ -36,9 +36,9 @@ use rr_ipc::{
 };
 use serde_json::{json, Value};
 
-use crate::brain::{rr3_brain_config_text, wait_log_contains, wait_socket_exists};
+use crate::brain::{rr3_brain_cfg_text, wait_log_contains, wait_socket_exists};
 use crate::drill::{
-    rr3_find_repo_root, rr3_manifest_text_ext, rr3_require_bins_ext, rr3_section, rr3_wait_modules,
+    rr3_find_repo_root, rr3_manifest_ext, rr3_require_bins_ext, rr3_section, rr3_wait_modules,
     Rr3SimArgs, RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN, RR3_SIM_PANEL_ADDR,
 };
 
@@ -78,7 +78,7 @@ pub fn rr3_chain_manifests(
     vec![
         (
             RR3_SIM_MODULE_A.to_string(),
-            rr3_manifest_text_ext(
+            rr3_manifest_ext(
                 RR3_SIM_MODULE_A,
                 sense_entry,
                 "module",
@@ -93,7 +93,7 @@ pub fn rr3_chain_manifests(
         ),
         (
             RR3_SIM_MODULE_B.to_string(),
-            rr3_manifest_text_ext(
+            rr3_manifest_ext(
                 RR3_SIM_MODULE_B,
                 interact_entry,
                 "module",
@@ -108,7 +108,7 @@ pub fn rr3_chain_manifests(
         ),
         (
             RR3_SIM_MODULE_BRAIN.to_string(),
-            rr3_manifest_text_ext(
+            rr3_manifest_ext(
                 RR3_SIM_MODULE_BRAIN,
                 brain_entry,
                 "brain",
@@ -125,7 +125,7 @@ pub fn rr3_chain_manifests(
         ),
         (
             RR3_SIM_MODULE_ACT.to_string(),
-            rr3_manifest_text_ext(
+            rr3_manifest_ext(
                 RR3_SIM_MODULE_ACT,
                 act_entry,
                 "module",
@@ -151,8 +151,8 @@ pub fn rr3_chain_manifests(
 
 /// 观察者 manifest：最小身份 + 两个取证主题订阅（不发布，无 exposes）。
 /// `entry` 注册门禁要求绝对路径——观察者不 exec，指向任一真二进制即可。
-pub fn rr3_chain_obs_manifest(entry_abs: &Path) -> String {
-    rr3_manifest_text_ext(
+pub fn rr3_chain_obs(entry_abs: &Path) -> String {
+    rr3_manifest_ext(
         RR3_CHAIN_OBS,
         entry_abs,
         "module",
@@ -168,7 +168,7 @@ pub fn rr3_chain_obs_manifest(entry_abs: &Path) -> String {
 
 /// sense 双麦 config（与批F2 判向 e2e 的 DOA_CONFIG 同形状：channels=2，
 /// VAD 阈值与仓内 config 同值；判向只认 ch_n>=2，单麦链路无方向语义）
-pub fn rr3_chain_sense_config_text() -> String {
+pub fn rr3_chain_sense_cfg() -> String {
     "[rr3-sense]\nlog_level = \"info\"\n\n[rr3-sense.audio]\nsample_rate = 16000\nchannels = 2\nframe_ms = 20\n\n[rr3-sense.vad]\nrms_start = 1500\nsilence_tail_ms = 700\nmin_speech_ms = 200\n\n[rr3-sense.doa]\nbin_threshold_deg = 30\n"
         .to_string()
 }
@@ -176,14 +176,14 @@ pub fn rr3_chain_sense_config_text() -> String {
 /// act 演练 config（与 e2e_act 夹具同形状，漂移当场由 main.rs 的形状解析红）。
 /// 行程键不在 config（批N3 件五门 g 收敛：行程真值 = 执行轴档案经
 /// RR3_ACT_AXIS_STATE 注入），本文本与仓内 modules/rr3-act/config.toml 同形。
-pub fn rr3_chain_act_config_text() -> String {
+pub fn rr3_chain_act_cfg() -> String {
     "[rr3-act]\nlog_level = \"info\"\n\n[rr3-act.servo]\nmove_timeout_ms = 800\nstate_min_interval_ms = 50\n\n[rr3-act.led]\nblink_period_ms = 500\neffects = [\"on\", \"off\", \"blink\"]\n\n[rr3-act.intent]\nopen_topics = [\"rr3-act/relay/set\", \"rr3-act/servo/command\"]\n\n[rr3-act.reflex]\nloop_hz = 1000\nsaturate_notice_ms = 500\n"
         .to_string()
 }
 
 /// interact 演练 config（I-11 起 interact 必读 config：不可点名集注入；与仓内
 /// `modules/rr3-interact/config.toml` 同形状，缺键/在册外值由 main.rs 解析红）
-pub fn rr3_chain_interact_config_text() -> String {
+pub fn rr3_chain_interact_cfg() -> String {
     "[rr3-interact]\nlog_level = \"info\"\n\n[rr3-interact.face]\nnon_pointable = [\"talk\"]\n"
         .to_string()
 }
@@ -393,12 +393,12 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     for (name, text) in [
         (
             "brain-config.toml",
-            rr3_brain_config_text(false, "http://127.0.0.1:9/v1"),
+            rr3_brain_cfg_text(false, "http://127.0.0.1:9/v1"),
         ),
-        ("sense-config.toml", rr3_chain_sense_config_text()),
-        ("interact-config.toml", rr3_chain_interact_config_text()),
-        ("act-config.toml", rr3_chain_act_config_text()),
-        ("rr3-obs.toml", rr3_chain_obs_manifest(&act)),
+        ("sense-config.toml", rr3_chain_sense_cfg()),
+        ("interact-config.toml", rr3_chain_interact_cfg()),
+        ("act-config.toml", rr3_chain_act_cfg()),
+        ("rr3-obs.toml", rr3_chain_obs(&act)),
     ] {
         let p = workdir.join(name);
         std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
@@ -664,7 +664,7 @@ mod tests {
 
     #[test]
     fn obs_manifest_subscribes_both_evidence_topics() {
-        let t = rr3_chain_obs_manifest(Path::new("/abs/rr3-act"));
+        let t = rr3_chain_obs(Path::new("/abs/rr3-act"));
         assert!(t.contains("name = \"rr3-obs\""), "{t}");
         assert!(
             t.contains(&format!(
@@ -677,16 +677,16 @@ mod tests {
 
     #[test]
     fn configs_carry_stereo_sense_and_act_servo_shape() {
-        let sense = rr3_chain_sense_config_text();
+        let sense = rr3_chain_sense_cfg();
         assert!(sense.contains("channels = 2"), "{sense}");
         assert!(sense.contains("rms_start = 1500"), "{sense}");
         assert!(sense.contains("bin_threshold_deg = 30"), "{sense}");
-        let act = rr3_chain_act_config_text();
+        let act = rr3_chain_act_cfg();
         // 行程键已撤（批N3 件五门 g），断言改锚存活键——servo 节时限仍在
         assert!(act.contains("move_timeout_ms = 800"), "{act}");
         assert!(act.contains("state_min_interval_ms = 50"), "{act}");
         assert!(!act.contains("limit_deg"), "行程键不得回流 config: {act}");
-        let interact = rr3_chain_interact_config_text();
+        let interact = rr3_chain_interact_cfg();
         assert!(
             interact.contains("non_pointable = [\"talk\"]"),
             "{interact}"

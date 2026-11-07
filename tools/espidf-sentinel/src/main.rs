@@ -246,7 +246,7 @@ impl Shared {
     }
 
     /// 断开转移 + 复位（Rr3LinkState::Down 的裸机面语义：运行环复位）。
-    fn mark_down_and_restart(&self, why: &str) -> ! {
+    fn rr3_mark_restart(&self, why: &str) -> ! {
         eprintln!("[sentinel] 断开: {why}");
         self.rt
             .lock()
@@ -336,13 +336,13 @@ fn main() {
     );
     let reply = match reply {
         Ok(v) if v.get("error").is_none() => v,
-        Ok(v) => shared.mark_down_and_restart(&format!("注册被拒: {v}")),
-        Err(e) => shared.mark_down_and_restart(&format!("注册失败: {e}")),
+        Ok(v) => shared.rr3_mark_restart(&format!("注册被拒: {v}")),
+        Err(e) => shared.rr3_mark_restart(&format!("注册失败: {e}")),
     };
     let task = reply
         .pointer("/result/src_task")
         .and_then(Value::as_u64)
-        .unwrap_or_else(|| shared.mark_down_and_restart("注册应答缺 result.src_task"));
+        .unwrap_or_else(|| shared.rr3_mark_restart("注册应答缺 result.src_task"));
     shared.task.store(task as u32, Ordering::Relaxed);
     // 机制核状态机转移 Registering → Online，首拍 = 此刻 + heartbeat_ms
     let now_ms = shared.now_ms();
@@ -421,7 +421,7 @@ fn heartbeat_loop(sh: Arc<Shared>) {
                 seq += 1;
                 sh.guard_line(Rr3GuardEvent::Feed { seq });
             }
-            other => sh.mark_down_and_restart(&format!("心跳失败: {other:?}")),
+            other => sh.rr3_mark_restart(&format!("心跳失败: {other:?}")),
         }
     }
 }
@@ -435,7 +435,7 @@ fn reader_loop(mut rx: UartRxHalf, sh: Arc<Shared>) {
         // （半帧/坏 magic/长度不符），错误面与宿主三实现同源
         let buf = match rx.rr3_recv_buf() {
             Ok(b) => b,
-            Err(e) => sh.mark_down_and_restart(&format!("收帧失败: {e:?}")),
+            Err(e) => sh.rr3_mark_restart(&format!("收帧失败: {e:?}")),
         };
         let frame = match Rr3Frame::try_from(buf) {
             Ok(f) => f,

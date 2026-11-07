@@ -311,7 +311,7 @@ watchdog_timeout_ms = {wd_ms}
 /// 旧签名，新形状单独可测。
 // 参数逐一对应 manifest 契约字段（wire 形状生成器，不是内部 API）——显式豁免。
 #[allow(clippy::too_many_arguments)]
-pub fn rr3_manifest_text_ext(
+pub fn rr3_manifest_ext(
     name: &str,
     entry_abs: &Path,
     module_type: &str,

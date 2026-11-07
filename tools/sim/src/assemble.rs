@@ -8,7 +8,7 @@
 //!
 //! 演练 modules-root 布局 = **装机布局**（`<root>/profiles/<机>.toml` 上两级是
 //! modules-root、`modules/<name>/{module.toml,config.toml,<entry>}`）：
-//! - manifest 用仓源原文、只改 entry 一个值（rr3-pack `rr3_manifest_install_rewrite`
+//! - manifest 用仓源原文、只改 entry 一个值（rr3-pack `rr3_manifest_rewrite`
 //!   同语义同三道门）——装配对账的 provides 真值必须是仓源那一册，自造 manifest
 //!   等于第二份真值；entry 绝对化是「entry 在仓相对、装机绝对」的第三面
 //!   （装机 = 演练 modules-root，前两面：deb 打包、buildroot post-build）；
@@ -36,14 +36,14 @@ use crate::drill::{
 /// 装配演练就绪上界：冷启动 + 六进程注册也要够用
 const RR3_ASSEMBLE_READY_DEADLINE: Duration = Duration::from_secs(60);
 
-/// 仓源 manifest 的 entry 装机改写（rr3-pack `rr3_manifest_install_rewrite` 同语义同
+/// 仓源 manifest 的 entry 装机改写（rr3-pack `rr3_manifest_rewrite` 同语义同
 /// 三道门，只改 entry 引号内的值，其余字节原样）：
 /// 门 0 装机值可装机（绝对路径 + 无 `.` / `..` 段；POSIX 语法判定——
 /// `Path::is_absolute` 在 Windows host 对 `/x` 返回 false，语义随 host 漂移会让同一
 /// 份 manifest 两侧判定不同，registry 的 `rr3_manifest_entry_is_absolute` 同款理由）；
 /// 门 1 entry 行恰一条；门 2 旧值与解析事实交叉核验（防夹具读错文件）；
 /// 门 3 改写后重解析复核。
-pub fn rr3_assemble_entry_rewrite(
+pub fn rr3_entry_rewrite(
     text: &str,
     installed: &Path,
     facts_entry: &str,
@@ -163,7 +163,7 @@ pub fn rr3_assemble_layout(
             .join("target/debug")
             .join(&facts.entry);
         // manifest 装机改写（三道门）后落位
-        let installed = rr3_assemble_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
+        let installed = rr3_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
         let dst_dir = workdir.join("modules").join(module);
         std::fs::create_dir_all(&dst_dir).map_err(|e| format!("建 {dst_dir:?} 失败: {e}"))?;
         let dst_manifest = dst_dir.join("module.toml");
@@ -413,7 +413,7 @@ watchdog_timeout_ms = 5000\n";
 
     #[test]
     fn rewrite_changes_only_the_entry_value() {
-        let out = rr3_assemble_entry_rewrite(
+        let out = rr3_entry_rewrite(
             GOOD,
             Path::new("/usr/lib/rr3/modules/rr3-x/rr3-x"),
             "rr3-x",
@@ -447,7 +447,7 @@ watchdog_timeout_ms = 5000\n";
         // 多条 entry 行
         let t = format!("{GOOD}entry = \"other\"\n");
         assert!(
-            rr3_assemble_entry_rewrite(&t, Path::new("/x"), "rr3-x", "rr3-x")
+            rr3_entry_rewrite(&t, Path::new("/x"), "rr3-x", "rr3-x")
                 .unwrap_err()
                 .contains("恰一条"),
             "多 entry 行须拒"
@@ -455,21 +455,19 @@ watchdog_timeout_ms = 5000\n";
         // 无 entry 行
         let t = GOOD.replace("entry = \"rr3-x\" # 行尾注释随原值保留\n", "");
         assert!(
-            rr3_assemble_entry_rewrite(&t, Path::new("/x"), "rr3-x", "rr3-x")
+            rr3_entry_rewrite(&t, Path::new("/x"), "rr3-x", "rr3-x")
                 .unwrap_err()
                 .contains("无 entry 行"),
             "无 entry 行须拒"
         );
         // 旧值与 facts 交叉核验
-        assert!(
-            rr3_assemble_entry_rewrite(GOOD, Path::new("/x"), "wrong", "rr3-x")
-                .unwrap_err()
-                .contains("不一致")
-        );
+        assert!(rr3_entry_rewrite(GOOD, Path::new("/x"), "wrong", "rr3-x")
+            .unwrap_err()
+            .contains("不一致"));
         // 不可装机：相对 / .. 段
         for bad in ["rel/entry", "/abs/../esc"] {
             assert!(
-                rr3_assemble_entry_rewrite(GOOD, Path::new(bad), "rr3-x", "rr3-x")
+                rr3_entry_rewrite(GOOD, Path::new(bad), "rr3-x", "rr3-x")
                     .unwrap_err()
                     .contains("不可装机"),
                 "{bad} 须拒"
