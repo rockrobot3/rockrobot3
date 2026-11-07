@@ -37,6 +37,12 @@ pub struct FrameAssembler {
     plen_cap: usize,
 }
 
+impl Default for FrameAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrameAssembler {
     /// 缺省护栏（板面音频片 ~11KB 的千倍余量）。
     pub fn new() -> Self {

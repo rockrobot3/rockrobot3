@@ -72,8 +72,8 @@ pub fn rr3_asr_boost_pcm(pcm: &[u8], gain: i32) -> Vec<u8> {
         return pcm.to_vec();
     }
     let mut out = Vec::with_capacity(pcm.len());
-    for pair in pcm.chunks_exact(2) {
-        let v = i16::from_le_bytes([pair[0], pair[1]]) as i32;
+    for pair in pcm.as_chunks::<2>().0 {
+        let v = i16::from_le_bytes(*pair) as i32;
         let s = (v * gain).clamp(-32768, 32767) as i16;
         out.extend_from_slice(&s.to_le_bytes());
     }

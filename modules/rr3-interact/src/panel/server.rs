@@ -104,6 +104,8 @@ impl Drop for Rr3ConnSlot {
 /// `roles.requires` 每项 ∪ `domains` 字段 ∪ 轴档案字段）。check.sh 步 ⑩ 自本常量
 /// 导出词表做 covers 形制校验（单真值点，不抄第二份）；词表外的集合 = 申报无效，
 /// fail-closed 当场红。
+// 门禁消费：check.sh 步 ⑩ awk 自本常量导出 covers 词表，Rust 侧无调用点。
+#[allow(dead_code)]
 pub const RR3_PANEL_COVER_SETS: [&str; 5] = ["ops", "pin", "role", "domain", "axis"];
 
 /// applies 生效路径词表（I-20，批N4 件四，全案 §19.3 判据 1）：面板写口动了
@@ -112,6 +114,8 @@ pub const RR3_PANEL_COVER_SETS: [&str; 5] = ["ops", "pin", "role", "domain", "ax
 /// check.sh 步 ⑩ 自本常量导出词表校验（词表外红、写口带 covers 申报而缺
 /// applies 红）；UI 面对操作者显式告知（写口应答带 `applies` 字段，前端文案
 /// 同义转述——密钥面即"brain 下一轮对话生效"）。
+// 门禁消费：check.sh 步 ⑩ awk 自本常量导出 applies 词表，Rust 侧无调用点。
+#[allow(dead_code)]
 pub const RR3_PANEL_APPLY_MODES: [&str; 3] = ["live", "reboot", "reflash"];
 
 /// 端点总表（I-9/I-12 唯一真值，0.0.5 批M MC-8③；covers 申报面随 I-19 批N4 件三
@@ -786,6 +790,15 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     })
 }
 
+/// 面板动作入队通道：动作 + 代执行回执发送端（主循环 on_tick 排空）
+pub type Rr3PanelActRx = mpsc::Receiver<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>;
+
+/// 面板状态页 link 槽（主循环 on_event 写、面板线程读）
+pub type Rr3PanelLink = Arc<Mutex<Option<Value>>>;
+
+/// [`spawn_host`] 的装配返回：动作入队端 + 状态页 link 槽
+pub type Rr3PanelHost = (Rr3PanelActRx, Rr3PanelLink);
+
 /// 面板线程宿主（0.0.8 W-A 批4 函数化，方案 §4.6）：link Arc＋动作通道＋
 /// 五限额毫秒→Duration 换算＋[`Rr3PanelShared`] 构造＋线程 spawn 收进一处，
 /// main.rs 一行装配。返回 `(act_rx, link)` 给 Dispatcher——act_rx 主循环
@@ -796,13 +809,7 @@ pub fn spawn_host(
     bus: &BusHandle,
     panel: &crate::boot::Rr3PanelCfg,
     selftest: &crate::boot::Rr3SelftestCfg,
-) -> Result<
-    (
-        mpsc::Receiver<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>,
-        Arc<Mutex<Option<Value>>>,
-    ),
-    String,
-> {
+) -> Result<Rr3PanelHost, String> {
     let link = Arc::new(Mutex::new(None::<Value>));
     let (act_tx, act_rx) = mpsc::channel();
     // 面板五限额/超时（批N4 件五 I-18②）：config 毫秒值转 Duration，装配期
@@ -1069,10 +1076,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
             let mut legs = Vec::with_capacity(8);
             // 腿1 speaker：beep 走主循环代执行——内置测试音（批N5 件五笔2）
             // 播放成功即 pass；主循环缺席/写播放面失败如实 fail 点名原因
-            let reason = match rr3_panel_act(shared, Rr3PanelAction::Beep) {
-                Ok(_) => None,
-                Err(e) => Some(e),
-            };
+            let reason = rr3_panel_act(shared, Rr3PanelAction::Beep).err();
             legs.push(json!({
                 "leg": "speaker",
                 "pass": if reason.is_none() { "pass" } else { "fail" },
@@ -1130,15 +1134,13 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                 };
             // 腿3 face：切到期望表情（I-17/M-10：期望值 config 数据化，产线
             // 按形态改 [rr3-interact.selftest].face_expect）
-            let reason = match rr3_panel_act(
+            let reason = rr3_panel_act(
                 shared,
                 Rr3PanelAction::Face {
                     expression: shared.selftest_face_expect.to_string(),
                 },
-            ) {
-                Ok(_) => None,
-                Err(e) => Some(e),
-            };
+            )
+            .err();
             let mut face_leg = json!({
                 "leg": "face",
                 "pass": if reason.is_none() { "pass" } else { "fail" },
@@ -1883,10 +1885,7 @@ mod tests {
         contracts: Value,
     ) {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        loop {
-            let Some(frame) = rr3_frame_read(&mut stream).ok() else {
-                break;
-            };
+        while let Ok(frame) = rr3_frame_read(&mut stream) {
             let Ok((ty, body)) = rr3_body_split_of(&frame) else {
                 break;
             };

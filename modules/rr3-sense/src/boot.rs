@@ -17,22 +17,20 @@ use rr_hal_api::Rr3AudioSource;
 use crate::capture::Rr3AudioConfig;
 use crate::vad::Rr3VadConfig;
 
+/// 音频源探活返回：源 + 命令旁路 + 后端名（错误文案复用）+ 开源形状（采集拍复用）
+pub(crate) type Rr3SenseProbe = (
+    Box<dyn Rr3AudioSource>,
+    Option<Rr3AudioCmdProducer>,
+    &'static str,
+    Rr3AudioCfg,
+);
+
 /// 音频源选择 + 开机探活编排：[`rr3_hal_audio_source_with_cmd`] 后端选择
 /// （反射环命令旁路随源给出，None = 后端无旁路）＋ open 探活（打开失败 Err
 /// 上抛）。「音频源就绪」回显归本编排（方案 §4.3 映射表字面）。返回四元——
 /// 源、命令旁路、后端名（"读帧失败({backend})"文案复用）、开源形状（采集拍
 /// 构造 `Rr3PcmStream` 复用）。
-pub(crate) fn rr3_sense_probe(
-    cfg: &Rr3SenseConfig,
-) -> Result<
-    (
-        Box<dyn Rr3AudioSource>,
-        Option<Rr3AudioCmdProducer>,
-        &'static str,
-        Rr3AudioCfg,
-    ),
-    String,
-> {
+pub(crate) fn rr3_sense_probe(cfg: &Rr3SenseConfig) -> Result<Rr3SenseProbe, String> {
     let (mut source, cmd_tx, backend) = rr3_hal_audio_source_with_cmd();
     if cfg.reflex.enable && cmd_tx.is_none() {
         eprintln!(

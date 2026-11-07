@@ -1350,7 +1350,7 @@ pub fn rr3_runtime_truth_set_locations(
         .ok_or_else(|| format!("装配单 {} 无文件名", abs.display()))?;
     let names = rr3_truth_set_member_names(stem, chip);
     // 与 names 同序逐条映射（成员名生成与定位映射一一对应，错位即成员集判等红）
-    let paths = vec![
+    let paths = [
         vec![abs.clone()],
         RR3_CONTRACT_BOOKS
             .iter()
@@ -1927,10 +1927,10 @@ pub fn rr3_profile_boot_inputs_with_probe(
     let mut role_missing: Vec<(String, String)> = Vec::new();
     let enabled_all: BTreeSet<String> = profile.enabled_slots.values().flatten().cloned().collect();
     for slot in &enabled_all {
-        if !profile.slots_present.contains(&slot) {
+        if !profile.slots_present.contains(slot) {
             continue;
         }
-        for role in roles.rr3_role_table_names_for_slot(&slot) {
+        for role in roles.rr3_role_table_names_for_slot(slot) {
             if !profile.pins.iter().any(|p| p.role == role) {
                 role_missing.push((slot.clone(), role));
             }
@@ -1946,7 +1946,7 @@ pub fn rr3_profile_boot_inputs_with_probe(
     // / 该格无 I2C 绑定 → 传 None → 探针回落总线级五面判据（无 [pins] 形态兼容面）。
     let mut i2c_bind: BTreeMap<String, (u32, String)> = BTreeMap::new();
     for slot in &enabled_all {
-        for role in roles.rr3_role_table_names_for_slot(&slot) {
+        for role in roles.rr3_role_table_names_for_slot(slot) {
             for pin in profile.pins.iter().filter(|p| p.role == role) {
                 let Some(n) = pin
                     .controller
@@ -2472,6 +2472,7 @@ fn rr3_assemble_scan(module_dir: &Path) -> (Vec<(String, Rr3AssembleFacts)>, Vec
 /// 逐条点名：
 /// - demand.rail 不在 [[supplies.domain]] ⇒ 红（域缺 = `current_cap_ma` 缺，预算无分母）；
 /// - per rail 扩算后最坏并发 Σ 超域 cap ⇒ 红点名（域 + 最坏值 + cap + 申报者清单）。
+///
 /// 加总口径（F-12）：**缺省 = 全部 critical=true 同时（最坏）**；收窄只认数据——
 /// `concurrency_group` **恰一组**归属的条目同组互斥（至多一个同时取流）⇒ 组内取
 /// max；显式空数组（不分组）与**多组**归属按不收窄计（宁超算不漏算），不许运行期
@@ -2625,6 +2626,7 @@ fn rr3_demand_kind_power_gaps(
 /// - ⑩-b `Σ heap_peak_bytes ≤ heap_total_bytes − heap_reserved_bytes`（可用堆 =
 ///   平台堆 − 常驻——F-13：UART2_TX_RING/AUDIO_Q_CAP/渲染缓冲/批N4 板侧配置
 ///   全是堆账，只加总栈会击穿半边）
+///
 /// `not_applicable = true`（host 档显式不适用）⇒ 绿（parse 层分档自洽已保证 host
 /// 档 not_applicable 必真且三数键不并存）。fail-closed 逐条点名：栈超与堆超各一条、
 /// 各自点名判据号与两侧数值——F-13 形状（堆值不计栈）下只红 ⑩-b 不级联 ⑩-a。
@@ -2746,7 +2748,7 @@ mod tests {
         let d = |rail: &str, peak: i64, critical: bool, groups: &[&str]| Rr3AssembleDemand {
             rail: rail.into(),
             peak_ma: peak,
-            sustained_ma: peak.min(120).max(1),
+            sustained_ma: peak.clamp(1, 120),
             critical,
             concurrency_group: groups.iter().map(|g| g.to_string()).collect(),
         };
