@@ -2458,6 +2458,8 @@ fn assemble_registry_tables_are_pinned() {
             "ina219_addr",
             "link_ifname",
             "spi_device",
+            // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值，描述符 [hardware].periph_uart）
+            "periph_uart",
             // 批N4 件七(b) 基-24 桥上配置腿：板侧配置三键（板侧裸寄存器自愈路径
             // 引脚真值，无 role 对应故不在 [pins] 派生键集，rtos 档 [hardware] 直给）
             "i2c_sda",

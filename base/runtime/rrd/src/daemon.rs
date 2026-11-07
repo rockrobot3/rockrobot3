@@ -209,7 +209,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
     // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
     // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
-    let (boot_manifests, degraded, hal_bindings, axis_state, predegraded) = match &cfg.profile {
+    let (boot_manifests, degraded, hal_bindings, axis_state, predegraded, hal_backend, audio_backend) = match &cfg.profile {
         Some(p) => {
             // 格位/角色/器件契约与主题契约同目录（--contracts 运行期落点，T5；roles.toml
             // 是校验①②判据源、devices.toml 是校验⑦-d 的 mate 集判定源、platform/ 是
@@ -293,11 +293,13 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 boot.hal_bindings,
                 boot.axis_state,
                 predegraded,
+                boot.hal_backend,
+                boot.audio_backend,
             )
         }
         // None 臂 = **仅 --manifest 调试后门**（基-23）：裸起（既无 --profile 又无
         // --manifest）在 cli parse 处已非 0 退出，走不到这里；后门路径无装配单，
-        // hal_bindings/axis_state 空串（spawn 不注入，fail-closed + 应急 env）、
+        // hal_bindings/axis_state/hal_backend 空（spawn 不注入，fail-closed + 应急 env）、
         // 无缺格点名、无装配快照（ctl.wiring 如实回不可得）。
         None => (
             cfg.manifests.clone(),
@@ -305,6 +307,8 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             String::new(),
             String::new(),
             BTreeSet::new(),
+            String::new(),
+            None,
         ),
     };
     // rrd 自身日志落盘（批N5 件二笔2，§17 运维留痕同轨判据）：`<socket>.log/rrd.log`
@@ -414,6 +418,10 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             // 缺省）。
             job.hal_bindings = hal_bindings.clone();
             job.axis_state = axis_state.clone();
+            // P0-3 根因门：装配单声明的 HAL 后端注入子进程——后端选择是部署事实，
+            // 必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产假验证）。
+            job.hal_backend = hal_backend.clone();
+            job.audio_backend = audio_backend.clone();
             jobs.push(job);
         }
     }

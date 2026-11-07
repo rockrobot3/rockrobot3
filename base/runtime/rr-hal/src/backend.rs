@@ -236,6 +236,22 @@ fn rr3_hal_sim_wave() -> crate::sim::Rr3SimWave {
         .unwrap_or(crate::sim::Rr3SimWave::Sine)
 }
 
+/// ESP32 外设桥 UART 设备路径解析（P0-3/P0-4）：优先从生效绑定
+/// （描述符 [hardware].periph_uart + 应急 env RR3_HAL_PERIPH_UART 覆盖）取，
+/// 回落直接读 env；都没有 → None（调用方 fail-closed 落 placeholder）。
+/// 跨平台（linux/mac 宿主档都消费），故不用 cfg 门。
+fn rr3_hal_periph_uart_path() -> Option<String> {
+    if let Ok(b) = crate::descriptor::rr3_hal_bindings_effective() {
+        if let Some(p) = b.periph_uart {
+            return Some(p);
+        }
+    }
+    std::env::var(rr_periph_proto::consts::RR3_HAL_PERIPH_UART_ENV)
+        .map(|p| p.trim().to_string())
+        .ok()
+        .filter(|p| !p.is_empty())
+}
+
 /// sim 方位角键的取值裁决（-90..=90 的有限十进制小数）。独立成纯函数：裁决可单测，
 /// 选择函数里只留"读环境 + 裁决 + 缺省"。
 pub fn rr3_sim_doa_deg_parse(s: &str) -> Option<f64> {
@@ -327,10 +343,8 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
         // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
-            match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
-                .map(|p| p.trim().to_string())
-            {
-                Ok(p) if !p.is_empty() => {
+            match rr3_hal_periph_uart_path() {
+                Some(p) => {
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_periph_baud_parse(&v))
@@ -346,9 +360,9 @@ pub fn rr3_hal_audio_source_with_cmd() -> (
                         RR3_BACKEND_ESP32,
                     )
                 }
-                _ => {
+                None => {
                     eprintln!(
-                        "rr-hal: esp32 档缺环境变量 {}，音频采集面落占位（使用时以 Unsupported 回错）",
+                        "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），音频采集面落占位（使用时以 Unsupported 回错）",
                         crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
                     );
                     (
@@ -461,16 +475,15 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
             unreachable!("上面 guard 已保证只在本分支编译")
         }
         RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
-        // ESP32 外设桥（批C）：设备路径来自应急 env（描述符键 periph_uart 随真件
-        // 装配批补入 profiles）；键缺失 → 占位显式回错（fail-closed，不猜设备）。
+        // ESP32 外设桥（批C）：设备路径来自生效绑定（描述符 [hardware].periph_uart
+        // + 应急 env RR3_HAL_PERIPH_UART 覆盖）；键缺失 → 占位显式回错
+        // （fail-closed，不猜设备）。
         // 宿主档门（批N8 件三）：espidf 档无桥面，本臂剔除后显式要 esp32 落
         // 下方 `_` 兜底臂占位回错（resolve 白名单单点不裁）。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
-            match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
-                .map(|p| p.trim().to_string())
-            {
-                Ok(p) if !p.is_empty() => {
+            match rr3_hal_periph_uart_path() {
+                Some(p) => {
                     let axis = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_AXIS_ENV)
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_periph_axis_parse(&v))
@@ -492,9 +505,9 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
                         RR3_BACKEND_ESP32,
                     )
                 }
-                _ => {
+                None => {
                     eprintln!(
-                        "rr-hal: esp32 档缺环境变量 {}，舵机面落占位（使用时以 Unsupported 回错）",
+                        "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），舵机面落占位（使用时以 Unsupported 回错）",
                         crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
                     );
                     (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
@@ -630,14 +643,13 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
             RR3_BACKEND_MAC,
         ),
         // ESP32 外设桥（批C）：OLED 出帧链路的宿主承载（帧面 rr3.call，板侧
-        // 8x8→64x64 放大渲染）。设备路径同舵机面的应急 env；缺 → 占位显式回错。
+        // 8x8→64x64 放大渲染）。设备路径来自生效绑定（描述符 [hardware].periph_uart
+        // + 应急 env RR3_HAL_PERIPH_UART 覆盖）；缺 → 占位显式回错。
         // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         RR3_BACKEND_ESP32 => {
-            match std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV)
-                .map(|p| p.trim().to_string())
-            {
-                Ok(p) if !p.is_empty() => {
+            match rr3_hal_periph_uart_path() {
+                Some(p) => {
                     // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
                     // 已钉 `UART2_BAUD_HZ`（2026-10-30 起定档 1.5M），会话须显式同档）
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
@@ -654,9 +666,9 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
                         RR3_BACKEND_ESP32,
                     )
                 }
-                _ => {
+                None => {
                     eprintln!(
-                        "rr-hal: esp32 档缺环境变量 {}，显示面落占位（使用时以 Unsupported 回错）",
+                        "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），显示面落占位（使用时以 Unsupported 回错）",
                         crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
                     );
                     (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
