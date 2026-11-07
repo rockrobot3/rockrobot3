@@ -80,7 +80,7 @@ fn main() -> std::process::ExitCode {
             RR3_CONTRACT_SCHEMA_VERSION,
             RR3_MANIFEST_SCHEMA_VERSION,
             &cfg.socket.display().to_string(),
-            topics.rr3_topic_set_names().len()
+            topics.rr3_topic_names().len()
         )
     );
     if let Some(ov) = &overlay {

@@ -7,7 +7,7 @@
 //! ① `atom.toml`（Atom manifest，契约=`rr-registry/src/atom.schema.toml`）
 //! ② 入口（`<名>.rs`，只声明公开面）· ③ 实现（`mech.rs`，机制主体）
 //! ④ 装配清单（`assemble.toml`，注入面声明）· ⑤ 唯一私有头（`private.rs`）。
-//! 产物当场回灌 `rr3_registry_validate_atom`（字段契约 + slots 查册门 + 板无关断言）。
+//! 产物当场回灌 `rr3_atom_gate`（字段契约 + slots 查册门 + 板无关断言）。
 
 use std::path::{Path, PathBuf};
 
@@ -194,7 +194,7 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
         std::fs::write(&path, body)?;
     }
 
-    let report = rr_registry::rr3_registry_validate_manifest(&staging.join("module.toml"));
+    let report = rr_registry::rr3_manifest_gate(&staging.join("module.toml"));
     if !report.ok() {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(Rr3MkmodError::Manifest(report.errors));
@@ -300,7 +300,7 @@ fn atom_private_rs(name: &str) -> String {
 /// 在 `out_root` 下生成原子件 `atoms 形状` 的 `<name>/` 五件套；返回生成的文件列表。
 ///
 /// `out_root` 语义 = 原子根目录（惯例 `modules/<组合件>/atoms`），产物落
-/// `<out_root>/<name>/`。生成后当场回灌 `rr3_registry_validate_atom`（字段契约 +
+/// `<out_root>/<name>/`。生成后当场回灌 `rr3_atom_gate`（字段契约 +
 /// slots 查册门 + 板无关断言）：`out_root` 须位于仓内以向上定位 `contracts/slots.toml`，
 /// 校验不过即整体丢弃（staging→rename，不留半成品）。
 pub fn rr3_mkmod_generate_atom(
@@ -331,13 +331,13 @@ pub fn rr3_mkmod_generate_atom(
 
     // 回灌校验（②b 同款纪律）：manifest + 装配清单生成即自检，不合规即中止。
     // G4：装配清单走 rr-registry 形状级真值（模板空数组必过；填实后坏形当场听见）。
-    let mut errs = rr_registry::rr3_registry_validate_atom(&staging.join("atom.toml"));
+    let mut errs = rr_registry::rr3_atom_gate(&staging.join("atom.toml"));
     let assemble_body = files
         .iter()
         .find(|(rel, _)| rel == "assemble.toml")
         .map(|(_, body)| body.as_str())
         .expect("五件套必含 assemble.toml");
-    if let Err(asm_errs) = rr_registry::rr3_registry_assemble_from_text(assemble_body) {
+    if let Err(asm_errs) = rr_registry::rr3_assemble_parse(assemble_body) {
         errs.extend(asm_errs);
     }
     if !errs.is_empty() {
@@ -380,7 +380,7 @@ mod tests {
             assert!(root.join(rel).is_file(), "缺 {rel}");
         }
         // 生成物独立再过一遍校验器（回灌发生在 staging 期，rename 后幂等）
-        let errs = rr_registry::rr3_registry_validate_atom(&root.join("sample_atom/atom.toml"));
+        let errs = rr_registry::rr3_atom_gate(&root.join("sample_atom/atom.toml"));
         assert!(errs.is_empty(), "{errs:?}");
     }
 

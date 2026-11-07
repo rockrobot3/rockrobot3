@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 use toml::Value;
 
-use crate::schema::{rr3_registry_get_by_path, Rr3FieldSpec};
+use crate::schema::{rr3_get_by_path, Rr3FieldSpec};
 
 /// Atom manifest 契约 schema 版本（对应 `atom.schema.toml` 的 `schema_version` 键）
 pub const RR3_ATOM_SCHEMA_VERSION: u32 = 1;
@@ -65,7 +65,7 @@ fn rr3_atom_str_field(table: &toml::Table, key: &str) -> Option<String> {
 
 /// 解析内嵌 atom schema，返回字段规格列表（顺序与契约文件一致；类型与
 /// module 侧 `Rr3FieldSpec` 复用，校验器共用 `rr3_registry_check`）
-pub fn rr3_registry_atom_field_specs() -> Vec<Rr3FieldSpec> {
+pub fn rr3_atom_field_specs() -> Vec<Rr3FieldSpec> {
     let root: Value = toml::from_str(RR3_ATOM_SCHEMA_TOML)
         .unwrap_or_else(|e| panic!("atom.schema.toml 解析失败: {e}"));
     let fields = root
@@ -86,7 +86,7 @@ pub fn rr3_registry_atom_field_specs() -> Vec<Rr3FieldSpec> {
 
 /// 板无关断言：文本命中任一禁词即报错（点名 token 与规则出处）。
 /// 独立成函数供三处复用：atom manifest 校验、mkmod 生成自检、批E 门禁接线。
-pub fn rr3_registry_board_free_assert(text: &str) -> Vec<String> {
+pub fn rr3_board_free_chk(text: &str) -> Vec<String> {
     let lower = text.to_lowercase();
     RR3_BOARD_TOKENS
         .iter()
@@ -111,7 +111,7 @@ fn rr3_atom_slots_path(manifest: &Path) -> PathBuf {
 
 /// 校验单个 atom.toml 文件：读文件 → 定位并解析 `contracts/slots.toml` → 全量校验。
 /// 生成器（tools/mkmodule）staging 回灌与 CI 用；路径须位于仓内以找到契约。
-pub fn rr3_registry_validate_atom(path: &Path) -> Vec<String> {
+pub fn rr3_atom_gate(path: &Path) -> Vec<String> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => return vec![format!("无法读取 atom manifest {}: {e}", path.display())],
@@ -126,21 +126,15 @@ pub fn rr3_registry_validate_atom(path: &Path) -> Vec<String> {
             )]
         }
     };
-    rr3_registry_validate_atom_text(
-        &text,
-        &crate::slots::rr3_registry_slot_table_from_text(&slots_text),
-    )
+    rr3_atom_chk(&text, &crate::slots::rr3_slot_parse(&slots_text))
 }
 
 /// 校验一段 atom.toml 文本 + 调用方给定的格位表（查册门真值注入侧）。
 /// 错误逐条点名字段；空格位表 fail-closed，不做任何后续校验。
-pub fn rr3_registry_validate_atom_text(
-    text: &str,
-    slots: &crate::slots::Rr3SlotTable,
-) -> Vec<String> {
+pub fn rr3_atom_chk(text: &str, slots: &crate::slots::Rr3SlotTable) -> Vec<String> {
     let mut errs = Vec::new();
 
-    if slots.rr3_slot_table_is_empty() {
+    if slots.rr3_slot_is_empty() {
         errs.push("格位表为空：拒绝校验任何 atom manifest（空注册表不是放行许可证）".to_string());
         return errs;
     }
@@ -154,19 +148,19 @@ pub fn rr3_registry_validate_atom_text(
     };
 
     // 0) 板无关断言（对 manifest 全文本，含注释——注释也是 manifest 的载荷面）
-    errs.extend(rr3_registry_board_free_assert(text));
+    errs.extend(rr3_board_free_chk(text));
 
     // 0b) 未知字段反向断言（收口批 E'，fail-closed，与 module 侧共用同一实现）：
     //     契约外的键（typo 如 uses.slost）不报错即静默丢依赖
-    errs.extend(crate::validate::rr3_registry_unknown_fields_assert(
+    errs.extend(crate::validate::rr3_no_unknown_keys(
         &root,
-        &rr3_registry_atom_field_specs(),
+        &rr3_atom_field_specs(),
         "atom manifest",
     ));
 
     // 1) 逐字段：存在性 + 类型 + 规则（与 validate.rs 逐字段循环同构，字段集来自 atom.schema.toml）
-    for spec in rr3_registry_atom_field_specs() {
-        let Some(value) = rr3_registry_get_by_path(&root, &spec.path) else {
+    for spec in rr3_atom_field_specs() {
+        let Some(value) = rr3_get_by_path(&root, &spec.path) else {
             if spec.required {
                 errs.push(format!("缺少必填字段 {}", spec.path));
             }
@@ -200,7 +194,7 @@ pub fn rr3_registry_validate_atom_text(
                         }
                         // 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）
                         if (spec.path == "provides.slots" || spec.path == "uses.slots")
-                            && !slots.rr3_slot_table_contains(s)
+                            && !slots.rr3_slot_contains(s)
                         {
                             errs.push(format!("字段 {} 引用未登记格位 {s}", spec.path));
                         }
@@ -221,7 +215,7 @@ pub fn rr3_registry_validate_atom_text(
     }
 
     // 2) 跨字段：每格一件（ADR-0019 裁定 1——Atom 填一个格、不可再分，恰一项）
-    let provided = rr3_registry_get_by_path(&root, "provides.slots").and_then(Value::as_array);
+    let provided = rr3_get_by_path(&root, "provides.slots").and_then(Value::as_array);
     match provided {
         Some(arr) if arr.len() == 1 => {}
         Some(arr) => errs.push(format!(
@@ -237,13 +231,13 @@ pub fn rr3_registry_validate_atom_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::slots::{rr3_registry_slot_table_from_text, Rr3SlotTable};
+    use crate::slots::{rr3_slot_parse, Rr3SlotTable};
 
     // include_str! 以本文件所在目录（src/）为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/slots.toml");
 
     fn slots() -> Rr3SlotTable {
-        rr3_registry_slot_table_from_text(CONTRACT)
+        rr3_slot_parse(CONTRACT)
     }
 
     fn battery_text() -> String {
@@ -271,13 +265,13 @@ subscribes = []
     /// 合法 atom 文本零报错；schema 字段集与 atom.schema.toml 同步（路径唯一）
     #[test]
     fn valid_battery_atom_passes() {
-        let errs = rr3_registry_validate_atom_text(&battery_text(), &slots());
+        let errs = rr3_atom_chk(&battery_text(), &slots());
         assert!(errs.is_empty(), "{errs:?}");
     }
 
     #[test]
     fn atom_field_paths_are_unique() {
-        let specs = rr3_registry_atom_field_specs();
+        let specs = rr3_atom_field_specs();
         let mut seen: Vec<&str> = specs.iter().map(|s| s.path.as_str()).collect();
         let before = seen.len();
         seen.sort_unstable();
@@ -290,13 +284,13 @@ subscribes = []
     #[test]
     fn unregistered_slot_is_rejected_and_empty_table_fail_closes() {
         let bad = battery_text().replace("power.battery", "power.solar");
-        let errs = rr3_registry_validate_atom_text(&bad, &slots());
+        let errs = rr3_atom_chk(&bad, &slots());
         assert!(
             errs.iter().any(|e| e.contains("未登记格位 power.solar")),
             "{errs:?}"
         );
 
-        let errs = rr3_registry_validate_atom_text(&battery_text(), &Rr3SlotTable::default());
+        let errs = rr3_atom_chk(&battery_text(), &Rr3SlotTable::default());
         assert_eq!(
             errs,
             vec!["格位表为空：拒绝校验任何 atom manifest（空注册表不是放行许可证）"]
@@ -310,7 +304,7 @@ subscribes = []
             "slots = [\"power.battery\"]",
             "slots = [\"power.battery\", \"power.charger\"]",
         );
-        let errs = rr3_registry_validate_atom_text(&two, &slots());
+        let errs = rr3_atom_chk(&two, &slots());
         assert!(
             errs.iter()
                 .any(|e| e.contains("恰有一项") && e.contains("2 项")),
@@ -318,7 +312,7 @@ subscribes = []
         );
 
         let none = battery_text().replace("slots = [\"power.battery\"]", "slots = []");
-        let errs = rr3_registry_validate_atom_text(&none, &slots());
+        let errs = rr3_atom_chk(&none, &slots());
         assert!(
             errs.iter()
                 .any(|e| e.contains("恰有一项") && e.contains("0 项")),
@@ -330,28 +324,28 @@ subscribes = []
     #[test]
     fn board_free_assertion_hits_tokens_anywhere() {
         let tainted = battery_text() + "\n# 后端绑定 INA219 @ GPIO2/3\n";
-        let errs = rr3_registry_validate_atom_text(&tainted, &slots());
+        let errs = rr3_atom_chk(&tainted, &slots());
         assert!(errs.iter().any(|e| e.contains("ina219")), "{errs:?}");
         assert!(errs.iter().any(|e| e.contains("gpio")), "{errs:?}");
 
         // 断言独立可用（生成器与批E 门禁的复用入口）
-        let errs = rr3_registry_board_free_assert("clean manifest");
+        let errs = rr3_board_free_chk("clean manifest");
         assert!(errs.is_empty());
-        assert_eq!(rr3_registry_board_free_assert("MAX7219").len(), 1);
+        assert_eq!(rr3_board_free_chk("MAX7219").len(), 1);
     }
 
     /// 必填字段与 topic 形状：缺字段点名、坏主题点名、uses/事件缺省放行
     #[test]
     fn required_fields_and_topic_shape_are_enforced() {
         let missing = battery_text().replace("version = \"0.0.1\"\n", "");
-        let errs = rr3_registry_validate_atom_text(&missing, &slots());
+        let errs = rr3_atom_chk(&missing, &slots());
         assert!(
             errs.iter().any(|e| e.contains("缺少必填字段 atom.version")),
             "{errs:?}"
         );
 
         let bad_topic = battery_text().replace("rr3-power/battery/state", "rr3-power/batteryState");
-        let errs = rr3_registry_validate_atom_text(&bad_topic, &slots());
+        let errs = rr3_atom_chk(&bad_topic, &slots());
         assert!(errs.iter().any(|e| e.contains("topic 非法")), "{errs:?}");
 
         let minimal = r#"
@@ -362,7 +356,7 @@ version = "0.1.0"
 [provides]
 slots = ["audio.vad"]
 "#;
-        let errs = rr3_registry_validate_atom_text(minimal, &slots());
+        let errs = rr3_atom_chk(minimal, &slots());
         assert!(errs.is_empty(), "uses/events 缺省即合规: {errs:?}");
     }
 
@@ -372,9 +366,9 @@ slots = ["audio.vad"]
     fn power_pilot_atoms_stay_compliant() {
         let battery = include_str!("../../../../modules/rr3-power/atoms/battery/atom.toml");
         let charger = include_str!("../../../../modules/rr3-power/atoms/charger/atom.toml");
-        let errs = rr3_registry_validate_atom_text(battery, &slots());
+        let errs = rr3_atom_chk(battery, &slots());
         assert!(errs.is_empty(), "battery 打样件漂移: {errs:?}");
-        let errs = rr3_registry_validate_atom_text(charger, &slots());
+        let errs = rr3_atom_chk(charger, &slots());
         assert!(errs.is_empty(), "charger 打样件漂移: {errs:?}");
     }
 
@@ -392,7 +386,7 @@ slots = ["audio.vad"]
             ("env", env),
             ("imu", imu),
         ] {
-            let errs = rr3_registry_validate_atom_text(text, &slots());
+            let errs = rr3_atom_chk(text, &slots());
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
@@ -405,7 +399,7 @@ slots = ["audio.vad"]
         let led = include_str!("../../../../modules/rr3-act/atoms/led/atom.toml");
         let relay = include_str!("../../../../modules/rr3-act/atoms/relay/atom.toml");
         for (name, text) in [("servo", servo), ("led", led), ("relay", relay)] {
-            let errs = rr3_registry_validate_atom_text(text, &slots());
+            let errs = rr3_atom_chk(text, &slots());
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
@@ -417,7 +411,7 @@ slots = ["audio.vad"]
         let face = include_str!("../../../../modules/rr3-interact/atoms/face/atom.toml");
         let player = include_str!("../../../../modules/rr3-interact/atoms/player/atom.toml");
         for (name, text) in [("face", face), ("player", player)] {
-            let errs = rr3_registry_validate_atom_text(text, &slots());
+            let errs = rr3_atom_chk(text, &slots());
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
@@ -429,7 +423,7 @@ slots = ["audio.vad"]
         let wifi = include_str!("../../../../modules/rr3-connect/atoms/wifi/atom.toml");
         let bt = include_str!("../../../../modules/rr3-connect/atoms/bt/atom.toml");
         for (name, text) in [("wifi", wifi), ("bt", bt)] {
-            let errs = rr3_registry_validate_atom_text(text, &slots());
+            let errs = rr3_atom_chk(text, &slots());
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
@@ -444,22 +438,21 @@ slots = ["audio.vad"]
         let llm = include_str!("../../../../modules/rr3-brain/atoms/llm/atom.toml");
         let tts = include_str!("../../../../modules/rr3-brain/atoms/tts/atom.toml");
         for (name, text) in [("dialog", dialog), ("asr", asr), ("llm", llm), ("tts", tts)] {
-            let errs = rr3_registry_validate_atom_text(text, &slots());
+            let errs = rr3_atom_chk(text, &slots());
             assert!(errs.is_empty(), "{name} 重铺件漂移: {errs:?}");
         }
     }
 
-    /// 收口批 E'：未知字段反向断言（rr3_registry_unknown_fields_assert）——
+    /// 收口批 E'：未知字段反向断言（rr3_no_unknown_keys）——
     /// typo 键（uses.slost）与未登记段双路红，合法 manifest 零命中（fail-closed 自证）
     #[test]
     fn unknown_fields_assert_flags_typo_keys() {
-        let specs = rr3_registry_atom_field_specs();
+        let specs = rr3_atom_field_specs();
         let bad: Value = toml::from_str(
             "[atom]\nname = \"x\"\nversion = \"0.1.0\"\n[provides]\nslots = [\"ui.face\"]\n[uses]\nslost = [\"audio.playback\"]\n[bogus]\ny = 2\n",
         )
         .expect("样例可解析");
-        let errs =
-            crate::validate::rr3_registry_unknown_fields_assert(&bad, &specs, "atom manifest");
+        let errs = crate::validate::rr3_no_unknown_keys(&bad, &specs, "atom manifest");
         assert!(
             errs.iter().any(|e| e.contains("uses.slost")),
             "typo 键必须点名: {errs:?}"
@@ -472,10 +465,7 @@ slots = ["audio.vad"]
             "[atom]\nname = \"x\"\nversion = \"0.1.0\"\n[provides]\nslots = [\"ui.face\"]\n",
         )
         .expect("合法样例可解析");
-        assert!(
-            crate::validate::rr3_registry_unknown_fields_assert(&ok, &specs, "atom manifest")
-                .is_empty()
-        );
+        assert!(crate::validate::rr3_no_unknown_keys(&ok, &specs, "atom manifest").is_empty());
     }
 
     /// 批E 门禁接线（architecture §13"每格一件·不留空格"反向断言，查册真值处执法）：
@@ -521,7 +511,7 @@ slots = ["audio.vad"]
                 }
                 scanned += 1;
                 let text = std::fs::read_to_string(&manifest).expect("atom.toml 可读");
-                let errs = rr3_registry_validate_atom_text(&text, &slots);
+                let errs = rr3_atom_chk(&text, &slots);
                 assert!(errs.is_empty(), "{} 漂移: {errs:?}", manifest.display());
                 let v: Value = toml::from_str(&text).expect("atom.toml 已过 TOML 解析");
                 // 批E'：目录名 = atom.name 唯一对应——⑦-b/⑦-c 门按目录名执法、
@@ -554,7 +544,7 @@ slots = ["audio.vad"]
         );
 
         // ② 不留空格 + 内建格不立件：23 格逐格反查，末尾覆盖账必须轧平
-        let names = slots.rr3_slot_table_names();
+        let names = slots.rr3_slot_names();
         for slot in &names {
             let provided = owner.get(slot);
             if BUILTIN_NO_ATOM.contains(&slot.as_str()) {

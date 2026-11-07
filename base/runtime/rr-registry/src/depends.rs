@@ -8,8 +8,8 @@
 //!   **全部**提供者建边（多提供者"任一存活即满足"是运行期语义，启动期全排前、保守且确定）。
 //! - 启动序 = Kahn 拓扑序，层内按 `start_priority` 升序、同值按名字典序（确定性裁定）。
 //! - 环（含自环：依赖只有自己 provides 的能力）→ 拒整个 boot；能力不可满足 → 只拒该模块。
-//!   两条分流由 [`rr3_registry_plan_boot`] 一次裁清（rrd boot 的唯一入口）；纯拓扑序
-//!   [`rr3_registry_resolve_boot_order`] 保留给 CI 全集检查与契约用例。
+//!   两条分流由 [`rr3_plan_boot`] 一次裁清（rrd boot 的唯一入口）；纯拓扑序
+//!   [`rr3_boot_order`] 保留给 CI 全集检查与契约用例。
 //! - `depends.optional` 不参与：不进启动序、不触发降级（v0.0.1 文档性声明）。
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,7 +20,7 @@ use toml::Value;
 /// "只拒点名模块"分流——rrd 不解析错误文案，第二处前缀字符串就是第二本真值）。
 const RR3_CYCLE_ERROR_HEAD: &str = "依赖环涉及";
 
-use crate::schema::{rr3_registry_get_by_path, rr3_registry_rule_list};
+use crate::schema::{rr3_get_by_path, rr3_rule_list};
 
 /// 单个模块参与仲裁所需的事实（从 manifest 文本提取；不做规则校验，
 /// 语法归 `validate.rs` 的单件层）
@@ -33,7 +33,7 @@ pub struct Rr3DependsFacts {
 }
 
 fn string_list(root: &Value, path: &str, errs: &mut Vec<String>) -> Vec<String> {
-    match rr3_registry_get_by_path(root, path).and_then(Value::as_array) {
+    match rr3_get_by_path(root, path).and_then(Value::as_array) {
         None => vec![],
         Some(arr) => {
             let mut out = Vec::new();
@@ -64,11 +64,11 @@ fn unsatisfiable_prefix(name: &str) -> String {
 
 /// 从 manifest 文本提取仲裁事实。`start_priority` 缺省 100（与 rrd 侧
 /// `manifest.rs` 同一缺省）。名字缺失是硬错误——仲裁按名字建边与报错。
-pub fn rr3_registry_depends_facts_from_text(text: &str) -> Result<Rr3DependsFacts, Vec<String>> {
+pub fn rr3_depends_parse(text: &str) -> Result<Rr3DependsFacts, Vec<String>> {
     let root: Value =
         toml::from_str(text).map_err(|e| vec![format!("manifest TOML 解析失败: {e}")])?;
     let mut errs = Vec::new();
-    let name = match rr3_registry_get_by_path(&root, "manifest.name").and_then(Value::as_str) {
+    let name = match rr3_get_by_path(&root, "manifest.name").and_then(Value::as_str) {
         Some(s) if !s.is_empty() => s.to_string(),
         Some(_) => {
             errs.push("manifest.name 不得为空字符串（依赖仲裁按名字建边）".to_string());
@@ -81,7 +81,7 @@ pub fn rr3_registry_depends_facts_from_text(text: &str) -> Result<Rr3DependsFact
     };
     let provides = string_list(&root, "provides.capabilities", &mut errs);
     let depends_required = string_list(&root, "depends.required", &mut errs);
-    let start_priority = rr3_registry_get_by_path(&root, "resources.start_priority")
+    let start_priority = rr3_get_by_path(&root, "resources.start_priority")
         .and_then(Value::as_integer)
         .unwrap_or(100);
     if !errs.is_empty() {
@@ -97,16 +97,14 @@ pub fn rr3_registry_depends_facts_from_text(text: &str) -> Result<Rr3DependsFact
 
 /// 依赖仲裁本体（ADR-0009 裁定 1/2）：返回 boot 启动序（模块名），或逐条错误。
 /// 可满足性错误全收集完才判环——运维一次改对，不挤牙膏。
-pub fn rr3_registry_resolve_boot_order(
-    facts: &[Rr3DependsFacts],
-) -> Result<Vec<String>, Vec<String>> {
-    rr3_registry_resolve_boot_order_excluding(facts, &BTreeSet::new())
+pub fn rr3_boot_order(facts: &[Rr3DependsFacts]) -> Result<Vec<String>, Vec<String>> {
+    rr3_boot_order_excl(facts, &BTreeSet::new())
 }
 
 /// 仲裁引擎：`excluded` 里的名字**不参与启动序**（`plan_boot` 剔除的不可满足者），
 /// 但**留在可满足性宇宙里**——它们的 provides 照样算数（manifest 合法，只是它自己
 /// 起不来），也不作为边目标（不排在它后面等一个永远不会上线的位置）。
-fn rr3_registry_resolve_boot_order_excluding(
+fn rr3_boot_order_excl(
     facts: &[Rr3DependsFacts],
     excluded: &BTreeSet<String>,
 ) -> Result<Vec<String>, Vec<String>> {
@@ -126,7 +124,7 @@ fn rr3_registry_resolve_boot_order_excluding(
         return Err(errs);
     }
 
-    let base: BTreeSet<String> = rr3_registry_rule_list("base_capabilities")
+    let base: BTreeSet<String> = rr3_rule_list("base_capabilities")
         .unwrap_or_default()
         .into_iter()
         .collect();
@@ -232,10 +230,10 @@ fn rr3_registry_resolve_boot_order_excluding(
 ///   它们的 provides **仍计入**可满足性宇宙（依赖它们能力的其余模块照常 boot，
 ///   运行期按裁定 3 降级），重仲裁剔除它们不会把下游连坐。
 ///   终止性：每个非 fatal 轮次至少剔除一个名字，`excluded` 有 `facts.len()` 上界。
-pub fn rr3_registry_plan_boot(facts: &[Rr3DependsFacts]) -> Rr3BootPlan {
+pub fn rr3_plan_boot(facts: &[Rr3DependsFacts]) -> Rr3BootPlan {
     let mut excluded: BTreeSet<String> = BTreeSet::new();
     loop {
-        match rr3_registry_resolve_boot_order_excluding(facts, &excluded) {
+        match rr3_boot_order_excl(facts, &excluded) {
             Ok(order) => {
                 return Rr3BootPlan {
                     order,
@@ -278,7 +276,7 @@ pub fn rr3_registry_plan_boot(facts: &[Rr3DependsFacts]) -> Rr3BootPlan {
     }
 }
 
-/// [`rr3_registry_plan_boot`] 的回报。字段语义见该函数文档。
+/// [`rr3_plan_boot`] 的回报。字段语义见该函数文档。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rr3BootPlan {
     pub order: Vec<String>,
@@ -311,14 +309,13 @@ required = ["bus.publish"]
 [resources]
 start_priority = 40
 "#;
-        let f = rr3_registry_depends_facts_from_text(text).expect("应能提取");
+        let f = rr3_depends_parse(text).expect("应能提取");
         assert_eq!(f.name, "rr3-x");
         assert_eq!(f.provides, vec!["audio.capture".to_string()]);
         assert_eq!(f.depends_required, vec!["bus.publish".to_string()]);
         assert_eq!(f.start_priority, 40);
 
-        let bare = rr3_registry_depends_facts_from_text("[manifest]\nname = \"rr3-y\"\n")
-            .expect("最小文本也应能提取");
+        let bare = rr3_depends_parse("[manifest]\nname = \"rr3-y\"\n").expect("最小文本也应能提取");
         assert!(bare.provides.is_empty() && bare.depends_required.is_empty());
         assert_eq!(
             bare.start_priority, 100,
@@ -328,14 +325,14 @@ start_priority = 40
 
     #[test]
     fn facts_missing_name_and_non_string_items_reported() {
-        let errs = rr3_registry_depends_facts_from_text("[provides]\ncapabilities = [\"x\"]\n")
-            .expect_err("缺名字必须报错");
+        let errs =
+            rr3_depends_parse("[provides]\ncapabilities = [\"x\"]\n").expect_err("缺名字必须报错");
         assert!(
             errs.iter().any(|e| e.contains("缺少 manifest.name")),
             "{errs:?}"
         );
 
-        let errs = rr3_registry_depends_facts_from_text(
+        let errs = rr3_depends_parse(
             "[manifest]\nname = \"rr3-x\"\n[provides]\ncapabilities = [1]\n[depends]\nrequired = [true]\n",
         )
         .expect_err("非字符串项必须报错");
@@ -353,7 +350,7 @@ start_priority = 40
 
     #[test]
     fn duplicate_names_rejected_before_edges() {
-        let errs = rr3_registry_resolve_boot_order(&[
+        let errs = rr3_boot_order(&[
             facts("rr3-a", &["cap.x"], &["bus.publish"], 100),
             facts("rr3-a", &[], &[], 100),
         ])
@@ -365,7 +362,7 @@ start_priority = 40
     #[test]
     fn tie_break_is_priority_then_name() {
         // 同层三模块：priority 决定先后，同 priority 按名字典序（b 在 c 前，与入参顺序无关）
-        let order = rr3_registry_resolve_boot_order(&[
+        let order = rr3_boot_order(&[
             facts("rr3-c", &[], &[], 50),
             facts("rr3-b", &[], &[], 50),
             facts("rr3-a", &[], &[], 10),
@@ -377,7 +374,7 @@ start_priority = 40
     #[test]
     fn self_dependency_is_a_cycle() {
         // 自己 provides、base 也没有的能力被自己依赖 = 自环 → 整批拒
-        let errs = rr3_registry_resolve_boot_order(&[
+        let errs = rr3_boot_order(&[
             facts("rr3-a", &["cap.x"], &["cap.x"], 100),
             facts("rr3-b", &[], &[], 100),
         ])
@@ -390,7 +387,7 @@ start_priority = 40
     /// plan_boot：不可满足只拒点名模块，其余照常按拓扑序成序
     #[test]
     fn plan_boot_rejects_only_the_unsatisfiable_and_orders_the_rest() {
-        let plan = rr3_registry_plan_boot(&[
+        let plan = rr3_plan_boot(&[
             facts("rr3-bad", &[], &["cap.ghost"], 10),
             facts("rr3-c", &[], &["bus.publish"], 50),
             facts("rr3-b", &[], &[], 50),
@@ -405,7 +402,7 @@ start_priority = 40
     /// 也不排在"永远不会上线的位置"后面（剔除者不作为边目标）
     #[test]
     fn plan_boot_keeps_rejected_module_provides_for_dependents() {
-        let plan = rr3_registry_plan_boot(&[
+        let plan = rr3_plan_boot(&[
             facts("rr3-ghost", &[], &["cap.ghost"], 10),
             // rr3-ghost 自己不可满足，但它 provides cap.y；rr3-user 依赖 cap.y
             facts("rr3-ghost2", &["cap.y"], &["cap.ghost"], 20),
@@ -422,7 +419,7 @@ start_priority = 40
     /// plan_boot：环照旧拒整个 boot（fatal），不产出半死集合
     #[test]
     fn plan_boot_fatals_on_cycle() {
-        let plan = rr3_registry_plan_boot(&[
+        let plan = rr3_plan_boot(&[
             facts("rr3-a", &["cap.a"], &["cap.b"], 100),
             facts("rr3-b", &["cap.b"], &["cap.a"], 100),
             facts("rr3-c", &[], &[], 100),

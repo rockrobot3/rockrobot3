@@ -19,35 +19,26 @@ pub mod topics;
 pub mod validate;
 
 pub use assemble::{
-    rr3_registry_assemble_from_text, rr3_registry_assemble_injection_gaps, Rr3AssembleDemand,
-    Rr3AssembleFacts, Rr3AssembleHandle, Rr3AssembleOp, RR3_ASSEMBLE_DESC_KEYS,
-    RR3_ASSEMBLE_HANDLE_TRAITS, RR3_ASSEMBLE_SCHEMA_VERSION,
+    rr3_assemble_parse, rr3_injection_gaps, Rr3AssembleDemand, Rr3AssembleFacts, Rr3AssembleHandle,
+    Rr3AssembleOp, RR3_ASSEMBLE_DESC_KEYS, RR3_ASSEMBLE_HANDLE_TRAITS, RR3_ASSEMBLE_SCHEMA_VERSION,
 };
 pub use atom::{
-    rr3_registry_atom_field_specs, rr3_registry_board_free_assert, rr3_registry_validate_atom,
-    rr3_registry_validate_atom_text, RR3_ATOM_SCHEMA_VERSION,
+    rr3_atom_chk, rr3_atom_field_specs, rr3_atom_gate, rr3_board_free_chk, RR3_ATOM_SCHEMA_VERSION,
 };
-pub use composite::{
-    rr3_registry_composite_from_text, Rr3CompositeFacts, RR3_COMPOSITE_SCHEMA_VERSION,
-};
-pub use depends::{
-    rr3_registry_depends_facts_from_text, rr3_registry_plan_boot, rr3_registry_resolve_boot_order,
-    Rr3BootPlan, Rr3DependsFacts,
-};
-pub use devices::{rr3_registry_device_table_from_text, Rr3DeviceTable};
+pub use composite::{rr3_composite_parse, Rr3CompositeFacts, RR3_COMPOSITE_SCHEMA_VERSION};
+pub use depends::{rr3_boot_order, rr3_depends_parse, rr3_plan_boot, Rr3BootPlan, Rr3DependsFacts};
+pub use devices::{rr3_dev_parse, Rr3DeviceTable};
 pub use platform::{
-    rr3_registry_platform_table_from_text, Rr3ConflictEntry, Rr3PlatformTable,
-    RR3_CONTRACT_PLATFORM_PATH, RR3_PLATFORM_KINDS, RR3_PLATFORM_OUTPUT_RULES,
+    rr3_plat_parse, Rr3ConflictEntry, Rr3PlatformTable, RR3_CONTRACT_PLATFORM_PATH,
+    RR3_PLATFORM_KINDS, RR3_PLATFORM_OUTPUT_RULES,
 };
-pub use roles::{rr3_registry_role_table_from_text, Rr3RoleTable};
+pub use roles::{rr3_role_parse, Rr3RoleTable};
 pub use schema::{
-    rr3_registry_field_specs, rr3_registry_get_by_path, rr3_registry_rule_list, Rr3FieldSpec,
-    RR3_MANIFEST_SCHEMA_VERSION,
+    rr3_field_specs, rr3_get_by_path, rr3_rule_list, Rr3FieldSpec, RR3_MANIFEST_SCHEMA_VERSION,
 };
-pub use slots::{rr3_registry_slot_table_from_text, Rr3SlotTable};
-pub use topics::{rr3_registry_topic_set_from_text, Rr3TopicSet};
+pub use slots::{rr3_slot_parse, Rr3SlotTable};
+pub use topics::{rr3_topic_parse, Rr3TopicSet};
 pub use validate::{
-    rr3_registry_check, rr3_registry_topic_names, rr3_registry_topic_owners,
-    rr3_registry_validate_manifest, rr3_registry_validate_manifest_text,
-    rr3_registry_validate_topics, Rr3ValidationReport,
+    rr3_manifest_chk, rr3_manifest_gate, rr3_registry_check, rr3_topics_chk, rr3_topics_names,
+    rr3_topics_owners, Rr3ValidationReport,
 };

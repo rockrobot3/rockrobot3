@@ -7,7 +7,7 @@
 //! 型号能力（addrs/baud_ok）在探测期与出厂自检消费。空器件表是契约事故，
 //! 不是放行许可证。
 //!
-//! 与 roles.rs 同型：解析失败给空表（`rr3_device_table_check` 点名"表为空"）；
+//! 与 roles.rs 同型：解析失败给空表（`rr3_dev_check` 点名"表为空"）；
 //! 跨表判等不在此处（⑦-d 的另一侧真值是 rrd 装载链手里的 wiring 数据，
 //! 由调用方携带判定）。
 
@@ -41,8 +41,8 @@ pub struct Rr3DeviceTable {
 }
 
 /// 解析一份器件表文本（生产契约与测试叠加同构，共用同一解析器，不写第二套）。
-/// 解析失败给空表（`rr3_device_table_check` 会点名"表为空"，fail-closed 护栏同 roles）。
-pub fn rr3_registry_device_table_from_text(text: &str) -> Rr3DeviceTable {
+/// 解析失败给空表（`rr3_dev_check` 会点名"表为空"，fail-closed 护栏同 roles）。
+pub fn rr3_dev_parse(text: &str) -> Rr3DeviceTable {
     let Ok(root) = toml::from_str::<Value>(text) else {
         return Rr3DeviceTable::default();
     };
@@ -98,28 +98,28 @@ pub fn rr3_registry_device_table_from_text(text: &str) -> Rr3DeviceTable {
 }
 
 impl Rr3DeviceTable {
-    pub fn rr3_device_table_is_empty(&self) -> bool {
+    pub fn rr3_dev_is_empty(&self) -> bool {
         self.devices.is_empty()
     }
 
     /// 查册：型号是否在册（门 o 的判定入口，§8 待建）
-    pub fn rr3_device_table_contains(&self, model: &str) -> bool {
+    pub fn rr3_dev_contains(&self, model: &str) -> bool {
         self.devices.contains_key(model)
     }
 
-    pub fn rr3_device_table_names(&self) -> Vec<String> {
+    pub fn rr3_dev_names(&self) -> Vec<String> {
         self.devices.keys().cloned().collect()
     }
 
     /// 器件峰值电流（校验⑨ 与件 demands.peak_ma 互校的分母侧事实源，批N2 消费）
-    pub fn rr3_device_table_peak_ma(&self, model: &str) -> Option<i64> {
+    pub fn rr3_dev_peak_ma(&self, model: &str) -> Option<i64> {
         self.devices.get(model).map(|e| e.peak_ma)
     }
 
     /// 全表 mate 集（校验⑦-d 的判定集）：wire.mate 必须落在其中，"none" 是
     /// 直连无对端的合法显式值（由调用方先剥）。空 mate（INA219 排针直连类
     /// 缺省）不进集——它不是可对账的对端型号。
-    pub fn rr3_device_table_mates(&self) -> BTreeSet<String> {
+    pub fn rr3_dev_mates(&self) -> BTreeSet<String> {
         self.devices
             .iter()
             .filter(|(_, e)| !e.mate.is_empty())
@@ -130,9 +130,9 @@ impl Rr3DeviceTable {
     /// 全表 mate → peak_ma 索引（校验⑦-c1 额定加总的峰值事实源——自检时点判，
     /// 批N5 件五）：按对端连接器型号查器件峰值。同一 mate 多器件在册取最大值
     /// （连接器口径的保守取法——对端可能接其中任一器件）；空 mate（直连缺省类）
-    /// 不进索引，与 [`Self::rr3_device_table_mates`] 同一收账口径。映射自同一份
+    /// 不进索引，与 [`Self::rr3_dev_mates`] 同一收账口径。映射自同一份
     /// 装载表，非第二真值点。
-    pub fn rr3_device_table_peak_by_mate(&self) -> BTreeMap<String, i64> {
+    pub fn rr3_dev_peak_by_mate(&self) -> BTreeMap<String, i64> {
         let mut out: BTreeMap<String, i64> = BTreeMap::new();
         for e in self.devices.values() {
             if e.mate.is_empty() {
@@ -149,8 +149,8 @@ impl Rr3DeviceTable {
     /// 必填（峰值 0 会让校验⑨ 恒过 = 假账）。mate 可缺省（直连类器件）。
     /// addrs/baud_ok 的**取值域**（地址是否合法、速率是否可达）是探测期与
     /// 出厂自检的判据（坑 7：装载期不认），本检查只管形状。
-    pub fn rr3_device_table_check(&self) -> Vec<String> {
-        if self.rr3_device_table_is_empty() {
+    pub fn rr3_dev_check(&self) -> Vec<String> {
+        if self.rr3_dev_is_empty() {
             return vec!["器件表为空：必须至少登记一个 [[device]]（增补轮六 §4.1b）".to_string()];
         }
         let mut errs = Vec::new();
@@ -199,50 +199,45 @@ mod tests {
     /// 契约必须解析成 6 条器件，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
-        let table = rr3_registry_device_table_from_text(CONTRACT);
+        let table = rr3_dev_parse(CONTRACT);
         assert_eq!(
             table.devices.len(),
             6,
             "契约器件数（批N3 件八起 SHTC3/ICM-42688 演练行，现役六条）"
         );
         assert_eq!(
-            table.rr3_device_table_names(),
+            table.rr3_dev_names(),
             vec!["ICM-42688", "INA219", "MAX7219", "SG90", "SHTC3", "SSD1306"]
         );
-        assert!(table.rr3_device_table_contains("SSD1306"));
-        assert!(
-            !table.rr3_device_table_contains("INMP441"),
-            "bus 词表未扩，不在册"
-        );
+        assert!(table.rr3_dev_contains("SSD1306"));
+        assert!(!table.rr3_dev_contains("INMP441"), "bus 词表未扩，不在册");
         // mate 集（⑦-d 判定集）：INA219 直连缺省不进集
-        let mates = table.rr3_device_table_mates();
+        let mates = table.rr3_dev_mates();
         assert_eq!(mates.len(), 3, "{mates:?}");
         assert!(mates.contains("SG90-3P"));
         assert!(mates.contains("0.96in-OLED-FPC"));
         assert!(mates.contains("MAX7219-DIP24"));
         assert!(!mates.contains("none"));
         // peak_ma 与 id_reg（⑨ 的事实源 / L-14 的数据源）
-        assert_eq!(table.rr3_device_table_peak_ma("SG90"), Some(700));
-        assert_eq!(table.rr3_device_table_peak_ma("INA219"), Some(1));
+        assert_eq!(table.rr3_dev_peak_ma("SG90"), Some(700));
+        assert_eq!(table.rr3_dev_peak_ma("INA219"), Some(1));
         // mate → peak 索引（⑦-c1 额定加总的峰值事实源，批N5 件五）：三 mate 对
         // 三器件；INA219 直连缺省不进索引
-        let peak_by_mate = table.rr3_device_table_peak_by_mate();
+        let peak_by_mate = table.rr3_dev_peak_by_mate();
         assert_eq!(peak_by_mate.len(), 3, "{peak_by_mate:?}");
         assert_eq!(peak_by_mate.get("SG90-3P"), Some(&700));
         assert_eq!(peak_by_mate.get("0.96in-OLED-FPC"), Some(&20));
         assert_eq!(peak_by_mate.get("MAX7219-DIP24"), Some(&330));
         assert!(!peak_by_mate.contains_key("none"));
         // 契约形状自检：真契约必须全绿
-        assert!(table.rr3_device_table_check().is_empty());
+        assert!(table.rr3_dev_check().is_empty());
     }
 
     /// 解析失败给空表，空表是契约事故——check 点名不静默放行
     #[test]
     fn unparsable_text_yields_empty_table_and_check_is_fatal() {
-        assert!(rr3_registry_device_table_from_text("not [ toml")
-            .devices
-            .is_empty());
-        let errs = rr3_registry_device_table_from_text("").rr3_device_table_check();
+        assert!(rr3_dev_parse("not [ toml").devices.is_empty());
+        let errs = rr3_dev_parse("").rr3_dev_check();
         assert_eq!(errs.len(), 1);
         assert!(errs[0].contains("器件表为空"), "{errs:?}");
     }
@@ -250,7 +245,7 @@ mod tests {
     /// 形状反例：bus 越域 / I2C 缺地址集 / baud_ok 缺 / peak_ma ≤ 0 逐条点名
     #[test]
     fn shape_errors_are_named() {
-        let table = rr3_registry_device_table_from_text(
+        let table = rr3_dev_parse(
             r#"
 [[device]]
 model = "X1"
@@ -277,7 +272,7 @@ bus = "spi"
 peak_ma = 10
 "#,
         );
-        let errs = table.rr3_device_table_check();
+        let errs = table.rr3_dev_check();
         assert_eq!(errs.len(), 4, "{errs:?}");
         assert!(errs
             .iter()

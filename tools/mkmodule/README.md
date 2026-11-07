@@ -15,7 +15,7 @@
 （契约只增不改，改契约 = 走 review），否则运行时引用会被契约测试拒绝。
 
 自检：`rr3_mkmod_generate` 落盘后立即调用 `rr-registry` 的
-`rr3_registry_validate_manifest` 校验生成的 `module.toml`，不过即回滚报错——
+`rr3_manifest_gate` 校验生成的 `module.toml`，不过即回滚报错——
 "生成物天然合契约"，无需人再记一遍
 [`docs/process/naming.md`](../../docs/process/naming.md)。
 

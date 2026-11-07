@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rr_registry::{rr3_registry_topic_set_from_text, Rr3TopicSet};
+use rr_registry::{rr3_topic_parse, Rr3TopicSet};
 
 /// 内建命名空间：`rr3-runtime/*` 两个主题属 rrd 的下行广播，模块上行冒充必须被拒（spec §5.0）。
 /// 强制点在装载处：`rr3_topics_load` 对叠加层任一名命中
@@ -37,14 +37,14 @@ pub fn rr3_contracts_dir(contracts: Option<&Path>) -> PathBuf {
 fn read_set(path: &Path, role: &str) -> Result<Rr3TopicSet, Vec<String>> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| vec![format!("读不到{role} {}: {e}", path.display())])?;
-    let set = rr3_registry_topic_set_from_text(&text);
-    if set.rr3_topic_set_is_empty() {
+    let set = rr3_topic_parse(&text);
+    if set.rr3_topic_is_empty() {
         return Err(vec![format!(
             "{role} {} 解析后为空，拒绝启动",
             path.display()
         )]);
     }
-    let errs = set.rr3_topic_set_check();
+    let errs = set.rr3_topic_check();
     if !errs.is_empty() {
         // 形状错误本身不带来源，这里逐条包上 {role}+path：契约的错和叠加层的错
         // 不能打出一样的字，否则"哪一册坏了"要人二次猜
@@ -100,7 +100,7 @@ fn rr3_overlay_resolved(overlay: &Path) -> Result<PathBuf, Vec<String>> {
 /// 逐条点名；不命中的条目不受牵连。
 fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<String>> {
     let errs: Vec<String> = set
-        .rr3_topic_set_names()
+        .rr3_topic_names()
         .iter()
         .filter(|t| rr3_topics_is_reserved_topic(t))
         .map(|t| {
@@ -120,44 +120,44 @@ fn reject_reserved_namespace(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<S
 /// 合并后对**整张表**再自检一次（Task 3 评审 DEFER→Task 5 的欠账；kind 一支随 Task 6 批次补齐）。
 ///
 /// `read_set` 只对契约、叠加层各自自检，合并这一步本身从未被验证过：
-/// `rr3_topic_set_merge` 只要退化（漏带一条生产 topic、把某条的 owner 或 kind 换成叠加层
+/// `rr3_topic_merge` 只要退化（漏带一条生产 topic、把某条的 owner 或 kind 换成叠加层
 /// 的值），装载就会把一张被改写过的所有权表交出去——那正是 spec §6
 /// "叠加层不是生产放行口"最坏的实现方式。故合并后复检两件事并逐条点名：
-/// ① merged 自身形状合法（`rr3_topic_set_check` 的范围：名字规则、owner 已登记、
+/// ① merged 自身形状合法（`rr3_topic_check` 的范围：名字规则、owner 已登记、
 ///    首段 == owner、kind 在白名单内）；② 契约的**每一条 topic 名**都仍在 merged 里，
 ///    且它的 **owner 与 kind** 一字未改（叠加层只能新增）。
 ///
-/// ② 里为什么要单独比 kind：`rr3_topic_set_check` 只问 kind 在不在
+/// ② 里为什么要单独比 kind：`rr3_topic_check` 只问 kind 在不在
 /// `[rules] topic_allowed_kinds` 白名单里，不问它是不是契约原值——契约某条 topic 的 kind
 /// 被 merge 换成另一个白名单值时，①照样全过、owner 也比得出"没变"，只有拿契约原值逐条
-/// 比对才抓得到（访问器 `Rr3TopicSet::rr3_topic_set_kind` 即为此而加）。
+/// 比对才抓得到（访问器 `Rr3TopicSet::rr3_topic_kind` 即为此而加）。
 /// 复验范围到 kind 为止：主题集只存 name→owner、name→kind 与 owner 名单，`stable`、
 /// `note` 那类注释性字段不在它的视图里，故本注释不称"全字段复验"。
 /// 与 `reject_reserved_namespace` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
 fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
     let mut errs: Vec<String> = merged
-        .rr3_topic_set_check()
+        .rr3_topic_check()
         .into_iter()
         .map(|e| format!("合并后主题集形状不合: {e}"))
         .collect();
-    for name in base.rr3_topic_set_names() {
-        let want = base.rr3_topic_set_owner(&name);
-        let want_kind = base.rr3_topic_set_kind(&name);
-        if !merged.rr3_topic_set_contains(&name) {
+    for name in base.rr3_topic_names() {
+        let want = base.rr3_topic_owner(&name);
+        let want_kind = base.rr3_topic_kind(&name);
+        if !merged.rr3_topic_contains(&name) {
             errs.push(format!(
                 "合并后契约 topic 丢失: {name}（叠加层不得覆盖生产条目）"
             ));
-        } else if merged.rr3_topic_set_owner(&name) != want {
+        } else if merged.rr3_topic_owner(&name) != want {
             errs.push(format!(
                 "契约 topic {name} 的 owner 被叠加层改写: {:?} → {:?}",
                 want,
-                merged.rr3_topic_set_owner(&name)
+                merged.rr3_topic_owner(&name)
             ));
-        } else if merged.rr3_topic_set_kind(&name) != want_kind {
+        } else if merged.rr3_topic_kind(&name) != want_kind {
             errs.push(format!(
                 "契约 topic {name} 的 kind 被叠加层改写: {:?} → {:?}",
                 want_kind,
-                merged.rr3_topic_set_kind(&name)
+                merged.rr3_topic_kind(&name)
             ));
         }
     }
@@ -185,8 +185,8 @@ pub fn rr3_topics_load(
     let ov = rr3_overlay_resolved(ov)?;
     let ov_set = read_set(&ov, "主题叠加层")?;
     reject_reserved_namespace(&ov_set, &ov)?;
-    let added = ov_set.rr3_topic_set_names();
-    let merged = base.rr3_topic_set_merge(&ov_set)?; // 撞名 → Err(冲突条目)
+    let added = ov_set.rr3_topic_names();
+    let merged = base.rr3_topic_merge(&ov_set)?; // 撞名 → Err(冲突条目)
     reject_inconsistent_merge(&base, &merged)?;
     Ok((merged, added))
 }
@@ -242,12 +242,12 @@ mod tests {
     fn contract_only_load_is_the_production_surface() {
         let (set, added) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
         assert_eq!(
-            set.rr3_topic_set_names().len(),
+            set.rr3_topic_names().len(),
             42,
             "契约计数（ADR-0023 39→42：append rr3-brain/model list/set/test）"
         );
         assert!(added.is_empty(), "没传叠加层就不该有新增条目");
-        assert!(set.rr3_topic_set_contains("rr3-runtime/system/heartbeat"));
+        assert!(set.rr3_topic_contains("rr3-runtime/system/heartbeat"));
     }
 
     #[test]
@@ -255,17 +255,17 @@ mod tests {
         let (set, added) =
             rr3_topics_load(&contract(), Some(&fixture_overlay())).expect("夹具应能合并");
         assert_eq!(
-            set.rr3_topic_set_names().len(),
+            set.rr3_topic_names().len(),
             45,
             "42 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿；ADR-0023 39→42：append rr3-brain/model list/set/test）"
         );
         assert_eq!(added.len(), 3);
         assert!(added.contains(&"rr3-sima/ping/state".to_string()));
-        assert!(set.rr3_topic_set_contains("rr3-sima/ping/state"));
+        assert!(set.rr3_topic_contains("rr3-sima/ping/state"));
     }
 
     /// 合并后必须**逐条复验 topic 名、owner 与 kind**（Task 3 评审 DEFER→Task 5；kind 一支随
-    /// Task 6 批次补，`Rr3TopicSet::rr3_topic_set_kind` 就是为它加的访问器）：装载交出去的那张表，
+    /// Task 6 批次补，`Rr3TopicSet::rr3_topic_kind` 就是为它加的访问器）：装载交出去的那张表，
     /// 除了"两边各自合法"，还得保证生产条目一条不少、owner 与 kind 一字未改。复验范围到 kind
     /// 为止（`stable`、`note` 不在主题集的视图里），别把这条读成全字段复验。
     /// 断言取自 `rr3_topics_load` 的真实返回，而不是再拼一遍期望集合——去掉装载处的
@@ -278,29 +278,29 @@ mod tests {
         let (merged, _) =
             rr3_topics_load(&contract(), Some(&fixture_overlay())).expect("夹具应能合并");
         assert!(
-            merged.rr3_topic_set_check().is_empty(),
+            merged.rr3_topic_check().is_empty(),
             "{:?}",
-            merged.rr3_topic_set_check()
+            merged.rr3_topic_check()
         );
-        for name in base_set.rr3_topic_set_names() {
+        for name in base_set.rr3_topic_names() {
             assert!(
-                merged.rr3_topic_set_contains(&name),
+                merged.rr3_topic_contains(&name),
                 "合并后契约条目丢失: {name}"
             );
             assert_eq!(
-                merged.rr3_topic_set_owner(&name),
-                base_set.rr3_topic_set_owner(&name),
+                merged.rr3_topic_owner(&name),
+                base_set.rr3_topic_owner(&name),
                 "契约 topic {name} 的 owner 被叠加层改写"
             );
             assert_eq!(
-                merged.rr3_topic_set_kind(&name),
-                base_set.rr3_topic_set_kind(&name),
+                merged.rr3_topic_kind(&name),
+                base_set.rr3_topic_kind(&name),
                 "契约 topic {name} 的 kind 被叠加层改写"
             );
         }
         // 叠加层新增的 owner 也必须进了这张表，否则"复验"会连合法新增一起否掉
         assert_eq!(
-            merged.rr3_topic_set_owner("rr3-sima/ping/state").as_deref(),
+            merged.rr3_topic_owner("rr3-sima/ping/state").as_deref(),
             Some("rr3-sima")
         );
     }
@@ -411,7 +411,7 @@ owner = "rr3-sense"
     }
 
     /// 叠加层里 owner 已登记、但 topic 首段不是该 owner —— 冒充别人的命名空间必须拒
-    /// （钉住 `rr3_topic_set_check` 的"不在 owner 命名空间内"分支）
+    /// （钉住 `rr3_topic_check` 的"不在 owner 命名空间内"分支）
     #[test]
     fn overlay_topic_outside_its_owner_namespace_is_rejected() {
         let ov = tmp_named(
@@ -426,12 +426,12 @@ owner = "rr3-sense"
         );
     }
 
-    /// `rr3_topic_set_names()` 承诺升序：契约文本是"按 owner 分组手写"的顺序，
+    /// `rr3_topic_names()` 承诺升序：契约文本是"按 owner 分组手写"的顺序，
     /// 若实现退化成插入序，本测试的第一/最后一条断言就会红。
     #[test]
     fn names_are_ascending_not_contract_file_order() {
         let (set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
-        let names = set.rr3_topic_set_names();
+        let names = set.rr3_topic_names();
         assert!(
             names.windows(2).all(|w| w[0] < w[1]),
             "主题名必须严格升序: {names:?}"
@@ -451,14 +451,14 @@ owner = "rr3-sense"
     #[test]
     fn unknown_topic_has_no_owner() {
         let (set, _) = rr3_topics_load(&contract(), None).expect("契约装载应成功");
-        assert_eq!(set.rr3_topic_set_owner("rr3-nobody/not/registered"), None);
+        assert_eq!(set.rr3_topic_owner("rr3-nobody/not/registered"), None);
         assert_eq!(
-            set.rr3_topic_set_owner("rr3-sense/audio/pcm").as_deref(),
+            set.rr3_topic_owner("rr3-sense/audio/pcm").as_deref(),
             Some("rr3-sense")
         );
     }
 
-    /// 复验必须连 **kind** 一起比（Task 5 评审 M-15）：`rr3_topic_set_check` 只问 kind
+    /// 复验必须连 **kind** 一起比（Task 5 评审 M-15）：`rr3_topic_check` 只问 kind
     /// 在不在白名单里，不问它是不是契约原值——把契约某条 topic 的 kind 从 `stream` 改成
     /// 另一个合法值 `event`，形状自检照样过，owner 也比得出"没变"，两条分支都抓不到。
     /// 本用例刻意不走 `rr3_topics_load`（正确的 merge 造不出 kind 被改写的表），而是手写
@@ -466,7 +466,7 @@ owner = "rr3-sense"
     /// 对照组证明这条规则不会把"只加新 topic"一起否掉。
     #[test]
     fn contract_topic_kind_rewritten_by_the_merge_is_rejected() {
-        let base = rr3_registry_topic_set_from_text(
+        let base = rr3_topic_parse(
             r#"schema_version = 1
 [[owner]]
 name = "rr3-sense"
@@ -477,7 +477,7 @@ owner = "rr3-sense"
 "#,
         );
         // 退化 merge 的产物：名字与 owner 都没动，只把 kind 换成另一个白名单值
-        let tampered = rr3_registry_topic_set_from_text(
+        let tampered = rr3_topic_parse(
             r#"schema_version = 1
 [[owner]]
 name = "rr3-sense"
@@ -488,9 +488,9 @@ owner = "rr3-sense"
 "#,
         );
         assert!(
-            tampered.rr3_topic_set_check().is_empty(),
+            tampered.rr3_topic_check().is_empty(),
             "用例前提：kind 换成 event 仍是合法值，形状自检抓不到（{:?}），只能靠复验抓",
-            tampered.rr3_topic_set_check()
+            tampered.rr3_topic_check()
         );
         assert_eq!(
             reject_inconsistent_merge(&base, &tampered).expect_err("契约 topic 的 kind 被改写必须拒"),
@@ -502,7 +502,7 @@ owner = "rr3-sense"
             （Debug 打在 Option 上，所以是 Some(...) 而不是裸引号串）"
         );
         // 对照组：只新增 topic、契约条目一字未动 —— 合法叠加层不得被误拒
-        let legit = rr3_registry_topic_set_from_text(
+        let legit = rr3_topic_parse(
             r#"schema_version = 1
 [[owner]]
 name = "rr3-sense"
@@ -552,7 +552,7 @@ owner = "rr3-sima"
 
         let (set, added) = rr3_topics_load(&contract(), Some(&rel)).expect("相对路径必须能装载");
         assert_eq!(
-            set.rr3_topic_set_names().len(),
+            set.rr3_topic_names().len(),
             45,
             "42 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿；ADR-0023 39→42：append rr3-brain/model list/set/test）"
         );

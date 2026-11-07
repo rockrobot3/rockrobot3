@@ -123,7 +123,7 @@ EOF 同样算干净收尾（`conn.rs` 的 `rr3_serve_request`、`conn.rs` 的 `r
 | 6 | 方法必须是 `rr3.register`（`rr3.ctl.*` 已在更早处分流，见上） | `Invalid` | `注册前第一条 RPC 必须是 rr3.register，收到 {method}` |
 | 7 | `params.manifest` 取值 | `Invalid` | `缺 params.manifest（要求非空字符串）` |
 | 8 | manifest 文本 → `Rr3ManifestFacts` | `Invalid` | 点名字段的校验错，多条以 `; ` 连接（如 `heartbeat_ms`、`restart_policy`） |
-| 9 | `rr3_registry_validate_manifest_text` 对主题集复验 | `Invalid` | 报告里的 `errors` 以 `; ` 连接 |
+| 9 | `rr3_manifest_chk` 对主题集复验 | `Invalid` | 报告里的 `errors` 以 `; ` 连接 |
 | 10 | `manifest.entry` 绝对性（`rr3_manifest_entry_is_absolute`，即 `/` 开头） | `Invalid` | `manifest.entry 必须是绝对路径，收到 {entry}` |
 | 11 | 进在册表 `rr3_reg_add` | 见下表映射 | `Rr3RegisterError` 的 `Display` 文案逐字 |
 

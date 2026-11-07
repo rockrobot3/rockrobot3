@@ -22,7 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rr_bus::{RR3_BROADCAST_DST_TASK, RR3_TASK_RRD};
 use rr_ipc::{opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3TransportListener, Rr3UdsListener};
-use rr_registry::{rr3_registry_plan_boot, Rr3DependsFacts, Rr3TopicSet};
+use rr_registry::{rr3_plan_boot, Rr3DependsFacts, Rr3TopicSet};
 use serde_json::json;
 
 use crate::cli::RrdConfig;
@@ -453,7 +453,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             start_priority: j.facts.start_priority,
         })
         .collect();
-    let plan = rr3_registry_plan_boot(&arb);
+    let plan = rr3_plan_boot(&arb);
     if !plan.fatal.is_empty() {
         for e in &plan.fatal {
             rr3_log(&format!("拒绝 boot：{e}"));

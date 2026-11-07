@@ -146,7 +146,7 @@
 | 文件 : 符号 | 字面量 | 语义 | 读者 | 去处 |
 |---|---|---|---|---|
 | `src/composite.rs : rr3_power_config_parse` | 缺段/缺键一律 `Err("config 缺 [rr3-power.{name}] 段" / "缺 {key}（0–65535 整数）")`；**无任何数值缺省**；仅 `.max(1)` | 配置面 fail-closed | 有 | **本仓正面样板**：策略全在 `config.toml`，代码不藏缺省值。其余五册都该收敛到这个形状（sense 的 `default()` 三份重复就是反例） |
-| `src/composite.rs` + `battery.rs : Rr3BatteryCfg.cutoff_voltage_mv` | config `3150` | 关断阈值 | **机器读者 = 注入门**（`atoms/battery/assemble.toml` 的 ops 槽 → `rr3_registry_assemble_injection_gaps` 按点路径取值，⑧-c 门仓级强制）；**非** `println!("…cutoff={}mV")` 回显（回显不算读者） | **MC-8① 判 (c)（2026-10-13）**：键保留为策略数据（保 M6 意图），**本版不关断**（关断动作归 M6 关机链，需 T1/T2 硬件）——启动日志显式标注"声明未生效"，从此不再有"回显即当作已实现"的中间态（见方案 §20 第 2 条 ⑤） |
+| `src/composite.rs` + `battery.rs : Rr3BatteryCfg.cutoff_voltage_mv` | config `3150` | 关断阈值 | **机器读者 = 注入门**（`atoms/battery/assemble.toml` 的 ops 槽 → `rr3_injection_gaps` 按点路径取值，⑧-c 门仓级强制）；**非** `println!("…cutoff={}mV")` 回显（回显不算读者） | **MC-8① 判 (c)（2026-10-13）**：键保留为策略数据（保 M6 意图），**本版不关断**（关断动作归 M6 关机链，需 T1/T2 硬件）——启动日志显式标注"声明未生效"，从此不再有"回显即当作已实现"的中间态（见方案 §20 第 2 条 ⑤） |
 | `composite.rs : low_voltage_mv` | config `3300` → `Rr3LowEdge::rr3_low_edge_new` | 低电阈值 | 有（**本单元唯一有后果的阈值**） | ✅ 已合规（policy 在 config，判据在机制核） |
 | `composite.rs : sample_period_ms` / `state_period_ms` | `5000` / `2000` | 拍点 | 有 | ✅ 已合规；`.max(1)` 钳位补留痕（P-2） |
 | `composite.rs : RR3_POLL_WAIT` | `100ms` | 收帧空转代价 | 有 | ops/config 键（与五册 POLL_WAIT 同批归一） |
