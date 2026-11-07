@@ -37,8 +37,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rr_core::runtime::{rr3_dispatch_class, Rr3Dispatch, Rr3ModuleRuntime};
 use rr_core::{rr3_frame_compose, RR3_METHOD_CALL, RR3_TASK_RRD, RR3_TRACE_ID_DIRECT};
 use rr_ipc::{
-    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
-    Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_UDS_PATH_DEFAULT,
+    opcode, rr3_body_encode, rr3_body_split, rr3_frame_read_cap, rr3_frame_write, Rr3Frame,
+    Rr3PayloadType, RR3_BUS_PATH_ENV, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_UDS_PATH_DEFAULT,
 };
 use serde_json::{json, Value};
 
@@ -595,8 +595,9 @@ fn rr3_reader_loop(
     inner: Arc<Rr3Inner>,
     inbox_tx: mpsc::SyncSender<Rr3Frame>,
 ) {
-    // EOF / 超时 / 坏帧：统一按断开处理
-    while let Ok(frame) = rr3_frame_read(&mut *sock) {
+    // EOF / 超时 / 坏帧：统一按断开处理。策略帽 1MB（0.0.8b 审计 B-7）：
+    // 坏 plen 在分配前拒收，撕裂流/对端 bug 不能按 64MB 协议上界撑爆本进程。
+    while let Ok(frame) = rr3_frame_read_cap(&mut *sock, RR3_FRAMING_PLEN_CAP_DEFAULT) {
         if inner.stop.load(Ordering::Relaxed) {
             break;
         }
@@ -647,7 +648,7 @@ fn rr3_reader_loop(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use rr_ipc::Rr3Header;
+    use rr_ipc::{rr3_frame_read, Rr3Header};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
 
