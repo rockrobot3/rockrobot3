@@ -15,15 +15,22 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{SyncSender, TrySendError};
 
 use rr_ipc::Rr3Frame;
 use rr_registry::Rr3TopicSet;
 
 use crate::manifest::Rr3ManifestFacts;
+use crate::rr3_log;
 
 /// 在册模块上限（spec §10 K3：v0.0.1 目标 5+1 模块，留余量并拒超额）
 pub const RR3_REG_MAX_MODULES: usize = 16;
+
+/// 单连接广播收件队列上界（帧数）。有界化是 OOM 防线：不读 socket 却继续喂心跳的
+/// 僵尸订阅者，无界队列会让 rrd 积压到进程被杀（0.0.8b 审计 B-5 实锤，Task 10
+/// carry 本轮落地）。128 帧 × 音频片 ~11KB ≈ 1.4MB/连接最坏，×16 连接上限
+/// ≈ 22MB——Pi/RK3566 量级可承受。队列满 = 该连接判慢，断投点名（见 fanout）。
+pub const RR3_FAN_CAP: usize = 128;
 
 /// 重启退避表（倍数 × restart_base_ms），末档封顶 60×base（spec §5.3）
 pub const RR3_RESTART_BACKOFF: [u64; 7] = [1, 2, 4, 8, 16, 32, 60];
@@ -141,7 +148,7 @@ struct Entry {
     /// 本次入库（注册）的时刻：`rr3_reg_expire` 用它判"这一世有没有活满一整条自己的窗口"
     /// （D-2 恢复归零的基准，与判死用的 `last_beat_ms` 是两颗不同的基准，不许混用）。
     registered_at_ms: u64,
-    tx: Option<Sender<Rr3Frame>>,
+    tx: Option<SyncSender<Rr3Frame>>,
 }
 
 /// watchdog 到期回报。`elapsed_ms` / `watchdog_ms` 必须由**判定处**一并交出：
@@ -377,7 +384,7 @@ impl RrdRegistry {
     pub fn rr3_reg_add(
         &mut self,
         facts: &Rr3ManifestFacts,
-        tx: Sender<Rr3Frame>,
+        tx: SyncSender<Rr3Frame>,
         now_ms: u64,
     ) -> Result<u64, Rr3RegisterError> {
         if facts.name == crate::topics_load::RR3_RESERVED_OWNER {
@@ -921,16 +928,35 @@ impl RrdRegistry {
 
     /// 投给除 `exclude_task` 外的所有**活**连接；返回成功入队数。接收者已 drop 不算错。
     /// **只做广播，不看 `frame.header.dst_task`**：该字段原样带上、本函数不读它，所以
-    /// 它**不是**单播入口（签名冻结，不改）——`expired_module_is_excluded_from_fanout`
-    /// 就把这条事实编码了：帧的 dst 写的是已判死的 simb，实际收到的是 sima。
-    /// 要点名发给某一个模块，请由 conn 层直接用那条连接的 `Sender`，别指望本函数过滤。
-    pub fn rr3_reg_fanout(&self, frame: &Rr3Frame, exclude_task: u64) -> usize {
-        self.modules
-            .values()
-            .filter(|e| e.src_task != exclude_task)
-            .filter_map(|e| e.tx.as_ref())
-            .filter(|tx| tx.send(frame.clone()).is_ok())
-            .count()
+    /// 它**不是**单播入口（`expired_module_is_excluded_from_fanout` 就把这条事实编码了：
+    /// 帧的 dst 写的是已判死的 simb，实际收到的是 sima）。要点名发给某一个模块，请由
+    /// conn 层直接用那条连接的 `Sender`，别指望本函数过滤。
+    ///
+    /// 有界队列的满侧策略（0.0.8b 审计 B-5，Task 10 carry 落地）：`try_send` 非阻塞——
+    /// `Full` = 这条连接的 writer 正阻塞在对端不读的 socket 上（僵尸订阅者的实锤形状），
+    /// 当场**断投**（`tx = None`）并点名：不静默丢帧也不拖广播方，模块侧由 client 心跳
+    /// 断链或 supervisor 重启走既有回收路。`Disconnected` 同置 None（writer 已亡）。
+    pub fn rr3_reg_fanout(&mut self, frame: &Rr3Frame, exclude_task: u64) -> usize {
+        let mut n = 0;
+        for (name, e) in &mut self.modules {
+            if e.src_task == exclude_task {
+                continue;
+            }
+            let Some(tx) = e.tx.as_ref() else {
+                continue;
+            };
+            match tx.try_send(frame.clone()) {
+                Ok(()) => n += 1,
+                Err(TrySendError::Disconnected(_)) => e.tx = None,
+                Err(TrySendError::Full(_)) => {
+                    e.tx = None;
+                    rr3_log(&format!(
+                        "慢消费者断投 {name}：收件队列满（{RR3_FAN_CAP} 帧上界）——主循环未在读总线帧，停发广播至其重连"
+                    ));
+                }
+            }
+        }
+        n
     }
 
     /// 快照按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，
@@ -993,7 +1019,7 @@ impl RrdRegistry {
         let Some(tx) = entry.tx.as_ref() else {
             return false;
         };
-        tx.send(frame.clone()).is_ok()
+        tx.try_send(frame.clone()).is_ok()
     }
 }
 
@@ -1028,8 +1054,8 @@ watchdog_timeout_ms = {wd}
         rr3_manifest_facts_from_text(&text).expect("测试 manifest 必须可读")
     }
 
-    fn chan() -> (Sender<Rr3Frame>, std::sync::mpsc::Receiver<Rr3Frame>) {
-        mpsc::channel()
+    fn chan() -> (SyncSender<Rr3Frame>, std::sync::mpsc::Receiver<Rr3Frame>) {
+        mpsc::sync_channel(RR3_FAN_CAP)
     }
 
     /// 带 `[rpc].exposes` 的 facts（M3 路由用例的夹具；exposes 为空 = 无 [rpc] 段）
@@ -2139,6 +2165,38 @@ owner = "rr3-simb"
         assert!(rxa.try_recv().is_ok(), "上一行里发起者也不能被排除");
         drop(rxb);
         assert_eq!(r.rr3_reg_fanout(&frame, ta), 0);
+    }
+
+    /// 有界队列满侧（0.0.8b 审计 B-5）：容量用满即断投——返回 0、tx 置 None，
+    /// 后续广播彻底跳过该连接；已入队的帧不丢（writer 照常收摊）。
+    #[test]
+    fn fanout_disconnects_slow_consumer_on_full_queue() {
+        let mut r = RrdRegistry::new(1000);
+        let (tx, rx) = mpsc::sync_channel::<Rr3Frame>(1);
+        let t = r
+            .rr3_reg_add(&facts("rr3-sima", 100, 500, "always"), tx, 0)
+            .unwrap();
+        let frame = Rr3Frame {
+            header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
+            payload: vec![],
+        };
+        assert_eq!(r.rr3_reg_fanout(&frame, t), 0, "发起者自己永远被排除");
+        assert_eq!(
+            r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+            1,
+            "第一帧入队"
+        );
+        assert_eq!(
+            r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+            0,
+            "队列满 → 断投（不阻塞、不静默丢）"
+        );
+        assert_eq!(
+            r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+            0,
+            "断投后彻底跳过"
+        );
+        assert!(rx.try_recv().is_ok(), "已入队的帧不丢");
     }
 
     /// 到期后连接句柄被丢掉：之后 fanout 不再往死连接塞

@@ -18,7 +18,7 @@
 //! 但同一 socket 上"应答 vs 广播"的**相对顺序不保证**，所以测试按类型/字段挑帧，不按序号。
 
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -33,7 +33,7 @@ use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
 use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
-use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry};
+use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry, RR3_FAN_CAP};
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_heartbeat_counters,
     rr3_rpc_manifest_param, rr3_rpc_parse_request, rr3_rpc_status_for_publish_deny,
@@ -41,6 +41,11 @@ use crate::rpc::{
 };
 use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log, rr3_log_tail};
+
+/// writer 线程单帧写超时（0.0.8b 审计 B-5）：对端不收时 5s 内必须显形——
+/// 超时即写失败，writer 退出、通道 drop、fanout 走 Disconnected 回收。
+/// 取 5s 与面板/总线读超时同档：正常 Unix socket 写是 µs 级，5s 不可达 = 真卡死。
+const RR3_FAN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 低电兜底的触发主题（D3 append 的契约主题；owner=rr3-power，rrd 只订阅不发布）
 const RR3_BATTERY_LOW_TOPIC: &str = "rr3-power/battery/low";
@@ -78,11 +83,16 @@ impl Rr3ConnCtx {
     }
 }
 
-/// 唯一的写出口：锁覆盖整帧 → 与并发 writer 的字节永不交错
-fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) {
+/// 唯一的写出口：锁覆盖整帧 → 与并发 writer 的字节永不交错。
+/// 写一帧到 `out`（持锁写，帧级原子）。返回 false = 写失败（含写超时）：
+/// writer 线程据此收摊退出（对端不收 = 这条连接写向已死），应答路径忽略返回值
+/// ——失败已点名进日志，连接生死由 reader 侧的 EOF/心跳回收裁定。
+fn rr3_write(out: &Arc<Mutex<UnixStream>>, frame: &Rr3Frame) -> bool {
     if let Err(e) = rr3_frame_write(&mut *rr3_lock(out), frame) {
         rr3_log(&format!("写帧失败 dst={}: {e:?}", frame.header.dst_task));
+        return false;
     }
+    true
 }
 
 /// 组一帧 rrd → 模块（ty=Response/Notification，dst=对端 task）
@@ -178,7 +188,7 @@ fn rr3_handshake(
     reader: &mut UnixStream,
     out: &Arc<Mutex<UnixStream>>,
     ctx: &Rr3ConnCtx,
-    fan_tx: Sender<Rr3Frame>,
+    fan_tx: SyncSender<Rr3Frame>,
 ) -> Result<Rr3Peer, String> {
     let frame = match rr3_frame_read(&mut *reader) {
         Ok(f) => f,
@@ -343,7 +353,7 @@ fn rr3_handshake(
     let mut replayed = 0usize;
     for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != peer.name) {
         if replay_tx
-            .send(rr3_state_frame(name, phase.as_str(), *t))
+            .try_send(rr3_state_frame(name, phase.as_str(), *t))
             .is_ok()
         {
             replayed += 1;
@@ -1033,12 +1043,22 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
             .try_clone()
             .map_err(|e| format!("try_clone 失败: {e}"))?,
     ));
-    let (fan_tx, fan_rx) = mpsc::channel::<Rr3Frame>();
+    // 写超时（0.0.8b 审计 B-5）：对端不收时 write 不得无限期占着 writer 线程与
+    // out 锁——5s 写不进 = 对端判死，writer 退出、通道 drop、fanout 走 Disconnected
+    // 回收。缺了它，一个卡死的订阅者能永久占一条 writer 线程。
+    rr3_lock(&out)
+        .set_write_timeout(Some(RR3_FAN_WRITE_TIMEOUT))
+        .map_err(|e| format!("set_write_timeout 失败: {e}"))?;
+    // 有界收件队列（RR3_FAN_CAP）：满侧策略见 registry.rs fanout doc——僵尸订阅者
+    // 的积压被封顶在"上界 × 帧大小"，不再无界吃到 rrd 被 OOM 杀。
+    let (fan_tx, fan_rx) = mpsc::sync_channel::<Rr3Frame>(RR3_FAN_CAP);
     let writer: JoinHandle<()> = {
         let out = out.clone();
         thread::spawn(move || {
             for frame in fan_rx.iter() {
-                rr3_write(&out, &frame);
+                if !rr3_write(&out, &frame) {
+                    break;
+                }
             }
         })
     };
@@ -1073,15 +1093,11 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         Err(e) => e.clone(),
     };
     rr3_conn_finish(&ctx, &me, clean_exit, &reason);
-    // 所有 Sender 都已随注册表条目释放 → writer 的 iter() 自然结束。
-    // 成立前提（F5/I-5）：这句只在**条目被移除时**成立。僵尸在册条目——注册之后不再读 socket
-    // 的模块——条目仍留在表里、Sender 不会被释放，而 `mpsc::channel` 是无界的：writer 一阻塞在
-    // write_all，那条连接的积压就无限增长。有界化 + 丢弃最旧 + 断连是 Task 10 的行为改动（已记
-    // carry，watchdog 心跳过期正是现成的回收路径），本轮只把前提写清、不改通道形状
-    // （brief 29-31 行约定的是 `mpsc::Receiver<Rr3Frame>` 这个类型，`sync_channel` 同样满足）。
-    // Task 10 落地的是 tick 线程，**没有**动通道形状；静默模块的回收现在由 expire 置
-    // `tx = None` 这一路提供（写线程随之结束、fd 随之释放），有界化 + 丢弃最旧**仍没做**
-    // （11b 只加了 supervisor 线程与 boot/重启，通道形状一字未动；这条 carry 还在原处）。
+    // 通道收口（0.0.8b 审计 B-5 落地，原 Task 10 carry）：条目随注册表释放 →
+    // 最后一个 Sender drop → writer 的 iter() 自然结束。僵尸在册条目（注册后不再
+    // 读 socket 的模块）由两路兜住：① 有界队列——writer 阻塞在写时积压封顶
+    // RR3_FAN_CAP 帧，fanout 满侧断投点名；② 写超时——writer 5s 写不进即退出、
+    // 通道 drop，fanout 走 Disconnected 置 tx=None。两条路都不再无界吃内存。
     let _ = writer.join();
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())
