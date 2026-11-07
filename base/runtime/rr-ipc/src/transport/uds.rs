@@ -46,6 +46,23 @@ impl Rr3TransportListener for Rr3UdsListener {
 }
 
 impl Rr3UdsListener {
+    /// 独占 bind（0.0.8d 审计 B-9）：先探测路径是否被**存活**实例占用——connect
+    /// 成功 = 有活的守护在听，返回 AddrInUse 拒绝启动（双实例夺活实例端点的裂脑
+    /// 就此禁绝：旧实例的 supervisor/在册表照跑，新实例却抢走模块连接面，两套
+    /// 状态各说各话）；connect 失败 = 残留死文件，清掉再 bind（原无条件 cleanup
+    /// 语义并入）。两个实例恰在"探测-清-bind"窗口内同时启动的理论竞态仍有残余
+    /// （UDS 无抽象命名空间），由部署面单实例约束（systemd/装机脚本）兜底。
+    pub fn rr3_bind_exclusive(path: &Path) -> io::Result<Self> {
+        if UnixStream::connect(path).is_ok() {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "探测到存活实例占用该路径——禁止双实例启动",
+            ));
+        }
+        Self::rr3_cleanup(path)?;
+        Self::rr3_bind(path)
+    }
+
     /// 客户端连接入口（M3 起的模块、`tools/sim` 的假设备都走这里）。
     pub fn rr3_connect(path: &Path) -> io::Result<UnixStream> {
         UnixStream::connect(path)
@@ -173,6 +190,37 @@ mod tests {
         drop(client);
         let err = server.join().unwrap().unwrap_err();
         assert_eq!(err, crate::transport::frame::Rr3FrameError::Closed);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// B-9：存活实例在听 = 独占 bind 拒且不得动活的端点文件，活实例照常服务
+    #[test]
+    fn bind_exclusive_refuses_live_listener() {
+        let p = tmp_sock("excl-live");
+        Rr3UdsListener::rr3_cleanup(&p).unwrap();
+        let live = Rr3UdsListener::rr3_bind(&p).expect("先起一个活实例");
+        let err = match Rr3UdsListener::rr3_bind_exclusive(&p) {
+            Err(e) => e,
+            Ok(_) => panic!("存活实例在听时必须拒绝独占 bind"),
+        };
+        assert_eq!(err.kind(), io::ErrorKind::AddrInUse, "存活实例必须拒");
+        assert!(p.exists(), "拒绝不得删活实例的端点文件");
+        let server = std::thread::spawn(move || live.rr3_accept().expect("活实例 accept 应成功"));
+        let _c = Rr3UdsListener::rr3_connect(&p).expect("活实例仍可连");
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// B-9：残留死 socket（实例已亡、文件还在）= 清掉后正常 bind（接续原 cleanup 语义）
+    #[test]
+    fn bind_exclusive_recovers_stale_socket() {
+        let p = tmp_sock("excl-stale");
+        {
+            let _s = Rr3UdsListener::rr3_bind(&p).expect("先绑一次");
+        }
+        assert!(p.exists(), "drop 后 socket 文件残留（模拟崩溃现场）");
+        let live = Rr3UdsListener::rr3_bind_exclusive(&p).expect("残留须被清掉并成功 bind");
+        drop(live);
         let _ = std::fs::remove_file(&p);
     }
 }

@@ -340,9 +340,9 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     crate::rr3_log_backfill();
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
-    Rr3UdsListener::rr3_cleanup(&cfg.socket)
-        .map_err(|e| format!("清理残留套接字 {}: {e}", cfg.socket.display()))?;
-    let listener = Rr3UdsListener::rr3_bind(&cfg.socket)
+    // bind 独占探测（0.0.8d 审计 B-9）：存活实例占用 = 拒绝启动（裂脑禁绝）；
+    // 残留死文件 = 探测 connect 失败后清掉再绑，探测与清理合并进 rr3_bind_exclusive。
+    let listener = Rr3UdsListener::rr3_bind_exclusive(&cfg.socket)
         .map_err(|e| format!("绑定 {} 失败: {e}", cfg.socket.display()))?;
     // 访问控制放行（批F5b R12，ADR-0010 增补）：chmod 0o660 + chgrp 属主组，
     // 尽力而为不拒启——详见函数 doc
