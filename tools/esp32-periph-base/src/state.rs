@@ -1,3 +1,9 @@
+//! 板侧共享状态：绑定表、运行期状态机与作业队列。
+//!
+//! `BOARD_BINDINGS` 是 NVS/宿主下发的绑定快照（单点存放，I2C 引脚恢复读它）；
+//! `PeriphState`/`Bus`/`Job` 是运行期状态与作业通道；`now_ms`/`esp_random_u32`
+//! 是时间与随机源薄封装（板侧无 `std::time` 时钟语义）。
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 

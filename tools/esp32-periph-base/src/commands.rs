@@ -1,3 +1,9 @@
+//! 控制串口（UART0）命令行面：逐行解析与应答。
+//!
+//! 承载 `frame_round`（一行一答的帧级往返）、自由度参数解析与板侧运维命令
+//! （状态/复位/绑定/表情等）；命令词与应答形状是板侧对外契约，改文案即改
+//! 运维面。总线归属门不在本文件——写口与裁决归 `frame.rs`/`state.rs`。
+
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
