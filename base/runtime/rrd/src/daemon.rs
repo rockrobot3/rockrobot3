@@ -22,8 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rr_bus::{RR3_BROADCAST_DST_TASK, RR3_TASK_RRD};
 use rr_ipc::{
-    opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3TransportEndpoint, Rr3TransportListener,
-    Rr3UdsListener,
+    opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3TransportListener, Rr3UdsListener,
 };
 use rr_registry::{rr3_registry_plan_boot, Rr3DependsFacts, Rr3TopicSet};
 use serde_json::json;
