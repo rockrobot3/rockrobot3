@@ -89,6 +89,14 @@ pub struct Rr3SpawnJob {
     /// 透传，spawn 时注入 `RR3_ACT_AXIS_STATE`；空串 = 不注入——模块侧折保守缺省
     /// （未标定不得自动，§6 硬约束），与 hal_bindings 同一条空值不注入纪律。
     pub axis_state: String,
+    /// HAL 后端声明（P0-3 根因门）：装配单 [runtime].hal_backend，daemon 透传，
+    /// spawn 时注入子进程 `RR3_HAL_BACKEND`。空串 = --manifest 调试路径不注入
+    /// （模块侧走平台缺省，CI/本地可显式 env 覆盖）。消除"漏 env 静默落 sim"。
+    pub hal_backend: String,
+    /// 音频采集面后端覆盖（组合档 Pi×ESP32 用 esp32）：装配单 [runtime].audio_backend，
+    /// daemon 透传，spawn 时注入子进程 `RR3_HAL_AUDIO_BACKEND`；None 不注入
+    /// （音频面回落全局 hal_backend）。
+    pub audio_backend: Option<String>,
 }
 
 /// supervisor 的两种请求。`Boot` 来自 daemon 的启动序（E-7），`Restart` 来自
@@ -187,9 +195,11 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
         manifest_path: manifest_path.to_path_buf(),
         entry,
         facts,
-        // `--manifest` 直起路径没有装配单，描述符与执行轴状态由 daemon 组装时统一透传
+        // `--manifest` 直起路径没有装配单，描述符/执行轴/HAL 后端由 daemon 组装时统一透传
         hal_bindings: String::new(),
         axis_state: String::new(),
+        hal_backend: String::new(),
+        audio_backend: None,
     })
 }
 
@@ -352,6 +362,17 @@ fn rr3_boot_spawn(
         .env("RR3_SIM_PEER_ROLE", boot_role);
     if !job.hal_bindings.is_empty() {
         cmd.env("RR3_HAL_BINDINGS", &job.hal_bindings);
+    }
+    // P0-3 根因门：装配单声明的 HAL 后端注入子进程 `RR3_HAL_BACKEND`——后端选择
+    // 是部署事实，必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产
+    // 假验证）。空串 = --manifest 调试路径不注入（模块侧走平台缺省）。
+    if !job.hal_backend.is_empty() {
+        cmd.env("RR3_HAL_BACKEND", &job.hal_backend);
+    }
+    // 音频采集面后端覆盖（组合档 Pi×ESP32 用 esp32）：注入 `RR3_HAL_AUDIO_BACKEND`，
+    // 让音频面独占 UART 而不影响全局后端。None 不注入（音频面回落全局 hal_backend）。
+    if let Some(ab) = &job.audio_backend {
+        cmd.env("RR3_HAL_AUDIO_BACKEND", ab);
     }
     // 执行轴状态（批N3 件三）：空值不注入——模块侧折保守缺省（未标定不得自动），
     // 与 hal_bindings 同一条"空 = 无真值，fail-closed"纪律

@@ -21,6 +21,10 @@ route = "distro" # Pi 4B 跑 Raspberry Pi OS（Debian 13 trixie 真机），发�
 [runtime]
 # rrd 自身运维参数（批N5 件二，F-30）：与 default 同源同值。
 log_ring_cap = 512
+# P0-3 根因门：HAL 后端必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim =
+# 生产假验证）。host-only 档全局 = linux（ALSA 采集/回放、sysfs PWM、nmcli 链路）；
+# 无 audio_backend 覆盖 → 音频面回落全局 linux。
+hal_backend = "linux"
 
 [platform]
 # host 档（ADR-0018 修订 1）：完整 Linux 底座 + 本机模块全跑在 Pi 上。
