@@ -11,7 +11,7 @@
 //!   `hardware/<name>/wiring.toml`、`hardware/<name>/axis/`（轴档案目录，在则整目录
 //!   随装）、`modules/<name>/config.toml`（config 是源真值，不是构建产物，不进注入
 //!   格式）。前六册 + 轴档案是 rrd 装载门的 boot 真值集，成员清单的真值只有 rrd
-//!   `rr3_runtime_truth_set` 一份（增补轮六 基-25／实-12：装载面定义清单，打包面照单
+//!   `rr3_truth_set` 一份（增补轮六 基-25／实-12：装载面定义清单，打包面照单
 //!   收口、不自带第二份——deb 缺任一必需册 rrd 即拒 boot，打包面缺任一册拒出包；
 //!   打包先按装载同判据预验装配单，坏单不得出包）。
 //!
@@ -46,7 +46,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use rrd::manifest::rr3_manifest_facts_from_text;
+use rrd::manifest::rr3_manifest_parse;
 
 /// deb 包名/版本/装机根。版本跟方案批次走（0.0.6），升级批次时改这一处。
 const RR3_DEB_PACKAGE: &str = "rockrobot3";
@@ -267,7 +267,7 @@ fn rr3_manifest_rewrite(
         out_lines.join("\n")
     };
     // 复核：改写产物必须仍能按 facts 解析且 entry 已是新值（改错了当场炸，不带病出包）
-    let reparsed = rr3_manifest_facts_from_text(&out).map_err(|errs| {
+    let reparsed = rr3_manifest_parse(&out).map_err(|errs| {
         format!(
             "模块 {module} 的 manifest 改写后解析失败: {}",
             errs.join("; ")
@@ -325,23 +325,23 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         }
     }
     let names = rr3_module_names(&cfg.payload)?;
-    // ---- 装载消费真值集（基-25／实-12：清单真值只有 rrd rr3_runtime_truth_set 一份，
+    // ---- 装载消费真值集（基-25／实-12：清单真值只有 rrd rr3_truth_set 一份，
     // 打包面照单收口、不自带第二份文件清单）----
     let profile_name = format!("{}.toml", cfg.profile);
     let profile_src = cfg.repo.join("profiles").join(&profile_name);
-    // 打包先按装载同判据预验装配单（rr3_profile_from_text，与 boot 链同一函数）：坏单
+    // 打包先按装载同判据预验装配单（rr3_profile_parse，与 boot 链同一函数）：坏单
     // 拒出包——出包时红比装机 boot 红早一个环节（块-15：装载必需件缺席而装机验证全绿
     // 才是最贵的洞）；预验同时给出 [platform].chip，平台事实表按它选册。
     let profile_text = fs::read_to_string(&profile_src)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
-    let profile = rrd::profile::rr3_profile_from_text(&profile_text).map_err(|errs| {
+    let profile = rrd::profile::rr3_profile_parse(&profile_text).map_err(|errs| {
         format!(
             "装配单 {} 预验失败（打包与装载同一判据，坏单不得出包）: {}",
             profile_src.display(),
             errs.join("; ")
         )
     })?;
-    let truth = rrd::profile::rr3_runtime_truth_set(&profile, &cfg.profile);
+    let truth = rrd::profile::rr3_truth_set(&profile, &cfg.profile);
     let missing: Vec<String> = truth
         .files
         .iter()
@@ -350,7 +350,7 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         .collect();
     if !missing.is_empty() {
         return Err(format!(
-            "装载消费真值集缺册: {}（--repo 须指向仓根 {}；清单真值 = rrd rr3_runtime_truth_set——缺任一必需册 rrd 装载即拒 boot，打包拒出包，基-25/实-12）",
+            "装载消费真值集缺册: {}（--repo 须指向仓根 {}；清单真值 = rrd rr3_truth_set——缺任一必需册 rrd 装载即拒 boot，打包拒出包，基-25/实-12）",
             missing.join(", "),
             cfg.repo.display()
         ));
@@ -426,7 +426,7 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         }
         let text = fs::read_to_string(&manifest_src)
             .map_err(|e| format!("读 {} 失败: {e}", manifest_src.display()))?;
-        let facts = rr3_manifest_facts_from_text(&text).map_err(|errs| {
+        let facts = rr3_manifest_parse(&text).map_err(|errs| {
             format!(
                 "模块 {name} 的 manifest 解析失败: {}（注入产物须是仓内 module.toml 的副本）",
                 errs.join("; ")
@@ -775,7 +775,7 @@ mod tests {
         assert!(postinst.contains("addgroup --system rockrobot3 2>/dev/null || true"));
         // 模块位：entry 改写为装机绝对路径，其余字节零差异；bin 按 entry 落位；config 随包
         let staged_manifest = fs::read_to_string(root.join("modules/rr3-act/module.toml")).unwrap();
-        let facts = rr3_manifest_facts_from_text(&staged_manifest).unwrap();
+        let facts = rr3_manifest_parse(&staged_manifest).unwrap();
         assert_eq!(facts.entry, "/usr/lib/rockrobot3/modules/rr3-act/rr3-act");
         let src = fs::read_to_string(payload.join("rr3-modules/rr3-act/manifest.toml")).unwrap();
         let expect = src.replace(
@@ -937,7 +937,7 @@ mod tests {
         );
         // entry 改写为装机绝对路径，lang 事实保留
         let facts =
-            rr3_manifest_facts_from_text(&fs::read_to_string(dir.join("module.toml")).unwrap())
+            rr3_manifest_parse(&fs::read_to_string(dir.join("module.toml")).unwrap())
                 .unwrap();
         assert_eq!(facts.lang, "python");
         assert_eq!(
@@ -1055,7 +1055,7 @@ mod tests {
     }
 
     /// 基-25 清单判等反例面：平台事实表缺席 → 打包拒出包并点名册位（清单真值 =
-    /// rrd rr3_runtime_truth_set，打包面不自带第二份清单）。
+    /// rrd rr3_truth_set，打包面不自带第二份清单）。
     #[test]
     fn stage_refuses_when_truth_set_file_missing() {
         let (payload, repo) = fixture();

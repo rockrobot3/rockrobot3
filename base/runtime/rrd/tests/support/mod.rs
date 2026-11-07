@@ -130,7 +130,7 @@ gnd_common = "star-1"
 
 /// 造一份监听面夹具（`e2e_profile.rs` 的 Root 同一装机布局）：
 /// `<root>/profiles/default.toml`、`<root>/hardware/default/wiring.toml`、
-/// `<root>/modules/rr3-listenstub/module.toml`——rr3_wiring_path_for_profile 推导的
+/// `<root>/modules/rr3-listenstub/module.toml`——rr3_wiring_path 推导的
 /// 同一棵树；名字取套接字 stem，pid 级唯一）。
 /// **stub manifest 必须真实落盘**（P2 教训）：缺格模块的 manifest 也进装载第 7 步的
 /// 路径解析，少了就退化成另一条"读取失败"的失败路径，钉不住缺格跳过语义。
@@ -320,7 +320,7 @@ impl RrdTest {
     }
 
     /// **显式 `--manifest` 调试后门**的起法（基-23）：manifest 指向 pid 唯一的**不存在
-    /// 路径**——`rr3_boot_job_from_manifest` 打一行"拒绝启动：manifest … 读取失败"后返回
+    /// 路径**——`rr3_boot_job_parse` 打一行"拒绝启动：manifest … 读取失败"后返回
     /// None（E-3：boot 期配置错误不吃预算，读不动 = None 跳过，非 fatal），boot 队列为空，
     /// rrd 照常监听。专供"必须走后门路径"的用例（e2e_ctl 的 ctl.wiring unavailable 断言：
     /// 后门无装配快照，如实回 available:false）——监听面主口径（rr3_start 一族）走的是

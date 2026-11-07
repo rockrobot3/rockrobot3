@@ -188,7 +188,7 @@ impl Root {
     fn write_profile(&self, text: &str) -> PathBuf {
         let p = self.dir.join("profiles").join("default.toml");
         std::fs::write(&p, text).expect("写装配单");
-        // 同批 stage 接线档（hardware/<形态>/wiring.toml，rr3_wiring_path_for_profile
+        // 同批 stage 接线档（hardware/<形态>/wiring.toml，rr3_wiring_path
         // 推导的同一布局）：装载期校验⑦要求装机档必在
         let w = self
             .dir

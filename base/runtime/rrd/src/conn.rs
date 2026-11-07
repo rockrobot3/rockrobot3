@@ -32,12 +32,12 @@ use rr_registry::{rr3_manifest_chk, Rr3TopicSet};
 use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
-use crate::manifest::{rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text};
+use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse};
 use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry, RR3_FAN_CAP};
 use crate::rpc::{
-    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_heartbeat_counters,
-    rr3_rpc_manifest_param, rr3_rpc_parse_request, rr3_rpc_status_for_publish_deny,
-    rr3_rpc_status_for_register, rr3_rpc_topic_param, Rr3RpcMethod, Rr3RpcRequest,
+    rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_counters,
+    rr3_rpc_deny_status, rr3_rpc_manifest, rr3_rpc_parse, rr3_rpc_reg_status, rr3_rpc_topic_param,
+    Rr3RpcMethod, Rr3RpcRequest,
 };
 use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log, rr3_log_tail};
@@ -183,7 +183,7 @@ fn rr3_refuse(
 ///
 /// 注册期每一次拒绝都**先回错误帧再断开**（只断连不回码等于让客户端挂在超时上）。
 /// 状态码：首帧类型/dst_task/RPC 畸形/manifest 文本非法/`entry` 非绝对 = `Invalid`；
-/// 重复名与超额 = `Busy`；保留名 = `Permission`（映射只在 `rr3_rpc_status_for_register` 一处）。
+/// 重复名与超额 = `Busy`；保留名 = `Permission`（映射只在 `rr3_rpc_reg_status` 一处）。
 fn rr3_handshake(
     reader: &mut UnixStream,
     out: &Arc<Mutex<UnixStream>>,
@@ -230,7 +230,7 @@ fn rr3_handshake(
             &format!("首帧 payload 类型必须是 Request，收到 {ty:?}"),
         ));
     }
-    let req = match rr3_rpc_parse_request(&body) {
+    let req = match rr3_rpc_parse(&body) {
         Ok(r) => r,
         Err((_, msg)) => {
             return Err(rr3_refuse(
@@ -259,7 +259,7 @@ fn rr3_handshake(
             ),
         ));
     }
-    let text = match rr3_rpc_manifest_param(&req.params) {
+    let text = match rr3_rpc_manifest(&req.params) {
         Ok(t) => t,
         Err((_, msg)) => {
             return Err(rr3_refuse(
@@ -271,7 +271,7 @@ fn rr3_handshake(
             ))
         }
     };
-    let facts = match rr3_manifest_facts_from_text(&text) {
+    let facts = match rr3_manifest_parse(&text) {
         Ok(f) => f,
         Err(errs) => {
             return Err(rr3_refuse(
@@ -296,7 +296,7 @@ fn rr3_handshake(
     // M2 的 manifest 从线上（wire）来，没有"所在目录"可依据 → entry 必须是绝对路径。
     // 在仓的 modules/*/module.toml 是**契约工件**而非注册输入：装机时由安装步骤写入绝对
     // entry（见 modules/README.md），所以这条门禁不吃在仓夹具。
-    if !rr3_manifest_entry_is_absolute(&facts.entry) {
+    if !rr3_manifest_abs(&facts.entry) {
         return Err(rr3_refuse(
             out,
             reported_task,
@@ -317,8 +317,8 @@ fn rr3_handshake(
     let task = match added {
         Ok(t) => t,
         Err(e) => {
-            // 状态码映射只在这一处（Task 6 的 rr3_rpc_status_for_register），别在 conn 里重写一遍
-            let code = rr3_rpc_status_for_register(&e);
+            // 状态码映射只在这一处（Task 6 的 rr3_rpc_reg_status），别在 conn 里重写一遍
+            let code = rr3_rpc_reg_status(&e);
             return Err(rr3_refuse(out, reported_task, req.id, code, &e.to_string()));
         }
     };
@@ -465,7 +465,7 @@ fn rr3_serve_ctl(
         // 装配快照读口（批N4 件九笔4）：boot 装载链验收后的四路底账 + [pins]×
         // wiring 全交叉逐条判果，一应答给出（判据真值单点 = assembly.rs）。快照
         // 未在册（--manifest 调试路径）时如实回不可得，不造假数据。
-        Rr3RpcMethod::CtlWiring => Ok(crate::assembly::rr3_assembly_wiring_json()),
+        Rr3RpcMethod::CtlWiring => Ok(crate::assembly::rr3_assembly_json()),
         // 契约完整性审计读口（批N5 件五笔4，Z-4）：boot 装载链验收后的契约四册
         // sha256 记账 + "齐全且 sha 对"自检判果一应答给出（判据真值单点 =
         // contracts.rs）。快照未在册（--manifest 调试路径）如实回不可得。
@@ -604,7 +604,7 @@ fn rr3_publish(
             out,
             me,
             rr3_best_effort_id(body),
-            rr3_rpc_status_for_publish_deny(&e),
+            rr3_rpc_deny_status(&e),
             &e.to_string(),
         );
         return Ok(Rr3Flow::Keep);
@@ -649,7 +649,7 @@ fn rr3_publish(
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-                &crate::daemon::rr3_system_power_frame("battery-low", percent, voltage_mv),
+                &crate::daemon::rr3_power_frame("battery-low", percent, voltage_mv),
                 rr_bus::RR3_TASK_RRD,
             );
             rr3_log(&format!(
@@ -667,7 +667,7 @@ fn rr3_publish(
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-                &crate::daemon::rr3_system_power_frame("battery-ok", percent, voltage_mv),
+                &crate::daemon::rr3_power_frame("battery-ok", percent, voltage_mv),
                 rr_bus::RR3_TASK_RRD,
             );
             rr3_log(&format!(
@@ -688,7 +688,7 @@ fn rr3_serve_request(
     me: &Rr3Peer,
     body: &[u8],
 ) -> Result<Rr3Flow, String> {
-    let req = match rr3_rpc_parse_request(body) {
+    let req = match rr3_rpc_parse(body) {
         Ok(r) => r,
         Err((_, msg)) => {
             rr3_reply_err(
@@ -742,7 +742,7 @@ fn rr3_serve_request(
             // 上一拍的账（e2e ctl_counters_aggregates_heartbeat_counters 在机器繁忙
             // 时实证：期望 5 实得 2）。归并块放最前不改变 D-6 三态语义，两把锁各自
             // 成段不嵌套。
-            if let Some(counters) = rr3_rpc_heartbeat_counters(&req.params) {
+            if let Some(counters) = rr3_rpc_counters(&req.params) {
                 let changed = rr3_lock(&ctx.shared).rr3_reg_counters_merge(&me.name, &counters);
                 // R26 心跳合并写（0.0.5 增补轮四 批W3 改判，0.0.4 Q2 逐拍
                 // write-through → M 毫秒窗口至多一次 + N 拍兜底；SIGTERM 强制

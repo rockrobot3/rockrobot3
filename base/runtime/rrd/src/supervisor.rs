@@ -64,9 +64,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::daemon::{rr3_now_ms, rr3_state_frame};
-use crate::manifest::{
-    rr3_manifest_entry_is_absolute, rr3_manifest_facts_from_text, Rr3ManifestFacts,
-};
+use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse, Rr3ManifestFacts};
 use crate::registry::{rr3_phase_for_exit, Rr3ChildExit, Rr3Phase, Rr3RestartPlan, RrdRegistry};
 use crate::{rr3_lock, rr3_log};
 
@@ -151,7 +149,7 @@ impl Rr3Supervisor {
 /// manifest 读不动/解析失败时 rrd 连 `name` 都不知道，只能点名"是哪个文件"（E-7 末句）；
 /// entry 不合格时点名的是"哪个模块的哪条 entry"。把文案塞进返回值再让 daemon 打，
 /// 就等于逼调用方去猜这两种形状，日志出口反而分散。
-pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
+pub fn rr3_boot_job_parse(manifest_path: &Path) -> Option<Rr3SpawnJob> {
     let text = match std::fs::read_to_string(manifest_path) {
         Ok(t) => t,
         Err(e) => {
@@ -162,7 +160,7 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
             return None;
         }
     };
-    let facts = match rr3_manifest_facts_from_text(&text) {
+    let facts = match rr3_manifest_parse(&text) {
         Ok(f) => f,
         Err(errs) => {
             rr3_log(&format!(
@@ -177,7 +175,7 @@ pub fn rr3_boot_job_from_manifest(manifest_path: &Path) -> Option<Rr3SpawnJob> {
     // 相对 entry 是相对它自己的 manifest 写的，跟着 CWD 走就成了一台机器一个目录树）。
     // 父目录取不到（`--manifest` 给的是裸文件名）时按空串 join，即由 rrd 的 CWD 展开——
     // 那是 CLI 原词本身有歧义，而回显出去的永远是最终解析后的那一条路径，不猜。
-    let entry = if rr3_manifest_entry_is_absolute(&facts.entry) {
+    let entry = if rr3_manifest_abs(&facts.entry) {
         PathBuf::from(&facts.entry)
     } else {
         manifest_path
@@ -305,7 +303,7 @@ fn rr3_absorb_exit(
 /// 超上界单代轮转（0.0.8c 审计 B-8）在打开前做——子进程持 fd 直写，rrd 只能在
 /// spawn 窗口收口体量；长跑期间体量由模块侧留痕纪律（事件级频率）约束。
 fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::File> {
-    // fail-closed：bus_path 由 daemon 侧绝对化（cli.rs 的 rr3_socket_absolute_path），
+    // fail-closed：bus_path 由 daemon 侧绝对化（cli.rs 的 rr3_socket_abs），
     // 相对/空路径到这里就是链条上游破了——拒开，绝不相对 CWD 悄悄建目录
     if !bus_path.is_absolute() {
         return Err(std::io::Error::new(
@@ -316,7 +314,7 @@ fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::Fi
     let dir = crate::rr3_unit_log_dir(bus_path);
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{unit}.log"));
-    crate::rr3_log_rotate_if_over(&path);
+    crate::rr3_log_rotate(&path);
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)

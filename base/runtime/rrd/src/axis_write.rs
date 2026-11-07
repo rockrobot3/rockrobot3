@@ -5,14 +5,14 @@
 //! [`crate::axis`] 与 [`crate::profile`]——本模块只做**写入编排的策略层**：
 //! 谁能写（档案外键 pin 必须 ∈ 装配单 [[pins]] 的 pin_id 全集，F-4 写侧半边）、
 //! 写到哪（`hardware/<形态>/axis/<instance>.toml`，形态名 = 装配单文件名 stem，
-//! 与 [`crate::wiring::rr3_wiring_path_for_profile`] 同一布局）、什么不许写
+//! 与 [`crate::wiring::rr3_wiring_path`] 同一布局）、什么不许写
 //! （坏目标不覆盖——件二装载域"不许覆盖病灶"的写侧镜像；同 pin 异名副本不
 //! 制造——副本会让 boot 链"恰一份合法才投影"拒注入，件三已定性，写入时先挡）。
 //!
 //! 为什么是独立产线小工具而不是 rrd daemon 的子命令：daemon 的 CLI 是守护进程
 //! 参数面（socket/tick/manifest），混进一次性写档案会让两种生命周期各说一套；
 //! 产线工人（路线 A 治具流程）与批N4 面板动作面要的是同一个写路径——本工具是
-//! [`crate::axis::rr3_act_profile_store`] 的第一个接线位，批N4 面板接线时复用
+//! [`crate::axis::rr3_act_prof_store`] 的第一个接线位，批N4 面板接线时复用
 //! 同一函数（§7"落盘只许有一份实现"，第二条写路径即红）。
 //!
 //! rtos 档不在本面射程内：`Rr3Store` 三项载体性质（工单 S-14）实测前
@@ -26,10 +26,10 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use crate::axis::{rr3_act_profile_from_text, rr3_act_profile_load};
+use crate::axis::{rr3_act_prof_parse, rr3_act_profile_load};
 // 落盘序随写盘面 unix 门（counters/axis 同径，批N9 件一补钉；run 的接线位同门）
 #[cfg(unix)]
-use crate::axis::rr3_act_profile_store;
+use crate::axis::rr3_act_prof_store;
 
 /// 写入参数：`--profile` 装配单（pin_id 全集与形态名的唯一输入）＋
 /// `--candidate` 候选档案（十四键平表全文）。
@@ -89,14 +89,14 @@ pub fn rr3_axis_write_parse(args: &[String]) -> Result<Rr3AxisWriteArgs, String>
 /// 补钉）——解析面 [`rr3_axis_write_parse`] 跨平台照常在册。
 #[cfg(unix)]
 pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
-    // ① 装配单装载：绝对路径（与 daemon 的 rr3_profile_absolute_path 同口径，
+    // ① 装配单装载：绝对路径（与 daemon 的 rr3_profile_abs 同口径，
     //    装机现场读不到装配单，pin_id 全集无从谈起）→ 文本 → 结构。
     //    写入面只吃装载域，不做 boot 的十条校验——整机装配合法性是 boot 正门的
     //    职责，写入时刻不重复判（判了就是第二份裁决点，迟早分叉）。
-    let profile_abs = crate::profile::rr3_profile_absolute_path(&cfg.profile)?;
+    let profile_abs = crate::profile::rr3_profile_abs(&cfg.profile)?;
     let profile_text = std::fs::read_to_string(&profile_abs)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_abs.display()))?;
-    let profile = crate::profile::rr3_profile_from_text(&profile_text).map_err(|errs| {
+    let profile = crate::profile::rr3_profile_parse(&profile_text).map_err(|errs| {
         format!(
             "装配单 {} 形状不合: {}",
             profile_abs.display(),
@@ -105,10 +105,10 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
     })?;
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
 
-    // ② 落位：形态名 = 装配单文件名 stem（rr3_wiring_path_for_profile 推导的
+    // ② 落位：形态名 = 装配单文件名 stem（rr3_wiring_path 推导的
     //    同一布局——profiles/<形态>.toml ↔ hardware/<形态>/），axis/ 在其下。
     //    接线档本身不读：写入面的输入只有装配单与候选档案。
-    let wiring_path = crate::wiring::rr3_wiring_path_for_profile(&cfg.profile)?;
+    let wiring_path = crate::wiring::rr3_wiring_path(&cfg.profile)?;
     let axis_dir = wiring_path
         .parent()
         .expect("wiring 路径必有父目录")
@@ -116,10 +116,10 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
 
     // ③ 候选全判据：十四键全键必填、类型域界、词表在册、行程自洽、pin 外键
     //    ∈ [[pins]]（F-4 写侧半边——装配单没有的 pin，写进去就是 boot 必红的死档）。
-    let candidate_path = crate::profile::rr3_profile_absolute_path(&cfg.candidate)?;
+    let candidate_path = crate::profile::rr3_profile_abs(&cfg.candidate)?;
     let candidate_text = std::fs::read_to_string(&candidate_path)
         .map_err(|e| format!("读不到候选档案 {}: {e}", candidate_path.display()))?;
-    let file = rr3_act_profile_from_text(
+    let file = rr3_act_prof_parse(
         &candidate_text,
         &candidate_path.display().to_string(),
         &pin_ids,
@@ -199,7 +199,7 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
     //    本函数不再叠加第二套备份/回滚。
     std::fs::create_dir_all(&axis_dir)
         .map_err(|e| format!("建档案目录 {} 失败: {e}", axis_dir.display()))?;
-    rr3_act_profile_store(&target, &file)
+    rr3_act_prof_store(&target, &file)
         .map_err(|e| format!("写入 {} 失败: {e}", target.display()))?;
 
     // ⑨ 回显：产线工人要当场看到"写了什么、多久生效"——档案在 boot 链的

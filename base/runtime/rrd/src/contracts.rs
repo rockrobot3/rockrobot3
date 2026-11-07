@@ -44,7 +44,7 @@ pub struct Rr3ContractsSnapshot {
     /// 四册记账（顺序 = [`RR3_CONTRACT_FILES`] 清单序，确定性渲染）
     pub entries: Vec<Rr3ContractsEntry>,
     /// 真值集七成员记账（基-40 件一②：装载面 [`crate::profile::
-    /// rr3_runtime_truth_set`] 的成员判据——装配单本体/契约四册/平台事实表/
+    /// rr3_truth_set`] 的成员判据——装配单本体/契约四册/平台事实表/
     /// 接线档逐条 sha 定格，自检复演判缺/漂）。四册同时在本表与 [`Self::entries`]
     /// 各记一笔：判据域不同（Z-4 四册账 vs 基-40 成员集账），重复记账是"两个判据
     /// 都抓同一病"，不是双真值——成员名与 sha 同源同值。
@@ -59,7 +59,7 @@ pub struct Rr3TruthSetEntry {
     /// 相对成员名（`profiles/<stem>.toml` / `contracts/*.toml` /
     /// `contracts/platform/<chip>.toml` / `hardware/<stem>/wiring.toml`）
     pub member: String,
-    /// 本机定位路径（boot 记账时由 [`crate::profile::rr3_runtime_truth_set_locations`]
+    /// 本机定位路径（boot 记账时由 [`crate::profile::rr3_truth_locations`]
     /// 派生；自检复演重读同一路径——漂移判据的定义域就是"这份文件"）
     pub path: PathBuf,
     /// sha256 十六进制小写（64 字符）
@@ -78,8 +78,8 @@ static RR3_CONTRACTS_SNAPSHOT: Mutex<Option<Rr3ContractsSnapshot>> = Mutex::new(
 /// 落盘新装配单后要**重记账**（写口的 tmp 产物过装载链全量预核 = 新验收事实，
 /// 记账跟住最新验收事实；否则写口自造一笔常驻"sha 漂"自检红，把真漂移淹没）。
 /// OnceLock 一次定格无处可换；Mutex<Option<_>> 三口语义：set 首份胜出、
-/// [`rr3_contracts_snapshot_replace`] 写口专属覆盖、get 快照只读。
-pub fn rr3_contracts_snapshot_set(snapshot: Rr3ContractsSnapshot) -> bool {
+/// [`rr3_contracts_rebook`] 写口专属覆盖、get 快照只读。
+pub fn rr3_contracts_set(snapshot: Rr3ContractsSnapshot) -> bool {
     let mut g = RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒");
     if g.is_some() {
         return false;
@@ -91,7 +91,7 @@ pub fn rr3_contracts_snapshot_set(snapshot: Rr3ContractsSnapshot) -> bool {
 /// 写口重记账（批N22 件一，`rr3.ctl.domain.set` 成功路径单点调用）：对写口
 /// 落盘后的新装配单重跑 capture（调用方持四路输入，与 boot 记账同源同形）。
 /// 未在册时拒（记账语义 = "boot 后的账"，--manifest 调试路径无账可换）。
-pub fn rr3_contracts_snapshot_replace(snapshot: Rr3ContractsSnapshot) -> Result<(), String> {
+pub fn rr3_contracts_rebook(snapshot: Rr3ContractsSnapshot) -> Result<(), String> {
     let mut g = RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒");
     if g.is_none() {
         return Err("契约记账未在册（未以 --profile boot），无处可重记账".to_string());
@@ -102,7 +102,7 @@ pub fn rr3_contracts_snapshot_replace(snapshot: Rr3ContractsSnapshot) -> Result<
 
 /// 快照只读口（conn.rs `rr3.ctl.contracts` 渲染源）。None = 未以 `--profile`
 /// 启动（`--manifest` 调试路径无契约记账）。
-pub fn rr3_contracts_snapshot() -> Option<Rr3ContractsSnapshot> {
+pub fn rr3_contracts_snap() -> Option<Rr3ContractsSnapshot> {
     RR3_CONTRACTS_SNAPSHOT
         .lock()
         .expect("契约记账锁中毒")
@@ -113,8 +113,8 @@ pub fn rr3_contracts_snapshot() -> Option<Rr3ContractsSnapshot> {
 /// 任何一册读不到 / 不可读即 Err——调用点是 boot 装载链验收之后，这些文件刚被
 /// 装载面读过一遍（真值集成员判据 = "装载期读的文件"），这里再读失败是文件
 /// 系统级异常，fail-closed 让 boot 带因退出（不带病定格）。真值集成员定位由
-/// [`crate::profile::rr3_runtime_truth_set_locations`] 派生（成员名与定位同源）。
-pub fn rr3_contracts_snapshot_capture(
+/// [`crate::profile::rr3_truth_locations`] 派生（成员名与定位同源）。
+pub fn rr3_contracts_scan(
     profile_path: &std::path::Path,
     contracts_dir: &std::path::Path,
     wiring_path: &std::path::Path,
@@ -133,12 +133,8 @@ pub fn rr3_contracts_snapshot_capture(
         });
     }
     let mut truth_set = Vec::new();
-    for loc in crate::profile::rr3_runtime_truth_set_locations(
-        profile_path,
-        contracts_dir,
-        wiring_path,
-        chip,
-    )? {
+    for loc in crate::profile::rr3_truth_locations(profile_path, contracts_dir, wiring_path, chip)?
+    {
         let bytes = std::fs::read(&loc.path)
             .map_err(|e| format!("真值集记账读失败 {}: {e}", loc.path.display()))?;
         truth_set.push(Rr3TruthSetEntry {
@@ -158,7 +154,7 @@ pub fn rr3_contracts_snapshot_capture(
 /// sha 对破、等 = pass。判据同质，无 not-applicable 豁免面。快照未在册
 /// （--manifest 路径）回空表，渲染层如实报 available:false，不造假判果。
 pub fn rr3_contracts_checks() -> Vec<Rr3AssemblyCheck> {
-    let Some(s) = rr3_contracts_snapshot() else {
+    let Some(s) = rr3_contracts_snap() else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -240,7 +236,7 @@ pub fn rr3_contracts_checks() -> Vec<Rr3AssemblyCheck> {
 /// `rr3.ctl.contracts` 应答渲染（conn.rs 单点调用；形状与 `rr3.ctl.wiring`
 /// 同族：available + checks）。快照未在册（--manifest 调试路径）如实报不可得。
 pub fn rr3_contracts_json() -> Value {
-    match rr3_contracts_snapshot() {
+    match rr3_contracts_snap() {
         Some(s) => {
             let checks: Vec<Value> = rr3_contracts_checks()
                 .iter()
@@ -428,11 +424,11 @@ mod tests {
         let miss_dir =
             std::env::temp_dir().join(format!("rrd-contracts-miss-{}", std::process::id()));
         std::fs::create_dir_all(&miss_dir).expect("建缺册目录");
-        let e = rr3_contracts_snapshot_capture(&profile_path, &miss_dir, &wiring_path, chip)
+        let e = rr3_contracts_scan(&profile_path, &miss_dir, &wiring_path, chip)
             .expect_err("缺真值集成员必须拒记账");
         assert!(e.contains("记账读失败") && e.contains("topics.toml"), "{e}");
 
-        let snap = rr3_contracts_snapshot_capture(&profile_path, &contracts, &wiring_path, chip)
+        let snap = rr3_contracts_scan(&profile_path, &contracts, &wiring_path, chip)
             .expect("真值集七成员齐全应记账成功");
         assert_eq!(snap.entries.len(), 4);
         assert_eq!(snap.entries[0].file, "topics.toml");
@@ -450,7 +446,7 @@ mod tests {
         );
 
         // OnceLock 进程级：本测试进程只这一份定格（首份胜出），三形全在同快照上判
-        assert!(rr3_contracts_snapshot_set(snap));
+        assert!(rr3_contracts_set(snap));
         let checks = rr3_contracts_checks();
         assert_eq!(checks.len(), 5, "四册逐条＋truth_set 汇总");
         assert!(

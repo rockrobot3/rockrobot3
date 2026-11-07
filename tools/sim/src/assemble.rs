@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use rrd::manifest::rr3_manifest_facts_from_text;
-use rrd::profile::rr3_profile_from_text;
+use rrd::manifest::rr3_manifest_parse;
+use rrd::profile::rr3_profile_parse;
 
 use crate::brain::wait_socket_exists;
 use crate::drill::{
@@ -40,7 +40,7 @@ const RR3_ASSEMBLE_READY_DEADLINE: Duration = Duration::from_secs(60);
 /// 三道门，只改 entry 引号内的值，其余字节原样）：
 /// 门 0 装机值可装机（绝对路径 + 无 `.` / `..` 段；POSIX 语法判定——
 /// `Path::is_absolute` 在 Windows host 对 `/x` 返回 false，语义随 host 漂移会让同一
-/// 份 manifest 两侧判定不同，registry 的 `rr3_manifest_entry_is_absolute` 同款理由）；
+/// 份 manifest 两侧判定不同，registry 的 `rr3_manifest_abs` 同款理由）；
 /// 门 1 entry 行恰一条；门 2 旧值与解析事实交叉核验（防夹具读错文件）；
 /// 门 3 改写后重解析复核。
 pub fn rr3_entry_rewrite(
@@ -93,7 +93,7 @@ pub fn rr3_entry_rewrite(
         return Err(format!("模块 {module} 的 manifest 无 entry 行"));
     }
     // 门 3：改写后重解析复核（entry 恰为新值，顺带保住"其余字段仍可解析"）
-    let re = rr3_manifest_facts_from_text(&out)
+    let re = rr3_manifest_parse(&out)
         .map_err(|errs| format!("模块 {module} 改写后不可解析: {errs:?}"))?;
     if re.entry != target {
         return Err(format!(
@@ -118,7 +118,7 @@ pub fn rr3_assemble_layout(
 ) -> Result<(PathBuf, Vec<Rr3AssembleEntry>), String> {
     let profile_text = std::fs::read_to_string(profile_src)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
-    let profile = rr3_profile_from_text(&profile_text)
+    let profile = rr3_profile_parse(&profile_text)
         .map_err(|errs| format!("装配单 {} 形状不合: {errs:?}", profile_src.display()))?;
 
     let profiles_dir = workdir.join("profiles");
@@ -153,7 +153,7 @@ pub fn rr3_assemble_layout(
                 src_manifest.display()
             )
         })?;
-        let facts = rr3_manifest_facts_from_text(&text)
+        let facts = rr3_manifest_parse(&text)
             .map_err(|errs| format!("仓源 manifest {src_manifest:?} 解析失败: {errs:?}"))?;
         // 产物 = 独立工程 target/debug 产物（批N32 件四起六模块全 Rust——
         // brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest 解析保证）
@@ -499,7 +499,7 @@ watchdog_timeout_ms = 5000\n";
             repo.join("profiles/default.toml"),
             // schema_version=5 形状（批N5 [runtime] 进场，F-30 环容量落数据）：host 档
             // 合法不适用显式写；本夹具不声明 [pins]，"a.b" 是夹具自造格位，本函数
-            // 只走形状解析（rr3_profile_from_text），不查册。
+            // 只走形状解析（rr3_profile_parse），不查册。
             "schema_version = 5\n\n[runtime]\nlog_ring_cap = 512\nhal_backend = \"sim\"\n\n[platform]\ntier = \"host\"\nchip = \"rk3566\"\n\n\
              [supplies]\nwatchdog_present = false\nwatchdog_timeout_ms = 15000\n\
              watchdog_feeder = \"none\"\ntick_period_ms = 200\ntick_jitter_ms = 100\n\
@@ -571,7 +571,7 @@ watchdog_timeout_ms = 5000\n";
     fn repo_default_enabled_slots_are_assembly_ready() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let profile_text = std::fs::read_to_string(repo.join("profiles/default.toml")).unwrap();
-        let profile = rr3_profile_from_text(&profile_text).expect("default 装配单可解析");
+        let profile = rr3_profile_parse(&profile_text).expect("default 装配单可解析");
         assert_eq!(profile.enabled_slots.len(), 6, "default 机六模块满配");
         assert!(
             repo.join("hardware/default/wiring.toml").is_file(),
@@ -581,7 +581,7 @@ watchdog_timeout_ms = 5000\n";
             let dir = repo.join("modules").join(module);
             let text = std::fs::read_to_string(dir.join("module.toml"))
                 .unwrap_or_else(|e| panic!("读 {module} manifest: {e}"));
-            let facts = rr3_manifest_facts_from_text(&text)
+            let facts = rr3_manifest_parse(&text)
                 .unwrap_or_else(|e| panic!("{module} manifest 解析: {e:?}"));
             assert_eq!(
                 facts.name, *module,

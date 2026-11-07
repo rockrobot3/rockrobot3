@@ -24,7 +24,7 @@ fn main() -> std::process::ExitCode {
     // 按 CLI 原词回显（`--socket rel.sock`）会让运维照自己 shell 的 CWD 去连，而 daemon
     // 绑的是 rrd 的 CWD + rel.sock——两处各说一套，比直接报错更难查。
     // 绝对化失败即致命：静默回落原词等于把这条缝留在原地。
-    match cli::rr3_socket_absolute_path(&cfg.socket) {
+    match cli::rr3_socket_abs(&cfg.socket) {
         Ok(abs) => cfg.socket = abs,
         Err(e) => {
             eprintln!("rrd: {e}");
@@ -35,7 +35,7 @@ fn main() -> std::process::ExitCode {
     // 叠加层路径在这里一次性绝对化：装载与横幅共用同一个解析结果（spec §6 的可见凭证）。
     // 解析失败即致命——横幅是"叠加层已生效"的可见凭证，按 CLI 原词回显会让它依赖 CWD。
     let overlay = match cfg.overlay.as_deref() {
-        Some(ov) => match topics_load::rr3_topics_absolute_path(ov) {
+        Some(ov) => match topics_load::rr3_topics_abs(ov) {
             Ok(abs) => Some(abs),
             Err(e) => {
                 eprintln!("rrd: 主题叠加层参数不可用: {e}");
@@ -48,7 +48,7 @@ fn main() -> std::process::ExitCode {
     // 装配单路径在这里一次性绝对化（与叠加层同形）：装载与横幅凭证共用同一个解析结果。
     // 解析失败即致命——装配单**必须已存在**才可装载，canonicalize 的 ENOENT 正是该报的错。
     if let Some(p) = cfg.profile.as_deref() {
-        match profile::rr3_profile_absolute_path(p) {
+        match profile::rr3_profile_abs(p) {
             Ok(abs) => cfg.profile = Some(abs),
             Err(e) => {
                 eprintln!("rrd: 装配单参数不可用: {e}");

@@ -159,7 +159,7 @@ impl Root {
     fn write_profile(&self, text: &str) -> PathBuf {
         let p = self.dir.join("profiles").join("default.toml");
         std::fs::write(&p, text).expect("写装配单");
-        // 同批 stage 接线档（hardware/<形态>/wiring.toml，rr3_wiring_path_for_profile
+        // 同批 stage 接线档（hardware/<形态>/wiring.toml，rr3_wiring_path
         // 推导的同一布局）：装载期校验⑦要求装机档必在
         let w = self
             .dir
@@ -323,7 +323,7 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
             .all(|b| b["sha256"].as_str().map(|s| s.len()) == Some(64)),
         "每册带 64 字符 sha256 十六进制: {books:?}"
     );
-    // 基-40 成员完整性段：七成员点名（成员名 = rr3_runtime_truth_set 相对名，顺序 =
+    // 基-40 成员完整性段：七成员点名（成员名 = rr3_truth_set 相对名，顺序 =
     // 成员名单点序），每成员带 64 字符 sha256——与四册账同源同值（四册成员重复记账）。
     let ts = c["truth_set"].as_array().expect("真值集记账必须在场: {v}");
     assert_eq!(

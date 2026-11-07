@@ -379,7 +379,7 @@ impl RrdRegistry {
     /// 位随 spawn 那一刻查），那是 conn/daemon 层的职责：路径绝对性已随 Task 7 落地
     /// （`conn.rs` 的握手拒相对 entry、回 AIRY_EINVAL 并点名字段）；存在性/可执行位已随
     /// Task 11b 落地，但**只查本守护要 spawn 的那批**——`supervisor.rs` 的
-    /// `rr3_boot_job_from_manifest` 在 boot 那一刻查（E-3，拒法是 `拒绝启动`）。走线上注册的
+    /// `rr3_boot_job_parse` 在 boot 那一刻查（E-3，拒法是 `拒绝启动`）。走线上注册的
     /// 外来模块 rrd 永不 spawn 它（E-1），所以那条 entry 的存在性根本无人裁定，也不是本表的职责。
     pub fn rr3_reg_add(
         &mut self,
@@ -417,7 +417,7 @@ impl RrdRegistry {
             });
         }
         // 入库前提：watchdog_ms 必须为正，否则 `now_ms - last_beat_ms >= watchdog_ms` 恒成立，
-        // 首轮到期扫描就把所有模块秒判死。`rr3_manifest_facts_from_text` 只在**文本**读取期
+        // 首轮到期扫描就把所有模块秒判死。`rr3_manifest_parse` 只在**文本**读取期
         // 拒非正整数（`manifest.rs` 的 `req_int`），而 `Rr3ManifestFacts` 字段全 `pub`，
         // 直接构造的 facts 绕得过那道校验，故这里再钉一次。
         // 用 debug_assert 而不是返回 Err：绕过 facts 读取入口是调用方的编程错误，而
@@ -426,7 +426,7 @@ impl RrdRegistry {
         // debug/release）就拒非正整数，CLI 面也没有 watchdog 这个旋钮可绕——本表不替它裁定语义。
         // 位置在**三条拒绝门之后**，让本函数文档里那句检查序在 debug 构建里也成立：断言
         // 抢在前面的话，一个带坏 watchdog 的重复/保留名/超额注册会先 panic 而不是如实返回
-        // Err，调用方拿不到拒绝理由（Task 6 的 `rr3_rpc_status_for_register` 便无从映射——
+        // Err，调用方拿不到拒绝理由（Task 6 的 `rr3_rpc_reg_status` 便无从映射——
         // 那个调用方已随 Task 7 落地，就是 `conn.rs` 注册被拒时走的 `rr3_refuse`）。
         debug_assert!(
             facts.watchdog_ms > 0,
@@ -1026,7 +1026,7 @@ impl RrdRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::rr3_manifest_facts_from_text;
+    use crate::manifest::rr3_manifest_parse;
     use std::sync::mpsc;
 
     fn facts(name: &str, hb: u64, wd: u64, policy: &str) -> Rr3ManifestFacts {
@@ -1051,7 +1051,7 @@ heartbeat_ms = {hb}
 watchdog_timeout_ms = {wd}
 "#
         );
-        rr3_manifest_facts_from_text(&text).expect("测试 manifest 必须可读")
+        rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
     }
 
     fn chan() -> (SyncSender<Rr3Frame>, std::sync::mpsc::Receiver<Rr3Frame>) {
@@ -1091,7 +1091,7 @@ heartbeat_ms = 100
 watchdog_timeout_ms = 500
 "#
         );
-        rr3_manifest_facts_from_text(&text).expect("测试 manifest 必须可读")
+        rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
     }
 
     /// 路由表读取：exposes 匹配、多 callee 取 task 最小、failed 排除、未声明回 None
@@ -1483,7 +1483,7 @@ watchdog_timeout_ms = 500
     }
 
     /// 注册期不许把 `watchdog_ms = 0` 收进表里：那样 `now - last_beat >= 0` 恒成立，
-    /// 首轮到期扫描就把全表秒判死。`rr3_manifest_facts_from_text` 已经把非正整数拒在
+    /// 首轮到期扫描就把全表秒判死。`rr3_manifest_parse` 已经把非正整数拒在
     /// 读取期，但 `Rr3ManifestFacts` 字段全 `pub`，调用方可以直接构造绕过它——所以入库
     /// 那一刻还得钉一次。`cargo test` 跑的是 debug 构建（`debug_assertions` 开），
     /// 故这里用 catch_unwind 断言它当场被拦；release 侧的下界不在本表也不在 CLI（没有 watchdog
@@ -1506,7 +1506,7 @@ watchdog_timeout_ms = 500
     /// 三条拒绝门必须先于 watchdog 断言：`rr3_reg_add` 的文档序是"保留名 → 同名在册 →
     /// 超额 → 分配 task"，而断言原先坐在函数第一行，debug 构建里一个带着坏 watchdog 的
     /// 重复注册会 panic 而不是如实返回 Duplicate——调用方拿不到拒绝理由，也就回不出
-    /// 正确错误码（Task 6 的 `rr3_rpc_status_for_register` 正是拿这个 Err 去映射，它的调用方
+    /// 正确错误码（Task 6 的 `rr3_rpc_reg_status` 正是拿这个 Err 去映射，它的调用方
     /// `conn.rs` 已随 Task 7 落地）。
     /// 三条门各给一个"坏 watchdog + 该拒"的输入，缺一条就抓不到。
     #[cfg(debug_assertions)]
@@ -2537,7 +2537,7 @@ heartbeat_ms = 100
 watchdog_timeout_ms = 60000
 "#
         );
-        rr3_manifest_facts_from_text(&text).expect("测试 manifest 必须可读")
+        rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
     }
 
     fn providers_of(pairs: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {

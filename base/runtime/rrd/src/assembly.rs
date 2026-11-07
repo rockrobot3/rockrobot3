@@ -37,7 +37,7 @@ pub struct Rr3AssemblySnapshot {
     pub wiring: Rr3Wiring,
     /// 器件表的 mate → peak_ma 索引（装载链同一份 `contracts/devices.toml` 派生，
     /// 非第二真值点）：额定加总族（校验⑦-c1·自检时点判，批N5 件五）的峰值事实源，
-    /// 判据真值单点仍住 [`rr3_assembly_cross_checks`]。
+    /// 判据真值单点仍住 [`rr3_cross_checks`]。
     pub peak_by_mate: BTreeMap<String, i64>,
     /// 轴档案（`hardware/<形态>/axis/*.toml` 全量合法装载件，件二装载器产物；
     /// 非投影选轴——面板出图要看见全部轴，投影 RR3_ACT_AXIS_STATE 只属于注入面）
@@ -51,13 +51,13 @@ static RR3_ASSEMBLY_SNAPSHOT: OnceLock<Rr3AssemblySnapshot> = OnceLock::new();
 /// boot 装载链成功后一次定格（daemon.rs 单点调用）。重复 set 首份胜出并回
 /// false——快照是"本次进程 boot 的装载结果"，后来者无权覆盖（与 OnceLock
 /// 语义一致；测试同进程多次 boot 也因此不 panic，首份在册即如实）。
-pub fn rr3_assembly_snapshot_set(snapshot: Rr3AssemblySnapshot) -> bool {
+pub fn rr3_assembly_set(snapshot: Rr3AssemblySnapshot) -> bool {
     RR3_ASSEMBLY_SNAPSHOT.set(snapshot).is_ok()
 }
 
 /// 快照只读口（conn.rs `rr3.ctl.wiring` 渲染源）。None = 未以 `--profile` 启动
 /// （`--manifest` 调试路径无装配快照）——应答如实报不可得，不造假数据。
-pub fn rr3_assembly_snapshot() -> Option<&'static Rr3AssemblySnapshot> {
+pub fn rr3_assembly_snap() -> Option<&'static Rr3AssemblySnapshot> {
     RR3_ASSEMBLY_SNAPSHOT.get()
 }
 
@@ -98,7 +98,7 @@ pub struct Rr3AssemblyCheck {
 ///   物理走线总线钉死不占连接器维 / power.charger.meter 共读源 / env·imu 占位格 /
 ///   tilt 待板侧收敛，各见装配注记），判 fail 会与在册数据矛盾；fail 分支只留给
 ///   数据漂移（如未来装载面撤了⑦-a 而快照仍旧）。
-pub fn rr3_assembly_cross_checks(
+pub fn rr3_cross_checks(
     profile: &Rr3Profile,
     wiring: &Rr3Wiring,
     peak_by_mate: &BTreeMap<String, i64>,
@@ -283,7 +283,7 @@ fn rated_closure<'a>(
 /// 申报的"真实渲染"承诺在这里兑现，渲染完整性由本文件测试区用门 d 同源词表
 /// （`RR3_PIN_KEYS` / `RR3_DOMAIN_KEYS` / `RR3_ACT_PROFILE_FIELDS`）钉死。
 /// 不含 `available` 位：那是全局单例语义（快照在不在册），归
-/// [`rr3_assembly_wiring_json`] 的壳——纯函数才能用局部快照无竞态地单测。
+/// [`rr3_assembly_json`] 的壳——纯函数才能用局部快照无竞态地单测。
 pub fn rr3_assembly_render(s: &Rr3AssemblySnapshot) -> Value {
     let p = &s.profile;
     json!({
@@ -354,7 +354,7 @@ pub fn rr3_assembly_render(s: &Rr3AssemblySnapshot) -> Value {
             "derives": s.roles.rr3_role_derives(name),
             "direction": s.roles.rr3_role_direction(name),
         })).collect::<Vec<Value>>(),
-        "checks": rr3_assembly_cross_checks(p, &s.wiring, &s.peak_by_mate).iter().map(|c| {
+        "checks": rr3_cross_checks(p, &s.wiring, &s.peak_by_mate).iter().map(|c| {
             json!({ "item": c.item, "pass": c.pass, "reason": c.reason })
         }).collect::<Vec<Value>>(),
     })
@@ -365,8 +365,8 @@ pub fn rr3_assembly_render(s: &Rr3AssemblySnapshot) -> Value {
 /// 数据。None 分支不单测——OnceLock 全局单例语义下，cargo test 同二进制并行
 /// 线程里"未 set"无法与"已 set"的用例共存（首份胜出的一锤子买卖），该分支由
 /// `--manifest` 路径的端到端用例覆盖。
-pub fn rr3_assembly_wiring_json() -> Value {
-    match rr3_assembly_snapshot() {
+pub fn rr3_assembly_json() -> Value {
+    match rr3_assembly_snap() {
         Some(s) => {
             let mut v = rr3_assembly_render(s);
             v["available"] = json!(true);
@@ -486,10 +486,10 @@ mod tests {
         let first = snapshot();
         let mut second = snapshot();
         second.profile_name = "另一形态".into();
-        assert!(rr3_assembly_snapshot_set(first));
-        assert!(!rr3_assembly_snapshot_set(second));
+        assert!(rr3_assembly_set(first));
+        assert!(!rr3_assembly_set(second));
         assert_eq!(
-            rr3_assembly_snapshot().expect("首份应可读").profile_name,
+            rr3_assembly_snap().expect("首份应可读").profile_name,
             "test形态"
         );
     }
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn cross_checks_cover_four_families_with_three_states() {
         let s = snapshot();
-        let checks = rr3_assembly_cross_checks(&s.profile, &s.wiring, &s.peak_by_mate);
+        let checks = rr3_cross_checks(&s.profile, &s.wiring, &s.peak_by_mate);
         // signal 族 3 导体：vcc/gnd 记 not-applicable，pin 导体记 pass
         let sig = |item: &str| checks.iter().find(|c| c.item == item).expect("点名位必在");
         assert_eq!(sig("signal:J3[0]:vcc").pass, RR3_CHECK_NA);
@@ -530,7 +530,7 @@ mod tests {
                 gnd_common: "none".into(),
             }],
         };
-        let bad = rr3_assembly_cross_checks(&s.profile, &broken, &s.peak_by_mate);
+        let bad = rr3_cross_checks(&s.profile, &broken, &s.peak_by_mate);
         assert_eq!(bad[0].pass, RR3_CHECK_FAIL);
         assert!(bad[0].reason.contains("⑦-a"));
         assert_eq!(bad[1].pass, RR3_CHECK_FAIL);
@@ -582,7 +582,7 @@ mod tests {
                 },
             ],
         };
-        let checks = rr3_assembly_cross_checks(&s.profile, &wiring, &s.peak_by_mate);
+        let checks = rr3_cross_checks(&s.profile, &wiring, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_FAIL);
         assert!(
             c(&checks, "rated:J1").reason.contains("2100"),
@@ -598,7 +598,7 @@ mod tests {
         let solo = crate::wiring::Rr3Wiring {
             wires: vec![mk("J7", vec![], 0.5)],
         };
-        let checks = rr3_assembly_cross_checks(&s.profile, &solo, &s.peak_by_mate);
+        let checks = rr3_cross_checks(&s.profile, &solo, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J7").pass, RR3_CHECK_FAIL);
         assert!(
             c(&checks, "rated:J7").reason.contains("700"),
@@ -615,7 +615,7 @@ mod tests {
                 mk("J4", vec![], 1.0),
             ],
         };
-        let checks = rr3_assembly_cross_checks(&s.profile, &diamond, &s.peak_by_mate);
+        let checks = rr3_cross_checks(&s.profile, &diamond, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J1").pass, RR3_CHECK_PASS);
         assert!(
             c(&checks, "rated:J1").reason.contains("2800"),
@@ -627,7 +627,7 @@ mod tests {
         let cycle = crate::wiring::Rr3Wiring {
             wires: vec![mk("J5", vec!["J6"], 3.0), mk("J6", vec!["J5"], 1.0)],
         };
-        let checks = rr3_assembly_cross_checks(&s.profile, &cycle, &s.peak_by_mate);
+        let checks = rr3_cross_checks(&s.profile, &cycle, &s.peak_by_mate);
         assert_eq!(c(&checks, "rated:J5").pass, RR3_CHECK_FAIL);
         assert!(
             c(&checks, "rated:J5").reason.contains("环"),
