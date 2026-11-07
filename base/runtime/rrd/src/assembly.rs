@@ -342,7 +342,7 @@ pub fn rr3_assembly_render(s: &Rr3AssemblySnapshot) -> Value {
                 "hold": a.hold.rr3_act_hold_name(),
                 "current_ceil_ma": a.current_ceil_ma,
                 "warmup_ms": a.warmup_ms,
-                "hard_stop": a.hard_stop.rr3_act_hard_stop_name(),
+                "hard_stop": a.hard_stop.rr3_hard_stop_name(),
                 "calibrated": a.calibrated,
                 "source": a.source.rr3_act_source_name(),
             })

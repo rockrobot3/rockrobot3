@@ -562,7 +562,7 @@
   角色覆盖扩表 4→18 归件六基-39；敞口表无增减。详录 [conventions §2](process/conventions.md) 同日条目。
 
 - **2026-10-18 批N2 件三：校验⑥-c2 运行期判据实体 ＋ D3 无器件合法态（decisions.md 裁定 5）**：
-  ①`rr-hal-api` 落判据实体 `rr3_rail_tier_effective(tier, age_ms: Option<u32>, max_age_ms)`——
+  ①`rr-hal-api` 落判据实体 `rr3_rail_tier_fold(tier, age_ms: Option<u32>, max_age_ms)`——
   `age > max_age_ms` 或时基取不到（`None`，零新类型）⇒ 折 `Unknown`、边界 `age == max` 不折；
   红例五断言（新鲜原样/边界不折/超龄 Ok⇒Unknown/超龄 Severe⇒Unknown 陈旧不许冒充新鲜/None⇒Unknown），
   rr-hal re-export 补函数名——单真值点，产出侧与消费侧共用不许手抄判据。②D3 落地 rrd `profile.rs`：

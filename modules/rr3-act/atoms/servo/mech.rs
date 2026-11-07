@@ -29,7 +29,7 @@ pub use rr_core::control::Rr3RateGate;
 /// 随批N2 逐域电流采样到位后开（全案 §6 路线 C 自动段）；N2 收口前标定只准
 /// 单步点动＋人工确认，标定产物的落盘走 rrd 的 axis_write 写入面（批N3 件四），
 /// 不经运行命令面。形态合法性（未标定拒自动等）在
-/// [`rr_hal_api::rr3_act_motion_allowed`]，调用方持轴状态判，本判定只管词面。
+/// [`rr_hal_api::rr3_motion_allowed`]，调用方持轴状态判，本判定只管词面。
 ///
 /// 错误零堆化（批N34 件二，批N24 件三同件族收尾）：词不进运行命令面交
 /// [`Rr3ServoMotionError`]（词本身是动态数据，借用进字段不落堆），人读文案由

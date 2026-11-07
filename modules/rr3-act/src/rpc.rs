@@ -56,7 +56,7 @@ pub(crate) fn rr3_handle_servo(
     // 枚举，词面文案在编排层渲染——契约字面量逐字不变）
     let motion = servo::rr3_servo_check_motion(args.get("motion").and_then(Value::as_str))
         .map_err(|servo::Rr3ServoMotionError::UnknownWord(word)| rr3_servo_motion_reject(word))?;
-    rr_hal_api::rr3_act_motion_allowed(axis.hard_stop, axis.calibrated, motion)
+    rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
         .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
     let (angle, move_ms) = rr3_servo_parse_args(args, cfg)?;
     // 安全核钳位最后包一道（批D₃ 裁定 5：安全核永远包住控制图）——上游裁决

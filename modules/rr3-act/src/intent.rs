@@ -140,7 +140,7 @@ fn rr3_intent_action_handle(
             // 拒动硬约束（§6，批N3 件三）：广播无 motion 键 = auto（保守缺省），
             // 未标定轴被代码拒动——判据与 RPC 路同源（rr-hal-api 单真值点）
             let motion = servo_motion_of(args)?;
-            rr_hal_api::rr3_act_motion_allowed(axis.hard_stop, axis.calibrated, motion)
+            rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
                 .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
             let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
             // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程

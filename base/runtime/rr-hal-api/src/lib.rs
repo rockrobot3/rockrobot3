@@ -55,7 +55,7 @@ pub struct Rr3ErrText {
 
 impl Rr3ErrText {
     /// 缓冲容量（字节数）
-    pub const fn rr3_err_text_capacity() -> usize {
+    pub const fn rr3_err_text_cap() -> usize {
         128
     }
 
@@ -97,7 +97,7 @@ pub struct Rr3SsidText {
 
 impl Rr3SsidText {
     /// 缓冲容量（octets，IEEE 802.11 SSID 上限）
-    pub const fn rr3_ssid_text_capacity() -> usize {
+    pub const fn rr3_ssid_text_cap() -> usize {
         32
     }
 
@@ -204,11 +204,7 @@ pub struct Rr3RailState {
 /// 消费纪律（[`Rr3RailTier`] 类型注记）：折出的 `Unknown` 在执行面按 `Severe`
 /// 那一侧处置（闸门保持置位 / 不许解禁），在展示面原样显示——本函数只折档，
 /// 不判处置策略，执法归校验⑥-c2 消费侧（板侧守护 / 件五 RailMonitor 归属搬家）。
-pub fn rr3_rail_tier_effective(
-    tier: Rr3RailTier,
-    age_ms: Option<u32>,
-    max_age_ms: u32,
-) -> Rr3RailTier {
+pub fn rr3_rail_tier_fold(tier: Rr3RailTier, age_ms: Option<u32>, max_age_ms: u32) -> Rr3RailTier {
     match age_ms {
         None => Rr3RailTier::Unknown,
         Some(age) if age > max_age_ms => Rr3RailTier::Unknown,
@@ -333,7 +329,7 @@ pub enum Rr3ActHardStop {
 
 impl Rr3ActHardStop {
     /// 档名（档案取值串同源：`unknown` / `yes` / `no`）
-    pub fn rr3_act_hard_stop_name(self) -> &'static str {
+    pub fn rr3_hard_stop_name(self) -> &'static str {
         match self {
             Rr3ActHardStop::Unknown => "unknown",
             Rr3ActHardStop::Yes => "yes",
@@ -343,7 +339,7 @@ impl Rr3ActHardStop {
 
     /// 从档案词解析（词表外回 `None`，装载侧点名红，不猜——与 name 同源成对，
     /// 词形改动只许落这一处）
-    pub fn rr3_act_hard_stop_parse(s: &str) -> Option<Self> {
+    pub fn rr3_hard_stop_parse(s: &str) -> Option<Self> {
         match s {
             "unknown" => Some(Rr3ActHardStop::Unknown),
             "yes" => Some(Rr3ActHardStop::Yes),
@@ -353,7 +349,7 @@ impl Rr3ActHardStop {
     }
 }
 
-/// 执行件动作形态（批N3，判据实体 [`rr3_act_motion_allowed`] 的判据对象）。
+/// 执行件动作形态（批N3，判据实体 [`rr3_motion_allowed`] 的判据对象）。
 /// 四形态各有判据，不许在调用点手抄第二份。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rr3ActMotion {
@@ -407,7 +403,7 @@ impl Rr3ActMotion {
 /// 单真值点：产出侧（rr3-act 组合件执行面）与判据用例共用本函数，不许各自
 /// 手抄 `if` 链。拒收回 [`Rr3HalError::InvalidParam`]（文案带动作形态与判据名，
 /// 与板侧 `axis_check` 越域回错同形——越界显式回错不静默 clamp）。
-pub fn rr3_act_motion_allowed(
+pub fn rr3_motion_allowed(
     hard_stop: Rr3ActHardStop,
     calibrated: bool,
     motion: Rr3ActMotion,
@@ -432,7 +428,7 @@ pub fn rr3_act_motion_allowed(
 ///
 /// 实现归属：rr3-act 组合件在 `dyn Rr3PwmServo` 句柄之上包行程 / 标定 / 拒动
 /// 语义（与批N2 件五 RailMonitor 归属搬家同构——机制住组合件，契约住本层）。
-/// 拒动判据不进签名：调用方先经 [`rr3_act_motion_allowed`] 判，再调本面——
+/// 拒动判据不进签名：调用方先经 [`rr3_motion_allowed`] 判，再调本面——
 /// 契约层只供给动作形态与判据实体，不持策略（[`Rr3Rail`] 同线）。
 ///
 /// 四方法在立 trait 时一次定形（§18 F-32：不许有一个未定义就进文档的方法名）：
@@ -444,7 +440,7 @@ pub fn rr3_act_motion_allowed(
 pub trait Rr3Actuator {
     /// 点动一步到 `deg`（超 `deadline_ms` 回错——受控堵转护栏的时间维，§6 路线 B）
     fn rr3_jog(&mut self, deg: u16, deadline_ms: u32) -> Result<(), Rr3HalError>;
-    /// 自动走位到 `deg`（判据 [`rr3_act_motion_allowed`] 拒收的动作形态不受理）
+    /// 自动走位到 `deg`（判据 [`rr3_motion_allowed`] 拒收的动作形态不受理）
     fn rr3_goto(&mut self, deg: u16, deadline_ms: u32) -> Result<(), Rr3HalError>;
     /// 位置读数（角度 + 来源同帧；无反馈面回 `Commanded` 回显，不许冒充测量）
     fn rr3_position(&self) -> Result<Rr3Position, Rr3HalError>;
@@ -668,7 +664,7 @@ pub struct Rr3ActProfile {
     /// 激磁预热窗口 ms（当前仅回显——F-25 如实标注，激磁预热无动作侧）
     pub warmup_ms: u32,
     /// 挡块事实（[`Rr3ActHardStop`]——unknown 按最保守一侧处置，判据
-    /// [`rr3_act_motion_allowed`]）
+    /// [`rr3_motion_allowed`]）
     pub hard_stop: Rr3ActHardStop,
     /// 标定完成位（false ⇒ Auto 拒，§6 硬约束——rtos 档只许运行期内存态，
     /// §4.4 载体语义②/S-14）
@@ -929,7 +925,7 @@ mod tests {
         let long = "汉".repeat(200);
         let t = Rr3ErrText::rr3_err_text_new(&long);
         // char 边界截断后字节数不必顶满容量（42×3=126 ≤ 128），只须不超且不劈字符
-        assert!(t.rr3_err_text_as_str().len() <= Rr3ErrText::rr3_err_text_capacity());
+        assert!(t.rr3_err_text_as_str().len() <= Rr3ErrText::rr3_err_text_cap());
         assert_eq!(t.rr3_err_text_as_str().chars().count(), 42); // 42×3=126 ≤ 128
     }
 
@@ -941,7 +937,7 @@ mod tests {
         let t = Rr3SsidText::rr3_ssid_text_new(&long);
         assert_eq!(
             t.rr3_ssid_text_as_str().len(),
-            Rr3SsidText::rr3_ssid_text_capacity()
+            Rr3SsidText::rr3_ssid_text_cap()
         );
     }
 
@@ -1005,28 +1001,28 @@ mod tests {
     fn rail_tier_effective_folds_stale_or_unclocked_readings_into_unknown() {
         // 新鲜读数原样（三电平档都不折）
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(100), 1_000),
+            rr3_rail_tier_fold(Rr3RailTier::Ok, Some(100), 1_000),
             Rr3RailTier::Ok
         );
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(1_000), 1_000),
+            rr3_rail_tier_fold(Rr3RailTier::Severe, Some(1_000), 1_000),
             Rr3RailTier::Severe,
             "边界 age == max_age_ms 不折（判据是严格 >，新鲜度上界闭区间内）"
         );
         // 超龄 Ok ⇒ Unknown（陈旧的 Ok 不许冒充新鲜）
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Ok, Some(1_001), 1_000),
+            rr3_rail_tier_fold(Rr3RailTier::Ok, Some(1_001), 1_000),
             Rr3RailTier::Unknown
         );
         // 超龄 Severe ⇒ Unknown（陈旧的 Severe 与"新鲜的 Severe"在执行面等处置，
         // 但在可信度上必须可区分——冒充新鲜即 T-6 红例）
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Severe, Some(u32::MAX), 1_000),
+            rr3_rail_tier_fold(Rr3RailTier::Severe, Some(u32::MAX), 1_000),
             Rr3RailTier::Unknown
         );
         // 时基取不到基准（None）⇒ Unknown（Y-4：编造龄期不许冒充新鲜）
         assert_eq!(
-            rr3_rail_tier_effective(Rr3RailTier::Ok, None, 1_000),
+            rr3_rail_tier_fold(Rr3RailTier::Ok, None, 1_000),
             Rr3RailTier::Unknown
         );
     }
@@ -1040,24 +1036,24 @@ mod tests {
         // 点动永远放行（未标定轴的唯一合法动作面）
         for hs in [Hs::Unknown, Hs::Yes, Hs::No] {
             for cal in [false, true] {
-                assert!(rr3_act_motion_allowed(hs, cal, Mo::Jog).is_ok());
+                assert!(rr3_motion_allowed(hs, cal, Mo::Jog).is_ok());
             }
         }
         // 硬约束一：calibrated=false ⇒ Auto 一律拒（判据文案点名判据名）
-        let e = rr3_act_motion_allowed(Hs::Yes, false, Mo::Auto).unwrap_err();
+        let e = rr3_motion_allowed(Hs::Yes, false, Mo::Auto).unwrap_err();
         assert!(e.to_string().contains("未标定轴不得自动"), "{e}");
         // 标定过 ⇒ Auto 放行
-        assert!(rr3_act_motion_allowed(Hs::Yes, true, Mo::Auto).is_ok());
+        assert!(rr3_motion_allowed(Hs::Yes, true, Mo::Auto).is_ok());
         // 硬约束二：hard_stop=unknown ⇒ C 自动段 / B 找挡块都拒
-        let e = rr3_act_motion_allowed(Hs::Unknown, true, Mo::CalibOpenLoop).unwrap_err();
+        let e = rr3_motion_allowed(Hs::Unknown, true, Mo::CalibOpenLoop).unwrap_err();
         assert!(e.to_string().contains("hard_stop=unknown"), "{e}");
-        assert!(rr3_act_motion_allowed(Hs::Unknown, false, Mo::CalibStallSearch).is_err());
+        assert!(rr3_motion_allowed(Hs::Unknown, false, Mo::CalibStallSearch).is_err());
         // hard_stop=yes ⇒ C 自动段 / B 找挡块放行（标定动作，与 calibrated 无关）
-        assert!(rr3_act_motion_allowed(Hs::Yes, false, Mo::CalibOpenLoop).is_ok());
-        assert!(rr3_act_motion_allowed(Hs::Yes, false, Mo::CalibStallSearch).is_ok());
+        assert!(rr3_motion_allowed(Hs::Yes, false, Mo::CalibOpenLoop).is_ok());
+        assert!(rr3_motion_allowed(Hs::Yes, false, Mo::CalibStallSearch).is_ok());
         // hard_stop=no ⇒ B 拒（无硬挡块可找）、C 自动段放行（软挡块路线不依赖该事实）
-        assert!(rr3_act_motion_allowed(Hs::No, true, Mo::CalibStallSearch).is_err());
-        assert!(rr3_act_motion_allowed(Hs::No, true, Mo::CalibOpenLoop).is_ok());
+        assert!(rr3_motion_allowed(Hs::No, true, Mo::CalibStallSearch).is_err());
+        assert!(rr3_motion_allowed(Hs::No, true, Mo::CalibOpenLoop).is_ok());
     }
 
     /// 档案字段词表形状 pin（批N3，§4.4 档案十四键）：键名唯一、两处"只回显"
@@ -1089,9 +1085,9 @@ mod tests {
             assert_eq!(f.reader, Rr3ActFieldReader::Adjudicate, "{k}");
         }
         // 挡块事实档名与档案取值串同源
-        assert_eq!(Rr3ActHardStop::Unknown.rr3_act_hard_stop_name(), "unknown");
-        assert_eq!(Rr3ActHardStop::Yes.rr3_act_hard_stop_name(), "yes");
-        assert_eq!(Rr3ActHardStop::No.rr3_act_hard_stop_name(), "no");
+        assert_eq!(Rr3ActHardStop::Unknown.rr3_hard_stop_name(), "unknown");
+        assert_eq!(Rr3ActHardStop::Yes.rr3_hard_stop_name(), "yes");
+        assert_eq!(Rr3ActHardStop::No.rr3_hard_stop_name(), "no");
     }
 
     /// 三档案词枚举（hold / hard_stop / source）name ↔ parse 同源 round-trip：
@@ -1108,9 +1104,9 @@ mod tests {
             (Rr3ActHardStop::Yes, "yes"),
             (Rr3ActHardStop::No, "no"),
         ] {
-            assert_eq!(Rr3ActHardStop::rr3_act_hard_stop_parse(w), Some(hs));
+            assert_eq!(Rr3ActHardStop::rr3_hard_stop_parse(w), Some(hs));
         }
-        assert_eq!(Rr3ActHardStop::rr3_act_hard_stop_parse("maybe"), None);
+        assert_eq!(Rr3ActHardStop::rr3_hard_stop_parse("maybe"), None);
         for (s, w) in [
             (Rr3ActSource::Manual, "manual"),
             (Rr3ActSource::Fixture, "fixture"),

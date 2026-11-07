@@ -17,8 +17,8 @@
 #![allow(clippy::result_large_err)]
 
 pub use rr_hal_api::{
-    rr3_rail_tier_effective, Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3BatteryState,
-    Rr3Display, Rr3ErrText, Rr3FaceFrame, Rr3GpioOut, Rr3HalError, Rr3Link, Rr3LinkState, Rr3Power,
+    rr3_rail_tier_fold, Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3BatteryState, Rr3Display,
+    Rr3ErrText, Rr3FaceFrame, Rr3GpioOut, Rr3HalError, Rr3Link, Rr3LinkState, Rr3Power,
     Rr3PwmServo, Rr3Rail, Rr3RailState, Rr3RailTier, Rr3SsidText, Rr3UnavailableSource,
     RR3_AUDIO_CFG_16K_MONO16,
 };
