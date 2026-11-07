@@ -1,5 +1,5 @@
 //! ESP32-UART 板面音频源后端（A 批 c3）：板面 INMP441 双麦流 → 宿主环形缓冲 →
-//! [`Rr3AudioSource`]（`rr3_hal_audio_source()` esp32 档）。
+//! [`Rr3AudioSource`]（`rr3_audio_source()` esp32 档）。
 //!
 //! 链路：板面 mic.rs 分片组帧（16kHz 双声道 s16le，128ms/8192B 一片，A-IPC
 //! Event 帧，topic `rr3-sense/audio/pcm`）→ UART2（[`crate::esp32_uart::
@@ -181,15 +181,10 @@ enum Rr3BoardFrameIn {
     Reply { id: u64, err: Option<String> },
 }
 
-fn rr3_esp32_classify_board_frame(
-    hdr: &Rr3Header,
-    payload: &[u8],
-) -> Result<Rr3BoardFrameIn, String> {
+fn rr3_esp32_classify(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3BoardFrameIn, String> {
     match rr_periph_proto::cmd::rr3_board_classify(hdr, payload)? {
         Rr3BoardFrame::Reply { id, err } => Ok(Rr3BoardFrameIn::Reply { id, err }),
-        Rr3BoardFrame::Event => {
-            rr3_esp32_parse_audio_event(hdr, payload).map(Rr3BoardFrameIn::Audio)
-        }
+        Rr3BoardFrame::Event => rr3_esp32_evt_parse(hdr, payload).map(Rr3BoardFrameIn::Audio),
     }
 }
 
@@ -274,10 +269,7 @@ struct Rr3Esp32AudioChunk {
 /// Event 帧解析（四道门全过才 Ok，任一失败 Err 点名——与板侧 frame_recv 同款
 /// fail-closed 口径；与 tools/rr3-audio-rec `parse_audio_event` 同值锚定）：
 /// dst=宿主门 → payload Event 类型门 → topic 门 → 字段/b64 门。
-fn rr3_esp32_parse_audio_event(
-    hdr: &Rr3Header,
-    payload: &[u8],
-) -> Result<Rr3Esp32AudioChunk, String> {
+fn rr3_esp32_evt_parse(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3Esp32AudioChunk, String> {
     if hdr.dst_task != RR3_HOST_TASK {
         return Err(format!(
             "dst_task={} 非宿主位形 {RR3_HOST_TASK}",
@@ -317,7 +309,7 @@ fn rr3_esp32_parse_audio_event(
 /// open 配置校验（纯函数）：板面流事实（16k/双声道/s16le）钉定，配置须同款。
 /// 不匹配回 `InvalidParam` 并指路 config-esp32.toml——单声道缺省配置误吃
 /// esp32 档时在探活期就点名，不静默出交织垃圾。
-fn rr3_esp32_audio_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
+fn rr3_esp32_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
     if cfg.sample_rate_hz != RR3_ESP32_AUDIO_RATE
         || cfg.channels != RR3_ESP32_AUDIO_CHANNELS
         || cfg.bit_depth != 16
@@ -429,7 +421,7 @@ fn rr3_tee_write(sink: &mut Option<std::fs::File>, bytes: &[u8]) {
 /// 读线程主体：会话内大块裸读 → 拆帧 → 四道门 → 入环；断流/错会话就地转
 /// 重连。收兵（stop 旗）时板面 `AUDIO OFF`（防残流，conn 随作用域释放 →
 /// flock 退账）。
-fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
+fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     // 取证 tee（批N12 件二）：线程级开口一次，重连续写同一文件（见 [`rr3_tee_open`]）
     let mut tee = rr3_tee_open();
     let mut conn: Option<Rr3UartConn> = Some(first);
@@ -509,7 +501,7 @@ fn rr3_esp32_reader_main(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                     loop {
                         match asm.pull() {
                             Ok(Some((hdr, body))) => {
-                                match rr3_esp32_classify_board_frame(&hdr, &body) {
+                                match rr3_esp32_classify(&hdr, &body) {
                                     Ok(Rr3BoardFrameIn::Audio(chunk)) => {
                                         err_streak = 0;
                                         if !logged_ready {
@@ -578,7 +570,7 @@ pub struct Rr3Esp32UartAudioSource {
     baud: u32,
     inner: Mutex<Option<Rr3Esp32AudioStream>>,
     /// 命令旁路盒（构造即建）：产面是否外发由构造子裁定（[`Self::
-    /// rr3_esp32_audio_source_new_with_cmd`]），耗面 open 时注入读线程核。
+    /// rr3_esp32_source_cmd`]），耗面 open 时注入读线程核。
     cmd: (Rr3AudioCmdProducer, Rr3AudioCmdConsumer),
 }
 
@@ -590,7 +582,7 @@ struct Rr3Esp32AudioStream {
 impl Rr3Esp32UartAudioSource {
     /// 构造（设备路径/波特率来自应急 env 的裁决结果；open 时才真开）。无旁路
     /// 产面形态（产面随 self 内部弃置——push 无人调，队列恒空，行为同旧版）。
-    pub fn rr3_esp32_audio_source_new(path: PathBuf, baud: u32) -> Self {
+    pub fn rr3_esp32_source_new(path: PathBuf, baud: u32) -> Self {
         Self {
             path,
             baud,
@@ -601,11 +593,8 @@ impl Rr3Esp32UartAudioSource {
 
     /// 带旁路构造（B 批 b1）：返 `(源, 产面)`——产面交宿主消费方（rr3-sense
     /// 反射环），耗面 open 时注入读线程（单写者纪律）。
-    pub fn rr3_esp32_audio_source_new_with_cmd(
-        path: PathBuf,
-        baud: u32,
-    ) -> (Self, Rr3AudioCmdProducer) {
-        let s = Self::rr3_esp32_audio_source_new(path, baud);
+    pub fn rr3_esp32_source_cmd(path: PathBuf, baud: u32) -> (Self, Rr3AudioCmdProducer) {
+        let s = Self::rr3_esp32_source_new(path, baud);
         let producer = s.cmd.0.clone();
         (s, producer)
     }
@@ -626,7 +615,7 @@ impl Rr3Esp32UartAudioSource {
 
 impl Rr3AudioSource for Rr3Esp32UartAudioSource {
     fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
-        rr3_esp32_audio_cfg_check(cfg)?;
+        rr3_esp32_cfg_check(cfg)?;
         // 重入：先停旧流（flock 排他下旧连接不退账新开口必被拒）
         if let Some(old) = self.inner.lock().unwrap_or_else(|p| p.into_inner()).take() {
             Self::rr3_close_stream(old);
@@ -649,7 +638,7 @@ impl Rr3AudioSource for Rr3Esp32UartAudioSource {
         let reader_core = Arc::clone(&core);
         let reader = std::thread::Builder::new()
             .name("rr3-hal-esp32-audio".into())
-            .spawn(move || rr3_esp32_reader_main(reader_core, conn))
+            .spawn(move || rr3_esp32_reader(reader_core, conn))
             .map_err(|e| {
                 eprintln!("rr-hal-esp32-audio: 读线程起建失败: {e}");
                 Rr3HalError::Busy
@@ -723,7 +712,7 @@ mod tests {
 
     #[test]
     fn cfg_check_accepts_board_facts_and_rejects_drift() {
-        assert!(rr3_esp32_audio_cfg_check(board_cfg()).is_ok());
+        assert!(rr3_esp32_cfg_check(board_cfg()).is_ok());
         // 单声道缺省配置（modules/rr3-sense/config.toml 现值）必须被拒——
         // 误吃 esp32 档在探活期点名，不静默出交织垃圾
         let mono = Rr3AudioCfg {
@@ -731,7 +720,7 @@ mod tests {
             channels: 1,
             bit_depth: 16,
         };
-        let err = rr3_esp32_audio_cfg_check(mono).unwrap_err();
+        let err = rr3_esp32_cfg_check(mono).unwrap_err();
         assert!(matches!(err, Rr3HalError::InvalidParam(_)));
         assert!(
             err.to_string().contains("config-esp32"),
@@ -742,13 +731,13 @@ mod tests {
             channels: 2,
             bit_depth: 16,
         };
-        assert!(rr3_esp32_audio_cfg_check(fast).is_err());
+        assert!(rr3_esp32_cfg_check(fast).is_err());
         let wide = Rr3AudioCfg {
             sample_rate_hz: 16000,
             channels: 2,
             bit_depth: 24,
         };
-        assert!(rr3_esp32_audio_cfg_check(wide).is_err());
+        assert!(rr3_esp32_cfg_check(wide).is_err());
     }
 
     #[test]
@@ -815,15 +804,14 @@ mod tests {
         let pcm: Vec<u8> = (0..16u8).collect();
         // 整链路：板形帧 → 四道门全过
         let frame = board_like_frame(7, &pcm, RR3_HOST_TASK);
-        let chunk =
-            rr3_esp32_parse_audio_event(&frame.header, &frame.payload).expect("板形帧必须全过");
+        let chunk = rr3_esp32_evt_parse(&frame.header, &frame.payload).expect("板形帧必须全过");
         assert_eq!(chunk.rate, 16000);
         assert_eq!(chunk.samples, pcm);
 
         // dst 门：非宿主位形拒收
         let other = board_like_frame(8, &pcm, 9);
         assert!(
-            rr3_esp32_parse_audio_event(&other.header, &other.payload).is_err(),
+            rr3_esp32_evt_parse(&other.header, &other.payload).is_err(),
             "dst=9 必须被拒"
         );
     }
@@ -919,13 +907,13 @@ mod tests {
         // 音频 Event → Audio（原四道门语义不变）
         let pcm: Vec<u8> = (0..8u8).collect();
         let audio = board_like_frame(3, &pcm, RR3_HOST_TASK);
-        match rr3_esp32_classify_board_frame(&audio.header, &audio.payload) {
+        match rr3_esp32_classify(&audio.header, &audio.payload) {
             Ok(Rr3BoardFrameIn::Audio(c)) => assert_eq!(c.samples, pcm),
             other => panic!("音频帧须落 Audio 臂: {other:?}"),
         }
         // 板侧应答 ok → Reply{id, err=None}
         let ok = board_reply_frame(7, None);
-        match rr3_esp32_classify_board_frame(&ok.header, &ok.payload) {
+        match rr3_esp32_classify(&ok.header, &ok.payload) {
             Ok(Rr3BoardFrameIn::Reply { id, err }) => {
                 assert_eq!(id, 7);
                 assert_eq!(err, None);
@@ -934,7 +922,7 @@ mod tests {
         }
         // 板侧业务失败（越程拒收）→ Reply{err=Some}（fail-visible，不静默）
         let bad = board_reply_frame(8, Some("越程拒收"));
-        match rr3_esp32_classify_board_frame(&bad.header, &bad.payload) {
+        match rr3_esp32_classify(&bad.header, &bad.payload) {
             Ok(Rr3BoardFrameIn::Reply { id, err }) => {
                 assert_eq!(id, 8);
                 assert_eq!(err.as_deref(), Some("越程拒收"));
@@ -944,7 +932,7 @@ mod tests {
         // dst 门：非宿主位形拒收（与音频门同口径）
         let mut other_dst = board_reply_frame(9, None);
         other_dst.header.dst_task = 9;
-        assert!(rr3_esp32_classify_board_frame(&other_dst.header, &other_dst.payload).is_err());
+        assert!(rr3_esp32_classify(&other_dst.header, &other_dst.payload).is_err());
     }
 
     /// 批N12 件二（敞口 16 对表 tee 工具面）：tee 关（None）＝no-op 零副作用；

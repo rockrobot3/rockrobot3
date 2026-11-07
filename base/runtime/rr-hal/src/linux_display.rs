@@ -27,7 +27,7 @@
 //! **级联锁存纪律（真板实证）**：MAX7219 级联下一次 CS 包络里每片只锁存
 //! 移位流的最后 16 位——一次 write 多包会让更早的包全部被吞。因此 init
 //! 序列逐条 write、整帧逐行 write（每条/每行 = 一个独立 CS 包络），包形状
-//! 统一走 [`rr3_max7219_cmd_payload`]（单包双片同值）。
+//! 统一走 [`rr3_max7219_cmd`]（单包双片同值）。
 //!
 //! boot 语义：选择函数（[`crate::backend::rr3_hal_display`]）不触设备：构造
 //! 只存路径，打开 + ioctl 配置 + init 序列延迟到首次 trait 调用（ensure，与
@@ -79,7 +79,7 @@ const RR3_MAX7219_REG_DISPLAYTEST: u8 = 0x0F;
 
 /// 一条 MAX7219 命令的级联包：每片收一个 16-bit 包（reg, data），CS 拉低期间
 /// 逐片移入。独立纯函数：包形状可单测。
-fn rr3_max7219_cmd_payload(reg: u8, data: u8) -> [u8; RR3_MAX7219_CHIPS * 2] {
+fn rr3_max7219_cmd(reg: u8, data: u8) -> [u8; RR3_MAX7219_CHIPS * 2] {
     let mut p = [0u8; RR3_MAX7219_CHIPS * 2];
     for chip in 0..RR3_MAX7219_CHIPS {
         p[chip * 2] = reg;
@@ -113,7 +113,7 @@ impl Rr3Max7219SpiDisplay {
     /// 指定 spidev 设备路径构造（选择函数从生效物理绑定取 `spi_device`，
     /// 批D④ fail-closed 同口径——设备路径没有代码缺省，描述符/env 都没给
     /// 就在选择面点名；测试用 temp 树也走这里，不触真硬件）
-    pub fn rr3_max7219_display_new(dev_path: &std::path::Path) -> Self {
+    pub fn rr3_max7219_new(dev_path: &std::path::Path) -> Self {
         Self {
             dev_path: dev_path.to_path_buf(),
             spi: Mutex::new(None),
@@ -171,14 +171,12 @@ impl Rr3Max7219SpiDisplay {
         }
         use std::io::Write;
         for (reg, data) in RR3_MAX7219_INIT_SEQ {
-            (&dev)
-                .write_all(&rr3_max7219_cmd_payload(reg, data))
-                .map_err(|e| {
-                    Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
-                        "display {:?} init 序列写失败: {e}",
-                        self.dev_path.display()
-                    )))
-                })?;
+            (&dev).write_all(&rr3_max7219_cmd(reg, data)).map_err(|e| {
+                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                    "display {:?} init 序列写失败: {e}",
+                    self.dev_path.display()
+                )))
+            })?;
         }
         *slot = Some(dev);
         Ok(())
@@ -226,7 +224,7 @@ impl Rr3Display for Rr3Max7219SpiDisplay {
         // 整帧逐行 write（级联锁存纪律：一次包络一片一包，行号直排 bit7 最左）
         for row in 0u8..8 {
             self.write_all(
-                &rr3_max7219_cmd_payload(RR3_MAX7219_REG_DIGIT0 + row, frame[row as usize]),
+                &rr3_max7219_cmd(RR3_MAX7219_REG_DIGIT0 + row, frame[row as usize]),
                 "出帧写失败",
             )?;
         }
@@ -259,10 +257,7 @@ mod tests {
     /// 级联命令包：每片同值（reg, data）×2——双片同显语义
     #[test]
     fn cmd_payload_is_per_chip_duplicated() {
-        assert_eq!(
-            rr3_max7219_cmd_payload(0x0C, 0x01),
-            [0x0C, 0x01, 0x0C, 0x01]
-        );
+        assert_eq!(rr3_max7219_cmd(0x0C, 0x01), [0x0C, 0x01, 0x0C, 0x01]);
     }
 
     /// init 序列 golden：五条命令按头注记顺序（ensure 逐条 write，每条一个
@@ -290,7 +285,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let dev = root.join("spidev0.0");
         std::fs::write(&dev, "").unwrap();
-        let mut out = Rr3Max7219SpiDisplay::rr3_max7219_display_new(&dev);
+        let mut out = Rr3Max7219SpiDisplay::rr3_max7219_new(&dev);
         // 探活读面 &self；写面 draw 是 &mut self，绑定取 mut
         let err = out.frame().unwrap_err();
         assert!(
@@ -309,7 +304,7 @@ mod tests {
     fn drop_without_ensure_is_noop() {
         let root = std::env::temp_dir().join(format!("rr3-hal-spi-{}-drop", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let out = Rr3Max7219SpiDisplay::rr3_max7219_display_new(&root.join("spidev0.0"));
+        let out = Rr3Max7219SpiDisplay::rr3_max7219_new(&root.join("spidev0.0"));
         drop(out);
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -31,7 +31,7 @@
 //! 毫秒级，但 NM 卡顿时可拖到秒级以上，且周期拍里没有别的超时兜底）。
 //! 批H5 审查补档：正常退出后的管道读也套同一档 timeout 做 deadline——kill
 //! 只收直子进程，幸存孙进程仍持写端时阻塞读会拖到孙退出，超时兜底被这条
-//! 旁路架空（`rr3_nm_read_to_end_capped`，M-γ 起在 nmcli_support 共享层）。
+//! 旁路架空（`rr3_nm_read_capped`，M-γ 起在 nmcli_support 共享层）。
 
 use std::path::PathBuf;
 use std::time::Duration;
