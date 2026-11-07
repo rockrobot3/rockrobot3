@@ -371,9 +371,54 @@ fn rr3_panel_body_json(body: &[u8]) -> Result<Value, String> {
     serde_json::from_str(text).map_err(|e| format!("body 不是合法 JSON: {e}"))
 }
 
+/// 五模块 ops 读面（批N4 件九二）：同一 BusCall 透传范式——参数裁决在 owner
+/// （各模块白名单组体快照，槽名 = assemble/composite.toml 槽表申报同源），
+/// 面板只透传。表驱动：路径 → 模块名，新增模块只加一行。
+const RR3_OPS_ROUTES: [(&str, &str); 5] = [
+    ("/api/act/ops", "rr3-act"),
+    ("/api/connect/ops", "rr3-connect"),
+    ("/api/interact/ops", "rr3-interact"),
+    ("/api/power/ops", "rr3-power"),
+    ("/api/sense/ops", "rr3-sense"),
+];
+
+/// ops 读面路径 → 名单点名 topic（非 ops 路径返回 None）
+fn rr3_ops_topic(path: &str) -> Option<String> {
+    RR3_OPS_ROUTES
+        .iter()
+        .find(|(p, _)| *p == path)
+        .map(|(_, m)| format!("{m}/ops/list"))
+}
+
+/// 无参读口 BusCall（空对象参数）
+fn rr3_get_call(topic: &str) -> Rr3PanelDispatch {
+    Rr3PanelDispatch::BusCall {
+        topic: topic.to_string(),
+        args: json!({}),
+    }
+}
+
+/// 带 body 写口 BusCall：body 非 JSON 即 400，参数裁决归 owner
+fn rr3_post_call(topic: &str, body: &[u8]) -> Rr3PanelDispatch {
+    match rr3_panel_body_json(body) {
+        Ok(args) => Rr3PanelDispatch::BusCall {
+            topic: topic.to_string(),
+            args,
+        },
+        Err(e) => Rr3PanelDispatch::BadRequest(e),
+    }
+}
+
 /// 路由纯函数：方法 + 路径 + body → 分派。**端点白名单 = [`RR3_PANEL_ROUTES`]**，
 /// 未知路径 404、方法不对 405、body 坏 400——面板不是攻击面兜底者，一切都显式。
 pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatch {
+    if let Some(topic) = rr3_ops_topic(path) {
+        return if method == "GET" {
+            rr3_get_call(&topic)
+        } else {
+            Rr3PanelDispatch::MethodNotAllowed
+        };
+    }
     match path {
         "/" => match method {
             "GET" => Rr3PanelDispatch::Html,
@@ -470,30 +515,17 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         // 参数裁决在 owner（connect 模块 parse_args 点名拒），面板只解析 JSON；
         // connect 的 body 原样透传（ssid/pass legacy 字段名，零翻译）
         "/api/wifi/scan" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-connect/wifi/scan".to_string(),
-                args: json!({}),
-            },
+            "GET" => rr3_get_call("rr3-connect/wifi/scan"),
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         "/api/wifi/connect" => {
             if method != "POST" {
                 return Rr3PanelDispatch::MethodNotAllowed;
             }
-            let args = match rr3_panel_body_json(body) {
-                Ok(v) => v,
-                Err(e) => return Rr3PanelDispatch::BadRequest(e),
-            };
-            Rr3PanelDispatch::BusCall {
-                topic: "rr3-connect/wifi/connect".to_string(),
-                args,
-            }
+            rr3_post_call("rr3-connect/wifi/connect", body)
         }
         "/api/wifi/forget" => match method {
-            "POST" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-connect/wifi/forget".to_string(),
-                args: json!({}),
-            },
+            "POST" => rr3_get_call("rr3-connect/wifi/forget"),
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         // 模型密钥面（0.0.6 抽象批）：key 落仓外 secrets 文件（panel::secrets），
@@ -509,20 +541,8 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         // persisted:false）。covers 六槽申报 = 门 d 转绿首刀（读渲染/写同一批
         // ops 槽，写口申报同集合）
         "/api/brain/ops" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-brain/ops/list".to_string(),
-                args: json!({}),
-            },
-            "POST" => {
-                let args = match rr3_panel_body_json(body) {
-                    Ok(v) => v,
-                    Err(e) => return Rr3PanelDispatch::BadRequest(e),
-                };
-                Rr3PanelDispatch::BusCall {
-                    topic: "rr3-brain/ops/set".to_string(),
-                    args,
-                }
-            }
+            "GET" => rr3_get_call("rr3-brain/ops/list"),
+            "POST" => rr3_post_call("rr3-brain/ops/set", body),
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         // 模型行面（ADR-0023）：GET 点名 `rr3-brain/model/list` 快照；POST
@@ -530,75 +550,15 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         // owner：结构门 + base_url 完整根 + 落盘），POST `/api/brain/model/test`
         // 点名单次连通性探测（业务失败以 ok:false 回，不折 HTTP 错）
         "/api/brain/models" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-brain/model/list".to_string(),
-                args: json!({}),
-            },
+            "GET" => rr3_get_call("rr3-brain/model/list"),
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         "/api/brain/model" => match method {
-            "POST" => {
-                let args = match rr3_panel_body_json(body) {
-                    Ok(v) => v,
-                    Err(e) => return Rr3PanelDispatch::BadRequest(e),
-                };
-                Rr3PanelDispatch::BusCall {
-                    topic: "rr3-brain/model/set".to_string(),
-                    args,
-                }
-            }
+            "POST" => rr3_post_call("rr3-brain/model/set", body),
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         "/api/brain/model/test" => match method {
-            "POST" => {
-                let args = match rr3_panel_body_json(body) {
-                    Ok(v) => v,
-                    Err(e) => return Rr3PanelDispatch::BadRequest(e),
-                };
-                Rr3PanelDispatch::BusCall {
-                    topic: "rr3-brain/model/test".to_string(),
-                    args,
-                }
-            }
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // 五模块 ops 槽读面（批N4 件九二，观测面收官刀）：同一 BusCall 透传范式——
-        // 参数裁决在 owner（各模块白名单组体快照，槽名 = assemble/composite.toml
-        // 槽表申报同源），面板只透传；covers 申报五组 30 槽 = ops 路分母全转绿
-        // （interact 自身也走 rrd 归属门——面板不因同进程豁免，ADR-0006 裁定 3）
-        "/api/act/ops" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-act/ops/list".to_string(),
-                args: json!({}),
-            },
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/connect/ops" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-connect/ops/list".to_string(),
-                args: json!({}),
-            },
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/interact/ops" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-interact/ops/list".to_string(),
-                args: json!({}),
-            },
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/power/ops" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-power/ops/list".to_string(),
-                args: json!({}),
-            },
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/sense/ops" => match method {
-            "GET" => Rr3PanelDispatch::BusCall {
-                topic: "rr3-sense/ops/list".to_string(),
-                args: json!({}),
-            },
+            "POST" => rr3_post_call("rr3-brain/model/test", body),
             _ => Rr3PanelDispatch::MethodNotAllowed,
         },
         "/api/model/key" => {

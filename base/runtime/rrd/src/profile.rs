@@ -440,6 +440,7 @@ pub fn rr3_profile_absolute_path(path: &Path) -> Result<PathBuf, String> {
 }
 
 /// 解析装配单文本。形状错误全部收集完才返回（运维一次改对），逐条点名、不静默放行。
+/// 各段解析下沉到 `rr3_*_parse`（错误追加顺序＝段序，文案逐字不变）。
 pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
     let root: toml::Value = match toml::from_str(text) {
         Ok(v) => v,
@@ -452,7 +453,37 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             "schema_version 必须为 {RR3_PROFILE_SCHEMA_VERSION}，收到 {other:?}"
         )),
     }
-    // [bindings]：非空表、每格非空字符串值。[os] 段运行期不读，解析时无视（见文件头）。
+    let bindings = rr3_bindings_parse(&root, &mut errs);
+    let enabled_slots = rr3_enabled_parse(&root, &mut errs);
+    let hardware = rr3_hardware_parse(&root, &mut errs);
+    let pins = rr3_pins_parse(&root, &mut errs);
+    let (platform_tier, platform_chip) = rr3_platform_parse(&root, &mut errs);
+    let rt = rr3_runtime_parse(&root, &mut errs);
+    let supplies = rr3_supplies_parse(&root, &platform_tier, &mut errs);
+    let (slots_present, slots_device_absent) = rr3_slots_parse(&root, &mut errs);
+    if !errs.is_empty() {
+        return Err(errs);
+    }
+    Ok(Rr3Profile {
+        platform_tier,
+        platform_chip,
+        bindings,
+        enabled_slots,
+        slots_present,
+        slots_device_absent,
+        supplies,
+        hardware,
+        log_ring_cap: rt.log_ring_cap,
+        hal_backend: rt.hal_backend,
+        audio_backend: rt.audio_backend,
+        servo_backend: rt.servo_backend,
+        display_backend: rt.display_backend,
+        pins,
+    })
+}
+
+/// [bindings]：非空表、每格非空字符串值。[os] 段运行期不读，解析时无视（见文件头）。
+fn rr3_bindings_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<String, String> {
     let mut bindings = BTreeMap::new();
     match root.get("bindings").and_then(toml::Value::as_table) {
         None => errs
@@ -468,7 +499,12 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
-    // [enabled_slots]：非空表、每值非空字符串数组。enabled_slots 决定起谁（Q3 裁定），空表 = 无可起模块。
+    bindings
+}
+
+/// [enabled_slots]：非空表、每值非空字符串数组。enabled_slots 决定起谁（Q3 裁定），
+/// 空表 = 无可起模块。
+fn rr3_enabled_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<String, Vec<String>> {
     let mut enabled_slots = BTreeMap::new();
     match root.get("enabled_slots").and_then(toml::Value::as_table) {
         None => errs.push("缺少 [enabled_slots]（模块 → 本形态启用的格位集合）".to_string()),
@@ -498,9 +534,13 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
-    // [hardware]：可选段（纯 sim/无硬件格形态可以不给）。每键非空、值必须是
-    // 字符串或整数标量（整数按十进制字符串化——rr-hal 描述符解析端全按字符串
-    // 收）；布尔/浮点/数组/表逐条点名，一条不静默放行。
+    enabled_slots
+}
+
+/// [hardware]：可选段（纯 sim/无硬件格形态可以不给）。每键非空、值必须是
+/// 字符串或整数标量（整数按十进制字符串化——rr-hal 描述符解析端全按字符串
+/// 收）；布尔/浮点/数组/表逐条点名，一条不静默放行。
+fn rr3_hardware_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<String, String> {
     let mut hardware = BTreeMap::new();
     match root.get("hardware").and_then(toml::Value::as_table) {
         None => {}
@@ -524,124 +564,130 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
-    // [[pin]]：可选段（schema 3，增补轮六 §4.2——纯 sim/无硬件格形态不给，此时校验②
-    // 不判：无物理面可绑不等于角色缺失）。字段白名单 RR3_PIN_KEYS 十一键、类型逐键点名；
-    // 身份键 role/direction 解析期即须在场（①缺失语义：role/direction 缺 → 红，判定
-    // 不依赖角色表）；instance/controller 及各 requires 键的"在场与留空"在 boot 链按
-    // 角色表逐条裁——本函数不带契约真值，不越权判角色语义。
+    hardware
+}
+
+/// [[pin]]：可选段（schema 3，增补轮六 §4.2——纯 sim/无硬件格形态不给，此时校验②
+/// 不判：无物理面可绑不等于角色缺失）。字段白名单 RR3_PIN_KEYS 十一键、类型逐键点名；
+/// 身份键 role/direction 解析期即须在场（①缺失语义：role/direction 缺 → 红，判定
+/// 不依赖角色表）；instance/controller 及各 requires 键的"在场与留空"在 boot 链按
+/// 角色表逐条裁——本函数不带契约真值，不越权判角色语义。
+fn rr3_pins_parse(root: &toml::Value, errs: &mut Vec<String>) -> Vec<Rr3PinEntry> {
     let mut pins: Vec<Rr3PinEntry> = Vec::new();
-    match root.get("pin").and_then(toml::Value::as_array) {
-        None => {}
-        Some(items) => {
-            for (i, item) in items.iter().enumerate() {
-                let t = match item.as_table() {
-                    Some(t) => t,
-                    None => {
-                        errs.push(format!("pin #{i} 须为 [[pin]] 表（数组内出现非表值）"));
-                        continue;
+    let Some(items) = root.get("pin").and_then(toml::Value::as_array) else {
+        return pins;
+    };
+    for (i, item) in items.iter().enumerate() {
+        let Some(t) = item.as_table() else {
+            errs.push(format!("pin #{i} 须为 [[pin]] 表（数组内出现非表值）"));
+            continue;
+        };
+        pins.push(rr3_pin_entry_parse(i, t, errs));
+    }
+    pins
+}
+
+/// 单条 [[pin]] 的逐键解析（含 role/direction 在场判据，顺序随键遍历）
+fn rr3_pin_entry_parse(i: usize, t: &toml::Table, errs: &mut Vec<String>) -> Rr3PinEntry {
+    let mut pin = Rr3PinEntry::default();
+    for (k, v) in t {
+        match k.as_str() {
+            "role" => match v.as_str() {
+                Some(s) if !s.is_empty() => pin.role = s.to_string(),
+                _ => errs.push(format!("pin #{i}.role 缺失或为空（角色外键）")),
+            },
+            "instance" => match v.as_str() {
+                Some(s) => pin.instance = s.to_string(),
+                None => errs.push(format!("pin #{i}.instance 应为字符串")),
+            },
+            "controller" => match v.as_str() {
+                Some(s) => pin.controller = s.to_string(),
+                None => errs.push(format!("pin #{i}.controller 应为字符串")),
+            },
+            "channel" => match v.as_integer() {
+                Some(n) => pin.channel = Some(n),
+                None => errs.push(format!("pin #{i}.channel 应为整数")),
+            },
+            "physical" => match v.as_array() {
+                Some(a) => {
+                    for x in a {
+                        match x.as_integer() {
+                            Some(n) => pin.physical.push(n),
+                            None => errs.push(format!(
+                                "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
+                            )),
+                        }
                     }
-                };
-                let mut pin = Rr3PinEntry::default();
-                for (k, v) in t {
-                    match k.as_str() {
-                        "role" => match v.as_str() {
-                            Some(s) if !s.is_empty() => pin.role = s.to_string(),
-                            _ => errs.push(format!("pin #{i}.role 缺失或为空（角色外键）")),
-                        },
-                        "instance" => match v.as_str() {
-                            Some(s) => pin.instance = s.to_string(),
-                            None => errs.push(format!("pin #{i}.instance 应为字符串")),
-                        },
-                        "controller" => match v.as_str() {
-                            Some(s) => pin.controller = s.to_string(),
-                            None => errs.push(format!("pin #{i}.controller 应为字符串")),
-                        },
-                        "channel" => match v.as_integer() {
-                            Some(n) => pin.channel = Some(n),
-                            None => errs.push(format!("pin #{i}.channel 应为整数")),
-                        },
-                        "physical" => match v.as_array() {
-                            Some(a) => {
-                                for x in a {
-                                    match x.as_integer() {
-                                        Some(n) => pin.physical.push(n),
-                                        None => errs.push(format!(
-                                            "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
-                                        )),
-                                    }
-                                }
-                            }
-                            None => errs.push(format!("pin #{i}.physical 应为整数数组")),
-                        },
-                        "direction" => match v.as_str() {
-                            Some(s) if !s.is_empty() => pin.direction = s.to_string(),
+                }
+                None => errs.push(format!("pin #{i}.physical 应为整数数组")),
+            },
+            "direction" => match v.as_str() {
+                Some(s) if !s.is_empty() => pin.direction = s.to_string(),
+                _ => errs.push(format!(
+                    "pin #{i}.direction 缺失或为空（校验①缺失语义：direction 缺 → 红）"
+                )),
+            },
+            "rail" => match v.as_str() {
+                Some(s) => pin.rail = s.to_string(),
+                None => errs.push(format!(
+                    "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
+                )),
+            },
+            "addr" => match v.as_str() {
+                Some(s) => pin.addr = s.to_string(),
+                None => errs.push(format!(
+                    "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
+                )),
+            },
+            "device" => match v.as_str() {
+                Some(s) => pin.device = s.to_string(),
+                None => errs.push(format!(
+                    "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
+                )),
+            },
+            "failsafe" => match v.as_str() {
+                Some(s) => pin.failsafe = s.to_string(),
+                None => errs.push(format!(
+                    "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
+                )),
+            },
+            "mux_group" => match v.as_array() {
+                Some(a) => {
+                    for x in a {
+                        match x.as_str() {
+                            Some(s) if !s.is_empty() => pin.mux_group.push(s.to_string()),
                             _ => errs.push(format!(
-                                "pin #{i}.direction 缺失或为空（校验①缺失语义：direction 缺 → 红）"
+                                "pin #{i}.mux_group 的每一项都必须是非空字符串"
                             )),
-                        },
-                        "rail" => match v.as_str() {
-                            Some(s) => pin.rail = s.to_string(),
-                            None => errs.push(format!(
-                                "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
-                            )),
-                        },
-                        "addr" => match v.as_str() {
-                            Some(s) => pin.addr = s.to_string(),
-                            None => errs.push(format!(
-                                "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
-                            )),
-                        },
-                        "device" => match v.as_str() {
-                            Some(s) => pin.device = s.to_string(),
-                            None => errs.push(format!(
-                                "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
-                            )),
-                        },
-                        "failsafe" => match v.as_str() {
-                            Some(s) => pin.failsafe = s.to_string(),
-                            None => errs.push(format!(
-                                "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
-                            )),
-                        },
-                        "mux_group" => match v.as_array() {
-                            Some(a) => {
-                                for x in a {
-                                    match x.as_str() {
-                                        Some(s) if !s.is_empty() => {
-                                            pin.mux_group.push(s.to_string())
-                                        }
-                                        _ => errs.push(format!(
-                                            "pin #{i}.mux_group 的每一项都必须是非空字符串"
-                                        )),
-                                    }
-                                }
-                            }
-                            None => errs.push(format!(
-                                "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表，批N7 已立册）"
-                            )),
-                        },
-                        other => errs.push(format!(
-                            "pin #{i} 未知键 {other}（只认 {}）",
-                            RR3_PIN_KEYS.join("/")
-                        )),
+                        }
                     }
                 }
-                if !t.contains_key("role") {
-                    errs.push(format!(
-                        "pin #{i} 缺 role（角色外键——引脚侧唯一真值点必须挂角色）"
-                    ));
-                }
-                if !t.contains_key("direction") {
-                    errs.push(format!("pin #{i} 缺 direction（校验①缺失语义）"));
-                }
-                pins.push(pin);
-            }
+                None => errs.push(format!(
+                    "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表，批N7 已立册）"
+                )),
+            },
+            other => errs.push(format!(
+                "pin #{i} 未知键 {other}（只认 {}）",
+                RR3_PIN_KEYS.join("/")
+            )),
         }
     }
-    // [platform]：必填段、单键 tier（ADR-0018 修订 1 ④ 七段之一）。tier 取值域
-    // host/rtos/bare 三档；chip = 平台事实表外键（§4.6，校验③④⑤⑧的判据前件选册
-    // ——contracts/platform/<chip>.toml，批N1 基-22），非空必填：芯片是装机事实，
-    // 留空 = ⑤⑧ 判不了 = fail-closed（同"留空即红"纪律），未知键逐条点名。
+    if !t.contains_key("role") {
+        errs.push(format!(
+            "pin #{i} 缺 role（角色外键——引脚侧唯一真值点必须挂角色）"
+        ));
+    }
+    if !t.contains_key("direction") {
+        errs.push(format!("pin #{i} 缺 direction（校验①缺失语义）"));
+    }
+    pin
+}
+
+/// [platform]：必填段、单键 tier（ADR-0018 修订 1 ④ 七段之一）。tier 取值域
+/// host/rtos/bare 三档；chip = 平台事实表外键（§4.6，校验③④⑤⑧的判据前件选册
+/// ——contracts/platform/<chip>.toml，批N1 基-22），非空必填：芯片是装机事实，
+/// 留空 = ⑤⑧ 判不了 = fail-closed（同"留空即红"纪律），未知键逐条点名。
+fn rr3_platform_parse(root: &toml::Value, errs: &mut Vec<String>) -> (String, String) {
     let mut platform_tier = String::new();
     let mut platform_chip = String::new();
     match root.get("platform").and_then(toml::Value::as_table) {
@@ -668,29 +714,56 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                         .to_string(),
                 ),
             }
-        }
-    }
-    if let Some(t) = root.get("platform").and_then(toml::Value::as_table) {
-        for k in t.keys() {
-            if k != "tier" && k != "chip" {
-                errs.push(format!("[platform] 未知键 {k}（只认 tier / chip）"));
+            for k in t.keys() {
+                if k != "tier" && k != "chip" {
+                    errs.push(format!("[platform] 未知键 {k}（只认 tier / chip）"));
+                }
             }
         }
     }
-    // [runtime]：必填段（schema 5 起必填，批N5 件二 F-30——"环容量 ∈ 装配单键集，
-    // 装载期缺即红"与 F-6 缺失语义同一列）。三键：log_ring_cap 正整数必填、
-    // hal_backend 后端名必填（P0-3 根因门）、audio_backend 可选（组合档音频面覆盖）。
-    let mut log_ring_cap: usize = 0;
-    let mut hal_backend: String = String::new();
-    let mut audio_backend: Option<String> = None;
-    let mut servo_backend: Option<String> = None;
-    let mut display_backend: Option<String> = None;
+    (platform_tier, platform_chip)
+}
+
+/// [runtime] 段解析产物（五键）
+struct Rr3RuntimeParsed {
+    log_ring_cap: usize,
+    hal_backend: String,
+    audio_backend: Option<String>,
+    servo_backend: Option<String>,
+    display_backend: Option<String>,
+}
+
+/// 后端名可选覆盖键：取值域同 hal_backend，不认即点名（组合档归属键）
+fn rr3_backend_opt(t: &toml::Table, key: &str, errs: &mut Vec<String>) -> Option<String> {
+    let v = t.get(key).and_then(toml::Value::as_str)?;
+    if RR3_HAL_BACKEND_LEGAL.contains(&v) {
+        Some(v.to_string())
+    } else {
+        errs.push(format!(
+            "runtime.{key} 取值不认: {v}（允许 {}）",
+            RR3_HAL_BACKEND_LEGAL.join("/")
+        ));
+        None
+    }
+}
+
+/// [runtime]：必填段（schema 5 起必填，批N5 件二 F-30——"环容量 ∈ 装配单键集，
+/// 装载期缺即红"与 F-6 缺失语义同一列）。三键：log_ring_cap 正整数必填、
+/// hal_backend 后端名必填（P0-3 根因门）、audio_backend 可选（组合档音频面覆盖）。
+fn rr3_runtime_parse(root: &toml::Value, errs: &mut Vec<String>) -> Rr3RuntimeParsed {
+    let mut out = Rr3RuntimeParsed {
+        log_ring_cap: 0,
+        hal_backend: String::new(),
+        audio_backend: None,
+        servo_backend: None,
+        display_backend: None,
+    };
     match root.get("runtime").and_then(toml::Value::as_table) {
         None => errs
             .push("缺少 [runtime]（rrd 运行参数；schema_version=5 起必填，批N5 件二）".to_string()),
         Some(t) => {
             match t.get("log_ring_cap").and_then(toml::Value::as_integer) {
-                Some(v) if v > 0 => log_ring_cap = v as usize,
+                Some(v) if v > 0 => out.log_ring_cap = v as usize,
                 Some(v) => errs.push(format!(
                     "runtime.log_ring_cap = {v} 须为正整数（日志环容量，0 = 运维留痕无环）"
                 )),
@@ -702,7 +775,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             // P0-3 根因门：hal_backend 必填且须在白名单内——后端选择是部署事实，
             // 必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产假验证）。
             match t.get("hal_backend").and_then(toml::Value::as_str) {
-                Some(v) if RR3_HAL_BACKEND_LEGAL.contains(&v) => hal_backend = v.to_string(),
+                Some(v) if RR3_HAL_BACKEND_LEGAL.contains(&v) => out.hal_backend = v.to_string(),
                 Some(v) => errs.push(format!(
                     "runtime.hal_backend 取值不认: {v}（允许 {}）",
                     RR3_HAL_BACKEND_LEGAL.join("/")
@@ -712,42 +785,10 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                         .to_string(),
                 ),
             }
-            // audio_backend 可选：仅组合档 Pi×ESP32 设 esp32（音频面单独走 UART）；
-            // 不设 → 音频面回落全局 hal_backend。取值域同 hal_backend。
-            if let Some(v) = t.get("audio_backend").and_then(toml::Value::as_str) {
-                if RR3_HAL_BACKEND_LEGAL.contains(&v) {
-                    audio_backend = Some(v.to_string());
-                } else {
-                    errs.push(format!(
-                        "runtime.audio_backend 取值不认: {v}（允许 {}）",
-                        RR3_HAL_BACKEND_LEGAL.join("/")
-                    ));
-                }
-            }
-            // servo_backend 可选（P0-4 组合档归属）：组合档舵机在 ESP32 板上设 esp32；
-            // 不设 → 舵机面回落全局 hal_backend。取值域同 hal_backend。
-            if let Some(v) = t.get("servo_backend").and_then(toml::Value::as_str) {
-                if RR3_HAL_BACKEND_LEGAL.contains(&v) {
-                    servo_backend = Some(v.to_string());
-                } else {
-                    errs.push(format!(
-                        "runtime.servo_backend 取值不认: {v}（允许 {}）",
-                        RR3_HAL_BACKEND_LEGAL.join("/")
-                    ));
-                }
-            }
-            // display_backend 可选（P0-4 组合档归属）：组合档 OLED/点阵在 ESP32 板上设 esp32；
-            // 不设 → 显示面回落全局 hal_backend。取值域同 hal_backend。
-            if let Some(v) = t.get("display_backend").and_then(toml::Value::as_str) {
-                if RR3_HAL_BACKEND_LEGAL.contains(&v) {
-                    display_backend = Some(v.to_string());
-                } else {
-                    errs.push(format!(
-                        "runtime.display_backend 取值不认: {v}（允许 {}）",
-                        RR3_HAL_BACKEND_LEGAL.join("/")
-                    ));
-                }
-            }
+            // 三个可选覆盖键：不设 → 对应能力面回落全局 hal_backend
+            out.audio_backend = rr3_backend_opt(t, "audio_backend", errs);
+            out.servo_backend = rr3_backend_opt(t, "servo_backend", errs);
+            out.display_backend = rr3_backend_opt(t, "display_backend", errs);
             for k in t.keys() {
                 if !RR3_RUNTIME_KEYS.contains(&k.as_str()) {
                     errs.push(format!(
@@ -758,8 +799,12 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
-    // [supplies]：必填段（看门狗三键 + 时序预算位三键，六键全必填、类型逐键检查、
-    // 未知键点名）——这是 G6 档位一致性校验与 0.0.6 点验矩阵的输入事实。
+    out
+}
+
+/// [supplies]：必填段（看门狗三键 + 时序预算位三键，六键全必填、类型逐键检查、
+/// 未知键点名）——这是 G6 档位一致性校验与 0.0.6 点验矩阵的输入事实。
+fn rr3_supplies_parse(root: &toml::Value, tier: &str, errs: &mut Vec<String>) -> Rr3Supplies {
     let mut supplies = Rr3Supplies::default();
     match root.get("supplies").and_then(toml::Value::as_table) {
         None => errs.push(
@@ -800,191 +845,201 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
                 }
             }
             // [[supplies.domain]]：电力网络声明（第七供给位，§3.1 家族 A；校验⑥ 判据源）。
-            // 缺数组 = 红吗？——不：域集是形态事实（无电力网络声明的形态不存在，
-            // 但 schema 3 装载期校验⑥-a 需要名单源，pins.rail 非空即须命中本表；
-            // 空数组 = 全 pin 无轨 = ⑥-b 若有 power 角色即红），解析层只收形状。
+            // 缺数组 = 红——schema 3 装载期校验⑥-a 需要名单源。
             match t.get("domain").and_then(toml::Value::as_array) {
-                Some(items) => {
-                    for (i, item) in items.iter().enumerate() {
-                        let label = format!("supplies.domains[{i}]");
-                        let Some(dt) = item.as_table() else {
-                            errs.push(format!("{label} 必须是 [[supplies.domain]] 表"));
-                            continue;
-                        };
-                        let mut d = Rr3Domain::default();
-                        for key in RR3_DOMAIN_KEYS {
-                            let path = format!("{label}.{key}");
-                            match key {
-                                "name" | "sense" | "current_sense" | "switch" | "evidence" => {
-                                    match dt.get(key).and_then(toml::Value::as_str) {
-                                        Some(s) if !s.is_empty() => {
-                                            let v = s.to_string();
-                                            match key {
-                                                "name" => d.name = v,
-                                                "sense" => d.sense = v,
-                                                "current_sense" => d.current_sense = v,
-                                                "evidence" => d.evidence = v,
-                                                _ => d.switch = v,
-                                            }
-                                        }
-                                        _ => errs.push(format!("{path} 缺失或不是非空字符串")),
-                                    }
-                                }
-                                "switchable" | "armed" => {
-                                    match (key, dt.get(key).and_then(toml::Value::as_bool)) {
-                                        ("switchable", Some(b)) => d.switchable = b,
-                                        ("armed", Some(b)) => d.armed = b,
-                                        _ => errs.push(format!("{path} 缺失或不是布尔")),
-                                    }
-                                }
-                                _ => match supplies_int(dt.get(key), &path) {
-                                    Ok(v) => match key {
-                                        "nominal_mv" => d.nominal_mv = v,
-                                        "mild_mv" => d.mild_mv = v,
-                                        "severe_mv" => d.severe_mv = v,
-                                        "current_cap_ma" => d.current_cap_ma = v,
-                                        _ => d.max_age_ms = v,
-                                    },
-                                    Err(e) => errs.push(e),
-                                },
-                            }
-                        }
-                        for k in dt.keys() {
-                            if !RR3_DOMAIN_KEYS.contains(&k.as_str()) {
-                                errs.push(format!(
-                                    "{label} 未知键 {k}（只认 {}）",
-                                    RR3_DOMAIN_KEYS.join("/")
-                                ));
-                            }
-                        }
-                        supplies.domains.push(d);
-                    }
-                }
+                Some(items) => supplies.domains = rr3_domains_parse(items, errs),
                 None => errs.push(
                     "缺少 [[supplies.domain]]（电力网络声明，第七供给位；schema_version=3 起必填，至少声明一域）"
                         .to_string(),
                 ),
             }
-            // [supplies.budget]：内存预算声明（校验⑩ 分母，schema 4 起必填——新必填
-            // 段随版本 bump，批N1 [[supplies.domain]] 先例）。分档自洽（ADR-0021 修订 3）
-            // 在 parse 层裁：host 档 not_applicable 必须真且三数键不得并存（自相矛盾）；
-            // rtos/bare 档 not_applicable 必须假且三数键必填（stack/total > 0、
-            // reserved ≥ 0、total ≤ reserved 红）。tier 非法（空）时跳过分档判——
-            // platform.tier 自有错误点名，不级联刷屏。
+            // [supplies.budget]：内存预算声明（校验⑩ 分母，schema 4 起必填）
             match t.get("budget").and_then(toml::Value::as_table) {
                 None => errs.push(
                     "缺少 [supplies.budget]（内存预算声明，校验⑩ 分母；schema_version=4 起必填——host 档显式写 not_applicable = true，不许留空）"
                         .to_string(),
                 ),
-                Some(bt) => {
-                    for k in bt.keys() {
-                        if !RR3_BUDGET_KEYS.contains(&k.as_str()) {
-                            errs.push(format!(
-                                "[supplies.budget] 未知键 {k}（只认 {}）",
-                                RR3_BUDGET_KEYS.join("/")
-                            ));
-                        }
-                    }
-                    match bt.get("not_applicable").and_then(toml::Value::as_bool) {
-                        Some(b) => supplies.budget.not_applicable = b,
-                        None => errs.push(
-                            "supplies.budget.not_applicable 缺失或不是布尔（校验⑩ 不适用必须显式声明，不许留空——F-6）"
-                                .to_string(),
-                        ),
-                    }
-                    let mut nums: BTreeMap<&str, i64> = BTreeMap::new();
-                    for key in [
-                        "task_stack_budget_bytes",
-                        "heap_total_bytes",
-                        "heap_reserved_bytes",
-                    ] {
-                        match bt.get(key).and_then(toml::Value::as_integer) {
-                            Some(v) => {
-                                nums.insert(key, v);
-                                match key {
-                                    "task_stack_budget_bytes" => {
-                                        supplies.budget.task_stack_budget_bytes = v
-                                    }
-                                    "heap_total_bytes" => supplies.budget.heap_total_bytes = v,
-                                    _ => supplies.budget.heap_reserved_bytes = v,
-                                }
-                            }
-                            None => {
-                                if bt.get(key).is_some() {
-                                    errs.push(format!("supplies.budget.{key} 应为整数"));
-                                }
+                Some(bt) => supplies.budget = rr3_budget_parse(bt, tier, errs),
+            }
+        }
+    }
+    supplies
+}
+
+/// [[supplies.domain]] 逐域解析（段名沿用 supplies.domains 文案口径）
+fn rr3_domains_parse(items: &[toml::Value], errs: &mut Vec<String>) -> Vec<Rr3Domain> {
+    let mut out = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("supplies.domains[{i}]");
+        let Some(dt) = item.as_table() else {
+            errs.push(format!("{label} 必须是 [[supplies.domain]] 表"));
+            continue;
+        };
+        let mut d = Rr3Domain::default();
+        for key in RR3_DOMAIN_KEYS {
+            let path = format!("{label}.{key}");
+            match key {
+                "name" | "sense" | "current_sense" | "switch" | "evidence" => {
+                    match dt.get(key).and_then(toml::Value::as_str) {
+                        Some(s) if !s.is_empty() => {
+                            let v = s.to_string();
+                            match key {
+                                "name" => d.name = v,
+                                "sense" => d.sense = v,
+                                "current_sense" => d.current_sense = v,
+                                "evidence" => d.evidence = v,
+                                _ => d.switch = v,
                             }
                         }
+                        _ => errs.push(format!("{path} 缺失或不是非空字符串")),
                     }
-                    if !platform_tier.is_empty() {
-                        if platform_tier == "host" {
-                            if !supplies.budget.not_applicable {
-                                errs.push(
-                                    "分档自洽校验失败（校验⑩）：tier = host 但 supplies.budget.not_applicable = false——校验⑩ 对 host 档不适用，合法不适用必须显式写 true，不许留空（F-6 / ADR-0021 修订 3）"
-                                        .to_string(),
-                                );
-                            }
-                            if !nums.is_empty() {
-                                errs.push(format!(
-                                    "分档自洽校验失败（校验⑩）：tier = host 但 [supplies.budget] 并存数字预算键 {}（与 not_applicable = true 自相矛盾——栈/堆预算只属于 rtos/bare 档，ADR-0021 修订 3）",
-                                    nums.keys().copied().collect::<Vec<_>>().join("/")
-                                ));
-                            }
-                        } else {
-                            // rtos / bare：有真栈/堆预算，not_applicable 不得真
-                            if supplies.budget.not_applicable {
-                                errs.push(
-                                    "分档自洽校验失败（校验⑩）：tier = rtos/bare 但 supplies.budget.not_applicable = true（rtos/bare 档有真栈/堆预算，写不适用是自相矛盾——ADR-0021 修订 3）"
-                                        .to_string(),
-                                );
-                            }
-                            for key in [
-                                "task_stack_budget_bytes",
-                                "heap_total_bytes",
-                                "heap_reserved_bytes",
-                            ] {
-                                if !nums.contains_key(key) {
-                                    errs.push(format!(
-                                        "supplies.budget.{key} 缺失（rtos/bare 档必填——校验⑩ 分母，合法不适用才走 not_applicable，不许留空——F-6）"
-                                    ));
-                                }
-                            }
-                            if let (Some(&st), Some(&tot), Some(&res)) = (
-                                nums.get("task_stack_budget_bytes"),
-                                nums.get("heap_total_bytes"),
-                                nums.get("heap_reserved_bytes"),
-                            ) {
-                                if st <= 0 {
-                                    errs.push(format!(
-                                        "supplies.budget.task_stack_budget_bytes = {st} 须为正整数（⑩-a 分母，0 预算 = 栈账无分母）"
-                                    ));
-                                }
-                                if tot <= 0 {
-                                    errs.push(format!(
-                                        "supplies.budget.heap_total_bytes = {tot} 须为正整数（⑩-b 分母基数）"
-                                    ));
-                                }
-                                if res < 0 {
-                                    errs.push(format!(
-                                        "supplies.budget.heap_reserved_bytes = {res} 须为非负整数（平台常驻占用，负数是物理矛盾）"
-                                    ));
-                                }
-                                if tot > 0 && res >= 0 && tot <= res {
-                                    errs.push(format!(
-                                        "supplies.budget.heap_total_bytes = {tot} ≤ heap_reserved_bytes = {res}（可用堆 = total − reserved ≤ 0，⑩-b 无分母——物理矛盾）"
-                                    ));
-                                }
-                            }
-                        }
-                    }
+                }
+                "switchable" | "armed" => match (key, dt.get(key).and_then(toml::Value::as_bool)) {
+                    ("switchable", Some(b)) => d.switchable = b,
+                    ("armed", Some(b)) => d.armed = b,
+                    _ => errs.push(format!("{path} 缺失或不是布尔")),
+                },
+                _ => match supplies_int(dt.get(key), &path) {
+                    Ok(v) => match key {
+                        "nominal_mv" => d.nominal_mv = v,
+                        "mild_mv" => d.mild_mv = v,
+                        "severe_mv" => d.severe_mv = v,
+                        "current_cap_ma" => d.current_cap_ma = v,
+                        _ => d.max_age_ms = v,
+                    },
+                    Err(e) => errs.push(e),
+                },
+            }
+        }
+        for k in dt.keys() {
+            if !RR3_DOMAIN_KEYS.contains(&k.as_str()) {
+                errs.push(format!(
+                    "{label} 未知键 {k}（只认 {}）",
+                    RR3_DOMAIN_KEYS.join("/")
+                ));
+            }
+        }
+        out.push(d);
+    }
+    out
+}
+
+/// [supplies.budget]：内存预算声明（校验⑩ 分母）。分档自洽（ADR-0021 修订 3）
+/// 在 parse 层裁：host 档 not_applicable 必须真且三数键不得并存（自相矛盾）；
+/// rtos/bare 档 not_applicable 必须假且三数键必填（stack/total > 0、
+/// reserved ≥ 0、total ≤ reserved 红）。tier 非法（空）时跳过分档判——
+/// platform.tier 自有错误点名，不级联刷屏。
+fn rr3_budget_parse(bt: &toml::Table, tier: &str, errs: &mut Vec<String>) -> Rr3Budget {
+    let mut budget = Rr3Budget::default();
+    for k in bt.keys() {
+        if !RR3_BUDGET_KEYS.contains(&k.as_str()) {
+            errs.push(format!(
+                "[supplies.budget] 未知键 {k}（只认 {}）",
+                RR3_BUDGET_KEYS.join("/")
+            ));
+        }
+    }
+    match bt.get("not_applicable").and_then(toml::Value::as_bool) {
+        Some(b) => budget.not_applicable = b,
+        None => errs.push(
+            "supplies.budget.not_applicable 缺失或不是布尔（校验⑩ 不适用必须显式声明，不许留空——F-6）"
+                .to_string(),
+        ),
+    }
+    let mut nums: BTreeMap<&str, i64> = BTreeMap::new();
+    for key in [
+        "task_stack_budget_bytes",
+        "heap_total_bytes",
+        "heap_reserved_bytes",
+    ] {
+        match bt.get(key).and_then(toml::Value::as_integer) {
+            Some(v) => {
+                nums.insert(key, v);
+                match key {
+                    "task_stack_budget_bytes" => budget.task_stack_budget_bytes = v,
+                    "heap_total_bytes" => budget.heap_total_bytes = v,
+                    _ => budget.heap_reserved_bytes = v,
+                }
+            }
+            None => {
+                if bt.get(key).is_some() {
+                    errs.push(format!("supplies.budget.{key} 应为整数"));
                 }
             }
         }
     }
-    // [slots]：必填段、present = 本板物理在位格位声明（缺格三源合一第一源）。
-    // 每项非空字符串；未知键点名。空数组合法——板可以什么都不在位（全 Degraded）。
-    // device_absent = base 层格的器件缺席登记（D3 裁定 5）：表键为格位名、值为
-    // 非空理由；留空即红（no_injection 范式——缺席不写理由 = 未申报的静默退化）。
+    if !tier.is_empty() {
+        if tier == "host" {
+            if !budget.not_applicable {
+                errs.push(
+                    "分档自洽校验失败（校验⑩）：tier = host 但 supplies.budget.not_applicable = false——校验⑩ 对 host 档不适用，合法不适用必须显式写 true，不许留空（F-6 / ADR-0021 修订 3）"
+                        .to_string(),
+                );
+            }
+            if !nums.is_empty() {
+                errs.push(format!(
+                    "分档自洽校验失败（校验⑩）：tier = host 但 [supplies.budget] 并存数字预算键 {}（与 not_applicable = true 自相矛盾——栈/堆预算只属于 rtos/bare 档，ADR-0021 修订 3）",
+                    nums.keys().copied().collect::<Vec<_>>().join("/")
+                ));
+            }
+        } else {
+            // rtos / bare：有真栈/堆预算，not_applicable 不得真
+            if budget.not_applicable {
+                errs.push(
+                    "分档自洽校验失败（校验⑩）：tier = rtos/bare 但 supplies.budget.not_applicable = true（rtos/bare 档有真栈/堆预算，写不适用是自相矛盾——ADR-0021 修订 3）"
+                        .to_string(),
+                );
+            }
+            for key in [
+                "task_stack_budget_bytes",
+                "heap_total_bytes",
+                "heap_reserved_bytes",
+            ] {
+                if !nums.contains_key(key) {
+                    errs.push(format!(
+                        "supplies.budget.{key} 缺失（rtos/bare 档必填——校验⑩ 分母，合法不适用才走 not_applicable，不许留空——F-6）"
+                    ));
+                }
+            }
+            if let (Some(&st), Some(&tot), Some(&res)) = (
+                nums.get("task_stack_budget_bytes"),
+                nums.get("heap_total_bytes"),
+                nums.get("heap_reserved_bytes"),
+            ) {
+                if st <= 0 {
+                    errs.push(format!(
+                        "supplies.budget.task_stack_budget_bytes = {st} 须为正整数（⑩-a 分母，0 预算 = 栈账无分母）"
+                    ));
+                }
+                if tot <= 0 {
+                    errs.push(format!(
+                        "supplies.budget.heap_total_bytes = {tot} 须为正整数（⑩-b 分母基数）"
+                    ));
+                }
+                if res < 0 {
+                    errs.push(format!(
+                        "supplies.budget.heap_reserved_bytes = {res} 须为非负整数（平台常驻占用，负数是物理矛盾）"
+                    ));
+                }
+                if tot > 0 && res >= 0 && tot <= res {
+                    errs.push(format!(
+                        "supplies.budget.heap_total_bytes = {tot} ≤ heap_reserved_bytes = {res}（可用堆 = total − reserved ≤ 0，⑩-b 无分母——物理矛盾）"
+                    ));
+                }
+            }
+        }
+    }
+    budget
+}
+
+/// [slots]：必填段、present = 本板物理在位格位声明（缺格三源合一第一源）。
+/// 每项非空字符串；未知键点名。空数组合法——板可以什么都不在位（全 Degraded）。
+/// device_absent = base 层格的器件缺席登记（D3 裁定 5）：表键为格位名、值为
+/// 非空理由；留空即红（no_injection 范式——缺席不写理由 = 未申报的静默退化）。
+fn rr3_slots_parse(
+    root: &toml::Value,
+    errs: &mut Vec<String>,
+) -> (Vec<String>, BTreeMap<String, String>) {
     let mut slots_present: Vec<String> = Vec::new();
     let mut slots_device_absent: BTreeMap<String, String> = BTreeMap::new();
     match root.get("slots").and_then(toml::Value::as_table) {
@@ -1026,25 +1081,7 @@ pub fn rr3_profile_from_text(text: &str) -> Result<Rr3Profile, Vec<String>> {
             }
         }
     }
-    if !errs.is_empty() {
-        return Err(errs);
-    }
-    Ok(Rr3Profile {
-        platform_tier,
-        platform_chip,
-        bindings,
-        enabled_slots,
-        slots_present,
-        slots_device_absent,
-        supplies,
-        hardware,
-        log_ring_cap,
-        hal_backend,
-        audio_backend,
-        servo_backend,
-        display_backend,
-        pins,
-    })
+    (slots_present, slots_device_absent)
 }
 
 /// [supplies] 的整数键读取：缺失或类型不合同一条错误点名（运维一次改对）
