@@ -227,7 +227,7 @@ fn rr3_model_api_root(host_or_root: &str) -> String {
 
 /// 模型行 `base_url` 取值裁决（boot 解析与面板写面共用一档）：非空、
 /// `http(s)://` 开头、不得含 `/chat/completions`（客户端自拼，防双拼 404）。
-pub(crate) fn rr3_model_base_url_validate(base_url: &str) -> Result<(), String> {
+pub(crate) fn rr3_base_url_check(base_url: &str) -> Result<(), String> {
     if base_url.is_empty() {
         return Err("base_url 不得为空".to_string());
     }
@@ -327,7 +327,7 @@ pub(crate) fn rr3_brain_model_row(doc: &Value) -> Result<Rr3ModelRow, String> {
     if base_url.is_empty() || model_id.is_empty() {
         return Err(format!("模型行 {name} 缺 base_url/model_id"));
     }
-    rr3_model_base_url_validate(&base_url).map_err(|e| format!("模型行 {name} {e}"))?;
+    rr3_base_url_check(&base_url).map_err(|e| format!("模型行 {name} {e}"))?;
     // key_ref 双源引用：`env:变量名` → 环境变量，裸名 → 面板 secrets 文件（语义
     // 承载在 cloud/llm.py，迁移件三落）；空白串折 None（Python strip() or None）
     let key_ref = row
@@ -351,7 +351,7 @@ fn rr3_py_list_repr(items: &[String]) -> String {
 
 /// TOML 文本 → Rr3BrainCfg。文档树整体进 [`Rr3BrainCfg::doc`]（ops/set 写面），
 /// boot 投影当场解析——缺段/缺键/类型不合法一律 Err 拒 boot（fail-closed）。
-pub(crate) fn rr3_brain_config_parse(text: &str) -> Result<Rr3BrainCfg, String> {
+pub(crate) fn rr3_brain_cfg_parse(text: &str) -> Result<Rr3BrainCfg, String> {
     let doc: Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
     // cloud 段必填四键 + timeout_s（Python cfg["rr3-brain"]["cloud"] 直取同义；
     // llm_model 只在无模型行表的 fallback 路径消费，由 rr3_brain_model_row 点名）
@@ -398,7 +398,7 @@ pub(crate) fn rr3_brain_config_parse(text: &str) -> Result<Rr3BrainCfg, String> 
 /// config 路径投影（ADR-0023 模型行落盘用）：与 [`rr3mod::bootstrap`] 实读同一
 /// 解析单点 [`rr3mod::rr3_config_path`]——解析器本身是纯函数不碰路径，装配段把
 /// 此处结果注入 [`Rr3BrainCfg::config_path`]，面板写面才能落回同一份文件。
-pub(crate) fn rr3_brain_config_path(config_env: Option<&'static str>) -> Result<PathBuf, String> {
+pub(crate) fn rr3_brain_cfg_path(config_env: Option<&'static str>) -> Result<PathBuf, String> {
     let manifest_path = std::env::var(rr3mod::RR3_MANIFEST_ENV).map_err(|_| {
         format!(
             "缺环境变量 {}（rrd spawn 注入；bootstrap 同源）",
@@ -445,7 +445,7 @@ call_timeout_s = 30.0
 [rr3-brain.dialog]
 max_utterance_ms = 8000
 "#;
-        let cfg = rr3_brain_config_parse(text).unwrap();
+        let cfg = rr3_brain_cfg_parse(text).unwrap();
         assert_eq!(cfg.cloud_timeout_s, 20.0);
         assert_eq!(cfg.call_timeout_s, 30.0);
         assert_eq!(cfg.max_utterance_ms, 8000);
@@ -475,7 +475,7 @@ timeout_s = 20
 [rr3-brain.dialog]
 max_utterance_ms = 8000
 "#;
-        let cfg = rr3_brain_config_parse(text).unwrap();
+        let cfg = rr3_brain_cfg_parse(text).unwrap();
         assert_eq!(
             cfg.model.base_url, "https://api.siliconflow.cn/v1",
             "cloud 主机根 fallback 补版本段成完整 API 根"
@@ -502,7 +502,7 @@ timeout_s = 20
 
 [rr3-brain.dialog]
 "#;
-        let cfg = rr3_brain_config_parse(text).unwrap();
+        let cfg = rr3_brain_cfg_parse(text).unwrap();
         assert_eq!(cfg.call_timeout_s, 30.0);
         assert_eq!(cfg.max_utterance_ms, 8000);
     }
@@ -510,24 +510,24 @@ timeout_s = 20
     /// 缺段/缺键点名（fail-closed；cloud 四键＋dialog 段必填，bus 段可选）
     #[test]
     fn config_parse_rejects_missing_sections_and_fields() {
-        let e = rr3_brain_config_parse("[rr3-brain]\nlog_level = \"info\"\n").unwrap_err();
+        let e = rr3_brain_cfg_parse("[rr3-brain]\nlog_level = \"info\"\n").unwrap_err();
         assert!(e.contains("[rr3-brain.cloud]"), "cloud 缺段点名: {e}");
-        let e = rr3_brain_config_parse(
+        let e = rr3_brain_cfg_parse(
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\ntts_model = \"t\"\n",
         )
         .unwrap_err();
         assert!(e.contains("timeout_s"), "cloud 缺 timeout_s 点名: {e}");
-        let e = rr3_brain_config_parse(
+        let e = rr3_brain_cfg_parse(
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n",
         )
         .unwrap_err();
         assert!(e.contains("[rr3-brain.dialog]"), "dialog 缺段点名: {e}");
-        let e = rr3_brain_config_parse(
+        let e = rr3_brain_cfg_parse(
             "[rr3-brain.cloud]\nbase_url = \"u\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n",
         )
         .unwrap_err();
         assert!(e.contains("asr_model"), "cloud 缺 asr_model 点名: {e}");
-        let e = rr3_brain_config_parse(
+        let e = rr3_brain_cfg_parse(
             "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n[rr3-brain.bus]\ncall_timeout_s = \"30\"\n",
         )
         .unwrap_err();
@@ -535,7 +535,7 @@ timeout_s = 20
             e.contains("call_timeout_s 须数值"),
             "字符串超时点名（Rust 只认数值）: {e}"
         );
-        let e = rr3_brain_config_parse("garbage =\n").unwrap_err();
+        let e = rr3_brain_cfg_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
     }
 
@@ -547,7 +547,7 @@ timeout_s = 20
         let two_active = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"u1\"\nmodel_id = \"m1\"\nactive = true\n[[rr3-brain.model]]\nname = \"乙\"\nbase_url = \"u2\"\nmodel_id = \"m2\"\nactive = true\n"
         );
-        let e = rr3_brain_config_parse(&two_active).unwrap_err();
+        let e = rr3_brain_cfg_parse(&two_active).unwrap_err();
         assert_eq!(
             e, "[[rr3-brain.model]] 须恰一行 active=true（现 2 行: ['甲', '乙']）",
             "两 active 红且名单逐字（Python 列表 repr 形状）"
@@ -555,12 +555,12 @@ timeout_s = 20
         let none_active = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"u1\"\nmodel_id = \"m1\"\nactive = false\n"
         );
-        let e = rr3_brain_config_parse(&none_active).unwrap_err();
+        let e = rr3_brain_cfg_parse(&none_active).unwrap_err();
         assert!(e.contains("现 0 行"), "零 active 同红: {e}");
         let bad_mode = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nmode = \"ssh\"\nbase_url = \"u1\"\nmodel_id = \"m1\"\nactive = true\n"
         );
-        let e = rr3_brain_config_parse(&bad_mode).unwrap_err();
+        let e = rr3_brain_cfg_parse(&bad_mode).unwrap_err();
         assert_eq!(
             e, "模型行 甲 mode 不认: ssh（允许 api/local）",
             "mode 不认文案逐字"
@@ -568,7 +568,7 @@ timeout_s = 20
         let bad_fmt = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nmode = \"api\"\napi_format = \"anthropic\"\nbase_url = \"u1\"\nmodel_id = \"m1\"\nactive = true\n"
         );
-        let e = rr3_brain_config_parse(&bad_fmt).unwrap_err();
+        let e = rr3_brain_cfg_parse(&bad_fmt).unwrap_err();
         assert_eq!(
             e, "模型行 甲 api_format 暂不支持: anthropic（本批仅 openai）",
             "api_format 不认文案逐字"
@@ -576,7 +576,7 @@ timeout_s = 20
         let missing = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nmode = \"api\"\nmodel_id = \"m1\"\nactive = true\n"
         );
-        let e = rr3_brain_config_parse(&missing).unwrap_err();
+        let e = rr3_brain_cfg_parse(&missing).unwrap_err();
         assert_eq!(e, "模型行 甲 缺 base_url/model_id", "缺连接键文案逐字");
     }
 
@@ -592,7 +592,7 @@ timeout_s = 20
 
 [rr3-brain.dialog]
 "#;
-        let e = rr3_brain_config_parse(text).unwrap_err();
+        let e = rr3_brain_cfg_parse(text).unwrap_err();
         assert!(e.contains("llm_model"), "fallback 缺 llm_model 点名: {e}");
     }
 
@@ -603,12 +603,12 @@ timeout_s = 20
         let blank = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"http://u1\"\nmodel_id = \"m1\"\napi_key_ref = \"  \"\nactive = true\n"
         );
-        let cfg = rr3_brain_config_parse(&blank).unwrap();
+        let cfg = rr3_brain_cfg_parse(&blank).unwrap();
         assert_eq!(cfg.model.key_ref, None, "空白 key_ref 折 None");
         let spaced = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \" http://u1 \"\nmodel_id = \" m1 \"\napi_key_ref = \" 甲 \"\nactive = true\n"
         );
-        let cfg = rr3_brain_config_parse(&spaced).unwrap();
+        let cfg = rr3_brain_cfg_parse(&spaced).unwrap();
         assert_eq!(cfg.model.base_url, "http://u1", "base_url strip");
         assert_eq!(cfg.model.model_id, "m1", "model_id strip");
         assert_eq!(cfg.model.key_ref.as_deref(), Some("甲"), "key_ref strip");
@@ -642,19 +642,19 @@ timeout_s = 20
     /// 模型行 base_url 裁决：非空 / http(s) 前缀 / 不得自带 /chat/completions
     #[test]
     fn model_base_url_validation_rejects_malformed_roots() {
-        assert!(rr3_model_base_url_validate("").is_err());
-        assert!(rr3_model_base_url_validate("u1").is_err());
-        assert!(rr3_model_base_url_validate("ftp://x/v1").is_err());
-        assert!(rr3_model_base_url_validate("https://x/v1/chat/completions").is_err());
-        assert!(rr3_model_base_url_validate("https://x/chat/completions/").is_err());
-        assert!(rr3_model_base_url_validate("https://api.deepseek.com/v1").is_ok());
-        assert!(rr3_model_base_url_validate("http://127.0.0.1:8080/v1").is_ok());
+        assert!(rr3_base_url_check("").is_err());
+        assert!(rr3_base_url_check("u1").is_err());
+        assert!(rr3_base_url_check("ftp://x/v1").is_err());
+        assert!(rr3_base_url_check("https://x/v1/chat/completions").is_err());
+        assert!(rr3_base_url_check("https://x/chat/completions/").is_err());
+        assert!(rr3_base_url_check("https://api.deepseek.com/v1").is_ok());
+        assert!(rr3_base_url_check("http://127.0.0.1:8080/v1").is_ok());
         // 行解析侧点名带行名（boot 拒 boot 不放行）
         let cloud = "[rr3-brain.cloud]\nbase_url = \"https://api.siliconflow.cn\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
         let bad = format!(
             "{cloud}[[rr3-brain.model]]\nname = \"甲\"\nbase_url = \"api.deepseek.com/v1\"\nmodel_id = \"m1\"\nactive = true\n"
         );
-        let e = rr3_brain_config_parse(&bad).unwrap_err();
+        let e = rr3_brain_cfg_parse(&bad).unwrap_err();
         assert!(e.starts_with("模型行 甲 base_url 须为完整 API 根"), "{e}");
     }
 
@@ -663,9 +663,9 @@ timeout_s = 20
     #[test]
     fn wake_section_defaults_off_and_parses_full() {
         let base = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\n";
-        let cfg = rr3_brain_config_parse(base).unwrap();
+        let cfg = rr3_brain_cfg_parse(base).unwrap();
         assert_eq!(cfg.wake, Rr3WakeCfg::default(), "缺段 = 关闭 + 缺省值");
-        let cfg = rr3_brain_config_parse(&format!(
+        let cfg = rr3_brain_cfg_parse(&format!(
             "{base}[rr3-brain.wake]\nenable = true\nphrases = [\"你好洛克\", \"洛克洛克\"]\nack = \"在呢\"\nfollowup_ms = 5000\n"
         ))
         .unwrap();
@@ -683,7 +683,7 @@ timeout_s = 20
             format!("{base}[rr3-brain.wake]\nack = \"\"\n"),
             format!("{base}[rr3-brain.wake]\nfollowup_ms = -1\n"),
         ] {
-            assert!(rr3_brain_config_parse(&bad).is_err(), "应拒: {bad}");
+            assert!(rr3_brain_cfg_parse(&bad).is_err(), "应拒: {bad}");
         }
     }
 

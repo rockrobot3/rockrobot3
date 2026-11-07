@@ -113,7 +113,7 @@ pub(crate) fn rr3_cloud_api_key() -> Result<String, String> {
 
 /// secrets 缺省路径（Python `expanduser(~/.rr3/secrets.json)` 同形状：HOME 缺失
 /// 保留 `~` 字面——后续打开必然失败折 None，语义一致）。
-fn rr3_secrets_default_path() -> String {
+fn rr3_secrets_def_path() -> String {
     match std::env::var("HOME") {
         Ok(home) => format!("{home}/.rr3/secrets.json"),
         Err(_) => "~/.rr3/secrets.json".to_string(),
@@ -124,7 +124,7 @@ fn rr3_secrets_default_path() -> String {
 /// 重启。缺文件/缺键/坏 json/值非串一律 None，容忍与否由调用方裁定（real 档缺
 /// key 报错只点名 ref，不回显任何值）。
 pub(crate) fn rr3_secrets_get(reference: &str) -> Option<String> {
-    let path = std::env::var(RR3_SECRETS_FILE_ENV).unwrap_or_else(|_| rr3_secrets_default_path());
+    let path = std::env::var(RR3_SECRETS_FILE_ENV).unwrap_or_else(|_| rr3_secrets_def_path());
     let text = std::fs::read_to_string(path).ok()?;
     let data: Value = serde_json::from_str(&text).ok()?;
     let val = data.get("keys")?.get(reference)?.as_str()?;
@@ -190,7 +190,7 @@ const RR3_CLOUD_RETRY_PAUSE: Duration = Duration::from_millis(500);
 /// 可重试判据（纯函数，单测钉域）：传输层「云端不可达 …」与 HTTP 429/5xx 重试；
 /// 其余（4xx/坏应答/缺密钥/缺字段）不重试。`interface` 是各云端错误文案的接口
 /// 前缀词（"识别接口"/"合成接口"），用于解析 `"{interface} HTTP {code}"`。
-fn rr3_cloud_error_retryable(interface: &str, err: &str) -> bool {
+fn rr3_cloud_retryable(interface: &str, err: &str) -> bool {
     if err.starts_with("云端不可达") {
         return true;
     }
@@ -235,7 +235,7 @@ impl Rr3AsrClient {
         let key = rr3_cloud_api_key()?;
         let boundary = rr3_boundary_hex();
         let boosted = crate::asr::rr3_asr_boost_pcm(pcm, RR3_ASR_INPUT_GAIN);
-        let body = crate::asr::rr3_asr_multipart_body(
+        let body = crate::asr::rr3_multipart_body(
             &self.model,
             &boosted,
             sample_rate,
@@ -244,7 +244,7 @@ impl Rr3AsrClient {
         );
         let url = format!("{}/v1/audio/transcriptions", self.base_url);
         let content_type = format!("multipart/form-data; boundary={boundary}");
-        // 有界重试（见 [`rr3_cloud_error_retryable`]）：multipart 体一次装配、多轮
+        // 有界重试（见 [`rr3_cloud_retryable`]）：multipart 体一次装配、多轮
         // 复用；只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
         let mut attempt = 0u32;
         loop {
@@ -270,8 +270,7 @@ impl Rr3AsrClient {
                         .ok_or_else(|| "识别应答缺 text 字段".to_string());
                 }
                 Err(e) => {
-                    if rr3_cloud_error_retryable("识别接口", &e) && attempt < RR3_CLOUD_ATTEMPTS
-                    {
+                    if rr3_cloud_retryable("识别接口", &e) && attempt < RR3_CLOUD_ATTEMPTS {
                         eprintln!(
                             "rr3-brain: ASR 第 {attempt}/{RR3_CLOUD_ATTEMPTS} 次失败（{e}），{}ms 后重试",
                             RR3_CLOUD_RETRY_PAUSE.as_millis()
@@ -494,7 +493,7 @@ impl Rr3TtsClient {
         .to_string()
         .into_bytes();
         let url = format!("{}/v1/audio/speech", self.base_url);
-        // 有界重试（与 ASR 同轨，见 [`rr3_cloud_error_retryable`]）：CosyVoice
+        // 有界重试（与 ASR 同轨，见 [`rr3_cloud_retryable`]）：CosyVoice
         // 读响应超时是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
         let mut attempt = 0u32;
         loop {
@@ -510,8 +509,7 @@ impl Rr3TtsClient {
             match posted {
                 Ok(resp) => return Ok(resp),
                 Err(e) => {
-                    if rr3_cloud_error_retryable("合成接口", &e) && attempt < RR3_CLOUD_ATTEMPTS
-                    {
+                    if rr3_cloud_retryable("合成接口", &e) && attempt < RR3_CLOUD_ATTEMPTS {
                         eprintln!(
                             "rr3-brain: TTS 第 {attempt}/{RR3_CLOUD_ATTEMPTS} 次失败（{e}），{}ms 后重试",
                             RR3_CLOUD_RETRY_PAUSE.as_millis()
@@ -862,7 +860,7 @@ mod tests {
                 "云端不可达 http://x: timed out reading response",
             ),
         ] {
-            assert!(rr3_cloud_error_retryable(iface, e), "应重试: {e}");
+            assert!(rr3_cloud_retryable(iface, e), "应重试: {e}");
         }
         for (iface, e) in [
             ("识别接口", "识别接口 HTTP 400"),
@@ -877,7 +875,7 @@ mod tests {
             ("合成接口", "合成应答非 JSON: expected value at line 1"),
             ("合成接口", "缺少环境变量 RR3_CLOUD_API_KEY，云端链路不可用"),
         ] {
-            assert!(!rr3_cloud_error_retryable(iface, e), "不应重试: {e}");
+            assert!(!rr3_cloud_retryable(iface, e), "不应重试: {e}");
         }
     }
 

@@ -26,7 +26,7 @@ pub fn rr3_wav_header(sample_rate: u32, data_len: u32) -> [u8; 44] {
 /// multipart 请求体装配：model 字段 + file 字段（filename="a.wav"，WAV 头仓内
 /// 自建）+ PCM + 收尾 boundary——对位 asr.py 上传体形状（整段 WAV 一次上传，
 /// ADR-0014 裁定 2；流式是 legacy 内存约束的产物，本机不复刻）。
-pub fn rr3_asr_multipart_body(
+pub fn rr3_multipart_body(
     model: &str,
     pcm: &[u8],
     sample_rate: u32,
@@ -89,8 +89,8 @@ mod tests {
     /// ⑧-a 腿一：multipart 装配确定性（同输入逐字节同体，段标记齐备）
     #[test]
     fn parity_leg1_asr_multipart_body_is_deterministic() {
-        let a = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
-        let b = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
+        let a = rr3_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
+        let b = rr3_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
         assert_eq!(a, b);
         assert!(a.windows(12).any(|w| w == b"name=\"model\""));
         assert!(a.windows(2).any(|w| w == b"m\r"), "model 值在体里");
@@ -118,12 +118,12 @@ mod tests {
     /// None 不落（旧体逐字节等价）。
     #[test]
     fn asr_multipart_language_field_optional() {
-        let none = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
+        let none = rr3_multipart_body("m", b"\x01\x02", 16000, "bd1", None);
         assert!(
             !none.windows(15).any(|w| w == b"name=\"language\""),
             "None 不落 language"
         );
-        let zh = rr3_asr_multipart_body("m", b"\x01\x02", 16000, "bd1", Some("zh"));
+        let zh = rr3_multipart_body("m", b"\x01\x02", 16000, "bd1", Some("zh"));
         assert!(
             zh.windows(15).any(|w| w == b"name=\"language\""),
             "Some 落 language"

@@ -249,7 +249,7 @@ topics_load.rs ×3，40→41 两处随契约计数联动；contracts/README.md �
 ① 寻址 = 组.槽与 `ops/list` 快照读源对偶（llm 组写实效源——模型行 active 在则
 写行、fallback 写 cloud 段；asr/tts/dialog 组与 llm.timeout_s 写 cloud/dialog 段）；
 ② 生效 = live 内存生效（写臂重建 asr/llm/tts 客户端，llm 重建即换会话 history
-归零；dialog 就地改参——`rr3_utterance_expired` 现读 `max_utterance_ms` 不丢开轮
+归零；dialog 就地改参——`rr3_utt_expired` 现读 `max_utterance_ms` 不丢开轮
 状态），**不落盘**——应答 `persisted:false` 如实申报，重启回 config.toml 真值
 （不申报 reboot：内存写不落盘，重启是丢失不是生效）；③ 落盘归后续批（Python 无
 TOML writer、重写丢 config 注释、Y-2 单写路径是 Rust persist.rs——三条协商点
