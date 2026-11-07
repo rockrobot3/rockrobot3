@@ -43,9 +43,14 @@ pub enum FakeMode {
     DropAfterRegister,
 }
 
+/// 单 log 槽（kind=req/response/event 收帧记账）
+type LogSlot = Arc<Mutex<Vec<Value>>>;
+/// tag → log 槽登记表
+type LogSlots = Mutex<HashMap<String, LogSlot>>;
+
 /// 各测试独立的 log 槽：tag → 收帧记账（kind=req/response/event）
 pub fn log_slot(tag: &str) -> Arc<Mutex<Vec<Value>>> {
-    static SLOTS: OnceLock<Mutex<HashMap<String, Arc<Mutex<Vec<Value>>>>>> = OnceLock::new();
+    static SLOTS: OnceLock<LogSlots> = OnceLock::new();
     let slots = SLOTS.get_or_init(|| Mutex::new(HashMap::new()));
     slots
         .lock()

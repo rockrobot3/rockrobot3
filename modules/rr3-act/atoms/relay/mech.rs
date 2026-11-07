@@ -10,6 +10,12 @@
 //! 人读文案由编排层渲染（`src/composite.rs` 的 `rr3_relay_apply_error_text`，
 //! 与改前逐字一致——act 册 §9 契约字面量，面板与 legacy 依赖字面）；HAL 句柄
 //! 入参改泛型（`G: Rr3GpioOut + ?Sized`，调用点单态化不改行为）。
+//!
+//! clippy `result_large_err` 模块级豁免：`Rr3ErrText` 内联 128B 是 no_std 面
+//! 定长契约（无堆可 Box），错误变体随行 HAL 错即必然 >128B——缩容会破坏零堆
+//! 契约，不属可清的临时债。
+
+#![allow(clippy::result_large_err)]
 
 use rr_hal_api::{Rr3GpioOut, Rr3HalError};
 

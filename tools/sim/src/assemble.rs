@@ -482,21 +482,20 @@ watchdog_timeout_ms = 5000\n";
         // 临时"仓"：profiles/default.toml + modules/rr3-pa（rust）
         let repo = std::env::temp_dir().join(format!("rr3-assemble-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&repo);
-        for (m, lang, entry) in [("rr3-pa", "rust", "rr3-pa")] {
-            let dir = repo.join("modules").join(m);
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
-                dir.join("module.toml"),
-                format!(
-                    "[manifest]\nschema_version = 1\nname = \"{m}\"\nlang = \"{lang}\"\n\
-                     entry = \"{entry}\"\n\n[provides]\ncapabilities = []\n\n\
-                     [resources]\nrestart_policy = \"always\"\n\n[health]\n\
-                     heartbeat_ms = 1000\nwatchdog_timeout_ms = 5000\n"
-                ),
-            )
-            .unwrap();
-            std::fs::write(dir.join("config.toml"), "[x]\nv = 1\n").unwrap();
-        }
+        let (m, lang, entry) = ("rr3-pa", "rust", "rr3-pa");
+        let dir = repo.join("modules").join(m);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("module.toml"),
+            format!(
+                "[manifest]\nschema_version = 1\nname = \"{m}\"\nlang = \"{lang}\"\n\
+                 entry = \"{entry}\"\n\n[provides]\ncapabilities = []\n\n\
+                 [resources]\nrestart_policy = \"always\"\n\n[health]\n\
+                 heartbeat_ms = 1000\nwatchdog_timeout_ms = 5000\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("config.toml"), "[x]\nv = 1\n").unwrap();
         std::fs::create_dir_all(repo.join("profiles")).unwrap();
         std::fs::write(
             repo.join("profiles/default.toml"),

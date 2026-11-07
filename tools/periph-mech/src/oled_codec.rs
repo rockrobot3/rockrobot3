@@ -271,8 +271,8 @@ mod tests {
         assert!(pages[0][96..].iter().all(|&b| b == 0));
         assert!(pages[0][40..96].iter().all(|&b| b == 0));
         // 其余页源字节为零 → 全零
-        for p in 1..8 {
-            assert!(pages[p].iter().all(|&b| b == 0), "页 {p} 应全零");
+        for (p, page) in pages.iter().enumerate().skip(1) {
+            assert!(page.iter().all(|&b| b == 0), "页 {p} 应全零");
         }
     }
 

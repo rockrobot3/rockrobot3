@@ -1316,8 +1316,10 @@ mod tests {
     /// Ignore 四态与跟进窗边界钉死；关闭门控 = 全放行（既有行为）。
     #[test]
     fn wake_decision_states_and_window() {
-        let mut cfg = Rr3WakeCfg::default();
-        cfg.enable = true;
+        let cfg = Rr3WakeCfg {
+            enable: true,
+            ..Default::default()
+        };
         assert_eq!(
             rr3_wake_decide("你好洛克", &cfg, 0, None),
             Rr3WakeAction::Ack
@@ -1395,8 +1397,10 @@ mod tests {
             Rr3WakeAction::Ignore,
             "窗外不收"
         );
-        let mut off = Rr3WakeCfg::default();
-        off.enable = false;
+        let off = Rr3WakeCfg {
+            enable: false,
+            ..Default::default()
+        };
         assert_eq!(
             rr3_wake_decide("今天天气怎么样", &off, 0, None),
             Rr3WakeAction::FollowUp,

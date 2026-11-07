@@ -148,9 +148,7 @@ pub(crate) fn rr3_tts_parse_args(args: &Value) -> Result<(String, u64), String> 
 /// （tts_play_reject）与清缓冲归调用方。
 pub(crate) fn rr3_tts_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(), String> {
     if pcm_bytes == 0 {
-        return Err(format!(
-            "tts PCM 点名申报 0 字节（空体无流，I-21① 下界拒），弃播"
-        ));
+        return Err("tts PCM 点名申报 0 字节（空体无流，I-21① 下界拒），弃播".to_string());
     }
     let buffered = buffered as u64;
     if buffered == pcm_bytes {
@@ -167,11 +165,13 @@ pub(crate) fn rr3_tts_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(
 }
 
 /// s16le 字节列 → i16 样点：小端两两成对。brain 分帧保证偶数字节，尾部奇数
-/// 字节不成样点，防御性丢弃（chunks_exact 自带该语义）。
+/// 字节不成样点，防御性丢弃（as_chunks 自带该语义）。
 pub(crate) fn rr3_pcm_bytes_to_samples(bytes: &[u8]) -> Vec<i16> {
     bytes
-        .chunks_exact(2)
-        .map(|p| i16::from_le_bytes([p[0], p[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|p| i16::from_le_bytes(*p))
         .collect()
 }
 
@@ -314,7 +314,9 @@ mod tests {
 
         fn hex_decode(s: &str) -> Vec<u8> {
             s.as_bytes()
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
                 .collect()
         }

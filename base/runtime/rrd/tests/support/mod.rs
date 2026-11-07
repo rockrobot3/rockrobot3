@@ -128,9 +128,10 @@ rated_a = 1.0
 gnd_common = "star-1"
 "#;
 
-/// 造一份监听面夹具（`e2e_profile.rs` 的 Root 同一装机布局：`<root>/profiles/default.toml`
-/// + `<root>/hardware/default/wiring.toml` + `<root>/modules/rr3-listenstub/module.toml`
-///——rr3_wiring_path_for_profile 推导的同一棵树；名字取套接字 stem，pid 级唯一）。
+/// 造一份监听面夹具（`e2e_profile.rs` 的 Root 同一装机布局）：
+/// `<root>/profiles/default.toml`、`<root>/hardware/default/wiring.toml`、
+/// `<root>/modules/rr3-listenstub/module.toml`——rr3_wiring_path_for_profile 推导的
+/// 同一棵树；名字取套接字 stem，pid 级唯一）。
 /// **stub manifest 必须真实落盘**（P2 教训）：缺格模块的 manifest 也进装载第 7 步的
 /// 路径解析，少了就退化成另一条"读取失败"的失败路径，钉不住缺格跳过语义。
 /// 返回 (装配单路径, 夹具根)——根交给 `RrdTest.fixture_root`，Drop 清整树：断言 panic
@@ -918,7 +919,7 @@ pub fn rr3_read_state_task(
                 v["topic"] == "rr3-runtime/module/state"
                     && v["module"] == module
                     && v["phase"] == phase
-                    && task.map_or(true, |t| v["src_task"].as_u64() == Some(t))
+                    && task.is_none_or(|t| v["src_task"].as_u64() == Some(t))
             }
             _ => false,
         },

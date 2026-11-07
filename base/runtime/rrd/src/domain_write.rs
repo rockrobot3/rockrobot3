@@ -781,7 +781,9 @@ gnd_common = "star-1"
         }
 
         /// tmp 仓形状夹具：profiles/ + contracts/ 四册 + platform/ + hardware/axis/
-        /// + docs/evidence/。契约册用最小合法形状（装载链要读）；平台事实表取
+        /// + docs/evidence/。
+        ///
+        /// 契约册用最小合法形状（装载链要读）；平台事实表取
         /// contracts/platform/rk3566.toml 的仓内真册（⑤-a/⑧-b 词表判据源）。
         fn fixture() -> Fixture {
             let n = SEQ.fetch_add(1, Ordering::Relaxed);

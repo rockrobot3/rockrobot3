@@ -120,7 +120,7 @@ fn battery_ok_clears_low_power_flag_and_names_the_recovery_once() {
     let powers: Vec<Value> = tail
         .iter()
         .filter(|f| rr3_json_of(f)["topic"] == "rr3-runtime/system/power")
-        .map(|f| rr3_json_of(f))
+        .map(rr3_json_of)
         .collect();
     assert!(
         powers.is_empty(),

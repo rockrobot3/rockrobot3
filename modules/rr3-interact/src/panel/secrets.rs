@@ -77,10 +77,6 @@ fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
 /// （批N4 件四 I-20：原 `truncate(true)` 原地覆盖无 tmp/无 fsync，掉电卡写中间
 /// ⇒ 凭据文件恒 Err 且写侧不能自愈——全案 §19.2 Y-2 判据 2"落盘原子序单点"），
 /// 父目录 0700（tmp 窗口的护城河），rename 后收 0600（敏感面铁律）。
-pub fn rr3_secrets_upsert(ref_name: &str, value: &str) -> Result<(), String> {
-    rr3_secrets_upsert_at(&rr3_secrets_path()?, ref_name, value)
-}
-
 pub fn rr3_secrets_upsert_at(path: &Path, ref_name: &str, value: &str) -> Result<(), String> {
     let ref_name = ref_name.trim();
     if ref_name.is_empty() {

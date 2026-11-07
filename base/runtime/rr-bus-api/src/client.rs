@@ -219,7 +219,7 @@ impl Rr3Inner {
     }
 
     fn rr3_next_id(&self) -> u64 {
-        self.next_id.fetch_add(1, Ordering::Relaxed) as u64 + 1
+        self.next_id.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// 计数增量（心跳线程每拍调用）：对每键算「当前累计 − 已发水位」，零增量键
@@ -247,7 +247,7 @@ impl Rr3Inner {
     }
 
     fn rr3_task(&self) -> u64 {
-        self.task.load(Ordering::Relaxed) as u64
+        self.task.load(Ordering::Relaxed)
     }
 }
 
