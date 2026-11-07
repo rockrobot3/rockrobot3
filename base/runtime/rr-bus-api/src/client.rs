@@ -54,6 +54,13 @@ const RR3_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// restart_policy 接管。
 const RR3_HEARTBEAT_MAX_MISSES: u32 = 3;
 
+/// 收件箱（非应答帧）队列上界（帧数，0.0.8b 审计 B-6）。有界化把"主循环停摆的
+/// 模块 OOM"折成"背压沿链上浮"：inbox 满 → reader 线程阻塞在 send → 不再读
+/// socket → 内核缓冲满 → rrd 侧 writer 写超时（5s）→ B-5 慢消费者断投 →
+/// supervisor 重启该模块。正常主循环每拍 `rr3_poll` 排空，256 帧对 125 帧/秒的
+/// 音频流是 ~2s 余量；最坏驻留 256×~11KB ≈ 2.8MB/模块，可承受。
+const RR3_INBOX_CAP: usize = 256;
+
 /// 从 manifest 文本里取模块身份（name + heartbeat_ms）。
 /// 只取客户端自己需要的两个字段：**校验是 rrd 的事**（rr-registry 的校验器 +
 /// conn.rs 的注册门禁），客户端不重复也不抢先——manifest 非法时注册会被 rrd
@@ -286,7 +293,7 @@ impl Rr3BusClient {
         let writer = stream
             .try_clone()
             .map_err(|e| format!("try_clone 失败: {e}"))?;
-        let (tx, rx) = mpsc::channel::<Rr3Frame>();
+        let (tx, rx) = mpsc::sync_channel::<Rr3Frame>(RR3_INBOX_CAP);
         let inner = Arc::new(Rr3Inner {
             task: AtomicCounter::new(0),
             name: identity.name,
@@ -583,7 +590,11 @@ impl Drop for Rr3BusClient {
 }
 
 /// reader 主循环：Response 按 id 投邮箱，其余进 inbox；连接死亡时唤醒所有等待者。
-fn rr3_reader_loop(sock: &mut UnixStream, inner: Arc<Rr3Inner>, inbox_tx: mpsc::Sender<Rr3Frame>) {
+fn rr3_reader_loop(
+    sock: &mut UnixStream,
+    inner: Arc<Rr3Inner>,
+    inbox_tx: mpsc::SyncSender<Rr3Frame>,
+) {
     // EOF / 超时 / 坏帧：统一按断开处理
     while let Ok(frame) = rr3_frame_read(&mut *sock) {
         if inner.stop.load(Ordering::Relaxed) {
