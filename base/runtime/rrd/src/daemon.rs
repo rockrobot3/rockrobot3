@@ -499,11 +499,16 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         }
     }
 
+    // accept 持续性错误（fd 表满等）的退避（0.0.8d 审计 B-10）：错误态下 accept 立即
+    // 返回，裸 continue = 一秒百万行日志 + CPU 自旋；200ms 界住速率，也给瞬时 fd
+    // 挤兑（退场进程释放）留泄压窗口。正常路径 accept 阻塞等连接，零开销。
+    const RR3_ACCEPT_ERR_BACKOFF: Duration = Duration::from_millis(200);
     loop {
         let stream = match listener.rr3_accept() {
             Ok(s) => s,
             Err(e) => {
                 rr3_log(&format!("accept 失败（继续服务）: {e}"));
+                thread::sleep(RR3_ACCEPT_ERR_BACKOFF);
                 continue;
             }
         };
