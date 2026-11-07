@@ -113,6 +113,7 @@ fn rr3_admin_token_check(body: &[u8]) -> bool {
 /// 面板 POST /api/relay 动作面先例。申报面进 check.sh ⑩ 扫描（批N13 件二
 /// 已把本表区段扩进扫描源），执法位＝未来板侧端点读五路字段而不申报即红
 /// （对拍判据 ⊆ 分母五路并集）。
+#[rustfmt::skip]
 pub(crate) const RR3_BOARD_ROUTES: &[(&str, &str, &[&str], &str)] = &[
     ("GET", "/", &[], ""),
     ("GET", "/api/board/state", &[], ""),
