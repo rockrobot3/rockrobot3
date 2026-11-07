@@ -1,0 +1,10 @@
+[[pin]]
+role = "act.axis.pwm"
+instance = "pan"
+controller = "pwm0"
+channel = 0
+physical = [12]
+direction = "out"
+rail = "rail5v"
+failsafe = "release"
+mux_group = []

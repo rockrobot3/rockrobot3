@@ -691,19 +691,7 @@ mod tests {
                         };
                         let payload =
                             rr3_body_encode(Rr3PayloadType::Response, reply.to_string().as_bytes());
-                        let out = Rr3Frame {
-                            header: Rr3Header {
-                                opcode: opcode::SEND,
-                                flags: 0,
-                                trace_id: 0,
-                                timestamp_ns: rr3_now_ns(),
-                                src_task: RR3_TASK_RRD,
-                                dst_task: 7,
-                                payload_len: payload.len() as u32,
-                                payload_crc32: rr_ipc::rr3_crc32(&payload),
-                            },
-                            payload,
-                        };
+                        let out = frame_send(payload);
                         if rr3_frame_write(&mut stream, &out).is_err() {
                             return;
                         }
@@ -717,19 +705,7 @@ mod tests {
                             .to_string()
                             .as_bytes(),
                     );
-                    let out = Rr3Frame {
-                        header: Rr3Header {
-                            opcode: opcode::SEND,
-                            flags: 0,
-                            trace_id: 0,
-                            timestamp_ns: rr3_now_ns(),
-                            src_task: RR3_TASK_RRD,
-                            dst_task: 7,
-                            payload_len: payload.len() as u32,
-                            payload_crc32: rr_ipc::rr3_crc32(&payload),
-                        },
-                        payload,
-                    };
+                    let out = frame_send(payload);
                     if rr3_frame_write(&mut stream, &out).is_err() {
                         return;
                     }
@@ -750,6 +726,23 @@ mod tests {
                 .subsec_nanos()
         ));
         p
+    }
+
+    /// 假 rrd 应答帧（三处同一构造）：SEND 头，时间戳与 CRC 按 payload 现算
+    fn frame_send(payload: Vec<u8>) -> Rr3Frame {
+        Rr3Frame {
+            header: Rr3Header {
+                opcode: opcode::SEND,
+                flags: 0,
+                trace_id: 0,
+                timestamp_ns: rr3_now_ns(),
+                src_task: RR3_TASK_RRD,
+                dst_task: 7,
+                payload_len: payload.len() as u32,
+                payload_crc32: rr_ipc::rr3_crc32(&payload),
+            },
+            payload,
+        }
     }
 
     fn connect_on(tag: &str, log: Arc<Mutex<Vec<(String, Value)>>>) -> (Rr3BusClient, PathBuf) {
@@ -955,19 +948,7 @@ mod tests {
                     .to_string()
                     .as_bytes(),
             );
-            let out = Rr3Frame {
-                header: Rr3Header {
-                    opcode: opcode::SEND,
-                    flags: 0,
-                    trace_id: 0,
-                    timestamp_ns: rr3_now_ns(),
-                    src_task: RR3_TASK_RRD,
-                    dst_task: 7,
-                    payload_len: payload.len() as u32,
-                    payload_crc32: rr_ipc::rr3_crc32(&payload),
-                },
-                payload,
-            };
+            let out = frame_send(payload);
             if rr3_frame_write(&mut stream, &out).is_err() {
                 return;
             }

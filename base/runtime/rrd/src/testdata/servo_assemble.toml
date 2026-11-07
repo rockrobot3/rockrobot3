@@ -1,0 +1,11 @@
+schema_version = 2
+
+[assemble]
+handles = [
+  { trait = "Rr3PwmServo", desc_key = "pwm_chip" },
+  { trait = "Rr3PwmServo", desc_key = "pwm_channel" },
+]
+ops = []
+demands = [
+  { rail = "rail5v", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },
+]

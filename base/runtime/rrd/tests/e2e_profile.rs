@@ -45,58 +45,15 @@ use support::*;
 /// 校验②只记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
 /// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。schema_version=5
 /// 起 [runtime] 必填（批N5 件二 F-30）——log_ring_cap 进场，P4 换小容量钉环判据。
-const GOOD: &str = r#"
-schema_version = 5
-
-[os]
-route = "distro"
-
-[runtime]
-log_ring_cap = 512
-hal_backend = "sim"
-
-[platform]
-tier = "host"
-chip = "rk3566"
-
-[supplies]
-watchdog_present = false
-watchdog_timeout_ms = 15000
-watchdog_feeder = "rrd"
-tick_period_ms = 200
-tick_jitter_ms = 100
-safety_core_interval_ms = 1000
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[supplies.budget]
-not_applicable = true
-
+const GOOD: &str = concat!(
+    include_str!("../src/testdata/profile_host_prefix.toml"),
+    r#"
 [slots]
 present = ["act.servo", "power.charger", "cognition.llm"]
 
-[bindings]
-"act.servo" = "rr3-pa"
-"power.charger" = "rr3-pb"
-"cognition.llm" = "rr3-pc"
-
-[enabled_slots]
-rr3-pa = ["act.servo"]
-rr3-pb = ["power.charger"]
-rr3-pc = ["cognition.llm"]
-"#;
+"#,
+    include_str!("../src/testdata/mod3_bindings_enabled.toml"),
+);
 
 /// 模块 manifest 模板：身份（name）来自目录名，entry 占位在落盘前替换为 sim_peer
 /// 构建产物的绝对路径（与 `rr3_fixture_manifest` 同一条"占位符永不上线"的纪律）。
@@ -124,20 +81,10 @@ heartbeat_ms = 200
 watchdog_timeout_ms = 1000
 "#;
 
-/// 接线档底稿（增补轮六 §4.3）：装载期校验⑦要求装机档必在——vcc/gnd-only
-/// 单线组（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
-const WIRING: &str = r#"
-[[wire]]
-connector = "J-T"
-hdr_pin = [1, 2]
-signal = ["vcc", "gnd"]
-net = "rail5v"
-feeds = []
-mate = "none"
-keyed = false
-rated_a = 1.0
-gnd_common = "star-1"
-"#;
+/// 接线档底稿单一真值（`src/testdata/wiring_bottom.toml`，support/e2e 各装机档与
+/// profile.rs 测试区同一底稿）：装载期校验⑦要求装机档必在——vcc/gnd-only 单线组
+///（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
+const WIRING: &str = include_str!("../src/testdata/wiring_bottom.toml");
 
 /// 装机布局夹具：`<root>/profiles/<机>.toml` + `<root>/modules/<名>/module.toml`。
 /// Drop 清整树——守卫口径与 `SimManifest` 同一条教训：断言 panic 后 /tmp 不许留残迹。

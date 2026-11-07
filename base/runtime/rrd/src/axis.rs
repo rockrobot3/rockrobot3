@@ -312,38 +312,12 @@ mod tests {
     use super::*;
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "rrd-axis-t-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .subsec_nanos()
-        ));
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        crate::test_fixtures::tmpdir_ns("rrd-axis-t-", tag)
     }
 
     /// §4.4 示例档（pan 轴）：全部判据走绿的正例基底
     fn sample_text() -> String {
-        [
-            "schema = 1",
-            "pin = \"act.axis.pwm.pan\"",
-            "center_deg = 90",
-            "lo_deg = 60",
-            "hi_deg = 120",
-            "dir_sign = 1",
-            "slew_deg_s = 100",
-            "settle_ms = 200",
-            "hold = \"release\"",
-            "current_ceil_ma = 750",
-            "warmup_ms = 0",
-            "hard_stop = \"unknown\"",
-            "calibrated = false",
-            "source = \"manual\"",
-        ]
-        .join("\n")
-            + "\n"
+        crate::test_fixtures::axis_sample_text(90, "unknown", false) + "\n"
     }
 
     fn sample_pin_ids() -> BTreeSet<String> {

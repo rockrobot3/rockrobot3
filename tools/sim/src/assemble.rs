@@ -29,8 +29,8 @@ use rrd::profile::rr3_profile_parse;
 
 use crate::brain::wait_socket_exists;
 use crate::drill::{
-    rr3_default_bins, rr3_find_repo_root, rr3_parse_status, rr3_require_bins_ext, rr3_section,
-    rr3_wait_modules, Rr3SimArgs,
+    rr3_default_bins, rr3_parse_status, rr3_require_bins_ext, rr3_section, rr3_wait_modules,
+    Rr3SimArgs,
 };
 
 /// 装配演练就绪上界：冷启动 + 六进程注册也要够用
@@ -189,13 +189,7 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .ok_or("内部错误：装配演练缺 --profile（main 路由保证）")?;
 
     // ---- 0. 定位：仓根与二进制 ----
-    let repo = match &a.repo {
-        Some(p) => p.clone(),
-        None => std::env::current_dir()
-            .ok()
-            .and_then(|cwd| rr3_find_repo_root(&cwd))
-            .ok_or("找不到仓根（缺 contracts/topics.toml）：请在仓内运行，或 --repo <路径>")?,
-    };
+    let repo = crate::drill::rr3_repo_locate(a)?;
     let (d_rrd, _peer, d_rrctl) = rr3_default_bins(&repo);
     let rrd = a.rrd.clone().unwrap_or(d_rrd);
     let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
@@ -338,9 +332,9 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
     }
 }
 
-/// 轮询用的 status 快照（与 main.rs run / brain.rs 的同名助手同一真值）：
+/// 轮询用的 status 快照（main.rs run / chain / brain 各演练共用同一真值）：
 /// 连接失败（rrd 尚未就绪）当空表处理，由 deadline 收口
-fn rr3_ctl_status_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)> {
+pub(crate) fn rr3_ctl_status_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)> {
     Command::new(rrctl)
         .arg("--bus-path")
         .arg(socket)
@@ -351,7 +345,7 @@ fn rr3_ctl_status_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)
 }
 
 /// 跑一次 rr3-ctl 子命令，stdout 原样带回（巡检报告素材）；意外失败即 Err
-fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, String> {
+pub(crate) fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, String> {
     let out = Command::new(rrctl)
         .arg("--bus-path")
         .arg(socket)
@@ -373,7 +367,11 @@ fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, String>
 }
 
 /// 预期会失败的那一类（ota）：把 (退出码, 合并输出) 带回来由调用方裁定
-fn rr3_ctl_maybe_fail(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, (i32, String)> {
+pub(crate) fn rr3_ctl_maybe_fail(
+    rrctl: &Path,
+    socket: &Path,
+    cmd: &str,
+) -> Result<String, (i32, String)> {
     let out = Command::new(rrctl)
         .arg("--bus-path")
         .arg(socket)
@@ -391,7 +389,7 @@ fn rr3_ctl_maybe_fail(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, 
 }
 
 /// 失败时带上 rrd.log 尾部（排查起点，不让人再跑一遍去找日志）
-fn rr3_with_log_tail(msg: &str, log_path: &Path) -> String {
+pub(crate) fn rr3_with_log_tail(msg: &str, log_path: &Path) -> String {
     let tail = std::fs::read_to_string(log_path)
         .map(|s| {
             let lines: Vec<&str> = s.lines().collect();

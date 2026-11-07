@@ -66,6 +66,24 @@ pub fn rr3_frame_to_bytes(f: &Rr3Frame) -> Result<Vec<u8>, Rr3FrameError> {
     Ok(out)
 }
 
+/// golden 纯头断言（wire / transport::frame 两处 golden 对账用例共用），带回解析出的
+/// 纯头续用：golden 是**无载荷**纯头（CRC 覆盖载荷，故其 CRC 字段本就为 0），
+/// 且与 golden 向量逐字节一致
+#[cfg(test)]
+pub(crate) fn rr3_golden_pure(g: &[u8]) -> Rr3Header {
+    let pure = Rr3Header::from_bytes(g).unwrap();
+    assert_eq!(
+        pure.payload_crc32, 0,
+        "golden 无载荷纯头的 CRC 字段必须为 0"
+    );
+    assert_eq!(
+        pure.to_bytes().to_vec(),
+        g,
+        "无载荷纯头与 golden 向量逐字节一致"
+    );
+    pure
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,17 +117,7 @@ mod tests {
     #[test]
     fn frame_header_is_byte_identical_to_golden() {
         let g = golden();
-        // golden 是**无载荷**纯头（CRC 覆盖载荷，故其 CRC 字段本就为 0）
-        let pure = Rr3Header::from_bytes(&g).unwrap();
-        assert_eq!(
-            pure.payload_crc32, 0,
-            "golden 无载荷纯头的 CRC 字段必须为 0"
-        );
-        assert_eq!(
-            pure.to_bytes().to_vec(),
-            g,
-            "无载荷纯头与 golden 向量逐字节一致"
-        );
+        let pure = rr3_golden_pure(&g);
 
         // 带载荷的真帧：头里的 CRC 由载荷算出（非零），且接收侧校验必过；
         // 除 CRC 字段外，其余头字节仍与 golden 逐字节一致

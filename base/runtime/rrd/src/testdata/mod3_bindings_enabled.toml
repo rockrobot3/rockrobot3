@@ -1,0 +1,9 @@
+[bindings]
+"act.servo" = "rr3-pa"
+"power.charger" = "rr3-pb"
+"cognition.llm" = "rr3-pc"
+
+[enabled_slots]
+rr3-pa = ["act.servo"]
+rr3-pb = ["power.charger"]
+rr3-pc = ["cognition.llm"]

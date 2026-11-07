@@ -661,45 +661,10 @@ mod tests {
 
         /// 装配单最小夹具（profile.rs GOOD 锚同族缩减：一域 + 一舵机轴 pin +
         /// budget/slots 段全显式）——装载链预核要全链过，段缺即红。
-        const PROFILE: &str = r#"
-schema_version = 5
-
-[os]
-route = "distro"
-
-[runtime]
-log_ring_cap = 512
-hal_backend = "sim"
-
-[platform]
-tier = "host"
-chip = "rk3566"
-
-[supplies]
-watchdog_present = false
-watchdog_timeout_ms = 15000
-watchdog_feeder = "rrd"
-tick_period_ms = 200
-tick_jitter_ms = 100
-safety_core_interval_ms = 1000
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[supplies.budget]
-not_applicable = true
-
+        /// 文本 = 数据夹具单一真值（src/testdata/）+ 本夹具独有的 hardware/对账尾段。
+        const PROFILE: &str = concat!(
+            include_str!("testdata/profile_host_prefix.toml"),
+            r#"
 [bindings]
 "act.servo" = "rr3-act"
 
@@ -707,17 +672,9 @@ not_applicable = true
 alsa_device = "default"
 link_ifname = "wlan0"
 
-[[pin]]
-role = "act.axis.pwm"
-instance = "pan"
-controller = "pwm0"
-channel = 0
-physical = [12]
-direction = "out"
-rail = "rail5v"
-failsafe = "release"
-mux_group = []
-
+"#,
+            include_str!("testdata/pin_servo_pan.toml"),
+            r#"
 [[pin]]
 role = "power.charger.meter"
 controller = "i2c1"
@@ -731,39 +688,20 @@ rr3-act = ["act.servo", "power.charger"]
 
 [slots]
 present = ["act.servo", "power.charger"]
-"#;
+"#,
+        );
 
-        /// 接线档夹具（§4.3 九字段，profile.rs 测试区 GOOD_WIRING 同形状）：单线组只挂
-        /// vcc/gnd（对 [[pin]] 增删免疫——⑦-a 不点名 pin_id），net=rail5v 在夹具域在册
-        /// （⑦-b）。不复制真仓 default/wiring.toml——它引 batt/rail3v3 域与真机 pin 集，
-        /// 与最小装配单必然失配，写口预核红例必须由真实判据产生、不由夹具失配产生。
-        const WIRING: &str = r#"
-[[wire]]
-connector = "J-T"
-hdr_pin = [1, 2]
-signal = ["vcc", "gnd"]
-net = "rail5v"
-feeds = []
-mate = "none"
-keyed = false
-rated_a = 1.0
-gnd_common = "star-1"
-"#;
+        /// 接线档夹具（§4.3 九字段，profile.rs 测试区 GOOD_WIRING 同形状）：单一真值
+        /// `src/testdata/wiring_bottom.toml`。单线组只挂 vcc/gnd（对 [[pin]] 增删
+        /// 免疫——⑦-a 不点名 pin_id），net=rail5v 在夹具域在册（⑦-b）。不复制真仓
+        /// default/wiring.toml——它引 batt/rail3v3 域与真机 pin 集，与最小装配单必然
+        /// 失配，写口预核红例必须由真实判据产生、不由夹具失配产生。
+        const WIRING: &str = include_str!("testdata/wiring_bottom.toml");
 
         /// rr3-act 的 servo 件装配清单（profile.rs 测试区 stage_servo_module 同形状）：
         /// 装载链门 c 对 kind=power 挂轨角色执法⑨ 覆盖判据——无 stage 件则一切
         /// "合法过写"用例被 ⑨ 误红（写口预核要全链过，夹具必须供件申报面）。
-        const ASSEMBLE: &str = concat!(
-        "schema_version = 2\n\n[assemble]\n",
-        "handles = [\n",
-        "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n",
-        "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_channel\" },\n",
-        "]\n",
-        "ops = []\n",
-        "demands = [\n",
-        "  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n",
-        "]\n",
-    );
+        const ASSEMBLE: &str = include_str!("testdata/servo_assemble.toml");
 
         struct Fixture {
             dir: PathBuf,

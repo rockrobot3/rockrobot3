@@ -12,6 +12,15 @@ use serde_json::json;
 use std::time::Duration;
 use support::*;
 
+/// 夹具注册（两处同款）：sima 以 always/100/500 上册并消费注册回执
+fn register_sima(c: &mut RrdClient) {
+    rr3_send(
+        c,
+        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
+    );
+    rr3_read_rpc(c);
+}
+
 /// 两个模块各拿一个不同 task，且互相看得见对方上线
 #[test]
 fn two_peers_get_distinct_tasks_and_online_broadcast() {
@@ -400,11 +409,7 @@ fn upstream_dst_must_be_rrd() {
 fn replies_are_point_to_point() {
     let rrd = RrdTest::rr3_start("ptp");
     let mut a = rrd.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(&mut a);
+    register_sima(&mut a);
 
     rr3_send(&mut a, &rr3_rpc_frame("rr3.heartbeat", 11, json!({}), 2));
     let hb = rr3_read_rpc_frame(&mut a);
@@ -427,11 +432,7 @@ fn replies_are_point_to_point() {
 fn legal_publish_is_forwarded_to_other_peers() {
     let mut rrd = RrdTest::rr3_start("pub-ok");
     let (mut a, mut b) = (rrd.rr3_connect(), rrd.rr3_connect());
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(&mut a);
+    register_sima(&mut a);
     rr3_send(
         &mut b,
         &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),
@@ -490,11 +491,7 @@ fn legal_publish_is_forwarded_to_other_peers() {
 fn foreign_prefix_publish_is_eperm_and_counted() {
     let mut rrd = RrdTest::rr3_start("pub-foreign");
     let mut a = rrd.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(&mut a);
+    register_sima(&mut a);
 
     for topic in ["rr3-simb/pong/state", "rr3-simb/pong/typo"] {
         rr3_send(
@@ -565,11 +562,7 @@ fn impersonating_runtime_namespace_is_refused() {
 fn unregistered_topic_is_einval() {
     let rrd = RrdTest::rr3_start("pub-unknown");
     let mut a = rrd.rr3_connect();
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(&mut a);
+    register_sima(&mut a);
 
     rr3_send(
         &mut a,
@@ -599,11 +592,7 @@ fn overlay_is_not_a_production_pass() {
     let rrd = RrdTest::rr3_start_no_overlay("pub-noov");
     let mut a = rrd.rr3_connect();
     // 夹具 manifest 里没有 publishes，校验只对契约负责 → 注册本身合法
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(&mut a);
+    register_sima(&mut a);
 
     rr3_send(
         &mut a,
@@ -693,11 +682,7 @@ fn event_without_topic_key_replies_error_and_keeps_connection() {
 fn forwarded_events_are_read_by_content_not_arrival_order() {
     let rrd = RrdTest::rr3_start("pub-order");
     let (mut a, mut b) = (rrd.rr3_connect(), rrd.rr3_connect());
-    rr3_send(
-        &mut a,
-        &rr3_register_frame(&rr3_manifest("rr3-sima", 100, 500, "always"), "rr3-sima"),
-    );
-    rr3_read_rpc(&mut a);
+    register_sima(&mut a);
     rr3_send(
         &mut b,
         &rr3_register_frame(&rr3_manifest("rr3-simb", 100, 500, "always"), "rr3-simb"),

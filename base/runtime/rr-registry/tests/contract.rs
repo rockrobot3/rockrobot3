@@ -855,6 +855,208 @@ fn str_list(v: &toml::Value, path: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// [supplies] 表在册 + 六个安全供给键逐一在册（default/distro 装配单共用），带回表续用
+fn supplies_keys(v: &toml::Value) -> &toml::Table {
+    let supplies = v
+        .get("supplies")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies]");
+    for k in [
+        "watchdog_present",
+        "watchdog_timeout_ms",
+        "watchdog_feeder",
+        "tick_period_ms",
+        "tick_jitter_ms",
+        "safety_core_interval_ms",
+    ] {
+        assert!(supplies.contains_key(k), "缺 [supplies].{k}");
+    }
+    supplies
+}
+
+/// [supplies.budget]（校验⑩ 分母，批N2）全段 pin（host 机装配单共用）：
+/// not_applicable 显式 true，数字预算键不得并存
+fn pin_budget(supplies: &toml::Table, what: &str) {
+    let budget = supplies
+        .get("budget")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [supplies.budget]（校验⑩ 分母，批N2）");
+    assert_eq!(
+        budget.get("not_applicable").and_then(toml::Value::as_bool),
+        Some(true),
+        "{what} 档 budget 合法不适用必须显式 true"
+    );
+    for num_key in [
+        "task_stack_budget_bytes",
+        "heap_total_bytes",
+        "heap_reserved_bytes",
+    ] {
+        assert!(
+            budget.get(num_key).is_none(),
+            "host 档 not_applicable = true 与数字预算键 {num_key} 并存（自相矛盾）"
+        );
+    }
+}
+
+/// [enabled_slots] 对账（default/distro 装配单共用）：覆盖模块集合 == modules/ 在册，
+/// 每模块格位集合 == manifest provides（normal 格），引用格位全部在表
+fn enabled_slots_check(
+    v: &toml::Value,
+    manifests: &std::collections::BTreeMap<String, toml::Value>,
+    table: &rr_registry::Rr3SlotTable,
+) {
+    let enabled_slots = v
+        .get("enabled_slots")
+        .and_then(toml::Value::as_table)
+        .expect("缺 [enabled_slots]");
+    let mut face_modules: Vec<&String> = enabled_slots.keys().collect();
+    face_modules.sort();
+    let mut manifest_modules: Vec<&String> = manifests.keys().collect();
+    manifest_modules.sort();
+    assert_eq!(
+        face_modules, manifest_modules,
+        "[enabled_slots] 覆盖的模块集合与 modules/ 漂移"
+    );
+    for (module, face) in enabled_slots {
+        let mut slots: Vec<String> = face
+            .as_array()
+            .expect("enabled_slots 值必须是数组")
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .map(String::from)
+            .collect();
+        slots.sort();
+        // manifest provides 可能含 placeholder/retired 格（模块"能提供"≠"装配单启用"），
+        // 装配面只启用 normal 格；此处对 caps 做同口径过滤再判等。
+        let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
+            .into_iter()
+            .filter(|c| {
+                let s = table.rr3_slot_status(c).unwrap_or_default();
+                s != "placeholder" && s != "retired"
+            })
+            .collect();
+        caps.sort();
+        assert_eq!(
+            slots, caps,
+            "{module} 的 [enabled_slots] 与 manifest provides（normal 格）漂移"
+        );
+        for s in &slots {
+            assert!(
+                table.rr3_slot_contains(s),
+                "[enabled_slots] 引用表外格位 {s}"
+            );
+        }
+    }
+}
+
+/// platform.chip 断言（同板多机型共用）：档位所配 chip 必须与平台表登记一致
+fn assert_chip(v: &toml::Value, chip: &str, what: &str) {
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("chip"))
+            .and_then(toml::Value::as_str),
+        Some(chip),
+        "{what} chip 漂移（平台表选 contracts/platform/{chip}.toml）"
+    );
+}
+
+/// platform.tier 钉值断言（七处 profile 同款）：消息各自点名机型档位
+fn assert_tier(v: &toml::Value, want: &str, msg: &str) {
+    assert_eq!(
+        v.get("platform")
+            .and_then(|p| p.get("tier"))
+            .and_then(toml::Value::as_str),
+        Some(want),
+        "{msg}"
+    );
+}
+
+/// S3 板侧十一键真值（esp32s3-mini 与 pi4b-host-esp32s3 两处装配单同源：
+/// 与 board/pins_s3.rs、main.rs 具名装配三方同值，漂移即红）
+fn s3_hardware_keys(hardware: &toml::Table, what: &str, why: &str) {
+    for (k, expected) in [
+        ("i2c_sda", "8"),
+        ("i2c_scl", "9"),
+        ("adc_rail_pin", "1"),
+        ("uart2_tx", "41"),
+        ("uart2_rx", "42"),
+        ("ledc_pan", "4"),
+        ("ledc_tilt", "5"),
+        ("i2s_bclk", "6"),
+        ("i2s_sd", "15"),
+        ("i2s_ws", "7"),
+        ("cred_store", "nvs:rr3"),
+    ] {
+        assert_eq!(
+            hardware.get(k).and_then(toml::Value::as_str),
+            Some(expected),
+            "{what} hardware.{k} 漂移（{why}）"
+        );
+    }
+}
+
+/// 生产格位全集：非 base 且非 placeholder/retired（[slots].present 对账与
+/// 未绑格位检查两处同款 filter 链，一份判据一份真值）
+fn normal_slots(table: &rr_registry::Rr3SlotTable) -> Vec<String> {
+    table
+        .rr3_slot_names()
+        .into_iter()
+        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
+        .filter(|n| {
+            let s = table.rr3_slot_status(n).unwrap_or_default();
+            s != "placeholder" && s != "retired"
+        })
+        .collect()
+}
+
+/// 装配单 [slots].present 的字符串集（缺段/缺键 expect 点名，不静默放空）
+fn present_of(v: &toml::Value) -> Vec<String> {
+    v.get("slots")
+        .and_then(|s| s.get("present"))
+        .and_then(toml::Value::as_array)
+        .expect("缺 [slots].present")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .map(String::from)
+        .collect()
+}
+
+/// [bindings] 逐项对账底座（default/distro 与 esp32-mini 两处装配单同款）：
+/// provider 字符串化 + 格位在册 + 非基础层 + provider 确实 provides 该格位，
+/// 返回 (格位, provider) 序列由调用方按各自形状对账
+fn bindings_walk<'a>(
+    bindings: &'a toml::Table,
+    table: &rr_registry::Rr3SlotTable,
+    manifests: &std::collections::BTreeMap<String, toml::Value>,
+) -> Vec<(&'a str, &'a str)> {
+    let mut bound = Vec::new();
+    for (slot, provider) in bindings {
+        let provider = provider
+            .as_str()
+            .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
+        assert!(
+            table.rr3_slot_contains(slot),
+            "bindings 引用表外格位 {slot}"
+        );
+        assert_ne!(
+            table.rr3_slot_layer(slot).unwrap(),
+            "base",
+            "基础层格位 {slot} 由基座内建承载，不得绑定模块"
+        );
+        let m = manifests
+            .get(provider)
+            .unwrap_or_else(|| panic!("bindings.{slot} 绑到不在册模块 {provider}"));
+        assert!(
+            str_list(m, "provides.capabilities")
+                .iter()
+                .any(|c| c == slot),
+            "{provider} 的 manifest 未 provides 被绑格位 {slot}"
+        );
+        bound.push((slot.as_str(), provider));
+    }
+    bound
+}
+
 /// 基础层 = base_capabilities 的表内化（ADR-0012 裁定 1）：
 /// 两份名单逐条钉死等价——第二份白名单不存在，仲裁与查册共用同一 base 真值。
 #[test]
@@ -1163,41 +1365,10 @@ fn default_profile_binds_module_slots_to_real_modules() {
         ["host", "rtos", "bare"].contains(&tier),
         "tier 越界: {tier}"
     );
-    let supplies = v
-        .get("supplies")
-        .and_then(toml::Value::as_table)
-        .expect("缺 [supplies]");
-    for k in [
-        "watchdog_present",
-        "watchdog_timeout_ms",
-        "watchdog_feeder",
-        "tick_period_ms",
-        "tick_jitter_ms",
-        "safety_core_interval_ms",
-    ] {
-        assert!(supplies.contains_key(k), "缺 [supplies].{k}");
-    }
+    let supplies = supplies_keys(&v);
     // [supplies.budget]（schema 4，批N2 校验⑩ 分母）：host 档合法不适用显式写 true
     //（F-6 不许留空），数字预算键不得并存（与 rrd parse 层分档自洽同口径）。
-    let budget = supplies
-        .get("budget")
-        .and_then(toml::Value::as_table)
-        .expect("缺 [supplies.budget]（校验⑩ 分母，批N2）");
-    assert_eq!(
-        budget.get("not_applicable").and_then(toml::Value::as_bool),
-        Some(true),
-        "host 档 budget 合法不适用必须显式 true"
-    );
-    for num_key in [
-        "task_stack_budget_bytes",
-        "heap_total_bytes",
-        "heap_reserved_bytes",
-    ] {
-        assert!(
-            budget.get(num_key).is_none(),
-            "host 档 not_applicable = true 与数字预算键 {num_key} 并存（自相矛盾）"
-        );
-    }
+    pin_budget(supplies, "host");
     assert_eq!(
         supplies
             .get("watchdog_present")
@@ -1214,15 +1385,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
         .filter_map(toml::Value::as_str)
         .map(String::from)
         .collect();
-    let mut expected_present: Vec<String> = table
-        .rr3_slot_names()
-        .into_iter()
-        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
-        .filter(|n| {
-            let s = table.rr3_slot_status(n).unwrap_or_default();
-            s != "placeholder" && s != "retired"
-        })
-        .collect();
+    let mut expected_present = normal_slots(&table);
     expected_present.sort();
     let mut present_sorted = present.clone();
     present_sorted.sort();
@@ -1251,43 +1414,16 @@ fn default_profile_binds_module_slots_to_real_modules() {
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("缺 [bindings]");
-    let mut bound: Vec<String> = Vec::new();
-    for (slot, provider) in bindings {
-        let provider = provider
-            .as_str()
-            .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
-        assert!(
-            table.rr3_slot_contains(slot),
-            "bindings 引用表外格位 {slot}"
-        );
-        let layer = table.rr3_slot_layer(slot).unwrap();
-        assert_ne!(
-            layer, "base",
-            "基础层格位 {slot} 由基座内建承载，不得绑定模块"
-        );
-        let m = manifests
-            .get(provider)
-            .unwrap_or_else(|| panic!("bindings.{slot} 绑到不在册模块 {provider}"));
-        assert!(
-            str_list(m, "provides.capabilities")
-                .iter()
-                .any(|c| c == slot),
-            "{provider} 的 manifest 未 provides 被绑格位 {slot}"
-        );
-        bound.push(slot.clone());
-    }
+    let mut bound: Vec<String> = bindings_walk(bindings, &table, &manifests)
+        .into_iter()
+        .map(|(s, _)| s.to_string())
+        .collect();
 
     // 全部 normal 格位恰好绑定一次（placeholder/retired 格不进生产装配面；配合 BTreeMap 键唯一即"不多不少"）
     bound.sort();
-    let mut unbound: Vec<String> = table
-        .rr3_slot_names()
+    let mut unbound: Vec<String> = normal_slots(&table)
         .into_iter()
-        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
-        .filter(|n| {
-            let s = table.rr3_slot_status(n).unwrap_or_default();
-            s != "placeholder" && s != "retired"
-        })
-        .filter(|n| !bound.iter().any(|b| b == n))
+        .filter(|n| !bound.contains(n))
         .collect();
     assert!(
         unbound.is_empty(),
@@ -1296,48 +1432,7 @@ fn default_profile_binds_module_slots_to_real_modules() {
     unbound.clear();
 
     // [enabled_slots]：模块 → 格位集合 == manifest provides 全集
-    let enabled_slots = v
-        .get("enabled_slots")
-        .and_then(toml::Value::as_table)
-        .expect("缺 [enabled_slots]");
-    let mut face_modules: Vec<&String> = enabled_slots.keys().collect();
-    face_modules.sort();
-    let mut manifest_modules: Vec<&String> = manifests.keys().collect();
-    manifest_modules.sort();
-    assert_eq!(
-        face_modules, manifest_modules,
-        "[enabled_slots] 覆盖的模块集合与 modules/ 漂移"
-    );
-    for (module, face) in enabled_slots {
-        let mut slots: Vec<String> = face
-            .as_array()
-            .expect("enabled_slots 值必须是数组")
-            .iter()
-            .filter_map(toml::Value::as_str)
-            .map(String::from)
-            .collect();
-        slots.sort();
-        // manifest provides 可能含 placeholder/retired 格（模块"能提供"≠"装配单启用"），
-        // 装配面只启用 normal 格；此处对 caps 做同口径过滤再判等。
-        let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
-            .into_iter()
-            .filter(|c| {
-                let s = table.rr3_slot_status(c).unwrap_or_default();
-                s != "placeholder" && s != "retired"
-            })
-            .collect();
-        caps.sort();
-        assert_eq!(
-            slots, caps,
-            "{module} 的 [enabled_slots] 与 manifest provides（normal 格）漂移"
-        );
-        for s in &slots {
-            assert!(
-                table.rr3_slot_contains(s),
-                "[enabled_slots] 引用表外格位 {s}"
-            );
-        }
-    }
+    enabled_slots_check(&v, &manifests, &table);
 }
 
 /// 门禁②（profile 侧）+ 0.0.2 T5 的 distro 装配单对账：快路机型的绑定面**恰好是
@@ -1380,66 +1475,13 @@ fn distro_profile_binds_exactly_the_body_layer() {
             .is_some_and(|n| n > 0),
         "distro 缺 [runtime].log_ring_cap 或非正整数（日志环容量，行数）"
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("tier"))
-            .and_then(toml::Value::as_str),
-        Some("host"),
-        "distro 机档位漂移"
-    );
-    let supplies = v
-        .get("supplies")
-        .and_then(toml::Value::as_table)
-        .expect("缺 [supplies]");
-    for k in [
-        "watchdog_present",
-        "watchdog_timeout_ms",
-        "watchdog_feeder",
-        "tick_period_ms",
-        "tick_jitter_ms",
-        "safety_core_interval_ms",
-    ] {
-        assert!(supplies.contains_key(k), "缺 [supplies].{k}");
-    }
+    assert_tier(&v, "host", "distro 机档位漂移");
+    let supplies = supplies_keys(&v);
     // [supplies.budget]（schema 4，批N2 校验⑩ 分母）：与 default 同板同值——host 档
     // 合法不适用显式写 true，数字预算键不得并存。
-    let budget = supplies
-        .get("budget")
-        .and_then(toml::Value::as_table)
-        .expect("缺 [supplies.budget]（校验⑩ 分母，批N2）");
-    assert_eq!(
-        budget.get("not_applicable").and_then(toml::Value::as_bool),
-        Some(true),
-        "distro 机 host 档 budget 合法不适用必须显式 true"
-    );
-    for num_key in [
-        "task_stack_budget_bytes",
-        "heap_total_bytes",
-        "heap_reserved_bytes",
-    ] {
-        assert!(
-            budget.get(num_key).is_none(),
-            "host 档 not_applicable = true 与数字预算键 {num_key} 并存（自相矛盾）"
-        );
-    }
-    let present: Vec<String> = v
-        .get("slots")
-        .and_then(|s| s.get("present"))
-        .and_then(toml::Value::as_array)
-        .expect("缺 [slots].present")
-        .iter()
-        .filter_map(toml::Value::as_str)
-        .map(String::from)
-        .collect();
-    let mut expected_present: Vec<String> = table
-        .rr3_slot_names()
-        .into_iter()
-        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
-        .filter(|n| {
-            let s = table.rr3_slot_status(n).unwrap_or_default();
-            s != "placeholder" && s != "retired"
-        })
-        .collect();
+    pin_budget(supplies, "distro 机 host");
+    let present = present_of(&v);
+    let mut expected_present = normal_slots(&table);
     expected_present.sort();
     let mut present_sorted = present;
     present_sorted.sort();
@@ -1491,14 +1533,8 @@ fn distro_profile_binds_exactly_the_body_layer() {
     // 未绑定的 normal 格位必须为空（placeholder/retired 格不进生产装配面；
     // 0.0.6 批F1：brain 随 deb 装机、cognition 四格绑定兑现——快路满配 = 身体层 +
     // 认知层 normal 格一格不缺。将来新增格位而 distro 不绑时，此钉强制显式重审）
-    let unbound: Vec<String> = table
-        .rr3_slot_names()
+    let unbound: Vec<String> = normal_slots(&table)
         .into_iter()
-        .filter(|n| table.rr3_slot_layer(n).as_deref() != Some("base"))
-        .filter(|n| {
-            let s = table.rr3_slot_status(n).unwrap_or_default();
-            s != "placeholder" && s != "retired"
-        })
         .filter(|n| !bindings.contains_key(n))
         .collect();
     assert!(
@@ -1507,48 +1543,7 @@ fn distro_profile_binds_exactly_the_body_layer() {
     );
 
     // enabled_slots 仍覆盖全部在册模块（含 brain——enabled_slots 决定起谁，brain 现在实际进 boot 队列），且与 provides 全集相等
-    let enabled_slots = v
-        .get("enabled_slots")
-        .and_then(toml::Value::as_table)
-        .expect("缺 [enabled_slots]");
-    let mut face_modules: Vec<&String> = enabled_slots.keys().collect();
-    face_modules.sort();
-    let mut manifest_modules: Vec<&String> = manifests.keys().collect();
-    manifest_modules.sort();
-    assert_eq!(
-        face_modules, manifest_modules,
-        "[enabled_slots] 覆盖的模块集合与 modules/ 漂移"
-    );
-    for (module, face) in enabled_slots {
-        let mut slots: Vec<String> = face
-            .as_array()
-            .expect("enabled_slots 值必须是数组")
-            .iter()
-            .filter_map(toml::Value::as_str)
-            .map(String::from)
-            .collect();
-        slots.sort();
-        // manifest provides 可能含 placeholder/retired 格（模块"能提供"≠"装配单启用"），
-        // 装配面只启用 normal 格；此处对 caps 做同口径过滤再判等。
-        let mut caps: Vec<String> = str_list(&manifests[module], "provides.capabilities")
-            .into_iter()
-            .filter(|c| {
-                let s = table.rr3_slot_status(c).unwrap_or_default();
-                s != "placeholder" && s != "retired"
-            })
-            .collect();
-        caps.sort();
-        assert_eq!(
-            slots, caps,
-            "{module} 的 [enabled_slots] 与 manifest provides（normal 格）漂移"
-        );
-        for s in &slots {
-            assert!(
-                table.rr3_slot_contains(s),
-                "[enabled_slots] 引用表外格位 {s}"
-            );
-        }
-    }
+    enabled_slots_check(&v, &manifests, &table);
 }
 
 /// F-B 桥接微型形态（0.0.5 批K R3-D6 / H4+C2）：`profiles/esp32-mini.toml` 第二形态
@@ -1583,13 +1578,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
             .is_some_and(|n| n > 0),
         "esp32-mini 缺 [runtime].log_ring_cap 或非正整数（日志环容量，行数）"
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("tier"))
-            .and_then(toml::Value::as_str),
-        Some("rtos"),
-        "esp32-mini 档位漂移（F-B = rtos 经桥档）"
-    );
+    assert_tier(&v, "rtos", "esp32-mini 档位漂移（F-B = rtos 经桥档）");
     // 板侧必须自己守住（模块设计索引 §10 F-B 行）：看门狗在板、由板侧运行环喂——
     // "经桥不等于把安全托付给网络"的硬判据落在装配单数据上
     let supplies = v
@@ -1681,31 +1670,9 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
         .get("bindings")
         .and_then(toml::Value::as_table)
         .expect("缺 [bindings]");
-    let mut bound: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
-    for (slot, provider) in bindings {
-        let provider = provider
-            .as_str()
-            .unwrap_or_else(|| panic!("bindings.{slot} 非字符串"));
-        assert!(
-            table.rr3_slot_contains(slot),
-            "bindings 引用表外格位 {slot}"
-        );
-        assert_ne!(
-            table.rr3_slot_layer(slot).unwrap(),
-            "base",
-            "基础层格位 {slot} 由基座内建承载，不得绑定模块"
-        );
-        let m = manifests
-            .get(provider)
-            .unwrap_or_else(|| panic!("bindings.{slot} 绑到不在册模块 {provider}"));
-        assert!(
-            str_list(m, "provides.capabilities")
-                .iter()
-                .any(|c| c == slot),
-            "{provider} 的 manifest 未 provides 被绑格位 {slot}"
-        );
-        bound.insert(slot.as_str(), provider);
-    }
+    let bound: std::collections::BTreeMap<&str, &str> = bindings_walk(bindings, &table, &manifests)
+        .into_iter()
+        .collect();
     assert_eq!(
         bound,
         std::collections::BTreeMap::from([
@@ -1762,15 +1729,7 @@ fn esp32_mini_profile_binds_bridged_minimal_shape() {
     }
 
     // [slots].present：恰为三格、升序（确定性）、全部在册非 base
-    let present: Vec<String> = v
-        .get("slots")
-        .and_then(|s| s.get("present"))
-        .and_then(toml::Value::as_array)
-        .expect("缺 [slots].present")
-        .iter()
-        .filter_map(toml::Value::as_str)
-        .map(String::from)
-        .collect();
+    let present = present_of(&v);
     assert_eq!(
         present,
         vec![
@@ -1827,13 +1786,7 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         Some(5),
         "esp32s3-mini schema_version 漂移"
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("tier"))
-            .and_then(toml::Value::as_str),
-        Some("rtos"),
-        "esp32s3-mini 档位漂移（F-B = rtos 经桥档）"
-    );
+    assert_tier(&v, "rtos", "esp32s3-mini 档位漂移（F-B = rtos 经桥档）");
     assert_eq!(
         v.get("platform")
             .and_then(|p| p.get("chip"))
@@ -1847,25 +1800,7 @@ fn esp32s3_mini_profile_pins_s3_harness() {
         .get("hardware")
         .and_then(toml::Value::as_table)
         .expect("esp32s3-mini 缺 [hardware] 段（板侧配置十一键真值点）");
-    for (k, expected) in [
-        ("i2c_sda", "8"),
-        ("i2c_scl", "9"),
-        ("adc_rail_pin", "1"),
-        ("uart2_tx", "41"),
-        ("uart2_rx", "42"),
-        ("ledc_pan", "4"),
-        ("ledc_tilt", "5"),
-        ("i2s_bclk", "6"),
-        ("i2s_sd", "15"),
-        ("i2s_ws", "7"),
-        ("cred_store", "nvs:rr3"),
-    ] {
-        assert_eq!(
-            hardware.get(k).and_then(toml::Value::as_str),
-            Some(expected),
-            "esp32s3-mini hardware.{k} 漂移（pins_s3.rs 同源）"
-        );
-    }
+    s3_hardware_keys(hardware, "esp32s3-mini", "pins_s3.rs 同源");
 
     // 形态面：三格绑定 + 三格在位，与 esp32-mini 同源同值。
     let bindings = v
@@ -1926,20 +1861,12 @@ fn pi4b_host_esp32_classic_profile_pins_t1_harness() {
         Some(5),
         "pi4b-host-esp32-classic schema_version 漂移"
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("tier"))
-            .and_then(toml::Value::as_str),
-        Some("host"),
-        "pi4b-host-esp32-classic 档位漂移（T1 = Pi 宿主档）"
+    assert_tier(
+        &v,
+        "host",
+        "pi4b-host-esp32-classic 档位漂移（T1 = Pi 宿主档）",
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("chip"))
-            .and_then(toml::Value::as_str),
-        Some("raspberry-pi-4"),
-        "pi4b-host-esp32-classic chip 漂移（平台表选 contracts/platform/raspberry-pi-4.toml）"
-    );
+    assert_chip(&v, "raspberry-pi-4", "pi4b-host-esp32-classic");
     assert_eq!(
         v.get("os")
             .and_then(|o| o.get("route"))
@@ -2059,13 +1986,7 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
         Some(5),
         "pi4b-host-esp32s3 schema_version 漂移"
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("tier"))
-            .and_then(toml::Value::as_str),
-        Some("host"),
-        "pi4b-host-esp32s3 档位漂移（T2 = Pi 宿主档）"
-    );
+    assert_tier(&v, "host", "pi4b-host-esp32s3 档位漂移（T2 = Pi 宿主档）");
     assert_eq!(
         v.get("platform")
             .and_then(|p| p.get("chip"))
@@ -2096,25 +2017,7 @@ fn pi4b_host_esp32s3_profile_pins_t2_harness() {
         "pi4b-host-esp32s3 link_ifname 漂移"
     );
     // 板侧十一键：S3 N16R8 真值（与 profiles/esp32s3-mini.toml 逐值对齐）。
-    for (k, expected) in [
-        ("i2c_sda", "8"),
-        ("i2c_scl", "9"),
-        ("adc_rail_pin", "1"),
-        ("uart2_tx", "41"),
-        ("uart2_rx", "42"),
-        ("ledc_pan", "4"),
-        ("ledc_tilt", "5"),
-        ("i2s_bclk", "6"),
-        ("i2s_sd", "15"),
-        ("i2s_ws", "7"),
-        ("cred_store", "nvs:rr3"),
-    ] {
-        assert_eq!(
-            hardware.get(k).and_then(toml::Value::as_str),
-            Some(expected),
-            "pi4b-host-esp32s3 hardware.{k} 漂移（应与 S3 线束同源）"
-        );
-    }
+    s3_hardware_keys(hardware, "pi4b-host-esp32s3", "应与 S3 线束同源");
 
     let bindings = v
         .get("bindings")
@@ -2161,13 +2064,7 @@ fn pi4b_host_profile_shape_n44_harness() {
         Some(5),
         "pi4b-host schema_version 漂移"
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("tier"))
-            .and_then(toml::Value::as_str),
-        Some("host"),
-        "pi4b-host 档位漂移（N44 = Pi 本机 host-only）"
-    );
+    assert_tier(&v, "host", "pi4b-host 档位漂移（N44 = Pi 本机 host-only）");
     assert_eq!(
         v.get("platform")
             .and_then(|p| p.get("chip"))
@@ -2290,20 +2187,12 @@ fn pi4b_board_profile_pins_w4_harness() {
         Some(5),
         "pi4b-board schema_version 漂移"
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("tier"))
-            .and_then(toml::Value::as_str),
-        Some("rtos"),
-        "pi4b-board 档位漂移（W4 只把 Pi 当板：rtos 薄板档，host 单轴描述符不能容纳双轴）"
+    assert_tier(
+        &v,
+        "rtos",
+        "pi4b-board 档位漂移（W4 只把 Pi 当板：rtos 薄板档，host 单轴描述符不能容纳双轴）",
     );
-    assert_eq!(
-        v.get("platform")
-            .and_then(|p| p.get("chip"))
-            .and_then(toml::Value::as_str),
-        Some("raspberry-pi-4"),
-        "pi4b-board chip 漂移（平台表选 contracts/platform/raspberry-pi-4.toml）"
-    );
+    assert_chip(&v, "raspberry-pi-4", "pi4b-board");
     assert_eq!(
         v.get("os")
             .and_then(|o| o.get("route"))

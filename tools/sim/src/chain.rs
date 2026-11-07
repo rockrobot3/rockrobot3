@@ -36,10 +36,11 @@ use rr_ipc::{
 };
 use serde_json::{json, Value};
 
-use crate::brain::{rr3_brain_cfg_text, wait_log_contains, wait_socket_exists};
+use crate::assemble::rr3_ctl_status_rows as rr3_ctl_rows;
+use crate::brain::{rr3_brain_cfg_text, rr3_teardown_procs, wait_log_contains, wait_socket_exists};
 use crate::drill::{
-    rr3_find_repo_root, rr3_manifest_ext, rr3_require_bins_ext, rr3_section, rr3_wait_modules,
-    Rr3SimArgs, RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN, RR3_SIM_PANEL_ADDR,
+    rr3_manifest_ext, rr3_require_bins_ext, rr3_section, rr3_wait_modules, Rr3SimArgs,
+    RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN, RR3_SIM_PANEL_ADDR,
 };
 
 /// 全链第四个真模块：执行器（sim 舵机/继电器面）
@@ -337,13 +338,7 @@ fn rr3_obs_frame(ty: Rr3PayloadType, body: &Value) -> Rr3Frame {
 
 pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     // ---- 0. 定位：仓根与五个二进制 ----
-    let repo = match &a.repo {
-        Some(p) => p.clone(),
-        None => std::env::current_dir()
-            .ok()
-            .and_then(|cwd| rr3_find_repo_root(&cwd))
-            .ok_or("找不到仓根（缺 contracts/topics.toml）：请在仓内运行，或 --repo <路径>")?,
-    };
+    let repo = crate::drill::rr3_repo_locate(a)?;
     let (d_rrd, _peer, d_rrctl) = crate::drill::rr3_default_bins(&repo);
     let rrd = a.rrd.clone().unwrap_or(d_rrd);
     let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
@@ -586,12 +581,8 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             Err(e) => Err(e),
         };
     }
-    for (name, mut child) in children {
-        let _ = child.kill();
-        let _ = child.wait();
-        let _ = name;
-    }
-    let _ = std::fs::remove_file(&socket);
+    // 收尾：杀全部子进程并删套接字（接演练结论）
+    rr3_teardown_procs(children, &socket);
     match outcome {
         Ok(()) => {
             report.push_str(rr3_section("演练结论（R9 档位逐项标注）").as_str());
@@ -603,17 +594,6 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         }
         Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
     }
-}
-
-/// 轮询用的 status 快照（连接失败当空表，由 deadline 收口；与既有演练同一真值）
-fn rr3_ctl_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)> {
-    Command::new(rrctl)
-        .arg("--bus-path")
-        .arg(socket)
-        .arg("status")
-        .output()
-        .map(|o| crate::drill::rr3_parse_status(&String::from_utf8_lossy(&o.stdout)))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

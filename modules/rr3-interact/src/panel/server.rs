@@ -923,6 +923,15 @@ fn rr3_bus_reply_status(result: &Value) -> (u16, &'static str) {
     }
 }
 
+/// ctl 应答里的判据对象数组（wiring/contracts 腿共用）：缺键或类型不对都当空表，
+/// 由空表腿与逐条转述兜底
+fn checks_of(v: &Value) -> Vec<Value> {
+    v.get("checks")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// 路由产物的执行面：状态码三元组在返回处一次定形。
 fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelReply {
     match rr3_panel_route(&req.method, &req.path, &req.body) {
@@ -1134,11 +1143,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                                 .unwrap_or(json!("ctl.wiring 应答缺 available:true（数据漂移）")),
                         }));
                     } else {
-                        let checks = v
-                            .get("checks")
-                            .and_then(Value::as_array)
-                            .cloned()
-                            .unwrap_or_default();
+                        let checks = checks_of(&v);
                         if checks.is_empty() {
                             legs.push(json!({
                                 "leg": "wiring/空", "pass": "n-a",
@@ -1183,11 +1188,7 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                             )),
                         }));
                     } else {
-                        let checks = v
-                            .get("checks")
-                            .and_then(Value::as_array)
-                            .cloned()
-                            .unwrap_or_default();
+                        let checks = checks_of(&v);
                         if checks.is_empty() {
                             legs.push(json!({
                                 "leg": "contracts/空", "pass": "fail",
@@ -1394,6 +1395,52 @@ fn rr3_fake_ctl_rrd(
 mod tests {
     use super::*;
     use rr_ipc::rr3_frame_read;
+
+    /// 面板测试底座（四处同款）：缺省限流/期望 + 无主循环 link 的共享面
+    fn panel_shared(
+        bus: BusHandle,
+        bus_path: String,
+        actions_tx: mpsc::Sender<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>,
+    ) -> Arc<Rr3PanelShared> {
+        Arc::new(Rr3PanelShared {
+            bus,
+            bus_path,
+            actions: actions_tx,
+            link: Arc::new(Mutex::new(None)),
+            limits: Rr3PanelLimits::default(),
+            selftest_face_expect: "happy",
+            selftest_expect: Rr3SelftestExpect::default(),
+        })
+    }
+
+    /// 单连接服务底座（三处同款）：一次 accept 交给真 handler，带回地址与线程句柄
+    fn panel_serve_once(
+        shared: Arc<Rr3PanelShared>,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = tcp.local_addr().unwrap();
+        let jh = std::thread::spawn(move || {
+            let (mut sock, _) = tcp.accept().unwrap();
+            rr3_panel_handle(&mut sock, &shared)
+        });
+        (addr, jh)
+    }
+
+    /// 自检 HTTP roundtrip 底座（两处同款）：POST /api/selftest 单请求，
+    /// 读全应答等线程收摊，解析出 JSON 体
+    fn selftest_roundtrip(addr: std::net::SocketAddr, jh: std::thread::JoinHandle<()>) -> Value {
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(b"POST /api/selftest HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+            .unwrap();
+        let _ = c.shutdown(std::net::Shutdown::Write);
+        let mut buf = Vec::new();
+        c.read_to_end(&mut buf).expect("自检应答必须完整可读");
+        jh.join().unwrap();
+        let text = String::from_utf8_lossy(&buf);
+        let body = text.split("\r\n\r\n").nth(1).expect("应答带 body");
+        serde_json::from_str(body).expect("自检应答是 JSON: {body}")
+    }
 
     /// BusCall 应答状态码裁定（I-21③）：载荷含 error = 422 业务失败，其余 200
     #[test]
@@ -1960,15 +2007,7 @@ mod tests {
         std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
 
         let (actions_tx, _rx) = mpsc::channel();
-        let shared = Arc::new(Rr3PanelShared {
-            bus,
-            bus_path: bus_path.to_string_lossy().into_owned(),
-            actions: actions_tx,
-            link: Arc::new(Mutex::new(None)),
-            limits: Rr3PanelLimits::default(),
-            selftest_face_expect: "happy",
-            selftest_expect: Rr3SelftestExpect::default(),
-        });
+        let shared = panel_shared(bus, bus_path.to_string_lossy().into_owned(), actions_tx);
 
         let live = Arc::new(AtomicUsize::new(0));
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2082,33 +2121,9 @@ mod tests {
 
         let (actions_tx, _rx) = mpsc::channel(); // 接收者即刻 drop（下行）：主循环不在
         drop(_rx); // 显式 drop 保 send 失败立即折 Err，不撞 5s 调用耐心
-        let shared = Arc::new(Rr3PanelShared {
-            bus,
-            bus_path: bus_path.to_string_lossy().into_owned(),
-            actions: actions_tx,
-            link: Arc::new(Mutex::new(None)),
-            limits: Rr3PanelLimits::default(),
-            selftest_face_expect: "happy",
-            selftest_expect: Rr3SelftestExpect::default(),
-        });
-        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = tcp.local_addr().unwrap();
-        let jh = std::thread::spawn(move || {
-            let (mut sock, _) = tcp.accept().unwrap();
-            rr3_panel_handle(&mut sock, &shared)
-        });
-
-        let mut c = TcpStream::connect(addr).unwrap();
-        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        c.write_all(b"POST /api/selftest HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
-            .unwrap();
-        let _ = c.shutdown(std::net::Shutdown::Write);
-        let mut buf = Vec::new();
-        c.read_to_end(&mut buf).expect("自检应答必须完整可读");
-        jh.join().unwrap();
-        let text = String::from_utf8_lossy(&buf);
-        let body = text.split("\r\n\r\n").nth(1).expect("应答带 body");
-        let v: Value = serde_json::from_str(body).expect("自检应答是 JSON: {body}");
+        let shared = panel_shared(bus, bus_path.to_string_lossy().into_owned(), actions_tx);
+        let (addr, jh) = panel_serve_once(shared);
+        let v = selftest_roundtrip(addr, jh);
 
         let legs = v["legs"].as_array().expect("逐腿数组");
         assert_eq!(legs.len(), 5, "并列五腿（三调＋wiring 腿＋contracts 腿）");
@@ -2188,33 +2203,9 @@ mod tests {
 
         let (actions_tx, _rx) = mpsc::channel();
         drop(_rx); // 接收者即刻 drop：speaker/face 走业务 Err
-        let shared = Arc::new(Rr3PanelShared {
-            bus,
-            bus_path: bus_path.to_string_lossy().into_owned(),
-            actions: actions_tx,
-            link: Arc::new(Mutex::new(None)),
-            limits: Rr3PanelLimits::default(),
-            selftest_face_expect: "happy",
-            selftest_expect: Rr3SelftestExpect::default(),
-        });
-        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = tcp.local_addr().unwrap();
-        let jh = std::thread::spawn(move || {
-            let (mut sock, _) = tcp.accept().unwrap();
-            rr3_panel_handle(&mut sock, &shared)
-        });
-
-        let mut c = TcpStream::connect(addr).unwrap();
-        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-        c.write_all(b"POST /api/selftest HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
-            .unwrap();
-        let _ = c.shutdown(std::net::Shutdown::Write);
-        let mut buf = Vec::new();
-        c.read_to_end(&mut buf).expect("自检应答必须完整可读");
-        jh.join().unwrap();
-        let text = String::from_utf8_lossy(&buf);
-        let body = text.split("\r\n\r\n").nth(1).expect("应答带 body");
-        let v: Value = serde_json::from_str(body).expect("自检应答是 JSON: {body}");
+        let shared = panel_shared(bus, bus_path.to_string_lossy().into_owned(), actions_tx);
+        let (addr, jh) = panel_serve_once(shared);
+        let v = selftest_roundtrip(addr, jh);
 
         let legs = v["legs"].as_array().expect("逐腿数组");
         assert_eq!(
@@ -2414,21 +2405,8 @@ mod tests {
         std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
 
         let (actions_tx, _rx) = mpsc::channel();
-        let shared = Arc::new(Rr3PanelShared {
-            bus,
-            bus_path: bus_path.to_string_lossy().into_owned(),
-            actions: actions_tx,
-            link: Arc::new(Mutex::new(None)),
-            limits: Rr3PanelLimits::default(),
-            selftest_face_expect: "happy",
-            selftest_expect: Rr3SelftestExpect::default(),
-        });
-        let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = tcp.local_addr().unwrap();
-        let jh = std::thread::spawn(move || {
-            let (mut sock, _) = tcp.accept().unwrap();
-            rr3_panel_handle(&mut sock, &shared)
-        });
+        let shared = panel_shared(bus, bus_path.to_string_lossy().into_owned(), actions_tx);
+        let (addr, jh) = panel_serve_once(shared);
 
         let mut c = TcpStream::connect(addr).unwrap();
         c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();

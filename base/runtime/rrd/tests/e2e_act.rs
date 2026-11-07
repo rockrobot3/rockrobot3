@@ -21,7 +21,6 @@
 
 mod support;
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use rr_bus::RR3_TASK_RRD;
@@ -51,45 +50,9 @@ fn rr3_ask_ctl(c: &mut RrdClient, method: &str, id: u64) -> serde_json::Value {
 /// 记 role_missing 非致命，boot 照常。schema_version=4 起 [supplies.budget]
 /// 必填（批N2 校验⑩ 分母）——host 档合法不适用显式写，boot 照常。
 /// schema_version=5 起 [runtime] 必填（批N5 件二 F-30）——log_ring_cap 进场。
-const PROFILE: &str = r#"
-schema_version = 5
-
-[os]
-route = "distro"
-
-[runtime]
-log_ring_cap = 512
-hal_backend = "sim"
-
-[platform]
-tier = "host"
-chip = "rk3566"
-
-[supplies]
-watchdog_present = false
-watchdog_timeout_ms = 15000
-watchdog_feeder = "rrd"
-tick_period_ms = 200
-tick_jitter_ms = 100
-safety_core_interval_ms = 1000
-
-[[supplies.domain]]
-name = "rail5v"
-nominal_mv = 5000
-mild_mv = 4600
-severe_mv = 4400
-current_cap_ma = 2000
-sense = "none"
-current_sense = "none"
-switch = "none"
-switchable = false
-armed = false
-evidence = "none"
-max_age_ms = 0
-
-[supplies.budget]
-not_applicable = true
-
+const PROFILE: &str = concat!(
+    include_str!("../src/testdata/profile_host_prefix.toml"),
+    r#"
 [slots]
 present = ["act.servo", "act.led", "act.relay"]
 
@@ -101,17 +64,9 @@ present = ["act.servo", "act.led", "act.relay"]
 [enabled_slots]
 rr3-act = ["act.servo", "act.led", "act.relay"]
 
-[[pin]]
-role = "act.axis.pwm"
-instance = "pan"
-controller = "pwm0"
-channel = 0
-physical = [12]
-direction = "out"
-rail = "rail5v"
-failsafe = "release"
-mux_group = []
-"#;
+"#,
+    include_str!("../src/testdata/pin_servo_pan.toml"),
+);
 
 /// 轴档案夹具（hardware/<形态>/axis/pan.toml，件二装载器落位；批N3 件三）：
 /// 已标定 + 挡块在册——执行轴状态投影 `calibrated=true,hard_stop=yes`，Auto 放行，
@@ -157,71 +112,14 @@ loop_hz = 1000
 saturate_notice_ms = 500
 "#;
 
-/// 接线档底稿（增补轮六 §4.3）：装载期校验⑦要求装机档必在——vcc/gnd-only
-/// 单线组（net=rail5v 在装配单域在册），对 [[pin]] 增删免疫。
-const WIRING: &str = r#"
-[[wire]]
-connector = "J-T"
-hdr_pin = [1, 2]
-signal = ["vcc", "gnd"]
-net = "rail5v"
-feeds = []
-mate = "none"
-keyed = false
-rated_a = 1.0
-gnd_common = "star-1"
-"#;
-
-/// 装机布局夹具（e2e_profile 同款）：Drop 清整树——断言 panic 后 /tmp 不许留残迹。
-struct Root {
-    dir: PathBuf,
-}
-
-impl Root {
-    fn new(tag: &str) -> Root {
-        let dir = std::env::temp_dir().join(format!("rr3-act-e2e-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir); // pid 复用留下的上次残根不许干扰本次
-        std::fs::create_dir_all(dir.join("profiles")).expect("建 profiles 目录");
-        Root { dir }
-    }
-
-    fn write_profile(&self, text: &str) -> PathBuf {
-        let p = self.dir.join("profiles").join("default.toml");
-        std::fs::write(&p, text).expect("写装配单");
-        // 同批 stage 接线档（hardware/<形态>/wiring.toml，rr3_wiring_path
-        // 推导的同一布局）：装载期校验⑦要求装机档必在
-        let w = self
-            .dir
-            .join("hardware")
-            .join("default")
-            .join("wiring.toml");
-        std::fs::create_dir_all(w.parent().unwrap()).expect("建 hardware 目录");
-        std::fs::write(&w, WIRING).expect("写接线档");
-        // 同批 stage 轴档案（hardware/<形态>/axis/pan.toml，件二装载器落位；批N3 件三
-        // 执行轴状态注入的正例基底——恰一份合法才投影，见 profile.rs rr3_axis_state_text）
-        let a = self
-            .dir
-            .join("hardware")
-            .join("default")
-            .join("axis")
-            .join("pan.toml");
-        std::fs::create_dir_all(a.parent().unwrap()).expect("建 axis 目录");
-        std::fs::write(&a, AXIS_PAN).expect("写轴档案");
-        p
-    }
-}
-
-impl Drop for Root {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
+/// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_power/e2e_connect 同款）；
+/// 轴档案的 stage 在用例体内紧跟 `rr3_write_profile` 落盘。
 
 #[test]
 fn act_module_full_face_end_to_end() {
     // ---------- 夹具：真二进制 + 真 manifest（entry 绝对化）+ config 同树 ----------
     let bin = rr3_build_module_bin("rr3-act");
-    let root = Root::new("act");
+    let root = E2eRoot::rr3_new("act", "act");
     let mod_dir = root.dir.join("modules").join("rr3-act");
     std::fs::create_dir_all(&mod_dir).expect("建模块目录");
     std::fs::write(
@@ -236,22 +134,21 @@ fn act_module_full_face_end_to_end() {
     // （五键 demands，与仓内 servo 件同形状）
     let asm = mod_dir.join("atoms/servo/assemble.toml");
     std::fs::create_dir_all(asm.parent().unwrap()).expect("建 atoms 目录");
-    std::fs::write(
-        &asm,
-        concat!(
-            "schema_version = 2\n\n[assemble]\n",
-            "handles = [\n",
-            "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_chip\" },\n",
-            "  { trait = \"Rr3PwmServo\", desc_key = \"pwm_channel\" },\n",
-            "]\n",
-            "ops = []\n",
-            "demands = [\n",
-            "  { rail = \"rail5v\", peak_ma = 700, sustained_ma = 120, critical = true, concurrency_group = [] },\n",
-            "]\n",
-        ),
-    )
-    .expect("stage servo assemble.toml");
-    let profile = root.write_profile(PROFILE);
+    // 件装配清单单一真值（src/testdata/servo_assemble.toml，与 profile.rs
+    // stage_servo_module / domain_write 测试区同一底稿）
+    std::fs::write(&asm, include_str!("../src/testdata/servo_assemble.toml"))
+        .expect("stage servo assemble.toml");
+    let profile = root.rr3_write_profile(PROFILE);
+    // 同批 stage 轴档案（hardware/<形态>/axis/pan.toml，件二装载器落位；批N3 件三）：
+    // 执行轴状态注入的正例基底——恰一份合法才投影，见 profile.rs rr3_axis_state_text
+    let a = root
+        .dir
+        .join("hardware")
+        .join("default")
+        .join("axis")
+        .join("pan.toml");
+    std::fs::create_dir_all(a.parent().unwrap()).expect("建 axis 目录");
+    std::fs::write(&a, AXIS_PAN).expect("写轴档案");
 
     // ---------- ① 装配单正门 boot：spawn 行回显真 entry → 注册 → running ----------
     // tick 必传小值（E2E_TICK_MS）：supervisor 扫尸节拍复用同一旋钮，安静 tick 会让
