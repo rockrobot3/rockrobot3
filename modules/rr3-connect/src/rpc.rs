@@ -24,7 +24,7 @@ pub(crate) fn rr3_handle_session(
     mode: &str,
     args: &Value,
 ) -> Result<Value, String> {
-    session::rr3_session_parse_args(args)?;
+    session::rr3_session_args(args)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
     let v = session::rr3_session_result(&st, mode)?;
     eprintln!("session: opened ssid={:?}", v["ssid"]);
@@ -33,44 +33,44 @@ pub(crate) fn rr3_handle_session(
 
 /// wifi/scan 点名：无参裁决 → sim 模拟列表（backend=sim 诚实标注）
 pub(crate) fn rr3_handle_wifi_scan(args: &Value) -> Result<Value, String> {
-    rr3_wifi_scan_parse_args(args)?;
+    rr3_wifi_scan_args(args)?;
     Ok(rr3_wifi_scan_result())
 }
 
 /// wifi/connect 点名：参数裁决（legacy 语义）→ **先过凭据存储后端**（失败即
 /// 折 error 应答、状态机不动，fail-closed）→ 存凭据转 station → connected
 /// 如实取链路读数回执。
-pub(crate) fn rr3_handle_wifi_connect(
+pub(crate) fn rr3_wifi_connect(
     dev: &dyn Rr3Link,
     store: &dyn Rr3WifiStore,
     prov: &mut wifi::Rr3Provision,
     args: &Value,
     min_pass_len: u64,
 ) -> Result<Value, String> {
-    let (ssid, pass) = rr3_wifi_connect_parse_args(args, min_pass_len)?;
+    let (ssid, pass) = rr3_wifi_conn_args(args, min_pass_len)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
     store
         .rr3_wifi_store_connect(&ssid, &pass)
         .map_err(|e| format!("凭据持久化失败: {e}"))?;
     prov.rr3_provision_connect(&ssid, &pass);
     eprintln!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
-    Ok(rr3_wifi_connect_result(&st, &ssid))
+    Ok(rr3_wifi_conn_result(&st, &ssid))
 }
 
 /// wifi/forget 点名：无参裁决 → **先真删后端配置**（失败折 error、状态机不动）
 /// → 清凭据回 ap（恢复出厂 WiFi ≠ M6 整机恢复出厂）
-pub(crate) fn rr3_handle_wifi_forget(
+pub(crate) fn rr3_wifi_forget(
     store: &dyn Rr3WifiStore,
     prov: &mut wifi::Rr3Provision,
     args: &Value,
 ) -> Result<Value, String> {
-    rr3_wifi_forget_parse_args(args)?;
+    rr3_wifi_forget_args(args)?;
     store
         .rr3_wifi_store_forget()
         .map_err(|e| format!("凭据删除失败: {e}"))?;
     prov.rr3_provision_forget();
     eprintln!("wifi: forget mode=ap（连接配置已真删）");
-    Ok(rr3_wifi_forget_result())
+    Ok(rr3_wifi_forget_res())
 }
 
 // ── 载荷组装与参数下钻面（0.0.5 批I N-7，ADR-0019 修订 4：json! 组装与 Value
@@ -99,7 +99,7 @@ pub fn rr3_link_body(seq: u64, st: &Rr3LinkState, mode: &str) -> Value {
 
 /// wifi/scan 点名参数裁决：无参动作，`null` 与空对象放行，多余字段点名拒。
 /// （自 wifi 原子件上移）
-pub fn rr3_wifi_scan_parse_args(args: &Value) -> Result<(), String> {
+pub fn rr3_wifi_scan_args(args: &Value) -> Result<(), String> {
     match args {
         Value::Null => Ok(()),
         Value::Object(m) if m.is_empty() => Ok(()),
@@ -127,10 +127,7 @@ pub fn rr3_wifi_scan_result() -> Value {
 /// 密码不短于下限，文案点名（"密码至少 8 位"是 legacy 原词，配网页依赖它——
 /// 下限数据化后文案数字随 [`Rr3LinkCfg::min_pass_len`] 走，缺省 8 时不漂移）。
 /// 字段名沿用 legacy 的 `pass`——面板表单同名透传，零翻译。（自 wifi 原子件上移）
-pub fn rr3_wifi_connect_parse_args(
-    args: &Value,
-    min_pass_len: u64,
-) -> Result<(String, String), String> {
+pub fn rr3_wifi_conn_args(args: &Value, min_pass_len: u64) -> Result<(String, String), String> {
     let ssid = args
         .get("ssid")
         .and_then(Value::as_str)
@@ -149,7 +146,7 @@ pub fn rr3_wifi_connect_parse_args(
 /// wifi/connect 结果：状态机已转 station；`connected` 如实取链路读数（sim 后端
 /// 由 env 定死，不 fake"连上了"）——legacy"等连后回真实结果"的等待语义由
 /// net/link 流承载，RPC 只回执状态机转移与当下读数。（自 wifi 原子件上移）
-pub fn rr3_wifi_connect_result(st: &Rr3LinkState, ssid: &str) -> Value {
+pub fn rr3_wifi_conn_result(st: &Rr3LinkState, ssid: &str) -> Value {
     json!({
         "ok": true,
         "connected": st.up,
@@ -159,7 +156,7 @@ pub fn rr3_wifi_connect_result(st: &Rr3LinkState, ssid: &str) -> Value {
 }
 
 /// wifi/forget 点名参数裁决：无参动作（同 scan）。（自 wifi 原子件上移）
-pub fn rr3_wifi_forget_parse_args(args: &Value) -> Result<(), String> {
+pub fn rr3_wifi_forget_args(args: &Value) -> Result<(), String> {
     match args {
         Value::Null => Ok(()),
         Value::Object(m) if m.is_empty() => Ok(()),
@@ -168,7 +165,7 @@ pub fn rr3_wifi_forget_parse_args(args: &Value) -> Result<(), String> {
 }
 
 /// wifi/forget 结果：清凭据回 ap，回执转移后的模式。（自 wifi 原子件上移）
-pub fn rr3_wifi_forget_result() -> Value {
+pub fn rr3_wifi_forget_res() -> Value {
     json!({ "ok": true, "mode": "ap" })
 }
 
@@ -178,7 +175,7 @@ pub fn rr3_wifi_forget_result() -> Value {
 /// 运行态）不在快照面——快照只答 config 注入的策略面，瞬态走 net/link 事件流。
 /// 签名随 0.0.8 批2 拆分适配两参（wifi_cfg/bt_up 自 Dispatcher 状态拆入），
 /// json! 体逐字不变。
-pub(crate) fn rr3_connect_ops_snapshot(wifi_cfg: &Rr3LinkCfg, bt_up: bool) -> Value {
+pub(crate) fn rr3_connect_ops(wifi_cfg: &Rr3LinkCfg, bt_up: bool) -> Value {
     json!({
         "bt": { "up": bt_up },
         "wifi": {
@@ -231,38 +228,32 @@ mod tests {
     #[test]
     fn wifi_connect_args_parse_legacy_semantics() {
         let (ssid, pass) =
-            rr3_wifi_connect_parse_args(&json!({"ssid": " home ", "pass": "password8"}), 8)
-                .unwrap();
+            rr3_wifi_conn_args(&json!({"ssid": " home ", "pass": "password8"}), 8).unwrap();
         assert_eq!(
             (ssid.as_str(), pass.as_str()),
             ("home", "password8"),
             "ssid 去首尾空白"
         );
         let (ssid, _) =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "12345678"}), 8).unwrap();
+            rr3_wifi_conn_args(&json!({"ssid": "home", "pass": "12345678"}), 8).unwrap();
         assert_eq!(ssid, "home", "恰好 8 位放行（等号边界）");
-        let e = rr3_wifi_connect_parse_args(&json!({"pass": "password8"}), 8).unwrap_err();
+        let e = rr3_wifi_conn_args(&json!({"pass": "password8"}), 8).unwrap_err();
         assert!(e.contains("ssid"), "缺 ssid 点名: {e}");
-        let e = rr3_wifi_connect_parse_args(&json!({"ssid": "  ", "pass": "password8"}), 8)
-            .unwrap_err();
+        let e = rr3_wifi_conn_args(&json!({"ssid": "  ", "pass": "password8"}), 8).unwrap_err();
         assert!(e.contains("ssid"), "空 ssid 点名: {e}");
-        let e = rr3_wifi_connect_parse_args(&json!({"ssid": "home"}), 8).unwrap_err();
+        let e = rr3_wifi_conn_args(&json!({"ssid": "home"}), 8).unwrap_err();
         assert!(e.contains("8 位"), "缺 pass 点名: {e}");
-        let e =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "short"}), 8).unwrap_err();
+        let e = rr3_wifi_conn_args(&json!({"ssid": "home", "pass": "short"}), 8).unwrap_err();
         assert!(
             e.contains("密码至少 8 位"),
             "短密码点名（legacy 原词）: {e}"
         );
         // 现场放宽档：下限 6 时 7 位密码放行、6 位等号放行、文案数字跟值
-        let (ssid, _) =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "1234567"}), 6).unwrap();
+        let (ssid, _) = rr3_wifi_conn_args(&json!({"ssid": "home", "pass": "1234567"}), 6).unwrap();
         assert_eq!(ssid, "home", "放宽档 7 位放行");
-        let (ssid, _) =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "123456"}), 6).unwrap();
+        let (ssid, _) = rr3_wifi_conn_args(&json!({"ssid": "home", "pass": "123456"}), 6).unwrap();
         assert_eq!(ssid, "home", "放宽档等号 6 位放行");
-        let e =
-            rr3_wifi_connect_parse_args(&json!({"ssid": "home", "pass": "12345"}), 6).unwrap_err();
+        let e = rr3_wifi_conn_args(&json!({"ssid": "home", "pass": "12345"}), 6).unwrap_err();
         assert!(e.contains("密码至少 6 位"), "文案数字随下限走: {e}");
     }
 
@@ -270,14 +261,14 @@ mod tests {
     /// 元素三字段（legacy panel.c h_scan 形状）；forget 回执 ap。
     #[test]
     fn wifi_scan_and_forget_shapes() {
-        assert_eq!(rr3_wifi_scan_parse_args(&Value::Null), Ok(()));
-        assert_eq!(rr3_wifi_scan_parse_args(&json!({})), Ok(()));
+        assert_eq!(rr3_wifi_scan_args(&Value::Null), Ok(()));
+        assert_eq!(rr3_wifi_scan_args(&json!({})), Ok(()));
         assert!(
-            rr3_wifi_scan_parse_args(&json!({"n": 5})).is_err(),
+            rr3_wifi_scan_args(&json!({"n": 5})).is_err(),
             "多余字段点名拒"
         );
-        assert_eq!(rr3_wifi_forget_parse_args(&json!({})), Ok(()));
-        assert!(rr3_wifi_forget_parse_args(&json!({"x": 1})).is_err());
+        assert_eq!(rr3_wifi_forget_args(&json!({})), Ok(()));
+        assert!(rr3_wifi_forget_args(&json!({"x": 1})).is_err());
 
         let v = rr3_wifi_scan_result();
         assert_eq!(v["backend"], "sim", "sim 后端诚实标注");
@@ -288,19 +279,19 @@ mod tests {
             assert!(it.get("rssi").and_then(Value::as_i64).is_some());
             assert!(it.get("auth").and_then(Value::as_bool).is_some());
         }
-        assert_eq!(rr3_wifi_forget_result()["mode"], "ap");
+        assert_eq!(rr3_wifi_forget_res()["mode"], "ap");
     }
 
     /// wifi/connect 结果：connected 如实透传链路读数（不 fake"连上了"），
     /// mode 恒 station、ssid 回显。
     #[test]
     fn wifi_connect_result_reports_link_honestly() {
-        let v = rr3_wifi_connect_result(&st(true), "home");
+        let v = rr3_wifi_conn_result(&st(true), "home");
         assert_eq!(v["ok"], true);
         assert_eq!(v["connected"], true);
         assert_eq!(v["mode"], "station");
         assert_eq!(v["ssid"], "home");
-        let v = rr3_wifi_connect_result(&st(false), "home");
+        let v = rr3_wifi_conn_result(&st(false), "home");
         assert_eq!(v["connected"], false, "链路 down 时 connected 如实 false");
     }
 
@@ -315,7 +306,7 @@ mod tests {
         let store = rr_hal::provision_store::Rr3SimWifiStore::default();
         let mut prov = wifi::Rr3Provision::rr3_provision_new();
 
-        let v = rr3_handle_wifi_connect(
+        let v = rr3_wifi_connect(
             &dev,
             &store,
             &mut prov,
@@ -334,7 +325,7 @@ mod tests {
             "凭据已落后端"
         );
 
-        let v = rr3_handle_wifi_forget(&store, &mut prov, &json!({})).unwrap();
+        let v = rr3_wifi_forget(&store, &mut prov, &json!({})).unwrap();
         assert_eq!(v["mode"], "ap");
         assert_eq!(prov.rr3_provision_mode(), "ap");
         assert!(
@@ -369,7 +360,7 @@ mod tests {
         let store = Rr3FailingStore;
         let mut prov = wifi::Rr3Provision::rr3_provision_new();
 
-        let e = rr3_handle_wifi_connect(
+        let e = rr3_wifi_connect(
             &dev,
             &store,
             &mut prov,
@@ -384,7 +375,7 @@ mod tests {
             "存储没成功，状态机不许转 station（fail-closed）"
         );
 
-        let e = rr3_handle_wifi_forget(&store, &mut prov, &json!({})).unwrap_err();
+        let e = rr3_wifi_forget(&store, &mut prov, &json!({})).unwrap_err();
         assert!(e.contains("凭据删除失败"), "删除失败点名: {e}");
     }
 }

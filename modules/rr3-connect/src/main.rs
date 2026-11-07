@@ -49,7 +49,7 @@ fn rr3_connect_run() -> Result<(), String> {
     // 路径段 RR3_CONNECT_CONFIG_ENV 覆盖 + manifest 同目录缺省归 load_config_text）
     let (bus, cfg) = bootstrap(Rr3ModConfig {
         config_env: Some(RR3_CONNECT_CONFIG_ENV),
-        parse_config: boot::rr3_connect_config_parse,
+        parse_config: boot::rr3_conn_cfg_parse,
     })?;
     eprintln!(
         "config 就绪: link report={}ms nmcli timeout={}ms",

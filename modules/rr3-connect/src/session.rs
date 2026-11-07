@@ -18,7 +18,7 @@ pub const SURFACE: &[&str] = &[
 ];
 
 /// session 点名参数裁决：只认 `action="open"`。缺参/类型错/未知值点名拒。
-pub fn rr3_session_parse_args(args: &Value) -> Result<(), String> {
+pub fn rr3_session_args(args: &Value) -> Result<(), String> {
     let action = args
         .get("action")
         .and_then(Value::as_str)
@@ -68,12 +68,12 @@ mod tests {
     /// result.error 的入参一半钉在这里。
     #[test]
     fn session_args_parse_open_only() {
-        assert_eq!(rr3_session_parse_args(&json!({"action": "open"})), Ok(()));
-        let e = rr3_session_parse_args(&json!({})).unwrap_err();
+        assert_eq!(rr3_session_args(&json!({"action": "open"})), Ok(()));
+        let e = rr3_session_args(&json!({})).unwrap_err();
         assert!(e.contains("action"), "缺参点名: {e}");
-        let e = rr3_session_parse_args(&json!({"action": 1})).unwrap_err();
+        let e = rr3_session_args(&json!({"action": 1})).unwrap_err();
         assert!(e.contains("action"), "类型错点名: {e}");
-        let e = rr3_session_parse_args(&json!({"action": "close"})).unwrap_err();
+        let e = rr3_session_args(&json!({"action": "close"})).unwrap_err();
         assert!(e.contains("close") && e.contains("open"), "未知值点名: {e}");
     }
 

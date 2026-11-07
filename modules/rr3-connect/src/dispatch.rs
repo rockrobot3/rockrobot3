@@ -88,7 +88,7 @@ impl Dispatcher for Rr3ConnectDispatcher {
                 rpc::rr3_handle_session(self.dev.as_ref(), self.prov.rr3_provision_mode(), args)
             }
             wifi::RR3_WIFI_SCAN_TOPIC => rpc::rr3_handle_wifi_scan(args),
-            wifi::RR3_WIFI_CONNECT_TOPIC => rpc::rr3_handle_wifi_connect(
+            wifi::RR3_WIFI_CONNECT_TOPIC => rpc::rr3_wifi_connect(
                 self.dev.as_ref(),
                 self.store.as_ref(),
                 &mut self.prov,
@@ -96,9 +96,9 @@ impl Dispatcher for Rr3ConnectDispatcher {
                 self.wifi_cfg.min_pass_len,
             ),
             wifi::RR3_WIFI_FORGET_TOPIC => {
-                rpc::rr3_handle_wifi_forget(self.store.as_ref(), &mut self.prov, args)
+                rpc::rr3_wifi_forget(self.store.as_ref(), &mut self.prov, args)
             }
-            RR3_OPS_LIST_TOPIC => Ok(rpc::rr3_connect_ops_snapshot(&self.wifi_cfg, self.bt_up)),
+            RR3_OPS_LIST_TOPIC => Ok(rpc::rr3_connect_ops(&self.wifi_cfg, self.bt_up)),
             other => Err(format!(
                 "rr3-connect 只 exposes {} 与 wifi/scan|connect|forget|ops/list，收到 {other}",
                 session::RR3_SESSION_TOPIC

@@ -37,7 +37,7 @@ pub(crate) fn rr3_connect_probe(
 
 /// HAL 配网凭据存储选择 + 在册查询编排（MC-6：凭据由后端承载持久化——linux =
 /// NetworkManager 连接配置）：构造不触设备，首次调用才起 nmcli。开机查在册——
-/// 在册则经 `rr3_provision_restored` 直接起 station（重启仍在册），失败即致命
+/// 在册则经 `rr3_prov_restored` 直接起 station（重启仍在册），失败即致命
 /// （fail-closed，不静默当"没配过网"）。「配网面就绪」回显归本编排。返回二元
 /// ——凭据存储（on_rpc connect/forget 运行期需要）与配网状态机初值。
 pub(crate) fn rr3_connect_provision(
@@ -51,7 +51,7 @@ pub(crate) fn rr3_connect_provision(
         Some(ssid) => {
             let ssid = ssid.rr3_ssid_text_as_str();
             eprintln!("配网面就绪: {store_backend} 在册 ssid={ssid:?}（重启恢复 station）");
-            Rr3Provision::rr3_provision_restored(ssid)
+            Rr3Provision::rr3_prov_restored(ssid)
         }
         None => {
             eprintln!("配网面就绪: {store_backend} 无在册凭据（出厂 ap）");
@@ -65,7 +65,7 @@ pub(crate) fn rr3_connect_provision(
 /// 个位数，点名缺字段的文案比派生宏的默认报错可读（rr3-act/rr3-power 同款）。
 /// 0.0.5 批I N-6：无读者的 roam_probe_enabled / tls_min_version / 总段 log_level
 /// 删除；N-2：timeout_ms 迁 wifi 段，生效点 = nmcli 子进程超时。
-pub(crate) fn rr3_connect_config_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
+pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
     let sect = |name: &str| -> Result<&toml::Value, String> {
         v.get("rr3-connect")
@@ -128,7 +128,7 @@ min_pass_len = 8
 [rr3-connect.bt]
 up = false
 "#;
-        let (wifi, bt_up) = rr3_connect_config_parse(text).unwrap();
+        let (wifi, bt_up) = rr3_conn_cfg_parse(text).unwrap();
         assert_eq!(wifi.link_report_period_ms, 5000);
         assert_eq!(wifi.timeout_ms, 20000);
         assert_eq!(wifi.min_pass_len, 8);
@@ -141,12 +141,12 @@ up = false
     #[test]
     fn config_min_pass_len_defaults_to_legacy_eight() {
         let base = "[rr3-connect.wifi]\nlink_report_period_ms = 5000\ntimeout_ms = 20000\n";
-        assert_eq!(rr3_connect_config_parse(base).unwrap().0.min_pass_len, 8);
+        assert_eq!(rr3_conn_cfg_parse(base).unwrap().0.min_pass_len, 8);
         let text = format!("{base}min_pass_len = 6\n");
-        assert_eq!(rr3_connect_config_parse(&text).unwrap().0.min_pass_len, 6);
+        assert_eq!(rr3_conn_cfg_parse(&text).unwrap().0.min_pass_len, 6);
         let text = format!("{base}min_pass_len = 0\n");
         assert_eq!(
-            rr3_connect_config_parse(&text).unwrap().0.min_pass_len,
+            rr3_conn_cfg_parse(&text).unwrap().0.min_pass_len,
             1,
             "显式 0 按 1 拒放（无下限不是合法配置）"
         );
@@ -154,12 +154,12 @@ up = false
 
     #[test]
     fn config_parse_rejects_missing_sections_and_fields() {
-        let e = rr3_connect_config_parse("[rr3-connect]\n").unwrap_err();
+        let e = rr3_conn_cfg_parse("[rr3-connect]\n").unwrap_err();
         assert!(e.contains("[rr3-connect.wifi]"), "缺段点名: {e}");
-        let e = rr3_connect_config_parse("[rr3-connect.wifi]\nlink_report_period_ms = 5000\n")
-            .unwrap_err();
+        let e =
+            rr3_conn_cfg_parse("[rr3-connect.wifi]\nlink_report_period_ms = 5000\n").unwrap_err();
         assert!(e.contains("timeout_ms"), "缺字段点名: {e}");
-        let e = rr3_connect_config_parse("garbage =\n").unwrap_err();
+        let e = rr3_conn_cfg_parse("garbage =\n").unwrap_err();
         assert!(e.contains("TOML"), "坏文本点名: {e}");
     }
 
@@ -169,13 +169,13 @@ up = false
     fn config_bt_up_defaults_false_and_type_checks() {
         let base = "[rr3-connect.wifi]\nlink_report_period_ms = 5000\ntimeout_ms = 20000\n";
         // 缺段回落 false
-        assert!(!rr3_connect_config_parse(base).unwrap().1);
+        assert!(!rr3_conn_cfg_parse(base).unwrap().1);
         // up=true 生效
         let text = format!("{base}[rr3-connect.bt]\nup = true\n");
-        assert!(rr3_connect_config_parse(&text).unwrap().1);
+        assert!(rr3_conn_cfg_parse(&text).unwrap().1);
         // 类型错点名
         let text = format!("{base}[rr3-connect.bt]\nup = \"yes\"\n");
-        let e = rr3_connect_config_parse(&text).unwrap_err();
+        let e = rr3_conn_cfg_parse(&text).unwrap_err();
         assert!(
             e.contains("[rr3-connect.bt]") && e.contains("up"),
             "类型错点名: {e}"
