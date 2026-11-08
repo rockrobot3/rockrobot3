@@ -120,107 +120,133 @@ pub fn rr3_cross_checks(
         .map(|w| (w.connector.as_str(), w))
         .collect();
     for w in &wiring.wires {
-        for (k, sig) in w.signal.iter().enumerate() {
-            let item = format!("signal:{}[{}]:{sig}", w.connector, k);
-            if sig == "vcc" || sig == "gnd" {
-                out.push(Rr3AssemblyCheck {
-                    item,
-                    pass: RR3_CHECK_NA,
-                    reason: "供电/地导体，非 pin 引用（校验⑦-a 豁免面）".to_string(),
-                });
-            } else if pin_ids.contains(sig) {
-                *refs.entry(sig.as_str()).or_insert(0) += 1;
-                out.push(Rr3AssemblyCheck {
-                    item,
-                    pass: RR3_CHECK_PASS,
-                    reason: "已解析到 [pins] 装载快照（校验⑦-a 复演）".to_string(),
-                });
-            } else {
-                out.push(Rr3AssemblyCheck {
-                    item,
-                    pass: RR3_CHECK_FAIL,
-                    reason: "signal 不在 [pins] pin_id 集（校验⑦-a 破——快照与装载面漂移）"
-                        .to_string(),
-                });
-            }
-        }
-        let item = format!("net:{}:{}", w.connector, w.net);
-        if w.net == "none" {
+        rr3_check_signal(w, &pin_ids, &mut refs, &mut out);
+        rr3_check_net(w, &domain_names, &mut out);
+        rr3_check_rated(w, peak_by_mate, &by_conn, &mut out);
+    }
+    rr3_check_pins(profile, &refs, &mut out);
+    out
+}
+
+/// signal 族（wiring→pins 方向，⑦-a 自检复演）：每导体一条，vcc/gnd 记 n-a
+fn rr3_check_signal<'a>(
+    w: &'a Rr3Wire,
+    pin_ids: &BTreeSet<String>,
+    refs: &mut BTreeMap<&'a str, usize>,
+    out: &mut Vec<Rr3AssemblyCheck>,
+) {
+    for (k, sig) in w.signal.iter().enumerate() {
+        let item = format!("signal:{}[{}]:{sig}", w.connector, k);
+        if sig == "vcc" || sig == "gnd" {
             out.push(Rr3AssemblyCheck {
                 item,
                 pass: RR3_CHECK_NA,
-                reason: "纯信号/地线组，不承载电力网络导体（校验⑦-b 豁免面）".to_string(),
+                reason: "供电/地导体，非 pin 引用（校验⑦-a 豁免面）".to_string(),
             });
-        } else if domain_names.contains(w.net.as_str()) {
+        } else if pin_ids.contains(sig) {
+            *refs.entry(sig.as_str()).or_insert(0) += 1;
             out.push(Rr3AssemblyCheck {
                 item,
                 pass: RR3_CHECK_PASS,
-                reason: "已在 [[supplies.domain]] 在册（校验⑦-b 复演）".to_string(),
+                reason: "已解析到 [pins] 装载快照（校验⑦-a 复演）".to_string(),
             });
         } else {
             out.push(Rr3AssemblyCheck {
                 item,
                 pass: RR3_CHECK_FAIL,
-                reason: "net 不在 domains（校验⑦-b 破——快照与装载面漂移）".to_string(),
+                reason: "signal 不在 [pins] pin_id 集（校验⑦-a 破——快照与装载面漂移）".to_string(),
             });
         }
-        // 额定加总族（校验⑦-c1·自检时点判——装载期 ⑦-c1 待建，先在自检点判，
-        // 同落点族先例）。判据 = §5 ⑦-c1 / F-10 修法（按 net 拓扑加总，不逐角色
-        // 判）：本线 + feeds 闭包（自反——本线对端器件的峰值是本线的主负载）各
-        // 线组按 mate 查器件峰值（mate = "none" 直连无注册对端型号，负载未注册
-        // 按 0 计——诚实边界），Σ peak_ma ≤ rated_a × 1000。裕量 = 1（F-10 峰值
-        // 直加口径；带裕量的装载期语义归其批，取值须数据承载、不入机制）。
-        // mate 非 none 必在器件 mate 集（装载期⑦-d 已判），查不到只会是契约坏形
-        // （rr3_dev_check 点名 peak_ma 缺失），按 0 计不隐藏也不炸。
-        let item = format!("rated:{}", w.connector);
-        if w.net == "none" {
-            out.push(Rr3AssemblyCheck {
-                item,
-                pass: RR3_CHECK_NA,
-                reason: "纯信号/地线组，不承载电力导体（校验⑦-c1 无判据面）".to_string(),
-            });
+    }
+}
+
+/// net 族（⑦-b 复演）：none 记 n-a，其余须在 domains 名集
+fn rr3_check_net(w: &Rr3Wire, domain_names: &BTreeSet<&str>, out: &mut Vec<Rr3AssemblyCheck>) {
+    let item = format!("net:{}:{}", w.connector, w.net);
+    if w.net == "none" {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_NA,
+            reason: "纯信号/地线组，不承载电力网络导体（校验⑦-b 豁免面）".to_string(),
+        });
+    } else if domain_names.contains(w.net.as_str()) {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_PASS,
+            reason: "已在 [[supplies.domain]] 在册（校验⑦-b 复演）".to_string(),
+        });
+    } else {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_FAIL,
+            reason: "net 不在 domains（校验⑦-b 破——快照与装载面漂移）".to_string(),
+        });
+    }
+}
+
+/// 额定加总族（⑦-c1·自检时点判）：本线 + feeds 闭包按 mate 查峰值加总 ≤ rated_a×1000
+fn rr3_check_rated<'a>(
+    w: &'a Rr3Wire,
+    peak_by_mate: &BTreeMap<String, i64>,
+    by_conn: &BTreeMap<&str, &'a Rr3Wire>,
+    out: &mut Vec<Rr3AssemblyCheck>,
+) {
+    let item = format!("rated:{}", w.connector);
+    if w.net == "none" {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_NA,
+            reason: "纯信号/地线组，不承载电力导体（校验⑦-c1 无判据面）".to_string(),
+        });
+        return;
+    }
+    // mate = none 直连无注册对端型号，负载未注册按 0 计（诚实边界）；mate 非 none
+    // 必在器件 mate 集（装载期⑦-d 已判），查不到只会是契约坏形，按 0 计不炸。
+    let peak = |g: &Rr3Wire| -> i64 {
+        if g.mate == "none" {
+            0
         } else {
-            let peak = |g: &Rr3Wire| -> i64 {
-                if g.mate == "none" {
-                    0
-                } else {
-                    peak_by_mate.get(g.mate.as_str()).copied().unwrap_or(0)
-                }
-            };
-            match rated_closure(w, &by_conn) {
-                Err(fault) => out.push(Rr3AssemblyCheck {
+            peak_by_mate.get(g.mate.as_str()).copied().unwrap_or(0)
+        }
+    };
+    match rated_closure(w, by_conn) {
+        Err(fault) => out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_FAIL,
+            reason: format!("feeds {fault}——额定加总不可判（快照与装载面漂移，正是自检要抓的）"),
+        }),
+        Ok(closure) => {
+            let sum_ma: i64 = closure.iter().map(|g| peak(g)).sum();
+            if sum_ma as f64 > w.rated_a * 1000.0 {
+                out.push(Rr3AssemblyCheck {
                     item,
                     pass: RR3_CHECK_FAIL,
                     reason: format!(
-                        "feeds {fault}——额定加总不可判（快照与装载面漂移，正是自检要抓的）"
+                        "馈线峰值加总 {sum_ma}mA > 本线额定 {}mA（校验⑦-c1 破——F-10：本线 + feeds 闭包 {} 组按拓扑加总，不逐角色判）",
+                        w.rated_a * 1000.0,
+                        closure.len()
                     ),
-                }),
-                Ok(closure) => {
-                    let sum_ma: i64 = closure.iter().map(|g| peak(g)).sum();
-                    if sum_ma as f64 > w.rated_a * 1000.0 {
-                        out.push(Rr3AssemblyCheck {
-                            item,
-                            pass: RR3_CHECK_FAIL,
-                            reason: format!(
-                                "馈线峰值加总 {sum_ma}mA > 本线额定 {}mA（校验⑦-c1 破——F-10：本线 + feeds 闭包 {} 组按拓扑加总，不逐角色判）",
-                                w.rated_a * 1000.0,
-                                closure.len()
-                            ),
-                        });
-                    } else {
-                        out.push(Rr3AssemblyCheck {
-                            item,
-                            pass: RR3_CHECK_PASS,
-                            reason: format!(
-                                "馈线峰值加总 {sum_ma}mA ≤ 本线额定 {}mA（校验⑦-c1 额定加总·自检时点判——F-10 拓扑加总；mate=none 直连负载未注册按 0 计）",
-                                w.rated_a * 1000.0
-                            ),
-                        });
-                    }
-                }
+                });
+            } else {
+                out.push(Rr3AssemblyCheck {
+                    item,
+                    pass: RR3_CHECK_PASS,
+                    reason: format!(
+                        "馈线峰值加总 {sum_ma}mA ≤ 本线额定 {}mA（校验⑦-c1 额定加总·自检时点判——F-10 拓扑加总；mate=none 直连负载未注册按 0 计）",
+                        w.rated_a * 1000.0
+                    ),
+                });
             }
         }
     }
+}
+
+/// 落点族（pins→wiring）：每 pin_id 数引用导体，≥1 pass、零引用 n-a（合法态）
+fn rr3_check_pins(
+    profile: &Rr3Profile,
+    refs: &BTreeMap<&str, usize>,
+    out: &mut Vec<Rr3AssemblyCheck>,
+) {
     for pin in &profile.pins {
         let id = pin.rr3_pin_id();
         let item = format!("pin:{id}");
@@ -238,7 +264,6 @@ pub fn rr3_cross_checks(
             }),
         }
     }
-    out
 }
 
 /// feeds 自反闭包（含起点——本线组对端器件的峰值是本线的主负载，F-10 的
