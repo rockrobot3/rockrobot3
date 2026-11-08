@@ -47,8 +47,8 @@ static ESP_APP_DESC: esp_bootloader_esp_idf::EspAppDesc =
 use esp_hal::{time::Duration, time::Instant, uart::UartTx, Blocking};
 
 use rr_ipc::{
-    opcode, rr3_body_encode, Rr3Header, Rr3PayloadType, RR3_CONTRACT_SCHEMA_VERSION,
-    RR3_IPC_HDR_SIZE,
+    opcode, rr3_body_encode, rr3_header_encode, Rr3Header, Rr3PayloadType,
+    RR3_CONTRACT_SCHEMA_VERSION, RR3_IPC_HDR_SIZE,
 };
 
 /// 夹具 payload 回发上限：先验头后分配，防 64 MiB 声明值吃穿 64 KiB 堆
@@ -135,6 +135,8 @@ fn golden_hdr() -> Rr3Header {
         src_task: 7,
         dst_task: 0,
         payload_len: 96,
+        // 纯头无载荷：CRC 覆盖载荷，故为 0（与 ipct003_dump 的 golden 行同值）
+        payload_crc32: 0,
     }
 }
 
@@ -148,9 +150,10 @@ fn frame_bytes(ty: Rr3PayloadType, body: &[u8]) -> alloc::vec::Vec<u8> {
         src_task: 7,
         dst_task: 0,
         payload_len: payload.len() as u32,
+        payload_crc32: 0, // 由 rr3_header_encode 按载荷算出覆盖
     };
     let mut out = alloc::vec::Vec::with_capacity(RR3_IPC_HDR_SIZE + payload.len());
-    out.extend_from_slice(&hdr.to_bytes());
+    out.extend_from_slice(&rr3_header_encode(&hdr, &payload));
     out.extend_from_slice(&payload);
     out
 }
