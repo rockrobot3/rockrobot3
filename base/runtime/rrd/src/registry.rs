@@ -285,7 +285,7 @@ pub struct RrdRegistry {
     /// 能力 → 提供者名字集合（ADR-0009 裁定 1/3）。**boot 仲裁的产物**：daemon 在
     /// 投 boot 队列前一次性写入（含被仲裁拒绝的模块——它们的 provides 仍计入
     /// 可满足性宇宙），运行期**不**重排（不做清单 2：动态重仲裁不做）。
-    /// 只含非 base 能力：base 内建能力不在表里即"永远在位"（`rr3_deps_all_satisfied`）。
+    /// 只含非 base 能力：base 内建能力不在表里即"永远在位"（`rr3_deps_satisfied`）。
     providers: BTreeMap<String, BTreeSet<String>>,
     /// 全局低电旗（0.0.2 方案 Q4 裁定的兜底动作面之一）。conn 转发
     /// `rr3-power/battery/low` 时置位（上升沿恰一次），supervisor 的唯一 spawn
@@ -591,7 +591,7 @@ impl RrdRegistry {
         topic: &str,
         topics: &Rr3TopicSet,
     ) -> Result<(), Rr3PublishDeny> {
-        if crate::topics_load::rr3_topics_is_reserved_topic(topic) {
+        if crate::topics_load::rr3_topics_reserved(topic) {
             return Err(Rr3PublishDeny::ReservedNamespace {
                 topic: topic.to_string(),
             });
@@ -839,7 +839,7 @@ impl RrdRegistry {
                     .get(&name)
                     .map(|e| e.facts.depends_required.clone())
                     .unwrap_or_default();
-                if self.rr3_deps_all_satisfied(&deps) {
+                if self.rr3_deps_satisfied(&deps) {
                     let e = self.modules.get_mut(&name).expect("刚读过、仍在册");
                     e.phase = Rr3Phase::Running;
                     out.push((name, e.src_task));
@@ -853,7 +853,7 @@ impl RrdRegistry {
     /// （永远在位）。走线上注册的模块若依赖 boot 全集之外的能力，这里同样按"在位"
     /// 处理——那是"运行期动态重仲裁不做"（ADR-0009 不做清单 2）的同一条边界：
     /// 可满足性宇宙只在 boot 时定一次，线上补注册的模块不做二次裁定（实施报告记录）。
-    fn rr3_deps_all_satisfied(&self, required: &[String]) -> bool {
+    fn rr3_deps_satisfied(&self, required: &[String]) -> bool {
         required.iter().all(|cap| match self.providers.get(cap) {
             None => true,
             Some(names) => names.iter().any(|n| {
