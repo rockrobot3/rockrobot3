@@ -28,7 +28,7 @@ mod support;
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rr_ipc::{rr3_body_split, Rr3PayloadType};
 use serde_json::json;
@@ -481,19 +481,38 @@ fn rrd_reboot_recovers_previous_run_lines_from_disk() {
         RrdTest::rr3_start_profile_env("prof-sink", &profile, E2E_TICK_MS, &[("RR3_PROBE", "sim")]);
     rrd2.rr3_wait_log("spawn rr3-pa pid=");
     let mut ctl = rrd2.rr3_connect();
-    rr3_send(&mut ctl, &rr3_rpc_frame("rr3.ctl.logs", 2, json!({}), 0));
-    let f = rr3_read_where(&mut ctl, "ctl.logs 应答", |fr| {
-        rr3_body_split(&fr.payload)
-            .map(|(ty, _)| ty == Rr3PayloadType::Response)
-            .unwrap_or(false)
-    });
-    let v = rr3_json_of(&f);
-    let joined: Vec<String> = v["result"]["lines"]
-        .as_array()
-        .expect("logs 应带 result.lines")
-        .iter()
-        .filter_map(|l| l.as_str().map(str::to_string))
-        .collect();
+    // 第二世的 spawn 行在 stdout 可见时刻未必已入环（`rr3_log` 的落盘 append 在
+    // stdout 与入环之间）。按环内位置等可观测信号：只有出现"位于第二世监听行之后"
+    // 的 spawn 行，才说明第二世行确实已入环——直接查询会偶发读到仅含回填块的旧环，
+    // 把第一世的 spawn 行误当比较基线。
+    let listen = format!("监听 {}", rrd2.socket.display());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut joined: Vec<String>;
+    loop {
+        rr3_send(&mut ctl, &rr3_rpc_frame("rr3.ctl.logs", 2, json!({}), 0));
+        let f = rr3_read_where(&mut ctl, "ctl.logs 应答", |fr| {
+            rr3_body_split(&fr.payload)
+                .map(|(ty, _)| ty == Rr3PayloadType::Response)
+                .unwrap_or(false)
+        });
+        let v = rr3_json_of(&f);
+        joined = v["result"]["lines"]
+            .as_array()
+            .expect("logs 应带 result.lines")
+            .iter()
+            .filter_map(|l| l.as_str().map(str::to_string))
+            .collect();
+        let spawn_at = joined.iter().rposition(|l| l.contains("spawn rr3-pa pid="));
+        let listen_at = joined.iter().rposition(|l| l.contains(&listen));
+        if matches!((spawn_at, listen_at), (Some(s), Some(b)) if s > b) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "第二世 spawn 行 10s 内未进入日志环（回填/入环次序异常）: {joined:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
     assert!(
         joined.iter().any(|l| l.contains("rr3-pb 子进程退出")),
         "第二世 ctl.logs 必须取到第一世崩溃前的收尸行（rrd 自身日志落盘＋启动回填）: {joined:?}"
