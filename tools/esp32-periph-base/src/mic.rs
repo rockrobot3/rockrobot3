@@ -23,7 +23,7 @@
 //!
 //! 批D③ 音频上行：`AUDIO ON` 后攒满 [`AUDIO_CHUNK_FRAMES`] 帧即组 Event 帧
 //! （逐通道减本分片 DC → 24bit 截 16bit → s16le → b64 → JSON 体，topic 并入体）
-//! → 有界 audio_q → 控制面 `drain_audio` 整帧写 UART2（921600）；OFF 只出统计。
+//! → 有界 audio_q → 控制面 `drain_audio` 整帧写 UART2（1.5M）；OFF 只出统计。
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -56,7 +56,7 @@ const MIC_THREAD_STACK: usize = 16384;
 const MIC_I2C_TIMEOUT: TickType_t = u32::MAX;
 /// 单次 read 缓冲：4096B = 512 帧 × 2ch × 4B（≈32ms @16kHz；栈上安全）。
 const MIC_BUF: usize = 4096;
-/// 统计打印窗：64 次 read ≈ 2s 一行（16 次≈512ms 时日志在 921600 上与音频上行抢
+/// 统计打印窗：64 次 read ≈ 2s 一行（16 次≈512ms 时日志在 1.5M 上与音频上行抢
 /// 带宽、且人眼来不及看；2s 一行足够判"有没有数据/速率对不对"）。
 const MIC_WINDOW_READS: usize = 64;
 /// 诊断位图窗口：每 200 次 read（≈6.4s）看一次前 16B 原始字节。

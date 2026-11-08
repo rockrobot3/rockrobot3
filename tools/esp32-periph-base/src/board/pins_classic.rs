@@ -1,7 +1,7 @@
 //! 经典 ESP32（xtensa-esp32-espidf）引脚装配对账锚。
 //!
 //! 真板接线（2026-10 验收档）：
-//! - UART2 = GPIO18→TX / GPIO19←RX（921600 指令面）
+//! - UART2 = GPIO18→TX / GPIO19←RX（1.5M 指令面）
 //! - I2C0  = GPIO21 SDA / GPIO22 SCL（SSD1306 0x3C）
 //! - LEDC  = GPIO32 pan / GPIO33 tilt（50Hz 14bit）
 //! - I2S0  = GPIO4 BCLK / GPIO27 SD / GPIO26 WS（INMP441 双麦）
