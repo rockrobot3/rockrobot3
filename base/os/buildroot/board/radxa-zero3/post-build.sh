@@ -183,6 +183,10 @@ case "$1" in
 		else
 			echo "S99rrd: amixer 缺席，跳过硬件电平预置"
 		fi
+		# 重启执行面解锁（与 distro 的 rrd.service 同一口径）：本轨是 BusyBox init，
+		# rrd 的 ctl.reboot 走 /sbin/reboot 回退（systemctl 不在）；面板/运维 reboot
+		# 是产品动作，缺省恒拒只保留给 e2e/调试路径。
+		export RR3_REBOOT_OK=1
 		start-stop-daemon -S -b -m -p /var/run/rrd.pid \
 			-x /usr/bin/rrd -- --socket /var/run/rock3-ipc.sock \
 			--contracts /usr/lib/rockrobot3/contracts \
