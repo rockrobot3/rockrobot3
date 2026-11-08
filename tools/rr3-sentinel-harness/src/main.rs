@@ -263,51 +263,33 @@ fn verdict(ok: bool, label: &str) -> bool {
     ok
 }
 
-fn main() {
-    let t0 = Instant::now();
-    let t0_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!(
-            "用法: rr3-sentinel-harness <串口设备> [拍数，缺省 8] [证据文件路径（C12 三样）]"
-        );
-        std::process::exit(2);
-    }
-    let device = args[1].clone();
-    let beats: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(8);
-    let evidence_path = args.get(3).cloned();
-    // 全程看门狗：到点 FAIL 退出（exit 2 = 环境性失败，与判据 FAIL 的 1 分开）。
-    // 预算随拍数放宽（base + 每拍 1s 宽松上界）——⑦ 列 200 拍 ≈ 40s 实跑，固定
-    // 60s 会把合法长采样误杀成环境失败。
-    {
-        let wd_budget =
-            Duration::from_secs(WATCHDOG_BASE_SECS + beats as u64 * WATCHDOG_PER_BEAT_MS / 1000);
-        let wd_start = t0;
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_millis(200));
-            if wd_start.elapsed() > wd_budget {
-                eprintln!("FAIL  harness 全程 {wd_budget:?} 看门狗到点（板侧在跑吗？线松了吗？）");
-                std::process::exit(2);
-            }
-        });
-    }
-    let now_ns = || t0.elapsed().as_nanos() as u64;
-    let mut fail = 0u32;
+/// 全程看门狗：到点 exit 2（环境性失败），预算随拍数放宽。
+fn rr3_watchdog(t0: Instant, beats: usize) {
+    let wd_budget =
+        Duration::from_secs(WATCHDOG_BASE_SECS + beats as u64 * WATCHDOG_PER_BEAT_MS / 1000);
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(200));
+        if t0.elapsed() > wd_budget {
+            eprintln!("FAIL  harness 全程 {wd_budget:?} 看门狗到点（板侧在跑吗？线松了吗？）");
+            std::process::exit(2);
+        }
+    });
+}
 
-    let mut conn =
-        match Rr3UartConn::open_with_baud(std::path::Path::new(&device), RR3_UART_BAUD_DEFAULT) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("FAIL  打开 {device} 失败: {e}");
-                std::process::exit(2);
-            }
-        };
+/// 打开串口：打不开 = 环境性失败（exit 2，与判据 FAIL=1 分开）。
+fn rr3_open(device: &str) -> Rr3UartConn {
+    match Rr3UartConn::open_with_baud(std::path::Path::new(device), RR3_UART_BAUD_DEFAULT) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("FAIL  打开 {device} 失败: {e}");
+            std::process::exit(2);
+        }
+    }
+}
 
-    // ① 注册：首帧必须是 rr3.register，params.name/manifest 在场（rrd 握手门序同款）
-    let (reg_name, hb_ms) = match conn.rr3_recv_buf() {
+/// ① 注册：首帧必须是 rr3.register，params.name/manifest 在场（rrd 握手门序同款）。
+fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u64) {
+    match conn.rr3_recv_buf() {
         Ok(buf) => match Rr3Frame::try_from(buf) {
             Ok(f) => match parse_upstream(f) {
                 Ok((Rr3PayloadType::Request, id, m, params, _))
@@ -364,22 +346,12 @@ fn main() {
             eprintln!("FAIL  首帧读取失败: {e:?}");
             std::process::exit(1);
         }
-    };
-    if !verdict(
-        !reg_name.is_empty(),
-        &format!("① 注册（Request/rr3.register，name={reg_name}）"),
-    ) {
-        fail += 1;
     }
-    if !verdict(
-        hb_ms > 0,
-        &format!("① manifest [health].heartbeat_ms 在场（{hb_ms}ms）"),
-    ) {
-        fail += 1;
-    }
+}
 
-    // ② 心跳 N 拍：逐拍回 accepted，记间隔（相对节拍的外部观测；首拍间隔含
-    // 注册→首拍的排拍 = heartbeat_ms）
+/// ② 心跳 N 拍：逐拍回 accepted，记间隔（相对节拍的外部观测；首拍间隔含
+/// 注册→首拍的排拍 = heartbeat_ms）。
+fn rr3_beats(conn: &mut Rr3UartConn, beats: usize, now_ns: &dyn Fn() -> u64) -> Vec<u128> {
     let mut intervals: Vec<u128> = Vec::new();
     let mut last = Instant::now();
     for i in 0..beats {
@@ -427,6 +399,13 @@ fn main() {
             }
         }
     }
+    intervals
+}
+
+/// ② 全收/无停摆 + ⑦ 时序对表（判据窗出处见 BEAT_* 常量注记）。返回
+/// (直方图文本, FAIL 数)。
+fn rr3_timing(intervals: &[u128], beats: usize, hb_ms: u64) -> (String, u32) {
+    let mut fail = 0u32;
     let max_dt = intervals.iter().copied().max().unwrap_or(0);
     let avg_dt = if intervals.is_empty() {
         0
@@ -447,10 +426,7 @@ fn main() {
     ) {
         fail += 1;
     }
-    // ⑦ 时序达标对表（批G；判据窗出处见 BEAT_* 常量注记）：名义值 = 注册
-    // manifest 的 heartbeat_ms，抖动预算 = profiles/esp32-mini.toml
-    // tick_jitter_ms=100。真值只认真板直方图（architecture §12.6 ⑦ 列）。
-    let hist = histogram_text(&intervals);
+    let hist = histogram_text(intervals);
     println!("② 直方图(10ms桶): {hist}");
     let hb = hb_ms as i64;
     let floor_ms = hb - BEAT_FLOOR_SLACK_MS;
@@ -473,8 +449,12 @@ fn main() {
     ) {
         fail += 1;
     }
+    (hist, fail)
+}
 
-    // ③ round-trip：下行 rr3.call → Response id 回显 + result.echo 原样回带
+/// ③ round-trip：下行 rr3.call → Response id 回显 + result.echo 原样回带。
+/// 返回 (应答到达, echo 对拍通过, 耗时 ms)。
+fn rr3_round_trip(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (bool, bool, u128) {
     let req = round_trip_request(HARNESS_TASK, now_ns());
     if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
         eprintln!("FAIL  round-trip 请求写出失败: {e:?}");
@@ -522,22 +502,11 @@ fn main() {
             }
         }
     }
-    if !verdict(
-        rt_ok,
-        &format!(
-            "③ round-trip 应答（id={ROUND_TRIP_ID} 回显，耗时 {}ms）",
-            rt_start.elapsed().as_millis()
-        ),
-    ) {
-        fail += 1;
-    }
-    if !verdict(rt_echo_ok, "③ result.echo 原样回带（params→echo 逐字对拍）") {
-        fail += 1;
-    }
+    (rt_ok, rt_echo_ok, rt_start.elapsed().as_millis())
+}
 
-    // ④ parity 对拍（批G ⑤列板上腿）：下行 rr3.call 点名 diag/parity——板回
-    // 向量、宿主同一 runner（确定性腿）、契约期望向量（契约腿）三方两腿。板侧
-    // 跑真实原语、不回显期望（哨兵 bf20d15/勘误），两腿在宿主汇合才算对拍。
+/// ④ parity 应答等待：返回 (板回 result, 耗时 ms)。
+fn rr3_parity_wait(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (Option<Value>, u128) {
     let req = parity_request(HARNESS_TASK, now_ns());
     if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
         eprintln!("FAIL  parity 请求写出失败: {e:?}");
@@ -579,14 +548,20 @@ fn main() {
             }
         }
     }
-    match &board_parity {
+    (board_parity, parity_start.elapsed().as_millis())
+}
+
+/// ④ 三方两腿对拍：板回向量在册 / 契约腿（宿主 runner == 期望）/ 确定性腿
+/// （板 == 宿主 runner，bit-for-bit）。返回 FAIL 数。
+fn rr3_parity_judge(board_parity: Option<&Value>, parity_ms: u128) -> u32 {
+    let mut fail = 0u32;
+    match board_parity {
         Some(bv) => {
             if !verdict(
                 bv.get("v").and_then(Value::as_u64) == Some(RR3_PARITY_VERSION as u64),
                 &format!(
-                    "④ 板回 parity 向量在册（v={}，耗时 {}ms）",
-                    RR3_PARITY_VERSION,
-                    parity_start.elapsed().as_millis()
+                    "④ 板回 parity 向量在册（v={}，耗时 {parity_ms}ms）",
+                    RR3_PARITY_VERSION
                 ),
             ) {
                 fail += 1;
@@ -617,6 +592,61 @@ fn main() {
             fail += 1;
         }
     }
+    fail
+}
+
+fn main() {
+    let t0 = Instant::now();
+    let t0_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        eprintln!(
+            "用法: rr3-sentinel-harness <串口设备> [拍数，缺省 8] [证据文件路径（C12 三样）]"
+        );
+        std::process::exit(2);
+    }
+    let device = args[1].clone();
+    let beats: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(8);
+    let evidence_path = args.get(3).cloned();
+    rr3_watchdog(t0, beats);
+    let now_ns = || t0.elapsed().as_nanos() as u64;
+    let mut fail = 0u32;
+    let mut conn = rr3_open(&device);
+
+    let (reg_name, hb_ms) = rr3_register(&mut conn, &now_ns);
+    if !verdict(
+        !reg_name.is_empty(),
+        &format!("① 注册（Request/rr3.register，name={reg_name}）"),
+    ) {
+        fail += 1;
+    }
+    if !verdict(
+        hb_ms > 0,
+        &format!("① manifest [health].heartbeat_ms 在场（{hb_ms}ms）"),
+    ) {
+        fail += 1;
+    }
+
+    let intervals = rr3_beats(&mut conn, beats, &now_ns);
+    let (hist, timing_fail) = rr3_timing(&intervals, beats, hb_ms);
+    fail += timing_fail;
+
+    let (rt_ok, rt_echo_ok, rt_ms) = rr3_round_trip(&mut conn, &now_ns);
+    if !verdict(
+        rt_ok,
+        &format!("③ round-trip 应答（id={ROUND_TRIP_ID} 回显，耗时 {rt_ms}ms）"),
+    ) {
+        fail += 1;
+    }
+    if !verdict(rt_echo_ok, "③ result.echo 原样回带（params→echo 逐字对拍）") {
+        fail += 1;
+    }
+
+    let (board_parity, parity_ms) = rr3_parity_wait(&mut conn, &now_ns);
+    fail += rr3_parity_judge(board_parity.as_ref(), parity_ms);
 
     // C12 证据文件（三样契约；rustc -Vv 由操作面追记）——fail 也写，原始数据留痕。
     if let Some(ep) = &evidence_path {
@@ -645,7 +675,6 @@ fn main() {
     }
     std::process::exit(1);
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
