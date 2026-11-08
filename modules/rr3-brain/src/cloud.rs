@@ -77,6 +77,10 @@ pub(crate) const RR3_LLM_MAX_TOKENS: i64 = 150;
 /// key_ref 双源语法前缀：`env:变量名` → 环境变量
 pub(crate) const RR3_KEY_REF_ENV_PREFIX: &str = "env:";
 
+/// 云端应答体策略帽（32 MiB）：ASR/LLM 应答 KB 级，TTS PCM 30s@48k 双声道约
+/// 5.7MB；32 MiB 给足长语音余量，同时任何单次调用都不允许把板子内存顶穿。
+const RR3_CLOUD_BODY_CAP: usize = 32 * 1024 * 1024;
+
 // ---------- 模式与密钥（自 cloud/__init__.py 迁入） ----------
 
 /// 云档（`RR3_BRAIN_CLOUD` 判据，每次调用现读——Python `rr3_brain_cloud_mode` 同形状）
@@ -168,12 +172,25 @@ pub(crate) fn rr3_http_post(
 }
 
 /// 应答体读尽（read-until-close 语义对 urllib resp.read() 同形状——TTS 响应无
-/// Content-Length、服务端发完即断，按流读尽即得）。
+/// Content-Length、服务端发完即断，按流读尽即得）。读侧强制策略帽：云端/中间人
+/// 返回超大响应时不能把板子的内存顶穿；读侧走 `take(cap+1)`，多读 1 字节
+/// 专用于判"是否还有余量"，分配上界仍是 cap+1。
 fn rr3_read_body(url: &str, resp: ureq::Response) -> Result<Vec<u8>, String> {
+    rr3_read_capped_body(url, resp.into_reader(), RR3_CLOUD_BODY_CAP)
+}
+
+/// 带帽读体（帽参数显式化，单测用小帽钉边界）。
+fn rr3_read_capped_body(url: &str, reader: impl Read, cap: usize) -> Result<Vec<u8>, String> {
     let mut buf = Vec::new();
-    resp.into_reader()
+    reader
+        .take(cap as u64 + 1)
         .read_to_end(&mut buf)
         .map_err(|e| format!("云端不可达 {url}: {e}"))?;
+    if buf.len() > cap {
+        return Err(format!(
+            "云端应答体超界（>{cap}B）: {url}（流式应答读尽策略帽，防内存耗尽）"
+        ));
+    }
     Ok(buf)
 }
 
@@ -771,6 +788,20 @@ mod tests {
     use super::*;
 
     // ---------- 纯函数面 ----------
+
+    /// 应答体策略帽（本轮审计）：帽内原样返回，超帽 1 字节即拒——云端/中间人
+    /// 返回超大响应时不得把板子内存顶穿。
+    #[test]
+    fn response_body_cap_bounds_memory() {
+        let ok = vec![7u8; 16];
+        assert_eq!(
+            rr3_read_capped_body("u", std::io::Cursor::new(ok.clone()), 16).unwrap(),
+            ok
+        );
+        let e = rr3_read_capped_body("u", std::io::Cursor::new(vec![7u8; 17]), 16)
+            .expect_err("超帽 1 字节必须拒");
+        assert!(e.contains("应答体超界"), "{e}");
+    }
 
     /// boundary 32 位小写 hex、两次调用不同
     #[test]
