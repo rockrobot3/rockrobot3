@@ -112,6 +112,22 @@ jobs:
       - name: 保底轨装配冒烟（post-build.sh）
         run: bash tools/ci/buildroot-assembly-smoke.sh
 
+  # 树莓派 / 瑞芯微部署面：aarch64-musl 静态产物构建门（与 pack-arm64 ① 同源，
+  # rust-lld 零外部工具链；不需要真板/打包器）。brain 的 ureq+ring 需 aarch64 C
+  # 工具链，归板上原生构建，不在本门（同 pack-arm64 ③ 分工）。
+  arm64-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: base/runtime
+      - name: aarch64-musl 静态产物七件
+        run: bash tools/ci/arm64-cross-check.sh
+
   # D9 装配演练（0.0.2 T6）：装配单驱动 boot + 六 Rust 模块真进程（批N32 件四起
   # brain 也是 Rust），判据六模块全 running + denied_publish = 0。
   sim-assemble:
