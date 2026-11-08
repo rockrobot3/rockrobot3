@@ -297,6 +297,7 @@ fn rr3_write_domain(
 }
 
 /// 读装配单并定位目标域（域缺拒——写面不做新域注册；与 boot 同一解析器）
+#[cfg(unix)]
 fn rr3_domain_read(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
@@ -327,9 +328,11 @@ fn rr3_domain_read(
 }
 
 /// 键行更新集：键名 → 新值文本（手术输入）
+#[cfg(unix)]
 type Rr3DomainUpdates = Vec<(&'static str, String)>;
 
 /// 写入计划：旧值提取 + 键行更新集（armed 与 evidence 成对，severe_mv 必携证据）
+#[cfg(unix)]
 fn rr3_domain_plan(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
@@ -374,6 +377,7 @@ fn rr3_domain_plan(
 }
 
 /// 手术 → tmp 落盘 → 装载链全量预核 → 原子写回（Err 即清 tmp，旧档原封）
+#[cfg(unix)]
 fn rr3_domain_commit(
     paths: &Rr3DomainWritePaths,
     text: &str,
@@ -423,6 +427,7 @@ fn rr3_domain_commit(
 
 /// 契约记账重记：写口的 tmp 产物已过装载链预核 = 新验收事实；重记失败不回滚
 /// 落盘（主事实已发生），点名让下次 boot 重定格。
+#[cfg(unix)]
 fn rr3_domain_relog(paths: &Rr3DomainWritePaths, boot: &crate::profile::Rr3ProfileBoot) -> bool {
     let Some(dir) = paths.slots.parent().map(PathBuf::from) else {
         return true;

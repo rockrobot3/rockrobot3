@@ -98,6 +98,7 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
 
 /// 装配单装载与落位：pin_id 全集来自 [[pins]]，axis/ 由接线布局推导。
 /// 写入面只吃装载域，不做 boot 的十条校验（整机合法性归 boot 正门）。
+#[cfg(unix)]
 fn rr3_aw_layout(cfg: &Rr3AxisWriteArgs) -> Result<(BTreeSet<String>, PathBuf), String> {
     let profile_abs = crate::profile::rr3_profile_abs(&cfg.profile)?;
     let profile_text = std::fs::read_to_string(&profile_abs)
@@ -119,6 +120,7 @@ fn rr3_aw_layout(cfg: &Rr3AxisWriteArgs) -> Result<(BTreeSet<String>, PathBuf), 
 }
 
 /// 候选档案全判据 + 落位文件名（pin 末段 instance；非两段式拒猜）
+#[cfg(unix)]
 fn rr3_aw_candidate(
     cfg: &Rr3AxisWriteArgs,
     pin_ids: &BTreeSet<String>,
@@ -149,6 +151,7 @@ fn rr3_aw_candidate(
 }
 
 /// 拒绝面 a：坏目标不覆盖；同文件名异 pin 拒覆盖（pin 才是档案身份键）
+#[cfg(unix)]
 fn rr3_aw_existing(
     target: &Path,
     file: &Rr3AxisFile,
@@ -179,6 +182,7 @@ fn rr3_aw_existing(
 }
 
 /// 拒绝面 b：同 pin 异名副本不制造（boot 链恰一份合法才投影；装载红散件不越权判）
+#[cfg(unix)]
 fn rr3_aw_duplicates(
     axis_dir: &Path,
     target: &Path,
@@ -208,6 +212,7 @@ fn rr3_aw_duplicates(
 }
 
 /// 原子落盘（tmp→fsync→rename 唯一写路径）并回显写入路径与档案要点
+#[cfg(unix)]
 fn rr3_aw_store(axis_dir: &Path, target: &Path, file: &Rr3AxisFile) -> Result<String, String> {
     std::fs::create_dir_all(axis_dir)
         .map_err(|e| format!("建档案目录 {} 失败: {e}", axis_dir.display()))?;
