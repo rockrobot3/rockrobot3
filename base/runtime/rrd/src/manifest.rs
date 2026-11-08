@@ -54,6 +54,35 @@ fn rr3_name_ok(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
+/// 可选字符串数组段（rpc.exposes / depends.required / events.subscribes /
+/// provides.capabilities 共用同一形状纪律）：缺省空；给了必须是非空字符串
+/// 数组，类型错/空项逐条点名——空表本身是合法语义（不接请求/不消费），
+/// 类型错被静默吞掉会让调用方拿到假诊断（fail-closed）。
+fn rr3_opt_str_list(
+    root: &Value,
+    path: &str,
+    type_label: &str,
+    item_label: &str,
+    errs: &mut Vec<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    match lookup(root, path) {
+        None => {}
+        Some(v) => match v.as_array() {
+            Some(items) => {
+                for item in items {
+                    match item.as_str() {
+                        Some(s) if !s.is_empty() => out.push(s.to_string()),
+                        _ => errs.push(format!("{item_label} 的每一项都必须是非空字符串")),
+                    }
+                }
+            }
+            None => errs.push(format!("{type_label} 应为字符串数组")),
+        },
+    }
+    out
+}
+
 fn req_str(root: &Value, path: &str, errs: &mut Vec<String>) -> String {
     match lookup(root, path) {
         None => {
@@ -120,73 +149,38 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
     }
     // [rpc].exposes：可选；给了就必须是**非空字符串数组**——类型错要报错，
     // 不能静默当空表（空表 = "不接请求"，类型错被吞掉会让调用方拿到"无人在册"的假诊断）
-    let mut rpc_exposes = Vec::new();
-    match lookup(&root, "rpc.exposes") {
-        None => {}
-        Some(v) => match v.as_array() {
-            Some(items) => {
-                for item in items {
-                    match item.as_str() {
-                        Some(s) if !s.is_empty() => rpc_exposes.push(s.to_string()),
-                        _ => errs.push("[rpc].exposes 的每一项都必须是非空字符串".to_string()),
-                    }
-                }
-            }
-            None => errs.push("rpc.exposes 应为字符串数组".to_string()),
-        },
-    }
+    let rpc_exposes = rr3_opt_str_list(
+        &root,
+        "rpc.exposes",
+        "rpc.exposes",
+        "[rpc].exposes",
+        &mut errs,
+    );
     // [depends].required 与 [provides].capabilities（ADR-0009 裁定 1）：可选段，
     // 给了就必须是**非空字符串数组**——类型错要报错，与 rpc.exposes 同一条纪律
-    let mut depends_required = Vec::new();
-    match lookup(&root, "depends.required") {
-        None => {}
-        Some(v) => match v.as_array() {
-            Some(items) => {
-                for item in items {
-                    match item.as_str() {
-                        Some(s) if !s.is_empty() => depends_required.push(s.to_string()),
-                        _ => errs.push("depends.required 的每一项都必须是非空字符串".to_string()),
-                    }
-                }
-            }
-            None => errs.push("depends.required 应为字符串数组".to_string()),
-        },
-    }
+    let depends_required = rr3_opt_str_list(
+        &root,
+        "depends.required",
+        "depends.required",
+        "depends.required",
+        &mut errs,
+    );
     // [events].subscribes：可选；类型与空项纪律同 rpc.exposes（fail-closed，
     // 不求值不静默吞）——运行期消费面 = 影子统计，见 Rr3ManifestFacts 注记
-    let mut subscribes = Vec::new();
-    match lookup(&root, "events.subscribes") {
-        None => {}
-        Some(v) => match v.as_array() {
-            Some(items) => {
-                for item in items {
-                    match item.as_str() {
-                        Some(s) if !s.is_empty() => subscribes.push(s.to_string()),
-                        _ => {
-                            errs.push("[events].subscribes 的每一项都必须是非空字符串".to_string())
-                        }
-                    }
-                }
-            }
-            None => errs.push("events.subscribes 应为字符串数组".to_string()),
-        },
-    }
-    let mut provides = Vec::new();
-    match lookup(&root, "provides.capabilities") {
-        None => {}
-        Some(v) => match v.as_array() {
-            Some(items) => {
-                for item in items {
-                    match item.as_str() {
-                        Some(s) if !s.is_empty() => provides.push(s.to_string()),
-                        _ => errs
-                            .push("provides.capabilities 的每一项都必须是非空字符串".to_string()),
-                    }
-                }
-            }
-            None => errs.push("provides.capabilities 应为字符串数组".to_string()),
-        },
-    }
+    let subscribes = rr3_opt_str_list(
+        &root,
+        "events.subscribes",
+        "events.subscribes",
+        "[events].subscribes",
+        &mut errs,
+    );
+    let provides = rr3_opt_str_list(
+        &root,
+        "provides.capabilities",
+        "provides.capabilities",
+        "provides.capabilities",
+        &mut errs,
+    );
     if !errs.is_empty() {
         return Err(errs);
     }
