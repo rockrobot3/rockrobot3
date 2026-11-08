@@ -276,6 +276,14 @@ impl Rr3TurnBus for BusHandle {
     }
 }
 
+/// 唤醒判决 + LLM 段的产物（`rr3_turn_reply` 出、主编排消费）：`ack` 标记本轮是
+/// 固定应答（TTS 段可复用预合成 PCM），`llm_ms` 为 `-` 表示本轮未进 LLM。
+struct Rr3TurnReply {
+    text: String,
+    llm_ms: String,
+    ack: bool,
+}
+
 /// cloud 三客户端整体（批N32 迁移件2：Python composite 装配段同形状——asr/tts
 /// 读 cloud 段、llm 读模型行实效；ops/set 写后按组重建的重建目标）。
 pub(crate) struct Rr3CloudClients {
@@ -468,120 +476,29 @@ impl Rr3BrainDispatcher {
     /// 完毕（rr3_record 成功后 bump）；`rounds_audible` = interact 回执 played_ms>0
     /// （点名失败/播出 0ms 不计）。
     fn rr3_finish_turn<B: Rr3TurnBus>(&mut self, bus: &B) -> Result<(), String> {
-        let pcm = self.dialog.rr3_take_utterance();
-        if pcm.is_empty() {
+        let Some((pcm, trace)) = self.rr3_turn_utt() else {
             return Ok(());
-        }
-        self.trace_seq += 1;
-        let trace = self.trace_seq;
-        // 诊断面（2026-10-31，env 门控，默认关）：把本轮**送 ASR 的 utterance**
-        // 落盘成裸 PCM（s16le 16k mono，字节数/32 = 毫秒）——唤醒词被截断/"只识别
-        // 到你好"类问题，音频证据比转写文本可靠。空值/未设 = 零落盘。
-        if let Ok(dir) = std::env::var("RR3_BRAIN_DUMP_UTT") {
-            let dir = dir.trim();
-            if !dir.is_empty() {
-                let _ = std::fs::create_dir_all(dir);
-                let _ = std::fs::write(format!("{dir}/utt-{trace}.pcm"), &pcm);
-            }
-        }
+        };
 
         let asr_started = Instant::now();
-        let user_text = match self.clients.asr.rr3_transcribe(&pcm, RR3_TTS_SAMPLE_RATE) {
-            Ok(t) => t,
-            Err(e) => {
-                bus.counter_bump("asr_fail", 1);
-                eprintln!(
-                    "轮次 {trace}: ASR 失败，弃轮（asr_ms={}，{e}）",
-                    asr_started.elapsed().as_millis()
-                );
-                return Ok(());
-            }
-        };
-        let asr_cost_ms = asr_started.elapsed().as_millis();
-        bus.counter_bump("asr_ok", 1);
-        if user_text.trim().is_empty() {
-            eprintln!("轮次 {trace}: 识别为空文本，弃轮（asr_ms={asr_cost_ms}）");
+        let Some((user_text, asr_cost_ms)) = self.rr3_turn_asr(bus, trace, &pcm, asr_started)
+        else {
             return Ok(());
-        }
-
-        // 唤醒门控（2026-10-31）：命中 → 固定应答/命令进 LLM；窗外未命中 → 静默
-        // 丢弃（不 LLM、不 TTS，用户听不到任何回声）；窗内未命中 → 追问续轮。
-        // `enable=false` 时 `rr3_wake_decide` 恒 FollowUp（既有行为逐点等价）。
-        let now = self.tb.rr3_now_ms();
-        let mut llm_input: Option<String> = None;
-        let mut reply_text = String::new();
-        let wake_action = rr3_wake_decide(&user_text, &self.cfg.wake, now, self.last_wake_ms);
-        let is_wake_ack = matches!(wake_action, Rr3WakeAction::Ack);
-        match wake_action {
-            Rr3WakeAction::Ignore => {
-                // 带 ASR 原文：唤醒不中时唯一可判读面（识别变体/前置语气词/误识别）
-                eprintln!(
-                    "轮次 {trace}: 未命中唤醒词（窗外），静默（ASR='{user_text}'，asr_ms={asr_cost_ms}）"
-                );
-                return Ok(());
-            }
-            Rr3WakeAction::Ack => {
-                // 带 ASR 原文：Ack 轮是唯一不出"对话轮完成"user 文本的轮（固定
-                // 应答），留一行可判读面——2026-10-31 实机排查 TTS 超时静默时
-                // 曾只能靠轮次时序倒推是哪句。
-                eprintln!("轮次 {trace}: 唤醒应答（ASR='{user_text}'）");
-                self.last_wake_ms = Some(now);
-                reply_text = self.cfg.wake.ack.clone();
-            }
-            Rr3WakeAction::Command(cmd) => {
-                self.last_wake_ms = Some(now);
-                llm_input = Some(cmd);
-            }
-            Rr3WakeAction::FollowUp => {
-                self.last_wake_ms = Some(now);
-                llm_input = Some(user_text.clone());
-            }
-        }
-        let mut llm_cost_ms = "-".to_string();
-        if let Some(input) = llm_input {
-            let llm_started = Instant::now();
-            let completed = self.clients.llm.rr3_complete(&input);
-            llm_cost_ms = llm_started.elapsed().as_millis().to_string();
-            reply_text = match completed {
-                Ok(t) => t,
-                Err(e) => {
-                    bus.counter_bump("llm_fail", 1);
-                    eprintln!(
-                        "轮次 {trace}: LLM 失败，弃轮（user='{user_text}'，llm_ms={llm_cost_ms}，{e}）"
-                    );
-                    return Ok(());
-                }
-            };
-        }
-
-        let tts_started = Instant::now();
-        let cached_ack = if is_wake_ack {
-            self.wake_ack_pcm.clone()
-        } else {
-            None
         };
-        let mut reply_pcm = match cached_ack {
-            Some(pcm) => pcm,
-            None => match self
-                .clients
-                .tts
-                .rr3_synthesize(&reply_text, RR3_TTS_SAMPLE_RATE)
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    bus.counter_bump("tts_fail", 1);
-                    eprintln!(
-                        "轮次 {trace}: TTS 失败，弃轮（tts_cost_ms={}，{e}）",
-                        tts_started.elapsed().as_millis()
-                    );
-                    return Ok(());
-                }
-            },
+
+        let Some(reply) = self.rr3_turn_reply(bus, trace, &user_text, asr_cost_ms) else {
+            return Ok(());
         };
-        let tts_cost_ms = tts_started.elapsed().as_millis();
-        if is_wake_ack && self.wake_ack_pcm.is_none() && !reply_pcm.is_empty() {
-            self.wake_ack_pcm = Some(reply_pcm.clone());
-        }
+        let reply_text = reply.text;
+        let llm_cost_ms = reply.llm_ms;
+        let is_wake_ack = reply.ack;
+
+        let Some((mut reply_pcm, tts_cost_ms)) =
+            self.rr3_turn_tts(bus, trace, &reply_text, is_wake_ack)
+        else {
+            return Ok(());
+        };
+        // ready_ms 与拆分前同刻：ASR 起点到 TTS 完成（含唤醒判决与 LLM）。
         let ready_ms = asr_started.elapsed().as_millis();
         if reply_pcm.len() % 2 == 1 {
             reply_pcm.pop(); // 奇数长度截尾（Python reply_pcm[:-1] 同形状）
@@ -589,30 +506,7 @@ impl Rr3BrainDispatcher {
         let samples = reply_pcm.len() as u64 / 2;
         let tts_ms = samples / 16_000 * 1000 + samples % 16_000 * 1000 / 16_000;
 
-        // 语音下行：先把 PCM 按 MCP-1 的形状分帧发布到 rr3-brain/audio/tts_pcm
-        // （stream），再走事务面点名 interact 的 tts/text——点名是"该不该播"的
-        // **唯一判据**，流只是载荷通路（§20 第 1 条 (a)）。点名的 args 带
-        // pcm_bytes，供播放面校验缓冲完整性（半流/空缓冲不静默，MC-1）。
-        self.pcm_seq = rr3_publish_tts_pcm(bus, &reply_pcm, self.pcm_seq)?;
-        let mut played = String::new();
-        match bus.call(
-            RR3_TOPIC_TTS,
-            &json!({ "text": reply_text, "pcm_bytes": reply_pcm.len() }),
-            Duration::from_secs_f64(self.cfg.call_timeout_s),
-        ) {
-            Ok(reply) => {
-                // audible 记账（B-16①）：播出且 >0ms 才算"用户听得见"——点名失败
-                // 与 played_ms=0 都不进这本账。Number 判型 = Python isinstance
-                // (int, float) 且非 bool 同形状（Null/串不进账）。
-                let played_ms = reply.get("played_ms").cloned().unwrap_or(Value::Null);
-                played = format!(" played_ms={}", rr3_py_str(&played_ms));
-                if matches!(played_ms, Value::Number(_)) && played_ms.as_f64().unwrap_or(0.0) > 0.0
-                {
-                    bus.counter_bump("rounds_audible", 1);
-                }
-            }
-            Err(e) => eprintln!("轮次 {trace}: interact 播放点名失败（{e}）"),
-        }
+        let played = self.rr3_turn_play(bus, trace, &reply_text, &reply_pcm)?;
 
         // 意图→动作映射在 brain（策略层唯一归属，0.0.3 Q1 裁定）：结构化 actions
         // 随 intent/result 广播，执行器按 exposes 归属门各自认领（brain 不单播不
@@ -646,6 +540,194 @@ impl Rr3BrainDispatcher {
         // 用户在机器人说完后拥有完整 followup_ms。
         self.last_wake_ms = Some(self.tb.rr3_now_ms());
         Ok(())
+    }
+
+    /// 取本轮 utterance 并定格轮次号：空缓冲 = 无轮可开（不占 trace 号）。
+    /// `RR3_BRAIN_DUMP_UTT` 诊断落盘（env 门控，默认关）随取随做。
+    fn rr3_turn_utt(&mut self) -> Option<(Vec<u8>, u64)> {
+        let pcm = self.dialog.rr3_take_utterance();
+        if pcm.is_empty() {
+            return None;
+        }
+        self.trace_seq += 1;
+        let trace = self.trace_seq;
+        // 诊断面（2026-10-31，env 门控，默认关）：把本轮**送 ASR 的 utterance**
+        // 落盘成裸 PCM（s16le 16k mono，字节数/32 = 毫秒）——唤醒词被截断/"只识别
+        // 到你好"类问题，音频证据比转写文本可靠。空值/未设 = 零落盘。
+        if let Ok(dir) = std::env::var("RR3_BRAIN_DUMP_UTT") {
+            let dir = dir.trim();
+            if !dir.is_empty() {
+                let _ = std::fs::create_dir_all(dir);
+                let _ = std::fs::write(format!("{dir}/utt-{trace}.pcm"), &pcm);
+            }
+        }
+        Some((pcm, trace))
+    }
+
+    /// ASR 段：转写失败/空文本折日志弃轮（None），不占后续段。
+    fn rr3_turn_asr<B: Rr3TurnBus>(
+        &mut self,
+        bus: &B,
+        trace: u64,
+        pcm: &[u8],
+        started: Instant,
+    ) -> Option<(String, u128)> {
+        let user_text = match self.clients.asr.rr3_transcribe(pcm, RR3_TTS_SAMPLE_RATE) {
+            Ok(t) => t,
+            Err(e) => {
+                bus.counter_bump("asr_fail", 1);
+                eprintln!(
+                    "轮次 {trace}: ASR 失败，弃轮（asr_ms={}，{e}）",
+                    started.elapsed().as_millis()
+                );
+                return None;
+            }
+        };
+        let asr_cost_ms = started.elapsed().as_millis();
+        bus.counter_bump("asr_ok", 1);
+        if user_text.trim().is_empty() {
+            eprintln!("轮次 {trace}: 识别为空文本，弃轮（asr_ms={asr_cost_ms}）");
+            return None;
+        }
+        Some((user_text, asr_cost_ms))
+    }
+
+    /// 唤醒门控 + LLM 段：命中唤醒 → 固定应答/命令进 LLM；窗外未命中 → 静默
+    /// 丢弃（None）；窗内未命中 → 追问续轮。`enable=false` 时恒 FollowUp。
+    fn rr3_turn_reply<B: Rr3TurnBus>(
+        &mut self,
+        bus: &B,
+        trace: u64,
+        user_text: &str,
+        asr_cost_ms: u128,
+    ) -> Option<Rr3TurnReply> {
+        // 唤醒门控（2026-10-31）：命中 → 固定应答/命令进 LLM；窗外未命中 → 静默
+        // 丢弃（不 LLM、不 TTS，用户听不到任何回声）；窗内未命中 → 追问续轮。
+        // `enable=false` 时 `rr3_wake_decide` 恒 FollowUp（既有行为逐点等价）。
+        let now = self.tb.rr3_now_ms();
+        let mut llm_input: Option<String> = None;
+        let mut reply_text = String::new();
+        let wake_action = rr3_wake_decide(user_text, &self.cfg.wake, now, self.last_wake_ms);
+        let is_wake_ack = matches!(wake_action, Rr3WakeAction::Ack);
+        match wake_action {
+            Rr3WakeAction::Ignore => {
+                // 带 ASR 原文：唤醒不中时唯一可判读面（识别变体/前置语气词/误识别）
+                eprintln!(
+                    "轮次 {trace}: 未命中唤醒词（窗外），静默（ASR='{user_text}'，asr_ms={asr_cost_ms}）"
+                );
+                return None;
+            }
+            Rr3WakeAction::Ack => {
+                // 带 ASR 原文：Ack 轮是唯一不出"对话轮完成"user 文本的轮（固定
+                // 应答），留一行可判读面——2026-10-31 实机排查 TTS 超时静默时
+                // 曾只能靠轮次时序倒推是哪句。
+                eprintln!("轮次 {trace}: 唤醒应答（ASR='{user_text}'）");
+                self.last_wake_ms = Some(now);
+                reply_text = self.cfg.wake.ack.clone();
+            }
+            Rr3WakeAction::Command(cmd) => {
+                self.last_wake_ms = Some(now);
+                llm_input = Some(cmd);
+            }
+            Rr3WakeAction::FollowUp => {
+                self.last_wake_ms = Some(now);
+                llm_input = Some(user_text.to_string());
+            }
+        }
+        let mut llm_cost_ms = "-".to_string();
+        if let Some(input) = llm_input {
+            let llm_started = Instant::now();
+            let completed = self.clients.llm.rr3_complete(&input);
+            llm_cost_ms = llm_started.elapsed().as_millis().to_string();
+            reply_text = match completed {
+                Ok(t) => t,
+                Err(e) => {
+                    bus.counter_bump("llm_fail", 1);
+                    eprintln!(
+                        "轮次 {trace}: LLM 失败，弃轮（user='{user_text}'，llm_ms={llm_cost_ms}，{e}）"
+                    );
+                    return None;
+                }
+            };
+        }
+        Some(Rr3TurnReply {
+            text: reply_text,
+            llm_ms: llm_cost_ms,
+            ack: is_wake_ack,
+        })
+    }
+
+    /// TTS 段：唤醒固定应答命中预合成 PCM 则复用；合成失败折日志弃轮（None）。
+    fn rr3_turn_tts<B: Rr3TurnBus>(
+        &mut self,
+        bus: &B,
+        trace: u64,
+        reply_text: &str,
+        is_wake_ack: bool,
+    ) -> Option<(Vec<u8>, u128)> {
+        let tts_started = Instant::now();
+        let cached_ack = if is_wake_ack {
+            self.wake_ack_pcm.clone()
+        } else {
+            None
+        };
+        let reply_pcm = match cached_ack {
+            Some(pcm) => pcm,
+            None => match self
+                .clients
+                .tts
+                .rr3_synthesize(reply_text, RR3_TTS_SAMPLE_RATE)
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    bus.counter_bump("tts_fail", 1);
+                    eprintln!(
+                        "轮次 {trace}: TTS 失败，弃轮（tts_cost_ms={}，{e}）",
+                        tts_started.elapsed().as_millis()
+                    );
+                    return None;
+                }
+            },
+        };
+        let tts_cost_ms = tts_started.elapsed().as_millis();
+        if is_wake_ack && self.wake_ack_pcm.is_none() && !reply_pcm.is_empty() {
+            self.wake_ack_pcm = Some(reply_pcm.clone());
+        }
+        Some((reply_pcm, tts_cost_ms))
+    }
+
+    /// 语音下行：先按 MCP-1 的形状分帧发布 tts_pcm（stream），再走事务面点名
+    /// interact 的 tts/text——点名是"该不该播"的**唯一判据**，流只是载荷通路
+    /// （§20 第 1 条 (a)）。返回播放回显后缀（`played_ms=...` 或空）。
+    fn rr3_turn_play<B: Rr3TurnBus>(
+        &mut self,
+        bus: &B,
+        trace: u64,
+        reply_text: &str,
+        reply_pcm: &[u8],
+    ) -> Result<String, String> {
+        // 点名的 args 带 pcm_bytes，供播放面校验缓冲完整性（半流/空缓冲不静默，MC-1）。
+        self.pcm_seq = rr3_publish_tts_pcm(bus, reply_pcm, self.pcm_seq)?;
+        let mut played = String::new();
+        match bus.call(
+            RR3_TOPIC_TTS,
+            &json!({ "text": reply_text, "pcm_bytes": reply_pcm.len() }),
+            Duration::from_secs_f64(self.cfg.call_timeout_s),
+        ) {
+            Ok(reply) => {
+                // audible 记账（B-16①）：播出且 >0ms 才算"用户听得见"——点名失败
+                // 与 played_ms=0 都不进这本账。Number 判型 = Python isinstance
+                // (int, float) 且非 bool 同形状（Null/串不进账）。
+                let played_ms = reply.get("played_ms").cloned().unwrap_or(Value::Null);
+                played = format!(" played_ms={}", rr3_py_str(&played_ms));
+                if matches!(played_ms, Value::Number(_)) && played_ms.as_f64().unwrap_or(0.0) > 0.0
+                {
+                    bus.counter_bump("rounds_audible", 1);
+                }
+            }
+            Err(e) => eprintln!("轮次 {trace}: interact 播放点名失败（{e}）"),
+        }
+        Ok(played)
     }
 }
 
