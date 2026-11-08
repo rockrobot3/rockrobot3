@@ -594,23 +594,59 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
         .spawn(move || {
             let mut rx = rx;
             let mut one = [0u8; 1];
-            // 平时睡在 read；醒来一次 = 一个 TERM/INT，flush 后即关停（exit 不返回，
-            // 故不是循环——clippy never_loop）。EOF = 发送端随进程没了，线程自然收场
-            if matches!(rx.read(&mut one), Ok(1)) {
-                let snap = rr3_lock(&shared).rr3_reg_counters_snapshot();
-                match path
-                    .as_deref()
-                    .map(|p| crate::counters::rr3_counters_store(p, &snap))
-                {
-                    Some(Ok(())) => rr3_log("counters 关停 flush 已落盘（SIGTERM/SIGINT）"),
-                    Some(Err(e)) => rr3_log(&format!("counters 关停 flush 失败（不挡关停）: {e}")),
-                    None => rr3_log("counters 关停 flush 跳过（未启用持久化）"),
+            // 平时睡在 read；醒来一次 = 一个 TERM/INT，flush 后即关停（exit 不返回）。
+            // EINTR 必须重试：std 的 read 不自动吞信号中断，若按"非 Ok(1) 即收场"
+            // 处理，一次 EINTR 就让本线程退出，而 SIGTERM/SIGINT 处理器已在位——
+            // 守护从此不再响应默认终止语义，systemd stop 会一直等到 SIGKILL，
+            // 尾部计数也永远不会 flush。
+            loop {
+                match rx.read(&mut one) {
+                    Ok(1) => {
+                        let snap = rr3_lock(&shared).rr3_reg_counters_snapshot();
+                        match path
+                            .as_deref()
+                            .map(|p| crate::counters::rr3_counters_store(p, &snap))
+                        {
+                            Some(Ok(())) => rr3_log("counters 关停 flush 已落盘（SIGTERM/SIGINT）"),
+                            Some(Err(e)) => {
+                                rr3_log(&format!("counters 关停 flush 失败（不挡关停）: {e}"))
+                            }
+                            None => rr3_log("counters 关停 flush 跳过（未启用持久化）"),
+                        }
+                        std::process::exit(0);
+                    }
+                    Ok(_) => {
+                        // self-pipe 写端是进程生命期的静态 fd，EOF 理论上不发生；
+                        // 真发生则恢复默认信号处置后收场——宁可让 SIGTERM 回到
+                        // "直接杀进程"，也不能留一个吞信号的空壳线程。
+                        rr3_log(
+                            "counters 关停 flush 线程异常收场（self-pipe EOF），恢复默认信号处置",
+                        );
+                        rr3_restore_term_default();
+                        return;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        rr3_log(&format!(
+                            "counters 关停 flush 线程读 self-pipe 失败（{e}），恢复默认信号处置"
+                        ));
+                        rr3_restore_term_default();
+                        return;
+                    }
                 }
-                std::process::exit(0);
             }
         });
     if let Err(e) = spawned {
         rr3_log(&format!("counters 关停 flush 未装上（线程起不来）: {e}"));
+    }
+}
+
+/// 恢复 SIGTERM/SIGINT 的默认处置（SIG_DFL = 0）：flush 线程若异常收场，
+/// 后续终止信号仍按内核默认语义杀进程，不被已安装的处理器永久吞掉。
+fn rr3_restore_term_default() {
+    unsafe {
+        signal(RR3_SIGTERM, 0);
+        signal(RR3_SIGINT, 0);
     }
 }
 
