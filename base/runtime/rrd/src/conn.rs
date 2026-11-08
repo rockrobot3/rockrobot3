@@ -32,7 +32,7 @@ use rr_registry::{rr3_manifest_chk, Rr3TopicSet};
 use serde_json::{json, Value};
 
 use crate::daemon::{rr3_now_ms, rr3_now_ns, rr3_state_frame};
-use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse};
+use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse, Rr3ManifestFacts};
 use crate::registry::{rr3_phase_for_exit, Rr3Beat, Rr3Death, Rr3Phase, RrdRegistry, RR3_FAN_CAP};
 use crate::rpc::{
     rr3_rpc_build_error, rr3_rpc_build_result, rr3_rpc_call_params, rr3_rpc_counters,
@@ -190,12 +190,37 @@ fn rr3_handshake(
     ctx: &Rr3ConnCtx,
     fan_tx: SyncSender<Rr3Frame>,
 ) -> Result<Rr3Peer, String> {
+    let (reported_task, body) = rr3_hs_read(reader, out)?;
+    let req = match rr3_rpc_parse(&body) {
+        Ok(r) => r,
+        Err((_, msg)) => {
+            return Err(rr3_refuse(
+                out,
+                reported_task,
+                rr3_best_effort_id(&body),
+                Rr3StatusCode::Invalid,
+                &format!("首帧 RPC 畸形: {msg}"),
+            ))
+        }
+    };
+    // ADR-0010 裁定 3：首帧是 rr3.ctl.* → 控制旁支，不注册、一问一答即断
+    if req.method.is_ctl() {
+        return Err(rr3_serve_ctl(out, ctx, reported_task, req));
+    }
+    let facts = rr3_hs_facts(&req, out, reported_task, ctx)?;
+    rr3_hs_admit(ctx, &facts, fan_tx, out, reported_task, req.id)
+}
+
+/// 握手首段：读首帧并过 dst/类型两道门（注册前应答按对端自报 src_task 回）
+fn rr3_hs_read(
+    reader: &mut UnixStream,
+    out: &Arc<Mutex<UnixStream>>,
+) -> Result<(u64, Vec<u8>), String> {
     let frame = match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
         Ok(f) => f,
         // 连首帧都没读到：无从应答，只把原因交回上层记一条
         Err(e) => return Err(format!("首帧读取失败: {e:?}")),
     };
-    // 注册前 rrd 还不知道对端的 task（还没分配），应答只能按对端**自报**的 src_task 回
     let reported_task = frame.header.src_task;
     let (ty, body) = match rr3_body_split(&frame.payload) {
         Ok(v) => v,
@@ -230,23 +255,16 @@ fn rr3_handshake(
             &format!("首帧 payload 类型必须是 Request，收到 {ty:?}"),
         ));
     }
-    let req = match rr3_rpc_parse(&body) {
-        Ok(r) => r,
-        Err((_, msg)) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                rr3_best_effort_id(&body),
-                Rr3StatusCode::Invalid,
-                &format!("首帧 RPC 畸形: {msg}"),
-            ))
-        }
-    };
-    // ADR-0010 裁定 3：首帧是 rr3.ctl.* → 控制旁支，不注册、一问一答即断。
-    // dst / Request 类型两道门在上面已过，模块路径（下方 Register 门）一字不动。
-    if req.method.is_ctl() {
-        return Err(rr3_serve_ctl(out, ctx, reported_task, req));
-    }
+    Ok((reported_task, body))
+}
+
+/// 注册门：方法/参数/形状/entry 绝对路径四道，全 fail-closed 回错误帧
+fn rr3_hs_facts(
+    req: &Rr3RpcRequest,
+    out: &Arc<Mutex<UnixStream>>,
+    reported_task: u64,
+    ctx: &Rr3ConnCtx,
+) -> Result<Rr3ManifestFacts, String> {
     if req.method != Rr3RpcMethod::Register {
         return Err(rr3_refuse(
             out,
@@ -293,9 +311,8 @@ fn rr3_handshake(
             &report.errors.join("; "),
         ));
     }
-    // M2 的 manifest 从线上（wire）来，没有"所在目录"可依据 → entry 必须是绝对路径。
-    // 在仓的 modules/*/module.toml 是**契约工件**而非注册输入：装机时由安装步骤写入绝对
-    // entry（见 modules/README.md），所以这条门禁不吃在仓夹具。
+    // M2 的 manifest 从线上来，没有"所在目录"可依据 → entry 必须是绝对路径。
+    // 在仓 modules/*/module.toml 是契约工件而非注册输入（装机时写入绝对 entry）。
     if !rr3_manifest_abs(&facts.entry) {
         return Err(rr3_refuse(
             out,
@@ -305,34 +322,43 @@ fn rr3_handshake(
             &format!("manifest.entry 必须是绝对路径，收到 {}", facts.entry),
         ));
     }
+    Ok(facts)
+}
+
+/// 入册与应答：注册成功 → 回 src_task → 广播 registered → 给后到者补发在册快照
+fn rr3_hs_admit(
+    ctx: &Rr3ConnCtx,
+    facts: &Rr3ManifestFacts,
+    fan_tx: SyncSender<Rr3Frame>,
+    out: &Arc<Mutex<UnixStream>>,
+    reported_task: u64,
+    req_id: u64,
+) -> Result<Rr3Peer, String> {
     let now = ctx.rr3_ctx_now_ms();
-    // 一份 Sender 进在册表（此后它是这条连接唯一的广播入口），一份留在这里给"后到者补快照"用
+    // 一份 Sender 进在册表（此后它是这条连接唯一的广播入口），一份给补快照用
     let replay_tx = fan_tx.clone();
-    // 硬规矩（11a 的回归换来的那条）：锁结果一律先 `let` 绑再 `match`。把
-    // `rr3_lock(..).rr3_reg_add(..)` 写进被匹配表达式，`MutexGuard` 临时量会延寿到整个 `match`
-    // 语句结束，而 `Err` 分支里的 `rr3_refuse` → `rr3_write` 要取的是**另一把**锁（out），
-    // 今天不死锁也只因为臂内没再碰在册表——将来谁在臂里加一次 `rr3_lock(&ctx.shared)` 就是
-    // 同线程重入自死锁，且 `#[cfg(unix)]` 让 Windows 侧全绿看不见。与 `rr3_conn_finish` 同形。
-    let added = rr3_lock(&ctx.shared).rr3_reg_add(&facts, fan_tx, now);
+    // 硬规矩：锁结果先 `let` 绑再 `match`——Guard 临时量不得延寿到 Err 臂的
+    // rr3_refuse（那边要取另一把锁），与 rr3_conn_finish 同形。
+    let added = rr3_lock(&ctx.shared).rr3_reg_add(facts, fan_tx, now);
     let task = match added {
         Ok(t) => t,
         Err(e) => {
-            // 状态码映射只在这一处（Task 6 的 rr3_rpc_reg_status），别在 conn 里重写一遍
+            // 状态码映射只在这一处（rr3_rpc_reg_status），不在 conn 里重写
             let code = rr3_rpc_reg_status(&e);
-            return Err(rr3_refuse(out, reported_task, req.id, code, &e.to_string()));
+            return Err(rr3_refuse(out, reported_task, req_id, code, &e.to_string()));
         }
     };
     rr3_log(&format!(
         "注册 {} task={task} hb={}ms wd={}ms policy={}",
         facts.name, facts.heartbeat_ms, facts.watchdog_ms, facts.restart_policy
     ));
-    // 应答与广播的先后不确定（两条线程两个写点），所以测试按类型挑帧，不按序号
+    // 应答与广播的先后不确定（两条线程两个写点），测试按类型挑帧，不按序号
     rr3_write(
         out,
         &rr3_out_frame(
             Rr3PayloadType::Response,
             task,
-            &rr3_rpc_build_result(req.id, &json!({"src_task": task})),
+            &rr3_rpc_build_result(req_id, &json!({"src_task": task})),
         ),
     );
     let peer = Rr3Peer {
@@ -344,11 +370,8 @@ fn rr3_handshake(
         RR3_TASK_RRD,
     );
     rr3_log(&format!("广播 registered 到 {n} 个连接"));
-    // 后到者的状态快照：state 是"当前生命周期"的唯一可见面，只发转移不发快照的话，
-    // 按 start_priority 后起的模块永远看不到先起模块上线过（Task 9 的依赖判定就没有输入）。
-    // 注意这里说的只是**入队次序**，不构成上线次序：writer 线程可能在 reader 取锁前就把别的
-    // 广播落盘了。所以这一条连接的帧序不做任何保证，读侧一律按类型/字段挑帧（夹具的按连接
-    // 待处理队列正是为此而存在，见 `rrd/tests/support/mod.rs` 的文件头）。
+    // 后到者补发在册状态：只发转移不发快照的话，后起模块看不到先起模块上线过。
+    // 这里只保证入队次序，不构成上线次序——读侧一律按类型/字段挑帧。
     let snapshot = rr3_lock(&ctx.shared).rr3_reg_snapshot();
     let mut replayed = 0usize;
     for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != peer.name) {
