@@ -622,7 +622,7 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
                         rr3_log(
                             "counters 关停 flush 线程异常收场（self-pipe EOF），恢复默认信号处置",
                         );
-                        rr3_restore_term_default();
+                        rr3_term_default();
                         return;
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -630,7 +630,7 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
                         rr3_log(&format!(
                             "counters 关停 flush 线程读 self-pipe 失败（{e}），恢复默认信号处置"
                         ));
-                        rr3_restore_term_default();
+                        rr3_term_default();
                         return;
                     }
                 }
@@ -643,7 +643,7 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
 
 /// 恢复 SIGTERM/SIGINT 的默认处置（SIG_DFL = 0）：flush 线程若异常收场，
 /// 后续终止信号仍按内核默认语义杀进程，不被已安装的处理器永久吞掉。
-fn rr3_restore_term_default() {
+fn rr3_term_default() {
     unsafe {
         signal(RR3_SIGTERM, 0);
         signal(RR3_SIGINT, 0);
