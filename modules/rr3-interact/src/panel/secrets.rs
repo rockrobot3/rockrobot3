@@ -16,6 +16,11 @@ use std::path::{Path, PathBuf};
 use rr_ipc::persist::rr3_atomic_store;
 use serde_json::{json, Value};
 
+/// secrets 读-改-写串行锁：面板每连接一线程，两个并发 `POST /api/model/key`
+/// 若各自读旧表再各自原子写，后写者覆盖前写者（丢键），且共用同一个
+/// `secrets.json.tmp` 会互相踩。upsert 是低频运维动作，进程级互斥代价可忽略。
+static RR3_SECRETS_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// secrets 路径环境变量（brain 侧同名同义——双端单一契约）
 pub const RR3_SECRETS_FILE_ENV: &str = "RR3_SECRETS_FILE";
 
@@ -85,6 +90,10 @@ pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<()
     if ref_name.chars().any(char::is_whitespace) {
         return Err(format!("ref 含空白: {ref_name:?}"));
     }
+    // 读-改-写整段持锁：丢键与 tmp 互踩都由此封死（见静态锁注释）。
+    let _write = RR3_SECRETS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let mut keys = rr3_secrets_read(path)?;
     if value.trim().is_empty() {
         keys.remove(ref_name);
@@ -122,6 +131,31 @@ mod tests {
             std::env::temp_dir().join(format!("rr3-panel-secrets-{}-{tag}", std::process::id()));
         let _ = std::fs::create_dir_all(&d);
         d.join("secrets.json")
+    }
+
+    /// 并发 upsert 不丢键（本轮审计）：面板每连接一线程，读-改-写必须串行。
+    #[test]
+    fn concurrent_upserts_do_not_lose_keys() {
+        let path = tmp_secrets("concurrent");
+        let mut hs = Vec::new();
+        for i in 0..16 {
+            let p = path.clone();
+            hs.push(std::thread::spawn(move || {
+                rr3_secrets_upsert(&p, &format!("ref-{i}"), "v").expect("并发写应成功");
+            }));
+        }
+        for h in hs {
+            h.join().expect("写线程不应 panic");
+        }
+        let keys = rr3_secrets_read(&path).expect("读回全表");
+        for i in 0..16 {
+            assert!(
+                keys.contains_key(&format!("ref-{i}")),
+                "并发写丢键 ref-{i}: {:?}",
+                keys.keys().collect::<Vec<_>>()
+            );
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
