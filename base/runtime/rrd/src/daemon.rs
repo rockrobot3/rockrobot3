@@ -750,6 +750,9 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
             loop {
                 match rx.read(&mut one) {
                     Ok(1) => {
+                        // 关停起点先行留痕：若后续 flush 卡在磁盘上，这行是
+                        // "信号已收到、正在落盘"与"信号都没到"的分界。
+                        rr3_log("收到终止信号（SIGTERM/SIGINT），开始关停 flush");
                         let snap = rr3_lock(&shared).rr3_reg_counters_snapshot();
                         match path
                             .as_deref()
