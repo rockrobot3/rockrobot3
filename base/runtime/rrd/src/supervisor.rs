@@ -362,6 +362,16 @@ fn rr3_boot_spawn(
         rr3_log(&format!("杀掉挂死的 {name} pid={}", old.id()));
     }
     rr3_lock(shared).rr3_reg_own(&name);
+    match rr3_spawn_build(job, bus_path, boot_role).spawn() {
+        Ok(child) => rr3_spawn_ok(children, &name, child, job, attempt),
+        Err(e) => rr3_spawn_err(shared, t0, due, job, &name, e),
+    }
+}
+
+/// 起进程命令的组装：E-6 三件环境（连哪儿/是谁/做什么）+ 四路后端覆盖与描述符、
+/// 执行轴状态，空值一律不注入；stderr 接 per-unit 日志（append），打不开回退 inherit。
+fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Command {
+    let name = job.facts.name.as_str();
     // E-6 的三件环境：连哪儿（rrd 自己的 socket 绝对路径）、是谁（该 job 的 manifest
     // 绝对路径，每次重启重读）、做什么（`--boot-role` 的值，原样透传、rrd 不解释）。
     // 物理绑定描述符（批D④）只在非空时追加注入：空 = 装配单未给 [hardware]（或
@@ -403,7 +413,7 @@ fn rr3_boot_spawn(
     // stderr 接 per-unit 日志文件（门 r 留痕通道定形，批N4 件八）：模块留痕唯一可达
     // 通道——append 语义让"一次重启后仍能取到崩溃前的最后 N 行"（§17 同轨判据）天然
     // 成立；文件打不开回退 inherit 并点名，观测通道故障降级、不挡起跑。
-    let stderr_stdio = match rr3_open_unit_log(bus_path, &name) {
+    let stderr_stdio = match rr3_open_unit_log(bus_path, name) {
         Ok(f) => Stdio::from(f),
         Err(e) => {
             rr3_log(&format!(
@@ -412,35 +422,48 @@ fn rr3_boot_spawn(
             Stdio::inherit()
         }
     };
-    let spawned = cmd.stdout(Stdio::null()).stderr(stderr_stdio).spawn();
-    match spawned {
-        Ok(child) => {
-            let pid = child.id();
-            children.insert(name.clone(), child);
-            // `attempt>0` 才附尾注：boot 那一次没有"第几次重启"可说
-            //（S1 正是靠这个后缀把第一世与第二世分开）。
-            let tail = if attempt > 0 {
-                format!(" attempt={attempt}")
-            } else {
-                String::new()
-            };
-            rr3_log(&format!(
-                "spawn {name} pid={pid} entry={}{}",
-                job.entry.display(),
-                tail
-            ));
-        }
-        Err(e) => {
-            // 撤下所有权标记：这一次根本没有进程，conn 那一路无从等退出码；标记留着
-            // 就会把同名新实例的 EOF 永远钉在 `DeferredToExitStatus` 上。
-            rr3_lock(shared).rr3_reg_unown(&name);
-            // 已知边界②：`Command::spawn` 返回 Err（ENOMEM / ETXTBSY 这类瞬态，或名字被外部
-            // 占用后的意外形状）走 EarlyExit 那一路，吃预算、有上限（E-3 末段）。
-            let reason = format!("起进程失败: {e}");
-            let verdict = rr3_lock(shared).rr3_reg_child_exit(&job.facts, false, rr3_now_ms(t0));
-            rr3_absorb_exit(shared, &name, &reason, verdict, due);
-        }
-    }
+    cmd.stdout(Stdio::null()).stderr(stderr_stdio);
+    cmd
+}
+
+/// 起进程成功：入子进程表 + 点名日志；`attempt>0` 才附尾注（boot 那次没有
+/// "第几次重启"可说——S1 正是靠这个后缀把第一世与第二世分开）。
+fn rr3_spawn_ok(
+    children: &mut BTreeMap<String, Child>,
+    name: &str,
+    child: Child,
+    job: &Rr3SpawnJob,
+    attempt: u32,
+) {
+    let pid = child.id();
+    children.insert(name.to_string(), child);
+    let tail = if attempt > 0 {
+        format!(" attempt={attempt}")
+    } else {
+        String::new()
+    };
+    rr3_log(&format!(
+        "spawn {name} pid={pid} entry={}{}",
+        job.entry.display(),
+        tail
+    ));
+}
+
+/// 起进程失败：撤所有权标记 + EarlyExit 记账（已知边界②：瞬态错误或被外部占名，
+/// 走吃预算、有上限那一路）。撤标记是必须的——否则同名新实例的 EOF 会被永远钉在
+/// `DeferredToExitStatus` 上。
+fn rr3_spawn_err(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    t0: Instant,
+    due: &mut Vec<(Instant, Rr3RestartPlan)>,
+    job: &Rr3SpawnJob,
+    name: &str,
+    e: std::io::Error,
+) {
+    rr3_lock(shared).rr3_reg_unown(name);
+    let reason = format!("起进程失败: {e}");
+    let verdict = rr3_lock(shared).rr3_reg_child_exit(&job.facts, false, rr3_now_ms(t0));
+    rr3_absorb_exit(shared, name, &reason, verdict, due);
 }
 
 /// 扫尸（E-5 每轮的第二段）。**先收集 `(name, status)` 再处理**：`iter_mut` 里不许 `remove`。
