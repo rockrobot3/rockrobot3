@@ -208,6 +208,23 @@ pub fn rr3_boot_summary_get() -> Option<String> {
     RR3_BOOT_SUMMARY.get().cloned()
 }
 
+/// 降级原因定格（模块, 类别, 点名文案）：daemon 装配完成后 set 一次，
+/// `rr3.ctl.health` 读回。与启动摘要同源同刻；未定格返回 None（后门路径），不造假值。
+#[cfg(unix)]
+static RR3_DEGRADE_NOTES: OnceLock<serde_json::Value> = OnceLock::new();
+
+/// 定格降级原因（daemon 装配完成后调一次）；重复调用被拒。
+#[cfg(unix)]
+pub fn rr3_degrade_notes_set(v: serde_json::Value) -> bool {
+    RR3_DEGRADE_NOTES.set(v).is_ok()
+}
+
+/// 读降级原因：未定格返回 None，不造假值。
+#[cfg(unix)]
+pub fn rr3_degrade_notes_get() -> Option<serde_json::Value> {
+    RR3_DEGRADE_NOTES.get().cloned()
+}
+
 fn rr3_log_ring() -> &'static Mutex<VecDeque<String>> {
     RR3_LOG_RING.get_or_init(|| Mutex::new(VecDeque::new()))
 }

@@ -493,7 +493,8 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
     }))
 }
 
-/// ctl.health 读面：心跳健康快照（watchdog 判活的输入）。
+/// ctl.health 读面：心跳健康快照（watchdog 判活的输入）+ 降级原因
+/// （模块 / 类别 / 点名文案；未定格的后门路径为 null，不造假值）。
 fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
     let modules = {
         let g = rr3_lock(&ctx.shared);
@@ -508,7 +509,10 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
             })
             .collect::<Vec<Value>>()
     };
-    Ok(json!({ "modules": modules }))
+    Ok(json!({
+        "modules": modules,
+        "degraded": crate::rr3_degrade_notes_get(),
+    }))
 }
 
 /// ctl.reboot 执行面：双重门（cfg(linux) 且 env `RR3_REBOOT_OK=1`）解锁才真跑

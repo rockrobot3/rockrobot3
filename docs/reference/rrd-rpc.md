@@ -76,8 +76,8 @@
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
-| `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>, "boot":<string|null>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致；`boot` 为启动摘要一行（`tier/chip/profile/modules/预降级/后端`），未定格为 `null` 不造假值 | `conn.rs` 的 `rr3_ctl_status` |
-| `rr3.ctl.health` | `CtlHealth` | 无必填 | `{"modules":[{"name","task","phase","heartbeat_ms","watchdog_ms","since_beat_ms"}]}`——后三数是**判定用的数回显**（条目自己的配置 + `now - last_beat`） | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_health_snapshot` |
+| `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>, "boot":<string|null>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致；`boot` 为启动摘要一行（`tier/chip/profile/modules/预降级/缺格/后端`），未定格为 `null` 不造假值 | `conn.rs` 的 `rr3_ctl_status` |
+| `rr3.ctl.health` | `CtlHealth` | 无必填 | `{"modules":[{"name","task","phase","heartbeat_ms","watchdog_ms","since_beat_ms"}], "degraded":[{"module","kind","detail"}]|null}`——后三数是**判定用的数回显**（条目自己的配置 + `now - last_beat`）；`degraded` 为降级原因（`kind` ∈ `missing_slot` / `assemble_broken`），未定格（`--manifest` 后门）为 `null` 不造假值 | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_health_snapshot` |
 | `rr3.ctl.logs` | `CtlLogs` | 无必填 | `{"lines":["rrd: …", …]}`——rrd 内存日志环（512 行环形，`rr3_log` 单点落环、不落盘）尾部副本 | `conn.rs` 的 `rr3_serve_ctl`、`lib.rs` 的 `rr3_log`/`rr3_log_tail` |
 | `rr3.ctl.ota` | `CtlOta` | 无必填 | **无**——恒拒：`Permission`（-22，`AIRY_EPERM`）+ 文案点 M6（契约状态码是冻结集，不自造 `NotSupported`） | `conn.rs` 的 `rr3_serve_ctl` |
 | `rr3.ctl.counters` | `CtlCounters` | 无必填 | `{"counters":{"<模块名>/<键>":<u64>, …, "boots":<u64>}}`——运维计数聚合快照（0.0.4 批B，Q1/Q2 裁定）：心跳可选 `counters` 按 `模块名/键` 前缀归并进在册表（`rr3_reg_counters_merge`，饱和加法），`boots` 是 rrd 自有裸键（每次启动自增，不走心跳）；持久化路径与语义见 [`rrd-cli.md`](rrd-cli.md) 的 `RR3_DATA_DIR`。**聚合与落盘在心跳 Rejected 之后也做**——运维账不跟判活走 | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_counters_*` 三方法、`counters.rs` |

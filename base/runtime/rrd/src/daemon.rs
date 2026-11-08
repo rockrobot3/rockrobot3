@@ -243,6 +243,8 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     rr3_log(&summary);
     // 同一行定格给 ctl.status：远程诊断读一次应答即可看到装配面，不必翻日志。
     let _ = crate::rr3_boot_summary_set(summary);
+    // 降级原因同刻定格给 ctl.health：卡在哪一格、为何不 spawn，一条应答看全。
+    let _ = crate::rr3_degrade_notes_set(rr3_degrade_json(&boot.degrade));
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     // bind 独占探测（0.0.8d 审计 B-9）：存活实例占用 = 拒绝启动（裂脑禁绝）；
@@ -311,7 +313,11 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
 /// 装配链产物：--profile 正门与 --manifest 调试后门的统一输入
 struct Rr3DaemonBoot {
     manifests: Vec<PathBuf>,
+    /// 缺格模块（`degrade` 中类别为 `missing_slot` 的投影，boot 序跳过这些名字）
     degraded: BTreeSet<String>,
+    /// 降级原因（模块, 类别, 点名文案）：`missing_slot` / `assemble_broken`，
+    /// 单源供启动摘要与 `ctl.health` 读回（远程诊断不必翻启动日志）
+    degrade: Vec<(String, String, String)>,
     hal_bindings: String,
     axis_state: String,
     predegraded: BTreeSet<String>,
@@ -338,6 +344,7 @@ fn rr3_daemon_boot(cfg: &RrdConfig) -> Result<Rr3DaemonBoot, String> {
         None => Ok(Rr3DaemonBoot {
             manifests: cfg.manifests.clone(),
             degraded: BTreeSet::new(),
+            degrade: Vec::new(),
             hal_bindings: String::new(),
             axis_state: String::new(),
             predegraded: BTreeSet::new(),
@@ -371,11 +378,27 @@ fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3Dae
         ));
     }
     rr3_boot_notes(&boot);
-    let degraded: BTreeSet<String> = boot.missing.iter().map(|(m, _)| m.clone()).collect();
-    let predegraded: BTreeSet<String> = boot
-        .assemble_broken
+    // 降级原因单源（模块, 类别, 点名文案）：缺格与装配缺项在此合流，
+    // degraded/predegraded 两集合由它投影，`ctl.health` 读回同一份。
+    let degrade: Vec<(String, String, String)> = boot
+        .missing
         .iter()
-        .map(|(m, _)| m.clone())
+        .map(|(m, slot)| (m.clone(), "missing_slot".to_string(), slot.clone()))
+        .chain(
+            boot.assemble_broken
+                .iter()
+                .map(|(m, msg)| (m.clone(), "assemble_broken".to_string(), msg.clone())),
+        )
+        .collect();
+    let degraded: BTreeSet<String> = degrade
+        .iter()
+        .filter(|(_, kind, _)| kind == "missing_slot")
+        .map(|(m, _, _)| m.clone())
+        .collect();
+    let predegraded: BTreeSet<String> = degrade
+        .iter()
+        .filter(|(_, kind, _)| kind == "assemble_broken")
+        .map(|(m, _, _)| m.clone())
         .collect();
     // 装配快照定格（批N4 件九笔4）：boot 链验收通过的底账一次 set 进 OnceLock，
     // `rr3.ctl.wiring` 的渲染源；首份胜出，重复 boot 不覆盖。
@@ -394,6 +417,7 @@ fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3Dae
     Ok(Rr3DaemonBoot {
         manifests: boot.manifests,
         degraded,
+        degrade,
         hal_bindings: boot.hal_bindings,
         axis_state: boot.axis_state,
         predegraded,
@@ -428,6 +452,17 @@ fn rr3_boot_summary(
         "启动摘要: tier={} chip={} profile={profile} modules={modules} 预降级={predegraded} 缺格={missing} 后端={backends}",
         dash(tier),
         dash(chip)
+    )
+}
+
+/// 降级原因 → JSON 数组（`module` / `kind` / `detail`），`ctl.health` 读回。
+/// 空表照实回 `[]`：装配链明确无降级，不是"未定格"。
+fn rr3_degrade_json(notes: &[(String, String, String)]) -> serde_json::Value {
+    serde_json::Value::Array(
+        notes
+            .iter()
+            .map(|(module, kind, detail)| json!({"module": module, "kind": kind, "detail": detail}))
+            .collect(),
     )
 }
 
@@ -968,5 +1003,29 @@ mod tests {
             s.contains("hal=linux audio=esp32 servo=esp32 display=esp32"),
             "后端链必须逐面回显: {s}"
         );
+    }
+
+    /// 降级原因：空表照实 `[]`；两类原因逐条带模块/类别/文案，顺序即入表顺序。
+    #[test]
+    fn degrade_notes_carry_kind_and_detail() {
+        assert_eq!(rr3_degrade_json(&[]), json!([]));
+        let notes = vec![
+            (
+                "rr3-act".to_string(),
+                "missing_slot".to_string(),
+                "servo".to_string(),
+            ),
+            (
+                "rr3-sense".to_string(),
+                "assemble_broken".to_string(),
+                "atoms/i2c 缺 assemble.toml".to_string(),
+            ),
+        ];
+        let v = rr3_degrade_json(&notes);
+        assert_eq!(v[0]["module"], "rr3-act", "{v}");
+        assert_eq!(v[0]["kind"], "missing_slot", "{v}");
+        assert_eq!(v[0]["detail"], "servo", "{v}");
+        assert_eq!(v[1]["kind"], "assemble_broken", "{v}");
+        assert_eq!(v[1]["detail"], "atoms/i2c 缺 assemble.toml", "{v}");
     }
 }
