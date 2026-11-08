@@ -176,85 +176,9 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
     // pins/controllers 至少一侧非空、why 必填（无可读理由的冲突不许进册）
     rr3_plat_conf(t, &mut table, &mut errs);
 
-    // [construction]：段缺即红（裁定①）；空表合法（无绑定形态显式空）。键 =
-    // "controller:role:instance" 三元串（⑧-a 定形），controller 段必须在本表
-    // [[controller]] 在册（同文件真值）。
-    match t.get("construction") {
-        Some(Value::Table(cons)) => {
-            for (k, v) in cons {
-                let segs: Vec<&str> = k.split(':').collect();
-                if segs.len() != 3 {
-                    errs.push(format!(
-                        "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
-                    ));
-                    continue;
-                }
-                if segs[0].is_empty() || segs[1].is_empty() {
-                    errs.push(format!(
-                        "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
-                    ));
-                    continue;
-                }
-                if !table.controllers.contains_key(segs[0]) {
-                    errs.push(format!(
-                        "construction 键 \"{k}\" 的 controller 段 {} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）",
-                        segs[0]
-                    ));
-                    continue;
-                }
-                match v.as_str() {
-                    Some(p) if !p.trim().is_empty() => {
-                        table.construction.insert(k.clone(), p.to_string());
-                    }
-                    Some(_) => errs.push(format!("construction[\"{k}\"] 构造路径不得为空串")),
-                    None => errs.push(format!(
-                        "construction[\"{k}\"] 应为字符串（平台侧构造路径，§4.5），收到 {v:?}"
-                    )),
-                }
-            }
-        }
-        Some(other) => errs.push(format!(
-            "平台表 construction 应为表（[construction]），收到 {other:?}"
-        )),
-        None => errs
-            .push("平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into()),
-    }
-
-    // [controller_wordform]：host 词形派生表（实-6 (a)，批N4 件七——规则自 rrd
-    // 硬编码下移平台表）。段缺即红（裁定①）；空表合法 = 显式声明本平台无 host
-    // 词形派生面（rtos/bare 档经 [[construction]] 具名构造直给，esp32 形状）；
-    // host 档消费侧（rrd 派生器）对查不到的词形逐键 fail-closed，空表配 host 档
-    // 必红。键域封闭四值，值 = 非空前缀字符串。
-    match t.get("controller_wordform") {
-        Some(Value::Table(wf)) => {
-            for (k, v) in wf {
-                if !RR3_PLATFORM_WORDFORM_KEYS.contains(&k.as_str()) {
-                    errs.push(format!(
-                        "[controller_wordform] 未知键 {k}（只认词形派生四键 {RR3_PLATFORM_WORDFORM_KEYS:?}；physical/channel/addr 类派生不经词形）"
-                    ));
-                    continue;
-                }
-                match v.as_str() {
-                    Some(p) if !p.trim().is_empty() => {
-                        table.controller_wordform.insert(k.clone(), p.to_string());
-                    }
-                    Some(_) => errs.push(format!(
-                        "[controller_wordform].{k} 词形前缀不得为空串（无词形须删键走空表显式）"
-                    )),
-                    None => errs.push(format!(
-                        "[controller_wordform].{k} 应为字符串前缀，收到 {v:?}"
-                    )),
-                }
-            }
-        }
-        Some(other) => errs.push(format!(
-            "平台表 controller_wordform 应为表（[controller_wordform]），收到 {other:?}"
-        )),
-        None => errs.push(
-            "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
-                .into(),
-        ),
-    }
+    // [construction]：三元键具名构造表；[controller_wordform]：host 词形派生表。
+    rr3_plat_cons(t, &mut table, &mut errs);
+    rr3_plat_wf(t, &mut table, &mut errs);
 
     if errs.is_empty() {
         Ok(table)
@@ -490,6 +414,84 @@ fn rr3_plat_conf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
         )),
         None => errs.push(
             "平台表缺 conflict 键（无冲突也必须显式写 conflict = [] 并带'评审确认无冲突矩阵'注记，裁定②）"
+                .into(),
+        ),
+    }
+}
+
+/// `[construction]` 段：`controller:role:instance` 三元键，controller 须本表在册。
+fn rr3_plat_cons(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    match t.get("construction") {
+        Some(Value::Table(cons)) => {
+            for (k, v) in cons {
+                let segs: Vec<&str> = k.split(':').collect();
+                if segs.len() != 3 {
+                    errs.push(format!(
+                        "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
+                    ));
+                    continue;
+                }
+                if segs[0].is_empty() || segs[1].is_empty() {
+                    errs.push(format!(
+                        "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
+                    ));
+                    continue;
+                }
+                if !table.controllers.contains_key(segs[0]) {
+                    errs.push(format!(
+                        "construction 键 \"{k}\" 的 controller 段 {} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）",
+                        segs[0]
+                    ));
+                    continue;
+                }
+                match v.as_str() {
+                    Some(p) if !p.trim().is_empty() => {
+                        table.construction.insert(k.clone(), p.to_string());
+                    }
+                    Some(_) => errs.push(format!("construction[\"{k}\"] 构造路径不得为空串")),
+                    None => errs.push(format!(
+                        "construction[\"{k}\"] 应为字符串（平台侧构造路径，§4.5），收到 {v:?}"
+                    )),
+                }
+            }
+        }
+        Some(other) => errs.push(format!(
+            "平台表 construction 应为表（[construction]），收到 {other:?}"
+        )),
+        None => errs
+            .push("平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into()),
+    }
+}
+
+/// `[controller_wordform]` 段：封闭四键、值 = 非空前缀；空表 = 显式无词形派生面。
+fn rr3_plat_wf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    match t.get("controller_wordform") {
+        Some(Value::Table(wf)) => {
+            for (k, v) in wf {
+                if !RR3_PLATFORM_WORDFORM_KEYS.contains(&k.as_str()) {
+                    errs.push(format!(
+                        "[controller_wordform] 未知键 {k}（只认词形派生四键 {RR3_PLATFORM_WORDFORM_KEYS:?}；physical/channel/addr 类派生不经词形）"
+                    ));
+                    continue;
+                }
+                match v.as_str() {
+                    Some(p) if !p.trim().is_empty() => {
+                        table.controller_wordform.insert(k.clone(), p.to_string());
+                    }
+                    Some(_) => errs.push(format!(
+                        "[controller_wordform].{k} 词形前缀不得为空串（无词形须删键走空表显式）"
+                    )),
+                    None => errs.push(format!(
+                        "[controller_wordform].{k} 应为字符串前缀，收到 {v:?}"
+                    )),
+                }
+            }
+        }
+        Some(other) => errs.push(format!(
+            "平台表 controller_wordform 应为表（[controller_wordform]），收到 {other:?}"
+        )),
+        None => errs.push(
+            "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
                 .into(),
         ),
     }
