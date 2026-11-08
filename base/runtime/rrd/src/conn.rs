@@ -433,10 +433,10 @@ fn rr3_serve_ctl(
             "OTA（含模块级 staging 更新）随 M6 落地，当前拒绝执行".to_string(),
         )),
         // 系统重启（0.0.4 批C，Q3 裁定）：执行面带**双重门**——cfg(linux) 且
-        // env `RR3_REBOOT_OK=1`（发行版服务单元注入）才真跑 `systemctl reboot`；
+        // env `RR3_REBOOT_OK=1`（装机服务单元/init 脚本注入）才真跑重启命令；
         // 其余一律 Permission 拒 + 日志点名。为什么加 env 门：cfg(linux) 单独
         // 解锁会让 CI 的 ubuntu runner 在 e2e 里真重启——e2e 可测性要求缺省路径
-        // 恒拒，解锁面留装机环境（rrd.service 设 RR3_REBOOT_OK=1）。
+        // 恒拒，解锁面留装机环境（distro 的 rrd.service 与 buildroot 的 S99rrd 同设）。
         Rr3RpcMethod::CtlReboot => rr3_ctl_reboot(),
         // 装配快照读口（批N4 件九笔4）：boot 装载链验收后的四路底账 + [pins]×
         // wiring 全交叉逐条判果，一应答给出（判据真值单点 = assembly.rs）。快照
@@ -508,27 +508,40 @@ fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
 }
 
 /// ctl.reboot 执行面：双重门（cfg(linux) 且 env `RR3_REBOOT_OK=1`）解锁才真跑
-/// `systemctl reboot`，其余一律 Permission 拒；e2e 缺省路径恒拒。
+/// 重启命令，其余一律 Permission 拒；e2e 缺省路径恒拒。
 fn rr3_ctl_reboot() -> Result<Value, (Rr3StatusCode, String)> {
     match rr3_reboot_unlocked() {
         Some(how) => {
             rr3_log(&format!("ctl.reboot 执行面已解锁（{how}），发起系统重启"));
-            match std::process::Command::new("systemctl")
-                .arg("reboot")
-                .status()
-            {
-                Ok(st) if st.success() => Ok(json!({"reboot": true})),
-                other => Err((
-                    Rr3StatusCode::Permission,
-                    format!("systemctl reboot 执行失败: {other:?}"),
-                )),
-            }
+            rr3_reboot_run()
+                .map(|()| json!({"reboot": true}))
+                .map_err(|e| (Rr3StatusCode::Permission, format!("重启命令执行失败: {e}")))
         }
         None => Err((
             Rr3StatusCode::Permission,
             "reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）".to_string(),
         )),
     }
+}
+
+/// 发起重启：systemd 轨走 `systemctl reboot`，Buildroot/BusyBox 轨回退
+/// `/sbin/reboot`、`/bin/reboot`——同一内核动作，两条装机轨都可达。
+/// 三条依次尝试，成功即返回；全失败点名每一条（不猜"哪条才该在"）。
+fn rr3_reboot_run() -> Result<(), String> {
+    const TRIES: [(&str, &[&str]); 3] = [
+        ("systemctl", &["reboot"]),
+        ("/sbin/reboot", &[]),
+        ("/bin/reboot", &[]),
+    ];
+    let mut errs = Vec::new();
+    for (cmd, args) in TRIES {
+        match std::process::Command::new(cmd).args(args).status() {
+            Ok(st) if st.success() => return Ok(()),
+            Ok(st) => errs.push(format!("{cmd}: {st}")),
+            Err(e) => errs.push(format!("{cmd}: {e}")),
+        }
+    }
+    Err(errs.join("; "))
 }
 
 /// 处理注册后的入站帧。`Err` = 协议违规，该连接按崩溃收尾。
