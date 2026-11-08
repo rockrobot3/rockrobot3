@@ -1096,8 +1096,9 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
     // 通道收口（0.0.8b 审计 B-5 落地，原 Task 10 carry）：条目随注册表释放 →
     // 最后一个 Sender drop → writer 的 iter() 自然结束。僵尸在册条目（注册后不再
     // 读 socket 的模块）由两路兜住：① 有界队列——writer 阻塞在写时积压封顶
-    // RR3_FAN_CAP 帧，fanout 满侧断投点名；② 写超时——writer 5s 写不进即退出、
-    // 通道 drop，fanout 走 Disconnected 置 tx=None。两条路都不再无界吃内存。
+    // RR3_FAN_CAP 帧，fanout 满侧**丢帧但保留连接**（本轮审计修正：置 tx=None 会
+    // 让心跳仍通的模块永久失聪）；② 写超时——writer 5s 写不进即退出、通道 drop，
+    // fanout 走 Disconnected 才置 tx=None。两条路都不再无界吃内存。
     let _ = writer.join();
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())

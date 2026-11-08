@@ -750,12 +750,21 @@ pub(crate) fn rr3_tts_pcm_frames(pcm: &[u8], mut seq: u64) -> (Vec<Value>, u64) 
     (frames, seq)
 }
 
+/// TTS 下行突发节流（本轮审计）：一轮 PCM 是整段预合成（播放前），帧数可达
+/// 数百；一次性灌入会把 rrd 的有界广播队列（128 帧）顶满——即使 rrd 满侧只丢帧
+/// 不摘连接，interact 的收流对账也会因缺帧拒播。每 16 帧让出 1ms 给 fanout/
+/// writer 排空：10s 语音（500 帧）仅增 ~31ms，相对 ASR/LLM/TTS 的秒级耗时无量级影响。
+const RR3_TTS_PUB_BURST: usize = 16;
+
 /// 按 [`rr3_tts_pcm_frames`] 分帧发布 tts_pcm 流，返回新的 seq 水位
 /// （发布写不出去 Err 上抛——传输性失败致命）。
 fn rr3_publish_tts_pcm<B: Rr3TurnBus>(bus: &B, pcm: &[u8], seq: u64) -> Result<u64, String> {
     let (frames, seq) = rr3_tts_pcm_frames(pcm, seq);
-    for body in frames {
+    for (i, body) in frames.into_iter().enumerate() {
         bus.publish(RR3_TOPIC_TTS_PCM, body)?;
+        if (i + 1) % RR3_TTS_PUB_BURST == 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
     Ok(seq)
 }
