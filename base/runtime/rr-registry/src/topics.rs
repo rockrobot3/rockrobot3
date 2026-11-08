@@ -89,7 +89,7 @@ impl Rr3TopicSet {
     /// 存在的唯一理由是让装载处能拿**契约原值**复验 merge：`rr3_topic_check` 只问
     /// kind 在不在 `[rules] topic_allowed_kinds` 白名单里，不问它有没有被改写，
     /// 光靠形状自检抓不到"stream 被换成 event"这种退化（消费方见 rrd 的
-    /// `reject_inconsistent_merge`）。
+    /// `reject_bad_merge`）。
     pub fn rr3_topic_kind(&self, topic: &str) -> Option<String> {
         self.kinds.get(topic).cloned()
     }

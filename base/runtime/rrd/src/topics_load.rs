@@ -12,7 +12,7 @@ use rr_registry::{rr3_topic_parse, Rr3TopicSet};
 
 /// 内建命名空间：`rr3-runtime/*` 两个主题属 rrd 的下行广播，模块上行冒充必须被拒（spec §5.0）。
 /// 强制点在装载处：`rr3_topics_load` 对叠加层任一名命中
-/// `rr3_topics_is_reserved_topic` 的条目即拒启动并点名（见
+/// `rr3_topics_reserved` 的条目即拒启动并点名（见
 /// `overlay_declaring_reserved_namespace_is_rejected`）；运行时注册路径上的同一判定随 Task 5/6 落地。
 pub const RR3_RESERVED_OWNER: &str = "rr3-runtime";
 
@@ -102,7 +102,7 @@ fn rr3_reject_reserved(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<String>
     let errs: Vec<String> = set
         .rr3_topic_names()
         .iter()
-        .filter(|t| rr3_topics_is_reserved_topic(t))
+        .filter(|t| rr3_topics_reserved(t))
         .map(|t| {
             format!(
                 "主题叠加层 {} 冒充内建命名空间: {t}（{RR3_RESERVED_OWNER}/* 属 rrd 的下行广播，叠加层不得声明）",
@@ -134,7 +134,7 @@ fn rr3_reject_reserved(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<String>
 /// 复验范围到 kind 为止：主题集只存 name→owner、name→kind 与 owner 名单，`stable`、
 /// `note` 那类注释性字段不在它的视图里，故本注释不称"全字段复验"。
 /// 与 `rr3_reject_reserved` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
-fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
+fn reject_bad_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
     let mut errs: Vec<String> = merged
         .rr3_topic_check()
         .into_iter()
@@ -172,7 +172,7 @@ fn reject_inconsistent_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result
 /// 两条路径都在进装载入口时被规范化（CF-4 契约 / 遗留 ③ 叠加层），后续所有文案都取
 /// 规范化后的那一个：`rr3_contract_abs` 与 `rr3_overlay_abs` 各管一条。
 /// 叠加层两道拒绝：撞名 → 点名冲突条目；声明 `rr3-runtime/*` → 点名冒充条目。
-/// 合并后还有一道：见 `reject_inconsistent_merge`。
+/// 合并后还有一道：见 `reject_bad_merge`。
 pub fn rr3_topics_load(
     contract: &Path,
     overlay: Option<&Path>,
@@ -187,12 +187,12 @@ pub fn rr3_topics_load(
     rr3_reject_reserved(&ov_set, &ov)?;
     let added = ov_set.rr3_topic_names();
     let merged = base.rr3_topic_merge(&ov_set)?; // 撞名 → Err(冲突条目)
-    reject_inconsistent_merge(&base, &merged)?;
+    reject_bad_merge(&base, &merged)?;
     Ok((merged, added))
 }
 
 /// 首段是否落在内建命名空间（冒充面）
-pub fn rr3_topics_is_reserved_topic(topic: &str) -> bool {
+pub fn rr3_topics_reserved(topic: &str) -> bool {
     topic.split('/').next().unwrap_or("") == RR3_RESERVED_OWNER
 }
 
@@ -404,10 +404,10 @@ owner = "rr3-sense"
 
     #[test]
     fn reserved_namespace_detection() {
-        assert!(rr3_topics_is_reserved_topic("rr3-runtime/system/heartbeat"));
-        assert!(rr3_topics_is_reserved_topic("rr3-runtime/module/state"));
-        assert!(!rr3_topics_is_reserved_topic("rr3-sima/ping/state"));
-        assert!(!rr3_topics_is_reserved_topic(""));
+        assert!(rr3_topics_reserved("rr3-runtime/system/heartbeat"));
+        assert!(rr3_topics_reserved("rr3-runtime/module/state"));
+        assert!(!rr3_topics_reserved("rr3-sima/ping/state"));
+        assert!(!rr3_topics_reserved(""));
     }
 
     /// 叠加层里 owner 已登记、但 topic 首段不是该 owner —— 冒充别人的命名空间必须拒
@@ -493,7 +493,7 @@ owner = "rr3-sense"
             tampered.rr3_topic_check()
         );
         assert_eq!(
-            reject_inconsistent_merge(&base, &tampered).expect_err("契约 topic 的 kind 被改写必须拒"),
+            reject_bad_merge(&base, &tampered).expect_err("契约 topic 的 kind 被改写必须拒"),
             vec![
                 "契约 topic rr3-sense/audio/pcm 的 kind 被叠加层改写: Some(\"stream\") → Some(\"event\")"
                     .to_string()
@@ -519,9 +519,9 @@ owner = "rr3-sima"
 "#,
         );
         assert!(
-            reject_inconsistent_merge(&base, &legit).is_ok(),
+            reject_bad_merge(&base, &legit).is_ok(),
             "合法新增不得被 kind 复验误拒: {:?}",
-            reject_inconsistent_merge(&base, &legit)
+            reject_bad_merge(&base, &legit)
         );
     }
 

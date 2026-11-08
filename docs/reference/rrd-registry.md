@@ -75,7 +75,7 @@
   - **置位**：`rr3_reg_degrade_after(provider)`——`provider` 的死亡**已先在本表落账**
     （三条死亡路各自先记账再传播，否则"它自己还 Running"会挡住判空），只置位、
     **不记账不出重启计划**（裁定 4：降级不是崩溃，不吃预算不经 supervisor）。
-  - **解除**：`rr3_reg_undegrade_after(provider)`——逐模块重算，`rr3_deps_all_satisfied`
+  - **解除**：`rr3_reg_undegrade_after(provider)`——逐模块重算，`rr3_deps_satisfied`
     要求 **全部** required 能力就位；不在 `providers` 表里的能力视为 base 内建、永远在位
     （线上补注册的模块不做二次裁定，ADR-0009 不做清单 2 的同一条边界）。
   - **线侧接线四处**：watchdog 判死（`daemon.rs`）、supervisor 收尸（`supervisor.rs`）、
@@ -283,7 +283,7 @@ supervisor 已退出，重启投递丢弃: {name}
 
 | 门 | 条件 | 拒绝 | 映射码 |
 |---|---|---|---|
-| ① | `rr3_topics_is_reserved_topic(topic)`（首段 == `RR3_RESERVED_OWNER`） | `Rr3PublishDeny::ReservedNamespace { topic }` | `Permission` |
+| ① | `rr3_topics_reserved(topic)`（首段 == `RR3_RESERVED_OWNER`） | `Rr3PublishDeny::ReservedNamespace { topic }` | `Permission` |
 | ② | 主题首段 != `sender_name` | `Rr3PublishDeny::ForeignPrefix { topic, owner, sender }` | `Permission` |
 | ③ | `topics.rr3_topic_contains(topic)` 为假 | `Rr3PublishDeny::NotRegistered { topic }` | `Invalid` |
 | ④ | `topics.rr3_topic_owner(topic) != Some(sender_name)`（含取不到 owner） | `Rr3PublishDeny::ForeignPrefix { topic, owner, sender }` | `Permission` |

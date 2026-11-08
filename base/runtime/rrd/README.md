@@ -10,7 +10,7 @@ health / config，事件总线的宿主（[`architecture.md`](../../../docs/arch
 | 文件 | 内容 |
 |---|---|
 | `src/cli.rs` | `rr3_cli_parse` / `rr3_cli_parse_with_env`：命令行参数与 `RrdConfig` 的默认值注入 |
-| `src/topics_load.rs` | 所有权表装载：`contracts/topics.toml` 全集 + 仅测试用的叠加层，两条路径都在装载入口内规范化（`rr3_topics_load` / `rr3_topics_absolute_path` / `rr3_topics_is_reserved_topic`） |
+| `src/topics_load.rs` | 所有权表装载：`contracts/topics.toml` 全集 + 仅测试用的叠加层，两条路径都在装载入口内规范化（`rr3_topics_load` / `rr3_topics_absolute_path` / `rr3_topics_reserved`） |
 | `src/manifest.rs` | 运行期事实的读取与入口校验：`Rr3ManifestFacts`、`rr3_manifest_facts_from_text`、`rr3_manifest_entry_is_absolute` |
 | `src/registry.rs` | 在册表 `RrdRegistry`：注册、心跳、到期判活、死亡记账与重启计划、扇出、快照，以及发布归属判定 |
 | `src/rpc.rs` | 上行 JSON-RPC 的方法白名单、参数校验、应答形状与错误码映射 |
