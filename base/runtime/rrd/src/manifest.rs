@@ -27,6 +27,10 @@ pub struct Rr3ManifestFacts {
     /// `[rpc].exposes`：本模块愿意被 `rr3.call` 点名的主题（M3 路由的路由表来源）。
     /// 可选段，缺省空 vec——不声明就是"不接模块间请求"，与 publishes 的归属检查互不相干。
     pub rpc_exposes: Vec<String>,
+    /// `[events].subscribes`：本模块消费的广播主题（契约面）。运行期只做
+    /// **影子统计**——广播仍全量扇出，按本字段模拟"本应过滤"的目标数；
+    /// 切换为过滤投递前不改行为（ADR 评审后另行落地）。
+    pub subscribes: Vec<String>,
 }
 
 fn lookup<'a>(root: &'a Value, dotted: &str) -> Option<&'a Value> {
@@ -130,6 +134,25 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
             None => errs.push("depends.required 应为字符串数组".to_string()),
         },
     }
+    // [events].subscribes：可选；类型与空项纪律同 rpc.exposes（fail-closed，
+    // 不求值不静默吞）——运行期消费面 = 影子统计，见 Rr3ManifestFacts 注记
+    let mut subscribes = Vec::new();
+    match lookup(&root, "events.subscribes") {
+        None => {}
+        Some(v) => match v.as_array() {
+            Some(items) => {
+                for item in items {
+                    match item.as_str() {
+                        Some(s) if !s.is_empty() => subscribes.push(s.to_string()),
+                        _ => {
+                            errs.push("[events].subscribes 的每一项都必须是非空字符串".to_string())
+                        }
+                    }
+                }
+            }
+            None => errs.push("events.subscribes 应为字符串数组".to_string()),
+        },
+    }
     let mut provides = Vec::new();
     match lookup(&root, "provides.capabilities") {
         None => {}
@@ -162,6 +185,7 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
         depends_required,
         provides,
         rpc_exposes,
+        subscribes,
     })
 }
 
@@ -358,6 +382,29 @@ watchdog_timeout_ms = 1000
             "{errs:?}"
         );
         let empty_item = GOOD.replace("[health]", "[rpc]\nexposes = [\"\"]\n\n[health]");
+        let errs = rr3_manifest_parse(&empty_item).expect_err("空串项必须报错");
+        assert!(
+            errs.iter().any(|e| e.contains("每一项都必须是非空字符串")),
+            "{errs:?}"
+        );
+    }
+
+    /// [events].subscribes：可选段（缺省空 vec），类型错/空项 fail-closed；
+    /// 运行期消费面 = 广播影子统计（不改投递行为）
+    #[test]
+    fn subscribes_is_optional_and_typed() {
+        assert!(rr3_manifest_parse(GOOD).unwrap().subscribes.is_empty());
+        let with = GOOD.replace("subscribes = []", "subscribes = [\"rr3-sense/audio/pcm\"]");
+        let f = rr3_manifest_parse(&with).expect("带 subscribes 的 manifest 应能读取");
+        assert_eq!(f.subscribes, vec!["rr3-sense/audio/pcm".to_string()]);
+        let bad = GOOD.replace("subscribes = []", "subscribes = \"rr3-sense/audio/pcm\"");
+        let errs = rr3_manifest_parse(&bad).expect_err("字符串不是数组必须报错");
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("events.subscribes 应为字符串数组")),
+            "{errs:?}"
+        );
+        let empty_item = GOOD.replace("subscribes = []", "subscribes = [\"\"]");
         let errs = rr3_manifest_parse(&empty_item).expect_err("空串项必须报错");
         assert!(
             errs.iter().any(|e| e.contains("每一项都必须是非空字符串")),

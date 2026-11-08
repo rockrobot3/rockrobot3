@@ -970,6 +970,38 @@ impl RrdRegistry {
         n
     }
 
+    /// 广播面影子统计（广播面架构 ADR 前哨，0.0.8c）：按各在册模块 manifest
+    /// `[events].subscribes` 统计本帧"本应被过滤"的目标连接数——**只记账与点名，
+    /// 不改投递行为**（真实投递仍走 [`Self::rr3_reg_fanout`] 全量扇出）。
+    /// 计数键：`fanout_shadow_frames`（含本应过滤目标的帧数）、`fanout_shadow_conns`
+    /// （帧×连接总数）、`fanout_shadow/<topic>`（主题分账）。主题首次出现时点名
+    /// 一条日志；后续由计数面读取，不逐帧刷屏。返回本帧本应过滤的连接数。
+    pub fn rr3_reg_fanout_shadow(&mut self, topic: &str, exclude_task: u64) -> u64 {
+        let mut n = 0u64;
+        for e in self.modules.values() {
+            if e.src_task == exclude_task || e.tx.is_none() {
+                continue;
+            }
+            if !e.facts.subscribes.iter().any(|t| t == topic) {
+                n += 1;
+            }
+        }
+        if n == 0 {
+            return 0;
+        }
+        self.rr3_reg_counters_bump("fanout_shadow_frames", 1);
+        self.rr3_reg_counters_bump("fanout_shadow_conns", n);
+        let key = format!("fanout_shadow/{topic}");
+        let first = !self.counters.contains_key(&key);
+        self.rr3_reg_counters_bump(&key, n);
+        if first {
+            rr3_log(&format!(
+                "影子统计（subscribes 过滤预演，不改投递）：{topic} 本应过滤 {n} 个连接；全量扇出照旧"
+            ));
+        }
+        n
+    }
+
     /// 快照按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，
     /// 名字序纯属 `BTreeMap<String,_>` 的顺带结果，故必须显式排。
     pub fn rr3_reg_snapshot(&self) -> Vec<(String, u64, Rr3Phase)> {
@@ -1103,6 +1135,73 @@ watchdog_timeout_ms = 500
 "#
         );
         rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
+    }
+
+    /// 带 `[events].subscribes` 的 facts（广播影子统计用例的夹具）
+    fn facts_subs(name: &str, subs: &[&str]) -> Rr3ManifestFacts {
+        let list = subs
+            .iter()
+            .map(|t| format!("\"{t}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let text = format!(
+            r#"[manifest]
+schema_version = 1
+name = "{name}"
+version = "0.0.1"
+type = "module"
+lang = "rust"
+entry = "/usr/bin/{name}"
+
+[events]
+publishes = []
+subscribes = [{list}]
+
+[resources]
+restart_policy = "never"
+
+[health]
+heartbeat_ms = 100
+watchdog_timeout_ms = 500
+"#
+        );
+        rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
+    }
+
+    /// 影子统计：按 subscribes 只记账"本应过滤"的连接，不改变全量投递
+    #[test]
+    fn fanout_shadow_counts_unsubscribed_without_changing_delivery() {
+        let mut r = RrdRegistry::new(1000);
+        let (txa, rxa) = chan();
+        let (txb, rxb) = chan();
+        r.rr3_reg_add(&facts_subs("rr3-sima", &["rr3-sense/audio/pcm"]), txa, 0)
+            .unwrap();
+        r.rr3_reg_add(&facts_subs("rr3-simb", &[]), txb, 0).unwrap();
+        assert_eq!(
+            r.rr3_reg_fanout_shadow("rr3-sense/audio/pcm", 0),
+            1,
+            "simb 未申报订阅，属本应过滤目标"
+        );
+        assert_eq!(
+            r.rr3_reg_fanout_shadow("rr3-sense/audio/pcm", 0),
+            1,
+            "重复帧继续记账"
+        );
+        let c = r.rr3_reg_counters_snapshot();
+        assert_eq!(c.get("fanout_shadow_frames"), Some(&2));
+        assert_eq!(c.get("fanout_shadow_conns"), Some(&2));
+        assert_eq!(
+            c.get("fanout_shadow/rr3-sense/audio/pcm"),
+            Some(&2),
+            "主题分账按连接数累加"
+        );
+        let frame = Rr3Frame {
+            header: rr_ipc::Rr3Header::rr3_hdr_broadcast(rr_ipc::opcode::SEND, 0),
+            payload: vec![],
+        };
+        assert_eq!(r.rr3_reg_fanout(&frame, 0), 2, "投递行为不变：仍全量扇出");
+        assert!(rxa.try_recv().is_ok());
+        assert!(rxb.try_recv().is_ok());
     }
 
     /// 路由表读取：exposes 匹配、多 callee 取 task 最小、failed 排除、未声明回 None
