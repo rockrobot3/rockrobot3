@@ -267,11 +267,43 @@ fn rr3_write_domain(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
 ) -> Result<Value, (Rr3StatusCode, String)> {
+    let (text, dom) = rr3_domain_read(paths, params)?;
+    let (old_value, updates) = rr3_domain_plan(paths, params, &dom)?;
+    let boot = rr3_domain_commit(paths, &text, params, &updates)?;
+    let relogged = rr3_domain_relog(paths, &boot);
+    let new_value = match &params.value {
+        Rr3WriteValue::Bool(b) => json!(b),
+        Rr3WriteValue::Num(n) => json!(n),
+    };
+    crate::rr3_log(&format!(
+        "domain 写口: {}.{} {}→{}（evidence {}，effective boot——下次 rrd 装载投影）",
+        params.name,
+        params.key,
+        old_value,
+        new_value,
+        params.evidence.as_deref().unwrap_or("none"),
+    ));
+    Ok(json!({
+        "ok": true,
+        "target": "domain",
+        "name": params.name,
+        "key": params.key,
+        "old": old_value,
+        "new": new_value,
+        "evidence": params.evidence,
+        "effective": "boot",
+        "contracts_relogged": relogged,
+    }))
+}
+
+/// 读装配单并定位目标域（域缺拒——写面不做新域注册；与 boot 同一解析器）
+fn rr3_domain_read(
+    paths: &Rr3DomainWritePaths,
+    params: &Rr3DomainWriteParams,
+) -> Result<(String, crate::profile::Rr3Domain), (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
-    let perm = |msg: String| (Rr3StatusCode::Permission, msg);
     let text = std::fs::read_to_string(&paths.profile)
         .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
-    // 旧值提取（域缺拒——写面不做新域注册）：从装载域拿（与 boot 同一解析器）
     let profile = crate::profile::rr3_profile_parse(&text).map_err(|errs| {
         invalid(format!(
             "装配单 {} 形状不合: {}",
@@ -284,16 +316,27 @@ fn rr3_write_domain(
         .domains
         .iter()
         .find(|d| d.name == params.name)
+        .cloned()
         .ok_or_else(|| {
             invalid(format!(
                 "域 {:?} 不在 [[supplies.domain]] 在册（缺域拒——新域是契约事件，不经写口注册）",
                 params.name
             ))
         })?;
-    let (old_value, updates): (Value, Vec<(&str, String)>) = match (
-        params.key.as_str(),
-        &params.value,
-    ) {
+    Ok((text, dom))
+}
+
+/// 键行更新集：键名 → 新值文本（手术输入）
+type Rr3DomainUpdates = Vec<(&'static str, String)>;
+
+/// 写入计划：旧值提取 + 键行更新集（armed 与 evidence 成对，severe_mv 必携证据）
+fn rr3_domain_plan(
+    paths: &Rr3DomainWritePaths,
+    params: &Rr3DomainWriteParams,
+    dom: &crate::profile::Rr3Domain,
+) -> Result<(Value, Rr3DomainUpdates), (Rr3StatusCode, String)> {
+    let perm = |msg: String| (Rr3StatusCode::Permission, msg);
+    let plan = match (params.key.as_str(), &params.value) {
         // armed 写：evidence 联动（成对纪律——写面直接落出⑥-e 要求的档内形状）
         ("armed", Rr3WriteValue::Bool(true)) => {
             let ev = params.evidence.clone().ok_or_else(|| {
@@ -327,10 +370,20 @@ fn rr3_write_domain(
         }
         _ => unreachable!("parse 层白名单已裁，值型与键必配"),
     };
-    // 手术 → tmp 落盘 → 装载链全量预核（与 boot 正门同一份裁决；Err 即拒写清 tmp）
+    Ok(plan)
+}
+
+/// 手术 → tmp 落盘 → 装载链全量预核 → 原子写回（Err 即清 tmp，旧档原封）
+fn rr3_domain_commit(
+    paths: &Rr3DomainWritePaths,
+    text: &str,
+    params: &Rr3DomainWriteParams,
+    updates: &[(&str, String)],
+) -> Result<crate::profile::Rr3ProfileBoot, (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let update_refs: Vec<(&str, &str)> = updates.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let new_text =
-        crate::profile::rr3_domain_apply(&text, &params.name, &update_refs).map_err(invalid)?;
+        crate::profile::rr3_domain_apply(text, &params.name, &update_refs).map_err(invalid)?;
     let stem = paths
         .profile
         .file_stem()
@@ -365,51 +418,31 @@ fn rr3_write_domain(
             paths.profile.display()
         ))
     })?;
-    // 契约记账重记（写口的 tmp 产物已过装载链全量预核 = 新验收事实；重记失败
-    // 不回滚落盘——主事实已发生，点名让下次 boot 重定格）
-    let contracts_dir = paths.slots.parent().map(PathBuf::from);
-    let mut relogged = true;
-    if let Some(dir) = contracts_dir {
-        match crate::contracts::rr3_contracts_scan(
-            &paths.profile,
-            &dir,
-            &paths.wiring,
-            &boot.platform_chip,
-        )
-        .and_then(crate::contracts::rr3_contracts_rebook)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                relogged = false;
-                crate::rr3_log(&format!(
-                    "domain 写口重记账失败（{e}）——契约自检将报漂直到下次 boot 重定格"
-                ));
-            }
+    Ok(boot)
+}
+
+/// 契约记账重记：写口的 tmp 产物已过装载链预核 = 新验收事实；重记失败不回滚
+/// 落盘（主事实已发生），点名让下次 boot 重定格。
+fn rr3_domain_relog(paths: &Rr3DomainWritePaths, boot: &crate::profile::Rr3ProfileBoot) -> bool {
+    let Some(dir) = paths.slots.parent().map(PathBuf::from) else {
+        return true;
+    };
+    match crate::contracts::rr3_contracts_scan(
+        &paths.profile,
+        &dir,
+        &paths.wiring,
+        &boot.platform_chip,
+    )
+    .and_then(crate::contracts::rr3_contracts_rebook)
+    {
+        Ok(()) => true,
+        Err(e) => {
+            crate::rr3_log(&format!(
+                "domain 写口重记账失败（{e}）——契约自检将报漂直到下次 boot 重定格"
+            ));
+            false
         }
     }
-    let new_value = match &params.value {
-        Rr3WriteValue::Bool(b) => json!(b),
-        Rr3WriteValue::Num(n) => json!(n),
-    };
-    crate::rr3_log(&format!(
-        "domain 写口: {}.{} {}→{}（evidence {}，effective boot——下次 rrd 装载投影）",
-        params.name,
-        params.key,
-        old_value,
-        new_value,
-        params.evidence.as_deref().unwrap_or("none"),
-    ));
-    Ok(json!({
-        "ok": true,
-        "target": "domain",
-        "name": params.name,
-        "key": params.key,
-        "old": old_value,
-        "new": new_value,
-        "evidence": params.evidence,
-        "effective": "boot",
-        "contracts_relogged": relogged,
-    }))
 }
 
 /// axis 落点写编排：**必须复用** [`crate::axis_write::rr3_axis_write_run`]（其头注
