@@ -759,91 +759,7 @@ fn rr3_serve_request(
             );
             Ok(Rr3Flow::Keep)
         }
-        Rr3RpcMethod::Heartbeat => {
-            // 运维计数聚合（0.0.4 批B，Q1 裁定）：心跳可选 `counters` 字段，模块自报
-            // → 按 `模块名/键` 归并进聚合表。锁内归并、锁外落盘；无变化不落盘，路径
-            // None 只进内存账。计数是运维账，不跟着判活走（Rejected 也照归并），
-            // 但**必须先于应答落账**（2026-10-07 顺序倒置修复）：旧序"应答先回、
-            // 归并在后"下，对端收到应答即读 `rr3.ctl.counters` 会抢在归并前读到
-            // 上一拍的账（e2e ctl_counters_aggregates_heartbeat_counters 在机器繁忙
-            // 时实证：期望 5 实得 2）。归并块放最前不改变 D-6 三态语义，两把锁各自
-            // 成段不嵌套。
-            if let Some(counters) = rr3_rpc_counters(&req.params) {
-                let changed = rr3_lock(&ctx.shared).rr3_reg_counters_merge(&me.name, &counters);
-                // R26 心跳合并写（0.0.5 增补轮四 批W3 改判，0.0.4 Q2 逐拍
-                // write-through → M 毫秒窗口至多一次 + N 拍兜底；SIGTERM 强制
-                // flush 归 daemon 的 term 路径）：变化先过共享闸门，判到 flush
-                // 才取快照写盘。落盘失败不记账，窗口判据下一拍仍成立自然重试。
-                if changed && ctx.counters_path.is_some() {
-                    // 整段持闸（2026-10-31 实机修复）：on_change→快照→store→on_flushed
-                    // 必须在同一临界区。旧形只把 on_change/on_flushed 各自锁一下，
-                    // 闸门又没有"flush 进行中"态——同窗两条连接都判到 true，两个
-                    // store 竞争同一个 counters.json.tmp：先 rename 者成功、后者
-                    // ENOENT（每 11s 一成一败的 journal 噪声即此）。锁序 gate→shared
-                    // 与全仓既有方向一致（merge 那手的 shared 锁在进入本段前已放）。
-                    let mut gate = rr3_lock(&ctx.counters_gate);
-                    if gate.rr3_on_change(ctx.rr3_ctx_now_ms()) {
-                        let snap = rr3_lock(&ctx.shared).rr3_reg_counters_snapshot();
-                        if let Some(path) = ctx.counters_path.as_deref() {
-                            match crate::counters::rr3_counters_store(path, &snap) {
-                                Ok(()) => gate.rr3_on_flushed(ctx.rr3_ctx_now_ms()),
-                                Err(e) => rr3_log(&format!(
-                                    "counters 落盘失败（下一拍窗口到自然重试）: {e}"
-                                )),
-                            }
-                        }
-                    }
-                }
-            }
-            // D-6：三态回报。Rejected 回错误帧；Kept/Promoted 都回 OK（合法心跳都得续命）。
-            let beat = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
-            match beat {
-                Rr3Beat::Rejected => {
-                    rr3_reply_err(
-                        out,
-                        me,
-                        req.id,
-                        Rr3StatusCode::TimedOut,
-                        "该 task 已过期或不在册，需重新注册",
-                    );
-                }
-                other => {
-                    rr3_reply_ok(out, me, req.id, &json!({"beat": "accepted"}));
-                    if other == Rr3Beat::Promoted {
-                        // E-8：`registered → running` 的**唯一**升级时刻，11b 起它第一次上线。
-                        // 相位名走 `Rr3Phase::Running.as_str()`，不写字面量 "running"（Task 10
-                        // 定下的同一条理由：写两处就有第二本真值）。
-                        // 只在 Promoted 上广播：`Kept` 走的是同一条 `other` 分支，拿"这一支被接受"
-                        // 当条件就是每次心跳重发一条 state（spec §5.0 的 state 是**转移**流，
-                        // 不是快照流；"恰好一条"这类判据正是靠这一条成立的）。
-                        let frame = rr3_state_frame(&me.name, Rr3Phase::Running.as_str(), me.task);
-                        // E-9：这里的排除项是 `RR3_TASK_RRD`，等于**不排除**——发起者自己也要收到
-                        // 关于自己的 running（它是唯一知道自己上线的连接）。supervisor 收尸那一路
-                        // 排的是 `crashed.src_task`，两处口径不同是**已知**的第三/第四种口径，
-                        // 归 Task 13 的 A-3 文档化，本轮不"统一"（统一成哪一种都没有判据支持）。
-                        let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, RR3_TASK_RRD);
-                        rr3_log(&format!("{} → running（广播到 {n} 个连接）", me.name));
-                        // ADR-0009 裁定 3 的恢复半边：本模块刚 Promoted，若它是某能力
-                        // 的提供者 → 依赖它的 Degraded 模块逐个重算，全部 required
-                        // 就位才回 Running。与断供那半边同一分工：谁记的账谁传播。
-                        let recovered = rr3_lock(&ctx.shared).rr3_reg_undegrade_after(&me.name);
-                        for (dep, task) in recovered {
-                            // 排除项 `RR3_TASK_RRD`（不排除）：解除与置位同一条理据——
-                            // 被解除者必须自己听到"我回来了"。
-                            let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-                                &rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
-                                RR3_TASK_RRD,
-                            );
-                            rr3_log(&format!(
-                                "{dep} 依赖恢复 → running（提供者 {} 回到 Running）广播到 {n} 个连接",
-                                me.name
-                            ));
-                        }
-                    }
-                }
-            }
-            Ok(Rr3Flow::Keep)
-        }
+        Rr3RpcMethod::Heartbeat => rr3_beat_handle(out, ctx, me, req.id, &req.params),
         Rr3RpcMethod::Unregister => {
             // 主动退场 ≠ 崩溃：直接移出在册表，不走 restart_policy。
             // 广播留给收尾处，保证"一次退出只有一条 state"。
@@ -852,6 +768,86 @@ fn rr3_serve_request(
             Ok(Rr3Flow::QuitClean)
         }
         Rr3RpcMethod::Call => rr3_route_call(out, ctx, me, req.id, &req.params, body),
+    }
+}
+
+/// 心跳：计数归并先行（对端读 counters 不得读到上一拍）→ D-6 三态回报 →
+/// Promoted 时广播 running 并做依赖恢复传播。
+fn rr3_beat_handle(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    id: u64,
+    params: &Value,
+) -> Result<Rr3Flow, String> {
+    rr3_beat_counters(ctx, me, params);
+    let beat = rr3_lock(&ctx.shared).rr3_reg_beat(me.task, ctx.rr3_ctx_now_ms());
+    match beat {
+        Rr3Beat::Rejected => {
+            rr3_reply_err(
+                out,
+                me,
+                id,
+                Rr3StatusCode::TimedOut,
+                "该 task 已过期或不在册，需重新注册",
+            );
+        }
+        other => {
+            rr3_reply_ok(out, me, id, &json!({"beat": "accepted"}));
+            // 只在 Promoted 上广播：Kept 若也发，每次心跳都会重发一条 state
+            // （spec §5.0 的 state 是转移流，不是快照流）
+            if other == Rr3Beat::Promoted {
+                rr3_beat_promote(ctx, me);
+            }
+        }
+    }
+    Ok(Rr3Flow::Keep)
+}
+
+/// 心跳可选 counters 字段归并 + R26 合并写（变化 → 闸门 → 快照 → 落盘）。
+/// 计数是运维账，不跟着判活走（Rejected 也照归并），但必须先于应答落账。
+fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
+    let Some(counters) = rr3_rpc_counters(params) else {
+        return;
+    };
+    let changed = rr3_lock(&ctx.shared).rr3_reg_counters_merge(&me.name, &counters);
+    if !changed || ctx.counters_path.is_none() {
+        return;
+    }
+    // 整段持闸：on_change→快照→store→on_flushed 必须在同一临界区。锁序
+    // gate→shared 与全仓既有方向一致（merge 那手的 shared 锁已放）。
+    let mut gate = rr3_lock(&ctx.counters_gate);
+    if !gate.rr3_on_change(ctx.rr3_ctx_now_ms()) {
+        return;
+    }
+    let snap = rr3_lock(&ctx.shared).rr3_reg_counters_snapshot();
+    let Some(path) = ctx.counters_path.as_deref() else {
+        return;
+    };
+    match crate::counters::rr3_counters_store(path, &snap) {
+        Ok(()) => gate.rr3_on_flushed(ctx.rr3_ctx_now_ms()),
+        Err(e) => rr3_log(&format!("counters 落盘失败（下一拍窗口到自然重试）: {e}")),
+    }
+}
+
+/// `registered → running` 的唯一升级时刻：广播 running + 依赖恢复传播。
+/// 排除项 `RR3_TASK_RRD` = 不排除——发起者自己也要收到关于自己的升级。
+fn rr3_beat_promote(ctx: &Rr3ConnCtx, me: &Rr3Peer) {
+    let frame = rr3_state_frame(&me.name, Rr3Phase::Running.as_str(), me.task);
+    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, RR3_TASK_RRD);
+    rr3_log(&format!("{} → running（广播到 {n} 个连接）", me.name));
+    // ADR-0009 裁定 3 恢复半边：提供者回到 Running → 依赖者逐个重算，全部
+    // required 就位才回 Running。谁记的账谁传播。
+    let recovered = rr3_lock(&ctx.shared).rr3_reg_undegrade_after(&me.name);
+    for (dep, task) in recovered {
+        let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
+            &rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
+            RR3_TASK_RRD,
+        );
+        rr3_log(&format!(
+            "{dep} 依赖恢复 → running（提供者 {} 回到 Running）广播到 {n} 个连接",
+            me.name
+        ));
     }
 }
 
