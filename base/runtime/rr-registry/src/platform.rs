@@ -167,91 +167,7 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
     }
 
     // [[controller]]：必须在册且非空（⑧-b 的键空间第一元；空表 = 词表事故）。
-    // 先逐条收集再建映射，重复名在此点名。
-    let mut entries: Vec<(String, String, i64)> = Vec::new();
-    match t.get("controller") {
-        Some(Value::Array(items)) if !items.is_empty() => {
-            for (i, item) in items.iter().enumerate() {
-                let Some(c) = item.as_table() else {
-                    errs.push(format!(
-                        "controller[{i}] 应为内联表 {{ name, kind, channels }}"
-                    ));
-                    continue;
-                };
-                for k in c.keys() {
-                    if k != "name" && k != "kind" && k != "channels" {
-                        errs.push(format!(
-                            "controller[{i}] 未知键 {k}（只认 name / kind / channels）"
-                        ));
-                    }
-                }
-                let name = match c.get("name").and_then(Value::as_str) {
-                    Some(n) if !n.trim().is_empty() => Some(n.to_string()),
-                    Some(_) => {
-                        errs.push(format!("controller[{i}].name 不得为空串"));
-                        None
-                    }
-                    None => {
-                        errs.push(format!("controller[{i}].name 应为字符串"));
-                        None
-                    }
-                };
-                let kind = match c.get("kind").and_then(Value::as_str) {
-                    Some(k) if RR3_PLATFORM_KINDS.contains(&k) => Some(k.to_string()),
-                    Some(k) => {
-                        errs.push(format!(
-                            "controller[{i}].kind \"{k}\" 非法（封闭七值 {RR3_PLATFORM_KINDS:?}，扩域走契约级评审）"
-                        ));
-                        None
-                    }
-                    None => {
-                        errs.push(format!("controller[{i}].kind 应为字符串"));
-                        None
-                    }
-                };
-                let channels = match c.get("channels") {
-                    Some(Value::Integer(n)) if *n >= 0 => Some(*n),
-                    Some(Value::Integer(n)) => {
-                        errs.push(format!("controller[{i}].channels 须非负，收到 {n}"));
-                        None
-                    }
-                    Some(other) => {
-                        errs.push(format!("controller[{i}].channels 应为整数，收到 {other:?}"));
-                        None
-                    }
-                    None => {
-                        errs.push(format!(
-                            "controller[{i}] 缺 channels（0 = 无通道维，须显式写）"
-                        ));
-                        None
-                    }
-                };
-                if let (Some(n), Some(k), Some(ch)) = (name, kind, channels) {
-                    entries.push((n, k, ch));
-                }
-            }
-        }
-        Some(Value::Array(_)) => errs.push(
-            "平台表 [[controller]] 为空（在册控制器词表为空 = ⑧-b 无键空间可判，词表事故）".into(),
-        ),
-        Some(other) => errs.push(format!(
-            "平台表 controller 应为数组（[[controller]]），收到 {other:?}"
-        )),
-        None => errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into()),
-    }
-    for (n, k, ch) in entries {
-        match table.controllers.entry(n) {
-            std::collections::btree_map::Entry::Occupied(e) => {
-                errs.push(format!("controller {} 重复（词表一名一条）", e.key()));
-            }
-            std::collections::btree_map::Entry::Vacant(v) => {
-                v.insert(Rr3ControllerEntry {
-                    kind: k,
-                    channels: ch,
-                });
-            }
-        }
-    }
+    rr3_plat_ctl(t, &mut table, &mut errs);
 
     // [capabilities]：段缺即红（裁定①；空集合法但必须显式写键）
     match t.get("capabilities") {
@@ -479,6 +395,94 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
         Ok(table)
     } else {
         Err(errs)
+    }
+}
+
+/// `[[controller]]` 段：先逐条收集再建映射，重复名在此点名（词表一名一条）。
+fn rr3_plat_ctl(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    let mut entries: Vec<(String, String, i64)> = Vec::new();
+    match t.get("controller") {
+        Some(Value::Array(items)) if !items.is_empty() => {
+            for (i, item) in items.iter().enumerate() {
+                let Some(c) = item.as_table() else {
+                    errs.push(format!(
+                        "controller[{i}] 应为内联表 {{ name, kind, channels }}"
+                    ));
+                    continue;
+                };
+                for k in c.keys() {
+                    if k != "name" && k != "kind" && k != "channels" {
+                        errs.push(format!(
+                            "controller[{i}] 未知键 {k}（只认 name / kind / channels）"
+                        ));
+                    }
+                }
+                let name = match c.get("name").and_then(Value::as_str) {
+                    Some(n) if !n.trim().is_empty() => Some(n.to_string()),
+                    Some(_) => {
+                        errs.push(format!("controller[{i}].name 不得为空串"));
+                        None
+                    }
+                    None => {
+                        errs.push(format!("controller[{i}].name 应为字符串"));
+                        None
+                    }
+                };
+                let kind = match c.get("kind").and_then(Value::as_str) {
+                    Some(k) if RR3_PLATFORM_KINDS.contains(&k) => Some(k.to_string()),
+                    Some(k) => {
+                        errs.push(format!(
+                            "controller[{i}].kind \"{k}\" 非法（封闭七值 {RR3_PLATFORM_KINDS:?}，扩域走契约级评审）"
+                        ));
+                        None
+                    }
+                    None => {
+                        errs.push(format!("controller[{i}].kind 应为字符串"));
+                        None
+                    }
+                };
+                let channels = match c.get("channels") {
+                    Some(Value::Integer(n)) if *n >= 0 => Some(*n),
+                    Some(Value::Integer(n)) => {
+                        errs.push(format!("controller[{i}].channels 须非负，收到 {n}"));
+                        None
+                    }
+                    Some(other) => {
+                        errs.push(format!("controller[{i}].channels 应为整数，收到 {other:?}"));
+                        None
+                    }
+                    None => {
+                        errs.push(format!(
+                            "controller[{i}] 缺 channels（0 = 无通道维，须显式写）"
+                        ));
+                        None
+                    }
+                };
+                if let (Some(n), Some(k), Some(ch)) = (name, kind, channels) {
+                    entries.push((n, k, ch));
+                }
+            }
+        }
+        Some(Value::Array(_)) => errs.push(
+            "平台表 [[controller]] 为空（在册控制器词表为空 = ⑧-b 无键空间可判，词表事故）".into(),
+        ),
+        Some(other) => errs.push(format!(
+            "平台表 controller 应为数组（[[controller]]），收到 {other:?}"
+        )),
+        None => errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into()),
+    }
+    for (n, k, ch) in entries {
+        match table.controllers.entry(n) {
+            std::collections::btree_map::Entry::Occupied(e) => {
+                errs.push(format!("controller {} 重复（词表一名一条）", e.key()));
+            }
+            std::collections::btree_map::Entry::Vacant(v) => {
+                v.insert(Rr3ControllerEntry {
+                    kind: k,
+                    channels: ch,
+                });
+            }
+        }
     }
 }
 
