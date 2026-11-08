@@ -76,7 +76,7 @@
 
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
-| `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致 | `conn.rs` 的 `rr3_serve_ctl` |
+| `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>, "boot":<string|null>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致；`boot` 为启动摘要一行（`tier/chip/profile/modules/预降级/后端`），未定格为 `null` 不造假值 | `conn.rs` 的 `rr3_ctl_status` |
 | `rr3.ctl.health` | `CtlHealth` | 无必填 | `{"modules":[{"name","task","phase","heartbeat_ms","watchdog_ms","since_beat_ms"}]}`——后三数是**判定用的数回显**（条目自己的配置 + `now - last_beat`） | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_health_snapshot` |
 | `rr3.ctl.logs` | `CtlLogs` | 无必填 | `{"lines":["rrd: …", …]}`——rrd 内存日志环（512 行环形，`rr3_log` 单点落环、不落盘）尾部副本 | `conn.rs` 的 `rr3_serve_ctl`、`lib.rs` 的 `rr3_log`/`rr3_log_tail` |
 | `rr3.ctl.ota` | `CtlOta` | 无必填 | **无**——恒拒：`Permission`（-22，`AIRY_EPERM`）+ 文案点 M6（契约状态码是冻结集，不自造 `NotSupported`） | `conn.rs` 的 `rr3_serve_ctl` |

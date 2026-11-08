@@ -86,6 +86,12 @@ fn ctl_status_lists_registered_modules_and_does_not_register_itself() {
         v["result"]["denied_publish"].is_u64(),
         "denied_publish 计数必须在场: {v}"
     );
+    assert!(
+        v["result"]["boot"]
+            .as_str()
+            .is_some_and(|s| s.contains("启动摘要")),
+        "boot 装配摘要必须在场（远程诊断不翻日志）: {v}"
+    );
     rr3_assert_ctl_closed(&mut ctl);
 }
 

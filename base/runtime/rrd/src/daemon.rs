@@ -223,14 +223,17 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         boot.servo_backend.as_deref(),
         boot.display_backend.as_deref(),
     );
-    rr3_log(&rr3_boot_summary(
+    let summary = rr3_boot_summary(
         &boot.tier,
         &boot.chip,
         &profile,
         boot.manifests.len(),
         boot.predegraded.len(),
         &backends,
-    ));
+    );
+    rr3_log(&summary);
+    // 同一行定格给 ctl.status：远程诊断读一次应答即可看到装配面，不必翻日志。
+    let _ = crate::rr3_boot_summary_set(summary);
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     // bind 独占探测（0.0.8d 审计 B-9）：存活实例占用 = 拒绝启动（裂脑禁绝）；
