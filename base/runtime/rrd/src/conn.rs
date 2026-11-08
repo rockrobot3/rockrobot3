@@ -587,6 +587,25 @@ fn rr3_publish(
     me: &Rr3Peer,
     body: &[u8],
 ) -> Result<Rr3Flow, String> {
+    let (parsed, topic) = match rr3_pub_parse(out, me, body) {
+        Ok(v) => v,
+        Err(flow) => return Ok(flow),
+    };
+    if let Some(flow) = rr3_pub_gate(out, ctx, me, body, &topic) {
+        return Ok(flow);
+    }
+    rr3_pub_forward(ctx, me, body, &topic);
+    rr3_pub_batt(ctx, &topic, &parsed);
+    Ok(Rr3Flow::Keep)
+}
+
+/// Event 体的解析与 topic 提取。两条形状错（非 JSON / 缺坏 topic）都回 Invalid 帧
+/// 并保持连接：`Err` 携带已应答的 `Keep`，调用方不再重复回帧。
+fn rr3_pub_parse(
+    out: &Arc<Mutex<UnixStream>>,
+    me: &Rr3Peer,
+    body: &[u8],
+) -> Result<(Value, String), Rr3Flow> {
     let parsed = match serde_json::from_slice::<Value>(body) {
         Ok(v) => v,
         Err(e) => {
@@ -597,7 +616,7 @@ fn rr3_publish(
                 Rr3StatusCode::Invalid,
                 &format!("Event 体必须是 JSON 对象: {e}"),
             );
-            return Ok(Rr3Flow::Keep);
+            return Err(Rr3Flow::Keep);
         }
     };
     let topic = match rr3_rpc_topic_param(&parsed) {
@@ -610,11 +629,23 @@ fn rr3_publish(
                 Rr3StatusCode::Invalid,
                 &msg,
             );
-            return Ok(Rr3Flow::Keep);
+            return Err(Rr3Flow::Keep);
         }
     };
+    Ok((parsed, topic))
+}
+
+/// 归属门（三层归属检查的应答侧）：拒则计数 + 回错误帧 + `Some(Keep)`；
+/// 放行返回 `None`。三种归属拒法都不断连（与 src_task 伪造同一口径）。
+fn rr3_pub_gate(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    body: &[u8],
+    topic: &str,
+) -> Option<Rr3Flow> {
     let deny = {
-        let check = RrdRegistry::rr3_reg_publish_check(&me.name, &topic, &ctx.topics);
+        let check = RrdRegistry::rr3_reg_publish_check(&me.name, topic, &ctx.topics);
         if let Err(e) = check {
             rr3_lock(&ctx.shared).rr3_reg_note_denied();
             Some(e)
@@ -622,21 +653,23 @@ fn rr3_publish(
             None
         }
     };
-    if let Some(e) = deny {
-        rr3_reply_err(
-            out,
-            me,
-            rr3_best_effort_id(body),
-            rr3_rpc_deny_status(&e),
-            &e.to_string(),
-        );
-        return Ok(Rr3Flow::Keep);
-    }
-    // 转发：保留体，头改写成"发布者 task + 广播目的"，类型仍是 Event。
-    // 这里第三处自己构造帧（另两处是 `rr3_out_frame` 的应答）：转发帧的 src 是**发布者**
-    // 而不是 rrd，套不进那个 src 恒为 RR3_TASK_RRD 的写法。
-    // `payload_len` 必须从**编出来的字节串**取，不能从 `body` 取——少了那 2 字节前缀
-    // 就是 Task 1 帧层的 `LengthMismatch`，收侧当场把这条链打死。
+    let e = deny?;
+    rr3_reply_err(
+        out,
+        me,
+        rr3_best_effort_id(body),
+        rr3_rpc_deny_status(&e),
+        &e.to_string(),
+    );
+    Some(Rr3Flow::Keep)
+}
+
+/// 转发：保留体，头改写成"发布者 task + 广播目的"，类型仍是 Event。
+/// 这里第三处自己构造帧（另两处是 `rr3_out_frame` 的应答）：转发帧的 src 是**发布者**
+/// 而不是 rrd，套不进那个 src 恒为 RR3_TASK_RRD 的写法。
+/// `payload_len` 必须从**编出来的字节串**取，不能从 `body` 取——少了那 2 字节前缀
+/// 就是 Task 1 帧层的 `LengthMismatch`，收侧当场把这条链打死。
+fn rr3_pub_forward(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str) {
     let payload = rr3_body_encode(Rr3PayloadType::Event, body);
     let frame = Rr3Frame {
         header: Rr3Header {
@@ -656,16 +689,19 @@ fn rr3_publish(
     let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, me.task);
     // 影子统计（广播面 ADR 前哨）：只按 manifest subscribes 记账"本应过滤"的
     // 目标数，不改上面的全量投递——计数面 = rr3.ctl.counters 的 fanout_shadow*
-    rr3_lock(&ctx.shared).rr3_reg_fanout_shadow(&topic, me.task);
+    rr3_lock(&ctx.shared).rr3_reg_fanout_shadow(topic, me.task);
     rr3_log(&format!("转发 {topic} 到 {n} 个连接"));
-    // 低电兜底（0.0.2 方案 D6/Q4 裁定，architecture §7.3 横切路径）：rrd 是总线本体，
-    // "订阅 battery/low|ok"就落在本转发点——每一帧 Event 都从这里过，谁发、值多少都已知。
-    // 四件动作面：置全局低电旗（上升沿恰一次）→ supervisor 的 spawn 漏斗拒新 spawn →
-    // 点名广播 rr3-runtime/system/power → 日志环（本函数的 rr3_log 即入口）。
-    // 解除路径（批N5 件二笔3，§17 运维留痕）：收到 battery/ok（恢复沿）清旗——
-    // 下降沿恰一次点名广播 reason=battery-ok，spawn 漏斗自此放行新 spawn；重复
-    // battery/ok（旗本就没置）不重复广播。battery/low|ok 本身照常已转发，兜底是
-    // 额外动作，不截断事件流。
+}
+
+/// 低电兜底（0.0.2 方案 D6/Q4 裁定，architecture §7.3 横切路径）：rrd 是总线本体，
+/// "订阅 battery/low|ok"就落在本转发点——每一帧 Event 都从这里过，谁发、值多少都已知。
+/// 四件动作面：置全局低电旗（上升沿恰一次）→ supervisor 的 spawn 漏斗拒新 spawn →
+/// 点名广播 rr3-runtime/system/power → 日志环（本函数的 rr3_log 即入口）。
+/// 解除路径（批N5 件二笔3，§17 运维留痕）：收到 battery/ok（恢复沿）清旗——
+/// 下降沿恰一次点名广播 reason=battery-ok，spawn 漏斗自此放行新 spawn；重复
+/// battery/ok（旗本就没置）不重复广播。battery/low|ok 本身照常已转发，兜底是
+/// 额外动作，不截断事件流。
+fn rr3_pub_batt(ctx: &Rr3ConnCtx, topic: &str, parsed: &Value) {
     if topic == RR3_BATTERY_LOW_TOPIC {
         let rising = rr3_lock(&ctx.shared).rr3_reg_low_power_raise();
         if rising {
@@ -703,7 +739,6 @@ fn rr3_publish(
             rr3_log("低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）");
         }
     }
-    Ok(Rr3Flow::Keep)
 }
 
 /// 三个上行方法。RPC 解析失败一律回 Invalid——Task 6 已保证解析器不产别的码，
