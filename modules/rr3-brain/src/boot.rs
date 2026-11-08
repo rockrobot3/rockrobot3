@@ -82,6 +82,10 @@ pub(crate) struct Rr3BrainCfg {
 /// 对位 composite.py `RR3_BUS_CALL_TIMEOUT_DEFAULT_S`，真值点 = config.toml 注释）
 pub(crate) const RR3_BUS_CALL_TIMEOUT_DEFAULT_S: f64 = 30.0;
 
+/// 超时类配置的合理上界（秒）：语音链路里超过 1h 的超时等同挂死；同时保证
+/// `Duration::from_secs_f64` 不会因 NaN/负数/超 u64 范围在运行期 panic。
+const RR3_CFG_TIMEOUT_MAX_S: f64 = 3600.0;
+
 /// dialog 话轮封顶缺省（`[rr3-brain.dialog].max_utterance_ms` 缺键回落；
 /// 对位 composite.py `dialog_cfg.get("max_utterance_ms", 8000)`）
 pub(crate) const RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS: i64 = 8000;
@@ -183,12 +187,27 @@ fn rr3_req_str<'a>(sect: &'a Value, sect_name: &str, key: &str) -> Result<&'a st
         .ok_or_else(|| format!("config [rr3-brain.{sect_name}] 缺 {key}（字符串）"))
 }
 
-/// 段内数值键（缺键/非数点名拒；Python float() 连数字字符串也收，Rust 只认
-/// 数值——数字串是配置劣化，点名优于静默收编）。
+/// 段内超时类数值键（缺键/非数/非有限/非正/超上界一律点名拒）：这些值最终
+/// 进 `Duration::from_secs_f64`，NaN/负数/超 u64 范围会在运行期 panic，配置面
+/// 必须先把它们挡在启动路径外。
 fn rr3_req_f64(sect: &Value, sect_name: &str, key: &str) -> Result<f64, String> {
-    sect.get(key)
-        .and_then(Value::as_f64)
-        .ok_or_else(|| format!("config [rr3-brain.{sect_name}] 缺 {key}（数值）"))
+    let v = sect
+        .get(key)
+        .ok_or_else(|| format!("config [rr3-brain.{sect_name}] 缺 {key}（数值）"))?;
+    rr3_timeout_value(v, sect_name, key)
+}
+
+/// 超时值域校验（已取到的 `Value`）：有限、>0、≤ 上界。
+fn rr3_timeout_value(v: &Value, sect_name: &str, key: &str) -> Result<f64, String> {
+    let x = v
+        .as_f64()
+        .ok_or_else(|| format!("config [rr3-brain.{sect_name}] {key} 须数值"))?;
+    if !x.is_finite() || x <= 0.0 || x > RR3_CFG_TIMEOUT_MAX_S {
+        return Err(format!(
+            "config [rr3-brain.{sect_name}] {key} 须为 (0, {RR3_CFG_TIMEOUT_MAX_S}] 秒内的有限数，收到 {x}"
+        ));
+    }
+    Ok(x)
 }
 
 /// Python float 的打印形状（config 就绪行逐字对位）：整值补 .0（20 → "20.0"），
@@ -366,20 +385,26 @@ pub(crate) fn rr3_brain_cfg_parse(text: &str) -> Result<Rr3BrainCfg, String> {
     // connect_timeout_s 已随迁移退役（批N32 增补裁定 4），本面不读
     let call_timeout_s = match doc.get("rr3-brain").and_then(|b| b.get("bus")) {
         Some(bus) => match bus.get("call_timeout_s") {
-            Some(v) => v
-                .as_f64()
-                .ok_or_else(|| "config [rr3-brain.bus] call_timeout_s 须数值".to_string())?,
+            Some(v) => rr3_timeout_value(v, "bus", "call_timeout_s")?,
             None => RR3_BUS_CALL_TIMEOUT_DEFAULT_S,
         },
         None => RR3_BUS_CALL_TIMEOUT_DEFAULT_S,
     };
     // dialog 段必填（Python dialog_cfg = cfg["rr3-brain"]["dialog"] 直取同义），
-    // 键可选缺省 8000
+    // 键可选缺省 8000；<=0 与 ops/set 写臂同一判据拒（起轮即过期/永不过期都是误配）
     let dialog = rr3_brain_sect(&doc, "dialog")?;
     let max_utterance_ms = match dialog.get("max_utterance_ms") {
-        Some(v) => v
-            .as_i64()
-            .ok_or_else(|| "config [rr3-brain.dialog] max_utterance_ms 须整数".to_string())?,
+        Some(v) => {
+            let n = v
+                .as_i64()
+                .ok_or_else(|| "config [rr3-brain.dialog] max_utterance_ms 须整数".to_string())?;
+            if n <= 0 {
+                return Err(format!(
+                    "config [rr3-brain.dialog] max_utterance_ms 须 >0，收到 {n}"
+                ));
+            }
+            n
+        }
         None => RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS,
     };
     // 唤醒词段可选（缺段 = 关闭门控；见 [`rr3_wake_cfg_of`]）
@@ -518,6 +543,37 @@ timeout_s = 20
         let cfg = rr3_brain_cfg_parse(text).unwrap();
         assert_eq!(cfg.call_timeout_s, 30.0);
         assert_eq!(cfg.max_utterance_ms, 8000);
+    }
+
+    /// 超时值域（本轮审计）：NaN/inf/非正/超上界一律拒——这些值进
+    /// `Duration::from_secs_f64` 会在首个云端调用/RPC 上 panic，必须挡在启动前。
+    #[test]
+    fn config_rejects_out_of_domain_timeouts() {
+        let text = |timeout: &str, bus: &str| {
+            format!(
+                "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = {timeout}\n[rr3-brain.dialog]\n[rr3-brain.bus]\ncall_timeout_s = {bus}\n"
+            )
+        };
+        for t in ["0", "-1", "inf", "nan", "3601"] {
+            let e = rr3_brain_cfg_parse(&text(t, "30")).unwrap_err();
+            assert!(e.contains("timeout_s"), "{t} 必须被拒: {e}");
+        }
+        for t in ["0", "-1", "inf", "nan", "3601"] {
+            let e = rr3_brain_cfg_parse(&text("20", t)).unwrap_err();
+            assert!(e.contains("call_timeout_s"), "{t} 必须被拒: {e}");
+        }
+        assert!(
+            rr3_brain_cfg_parse(&text("20", "30")).is_ok(),
+            "仓内档必须仍可解析"
+        );
+    }
+
+    /// dialog 话轮封顶：<=0 必须拒（否则状态机起轮即过期，与 ops/set 写臂判据一致）
+    #[test]
+    fn config_rejects_nonpositive_max_utterance_ms() {
+        let text = "[rr3-brain.cloud]\nbase_url = \"u\"\nasr_model = \"a\"\nllm_model = \"m\"\ntts_model = \"t\"\ntimeout_s = 20\n[rr3-brain.dialog]\nmax_utterance_ms = 0\n";
+        let e = rr3_brain_cfg_parse(text).unwrap_err();
+        assert!(e.contains("max_utterance_ms") && e.contains(">0"), "{e}");
     }
 
     /// 缺段/缺键点名（fail-closed；cloud 四键＋dialog 段必填，bus 段可选）
