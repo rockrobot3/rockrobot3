@@ -237,6 +237,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         &profile,
         boot.manifests.len(),
         boot.predegraded.len(),
+        boot.degraded.len(),
         &backends,
     );
     rr3_log(&summary);
@@ -413,6 +414,7 @@ fn rr3_boot_summary(
     profile: &str,
     modules: usize,
     predegraded: usize,
+    missing: usize,
     backends: &str,
 ) -> String {
     let dash = |s: &str| {
@@ -423,7 +425,7 @@ fn rr3_boot_summary(
         }
     };
     format!(
-        "启动摘要: tier={} chip={} profile={profile} modules={modules} 预降级={predegraded} 后端={backends}",
+        "启动摘要: tier={} chip={} profile={profile} modules={modules} 预降级={predegraded} 缺格={missing} 后端={backends}",
         dash(tier),
         dash(chip)
     )
@@ -946,9 +948,10 @@ mod tests {
     #[test]
     fn boot_summary_marks_backdoor_and_counts() {
         let b = rr3_backend_summary("", None, None, None);
-        let s = rr3_boot_summary("", "", "--manifest", 3, 1, &b);
+        let s = rr3_boot_summary("", "", "--manifest", 3, 1, 2, &b);
         assert!(s.contains("tier=-") && s.contains("chip=-"), "{s}");
         assert!(s.contains("modules=3") && s.contains("预降级=1"), "{s}");
+        assert!(s.contains("缺格=2"), "缺格数必须回显: {s}");
         assert!(s.contains("hal=-"), "后门无后端须显式 -: {s}");
         let b = rr3_backend_summary("linux", Some("esp32"), Some("esp32"), Some("esp32"));
         let s = rr3_boot_summary(
@@ -956,6 +959,7 @@ mod tests {
             "esp32",
             "/usr/lib/rockrobot3/profiles/esp32-mini.toml",
             1,
+            0,
             0,
             &b,
         );
