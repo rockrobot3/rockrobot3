@@ -114,4 +114,26 @@ else
   fail=1
 fi
 
+# ⑨ release 构建面（生产烧录档）：dev 档 opt-level=2 只代表开发构建，
+# release 的 codegen/LTO 差异必须独立出产物证据（W1/T2 构建面）。
+rel_elf="$(rr3_cargo_artifact xtensa-esp32s3-espidf release esp32-periph-base)" || {
+  echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
+  exit 1
+}
+if cargo +esp build --release \
+     --target xtensa-esp32s3-espidf \
+     --no-default-features --features esp32s3 \
+     --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+     --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+  if [ -f "$rel_elf" ]; then
+    echo "PASS  S3 release 构建（生产烧录档）: $rel_elf"
+  else
+    echo "FAIL  S3 release 编译退出 0 但 ELF 不在树: $rel_elf" >&2
+    fail=1
+  fi
+else
+  echo "FAIL  S3 release 构建失败" >&2
+  fail=1
+fi
+
 exit "$fail"
