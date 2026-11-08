@@ -28,6 +28,12 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
+/// 进程级落盘互斥：心跳闸门（conn）与 SIGTERM flush 线程可并发写同一固定 tmp
+/// 名——无互斥时 create/truncate/rename 交错会写出半截 JSON，下次 boot 起空账。
+/// 原子写的"单写者"前提由本锁补上（其它写口各用独立 tmp，不受影响）。
+#[cfg(unix)]
+static RR3_COUNTERS_STORE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `boots` 是 rrd 自有的计数键（启动自增，不走心跳），聚合表里的保留字面量
 pub const RR3_COUNTERS_BOOTS_KEY: &str = "boots";
 
@@ -116,6 +122,7 @@ pub use rr_ipc::persist::rr3_atomic_store;
 /// 本函数随写盘面同门。
 #[cfg(unix)]
 pub fn rr3_counters_store(path: &Path, table: &BTreeMap<String, u64>) -> Result<(), String> {
+    let _one_writer = RR3_COUNTERS_STORE.lock().unwrap_or_else(|p| p.into_inner());
     let body = json!(table).to_string();
     let tmp = path.with_file_name(COUNTERS_TMP);
     rr3_atomic_store(path, &tmp, body.as_bytes())
@@ -340,5 +347,32 @@ mod tests {
         g.rr3_on_flushed(10_100);
         assert!(!g.rr3_on_change(20_099), "第二个窗口内不刷");
         assert!(g.rr3_on_change(20_100), "第二个窗口到照刷");
+    }
+
+    /// 并发落盘（心跳闸门与 SIGTERM flush 同形）：固定 tmp 名的原子写序必须有
+    /// 单写者互斥，否则 create/truncate/rename 交错会留下半截 JSON（下次 boot 空账）。
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_stores_leave_parseable_file() {
+        let dir = tmpdir("conc");
+        let path = dir.join("counters.json");
+        let mut hs = Vec::new();
+        for i in 0..8u64 {
+            let p = path.clone();
+            hs.push(std::thread::spawn(move || {
+                for n in 0..20u64 {
+                    let mut t = BTreeMap::new();
+                    t.insert(format!("k{i}"), n);
+                    rr3_counters_store(&p, &t).expect("并发写应成功");
+                }
+            }));
+        }
+        for h in hs {
+            h.join().expect("写线程不应 panic");
+        }
+        let (t, note) = rr3_counters_load(&path);
+        assert!(note.is_none(), "落盘必须是可解析的完整 JSON: {note:?}");
+        assert_eq!(t.len(), 1, "整表覆盖，最后写胜出: {t:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
