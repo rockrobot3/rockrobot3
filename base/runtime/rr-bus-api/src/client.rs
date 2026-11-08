@@ -174,7 +174,16 @@ struct Rr3Inner {
 
 impl Rr3Inner {
     fn rr3_write_frame(&self, mut frame: Rr3Frame) -> Result<(), String> {
-        frame.header.payload_len = frame.payload.len() as u32;
+        let plen = frame.payload.len();
+        // 总线读侧按 1MiB 策略帽拒收（rr3_frame_read_cap）：超限时若仍把帧写进
+        // socket，对端会直接断开，模块只看到"总线已断开"而不知道根因。写侧
+        // 先 fail-closed，把可诊断的错误留在本进程。
+        if plen > RR3_FRAMING_PLEN_CAP_DEFAULT {
+            return Err(format!(
+                "载荷 {plen}B 超总线帧上界 {RR3_FRAMING_PLEN_CAP_DEFAULT}B（rrd 读侧会拒收并断链）"
+            ));
+        }
+        frame.header.payload_len = plen as u32;
         rr3_frame_write(
             &mut *self.sock.lock().unwrap_or_else(|p| p.into_inner()),
             &frame,
@@ -289,6 +298,17 @@ impl Rr3BusClient {
         identity: Rr3BusIdentity,
         wire_manifest: &str,
     ) -> Result<Self, String> {
+        Self::rr3_connect_timeout(path, identity, wire_manifest, RR3_CONNECT_TIMEOUT)
+    }
+
+    /// 连接本体：注册等待上界显式注入（生产走 [`RR3_CONNECT_TIMEOUT`]，单测
+    /// 用短档钉"静默对端必须快速失败且 reader 线程被收掉"）。
+    fn rr3_connect_timeout(
+        path: &str,
+        identity: Rr3BusIdentity,
+        wire_manifest: &str,
+        connect_timeout: Duration,
+    ) -> Result<Self, String> {
         let stream = UnixStream::connect(path).map_err(|e| format!("连总线 {path} 失败: {e}"))?;
         let writer = stream
             .try_clone()
@@ -320,28 +340,20 @@ impl Rr3BusClient {
             0,
             "rr3.register",
             json!({"name": inner.name, "manifest": wire_manifest}),
-            RR3_CONNECT_TIMEOUT,
+            connect_timeout,
         );
         let reply = match reply {
             Ok(v) => v,
             Err(e) => {
-                inner.stop.store(true, Ordering::Relaxed);
-                let _ = reader.join();
+                rr3_abort_reader(&inner, reader);
                 return Err(format!("注册失败: {e}"));
             }
         };
-        let task = reply
-            .get("src_task")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                inner.stop.store(true, Ordering::Relaxed);
-                "注册应答缺 result.src_task".to_string()
-            });
-        let task = match task {
-            Ok(t) => t,
-            Err(e) => {
-                let _ = reader.join();
-                return Err(e);
+        let task = match reply.get("src_task").and_then(Value::as_u64) {
+            Some(t) => t,
+            None => {
+                rr3_abort_reader(&inner, reader);
+                return Err("注册应答缺 result.src_task".to_string());
             }
         };
         inner.task.store(task as _, Ordering::Relaxed);
@@ -362,7 +374,7 @@ impl Rr3BusClient {
         // 字段（可选 append，旧 rrd 忽略未知字段，双向兼容；空映射不带，保持与
         // 无上报模块同一条线上形状）。
         let hb_inner = inner.clone();
-        std::thread::Builder::new()
+        let hb = std::thread::Builder::new()
             .name("rr3-bus-heartbeat".into())
             .spawn(move || {
                 let mut misses: u32 = 0;
@@ -437,8 +449,13 @@ impl Rr3BusClient {
                         .unwrap_or_else(|p| p.into_inner())
                         .rr3_heartbeat_sent(now_ms);
                 }
-            })
-            .map_err(|e| format!("起心跳线程失败: {e}"))?;
+            });
+        if let Err(e) = hb {
+            // 心跳起不来 = 这个客户端不可能"活着"：先收掉 reader（关 socket 解
+            // 阻塞读）再回错，不能让半套连接把调用进程挂在启动路径上。
+            rr3_abort_reader(&inner, reader);
+            return Err(format!("起心跳线程失败: {e}"));
+        }
 
         Ok(Self { inner })
     }
@@ -587,6 +604,19 @@ impl Drop for Rr3BusClient {
             .unwrap_or_else(|p| p.into_inner())
             .shutdown(std::net::Shutdown::Both);
     }
+}
+
+/// 连接失败收尾：置 stop + shutdown 解 reader 的阻塞读，再 join。
+/// 只置 stop（旧写法）不关 socket 时 reader 仍卡在 read 上，join 会把
+/// "注册超时"拖成永久挂死——启动路径必须可失败、可观测。
+fn rr3_abort_reader(inner: &Rr3Inner, reader: JoinHandle<()>) {
+    inner.stop.store(true, Ordering::Relaxed);
+    let _ = inner
+        .sock
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .shutdown(std::net::Shutdown::Both);
+    let _ = reader.join();
 }
 
 /// reader 主循环：Response 按 id 投邮箱，其余进 inbox；连接死亡时唤醒所有等待者。
@@ -800,6 +830,54 @@ mod tests {
         );
         assert!(log.iter().any(|(m, _)| m == "rr3.heartbeat"));
         drop(client);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// B-8（本轮审计）：载荷超总线读侧策略帽时写侧必须先拒——旧行为是把帧写进
+    /// socket，rrd 读侧拒收后断链，模块只看到"总线已断开"，根因丢失。
+    #[test]
+    fn publish_rejects_payload_over_bus_cap() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (client, path) = connect_on("cap", log);
+        let big = "x".repeat(RR3_FRAMING_PLEN_CAP_DEFAULT);
+        let e = client
+            .rr3_publish("rr3-t/big", json!({"blob": big}))
+            .expect_err("超帽载荷必须在写侧被拒");
+        assert!(e.contains("超总线帧上界"), "{e}");
+        drop(client);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// B-9（本轮审计）：对端接受连接但静默不回注册应答时，连接必须按超时失败，
+    /// 且失败路径关 socket 收掉 reader——旧写法只置 stop 再 join，reader 卡在
+    /// read 上会把启动超时拖成永久挂死。
+    #[test]
+    fn connect_times_out_and_aborts_reader_when_peer_is_silent() {
+        use std::time::Instant;
+        let path = tmp_bus_path("silent");
+        let listener = UnixListener::bind(&path).unwrap();
+        let (hold_tx, hold_rx) = mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            let (_stream, _) = listener.accept().expect("假 rrd 应接受连接");
+            let _ = hold_rx.recv(); // 持有连接保持静默：不回注册应答
+        });
+        let t0 = Instant::now();
+        let e = match Rr3BusClient::rr3_connect_timeout(
+            path.to_str().unwrap(),
+            rr3_manifest_ident(MANIFEST).unwrap(),
+            MANIFEST,
+            Duration::from_millis(150),
+        ) {
+            Ok(_) => panic!("静默对端必须超时失败"),
+            Err(e) => e,
+        };
+        assert!(e.contains("注册失败") && e.contains("超时"), "{e}");
+        assert!(
+            t0.elapsed() < Duration::from_secs(3),
+            "reader 必须被收掉，连接失败不得挂死：{:?}",
+            t0.elapsed()
+        );
+        let _ = hold_tx.send(());
         let _ = std::fs::remove_file(&path);
     }
 
