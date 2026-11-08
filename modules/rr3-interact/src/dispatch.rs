@@ -43,12 +43,12 @@ impl Rr3TtsPcmBuf {
     /// 收一帧：`pcm_b64` 解码追加（STREAM 语义有序到达，帧序即字节序）。
     /// 解码失败/超上界上抛，由调用方弃帧——缺口由点名的对账兜住，不静默。
     pub(crate) fn rr3_tts_buf_push(&mut self, pcm_b64: &str) -> Result<(), String> {
-        self.rr3_tts_buf_push_capped(pcm_b64, RR3_TTS_BUF_CAP)
+        self.rr3_tts_push_cap(pcm_b64, RR3_TTS_BUF_CAP)
     }
 
     /// 带帽收帧（帽参数显式化，单测用小帽钉边界）：先按 base64 上界估算，
     /// 超帽时不解码、不分配。
-    fn rr3_tts_buf_push_capped(&mut self, pcm_b64: &str, cap: usize) -> Result<(), String> {
+    fn rr3_tts_push_cap(&mut self, pcm_b64: &str, cap: usize) -> Result<(), String> {
         let projected = self.bytes.len().saturating_add(pcm_b64.len() / 4 * 3);
         if projected > cap {
             return Err(format!(
@@ -256,7 +256,7 @@ mod tests {
         );
         // 超帽（本轮审计）：整帧拒收、不部分写入——点名对账随后拒播整轮
         let b64 = rr_ipc::rr3_base64_encode(&[1, 2, 3, 4, 5]);
-        assert!(buf.rr3_tts_buf_push_capped(&b64, 4).is_err(), "超帽必须拒");
+        assert!(buf.rr3_tts_push_cap(&b64, 4).is_err(), "超帽必须拒");
         assert_eq!(buf.rr3_tts_buf_len(), 0, "超帽帧不得部分写入");
     }
 
