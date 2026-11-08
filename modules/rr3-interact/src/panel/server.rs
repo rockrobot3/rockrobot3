@@ -1157,12 +1157,15 @@ fn rr3_leg_relay(shared: &Rr3PanelShared) -> (Value, &'static str) {
             }
             (leg, want)
         }
+        // 取数失败 = 能力面不可核验：腿如实 fail，期望态按最严的 pass 记——
+        // 旧实现把期望也记 fail，等值判定会把这条故障腿抵消成"符合预期"，
+        // 自检 verdict 可能在 rrd 状态面故障时假绿（0.0.8c 审计收口）。
         Err(e) => (
             json!({
                 "leg": "relay", "pass": "fail",
                 "reason": format!("ctl.status 取数失败: {e}"),
             }),
-            "fail",
+            "pass",
         ),
     }
 }
@@ -2367,6 +2370,62 @@ mod tests {
         assert_eq!(rr3_relay_expect(true, "pass"), "pass");
         assert_eq!(rr3_relay_expect(true, "fail"), "fail");
         assert_eq!(rr3_relay_expect(true, "n-a"), "n-a");
+    }
+
+    /// relay 腿 ctl 取数失败必须 fail-closed（0.0.8c 审计）：腿如实 fail，
+    /// 期望态不得记成 fail 抵消等值——能力面不可核验时 verdict 必红。
+    #[test]
+    fn selftest_relay_ctl_failure_is_fail_closed() {
+        let dir = std::env::temp_dir().join(format!("panel-relay-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 总线连接只用于构造 BusHandle：本腿在 ctl 失败分支不会触总线
+        let bus_path = dir.join("bus.sock");
+        let bus_listener = std::os::unix::net::UnixListener::bind(&bus_path).unwrap();
+        std::thread::spawn(move || {
+            rr3_i4_fake_rrd(
+                bus_listener,
+                Arc::new(Mutex::new(Vec::new())),
+                json!({}),
+                json!({}),
+            )
+        });
+        std::env::set_var(rr_ipc::RR3_BUS_PATH_ENV, bus_path.to_str().unwrap());
+        let bus = BusHandle::wrap(Rr3BusClient::rr3_connect(I4_MANIFEST).expect("连假 rrd 应成功"));
+        std::env::remove_var(rr_ipc::RR3_BUS_PATH_ENV);
+
+        // ctl 短连指向错误信封：ctl.status 取数失败
+        let ctl_path = dir.join("ctl.sock");
+        let ctl_listener = std::os::unix::net::UnixListener::bind(&ctl_path).unwrap();
+        let jh = rr3_fake_ctl_rrd(
+            ctl_listener,
+            json!({
+                "jsonrpc": "2.0", "id": 6,
+                "error": { "code": 3, "message": "ctl.status 不可用" }
+            }),
+        );
+
+        let (actions_tx, _rx) = mpsc::channel();
+        let shared = panel_shared(bus, ctl_path.to_string_lossy().into_owned(), actions_tx);
+        let (leg, want) = rr3_leg_relay(&shared);
+        assert_eq!(leg["pass"], "fail", "取数失败如实记 fail");
+        assert_eq!(want, "pass", "期望态不得被记成 fail 抵消");
+        let legs = vec![
+            json!({ "leg": "speaker", "pass": "pass" }),
+            leg,
+            json!({ "leg": "face", "pass": "pass" }),
+        ];
+        let expect = Rr3SelftestExpect {
+            relay: want,
+            ..Default::default()
+        };
+        assert_eq!(
+            rr3_selftest_verdict(&legs, &expect),
+            "fail",
+            "能力核验故障不得假绿"
+        );
+        jh.join().unwrap();
     }
 
     /// verdict 对 relay=n-a 的 host-only 形态等值即过（n-a 不拖累）。
