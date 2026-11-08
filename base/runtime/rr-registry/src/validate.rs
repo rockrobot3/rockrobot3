@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 use toml::Value;
 
-use crate::schema::{rr3_field_specs, rr3_get_by_path, rr3_rule_list};
+use crate::schema::{rr3_field_specs, rr3_get_by_path, rr3_rule_list, Rr3FieldSpec};
 
 const RR3_TOPIC_HEAD: &str = "rr3-";
 
@@ -271,82 +271,7 @@ fn rr3_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) -> Vec<St
 
     // 1) 逐字段：存在性 + 类型 + 规则
     for spec in rr3_field_specs() {
-        let found = rr3_get_by_path(&root, &spec.path);
-        let Some(value) = found else {
-            if spec.required {
-                report.errors.push(format!("缺少必填字段 {}", spec.path));
-            }
-            continue;
-        };
-
-        let kind_ok = match spec.kind.as_str() {
-            "string" => match value.as_str() {
-                Some(s) => {
-                    if let Some(rule) = &spec.rule {
-                        report.errors.extend(rr3_registry_check(rule, s));
-                    }
-                    true
-                }
-                None => false,
-            },
-            "bool" => value.as_bool().is_some(),
-            "int" => value.as_integer().is_some(),
-            "list" => match (value.as_array(), spec.rule.as_deref()) {
-                (Some(arr), Some(rule)) => {
-                    for (idx, item) in arr.iter().enumerate() {
-                        // F1：列表项非字符串是 manifest 类型错误，必须报告而非被 filter_map 静默
-                        // 丢弃（否则同段的合法项会掩盖它，fail-open）。
-                        let Some(s) = item.as_str() else {
-                            report.errors.push(format!(
-                                "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
-                                spec.path,
-                                idx + 1
-                            ));
-                            continue;
-                        };
-                        if rule == "own_topic" {
-                            report.errors.extend(rr3_registry_check("topic", s));
-                            let want = format!("{self_name}/");
-                            if !self_name.is_empty() && !s.starts_with(&want) {
-                                report
-                                    .errors
-                                    .push(format!("越权主题 {s}（前缀必须是 {want}）"));
-                            }
-                            // F2：events.publishes 与 rpc.exposes 都必须在主题集
-                            // （contracts/topics.toml，CI 检查③）注册，未注册的 RPC 名不再放行。
-                            // F3：主题集为空的内核入口已由两个包装 fail-closed（rr3_topic_
-                            // is_empty 护栏）——空注册表不得让成员检查被空洞满足。
-                            let check_registered =
-                                spec.path == "events.publishes" || spec.path == "rpc.exposes";
-                            if check_registered && !topics.rr3_topic_contains(s) {
-                                report.errors.push(format!("未注册主题 {s}"));
-                            }
-                            // C14 门改判（0.0.5 批J）：retired 主题 = 号位保留、义务解除，
-                            // 申报发布/暴露即拒（ADR-0019 修订 2 ②）。
-                            if check_registered
-                                && topics.rr3_topic_contains(s)
-                                && topics.rr3_topic_status(s).as_deref() == Some("retired")
-                            {
-                                report.errors.push(format!(
-                                    "retired 主题 {s} 不得被申报（发布/暴露）——号位保留、义务解除（ADR-0019 修订 2 ②）"
-                                ));
-                            }
-                        } else {
-                            report.errors.extend(rr3_registry_check(rule, s));
-                        }
-                    }
-                    true
-                }
-                (Some(_), None) => true,
-                _ => false,
-            },
-            other => panic!("schema 未知 kind {other}（契约与代码不同步）"),
-        };
-        if !kind_ok {
-            report
-                .errors
-                .push(rr3_type_err(&spec.path, &spec.kind, value));
-        }
+        rr3_chk_field(&spec, &root, self_name, topics, &mut report.errors);
     }
 
     // 2) 跨字段：heartbeat < watchdog（方案 §4 [health] 约束）
@@ -361,24 +286,120 @@ fn rr3_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) -> Vec<St
     }
 
     // 3) subscribes 必须已注册（订阅方不要求前缀归属）
-    // F3：空主题集的内核入口已由两个包装 fail-closed——空注册表不得让订阅成员检查被空洞满足。
-    // 非字符串项的类型错误已由逐字段循环（rule=topic）报告，这里只做成员检查。
-    // C14 门改判（0.0.5 批J）：retired 主题不得被申报订阅（号位保留、义务解除）。
-    if let Some(arr) = rr3_get_by_path(&root, "events.subscribes").and_then(Value::as_array) {
+    rr3_chk_subs(&root, topics, &mut report.errors);
+
+    report.errors
+}
+
+/// 单字段检查：存在性（必填）→ 类型 → 规则；类型错只报一次并给出实际值。
+/// 顺序与拆分前逐段等价。
+fn rr3_chk_field(
+    spec: &Rr3FieldSpec,
+    root: &Value,
+    self_name: &str,
+    topics: &crate::topics::Rr3TopicSet,
+    errs: &mut Vec<String>,
+) {
+    let Some(value) = rr3_get_by_path(root, &spec.path) else {
+        if spec.required {
+            errs.push(format!("缺少必填字段 {}", spec.path));
+        }
+        return;
+    };
+
+    let kind_ok = match spec.kind.as_str() {
+        "string" => match value.as_str() {
+            Some(s) => {
+                if let Some(rule) = &spec.rule {
+                    errs.extend(rr3_registry_check(rule, s));
+                }
+                true
+            }
+            None => false,
+        },
+        "bool" => value.as_bool().is_some(),
+        "int" => value.as_integer().is_some(),
+        "list" => match (value.as_array(), spec.rule.as_deref()) {
+            (Some(arr), Some(rule)) => {
+                for (idx, item) in arr.iter().enumerate() {
+                    // F1：列表项非字符串是 manifest 类型错误，必须报告而非被 filter_map 静默
+                    // 丢弃（否则同段的合法项会掩盖它，fail-open）。
+                    let Some(s) = item.as_str() else {
+                        errs.push(format!(
+                            "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
+                            spec.path,
+                            idx + 1
+                        ));
+                        continue;
+                    };
+                    rr3_chk_item(spec, rule, s, self_name, topics, errs);
+                }
+                true
+            }
+            (Some(_), None) => true,
+            _ => false,
+        },
+        other => panic!("schema 未知 kind {other}（契约与代码不同步）"),
+    };
+    if !kind_ok {
+        errs.push(rr3_type_err(&spec.path, &spec.kind, value));
+    }
+}
+
+/// 列表项规则：own_topic 含前缀归属、主题注册与 retired 三重判定；
+/// 其余规则一律走 `rr3_registry_check`（一份判据一份真值）。
+fn rr3_chk_item(
+    spec: &Rr3FieldSpec,
+    rule: &str,
+    s: &str,
+    self_name: &str,
+    topics: &crate::topics::Rr3TopicSet,
+    errs: &mut Vec<String>,
+) {
+    if rule != "own_topic" {
+        errs.extend(rr3_registry_check(rule, s));
+        return;
+    }
+    errs.extend(rr3_registry_check("topic", s));
+    let want = format!("{self_name}/");
+    if !self_name.is_empty() && !s.starts_with(&want) {
+        errs.push(format!("越权主题 {s}（前缀必须是 {want}）"));
+    }
+    // F2：events.publishes 与 rpc.exposes 都必须在主题集
+    // （contracts/topics.toml，CI 检查③）注册，未注册的 RPC 名不再放行。
+    // F3：主题集为空的内核入口已由两个包装 fail-closed（rr3_topic_
+    // is_empty 护栏）——空注册表不得让成员检查被空洞满足。
+    let check_registered = spec.path == "events.publishes" || spec.path == "rpc.exposes";
+    if check_registered && !topics.rr3_topic_contains(s) {
+        errs.push(format!("未注册主题 {s}"));
+    }
+    // C14 门改判（0.0.5 批J）：retired 主题 = 号位保留、义务解除，
+    // 申报发布/暴露即拒（ADR-0019 修订 2 ②）。
+    if check_registered
+        && topics.rr3_topic_contains(s)
+        && topics.rr3_topic_status(s).as_deref() == Some("retired")
+    {
+        errs.push(format!(
+            "retired 主题 {s} 不得被申报（发布/暴露）——号位保留、义务解除（ADR-0019 修订 2 ②）"
+        ));
+    }
+}
+
+/// subscribes 成员检查：必须已注册（订阅方不要求前缀归属）。
+/// 非字符串项的类型错误已由逐字段循环（rule=topic）报告，这里只做成员检查；
+/// C14 门改判（0.0.5 批J）：retired 主题不得被申报订阅（号位保留、义务解除）。
+fn rr3_chk_subs(root: &Value, topics: &crate::topics::Rr3TopicSet, errs: &mut Vec<String>) {
+    if let Some(arr) = rr3_get_by_path(root, "events.subscribes").and_then(Value::as_array) {
         for topic in arr.iter().filter_map(Value::as_str) {
             if !topics.rr3_topic_contains(topic) {
-                report
-                    .errors
-                    .push(format!("events.subscribes 引用未注册主题 {topic}"));
+                errs.push(format!("events.subscribes 引用未注册主题 {topic}"));
             } else if topics.rr3_topic_status(topic).as_deref() == Some("retired") {
-                report.errors.push(format!(
+                errs.push(format!(
                     "events.subscribes 引用 retired 主题 {topic}——号位保留、义务解除（ADR-0019 修订 2 ②）"
                 ));
             }
         }
     }
-
-    report.errors
 }
 
 /// 取 topics.toml 中登记的 owner 名列表
