@@ -24,6 +24,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.." # 仓根
+# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
+# crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
+. tools/ci/cargo-artifact.sh
 
 PROJ=tools/esp32-periph-base
 ELF_NAME=esp32-periph-base
@@ -83,7 +86,8 @@ if ! ( cd "$PROJ" && cargo +esp build "${build_args[@]}" ); then
 fi
 
 echo "== ③ 产物在树断言 =="
-ELF="$PROJ/target/xtensa-esp32-espidf/$BUILD/$ELF_NAME"
+ELF="$( cd "$PROJ" && rr3_cargo_artifact xtensa-esp32-espidf "$BUILD" "$ELF_NAME" )" \
+  || die "无法解析 cargo target_directory（metadata 不可用）"
 [ -f "$ELF" ] || die "ELF 不在树: $ELF"
 echo "PASS  ELF 在树: $ELF"
 

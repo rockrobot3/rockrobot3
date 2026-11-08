@@ -17,6 +17,9 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 export PATH="$HOME/.cargo/bin:$PATH"
 export CARGO_TERM_COLOR=never
+# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
+# crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
+. "$root/tools/ci/cargo-artifact.sh"
 fail=0
 
 # ---- 工具链缺位五查（缺一 = 整门 SKIP，同 espidf-sentinel-check.sh 口径）----
@@ -64,7 +67,11 @@ for mod in rr3-act rr3-sense; do
       echo "PASS  $mod venv dist-info 兼容改名: ${d##*/} → ruamel.yaml-*"
     fi
   done
-  elf="target/xtensa-esp32-espidf/debug/$mod"
+  elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug "$mod")" || {
+    echo "FAIL  $mod 无法解析 cargo target_directory（metadata 不可用）" >&2
+    fail=1
+    continue
+  }
   if cargo +esp build --target xtensa-esp32-espidf \
        --config 'source.crates-io.replace-with="rsproxy-sparse"' \
        --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then

@@ -11,6 +11,9 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 cd "$root/tools/espidf-std-hello" || { echo "ERROR: 无法进入 tools/espidf-std-hello" >&2; exit 1; }
+# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
+# crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
+. "$root/tools/ci/cargo-artifact.sh"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -67,7 +70,10 @@ for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
 done
 
 # elf 判据：debug 构建（冒烟只证构建链通，无时序敏感性，同 release 判据不适用）
-elf="target/xtensa-esp32-espidf/debug/espidf-std-hello"
+elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug espidf-std-hello)" || {
+  echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
+  exit 1
+}
 if cargo +esp build \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then

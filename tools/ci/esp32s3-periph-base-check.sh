@@ -25,6 +25,9 @@ export RR3_ALLOW_DEV_ADMIN_TOKEN=1
 fail=0
 
 cd "$root/tools/esp32-periph-base" || { echo "ERROR: 无法进入 tools/esp32-periph-base" >&2; exit 1; }
+# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
+# crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
+. "$root/tools/ci/cargo-artifact.sh"
 
 # ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
@@ -78,7 +81,10 @@ for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
 done
 
 # target-dir 由仓根 .cargo/config.toml 统一到 /tmp/rr3-build（P0-5）
-elf="/tmp/rr3-build/xtensa-esp32s3-espidf/debug/esp32-periph-base"
+elf="$(rr3_cargo_artifact xtensa-esp32s3-espidf debug esp32-periph-base)" || {
+  echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
+  exit 1
+}
 if cargo +esp build \
      --target xtensa-esp32s3-espidf \
      --no-default-features --features esp32s3 \

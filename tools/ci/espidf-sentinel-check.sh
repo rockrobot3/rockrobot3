@@ -20,6 +20,9 @@ fail=0
 
 # ---- 甲面：xtensa 哨兵（工具链缺位 = 整门 SKIP，同 espidf-std-check.sh 口径）----
 cd "$root/tools/espidf-sentinel" || { echo "ERROR: 无法进入 tools/espidf-sentinel" >&2; exit 1; }
+# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
+# crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
+. "$root/tools/ci/cargo-artifact.sh"
 
 # ① esp fork 工具链（rustup alias esp，0.0.7 批A'）
 if ! rustup toolchain list 2>/dev/null | grep -q '^esp'; then
@@ -67,7 +70,10 @@ for d in "$venv_sp"/ruamel_yaml-*.dist-info; do
   fi
 done
 
-elf="target/xtensa-esp32-espidf/debug/espidf-sentinel"
+elf="$(rr3_cargo_artifact xtensa-esp32-espidf debug espidf-sentinel)" || {
+  echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
+  exit 1
+}
 if cargo +esp build \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
      --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
