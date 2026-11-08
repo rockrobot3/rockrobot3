@@ -486,7 +486,11 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
             g.rr3_reg_denied(),
         )
     };
-    Ok(json!({"modules": modules, "denied_publish": denied}))
+    Ok(json!({
+        "modules": modules,
+        "denied_publish": denied,
+        "boot": crate::rr3_boot_summary_get(),
+    }))
 }
 
 /// ctl.health 读面：心跳健康快照（watchdog 判活的输入）。

@@ -191,6 +191,23 @@ fn rr3_ring_push(ring: &mut VecDeque<String>, line: String, cap: usize) {
 
 static RR3_LOG_RING: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
+/// 本次装配摘要的一行定格：daemon 启动时 set 一次，`rr3.ctl.status` 读回。
+/// 远程诊断不必先翻日志；首份胜出（进程内装配事实，运行期不改）。
+#[cfg(unix)]
+static RR3_BOOT_SUMMARY: OnceLock<String> = OnceLock::new();
+
+/// 定格启动摘要（daemon 装配完成后调一次）；重复调用被拒。
+#[cfg(unix)]
+pub fn rr3_boot_summary_set(line: String) -> bool {
+    RR3_BOOT_SUMMARY.set(line).is_ok()
+}
+
+/// 读启动摘要：未定格（非装配路径/尚未启动完）返回 None，不造假值。
+#[cfg(unix)]
+pub fn rr3_boot_summary_get() -> Option<String> {
+    RR3_BOOT_SUMMARY.get().cloned()
+}
+
 fn rr3_log_ring() -> &'static Mutex<VecDeque<String>> {
     RR3_LOG_RING.get_or_init(|| Mutex::new(VecDeque::new()))
 }
