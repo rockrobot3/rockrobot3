@@ -415,37 +415,8 @@ fn rr3_serve_ctl(
 ) -> String {
     // 先在锁内取数、锁外应答：与握手主路的锁纪律一致（持 shared 锁时不碰 out 锁）
     let result: Result<Value, (Rr3StatusCode, String)> = match req.method {
-        Rr3RpcMethod::CtlStatus => {
-            let (modules, denied) = {
-                let g = rr3_lock(&ctx.shared);
-                (
-                    g.rr3_reg_snapshot()
-                        .into_iter()
-                        .map(|(name, task, phase)| {
-                            json!({"name": name, "task": task, "phase": phase.as_str()})
-                        })
-                        .collect::<Vec<Value>>(),
-                    g.rr3_reg_denied(),
-                )
-            };
-            Ok(json!({"modules": modules, "denied_publish": denied}))
-        }
-        Rr3RpcMethod::CtlHealth => {
-            let modules = {
-                let g = rr3_lock(&ctx.shared);
-                g.rr3_reg_health_snapshot(ctx.rr3_ctx_now_ms())
-                    .into_iter()
-                    .map(|r| {
-                        json!({
-                            "name": r.name, "task": r.src_task, "phase": r.phase.as_str(),
-                            "heartbeat_ms": r.heartbeat_ms, "watchdog_ms": r.watchdog_ms,
-                            "since_beat_ms": r.since_beat_ms,
-                        })
-                    })
-                    .collect::<Vec<Value>>()
-            };
-            Ok(json!({ "modules": modules }))
-        }
+        Rr3RpcMethod::CtlStatus => rr3_ctl_status(ctx),
+        Rr3RpcMethod::CtlHealth => rr3_ctl_health(ctx),
         Rr3RpcMethod::CtlLogs => Ok(json!({"lines": rr3_log_tail()})),
         // 运维计数读面（0.0.4 批B，Q1 裁定）：与 CtlHealth 分开——health 是心跳健康
         // 语义（watchdog 判活的输入），counters 是业务运维账（"机器慢先看数字"）。
@@ -466,25 +437,7 @@ fn rr3_serve_ctl(
         // 其余一律 Permission 拒 + 日志点名。为什么加 env 门：cfg(linux) 单独
         // 解锁会让 CI 的 ubuntu runner 在 e2e 里真重启——e2e 可测性要求缺省路径
         // 恒拒，解锁面留装机环境（rrd.service 设 RR3_REBOOT_OK=1）。
-        Rr3RpcMethod::CtlReboot => match rr3_reboot_unlocked() {
-            Some(how) => {
-                rr3_log(&format!("ctl.reboot 执行面已解锁（{how}），发起系统重启"));
-                match std::process::Command::new("systemctl")
-                    .arg("reboot")
-                    .status()
-                {
-                    Ok(st) if st.success() => Ok(json!({"reboot": true})),
-                    other => Err((
-                        Rr3StatusCode::Permission,
-                        format!("systemctl reboot 执行失败: {other:?}"),
-                    )),
-                }
-            }
-            None => Err((
-                Rr3StatusCode::Permission,
-                "reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）".to_string(),
-            )),
-        },
+        Rr3RpcMethod::CtlReboot => rr3_ctl_reboot(),
         // 装配快照读口（批N4 件九笔4）：boot 装载链验收后的四路底账 + [pins]×
         // wiring 全交叉逐条判果，一应答给出（判据真值单点 = assembly.rs）。快照
         // 未在册（--manifest 调试路径）时如实回不可得，不造假数据。
@@ -517,6 +470,65 @@ fn rr3_serve_ctl(
         req.method.as_str()
     ));
     "ctl 查询完成，一次性控制连接按 ADR-0010 收尾".to_string()
+}
+
+/// ctl.status 读面：在册模块快照 + 越权发布计数（锁内取数、锁外组 JSON）。
+fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
+    let (modules, denied) = {
+        let g = rr3_lock(&ctx.shared);
+        (
+            g.rr3_reg_snapshot()
+                .into_iter()
+                .map(|(name, task, phase)| {
+                    json!({"name": name, "task": task, "phase": phase.as_str()})
+                })
+                .collect::<Vec<Value>>(),
+            g.rr3_reg_denied(),
+        )
+    };
+    Ok(json!({"modules": modules, "denied_publish": denied}))
+}
+
+/// ctl.health 读面：心跳健康快照（watchdog 判活的输入）。
+fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
+    let modules = {
+        let g = rr3_lock(&ctx.shared);
+        g.rr3_reg_health_snapshot(ctx.rr3_ctx_now_ms())
+            .into_iter()
+            .map(|r| {
+                json!({
+                    "name": r.name, "task": r.src_task, "phase": r.phase.as_str(),
+                    "heartbeat_ms": r.heartbeat_ms, "watchdog_ms": r.watchdog_ms,
+                    "since_beat_ms": r.since_beat_ms,
+                })
+            })
+            .collect::<Vec<Value>>()
+    };
+    Ok(json!({ "modules": modules }))
+}
+
+/// ctl.reboot 执行面：双重门（cfg(linux) 且 env `RR3_REBOOT_OK=1`）解锁才真跑
+/// `systemctl reboot`，其余一律 Permission 拒；e2e 缺省路径恒拒。
+fn rr3_ctl_reboot() -> Result<Value, (Rr3StatusCode, String)> {
+    match rr3_reboot_unlocked() {
+        Some(how) => {
+            rr3_log(&format!("ctl.reboot 执行面已解锁（{how}），发起系统重启"));
+            match std::process::Command::new("systemctl")
+                .arg("reboot")
+                .status()
+            {
+                Ok(st) if st.success() => Ok(json!({"reboot": true})),
+                other => Err((
+                    Rr3StatusCode::Permission,
+                    format!("systemctl reboot 执行失败: {other:?}"),
+                )),
+            }
+        }
+        None => Err((
+            Rr3StatusCode::Permission,
+            "reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）".to_string(),
+        )),
+    }
 }
 
 /// 处理注册后的入站帧。`Err` = 协议违规，该连接按崩溃收尾。
