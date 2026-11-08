@@ -214,14 +214,62 @@ fn rr3_wire_fields(
     errs: &mut Vec<String>,
 ) -> Rr3Wire {
     let (hdr_pin, signal) = rr3_wire_conductors(i, t, errs);
-    // net：domains 外键，"none" 是纯信号/地线组的合法显式值
-    let net = t.get("net").and_then(toml::Value::as_str).unwrap_or("");
-    if net.is_empty() {
-        errs.push(format!(
-            "wire #{i}.net 缺失或为空（\"none\" 是纯信号/地线组的合法显式值，留空即红）"
-        ));
+    // 判据按字段序执行，错误顺序与文案逐字保持（net → feeds → mate → keyed →
+    // rated_a → gnd_common）。
+    let net = rr3_wire_req_str(
+        i,
+        t,
+        "net",
+        "\"none\" 是纯信号/地线组的合法显式值，留空即红",
+        errs,
+    );
+    let feeds = rr3_wire_feeds(i, t, errs);
+    let mate = rr3_wire_req_str(
+        i,
+        t,
+        "mate",
+        "\"none\" 是排针/焊线直连的合法显式值，留空即红",
+        errs,
+    );
+    let keyed = rr3_wire_keyed(i, t, errs);
+    let rated_a = rr3_wire_rated(i, t, errs);
+    let gnd_common = rr3_wire_req_str(
+        i,
+        t,
+        "gnd_common",
+        "共地点标识，\"none\" 是无地导体线组的合法显式值",
+        errs,
+    );
+    Rr3Wire {
+        connector: connector.to_string(),
+        hdr_pin,
+        signal,
+        net,
+        feeds,
+        mate,
+        keyed,
+        rated_a,
+        gnd_common,
     }
-    // feeds：无下游线组显式写 []（缺失语义列：缺 → 红）
+}
+
+/// 必填字符串字段（net/mate/gnd_common）：缺失、非串、空串同一文案点名。
+fn rr3_wire_req_str(
+    i: usize,
+    t: &toml::value::Table,
+    key: &str,
+    hint: &str,
+    errs: &mut Vec<String>,
+) -> String {
+    let v = t.get(key).and_then(toml::Value::as_str).unwrap_or("");
+    if v.is_empty() {
+        errs.push(format!("wire #{i}.{key} 缺失或为空（{hint}）"));
+    }
+    v.to_string()
+}
+
+/// feeds：无下游线组显式写 []（缺失/类型错 → 红）。
+fn rr3_wire_feeds(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> Vec<String> {
     let feeds: Vec<String> = t
         .get("feeds")
         .and_then(toml::Value::as_array)
@@ -237,15 +285,12 @@ fn rr3_wire_fields(
             "wire #{i}.feeds 缺失或不是字符串数组（无下游线组显式写 []，留空即红——§5 缺失语义列）"
         ));
     }
-    // mate：devices.toml 外键，"none" 是直连无对端的合法显式值
-    let mate = t.get("mate").and_then(toml::Value::as_str).unwrap_or("");
-    if mate.is_empty() {
-        errs.push(format!(
-            "wire #{i}.mate 缺失或为空（\"none\" 是排针/焊线直连的合法显式值，留空即红）"
-        ));
-    }
-    // keyed：有无防呆必须显式声明（缺失语义列：缺 → 红）
-    let keyed = match t.get("keyed").and_then(toml::Value::as_bool) {
+    feeds
+}
+
+/// keyed：有无物理防呆必须显式声明（缺 → 红）。
+fn rr3_wire_keyed(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> bool {
+    match t.get("keyed").and_then(toml::Value::as_bool) {
         Some(b) => b,
         None => {
             errs.push(format!(
@@ -253,12 +298,15 @@ fn rr3_wire_fields(
             ));
             false
         }
-    };
-    // rated_a：正数（0 额定线不存在；⑦-c 的判据面，批N2 消费）
-    let rated_a = t
+    }
+}
+
+/// rated_a：正数（0 额定线不存在；⑦-c 的判据面）。
+fn rr3_wire_rated(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> f64 {
+    let rated = t
         .get("rated_a")
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)));
-    let rated_a = match rated_a {
+    match rated {
         Some(a) if a > 0.0 => a,
         _ => {
             errs.push(format!(
@@ -266,27 +314,6 @@ fn rr3_wire_fields(
             ));
             0.0
         }
-    };
-    // gnd_common：共地点标识，"none" 是无地导体线组的合法显式值
-    let gnd_common = t
-        .get("gnd_common")
-        .and_then(toml::Value::as_str)
-        .unwrap_or("");
-    if gnd_common.is_empty() {
-        errs.push(format!(
-            "wire #{i}.gnd_common 缺失或为空（共地点标识，\"none\" 是无地导体线组的合法显式值）"
-        ));
-    }
-    Rr3Wire {
-        connector: connector.to_string(),
-        hdr_pin,
-        signal,
-        net: net.to_string(),
-        feeds,
-        mate: mate.to_string(),
-        keyed,
-        rated_a,
-        gnd_common: gnd_common.to_string(),
     }
 }
 
