@@ -229,11 +229,26 @@ fn rr3_log_ring() -> &'static Mutex<VecDeque<String>> {
     RR3_LOG_RING.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
-/// 日志环的尾部副本（`rr3.ctl.logs` 的数据源）。只有 `conn`（`#[cfg(unix)]`）读它，
+/// 日志环查询（`rr3.ctl.logs` 的数据源）：`prefix` 非空时只回包含该子串的行，
+/// `tail > 0` 时只回最后 tail 行（0 = 不限）。只有 `conn`（`#[cfg(unix)]`）读它，
 /// 所以本函数同样 cfg——Windows 侧无人调用，不 cfg 就是 `dead_code` 警告。
 #[cfg(unix)]
-pub fn rr3_log_tail() -> Vec<String> {
-    rr3_lock(rr3_log_ring()).iter().cloned().collect()
+pub fn rr3_log_query(prefix: &str, tail: usize) -> Vec<String> {
+    rr3_log_filter(&rr3_lock(rr3_log_ring()), prefix, tail)
+}
+
+/// 查询的纯函数核（锁外可测）：过滤与尾行裁剪，不改环。
+#[cfg(unix)]
+fn rr3_log_filter(lines: &VecDeque<String>, prefix: &str, tail: usize) -> Vec<String> {
+    let mut out: Vec<String> = lines
+        .iter()
+        .filter(|line| prefix.is_empty() || line.contains(prefix))
+        .cloned()
+        .collect();
+    if tail > 0 && out.len() > tail {
+        out.drain(..out.len() - tail);
+    }
+    out
 }
 
 /// 启动回填（批N5 件二笔2，§17 运维留痕同轨判据）：读落盘文件尾，把崩溃前的最后
@@ -351,6 +366,41 @@ mod tests {
             vec!["l4"],
             "容量调小后环必须收敛到新容量以内"
         );
+    }
+
+    /// 日志查询核（ctl.logs）：前缀过滤 + 尾行裁剪；0 = 不限，空前缀 = 不过滤。
+    #[cfg(unix)]
+    #[test]
+    fn log_filter_prefix_and_tail() {
+        let lines: VecDeque<String> = [
+            "rrd: 启动摘要 x",
+            "rrd: 轮次 1: ASR 失败",
+            "rrd: 启动摘要 y",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            rr3_log_filter(&lines, "", 0).len(),
+            3,
+            "空前缀不限尾数须全回"
+        );
+        assert_eq!(
+            rr3_log_filter(&lines, "启动摘要", 0),
+            vec!["rrd: 启动摘要 x", "rrd: 启动摘要 y"],
+            "前缀过滤按子串命中"
+        );
+        assert_eq!(
+            rr3_log_filter(&lines, "", 1),
+            vec!["rrd: 启动摘要 y"],
+            "尾行裁剪取最后 N 行"
+        );
+        assert_eq!(
+            rr3_log_filter(&lines, "启动摘要", 1),
+            vec!["rrd: 启动摘要 y"],
+            "过滤后裁剪"
+        );
+        assert!(rr3_log_filter(&lines, "不存在", 0).is_empty());
     }
 
     /// 容量定格一次（首份胜出）：重复 set 不覆盖——容量是 boot 期事实，运行期不改。
