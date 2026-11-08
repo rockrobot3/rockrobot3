@@ -273,6 +273,44 @@ pub struct Rr3HttpRequest {
     pub body: Vec<u8>,
 }
 
+/// 从缓冲读一行，**边读边判上界**：单行超 `cap` 立即 Err，不把整行读进内存。
+///
+/// `BufRead::read_line` 会一直分配到换行符为止——慢速客户端只要不发 `\n`，就能
+/// 用一条超长请求行/头行把面板线程的内存顶穿（读超时只限时间，不限已分配量）。
+/// 这里走 `fill_buf`/`consume`：每次只消费缓冲里的可见块，超界时 `out` 最多
+/// `cap` 字节。返回追加字节数；0 = EOF。
+fn rr3_read_line_cap(
+    reader: &mut impl BufRead,
+    cap: usize,
+    what: &str,
+    out: &mut String,
+) -> Result<usize, String> {
+    let mut used = 0usize;
+    loop {
+        let buf = reader
+            .fill_buf()
+            .map_err(|e| format!("读{what}失败: {e}"))?;
+        if buf.is_empty() {
+            return Ok(used);
+        }
+        let (take, complete) = match buf.iter().position(|&b| b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (buf.len(), false),
+        };
+        if used + take > cap {
+            return Err(format!("{what}超界（单行 > {cap}B）"));
+        }
+        let chunk =
+            std::str::from_utf8(&buf[..take]).map_err(|e| format!("{what}不是合法 UTF-8: {e}"))?;
+        out.push_str(chunk);
+        reader.consume(take);
+        used += take;
+        if complete {
+            return Ok(used);
+        }
+    }
+}
+
 /// 从连接上读一个请求：请求行 → 头（找 Content-Length）→ 读满 body。
 /// 半包/慢客户端按 [`Rr3PanelLimits::read_timeout`] 折 Err，不 panic 不占线程；
 /// 头区/body 上界同取 [`Rr3PanelLimits`]（I-18②：限额经 shared 贯穿）。
@@ -290,15 +328,13 @@ pub fn rr3_http_read_req(
     );
 
     // 请求行："METHOD /path HTTP/1.1"。请求行与头区共用同一总额预算——请求行
-    // 不设界的话，单行无 \n 的慢发可让 read_line 无界增长（局域网 DoS 面，
-    // 静态审计 0.0.8b 收口）。
+    // 不设界的话，单行无 \n 的慢发可让读侧无界增长（局域网 DoS 面，静态审计
+    // 0.0.8b 收口）。上界在读取过程中逐块判定，不依赖事后长度检查。
     let mut line = String::new();
-    reader
-        .read_line(&mut line)
-        .map_err(|e| format!("读请求行失败: {e}"))?;
-    let mut header_bytes = line.len();
-    if header_bytes > limits.header_limit {
-        return Err(format!("请求行超界（>{0}B）", limits.header_limit));
+    let mut header_bytes =
+        rr3_read_line_cap(&mut reader, limits.header_limit, "请求行", &mut line)?;
+    if header_bytes == 0 {
+        return Err("请求行不完整: 对端关闭".to_string());
     }
     let mut parts = line.split_whitespace();
     let method = parts
@@ -313,14 +349,16 @@ pub fn rr3_http_read_req(
     // 头区：只认 Content-Length，其余忽略；空行收尾，总量（含请求行）超界即断
     let mut content_length = 0usize;
     loop {
-        let mut head = String::new();
-        reader
-            .read_line(&mut head)
-            .map_err(|e| format!("读头失败: {e}"))?;
-        header_bytes += head.len();
-        if header_bytes > limits.header_limit {
+        let remaining = limits.header_limit.saturating_sub(header_bytes);
+        if remaining == 0 {
             return Err(format!("头区超界（>{0}B）", limits.header_limit));
         }
+        let mut head = String::new();
+        let n = rr3_read_line_cap(&mut reader, remaining, "头区", &mut head)?;
+        if n == 0 {
+            break; // EOF：与旧 read_line 的 0 字节语义一致（无空行收尾）
+        }
+        header_bytes += n;
         let head = head.trim_end();
         if head.is_empty() {
             break;
@@ -1395,6 +1433,38 @@ fn rr3_fake_ctl_rrd(
 mod tests {
     use super::*;
     use rr_ipc::rr3_frame_read;
+
+    /// B-10（本轮审计）：超长且无换行的请求行/头行必须在读取过程中被上界截停，
+    /// 不允许先把整行分配进内存再判长度（慢速客户端可借此顶穿面板线程内存）。
+    #[test]
+    fn read_line_cap_stops_before_unbounded_growth() {
+        let mut c = std::io::Cursor::new(vec![b'a'; 4096]);
+        let mut out = String::new();
+        let e = rr3_read_line_cap(&mut c, 64, "请求行", &mut out).unwrap_err();
+        assert!(e.contains("超界"), "{e}");
+        assert!(out.len() <= 64, "已读内容不得超过上界: {}", out.len());
+    }
+
+    /// 正常行/EOF 语义：按行截断、返回追加字节数，EOF 返回 0
+    #[test]
+    fn read_line_cap_returns_line_and_eof() {
+        let mut c = std::io::Cursor::new(b"GET /x HTTP/1.1\r\nHost: a\r\n".to_vec());
+        let mut out = String::new();
+        assert_eq!(
+            rr3_read_line_cap(&mut c, 64, "请求行", &mut out).unwrap(),
+            17
+        );
+        assert_eq!(out, "GET /x HTTP/1.1\r\n");
+        let mut out = String::new();
+        assert_eq!(rr3_read_line_cap(&mut c, 64, "头区", &mut out).unwrap(), 9);
+        assert_eq!(out, "Host: a\r\n");
+        let mut out = String::new();
+        assert_eq!(
+            rr3_read_line_cap(&mut c, 64, "头区", &mut out).unwrap(),
+            0,
+            "EOF 必须返回 0"
+        );
+    }
 
     /// 面板测试底座（四处同款）：缺省限流/期望 + 无主循环 link 的共享面
     fn panel_shared(
