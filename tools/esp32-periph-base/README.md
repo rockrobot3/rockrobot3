@@ -77,7 +77,7 @@ rr-mech 安全核 `Rr3LowEdge` **两实例**（一核两条线）产——"越�
 | OLED SSD1306 0.96" | VCC→3V3 · GND→GND · SCL→GPIO22 · SDA→GPIO21 | I2C0 @100kHz，地址 0x3C（400k 在长跳线/弱上拉下时序边际，真板实录页写 ESP_FAIL，降 100k；50k 更差——老 I2C 驱动的低速档是反直觉的坏档） |
 | 舵机 pan（水平） | 信号→GPIO32 · 电源→**板载 5V（现场档-甲首选：5V/3A 充电头直喂本排针）** · GND→共地 | 正式装机改独立轨（见"供电档位"节，堵转 ~700mA/只） |
 | 舵机 tilt（俯仰） | 信号→GPIO33 · 电源→**板载 5V（现场档-甲首选：5V/3A 充电头直喂本排针）** · GND→共地 | 独立轨时 UBEC/板/舵机单点共地（铁律） |
-| UART2 指令面 | GPIO18→CP2102 RXD · GPIO19←CP2102 TXD · GND→共地 | **921600**（批D② 起，Q1=(a) 带宽账裁定：音频上行需 >512kbps；此前批B/C 为 115200，烧新固件后宿主须同档——`RR3_HAL_PERIPH_BAUD=921600` 或 recorder `--baud`），3.3V TTL（严禁 5V）。**引脚定案（2026-10-12 真板实锤）：GPIO16/17 一装 UART2 驱动即把 I2C0 打死（换序/前后装均复现），故改 18/19**；19 与未来点阵 VSPI 预留同脚，已记为技术债 |
+| UART2 指令面 | GPIO18→CP2102 RXD · GPIO19←CP2102 TXD · GND→共地 | **1500000（1.5M，2026-10-30 定档；此前 921600）**（Q1=(a) 带宽账：音频上行 16k 双声道 b64 后 ≈87KB/s，921600 只剩 ~5% 余量；烧新固件后宿主须同档——`RR3_HAL_PERIPH_BAUD=1500000` 或 recorder `--baud`），3.3V TTL（严禁 5V）。**引脚定案（2026-10-12 真板实锤）：GPIO16/17 一装 UART2 驱动即把 I2C0 打死（换序/前后装均复现），故改 18/19**；19 与未来点阵 VSPI 预留同脚，已记为技术债 |
 | 5V 轨分压测点（方案A Q1/Q2） | GPIO34 ← 5V 轨经分压网络（5V→≤3.3V） · GND→单点共地 | ADC1_CH6（input-only 档）；分压比/阈值在 `board.rs` 策略面（**占位待标定**，接线后对拍回填）。属观测面、**非必接线**——未接线时浮空读数**不接闸**（`RAIL_GATE_ARMED=false`），只观测不拒动 |
 | 板载 USB（cu.usbserial-1410） | 烧录 + monitor | `cargo +esp run`，Ctrl+] 退出 |
 
@@ -146,7 +146,7 @@ rr-mech 安全核 `Rr3LowEdge` **两实例**（一核两条线）产——"越�
    ```bash
    python3 -c "
    import serial, time
-   s = serial.Serial('/dev/cu.usbserial-0001', 921600, timeout=1)
+   s = serial.Serial('/dev/cu.usbserial-0001', 1500000, timeout=1)
    s.reset_input_buffer()
    for cmd in ['HELP', 'INFO', 'OLED HELLO ROCK3', 'FACE happy', 'PAN 60', 'PAN 120', 'PAN 90', 'TILT 98', 'SCAN']:
        s.write((cmd + '\n').encode()); time.sleep(1.2)
@@ -179,7 +179,7 @@ rr-mech 安全核 `Rr3LowEdge` **两实例**（一核两条线）产——"越�
 | `WANDER` / `WANDER STOP` | 开/停自主扫摆；开时两轴**错拍单动**（同拍只驱动一轴），端点=本轴行程边界 |
 | `SCAN` | 两轴各自按本轴行程五等分点**串行**扫描（每点 pan→600ms→tilt→600ms，逐点回读）；控制面即刻 ack，逐点在运行面异步回包 |
 | `RAIL` | 采一次 5V 轨压（方案A Q1 观测面）：控制面即刻 ack，运行面采一次经 outbox 异步回包 `RAIL rail=<mV> raw=<raw>`（真板分压测点接线后对拍标定用） |
-| `AUDIO ON` / `AUDIO OFF` | 开/停双麦音频上行（批D③）：ON 后 mic 线每 2048 帧（128ms @16k）组一条 `rr3-sense/audio/pcm` Event 帧整帧发 UART2（921600 档；有界队列 4 深，满丢最旧，`INFO` 可见 `audio/seq/sent/drop/q`）；OFF 即停攒新片、余片发完 |
+| `AUDIO ON` / `AUDIO OFF` | 开/停双麦音频上行（批D③）：ON 后 mic 线每 2048 帧（128ms @16k）组一条 `rr3-sense/audio/pcm` Event 帧整帧发 UART2（1.5M 档；有界队列 4 深，满丢最旧，`INFO` 可见 `audio/seq/sent/drop/q`）；OFF 即停攒新片、余片发完 |
 | `INFO` | 回读当前角度 / 限幅区间 / **5V 轨最近采样（rail/raw/tier/low_events）** / **音频上行（audio/seq/sent/drop/q）** / OLED 最近文本 / 堆水位 |
 | `FONT` | "ABC123" 字模 hex 自检护栏 |
 | `HELP` | 指令表 |
@@ -214,7 +214,7 @@ I2S 实际率 ~16.6kHz 与标称 16k 有差，按实测写回放音高才对）�
 
 ```bash
 cd tools/rr3-audio-rec && cargo run --release -- /dev/cu.usbserial-0001 --secs 20
-# 缺省 out=rr3-audio-<unix秒>.wav baud=921600；拍手/说话后听感核对（判据①：
+# 缺省 out=rr3-audio-<unix秒>.wav baud=1500000；拍手/说话后听感核对（判据①：
 # 宿主录得双通道 wav 可回放），进度行可见 chunk/seq/gaps（gaps>0 = 板面背压丢片，
 # 与板面 `INFO` 的 drop 互为对账）
 ```
