@@ -15,6 +15,9 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 export PATH="$HOME/.cargo/bin:$PATH"
 export CARGO_TERM_COLOR=never
+# 管理令牌门（httpd.rs 编译期断言）：本门只验构建面、不产生产镜像，显式允许
+# 公开缺省令牌；生产镜像必须带 RR3_BOARD_ADMIN_TOKEN（见 tools/deploy/flash-esp32.sh）。
+export RR3_ALLOW_DEV_ADMIN_TOKEN=1
 fail=0
 
 # ---- 甲面：xtensa 外设底座（工具链缺位 = 整门 SKIP，同 espidf-sentinel-check.sh 口径）----

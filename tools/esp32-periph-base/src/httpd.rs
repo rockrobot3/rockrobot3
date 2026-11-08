@@ -78,14 +78,22 @@ use rr_ipc::Rr3BoardBindings;
 use crate::state::{lock_bus, Bus};
 
 /// 板侧 HTTP 写口管理令牌（P1-3）：POST /api/board/wifi 与 /api/board/reboot
-/// 须在 JSON body 带 `token` 字段且与本值相等，否则 401。生产构建须通过
-/// `RR3_BOARD_ADMIN_TOKEN` 编译期环境变量覆盖缺省值；缺省值仅适用于开发，
-/// 与 SoftAP 口令（仓内公开）不同面——AP 口令是"接进来"的门槛，令牌是"改
-/// 配置/动作面"的门槛。
+/// 须在 JSON body 带 `token` 字段且与本值相等，否则 401。生产构建必须经
+/// `RR3_BOARD_ADMIN_TOKEN` 显式给值；缺省公开值只允许在显式声明"开发/CI
+/// 构建"时编入（下方 const 断言执法）。
 const RR3_BOARD_ADMIN_TOKEN: &str = match option_env!("RR3_BOARD_ADMIN_TOKEN") {
     Some(t) if !t.is_empty() => t,
     _ => "rock3-board-admin-dev",
 };
+
+/// 令牌配置门（fail-closed，编译期）：没有生产令牌、又没有显式
+/// `RR3_ALLOW_DEV_ADMIN_TOKEN=1`（开发/CI）时直接编译失败——公开缺省令牌
+/// 不得静默进入任何镜像（SoftAP 口令是仓内公开的，令牌是写口唯一门槛）。
+const _: () = assert!(
+    matches!(option_env!("RR3_BOARD_ADMIN_TOKEN"), Some(t) if !t.is_empty())
+        || option_env!("RR3_ALLOW_DEV_ADMIN_TOKEN").is_some(),
+    "缺少生产管理令牌：请设置 RR3_BOARD_ADMIN_TOKEN=<强随机值> 后重编；仅开发/CI 可设 RR3_ALLOW_DEV_ADMIN_TOKEN=1 使用公开缺省值"
+);
 
 /// 写口令牌校验：body JSON 须含 `token` 字段且等于 [`RR3_BOARD_ADMIN_TOKEN`]。
 /// 纯函数，单测可钉；不读 env、不碰全局。
