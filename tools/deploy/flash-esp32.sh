@@ -19,8 +19,9 @@
 #
 # 前置门（产线脚本语义：缺件 FAIL 点名，非 CI 门 SKIP 口径）：espflash 4.x（实测
 # 4.6.0）、esp 工具链含 rust-src（esp-1.90.0.0）、ldproxy、esp-clang、ESP-IDF v5.2.2
-# 本地克隆（路径同 tools/esp32-periph-base/.cargo/config.toml [env] IDF_PATH；版本
-# 钉死登记表见 tools/espidf-std-hello/README.md）。
+# 本地克隆（版本钉死登记表见 tools/espidf-std-hello/README.md）。IDF_PATH 必须由本
+# 脚本显式导出：esp-idf-sys 在 IDF_PATH 缺位时回落 managed 仓库（v5.2.1 且会联网探查），
+# 与工具链钉版本不一致时构建即失败——门脚本同款导出口径。
 set -euo pipefail
 
 cd "$(dirname "$0")/../.." # 仓根
@@ -66,6 +67,7 @@ command -v ldproxy >/dev/null 2>&1 || die "ldproxy 未安装（cargo install ldp
 rr3_esp_clang_lib >/dev/null || die "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so，bindgen 需 Xtensa 后端）"
 [ -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ] \
   || die "ESP-IDF v5.2.2 本地克隆缺位（~/.espressif/frameworks，见 tools/espidf-std-hello/README.md 登记表）"
+export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
 echo "PASS  $espflash_ver + esp 工具链（rust-src 在位）+ ldproxy + esp-clang + IDF v5.2.2"
 
 echo "== ② 构建（cargo +esp build，${BUILD}；镜像注入同 espidf-sentinel-check.sh ⑤）=="
@@ -92,9 +94,15 @@ ELF="$( cd "$PROJ" && rr3_cargo_artifact xtensa-esp32-espidf "$BUILD" "$ELF_NAME
 echo "PASS  ELF 在树: $ELF"
 
 echo "== ④ descriptor 校验（.flash.appdesc 三查）=="
-objdump_bin="$(find "$PROJ/.embuild/espressif/tools/xtensa-esp-elf" \
-  -name 'xtensa-esp32-elf-objdump' -type f 2>/dev/null | head -1)"
-[ -n "$objdump_bin" ] || die "xtensa-esp32-elf-objdump 缺位（.embuild 未装 xtensa esp-gcc？重跑构建）"
+# 工具链根随装机布局而异：embuild 本地根（EMBUILD_ROOT，仓根 config 已移到 /tmp）
+# 或 ESP-IDF 全局工具目录（ESP_IDF_TOOLS_INSTALL_DIR=global）。两处都查，找不到
+# 显式 die——原实现只看 crate 内 .embuild，路径迁移后 find 非零被 set -e 静默吞掉，
+# 干跑门变成"看起来过了"的假绿。
+objdump_bin="$(find \
+  "${EMBUILD_ROOT:-$PROJ/.embuild}/espressif/tools" \
+  "$HOME/.espressif/tools" \
+  -name 'xtensa-esp32-elf-objdump' -type f 2>/dev/null | head -1 || true)"
+[ -n "$objdump_bin" ] || die "xtensa-esp32-elf-objdump 未找到（查 EMBUILD_ROOT 与 ~/.espressif/tools；IDF 工具链未装？）"
 # 查一：节在册（espidf std 构建应自带；esp-hal 裸金属缺它即 6d3a1ee 同款症状）
 "$objdump_bin" -h "$ELF" | grep -q '\.flash\.appdesc' || die "ELF 无 .flash.appdesc 节"
 # 查二：节尺寸＝IDF v5.2.2 自带 0x120（objdump -h size 列；升级 IDF 需重验整链）

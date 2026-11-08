@@ -28,6 +28,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.." # 仓根
+# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
+# crate 内 target/（否则装配面必报"镜像源不存在"）。
+. tools/ci/cargo-artifact.sh
 
 BUILD=debug
 while [ $# -gt 0 ]; do
@@ -47,8 +50,10 @@ if [ "$BUILD" = release ]; then verif_args+=(--release); fi
 bash tools/deploy/flash-esp32.sh --check-only ${verif_args[@]+"${verif_args[@]}"} \
   || die "验证面未过（flash-esp32.sh --check-only）"
 
-ARTDIR="tools/esp32-periph-base/target/xtensa-esp32-espidf/${BUILD}"
-OUT="$ARTDIR/esp32-periph-base-merged.bin"
+ELF="$( cd tools/esp32-periph-base && rr3_cargo_artifact xtensa-esp32-espidf "$BUILD" esp32-periph-base )" \
+  || die "无法解析 cargo target_directory（metadata 不可用）"
+[ -f "$ELF" ] || die "ELF 不在树: $ELF"
+OUT="$(dirname "$ELF")/esp32-periph-base-merged.bin"
 
 echo "== ② 装配面（save-image --merge：bootloader+分区表+app 按偏移合单镜像）=="
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -58,7 +63,7 @@ espflash_ver="$(espflash --version 2>/dev/null)" || die "espflash 未安装（ca
 printf '%s\n' "$espflash_ver" | grep -qE '^espflash 4\.' \
   || die "espflash 非 4.x: ${espflash_ver}（版本钉 4.x，实测 4.6.0）"
 espflash save-image --chip esp32 --merge --flash-size 4mb \
-  "$ARTDIR/esp32-periph-base" "$OUT" || die "save-image 装配失败"
+  "$ELF" "$OUT" || die "save-image 装配失败"
 echo "PASS  merged 镜像在树: $OUT"
 
 echo "== ③ 自校验面（merged 布局三点 magic + 整片尺寸）=="
