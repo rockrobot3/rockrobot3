@@ -11,6 +11,9 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 cd "$root/tools/esp32-uart-echo" || { echo "ERROR: 无法进入 tools/esp32-uart-echo" >&2; exit 1; }
+# 产物定位共享单点：target-dir 由仓根 .cargo/config.toml 移出源码区，不得写死
+# crate 内 target/（否则编译成功也会被判"ELF 不在树"）。
+. "$root/tools/ci/cargo-artifact.sh"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -36,7 +39,10 @@ fi
 
 # release 构建：esp-hal 明示 dev profile 可能慢一个数量级并引发时序问题——夹具的
 # 50ms 帧内静默超时与 115200 持续流（87µs/字节）对时序敏感，板级验证用 release。
-elf="target/xtensa-esp32-none-elf/release/esp32-uart-echo"
+elf="$(rr3_cargo_artifact xtensa-esp32-none-elf release esp32-uart-echo)" || {
+  echo "FAIL  无法解析 cargo target_directory（metadata 不可用）" >&2
+  exit 1
+}
 # 仓库源不硬编码镜像（他人环境各异），rsproxy 注入随本机
 if cargo +esp build --release \
      --config 'source.crates-io.replace-with="rsproxy-sparse"' \
