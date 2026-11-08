@@ -234,6 +234,9 @@ impl Rr3Inner {
         }
     }
 
+    // 64 位目标上 u64::from(u64) 是恒等转换，clippy 会报 useless_conversion；
+    // 32 位（xtensa espidf，AtomicCounter=AtomicU32）上它是必需的出界面对齐。
+    #[allow(clippy::useless_conversion)]
     fn rr3_next_id(&self) -> u64 {
         // 32 位目标（xtensa espidf）计数器退 AtomicU32，出界面对齐协议 u64——
         // 转换必须在本层做，调用方拿到的永远是宽口径。
@@ -264,6 +267,7 @@ impl Rr3Inner {
         delta
     }
 
+    #[allow(clippy::useless_conversion)] // 同上：32 位目标必需
     fn rr3_task(&self) -> u64 {
         u64::from(self.task.load(Ordering::Relaxed))
     }
