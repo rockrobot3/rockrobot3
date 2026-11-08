@@ -210,6 +210,20 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // inherit 同一条纪律）。位置钉死在装配链 match **之后**：--profile 路径此刻
     // 环容量已定格（回填行数按真容量收）；--manifest 调试路径按 512 兜底收。
     rr3_daemon_logs(cfg);
+    // 启动摘要（可观测性）：一行钉住本次装配的输入面与规模，排障先看这一行。
+    // 后门（--manifest）无装配单：tier/chip 显示 `-`，不造假值。
+    let profile = cfg
+        .profile
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "--manifest".to_string());
+    rr3_log(&rr3_boot_summary(
+        &boot.tier,
+        &boot.chip,
+        &profile,
+        boot.manifests.len(),
+        boot.predegraded.len(),
+    ));
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     // bind 独占探测（0.0.8d 审计 B-9）：存活实例占用 = 拒绝启动（裂脑禁绝）；
@@ -286,6 +300,10 @@ struct Rr3DaemonBoot {
     audio_backend: Option<String>,
     servo_backend: Option<String>,
     display_backend: Option<String>,
+    /// 装配单 [platform].tier（`--manifest` 后门为空）
+    tier: String,
+    /// 装配单 [platform].chip（`--manifest` 后门为空）
+    chip: String,
 }
 
 /// 装配链（0.0.2 方案 D2，Q3 裁定）：--profile 是装机正门——enabled_slots 决定起谁，
@@ -308,6 +326,8 @@ fn rr3_daemon_boot(cfg: &RrdConfig) -> Result<Rr3DaemonBoot, String> {
             audio_backend: None,
             servo_backend: None,
             display_backend: None,
+            tier: String::new(),
+            chip: String::new(),
         }),
     }
 }
@@ -362,7 +382,32 @@ fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3Dae
         audio_backend: boot.audio_backend,
         servo_backend: boot.servo_backend,
         display_backend: boot.display_backend,
+        tier: boot.platform_tier,
+        chip: boot.platform_chip,
     })
+}
+
+/// 启动摘要（一行钉住本次装配的输入面与规模，排障先看这一行）。
+/// 空档/芯片 = `--manifest` 后门（无装配单），显示 `-` 不造假值。
+fn rr3_boot_summary(
+    tier: &str,
+    chip: &str,
+    profile: &str,
+    modules: usize,
+    predegraded: usize,
+) -> String {
+    let dash = |s: &str| {
+        if s.is_empty() {
+            "-".to_string()
+        } else {
+            s.to_string()
+        }
+    };
+    format!(
+        "启动摘要: tier={} chip={} profile={profile} modules={modules} 预降级={predegraded}",
+        dash(tier),
+        dash(chip)
+    )
 }
 
 /// 装配链点名：缺格 / 缺角色 / 装配缺项 / 轴档案注记——四类分开，不混写
@@ -849,5 +894,21 @@ mod tests {
         );
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 启动摘要：后门路径空档/芯片必须显式 `-`（不造假值），规模数字来自装配面。
+    #[test]
+    fn boot_summary_marks_backdoor_and_counts() {
+        let s = rr3_boot_summary("", "", "--manifest", 3, 1);
+        assert!(s.contains("tier=-") && s.contains("chip=-"), "{s}");
+        assert!(s.contains("modules=3") && s.contains("预降级=1"), "{s}");
+        let s = rr3_boot_summary(
+            "rtos",
+            "esp32",
+            "/usr/lib/rockrobot3/profiles/esp32-mini.toml",
+            1,
+            0,
+        );
+        assert!(s.contains("tier=rtos") && s.contains("chip=esp32"), "{s}");
     }
 }
