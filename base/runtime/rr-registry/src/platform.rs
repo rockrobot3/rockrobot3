@@ -170,59 +170,7 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
     rr3_plat_ctl(t, &mut table, &mut errs);
 
     // [capabilities]：段缺即红（裁定①；空集合法但必须显式写键）
-    match t.get("capabilities") {
-        Some(Value::Table(caps)) => {
-            for k in caps.keys() {
-                if k != "adc_pins"
-                    && k != "input_only_pins"
-                    && k != "no_open_drain"
-                    && k != "output_capable_pins"
-                {
-                    errs.push(format!(
-                        "[capabilities] 未知键 {k}（只认 adc_pins / input_only_pins / no_open_drain / output_capable_pins）"
-                    ));
-                }
-            }
-            match caps.get("adc_pins") {
-                Some(v) => table.capabilities.adc_pins = rr3_pin_set_from(v, "adc_pins", &mut errs),
-                None => errs.push(
-                    "[capabilities] 缺 adc_pins（无 ADC 须显式写 [] 并带行级注记，裁定②）".into(),
-                ),
-            }
-            match caps.get("input_only_pins") {
-                Some(v) => {
-                    table.capabilities.input_only_pins =
-                        rr3_pin_set_from(v, "input_only_pins", &mut errs)
-                }
-                None => {
-                    errs.push("[capabilities] 缺 input_only_pins（无此类脚须显式写 []）".into())
-                }
-            }
-            match caps.get("no_open_drain") {
-                Some(v) => {
-                    table.capabilities.no_open_drain =
-                        rr3_pin_set_from(v, "no_open_drain", &mut errs)
-                }
-                None => errs.push("[capabilities] 缺 no_open_drain（无此类脚须显式写 []）".into()),
-            }
-            match caps.get("output_capable_pins").and_then(Value::as_str) {
-                Some(r) if RR3_PLATFORM_OUTPUT_RULES.contains(&r) => {
-                    table.capabilities.output_rule = r.to_string();
-                }
-                Some(r) => errs.push(format!(
-                    "[capabilities].output_capable_pins \"{r}\" 不在册（在册规则 {RR3_PLATFORM_OUTPUT_RULES:?}，扩规则走契约级评审）"
-                )),
-                None => errs.push(
-                    "[capabilities] 缺 output_capable_pins（取值规则集，§4.6：写规则不写枚举）"
-                        .into(),
-                ),
-            }
-        }
-        Some(other) => errs.push(format!(
-            "平台表 capabilities 应为表（[capabilities]），收到 {other:?}"
-        )),
-        None => errs.push("平台表缺 [capabilities] 段（⑤-a/⑤-b 判据前件，缺段即红，裁定①）".into()),
-    }
+    rr3_plat_caps(t, &mut table, &mut errs);
 
     // conflict：键必须存在（空数组合法但显式，裁定②）；每条 group 唯一、
     // pins/controllers 至少一侧非空、why 必填（无可读理由的冲突不许进册）
@@ -483,6 +431,62 @@ fn rr3_plat_ctl(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<St
                 });
             }
         }
+    }
+}
+
+/// `[capabilities]` 段：能力集四键（段缺即红；空集合法但必须显式写键）。
+fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    match t.get("capabilities") {
+        Some(Value::Table(caps)) => {
+            for k in caps.keys() {
+                if k != "adc_pins"
+                    && k != "input_only_pins"
+                    && k != "no_open_drain"
+                    && k != "output_capable_pins"
+                {
+                    errs.push(format!(
+                        "[capabilities] 未知键 {k}（只认 adc_pins / input_only_pins / no_open_drain / output_capable_pins）"
+                    ));
+                }
+            }
+            match caps.get("adc_pins") {
+                Some(v) => table.capabilities.adc_pins = rr3_pin_set_from(v, "adc_pins", errs),
+                None => errs.push(
+                    "[capabilities] 缺 adc_pins（无 ADC 须显式写 [] 并带行级注记，裁定②）".into(),
+                ),
+            }
+            match caps.get("input_only_pins") {
+                Some(v) => {
+                    table.capabilities.input_only_pins =
+                        rr3_pin_set_from(v, "input_only_pins", errs)
+                }
+                None => {
+                    errs.push("[capabilities] 缺 input_only_pins（无此类脚须显式写 []）".into())
+                }
+            }
+            match caps.get("no_open_drain") {
+                Some(v) => {
+                    table.capabilities.no_open_drain = rr3_pin_set_from(v, "no_open_drain", errs)
+                }
+                None => errs.push("[capabilities] 缺 no_open_drain（无此类脚须显式写 []）".into()),
+            }
+            match caps.get("output_capable_pins").and_then(Value::as_str) {
+                Some(r) if RR3_PLATFORM_OUTPUT_RULES.contains(&r) => {
+                    table.capabilities.output_rule = r.to_string();
+                }
+                Some(r) => errs.push(format!(
+                    "[capabilities].output_capable_pins \"{r}\" 不在册（在册规则 {RR3_PLATFORM_OUTPUT_RULES:?}，扩规则走契约级评审）"
+                )),
+                None => errs.push(
+                    "[capabilities] 缺 output_capable_pins（取值规则集，§4.6：写规则不写枚举）"
+                        .into(),
+                ),
+            }
+        }
+        Some(other) => errs.push(format!(
+            "平台表 capabilities 应为表（[capabilities]），收到 {other:?}"
+        )),
+        None => errs.push("平台表缺 [capabilities] 段（⑤-a/⑤-b 判据前件，缺段即红，裁定①）".into()),
     }
 }
 
