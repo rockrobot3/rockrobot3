@@ -2489,7 +2489,6 @@ fn rr3_pin_occupancy(
     devices: &Rr3DeviceTable,
 ) -> Vec<String> {
     let mut errs = Vec::new();
-    let plat = platform.rr3_platform_name();
     // ③-a physical 元素唯一（BTreeMap 定化点名序：首占者记录）。owner 值用
     // pin 序号判"同一条"，不用 pin_id 字符串——per_instance=false 角色的多条
     // pin 无 instance 可分，pin_id 同名会把双占误判成"自己撞自己"而吞红。
@@ -2500,72 +2499,121 @@ fn rr3_pin_occupancy(
     let mut addr_owner: BTreeMap<(String, String), usize> = BTreeMap::new();
     for (idx, pin) in profile.pins.iter().enumerate() {
         let label = format!("pins[{}]", pin.rr3_pin_id());
-        // device 非空即在册（门 o 装载侧执法：装配单不得自造型号词——型号词的
-        // 取值域 = contracts/devices.toml 在册名单，单条 pin 也判，与共址无关）
-        if !pin.device.is_empty() && !devices.rr3_dev_contains(&pin.device) {
-            errs.push(format!(
-                "{label} device \"{}\" 未在器件词表在册（门 o：device 外键 → contracts/devices.toml，装配单不得自造型号词）",
-                pin.device
-            ));
-        }
-        for p in &pin.physical {
-            match phys_owner.get(p) {
-                Some(first) if *first != idx => errs.push(format!(
-                    "{label} physical 元素 {p} 与 pins[{}] 双占（校验③-a：同一 physical 元素在启用集里 ≤ 1 次）",
-                    profile.pins[*first].rr3_pin_id()
-                )),
-                None => {
-                    phys_owner.insert(*p, idx);
-                }
-                _ => {}
+        rr3_pin_dev_check(&label, pin, devices, &mut errs);
+        rr3_pin_phys_take(&label, profile, idx, pin, &mut phys_owner, &mut errs);
+        rr3_pin_chan_take(&label, profile, idx, pin, &mut chan_owner, &mut errs);
+        rr3_pin_addr_take(&label, profile, idx, pin, &mut addr_owner, &mut errs);
+    }
+    rr3_pin_mux_check(profile, platform, &mut errs);
+    errs
+}
+
+/// 门 o 装载侧执法：device 非空即在册（型号词取值域 = contracts/devices.toml
+/// 在册名单，装配单不得自造——单条 pin 也判，与共址无关）。
+fn rr3_pin_dev_check(
+    label: &str,
+    pin: &Rr3PinEntry,
+    devices: &Rr3DeviceTable,
+    errs: &mut Vec<String>,
+) {
+    if !pin.device.is_empty() && !devices.rr3_dev_contains(&pin.device) {
+        errs.push(format!(
+            "{label} device \"{}\" 未在器件词表在册（门 o：device 外键 → contracts/devices.toml，装配单不得自造型号词）",
+            pin.device
+        ));
+    }
+}
+
+/// ③-a：同一 physical 元素在启用集里 ≤ 1 次（首占者入表，后者点名双占）。
+fn rr3_pin_phys_take(
+    label: &str,
+    profile: &Rr3Profile,
+    idx: usize,
+    pin: &Rr3PinEntry,
+    owner: &mut BTreeMap<i64, usize>,
+    errs: &mut Vec<String>,
+) {
+    for p in &pin.physical {
+        match owner.get(p) {
+            Some(first) if *first != idx => errs.push(format!(
+                "{label} physical 元素 {p} 与 pins[{}] 双占（校验③-a：同一 physical 元素在启用集里 ≤ 1 次）",
+                profile.pins[*first].rr3_pin_id()
+            )),
+            None => {
+                owner.insert(*p, idx);
             }
+            _ => {}
         }
-        if let (true, Some(ch)) = (!pin.controller.is_empty(), pin.channel) {
-            let key = (pin.controller.clone(), ch);
-            match chan_owner.get(&key) {
-                Some(first) if *first != idx => errs.push(format!(
-                    "{label} (controller {}, channel {ch}) 与 pins[{}] 双占（校验③-b：同一 (controller, channel) ≤ 1 次——F-7 脚+通道两维）",
-                    pin.controller,
-                    profile.pins[*first].rr3_pin_id()
-                )),
-                None => {
-                    chan_owner.insert(key, idx);
-                }
-                _ => {}
+    }
+}
+
+/// ③-b：同一 (controller, channel) ≤ 1 次（F-7 脚+通道两维；channel 缺席不占通道维）。
+fn rr3_pin_chan_take(
+    label: &str,
+    profile: &Rr3Profile,
+    idx: usize,
+    pin: &Rr3PinEntry,
+    owner: &mut BTreeMap<(String, i64), usize>,
+    errs: &mut Vec<String>,
+) {
+    if let (true, Some(ch)) = (!pin.controller.is_empty(), pin.channel) {
+        let key = (pin.controller.clone(), ch);
+        match owner.get(&key) {
+            Some(first) if *first != idx => errs.push(format!(
+                "{label} (controller {}, channel {ch}) 与 pins[{}] 双占（校验③-b：同一 (controller, channel) ≤ 1 次——F-7 脚+通道两维）",
+                pin.controller,
+                profile.pins[*first].rr3_pin_id()
+            )),
+            None => {
+                owner.insert(key, idx);
             }
+            _ => {}
         }
-        if !pin.controller.is_empty() && !pin.addr.is_empty() && pin.addr != "none" {
-            let key = (pin.controller.clone(), pin.addr.clone());
-            match addr_owner.get(&key) {
-                Some(first) => {
-                    // ③-c 精化（批N3 件八）：共址须同 device 且非空——器件身份
-                    // 不同 = 真冲突（坑 7 与"两块 SSD1306 同址"的区分位），
-                    // device 缺省 = 身份不可判（同址红不可豁免——无身份就没法
-                    // 判"是不是同一个器件"，fail-closed）。两条各点名一条。
-                    let first_pin = &profile.pins[*first];
-                    if pin.device.is_empty() || first_pin.device.is_empty() {
-                        errs.push(format!(
-                            "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 缺省（校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册——共读源须显式登记器件身份，缺省 = 不可判即红）",
-                            pin.controller, pin.addr, first_pin.rr3_pin_id()
-                        ));
-                    } else if pin.device != first_pin.device {
-                        errs.push(format!(
-                            "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 不同（{} vs {}）——校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册（器件身份不同 = 地址冲突，坑 7）",
-                            pin.controller,
-                            pin.addr,
-                            first_pin.rr3_pin_id(),
-                            first_pin.device,
-                            pin.device
-                        ));
-                    }
+    }
+}
+
+/// ③-c：同一 (bus, addr) 的多条 pin 须同 device 且非空（批N3 件八精化）。
+/// 器件身份不同 = 真冲突（坑 7）；device 缺省 = 身份不可判，fail-closed 红。
+fn rr3_pin_addr_take(
+    label: &str,
+    profile: &Rr3Profile,
+    idx: usize,
+    pin: &Rr3PinEntry,
+    owner: &mut BTreeMap<(String, String), usize>,
+    errs: &mut Vec<String>,
+) {
+    if !pin.controller.is_empty() && !pin.addr.is_empty() && pin.addr != "none" {
+        let key = (pin.controller.clone(), pin.addr.clone());
+        match owner.get(&key) {
+            Some(first) => {
+                let first_pin = &profile.pins[*first];
+                if pin.device.is_empty() || first_pin.device.is_empty() {
+                    errs.push(format!(
+                        "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 缺省（校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册——共读源须显式登记器件身份，缺省 = 不可判即红）",
+                        pin.controller, pin.addr, first_pin.rr3_pin_id()
+                    ));
+                } else if pin.device != first_pin.device {
+                    errs.push(format!(
+                        "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 不同（{} vs {}）——校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册（器件身份不同 = 地址冲突，坑 7）",
+                        pin.controller,
+                        pin.addr,
+                        first_pin.rr3_pin_id(),
+                        first_pin.device,
+                        pin.device
+                    ));
                 }
-                None => {
-                    addr_owner.insert(key, idx);
-                }
+            }
+            None => {
+                owner.insert(key, idx);
             }
         }
     }
-    // ④-b conflicts 反推互斥：同一条冲突登记面的命中者 ≥ 2 且任一未申报该组 → 红
+}
+
+/// ④-b conflicts 反推互斥：同一条冲突登记面的命中者 ≥ 2 且任一未申报该组 → 红
+/// （命中是单向含入：平台表里现役绑定之外的部分不算红）。
+fn rr3_pin_mux_check(profile: &Rr3Profile, platform: &Rr3PlatformTable, errs: &mut Vec<String>) {
+    let plat = platform.rr3_platform_name();
     for entry in platform.rr3_conflicts() {
         let group = entry.rr3_conflict_group();
         let hits: Vec<&Rr3PinEntry> = profile
@@ -2592,7 +2640,6 @@ fn rr3_pin_occupancy(
             }
         }
     }
-    errs
 }
 
 /// 扫描单个模块目录的装配清单（G4/ADR-0019 修订 1 ③）：`atoms/<件>/` 必有
