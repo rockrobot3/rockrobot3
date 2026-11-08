@@ -132,20 +132,7 @@ fn rr3_boot_order_excl(
     // 裁定 1：可满足性 = base ∪ 全集 provides。错误逐条点名，全收集。
     // 被剔除的模块不再报：它反正不起，重仲裁时把同一错误再报一遍会把剔除
     // 变成 fatal（`plan_boot` 看到剔除集合没增长就走防御分支）。
-    for f in facts {
-        if excluded.contains(&f.name) {
-            continue;
-        }
-        for cap in &f.depends_required {
-            if base.contains(cap) {
-                continue;
-            }
-            let provided = facts.iter().any(|g| g.provides.iter().any(|p| p == cap));
-            if !provided {
-                errs.push(unsatisfiable_error(&f.name, cap));
-            }
-        }
-    }
+    rr3_caps_unmet(facts, excluded, &base, &mut errs);
     if !errs.is_empty() {
         return Err(errs);
     }
@@ -154,22 +141,7 @@ fn rr3_boot_order_excl(
     // 边去重：一个消费者依赖同一提供者的两个能力是两条需求、一条边。
     // 被剔除的模块两侧都不建边：它不进启动序（没有"排在它后面"），它依赖谁也无关
     // （它反正不起）。
-    let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new(); // (consumer, provider)
-    for (ci, f) in facts.iter().enumerate() {
-        if excluded.contains(&f.name) {
-            continue;
-        }
-        for cap in &f.depends_required {
-            if base.contains(cap) {
-                continue;
-            }
-            for (pi, g) in facts.iter().enumerate() {
-                if !excluded.contains(&g.name) && g.provides.iter().any(|p| p == cap) {
-                    edges.insert((ci, pi));
-                }
-            }
-        }
-    }
+    let edges = rr3_edges_build(facts, excluded, &base);
 
     // Kahn：就绪集合按 (start_priority, name) 取最小——同层内 start_priority
     // 稳定升序、同值名字典序，结果与装载顺序无关
@@ -221,6 +193,54 @@ fn rr3_boot_order_excl(
         return Err(errs);
     }
     Ok(order)
+}
+
+/// 可满足性（裁定 1）：base ∪ 全集 provides；被剔除模块不报（它反正不起）。
+fn rr3_caps_unmet(
+    facts: &[Rr3DependsFacts],
+    excluded: &BTreeSet<String>,
+    base: &BTreeSet<String>,
+    errs: &mut Vec<String>,
+) {
+    for f in facts {
+        if excluded.contains(&f.name) {
+            continue;
+        }
+        for cap in &f.depends_required {
+            if base.contains(cap) {
+                continue;
+            }
+            let provided = facts.iter().any(|g| g.provides.iter().any(|p| p == cap));
+            if !provided {
+                errs.push(unsatisfiable_error(&f.name, cap));
+            }
+        }
+    }
+}
+
+/// 建边（裁定 2）：消费者 → 全部提供者；base 能力无边；剔除模块两侧都不建边。
+fn rr3_edges_build(
+    facts: &[Rr3DependsFacts],
+    excluded: &BTreeSet<String>,
+    base: &BTreeSet<String>,
+) -> BTreeSet<(usize, usize)> {
+    let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new(); // (consumer, provider)
+    for (ci, f) in facts.iter().enumerate() {
+        if excluded.contains(&f.name) {
+            continue;
+        }
+        for cap in &f.depends_required {
+            if base.contains(cap) {
+                continue;
+            }
+            for (pi, g) in facts.iter().enumerate() {
+                if !excluded.contains(&g.name) && g.provides.iter().any(|p| p == cap) {
+                    edges.insert((ci, pi));
+                }
+            }
+        }
+    }
+    edges
 }
 
 /// boot 仲裁的**完整裁定**（ADR-0009 裁定 2，rrd 只执行、不 reimplement）：
