@@ -40,7 +40,7 @@ use crate::rpc::{
     Rr3RpcMethod, Rr3RpcRequest,
 };
 use crate::supervisor::Rr3Supervisor;
-use crate::{rr3_lock, rr3_log, rr3_log_tail};
+use crate::{rr3_lock, rr3_log, rr3_log_query};
 
 /// writer 线程单帧写超时（0.0.8b 审计 B-5）：对端不收时 5s 内必须显形——
 /// 超时即写失败，writer 退出、通道 drop、fanout 走 Disconnected 回收。
@@ -401,6 +401,35 @@ fn rr3_reboot_unlocked() -> Option<&'static str> {
     }
 }
 
+/// ctl.logs 参数（均可选）：`prefix` 子串过滤（空 = 不过滤），`tail` 尾行数
+/// （0 = 不限）。坏形 fail-closed 拒——把输错的过滤条件静默折默认，会把
+/// "参数写错"伪装成"没有匹配行"，排障时最贵的一类假象。
+fn rr3_log_args(params: &Value) -> Result<(String, usize), (Rr3StatusCode, String)> {
+    let prefix = match params.get("prefix") {
+        None => String::new(),
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => {
+            return Err((
+                Rr3StatusCode::Invalid,
+                format!("ctl.logs prefix 应为字符串，收到 {other}"),
+            ))
+        }
+    };
+    let tail = match params.get("tail") {
+        None => 0,
+        Some(v) => match v.as_u64() {
+            Some(n) => usize::try_from(n).unwrap_or(usize::MAX),
+            None => {
+                return Err((
+                    Rr3StatusCode::Invalid,
+                    format!("ctl.logs tail 应为非负整数，收到 {v}"),
+                ))
+            }
+        },
+    };
+    Ok((prefix, tail))
+}
+
 /// 控制旁支（ADR-0010 裁定 2/4）：一次性查询连接，一问一答即断。
 ///
 /// 不注册、不进在册表、不受 watchdog 管——在册表是"活的业务模块"的账本，运维探针
@@ -417,7 +446,8 @@ fn rr3_serve_ctl(
     let result: Result<Value, (Rr3StatusCode, String)> = match req.method {
         Rr3RpcMethod::CtlStatus => rr3_ctl_status(ctx),
         Rr3RpcMethod::CtlHealth => rr3_ctl_health(ctx),
-        Rr3RpcMethod::CtlLogs => Ok(json!({"lines": rr3_log_tail()})),
+        Rr3RpcMethod::CtlLogs => rr3_log_args(&req.params)
+            .map(|(prefix, tail)| json!({"lines": rr3_log_query(&prefix, tail)})),
         // 运维计数读面（0.0.4 批B，Q1 裁定）：与 CtlHealth 分开——health 是心跳健康
         // 语义（watchdog 判活的输入），counters 是业务运维账（"机器慢先看数字"）。
         // 键 = `模块名/键`（模块自报归并）或 `boots`（rrd 自有）；未持久化时只有内存账。
@@ -1192,4 +1222,27 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
     let _ = writer.join();
     let _ = reader.shutdown(std::net::Shutdown::Both);
     outcome.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ctl.logs 参数：缺省合法；坏形 fail-closed 拒（不静默折默认）。
+    #[test]
+    fn log_args_default_and_bad_shapes() {
+        let (p, t) = rr3_log_args(&json!({})).expect("全缺省合法");
+        assert!(p.is_empty() && t == 0);
+        let (p, t) = rr3_log_args(&json!({"prefix": "启动摘要", "tail": 3})).expect("正例");
+        assert_eq!((p.as_str(), t), ("启动摘要", 3));
+        assert!(
+            rr3_log_args(&json!({"prefix": 1})).is_err(),
+            "prefix 非串须拒"
+        );
+        assert!(rr3_log_args(&json!({"tail": -1})).is_err(), "tail 负数须拒");
+        assert!(
+            rr3_log_args(&json!({"tail": "x"})).is_err(),
+            "tail 非数须拒"
+        );
+    }
 }
