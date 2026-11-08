@@ -91,106 +91,122 @@ mod peer {
 
         match role.as_str() {
             "resident" => rr3_resident(&mut stream, task, facts.heartbeat_ms),
-            "publish_once" => {
-                // 主题名从自己的 manifest 取（约定 2），不硬编码
-                let topic = rr3_first_publish(&text).ok_or("publish_once 需要 publishes 非空")?;
-                rr3_send(
-                    &mut stream,
-                    Rr3PayloadType::Event,
-                    task,
-                    &json!({"topic": topic, "seq": 1}),
-                )?;
-                println!("sim-peer: 已发布 {topic}");
-                rr3_beat(&mut stream, task, 10)
-            }
+            "publish_once" => rr3_peer_once(&mut stream, task, &text),
             // e2e 点名发起方（0.0.7 §9.4 ⑤ macOS 档）：注册后发一次 `rr3.call`，
             // 等被调方沿 Response 回路（trace_id = 本 task）送回的应答，result
             // 原样打行作 round-trip 物证，喂一颗心跳后退场。点名对象与参数由
             // 环境给（topic 必填、args 可选 JSON）——夹具不持业务主题知识。
             // error 应答即 Err（非零退出）：e2e 的"点名被拒"负向判据就靠它。
-            "call_once" => {
-                let topic = env::var("RR3_SIM_PEER_CALL_TOPIC")
-                    .map_err(|_| "call_once 需要 RR3_SIM_PEER_CALL_TOPIC".to_string())?;
-                let args: Value = match env::var("RR3_SIM_PEER_CALL_ARGS") {
-                    Ok(s) => serde_json::from_str(&s)
-                        .map_err(|e| format!("RR3_SIM_PEER_CALL_ARGS 不是合法 JSON: {e}"))?,
-                    Err(_) => Value::Null,
-                };
-                rr3_send(
-                    &mut stream,
-                    Rr3PayloadType::Request,
-                    task,
-                    &json!({"jsonrpc": "2.0", "id": 2, "method": "rr3.call",
-                            "params": {"topic": topic, "args": args}}),
-                )?;
-                let reply = rr3_wait_reply(&mut stream, 2)?;
-                if reply["error"].is_object() {
-                    return Err(format!("call 被拒: {}", reply["error"]));
-                }
-                println!("sim-peer: call {topic} 回路 result={}", reply["result"]);
-                rr3_beat(&mut stream, task, 10)
-            }
-            "exit_clean" => {
-                rr3_send(
-                    &mut stream,
-                    Rr3PayloadType::Request,
-                    task,
-                    &json!({"jsonrpc": "2.0", "id": 2, "method": "rr3.unregister", "params": {}}),
-                )?;
-                let r = rr3_wait_reply(&mut stream, 2)?;
-                if r["error"].is_object() {
-                    return Err(format!("退场被拒: {}", r["error"]));
-                }
-                println!("sim-peer: 已主动退场");
-                Ok(()) // 返回即 drop 掉 stream
-            }
-            "abort" => {
-                rr3_beat(&mut stream, task, 10)?;
-                // 先排空接收队列再打死。为什么这属于夹具而不是被测行为：队列里留着未读的
-                // 广播帧时，内核在进程死亡那一刻把关闭改成 RST，rrd 读到的就是 ECONNRESET
-                // 而不是 EOF → 收尾走 `Err` 分支（phase `failed`）；队列空了才是 FIN → EOF →
-                // `Rr3FrameError::Closed`（phase `unregistered`）。实测未排空时本用例 10 次红 1 次。
-                // 这一维量的是"进程有没有把 socket 读干净"，不是"有没有体面退场"，
-                // 所以本任务把它当混淆项排掉；FIN/RST 双路（连同退出码）归 Task 11 的崩溃检测。
-                rr3_drain_incoming(&mut stream)?;
-                println!("sim-peer: 即将 abort");
-                // 不 close、不 unregister：让 rrd 只看到一次 EOF。`abort` 本身就跳过析构，
-                // 这里显式 forget 是为了让"socket 有没有被优雅关闭"不靠编译器心情。
-                std::mem::forget(stream);
-                std::process::abort();
-            }
+            "call_once" => rr3_peer_call(&mut stream, task),
+            "exit_clean" => rr3_peer_exit(&mut stream, task),
+            "abort" => rr3_peer_abort(&mut stream, task),
             // 注册 + 一颗心跳后**彻底静默**（不再喂狗，也不再读帧）。
             // 这正是 watchdog 要抓的形状：连接还在、fd 没关、只是不喂狗了。
             // 里程碑只打一行（约定 3：只打里程碑，不打循环）。
-            "go_silent" => {
-                rr3_beat(&mut stream, task, 10)?;
-                println!("sim-peer: 静默中（已喂 1 次）");
-                loop {
-                    std::thread::sleep(Duration::from_secs(3600));
-                }
-            }
+            "go_silent" => rr3_peer_silent(&mut stream, task),
             // 静默到必然已过期，再回头连续喂 5 次，并把每一次的接受/被拒打出来。
             // 与 `rr3_beat` 的区别：那个把被拒当致命错误直接退出（继续喂一条已不在册的
             // 连接没有观察价值）；本支要观察的恰是"被拒之后是什么样"，所以必须用
             // `rr3_beat_verdict`。
-            "silent_then_beat" => {
-                rr3_beat(&mut stream, task, 10)?;
-                println!("sim-peer: 静默中（已喂 1 次）");
-                std::thread::sleep(SILENT_BEFORE_REVIVE);
-                for n in 1..=5u64 {
-                    let accepted = rr3_beat_verdict(&mut stream, task, 20 + n)?;
-                    println!(
-                        "sim-peer: 喂狗 #{n} {}",
-                        if accepted { "接受" } else { "被拒" }
-                    );
-                    std::thread::sleep(Duration::from_millis(REVIVE_BEAT_GAP_MS));
-                }
-                println!("sim-peer: 已试喂 5 次");
-                loop {
-                    std::thread::sleep(Duration::from_secs(3600));
-                }
-            }
+            "silent_then_beat" => rr3_peer_revive(&mut stream, task),
             other => Err(format!("未知 RR3_SIM_PEER_ROLE: {other}")),
+        }
+    }
+
+    /// publish_once：主题名从自己的 manifest 取（约定 2），不硬编码；发一帧后喂一颗
+    /// 心跳退出。
+    fn rr3_peer_once(stream: &mut UnixStream, task: u64, text: &str) -> Result<(), String> {
+        let topic = rr3_first_publish(text).ok_or("publish_once 需要 publishes 非空")?;
+        rr3_send(
+            stream,
+            Rr3PayloadType::Event,
+            task,
+            &json!({"topic": topic, "seq": 1}),
+        )?;
+        println!("sim-peer: 已发布 {topic}");
+        rr3_beat(stream, task, 10)
+    }
+
+    /// call_once：发 `rr3.call` 并等 Response 回路；error 应答即 Err（负向判据靠它）。
+    fn rr3_peer_call(stream: &mut UnixStream, task: u64) -> Result<(), String> {
+        let topic = env::var("RR3_SIM_PEER_CALL_TOPIC")
+            .map_err(|_| "call_once 需要 RR3_SIM_PEER_CALL_TOPIC".to_string())?;
+        let args: Value = match env::var("RR3_SIM_PEER_CALL_ARGS") {
+            Ok(s) => serde_json::from_str(&s)
+                .map_err(|e| format!("RR3_SIM_PEER_CALL_ARGS 不是合法 JSON: {e}"))?,
+            Err(_) => Value::Null,
+        };
+        rr3_send(
+            stream,
+            Rr3PayloadType::Request,
+            task,
+            &json!({"jsonrpc": "2.0", "id": 2, "method": "rr3.call",
+                    "params": {"topic": topic, "args": args}}),
+        )?;
+        let reply = rr3_wait_reply(stream, 2)?;
+        if reply["error"].is_object() {
+            return Err(format!("call 被拒: {}", reply["error"]));
+        }
+        println!("sim-peer: call {topic} 回路 result={}", reply["result"]);
+        rr3_beat(stream, task, 10)
+    }
+
+    /// exit_clean：主动 `rr3.unregister`，应答后返回即 drop 掉 stream。
+    fn rr3_peer_exit(stream: &mut UnixStream, task: u64) -> Result<(), String> {
+        rr3_send(
+            stream,
+            Rr3PayloadType::Request,
+            task,
+            &json!({"jsonrpc": "2.0", "id": 2, "method": "rr3.unregister", "params": {}}),
+        )?;
+        let r = rr3_wait_reply(stream, 2)?;
+        if r["error"].is_object() {
+            return Err(format!("退场被拒: {}", r["error"]));
+        }
+        println!("sim-peer: 已主动退场");
+        Ok(()) // 返回即 drop 掉 stream
+    }
+
+    /// abort：先排空接收队列再打死。为什么这属于夹具而不是被测行为：队列里留着未读的
+    /// 广播帧时，内核在进程死亡那一刻把关闭改成 RST，rrd 读到的就是 ECONNRESET
+    /// 而不是 EOF → 收尾走 `Err` 分支（phase `failed`）；队列空了才是 FIN → EOF →
+    /// `Rr3FrameError::Closed`（phase `unregistered`）。实测未排空时本用例 10 次红 1 次。
+    /// 这一维量的是"进程有没有把 socket 读干净"，不是"有没有体面退场"，
+    /// 所以本任务把它当混淆项排掉；FIN/RST 双路（连同退出码）归 Task 11 的崩溃检测。
+    fn rr3_peer_abort(stream: &mut UnixStream, task: u64) -> Result<(), String> {
+        rr3_beat(stream, task, 10)?;
+        rr3_drain_incoming(stream)?;
+        println!("sim-peer: 即将 abort");
+        // 不 close、不 unregister：`abort` 立即终止进程、析构不会运行，
+        // rrd 只看到一次 EOF。
+        std::process::abort();
+    }
+
+    /// go_silent：喂一颗心跳后彻底静默（不读帧、不喂狗），直到被杀。
+    fn rr3_peer_silent(stream: &mut UnixStream, task: u64) -> Result<(), String> {
+        rr3_beat(stream, task, 10)?;
+        println!("sim-peer: 静默中（已喂 1 次）");
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+
+    /// silent_then_beat：静默到必然已过期，再连续喂 5 次并逐次打接受/被拒。
+    fn rr3_peer_revive(stream: &mut UnixStream, task: u64) -> Result<(), String> {
+        rr3_beat(stream, task, 10)?;
+        println!("sim-peer: 静默中（已喂 1 次）");
+        std::thread::sleep(SILENT_BEFORE_REVIVE);
+        for n in 1..=5u64 {
+            let accepted = rr3_beat_verdict(stream, task, 20 + n)?;
+            println!(
+                "sim-peer: 喂狗 #{n} {}",
+                if accepted { "接受" } else { "被拒" }
+            );
+            std::thread::sleep(Duration::from_millis(REVIVE_BEAT_GAP_MS));
+        }
+        println!("sim-peer: 已试喂 5 次");
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
         }
     }
 
