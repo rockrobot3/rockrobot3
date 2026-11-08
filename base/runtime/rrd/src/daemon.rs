@@ -708,7 +708,11 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
             }
         });
     if let Err(e) = spawned {
+        // 线程起不来：处理器已在位但无人读 self-pipe。Rust 把 SIGPIPE 置 IGN，
+        // 信号处理器写空管道只会得 EPIPE 而不终止——必须在这里恢复默认处置，
+        // 否则 systemctl stop 会一直等到 SIGKILL（与 EINTR 那条同源的吞信号故障）。
         rr3_log(&format!("counters 关停 flush 未装上（线程起不来）: {e}"));
+        rr3_term_default();
     }
 }
 
