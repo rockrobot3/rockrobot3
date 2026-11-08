@@ -399,25 +399,7 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
     };
 
     let mut errs: Vec<String> = Vec::new();
-    // schema_version：必须为 2（v1 是"无代码读它"时代的死数据形状，直接点名不迁就）
-    match t.get("schema_version") {
-        Some(Value::Integer(v)) if *v == RR3_ASSEMBLE_SCHEMA_VERSION as i64 => {}
-        Some(Value::Integer(v)) => errs.push(format!(
-            "装配清单 schema_version 必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}，收到 {v}"
-        )),
-        Some(other) => errs.push(format!("装配清单 schema_version 应为整数，收到 {other:?}")),
-        None => errs.push(format!(
-            "装配清单缺 schema_version（必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}）"
-        )),
-    }
-    // 顶层未知键点名（只认 schema_version + assemble）
-    for k in t.keys() {
-        if k != "schema_version" && k != "assemble" {
-            errs.push(format!(
-                "装配清单顶层未知键 {k}（只认 schema_version / assemble）"
-            ));
-        }
-    }
+    rr3_asm_head(t, &mut errs);
 
     let Some(asm) = t.get("assemble").and_then(Value::as_table) else {
         errs.push("装配清单缺 [assemble] 表（handles / ops 两键都必填，空数组合法）".into());
@@ -427,95 +409,14 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
             Err(errs)
         };
     };
-    // [assemble] 未知键点名（内存申报键 task_stack_bytes/heap_peak_bytes 是件级
-    // 专用——组合件级 [assemble] 不认，同 demands：内存账是原子件的物理属性）
-    for k in asm.keys() {
-        if k != "handles"
-            && k != "ops"
-            && k != "no_injection"
-            && k != "demands"
-            && k != "task_stack_bytes"
-            && k != "heap_peak_bytes"
-        {
-            errs.push(format!(
-                "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands / task_stack_bytes / heap_peak_bytes）"
-            ));
-        }
-    }
+    rr3_asm_keys(asm, &mut errs);
 
     let mut facts = Rr3AssembleFacts::default();
-    // 两数组"已在文本中出现"（供空面规则判"漏填 vs 明写不需"）：缺键与形状坏另有其错，
-    // 不能替本规则挡刀，也不能被本规则牵连出第二遍点名。
-    let mut handles_present = false;
-    let mut handles_empty = false;
-    let mut ops_present = false;
-    let mut ops_empty = false;
-    // no_injection = true 是"本件不需注入面"的显式声明（L-5）：只认布尔 true。
-    match asm.get("no_injection") {
-        Some(Value::Boolean(true)) => facts.no_injection = true,
-        Some(Value::Boolean(false)) => {
-            errs.push("no_injection 只认 true（本件不需注入面时明写；非空面不得写此键）".into())
-        }
-        Some(other) => errs.push(format!("no_injection 应为布尔 true，收到 {other:?}")),
-        None => {}
-    }
-
-    // handles：数组，每条 = { trait, desc_key }，两键都在册表内（解析与组合件级共用一份）
-    match asm.get("handles") {
-        Some(Value::Array(items)) => {
-            handles_present = true;
-            handles_empty = items.is_empty();
-            let (parsed, mut item_errs) = rr3_handles_parse(items);
-            facts.handles = parsed;
-            errs.append(&mut item_errs);
-        }
-        Some(other) => errs.push(format!("[assemble].handles 应为数组，收到 {other:?}")),
-        None => errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into()),
-    }
-
-    // ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径（共用同上）
-    match asm.get("ops") {
-        Some(Value::Array(items)) => {
-            ops_present = true;
-            ops_empty = items.is_empty();
-            let (parsed, mut item_errs) = rr3_ops_parse(items);
-            facts.ops = parsed;
-            errs.append(&mut item_errs);
-        }
-        Some(other) => errs.push(format!("[assemble].ops 应为数组，收到 {other:?}")),
-        None => errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into()),
-    }
-
-    // demands：电流需求申报（基-36 首件）。缺键 = 空申报合法（执法面归门 c，
-    // 不在形状层强制——L-5 空面规则只管注入面 handles/ops，不涉 demands）。
-    match asm.get("demands") {
-        Some(Value::Array(items)) => {
-            let (parsed, mut item_errs) = rr3_demands_parse(items);
-            facts.demands = parsed;
-            errs.append(&mut item_errs);
-        }
-        Some(other) => errs.push(format!("[assemble].demands 应为数组，收到 {other:?}")),
-        None => {}
-    }
-
-    // task_stack_bytes / heap_peak_bytes：内存需求申报（校验⑩ 分子面，批N2 n2c-v10）。
-    // 缺键 = 未申报 = 0 不进 Σ（申报义务未触发——板侧任务映射未建模，0.0.7 批G/批D1；
-    // 形状层不强制，同 demands 的"缺键 = 空申报合法"）；给键必须是非负整数
-    // （负数 = 物理矛盾，fail-closed）。件级语义非每实例——判据消费在
-    // rrd `rr3_memory_budget`，直加不扩算。
-    for (key, slot) in [
-        ("task_stack_bytes", &mut facts.task_stack_bytes),
-        ("heap_peak_bytes", &mut facts.heap_peak_bytes),
-    ] {
-        match asm.get(key) {
-            Some(Value::Integer(v)) if *v >= 0 => *slot = *v,
-            Some(Value::Integer(v)) => errs.push(format!(
-                "[assemble].{key} = {v} 须为非负整数（本件内存占用字节数，负数是物理矛盾）"
-            )),
-            Some(other) => errs.push(format!("[assemble].{key} 应为整数，收到 {other:?}")),
-            None => {}
-        }
-    }
+    rr3_asm_noinj(asm, &mut facts, &mut errs);
+    let (handles_present, handles_empty) = rr3_asm_handles(asm, &mut facts, &mut errs);
+    let (ops_present, ops_empty) = rr3_asm_ops(asm, &mut facts, &mut errs);
+    rr3_asm_demands(asm, &mut facts, &mut errs);
+    rr3_asm_mem(asm, &mut facts, &mut errs);
 
     // 空面规则（L-5）：两数组均在文本中出现且均为空 ⇒ 必须明写 no_injection = true；
     // 反之，明写 no_injection 时两数组必须都空。这条把"漏填"与"本件确无注入面"分开——
@@ -532,6 +433,143 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
         Ok(facts)
     } else {
         Err(errs)
+    }
+}
+
+/// 顶层形状：schema_version（必须 2）与顶层未知键（只认 schema_version / assemble）。
+fn rr3_asm_head(t: &toml::Table, errs: &mut Vec<String>) {
+    // v1 是"无代码读它"时代的死数据形状，直接点名不迁就
+    match t.get("schema_version") {
+        Some(Value::Integer(v)) if *v == RR3_ASSEMBLE_SCHEMA_VERSION as i64 => {}
+        Some(Value::Integer(v)) => errs.push(format!(
+            "装配清单 schema_version 必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}，收到 {v}"
+        )),
+        Some(other) => errs.push(format!("装配清单 schema_version 应为整数，收到 {other:?}")),
+        None => errs.push(format!(
+            "装配清单缺 schema_version（必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}）"
+        )),
+    }
+    for k in t.keys() {
+        if k != "schema_version" && k != "assemble" {
+            errs.push(format!(
+                "装配清单顶层未知键 {k}（只认 schema_version / assemble）"
+            ));
+        }
+    }
+}
+
+/// `[assemble]` 未知键点名（内存申报键 task_stack_bytes/heap_peak_bytes 是件级
+/// 专用——组合件级 [assemble] 不认，同 demands：内存账是原子件的物理属性）。
+fn rr3_asm_keys(asm: &toml::Table, errs: &mut Vec<String>) {
+    for k in asm.keys() {
+        if k != "handles"
+            && k != "ops"
+            && k != "no_injection"
+            && k != "demands"
+            && k != "task_stack_bytes"
+            && k != "heap_peak_bytes"
+        {
+            errs.push(format!(
+                "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands / task_stack_bytes / heap_peak_bytes）"
+            ));
+        }
+    }
+}
+
+/// no_injection = true 是"本件不需注入面"的显式声明（L-5）：只认布尔 true。
+fn rr3_asm_noinj(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<String>) {
+    match asm.get("no_injection") {
+        Some(Value::Boolean(true)) => facts.no_injection = true,
+        Some(Value::Boolean(false)) => {
+            errs.push("no_injection 只认 true（本件不需注入面时明写；非空面不得写此键）".into())
+        }
+        Some(other) => errs.push(format!("no_injection 应为布尔 true，收到 {other:?}")),
+        None => {}
+    }
+}
+
+/// handles：数组，每条 = { trait, desc_key }，两键都在册表内（解析与组合件级共用
+/// 一份）。返回（键在文本中出现, 数组为空）供 L-5 空面规则使用。
+fn rr3_asm_handles(
+    asm: &toml::Table,
+    facts: &mut Rr3AssembleFacts,
+    errs: &mut Vec<String>,
+) -> (bool, bool) {
+    match asm.get("handles") {
+        Some(Value::Array(items)) => {
+            let (parsed, mut item_errs) = rr3_handles_parse(items);
+            facts.handles = parsed;
+            errs.append(&mut item_errs);
+            (true, items.is_empty())
+        }
+        Some(other) => {
+            errs.push(format!("[assemble].handles 应为数组，收到 {other:?}"));
+            (false, false)
+        }
+        None => {
+            errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into());
+            (false, false)
+        }
+    }
+}
+
+/// ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径（共用同上）。
+/// 返回（键在文本中出现, 数组为空）供 L-5 空面规则使用。
+fn rr3_asm_ops(
+    asm: &toml::Table,
+    facts: &mut Rr3AssembleFacts,
+    errs: &mut Vec<String>,
+) -> (bool, bool) {
+    match asm.get("ops") {
+        Some(Value::Array(items)) => {
+            let (parsed, mut item_errs) = rr3_ops_parse(items);
+            facts.ops = parsed;
+            errs.append(&mut item_errs);
+            (true, items.is_empty())
+        }
+        Some(other) => {
+            errs.push(format!("[assemble].ops 应为数组，收到 {other:?}"));
+            (false, false)
+        }
+        None => {
+            errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into());
+            (false, false)
+        }
+    }
+}
+
+/// demands：电流需求申报（基-36 首件）。缺键 = 空申报合法（执法面归门 c，
+/// 不在形状层强制——L-5 空面规则只管注入面 handles/ops，不涉 demands）。
+fn rr3_asm_demands(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<String>) {
+    match asm.get("demands") {
+        Some(Value::Array(items)) => {
+            let (parsed, mut item_errs) = rr3_demands_parse(items);
+            facts.demands = parsed;
+            errs.append(&mut item_errs);
+        }
+        Some(other) => errs.push(format!("[assemble].demands 应为数组，收到 {other:?}")),
+        None => {}
+    }
+}
+
+/// task_stack_bytes / heap_peak_bytes：内存需求申报（校验⑩ 分子面，批N2 n2c-v10）。
+/// 缺键 = 未申报 = 0 不进 Σ（申报义务未触发——板侧任务映射未建模，0.0.7 批G/批D1；
+/// 形状层不强制，同 demands 的"缺键 = 空申报合法"）；给键必须是非负整数
+/// （负数 = 物理矛盾，fail-closed）。件级语义非每实例——判据消费在
+/// rrd `rr3_memory_budget`，直加不扩算。
+fn rr3_asm_mem(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<String>) {
+    for (key, slot) in [
+        ("task_stack_bytes", &mut facts.task_stack_bytes),
+        ("heap_peak_bytes", &mut facts.heap_peak_bytes),
+    ] {
+        match asm.get(key) {
+            Some(Value::Integer(v)) if *v >= 0 => *slot = *v,
+            Some(Value::Integer(v)) => errs.push(format!(
+                "[assemble].{key} = {v} 须为非负整数（本件内存占用字节数，负数是物理矛盾）"
+            )),
+            Some(other) => errs.push(format!("[assemble].{key} 应为整数，收到 {other:?}")),
+            None => {}
+        }
     }
 }
 
