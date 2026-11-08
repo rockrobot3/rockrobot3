@@ -201,122 +201,7 @@ pub fn rr3_power_frame(reason: &str, percent: u64, voltage_mv: u64) -> Rr3Frame 
 /// 3. 投 boot 队列 —— 放在 accept 循环之前，否则第一条消息永远没人取。
 pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String> {
     let t0 = Instant::now();
-    // 装配链（0.0.2 方案 D2，Q3 裁定）：--profile 是装机正门——enabled_slots 决定起谁，
-    // 装载/查册/缺格判定/manifest 解析全部在 bind 之前完成（fatal 即非 0 退出，
-    // 套接字不留残迹）；--manifest 调试后门维持原路径。两路径**共用**下面的
-    // plan_boot 仲裁与 supervisor spawn，不双真值。缺格不是致命项（方案 P2：
-    // 缺格只降点名模块、缺格≠拒 boot），逐条点名后由 boot 队列跳过。
-    let (
-        boot_manifests,
-        degraded,
-        hal_bindings,
-        axis_state,
-        predegraded,
-        hal_backend,
-        audio_backend,
-        servo_backend,
-        display_backend,
-    ) = match &cfg.profile {
-        Some(p) => {
-            // 格位/角色/器件契约与主题契约同目录（--contracts 运行期落点，T5；roles.toml
-            // 是校验①②判据源、devices.toml 是校验⑦-d 的 mate 集判定源、platform/ 是
-            // 校验③④⑤⑧的判据前件选册目录，增补轮六 §4.1/§4.1b/§4.6）；接线档按装机
-            // 布局由装配单推导（hardware/<形态>/wiring.toml，§4.3——与 modules-root
-            // 同一条 <root> 纪律，校验⑦ 判据面）
-            let contracts = crate::topics_load::rr3_contracts_dir(cfg.contracts.as_deref());
-            let slots = contracts.join("slots.toml");
-            let roles = contracts.join("roles.toml");
-            let devices = contracts.join("devices.toml");
-            let platform = contracts.join("platform");
-            let wiring = crate::wiring::rr3_wiring_path(p)?;
-            let boot =
-                crate::profile::rr3_boot_inputs(p, &slots, &roles, &devices, &wiring, &platform)?;
-            // 日志环容量一次定格（批N5 件二 F-30）：装配单 [runtime].log_ring_cap——
-            // 装载期缺键已在 parse 层拒（缺即红），到这里必是合法正整数。首份胜出
-            // （OnceLock，与装配快照同语义）；--manifest 调试路径不读装配单，环按
-            // lib.rs 的 512 兜底。点名一行进环本身：运维在 rr3.ctl.logs 里看得到
-            // 本机容量是多少。
-            if crate::rr3_log_ring_cap_set(boot.log_ring_cap) {
-                rr3_log(&format!(
-                    "日志环容量定格 {} 行（装配单 [runtime].log_ring_cap）",
-                    boot.log_ring_cap
-                ));
-            }
-            for (module, slot) in &boot.missing {
-                rr3_log(&format!(
-                    "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
-                ));
-            }
-            // 校验②（增补轮六 §5，后果 = 降）：缺角色与缺格分开点名——缺格是
-            // "bindings 无此格"，缺角色是"格位在位却无 [[pin]] 绑定"，两件事不可混写。
-            for (slot, role) in &boot.role_missing {
-                rr3_log(&format!(
-                    "缺角色 {slot}：角色 {role} 无 [pins] 绑定（校验②——该格缺能力，修装配单 [pins] 后重启解除）"
-                ));
-            }
-            // G4（ADR-0019 修订 1 ③）：装配缺项点名到件，模块照常 spawn 但在册即 Degraded
-            for (module, msg) in &boot.assemble_broken {
-                rr3_log(&format!(
-                    "装配缺项 {module}：{msg}（该模块在册即 Degraded，不致命——修数据后重启 rrd 解除）"
-                ));
-            }
-            // 执行轴状态（批N3 件三）：档案装载点名（坏件逐条 / 多份合法）与缺格/
-            // 缺角色分开——注入文本空串 = 不注入，模块侧折保守缺省（§6 复位语义④）
-            for note in &boot.axis_notes {
-                rr3_log(note);
-            }
-            let names: BTreeSet<String> = boot.missing.iter().map(|(m, _)| m.clone()).collect();
-            let predegraded: BTreeSet<String> = boot
-                .assemble_broken
-                .iter()
-                .map(|(m, _)| m.clone())
-                .collect();
-            // 装配快照定格（批N4 件九笔4）：boot 链验收通过的底账一次 set 进
-            // OnceLock（assembly.rs 单点，日志环同款进程级静态），`rr3.ctl.wiring`
-            // 的渲染源。首份胜出语义下重复 boot 不覆盖；--manifest 调试路径
-            // （None 臂）无快照，ctl.wiring 如实回不可得。
-            if let Some(s) = boot.snapshot.clone() {
-                crate::assembly::rr3_assembly_set(s);
-            }
-            // 契约记账快照定格（批N5 件五笔4，Z-4；批N8 件一②扩面，基-40）：boot
-            // 链验收通过后对装载消费真值集记账（contracts.rs 单点）——契约四册
-            // sha256 记账（Z-4 判据）＋真值集七成员记账（基-40 成员完整性判据，
-            // 定位由装载面 rr3_truth_locations 派生），`rr3.ctl.contracts`
-            // 的渲染源 + 自检"齐全且 sha 对"的对比锚。此刻七册刚被装载面读过一遍，
-            // 记账重读失败 = 文件系统级异常，fail-closed 带因拒 boot（不带病定格）。
-            let cs =
-                crate::contracts::rr3_contracts_scan(p, &contracts, &wiring, &boot.platform_chip)?;
-            if crate::contracts::rr3_contracts_set(cs) {
-                rr3_log("真值集记账定格：契约四册 Z-4 账＋真值集七成员基-40 账（rr3.ctl.contracts 自检判据锚）");
-            }
-            (
-                boot.manifests,
-                names,
-                boot.hal_bindings,
-                boot.axis_state,
-                predegraded,
-                boot.hal_backend,
-                boot.audio_backend,
-                boot.servo_backend,
-                boot.display_backend,
-            )
-        }
-        // None 臂 = **仅 --manifest 调试后门**（基-23）：裸起（既无 --profile 又无
-        // --manifest）在 cli parse 处已非 0 退出，走不到这里；后门路径无装配单，
-        // hal_bindings/axis_state/hal_backend 空（spawn 不注入，fail-closed + 应急 env）、
-        // 无缺格点名、无装配快照（ctl.wiring 如实回不可得）。
-        None => (
-            cfg.manifests.clone(),
-            BTreeSet::new(),
-            String::new(),
-            String::new(),
-            BTreeSet::new(),
-            String::new(),
-            None,
-            None,
-            None,
-        ),
-    };
+    let boot = rr3_daemon_boot(cfg)?;
     // rrd 自身日志落盘（批N5 件二笔2，§17 运维留痕同轨判据）：`<socket>.log/rrd.log`
     // append——与 per-unit 文件同目录同派生单点。每行同步 append、不轮转；下一行
     // 的启动回填把崩溃前的文件尾置回环头，`rr3.ctl.logs` 重启后仍取得到崩溃前的
@@ -324,30 +209,17 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 退纯内存，观测通道故障降级、不放大成可用性故障（supervisor stderr 回退
     // inherit 同一条纪律）。位置钉死在装配链 match **之后**：--profile 路径此刻
     // 环容量已定格（回填行数按真容量收）；--manifest 调试路径按 512 兜底收。
-    if let Err(e) = crate::rr3_log_sink_set(&cfg.socket) {
-        rr3_log(&format!(
-            "rrd 日志落盘不可用: {e} —— 运维留痕退纯内存（rr3.ctl.logs 仅本次启动的环）"
-        ));
-    }
-    crate::rr3_log_backfill();
+    rr3_daemon_logs(cfg);
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     // bind 独占探测（0.0.8d 审计 B-9）：存活实例占用 = 拒绝启动（裂脑禁绝）；
     // 残留死文件 = 探测 connect 失败后清掉再绑，探测与清理合并进 rr3_bind_exclusive。
-    let listener = Rr3UdsListener::rr3_bind_exclusive(&cfg.socket)
-        .map_err(|e| format!("绑定 {} 失败: {e}", cfg.socket.display()))?;
-    // 访问控制放行（批F5b R12，ADR-0010 增补）：chmod 0o660 + chgrp 属主组，
-    // 尽力而为不拒启——详见函数 doc
-    rr3_socket_acl_grant(&cfg.socket);
-    rr3_log(&format!("监听 {}", cfg.socket.display()));
+    let listener = rr3_daemon_bind(cfg)?;
 
     let shared = Arc::new(Mutex::new(RrdRegistry::new(cfg.restart_base_ms)));
     // G4：装配缺项的模块预降级——注册入表即 Degraded，且不被解除传播捞回
-    if !predegraded.is_empty() {
-        shared
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .rr3_reg_predegrade_mark(predegraded);
+    if !boot.predegraded.is_empty() {
+        rr3_lock(&shared).rr3_reg_predegrade_mark(boot.predegraded.clone());
     }
     let topics = Arc::new(topics);
 
@@ -355,29 +227,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 不走心跳）→ 立即回写一次。路径判定一处（counters.rs）：env RR3_DATA_DIR 优先，
     // cfg(linux) 缺省 /data/rr3，皆无 = 不持久化（日志一行点名，不报错——sim 直跑就是
     // 没有数据分区的，运维账只在内存里也照常用）。
-    let counters_path = crate::counters::rr3_counters_path();
-    match &counters_path {
-        Some(path) => {
-            let (mut table, note) = crate::counters::rr3_counters_load(path);
-            if let Some(n) = note {
-                rr3_log(&format!("counters 启动加载按空表起账: {n}"));
-            }
-            *table
-                .entry(crate::counters::RR3_COUNTERS_BOOTS_KEY.to_string())
-                .or_insert(0) += 1;
-            rr3_lock(&shared).rr3_reg_counters_replace(table.clone());
-            match crate::counters::rr3_counters_store(path, &table) {
-                Ok(()) => rr3_log(&format!(
-                    "counters 持久化已启用: {}（boots 自增已回写）",
-                    path.display()
-                )),
-                Err(e) => rr3_log(&format!("counters 回写失败（心跳拍会自然重试）: {e}")),
-            }
-        }
-        None => rr3_log(
-            "counters 不持久化（无 RR3_DATA_DIR 且非 linux 缺省面）: 计数仅内存账，断电不保",
-        ),
-    }
+    let counters_path = rr3_daemon_counters(&shared);
 
     // R26 心跳合并写闸门（0.0.5 增补轮四 批W3）：env 解析一次，全连接共享一份；
     // SIGTERM/SIGINT 强制 flush 在此一并装上——合并写窗口内未落盘的尾部计数
@@ -408,37 +258,192 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
 
     rr3_spawn_watchdog(shared.clone(), t0, cfg.watchdog_tick_ms, sup.clone());
 
-    // E-7 启动序：先**全部装载**（含 E-3 的存在性/可执行位门禁，被拒的当场打 `拒绝启动`），
-    // 再交给 rr-registry 仲裁（ADR-0009），最后按裁定投递。分成几段而不是边读边投：
-    // `拒绝启动` 走的是 CLI 顺序、`spawn` 走的是仲裁序，两种序混在日志里就没有可读性
-    // 可言（先装载后投递让这两段各自连续）。
-    let mut jobs: Vec<Rr3SpawnJob> = Vec::new();
-    for manifest in &boot_manifests {
-        if let Some(mut job) = rr3_boot_job_parse(manifest) {
-            // 物理绑定描述符（ADR-0018 裁定 4、批D④）：装配链解析出的 [hardware]
-            // 文本随每个 job 透传，supervisor spawn 时注入 RR3_HAL_BINDINGS；
-            // --manifest 调试后门无装配单 → 空串（不注入，fail-closed + 应急 env）。
-            // 执行轴状态（批N3 件三，件五消歧）同位透传：instance 与轴读数
-            // （RR3_HAL_PERIPH_AXIS，缺省契约常量）相等的恰一份合法档案的投影（含
-            // 行程三键），spawn 时注入 RR3_ACT_AXIS_STATE；空串不注入（模块侧折保守
-            // 缺省）。
-            job.hal_bindings = hal_bindings.clone();
-            job.axis_state = axis_state.clone();
-            // P0-3 根因门：装配单声明的 HAL 后端注入子进程——后端选择是部署事实，
-            // 必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产假验证）。
-            job.hal_backend = hal_backend.clone();
-            job.audio_backend = audio_backend.clone();
-            // P0-4 组合档归属：舵机/显示面后端覆盖（组合档在 ESP32 板上）注入子进程
-            job.servo_backend = servo_backend.clone();
-            job.display_backend = display_backend.clone();
-            jobs.push(job);
-        }
+    // E-7 启动序：先全部装载，再交 rr-registry 仲裁，最后按裁定投递
+    rr3_daemon_queue(&boot, &shared, &sup)?;
+
+    rr3_daemon_accept(
+        listener,
+        Rr3AcceptCtx {
+            shared,
+            topics,
+            t0,
+            pre_register_timeout_ms: cfg.pre_register_timeout_ms,
+            sup,
+            counters_path,
+            counters_gate,
+        },
+    )
+}
+
+/// 装配链产物：--profile 正门与 --manifest 调试后门的统一输入
+struct Rr3DaemonBoot {
+    manifests: Vec<PathBuf>,
+    degraded: BTreeSet<String>,
+    hal_bindings: String,
+    axis_state: String,
+    predegraded: BTreeSet<String>,
+    hal_backend: String,
+    audio_backend: Option<String>,
+    servo_backend: Option<String>,
+    display_backend: Option<String>,
+}
+
+/// 装配链（0.0.2 方案 D2，Q3 裁定）：--profile 是装机正门——enabled_slots 决定起谁，
+/// 装载/查册/缺格判定/manifest 解析全部在 bind 之前完成（fatal 即非 0 退出，
+/// 套接字不留残迹）；--manifest 调试后门维持原路径。两路径共用 plan_boot 仲裁与
+/// supervisor spawn，不双真值。缺格不是致命项（方案 P2：缺格只降点名模块）。
+fn rr3_daemon_boot(cfg: &RrdConfig) -> Result<Rr3DaemonBoot, String> {
+    match &cfg.profile {
+        Some(p) => rr3_boot_profile(cfg, p),
+        // None 臂 = 仅 --manifest 调试后门（基-23）：裸起在 cli parse 处已非 0 退出。
+        // 后门无装配单：hal_bindings/axis_state/hal_backend 空（spawn 不注入）、
+        // 无缺格点名、无装配快照（ctl.wiring 如实回不可得）。
+        None => Ok(Rr3DaemonBoot {
+            manifests: cfg.manifests.clone(),
+            degraded: BTreeSet::new(),
+            hal_bindings: String::new(),
+            axis_state: String::new(),
+            predegraded: BTreeSet::new(),
+            hal_backend: String::new(),
+            audio_backend: None,
+            servo_backend: None,
+            display_backend: None,
+        }),
     }
-    // ADR-0009 裁定 1/2：装载全集交给 rr-registry 仲裁——rrd 只**执行**裁定，不 reimplement：
-    // 环 / 名重复 → `fatal` 非空，拒整个 boot（先逐条点名到 stdout 日志，再以 Err 退出，
-    // main 据此非 0 退出）；不可满足 → `rejected` 点名模块照既有口径 `拒绝启动`（不吃预算），
-    // 其余模块照常；`order` = 拓扑序为主键、层内 (start_priority, name) 确定性次键——
-    // 旧的"start_priority 全局稳定升序"从主键降级为次键，不再直接排 boot 队列。
+}
+
+/// --profile 正门：契约定位 → 装配链装载 → 日志环/快照/真值集记账定格
+fn rr3_boot_profile(cfg: &RrdConfig, profile: &std::path::Path) -> Result<Rr3DaemonBoot, String> {
+    // 格位/角色/器件契约与主题契约同目录（--contracts 运行期落点，T5）；接线档按
+    // 装机布局由装配单推导（hardware/<形态>/wiring.toml，§4.3）
+    let contracts = crate::topics_load::rr3_contracts_dir(cfg.contracts.as_deref());
+    let slots = contracts.join("slots.toml");
+    let roles = contracts.join("roles.toml");
+    let devices = contracts.join("devices.toml");
+    let platform = contracts.join("platform");
+    let wiring = crate::wiring::rr3_wiring_path(profile)?;
+    let boot =
+        crate::profile::rr3_boot_inputs(profile, &slots, &roles, &devices, &wiring, &platform)?;
+    // 日志环容量一次定格（批N5 件二 F-30）：装配单 [runtime].log_ring_cap；首份胜出
+    if crate::rr3_log_ring_cap_set(boot.log_ring_cap) {
+        rr3_log(&format!(
+            "日志环容量定格 {} 行（装配单 [runtime].log_ring_cap）",
+            boot.log_ring_cap
+        ));
+    }
+    rr3_boot_notes(&boot);
+    let degraded: BTreeSet<String> = boot.missing.iter().map(|(m, _)| m.clone()).collect();
+    let predegraded: BTreeSet<String> = boot
+        .assemble_broken
+        .iter()
+        .map(|(m, _)| m.clone())
+        .collect();
+    // 装配快照定格（批N4 件九笔4）：boot 链验收通过的底账一次 set 进 OnceLock，
+    // `rr3.ctl.wiring` 的渲染源；首份胜出，重复 boot 不覆盖。
+    if let Some(s) = boot.snapshot.clone() {
+        crate::assembly::rr3_assembly_set(s);
+    }
+    // 契约记账快照定格（Z-4/基-40）：契约四册 sha256 + 真值集七成员，`rr3.ctl.contracts`
+    // 的渲染源与自检判据锚；记账重读失败 = 文件系统级异常，fail-closed 带因拒 boot。
+    let cs =
+        crate::contracts::rr3_contracts_scan(profile, &contracts, &wiring, &boot.platform_chip)?;
+    if crate::contracts::rr3_contracts_set(cs) {
+        rr3_log(
+            "真值集记账定格：契约四册 Z-4 账＋真值集七成员基-40 账（rr3.ctl.contracts 自检判据锚）",
+        );
+    }
+    Ok(Rr3DaemonBoot {
+        manifests: boot.manifests,
+        degraded,
+        hal_bindings: boot.hal_bindings,
+        axis_state: boot.axis_state,
+        predegraded,
+        hal_backend: boot.hal_backend,
+        audio_backend: boot.audio_backend,
+        servo_backend: boot.servo_backend,
+        display_backend: boot.display_backend,
+    })
+}
+
+/// 装配链点名：缺格 / 缺角色 / 装配缺项 / 轴档案注记——四类分开，不混写
+fn rr3_boot_notes(boot: &crate::profile::Rr3ProfileBoot) {
+    for (module, slot) in &boot.missing {
+        rr3_log(&format!(
+            "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
+        ));
+    }
+    for (slot, role) in &boot.role_missing {
+        rr3_log(&format!(
+            "缺角色 {slot}：角色 {role} 无 [pins] 绑定（校验②——该格缺能力，修装配单 [pins] 后重启解除）"
+        ));
+    }
+    for (module, msg) in &boot.assemble_broken {
+        rr3_log(&format!(
+            "装配缺项 {module}：{msg}（该模块在册即 Degraded，不致命——修数据后重启 rrd 解除）"
+        ));
+    }
+    for note in &boot.axis_notes {
+        rr3_log(note);
+    }
+}
+
+/// rrd 自身日志落盘（§17 运维留痕）：打不开 = 点名退纯内存，不放大成可用性故障
+fn rr3_daemon_logs(cfg: &RrdConfig) {
+    if let Err(e) = crate::rr3_log_sink_set(&cfg.socket) {
+        rr3_log(&format!(
+            "rrd 日志落盘不可用: {e} —— 运维留痕退纯内存（rr3.ctl.logs 仅本次启动的环）"
+        ));
+    }
+    crate::rr3_log_backfill();
+}
+
+/// 独占绑定 + 访问控制放行（chmod 0o660/chgrp 属主组，尽力而为不拒启）
+fn rr3_daemon_bind(cfg: &RrdConfig) -> Result<Rr3UdsListener, String> {
+    let listener = Rr3UdsListener::rr3_bind_exclusive(&cfg.socket)
+        .map_err(|e| format!("绑定 {} 失败: {e}", cfg.socket.display()))?;
+    rr3_socket_acl_grant(&cfg.socket);
+    rr3_log(&format!("监听 {}", cfg.socket.display()));
+    Ok(listener)
+}
+
+/// 运维计数持久化：启动加载全表 → boots 自增 → 立即回写；无数据分区 = 内存账
+fn rr3_daemon_counters(shared: &Arc<Mutex<RrdRegistry>>) -> Option<PathBuf> {
+    let counters_path = crate::counters::rr3_counters_path();
+    match &counters_path {
+        Some(path) => {
+            let (mut table, note) = crate::counters::rr3_counters_load(path);
+            if let Some(n) = note {
+                rr3_log(&format!("counters 启动加载按空表起账: {n}"));
+            }
+            *table
+                .entry(crate::counters::RR3_COUNTERS_BOOTS_KEY.to_string())
+                .or_insert(0) += 1;
+            rr3_lock(shared).rr3_reg_counters_replace(table.clone());
+            match crate::counters::rr3_counters_store(path, &table) {
+                Ok(()) => rr3_log(&format!(
+                    "counters 持久化已启用: {}（boots 自增已回写）",
+                    path.display()
+                )),
+                Err(e) => rr3_log(&format!("counters 回写失败（心跳拍会自然重试）: {e}")),
+            }
+        }
+        None => rr3_log(
+            "counters 不持久化（无 RR3_DATA_DIR 且非 linux 缺省面）: 计数仅内存账，断电不保",
+        ),
+    }
+    counters_path
+}
+
+/// boot 队列：装载 → 仲裁 → 提供者表 → 按 order 投递（缺格模块跳过）
+fn rr3_daemon_queue(
+    boot: &Rr3DaemonBoot,
+    shared: &Arc<Mutex<RrdRegistry>>,
+    sup: &Rr3Supervisor,
+) -> Result<(), String> {
+    let jobs = rr3_jobs_load(boot);
+    // ADR-0009 裁定 1/2：装载全集交 rr-registry 仲裁——rrd 只执行裁定：
+    // 环/名重复 → fatal 拒整个 boot；不可满足 → rejected 点名；order = 拓扑序 +
+    // 层内 (start_priority, name) 确定性次键。
     let arb: Vec<Rr3DependsFacts> = jobs
         .iter()
         .map(|j| Rr3DependsFacts {
@@ -458,9 +463,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             plan.fatal.join("; ")
         ));
     }
-    // 提供者表（裁定 1/3 的运行期账本）：boot 全集一次性写入，**含被拒模块**——
-    // 它们的 provides 仍计入可满足性宇宙（`plan_boot` 的同一口径），运行期不重排。
-    // 降级传播只认这张表：不在表里的能力按 base 内建处理（永远在位）。
+    // 提供者表：boot 全集一次性写入，含被拒模块——provides 仍计入可满足性宇宙
     let mut providers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for j in &jobs {
         for cap in &j.facts.provides {
@@ -470,7 +473,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 .insert(j.facts.name.clone());
         }
     }
-    rr3_lock(&shared).rr3_reg_set_providers(providers);
+    rr3_lock(shared).rr3_reg_set_providers(providers);
     for name in &plan.rejected {
         rr3_log(&format!(
             "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
@@ -481,22 +484,49 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         .map(|j| (j.facts.name.clone(), j))
         .collect();
     for name in &plan.order {
-        // 缺格模块不进 boot 队列（拒绝启动 已由装配链在 bind 前点名）；它的 provides
-        // 仍在上面的 providers 表里——可满足性宇宙完整，下游不连坐（ADR-0009 同款语义）。
-        if degraded.contains(name) {
+        // 缺格模块不进 boot 队列；provides 已在 providers 表里，下游不连坐
+        if boot.degraded.contains(name) {
             continue;
         }
         if let Some(job) = by_name.remove(name) {
             sup.rr3_boot(job);
         }
     }
+    Ok(())
+}
 
-    // accept 持续性错误（fd 表满等）的退避（0.0.8d 审计 B-10）：错误态下 accept 立即
-    // 返回，裸 continue = 一秒百万行日志 + CPU 自旋；200ms 界住速率，也给瞬时 fd
-    // 挤兑（退场进程释放）留泄压窗口。正常路径 accept 阻塞等连接，零开销。
+/// 装载期解析全部 manifest 并为每个 job 注入装配链事实
+fn rr3_jobs_load(boot: &Rr3DaemonBoot) -> Vec<Rr3SpawnJob> {
+    let mut jobs = Vec::new();
+    for manifest in &boot.manifests {
+        if let Some(mut job) = rr3_boot_job_parse(manifest) {
+            // 物理绑定/轴状态/HAL 后端随 job 透传给子进程（空串 = 不注入）
+            job.hal_bindings = boot.hal_bindings.clone();
+            job.axis_state = boot.axis_state.clone();
+            job.hal_backend = boot.hal_backend.clone();
+            job.audio_backend = boot.audio_backend.clone();
+            job.servo_backend = boot.servo_backend.clone();
+            job.display_backend = boot.display_backend.clone();
+            jobs.push(job);
+        }
+    }
+    jobs
+}
+
+/// accept 循环的共享面（一次构造，逐连接 clone）
+struct Rr3AcceptCtx {
+    shared: Arc<Mutex<RrdRegistry>>,
+    topics: Arc<Rr3TopicSet>,
+    t0: Instant,
+    pre_register_timeout_ms: u64,
+    sup: Rr3Supervisor,
+    counters_path: Option<PathBuf>,
+    counters_gate: Arc<Mutex<crate::counters::Rr3CountersGate>>,
+}
+
+/// accept 主循环（永不返回）：持续性错误退避 200ms，并发连接上限 64
+fn rr3_daemon_accept(listener: Rr3UdsListener, ctx: Rr3AcceptCtx) -> ! {
     const RR3_ACCEPT_ERR_BACKOFF: Duration = Duration::from_millis(200);
-    // 并发连接上限（本轮审计）：每连接 2 线程 + 2 fd，pre_register 窗口内无上限时，
-    // 本地瞬时会话风暴可把线程/fd 表打满。16 模块 + ctl 短连留足余量。
     const RR3_MAX_CONNS: usize = 64;
     let live = Arc::new(AtomicUsize::new(0));
     loop {
@@ -518,18 +548,18 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
                 continue;
             }
         };
-        let ctx = Rr3ConnCtx {
-            shared: shared.clone(),
-            topics: topics.clone(),
-            t0,
-            pre_register_timeout_ms: cfg.pre_register_timeout_ms,
-            sup: sup.clone(),
-            counters_path: counters_path.clone(),
-            counters_gate: counters_gate.clone(),
+        let conn = Rr3ConnCtx {
+            shared: ctx.shared.clone(),
+            topics: ctx.topics.clone(),
+            t0: ctx.t0,
+            pre_register_timeout_ms: ctx.pre_register_timeout_ms,
+            sup: ctx.sup.clone(),
+            counters_path: ctx.counters_path.clone(),
+            counters_gate: ctx.counters_gate.clone(),
         };
         thread::spawn(move || {
             let _slot = slot; // 线程退出（含 panic）必归还并发槽
-            if let Err(e) = rr3_conn_serve(stream, ctx) {
+            if let Err(e) = rr3_conn_serve(stream, conn) {
                 rr3_log(&format!("连接收尾: {e}"));
             }
         });
