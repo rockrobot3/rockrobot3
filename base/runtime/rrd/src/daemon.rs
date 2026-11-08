@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -495,12 +495,26 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     // 返回，裸 continue = 一秒百万行日志 + CPU 自旋；200ms 界住速率，也给瞬时 fd
     // 挤兑（退场进程释放）留泄压窗口。正常路径 accept 阻塞等连接，零开销。
     const RR3_ACCEPT_ERR_BACKOFF: Duration = Duration::from_millis(200);
+    // 并发连接上限（本轮审计）：每连接 2 线程 + 2 fd，pre_register 窗口内无上限时，
+    // 本地瞬时会话风暴可把线程/fd 表打满。16 模块 + ctl 短连留足余量。
+    const RR3_MAX_CONNS: usize = 64;
+    let live = Arc::new(AtomicUsize::new(0));
     loop {
         let stream = match listener.rr3_accept() {
             Ok(s) => s,
             Err(e) => {
                 rr3_log(&format!("accept 失败（继续服务）: {e}"));
                 thread::sleep(RR3_ACCEPT_ERR_BACKOFF);
+                continue;
+            }
+        };
+        let slot = match rr3_conn_acquire(&live, RR3_MAX_CONNS) {
+            Some(slot) => slot,
+            None => {
+                rr3_log(&format!(
+                    "连接数超上限 {RR3_MAX_CONNS}，拒绝新连接（在服 {} 条）",
+                    live.load(Ordering::Relaxed)
+                ));
                 continue;
             }
         };
@@ -514,11 +528,31 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
             counters_gate: counters_gate.clone(),
         };
         thread::spawn(move || {
+            let _slot = slot; // 线程退出（含 panic）必归还并发槽
             if let Err(e) = rr3_conn_serve(stream, ctx) {
                 rr3_log(&format!("连接收尾: {e}"));
             }
         });
     }
+}
+
+/// 连接并发槽守卫：Drop 归还计数，panic 路径也不漏账。
+struct Rr3ConnSlot(Arc<AtomicUsize>);
+
+impl Drop for Rr3ConnSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// 申请一个连接槽；满则 None（调用方拒连并点名）。`max` 显式传入便于单测小帽。
+fn rr3_conn_acquire(live: &Arc<AtomicUsize>, max: usize) -> Option<Rr3ConnSlot> {
+    let n = live.fetch_add(1, Ordering::Relaxed);
+    if n >= max {
+        live.fetch_sub(1, Ordering::Relaxed);
+        return None;
+    }
+    Some(Rr3ConnSlot(live.clone()))
 }
 
 /// ctl socket 的属主组（0.0.6 批F5b R12）：postinst 建系统组，运维用户由
@@ -700,6 +734,21 @@ fn rr3_socket_acl_grant(path: &std::path::Path) {
 mod tests {
     use super::*;
     use rr_ipc::{rr3_body_split, Rr3PayloadType};
+
+    /// 并发连接槽（本轮审计）：到上限拒新、释放后可再申请、Drop 归还计数。
+    #[test]
+    fn conn_slots_reject_over_limit_and_recover_on_drop() {
+        let live = Arc::new(AtomicUsize::new(0));
+        let a = rr3_conn_acquire(&live, 2).expect("第 1 条");
+        let b = rr3_conn_acquire(&live, 2).expect("第 2 条");
+        assert!(rr3_conn_acquire(&live, 2).is_none(), "第 3 条必须拒");
+        assert_eq!(live.load(Ordering::Relaxed), 2, "拒绝不得漏计数");
+        drop(a);
+        assert_eq!(live.load(Ordering::Relaxed), 1);
+        let c = rr3_conn_acquire(&live, 2).expect("释放后可再申请");
+        drop((b, c));
+        assert_eq!(live.load(Ordering::Relaxed), 0);
+    }
 
     /// 低电兜底点名帧的形状钉死（0.0.2 Q4）：Notification、src=rrd、dst=广播、
     /// 体恰四字段（topic/reason/percent/voltage_mv），值从触发事件透传。e2e 的旁观者
