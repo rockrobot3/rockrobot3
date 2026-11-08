@@ -66,6 +66,11 @@ command -v ldproxy >/dev/null 2>&1 || die "ldproxy 未安装（cargo install ldp
 echo "PASS  $espflash_ver + esp 工具链（rust-src 在位）+ ldproxy + esp-clang + IDF v5.2.2"
 
 echo "== ② 构建（cargo +esp build，${BUILD}；镜像注入同 espidf-sentinel-check.sh ⑤）=="
+# 管理令牌门（httpd.rs 编译期断言）：烧录产物会被当场使用，缺省公开令牌不得
+# 静默进板。生产强令牌与"显式 dev 固件"二选一，未配置即拒烧（fail-closed）。
+if [ -z "${RR3_BOARD_ADMIN_TOKEN:-}" ] && [ -z "${RR3_ALLOW_DEV_ADMIN_TOKEN:-}" ]; then
+  die "缺管理令牌：生产烧录请 export RR3_BOARD_ADMIN_TOKEN=<强随机值>；仅开发板可 export RR3_ALLOW_DEV_ADMIN_TOKEN=1（公开缺省令牌）"
+fi
 build_args=(
   --config 'source.crates-io.replace-with="rsproxy-sparse"'
   --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'
