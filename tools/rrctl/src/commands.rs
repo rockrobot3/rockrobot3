@@ -244,7 +244,7 @@ fn format_counters(envelope: &Value) -> Result<String, String> {
 fn format_reboot(envelope: &Value) -> Result<String, String> {
     let result = envelope.get("result").ok_or("应答缺 result")?;
     match result.get("reboot").and_then(Value::as_bool) {
-        Some(true) => Ok("系统重启已发起（rrd 侧 systemctl reboot 已执行）".to_string()),
+        Some(true) => Ok("系统重启已发起（rrd 侧重启命令已执行）".to_string()),
         _ => Err("reboot 应答缺 result.reboot 或非 true".to_string()),
     }
 }
