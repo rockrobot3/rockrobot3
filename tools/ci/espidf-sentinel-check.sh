@@ -49,8 +49,8 @@ if [ ! -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ]; then
 fi
 export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
 # ④ esp-clang（bindgen 需 Xtensa 后端）
-if [ ! -e "$HOME/.espup/esp-clang/libclang.dylib" ]; then
-  echo "SKIP  esp-clang 缺位（~/.espup/esp-clang）——espidf 哨兵门不执行"
+if ! rr3_esp_clang_lib >/dev/null; then
+  echo "SKIP  esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——espidf 哨兵门不执行"
   exit 0
 fi
 # ⑤ 镜像注入（仓库源不硬编码镜像，同 espidf-std-check.sh）

@@ -17,3 +17,20 @@ rr3_cargo_artifact() {
   [ -n "$td" ] || return 1
   printf '%s/%s/%s/%s\n' "$td" "$1" "$2" "$3"
 }
+
+# esp-clang 定位（ESP 门共享单点）：espup 把乐鑫 LLVM fork 的库目录挂到
+# ~/.espup/esp-clang，宿主库名随平台而异（macOS libclang.dylib / Linux libclang.so）。
+# 打印首个存在的库路径；缺位返回非 0，调用方按各自纪律 SKIP（CI 门）或 die（产线脚本）。
+# 允许 RR3_ESP_CLANG_DIR 覆盖（非 espup 布局的等价安装）。
+rr3_esp_clang_lib() {
+  local d="${RR3_ESP_CLANG_DIR:-$HOME/.espup/esp-clang}"
+  local f
+  for f in "$d/libclang.dylib" "$d/libclang.so" \
+           "$d/lib/libclang.dylib" "$d/lib/libclang.so"; do
+    if [ -e "$f" ]; then
+      printf '%s\n' "$f"
+      return 0
+    fi
+  done
+  return 1
+}

@@ -7,6 +7,8 @@ on:
   push:
     branches: [main, "dev/**"]
   pull_request:
+  # 重工具链 ESP 档按需触发（冷跑含 ESP-IDF 工具链安装，不随每次 dev 推送跑账）
+  workflow_dispatch:
 
 jobs:
   # 规约门禁（十步）：本地与 CI 同一入口（docs/process/conventions.md §2）。
@@ -87,6 +89,44 @@ jobs:
           # shellcheck disable=SC1091
           [ -f "$HOME/export-esp.sh" ] && . "$HOME/export-esp.sh"
           bash tools/ci/ipct003.sh --strict
+
+  # 重工具链 ESP 构建档（A 任务构建面）：espup 钉版 v0.17.1 + ESP-IDF v5.2.2 克隆 +
+  # 乐鑫 esp-clang + ldproxy——冷跑 20 分钟量级，不与每次 dev 推送抢跑账：手动触发或
+  # 合入 main 的 PR 才跑（发布门前置）。两门各自 SKIP 纪律不变：前置缺位 = SKIP 明说，
+  # 在位但编译失败/产物不在树 = 红。
+  esp32-gates:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 安装 esp 工具链（espup 钉版，esp32 + esp32s3 双档）
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu \
+            -o "$HOME/.local/bin/espup"
+          chmod +x "$HOME/.local/bin/espup"
+          "$HOME/.local/bin/espup" install --targets esp32,esp32s3
+      - name: 安装 ldproxy
+        run: cargo install ldproxy --locked
+      - name: 克隆 ESP-IDF v5.2.2（版本钉与 tools/espidf-std-hello/README.md 登记表同源）
+        run: |
+          mkdir -p "$HOME/.espressif/frameworks"
+          git clone --depth 1 -b v5.2.2 --recursive \
+            https://github.com/espressif/esp-idf.git \
+            "$HOME/.espressif/frameworks/esp-idf-v5.2.2"
+          "$HOME/.espressif/frameworks/esp-idf-v5.2.2/install.sh" esp32 esp32s3
+      - name: classic ESP32 外设基座门（debug + release）
+        run: |
+          # espup 生成的环境导出（LIBCLANG_PATH 等）供 +esp 工具链取用
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          bash tools/ci/esp32-periph-base-check.sh
+      - name: ESP32-S3 外设基座门（debug + release + 单测编译面）
+        run: |
+          # shellcheck disable=SC1091
+          . "$HOME/export-esp.sh"
+          bash tools/ci/esp32s3-periph-base-check.sh
 
   # 发行版快路轨冒烟（0.0.2 T5 / D8，ADR-0013 裁定 5 首证）：单步容器
   # （rust:bookworm，glibc 自洽，本机产物装本机 deb）内构建 → rr3-pack 出 deb →

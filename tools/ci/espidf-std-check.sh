@@ -48,8 +48,8 @@ export IDF_PATH="$HOME/.espressif/frameworks/esp-idf-v5.2.2"
 
 # ④ esp-clang（乐鑫 LLVM fork：bindgen 需 Xtensa 后端；esp-idf-sys 经 espup 惯例
 #    symlink ~/.espup/esp-clang 自动发现并覆盖 LIBCLANG_PATH，见 common.rs setup_clang_env）
-if [ ! -e "$HOME/.espup/esp-clang/libclang.dylib" ]; then
-  echo "SKIP  esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib）——espidf std 冒烟门不执行，安装方式见本目录 README.md"
+if ! rr3_esp_clang_lib >/dev/null; then
+  echo "SKIP  esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so）——espidf std 冒烟门不执行，安装方式见本目录 README.md"
   exit 0
 fi
 

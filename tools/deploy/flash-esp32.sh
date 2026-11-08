@@ -63,7 +63,7 @@ rustup toolchain list 2>/dev/null | grep -q '^esp' || die "esp 工具链未安�
 esp_sysroot="$(rustc +esp --print sysroot 2>/dev/null)" || die "rustc +esp 不可用"
 [ -d "$esp_sysroot/lib/rustlib/src/rust" ] || die "esp 工具链缺 rust-src（build-std 依赖）"
 command -v ldproxy >/dev/null 2>&1 || die "ldproxy 未安装（cargo install ldproxy）"
-[ -e "$HOME/.espup/esp-clang/libclang.dylib" ] || die "esp-clang 缺位（~/.espup/esp-clang，bindgen 需 Xtensa 后端）"
+rr3_esp_clang_lib >/dev/null || die "esp-clang 缺位（~/.espup/esp-clang 无 libclang.dylib/.so，bindgen 需 Xtensa 后端）"
 [ -f "$HOME/.espressif/frameworks/esp-idf-v5.2.2/tools/idf.py" ] \
   || die "ESP-IDF v5.2.2 本地克隆缺位（~/.espressif/frameworks，见 tools/espidf-std-hello/README.md 登记表）"
 echo "PASS  $espflash_ver + esp 工具链（rust-src 在位）+ ldproxy + esp-clang + IDF v5.2.2"
