@@ -9,7 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use crate::board::{
-    AXIS_SETTLE_MS, DUTY_MAX, DUTY_MIN, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS, SCAN_POINT_MS,
+    AXIS_SETTLE_MS, DUTY_MAX, DUTY_MIN, RAIL_GATE_ARMED, RAIL_SAMPLE_PERIOD_MS, RUNTIME_TICK_MS,
+    SCAN_POINT_MS,
 };
 use crate::periph::RtPeriph;
 use crate::power::rr3_rail_raw_valid;
@@ -189,8 +190,15 @@ fn sample_rail(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) -> Result<(u16, u16), S
         }
     }
     if event {
+        // 未接闸时把"只观测、不拒动"写在同一行：未接分压测点/未标定时 ADC 浮空
+        // 会读出伪欠压，运维看到 severe 不该去追一个不存在的电源故障。
+        let gate = if RAIL_GATE_ARMED {
+            ""
+        } else {
+            "（未接闸：占位未标定，仅观测不拒动）"
+        };
         println!(
-            "[periph] 5V 轨欠压越阈 tier={} rail={mv}mV raw={raw}",
+            "[periph] 5V 轨欠压越阈 tier={} rail={mv}mV raw={raw}{gate}",
             tier.name()
         );
     }
