@@ -149,6 +149,8 @@ struct Entry {
     /// （D-2 恢复归零的基准，与判死用的 `last_beat_ms` 是两颗不同的基准，不许混用）。
     registered_at_ms: u64,
     tx: Option<SyncSender<Rr3Frame>>,
+    /// 广播队列满导致的丢帧计数（满侧不摘连接，只丢帧；见 `rr3_reg_fanout`）
+    fan_dropped: u64,
 }
 
 /// watchdog 到期回报。`elapsed_ms` / `watchdog_ms` 必须由**判定处**一并交出：
@@ -463,6 +465,7 @@ impl RrdRegistry {
                 last_beat_ms: now_ms,
                 registered_at_ms: now_ms,
                 tx: Some(tx),
+                fan_dropped: 0,
             },
         );
         Ok(task)
@@ -932,10 +935,14 @@ impl RrdRegistry {
     /// 帧的 dst 写的是已判死的 simb，实际收到的是 sima）。要点名发给某一个模块，请由
     /// conn 层直接用那条连接的 `Sender`，别指望本函数过滤。
     ///
-    /// 有界队列的满侧策略（0.0.8b 审计 B-5，Task 10 carry 落地）：`try_send` 非阻塞——
-    /// `Full` = 这条连接的 writer 正阻塞在对端不读的 socket 上（僵尸订阅者的实锤形状），
-    /// 当场**断投**（`tx = None`）并点名：不静默丢帧也不拖广播方，模块侧由 client 心跳
-    /// 断链或 supervisor 重启走既有回收路。`Disconnected` 同置 None（writer 已亡）。
+    /// 有界队列的满侧策略（0.0.8b 审计 B-5 初版；本轮审计修正）：`try_send`
+    /// 非阻塞——`Full` = 这条连接的 writer 暂时追不上广播（对端主循环在长动作里，
+    /// 如 interact 播放整段 TTS），此时**只丢当前帧、保留连接**并计数：
+    /// 事件总线是尽力投递，丢帧可由模块侧 seq 缺口对账看见，队列腾空后自动续投。
+    /// 旧行为把 `tx=None` 当"断投至重连"，但模块没有重连信号——心跳是独立的
+    /// RPC 通道，连接看起来一直活着，于是模块会**永久失聪**直到因别的原因重启；
+    /// 一次播放期积压就足以触发，属可用性缺陷。`Disconnected` 才是 writer 真亡，
+    /// 才置 `tx=None`。
     pub fn rr3_reg_fanout(&mut self, frame: &Rr3Frame, exclude_task: u64) -> usize {
         let mut n = 0;
         for (name, e) in &mut self.modules {
@@ -949,10 +956,14 @@ impl RrdRegistry {
                 Ok(()) => n += 1,
                 Err(TrySendError::Disconnected(_)) => e.tx = None,
                 Err(TrySendError::Full(_)) => {
-                    e.tx = None;
-                    rr3_log(&format!(
-                        "慢消费者断投 {name}：收件队列满（{RR3_FAN_CAP} 帧上界）——主循环未在读总线帧，停发广播至其重连"
-                    ));
+                    e.fan_dropped = e.fan_dropped.saturating_add(1);
+                    // 每 64 帧点名一次：满队列期间不刷屏，又不把丢帧静默掉
+                    if e.fan_dropped % 64 == 1 {
+                        rr3_log(&format!(
+                            "广播积压丢帧 {name}：收件队列满（{RR3_FAN_CAP} 帧上界），已丢 {} 帧——保留连接，主循环恢复读取后自动续投",
+                            e.fan_dropped
+                        ));
+                    }
                 }
             }
         }
@@ -2167,10 +2178,11 @@ owner = "rr3-simb"
         assert_eq!(r.rr3_reg_fanout(&frame, ta), 0);
     }
 
-    /// 有界队列满侧（0.0.8b 审计 B-5）：容量用满即断投——返回 0、tx 置 None，
-    /// 后续广播彻底跳过该连接；已入队的帧不丢（writer 照常收摊）。
+    /// 有界队列满侧（0.0.8b 审计 B-5 初版；本轮审计修正）：容量用满即**丢当前帧、
+    /// 保留连接**——返回 0、计数 +1；队列腾空后下一帧自动续投。旧行为置 tx=None
+    /// 会让模块在心跳仍通的情况下永久失聪（没有重连信号），播放期积压即可触发。
     #[test]
-    fn fanout_disconnects_slow_consumer_on_full_queue() {
+    fn fanout_drops_frames_but_keeps_slow_consumer() {
         let mut r = RrdRegistry::new(1000);
         let (tx, rx) = mpsc::sync_channel::<Rr3Frame>(1);
         let t = r
@@ -2189,14 +2201,19 @@ owner = "rr3-simb"
         assert_eq!(
             r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
             0,
-            "队列满 → 断投（不阻塞、不静默丢）"
+            "队列满 → 丢当前帧（不阻塞、不摘连接）"
         );
         assert_eq!(
             r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
             0,
-            "断投后彻底跳过"
+            "仍满继续丢，但连接保留"
         );
         assert!(rx.try_recv().is_ok(), "已入队的帧不丢");
+        assert_eq!(
+            r.rr3_reg_fanout(&frame, rr_bus::RR3_BROADCAST_DST_TASK),
+            1,
+            "队列腾空后自动续投（连接未被永久断投）"
+        );
     }
 
     /// 到期后连接句柄被丢掉：之后 fanout 不再往死连接塞
