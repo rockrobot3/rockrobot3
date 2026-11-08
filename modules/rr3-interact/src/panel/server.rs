@@ -745,9 +745,23 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
         "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
         RR3_PANEL_ROUTES.len()
     );
+    // 安全面自述：面板写口无令牌鉴权，非回环监听是"可信局域网"决策，启动即点名。
+    if !rr3_panel_loopback(&addr) {
+        eprintln!(
+            "面板警告: 监听 {addr} 非回环——写口无令牌鉴权（继电器/密钥/配网/重启），仅限可信局域网"
+        );
+    }
     rr3_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
         std::thread::Builder::new().name("rr3-panel-conn".into())
     })
+}
+
+/// 监听是否只绑回环：可解析 IP 才判 loopback；主机名/非法形状按非回环处理
+/// （保守告警，不猜解析结果）。
+fn rr3_panel_loopback(addr: &str) -> bool {
+    addr.parse::<std::net::SocketAddr>()
+        .map(|a| a.ip().is_loopback())
+        .unwrap_or(false)
 }
 
 /// 面板动作入队通道：动作 + 代执行回执发送端（主循环 on_tick 排空）
@@ -2526,5 +2540,16 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), covers.len(), "covers 申报不得重复");
+    }
+
+    /// 回环判定：IP 才判 loopback；主机名/非法形状按非回环（保守告警）。
+    #[test]
+    fn panel_loopback_only_accepts_loopback_ips() {
+        assert!(rr3_panel_loopback("127.0.0.1:8080"));
+        assert!(rr3_panel_loopback("[::1]:8080"));
+        assert!(!rr3_panel_loopback("0.0.0.0:8080"));
+        assert!(!rr3_panel_loopback("192.168.1.10:8080"));
+        assert!(!rr3_panel_loopback("localhost:8080"));
+        assert!(!rr3_panel_loopback("not-an-addr"));
     }
 }
