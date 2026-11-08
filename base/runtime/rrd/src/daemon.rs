@@ -557,12 +557,19 @@ fn rr3_daemon_accept(listener: Rr3UdsListener, ctx: Rr3AcceptCtx) -> ! {
             counters_path: ctx.counters_path.clone(),
             counters_gate: ctx.counters_gate.clone(),
         };
-        thread::spawn(move || {
-            let _slot = slot; // 线程退出（含 panic）必归还并发槽
-            if let Err(e) = rr3_conn_serve(stream, conn) {
-                rr3_log(&format!("连接收尾: {e}"));
-            }
-        });
+        let spawned = thread::Builder::new()
+            .name("rrd-conn".into())
+            .spawn(move || {
+                let _slot = slot; // 线程退出（含 panic）必归还并发槽
+                if let Err(e) = rr3_conn_serve(stream, conn) {
+                    rr3_log(&format!("连接收尾: {e}"));
+                }
+            });
+        if let Err(e) = spawned {
+            // 线程起不来（资源耗尽）只拒这一条连接：accept 主循环不能 panic——
+            // 守护停摆比少一条连接严重得多（闭包已 drop，槽位随 Drop 归还）。
+            rr3_log(&format!("连接线程起不来，拒连（继续服务）: {e}"));
+        }
     }
 }
 
