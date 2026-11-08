@@ -41,6 +41,19 @@ fn lookup<'a>(root: &'a Value, dotted: &str) -> Option<&'a Value> {
     Some(cur)
 }
 
+/// 模块名形状（唯一真值：boot 装载与线上注册共用本解析器）。名字是 per-unit
+/// 日志路径分量（supervisor 落 `<socket>.log/<name>.log`）与计数键前缀，
+/// 带路径分隔符即越出日志目录的根因——只收 ASCII 字母/数字/-/_/.。
+fn rr3_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
 fn req_str(root: &Value, path: &str, errs: &mut Vec<String>) -> String {
     match lookup(root, path) {
         None => {
@@ -89,6 +102,11 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
     };
     let mut errs = Vec::new();
     let name = req_str(&root, "manifest.name", &mut errs);
+    if !name.is_empty() && !rr3_name_ok(&name) {
+        errs.push(format!(
+            "manifest.name {name:?} 形状非法（只允许 ASCII 字母/数字/-/_/.，不得为 . 或 ..，长度 1..=64）"
+        ));
+    }
     let entry = req_str(&root, "manifest.entry", &mut errs);
     let lang = req_str(&root, "manifest.lang", &mut errs);
     let restart_policy = req_str(&root, "resources.restart_policy", &mut errs);
@@ -425,6 +443,21 @@ watchdog_timeout_ms = 1000
             "\\usr\\bin\\sim_peer",
         ] {
             assert!(!rr3_manifest_abs(rel), "{rel} 不是绝对路径");
+        }
+    }
+
+    /// 模块名形状：路径分量（per-unit 日志落盘）不得带分隔符或 `..`；
+    /// 非 ASCII/空白/超长同拒——名字从线上注册与 boot 两路进同一解析器。
+    #[test]
+    fn module_name_shape_rejects_path_components() {
+        let long = "x".repeat(65);
+        for bad in ["../x", "a/b", ".", "..", "名字", "a b", long.as_str()] {
+            let text = GOOD.replace("name = \"rr3-sima\"", &format!("name = \"{bad}\""));
+            assert!(rr3_manifest_parse(&text).is_err(), "非法名应拒: {bad:?}");
+        }
+        for ok in ["rr3-a", "a_b.c", "x"] {
+            let text = GOOD.replace("name = \"rr3-sima\"", &format!("name = \"{ok}\""));
+            assert!(rr3_manifest_parse(&text).is_ok(), "合法名应过: {ok:?}");
         }
     }
 }
