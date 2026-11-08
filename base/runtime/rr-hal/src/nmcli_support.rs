@@ -106,6 +106,33 @@ fn capped_loop(s: &mut impl Read, deadline: Instant) -> Vec<u8> {
     out
 }
 
+/// 错误文案里的 argv 脱敏：Wi-Fi 凭据只以 `psk`/`password` 键的下一项或
+/// `*.psk=...` 形式出现；超时/非零错误不得把口令写进日志（凭据泄漏面）。
+fn rr3_nm_redact(args: &[&str]) -> String {
+    let mut out: Vec<String> = Vec::with_capacity(args.len());
+    let mut mask_next = false;
+    for a in args {
+        if mask_next {
+            out.push("***".to_string());
+            mask_next = false;
+            continue;
+        }
+        if let Some((k, _)) = a.split_once('=') {
+            if k == "psk" || k == "password" || k.ends_with(".psk") {
+                out.push(format!("{k}=***"));
+            } else {
+                out.push((*a).to_string());
+            }
+            continue;
+        }
+        out.push((*a).to_string());
+        if *a == "psk" || *a == "password" || a.ends_with(".psk") {
+            mask_next = true;
+        }
+    }
+    out.join(" ")
+}
+
 /// 起一次 nmcli 子进程（terse 模式由调用方的 args 自带），带超时守护：
 /// spawn 后轮询 `try_wait`，到点 kill 并显式回错（0.0.5 批I N-2）。超时分支
 /// **回错在前、不读管道**——kill 只收直子进程，其孙进程（如 shell fork 的
@@ -158,7 +185,7 @@ pub(crate) fn rr3_nm_run(
             &format!(
                 "nmcli 超时（>{}ms）被终止: {}",
                 timeout.as_millis(),
-                args.join(" "),
+                rr3_nm_redact(args),
             ),
         )));
     }
@@ -178,11 +205,42 @@ pub(crate) fn rr3_nm_run(
     if !status.map(|s| s.success()).unwrap_or(false) {
         return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
             &format!(
-                "nmcli 退出非零（{:?}）: {}",
-                args,
+                "nmcli 退出非零（{}）: {}",
+                rr3_nm_redact(args),
                 String::from_utf8_lossy(&stderr).trim()
             ),
         )));
     }
     Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 超时/非零错误里的 argv 必须脱敏：ssid 与非凭据值保留，psk 值打码。
+    #[test]
+    fn redact_hides_wifi_psk() {
+        let args = [
+            "con",
+            "modify",
+            "rr3-provision",
+            "802-11-wireless.ssid",
+            "Home",
+            "802-11-wireless-security.psk",
+            "s3cret",
+            "802-11-wireless-security.key-mgmt",
+            "wpa-psk",
+        ];
+        let s = rr3_nm_redact(&args);
+        assert!(s.contains("Home"), "ssid 保留: {s}");
+        assert!(s.contains("wpa-psk"), "非凭据值保留: {s}");
+        assert!(!s.contains("s3cret"), "口令不得出现: {s}");
+        assert!(s.contains("***"), "凭据位必须打码: {s}");
+        let eq = rr3_nm_redact(&["con", "modify", "x", "802-11-wireless-security.psk=s3cret"]);
+        assert!(
+            !eq.contains("s3cret") && eq.contains("802-11-wireless-security.psk=***"),
+            "等号形式同样脱敏: {eq}"
+        );
+    }
 }
