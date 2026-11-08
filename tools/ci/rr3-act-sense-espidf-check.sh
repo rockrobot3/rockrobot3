@@ -85,6 +85,21 @@ for mod in rr3-act rr3-sense; do
     echo "FAIL  $mod xtensa-esp32-espidf 构建失败" >&2
     fail=1
   fi
+  # S3 编译面（W1/T2 另一芯片档）：check 不链接，只验 target 无关代码在
+  # xtensa-esp32s3-espidf 同样可编；esp-idf-sys 按 MCU=esp32s3 选 sdkconfig。
+  # 工具链不认该目标 = SKIP 该腿（与整门 SKIP 纪律同口径）。
+  if rustc +esp --print target-list 2>/dev/null | grep -qx 'xtensa-esp32s3-espidf'; then
+    if MCU=esp32s3 cargo +esp check --target xtensa-esp32s3-espidf \
+         --config 'source.crates-io.replace-with="rsproxy-sparse"' \
+         --config 'source.rsproxy-sparse.registry="sparse+https://rsproxy.cn/index/"'; then
+      echo "PASS  $mod xtensa-esp32s3-espidf check（S3 芯片档编译面）"
+    else
+      echo "FAIL  $mod xtensa-esp32s3-espidf check 失败" >&2
+      fail=1
+    fi
+  else
+    echo "SKIP  esp 工具链不认 xtensa-esp32s3-espidf——$mod 的 S3 腿不执行"
+  fi
 done
 
 exit "$fail"
