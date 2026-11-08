@@ -67,6 +67,11 @@ const RR3_REFLEX_PAN_CENTER_DEG: i32 = 90;
 const RR3_REFLEX_PAN_SWING_DEG: i32 = 30;
 /// tilt 中位（板侧行程 [80,100] 的中位 90）：点头手势的基准位——先回中位
 /// 蓄势，再上仰 `nod_deg`（绝对角 = 中位 + nod_deg，板侧 fail-closed 裁决）。
+/// 仅宿主桥档消费（espidf 档无命令旁路）；保留定义供测试与机制面同源。
+#[cfg_attr(
+    not(any(target_os = "linux", target_os = "macos")),
+    allow(dead_code)
+)]
 const RR3_REFLEX_TILT_CENTER_DEG: i32 = 90;
 
 /// 主循环状态整体持有（自原 composite.rs 局部状态迁入，状态归属随分发走）：
@@ -88,7 +93,12 @@ pub(crate) struct Rr3SenseDispatcher {
     tick: Duration,
     /// pcm / vad 共用流序（现况）
     seq: u64,
-    /// 反射环命令旁路（None = 后端无旁路；探测与警告随 boot.rs probe）
+    /// 反射环命令旁路（None = 后端无旁路；探测与警告随 boot.rs probe）。
+    /// 仅宿主桥档读（espidf 档无旁路，字段保留以维持构造形状）。
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "macos")),
+        allow(dead_code)
+    )]
     cmd_tx: Option<rr_hal::backend::Rr3AudioCmdProducer>,
     /// 播放期门控状态机（B批 b2；on_event 喂帧、on_tick onset 臂读门）
     tts_gate: Rr3TtsGate,
@@ -99,6 +109,11 @@ pub(crate) struct Rr3SenseDispatcher {
     /// 点头手势时序（0.0.8 批"转完点头"）：pan 下发后按 nod_delay_ms 先回 tilt
     /// 中位（蓄势位），再按 nod_hold_ms 上仰到中位 + nod_deg（示意"听到了"）。
     /// None = 无手势在途（nod_deg=0 或尚未判停）。
+    /// 仅宿主桥档读写（espidf 档无旁路，字段保留以维持构造形状）。
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "macos")),
+        allow(dead_code)
+    )]
     pending_nod: Option<Rr3NodState>,
     /// 判向策略量一次收进 Rr3DoaCfg（B批 b3b：能量门/几何/档界整体注入机制件）
     doa_cfg: capture::Rr3DoaCfg,
@@ -431,6 +446,11 @@ fn rr3_reflex_pan(enable: bool, deadband_deg: i32, doa_deg: i32, gate_open: bool
 /// `nod_deg = 0` = 不做手势（旧版逐点等价）。目标 = tilt 中位（蓄势）→ 中位 +
 /// `nod_deg`（上仰）；绝对角越出舵机全域 0..=180 不生成（板侧行程 fail-closed
 /// 是最终裁决，这里只防无意义负角）。
+/// 仅宿主桥档消费（espidf 档无命令旁路）；保留定义供测试与机制面同源。
+#[cfg_attr(
+    not(any(target_os = "linux", target_os = "macos")),
+    allow(dead_code)
+)]
 fn rr3_reflex_nod_plan(
     center_deg: i32,
     nod_deg: i32,

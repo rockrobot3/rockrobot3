@@ -275,7 +275,8 @@ fn rr3_hal_sim_wave() -> crate::sim::Rr3SimWave {
 /// ESP32 外设桥 UART 设备路径解析（P0-3/P0-4）：优先从生效绑定
 /// （描述符 [hardware].periph_uart + 应急 env RR3_HAL_PERIPH_UART 覆盖）取，
 /// 回落直接读 env；都没有 → None（调用方 fail-closed 落 placeholder）。
-/// 跨平台（linux/mac 宿主档都消费），故不用 cfg 门。
+/// 宿主档门（linux/mac 是桥的承载侧；espidf 档无桥面，调用点全部同门）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn rr3_periph_uart_path() -> Option<String> {
     if let Ok(b) = crate::descriptor::rr3_bindings_eff() {
         if let Some(p) = b.periph_uart {
