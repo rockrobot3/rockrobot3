@@ -299,6 +299,10 @@ pub struct RrdRegistry {
     /// 持久化的内存真值，落盘点在 daemon 启动与本表心跳归并后的调用方（conn）。
     /// 与 `crash_streak`（崩溃重启账）分开：这里是业务运维账，"机器慢先看数字"。
     counters: BTreeMap<String, u64>,
+    /// 广播转发留痕闸（真板验收 2026-11-08）：每个 topic 上次的接收连接数。音频
+    /// PCM 每帧一条"转发到 N 个连接"会冲垮日志环，只在连接数变化（含首次）时
+    /// 留痕——拓扑变化才是运维要看的信号。
+    fanout_last: BTreeMap<String, usize>,
 }
 
 impl RrdRegistry {
@@ -316,6 +320,7 @@ impl RrdRegistry {
             providers: BTreeMap::new(),
             low_power: false,
             counters: BTreeMap::new(),
+            fanout_last: BTreeMap::new(),
         }
     }
 
@@ -1002,6 +1007,18 @@ impl RrdRegistry {
         n
     }
 
+    /// 广播转发留痕闸：返回 true = 该 topic 的接收连接数相对上次发生变化（含首次），
+    /// 调用方据此才落日志。音频流每帧一条会把日志环/落盘冲垮，拓扑变化才值得记。
+    pub fn rr3_reg_fan_changed(&mut self, topic: &str, n: usize) -> bool {
+        match self.fanout_last.get(topic) {
+            Some(&prev) if prev == n => false,
+            _ => {
+                self.fanout_last.insert(topic.to_string(), n);
+                true
+            }
+        }
+    }
+
     /// 快照按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，
     /// 名字序纯属 `BTreeMap<String,_>` 的顺带结果，故必须显式排。
     pub fn rr3_reg_snapshot(&self) -> Vec<(String, u64, Rr3Phase)> {
@@ -1202,6 +1219,26 @@ watchdog_timeout_ms = 500
         assert_eq!(r.rr3_reg_fanout(&frame, 0), 2, "投递行为不变：仍全量扇出");
         assert!(rxa.try_recv().is_ok());
         assert!(rxb.try_recv().is_ok());
+    }
+
+    /// 转发留痕闸：首次必记、同数沉默、连接数变化再记——音频流每帧一条会刷爆日志环。
+    #[test]
+    fn fanout_log_gate_only_on_conn_change() {
+        let mut r = RrdRegistry::new(1000);
+        assert!(r.rr3_reg_fan_changed("rr3-sense/audio/pcm", 4), "首次必记");
+        assert!(!r.rr3_reg_fan_changed("rr3-sense/audio/pcm", 4), "同数沉默");
+        assert!(
+            r.rr3_reg_fan_changed("rr3-sense/audio/pcm", 3),
+            "连接数变化必记"
+        );
+        assert!(
+            !r.rr3_reg_fan_changed("rr3-sense/audio/pcm", 3),
+            "回落同数沉默"
+        );
+        assert!(
+            r.rr3_reg_fan_changed("rr3-act/servo/state", 2),
+            "按 topic 分账"
+        );
     }
 
     /// 路由表读取：exposes 匹配、多 callee 取 task 最小、failed 排除、未声明回 None
