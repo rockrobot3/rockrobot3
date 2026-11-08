@@ -231,20 +231,31 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         boot.servo_backend.as_deref(),
         boot.display_backend.as_deref(),
     );
+    // 缺格数按 (模块, 格位) 条目计——一格一条，不是"缺格模块数"：同一模块缺两格
+    // 是两个缺格，报文只数模块会把严重度报小。
+    let missing_slots = boot
+        .degrade
+        .iter()
+        .filter(|(_, kind, _)| kind == "missing_slot")
+        .count();
     let summary = rr3_boot_summary(
         &boot.tier,
         &boot.chip,
         &profile,
         boot.manifests.len(),
         boot.predegraded.len(),
-        boot.degraded.len(),
+        missing_slots,
         &backends,
     );
     rr3_log(&summary);
     // 同一行定格给 ctl.status：远程诊断读一次应答即可看到装配面，不必翻日志。
     let _ = crate::rr3_boot_summary_set(summary);
     // 降级原因同刻定格给 ctl.health：卡在哪一格、为何不 spawn，一条应答看全。
-    let _ = crate::rr3_degrade_notes_set(rr3_degrade_json(&boot.degrade));
+    // 只在装配单正门定格——`--manifest` 后门未跑装配链，"无降级"是未知而非事实，
+    // 读面须为 null（[] 会被误读成"确认无降级"）。
+    if cfg.profile.is_some() {
+        let _ = crate::rr3_degrade_notes_set(rr3_degrade_json(&boot.degrade));
+    }
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
     // bind 独占探测（0.0.8d 审计 B-9）：存活实例占用 = 拒绝启动（裂脑禁绝）；
