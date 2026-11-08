@@ -589,85 +589,16 @@ fn rr3_pins_parse(root: &toml::Value, errs: &mut Vec<String>) -> Vec<Rr3PinEntry
     pins
 }
 
-/// 单条 [[pin]] 的逐键解析（含 role/direction 在场判据，顺序随键遍历）
+/// 单条 [[pin]] 的逐键解析（含 role/direction 在场判据，顺序随键遍历）。
+/// 键按类型分派：字符串面 / 数组面 / 数值面各一 helper，错误文案与逐键次序不变。
 fn rr3_pin_entry_parse(i: usize, t: &toml::Table, errs: &mut Vec<String>) -> Rr3PinEntry {
     let mut pin = Rr3PinEntry::default();
     for (k, v) in t {
         match k.as_str() {
-            "role" => match v.as_str() {
-                Some(s) if !s.is_empty() => pin.role = s.to_string(),
-                _ => errs.push(format!("pin #{i}.role 缺失或为空（角色外键）")),
-            },
-            "instance" => match v.as_str() {
-                Some(s) => pin.instance = s.to_string(),
-                None => errs.push(format!("pin #{i}.instance 应为字符串")),
-            },
-            "controller" => match v.as_str() {
-                Some(s) => pin.controller = s.to_string(),
-                None => errs.push(format!("pin #{i}.controller 应为字符串")),
-            },
-            "channel" => match v.as_integer() {
-                Some(n) => pin.channel = Some(n),
-                None => errs.push(format!("pin #{i}.channel 应为整数")),
-            },
-            "physical" => match v.as_array() {
-                Some(a) => {
-                    for x in a {
-                        match x.as_integer() {
-                            Some(n) => pin.physical.push(n),
-                            None => errs.push(format!(
-                                "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
-                            )),
-                        }
-                    }
-                }
-                None => errs.push(format!("pin #{i}.physical 应为整数数组")),
-            },
-            "direction" => match v.as_str() {
-                Some(s) if !s.is_empty() => pin.direction = s.to_string(),
-                _ => errs.push(format!(
-                    "pin #{i}.direction 缺失或为空（校验①缺失语义：direction 缺 → 红）"
-                )),
-            },
-            "rail" => match v.as_str() {
-                Some(s) => pin.rail = s.to_string(),
-                None => errs.push(format!(
-                    "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
-                )),
-            },
-            "addr" => match v.as_str() {
-                Some(s) => pin.addr = s.to_string(),
-                None => errs.push(format!(
-                    "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
-                )),
-            },
-            "device" => match v.as_str() {
-                Some(s) => pin.device = s.to_string(),
-                None => errs.push(format!(
-                    "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
-                )),
-            },
-            "failsafe" => match v.as_str() {
-                Some(s) => pin.failsafe = s.to_string(),
-                None => errs.push(format!(
-                    "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
-                )),
-            },
-            "mux_group" => match v.as_array() {
-                Some(a) => {
-                    for x in a {
-                        match x.as_str() {
-                            Some(s) if !s.is_empty() => pin.mux_group.push(s.to_string()),
-                            _ => errs.push(format!(
-                                "pin #{i}.mux_group 的每一项都必须是非空字符串"
-                            )),
-                        }
-                    }
-                }
-                None => errs.push(format!(
-                    "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表，批N7 已立册）"
-                )),
-            },
+            "physical" | "mux_group" => rr3_pin_list(i, k, v, &mut pin, errs),
+            "channel" => rr3_pin_num(i, v, &mut pin, errs),
+            "role" | "instance" | "controller" | "direction" | "rail" | "addr" | "device"
+            | "failsafe" => rr3_pin_str(i, k, v, &mut pin, errs),
             other => errs.push(format!(
                 "pin #{i} 未知键 {other}（只认 {}）",
                 RR3_PIN_KEYS.join("/")
@@ -683,6 +614,101 @@ fn rr3_pin_entry_parse(i: usize, t: &toml::Table, errs: &mut Vec<String>) -> Rr3
         errs.push(format!("pin #{i} 缺 direction（校验①缺失语义）"));
     }
     pin
+}
+
+/// 字符串类键（role/instance/controller/direction/rail/addr/device/failsafe）。
+/// role/direction 空串与类型错同文案，其余键空串当值收（与拆分前一致）。
+fn rr3_pin_str(i: usize, k: &str, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
+    match k {
+        "role" => match v.as_str() {
+            Some(s) if !s.is_empty() => pin.role = s.to_string(),
+            _ => errs.push(format!("pin #{i}.role 缺失或为空（角色外键）")),
+        },
+        "instance" => match v.as_str() {
+            Some(s) => pin.instance = s.to_string(),
+            None => errs.push(format!("pin #{i}.instance 应为字符串")),
+        },
+        "controller" => match v.as_str() {
+            Some(s) => pin.controller = s.to_string(),
+            None => errs.push(format!("pin #{i}.controller 应为字符串")),
+        },
+        "direction" => match v.as_str() {
+            Some(s) if !s.is_empty() => pin.direction = s.to_string(),
+            _ => errs.push(format!(
+                "pin #{i}.direction 缺失或为空（校验①缺失语义：direction 缺 → 红）"
+            )),
+        },
+        "rail" => match v.as_str() {
+            Some(s) => pin.rail = s.to_string(),
+            None => errs.push(format!(
+                "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
+            )),
+        },
+        "addr" => match v.as_str() {
+            Some(s) => pin.addr = s.to_string(),
+            None => errs.push(format!(
+                "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
+            )),
+        },
+        "device" => match v.as_str() {
+            Some(s) => pin.device = s.to_string(),
+            None => errs.push(format!(
+                "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
+            )),
+        },
+        "failsafe" => match v.as_str() {
+            Some(s) => pin.failsafe = s.to_string(),
+            None => errs.push(format!(
+                "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
+            )),
+        },
+        other => errs.push(format!(
+            "pin #{i} 未知键 {other}（只认 {}）",
+            RR3_PIN_KEYS.join("/")
+        )),
+    }
+}
+
+/// 数组类键：physical（整数数组）与 mux_group（非空字符串数组）。
+fn rr3_pin_list(i: usize, k: &str, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
+    match k {
+        "physical" => match v.as_array() {
+            Some(a) => {
+                for x in a {
+                    match x.as_integer() {
+                        Some(n) => pin.physical.push(n),
+                        None => errs.push(format!(
+                            "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
+                        )),
+                    }
+                }
+            }
+            None => errs.push(format!("pin #{i}.physical 应为整数数组")),
+        },
+        _ => match v.as_array() {
+            Some(a) => {
+                for x in a {
+                    match x.as_str() {
+                        Some(s) if !s.is_empty() => pin.mux_group.push(s.to_string()),
+                        _ => errs.push(format!(
+                            "pin #{i}.mux_group 的每一项都必须是非空字符串"
+                        )),
+                    }
+                }
+            }
+            None => errs.push(format!(
+                "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表，批N7 已立册）"
+            )),
+        },
+    }
+}
+
+/// 数值类键：channel（整数通道号）。
+fn rr3_pin_num(i: usize, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
+    match v.as_integer() {
+        Some(n) => pin.channel = Some(n),
+        None => errs.push(format!("pin #{i}.channel 应为整数")),
+    }
 }
 
 /// [platform]：必填段、单键 tier（ADR-0018 修订 1 ④ 七段之一）。tier 取值域
