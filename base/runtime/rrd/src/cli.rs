@@ -118,85 +118,7 @@ pub fn rr3_cli_parse_env(
     };
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--socket" => {
-                cfg.socket = PathBuf::from(need_path_value("--socket", args, i)?);
-                i += 2;
-            }
-            "--topics-overlay" => {
-                cfg.overlay = Some(PathBuf::from(need_path_value("--topics-overlay", args, i)?));
-                i += 2;
-            }
-            "--contracts" => {
-                cfg.contracts = Some(PathBuf::from(need_path_value("--contracts", args, i)?));
-                i += 2;
-            }
-            "--profile" => {
-                if !cfg.manifests.is_empty() {
-                    return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
-                }
-                cfg.profile = Some(PathBuf::from(need_path_value("--profile", args, i)?));
-                i += 2;
-            }
-            "--manifest" => {
-                if cfg.profile.is_some() {
-                    return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
-                }
-                cfg.manifests
-                    .push(PathBuf::from(need_path_value("--manifest", args, i)?));
-                i += 2;
-            }
-            "--restart-base-ms" => {
-                cfg.restart_base_ms =
-                    parse_restart_base(&need_value("--restart-base-ms", args, i)?)?;
-                i += 2;
-            }
-            "--pre-register-timeout-ms" => {
-                cfg.pre_register_timeout_ms = parse_ms(
-                    "--pre-register-timeout-ms",
-                    &need_value("--pre-register-timeout-ms", args, i)?,
-                )?;
-                i += 2;
-            }
-            "--watchdog-tick-ms" => {
-                let raw = need_value("--watchdog-tick-ms", args, i)?;
-                let n = parse_ms("--watchdog-tick-ms", &raw)?;
-                if n == 0 {
-                    return Err(
-                        "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）"
-                            .to_string(),
-                    );
-                }
-                cfg.watchdog_tick_ms = n;
-                i += 2;
-            }
-            "--boot-role" => {
-                let raw = need_value("--boot-role", args, i)?;
-                // 两道拒法都只为一个目的：**role 进了子进程才炸，就查不出是谁给的**。
-                // 空值：`sim_peer` 会打"未知 RR3_SIM_PEER_ROLE: "（一个空名字的错误行，
-                // 既指不出参数也指不出用例）；疑似开关的值：`--boot-role --socket` 会把
-                // `--socket` 当成 role 吞下、于是**下一个真开关**丢了（与 `need_path_value`
-                // 当年修的"叠加层被静默丢掉"同一形状，只是这里丢的是 socket 路径）。
-                if raw.is_empty() {
-                    return Err(format!(
-                        "--boot-role 不得为空（role 由夹具解释，空值只会得到一条查不出来源的\"未知 RR3_SIM_PEER_ROLE\"）\n{USAGE}"
-                    ));
-                }
-                if raw.starts_with('-') {
-                    return Err(format!(
-                        "--boot-role 缺参数：收到疑似开关的 {raw}（role 不得以 - 开头）\n{USAGE}"
-                    ));
-                }
-                // **不校验取值**（E-6）：合法集是夹具的约定，rrd 只透传。
-                cfg.boot_role = raw;
-                i += 2;
-            }
-            "-h" | "--help" => {
-                println!("{USAGE}");
-                i += 1;
-            }
-            other => return Err(format!("未知选项 {other}\n{USAGE}")),
-        }
+        i = rr3_cli_arg(&mut cfg, args, i)?;
     }
     if cfg.socket.as_os_str().is_empty() {
         return Err("--socket 不得为空".to_string());
@@ -207,6 +129,88 @@ pub fn rr3_cli_parse_env(
         return Err(format!("{ASSEMBLY_SURFACE_REQUIRED}\n{USAGE}"));
     }
     Ok(cfg)
+}
+
+/// 解析单个参数位，返回下一个待解析下标：形状门（未知选项 / 缺参数 / 值以 `-`
+/// 开头 / 非数字）全在此处拒，不静默回落默认值（fail-closed）。
+fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    match args[i].as_str() {
+        "--socket" => {
+            cfg.socket = PathBuf::from(need_path_value("--socket", args, i)?);
+            Ok(i + 2)
+        }
+        "--topics-overlay" => {
+            cfg.overlay = Some(PathBuf::from(need_path_value("--topics-overlay", args, i)?));
+            Ok(i + 2)
+        }
+        "--contracts" => {
+            cfg.contracts = Some(PathBuf::from(need_path_value("--contracts", args, i)?));
+            Ok(i + 2)
+        }
+        "--profile" => {
+            if !cfg.manifests.is_empty() {
+                return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
+            }
+            cfg.profile = Some(PathBuf::from(need_path_value("--profile", args, i)?));
+            Ok(i + 2)
+        }
+        "--manifest" => {
+            if cfg.profile.is_some() {
+                return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
+            }
+            cfg.manifests
+                .push(PathBuf::from(need_path_value("--manifest", args, i)?));
+            Ok(i + 2)
+        }
+        "--restart-base-ms" => {
+            cfg.restart_base_ms = parse_restart_base(&need_value("--restart-base-ms", args, i)?)?;
+            Ok(i + 2)
+        }
+        "--pre-register-timeout-ms" => {
+            cfg.pre_register_timeout_ms = parse_ms(
+                "--pre-register-timeout-ms",
+                &need_value("--pre-register-timeout-ms", args, i)?,
+            )?;
+            Ok(i + 2)
+        }
+        "--watchdog-tick-ms" => {
+            let raw = need_value("--watchdog-tick-ms", args, i)?;
+            let n = parse_ms("--watchdog-tick-ms", &raw)?;
+            if n == 0 {
+                return Err(
+                    "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）".to_string(),
+                );
+            }
+            cfg.watchdog_tick_ms = n;
+            Ok(i + 2)
+        }
+        "--boot-role" => {
+            let raw = need_value("--boot-role", args, i)?;
+            // 两道拒法都只为一个目的：**role 进了子进程才炸，就查不出是谁给的**。
+            // 空值：`sim_peer` 会打"未知 RR3_SIM_PEER_ROLE: "（一个空名字的错误行，
+            // 既指不出参数也指不出用例）；疑似开关的值：`--boot-role --socket` 会把
+            // `--socket` 当成 role 吞下、于是**下一个真开关**丢了（与 `need_path_value`
+            // 当年修的"叠加层被静默丢掉"同一形状，只是这里丢的是 socket 路径）。
+            if raw.is_empty() {
+                return Err(format!(
+                    "--boot-role 不得为空（role 由夹具解释，空值只会得到一条查不出来源的\"未知 RR3_SIM_PEER_ROLE\"）\n{USAGE}"
+                ));
+            }
+            if raw.starts_with('-') {
+                return Err(format!(
+                    "--boot-role 缺参数：收到疑似开关的 {raw}（role 不得以 - 开头）\n{USAGE}"
+                ));
+            }
+            // **不校验取值**（E-6）：合法集是夹具的约定，rrd 只透传。
+            cfg.boot_role = raw;
+            Ok(i + 2)
+        }
+        "-h" | "--help" => {
+            println!("{USAGE}");
+            Ok(i + 1)
+        }
+        other => Err(format!("未知选项 {other}\n{USAGE}")),
+    }
 }
 
 fn parse_ms(flag: &str, raw: &str) -> Result<u64, String> {
