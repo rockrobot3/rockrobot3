@@ -116,35 +116,23 @@ fn rr3_non_empty(s: &str) -> Option<String> {
 impl Rr3HalBindings {
     /// 单键写入：key 必须在册，raw 按该键取值域裁决。`from_text` 与
     /// [`rr3_bindings_compose`] 共用——同一套键位真值，两处不各说一套。
+    /// 按取值域分派三组：非空串 / 索引数 / GPIO 号；逐键语义与错误文案不变。
     fn rr3_binding_set(&mut self, key: &str, raw: &str) -> Result<(), String> {
         let bad = || format!("描述符键 {key} 取值不认: {raw:?}");
         match key {
-            "alsa_device" => self.alsa_device = Some(rr3_non_empty(raw).ok_or_else(bad)?),
-            "link_ifname" => self.link_ifname = Some(rr3_non_empty(raw).ok_or_else(bad)?),
-            "spi_device" => self.spi_device = Some(rr3_non_empty(raw).ok_or_else(bad)?),
-            "pwm_chip" => self.pwm_chip = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
-            "pwm_channel" => self.pwm_channel = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
-            "gpio_chip" => self.gpio_chip = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
-            "gpio_led_line" => self.gpio_led_line = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
-            "gpio_relay_line" => {
-                self.gpio_relay_line = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?)
+            "alsa_device" | "link_ifname" | "spi_device" | "periph_uart" => {
+                self.rr3_bind_str(key, raw).ok_or_else(bad)?;
             }
-            "i2c_bus" => self.i2c_bus = Some(rr3_pwm_index_parse(raw).ok_or_else(bad)?),
-            "i2c_sda" => self.i2c_sda = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "i2c_scl" => self.i2c_scl = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "adc_rail_pin" => self.adc_rail_pin = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "uart2_tx" => self.uart2_tx = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "uart2_rx" => self.uart2_rx = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "ledc_pan" => self.ledc_pan = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "ledc_tilt" => self.ledc_tilt = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "i2s_bclk" => self.i2s_bclk = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "i2s_sd" => self.i2s_sd = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
-            "i2s_ws" => self.i2s_ws = Some(rr3_gpio_num_parse(raw).ok_or_else(bad)?),
+            "pwm_chip" | "pwm_channel" | "gpio_chip" | "gpio_led_line" | "gpio_relay_line"
+            | "i2c_bus" => {
+                self.rr3_bind_idx(key, raw).ok_or_else(bad)?;
+            }
+            "i2c_sda" | "i2c_scl" | "adc_rail_pin" | "uart2_tx" | "uart2_rx" | "ledc_pan"
+            | "ledc_tilt" | "i2s_bclk" | "i2s_sd" | "i2s_ws" => {
+                self.rr3_bind_gpio(key, raw).ok_or_else(bad)?;
+            }
             "cred_store" => self.cred_store = Some(rr3_cred_store_parse(raw).ok_or_else(bad)?),
             "ina219_addr" => self.ina219_addr = Some(rr3_ina219_parse(raw).ok_or_else(bad)?),
-            // P0-3/P0-4：ESP32 外设桥 UART 设备路径（组合档宿主侧真值），与 alsa_device
-            // 同一条非空串裁决（trim 后空 = 不认）。
-            "periph_uart" => self.periph_uart = Some(rr3_non_empty(raw).ok_or_else(bad)?),
             other => {
                 return Err(format!(
                     "描述符键 {other} 未在册（[hardware] 不得自造键位，在册键集见 descriptor.rs）"
@@ -152,6 +140,53 @@ impl Rr3HalBindings {
             }
         }
         Ok(())
+    }
+
+    /// 非空串域（设备路径 / 链路名）：trim 后空 = 不认（None 由调用方统一点名）。
+    fn rr3_bind_str(&mut self, key: &str, raw: &str) -> Option<()> {
+        let v = rr3_non_empty(raw)?;
+        match key {
+            "alsa_device" => self.alsa_device = Some(v),
+            "link_ifname" => self.link_ifname = Some(v),
+            "spi_device" => self.spi_device = Some(v),
+            "periph_uart" => self.periph_uart = Some(v),
+            _ => return None,
+        }
+        Some(())
+    }
+
+    /// 索引数域（pwm/gpio chip 与通道/线号、i2c 总线号）。
+    fn rr3_bind_idx(&mut self, key: &str, raw: &str) -> Option<()> {
+        let v = rr3_pwm_index_parse(raw)?;
+        match key {
+            "pwm_chip" => self.pwm_chip = Some(v),
+            "pwm_channel" => self.pwm_channel = Some(v),
+            "gpio_chip" => self.gpio_chip = Some(v),
+            "gpio_led_line" => self.gpio_led_line = Some(v),
+            "gpio_relay_line" => self.gpio_relay_line = Some(v),
+            "i2c_bus" => self.i2c_bus = Some(v),
+            _ => return None,
+        }
+        Some(())
+    }
+
+    /// GPIO 号域（I2C/I2S/UART2/LEDC/ADC 的物理脚）。
+    fn rr3_bind_gpio(&mut self, key: &str, raw: &str) -> Option<()> {
+        let v = rr3_gpio_num_parse(raw)?;
+        match key {
+            "i2c_sda" => self.i2c_sda = Some(v),
+            "i2c_scl" => self.i2c_scl = Some(v),
+            "adc_rail_pin" => self.adc_rail_pin = Some(v),
+            "uart2_tx" => self.uart2_tx = Some(v),
+            "uart2_rx" => self.uart2_rx = Some(v),
+            "ledc_pan" => self.ledc_pan = Some(v),
+            "ledc_tilt" => self.ledc_tilt = Some(v),
+            "i2s_bclk" => self.i2s_bclk = Some(v),
+            "i2s_sd" => self.i2s_sd = Some(v),
+            "i2s_ws" => self.i2s_ws = Some(v),
+            _ => return None,
+        }
+        Some(())
     }
 }
 
