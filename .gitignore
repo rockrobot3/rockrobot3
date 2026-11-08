@@ -25,9 +25,23 @@
 # CI 单真源（R30）：GitHub Actions 工作流
 !.github/
 !.github/**
-# 项目文档与证据容器（完整白名单；历史账与 ADR 均在此列）
+# 项目文档与证据容器：按目录/文件显式挂载（保持"默认忽略所有"，
+# 新增文档必须先在此登记，否则不进 `git status`——非必要不追踪）
 !docs/
-!docs/**
+!docs/README.md
+!docs/status.md
+!docs/openitems.toml
+!docs/architecture/
+!docs/architecture/**
+!docs/design/
+!docs/design/**
+!docs/reference/
+!docs/reference/**
+!docs/evidence/
+!docs/evidence/**
+!docs/process/
+!docs/process/**
+!docs/黑客三号-开源智能硬件赛道-参赛介绍.md
 
 # Agent 工作产物不入库：实施计划/账本属会话副产物，不是项目交付物
 docs/superpowers/
