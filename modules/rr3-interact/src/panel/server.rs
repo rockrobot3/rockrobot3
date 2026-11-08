@@ -454,176 +454,132 @@ fn rr3_post_call(topic: &str, body: &[u8]) -> Rr3PanelDispatch {
 
 /// 路由纯函数：方法 + 路径 + body → 分派。**端点白名单 = [`RR3_PANEL_ROUTES`]**，
 /// 未知路径 404、方法不对 405、body 坏 400——面板不是攻击面兜底者，一切都显式。
+///
+/// 结构约束（2026-11 重构）：本表**平铺**，每端点一行；方法收窄走
+/// [`rr3_get_only`]/[`rr3_post_only`] 或 match guard，body 解析走
+/// `rr3_*_set` 小函数——禁止在表内嵌第二层 match（cc 与判读面双收敛）。
 pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatch {
     if let Some(topic) = rr3_ops_topic(path) {
-        return if method == "GET" {
-            rr3_get_call(&topic)
-        } else {
-            Rr3PanelDispatch::MethodNotAllowed
-        };
+        return rr3_get_only(method, rr3_get_call(&topic));
     }
     match path {
-        "/" => match method {
-            "GET" => Rr3PanelDispatch::Html,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/status" => match method {
-            "GET" => Rr3PanelDispatch::StatusQuery,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // 存活/版本探针（2026-10-31 面板便捷性改进）：不触总线、零依赖——监控与
-        // 客户端"服务是否活着"的判据不该依赖 rrd 健康查询（那条会随 rrd 波动），
-        // 也不该靠 /api/status 的载荷形状。纯进程内应答，可高频轮询。
-        "/api/healthz" => match method {
-            "GET" => Rr3PanelDispatch::HealthQuery,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/version" => match method {
-            "GET" => Rr3PanelDispatch::VersionQuery,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/data" => match method {
-            "GET" => Rr3PanelDispatch::CountersQuery,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/logs" => match method {
-            "GET" => Rr3PanelDispatch::LogsQuery,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // 接线图读口（批N4 件九笔4）：ctl.wiring 透传。面板不解析不判——
-        // 全交叉判据的真值单点在 rrd（assembly.rs），第二真值点禁令
-        "/api/wiring" => match method {
-            "GET" => Rr3PanelDispatch::WiringQuery,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // 装配侧写口（批N22 件一）：body 原样透传 rrd 写口门序（confirm/证据/
-        // key 白名单全在 rrd 单点裁决，面板零业务语义——wiring 读口同一条第二
-        // 真值点禁令的写半边）
-        "/api/profile/domain" => {
-            if method != "POST" {
-                return Rr3PanelDispatch::MethodNotAllowed;
-            }
-            let params = match rr3_panel_body_json(body) {
-                Ok(v) => v,
-                Err(e) => return Rr3PanelDispatch::BadRequest(e),
-            };
-            Rr3PanelDispatch::ProfileDomainSet { params }
-        }
-        "/api/relay" => {
-            if method != "POST" {
-                return Rr3PanelDispatch::MethodNotAllowed;
-            }
-            let args = match rr3_panel_body_json(body) {
-                Ok(v) => v,
-                Err(e) => return Rr3PanelDispatch::BadRequest(e),
-            };
-            // 参数在这里裁决（relay 只认布尔 on），归属门在 rrd（topic 必须在
-            // act 的 exposes 里——它是既有 exposes，零新增，Q3 裁定）
-            match args.get("on").and_then(Value::as_bool) {
-                Some(on) => Rr3PanelDispatch::BusCall {
-                    topic: "rr3-act/relay/set".to_string(),
-                    args: json!({ "on": on }),
-                },
-                None => Rr3PanelDispatch::BadRequest("缺布尔参数 on".to_string()),
-            }
-        }
-        "/api/beep" => match method {
-            "POST" => Rr3PanelDispatch::PanelAct(Rr3PanelAction::Beep),
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/face" => {
-            if method != "POST" {
-                return Rr3PanelDispatch::MethodNotAllowed;
-            }
-            let args = match rr3_panel_body_json(body) {
-                Ok(v) => v,
-                Err(e) => return Rr3PanelDispatch::BadRequest(e),
-            };
-            match args.get("expression").and_then(Value::as_str) {
-                Some(expression) => Rr3PanelDispatch::PanelAct(Rr3PanelAction::Face {
-                    expression: expression.to_string(),
-                }),
-                None => Rr3PanelDispatch::BadRequest("缺字符串参数 expression".to_string()),
-            }
-        }
-        "/api/selftest" => match method {
-            "POST" => Rr3PanelDispatch::SelfTest,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/reboot" => match method {
-            "POST" => Rr3PanelDispatch::Reboot,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // 配网面（0.0.4 批D）：三端点全部 BusCall 透传 connect 三 RPC——
-        // 参数裁决在 owner（connect 模块 parse_args 点名拒），面板只解析 JSON；
-        // connect 的 body 原样透传（ssid/pass legacy 字段名，零翻译）
-        "/api/wifi/scan" => match method {
-            "GET" => rr3_get_call("rr3-connect/wifi/scan"),
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
+        "/" => rr3_get_only(method, Rr3PanelDispatch::Html),
+        "/api/status" => rr3_get_only(method, Rr3PanelDispatch::StatusQuery),
+        // 存活/版本探针（2026-10-31）：不触总线、零依赖，可高频轮询
+        "/api/healthz" => rr3_get_only(method, Rr3PanelDispatch::HealthQuery),
+        "/api/version" => rr3_get_only(method, Rr3PanelDispatch::VersionQuery),
+        "/api/data" => rr3_get_only(method, Rr3PanelDispatch::CountersQuery),
+        "/api/logs" => rr3_get_only(method, Rr3PanelDispatch::LogsQuery),
+        // 接线图读口：ctl.wiring 透传，判据真值单点在 rrd assembly.rs
+        "/api/wiring" => rr3_get_only(method, Rr3PanelDispatch::WiringQuery),
+        // 装配侧写口：body 原样透传 rrd 写口门序（confirm/证据/key 白名单）
+        "/api/profile/domain" => rr3_post_only(method, rr3_domain_set(body)),
+        // relay：面板只裁决布尔 on，归属门在 rrd（topic 属 act exposes）
+        "/api/relay" => rr3_post_only(method, rr3_relay_set(body)),
+        "/api/beep" => rr3_post_only(method, Rr3PanelDispatch::PanelAct(Rr3PanelAction::Beep)),
+        "/api/face" => rr3_post_only(method, rr3_face_set(body)),
+        "/api/selftest" => rr3_post_only(method, Rr3PanelDispatch::SelfTest),
+        "/api/reboot" => rr3_post_only(method, Rr3PanelDispatch::Reboot),
+        // 配网面：BusCall 透传 connect 三 RPC，参数裁决在 owner 模块
+        "/api/wifi/scan" => rr3_get_only(method, rr3_get_call("rr3-connect/wifi/scan")),
         "/api/wifi/connect" => {
-            if method != "POST" {
-                return Rr3PanelDispatch::MethodNotAllowed;
-            }
-            rr3_post_call("rr3-connect/wifi/connect", body)
+            rr3_post_only(method, rr3_post_call("rr3-connect/wifi/connect", body))
         }
-        "/api/wifi/forget" => match method {
-            "POST" => rr3_get_call("rr3-connect/wifi/forget"),
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // 模型密钥面（0.0.6 抽象批）：key 落仓外 secrets 文件（panel::secrets），
-        // 不走总线不入配置——GET 清单只回 ref 名，POST 应答只回 ref 不回值
-        "/api/model/keys" => match method {
-            "GET" => Rr3PanelDispatch::ModelKeysQuery,
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // brain ops 槽读面（B-12，批N4 件六二）＋写面（件九三 配置面）：同一
-        // BusCall 透传范式——GET 点名 `rr3-brain/ops/list` 快照；POST 点名
-        // `rr3-brain/ops/set` 写口，group/slot/value body 原样透传（参数裁决在
-        // owner：白名单/类型域值 fail-closed；live 内存生效不落盘，应答带
-        // persisted:false）。covers 六槽申报 = 门 d 转绿首刀（读渲染/写同一批
-        // ops 槽，写口申报同集合）
-        "/api/brain/ops" => match method {
-            "GET" => rr3_get_call("rr3-brain/ops/list"),
-            "POST" => rr3_post_call("rr3-brain/ops/set", body),
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        // 模型行面（ADR-0023）：GET 点名 `rr3-brain/model/list` 快照；POST
-        // `/api/brain/model` 点名 CRUD 写口（op/name/字段 body 原样透传，裁决在
-        // owner：结构门 + base_url 完整根 + 落盘），POST `/api/brain/model/test`
-        // 点名单次连通性探测（业务失败以 ok:false 回，不折 HTTP 错）
-        "/api/brain/models" => match method {
-            "GET" => rr3_get_call("rr3-brain/model/list"),
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/brain/model" => match method {
-            "POST" => rr3_post_call("rr3-brain/model/set", body),
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/brain/model/test" => match method {
-            "POST" => rr3_post_call("rr3-brain/model/test", body),
-            _ => Rr3PanelDispatch::MethodNotAllowed,
-        },
-        "/api/model/key" => {
-            if method != "POST" {
-                return Rr3PanelDispatch::MethodNotAllowed;
-            }
-            let args = match rr3_panel_body_json(body) {
-                Ok(v) => v,
-                Err(e) => return Rr3PanelDispatch::BadRequest(e),
-            };
-            match (
-                args.get("ref").and_then(Value::as_str),
-                args.get("value").and_then(Value::as_str),
-            ) {
-                (Some(ref_name), Some(value)) => Rr3PanelDispatch::ModelKeySet {
-                    ref_name: ref_name.to_string(),
-                    value: value.to_string(),
-                },
-                _ => Rr3PanelDispatch::BadRequest("缺字符串参数 ref/value".to_string()),
-            }
+        // forget 无参数：空对象 args（legacy 语义，body 不读）
+        "/api/wifi/forget" => rr3_post_only(method, rr3_get_call("rr3-connect/wifi/forget")),
+        // 模型密钥面：只报 ref 名，POST 应答不回值
+        "/api/model/keys" => rr3_get_only(method, Rr3PanelDispatch::ModelKeysQuery),
+        "/api/model/key" => rr3_post_only(method, rr3_key_set(body)),
+        // brain ops 读/写同源（读渲染与写同一批 ops 槽）
+        "/api/brain/ops" => rr3_brain_ops(method, body),
+        "/api/brain/models" => rr3_get_only(method, rr3_get_call("rr3-brain/model/list")),
+        "/api/brain/model" => rr3_post_only(method, rr3_post_call("rr3-brain/model/set", body)),
+        "/api/brain/model/test" => {
+            rr3_post_only(method, rr3_post_call("rr3-brain/model/test", body))
         }
         _ => Rr3PanelDispatch::NotFound,
+    }
+}
+
+/// GET 限定：表内读口统一收窄（非 GET = 405）
+fn rr3_get_only(method: &str, d: Rr3PanelDispatch) -> Rr3PanelDispatch {
+    if method == "GET" {
+        d
+    } else {
+        Rr3PanelDispatch::MethodNotAllowed
+    }
+}
+
+/// POST 限定：动作/写口统一收窄（非 POST = 405）
+fn rr3_post_only(method: &str, d: Rr3PanelDispatch) -> Rr3PanelDispatch {
+    if method == "POST" {
+        d
+    } else {
+        Rr3PanelDispatch::MethodNotAllowed
+    }
+}
+
+/// brain ops 两面同端点：GET 读快照 / POST 写槽（参数裁决在 owner）
+fn rr3_brain_ops(method: &str, body: &[u8]) -> Rr3PanelDispatch {
+    match method {
+        "GET" => rr3_get_call("rr3-brain/ops/list"),
+        "POST" => rr3_post_call("rr3-brain/ops/set", body),
+        _ => Rr3PanelDispatch::MethodNotAllowed,
+    }
+}
+
+/// `POST /api/profile/domain`：body 原样透传（参数裁决在 rrd 写口门序）
+fn rr3_domain_set(body: &[u8]) -> Rr3PanelDispatch {
+    match rr3_panel_body_json(body) {
+        Ok(params) => Rr3PanelDispatch::ProfileDomainSet { params },
+        Err(e) => Rr3PanelDispatch::BadRequest(e),
+    }
+}
+
+/// `POST /api/relay`：只认布尔 on
+fn rr3_relay_set(body: &[u8]) -> Rr3PanelDispatch {
+    let args = match rr3_panel_body_json(body) {
+        Ok(v) => v,
+        Err(e) => return Rr3PanelDispatch::BadRequest(e),
+    };
+    match args.get("on").and_then(Value::as_bool) {
+        Some(on) => Rr3PanelDispatch::BusCall {
+            topic: "rr3-act/relay/set".to_string(),
+            args: json!({ "on": on }),
+        },
+        None => Rr3PanelDispatch::BadRequest("缺布尔参数 on".to_string()),
+    }
+}
+
+/// `POST /api/face`：只认字符串 expression
+fn rr3_face_set(body: &[u8]) -> Rr3PanelDispatch {
+    let args = match rr3_panel_body_json(body) {
+        Ok(v) => v,
+        Err(e) => return Rr3PanelDispatch::BadRequest(e),
+    };
+    match args.get("expression").and_then(Value::as_str) {
+        Some(expression) => Rr3PanelDispatch::PanelAct(Rr3PanelAction::Face {
+            expression: expression.to_string(),
+        }),
+        None => Rr3PanelDispatch::BadRequest("缺字符串参数 expression".to_string()),
+    }
+}
+
+/// `POST /api/model/key`：只认字符串 ref/value
+fn rr3_key_set(body: &[u8]) -> Rr3PanelDispatch {
+    let args = match rr3_panel_body_json(body) {
+        Ok(v) => v,
+        Err(e) => return Rr3PanelDispatch::BadRequest(e),
+    };
+    match (
+        args.get("ref").and_then(Value::as_str),
+        args.get("value").and_then(Value::as_str),
+    ) {
+        (Some(ref_name), Some(value)) => Rr3PanelDispatch::ModelKeySet {
+            ref_name: ref_name.to_string(),
+            value: value.to_string(),
+        },
+        _ => Rr3PanelDispatch::BadRequest("缺字符串参数 ref/value".to_string()),
     }
 }
 
@@ -972,7 +928,13 @@ fn checks_of(v: &Value) -> Vec<Value> {
 
 /// 路由产物的执行面：状态码三元组在返回处一次定形。
 fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelReply {
-    match rr3_panel_route(&req.method, &req.path, &req.body) {
+    rr3_panel_reply(rr3_panel_route(&req.method, &req.path, &req.body), shared)
+}
+
+/// 分派 → 应答（执行面主表，平铺；动作体按域折到 `rr3_exec_*` 小函数）。
+/// 文案/状态码与拆分前逐字一致——结构重构只动形状不动判据。
+fn rr3_panel_reply(d: Rr3PanelDispatch, shared: &Rr3PanelShared) -> Rr3PanelReply {
+    match d {
         Rr3PanelDispatch::Html => Rr3PanelReply::html(),
         Rr3PanelDispatch::NotFound => {
             Rr3PanelReply::json(404, "Not Found", json!({ "error": "not found" }))
@@ -1003,314 +965,293 @@ fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelR
                 "routes": RR3_PANEL_ROUTES.len(),
             }),
         ),
-        Rr3PanelDispatch::StatusQuery => {
-            // health 是 ctl 查询；link 是订阅缓存（主循环从总线收 Event 存的）
-            let health = rr3_ctl_query(
-                &shared.bus_path,
-                "rr3.ctl.health",
-                1,
-                shared.limits.read_timeout,
-            );
-            let link = shared.link.lock().map(|g| g.clone()).unwrap_or(None);
-            match health {
-                Ok(h) => Rr3PanelReply::json(200, "OK", json!({ "health": h, "link": link })),
-                Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+        Rr3PanelDispatch::StatusQuery => rr3_exec_status(shared),
+        Rr3PanelDispatch::CountersQuery => rr3_exec_ctl(shared, "rr3.ctl.counters", 2),
+        Rr3PanelDispatch::LogsQuery => rr3_exec_ctl(shared, "rr3.ctl.logs", 3),
+        // 接线图：rrd 应答原样透传（available:false 是数据态不是网关错）
+        Rr3PanelDispatch::WiringQuery => rr3_exec_ctl(shared, "rr3.ctl.wiring", 5),
+        Rr3PanelDispatch::BusCall { topic, args } => rr3_exec_bus(shared, &topic, &args),
+        Rr3PanelDispatch::PanelAct(action) => rr3_exec_act(shared, action),
+        Rr3PanelDispatch::SelfTest => rr3_exec_selftest(shared),
+        Rr3PanelDispatch::Reboot => rr3_exec_reboot(shared),
+        // 装配侧写口：body 原样透传 rrd 门序——502 而非 403：码→HTTP 映射是
+        // rrd 应答层业务语义，面板只保真转达拒因文案（第二真值点禁令）
+        Rr3PanelDispatch::ProfileDomainSet { params } => rr3_exec_domain(shared, &params),
+        Rr3PanelDispatch::ModelKeysQuery => rr3_exec_keys(),
+        Rr3PanelDispatch::ModelKeySet { ref_name, value } => rr3_exec_key(&ref_name, &value),
+    }
+}
+
+/// 状态页：health 走 ctl 查询；link 是主循环订阅缓存（只读快照）
+fn rr3_exec_status(shared: &Rr3PanelShared) -> Rr3PanelReply {
+    let health = rr3_ctl_query(
+        &shared.bus_path,
+        "rr3.ctl.health",
+        1,
+        shared.limits.read_timeout,
+    );
+    let link = shared.link.lock().map(|g| g.clone()).unwrap_or(None);
+    match health {
+        Ok(h) => Rr3PanelReply::json(200, "OK", json!({ "health": h, "link": link })),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+    }
+}
+
+/// ctl 读口统一折装：成功原样透传，失败 502（数据态仍 200 由 rrd 决定）
+fn rr3_exec_ctl(shared: &Rr3PanelShared, method: &str, id: u64) -> Rr3PanelReply {
+    match rr3_ctl_query(&shared.bus_path, method, id, shared.limits.read_timeout) {
+        Ok(v) => Rr3PanelReply::json(200, "OK", v),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+    }
+}
+
+/// 重启口：rrd 双重门缺省恒拒，拒因如实转达（403 + rrd 原文案）
+fn rr3_exec_reboot(shared: &Rr3PanelShared) -> Rr3PanelReply {
+    match rr3_ctl_query(
+        &shared.bus_path,
+        "rr3.ctl.reboot",
+        4,
+        shared.limits.read_timeout,
+    ) {
+        Ok(v) => Rr3PanelReply::json(200, "OK", v),
+        Err(e) => Rr3PanelReply::json(403, "Forbidden", json!({ "error": e })),
+    }
+}
+
+/// 装配侧写口：body 原样透传；拒因全文转达（含缺二次确认/证据不过等点名文案）
+fn rr3_exec_domain(shared: &Rr3PanelShared, params: &Value) -> Rr3PanelReply {
+    match rr3_ctl_send(
+        &shared.bus_path,
+        "rr3.ctl.domain.set",
+        params,
+        6,
+        shared.limits.read_timeout,
+    ) {
+        Ok(v) => Rr3PanelReply::json(200, "OK", v),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+    }
+}
+
+/// BusCall 动作：业务错误按载荷裁（422 + ok:false），传输失败 502
+fn rr3_exec_bus(shared: &Rr3PanelShared, topic: &str, args: &Value) -> Rr3PanelReply {
+    match shared.bus.call(topic, args, shared.limits.call_timeout) {
+        Ok(result) => {
+            let (status, reason) = rr3_bus_reply_status(&result);
+            if status == 200 {
+                Rr3PanelReply::json(status, reason, json!({ "ok": true, "result": result }))
+            } else {
+                Rr3PanelReply::json(
+                    status,
+                    reason,
+                    json!({ "ok": false, "error": result["error"] }),
+                )
             }
         }
-        Rr3PanelDispatch::CountersQuery => {
-            match rr3_ctl_query(
-                &shared.bus_path,
-                "rr3.ctl.counters",
-                2,
-                shared.limits.read_timeout,
-            ) {
-                Ok(v) => Rr3PanelReply::json(200, "OK", v),
-                Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
-            }
-        }
-        Rr3PanelDispatch::LogsQuery => match rr3_ctl_query(
-            &shared.bus_path,
-            "rr3.ctl.logs",
-            3,
-            shared.limits.read_timeout,
-        ) {
-            Ok(v) => Rr3PanelReply::json(200, "OK", v),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+    }
+}
+
+/// 进程内动作（beep/face）：主循环代执行，失败折 502
+fn rr3_exec_act(shared: &Rr3PanelShared, action: Rr3PanelAction) -> Rr3PanelReply {
+    match rr3_panel_act(shared, action) {
+        Ok(result) => Rr3PanelReply::json(200, "OK", json!({ "ok": true, "result": result })),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+    }
+}
+
+/// 模型密钥清单：只回 ref 名，永不回值
+fn rr3_exec_keys() -> Rr3PanelReply {
+    match rr3_secrets_path() {
+        Ok(path) => match rr3_secrets_list_at(&path) {
+            Ok(keys) => Rr3PanelReply::json(200, "OK", json!({ "keys": keys })),
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
         },
-        // 接线图（批N4 件九笔4）：rrd 应答原样透传（available:false = 未以
-        // --profile 启动的诚实面，仍 200——不可得是数据态不是网关错）
-        Rr3PanelDispatch::WiringQuery => match rr3_ctl_query(
-            &shared.bus_path,
-            "rr3.ctl.wiring",
-            5,
-            shared.limits.read_timeout,
-        ) {
-            Ok(v) => Rr3PanelReply::json(200, "OK", v),
-            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
-        },
-        Rr3PanelDispatch::BusCall { topic, args } => {
-            match shared.bus.call(&topic, &args, shared.limits.call_timeout) {
-                Ok(result) => {
-                    // 业务错误按载荷裁（I-21③）：被调方折 `{"error":…}` 应答 =
-                    // 业务失败，不得 200+ok:true 假成功（脚本报永远成功）
-                    let (status, reason) = rr3_bus_reply_status(&result);
-                    if status == 200 {
-                        Rr3PanelReply::json(status, reason, json!({ "ok": true, "result": result }))
-                    } else {
-                        Rr3PanelReply::json(
-                            status,
-                            reason,
-                            json!({ "ok": false, "error": result["error"] }),
-                        )
-                    }
-                }
-                Err(e) => {
-                    Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e }))
-                }
-            }
-        }
-        Rr3PanelDispatch::PanelAct(action) => match rr3_panel_act(shared, action) {
-            Ok(result) => Rr3PanelReply::json(200, "OK", json!({ "ok": true, "result": result })),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+    }
+}
+
+/// 模型密钥写入：应答只回 ref；applies=live（secrets 落盘后 brain 每轮现读）
+fn rr3_exec_key(ref_name: &str, value: &str) -> Rr3PanelReply {
+    match rr3_secrets_path() {
+        Ok(path) => match rr3_secrets_upsert(&path, ref_name, value) {
+            Ok(()) => Rr3PanelReply::json(
+                200,
+                "OK",
+                json!({ "ok": true, "ref": ref_name, "applies": "live" }),
+            ),
             Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
         },
-        Rr3PanelDispatch::SelfTest => {
-            // 并列三调＋接线全交叉（Q3）：各答各展示、无依赖链、单项失败不连锁——
-            // 这不是编排（无状态机无裁决），brain 才是唯一编排者（ADR-0007）。
-            // 批N4 件五 I-18③（D15 裁定）：逐腿输出 `{leg, pass, reason?}`——
-            // pass = pass|fail|n-a 三态；失败腿如实报 fail **不折算通过**。
-            // 批N4 件九笔4 起加腿四 wiring：rr3.ctl.wiring 取装配快照的全交叉
-            // 判果**逐条摊进 legs**（`leg = "wiring/<item>"`，逐形态内容不同 =
-            // 全案 §7 ⑤"出厂自检必测 [pins]×wiring 全交叉"的原文）——判果本身
-            // 是 rrd 的产出，这里只转述不重判（第二真值点禁令）。
-            // 批N5 件五笔4 起加腿五 contracts：rr3.ctl.contracts 取契约四册
-            // "齐全且 sha 对"（Z-4）判果，同款逐条摊 `contracts/<item>`。
-            // verdict 判定归 [`rr3_selftest_verdict`]（批N5 件五 F-31 预期表
-            // 等值改判，纯函数化守判据面）。
-            let mut legs = Vec::with_capacity(8);
-            // 腿1 speaker：beep 走主循环代执行——内置测试音（批N5 件五笔2）
-            // 播放成功即 pass；主循环缺席/写播放面失败如实 fail 点名原因
-            let reason = rr3_panel_act(shared, Rr3PanelAction::Beep).err();
-            legs.push(json!({
-                "leg": "speaker",
-                "pass": if reason.is_none() { "pass" } else { "fail" },
-            }));
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+    }
+}
+
+/// 出厂自检：并列五腿（speaker/relay/face/wiring/contracts）各答各展示，
+/// 无依赖链、单项失败不连锁（不是编排——brain 才是唯一编排者，ADR-0007）。
+/// 逐腿 `{leg, pass, reason?}`，pass = pass|fail|n-a 三态；失败腿如实报 fail
+/// 不折算通过。verdict 判定归 [`rr3_selftest_verdict`]（预期表等值，纯函数化）。
+fn rr3_exec_selftest(shared: &Rr3PanelShared) -> Rr3PanelReply {
+    let mut legs = Vec::with_capacity(8);
+    legs.push(rr3_leg_beep(shared));
+    let (relay_leg, relay_want) = rr3_leg_relay(shared);
+    legs.push(relay_leg);
+    legs.push(rr3_leg_face(shared));
+    rr3_leg_group(
+        shared,
+        &mut legs,
+        "wiring",
+        "rr3.ctl.wiring",
+        "n-a",
+        "装配快照在册但零判据对象（零线组零 pin）",
+    );
+    rr3_leg_group(
+        shared,
+        &mut legs,
+        "contracts",
+        "rr3.ctl.contracts",
+        "fail",
+        "契约记账在册但零判据对象（四册点名清单漂移）",
+    );
+    let expect = Rr3SelftestExpect {
+        relay: relay_want,
+        ..shared.selftest_expect
+    };
+    let verdict = rr3_selftest_verdict(&legs, &expect);
+    Rr3PanelReply::json(200, "OK", json!({ "legs": legs, "verdict": verdict }))
+}
+
+/// 腿1 speaker：内置测试音播放成功即 pass（主循环缺席/写播放面失败如实 fail）
+fn rr3_leg_beep(shared: &Rr3PanelShared) -> Value {
+    let reason = rr3_panel_act(shared, Rr3PanelAction::Beep).err();
+    let mut leg = json!({
+        "leg": "speaker",
+        "pass": if reason.is_none() { "pass" } else { "fail" },
+    });
+    if let Some(e) = reason {
+        leg["reason"] = json!(e);
+    }
+    leg
+}
+
+/// 腿2 relay：能力面先判——`rr3-act` 不在册即 n-a，不向总线发无人接的
+/// on/off；ctl 取数失败仍 fail-closed 记 fail（不把系统面故障伪装成 n-a）。
+/// 返回 (腿, 期望态)——ctl 失败时期望态记 fail 与腿等值（既有判据，行为不变）。
+fn rr3_leg_relay(shared: &Rr3PanelShared) -> (Value, &'static str) {
+    match rr3_act_enabled(&shared.bus_path, shared.limits.read_timeout) {
+        Ok(enabled) => {
+            let want = rr3_relay_expect(enabled, shared.selftest_expect.relay);
+            if want == "n-a" {
+                let why = if enabled {
+                    "expect.relay=n-a（配置声明不适用）"
+                } else {
+                    "rr3-act 未启用（host-only 能力面 n-a）"
+                };
+                return (
+                    json!({ "leg": "relay", "pass": "n-a", "reason": why }),
+                    want,
+                );
+            }
+            let (pass, reason) = rr3_relay_cycle(shared);
+            let mut leg = json!({ "leg": "relay", "pass": pass });
             if let Some(e) = reason {
-                legs.last_mut().unwrap()["reason"] = json!(e);
+                leg["reason"] = json!(e);
             }
-            // 腿2 relay：能力面先判——`rr3-act` 不在册（host-only 三模块形态）
-            // 即 n-a，不向总线发无人接的 on/off；配置 expect.relay=n-a 同样跳过。
-            // 能力缺席优先于预期表（避免无末梢形态被共享 config 的 relay=pass
-            // 拖红）；ctl 取数失败仍 fail-closed 记 fail，不把系统面故障伪装成 n-a。
-            let relay_expect = match rr3_act_enabled(&shared.bus_path, shared.limits.read_timeout) {
-                Ok(enabled) => {
-                    let want = rr3_relay_expect(enabled, shared.selftest_expect.relay);
-                    if want == "n-a" {
-                        let why = if enabled {
-                            "expect.relay=n-a（配置声明不适用）"
-                        } else {
-                            "rr3-act 未启用（host-only 能力面 n-a）"
-                        };
-                        legs.push(json!({ "leg": "relay", "pass": "n-a", "reason": why }));
-                    } else {
-                        let relay_on = shared.bus.call(
-                            "rr3-act/relay/set",
-                            &json!({ "on": true }),
-                            shared.limits.call_timeout,
-                        );
-                        let (relay_pass, relay_reason) = match relay_on {
-                            Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
-                            Ok(_) => match shared.bus.call(
-                                "rr3-act/relay/set",
-                                &json!({ "on": false }),
-                                shared.limits.call_timeout,
-                            ) {
-                                Ok(_) => ("pass", None),
-                                Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
-                            },
-                        };
-                        let mut relay_leg = json!({ "leg": "relay", "pass": relay_pass });
-                        if let Some(e) = relay_reason {
-                            relay_leg["reason"] = json!(e);
-                        }
-                        legs.push(relay_leg);
-                    }
-                    want
-                }
-                Err(e) => {
-                    legs.push(json!({
-                        "leg": "relay", "pass": "fail",
-                        "reason": format!("ctl.status 取数失败: {e}"),
-                    }));
-                    "fail"
-                }
-            };
-            // 腿3 face：切到期望表情（I-17/M-10：期望值 config 数据化，产线
-            // 按形态改 [rr3-interact.selftest].face_expect）
-            let reason = rr3_panel_act(
-                shared,
-                Rr3PanelAction::Face {
-                    expression: shared.selftest_face_expect.to_string(),
-                },
-            )
-            .err();
-            let mut face_leg = json!({
-                "leg": "face",
-                "pass": if reason.is_none() { "pass" } else { "fail" },
-            });
-            if let Some(e) = reason {
-                face_leg["reason"] = json!(e);
-            }
-            legs.push(face_leg);
-            // 腿4 wiring（批N4 件九笔4）：ctl 取数失败/快照不可得 = 单腿 fail
-            // 如实点名；取到即把 rrd 三态判果逐条转述（"not-applicable" → n-a，
-            // 其余未知值 fail-closed 折 fail——失败腿不得折算通过）
-            match rr3_ctl_query(
-                &shared.bus_path,
-                "rr3.ctl.wiring",
-                5,
-                shared.limits.read_timeout,
-            ) {
-                Err(e) => legs.push(json!({
-                    "leg": "wiring/取数", "pass": "fail", "reason": e,
-                })),
-                Ok(v) => {
-                    if v.get("available").and_then(Value::as_bool) != Some(true) {
-                        legs.push(json!({
-                            "leg": "wiring/取数", "pass": "fail",
-                            "reason": v.get("reason").cloned()
-                                .unwrap_or(json!("ctl.wiring 应答缺 available:true（数据漂移）")),
-                        }));
-                    } else {
-                        let checks = checks_of(&v);
-                        if checks.is_empty() {
-                            legs.push(json!({
-                                "leg": "wiring/空", "pass": "n-a",
-                                "reason": "装配快照在册但零判据对象（零线组零 pin）",
-                            }));
-                        }
-                        for c in &checks {
-                            let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
-                            let pass = match c.get("pass").and_then(Value::as_str) {
-                                Some("pass") => "pass",
-                                Some("not-applicable") => "n-a",
-                                _ => "fail",
-                            };
-                            let mut leg = json!({ "leg": format!("wiring/{item}"), "pass": pass });
-                            if let Some(r) = c.get("reason") {
-                                leg["reason"] = r.clone();
-                            }
-                            legs.push(leg);
-                        }
-                    }
-                }
-            }
-            // 腿5 contracts（批N5 件五笔4，Z-4）：契约四册"齐全且 sha 对"的
-            // rrd 自检判果逐条转述（`leg = "contracts/<item>"`）——判据真值
-            // 单点在 rrd contracts.rs，这里只转述不重判（第二真值点禁令）；
-            // 取数失败/快照不可得 = 单腿 fail 如实点名
-            match rr3_ctl_query(
-                &shared.bus_path,
-                "rr3.ctl.contracts",
-                5,
-                shared.limits.read_timeout,
-            ) {
-                Err(e) => legs.push(json!({
-                    "leg": "contracts/取数", "pass": "fail", "reason": e,
-                })),
-                Ok(v) => {
-                    if v.get("available").and_then(Value::as_bool) != Some(true) {
-                        legs.push(json!({
-                            "leg": "contracts/取数", "pass": "fail",
-                            "reason": v.get("reason").cloned().unwrap_or(json!(
-                                "ctl.contracts 应答缺 available:true（数据漂移）"
-                            )),
-                        }));
-                    } else {
-                        let checks = checks_of(&v);
-                        if checks.is_empty() {
-                            legs.push(json!({
-                                "leg": "contracts/空", "pass": "fail",
-                                "reason": "契约记账在册但零判据对象（四册点名清单漂移）",
-                            }));
-                        }
-                        for c in &checks {
-                            let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
-                            let pass = match c.get("pass").and_then(Value::as_str) {
-                                Some("pass") => "pass",
-                                Some("not-applicable") => "n-a",
-                                _ => "fail",
-                            };
-                            let mut leg =
-                                json!({ "leg": format!("contracts/{item}"), "pass": pass });
-                            if let Some(r) = c.get("reason") {
-                                leg["reason"] = r.clone();
-                            }
-                            legs.push(leg);
-                        }
-                    }
-                }
-            }
-            // verdict = 结果集与预期集等值（批N5 件五 F-31）：固定腿逐名三态
-            // 等值（缺腿即红、腿册外多腿 fail-closed 红），wiring/* 与
-            // contracts/* 组内零 fail 即组过（n-a 不拖累）。整体红绿是派生量，
-            // 预期表 config 数据化；relay 腿的期望按能力面局部覆盖（host-only
-            // 无 rr3-act 即 n-a），不改共享 config 的 pass 默认。
-            let expect = Rr3SelftestExpect {
-                relay: relay_expect,
-                ..shared.selftest_expect
-            };
-            let verdict = rr3_selftest_verdict(&legs, &expect);
-            Rr3PanelReply::json(200, "OK", json!({ "legs": legs, "verdict": verdict }))
+            (leg, want)
         }
-        Rr3PanelDispatch::Reboot => match rr3_ctl_query(
-            &shared.bus_path,
-            "rr3.ctl.reboot",
-            4,
-            shared.limits.read_timeout,
+        Err(e) => (
+            json!({
+                "leg": "relay", "pass": "fail",
+                "reason": format!("ctl.status 取数失败: {e}"),
+            }),
+            "fail",
+        ),
+    }
+}
+
+/// relay on→off 往返：on 失败不执行 off；off 失败如实点名
+fn rr3_relay_cycle(shared: &Rr3PanelShared) -> (&'static str, Option<String>) {
+    match shared.bus.call(
+        "rr3-act/relay/set",
+        &json!({ "on": true }),
+        shared.limits.call_timeout,
+    ) {
+        Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
+        Ok(_) => match shared.bus.call(
+            "rr3-act/relay/set",
+            &json!({ "on": false }),
+            shared.limits.call_timeout,
         ) {
-            Ok(v) => Rr3PanelReply::json(200, "OK", v),
-            // rrd 侧双重门缺省恒拒：面板如实转达拒因（403 语义用 502 会误导，
-            // 直接回 403 + rrd 原文案——"解锁旋钮"是运维要看见的字）
-            Err(e) => Rr3PanelReply::json(403, "Forbidden", json!({ "error": e })),
+            Ok(_) => ("pass", None),
+            Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
         },
-        // 装配侧写口（批N22 件一）：body 原样透传 rrd 门序——拒因全文转达
-        // （缺二次确认/证据不过/白名单外等 ADR-0021 点名文案是运维要看见的字）。
-        // 502 而非 403：写口拒混合形状病与权限病（Invalid/Permission），码→HTTP
-        // 状态的映射是业务语义，面板不判（第二真值点禁令）——rrd 拒因文案保真
-        // 即可，机器可读码在 rrd 应答层
-        Rr3PanelDispatch::ProfileDomainSet { params } => match rr3_ctl_send(
-            &shared.bus_path,
-            "rr3.ctl.domain.set",
-            &params,
-            6,
-            shared.limits.read_timeout,
-        ) {
-            Ok(v) => Rr3PanelReply::json(200, "OK", v),
-            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+    }
+}
+
+/// 腿3 face：切到期望表情（期望值 config 数据化，产线按形态改 face_expect）
+fn rr3_leg_face(shared: &Rr3PanelShared) -> Value {
+    let reason = rr3_panel_act(
+        shared,
+        Rr3PanelAction::Face {
+            expression: shared.selftest_face_expect.to_string(),
         },
-        Rr3PanelDispatch::ModelKeysQuery => match rr3_secrets_path() {
-            Ok(path) => match rr3_secrets_list_at(&path) {
-                Ok(keys) => Rr3PanelReply::json(200, "OK", json!({ "keys": keys })),
-                Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
-            },
-            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
-        },
-        Rr3PanelDispatch::ModelKeySet { ref_name, value } => match rr3_secrets_path() {
-            Ok(path) => match rr3_secrets_upsert(&path, &ref_name, &value) {
-                // 应答只回 ref——值永不进任何负载/日志（secrets 模块铁律）；
-                // applies=live 机器可读申报（I-20）：secrets 落盘后 brain 每次现读，
-                // 前端文案"brain 下一轮对话生效"与这里的字面同源同义。
-                Ok(()) => Rr3PanelReply::json(
-                    200,
-                    "OK",
-                    json!({ "ok": true, "ref": ref_name, "applies": "live" }),
-                ),
-                Err(e) => {
-                    Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e }))
+    )
+    .err();
+    let mut leg = json!({
+        "leg": "face",
+        "pass": if reason.is_none() { "pass" } else { "fail" },
+    });
+    if let Some(e) = reason {
+        leg["reason"] = json!(e);
+    }
+    leg
+}
+
+/// 腿4/5 组腿：ctl 取数失败/快照不可得 = 单腿 fail 如实点名；取到即把 rrd
+/// 三态判果逐条转述（"not-applicable" → n-a，其余未知值 fail-closed 折 fail）。
+/// `empty_pass/empty_reason` = 空判据对象的态与原因（wiring 空表 n-a、contracts
+/// 空表 fail——四册点名清单漂移不折通过）。
+fn rr3_leg_group(
+    shared: &Rr3PanelShared,
+    legs: &mut Vec<Value>,
+    prefix: &str,
+    topic: &str,
+    empty_pass: &str,
+    empty_reason: &str,
+) {
+    match rr3_ctl_query(&shared.bus_path, topic, 5, shared.limits.read_timeout) {
+        Err(e) => legs.push(json!({
+            "leg": format!("{prefix}/取数"), "pass": "fail", "reason": e,
+        })),
+        Ok(v) => {
+            if v.get("available").and_then(Value::as_bool) != Some(true) {
+                legs.push(json!({
+                    "leg": format!("{prefix}/取数"), "pass": "fail",
+                    "reason": v.get("reason").cloned().unwrap_or(json!(
+                        format!("ctl.{prefix} 应答缺 available:true（数据漂移）")
+                    )),
+                }));
+                return;
+            }
+            let checks = checks_of(&v);
+            if checks.is_empty() {
+                legs.push(json!({
+                    "leg": format!("{prefix}/空"), "pass": empty_pass,
+                    "reason": empty_reason,
+                }));
+            }
+            for c in &checks {
+                let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
+                let pass = match c.get("pass").and_then(Value::as_str) {
+                    Some("pass") => "pass",
+                    Some("not-applicable") => "n-a",
+                    _ => "fail",
+                };
+                let mut leg = json!({ "leg": format!("{prefix}/{item}"), "pass": pass });
+                if let Some(r) = c.get("reason") {
+                    leg["reason"] = r.clone();
                 }
-            },
-            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
-        },
+                legs.push(leg);
+            }
+        }
     }
 }
 
