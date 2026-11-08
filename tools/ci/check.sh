@@ -1434,6 +1434,20 @@ if [ "$gate_d_fail" -ne 0 ]; then
   fail=1
 fi
 
+# ⑫ 质量度量门（B11，基线钉数）：重复率硬门槛 3%；圈复杂度与超长生产函数名按
+# tools/ci/metrics-baseline.json 只降不升（与红账基线门同款纪律）。度量核为纯
+# Python 标准库脚本（无外网依赖）；python3 缺位按 SKIP 纪律明说不放行静默。
+printf '\n=== ⑫ 质量度量门（重复率 / 圈复杂度 / 函数名长度） ===\n'
+if command -v python3 >/dev/null 2>&1; then
+  if python3 tools/ci/metrics.py; then
+    :
+  else
+    fail=1
+  fi
+else
+  printf 'SKIP  ⑫ python3 缺位——质量度量门不执行（CI runner 自带 python3）\n'
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"

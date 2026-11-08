@@ -53,4 +53,4 @@ CI 单一事实源在 [`.github/workflows/ci.yml`](../../.github/workflows/ci.ym
 **CI 接线（0.0.5 批M MC-10 L-1）**：本脚本此前**无任何调用方**（不在 `check.sh`、不在 `ci.yml`），
 0.0.5 批M 起由 `.github/workflows/ci.yml` 的第九 job `matrix`（ubuntu-latest）调用——**非 `--strict`**
 （⑦ 时序达标无固定载体，默认口径如实记"未跑"、退 0；出现 FAIL 列才退 1），产出**人工搬进**
-`docs/status.md` 矩阵行。出数 ≠ 判据：判据真源仍 `check.sh` 十步 + 本目录各专用门。
+`docs/status.md` 矩阵行。出数 ≠ 判据：判据真源仍 `check.sh` 全步 + 本目录各专用门。

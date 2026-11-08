@@ -19,7 +19,7 @@ jobs:
       # ⑨-y 跨平台可编面的前件（批N8 件六）：门内不设 SKIP，target 缺位即红
       - name: 安装 Windows target（⑨-y 门前置）
         run: rustup target add x86_64-pc-windows-msvc
-      - name: 规约门禁检查（十步）
+      - name: 规约门禁检查（check.sh 全步，含 ⑫ 质量度量）
         run: bash tools/ci/check.sh
 
   # 门禁之外的 lint 拆步：fmt 与 clippy 各自独立失败，一步红即整 job 红，
