@@ -200,6 +200,14 @@ pub fn rr3_power_frame(reason: &str, percent: u64, voltage_mv: u64) -> Rr3Frame 
 ///    "先起 watchdog、再起 boot 队列"）；
 /// 3. 投 boot 队列 —— 放在 accept 循环之前，否则第一条消息永远没人取。
 pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String> {
+    // panic 留痕（可观测性）：线程 panic 默认只到 stderr，不进 rrd 日志环/落盘；
+    // 先落一行再交默认钩子，ctl.logs 与 rrd.log 都能看到"哪个线程/哪一行"出事，
+    // 不改变 panic 语义。rr3_log 已不 panic（写失败降级），钩子内无重入风险。
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        rr3_log(&format!("线程 panic: {info}"));
+        default_hook(info);
+    }));
     let t0 = Instant::now();
     let boot = rr3_daemon_boot(cfg)?;
     // rrd 自身日志落盘（批N5 件二笔2，§17 运维留痕同轨判据）：`<socket>.log/rrd.log`
