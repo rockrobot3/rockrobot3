@@ -120,138 +120,172 @@ pub fn rr3_wiring_from_text(text: &str) -> Result<Rr3Wiring, Vec<String>> {
             errs.push(format!("wire #{i} 必须是 TOML 表（[[wire]]）"));
             continue;
         };
-        for k in t.keys() {
-            if !RR3_WIRE_KEYS.contains(&k.as_str()) {
-                errs.push(format!("wire #{i} 未知键 {k}（九字段封闭，§4.3）"));
-            }
-        }
-        // connector：位号是身份键（⑦ 的判据 label、feeds 的引用键），缺了整条无从谈起
-        let connector = t
-            .get("connector")
-            .and_then(toml::Value::as_str)
-            .unwrap_or("");
-        if connector.is_empty() {
-            errs.push(format!("wire #{i}.connector 缺失或为空"));
-        } else if let Some(prev) = seen.get(connector) {
-            errs.push(format!(
-                "wire #{i} 位号 {connector} 与 wire #{prev} 重复（一连接器一组线，feeds 引用以位号为键）"
-            ));
-        } else {
-            seen.insert(connector, i);
-        }
-        // hdr_pin：非空整数数组（排针物理序号）
-        let hdr_pin: Vec<i64> = t
-            .get("hdr_pin")
-            .and_then(toml::Value::as_array)
-            .map(|a| a.iter().filter_map(toml::Value::as_integer).collect())
-            .unwrap_or_default();
-        if hdr_pin.is_empty() {
-            errs.push(format!("wire #{i}.hdr_pin 必须是非空整数数组"));
-        }
-        // signal：非空字符串数组（每导体一个信号名）
-        let signal: Vec<String> = t
-            .get("signal")
-            .and_then(toml::Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(toml::Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        if signal.is_empty() {
-            errs.push(format!("wire #{i}.signal 必须是非空字符串数组"));
-        }
-        // 位序对应：hdr_pin[k] ↔ signal[k]（丝印序即信号序）
-        if !hdr_pin.is_empty() && !signal.is_empty() && hdr_pin.len() != signal.len() {
-            errs.push(format!(
-                "wire #{i} 的 hdr_pin（{} 个）与 signal（{} 个）数目不等（位序对应：hdr_pin[k] ↔ signal[k]）",
-                hdr_pin.len(),
-                signal.len()
-            ));
-        }
-        // net：domains 外键，"none" 是纯信号/地线组的合法显式值
-        let net = t.get("net").and_then(toml::Value::as_str).unwrap_or("");
-        if net.is_empty() {
-            errs.push(format!(
-                "wire #{i}.net 缺失或为空（\"none\" 是纯信号/地线组的合法显式值，留空即红）"
-            ));
-        }
-        // feeds：无下游线组显式写 []（缺失语义列：缺 → 红）
-        let feeds: Vec<String> = t
-            .get("feeds")
-            .and_then(toml::Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(toml::Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        if t.get("feeds").and_then(toml::Value::as_array).is_none() {
-            errs.push(format!(
-                "wire #{i}.feeds 缺失或不是字符串数组（无下游线组显式写 []，留空即红——§5 缺失语义列）"
-            ));
-        }
-        // mate：devices.toml 外键，"none" 是直连无对端的合法显式值
-        let mate = t.get("mate").and_then(toml::Value::as_str).unwrap_or("");
-        if mate.is_empty() {
-            errs.push(format!(
-                "wire #{i}.mate 缺失或为空（\"none\" 是排针/焊线直连的合法显式值，留空即红）"
-            ));
-        }
-        // keyed：有无防呆必须显式声明（缺失语义列：缺 → 红）
-        let keyed = match t.get("keyed").and_then(toml::Value::as_bool) {
-            Some(b) => b,
-            None => {
-                errs.push(format!(
-                    "wire #{i}.keyed 缺失或不是布尔（有无物理防呆必须显式声明——§5 缺失语义列）"
-                ));
-                false
-            }
-        };
-        // rated_a：正数（0 额定线不存在；⑦-c 的判据面，批N2 消费）
-        let rated_a = t
-            .get("rated_a")
-            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)));
-        let rated_a = match rated_a {
-            Some(a) if a > 0.0 => a,
-            _ => {
-                errs.push(format!(
-                    "wire #{i}.rated_a 缺失或不是正数（线材额定电流，缺失即红——§5 缺失语义列）"
-                ));
-                0.0
-            }
-        };
-        // gnd_common：共地点标识，"none" 是无地导体线组的合法显式值
-        let gnd_common = t
-            .get("gnd_common")
-            .and_then(toml::Value::as_str)
-            .unwrap_or("");
-        if gnd_common.is_empty() {
-            errs.push(format!(
-                "wire #{i}.gnd_common 缺失或为空（共地点标识，\"none\" 是无地导体线组的合法显式值）"
-            ));
-        }
-        wires.push(Rr3Wire {
-            connector: connector.to_string(),
-            hdr_pin,
-            signal,
-            net: net.to_string(),
-            feeds,
-            mate: mate.to_string(),
-            keyed,
-            rated_a,
-            gnd_common: gnd_common.to_string(),
-        });
+        rr3_wire_unknown(i, t, &mut errs);
+        let connector = rr3_wire_ident(i, t, &mut seen, &mut errs);
+        wires.push(rr3_wire_fields(i, t, connector, &mut errs));
     }
     if !errs.is_empty() {
         return Err(errs);
     }
     // 闭合面：feeds 指向同文件其他线组的位号（位号集在本档内闭合），自环即红。
     // 一般环（A→B→A）的检测随批N2 ⑦-c 的闭包计算同链落，本批不预支。
+    rr3_wire_close(&wires, &mut errs);
+    if !errs.is_empty() {
+        return Err(errs);
+    }
+    Ok(Rr3Wiring { wires })
+}
+
+/// 未知键门：九字段封闭（§4.3），表内多一个键即点名
+fn rr3_wire_unknown(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) {
+    for k in t.keys() {
+        if !RR3_WIRE_KEYS.contains(&k.as_str()) {
+            errs.push(format!("wire #{i} 未知键 {k}（九字段封闭，§4.3）"));
+        }
+    }
+}
+
+/// connector 身份门：非空 + 位号唯一（一连接器一组线，feeds 引用以位号为键）
+fn rr3_wire_ident<'a>(
+    i: usize,
+    t: &'a toml::value::Table,
+    seen: &mut BTreeMap<&'a str, usize>,
+    errs: &mut Vec<String>,
+) -> &'a str {
+    let connector = t
+        .get("connector")
+        .and_then(toml::Value::as_str)
+        .unwrap_or("");
+    if connector.is_empty() {
+        errs.push(format!("wire #{i}.connector 缺失或为空"));
+    } else if let Some(prev) = seen.get(connector) {
+        errs.push(format!(
+            "wire #{i} 位号 {connector} 与 wire #{prev} 重复（一连接器一组线，feeds 引用以位号为键）"
+        ));
+    } else {
+        seen.insert(connector, i);
+    }
+    connector
+}
+
+/// 单条线组的八字段解析（connector 已由身份门给出）；形状错逐条点名、不静默
+fn rr3_wire_fields(
+    i: usize,
+    t: &toml::value::Table,
+    connector: &str,
+    errs: &mut Vec<String>,
+) -> Rr3Wire {
+    // hdr_pin：非空整数数组（排针物理序号）
+    let hdr_pin: Vec<i64> = t
+        .get("hdr_pin")
+        .and_then(toml::Value::as_array)
+        .map(|a| a.iter().filter_map(toml::Value::as_integer).collect())
+        .unwrap_or_default();
+    if hdr_pin.is_empty() {
+        errs.push(format!("wire #{i}.hdr_pin 必须是非空整数数组"));
+    }
+    // signal：非空字符串数组（每导体一个信号名）
+    let signal: Vec<String> = t
+        .get("signal")
+        .and_then(toml::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if signal.is_empty() {
+        errs.push(format!("wire #{i}.signal 必须是非空字符串数组"));
+    }
+    // 位序对应：hdr_pin[k] ↔ signal[k]（丝印序即信号序）
+    if !hdr_pin.is_empty() && !signal.is_empty() && hdr_pin.len() != signal.len() {
+        errs.push(format!(
+            "wire #{i} 的 hdr_pin（{} 个）与 signal（{} 个）数目不等（位序对应：hdr_pin[k] ↔ signal[k]）",
+            hdr_pin.len(),
+            signal.len()
+        ));
+    }
+    // net：domains 外键，"none" 是纯信号/地线组的合法显式值
+    let net = t.get("net").and_then(toml::Value::as_str).unwrap_or("");
+    if net.is_empty() {
+        errs.push(format!(
+            "wire #{i}.net 缺失或为空（\"none\" 是纯信号/地线组的合法显式值，留空即红）"
+        ));
+    }
+    // feeds：无下游线组显式写 []（缺失语义列：缺 → 红）
+    let feeds: Vec<String> = t
+        .get("feeds")
+        .and_then(toml::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if t.get("feeds").and_then(toml::Value::as_array).is_none() {
+        errs.push(format!(
+            "wire #{i}.feeds 缺失或不是字符串数组（无下游线组显式写 []，留空即红——§5 缺失语义列）"
+        ));
+    }
+    // mate：devices.toml 外键，"none" 是直连无对端的合法显式值
+    let mate = t.get("mate").and_then(toml::Value::as_str).unwrap_or("");
+    if mate.is_empty() {
+        errs.push(format!(
+            "wire #{i}.mate 缺失或为空（\"none\" 是排针/焊线直连的合法显式值，留空即红）"
+        ));
+    }
+    // keyed：有无防呆必须显式声明（缺失语义列：缺 → 红）
+    let keyed = match t.get("keyed").and_then(toml::Value::as_bool) {
+        Some(b) => b,
+        None => {
+            errs.push(format!(
+                "wire #{i}.keyed 缺失或不是布尔（有无物理防呆必须显式声明——§5 缺失语义列）"
+            ));
+            false
+        }
+    };
+    // rated_a：正数（0 额定线不存在；⑦-c 的判据面，批N2 消费）
+    let rated_a = t
+        .get("rated_a")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)));
+    let rated_a = match rated_a {
+        Some(a) if a > 0.0 => a,
+        _ => {
+            errs.push(format!(
+                "wire #{i}.rated_a 缺失或不是正数（线材额定电流，缺失即红——§5 缺失语义列）"
+            ));
+            0.0
+        }
+    };
+    // gnd_common：共地点标识，"none" 是无地导体线组的合法显式值
+    let gnd_common = t
+        .get("gnd_common")
+        .and_then(toml::Value::as_str)
+        .unwrap_or("");
+    if gnd_common.is_empty() {
+        errs.push(format!(
+            "wire #{i}.gnd_common 缺失或为空（共地点标识，\"none\" 是无地导体线组的合法显式值）"
+        ));
+    }
+    Rr3Wire {
+        connector: connector.to_string(),
+        hdr_pin,
+        signal,
+        net: net.to_string(),
+        feeds,
+        mate: mate.to_string(),
+        keyed,
+        rated_a,
+        gnd_common: gnd_common.to_string(),
+    }
+}
+
+/// 闭合面：feeds 必须指向本档其他线组位号（自环即红）
+fn rr3_wire_close(wires: &[Rr3Wire], errs: &mut Vec<String>) {
     let connectors: BTreeSet<&str> = wires.iter().map(|w| w.connector.as_str()).collect();
-    for w in &wires {
+    for w in wires {
         for f in &w.feeds {
             if f == &w.connector {
                 errs.push(format!(
@@ -266,10 +300,6 @@ pub fn rr3_wiring_from_text(text: &str) -> Result<Rr3Wiring, Vec<String>> {
             }
         }
     }
-    if !errs.is_empty() {
-        return Err(errs);
-    }
-    Ok(Rr3Wiring { wires })
 }
 
 impl Rr3Wiring {
