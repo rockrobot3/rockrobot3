@@ -64,6 +64,10 @@ pub(crate) struct Rr3RailCfg {
     pub(crate) max_age_ms: u32,
 }
 
+/// 采样周期下限（ms）：0/极小值若折 1ms，会变成 I2C/轨压读数自旋，把 CPU 与
+/// 总线占满；100ms 是"读数够新"与"不自旋"的折中（生产最低档 rail=1000ms）。
+const RR3_MIN_PERIOD_MS: u64 = 100;
+
 /// TOML 文本 → Rr3PowerCfg。手工下钻不引 serde derive：字段个位数，
 /// 点名缺字段的文案比派生宏的默认报错可读（rr3-act 同款）。
 pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
@@ -96,13 +100,15 @@ pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
     };
     let battery_sect = sect("battery")?.clone();
     let charger_sect = sect("charger")?.clone();
-    // 周期键钳制留痕（0.0.5 批I P-2）：0 无节拍意义，收敛 1ms 并打一行
-    // （哪个键、原值、钳后值）——钳位不再静默
+    // 周期键钳制留痕（0.0.5 批I P-2；本轮审计抬下限）：0 无节拍意义，且不能
+    // 折 1ms——那是 I2C/轨压读数自旋；钳到 100ms 并打一行（哪个键、原值、钳后值）
     let period_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
         let raw = u64_of(sect, key, sect_name)?;
-        if raw < 1 {
-            eprintln!("config [rr3-power.{sect_name}] {key}={raw} 无节拍意义，钳到 1ms");
-            Ok(1)
+        if raw < RR3_MIN_PERIOD_MS {
+            eprintln!(
+                "config [rr3-power.{sect_name}] {key}={raw} 低于采样下限，钳到 {RR3_MIN_PERIOD_MS}ms（防读数自旋）"
+            );
+            Ok(RR3_MIN_PERIOD_MS)
         } else {
             Ok(raw)
         }
@@ -232,10 +238,11 @@ max_age_ms = 0
         assert!(e.contains("阈值倒挂"), "severe > mild 红: {e}");
     }
 
-    /// 钳制留痕（0.0.5 批I P-2）：0 周期收敛 1 不拒 boot——采样拍不能自毁；
-    /// eprintln 留痕在解析期打（键名/原值/钳后值），此处钉收敛结果
+    /// 钳制留痕（0.0.5 批I P-2；本轮审计抬下限）：0 周期收敛到 100ms 不拒 boot
+    /// ——采样拍不能自毁，也不能折 1ms 变成 I2C 读数自旋；eprintln 留痕在解析期
+    /// 打（键名/原值/钳后值），此处钉收敛结果
     #[test]
-    fn config_parse_clamps_zero_period_to_one() {
+    fn config_parse_clamps_degenerate_period_to_floor() {
         let text = r#"
 [rr3-power.battery]
 sample_period_ms = 0
@@ -254,8 +261,8 @@ severe_mv = 4400
 max_age_ms = 0
 "#;
         let cfg = rr3_power_cfg_parse(text).unwrap();
-        assert_eq!(cfg.battery.sample_period_ms, 1, "0 周期钳到 1ms");
-        assert_eq!(cfg.charger.state_period_ms, 1, "0 周期钳到 1ms");
-        assert_eq!(cfg.rail.sample_period_ms, 1, "rail 0 周期同钳 1ms");
+        assert_eq!(cfg.battery.sample_period_ms, 100, "0 周期钳到 100ms");
+        assert_eq!(cfg.charger.state_period_ms, 100, "0 周期钳到 100ms");
+        assert_eq!(cfg.rail.sample_period_ms, 100, "rail 0 周期同钳 100ms");
     }
 }

@@ -61,6 +61,16 @@ pub(crate) fn rr3_wifi_provision(
     Ok((store, prov))
 }
 
+/// 链路轮询周期下限（ms）：0/极小值会让 nmcli 子进程每秒被 fork 上千次，
+/// 把 CPU 与 fork 预算吃光；100ms 是"响应可见"与"不制造 fork 风暴"的折中。
+const RR3_MIN_LINK_PERIOD_MS: u64 = 100;
+/// nmcli 子进程超时下限（ms）：低于 1s 的"超时"在正常调度抖动下也必然触发，
+/// 等于把每一次链路读数判成失败。
+const RR3_MIN_NM_TIMEOUT_MS: u64 = 1_000;
+/// nmcli 超时上界（ms）：sync 读数在 on_tick 里执行，超时过长会拖住心跳节拍；
+/// 60s 已远超正常毫秒级返回，超界按配置错拒。
+const RR3_MAX_NM_TIMEOUT_MS: u64 = 60_000;
+
 /// TOML 文本 → (Rr3LinkCfg, bt 开机初值)。手工下钻不引 serde derive：字段
 /// 个位数，点名缺字段的文案比派生宏的默认报错可读（rr3-act/rr3-power 同款）。
 /// 0.0.5 批I N-6：无读者的 roam_probe_enabled / tls_min_version / 总段 log_level
@@ -80,6 +90,25 @@ pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), Strin
             .ok_or_else(|| format!("config [rr3-connect.{sect_name}] 缺 {key}（非负整数）"))
     };
     let wifi_sect = sect("wifi")?.clone();
+    // 轮询周期/超时的工程域（本轮审计）：0 周期不可折 1ms——那是 fork 风暴；
+    // 超时过小恒失败、过大拖住 on_tick 心跳。周期按 100ms 下限钳制并留痕，
+    // 超时越上界直接拒（配置错，不猜意图）。
+    let raw_period = u64_of(&wifi_sect, "link_report_period_ms", "wifi")?;
+    let link_period = if raw_period < RR3_MIN_LINK_PERIOD_MS {
+        eprintln!(
+            "config [rr3-connect.wifi] link_report_period_ms={raw_period} 低于下限，钳到 {RR3_MIN_LINK_PERIOD_MS}ms（防 nmcli fork 风暴）"
+        );
+        RR3_MIN_LINK_PERIOD_MS
+    } else {
+        raw_period
+    };
+    let raw_timeout = u64_of(&wifi_sect, "timeout_ms", "wifi")?;
+    if raw_timeout > RR3_MAX_NM_TIMEOUT_MS {
+        return Err(format!(
+            "config [rr3-connect.wifi] timeout_ms 须在 {RR3_MIN_NM_TIMEOUT_MS}..={RR3_MAX_NM_TIMEOUT_MS}，收到 {raw_timeout}"
+        ));
+    }
+    let nm_timeout = raw_timeout.max(RR3_MIN_NM_TIMEOUT_MS);
     // bt 开机初值（N-1：env 注入退役改 config 数据化注入）：缺段回落 false
     // =出厂不自动开蓝牙，等价旧 env 未设行为（已部署旧 config 兼容）；
     // 有段则 up 必须是布尔（类型错点名拒，不静默吞）
@@ -95,8 +124,8 @@ pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), Strin
         .unwrap_or(false);
     Ok((
         Rr3LinkCfg {
-            link_report_period_ms: u64_of(&wifi_sect, "link_report_period_ms", "wifi")?.max(1),
-            timeout_ms: u64_of(&wifi_sect, "timeout_ms", "wifi")?.max(1),
+            link_report_period_ms: link_period,
+            timeout_ms: nm_timeout,
             // 配网口令下限（N-11①/M-6，批N4 件五数据化）：缺键回落 8 = legacy
             // 语义（已部署旧 config 兼容，同 bt 段缺段回落口径）；显式给值时
             // 必须 ≥1（0 = 无下限是策略漏洞，不当合法配置放行）
@@ -150,6 +179,20 @@ up = false
             1,
             "显式 0 按 1 拒放（无下限不是合法配置）"
         );
+    }
+
+    /// 轮询周期/超时工程域（本轮审计）：0 周期钳 100ms（防 nmcli fork 风暴），
+    /// 超时 <1s 抬到 1s、>60s 拒（恒失败与拖心跳都是配置错）。
+    #[test]
+    fn config_clamps_period_and_timeout_domains() {
+        let text = |p: u64, t: u64| {
+            format!("[rr3-connect.wifi]\nlink_report_period_ms = {p}\ntimeout_ms = {t}\n")
+        };
+        let (cfg, _) = rr3_conn_cfg_parse(&text(0, 0)).unwrap();
+        assert_eq!(cfg.link_report_period_ms, 100, "0 周期钳 100ms");
+        assert_eq!(cfg.timeout_ms, 1000, "0 超时抬到 1s");
+        let e = rr3_conn_cfg_parse(&text(5000, 60_001)).unwrap_err();
+        assert!(e.contains("timeout_ms"), "超上界必须拒: {e}");
     }
 
     #[test]
