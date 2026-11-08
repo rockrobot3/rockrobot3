@@ -81,6 +81,45 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
     };
 
     let mut errs: Vec<String> = Vec::new();
+    let mut facts = Rr3CompositeFacts::default();
+    rr3_comp_head(t, &mut facts, &mut errs);
+
+    // [assemble]：atoms 必填非空不重复；handles/ops/no_injection 与件级同规则。
+    // 段缺同样只点名，让 schema/[composite] 的错误同批亮出。
+    let asm = t.get("assemble").and_then(Value::as_table);
+    let Some(asm) = asm else {
+        errs.push(
+            "组合件清单缺 [assemble] 表（atoms 必填，handles / ops / no_injection 同件级规则）"
+                .into(),
+        );
+        return if errs.is_empty() {
+            Ok(facts)
+        } else {
+            Err(errs)
+        };
+    };
+    for k in asm.keys() {
+        if k != "atoms" && k != "handles" && k != "ops" && k != "no_injection" {
+            errs.push(format!(
+                "[assemble] 未知键 {k}（只认 atoms / handles / ops / no_injection）"
+            ));
+        }
+    }
+
+    rr3_comp_atoms(asm, &mut facts, &mut errs);
+
+    rr3_comp_surface(asm, &mut facts, &mut errs);
+
+    if errs.is_empty() {
+        Ok(facts)
+    } else {
+        Err(errs)
+    }
+}
+
+/// 顶层形状段：顶层未知键、schema_version 域、`[composite]`（name / unit）。
+/// 错误按原顺序追加；段缺只点名不提前返回（[assemble] 的错误同批亮出）。
+fn rr3_comp_head(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
     // 顶层未知键点名（只认 schema_version / composite / assemble）
     for k in t.keys() {
         if k != "schema_version" && k != "composite" && k != "assemble" {
@@ -101,8 +140,6 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
             "组合件清单缺 schema_version（必须为 {RR3_COMPOSITE_SCHEMA_VERSION}）"
         )),
     }
-
-    let mut facts = Rr3CompositeFacts::default();
 
     // [composite]：name 非空 + unit 在册。段缺只点名不提前返回——[assemble] 的
     // 独立错误要一次点全（fail-closed：一次修完，不让用户挤牙膏）。
@@ -130,30 +167,10 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
         }
         None => errs.push("组合件清单缺 [composite] 表（name / unit 必填）".into()),
     }
+}
 
-    // [assemble]：atoms 必填非空不重复；handles/ops/no_injection 与件级同规则。
-    // 段缺同样只点名，让 schema/[composite] 的错误同批亮出。
-    let asm = t.get("assemble").and_then(Value::as_table);
-    let Some(asm) = asm else {
-        errs.push(
-            "组合件清单缺 [assemble] 表（atoms 必填，handles / ops / no_injection 同件级规则）"
-                .into(),
-        );
-        return if errs.is_empty() {
-            Ok(facts)
-        } else {
-            Err(errs)
-        };
-    };
-    for k in asm.keys() {
-        if k != "atoms" && k != "handles" && k != "ops" && k != "no_injection" {
-            errs.push(format!(
-                "[assemble] 未知键 {k}（只认 atoms / handles / ops / no_injection）"
-            ));
-        }
-    }
-
-    // atoms：⊗ 链。非空数组（空组合件无意义）、每条非空串、不重复
+/// atoms（⊗ 链）：非空数组、每条非空串、不重复。
+fn rr3_comp_atoms(asm: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
     match asm.get("atoms") {
         Some(Value::Array(items)) => {
             if items.is_empty() {
@@ -176,7 +193,11 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
         Some(other) => errs.push(format!("[assemble].atoms 应为数组，收到 {other:?}")),
         None => errs.push("[assemble] 缺 atoms 键（组合件必须申报装配了哪些原子件）".into()),
     }
+}
 
+/// 注入面三键（handles / ops / no_injection）与 L-5 空面规则；
+/// 条目级解析共用件级 helper（一份判据一份真值）。
+fn rr3_comp_surface(asm: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
     // 两数组"已在文本中出现"（L-5 判"漏填 vs 明写"的口径与件级一致）
     let mut handles_present = false;
     let mut handles_empty = false;
@@ -227,12 +248,6 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
         ops_empty,
         facts.no_injection,
     ));
-
-    if errs.is_empty() {
-        Ok(facts)
-    } else {
-        Err(errs)
-    }
 }
 
 #[cfg(test)]
