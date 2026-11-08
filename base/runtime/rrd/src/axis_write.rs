@@ -24,9 +24,9 @@
 //! 的拒动判据在 [`rr_hal_api::rr3_motion_allowed`]，写入面与运动面零交叠。
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::axis::{rr3_act_prof_parse, rr3_act_profile_load};
+use crate::axis::{rr3_act_prof_parse, rr3_act_profile_load, Rr3AxisFile};
 // 落盘序随写盘面 unix 门（counters/axis 同径，批N9 件一补钉；run 的接线位同门）
 #[cfg(unix)]
 use crate::axis::rr3_act_prof_store;
@@ -89,10 +89,16 @@ pub fn rr3_axis_write_parse(args: &[String]) -> Result<Rr3AxisWriteArgs, String>
 /// 补钉）——解析面 [`rr3_axis_write_parse`] 跨平台照常在册。
 #[cfg(unix)]
 pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
-    // ① 装配单装载：绝对路径（与 daemon 的 rr3_profile_abs 同口径，
-    //    装机现场读不到装配单，pin_id 全集无从谈起）→ 文本 → 结构。
-    //    写入面只吃装载域，不做 boot 的十条校验——整机装配合法性是 boot 正门的
-    //    职责，写入时刻不重复判（判了就是第二份裁决点，迟早分叉）。
+    let (pin_ids, axis_dir) = rr3_aw_layout(cfg)?;
+    let (file, target) = rr3_aw_candidate(cfg, &pin_ids, &axis_dir)?;
+    rr3_aw_existing(&target, &file, &pin_ids)?;
+    rr3_aw_duplicates(&axis_dir, &target, &file, &pin_ids)?;
+    rr3_aw_store(&axis_dir, &target, &file)
+}
+
+/// 装配单装载与落位：pin_id 全集来自 [[pins]]，axis/ 由接线布局推导。
+/// 写入面只吃装载域，不做 boot 的十条校验（整机合法性归 boot 正门）。
+fn rr3_aw_layout(cfg: &Rr3AxisWriteArgs) -> Result<(BTreeSet<String>, PathBuf), String> {
     let profile_abs = crate::profile::rr3_profile_abs(&cfg.profile)?;
     let profile_text = std::fs::read_to_string(&profile_abs)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_abs.display()))?;
@@ -104,31 +110,29 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
         )
     })?;
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
-
-    // ② 落位：形态名 = 装配单文件名 stem（rr3_wiring_path 推导的
-    //    同一布局——profiles/<形态>.toml ↔ hardware/<形态>/），axis/ 在其下。
-    //    接线档本身不读：写入面的输入只有装配单与候选档案。
     let wiring_path = crate::wiring::rr3_wiring_path(&cfg.profile)?;
     let axis_dir = wiring_path
         .parent()
         .expect("wiring 路径必有父目录")
         .join("axis");
+    Ok((pin_ids, axis_dir))
+}
 
-    // ③ 候选全判据：十四键全键必填、类型域界、词表在册、行程自洽、pin 外键
-    //    ∈ [[pins]]（F-4 写侧半边——装配单没有的 pin，写进去就是 boot 必红的死档）。
+/// 候选档案全判据 + 落位文件名（pin 末段 instance；非两段式拒猜）
+fn rr3_aw_candidate(
+    cfg: &Rr3AxisWriteArgs,
+    pin_ids: &BTreeSet<String>,
+    axis_dir: &Path,
+) -> Result<(Rr3AxisFile, PathBuf), String> {
     let candidate_path = crate::profile::rr3_profile_abs(&cfg.candidate)?;
     let candidate_text = std::fs::read_to_string(&candidate_path)
         .map_err(|e| format!("读不到候选档案 {}: {e}", candidate_path.display()))?;
     let file = rr3_act_prof_parse(
         &candidate_text,
         &candidate_path.display().to_string(),
-        &pin_ids,
+        pin_ids,
     )
     .map_err(|errs| errs.join("; "))?;
-
-    // ④ 文件名 = instance（pin 末段）。两段式（role.instance）是轴档案的规范词形
-    //    ——per_instance 角色的 pin_id 由装配单侧生成，无实例段的 pin 说明装配单
-    //    本身形状有问题，写入面不猜（落错名就是副本的另一种形态）。
     let instance = file
         .pin
         .rsplit('.')
@@ -141,69 +145,73 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
             )
         })?;
     let target = axis_dir.join(format!("{instance}.toml"));
+    Ok((file, target))
+}
 
-    // ⑤ 拒绝面 a——坏目标不覆盖：目标在场但装载判据红，说明上一份已经病了；
-    //    覆盖它等于把病灶誊进下一轮（件二装载域的"不许覆盖"是读侧视角，
-    //    这里是同一条纪律的写侧视角）。
-    if target.exists() {
-        match rr3_act_profile_load(&target, &pin_ids) {
-            Err(errs) => {
+/// 拒绝面 a：坏目标不覆盖；同文件名异 pin 拒覆盖（pin 才是档案身份键）
+fn rr3_aw_existing(
+    target: &Path,
+    file: &Rr3AxisFile,
+    pin_ids: &BTreeSet<String>,
+) -> Result<(), String> {
+    if !target.exists() {
+        return Ok(());
+    }
+    match rr3_act_profile_load(target, pin_ids) {
+        Err(errs) => Err(format!(
+            "目标 {} 已存在且装载红（{}）——坏档案不许覆盖，先修或手工移除后再写",
+            target.display(),
+            errs.join("; ")
+        )),
+        Ok(Some(existing)) => {
+            if existing.pin != file.pin {
                 return Err(format!(
-                    "目标 {} 已存在且装载红（{}）——坏档案不许覆盖，先修或手工移除后再写",
+                    "目标 {} 已存在且 pin = {:?}（候选 {:?}）——instance 落位与档案身份冲突，拒绝覆盖",
                     target.display(),
-                    errs.join("; ")
+                    existing.pin,
+                    file.pin
                 ));
             }
-            Ok(Some(existing)) => {
-                // ⑥ 拒绝面 b 前置——同文件名装别的轴：pin 是档案身份键，文件名
-                //    不是；同名异 pin 意味着有人拿 instance 名当 free slot 用，
-                //    写进去装载链对账照样红，先在这里点名。
-                if existing.pin != file.pin {
-                    return Err(format!(
-                        "目标 {} 已存在且 pin = {:?}（候选 {:?}）——instance 落位与档案身份冲突，拒绝覆盖",
-                        target.display(),
-                        existing.pin,
-                        file.pin
-                    ));
-                }
-            }
-            Ok(None) => unreachable!("target.exists() 为真时装载不会回 None"),
+            Ok(())
         }
+        Ok(None) => unreachable!("target.exists() 为真时装载不会回 None"),
     }
+}
 
-    // ⑦ 拒绝面 b——同 pin 异名副本不制造：boot 链"恰一份合法才投影"（件三），
-    //    两份同 pin 合法档 = 注入空串 + 点名"消歧归件五"。产线写入先把这道红
-    //    挡在写入时，别等 boot 才发现。装载红的散件不在此判（别人的病灶由
-    //    boot 链点名，写入面不越权替修）。
-    if let Ok(entries) = std::fs::read_dir(&axis_dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p == target || p.extension().and_then(|x| x.to_str()) != Some("toml") {
-                continue;
-            }
-            if let Ok(Some(other)) = rr3_act_profile_load(&p, &pin_ids) {
-                if other.pin == file.pin {
-                    return Err(format!(
-                        "axis/ 下已有 {} 装同一 pin {:?}（候选目标 {}）——同 pin 两份合法档会让 boot 链拒注入（恰一份才投影），先清理副本",
-                        p.display(),
-                        file.pin,
-                        target.display()
-                    ));
-                }
+/// 拒绝面 b：同 pin 异名副本不制造（boot 链恰一份合法才投影；装载红散件不越权判）
+fn rr3_aw_duplicates(
+    axis_dir: &Path,
+    target: &Path,
+    file: &Rr3AxisFile,
+    pin_ids: &BTreeSet<String>,
+) -> Result<(), String> {
+    let Ok(entries) = std::fs::read_dir(axis_dir) else {
+        return Ok(());
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p == target || p.extension().and_then(|x| x.to_str()) != Some("toml") {
+            continue;
+        }
+        if let Ok(Some(other)) = rr3_act_profile_load(&p, pin_ids) {
+            if other.pin == file.pin {
+                return Err(format!(
+                    "axis/ 下已有 {} 装同一 pin {:?}（候选目标 {}）——同 pin 两份合法档会让 boot 链拒注入（恰一份才投影），先清理副本",
+                    p.display(),
+                    file.pin,
+                    target.display()
+                ));
             }
         }
     }
+    Ok(())
+}
 
-    // ⑧ 原子落盘：tmp 写全量 → fsync → rename，失败清 tmp、旧档原封——
-    //    "失败即退回上一份档案"的机制保证就在这条原子序里（§6 硬约束①），
-    //    本函数不再叠加第二套备份/回滚。
-    std::fs::create_dir_all(&axis_dir)
+/// 原子落盘（tmp→fsync→rename 唯一写路径）并回显写入路径与档案要点
+fn rr3_aw_store(axis_dir: &Path, target: &Path, file: &Rr3AxisFile) -> Result<String, String> {
+    std::fs::create_dir_all(axis_dir)
         .map_err(|e| format!("建档案目录 {} 失败: {e}", axis_dir.display()))?;
-    rr3_act_prof_store(&target, &file)
-        .map_err(|e| format!("写入 {} 失败: {e}", target.display()))?;
-
-    // ⑨ 回显：产线工人要当场看到"写了什么、多久生效"——档案在 boot 链的
-    //    投影时点是 rrd 下次 --profile boot 扫描 axis/ 时（恰一份合法才投影）。
+    rr3_act_prof_store(target, file).map_err(|e| format!("写入 {} 失败: {e}", target.display()))?;
     let p = &file.profile;
     Ok(format!(
         "已写入 {}\n  pin = {}  calibrated = {}  hard_stop = {}  source = {}\n  生效时点：rrd 下次 --profile boot 扫描 axis/ 时投影执行轴状态（恰一份合法才投影）",
