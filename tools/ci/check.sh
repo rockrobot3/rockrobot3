@@ -1182,6 +1182,30 @@ if [ "$gate_y_fail" -ne 0 ]; then
   fail=1
 fi
 
+# —— ⑨-y 附加判据：ESP 专用工程不进门禁 ④/⑥，宿主编译看不见协议头字段漂移
+#    （0.0.8 静态审计实锤：payload_crc32 进场后 esp32-uart-echo 的 Rr3Header
+#    字面量未跟，xtensa 固件 E0063 编不过）。按构造点计数 fail-closed：
+#    剥注释后"构造数（扣除 -> Rr3Header 返回型）"必须 ≤ payload_crc32 字段数。
+#    工具链不在位的机器也能跑，是这些工程唯一不依赖 esp 环境的漂移防线。
+hdr_bad=0
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  h=$(sed 's://.*$::' "$f" | grep -c 'Rr3Header[[:space:]]*{')
+  r=$(sed 's://.*$::' "$f" | grep -c -- '->[[:space:]]*Rr3Header')
+  c=$(sed 's://.*$::' "$f" | grep -c 'payload_crc32')
+  need=$((h - r))
+  if [ "$need" -gt 0 ] && [ "$c" -lt "$need" ]; then
+    printf 'FAIL  ⑨-y 协议头字段漂移 %s：构造 %s 处、payload_crc32 %s 处（缺字段即 xtensa 编不过）\n' \
+      "$f" "$need" "$c"
+    hdr_bad=1
+  fi
+done < <(git -c core.quotepath=false ls-files 'tools/*/src/*.rs' | grep -E '(esp|espidf)')
+if [ "$hdr_bad" -ne 0 ]; then
+  fail=1
+else
+  printf 'PASS  ⑨-y 协议头字段齐全（ESP 专用工程 Rr3Header 构造均带 payload_crc32）\n'
+fi
+
 # —— ⑩ 门 d 面板覆盖率对账·基线钉数门（当前上限 0）（基-19↔本步；interact I-19，批N4 件三；全案 §8
 #     门 d / conventions §2 拟步 ⑩）。判据（字段级分母 + covers 申报制分子）：
 #       分母 = 五路字段并集（全部自代码常量/契约表导出——单真值点，⑨-a/⑨-n 先例）：
