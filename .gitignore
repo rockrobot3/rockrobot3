@@ -1,6 +1,16 @@
-# Rockrobot3 项目仓
-# 策略：默认忽略所有——任何新增顶层路径**必须**来这里挂白名单，否则不入库
-# （策略正文见 docs/process/conventions.md §1"仓库追踪策略"）
+# Rockrobot3 项目仓 —— 仓库追踪策略
+#
+# 原则：**默认忽略所有**。任何新增顶层路径必须来本文件挂白名单，否则
+# 文件根本不会出现在 `git status`，静默丢件（策略正文见
+# docs/process/conventions.md §1.1）。
+#
+# 本仓只追踪三类内容：
+#   1. 源码与构建配置（base/modules/tools/.cargo/.github/contracts/profiles/hardware）；
+#   2. 项目运行与验收必需的文档（docs/ 中 architecture/design/process/reference/
+#      status/openitems 与 evidence 证据容器——后者是 rrd 装载链的测试夹具）；
+#   3. 仓级说明与许可（README/LICENSE/.dockerignore）。
+# 其余一律不追踪：构建产物、日志、录音、编辑器/Agent 会话、密钥、覆盖率与
+# 临时补丁。源码区严禁任何编译/集成/构建产物（target-dir 已统一到 /tmp）。
 *
 # 项目仓必要文件（白名单）
 !.gitignore
@@ -8,27 +18,30 @@
 !README.md
 !README_zh.md
 !LICENSE
-# 项目仓必要文档（社区/安全/Docker 构建依赖，须入库）
 !.dockerignore
 # 仓根统一构建配置（P0-5）：target-dir / EMBUILD_ROOT 指向源码区外，须入库
 !.cargo/
 !.cargo/**
-# 项目仓直属模块（非 submodule，需完整追踪）
+# CI 单真源（R30）：GitHub Actions 工作流
 !.github/
 !.github/**
-# CI 单真源（R30，2026-10-11）：atomgit 无流水线功能，CI 改走 GitHub Actions——
-# 真源 .github/workflows/ci.yml（R27 的 .gitcode/ 路径已删除）
+# 项目文档与证据容器（完整白名单；历史账与 ADR 均在此列）
 !docs/
 !docs/**
+
 # Agent 工作产物不入库：实施计划/账本属会话副产物，不是项目交付物
 docs/superpowers/
 .superpowers/
-# IDE 会话目录（本机工作区状态，永不属于交付物）
+# IDE / Agent 会话目录（本机工作区状态，永不属于交付物）
 .trae/
 .idea/
 .vscode/
+.claude/
+.cursor/
+.copilot/
+.aider*
 
-# ---- v0.0.1 结构化改造：新骨架必须可追踪 ----
+# ---- 结构化源码骨架：必须可追踪 ----
 !base/
 !base/**
 !modules/
@@ -37,8 +50,7 @@ docs/superpowers/
 !contracts/**
 !profiles/
 !profiles/**
-# 装机接线档（增补轮六批N1 §4.3）：hardware/<形态>/wiring.toml——机器可查、人照它插线，
-# 校验⑦ 的判据面，与 profiles/ 同级入库
+# 装机接线档（hardware/<形态>/wiring.toml）：校验⑦ 的判据面
 !hardware/
 !hardware/**
 !tools/
@@ -47,18 +59,32 @@ docs/superpowers/
 # ---- 产物面：一律不追踪（含白名单目录内的再排除） ----
 **/target/
 **/build/
-# 实录证据件（rr3-audio-rec 录音 wav）随收流落盘不入库：结论已摘要进 status.md，
-# 数据本身属会话产物（全仓任何目录的 wav 同规则，防换 cwd 落盘漏网）
+# 实录证据件（rr3-audio-rec 录音 wav）随收流落盘不入库
 *.wav
 # 日志与临时件：运行期产物（rrd/模块留痕走 <socket>.log 目录、录屏截图）
 *.log
 *.tmp
 *.bak
 *.swp
-# rr3-brain 是 Python 包：编译产物随 build 再生，不入库（modules/** 白名单覆盖过宽）
+*.orig
+*.rej
+# rr3-brain 是 Python 包：编译产物随 build 再生，不入库
 **/__pycache__/
 **/*.py[cod]
 
-# macOS 元数据（无目录前缀 = 匹配任意层级）
+# ---- 安全与工具面：本机凭据、覆盖率、调试符号、系统元数据 ----
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets.json
+.rr3/
+*.profraw
+*.profdata
+*.dSYM/
 .DS_Store
 .screenshots/

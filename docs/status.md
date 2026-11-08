@@ -1383,15 +1383,14 @@ e2e 两处夹具随新口径对齐（audio_chain 的 sense config env 指仓内�
   running、`denied_publish = 0`。工具随批小改：`--brain` 演练就绪上界 env 可覆盖
   （`RR3_BRAIN_READY_DEADLINE_MS`，缺省 60s 零改动）——sim burst 源自动说话 60s 够用，
   真板档等真人响应节奏不可预置（60s 硬上限首轮演练超时暴露）。本机 python 门槛随批解决：
-  Miniforge x86_64 用户目录静默装（`~/miniforge3`，python 3.14，不碰系统
+  Miniforge x86_64 用户目录静默装（用户目录下 `miniforge3`，python 3.14，不碰系统
   python3/shell 配置；brew 源被墙 + arm64 包 Bad CPU type（本机 Intel）两绕行），调用时
-  `PATH=~/miniforge3/bin:$PATH` 显式前插。A 批（语音自由交流）至此**代码 + 配置 +
+  `PATH` 显式前插该目录的 `bin`。A 批（语音自由交流）至此**代码 + 配置 +
   工具 + 真板验收全收官**：c1–c6（`1d00cef`→`5cb7f98`→`5dce1cd`→`406b1ef`→`ebb0c81`）+
   冒烟(一)（`7438dcc`）+ 本批。真 key 就位后 `--brain-cloud real` 切档即全语音自由对话。
 - **0.0.6 模型连接抽象批——AgentRT v3 式连接行 + 密钥双源 + 面板密钥面（2026-10-14，提交
   `d69e918`+`89eb71e`+本批记）**：用户需求"抽象化 API 客户端连云端/本地模型；操作面板填 key，
-  代码无明文密钥"（立项计划 .trae/documents/rock3-model-client-abstraction-and-panel-keys.md，
-  本地工作区文档）
+  代码无明文密钥"（立项计划属本地工作区文档，不入库）
   → ①**云适配层**（继任 = [src/cloud.rs](../modules/rr3-brain/src/cloud.rs)）——
   `config.toml` 新增 `[[rr3-brain.model]]` 连接行（name/mode(api|local)/api_format(本批仅
   openai，anthropic 预留)/base_url/model_id/api_key_ref/active，恰一 active 由解析器强制，
