@@ -174,90 +174,7 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
 
     // conflict：键必须存在（空数组合法但显式，裁定②）；每条 group 唯一、
     // pins/controllers 至少一侧非空、why 必填（无可读理由的冲突不许进册）
-    let mut groups_seen = BTreeSet::<String>::new();
-    match t.get("conflict") {
-        Some(Value::Array(items)) => {
-            for (i, item) in items.iter().enumerate() {
-                let Some(c) = item.as_table() else {
-                    errs.push(format!(
-                        "conflict[{i}] 应为内联表 {{ group, pins/controllers, why }}"
-                    ));
-                    continue;
-                };
-                for k in c.keys() {
-                    if k != "group" && k != "pins" && k != "controllers" && k != "why" {
-                        errs.push(format!(
-                            "conflict[{i}] 未知键 {k}（只认 group / pins / controllers / why）"
-                        ));
-                    }
-                }
-                let group = match c.get("group").and_then(Value::as_str) {
-                    Some(g) if !g.trim().is_empty() => Some(g.to_string()),
-                    Some(_) => {
-                        errs.push(format!("conflict[{i}].group 不得为空串"));
-                        None
-                    }
-                    None => {
-                        errs.push(format!("conflict[{i}].group 应为字符串"));
-                        None
-                    }
-                };
-                let mut pins = BTreeSet::new();
-                let mut controllers = BTreeSet::new();
-                if let Some(v) = c.get("pins") {
-                    pins = rr3_pin_set_from(v, &format!("conflict[{i}].pins"), &mut errs);
-                }
-                if let Some(v) = c.get("controllers") {
-                    controllers =
-                        rr3_str_set_from(v, &format!("conflict[{i}].controllers"), &mut errs);
-                }
-                if pins.is_empty() && controllers.is_empty() {
-                    errs.push(format!(
-                        "conflict[{i}]（组 {}）pins 与 controllers 均空：点名不到任何成员的冲突集无判据对象",
-                        group.as_deref().unwrap_or("")
-                    ));
-                }
-                for ctl in &controllers {
-                    if !table.controllers.contains_key(ctl) {
-                        errs.push(format!(
-                            "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
-                        ));
-                    }
-                }
-                match c.get("why").and_then(Value::as_str) {
-                    Some(w) if !w.trim().is_empty() => {}
-                    Some(_) => errs.push(format!("conflict[{i}].why 不得为空串")),
-                    None => errs.push(format!("conflict[{i}] 缺 why（进册的冲突必须带可读理由）")),
-                }
-                if let Some(g) = group {
-                    if !g.trim().is_empty() && !(pins.is_empty() && controllers.is_empty()) {
-                        if !groups_seen.insert(g.clone()) {
-                            errs.push(format!(
-                                "conflict[{i}] 组名 {g} 重复（一组一条，互斥集不许同名两册）"
-                            ));
-                        }
-                        table.conflicts.push(Rr3ConflictEntry {
-                            group: g,
-                            pins,
-                            controllers,
-                            why: c
-                                .get("why")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .to_string(),
-                        });
-                    }
-                }
-            }
-        }
-        Some(other) => errs.push(format!(
-            "平台表 conflict 应为数组（[[conflict]] / []），收到 {other:?}"
-        )),
-        None => errs.push(
-            "平台表缺 conflict 键（无冲突也必须显式写 conflict = [] 并带'评审确认无冲突矩阵'注记，裁定②）"
-                .into(),
-        ),
-    }
+    rr3_plat_conf(t, &mut table, &mut errs);
 
     // [construction]：段缺即红（裁定①）；空表合法（无绑定形态显式空）。键 =
     // "controller:role:instance" 三元串（⑧-a 定形），controller 段必须在本表
@@ -487,6 +404,94 @@ fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
             "平台表 capabilities 应为表（[capabilities]），收到 {other:?}"
         )),
         None => errs.push("平台表缺 [capabilities] 段（⑤-a/⑤-b 判据前件，缺段即红，裁定①）".into()),
+    }
+}
+
+/// `conflict` 段：组名唯一、成员至少一侧、why 必填；controllers 成员须本表在册。
+fn rr3_plat_conf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    let mut groups_seen = BTreeSet::<String>::new();
+    match t.get("conflict") {
+        Some(Value::Array(items)) => {
+            for (i, item) in items.iter().enumerate() {
+                let Some(c) = item.as_table() else {
+                    errs.push(format!(
+                        "conflict[{i}] 应为内联表 {{ group, pins/controllers, why }}"
+                    ));
+                    continue;
+                };
+                for k in c.keys() {
+                    if k != "group" && k != "pins" && k != "controllers" && k != "why" {
+                        errs.push(format!(
+                            "conflict[{i}] 未知键 {k}（只认 group / pins / controllers / why）"
+                        ));
+                    }
+                }
+                let group = match c.get("group").and_then(Value::as_str) {
+                    Some(g) if !g.trim().is_empty() => Some(g.to_string()),
+                    Some(_) => {
+                        errs.push(format!("conflict[{i}].group 不得为空串"));
+                        None
+                    }
+                    None => {
+                        errs.push(format!("conflict[{i}].group 应为字符串"));
+                        None
+                    }
+                };
+                let mut pins = BTreeSet::new();
+                let mut controllers = BTreeSet::new();
+                if let Some(v) = c.get("pins") {
+                    pins = rr3_pin_set_from(v, &format!("conflict[{i}].pins"), errs);
+                }
+                if let Some(v) = c.get("controllers") {
+                    controllers =
+                        rr3_str_set_from(v, &format!("conflict[{i}].controllers"), errs);
+                }
+                if pins.is_empty() && controllers.is_empty() {
+                    errs.push(format!(
+                        "conflict[{i}]（组 {}）pins 与 controllers 均空：点名不到任何成员的冲突集无判据对象",
+                        group.as_deref().unwrap_or("")
+                    ));
+                }
+                for ctl in &controllers {
+                    if !table.controllers.contains_key(ctl) {
+                        errs.push(format!(
+                            "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
+                        ));
+                    }
+                }
+                match c.get("why").and_then(Value::as_str) {
+                    Some(w) if !w.trim().is_empty() => {}
+                    Some(_) => errs.push(format!("conflict[{i}].why 不得为空串")),
+                    None => errs.push(format!("conflict[{i}] 缺 why（进册的冲突必须带可读理由）")),
+                }
+                if let Some(g) = group {
+                    if !g.trim().is_empty() && !(pins.is_empty() && controllers.is_empty()) {
+                        if !groups_seen.insert(g.clone()) {
+                            errs.push(format!(
+                                "conflict[{i}] 组名 {g} 重复（一组一条，互斥集不许同名两册）"
+                            ));
+                        }
+                        table.conflicts.push(Rr3ConflictEntry {
+                            group: g,
+                            pins,
+                            controllers,
+                            why: c
+                                .get("why")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        Some(other) => errs.push(format!(
+            "平台表 conflict 应为数组（[[conflict]] / []），收到 {other:?}"
+        )),
+        None => errs.push(
+            "平台表缺 conflict 键（无冲突也必须显式写 conflict = [] 并带'评审确认无冲突矩阵'注记，裁定②）"
+                .into(),
+        ),
     }
 }
 
