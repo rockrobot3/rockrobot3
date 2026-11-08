@@ -32,7 +32,7 @@
 //! 快照未在册（`--manifest` 调试路径）如实回不可得：无记账即无路径依据，写口
 //! 拒（与 wiring/contracts 读口"如实报不可得"同一条诚实纪律）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rr_ipc::Rr3StatusCode;
 use serde_json::{json, Value};
@@ -464,41 +464,8 @@ fn rr3_write_axis(
     let Rr3WriteValue::Num(n) = params.value else {
         return Err(invalid("current_ceil_ma 要求正整数".to_string()));
     };
-    // 轴档定位：hardware/<形态>/axis/<instance>.toml（接线布局推导的同一目录锚）
-    let axis_dir = paths
-        .wiring
-        .parent()
-        .ok_or_else(|| invalid("接线档路径无父目录".to_string()))?
-        .join("axis");
-    let axis_path = axis_dir.join(format!("{}.toml", params.name));
-    if !axis_path.exists() {
-        return Err(invalid(format!(
-            "轴档 {} 不在场（写口只改在册档单键；立档走产线写入面 axis_write 全判据流程）",
-            axis_path.display()
-        )));
-    }
-    // 旧值提取：装载域拿（pin 外键核同一份判据；装载红 = 坏档，拒——
-    // axis_write_run 的"坏目标不覆盖"在下游还会挡一道，这里先点名）
-    let text = std::fs::read_to_string(&paths.profile)
-        .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
-    let profile = crate::profile::rr3_profile_parse(&text).map_err(|errs| {
-        invalid(format!(
-            "装配单 {} 形状不合: {}",
-            paths.profile.display(),
-            errs.join("; ")
-        ))
-    })?;
-    let pin_ids: std::collections::BTreeSet<String> =
-        profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
-    let existing = crate::axis::rr3_act_profile_load(&axis_path, &pin_ids).map_err(|errs| {
-        invalid(format!(
-            "轴档 {} 装载红: {}",
-            axis_path.display(),
-            errs.join("; ")
-        ))
-    })?;
-    let file = existing.ok_or_else(|| invalid(format!("轴档 {} 不在场", axis_path.display())))?;
-    let old = json!(file.profile.current_ceil_ma);
+    let axis_path = rr3_axis_path(paths, &params.name)?;
+    let old = rr3_axis_old(paths, &axis_path)?;
     // 证据引用门（仅留痕——轴档十四键无 evidence 键，写动作证据住审计留痕）
     let ev = params.evidence.clone().ok_or_else(|| {
         (
@@ -508,23 +475,7 @@ fn rr3_write_axis(
     })?;
     rr3_write_evidence(&paths.profile, &ev)?;
     // 单键手术 → tmp 候选档 → 复用产线写入面（全判据＋原子落盘＋副本拒单点）
-    let new_text = crate::profile::rr3_key_line_apply(
-        &std::fs::read_to_string(&axis_path)
-            .map_err(|e| invalid(format!("读不到轴档 {}: {e}", axis_path.display())))?,
-        "current_ceil_ma",
-        &n.to_string(),
-    )
-    .map_err(invalid)?;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = std::env::temp_dir().join(format!(
-        "rr3-axis-candidate-{}-{nanos}.toml",
-        std::process::id()
-    ));
-    std::fs::write(&tmp, new_text.as_bytes())
-        .map_err(|e| invalid(format!("写候选档 {} 失败: {e}", tmp.display())))?;
+    let tmp = rr3_axis_stage(&axis_path, n)?;
     let run = crate::axis_write::rr3_axis_write_run(&crate::axis_write::Rr3AxisWriteArgs {
         profile: paths.profile.clone(),
         candidate: tmp.clone(),
@@ -546,6 +497,80 @@ fn rr3_write_axis(
         "effective": "boot",
         "echo": echo,
     }))
+}
+
+/// 轴档定位：hardware/<形态>/axis/<instance>.toml（接线布局推导的同一目录锚），
+/// 不在场即拒（写口只改在册档单键；立档走产线写入面全判据流程）。
+fn rr3_axis_path(
+    paths: &Rr3DomainWritePaths,
+    name: &str,
+) -> Result<PathBuf, (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    let axis_dir = paths
+        .wiring
+        .parent()
+        .ok_or_else(|| invalid("接线档路径无父目录".to_string()))?
+        .join("axis");
+    let axis_path = axis_dir.join(format!("{name}.toml"));
+    if !axis_path.exists() {
+        return Err(invalid(format!(
+            "轴档 {} 不在场（写口只改在册档单键；立档走产线写入面 axis_write 全判据流程）",
+            axis_path.display()
+        )));
+    }
+    Ok(axis_path)
+}
+
+/// 旧值提取：装载域拿（pin 外键核同一份判据；装载红 = 坏档，拒——
+/// axis_write_run 的"坏目标不覆盖"在下游还会挡一道，这里先点名）。
+fn rr3_axis_old(
+    paths: &Rr3DomainWritePaths,
+    axis_path: &Path,
+) -> Result<Value, (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    let text = std::fs::read_to_string(&paths.profile)
+        .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
+    let profile = crate::profile::rr3_profile_parse(&text).map_err(|errs| {
+        invalid(format!(
+            "装配单 {} 形状不合: {}",
+            paths.profile.display(),
+            errs.join("; ")
+        ))
+    })?;
+    let pin_ids: std::collections::BTreeSet<String> =
+        profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
+    let existing = crate::axis::rr3_act_profile_load(axis_path, &pin_ids).map_err(|errs| {
+        invalid(format!(
+            "轴档 {} 装载红: {}",
+            axis_path.display(),
+            errs.join("; ")
+        ))
+    })?;
+    let file = existing.ok_or_else(|| invalid(format!("轴档 {} 不在场", axis_path.display())))?;
+    Ok(json!(file.profile.current_ceil_ma))
+}
+
+/// 单键手术产出 tmp 候选档：读旧档 → 改 current_ceil_ma → 写到临时路径。
+fn rr3_axis_stage(axis_path: &Path, n: u64) -> Result<PathBuf, (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    let new_text = crate::profile::rr3_key_line_apply(
+        &std::fs::read_to_string(axis_path)
+            .map_err(|e| invalid(format!("读不到轴档 {}: {e}", axis_path.display())))?,
+        "current_ceil_ma",
+        &n.to_string(),
+    )
+    .map_err(invalid)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "rr3-axis-candidate-{}-{nanos}.toml",
+        std::process::id()
+    ));
+    std::fs::write(&tmp, new_text.as_bytes())
+        .map_err(|e| invalid(format!("写候选档 {} 失败: {e}", tmp.display())))?;
+    Ok(tmp)
 }
 
 /// conn 臂薄壳：params 拆包 → 快照路径推导 → 执行。快照未在册（--manifest
