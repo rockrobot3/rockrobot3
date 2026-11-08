@@ -44,6 +44,8 @@ fn main() {
 /// 装配序列（自 Python composite.py `rr3_brain_run` 迁入，打印序列逐字不变；
 /// config 就绪行 connect 段随键退役撤除——批N32 增补裁定 4）。
 fn rr3_brain_run() -> Result<(), String> {
+    // 逐件版本自述（与其余五模块同形）：per-unit 日志第一行先认二进制与版本。
+    eprintln!("rr3-brain 0.0.1（Rust 实现，云端/对话/意图面）");
     dispatch::rr3_brain_surface();
     // 总线接入 + config 读取解析（收敛序列前四段在 rr3mod bootstrap，文案逐字）
     let (bus, mut cfg) = bootstrap(Rr3ModConfig {
