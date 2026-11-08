@@ -130,7 +130,7 @@ fn rr3_log_sink_append(line: &str) {
 }
 
 /// 统一日志出口：stdout、行首 `rrd: `。集成测试的可观察面全靠它。
-/// 走 `println!`：Rust stdout 是行缓冲，管道里也按行 flush，父进程逐行读得到。
+/// 走 `io::Write` 逐行写（行缓冲，管道里也按行 flush），父进程逐行读得到。
 ///
 /// ADR-0010 裁定 5：stdout 行为一字不动，同一行**追加**一份进固定容量日志环；
 /// `rr3.ctl.logs` 读环的尾部副本。环在这里单点落——rr3_log 是全 daemon 唯一日志出口，
@@ -140,10 +140,21 @@ fn rr3_log_sink_append(line: &str) {
 /// `<socket>.log/rrd.log`——stdout/环/文件三面同源，重启回填见 [`rr3_log_backfill`]。
 pub fn rr3_log(msg: &str) {
     let line = format!("rrd: {msg}");
-    println!("{line}");
+    // stdout 是观测通道：管道关闭（EPIPE）时 `println!` 会 panic，主线程/收件线程
+    // 一 panic 就把整个守护带走——与落盘臂"通道故障降级、不放大成可用性故障"的
+    // 纪律相悖。写失败静默降级，环与落盘照常。
+    let _ = rr3_log_emit(&mut std::io::stdout(), &line);
     rr3_log_sink_append(&line);
     let mut ring = rr3_lock(rr3_log_ring());
     rr3_ring_push(&mut ring, line, rr3_log_ring_cap());
+}
+
+/// 单行写出（含换行与 flush）：返回 false = 观测通道写失败，调用方降级不 panic。
+fn rr3_log_emit(out: &mut dyn Write, line: &str) -> bool {
+    out.write_all(line.as_bytes())
+        .and_then(|()| out.write_all(b"\n"))
+        .and_then(|()| out.flush())
+        .is_ok()
 }
 
 /// 日志环容量兜底值（行数）。512 行对"运维看刚才发生了什么"足够，内存成本有界；
@@ -369,5 +380,24 @@ mod tests {
             rr3_unit_log_dir(Path::new("/tmp/rr3-a.sock")),
             PathBuf::from("/tmp/rr3-a.sock.log")
         );
+    }
+
+    /// stdout 写失败必须降级为 false 而不是 panic：观测通道（管道关闭/EPIPE）
+    /// 不得把守护进程带走（与落盘臂的降级纪律同源）。
+    #[test]
+    fn log_emit_returns_false_on_broken_channel() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(!rr3_log_emit(&mut Broken, "rrd: x"), "写失败须返回 false");
+        let mut ok = Vec::new();
+        assert!(rr3_log_emit(&mut ok, "rrd: x"), "可写通道须成功");
+        assert_eq!(ok, b"rrd: x\n", "逐行写出，带换行分隔");
     }
 }
