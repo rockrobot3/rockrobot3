@@ -406,11 +406,24 @@ fn rr3_tee_open() -> Option<std::fs::File> {
     }
 }
 
+/// tee 单文件上限（真板实录 2026-11-09）：取证开关被留在 systemd drop-in 里时，
+/// 无界追加会填满宿主 tmpfs（实测 923MB 塞满 /tmp，直接阻断部署/OTA）。上限到点
+/// 停 tee 并留一条日志——观测面降级，链路面不受影响。
+const RR3_TEE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
 /// tee 写入面（单测锚点）：`sink = None`（tee 关）即 no-op 零副作用；打开时逐
 /// 字节镜像追加。写失败 = 观测面降级（打一条后停 tee），**绝不反噬链路面**——
 /// 音频链 fail-closed 纪律管的是链路判定，观测面降级不构成链路故障。
 fn rr3_tee_write(sink: &mut Option<std::fs::File>, bytes: &[u8]) {
     let Some(f) = sink.as_mut() else { return };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    if len + bytes.len() as u64 > RR3_TEE_MAX_BYTES {
+        eprintln!(
+            "rr-hal-esp32-audio: 取证 tee 达上限 {RR3_TEE_MAX_BYTES}B（tee 停用，链路不受影响）"
+        );
+        *sink = None;
+        return;
+    }
     use std::io::Write;
     if let Err(e) = f.write_all(bytes).and_then(|()| f.flush()) {
         eprintln!("rr-hal-esp32-audio: tee 写失败（tee 停用，链路不受影响）: {e}");
@@ -968,6 +981,30 @@ mod tests {
         assert!(on.is_some(), "正常写不应停 tee");
         let got = std::fs::read(&path).expect("tee 测试临时文件回读失败");
         assert_eq!(got, b"abcde", "tee 流须与消费流逐字节一致且按序追加");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 上限闸：文件到 64MiB 后下一笔停 tee（观测面降级），不 panic 不反噬链路。
+    #[test]
+    fn tee_stops_at_size_cap() {
+        let path = std::env::temp_dir().join(format!(
+            "rr3-tee-cap-test-{}-{}.bin",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&path)
+            .expect("tee 上限测试文件打开失败");
+        // 稀疏文件预置到上限（不实际占盘），下一笔即应停
+        f.set_len(RR3_TEE_MAX_BYTES).expect("预置长度失败");
+        let mut sink: Option<std::fs::File> = Some(f);
+        rr3_tee_write(&mut sink, b"x");
+        assert!(sink.is_none(), "达上限后 tee 必须停用");
         let _ = std::fs::remove_file(&path);
     }
 }
