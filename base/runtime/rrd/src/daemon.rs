@@ -217,12 +217,19 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
         .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "--manifest".to_string());
+    let backends = rr3_backend_summary(
+        &boot.hal_backend,
+        boot.audio_backend.as_deref(),
+        boot.servo_backend.as_deref(),
+        boot.display_backend.as_deref(),
+    );
     rr3_log(&rr3_boot_summary(
         &boot.tier,
         &boot.chip,
         &profile,
         boot.manifests.len(),
         boot.predegraded.len(),
+        &backends,
     ));
     // bind/cleanup/accept 走 trait 工厂（ADR-0008）：端点与监听语义上提到 rr-ipc，
     // Conn 类型仍是 UnixStream——conn.rs 的读写循环与 socket 专有门（读超时/shutdown）不动。
@@ -395,6 +402,7 @@ fn rr3_boot_summary(
     profile: &str,
     modules: usize,
     predegraded: usize,
+    backends: &str,
 ) -> String {
     let dash = |s: &str| {
         if s.is_empty() {
@@ -404,10 +412,34 @@ fn rr3_boot_summary(
         }
     };
     format!(
-        "启动摘要: tier={} chip={} profile={profile} modules={modules} 预降级={predegraded}",
+        "启动摘要: tier={} chip={} profile={profile} modules={modules} 预降级={predegraded} 后端={backends}",
         dash(tier),
         dash(chip)
     )
+}
+
+/// HAL 后端链摘要：全局 + 三面覆盖（None/空 = 回落全局，显示 `-`）。
+fn rr3_backend_summary(
+    hal: &str,
+    audio: Option<&str>,
+    servo: Option<&str>,
+    display: Option<&str>,
+) -> String {
+    let hal = if hal.is_empty() { "-" } else { hal };
+    format!(
+        "hal={hal} audio={} servo={} display={}",
+        rr3_dash_opt(audio),
+        rr3_dash_opt(servo),
+        rr3_dash_opt(display)
+    )
+}
+
+/// 可选后端名：None/空 → `-`（回落全局，不造假值）。
+fn rr3_dash_opt(s: Option<&str>) -> &str {
+    match s {
+        Some(v) if !v.is_empty() => v,
+        _ => "-",
+    }
 }
 
 /// 装配链点名：缺格 / 缺角色 / 装配缺项 / 轴档案注记——四类分开，不混写
@@ -899,16 +931,24 @@ mod tests {
     /// 启动摘要：后门路径空档/芯片必须显式 `-`（不造假值），规模数字来自装配面。
     #[test]
     fn boot_summary_marks_backdoor_and_counts() {
-        let s = rr3_boot_summary("", "", "--manifest", 3, 1);
+        let b = rr3_backend_summary("", None, None, None);
+        let s = rr3_boot_summary("", "", "--manifest", 3, 1, &b);
         assert!(s.contains("tier=-") && s.contains("chip=-"), "{s}");
         assert!(s.contains("modules=3") && s.contains("预降级=1"), "{s}");
+        assert!(s.contains("hal=-"), "后门无后端须显式 -: {s}");
+        let b = rr3_backend_summary("linux", Some("esp32"), Some("esp32"), Some("esp32"));
         let s = rr3_boot_summary(
             "rtos",
             "esp32",
             "/usr/lib/rockrobot3/profiles/esp32-mini.toml",
             1,
             0,
+            &b,
         );
         assert!(s.contains("tier=rtos") && s.contains("chip=esp32"), "{s}");
+        assert!(
+            s.contains("hal=linux audio=esp32 servo=esp32 display=esp32"),
+            "后端链必须逐面回显: {s}"
+        );
     }
 }
