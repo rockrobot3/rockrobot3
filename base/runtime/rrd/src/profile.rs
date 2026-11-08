@@ -1442,352 +1442,41 @@ pub fn rr3_boot_with_probe(
     platform_dir: &Path,
     probe: &dyn crate::probe::Rr3Probe,
 ) -> Result<Rr3ProfileBoot, String> {
-    let abs = rr3_profile_abs(profile_path)?;
-    let text = std::fs::read_to_string(&abs)
-        .map_err(|e| format!("读不到装配单 {}: {e}", abs.display()))?;
-    let profile = rr3_profile_parse(&text).map_err(|errs| {
-        errs.iter()
-            .map(|e| format!("装配单 {} 形状不合: {e}", abs.display()))
-            .collect::<Vec<_>>()
-            .join("; ")
-    })?;
+    let (abs, profile) = rr3_load_profile(profile_path)?;
 
     // 查册门（裁定 5②）：格位真值只有 rr-registry 那一册，CI 全集层与本入口共用。
-    let slots_abs = std::fs::canonicalize(slots_path)
-        .map_err(|e| format!("读不到格位契约 {}: {e}", slots_path.display()))?;
-    let slots_text = std::fs::read_to_string(&slots_abs)
-        .map_err(|e| format!("读不到格位契约 {}: {e}", slots_abs.display()))?;
-    let table: Rr3SlotTable = rr3_slot_parse(&slots_text);
-    if table.rr3_slot_is_empty() {
-        return Err(format!(
-            "格位契约 {} 解析后为空，拒绝启动（空格位表是契约事故）",
-            slots_abs.display()
-        ));
-    }
-    // 形状门（0.0.5 批J 深挖收口；与 topics 装载的 rr3_topic_check 同构——
-    // CI 契约测试钉 23 格是全集层门，这里是运行期门，两轴缺一即带病）：
-    // 格名规则、层名、status/tier_scope 白名单逐条点名。
-    let slot_errs = table.rr3_slot_check();
-    if !slot_errs.is_empty() {
-        return Err(format!(
-            "格位契约 {} 形状不合，拒绝启动: {}",
-            slots_abs.display(),
-            slot_errs.join("; ")
-        ));
-    }
+    let table = rr3_load_slots(slots_path)?;
 
     // 角色契约装载（增补轮六 §4.1，校验①②判据源）：与格位契约同一 fail-closed
     // 口径——读不到 / 解析空 / 形状越界都是契约事故，拒启动（空角色表不是放行许可证）。
-    let roles_abs = std::fs::canonicalize(roles_path)
-        .map_err(|e| format!("读不到角色契约 {}: {e}", roles_path.display()))?;
-    let roles_text = std::fs::read_to_string(&roles_abs)
-        .map_err(|e| format!("读不到角色契约 {}: {e}", roles_abs.display()))?;
-    let roles: Rr3RoleTable = rr3_role_parse(&roles_text);
-    if roles.rr3_role_is_empty() {
-        return Err(format!(
-            "角色契约 {} 解析后为空，拒绝启动（空角色表是契约事故）",
-            roles_abs.display()
-        ));
-    }
-    let role_errs = roles.rr3_role_check();
-    if !role_errs.is_empty() {
-        return Err(format!(
-            "角色契约 {} 形状不合，拒绝启动: {}",
-            roles_abs.display(),
-            role_errs.join("; ")
-        ));
-    }
+    let roles = rr3_load_roles(roles_path)?;
 
     // 器件词表装载（增补轮六 §4.1b，校验⑦-d 的 mate 集判定源）：与格位/角色契约
     // 同一 fail-closed 口径——空器件表是契约事故，不是放行许可证。装载期只查
     // mate 外键闭合，不认型号能力（D10a：addrs/baud_ok 是探测期/出厂自检判据）。
-    let devices_abs = std::fs::canonicalize(devices_path)
-        .map_err(|e| format!("读不到器件词表 {}: {e}", devices_path.display()))?;
-    let devices_text = std::fs::read_to_string(&devices_abs)
-        .map_err(|e| format!("读不到器件词表 {}: {e}", devices_abs.display()))?;
-    let devices: Rr3DeviceTable = rr3_dev_parse(&devices_text);
-    if devices.rr3_dev_is_empty() {
-        return Err(format!(
-            "器件词表 {} 解析后为空，拒绝启动（空器件表是契约事故）",
-            devices_abs.display()
-        ));
-    }
-    let device_errs = devices.rr3_dev_check();
-    if !device_errs.is_empty() {
-        return Err(format!(
-            "器件词表 {} 形状不合，拒绝启动: {}",
-            devices_abs.display(),
-            device_errs.join("; ")
-        ));
-    }
+    let devices = rr3_load_devices(devices_path)?;
 
     // 接线档装载（增补轮六 §4.3，校验⑦ 判据面）：装机档必在——读不到/空表/
     // 形状不合/闭合面破都是装配事故，拒启动（接线闭合是校验⑦的前提，没有
     // "无线的机器"）。
-    let wiring_abs = std::fs::canonicalize(wiring_path)
-        .map_err(|e| format!("读不到接线档 {}: {e}", wiring_path.display()))?;
-    let wiring_text = std::fs::read_to_string(&wiring_abs)
-        .map_err(|e| format!("读不到接线档 {}: {e}", wiring_abs.display()))?;
-    let wiring = crate::wiring::rr3_wiring_from_text(&wiring_text).map_err(|errs| {
-        format!(
-            "接线档 {} 形状不合，拒绝启动: {}",
-            wiring_abs.display(),
-            errs.join("; ")
-        )
-    })?;
+    let (wiring_abs, wiring) = rr3_load_wiring(wiring_path)?;
 
     // 平台事实表装载（增补轮六 §4.6，批N1 基-22；校验③④⑤⑧的判据前件）：按
     // [platform].chip 在 platform_dir 下选册（daemon 传 contracts/platform/，与
     // roles/devices 同源）。fail-closed 与 roles 同口径但更严——platform.rs 解析本就
     // 回 Err 版（roles/devices 宽容回空表走"表为空"点名，那是集合词表；平台表宽容 =
     // ④⑤⑧ 静默不判，§18 F-6 同病），读不到/形状坏都逐条点名拒 boot，不降级。
-    let platform_path = platform_dir.join(rr3_platform_file(&profile.platform_chip));
-    let platform_text = std::fs::read_to_string(&platform_path).map_err(|e| {
-        format!(
-            "读不到平台事实表 {}（[platform].chip = {} 的选册）: {e}",
-            platform_path.display(),
-            profile.platform_chip
-        )
-    })?;
-    let platform: Rr3PlatformTable = rr3_plat_parse(&platform_text).map_err(|errs| {
-        format!(
-            "平台事实表 {} 形状不合，拒绝启动: {}",
-            platform_path.display(),
-            errs.join("; ")
-        )
-    })?;
+    let platform = rr3_load_platform(platform_dir, &profile.platform_chip)?;
 
     let mut errs: Vec<String> = Vec::new();
-    // bindings 的格位必须查册命中，且不得是基础层（基础层由基座内建承载，slots.toml 注记）
-    for slot in profile.bindings.keys() {
-        if !table.rr3_slot_contains(slot) {
-            errs.push(format!(
-                "bindings 格位 {slot} 未在册（contracts/slots.toml 无此格，装配单不得自造格位）"
-            ));
-        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
-            errs.push(format!(
-                "bindings 不得绑定基础层格位 {slot}（基础层由基座内建承载，恒在位）"
-            ));
-        }
-    }
-    // enabled_slots 的格位必须查册命中（基础层允许——恒在位，只记账不绑定）
-    for (module, slots) in &profile.enabled_slots {
-        for slot in slots {
-            if !table.rr3_slot_contains(slot) {
-                errs.push(format!(
-                    "enabled_slots 模块 {module} 的格位 {slot} 未在册（contracts/slots.toml 无此格）"
-                ));
-            }
-        }
-    }
-    // [slots].present 查册门：声明集同样只认 rr-registry 那一册；基础层格位恒在位
-    // （slots.toml 注记），进 present 属自相矛盾 → 点名拒。
-    for slot in &profile.slots_present {
-        if !table.rr3_slot_contains(slot) {
-            errs.push(format!(
-                "[slots].present 格位 {slot} 未在册（contracts/slots.toml 无此格）"
-            ));
-        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
-            errs.push(format!(
-                "[slots].present 不得声明基础层格位 {slot}（基础层由基座内建承载，恒在位）"
-            ));
-        }
-    }
-    // [slots].device_absent 查册门（D3 裁定 5，批N2 件三）：三查 fail-closed——
-    // ① 格名必须在册（查册门）；② 必须是 base 层格：device_absent 是 base 格专属的
-    // 器件缺席登记，非 base 格的缺席表达 = 不进 present（缺格判定自然红），写进本表
-    // 属第二套语法即红（F-2 同型：一个语义不许两条语法）；③ 理由非空已在解析段判。
-    for slot in profile.slots_device_absent.keys() {
-        if !table.rr3_slot_contains(slot) {
-            errs.push(format!(
-                "[slots].device_absent 格位 {slot} 未在册（contracts/slots.toml 无此格）"
-            ));
-        } else if table.rr3_slot_layer(slot).as_deref() != Some("base") {
-            errs.push(format!(
-                "[slots].device_absent 只登记基础层格位，{slot} 非 base 层（非基础层格的缺席表达 = 不进 [slots].present，写进本表属第二套语法）"
-            ));
-        }
-    }
-    // G6 档位一致性（ADR-0018 修订 1：无看门狗的板不允许归 bare 档）：
-    // tier=bare 而 watchdog_present=false 的装配单自相矛盾 → 拒 boot。
-    if profile.platform_tier == "bare" && !profile.supplies.watchdog_present {
-        errs.push(
-            "档位一致性校验失败：tier = bare 但 supplies.watchdog_present = false——无看门狗的板不允许归 bare 档（ADR-0018 修订 1），拒绝启动"
-                .to_string(),
-        );
-    }
-    // L-10 tier↔tier_scope 交叉校验（ADR-0012 增补注记 base-supply/base-bus 分族的
-    // 装配侧执法，0.0.5 批K）：tier_scope 说"这档要不要这张格"——tier 档引用
-    // scope 外的格 = 自相矛盾（如 bare 自足档无总线，引用 bus.* 即假账）→ 拒 boot
-    // 点名。三处引用（bindings / enabled_slots / [slots].present）合并去重逐格查；
-    // 未在册格由上面三处查册门点名，此处只对在册格判 scope，不重复报。
-    let mut referenced: BTreeSet<String> = BTreeSet::new();
-    referenced.extend(profile.bindings.keys().cloned());
-    for slots in profile.enabled_slots.values() {
-        referenced.extend(slots.iter().cloned());
-    }
-    referenced.extend(profile.slots_present.iter().cloned());
-    for slot in &referenced {
-        if !table.rr3_slot_contains(slot) {
-            continue;
-        }
-        // P0-2 根因门：占位/退役格不得进生产装配面。status=placeholder 表示该格
-        // 无真件（骨架占位），retired 表示已退役；装配单声称在位/绑定 = 假账，
-        // 与"严禁演示性功能"直接冲突 → 拒 boot。真件落地后把 contracts/slots.toml
-        // 的 status 改回 normal 再恢复绑定。
-        if let Some(status) = table.rr3_slot_status(slot) {
-            if status == "placeholder" || status == "retired" {
-                errs.push(format!(
-                    "装配面引用 {status} 格 {slot}（占位/退役格不得进生产装配面；真件落地后改 contracts/slots.toml status=normal 再绑定）"
-                ));
-            }
-        }
-        let scope = table.rr3_slot_tier_scope(slot).unwrap_or_default();
-        if !scope.iter().any(|t| t == &profile.platform_tier) {
-            errs.push(format!(
-                "tier↔tier_scope 交叉校验失败：装配档 {tier} 引用格 {slot}，其 tier_scope = {scope:?} 不含 {tier}（该档不适用此格，ADR-0012 增补注记分族），拒绝启动",
-                tier = profile.platform_tier
-            ));
-        }
-    }
-    // 结构自洽：每条 binding 都必须被 enabled_slots 认领（enabled_slots[M] 含该格位）——
-    // 否则它是死数据：绑了没人用，装配单与 enabled_slots 各说一套。
-    for (slot, module) in &profile.bindings {
-        let claimed = profile
-            .enabled_slots
-            .get(module)
-            .is_some_and(|slots| slots.contains(slot));
-        if !claimed {
-            errs.push(format!(
-                "bindings 条目 {slot}={module} 未被 enabled_slots 认领（模块 {module} 不在 enabled_slots，或其 enabled_slots 不含 {slot}）"
-            ));
-        }
-    }
-    // 装载期校验①（增补轮六 §5，后果 = 拒）：[[pin]] 逐条——role 查册、per_instance
-    // 规则、requires 逐项在场（留空即红）、direction 与角色一致、role.slot ∈ slots。
-    // 同环做 host 档派生（词形前缀 × 角色 derives 声明，前缀真值 = 平台表
-    // [controller_wordform]，实-6 (a)）：rtos/bare 档不派生，板侧描述符消费归
-    // 0.0.7 批G/批D1——pins 的校验照跑（物理真值不分档）。
-    // host 档词形前件守卫（实-6 (a)，批N4 件七）：词形派生表空 = 平台没提供派生
-    // 前件——host 档必须选带词形表的主机平台册（rtos/bare 册空表显式，esp32 形状）。
-    // 逐键 fail-closed 由 rr3_wordform_prefix 承担，此处总守卫一条。
-    let mut derived: BTreeMap<String, String> = BTreeMap::new();
-    if profile.platform_tier == "host" && platform.rr3_wordform_map().is_empty() {
-        errs.push(
-            "host 档平台事实表 controller_wordform 为空（词形派生前件缺失，host 档必须选带词形表的主机平台册，fail-closed）"
-                .into(),
-        );
-    }
-    for pin in &profile.pins {
-        let label = format!("pins[{}]", pin.rr3_pin_id());
-        // ①-a 角色在册（未在册的角色后续判据无从谈起，点名后跳过该条，不级联刷屏）
-        let Some(derives) = roles.rr3_role_derives(&pin.role) else {
-            errs.push(format!(
-                "{label} 角色 {} 未在册（contracts/roles.toml 无此角色，装配单不得自造角色）",
-                pin.role
-            ));
-            continue;
-        };
-        // ①-b per_instance 规则：true ⇒ instance 必填（pin_id = role.instance），
-        // false ⇒ instance 禁填（pin_id = role）
-        match roles.rr3_role_per_inst(&pin.role) {
-            Some(true) if pin.instance.is_empty() => errs.push(format!(
-                "{label} 角色 {} per_instance = true，instance 必填（多实例角色的身份一半在 instance）",
-                pin.role
-            )),
-            Some(false) if !pin.instance.is_empty() => errs.push(format!(
-                "{label} 角色 {} per_instance = false，instance 禁填（填了 pin_id 就有两个真值点）",
-                pin.role
-            )),
-            _ => {}
-        }
-        // ①-b requires 逐项在场（§5 缺失语义：String 空串 = 缺、channel None = 缺、
-        // physical 空数组 = 缺；rail/addr 的合法显式值 "none" 照常算在场——
-        // "合法不适用"必须显式写，留空即红）
-        for f in roles.rr3_role_requires(&pin.role).unwrap_or_default() {
-            if !RR3_PIN_KEYS.contains(&f.as_str()) {
-                errs.push(format!(
-                    "角色 {} 的 requires 引用未知字段 {f}（[pins] 字段词表外——门 a 六表对账第 5 张的漂移）",
-                    pin.role
-                ));
-            } else if !rr3_pin_has(pin, &f) {
-                errs.push(format!(
-                    "{label} 缺 {f}（角色 {} requires 必填，留空即红——§5 缺失语义；\"合法不适用\"须显式写 none）",
-                    pin.role
-                ));
-            }
-        }
-        // ① direction 相等（pin 的物理方向与角色声明的方向各说一套 = 数据矛盾）
-        if let Some(d) = roles.rr3_role_direction(&pin.role) {
-            if pin.direction != d {
-                errs.push(format!(
-                    "{label} direction = {} 与角色 {} direction = {d} 不一致（校验①）",
-                    pin.direction, pin.role
-                ));
-            }
-        }
-        // ① role.slot ∈ slots（roles/slots 两表对账的装载侧执法——真值各在对方表）
-        if let Some(slot) = roles.rr3_role_slot(&pin.role) {
-            if !table.rr3_slot_contains(&slot) {
-                errs.push(format!(
-                    "角色 {} 的 slot {slot} 未在格位契约在册（roles/slots 两表对账）",
-                    pin.role
-                ));
-            }
-        }
-        if profile.platform_tier != "host" {
-            continue;
-        }
-        // host 档派生：derives 声明逐键取值；多实例共键须同值（双轴同 chip 合法，
-        // 两 chip 抢一个键名 = 资源矛盾）
-        for d in &derives {
-            match rr3_pin_derive_value(pin, d, &platform) {
-                Ok(v) => match derived.get(d) {
-                    None => {
-                        derived.insert(d.clone(), v);
-                    }
-                    Some(prev) if prev != &v => errs.push(format!(
-                        "{label} 派生键 {d} 与他条取值不同（{prev} vs {v}）——多实例共键须同值（同一资源维）"
-                    )),
-                    _ => {}
-                },
-                Err(e) => errs.push(format!("{label} 派生 {d} 失败: {e}")),
-            }
-        }
-        // 词形漂移（①-f）：控制器词形已指明总线族，该族派生键必须被角色声明（否则
-        // 派生视图会漏键——roles.derives 与 pin 实况各说一套）。词形清单**住平台表**
-        // （实-6 (a)，批N4 件七）：遍历 [controller_wordform] 逐键试词形——表里有
-        // 什么判什么，rrd 零硬编码词形清单，新增词形键 = 改数据判据自动扩。derives
-        // 显式空的角色跳过（批N3 件八：P-5 共读源/placeholder 格不派生注入键——
-        // "不派生"是声明不是漏声明，见 roles.toml 器件三角色注记）
-        if !derives.is_empty() {
-            for (key, prefix) in platform.rr3_wordform_map() {
-                if rr3_wordform_tail(&pin.controller, prefix).is_some()
-                    && !derives.iter().any(|d| d == key)
-                {
-                    errs.push(format!(
-                        "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
-                        pin.controller, pin.role
-                    ));
-                }
-            }
-        }
-    }
-    // 门 n（§8 注入路径唯一，power P-13）：同一 handle(trait, key) 的取值只能有一条
-    // 来源路径。[hardware] 出现物理键一律红——pin 实际派生该键时点名两份取值（两处
-    // 并存判据），否则按稳态判据点名；check.sh 拟 ⑨-n 的静态扫面与本条互为冗余。
-    for k in RR3_PIN_DERIVED_KEYS {
-        if let Some(hv) = profile.hardware.get(k) {
-            match derived.get(k) {
-                Some(dv) => errs.push(format!(
-                    "hardware.{k} = \"{hv}\" 与 [pins] 派生值 \"{dv}\" 两处并存（门 n：注入路径唯一，[pins] 派生或 [hardware] 直给二者取一）"
-                )),
-                None => errs.push(format!(
-                    "hardware.{k} 是引脚侧派生键（schema 3 起唯一来源 = [pins] 派生，[hardware] 不得直给——门 n 稳态判据）"
-                )),
-            }
-        }
-    }
+    errs.extend(rr3_check_slot_refs(&profile, &table));
+    errs.extend(rr3_check_tier(&profile, &table));
+    errs.extend(rr3_check_claims(&profile));
+    // 装载期校验①（增补轮六 §5，后果 = 拒）：[[pin]] 逐条校验 + host 档词形派生
+    let (pin_errs, derived) = rr3_check_pins(&profile, &roles, &table, &platform);
+    errs.extend(pin_errs);
+    // 门 n（§8 注入路径唯一）：[hardware] 不得出现引脚侧派生键
+    errs.extend(rr3_check_hw_keys(&profile, &derived));
     // 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；Task 4）：方向/能力/词表
     // 三面接平台表——判据真值只有 contracts/platform/<chip>.toml 一册，不推断、
     // 不运行期回退；表在上方已 fail-closed 装载，此处只判。
@@ -1806,79 +1495,8 @@ pub fn rr3_boot_with_probe(
         .iter()
         .map(|d| d.name.clone())
         .collect();
-    for pin in &profile.pins {
-        // rail 缺省的合法性与角色 kind 挂钩：power 面（⑥-b）必须有在册轨；
-        // signal 面（meter 类，requires 无 rail）不写 rail 合法——写了非 none 的
-        // 名字则一律查在册（⑥-a）。"none" 是 signal 侧控制线的显式不适值。
-        let kind = roles.rr3_role_kind(&pin.role);
-        let rail_unlisted = pin.rail.is_empty() || pin.rail == "none";
-        if rail_unlisted {
-            if kind.as_deref() == Some("power") {
-                errs.push(format!(
-                    "pins[{}] rail {} 但角色 {} kind = power（校验⑥-b：功率面必须挂真实供电轨，缺 rail 或 none 即红）",
-                    pin.rr3_pin_id(),
-                    if pin.rail.is_empty() { "缺失" } else { "= none" },
-                    pin.role
-                ));
-            }
-        } else if !domain_names.contains(pin.rail.as_str()) {
-            errs.push(format!(
-                "pins[{}] rail = {} 未在 [[supplies.domain]] 在册（校验⑥-a；域名单源在该形态的域声明，§18 F-5）",
-                pin.rr3_pin_id(),
-                pin.rail
-            ));
-        }
-    }
-    for d in &profile.supplies.domains {
-        let label = format!("supplies.domains[{}]", d.name);
-        if d.armed && (d.sense == "none" || d.max_age_ms <= 0) {
-            errs.push(format!(
-                "{label} armed = true 但 sense = none 或 max_age_ms ≤ 0（校验⑥-c：无测点/无龄期上界的域不得武装拒动——未标定即 armed=false，§3.1 降级语义）"
-            ));
-        }
-        // ⑥-e（批N21 件二，D11 界面门的装载期半边）：evidence 与 armed 成对——
-        // 武装必须携证据引用且形制合法（`<形态>/<四位编号>`，规则 conventions §6.1）；
-        // 未武装显式写 "none"（同 switch/switchable 成对范式）。文件侧四道核
-        // （存在/frontmatter/form 一致）需要证据容器根，归
-        // [`rr3_evidence_check`]，由 boot 装载链调用——解析期只持
-        // 无文件面判据（机制与策略分离：哪里需要文件系统，哪里才碰 fs）。
-        if d.armed {
-            if d.evidence == "none" || d.evidence.is_empty() {
-                errs.push(format!(
-                    "{label} armed = true 但 evidence = none（校验⑥-e：武装拒动必须引用一条真板实测证据，规则住 conventions §6.1；未标定即 armed = false）"
-                ));
-            } else if !rr_ipc::evidence::rr3_evidence_ref_ok(&d.evidence) {
-                errs.push(format!(
-                    "{label}.evidence = {} 形制不合法（校验⑥-e：应为 <形态>/<四位编号>，如 实测/0001）",
-                    d.evidence
-                ));
-            }
-        } else if d.evidence != "none" {
-            errs.push(format!(
-                "{label} armed = false 但 evidence = {}（校验⑥-e：未武装不携证据，evidence 显式写 \"none\"——证据位与武装位成对，不出现过期引用）",
-                if d.evidence.is_empty() { "缺失" } else { &d.evidence }
-            ));
-        }
-        for (key, val) in [
-            ("sense", &d.sense),
-            ("current_sense", &d.current_sense),
-            ("switch", &d.switch),
-        ] {
-            if val == "none" {
-                continue;
-            }
-            if !profile.pins.iter().any(|p| p.rr3_pin_id() == *val) {
-                errs.push(format!(
-                    "{label}.{key} = {val} 不在 [pins] 的 pin_id 集（校验⑥-d：绑定位一律写 pin_id，\"none\" 是合法显式值——第二套语法如 adc:gp34 一律红，F-2）"
-                ));
-            }
-        }
-        if d.switchable && d.switch == "none" {
-            errs.push(format!(
-                "{label} switchable = true 但 switch = none（可切域必有开关控制位，两键成对）"
-            ));
-        }
-    }
+    errs.extend(rr3_check_rails(&profile, &roles, &domain_names));
+    errs.extend(rr3_check_domains(&profile));
     // 装载期校验⑦（增补轮六 §5，后果 = 拒）：接线闭合与额定加总。⑦-a wire.signal
     // ⊆ pin_id ∪ {vcc,gnd}；⑦-b wire.net ⊆ domains；⑦-d wire.mate ∈ devices.toml
     // 的 mate 集；闭合面（feeds 位号集）在接线档装载时已判。额定加总两位（§22
@@ -1889,53 +1507,18 @@ pub fn rr3_boot_with_probe(
     let mate_set = devices.rr3_dev_mates();
     errs.extend(wiring.rr3_wiring_check(&pin_ids, &domain_names, &mate_set));
 
-    // 门 c 装载执法（批N2 本体 ⑨-c，校验⑨ 后果 = 拒）：装配扫描一次两用——形状/
-    // 注入缺错误照旧进 assemble_broken（G4 该格 Degraded，不 fatal），校验⑨ 的预算
-    // 与覆盖判据在此接装载拒链（进 errs，boot 拒）。manifest 解析所需的 modules-root
-    // 就此上提（原在缺格判定段，纯路径推导无副作用）。
-    // 如实注记：assemble.toml 坏形的件无法供 demands facts（坏形已进 assemble_broken
-    // 点名），预算加总不含它——洞的可见面 = Degraded 点名，此处不 claim 全覆盖。
+    // 门 c 装载执法（批N2 本体 ⑨-c）：装配扫描一次两用——形状/注入缺错误进
+    // assemble_broken（G4 该格 Degraded，不 fatal），校验⑨⑩ 的预算判据进 errs
+    // （boot 拒）。如实注记：assemble.toml 坏形的件无法供 demands facts（坏形已进
+    // assemble_broken 点名），预算加总不含它——洞的可见面 = Degraded 点名。
     let root = abs.parent().and_then(Path::parent).ok_or_else(|| {
         format!(
             "装配单 {} 无法定位 modules-root（须在 <root>/profiles/ 下）",
             abs.display()
         )
     })?;
-    let mut assemble_broken: Vec<(String, String)> = Vec::new();
-    let mut scanned: Vec<(String, Vec<(String, Rr3AssembleFacts)>)> = Vec::new();
-    for m in profile.enabled_slots.keys() {
-        let (atoms, msgs) = rr3_assemble_scan(&root.join("modules").join(m));
-        scanned.push((m.clone(), atoms));
-        for msg in msgs {
-            assemble_broken.push((m.clone(), msg));
-        }
-    }
-    // 申报分子：每实例扩算（条目 × 该件经 iface 归因服务到的角色 pin 数，地板 1）
-    let declared = rr3_demand_expand(&profile, &roles, &scanned);
-    // 校验⑨ 本判（F-12 加总口径：缺省全部同时，收窄只认 concurrency_group 数据）
-    errs.extend(rr3_demand_budget(&declared, &profile.supplies.domains));
-    // 校验⑨ 缺失语义另一半：kind=power 角色挂轨，绑定模块的件申报面必须覆盖
-    errs.extend(rr3_power_gaps(&profile, &roles, &scanned));
-    // 校验⑩ 内存预算（批N2 n2c-v10，全案 §5 判据⑩ / F-13）：分子 = 装配扫描
-    // facts 的内存申报**件级直加**（非每实例扩算，assemble.rs 头注同源；坏形件
-    // 不进加总——可见面 = assemble_broken 点名，不 claim 全覆盖，同⑨ 诚实注记）；
-    // 分母 = [supplies.budget]（host 档 not_applicable = true 显式不适用 ⇒ 绿）。
-    let stack_sum: i64 = scanned
-        .iter()
-        .flat_map(|(_, atoms)| atoms.iter())
-        .map(|(_, f)| f.task_stack_bytes)
-        .sum();
-    let heap_sum: i64 = scanned
-        .iter()
-        .flat_map(|(_, atoms)| atoms.iter())
-        .map(|(_, f)| f.heap_peak_bytes)
-        .sum();
-    errs.extend(rr3_memory_budget(
-        stack_sum,
-        heap_sum,
-        &profile.supplies.budget,
-        &profile.platform_tier,
-    ));
+    let (scanned, assemble_broken) = rr3_scan_modules(root, &profile);
+    errs.extend(rr3_check_budgets(&profile, &roles, &scanned));
     // 装载期校验⑥-e 文件半边（批N21 件二）：armed=true 域的证据引用四道核
     // （存在/frontmatter/form 一致；形制与成对形状半边已在 parse 层与 ⑥ 校验段拒）。
     // 证据容器根复用 modules-root 同一条 <root>/profiles/ 布局纪律 → <root>/docs/evidence；
@@ -1945,117 +1528,16 @@ pub fn rr3_boot_with_probe(
     if !errs.is_empty() {
         return Err(errs.join("; "));
     }
-    // 装载期校验②（增补轮六 §5，后果 = 降不拒）：present ∩ enabled_slots 的每个格位，
-    // roles 表归入它的角色必须都有 [[pin]] 绑定——缺角色即缺能力。(格位, 角色) 进
-    // role_missing 清单随 boot 带出，由 daemon 点名（Degraded 可见面归批N4 I-15）。
-    let mut role_missing: Vec<(String, String)> = Vec::new();
-    let enabled_all: BTreeSet<String> = profile.enabled_slots.values().flatten().cloned().collect();
-    for slot in &enabled_all {
-        if !profile.slots_present.contains(slot) {
-            continue;
-        }
-        for role in roles.rr3_role_slot_names(slot) {
-            if !profile.pins.iter().any(|p| p.role == role) {
-                role_missing.push((slot.clone(), role));
-            }
-        }
-    }
-    role_missing.sort();
+    // 装载期校验②（后果 = 降不拒）：present ∩ enabled_slots 的缺角色清单
+    let role_missing = rr3_role_gaps(&profile, &roles);
 
     // 缺格判定：enabled_slots 声明的非基础层格位没有指向本模块的有效 binding（或探测不到）。
     // 基础层恒在位，跳过（slots.toml 注记：net.online / power.battery boot 即在位、恒不降级）。
-    let mut missing: Vec<(String, String)> = Vec::new();
-    // L-14 器件级探测的 (bus, addr) 组装：格位 → 该格角色在 [pins] 的 I2C 绑定
-    // （controller 词形 i2c<N> → N，addr 非 none 非空才有效）。装配单未声明 [pins]
-    // / 该格无 I2C 绑定 → 传 None → 探针回落总线级五面判据（无 [pins] 形态兼容面）。
-    let mut i2c_bind: BTreeMap<String, (u32, String)> = BTreeMap::new();
-    for slot in &enabled_all {
-        for role in roles.rr3_role_slot_names(slot) {
-            for pin in profile.pins.iter().filter(|p| p.role == role) {
-                let Some(n) = pin
-                    .controller
-                    .strip_prefix("i2c")
-                    .and_then(|rest| rest.parse::<u32>().ok())
-                else {
-                    continue;
-                };
-                if !pin.addr.is_empty() && pin.addr != "none" {
-                    i2c_bind
-                        .entry(slot.clone())
-                        .or_insert_with(|| (n, pin.addr.clone()));
-                }
-            }
-        }
-    }
-    // 探测先行：bindings 声明的格位逐格探测（MC-4：linux 走五面真值探测，非 linux
-    // 生产面恒缺，test 面/显式注入走注入件）。探测自身故障按"探测不到"处理
-    // （fail-closed，方案 §4）；缺格三源合一的"实测缺"这一源即出自本环。
-    for (slot, module) in &profile.bindings {
-        let (bus, addr) = match i2c_bind.get(slot) {
-            Some((n, a)) => (Some(*n), Some(a.as_str())),
-            None => (None, None),
-        };
-        if !probe.rr3_probe_slot_bound(slot, bus, addr) {
-            missing.push((module.clone(), slot.clone()));
-        }
-    }
-    for (module, slots) in &profile.enabled_slots {
-        for slot in slots {
-            let base = table.rr3_slot_layer(slot).as_deref() == Some("base");
-            if base {
-                continue;
-            }
-            // 缺格三源合一第一源（方案 §15）：本板声明缺（[slots].present 不含）→ 缺格，
-            // 不再看 binding 与探测——板说没有，装配单绑了也白绑。
-            if !profile.slots_present.contains(slot) {
-                if !missing.contains(&(module.clone(), slot.clone())) {
-                    missing.push((module.clone(), slot.clone()));
-                }
-                continue;
-            }
-            if profile.bindings.get(slot) != Some(module)
-                && !missing.contains(&(module.clone(), slot.clone()))
-            {
-                missing.push((module.clone(), slot.clone()));
-            }
-        }
-    }
-    missing.sort();
+    let missing = rr3_slot_gaps(&profile, &table, &roles, probe);
 
-    // manifest 解析：modules-root 已在门 c 段上提（装配单路径的上两级，<root>/profiles/<机>.toml）。
-    let manifests: Vec<PathBuf> = profile
-        .enabled_slots
-        .keys()
-        .map(|m| root.join("modules").join(m).join("module.toml"))
-        .collect();
-    // hal_bindings（spawn 时注入 RR3_HAL_BINDINGS）：host 档 = [pins] 派生视图 ∪
-    // [hardware] 非引脚键（`alsa_device`/`link_ifname` 两键；键名不变，rr-hal
-    // descriptor.rs 解析端零改动；`spi_device` 批N3 件六起走派生视图——敞口 18 行收口）；
-    // rtos/bare 档不派生，[hardware] 原样直给。门 n 已保证物理键不双占，合并无覆盖歧义。
-    let mut merged = derived;
-    for (k, v) in &profile.hardware {
-        merged.insert(k.clone(), v.clone());
-    }
-    let hal_bindings = rr3_bindings_text(&merged);
-
-    // 执行轴状态投影（批N3 件三，件五消歧）：目录 = 接线档同级的 axis/（hardware/
-    // <形态>/axis/*.toml，件二装载器落位）；pin_ids 复用校验⑦段的同一集合（[[pin]]
-    // 的 pin_id 全集——档案外键与接线闭合对同一真值源对账，两个读者一套语法）。
-    // 轴读数 = RR3_HAL_PERIPH_AXIS env（缺省 RR3_PERIPH_AXIS_DEFAULT，与 rr-hal 桥
-    // 后端同一契约常量——spawn 的子进程继承本进程环境，注入面选轴与后端选轴因此
-    // 同源）；恰一份 instance 命中才投影，其余口径见 [`rr3_axis_state_text`]（降级
-    // 面点名，不拒 boot）。批N4 件九笔4：装载一次，清单同时进装配快照（面板出图
-    // 要看见全部轴），投影只吃这份清单——不重读目录造第二真值点。
-    let axis_dir = wiring_abs.parent().expect("接线档必有父目录").join("axis");
-    let axis_wanted = std::env::var(rr_hal_api::RR3_PERIPH_AXIS_ENV)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| rr_hal_api::RR3_PERIPH_AXIS_DEFAULT.to_string());
-    let (axis_files, axis_notes) = rr3_axis_files_load(&axis_dir, &pin_ids);
-    let (axis_state, axis_notes_project) = rr3_axis_state_text(&axis_files, &axis_wanted);
-    let mut axis_notes = axis_notes;
-    axis_notes.extend(axis_notes_project);
+    let manifests = rr3_manifests(&profile, root);
+    let hal_bindings = rr3_hal_bindings(derived, &profile.hardware);
+    let (axis_files, axis_state, axis_notes) = rr3_axis_load(&wiring_abs, &pin_ids);
 
     // G4 装配段校验（ADR-0019 修订 1 ③）已在门 c 段随装配扫描一次完成：缺文件/
     // 坏形/ops 注入缺逐条点名进 assemble_broken，该模块 boot 入 Degraded（不 fatal；
@@ -2094,6 +1576,685 @@ pub fn rr3_boot_with_probe(
         display_backend: profile.display_backend.clone(),
         platform_chip: profile.platform_chip.clone(),
         snapshot: Some(snapshot),
+    })
+}
+
+/// 格位引用查册门三扇合一：bindings/enabled_slots、[slots].present、
+/// [slots].device_absent（判定口径见各子函数）。
+fn rr3_check_slot_refs(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
+    let mut errs = rr3_check_bind_slots(profile, table);
+    errs.extend(rr3_check_present(profile, table));
+    errs.extend(rr3_check_absent(profile, table));
+    errs
+}
+
+/// bindings/enabled_slots 的查册门（bindings 另拒基础层格位——基础层恒在位）
+fn rr3_check_bind_slots(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
+    let mut errs = Vec::new();
+    for slot in profile.bindings.keys() {
+        if !table.rr3_slot_contains(slot) {
+            errs.push(format!(
+                "bindings 格位 {slot} 未在册（contracts/slots.toml 无此格，装配单不得自造格位）"
+            ));
+        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
+            errs.push(format!(
+                "bindings 不得绑定基础层格位 {slot}（基础层由基座内建承载，恒在位）"
+            ));
+        }
+    }
+    // enabled_slots 的格位必须查册命中（基础层允许——恒在位，只记账不绑定）
+    for (module, slots) in &profile.enabled_slots {
+        for slot in slots {
+            if !table.rr3_slot_contains(slot) {
+                errs.push(format!(
+                    "enabled_slots 模块 {module} 的格位 {slot} 未在册（contracts/slots.toml 无此格）"
+                ));
+            }
+        }
+    }
+    errs
+}
+
+/// [slots].present 查册门：声明集只认 rr-registry 那一册；基础层进 present 属
+/// 自相矛盾（恒在位），点名拒。
+fn rr3_check_present(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
+    let mut errs = Vec::new();
+    for slot in &profile.slots_present {
+        if !table.rr3_slot_contains(slot) {
+            errs.push(format!(
+                "[slots].present 格位 {slot} 未在册（contracts/slots.toml 无此格）"
+            ));
+        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
+            errs.push(format!(
+                "[slots].present 不得声明基础层格位 {slot}（基础层由基座内建承载，恒在位）"
+            ));
+        }
+    }
+    errs
+}
+
+/// [slots].device_absent 查册门（D3 裁定 5）：格名在册 + 只登记 base 层格
+/// （非 base 格的缺席表达 = 不进 present，写进本表属第二套语法即红）。
+fn rr3_check_absent(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
+    let mut errs = Vec::new();
+    for slot in profile.slots_device_absent.keys() {
+        if !table.rr3_slot_contains(slot) {
+            errs.push(format!(
+                "[slots].device_absent 格位 {slot} 未在册（contracts/slots.toml 无此格）"
+            ));
+        } else if table.rr3_slot_layer(slot).as_deref() != Some("base") {
+            errs.push(format!(
+                "[slots].device_absent 只登记基础层格位，{slot} 非 base 层（非基础层格的缺席表达 = 不进 [slots].present，写进本表属第二套语法）"
+            ));
+        }
+    }
+    errs
+}
+
+/// 档位一致性（G6：bare 必须有看门狗）+ tier↔tier_scope 交叉校验（L-10）+
+/// 占位/退役格禁入生产装配面（P0-2）。三处引用合并去重逐格查，未在册格由
+/// 上面查册门点名，此处只对在册格判 scope，不重复报。
+fn rr3_check_tier(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
+    let mut errs = Vec::new();
+    if profile.platform_tier == "bare" && !profile.supplies.watchdog_present {
+        errs.push(
+            "档位一致性校验失败：tier = bare 但 supplies.watchdog_present = false——无看门狗的板不允许归 bare 档（ADR-0018 修订 1），拒绝启动"
+                .to_string(),
+        );
+    }
+    let mut referenced: BTreeSet<String> = BTreeSet::new();
+    referenced.extend(profile.bindings.keys().cloned());
+    for slots in profile.enabled_slots.values() {
+        referenced.extend(slots.iter().cloned());
+    }
+    referenced.extend(profile.slots_present.iter().cloned());
+    for slot in &referenced {
+        if !table.rr3_slot_contains(slot) {
+            continue;
+        }
+        // P0-2 根因门：占位/退役格不得进生产装配面（真件落地后改 status=normal）
+        if let Some(status) = table.rr3_slot_status(slot) {
+            if status == "placeholder" || status == "retired" {
+                errs.push(format!(
+                    "装配面引用 {status} 格 {slot}（占位/退役格不得进生产装配面；真件落地后改 contracts/slots.toml status=normal 再绑定）"
+                ));
+            }
+        }
+        let scope = table.rr3_slot_tier_scope(slot).unwrap_or_default();
+        if !scope.iter().any(|t| t == &profile.platform_tier) {
+            errs.push(format!(
+                "tier↔tier_scope 交叉校验失败：装配档 {tier} 引用格 {slot}，其 tier_scope = {scope:?} 不含 {tier}（该档不适用此格，ADR-0012 增补注记分族），拒绝启动",
+                tier = profile.platform_tier
+            ));
+        }
+    }
+    errs
+}
+
+/// 结构自洽：每条 binding 都必须被 enabled_slots 认领（否则是死数据）
+fn rr3_check_claims(profile: &Rr3Profile) -> Vec<String> {
+    let mut errs = Vec::new();
+    for (slot, module) in &profile.bindings {
+        let claimed = profile
+            .enabled_slots
+            .get(module)
+            .is_some_and(|slots| slots.contains(slot));
+        if !claimed {
+            errs.push(format!(
+                "bindings 条目 {slot}={module} 未被 enabled_slots 认领（模块 {module} 不在 enabled_slots，或其 enabled_slots 不含 {slot}）"
+            ));
+        }
+    }
+    errs
+}
+
+/// 装载期校验①（[[pin]] 逐条）+ host 档词形派生；返回 (错误, 派生视图)。
+/// rtos/bare 档不派生（板侧描述符消费归 0.0.7 批G/批D1），pins 校验照跑。
+fn rr3_check_pins(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    table: &Rr3SlotTable,
+    platform: &Rr3PlatformTable,
+) -> (Vec<String>, BTreeMap<String, String>) {
+    let mut errs = Vec::new();
+    let mut derived = BTreeMap::new();
+    // host 档词形前件守卫（实-6 (a)）：词形表空 = 平台没提供派生前件，fail-closed
+    if profile.platform_tier == "host" && platform.rr3_wordform_map().is_empty() {
+        errs.push(
+            "host 档平台事实表 controller_wordform 为空（词形派生前件缺失，host 档必须选带词形表的主机平台册，fail-closed）"
+                .into(),
+        );
+    }
+    for pin in &profile.pins {
+        let (pin_errs, derives) = rr3_check_pin(pin, roles, table);
+        errs.extend(pin_errs);
+        let Some(derives) = derives else { continue };
+        if profile.platform_tier != "host" {
+            continue;
+        }
+        errs.extend(rr3_derive_pin(pin, &derives, platform, &mut derived));
+    }
+    (errs, derived)
+}
+
+/// 单条 pin 的静态校验（角色查册 / per_instance / requires / direction /
+/// role.slot）；角色未在册时直接返回单条点名（不级联刷屏），Second 返回 derived
+/// 声明供 host 档派生。
+fn rr3_check_pin(
+    pin: &Rr3PinEntry,
+    roles: &Rr3RoleTable,
+    table: &Rr3SlotTable,
+) -> (Vec<String>, Option<Vec<String>>) {
+    let mut errs = Vec::new();
+    let label = format!("pins[{}]", pin.rr3_pin_id());
+    let Some(derives) = roles.rr3_role_derives(&pin.role) else {
+        errs.push(format!(
+            "{label} 角色 {} 未在册（contracts/roles.toml 无此角色，装配单不得自造角色）",
+            pin.role
+        ));
+        return (errs, None);
+    };
+    // per_instance 规则：true ⇒ instance 必填；false ⇒ instance 禁填
+    match roles.rr3_role_per_inst(&pin.role) {
+        Some(true) if pin.instance.is_empty() => errs.push(format!(
+            "{label} 角色 {} per_instance = true，instance 必填（多实例角色的身份一半在 instance）",
+            pin.role
+        )),
+        Some(false) if !pin.instance.is_empty() => errs.push(format!(
+            "{label} 角色 {} per_instance = false，instance 禁填（填了 pin_id 就有两个真值点）",
+            pin.role
+        )),
+        _ => {}
+    }
+    // requires 逐项在场（§5 缺失语义：空串/None/空数组 = 缺；"none" 算在场）
+    for f in roles.rr3_role_requires(&pin.role).unwrap_or_default() {
+        if !RR3_PIN_KEYS.contains(&f.as_str()) {
+            errs.push(format!(
+                "角色 {} 的 requires 引用未知字段 {f}（[pins] 字段词表外——门 a 六表对账第 5 张的漂移）",
+                pin.role
+            ));
+        } else if !rr3_pin_has(pin, &f) {
+            errs.push(format!(
+                "{label} 缺 {f}（角色 {} requires 必填，留空即红——§5 缺失语义；\"合法不适用\"须显式写 none）",
+                pin.role
+            ));
+        }
+    }
+    // direction 相等（pin 的物理方向与角色声明各说一套 = 数据矛盾）
+    if let Some(d) = roles.rr3_role_direction(&pin.role) {
+        if pin.direction != d {
+            errs.push(format!(
+                "{label} direction = {} 与角色 {} direction = {d} 不一致（校验①）",
+                pin.direction, pin.role
+            ));
+        }
+    }
+    // role.slot ∈ slots（roles/slots 两表对账的装载侧执法）
+    if let Some(slot) = roles.rr3_role_slot(&pin.role) {
+        if !table.rr3_slot_contains(&slot) {
+            errs.push(format!(
+                "角色 {} 的 slot {slot} 未在格位契约在册（roles/slots 两表对账）",
+                pin.role
+            ));
+        }
+    }
+    (errs, Some(derives))
+}
+
+/// host 档派生：derives 声明逐键取值（多实例共键须同值）+ 词形漂移检查。
+/// 词形清单住平台表——表里有什么判什么，rrd 零硬编码词形清单。
+fn rr3_derive_pin(
+    pin: &Rr3PinEntry,
+    derives: &[String],
+    platform: &Rr3PlatformTable,
+    derived: &mut BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut errs = Vec::new();
+    let label = format!("pins[{}]", pin.rr3_pin_id());
+    for d in derives {
+        match rr3_pin_derive_value(pin, d, platform) {
+            Ok(v) => match derived.get(d) {
+                None => {
+                    derived.insert(d.clone(), v);
+                }
+                Some(prev) if prev != &v => errs.push(format!(
+                    "{label} 派生键 {d} 与他条取值不同（{prev} vs {v}）——多实例共键须同值（同一资源维）"
+                )),
+                _ => {}
+            },
+            Err(e) => errs.push(format!("{label} 派生 {d} 失败: {e}")),
+        }
+    }
+    // 词形漂移（①-f）：控制器词形指明总线族，该族派生键必须被角色声明。
+    // derives 显式空的角色跳过（"不派生"是声明不是漏声明）。
+    if !derives.is_empty() {
+        for (key, prefix) in platform.rr3_wordform_map() {
+            if rr3_wordform_tail(&pin.controller, prefix).is_some()
+                && !derives.iter().any(|d| d == key)
+            {
+                errs.push(format!(
+                    "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
+                    pin.controller, pin.role
+                ));
+            }
+        }
+    }
+    errs
+}
+
+/// 门 n（§8 注入路径唯一）：[hardware] 出现引脚侧派生键一律红——pin 实际派生
+/// 该键时点名两份取值，否则按稳态判据点名。
+fn rr3_check_hw_keys(profile: &Rr3Profile, derived: &BTreeMap<String, String>) -> Vec<String> {
+    let mut errs = Vec::new();
+    for k in RR3_PIN_DERIVED_KEYS {
+        if let Some(hv) = profile.hardware.get(k) {
+            match derived.get(k) {
+                Some(dv) => errs.push(format!(
+                    "hardware.{k} = \"{hv}\" 与 [pins] 派生值 \"{dv}\" 两处并存（门 n：注入路径唯一，[pins] 派生或 [hardware] 直给二者取一）"
+                )),
+                None => errs.push(format!(
+                    "hardware.{k} 是引脚侧派生键（schema 3 起唯一来源 = [pins] 派生，[hardware] 不得直给——门 n 稳态判据）"
+                )),
+            }
+        }
+    }
+    errs
+}
+
+/// 装载期校验⑥-a/⑥-b：功率面角色必须挂真实供电轨，轨名必须在册；
+/// signal 面缺 rail 合法，"none" 是显式不适值。
+fn rr3_check_rails(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    domain_names: &BTreeSet<String>,
+) -> Vec<String> {
+    let mut errs = Vec::new();
+    for pin in &profile.pins {
+        let kind = roles.rr3_role_kind(&pin.role);
+        let rail_unlisted = pin.rail.is_empty() || pin.rail == "none";
+        if rail_unlisted {
+            if kind.as_deref() == Some("power") {
+                errs.push(format!(
+                    "pins[{}] rail {} 但角色 {} kind = power（校验⑥-b：功率面必须挂真实供电轨，缺 rail 或 none 即红）",
+                    pin.rr3_pin_id(),
+                    if pin.rail.is_empty() { "缺失" } else { "= none" },
+                    pin.role
+                ));
+            }
+        } else if !domain_names.contains(pin.rail.as_str()) {
+            errs.push(format!(
+                "pins[{}] rail = {} 未在 [[supplies.domain]] 在册（校验⑥-a；域名单源在该形态的域声明，§18 F-5）",
+                pin.rr3_pin_id(),
+                pin.rail
+            ));
+        }
+    }
+    errs
+}
+
+/// 装载期校验⑥-c/⑥-d/⑥-e 的域面：武装需测点与龄期上界、evidence 与 armed
+/// 成对且形制合法、三个绑定引用位必须是 [pins] 的 pin_id、可切域必有开关位。
+fn rr3_check_domains(profile: &Rr3Profile) -> Vec<String> {
+    let mut errs = Vec::new();
+    for d in &profile.supplies.domains {
+        errs.extend(rr3_check_domain(d, &profile.pins));
+    }
+    errs
+}
+
+/// 单个电力域的五项判据（文案与批N21 件二同源）
+fn rr3_check_domain(d: &Rr3Domain, pins: &[Rr3PinEntry]) -> Vec<String> {
+    let mut errs = Vec::new();
+    let label = format!("supplies.domains[{}]", d.name);
+    if d.armed && (d.sense == "none" || d.max_age_ms <= 0) {
+        errs.push(format!(
+            "{label} armed = true 但 sense = none 或 max_age_ms ≤ 0（校验⑥-c：无测点/无龄期上界的域不得武装拒动——未标定即 armed=false，§3.1 降级语义）"
+        ));
+    }
+    if d.armed {
+        if d.evidence == "none" || d.evidence.is_empty() {
+            errs.push(format!(
+                "{label} armed = true 但 evidence = none（校验⑥-e：武装拒动必须引用一条真板实测证据，规则住 conventions §6.1；未标定即 armed = false）"
+            ));
+        } else if !rr_ipc::evidence::rr3_evidence_ref_ok(&d.evidence) {
+            errs.push(format!(
+                "{label}.evidence = {} 形制不合法（校验⑥-e：应为 <形态>/<四位编号>，如 实测/0001）",
+                d.evidence
+            ));
+        }
+    } else if d.evidence != "none" {
+        errs.push(format!(
+            "{label} armed = false 但 evidence = {}（校验⑥-e：未武装不携证据，evidence 显式写 \"none\"——证据位与武装位成对，不出现过期引用）",
+            if d.evidence.is_empty() { "缺失" } else { &d.evidence }
+        ));
+    }
+    for (key, val) in [
+        ("sense", &d.sense),
+        ("current_sense", &d.current_sense),
+        ("switch", &d.switch),
+    ] {
+        if val == "none" {
+            continue;
+        }
+        if !pins.iter().any(|p| p.rr3_pin_id() == *val) {
+            errs.push(format!(
+                "{label}.{key} = {val} 不在 [pins] 的 pin_id 集（校验⑥-d：绑定位一律写 pin_id，\"none\" 是合法显式值——第二套语法如 adc:gp34 一律红，F-2）"
+            ));
+        }
+    }
+    if d.switchable && d.switch == "none" {
+        errs.push(format!(
+            "{label} switchable = true 但 switch = none（可切域必有开关控制位，两键成对）"
+        ));
+    }
+    errs
+}
+
+/// 装配扫描产物：模块名 → [(件名, facts)]（预算判据分子；坏形进 broken 旁路）
+type Rr3Scan = Vec<(String, Vec<(String, Rr3AssembleFacts)>)>;
+
+/// 装配扫描：逐模块读 atoms/*/assemble.toml；坏形/注入缺进 broken（该模块
+/// Degraded，不 fatal），合法 facts 进 scanned（预算判据分子）。
+fn rr3_scan_modules(root: &Path, profile: &Rr3Profile) -> (Rr3Scan, Vec<(String, String)>) {
+    let mut broken = Vec::new();
+    let mut scanned = Vec::new();
+    for m in profile.enabled_slots.keys() {
+        let (atoms, msgs) = rr3_assemble_scan(&root.join("modules").join(m));
+        scanned.push((m.clone(), atoms));
+        for msg in msgs {
+            broken.push((m.clone(), msg));
+        }
+    }
+    (scanned, broken)
+}
+
+/// 校验⑨（电流预算/覆盖）与校验⑩（内存预算）：分子来自装配扫描 facts，
+/// 分母来自装配单；坏形件不进加总（可见面 = assemble_broken 点名）。
+fn rr3_check_budgets(profile: &Rr3Profile, roles: &Rr3RoleTable, scanned: &Rr3Scan) -> Vec<String> {
+    let mut errs = Vec::new();
+    let declared = rr3_demand_expand(profile, roles, scanned);
+    errs.extend(rr3_demand_budget(&declared, &profile.supplies.domains));
+    errs.extend(rr3_power_gaps(profile, roles, scanned));
+    let stack_sum: i64 = scanned
+        .iter()
+        .flat_map(|(_, atoms)| atoms.iter())
+        .map(|(_, f)| f.task_stack_bytes)
+        .sum();
+    let heap_sum: i64 = scanned
+        .iter()
+        .flat_map(|(_, atoms)| atoms.iter())
+        .map(|(_, f)| f.heap_peak_bytes)
+        .sum();
+    errs.extend(rr3_memory_budget(
+        stack_sum,
+        heap_sum,
+        &profile.supplies.budget,
+        &profile.platform_tier,
+    ));
+    errs
+}
+
+/// 校验②（后果 = 降不拒）：present ∩ enabled_slots 的缺角色清单
+fn rr3_role_gaps(profile: &Rr3Profile, roles: &Rr3RoleTable) -> Vec<(String, String)> {
+    let mut gaps = Vec::new();
+    let enabled_all: BTreeSet<String> = profile.enabled_slots.values().flatten().cloned().collect();
+    for slot in &enabled_all {
+        if !profile.slots_present.contains(slot) {
+            continue;
+        }
+        for role in roles.rr3_role_slot_names(slot) {
+            if !profile.pins.iter().any(|p| p.role == role) {
+                gaps.push((slot.clone(), role));
+            }
+        }
+    }
+    gaps.sort();
+    gaps
+}
+
+/// 缺格三源合一（方案 §15）：实测缺（探测）+ 声明缺（present）+ 注入缺
+/// （enabled_slots 声明但无指向本模块的 binding）；基础层恒在位跳过。
+fn rr3_slot_gaps(
+    profile: &Rr3Profile,
+    table: &Rr3SlotTable,
+    roles: &Rr3RoleTable,
+    probe: &dyn crate::probe::Rr3Probe,
+) -> Vec<(String, String)> {
+    let i2c_bind = rr3_i2c_bind(profile, roles);
+    let mut missing = rr3_probe_gaps(profile, &i2c_bind, probe);
+    rr3_declared_gaps(profile, table, &mut missing);
+    missing.sort();
+    missing
+}
+
+/// L-14 器件级探测的 (bus, addr) 组装：格位 → 该格角色在 [pins] 的 I2C 绑定
+/// （controller 词形 i2c<N> → N，addr 非 none 非空才有效）。无绑定 → None →
+/// 探针回落总线级五面判据（无 [pins] 形态兼容面）。
+fn rr3_i2c_bind(profile: &Rr3Profile, roles: &Rr3RoleTable) -> BTreeMap<String, (u32, String)> {
+    let mut i2c_bind = BTreeMap::new();
+    let enabled_all: BTreeSet<String> = profile.enabled_slots.values().flatten().cloned().collect();
+    for slot in &enabled_all {
+        for role in roles.rr3_role_slot_names(slot) {
+            for pin in profile.pins.iter().filter(|p| p.role == role) {
+                let Some(n) = pin
+                    .controller
+                    .strip_prefix("i2c")
+                    .and_then(|rest| rest.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if !pin.addr.is_empty() && pin.addr != "none" {
+                    i2c_bind
+                        .entry(slot.clone())
+                        .or_insert_with(|| (n, pin.addr.clone()));
+                }
+            }
+        }
+    }
+    i2c_bind
+}
+
+/// 探测先行（MC-4）：bindings 声明的格位逐格探测；探测自身故障按"探测不到"
+/// 处理（fail-closed，方案 §4）——缺格三源合一的"实测缺"即出自本环。
+fn rr3_probe_gaps(
+    profile: &Rr3Profile,
+    i2c_bind: &BTreeMap<String, (u32, String)>,
+    probe: &dyn crate::probe::Rr3Probe,
+) -> Vec<(String, String)> {
+    let mut missing = Vec::new();
+    for (slot, module) in &profile.bindings {
+        let (bus, addr) = match i2c_bind.get(slot) {
+            Some((n, a)) => (Some(*n), Some(a.as_str())),
+            None => (None, None),
+        };
+        if !probe.rr3_probe_slot_bound(slot, bus, addr) {
+            missing.push((module.clone(), slot.clone()));
+        }
+    }
+    missing
+}
+
+/// 声明缺/注入缺逐格补齐（去重；板说没有的格不再看 binding——绑了也白绑）
+fn rr3_declared_gaps(
+    profile: &Rr3Profile,
+    table: &Rr3SlotTable,
+    missing: &mut Vec<(String, String)>,
+) {
+    for (module, slots) in &profile.enabled_slots {
+        for slot in slots {
+            if table.rr3_slot_layer(slot).as_deref() == Some("base") {
+                continue;
+            }
+            let absent = !profile.slots_present.contains(slot);
+            if (absent || profile.bindings.get(slot) != Some(module))
+                && !missing.contains(&(module.clone(), slot.clone()))
+            {
+                missing.push((module.clone(), slot.clone()));
+            }
+        }
+    }
+}
+
+/// manifest 路径（模块名升序：BTreeMap 键序，确定性）
+fn rr3_manifests(profile: &Rr3Profile, root: &Path) -> Vec<PathBuf> {
+    profile
+        .enabled_slots
+        .keys()
+        .map(|m| root.join("modules").join(m).join("module.toml"))
+        .collect()
+}
+
+/// hal_bindings 注入文本：host 档派生视图 ∪ [hardware] 非引脚键（门 n 已保证
+/// 物理键不双占，合并无覆盖歧义）；rtos/bare 档 derived 为空，[hardware] 原样。
+fn rr3_hal_bindings(
+    derived: BTreeMap<String, String>,
+    hardware: &BTreeMap<String, String>,
+) -> String {
+    let mut merged = derived;
+    for (k, v) in hardware {
+        merged.insert(k.clone(), v.clone());
+    }
+    rr3_bindings_text(&merged)
+}
+
+/// 执行轴装载与投影：目录 = 接线档同级 axis/，pin_ids = [[pin]] 全集；
+/// 装载一次，清单同时进装配快照（面板出图要看见全部轴），投影只吃这份清单。
+fn rr3_axis_load(
+    wiring_abs: &Path,
+    pin_ids: &BTreeSet<String>,
+) -> (Vec<crate::axis::Rr3AxisFile>, String, Vec<String>) {
+    let axis_dir = wiring_abs.parent().expect("接线档必有父目录").join("axis");
+    let axis_wanted = std::env::var(rr_hal_api::RR3_PERIPH_AXIS_ENV)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| rr_hal_api::RR3_PERIPH_AXIS_DEFAULT.to_string());
+    let (axis_files, axis_notes) = rr3_axis_files_load(&axis_dir, pin_ids);
+    let (axis_state, axis_notes_project) = rr3_axis_state_text(&axis_files, &axis_wanted);
+    let mut axis_notes = axis_notes;
+    axis_notes.extend(axis_notes_project);
+    (axis_files, axis_state, axis_notes)
+}
+
+/// 装配单装载：绝对化 → 读文本 → 解析（形状不合逐条点名，一条不静默放行）
+fn rr3_load_profile(path: &Path) -> Result<(PathBuf, Rr3Profile), String> {
+    let abs = rr3_profile_abs(path)?;
+    let text = std::fs::read_to_string(&abs)
+        .map_err(|e| format!("读不到装配单 {}: {e}", abs.display()))?;
+    let profile = rr3_profile_parse(&text).map_err(|errs| {
+        errs.iter()
+            .map(|e| format!("装配单 {} 形状不合: {e}", abs.display()))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    Ok((abs, profile))
+}
+
+/// 格位契约装载 + 空表/形状门（查册真值 = rr-registry 那一册，与 CI 全集层同源）
+fn rr3_load_slots(path: &Path) -> Result<Rr3SlotTable, String> {
+    let abs = std::fs::canonicalize(path)
+        .map_err(|e| format!("读不到格位契约 {}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(&abs)
+        .map_err(|e| format!("读不到格位契约 {}: {e}", abs.display()))?;
+    let table: Rr3SlotTable = rr3_slot_parse(&text);
+    if table.rr3_slot_is_empty() {
+        return Err(format!(
+            "格位契约 {} 解析后为空，拒绝启动（空格位表是契约事故）",
+            abs.display()
+        ));
+    }
+    // 形状门（0.0.5 批J 深挖收口；与 topics 装载的 rr3_topic_check 同构——
+    // CI 契约测试钉 23 格是全集层门，这里是运行期门，两轴缺一即带病）。
+    let errs = table.rr3_slot_check();
+    if !errs.is_empty() {
+        return Err(format!(
+            "格位契约 {} 形状不合，拒绝启动: {}",
+            abs.display(),
+            errs.join("; ")
+        ));
+    }
+    Ok(table)
+}
+
+/// 角色契约装载 + 空表/形状门（与格位契约同一 fail-closed 口径）
+fn rr3_load_roles(path: &Path) -> Result<Rr3RoleTable, String> {
+    let abs = std::fs::canonicalize(path)
+        .map_err(|e| format!("读不到角色契约 {}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(&abs)
+        .map_err(|e| format!("读不到角色契约 {}: {e}", abs.display()))?;
+    let roles: Rr3RoleTable = rr3_role_parse(&text);
+    if roles.rr3_role_is_empty() {
+        return Err(format!(
+            "角色契约 {} 解析后为空，拒绝启动（空角色表是契约事故）",
+            abs.display()
+        ));
+    }
+    let errs = roles.rr3_role_check();
+    if !errs.is_empty() {
+        return Err(format!(
+            "角色契约 {} 形状不合，拒绝启动: {}",
+            abs.display(),
+            errs.join("; ")
+        ));
+    }
+    Ok(roles)
+}
+
+/// 器件词表装载 + 空表/形状门（装载期只查 mate 外键闭合，不认型号能力，D10a）
+fn rr3_load_devices(path: &Path) -> Result<Rr3DeviceTable, String> {
+    let abs = std::fs::canonicalize(path)
+        .map_err(|e| format!("读不到器件词表 {}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(&abs)
+        .map_err(|e| format!("读不到器件词表 {}: {e}", abs.display()))?;
+    let devices: Rr3DeviceTable = rr3_dev_parse(&text);
+    if devices.rr3_dev_is_empty() {
+        return Err(format!(
+            "器件词表 {} 解析后为空，拒绝启动（空器件表是契约事故）",
+            abs.display()
+        ));
+    }
+    let errs = devices.rr3_dev_check();
+    if !errs.is_empty() {
+        return Err(format!(
+            "器件词表 {} 形状不合，拒绝启动: {}",
+            abs.display(),
+            errs.join("; ")
+        ));
+    }
+    Ok(devices)
+}
+
+/// 接线档装载（装机档必在：读不到/形状不合都拒启动；返回绝对路径供轴目录推导）
+fn rr3_load_wiring(path: &Path) -> Result<(PathBuf, crate::wiring::Rr3Wiring), String> {
+    let abs =
+        std::fs::canonicalize(path).map_err(|e| format!("读不到接线档 {}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(&abs)
+        .map_err(|e| format!("读不到接线档 {}: {e}", abs.display()))?;
+    let wiring = crate::wiring::rr3_wiring_from_text(&text).map_err(|errs| {
+        format!(
+            "接线档 {} 形状不合，拒绝启动: {}",
+            abs.display(),
+            errs.join("; ")
+        )
+    })?;
+    Ok((abs, wiring))
+}
+
+/// 平台事实表装载：按 [platform].chip 选册，读不到/形状坏逐条点名拒 boot（不降级）
+fn rr3_load_platform(dir: &Path, chip: &str) -> Result<Rr3PlatformTable, String> {
+    let path = dir.join(rr3_platform_file(chip));
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "读不到平台事实表 {}（[platform].chip = {chip} 的选册）: {e}",
+            path.display()
+        )
+    })?;
+    rr3_plat_parse(&text).map_err(|errs| {
+        format!(
+            "平台事实表 {} 形状不合，拒绝启动: {}",
+            path.display(),
+            errs.join("; ")
+        )
     })
 }
 
