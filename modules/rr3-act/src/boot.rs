@@ -226,6 +226,10 @@ pub(crate) struct Rr3IntentCfg {
     pub(crate) open_topics: Vec<String>,
 }
 
+/// 反射环节拍上界（Hz）：`1_000_000 / loop_hz` 微秒取整，超过 1kHz 的配置
+/// 在生产里没有物理意义，却会让循环周期归零（满转自旋）。
+const RR3_MAX_LOOP_HZ: u32 = 1_000;
+
 /// TOML 文本 → Rr3ActCfg。手工下钻不引 serde derive：字段个位数，
 /// 点名缺字段的文案比派生宏的默认报错可读。
 pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
@@ -251,11 +255,17 @@ pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     // 只管时限/限速。config 出现任何行程键 = 读者零的死键，装配期
     // （rrd assemble scan）与 CI 门 ⑨-e 双面执法，此处不再解析。
     // loop_hz 越界拒 boot（0.0.5 批I A-3）：`as u32` 裸截断会把 2^32+1 之类
-    // 值偷偷收成 1，节拍面静默变形——try_from 点名拒绝
+    // 值偷偷收成 1，节拍面静默变形——try_from 点名拒绝。本轮审计补上界：
+    // 1_000_000/loop_hz 在 loop_hz 极大时取整为 0µs，反射环会变成满转自旋。
     let loop_hz_raw = u64_of(&reflex_sect, "loop_hz", "reflex")?.max(1);
     let loop_hz = u32::try_from(loop_hz_raw).map_err(|_| {
         format!("config [rr3-act.reflex] loop_hz={loop_hz_raw} 超出 u32 范围，拒 boot")
     })?;
+    if loop_hz > RR3_MAX_LOOP_HZ {
+        return Err(format!(
+            "config [rr3-act.reflex] loop_hz 须在 1..={RR3_MAX_LOOP_HZ}，收到 {loop_hz}（更大值会退化为满转自旋）"
+        ));
+    }
     // 灯效白名单子集（A-9）：数组逐元素必须是**在册契约值**，非在册值或非字符串
     // 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态一条点名都不认（合法）
     let effects_arr = led_sect
@@ -467,6 +477,13 @@ saturate_notice_ms = 500
 "#;
         let e = rr3_act_config_parse(text).unwrap_err();
         assert!(e.contains("loop_hz"), "越界点名: {e}");
+        // 本轮审计：装得进 u32 但大到让 1_000_000/hz 归零的档位同样拒
+        let text = text.replace("loop_hz = 5000000000", "loop_hz = 4000000000");
+        let e = rr3_act_config_parse(&text).unwrap_err();
+        assert!(
+            e.contains("loop_hz") && e.contains("满转自旋"),
+            "超大 loop_hz 点名: {e}"
+        );
     }
 
     /// A-9 fail-closed：灯效白名单子集与意图开放集逐条点名——缺键/类型错/
