@@ -422,6 +422,9 @@ pub struct Rr3ProfileBoot {
     /// 记账（[`rr3_truth_locations`] 消费）按它定位平台事实表——
     /// daemon 臂不再二次解析装配单拿 chip（双真值即漂移温床）。
     pub platform_chip: String,
+    /// [platform].tier（host/rtos/bare）：启动摘要与排障面回显用；同源于
+    /// [`Rr3Profile::platform_tier`]，不二次解析装配单。
+    pub platform_tier: String,
     /// 装配快照（批N4 件九笔4，`rr3.ctl.wiring` 判据源）：boot 装载链验收通过后
     /// 的四元不可变底账（装配单本体 / 接线档 / 轴档案 / 角色表）。None = 本 boot
     /// 未走装配单路径（`--manifest` 调试路径）或接线档尚未在册（快照无接线档即
@@ -930,6 +933,27 @@ fn rr3_domains_parse(items: &[toml::Value], errs: &mut Vec<String>) -> Vec<Rr3Do
 /// platform.tier 自有错误点名，不级联刷屏。
 fn rr3_budget_parse(bt: &toml::Table, tier: &str, errs: &mut Vec<String>) -> Rr3Budget {
     let mut budget = Rr3Budget::default();
+    rr3_budget_keys(bt, errs);
+    match bt.get("not_applicable").and_then(toml::Value::as_bool) {
+        Some(b) => budget.not_applicable = b,
+        None => errs.push(
+            "supplies.budget.not_applicable 缺失或不是布尔（校验⑩ 不适用必须显式声明，不许留空——F-6）"
+                .to_string(),
+        ),
+    }
+    let nums = rr3_budget_nums(bt, &mut budget, errs);
+    if !tier.is_empty() {
+        if tier == "host" {
+            rr3_budget_host(&budget, &nums, errs);
+        } else {
+            rr3_budget_rtos(&budget, &nums, errs);
+        }
+    }
+    budget
+}
+
+/// 未知键点名：预算段只认 [`RR3_BUDGET_KEYS`] 四键（三数 + 不适用位）。
+fn rr3_budget_keys(bt: &toml::Table, errs: &mut Vec<String>) {
     for k in bt.keys() {
         if !RR3_BUDGET_KEYS.contains(&k.as_str()) {
             errs.push(format!(
@@ -938,14 +962,15 @@ fn rr3_budget_parse(bt: &toml::Table, tier: &str, errs: &mut Vec<String>) -> Rr3
             ));
         }
     }
-    match bt.get("not_applicable").and_then(toml::Value::as_bool) {
-        Some(b) => budget.not_applicable = b,
-        None => errs.push(
-            "supplies.budget.not_applicable 缺失或不是布尔（校验⑩ 不适用必须显式声明，不许留空——F-6）"
-                .to_string(),
-        ),
-    }
-    let mut nums: BTreeMap<&str, i64> = BTreeMap::new();
+}
+
+/// 三数键收集（类型错点名）：返回"本次出现的键→值"，分档自洽判据共用。
+fn rr3_budget_nums(
+    bt: &toml::Table,
+    budget: &mut Rr3Budget,
+    errs: &mut Vec<String>,
+) -> BTreeMap<&'static str, i64> {
+    let mut nums: BTreeMap<&'static str, i64> = BTreeMap::new();
     for key in [
         "task_stack_budget_bytes",
         "heap_total_bytes",
@@ -967,68 +992,70 @@ fn rr3_budget_parse(bt: &toml::Table, tier: &str, errs: &mut Vec<String>) -> Rr3
             }
         }
     }
-    if !tier.is_empty() {
-        if tier == "host" {
-            if !budget.not_applicable {
-                errs.push(
-                    "分档自洽校验失败（校验⑩）：tier = host 但 supplies.budget.not_applicable = false——校验⑩ 对 host 档不适用，合法不适用必须显式写 true，不许留空（F-6 / ADR-0021 修订 3）"
-                        .to_string(),
-                );
-            }
-            if !nums.is_empty() {
-                errs.push(format!(
-                    "分档自洽校验失败（校验⑩）：tier = host 但 [supplies.budget] 并存数字预算键 {}（与 not_applicable = true 自相矛盾——栈/堆预算只属于 rtos/bare 档，ADR-0021 修订 3）",
-                    nums.keys().copied().collect::<Vec<_>>().join("/")
-                ));
-            }
-        } else {
-            // rtos / bare：有真栈/堆预算，not_applicable 不得真
-            if budget.not_applicable {
-                errs.push(
-                    "分档自洽校验失败（校验⑩）：tier = rtos/bare 但 supplies.budget.not_applicable = true（rtos/bare 档有真栈/堆预算，写不适用是自相矛盾——ADR-0021 修订 3）"
-                        .to_string(),
-                );
-            }
-            for key in [
-                "task_stack_budget_bytes",
-                "heap_total_bytes",
-                "heap_reserved_bytes",
-            ] {
-                if !nums.contains_key(key) {
-                    errs.push(format!(
-                        "supplies.budget.{key} 缺失（rtos/bare 档必填——校验⑩ 分母，合法不适用才走 not_applicable，不许留空——F-6）"
-                    ));
-                }
-            }
-            if let (Some(&st), Some(&tot), Some(&res)) = (
-                nums.get("task_stack_budget_bytes"),
-                nums.get("heap_total_bytes"),
-                nums.get("heap_reserved_bytes"),
-            ) {
-                if st <= 0 {
-                    errs.push(format!(
-                        "supplies.budget.task_stack_budget_bytes = {st} 须为正整数（⑩-a 分母，0 预算 = 栈账无分母）"
-                    ));
-                }
-                if tot <= 0 {
-                    errs.push(format!(
-                        "supplies.budget.heap_total_bytes = {tot} 须为正整数（⑩-b 分母基数）"
-                    ));
-                }
-                if res < 0 {
-                    errs.push(format!(
-                        "supplies.budget.heap_reserved_bytes = {res} 须为非负整数（平台常驻占用，负数是物理矛盾）"
-                    ));
-                }
-                if tot > 0 && res >= 0 && tot <= res {
-                    errs.push(format!(
-                        "supplies.budget.heap_total_bytes = {tot} ≤ heap_reserved_bytes = {res}（可用堆 = total − reserved ≤ 0，⑩-b 无分母——物理矛盾）"
-                    ));
-                }
-            }
+    nums
+}
+
+/// host 档自洽：不适用必须显式为 true，且三数键不得并存（F-6 / ADR-0021 修订 3）。
+fn rr3_budget_host(budget: &Rr3Budget, nums: &BTreeMap<&'static str, i64>, errs: &mut Vec<String>) {
+    if !budget.not_applicable {
+        errs.push(
+            "分档自洽校验失败（校验⑩）：tier = host 但 supplies.budget.not_applicable = false——校验⑩ 对 host 档不适用，合法不适用必须显式写 true，不许留空（F-6 / ADR-0021 修订 3）"
+                .to_string(),
+        );
+    }
+    if !nums.is_empty() {
+        errs.push(format!(
+            "分档自洽校验失败（校验⑩）：tier = host 但 [supplies.budget] 并存数字预算键 {}（与 not_applicable = true 自相矛盾——栈/堆预算只属于 rtos/bare 档，ADR-0021 修订 3）",
+            nums.keys().copied().collect::<Vec<_>>().join("/")
+        ));
+    }
+}
+
+/// rtos/bare 档自洽：三数必填、正负域与"可用堆 > 0"物理判据。
+fn rr3_budget_rtos(budget: &Rr3Budget, nums: &BTreeMap<&'static str, i64>, errs: &mut Vec<String>) {
+    if budget.not_applicable {
+        errs.push(
+            "分档自洽校验失败（校验⑩）：tier = rtos/bare 但 supplies.budget.not_applicable = true（rtos/bare 档有真栈/堆预算，写不适用是自相矛盾——ADR-0021 修订 3）"
+                .to_string(),
+        );
+    }
+    for key in [
+        "task_stack_budget_bytes",
+        "heap_total_bytes",
+        "heap_reserved_bytes",
+    ] {
+        if !nums.contains_key(key) {
+            errs.push(format!(
+                "supplies.budget.{key} 缺失（rtos/bare 档必填——校验⑩ 分母，合法不适用才走 not_applicable，不许留空——F-6）"
+            ));
         }
     }
-    budget
+    if let (Some(&st), Some(&tot), Some(&res)) = (
+        nums.get("task_stack_budget_bytes"),
+        nums.get("heap_total_bytes"),
+        nums.get("heap_reserved_bytes"),
+    ) {
+        if st <= 0 {
+            errs.push(format!(
+                "supplies.budget.task_stack_budget_bytes = {st} 须为正整数（⑩-a 分母，0 预算 = 栈账无分母）"
+            ));
+        }
+        if tot <= 0 {
+            errs.push(format!(
+                "supplies.budget.heap_total_bytes = {tot} 须为正整数（⑩-b 分母基数）"
+            ));
+        }
+        if res < 0 {
+            errs.push(format!(
+                "supplies.budget.heap_reserved_bytes = {res} 须为非负整数（平台常驻占用，负数是物理矛盾）"
+            ));
+        }
+        if tot > 0 && res >= 0 && tot <= res {
+            errs.push(format!(
+                "supplies.budget.heap_total_bytes = {tot} ≤ heap_reserved_bytes = {res}（可用堆 = total − reserved ≤ 0，⑩-b 无分母——物理矛盾）"
+            ));
+        }
+    }
 }
 
 /// [slots]：必填段、present = 本板物理在位格位声明（缺格三源合一第一源）。
@@ -1575,6 +1602,7 @@ pub fn rr3_boot_with_probe(
         servo_backend: profile.servo_backend.clone(),
         display_backend: profile.display_backend.clone(),
         platform_chip: profile.platform_chip.clone(),
+        platform_tier: profile.platform_tier.clone(),
         snapshot: Some(snapshot),
     })
 }
