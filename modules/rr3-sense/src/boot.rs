@@ -123,6 +123,15 @@ impl Default for Rr3SenseConfig {
     }
 }
 
+/// 采集面不变量上界（本轮审计）：采样率/声道/单拍时长属工程域，超界即配置错，
+/// 不是扩展点——0 采样率/0 声道会让采集面永远静默却看起来活着，巨型
+/// frame_ms/window_ms 会在 `frames_per_tick` 与判向 ring 分配处溢出或吃光内存。
+const RR3_MAX_SAMPLE_RATE: u32 = 384_000;
+const RR3_MAX_CHANNELS: u8 = 8;
+const RR3_MAX_FRAME_MS: u64 = 1_000;
+/// 判向窗 ring 的采样点总上界（8Mi 点 ≈ 16MiB）
+const RR3_MAX_RING_SAMPLES: u128 = 8 * 1024 * 1024;
+
 /// 解析配置文本：缺键回落默认，类型错显式报错（不静默吞）。
 pub(crate) fn rr3_sense_cfg_parse(text: &str) -> Result<Rr3SenseConfig, String> {
     let root: toml::Value = text
@@ -203,7 +212,60 @@ pub(crate) fn rr3_sense_cfg_parse(text: &str) -> Result<Rr3SenseConfig, String> 
         rr3_cfg_u64(reflex, "nod_delay_ms", &mut cfg.reflex.nod_delay_ms)?;
         rr3_cfg_u64(reflex, "nod_hold_ms", &mut cfg.reflex.nod_hold_ms)?;
     }
+    rr3_sense_cfg_check(&cfg)?;
     Ok(cfg)
+}
+
+/// 采集/判据面不变量（解析后统一校验，默认值同过一遍）：全部 fail-closed，
+/// 错误文案点名键、收到值与合法域。
+fn rr3_sense_cfg_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
+    if cfg.audio.sample_rate == 0 || cfg.audio.sample_rate > RR3_MAX_SAMPLE_RATE {
+        return Err(format!(
+            "[rr3-sense.audio] sample_rate 须在 1..={RR3_MAX_SAMPLE_RATE}，收到 {}",
+            cfg.audio.sample_rate
+        ));
+    }
+    if cfg.audio.channels == 0 || cfg.audio.channels > RR3_MAX_CHANNELS {
+        return Err(format!(
+            "[rr3-sense.audio] channels 须在 1..={RR3_MAX_CHANNELS}，收到 {}",
+            cfg.audio.channels
+        ));
+    }
+    if cfg.audio.frame_ms > RR3_MAX_FRAME_MS {
+        return Err(format!(
+            "[rr3-sense.audio] frame_ms 须在 1..={RR3_MAX_FRAME_MS}，收到 {}",
+            cfg.audio.frame_ms
+        ));
+    }
+    if !(0..=32767).contains(&cfg.vad.rms_start) {
+        return Err(format!(
+            "[rr3-sense.vad] rms_start 须在 0..=32767（i16 采样域），收到 {}",
+            cfg.vad.rms_start
+        ));
+    }
+    if !(0..=180).contains(&cfg.doa.bin_threshold_deg) {
+        return Err(format!(
+            "[rr3-sense.doa] bin_threshold_deg 须在 0..=180，收到 {}",
+            cfg.doa.bin_threshold_deg
+        ));
+    }
+    if !(0..=180).contains(&cfg.reflex.deadband_deg) {
+        return Err(format!(
+            "[rr3-sense.reflex] deadband_deg 须在 0..=180，收到 {}",
+            cfg.reflex.deadband_deg
+        ));
+    }
+    // 判向 ring 分配量 = rate × window_ms / 1000 × channels（采样点）：用 u128
+    // 计算再比上界，避免 u64 乘法在畸形配置下溢出。
+    let ring_samples = cfg.audio.sample_rate as u128 * cfg.doa.window_ms as u128 / 1000
+        * cfg.audio.channels as u128;
+    if ring_samples > RR3_MAX_RING_SAMPLES {
+        return Err(format!(
+            "[rr3-sense.doa] window_ms={} 的判向 ring 需 {ring_samples} 采样点，超上界 {RR3_MAX_RING_SAMPLES}（约 16MiB）",
+            cfg.doa.window_ms
+        ));
+    }
+    Ok(())
 }
 
 fn rr3_cfg_u64(table: &toml::Value, key: &str, slot: &mut u64) -> Result<(), String> {
@@ -288,6 +350,31 @@ mod tests {
         let cfg = rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = 0\n").unwrap();
         assert_eq!(cfg.audio.frame_ms, 20);
         assert!(rr3_sense_cfg_parse("[rr3-sense.audio]\nframe_ms = -5\n").is_err());
+    }
+
+    /// 采集/判据域（本轮审计）：0 采样率/声道=假活，巨型 frame/window=溢出或
+    /// 吃内存，负阈值/越界档界=语义反转——一律 fail-closed。
+    #[test]
+    fn config_rejects_degenerate_audio_and_doa_domains() {
+        for text in [
+            "[rr3-sense.audio]\nsample_rate = 0\n",
+            "[rr3-sense.audio]\nsample_rate = 384001\n",
+            "[rr3-sense.audio]\nchannels = 0\n",
+            "[rr3-sense.audio]\nchannels = 9\n",
+            "[rr3-sense.audio]\nframe_ms = 1001\n",
+            "[rr3-sense.vad]\nrms_start = -1\n",
+            "[rr3-sense.vad]\nrms_start = 32768\n",
+            "[rr3-sense.doa]\nbin_threshold_deg = -1\n",
+            "[rr3-sense.doa]\nbin_threshold_deg = 181\n",
+            "[rr3-sense.reflex]\ndeadband_deg = -1\n",
+            "[rr3-sense.doa]\nwindow_ms = 3600000\n",
+        ] {
+            assert!(rr3_sense_cfg_parse(text).is_err(), "必须拒: {text}");
+        }
+        assert!(rr3_sense_cfg_parse(
+            "[rr3-sense.audio]\nsample_rate = 48000\nchannels = 2\nframe_ms = 10\n"
+        )
+        .is_ok());
     }
 
     /// reflex 段解析：缺段 = enable 缺省 false（不开与旧版逐点等价）；全量注入
