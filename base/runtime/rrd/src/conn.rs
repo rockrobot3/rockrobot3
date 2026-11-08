@@ -749,11 +749,19 @@ fn rr3_pub_forward(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str) {
     };
     // 排除项是发布者自己：模块不该收到自己发出的广播（`rr3_reg_fanout` 只按 task 排除，
     // 不看帧的 dst，见该函数文档）。
-    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(&frame, me.task);
-    // 影子统计（广播面 ADR 前哨）：只按 manifest subscribes 记账"本应过滤"的
-    // 目标数，不改上面的全量投递——计数面 = rr3.ctl.counters 的 fanout_shadow*
-    rr3_lock(&ctx.shared).rr3_reg_fanout_shadow(topic, me.task);
-    rr3_log(&format!("转发 {topic} 到 {n} 个连接"));
+    // 留痕只在接收连接数变化（含首次）时落——音频 PCM 每帧一条会把日志环冲垮。
+    let (n, changed) = {
+        let mut g = rr3_lock(&ctx.shared);
+        let n = g.rr3_reg_fanout(&frame, me.task);
+        // 影子统计（广播面 ADR 前哨）：只按 manifest subscribes 记账"本应过滤"的
+        // 目标数，不改上面的全量投递——计数面 = rr3.ctl.counters 的 fanout_shadow*
+        g.rr3_reg_fanout_shadow(topic, me.task);
+        let changed = g.rr3_reg_fan_changed(topic, n);
+        (n, changed)
+    };
+    if changed {
+        rr3_log(&format!("转发 {topic} 到 {n} 个连接"));
+    }
 }
 
 /// 低电兜底（0.0.2 方案 D6/Q4 裁定，architecture §7.3 横切路径）：rrd 是总线本体，
