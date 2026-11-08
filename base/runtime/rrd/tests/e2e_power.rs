@@ -70,8 +70,8 @@ severe_mv = 4400
 max_age_ms = 0
 "#;
 
-/// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_act/e2e_connect 同款：
-/// profiles/default.toml + hardware/default/wiring.toml，Drop 清整树）。
+// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_act/e2e_connect 同款：
+// profiles/default.toml + hardware/default/wiring.toml，Drop 清整树）。
 
 /// 帧的 (载荷类型, topic) 摘要：谓词与计数共用的纯函数底座。非 JSON / 坏前缀 /
 /// 非 object 体一律 None——谓词里不许 panic（SCAN_BUDGET 的硬前提），`get` 而非
