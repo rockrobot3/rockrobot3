@@ -168,14 +168,12 @@ fn rr3_wire_ident<'a>(
     connector
 }
 
-/// 单条线组的八字段解析（connector 已由身份门给出）；形状错逐条点名、不静默
-fn rr3_wire_fields(
+/// 导体面：hdr_pin 非空整数数组 + signal 非空字符串数组 + 位序对应（等长）
+fn rr3_wire_conductors(
     i: usize,
     t: &toml::value::Table,
-    connector: &str,
     errs: &mut Vec<String>,
-) -> Rr3Wire {
-    // hdr_pin：非空整数数组（排针物理序号）
+) -> (Vec<i64>, Vec<String>) {
     let hdr_pin: Vec<i64> = t
         .get("hdr_pin")
         .and_then(toml::Value::as_array)
@@ -184,7 +182,6 @@ fn rr3_wire_fields(
     if hdr_pin.is_empty() {
         errs.push(format!("wire #{i}.hdr_pin 必须是非空整数数组"));
     }
-    // signal：非空字符串数组（每导体一个信号名）
     let signal: Vec<String> = t
         .get("signal")
         .and_then(toml::Value::as_array)
@@ -206,6 +203,17 @@ fn rr3_wire_fields(
             signal.len()
         ));
     }
+    (hdr_pin, signal)
+}
+
+/// 单条线组的八字段解析（connector 已由身份门给出）；形状错逐条点名、不静默
+fn rr3_wire_fields(
+    i: usize,
+    t: &toml::value::Table,
+    connector: &str,
+    errs: &mut Vec<String>,
+) -> Rr3Wire {
+    let (hdr_pin, signal) = rr3_wire_conductors(i, t, errs);
     // net：domains 外键，"none" 是纯信号/地线组的合法显式值
     let net = t.get("net").and_then(toml::Value::as_str).unwrap_or("");
     if net.is_empty() {
