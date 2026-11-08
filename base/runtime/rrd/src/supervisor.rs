@@ -68,6 +68,10 @@ use crate::manifest::{rr3_manifest_abs, rr3_manifest_parse, Rr3ManifestFacts};
 use crate::registry::{rr3_phase_for_exit, Rr3ChildExit, Rr3Phase, Rr3RestartPlan, RrdRegistry};
 use crate::{rr3_lock, rr3_log};
 
+/// 低电旗期间的启动重试间隔：计划保留、延后重问（旗解除后即放行）。
+/// 5s 与运维观察节奏同档；低电段本身应短于一次充电恢复。
+const RR3_LOW_POWER_RETRY_MS: u64 = 5_000;
+
 /// 一个"我能起谁"的条目（E-1：`jobs` 的全集只由 `--manifest` 填）。
 #[derive(Debug, Clone)]
 pub struct Rr3SpawnJob {
@@ -219,6 +223,17 @@ fn rr3_schedule_due(due: &mut Vec<(Instant, Rr3RestartPlan)>, plan: Rr3RestartPl
     }
 }
 
+/// 低电拒绝时重建的到期计划：名字/第几次/入口原样，延迟换成固定重试间隔。
+/// 只改"什么时候再问"，不动重启预算（被拒的一次不记账）。
+fn rr3_low_power_retry(name: &str, attempt: u32, entry: &str) -> Rr3RestartPlan {
+    Rr3RestartPlan {
+        name: name.to_string(),
+        attempt,
+        delay_ms: RR3_LOW_POWER_RETRY_MS,
+        entry: entry.to_string(),
+    }
+}
+
 /// 一个终态的**唯一**落点：广播（若该广播）、点名理由的日志、计划进到期表。
 /// 收尸那一路与"起进程失败"那一路共用它（两条路只是 `status` 的来源不同）。
 ///
@@ -351,6 +366,12 @@ fn rr3_boot_spawn(
         rr3_log(&format!(
             "低电兜底：拒绝 spawn {name}（全局低电旗已置位，停止新 spawn）"
         ));
+        // 计划不丢：旗解除后模块必须回得来。丢了就是"一次低电段永久少一个模块"，
+        // rr3-power 自己死掉更会锁死解除路径（只有它能发 battery/ok）。
+        rr3_log(&format!(
+            "低电兜底：{name} 的启动计划保留，{RR3_LOW_POWER_RETRY_MS}ms 后重试（旗解除即放行）"
+        ));
+        rr3_schedule_due(due, rr3_low_power_retry(&name, attempt, &job.facts.entry));
         return;
     }
     if let Some(mut old) = children.remove(&name) {
@@ -672,6 +693,21 @@ mod tests {
         assert!(
             rr3_open_unit_log(Path::new(""), "rr3-x").is_err(),
             "空 socket 路径应 fail-closed"
+        );
+    }
+
+    /// 低电拒绝只延后、不丢计划：身份/第几次/入口必须原样带过，延迟足够大
+    /// （远大于扫尸节拍），避免低电段内紧循环重试。
+    #[test]
+    fn low_power_retry_keeps_identity_and_delays() {
+        let p = rr3_low_power_retry("rr3-power", 2, "bin/rr3-power");
+        assert_eq!(p.name, "rr3-power");
+        assert_eq!(p.attempt, 2, "重启预算的计数不因被拒而归零");
+        assert_eq!(p.entry, "bin/rr3-power");
+        assert_eq!(p.delay_ms, RR3_LOW_POWER_RETRY_MS);
+        assert!(
+            p.delay_ms >= 1_000,
+            "重试间隔必须远大于扫尸节拍，低电段内不得紧循环"
         );
     }
 }
