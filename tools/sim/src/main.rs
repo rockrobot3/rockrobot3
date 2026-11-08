@@ -48,8 +48,8 @@ mod run {
         rr3_ctl_maybe_fail, rr3_ctl_out, rr3_ctl_status_rows as rr3_ctl_rows, rr3_with_log_tail,
     };
     use crate::drill::{
-        rr3_default_bins, rr3_find_repo_root, rr3_manifest_text, rr3_require_bins, rr3_section,
-        rr3_wait_modules, RR3_DRILL_PUBLISHER, RR3_DRILL_RESIDENT, RR3_SIM_B_TOPIC,
+        rr3_default_bins, rr3_manifest_text, rr3_require_bins, rr3_section, rr3_wait_modules,
+        RR3_DRILL_PUBLISHER, RR3_DRILL_RESIDENT, RR3_SIM_B_TOPIC,
     };
 
     /// 巡检轮询的上界：冷启动（首次加载契约 + 起子进程）在慢机器上也要够用

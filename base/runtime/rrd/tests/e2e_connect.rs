@@ -56,8 +56,8 @@ timeout_ms = 20000
 up = false
 "#;
 
-/// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_power/e2e_act 同款）。
-/// tag 区分两场景：同一测试二进制并行跑，目录不得相撞。
+// 装机布局夹具用 support 的共享 [`support::E2eRoot`]（e2e_power/e2e_act 同款）。
+// tag 区分两场景：同一测试二进制并行跑，目录不得相撞。
 
 /// 帧的 (载荷类型, topic) 摘要：谓词共用的纯函数底座。非 JSON / 坏前缀 /
 /// 非 object 体一律 None——谓词里不许 panic（read_where 预算的硬前提）。
