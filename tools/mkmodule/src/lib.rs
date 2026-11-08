@@ -353,13 +353,15 @@ pub fn rr3_mkmod_generate_atom(
 mod tests {
     use super::*;
 
-    /// 仓内临时根（target/ 不入库且向上可定位 contracts/slots.toml，回灌门可走通）
+    /// 临时根：落在系统临时目录（源码区严禁任何构建/集成产物）；把仓内
+    /// `contracts/slots.toml` 复制到 `<tmp>/contracts/`，让回灌门沿祖先目录
+    /// 定位契约的既有语义在临时树上同样成立。tag + pid 隔离并行用例。
     fn scratch_root(tag: &str) -> PathBuf {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target/mkmod-test")
-            .join(tag);
+        let dir = std::env::temp_dir().join(format!("rr3-mkmod-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join("contracts")).unwrap();
+        let slots = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts/slots.toml");
+        std::fs::copy(&slots, dir.join("contracts/slots.toml")).unwrap();
         dir
     }
 
