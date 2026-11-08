@@ -104,7 +104,6 @@ pub fn rr3_act_prof_parse(
     pin_ids: &BTreeSet<String>,
 ) -> Result<Rr3AxisFile, Vec<String>> {
     let mut errs: Vec<String> = Vec::new();
-
     let v: toml::Value = match text.parse() {
         Ok(v) => v,
         Err(e) => return Err(vec![format!("{path}: 不是合法 TOML: {e}")]),
@@ -114,9 +113,38 @@ pub fn rr3_act_prof_parse(
             "{path}: 应为键值平表（十四键平铺，无嵌套小节）"
         )]);
     };
+    rr3_axis_keys(path, table, &mut errs);
+    let nums = rr3_axis_nums(&v, path, &mut errs);
+    let words = rr3_axis_words(&v, path, &mut errs);
+    let pin = rr3_axis_pin(&v, path, pin_ids, &mut errs);
+    rr3_axis_window(path, &nums, &mut errs);
+    if !errs.is_empty() {
+        return Err(errs);
+    }
+    // 判据全绿后十四键必在场：上面每个 None 分支都已同步点名——errs 空 ⟺ 全 Some
+    let profile = (|| {
+        Some(Rr3ActProfile {
+            center_deg: nums.center? as u16,
+            lo_deg: nums.lo? as u16,
+            hi_deg: nums.hi? as u16,
+            dir_sign: nums.dir? as i8,
+            slew_deg_s: nums.slew? as u16,
+            settle_ms: nums.settle? as u32,
+            hold: words.hold?,
+            current_ceil_ma: nums.ceil_ma? as u16,
+            warmup_ms: nums.warmup? as u32,
+            hard_stop: words.hard_stop?,
+            calibrated: words.calibrated?,
+            source: words.source?,
+        })
+    })()
+    .expect("逐键判据全绿后十二键必在场（errs 已判空）");
+    let pin = pin.expect("逐键判据全绿后 pin 必在场（errs 已判空）");
+    Ok(Rr3AxisFile { pin, profile })
+}
 
-    // 白名单 + F-6 全键必填：一次遍历两查——词表外键点名（加键走契约级评审），
-    // 词表内键登记已见；随后按词表反向扫缺键（"合法不适用"必须显式写，留空即红）
+/// 白名单 + F-6 全键必填：词表外键点名、词表内键登记、随后反向扫缺键
+fn rr3_axis_keys(path: &str, table: &toml::value::Table, errs: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     for k in table.keys() {
         if RR3_ACT_PROFILE_FIELDS.iter().any(|f| f.key == k) {
@@ -135,15 +163,28 @@ pub fn rr3_act_prof_parse(
             ));
         }
     }
+}
 
-    // 键级域判据（策略逐键显式）：schema 只认 1（升版走契约级评审，对账即弃）；
-    // 行程键非负且进 u16；dir_sign ∈ {±1}（0 = 物理矛盾，单独点名）；slew /
-    // 电流上限须正；ms 键进 u32。域界红都不进产物。
-    let _ = rr3_int_field(&v, &mut errs, path, "schema", 1, 1);
-    let center = rr3_int_field(&v, &mut errs, path, "center_deg", 0, i64::from(u16::MAX));
-    let lo = rr3_int_field(&v, &mut errs, path, "lo_deg", 0, i64::from(u16::MAX));
-    let hi = rr3_int_field(&v, &mut errs, path, "hi_deg", 0, i64::from(u16::MAX));
-    let dir = match rr3_int_field(&v, &mut errs, path, "dir_sign", -1, 1) {
+/// 数值键解析产物（None = 缺键/形状错/越域，病灶已进 errs）
+struct Rr3AxisNums {
+    center: Option<i64>,
+    lo: Option<i64>,
+    hi: Option<i64>,
+    dir: Option<i64>,
+    slew: Option<i64>,
+    settle: Option<i64>,
+    warmup: Option<i64>,
+    ceil_ma: Option<i64>,
+}
+
+/// 键级域判据（策略逐键显式）：schema 只认 1；行程键进 u16；dir_sign ∈ ±1
+/// （0 = 物理矛盾单独点名）；slew/电流上限须正；ms 键进 u32。域界红不进产物。
+fn rr3_axis_nums(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Rr3AxisNums {
+    let _ = rr3_int_field(v, errs, path, "schema", 1, 1);
+    let center = rr3_int_field(v, errs, path, "center_deg", 0, i64::from(u16::MAX));
+    let lo = rr3_int_field(v, errs, path, "lo_deg", 0, i64::from(u16::MAX));
+    let hi = rr3_int_field(v, errs, path, "hi_deg", 0, i64::from(u16::MAX));
+    let dir = match rr3_int_field(v, errs, path, "dir_sign", -1, 1) {
         Some(0) => {
             errs.push(format!(
                 "{path}: dir_sign = 0（方向符号只有 ±1，0 是物理矛盾）"
@@ -152,20 +193,33 @@ pub fn rr3_act_prof_parse(
         }
         other => other,
     };
-    let slew = rr3_int_field(&v, &mut errs, path, "slew_deg_s", 1, i64::from(u16::MAX));
-    let settle = rr3_int_field(&v, &mut errs, path, "settle_ms", 0, i64::from(u32::MAX));
-    let warmup = rr3_int_field(&v, &mut errs, path, "warmup_ms", 0, i64::from(u32::MAX));
-    let ceil_ma = rr3_int_field(
-        &v,
-        &mut errs,
-        path,
-        "current_ceil_ma",
-        1,
-        i64::from(u16::MAX),
-    );
+    let slew = rr3_int_field(v, errs, path, "slew_deg_s", 1, i64::from(u16::MAX));
+    let settle = rr3_int_field(v, errs, path, "settle_ms", 0, i64::from(u32::MAX));
+    let warmup = rr3_int_field(v, errs, path, "warmup_ms", 0, i64::from(u32::MAX));
+    let ceil_ma = rr3_int_field(v, errs, path, "current_ceil_ma", 1, i64::from(u16::MAX));
+    Rr3AxisNums {
+        center,
+        lo,
+        hi,
+        dir,
+        slew,
+        settle,
+        warmup,
+        ceil_ma,
+    }
+}
 
-    // 词键走在册词表解析（词形真值在 rr-hal-api 各 enum 的 impl，此处不认第二份）
-    let hold = match rr3_text_field(&v, &mut errs, path, "hold") {
+/// 文本/布尔词键解析产物（None = 缺键/形状错/词表外，病灶已进 errs）
+struct Rr3AxisWords {
+    hold: Option<Rr3ActHold>,
+    hard_stop: Option<Rr3ActHardStop>,
+    source: Option<Rr3ActSource>,
+    calibrated: Option<bool>,
+}
+
+/// 词键走在册词表解析：词形真值在 rr-hal-api 各 enum 的 impl，此处不认第二份
+fn rr3_axis_words(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Rr3AxisWords {
+    let hold = match rr3_text_field(v, errs, path, "hold") {
         Some(s) => match Rr3ActHold::rr3_act_hold_parse(s) {
             Some(h) => Some(h),
             None => {
@@ -177,7 +231,7 @@ pub fn rr3_act_prof_parse(
         },
         None => None,
     };
-    let hard_stop = match rr3_text_field(&v, &mut errs, path, "hard_stop") {
+    let hard_stop = match rr3_text_field(v, errs, path, "hard_stop") {
         Some(s) => match Rr3ActHardStop::rr3_hard_stop_parse(s) {
             Some(h) => Some(h),
             None => {
@@ -189,7 +243,7 @@ pub fn rr3_act_prof_parse(
         },
         None => None,
     };
-    let source = match rr3_text_field(&v, &mut errs, path, "source") {
+    let source = match rr3_text_field(v, errs, path, "source") {
         Some(s) => match Rr3ActSource::rr3_act_source_parse(s) {
             Some(src) => Some(src),
             None => {
@@ -201,11 +255,23 @@ pub fn rr3_act_prof_parse(
         },
         None => None,
     };
-    let calibrated = rr3_bool_field(&v, &mut errs, path, "calibrated");
+    let calibrated = rr3_bool_field(v, errs, path, "calibrated");
+    Rr3AxisWords {
+        hold,
+        hard_stop,
+        source,
+        calibrated,
+    }
+}
 
-    // pin 外键对账（F-4）：档案与绑定之间必须有外键，否则档案改名而 [pins]
-    // 不动，一条校验都不红——档案侧的对账半边在此，绑定侧归 profile 装载域
-    let pin = match rr3_text_field(&v, &mut errs, path, "pin") {
+/// pin 外键对账（F-4）：档案外键与 [pins] 的 pin_id 集必须对账
+fn rr3_axis_pin(
+    v: &toml::Value,
+    path: &str,
+    pin_ids: &BTreeSet<String>,
+    errs: &mut Vec<String>,
+) -> Option<String> {
+    match rr3_text_field(v, errs, path, "pin") {
         Some(s) if pin_ids.contains(s) => Some(s.to_string()),
         Some(s) => {
             errs.push(format!(
@@ -214,44 +280,18 @@ pub fn rr3_act_prof_parse(
             None
         }
         None => None,
-    };
+    }
+}
 
-    // 自洽判据（§4.4）：行程窗口必须包住中位锚——lo < center < hi（三键都在场
-    // 才判，缺键病灶已各自点名，这里不重复报）
-    if let (Some(lo), Some(center), Some(hi)) = (lo, center, hi) {
+/// 自洽判据（§4.4）：行程窗口必须包住中位锚——lo < center < hi（三键在场才判）
+fn rr3_axis_window(path: &str, nums: &Rr3AxisNums, errs: &mut Vec<String>) {
+    if let (Some(lo), Some(center), Some(hi)) = (nums.lo, nums.center, nums.hi) {
         if !(lo < center && center < hi) {
             errs.push(format!(
                 "{path}: 行程窗口自洽破：lo_deg = {lo}, center_deg = {center}, hi_deg = {hi}（须 lo < center < hi）"
             ));
         }
     }
-
-    if !errs.is_empty() {
-        return Err(errs);
-    }
-
-    // 判据全绿后十四键必在场：上面每个 None 分支都已同步点名（缺键 / 形状错 /
-    // 越域 / 词表外 / 外键未命中）——errs 空 ⟺ 全 Some，重组只是换承载形状
-    let profile = (|| {
-        Some(Rr3ActProfile {
-            center_deg: center? as u16,
-            lo_deg: lo? as u16,
-            hi_deg: hi? as u16,
-            dir_sign: dir? as i8,
-            slew_deg_s: slew? as u16,
-            settle_ms: settle? as u32,
-            hold: hold?,
-            current_ceil_ma: ceil_ma? as u16,
-            warmup_ms: warmup? as u32,
-            hard_stop: hard_stop?,
-            calibrated: calibrated?,
-            source: source?,
-        })
-    })()
-    .expect("逐键判据全绿后十二键必在场（errs 已判空）");
-    let pin = pin.expect("逐键判据全绿后 pin 必在场（errs 已判空）");
-
-    Ok(Rr3AxisFile { pin, profile })
 }
 
 /// 序列化：键序 = 十四键词表序（与 [`RR3_ACT_PROFILE_FIELDS`] 同序发射，测试
