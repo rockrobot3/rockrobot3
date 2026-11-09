@@ -630,64 +630,99 @@ fn rr3_esp32_frames(
     loop {
         match asm.pull() {
             Ok(Some((hdr, body))) => match rr3_esp32_classify(&hdr, &body) {
-                Ok(Rr3BoardFrameIn::Audio(chunk)) => {
-                    *err_streak = 0;
-                    core.chunks.fetch_add(1, Ordering::Relaxed);
-                    if !once.ready {
-                        once.ready = true;
-                        eprintln!(
-                            "rr-hal-esp32-audio: 板面流就绪（实测 rate={} ch=2 s16le）",
-                            chunk.rate
-                        );
-                    }
-                    let samples = rr3_s16le_decode(&chunk.samples);
-                    let mut ring = core.ring.lock().unwrap_or_else(|p| p.into_inner());
-                    ring.rr3_ring_push(&samples, core.channels as usize);
-                    if ring.rr3_ring_dropped() > 0 && !once.overflow {
-                        once.overflow = true;
-                        eprintln!(
-                            "rr-hal-esp32-audio: 环形缓冲开始溢丢最旧（板-宿主钟滑移稳态损耗，VAD/ASR 可容忍）"
-                        );
-                    }
-                }
-                Ok(Rr3BoardFrameIn::Reply { id, err }) => match err {
-                    Some(e) => {
-                        eprintln!("rr-hal-esp32-audio: 板面应答 id={id} 业务失败: {e}")
-                    }
-                    None => {
-                        // 成功回执逐条打会在高频命令面刷屏；首条点名即证明回执
-                        // 通道活着，后续同口径不再重复。
-                        if !once.ack {
-                            once.ack = true;
-                            eprintln!(
-                                "rr-hal-esp32-audio: 板面命令回执就绪（id={id} ok；后续成功回执不逐条打印）"
-                            );
-                        }
-                    }
-                },
-                Err(e) => {
-                    *err_streak += 1;
-                    *err_total += 1;
-                    core.errs.fetch_add(1, Ordering::Relaxed);
-                    if rr3_err_log_now(*err_total) {
-                        eprintln!(
-                            "rr-hal-esp32-audio: 累计 {err_total} 帧未过门（连续 {err_streak}；帧界损坏/载荷 CRC 不符？）: {e}"
-                        );
-                    }
-                }
+                Ok(frame) => rr3_esp32_take(core, once, err_streak, frame),
+                Err(e) => rr3_esp32_miss(core, err_streak, err_total, &e),
             },
             Ok(None) => break,
-            Err((discarded, why)) => {
-                *err_streak += 1;
-                *err_total += 1;
-                core.errs.fetch_add(1, Ordering::Relaxed);
-                if rr3_err_log_now(*err_total) {
-                    eprintln!(
-                        "rr-hal-esp32-audio: 累计 {err_total} 次拆帧失败（连续 {err_streak}，已弃 {discarded}B 重扫）: {why}"
-                    );
-                }
+            Err((discarded, why)) => rr3_esp32_lost(core, err_streak, err_total, discarded, &why),
+        }
+    }
+}
+
+/// 过门好帧的两类落账：音频入环并清连续坏帧计数，回执按成败记账。
+fn rr3_esp32_take(
+    core: &Rr3Esp32AudioCore,
+    once: &mut Rr3IngestLog,
+    streak: &mut u64,
+    frame: Rr3BoardFrameIn,
+) {
+    match frame {
+        Rr3BoardFrameIn::Audio(chunk) => {
+            *streak = 0;
+            rr3_esp32_take_audio(core, once, chunk);
+        }
+        Rr3BoardFrameIn::Reply { id, err } => rr3_esp32_take_reply(once, id, err),
+    }
+}
+
+/// 音频帧入环：首帧就绪与首次溢丢各打一行（会话内只打一次）。
+fn rr3_esp32_take_audio(
+    core: &Rr3Esp32AudioCore,
+    once: &mut Rr3IngestLog,
+    chunk: Rr3Esp32AudioChunk,
+) {
+    core.chunks.fetch_add(1, Ordering::Relaxed);
+    if !once.ready {
+        once.ready = true;
+        eprintln!(
+            "rr-hal-esp32-audio: 板面流就绪（实测 rate={} ch=2 s16le）",
+            chunk.rate
+        );
+    }
+    let samples = rr3_s16le_decode(&chunk.samples);
+    let mut ring = core.ring.lock().unwrap_or_else(|p| p.into_inner());
+    ring.rr3_ring_push(&samples, core.channels as usize);
+    if ring.rr3_ring_dropped() > 0 && !once.overflow {
+        once.overflow = true;
+        eprintln!(
+            "rr-hal-esp32-audio: 环形缓冲开始溢丢最旧（板-宿主钟滑移稳态损耗，VAD/ASR 可容忍）"
+        );
+    }
+}
+
+/// 命令回执：业务失败逐条点名；成功回执只打首条（高频命令面不刷屏，首条
+/// 已证明回执通道活着）。
+fn rr3_esp32_take_reply(once: &mut Rr3IngestLog, id: u64, err: Option<String>) {
+    match err {
+        Some(e) => eprintln!("rr-hal-esp32-audio: 板面应答 id={id} 业务失败: {e}"),
+        None => {
+            if !once.ack {
+                once.ack = true;
+                eprintln!(
+                    "rr-hal-esp32-audio: 板面命令回执就绪（id={id} ok；后续成功回执不逐条打印）"
+                );
             }
         }
+    }
+}
+
+/// 四道门未过（帧界损坏/载荷 CRC 不符）：连续与累计双计数，首条与每千条点名。
+fn rr3_esp32_miss(core: &Rr3Esp32AudioCore, streak: &mut u64, total: &mut u64, why: &str) {
+    *streak += 1;
+    *total += 1;
+    core.errs.fetch_add(1, Ordering::Relaxed);
+    if rr3_err_log_now(*total) {
+        eprintln!(
+            "rr-hal-esp32-audio: 累计 {total} 帧未过门（连续 {streak}；帧界损坏/载荷 CRC 不符？）: {why}"
+        );
+    }
+}
+
+/// 拆帧器弃字节重扫：与门故障同族计数，文案点明弃字节数（线面坏段可见）。
+fn rr3_esp32_lost(
+    core: &Rr3Esp32AudioCore,
+    streak: &mut u64,
+    total: &mut u64,
+    discarded: u64,
+    why: &str,
+) {
+    *streak += 1;
+    *total += 1;
+    core.errs.fetch_add(1, Ordering::Relaxed);
+    if rr3_err_log_now(*total) {
+        eprintln!(
+            "rr-hal-esp32-audio: 累计 {total} 次拆帧失败（连续 {streak}，已弃 {discarded}B 重扫）: {why}"
+        );
     }
 }
 
