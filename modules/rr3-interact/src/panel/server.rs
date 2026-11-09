@@ -736,6 +736,17 @@ fn rr3_accept_loop(
             eprintln!("面板连接写耐心未设上（连接仍按既有语义处理）: {e}");
         }
         if live.load(Ordering::Relaxed) >= shared.limits.max_conns {
+            // 拒连必须留痕（信息面）：面板"打得开但一直 503"时，只有这行能指出
+            // 是对端洪水还是自家槽位泄漏——对端地址是最小充分证据。
+            let peer = stream
+                .peer_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            eprintln!(
+                "面板并发已达上限 {}（在服 {}），拒连对端 {peer}",
+                shared.limits.max_conns,
+                live.load(Ordering::Relaxed)
+            );
             let body = br#"{"error":"conn limit"}"#;
             let _ = rr3_http_respond(
                 &mut stream,
