@@ -203,47 +203,8 @@ pub(crate) fn rr3_wake_decide(
         return Rr3WakeAction::FollowUp;
     }
     let norm = rr3_wake_norm(text);
-    let norm_chars: Vec<char> = norm.chars().collect();
-    for phrase in &cfg.phrases {
-        let pn = rr3_wake_norm(phrase);
-        let pn_chars: Vec<char> = pn.chars().collect();
-        if pn_chars.is_empty() {
-            continue;
-        }
-        // ASR 吞词尾（实机"你好洛克"→"你好，洛。"）：文本比短语短 1 字仍按
-        // 前缀容错认（短 2 字以上不认——"你好"这类日常问候不误唤醒）。
-        if norm_chars.len() < pn_chars.len() {
-            if norm_chars.len() + 1 < pn_chars.len() {
-                continue;
-            }
-            let prefix: String = norm_chars.iter().collect();
-            let phrase_prefix: String = pn_chars[..norm_chars.len()].iter().collect();
-            if rr3_wake_edit_dist(&prefix, &phrase_prefix) <= rr3_wake_max_edits(pn_chars.len()) {
-                return Rr3WakeAction::Ack;
-            }
-            continue;
-        }
-        let prefix: String = norm_chars[..pn_chars.len()].iter().collect();
-        if rr3_wake_edit_dist(&prefix, &pn) <= rr3_wake_max_edits(pn_chars.len()) {
-            let rest: String = norm_chars[pn_chars.len()..].iter().collect();
-            let rest = rest.trim();
-            if rest.is_empty() {
-                return Rr3WakeAction::Ack;
-            }
-            return Rr3WakeAction::Command(rest.to_string());
-        }
-    }
-    // 2026-10-31 用户裁定（云端 ASR 对"洛克"不稳定，同一句每次识成骆天/洛天/
-    // 要是/老师/洛哥/洛师）：短语表之后**兜底接受"你好"开头即唤醒**——"你好"
-    // 后 ≤2 字视为名字或误识尾巴 → Ack；更长 → 当命令（去"你好"前缀）进 LLM。
-    // 放在短语表之后：已知短语能精确剥掉前缀（如"你好洛师，今天天气"→命令只留
-    // "今天天气"），兜底只处理短语表没覆盖的变体。
-    if let Some(rest) = norm.strip_prefix("你好") {
-        let rest = rest.trim();
-        if rest.chars().count() <= 2 {
-            return Rr3WakeAction::Ack;
-        }
-        return Rr3WakeAction::Command(rest.to_string());
+    if let Some(action) = rr3_wake_hit(&norm, cfg) {
+        return action;
     }
     match last_wake_ms {
         Some(last) if cfg.followup_ms > 0 && now_ms.saturating_sub(last) <= cfg.followup_ms => {
@@ -251,6 +212,56 @@ pub(crate) fn rr3_wake_decide(
         }
         _ => Rr3WakeAction::Ignore,
     }
+}
+
+/// 短语表逐条匹配，未中再走"你好"兜底（2026-10-31 用户裁定：云端 ASR 对"洛克"
+/// 不稳定，同一句每次识成骆天/洛天/要是/老师/洛哥/洛师）。兜底放在短语表之后：
+/// 已知短语能精确剥掉前缀（"你好洛师，今天天气"→命令只留"今天天气"），兜底只
+/// 处理短语表没覆盖的变体——"你好"后 ≤2 字视为名字或误识尾巴 → Ack；更长 →
+/// 当命令（去前缀）进 LLM。
+fn rr3_wake_hit(norm: &str, cfg: &Rr3WakeCfg) -> Option<Rr3WakeAction> {
+    let norm_chars: Vec<char> = norm.chars().collect();
+    for phrase in &cfg.phrases {
+        if let Some(action) = rr3_wake_phrase(&norm_chars, phrase) {
+            return Some(action);
+        }
+    }
+    let rest = norm.strip_prefix("你好")?.trim();
+    Some(if rest.chars().count() <= 2 {
+        Rr3WakeAction::Ack
+    } else {
+        Rr3WakeAction::Command(rest.to_string())
+    })
+}
+
+/// 单条短语：归一后空串跳过；ASR 吞词尾（实机"你好洛克"→"你好，洛。"）时文本
+/// 比短语短 1 字仍按前缀容错认（短 2 字以上不认——"你好"这类日常问候不误唤醒）。
+fn rr3_wake_phrase(norm_chars: &[char], phrase: &str) -> Option<Rr3WakeAction> {
+    let pn = rr3_wake_norm(phrase);
+    let pn_chars: Vec<char> = pn.chars().collect();
+    if pn_chars.is_empty() {
+        return None;
+    }
+    if norm_chars.len() < pn_chars.len() {
+        if norm_chars.len() + 1 < pn_chars.len() {
+            return None;
+        }
+        let prefix: String = norm_chars.iter().collect();
+        let phrase_prefix: String = pn_chars[..norm_chars.len()].iter().collect();
+        return (rr3_wake_edit_dist(&prefix, &phrase_prefix) <= rr3_wake_max_edits(pn_chars.len()))
+            .then_some(Rr3WakeAction::Ack);
+    }
+    let prefix: String = norm_chars[..pn_chars.len()].iter().collect();
+    if rr3_wake_edit_dist(&prefix, &pn) > rr3_wake_max_edits(pn_chars.len()) {
+        return None;
+    }
+    let rest: String = norm_chars[pn_chars.len()..].iter().collect();
+    let rest = rest.trim();
+    Some(if rest.is_empty() {
+        Rr3WakeAction::Ack
+    } else {
+        Rr3WakeAction::Command(rest.to_string())
+    })
 }
 
 /// 整轮编排面的总线写口窄化（Python rr3_finish_turn 首参 bus 的鸭子类型对位）：
