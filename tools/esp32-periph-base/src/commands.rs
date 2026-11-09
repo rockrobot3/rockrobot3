@@ -113,6 +113,12 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         };
         let line = line.trim();
         if line.is_empty() {
+            // 空行 = 宿主音频心跳（A9.3）：不是协议命令，新旧固件都不应答；
+            // 仅音频会话中计入存活时刻（旧宿主不发空行 → 永不武装看门狗）。
+            let mut b = lock_bus(&bus);
+            if b.st.audio_on {
+                b.st.audio_host_ms = now_ms();
+            }
             continue;
         }
         let mut parts = line.split_whitespace();
@@ -120,9 +126,6 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let result = rr3_cmd_exec(head, &mut parts, line, &bus, &mut ctl); // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
                                                                            // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
         let dropped = match result {
-            // 空应答 = 静默命令（`AUDIO PING` 心跳）：不写任何字节，避免行面
-            // 应答插进音频帧流污染宿主拆帧器。
-            Ok(line) if line.is_empty() => false,
             Ok(line) => !reply(&mut io.uart, &line),
             Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
         };
@@ -342,10 +345,8 @@ fn rr3_cmd_ui(
             // 音频上行开关（批D③）：ON 后 mic 线攒满分片（2048 帧 = 128ms）即组
             // Event 帧推 audio_q，控制面每轮 drain_audio 整帧写 UART2。OFF 后队列
             // 余片仍照常发完（drain_audio 不看开关），mic 线不再攒新片。
-            // PING 是宿主收流线程的 5s 静默心跳（A9.3）：只刷新失联看门狗时刻，
-            // **不回任何字节**（应答会插进音频帧流污染宿主拆帧器）。
-            // ON/OFF 把心跳时刻归零：看门狗只认**本会话内**的 PING——旧宿主不发
-            // PING 时永不启用（混版部署保持常流），新宿主重连后首个 PING 才武装。
+            // 宿主心跳走**空行**（A9.3，见 cmd_loop 空行分支）：ON/OFF 归零心跳
+            // 时刻，看门狗只认本会话内的空行——旧宿主不发空行时永不启用。
             "AUDIO" => match parts.next() {
                 Some("ON") => {
                     let mut b = lock_bus(bus);
@@ -359,15 +360,7 @@ fn rr3_cmd_ui(
                     b.st.audio_host_ms = 0;
                     Ok("OK audio off".into())
                 }
-                Some("PING") => {
-                    let mut b = lock_bus(bus);
-                    if b.st.audio_host_ms == 0 {
-                        println!("[periph] 宿主音频心跳已建立（AUDIO PING 5s 周期，看门狗 15s）");
-                    }
-                    b.st.audio_host_ms = now_ms();
-                    Ok(String::new())
-                }
-                _ => Err("AUDIO 需 ON|OFF|PING 参数".into()),
+                _ => Err("AUDIO 需 ON|OFF 参数".into()),
             },
             "INFO" => {
                 let (plo, phi) = Axis::Pan.range();
