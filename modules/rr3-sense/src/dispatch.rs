@@ -295,7 +295,10 @@ impl Rr3SenseDispatcher {
         bus: &BusHandle,
     ) -> Result<(), String> {
         if let Some(edge) = self.vad.rr3_vad_feed(&pcm.samples) {
-            let gate_open = self.tts_gate.rr3_tts_gate_open(Instant::now());
+            // 拍时刻入参（`now`）统一用作门判基准：本拍内不二次读时钟，
+            // 门判/节点计划与 tick 同一条时间轴（espidf 档计划面不落，
+            // 旧版此处另取 `Instant::now()` 让 `now` 在该档成死参）。
+            let gate_open = self.tts_gate.rr3_tts_gate_open(now);
             match edge {
                 // 播放期门控（B批 b2）：门开只弃 onset 发布（扬声器自声不再触发
                 // 听声转头），VAD 状态机照喂不中断；offset 与门无关照发
