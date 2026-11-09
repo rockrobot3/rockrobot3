@@ -591,8 +591,34 @@ mod tests {
         assert_eq!(v["angle_deg"], 95);
     }
 
-    // ----- I2C / ADS1115 -----
+    /// 帧内断流必须**有界退出**（批B15）：旧版帧面走阻塞 `Read`（VMIN=1、无
+    /// VTIME），半帧后对端不再给字节就永久停在 128B 头里，控制面只能整机重启。
+    /// 判据是"拒绝 + 有时间上界"，不是某个具体错误码——任何 `Err` 都让调用方
+    /// 残尾吞净后复位失步，这正是坏帧可恢复的形状。读取放独立线程 + 主线程
+    /// 限时收：**回归时测试不会自己挂死**，而是明确报出"没有上界"。
+    #[test]
+    fn frame_read_half_frame_times_out() {
+        let (mut master, _slave_keepalive, path) = pty_pair();
+        let mut conn = Rr3UartConn::open_with_baud(&path, 115_200).expect("pty slave 打开失败");
+        master
+            .write_all(&[rr_periph_proto::RR3_MAGIC_FIRST, 0x00, 0x00, 0x00])
+            .expect("写半帧失败");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut io = crate::UartIo {
+                uart: &mut conn,
+                pre: Some(rr_periph_proto::RR3_MAGIC_FIRST),
+            };
+            let _ = tx.send(periph_mech::frame::frame_recv(&mut io).is_err());
+        });
+        let rejected = rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("半帧读取没有上界（旧版会永久阻塞）：控制面永久挂死的同一缺陷");
+        assert!(rejected, "半帧不得当完整帧放行");
+        let _ = worker.join();
+    }
 
+    // ----- I2C / ADS1115 -----
     #[test]
     fn i2c_port_forwards_write_transaction() {
         let (bus, f) = fake();
