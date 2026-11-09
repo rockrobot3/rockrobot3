@@ -117,7 +117,196 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         }
         let mut parts = line.split_whitespace();
         let head = parts.next().unwrap_or("");
-        let result: Result<String, String> = match head {
+        let result = rr3_cmd_exec(head, &mut parts, line, &bus, &mut ctl); // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
+                                                                           // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
+        let dropped = match result {
+            Ok(line) => !reply(&mut io.uart, &line),
+            Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
+        };
+        if dropped {
+            let mut b = lock_bus(&bus);
+            b.st.reply_drop = b.st.reply_drop.saturating_add(1);
+        }
+    }
+}
+
+/// 行面指令分派（cmd_loop 的纯解析/记账半边）：输入已切好的 head/parts 与原始行
+/// （OLED 取原文保留内嵌空格），输出应答行或 ERR 文案。硬件动作一律推作业，
+/// 本函数不碰慢外设；`ctl` 只承载 FACE 的前一表情记账。
+fn rr3_cmd_exec(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    line: &str,
+    bus: &Arc<Mutex<Bus>>,
+    ctl: &mut CtlState,
+) -> Result<String, String> {
+    if let Some(r) = rr3_cmd_motion(head, parts, bus) {
+        return r;
+    }
+    if let Some(r) = rr3_cmd_face(head, parts, bus, ctl) {
+        return r;
+    }
+    if let Some(r) = rr3_cmd_ui(head, parts, line, bus) {
+        return r;
+    }
+    Err(format!("unknown cmd \"{head}\"（HELP 看指令表）"))
+}
+
+fn rr3_cmd_motion(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Option<Result<String, String>> {
+    let r = match head {
+        "PAN" => parse_deg(parts.next()).and_then(|deg| {
+            let d = axis_check(Axis::Pan, deg)?;
+            {
+                let mut b = lock_bus(bus);
+                b.st.wander_on = false; // 外部点名优先，自主扫摆让位
+                                        // **不写前记账**：`st` 角度只由运行面在作业成功后镜像硬件真值
+                                        // （见 runtime `exec_job`）——失败/排队时读接口不复述没到达的角。
+            }
+            push_job(
+                bus,
+                Job::Move {
+                    pan: Some(d),
+                    tilt: None,
+                },
+            );
+            push_job(bus, Job::RedrawOled);
+            Ok(format!("OK pan={d}"))
+        }),
+        "TILT" => parse_deg(parts.next()).and_then(|deg| {
+            let d = axis_check(Axis::Tilt, deg)?;
+            {
+                let mut b = lock_bus(bus);
+                b.st.wander_on = false;
+                // 同上：角度记账归运行面（作业成功才提交）
+            }
+            push_job(
+                bus,
+                Job::Move {
+                    pan: None,
+                    tilt: Some(d),
+                },
+            );
+            push_job(bus, Job::RedrawOled);
+            Ok(format!("OK tilt={d}"))
+        }),
+        "SERVO" => match (parse_deg(parts.next()), parse_deg(parts.next())) {
+            (Ok(p), Ok(t)) => match (axis_check(Axis::Pan, p), axis_check(Axis::Tilt, t)) {
+                (Ok(p), Ok(t)) => {
+                    {
+                        let mut b = lock_bus(bus);
+                        b.st.wander_on = false;
+                        // 同上：两轴角度由运行面在整条串行移动成功后提交
+                    }
+                    // 串行降级：运行面先 pan 到位 → 整定 → 再 tilt（削峰值电流）
+                    push_job(
+                        bus,
+                        Job::Move {
+                            pan: Some(p),
+                            tilt: Some(t),
+                        },
+                    );
+                    push_job(bus, Job::RedrawOled);
+                    Ok(format!("OK pan={p} tilt={t}"))
+                }
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            },
+            _ => Err("SERVO 需两个 0-180 角度参数".into()),
+        },
+        // 表情（行面）：控制面改状态 + 推 Job::RenderCapsules（慢 I2C 在运行面），
+        // 与帧面 expression 同一套基态预设/微动作（expr_eye_base + anim_reset）。
+        // 补此命令的原因：表情原只走帧面（需 UART2 帧链路），现场该链路劣化时
+        // 表情无路可触发——行面直命令是可达性兜底。
+        "SCAN" => {
+            // 判据②（**串行**）：运行面按本轴行程五等分点逐点扫描（pan
+            // 70/80/90/100/110、tilt 80/85/90/95/100），每点先 pan 到位再 tilt
+            // 到位，逐点 outbox 回包。控制面只置位 + 排队并即刻 ack——不被 ~6s
+            // 的扫描阻塞（旧版在命令线程里跑，是"卡顿"来源之一）。
+            lock_bus(bus).st.wander_on = false; // 判据测试不被自主扫摆扰动
+            push_job(bus, Job::Scan);
+            Ok("OK scan queued (串行 pan→tilt，逐点回包)".into())
+        }
+        // 5V 轨单次采样（方案A Q1 观测面）：控制面不碰 ADC（ADC 在运行面），推作业
+        // 由运行面采一次、经 outbox 异步回包（读一次打轨压 mV 与引脚 raw——真板
+        // 分压测点接线后与万用表对拍标定用）。
+        "WANDER" => match parts.next() {
+            Some("STOP") => {
+                lock_bus(bus).st.wander_on = false;
+                let (p, t) = {
+                    let b = lock_bus(bus);
+                    (b.st.pan_deg, b.st.tilt_deg)
+                };
+                Ok(format!("OK wander off pan={p} tilt={t}"))
+            }
+            None => {
+                {
+                    let mut b = lock_bus(bus);
+                    b.st.wander_on = true;
+                    // 两轴方向独立随机起步，立即起摆
+                    b.st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                    b.st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                    b.st.next_wander_ms = 0;
+                }
+                let (p, t) = {
+                    let b = lock_bus(bus);
+                    (b.st.pan_deg, b.st.tilt_deg)
+                };
+                Ok(format!("OK wander on pan={p} tilt={t}"))
+            }
+            Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
+        },
+        _ => return None,
+    };
+    Some(r)
+}
+
+fn rr3_cmd_face(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+    ctl: &mut CtlState,
+) -> Option<Result<String, String>> {
+    let r = match head {
+        "FACE" => match parts.next() {
+            Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
+                let base = expr_eye_base(expr);
+                ctl.prev_expr = expr.to_string();
+                {
+                    let mut b = lock_bus(bus);
+                    b.st.expr_mode = true;
+                    b.st.frame_mode = false;
+                    b.st.base = base;
+                    b.st.last_text = format!("EXPR {expr}");
+                    b.st.anim_reset();
+                    b.st.drawn = base;
+                }
+                push_job(bus, Job::RenderCapsules);
+                Ok(format!("OK face={expr}"))
+            }
+            Some(other) => Err(format!(
+                "expression 不在白名单: \"{other}\"（可选: {}）",
+                RR3_FACE_EXPRS.join("/")
+            )),
+            None => Err(format!(
+                "FACE 需表情参数（可选: {}）",
+                RR3_FACE_EXPRS.join("/")
+            )),
+        },
+        _ => return None,
+    };
+    Some(r)
+}
+
+fn rr3_cmd_ui(
+    head: &str,
+    parts: &mut std::str::SplitWhitespace<'_>,
+    line: &str,
+    bus: &Arc<Mutex<Bus>>,
+) -> Option<Result<String, String>> {
+    let r = match head {
             "HELP" => Ok(
                 format!("CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@{UART2_BAUD_HZ}，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T093)")
             ),
@@ -134,142 +323,17 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                 } else {
                     // 控制面记账 + 排队，运行面出字（慢 I2C 不在控制面）
                     {
-                        let mut b = lock_bus(&bus);
+                        let mut b = lock_bus(bus);
                         b.st.last_text = rest.to_string();
                         b.st.frame_mode = false;
                         b.st.expr_mode = false;
                     }
-                    push_job(&bus, Job::RedrawOled);
+                    push_job(bus, Job::RedrawOled);
                     Ok(format!("OK oled \"{rest}\""))
                 }
             }
-            "PAN" => parse_deg(parts.next()).and_then(|deg| {
-                let d = axis_check(Axis::Pan, deg)?;
-                {
-                    let mut b = lock_bus(&bus);
-                    b.st.wander_on = false; // 外部点名优先，自主扫摆让位
-                    // **不写前记账**：`st` 角度只由运行面在作业成功后镜像硬件真值
-                    // （见 runtime `exec_job`）——失败/排队时读接口不复述没到达的角。
-                }
-                push_job(
-                    &bus,
-                    Job::Move {
-                        pan: Some(d),
-                        tilt: None,
-                    },
-                );
-                push_job(&bus, Job::RedrawOled);
-                Ok(format!("OK pan={d}"))
-            }),
-            "TILT" => parse_deg(parts.next()).and_then(|deg| {
-                let d = axis_check(Axis::Tilt, deg)?;
-                {
-                    let mut b = lock_bus(&bus);
-                    b.st.wander_on = false;
-                    // 同上：角度记账归运行面（作业成功才提交）
-                }
-                push_job(
-                    &bus,
-                    Job::Move {
-                        pan: None,
-                        tilt: Some(d),
-                    },
-                );
-                push_job(&bus, Job::RedrawOled);
-                Ok(format!("OK tilt={d}"))
-            }),
-            "SERVO" => match (parse_deg(parts.next()), parse_deg(parts.next())) {
-                (Ok(p), Ok(t)) => match (axis_check(Axis::Pan, p), axis_check(Axis::Tilt, t)) {
-                    (Ok(p), Ok(t)) => {
-                        {
-                            let mut b = lock_bus(&bus);
-                            b.st.wander_on = false;
-                            // 同上：两轴角度由运行面在整条串行移动成功后提交
-                        }
-                        // 串行降级：运行面先 pan 到位 → 整定 → 再 tilt（削峰值电流）
-                        push_job(
-                            &bus,
-                            Job::Move {
-                                pan: Some(p),
-                                tilt: Some(t),
-                            },
-                        );
-                        push_job(&bus, Job::RedrawOled);
-                        Ok(format!("OK pan={p} tilt={t}"))
-                    }
-                    (Err(e), _) | (_, Err(e)) => Err(e),
-                },
-                _ => Err("SERVO 需两个 0-180 角度参数".into()),
-            },
-            // 表情（行面）：控制面改状态 + 推 Job::RenderCapsules（慢 I2C 在运行面），
-            // 与帧面 expression 同一套基态预设/微动作（expr_eye_base + anim_reset）。
-            // 补此命令的原因：表情原只走帧面（需 UART2 帧链路），现场该链路劣化时
-            // 表情无路可触发——行面直命令是可达性兜底。
-            "FACE" => match parts.next() {
-                Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
-                    let base = expr_eye_base(expr);
-                    ctl.prev_expr = expr.to_string();
-                    {
-                        let mut b = lock_bus(&bus);
-                        b.st.expr_mode = true;
-                        b.st.frame_mode = false;
-                        b.st.base = base;
-                        b.st.last_text = format!("EXPR {expr}");
-                        b.st.anim_reset();
-                        b.st.drawn = base;
-                    }
-                    push_job(&bus, Job::RenderCapsules);
-                    Ok(format!("OK face={expr}"))
-                }
-                Some(other) => Err(format!(
-                    "expression 不在白名单: \"{other}\"（可选: {}）",
-                    RR3_FACE_EXPRS.join("/")
-                )),
-                None => Err(format!(
-                    "FACE 需表情参数（可选: {}）",
-                    RR3_FACE_EXPRS.join("/")
-                )),
-            },
-            "WANDER" => match parts.next() {
-                Some("STOP") => {
-                    lock_bus(&bus).st.wander_on = false;
-                    let (p, t) = {
-                        let b = lock_bus(&bus);
-                        (b.st.pan_deg, b.st.tilt_deg)
-                    };
-                    Ok(format!("OK wander off pan={p} tilt={t}"))
-                }
-                None => {
-                    {
-                        let mut b = lock_bus(&bus);
-                        b.st.wander_on = true;
-                        // 两轴方向独立随机起步，立即起摆
-                        b.st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
-                        b.st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
-                        b.st.next_wander_ms = 0;
-                    }
-                    let (p, t) = {
-                        let b = lock_bus(&bus);
-                        (b.st.pan_deg, b.st.tilt_deg)
-                    };
-                    Ok(format!("OK wander on pan={p} tilt={t}"))
-                }
-                Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
-            },
-            "SCAN" => {
-                // 判据②（**串行**）：运行面按本轴行程五等分点逐点扫描（pan
-                // 70/80/90/100/110、tilt 80/85/90/95/100），每点先 pan 到位再 tilt
-                // 到位，逐点 outbox 回包。控制面只置位 + 排队并即刻 ack——不被 ~6s
-                // 的扫描阻塞（旧版在命令线程里跑，是"卡顿"来源之一）。
-                lock_bus(&bus).st.wander_on = false; // 判据测试不被自主扫摆扰动
-                push_job(&bus, Job::Scan);
-                Ok("OK scan queued (串行 pan→tilt，逐点回包)".into())
-            }
-            // 5V 轨单次采样（方案A Q1 观测面）：控制面不碰 ADC（ADC 在运行面），推作业
-            // 由运行面采一次、经 outbox 异步回包（读一次打轨压 mV 与引脚 raw——真板
-            // 分压测点接线后与万用表对拍标定用）。
             "RAIL" => {
-                push_job(&bus, Job::SampleRail);
+                push_job(bus, Job::SampleRail);
                 Ok("OK rail sample queued".into())
             }
             // 音频上行开关（批D③）：ON 后 mic 线攒满分片（2048 帧 = 128ms）即组
@@ -277,11 +341,11 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
             // 余片仍照常发完（drain_audio 不看开关），mic 线不再攒新片。
             "AUDIO" => match parts.next() {
                 Some("ON") => {
-                    lock_bus(&bus).st.audio_on = true;
+                    lock_bus(bus).st.audio_on = true;
                     Ok("OK audio on".into())
                 }
                 Some("OFF") => {
-                    lock_bus(&bus).st.audio_on = false;
+                    lock_bus(bus).st.audio_on = false;
                     Ok("OK audio off".into())
                 }
                 _ => Err("AUDIO 需 ON|OFF 参数".into()),
@@ -309,7 +373,7 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                     job_drop,
                     reply_drop,
                 ) = {
-                    let b = lock_bus(&bus);
+                    let b = lock_bus(bus);
                     (
                         b.st.pan_deg,
                         b.st.tilt_deg,
@@ -358,19 +422,9 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
                     .collect();
                 Ok(format!("FONT ABC123 = {}", hex.join(",")))
             }
-            other => Err(format!("unknown cmd \"{other}\"（HELP 看指令表）")),
-        };
-        // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
-        // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
-        let dropped = match result {
-            Ok(line) => !reply(&mut io.uart, &line),
-            Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
-        };
-        if dropped {
-            let mut b = lock_bus(&bus);
-            b.st.reply_drop = b.st.reply_drop.saturating_add(1);
-        }
-    }
+        _ => return None,
+    };
+    Some(r)
 }
 
 /// 角度参数解析（0–180 之外一律 Err——调用方不再 clamp，fail-closed）。
