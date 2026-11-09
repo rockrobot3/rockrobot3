@@ -11,7 +11,9 @@
 //! 随批退役）。本层零业务 match——策略量经 config 数据化注入，机制件零策略载荷。
 
 use rr3mod::BusHandle;
-use rr_hal::backend::{rr3_hal_gpio_out, rr3_hal_servo, RR3_BACKEND_ESP32};
+use rr_hal::backend::{
+    rr3_hal_gpio_out, rr3_hal_servo, rr3_servo_backend, RR3_BACKEND_ESP32, RR3_BACKEND_PLACEHOLDER,
+};
 use rr_hal_api::{Rr3GpioOut, Rr3HalError, Rr3PwmServo};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -193,6 +195,28 @@ fn rr3_remote_bridge(
     Err(format!("舵机面探活失败({backend}): HAL 设备忙"))
 }
 
+/// 桥共享判据（纯函数）：舵机面与音频采集面同选 esp32 ⇒ 同一外设桥，契约所有者
+/// 是音频面 rr3-sense；act 不参与 flock 竞争，直接走远端命令面。
+fn rr3_shared_rule(servo: &str, audio: &str) -> bool {
+    servo == RR3_BACKEND_ESP32 && audio == RR3_BACKEND_ESP32
+}
+
+/// 生效后端上裁决桥是否共享：音频面覆盖键优先于全局（与 rr-hal 同一选择函数）。
+/// 非宿主档没有跨进程命令面，恒 false（保持既有 rtos 行为）。
+fn rr3_bridge_shared(servo: &str) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        rr_hal::backend::rr3_audio_backend()
+            .map(|audio| rr3_shared_rule(servo, audio))
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = servo;
+        false
+    }
+}
+
 /// HAL 执行面三面选择 + 开机探活。舵机面是执行器核心：Unsupported / 探活读失败
 /// 即致命（显式回错不静默退化，不给"半个执行器"的假活）。LED / 继电器是**可缺
 /// 面**：组合档装配单如实申报二者不在位（[enabled_slots] 未启用），rrd 据此注入
@@ -206,13 +230,23 @@ fn rr3_remote_bridge(
 /// Unsupported/参数错仍 fail-closed 上抛，不把"开不了桥"当通用降级借口。
 pub(crate) fn rr3_act_probe(bus: &BusHandle) -> Result<Rr3ActDevs, String> {
     let (servo_dev, servo_backend) = {
-        let (dev, backend) = rr3_hal_servo();
-        match dev.angle() {
-            Ok(_) => (dev, backend),
-            Err(Rr3HalError::Busy) if backend == RR3_BACKEND_ESP32 => {
-                rr3_remote_bridge(bus, backend)?
+        // 单所有者优先（A9 根因）：音频采集面同走 esp32 桥时，桥的契约所有者是
+        // rr3-sense（音频流 + 命令旁路）。此处**不得先开桥再等 Busy**——两进程同时
+        // 起跑时 act 先 open 会赢下 flock，sense 随后连报 HAL 设备忙（2026-11-09
+        // 真板实录，两次部署复现）。改为直接走远端命令面；sense 未起时 act 显式
+        // 失败交 supervisor 退避重试，绝不抢桥。
+        let backend = rr3_servo_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER);
+        if rr3_bridge_shared(backend) {
+            rr3_remote_bridge(bus, backend)?
+        } else {
+            let (dev, backend) = rr3_hal_servo();
+            match dev.angle() {
+                Ok(_) => (dev, backend),
+                Err(Rr3HalError::Busy) if backend == RR3_BACKEND_ESP32 => {
+                    rr3_remote_bridge(bus, backend)?
+                }
+                Err(e) => return Err(format!("舵机面探活失败({backend}): {e}")),
             }
-            Err(e) => return Err(format!("舵机面探活失败({backend}): {e}")),
         }
     };
     let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
@@ -479,6 +513,15 @@ saturate_notice_ms = 500
         );
         assert_eq!(cfg.reflex.loop_hz, 1000);
         assert_eq!(cfg.reflex.saturate_notice_ms, 500);
+    }
+
+    /// 桥共享判据：只有舵机面与音频面同选 esp32 才归 sense 独占。
+    #[test]
+    fn shared_rule_only_when_both_esp32() {
+        assert!(rr3_shared_rule("esp32", "esp32"));
+        assert!(!rr3_shared_rule("esp32", "linux"));
+        assert!(!rr3_shared_rule("linux", "esp32"));
+        assert!(!rr3_shared_rule("sim", "sim"));
     }
 
     /// 可缺面门：占位（装配单未启用该格）只点名不致命；Busy/参数错是真故障。
