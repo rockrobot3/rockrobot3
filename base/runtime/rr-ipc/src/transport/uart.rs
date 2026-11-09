@@ -548,6 +548,39 @@ impl Rr3UartConn {
     }
 }
 
+impl Rr3UartConn {
+    /// 读侧超时档（十分之一秒粒度；`0` = 恢复缺省纯阻塞 VMIN=1/VTIME=0）。
+    ///
+    /// **为什么需要**：宿主对板侧的 `rr3.method` 是"发一帧等一帧"的同步往返，
+    /// 缺省阻塞读在板侧死机/复位/线断时**永不返回**——调用线程（rrd 的 HAL 面、
+    /// 面板 RPC）整条挂死，连接也无法报废重开。置 VMIN=0/VTIME=n 后，静默超过
+    /// n×100ms 的读回 `Ok(0)`，帧层按 Closed 上报，调用方据此报废连接（下次
+    /// 调用重开并 `rr3_flush_input` 净化残字节）。
+    ///
+    /// 语义边界：VTIME 是**字节间**静默窗口，不是整帧总时长——帧内字节间隔在
+    /// 1.5M 下 ~6.7µs，正常链路远小于任一台法档位；只有"根本没人发"才会触发。
+    /// 对桥/哨兵等本来就该阻塞等的收流端不适用，故只作显式调用。
+    pub fn rr3_set_read_timeout(&self, ds: u8) -> std::io::Result<()> {
+        let mut t = Termios::zeroed();
+        // SAFETY：t 是本栈上的合法 termios，tcgetattr 只写它。
+        if unsafe { c_tcgetattr(self.fd, &mut t) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if ds == 0 {
+            t.c_cc[VMIN] = 1;
+            t.c_cc[VTIME] = 0;
+        } else {
+            t.c_cc[VMIN] = 0;
+            t.c_cc[VTIME] = ds;
+        }
+        // SAFETY：合法指针；TCSANOW 立即生效。
+        if unsafe { c_tcsetattr(self.fd, TCSANOW, &t) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
 /// raw 模式配置：取当前 termios → cfmakeraw → 显式 VMIN=1/VTIME=0（阻塞读满语义，
 /// 不靠 cfmakeraw 之后残留的寄存器初值）→ 收发波特率 → TCSANOW 生效 →
 /// `tcflush(TCIFLUSH)` 净化输入队列。
@@ -796,13 +829,27 @@ mod tests {
 
     /// 半帧用例需要"读超时"而不是阻塞：把读侧切到 VMIN=0/VTIME=1（100ms 静默即返回 0）。
     fn set_read_timeout(conn: &Rr3UartConn) {
-        let mut t = Termios::zeroed();
-        // SAFETY：合法栈上 termios。
-        assert_eq!(unsafe { c_tcgetattr(conn.fd, &mut t) }, 0);
-        t.c_cc[VMIN] = 0;
-        t.c_cc[VTIME] = 1;
-        // SAFETY：合法指针。
-        assert_eq!(unsafe { c_tcsetattr(conn.fd, TCSANOW, &t) }, 0);
+        conn.rr3_set_read_timeout(1).expect("设读超时失败");
+    }
+
+    /// 宿主往返必须能醒来：VMIN=0/VTIME 档下无数据静默即回错误（Closed 形状），
+    /// 而不是像缺省阻塞读那样永久挂住——板死/断线时调用线程必须能被释放。
+    #[test]
+    fn read_timeout_bounds_empty_recv() {
+        let (_master, mut conn) = pty_pair(RR3_UART_BAUD_DEFAULT);
+        conn.rr3_set_read_timeout(2).expect("设读超时失败");
+        let t0 = std::time::Instant::now();
+        let r = conn.rr3_recv_buf();
+        let dt = t0.elapsed();
+        assert!(r.is_err(), "无数据必须报错（不得假装收到帧）: {r:?}");
+        assert!(
+            dt >= std::time::Duration::from_millis(150),
+            "不得提前返回（应等满静默窗口）={dt:?}"
+        );
+        assert!(
+            dt < std::time::Duration::from_secs(2),
+            "超时档未生效（仍在阻塞）={dt:?}"
+        );
     }
 
     /// 空闲前导：`last_tx` 归 None（开口后首突发 / 长空闲）后首个写必须先出
