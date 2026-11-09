@@ -2,6 +2,8 @@
 # "先不建硬门、立第三个 baseline 文件只降不升"（批N8 件六落）。
 # B7（2026-11-10）建硬门（check.sh ⑭）兑现"执法位下轮再论"，并同批处置两笔失真：
 #   ①锚函数 rr3_profile_boot_inputs_with_probe 已在重构中更名为 rr3_boot_with_probe
+#      （B9 起 profile.rs 拆 模型/解析/装载，锚函数迁 profile/boot.rs——⑭ 按内容定位，
+#      文件位置不再是锚点，见 check.sh prof_src）
 #     且块行 623→146（load_*/check_* 族拆分实得）——无读者基线的注记烂掉无人知，
 #     本文件以现名现值重钉，⑭ 对"锚函数缺失"红（失锚即基线失效，不许静默跳过）；
 #   ②unknown_key_rejects 撤出：原"只降不升"语义结构性坏死——每新增一个封闭词表
@@ -11,6 +13,6 @@
 #   上调须评审说明理由。
 # 行形制：<计数名> = <非负整数>（行尾 # 注释 = 产出命令与差异注记；解析按
 #   "^<名> = <纯整数>" 取值，尾注不进数值）。
-gate_fn_lines = 146        # base/runtime/rrd/src/profile.rs 装载门函数 rr3_boot_with_probe 块行数（自 `pub fn` 行至首个列 0 `}`；623→146 系 load/check 族两轮拆分实得）
+gate_fn_lines = 146        # profile/boot.rs 装载门函数 rr3_boot_with_probe 块行数（自 `pub fn` 行至首个列 0 `}`；623→146 系 load/check 族两轮拆分实得）
 read_table_boilerplate = 0 # 同函数块内 `read_to_string` 出现次数（读表已全部下沉 rr3_load_* 族；回流入门函数即 ⑭ 红）
 same_shape_fns = 14        # grep -rhoE 'fn rr3_[a-z_0-9]*(from_text|is_empty|contains|check)[a-z_0-9]*\(' base/runtime/rr-registry/src/*.rs | sort -u | wc -l（B7 现跑；22→14 系冲突条目/原子条目拆小函数实得）
