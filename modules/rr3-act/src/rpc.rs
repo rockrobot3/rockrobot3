@@ -163,6 +163,11 @@ pub(crate) fn rr3_act_ops_snapshot(cfg: &Rr3ActCfg) -> Value {
 /// 行程与时限的值域判定留件（`servo::rr3_servo_travel` /
 /// `servo::rr3_servo_timeout`），点名顺序与上移前逐字同序。
 pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64), String> {
+    Ok((rr3_servo_angle(args, cfg)?, rr3_servo_move(args, cfg)?))
+}
+
+/// angle_deg：缺参/非整数/越 u16/行程外的点名顺序与上移前逐字同序。
+fn rr3_servo_angle(args: &Value, cfg: &Rr3ServoCfg) -> Result<u16, String> {
     let angle = args
         .get("angle_deg")
         .ok_or_else(|| "缺 angle_deg（int，行程内角度）".to_string())?;
@@ -179,6 +184,11 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
             max_deg,
         } => format!("angle_deg={angle_deg} 超出行程 [{min_deg}, {max_deg}]"),
     })?;
+    Ok(angle)
+}
+
+/// move_ms：缺省/Null 走时限缺省；给值则非负整数 + 值域判定（留件）。
+fn rr3_servo_move(args: &Value, cfg: &Rr3ServoCfg) -> Result<u64, String> {
     let move_ms = match args.get("move_ms") {
         None | Some(Value::Null) => None,
         Some(v) => Some(
@@ -186,13 +196,12 @@ pub fn rr3_servo_parse_args(args: &Value, cfg: &Rr3ServoCfg) -> Result<(u16, u64
                 .ok_or_else(|| format!("move_ms 必须是非负整数，收到 {v}"))?,
         ),
     };
-    let move_ms = servo::rr3_servo_timeout(move_ms, cfg).map_err(|e| match e {
+    servo::rr3_servo_timeout(move_ms, cfg).map_err(|e| match e {
         servo::Rr3ServoTimeoutError::ZeroMs => "move_ms 必须大于 0".to_string(),
         servo::Rr3ServoTimeoutError::BeyondLimit { ms, limit } => {
             format!("move_ms={ms} 超出时限上限 {limit}（不给堵转留机会）")
         }
-    })?;
-    Ok((angle, move_ms))
+    })
 }
 
 /// servo/state 体：seq 逐条 +1（流序），angle_deg 是当前角

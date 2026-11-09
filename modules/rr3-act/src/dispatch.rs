@@ -107,6 +107,70 @@ impl Rr3ActDispatcher {
             tb: Rr3TimeBase::rr3_time_base_new(),
         }
     }
+
+    /// 低电禁动闸门（MC-5 §20 ② ①）：触发源唯一 = rrd 低电旗广播
+    /// `rr3-runtime/system/power`（判定已在 power 侧、rrd 置旗已在，件内
+    /// 不再判定电压）。置位即闭锁执行面；trip 自带去抖（重复广播不翻转）。
+    /// 批N5 件二笔3 波及订正：该主题现两值 reason——battery-low 闭锁；
+    /// **battery-ok 是解除广播，不闭锁也不解禁**（解禁只认轨压样本，复位
+    /// 语义④；低电段中本件重启会被解除广播误闭锁至重启，缺 reason/未知值
+    /// 按 fail-closed 闭锁安全向）。
+    fn rr3_power_evt(&mut self, body: &Value) {
+        let reason = body.get("reason").and_then(Value::as_str).unwrap_or("");
+        if reason == "battery-ok" {
+            eprintln!(
+                "低电禁动：battery-ok 解除广播不闭锁（本侧解禁只认轨压样本，喂入面挂账批N3 件七）"
+            );
+        } else if self.low_gate.rr3_low_gate_trip() {
+            eprintln!(
+                "低电禁动：执行面（servo/relay）闭锁，妆面不受辖（{RR3_SYSTEM_POWER_TOPIC} reason={reason}）"
+            );
+        }
+    }
+
+    /// relay 结果发布：变化即发（0.0.5 批I A-7），同态命令折日志不发布。
+    fn rr3_relay_out(
+        &mut self,
+        bus: &BusHandle,
+        trace: u64,
+        on: bool,
+        prev: bool,
+    ) -> Result<(), String> {
+        if !relay::rr3_relay_state_due(prev, on) {
+            eprintln!("intent: trace={trace} relay on={on}（同态不续发）");
+            return Ok(());
+        }
+        self.relay_seq += 1;
+        bus.counter_bump(relay::rr3_relay_count_key(on), 1);
+        bus.publish(
+            relay::RR3_RELAY_STATE_TOPIC,
+            rpc::rr3_relay_state_body(self.relay_seq, on),
+        )?;
+        eprintln!(
+            "intent: trace={trace} relay on={on}，state#{} 已发",
+            self.relay_seq
+        );
+        Ok(())
+    }
+
+    /// servo 结果发布：限速门同 RPC 路（两条驱动路共用一条状态流）；被限速
+    /// 挡掉的发布不补发，下一次动作自然携带最新角度。
+    fn rr3_servo_out(&mut self, bus: &BusHandle, trace: u64, angle: u16) -> Result<(), String> {
+        if !self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
+            eprintln!("intent: trace={trace} servo angle={angle}（state 被限速挡下）");
+            return Ok(());
+        }
+        self.servo_seq += 1;
+        bus.publish(
+            servo::RR3_SERVO_STATE_TOPIC,
+            rpc::rr3_servo_state_body(self.servo_seq, angle),
+        )?;
+        eprintln!(
+            "intent: trace={trace} servo angle={angle}，state#{} 已发",
+            self.servo_seq
+        );
+        Ok(())
+    }
 }
 
 impl Dispatcher for Rr3ActDispatcher {
@@ -191,22 +255,8 @@ impl Dispatcher for Rr3ActDispatcher {
     /// 两道归属门在 intent.rs 原位，本层只做 topic 过滤＋actions 分派＋outcome
     /// 发布与日志；其余 topic 忽略。
     fn on_event(&mut self, topic: &str, body: &Value, bus: &BusHandle) -> Result<(), String> {
-        // 低电禁动闸门（MC-5 §20 ② ①）：触发源唯一 = rrd 低电旗广播
-        // `rr3-runtime/system/power`（判定已在 power 侧、rrd 置旗已在，件内
-        // 不再判定电压）。置位即闭锁执行面；trip 自带去抖（重复广播不翻转）。
-        // 批N5 件二笔3 波及订正：该主题现两值 reason——battery-low 闭锁；
-        // **battery-ok 是解除广播，不闭锁也不解禁**（解禁只认轨压样本，复位
-        // 语义④；低电段中本件重启会被解除广播误闭锁至重启，缺 reason/未知值
-        // 按 fail-closed 闭锁安全向）。
         if topic == RR3_SYSTEM_POWER_TOPIC {
-            let reason = body.get("reason").and_then(Value::as_str).unwrap_or("");
-            if reason == "battery-ok" {
-                eprintln!("低电禁动：battery-ok 解除广播不闭锁（本侧解禁只认轨压样本，喂入面挂账批N3 件七）");
-            } else if self.low_gate.rr3_low_gate_trip() {
-                eprintln!(
-                    "低电禁动：执行面（servo/relay）闭锁，妆面不受辖（{RR3_SYSTEM_POWER_TOPIC} reason={reason}）"
-                );
-            }
+            self.rr3_power_evt(body);
             return Ok(());
         }
         // 订阅面：广播帧只认 `rr3-brain/intent/result`（Q1 裁定：brain 产出意图、
@@ -217,60 +267,27 @@ impl Dispatcher for Rr3ActDispatcher {
             return Ok(());
         }
         let trace = body.get("trace").and_then(Value::as_u64).unwrap_or(0);
-        match body.get("actions") {
-            None | Some(Value::Null) => {
-                eprintln!("intent: trace={trace}（纯对话轮，无动作）");
-            }
-            Some(actions) => {
-                for r in intent::rr3_actions_handle(
-                    actions,
-                    &mut *self.relay_gpio,
-                    &mut *self.servo_dev,
-                    &self.cfg.servo,
-                    self.low_gate.rr3_low_gate_blocked(),
-                    &self.axis,
-                    &self.cfg.intent.open_topics,
-                ) {
-                    match r {
-                        Ok(intent::Rr3IntentOutcome::Relay(on, prev)) => {
-                            // 变化即发（0.0.5 批I A-7）：同态命令折日志不发布
-                            if relay::rr3_relay_state_due(prev, on) {
-                                self.relay_seq += 1;
-                                bus.counter_bump(relay::rr3_relay_count_key(on), 1);
-                                bus.publish(
-                                    relay::RR3_RELAY_STATE_TOPIC,
-                                    rpc::rr3_relay_state_body(self.relay_seq, on),
-                                )?;
-                                eprintln!(
-                                    "intent: trace={trace} relay on={on}，state#{} 已发",
-                                    self.relay_seq
-                                );
-                            } else {
-                                eprintln!("intent: trace={trace} relay on={on}（同态不续发）");
-                            }
-                        }
-                        Ok(intent::Rr3IntentOutcome::Servo(angle)) => {
-                            // servo/state 限速门同 RPC 路（两条驱动路共用一条状态流）；
-                            // 被限速挡掉的发布不补发，下一次动作自然携带最新角度
-                            if self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
-                                self.servo_seq += 1;
-                                bus.publish(
-                                    servo::RR3_SERVO_STATE_TOPIC,
-                                    rpc::rr3_servo_state_body(self.servo_seq, angle),
-                                )?;
-                                eprintln!(
-                                    "intent: trace={trace} servo angle={angle}，state#{} 已发",
-                                    self.servo_seq
-                                );
-                            } else {
-                                eprintln!(
-                                    "intent: trace={trace} servo angle={angle}（state 被限速挡下）"
-                                );
-                            }
-                        }
-                        Err(e) => eprintln!("intent: trace={trace} 拒执行: {e}"),
-                    }
+        let Some(actions) = body.get("actions").filter(|v| !v.is_null()) else {
+            eprintln!("intent: trace={trace}（纯对话轮，无动作）");
+            return Ok(());
+        };
+        for r in intent::rr3_actions_handle(
+            actions,
+            &mut *self.relay_gpio,
+            &mut *self.servo_dev,
+            &self.cfg.servo,
+            self.low_gate.rr3_low_gate_blocked(),
+            &self.axis,
+            &self.cfg.intent.open_topics,
+        ) {
+            match r {
+                Ok(intent::Rr3IntentOutcome::Relay(on, prev)) => {
+                    self.rr3_relay_out(bus, trace, on, prev)?
                 }
+                Ok(intent::Rr3IntentOutcome::Servo(angle)) => {
+                    self.rr3_servo_out(bus, trace, angle)?
+                }
+                Err(e) => eprintln!("intent: trace={trace} 拒执行: {e}"),
             }
         }
         Ok(())
