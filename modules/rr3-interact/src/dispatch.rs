@@ -39,6 +39,17 @@ pub(crate) struct Rr3TtsPcmBuf {
 /// 点名"或故障模块把 interact 内存顶穿。超界帧丢弃，点名对账必然失败→整轮拒播。
 const RR3_TTS_BUF_CAP: usize = 32 * 1024 * 1024;
 
+/// 收下的帧计数键（运维面，随心跳归并；与 `tts_pcm_bad` 互补对账）
+const RR3_TTS_PCM_FRAMES_KEY: &str = "tts_pcm_frames";
+
+/// 弃帧计数键（运维面，随心跳归并；`tts_pcm_frames` 只记收下的帧——两者相加
+/// 才是上游实际发出的帧数，"只流不点名"看这里就知道）。
+const RR3_TTS_PCM_BAD_KEY: &str = "tts_pcm_bad";
+
+/// 弃帧留痕抽样（首帧必留，其后每 N 帧一条）：坏源可能成百上千帧连续弃，
+/// 逐帧打会把日志文件撑爆；抽样保证"有没有在坏、坏因是什么"始终可查。
+const RR3_TTS_BAD_LOG_EVERY: u32 = 64;
+
 impl Rr3TtsPcmBuf {
     /// 收一帧：`pcm_b64` 解码追加（STREAM 语义有序到达，帧序即字节序）。
     /// 解码失败/超上界上抛，由调用方弃帧——缺口由点名的对账兜住，不静默。
@@ -129,6 +140,8 @@ pub(crate) struct Rr3InteractDispatcher {
     act_rx: mpsc::Receiver<(Rr3PanelAction, mpsc::Sender<Result<Value, String>>)>,
     /// 表情帧节拍锚：on_tick 到点重置（serve 传入 now 实参，同拍等价）
     face_tick_at: Instant,
+    /// 弃帧累计（既有计数上报又有抽样留痕闸门：同一自增量，不引第二份状态）
+    tts_pcm_bad: u32,
 }
 
 impl Rr3InteractDispatcher {
@@ -152,8 +165,36 @@ impl Rr3InteractDispatcher {
             link,
             act_rx,
             face_tick_at: Instant::now(),
+            tts_pcm_bad: 0,
         }
     }
+
+    /// 收流一帧（`on_event` 的 tts_pcm 臂）：成帧计数；坏帧**弃该帧但必须留痕**——
+    /// 上抛会按 Dispatcher 契约把模块判死，逐帧打又会撑爆日志文件，故按首帧＋
+    /// 每 [`RR3_TTS_BAD_LOG_EVERY`] 帧抽样点名，并另账计数由心跳归并上报。
+    fn rr3_tts_frame(&mut self, body: &Value, bus: &BusHandle) {
+        let pushed = body
+            .get("pcm_b64")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "帧缺 pcm_b64".to_string())
+            .and_then(|b64| self.tts_pcm.rr3_tts_buf_push(b64));
+        match pushed {
+            Ok(()) => bus.counter_bump(RR3_TTS_PCM_FRAMES_KEY, 1),
+            Err(e) => {
+                self.tts_pcm_bad = self.tts_pcm_bad.saturating_add(1);
+                bus.counter_bump(RR3_TTS_PCM_BAD_KEY, 1);
+                if rr3_bad_log_due(self.tts_pcm_bad) {
+                    eprintln!("tts_pcm 弃帧（累计 {} 帧）: {e}", self.tts_pcm_bad);
+                }
+            }
+        }
+    }
+}
+
+/// 弃帧留痕闸门（纯函数，单测钉域）：第 1 帧必留（"什么时候开始坏的"），其后
+/// 每 N 帧一条（"还在坏、坏因未变"），中间帧只进计数。
+fn rr3_bad_log_due(n: u32) -> bool {
+    n == 1 || n % RR3_TTS_BAD_LOG_EVERY == 0
 }
 
 impl Dispatcher for Rr3InteractDispatcher {
@@ -191,13 +232,7 @@ impl Dispatcher for Rr3InteractDispatcher {
             RR3_NET_LINK_TOPIC => {
                 *self.link.lock().unwrap_or_else(|p| p.into_inner()) = Some(body.clone());
             }
-            player::RR3_TTS_PCM_TOPIC => {
-                if let Some(b64) = body.get("pcm_b64").and_then(Value::as_str) {
-                    if self.tts_pcm.rr3_tts_buf_push(b64).is_ok() {
-                        bus.counter_bump("tts_pcm_frames", 1);
-                    }
-                }
-            }
+            player::RR3_TTS_PCM_TOPIC => self.rr3_tts_frame(body, bus),
             _ => {}
         }
         Ok(())
@@ -238,6 +273,18 @@ impl Dispatcher for Rr3InteractDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 弃帧留痕闸门（B17 审计）：首帧必留、其后每 64 帧一条，中间帧只进计数——
+    /// 坏源连续弃帧时日志不爆、证据不断。
+    #[test]
+    fn bad_log_gate_keeps_first_then_samples() {
+        assert!(rr3_bad_log_due(1), "第一帧必须留痕");
+        assert!(!rr3_bad_log_due(2));
+        assert!(!rr3_bad_log_due(RR3_TTS_BAD_LOG_EVERY - 1));
+        assert!(rr3_bad_log_due(RR3_TTS_BAD_LOG_EVERY));
+        assert!(rr3_bad_log_due(RR3_TTS_BAD_LOG_EVERY * 3));
+        assert!(!rr3_bad_log_due(RR3_TTS_BAD_LOG_EVERY * 3 + 1));
+    }
 
     /// 收流缓冲：解码追加 + 排空清零（残流不跨轮滞留），坏帧 fail-closed
     #[test]
