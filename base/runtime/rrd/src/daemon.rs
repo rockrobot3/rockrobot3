@@ -564,7 +564,10 @@ fn rr3_daemon_counters(shared: &Arc<Mutex<RrdRegistry>>) -> Option<PathBuf> {
                     table.len()
                 ));
             } else {
-                rr3_log(&format!("counters 启动加载 {} 键（上界 {cap}）", table.len()));
+                rr3_log(&format!(
+                    "counters 启动加载 {} 键（上界 {cap}）",
+                    table.len()
+                ));
             }
             match crate::counters::rr3_counters_store(path, &table) {
                 Ok(()) => rr3_log(&format!(

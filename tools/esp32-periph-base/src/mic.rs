@@ -43,9 +43,8 @@ use rr_ipc::{
 use serde_json::json;
 
 use crate::board::{
-    AUDIO_CHUNK_FRAMES, AUDIO_HOST_TIMEOUT_MS, AUDIO_Q_CAP, MIC_GAIN, MIC_SR_HZ,
-    RR3_AUDIO_TOPIC, RR3_BIND_I2S_BCLK, RR3_BIND_I2S_SD, RR3_BIND_I2S_WS, RR3_HOST_TASK,
-    RR3_PERIPH_TASK,
+    AUDIO_CHUNK_FRAMES, AUDIO_HOST_TIMEOUT_MS, AUDIO_Q_CAP, MIC_GAIN, MIC_SR_HZ, RR3_AUDIO_TOPIC,
+    RR3_BIND_I2S_BCLK, RR3_BIND_I2S_SD, RR3_BIND_I2S_WS, RR3_HOST_TASK, RR3_PERIPH_TASK,
 };
 use crate::capture::{chunk_to_pcm, frame32_to_pair, push_bounded, Rr3DcBlocker};
 use crate::link::rr3_frame_now_ns;

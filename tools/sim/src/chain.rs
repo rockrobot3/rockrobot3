@@ -423,7 +423,10 @@ fn rr3_chain_bins(a: &Rr3SimArgs) -> Result<Rr3ChainBins, String> {
             &bins.interact,
             "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
         ),
-        (&bins.act, "cargo build -p rr3-act（在 modules/rr3-act/ 下）"),
+        (
+            &bins.act,
+            "cargo build -p rr3-act（在 modules/rr3-act/ 下）",
+        ),
         (
             &bins.brain,
             "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
@@ -514,10 +517,7 @@ fn rr3_chain_run(
 }
 
 /// 起 rrd：boot spawn rr3-sense（双麦 burst 源 + 判向注入随 rrd 环境继承）。
-fn rr3_chain_up_rrd(
-    ctx: &Rr3ChainCtx,
-    children: &mut Vec<(String, Child)>,
-) -> Result<(), String> {
+fn rr3_chain_up_rrd(ctx: &Rr3ChainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
     let fix = ctx.fix;
     let rrd_log = fix.workdir.join("rrd.log");
     let rrd_child = Command::new(&ctx.bins.rrd)
@@ -547,10 +547,7 @@ fn rr3_chain_up_rrd(
 }
 
 /// 观察者连总线并注册（最小身份，专收两个取证主题）。
-fn rr3_chain_obs_up(
-    fix: &Rr3ChainFix,
-    report: &mut String,
-) -> Result<UnixStream, String> {
+fn rr3_chain_obs_up(fix: &Rr3ChainFix, report: &mut String) -> Result<UnixStream, String> {
     let mut obs_stream = UnixStream::connect(&fix.socket)
         .map_err(|e| format!("观察者连 {:?} 失败: {e}", fix.socket))?;
     let obs_manifest_text = std::fs::read_to_string(&fix.obs_manifest)
@@ -563,10 +560,7 @@ fn rr3_chain_obs_up(
 }
 
 /// 外部起 interact / brain / act（三真模块，各自日志进 workdir，复用共用起法）。
-fn rr3_chain_up_ext(
-    ctx: &Rr3ChainCtx,
-    children: &mut Vec<(String, Child)>,
-) -> Result<(), String> {
+fn rr3_chain_up_ext(ctx: &Rr3ChainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
     let fix = ctx.fix;
     for (name, mut cmd) in [
         {

@@ -87,8 +87,7 @@ fn rr3_abs_config(
     // 解析失败即致命——横幅是"叠加层已生效"的可见凭证，按 CLI 原词回显会让它依赖 CWD。
     let overlay = match cfg.overlay.as_deref() {
         Some(ov) => Some(
-            topics_load::rr3_topics_abs(ov)
-                .map_err(|e| format!("主题叠加层参数不可用: {e}"))?,
+            topics_load::rr3_topics_abs(ov).map_err(|e| format!("主题叠加层参数不可用: {e}"))?,
         ),
         None => None,
     };
@@ -96,9 +95,8 @@ fn rr3_abs_config(
     // 装配单路径在这里一次性绝对化（与叠加层同形）：装载与横幅凭证共用同一个解析结果。
     // 解析失败即致命——装配单**必须已存在**才可装载，canonicalize 的 ENOENT 正是该报的错。
     if let Some(p) = cfg.profile.as_deref() {
-        cfg.profile = Some(
-            profile::rr3_profile_abs(p).map_err(|e| format!("装配单参数不可用: {e}"))?,
-        );
+        cfg.profile =
+            Some(profile::rr3_profile_abs(p).map_err(|e| format!("装配单参数不可用: {e}"))?);
     }
     Ok((cfg, overlay))
 }

@@ -89,7 +89,10 @@ pub(crate) fn rr3_axis_files_load(
 /// 读者数为 0"的 host 侧半边）。零份回空串且安静（无档案是常态起跑态）；坏件
 /// 逐条点名但不拒 boot（档案装载是降级面，与缺格/缺角色同档——模块侧折保守
 /// 缺省仍是安全向）；多份合法点名后同样空串。
-pub(crate) fn rr3_axis_state_text(found: &[crate::axis::Rr3AxisFile], axis: &str) -> (String, Vec<String>) {
+pub(crate) fn rr3_axis_state_text(
+    found: &[crate::axis::Rr3AxisFile],
+    axis: &str,
+) -> (String, Vec<String>) {
     let mut notes = Vec::new();
     // 副本病灶：同 pin 多份文件 → 不注入（恰一份合法才投影；先清理副本）
     let mut pin_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
@@ -578,7 +581,9 @@ pub use crate::profile_edit::{rr3_domain_apply, rr3_key_line_apply};
 /// 门 c（⑨-c）起同时返回解析成功的 facts（(件名, facts) 升序）供校验⑨ 消费——
 /// 形状错误照旧走错误串（该件 Degraded），坏形件的 demands 不进预算加总（可见面 =
 /// assemble_broken 点名，不 claim 全覆盖）。
-pub(crate) fn rr3_assemble_scan(module_dir: &Path) -> (Vec<(String, Rr3AssembleFacts)>, Vec<String>) {
+pub(crate) fn rr3_assemble_scan(
+    module_dir: &Path,
+) -> (Vec<(String, Rr3AssembleFacts)>, Vec<String>) {
     let atoms_dir = module_dir.join("atoms");
     let Ok(entries) = std::fs::read_dir(&atoms_dir) else {
         return (Vec::new(), Vec::new());
@@ -795,7 +800,12 @@ pub(crate) fn rr3_power_gaps(
 /// 分子是**件级直加**非每实例扩算（assemble.rs 头注同源：件全部实例共享一个任务
 /// 栈/一条堆账）；输入由装载链对扫描成功的件直加，坏形件不进加总（可见面 =
 /// assemble_broken 点名，不 claim 全覆盖，同校验⑨ 诚实注记）。
-pub(crate) fn rr3_memory_budget(stack_sum: i64, heap_sum: i64, budget: &Rr3Budget, tier: &str) -> Vec<String> {
+pub(crate) fn rr3_memory_budget(
+    stack_sum: i64,
+    heap_sum: i64,
+    budget: &Rr3Budget,
+    tier: &str,
+) -> Vec<String> {
     let mut errs = Vec::new();
     if budget.not_applicable {
         return errs;
@@ -815,4 +825,3 @@ pub(crate) fn rr3_memory_budget(stack_sum: i64, heap_sum: i64, budget: &Rr3Budge
     }
     errs
 }
-

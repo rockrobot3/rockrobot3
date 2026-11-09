@@ -478,11 +478,7 @@ fn rr3_stat_tick(core: &Rr3Esp32AudioCore, mark: &mut Rr3StatMark) {
         errs,
         recs,
     );
-    *mark = Rr3StatMark {
-        chunks,
-        errs,
-        recs,
-    };
+    *mark = Rr3StatMark { chunks, errs, recs };
 }
 
 /// 统计水位（上一窗的累计值；只由读线程持有）。
@@ -510,9 +506,7 @@ fn rr3_drain_cmds(
         let frame = rr3_esp32_cmd_frame(*cmd_id, &cmd);
         if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
             rx.rr3_cmd_push_front(cmd);
-            return Err(format!(
-                "命令写出失败（回插队首，连接报废转重连）: {e:?}"
-            ));
+            return Err(format!("命令写出失败（回插队首，连接报废转重连）: {e:?}"));
         }
         *cmd_id += 1;
     }
