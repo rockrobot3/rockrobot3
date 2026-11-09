@@ -128,7 +128,7 @@ impl Rr3AudioSource for Rr3AlsaAudioSource {
         };
         let ch = open.cfg.channels as usize;
         let frames = buf.len() / ch;
-        let mut io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
+        let io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
         let mut done = 0usize;
         while done < frames {
             match io.readi(&mut buf[done * ch..]) {
@@ -175,7 +175,7 @@ impl Rr3AudioSink for Rr3AlsaAudioSink {
         };
         let ch = open.cfg.channels as usize;
         let total_frames = samples.len() / ch;
-        let mut io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
+        let io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
         let mut done = 0usize;
         while done < total_frames {
             match io.writei(&samples[done * ch..]) {
