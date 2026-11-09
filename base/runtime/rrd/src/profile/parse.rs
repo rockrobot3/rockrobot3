@@ -439,32 +439,18 @@ fn rr3_supplies_parse(root: &toml::Value, tier: &str, errs: &mut Vec<String>) ->
 
 /// `[supplies]` 标量位：看门狗声明/时序预算/喂狗者 + 未知键点名。
 fn rr3_supplies_core(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec<String>) {
-    match t.get("watchdog_present").and_then(toml::Value::as_bool) {
-        Some(b) => supplies.watchdog_present = b,
-        None => errs.push("supplies.watchdog_present 缺失或不是布尔".to_string()),
-    }
-    for key in [
-        "watchdog_timeout_ms",
-        "tick_period_ms",
-        "tick_jitter_ms",
+    rr3_supplies_flags(t, supplies, errs);
+    rr3_int_into(t, "watchdog_timeout_ms", &mut supplies.watchdog_timeout_ms, errs);
+    rr3_int_into(t, "tick_period_ms", &mut supplies.tick_period_ms, errs);
+    rr3_int_into(t, "tick_jitter_ms", &mut supplies.tick_jitter_ms, errs);
+    rr3_int_into(
+        t,
         "safety_core_interval_ms",
-    ] {
-        match supplies_int(t.get(key), key) {
-            Ok(v) => match key {
-                "watchdog_timeout_ms" => supplies.watchdog_timeout_ms = v,
-                "tick_period_ms" => supplies.tick_period_ms = v,
-                "tick_jitter_ms" => supplies.tick_jitter_ms = v,
-                _ => supplies.safety_core_interval_ms = v,
-            },
-            Err(e) => errs.push(e),
-        }
-    }
-    match t.get("watchdog_feeder").and_then(toml::Value::as_str) {
-        Some(s) if !s.is_empty() => supplies.watchdog_feeder = s.to_string(),
-        _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
-    }
+        &mut supplies.safety_core_interval_ms,
+        errs,
+    );
+    // domain / budget 是子段键，各自成块解析（第七供给位 / 校验⑩ 分母）
     for k in t.keys() {
-        // domain / budget 是子段键，各自成块解析（第七供给位 / 校验⑩ 分母）
         if k != "domain" && k != "budget" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
             errs.push(format!(
                 "[supplies] 未知键 {k}（只认 {}）",
@@ -474,8 +460,26 @@ fn rr3_supplies_core(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec
     }
 }
 
-/// `[supplies]` 两个子段：`[[supplies.domain]]`（第七供给位）与
-/// `[supplies.budget]`（校验⑩ 分母）。
+/// 看门狗有无与非空喂者两键（B9 自 supplies_core 抽出）：缺/型错各自点名。
+fn rr3_supplies_flags(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec<String>) {
+    match t.get("watchdog_present").and_then(toml::Value::as_bool) {
+        Some(b) => supplies.watchdog_present = b,
+        None => errs.push("supplies.watchdog_present 缺失或不是布尔".to_string()),
+    }
+    match t.get("watchdog_feeder").and_then(toml::Value::as_str) {
+        Some(s) if !s.is_empty() => supplies.watchdog_feeder = s.to_string(),
+        _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
+    }
+}
+
+/// 整数键落位（B9 自 supplies_core 抽出）：一条键一条点名，字段引用直给。
+fn rr3_int_into(t: &toml::Table, key: &str, slot: &mut i64, errs: &mut Vec<String>) {
+    match supplies_int(t.get(key), key) {
+        Ok(v) => *slot = v,
+        Err(e) => errs.push(e),
+    }
+}
+
 fn rr3_supplies_sub(
     t: &toml::Table,
     supplies: &mut Rr3Supplies,

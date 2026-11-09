@@ -161,6 +161,25 @@ pub struct Rr3DoaFix {
 /// b3a「甲=右」口头确认不可靠——悬空实验只有相对稳定性、无绝对方位锚点）。
 /// 符号约定：lag>0 = R（frame[0]，物理右）先到 = 声源在右，deg>0 同号直通反射环。
 pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3DoaFix> {
+    let (ch, frames) = rr3_doa_gate(samples, channels, cfg)?;
+    // 物理 lag 上限：round(sr·基线/声速)——15cm @16k = round(6.997) = 7
+    let sr_mm = cfg.sample_rate_hz as i64 * cfg.mic_baseline_mm as i64;
+    let lag_max = ((2 * sr_mm + RR3_SOUND_MM_PER_S) / (2 * RR3_SOUND_MM_PER_S)) as usize;
+    let half = lag_max + 1;
+    let cc = rr3_doa_cc(samples, ch, frames, half);
+    let lag_q7 = rr3_doa_peak(&cc, lag_max, half);
+    // sinθ = lag·声速/(sr·基线)：K_Q15 定标（Q7 lag → Q15 sinθ），查表出整度
+    let k_q15 = RR3_SOUND_MM_PER_S * 32768 / sr_mm;
+    let sin_q15 = ((lag_q7 * k_q15) >> 7).clamp(-32768, 32767) as i32;
+    let idx = (((sin_q15 + 32768) * 256 + 32768) >> 16) as usize;
+    let deg = RR3_ASIN_DEG_LUT[idx];
+    let bin = rr3_doa_bin_of(deg, cfg.bin_threshold_deg);
+    Some(Rr3DoaFix { deg, bin })
+}
+
+/// 形状门 + 能量门（B9 自 doa_fix 抽出）：通道/基线/帧数合法且至少一采集帧
+/// rms ≥ 阈值才继续。阈值²×帧长定标比较，免 isqrt。
+fn rr3_doa_gate(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<(usize, usize)> {
     if channels < 2 || cfg.mic_baseline_mm == 0 {
         return None;
     }
@@ -169,7 +188,6 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
     if frames == 0 {
         return None;
     }
-    // 能量门：任一采集帧（L/R 任一通道）rms ≥ 阈值（阈值²×帧长定标比较，免 isqrt）
     let frame_len = ((cfg.sample_rate_hz as u64 * cfg.frame_ms) / 1000).max(1) as usize;
     let min = cfg.window_rms_min.max(0) as u64;
     if min > 0 {
@@ -194,11 +212,12 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
             return None;
         }
     }
-    // 物理 lag 上限：round(sr·基线/声速)——15cm @16k = round(6.997) = 7
-    let sr_mm = cfg.sample_rate_hz as i64 * cfg.mic_baseline_mm as i64;
-    let lag_max = ((2 * sr_mm + RR3_SOUND_MM_PER_S) / (2 * RR3_SOUND_MM_PER_S)) as usize;
-    // cc[d] = Σ_t R[t]·L[t+d]，d ∈ [−(lag_max+1), lag_max+1]（±1 供抛物线取邻）
-    let half = lag_max + 1;
+    Some((ch, frames))
+}
+
+/// 互相关积分（B9 自 doa_fix 抽出）：cc[d] = Σ_t R[t]·L[t+d]，
+/// d ∈ [−(lag_max+1), lag_max+1]（±1 供抛物线取邻）。
+fn rr3_doa_cc(samples: &[i16], ch: usize, frames: usize, half: usize) -> Vec<i64> {
     let mut cc = vec![0i64; 2 * half + 1];
     for (i, slot) in cc.iter_mut().enumerate() {
         let d = i as i64 - half as i64;
@@ -218,7 +237,13 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
         }
         *slot = acc;
     }
-    // 峰值搜索限物理域 [−lag_max, lag_max]（±31/32 次峰在域外，按构造剔除）
+    cc
+}
+
+/// 峰值 + 整数抛物线亚样本（B9 自 doa_fix 抽出，Q7）：峰值搜索限物理域
+/// [−lag_max, lag_max]（域外次峰按构造剔除）；真峰处 2y1 > y0+y2，den ≤ 0
+/// （平台/边界）不插补。返回 Q7 lag。
+fn rr3_doa_peak(cc: &[i64], lag_max: usize, half: usize) -> i64 {
     let mut best = 0i64;
     let mut bv = -1i64;
     for d in -(lag_max as i64)..=(lag_max as i64) {
@@ -228,7 +253,6 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
             best = d;
         }
     }
-    // 整数抛物线亚样本（Q7）：真峰处 2y1 > y0+y2，den ≤ 0（平台/边界）不插补
     let y0 = cc[(best - 1 + half as i64) as usize].abs();
     let y2 = cc[(best + 1 + half as i64) as usize].abs();
     let den = 2 * bv - y0 - y2;
@@ -237,14 +261,7 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
     } else {
         0
     };
-    // sinθ = lag·声速/(sr·基线)：K_Q15 定标（Q7 lag → Q15 sinθ），查表出整度
-    let k_q15 = RR3_SOUND_MM_PER_S * 32768 / sr_mm;
-    let lag_q7 = best * 128 + sub;
-    let sin_q15 = ((lag_q7 * k_q15) >> 7).clamp(-32768, 32767) as i32;
-    let idx = (((sin_q15 + 32768) * 256 + 32768) >> 16) as usize;
-    let deg = RR3_ASIN_DEG_LUT[idx];
-    let bin = rr3_doa_bin_of(deg, cfg.bin_threshold_deg);
-    Some(Rr3DoaFix { deg, bin })
+    best * 128 + sub
 }
 
 #[cfg(test)]
