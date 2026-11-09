@@ -157,6 +157,9 @@ pub(crate) struct PeriphState {
     /// 应答整行未发完的累计（TX 环满/写错；`INFO` 观测）：非零即存在"宿主收不到
     /// 回包"的静默丢应答，与 `audio` 上行抢带宽相关。
     pub(crate) reply_drop: u64,
+    /// 音频分片写不全累计（宿主失联/退避时的背压面）。只进日志抽样与内部账，
+    /// 不改 INFO 行格式（观测面字段冻结）。
+    pub(crate) audio_write_fail: u64,
 }
 
 impl PeriphState {
@@ -196,6 +199,7 @@ impl PeriphState {
             move_fail_events: 0,
             job_dropped: 0,
             reply_drop: 0,
+            audio_write_fail: 0,
         }
     }
 
@@ -425,8 +429,19 @@ pub(crate) fn drain_audio(uart: &mut UartDriver<'static>, bus: &Arc<Mutex<Bus>>)
             lock_bus(bus).st.audio_sent += 1;
         } else {
             // 写不全：线上半帧（帧层拒收 + recorder 端 seq 断档对账），此处点名，
-            // 不再"零日志地当没发生"。
-            eprintln!("[periph] 音频分片写不全 {n}/{}", f.len());
+            // 不再"零日志地当没发生"。宿主失联时每片都写不全——按累计数抽样打点
+            // （首条 + 每 100 条），否则 50 片/秒会变成日志风暴。
+            let fails = {
+                let mut b = lock_bus(bus);
+                b.st.audio_write_fail = b.st.audio_write_fail.saturating_add(1);
+                b.st.audio_write_fail
+            };
+            if fails == 1 || fails % 100 == 0 {
+                eprintln!(
+                    "[periph] 音频分片写不全 {n}/{}（累计 {fails} 片，疑似宿主失联/退避）",
+                    f.len()
+                );
+            }
         }
     }
 }
