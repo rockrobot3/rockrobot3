@@ -42,6 +42,10 @@ pub struct Rr3DialogTurn {
     pub trace_id: u64,
 }
 
+/// 对话历史保留轮数（只记不读的面也必须有界：常驻进程跑数月，无界 Vec 是
+/// 真实内存泄漏——2026-11-09 静态审计；保留少量轮次供后续面板回看接线）。
+const RR3_DIALOG_HISTORY_CAP: usize = 8;
+
 /// utterance 边界状态机（纯逻辑，不碰网络不碰总线）。
 ///
 /// `rr3_feed_pcm` 吃组合件适配后的 pcm 载荷（b64 串＋毫秒长，sense 事件体
@@ -128,8 +132,13 @@ impl Rr3Dialog {
     }
 
     /// 历史登记（完成一轮才记账——计数点 = rr3_record 成功，方案 §4 归属表）。
+    /// 环形上界：超窗丢最旧，常驻进程不随话轮数增长。
     pub fn rr3_record(&mut self, turn: Rr3DialogTurn) {
         self.history.push(turn);
+        if self.history.len() > RR3_DIALOG_HISTORY_CAP {
+            let over = self.history.len() - RR3_DIALOG_HISTORY_CAP;
+            self.history.drain(..over);
+        }
     }
 }
 
@@ -255,6 +264,25 @@ mod tests {
         assert_eq!(d.history.len(), 1);
         assert_eq!(d.history[0].user_text, "你好");
         assert_eq!(d.history[0].trace_id, 1);
+    }
+
+    /// 历史上界：超窗丢最旧，条数封顶不随话轮数增长（常驻进程不泄漏）。
+    #[test]
+    fn record_caps_history_len() {
+        let mut d = Rr3Dialog::rr3_new(8000);
+        for i in 0..RR3_DIALOG_HISTORY_CAP * 3 {
+            d.rr3_record(Rr3DialogTurn {
+                user_text: format!("u{i}"),
+                reply_text: String::new(),
+                trace_id: i as u64,
+            });
+        }
+        assert_eq!(d.history.len(), RR3_DIALOG_HISTORY_CAP);
+        assert_eq!(
+            d.history.last().unwrap().trace_id as usize,
+            RR3_DIALOG_HISTORY_CAP * 3 - 1,
+            "最新一轮必在窗口尾"
+        );
     }
 
     // ---------- 件级两腿对拍（⑧-a，§4.0.3 判据②） ----------
