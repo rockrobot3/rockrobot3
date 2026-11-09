@@ -77,6 +77,10 @@ fn rr3_err_log_now(err_total: u64) -> bool {
     err_total == 1 || err_total % RR3_ERR_LOG_EVERY == 0
 }
 
+/// 桥链周期统计窗（10min）：帧数/坏帧/重连累计，1.5M 长跑的误码口径。
+/// 误码率 = 坏帧 / 音频帧；一次会话内即可算，跨重连也连续（计数在核上）。
+const RR3_BRIDGE_STAT_PERIOD: Duration = Duration::from_secs(600);
+
 /// 板面音频流事实（板固件 mic.rs 钉定）：16kHz 采样率。open 校验配置同款，
 /// 不匹配回 `InvalidParam`（fail-closed，指路 config-esp32.toml）。
 pub const RR3_ESP32_AUDIO_RATE: u32 = 16000;
@@ -347,6 +351,11 @@ struct Rr3Esp32AudioCore {
     ring: Mutex<Rr3AudioRing>,
     stop: AtomicBool,
     cmd: Option<Rr3AudioCmdConsumer>,
+    /// 桥链累计统计（本进程生命周期）：音频帧、坏帧、重连次数——周期统计行与
+    /// 长跑误码取证的读面。原子量只为跨重连累计，不参与控制流。
+    chunks: AtomicU64,
+    errs: AtomicU64,
+    reconnects: AtomicU64,
 }
 
 /// 断流重连（永不放弃）：歇口 → [`HANDSHAKE_TRIES`] 轮逐次**重开 fd** + 握手
@@ -363,6 +372,7 @@ fn rr3_esp32_reconnect(core: &Rr3Esp32AudioCore) -> Option<Rr3UartConn> {
             }
             match rr3_esp32_audio_open(&core.path, core.baud) {
                 Ok(c) => {
+                    core.reconnects.fetch_add(1, Ordering::Relaxed);
                     eprintln!("rr-hal-esp32-audio: 重连成功（第 {attempt}/{HANDSHAKE_TRIES} 轮）");
                     return Some(c);
                 }
@@ -445,6 +455,8 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     let mut logged_ready = false;
     let mut logged_overflow = false;
     let mut logged_ack = false;
+    // 桥链周期统计计时（统计面与链路控制解耦：到点只打一行，不改任何状态）
+    let mut stat_at = Instant::now();
     // 命令旁路请求 id 计数（读线程局部；fire-and-forget 面只服务回执对账日志，
     // 无跨会话唯一性要求）
     let mut cmd_id: u64 = 1;
@@ -464,6 +476,16 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
         loop {
             if core.stop.load(Ordering::Acquire) {
                 break;
+            }
+            if stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
+                stat_at = Instant::now();
+                eprintln!(
+                    "rr-hal-esp32-audio: 桥链统计（{}min 窗）: 音频帧累计={} 坏帧累计={} 重连累计={}",
+                    RR3_BRIDGE_STAT_PERIOD.as_secs() / 60,
+                    core.chunks.load(Ordering::Relaxed),
+                    core.errs.load(Ordering::Relaxed),
+                    core.reconnects.load(Ordering::Relaxed),
+                );
             }
             // —— 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出
             // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
@@ -522,6 +544,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                                 match rr3_esp32_classify(&hdr, &body) {
                                     Ok(Rr3BoardFrameIn::Audio(chunk)) => {
                                         err_streak = 0;
+                                        core.chunks.fetch_add(1, Ordering::Relaxed);
                                         if !logged_ready {
                                             logged_ready = true;
                                             eprintln!(
@@ -558,6 +581,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                                     Err(e) => {
                                         err_streak += 1;
                                         err_total += 1;
+                                        core.errs.fetch_add(1, Ordering::Relaxed);
                                         if rr3_err_log_now(err_total) {
                                             eprintln!(
                                                 "rr-hal-esp32-audio: 累计 {err_total} 帧未过门（连续 {err_streak}；帧界损坏/载荷 CRC 不符？）: {e}"
@@ -570,6 +594,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                             Err((discarded, why)) => {
                                 err_streak += 1;
                                 err_total += 1;
+                                core.errs.fetch_add(1, Ordering::Relaxed);
                                 if rr3_err_log_now(err_total) {
                                     eprintln!(
                                         "rr-hal-esp32-audio: 累计 {err_total} 次拆帧失败（连续 {err_streak}，已弃 {discarded}B 重扫）: {why}"
@@ -659,6 +684,9 @@ impl Rr3AudioSource for Rr3Esp32UartAudioSource {
             ring: Mutex::new(Rr3AudioRing::rr3_ring_new(RR3_ESP32_RING_CAP_SAMPLES)),
             stop: AtomicBool::new(false),
             cmd: Some(self.cmd.1.clone()),
+            chunks: AtomicU64::new(0),
+            errs: AtomicU64::new(0),
+            reconnects: AtomicU64::new(0),
         });
         let reader_core = Arc::clone(&core);
         let reader = std::thread::Builder::new()
