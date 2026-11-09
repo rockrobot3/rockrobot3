@@ -578,6 +578,188 @@ fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>, o
     }
 }
 
+/// 解码主循环的滚动账（主线程独占；`watch` 是跨线程共享原子面，不在此）。
+struct DecodeState {
+    tracker: SeqTracker,
+    doa: DoaTracker,
+    /// 板侧**声明**率（流内 `rate` 字段）：wav 头标称值与实测率退化兜底的事实源，
+    /// 本地硬编码不兜底——板面换采样档后宿主静默写错头。
+    declared_rate: Option<u32>,
+    /// 连续段实测率锚 (锚时刻, 锚时帧数)：断档/重启/首片即重新锚定——断流空洞
+    /// 不摊进实测率分母。重连/失步必然丢片（seq 断档或重启）→ 全部重锚场景覆盖。
+    rate_anchor: Option<(Instant, u64)>,
+    chunks: u64,
+    total_bytes: u64,
+    last_frame: Option<Instant>,
+    errors: u64,
+    doa_on: bool,
+}
+
+impl DecodeState {
+    fn new(doa_on: bool) -> Self {
+        Self {
+            tracker: SeqTracker {
+                prev: None,
+                gaps: 0,
+                restarts: 0,
+            },
+            doa: DoaTracker::new(),
+            declared_rate: None,
+            rate_anchor: None,
+            chunks: 0,
+            total_bytes: 0,
+            last_frame: None,
+            errors: 0,
+            doa_on,
+        }
+    }
+
+    /// 好片全链：seq/声明率记账 → DoA 冒烟 → 移交写线程（零磁盘 I/O）→ 连续段
+    /// 实测率推进 → 节拍打印。写线程亡 = fail-honest 补恢复头退 4。
+    fn ingest(
+        &mut self,
+        chunk: AudioChunk,
+        src_task: u64,
+        errors: u64,
+        watch: &WatchState,
+        tx: &mpsc::Sender<Vec<u8>>,
+        out_path: &std::path::Path,
+    ) {
+        let now = Instant::now();
+        self.last_frame = Some(now);
+        let broke = account_chunk(
+            chunk.seq,
+            chunk.rate,
+            &mut self.tracker,
+            &mut self.declared_rate,
+            watch,
+        );
+        self.chunks += 1;
+        // DoA 在解码面算（纯计算）；分片移交写线程
+        if self.doa_on {
+            if let Some(line) = self.doa.feed(&chunk.samples) {
+                println!("{line}");
+            }
+        }
+        let nsamp = chunk.samples.len();
+        if tx.send(chunk.samples).is_err() {
+            eprintln!("rr3-audio-rec: 写线程通道断开（写线程已亡）");
+            bail_with_recovery(out_path, watch);
+        }
+        self.total_bytes += nsamp as u64;
+        watch.ingested.store(self.total_bytes, Ordering::Release);
+        let frames = self.total_bytes / 4;
+        rate_progress(&mut self.rate_anchor, broke, now, frames, watch);
+        if self.chunks % 8 == 0 {
+            println!(
+                "[rec] chunk={} seq={} ms={} bytes={} gaps={} restarts={} err={errors} src_task={src_task}",
+                self.chunks,
+                chunk.seq,
+                chunk.ms,
+                self.total_bytes,
+                self.tracker.gaps,
+                self.tracker.restarts
+            );
+        }
+    }
+}
+
+/// 分片记账：seq 连续性对账（返回 `broke`=断档/重启，供实测率重锚）＋板侧声明
+/// 率首见入账/变更告警（变更=板侧重配置，须重新对账；wav 头以末值/实测为准）。
+fn account_chunk(
+    seq: u32,
+    rate: u32,
+    tracker: &mut SeqTracker,
+    declared: &mut Option<u32>,
+    watch: &WatchState,
+) -> bool {
+    let before = (tracker.gaps, tracker.restarts);
+    tracker.feed(seq);
+    let broke = (tracker.gaps, tracker.restarts) != before;
+    match *declared {
+        None => {
+            *declared = Some(rate);
+            // 首片即把声明率写成 wav 头的初值（实测率 0.5s 后才可信）
+            watch.rate.store(rate, Ordering::Release);
+        }
+        Some(r) if r != rate => {
+            eprintln!("rr3-audio-rec: 板侧声明率变更 {r}Hz → {rate}Hz（wav 头以末值/实测为准）");
+            *declared = Some(rate);
+        }
+        _ => {}
+    }
+    broke
+}
+
+/// 连续段实测率推进：断档/重启/首片重锚（空洞不摊进分母）；段 >0.5s 才把
+/// 实测率刷进 `watch.rate`（不足 0.5s 测时标称）。
+fn rate_progress(
+    anchor: &mut Option<(Instant, u64)>,
+    broke: bool,
+    now: Instant,
+    frames: u64,
+    watch: &WatchState,
+) {
+    if broke || anchor.is_none() {
+        *anchor = Some((now, frames));
+    }
+    if let Some((t0, f0)) = *anchor {
+        let d = now.duration_since(t0);
+        if d.as_secs_f64() > 0.5 {
+            let r = (((frames - f0) as f64) / d.as_secs_f64()).round() as u32;
+            if r > 0 {
+                watch.rate.store(r, Ordering::Release);
+            }
+        }
+    }
+}
+
+/// 收兵期实测率终值：连续段（锚后至最后一片的墙钟 × 段内帧数），断流空洞不摊
+/// 进分母。段 <0.5s 或退化率（<1kHz，锚后无实流的边缘段）退板侧声明率；未声明
+/// 才退 [`NOMINAL_RATE_FALLBACK_HZ`]。
+fn measured_rate(
+    anchor: Option<(Instant, u64)>,
+    last_frame: Option<Instant>,
+    frames_total: u64,
+    declared: Option<u32>,
+) -> u32 {
+    let nominal = declared.unwrap_or(NOMINAL_RATE_FALLBACK_HZ);
+    match anchor {
+        Some((t0, f0)) => {
+            let end = last_frame.unwrap_or(t0);
+            let d = end.duration_since(t0).as_secs_f64();
+            let r = if d > 0.5 {
+                (((frames_total - f0) as f64) / d).round() as u32
+            } else {
+                0
+            };
+            if r >= 1000 {
+                r
+            } else {
+                nominal
+            }
+        }
+        None => nominal,
+    }
+}
+
+/// 首连开口 + 握手（重连同款路径，见 handshake；开口翻转复位板子 → settle 后
+/// 冲残留）。失败即退 1，文案与旧版逐字一致。
+fn open_handshake(device: &str, baud: u32) -> Rr3UartConn {
+    let mut conn = match Rr3UartConn::open_with_baud(std::path::Path::new(device), baud) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("rr3-audio-rec: 开口失败 {device}: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = handshake(&mut conn) {
+        eprintln!("rr3-audio-rec: 握手失败: {e}");
+        std::process::exit(1);
+    }
+    conn
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&argv) {
@@ -587,19 +769,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let mut conn = match Rr3UartConn::open_with_baud(std::path::Path::new(&args.device), args.baud)
-    {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("rr3-audio-rec: 开口失败 {}: {e}", args.device);
-            std::process::exit(1);
-        }
-    };
-    // 首连握手（重连同款路径，见 handshake；开口翻转复位板子 → settle 后冲残留）
-    if let Err(e) = handshake(&mut conn) {
-        eprintln!("rr3-audio-rec: 握手失败: {e}");
-        std::process::exit(1);
-    }
+    let conn = open_handshake(&args.device, args.baud);
 
     // 收流面线程化（判据② A/B 定案）：读线程（conn 所有权整体移交）只做大块
     // 裸读推裸字节通道；解码主循环纯内存拆帧 → dst/Event/topic/b64 四道门 →
@@ -648,26 +818,9 @@ fn main() {
     };
     watch.armed.store(true, Ordering::Release);
 
-    let mut tracker = SeqTracker {
-        prev: None,
-        gaps: 0,
-        restarts: 0,
-    };
-    let mut doa = DoaTracker::new();
-    let mut chunks = 0u64;
-    let mut errors = 0u64;
+    let mut st = DecodeState::new(args.doa);
     let mut err_streak = 0u64; // 连续拆帧失败（好片即清零；达阈值记重同步账）
     let mut resyncs = 0u64;
-    let mut total_bytes = 0u64;
-    let mut last_frame: Option<Instant> = None;
-    // 连续段实测率锚 (锚时刻, 锚时帧数)：断档/重启/首片即重新锚定——断流空洞
-    // 不摊进实测率分母（旧版首末墙钟摊全程，断流后实测率被稀释）。重连/失步
-    // 必然丢片（seq 断档或重启）→ `broke` 覆盖全部重锚场景。
-    let mut rate_anchor: Option<(Instant, u64)> = None;
-    // 板侧**声明**率（流内 `rate` 字段）：wav 头的标称值与实测率退化时的兜底都以它
-    // 为准，而不是本地硬编码 16000——否则板面换采样档（MIC_SR_HZ）后宿主会静默
-    // 写错头。首片记下、中途变更告警（变更=板侧重配置，须重新对账）。
-    let mut declared_rate: Option<u32> = None;
     let deadline = Instant::now() + Duration::from_secs(args.secs);
     let mut asm = FrameAssembler::new();
     println!(
@@ -690,7 +843,7 @@ fn main() {
                 Ok(Some(a)) => Some(a),
                 Ok(None) => break,
                 Err((dropped, why)) => {
-                    errors += 1;
+                    st.errors += 1;
                     err_streak += 1;
                     eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
                     None
@@ -700,69 +853,18 @@ fn main() {
                 let frame = Rr3Frame { header, payload };
                 match parse_audio_event(&frame) {
                     Ok(chunk) => {
-                        let now = Instant::now();
-                        last_frame = Some(now);
-                        let account_before = (tracker.gaps, tracker.restarts);
-                        tracker.feed(chunk.seq);
-                        let broke = (tracker.gaps, tracker.restarts) != account_before;
-                        chunks += 1;
                         err_streak = 0;
-                        match declared_rate {
-                            None => {
-                                declared_rate = Some(chunk.rate);
-                                // 首片即把声明率写成 wav 头的初值（实测率 0.5s 后才可信）
-                                watch.rate.store(chunk.rate, Ordering::Release);
-                            }
-                            Some(r) if r != chunk.rate => {
-                                eprintln!(
-                                    "rr3-audio-rec: 板侧声明率变更 {r}Hz → {}Hz（wav 头以末值/实测为准）",
-                                    chunk.rate
-                                );
-                                declared_rate = Some(chunk.rate);
-                            }
-                            _ => {}
-                        }
-                        // DoA 在解码面算（纯计算）；分片移交写线程（零磁盘 I/O）
-                        if args.doa {
-                            if let Some(line) = doa.feed(&chunk.samples) {
-                                println!("{line}");
-                            }
-                        }
-                        let nsamp = chunk.samples.len();
-                        if tx.send(chunk.samples).is_err() {
-                            eprintln!("rr3-audio-rec: 写线程通道断开（写线程已亡）");
-                            bail_with_recovery(&out_path, &watch);
-                        }
-                        total_bytes += nsamp as u64;
-                        watch.ingested.store(total_bytes, Ordering::Release);
-                        let frames = total_bytes / 4;
-                        // 连续段实测率：断档/重启即重新锚定（空洞不摊进分母）
-                        if broke || rate_anchor.is_none() {
-                            rate_anchor = Some((now, frames));
-                        }
-                        if let Some((t0, f0)) = rate_anchor {
-                            let d = now.duration_since(t0);
-                            if d.as_secs_f64() > 0.5 {
-                                let r = (((frames - f0) as f64) / d.as_secs_f64()).round() as u32;
-                                if r > 0 {
-                                    watch.rate.store(r, Ordering::Release);
-                                }
-                            }
-                        }
-                        if chunks % 8 == 0 {
-                            println!(
-                                "[rec] chunk={chunks} seq={} ms={} bytes={} gaps={} restarts={} err={errors} src_task={}",
-                                chunk.seq,
-                                chunk.ms,
-                                total_bytes,
-                                tracker.gaps,
-                                tracker.restarts,
-                                frame.header.src_task
-                            );
-                        }
+                        st.ingest(
+                            chunk,
+                            frame.header.src_task,
+                            st.errors,
+                            &watch,
+                            &tx,
+                            &out_path,
+                        );
                     }
                     Err(e) => {
-                        errors += 1;
+                        st.errors += 1;
                         err_streak += 1;
                         eprintln!("[rec] 事件门拒收: {e}");
                     }
@@ -796,33 +898,17 @@ fn main() {
         std::process::exit(1);
     }
 
-    if total_bytes == 0 {
+    if st.total_bytes == 0 {
         eprintln!("[rec] 0 分片（查板面 AUDIO ON 应答/I2S 面波特率档）");
         let _ = std::fs::remove_file(&out_path); // 占位空壳不留垃圾
         std::process::exit(1);
     }
-    // 实测采样率改按**连续段**（锚后至最后一片的墙钟 × 段内帧数）：断流空洞
-    // 不摊进分母。段 <0.5s 或退化率（<1kHz，锚后无实流的边缘段）退标称 rate；
-    // 标称率取**板侧声明值**（未声明才退 [`NOMINAL_RATE_FALLBACK_HZ`]）。
-    let frames_total = total_bytes / 4;
-    let nominal_rate = declared_rate.unwrap_or(NOMINAL_RATE_FALLBACK_HZ);
-    let measured = match rate_anchor {
-        Some((t0, f0)) => {
-            let end = last_frame.unwrap_or(t0);
-            let d = end.duration_since(t0).as_secs_f64();
-            let r = if d > 0.5 {
-                (((frames_total - f0) as f64) / d).round() as u32
-            } else {
-                0
-            };
-            if r >= 1000 {
-                r
-            } else {
-                nominal_rate
-            }
-        }
-        None => nominal_rate,
-    };
+    let measured = measured_rate(
+        st.rate_anchor,
+        st.last_frame,
+        st.total_bytes / 4,
+        st.declared_rate,
+    );
     let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
     match OpenOptions::new()
         .write(true)
@@ -830,13 +916,16 @@ fn main() {
         .and_then(|f| f.write_all_at(&wav_header(data_len, 2, measured, 16), 0))
     {
         Ok(()) => println!(
-            "[rec] ✓ {}：chunks={chunks} gaps={} restarts={} err={errors} resyncs={resyncs} reconnects={} frames={frames_total} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
+            "[rec] ✓ {}：chunks={} gaps={} restarts={} err={} resyncs={resyncs} reconnects={} frames={} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
             out_path.display(),
-            tracker.gaps,
-            tracker.restarts,
+            st.chunks,
+            st.tracker.gaps,
+            st.tracker.restarts,
+            st.errors,
             watch.reconnects.load(Ordering::Acquire),
+            st.total_bytes / 4,
             measured,
-            frames_total as f64 / measured as f64,
+            st.total_bytes as f64 / 4.0 / measured as f64,
         ),
         Err(e) => {
             eprintln!("rr3-audio-rec: wav 补头失败 {}: {e}", out_path.display());
@@ -844,7 +933,7 @@ fn main() {
         }
     }
     if args.doa {
-        println!("{}", doa.summary());
+        println!("{}", st.doa.summary());
     }
 }
 
