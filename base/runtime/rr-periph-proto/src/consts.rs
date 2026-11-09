@@ -20,16 +20,13 @@ pub const RR3_TRACE_DIRECT: u64 = 0;
 /// 与 0x31 无交集，分流无歧义）。
 pub const RR3_MAGIC_FIRST: u8 = rr_ipc::RR3_MAGIC_LE[0];
 
-/// 桥后端**缺省**波特率：115200（宿主缺省不变，高速档只显式选择）。
+/// 桥后端**定档**波特率：1.5M（2026-10-30 板固件 `UART2_BAUD_HZ` 定档）。
 ///
-/// 档位表真值在 rr-ipc，但该导出面带 linux/macos 门（固件目标不载），故非宿主
-/// 平台落同值字面量；宿主侧测试锚定与 rr-ipc 一致。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub const RR3_BRIDGE_BAUD: u32 = rr_ipc::RR3_UART_BAUD_DEFAULT;
-
-/// 非宿主传输实现平台（如 xtensa-esp32-espidf 固件）的同值字面量，见上注。
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub const RR3_BRIDGE_BAUD: u32 = 115_200;
+/// 板与宿主共用本常量——桥链是同一根 UART 的两端，缺省值不允许各写一份：
+/// 板端定档后宿主缺省仍漂在 115200 会让整链静默失联（A8 误码观测的前件）。
+/// `rr_ipc::RR3_UART_BAUD_DEFAULT` 仍是**通用**传输缺省（115200），桥面不得
+/// 复用它。非宿主平台（xtensa 固件）不载 rr-ipc，本常量无平台门、无第二真值。
+pub const RR3_BRIDGE_BAUD: u32 = 1_500_000;
 
 /// 舵机点名主题（在册 request L1；payload 形状事实源
 /// contracts/events/act-servo_command.schema.json）。
@@ -42,7 +39,7 @@ pub const RR3_FACE_TOPIC: &str = "rr3-interact/face/expression";
 /// ESP32 档设备路径 env 键（宿主侧应急覆盖口径）。
 pub const RR3_HAL_PERIPH_UART_ENV: &str = "RR3_HAL_PERIPH_UART";
 
-/// ESP32 档波特率 env 键（宿主侧；板固件钉 `UART2_BAUD_HZ`（1.5M），会话须显式同档）。
+/// ESP32 档波特率 env 键（宿主侧；缺省即 [`RR3_BRIDGE_BAUD`]（1.5M），本键仅覆盖）。
 pub const RR3_HAL_PERIPH_BAUD_ENV: &str = "RR3_HAL_PERIPH_BAUD";
 
 #[cfg(test)]
@@ -61,12 +58,11 @@ mod tests {
         assert_eq!(RR3_PERIPH_TASK, 2, "板上执行面占首模块池位形");
         assert_eq!(RR3_MAGIC_FIRST, 0x31, "magic \"1ERA\" 的 LE 首字节");
         assert_eq!(RR3_MAGIC_FIRST, rr_ipc::RR3_MAGIC_LE[0]);
+        // 桥面定档 1.5M（板固件 UART2_BAUD_HZ 同源）；通用传输缺省 115200
+        // 仍归 rr-ipc——两者是不同域，不得再锚成相等。
+        assert_eq!(RR3_BRIDGE_BAUD, 1_500_000, "桥面定档=板固件同值");
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        assert_eq!(
-            RR3_BRIDGE_BAUD,
-            rr_ipc::RR3_UART_BAUD_DEFAULT,
-            "缺省档真值单点在 rr-ipc"
-        );
+        assert_ne!(RR3_BRIDGE_BAUD, rr_ipc::RR3_UART_BAUD_DEFAULT);
         assert!(!RR3_SERVO_TOPIC.is_empty());
         assert!(!RR3_FACE_TOPIC.is_empty());
     }

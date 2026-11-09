@@ -525,8 +525,8 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_axis_parse(&v))
                         .unwrap_or(rr_hal_api::RR3_PERIPH_AXIS_DEFAULT);
-                    // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
-                    // 已钉 `UART2_BAUD_HZ`（2026-10-30 起定档 1.5M），会话须显式同档）
+                    // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
+                    // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
@@ -685,8 +685,8 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
         RR3_BACKEND_ESP32 => {
             match rr3_periph_uart_path() {
                 Some(p) => {
-                    // 批D②：波特率 env（白名单裁决，缺省 115200 不变——板固件
-                    // 已钉 `UART2_BAUD_HZ`（2026-10-30 起定档 1.5M），会话须显式同档）
+                    // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
+                    // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
                     let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
                         .ok()
                         .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
