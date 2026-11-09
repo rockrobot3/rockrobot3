@@ -54,7 +54,28 @@ impl Rr3ByteStream for UartIo<'_> {
             buf[0] = b;
             return 1;
         }
-        self.uart.rr3_read_into(buf)
+        // 帧内读与行面同一纪律：**字节间超时 + 无进展预算**。旧版直接走阻塞
+        // `Read`（VMIN=1 无 VTIME），半帧断线时控制面永久停在 128B 头里——宿主
+        // 进程被杀/误码丢字节后再不会有字节到达，只能整机重启。预算用尽折叠为
+        // 0（缝上无错误通道，Closed 形状）→ `TornHeader/TornPayload` → 调用方
+        // 残尾吞净后复位失步，与 ESP 板侧同名实现同一语义。
+        let mut idle = 0u32;
+        loop {
+            match self.uart.rr3_read_timeout(buf, LINE_BYTE_TIMEOUT_MS) {
+                Ok(0) => {
+                    idle += 1;
+                    if idle >= FRAME_GAP_BUDGET {
+                        eprintln!("[periph] 帧内读超时（{FRAME_GAP_BUDGET} 拍无进展，判半帧断线）");
+                        return 0;
+                    }
+                }
+                Ok(n) => return n,
+                Err(e) => {
+                    eprintln!("[periph] 帧面 UART 读失败: {e}");
+                    return 0;
+                }
+            }
+        }
     }
 
     fn rr3_write_all_bytes(&mut self, buf: &[u8]) -> usize {

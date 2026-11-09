@@ -77,6 +77,10 @@ pub const LINE_BYTE_TIMEOUT_MS: i32 = 50;
 pub const LINE_MAX: usize = 128;
 /// 帧面坏帧后的残尾吞净上限。
 pub const FRAME_DRAIN_MAX: usize = 4096;
+/// 帧内**无进展预算**（连续几拍 `LINE_BYTE_TIMEOUT_MS` 无字节即判半帧断线）。
+/// 与 `read_line` 同款：帧内字节间隔是微秒级，两拍（≈100ms）无字节只能是对端
+/// 停手/丢字节——继续等就等于控制面永久挂死（旧版阻塞读的真实后果）。
+pub const FRAME_GAP_BUDGET: u32 = 2;
 
 /// 环境覆盖键（应急；缺省即本文件常数）。
 pub const ENV_UART_DEV: &str = "RR3_PI_UART";

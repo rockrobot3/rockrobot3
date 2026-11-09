@@ -173,13 +173,26 @@ impl Rr3ByteStream for UartIo<'_> {
             }
             return 0;
         }
-        // 固有 read（阻塞，delay = portMAX_DELAY）；错误折叠为 0（缝上无错误
-        // 通道，Closed 形状）——细节 eprintln 当场可见（批J G5 口径）。
-        match self.uart.read(buf, u32::MAX) {
-            Ok(n) => n,
-            Err(e) => {
-                eprintln!("[periph] UART 读失败: {e:?}");
-                0
+        // 帧内读与行面同一纪律：**字节间超时 + 无进展预算**，不拿 portMAX_DELAY
+        // 赌对端一定把帧发完。半帧断线（UART 误码丢字节、宿主进程被杀）时旧版
+        // 永久阻塞在 128B 头里，控制面再也回不到轮首——正是 `read_line` 早已修掉
+        // 的"整面锁死"形状，帧面此前漏改。预算用尽折叠为 0（缝上无错误通道，
+        // Closed 形状）→ `TornHeader/TornPayload` → 调用方残尾吞净后复位失步。
+        let mut idle = 0u32;
+        loop {
+            match self.uart.read(buf, LINE_BYTE_TICKS) {
+                Ok(0) => {
+                    idle += 1;
+                    if idle >= LINE_GAP_BUDGET {
+                        eprintln!("[periph] 帧内读超时（{LINE_GAP_BUDGET} 拍无进展，判半帧断线）");
+                        return 0;
+                    }
+                }
+                Ok(n) => return n,
+                Err(e) => {
+                    eprintln!("[periph] UART 读失败: {e:?}");
+                    return 0;
+                }
             }
         }
     }
