@@ -150,33 +150,38 @@ pub fn rr3_cred_store_parse(s: &str) -> Option<String> {
     Some(format!("nvs:{ns}"))
 }
 
+/// GPIO 类键 → 槽位取值器（键集与槽位一处对齐：键名在 [`RR3_BOARD_BINDING_KEYS`]、
+/// 槽位在实体字段上，全键覆盖由单测 `entry_fills_known_keys_and_names_unknown` 兜底）。
+type Rr3BindSlot = fn(&mut Rr3BoardBindings) -> &mut Option<u8>;
+
+/// GPIO 类十键的槽位表（cred_store 是另一取值域，不入本表）。
+const RR3_GPIO_SLOTS: [(&str, Rr3BindSlot); 10] = [
+    (RR3_BOARD_BINDING_I2C_SDA, |b| &mut b.i2c_sda),
+    (RR3_BOARD_BINDING_I2C_SCL, |b| &mut b.i2c_scl),
+    (RR3_BOARD_BINDING_ADC_RAIL_PIN, |b| &mut b.adc_rail_pin),
+    (RR3_BOARD_BINDING_UART2_TX, |b| &mut b.uart2_tx),
+    (RR3_BOARD_BINDING_UART2_RX, |b| &mut b.uart2_rx),
+    (RR3_BOARD_BINDING_LEDC_PAN, |b| &mut b.ledc_pan),
+    (RR3_BOARD_BINDING_LEDC_TILT, |b| &mut b.ledc_tilt),
+    (RR3_BOARD_BINDING_I2S_BCLK, |b| &mut b.i2s_bclk),
+    (RR3_BOARD_BINDING_I2S_SD, |b| &mut b.i2s_sd),
+    (RR3_BOARD_BINDING_I2S_WS, |b| &mut b.i2s_ws),
+];
+
 /// 单条目写入（载荷遍历侧逐条调用）：键必须在册、值过取值域裁决；坏条目**不
 /// 半写入**（先裁决后赋值）。独立纯函数：键域/值域可单测。
 pub fn rr3_board_bind_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Result<(), String> {
     let bad = || format!("板侧绑定键 {k} 取值不认: {v:?}");
-    // GPIO 类键先选槽位、后统一解析赋值（坏值不半写入）；cred_store 是另一取值域。
-    let slot = match k {
-        RR3_BOARD_BINDING_I2C_SDA => &mut b.i2c_sda,
-        RR3_BOARD_BINDING_I2C_SCL => &mut b.i2c_scl,
-        RR3_BOARD_BINDING_ADC_RAIL_PIN => &mut b.adc_rail_pin,
-        RR3_BOARD_BINDING_UART2_TX => &mut b.uart2_tx,
-        RR3_BOARD_BINDING_UART2_RX => &mut b.uart2_rx,
-        RR3_BOARD_BINDING_LEDC_PAN => &mut b.ledc_pan,
-        RR3_BOARD_BINDING_LEDC_TILT => &mut b.ledc_tilt,
-        RR3_BOARD_BINDING_I2S_BCLK => &mut b.i2s_bclk,
-        RR3_BOARD_BINDING_I2S_SD => &mut b.i2s_sd,
-        RR3_BOARD_BINDING_I2S_WS => &mut b.i2s_ws,
-        RR3_BOARD_BINDING_CRED_STORE => {
-            b.cred_store = Some(rr3_cred_store_parse(v).ok_or_else(bad)?);
-            return Ok(());
-        }
-        other => {
-            return Err(format!(
-                "板侧绑定键 {other} 未在册（载荷键域见 bindings.rs 在册表）"
-            ))
-        }
-    };
-    *slot = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?);
+    // cred_store 是独立的非 GPIO 取值域，先分流（不走槽位表）
+    if k == RR3_BOARD_BINDING_CRED_STORE {
+        b.cred_store = Some(rr3_cred_store_parse(v).ok_or_else(bad)?);
+        return Ok(());
+    }
+    let (_, slot) = RR3_GPIO_SLOTS
+        .iter()
+        .find(|(name, _)| *name == k)
+        .ok_or_else(|| format!("板侧绑定键 {k} 未在册（载荷键域见 bindings.rs 在册表）"))?;
+    *slot(b) = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?);
     Ok(())
 }
 
