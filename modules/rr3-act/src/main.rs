@@ -2,8 +2,7 @@
 //! 装配只做启动编排：SURFACE 自述 → [`rr3mod::bootstrap`]（收敛序列前四段）→ 轴状态
 //! 装载＋行程填值＋config 就绪行 → 三面探活 → reflex spawn（[`boot`]）→ Dispatcher →
 //! [`rr3mod::serve`]。机制在 [`dispatch`]（11 字段＋on_rpc 四臂＋on_event 两臂＋on_tick
-//! led 节拍），协议面在 [`rpc`]；intent/reflex 宿主留本模块（0.0.5 方案 §12.1），原子件
-//! 在 `atoms/` 原位不动。
+//! led 节拍），协议面在 [`rpc`]；intent/reflex 宿主与 `atoms/` 原子件原位不动（§12.1）。
 
 mod boot;
 mod dispatch;
@@ -58,7 +57,7 @@ fn rr3_act_run() -> Result<(), String> {
     cfg.servo.angle_max_deg = axis.hi_deg;
     let open = &cfg.intent.open_topics;
     let intent_open = if open.is_empty() {
-        "(空)".to_string()
+        "(空)".into()
     } else {
         open.join("/")
     };
@@ -69,8 +68,9 @@ fn rr3_act_run() -> Result<(), String> {
         cfg.reflex.loop_hz
     );
 
-    // HAL 三面探活：各读回一次，Unsupported 即致命——fail-closed
-    let (servo_dev, led_gpio, relay_gpio) = boot::rr3_act_probe()?;
+    // HAL 三面探活：各读回一次，Unsupported 即致命——fail-closed。
+    // 桥被音频源（rr3-sense）独占时，舵机面自动改走其命令 RPC（A9.2）。
+    let (servo_dev, led_gpio, relay_gpio) = boot::rr3_act_probe(&bus)?;
     // 反射环宿主：进程内 1kHz 闭环的位子，永不进总线（ADR-0007 裁定 1）
     boot::rr3_act_spawn_reflex(cfg.reflex, &bus)?;
 

@@ -232,7 +232,11 @@ mod tests {
         );
         assert!(merged.rr3_topic_contains("rr3-sima/ping/state"));
         // self 未被改动
-        assert_eq!(base.topics.len(), 43, "契约计数（ADR-0023 39→42；A9 42→43）");
+        assert_eq!(
+            base.topics.len(),
+            43,
+            "契约计数（ADR-0023 39→42；A9 42→43）"
+        );
         assert_eq!(
             base.rr3_topic_kind("rr3-sima/ping/state"),
             None,
