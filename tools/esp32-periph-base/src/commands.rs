@@ -164,109 +164,128 @@ fn rr3_cmd_motion(
     bus: &Arc<Mutex<Bus>>,
 ) -> Option<Result<String, String>> {
     let r = match head {
-        "PAN" => parse_deg(parts.next()).and_then(|deg| {
-            let d = axis_check(Axis::Pan, deg)?;
-            {
-                let mut b = lock_bus(bus);
-                b.st.wander_on = false; // 外部点名优先，自主扫摆让位
-                                        // **不写前记账**：`st` 角度只由运行面在作业成功后镜像硬件真值
-                                        // （见 runtime `exec_job`）——失败/排队时读接口不复述没到达的角。
-            }
-            push_job(
-                bus,
-                Job::Move {
-                    pan: Some(d),
-                    tilt: None,
-                },
-            );
-            push_job(bus, Job::RedrawOled);
-            Ok(format!("OK pan={d}"))
-        }),
-        "TILT" => parse_deg(parts.next()).and_then(|deg| {
-            let d = axis_check(Axis::Tilt, deg)?;
-            {
-                let mut b = lock_bus(bus);
-                b.st.wander_on = false;
-                // 同上：角度记账归运行面（作业成功才提交）
-            }
-            push_job(
-                bus,
-                Job::Move {
-                    pan: None,
-                    tilt: Some(d),
-                },
-            );
-            push_job(bus, Job::RedrawOled);
-            Ok(format!("OK tilt={d}"))
-        }),
-        "SERVO" => match (parse_deg(parts.next()), parse_deg(parts.next())) {
-            (Ok(p), Ok(t)) => match (axis_check(Axis::Pan, p), axis_check(Axis::Tilt, t)) {
-                (Ok(p), Ok(t)) => {
-                    {
-                        let mut b = lock_bus(bus);
-                        b.st.wander_on = false;
-                        // 同上：两轴角度由运行面在整条串行移动成功后提交
-                    }
-                    // 串行降级：运行面先 pan 到位 → 整定 → 再 tilt（削峰值电流）
-                    push_job(
-                        bus,
-                        Job::Move {
-                            pan: Some(p),
-                            tilt: Some(t),
-                        },
-                    );
-                    push_job(bus, Job::RedrawOled);
-                    Ok(format!("OK pan={p} tilt={t}"))
-                }
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
-            _ => Err("SERVO 需两个 0-180 角度参数".into()),
-        },
-        // 表情（行面）：控制面改状态 + 推 Job::RenderCapsules（慢 I2C 在运行面），
-        // 与帧面 expression 同一套基态预设/微动作（expr_eye_base + anim_reset）。
-        // 补此命令的原因：表情原只走帧面（需 UART2 帧链路），现场该链路劣化时
-        // 表情无路可触发——行面直命令是可达性兜底。
-        "SCAN" => {
-            // 判据②（**串行**）：运行面按本轴行程五等分点逐点扫描（pan
-            // 70/80/90/100/110、tilt 80/85/90/95/100），每点先 pan 到位再 tilt
-            // 到位，逐点 outbox 回包。控制面只置位 + 排队并即刻 ack——不被 ~6s
-            // 的扫描阻塞（旧版在命令线程里跑，是"卡顿"来源之一）。
-            lock_bus(bus).st.wander_on = false; // 判据测试不被自主扫摆扰动
-            push_job(bus, Job::Scan);
-            Ok("OK scan queued (串行 pan→tilt，逐点回包)".into())
-        }
-        // 5V 轨单次采样（方案A Q1 观测面）：控制面不碰 ADC（ADC 在运行面），推作业
-        // 由运行面采一次、经 outbox 异步回包（读一次打轨压 mV 与引脚 raw——真板
-        // 分压测点接线后与万用表对拍标定用）。
-        "WANDER" => match parts.next() {
-            Some("STOP") => {
-                lock_bus(bus).st.wander_on = false;
-                let (p, t) = {
-                    let b = lock_bus(bus);
-                    (b.st.pan_deg, b.st.tilt_deg)
-                };
-                Ok(format!("OK wander off pan={p} tilt={t}"))
-            }
-            None => {
-                {
-                    let mut b = lock_bus(bus);
-                    b.st.wander_on = true;
-                    // 两轴方向独立随机起步，立即起摆
-                    b.st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
-                    b.st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
-                    b.st.next_wander_ms = 0;
-                }
-                let (p, t) = {
-                    let b = lock_bus(bus);
-                    (b.st.pan_deg, b.st.tilt_deg)
-                };
-                Ok(format!("OK wander on pan={p} tilt={t}"))
-            }
-            Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
-        },
+        "PAN" => cmd_pan(parts, bus),
+        "TILT" => cmd_tilt(parts, bus),
+        "SERVO" => cmd_servo(parts, bus),
+        "SCAN" => cmd_scan(bus),
+        "WANDER" => cmd_wander(parts, bus),
         _ => return None,
     };
     Some(r)
+}
+
+/// 外部点名让位：写死动作命令一到，自主扫摆必须停（否则动作被自主节拍打断）。
+fn claim_motion(bus: &Arc<Mutex<Bus>>) {
+    lock_bus(bus).st.wander_on = false;
+}
+
+/// `PAN <deg>`：单轴移动。**不写前记账**——`st` 角度只由运行面在作业成功后镜像
+/// 硬件真值（见 runtime `exec_job`），失败/排队时读接口不复述没到达的角。
+fn cmd_pan(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let d = axis_check(Axis::Pan, parse_deg(parts.next())?)?;
+    claim_motion(bus);
+    push_job(
+        bus,
+        Job::Move {
+            pan: Some(d),
+            tilt: None,
+        },
+    );
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK pan={d}"))
+}
+
+/// `TILT <deg>`：单轴移动，记账口径同 `PAN`。
+fn cmd_tilt(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let d = axis_check(Axis::Tilt, parse_deg(parts.next())?)?;
+    claim_motion(bus);
+    push_job(
+        bus,
+        Job::Move {
+            pan: None,
+            tilt: Some(d),
+        },
+    );
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK tilt={d}"))
+}
+
+/// `SERVO <pan> <tilt>`：串行降级（运行面先 pan 到位 → 整定 → 再 tilt，削峰值
+/// 电流），两轴角度由运行面在整条串行移动成功后提交。任一角非法即整条拒发。
+fn cmd_servo(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let (p, t) = parse_pair(parts)?;
+    let p = axis_check(Axis::Pan, p)?;
+    let t = axis_check(Axis::Tilt, t)?;
+    claim_motion(bus);
+    push_job(
+        bus,
+        Job::Move {
+            pan: Some(p),
+            tilt: Some(t),
+        },
+    );
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK pan={p} tilt={t}"))
+}
+
+/// 取两个角度参数：任一缺失/非数都归为同一条参数文案（旧行为逐字保留）。
+fn parse_pair(parts: &mut std::str::SplitWhitespace<'_>) -> Result<(u32, u32), String> {
+    match (parse_deg(parts.next()), parse_deg(parts.next())) {
+        (Ok(p), Ok(t)) => Ok((p, t)),
+        _ => Err("SERVO 需两个 0-180 角度参数".into()),
+    }
+}
+
+/// `SCAN`：判据②（**串行**）——运行面按本轴行程五等分点逐点扫描（pan
+/// 70/80/90/100/110、tilt 80/85/90/95/100），每点先 pan 到位再 tilt 到位，逐点
+/// outbox 回包。控制面只置位 + 排队并即刻 ack——不被 ~6s 的扫描阻塞（旧版在
+/// 命令线程里跑，是"卡顿"来源之一）。
+fn cmd_scan(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    claim_motion(bus); // 判据测试不被自主扫摆扰动
+    push_job(bus, Job::Scan);
+    Ok("OK scan queued (串行 pan→tilt，逐点回包)".into())
+}
+
+/// `WANDER [STOP]`：无参开自主扫摆（两轴方向独立随机），`STOP` 停摆并回报当前角。
+fn cmd_wander(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    match parts.next() {
+        Some("STOP") => {
+            claim_motion(bus);
+            let (p, t) = {
+                let b = lock_bus(bus);
+                (b.st.pan_deg, b.st.tilt_deg)
+            };
+            Ok(format!("OK wander off pan={p} tilt={t}"))
+        }
+        None => {
+            {
+                let mut b = lock_bus(bus);
+                b.st.wander_on = true;
+                // 两轴方向独立随机起步，立即起摆
+                b.st.wander_pan_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                b.st.wander_tilt_dir = if esp_random_u32() % 2 == 0 { 1 } else { -1 };
+                b.st.next_wander_ms = 0;
+            }
+            let (p, t) = {
+                let b = lock_bus(bus);
+                (b.st.pan_deg, b.st.tilt_deg)
+            };
+            Ok(format!("OK wander on pan={p} tilt={t}"))
+        }
+        Some(other) => Err(format!("WANDER 参数非法: {other}（无参=开，STOP=停）")),
+    }
 }
 
 fn rr3_cmd_face(
