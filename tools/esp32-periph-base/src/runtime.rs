@@ -47,118 +47,148 @@ pub(crate) fn runtime_loop(mut ph: RtPeriph, bus: Arc<Mutex<Bus>>) {
 }
 
 /// 执行一件硬件作业（脱锁慢跑阶段——只在需要读状态时短暂持锁取快照）。
+/// 分派表只做路由，逐臂实现分居下列 `job_*` 函数，便于逐条判读与取证。
 fn exec_job(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, job: Job) {
     match job {
-        Job::RedrawOled => {
-            let (text, pan, tilt, visible) = {
-                let b = lock_bus(bus);
-                (
-                    b.st.last_text.clone(),
-                    b.st.pan_deg,
-                    b.st.tilt_deg,
-                    b.st.angle_row_visible(),
-                )
-            };
-            if visible {
-                if let Err(e) = ph.oled_show(&text, pan, tilt) {
-                    eprintln!("[periph] 角度行刷新失败: {e}");
-                }
-            }
+        Job::RedrawOled => job_redraw(ph, bus),
+        Job::Move { pan, tilt } => job_move(ph, bus, pan, tilt),
+        Job::Scan => rt_scan(ph, bus),
+        Job::RenderCapsules => job_capsules(ph, bus),
+        Job::RenderFrame(frame) => job_frame(ph, &frame),
+        Job::SampleRail => job_rail(ph, bus),
+    }
+}
+
+/// 角度行刷新（`RedrawOled` 臂）：帧/表情模式由 `angle_row_visible` 守卫跳过。
+fn job_redraw(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    let (text, pan, tilt, visible) = {
+        let b = lock_bus(bus);
+        (
+            b.st.last_text.clone(),
+            b.st.pan_deg,
+            b.st.tilt_deg,
+            b.st.angle_row_visible(),
+        )
+    };
+    if visible {
+        if let Err(e) = ph.oled_show(&text, pan, tilt) {
+            eprintln!("[periph] 角度行刷新失败: {e}");
         }
-        Job::Move { pan, tilt } => {
-            let want = |v: Option<u32>| v.map_or_else(|| "-".into(), |d| d.to_string());
-            let ok = rt_move(ph, pan, tilt);
-            // **提交硬件真值**（稳健性修复，与命令面"不写前记账"配对）：无论成功
-            // 与否都把运行面 ledger（机制核记账角，只有 `servo_set` 成功才推进）
-            // 镜像进共享状态——成功 = 目标角，失败 = 真实残留角。于是 `INFO`/帧面
-            // 读到的角永远是"已到达过的角"，且后续移动的起点与上报一致（旧版：
-            // 命令面先写 `st`、失败不回滚，两份账本分裂 = 上报假姿态）。
-            {
-                let mut b = lock_bus(bus);
-                b.st.pan_deg = ph.pan_deg();
-                b.st.tilt_deg = ph.tilt_deg();
-            }
-            if ok {
-                // 姿态到位回读（**硬件侧证据**：直接读 LEDC 寄存器换算，不听记账角；
-                // 只回读本次请求的轴——未动的轴 duty 可能为 0，换算无意义）。
-                let rd = |axis: Axis| {
-                    duty_to_deg(
-                        match axis {
-                            Axis::Pan => ph.pan.get_duty(),
-                            Axis::Tilt => ph.tilt.get_duty(),
-                        },
-                        DUTY_MIN,
-                        DUTY_MAX,
-                    )
-                };
-                println!(
-                    "[periph] 姿态到位 pan={} tilt={}（LEDC 回读 pan={}° tilt={}°，记账 {}°/{}°）",
-                    want(pan),
-                    want(tilt),
-                    rd(Axis::Pan),
-                    rd(Axis::Tilt),
-                    ph.pan_deg(),
-                    ph.tilt_deg()
-                );
+    }
+}
+
+/// 舵机移动作业（`Move` 臂）：执行 + 提交硬件真值 + 成功/失败两半取证。
+fn job_move(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, pan: Option<u32>, tilt: Option<u32>) {
+    let ok = rt_move(ph, pan, tilt);
+    // **提交硬件真值**（稳健性修复，与命令面"不写前记账"配对）：无论成功
+    // 与否都把运行面 ledger（机制核记账角，只有 `servo_set` 成功才推进）
+    // 镜像进共享状态——成功 = 目标角，失败 = 真实残留角。于是 `INFO`/帧面
+    // 读到的角永远是"已到达过的角"，且后续移动的起点与上报一致（旧版：
+    // 命令面先写 `st`、失败不回滚，两份账本分裂 = 上报假姿态）。
+    {
+        let mut b = lock_bus(bus);
+        b.st.pan_deg = ph.pan_deg();
+        b.st.tilt_deg = ph.tilt_deg();
+    }
+    if ok {
+        move_done(ph, pan, tilt);
+    } else {
+        move_fail(bus, pan, tilt);
+    }
+}
+
+/// 角度参数的外部呈现：`Some(90)` → `"90"`，缺省 → `"-"`。
+fn deg_txt(v: Option<u32>) -> String {
+    v.map_or_else(|| "-".into(), |d| d.to_string())
+}
+
+/// 移动成功半臂：姿态到位回读（**硬件侧证据**：直接读 LEDC 寄存器换算，不听
+/// 记账角；只回读本次请求的轴——未动的轴 duty 可能为 0，换算无意义）。
+fn move_done(ph: &RtPeriph, pan: Option<u32>, tilt: Option<u32>) {
+    let rd = |axis: Axis| {
+        duty_to_deg(
+            match axis {
+                Axis::Pan => ph.pan.get_duty(),
+                Axis::Tilt => ph.tilt.get_duty(),
+            },
+            DUTY_MIN,
+            DUTY_MAX,
+        )
+    };
+    println!(
+        "[periph] 姿态到位 pan={} tilt={}（LEDC 回读 pan={}° tilt={}°，记账 {}°/{}°）",
+        deg_txt(pan),
+        deg_txt(tilt),
+        rd(Axis::Pan),
+        rd(Axis::Tilt),
+        ph.pan_deg(),
+        ph.tilt_deg()
+    );
+}
+
+/// 移动失败半臂（批N12 件一：敞口 16 第一问缺码半边）：`rt_move` 内部虽有逐轴
+/// `eprintln`，但作业级失败必须计数并回宿主（全案 §20.5 "返回值被丢弃"的残留
+/// 形态）。失败行带稳定前缀＋累计值（串口取证 grep 判据），并照 SCAN/SampleRail
+/// 先例走 outbox `ERR` 行回宿主。
+fn move_fail(bus: &Arc<Mutex<Bus>>, pan: Option<u32>, tilt: Option<u32>) {
+    let n = {
+        let mut b = lock_bus(bus);
+        b.st.move_fail_events = b.st.move_fail_events.saturating_add(1);
+        b.st.move_fail_events
+    };
+    eprintln!(
+        "[periph] Move 失败 pan={} tilt={}（累计 {n}）",
+        deg_txt(pan),
+        deg_txt(tilt)
+    );
+    outbox_push(
+        bus,
+        format!(
+            "ERR Move 失败 pan={} tilt={}（累计 {n}）",
+            deg_txt(pan),
+            deg_txt(tilt)
+        ),
+    );
+}
+
+/// 表情重绘（`RenderCapsules` 臂）：慢 I2C 只在运行面发生。
+fn job_capsules(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    let style = {
+        let b = lock_bus(bus);
+        b.st.base
+    };
+    if let Err(e) = ph.capsules_degrading(style) {
+        eprintln!("[periph] 胶囊眼渲染失败: {e}");
+    }
+}
+
+/// 点阵帧渲染（`RenderFrame` 臂）。
+fn job_frame(ph: &mut RtPeriph, frame: &[u8; 8]) {
+    if let Err(e) = ph.render_frame(frame) {
+        eprintln!("[periph] 点阵渲染失败: {e}");
+    }
+}
+
+/// 5V 轨单次采样（`SampleRail` 臂）：成功按有效/悬空两态回包，读失败回 ERR。
+fn job_rail(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    match sample_rail(ph, bus) {
+        Ok((mv, raw)) => {
+            let valid = { lock_bus(bus).st.rail_valid };
+            if valid {
+                println!("[periph] RAIL 采样 rail={mv}mV pin_raw={raw}");
+                outbox_push(bus, format!("RAIL rail={mv}mV raw={raw}"));
             } else {
-                // 批N12 件一（敞口 16 第一问缺码半边）：失败半臂此前为空——rt_move
-                // 内部虽有逐轴 `eprintln`，但作业级失败不计数、不回宿主（全案 §20.5
-                // "返回值被丢弃"的残留形态）。失败行带稳定前缀＋累计值（串口取证
-                // grep 判据），并照 SCAN/SampleRail 先例走 outbox `ERR` 行回宿主。
-                let n = {
-                    let mut b = lock_bus(bus);
-                    b.st.move_fail_events = b.st.move_fail_events.saturating_add(1);
-                    b.st.move_fail_events
-                };
-                eprintln!(
-                    "[periph] Move 失败 pan={} tilt={}（累计 {n}）",
-                    want(pan),
-                    want(tilt)
-                );
+                println!("[periph] RAIL 采样: ADC 悬空/饱和 raw={raw}");
                 outbox_push(
                     bus,
-                    format!(
-                        "ERR Move 失败 pan={} tilt={}（累计 {n}）",
-                        want(pan),
-                        want(tilt)
-                    ),
+                    format!("ERR RAIL ADC 悬空/饱和 raw={raw}（检查 2:1 分压）"),
                 );
             }
         }
-        Job::Scan => rt_scan(ph, bus),
-        Job::RenderCapsules => {
-            let style = {
-                let b = lock_bus(bus);
-                b.st.base
-            };
-            if let Err(e) = ph.capsules_degrading(style) {
-                eprintln!("[periph] 胶囊眼渲染失败: {e}");
-            }
+        Err(e) => {
+            eprintln!("[periph] RAIL 采样失败: {e}");
+            outbox_push(bus, format!("ERR RAIL 采样失败: {e}"));
         }
-        Job::RenderFrame(frame) => {
-            if let Err(e) = ph.render_frame(&frame) {
-                eprintln!("[periph] 点阵渲染失败: {e}");
-            }
-        }
-        Job::SampleRail => match sample_rail(ph, bus) {
-            Ok((mv, raw)) => {
-                let valid = { lock_bus(bus).st.rail_valid };
-                if valid {
-                    println!("[periph] RAIL 采样 rail={mv}mV pin_raw={raw}");
-                    outbox_push(bus, format!("RAIL rail={mv}mV raw={raw}"));
-                } else {
-                    println!("[periph] RAIL 采样: ADC 悬空/饱和 raw={raw}");
-                    outbox_push(
-                        bus,
-                        format!("ERR RAIL ADC 悬空/饱和 raw={raw}（检查 2:1 分压）"),
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("[periph] RAIL 采样失败: {e}");
-                outbox_push(bus, format!("ERR RAIL 采样失败: {e}"));
-            }
-        },
     }
 }
 
@@ -288,16 +318,10 @@ fn rt_scan(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
 }
 
 /// 运行面自主节拍（无作业时 10ms 一拍）：**决策段持锁纯算，渲染/驱动段脱锁慢跑**
-/// ——慢 I2C 不阻塞控制面命令吞吐。
+/// ——慢 I2C 不阻塞控制面命令吞吐。分段见下：轨压采样 / 表情微动作 / 自主扫摆 /
+/// 角度行刷新，各自独立取证。
 fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
-    // 5V 轨周期采样 + 欠压判定（**机制面**，方案A Q1/Q2）：到点采一次、喂判定核，写
-    // 档位/计数入共享状态（`INFO` 观测面 + `servo_set` 拒动判据）。失败只打站不 panic。
-    if now_ms() >= ph.next_rail_ms {
-        ph.next_rail_ms = now_ms() + RAIL_SAMPLE_PERIOD_MS;
-        if let Err(e) = sample_rail(ph, bus) {
-            eprintln!("[periph] 轨压周期采样失败: {e}");
-        }
-    }
+    tick_rail(ph, bus);
     let (render, mv, refresh) = {
         let mut b = lock_bus(bus);
         let st = &mut b.st;
@@ -305,39 +329,64 @@ fn autonomous_tick(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
         let (mv, refresh) = st.wander_decide();
         (render, mv, refresh)
     };
+    tick_anim(ph, render);
+    tick_wander(ph, bus, mv);
+    if refresh {
+        tick_redraw(ph, bus);
+    }
+}
+
+/// 5V 轨周期采样 + 欠压判定（**机制面**，方案A Q1/Q2）：到点采一次、喂判定核，
+/// 写档位/计数入共享状态（`INFO` 观测面 + `servo_set` 拒动判据）。失败只打站不
+/// panic。
+fn tick_rail(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    if now_ms() >= ph.next_rail_ms {
+        ph.next_rail_ms = now_ms() + RAIL_SAMPLE_PERIOD_MS;
+        if let Err(e) = sample_rail(ph, bus) {
+            eprintln!("[periph] 轨压周期采样失败: {e}");
+        }
+    }
+}
+
+/// 表情微动作渲染（决策已在持锁段完成，此处只驱动）。
+fn tick_anim(ph: &mut RtPeriph, render: Option<crate::face::EyeStyle>) {
     if let Some(style) = render {
         if let Err(e) = ph.capsules_degrading(style) {
             eprintln!("[periph] 表情微动作渲染失败: {e}");
         }
     }
-    if let Some((axis, deg)) = mv {
-        if let Err(e) = ph.servo_set(axis, deg) {
-            eprintln!("[periph] 扫摆驱动失败: {e}");
-            // 批N12 件一：自主扫摆失败计数（静默观测面，同 `selfheal_skipped`
-            // 口径——不刷 outbox 打扰宿主，Move 作业失败才回包）。
-            let mut b = lock_bus(bus);
-            b.st.move_fail_events = b.st.move_fail_events.saturating_add(1);
-            // 决策段先推进了 `st` 角度，驱动失败即**回填真实角**（不冒领）：
-            // 与 `Job::Move` 的提交口径一致，避免自主扫摆场景的账本分裂。
-            b.st.pan_deg = ph.pan_deg();
-            b.st.tilt_deg = ph.tilt_deg();
-        }
+}
+
+/// 自主扫摆单步驱动 + 失败回填（批N12 件一：失败计数走静默观测面，同
+/// `selfheal_skipped` 口径——不刷 outbox 打扰宿主，Move 作业失败才回包）。
+fn tick_wander(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>, mv: Option<(Axis, u32)>) {
+    let Some((axis, deg)) = mv else { return };
+    if let Err(e) = ph.servo_set(axis, deg) {
+        eprintln!("[periph] 扫摆驱动失败: {e}");
+        let mut b = lock_bus(bus);
+        b.st.move_fail_events = b.st.move_fail_events.saturating_add(1);
+        // 决策段先推进了 `st` 角度，驱动失败即**回填真实角**（不冒领）：
+        // 与 `Job::Move` 的提交口径一致，避免自主扫摆场景的账本分裂。
+        b.st.pan_deg = ph.pan_deg();
+        b.st.tilt_deg = ph.tilt_deg();
     }
-    if refresh {
-        // 刷前重读（含本拍刚走的角度）；帧/表情模式由 angle_row_visible 守卫跳过
-        let (text, pan, tilt, visible) = {
-            let b = lock_bus(bus);
-            (
-                b.st.last_text.clone(),
-                b.st.pan_deg,
-                b.st.tilt_deg,
-                b.st.angle_row_visible(),
-            )
-        };
-        if visible {
-            if let Err(e) = ph.oled_show(&text, pan, tilt) {
-                eprintln!("[periph] 角度行刷新失败: {e}");
-            }
+}
+
+/// 扫摆后的角度行刷新（刷前重读，含本拍刚走的角度；帧/表情模式由
+/// `angle_row_visible` 守卫跳过）。
+fn tick_redraw(ph: &mut RtPeriph, bus: &Arc<Mutex<Bus>>) {
+    let (text, pan, tilt, visible) = {
+        let b = lock_bus(bus);
+        (
+            b.st.last_text.clone(),
+            b.st.pan_deg,
+            b.st.tilt_deg,
+            b.st.angle_row_visible(),
+        )
+    };
+    if visible {
+        if let Err(e) = ph.oled_show(&text, pan, tilt) {
+            eprintln!("[periph] 角度行刷新失败: {e}");
         }
     }
 }
