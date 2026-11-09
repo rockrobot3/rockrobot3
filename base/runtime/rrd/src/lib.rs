@@ -17,6 +17,7 @@ pub mod domain_write;
 pub mod manifest;
 pub mod probe;
 pub mod profile;
+mod profile_edit;
 pub mod registry;
 pub mod rpc;
 pub mod topics_load;
