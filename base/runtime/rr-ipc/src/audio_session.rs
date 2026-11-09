@@ -55,8 +55,14 @@ pub const HANDSHAKE_TRIES: u32 = 10;
 /// 两次握手尝试之间的歇口（给宿主 USB 栈缓冲；每轮都重新 close/open fd）。
 pub const HANDSHAKE_RETRY_PAUSE: Duration = Duration::from_secs(2);
 
+/// 单行应答字节上限：板面残流（音频帧）可能抢在 `OK audio off/on` 之前进线，
+/// 行内合法前缀约一帧（≤16KB）；32KB 留一倍余量。超界即 Err——没有换行的
+/// 无限流不能把握手读侧内存顶穿（2026-11-09 静态审计；真板实录见下方日志面）。
+const RR3_REPLY_LINE_CAP: usize = 32 * 1024;
+
 /// 收一行（逐字节超时读 [`REPLY_TIMEOUT_MS`]；'\r' 剥离；换行即返回）。
-/// 超时无字节即 Err（板面哑了——握手路径据此点名，不再无限等）。
+/// 超时无字节即 Err（板面哑了——握手路径据此点名，不再无限等）；行超
+/// [`RR3_REPLY_LINE_CAP`] 无换行即 Err（板面残流未停/非行协议数据）。
 pub fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error> {
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
@@ -75,7 +81,15 @@ pub fn read_reply_line(conn: &mut Rr3UartConn) -> Result<String, std::io::Error>
                 }
                 return Ok(String::from_utf8_lossy(&line).into_owned());
             }
-            b => line.push(b),
+            b => {
+                if line.len() >= RR3_REPLY_LINE_CAP {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("应答行超 {RR3_REPLY_LINE_CAP}B 仍无换行（板面残流未停？）"),
+                    ));
+                }
+                line.push(b);
+            }
         }
     }
 }
@@ -121,7 +135,7 @@ pub fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
     // OFF 应答读了即弃，但**超时可见**（d4 run#2 排障教训：`let _ =` 静默丢弃
     // 害排查——宿主侧 USB RX 冻结时这条读无声超时，故障面全靠 seq 对账反推）
     match read_reply_line(conn) {
-        Ok(l) => eprintln!("[audio] 防御 OFF 应答: {l:?}"),
+        Ok(l) => eprintln!("[audio] 防御 OFF 应答: {:?}", rr3_log_head(&l, 120)),
         Err(e) => eprintln!("[audio] 防御 OFF 应答未收到（残流/宿主侧静默，继续）: {e}"),
     }
     conn.rr3_flush_input()
@@ -148,7 +162,8 @@ pub fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
         );
         if Instant::now() >= deadline {
             return Err(format!(
-                "应答 {REPLY_TIMEOUT_MS}ms 预算内未见 OK audio on（末行 {line:?}）"
+                "应答 {REPLY_TIMEOUT_MS}ms 预算内未见 OK audio on（末行 {:?}）",
+                rr3_log_head(&line, 80)
             ));
         }
     }
