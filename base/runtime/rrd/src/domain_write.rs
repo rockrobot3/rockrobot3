@@ -154,7 +154,7 @@ pub struct Rr3DomainWritePaths {
 }
 
 /// 记账成员相对名 → 写口路径位（基-40 记账七成员里写口要用的六路）。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Rr3PathSlot {
     Profile,
     Slots,
@@ -192,36 +192,53 @@ fn rr3_path_slot(member: &str) -> Option<Rr3PathSlot> {
 /// 从真值集记账行推导写口路径集（跨平台纯函数）。topics.toml 不取（装载链
 /// 内部按 contracts 目录读）。
 pub fn rr3_write_paths(truth_set: &[Rr3TruthSetEntry]) -> Result<Rr3DomainWritePaths, String> {
-    let mut profile = None;
-    let mut slots = None;
-    let mut roles = None;
-    let mut devices = None;
-    let mut wiring = None;
-    let mut platform_dir = None;
-    for e in truth_set {
-        match rr3_path_slot(&e.member) {
-            Some(Rr3PathSlot::Profile) => profile = Some(e.path.clone()),
-            Some(Rr3PathSlot::Slots) => slots = Some(e.path.clone()),
-            Some(Rr3PathSlot::Roles) => roles = Some(e.path.clone()),
-            Some(Rr3PathSlot::Devices) => devices = Some(e.path.clone()),
-            Some(Rr3PathSlot::Wiring) => wiring = Some(e.path.clone()),
-            Some(Rr3PathSlot::Platform) => platform_dir = e.path.parent().map(PathBuf::from),
-            None => {}
-        }
-    }
-    // 逐条点名缺员（基-40 记账七成员，写口必需六路；缺哪条点哪条，不静默合并）
-    let missing = |what: &str, v: &Option<PathBuf>| {
-        v.clone()
-            .ok_or_else(|| format!("真值集记账缺 {what} 成员（记账形状破），写口拒"))
-    };
     Ok(Rr3DomainWritePaths {
-        profile: missing("profiles/<stem>.toml", &profile)?,
-        slots: missing("contracts/slots.toml", &slots)?,
-        roles: missing("contracts/roles.toml", &roles)?,
-        devices: missing("contracts/devices.toml", &devices)?,
-        wiring: missing("hardware/<stem>/wiring.toml", &wiring)?,
-        platform_dir: missing("contracts/platform/<chip>.toml", &platform_dir)?,
+        profile: rr3_req(
+            rr3_path_pick(truth_set, Rr3PathSlot::Profile),
+            "profiles/<stem>.toml",
+        )?,
+        slots: rr3_req(
+            rr3_path_pick(truth_set, Rr3PathSlot::Slots),
+            "contracts/slots.toml",
+        )?,
+        roles: rr3_req(
+            rr3_path_pick(truth_set, Rr3PathSlot::Roles),
+            "contracts/roles.toml",
+        )?,
+        devices: rr3_req(
+            rr3_path_pick(truth_set, Rr3PathSlot::Devices),
+            "contracts/devices.toml",
+        )?,
+        wiring: rr3_req(
+            rr3_path_pick(truth_set, Rr3PathSlot::Wiring),
+            "hardware/<stem>/wiring.toml",
+        )?,
+        platform_dir: rr3_req(
+            rr3_path_pick(truth_set, Rr3PathSlot::Platform),
+            "contracts/platform/<chip>.toml",
+        )?,
     })
+}
+
+/// 按槽取路径（B10 自 write_paths 抽出）：分类单点仍是 [`rr3_path_slot`]，
+/// 命中即取该成员路径；同一槽多成员记账 = 形状破，取首条并交由上游点名。
+fn rr3_path_pick(truth_set: &[Rr3TruthSetEntry], slot: Rr3PathSlot) -> Option<PathBuf> {
+    let p = truth_set
+        .iter()
+        .find(|e| rr3_path_slot(&e.member) == Some(slot))
+        .map(|e| e.path.clone())?;
+    // platform 槽登记的是 chip 表文件本身，写口要的是目录（兄弟表落位同目录）
+    if slot == Rr3PathSlot::Platform {
+        p.parent().map(PathBuf::from)
+    } else {
+        Some(p)
+    }
+}
+
+/// 缺员点名（B10 自 write_paths 抽出）：真值集记账七成员里写口必需六路，
+/// 缺哪条点哪条，不静默合并。
+fn rr3_req(v: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
+    v.ok_or_else(|| format!("真值集记账缺 {what} 成员（记账形状破），写口拒"))
 }
 
 /// 证据容器根（§6.1：modules-root 同一条 `<root>/profiles/` 布局纪律推导出

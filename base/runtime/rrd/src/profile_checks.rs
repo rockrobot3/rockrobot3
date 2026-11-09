@@ -398,7 +398,10 @@ fn rr3_derive_pin(
 
 /// 门 n（§8 注入路径唯一）：[hardware] 出现引脚侧派生键一律红——pin 实际派生
 /// 该键时点名两份取值，否则按稳态判据点名。
-pub(crate) fn rr3_check_hw_keys(profile: &Rr3Profile, derived: &BTreeMap<String, String>) -> Vec<String> {
+pub(crate) fn rr3_check_hw_keys(
+    profile: &Rr3Profile,
+    derived: &BTreeMap<String, String>,
+) -> Vec<String> {
     let mut errs = Vec::new();
     for k in RR3_PIN_DERIVED_KEYS {
         if let Some(hv) = profile.hardware.get(k) {
@@ -509,7 +512,10 @@ type Rr3Scan = Vec<(String, Vec<(String, Rr3AssembleFacts)>)>;
 
 /// 装配扫描：逐模块读 atoms/*/assemble.toml；坏形/注入缺进 broken（该模块
 /// Degraded，不 fatal），合法 facts 进 scanned（预算判据分子）。
-pub(crate) fn rr3_scan_modules(root: &Path, profile: &Rr3Profile) -> (Rr3Scan, Vec<(String, String)>) {
+pub(crate) fn rr3_scan_modules(
+    root: &Path,
+    profile: &Rr3Profile,
+) -> (Rr3Scan, Vec<(String, String)>) {
     let mut broken = Vec::new();
     let mut scanned = Vec::new();
     for m in profile.enabled_slots.keys() {
@@ -524,7 +530,11 @@ pub(crate) fn rr3_scan_modules(root: &Path, profile: &Rr3Profile) -> (Rr3Scan, V
 
 /// 校验⑨（电流预算/覆盖）与校验⑩（内存预算）：分子来自装配扫描 facts，
 /// 分母来自装配单；坏形件不进加总（可见面 = assemble_broken 点名）。
-pub(crate) fn rr3_check_budgets(profile: &Rr3Profile, roles: &Rr3RoleTable, scanned: &Rr3Scan) -> Vec<String> {
+pub(crate) fn rr3_check_budgets(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    scanned: &Rr3Scan,
+) -> Vec<String> {
     let mut errs = Vec::new();
     let declared = rr3_demand_expand(profile, roles, scanned);
     errs.extend(rr3_demand_budget(&declared, &profile.supplies.domains));

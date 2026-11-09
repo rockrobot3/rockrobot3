@@ -440,7 +440,12 @@ fn rr3_supplies_parse(root: &toml::Value, tier: &str, errs: &mut Vec<String>) ->
 /// `[supplies]` 标量位：看门狗声明/时序预算/喂狗者 + 未知键点名。
 fn rr3_supplies_core(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec<String>) {
     rr3_supplies_flags(t, supplies, errs);
-    rr3_int_into(t, "watchdog_timeout_ms", &mut supplies.watchdog_timeout_ms, errs);
+    rr3_int_into(
+        t,
+        "watchdog_timeout_ms",
+        &mut supplies.watchdog_timeout_ms,
+        errs,
+    );
     rr3_int_into(t, "tick_period_ms", &mut supplies.tick_period_ms, errs);
     rr3_int_into(t, "tick_jitter_ms", &mut supplies.tick_jitter_ms, errs);
     rr3_int_into(
@@ -746,7 +751,9 @@ fn rr3_slots_parse(
     rr3_slots_absent(t, &mut slots_device_absent, errs);
     for k in t.keys() {
         if k != "present" && k != "device_absent" {
-            errs.push(format!("[slots] 未知键 {k}（只认 present / device_absent）"));
+            errs.push(format!(
+                "[slots] 未知键 {k}（只认 present / device_absent）"
+            ));
         }
     }
     (slots_present, slots_device_absent)
@@ -759,9 +766,8 @@ fn rr3_slots_present(t: &toml::Table, out: &mut Vec<String>, errs: &mut Vec<Stri
             for item in items {
                 match item.as_str() {
                     Some(s) if !s.is_empty() => out.push(s.to_string()),
-                    _ => errs.push(
-                        "[slots].present 的每一项都必须是非空字符串（格位名）".to_string(),
-                    ),
+                    _ => errs
+                        .push("[slots].present 的每一项都必须是非空字符串（格位名）".to_string()),
                 }
             }
         }
@@ -770,11 +776,7 @@ fn rr3_slots_present(t: &toml::Table, out: &mut Vec<String>, errs: &mut Vec<Stri
 }
 
 /// [slots].device_absent（B9 自 slots_parse 抽出）：缺席须显式申报非空理由。
-fn rr3_slots_absent(
-    t: &toml::Table,
-    out: &mut BTreeMap<String, String>,
-    errs: &mut Vec<String>,
-) {
+fn rr3_slots_absent(t: &toml::Table, out: &mut BTreeMap<String, String>, errs: &mut Vec<String>) {
     let Some(absent) = t.get("device_absent").and_then(toml::Value::as_table) else {
         return;
     };

@@ -56,22 +56,22 @@ mod boot;
 mod model;
 mod parse;
 
-pub use boot::{
-    rr3_boot_inputs, rr3_boot_with_probe, rr3_domain_apply, rr3_evidence_check,
-    rr3_key_line_apply, rr3_truth_locations, rr3_truth_set, Rr3RuntimeTruthSet,
-    Rr3TruthSetLocation, RR3_CONTRACT_BOOKS,
-};
 pub(crate) use boot::{
     rr3_assemble_scan, rr3_axis_files_load, rr3_axis_state_text, rr3_bindings_text,
     rr3_demand_budget, rr3_demand_expand, rr3_memory_budget, rr3_power_gaps,
 };
+pub use boot::{
+    rr3_boot_inputs, rr3_boot_with_probe, rr3_domain_apply, rr3_evidence_check, rr3_key_line_apply,
+    rr3_truth_locations, rr3_truth_set, Rr3RuntimeTruthSet, Rr3TruthSetLocation,
+    RR3_CONTRACT_BOOKS,
+};
+#[cfg(test)]
+pub(crate) use model::RR3_DOMAIN_KEYS;
 pub use model::{
     Rr3Budget, Rr3Domain, Rr3PinEntry, Rr3Profile, Rr3ProfileBoot, Rr3Supplies,
     RR3_CONTRACT_DEVICES_PATH, RR3_CONTRACT_ROLES_PATH, RR3_CONTRACT_SLOTS_PATH,
 };
 pub(crate) use model::{RR3_PIN_DERIVED_KEYS, RR3_PIN_KEYS};
-#[cfg(test)]
-pub(crate) use model::RR3_DOMAIN_KEYS;
 pub use parse::{rr3_profile_abs, rr3_profile_parse};
 
 #[cfg(test)]
@@ -1694,5 +1694,4 @@ mux_group = []
             assert!(errs.iter().any(|e| e.contains(want)), "缺 {want}: {errs:?}");
         }
     }
-
 }

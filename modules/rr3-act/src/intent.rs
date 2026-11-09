@@ -173,11 +173,8 @@ fn rr3_servo_arm(
         .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
     let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
     // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
-    let angle = rr_core::control::rr3_travel_clamp(
-        angle,
-        servo_cfg.angle_min_deg,
-        servo_cfg.angle_max_deg,
-    );
+    let angle =
+        rr_core::control::rr3_travel_clamp(angle, servo_cfg.angle_min_deg, servo_cfg.angle_max_deg);
     // HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）
     servo
         .set_angle(angle)

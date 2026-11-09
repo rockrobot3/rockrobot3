@@ -381,4 +381,3 @@ pub struct Rr3ProfileBoot {
     /// 单点），boot 函数自身不碰全局态——纯构造，快照住处由调用方拍。
     pub snapshot: Option<crate::assembly::Rr3AssemblySnapshot>,
 }
-

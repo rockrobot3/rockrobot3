@@ -332,9 +332,9 @@ fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
 fn rr3_caps_set(caps: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     match caps.get("adc_pins") {
         Some(v) => table.capabilities.adc_pins = rr3_pin_set_from(v, "adc_pins", errs),
-        None => errs.push(
-            "[capabilities] 缺 adc_pins（无 ADC 须显式写 [] 并带行级注记，裁定②）".into(),
-        ),
+        None => {
+            errs.push("[capabilities] 缺 adc_pins（无 ADC 须显式写 [] 并带行级注记，裁定②）".into())
+        }
     }
     match caps.get("input_only_pins") {
         Some(v) => {

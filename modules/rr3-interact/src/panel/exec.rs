@@ -17,8 +17,8 @@ use serde_json::{json, Value};
 
 use super::secrets::{rr3_secrets_list_at, rr3_secrets_path, rr3_secrets_upsert};
 use super::server::{
-    rr3_ctl_query, rr3_ctl_send, rr3_panel_route, Rr3HttpRequest, Rr3PanelAction,
-    Rr3PanelDispatch, Rr3PanelShared, Rr3SelftestExpect, RR3_PANEL_ROUTES,
+    rr3_ctl_query, rr3_ctl_send, rr3_panel_route, Rr3HttpRequest, Rr3PanelAction, Rr3PanelDispatch,
+    Rr3PanelShared, Rr3SelftestExpect, RR3_PANEL_ROUTES,
 };
 use super::RR3_PANEL_INDEX_HTML;
 
@@ -73,10 +73,7 @@ fn checks_of(v: &Value) -> Vec<Value> {
 }
 
 /// 路由产物的执行面：状态码三元组在返回处一次定形。
-pub(super) fn rr3_panel_execute(
-    req: &Rr3HttpRequest,
-    shared: &Rr3PanelShared,
-) -> Rr3PanelReply {
+pub(super) fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -> Rr3PanelReply {
     rr3_panel_reply(rr3_panel_route(&req.method, &req.path, &req.body), shared)
 }
 

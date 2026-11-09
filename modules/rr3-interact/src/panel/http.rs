@@ -219,9 +219,13 @@ mod tests {
         assert!(rr3_req_line(&mut c, 64).unwrap_err().contains("缺路径"));
 
         let mut c = std::io::Cursor::new(b"Content-Length: x\r\n\r\n".to_vec());
-        assert!(rr3_req_heads(&mut c, 64, 0).unwrap_err().contains("不是数字"));
+        assert!(rr3_req_heads(&mut c, 64, 0)
+            .unwrap_err()
+            .contains("不是数字"));
 
         let mut c = std::io::Cursor::new(b"Host: a\r\n\r\n".to_vec());
-        assert!(rr3_req_heads(&mut c, 4, 0).unwrap_err().contains("头区超界"));
+        assert!(rr3_req_heads(&mut c, 4, 0)
+            .unwrap_err()
+            .contains("头区超界"));
     }
 }

@@ -105,7 +105,6 @@ mod run {
         log_path: &Path,
         report: &mut String,
     ) -> Result<(), String> {
-
         // ---- 3. 轮询等 resident 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试） ----
         rr3_wait_modules(
             || rr3_ctl_rows(&rrctl, &socket),
