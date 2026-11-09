@@ -1105,7 +1105,7 @@ pub fn rr3_fixture_manifest(tag: &str, dir: &str) -> SimManifest {
 /// 把夹具 manifest 副本的 `watchdog_timeout_ms` 改写成 `ms`（只动本用例 pid 唯一的 /tmp 副本，
 /// 共用夹具文件一字不动）。改写没命中就 panic——夹具形状变了时"静默不改"会让隔离失效。
 ///
-/// 为什么存在：S2/S3（e2e_spawn_restart）要钉"子进程退出码是 owned 崩溃定性的权威"，而
+/// 为什么存在：S1/S2/S3（e2e_spawn_restart）要钉"子进程退出码是 owned 崩溃定性的权威"，而
 /// 共用夹具的 500ms watchdog 是给 e2e_watchdog 的判据用的。高负载机上 supervisor 的收尸
 /// （try_wait + 扫尸节拍）可能饿到 500ms 以上，watchdog 就抢先把条目记成 failed——
 /// 收尸那一路于是走 Silent，断言红在竞争噪声而不是被测行为上。拉大这一用例副本的

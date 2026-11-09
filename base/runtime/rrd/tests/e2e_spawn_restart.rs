@@ -84,6 +84,10 @@ fn rr3_kill_hung_fixture(pid: u64) {
 #[test]
 fn boot_spawned_module_reaches_running_then_restarts_after_crash() {
     let m = rr3_fixture_manifest("sr-s1", "sima"); // restart_policy = always
+                                                   // 与 S2/S3 同一处置：本用例钉的是"退出码那一路的定性"，共用夹具的 500ms
+                                                   // watchdog 是 e2e_watchdog 的判据。高负载机上收尸可能晚于 500ms，watchdog
+                                                   // 抢记后收尸走 Silent、断言红在竞争噪声上（16 路并行实测复现）。
+    rr3_fixture_watchdog_ms(&m, 60_000);
     let mut rrd = RrdTest::rr3_start_boot("sr-s1", &[&m.path], "abort", E2E_TICK_MS);
     let mut b = rr3_observer(&mut rrd, "rr3-obs");
 
