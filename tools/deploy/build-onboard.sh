@@ -82,17 +82,22 @@ for m in brain sense interact; do
 done
 
 echo "== ④ 板上原生构建（sense/interact 带 alsa feature；brain 带 TLS——ureq+rustls(ring) 需要 C 工具链，宿主 musl 交叉结构性不覆盖，2026-10-31 定案归板上）=="
-rrun "cd $RMT_SRC && cargo build --locked --release --manifest-path modules/rr3-brain/Cargo.toml"
+# 仓根 .cargo/config.toml 把 target-dir 移出源码区（/tmp/rr3-build）；板上同步会
+# 带上该配置，若沿用各模块 target/ 路径会读到**陈旧产物**（2026-11-09 实录：
+# 取回的是 10-31 的 interact，缺 periph_uart 键，真机拒启）。这里显式指定
+# 板侧 target 根，让产物路径可预期且不落源码区。
+RMT_TARGET="$RMT_SRC/target"
+rrun "cd $RMT_SRC && CARGO_TARGET_DIR=$RMT_TARGET cargo build --locked --release --manifest-path modules/rr3-brain/Cargo.toml"
 for m in sense interact; do
   echo "-- rr3-$m"
-  rrun "cd $RMT_SRC && cargo build --locked --release --features alsa --manifest-path modules/rr3-$m/Cargo.toml"
+  rrun "cd $RMT_SRC && CARGO_TARGET_DIR=$RMT_TARGET cargo build --locked --release --features alsa --manifest-path modules/rr3-$m/Cargo.toml"
 done
 
 echo "== ⑤ 产物归位 staging（payload/rr3-modules/<name>/bin）=="
 # 新鲜度门禁（2026-10-31 事故后加，见 ② 注）：产物必须比任一源文件新，否则
 # "构建成功"只是假象——cargo 复用了陈旧对象。门禁失败即点名退出，不出旧包。
 for m in brain sense interact; do
-  stale="$(rrun "find $RMT_SRC/base $RMT_SRC/modules -name '*.rs' -newer $RMT_SRC/modules/rr3-$m/target/release/rr3-$m | head -3" || true)"
+  stale="$(rrun "find $RMT_SRC/base $RMT_SRC/modules -name '*.rs' -newer $RMT_TARGET/release/rr3-$m | head -3" || true)"
   if [ -n "$stale" ]; then
     echo "rr3-$m 产物陈旧（比源码旧）——拒出包。新于产物的源文件：" >&2
     printf '%s\n' "$stale" >&2
@@ -101,7 +106,7 @@ for m in brain sense interact; do
 done
 for m in brain sense interact; do
   mkdir -p "$PAY/rr3-modules/rr3-$m"
-  rsync "$HOST:$RMT_SRC/modules/rr3-$m/target/release/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
+  rsync "$HOST:$RMT_TARGET/release/rr3-$m" "$PAY/rr3-modules/rr3-$m/bin"
 done
 
 echo "== ⑥ 板上构建件断言（动态 ELF aarch64；音频两件 ldd 含 libasound）=="
@@ -114,7 +119,7 @@ for m in brain sense interact; do
   fi
 done
 for m in sense interact; do
-  rrun "ldd $RMT_SRC/modules/rr3-$m/target/release/rr3-$m" | grep -q libasound
+  rrun "ldd $RMT_TARGET/release/rr3-$m" | grep -q libasound
 done
 
 echo "== ⑦ 装机面 config 漂移报告（非阻断；批N38 件二）=="
