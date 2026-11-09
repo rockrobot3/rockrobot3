@@ -1485,6 +1485,25 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   else
     printf 'PASS  ⑬ 追踪面无构建目录（target/build/node_modules）\n'
   fi
+  # 未入册源码门（B8 审计：⑫ 度量只读 `git ls-files`，新源码没 `git add` 就
+  # 不进度量、也不进构建——白名单策略下它连 `git status` 都不显眼，属静默漏面。
+  # 这里只点源码类扩展名，忽略目录（.trae/ 等）不误报）。
+  hy_new="$(git status --porcelain --untracked-files=normal -- \
+    '*.rs' '*.toml' '*.py' '*.html' '*.sh' 2>&1)"
+  hy_rc=$?
+  if [ "$hy_rc" -ne 0 ]; then
+    printf 'FAIL  ⑬ 未入册源码扫描器执行失败（git status 退出码 %s）:\n%s\n' \
+      "$hy_rc" "$(printf '%s\n' "$hy_new" | head -3)"
+    hyg_fail=1
+  else
+    hy_new="$(printf '%s\n' "$hy_new" | grep '^??' | head -5)"
+    if [ -n "$hy_new" ]; then
+      printf 'FAIL  ⑬ 源码未入册（度量/构建会漏，先 git add）:\n%s\n' "$hy_new"
+      hyg_fail=1
+    else
+      printf 'PASS  ⑬ 源码面无非入册新件（rs/toml/py/html/sh）\n'
+    fi
+  fi
 else
   printf 'SKIP  ⑬ 非 git 工作树——仓面卫生门不执行\n'
 fi
