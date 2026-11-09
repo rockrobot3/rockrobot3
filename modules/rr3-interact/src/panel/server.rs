@@ -38,7 +38,7 @@ use rr_ipc::{
 use serde_json::{json, Value};
 
 use super::exec::{rr3_panel_execute, Rr3PanelReply};
-use super::http::{rr3_http_read_req, rr3_http_respond, rr3_panel_body_json};
+use super::http::{rr3_http_patience, rr3_http_read_req, rr3_http_respond, rr3_panel_body_json};
 
 /// 面板监听面：env `RR3_PANEL_ADDR` 优先，缺省只绑回环（Q3 裁定）。
 /// 板上 `0.0.0.0` 随装配单注入，真机验证后置（不 claim）。
@@ -729,6 +729,12 @@ fn rr3_accept_loop(
 ) -> Result<(), String> {
     loop {
         let (mut stream, _) = listener.accept().map_err(|e| format!("accept 失败: {e}"))?;
+        // 连接 IO 耐心（读侧已在 rr3_http_read_req 设，写侧在此按同一预算补）：
+        // 对端只连不读时 write_all 会一直堵在“发送缓冲已满”，8 个槽位被钉死＝
+        // 面板整体失联（运维最后一扇门自锁，静态审计 B16）。
+        if let Err(e) = rr3_http_patience(&stream, shared.limits.read_timeout) {
+            eprintln!("面板连接写耐心未设上（连接仍按既有语义处理）: {e}");
+        }
         if live.load(Ordering::Relaxed) >= shared.limits.max_conns {
             let body = br#"{"error":"conn limit"}"#;
             let _ = rr3_http_respond(

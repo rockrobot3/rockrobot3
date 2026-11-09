@@ -14,6 +14,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -147,6 +148,16 @@ fn rr3_req_body(reader: &mut impl Read, len: usize) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
+/// 连接写侧耐心（机制面，B16 审计）：读侧已由 [`rr3_http_read_req`] 设界，写侧
+/// 同样必须有界——对端只连不读时 `write_all` 会一直堵在"发送缓冲已满"，连接
+/// 线程与并发槽位一起被钉死（8 槽耗尽＝面板整体失联）。失败只回 Err 由调用方
+/// 记一条，不上抛：耐心设不上也不该让连接连"回错误"的机会都没有。
+pub fn rr3_http_patience(stream: &TcpStream, patience: Duration) -> Result<(), String> {
+    stream
+        .set_write_timeout(Some(patience))
+        .map_err(|e| format!("设写超时失败: {e}"))
+}
+
 /// 写一个 HTTP 应答并关连接（Connection: close：一问一答，与 ctl 短连同口径）
 pub fn rr3_http_respond(
     stream: &mut TcpStream,
@@ -209,6 +220,29 @@ mod tests {
             rr3_read_line_cap(&mut c, 64, "头区", &mut out).unwrap(),
             0,
             "EOF 必须返回 0"
+        );
+    }
+
+    /// 写侧耐心（B16 审计）：对端只连不读时，应答写必须在耐心窗内放弃——不允许
+    /// 把连接线程永久钉在"发送缓冲已满"的写调用上（8 槽位耗尽＝面板失联）。
+    #[test]
+    fn patience_bounds_write_when_peer_never_reads() {
+        use std::net::TcpListener;
+        use std::time::Instant;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _peer = TcpStream::connect(addr).unwrap(); // 只建连、绝不读
+        let (mut server, _) = listener.accept().unwrap();
+        rr3_http_patience(&server, Duration::from_millis(100)).unwrap();
+        let body = vec![7u8; 16 << 20]; // 远超本机收发缓冲合计，必然堵在写侧
+        let started = Instant::now();
+        let r = rr3_http_respond(&mut server, 200, "OK", "application/octet-stream", &body);
+        assert!(r.is_err(), "对端不读必须回 Err，不可无限阻塞: {r:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "必须在耐心窗内放弃（实测 {:?}）",
+            started.elapsed()
         );
     }
 
