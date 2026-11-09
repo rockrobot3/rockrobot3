@@ -80,3 +80,13 @@ fields = [
 owner = "批N4 件九笔4（已收口）：rrd rr3.ctl.wiring 快照读口＋面板 GET /api/wiring＋covers 申报 axis 14 字段"
 evidence = "tools/ci/check.sh step ⑩；tools/ci/gate-d-baseline.txt 行 1（0）；base/runtime/rrd/src/assembly.rs"
 status = "done"
+
+# ============ 批B13 静态审计登记（2026-11-10） ============
+
+[[gap]]
+entry = "ESP 专用门 CI 覆盖缺口：esp-uart-echo / espidf-std / espidf-sentinel / rr3-act-sense-espidf 四门只在人工清单里，未进 ci.yml 的 esp job（该 job 仅跑两档 periph-base）；平台工程编译中断在合入后可长期隐形——2026-11-10 esp-uart-echo 的 E0412 即由此存活到批B13 才被人工跑门发现"
+kind = "无载体"
+fields = []
+owner = "触发条件：.github/workflows/ci.yml 属并行窗口未提交 WIP，本窗口不代改；其落定后由该窗口补 esp job 四个 step（工具链缺位照既有三门的 SKIP 纪律明说）"
+evidence = "tools/ci/check.sh 头部 14–25 行（专用门清单）；.github/workflows/ci.yml esp job"
+status = "open"
