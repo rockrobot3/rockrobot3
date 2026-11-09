@@ -198,75 +198,121 @@ fn run_link(
 
     // 短命连接退避（见 [`UDS_MIN_DWELL`]）；连接活过窗口即复位。
     let mut dwell = Backoff::new();
-    'uds: loop {
+    loop {
         if shutdown.load(Ordering::SeqCst) {
             return LinkOutcome::Shutdown;
         }
-        // —— UDS connect（三态之一：未就绪退避重试；上行丢弃计数在涨）——
-        let (stream, waited) = match connect_with_backoff(&cfg.socket, shutdown) {
+        let conn = match uds_attach(cfg, shutdown, &sink, &src, &dropped) {
             None => return LinkOutcome::Shutdown,
-            Some(s) => s,
+            Some(c) => c,
         };
+        match uds_wait(&exit_rx, shutdown, conn, &mut dwell) {
+            WaitOutcome::Reconnect => continue,
+            WaitOutcome::UartDead => return LinkOutcome::UartDead,
+            WaitOutcome::Shutdown => return LinkOutcome::Shutdown,
+        }
+    }
+}
+
+/// 一条已交接的 UDS 连接（kill 半边归主线程）。
+struct Rr3UdsConn {
+    kill: UnixStream,
+    at: Instant,
+}
+
+/// 看守结局：UDS 断链重连 / UART 断链重开 / 关停。
+enum WaitOutcome {
+    Reconnect,
+    UartDead,
+    Shutdown,
+}
+
+/// UDS 接链（三态之一：未就绪退避重试；上行丢弃计数在涨）：写窗口 → 三半边
+/// 克隆 → 交接。返回 None = 等待期收到关停。
+fn uds_attach(
+    cfg: &BridgeConfig,
+    shutdown: &AtomicBool,
+    sink: &Rr3LinkSlot,
+    src: &Rr3LinkSlot,
+    dropped: &AtomicU64,
+) -> Option<Rr3UdsConn> {
+    loop {
+        let (stream, waited) = connect_with_backoff(&cfg.socket, shutdown)?;
         // 写向窗口必须在交接前设好：这是阻塞写面的唯一上界（见常量注记）。
         if let Err(e) = stream.set_write_timeout(Some(UDS_WRITE_TIMEOUT)) {
             log(&format!("uds 写超时设置失败（{e}）；重试"));
-            continue 'uds;
+            continue;
         }
-        let conn_at = Instant::now();
-        if waited {
-            log(&format!(
-                "uds connected {}（等待期上行丢弃 {} 字节，未缓冲）",
-                cfg.socket.display(),
-                dropped.load(Ordering::Relaxed)
-            ));
-        } else {
-            log(&format!("uds connected {}", cfg.socket.display()));
-        }
-        // 三个半边：wr→上行线程、rd→下行线程、kill 留主线程（断链时先行闭合，
-        // 把还阻塞在旧流上的线程及时放出来）。
+        let at = Instant::now();
+        log_connected(&cfg.socket, waited, dropped);
         let wr = match stream.try_clone() {
             Ok(s) => s,
             Err(e) => {
                 log(&format!("uds clone 失败（{e}）；重试"));
-                continue 'uds;
+                continue;
             }
         };
         let rd = match stream.try_clone() {
             Ok(s) => s,
             Err(e) => {
                 log(&format!("uds clone 失败（{e}）；重试"));
-                continue 'uds;
+                continue;
             }
         };
-        let kill = stream; // 第三个半边归主线程
+        // 三个半边：wr→上行线程、rd→下行线程、kill 留主线程（断链时先行闭合，
+        // 把还阻塞在旧流上的线程及时放出来）。
         if sink.put(wr).is_some() {
             log("uds 上行交接：顶掉上一条未接手连接，旧句柄即刻关闭");
         }
         src.put(rd);
-        // —— 看守线程消息：UDS 断链重连 / UART 断链重开 / 关停 ——
-        loop {
-            if shutdown.load(Ordering::SeqCst) {
-                return LinkOutcome::Shutdown;
+        return Some(Rr3UdsConn { kill: stream, at });
+    }
+}
+
+/// 连接日志（等待过退避时带丢弃累计——运维据它判断"看起来在跑"是否真在跑）。
+fn log_connected(socket: &Path, waited: bool, dropped: &AtomicU64) {
+    if waited {
+        log(&format!(
+            "uds connected {}（等待期上行丢弃 {} 字节，未缓冲）",
+            socket.display(),
+            dropped.load(Ordering::Relaxed)
+        ));
+    } else {
+        log(&format!("uds connected {}", socket.display()));
+    }
+}
+
+/// 看守线程消息：UDS 断链重连 / UART 断链重开 / 关停。断链时先闭合 kill
+/// 半边，把还阻塞在旧流上的对端线程及时放出来。
+fn uds_wait(
+    exit_rx: &mpsc::Receiver<ExitMsg>,
+    shutdown: &AtomicBool,
+    conn: Rr3UdsConn,
+    dwell: &mut Backoff,
+) -> WaitOutcome {
+    let Rr3UdsConn { kill, at } = conn;
+    loop {
+        if shutdown.load(Ordering::SeqCst) {
+            return WaitOutcome::Shutdown;
+        }
+        match exit_rx.recv_timeout(WAIT_SLICE) {
+            Ok(ExitMsg::UdsDead(why)) => {
+                drop(kill);
+                if !uds_retire(&why, at.elapsed(), dwell, shutdown) {
+                    return WaitOutcome::Shutdown;
+                }
+                return WaitOutcome::Reconnect;
             }
-            match exit_rx.recv_timeout(WAIT_SLICE) {
-                Ok(ExitMsg::UdsDead(why)) => {
-                    drop(kill); // 闭合第三个半边，放行阻塞在旧流上的对端线程
-                    if !uds_retire(&why, conn_at.elapsed(), &mut dwell, shutdown) {
-                        return LinkOutcome::Shutdown;
-                    }
-                    continue 'uds;
-                }
-                Ok(ExitMsg::UartDead(why)) => {
-                    log(&format!("uart 断链（{why}）；关 UDS，重开设备节点"));
-                    drop(kill);
-                    return LinkOutcome::UartDead;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    // 两个线程都已退场 = UART 面没了
-                    log("uart 断链（收发线程均已退场）；关 UDS，重开设备节点");
-                    return LinkOutcome::UartDead;
-                }
+            Ok(ExitMsg::UartDead(why)) => {
+                log(&format!("uart 断链（{why}）；关 UDS，重开设备节点"));
+                drop(kill);
+                return WaitOutcome::UartDead;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // 两个线程都已退场 = UART 面没了
+                log("uart 断链（收发线程均已退场）；关 UDS，重开设备节点");
+                return WaitOutcome::UartDead;
             }
         }
     }
