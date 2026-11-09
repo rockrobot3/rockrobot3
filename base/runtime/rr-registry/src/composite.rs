@@ -120,6 +120,12 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
 /// 顶层形状段：顶层未知键、schema_version 域、`[composite]`（name / unit）。
 /// 错误按原顺序追加；段缺只点名不提前返回（[assemble] 的错误同批亮出）。
 fn rr3_comp_head(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
+    rr3_comp_keys(t, errs);
+    rr3_comp_meta(t, facts, errs);
+}
+
+/// 顶层键域与版本域（只认 schema_version / composite / assemble）。
+fn rr3_comp_keys(t: &toml::Table, errs: &mut Vec<String>) {
     // 顶层未知键点名（只认 schema_version / composite / assemble）
     for k in t.keys() {
         if k != "schema_version" && k != "composite" && k != "assemble" {
@@ -140,9 +146,12 @@ fn rr3_comp_head(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<
             "组合件清单缺 schema_version（必须为 {RR3_COMPOSITE_SCHEMA_VERSION}）"
         )),
     }
+}
 
-    // [composite]：name 非空 + unit 在册。段缺只点名不提前返回——[assemble] 的
-    // 独立错误要一次点全（fail-closed：一次修完，不让用户挤牙膏）。
+/// `[composite]` 元数据：name 非空 + unit 在册。
+fn rr3_comp_meta(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
+    // 段缺只点名不提前返回——[assemble] 的独立错误要一次点全（fail-closed：
+    // 一次修完，不让用户挤牙膏）。
     match t.get("composite").and_then(Value::as_table) {
         Some(comp) => {
             for k in comp.keys() {
