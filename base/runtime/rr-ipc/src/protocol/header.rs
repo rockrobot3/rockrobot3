@@ -226,6 +226,8 @@ impl Rr3Header {
         if buf.len() < RR3_IPC_HDR_SIZE {
             return Err(Rr3HdrError::TooShort { got: buf.len() });
         }
+        // 长度守卫已保证 buf.len() ≥ 128，任意常量偏移 + 宽度都不越界，
+        // try_into 定长切片必然成功——unwrap 是守卫的直读推论，不是风险点。
         let u16le = |o: usize| u16::from_le_bytes(buf[o..o + 2].try_into().unwrap());
         let u32le = |o: usize| u32::from_le_bytes(buf[o..o + 4].try_into().unwrap());
         let u64le = |o: usize| u64::from_le_bytes(buf[o..o + 8].try_into().unwrap());

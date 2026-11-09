@@ -257,6 +257,7 @@ fn rr3_manifest_rewrite(
             ))
         }
     };
+    // idx 来自同文本的 entry 行扫描（hits 的来源），行必然存在——unwrap 是扫描的直读推论
     if &text.lines().nth(idx).unwrap()[rng.a + 1..rng.b] != facts_entry {
         return Err(format!(
             "模块 {module} 的 entry 行值与 [manifest].entry 解析值不一致（疑似同名键，打包拒绝）"

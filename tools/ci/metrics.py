@@ -205,20 +205,6 @@ def strip_code(src):
     return "".join(out)
 
 
-def production_part(src):
-    """截掉测试尾巴：**cfg(test) 门 mod** 的块起点之后不进度量。
-
-    只认"cfg(test) 属性（可连挂其他属性）+ mod"形状——`#[cfg(test)] const/fn`
-    等单点豁免不是测试面边界，其后的 `fn main` 等主面代码必须留在度量内
-    （实测 rr3-audio-rec main CC 46 曾被首个非 mod cfg(test) 项整段藏出）。
-    入参须是 strip_code 之后的文本：注释/字符串里提到 `#[cfg(test)]` 不构成
-    截断依据。"""
-    for m in TEST_ATTR.finditer(src):
-        if TEST_MOD_TAIL.match(src[m.start() :]):
-            return src[: m.start()]
-    return src
-
-
 def functions(src):
     """(名字, 函数体) 列表；花括号配对取体，声明无体（trait 方法）跳过。"""
     out = []
