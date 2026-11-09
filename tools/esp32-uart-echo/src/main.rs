@@ -44,7 +44,7 @@ static ESP_APP_DESC: esp_bootloader_esp_idf::EspAppDesc =
         esp_bootloader_esp_idf::MMU_PAGE_SIZE,
     );
 
-use esp_hal::{time::Duration, time::Instant, uart::UartTx, Blocking};
+use esp_hal::{time::Duration, time::Instant, uart::UartRx, uart::UartTx, Blocking};
 
 use rr_ipc::{
     opcode, rr3_body_encode, rr3_header_encode, Rr3Header, Rr3PayloadType,
