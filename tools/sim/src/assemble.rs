@@ -128,70 +128,92 @@ pub fn rr3_assemble_layout(
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
     let profile = rr3_profile_parse(&profile_text)
         .map_err(|errs| format!("装配单 {} 形状不合: {errs:?}", profile_src.display()))?;
+    let profile_dst = rr3_layout_profile(workdir, profile_src, &profile_text)?;
+    let stem = rr3_layout_stem(profile_src)?;
+    rr3_layout_wiring(repo, workdir, stem)?;
 
+    let mut entries = Vec::with_capacity(profile.enabled_slots.len());
+    for module in profile.enabled_slots.keys() {
+        entries.push(rr3_layout_module(repo, workdir, module)?);
+    }
+    Ok((profile_dst, entries))
+}
+
+/// 装配单原文落位到演练 modules-root（`profiles/<名>.toml`），零改。
+fn rr3_layout_profile(workdir: &Path, profile_src: &Path, text: &str) -> Result<PathBuf, String> {
     let profiles_dir = workdir.join("profiles");
     std::fs::create_dir_all(&profiles_dir).map_err(|e| format!("建 {profiles_dir:?} 失败: {e}"))?;
     let profile_name = profile_src
         .file_name()
         .ok_or_else(|| format!("装配单路径 {} 无文件名", profile_src.display()))?;
     let profile_dst = profiles_dir.join(profile_name);
-    std::fs::write(&profile_dst, &profile_text)
-        .map_err(|e| format!("写 {profile_dst:?} 失败: {e}"))?;
+    std::fs::write(&profile_dst, text).map_err(|e| format!("写 {profile_dst:?} 失败: {e}"))?;
+    Ok(profile_dst)
+}
 
-    // 接线档同批装机（原文零改）：装载期校验⑦要求 hardware/<形态>/wiring.toml
-    // 必在，仓源缺件在这里红，不让演练跑一半才红
-    let stem = profile_src
+/// 装配单文件名主干（接线档目录名，`hardware/<stem>/wiring.toml`）。
+fn rr3_layout_stem(profile_src: &Path) -> Result<&str, String> {
+    profile_src
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
-        .ok_or_else(|| format!("装配单路径 {} 无文件名", profile_src.display()))?;
+        .ok_or_else(|| format!("装配单路径 {} 无文件名", profile_src.display()))
+}
+
+/// 接线档同批装机（原文零改）：装载期校验⑦要求 hardware/<形态>/wiring.toml
+/// 必在，仓源缺件在这里红，不让演练跑一半才红。
+fn rr3_layout_wiring(repo: &Path, workdir: &Path, stem: &str) -> Result<(), String> {
     let wiring_src = repo.join("hardware").join(stem).join("wiring.toml");
     let wiring_dst_dir = workdir.join("hardware").join(stem);
     std::fs::create_dir_all(&wiring_dst_dir)
         .map_err(|e| format!("建 {wiring_dst_dir:?} 失败: {e}"))?;
     std::fs::copy(&wiring_src, wiring_dst_dir.join("wiring.toml"))
-        .map_err(|e| format!("仓源接线档 {wiring_src:?} 拷贝失败: {e}（校验⑦要求装机档必在）"))?;
+        .map(|_| ())
+        .map_err(|e| format!("仓源接线档 {wiring_src:?} 拷贝失败: {e}（校验⑦要求装机档必在）"))
+}
 
-    let mut entries = Vec::new();
-    for module in profile.enabled_slots.keys() {
-        let src_dir = repo.join("modules").join(module);
-        let src_manifest = src_dir.join("module.toml");
-        let text = std::fs::read_to_string(&src_manifest).map_err(|e| {
-            format!(
-                "读不到仓源 manifest {}: {e}（装配演练要求 face 模块五件齐全）",
-                src_manifest.display()
-            )
-        })?;
-        let facts = rr3_manifest_parse(&text)
-            .map_err(|errs| format!("仓源 manifest {src_manifest:?} 解析失败: {errs:?}"))?;
-        // 产物 = 与 rr3-sim 同 target-dir 的模块产物（批N32 件四起六模块全
-        // Rust——brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest
-        // 解析保证）。target-dir 已由仓根配置移出源码区，定位走单点。
-        let entry_abs = rr3_bin_dir(&repo).join(&facts.entry);
-        // manifest 装机改写（三道门）后落位
-        let installed = rr3_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
-        let dst_dir = workdir.join("modules").join(module);
-        std::fs::create_dir_all(&dst_dir).map_err(|e| format!("建 {dst_dir:?} 失败: {e}"))?;
-        let dst_manifest = dst_dir.join("module.toml");
-        std::fs::write(&dst_manifest, installed)
-            .map_err(|e| format!("写 {dst_manifest:?} 失败: {e}"))?;
-        // config 同目录就位（模块 rr3_config_load 读 manifest 同目录 config.toml，
-        // 缺件必重启环——演练 fail-fast 不装必死模块）：全部模块用仓源 config
-        // （纯运行参数；brain 云端由 rrd env RR3_BRAIN_CLOUD=mock 压成 mock 档）
-        let dst_config = dst_dir.join("config.toml");
-        let src_config = src_dir.join("config.toml");
-        std::fs::copy(&src_config, &dst_config).map_err(|e| {
-            format!("仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环")
-        })?;
-        // atoms/ 申报面同批装机：校验⑨ 从 `modules/<m>/atoms/*/assemble.toml` 读
-        // demands（rail/电流预算）。漏拷会让 rrd 判"件未申报 demands 而角色
-        // kind=power"红、拒绝 bind——演练布局与装机布局在此处必须逐件等价。
-        let atoms_src = src_dir.join("atoms");
-        if atoms_src.is_dir() {
-            rr3_copy_tree(&atoms_src, &dst_dir.join("atoms"))?;
-        }
-        entries.push((module.clone(), entry_abs));
+/// 一个模块的五件套装机（manifest entry 绝对化 + config + atoms 申报面）。
+fn rr3_layout_module(
+    repo: &Path,
+    workdir: &Path,
+    module: &str,
+) -> Result<Rr3AssembleEntry, String> {
+    let src_dir = repo.join("modules").join(module);
+    let src_manifest = src_dir.join("module.toml");
+    let text = std::fs::read_to_string(&src_manifest).map_err(|e| {
+        format!(
+            "读不到仓源 manifest {}: {e}（装配演练要求 face 模块五件齐全）",
+            src_manifest.display()
+        )
+    })?;
+    let facts = rr3_manifest_parse(&text)
+        .map_err(|errs| format!("仓源 manifest {src_manifest:?} 解析失败: {errs:?}"))?;
+    // 产物 = 与 rr3-sim 同 target-dir 的模块产物（批N32 件四起六模块全
+    // Rust——brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest
+    // 解析保证）。target-dir 已由仓根配置移出源码区，定位走单点。
+    let entry_abs = rr3_bin_dir(repo).join(&facts.entry);
+    // manifest 装机改写（三道门）后落位
+    let installed = rr3_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
+    let dst_dir = workdir.join("modules").join(module);
+    std::fs::create_dir_all(&dst_dir).map_err(|e| format!("建 {dst_dir:?} 失败: {e}"))?;
+    let dst_manifest = dst_dir.join("module.toml");
+    std::fs::write(&dst_manifest, installed)
+        .map_err(|e| format!("写 {dst_manifest:?} 失败: {e}"))?;
+    // config 同目录就位（模块 rr3_config_load 读 manifest 同目录 config.toml，
+    // 缺件必重启环——演练 fail-fast 不装必死模块）：全部模块用仓源 config
+    // （纯运行参数；brain 云端由 rrd env RR3_BRAIN_CLOUD=mock 压成 mock 档）
+    let dst_config = dst_dir.join("config.toml");
+    let src_config = src_dir.join("config.toml");
+    std::fs::copy(&src_config, &dst_config).map_err(|e| {
+        format!("仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环")
+    })?;
+    // atoms/ 申报面同批装机：校验⑨ 从 `modules/<m>/atoms/*/assemble.toml` 读
+    // demands（rail/电流预算）。漏拷会让 rrd 判"件未申报 demands 而角色
+    // kind=power"红、拒绝 bind——演练布局与装机布局在此处必须逐件等价。
+    let atoms_src = src_dir.join("atoms");
+    if atoms_src.is_dir() {
+        rr3_copy_tree(&atoms_src, &dst_dir.join("atoms"))?;
     }
-    Ok((profile_dst, entries))
+    Ok((module.to_string(), entry_abs))
 }
 
 /// 目录递归拷贝（std 无内置；只服务演练夹具，符号链接按文件内容拷贝）。
