@@ -21,7 +21,7 @@ use crate::periph::CtlUart;
 use crate::ports_impl::Rr3BoardClock;
 use crate::servo::{axis_check, Axis};
 use crate::state::{
-    drain_audio, drain_outbox, esp_random_u32, lock_bus, push_job, Bus, CtlState, Job,
+    drain_audio, drain_outbox, esp_random_u32, lock_bus, now_ms, push_job, Bus, CtlState, Job,
 };
 
 // ---------------------------------------------------------------------------
@@ -120,6 +120,9 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         let result = rr3_cmd_exec(head, &mut parts, line, &bus, &mut ctl); // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
                                                                            // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
         let dropped = match result {
+            // 空应答 = 静默命令（`AUDIO PING` 心跳）：不写任何字节，避免行面
+            // 应答插进音频帧流污染宿主拆帧器。
+            Ok(line) if line.is_empty() => false,
             Ok(line) => !reply(&mut io.uart, &line),
             Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
         };
@@ -339,16 +342,24 @@ fn rr3_cmd_ui(
             // 音频上行开关（批D③）：ON 后 mic 线攒满分片（2048 帧 = 128ms）即组
             // Event 帧推 audio_q，控制面每轮 drain_audio 整帧写 UART2。OFF 后队列
             // 余片仍照常发完（drain_audio 不看开关），mic 线不再攒新片。
+            // PING 是宿主收流线程的 5s 静默心跳（A9.3）：只刷新失联看门狗时刻，
+            // **不回任何字节**（应答会插进音频帧流污染宿主拆帧器）。
             "AUDIO" => match parts.next() {
                 Some("ON") => {
-                    lock_bus(bus).st.audio_on = true;
+                    let mut b = lock_bus(bus);
+                    b.st.audio_on = true;
+                    b.st.audio_host_ms = now_ms();
                     Ok("OK audio on".into())
                 }
                 Some("OFF") => {
                     lock_bus(bus).st.audio_on = false;
                     Ok("OK audio off".into())
                 }
-                _ => Err("AUDIO 需 ON|OFF 参数".into()),
+                Some("PING") => {
+                    lock_bus(bus).st.audio_host_ms = now_ms();
+                    Ok(String::new())
+                }
+                _ => Err("AUDIO 需 ON|OFF|PING 参数".into()),
             },
             "INFO" => {
                 let (plo, phi) = Axis::Pan.range();

@@ -130,6 +130,10 @@ pub(crate) struct PeriphState {
     /// 音频上行开关（`AUDIO ON|OFF` 行命令置位；mic 线每 read 批读——false 时
     /// 只出统计冒烟面不攒分片）。
     pub(crate) audio_on: bool,
+    /// 最近一次宿主音频心跳时刻（esp_timer ms；`AUDIO ON` 与静默 `AUDIO PING`
+    /// 刷新，0 = 从未收到——旧宿主无心跳，看门狗不启用，见
+    /// [`crate::board::AUDIO_HOST_TIMEOUT_MS`]）。
+    pub(crate) audio_host_ms: u64,
     /// 音频分片序号（wrapping u32，随分片自增；recorder 按 seq 连续性计丢片，
     /// 与 `audio_dropped` 互为对账）。
     pub(crate) audio_seq: u32,
@@ -191,6 +195,7 @@ impl PeriphState {
             rail_tier: RailTier::Ok,
             rail_low_events: 0,
             audio_on: false,
+            audio_host_ms: 0,
             audio_seq: 0,
             audio_sent: 0,
             audio_dropped: 0,
