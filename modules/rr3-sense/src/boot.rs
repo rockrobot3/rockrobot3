@@ -139,81 +139,107 @@ pub(crate) fn rr3_sense_cfg_parse(text: &str) -> Result<Rr3SenseConfig, String> 
         .map_err(|e| format!("配置不是合法 TOML: {e}"))?;
     let mut cfg = Rr3SenseConfig::default();
     let section = root.get("rr3-sense");
-    if let Some(audio) = section.and_then(|s| s.get("audio")) {
-        let mut rate = cfg.audio.sample_rate as u64;
-        let mut ch = cfg.audio.channels as u64;
-        let mut fms = cfg.audio.frame_ms;
-        rr3_cfg_u64(audio, "sample_rate", &mut rate)?;
-        rr3_cfg_u64(audio, "channels", &mut ch)?;
-        rr3_cfg_u64(audio, "frame_ms", &mut fms)?;
-        // 0.0.5 批I S-1：frame_ms < 1（u64 域即 0）无节拍意义（0 帧 → read 空
-        // → 全速刷总线），收敛到登记默认 20ms 并留痕——半有效的配置比报错更隐蔽
-        if fms < 1 {
-            eprintln!("config [rr3-sense.audio] frame_ms={fms} 无节拍意义，收敛 20ms");
-            fms = 20;
-        }
-        cfg.audio.sample_rate = u32::try_from(rate)
-            .map_err(|_| format!("[rr3-sense.audio] sample_rate 越界: {rate}"))?;
-        cfg.audio.channels =
-            u8::try_from(ch).map_err(|_| format!("[rr3-sense.audio] channels 越界: {ch}"))?;
-        cfg.audio.frame_ms = fms;
-    }
-    if let Some(vad) = section.and_then(|s| s.get("vad")) {
-        rr3_cfg_i64(vad, "rms_start", &mut cfg.vad.rms_start)?;
-        rr3_cfg_u64(vad, "silence_tail_ms", &mut cfg.vad.silence_tail_ms)?;
-        rr3_cfg_u64(vad, "min_speech_ms", &mut cfg.vad.min_speech_ms)?;
-    }
-    // S-5 + B批 b3b：DoA 档界与判向窗策略量（缺键回落默认；异常值显式报错，
-    // window_ms=0 无窗意义收敛默认留痕——与 audio.frame_ms 同一口径）
-    if let Some(doa) = section.and_then(|s| s.get("doa")) {
-        let mut t = cfg.doa.bin_threshold_deg as i64;
-        rr3_cfg_i64(doa, "bin_threshold_deg", &mut t)?;
-        cfg.doa.bin_threshold_deg =
-            i32::try_from(t).map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))?;
-        rr3_cfg_u64(doa, "window_ms", &mut cfg.doa.window_ms)?;
-        if cfg.doa.window_ms < 1 {
-            eprintln!(
-                "config [rr3-sense.doa] window_ms={} 无窗意义，收敛 1000ms",
-                cfg.doa.window_ms
-            );
-            cfg.doa.window_ms = 1000;
-        }
-        let mut wrm = cfg.doa.window_rms_min;
-        rr3_cfg_i64(doa, "window_rms_min", &mut wrm)?;
-        if !(0..=32767).contains(&wrm) {
-            return Err(format!(
-                "[rr3-sense.doa] window_rms_min 须在 0..=32767，收到 {wrm}"
-            ));
-        }
-        cfg.doa.window_rms_min = wrm;
-        let mut mm = cfg.doa.mic_baseline_mm as u64;
-        rr3_cfg_u64(doa, "mic_baseline_mm", &mut mm)?;
-        if mm == 0 {
-            return Err("[rr3-sense.doa] mic_baseline_mm=0 无几何可判向".to_string());
-        }
-        cfg.doa.mic_baseline_mm =
-            u32::try_from(mm).map_err(|_| format!("[rr3-sense.doa] mic_baseline_mm 越界: {mm}"))?;
-    }
-    // B批 b2：反射环与播放期门控策略量（缺键回落默认，enable 缺省 false）
-    if let Some(reflex) = section.and_then(|s| s.get("reflex")) {
-        rr3_cfg_bool(reflex, "enable", &mut cfg.reflex.enable)?;
-        let mut db = cfg.reflex.deadband_deg as i64;
-        rr3_cfg_i64(reflex, "deadband_deg", &mut db)?;
-        cfg.reflex.deadband_deg =
-            i32::try_from(db).map_err(|_| format!("[rr3-sense.reflex] deadband_deg 越界: {db}"))?;
-        rr3_cfg_u64(reflex, "gate_tail_ms", &mut cfg.reflex.gate_tail_ms)?;
-        rr3_cfg_u64(reflex, "gate_gap_ms", &mut cfg.reflex.gate_gap_ms)?;
-        // 0.0.8 批"转完点头"：策略三键（缺键回落默认；nod_deg 缺省 0 = 手势关，
-        // 与旧版逐点等价）。行程不在此预钳——板侧 fail-closed 是唯一裁决面。
-        let mut nod = cfg.reflex.nod_deg as i64;
-        rr3_cfg_i64(reflex, "nod_deg", &mut nod)?;
-        cfg.reflex.nod_deg =
-            i32::try_from(nod).map_err(|_| format!("[rr3-sense.reflex] nod_deg 越界: {nod}"))?;
-        rr3_cfg_u64(reflex, "nod_delay_ms", &mut cfg.reflex.nod_delay_ms)?;
-        rr3_cfg_u64(reflex, "nod_hold_ms", &mut cfg.reflex.nod_hold_ms)?;
-    }
+    rr3_cfg_audio(section, &mut cfg)?;
+    rr3_cfg_vad(section, &mut cfg)?;
+    rr3_cfg_doa(section, &mut cfg)?;
+    rr3_cfg_reflex(section, &mut cfg)?;
     rr3_sense_cfg_check(&cfg)?;
     Ok(cfg)
+}
+
+/// `[rr3-sense.audio]` 段（缺段回落默认；frame_ms=0 收敛 20ms 留痕）。
+fn rr3_cfg_audio(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Result<(), String> {
+    let Some(audio) = section.and_then(|s| s.get("audio")) else {
+        return Ok(());
+    };
+    let mut rate = cfg.audio.sample_rate as u64;
+    let mut ch = cfg.audio.channels as u64;
+    let mut fms = cfg.audio.frame_ms;
+    rr3_cfg_u64(audio, "sample_rate", &mut rate)?;
+    rr3_cfg_u64(audio, "channels", &mut ch)?;
+    rr3_cfg_u64(audio, "frame_ms", &mut fms)?;
+    // 0.0.5 批I S-1：frame_ms < 1（u64 域即 0）无节拍意义（0 帧 → read 空
+    // → 全速刷总线），收敛到登记默认 20ms 并留痕——半有效的配置比报错更隐蔽
+    if fms < 1 {
+        eprintln!("config [rr3-sense.audio] frame_ms={fms} 无节拍意义，收敛 20ms");
+        fms = 20;
+    }
+    cfg.audio.sample_rate =
+        u32::try_from(rate).map_err(|_| format!("[rr3-sense.audio] sample_rate 越界: {rate}"))?;
+    cfg.audio.channels =
+        u8::try_from(ch).map_err(|_| format!("[rr3-sense.audio] channels 越界: {ch}"))?;
+    cfg.audio.frame_ms = fms;
+    Ok(())
+}
+
+/// `[rr3-sense.vad]` 段（缺段回落默认）。
+fn rr3_cfg_vad(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Result<(), String> {
+    let Some(vad) = section.and_then(|s| s.get("vad")) else {
+        return Ok(());
+    };
+    rr3_cfg_i64(vad, "rms_start", &mut cfg.vad.rms_start)?;
+    rr3_cfg_u64(vad, "silence_tail_ms", &mut cfg.vad.silence_tail_ms)?;
+    rr3_cfg_u64(vad, "min_speech_ms", &mut cfg.vad.min_speech_ms)?;
+    Ok(())
+}
+
+/// `[rr3-sense.doa]` 段（S-5 + B批 b3b：缺段回落默认；异常值显式报错，
+/// window_ms=0 无窗意义收敛默认留痕——与 audio.frame_ms 同一口径）。
+fn rr3_cfg_doa(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Result<(), String> {
+    let Some(doa) = section.and_then(|s| s.get("doa")) else {
+        return Ok(());
+    };
+    let mut t = cfg.doa.bin_threshold_deg as i64;
+    rr3_cfg_i64(doa, "bin_threshold_deg", &mut t)?;
+    cfg.doa.bin_threshold_deg =
+        i32::try_from(t).map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))?;
+    rr3_cfg_u64(doa, "window_ms", &mut cfg.doa.window_ms)?;
+    if cfg.doa.window_ms < 1 {
+        eprintln!(
+            "config [rr3-sense.doa] window_ms={} 无窗意义，收敛 1000ms",
+            cfg.doa.window_ms
+        );
+        cfg.doa.window_ms = 1000;
+    }
+    let mut wrm = cfg.doa.window_rms_min;
+    rr3_cfg_i64(doa, "window_rms_min", &mut wrm)?;
+    if !(0..=32767).contains(&wrm) {
+        return Err(format!(
+            "[rr3-sense.doa] window_rms_min 须在 0..=32767，收到 {wrm}"
+        ));
+    }
+    cfg.doa.window_rms_min = wrm;
+    let mut mm = cfg.doa.mic_baseline_mm as u64;
+    rr3_cfg_u64(doa, "mic_baseline_mm", &mut mm)?;
+    if mm == 0 {
+        return Err("[rr3-sense.doa] mic_baseline_mm=0 无几何可判向".to_string());
+    }
+    cfg.doa.mic_baseline_mm =
+        u32::try_from(mm).map_err(|_| format!("[rr3-sense.doa] mic_baseline_mm 越界: {mm}"))?;
+    Ok(())
+}
+
+/// `[rr3-sense.reflex]` 段（B批 b2：缺键回落默认，enable 缺省 false）。
+fn rr3_cfg_reflex(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Result<(), String> {
+    let Some(reflex) = section.and_then(|s| s.get("reflex")) else {
+        return Ok(());
+    };
+    rr3_cfg_bool(reflex, "enable", &mut cfg.reflex.enable)?;
+    let mut db = cfg.reflex.deadband_deg as i64;
+    rr3_cfg_i64(reflex, "deadband_deg", &mut db)?;
+    cfg.reflex.deadband_deg =
+        i32::try_from(db).map_err(|_| format!("[rr3-sense.reflex] deadband_deg 越界: {db}"))?;
+    rr3_cfg_u64(reflex, "gate_tail_ms", &mut cfg.reflex.gate_tail_ms)?;
+    rr3_cfg_u64(reflex, "gate_gap_ms", &mut cfg.reflex.gate_gap_ms)?;
+    // 0.0.8 批"转完点头"：策略三键（缺键回落默认；nod_deg 缺省 0 = 手势关，
+    // 与旧版逐点等价）。行程不在此预钳——板侧 fail-closed 是唯一裁决面。
+    let mut nod = cfg.reflex.nod_deg as i64;
+    rr3_cfg_i64(reflex, "nod_deg", &mut nod)?;
+    cfg.reflex.nod_deg =
+        i32::try_from(nod).map_err(|_| format!("[rr3-sense.reflex] nod_deg 越界: {nod}"))?;
+    rr3_cfg_u64(reflex, "nod_delay_ms", &mut cfg.reflex.nod_delay_ms)?;
+    rr3_cfg_u64(reflex, "nod_hold_ms", &mut cfg.reflex.nod_hold_ms)?;
+    Ok(())
 }
 
 /// 采集/判据面不变量（解析后统一校验，默认值同过一遍）：全部 fail-closed，
