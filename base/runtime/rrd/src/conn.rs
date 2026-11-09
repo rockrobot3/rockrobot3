@@ -18,7 +18,7 @@
 //! 但同一 socket 上"应答 vs 广播"的**相对顺序不保证**，所以测试按类型/字段挑帧，不按序号。
 
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc::{self, SyncSender};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -41,6 +41,8 @@ use crate::rpc::{
 };
 use crate::supervisor::Rr3Supervisor;
 use crate::{rr3_lock, rr3_log, rr3_log_query};
+
+mod handshake;
 
 /// writer 线程单帧写超时（0.0.8b 审计 B-5）：对端不收时 5s 内必须显形——
 /// 超时即写失败，writer 退出、通道 drop、fanout 走 Disconnected 回收。
@@ -184,208 +186,8 @@ fn rr3_refuse(
 /// 注册期每一次拒绝都**先回错误帧再断开**（只断连不回码等于让客户端挂在超时上）。
 /// 状态码：首帧类型/dst_task/RPC 畸形/manifest 文本非法/`entry` 非绝对 = `Invalid`；
 /// 重复名与超额 = `Busy`；保留名 = `Permission`（映射只在 `rr3_rpc_reg_status` 一处）。
-fn rr3_handshake(
-    reader: &mut UnixStream,
-    out: &Arc<Mutex<UnixStream>>,
-    ctx: &Rr3ConnCtx,
-    fan_tx: SyncSender<Rr3Frame>,
-) -> Result<Rr3Peer, String> {
-    let (reported_task, body) = rr3_hs_read(reader, out)?;
-    let req = match rr3_rpc_parse(&body) {
-        Ok(r) => r,
-        Err((_, msg)) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                rr3_best_effort_id(&body),
-                Rr3StatusCode::Invalid,
-                &format!("首帧 RPC 畸形: {msg}"),
-            ))
-        }
-    };
-    // ADR-0010 裁定 3：首帧是 rr3.ctl.* → 控制旁支，不注册、一问一答即断
-    if req.method.is_ctl() {
-        return Err(rr3_serve_ctl(out, ctx, reported_task, req));
-    }
-    let facts = rr3_hs_facts(&req, out, reported_task, ctx)?;
-    rr3_hs_admit(ctx, &facts, fan_tx, out, reported_task, req.id)
-}
-
-/// 握手首段：读首帧并过 dst/类型两道门（注册前应答按对端自报 src_task 回）
-fn rr3_hs_read(
-    reader: &mut UnixStream,
-    out: &Arc<Mutex<UnixStream>>,
-) -> Result<(u64, Vec<u8>), String> {
-    let frame = match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
-        Ok(f) => f,
-        // 连首帧都没读到：无从应答，只把原因交回上层记一条
-        Err(e) => return Err(format!("首帧读取失败: {e:?}")),
-    };
-    let reported_task = frame.header.src_task;
-    let (ty, body) = match rr3_body_split(&frame.payload) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                0,
-                Rr3StatusCode::Invalid,
-                &format!("首帧 payload 前缀非法: {e:?}"),
-            ))
-        }
-    };
-    if frame.header.dst_task != RR3_TASK_RRD {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            rr3_best_effort_id(&body),
-            Rr3StatusCode::Invalid,
-            &format!(
-                "首帧 dst_task 必须为 {RR3_TASK_RRD}，收到 {}",
-                frame.header.dst_task
-            ),
-        ));
-    }
-    if ty != Rr3PayloadType::Request {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            rr3_best_effort_id(&body),
-            Rr3StatusCode::Invalid,
-            &format!("首帧 payload 类型必须是 Request，收到 {ty:?}"),
-        ));
-    }
-    Ok((reported_task, body))
-}
-
-/// 注册门：方法/参数/形状/entry 绝对路径四道，全 fail-closed 回错误帧
-fn rr3_hs_facts(
-    req: &Rr3RpcRequest,
-    out: &Arc<Mutex<UnixStream>>,
-    reported_task: u64,
-    ctx: &Rr3ConnCtx,
-) -> Result<Rr3ManifestFacts, String> {
-    if req.method != Rr3RpcMethod::Register {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            req.id,
-            Rr3StatusCode::Invalid,
-            &format!(
-                "注册前第一条 RPC 必须是 rr3.register，收到 {}",
-                req.method.as_str()
-            ),
-        ));
-    }
-    let text = match rr3_rpc_manifest(&req.params) {
-        Ok(t) => t,
-        Err((_, msg)) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                req.id,
-                Rr3StatusCode::Invalid,
-                &msg,
-            ))
-        }
-    };
-    let facts = match rr3_manifest_parse(&text) {
-        Ok(f) => f,
-        Err(errs) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                req.id,
-                Rr3StatusCode::Invalid,
-                &errs.join("; "),
-            ))
-        }
-    };
-    let report = rr3_manifest_chk(&text, &ctx.topics);
-    if !report.ok() {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            req.id,
-            Rr3StatusCode::Invalid,
-            &report.errors.join("; "),
-        ));
-    }
-    // M2 的 manifest 从线上来，没有"所在目录"可依据 → entry 必须是绝对路径。
-    // 在仓 modules/*/module.toml 是契约工件而非注册输入（装机时写入绝对 entry）。
-    if !rr3_manifest_abs(&facts.entry) {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            req.id,
-            Rr3StatusCode::Invalid,
-            &format!("manifest.entry 必须是绝对路径，收到 {}", facts.entry),
-        ));
-    }
-    Ok(facts)
-}
-
-/// 入册与应答：注册成功 → 回 src_task → 广播 registered → 给后到者补发在册快照
-fn rr3_hs_admit(
-    ctx: &Rr3ConnCtx,
-    facts: &Rr3ManifestFacts,
-    fan_tx: SyncSender<Rr3Frame>,
-    out: &Arc<Mutex<UnixStream>>,
-    reported_task: u64,
-    req_id: u64,
-) -> Result<Rr3Peer, String> {
-    let now = ctx.rr3_ctx_now_ms();
-    // 一份 Sender 进在册表（此后它是这条连接唯一的广播入口），一份给补快照用
-    let replay_tx = fan_tx.clone();
-    // 硬规矩：锁结果先 `let` 绑再 `match`——Guard 临时量不得延寿到 Err 臂的
-    // rr3_refuse（那边要取另一把锁），与 rr3_conn_finish 同形。
-    let added = rr3_lock(&ctx.shared).rr3_reg_add(facts, fan_tx, now);
-    let task = match added {
-        Ok(t) => t,
-        Err(e) => {
-            // 状态码映射只在这一处（rr3_rpc_reg_status），不在 conn 里重写
-            let code = rr3_rpc_reg_status(&e);
-            return Err(rr3_refuse(out, reported_task, req_id, code, &e.to_string()));
-        }
-    };
-    rr3_log(&format!(
-        "注册 {} task={task} hb={}ms wd={}ms policy={}",
-        facts.name, facts.heartbeat_ms, facts.watchdog_ms, facts.restart_policy
-    ));
-    // 应答与广播的先后不确定（两条线程两个写点），测试按类型挑帧，不按序号
-    rr3_write(
-        out,
-        &rr3_out_frame(
-            Rr3PayloadType::Response,
-            task,
-            &rr3_rpc_build_result(req_id, &json!({"src_task": task})),
-        ),
-    );
-    let peer = Rr3Peer {
-        task,
-        name: facts.name.clone(),
-    };
-    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-        &rr3_state_frame(&peer.name, "registered", peer.task),
-        RR3_TASK_RRD,
-    );
-    rr3_log(&format!("广播 registered 到 {n} 个连接"));
-    // 后到者补发在册状态：只发转移不发快照的话，后起模块看不到先起模块上线过。
-    // 这里只保证入队次序，不构成上线次序——读侧一律按类型/字段挑帧。
-    let snapshot = rr3_lock(&ctx.shared).rr3_reg_snapshot();
-    let mut replayed = 0usize;
-    for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != peer.name) {
-        if replay_tx
-            .try_send(rr3_state_frame(name, phase.as_str(), *t))
-            .is_ok()
-        {
-            replayed += 1;
-        }
-    }
-    rr3_log(&format!("向 {} 补发在册状态 {replayed} 条", peer.name));
-    Ok(peer)
-}
-
+/// 首帧读取与注册门见 `conn/handshake.rs`（批B12 件二分面）。
+///
 /// reboot 执行面的解锁判定（0.0.4 批C）：`Some(解锁口径)` = cfg(linux) 且 env
 /// `RR3_REBOOT_OK=1`；`None` = 缺省恒拒。口径文案只进日志——运维在 rrd 日志环
 /// 里能看到"是谁解锁的"。为什么是双重门而不是单 cfg：ubuntu CI 的 e2e 也编译
@@ -1219,7 +1021,7 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         )))
         .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
     let mut reader = stream;
-    let me = rr3_handshake(&mut reader, &out, &ctx, fan_tx)?;
+    let me = handshake::rr3_handshake(&mut reader, &out, &ctx, fan_tx)?;
     reader
         .set_read_timeout(None)
         .map_err(|e| format!("清读超时失败: {e}"))?;
