@@ -29,8 +29,8 @@ use rrd::profile::rr3_profile_parse;
 
 use crate::brain::wait_socket_exists;
 use crate::drill::{
-    rr3_default_bins, rr3_parse_status, rr3_require_bins_ext, rr3_section, rr3_wait_modules,
-    Rr3SimArgs,
+    rr3_bin_dir, rr3_default_bins, rr3_parse_status, rr3_require_bins_ext, rr3_section,
+    rr3_wait_modules, Rr3SimArgs,
 };
 
 /// 装配演练就绪上界：冷启动 + 六进程注册也要够用
@@ -155,13 +155,10 @@ pub fn rr3_assemble_layout(
         })?;
         let facts = rr3_manifest_parse(&text)
             .map_err(|errs| format!("仓源 manifest {src_manifest:?} 解析失败: {errs:?}"))?;
-        // 产物 = 独立工程 target/debug 产物（批N32 件四起六模块全 Rust——
-        // brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest 解析保证）
-        let entry_abs = repo
-            .join("modules")
-            .join(module)
-            .join("target/debug")
-            .join(&facts.entry);
+        // 产物 = 与 rr3-sim 同 target-dir 的模块产物（批N32 件四起六模块全
+        // Rust——brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest
+        // 解析保证）。target-dir 已由仓根配置移出源码区，定位走单点。
+        let entry_abs = rr3_bin_dir(&repo).join(&facts.entry);
         // manifest 装机改写（三道门）后落位
         let installed = rr3_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
         let dst_dir = workdir.join("modules").join(module);
@@ -586,22 +583,14 @@ watchdog_timeout_ms = 5000\n";
             std::fs::read_to_string(work.join("hardware/default/wiring.toml")).unwrap(),
             std::fs::read_to_string(repo.join("hardware/default/wiring.toml")).unwrap()
         );
-        // 模块就位：entry 指 target/debug 产物
+        // 模块就位：entry 指与 rr3-sim 同 target-dir 的产物
         assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0],
-            (
-                "rr3-pa".into(),
-                repo.join("modules/rr3-pa/target/debug/rr3-pa")
-            )
-        );
+        let want_entry = rr3_bin_dir(&repo).join("rr3-pa");
+        assert_eq!(entries[0], ("rr3-pa".into(), want_entry.clone()));
         // manifest 已绝对化且原文仅 entry 一处改写
         let staged = std::fs::read_to_string(work.join("modules/rr3-pa/module.toml")).unwrap();
         assert!(
-            staged.contains(&format!(
-                "entry = \"{}\"",
-                repo.join("modules/rr3-pa/target/debug/rr3-pa").display()
-            )),
+            staged.contains(&format!("entry = \"{}\"", want_entry.display())),
             "{staged}"
         );
         assert!(staged.contains("name = \"rr3-pa\""));

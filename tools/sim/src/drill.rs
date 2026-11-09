@@ -248,14 +248,35 @@ pub fn rr3_find_repo_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-/// 三个二进制的缺省路径（仓内 target/debug 布局）。不在 `paths.rs` 单独设文件：
-/// 布局是三个常量，单测钉在 `rr3_default_bins` 上。
+/// 构建产物目录（单点）：仓根 `.cargo/config.toml` 把 target-dir 移出源码区，
+/// 缺省二进制路径**不得**按 `<crate>/target/debug` 推——源码区没有产物，编译
+/// 成功也会被判"不在树"。以当前进程所在目录为准（cargo run 与各 crate 共用
+/// 同一 target-dir）；`cargo test` 落在 `deps/` 子层，退一级。判定标记是
+/// `rrd` 或 `rr3-sim` 在位；缺失时回退仓内旧布局，仍由 [`rr3_require_bins`]
+/// 点名构建命令显式失败。
+pub fn rr3_bin_dir(repo: &Path) -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(d) = rr3_run_dir(&exe) {
+            return d;
+        }
+    }
+    repo.join("base/runtime/target/debug")
+}
+
+/// 当前可执行文件所在产物目录（`deps/` 子层退一级）；无同层标记回 None。
+fn rr3_run_dir(exe: &Path) -> Option<PathBuf> {
+    let mut d = exe.parent()?.to_path_buf();
+    if d.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        d = d.parent()?.to_path_buf();
+    }
+    (d.join("rrd").is_file() || d.join("rr3-sim").is_file()).then_some(d)
+}
+
+/// 三个二进制的缺省路径（全部随 [`rr3_bin_dir`] 同层）。不在 `paths.rs` 单独
+/// 设文件：布局是三个常量，单测钉在 `rr3_default_bins` 上。
 pub fn rr3_default_bins(repo: &Path) -> (PathBuf, PathBuf, PathBuf) {
-    (
-        repo.join("base/runtime/target/debug/rrd"),
-        repo.join("base/runtime/target/debug/sim_peer"),
-        repo.join("tools/rrctl/target/debug/rr3-ctl"),
-    )
+    let dir = rr3_bin_dir(repo);
+    (dir.join("rrd"), dir.join("sim_peer"), dir.join("rr3-ctl"))
 }
 
 /// 各演练共用的仓根定位（main/chain/brain/assemble 四处同款底座）：

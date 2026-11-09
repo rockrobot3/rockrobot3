@@ -7,7 +7,7 @@ F4 起本入口是**脚本化全链路演练**：全部真进程、真套接字�
     cargo build -p rrd（base/runtime/ 下，产出 rrd + sim_peer）
     cargo build --manifest-path tools/rrctl/Cargo.toml
     cargo build --manifest-path tools/sim/Cargo.toml
-    ./tools/sim/target/debug/rr3-sim            # 仓内任意目录可跑；--keep 保留现场
+    cargo run --manifest-path tools/sim/Cargo.toml   # 仓内任意目录可跑；--keep 保留现场
 
 演练脚本五步：
 
@@ -26,7 +26,8 @@ F4 起本入口是**脚本化全链路演练**：全部真进程、真套接字�
 形状），故 B 的终相在 `unregistered` / `failed` 两可，演练只断言它不再 `running`。
 
 参数：`--socket <路径>`、`--repo <仓根>`、`--rrd/--sim-peer/--rrctl <二进制>`、`--keep`。
-缺省值按仓内 `target/debug` 布局推；二进制缺失时报错点名对应的 `cargo build` 命令。
+缺省值取 `rr3-sim` 自身所在 target-dir（仓根配置已把产物移出源码区，不得按
+`<crate>/target/debug` 推）；二进制缺失时报错点名对应的 `cargo build` 命令。
 
 另有两个与两面演练互斥的模式（同给即拒）：
 
