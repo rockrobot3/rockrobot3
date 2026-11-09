@@ -77,51 +77,17 @@ pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
             .and_then(|s| s.get(name))
             .ok_or_else(|| format!("config 缺 [rr3-power.{name}] 段"))
     };
-    let u16_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u16, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0 && *n <= u16::MAX as i64)
-            .map(|n| n as u16)
-            .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–65535 整数）"))
-    };
-    let u32_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u32, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0 && *n <= u32::MAX as i64)
-            .map(|n| n as u32)
-            .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–4294967295 整数）"))
-    };
-    let u64_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0)
-            .map(|n| n as u64)
-            .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（非负整数）"))
-    };
     let battery_sect = sect("battery")?.clone();
     let charger_sect = sect("charger")?.clone();
-    // 周期键钳制留痕（0.0.5 批I P-2；本轮审计抬下限）：0 无节拍意义，且不能
-    // 折 1ms——那是 I2C/轨压读数自旋；钳到 100ms 并打一行（哪个键、原值、钳后值）
-    let period_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
-        let raw = u64_of(sect, key, sect_name)?;
-        if raw < RR3_MIN_PERIOD_MS {
-            eprintln!(
-                "config [rr3-power.{sect_name}] {key}={raw} 低于采样下限，钳到 {RR3_MIN_PERIOD_MS}ms（防读数自旋）"
-            );
-            Ok(RR3_MIN_PERIOD_MS)
-        } else {
-            Ok(raw)
-        }
-    };
     // battery/charger 先解析（既有红例的次序契约：缺字段点名先于 rail 段点名），
     // rail 段（批N2 件五）殿后——段必填＋全键必填，up=false 惰性但显式写
     let battery = Rr3BatteryCfg {
-        sample_period_ms: period_of(&battery_sect, "sample_period_ms", "battery")?,
-        low_voltage_mv: u16_of(&battery_sect, "low_voltage_mv", "battery")?,
-        cutoff_voltage_mv: u16_of(&battery_sect, "cutoff_voltage_mv", "battery")?,
+        sample_period_ms: rr3_period(&battery_sect, "sample_period_ms", "battery")?,
+        low_voltage_mv: rr3_u16(&battery_sect, "low_voltage_mv", "battery")?,
+        cutoff_voltage_mv: rr3_u16(&battery_sect, "cutoff_voltage_mv", "battery")?,
     };
     let charger = Rr3ChargerCfg {
-        state_period_ms: period_of(&charger_sect, "state_period_ms", "charger")?,
+        state_period_ms: rr3_period(&charger_sect, "state_period_ms", "charger")?,
     };
     let rail_sect = sect("rail")?.clone();
     let rail = Rr3RailCfg {
@@ -135,10 +101,10 @@ pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .ok_or_else(|| "config [rr3-power.rail] 缺 domain（非空字符串）".to_string())?,
-        sample_period_ms: period_of(&rail_sect, "sample_period_ms", "rail")?,
-        mild_mv: u16_of(&rail_sect, "mild_mv", "rail")?,
-        severe_mv: u16_of(&rail_sect, "severe_mv", "rail")?,
-        max_age_ms: u32_of(&rail_sect, "max_age_ms", "rail")?,
+        sample_period_ms: rr3_period(&rail_sect, "sample_period_ms", "rail")?,
+        mild_mv: rr3_u16(&rail_sect, "mild_mv", "rail")?,
+        severe_mv: rr3_u16(&rail_sect, "severe_mv", "rail")?,
+        max_age_ms: rr3_u32(&rail_sect, "max_age_ms", "rail")?,
     };
     if rail.severe_mv >= rail.mild_mv {
         return Err(format!(
@@ -151,6 +117,47 @@ pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
         charger,
         rail,
     })
+}
+
+/// `[rr3-power.<段>] <key>` 取 u16（0..=65535 整数；缺键/越界同文案点名）。
+fn rr3_u16(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u16, String> {
+    sect.get(key)
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0 && *n <= u16::MAX as i64)
+        .map(|n| n as u16)
+        .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–65535 整数）"))
+}
+
+/// 取 u32（0..=u32::MAX 整数）。
+fn rr3_u32(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u32, String> {
+    sect.get(key)
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0 && *n <= u32::MAX as i64)
+        .map(|n| n as u32)
+        .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（0–4294967295 整数）"))
+}
+
+/// 取 u64（非负整数）。
+fn rr3_u64(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String> {
+    sect.get(key)
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .ok_or_else(|| format!("config [rr3-power.{sect_name}] 缺 {key}（非负整数）"))
+}
+
+/// 周期键钳制留痕（0.0.5 批I P-2；抬下限防读数自旋）：低于下限折
+/// [`RR3_MIN_PERIOD_MS`] 并打一行（哪个键、原值、钳后值）。
+fn rr3_period(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String> {
+    let raw = rr3_u64(sect, key, sect_name)?;
+    if raw < RR3_MIN_PERIOD_MS {
+        eprintln!(
+            "config [rr3-power.{sect_name}] {key}={raw} 低于采样下限，钳到 {RR3_MIN_PERIOD_MS}ms（防读数自旋）"
+        );
+        Ok(RR3_MIN_PERIOD_MS)
+    } else {
+        Ok(raw)
+    }
 }
 
 #[cfg(test)]
