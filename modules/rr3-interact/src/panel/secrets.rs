@@ -103,7 +103,14 @@ pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<()
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("建 {} 失败: {e}", parent.display()))?;
-        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+        if rr3_secrets_own(
+            std::env::var(RR3_SECRETS_FILE_ENV).ok(),
+            path,
+            std::env::var("HOME").ok(),
+        ) {
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("收 {} 目录权限失败: {e}", parent.display()))?;
+        }
     }
     let body = json!({ "keys": keys }).to_string();
     let tmp = path.with_extension("json.tmp");
@@ -111,6 +118,16 @@ pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<()
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("收 {} 权限失败: {e}", path.display()))?;
     Ok(())
+}
+
+/// 目录归属（策略面，纯函数）：只有缺省 `~/.rr3` 是面板自己建的，目录权限由
+/// 面板负责；外部显式指定的路径（`RR3_SECRETS_FILE`，运维/测试注入）只对**文件**
+/// 收 0600，绝不对别人的目录 chmod——`RR3_SECRETS_FILE=/tmp/x/secrets.json`
+/// 这类配置曾把 `/tmp` 收成 0700，属破坏性副作用。
+fn rr3_secrets_own(env: Option<String>, path: &Path, home: Option<String>) -> bool {
+    rr3_secrets_resolve(env, home)
+        .map(|d| d == path)
+        .unwrap_or(false)
 }
 
 /// 已存 ref 清单（`GET /api/model/keys` 的负载）：只回名字与已设标记，**无值**。
@@ -156,6 +173,26 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// 目录归属判据（本轮审计）：只有缺省 `~/.rr3` 由面板管权限；显式注入路径
+    /// 一律不 chmod 父目录——否则 `RR3_SECRETS_FILE=/tmp/x.json` 会把 /tmp 收成
+    /// 0700，属破坏性副作用。
+    #[test]
+    fn own_dir_only_for_default_path() {
+        let def = PathBuf::from("/home/u/.rr3/secrets.json");
+        assert!(rr3_secrets_own(None, &def, Some("/home/u".into())));
+        assert!(!rr3_secrets_own(
+            Some("/tmp/x.json".into()),
+            &def,
+            Some("/home/u".into())
+        ));
+        assert!(!rr3_secrets_own(
+            None,
+            &PathBuf::from("/tmp/x.json"),
+            Some("/home/u".into())
+        ));
+        assert!(!rr3_secrets_own(None, &def, None));
     }
 
     #[test]
