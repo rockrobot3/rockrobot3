@@ -244,22 +244,14 @@ struct Rr3BrainBins {
 
 fn rr3_brain_bins(a: &Rr3SimArgs) -> Result<Rr3BrainBins, String> {
     let repo = crate::drill::rr3_repo_locate(a)?;
+    let dir = crate::drill::rr3_bin_dir(&repo);
     let (d_rrd, _peer, d_rrctl) = crate::drill::rr3_default_bins(&repo);
     let bins = Rr3BrainBins {
         rrd: a.rrd.clone().unwrap_or(d_rrd),
         rrctl: a.rrctl.clone().unwrap_or(d_rrctl),
-        sense: a
-            .sense
-            .clone()
-            .unwrap_or(repo.join("modules/rr3-sense/target/debug/rr3-sense")),
-        interact: a
-            .interact
-            .clone()
-            .unwrap_or(repo.join("modules/rr3-interact/target/debug/rr3-interact")),
-        brain: a
-            .brain_bin
-            .clone()
-            .unwrap_or(repo.join("modules/rr3-brain/target/debug/rr3-brain")),
+        sense: a.sense.clone().unwrap_or(dir.join("rr3-sense")),
+        interact: a.interact.clone().unwrap_or(dir.join("rr3-interact")),
+        brain: a.brain_bin.clone().unwrap_or(dir.join("rr3-brain")),
     };
     rr3_require_bins_ext(&[
         (&bins.rrd, "cargo build -p rrd（在 base/runtime/ 下）"),

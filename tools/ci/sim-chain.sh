@@ -20,4 +20,6 @@ for m in rr3-act rr3-sense rr3-interact rr3-brain; do
 done
 
 echo "== rr3-sim --chain（采集→意图→判向→转向→表情，六真进程 mock 闭环）=="
-exec ./tools/sim/target/debug/rr3-sim --chain
+# 产物落点随仓根 target-dir（源码区外）：cargo run 复用同一 target-dir，
+# 不写死 `<crate>/target`（写死会因产物不在源码区而误报缺件）。
+exec cargo run -q --manifest-path tools/sim/Cargo.toml -- --chain

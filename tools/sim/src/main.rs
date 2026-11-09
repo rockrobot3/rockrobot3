@@ -416,20 +416,15 @@ mod tests {
     }
 
     #[test]
-    fn default_bins_follow_repo_layout() {
+    fn default_bins_share_target_dir() {
+        // target-dir 由仓根配置移出源码区：三个缺省产物必须同层且同名，
+        // 不得再按 `<crate>/target/debug` 推（源码区没有产物）。
         let (rrd, peer, rrctl) = rr3_default_bins(std::path::Path::new("/repo"));
-        assert_eq!(
-            rrd,
-            std::path::PathBuf::from("/repo/base/runtime/target/debug/rrd")
-        );
-        assert_eq!(
-            peer,
-            std::path::PathBuf::from("/repo/base/runtime/target/debug/sim_peer")
-        );
-        assert_eq!(
-            rrctl,
-            std::path::PathBuf::from("/repo/tools/rrctl/target/debug/rr3-ctl")
-        );
+        assert_eq!(rrd.file_name().unwrap(), "rrd");
+        assert_eq!(peer.file_name().unwrap(), "sim_peer");
+        assert_eq!(rrctl.file_name().unwrap(), "rr3-ctl");
+        assert_eq!(rrd.parent(), peer.parent(), "rrd/sim_peer 同 target-dir");
+        assert_eq!(rrd.parent(), rrctl.parent(), "rr3-ctl 同 target-dir");
         // 缺失检查点名 cargo build 命令
         let e = rr3_require_bins(
             std::path::Path::new("/nope/rrd"),
