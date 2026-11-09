@@ -35,6 +35,7 @@ grep -qx "$top/BUNDLE_VERSION" <<<"$list" \
   || die "部署包缺 $top/BUNDLE_VERSION（非 A10 版本化包）"
 grep -qx "$top/bin/rrd" <<<"$list" || die "部署包缺 bin/rrd"
 
+[ "$ROOT" != "/" ] || die "安装根不得为 /"
 parent=$(dirname "$ROOT")
 stage=$(mktemp -d "$parent/.rockrobot3-new.XXXXXX")
 backup="$parent/.rockrobot3-prev"
@@ -73,6 +74,7 @@ fi
 rollback() {
   echo "FAIL  新树启动验证未过，回滚" >&2
   systemctl stop rrd >/dev/null 2>&1 || true
+  rm -f "$BIN/.rrd.new" "$BIN/.rr3-ctl.new"
   rm -rf "$ROOT"
   if [ -d "$backup" ]; then
     mv "$backup" "$ROOT"
@@ -99,16 +101,27 @@ for _ in $(seq 1 40); do
   sleep 1
 done
 systemctl is-active --quiet rrd && die "rrd 40s 内未停稳，放弃安装（机树未改动）"
+# mktemp 建的是 0700：换位后整棵装机树会继承该权限，非 root 工具连
+# profiles/contracts 都读不到。换位前显式归一为 0755（安装根是共享只读面）。
+chmod 0755 "$stage"
 if [ -d "$ROOT" ]; then
   rm -rf "$backup"
   mv "$ROOT" "$backup"
 fi
-mv "$stage" "$ROOT"
+if ! mv "$stage" "$ROOT"; then
+  # 第二次换位失败：立即把旧树放回，避免"有备份但无装机树"的裸奔窗口
+  if [ -d "$backup" ]; then
+    mv "$backup" "$ROOT"
+  fi
+  die "新树换位失败（已恢复上一版树；/usr/bin 二进制未改动）"
+fi
 trap - EXIT
 
+# 二进制替换同样在回滚保护内：这里失败若直接退出，会留下"新树 + 旧 rrd"
+# 的半更新态，正是本脚本要消灭的故障面。
 for b in rrd rr3-ctl; do
-  install -m755 "$ROOT/bin/$b" "$BIN/.$b.new"
-  mv -f "$BIN/.$b.new" "$BIN/$b"
+  install -m755 "$ROOT/bin/$b" "$BIN/.$b.new" || rollback
+  mv -f "$BIN/.$b.new" "$BIN/$b" || rollback
 done
 # 先前的崩溃循环会把 StartLimit 打满（Failed to start: start request repeated
 # too quickly）；不清账的话新树第一次 start 就被拒，健康窗口还没开始就回滚。
