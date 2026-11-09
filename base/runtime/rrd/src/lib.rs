@@ -17,6 +17,7 @@ pub mod domain_write;
 pub mod manifest;
 pub mod probe;
 pub mod profile;
+mod profile_checks;
 mod profile_edit;
 mod profile_pins;
 pub mod registry;
