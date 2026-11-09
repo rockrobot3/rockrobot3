@@ -8,6 +8,7 @@
 
 pub mod secrets;
 pub mod server;
+mod exec;
 mod http;
 
 /// 单文件内嵌静态页（`GET /` 的 body）——编译期打进二进制
