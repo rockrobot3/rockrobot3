@@ -736,46 +736,58 @@ fn rr3_slots_parse(
 ) -> (Vec<String>, BTreeMap<String, String>) {
     let mut slots_present: Vec<String> = Vec::new();
     let mut slots_device_absent: BTreeMap<String, String> = BTreeMap::new();
-    match root.get("slots").and_then(toml::Value::as_table) {
-        None => errs.push(
+    let Some(t) = root.get("slots").and_then(toml::Value::as_table) else {
+        errs.push(
             "缺少 [slots]（present = 本板物理在位格位声明；schema_version=2 起必填）".to_string(),
-        ),
-        Some(t) => {
-            match t.get("present").and_then(toml::Value::as_array) {
-                Some(items) => {
-                    for item in items {
-                        match item.as_str() {
-                            Some(s) if !s.is_empty() => slots_present.push(s.to_string()),
-                            _ => errs.push(
-                                "[slots].present 的每一项都必须是非空字符串（格位名）".to_string(),
-                            ),
-                        }
-                    }
-                }
-                None => errs.push("[slots] 缺 present（本板物理在位格位数组）".to_string()),
-            }
-            if let Some(absent) = t.get("device_absent").and_then(toml::Value::as_table) {
-                for (slot, reason) in absent {
-                    match reason.as_str() {
-                        Some(r) if !r.trim().is_empty() => {
-                            slots_device_absent.insert(slot.clone(), r.to_string());
-                        }
-                        _ => errs.push(format!(
-                            "[slots].device_absent 格位 {slot} 的理由必须是非空字符串（缺席须显式申报理由，留空即红）"
-                        )),
-                    }
-                }
-            }
-            for k in t.keys() {
-                if k != "present" && k != "device_absent" {
-                    errs.push(format!(
-                        "[slots] 未知键 {k}（只认 present / device_absent）"
-                    ));
-                }
-            }
+        );
+        return (slots_present, slots_device_absent);
+    };
+    rr3_slots_present(t, &mut slots_present, errs);
+    rr3_slots_absent(t, &mut slots_device_absent, errs);
+    for k in t.keys() {
+        if k != "present" && k != "device_absent" {
+            errs.push(format!("[slots] 未知键 {k}（只认 present / device_absent）"));
         }
     }
     (slots_present, slots_device_absent)
+}
+
+/// [slots].present（B9 自 slots_parse 抽出）：本板物理在位格位数组，逐项非空。
+fn rr3_slots_present(t: &toml::Table, out: &mut Vec<String>, errs: &mut Vec<String>) {
+    match t.get("present").and_then(toml::Value::as_array) {
+        Some(items) => {
+            for item in items {
+                match item.as_str() {
+                    Some(s) if !s.is_empty() => out.push(s.to_string()),
+                    _ => errs.push(
+                        "[slots].present 的每一项都必须是非空字符串（格位名）".to_string(),
+                    ),
+                }
+            }
+        }
+        None => errs.push("[slots] 缺 present（本板物理在位格位数组）".to_string()),
+    }
+}
+
+/// [slots].device_absent（B9 自 slots_parse 抽出）：缺席须显式申报非空理由。
+fn rr3_slots_absent(
+    t: &toml::Table,
+    out: &mut BTreeMap<String, String>,
+    errs: &mut Vec<String>,
+) {
+    let Some(absent) = t.get("device_absent").and_then(toml::Value::as_table) else {
+        return;
+    };
+    for (slot, reason) in absent {
+        match reason.as_str() {
+            Some(r) if !r.trim().is_empty() => {
+                out.insert(slot.clone(), r.to_string());
+            }
+            _ => errs.push(format!(
+                "[slots].device_absent 格位 {slot} 的理由必须是非空字符串（缺席须显式申报理由，留空即红）"
+            )),
+        }
+    }
 }
 
 /// [supplies] 的整数键读取：缺失或类型不合同一条错误点名（运维一次改对）
