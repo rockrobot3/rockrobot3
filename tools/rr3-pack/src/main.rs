@@ -550,10 +550,21 @@ fn rr3_stage_opt(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), S
     Ok(())
 }
 
-/// control 文本（字段序按 dpkg 惯例）。Maintainer 与 Git 提交身份同源。
+/// 发版维护者标识缺省值：`.invalid` 是 RFC 2606 保留域，源码仓不写个人/单位
+/// 身份；发行方用 [`RR3_DEB_MAINTAINER_ENV`] 覆盖（debian/control 的必填字段
+/// 不能空，缺省必须是可解析的合法地址）。
+const RR3_DEB_MAINTAINER: &str = "RockRobot3 Maintainers <maintainers@rockrobot3.invalid>";
+/// 维护者覆盖环境变量（发版流水线注入真实身份，源码零泄漏）。
+const RR3_DEB_MAINTAINER_ENV: &str = "RR3_DEB_MAINTAINER";
+
+/// control 文本（字段序按 dpkg 惯例）。
 fn rr3_control_text(arch: &str) -> String {
+    let maintainer = std::env::var(RR3_DEB_MAINTAINER_ENV)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| RR3_DEB_MAINTAINER.to_string());
     format!(
-        "Package: {RR3_DEB_PACKAGE}\nVersion: {RR3_DEB_VERSION}\nSection: net\nPriority: optional\nArchitecture: {arch}\nMaintainer: lei_huang <maintainers@rockrobot3.invalid>\nDescription: RockRobot3 运行时 payload（rrd + 模块 + systemd 单元，发行版快路轨）\n"
+        "Package: {RR3_DEB_PACKAGE}\nVersion: {RR3_DEB_VERSION}\nSection: net\nPriority: optional\nArchitecture: {arch}\nMaintainer: {maintainer}\nDescription: RockRobot3 运行时 payload（rrd + 模块 + systemd 单元，发行版快路轨）\n"
     )
 }
 
@@ -639,6 +650,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 源码仓身份零泄漏：缺省维护者必须是 RFC 2606 保留域（发版由环境变量
+    /// 注入真实身份，不在树内落任何个人/单位地址）。
+    #[test]
+    fn control_text_defaults_to_reserved_domain() {
+        assert!(RR3_DEB_MAINTAINER.ends_with(".invalid>"));
+        let text = rr3_control_text("arm64");
+        assert!(text.contains("Maintainer: "));
+        assert!(text.contains(RR3_DEB_MAINTAINER) || std::env::var(RR3_DEB_MAINTAINER_ENV).is_ok());
+        assert!(text.ends_with('\n'));
+    }
 
     /// 真仓装配单（基-25：打包预验走 rrd 解析器，夹具必须给合法装配单——空文本过不了
     /// 解析器。include_str! 相对源文件 src/，到仓根四级）。distro chip=rk3566、
