@@ -224,6 +224,93 @@ fn hdr_err_log(e: rr_ipc::Rr3HdrError) -> &'static str {
     }
 }
 
+/// 超限帧排空：头层合法但超出夹具承载，逐字节读完保持线路对齐（契约头层校验
+/// 已过，这不是坏帧；只是夹具不回发超大帧）。读完返回 true；超时/读错返回
+/// false（对齐已破坏，调用方按重扫处理）。
+fn drain_oversize(
+    rx: &mut UartRx<'_, Blocking>,
+    one: &mut [u8; 1],
+    want: usize,
+    last_rx: &mut Instant,
+    console: &mut UartTx<'_, Blocking>,
+) -> bool {
+    let mut drained = 0usize;
+    while drained < want {
+        match rx.read_buffered(one) {
+            Ok(0) => {
+                if last_rx.elapsed() > IDLE_TIMEOUT {
+                    log!(&mut *console, "reject: drain timeout — resync");
+                    return false;
+                }
+            }
+            Ok(_) => {
+                *last_rx = Instant::now();
+                drained += 1;
+            }
+            Err(_) => {
+                log!(&mut *console, "reject: rx error while draining");
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// 按 payload_len 收满一帧载荷：满帧返回 Some(payload)，半帧（超时/读错）返回
+/// None（调用方按对齐破坏处理，不回发）。
+fn recv_payload(
+    rx: &mut UartRx<'_, Blocking>,
+    one: &mut [u8; 1],
+    want: usize,
+    last_rx: &mut Instant,
+    console: &mut UartTx<'_, Blocking>,
+) -> Option<alloc::vec::Vec<u8>> {
+    let mut payload = alloc::vec![0u8; want];
+    let mut got = 0usize;
+    while got < want {
+        match rx.read_buffered(one) {
+            Ok(0) => {
+                if last_rx.elapsed() > IDLE_TIMEOUT {
+                    log!(&mut *console, "reject: short frame (payload {got}/{want})");
+                    return None;
+                }
+            }
+            Ok(_) => {
+                payload[got] = one[0];
+                got += 1;
+                *last_rx = Instant::now();
+            }
+            Err(_) => {
+                log!(&mut *console, "reject: rx error in payload");
+                return None;
+            }
+        }
+    }
+    Some(payload)
+}
+
+/// 整帧回发（raw 字节：收到的 128B 头 + payload），失败打日志（回发失败不拒帧）。
+fn echo_frame(
+    tx: &mut UartTx<'_, Blocking>,
+    hdr: &[u8; RR3_IPC_HDR_SIZE],
+    payload: &[u8],
+    console: &mut UartTx<'_, Blocking>,
+) {
+    log!(
+        &mut *console,
+        "frame received: len={} payload_len={}",
+        RR3_IPC_HDR_SIZE + payload.len(),
+        payload.len()
+    );
+    let mut ok = write_all(tx, hdr).is_ok();
+    if ok {
+        ok = write_all(tx, payload).is_ok();
+    }
+    if !ok {
+        log!(&mut *console, "reject: tx error — echo failed");
+    }
+}
+
 #[esp_hal::main]
 fn main() -> ! {
     // 64 KiB 内部堆：payload 回发缓冲按 8 KiB 封顶分配（先验头再分配，见
@@ -291,78 +378,29 @@ fn main() -> ! {
                         Ok(h) => {
                             let want = h.payload_len as usize;
                             if want > PAYLOAD_CAP {
-                                // 头层合法但超出夹具承载：排空线路保持对齐（契约头层
-                                // 校验已过，这不是坏帧；只是夹具不回发超大帧）
+                                // 头层合法但超出夹具承载：排空线路保持对齐
                                 log!(
                                     &mut console,
                                     "reject: payload too large (declared {want}, cap {PAYLOAD_CAP}) — draining"
                                 );
-                                let mut drained = 0usize;
-                                while drained < want {
-                                    match rx.read_buffered(&mut one) {
-                                        Ok(0) => {
-                                            if last_rx.elapsed() > IDLE_TIMEOUT {
-                                                log!(
-                                                    &mut console,
-                                                    "reject: drain timeout — resync"
-                                                );
-                                                break;
-                                            }
-                                        }
-                                        Ok(_) => {
-                                            last_rx = Instant::now();
-                                            drained += 1;
-                                        }
-                                        Err(_) => {
-                                            log!(&mut console, "reject: rx error while draining");
-                                            break;
-                                        }
-                                    }
-                                }
+                                // 排空中断（超时/读错）同样按对齐破坏处理：缓冲重扫
+                                let _ = drain_oversize(
+                                    &mut rx,
+                                    &mut one,
+                                    want,
+                                    &mut last_rx,
+                                    &mut console,
+                                );
                                 fill = 0;
                             } else {
-                                let mut payload = alloc::vec![0u8; want];
-                                let mut got = 0usize;
-                                let mut torn = false;
-                                while got < want {
-                                    match rx.read_buffered(&mut one) {
-                                        Ok(0) => {
-                                            if last_rx.elapsed() > IDLE_TIMEOUT {
-                                                log!(
-                                                    &mut console,
-                                                    "reject: short frame (payload {got}/{want})"
-                                                );
-                                                torn = true;
-                                                break;
-                                            }
-                                        }
-                                        Ok(_) => {
-                                            payload[got] = one[0];
-                                            got += 1;
-                                            last_rx = Instant::now();
-                                        }
-                                        Err(_) => {
-                                            log!(&mut console, "reject: rx error in payload");
-                                            torn = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                if !torn {
-                                    log!(
-                                        &mut console,
-                                        "frame received: len={} payload_len={}",
-                                        RR3_IPC_HDR_SIZE + want,
-                                        want
-                                    );
-                                    // 整帧回发（raw 字节：收到的 128B 头 + payload）
-                                    let mut ok = write_all(&mut tx, &hdr).is_ok();
-                                    if ok {
-                                        ok = write_all(&mut tx, &payload).is_ok();
-                                    }
-                                    if !ok {
-                                        log!(&mut console, "reject: tx error — echo failed");
-                                    }
+                                if let Some(payload) = recv_payload(
+                                    &mut rx,
+                                    &mut one,
+                                    want,
+                                    &mut last_rx,
+                                    &mut console,
+                                ) {
+                                    echo_frame(&mut tx, &hdr, &payload, &mut console);
                                 }
                                 fill = 0;
                             }
