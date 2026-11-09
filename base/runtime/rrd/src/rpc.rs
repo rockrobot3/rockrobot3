@@ -44,6 +44,21 @@ pub enum Rr3RpcMethod {
     CtlDomainSet,
 }
 
+/// ctl 方法族在册表（ADR-0010）：解析面的 ctl 反查与 [`Rr3RpcMethod::is_ctl`]
+/// 的成员判据共用本表；方法名的唯一真值仍单点在 [`Rr3RpcMethod::as_str`]
+/// （本表只列变体、不携字面名，名字漂移只在 as_str 一处发生）。
+const RR3_CTL_METHODS: [Rr3RpcMethod; 9] = [
+    Rr3RpcMethod::CtlStatus,
+    Rr3RpcMethod::CtlHealth,
+    Rr3RpcMethod::CtlLogs,
+    Rr3RpcMethod::CtlOta,
+    Rr3RpcMethod::CtlCounters,
+    Rr3RpcMethod::CtlReboot,
+    Rr3RpcMethod::CtlWiring,
+    Rr3RpcMethod::CtlContracts,
+    Rr3RpcMethod::CtlDomainSet,
+];
+
 impl Rr3RpcMethod {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -64,41 +79,23 @@ impl Rr3RpcMethod {
         }
     }
 
+    /// 名字 → 变体：核心四方法直配，ctl 族按 [`RR3_CTL_METHODS`] 反查
+    /// [`Self::as_str`]（解析面不另立 ctl 字面表——两张字面表并存必漂移）。
     fn parse(s: &str) -> Option<Self> {
         match s {
             "rr3.register" => Some(Self::Register),
             "rr3.heartbeat" => Some(Self::Heartbeat),
             "rr3.unregister" => Some(Self::Unregister),
             s if s == rr_bus::RR3_METHOD_CALL => Some(Self::Call),
-            "rr3.ctl.status" => Some(Self::CtlStatus),
-            "rr3.ctl.health" => Some(Self::CtlHealth),
-            "rr3.ctl.logs" => Some(Self::CtlLogs),
-            "rr3.ctl.ota" => Some(Self::CtlOta),
-            "rr3.ctl.counters" => Some(Self::CtlCounters),
-            "rr3.ctl.reboot" => Some(Self::CtlReboot),
-            "rr3.ctl.wiring" => Some(Self::CtlWiring),
-            "rr3.ctl.contracts" => Some(Self::CtlContracts),
-            "rr3.ctl.domain.set" => Some(Self::CtlDomainSet),
-            _ => None,
+            _ => RR3_CTL_METHODS.iter().copied().find(|m| m.as_str() == s),
         }
     }
 
-    /// 是否控制查询方法（ADR-0010 裁定 3 的分流判据）。conn 的握手分流经它；
-    /// 已注册连接的上行拒绝用显式 OR 臂（带守卫的臂不计入穷尽性），两处由
-    /// 编译器共同看护：新增 ctl 变体漏改任何一处都会变红。
+    /// 是否控制查询方法（ADR-0010 裁定 3 的分流判据）。成员判据与解析面共用
+    /// [`RR3_CTL_METHODS`]：ctl 族增列一处，解析与分流同时生效。conn 的握手分流
+    /// 经它；已注册连接的上行拒绝用显式 OR 臂（带守卫的臂不计入穷尽性）。
     pub fn is_ctl(&self) -> bool {
-        matches!(
-            self,
-            Self::CtlStatus
-                | Self::CtlHealth
-                | Self::CtlLogs
-                | Self::CtlOta
-                | Self::CtlCounters
-                | Self::CtlReboot
-                | Self::CtlWiring
-                | Self::CtlContracts
-                | Self::CtlDomainSet
-        )
+        RR3_CTL_METHODS.contains(self)
     }
 }
 
@@ -377,6 +374,16 @@ mod tests {
         assert!(!Rr3RpcMethod::Heartbeat.is_ctl());
         assert!(!Rr3RpcMethod::Unregister.is_ctl());
         assert!(!Rr3RpcMethod::Call.is_ctl());
+        // ctl 在册表 ↔ 名字真值互证：表内每变体经 as_str 反查必回本变体
+        // （表漏列/名漂移在此一处即红，不靠人工对齐两张清单）
+        for m in RR3_CTL_METHODS {
+            assert!(m.is_ctl(), "{m:?} 在册必判 ctl");
+            assert_eq!(
+                Rr3RpcMethod::parse(m.as_str()),
+                Some(m),
+                "{m:?} 名字反查必须回到本变体"
+            );
+        }
     }
 
     /// 心跳可选 counters 字段的形状拆包（0.0.4 批B）：缺省/非对象/空 → None；
