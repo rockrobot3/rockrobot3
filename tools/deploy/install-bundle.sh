@@ -16,7 +16,17 @@ set -euo pipefail
 BUNDLE=${1:-}
 ROOT=${2:-/usr/lib/rockrobot3}
 BIN=${RR3_INSTALL_BIN:-/usr/bin}
-SOCK=${RR3_BUS_PATH:-/var/run/rock3-ipc.sock}
+
+# 从 rrd 单元 ExecStart 取开关值（单元缺失 / 开关未写 = 空）。单元是部署面的
+# 单点真值：安装根、profile、socket 都以它为准，脚本不再自持第二份缺省。
+# 为什么函数里吞掉 systemctl 的非零：首装时单元可能尚未落地，裸管道在
+# pipefail 下会把整条赋值判失败，set -e 当场退出——安装步骤一步都走不到。
+unit_arg() {
+  { systemctl cat rrd 2>/dev/null || true; } \
+    | sed -n "s/^ExecStart=.*$1 \([^ ]*\).*/\1/p" | tail -1
+}
+SOCK=${RR3_BUS_PATH:-$(unit_arg --socket)}
+SOCK=${SOCK:-/var/run/rock3-ipc.sock}
 
 die() { echo "FAIL  $*" >&2; exit 1; }
 
@@ -64,8 +74,7 @@ for f in bin/rrd bin/rr3-ctl contracts/topics.toml; do
 done
 
 # 期望模块集：从 rrd 单元命令行取 --profile，读其 [enabled_slots] 键（模块名）
-profile=$(systemctl cat rrd 2>/dev/null \
-  | sed -n 's/^ExecStart=.*--profile \([^ ]*\).*/\1/p' | tail -1)
+profile=$(unit_arg --profile)
 expected=""
 if [ -n "$profile" ] && [ -f "$profile" ]; then
   expected=$(awk '/^\[enabled_slots\]/{f=1;next} /^\[/{f=0} f && /^[A-Za-z0-9_-]+ *=/ {sub(/ *=.*/, ""); print}' "$profile")
