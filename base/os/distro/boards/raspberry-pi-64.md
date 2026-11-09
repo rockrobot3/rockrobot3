@@ -26,7 +26,7 @@
 
 ```bash
 bash tools/deploy/pack-arm64.sh
-# 产物：/tmp/rr3-arm64-deploy/rockrobot3_0.0.6_arm64.deb.stage（staging 布局树）
+# 产物：/tmp/rr3-arm64-deploy/rockrobot3_${RR3_DEB_VERSION:-0.0.6}_arm64.deb.stage（staging 布局树）
 # 脚本内含 aarch64 静态 ELF 体检与 entry 装机绝对化断言，绿了才往下走
 ```
 
@@ -37,10 +37,11 @@ bash tools/deploy/pack-arm64.sh
 ## 2. 传板真装
 
 ```bash
-scp -r /tmp/rr3-arm64-deploy/rockrobot3_0.0.6_arm64.deb.stage <user>@<板>:~/stage
+VER="${RR3_DEB_VERSION:-0.0.6}"
+scp -r /tmp/rr3-arm64-deploy/rockrobot3_${VER}_arm64.deb.stage <user>@<板>:~/stage
 ssh <user>@<板>
-cd ~ && dpkg-deb --build stage ./rockrobot3_0.0.6_arm64.deb   # 板上出包（dpkg-deb 自带）
-sudo dpkg -i ./rockrobot3_0.0.6_arm64.deb                      # postinst 只 enable 不 start
+cd ~ && dpkg-deb --build stage ./rockrobot3_${VER}_arm64.deb   # 板上出包（dpkg-deb 自带）
+sudo dpkg -i ./rockrobot3_${VER}_arm64.deb                      # postinst 只 enable 不 start
 ```
 
 装机位（与 `rrd.service` 同一组路径）：`/usr/bin/{rrd,rr3-ctl}` +
