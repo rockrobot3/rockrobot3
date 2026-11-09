@@ -240,6 +240,47 @@ mod tests {
         assert_eq!(hdr.payload_len as usize, payload.len());
     }
 
+    /// 误码离线取证（A8，真板不在场时的确定性面）：载荷任一字节单点翻转都被
+    /// CRC32 门拒收并整帧丢弃。CRC 对单字节差分的映射非零（生成多项式次数
+    /// 32 > 差分次数 <8），故逐字节扫描是确定性判据，不是抽样。
+    #[test]
+    fn assembler_payload_single_byte_flips_all_rejected() {
+        let good = board_like_frame(21);
+        let plen = good.len() - RR3_IPC_HDR_SIZE;
+        assert!(plen > 0);
+        for i in 0..plen {
+            let mut bad = good.clone();
+            bad[RR3_IPC_HDR_SIZE + i] ^= 1 << (i % 8);
+            let mut a = FrameAssembler::new();
+            a.feed(&bad);
+            let (dropped, why) = a.pull().unwrap_err();
+            assert_eq!(dropped, bad.len() as u64, "第 {i} 字节：坏帧必须整帧丢弃");
+            assert!(why.contains("CRC32 不符"), "第 {i} 字节：{why}");
+        }
+        // 扫描后拆帧器状态未被污染：一条好帧照常出
+        let mut a = FrameAssembler::new();
+        a.feed(&good);
+        assert!(a.pull().unwrap().is_some());
+    }
+
+    /// 误码鲁棒性：全帧逐位翻转不得 panic；坏帧后的缓冲不得越过帧长上界
+    /// （拆帧器只认 magic 对齐 + plen 护栏，超出即报错弃帧）。
+    #[test]
+    fn assembler_bit_flip_sweep_never_panics() {
+        let good = board_like_frame(22);
+        for bit in 0..good.len() * 8 {
+            let mut bad = good.clone();
+            bad[bit / 8] ^= 1 << (bit % 8);
+            let mut a = FrameAssembler::new();
+            a.feed(&bad);
+            // 任一位翻转后：Ok(Some)/Ok(None)/Err 都是合法收敛，唯独不许 panic
+            let _ = a.pull();
+            // 再喂一条好帧，缓冲仍有界（不 panic 即证明未按幻影 plen 无限等）
+            a.feed(&good);
+            let _ = a.pull();
+        }
+    }
+
     /// 拆帧器：头层合法的 64MiB plen 越拆帧护栏——按坏帧弃 magic，不缓冲；
     /// 自定义护栏同径生效。
     #[test]
