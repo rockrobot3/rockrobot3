@@ -450,17 +450,29 @@ fn rr3_tee_write(sink: &mut Option<std::fs::File>, bytes: &[u8]) {
     }
 }
 
+/// 本窗坏帧率告警判据：>0.1%（千分之一）即尾标 `[注意]`，异常窗一眼可见。
+fn rr3_bad_alert(frames: u64, bad: u64) -> bool {
+    frames > 0 && bad.saturating_mul(1000) > frames
+}
+
 /// 桥链周期统计（10min 窗）：本窗增量 + 生命周期累计。误码率按**本窗**坏/帧
 /// 计算（累计口径受重连/重启影响，只作参考）；增量是排障主读数。
 fn rr3_stat_tick(core: &Rr3Esp32AudioCore, mark: &mut Rr3StatMark) {
     let chunks = core.chunks.load(Ordering::Relaxed);
     let errs = core.errs.load(Ordering::Relaxed);
     let recs = core.reconnects.load(Ordering::Relaxed);
+    let dframe = chunks.saturating_sub(mark.chunks);
+    let dbad = errs.saturating_sub(mark.errs);
+    let flag = if rr3_bad_alert(dframe, dbad) {
+        " [注意:本窗坏帧率>0.1%]"
+    } else {
+        ""
+    };
     eprintln!(
-        "rr-hal-esp32-audio: 桥链统计（{}min 窗）: 本窗帧=+{} 坏=+{} 重连=+{} | 累计帧={} 坏={} 重连={}",
+        "rr-hal-esp32-audio: 桥链统计（{}min 窗）: 本窗帧=+{} 坏=+{} 重连=+{} | 累计帧={} 坏={} 重连={}{flag}",
         RR3_BRIDGE_STAT_PERIOD.as_secs() / 60,
-        chunks.saturating_sub(mark.chunks),
-        errs.saturating_sub(mark.errs),
+        dframe,
+        dbad,
         recs.saturating_sub(mark.recs),
         chunks,
         errs,
@@ -1094,6 +1106,16 @@ mod tests {
         let got = std::fs::read(&path).expect("tee 测试临时文件回读失败");
         assert_eq!(got, b"abcde", "tee 流须与消费流逐字节一致且按序追加");
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// 坏帧率告警：严格 >0.1%（千分之一）才置位；空窗不告警。
+    #[test]
+    fn bad_rate_alert_threshold() {
+        assert!(!rr3_bad_alert(0, 0));
+        assert!(!rr3_bad_alert(1000, 1), "恰 0.1% 不告警");
+        assert!(rr3_bad_alert(1000, 2));
+        assert!(rr3_bad_alert(4687, 5));
+        assert!(!rr3_bad_alert(4687, 4), "4/4687 < 0.1%");
     }
 
     /// 坏帧打点：首条必打，其后按累计周期抽样（持续误码不刷屏）。
