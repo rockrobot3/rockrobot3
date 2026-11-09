@@ -383,6 +383,37 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
     }
 }
 
+/// 注册后读侧静默上界就位（ADR-0025 裁定 1/4），返回上界毫秒；0 = 不设上界。
+///
+/// 上界 = 该模块自己申报的 `watchdog_ms × 2`：2 倍是归属裁定——保证看门狗先到期，
+/// 连接收尾走 `Silent`，判死/广播/重启预算只归看门狗一拍。健康模块按 heartbeat_ms
+/// 喂狗（< watchdog_ms），正常业务永远触不到这条界。在册事实缺失或看门狗窗口为 0
+/// 时不设上界并留痕——宁可退化为无上界，也不拿错的上界误杀健康连接。
+fn rr3_conn_idle_set(
+    stream: &UnixStream,
+    shared: &Arc<Mutex<RrdRegistry>>,
+    name: &str,
+) -> Result<u64, String> {
+    let idle_ms = rr3_lock(shared)
+        .rr3_reg_facts(name)
+        .map(|f| f.watchdog_ms.saturating_mul(2))
+        .unwrap_or(0);
+    if idle_ms > 0 {
+        stream
+            .set_read_timeout(Some(Duration::from_millis(idle_ms)))
+            .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
+    } else {
+        rr3_log(&format!(
+            "{name} 无可用看门狗窗口（在册事实缺失或为 0），读侧不设静默上界——\
+             连接回收退化为依赖对端断开"
+        ));
+        stream
+            .set_read_timeout(None)
+            .map_err(|e| format!("清读超时失败: {e}"))?;
+    }
+    Ok(idle_ms)
+}
+
 /// 注册后的读循环：逐帧读、逐帧处理，直到干净收尾或带原因断开。
 /// EOF（对端关连接）与 `rr3.unregister` 都是 `QuitClean`；其余读错/处理错带原因返回。
 ///
@@ -458,28 +489,7 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
     let mut reader = stream;
     let me = handshake::rr3_handshake(&mut reader, &out, &ctx, fan_tx)?;
-    // 注册后静默上界（ADR-0025）：模块自己申报的看门狗窗口 × 2。2 倍是**归属裁定**
-    // 而不是余量估算——保证看门狗先到期，本连接收尾走 Silent，判死与重启预算不双计。
-    // 健康模块按 heartbeat_ms 喂狗（< watchdog_ms），正常业务永远触不到这条上界。
-    let idle_ms = match rr3_lock(&ctx.shared).rr3_reg_facts(&me.name) {
-        Some(f) => f.watchdog_ms.saturating_mul(2),
-        None => {
-            rr3_log(&format!(
-                "{} 在册事实缺失，读侧不设静默上界（连接回收退化为依赖对端断开）",
-                me.name
-            ));
-            0
-        }
-    };
-    if idle_ms > 0 {
-        reader
-            .set_read_timeout(Some(Duration::from_millis(idle_ms)))
-            .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
-    } else {
-        reader
-            .set_read_timeout(None)
-            .map_err(|e| format!("清读超时失败: {e}"))?;
-    }
+    let idle_ms = rr3_conn_idle_set(&reader, &ctx.shared, &me.name)?;
 
     let outcome = rr3_read_loop(&out, &ctx, &me, &mut reader, idle_ms);
 
