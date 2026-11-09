@@ -555,6 +555,17 @@ fn rr3_daemon_counters(shared: &Arc<Mutex<RrdRegistry>>) -> Option<PathBuf> {
                 .entry(crate::counters::RR3_COUNTERS_BOOTS_KEY.to_string())
                 .or_insert(0) += 1;
             rr3_lock(shared).rr3_reg_ctr_replace(table.clone());
+            // 键数封面（可定位）：正常六模块远低于上界；逼近/超界说明历史异常键
+            // 或故障模块换键，启动一行即见，不必等首拍心跳的拒键日志。
+            let cap = crate::registry::RR3_CTR_KEY_CAP;
+            if table.len() > cap {
+                rr3_log(&format!(
+                    "counters 启动加载 {} 键，已超上界 {cap}：新键将被拒（查历史异常键）",
+                    table.len()
+                ));
+            } else {
+                rr3_log(&format!("counters 启动加载 {} 键（上界 {cap}）", table.len()));
+            }
             match crate::counters::rr3_counters_store(path, &table) {
                 Ok(()) => rr3_log(&format!(
                     "counters 持久化已启用: {}（boots 自增已回写）",
