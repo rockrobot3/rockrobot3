@@ -25,8 +25,8 @@
 //! **采购前档**，不充当真件收口证据。仅 Unix 参与编译（依赖 UDS 与真进程）。
 
 use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use rr_bus::RR3_TASK_RRD;
@@ -37,7 +37,10 @@ use rr_ipc::{
 use serde_json::{json, Value};
 
 use crate::assemble::rr3_ctl_status_rows as rr3_ctl_rows;
-use crate::brain::{rr3_brain_cfg_text, rr3_teardown_procs, wait_log_contains, wait_socket_exists};
+use crate::brain::{
+    rr3_brain_cfg_text, rr3_ctl_denied_zero, rr3_spawn_logged, rr3_teardown_procs,
+    wait_log_contains, wait_socket_exists,
+};
 use crate::drill::{
     rr3_manifest_ext, rr3_require_bins_ext, rr3_section, rr3_wait_modules, Rr3SimArgs,
     RR3_SIM_MODULE_A, RR3_SIM_MODULE_B, RR3_SIM_MODULE_BRAIN, RR3_SIM_PANEL_ADDR,
@@ -337,46 +340,122 @@ fn rr3_obs_frame(ty: Rr3PayloadType, body: &Value) -> Rr3Frame {
 }
 
 pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
-    // ---- 0. 定位：仓根与五个二进制 ----
+    let bins = rr3_chain_bins(a)?;
+    let fix = rr3_chain_fix(a, &bins)?;
+    let ctx = Rr3ChainCtx {
+        bins: &bins,
+        fix: &fix,
+    };
+    let mut children: Vec<(String, Child)> = Vec::new();
+    let mut report = String::new();
+    let outcome = rr3_chain_run(&ctx, &mut children, &mut report);
+
+    // ---- 收尾：杀全部子进程；--keep 保留现场 ----
+    if a.keep {
+        println!(
+            "rr3-sim --chain: --keep 保留现场：socket={} workdir={}",
+            fix.socket.display(),
+            fix.workdir.display()
+        );
+        println!(
+            "rr3-sim --chain: 手动收尾：kill 上述进程；rm -rf {:?}",
+            fix.workdir
+        );
+        return match outcome {
+            Ok(()) => {
+                report.push_str(rr3_section("演练结论（R9 档位逐项标注）").as_str());
+                report.push_str(
+                    "全链 mock 闭环 OK：采集=sim burst 注入口 / 意图=mock 云 / 判向=sim 方位注入 / 转向=sim 舵机 / 表情=sim 状态机（无显示件）\n\
+                     本演练是采购前档（R9），不充当真件收口证据——真件档随采购后批验收。\n",
+                );
+                Ok(report)
+            }
+            Err(e) => Err(e),
+        };
+    }
+    rr3_teardown_procs(children, &fix.socket);
+    match outcome {
+        Ok(()) => {
+            report.push_str(rr3_section("演练结论（R9 档位逐项标注）").as_str());
+            report.push_str(
+                "全链 mock 闭环 OK（无人工干预 ≥1 轮）：采集=sim burst 注入口 / 意图=mock 云（R4） / 判向=sim 方位注入 / 转向=sim 舵机 / 表情=sim 状态机（无显示件）\n\
+                 本演练是采购前档（R9），不充当真件收口证据——真件档随采购后批验收。\n",
+            );
+            Ok(report)
+        }
+        Err(e) => Err(format!("{e}\n（现场日志在 {:?}）", fix.workdir)),
+    }
+}
+
+/// 演练二进制集（定位 + 存在性校验一次做完）。
+struct Rr3ChainBins {
+    rrd: PathBuf,
+    rrctl: PathBuf,
+    sense: PathBuf,
+    interact: PathBuf,
+    act: PathBuf,
+    brain: PathBuf,
+}
+
+fn rr3_chain_bins(a: &Rr3SimArgs) -> Result<Rr3ChainBins, String> {
     let repo = crate::drill::rr3_repo_locate(a)?;
     let (d_rrd, _peer, d_rrctl) = crate::drill::rr3_default_bins(&repo);
-    let rrd = a.rrd.clone().unwrap_or(d_rrd);
-    let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
-    let sense = a
-        .sense
-        .clone()
-        .unwrap_or(repo.join("modules/rr3-sense/target/debug/rr3-sense"));
-    let interact = a
-        .interact
-        .clone()
-        .unwrap_or(repo.join("modules/rr3-interact/target/debug/rr3-interact"));
-    let act = a
-        .act
-        .clone()
-        .unwrap_or(repo.join("modules/rr3-act/target/debug/rr3-act"));
-    let brain = a
-        .brain_bin
-        .clone()
-        .unwrap_or(repo.join("modules/rr3-brain/target/debug/rr3-brain"));
+    let bins = Rr3ChainBins {
+        rrd: a.rrd.clone().unwrap_or(d_rrd),
+        rrctl: a.rrctl.clone().unwrap_or(d_rrctl),
+        sense: a
+            .sense
+            .clone()
+            .unwrap_or(repo.join("modules/rr3-sense/target/debug/rr3-sense")),
+        interact: a
+            .interact
+            .clone()
+            .unwrap_or(repo.join("modules/rr3-interact/target/debug/rr3-interact")),
+        act: a
+            .act
+            .clone()
+            .unwrap_or(repo.join("modules/rr3-act/target/debug/rr3-act")),
+        brain: a
+            .brain_bin
+            .clone()
+            .unwrap_or(repo.join("modules/rr3-brain/target/debug/rr3-brain")),
+    };
     rr3_require_bins_ext(&[
-        (&rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
-        (&rrctl, "cargo build --manifest-path tools/rrctl/Cargo.toml"),
+        (&bins.rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
         (
-            &sense,
+            &bins.rrctl,
+            "cargo build --manifest-path tools/rrctl/Cargo.toml",
+        ),
+        (
+            &bins.sense,
             "cargo build -p rr3-sense（在 modules/rr3-sense/ 下）",
         ),
         (
-            &interact,
+            &bins.interact,
             "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
         ),
-        (&act, "cargo build -p rr3-act（在 modules/rr3-act/ 下）"),
+        (&bins.act, "cargo build -p rr3-act（在 modules/rr3-act/ 下）"),
         (
-            &brain,
+            &bins.brain,
             "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
         ),
     ])?;
+    Ok(bins)
+}
 
-    // ---- 1. 夹具：套接字 + 四份 manifest + 观察者 manifest + 三份 config ----
+/// 演练夹具：工作目录 + 套接字 + 四份 manifest + 五份文本（写完即用）。
+struct Rr3ChainFix {
+    workdir: PathBuf,
+    socket: PathBuf,
+    brain_cfg: PathBuf,
+    sense_cfg: PathBuf,
+    interact_cfg: PathBuf,
+    act_cfg: PathBuf,
+    obs_manifest: PathBuf,
+    m_sense: PathBuf,
+}
+
+fn rr3_chain_fix(a: &Rr3SimArgs, bins: &Rr3ChainBins) -> Result<Rr3ChainFix, String> {
     let workdir = match &a.socket {
         Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
         None => std::env::temp_dir().join(format!("rr3-sim-chain-{}", std::process::id())),
@@ -393,207 +472,217 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         ("sense-config.toml", rr3_chain_sense_cfg()),
         ("interact-config.toml", rr3_chain_itact_cfg()),
         ("act-config.toml", rr3_chain_act_cfg()),
-        ("rr3-obs.toml", rr3_chain_obs(&act)),
     ] {
         let p = workdir.join(name);
         std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
     }
-    let brain_cfg = workdir.join("brain-config.toml");
-    let sense_cfg = workdir.join("sense-config.toml");
-    let interact_cfg = workdir.join("interact-config.toml");
-    let act_cfg = workdir.join("act-config.toml");
     let obs_manifest = workdir.join(format!("{RR3_CHAIN_OBS}.toml"));
+    // 观察者 manifest 需要绝对 entry：指向 act 真二进制（不 exec，只过注册门禁）
+    std::fs::write(&obs_manifest, rr3_chain_obs(&bins.act))
+        .map_err(|e| format!("写 {obs_manifest:?} 失败: {e}"))?;
+    Ok(Rr3ChainFix {
+        brain_cfg: workdir.join("brain-config.toml"),
+        sense_cfg: workdir.join("sense-config.toml"),
+        interact_cfg: workdir.join("interact-config.toml"),
+        act_cfg: workdir.join("act-config.toml"),
+        obs_manifest,
+        m_sense: workdir.join(format!("{RR3_SIM_MODULE_A}.toml")),
+        workdir,
+        socket,
+    })
+}
 
-    let mut children: Vec<(String, std::process::Child)> = Vec::new();
-    let mut report = String::new();
-    let outcome = (|| -> Result<(), String> {
-        for (name, text) in rr3_chain_manifests(&sense, &interact, &act, &brain) {
-            let p = workdir.join(format!("{name}.toml"));
-            std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
-        }
-        let m_sense = workdir.join(format!("{RR3_SIM_MODULE_A}.toml"));
+/// 演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
+struct Rr3ChainCtx<'a> {
+    bins: &'a Rr3ChainBins,
+    fix: &'a Rr3ChainFix,
+}
 
-        // ---- 2. 起 rrd：boot spawn rr3-sense（双麦 burst 源 + 判向注入随 rrd 环境继承） ----
-        let rrd_log = workdir.join("rrd.log");
-        let rrd_child = Command::new(&rrd)
-            .arg("--socket")
-            .arg(&socket)
-            .arg("--manifest")
-            .arg(&m_sense)
-            .arg("--boot-role")
-            .arg("resident")
-            .args(["--pre-register-timeout-ms", "3000"])
-            .env("RR3_HAL_BACKEND", "sim")
-            .env("RR3_HAL_SIM_WAVE", "burst")
-            .env("RR3_HAL_SIM_DOA_DEG", RR3_CHAIN_DOA_DEG.to_string())
-            .env("RR3_SENSE_CONFIG", &sense_cfg)
-            .stdout(Stdio::from(
-                std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
-            ))
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("起 rrd 失败: {e}"))?;
-        children.push(("rrd".into(), rrd_child));
-        println!(
-            "rr3-sim --chain: rrd 已起，socket={}（sense 双麦 burst + DOA 注入 {RR3_CHAIN_DOA_DEG}°）",
-            socket.display()
-        );
+/// 演练主体：写 manifest → 起 rrd → 注册观察者 → 起外部三模块 → 取证 → 巡检。
+fn rr3_chain_run(
+    ctx: &Rr3ChainCtx,
+    children: &mut Vec<(String, Child)>,
+    report: &mut String,
+) -> Result<(), String> {
+    let fix = ctx.fix;
+    for (name, text) in rr3_chain_manifests(
+        &ctx.bins.sense,
+        &ctx.bins.interact,
+        &ctx.bins.act,
+        &ctx.bins.brain,
+    ) {
+        let p = fix.workdir.join(format!("{name}.toml"));
+        std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
+    }
+    rr3_chain_up_rrd(ctx, children)?;
+    // 等 bind，观察者**先于外部模块**注册（servo/state 一次性广播，晚注册漏收）
+    wait_socket_exists(&fix.socket, RR3_CHAIN_READY_DEADLINE)?;
+    let mut obs_stream = rr3_chain_obs_up(fix, report)?;
+    rr3_chain_up_ext(ctx, children)?;
+    rr3_chain_mods_up(ctx, report)?;
+    rr3_chain_evidence(ctx, &mut obs_stream, report)?;
+    rr3_chain_status(ctx, report)
+}
 
-        // ---- 3. 等 bind，观察者**先于外部模块**注册（servo/state 一次性广播，晚注册漏收） ----
-        wait_socket_exists(&socket, RR3_CHAIN_READY_DEADLINE)?;
-        let mut obs_stream =
-            UnixStream::connect(&socket).map_err(|e| format!("观察者连 {socket:?} 失败: {e}"))?;
-        let obs_manifest_text = std::fs::read_to_string(&obs_manifest)
-            .map_err(|e| format!("读 {obs_manifest:?} 失败: {e}"))?;
-        rr3_obs_register(&mut obs_stream, &obs_manifest_text)?;
-        report.push_str(&format!(
-            "总线观察者已注册（{RR3_CHAIN_OBS}，订阅 {RR3_SENSE_TOPIC_VAD} / {RR3_ACT_TOPIC_SERVO_STATE}）\n"
-        ));
+/// 起 rrd：boot spawn rr3-sense（双麦 burst 源 + 判向注入随 rrd 环境继承）。
+fn rr3_chain_up_rrd(
+    ctx: &Rr3ChainCtx,
+    children: &mut Vec<(String, Child)>,
+) -> Result<(), String> {
+    let fix = ctx.fix;
+    let rrd_log = fix.workdir.join("rrd.log");
+    let rrd_child = Command::new(&ctx.bins.rrd)
+        .arg("--socket")
+        .arg(&fix.socket)
+        .arg("--manifest")
+        .arg(&fix.m_sense)
+        .arg("--boot-role")
+        .arg("resident")
+        .args(["--pre-register-timeout-ms", "3000"])
+        .env("RR3_HAL_BACKEND", "sim")
+        .env("RR3_HAL_SIM_WAVE", "burst")
+        .env("RR3_HAL_SIM_DOA_DEG", RR3_CHAIN_DOA_DEG.to_string())
+        .env("RR3_SENSE_CONFIG", &fix.sense_cfg)
+        .stdout(Stdio::from(
+            std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
+        ))
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("起 rrd 失败: {e}"))?;
+    children.push(("rrd".into(), rrd_child));
+    println!(
+        "rr3-sim --chain: rrd 已起，socket={}（sense 双麦 burst + DOA 注入 {RR3_CHAIN_DOA_DEG}°）",
+        fix.socket.display()
+    );
+    Ok(())
+}
 
-        // ---- 4. 外部起 interact / brain / act ----
-        for (name, mut cmd) in [
-            {
-                let mut c = Command::new(&interact);
-                c.env("RR3_HAL_BACKEND", "sim")
-                    .env("RR3_PANEL_ADDR", RR3_SIM_PANEL_ADDR)
-                    .env("RR3_INTERACT_CONFIG", &interact_cfg);
-                (RR3_SIM_MODULE_B, c)
-            },
-            {
-                let mut c = Command::new(&brain);
-                c.env("RR3_BRAIN_CLOUD", "mock")
-                    .env("RR3_BRAIN_MOCK_ASR_TEXT", RR3_CHAIN_ASR_TEXT)
-                    .env("RR3_BRAIN_CONFIG", &brain_cfg);
-                (RR3_SIM_MODULE_BRAIN, c)
-            },
-            {
-                let mut c = Command::new(&act);
-                c.env("RR3_HAL_BACKEND", "sim")
-                    .env("RR3_ACT_CONFIG", &act_cfg)
-                    // 执行轴状态（批N3 件三建、件五五键）：chain 直起路径与
-                    // rrd --manifest 并存，模块 env 由 chain 直设——sim 档已
-                    // 标定 + 挡块在册，行程/中位同档案样本值，Auto 放行
-                    .env(
-                        "RR3_ACT_AXIS_STATE",
-                        "calibrated=true,hard_stop=yes,lo=60,hi=120,center=90",
-                    );
-                (RR3_SIM_MODULE_ACT, c)
-            },
-        ] {
-            let log = workdir.join(format!("{name}.log"));
-            let out = std::fs::File::create(&log).map_err(|e| format!("建 {log:?} 失败: {e}"))?;
-            let err = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&log)
-                .map_err(|e| format!("开 {log:?} 失败: {e}"))?;
-            let child = cmd
-                .env("RR3_BUS_PATH", &socket)
-                .env("RR3_MANIFEST", workdir.join(format!("{name}.toml")))
-                .stdout(Stdio::from(out))
-                .stderr(Stdio::from(err))
-                .spawn()
-                .map_err(|e| format!("起 {name} 失败: {e}"))?;
-            children.push((name.to_string(), child));
-        }
+/// 观察者连总线并注册（最小身份，专收两个取证主题）。
+fn rr3_chain_obs_up(
+    fix: &Rr3ChainFix,
+    report: &mut String,
+) -> Result<UnixStream, String> {
+    let mut obs_stream = UnixStream::connect(&fix.socket)
+        .map_err(|e| format!("观察者连 {:?} 失败: {e}", fix.socket))?;
+    let obs_manifest_text = std::fs::read_to_string(&fix.obs_manifest)
+        .map_err(|e| format!("读 {:?} 失败: {e}", fix.obs_manifest))?;
+    rr3_obs_register(&mut obs_stream, &obs_manifest_text)?;
+    report.push_str(&format!(
+        "总线观察者已注册（{RR3_CHAIN_OBS}，订阅 {RR3_SENSE_TOPIC_VAD} / {RR3_ACT_TOPIC_SERVO_STATE}）\n"
+    ));
+    Ok(obs_stream)
+}
 
-        // ---- 5. 有界等四模块 running ----
-        rr3_wait_modules(
-            || rr3_ctl_rows(&rrctl, &socket),
-            &[
-                (RR3_SIM_MODULE_A, "running"),
-                (RR3_SIM_MODULE_B, "running"),
-                (RR3_SIM_MODULE_BRAIN, "running"),
-                (RR3_SIM_MODULE_ACT, "running"),
-            ],
-            RR3_CHAIN_READY_DEADLINE,
-        )?;
-        report.push_str(rr3_section("四模块 running（sense/interact/brain/act）").as_str());
-
-        // ---- 6. 观察者取证（判向 + 转向，一轮以上闭环的总线证据） ----
-        let obs = rr3_obs_collect(&mut obs_stream, RR3_CHAIN_READY_DEADLINE)?;
-        let verdict = rr3_chain_judge(&obs)?;
-        report.push_str(rr3_section("总线取证（判向 → 转向）").as_str());
-        report.push_str(&format!("{verdict}\n"));
-
-        // ---- 7. 三段日志留痕（意图/表情/转向的进程内证据） ----
-        report.push_str(rr3_section("全链留痕（进程内日志）").as_str());
-        let brain_log = workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.log"));
-        let interact_log = workdir.join(format!("{RR3_SIM_MODULE_B}.log"));
-        let act_log = workdir.join(format!("{RR3_SIM_MODULE_ACT}.log"));
-        let turn = wait_log_contains(
-            &brain_log,
-            crate::brain::RR3_BRAIN_TURN_MARK,
-            RR3_CHAIN_READY_DEADLINE,
-        )?;
-        if !turn.contains("actions=1") {
-            return Err(format!(
-                "brain 轮次行的动作数不是 1（词表左档应产一条 servo 动作）: {turn}"
-            ));
-        }
-        report.push_str(&format!("brain: {turn}\n"));
-        let tts = wait_log_contains(&interact_log, "tts:", RR3_CHAIN_READY_DEADLINE)?;
-        if !tts.contains("talk 挂起") {
-            return Err(format!(
-                "interact 播放行没携 talk 挂起（表情机没接管）: {tts}"
-            ));
-        }
-        report.push_str(&format!(
-            "interact: {tts}（表情机 talk 自动挂起，sim 档无显示件）\n"
-        ));
-        let intent = wait_log_contains(&act_log, "servo angle=", RR3_CHAIN_READY_DEADLINE)?;
-        report.push_str(&format!("act: {intent}\n"));
-
-        // ---- 8. rr3-ctl status 巡检：denied_publish = 0 是"事件真被接受"的线上证据 ----
-        let out = Command::new(&rrctl)
-            .arg("--bus-path")
-            .arg(&socket)
-            .arg("status")
-            .output()
-            .map_err(|e| format!("跑 rr3-ctl status 失败: {e}"))?;
-        let status_out = String::from_utf8_lossy(&out.stdout).into_owned();
-        if !status_out.contains("denied_publish = 0") {
-            return Err(format!(
-                "denied_publish ≠ 0：链上发布被 rrd 拒了\n{status_out}"
-            ));
-        }
-        report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
-        report.push_str(&status_out);
-        Ok(())
-    })();
-
-    // ---- 9. 收尾：杀全部子进程；--keep 保留现场 ----
-    if a.keep {
-        println!(
-            "rr3-sim --chain: --keep 保留现场：socket={} workdir={}",
-            socket.display(),
-            workdir.display()
-        );
-        println!("rr3-sim --chain: 手动收尾：kill 上述进程；rm -rf {workdir:?}");
-        return match outcome {
-            Ok(()) => {
-                report.push_str(rr3_section("演练结论（R9 档位逐项标注）").as_str());
-                report.push_str(
-                    "全链 mock 闭环 OK：采集=sim burst 注入口 / 意图=mock 云 / 判向=sim 方位注入 / 转向=sim 舵机 / 表情=sim 状态机（无显示件）\n\
-                     本演练是采购前档（R9），不充当真件收口证据——真件档随采购后批验收。\n",
+/// 外部起 interact / brain / act（三真模块，各自日志进 workdir，复用共用起法）。
+fn rr3_chain_up_ext(
+    ctx: &Rr3ChainCtx,
+    children: &mut Vec<(String, Child)>,
+) -> Result<(), String> {
+    let fix = ctx.fix;
+    for (name, mut cmd) in [
+        {
+            let mut c = Command::new(&ctx.bins.interact);
+            c.env("RR3_HAL_BACKEND", "sim")
+                .env("RR3_PANEL_ADDR", RR3_SIM_PANEL_ADDR)
+                .env("RR3_INTERACT_CONFIG", &fix.interact_cfg);
+            (RR3_SIM_MODULE_B, c)
+        },
+        {
+            let mut c = Command::new(&ctx.bins.brain);
+            c.env("RR3_BRAIN_CLOUD", "mock")
+                .env("RR3_BRAIN_MOCK_ASR_TEXT", RR3_CHAIN_ASR_TEXT)
+                .env("RR3_BRAIN_CONFIG", &fix.brain_cfg);
+            (RR3_SIM_MODULE_BRAIN, c)
+        },
+        {
+            let mut c = Command::new(&ctx.bins.act);
+            c.env("RR3_HAL_BACKEND", "sim")
+                .env("RR3_ACT_CONFIG", &fix.act_cfg)
+                // 执行轴状态（批N3 件三建、件五五键）：chain 直起路径与
+                // rrd --manifest 并存，模块 env 由 chain 直设——sim 档已
+                // 标定 + 挡块在册，行程/中位同档案样本值，Auto 放行
+                .env(
+                    "RR3_ACT_AXIS_STATE",
+                    "calibrated=true,hard_stop=yes,lo=60,hi=120,center=90",
                 );
-                Ok(report)
-            }
-            Err(e) => Err(e),
-        };
+            (RR3_SIM_MODULE_ACT, c)
+        },
+    ] {
+        let log = fix.workdir.join(format!("{name}.log"));
+        cmd.env("RR3_BUS_PATH", &fix.socket)
+            .env("RR3_MANIFEST", fix.workdir.join(format!("{name}.toml")));
+        let child = rr3_spawn_logged(cmd, &log, name)?;
+        children.push((name.to_string(), child));
     }
-    // 收尾：杀全部子进程并删套接字（接演练结论）
-    rr3_teardown_procs(children, &socket);
-    match outcome {
-        Ok(()) => {
-            report.push_str(rr3_section("演练结论（R9 档位逐项标注）").as_str());
-            report.push_str(
-                "全链 mock 闭环 OK（无人工干预 ≥1 轮）：采集=sim burst 注入口 / 意图=mock 云（R4） / 判向=sim 方位注入 / 转向=sim 舵机 / 表情=sim 状态机（无显示件）\n\
-                 本演练是采购前档（R9），不充当真件收口证据——真件档随采购后批验收。\n",
-            );
-            Ok(report)
-        }
-        Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
+    Ok(())
+}
+
+/// 有界等四模块 running。
+fn rr3_chain_mods_up(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> {
+    rr3_wait_modules(
+        || rr3_ctl_rows(&ctx.bins.rrctl, &ctx.fix.socket),
+        &[
+            (RR3_SIM_MODULE_A, "running"),
+            (RR3_SIM_MODULE_B, "running"),
+            (RR3_SIM_MODULE_BRAIN, "running"),
+            (RR3_SIM_MODULE_ACT, "running"),
+        ],
+        RR3_CHAIN_READY_DEADLINE,
+    )?;
+    report.push_str(rr3_section("四模块 running（sense/interact/brain/act）").as_str());
+    Ok(())
+}
+
+/// 观察者取证（判向 + 转向）与三段进程内日志留痕。
+fn rr3_chain_evidence(
+    ctx: &Rr3ChainCtx,
+    obs_stream: &mut UnixStream,
+    report: &mut String,
+) -> Result<(), String> {
+    let obs = rr3_obs_collect(obs_stream, RR3_CHAIN_READY_DEADLINE)?;
+    let verdict = rr3_chain_judge(&obs)?;
+    report.push_str(rr3_section("总线取证（判向 → 转向）").as_str());
+    report.push_str(&format!("{verdict}\n"));
+
+    report.push_str(rr3_section("全链留痕（进程内日志）").as_str());
+    let brain_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.log"));
+    let interact_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_B}.log"));
+    let act_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_ACT}.log"));
+    let turn = wait_log_contains(
+        &brain_log,
+        crate::brain::RR3_BRAIN_TURN_MARK,
+        RR3_CHAIN_READY_DEADLINE,
+    )?;
+    if !turn.contains("actions=1") {
+        return Err(format!(
+            "brain 轮次行的动作数不是 1（词表左档应产一条 servo 动作）: {turn}"
+        ));
     }
+    report.push_str(&format!("brain: {turn}\n"));
+    let tts = wait_log_contains(&interact_log, "tts:", RR3_CHAIN_READY_DEADLINE)?;
+    if !tts.contains("talk 挂起") {
+        return Err(format!(
+            "interact 播放行没携 talk 挂起（表情机没接管）: {tts}"
+        ));
+    }
+    report.push_str(&format!(
+        "interact: {tts}（表情机 talk 自动挂起，sim 档无显示件）\n"
+    ));
+    let intent = wait_log_contains(&act_log, "servo angle=", RR3_CHAIN_READY_DEADLINE)?;
+    report.push_str(&format!("act: {intent}\n"));
+    Ok(())
+}
+
+/// `rr3-ctl status` 巡检：denied_publish = 0 是"事件真被接受"的线上证据。
+fn rr3_chain_status(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> {
+    let status_out = rr3_ctl_denied_zero(
+        &ctx.bins.rrctl,
+        &ctx.fix.socket,
+        "denied_publish ≠ 0：链上发布被 rrd 拒了",
+    )?;
+    report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
+    report.push_str(&status_out);
+    Ok(())
 }
 
 #[cfg(test)]

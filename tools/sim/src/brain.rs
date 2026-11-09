@@ -17,7 +17,7 @@
 //! `--audio-backend esp32` 必给——flock 排他下 interact 不得吃源面 UART，A 批 c4）。
 //! 本模块依赖 UDS 与真进程，仅 Unix 参与编译。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -166,40 +166,7 @@ fn rr3_llm_root_of(base_url: &str) -> String {
 }
 
 pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
-    // ---- 0. 定位：仓根与二进制 ----
-    let repo = crate::drill::rr3_repo_locate(a)?;
-    let (d_rrd, _peer, d_rrctl) = crate::drill::rr3_default_bins(&repo);
-    let rrd = a.rrd.clone().unwrap_or(d_rrd);
-    let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
-    let sense = a
-        .sense
-        .clone()
-        .unwrap_or(repo.join("modules/rr3-sense/target/debug/rr3-sense"));
-    let interact = a
-        .interact
-        .clone()
-        .unwrap_or(repo.join("modules/rr3-interact/target/debug/rr3-interact"));
-    let brain = a
-        .brain_bin
-        .clone()
-        .unwrap_or(repo.join("modules/rr3-brain/target/debug/rr3-brain"));
-    rr3_require_bins_ext(&[
-        (&rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
-        (&rrctl, "cargo build --manifest-path tools/rrctl/Cargo.toml"),
-        (
-            &sense,
-            "cargo build -p rr3-sense（在 modules/rr3-sense/ 下）",
-        ),
-        (
-            &interact,
-            "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
-        ),
-        (
-            &brain,
-            "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
-        ),
-    ])?;
-
+    let bins = rr3_brain_bins(a)?;
     // 音频后端与云模式（缺省行为零改动：sim + mock——CI/无头纪律；真件只显式启用）
     let audio_backend = a.audio_backend.clone().unwrap_or_else(|| "sim".to_string());
     // 回放面（interact）：缺省跟随源面（既有 sim/mac 链路零改动）；esp32 源
@@ -214,164 +181,19 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .brain_base_url
         .clone()
         .unwrap_or_else(|| "http://127.0.0.1:9/v1".to_string());
-
-    // ---- 1. 夹具：套接字 + 三份 manifest + 演练 config ----
-    let workdir = match &a.socket {
-        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
-        None => std::env::temp_dir().join(format!("rr3-sim-brain-{}", std::process::id())),
+    let fix = rr3_brain_fix(a, &bins, cloud_real, &brain_base_url)?;
+    let ctx = Rr3BrainCtx {
+        bins: &bins,
+        fix: &fix,
+        audio_backend: &audio_backend,
+        sink_backend: &sink_backend,
+        cloud_real,
     };
-    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
-    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
-    let _ = std::fs::remove_file(&socket);
-
-    let manifest_path = workdir.join("config.toml");
-    std::fs::write(
-        &manifest_path,
-        rr3_brain_cfg_text(cloud_real, &brain_base_url),
-    )
-    .map_err(|e| format!("写演练 config 失败: {e}"))?;
-    // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
-    // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
-    // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
-    let interact_cfg = workdir.join("interact-config.toml");
-    std::fs::write(&interact_cfg, crate::chain::rr3_chain_itact_cfg())
-        .map_err(|e| format!("写 interact config 失败: {e}"))?;
-
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
-    let outcome = (|| -> Result<(), String> {
-        for (name, text) in rr3_brain_manifests(&sense, &interact, &brain) {
-            let p = workdir.join(format!("{name}.toml"));
-            std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
-        }
-        let m_sense = workdir.join(format!("{RR3_SIM_MODULE_A}.toml"));
-        let m_interact = workdir.join(format!("{RR3_SIM_MODULE_B}.toml"));
-        let m_brain = workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.toml"));
+    let outcome = rr3_brain_run(&ctx, &mut children, &mut report);
 
-        // ---- 2. 起 rrd：boot spawn rr3-sense（sim 正弦源） ----
-        let rrd_log = workdir.join("rrd.log");
-        let rrd = Command::new(&rrd)
-            .arg("--socket")
-            .arg(&socket)
-            .arg("--manifest")
-            .arg(&m_sense)
-            .arg("--boot-role")
-            .arg("resident")
-            .args(["--pre-register-timeout-ms", "3000"])
-            .env("RR3_HAL_BACKEND", &audio_backend)
-            // burst（1s 正弦 + 1s 静音循环）：VAD 周期性发 onset/offset，
-            // brain 晚于首个 onset 注册也能赶上下一轮——sine 恒有声只发一次 onset
-            .env("RR3_HAL_SIM_WAVE", "burst")
-            .stdout(Stdio::from(
-                std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
-            ))
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("起 rrd 失败: {e}"))?;
-        let rrd_pid = rrd.id();
-        children.push(("rrd".into(), rrd));
-        println!(
-            "rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}，音频={audio_backend}（源）/ {sink_backend}（回放），云={}",
-            socket.display(),
-            if cloud_real { "real" } else { "mock" },
-        );
-
-        // ---- 2.5 等 rrd bind 完套接字再起外部模块：sense 由 rrd spawn（bind 后），
-        //      interact/brain 是外部进程，抢跑会撞 ENOENT（模块按契约快速退，不重试） ----
-        wait_socket_exists(&socket, rr3_brain_ready_at())?;
-
-        // ---- 3. 外部起 interact 与 brain ----
-        let interact_log = workdir.join("interact.log");
-        let interact_child = Command::new(&interact)
-            .env("RR3_BUS_PATH", &socket)
-            .env("RR3_MANIFEST", &m_interact)
-            // 回放面独立后端（A 批 c4）：interact 吃 sink_backend——esp32 源档下
-            // 源（rrd/sense）与回放（interact）分列，同一 UART 的 flock 排他
-            // 天然不成立
-            .env("RR3_HAL_BACKEND", &sink_backend)
-            // 面板地址：用户显式给的 RR3_PANEL_ADDR 优先（手机/局域网面板面），
-            // 未给才落演练缺省回环 18080
-            .env(
-                "RR3_PANEL_ADDR",
-                std::env::var("RR3_PANEL_ADDR")
-                    .ok()
-                    .filter(|v| !v.trim().is_empty())
-                    .unwrap_or_else(|| crate::drill::RR3_SIM_PANEL_ADDR.to_string()),
-            )
-            .env("RR3_INTERACT_CONFIG", &interact_cfg)
-            .stdout(Stdio::from(
-                std::fs::File::create(&interact_log)
-                    .map_err(|e| format!("建 {interact_log:?} 失败: {e}"))?,
-            ))
-            .stderr(Stdio::from(
-                std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&interact_log)
-                    .map_err(|e| format!("开 {interact_log:?} 失败: {e}"))?,
-            ))
-            .spawn()
-            .map_err(|e| format!("起 rr3-interact 失败: {e}"))?;
-        children.push((RR3_SIM_MODULE_B.into(), interact_child));
-
-        let brain_log = workdir.join("brain.log");
-        let brain_child = Command::new(&brain)
-            .env("RR3_BUS_PATH", &socket)
-            .env("RR3_MANIFEST", &m_brain)
-            .env("RR3_BRAIN_CLOUD", if cloud_real { "real" } else { "mock" })
-            .env("RR3_BRAIN_CONFIG", &manifest_path)
-            .stdout(Stdio::from(
-                std::fs::File::create(&brain_log)
-                    .map_err(|e| format!("建 {brain_log:?} 失败: {e}"))?,
-            ))
-            .stderr(Stdio::from(
-                std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&brain_log)
-                    .map_err(|e| format!("开 {brain_log:?} 失败: {e}"))?,
-            ))
-            .spawn()
-            .map_err(|e| format!("起 rr3-brain 失败: {e}"))?;
-        children.push((RR3_SIM_MODULE_BRAIN.into(), brain_child));
-
-        // ---- 4. 有界等待：三模块 running + brain 轮次完成 + interact 播放过 ----
-        rr3_wait_modules(
-            || rr3_ctl_status_rows(&rrctl, &socket),
-            &[
-                (RR3_SIM_MODULE_A, "running"),
-                (RR3_SIM_MODULE_B, "running"),
-                (RR3_SIM_MODULE_BRAIN, "running"),
-            ],
-            rr3_brain_ready_at(),
-        )?;
-        report.push_str("\n=== 三模块 running ===\n");
-        wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, rr3_brain_ready_at())?;
-        report.push_str(&format!(
-            "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
-        ));
-        wait_log_contains(&interact_log, RR3_INTERACT_TTS_MARK, rr3_brain_ready_at())?;
-        report.push_str(&format!(
-            "interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"
-        ));
-
-        // ---- 5. rr3-ctl status 巡检：denied_publish = 0 是"事件真被接受"的线上证据 ----
-        let out = Command::new(&rrctl)
-            .arg("--bus-path")
-            .arg(&socket)
-            .arg("status")
-            .output()
-            .map_err(|e| format!("跑 rr3-ctl status 失败: {e}"))?;
-        let status_out = String::from_utf8_lossy(&out.stdout).into_owned();
-        if !status_out.contains("denied_publish = 0") {
-            return Err(format!(
-                "denied_publish ≠ 0：brain 的发布被 rrd 拒了\n{status_out}"
-            ));
-        }
-        report.push_str("\n=== rr3-ctl status 巡检 ===\n");
-        report.push_str(&status_out);
-        Ok(())
-    })();
-
-    // ---- 6. 收尾：杀全部子进程；--keep 保留现场 ----
+    // ---- 收尾：杀全部子进程；--keep 保留现场 ----
     let cloud_label = if cloud_real {
         "云端 real"
     } else {
@@ -382,10 +204,13 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     if a.keep {
         println!(
             "rr3-sim --brain: --keep 保留现场：socket={} workdir={}",
-            socket.display(),
-            workdir.display()
+            fix.socket.display(),
+            fix.workdir.display()
         );
-        println!("rr3-sim --brain: 手动收尾：kill 上述进程；rm -rf {workdir:?}");
+        println!(
+            "rr3-sim --brain: 手动收尾：kill 上述进程；rm -rf {:?}",
+            fix.workdir
+        );
         return match outcome {
             Ok(()) => {
                 report.push_str(&format!(
@@ -396,8 +221,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             Err(e) => Err(e),
         };
     }
-    // 收尾：杀子进程 + 删套接字，随后出演练结论
-    rr3_teardown_procs(children, &socket);
+    rr3_teardown_procs(children, &fix.socket);
     match outcome {
         Ok(()) => {
             report.push_str(&format!(
@@ -405,8 +229,272 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             ));
             Ok(report)
         }
-        Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
+        Err(e) => Err(format!("{e}\n（现场日志在 {:?}）", fix.workdir)),
     }
+}
+
+/// 演练二进制集（定位 + 存在性校验一次做完）。
+struct Rr3BrainBins {
+    rrd: PathBuf,
+    rrctl: PathBuf,
+    sense: PathBuf,
+    interact: PathBuf,
+    brain: PathBuf,
+}
+
+fn rr3_brain_bins(a: &Rr3SimArgs) -> Result<Rr3BrainBins, String> {
+    let repo = crate::drill::rr3_repo_locate(a)?;
+    let (d_rrd, _peer, d_rrctl) = crate::drill::rr3_default_bins(&repo);
+    let bins = Rr3BrainBins {
+        rrd: a.rrd.clone().unwrap_or(d_rrd),
+        rrctl: a.rrctl.clone().unwrap_or(d_rrctl),
+        sense: a
+            .sense
+            .clone()
+            .unwrap_or(repo.join("modules/rr3-sense/target/debug/rr3-sense")),
+        interact: a
+            .interact
+            .clone()
+            .unwrap_or(repo.join("modules/rr3-interact/target/debug/rr3-interact")),
+        brain: a
+            .brain_bin
+            .clone()
+            .unwrap_or(repo.join("modules/rr3-brain/target/debug/rr3-brain")),
+    };
+    rr3_require_bins_ext(&[
+        (&bins.rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
+        (
+            &bins.rrctl,
+            "cargo build --manifest-path tools/rrctl/Cargo.toml",
+        ),
+        (
+            &bins.sense,
+            "cargo build -p rr3-sense（在 modules/rr3-sense/ 下）",
+        ),
+        (
+            &bins.interact,
+            "cargo build -p rr3-interact（在 modules/rr3-interact/ 下）",
+        ),
+        (
+            &bins.brain,
+            "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
+        ),
+    ])?;
+    Ok(bins)
+}
+
+/// 演练夹具：工作目录 + 套接字 + 三份 manifest + 两份 config（写完即用）。
+struct Rr3BrainFix {
+    workdir: PathBuf,
+    socket: PathBuf,
+    brain_cfg: PathBuf,
+    interact_cfg: PathBuf,
+    m_sense: PathBuf,
+    m_interact: PathBuf,
+    m_brain: PathBuf,
+}
+
+fn rr3_brain_fix(
+    a: &Rr3SimArgs,
+    bins: &Rr3BrainBins,
+    cloud_real: bool,
+    base_url: &str,
+) -> Result<Rr3BrainFix, String> {
+    let workdir = match &a.socket {
+        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        None => std::env::temp_dir().join(format!("rr3-sim-brain-{}", std::process::id())),
+    };
+    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
+    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
+    let _ = std::fs::remove_file(&socket);
+
+    let brain_cfg = workdir.join("config.toml");
+    std::fs::write(&brain_cfg, rr3_brain_cfg_text(cloud_real, base_url))
+        .map_err(|e| format!("写演练 config 失败: {e}"))?;
+    // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
+    // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
+    // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
+    let interact_cfg = workdir.join("interact-config.toml");
+    std::fs::write(&interact_cfg, crate::chain::rr3_chain_itact_cfg())
+        .map_err(|e| format!("写 interact config 失败: {e}"))?;
+
+    for (name, text) in rr3_brain_manifests(&bins.sense, &bins.interact, &bins.brain) {
+        let p = workdir.join(format!("{name}.toml"));
+        std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
+    }
+    let m_sense = workdir.join(format!("{RR3_SIM_MODULE_A}.toml"));
+    let m_interact = workdir.join(format!("{RR3_SIM_MODULE_B}.toml"));
+    let m_brain = workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.toml"));
+    Ok(Rr3BrainFix {
+        workdir,
+        socket,
+        brain_cfg,
+        interact_cfg,
+        m_sense,
+        m_interact,
+        m_brain,
+    })
+}
+
+/// 演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
+struct Rr3BrainCtx<'a> {
+    bins: &'a Rr3BrainBins,
+    fix: &'a Rr3BrainFix,
+    audio_backend: &'a str,
+    sink_backend: &'a str,
+    cloud_real: bool,
+}
+
+/// 演练主体：起 rrd → 等 bind → 起外部两模块 → 有界等证据 → 状态巡检。
+fn rr3_brain_run(
+    ctx: &Rr3BrainCtx,
+    children: &mut Vec<(String, Child)>,
+    report: &mut String,
+) -> Result<(), String> {
+    rr3_brain_up_rrd(ctx, children)?;
+    // 等 rrd bind 完套接字再起外部模块：sense 由 rrd spawn（bind 后），
+    // interact/brain 是外部进程，抢跑会撞 ENOENT（模块按契约快速退，不重试）
+    wait_socket_exists(&ctx.fix.socket, rr3_brain_ready_at())?;
+    rr3_brain_up_ext(ctx, children)?;
+    rr3_brain_wait(ctx, report)
+}
+
+/// 起 rrd（boot spawn rr3-sense，sim burst 正弦源）。
+fn rr3_brain_up_rrd(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
+    let fix = ctx.fix;
+    let rrd_log = fix.workdir.join("rrd.log");
+    let rrd = Command::new(&ctx.bins.rrd)
+        .arg("--socket")
+        .arg(&fix.socket)
+        .arg("--manifest")
+        .arg(&fix.m_sense)
+        .arg("--boot-role")
+        .arg("resident")
+        .args(["--pre-register-timeout-ms", "3000"])
+        .env("RR3_HAL_BACKEND", ctx.audio_backend)
+        // burst（1s 正弦 + 1s 静音循环）：VAD 周期性发 onset/offset，
+        // brain 晚于首个 onset 注册也能赶上下一轮——sine 恒有声只发一次 onset
+        .env("RR3_HAL_SIM_WAVE", "burst")
+        .stdout(Stdio::from(
+            std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
+        ))
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("起 rrd 失败: {e}"))?;
+    let rrd_pid = rrd.id();
+    children.push(("rrd".into(), rrd));
+    println!(
+        "rr3-sim --brain: rrd 已起 pid={rrd_pid}，socket={}，音频={}（源）/ {}（回放），云={}",
+        fix.socket.display(),
+        ctx.audio_backend,
+        ctx.sink_backend,
+        if ctx.cloud_real { "real" } else { "mock" },
+    );
+    Ok(())
+}
+
+/// 外部起 interact 与 brain（两个真模块，各自日志进 workdir）。
+fn rr3_brain_up_ext(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
+    let fix = ctx.fix;
+    let mut ic = Command::new(&ctx.bins.interact);
+    ic.env("RR3_BUS_PATH", &fix.socket)
+        .env("RR3_MANIFEST", &fix.m_interact)
+        // 回放面独立后端（A 批 c4）：interact 吃 sink_backend——esp32 源档下
+        // 源（rrd/sense）与回放（interact）分列，同一 UART 的 flock 排他
+        // 天然不成立
+        .env("RR3_HAL_BACKEND", ctx.sink_backend)
+        // 面板地址：用户显式给的 RR3_PANEL_ADDR 优先（手机/局域网面板面），
+        // 未给才落演练缺省回环 18080
+        .env(
+            "RR3_PANEL_ADDR",
+            std::env::var("RR3_PANEL_ADDR")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(|| crate::drill::RR3_SIM_PANEL_ADDR.to_string()),
+        )
+        .env("RR3_INTERACT_CONFIG", &fix.interact_cfg);
+    let interact_log = fix.workdir.join("interact.log");
+    let interact_child = rr3_spawn_logged(ic, &interact_log, RR3_SIM_MODULE_B)?;
+    children.push((RR3_SIM_MODULE_B.into(), interact_child));
+
+    let mut bc = Command::new(&ctx.bins.brain);
+    bc.env("RR3_BUS_PATH", &fix.socket)
+        .env("RR3_MANIFEST", &fix.m_brain)
+        .env(
+            "RR3_BRAIN_CLOUD",
+            if ctx.cloud_real { "real" } else { "mock" },
+        )
+        .env("RR3_BRAIN_CONFIG", &fix.brain_cfg);
+    let brain_log = fix.workdir.join("brain.log");
+    let brain_child = rr3_spawn_logged(bc, &brain_log, RR3_SIM_MODULE_BRAIN)?;
+    children.push((RR3_SIM_MODULE_BRAIN.into(), brain_child));
+    Ok(())
+}
+
+/// 有界等：三模块 running → brain 轮次完成 → interact 播放过 → 拒绝发布为 0。
+fn rr3_brain_wait(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), String> {
+    let fix = ctx.fix;
+    rr3_wait_modules(
+        || rr3_ctl_status_rows(&ctx.bins.rrctl, &fix.socket),
+        &[
+            (RR3_SIM_MODULE_A, "running"),
+            (RR3_SIM_MODULE_B, "running"),
+            (RR3_SIM_MODULE_BRAIN, "running"),
+        ],
+        rr3_brain_ready_at(),
+    )?;
+    report.push_str("\n=== 三模块 running ===\n");
+    let brain_log = fix.workdir.join("brain.log");
+    wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, rr3_brain_ready_at())?;
+    report.push_str(&format!(
+        "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
+    ));
+    let interact_log = fix.workdir.join("interact.log");
+    wait_log_contains(&interact_log, RR3_INTERACT_TTS_MARK, rr3_brain_ready_at())?;
+    report.push_str(&format!(
+        "interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"
+    ));
+    let status_out = rr3_ctl_denied_zero(
+        &ctx.bins.rrctl,
+        &fix.socket,
+        "denied_publish ≠ 0：brain 的发布被 rrd 拒了",
+    )?;
+    report.push_str("\n=== rr3-ctl status 巡检 ===\n");
+    report.push_str(&status_out);
+    Ok(())
+}
+
+/// 起一个带日志的外部进程（stdout 建、stderr 追加；两份演练共用）。
+pub(crate) fn rr3_spawn_logged(mut cmd: Command, log: &Path, name: &str) -> Result<Child, String> {
+    let out = std::fs::File::create(log).map_err(|e| format!("建 {log:?} 失败: {e}"))?;
+    let err = std::fs::OpenOptions::new()
+        .append(true)
+        .open(log)
+        .map_err(|e| format!("开 {log:?} 失败: {e}"))?;
+    cmd.stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
+        .spawn()
+        .map_err(|e| format!("起 {name} 失败: {e}"))
+}
+
+/// `rr3-ctl status` 巡检：`denied_publish = 0` 是"事件真被接受"的线上证据。
+/// `denial` 是失败时点名文案（两份演练各自的语境），空 stdout 也会带出。
+pub(crate) fn rr3_ctl_denied_zero(
+    rrctl: &Path,
+    socket: &Path,
+    denial: &str,
+) -> Result<String, String> {
+    let out = Command::new(rrctl)
+        .arg("--bus-path")
+        .arg(socket)
+        .arg("status")
+        .output()
+        .map_err(|e| format!("跑 rr3-ctl status 失败: {e}"))?;
+    let status_out = String::from_utf8_lossy(&out.stdout).into_owned();
+    if !status_out.contains("denied_publish = 0") {
+        return Err(format!("{denial}\n{status_out}"));
+    }
+    Ok(status_out)
 }
 
 /// 收尾共用：杀光子进程、删总线套接字（--keep 保留现场分支不走这里）
