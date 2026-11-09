@@ -199,7 +199,7 @@ pub fn spawn_mic_smoke(
                             b.st.audio_on = false;
                             b.audio_q.clear();
                             println!(
-                                "[mic] 宿主心跳停发超 {AUDIO_HOST_TIMEOUT_MS}ms → 自动停流（AUDIO PING 看门狗）"
+                                "[mic] 宿主心跳停发超 {AUDIO_HOST_TIMEOUT_MS}ms → 自动停流（空行心跳看门狗）"
                             );
                             false
                         } else {
