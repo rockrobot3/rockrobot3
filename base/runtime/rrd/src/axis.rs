@@ -121,26 +121,38 @@ pub fn rr3_act_prof_parse(
     if !errs.is_empty() {
         return Err(errs);
     }
-    // 判据全绿后十四键必在场：上面每个 None 分支都已同步点名——errs 空 ⟺ 全 Some
-    let profile = (|| {
-        Some(Rr3ActProfile {
-            center_deg: nums.center? as u16,
-            lo_deg: nums.lo? as u16,
-            hi_deg: nums.hi? as u16,
-            dir_sign: nums.dir? as i8,
-            slew_deg_s: nums.slew? as u16,
-            settle_ms: nums.settle? as u32,
-            hold: words.hold?,
-            current_ceil_ma: nums.ceil_ma? as u16,
-            warmup_ms: nums.warmup? as u32,
-            hard_stop: words.hard_stop?,
-            calibrated: words.calibrated?,
-            source: words.source?,
-        })
-    })()
-    .expect("逐键判据全绿后十二键必在场（errs 已判空）");
-    let pin = pin.expect("逐键判据全绿后 pin 必在场（errs 已判空）");
+    // 判据全绿后十四键必在场：上面每个 None 分支都已同步点名——errs 空 ⟺ 全 Some。
+    // B10：残留缺键按"内部不一致"折 Err 点名，不再 expect 崩溃（库不杀宿主）。
+    let profile = rr3_axis_build(&nums, &words).ok_or_else(|| {
+        vec![format!(
+            "{path}: 逐键判据全绿但十二键不全（判据与构造面不一致，内部缺陷）"
+        )]
+    })?;
+    let pin = pin.ok_or_else(|| {
+        vec![format!(
+            "{path}: 逐键判据全绿但 pin 缺失（判据与构造面不一致，内部缺陷）"
+        )]
+    })?;
     Ok(Rr3AxisFile { pin, profile })
+}
+
+/// 十二键构造（B10 自 act_prof_parse 抽出）：只做 Option 拼接，判据已在
+/// 调用方逐键点名；返回 None 即判据面与构造面不一致（调用方折 Err 点名）。
+fn rr3_axis_build(nums: &Rr3AxisNums, words: &Rr3AxisWords) -> Option<Rr3ActProfile> {
+    Some(Rr3ActProfile {
+        center_deg: nums.center? as u16,
+        lo_deg: nums.lo? as u16,
+        hi_deg: nums.hi? as u16,
+        dir_sign: nums.dir? as i8,
+        slew_deg_s: nums.slew? as u16,
+        settle_ms: nums.settle? as u32,
+        hold: words.hold?,
+        current_ceil_ma: nums.ceil_ma? as u16,
+        warmup_ms: nums.warmup? as u32,
+        hard_stop: words.hard_stop?,
+        calibrated: words.calibrated?,
+        source: words.source?,
+    })
 }
 
 /// 白名单 + F-6 全键必填：词表外键点名、词表内键登记、随后反向扫缺键
