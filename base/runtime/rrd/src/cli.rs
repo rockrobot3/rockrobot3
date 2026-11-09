@@ -135,6 +135,20 @@ pub fn rr3_cli_parse_env(
 /// 开头 / 非数字）全在此处拒，不静默回落默认值（fail-closed）。
 fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
     match args[i].as_str() {
+        "--socket" | "--topics-overlay" | "--contracts" | "--profile" | "--manifest" => {
+            rr3_cli_path(cfg, args, i)
+        }
+        "--restart-base-ms" | "--pre-register-timeout-ms" | "--watchdog-tick-ms" => {
+            rr3_cli_num(cfg, args, i)
+        }
+        "--boot-role" | "-h" | "--help" => rr3_cli_misc(cfg, args, i),
+        other => Err(format!("未知选项 {other}\n{USAGE}")),
+    }
+}
+
+/// 路径型参数族：值走 `need_path_value`（缺值/疑似开关一律拒，不静默回落）。
+fn rr3_cli_path(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    match args[i].as_str() {
         "--socket" => {
             cfg.socket = PathBuf::from(need_path_value("--socket", args, i)?);
             Ok(i + 2)
@@ -162,6 +176,13 @@ fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, 
                 .push(PathBuf::from(need_path_value("--manifest", args, i)?));
             Ok(i + 2)
         }
+        other => Err(format!("未知选项 {other}\n{USAGE}")),
+    }
+}
+
+/// 数值型参数族：非负整数毫秒；watchdog 额外拒 0（忙循环不是"更快一点"）。
+fn rr3_cli_num(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    match args[i].as_str() {
         "--restart-base-ms" => {
             cfg.restart_base_ms = parse_restart_base(&need_value("--restart-base-ms", args, i)?)?;
             Ok(i + 2)
@@ -184,6 +205,13 @@ fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, 
             cfg.watchdog_tick_ms = n;
             Ok(i + 2)
         }
+        other => Err(format!("未知选项 {other}\n{USAGE}")),
+    }
+}
+
+/// 杂项参数族：boot-role 的两道拒法 + help。
+fn rr3_cli_misc(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    match args[i].as_str() {
         "--boot-role" => {
             let raw = need_value("--boot-role", args, i)?;
             // 两道拒法都只为一个目的：**role 进了子进程才炸，就查不出是谁给的**。
