@@ -322,6 +322,7 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
             .and_then(|s| s.to_str())
             .unwrap_or("out")
     ));
+    rr3_stage_reset(&stage)?;
     let root = stage.join("usr/lib/rockrobot3");
     rr3_stage_layout(cfg, &stage)?;
     rr3_stage_unit(&stage, &profile_name)?;
@@ -331,6 +332,17 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         rr3_stage_module(cfg, &root, name)?;
     }
     Ok(stage)
+}
+
+/// staging 目录复用语义：**先清空再装配**。上一次失败或模块下线留下的文件不能
+/// 被打进本次 deb——陈旧模块是"包里多一件"最贵的错法；清理失败直接报错，不静默
+/// 续装。
+fn rr3_stage_reset(stage: &Path) -> Result<(), String> {
+    if stage.exists() {
+        fs::remove_dir_all(stage)
+            .map_err(|e| format!("清理旧 staging 树 {} 失败: {e}", stage.display()))?;
+    }
+    Ok(())
 }
 
 /// 注入产物完整性 + 模块名单 + 装载真值预验（缺席逐件点名，不静默跳过——
@@ -860,6 +872,21 @@ mod tests {
         );
         assert!(root.join("modules/rr3-act/config.toml").is_file());
         assert!(root.join("modules/rr3-connect/rr3-connect").is_file());
+    }
+
+    /// staging 复用必须先清空：上一次遗留的模块/配置不得进入本次包。
+    #[test]
+    fn stage_reset_removes_stale_files() {
+        let (payload, repo) = fixture();
+        let (cfg, out) = cfg_of(&payload, &repo);
+        let stage = out.with_file_name("rockrobot3.deb.stage");
+        let stale = stage.join("usr/lib/rockrobot3/modules/rr3-gone/module.toml");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        fs::write(&stale, "stale").unwrap();
+        let got = rr3_stage(&cfg).unwrap();
+        assert_eq!(got, stage);
+        assert!(!stale.exists(), "旧 staging 的陈旧模块必须被清掉");
+        assert!(stage.join("usr/bin/rrd").is_file(), "清空后必须重新装配");
     }
 
     #[test]
