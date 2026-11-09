@@ -933,35 +933,10 @@ fn rr3_domain_one(dt: &toml::Table, label: &str, errs: &mut Vec<String>) -> Rr3D
         let path = format!("{label}.{key}");
         match key {
             "name" | "sense" | "current_sense" | "switch" | "evidence" => {
-                match dt.get(key).and_then(toml::Value::as_str) {
-                    Some(s) if !s.is_empty() => {
-                        let v = s.to_string();
-                        match key {
-                            "name" => d.name = v,
-                            "sense" => d.sense = v,
-                            "current_sense" => d.current_sense = v,
-                            "evidence" => d.evidence = v,
-                            _ => d.switch = v,
-                        }
-                    }
-                    _ => errs.push(format!("{path} 缺失或不是非空字符串")),
-                }
+                rr3_domain_str(&mut d, key, dt.get(key), &path, errs)
             }
-            "switchable" | "armed" => match (key, dt.get(key).and_then(toml::Value::as_bool)) {
-                ("switchable", Some(b)) => d.switchable = b,
-                ("armed", Some(b)) => d.armed = b,
-                _ => errs.push(format!("{path} 缺失或不是布尔")),
-            },
-            _ => match supplies_int(dt.get(key), &path) {
-                Ok(v) => match key {
-                    "nominal_mv" => d.nominal_mv = v,
-                    "mild_mv" => d.mild_mv = v,
-                    "severe_mv" => d.severe_mv = v,
-                    "current_cap_ma" => d.current_cap_ma = v,
-                    _ => d.max_age_ms = v,
-                },
-                Err(e) => errs.push(e),
-            },
+            "switchable" | "armed" => rr3_domain_bool(&mut d, key, dt.get(key), &path, errs),
+            _ => rr3_domain_int(&mut d, key, dt.get(key), &path, errs),
         }
     }
     for k in dt.keys() {
@@ -973,6 +948,64 @@ fn rr3_domain_one(dt: &toml::Table, label: &str, errs: &mut Vec<String>) -> Rr3D
         }
     }
     d
+}
+
+/// 字符串类域键：非空即收；缺失/空串同文案。
+fn rr3_domain_str(
+    d: &mut Rr3Domain,
+    key: &str,
+    v: Option<&toml::Value>,
+    path: &str,
+    errs: &mut Vec<String>,
+) {
+    match v.and_then(toml::Value::as_str) {
+        Some(s) if !s.is_empty() => {
+            let v = s.to_string();
+            match key {
+                "name" => d.name = v,
+                "sense" => d.sense = v,
+                "current_sense" => d.current_sense = v,
+                "evidence" => d.evidence = v,
+                _ => d.switch = v,
+            }
+        }
+        _ => errs.push(format!("{path} 缺失或不是非空字符串")),
+    }
+}
+
+/// 布尔类域键：缺失/非布尔同文案。
+fn rr3_domain_bool(
+    d: &mut Rr3Domain,
+    key: &str,
+    v: Option<&toml::Value>,
+    path: &str,
+    errs: &mut Vec<String>,
+) {
+    match (key, v.and_then(toml::Value::as_bool)) {
+        ("switchable", Some(b)) => d.switchable = b,
+        ("armed", Some(b)) => d.armed = b,
+        _ => errs.push(format!("{path} 缺失或不是布尔")),
+    }
+}
+
+/// 数值类域键：经 [`supplies_int`] 校验，按键落位。
+fn rr3_domain_int(
+    d: &mut Rr3Domain,
+    key: &str,
+    v: Option<&toml::Value>,
+    path: &str,
+    errs: &mut Vec<String>,
+) {
+    match supplies_int(v, path) {
+        Ok(n) => match key {
+            "nominal_mv" => d.nominal_mv = n,
+            "mild_mv" => d.mild_mv = n,
+            "severe_mv" => d.severe_mv = n,
+            "current_cap_ma" => d.current_cap_ma = n,
+            _ => d.max_age_ms = n,
+        },
+        Err(e) => errs.push(e),
+    }
 }
 
 fn rr3_budget_parse(bt: &toml::Table, tier: &str, errs: &mut Vec<String>) -> Rr3Budget {
