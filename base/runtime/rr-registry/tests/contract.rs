@@ -539,22 +539,22 @@ fn registry_shape_is_pinned() {
         "owner 名不得重复登记: {owners:?}"
     );
 
-    // 2) topic 侧：43 条，且不重名（重名会让下面的子集论证失去意义）
+    // 2) topic 侧：与钉数单点一致，且不重名（重名会让下面的子集论证失去意义）
     let topics = registry_triples(&text);
     assert_eq!(
         topics.len(),
-        43,
-        "契约 43 条主题（0.0.5 第 IV 轮 MCP-0 2026-10-12 29→30：append brain/audio/tts_pcm 下行流，F-4 通路契约；增补轮六 批N2 件二 2026-10-18 30→31：append rr3-power/rail/state，ADR-0021 裁定 2；批N4 件六二 2026-10-19 31→32：append rr3-brain/ops/list 只读点名，B-12；批N4 件九二 2026-10-19 32→37：append 五模块 ops/list 只读点名五主题；批N4 件九三 2026-10-19 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 2026-10-20 38→39：append rr3-power/battery/ok 低电恢复沿，§17 运维留痕；ADR-0023 2026-10-24 39→42：append rr3-brain/model list/set/test 模型行面；A9 2026-11-09 42→43：append rr3-sense/servo/set 桥单所有者舵机命令面；与批C/批D 同一张改表纪律 §18.4 防重规则①）"
+        rr_registry::RR3_CONTRACT_TOPIC_COUNT,
+        "契约主题数与钉数单点不一致（改 contracts/topics.toml 须同批改 RR3_CONTRACT_TOPIC_COUNT）"
     );
     let names: HashSet<&str> = topics.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(names.len(), topics.len(), "topic 名不得重复登记");
 
-    // 3) kind 分布：23 request / 12 event / 4 stream / 4 notification
+    // 3) kind 分布：钉数 request，其余三类按契约现状
     let count = |want: &str| topics.iter().filter(|t| t.2 == want).count();
     assert_eq!(
         count("request"),
-        23,
-        "kind=request 的分布漂移（ADR-0023 19→22：append rr3-brain/model list/set/test；A9 22→23：append rr3-sense/servo/set）"
+        rr_registry::RR3_CONTRACT_REQUEST_COUNT,
+        "kind=request 分布与钉数单点不一致（改契约须同批改 RR3_CONTRACT_REQUEST_COUNT）"
     );
     assert_eq!(
         count("event"),

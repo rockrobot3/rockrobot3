@@ -37,7 +37,9 @@ pub use schema::{
     rr3_field_specs, rr3_get_by_path, rr3_rule_list, Rr3FieldSpec, RR3_MANIFEST_SCHEMA_VERSION,
 };
 pub use slots::{rr3_slot_parse, Rr3SlotTable};
-pub use topics::{rr3_topic_parse, Rr3TopicSet};
+pub use topics::{
+    rr3_topic_parse, Rr3TopicSet, RR3_CONTRACT_REQUEST_COUNT, RR3_CONTRACT_TOPIC_COUNT,
+};
 pub use validate::{
     rr3_manifest_chk, rr3_manifest_gate, rr3_registry_check, rr3_topics_chk, rr3_topics_names,
     rr3_topics_owners, Rr3ValidationReport,
