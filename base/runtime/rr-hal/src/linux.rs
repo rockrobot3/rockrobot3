@@ -18,6 +18,19 @@ use crate::{Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3ErrText, Rr3HalError};
 /// ALSA underrun/overrun 的 errno（EPIPE）
 const EPIPE: i32 = 32;
 
+/// 单次搬运的无进展上界（读/写同一口径）：`readi`/`writei` 回 0 帧，或 recover
+/// 成功但复搬运仍失败（PCM 半恢复/挂起态），逐次累计。到界即带因上抛——此前是
+/// `Ok(_) => continue` 裸空转：设备挂起时 100% CPU 死循环且零日志，板上表现就是
+/// "模块卡死、不知卡在哪"。
+const RR3_ALSA_STALL_MAX: u32 = 64;
+
+/// 无进展上抛（纯函数，点名操作/进度/累计次数）。
+fn rr3_alsa_stall_err(op: &str, done: usize, frames: usize, n: u32) -> Rr3HalError {
+    Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+        "alsa {op} 连续 {n} 次无进展（已搬 {done}/{frames} 帧）——设备挂起或半恢复，交调用方重开设备"
+    )))
+}
+
 /// open 参数门禁：与 sim 后端同一套要求（16bit 采样且 rate/channels 非零）
 fn rr3_alsa_cfg_check(cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
     if cfg.sample_rate_hz == 0 || cfg.channels == 0 || cfg.bit_depth != 16 {
@@ -130,12 +143,31 @@ impl Rr3AudioSource for Rr3AlsaAudioSource {
         let frames = buf.len() / ch;
         let io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
         let mut done = 0usize;
+        let mut stall = 0u32;
         while done < frames {
             match io.readi(&mut buf[done * ch..]) {
-                Ok(n) if n > 0 => done += n,
-                Ok(_) => continue,
-                Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => continue,
-                Err(_e) => return Err(Rr3HalError::Busy),
+                Ok(n) if n > 0 => {
+                    done += n;
+                    stall = 0;
+                }
+                Ok(_) => {
+                    stall += 1;
+                    if stall >= RR3_ALSA_STALL_MAX {
+                        return Err(rr3_alsa_stall_err("readi", done, frames, stall));
+                    }
+                    std::thread::yield_now();
+                }
+                Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => {
+                    stall += 1;
+                    if stall >= RR3_ALSA_STALL_MAX {
+                        return Err(rr3_alsa_stall_err("readi(recover)", done, frames, stall));
+                    }
+                }
+                Err(e) => {
+                    let errno = e.errno();
+                    eprintln!("rr-hal-alsa: readi 硬错 errno={errno}（已搬 {done}/{frames} 帧）");
+                    return Err(Rr3HalError::Busy);
+                }
             }
         }
         Ok(done * ch)
@@ -177,12 +209,38 @@ impl Rr3AudioSink for Rr3AlsaAudioSink {
         let total_frames = samples.len() / ch;
         let io = open.pcm.io_i16().map_err(|_e| Rr3HalError::Busy)?;
         let mut done = 0usize;
+        let mut stall = 0u32;
         while done < total_frames {
             match io.writei(&samples[done * ch..]) {
-                Ok(n) if n > 0 => done += n,
-                Ok(_) => continue,
-                Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => continue,
-                Err(_) => return Err(Rr3HalError::Busy),
+                Ok(n) if n > 0 => {
+                    done += n;
+                    stall = 0;
+                }
+                Ok(_) => {
+                    stall += 1;
+                    if stall >= RR3_ALSA_STALL_MAX {
+                        return Err(rr3_alsa_stall_err("writei", done, total_frames, stall));
+                    }
+                    std::thread::yield_now();
+                }
+                Err(e) if rr3_alsa_io_recover(&open.pcm, &e) => {
+                    stall += 1;
+                    if stall >= RR3_ALSA_STALL_MAX {
+                        return Err(rr3_alsa_stall_err(
+                            "writei(recover)",
+                            done,
+                            total_frames,
+                            stall,
+                        ));
+                    }
+                }
+                Err(e) => {
+                    let errno = e.errno();
+                    eprintln!(
+                        "rr-hal-alsa: writei 硬错 errno={errno}（已搬 {done}/{total_frames} 帧）"
+                    );
+                    return Err(Rr3HalError::Busy);
+                }
             }
         }
         Ok(())
