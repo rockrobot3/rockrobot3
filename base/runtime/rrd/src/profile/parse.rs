@@ -307,40 +307,62 @@ fn rr3_pin_num(i: usize, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<
 /// ——contracts/platform/<chip>.toml，批N1 基-22），非空必填：芯片是装机事实，
 /// 留空 = ⑤⑧ 判不了 = fail-closed（同"留空即红"纪律），未知键逐条点名。
 fn rr3_platform_parse(root: &toml::Value, errs: &mut Vec<String>) -> (String, String) {
-    let mut platform_tier = String::new();
-    let mut platform_chip = String::new();
-    match root.get("platform").and_then(toml::Value::as_table) {
-        None => errs
-            .push("缺少 [platform]（tier = host/rtos/bare；schema_version=2 起必填）".to_string()),
-        Some(t) => {
-            match t.get("tier") {
-                None => errs.push("[platform] 缺 tier（host/rtos/bare）".to_string()),
-                Some(v) => match v.as_str() {
-                    Some(s) if RR3_PLATFORM_TIERS.contains(&s) => platform_tier = s.to_string(),
-                    other => errs.push(format!(
-                        "platform.tier 必须是 host/rtos/bare 之一，收到 {other:?}"
-                    )),
-                },
-            }
-            match t.get("chip") {
-                Some(toml::Value::String(s)) if !s.trim().is_empty() => platform_chip = s.clone(),
-                Some(toml::Value::String(_)) => {
-                    errs.push("[platform].chip 不得为空串（平台事实表外键，contracts/platform/<chip>.toml 选册）".to_string())
-                }
-                Some(other) => errs.push(format!("[platform].chip 应为字符串，收到 {other:?}")),
-                None => errs.push(
-                    "[platform] 缺 chip（平台事实表外键——校验③④⑤⑧按它选 contracts/platform/<chip>.toml，留空即红）"
-                        .to_string(),
-                ),
-            }
-            for k in t.keys() {
-                if k != "tier" && k != "chip" {
-                    errs.push(format!("[platform] 未知键 {k}（只认 tier / chip）"));
-                }
-            }
+    let Some(t) = root.get("platform").and_then(toml::Value::as_table) else {
+        errs.push("缺少 [platform]（tier = host/rtos/bare；schema_version=2 起必填）".to_string());
+        return (String::new(), String::new());
+    };
+    let tier = rr3_plat_tier(t, errs);
+    let chip = rr3_plat_chip(t, errs);
+    for k in t.keys() {
+        if k != "tier" && k != "chip" {
+            errs.push(format!("[platform] 未知键 {k}（只认 tier / chip）"));
         }
     }
-    (platform_tier, platform_chip)
+    (tier, chip)
+}
+
+/// [platform].tier：封闭三档（host/rtos/bare）；缺键或出域逐条点名。
+fn rr3_plat_tier(t: &toml::Table, errs: &mut Vec<String>) -> String {
+    match t.get("tier") {
+        None => {
+            errs.push("[platform] 缺 tier（host/rtos/bare）".to_string());
+            String::new()
+        }
+        Some(v) => match v.as_str() {
+            Some(s) if RR3_PLATFORM_TIERS.contains(&s) => s.to_string(),
+            other => {
+                errs.push(format!(
+                    "platform.tier 必须是 host/rtos/bare 之一，收到 {other:?}"
+                ));
+                String::new()
+            }
+        },
+    }
+}
+
+/// [platform].chip：平台事实表外键，非空必填（留空 = ③④⑤⑧ 判不了，fail-closed）。
+fn rr3_plat_chip(t: &toml::Table, errs: &mut Vec<String>) -> String {
+    match t.get("chip") {
+        Some(toml::Value::String(s)) if !s.trim().is_empty() => s.clone(),
+        Some(toml::Value::String(_)) => {
+            errs.push(
+                "[platform].chip 不得为空串（平台事实表外键，contracts/platform/<chip>.toml 选册）"
+                    .to_string(),
+            );
+            String::new()
+        }
+        Some(other) => {
+            errs.push(format!("[platform].chip 应为字符串，收到 {other:?}"));
+            String::new()
+        }
+        None => {
+            errs.push(
+                "[platform] 缺 chip（平台事实表外键——校验③④⑤⑧按它选 contracts/platform/<chip>.toml，留空即红）"
+                    .to_string(),
+            );
+            String::new()
+        }
+    }
 }
 
 /// [runtime] 段解析产物（五键）
