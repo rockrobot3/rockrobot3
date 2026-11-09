@@ -240,7 +240,17 @@ fn rr3_ctl_item(
             ));
         }
     }
-    let name = match c.get("name").and_then(Value::as_str) {
+    let name = rr3_ctl_name(c, i, errs);
+    let kind = rr3_ctl_kind(c, i, errs);
+    let channels = rr3_ctl_chans(c, i, errs);
+    if let (Some(n), Some(k), Some(ch)) = (name, kind, channels) {
+        entries.push((n, k, ch));
+    }
+}
+
+/// `[[controller]]` 单条 name：非空字符串。
+fn rr3_ctl_name(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<String> {
+    match c.get("name").and_then(Value::as_str) {
         Some(n) if !n.trim().is_empty() => Some(n.to_string()),
         Some(_) => {
             errs.push(format!("controller[{i}].name 不得为空串"));
@@ -250,8 +260,12 @@ fn rr3_ctl_item(
             errs.push(format!("controller[{i}].name 应为字符串"));
             None
         }
-    };
-    let kind = match c.get("kind").and_then(Value::as_str) {
+    }
+}
+
+/// `[[controller]]` 单条 kind：封闭七值。
+fn rr3_ctl_kind(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<String> {
+    match c.get("kind").and_then(Value::as_str) {
         Some(k) if RR3_PLATFORM_KINDS.contains(&k) => Some(k.to_string()),
         Some(k) => {
             errs.push(format!(
@@ -263,8 +277,12 @@ fn rr3_ctl_item(
             errs.push(format!("controller[{i}].kind 应为字符串"));
             None
         }
-    };
-    let channels = match c.get("channels") {
+    }
+}
+
+/// `[[controller]]` 单条 channels：非负整数（0 = 无通道维，须显式写）。
+fn rr3_ctl_chans(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<i64> {
+    match c.get("channels") {
         Some(Value::Integer(n)) if *n >= 0 => Some(*n),
         Some(Value::Integer(n)) => {
             errs.push(format!("controller[{i}].channels 须非负，收到 {n}"));
@@ -280,9 +298,6 @@ fn rr3_ctl_item(
             ));
             None
         }
-    };
-    if let (Some(n), Some(k), Some(ch)) = (name, kind, channels) {
-        entries.push((n, k, ch));
     }
 }
 
