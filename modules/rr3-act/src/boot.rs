@@ -193,11 +193,12 @@ fn rr3_remote_bridge(
     Err(format!("舵机面探活失败({backend}): HAL 设备忙"))
 }
 
-/// HAL 执行面三面选择 + 开机探活：servo/led/relay 各读回一次，Unsupported /
-/// 探活读失败即致命——显式回错不静默退化（rr-hal 占位件的契约），也不给"半个
-/// 执行器"的假活。探活全是读面 &self（批I F1 同步化后无需 block_on）。自原
-/// composite.rs 逐字迁入（失败文案三条与「执行面就绪」回显逐字）；backend 名
-/// 回显后丢弃（错误文案复用点在三条 map_err）。
+/// HAL 执行面三面选择 + 开机探活。舵机面是执行器核心：Unsupported / 探活读失败
+/// 即致命（显式回错不静默退化，不给"半个执行器"的假活）。LED / 继电器是**可缺
+/// 面**：组合档装配单如实申报二者不在位（[enabled_slots] 未启用），rrd 据此注入
+/// 占位后端——占位在命令面以 Unsupported 回错就是诚实语义，进程不该因此拒启，
+/// 否则"只启用 act.servo 的合法装配"永远起不来（2026-11-09 真板实录）。其余读
+/// 失败（Busy / 参数错）仍是真故障，fail-closed 上抛。探活全是读面 &self。
 ///
 /// A9.2 桥冲突降级：组合档 `/dev/ttyAMA0` 由 rr3-sense 独占（音频 + 命令旁路），
 /// 本进程再开同一设备必得 `Busy`。此时舵机面改走 sense 的 `servo/set` RPC（同一
@@ -216,14 +217,23 @@ pub(crate) fn rr3_act_probe(bus: &BusHandle) -> Result<Rr3ActDevs, String> {
     };
     let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
     let (relay_gpio, relay_backend) = rr3_hal_gpio_out("relay");
-    led_gpio
-        .level()
-        .map_err(|e| format!("LED 面探活失败({led_backend}): {e}"))?;
-    relay_gpio
-        .level()
-        .map_err(|e| format!("继电器面探活失败({relay_backend}): {e}"))?;
+    rr3_opt_face("LED", led_backend, led_gpio.level())?;
+    rr3_opt_face("继电器", relay_backend, relay_gpio.level())?;
     eprintln!("执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}");
     Ok((servo_dev, led_gpio, relay_gpio))
+}
+
+/// 可缺面探活：占位后端（`Unsupported`）是装配单"该格未启用"的诚实投影——点名
+/// 后继续，使用该面时仍由占位逐次回错；其余错误（Busy/参数错）是真故障，致命。
+fn rr3_opt_face(face: &str, backend: &str, probe: Result<bool, Rr3HalError>) -> Result<(), String> {
+    match probe {
+        Ok(_) => Ok(()),
+        Err(Rr3HalError::Unsupported(_)) => {
+            eprintln!("{face} 面未启用（{backend}），该面命令按 Unsupported 回错，其余面继续");
+            Ok(())
+        }
+        Err(e) => Err(format!("{face} 面探活失败({backend}): {e}")),
+    }
 }
 
 /// 反射环宿主线程 spawn：进程内 1kHz 闭环的位子，永不进总线（ADR-0007 裁定 1）。
@@ -469,6 +479,14 @@ saturate_notice_ms = 500
         );
         assert_eq!(cfg.reflex.loop_hz, 1000);
         assert_eq!(cfg.reflex.saturate_notice_ms, 500);
+    }
+
+    /// 可缺面门：占位（装配单未启用该格）只点名不致命；Busy/参数错是真故障。
+    #[test]
+    fn opt_face_degrades_only_placeholder() {
+        assert!(rr3_opt_face("LED", "placeholder", Err(Rr3HalError::Unsupported("x"))).is_ok());
+        assert!(rr3_opt_face("LED", "linux", Err(Rr3HalError::Busy)).is_err());
+        assert!(rr3_opt_face("继电器", "linux", Ok(true)).is_ok());
     }
 
     #[test]
