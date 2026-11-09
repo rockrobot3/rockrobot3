@@ -439,39 +439,42 @@ pub(super) fn rr3_selftest_verdict(legs: &[Value], expect: &Rr3SelftestExpect) -
     for l in legs {
         let name = l.get("leg").and_then(Value::as_str).unwrap_or("");
         let state = l.get("pass").and_then(Value::as_str).unwrap_or("");
-        match name {
-            "speaker" | "relay" | "face" => {
-                let ix = match name {
-                    "speaker" => 0,
-                    "relay" => 1,
-                    _ => 2,
-                };
-                seen[ix] = true;
-                let want = [expect.speaker, expect.relay, expect.face][ix];
-                if state != want {
-                    return "fail";
-                }
-            }
-            n if n.starts_with("wiring/") => {
-                if state == "fail" {
-                    return "fail";
-                }
-            }
-            // contracts/* 组（批N5 件五笔4，Z-4）：同 wiring 组规则——组内零
-            // fail 即组过（n-a 不拖累不救场；判据同质无豁免面，n-a 不会出现，
-            // 万一出现按零 fail 处理不放大）
-            n if n.starts_with("contracts/") => {
-                if state == "fail" {
-                    return "fail";
-                }
-            }
-            _ => return "fail", // 腿册外未知腿名 fail-closed：不算通过
+        if !rr3_leg_track(name, state, expect, &mut seen) {
+            return "fail";
         }
     }
     if seen.iter().any(|s| !s) {
         return "fail"; // 结果集缺固定腿即红
     }
     "pass"
+}
+
+/// 单腿裁决：固定三腿对预期值并记到场；wiring/* 与 contracts/* 组内零 fail 即
+/// 组过（n-a 不拖累不救场，判据同质无豁免面）；腿册外未知腿名 fail-closed。
+fn rr3_leg_track(
+    name: &str,
+    state: &str,
+    expect: &Rr3SelftestExpect,
+    seen: &mut [bool; 3],
+) -> bool {
+    if let Some(ix) = rr3_leg_ix(name) {
+        seen[ix] = true;
+        return state == [expect.speaker, expect.relay, expect.face][ix];
+    }
+    if name.starts_with("wiring/") || name.starts_with("contracts/") {
+        return state != "fail";
+    }
+    false
+}
+
+/// 固定腿名 → 记账位（speaker/relay/face；册外 None）。
+fn rr3_leg_ix(name: &str) -> Option<usize> {
+    match name {
+        "speaker" => Some(0),
+        "relay" => Some(1),
+        "face" => Some(2),
+        _ => None,
+    }
 }
 
 /// 进程内动作执行：递主循环、等应答（动作在主循环串行处理，与 TTS 点名互斥）。
