@@ -70,59 +70,42 @@ fn rr3_semver_ok(s: &str) -> bool {
 /// 单条规则检查（上下文无关规则）。`own_topic` 需 manifest.name，由
 /// `rr3_manifest_gate` 特判，不进这里。
 pub fn rr3_registry_check(rule: &str, value: &str) -> Vec<String> {
-    let bad = |m: String| vec![m];
-    match rule {
-        "none" => vec![],
-        "module_name" => {
-            let stem = value.strip_prefix(RR3_TOPIC_HEAD).unwrap_or("");
-            if rr3_lower_alpha(stem) {
-                vec![]
-            } else {
-                bad(format!("manifest.name 非法: {value}（要求 ^rr3-[a-z]+$）"))
-            }
-        }
-        "semver" => {
-            if rr3_semver_ok(value) {
-                vec![]
-            } else {
-                bad(format!("semver 非法: {value}（要求点分数字）"))
-            }
-        }
-        "type" | "lang" | "restart_policy" => {
-            let allowed = rr3_rule_list(rule).unwrap_or_default();
-            if allowed.iter().any(|a| a == value) {
-                vec![]
-            } else {
-                bad(format!("{rule} 越界: {value}（允许 {allowed:?}）"))
-            }
-        }
-        "capability" => {
-            if rr3_capability_shape(value) {
-                vec![]
-            } else {
-                bad(format!(
-                    "capability 非法: {value}（要求 ^[a-z]+(\\.[a-z_]+)+$）"
-                ))
-            }
-        }
+    let pass = match rule {
+        "none" => true,
+        "module_name" => rr3_lower_alpha(value.strip_prefix(RR3_TOPIC_HEAD).unwrap_or("")),
+        "semver" => rr3_semver_ok(value),
+        "type" | "lang" | "restart_policy" => rr3_rule_list(rule)
+            .unwrap_or_default()
+            .iter()
+            .any(|a| a == value),
+        "capability" => rr3_capability_shape(value),
         // 原子件名（atom.schema.toml，0.0.5 批B①）：^[a-z][a-z_]*$，复用 capability 段规则
-        "atom_name" => {
-            if rr3_lower_us(value) {
-                vec![]
-            } else {
-                bad(format!("atom.name 非法: {value}（要求 ^[a-z][a-z_]*$）"))
-            }
+        "atom_name" => rr3_lower_us(value),
+        "topic" => rr3_topic_shape_ok(value),
+        other => return vec![format!("未知规则名（schema 与代码不同步）: {other}")],
+    };
+    if pass {
+        Vec::new()
+    } else {
+        vec![rr3_rule_err(rule, value)]
+    }
+}
+
+/// 规则失配文案（一句一规则，与判据同表单点；新增规则两处同批）。
+fn rr3_rule_err(rule: &str, value: &str) -> String {
+    match rule {
+        "module_name" => format!("manifest.name 非法: {value}（要求 ^rr3-[a-z]+$）"),
+        "semver" => format!("semver 非法: {value}（要求点分数字）"),
+        "type" | "lang" | "restart_policy" => {
+            format!(
+                "{rule} 越界: {value}（允许 {:?}）",
+                rr3_rule_list(rule).unwrap_or_default()
+            )
         }
-        "topic" => {
-            if rr3_topic_shape_ok(value) {
-                vec![]
-            } else {
-                bad(format!(
-                    "topic 非法: {value}（要求 rr3-<模块>/<域>/<事件>）"
-                ))
-            }
-        }
-        other => bad(format!("未知规则名（schema 与代码不同步）: {other}")),
+        "capability" => format!("capability 非法: {value}（要求 ^[a-z]+(\\.[a-z_]+)+$）"),
+        "atom_name" => format!("atom.name 非法: {value}（要求 ^[a-z][a-z_]*$）"),
+        "topic" => format!("topic 非法: {value}（要求 rr3-<模块>/<域>/<事件>）"),
+        other => format!("未知规则名（schema 与代码不同步）: {other}"),
     }
 }
 
@@ -307,7 +290,21 @@ fn rr3_chk_field(
         return;
     };
 
-    let kind_ok = match spec.kind.as_str() {
+    if !rr3_kind_ok(spec, value, self_name, topics, errs) {
+        errs.push(rr3_type_err(&spec.path, &spec.kind, value));
+    }
+}
+
+/// 类型与规则的联合裁决：string/bool/int/list 四类，未知 kind = 契约漂移（panic）。
+/// string 与 list 的规则检查在本层下沉，bool/int 只看形状。
+fn rr3_kind_ok(
+    spec: &Rr3FieldSpec,
+    value: &Value,
+    self_name: &str,
+    topics: &crate::topics::Rr3TopicSet,
+    errs: &mut Vec<String>,
+) -> bool {
+    match spec.kind.as_str() {
         "string" => match value.as_str() {
             Some(s) => {
                 if let Some(rule) = &spec.rule {
@@ -319,31 +316,38 @@ fn rr3_chk_field(
         },
         "bool" => value.as_bool().is_some(),
         "int" => value.as_integer().is_some(),
-        "list" => match (value.as_array(), spec.rule.as_deref()) {
-            (Some(arr), Some(rule)) => {
-                for (idx, item) in arr.iter().enumerate() {
-                    // F1：列表项非字符串是 manifest 类型错误，必须报告而非被 filter_map 静默
-                    // 丢弃（否则同段的合法项会掩盖它，fail-open）。
-                    let Some(s) = item.as_str() else {
-                        errs.push(format!(
-                            "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
-                            spec.path,
-                            idx + 1
-                        ));
-                        continue;
-                    };
-                    rr3_chk_item(spec, rule, s, self_name, topics, errs);
-                }
-                true
-            }
-            (Some(_), None) => true,
-            _ => false,
-        },
+        "list" => rr3_chk_list(spec, value, self_name, topics, errs),
         other => panic!("schema 未知 kind {other}（契约与代码不同步）"),
-    };
-    if !kind_ok {
-        errs.push(rr3_type_err(&spec.path, &spec.kind, value));
     }
+}
+
+/// 列表字段：无规则只看数组形状；有规则逐项过 `rr3_chk_item`。非字符串项必须
+/// 点名（F1：filter_map 静默丢弃会让同段合法项掩盖类型错，fail-open）。
+fn rr3_chk_list(
+    spec: &Rr3FieldSpec,
+    value: &Value,
+    self_name: &str,
+    topics: &crate::topics::Rr3TopicSet,
+    errs: &mut Vec<String>,
+) -> bool {
+    let Some(arr) = value.as_array() else {
+        return false;
+    };
+    let Some(rule) = spec.rule.as_deref() else {
+        return true;
+    };
+    for (idx, item) in arr.iter().enumerate() {
+        let Some(s) = item.as_str() else {
+            errs.push(format!(
+                "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
+                spec.path,
+                idx + 1
+            ));
+            continue;
+        };
+        rr3_chk_item(spec, rule, s, self_name, topics, errs);
+    }
+    true
 }
 
 /// 列表项规则：own_topic 含前缀归属、主题注册与 retired 三重判定；
