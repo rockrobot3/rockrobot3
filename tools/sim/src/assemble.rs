@@ -36,6 +36,14 @@ use crate::drill::{
 /// 装配演练就绪上界：冷启动 + 六进程注册也要够用
 const RR3_ASSEMBLE_READY_DEADLINE: Duration = Duration::from_secs(60);
 
+/// 本次运行的唯一戳（纳秒）：缺省工作目录据此与上一轮隔离。
+fn rr3_sim_stamp() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
 /// 仓源 manifest 的 entry 装机改写（rr3-pack `rr3_manifest_rewrite` 同语义同
 /// 三道门，只改 entry 引号内的值，其余字节原样）：
 /// 门 0 装机值可装机（绝对路径 + 无 `.` / `..` 段；POSIX 语法判定——
@@ -215,10 +223,20 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
 
     // ---- 1. 夹具：演练 modules-root（装机布局）----
+    // 缺省工作目录每次运行唯一（pid 会被容器快速复用，单 pid 命名会让上一轮
+    // 遗留模块混进本轮装配）；显式 --socket 时目录归调用方，不删其父目录。
+    let owned_dir = a.socket.is_none();
     let workdir = match &a.socket {
         Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
-        None => std::env::temp_dir().join(format!("rr3-sim-assemble-{}", std::process::id())),
+        None => std::env::temp_dir().join(format!(
+            "rr3-sim-assemble-{}-{}",
+            std::process::id(),
+            rr3_sim_stamp()
+        )),
     };
+    if owned_dir {
+        let _ = std::fs::remove_dir_all(&workdir);
+    }
     std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
     let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
     let _ = std::fs::remove_file(&socket);
@@ -255,6 +273,10 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
 
     match outcome {
         Ok(()) => {
+            // 成功即收现场（失败保留供排障，错误信息已点名 workdir）。
+            if owned_dir {
+                let _ = std::fs::remove_dir_all(&workdir);
+            }
             report.push_str(rr3_section("演练结论").as_str());
             report.push_str(&format!(
                 "装配演练 OK：{} 个 face 模块全 running + denied_publish = 0（装配单 {}）\n",
