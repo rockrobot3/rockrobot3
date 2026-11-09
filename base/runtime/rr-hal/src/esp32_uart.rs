@@ -167,8 +167,8 @@ struct Rr3BridgeConn {
 }
 
 impl Rr3BridgeConn {
-    /// 波特率显式档（批D②）：板固件 `board::UART2_BAUD_HZ`（2026-10-30 起 1.5M）
-    /// 时经 env/构造参数同档传入。
+    /// 波特率显式档（批D②）：缺省与板固件 `board::UART2_BAUD_HZ` 同源
+    /// （[`RR3_BRIDGE_BAUD`]），env/构造参数只作降速实验覆盖。
     fn rr3_bridge_conn_new(path: PathBuf, baud: u32) -> Self {
         Self {
             path,
@@ -531,8 +531,8 @@ mod tests {
         );
         assert_eq!(RR3_PERIPH_TASK, 2, "板上执行面占首模块池位形");
         assert_eq!(
-            RR3_BRIDGE_BAUD, 115200,
-            "缺省档保持 115200（Q1=(a)：宿主缺省不变）"
+            RR3_BRIDGE_BAUD, 1_500_000,
+            "桥面定档 1.5M：与板固件 UART2_BAUD_HZ 共用 rr-periph-proto 常量"
         );
     }
 }

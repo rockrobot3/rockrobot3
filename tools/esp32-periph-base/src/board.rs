@@ -306,8 +306,10 @@ pub(crate) fn rr3_bindings_check(b: &Rr3BoardBindings) -> usize {
 /// 优化），换适配器/换档位都不消除 → **定档 1.5M**：占线 95%→46%，2M 不取
 /// （误码率不随档位下降，余量收益换不回物理层风险）。**档位可编译期取值，
 /// 物理可行性以长跑误码为准**；换线/换适配器后须重跑同套探针。
-/// 宿主须显式同档（`RR3_HAL_PERIPH_BAUD` / `rr3-audio-rec --baud` / 探针 termios）。
-pub(crate) const UART2_BAUD_HZ: u32 = 1_500_000;
+/// 宿主与本常量共用 [`rr_periph_proto::consts::RR3_BRIDGE_BAUD`]（单点真值：
+/// 桥链是同一根 UART 的两端，缺省值各写一份必然漂移）；`RR3_HAL_PERIPH_BAUD`
+/// / `rr3-audio-rec --baud` 仅作显式覆盖（换线实验用的降速档）。
+pub(crate) const UART2_BAUD_HZ: u32 = rr_periph_proto::consts::RR3_BRIDGE_BAUD;
 /// LEDC 定时器频率（SG90 50Hz）。
 pub(crate) const LEDC_FREQ_HZ: u32 = 50;
 /// LEDC 分辨率（50Hz×2^14=819200Hz，源 80MHz 分频 97.66 → 实际 ≈50.0Hz）。
