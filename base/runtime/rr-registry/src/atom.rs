@@ -192,50 +192,66 @@ fn rr3_atom_one(
         return;
     };
     match spec.kind.as_str() {
-        "string" => match value.as_str() {
-            Some(s) => {
-                if let Some(rule) = &spec.rule {
-                    errs.extend(crate::validate::rr3_registry_check(rule, s));
-                }
-            }
-            None => errs.push(format!(
-                "字段 {} 类型应为 string，实际为 {value:?}",
-                spec.path
-            )),
-        },
-        "list" => match value.as_array() {
-            Some(arr) => {
-                for (idx, item) in arr.iter().enumerate() {
-                    let Some(s) = item.as_str() else {
-                        errs.push(format!(
-                            "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
-                            spec.path,
-                            idx + 1
-                        ));
-                        continue;
-                    };
-                    if let Some(rule) = &spec.rule {
-                        errs.extend(crate::validate::rr3_registry_check(rule, s));
-                    }
-                    // 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）
-                    if (spec.path == "provides.slots" || spec.path == "uses.slots")
-                        && !slots.rr3_slot_contains(s)
-                    {
-                        errs.push(format!("字段 {} 引用未登记格位 {s}", spec.path));
-                    }
-                }
-            }
-            None => errs.push(format!(
-                "字段 {} 类型应为 list，实际为 {value:?}",
-                spec.path
-            )),
-        },
-        "int" => {
-            if value.as_integer().is_none() {
-                errs.push(format!("字段 {} 类型应为 int，实际为 {value:?}", spec.path));
-            }
-        }
+        "string" => rr3_atom_str(spec, value, errs),
+        "list" => rr3_atom_list(spec, value, slots, errs),
+        "int" => rr3_atom_int(spec, value, errs),
         other => panic!("atom schema 未知 kind {other}（契约与代码不同步）"),
+    }
+}
+
+/// string 型：类型判定 + 词形规则校验
+fn rr3_atom_str(spec: &Rr3FieldSpec, value: &Value, errs: &mut Vec<String>) {
+    let Some(s) = value.as_str() else {
+        errs.push(format!(
+            "字段 {} 类型应为 string，实际为 {value:?}",
+            spec.path
+        ));
+        return;
+    };
+    if let Some(rule) = &spec.rule {
+        errs.extend(crate::validate::rr3_registry_check(rule, s));
+    }
+}
+
+/// list 型：逐项字符串判定 + 词形规则 + 查册门（provides/uses 每格须命中格位表）
+fn rr3_atom_list(
+    spec: &Rr3FieldSpec,
+    value: &Value,
+    slots: &crate::slots::Rr3SlotTable,
+    errs: &mut Vec<String>,
+) {
+    let Some(arr) = value.as_array() else {
+        errs.push(format!(
+            "字段 {} 类型应为 list，实际为 {value:?}",
+            spec.path
+        ));
+        return;
+    };
+    for (idx, item) in arr.iter().enumerate() {
+        let Some(s) = item.as_str() else {
+            errs.push(format!(
+                "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
+                spec.path,
+                idx + 1
+            ));
+            continue;
+        };
+        if let Some(rule) = &spec.rule {
+            errs.extend(crate::validate::rr3_registry_check(rule, s));
+        }
+        // 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）
+        if (spec.path == "provides.slots" || spec.path == "uses.slots")
+            && !slots.rr3_slot_contains(s)
+        {
+            errs.push(format!("字段 {} 引用未登记格位 {s}", spec.path));
+        }
+    }
+}
+
+/// int 型：JSON 整数判定（浮点/字符串不算）
+fn rr3_atom_int(spec: &Rr3FieldSpec, value: &Value, errs: &mut Vec<String>) {
+    if value.as_integer().is_none() {
+        errs.push(format!("字段 {} 类型应为 int，实际为 {value:?}", spec.path));
     }
 }
 
