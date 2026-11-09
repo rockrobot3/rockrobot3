@@ -450,16 +450,35 @@ fn rr3_tee_write(sink: &mut Option<std::fs::File>, bytes: &[u8]) {
     }
 }
 
-/// 桥链周期统计（10min 窗）：帧数/坏帧/重连累计，1.5M 长跑的误码口径。
-/// 误码率 = 坏帧 / 音频帧；一次会话内即可算，跨重连也连续（计数在核上）。
-fn rr3_stat_tick(core: &Rr3Esp32AudioCore) {
+/// 桥链周期统计（10min 窗）：本窗增量 + 生命周期累计。误码率按**本窗**坏/帧
+/// 计算（累计口径受重连/重启影响，只作参考）；增量是排障主读数。
+fn rr3_stat_tick(core: &Rr3Esp32AudioCore, mark: &mut Rr3StatMark) {
+    let chunks = core.chunks.load(Ordering::Relaxed);
+    let errs = core.errs.load(Ordering::Relaxed);
+    let recs = core.reconnects.load(Ordering::Relaxed);
     eprintln!(
-        "rr-hal-esp32-audio: 桥链统计（{}min 窗）: 音频帧累计={} 坏帧累计={} 重连累计={}",
+        "rr-hal-esp32-audio: 桥链统计（{}min 窗）: 本窗帧=+{} 坏=+{} 重连=+{} | 累计帧={} 坏={} 重连={}",
         RR3_BRIDGE_STAT_PERIOD.as_secs() / 60,
-        core.chunks.load(Ordering::Relaxed),
-        core.errs.load(Ordering::Relaxed),
-        core.reconnects.load(Ordering::Relaxed),
+        chunks.saturating_sub(mark.chunks),
+        errs.saturating_sub(mark.errs),
+        recs.saturating_sub(mark.recs),
+        chunks,
+        errs,
+        recs,
     );
+    *mark = Rr3StatMark {
+        chunks,
+        errs,
+        recs,
+    };
+}
+
+/// 统计水位（上一窗的累计值；只由读线程持有）。
+#[derive(Default)]
+struct Rr3StatMark {
+    chunks: u64,
+    errs: u64,
+    recs: u64,
 }
 
 /// 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出（板侧执行前
@@ -498,6 +517,8 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     let mut once = Rr3IngestLog::default();
     // 桥链周期统计计时（统计面与链路控制解耦：到点只打一行，不改任何状态）
     let mut stat_at = Instant::now();
+    // 统计水位（上一窗累计值；本窗增量 = 现值 − 水位）
+    let mut stat_mark = Rr3StatMark::default();
     // 宿主音频心跳计时（A9.3：板侧失联看门狗的时间源）
     let mut ping_at = Instant::now();
     // 命令旁路请求 id 计数（读线程局部；fire-and-forget 面只服务回执对账日志，
@@ -522,7 +543,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
             }
             if stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
                 stat_at = Instant::now();
-                rr3_stat_tick(&core);
+                rr3_stat_tick(&core, &mut stat_mark);
             }
             // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
             // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
