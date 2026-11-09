@@ -260,6 +260,12 @@ fn owner_for_echo(registered: Option<String>) -> String {
         .unwrap_or_else(|| "?".to_string())
 }
 
+/// 运维计数聚合表的键数上界：模块自报键是**外部输入**（心跳 `counters`），
+/// 键只增不减且随 write-through 落盘——故障模块每拍换键可把内存/计数器文件
+/// 撑爆。六模块的静态键集远小于本值；越界即拒新键并一次性点名（既有键照常
+/// 累加，不丢历史账）。
+const RR3_CTR_KEY_CAP: usize = 4096;
+
 #[derive(Debug)]
 pub struct RrdRegistry {
     modules: BTreeMap<String, Entry>,
@@ -299,6 +305,8 @@ pub struct RrdRegistry {
     /// 持久化的内存真值，落盘点在 daemon 启动与本表心跳归并后的调用方（conn）。
     /// 与 `crash_streak`（崩溃重启账）分开：这里是业务运维账，"机器慢先看数字"。
     counters: BTreeMap<String, u64>,
+    /// 键数上界越界只点名一次（避免每拍刷屏；[`RR3_CTR_KEY_CAP`]）。
+    ctr_cap_noted: bool,
     /// 广播转发留痕闸（真板验收 2026-11-08）：每个 topic 上次的接收连接数。音频
     /// PCM 每帧一条"转发到 N 个连接"会冲垮日志环，只在连接数变化（含首次）时
     /// 留痕——拓扑变化才是运维要看的信号。
@@ -320,6 +328,7 @@ impl RrdRegistry {
             providers: BTreeMap::new(),
             low_power: false,
             counters: BTreeMap::new(),
+            ctr_cap_noted: false,
             fanout_last: BTreeMap::new(),
         }
     }
@@ -357,6 +366,15 @@ impl RrdRegistry {
         let mut changed = false;
         for (k, v) in counters {
             let key = format!("{module}/{k}");
+            if !self.counters.contains_key(&key) && self.counters.len() >= RR3_CTR_KEY_CAP {
+                if !self.ctr_cap_noted {
+                    self.ctr_cap_noted = true;
+                    rr3_log(&format!(
+                        "运维计数键数达上界 {RR3_CTR_KEY_CAP}，拒新键 {key}（既有键照常累加；查模块是否每拍换键）"
+                    ));
+                }
+                continue;
+            }
             let slot = self.counters.entry(key).or_insert(0);
             let before = *slot;
             *slot = before.saturating_add(*v);
@@ -2104,6 +2122,27 @@ owner = "rr3-simb"
             r.rr3_reg_counters().is_empty(),
             "replace 是启动装载入口，整体替换"
         );
+    }
+
+    /// 计数键数上界（外部输入防护）：满帽后拒新键、既有键照常累加、只点名一次。
+    #[test]
+    fn counters_key_cap_rejects_new_keys_keeps_old() {
+        use std::collections::BTreeMap;
+        let mut r = RrdRegistry::new(1000);
+        let mut beat = BTreeMap::new();
+        for i in 0..RR3_CTR_KEY_CAP {
+            beat.insert(format!("k{i}"), 1u64);
+        }
+        assert!(r.rr3_reg_ctr_merge("m", &beat));
+        assert_eq!(r.rr3_reg_counters().len(), RR3_CTR_KEY_CAP);
+        let mut extra = BTreeMap::new();
+        extra.insert("overflow".to_string(), 1u64);
+        assert!(!r.rr3_reg_ctr_merge("m", &extra), "越界新键不产生变化");
+        assert!(!r.rr3_reg_counters().contains_key("m/overflow"));
+        let mut old = BTreeMap::new();
+        old.insert("k0".to_string(), 5u64);
+        assert!(r.rr3_reg_ctr_merge("m", &old), "既有键仍可累加");
+        assert_eq!(r.rr3_reg_counters()["m/k0"], 6);
     }
 
     /// `--restart-base-ms 0` 的**现值**是 `delay_ms = 0`（第 1 档 1×0、第 2 档 2×0 都是 0，
