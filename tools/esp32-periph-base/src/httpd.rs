@@ -793,6 +793,12 @@ unsafe fn wifi_ap_configure() -> Result<&'static str, i32> {
 }
 
 unsafe fn wifi_sta_set_credentials(ssid: &[u8], pass: &[u8]) -> i32 {
+    // FFI 边界自守（静态审计 B16）：定长数组越界复制＝panic＝整板 abort，这里把
+    // "上层忘了校形"折成错误码走事务回退，永不 panic（读窄缝已同域校验，本关是
+    // 第二道墙）。
+    if ssid.len() > crate::cred::RR3_CRED_SSID_MAX || pass.len() > crate::cred::RR3_CRED_PASS_MAX {
+        return -1; // 形制域内错误（非 esp_err 码空间，同 cred 模块口径）
+    }
     let mut wcfg: wifi_config_t = std::mem::zeroed();
     wcfg.sta.ssid[..ssid.len()].copy_from_slice(ssid);
     wcfg.sta.password[..pass.len()].copy_from_slice(pass);

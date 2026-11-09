@@ -71,8 +71,21 @@ pub(crate) fn rr3_cred_form_check(ssid: &str, pass: &str) -> Result<(), &'static
     Ok(())
 }
 
-/// 读时现取（读取窄缝唯一出入口）：两键齐才 `Some`（半份凭据＝没配，不猜不造）。
-/// NVS 未初始化/命名空间不存在/键不存在/值超形——一律 `None`＋键名级点名（不出值）。
+/// 读出值定形（纯函数，单测钉域）：NUL 截断 + 字长上限 + UTF-8 三关。**读侧与写侧
+/// 同域**——NVS 里可能躺着旧固件/手改的超形值，直接放进 WiFi 定长数组
+/// （`sta.ssid[32]`/`sta.password[64]`）的 `copy_from_slice` 就是越界 panic＝整板
+/// abort（静态审计 B16）。空串合法（开放网络密码），空 SSID 由形制门另判。
+fn rr3_cred_take(raw: &[u8], max: usize) -> Option<String> {
+    let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    if end > max {
+        return None;
+    }
+    std::str::from_utf8(&raw[..end]).ok().map(str::to_string)
+}
+
+/// 读时现取（读取窄缝唯一出入口）：两键齐且**形制同门**才 `Some`（半份/超形凭据＝
+/// 没配，不猜不造）。NVS 未初始化/命名空间不存在/键不存在/值超形——一律 `None`＋
+/// 键名级点名（不出值）。
 pub(crate) fn rr3_cred_read() -> Option<Rr3Cred> {
     let ns = CString::new(RR3_CRED_NAMESPACE).ok()?;
     let k_ssid = CString::new(RR3_CRED_KEY_SSID).ok()?;
@@ -84,8 +97,16 @@ pub(crate) fn rr3_cred_read() -> Option<Rr3Cred> {
     }
     let r = unsafe {
         (|| {
-            let ssid = nvs_get_str_boxed(h, &k_ssid)?;
-            let pass = nvs_get_str_boxed(h, &k_pass)?;
+            let ssid = nvs_get_str_boxed(h, &k_ssid, RR3_CRED_SSID_MAX)?;
+            let pass = nvs_get_str_boxed(h, &k_pass, RR3_CRED_PASS_MAX)?;
+            // 写侧同门复验（空 SSID 等半份形制在此折缺席，读口不是"任何字节能进"
+            if rr3_cred_form_check(&ssid, &pass).is_err() {
+                eprintln!(
+                    "[periph] 凭据形制不合（键 {}）——按缺席处理",
+                    k_ssid.to_string_lossy()
+                );
+                return None;
+            }
             Some(Rr3Cred::new(ssid, pass))
         })()
     };
@@ -95,25 +116,24 @@ pub(crate) fn rr3_cred_read() -> Option<Rr3Cred> {
 
 /// 单键读出（定长缓冲一次取——形制上限已知，两段式探测无必要；超形/坏 UTF-8＝
 /// 不认，点名后按缺席处理——fail-honest 不静默造值）。
-unsafe fn nvs_get_str_boxed(h: nvs_handle_t, key: &CString) -> Option<String> {
-    // +1 NUL；65 容密码形制上限 64——超形值读出即 INVALID_LENGTH，点名缺席
+unsafe fn nvs_get_str_boxed(h: nvs_handle_t, key: &CString, max: usize) -> Option<String> {
+    // +1 NUL；缓冲按**密码上限** 64 取（两键中最宽者），逐键上限由 take 判
     let mut buf = [0u8; RR3_CRED_PASS_MAX + 1];
     let mut len = buf.len();
     let r = nvs_get_str(h, key.as_ptr(), buf.as_mut_ptr() as *mut _, &mut len);
     let kname = key.to_string_lossy();
     if r == ESP_ERR_NVS_INVALID_LENGTH {
-        eprintln!("[periph] 凭据键 {kname} 值超形（>{RR3_CRED_PASS_MAX}B）——按缺席处理");
+        eprintln!("[periph] 凭据键 {kname} 值超形（>{max}B）——按缺席处理");
         return None;
     }
     if r != ESP_OK {
         // NVS_NOT_FOUND 等＝该键没配（常态走 None）；其余错误同样键名级点名不出值
         return None;
     }
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    match std::str::from_utf8(&buf[..end]) {
-        Ok(s) => Some(s.to_string()),
-        Err(_) => {
-            eprintln!("[periph] 凭据键 {kname} 值非 UTF-8——按缺席处理");
+    match rr3_cred_take(&buf, max) {
+        Some(s) => Some(s),
+        None => {
+            eprintln!("[periph] 凭据键 {kname} 值非 UTF-8 或超形（>{max}B）——按缺席处理");
             None
         }
     }
@@ -223,6 +243,39 @@ mod tests {
         assert!(
             rr3_cred_form_check(&ok_ssid, &bad_pass).is_err(),
             "密码 65B 必须红"
+        );
+    }
+
+    /// 读侧定形（静态审计 B16）：NVS 里的超形/坏 UTF-8 值不得流出读窄缝——
+    /// 写侧形制门只拦新写入，旧固件/手改的存量值必须同域拒（否则定长数组
+    /// `copy_from_slice` 越界即整板 abort）。空串合法（开放网络密码）。
+    #[test]
+    fn take_rejects_oversize_and_bad_utf8() {
+        assert_eq!(
+            rr3_cred_take(b"ap\0", RR3_CRED_SSID_MAX).as_deref(),
+            Some("ap")
+        );
+        assert_eq!(
+            rr3_cred_take(b"", RR3_CRED_PASS_MAX).as_deref(),
+            Some(""),
+            "空密码合法"
+        );
+        let max_ssid = "a".repeat(RR3_CRED_SSID_MAX);
+        assert_eq!(
+            rr3_cred_take(max_ssid.as_bytes(), RR3_CRED_SSID_MAX).as_deref(),
+            Some(max_ssid.as_str()),
+            "恰好 32B 合法（无 NUL 也按全长取）"
+        );
+        let over = "a".repeat(RR3_CRED_SSID_MAX + 1);
+        assert_eq!(
+            rr3_cred_take(over.as_bytes(), RR3_CRED_SSID_MAX),
+            None,
+            "33B SSID 必须缺席"
+        );
+        assert_eq!(
+            rr3_cred_take(&[0xff, 0xfe], RR3_CRED_PASS_MAX),
+            None,
+            "非 UTF-8 必须缺席"
         );
     }
 
