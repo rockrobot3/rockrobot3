@@ -369,8 +369,8 @@ mod tests {
     #[test]
     fn atom_generation_passes_registry_validation() {
         let root = scratch_root("ok");
-        let files = rr3_mkmod_gen_atom("sample_atom", "power.battery", &root)
-            .expect("合法生成必须成功");
+        let files =
+            rr3_mkmod_gen_atom("sample_atom", "power.battery", &root).expect("合法生成必须成功");
         assert_eq!(files.len(), 5, "五件套缺一不可");
         for rel in [
             "sample_atom/atom.toml",
