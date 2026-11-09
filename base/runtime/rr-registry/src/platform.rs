@@ -128,43 +128,9 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
         return Err(vec![format!("平台表顶层必须是 TOML 表，收到 {root:?}")]);
     };
     let mut errs: Vec<String> = Vec::new();
-
-    // 顶层未知键点名（只认七键）
-    for k in t.keys() {
-        if ![
-            "schema_version",
-            "platform",
-            "controller",
-            "capabilities",
-            "conflict",
-            "construction",
-            "controller_wordform",
-        ]
-        .contains(&k.as_str())
-        {
-            errs.push(format!(
-                "平台表顶层未知键 {k}（只认 schema_version / platform / controller / capabilities / conflict / construction / controller_wordform）"
-            ));
-        }
-    }
-
-    // schema_version：平台表自己的版本域（当前 1；破坏性变更才 bump）
-    match t.get("schema_version") {
-        Some(Value::Integer(1)) => {}
-        Some(Value::Integer(v)) => errs.push(format!("平台表 schema_version 必须为 1，收到 {v}")),
-        Some(other) => errs.push(format!("平台表 schema_version 应为整数，收到 {other:?}")),
-        None => errs.push("平台表缺 schema_version（必须为 1）".into()),
-    }
-
     let mut table = Rr3PlatformTable::default();
 
-    // platform：非空字符串（与 profiles [platform] 的平台标识同源，§4.6）
-    match t.get("platform") {
-        Some(Value::String(s)) if !s.trim().is_empty() => table.platform = s.clone(),
-        Some(Value::String(_)) => errs.push("平台表 platform 不得为空串".into()),
-        Some(other) => errs.push(format!("平台表 platform 应为字符串，收到 {other:?}")),
-        None => errs.push("平台表缺 platform 键".into()),
-    }
+    rr3_plat_head(t, &mut table, &mut errs);
 
     // [[controller]]：必须在册且非空（⑧-b 的键空间第一元；空表 = 词表事故）。
     rr3_plat_ctl(t, &mut table, &mut errs);
@@ -184,6 +150,43 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
         Ok(table)
     } else {
         Err(errs)
+    }
+}
+
+/// 顶面三事（B10 自 plat_parse 抽出）：七键封闭、schema_version=1、
+/// platform 非空——点名文案逐字保留。
+fn rr3_plat_head(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    // 顶层未知键点名（只认七键）
+    for k in t.keys() {
+        if ![
+            "schema_version",
+            "platform",
+            "controller",
+            "capabilities",
+            "conflict",
+            "construction",
+            "controller_wordform",
+        ]
+        .contains(&k.as_str())
+        {
+            errs.push(format!(
+                "平台表顶层未知键 {k}（只认 schema_version / platform / controller / capabilities / conflict / construction / controller_wordform）"
+            ));
+        }
+    }
+    // schema_version：平台表自己的版本域（当前 1；破坏性变更才 bump）
+    match t.get("schema_version") {
+        Some(Value::Integer(1)) => {}
+        Some(Value::Integer(v)) => errs.push(format!("平台表 schema_version 必须为 1，收到 {v}")),
+        Some(other) => errs.push(format!("平台表 schema_version 应为整数，收到 {other:?}")),
+        None => errs.push("平台表缺 schema_version（必须为 1）".into()),
+    }
+    // platform：非空字符串（与 profiles [platform] 的平台标识同源，§4.6）
+    match t.get("platform") {
+        Some(Value::String(s)) if !s.trim().is_empty() => table.platform = s.clone(),
+        Some(Value::String(_)) => errs.push("平台表 platform 不得为空串".into()),
+        Some(other) => errs.push(format!("平台表 platform 应为字符串，收到 {other:?}")),
+        None => errs.push("平台表缺 platform 键".into()),
     }
 }
 
