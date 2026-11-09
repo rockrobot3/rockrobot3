@@ -70,76 +70,86 @@ impl Rr3ActAxisState {
     /// 键序无关、五键必在、重复键/坏布尔/词表外词/越 u16/未知键逐条点名。解析失败
     /// 由调用方折保守缺省并打点（不 exit——保守态是安全向，退出反而进重启循环）。
     fn rr3_from_env(text: &str) -> Result<Self, String> {
-        let mut calibrated = None;
-        let mut hard_stop = None;
-        let mut lo = None;
-        let mut hi = None;
-        let mut center = None;
+        let mut raw = Rr3AxisRaw::default();
         for kv in text.split(',') {
             let (k, v) = kv.split_once('=').ok_or_else(|| {
                 format!(
                     "执行轴状态段 {kv:?} 缺 =（形状 calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>）"
                 )
             })?;
-            match k {
-                "calibrated" => {
-                    if calibrated.is_some() {
-                        return Err("执行轴状态 calibrated 重复".into());
-                    }
-                    calibrated = Some(match v {
-                        "true" => true,
-                        "false" => false,
-                        _ => return Err(format!("执行轴状态 calibrated={v:?} 非显式布尔")),
-                    });
-                }
-                "hard_stop" => {
-                    if hard_stop.is_some() {
-                        return Err("执行轴状态 hard_stop 重复".into());
-                    }
-                    hard_stop = Some(
-                        rr_hal_api::Rr3ActHardStop::rr3_hard_stop_parse(v).ok_or_else(|| {
-                            format!("执行轴状态 hard_stop={v:?} 不在档案词表（unknown/yes/no）")
-                        })?,
-                    );
-                }
-                "lo" => {
-                    if lo.is_some() {
-                        return Err("执行轴状态 lo 重复".into());
-                    }
-                    lo =
-                        Some(v.parse::<u16>().map_err(|_| {
-                            format!("执行轴状态 lo={v:?} 非行程下限整数（u16 域）")
-                        })?);
-                }
-                "hi" => {
-                    if hi.is_some() {
-                        return Err("执行轴状态 hi 重复".into());
-                    }
-                    hi =
-                        Some(v.parse::<u16>().map_err(|_| {
-                            format!("执行轴状态 hi={v:?} 非行程上限整数（u16 域）")
-                        })?);
-                }
-                "center" => {
-                    if center.is_some() {
-                        return Err("执行轴状态 center 重复".into());
-                    }
-                    center =
-                        Some(v.parse::<u16>().map_err(|_| {
-                            format!("执行轴状态 center={v:?} 非中位锚整数（u16 域）")
-                        })?);
-                }
-                other => return Err(format!("执行轴状态未知键 {other:?}")),
-            }
+            rr3_axis_kv(&mut raw, k, v)?;
         }
         Ok(Self {
-            calibrated: calibrated.ok_or("执行轴状态缺 calibrated")?,
-            hard_stop: hard_stop.ok_or("执行轴状态缺 hard_stop")?,
-            lo_deg: lo.ok_or("执行轴状态缺 lo（档案行程下限）")?,
-            hi_deg: hi.ok_or("执行轴状态缺 hi（档案行程上限）")?,
-            center_deg: center.ok_or("执行轴状态缺 center（档案中位锚）")?,
+            calibrated: raw.calibrated.ok_or("执行轴状态缺 calibrated")?,
+            hard_stop: raw.hard_stop.ok_or("执行轴状态缺 hard_stop")?,
+            lo_deg: raw.lo.ok_or("执行轴状态缺 lo（档案行程下限）")?,
+            hi_deg: raw.hi.ok_or("执行轴状态缺 hi（档案行程上限）")?,
+            center_deg: raw.center.ok_or("执行轴状态缺 center（档案中位锚）")?,
         })
     }
+}
+
+/// 注入文本的原始槽位（五键各一，重复键由 [`rr3_axis_once`] 拒）。
+#[derive(Default)]
+struct Rr3AxisRaw {
+    calibrated: Option<bool>,
+    hard_stop: Option<rr_hal_api::Rr3ActHardStop>,
+    lo: Option<u16>,
+    hi: Option<u16>,
+    center: Option<u16>,
+}
+
+/// 单键写槽：已在位即判重复（重复键是注入链故障，不能后值覆盖前值）。
+fn rr3_axis_once<T>(slot: &Option<T>, k: &str) -> Result<(), String> {
+    if slot.is_some() {
+        return Err(format!("执行轴状态 {k} 重复"));
+    }
+    Ok(())
+}
+
+/// 单键解析（值与词表/域校验同处）：文案逐字保留。
+fn rr3_axis_kv(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
+    match k {
+        "calibrated" => {
+            rr3_axis_once(&raw.calibrated, k)?;
+            raw.calibrated = Some(match v {
+                "true" => true,
+                "false" => false,
+                _ => return Err(format!("执行轴状态 calibrated={v:?} 非显式布尔")),
+            });
+        }
+        "hard_stop" => {
+            rr3_axis_once(&raw.hard_stop, k)?;
+            raw.hard_stop = Some(
+                rr_hal_api::Rr3ActHardStop::rr3_hard_stop_parse(v).ok_or_else(|| {
+                    format!("执行轴状态 hard_stop={v:?} 不在档案词表（unknown/yes/no）")
+                })?,
+            );
+        }
+        "lo" => {
+            rr3_axis_once(&raw.lo, k)?;
+            raw.lo = Some(
+                v.parse::<u16>()
+                    .map_err(|_| format!("执行轴状态 lo={v:?} 非行程下限整数（u16 域）"))?,
+            );
+        }
+        "hi" => {
+            rr3_axis_once(&raw.hi, k)?;
+            raw.hi = Some(
+                v.parse::<u16>()
+                    .map_err(|_| format!("执行轴状态 hi={v:?} 非行程上限整数（u16 域）"))?,
+            );
+        }
+        "center" => {
+            rr3_axis_once(&raw.center, k)?;
+            raw.center = Some(
+                v.parse::<u16>()
+                    .map_err(|_| format!("执行轴状态 center={v:?} 非中位锚整数（u16 域）"))?,
+            );
+        }
+        other => return Err(format!("执行轴状态未知键 {other:?}")),
+    }
+    Ok(())
 }
 
 /// 执行轴状态装载：env 读 + 坏形/缺席折保守缺省并点名（安全向，不退），回显注入
