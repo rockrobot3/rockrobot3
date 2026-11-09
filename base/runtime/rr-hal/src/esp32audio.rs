@@ -495,9 +495,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     // 取证 tee（批N12 件二）：线程级开口一次，重连续写同一文件（见 [`rr3_tee_open`]）
     let mut tee = rr3_tee_open();
     let mut conn: Option<Rr3UartConn> = Some(first);
-    let mut logged_ready = false;
-    let mut logged_overflow = false;
-    let mut logged_ack = false;
+    let mut once = Rr3IngestLog::default();
     // 桥链周期统计计时（统计面与链路控制解耦：到点只打一行，不改任何状态）
     let mut stat_at = Instant::now();
     // 宿主音频心跳计时（A9.3：板侧失联看门狗的时间源）
@@ -573,71 +571,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                     // 病灶"帧内尾随残渣"的取证层，tee 流与消费流逐字节一致）
                     rr3_tee_write(&mut tee, &raw[..n]);
                     asm.feed(&raw[..n]);
-                    loop {
-                        match asm.pull() {
-                            Ok(Some((hdr, body))) => {
-                                match rr3_esp32_classify(&hdr, &body) {
-                                    Ok(Rr3BoardFrameIn::Audio(chunk)) => {
-                                        err_streak = 0;
-                                        core.chunks.fetch_add(1, Ordering::Relaxed);
-                                        if !logged_ready {
-                                            logged_ready = true;
-                                            eprintln!(
-                                                "rr-hal-esp32-audio: 板面流就绪（实测 rate={} ch=2 s16le）",
-                                                chunk.rate
-                                            );
-                                        }
-                                        let samples = rr3_s16le_decode(&chunk.samples);
-                                        let mut ring =
-                                            core.ring.lock().unwrap_or_else(|p| p.into_inner());
-                                        ring.rr3_ring_push(&samples, core.channels as usize);
-                                        if ring.rr3_ring_dropped() > 0 && !logged_overflow {
-                                            logged_overflow = true;
-                                            eprintln!(
-                                                "rr-hal-esp32-audio: 环形缓冲开始溢丢最旧（板-宿主钟滑移稳态损耗，VAD/ASR 可容忍）"
-                                            );
-                                        }
-                                    }
-                                    Ok(Rr3BoardFrameIn::Reply { id, err }) => match err {
-                                        Some(e) => eprintln!(
-                                            "rr-hal-esp32-audio: 板面应答 id={id} 业务失败: {e}"
-                                        ),
-                                        None => {
-                                            // 成功回执逐条打会在高频命令面刷屏；首条点名即
-                                            // 证明回执通道活着，后续同口径不再重复。
-                                            if !logged_ack {
-                                                logged_ack = true;
-                                                eprintln!(
-                                                    "rr-hal-esp32-audio: 板面命令回执就绪（id={id} ok；后续成功回执不逐条打印）"
-                                                );
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        err_streak += 1;
-                                        err_total += 1;
-                                        core.errs.fetch_add(1, Ordering::Relaxed);
-                                        if rr3_err_log_now(err_total) {
-                                            eprintln!(
-                                                "rr-hal-esp32-audio: 累计 {err_total} 帧未过门（连续 {err_streak}；帧界损坏/载荷 CRC 不符？）: {e}"
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            Ok(None) => break,
-                            Err((discarded, why)) => {
-                                err_streak += 1;
-                                err_total += 1;
-                                core.errs.fetch_add(1, Ordering::Relaxed);
-                                if rr3_err_log_now(err_total) {
-                                    eprintln!(
-                                        "rr-hal-esp32-audio: 累计 {err_total} 次拆帧失败（连续 {err_streak}，已弃 {discarded}B 重扫）: {why}"
-                                    );
-                                }
-                            }
-                        }
-                    }
+                    rr3_esp32_frames(&core, &mut asm, &mut once, &mut err_streak, &mut err_total);
                 }
             }
         }
@@ -645,6 +579,88 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     // 收兵：板面停流（防御残流），conn 释放 → flock 退账
     if let Some(mut c) = conn {
         let _ = c.write_all(b"AUDIO OFF\n");
+    }
+}
+
+/// 会话内「只打一次」观测旗标（跨重连保留：首帧就绪/首次溢丢/首条回执各打一行）。
+#[derive(Default)]
+struct Rr3IngestLog {
+    ready: bool,
+    overflow: bool,
+    ack: bool,
+}
+
+/// 会话内帧落账：把拆帧器已喂入的字节逐帧弹出 → 分类 → 入环/记账。
+/// 断流与读失败留在读循环（连接级），本函数只处理"已到手的完整帧"；
+/// `err_streak/err_total` 是会话内计数（重连即新流），调用方持有。
+fn rr3_esp32_frames(
+    core: &Rr3Esp32AudioCore,
+    asm: &mut FrameAssembler,
+    once: &mut Rr3IngestLog,
+    err_streak: &mut u64,
+    err_total: &mut u64,
+) {
+    loop {
+        match asm.pull() {
+            Ok(Some((hdr, body))) => match rr3_esp32_classify(&hdr, &body) {
+                Ok(Rr3BoardFrameIn::Audio(chunk)) => {
+                    *err_streak = 0;
+                    core.chunks.fetch_add(1, Ordering::Relaxed);
+                    if !once.ready {
+                        once.ready = true;
+                        eprintln!(
+                            "rr-hal-esp32-audio: 板面流就绪（实测 rate={} ch=2 s16le）",
+                            chunk.rate
+                        );
+                    }
+                    let samples = rr3_s16le_decode(&chunk.samples);
+                    let mut ring = core.ring.lock().unwrap_or_else(|p| p.into_inner());
+                    ring.rr3_ring_push(&samples, core.channels as usize);
+                    if ring.rr3_ring_dropped() > 0 && !once.overflow {
+                        once.overflow = true;
+                        eprintln!(
+                            "rr-hal-esp32-audio: 环形缓冲开始溢丢最旧（板-宿主钟滑移稳态损耗，VAD/ASR 可容忍）"
+                        );
+                    }
+                }
+                Ok(Rr3BoardFrameIn::Reply { id, err }) => match err {
+                    Some(e) => {
+                        eprintln!("rr-hal-esp32-audio: 板面应答 id={id} 业务失败: {e}")
+                    }
+                    None => {
+                        // 成功回执逐条打会在高频命令面刷屏；首条点名即证明回执
+                        // 通道活着，后续同口径不再重复。
+                        if !once.ack {
+                            once.ack = true;
+                            eprintln!(
+                                "rr-hal-esp32-audio: 板面命令回执就绪（id={id} ok；后续成功回执不逐条打印）"
+                            );
+                        }
+                    }
+                },
+                Err(e) => {
+                    *err_streak += 1;
+                    *err_total += 1;
+                    core.errs.fetch_add(1, Ordering::Relaxed);
+                    if rr3_err_log_now(*err_total) {
+                        eprintln!(
+                            "rr-hal-esp32-audio: 累计 {err_total} 帧未过门（连续 {err_streak}；帧界损坏/载荷 CRC 不符？）: {e}"
+                        );
+                    }
+                }
+            },
+            Ok(None) => break,
+            Err((discarded, why)) => {
+                *err_streak += 1;
+                *err_total += 1;
+                core.errs.fetch_add(1, Ordering::Relaxed);
+                if rr3_err_log_now(*err_total) {
+                    eprintln!(
+                        "rr-hal-esp32-audio: 累计 {err_total} 次拆帧失败（连续 {err_streak}，已弃 {discarded}B 重扫）: {why}"
+                    );
+                }
+            }
+        }
     }
 }
 
