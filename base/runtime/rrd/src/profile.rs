@@ -921,60 +921,60 @@ fn rr3_domains_parse(items: &[toml::Value], errs: &mut Vec<String>) -> Vec<Rr3Do
             errs.push(format!("{label} 必须是 [[supplies.domain]] 表"));
             continue;
         };
-        let mut d = Rr3Domain::default();
-        for key in RR3_DOMAIN_KEYS {
-            let path = format!("{label}.{key}");
-            match key {
-                "name" | "sense" | "current_sense" | "switch" | "evidence" => {
-                    match dt.get(key).and_then(toml::Value::as_str) {
-                        Some(s) if !s.is_empty() => {
-                            let v = s.to_string();
-                            match key {
-                                "name" => d.name = v,
-                                "sense" => d.sense = v,
-                                "current_sense" => d.current_sense = v,
-                                "evidence" => d.evidence = v,
-                                _ => d.switch = v,
-                            }
-                        }
-                        _ => errs.push(format!("{path} 缺失或不是非空字符串")),
-                    }
-                }
-                "switchable" | "armed" => match (key, dt.get(key).and_then(toml::Value::as_bool)) {
-                    ("switchable", Some(b)) => d.switchable = b,
-                    ("armed", Some(b)) => d.armed = b,
-                    _ => errs.push(format!("{path} 缺失或不是布尔")),
-                },
-                _ => match supplies_int(dt.get(key), &path) {
-                    Ok(v) => match key {
-                        "nominal_mv" => d.nominal_mv = v,
-                        "mild_mv" => d.mild_mv = v,
-                        "severe_mv" => d.severe_mv = v,
-                        "current_cap_ma" => d.current_cap_ma = v,
-                        _ => d.max_age_ms = v,
-                    },
-                    Err(e) => errs.push(e),
-                },
-            }
-        }
-        for k in dt.keys() {
-            if !RR3_DOMAIN_KEYS.contains(&k.as_str()) {
-                errs.push(format!(
-                    "{label} 未知键 {k}（只认 {}）",
-                    RR3_DOMAIN_KEYS.join("/")
-                ));
-            }
-        }
-        out.push(d);
+        out.push(rr3_domain_one(dt, &label, errs));
     }
     out
 }
 
-/// [supplies.budget]：内存预算声明（校验⑩ 分母）。分档自洽（ADR-0021 修订 3）
-/// 在 parse 层裁：host 档 not_applicable 必须真且三数键不得并存（自相矛盾）；
-/// rtos/bare 档 not_applicable 必须假且三数键必填（stack/total > 0、
-/// reserved ≥ 0、total ≤ reserved 红）。tier 非法（空）时跳过分档判——
-/// platform.tier 自有错误点名，不级联刷屏。
+/// 单域解析：键表驱动（[`RR3_DOMAIN_KEYS`]）逐键取数，未知键点名。
+fn rr3_domain_one(dt: &toml::Table, label: &str, errs: &mut Vec<String>) -> Rr3Domain {
+    let mut d = Rr3Domain::default();
+    for key in RR3_DOMAIN_KEYS {
+        let path = format!("{label}.{key}");
+        match key {
+            "name" | "sense" | "current_sense" | "switch" | "evidence" => {
+                match dt.get(key).and_then(toml::Value::as_str) {
+                    Some(s) if !s.is_empty() => {
+                        let v = s.to_string();
+                        match key {
+                            "name" => d.name = v,
+                            "sense" => d.sense = v,
+                            "current_sense" => d.current_sense = v,
+                            "evidence" => d.evidence = v,
+                            _ => d.switch = v,
+                        }
+                    }
+                    _ => errs.push(format!("{path} 缺失或不是非空字符串")),
+                }
+            }
+            "switchable" | "armed" => match (key, dt.get(key).and_then(toml::Value::as_bool)) {
+                ("switchable", Some(b)) => d.switchable = b,
+                ("armed", Some(b)) => d.armed = b,
+                _ => errs.push(format!("{path} 缺失或不是布尔")),
+            },
+            _ => match supplies_int(dt.get(key), &path) {
+                Ok(v) => match key {
+                    "nominal_mv" => d.nominal_mv = v,
+                    "mild_mv" => d.mild_mv = v,
+                    "severe_mv" => d.severe_mv = v,
+                    "current_cap_ma" => d.current_cap_ma = v,
+                    _ => d.max_age_ms = v,
+                },
+                Err(e) => errs.push(e),
+            },
+        }
+    }
+    for k in dt.keys() {
+        if !RR3_DOMAIN_KEYS.contains(&k.as_str()) {
+            errs.push(format!(
+                "{label} 未知键 {k}（只认 {}）",
+                RR3_DOMAIN_KEYS.join("/")
+            ));
+        }
+    }
+    d
+}
+
 fn rr3_budget_parse(bt: &toml::Table, tier: &str, errs: &mut Vec<String>) -> Rr3Budget {
     let mut budget = Rr3Budget::default();
     rr3_budget_keys(bt, errs);
