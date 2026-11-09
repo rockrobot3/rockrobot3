@@ -148,6 +148,13 @@ pub(crate) const AUDIO_CHUNK_FRAMES: usize = 2048;
 /// `audio_dropped`（判据② 背压观测前哨，与 recorder 端 seq 断档互为对账）。
 /// 4 分片 ≈ 45KB 堆 + 单分片传输 ~59ms（1.5M），吸收宿主 ~0.5s 级收流抖动。
 pub(crate) const AUDIO_Q_CAP: usize = 4;
+/// 宿主音频心跳窗口（ms）：宿主收流线程每 5s 发一条静默 `AUDIO PING`，板侧
+/// 累计 `audio_host_ms`；超过本窗口未再收到即判宿主失联（进程被杀/整机断电），
+/// mic 线自动停流并清空 audio_q——否则板侧会对着无人的 UART 无穷推流（I2S
+/// DMA/b64/组帧照跑，序号空转）。15s = 3 个心跳周期，容忍宿主一次 GC/调度停顿。
+/// **兼容门**：`audio_host_ms == 0`（从未收到 PING，旧宿主）时看门狗不启用——
+/// 新固件 + 旧宿主仍按旧语义常流，避免混版部署把语音切死。
+pub(crate) const AUDIO_HOST_TIMEOUT_MS: u64 = 15_000;
 /// 语音档采样率（判据① wav 口径；全案批D §4）——采集档位策略量（I2S 配置与
 /// 上行 JSON `rate`/`ms` 字段同源；换采集档只动本文件，变换机制在 capture
 /// 机制件按参吃值）。

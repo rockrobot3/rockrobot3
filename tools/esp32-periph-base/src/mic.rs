@@ -43,12 +43,13 @@ use rr_ipc::{
 use serde_json::json;
 
 use crate::board::{
-    AUDIO_CHUNK_FRAMES, AUDIO_Q_CAP, MIC_GAIN, MIC_SR_HZ, RR3_AUDIO_TOPIC, RR3_BIND_I2S_BCLK,
-    RR3_BIND_I2S_SD, RR3_BIND_I2S_WS, RR3_HOST_TASK, RR3_PERIPH_TASK,
+    AUDIO_CHUNK_FRAMES, AUDIO_HOST_TIMEOUT_MS, AUDIO_Q_CAP, MIC_GAIN, MIC_SR_HZ,
+    RR3_AUDIO_TOPIC, RR3_BIND_I2S_BCLK, RR3_BIND_I2S_SD, RR3_BIND_I2S_WS, RR3_HOST_TASK,
+    RR3_PERIPH_TASK,
 };
 use crate::capture::{chunk_to_pcm, frame32_to_pair, push_bounded, Rr3DcBlocker};
 use crate::link::rr3_frame_now_ns;
-use crate::state::{lock_bus, Bus};
+use crate::state::{lock_bus, now_ms, Bus};
 
 /// 采集线程栈（8KB→16KB 运行下限钉死的教训在案，勿再调低；buf 4KB 在栈上）。
 const MIC_THREAD_STACK: usize = 16384;
@@ -182,7 +183,28 @@ pub fn spawn_mic_smoke(
                         }
                         // 音频开关每 read 批读一次（不逐帧拿锁）；关时清分片，
                         // ON 起始即整片（seq/DC 基线都从零起）
-                        let audio_on = lock_bus(&bus).st.audio_on;
+                        let (audio_on, host_ms) = {
+                            let b = lock_bus(&bus);
+                            (b.st.audio_on, b.st.audio_host_ms)
+                        };
+                        // A9.3 宿主失联看门狗：见过心跳（host_ms != 0）才启用
+                        // （旧宿主无 PING，混版部署保持常流语义），超窗即自动停流
+                        // 并清空待发队列——宿主进程被杀/整机断电后，板侧不再对着
+                        // 无人 UART 无穷推流。宿主回来重连即重新握手起流。
+                        let audio_on = if audio_on
+                            && host_ms != 0
+                            && now_ms().saturating_sub(host_ms) > AUDIO_HOST_TIMEOUT_MS
+                        {
+                            let mut b = lock_bus(&bus);
+                            b.st.audio_on = false;
+                            b.audio_q.clear();
+                            println!(
+                                "[mic] 宿主心跳停发超 {AUDIO_HOST_TIMEOUT_MS}ms → 自动停流（AUDIO PING 看门狗）"
+                            );
+                            false
+                        } else {
+                            audio_on
+                        };
                         if !audio_on {
                             chunk.clear();
                             dc.reset();
