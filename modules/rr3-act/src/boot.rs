@@ -342,12 +342,12 @@ pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     let intent_sect = rr3_act_cfg_sect(&v, "intent")?;
     let reflex_sect = rr3_act_cfg_sect(&v, "reflex")?;
     Ok(Rr3ActCfg {
-        servo: rr3_act_servo(&servo_sect)?,
-        led: rr3_act_led(&led_sect)?,
+        servo: rr3_act_servo(servo_sect)?,
+        led: rr3_act_led(led_sect)?,
         intent: Rr3IntentCfg {
-            open_topics: rr3_act_cfg_topics(&intent_sect)?,
+            open_topics: rr3_act_cfg_topics(intent_sect)?,
         },
-        reflex: rr3_act_reflex(&reflex_sect)?,
+        reflex: rr3_act_reflex(reflex_sect)?,
     })
 }
 

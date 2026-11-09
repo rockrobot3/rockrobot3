@@ -107,17 +107,17 @@ mod run {
     ) -> Result<(), String> {
         // ---- 3. 轮询等 resident 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试） ----
         rr3_wait_modules(
-            || rr3_ctl_rows(&rrctl, &socket),
+            || rr3_ctl_rows(rrctl, socket),
             &[(RR3_DRILL_RESIDENT, "running")],
             RR3_READY_DEADLINE,
         )
-        .map_err(|e| rr3_with_log_tail(&e, &log_path))?;
+        .map_err(|e| rr3_with_log_tail(&e, log_path))?;
         report.push_str(rr3_section("模块 A（boot spawn → running）已就绪").as_str());
 
         // ---- 4. 外部起发布者（publish_once：发布一条真事件后退场） ----
-        let st = Command::new(&peer)
-            .env("RR3_BUS_PATH", &socket)
-            .env("RR3_MANIFEST", &m_b)
+        let st = Command::new(peer)
+            .env("RR3_BUS_PATH", socket)
+            .env("RR3_MANIFEST", m_b)
             .env("RR3_SIM_PEER_ROLE", "publish_once")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -134,9 +134,9 @@ mod run {
 
         // ---- 5. rr3-ctl 四命令巡检 ----
         report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
-        let status_out = rr3_ctl_out(&rrctl, &socket, "status")?;
+        let status_out = rr3_ctl_out(rrctl, socket, "status")?;
         report.push_str(&status_out);
-        let rows = rr3_ctl_rows(&rrctl, &socket);
+        let rows = rr3_ctl_rows(rrctl, socket);
         // denied_publish = 0 是"事件真被接受"的线上证据：发布被拒会在这里现形
         if !status_out.contains("denied_publish = 0") {
             return Err(format!(
@@ -164,11 +164,11 @@ mod run {
         }
 
         report.push_str(rr3_section("rr3-ctl health").as_str());
-        report.push_str(&rr3_ctl_out(&rrctl, &socket, "health")?);
+        report.push_str(&rr3_ctl_out(rrctl, socket, "health")?);
         report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
-        report.push_str(&rr3_ctl_out(&rrctl, &socket, "logs")?);
+        report.push_str(&rr3_ctl_out(rrctl, socket, "logs")?);
         report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
-        match rr3_ctl_maybe_fail(&rrctl, &socket, "ota") {
+        match rr3_ctl_maybe_fail(rrctl, socket, "ota") {
             Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
             Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
         }
