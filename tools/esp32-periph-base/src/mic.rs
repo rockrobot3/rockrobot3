@@ -166,6 +166,7 @@ impl MicStats {
         } else {
             0.0
         };
+        let (l_peak, r_peak, build_n) = (self.l_peak, self.r_peak, self.build_n);
         println!(
             "[mic] {rate}Hz L rms={l_rms} peak={l_peak} | R rms={r_rms} peak={r_peak} | L==R {eq_pct}% | build={build_ms:.1}ms×{build_n}"
         );
