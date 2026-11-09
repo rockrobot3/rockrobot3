@@ -444,6 +444,24 @@ fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Comma
         }
     };
     cmd.stdout(Stdio::null()).stderr(stderr_stdio);
+    // 父死子收（Linux）：rrd 崩溃/被杀时子进程不能变孤儿继续占 UART/声卡。
+    // 2026-11-09 真板实录：部署停旧栈后新 sense 连报两次 `HAL 设备忙`——旧 sense
+    // 的音频读线程仍持有 /dev/ttyAMA0 flock。PDEATHSIG 让内核在父进程死亡时给
+    // 子进程补 SIGTERM，孤儿窗口从"等模块自己发现总线断了"缩到信号投递延迟。
+    // pre_exec 只调 prctl（async-signal-safe，无分配），失败按 spawn 错误上抛。
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY：闭包内仅一次 prctl 调用并读 errno，不触碰父进程状态。
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM, 0, 0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
     cmd
 }
 
