@@ -1,5 +1,11 @@
 //! 单连接服务：本线程 reader + 一条 writer 线程。
 //!
+//! 分面（批B12）：本文件留共享件（帧构造/应答/写出口/`Rr3Flow`/拒绝出口）、
+//! 入站路由 `rr3_serve_frame`、上行方法表 `rr3_serve_request`、收尾与主循环；
+//! 四个协议分面各自成子模块——`conn/handshake.rs`（注册握手）、`conn/ctl.rs`
+//! （控制旁支）、`conn/publish.rs`（业务发布 + 低电兜底）、`conn/beat.rs`
+//! （心跳与升级）、`conn/route.rs`（`rr3.call` 与应答回程）。
+//!
 //! 协议面（spec §5.0 + 偏离 4）：
 //! - 第一条帧必须是 `Request` + `dst_task = RR3_TASK_RRD` 的 `rr3.register`，否则按协议错误断开；
 //! - `src_task` 由 rrd 分配并在应答 result 里回带；注册后上行帧的 `src_task` 必须等于分配值
@@ -11,7 +17,7 @@
 //!   任何一种拒法都只回错误帧 + 计数，不断连（spec §6、ADR-0006 决策 2/4）；
 //! - 上行 `Response` 是 M3 `rr3.call` 的应答回路：trace_id = 调用方 task（转发时写入），
 //!   body 原样、dst 改写为 trace_id 定向回投；trace_id=0 或调用方已不在册都只回错误帧
-//!   不断连（M3 定型，见 `rr3_route_call` / `rr3_route_response`）。
+//!   不断连（M3 定型，见 `route::rr3_route_call` / `route::rr3_route_response`）。
 //!
 //! 写面（本任务的并发形状）：reader 线程写应答、writer 线程写广播，两者持有同一 socket 的
 //! `try_clone` 句柄、共用一把 `Mutex<UnixStream>`、且一帧一次 `write_all` → **整帧原子**；
