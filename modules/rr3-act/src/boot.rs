@@ -11,8 +11,12 @@
 //! 随批退役）。本层零业务 match——策略量经 config 数据化注入，机制件零策略载荷。
 
 use rr3mod::BusHandle;
-use rr_hal::backend::{rr3_hal_gpio_out, rr3_hal_servo};
-use rr_hal_api::{Rr3GpioOut, Rr3PwmServo};
+use rr_hal::backend::{rr3_hal_gpio_out, rr3_hal_servo, RR3_BACKEND_ESP32};
+use rr_hal_api::{Rr3GpioOut, Rr3HalError, Rr3PwmServo};
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "remote.rs"]
+mod remote;
 
 use crate::led::{Rr3LedEffect, RR3_LED_EFFECT_VALUES};
 use crate::reflex::{rr3_reflex_loop, Rr3ReflexCfg};
@@ -168,18 +172,50 @@ pub(crate) type Rr3ActDevs = (
     Box<dyn Rr3GpioOut>,
 );
 
+/// 桥被 sense 独占时的舵机面置换（A9.2）：host 档改走 `rr3-sense/servo/set`，
+/// 换回 `(远端执行器, 回显后端名)`；rtos/bare 档无跨进程总线通路，维持
+/// fail-closed 点名（不虚构一个不可达的远端面）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_remote_bridge(
+    bus: &BusHandle,
+    backend: &'static str,
+) -> Result<(Box<dyn Rr3PwmServo>, &'static str), String> {
+    eprintln!("rr-hal: 舵机桥被 rr3-sense 独占（{backend} Busy），改走远端命令面（A9.2）");
+    let dev = remote::Rr3RemoteServo::rr3_remote_new(bus)?;
+    Ok((Box::new(dev), "remote(rr3-sense)"))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn rr3_remote_bridge(
+    _bus: &BusHandle,
+    backend: &'static str,
+) -> Result<(Box<dyn Rr3PwmServo>, &'static str), String> {
+    Err(format!("舵机面探活失败({backend}): HAL 设备忙"))
+}
+
 /// HAL 执行面三面选择 + 开机探活：servo/led/relay 各读回一次，Unsupported /
 /// 探活读失败即致命——显式回错不静默退化（rr-hal 占位件的契约），也不给"半个
 /// 执行器"的假活。探活全是读面 &self（批I F1 同步化后无需 block_on）。自原
 /// composite.rs 逐字迁入（失败文案三条与「执行面就绪」回显逐字）；backend 名
 /// 回显后丢弃（错误文案复用点在三条 map_err）。
-pub(crate) fn rr3_act_probe() -> Result<Rr3ActDevs, String> {
-    let (servo_dev, servo_backend) = rr3_hal_servo();
+///
+/// A9.2 桥冲突降级：组合档 `/dev/ttyAMA0` 由 rr3-sense 独占（音频 + 命令旁路），
+/// 本进程再开同一设备必得 `Busy`。此时舵机面改走 sense 的 `servo/set` RPC（同一
+/// 物理执行器、单一写者），并把 backend 名回显为 `remote(rr3-sense)`；其余
+/// Unsupported/参数错仍 fail-closed 上抛，不把"开不了桥"当通用降级借口。
+pub(crate) fn rr3_act_probe(bus: &BusHandle) -> Result<Rr3ActDevs, String> {
+    let (servo_dev, servo_backend) = {
+        let (dev, backend) = rr3_hal_servo();
+        match dev.angle() {
+            Ok(_) => (dev, backend),
+            Err(Rr3HalError::Busy) if backend == RR3_BACKEND_ESP32 => {
+                rr3_remote_bridge(bus, backend)?
+            }
+            Err(e) => return Err(format!("舵机面探活失败({backend}): {e}")),
+        }
+    };
     let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
     let (relay_gpio, relay_backend) = rr3_hal_gpio_out("relay");
-    servo_dev
-        .angle()
-        .map_err(|e| format!("舵机面探活失败({servo_backend}): {e}"))?;
     led_gpio
         .level()
         .map_err(|e| format!("LED 面探活失败({led_backend}): {e}"))?;
