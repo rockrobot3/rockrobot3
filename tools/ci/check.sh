@@ -42,6 +42,15 @@ if [ -z "$root" ] || ! cd "$root"; then
   exit 1
 fi
 
+# 装配单真值面源码集（B9 起 profile.rs 按 模型/解析/装载 三分）：定义点落在
+# 主文件或 profile/ 子模块都算单点——门禁按"内容"执法，不按文件名执法，结构
+# 重构（搬文件）不再失锚；测试面（profile/tests/）不计入声明扫描。
+prof_src="$(printf '%s\n' base/runtime/rrd/src/profile.rs; find base/runtime/rrd/src/profile -name '*.rs' -not -path '*/tests/*' 2>/dev/null)"
+if [ -z "$prof_src" ]; then
+  echo "ERROR: 装配单真值面源码集为空（base/runtime/rrd/src/profile* 不存在），规约门拒绝执行。" >&2
+  exit 1
+fi
+
 fail=0
 tmpout="$(mktemp)" || { echo "ERROR: mktemp 失败，无法捕获步骤输出。" >&2; exit 1; }
 trap 'rm -f "$tmpout"' EXIT
@@ -802,13 +811,13 @@ fi
 # RR3_PIN_DERIVED_KEYS 任一物理键即红（稳态：物理键一律 [pins] 派生，[hardware] 只留
 # 非引脚键 alsa_device/link_ifname——批N3 件六 SPI 词形收口：spi_device 已进派生键集、
 # 扫面 8 键，敞口 18 行已结）。键名单从代码常量导出（单真值点，不抄第二份）：解析
-# rrd/src/profile.rs 的 RR3_PIN_DERIVED_KEYS 数组，声明数量与实解析数量不等即门禁失效。
+# 装配单模块的 RR3_PIN_DERIVED_KEYS 数组（profile/model.rs），声明数量与实解析数量不等即门禁失效。
 step "⑨-n 注入路径唯一（[hardware] 禁物理键——[pins] 派生稳态判据静态面，门 n）"
 gate_n_fail=0
 keys_file="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
-awk '/const RR3_PIN_DERIVED_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/src/profile.rs \
+awk '/const RR3_PIN_DERIVED_KEYS/{f=1} f{print} f && /\];/{exit}' $prof_src \
   | grep -oE '"[^"]+"' | tr -d '"' > "$keys_file"
-decl_n="$(grep -m1 -oE 'RR3_PIN_DERIVED_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+decl_n="$(grep -h -m1 -oE 'RR3_PIN_DERIVED_KEYS: \[&str; [0-9]+\]' $prof_src | grep -oE '[0-9]+\]' | tr -d ']')"
 real_n="$(grep -c . "$keys_file" || true)"
 prof_n="$(find profiles -maxdepth 1 -name '*.toml' 2>/dev/null | wc -l | tr -d ' ')"
 if [ -z "$decl_n" ] || [ "$real_n" -eq 0 ] || [ "$decl_n" -ne "$real_n" ] || [ "$prof_n" -eq 0 ]; then
@@ -830,7 +839,7 @@ if [ "$gate_n_fail" -eq 0 ]; then
   done
   if [ -s "$hits_file" ]; then
     cat "$hits_file"
-    printf 'FAIL  ⑨-n [hardware] 出现物理键（门 n 稳态判据：物理键一律 [pins] 派生；迁移期判据见 profile.rs 门 n 段）\n'
+    printf 'FAIL  ⑨-n [hardware] 出现物理键（门 n 稳态判据：物理键一律 [pins] 派生；迁移期判据见 profile/model.rs 门 n 段）\n'
     gate_n_fail=1
   else
     printf 'PASS  ⑨-n [hardware] 零物理键（%s 份 profile 全扫，[hardware] 只留非引脚键）\n' "$prof_n"
@@ -857,7 +866,7 @@ run_tests sh -c 'cd base/runtime && cargo test -p rrd --lib demand_budget'
 #     四腿键集全部自代码常量/契约表导出（单真值点，不抄第二份；⑨-n 先例）：
 #       slots ← contracts/slots.toml；roles ← contracts/roles.toml；
 #       TRAITS/DESC_KEYS ← rr-registry/src/assemble.rs 两在册表；
-#       PIN_KEYS ← rrd/src/profile.rs RR3_PIN_KEYS（声明数/实解析数判等）。
+#       PIN_KEYS ← 装配单模块 RR3_PIN_KEYS（profile/model.rs）（声明数/实解析数判等）。
 #     报告三段（裁定配套 (a)：走 stdout 可见面，不走被 Stdio::null() 吞掉的面）：
 #       A 段 = 未覆盖 normal 格（status=normal 且无任何 role.slot 指向）；
 #       B 段 = roles 侧悬空（slot/iface/requires/derives 任一不在对方真值集——**应恒 0**，
@@ -891,8 +900,8 @@ awk '/pub const RR3_ASSEMBLE_HANDLE_TRAITS/{f=1} f{print} f && /\];/{exit}' \
 awk '/pub const RR3_ASSEMBLE_DESC_KEYS/{f=1} f{print} f && /\];/{exit}' \
   base/runtime/rr-registry/src/assemble.rs | grep -oE '"[^"]+"' | tr -d '"' > "$ga_desc"
 awk '/const RR3_PIN_KEYS/{f=1} f{print} f && /\];/{exit}' \
-  base/runtime/rrd/src/profile.rs | grep -oE '"[^"]+"' | tr -d '"' > "$ga_pins"
-decl_pin_n="$(grep -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+  $prof_src | grep -oE '"[^"]+"' | tr -d '"' > "$ga_pins"
+decl_pin_n="$(grep -h -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' $prof_src | grep -oE '[0-9]+\]' | tr -d ']')"
 real_pin_n="$(grep -c . "$ga_pins" || true)"
 # slots：name+status 两轴逐格（⑧-a 同款 awk 口径）；roles：name/slot/iface/requires/derives 逐条
 awk '
@@ -1096,7 +1105,7 @@ fi
 #     三面共读；成员集相等由判据保证（单测 truth_set_members_and_boot_locations_
 #     are_the_same_set 判等实体＋运行时 truth_set 自检逐枚点名），不再靠注释声称。
 #     本门四条执法（静态面，逐条点名，任一缺失即红）：
-#       1) 单点在位：profile.rs 定义 pub const RR3_CONTRACT_BOOKS（字面唯一份）；
+#       1) 单点在位：装配单模块（profile/boot.rs）定义 pub const RR3_CONTRACT_BOOKS（字面唯一份）；
 #       2) 判据面共读：contracts.rs 的 RR3_CONTRACT_FILES 定义必须引用该常量
 #          （判据面再现字面数组 = 第二份清单 = 红）；
 #       3) 打包面共读：rr3-pack 必须调 rrd::profile::rr3_truth_set 照单
@@ -1107,9 +1116,9 @@ fi
 #     fail-closed，本门只执法静态面——两半合成 ⑨-z 全貌。
 step "⑨-z 真值集三方成员判等（单点在位＋判据面/打包面共读＋第二份字面零命中，门 z）"
 gate_z_fail=0
-if ! grep -q 'pub const RR3_CONTRACT_BOOKS' base/runtime/rrd/src/profile.rs; then
+if ! printf '%s\n' "$prof_src" | xargs grep -q 'pub const RR3_CONTRACT_BOOKS'; then
   gate_z_fail=1
-  printf 'FAIL  ⑨-z 契约四册名单单点缺席（base/runtime/rrd/src/profile.rs 须定义 pub const RR3_CONTRACT_BOOKS——字面唯一份，基-40）\n'
+  printf 'FAIL  ⑨-z 契约四册名单单点缺席（装配单模块须定义 pub const RR3_CONTRACT_BOOKS（profile/boot.rs）——字面唯一份，基-40）\n'
 fi
 if ! grep -q 'pub const RR3_CONTRACT_FILES: \[&str; 4\] = crate::profile::RR3_CONTRACT_BOOKS' base/runtime/rrd/src/contracts.rs; then
   gate_z_fail=1
@@ -1210,9 +1219,9 @@ fi
 #     门 d / conventions §2 拟步 ⑩）。判据（字段级分母 + covers 申报制分子）：
 #       分母 = 五路字段并集（全部自代码常量/契约表导出——单真值点，⑨-a/⑨-n 先例）：
 #         ops/<slot>   ← modules/*/atoms/*/assemble.toml 的 ops 槽；
-#         pin/<field>  ← rrd/src/profile.rs RR3_PIN_KEYS（⑨-a 同款 awk，声明数判等）；
+#         pin/<field>  ← 装配单模块 RR3_PIN_KEYS（⑨-a 同款 awk，声明数判等）；
 #         role/<req>   ← contracts/roles.toml requires 逐项（⑨-a 同款拆词）；
-#         domain/<f>   ← rrd/src/profile.rs RR3_DOMAIN_KEYS（声明数判等）；
+#         domain/<f>   ← 装配单模块 RR3_DOMAIN_KEYS（声明数判等）；
 #         axis/<field> ← rr-hal-api lib.rs RR3_ACT_PROFILE_FIELDS 十四键。
 #       分子 = ∪ 每端点 covers 申报（panel/server.rs RR3_PANEL_ROUTES 第三列 ＋
 #       板侧 httpd.rs RR3_BOARD_ROUTES 第三列，批N13 件二扩入两源同扫），
@@ -1248,18 +1257,18 @@ trap 'rm -f "$tmpout" "$ga_slots" "$ga_roles" "$ga_traits" "$ga_desc" "$ga_pins"
 { grep -hoE 'slot = "[^"]+"' modules/*/atoms/*/assemble.toml
   grep -hoE 'slot = "[^"]+"' modules/*/composite.toml; } \
   | sed 's/.*slot = "/ops\//;s/"$//' | sort -u > "$gd_ops"
-awk '/const RR3_PIN_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/src/profile.rs \
+awk '/const RR3_PIN_KEYS/{f=1} f{print} f && /\];/{exit}' $prof_src \
   | grep -oE '"[^"]+"' | tr -d '"' | sed 's/^/pin\//' | sort -u > "$gd_pin"
-gd_pin_decl="$(grep -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+gd_pin_decl="$(grep -h -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' $prof_src | grep -oE '[0-9]+\]' | tr -d ']')"
 awk '
   $1 == "requires" {
     line = $0
     while (match(line, /"[^"]+"/)) { print substr(line, RSTART+1, RLENGTH-2); line = substr(line, RSTART+RLENGTH) }
   }
 ' contracts/roles.toml | sed 's/^/role\//' | sort -u > "$gd_role"
-awk '/const RR3_DOMAIN_KEYS/{f=1} f{print} f && /\];/{exit}' base/runtime/rrd/src/profile.rs \
+awk '/const RR3_DOMAIN_KEYS/{f=1} f{print} f && /\];/{exit}' $prof_src \
   | grep -oE '"[^"]+"' | tr -d '"' | sed 's/^/domain\//' | sort -u > "$gd_dom"
-gd_dom_decl="$(grep -m1 -oE 'RR3_DOMAIN_KEYS: \[&str; [0-9]+\]' base/runtime/rrd/src/profile.rs | grep -oE '[0-9]+\]' | tr -d ']')"
+gd_dom_decl="$(grep -h -m1 -oE 'RR3_DOMAIN_KEYS: \[&str; [0-9]+\]' $prof_src | grep -oE '[0-9]+\]' | tr -d ']')"
 awk '/pub const RR3_ACT_PROFILE_FIELDS/{f=1} f{print} f && /^\];/{exit}' base/runtime/rr-hal-api/src/lib.rs \
   | grep -oE 'key: "[^"]+"' | sed 's/key: "/axis\//;s/"$//' | sort -u > "$gd_axis"
 # —— covers 原串导出（两源同一段扫描逻辑复用，批N13 件二扩入板侧）：
@@ -1524,12 +1533,11 @@ if [ ! -f "$gs_base" ]; then
   printf 'FAIL  ⑭ 基线文件缺失: %s\n' "$gs_base"
   gs_fail=1
 else
-  gs_file=base/runtime/rrd/src/profile.rs
   gs_fn='pub fn rr3_boot_with_probe('
-  gs_start=$(grep -nF "$gs_fn" "$gs_file" | head -1 | cut -d: -f1)
+  gs_file=$(grep -lF "$gs_fn" $prof_src 2>/dev/null | head -1)
+  gs_start=$(grep -nF "$gs_fn" "$gs_file" 2>/dev/null | head -1 | cut -d: -f1)
   if [ -z "$gs_start" ]; then
-    printf 'FAIL  ⑭ 基线锚函数缺失: %s 中找不到 %s——装载门被改名/搬走须同批改基线，不许静默\n' \
-      "$gs_file" "$gs_fn"
+    printf 'FAIL  ⑭ 基线锚函数缺失: 装配单模块中找不到 %s——装载门被改名/搬走须同批改基线，不许静默\n' "$gs_fn"
     gs_fail=1
   else
     gs_end=$(awk -v s="$gs_start" 'NR>=s && /^}/ {print NR; exit}' "$gs_file")

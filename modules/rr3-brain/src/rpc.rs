@@ -266,7 +266,7 @@ fn rr3_ops_target(
         "dialog"
     } else if group == "asr" || group == "tts" || slot == "timeout_s" {
         "cloud"
-    } else if rr3_model_rows_or_empty(brain) {
+    } else if rr3_no_model_rows(brain) {
         "cloud"
     } else {
         let actives = brain
@@ -295,7 +295,7 @@ fn rr3_ops_target(
 }
 
 /// 模型行表是否缺省（缺表/空表走 cloud fallback；非数组视同非空由调用方拦）
-fn rr3_model_rows_or_empty(brain: &Value) -> bool {
+fn rr3_no_model_rows(brain: &Value) -> bool {
     brain
         .get("model")
         .and_then(Value::as_array)
