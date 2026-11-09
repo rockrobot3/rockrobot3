@@ -114,7 +114,23 @@ fn face_exprs(face: &Value, errs: &mut Vec<String>) -> (Vec<String>, Vec<String>
 /// （件二）才是档案全键的裁决面。
 fn axis_travel_rows(root: &Path, errs: &mut Vec<String>) -> Vec<(String, u32, u32, u32)> {
     let dir = root.join("hardware/esp32-mini/axis");
-    let Some(entries) = fs::read_dir(&dir).ok().map(|rd| {
+    let Some(entries) = axis_entries(&dir, errs) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(String, u32, u32, u32)> = Vec::new();
+    for path in entries {
+        match axis_row_of(&path) {
+            Ok(row) => rows.push(row),
+            Err(es) => errs.extend(es),
+        }
+    }
+    rows
+}
+
+/// 档案目录读面：缺席与空表各是一条独立拒因（都属"行程真值点没有档案"的
+/// 两种形状），缺一不可。
+fn axis_entries(dir: &Path, errs: &mut Vec<String>) -> Option<Vec<PathBuf>> {
+    let Some(entries) = fs::read_dir(dir).ok().map(|rd| {
         let mut es: Vec<_> = rd
             .filter_map(Result::ok)
             .map(|e| e.path())
@@ -127,93 +143,102 @@ fn axis_travel_rows(root: &Path, errs: &mut Vec<String>) -> Vec<(String, u32, u3
             "{} 缺席或不可读（板侧行程真值点必须有档案）",
             dir.display()
         ));
-        return Vec::new();
+        return None;
     };
     if entries.is_empty() {
         errs.push(format!(
             "{} 无 *.toml 档案（行程常量表拒绝生成空表——查无行程的轴在板侧 fail-closed）",
             dir.display()
         ));
-        return Vec::new();
+        return None;
     }
-    let mut rows: Vec<(String, u32, u32, u32)> = Vec::new();
-    for path in entries {
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                errs.push(format!("{} 文件名不可读", path.display()));
-                continue;
-            }
-        };
-        let text = match fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(e) => {
-                errs.push(format!("读 {} 失败: {e}", path.display()));
-                continue;
-            }
-        };
-        let v: Value = match toml::from_str(&text) {
-            Ok(v) => v,
-            Err(e) => {
-                errs.push(format!("{} 解析失败: {e}", path.display()));
-                continue;
-            }
-        };
-        // schema 钉 1（档案 schema 升版 = 装载器与生成器同批，此处显式拒绝旧版）
-        match v.get("schema").and_then(Value::as_integer) {
-            Some(1) => {}
-            other => {
-                errs.push(format!(
-                    "{} schema = {other:?} ≠ 1（升版须同批改生成器）",
-                    path.display()
-                ));
-                continue;
-            }
+    Some(entries)
+}
+
+/// 单档案 → 一行 (stem, lo, hi, center)；不合规处逐条折 Err（可多条：三键各自
+/// 独立校验，坏几个报几个），由调用方统一入 errs——判断面与收集面分离。
+fn axis_row_of(path: &Path) -> Result<(String, u32, u32, u32), Vec<String>> {
+    let v = axis_doc_of(path).map_err(|e| vec![e])?;
+    let stem = axis_ident(path, &v).map_err(|e| vec![e])?;
+    let (center, lo, hi) = axis_triple(&v, path)?;
+    if !(lo < center && center < hi) {
+        return Err(vec![format!(
+            "{} 行程窗口不自洽：须 lo < center < hi（{lo} < {center} < {hi}）",
+            path.display()
+        )]);
+    }
+    Ok((stem, lo, hi, center))
+}
+
+/// 三键并检：`center_deg`/`lo_deg`/`hi_deg` 各自独立，逐键留痕不短路（一次
+/// 运行把同一档案的坏键全报出来，省掉"改一个键再跑一次"的往返）。
+fn axis_triple(v: &Value, path: &Path) -> Result<(u32, u32, u32), Vec<String>> {
+    let keys = ["center_deg", "lo_deg", "hi_deg"];
+    let mut vals = [0u32; 3];
+    let mut errs: Vec<String> = Vec::new();
+    for (i, key) in keys.iter().enumerate() {
+        match axis_u32(v, key, path) {
+            Ok(n) => vals[i] = n,
+            Err(e) => errs.push(e),
         }
-        let pin = match v.get("pin").and_then(Value::as_str) {
-            Some(p) if !p.is_empty() => p.to_string(),
-            other => {
-                errs.push(format!(
-                    "{} pin = {other:?} 非非空文本（外键对账锚）",
-                    path.display()
-                ));
-                continue;
-            }
-        };
-        let tail = pin.rsplit('.').next().unwrap_or(&pin).to_string();
-        if tail != stem {
-            errs.push(format!(
-                "{} 文件名 {:?} 与 pin 末段 {:?} 不对账——instance 是档案的消歧锚",
-                path.display(),
-                stem,
-                tail
-            ));
-            continue;
-        }
-        let mut int_of = |key: &str| -> Option<u32> {
-            match v.get(key).and_then(Value::as_integer) {
-                Some(n) if n >= 0 && n <= u32::MAX as i64 => Some(n as u32),
-                other => {
-                    errs.push(format!("{} {key} = {other:?} 非非负整数", path.display()));
-                    None
-                }
-            }
-        };
-        let (Some(center), Some(lo), Some(hi)) =
-            (int_of("center_deg"), int_of("lo_deg"), int_of("hi_deg"))
-        else {
-            continue;
-        };
-        if !(lo < center && center < hi) {
-            errs.push(format!(
-                "{} 行程窗口不自洽：须 lo < center < hi（{lo} < {center} < {hi}）",
+    }
+    if errs.is_empty() {
+        Ok((vals[0], vals[1], vals[2]))
+    } else {
+        Err(errs)
+    }
+}
+
+/// 档案装载面：读文本 → 解析 → schema 钉 1（档案 schema 升版 = 装载器与
+/// 生成器同批，此处显式拒绝旧版）。
+fn axis_doc_of(path: &Path) -> Result<Value, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("读 {} 失败: {e}", path.display()))?;
+    let v: Value =
+        toml::from_str(&text).map_err(|e| format!("{} 解析失败: {e}", path.display()))?;
+    match v.get("schema").and_then(Value::as_integer) {
+        Some(1) => Ok(v),
+        other => Err(format!(
+            "{} schema = {other:?} ≠ 1（升版须同批改生成器）",
+            path.display()
+        )),
+    }
+}
+
+/// 档案身份面：`pin` 非空且其末段必须等于文件名 stem——instance 是档案的
+/// 消歧锚，两者不一致说明档案被改名却没改 pin。
+fn axis_ident(path: &Path, v: &Value) -> Result<String, String> {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)
+        .ok_or_else(|| format!("{} 文件名不可读", path.display()))?;
+    let pin = match v.get("pin").and_then(Value::as_str) {
+        Some(p) if !p.is_empty() => p,
+        other => {
+            return Err(format!(
+                "{} pin = {other:?} 非非空文本（外键对账锚）",
                 path.display()
-            ));
-            continue;
+            ))
         }
-        rows.push((stem, lo, hi, center));
+    };
+    let tail = pin.rsplit('.').next().unwrap_or(pin);
+    if tail != stem {
+        return Err(format!(
+            "{} 文件名 {:?} 与 pin 末段 {:?} 不对账——instance 是档案的消歧锚",
+            path.display(),
+            stem,
+            tail
+        ));
     }
-    rows
+    Ok(stem)
+}
+
+/// 三键取数：非负整数且在 u32 值域内，越界与类型不对同一句点名。
+fn axis_u32(v: &Value, key: &str, path: &Path) -> Result<u32, String> {
+    match v.get(key).and_then(Value::as_integer) {
+        Some(n) if (0..=u32::MAX as i64).contains(&n) => Ok(n as u32),
+        other => Err(format!("{} {key} = {other:?} 非非负整数", path.display())),
+    }
 }
 
 /// 生成 topics_gen.rs 文本（板侧 include 的常量表；头注点名生成器与真值点，
