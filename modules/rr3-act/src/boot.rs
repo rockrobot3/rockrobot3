@@ -89,7 +89,7 @@ impl Rr3ActAxisState {
     }
 }
 
-/// 注入文本的原始槽位（五键各一，重复键由 [`rr3_axis_once`] 拒）。
+/// 注入文本的原始槽位（五键各一，重复键由 [`rr3_axis_seen`] 拒）。
 #[derive(Default)]
 struct Rr3AxisRaw {
     calibrated: Option<bool>,
@@ -99,38 +99,47 @@ struct Rr3AxisRaw {
     center: Option<u16>,
 }
 
-/// 单键写槽：已在位即判重复（重复键是注入链故障，不能后值覆盖前值）。
-fn rr3_axis_once<T>(slot: &Option<T>, k: &str) -> Result<(), String> {
-    if slot.is_some() {
+/// 单键解析（**只做路由**；值与词表/域校验各自成体，文案逐字保留）。
+/// B9：重复键判定前移一次（[`rr3_axis_seen`]），三数值键归一臂
+/// [`rr3_axis_pose`]——路由本身不再每臂各判一次。
+fn rr3_axis_kv(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
+    if rr3_axis_seen(raw, k)? {
         return Err(format!("执行轴状态 {k} 重复"));
+    }
+    match k {
+        "calibrated" => raw.calibrated = Some(rr3_axis_bool(v)?),
+        "hard_stop" => raw.hard_stop = Some(rr3_axis_stop(v)?),
+        "lo" | "hi" | "center" => rr3_axis_pose(raw, k, v)?,
+        other => return Err(format!("执行轴状态未知键 {other:?}")),
     }
     Ok(())
 }
 
-/// 单键解析（**只做路由**；值与词表/域校验各自成体，文案逐字保留）。
-fn rr3_axis_kv(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
+/// 键是否已出现（重复键判据的单点；未知键在此点名，与旧 [`rr3_axis_once`]
+/// 同一文案域）。
+fn rr3_axis_seen(raw: &Rr3AxisRaw, k: &str) -> Result<bool, String> {
     match k {
-        "calibrated" => {
-            rr3_axis_once(&raw.calibrated, k)?;
-            raw.calibrated = Some(rr3_axis_bool(v)?);
-        }
-        "hard_stop" => {
-            rr3_axis_once(&raw.hard_stop, k)?;
-            raw.hard_stop = Some(rr3_axis_stop(v)?);
-        }
-        "lo" => {
-            rr3_axis_once(&raw.lo, k)?;
-            raw.lo = Some(rr3_axis_num(v, k, "行程下限")?);
-        }
-        "hi" => {
-            rr3_axis_once(&raw.hi, k)?;
-            raw.hi = Some(rr3_axis_num(v, k, "行程上限")?);
-        }
-        "center" => {
-            rr3_axis_once(&raw.center, k)?;
-            raw.center = Some(rr3_axis_num(v, k, "中位锚")?);
-        }
-        other => return Err(format!("执行轴状态未知键 {other:?}")),
+        "calibrated" => Ok(raw.calibrated.is_some()),
+        "hard_stop" => Ok(raw.hard_stop.is_some()),
+        "lo" => Ok(raw.lo.is_some()),
+        "hi" => Ok(raw.hi.is_some()),
+        "center" => Ok(raw.center.is_some()),
+        other => Err(format!("执行轴状态未知键 {other:?}")),
+    }
+}
+
+/// lo/hi/center 三数值键（同形 u16 域，文案按键取域说明）
+fn rr3_axis_pose(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
+    let what = match k {
+        "lo" => "行程下限",
+        "hi" => "行程上限",
+        _ => "中位锚",
+    };
+    let n = rr3_axis_num(v, k, what)?;
+    match k {
+        "lo" => raw.lo = Some(n),
+        "hi" => raw.hi = Some(n),
+        _ => raw.center = Some(n),
     }
     Ok(())
 }
