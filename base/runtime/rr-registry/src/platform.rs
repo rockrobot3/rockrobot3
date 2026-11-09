@@ -394,27 +394,7 @@ fn rr3_conf_item(
             None
         }
     };
-    let mut pins = BTreeSet::new();
-    let mut controllers = BTreeSet::new();
-    if let Some(v) = c.get("pins") {
-        pins = rr3_pin_set_from(v, &format!("conflict[{i}].pins"), errs);
-    }
-    if let Some(v) = c.get("controllers") {
-        controllers = rr3_str_set_from(v, &format!("conflict[{i}].controllers"), errs);
-    }
-    if pins.is_empty() && controllers.is_empty() {
-        errs.push(format!(
-            "conflict[{i}]（组 {}）pins 与 controllers 均空：点名不到任何成员的冲突集无判据对象",
-            group.as_deref().unwrap_or("")
-        ));
-    }
-    for ctl in &controllers {
-        if !table.controllers.contains_key(ctl) {
-            errs.push(format!(
-                "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
-            ));
-        }
-    }
+    let (pins, controllers) = rr3_conf_members(c, i, &group, table, errs);
     match c.get("why").and_then(Value::as_str) {
         Some(w) if !w.trim().is_empty() => {}
         Some(_) => errs.push(format!("conflict[{i}].why 不得为空串")),
@@ -439,6 +419,39 @@ fn rr3_conf_item(
             });
         }
     }
+}
+
+/// 冲突集成员：pins/controllers 两数组（缺省空集）；两集皆空即点名；controllers
+/// 成员必须在本表 `[[controller]]` 在册（同文件真值，先立词表再引）。
+fn rr3_conf_members(
+    c: &toml::Table,
+    i: usize,
+    group: &Option<String>,
+    table: &Rr3PlatformTable,
+    errs: &mut Vec<String>,
+) -> (BTreeSet<i64>, BTreeSet<String>) {
+    let mut pins = BTreeSet::new();
+    let mut controllers = BTreeSet::new();
+    if let Some(v) = c.get("pins") {
+        pins = rr3_pin_set_from(v, &format!("conflict[{i}].pins"), errs);
+    }
+    if let Some(v) = c.get("controllers") {
+        controllers = rr3_str_set_from(v, &format!("conflict[{i}].controllers"), errs);
+    }
+    if pins.is_empty() && controllers.is_empty() {
+        errs.push(format!(
+            "conflict[{i}]（组 {}）pins 与 controllers 均空：点名不到任何成员的冲突集无判据对象",
+            group.as_deref().unwrap_or("")
+        ));
+    }
+    for ctl in &controllers {
+        if !table.controllers.contains_key(ctl) {
+            errs.push(format!(
+                "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
+            ));
+        }
+    }
+    (pins, controllers)
 }
 
 /// `[construction]` 段：`controller:role:instance` 三元键，controller 须本表在册。
