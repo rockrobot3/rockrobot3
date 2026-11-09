@@ -153,6 +153,42 @@ pub struct Rr3DomainWritePaths {
     pub platform_dir: PathBuf,
 }
 
+/// 记账成员相对名 → 写口路径位（基-40 记账七成员里写口要用的六路）。
+#[derive(Clone, Copy)]
+enum Rr3PathSlot {
+    Profile,
+    Slots,
+    Roles,
+    Devices,
+    Wiring,
+    Platform,
+}
+
+/// 成员分类（纯函数）：不认识 = None（topics.toml 等非写口成员不取）。
+/// 分类单点在这里，主循环只做"放位"，成员口径变化只改这一处。
+fn rr3_path_slot(member: &str) -> Option<Rr3PathSlot> {
+    if member.starts_with("profiles/") && member.ends_with(".toml") {
+        return Some(Rr3PathSlot::Profile);
+    }
+    if member.starts_with("hardware/") && member.ends_with("/wiring.toml") {
+        return Some(Rr3PathSlot::Wiring);
+    }
+    if let Some(rest) = member.strip_prefix("contracts/platform/") {
+        return rest.ends_with(".toml").then_some(Rr3PathSlot::Platform);
+    }
+    let books = &crate::profile::RR3_CONTRACT_BOOKS;
+    for (idx, slot) in [
+        (1, Rr3PathSlot::Slots),
+        (2, Rr3PathSlot::Roles),
+        (3, Rr3PathSlot::Devices),
+    ] {
+        if member.strip_prefix("contracts/") == Some(books[idx]) {
+            return Some(slot);
+        }
+    }
+    None
+}
+
 /// 从真值集记账行推导写口路径集（跨平台纯函数）。topics.toml 不取（装载链
 /// 内部按 contracts 目录读）。
 pub fn rr3_write_paths(truth_set: &[Rr3TruthSetEntry]) -> Result<Rr3DomainWritePaths, String> {
@@ -163,28 +199,14 @@ pub fn rr3_write_paths(truth_set: &[Rr3TruthSetEntry]) -> Result<Rr3DomainWriteP
     let mut wiring = None;
     let mut platform_dir = None;
     for e in truth_set {
-        if e.member.starts_with("profiles/") && e.member.ends_with(".toml") {
-            profile = Some(e.path.clone());
-        }
-        match e.member.as_str() {
-            m if m == format!("contracts/{}", crate::profile::RR3_CONTRACT_BOOKS[1]) => {
-                slots = Some(e.path.clone())
-            }
-            m if m == format!("contracts/{}", crate::profile::RR3_CONTRACT_BOOKS[2]) => {
-                roles = Some(e.path.clone())
-            }
-            m if m == format!("contracts/{}", crate::profile::RR3_CONTRACT_BOOKS[3]) => {
-                devices = Some(e.path.clone())
-            }
-            _ => {}
-        }
-        if let Some(rest) = e.member.strip_prefix("contracts/platform/") {
-            if rest.ends_with(".toml") {
-                platform_dir = e.path.parent().map(PathBuf::from);
-            }
-        }
-        if e.member.starts_with("hardware/") && e.member.ends_with("/wiring.toml") {
-            wiring = Some(e.path.clone());
+        match rr3_path_slot(&e.member) {
+            Some(Rr3PathSlot::Profile) => profile = Some(e.path.clone()),
+            Some(Rr3PathSlot::Slots) => slots = Some(e.path.clone()),
+            Some(Rr3PathSlot::Roles) => roles = Some(e.path.clone()),
+            Some(Rr3PathSlot::Devices) => devices = Some(e.path.clone()),
+            Some(Rr3PathSlot::Wiring) => wiring = Some(e.path.clone()),
+            Some(Rr3PathSlot::Platform) => platform_dir = e.path.parent().map(PathBuf::from),
+            None => {}
         }
     }
     // 逐条点名缺员（基-40 记账七成员，写口必需六路；缺哪条点哪条，不静默合并）
