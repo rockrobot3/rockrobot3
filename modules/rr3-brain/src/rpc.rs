@@ -153,6 +153,13 @@ pub(crate) fn rr3_ops_write(
     slot: &str,
     value: &Value,
 ) -> Result<(Value, Value), String> {
+    rr3_ops_slot_check(group, slot)?;
+    let new = rr3_ops_value_check(group, slot, value)?;
+    rr3_ops_apply(doc, group, slot, new)
+}
+
+/// 组/槽白名单校验（组不认/槽不认逐条点名）。
+fn rr3_ops_slot_check(group: &str, slot: &str) -> Result<(), String> {
     let (_, slots) = RR3_OPS_WRITE_GROUPS
         .iter()
         .find(|(g, _)| *g == group)
@@ -163,9 +170,13 @@ pub(crate) fn rr3_ops_write(
             rr3_ops_slots_text(group)
         ));
     }
+    Ok(())
+}
 
-    // 类型域值校验（Python 分支同序：字符串槽 → timeout_s → max_utterance_ms）
-    let new: Value = if RR3_OPS_STRING_SLOTS.contains(&slot) {
+/// 类型域值校验（Python 分支同序：字符串槽 → timeout_s → max_utterance_ms），
+/// 返回落 doc 的规范化值。
+fn rr3_ops_value_check(group: &str, slot: &str, value: &Value) -> Result<Value, String> {
+    if RR3_OPS_STRING_SLOTS.contains(&slot) {
         let s = value.as_str().ok_or_else(|| {
             format!(
                 "槽 {group}.{slot} 须字符串，收到 {}",
@@ -176,8 +187,9 @@ pub(crate) fn rr3_ops_write(
         if s.is_empty() {
             return Err(format!("槽 {group}.{slot} 不得为空"));
         }
-        json!(s)
-    } else if slot == "timeout_s" {
+        return Ok(json!(s));
+    }
+    if slot == "timeout_s" {
         if value.is_boolean() || !value.is_number() {
             return Err(format!(
                 "槽 {group}.{slot} 须数值，收到 {}",
@@ -192,30 +204,37 @@ pub(crate) fn rr3_ops_write(
                 rr3_py_float_str(f)
             ));
         }
-        json!(f)
-    } else {
-        // max_utterance_ms（白名单仅此一整数槽，走这里即它）
-        if value.is_boolean() || !value.is_number() {
-            return Err(format!(
-                "槽 {group}.{slot} 须数值，收到 {}",
-                rr3_py_type_name(value)
-            ));
-        }
-        let is_int = value.is_i64() || value.is_u64();
-        let f = value.as_f64().unwrap_or(0.0);
-        if !is_int && f.fract() != 0.0 {
-            return Err(format!(
-                "槽 {group}.{slot} 须整数，收到 {}",
-                rr3_py_float_str(f)
-            ));
-        }
-        let i = f as i64;
-        if !(i > 0) {
-            return Err(format!("槽 {group}.{slot} 须 >0，收到 {i}"));
-        }
-        json!(i)
-    };
+        return Ok(json!(f));
+    }
+    // max_utterance_ms（白名单仅此一整数槽，走这里即它）
+    if value.is_boolean() || !value.is_number() {
+        return Err(format!(
+            "槽 {group}.{slot} 须数值，收到 {}",
+            rr3_py_type_name(value)
+        ));
+    }
+    let is_int = value.is_i64() || value.is_u64();
+    let f = value.as_f64().unwrap_or(0.0);
+    if !is_int && f.fract() != 0.0 {
+        return Err(format!(
+            "槽 {group}.{slot} 须整数，收到 {}",
+            rr3_py_float_str(f)
+        ));
+    }
+    let i = f as i64;
+    if !(i > 0) {
+        return Err(format!("槽 {group}.{slot} 须 >0，收到 {i}"));
+    }
+    Ok(json!(i))
+}
 
+/// 写源落位（Python rr3_ops_write 尾段同形状）：返回 (old, new)。
+fn rr3_ops_apply(
+    doc: &mut Value,
+    group: &str,
+    slot: &str,
+    new: Value,
+) -> Result<(Value, Value), String> {
     // 写源映射（Python rr3_ops_write 尾段同形状）：dialog → dialog 段（缺段建段，
     // setdefault 同义）；asr/tts 全槽与 llm.timeout_s → cloud 段；llm 组
     // llm_model/base_url → 实效源（模型行 active 在则写行、否则 cloud fallback）
@@ -408,8 +427,20 @@ pub(crate) fn rr3_model_list(cfg: &Rr3BrainCfg) -> Result<Value, String> {
     Ok(json!({ "models": models, "active": rr3_row_active_name(&rows) }))
 }
 
-/// upsert 一行（同名即更新；新行在表内无 active 时自动接任）
-fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(), String> {
+/// upsert 入参（一次解析；`key_ref` 三态：缺席 = 保留现值、空串 = 清除、
+/// 有值 = 校验后写——`key_ref_clear` 承载"空串清除"这一态）。
+struct Rr3ModelRowInput<'a> {
+    base_url: &'a str,
+    model_id: &'a str,
+    api_format: &'a str,
+    mode: &'a str,
+    key_ref: Option<String>,
+    key_ref_clear: bool,
+    active: Option<bool>,
+}
+
+/// 模型行进参解析：必填/域名/键引用/active 逐项按旧文案 fail-closed。
+fn rr3_model_row_input<'a>(name: &str, args: &'a Value) -> Result<Rr3ModelRowInput<'a>, String> {
     let base_url = args
         .get("base_url")
         .and_then(Value::as_str)
@@ -444,39 +475,51 @@ fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(
     if mode != "api" && mode != "local" {
         return Err(format!("模型行 {name} mode 不认: {mode}（允许 api/local）"));
     }
-    // api_key_ref 三态：键缺席 = 保留现值（新建即无）；空串 = 清空；有值 = 校验后写
-    let key_ref_given = args
-        .get("api_key_ref")
-        .map(|v| {
-            v.as_str()
+    let (key_ref, key_ref_clear) = match args.get("api_key_ref") {
+        None => (None, false),
+        Some(v) => {
+            let s = v
+                .as_str()
                 .map(str::trim)
-                .ok_or_else(|| format!("模型行 {name} api_key_ref 须字符串"))
-        })
-        .transpose()?;
-    let key_ref = match key_ref_given {
-        Some("") => None,
-        Some(s) => {
-            if s.chars().any(char::is_whitespace) {
-                return Err(format!("模型行 {name} api_key_ref 不得含空白: '{s}'"));
-            }
-            if let Some(var) = s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX) {
-                if var.is_empty() || var.chars().any(char::is_whitespace) {
-                    return Err(format!(
-                        "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
-                    ));
+                .ok_or_else(|| format!("模型行 {name} api_key_ref 须字符串"))?;
+            if s.is_empty() {
+                (None, true)
+            } else {
+                if s.chars().any(char::is_whitespace) {
+                    return Err(format!("模型行 {name} api_key_ref 不得含空白: '{s}'"));
                 }
+                if let Some(var) = s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX) {
+                    if var.is_empty() || var.chars().any(char::is_whitespace) {
+                        return Err(format!(
+                            "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
+                        ));
+                    }
+                }
+                (Some(s.to_string()), false)
             }
-            Some(s.to_string())
         }
-        None => None,
     };
-    let active_given = match args.get("active") {
+    let active = match args.get("active") {
         None => None,
         Some(v) => Some(
             v.as_bool()
                 .ok_or_else(|| format!("模型行 {name} active 须布尔"))?,
         ),
     };
+    Ok(Rr3ModelRowInput {
+        base_url,
+        model_id,
+        api_format,
+        mode,
+        key_ref,
+        key_ref_clear,
+        active,
+    })
+}
+
+/// upsert 一行（同名即更新；新行在表内无 active 时自动接任）
+fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(), String> {
+    let inp = rr3_model_row_input(name, args)?;
     let idx = rows
         .iter()
         .position(|r| r.get("name").and_then(Value::as_str) == Some(name));
@@ -493,7 +536,7 @@ fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(
         .enumerate()
         .any(|(j, r)| j != i && r.get("active").and_then(Value::as_bool) == Some(true));
     let prev_active = rows[i].get("active").and_then(Value::as_bool) == Some(true);
-    let active = match active_given {
+    let active = match inp.active {
         Some(a) => a,
         None => {
             if is_new {
@@ -508,17 +551,14 @@ fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(
             .as_object_mut()
             .ok_or_else(|| format!("模型行 #{i} 须为表（TOML 行表同构）"))?;
         obj.insert("name".to_string(), json!(name));
-        obj.insert("mode".to_string(), json!(mode));
-        obj.insert("api_format".to_string(), json!(api_format));
-        obj.insert("base_url".to_string(), json!(base_url));
-        obj.insert("model_id".to_string(), json!(model_id));
-        if let Some(given) = key_ref_given {
-            if let Some(k) = key_ref {
-                obj.insert("api_key_ref".to_string(), json!(k));
-            } else {
-                obj.remove("api_key_ref");
-            }
-            let _ = given;
+        obj.insert("mode".to_string(), json!(inp.mode));
+        obj.insert("api_format".to_string(), json!(inp.api_format));
+        obj.insert("base_url".to_string(), json!(inp.base_url));
+        obj.insert("model_id".to_string(), json!(inp.model_id));
+        if let Some(k) = inp.key_ref {
+            obj.insert("api_key_ref".to_string(), json!(k));
+        } else if inp.key_ref_clear {
+            obj.remove("api_key_ref");
         }
         obj.insert("active".to_string(), json!(active));
     }
