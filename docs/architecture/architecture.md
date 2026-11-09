@@ -463,7 +463,7 @@ rock3/
 │                                     Cargo.toml + src/main.rs + README.md；Rust 模块各带 Cargo.lock
 │   ├── rr3-sense/                 ← src/audio/{capture,vad}.rs（+ mod.rs）、env.rs、imu.rs
 │   ├── rr3-act/                   ← src/{servo,reflex,led}.rs——舵机/电机反射环的宿主进程
-│   ├── rr3-interact/              ← src/player.rs、face.rs、panel/{mod.rs,server.rs,www/index.html}
+│   ├── rr3-interact/              ← src/player.rs、face.rs、panel/{mod.rs,server.rs,http.rs,secrets.rs,www/index.html}
 │   ├── rr3-power/                 ← src/battery.rs、charger.rs
 │   ├── rr3-connect/               ← src/wifi.rs、bt.rs、session.rs
 │   └── rr3-brain/                 ← Python 包（无 Cargo.toml）：rr3_brain/{__main__.py,dialog.py,
