@@ -3,7 +3,7 @@
 //! 生成 `modules/rr3-<名>/` 骨架：manifest + config + 空 Rust 程序 + README。
 //! 生成物当场用 `rr-registry` 的契约校验，不合规即中止（architecture.md §7）。
 //!
-//! 0.0.5 批B② 扩产（ADR-0019）：原子件五件套生成（`rr3_mkmod_generate_atom`）——
+//! 0.0.5 批B② 扩产（ADR-0019）：原子件五件套生成（`rr3_mkmod_gen_atom`）——
 //! ① `atom.toml`（Atom manifest，契约=`rr-registry/src/atom.schema.toml`）
 //! ② 入口（`<名>.rs`，只声明公开面）· ③ 实现（`mech.rs`，机制主体）
 //! ④ 装配清单（`assemble.toml`，注入面声明）· ⑤ 唯一私有头（`private.rs`）。
@@ -303,7 +303,7 @@ fn atom_private_rs(name: &str) -> String {
 /// `<out_root>/<name>/`。生成后当场回灌 `rr3_atom_gate`（字段契约 +
 /// slots 查册门 + 板无关断言）：`out_root` 须位于仓内以向上定位 `contracts/slots.toml`，
 /// 校验不过即整体丢弃（staging→rename，不留半成品）。
-pub fn rr3_mkmod_generate_atom(
+pub fn rr3_mkmod_gen_atom(
     name: &str,
     slot: &str,
     out_root: &Path,
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn atom_generation_passes_registry_validation() {
         let root = scratch_root("ok");
-        let files = rr3_mkmod_generate_atom("sample_atom", "power.battery", &root)
+        let files = rr3_mkmod_gen_atom("sample_atom", "power.battery", &root)
             .expect("合法生成必须成功");
         assert_eq!(files.len(), 5, "五件套缺一不可");
         for rel in [
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn generated_atom_face_carries_no_serde_json() {
         let root = scratch_root("closure");
-        rr3_mkmod_generate_atom("sample_atom", "power.battery", &root).unwrap();
+        rr3_mkmod_gen_atom("sample_atom", "power.battery", &root).unwrap();
         for rel in [
             "sample_atom/atom.toml",
             "sample_atom/sample_atom.rs",
@@ -410,15 +410,15 @@ mod tests {
     fn atom_generation_rejects_bad_inputs() {
         let root = scratch_root("bad");
         assert!(matches!(
-            rr3_mkmod_generate_atom("Bad-Atom", "power.battery", &root),
+            rr3_mkmod_gen_atom("Bad-Atom", "power.battery", &root),
             Err(Rr3MkmodError::InvalidName(_))
         ));
-        rr3_mkmod_generate_atom("dupe", "power.battery", &root).unwrap();
+        rr3_mkmod_gen_atom("dupe", "power.battery", &root).unwrap();
         assert!(matches!(
-            rr3_mkmod_generate_atom("dupe", "power.battery", &root),
+            rr3_mkmod_gen_atom("dupe", "power.battery", &root),
             Err(Rr3MkmodError::AlreadyExists(_))
         ));
-        let e = rr3_mkmod_generate_atom("nosuch", "power.solar", &root).unwrap_err();
+        let e = rr3_mkmod_gen_atom("nosuch", "power.solar", &root).unwrap_err();
         let Rr3MkmodError::Manifest(errs) = e else {
             panic!("未登记格位必须由回灌拒绝")
         };

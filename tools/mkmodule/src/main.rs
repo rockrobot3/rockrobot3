@@ -34,7 +34,7 @@ fn main() {
             eprintln!("无法创建原子根目录 {}: {e}", out_root.display());
             std::process::exit(1);
         }
-        match rr3_mkmod::rr3_mkmod_generate_atom(&args[1], &args[2], &out_root) {
+        match rr3_mkmod::rr3_mkmod_gen_atom(&args[1], &args[2], &out_root) {
             Ok(files) => {
                 println!("已生成原子件五件套 ({} 个文件):", files.len());
                 for f in files {
