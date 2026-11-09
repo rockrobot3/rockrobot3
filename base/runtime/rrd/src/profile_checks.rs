@@ -55,38 +55,62 @@ fn rr3_pin_derive_value(
     platform: &Rr3PlatformTable,
 ) -> Result<String, String> {
     match key {
-        "pwm_chip" | "gpio_chip" | "i2c_bus" => {
-            let prefix = rr3_wordform_prefix(platform, key)?;
-            rr3_wordform_tail(&pin.controller, &prefix)
-                .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))
-        }
-        "pwm_channel" => pin
-            .channel
-            .map(|c| c.to_string())
-            .ok_or_else(|| "channel 留空".to_string()),
-        "gpio_led_line" | "gpio_relay_line" => pin
-            .physical
-            .first()
-            .map(|n| n.to_string())
-            .ok_or_else(|| "physical 留空".to_string()),
-        "ina219_addr" => {
-            if pin.addr.is_empty() {
-                Err("addr 留空".to_string())
-            } else {
-                Ok(pin.addr.clone())
-            }
-        }
-        "spi_device" => {
-            let prefix = rr3_wordform_prefix(platform, key)?;
-            let bus = rr3_wordform_tail(&pin.controller, &prefix)
-                .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))?;
-            let cs = pin
-                .channel
-                .map(|c| c.to_string())
-                .ok_or_else(|| "channel 留空（SPI 片选号）".to_string())?;
-            Ok(format!("/dev/spidev{bus}.{cs}"))
-        }
+        "pwm_chip" | "gpio_chip" | "i2c_bus" => rr3_derive_word(pin, key, platform),
+        "spi_device" => rr3_derive_spi(pin, key, platform),
+        "pwm_channel" => rr3_derive_channel(pin),
+        "gpio_led_line" | "gpio_relay_line" => rr3_derive_line(pin),
+        "ina219_addr" => rr3_derive_addr(pin),
         other => Err(format!("派生键 {other} 不在派生规则表（八物理键封闭）")),
+    }
+}
+
+/// 词形键派生（B9 自 pin_derive_value 抽出）：controller 必须合 `<prefix><N>`，
+/// 派生值 = N 的字符串形式。
+fn rr3_derive_word(
+    pin: &Rr3PinEntry,
+    key: &str,
+    platform: &Rr3PlatformTable,
+) -> Result<String, String> {
+    let prefix = rr3_wordform_prefix(platform, key)?;
+    rr3_wordform_tail(&pin.controller, &prefix)
+        .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))
+}
+
+/// spi_device 派生（B9 自 pin_derive_value 抽出）：`/dev/spidev<bus>.<cs>`，
+/// bus 自 controller 词形、cs 自 channel。
+fn rr3_derive_spi(
+    pin: &Rr3PinEntry,
+    key: &str,
+    platform: &Rr3PlatformTable,
+) -> Result<String, String> {
+    let prefix = rr3_wordform_prefix(platform, key)?;
+    let bus = rr3_wordform_tail(&pin.controller, &prefix)
+        .ok_or_else(|| format!("controller 词形 {} 不合 {prefix}<N>", pin.controller))?;
+    let cs = pin
+        .channel
+        .map(|c| c.to_string())
+        .ok_or_else(|| "channel 留空（SPI 片选号）".to_string())?;
+    Ok(format!("/dev/spidev{bus}.{cs}"))
+}
+
+fn rr3_derive_channel(pin: &Rr3PinEntry) -> Result<String, String> {
+    pin.channel
+        .map(|c| c.to_string())
+        .ok_or_else(|| "channel 留空".to_string())
+}
+
+fn rr3_derive_line(pin: &Rr3PinEntry) -> Result<String, String> {
+    pin.physical
+        .first()
+        .map(|n| n.to_string())
+        .ok_or_else(|| "physical 留空".to_string())
+}
+
+fn rr3_derive_addr(pin: &Rr3PinEntry) -> Result<String, String> {
+    if pin.addr.is_empty() {
+        Err("addr 留空".to_string())
+    } else {
+        Ok(pin.addr.clone())
     }
 }
 
