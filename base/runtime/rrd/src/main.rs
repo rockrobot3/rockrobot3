@@ -12,7 +12,7 @@ use rrd::RRD_UNSUPPORTED;
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut cfg = match cli::rr3_cli_parse(&args) {
+    let cfg = match cli::rr3_cli_parse(&args) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{e}");
@@ -20,42 +20,15 @@ fn main() -> std::process::ExitCode {
         }
     };
 
-    // 套接字路径在打印横幅**之前**绝对化：横幅回显的必须正是 daemon 要绑的那一个。
-    // 按 CLI 原词回显（`--socket rel.sock`）会让运维照自己 shell 的 CWD 去连，而 daemon
-    // 绑的是 rrd 的 CWD + rel.sock——两处各说一套，比直接报错更难查。
-    // 绝对化失败即致命：静默回落原词等于把这条缝留在原地。
-    match cli::rr3_socket_abs(&cfg.socket) {
-        Ok(abs) => cfg.socket = abs,
+    // 三处路径（套接字/叠加层/装配单）在打印横幅**之前**一次性绝对化：
+    // 横幅回显的必须正是 daemon 要用的那一个，凭证不得依赖 CWD。
+    let (cfg, overlay) = match rr3_abs_config(cfg) {
+        Ok(v) => v,
         Err(e) => {
             eprintln!("rrd: {e}");
             return std::process::ExitCode::FAILURE;
         }
-    }
-
-    // 叠加层路径在这里一次性绝对化：装载与横幅共用同一个解析结果（spec §6 的可见凭证）。
-    // 解析失败即致命——横幅是"叠加层已生效"的可见凭证，按 CLI 原词回显会让它依赖 CWD。
-    let overlay = match cfg.overlay.as_deref() {
-        Some(ov) => match topics_load::rr3_topics_abs(ov) {
-            Ok(abs) => Some(abs),
-            Err(e) => {
-                eprintln!("rrd: 主题叠加层参数不可用: {e}");
-                return std::process::ExitCode::FAILURE;
-            }
-        },
-        None => None,
     };
-
-    // 装配单路径在这里一次性绝对化（与叠加层同形）：装载与横幅凭证共用同一个解析结果。
-    // 解析失败即致命——装配单**必须已存在**才可装载，canonicalize 的 ENOENT 正是该报的错。
-    if let Some(p) = cfg.profile.as_deref() {
-        match profile::rr3_profile_abs(p) {
-            Ok(abs) => cfg.profile = Some(abs),
-            Err(e) => {
-                eprintln!("rrd: 装配单参数不可用: {e}");
-                return std::process::ExitCode::FAILURE;
-            }
-        }
-    }
 
     // 装载在两个平台都做：契约坏了要当场看见，而不是"等不到 UDS"。
     // 契约目录运行期落点（T5）：--contracts 显式 > 编译期仓内路径；topics/slots
@@ -96,6 +69,38 @@ fn main() -> std::process::ExitCode {
     }
 
     rr3_run(cfg, topics)
+}
+
+/// 启动参数的三处路径（套接字/叠加层/装配单）一次性绝对化：解析结果既是装载输入
+/// 也是横幅可见凭证，必须在打印横幅**之前**定死——按 CLI 原词回显会让凭证依赖 CWD。
+/// 任一失败即致命，Err 交回 main 统一按 `rrd: {e}` 报出（文案逐字不变）。
+fn rr3_abs_config(
+    mut cfg: cli::RrdConfig,
+) -> Result<(cli::RrdConfig, Option<std::path::PathBuf>), String> {
+    // 套接字路径在打印横幅**之前**绝对化：横幅回显的必须正是 daemon 要绑的那一个。
+    // 按 CLI 原词回显（`--socket rel.sock`）会让运维照自己 shell 的 CWD 去连，而 daemon
+    // 绑的是 rrd 的 CWD + rel.sock——两处各说一套，比直接报错更难查。
+    // 绝对化失败即致命：静默回落原词等于把这条缝留在原地。
+    cfg.socket = cli::rr3_socket_abs(&cfg.socket)?;
+
+    // 叠加层路径在这里一次性绝对化：装载与横幅共用同一个解析结果（spec §6 的可见凭证）。
+    // 解析失败即致命——横幅是"叠加层已生效"的可见凭证，按 CLI 原词回显会让它依赖 CWD。
+    let overlay = match cfg.overlay.as_deref() {
+        Some(ov) => Some(
+            topics_load::rr3_topics_abs(ov)
+                .map_err(|e| format!("主题叠加层参数不可用: {e}"))?,
+        ),
+        None => None,
+    };
+
+    // 装配单路径在这里一次性绝对化（与叠加层同形）：装载与横幅凭证共用同一个解析结果。
+    // 解析失败即致命——装配单**必须已存在**才可装载，canonicalize 的 ENOENT 正是该报的错。
+    if let Some(p) = cfg.profile.as_deref() {
+        cfg.profile = Some(
+            profile::rr3_profile_abs(p).map_err(|e| format!("装配单参数不可用: {e}"))?,
+        );
+    }
+    Ok((cfg, overlay))
 }
 
 /// （Unix）把守护主循环交出去：它永不返回，除非 bind 失败。

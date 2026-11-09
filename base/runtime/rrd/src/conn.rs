@@ -1164,6 +1164,27 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
     }
 }
 
+/// 注册后的读循环：逐帧读、逐帧处理，直到干净收尾或带原因断开。
+/// EOF（对端关连接）与 `rr3.unregister` 都是 `QuitClean`；其余读错/处理错带原因返回。
+fn rr3_read_loop(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    reader: &mut UnixStream,
+) -> Result<Rr3Flow, String> {
+    loop {
+        match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
+            Ok(frame) => match rr3_serve_frame(out, ctx, me, &frame) {
+                Ok(Rr3Flow::Keep) => {}
+                Ok(Rr3Flow::QuitClean) => break Ok(Rr3Flow::QuitClean),
+                Err(reason) => break Err(reason),
+            },
+            Err(Rr3FrameError::Closed) => break Ok(Rr3Flow::QuitClean),
+            Err(e) => break Err(format!("帧读取失败: {e:?}")),
+        }
+    }
+}
+
 /// 服务一条连接。返回 `Err` 只描述**这一条**连接的断开原因；守护进程与别的连接不受影响。
 pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String> {
     let out: Arc<Mutex<UnixStream>> = Arc::new(Mutex::new(
@@ -1203,17 +1224,7 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         .set_read_timeout(None)
         .map_err(|e| format!("清读超时失败: {e}"))?;
 
-    let outcome: Result<Rr3Flow, String> = loop {
-        match rr3_frame_read_cap(&mut reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
-            Ok(frame) => match rr3_serve_frame(&out, &ctx, &me, &frame) {
-                Ok(Rr3Flow::Keep) => {}
-                Ok(Rr3Flow::QuitClean) => break Ok(Rr3Flow::QuitClean),
-                Err(reason) => break Err(reason),
-            },
-            Err(Rr3FrameError::Closed) => break Ok(Rr3Flow::QuitClean),
-            Err(e) => break Err(format!("帧读取失败: {e:?}")),
-        }
-    };
+    let outcome = rr3_read_loop(&out, &ctx, &me, &mut reader);
 
     let clean_exit = outcome.is_ok();
     let reason = match &outcome {
