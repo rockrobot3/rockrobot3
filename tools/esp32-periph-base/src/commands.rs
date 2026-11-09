@@ -82,57 +82,73 @@ pub(crate) fn cmd_loop(mut io: CtlUart, bus: Arc<Mutex<Bus>>) {
         // 上行，同线程串行写与行面字节互不交错），再窥视下一字节
         drain_outbox(&mut io.uart, &bus);
         drain_audio(&mut io.uart, &bus);
-        let mut first = [0u8; 1];
         // 窥视带 1-tick（10ms）超时：空口返回 Ok(0) 即回到轮首（转手清 outbox +
         // 让出 CPU，自主行为在运行面跑，不再占用控制面）；有字节（Ok(n≥1)）照旧
         // 双面分流（帧/行路径的后续读带 LINE_BYTE_TICKS 字节间超时，半行也不会
         // 让控制面永久挂住）。Err 才是真读失败。
-        match io.uart.read(&mut first, 1) {
-            Ok(0) => continue,
-            Ok(_) => {}
-            Err(_) => {
+        match peek_byte(&mut io) {
+            Ok(None) => continue,
+            Ok(Some(first)) => serve(&mut io, &bus, &mut ctl, first),
+            Err(()) => {
                 eprintln!("[periph] UART 读失败，退避后重试");
                 thread::sleep(Duration::from_millis(100));
-                continue;
             }
         }
-        if first[0] == RR3_MAGIC_FIRST {
-            frame_round(&mut io, &bus, &mut ctl, first[0]);
-            continue;
+    }
+}
+
+/// 窥视一个首字节：`Ok(None)` = 空口（已等过一个 tick），`Err` = 真读失败。
+fn peek_byte(io: &mut CtlUart) -> Result<Option<u8>, ()> {
+    let mut first = [0u8; 1];
+    match io.uart.read(&mut first, 1) {
+        Ok(0) => Ok(None),
+        Ok(_) => Ok(Some(first[0])),
+        Err(_) => Err(()),
+    }
+}
+
+/// 一轮命令服务：首字节定面（0x31 帧面 / 其余行面），行面解析 → 分派 → 应答。
+fn serve(io: &mut CtlUart, bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, first: u8) {
+    if first == RR3_MAGIC_FIRST {
+        frame_round(io, bus, ctl, first);
+        return;
+    }
+    let line = match read_line(&mut io.uart, first) {
+        Ok(l) => l,
+        Err(why) => {
+            // 必须回 ERR：旧版只 eprintln 就 continue，宿主侧只看到"发了命令、
+            // 永远等不到应答"（静默超时），而线上已经产的残字节还可能被下一轮
+            // 当新命令解析。fail-closed 且 fail-visible。
+            eprintln!("[periph] 收行失败: {why}");
+            let _ = reply(&mut io.uart, &format!("ERR {why}"));
+            return;
         }
-        let line = match read_line(&mut io.uart, first[0]) {
-            Ok(l) => l,
-            Err(why) => {
-                // 必须回 ERR：旧版只 eprintln 就 continue，宿主侧只看到"发了命令、
-                // 永远等不到应答"（静默超时），而线上已经产的残字节还可能被下一轮
-                // 当新命令解析。fail-closed 且 fail-visible。
-                eprintln!("[periph] 收行失败: {why}");
-                let _ = reply(&mut io.uart, &format!("ERR {why}"));
-                continue;
-            }
-        };
-        let line = line.trim();
-        if line.is_empty() {
-            // 空行 = 宿主音频心跳（A9.3）：不是协议命令，新旧固件都不应答；
-            // 仅音频会话中计入存活时刻（旧宿主不发空行 → 永不武装看门狗）。
-            let mut b = lock_bus(&bus);
-            if b.st.audio_on {
-                b.st.audio_host_ms = now_ms();
-            }
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let head = parts.next().unwrap_or("");
-        let result = rr3_cmd_exec(head, &mut parts, line, &bus, &mut ctl); // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
-                                                                           // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
-        let dropped = match result {
-            Ok(line) => !reply(&mut io.uart, &line),
-            Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
-        };
-        if dropped {
-            let mut b = lock_bus(&bus);
-            b.st.reply_drop = b.st.reply_drop.saturating_add(1);
-        }
+    };
+    let line = line.trim();
+    if line.is_empty() {
+        heartbeat(bus);
+        return;
+    }
+    let mut parts = line.split_whitespace();
+    let head = parts.next().unwrap_or("");
+    let result = rr3_cmd_exec(head, &mut parts, line, bus, ctl); // 应答回写并计丢应答（TX 环满/写错时 `reply` 回 false）：宿主等的是这一
+                                                                 // 行，丢了必须留痕（`INFO reply_drop`），不再静默。
+    let dropped = match result {
+        Ok(line) => !reply(&mut io.uart, &line),
+        Err(e) => !reply(&mut io.uart, &format!("ERR {e}")),
+    };
+    if dropped {
+        let mut b = lock_bus(bus);
+        b.st.reply_drop = b.st.reply_drop.saturating_add(1);
+    }
+}
+
+/// 空行 = 宿主音频心跳（A9.3）：不是协议命令，新旧固件都不应答；仅音频会话中计入
+/// 存活时刻（旧宿主不发空行 → 永不武装看门狗）。
+fn heartbeat(bus: &Arc<Mutex<Bus>>) {
+    let mut b = lock_bus(bus);
+    if b.st.audio_on {
+        b.st.audio_host_ms = now_ms();
     }
 }
 
@@ -332,130 +348,148 @@ fn rr3_cmd_ui(
     bus: &Arc<Mutex<Bus>>,
 ) -> Option<Result<String, String>> {
     let r = match head {
-            "HELP" => Ok(
-                format!("CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@{UART2_BAUD_HZ}，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T093)")
-            ),
-            "OLED" => {
-                // 参数取原始行去指令头，保留内嵌空格（≤63 字符 = 3 行 × 21 列，row3 角度行）
-                let rest = line[head.len()..].trim_start();
-                if rest.is_empty() {
-                    Err("OLED 缺文本参数".into())
-                } else if rest.len() > OLED_COLS * (OLED_ROWS - 1) {
-                    Err(format!(
-                        "OLED 文本超长（≤{} 字符 = 3 行 × 21 列，第 4 行为角度行）",
-                        OLED_COLS * (OLED_ROWS - 1)
-                    ))
-                } else {
-                    // 控制面记账 + 排队，运行面出字（慢 I2C 不在控制面）
-                    {
-                        let mut b = lock_bus(bus);
-                        b.st.last_text = rest.to_string();
-                        b.st.frame_mode = false;
-                        b.st.expr_mode = false;
-                    }
-                    push_job(bus, Job::RedrawOled);
-                    Ok(format!("OK oled \"{rest}\""))
-                }
-            }
-            "RAIL" => {
-                push_job(bus, Job::SampleRail);
-                Ok("OK rail sample queued".into())
-            }
-            // 音频上行开关（批D③）：ON 后 mic 线攒满分片（2048 帧 = 128ms）即组
-            // Event 帧推 audio_q，控制面每轮 drain_audio 整帧写 UART2。OFF 后队列
-            // 余片仍照常发完（drain_audio 不看开关），mic 线不再攒新片。
-            // 宿主心跳走**空行**（A9.3，见 cmd_loop 空行分支）：ON/OFF 归零心跳
-            // 时刻，看门狗只认本会话内的空行——旧宿主不发空行时永不启用。
-            "AUDIO" => match parts.next() {
-                Some("ON") => {
-                    let mut b = lock_bus(bus);
-                    b.st.audio_on = true;
-                    b.st.audio_host_ms = 0;
-                    Ok("OK audio on".into())
-                }
-                Some("OFF") => {
-                    let mut b = lock_bus(bus);
-                    b.st.audio_on = false;
-                    b.st.audio_host_ms = 0;
-                    Ok("OK audio off".into())
-                }
-                _ => Err("AUDIO 需 ON|OFF 参数".into()),
-            },
-            "INFO" => {
-                let (plo, phi) = Axis::Pan.range();
-                let (tlo, thi) = Axis::Tilt.range();
-                let (
-                    pan,
-                    tilt,
-                    wander,
-                    phase,
-                    last_text,
-                    rail_mv,
-                    rail_raw,
-                    rail_valid,
-                    rail_tier,
-                    rail_low,
-                    selfheal_skip,
-                    audio_on,
-                    audio_seq,
-                    audio_sent,
-                    audio_dropped,
-                    audio_q,
-                    job_drop,
-                    reply_drop,
-                ) = {
-                    let b = lock_bus(bus);
-                    (
-                        b.st.pan_deg,
-                        b.st.tilt_deg,
-                        b.st.wander_on,
-                        b.st.wander_phase,
-                        b.st.last_text.clone(),
-                        b.st.rail_mv,
-                        b.st.rail_raw,
-                        b.st.rail_valid,
-                        b.st.rail_tier,
-                        b.st.rail_low_events,
-                        b.st.selfheal_skipped,
-                        b.st.audio_on,
-                        b.st.audio_seq,
-                        b.st.audio_sent,
-                        b.st.audio_dropped,
-                        b.audio_q.len(),
-                        b.st.job_dropped,
-                        b.st.reply_drop,
-                    )
-                };
-                let rail = if rail_valid {
-                    format!("{rail_mv}mV raw={rail_raw}")
-                } else {
-                    format!("absent raw={rail_raw}")
-                };
-                let rail_tier_name = if rail_valid { rail_tier.name() } else { "unknown" };
-                Ok(format!(
-                    "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail} rail_tier={rail_tier_name} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={}B min_free={}B",
-                    if wander { "on" } else { "off" },
-                    if audio_on { "on" } else { "off" },
-                    unsafe { esp_get_free_heap_size() },
-                    unsafe { esp_get_minimum_free_heap_size() }
-                ))
-            }
-            "FONT" => {
-                // 字模自检护栏：打印 "ABC123" 的 5x7 字模 hex，供人工比对
-                let hex: Vec<String> = "ABC123"
-                    .bytes()
-                    .map(|c| {
-                        glyph(c)
-                            .iter()
-                            .map(|b| format!("{b:02X}"))
-                            .collect::<String>()
-                    })
-                    .collect();
-                Ok(format!("FONT ABC123 = {}", hex.join(",")))
-            }
+        "HELP" => cmd_help(),
+        "OLED" => cmd_oled(head, line, bus),
+        "RAIL" => cmd_rail(bus),
+        "AUDIO" => cmd_audio(parts, bus),
+        "INFO" => cmd_info(bus),
+        "FONT" => cmd_font(),
         _ => return None,
     };
     Some(r)
+}
+
+fn cmd_help() -> Result<String, String> {
+    Ok(format!("CMDS: OLED <text> | FACE <idle|blink|talk|think|happy|listen|turn|sleepy|surprised|angry|sad|confused|focus|love|dizzy|scared> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | SCAN | WANDER [STOP] | RAIL | AUDIO ON|OFF | INFO | HELP  (行程 pan 60-120 / tilt 80-100，中位 90；SERVO/SCAN 串行先左右后俯仰；RAIL 采一次 5V 轨压；AUDIO ON 起双麦 16k 双声道分片上行@{UART2_BAUD_HZ}，宿主 rr3-audio-rec 收流落 wav；开机默认表情 idle + 姿态 P060 T093)"))
+}
+
+/// `OLED <text>`：参数取原始行去指令头，保留内嵌空格（≤63 字符 = 3 行 × 21 列，
+/// row3 角度行）。控制面记账 + 排队，运行面出字（慢 I2C 不在控制面）。
+fn cmd_oled(head: &str, line: &str, bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    let rest = line[head.len()..].trim_start();
+    if rest.is_empty() {
+        return Err("OLED 缺文本参数".into());
+    }
+    if rest.len() > OLED_COLS * (OLED_ROWS - 1) {
+        return Err(format!(
+            "OLED 文本超长（≤{} 字符 = 3 行 × 21 列，第 4 行为角度行）",
+            OLED_COLS * (OLED_ROWS - 1)
+        ));
+    }
+    {
+        let mut b = lock_bus(bus);
+        b.st.last_text = rest.to_string();
+        b.st.frame_mode = false;
+        b.st.expr_mode = false;
+    }
+    push_job(bus, Job::RedrawOled);
+    Ok(format!("OK oled \"{rest}\""))
+}
+
+fn cmd_rail(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    push_job(bus, Job::SampleRail);
+    Ok("OK rail sample queued".into())
+}
+
+/// 音频上行开关（批D③）：ON 后 mic 线攒满分片（2048 帧 = 128ms）即组 Event 帧推
+/// audio_q，控制面每轮 drain_audio 整帧写 UART2。OFF 后队列余片仍照常发完
+/// （drain_audio 不看开关），mic 线不再攒新片。宿主心跳走**空行**（A9.3，见
+/// cmd_loop 空行分支）：ON/OFF 归零心跳时刻，看门狗只认本会话内的空行——旧宿主
+/// 不发空行时永不启用。
+fn cmd_audio(
+    parts: &mut std::str::SplitWhitespace<'_>,
+    bus: &Arc<Mutex<Bus>>,
+) -> Result<String, String> {
+    let on = match parts.next() {
+        Some("ON") => true,
+        Some("OFF") => false,
+        _ => return Err("AUDIO 需 ON|OFF 参数".into()),
+    };
+    {
+        let mut b = lock_bus(bus);
+        b.st.audio_on = on;
+        b.st.audio_host_ms = 0;
+    }
+    Ok(if on { "OK audio on" } else { "OK audio off" }.into())
+}
+
+/// `INFO` 观测面：一拍取齐状态快照后拼行（取锁只此一次，避免中途跳变）。
+fn cmd_info(bus: &Arc<Mutex<Bus>>) -> Result<String, String> {
+    let (plo, phi) = Axis::Pan.range();
+    let (tlo, thi) = Axis::Tilt.range();
+    let (
+        pan,
+        tilt,
+        wander,
+        phase,
+        last_text,
+        rail_mv,
+        rail_raw,
+        rail_valid,
+        rail_tier,
+        rail_low,
+        selfheal_skip,
+        audio_on,
+        audio_seq,
+        audio_sent,
+        audio_dropped,
+        audio_q,
+        job_drop,
+        reply_drop,
+    ) = {
+        let b = lock_bus(bus);
+        (
+            b.st.pan_deg,
+            b.st.tilt_deg,
+            b.st.wander_on,
+            b.st.wander_phase,
+            b.st.last_text.clone(),
+            b.st.rail_mv,
+            b.st.rail_raw,
+            b.st.rail_valid,
+            b.st.rail_tier,
+            b.st.rail_low_events,
+            b.st.selfheal_skipped,
+            b.st.audio_on,
+            b.st.audio_seq,
+            b.st.audio_sent,
+            b.st.audio_dropped,
+            b.audio_q.len(),
+            b.st.job_dropped,
+            b.st.reply_drop,
+        )
+    };
+    let rail = if rail_valid {
+        format!("{rail_mv}mV raw={rail_raw}")
+    } else {
+        format!("absent raw={rail_raw}")
+    };
+    let rail_tier_name = if rail_valid {
+        rail_tier.name()
+    } else {
+        "unknown"
+    };
+    Ok(format!(
+        "INFO pan={pan} tilt={tilt} lim=pan[{plo},{phi}]/tilt[{tlo},{thi}] wander={} phase={phase} rail={rail} rail_tier={rail_tier_name} low_events={rail_low} selfheal_skip={selfheal_skip} audio={} seq={audio_seq} sent={audio_sent} drop={audio_dropped} q={audio_q} job_drop={job_drop} reply_drop={reply_drop} oled_last=\"{last_text}\" free={}B min_free={}B",
+        if wander { "on" } else { "off" },
+        if audio_on { "on" } else { "off" },
+        unsafe { esp_get_free_heap_size() },
+        unsafe { esp_get_minimum_free_heap_size() }
+    ))
+}
+
+/// `FONT` 字模自检护栏：打印 "ABC123" 的 5x7 字模 hex，供人工比对。
+fn cmd_font() -> Result<String, String> {
+    let hex: Vec<String> = "ABC123"
+        .bytes()
+        .map(|c| {
+            glyph(c)
+                .iter()
+                .map(|b| format!("{b:02X}"))
+                .collect::<String>()
+        })
+        .collect();
+    Ok(format!("FONT ABC123 = {}", hex.join(",")))
 }
 
 /// 角度参数解析（0–180 之外一律 Err——调用方不再 clamp，fail-closed）。
