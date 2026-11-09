@@ -459,10 +459,22 @@ pub(crate) fn rr3_check_domains(profile: &Rr3Profile) -> Vec<String> {
     errs
 }
 
-/// 单个电力域的五项判据（文案与批N21 件二同源）
+/// 单个电力域的五项判据（文案与批N21 件二同源），按武装/绑定/开关三面分立。
 fn rr3_check_domain(d: &Rr3Domain, pins: &[Rr3PinEntry]) -> Vec<String> {
     let mut errs = Vec::new();
     let label = format!("supplies.domains[{}]", d.name);
+    rr3_arm_check(d, &label, &mut errs);
+    rr3_bind_check(d, pins, &label, &mut errs);
+    if d.switchable && d.switch == "none" {
+        errs.push(format!(
+            "{label} switchable = true 但 switch = none（可切域必有开关控制位，两键成对）"
+        ));
+    }
+    errs
+}
+
+/// ⑥-c/⑥-e 武装面：武装需测点与龄期上界，evidence 与 armed 成对且形制合法。
+fn rr3_arm_check(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
     if d.armed && (d.sense == "none" || d.max_age_ms <= 0) {
         errs.push(format!(
             "{label} armed = true 但 sense = none 或 max_age_ms ≤ 0（校验⑥-c：无测点/无龄期上界的域不得武装拒动——未标定即 armed=false，§3.1 降级语义）"
@@ -485,6 +497,10 @@ fn rr3_check_domain(d: &Rr3Domain, pins: &[Rr3PinEntry]) -> Vec<String> {
             if d.evidence.is_empty() { "缺失" } else { &d.evidence }
         ));
     }
+}
+
+/// ⑥-d 绑定位：sense/current_sense/switch 一律写 pin_id（"none" 是合法显式值）。
+fn rr3_bind_check(d: &Rr3Domain, pins: &[Rr3PinEntry], label: &str, errs: &mut Vec<String>) {
     for (key, val) in [
         ("sense", &d.sense),
         ("current_sense", &d.current_sense),
@@ -499,12 +515,6 @@ fn rr3_check_domain(d: &Rr3Domain, pins: &[Rr3PinEntry]) -> Vec<String> {
             ));
         }
     }
-    if d.switchable && d.switch == "none" {
-        errs.push(format!(
-            "{label} switchable = true 但 switch = none（可切域必有开关控制位，两键成对）"
-        ));
-    }
-    errs
 }
 
 /// 装配扫描产物：模块名 → [(件名, facts)]（预算判据分子；坏形进 broken 旁路）
