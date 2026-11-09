@@ -177,9 +177,33 @@ pub fn rr3_assemble_layout(
         std::fs::copy(&src_config, &dst_config).map_err(|e| {
             format!("仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环")
         })?;
+        // atoms/ 申报面同批装机：校验⑨ 从 `modules/<m>/atoms/*/assemble.toml` 读
+        // demands（rail/电流预算）。漏拷会让 rrd 判"件未申报 demands 而角色
+        // kind=power"红、拒绝 bind——演练布局与装机布局在此处必须逐件等价。
+        let atoms_src = src_dir.join("atoms");
+        if atoms_src.is_dir() {
+            rr3_copy_tree(&atoms_src, &dst_dir.join("atoms"))?;
+        }
         entries.push((module.clone(), entry_abs));
     }
     Ok((profile_dst, entries))
+}
+
+/// 目录递归拷贝（std 无内置；只服务演练夹具，符号链接按文件内容拷贝）。
+fn rr3_copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("建 {dst:?} 失败: {e}"))?;
+    let rd = std::fs::read_dir(src).map_err(|e| format!("读目录 {src:?} 失败: {e}"))?;
+    for ent in rd {
+        let ent = ent.map_err(|e| format!("遍历 {src:?} 失败: {e}"))?;
+        let from = ent.path();
+        let to = dst.join(ent.file_name());
+        if from.is_dir() {
+            rr3_copy_tree(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to).map_err(|e| format!("拷贝 {from:?} 失败: {e}"))?;
+        }
+    }
+    Ok(())
 }
 
 pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
@@ -187,7 +211,6 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
         .profile
         .clone()
         .ok_or("内部错误：装配演练缺 --profile（main 路由保证）")?;
-
     // ---- 0. 定位：仓根与二进制 ----
     let repo = crate::drill::rr3_repo_locate(a)?;
     let (d_rrd, _peer, d_rrctl) = rr3_default_bins(&repo);
@@ -203,120 +226,35 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
     let _ = std::fs::remove_file(&socket);
     let (profile_dst, entries) = rr3_assemble_layout(&repo, &workdir, &profile_src)?;
+    rr3_asm_bins(&rrd, &rrctl, &entries)?;
 
-    // 产物存在性 fail-fast（点名 cargo build 指引，先例句式）
-    let mut bins: Vec<(&Path, String)> = vec![
-        (&rrd, "cargo build -p rrd（在 base/runtime/ 下）".into()),
-        (
-            &rrctl,
-            "cargo build --manifest-path tools/rrctl/Cargo.toml".into(),
-        ),
-    ];
-    for (module, entry_abs) in &entries {
-        bins.push((
-            entry_abs.as_path(),
-            format!("cargo build -p {module}（在 modules/{module}/ 下）"),
-        ));
-    }
-    let bin_refs: Vec<(&Path, &str)> = bins.iter().map(|(p, h)| (*p, h.as_str())).collect();
-    rr3_require_bins_ext(&bin_refs)?;
-
+    let log_path = workdir.join("rrd.log");
+    let ctx = Rr3AsmCtx {
+        rrd: &rrd,
+        rrctl: &rrctl,
+        socket: &socket,
+        profile_dst: &profile_dst,
+        log_path: &log_path,
+        entries: &entries,
+        repo: &repo,
+    };
     let mut report = String::new();
-    let outcome = (|| -> Result<(), String> {
-        // ---- 2. 起 rrd：装配单驱动 boot（参数与 rrd.service 的 ExecStart 同形）----
-        let log_path = workdir.join("rrd.log");
-        let mut rrd_child = Command::new(&rrd)
-            .arg("--socket")
-            .arg(&socket)
-            .arg("--contracts")
-            .arg(repo.join("contracts"))
-            .arg("--profile")
-            .arg(&profile_dst)
-            // mock 注入走 rrd env，boot spawn 的子模块全部继承：
-            // HAL 后端全落 sim；sim 探针（MC-4：非 test 面不再默认 sim——开发机/CI
-            // 无 linux sysfs 硬件面，不显式选 sim 会被 fail-closed 判缺格、模块拒绝起）；
-            // burst 波形让 VAD 周期发边沿；brain 云端走 mock
-            .env("RR3_HAL_BACKEND", "sim")
-            .env("RR3_PROBE", "sim")
-            .env("RR3_HAL_SIM_WAVE", "burst")
-            .env("RR3_BRAIN_CLOUD", "mock")
-            .stdout(Stdio::from(
-                std::fs::File::create(&log_path)
-                    .map_err(|e| format!("建 {log_path:?} 失败: {e}"))?,
-            ))
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("起 rrd 失败: {e}"))?;
-        let rrd_pid = rrd_child.id();
+    let (mut rrd_child, rrd_pid) = rr3_asm_up_rrd(&ctx)?;
+    let outcome = rr3_asm_wait(&ctx, &mut report);
+
+    // ---- 收尾：杀 rrd（子模块喂狗失败自退）；--keep 保留现场 ----
+    if a.keep {
         println!(
-            "rr3-sim --profile: rrd 已起 pid={rrd_pid}，socket={}，装配单={}",
+            "rr3-sim --profile: --keep 保留现场：socket={} workdir={}",
             socket.display(),
-            profile_dst.display()
+            workdir.display()
         );
-
-        let mut kill_rrd = true;
-        let outcome = (|| -> Result<(), String> {
-            // ---- 3. 等 rrd bind 套接字，再轮询全部 face 模块到 running ----
-            wait_socket_exists(&socket, RR3_ASSEMBLE_READY_DEADLINE)?;
-            let wanted: Vec<(&str, &str)> = entries
-                .iter()
-                .map(|(m, _)| (m.as_str(), "running"))
-                .collect();
-            rr3_wait_modules(
-                || rr3_ctl_status_rows(&rrctl, &socket),
-                &wanted,
-                RR3_ASSEMBLE_READY_DEADLINE,
-            )
-            .map_err(|e| rr3_with_log_tail(&e, &log_path))?;
-            report.push_str(rr3_section("装配单驱动 boot：全部 face 模块 running").as_str());
-            for (m, entry_abs) in &entries {
-                report.push_str(&format!("{m}  entry={}\n", entry_abs.display()));
-            }
-
-            // ---- 4. rr3-ctl 四命令巡检 ----
-            report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
-            let status_out = rr3_ctl_out(&rrctl, &socket, "status")?;
-            report.push_str(&status_out);
-            // denied_publish = 0 是"事件真被接受"的线上证据（D9 验收判据）
-            if !status_out.contains("denied_publish = 0") {
-                return Err(format!("denied_publish ≠ 0：发布被 rrd 拒了\n{status_out}"));
-            }
-            let rows = rr3_ctl_status_rows(&rrctl, &socket);
-            for (m, _) in &entries {
-                match rows.iter().find(|(n, _, p)| n == m && p == "running") {
-                    Some(_) => {}
-                    None => return Err(format!("巡检快照里 {m} 不在 running（掉线？）：{rows:?}")),
-                }
-            }
-            report.push_str(rr3_section("rr3-ctl health").as_str());
-            report.push_str(&rr3_ctl_out(&rrctl, &socket, "health")?);
-            report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
-            report.push_str(&rr3_ctl_out(&rrctl, &socket, "logs")?);
-            report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
-            match rr3_ctl_maybe_fail(&rrctl, &socket, "ota") {
-                Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
-                Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
-            }
-            Ok(())
-        })();
-
-        // ---- 收尾：杀 rrd（子模块喂狗失败自退）；--keep 保留现场 ----
-        if a.keep {
-            kill_rrd = false;
-            println!(
-                "rr3-sim --profile: --keep 保留现场：socket={} workdir={}",
-                socket.display(),
-                workdir.display()
-            );
-            println!("rr3-sim --profile: 手动收尾：kill {rrd_pid}；rm -rf {workdir:?}");
-        }
-        if kill_rrd {
-            let _ = rrd_child.kill();
-            let _ = rrd_child.wait();
-            let _ = std::fs::remove_file(&socket);
-        }
-        outcome
-    })();
+        println!("rr3-sim --profile: 手动收尾：kill {rrd_pid}；rm -rf {workdir:?}");
+    } else {
+        let _ = rrd_child.kill();
+        let _ = rrd_child.wait();
+        let _ = std::fs::remove_file(&socket);
+    }
 
     match outcome {
         Ok(()) => {
@@ -330,6 +268,114 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
         }
         Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
     }
+}
+
+/// 装配演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
+struct Rr3AsmCtx<'a> {
+    rrd: &'a Path,
+    rrctl: &'a Path,
+    socket: &'a Path,
+    profile_dst: &'a Path,
+    log_path: &'a Path,
+    entries: &'a [Rr3AssembleEntry],
+    repo: &'a Path,
+}
+
+/// 产物存在性 fail-fast（点名 cargo build 指引，先例句式）。
+fn rr3_asm_bins(rrd: &Path, rrctl: &Path, entries: &[Rr3AssembleEntry]) -> Result<(), String> {
+    let mut bins: Vec<(&Path, String)> = vec![
+        (rrd, "cargo build -p rrd（在 base/runtime/ 下）".into()),
+        (
+            rrctl,
+            "cargo build --manifest-path tools/rrctl/Cargo.toml".into(),
+        ),
+    ];
+    for (module, entry_abs) in entries {
+        bins.push((
+            entry_abs.as_path(),
+            format!("cargo build -p {module}（在 modules/{module}/ 下）"),
+        ));
+    }
+    let bin_refs: Vec<(&Path, &str)> = bins.iter().map(|(p, h)| (*p, h.as_str())).collect();
+    rr3_require_bins_ext(&bin_refs)
+}
+
+/// 起 rrd：装配单驱动 boot（参数与 rrd.service 的 ExecStart 同形）。
+fn rr3_asm_up_rrd(ctx: &Rr3AsmCtx) -> Result<(std::process::Child, u32), String> {
+    let child = Command::new(ctx.rrd)
+        .arg("--socket")
+        .arg(ctx.socket)
+        .arg("--contracts")
+        .arg(ctx.repo.join("contracts"))
+        .arg("--profile")
+        .arg(ctx.profile_dst)
+        // mock 注入走 rrd env，boot spawn 的子模块全部继承：
+        // HAL 后端全落 sim；sim 探针（MC-4：非 test 面不再默认 sim——开发机/CI
+        // 无 linux sysfs 硬件面，不显式选 sim 会被 fail-closed 判缺格、模块拒绝起）；
+        // burst 波形让 VAD 周期发边沿；brain 云端走 mock
+        .env("RR3_HAL_BACKEND", "sim")
+        .env("RR3_PROBE", "sim")
+        .env("RR3_HAL_SIM_WAVE", "burst")
+        .env("RR3_BRAIN_CLOUD", "mock")
+        .stdout(Stdio::from(
+            std::fs::File::create(ctx.log_path)
+                .map_err(|e| format!("建 {:?} 失败: {e}", ctx.log_path))?,
+        ))
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("起 rrd 失败: {e}"))?;
+    let pid = child.id();
+    println!(
+        "rr3-sim --profile: rrd 已起 pid={pid}，socket={}，装配单={}",
+        ctx.socket.display(),
+        ctx.profile_dst.display()
+    );
+    Ok((child, pid))
+}
+
+/// 等全模块 running → rr3-ctl 四命令巡检（status/health/logs/ota）。
+fn rr3_asm_wait(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
+    wait_socket_exists(ctx.socket, RR3_ASSEMBLE_READY_DEADLINE)?;
+    let wanted: Vec<(&str, &str)> = ctx
+        .entries
+        .iter()
+        .map(|(m, _)| (m.as_str(), "running"))
+        .collect();
+    rr3_wait_modules(
+        || rr3_ctl_status_rows(ctx.rrctl, ctx.socket),
+        &wanted,
+        RR3_ASSEMBLE_READY_DEADLINE,
+    )
+    .map_err(|e| rr3_with_log_tail(&e, ctx.log_path))?;
+    report.push_str(rr3_section("装配单驱动 boot：全部 face 模块 running").as_str());
+    for (m, entry_abs) in ctx.entries {
+        report.push_str(&format!("{m}  entry={}\n", entry_abs.display()));
+    }
+
+    // ---- 4. rr3-ctl 四命令巡检 ----
+    report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
+    let status_out = rr3_ctl_out(ctx.rrctl, ctx.socket, "status")?;
+    report.push_str(&status_out);
+    // denied_publish = 0 是"事件真被接受"的线上证据（D9 验收判据）
+    if !status_out.contains("denied_publish = 0") {
+        return Err(format!("denied_publish ≠ 0：发布被 rrd 拒了\n{status_out}"));
+    }
+    let rows = rr3_ctl_status_rows(ctx.rrctl, ctx.socket);
+    for (m, _) in ctx.entries {
+        if !rows.iter().any(|(n, _, p)| n == m && p == "running") {
+            return Err(format!("巡检快照里 {m} 不在 running（掉线？）：{rows:?}"));
+        }
+    }
+    report.push_str(rr3_section("rr3-ctl health").as_str());
+    report.push_str(&rr3_ctl_out(ctx.rrctl, ctx.socket, "health")?);
+    report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
+    report.push_str(&rr3_ctl_out(ctx.rrctl, ctx.socket, "logs")?);
+    report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
+    match rr3_ctl_maybe_fail(ctx.rrctl, ctx.socket, "ota") {
+        Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
+        Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
+    }
+    Ok(())
 }
 
 /// 轮询用的 status 快照（main.rs run / chain / brain 各演练共用同一真值）：
