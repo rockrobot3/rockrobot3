@@ -49,10 +49,12 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
 
   echo "== ④ rr3-pack 出 deb 并安装 =="
   ARCH=$(dpkg --print-architecture)
+  VER="${RR3_DEB_VERSION:-0.0.6}"
+  export RR3_DEB_VERSION="$VER"
   /tmp/rr3-target/release/rr3-pack \
     --payload "$PAY" --repo /work --arch "$ARCH" \
-    --out "/tmp/rockrobot3_0.0.6_${ARCH}.deb"
-  dpkg -i "/tmp/rockrobot3_0.0.6_${ARCH}.deb"
+    --out "/tmp/rockrobot3_${VER}_${ARCH}.deb"
+  dpkg -i "/tmp/rockrobot3_${VER}_${ARCH}.deb"
 
   echo "== ⑤ 装机位断言（rrd.service 同一组路径；点名式——败即报缺席路径与装机实况，不再裸退）=="
   # 点名断言 helper：失败打印缺席路径 + 父目录 ls + deb 清单/校验比对（装机里到底

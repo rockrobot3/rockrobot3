@@ -20,6 +20,9 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/rr3-arm64-target}"
 REL="$CARGO_TARGET_DIR/$TARGET/release"
 OUT="${1:-/tmp/rr3-arm64-deploy}"
 PAY="$OUT/payload"
+# 版本单一真值：与 rr3-pack 同读 RR3_DEB_VERSION，包名/control 不会各说各话。
+VER="${RR3_DEB_VERSION:-0.0.6}"
+export RR3_DEB_VERSION="$VER"
 RR3_PACK="$CARGO_TARGET_DIR/release/rr3-pack" # 打包器本身按宿主架构跑
 
 echo "== ① 交叉编译（$TARGET 静态，rust-lld）=="
@@ -62,9 +65,9 @@ bash "$(dirname "$0")/build-onboard.sh" "$RR3_ONBOARD_HOST" "$OUT"
 echo "== ④ rr3-pack --stage-only（staging deb 布局树）=="
 mkdir -p "$OUT"
 "$RR3_PACK" --payload "$PAY" --repo "$(pwd)" --arch arm64 \
-  --out "$OUT/rockrobot3_0.0.6_arm64.deb" --stage-only
+  --out "$OUT/rockrobot3_${VER}_arm64.deb" --stage-only
 
-STAGE="$OUT/rockrobot3_0.0.6_arm64.deb.stage"
+STAGE="$OUT/rockrobot3_${VER}_arm64.deb.stage"
 echo "== ⑤ staging 布局断言（同 distro-smoke ⑤ 的 staging 版）=="
 test -x "$STAGE/usr/bin/rrd"
 test -x "$STAGE/usr/bin/rr3-ctl"
@@ -83,4 +86,4 @@ test -f "$STAGE/usr/lib/rockrobot3/modules/rr3-sense/config-esp32.toml"
 file "$STAGE/usr/bin/rrd" | grep -q "ELF 64-bit.*ARM aarch64.*statically linked" # 真板产物体检
 
 echo "staging 树就绪: $STAGE"
-echo "传板真装三步: scp -r '$STAGE' 板:~/stage && 板上 dpkg-deb --build ~/stage ./rockrobot3_0.0.6_arm64.deb && sudo dpkg -i ./rockrobot3_0.0.6_arm64.deb"
+echo "传板真装三步: scp -r '$STAGE' 板:~/stage && 板上 dpkg-deb --build ~/stage ./rockrobot3_${VER}_arm64.deb && sudo dpkg -i ./rockrobot3_${VER}_arm64.deb"

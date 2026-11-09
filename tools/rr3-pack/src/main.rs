@@ -48,10 +48,22 @@ use std::process::Command;
 
 use rrd::manifest::rr3_manifest_parse;
 
-/// deb 包名/版本/装机根。版本跟方案批次走（0.0.6），升级批次时改这一处。
+/// deb 包名/版本/装机根。版本缺省跟方案批次走（0.0.6）；发版用
+/// [`RR3_DEB_VERSION_ENV`] 覆盖，包名与控制字段同源。
 const RR3_DEB_PACKAGE: &str = "rockrobot3";
 const RR3_DEB_VERSION: &str = "0.0.6";
 const RR3_INSTALL_ROOT: &str = "/usr/lib/rockrobot3";
+/// 版本覆盖环境变量：发版流水线与部署脚本同读一处，避免"包名 0.0.6 / control
+/// 0.0.5"这类两处真值漂移。
+const RR3_DEB_VERSION_ENV: &str = "RR3_DEB_VERSION";
+
+/// 本次出包版本（环境变量优先，缺省值为本地/演练档）。
+fn rr3_deb_version() -> String {
+    std::env::var(RR3_DEB_VERSION_ENV)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| RR3_DEB_VERSION.to_string())
+}
 
 /// systemd 单元实体在 base/os/distro/units/rrd.service，include_str! 编译期嵌入：
 /// 文件缺席直接编译失败（比运行期读 --repo 再报错更早），打包器对 repo 布局的依赖
@@ -602,7 +614,8 @@ fn rr3_control_text(arch: &str) -> String {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| RR3_DEB_MAINTAINER.to_string());
     format!(
-        "Package: {RR3_DEB_PACKAGE}\nVersion: {RR3_DEB_VERSION}\nSection: net\nPriority: optional\nArchitecture: {arch}\nMaintainer: {maintainer}\nDescription: RockRobot3 运行时 payload（rrd + 模块 + systemd 单元，发行版快路轨）\n"
+        "Package: {RR3_DEB_PACKAGE}\nVersion: {}\nSection: net\nPriority: optional\nArchitecture: {arch}\nMaintainer: {maintainer}\nDescription: RockRobot3 运行时 payload（rrd + 模块 + systemd 单元，发行版快路轨）\n",
+        rr3_deb_version()
     )
 }
 
