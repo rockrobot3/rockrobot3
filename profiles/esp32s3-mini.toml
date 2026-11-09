@@ -5,7 +5,8 @@
 # 与 esp32-mini 的**唯一差异是芯片与线束**：形态语义（三格微型形态 F-B）、bindings、
 # enabled_slots、slots、电力/内存预算全部同源同值。S3 N16R8 的 GPIO26–37 被
 # 16MB Flash + 8MB Octal PSRAM 占用，故 classic 的 26/27/32/33/34 全部不可用：
-#   UART2 17/18、I2C0 8/9、LEDC 4/5、I2S0 6/15/7、ADC 1。
+#   UART2 41/42（2026-10-29 真板订正，原 17/18 板内缓冲不通）、I2C0 8/9、
+#   LEDC 4/5、I2S0 6/15/7、ADC 1。
 # 真值表同源：board/pins_s3.rs ↔ main.rs 具名装配 ↔ 本文件 [hardware]/[[pin]]。
 #
 # 板侧必须自己守住：限位 / 时限 / 饱和通告在板侧跑（桥断仍守护）。本文件只加数据，
