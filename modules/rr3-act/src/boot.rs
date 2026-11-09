@@ -107,49 +107,53 @@ fn rr3_axis_once<T>(slot: &Option<T>, k: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 单键解析（值与词表/域校验同处）：文案逐字保留。
+/// 单键解析（**只做路由**；值与词表/域校验各自成体，文案逐字保留）。
 fn rr3_axis_kv(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
     match k {
         "calibrated" => {
             rr3_axis_once(&raw.calibrated, k)?;
-            raw.calibrated = Some(match v {
-                "true" => true,
-                "false" => false,
-                _ => return Err(format!("执行轴状态 calibrated={v:?} 非显式布尔")),
-            });
+            raw.calibrated = Some(rr3_axis_bool(v)?);
         }
         "hard_stop" => {
             rr3_axis_once(&raw.hard_stop, k)?;
-            raw.hard_stop = Some(
-                rr_hal_api::Rr3ActHardStop::rr3_hard_stop_parse(v).ok_or_else(|| {
-                    format!("执行轴状态 hard_stop={v:?} 不在档案词表（unknown/yes/no）")
-                })?,
-            );
+            raw.hard_stop = Some(rr3_axis_stop(v)?);
         }
         "lo" => {
             rr3_axis_once(&raw.lo, k)?;
-            raw.lo = Some(
-                v.parse::<u16>()
-                    .map_err(|_| format!("执行轴状态 lo={v:?} 非行程下限整数（u16 域）"))?,
-            );
+            raw.lo = Some(rr3_axis_num(v, k, "行程下限")?);
         }
         "hi" => {
             rr3_axis_once(&raw.hi, k)?;
-            raw.hi = Some(
-                v.parse::<u16>()
-                    .map_err(|_| format!("执行轴状态 hi={v:?} 非行程上限整数（u16 域）"))?,
-            );
+            raw.hi = Some(rr3_axis_num(v, k, "行程上限")?);
         }
         "center" => {
             rr3_axis_once(&raw.center, k)?;
-            raw.center = Some(
-                v.parse::<u16>()
-                    .map_err(|_| format!("执行轴状态 center={v:?} 非中位锚整数（u16 域）"))?,
-            );
+            raw.center = Some(rr3_axis_num(v, k, "中位锚")?);
         }
         other => return Err(format!("执行轴状态未知键 {other:?}")),
     }
     Ok(())
+}
+
+/// 显式布尔（只认 `true`/`false`：注入链错值必须点名，不猜同义写法）。
+fn rr3_axis_bool(v: &str) -> Result<bool, String> {
+    match v {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(format!("执行轴状态 calibrated={v:?} 非显式布尔")),
+    }
+}
+
+/// 硬限位词表（档案三值 `unknown/yes/no`；词表外点名回错）。
+fn rr3_axis_stop(v: &str) -> Result<rr_hal_api::Rr3ActHardStop, String> {
+    rr_hal_api::Rr3ActHardStop::rr3_hard_stop_parse(v)
+        .ok_or_else(|| format!("执行轴状态 hard_stop={v:?} 不在档案词表（unknown/yes/no）"))
+}
+
+/// u16 域整数键（lo/hi/center 三键同形；`what` 是文案里的域说明）。
+fn rr3_axis_num(v: &str, k: &str, what: &str) -> Result<u16, String> {
+    v.parse::<u16>()
+        .map_err(|_| format!("执行轴状态 {k}={v:?} 非{what}整数（u16 域）"))
 }
 
 /// 执行轴状态装载：env 读 + 坏形/缺席折保守缺省并点名（安全向，不退），回显注入
@@ -379,9 +383,8 @@ fn rr3_act_cfg_loop(sect: &toml::Value) -> Result<u32, String> {
         .map(|n| n as u64)
         .ok_or_else(|| "config [rr3-act.reflex] 缺 loop_hz（非负整数）".to_string())?
         .max(1);
-    let hz = u32::try_from(raw).map_err(|_| {
-        format!("config [rr3-act.reflex] loop_hz={raw} 超出 u32 范围，拒 boot")
-    })?;
+    let hz = u32::try_from(raw)
+        .map_err(|_| format!("config [rr3-act.reflex] loop_hz={raw} 超出 u32 范围，拒 boot"))?;
     if hz > RR3_MAX_LOOP_HZ {
         return Err(format!(
             "config [rr3-act.reflex] loop_hz 须在 1..={RR3_MAX_LOOP_HZ}，收到 {hz}（更大值会退化为满转自旋）"
