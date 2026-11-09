@@ -111,88 +111,104 @@ impl Dispatcher for Rr3PowerDispatcher {
 
     /// 三节拍（自原 composite.rs 主循环体逐字迁入，拍序不变：battery → charger →
     /// rail）。`now` 由 serve 每圈传入（帧无关节拍，与帧到达无关）。
+    /// B9 起每拍体各自成方法：拍序 = 策略面（本函数），拍体 = 机制面（`rr3_*_beat`）。
     fn on_tick(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
-        // battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，上抛
-        // 致命；失败先计入 counters（0.0.5 批I P-2：数据新鲜度可观测），再走退出语义。
         if now >= self.next_battery {
-            let st = match self.dev.battery() {
-                Ok(st) => st,
-                Err(e) => {
-                    bus.counter_bump("battery_read_fail", 1);
-                    return Err(format!("电池读数失败（{}）: {e}", self.backend));
-                }
-            };
-            self.battery_seq += 1;
-            bus.publish(
-                RR3_BATTERY_STATE_TOPIC,
-                rr3_battery_body(self.battery_seq, st),
-            )?;
-            // 低电两个沿、同一采样值，喂入次序是契约（Rr3LowEdge doc 钉死）：
-            // **先 recover 后 cross**——cross 的再武装分支会悄悄置回 armed，先喂它
-            // 会把恢复沿吞掉（battery/ok 丢失）。恢复沿发布 = rrd 清全局低电旗、
-            // 恢复新 spawn 的解除路径（批N5 件二笔3，§17 运维留痕）。
-            if self.low_edge.rr3_low_edge_recover(st.voltage_mv) {
-                self.ok_seq += 1;
-                bus.publish(RR3_BATTERY_OK_TOPIC, rr3_battery_ok_body(self.ok_seq, st))?;
-                eprintln!(
-                    "battery/ok: {}% {}mV（回阈恢复首拍，段内不重发）",
-                    st.percent, st.voltage_mv
-                );
-            }
-            if self.low_edge.rr3_low_edge_cross(st.voltage_mv) {
-                self.low_seq += 1;
-                bus.publish(
-                    RR3_BATTERY_LOW_TOPIC,
-                    rr3_battery_low_body(self.low_seq, st),
-                )?;
-                eprintln!(
-                    "battery/low: {}% {}mV（越阈首拍，段内不重发）",
-                    st.percent, st.voltage_mv
-                );
-            }
-            self.last = Some(st);
-            self.next_battery = now + Duration::from_millis(self.cfg.battery.sample_period_ms);
+            self.rr3_battery_beat(now, bus)?;
         }
-
-        // charger 拍：由最近一次电池读数派生；首拍 battery 之前不发（读数还没着落）
         if now >= self.next_charger {
-            if let Some(st) = self.last {
-                self.charger_seq += 1;
-                bus.publish(
-                    RR3_CHARGER_STATE_TOPIC,
-                    rr3_charger_body(self.charger_seq, st.charging),
-                )?;
-            }
-            self.next_charger = now + Duration::from_millis(self.cfg.charger.state_period_ms);
+            self.rr3_charger_beat(now, bus)?;
         }
-
-        // rail 拍（批N2 件五）：读域压 → ⑥-c2 按龄期折有效档位 → 判定核 → 周期流
-        // ＋边沿守护行。HAL 读数失败同 battery_read_fail 纪律：counter 先行再退——
-        // 失败是设备/传输级，上抛致命不装活着。
         if self.cfg.rail.up && now >= self.next_rail {
-            let st = match self.rail_dev.rr3_read(&self.cfg.rail.domain) {
-                Ok(st) => st,
-                Err(e) => {
-                    bus.counter_bump("rail_read_fail", 1);
-                    return Err(format!("轨压读数失败（{}）: {e}", self.rail_backend));
-                }
-            };
-            self.rail_seq += 1;
-            let (tier, event) = rr3_rail_beat(&mut self.rail_judge, st, self.cfg.rail.max_age_ms);
-            bus.publish(
-                RR3_RAIL_STATE_TOPIC,
-                rr3_rail_state_body(self.rail_seq, st.mv, st.age_ms, tier.rr3_rail_tier_name()),
-            )?;
-            if event == Some(true) {
-                bus.counter_bump("rail_edge", 1);
-                eprintln!(
-                    "rail/edge: {}mV tier={}（越阈首拍，段内不重发）",
-                    st.mv,
-                    tier.rr3_rail_tier_name()
-                );
-            }
-            self.next_rail = now + Duration::from_millis(self.cfg.rail.sample_period_ms);
+            self.rr3_rail_tick(now, bus)?;
         }
+        Ok(())
+    }
+}
+
+impl Rr3PowerDispatcher {
+    /// battery 拍：读数 → 周期流 → 低电边沿。HAL 读数失败 = 设备/传输级，上抛
+    /// 致命；失败先计入 counters（0.0.5 批I P-2：数据新鲜度可观测），再走退出语义。
+    fn rr3_battery_beat(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
+        let st = match self.dev.battery() {
+            Ok(st) => st,
+            Err(e) => {
+                bus.counter_bump("battery_read_fail", 1);
+                return Err(format!("电池读数失败（{}）: {e}", self.backend));
+            }
+        };
+        self.battery_seq += 1;
+        bus.publish(
+            RR3_BATTERY_STATE_TOPIC,
+            rr3_battery_body(self.battery_seq, st),
+        )?;
+        // 低电两个沿、同一采样值，喂入次序是契约（Rr3LowEdge doc 钉死）：
+        // **先 recover 后 cross**——cross 的再武装分支会悄悄置回 armed，先喂它
+        // 会把恢复沿吞掉（battery/ok 丢失）。恢复沿发布 = rrd 清全局低电旗、
+        // 恢复新 spawn 的解除路径（批N5 件二笔3，§17 运维留痕）。
+        if self.low_edge.rr3_low_edge_recover(st.voltage_mv) {
+            self.ok_seq += 1;
+            bus.publish(RR3_BATTERY_OK_TOPIC, rr3_battery_ok_body(self.ok_seq, st))?;
+            eprintln!(
+                "battery/ok: {}% {}mV（回阈恢复首拍，段内不重发）",
+                st.percent, st.voltage_mv
+            );
+        }
+        if self.low_edge.rr3_low_edge_cross(st.voltage_mv) {
+            self.low_seq += 1;
+            bus.publish(
+                RR3_BATTERY_LOW_TOPIC,
+                rr3_battery_low_body(self.low_seq, st),
+            )?;
+            eprintln!(
+                "battery/low: {}% {}mV（越阈首拍，段内不重发）",
+                st.percent, st.voltage_mv
+            );
+        }
+        self.last = Some(st);
+        self.next_battery = now + Duration::from_millis(self.cfg.battery.sample_period_ms);
+        Ok(())
+    }
+
+    /// charger 拍：由最近一次电池读数派生；首拍 battery 之前不发（读数还没着落）
+    fn rr3_charger_beat(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
+        if let Some(st) = self.last {
+            self.charger_seq += 1;
+            bus.publish(
+                RR3_CHARGER_STATE_TOPIC,
+                rr3_charger_body(self.charger_seq, st.charging),
+            )?;
+        }
+        self.next_charger = now + Duration::from_millis(self.cfg.charger.state_period_ms);
+        Ok(())
+    }
+
+    /// rail 拍（批N2 件五）：读域压 → ⑥-c2 按龄期折有效档位 → 判定核 → 周期流
+    /// ＋边沿守护行。HAL 读数失败同 battery_read_fail 纪律：counter 先行再退——
+    /// 失败是设备/传输级，上抛致命不装活着。
+    fn rr3_rail_tick(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
+        let st = match self.rail_dev.rr3_read(&self.cfg.rail.domain) {
+            Ok(st) => st,
+            Err(e) => {
+                bus.counter_bump("rail_read_fail", 1);
+                return Err(format!("轨压读数失败（{}）: {e}", self.rail_backend));
+            }
+        };
+        self.rail_seq += 1;
+        let (tier, event) = rr3_rail_beat(&mut self.rail_judge, st, self.cfg.rail.max_age_ms);
+        bus.publish(
+            RR3_RAIL_STATE_TOPIC,
+            rr3_rail_state_body(self.rail_seq, st.mv, st.age_ms, tier.rr3_rail_tier_name()),
+        )?;
+        if event == Some(true) {
+            bus.counter_bump("rail_edge", 1);
+            eprintln!(
+                "rail/edge: {}mV tier={}（越阈首拍，段内不重发）",
+                st.mv,
+                tier.rr3_rail_tier_name()
+            );
+        }
+        self.next_rail = now + Duration::from_millis(self.cfg.rail.sample_period_ms);
         Ok(())
     }
 }

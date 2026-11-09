@@ -268,6 +268,32 @@ impl Dispatcher for Rr3SenseDispatcher {
         )?;
         bus.counter_bump(RR3_PCM_FRAMES_KEY, 1);
 
+        self.rr3_vad_beat(&pcm, now, bus)?;
+
+        // 点头手势推进（0.0.8 批）：与 VAD 边沿无关，每拍看时刻——蓄势/上仰
+        // 两段按 config 时序到点下发（宿主桥档专用，espidf 档无旁路自然跳过）
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        self.rr3_nod_step(now, bus);
+
+        // 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；
+        // 抖动可接受——v0.0.1 的 pcm 流只供联调，时序对齐挂 M5）
+        let spent = now.elapsed();
+        if spent < self.tick {
+            std::thread::sleep(self.tick - spent);
+        }
+        Ok(())
+    }
+}
+
+impl Rr3SenseDispatcher {
+    /// VAD 边沿拍（B9 自 on_tick 拆出）：判向、发布、反射环与点头蓄势同址。
+    /// 判据全量入参（门控/DoA/时序）不变，拆面只动形状不动语义。
+    fn rr3_vad_beat(
+        &mut self,
+        pcm: &Rr3PcmStream,
+        now: Instant,
+        bus: &BusHandle,
+    ) -> Result<(), String> {
         if let Some(edge) = self.vad.rr3_vad_feed(&pcm.samples) {
             let gate_open = self.tts_gate.rr3_tts_gate_open(Instant::now());
             match edge {
@@ -344,18 +370,6 @@ impl Dispatcher for Rr3SenseDispatcher {
                     }
                 }
             }
-        }
-
-        // 点头手势推进（0.0.8 批）：与 VAD 边沿无关，每拍看时刻——蓄势/上仰
-        // 两段按 config 时序到点下发（宿主桥档专用，espidf 档无旁路自然跳过）
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        self.rr3_nod_step(now, bus);
-
-        // 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；
-        // 抖动可接受——v0.0.1 的 pcm 流只供联调，时序对齐挂 M5）
-        let spent = now.elapsed();
-        if spent < self.tick {
-            std::thread::sleep(self.tick - spent);
         }
         Ok(())
     }
