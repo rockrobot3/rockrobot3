@@ -18,6 +18,7 @@ pub mod manifest;
 pub mod probe;
 pub mod profile;
 mod profile_edit;
+mod profile_pins;
 pub mod registry;
 pub mod rpc;
 pub mod topics_load;
