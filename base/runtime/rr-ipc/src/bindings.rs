@@ -154,28 +154,29 @@ pub fn rr3_cred_store_parse(s: &str) -> Option<String> {
 /// 半写入**（先裁决后赋值）。独立纯函数：键域/值域可单测。
 pub fn rr3_board_bind_entry(b: &mut Rr3BoardBindings, k: &str, v: &str) -> Result<(), String> {
     let bad = || format!("板侧绑定键 {k} 取值不认: {v:?}");
-    match k {
-        RR3_BOARD_BINDING_I2C_SDA => b.i2c_sda = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_I2C_SCL => b.i2c_scl = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_ADC_RAIL_PIN => {
-            b.adc_rail_pin = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?)
-        }
-        RR3_BOARD_BINDING_UART2_TX => b.uart2_tx = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_UART2_RX => b.uart2_rx = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_LEDC_PAN => b.ledc_pan = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_LEDC_TILT => b.ledc_tilt = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_I2S_BCLK => b.i2s_bclk = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_I2S_SD => b.i2s_sd = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
-        RR3_BOARD_BINDING_I2S_WS => b.i2s_ws = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?),
+    // GPIO 类键先选槽位、后统一解析赋值（坏值不半写入）；cred_store 是另一取值域。
+    let slot = match k {
+        RR3_BOARD_BINDING_I2C_SDA => &mut b.i2c_sda,
+        RR3_BOARD_BINDING_I2C_SCL => &mut b.i2c_scl,
+        RR3_BOARD_BINDING_ADC_RAIL_PIN => &mut b.adc_rail_pin,
+        RR3_BOARD_BINDING_UART2_TX => &mut b.uart2_tx,
+        RR3_BOARD_BINDING_UART2_RX => &mut b.uart2_rx,
+        RR3_BOARD_BINDING_LEDC_PAN => &mut b.ledc_pan,
+        RR3_BOARD_BINDING_LEDC_TILT => &mut b.ledc_tilt,
+        RR3_BOARD_BINDING_I2S_BCLK => &mut b.i2s_bclk,
+        RR3_BOARD_BINDING_I2S_SD => &mut b.i2s_sd,
+        RR3_BOARD_BINDING_I2S_WS => &mut b.i2s_ws,
         RR3_BOARD_BINDING_CRED_STORE => {
-            b.cred_store = Some(rr3_cred_store_parse(v).ok_or_else(bad)?)
+            b.cred_store = Some(rr3_cred_store_parse(v).ok_or_else(bad)?);
+            return Ok(());
         }
         other => {
             return Err(format!(
                 "板侧绑定键 {other} 未在册（载荷键域见 bindings.rs 在册表）"
             ))
         }
-    }
+    };
+    *slot = Some(rr3_gpio_num_parse(v).ok_or_else(bad)?);
     Ok(())
 }
 
