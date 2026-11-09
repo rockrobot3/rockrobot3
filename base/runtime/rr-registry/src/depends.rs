@@ -109,25 +109,11 @@ fn rr3_boot_order_excl(
     excluded: &BTreeSet<String>,
 ) -> Result<Vec<String>, Vec<String>> {
     let mut errs = Vec::new();
-
-    // 名字唯一是建边前提：同名两份 manifest 的"谁依赖谁"无从谈起
-    let mut seen: BTreeSet<&str> = BTreeSet::new();
-    for f in facts {
-        if !seen.insert(f.name.as_str()) {
-            errs.push(format!(
-                "manifest 名重复: {}（依赖仲裁要求模块名唯一）",
-                f.name
-            ));
-        }
-    }
-    if !errs.is_empty() {
+    if !rr3_names_unique(facts, &mut errs) {
         return Err(errs);
     }
 
-    let base: BTreeSet<String> = rr3_rule_list("base_capabilities")
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    let base = rr3_base_caps();
 
     // 裁定 1：可满足性 = base ∪ 全集 provides。错误逐条点名，全收集。
     // 被剔除的模块不再报：它反正不起，重仲裁时把同一错误再报一遍会把剔除
@@ -142,12 +128,53 @@ fn rr3_boot_order_excl(
     // 被剔除的模块两侧都不建边：它不进启动序（没有"排在它后面"），它依赖谁也无关
     // （它反正不起）。
     let edges = rr3_edges_build(facts, excluded, &base);
+    let order = rr3_kahn(facts, excluded, &edges);
 
-    // Kahn：就绪集合按 (start_priority, name) 取最小——同层内 start_priority
-    // 稳定升序、同值名字典序，结果与装载顺序无关
+    // 环（含自环）与其下游永远进不了就绪集合——整批拒（裁定 2）。被剔除的模块
+    // 不算"卡住"：它们本来就不在启动序里。
+    let stuck = rr3_stuck(facts, excluded, &order);
+    if !stuck.is_empty() {
+        errs.push(format!(
+            "{RR3_CYCLE_ERROR_HEAD}（含环下游，拒整个 boot）: {}",
+            stuck.join(", ")
+        ));
+        return Err(errs);
+    }
+    Ok(order)
+}
+
+/// 名字唯一（建边前提）：同名两份 manifest 的"谁依赖谁"无从谈起。
+fn rr3_names_unique(facts: &[Rr3DependsFacts], errs: &mut Vec<String>) -> bool {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for f in facts {
+        if !seen.insert(f.name.as_str()) {
+            errs.push(format!(
+                "manifest 名重复: {}（依赖仲裁要求模块名唯一）",
+                f.name
+            ));
+        }
+    }
+    errs.is_empty()
+}
+
+/// base 能力集（常驻词表，与 manifest 无关）。
+fn rr3_base_caps() -> BTreeSet<String> {
+    rr3_rule_list("base_capabilities")
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
+}
+
+/// Kahn 拓扑：就绪集合按 (start_priority, name) 取最小——同层内 start_priority
+/// 稳定升序、同值名字典序，结果与装载顺序无关。
+fn rr3_kahn(
+    facts: &[Rr3DependsFacts],
+    excluded: &BTreeSet<String>,
+    edges: &BTreeSet<(usize, usize)>,
+) -> Vec<String> {
     let mut indegree: BTreeMap<usize, usize> = BTreeMap::new();
     let mut dependents: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (ci, pi) in &edges {
+    for (ci, pi) in edges {
         *indegree.entry(*ci).or_insert(0) += 1;
         dependents.entry(*pi).or_default().push(*ci);
     }
@@ -176,23 +203,20 @@ fn rr3_boot_order_excl(
             }
         }
     }
+    order
+}
 
-    // 环（含自环）与其下游永远进不了就绪集合——整批拒（裁定 2）。被剔除的模块
-    // 不算"卡住"：它们本来就不在启动序里。
-    let boot_count = facts.iter().filter(|f| !excluded.contains(&f.name)).count();
-    if order.len() != boot_count {
-        let stuck: Vec<&str> = facts
-            .iter()
-            .map(|f| f.name.as_str())
-            .filter(|n| !excluded.contains(*n) && !order.iter().any(|o| o == n))
-            .collect();
-        errs.push(format!(
-            "{RR3_CYCLE_ERROR_HEAD}（含环下游，拒整个 boot）: {}",
-            stuck.join(", ")
-        ));
-        return Err(errs);
-    }
-    Ok(order)
+/// 卡在环里（含环下游）的非剔除模块名，按 facts 序逐名。
+fn rr3_stuck<'a>(
+    facts: &'a [Rr3DependsFacts],
+    excluded: &BTreeSet<String>,
+    order: &[String],
+) -> Vec<&'a str> {
+    facts
+        .iter()
+        .map(|f| f.name.as_str())
+        .filter(|n| !excluded.contains(*n) && !order.iter().any(|o| o == n))
+        .collect()
 }
 
 /// 可满足性（裁定 1）：base ∪ 全集 provides；被剔除模块不报（它反正不起）。
