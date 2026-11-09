@@ -95,6 +95,95 @@ mod run {
         }
     }
 
+    /// 起 rrd 之后的全部有界等待与巡检（3–6 段）：等 resident running → 外部发布者
+    /// 一次性发布并退场 → rr3-ctl 四命令巡检 → sim 设备源不变量。rrd 收尾归调用方。
+    fn rr3_sim_wait(
+        rrctl: &Path,
+        peer: &Path,
+        socket: &Path,
+        m_b: &Path,
+        log_path: &Path,
+        report: &mut String,
+    ) -> Result<(), String> {
+
+        // ---- 3. 轮询等 resident 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试） ----
+        rr3_wait_modules(
+            || rr3_ctl_rows(&rrctl, &socket),
+            &[(RR3_DRILL_RESIDENT, "running")],
+            RR3_READY_DEADLINE,
+        )
+        .map_err(|e| rr3_with_log_tail(&e, &log_path))?;
+        report.push_str(rr3_section("模块 A（boot spawn → running）已就绪").as_str());
+
+        // ---- 4. 外部起发布者（publish_once：发布一条真事件后退场） ----
+        let st = Command::new(&peer)
+            .env("RR3_BUS_PATH", &socket)
+            .env("RR3_MANIFEST", &m_b)
+            .env("RR3_SIM_PEER_ROLE", "publish_once")
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .map_err(|e| format!("起 {RR3_DRILL_PUBLISHER} 失败: {e}"))?;
+        if !st.success() {
+            return Err(format!(
+                "{RR3_DRILL_PUBLISHER} 退出码 {st}（详见上方输出与 {log_path:?}）"
+            ));
+        }
+        report.push_str(&format!(
+            "{RR3_DRILL_PUBLISHER} 已发布 {RR3_SIM_B_TOPIC} 并退场（exit {st}）\n"
+        ));
+
+        // ---- 5. rr3-ctl 四命令巡检 ----
+        report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
+        let status_out = rr3_ctl_out(&rrctl, &socket, "status")?;
+        report.push_str(&status_out);
+        let rows = rr3_ctl_rows(&rrctl, &socket);
+        // denied_publish = 0 是"事件真被接受"的线上证据：发布被拒会在这里现形
+        if !status_out.contains("denied_publish = 0") {
+            return Err(format!(
+                "denied_publish ≠ 0：{RR3_SIM_B_TOPIC} 的发布被 rrd 拒了，见日志 {log_path:?}\n{status_out}"
+            ));
+        }
+        if !rows
+            .iter()
+            .any(|(n, _, p)| n == RR3_DRILL_RESIDENT && p == "running")
+        {
+            return Err(format!(
+                "{RR3_DRILL_RESIDENT} 不在 running（巡检期间掉线？）：{rows:?}"
+            ));
+        }
+        // 发布者退场后的终相**不作死断言**：sim_peer 的 publish_once 退场不排空接收队列，
+        // 未读广播帧会让对端把 FIN 变 RST（sim_peer.rs 的 abort 支注释记了同一形状），
+        // 终相随收尾路径在 unregistered/failed 两可—— rr3-sim 只断言"不在 running 了"。
+        if let Some((n, _, p)) = rows.iter().find(|(n, _, _)| n == RR3_DRILL_PUBLISHER) {
+            if p == "running" {
+                return Err(format!("{n} 退场后仍 running（EOF 没被记账？）：{rows:?}"));
+            }
+            report.push_str(&format!(
+                "注：{n} 终相 = {p}（退场未排空 → 终相两可，见 sim_peer.rs）\n"
+            ));
+        }
+
+        report.push_str(rr3_section("rr3-ctl health").as_str());
+        report.push_str(&rr3_ctl_out(&rrctl, &socket, "health")?);
+        report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
+        report.push_str(&rr3_ctl_out(&rrctl, &socket, "logs")?);
+        report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
+        match rr3_ctl_maybe_fail(&rrctl, &socket, "ota") {
+            Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
+            Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
+        }
+
+        // ---- 6. sim 设备源不变量（rr-hal 同一种流） ----
+        let stream = crate::devices::rr3_sim_silence(1600);
+        report.push_str(rr3_section("sim 设备源不变量").as_str());
+        report.push_str(&format!(
+            "backend=sim，1600 帧 @16kHz → {}ms（与 linux 后端同一种流）\n",
+            stream.rr3_pcm_duration_ms()
+        ));
+        Ok(())
+    }
+
     fn rr3_sim_drill(a: &crate::drill::Rr3SimArgs) -> Result<String, String> {
         // ---- 0. 定位：仓根与三个二进制 ----
         let repo = crate::drill::rr3_repo_locate(a)?;
@@ -168,84 +257,7 @@ mod run {
         );
 
         let mut report = String::new();
-        let outcome = (|| -> Result<(), String> {
-            // ---- 3. 轮询等 resident 到 running（rr3-ctl 尚未就绪时连接失败按"还没好"重试） ----
-            rr3_wait_modules(
-                || rr3_ctl_rows(&rrctl, &socket),
-                &[(RR3_DRILL_RESIDENT, "running")],
-                RR3_READY_DEADLINE,
-            )
-            .map_err(|e| rr3_with_log_tail(&e, &log_path))?;
-            report.push_str(rr3_section("模块 A（boot spawn → running）已就绪").as_str());
-
-            // ---- 4. 外部起发布者（publish_once：发布一条真事件后退场） ----
-            let st = Command::new(&peer)
-                .env("RR3_BUS_PATH", &socket)
-                .env("RR3_MANIFEST", &m_b)
-                .env("RR3_SIM_PEER_ROLE", "publish_once")
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .status()
-                .map_err(|e| format!("起 {RR3_DRILL_PUBLISHER} 失败: {e}"))?;
-            if !st.success() {
-                return Err(format!(
-                    "{RR3_DRILL_PUBLISHER} 退出码 {st}（详见上方输出与 {log_path:?}）"
-                ));
-            }
-            report.push_str(&format!(
-                "{RR3_DRILL_PUBLISHER} 已发布 {RR3_SIM_B_TOPIC} 并退场（exit {st}）\n"
-            ));
-
-            // ---- 5. rr3-ctl 四命令巡检 ----
-            report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
-            let status_out = rr3_ctl_out(&rrctl, &socket, "status")?;
-            report.push_str(&status_out);
-            let rows = rr3_ctl_rows(&rrctl, &socket);
-            // denied_publish = 0 是"事件真被接受"的线上证据：发布被拒会在这里现形
-            if !status_out.contains("denied_publish = 0") {
-                return Err(format!(
-                    "denied_publish ≠ 0：{RR3_SIM_B_TOPIC} 的发布被 rrd 拒了，见日志 {log_path:?}\n{status_out}"
-                ));
-            }
-            if !rows
-                .iter()
-                .any(|(n, _, p)| n == RR3_DRILL_RESIDENT && p == "running")
-            {
-                return Err(format!(
-                    "{RR3_DRILL_RESIDENT} 不在 running（巡检期间掉线？）：{rows:?}"
-                ));
-            }
-            // 发布者退场后的终相**不作死断言**：sim_peer 的 publish_once 退场不排空接收队列，
-            // 未读广播帧会让对端把 FIN 变 RST（sim_peer.rs 的 abort 支注释记了同一形状），
-            // 终相随收尾路径在 unregistered/failed 两可—— rr3-sim 只断言"不在 running 了"。
-            if let Some((n, _, p)) = rows.iter().find(|(n, _, _)| n == RR3_DRILL_PUBLISHER) {
-                if p == "running" {
-                    return Err(format!("{n} 退场后仍 running（EOF 没被记账？）：{rows:?}"));
-                }
-                report.push_str(&format!(
-                    "注：{n} 终相 = {p}（退场未排空 → 终相两可，见 sim_peer.rs）\n"
-                ));
-            }
-
-            report.push_str(rr3_section("rr3-ctl health").as_str());
-            report.push_str(&rr3_ctl_out(&rrctl, &socket, "health")?);
-            report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
-            report.push_str(&rr3_ctl_out(&rrctl, &socket, "logs")?);
-            report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
-            match rr3_ctl_maybe_fail(&rrctl, &socket, "ota") {
-                Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
-                Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
-            }
-
-            // ---- 6. sim 设备源不变量（rr-hal 同一种流） ----
-            let stream = crate::devices::rr3_sim_silence(1600);
-            report.push_str(rr3_section("sim 设备源不变量").as_str());
-            report.push_str(&format!(
-                "backend=sim，1600 帧 @16kHz → {}ms（与 linux 后端同一种流）\n",
-                stream.rr3_pcm_duration_ms()
-            ));
-            Ok(())
-        })();
+        let outcome = rr3_sim_wait(&rrctl, &peer, &socket, &m_b, &log_path, &mut report);
 
         let result = match outcome {
             Ok(()) => {
