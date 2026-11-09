@@ -30,10 +30,13 @@
 |---|---|---|
 | ① | workspace 编译（含测试目标） | `cargo check --all-targets --workspace`（CWD = `base/runtime`） |
 | ①b | workspace 全量测试 | `cargo test --workspace`（CWD = `base/runtime`） |
+| ①c | 代码风格门 rustfmt --check（CI lint 同源） | `cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check` ＋逐独立工程 `cargo fmt --manifest-path <dir>/Cargo.toml -- --check`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*`；esp 条件工程 fmt 不编译照跑） |
+| ①d | 静态 lint 门 clippy -D warnings（workspace，CI lint 同源） | `cargo clippy -q --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings` |
 | ② | manifest schema + 注册表形状 pin | `cargo test -p rr-registry --test contract` |
 | ②b | mkmod 输出即契约用例（方案 P3） | `cargo test --manifest-path tools/mkmodule/Cargo.toml` |
 | ③ | 主题前缀归属 | `cargo test -p rr-registry topics_prefix` |
 | ④ | 仓内所有独立 Rust 工程编译 | 逐工程 `cargo check --all-targets --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/ota/`，排除 `base/runtime/*` 与 esp 条件工程 `tools/esp32-uart-echo`/`tools/espidf-std-hello`/`tools/espidf-sentinel`/`tools/esp32-periph-base`——后者由各自专用门执法） |
+| ④b | 独立工程 clippy -D warnings（CI lint 同源） | 逐工程 `cargo clippy -q --all-targets --manifest-path <dir>/Cargo.toml -- -D warnings`（排除口径与 ④ 完全一致；esp 条件工程宿主 stable clippy 必红，归各自专用门） |
 | ⑤ | 文档门：已跟踪 md 不得为空、相对链接不得断、README 不得漏进导航 | 遍历 `git -c core.quotepath=false ls-files '*.md'`（全集进门，无任何排除），逐个判 `[ -s ]`，并取 markdown 链接括号里的相对路径目标判其是否存在；再把 `docs/README.md` 的链接按 `docs/` 归一成仓根路径，逐个已跟踪 README 对号（`docs/README.md` 自身是导航本体，不参与被检），未出现在导航里的打印 `导航漏链  <path>`；违规逐条点名后非 0 退出 |
 | ⑥ | **格格双达标·独立工程测试接线**（architecture §13；0.0.5 批E 起，批E' 扩全量口径） | 逐工程 `cargo test -q --manifest-path <dir>/Cargo.toml`（`modules/` + `tools/` + `base/`，排除 `base/runtime/*` 与 esp 条件工程 `tools/esp32-uart-echo`/`tools/espidf-std-hello`/`tools/espidf-sentinel`/`tools/esp32-periph-base`）；PASS 计数；`find` 打空即整步 FAIL（"接线了但没测"在此红，不以 SKIP 充数） |
 | ⑦ | **§13 静态断言五件**（全 fail-closed，逐条点名） | ⑦-a 机制核与件面零策略载荷（禁词扫 `rr-mech/src/*.rs`（0.0.5 批M 控制原语叶子件下沉，MC-10 L-4 补）+ `rr-core/src/*.rs` + `rr-hal-api/src/*.rs`（0.0.5 批I C8 起）+ `rr-ipc/src/protocol/*.rs` + `transport/mod.rs`，**0.0.5 批K H2 起再加 `modules/*/atoms/*/*.rs`**——件声明面同样不许带厂商/芯片/器件名，行注释先剥离）· ⑦-b `F⊗F`/装配成员存在性（每份 `composite.toml` 的 `atoms` 行须解析到本模块 `atoms/<名>/atom.toml`）· ⑦-c 五件套计数（件形按 `module.toml` 的 `lang` 数据位选：rust 五件 / python 两件式 / 组合件实体按 lang 推导——零件名零硬编码，批M MC-10 L-2）· ⑦-d 入口体量 ≤80 行（入口路径亦按 `lang` 推导）· ⑦-e 门禁清单自指判等（⑦-a 扫面名集 A 逐名须在 §2 本行与 `tools/ci/README.md` 的 ⑦ 行齐 + `tools/ci/rr-core-xtensa-check.sh` 的 `-p` 目标集 ⊆ A；代码为唯一真值、文档向代码看齐；0.0.5 批M MC-10 L-4）。**"每格一件·不留空格"的反向断言不在本步**，在 ② 的 rr-registry 仓扫描测试（`repo_atoms_compliant_and_every_slot_uniquely_covered`） |
@@ -71,6 +74,13 @@ python3 缺位按 SKIP 纪律明说）。三条判据：**重复率硬门槛 3%*
 （`*.rs`/`*.toml`/`*.py`/`*.html`/`*.sh`）即红——⑫ 度量只读 `git ls-files`，
 新源码没 `git add` 就不进度量也不进构建，而白名单策略下它连 `git status` 的
 常规输出里都不显眼（静默漏面）；扫描器自身失败同红（fail-closed）。
+
+**2026-11-10 lint 并门步（①c/①d/④b，已建成）**：CI 的 lint job（rustfmt
+--check + clippy -D warnings，仓内全工程）此前不在本地门禁里，手工折行与
+clippy 告警一路入库（实证：`9390d28` 收 ⑱ 文件漂移、`9227249` 收
+too_many_arguments）。本批把 CI lint 两段拆为 ①c（fmt：workspace + 全部独立
+工程，esp 条件工程不编译照跑）、①d（clippy：workspace）、④b（clippy：独立
+工程，排除口径同 ④）三步并入 `check.sh`，本地与 CI 从此同一强度。
 
 **拟增三步（2026-10-14 增补轮六登记，尚未建成——建成前不得当作现有强度引用）**：
 **第八轮实测（2026-10-15）把"尚未建成"从声明变成计数**：`tools/ci/check.sh` 里可数的 step 只有

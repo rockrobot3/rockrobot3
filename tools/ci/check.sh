@@ -93,6 +93,21 @@ run sh -c 'cd base/runtime && cargo check --all-targets --workspace'
 step "①b workspace 全量测试（含未被点名的守护用例）"
 run_tests sh -c 'cd base/runtime && cargo test --workspace'
 
+# ①c/①d 与 CI lint job 同源（.github/workflows/ci.yml lint）。此前本地门禁缺
+# fmt/clippy 两步，手工折行与 clippy 告警一路入库（9390d28 收 ⑱ 文件漂移、
+# 9227249 收 too_many_arguments 即实证）——"CI 绿本地红"的两套逻辑由此补齐。
+# fmt 不编译，对 esp 条件工程照跑（CI lint 同口径）；clippy 宿主 stable 对
+# esp 专用工程必红，独立工程侧归 ④b 排除、由各自专用门执法（口径同 ④）。
+step "①c 代码风格门 rustfmt --check（base/runtime + 全部独立工程，CI lint 同源）"
+run sh -c 'cargo fmt --manifest-path base/runtime/Cargo.toml --all -- --check'
+while IFS= read -r -d '' manifest; do
+  run sh -c "cargo fmt --manifest-path '$manifest' -- --check"
+done < <(find modules tools base/ota -name Cargo.toml \
+            -not -path "*/target/*" -not -path "base/runtime/*" -print0 | sort -z)
+
+step "①d 静态 lint 门 clippy -D warnings（base/runtime workspace）"
+run sh -c 'cargo clippy -q --all-targets --manifest-path base/runtime/Cargo.toml --workspace -- -D warnings'
+
 step "② manifest schema 校验 + 注册表形状 pin"
 run_tests sh -c 'cd base/runtime && cargo test -p rr-registry --test contract'
 step "②b mkmod 输出即契约用例（方案 P3）"
@@ -125,6 +140,18 @@ if [ "$found" -eq 0 ]; then
   printf 'FAIL  ④ 未发现任何独立 Rust 工程（find 打空属门禁失效，不放行）\n'
   fail=1
 fi
+
+# ④b 独立工程静态 lint（CI lint 同源）：fmt 已在 ①c 全量覆盖（esp 工程 fmt 不
+# 编译照跑），此处只补独立工程的 clippy。esp 条件工程宿主 stable clippy 必红，
+# 排除口径与 ④ 完全一致，编译执法归各自专用门（SKIP 纪律）。
+step "④b 独立工程 clippy -D warnings（CI lint 同源；esp 条件工程归专用门）"
+while IFS= read -r -d '' manifest; do
+  run sh -c "cargo clippy -q --all-targets --manifest-path '$manifest' -- -D warnings"
+done < <(find modules tools base/ota -name Cargo.toml -not -path "*/target/*" \
+                    -not -path "base/runtime/*" -not -path "tools/esp32-uart-echo/*" \
+                    -not -path "tools/espidf-std-hello/*" -not -path "tools/espidf-sentinel/*" \
+                    -not -path "tools/esp32-periph-base/*" \
+                    -print0 | sort -z)
 
 # ⑤ 文档门：已跟踪的 md 不得为空、相对链接不得断。
 #    空文档判据用 `-s`（字节数为 0 即空），断链判据只取 `](...)` 里的相对路径
