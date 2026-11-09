@@ -193,7 +193,10 @@ mod tests {
         let _ = std::fs::remove_file(&p);
     }
 
-    /// B-9：存活实例在听 = 独占 bind 拒且不得动活的端点文件，活实例照常服务
+    /// B-9：存活实例在听 = 独占 bind 拒且不得动活的端点文件，活实例照常服务。
+    /// 先消费掉 `rr3_bind_exclusive` 探测时排进 accept 队列的那条连接，再连新客户端
+    /// ——若把 listener 移进线程只 accept 一次，闭包结束即 drop listener，第 209 行
+    /// 的新连接会与"监听端已关闭"竞态（macOS 上实锤 ConnectionRefused 偶发）。
     #[test]
     fn bind_exclusive_refuses_live_listener() {
         let p = tmp_sock("excl-live");
@@ -205,9 +208,10 @@ mod tests {
         };
         assert_eq!(err.kind(), io::ErrorKind::AddrInUse, "存活实例必须拒");
         assert!(p.exists(), "拒绝不得删活实例的端点文件");
-        let server = std::thread::spawn(move || live.rr3_accept().expect("活实例 accept 应成功"));
+        let probe = live.rr3_accept().expect("活实例 accept 应成功");
         let _c = Rr3UdsListener::rr3_connect(&p).expect("活实例仍可连");
-        server.join().unwrap();
+        drop(probe);
+        drop(live);
         let _ = std::fs::remove_file(&p);
     }
 
