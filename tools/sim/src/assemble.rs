@@ -538,6 +538,9 @@ watchdog_timeout_ms = 5000\n";
         )
         .unwrap();
         std::fs::write(dir.join("config.toml"), "[x]\nv = 1\n").unwrap();
+        // atoms/ 申报面：校验⑨ 从装机树读 demands，夹具必须与装机布局同形
+        std::fs::create_dir_all(dir.join("atoms/servo")).unwrap();
+        std::fs::write(dir.join("atoms/servo/assemble.toml"), "[assemble]\n").unwrap();
         std::fs::create_dir_all(repo.join("profiles")).unwrap();
         std::fs::write(
             repo.join("profiles/default.toml"),
@@ -604,6 +607,11 @@ watchdog_timeout_ms = 5000\n";
         assert!(staged.contains("name = \"rr3-pa\""));
         // config 同目录就位
         assert!(work.join("modules/rr3-pa/config.toml").is_file());
+        // atoms/ 树同批装机（漏拷会让 rrd 校验⑨ 误判"件未申报 demands"）
+        assert_eq!(
+            std::fs::read_to_string(work.join("modules/rr3-pa/atoms/servo/assemble.toml")).unwrap(),
+            "[assemble]\n"
+        );
         std::fs::remove_dir_all(&repo).ok();
         std::fs::remove_dir_all(&work).ok();
     }
