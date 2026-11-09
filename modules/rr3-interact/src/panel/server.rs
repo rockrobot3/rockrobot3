@@ -314,14 +314,32 @@ fn rr3_post_call(topic: &str, body: &[u8]) -> Rr3PanelDispatch {
 /// 路由纯函数：方法 + 路径 + body → 分派。**端点白名单 = [`RR3_PANEL_ROUTES`]**，
 /// 未知路径 404、方法不对 405、body 坏 400——面板不是攻击面兜底者，一切都显式。
 ///
-/// 结构约束（2026-11 重构）：本表**平铺**，每端点一行；方法收窄走
-/// [`rr3_get_only`]/[`rr3_post_only`] 或 match guard，body 解析走
-/// `rr3_*_set` 小函数——禁止在表内嵌第二层 match（cc 与判读面双收敛）。
+/// 结构约束（B8 分面）：按资源归属分 sys/mod/cfg/act 四组匹配，每条路径只在
+/// 一组出现（组内仍一端点一行、无第二层 match）；方法收窄走
+/// [`rr3_get_only`]/[`rr3_post_only`]，body 解析走 `rr3_*_set` 小函数。
+/// 分面只切判读面，不复制申报列——covers/applies 真值仍单点在端点表。
 pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatch {
-    if let Some(topic) = rr3_ops_topic(path) {
-        return rr3_get_only(method, rr3_get_call(&topic));
+    if let Some(d) = rr3_route_sys(method, path) {
+        return d;
     }
-    match path {
+    if let Some(d) = rr3_route_mod(method, path, body) {
+        return d;
+    }
+    if let Some(d) = rr3_route_cfg(method, path, body) {
+        return d;
+    }
+    if let Some(d) = rr3_route_act(method, path, body) {
+        return d;
+    }
+    Rr3PanelDispatch::NotFound
+}
+
+/// 系统读面：静态页、状态/存活/版本/计数/日志、装配快照。
+/// 四条路由组（sys/mod/cfg/act）按资源归属划面，每条路径**只在一组**出现；
+/// 端点真值仍是 [`RR3_PANEL_ROUTES`]（本组表不复制申报列），漂移由
+/// `route_table_matches_dispatch` 逐表项钉死。
+fn rr3_route_sys(method: &str, path: &str) -> Option<Rr3PanelDispatch> {
+    Some(match path {
         "/" => rr3_get_only(method, Rr3PanelDispatch::Html),
         "/api/status" => rr3_get_only(method, Rr3PanelDispatch::StatusQuery),
         // 存活/版本探针（2026-10-31）：不触总线、零依赖，可高频轮询
@@ -331,24 +349,17 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         "/api/logs" => rr3_get_only(method, Rr3PanelDispatch::LogsQuery),
         // 接线图读口：ctl.wiring 透传，判据真值单点在 rrd assembly.rs
         "/api/wiring" => rr3_get_only(method, Rr3PanelDispatch::WiringQuery),
-        // 装配侧写口：body 原样透传 rrd 写口门序（confirm/证据/key 白名单）
-        "/api/profile/domain" => rr3_post_only(method, rr3_domain_set(body)),
-        // relay：面板只裁决布尔 on，归属门在 rrd（topic 属 act exposes）
-        "/api/relay" => rr3_post_only(method, rr3_relay_set(body)),
-        "/api/beep" => rr3_post_only(method, Rr3PanelDispatch::PanelAct(Rr3PanelAction::Beep)),
-        "/api/face" => rr3_post_only(method, rr3_face_set(body)),
-        "/api/selftest" => rr3_post_only(method, Rr3PanelDispatch::SelfTest),
-        "/api/reboot" => rr3_post_only(method, Rr3PanelDispatch::Reboot),
-        // 配网面：BusCall 透传 connect 三 RPC，参数裁决在 owner 模块
-        "/api/wifi/scan" => rr3_get_only(method, rr3_get_call("rr3-connect/wifi/scan")),
-        "/api/wifi/connect" => {
-            rr3_post_only(method, rr3_post_call("rr3-connect/wifi/connect", body))
-        }
-        // forget 无参数：空对象 args（legacy 语义，body 不读）
-        "/api/wifi/forget" => rr3_post_only(method, rr3_get_call("rr3-connect/wifi/forget")),
-        // 模型密钥面：只报 ref 名，POST 应答不回值
-        "/api/model/keys" => rr3_get_only(method, Rr3PanelDispatch::ModelKeysQuery),
-        "/api/model/key" => rr3_post_only(method, rr3_key_set(body)),
+        _ => return None,
+    })
+}
+
+/// 模块面：五模块 ops 读口（表驱动 [`RR3_OPS_ROUTES`]）＋ brain ops/模型行
+/// ＋ 模型密钥面（只报 ref 名，POST 应答不回值）。
+fn rr3_route_mod(method: &str, path: &str, body: &[u8]) -> Option<Rr3PanelDispatch> {
+    if let Some(topic) = rr3_ops_topic(path) {
+        return Some(rr3_get_only(method, rr3_get_call(&topic)));
+    }
+    Some(match path {
         // brain ops 读/写同源（读渲染与写同一批 ops 槽）
         "/api/brain/ops" => rr3_brain_ops(method, body),
         "/api/brain/models" => rr3_get_only(method, rr3_get_call("rr3-brain/model/list")),
@@ -356,8 +367,38 @@ pub fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatc
         "/api/brain/model/test" => {
             rr3_post_only(method, rr3_post_call("rr3-brain/model/test", body))
         }
-        _ => Rr3PanelDispatch::NotFound,
-    }
+        "/api/model/keys" => rr3_get_only(method, Rr3PanelDispatch::ModelKeysQuery),
+        "/api/model/key" => rr3_post_only(method, rr3_key_set(body)),
+        _ => return None,
+    })
+}
+
+/// 配置面：装配侧写口（rrd 门序单点裁决）＋ 配网三 RPC（参数裁决在 owner 模块）。
+fn rr3_route_cfg(method: &str, path: &str, body: &[u8]) -> Option<Rr3PanelDispatch> {
+    Some(match path {
+        // 装配侧写口：body 原样透传 rrd 写口门序（confirm/证据/key 白名单）
+        "/api/profile/domain" => rr3_post_only(method, rr3_domain_set(body)),
+        "/api/wifi/scan" => rr3_get_only(method, rr3_get_call("rr3-connect/wifi/scan")),
+        "/api/wifi/connect" => {
+            rr3_post_only(method, rr3_post_call("rr3-connect/wifi/connect", body))
+        }
+        // forget 无参数：空对象 args（legacy 语义，body 不读）
+        "/api/wifi/forget" => rr3_post_only(method, rr3_get_call("rr3-connect/wifi/forget")),
+        _ => return None,
+    })
+}
+
+/// 动作面：继电器（归属门在 rrd）、进程内 beep/face、自检、重启（双重门缺省拒）。
+fn rr3_route_act(method: &str, path: &str, body: &[u8]) -> Option<Rr3PanelDispatch> {
+    Some(match path {
+        // relay：面板只裁决布尔 on，归属门在 rrd（topic 属 act exposes）
+        "/api/relay" => rr3_post_only(method, rr3_relay_set(body)),
+        "/api/beep" => rr3_post_only(method, Rr3PanelDispatch::PanelAct(Rr3PanelAction::Beep)),
+        "/api/face" => rr3_post_only(method, rr3_face_set(body)),
+        "/api/selftest" => rr3_post_only(method, Rr3PanelDispatch::SelfTest),
+        "/api/reboot" => rr3_post_only(method, Rr3PanelDispatch::Reboot),
+        _ => return None,
+    })
 }
 
 /// GET 限定：表内读口统一收窄（非 GET = 405）
