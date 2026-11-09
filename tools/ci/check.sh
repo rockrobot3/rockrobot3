@@ -1448,6 +1448,50 @@ else
   printf 'SKIP  ⑫ python3 缺位——质量度量门不执行（CI runner 自带 python3）\n'
 fi
 
+# ⑬ 仓面卫生门（规则 7-b 的机制化）：追踪面不得含本机开发绝对路径，不得追踪
+# 构建目录。白名单策略（.gitignore 默认忽略所有）防的是"无意收进产物"，本门防
+# 的是"产物/本机路径已被收进"——两者一前一后，缺一就有漏面。
+# 自身与文档中作为反例引用的路径不参与（本脚本被 git grep 扫到会自指）。
+printf '\n=== ⑬ 仓面卫生门（追踪文件本机路径 / 构建目录） ===\n'
+hyg_fail=0
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  hy_path="$(git grep -IE -n \
+    -e '/Users/[A-Za-z0-9._-]+/' \
+    -e 'trae_projects' \
+    -e 'C:\\\\Users\\\\' \
+    -- . ':(exclude)tools/ci/check.sh' ':(exclude)docs/process/conventions.md' \
+    2>&1)"
+  hy_rc=$?
+  case "$hy_rc" in
+    0)
+      printf 'FAIL  ⑬ 追踪文件含本机开发路径（规则 7-b：不得暴露本地路径）:\n%s\n' \
+        "$(printf '%s\n' "$hy_path" | head -5)"
+      hyg_fail=1
+      ;;
+    1)
+      printf 'PASS  ⑬ 追踪文件无本机开发路径（/Users/<name>/、trae_projects、C:\\Users\\）\n'
+      ;;
+    *)
+      # 工具错误不得当"无命中"放行（fail-closed：门自己坏掉也是红）
+      printf 'FAIL  ⑬ 本机路径扫描器执行失败（git grep 退出码 %s）:\n%s\n' \
+        "$hy_rc" "$(printf '%s\n' "$hy_path" | head -3)"
+      hyg_fail=1
+      ;;
+  esac
+  hy_dir="$(git ls-files | grep -E '(^|/)(target|build|node_modules)/' | head -5)"
+  if [ -n "$hy_dir" ]; then
+    printf 'FAIL  ⑬ 构建目录被追踪（源码区严禁构建产物）:\n%s\n' "$hy_dir"
+    hyg_fail=1
+  else
+    printf 'PASS  ⑬ 追踪面无构建目录（target/build/node_modules）\n'
+  fi
+else
+  printf 'SKIP  ⑬ 非 git 工作树——仓面卫生门不执行\n'
+fi
+if [ "$hyg_fail" -ne 0 ]; then
+  fail=1
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"
