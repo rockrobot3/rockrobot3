@@ -36,7 +36,7 @@ pub(super) fn rr3_handshake(
     };
     // ADR-0010 裁定 3：首帧是 rr3.ctl.* → 控制旁支，不注册、一问一答即断
     if req.method.is_ctl() {
-        return Err(rr3_serve_ctl(out, ctx, reported_task, req));
+        return Err(super::ctl::rr3_serve_ctl(out, ctx, reported_task, req));
     }
     let facts = rr3_hs_facts(&req, out, reported_task, ctx)?;
     rr3_hs_admit(ctx, &facts, fan_tx, out, reported_task, req.id)
