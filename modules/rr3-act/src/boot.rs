@@ -337,47 +337,64 @@ const RR3_MAX_LOOP_HZ: u32 = 1_000;
 /// 点名缺字段的文案比派生宏的默认报错可读。
 pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
-    let sect = |name: &str| -> Result<&toml::Value, String> {
-        v.get("rr3-act")
-            .and_then(|s| s.get(name))
-            .ok_or_else(|| format!("config 缺 [rr3-act.{name}] 段"))
-    };
-    let u64_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0)
-            .map(|n| n as u64)
-            .ok_or_else(|| format!("config [rr3-act.{sect_name}] 缺 {key}（非负整数）"))
-    };
-    let servo_sect = sect("servo")?.clone();
-    let led_sect = sect("led")?.clone();
-    let intent_sect = sect("intent")?.clone();
-    let reflex_sect = sect("reflex")?.clone();
-    // 行程键不在 config（批N3 件五门 g 收敛）：Rr3ServoCfg 的 angle_min/max_deg
-    // 由执行轴状态注入填值（RR3_ACT_AXIS_STATE 的 lo/hi，档案真值），本解析面
-    // 只管时限/限速。config 出现任何行程键 = 读者零的死键，装配期
-    // （rrd assemble scan）与 CI 门 ⑨-e 双面执法，此处不再解析。
-    let loop_hz = rr3_act_cfg_loop(&reflex_sect)?;
-    let effects = rr3_act_cfg_effects(&led_sect)?;
-    let open_topics = rr3_act_cfg_topics(&intent_sect)?;
+    let servo_sect = rr3_act_cfg_sect(&v, "servo")?;
+    let led_sect = rr3_act_cfg_sect(&v, "led")?;
+    let intent_sect = rr3_act_cfg_sect(&v, "intent")?;
+    let reflex_sect = rr3_act_cfg_sect(&v, "reflex")?;
     Ok(Rr3ActCfg {
-        servo: Rr3ServoCfg {
-            // 行程占位（批N3 件五）：真值由装配段 rr3_act_run 用执行轴状态注入
-            // 覆填（cfg.servo.angle_min/max_deg = axis.lo/hi_deg），此处不解析
-            angle_min_deg: 0,
-            angle_max_deg: 180,
-            move_timeout_ms: u64_of(&servo_sect, "move_timeout_ms", "servo")?,
-            state_min_interval_ms: u64_of(&servo_sect, "state_min_interval_ms", "servo")?,
+        servo: rr3_act_servo(&servo_sect)?,
+        led: rr3_act_led(&led_sect)?,
+        intent: Rr3IntentCfg {
+            open_topics: rr3_act_cfg_topics(&intent_sect)?,
         },
-        led: Rr3LedCfg {
-            blink_period_ms: u64_of(&led_sect, "blink_period_ms", "led")?.max(1),
-            effects,
-        },
-        intent: Rr3IntentCfg { open_topics },
-        reflex: Rr3ReflexCfg {
-            loop_hz,
-            saturate_notice_ms: u64_of(&reflex_sect, "saturate_notice_ms", "reflex")?,
-        },
+        reflex: rr3_act_reflex(&reflex_sect)?,
+    })
+}
+
+/// `[rr3-act.<名>]` 段取址：缺段点名段名（解析面唯一入口）。
+fn rr3_act_cfg_sect<'a>(v: &'a toml::Value, name: &str) -> Result<&'a toml::Value, String> {
+    v.get("rr3-act")
+        .and_then(|s| s.get(name))
+        .ok_or_else(|| format!("config 缺 [rr3-act.{name}] 段"))
+}
+
+/// 段内非负整数字段：缺键/类型错/负数一律点名 `[rr3-act.<段>] 缺 <键>`。
+fn rr3_act_cfg_u64(sect: &toml::Value, key: &str, name: &str) -> Result<u64, String> {
+    sect.get(key)
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .ok_or_else(|| format!("config [rr3-act.{name}] 缺 {key}（非负整数）"))
+}
+
+/// servo 段：只管时限/限速。行程键不在 config（批N3 件五门 g 收敛）：Rr3ServoCfg
+/// 的 angle_min/max_deg 由执行轴状态注入填值（RR3_ACT_AXIS_STATE 的 lo/hi，
+/// 档案真值），config 出现任何行程键 = 读者零的死键，装配期（rrd assemble scan）
+/// 与 CI 门 ⑨-e 双面执法，此处不再解析。
+fn rr3_act_servo(sect: &toml::Value) -> Result<Rr3ServoCfg, String> {
+    Ok(Rr3ServoCfg {
+        // 行程占位（批N3 件五）：真值由装配段 rr3_act_run 用执行轴状态注入
+        // 覆填（cfg.servo.angle_min/max_deg = axis.lo/hi_deg），此处不解析
+        angle_min_deg: 0,
+        angle_max_deg: 180,
+        move_timeout_ms: rr3_act_cfg_u64(sect, "move_timeout_ms", "servo")?,
+        state_min_interval_ms: rr3_act_cfg_u64(sect, "state_min_interval_ms", "servo")?,
+    })
+}
+
+/// led 段：眨眼周期下限 1ms（0 为无意义自旋），灯效白名单子集见 `rr3_act_cfg_effects`。
+fn rr3_act_led(sect: &toml::Value) -> Result<Rr3LedCfg, String> {
+    Ok(Rr3LedCfg {
+        blink_period_ms: rr3_act_cfg_u64(sect, "blink_period_ms", "led")?.max(1),
+        effects: rr3_act_cfg_effects(sect)?,
+    })
+}
+
+/// reflex 段：节拍走越界裁决（`rr3_act_cfg_loop`），饱和提示阈值直取。
+fn rr3_act_reflex(sect: &toml::Value) -> Result<Rr3ReflexCfg, String> {
+    Ok(Rr3ReflexCfg {
+        loop_hz: rr3_act_cfg_loop(sect)?,
+        saturate_notice_ms: rr3_act_cfg_u64(sect, "saturate_notice_ms", "reflex")?,
     })
 }
 
