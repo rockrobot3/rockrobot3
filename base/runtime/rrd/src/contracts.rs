@@ -74,13 +74,18 @@ static RR3_CONTRACTS_SNAPSHOT: Mutex<Option<Rr3ContractsSnapshot>> = Mutex::new(
 /// 首份胜出并回 false（与装配快照同语义）；--manifest 调试路径不定格——
 /// `rr3.ctl.contracts` 如实报不可得，不造假数据。
 ///
+/// 锁中毒按 `into_inner` 继续读/写（rrd 全仓口径：账本不因一次 panic 变成不可用；
+/// 写路径只覆盖快照值，毒标记不携带半写状态）。
+///
 /// 为什么从 OnceLock 换 Mutex（批N22 件一）：装配侧写口（`rr3.ctl.domain.set`）
 /// 落盘新装配单后要**重记账**（写口的 tmp 产物过装载链全量预核 = 新验收事实，
 /// 记账跟住最新验收事实；否则写口自造一笔常驻"sha 漂"自检红，把真漂移淹没）。
 /// OnceLock 一次定格无处可换；Mutex<Option<_>> 三口语义：set 首份胜出、
 /// [`rr3_contracts_rebook`] 写口专属覆盖、get 快照只读。
 pub fn rr3_contracts_set(snapshot: Rr3ContractsSnapshot) -> bool {
-    let mut g = RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒");
+    let mut g = RR3_CONTRACTS_SNAPSHOT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     if g.is_some() {
         return false;
     }
@@ -92,7 +97,9 @@ pub fn rr3_contracts_set(snapshot: Rr3ContractsSnapshot) -> bool {
 /// 落盘后的新装配单重跑 capture（调用方持四路输入，与 boot 记账同源同形）。
 /// 未在册时拒（记账语义 = "boot 后的账"，--manifest 调试路径无账可换）。
 pub fn rr3_contracts_rebook(snapshot: Rr3ContractsSnapshot) -> Result<(), String> {
-    let mut g = RR3_CONTRACTS_SNAPSHOT.lock().expect("契约记账锁中毒");
+    let mut g = RR3_CONTRACTS_SNAPSHOT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     if g.is_none() {
         return Err("契约记账未在册（未以 --profile boot），无处可重记账".to_string());
     }
@@ -105,7 +112,7 @@ pub fn rr3_contracts_rebook(snapshot: Rr3ContractsSnapshot) -> Result<(), String
 pub fn rr3_contracts_snap() -> Option<Rr3ContractsSnapshot> {
     RR3_CONTRACTS_SNAPSHOT
         .lock()
-        .expect("契约记账锁中毒")
+        .unwrap_or_else(|p| p.into_inner())
         .clone()
 }
 
