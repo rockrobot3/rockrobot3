@@ -39,6 +39,11 @@ const RR3_DUMP_TOPIC: &str = "rr3-sense/capture/dump";
 /// 白名单组体应答，槽名与 assemble.toml 槽表申报同源（门 d covers 申报的对账面）
 const RR3_OPS_LIST_TOPIC: &str = "rr3-sense/ops/list";
 
+/// 舵机命令面（A9，桥单所有者）：`rr3-act` 的手动舵机命令经此 RPC 转交持桥的
+/// 音频源旁路。仅在宿主桥档编译（espidf 板侧无跨进程桥冲突，不暴露此面）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const RR3_SERVO_TOPIC: &str = "rr3-sense/servo/set";
+
 /// 采集新鲜度运维计数键（批M M-β S-3）：`pcm_frames` 每实际上总线一帧 +1；
 /// `pcm_empty_frames` 读回欠载空帧（read 实填 0 采样——"活着但不动"的饿死
 /// 信号，MC-11 判据：卡死与静默停摆看得见）另账。经心跳自报 rrd 归并，
@@ -68,10 +73,7 @@ const RR3_REFLEX_PAN_SWING_DEG: i32 = 30;
 /// tilt 中位（板侧行程 [80,100] 的中位 90）：点头手势的基准位——先回中位
 /// 蓄势，再上仰 `nod_deg`（绝对角 = 中位 + nod_deg，板侧 fail-closed 裁决）。
 /// 仅宿主桥档消费（espidf 档无命令旁路）；保留定义供测试与机制面同源。
-#[cfg_attr(
-    not(any(target_os = "linux", target_os = "macos")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 const RR3_REFLEX_TILT_CENTER_DEG: i32 = 90;
 
 /// 主循环状态整体持有（自原 composite.rs 局部状态迁入，状态归属随分发走）：
@@ -95,10 +97,7 @@ pub(crate) struct Rr3SenseDispatcher {
     seq: u64,
     /// 反射环命令旁路（None = 后端无旁路；探测与警告随 boot.rs probe）。
     /// 仅宿主桥档读（espidf 档无旁路，字段保留以维持构造形状）。
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "macos")),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
     cmd_tx: Option<rr_hal::backend::Rr3AudioCmdProducer>,
     /// 播放期门控状态机（B批 b2；on_event 喂帧、on_tick onset 臂读门）
     tts_gate: Rr3TtsGate,
@@ -110,10 +109,7 @@ pub(crate) struct Rr3SenseDispatcher {
     /// 中位（蓄势位），再按 nod_hold_ms 上仰到中位 + nod_deg（示意"听到了"）。
     /// None = 无手势在途（nod_deg=0 或尚未判停）。
     /// 仅宿主桥档读写（espidf 档无旁路，字段保留以维持构造形状）。
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "macos")),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
     pending_nod: Option<Rr3NodState>,
     /// 判向策略量一次收进 Rr3DoaCfg（B批 b3b：能量门/几何/档界整体注入机制件）
     doa_cfg: capture::Rr3DoaCfg,
@@ -207,8 +203,16 @@ impl Dispatcher for Rr3SenseDispatcher {
         } else if topic == RR3_OPS_LIST_TOPIC {
             Ok(json!({ "ops": rpc::rr3_sense_ops(&self.cfg) }))
         } else {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            if topic == RR3_SERVO_TOPIC {
+                return rr3_sense_servo(self.cmd_tx.as_ref(), _args);
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            let servo = format!("/{RR3_SERVO_TOPIC}");
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            let servo = String::new();
             Err(format!(
-                "rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}，收到 {topic}"
+                "rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}{servo}，收到 {topic}"
             ))
         }
     }
@@ -447,10 +451,7 @@ fn rr3_reflex_pan(enable: bool, deadband_deg: i32, doa_deg: i32, gate_open: bool
 /// `nod_deg`（上仰）；绝对角越出舵机全域 0..=180 不生成（板侧行程 fail-closed
 /// 是最终裁决，这里只防无意义负角）。
 /// 仅宿主桥档消费（espidf 档无命令旁路）；保留定义供测试与机制面同源。
-#[cfg_attr(
-    not(any(target_os = "linux", target_os = "macos")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 fn rr3_reflex_nod_plan(
     center_deg: i32,
     nod_deg: i32,
@@ -521,10 +522,70 @@ impl Rr3DoaRing {
     }
 }
 
+/// 舵机命令面（A9，桥单所有者）：args `{"pan":0..=180}` / `{"tilt":0..=180}`，
+/// 至少一键；逐轴推入持桥音频源的命令旁路（板侧执行前回执）。`cmd_tx` 缺位 =
+/// 本进程不是桥所有者（音频后端非 esp32）——fail-closed 点名拒，不另开 UART。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_sense_servo(
+    tx: Option<&rr_hal::backend::Rr3AudioCmdProducer>,
+    args: &Value,
+) -> Result<Value, String> {
+    let pan = rr3_axis_deg(args, "pan")?;
+    let tilt = rr3_axis_deg(args, "tilt")?;
+    let n = u32::from(pan.is_some()) + u32::from(tilt.is_some());
+    if n == 0 {
+        return Err("舵机命令需 pan/tilt 至少一键（0..=180）".into());
+    }
+    let Some(tx) = tx else {
+        return Err("舵机命令面未就绪：本进程不持有外设桥（音频后端须为 esp32）".into());
+    };
+    if let Some(p) = pan {
+        tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(p));
+    }
+    if let Some(t) = tilt {
+        tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(t));
+    }
+    Ok(json!({ "queued": n }))
+}
+
+/// 单轴角度门：缺键/Null = 本轴不下发；非整数或 >180 逐键点名（板侧行程裁决前
+/// 的协议级 fail-closed，不预钳不猜）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_axis_deg(args: &Value, key: &str) -> Result<Option<u16>, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            let n = v
+                .as_u64()
+                .ok_or_else(|| format!("{key} 应为整数角度（0..=180）"))?;
+            if n > 180 {
+                return Err(format!("{key} 越界 0..=180: {n}"));
+            }
+            Ok(Some(n as u16))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::capture::Rr3DoaBin;
+
+    /// A9 舵机命令面：单轴门 + 非桥主 fail-closed（无 cmd_tx 不许另开 UART）。
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn servo_axis_gate_and_owner_gate() {
+        assert_eq!(rr3_axis_deg(&json!({"pan": 90}), "pan").unwrap(), Some(90));
+        assert_eq!(rr3_axis_deg(&json!({"tilt": 0}), "tilt").unwrap(), Some(0));
+        assert_eq!(rr3_axis_deg(&json!({}), "pan").unwrap(), None);
+        assert!(rr3_axis_deg(&json!({"pan": 181}), "pan").is_err());
+        assert!(rr3_axis_deg(&json!({"tilt": "x"}), "tilt").is_err());
+        assert!(rr3_sense_servo(None, &json!({})).is_err(), "缺两键拒");
+        assert!(
+            rr3_sense_servo(None, &json!({"pan": 90})).is_err(),
+            "非桥主拒"
+        );
+    }
 
     /// 流级下混：channels 归 1、rate 不动、samples 收缩；单麦原样返回（零改动）。
     /// 随下混函数自 capture/mech.rs 迁入（0.0.5 批I 深挖收口）。

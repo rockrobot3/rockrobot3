@@ -166,14 +166,14 @@ mod tests {
     // 叠加层夹具落在 workspace 根的 tests/fixtures/（刻意不进 modules/、不进 contracts/）
     const OVERLAY: &str = include_str!("../../tests/fixtures/sim-topics.toml");
 
-    /// 契约必须解析成 8 owner / 42 topic（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 8 owner / 43 topic（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let set = rr3_topic_parse(CONTRACT);
         assert_eq!(
             set.topics.len(),
-            42,
-            "契约 topic 数（ADR-0023 39→42：append rr3-brain/model list/set/test 模型行面）"
+            43,
+            "契约 topic 数（ADR-0023 39→42：append rr3-brain/model list/set/test 模型行面；A9 42→43：append rr3-sense/servo/set）"
         );
         assert_eq!(set.owners.len(), 8, "契约 owner 数");
         assert!(!set.rr3_topic_is_empty());
@@ -207,8 +207,8 @@ mod tests {
             .expect("合并");
         assert_eq!(
             merged.topics.len(),
-            45,
-            "42 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿；ADR-0023 39→42：append rr3-brain/model list/set/test）"
+            46,
+            "43 契约 + 3 夹具（0.0.5 第 IV 轮 MCP-0 契约 29→30：append brain/audio/tts_pcm；增补轮六 批N2 件二 30→31：append rr3-power/rail/state；批N4 件六二 31→32：append rr3-brain/ops/list，B-12；批N4 件九二 32→37：append 五模块 ops/list；批N4 件九三 37→38：append rr3-brain/ops/set 配置面写口；批N5 件二笔3 38→39：append rr3-power/battery/ok 低电恢复沿；ADR-0023 39→42：append rr3-brain/model list/set/test；A9 42→43：append rr3-sense/servo/set）"
         );
         assert_eq!(merged.owners.len(), 10);
         assert_eq!(
@@ -232,7 +232,7 @@ mod tests {
         );
         assert!(merged.rr3_topic_contains("rr3-sima/ping/state"));
         // self 未被改动
-        assert_eq!(base.topics.len(), 42, "契约计数（ADR-0023 39→42）");
+        assert_eq!(base.topics.len(), 43, "契约计数（ADR-0023 39→42；A9 42→43）");
         assert_eq!(
             base.rr3_topic_kind("rr3-sima/ping/state"),
             None,

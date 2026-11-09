@@ -196,6 +196,13 @@ stable = "L2"
 note = "sense 抓取转储 RPC（rpc.exposes 事务面，request 语义）"
 
 [[topic]]
+name = "rr3-sense/servo/set"
+kind = "request"
+owner = "rr3-sense"
+stable = "L2"
+note = "桥单所有者舵机命令面（A9）：rr3-act 手动命令经持桥音频源旁路下发，args {pan?, tilt?} 0..=180；非桥主 fail-closed"
+
+[[topic]]
 name = "rr3-act/relay/set"
 kind = "request"
 owner = "rr3-act"
