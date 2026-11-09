@@ -334,57 +334,9 @@ pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     // 由执行轴状态注入填值（RR3_ACT_AXIS_STATE 的 lo/hi，档案真值），本解析面
     // 只管时限/限速。config 出现任何行程键 = 读者零的死键，装配期
     // （rrd assemble scan）与 CI 门 ⑨-e 双面执法，此处不再解析。
-    // loop_hz 越界拒 boot（0.0.5 批I A-3）：`as u32` 裸截断会把 2^32+1 之类
-    // 值偷偷收成 1，节拍面静默变形——try_from 点名拒绝。本轮审计补上界：
-    // 1_000_000/loop_hz 在 loop_hz 极大时取整为 0µs，反射环会变成满转自旋。
-    let loop_hz_raw = u64_of(&reflex_sect, "loop_hz", "reflex")?.max(1);
-    let loop_hz = u32::try_from(loop_hz_raw).map_err(|_| {
-        format!("config [rr3-act.reflex] loop_hz={loop_hz_raw} 超出 u32 范围，拒 boot")
-    })?;
-    if loop_hz > RR3_MAX_LOOP_HZ {
-        return Err(format!(
-            "config [rr3-act.reflex] loop_hz 须在 1..={RR3_MAX_LOOP_HZ}，收到 {loop_hz}（更大值会退化为满转自旋）"
-        ));
-    }
-    // 灯效白名单子集（A-9）：数组逐元素必须是**在册契约值**，非在册值或非字符串
-    // 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态一条点名都不认（合法）
-    let effects_arr = led_sect
-        .get("effects")
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| "config [rr3-act.led] 缺 effects（灯效白名单数组）".to_string())?;
-    let mut effects = Vec::with_capacity(effects_arr.len());
-    for (i, e) in effects_arr.iter().enumerate() {
-        let s = e
-            .as_str()
-            .ok_or_else(|| format!("config [rr3-act.led] effects[{i}] 必须是字符串，收到 {e}"))?;
-        let eff = Rr3LedEffect::rr3_led_effect_parse(s).ok_or_else(|| {
-            format!(
-                "config [rr3-act.led] effects[{i}] 非在册灯效 {s:?}（在册值 {}）",
-                RR3_LED_EFFECT_VALUES.join("/")
-            )
-        })?;
-        effects.push(eff);
-    }
-    // 意图执行面开放集（A-9）：只认本模块**有执行臂**的在册意图主题
-    // （relay/set、servo/command），越界值逐条点名拒 boot（fail-closed）；空集合法
-    let open_arr = intent_sect
-        .get("open_topics")
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| "config [rr3-act.intent] 缺 open_topics（意图开放主题数组）".to_string())?;
-    let mut open_topics = Vec::with_capacity(open_arr.len());
-    for (i, t) in open_arr.iter().enumerate() {
-        let s = t.as_str().ok_or_else(|| {
-            format!("config [rr3-act.intent] open_topics[{i}] 必须是字符串，收到 {t}")
-        })?;
-        if s != RR3_SERVO_COMMAND_TOPIC && s != RR3_RELAY_SET_TOPIC {
-            return Err(format!(
-                "config [rr3-act.intent] open_topics[{i}] 非本模块可执行的意图主题 {s:?}（只认 {}/{}）",
-                RR3_RELAY_SET_TOPIC,
-                RR3_SERVO_COMMAND_TOPIC
-            ));
-        }
-        open_topics.push(s.to_string());
-    }
+    let loop_hz = rr3_act_cfg_loop(&reflex_sect)?;
+    let effects = rr3_act_cfg_effects(&led_sect)?;
+    let open_topics = rr3_act_cfg_topics(&intent_sect)?;
     Ok(Rr3ActCfg {
         servo: Rr3ServoCfg {
             // 行程占位（批N3 件五）：真值由装配段 rr3_act_run 用执行轴状态注入
@@ -404,6 +356,75 @@ pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
             saturate_notice_ms: u64_of(&reflex_sect, "saturate_notice_ms", "reflex")?,
         },
     })
+}
+
+/// reflex 环节拍：越界拒 boot（0.0.5 批I A-3）——`as u32` 裸截断会把 2^32+1
+/// 之类值偷偷收成 1，节拍面静默变形；上界补 1kHz（`1_000_000/loop_hz` 在极值
+/// 时取整为 0µs，反射环会退化为满转自旋）。
+fn rr3_act_cfg_loop(sect: &toml::Value) -> Result<u32, String> {
+    let raw = sect
+        .get("loop_hz")
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .ok_or_else(|| "config [rr3-act.reflex] 缺 loop_hz（非负整数）".to_string())?
+        .max(1);
+    let hz = u32::try_from(raw).map_err(|_| {
+        format!("config [rr3-act.reflex] loop_hz={raw} 超出 u32 范围，拒 boot")
+    })?;
+    if hz > RR3_MAX_LOOP_HZ {
+        return Err(format!(
+            "config [rr3-act.reflex] loop_hz 须在 1..={RR3_MAX_LOOP_HZ}，收到 {hz}（更大值会退化为满转自旋）"
+        ));
+    }
+    Ok(hz)
+}
+
+/// 灯效白名单子集（A-9）：数组逐元素必须是**在册契约值**，非在册值或非字符串
+/// 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态一条点名都不认（合法）。
+fn rr3_act_cfg_effects(sect: &toml::Value) -> Result<Vec<Rr3LedEffect>, String> {
+    let arr = sect
+        .get("effects")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "config [rr3-act.led] 缺 effects（灯效白名单数组）".to_string())?;
+    let mut effects = Vec::with_capacity(arr.len());
+    for (i, e) in arr.iter().enumerate() {
+        let s = e
+            .as_str()
+            .ok_or_else(|| format!("config [rr3-act.led] effects[{i}] 必须是字符串，收到 {e}"))?;
+        let eff = Rr3LedEffect::rr3_led_effect_parse(s).ok_or_else(|| {
+            format!(
+                "config [rr3-act.led] effects[{i}] 非在册灯效 {s:?}（在册值 {}）",
+                RR3_LED_EFFECT_VALUES.join("/")
+            )
+        })?;
+        effects.push(eff);
+    }
+    Ok(effects)
+}
+
+/// 意图执行面开放集（A-9）：只认本模块**有执行臂**的在册意图主题
+/// （relay/set、servo/command），越界值逐条点名拒 boot（fail-closed）；空集合法。
+fn rr3_act_cfg_topics(sect: &toml::Value) -> Result<Vec<String>, String> {
+    let arr = sect
+        .get("open_topics")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "config [rr3-act.intent] 缺 open_topics（意图开放主题数组）".to_string())?;
+    let mut topics = Vec::with_capacity(arr.len());
+    for (i, t) in arr.iter().enumerate() {
+        let s = t.as_str().ok_or_else(|| {
+            format!("config [rr3-act.intent] open_topics[{i}] 必须是字符串，收到 {t}")
+        })?;
+        if s != RR3_SERVO_COMMAND_TOPIC && s != RR3_RELAY_SET_TOPIC {
+            return Err(format!(
+                "config [rr3-act.intent] open_topics[{i}] 非本模块可执行的意图主题 {s:?}（只认 {}/{}）",
+                RR3_RELAY_SET_TOPIC,
+                RR3_SERVO_COMMAND_TOPIC
+            ));
+        }
+        topics.push(s.to_string());
+    }
+    Ok(topics)
 }
 
 #[cfg(test)]
