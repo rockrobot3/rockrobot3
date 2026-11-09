@@ -277,26 +277,40 @@ pub(crate) fn rr3_base_url_check(base_url: &str) -> Result<(), String> {
 /// fail-closed：active 数≠1、mode/api_format 不认、缺 base_url/model_id 一律
 /// Err 点名行 name，不静默挑行。错误文案逐字对位 Python。
 pub(crate) fn rr3_brain_model_row(doc: &Value) -> Result<Rr3ModelRow, String> {
+    let rows = rr3_model_rows(doc)?;
+    if rows.is_empty() {
+        return rr3_model_legacy(doc);
+    }
+    rr3_model_act(rr3_model_pick(rows)?)
+}
+
+/// 取 [[rr3-brain.model]] 行表：缺键/Null = 空表（走 legacy 四元组），非数组拒 boot
+fn rr3_model_rows(doc: &Value) -> Result<&[Value], String> {
     let brain = doc
         .get("rr3-brain")
         .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())?;
-    let rows: &[Value] = match brain.get("model") {
-        None | Some(Value::Null) => &[],
-        Some(Value::Array(rows)) => rows.as_slice(),
-        Some(_) => return Err("config [[rr3-brain.model]] 须为行表（数组）".to_string()),
-    };
-    if rows.is_empty() {
-        // 无表 → 旧路径四元组（cloud 段 base_url + llm_model，key_ref=None 走
-        // 通用环境变量键，mode=None 随全局档）。cloud.base_url 是主机根（ASR/TTS
-        // 亦消费），LLM 腿在此补成完整 API 根：路径为空补 `/v1`。
-        let cloud = rr3_brain_sect(doc, "cloud")?;
-        return Ok(Rr3ModelRow {
-            base_url: rr3_model_api_root(rr3_req_str(cloud, "cloud", "base_url")?),
-            model_id: rr3_req_str(cloud, "cloud", "llm_model")?.to_string(),
-            key_ref: None,
-            mode: None,
-        });
+    match brain.get("model") {
+        None | Some(Value::Null) => Ok(&[]),
+        Some(Value::Array(rows)) => Ok(rows.as_slice()),
+        Some(_) => Err("config [[rr3-brain.model]] 须为行表（数组）".to_string()),
     }
+}
+
+/// 无模型行表 → 旧路径四元组：cloud 段 base_url + llm_model，key_ref=None 走
+/// 通用环境变量键，mode=None 随全局档。cloud.base_url 是主机根（ASR/TTS 亦消费），
+/// LLM 腿在此补成完整 API 根：路径为空补 `/v1`。
+fn rr3_model_legacy(doc: &Value) -> Result<Rr3ModelRow, String> {
+    let cloud = rr3_brain_sect(doc, "cloud")?;
+    Ok(Rr3ModelRow {
+        base_url: rr3_model_api_root(rr3_req_str(cloud, "cloud", "base_url")?),
+        model_id: rr3_req_str(cloud, "cloud", "llm_model")?.to_string(),
+        key_ref: None,
+        mode: None,
+    })
+}
+
+/// 在行表里挑唯一 active 行；非恰一行即拒（错误文案带全部行名，便于对表）
+fn rr3_model_pick(rows: &[Value]) -> Result<&Value, String> {
     let names: Vec<String> = rows
         .iter()
         .map(|r| {
@@ -311,13 +325,18 @@ pub(crate) fn rr3_brain_model_row(doc: &Value) -> Result<Rr3ModelRow, String> {
         .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
         .collect();
     if active.len() != 1 {
-        let names_fmt = rr3_py_list_repr(&names);
         return Err(format!(
-            "[[rr3-brain.model]] 须恰一行 active=true（现 {} 行: {names_fmt}）",
-            active.len()
+            "[[rr3-brain.model]] 须恰一行 active=true（现 {} 行: {}）",
+            active.len(),
+            rr3_py_list_repr(&names)
         ));
     }
-    let row = active[0];
+    Ok(active[0])
+}
+
+/// active 行 → 投影四元组：mode 词表（api/local）、api_format（本批仅 openai）、
+/// base_url/model_id 非空 + API 根形制、api_key_ref 双源引用归一
+fn rr3_model_act(row: &Value) -> Result<Rr3ModelRow, String> {
     let name = row.get("name").and_then(Value::as_str).unwrap_or("?");
     let mode = match row.get("mode").and_then(Value::as_str).unwrap_or("api") {
         "api" => Rr3LlmMode::Api,
