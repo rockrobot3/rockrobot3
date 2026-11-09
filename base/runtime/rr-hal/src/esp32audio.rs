@@ -67,11 +67,15 @@ pub(crate) use rr_periph_proto::consts::RR3_TASK_HOST as RR3_HOST_TASK;
 /// 音频 PCM 上行主题（在册 stream L1：contracts/topics.toml；事实源
 /// modules/rr3-sense composite::`RR3_PCM_TOPIC`，本 crate 不加依赖边，同值锚定）。
 const RR3_AUDIO_TOPIC: &str = "rr3-sense/audio/pcm";
-/// 连续门失败/拆帧失败达此数记一条日志（1-2 次可能是单帧毛刺，3 次 = 帧界
-/// 成片损坏，值得点名；坏帧弃扫本身由 [`FrameAssembler`] 即时完成）。
-/// **同时是"累计"打点周期**：间歇性坏帧（各被好帧隔开）不会把连续计数堆到阈值，
-/// 若只按连续计数打日志，这类丢帧会**全程静默**——而它恰恰是线面误码的典型形态。
-const RR3_ERR_STREAK_LOG: u64 = 3;
+/// 坏帧打点周期：首条立即点名（证明坏帧形态），其后每累计 `RR3_ERR_LOG_EVERY`
+/// 条记一次。此前按 3 取模是持续误码时每 3 帧刷一条——线面整段坏掉时会变成日志
+/// 风暴（2026-11-09 静态审计：音频读循环是帧率驱动，不是事件驱动）。
+const RR3_ERR_LOG_EVERY: u64 = 1_000;
+
+/// 坏帧打点判据：首条必打，之后按累计周期抽样（连续坏帧期间不刷屏）。
+fn rr3_err_log_now(err_total: u64) -> bool {
+    err_total == 1 || err_total % RR3_ERR_LOG_EVERY == 0
+}
 
 /// 板面音频流事实（板固件 mic.rs 钉定）：16kHz 采样率。open 校验配置同款，
 /// 不匹配回 `InvalidParam`（fail-closed，指路 config-esp32.toml）。
@@ -440,6 +444,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     let mut conn: Option<Rr3UartConn> = Some(first);
     let mut logged_ready = false;
     let mut logged_overflow = false;
+    let mut logged_ack = false;
     // 命令旁路请求 id 计数（读线程局部；fire-and-forget 面只服务回执对账日志，
     // 无跨会话唯一性要求）
     let mut cmd_id: u64 = 1;
@@ -539,14 +544,21 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                                         Some(e) => eprintln!(
                                             "rr-hal-esp32-audio: 板面应答 id={id} 业务失败: {e}"
                                         ),
-                                        None => eprintln!(
-                                            "rr-hal-esp32-audio: 板面应答 id={id} ok（pre-execution ack）"
-                                        ),
+                                        None => {
+                                            // 成功回执逐条打会在高频命令面刷屏；首条点名即
+                                            // 证明回执通道活着，后续同口径不再重复。
+                                            if !logged_ack {
+                                                logged_ack = true;
+                                                eprintln!(
+                                                    "rr-hal-esp32-audio: 板面命令回执就绪（id={id} ok；后续成功回执不逐条打印）"
+                                                );
+                                            }
+                                        }
                                     },
                                     Err(e) => {
                                         err_streak += 1;
                                         err_total += 1;
-                                        if err_total % RR3_ERR_STREAK_LOG == 0 {
+                                        if rr3_err_log_now(err_total) {
                                             eprintln!(
                                                 "rr-hal-esp32-audio: 累计 {err_total} 帧未过门（连续 {err_streak}；帧界损坏/载荷 CRC 不符？）: {e}"
                                             );
@@ -558,7 +570,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                             Err((discarded, why)) => {
                                 err_streak += 1;
                                 err_total += 1;
-                                if err_total % RR3_ERR_STREAK_LOG == 0 {
+                                if rr3_err_log_now(err_total) {
                                     eprintln!(
                                         "rr-hal-esp32-audio: 累计 {err_total} 次拆帧失败（连续 {err_streak}，已弃 {discarded}B 重扫）: {why}"
                                     );
@@ -982,6 +994,17 @@ mod tests {
         let got = std::fs::read(&path).expect("tee 测试临时文件回读失败");
         assert_eq!(got, b"abcde", "tee 流须与消费流逐字节一致且按序追加");
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// 坏帧打点：首条必打，其后按累计周期抽样（持续误码不刷屏）。
+    #[test]
+    fn err_log_first_then_sampled() {
+        assert!(rr3_err_log_now(1));
+        assert!(!rr3_err_log_now(2));
+        assert!(!rr3_err_log_now(RR3_ERR_LOG_EVERY - 1));
+        assert!(rr3_err_log_now(RR3_ERR_LOG_EVERY));
+        assert!(!rr3_err_log_now(RR3_ERR_LOG_EVERY + 1));
+        assert!(rr3_err_log_now(RR3_ERR_LOG_EVERY * 2));
     }
 
     /// 上限闸：文件到 64MiB 后下一笔停 tee（观测面降级），不 panic 不反噬链路。
