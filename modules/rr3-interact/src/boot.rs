@@ -285,8 +285,23 @@ fn rr3_expect_set(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Result
 fn rr3_itact_face(v: &toml::Value) -> Result<Rr3FaceCfg, String> {
     let face_sect =
         rr3_itact_sect(v, "face").ok_or_else(|| "config 缺 [rr3-interact.face] 段".to_string())?;
-    // 不可点名集（I-11）：数组逐元素必须是**在册契约值**，非在册名或非字符串
-    // 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态不排除任何表情点名（合法）
+    let non_pointable = rr3_face_nonpt(face_sect)?;
+    // 表情节拍与兜底表情（批N4 件五 I-17/M-2/M-3）：缺键回落 legacy 值；
+    // default_expression 必须在册（同 non_pointable 白名单对账）
+    let mut face_tick_ms = 250u64;
+    rr3_cfg_u64(face_sect, "face_tick_ms", "face", &mut face_tick_ms)?;
+    let face_tick_ms = face_tick_ms.max(1);
+    let default_expr = rr3_face_default(face_sect)?;
+    Ok(Rr3FaceCfg {
+        non_pointable,
+        face_tick_ms,
+        default_expr,
+    })
+}
+
+/// 不可点名集（I-11）：数组逐元素必须是**在册契约值**，非在册名或非字符串
+/// 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态不排除任何表情点名（合法）
+fn rr3_face_nonpt(face_sect: &toml::Value) -> Result<Vec<&'static str>, String> {
     let arr = face_sect
         .get("non_pointable")
         .and_then(toml::Value::as_array)
@@ -306,29 +321,22 @@ fn rr3_itact_face(v: &toml::Value) -> Result<Rr3FaceCfg, String> {
         })?;
         non_pointable.push(expr);
     }
-    // 表情节拍与兜底表情（批N4 件五 I-17/M-2/M-3）：缺键回落 legacy 值；
-    // default_expression 必须在册（同 non_pointable 白名单对账）
-    let mut face_tick_ms = 250u64;
-    rr3_cfg_u64(face_sect, "face_tick_ms", "face", &mut face_tick_ms)?;
-    let face_tick_ms = face_tick_ms.max(1);
-    let default_expr = match face_sect.get("default_expression") {
-        Some(name) => {
-            let s = name.as_str().ok_or_else(|| {
-                format!("config [rr3-interact.face] default_expression 必须是字符串，收到 {name}")
-            })?;
-            rr3_face_expr_lookup(s).ok_or_else(|| {
-                format!(
-                    "config [rr3-interact.face] default_expression 非在册表情 {s:?}（在册值 {}）",
-                    RR3_FACE_EXPRESSIONS_JOINED
-                )
-            })?
-        }
-        None => rr3_face_expr_lookup("idle").expect("在册白名单恒含 idle，lookup 必中"),
+    Ok(non_pointable)
+}
+
+/// 兜底表情：缺键回落 `idle`（在册白名单恒含，expect 不是兜底而是不变量）
+fn rr3_face_default(face_sect: &toml::Value) -> Result<&'static str, String> {
+    let Some(name) = face_sect.get("default_expression") else {
+        return Ok(rr3_face_expr_lookup("idle").expect("在册白名单恒含 idle，lookup 必中"));
     };
-    Ok(Rr3FaceCfg {
-        non_pointable,
-        face_tick_ms,
-        default_expr,
+    let s = name.as_str().ok_or_else(|| {
+        format!("config [rr3-interact.face] default_expression 必须是字符串，收到 {name}")
+    })?;
+    rr3_face_expr_lookup(s).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.face] default_expression 非在册表情 {s:?}（在册值 {}）",
+            RR3_FACE_EXPRESSIONS_JOINED
+        )
     })
 }
 
