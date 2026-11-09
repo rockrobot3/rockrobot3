@@ -2,7 +2,7 @@
 //! `actions`（元素 `{topic, args}`，contracts/events/brain-intent-result.schema.json），
 //! 本模块广播认领——**两道归属门**后才执行：
 //!
-//! ① 归属门：topic ∈ 本模块 exposes（不越权——发布侧 `rr3_reg_publish_check`
+//! ① 归属门：topic ∈ 本模块 exposes（不越权——发布侧 `rr3_reg_pub_check`
 //!    四道门的精神在订阅执行面的对偶：别人的主题一个不碰）；
 //! ② 开放门：topic ∈ 意图执行面**开放集**——该集由 config `[rr3-act.intent]
 //!    open_topics` 注入、组合件读入透传（0.0.5 批M MC-10 A-9："某形态不开某令"

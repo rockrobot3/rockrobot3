@@ -118,7 +118,7 @@ fn rr3_spawn_watchdog(
                 // ADR-0009 裁定 3：提供者离开 Running（到期判死这一路，死亡已在
                 // `rr3_reg_expire` 里落账）→ 降级传播。只置位与广播，不产计划、
                 // 不经 supervisor（裁定 4：降级不是崩溃）。
-                let degraded = rr3_lock(&shared).rr3_reg_degrade_after(&ex.name);
+                let degraded = rr3_lock(&shared).rr3_reg_degrade(&ex.name);
                 for (dep, task) in degraded {
                     // 排除项是 `RR3_TASK_RRD`（等于不排除，E-9 的同一理据）：依赖者自己
                     // 恰恰是最需要知道"我已降级"的一方——它没有别的途径查自己的相位。
@@ -265,7 +265,7 @@ pub fn rr3_daemon_run(cfg: &RrdConfig, topics: Rr3TopicSet) -> Result<(), String
     let shared = Arc::new(Mutex::new(RrdRegistry::new(cfg.restart_base_ms)));
     // G4：装配缺项的模块预降级——注册入表即 Degraded，且不被解除传播捞回
     if !boot.predegraded.is_empty() {
-        rr3_lock(&shared).rr3_reg_predegrade_mark(boot.predegraded.clone());
+        rr3_lock(&shared).rr3_reg_predegrade(boot.predegraded.clone());
     }
     let topics = Arc::new(topics);
 
@@ -554,7 +554,7 @@ fn rr3_daemon_counters(shared: &Arc<Mutex<RrdRegistry>>) -> Option<PathBuf> {
             *table
                 .entry(crate::counters::RR3_COUNTERS_BOOTS_KEY.to_string())
                 .or_insert(0) += 1;
-            rr3_lock(shared).rr3_reg_counters_replace(table.clone());
+            rr3_lock(shared).rr3_reg_ctr_replace(table.clone());
             match crate::counters::rr3_counters_store(path, &table) {
                 Ok(()) => rr3_log(&format!(
                     "counters 持久化已启用: {}（boots 自增已回写）",
@@ -609,7 +609,7 @@ fn rr3_daemon_queue(
                 .insert(j.facts.name.clone());
         }
     }
-    rr3_lock(shared).rr3_reg_set_providers(providers);
+    rr3_lock(shared).rr3_reg_providers(providers);
     for name in &plan.rejected {
         rr3_log(&format!(
             "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
@@ -812,7 +812,7 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
                         // 关停起点先行留痕：若后续 flush 卡在磁盘上，这行是
                         // "信号已收到、正在落盘"与"信号都没到"的分界。
                         rr3_log("收到终止信号（SIGTERM/SIGINT），开始关停 flush");
-                        let snap = rr3_lock(&shared).rr3_reg_counters_snapshot();
+                        let snap = rr3_lock(&shared).rr3_reg_counters();
                         match path
                             .as_deref()
                             .map(|p| crate::counters::rr3_counters_store(p, &snap))

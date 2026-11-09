@@ -82,7 +82,7 @@ rrd 在 `<RR3_DATA_DIR>/counters.json` 维护**心跳计数聚合账**（`rr3.ct
 
 - **启动序**（`daemon.rs` 启动段）：路径判定（`counters.rs 的 rr3_counters_path`）→ 装载
   （`rr3_counters_load`：文件不存在=首启静默；坏文件=空表起账 + 一条日志，**不致命**）→
-  `boots` 自增 → `rr3_reg_counters_replace` → 立即回写一次（日志 `counters 持久化已启用: {path}（boots 自增已回写）`）。
+  `boots` 自增 → `rr3_reg_ctr_replace` → 立即回写一次（日志 `counters 持久化已启用: {path}（boots 自增已回写）`）。
 - **运行期心跳合并写**（`conn.rs` 心跳分支；0.0.5 增补轮四 R26 改判，批W3）：心跳带
   `counters` 且归并**有变化**先过合并写闸门（`counters.rs 的 Rr3CountersGate`，
   daemon 造一份全连接共享）——首拍即刷、此后 M 毫秒窗口至多一次（env

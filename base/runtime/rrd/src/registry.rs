@@ -45,8 +45,8 @@ pub const RR3_EXPIRE_HEARTBEAT_TIMEOUT: &str = "heartbeat_timeout";
 /// 生命周期阶段。本文件**当前可发生**的转移：
 /// `registered → running`（`rr3_reg_beat` 回报 `Rr3Beat::Promoted`）、
 /// `registered | running → failed`（`rr3_reg_expire` 超时、`rr3_reg_death` 退出、
-/// `rr3_reg_child_exit` 收尸）、`running → degraded`（`rr3_reg_degrade_after`：required
-/// 能力的提供者全灭，ADR-0009 裁定 3）、`degraded → running`（`rr3_reg_undegrade_after`：
+/// `rr3_reg_child_exit` 收尸）、`running → degraded`（`rr3_reg_degrade`：required
+/// 能力的提供者全灭，ADR-0009 裁定 3）、`degraded → running`（`rr3_reg_undegrade`：
 /// 任一提供者回 Running 且全部 required 能力重新就位）。
 /// `Degraded` 的语义 = 既有兜底：心跳只续命不升级（`rr3_reg_beat` 归 `Kept`，一颗心跳
 /// 不许把降级标注抹平）；降级**不**重启、不吃预算、不经 supervisor（裁定 4——下游进程
@@ -58,7 +58,7 @@ pub enum Rr3Phase {
     Registered,
     Running,
     /// required 能力的全部提供者离开 Running（ADR-0009 裁定 3；写入方
-    /// `rr3_reg_degrade_after`，解除方 `rr3_reg_undegrade_after`）
+    /// `rr3_reg_degrade`，解除方 `rr3_reg_undegrade`）
     Degraded,
     Failed,
 }
@@ -251,7 +251,7 @@ pub fn rr3_phase_for_exit(clean_exit: bool) -> &'static str {
 }
 
 /// `ForeignPrefix.owner` 的回显唯一写法：在册但登记文本没写 owner 键（解析成空串）与
-/// 根本不在册（None）都渲染 `?`。`rr3_reg_publish_check` 的两处 `ForeignPrefix` 构造点
+/// 根本不在册（None）都渲染 `?`。`rr3_reg_pub_check` 的两处 `ForeignPrefix` 构造点
 /// 都必须经它——任何一处绕过它就会把"同一种未知"写成两种回显（由
 /// `foreign_prefix_owner_echo_is_question_mark_on_both_construction_sites` 钉住）。
 fn owner_for_echo(registered: Option<String>) -> String {
@@ -280,7 +280,7 @@ pub struct RrdRegistry {
     /// 装配缺项预降级集（G4/ADR-0019 修订 1 ③）：boot 装配段校验缺项的模块**照常
     /// spawn**（件没病，重启治不了装配数据），但在册即 `Degraded`、且不被解除传播
     /// 捞回——装配声明是盘上静态数据，修数据 + 重启 rrd 是唯一解除路。
-    /// daemon 在投 boot 队列前一次性写入（`rr3_reg_predegrade_mark`）。
+    /// daemon 在投 boot 队列前一次性写入（`rr3_reg_predegrade`）。
     pre_degraded: BTreeSet<String>,
     /// 能力 → 提供者名字集合（ADR-0009 裁定 1/3）。**boot 仲裁的产物**：daemon 在
     /// 投 boot 队列前一次性写入（含被仲裁拒绝的模块——它们的 provides 仍计入
@@ -325,20 +325,20 @@ impl RrdRegistry {
     }
 
     /// 运维计数：启动时注入持久化加载的全表（daemon 启动点），或整体替换。
-    /// 运行期归并走 [`rr3_reg_counters_merge`]，不走这里——这条只服务启动装载。
-    pub fn rr3_reg_counters_replace(&mut self, table: BTreeMap<String, u64>) {
+    /// 运行期归并走 [`rr3_reg_ctr_merge`]，不走这里——这条只服务启动装载。
+    pub fn rr3_reg_ctr_replace(&mut self, table: BTreeMap<String, u64>) {
         self.counters = table;
     }
 
     /// 装配缺项预降级标记（G4）：daemon 在投 boot 队列前写入的名字集。命中者
     /// 注册入表即 `Degraded`（见 `rr3_reg_register` 的插入相位），且不被
-    /// [`rr3_reg_undegrade_after`] 捞回。
-    pub fn rr3_reg_predegrade_mark(&mut self, names: impl IntoIterator<Item = String>) {
+    /// [`rr3_reg_undegrade`] 捞回。
+    pub fn rr3_reg_predegrade(&mut self, names: impl IntoIterator<Item = String>) {
         self.pre_degraded.extend(names);
     }
 
     /// 运维计数：单键累加（rrd 自有键的唯一写法，`boots` 自增即它）
-    pub fn rr3_reg_counters_bump(&mut self, key: &str, by: u64) {
+    pub fn rr3_reg_ctr_bump(&mut self, key: &str, by: u64) {
         *self.counters.entry(key.to_string()).or_insert(0) += by;
     }
 
@@ -350,11 +350,7 @@ impl RrdRegistry {
     /// 当增量再收一遍，pcm_frames 跑出 40 亿量级（快照 × 增量两语义同线各说各话
     /// 的双端分裂，2026-10-05 批B 落地即埋）。
     /// 返回是否产生了变化（调用方据此决定要不要 write-through 落盘，空拍不写盘）。
-    pub fn rr3_reg_counters_merge(
-        &mut self,
-        module: &str,
-        counters: &BTreeMap<String, u64>,
-    ) -> bool {
+    pub fn rr3_reg_ctr_merge(&mut self, module: &str, counters: &BTreeMap<String, u64>) -> bool {
         if counters.is_empty() {
             return false;
         }
@@ -370,13 +366,13 @@ impl RrdRegistry {
     }
 
     /// 运维计数：全表只读快照（`rr3.ctl.counters` 的读面与持久化写盘共用）
-    pub fn rr3_reg_counters_snapshot(&self) -> BTreeMap<String, u64> {
+    pub fn rr3_reg_counters(&self) -> BTreeMap<String, u64> {
         self.counters.clone()
     }
 
     /// 写入能力 → 提供者表（boot 一次，见字段文档）。空表 = 无跨模块能力（全 base），
     /// 传播方法随之全部空转——与"没有模块声明 provides"的既有行为兼容。
-    pub fn rr3_reg_set_providers(&mut self, providers: BTreeMap<String, BTreeSet<String>>) {
+    pub fn rr3_reg_providers(&mut self, providers: BTreeMap<String, BTreeSet<String>>) {
         self.providers = providers;
     }
 
@@ -460,7 +456,7 @@ impl RrdRegistry {
             Entry {
                 name: facts.name.clone(),
                 src_task: task,
-                // G4：装配缺项的模块在册即 Degraded（rr3_reg_predegrade_mark 的对面）
+                // G4：装配缺项的模块在册即 Degraded（rr3_reg_predegrade 的对面）
                 phase: if self.pre_degraded.contains(facts.name.as_str()) {
                     Rr3Phase::Degraded
                 } else {
@@ -591,7 +587,7 @@ impl RrdRegistry {
     /// 的装载路径上被强制；`rr3_topic_parse` 本身是 public，绕开 check
     /// 造一张"首段是 rr3-sima、登记 owner 是 rr3-simb"的表并不费力。安全判定不该押在
     /// "上游一定查过"上，故这里就地把两条都查一遍（多一次 O(log n) 查表，无副作用）。
-    pub fn rr3_reg_publish_check(
+    pub fn rr3_reg_pub_check(
         sender_name: &str,
         topic: &str,
         topics: &Rr3TopicSet,
@@ -641,7 +637,7 @@ impl RrdRegistry {
 
     /// 置全局低电旗。返回是否为**首次**置位（上升沿）——conn 用它保证同一次低电段
     /// 只广播一次 `rr3-runtime/system/power`（重复 battery/low 不重复点名）。
-    pub fn rr3_reg_low_power_raise(&mut self) -> bool {
+    pub fn rr3_reg_lp_raise(&mut self) -> bool {
         let rising = !self.low_power;
         self.low_power = true;
         rising
@@ -651,14 +647,14 @@ impl RrdRegistry {
     /// 返回是否为真**下降沿**（此前确实在低电段）——conn 用它保证同一次低电段
     /// 只广播一次 `reason=battery-ok` 的解除点名（重复 battery/ok 不重复广播）。
     /// 与 raise 同一张表同一面：两个沿一个对，谁触发谁点名。
-    pub fn rr3_reg_low_power_lower(&mut self) -> bool {
+    pub fn rr3_reg_lp_lower(&mut self) -> bool {
         let falling = self.low_power;
         self.low_power = false;
         falling
     }
 
     /// supervisor 的 spawn 漏斗（`rr3_boot_spawn`）每 spawn 前读这一问。
-    pub fn rr3_reg_low_power_is_set(&self) -> bool {
+    pub fn rr3_reg_lp_is_set(&self) -> bool {
         self.low_power
     }
 
@@ -780,7 +776,7 @@ impl RrdRegistry {
     /// **只置位，不记账不出计划**（裁定 4：降级不是崩溃，不吃预算不经 supervisor）。
     /// 前置：调用时 `provider` 的死亡已落账（三条死亡路各自先记账再传播），否则
     /// "它自己还 Running"会挡住判空。
-    pub fn rr3_reg_degrade_after(&mut self, provider: &str) -> Vec<(String, u64)> {
+    pub fn rr3_reg_degrade(&mut self, provider: &str) -> Vec<(String, u64)> {
         let caps: Vec<String> = self
             .providers
             .iter()
@@ -814,8 +810,8 @@ impl RrdRegistry {
     /// 解除传播（ADR-0009 裁定 3 的恢复半边）：`provider` 回到 Running（`Promoted`
     /// 那一拍）之后调用。依赖它能力的在册 `Degraded` 模块逐个重算——**全部**
     /// required 能力重新就位才回 `Running`（只回来一个提供者不代表别的依赖也好了）。
-    /// 返回与 `rr3_reg_degrade_after` 同形。
-    pub fn rr3_reg_undegrade_after(&mut self, provider: &str) -> Vec<(String, u64)> {
+    /// 返回与 `rr3_reg_degrade` 同形。
+    pub fn rr3_reg_undegrade(&mut self, provider: &str) -> Vec<(String, u64)> {
         let caps: Vec<String> = self
             .providers
             .iter()
@@ -981,7 +977,7 @@ impl RrdRegistry {
     /// 计数键：`fanout_shadow_frames`（含本应过滤目标的帧数）、`fanout_shadow_conns`
     /// （帧×连接总数）、`fanout_shadow/<topic>`（主题分账）。主题首次出现时点名
     /// 一条日志；后续由计数面读取，不逐帧刷屏。返回本帧本应过滤的连接数。
-    pub fn rr3_reg_fanout_shadow(&mut self, topic: &str, exclude_task: u64) -> u64 {
+    pub fn rr3_reg_shadow(&mut self, topic: &str, exclude_task: u64) -> u64 {
         let mut n = 0u64;
         for e in self.modules.values() {
             if e.src_task == exclude_task || e.tx.is_none() {
@@ -994,11 +990,11 @@ impl RrdRegistry {
         if n == 0 {
             return 0;
         }
-        self.rr3_reg_counters_bump("fanout_shadow_frames", 1);
-        self.rr3_reg_counters_bump("fanout_shadow_conns", n);
+        self.rr3_reg_ctr_bump("fanout_shadow_frames", 1);
+        self.rr3_reg_ctr_bump("fanout_shadow_conns", n);
         let key = format!("fanout_shadow/{topic}");
         let first = !self.counters.contains_key(&key);
-        self.rr3_reg_counters_bump(&key, n);
+        self.rr3_reg_ctr_bump(&key, n);
         if first {
             rr3_log(&format!(
                 "影子统计（subscribes 过滤预演，不改投递）：{topic} 本应过滤 {n} 个连接；全量扇出照旧"
@@ -1033,7 +1029,7 @@ impl RrdRegistry {
 
     /// 健康快照：与 `rr3_reg_snapshot` 同一排序（task 升序），每行多带心跳三数。
     /// 数据全部来自既有条目字段，不新增守护状态（ADR-0010 裁定 4）。
-    pub fn rr3_reg_health_snapshot(&self, now_ms: u64) -> Vec<Rr3HealthRow> {
+    pub fn rr3_reg_health(&self, now_ms: u64) -> Vec<Rr3HealthRow> {
         let mut v: Vec<Rr3HealthRow> = self
             .modules
             .values()
@@ -1195,16 +1191,16 @@ watchdog_timeout_ms = 500
             .unwrap();
         r.rr3_reg_add(&facts_subs("rr3-simb", &[]), txb, 0).unwrap();
         assert_eq!(
-            r.rr3_reg_fanout_shadow("rr3-sense/audio/pcm", 0),
+            r.rr3_reg_shadow("rr3-sense/audio/pcm", 0),
             1,
             "simb 未申报订阅，属本应过滤目标"
         );
         assert_eq!(
-            r.rr3_reg_fanout_shadow("rr3-sense/audio/pcm", 0),
+            r.rr3_reg_shadow("rr3-sense/audio/pcm", 0),
             1,
             "重复帧继续记账"
         );
-        let c = r.rr3_reg_counters_snapshot();
+        let c = r.rr3_reg_counters();
         assert_eq!(c.get("fanout_shadow_frames"), Some(&2));
         assert_eq!(c.get("fanout_shadow_conns"), Some(&2));
         assert_eq!(
@@ -1376,7 +1372,7 @@ watchdog_timeout_ms = 500
         let a = r
             .rr3_reg_add(&facts("rr3-alpha", 300, 2000, "always"), chan().0, 0)
             .unwrap();
-        let rows = r.rr3_reg_health_snapshot(1500);
+        let rows = r.rr3_reg_health(1500);
         assert_eq!(
             rows.iter()
                 .map(|x| (x.name.as_str(), x.src_task))
@@ -1400,7 +1396,7 @@ watchdog_timeout_ms = 500
         let mut r = RrdRegistry::new(1000);
         r.rr3_reg_add(&facts("rr3-sima", 200, 1000, "always"), chan().0, 1000)
             .unwrap();
-        let rows = r.rr3_reg_health_snapshot(500);
+        let rows = r.rr3_reg_health(500);
         assert_eq!(
             rows[0].since_beat_ms, 0,
             "now < last_beat 时夹 0，不是 u64 回绕的大数"
@@ -1870,11 +1866,9 @@ watchdog_timeout_ms = 500
             ("rr3-sima/ping/state", "rr3-sima"),
             ("rr3-simb/pong/state", "rr3-simb"),
         ]);
-        assert!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set).is_ok()
-        );
+        assert!(RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-sima/ping/state", &set).is_ok());
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-simb/pong/state", &set)
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-simb/pong/state", &set)
                 .expect_err("越权必须拒"),
             Rr3PublishDeny::ForeignPrefix {
                 topic: "rr3-simb/pong/state".into(),
@@ -1913,7 +1907,7 @@ owner = "rr3-simb"
             "前提：这张表本来就形状不合法（首段 ≠ owner），装载路径永不产出它，只用于验第三道防线"
         );
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set),
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-sima/ping/state", &set),
             Err(Rr3PublishDeny::ForeignPrefix {
                 topic: "rr3-sima/ping/state".into(),
                 owner: "rr3-simb".into(),
@@ -1943,7 +1937,7 @@ owner = "rr3-simb"
             Some("")
         );
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set),
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-sima/ping/state", &set),
             Err(Rr3PublishDeny::ForeignPrefix {
                 topic: "rr3-sima/ping/state".into(),
                 owner: "?".into(),
@@ -1966,7 +1960,7 @@ owner = "rr3-simb"
         );
         assert_eq!(set.rr3_topic_owner("rr3-sima/x/y").as_deref(), Some(""));
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-simb", "rr3-sima/x/y", &set),
+            RrdRegistry::rr3_reg_pub_check("rr3-simb", "rr3-sima/x/y", &set),
             Err(Rr3PublishDeny::ForeignPrefix {
                 topic: "rr3-sima/x/y".into(),
                 owner: "?".into(),
@@ -1979,7 +1973,7 @@ owner = "rr3-simb"
             "\n[[owner]]\nname = \"rr3-sima\"\n[[topic]]\nname = \"rr3-sima/ping/state\"\nkind = \"event\"\n",
         );
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/state", &set2),
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-sima/ping/state", &set2),
             Err(Rr3PublishDeny::ForeignPrefix {
                 topic: "rr3-sima/ping/state".into(),
                 owner: "?".into(),
@@ -1997,7 +1991,7 @@ owner = "rr3-simb"
             ("rr3-simb/pong/state", "rr3-simb"),
         ]);
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-simb", &set),
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-simb", &set),
             Err(Rr3PublishDeny::ForeignPrefix {
                 topic: "rr3-simb".into(),
                 owner: "?".into(),
@@ -2011,7 +2005,7 @@ owner = "rr3-simb"
     fn publish_rejects_runtime_impersonation_first() {
         let set = topic_set(&[("rr3-runtime/module/state", "rr3-runtime")]);
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-runtime/module/state", &set)
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-runtime/module/state", &set)
                 .expect_err("下行广播冒充必须拒"),
             Rr3PublishDeny::ReservedNamespace {
                 topic: "rr3-runtime/module/state".into()
@@ -2027,13 +2021,13 @@ owner = "rr3-simb"
     fn publish_rejects_reserved_namespace_whatever_the_sender_claims() {
         let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima")]);
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-runtime/system/heartbeat", &set),
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-runtime/system/heartbeat", &set),
             Err(Rr3PublishDeny::ReservedNamespace {
                 topic: "rr3-runtime/system/heartbeat".into()
             })
         );
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-runtime", &set),
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-runtime", &set),
             Err(Rr3PublishDeny::ReservedNamespace {
                 topic: "rr3-runtime".into()
             })
@@ -2045,7 +2039,7 @@ owner = "rr3-simb"
     fn publish_rejects_unregistered_topic() {
         let set = topic_set(&[("rr3-sima/ping/state", "rr3-sima")]);
         assert_eq!(
-            RrdRegistry::rr3_reg_publish_check("rr3-sima", "rr3-sima/ping/others", &set),
+            RrdRegistry::rr3_reg_pub_check("rr3-sima", "rr3-sima/ping/others", &set),
             Err(Rr3PublishDeny::NotRegistered {
                 topic: "rr3-sima/ping/others".into()
             })
@@ -2088,26 +2082,26 @@ owner = "rr3-simb"
         let mut beat = BTreeMap::new();
         beat.insert("asr_ok".to_string(), 2u64);
         beat.insert("asr_fail".to_string(), 1u64);
-        assert!(r.rr3_reg_counters_merge("rr3-brain", &beat), "首拍即变化");
+        assert!(r.rr3_reg_ctr_merge("rr3-brain", &beat), "首拍即变化");
         // 同模块同键累加；另一模块同名键不互踩
         let mut beat2 = BTreeMap::new();
         beat2.insert("asr_ok".to_string(), 3u64);
-        assert!(r.rr3_reg_counters_merge("rr3-brain", &beat2));
-        assert!(r.rr3_reg_counters_merge("rr3-brain", &beat2));
+        assert!(r.rr3_reg_ctr_merge("rr3-brain", &beat2));
+        assert!(r.rr3_reg_ctr_merge("rr3-brain", &beat2));
         let mut beat3 = BTreeMap::new();
         beat3.insert("relay_on".to_string(), 1u64);
-        assert!(r.rr3_reg_counters_merge("rr3-act", &beat3));
-        let t = r.rr3_reg_counters_snapshot();
+        assert!(r.rr3_reg_ctr_merge("rr3-act", &beat3));
+        let t = r.rr3_reg_counters();
         assert_eq!(t["rr3-brain/asr_ok"], 8, "2+3+3 同键累加");
         assert_eq!(t["rr3-brain/asr_fail"], 1);
         assert_eq!(t["rr3-act/relay_on"], 1, "模块前缀隔离");
         // 空拍不算变化（调用方不落盘）
-        assert!(!r.rr3_reg_counters_merge("rr3-brain", &BTreeMap::new()));
+        assert!(!r.rr3_reg_ctr_merge("rr3-brain", &BTreeMap::new()));
         // rrd 自有键（boots）不走前缀
-        r.rr3_reg_counters_bump("boots", 1);
-        r.rr3_reg_counters_replace(BTreeMap::new());
+        r.rr3_reg_ctr_bump("boots", 1);
+        r.rr3_reg_ctr_replace(BTreeMap::new());
         assert!(
-            r.rr3_reg_counters_snapshot().is_empty(),
+            r.rr3_reg_counters().is_empty(),
             "replace 是启动装载入口，整体替换"
         );
     }
@@ -2708,7 +2702,7 @@ watchdog_timeout_ms = 60000
     #[test]
     fn provider_death_degrades_running_dependent() {
         let mut r = RrdRegistry::new(20);
-        r.rr3_reg_set_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
+        r.rr3_reg_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
         let p = facts("rr3-prov", 100, 5000, "always");
         let d = facts_with_depends("rr3-dep", &["cap.x"]);
         let (ptx, _) = chan();
@@ -2720,7 +2714,7 @@ watchdog_timeout_ms = 60000
 
         // 提供者判死前传播必须空转（前置：死亡先落账）
         assert!(
-            r.rr3_reg_degrade_after("rr3-prov").is_empty(),
+            r.rr3_reg_degrade("rr3-prov").is_empty(),
             "死亡未落账时不得误判"
         );
 
@@ -2729,7 +2723,7 @@ watchdog_timeout_ms = 60000
             Rr3Death::Broadcast { .. }
         ));
         assert_eq!(
-            r.rr3_reg_degrade_after("rr3-prov"),
+            r.rr3_reg_degrade("rr3-prov"),
             vec![("rr3-dep".to_string(), dt)],
             "唯一提供者全灭 → 下游 Degraded"
         );
@@ -2755,8 +2749,8 @@ watchdog_timeout_ms = 60000
     #[test]
     fn predegraded_module_registers_degraded_and_is_not_rescued() {
         let mut r = RrdRegistry::new(20);
-        r.rr3_reg_predegrade_mark(["rr3-dep".to_string()]);
-        r.rr3_reg_set_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
+        r.rr3_reg_predegrade(["rr3-dep".to_string()]);
+        r.rr3_reg_providers(providers_of(&[("cap.x", &["rr3-prov"])]));
         let (dtx, _) = chan();
         let dt = r
             .rr3_reg_add(&facts_with_depends("rr3-dep", &["cap.x"]), dtx, 0)
@@ -2778,7 +2772,7 @@ watchdog_timeout_ms = 60000
         // 提供者回 Running 触发解除传播：预降级不捞回
         assert_eq!(r.rr3_reg_beat(pt, 20), Rr3Beat::Promoted);
         assert!(
-            r.rr3_reg_undegrade_after("rr3-prov").is_empty(),
+            r.rr3_reg_undegrade("rr3-prov").is_empty(),
             "能力全就位也不得把装配缺项的预降级捞回 Running"
         );
         assert_eq!(
@@ -2794,7 +2788,7 @@ watchdog_timeout_ms = 60000
     #[test]
     fn any_surviving_provider_keeps_dependent_running() {
         let mut r = RrdRegistry::new(20);
-        r.rr3_reg_set_providers(providers_of(&[("cap.x", &["rr3-p1", "rr3-p2"])]));
+        r.rr3_reg_providers(providers_of(&[("cap.x", &["rr3-p1", "rr3-p2"])]));
         let d = facts_with_depends("rr3-dep", &["cap.x"]);
         let (t1x, _) = chan();
         let (t2x, _) = chan();
@@ -2813,16 +2807,13 @@ watchdog_timeout_ms = 60000
             r.rr3_reg_death("rr3-p1", false, 20),
             Rr3Death::Broadcast { .. }
         ));
-        assert!(
-            r.rr3_reg_degrade_after("rr3-p1").is_empty(),
-            "p2 还活着，不降级"
-        );
+        assert!(r.rr3_reg_degrade("rr3-p1").is_empty(), "p2 还活着，不降级");
         assert!(matches!(
             r.rr3_reg_death("rr3-p2", false, 30),
             Rr3Death::Broadcast { .. }
         ));
         assert_eq!(
-            r.rr3_reg_degrade_after("rr3-p2"),
+            r.rr3_reg_degrade("rr3-p2"),
             vec![("rr3-dep".to_string(), dt)]
         );
     }
@@ -2831,7 +2822,7 @@ watchdog_timeout_ms = 60000
     #[test]
     fn provider_recovery_undegrades_only_when_all_deps_satisfied() {
         let mut r = RrdRegistry::new(20);
-        r.rr3_reg_set_providers(providers_of(&[
+        r.rr3_reg_providers(providers_of(&[
             ("cap.x", &["rr3-px"]),
             ("cap.y", &["rr3-py"]),
         ]));
@@ -2857,7 +2848,7 @@ watchdog_timeout_ms = 60000
         // 断供即降级（非对称设计的前半）：cap.x 已无任何在位提供者，dep 缺它就跑不了，
         // 不等 cap.y 也断——置位要快，解除才从严
         assert_eq!(
-            r.rr3_reg_degrade_after("rr3-px"),
+            r.rr3_reg_degrade("rr3-px"),
             vec![("rr3-dep".to_string(), dt)]
         );
         assert!(matches!(
@@ -2865,16 +2856,13 @@ watchdog_timeout_ms = 60000
             Rr3Death::Broadcast { .. }
         ));
         // 已经 Degraded 的不重复传播（Running 过滤器天然挡住）
-        assert!(
-            r.rr3_reg_degrade_after("rr3-py").is_empty(),
-            "重复置位不是传播"
-        );
+        assert!(r.rr3_reg_degrade("rr3-py").is_empty(), "重复置位不是传播");
 
         // px 回来了（新 task 重注册 + Promoted），但 cap.y 还没好 → 不解除
         let px2 = promote(&mut r, "rr3-px");
         assert_ne!(px, px2, "重注册必须换新 task");
         assert!(
-            r.rr3_reg_undegrade_after("rr3-px").is_empty(),
+            r.rr3_reg_undegrade("rr3-px").is_empty(),
             "cap.y 仍无提供者在位"
         );
         assert_eq!(
@@ -2888,7 +2876,7 @@ watchdog_timeout_ms = 60000
         // py 也回来了 → 全部就位 → 解除回 Running
         promote(&mut r, "rr3-py");
         assert_eq!(
-            r.rr3_reg_undegrade_after("rr3-py"),
+            r.rr3_reg_undegrade("rr3-py"),
             vec![("rr3-dep".to_string(), dt)]
         );
         assert_eq!(
@@ -2909,18 +2897,15 @@ watchdog_timeout_ms = 60000
     #[test]
     fn low_power_flag_rises_once_lowers_and_rises_again() {
         let mut r = RrdRegistry::new(1000);
-        assert!(!r.rr3_reg_low_power_is_set(), "初始未置位");
-        assert!(r.rr3_reg_low_power_raise(), "首次置位是上升沿");
-        assert!(r.rr3_reg_low_power_is_set());
-        assert!(!r.rr3_reg_low_power_raise(), "重复置位不再是上升沿");
-        assert!(r.rr3_reg_low_power_lower(), "旗已置位：lower 是真下降沿");
-        assert!(!r.rr3_reg_low_power_is_set(), "解除即出段");
-        assert!(!r.rr3_reg_low_power_lower(), "重复解除不再是下降沿");
-        assert!(
-            r.rr3_reg_low_power_raise(),
-            "解除后可再升起（episodes 语义）"
-        );
-        assert!(r.rr3_reg_low_power_is_set());
+        assert!(!r.rr3_reg_lp_is_set(), "初始未置位");
+        assert!(r.rr3_reg_lp_raise(), "首次置位是上升沿");
+        assert!(r.rr3_reg_lp_is_set());
+        assert!(!r.rr3_reg_lp_raise(), "重复置位不再是上升沿");
+        assert!(r.rr3_reg_lp_lower(), "旗已置位：lower 是真下降沿");
+        assert!(!r.rr3_reg_lp_is_set(), "解除即出段");
+        assert!(!r.rr3_reg_lp_lower(), "重复解除不再是下降沿");
+        assert!(r.rr3_reg_lp_raise(), "解除后可再升起（episodes 语义）");
+        assert!(r.rr3_reg_lp_is_set());
     }
 
     /// 小测试辅助：主题集
