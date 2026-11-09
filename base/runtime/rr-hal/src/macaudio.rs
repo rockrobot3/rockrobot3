@@ -30,6 +30,7 @@
 use std::collections::VecDeque;
 use std::ptr;
 use std::sync::{Condvar, Mutex};
+use std::time::Duration;
 
 use crate::{Rr3AudioCfg, Rr3AudioSink, Rr3AudioSource, Rr3ErrText, Rr3HalError};
 
@@ -198,6 +199,39 @@ fn rr3_mac_status_err(where_: &str, status: OsStatus) -> Rr3HalError {
 /// 锁的毒化恢复（linux.rs 同款：锁内无 panic 传播，毒锁照用）。
 fn rr3_mac_lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// 跨线程交接的有界等（读/写共用同一个超时契约）。无超时 `cv.wait` 是真实挂死面：
+/// 输入/输出设备掉线或回调停摆时模块线程永久挂起且零日志；又因 read/write 持
+/// `inner` 锁等待，关停路径的 Drop 会与之互等。上界取 2s（16k mono 一块 128ms，
+/// 连续 2s 凑不满 = 设备侧确实不供数，不是抖动）。
+const RR3_MAC_WAIT_MS: u64 = 2_000;
+
+/// 条件等：条件成立或到点即还守卫，返回 `(守卫, 是否就绪)`。超时由调用方带因
+/// 点名上抛——观测面降级/设备掉线必须可见，不静默续等。
+fn rr3_mac_wait<'a, T, F>(
+    cv: &Condvar,
+    mut guard: std::sync::MutexGuard<'a, T>,
+    ready: F,
+    timeout: Duration,
+) -> (std::sync::MutexGuard<'a, T>, bool)
+where
+    F: Fn(&T) -> bool,
+{
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if ready(&guard) {
+            return (guard, true);
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return (guard, false);
+        }
+        let (g, _) = cv
+            .wait_timeout(guard, deadline - now)
+            .unwrap_or_else(|p| p.into_inner());
+        guard = g;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -373,9 +407,22 @@ impl Rr3AudioSource for Rr3MacAudioSource {
             )));
         };
         let shared = unsafe { &*st.shared };
-        let mut state = rr3_mac_lock(&shared.state);
-        while state.len() < buf.len() {
-            state = shared.cv.wait(state).unwrap_or_else(|p| p.into_inner());
+        let state = rr3_mac_lock(&shared.state);
+        let (mut state, ready) = rr3_mac_wait(
+            &shared.cv,
+            state,
+            |q| q.len() >= buf.len(),
+            Duration::from_millis(RR3_MAC_WAIT_MS),
+        );
+        if !ready {
+            let got = state.len();
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                &format!(
+                    "mac 拾音 {RR3_MAC_WAIT_MS}ms 未凑满 {}/{} 样点——输入设备掉线或回调停摆（查系统输入设备与麦克风授权）",
+                    got,
+                    buf.len()
+                ),
+            )));
         }
         for (d, b) in state.drain(..buf.len()).zip(buf.iter_mut()) {
             *b = d;
@@ -536,8 +583,21 @@ impl Rr3AudioSink for Rr3MacAudioSink {
         let mut state = rr3_mac_lock(&shared.state);
         let mut i = 0usize;
         while i < samples.len() {
-            while state.deque.len() >= state.watermark {
-                state = shared.cv.wait(state).unwrap_or_else(|p| p.into_inner());
+            let (guard, roomy) = rr3_mac_wait(
+                &shared.cv,
+                state,
+                |s| s.deque.len() < s.watermark,
+                Duration::from_millis(RR3_MAC_WAIT_MS),
+            );
+            state = guard;
+            if !roomy {
+                return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                    &format!(
+                        "mac 回放 {RR3_MAC_WAIT_MS}ms 队列未排水（已写 {}/{} 样点）——输出设备掉线或回调停摆",
+                        i,
+                        samples.len()
+                    ),
+                )));
             }
             let room = state.watermark - state.deque.len();
             let take = room.min(samples.len() - i);
@@ -644,6 +704,37 @@ mod tests {
             panic!("open 面错误应折 InvalidParam");
         };
         assert!(t.rr3_err_text_as_str().contains("OSStatus -50"));
+    }
+
+    /// 有界等（B18 挂死面回归）：无唤醒源时到点返回 false，绝不永久挂起——
+    /// 设备掉线下 read/write 走这条分支带因上抛（此前是无超时 `cv.wait`）。
+    #[test]
+    fn wait_times_out_without_notify() {
+        let m = Mutex::new(0usize);
+        let cv = Condvar::new();
+        let (guard, ready) = rr3_mac_wait(
+            &cv,
+            m.lock().unwrap(),
+            |n| *n > 0,
+            Duration::from_millis(30),
+        );
+        assert!(!ready, "无唤醒源必须到点返回，不得挂死");
+        drop(guard);
+    }
+
+    /// 条件已成立时立即就绪，不吃满超时窗（短超时下也不假红）。
+    #[test]
+    fn wait_returns_ready_without_waiting() {
+        let m = Mutex::new(3usize);
+        let cv = Condvar::new();
+        let (guard, ready) = rr3_mac_wait(
+            &cv,
+            m.lock().unwrap(),
+            |n| *n >= 3,
+            Duration::from_millis(500),
+        );
+        assert!(ready, "条件已成立应立即返回");
+        drop(guard);
     }
 
     /// 真设备探针（缺省跳过，不进 CI——CI 真开麦是纪律红线）。手跑：
