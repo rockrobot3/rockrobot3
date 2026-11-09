@@ -130,7 +130,7 @@ pub(crate) struct PeriphState {
     /// 音频上行开关（`AUDIO ON|OFF` 行命令置位；mic 线每 read 批读——false 时
     /// 只出统计冒烟面不攒分片）。
     pub(crate) audio_on: bool,
-    /// 最近一次宿主音频心跳时刻（esp_timer ms；**只由静默 `AUDIO PING` 刷新**，
+    /// 最近一次宿主音频心跳时刻（esp_timer ms；**只由音频会话中的空行刷新**，
     /// `AUDIO ON/OFF` 归零——0 = 本会话未见过心跳（旧宿主），看门狗不启用，
     /// 见 [`crate::board::AUDIO_HOST_TIMEOUT_MS`]）。
     pub(crate) audio_host_ms: u64,

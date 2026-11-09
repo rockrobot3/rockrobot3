@@ -80,10 +80,10 @@ fn rr3_err_log_now(err_total: u64) -> bool {
 /// 桥链周期统计窗（10min）：帧数/坏帧/重连累计，1.5M 长跑的误码口径。
 /// 误码率 = 坏帧 / 音频帧；一次会话内即可算，跨重连也连续（计数在核上）。
 const RR3_BRIDGE_STAT_PERIOD: Duration = Duration::from_secs(600);
-/// 宿主音频心跳周期（A9.3）：每 5s 向板侧发一条**静默** `AUDIO PING`，板侧
-/// 15s 收不到即自动停流并清 audio_q——宿主进程被 SIGKILL/整机断电后，板侧不再
-/// 对着无人 UART 空转推流。旧固件把 PING 回成 ERR 行（混版窗口内每秒 0.2 行，
-/// 拆帧器丢弃重扫，不破坏帧流）；新固件不语。
+/// 宿主音频心跳周期（A9.3）：每 5s 向板侧发一个**空行**（`\n`）——空行不是
+/// 协议命令，新旧固件都静默忽略（旧固件零应答污染，新固件在音频会话中把它
+/// 计为宿主存活）。板侧 15s 收不到即自动停流并清 audio_q——宿主进程被
+/// SIGKILL/整机断电后，板侧不再对着无人 UART 空转推流。
 const RR3_PING_PERIOD: Duration = Duration::from_secs(5);
 
 /// 板面音频流事实（板固件 mic.rs 钉定）：16kHz 采样率。open 校验配置同款，
@@ -526,11 +526,11 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                 stat_at = Instant::now();
                 rr3_stat_tick(&core);
             }
-            // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一条静默行；写失败
-            // 即连接坏，与读失败同路重连（重连后握手会再 AUDIO ON）——
+            // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
+            // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
             if ping_at.elapsed() >= RR3_PING_PERIOD {
                 ping_at = Instant::now();
-                if let Err(e) = c.write_all(b"AUDIO PING\n") {
+                if let Err(e) = c.write_all(b"\n") {
                     eprintln!("rr-hal-esp32-audio: 心跳写出失败: {e} → 重连");
                     conn = None;
                     break;
