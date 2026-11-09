@@ -78,50 +78,10 @@ pub struct Rr3DomainWriteParams {
 /// params 拆包＋形状核（跨平台纯函数）。confirm 门不在本层（它是权限语义，
 /// 归 execute 的门序；parse 只裁"形状合不合法"）。错误码全 Invalid（参数形状病）。
 pub fn rr3_write_parse(params: &Value) -> Result<Rr3DomainWriteParams, (Rr3StatusCode, String)> {
-    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
-    let target = match params.get("target").and_then(Value::as_str) {
-        Some("domain") => Rr3WriteTarget::Domain,
-        Some("axis") => Rr3WriteTarget::Axis,
-        _ => {
-            return Err(invalid(
-                "缺 params.target（要求 \"domain\" 或 \"axis\"）".to_string(),
-            ))
-        }
-    };
-    let name = params
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| invalid("缺 params.name（要求非空字符串）".to_string()))?
-        .to_string();
-    let key = params
-        .get("key")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| invalid("缺 params.key（要求非空字符串）".to_string()))?;
-    // key 白名单（conventions §6.1 三写口点名集；词表外 = 申报面错，fail-closed）
-    let value = match (target, key) {
-        (Rr3WriteTarget::Domain, "armed") => {
-            Rr3WriteValue::Bool(params.get("value").and_then(Value::as_bool).ok_or_else(
-                || invalid("armed 的 params.value 要求布尔（true/false）".to_string()),
-            )?)
-        }
-        (Rr3WriteTarget::Domain, "severe_mv") | (Rr3WriteTarget::Axis, "current_ceil_ma") => {
-            let n = params
-                .get("value")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| invalid(format!("{key} 的 params.value 要求正整数")))?;
-            if n == 0 {
-                return Err(invalid(format!("{key} 的 params.value 要求正整数（收到 0）")));
-            }
-            Rr3WriteValue::Num(n)
-        }
-        _ => {
-            return Err(invalid(format!(
-                "key {key:?} 不在写口白名单（domain → armed/severe_mv；axis → current_ceil_ma；conventions §6.1 三写口点名集）"
-            )))
-        }
-    };
+    let target = rr3_write_target(params)?;
+    let name = rr3_write_text(params, "name")?.to_string();
+    let key = rr3_write_text(params, "key")?;
+    let value = rr3_write_value(params, target, key)?;
     let evidence = params
         .get("evidence")
         .and_then(Value::as_str)
@@ -135,6 +95,62 @@ pub fn rr3_write_parse(params: &Value) -> Result<Rr3DomainWriteParams, (Rr3Statu
         evidence,
         confirm: None,
     })
+}
+
+/// `params.target` 词表（domain/axis）：出域即拒，文案点名两种合法取值。
+fn rr3_write_target(params: &Value) -> Result<Rr3WriteTarget, (Rr3StatusCode, String)> {
+    match params.get("target").and_then(Value::as_str) {
+        Some("domain") => Ok(Rr3WriteTarget::Domain),
+        Some("axis") => Ok(Rr3WriteTarget::Axis),
+        _ => Err((
+            Rr3StatusCode::Invalid,
+            "缺 params.target（要求 \"domain\" 或 \"axis\"）".to_string(),
+        )),
+    }
+}
+
+/// 非空字符串字段（name/key 同形）：缺、非串、空串一律拒，文案带字段名。
+fn rr3_write_text<'a>(params: &'a Value, field: &str) -> Result<&'a str, (Rr3StatusCode, String)> {
+    params
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            (
+                Rr3StatusCode::Invalid,
+                format!("缺 params.{field}（要求非空字符串）"),
+            )
+        })
+}
+
+/// 值型白名单（conventions §6.1 三写口点名集）：域 armed 取布尔，域 severe_mv
+/// 与轴 current_ceil_ma 取正整数（0 拒——正整数是输入形状核，无域界语义）。
+/// 白名单外 = 申报面错，fail-closed 并点名合法集。
+fn rr3_write_value(
+    params: &Value,
+    target: Rr3WriteTarget,
+    key: &str,
+) -> Result<Rr3WriteValue, (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    match (target, key) {
+        (Rr3WriteTarget::Domain, "armed") => params
+            .get("value")
+            .and_then(Value::as_bool)
+            .map(Rr3WriteValue::Bool)
+            .ok_or_else(|| invalid("armed 的 params.value 要求布尔（true/false）".to_string())),
+        (Rr3WriteTarget::Domain, "severe_mv") | (Rr3WriteTarget::Axis, "current_ceil_ma") => {
+            match params.get("value").and_then(Value::as_u64) {
+                Some(n) if n > 0 => Ok(Rr3WriteValue::Num(n)),
+                Some(_) => Err(invalid(format!(
+                    "{key} 的 params.value 要求正整数（收到 0）"
+                ))),
+                None => Err(invalid(format!("{key} 的 params.value 要求正整数"))),
+            }
+        }
+        _ => Err(invalid(format!(
+            "key {key:?} 不在写口白名单（domain → armed/severe_mv；axis → current_ceil_ma；conventions §6.1 三写口点名集）"
+        ))),
+    }
 }
 
 /// 写口路径集（真值集记账推导，零新增全局）：记账成员判据 = 成员相对名（基-40
