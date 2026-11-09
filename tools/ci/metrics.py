@@ -5,9 +5,9 @@
 # - 重复率：**硬门槛 3%**。相邻 W=10 条"有效行"滑窗取哈希，出现 ≥2 次的窗口
 #   所覆盖行计为重复行；有效行 = 去注释、字符串/字符字面量内容折占位符、去纯
 #   标点行后的非空行。生成物（文件头 @generated/自动生成）与测试面（tests/ 目录、
-#   cfg(test) 门 mod 块之后的尾部）不参与——它们是夹具/生成数据，不是可
-#   复用缺陷。测试面判定：cfg 谓词**测试专用**（`test` 裸项/`all(…test…)`），
-#   `any(…)`/`not(…)` 门是生产件不剔除（backend.rs 613 行教训）。
+#   `tests.rs` 测试模块文件、cfg(test) 门 mod 块之后的尾部）不参与——它们是夹具/
+#   生成数据，不是可复用缺陷。测试面判定：cfg 谓词**测试专用**（`test` 裸项/
+#   `all(…test…)`），`any(…)`/`not(…)` 门是生产件不剔除（backend.rs 613 行教训）。
 # - 圈复杂度：均值与单函数最大值按 `tools/ci/metrics-baseline.json` **钉基线、
 #   只降不升**（与仓内红账基线门同款纪律）。目标均值 2.5 尚未达到，红账在账；
 #   基线只能随重构下调，上调须在评审里说明理由。
@@ -255,7 +255,7 @@ def measure(root):
     ccs = []
     long_names = []
     for rel in rust_files(root):
-        if "/tests/" in rel or rel.startswith("tests/"):
+        if "/tests/" in rel or rel.startswith("tests/") or os.path.basename(rel) == "tests.rs":
             continue
         path = os.path.join(root, rel)
         try:
