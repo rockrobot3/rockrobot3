@@ -398,7 +398,18 @@ fn rr3_conf_item(
     let (pins, controllers) = rr3_conf_members(c, i, &group, table, errs);
     let why = rr3_conf_why(c, i, errs);
     if let Some(g) = group {
-        rr3_conf_register(i, g, pins, controllers, why, groups_seen, table, errs);
+        rr3_conf_register(
+            Rr3ConflictDraft {
+                i,
+                group: g,
+                pins,
+                controllers,
+                why: why.to_string(),
+            },
+            groups_seen,
+            table,
+            errs,
+        );
     }
 }
 
@@ -443,30 +454,36 @@ fn rr3_conf_why<'a>(c: &'a toml::Table, i: usize, errs: &mut Vec<String>) -> &'a
     }
 }
 
-/// 入册：成员集全空不登记（已是错误面）；组名唯一（同名两册点名）。
-fn rr3_conf_register(
+/// conflict 单册解析产物（rr3_conf_item 五步的汇合点，入册前成型）。
+struct Rr3ConflictDraft {
     i: usize,
-    g: String,
+    group: String,
     pins: BTreeSet<i64>,
     controllers: BTreeSet<String>,
-    why: &str,
+    why: String,
+}
+
+/// 入册：成员集全空不登记（已是错误面）；组名唯一（同名两册点名）。
+fn rr3_conf_register(
+    d: Rr3ConflictDraft,
     groups_seen: &mut BTreeSet<String>,
     table: &mut Rr3PlatformTable,
     errs: &mut Vec<String>,
 ) {
-    if pins.is_empty() && controllers.is_empty() {
+    if d.pins.is_empty() && d.controllers.is_empty() {
         return;
     }
-    if !groups_seen.insert(g.clone()) {
+    if !groups_seen.insert(d.group.clone()) {
         errs.push(format!(
-            "conflict[{i}] 组名 {g} 重复（一组一条，互斥集不许同名两册）"
+            "conflict[{}] 组名 {} 重复（一组一条，互斥集不许同名两册）",
+            d.i, d.group
         ));
     }
     table.conflicts.push(Rr3ConflictEntry {
-        group: g,
-        pins,
-        controllers,
-        why: why.to_string(),
+        group: d.group,
+        pins: d.pins,
+        controllers: d.controllers,
+        why: d.why,
     });
 }
 
