@@ -264,7 +264,7 @@ fn owner_for_echo(registered: Option<String>) -> String {
 /// 键只增不减且随 write-through 落盘——故障模块每拍换键可把内存/计数器文件
 /// 撑爆。六模块的静态键集远小于本值；越界即拒新键并一次性点名（既有键照常
 /// 累加，不丢历史账）。
-const RR3_CTR_KEY_CAP: usize = 4096;
+pub(crate) const RR3_CTR_KEY_CAP: usize = 4096;
 
 #[derive(Debug)]
 pub struct RrdRegistry {
