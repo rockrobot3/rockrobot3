@@ -325,36 +325,7 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
         }
     }
     let names = rr3_module_names(&cfg.payload)?;
-    // ---- 装载消费真值集（基-25／实-12：清单真值只有 rrd rr3_truth_set 一份，
-    // 打包面照单收口、不自带第二份文件清单）----
-    let profile_name = format!("{}.toml", cfg.profile);
-    let profile_src = cfg.repo.join("profiles").join(&profile_name);
-    // 打包先按装载同判据预验装配单（rr3_profile_parse，与 boot 链同一函数）：坏单
-    // 拒出包——出包时红比装机 boot 红早一个环节（块-15：装载必需件缺席而装机验证全绿
-    // 才是最贵的洞）；预验同时给出 [platform].chip，平台事实表按它选册。
-    let profile_text = fs::read_to_string(&profile_src)
-        .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
-    let profile = rrd::profile::rr3_profile_parse(&profile_text).map_err(|errs| {
-        format!(
-            "装配单 {} 预验失败（打包与装载同一判据，坏单不得出包）: {}",
-            profile_src.display(),
-            errs.join("; ")
-        )
-    })?;
-    let truth = rrd::profile::rr3_truth_set(&profile, &cfg.profile);
-    let missing: Vec<String> = truth
-        .files
-        .iter()
-        .filter(|rel| !cfg.repo.join(rel).is_file())
-        .cloned()
-        .collect();
-    if !missing.is_empty() {
-        return Err(format!(
-            "装载消费真值集缺册: {}（--repo 须指向仓根 {}；清单真值 = rrd rr3_truth_set——缺任一必需册 rrd 装载即拒 boot，打包拒出包，基-25/实-12）",
-            missing.join(", "),
-            cfg.repo.display()
-        ));
-    }
+    let (profile_name, truth) = rr3_truth_ready(cfg)?;
     // ---- 落 staging ----
     let stage = cfg.out.with_file_name(format!(
         "{}.stage",
@@ -416,115 +387,167 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     }
     // ---- 逐模块：manifest（entry 改写）+ 产物（rust bin / python pkg+shim）+ config（仓内源真值）----
     for name in &names {
-        let mod_src = cfg.payload.join("rr3-modules").join(name);
-        let manifest_src = mod_src.join("manifest.toml");
-        if !manifest_src.is_file() {
-            return Err(format!(
-                "模块 {name} 注入产物不完整: {} 缺席（约定 rr3-modules/<name>/manifest.toml）",
-                manifest_src.display()
-            ));
-        }
-        let text = fs::read_to_string(&manifest_src)
-            .map_err(|e| format!("读 {} 失败: {e}", manifest_src.display()))?;
-        let facts = rr3_manifest_parse(&text).map_err(|errs| {
-            format!(
-                "模块 {name} 的 manifest 解析失败: {}（注入产物须是仓内 module.toml 的副本）",
-                errs.join("; ")
-            )
-        })?;
-        if &facts.name != name {
-            return Err(format!(
-                "模块目录名 {name} 与 manifest.name {} 不一致（注入产物自相矛盾，打包拒绝）",
-                facts.name
-            ));
-        }
-        rr3_entry_ok(&facts.entry, name)?;
-        let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
-        let staged = root.join("modules").join(name);
-        fs::create_dir_all(&staged)
-            .map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
-        fs::write(
-            staged.join("module.toml"),
-            rr3_manifest_rewrite(&text, &installed_entry, &facts.entry, name)?,
-        )
-        .map_err(|e| format!("写 {}/module.toml 失败: {e}", staged.display()))?;
-        let entry_path = staged.join(&facts.entry);
-        if let Some(parent) = entry_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
-        }
-        // 产物按 lang 分型（批F1）：rust = 注入 bin 按 entry 落位；python = pkg 树落位 +
-        // 打包器生成 shim（PYTHONPATH 须装机绝对，只有打包器知道 RR3_INSTALL_ROOT）。
-        if facts.lang == "python" {
-            let pkg_src = mod_src.join("pkg");
-            if !pkg_src.is_dir() {
-                return Err(format!(
-                    "模块 {name}（lang=python）注入产物不完整: {} 缺席（python 模块约定 rr3-modules/<name>/{{pkg/,manifest.toml}}）",
-                    pkg_src.display()
-                ));
-            }
-            let pkg_dst = staged.join("pkg");
-            rr3_copy_dir(&pkg_src, &pkg_dst).map_err(|e| format!("复制 {name} pkg 树失败: {e}"))?;
-            let py_module = name.replace('-', "_");
-            // shim 里的 PYTHONPATH 必须是**装机绝对**（不是 staging 临时路径——staging 在
-            // 宿主出、板上 dpkg -i 才落 /usr/lib/rockrobot3，写 staging 路径装完即指向虚处）
-            let pkg_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/pkg");
-            let config_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/config.toml");
-            fs::write(
-                &entry_path,
-                rr3_python_shim_text(
-                    Path::new(&pkg_installed),
-                    &py_module,
-                    Path::new(&config_installed),
-                ),
-            )
-            .map_err(|e| format!("写 {name} shim 失败: {e}"))?;
-            rr3_make_executable(&entry_path);
-        } else {
-            let bin_src = mod_src.join("bin");
-            if !bin_src.is_file() {
-                return Err(format!(
-                    "模块 {name} 注入产物不完整: {} 缺席（rust 模块约定 rr3-modules/<name>/{{bin,manifest.toml}}）",
-                    bin_src.display()
-                ));
-            }
-            fs::copy(&bin_src, &entry_path).map_err(|e| format!("复制 {name} bin 失败: {e}"))?;
-        }
-        let config_src = cfg.repo.join("modules").join(name).join("config.toml");
-        if !config_src.is_file() {
-            return Err(format!(
-                "仓内文件缺席: {}（模块开机即读 manifest 同目录 config.toml，缺件必重启环——随包必带）",
-                config_src.display()
-            ));
-        }
-        fs::copy(&config_src, staged.join("config.toml"))
-            .map_err(|e| format!("复制 {name} config.toml 失败: {e}"))?;
-        // G4/C1（ADR-0019 修订 1 ③ + 批J C1 裁定）：staging 扩整树——组合件编排声明
-        // composite.toml 与原子件声明树 atoms/（五件套含 assemble.toml）随包进 deb，
-        // 装机后板上 rrd 装配段（--profile 正门）才能扫到件级注入声明。两者可选
-        // （无原子件/无编排的模块形态允许缺省），在位即纯副本（pkg 同款纪律）。
-        let repo_mod = cfg.repo.join("modules").join(name);
-        // 形态档配置（可选，2026-10-31）：`config-esp32.toml` 是板麦双通道档
-        // （channels=2 + 反射环开启），与默认 config.toml 同源随包——部署侧用
-        // RR3_SENSE_CONFIG 指向装机路径显式装载；默认档不读它，不存在即不随装
-        // （与 composite/atoms 同一条"在位即纯副本"可选件纪律）。
-        let config_esp32_src = repo_mod.join("config-esp32.toml");
-        if config_esp32_src.is_file() {
-            fs::copy(&config_esp32_src, staged.join("config-esp32.toml"))
-                .map_err(|e| format!("复制 {name} config-esp32.toml 失败: {e}"))?;
-        }
-        let composite_src = repo_mod.join("composite.toml");
-        if composite_src.is_file() {
-            fs::copy(&composite_src, staged.join("composite.toml"))
-                .map_err(|e| format!("复制 {name} composite.toml 失败: {e}"))?;
-        }
-        let atoms_src = repo_mod.join("atoms");
-        if atoms_src.is_dir() {
-            rr3_copy_dir(&atoms_src, &staged.join("atoms"))
-                .map_err(|e| format!("复制 {name} atoms 树失败: {e}"))?;
-        }
+        rr3_stage_module(cfg, &root, name)?;
     }
     Ok(stage)
+}
+
+/// 装载消费真值集预验（基-25／实-12）：打包与装载同一判据，清单真值只有 rrd
+/// `rr3_truth_set` 一份；坏单/缺册都拒出包，不在打包面自带第二份文件清单。
+fn rr3_truth_ready(
+    cfg: &Rr3PackConfig,
+) -> Result<(String, rrd::profile::Rr3RuntimeTruthSet), String> {
+    let profile_name = format!("{}.toml", cfg.profile);
+    let profile_src = cfg.repo.join("profiles").join(&profile_name);
+    // 打包先按装载同判据预验装配单（rr3_profile_parse，与 boot 链同一函数）：坏单
+    // 拒出包——出包时红比装机 boot 红早一个环节（块-15：装载必需件缺席而装机验证全绿
+    // 才是最贵的洞）；预验同时给出 [platform].chip，平台事实表按它选册。
+    let profile_text = fs::read_to_string(&profile_src)
+        .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
+    let profile = rrd::profile::rr3_profile_parse(&profile_text).map_err(|errs| {
+        format!(
+            "装配单 {} 预验失败（打包与装载同一判据，坏单不得出包）: {}",
+            profile_src.display(),
+            errs.join("; ")
+        )
+    })?;
+    let truth = rrd::profile::rr3_truth_set(&profile, &cfg.profile);
+    let missing: Vec<String> = truth
+        .files
+        .iter()
+        .filter(|rel| !cfg.repo.join(rel).is_file())
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "装载消费真值集缺册: {}（--repo 须指向仓根 {}；清单真值 = rrd rr3_truth_set——缺任一必需册 rrd 装载即拒 boot，打包拒出包，基-25/实-12）",
+            missing.join(", "),
+            cfg.repo.display()
+        ));
+    }
+    Ok((profile_name, truth))
+}
+
+/// 单模块落 staging：产物按 lang 分型（rust = 注入 bin 按 entry 落位；python =
+/// pkg 树落位 + 打包器生成 shim——PYTHONPATH 须装机绝对，只有打包器知道
+/// RR3_INSTALL_ROOT）；config 与可选原子件/编排/形态档按"在位即纯副本"随装。
+fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), String> {
+    let mod_src = cfg.payload.join("rr3-modules").join(name);
+    let manifest_src = mod_src.join("manifest.toml");
+    if !manifest_src.is_file() {
+        return Err(format!(
+            "模块 {name} 注入产物不完整: {} 缺席（约定 rr3-modules/<name>/manifest.toml）",
+            manifest_src.display()
+        ));
+    }
+    let text = fs::read_to_string(&manifest_src)
+        .map_err(|e| format!("读 {} 失败: {e}", manifest_src.display()))?;
+    let facts = rr3_manifest_parse(&text).map_err(|errs| {
+        format!(
+            "模块 {name} 的 manifest 解析失败: {}（注入产物须是仓内 module.toml 的副本）",
+            errs.join("; ")
+        )
+    })?;
+    if facts.name != name {
+        return Err(format!(
+            "模块目录名 {name} 与 manifest.name {} 不一致（注入产物自相矛盾，打包拒绝）",
+            facts.name
+        ));
+    }
+    rr3_entry_ok(&facts.entry, name)?;
+    let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
+    let staged = root.join("modules").join(name);
+    fs::create_dir_all(&staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
+    fs::write(
+        staged.join("module.toml"),
+        rr3_manifest_rewrite(&text, &installed_entry, &facts.entry, name)?,
+    )
+    .map_err(|e| format!("写 {}/module.toml 失败: {e}", staged.display()))?;
+    let entry_path = staged.join(&facts.entry);
+    if let Some(parent) = entry_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
+    }
+    if facts.lang == "python" {
+        rr3_stage_py(&mod_src, &staged, &entry_path, name)?;
+    } else {
+        rr3_stage_bin(&mod_src, &entry_path, name)?;
+    }
+    let config_src = cfg.repo.join("modules").join(name).join("config.toml");
+    if !config_src.is_file() {
+        return Err(format!(
+            "仓内文件缺席: {}（模块开机即读 manifest 同目录 config.toml，缺件必重启环——随包必带）",
+            config_src.display()
+        ));
+    }
+    fs::copy(&config_src, staged.join("config.toml"))
+        .map_err(|e| format!("复制 {name} config.toml 失败: {e}"))?;
+    rr3_stage_opt(cfg, &staged, name)
+}
+
+/// python 模块：pkg 树 + 装机绝对路径 shim。
+fn rr3_stage_py(
+    mod_src: &Path,
+    staged: &Path,
+    entry_path: &Path,
+    name: &str,
+) -> Result<(), String> {
+    let pkg_src = mod_src.join("pkg");
+    if !pkg_src.is_dir() {
+        return Err(format!(
+            "模块 {name}（lang=python）注入产物不完整: {} 缺席（python 模块约定 rr3-modules/<name>/{{pkg/,manifest.toml}}）",
+            pkg_src.display()
+        ));
+    }
+    rr3_copy_dir(&pkg_src, &staged.join("pkg"))
+        .map_err(|e| format!("复制 {name} pkg 树失败: {e}"))?;
+    let pkg_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/pkg");
+    let config_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/config.toml");
+    fs::write(
+        entry_path,
+        rr3_python_shim_text(
+            Path::new(&pkg_installed),
+            &name.replace('-', "_"),
+            Path::new(&config_installed),
+        ),
+    )
+    .map_err(|e| format!("写 {name} shim 失败: {e}"))?;
+    rr3_make_executable(entry_path);
+    Ok(())
+}
+
+/// rust 模块：注入 bin 按 entry 落位。
+fn rr3_stage_bin(mod_src: &Path, entry_path: &Path, name: &str) -> Result<(), String> {
+    let bin_src = mod_src.join("bin");
+    if !bin_src.is_file() {
+        return Err(format!(
+            "模块 {name} 注入产物不完整: {} 缺席（rust 模块约定 rr3-modules/<name>/{{bin,manifest.toml}}）",
+            bin_src.display()
+        ));
+    }
+    fs::copy(&bin_src, entry_path).map_err(|e| format!("复制 {name} bin 失败: {e}"))?;
+    Ok(())
+}
+
+/// 可选随装件（G4/C1：组合件编排与原子件声明树；形态档 config-esp32 同款纪律，
+/// 在位即纯副本——缺省不是错误，模块形态允许无原子件/无编排）。
+fn rr3_stage_opt(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), String> {
+    let repo_mod = cfg.repo.join("modules").join(name);
+    let config_esp32_src = repo_mod.join("config-esp32.toml");
+    if config_esp32_src.is_file() {
+        fs::copy(&config_esp32_src, staged.join("config-esp32.toml"))
+            .map_err(|e| format!("复制 {name} config-esp32.toml 失败: {e}"))?;
+    }
+    let composite_src = repo_mod.join("composite.toml");
+    if composite_src.is_file() {
+        fs::copy(&composite_src, staged.join("composite.toml"))
+            .map_err(|e| format!("复制 {name} composite.toml 失败: {e}"))?;
+    }
+    let atoms_src = repo_mod.join("atoms");
+    if atoms_src.is_dir() {
+        rr3_copy_dir(&atoms_src, &staged.join("atoms"))
+            .map_err(|e| format!("复制 {name} atoms 树失败: {e}"))?;
+    }
+    Ok(())
 }
 
 /// control 文本（字段序按 dpkg 惯例）。Maintainer 与 Git 提交身份同源。
@@ -937,8 +960,7 @@ mod tests {
         );
         // entry 改写为装机绝对路径，lang 事实保留
         let facts =
-            rr3_manifest_parse(&fs::read_to_string(dir.join("module.toml")).unwrap())
-                .unwrap();
+            rr3_manifest_parse(&fs::read_to_string(dir.join("module.toml")).unwrap()).unwrap();
         assert_eq!(facts.lang, "python");
         assert_eq!(
             facts.entry,
