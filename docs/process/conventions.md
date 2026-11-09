@@ -89,6 +89,11 @@ too_many_arguments）。本批把 CI lint 两段拆为 ①c（fmt：workspace + 
 e2e 并发确定性同批结案——真 flaky 是 uart flock spawn 瞬态（批N21 件一已
 根因拆修），撞 tag 假设被枚举证伪（各测试文件内 tag 互异、跨文件靠 pid 隔离）。
 
+**2026-11-10 architecture.md brain Python 化残留清理（10 处）**：分层图两处、CI job 描述、
+contracts 定位语、rr-ipc schema 对齐语、模块树 rr3-brain 布局、legacy 迁移映射两处、风险表
+R3（标消除）R4（改宿主/模块/板侧 Rust↔Rust）。保留不动的合法提及：schema `lang` 域
+（rr3-pack python 分支仍在册）、ADR-0014 文件名、带日期的审计史录（基-33 五处）。
+
 **拟增三步（2026-10-14 增补轮六登记，尚未建成——建成前不得当作现有强度引用）**：
 **第八轮实测（2026-10-15）把"尚未建成"从声明变成计数**：`tools/ci/check.sh` 里可数的 step 只有
 ①/①b/②/②b/③/④/⑤/⑥/⑦/⑧ 共 **10** 行，⑨/⑩/⑪ **零命中** ⇒ 待建门 **20 把、专属执法位建成 0 把**（全案 §22.1，基线 `b11dd2f`）。

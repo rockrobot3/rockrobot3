@@ -320,7 +320,7 @@ Yocto（后期再评估，双轨不含第三轨）、容器编排层（OCI 只�
 ┌─────────────────────────────────────────────────────┐
 │  模块层 Layer 2（5+1，独立进程，崩溃隔离）              │
 │  rr3-sense  rr3-act  rr3-interact  rr3-power        │
-│  rr3-connect            rr3-brain (Python)          │
+│  rr3-connect            rr3-brain (Rust)            │
 │  分发 = OCI 镜像（打包格式，非编排层，ADR-0013）        │
 ├─────────────────────────────────────────────────────┤
 │  底座 payload Layer 1（rock3 本体）                    │
@@ -362,11 +362,11 @@ rock3/
 ├── .gitignore                     ← 白名单式追踪：`*` 默认忽略，逐目录放开（密钥与再生件永不入库）
 ├── .github/
 │   ├── README.md
-│   └── workflows/ci.yml           ← 三 job 拆步：conventions（与本地同一入口
+│   └── workflows/ci.yml           ← job 拆步：conventions（与本地同一入口
 │                                      `bash tools/ci/check.sh`）· lint（fmt/clippy）·
-│                                      brain-unittest（ubuntu+macos 双矩阵）
+│                                      distro/buildroot/sim 装配与链路演练
 │
-├── contracts/                     ← [SC] 字节级共享契约（Rust/Python 双方唯一事实源）
+├── contracts/                     ← [SC] 字节级共享契约（跨 crate 唯一事实源）
 │   ├── README.md                  ← 歧义裁定与"契约只增不改"的演进规则
 │   ├── envelope.schema.json       ← A-IPC 128B 消息头 + 5 种 payload 类型契约（ADR-0006）
 │   ├── topics.toml                ← 主题所有权注册表（前缀归属与校验入口见 §6.3）
@@ -466,8 +466,8 @@ rock3/
 │   ├── rr3-interact/              ← src/player.rs、face.rs、panel/{mod.rs,server.rs,http.rs,secrets.rs,www/index.html}
 │   ├── rr3-power/                 ← src/battery.rs、charger.rs
 │   ├── rr3-connect/               ← src/wifi.rs、bt.rs、session.rs
-│   └── rr3-brain/                 ← Python 包（无 Cargo.toml）：rr3_brain/{__main__.py,dialog.py,
-│                                     cloud/{asr,llm,tts}.py} + config.toml + pyproject.toml
+│   └── rr3-brain/                 ← Rust crate：src/{main,boot,dispatch,intent,rpc,
+│                                     cloud,config_store}.rs + config.toml
 │
 ├── tools/                         ← 三个独立 workspace + 门禁脚本（各自 Cargo.lock）
 │   ├── ci/check.sh                ← 规约检查唯一入口；步序与条数只登记在 conventions.md §2
@@ -926,7 +926,7 @@ SSD1306 128×64（板侧已真跑）、点阵（预留）与 host 屏——改�
 
 ```
 rr-ipc/
-├── protocol/     ← 128B 头与 payload 类型前缀的纯编解码，与传输无关（Rust/Python 对齐同一 schema）
+├── protocol/     ← 128B 头与 payload 类型前缀的纯编解码，与传输无关（宿主与板侧对齐同一 schema）
 │   ├── header.rs    ← `Rr3Header::from_bytes` / `to_bytes`、`MAGIC`、`RR3_IPC_HDR_SIZE` = 128
 │   ├── body.rs      ← rr3_body_encode / rr3_body_split：前缀宽度 RR3_BODY_TYPE_PREFIX_LEN = 2（u16 小端）
 │   └── mod.rs       ← 声明 header / body 两个子模块；对外名字由 crate 根 lib.rs 统一再导出
@@ -1092,7 +1092,7 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 
 ```
                     ┌─────────────── rrd 事件总线 (UDS) ───────────────┐
-  麦克风 ► rr3-sense ─┤ rr3-sense/audio/vad_start ──► rr3-brain (Python) │
+  麦克风 ► rr3-sense ─┤ rr3-sense/audio/vad_start ──► rr3-brain (Rust)   │
   (ALSA)             │          asr_final               │ 云端 ASR/LLM/TTS
                      │                                  ├─ rr3-brain/dialog/response
   喇叭   ◄ rr3-interact ◄───────────────────────────────┤
@@ -1137,13 +1137,13 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 | legacy（已冻结） | 去向 | 方式 |
 |---|---|---|
 | `legacy/core/audio` | rr3-sense（采集+VAD）/ rr3-interact（播放） | HAL 换 ALSA，VAD 逻辑移植 |
-| `legacy/core/asr` · `legacy/core/llm` · `legacy/core/tts` | rr3-brain/cloud/ | Python 直接移植 HTTP 逻辑（含 Content-Length 等踩坑） |
+| `legacy/core/asr` · `legacy/core/llm` · `legacy/core/tts` | rr3-brain/cloud/ | Rust 逐语义移植 HTTP 逻辑（含 Content-Length 等踩坑） |
 | `legacy/core/relay` | rr3-act | gpiod |
 | `legacy/core/link/wifi` · `legacy/core/link/btctl` | rr3-connect | NetworkManager(D-Bus) / BlueZ |
 | `legacy/core/panel` | rr3-interact/panel | HTML 资产直接搬入 |
 | `legacy/core/applog` · `legacy/core/data` | base/runtime | 日志与计数是基座职责 |
 | `legacy/firmware-c/main/config.h` | rr3-brain/config.toml | 对话策略参数平移 |
-| `legacy/firmware-c/main/main.c` | rr3-brain/dialog.py | 编排逻辑移植 |
+| `legacy/firmware-c/main/main.c` | rr3-brain/dispatch.rs | 编排逻辑移植 |
 
 > 路径以迁移后（`e98a3d1`）的真实位置为准：`core/`、`firmware-c/` 已整体位于 `legacy/` 下。
 > **消化已完成（2026-10-05 0.0.4 批I）**：逐组件语义全部收敛（panel/data 批C/B 实装、
@@ -1176,8 +1176,8 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 |---|---|---|---|
 | R1 | 保底轨 Buildroot + RK3566 DTS/音频补丁工作量超预期 | M1 / 保底轨 | 快路上线后保底轨冻结在 Radxa ZERO 3 参考板，自绘板后置；新板优先走发行版快路（ADR-0013） |
 | R2 | ALSA 全双工延迟不达标 | M3 | legacy 闭环 2~5s 为基线，Linux 侧硬件换血预期更好；先实测再优化 |
-| R3 | Python brain GIL/冷启动 | M4 | 策略预载；必要时 brain 拆子进程 |
-| R4 | Rust↔Python 契约漂移 | M2+ | `contracts/` 目录 [SC] 唯一事实源；漂移由**三个入口**分层拦：`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表的 `rr3_reg_pub_check`（三者职责与顺序见 §6.3）。前两个在提交前跑，第三个在线上判定；它接到线上流量的哪一段属实况，见 [`../status.md`](../status.md) |
+| R3 | Python brain GIL/冷启动（已消除：批N32件四 brain Rust 化，无 GIL 面） | M4 | — |
+| R4 | Rust↔Rust（宿主/模块/板侧）契约漂移 | M2+ | `contracts/` 目录 [SC] 唯一事实源；漂移由**三个入口**分层拦：`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表的 `rr3_reg_pub_check`（三者职责与顺序见 §6.3）。前两个在提交前跑，第三个在线上判定；它接到线上流量的哪一段属实况，见 [`../status.md`](../status.md) |
 | R5 | 0.5L 体积散热（RK3566 被动散热） | 硬件 | 选型时评估无风扇功耗档，后期实机温测 |
 | R6 | A-IPC 自实现运行时与标准偏差 | M2 | IPC-T-001~003 必测；半年复查时对照标准版本变更 |
 | R7 | 待机 <1W 需 suspend/电源状态机与 OS 深度协同 | M5 | rr3-power 与 rrd 电源状态机设计前置，模块声明 wake 权限 |
