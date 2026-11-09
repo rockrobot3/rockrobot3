@@ -620,52 +620,70 @@ fn rr3_pin_entry_parse(i: usize, t: &toml::Table, errs: &mut Vec<String>) -> Rr3
 /// role/direction 空串与类型错同文案，其余键空串当值收（与拆分前一致）。
 fn rr3_pin_str(i: usize, k: &str, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
     match k {
-        "role" => match v.as_str() {
-            Some(s) if !s.is_empty() => pin.role = s.to_string(),
-            _ => errs.push(format!("pin #{i}.role 缺失或为空（角色外键）")),
-        },
-        "instance" => match v.as_str() {
-            Some(s) => pin.instance = s.to_string(),
-            None => errs.push(format!("pin #{i}.instance 应为字符串")),
-        },
-        "controller" => match v.as_str() {
-            Some(s) => pin.controller = s.to_string(),
-            None => errs.push(format!("pin #{i}.controller 应为字符串")),
-        },
-        "direction" => match v.as_str() {
-            Some(s) if !s.is_empty() => pin.direction = s.to_string(),
-            _ => errs.push(format!(
-                "pin #{i}.direction 缺失或为空（校验①缺失语义：direction 缺 → 红）"
-            )),
-        },
-        "rail" => match v.as_str() {
-            Some(s) => pin.rail = s.to_string(),
-            None => errs.push(format!(
-                "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
-            )),
-        },
-        "addr" => match v.as_str() {
-            Some(s) => pin.addr = s.to_string(),
-            None => errs.push(format!(
-                "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
-            )),
-        },
-        "device" => match v.as_str() {
-            Some(s) => pin.device = s.to_string(),
-            None => errs.push(format!(
-                "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
-            )),
-        },
-        "failsafe" => match v.as_str() {
-            Some(s) => pin.failsafe = s.to_string(),
-            None => errs.push(format!(
-                "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
-            )),
-        },
+        "role" | "direction" => rr3_pin_str_req(i, k, v, pin, errs),
+        "instance" | "controller" | "rail" | "addr" | "device" | "failsafe" => {
+            rr3_pin_str_opt(i, k, v, pin, errs)
+        }
         other => errs.push(format!(
             "pin #{i} 未知键 {other}（只认 {}）",
             RR3_PIN_KEYS.join("/")
         )),
+    }
+}
+
+/// 必填非空字符串键（role/direction）：空串与类型错同文案。
+fn rr3_pin_str_req(
+    i: usize,
+    k: &str,
+    v: &toml::Value,
+    pin: &mut Rr3PinEntry,
+    errs: &mut Vec<String>,
+) {
+    match (k, v.as_str()) {
+        ("role", Some(s)) if !s.is_empty() => pin.role = s.to_string(),
+        ("role", _) => errs.push(format!("pin #{i}.role 缺失或为空（角色外键）")),
+        ("direction", Some(s)) if !s.is_empty() => pin.direction = s.to_string(),
+        ("direction", _) => errs.push(format!(
+            "pin #{i}.direction 缺失或为空（校验①缺失语义：direction 缺 → 红）"
+        )),
+        _ => {}
+    }
+}
+
+/// 可空字符串键（instance/controller/rail/addr/device/failsafe）：空串当值收。
+fn rr3_pin_str_opt(
+    i: usize,
+    k: &str,
+    v: &toml::Value,
+    pin: &mut Rr3PinEntry,
+    errs: &mut Vec<String>,
+) {
+    let Some(s) = v.as_str() else {
+        errs.push(match k {
+            "instance" => format!("pin #{i}.instance 应为字符串"),
+            "controller" => format!("pin #{i}.controller 应为字符串"),
+            "rail" => format!(
+                "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
+            ),
+            "addr" => format!(
+                "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
+            ),
+            "device" => format!(
+                "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
+            ),
+            _ => format!(
+                "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
+            ),
+        });
+        return;
+    };
+    match k {
+        "instance" => pin.instance = s.to_string(),
+        "controller" => pin.controller = s.to_string(),
+        "rail" => pin.rail = s.to_string(),
+        "addr" => pin.addr = s.to_string(),
+        "device" => pin.device = s.to_string(),
+        _ => pin.failsafe = s.to_string(),
     }
 }
 
