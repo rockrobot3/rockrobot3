@@ -662,18 +662,14 @@ fn rr3_pin_str_opt(
         errs.push(match k {
             "instance" => format!("pin #{i}.instance 应为字符串"),
             "controller" => format!("pin #{i}.controller 应为字符串"),
-            "rail" => format!(
-                "pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"
-            ),
+            "rail" => format!("pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"),
             "addr" => format!(
                 "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
             ),
             "device" => format!(
                 "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
             ),
-            _ => format!(
-                "pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"
-            ),
+            _ => format!("pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"),
         });
         return;
     };
@@ -857,59 +853,73 @@ fn rr3_supplies_parse(root: &toml::Value, tier: &str, errs: &mut Vec<String>) ->
             "缺少 [supplies]（平台看门狗与时序预算声明；schema_version=2 起必填）".to_string(),
         ),
         Some(t) => {
-            match t.get("watchdog_present").and_then(toml::Value::as_bool) {
-                Some(b) => supplies.watchdog_present = b,
-                None => errs.push("supplies.watchdog_present 缺失或不是布尔".to_string()),
-            }
-            for key in [
-                "watchdog_timeout_ms",
-                "tick_period_ms",
-                "tick_jitter_ms",
-                "safety_core_interval_ms",
-            ] {
-                match supplies_int(t.get(key), key) {
-                    Ok(v) => match key {
-                        "watchdog_timeout_ms" => supplies.watchdog_timeout_ms = v,
-                        "tick_period_ms" => supplies.tick_period_ms = v,
-                        "tick_jitter_ms" => supplies.tick_jitter_ms = v,
-                        _ => supplies.safety_core_interval_ms = v,
-                    },
-                    Err(e) => errs.push(e),
-                }
-            }
-            match t.get("watchdog_feeder").and_then(toml::Value::as_str) {
-                Some(s) if !s.is_empty() => supplies.watchdog_feeder = s.to_string(),
-                _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
-            }
-            for k in t.keys() {
-                // domain / budget 是子段键，各自成块解析（第七供给位 / 校验⑩ 分母）
-                if k != "domain" && k != "budget" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
-                    errs.push(format!(
-                        "[supplies] 未知键 {k}（只认 {}）",
-                        RR3_SUPPLIES_KEYS.join("/")
-                    ));
-                }
-            }
-            // [[supplies.domain]]：电力网络声明（第七供给位，§3.1 家族 A；校验⑥ 判据源）。
-            // 缺数组 = 红——schema 3 装载期校验⑥-a 需要名单源。
-            match t.get("domain").and_then(toml::Value::as_array) {
-                Some(items) => supplies.domains = rr3_domains_parse(items, errs),
-                None => errs.push(
-                    "缺少 [[supplies.domain]]（电力网络声明，第七供给位；schema_version=3 起必填，至少声明一域）"
-                        .to_string(),
-                ),
-            }
-            // [supplies.budget]：内存预算声明（校验⑩ 分母，schema 4 起必填）
-            match t.get("budget").and_then(toml::Value::as_table) {
-                None => errs.push(
-                    "缺少 [supplies.budget]（内存预算声明，校验⑩ 分母；schema_version=4 起必填——host 档显式写 not_applicable = true，不许留空）"
-                        .to_string(),
-                ),
-                Some(bt) => supplies.budget = rr3_budget_parse(bt, tier, errs),
-            }
+            rr3_supplies_core(t, &mut supplies, errs);
+            rr3_supplies_sub(t, &mut supplies, tier, errs);
         }
     }
     supplies
+}
+
+/// `[supplies]` 标量位：看门狗声明/时序预算/喂狗者 + 未知键点名。
+fn rr3_supplies_core(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec<String>) {
+    match t.get("watchdog_present").and_then(toml::Value::as_bool) {
+        Some(b) => supplies.watchdog_present = b,
+        None => errs.push("supplies.watchdog_present 缺失或不是布尔".to_string()),
+    }
+    for key in [
+        "watchdog_timeout_ms",
+        "tick_period_ms",
+        "tick_jitter_ms",
+        "safety_core_interval_ms",
+    ] {
+        match supplies_int(t.get(key), key) {
+            Ok(v) => match key {
+                "watchdog_timeout_ms" => supplies.watchdog_timeout_ms = v,
+                "tick_period_ms" => supplies.tick_period_ms = v,
+                "tick_jitter_ms" => supplies.tick_jitter_ms = v,
+                _ => supplies.safety_core_interval_ms = v,
+            },
+            Err(e) => errs.push(e),
+        }
+    }
+    match t.get("watchdog_feeder").and_then(toml::Value::as_str) {
+        Some(s) if !s.is_empty() => supplies.watchdog_feeder = s.to_string(),
+        _ => errs.push("supplies.watchdog_feeder 缺失或不是非空字符串".to_string()),
+    }
+    for k in t.keys() {
+        // domain / budget 是子段键，各自成块解析（第七供给位 / 校验⑩ 分母）
+        if k != "domain" && k != "budget" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
+            errs.push(format!(
+                "[supplies] 未知键 {k}（只认 {}）",
+                RR3_SUPPLIES_KEYS.join("/")
+            ));
+        }
+    }
+}
+
+/// `[supplies]` 两个子段：`[[supplies.domain]]`（第七供给位）与
+/// `[supplies.budget]`（校验⑩ 分母）。
+fn rr3_supplies_sub(
+    t: &toml::Table,
+    supplies: &mut Rr3Supplies,
+    tier: &str,
+    errs: &mut Vec<String>,
+) {
+    // 缺数组 = 红——schema 3 装载期校验⑥-a 需要名单源。
+    match t.get("domain").and_then(toml::Value::as_array) {
+        Some(items) => supplies.domains = rr3_domains_parse(items, errs),
+        None => errs.push(
+            "缺少 [[supplies.domain]]（电力网络声明，第七供给位；schema_version=3 起必填，至少声明一域）"
+                .to_string(),
+        ),
+    }
+    match t.get("budget").and_then(toml::Value::as_table) {
+        None => errs.push(
+            "缺少 [supplies.budget]（内存预算声明，校验⑩ 分母；schema_version=4 起必填——host 档显式写 not_applicable = true，不许留空）"
+                .to_string(),
+        ),
+        Some(bt) => supplies.budget = rr3_budget_parse(bt, tier, errs),
+    }
 }
 
 /// [[supplies.domain]] 逐域解析（段名沿用 supplies.domains 文案口径）

@@ -154,6 +154,13 @@ fn rr3_sim_unknown(other: &str) -> String {
 
 /// 旗标组合与取值域裁决（互斥/归属/白名单/fail-closed ① ②），parse 只编排。
 fn rr3_sim_args_check(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_args_modes(a)?;
+    rr3_args_audio(a)?;
+    rr3_args_cloud(a)
+}
+
+/// 三种演练模式互斥（各证一面，不合并）。
+fn rr3_args_modes(a: &Rr3SimArgs) -> Result<(), String> {
     if (a.brain || a.profile.is_some()) && a.chain {
         return Err(
             "--chain 与 --brain/--profile 同给：全链闭环、对话闭环与装配演练互斥（各证一面，不合并）"
@@ -165,9 +172,12 @@ fn rr3_sim_args_check(a: &Rr3SimArgs) -> Result<(), String> {
             "--brain 与 --profile 同给：对话闭环演练与装配演练互斥（各证一面，不合并）".to_string(),
         );
     }
-    // --brain 专用旗标的归属与取值把关（脚本工具的第一错法：静默忽略拼写/错配）
+    Ok(())
+}
+
+/// 音频双后端旗标：仅 --brain 适用，白名单 + 板面约束（fail-closed ①②）。
+fn rr3_args_audio(a: &Rr3SimArgs) -> Result<(), String> {
     const AUDIO_BACKENDS: [&str; 5] = ["sim", "linux", "esp32", "mac", "placeholder"];
-    const BRAIN_CLOUDS: [&str; 2] = ["mock", "real"];
     if let Some(b) = &a.audio_backend {
         if !a.brain {
             return Err("--audio-backend 仅 --brain 演练适用".to_string());
@@ -204,6 +214,12 @@ fn rr3_sim_args_check(a: &Rr3SimArgs) -> Result<(), String> {
                 .to_string(),
         );
     }
+    Ok(())
+}
+
+/// 云端旗标：仅 --brain 适用，枚举 + 端点形状 + real 必须显式端点。
+fn rr3_args_cloud(a: &Rr3SimArgs) -> Result<(), String> {
+    const BRAIN_CLOUDS: [&str; 2] = ["mock", "real"];
     if let Some(c) = &a.brain_cloud {
         if !a.brain {
             return Err("--brain-cloud 仅 --brain 演练适用".to_string());
