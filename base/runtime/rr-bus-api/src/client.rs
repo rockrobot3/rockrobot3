@@ -308,7 +308,8 @@ impl Rr3BusClient {
     }
 
     /// 连接本体：注册等待上界显式注入（生产走 [`RR3_CONNECT_TIMEOUT`]，单测
-    /// 用短档钉"静默对端必须快速失败且 reader 线程被收掉"）。
+    /// 用短档钉"静默对端必须快速失败且 reader 线程被收掉"）。B9：连接 = 建面 →
+    /// reader 上路 → 注册 → 心跳上路四段，段体各自成函数。
     fn rr3_connect_timeout(
         path: &str,
         identity: Rr3BusIdentity,
@@ -334,35 +335,8 @@ impl Rr3BusClient {
         });
 
         // reader 必须先于注册帧上路：注册应答也走 pending 路由
-        let reader_inner = inner.clone();
-        let mut reader_sock = stream;
-        let reader: JoinHandle<()> = std::thread::Builder::new()
-            .name("rr3-bus-reader".into())
-            .spawn(move || rr3_reader_loop(&mut reader_sock, reader_inner, tx))
-            .map_err(|e| format!("起 reader 线程失败: {e}"))?;
-
-        // 注册：注册前没有 task，按契约 src=0（"用户态不得自设"的客户端侧写法）
-        let reply = inner.rr3_call_inner(
-            0,
-            "rr3.register",
-            json!({"name": inner.name, "manifest": wire_manifest}),
-            connect_timeout,
-        );
-        let reply = match reply {
-            Ok(v) => v,
-            Err(e) => {
-                rr3_abort_reader(&inner, reader);
-                return Err(format!("注册失败: {e}"));
-            }
-        };
-        let task = match reply.get("src_task").and_then(Value::as_u64) {
-            Some(t) => t,
-            None => {
-                rr3_abort_reader(&inner, reader);
-                return Err("注册应答缺 result.src_task".to_string());
-            }
-        };
-        inner.task.store(task as _, Ordering::Relaxed);
+        let mut reader = Rr3ReaderGuard::rr3_start(stream, &inner, tx)?;
+        let task = rr3_register(&inner, &mut reader, wire_manifest, connect_timeout)?;
         // 单调时基（批I A-2）：拍点全链（注册首拍 + 心跳判定）同一 Instant 锚点，
         // 墙钟回拨不再能扰动心跳节拍
         let tb = Rr3TimeBase::rr3_time_base_new();
@@ -374,95 +348,12 @@ impl Rr3BusClient {
             .rr3_mark_registered(task, tb.rr3_now_ms());
 
         // 心跳线程：拍点真值在机制核状态机（相对节拍，逐拍 +hb）；std 驱动器
-        // 只做平台事——sleep 等拍点、组装/发帧。被拒/超时 = 连续失败到上界才
-        // 退出，交给 supervisor 裁定（单拍抖动由下一拍自愈，见
-        // [`RR3_HEARTBEAT_MAX_MISSES`]）。每拍先取计数快照：非空才带 `counters`
-        // 字段（可选 append，旧 rrd 忽略未知字段，双向兼容；空映射不带，保持与
-        // 无上报模块同一条线上形状）。
-        let hb_inner = inner.clone();
-        let hb = std::thread::Builder::new()
-            .name("rr3-bus-heartbeat".into())
-            .spawn(move || {
-                let mut misses: u32 = 0;
-                loop {
-                    let Some(wait_ms) = hb_inner
-                        .rt
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .rr3_beat_wait_ms(tb.rr3_now_ms())
-                    else {
-                        return; // 断开（Down）即停拍——"不装活着"同一裁定
-                    };
-                    std::thread::sleep(Duration::from_millis(wait_ms));
-                    if hb_inner.stop.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    let now_ms = tb.rr3_now_ms();
-                    let due = hb_inner
-                        .rt
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .rr3_heartbeat_due(now_ms);
-                    if !due {
-                        continue; // 提前醒（信号打断等），回睡
-                    }
-                    let delta = hb_inner.rr3_counters_delta();
-                    let params = if delta.is_empty() {
-                        json!({})
-                    } else {
-                        json!({ "counters": delta })
-                    };
-                    if hb_inner
-                        .rr3_call_inner(
-                            hb_inner.rr3_task(),
-                            "rr3.heartbeat",
-                            params,
-                            Duration::from_secs(5),
-                        )
-                        .is_err()
-                        && !hb_inner.stop.load(Ordering::Relaxed)
-                    {
-                        // 宽限：连续失败到上界才退出（见 RR3_HEARTBEAT_MAX_MISSES）。
-                        // 不记 `rr3_heartbeat_sent` → 下一拍立即到期重试，间隔由 RPC
-                        // 超时（5s）兜住，不空转。
-                        misses += 1;
-                        if misses >= RR3_HEARTBEAT_MAX_MISSES {
-                            eprintln!(
-                                "rr3-bus: 心跳连续 {misses} 拍失败，标记总线死亡（supervisor 按 restart_policy 裁定）"
-                            );
-                            // 库内不 process::exit：设 stop 让宿主 serve 循环的
-                            // rr3_connected 死亡探针翻假，由宿主自行以 exit code 1
-                            // 退出（库不得杀宿主进程）。关 socket 解阻塞 reader
-                            // 与 pending 等待者，与 Drop 同形。
-                            hb_inner.stop.store(true, Ordering::Relaxed);
-                            let _ = hb_inner
-                                .sock
-                                .lock()
-                                .unwrap_or_else(|p| p.into_inner())
-                                .shutdown(std::net::Shutdown::Both);
-                            break;
-                        }
-                        eprintln!(
-                            "rr3-bus: 心跳失败 第 {misses}/{RR3_HEARTBEAT_MAX_MISSES} 拍（不退出，下拍重试）"
-                        );
-                        continue;
-                    }
-                    // 成功即清零宽限计数
-                    misses = 0;
-                    hb_inner
-                        .rt
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .rr3_heartbeat_sent(now_ms);
-                }
-            });
-        if let Err(e) = hb {
-            // 心跳起不来 = 这个客户端不可能"活着"：先收掉 reader（关 socket 解
-            // 阻塞读）再回错，不能让半套连接把调用进程挂在启动路径上。
-            rr3_abort_reader(&inner, reader);
+        // 只做平台事——sleep 等拍点、组装/发帧。起不来 = 这半套连接不可用：
+        // 先收 reader（关 socket 解阻塞）再回错，不把调用进程挂在启动路径上。
+        if let Err(e) = rr3_spawn_hb(&inner, tb) {
+            reader.rr3_abort();
             return Err(format!("起心跳线程失败: {e}"));
         }
-
         Ok(Self { inner })
     }
 
@@ -615,6 +506,155 @@ impl Drop for Rr3BusClient {
 /// 连接失败收尾：置 stop + shutdown 解 reader 的阻塞读，再 join。
 /// 只置 stop（旧写法）不关 socket 时 reader 仍卡在 read 上，join 会把
 /// "注册超时"拖成永久挂死——启动路径必须可失败、可观测。
+/// reader 收尾守卫（B9）：连接建立期持有 reader 句柄，失败路径可显式收掉；
+/// 成功路径直接析构 = 线程继续跑（Drop 不 join，语义与拆分前一致）。
+struct Rr3ReaderGuard {
+    inner: Arc<Rr3Inner>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl Rr3ReaderGuard {
+    fn rr3_start(
+        stream: UnixStream,
+        inner: &Arc<Rr3Inner>,
+        tx: mpsc::SyncSender<Rr3Frame>,
+    ) -> Result<Self, String> {
+        let inner_c = inner.clone();
+        let mut sock = stream;
+        let handle = std::thread::Builder::new()
+            .name("rr3-bus-reader".into())
+            .spawn(move || rr3_reader_loop(&mut sock, inner_c, tx))
+            .map_err(|e| format!("起 reader 线程失败: {e}"))?;
+        Ok(Self {
+            inner: inner.clone(),
+            handle: Some(handle),
+        })
+    }
+
+    fn rr3_abort(&mut self) {
+        if let Some(h) = self.handle.take() {
+            rr3_abort_reader(&self.inner, h);
+        }
+    }
+}
+
+/// 注册帧（B9 自连接体抽出）：注册前没有 task，按契约 src=0（"用户态不得自设"
+/// 的客户端侧写法）；失败统一收 reader 并把错因上抛。
+fn rr3_register(
+    inner: &Arc<Rr3Inner>,
+    reader: &mut Rr3ReaderGuard,
+    wire_manifest: &str,
+    timeout: Duration,
+) -> Result<u64, String> {
+    let reply = inner
+        .rr3_call_inner(
+            0,
+            "rr3.register",
+            json!({"name": inner.name, "manifest": wire_manifest}),
+            timeout,
+        )
+        .map_err(|e| {
+            reader.rr3_abort();
+            format!("注册失败: {e}")
+        })?;
+    let task = reply
+        .get("src_task")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            reader.rr3_abort();
+            "注册应答缺 result.src_task".to_string()
+        })?;
+    inner.task.store(task as _, Ordering::Relaxed);
+    Ok(task)
+}
+
+/// 心跳线程上路（B9 自连接体抽出）：线程体归 [`rr3_hb_loop`]，此处只做 spawn。
+fn rr3_spawn_hb(inner: &Arc<Rr3Inner>, tb: Rr3TimeBase) -> std::io::Result<JoinHandle<()>> {
+    let hb_inner = inner.clone();
+    std::thread::Builder::new()
+        .name("rr3-bus-heartbeat".into())
+        .spawn(move || rr3_hb_loop(hb_inner, tb))
+}
+
+/// 心跳主循环（B9 自连接体抽出，语义逐字未动）：每拍先取计数快照——非空才带
+/// `counters` 字段（可选 append，旧 rrd 忽略未知字段，双向兼容；空映射不带，
+/// 保持与无上报模块同一条线上形状）。被拒/超时 = 连续失败到上界才退出，交给
+/// supervisor 裁定（单拍抖动由下一拍自愈，见 [`RR3_HEARTBEAT_MAX_MISSES`]）。
+fn rr3_hb_loop(hb_inner: Arc<Rr3Inner>, tb: Rr3TimeBase) {
+    let mut misses: u32 = 0;
+    loop {
+        let Some(wait_ms) = hb_inner
+            .rt
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .rr3_beat_wait_ms(tb.rr3_now_ms())
+        else {
+            return; // 断开（Down）即停拍——"不装活着"同一裁定
+        };
+        std::thread::sleep(Duration::from_millis(wait_ms));
+        if hb_inner.stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let now_ms = tb.rr3_now_ms();
+        let due = hb_inner
+            .rt
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .rr3_heartbeat_due(now_ms);
+        if !due {
+            continue; // 提前醒（信号打断等），回睡
+        }
+        let delta = hb_inner.rr3_counters_delta();
+        let params = if delta.is_empty() {
+            json!({})
+        } else {
+            json!({ "counters": delta })
+        };
+        if hb_inner
+            .rr3_call_inner(
+                hb_inner.rr3_task(),
+                "rr3.heartbeat",
+                params,
+                Duration::from_secs(5),
+            )
+            .is_err()
+            && !hb_inner.stop.load(Ordering::Relaxed)
+        {
+            // 宽限：连续失败到上界才退出（见 RR3_HEARTBEAT_MAX_MISSES）。
+            // 不记 `rr3_heartbeat_sent` → 下一拍立即到期重试，间隔由 RPC
+            // 超时（5s）兜住，不空转。
+            misses += 1;
+            if misses >= RR3_HEARTBEAT_MAX_MISSES {
+                eprintln!(
+                    "rr3-bus: 心跳连续 {misses} 拍失败，标记总线死亡（supervisor 按 restart_policy 裁定）"
+                );
+                // 库内不 process::exit：设 stop 让宿主 serve 循环的
+                // rr3_connected 死亡探针翻假，由宿主自行以 exit code 1
+                // 退出（库不得杀宿主进程）。关 socket 解阻塞 reader
+                // 与 pending 等待者，与 Drop 同形。
+                hb_inner.stop.store(true, Ordering::Relaxed);
+                let _ = hb_inner
+                    .sock
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .shutdown(std::net::Shutdown::Both);
+                break;
+            }
+            eprintln!(
+                "rr3-bus: 心跳失败 第 {misses}/{RR3_HEARTBEAT_MAX_MISSES} 拍（不退出，下拍重试）"
+            );
+            continue;
+        }
+        // 成功即清零宽限计数
+        misses = 0;
+        hb_inner
+            .rt
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .rr3_heartbeat_sent(now_ms);
+    }
+}
+
 fn rr3_abort_reader(inner: &Rr3Inner, reader: JoinHandle<()>) {
     inner.stop.store(true, Ordering::Relaxed);
     let _ = inner
