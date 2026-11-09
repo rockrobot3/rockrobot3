@@ -592,6 +592,10 @@ struct DecodeState {
     total_bytes: u64,
     last_frame: Option<Instant>,
     errors: u64,
+    /// 连续拆帧失败计数（好片即清零；达 [`ERR_STREAK_RESYNC`] 记重同步账并清零）。
+    err_streak: u64,
+    /// 失步重同步账（成片损坏点名次数；汇总打印用）。
+    resyncs: u64,
     doa_on: bool,
 }
 
@@ -610,6 +614,8 @@ impl DecodeState {
             total_bytes: 0,
             last_frame: None,
             errors: 0,
+            err_streak: 0,
+            resyncs: 0,
             doa_on,
         }
     }
@@ -760,6 +766,185 @@ fn open_handshake(device: &str, baud: u32) -> Rr3UartConn {
     conn
 }
 
+/// 三线程与通道面（起子产物；收兵按 reader → writer 顺序收口，见 finish_and_report）。
+struct RecThreads {
+    /// 解码面 → 写线程的分片通道（收兵 drop 触发写线程排空退出）。
+    tx: mpsc::Sender<Vec<u8>>,
+    /// 读线程 → 解码面的裸字节通道。
+    byte_rx: mpsc::Receiver<Vec<u8>>,
+    /// 停流旗（置位后读线程发 AUDIO OFF 收兵退出）。
+    stop: Arc<AtomicBool>,
+    writer: std::thread::JoinHandle<()>,
+    reader: std::thread::JoinHandle<()>,
+}
+
+/// 三线程起子（读/写/看门狗）：conn 整体移交读线程裸读、wav 文件移交写线程
+/// 独占、watch 按线程克隆；武装旗置位归主线程。
+fn rec_spawn_threads(
+    conn: Rr3UartConn,
+    wav_file: File,
+    watch: Arc<WatchState>,
+    out_path: &std::path::Path,
+    device: &str,
+    baud: u32,
+) -> RecThreads {
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    // 写线程独占 wav 文件（占位头/逐片写透全在此线程）；mpsc 解耦见 writer_run。
+    let writer = {
+        let w = Arc::clone(&watch);
+        let out = out_path.to_path_buf();
+        std::thread::spawn(move || writer_run(wav_file, rx, w, out))
+    };
+    {
+        let w = Arc::clone(&watch);
+        let path = out_path.to_string_lossy().into_owned();
+        std::thread::spawn(move || watchdog_run(w, path));
+    }
+    // 读线程：conn/裸字节通道/停流旗移交（静默重连与收兵 OFF 全在读侧闭环，
+    // 见 reader_run）。
+    let (byte_tx, byte_rx) = mpsc::channel::<Vec<u8>>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let reader = {
+        let w = Arc::clone(&watch);
+        let stop = Arc::clone(&stop);
+        let dev = device.to_string();
+        let out = out_path.to_path_buf();
+        std::thread::spawn(move || reader_run(conn, byte_tx, stop, w, dev, baud, out))
+    };
+    RecThreads {
+        tx,
+        byte_rx,
+        stop,
+        writer,
+        reader,
+    }
+}
+
+/// 解码主循环：裸字节通道节拍收料 → 内存拆帧出尽 → dst/Event/topic/b64 四道门
+/// → 好片移交写线程。坏帧弃扫即时完成（Err 起点已弃，续扫由下次 pull 接上），
+/// 成片损坏按 [`ERR_STREAK_RESYNC`] 记失步重同步账。
+fn decode_loop(
+    byte_rx: &mpsc::Receiver<Vec<u8>>,
+    asm: &mut FrameAssembler,
+    st: &mut DecodeState,
+    deadline: Instant,
+    watch: &WatchState,
+    tx: &mpsc::Sender<Vec<u8>>,
+    out_path: &std::path::Path,
+) {
+    while Instant::now() < deadline {
+        match byte_rx.recv_timeout(DECODE_TICK) {
+            Ok(bytes) => asm.feed(&bytes),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                eprintln!("[rec] 裸字节通道断开（读线程已亡）");
+                bail_with_recovery(out_path, watch);
+            }
+        }
+        loop {
+            let assembled = match asm.pull() {
+                Ok(Some(a)) => Some(a),
+                Ok(None) => break,
+                Err((dropped, why)) => {
+                    st.errors += 1;
+                    st.err_streak += 1;
+                    eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
+                    None
+                }
+            };
+            if let Some((header, payload)) = assembled {
+                let frame = Rr3Frame { header, payload };
+                match parse_audio_event(&frame) {
+                    Ok(chunk) => {
+                        st.err_streak = 0;
+                        st.ingest(chunk, frame.header.src_task, st.errors, watch, tx, out_path);
+                    }
+                    Err(e) => {
+                        st.errors += 1;
+                        st.err_streak += 1;
+                        eprintln!("[rec] 事件门拒收: {e}");
+                    }
+                }
+            }
+            // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
+            // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
+            if st.err_streak >= ERR_STREAK_RESYNC {
+                st.resyncs += 1;
+                st.err_streak = 0;
+                eprintln!(
+                    "[rec] 失步重同步 #{}：内存弃扫 {}B 后对齐续收",
+                    st.resyncs,
+                    asm.discarded()
+                );
+            }
+        }
+    }
+}
+
+/// 收兵 + 汇总：停流旗 → 读线程发 AUDIO OFF 退出（板面队列余片照发，本端不再
+/// 读，conn 随线程收口关闭）。OFF 后解武装；关通道让写线程排空收兵；最后按
+/// 实测率补真头并打印汇总。任一线程异常即整进程退，不冒领成功。
+fn finish_and_report(
+    threads: RecThreads,
+    watch: &WatchState,
+    st: DecodeState,
+    out_path: &std::path::Path,
+    doa: bool,
+) {
+    threads.stop.store(true, Ordering::Release);
+    if threads.reader.join().is_err() {
+        eprintln!("rr3-audio-rec: 读线程异常退出");
+        std::process::exit(1);
+    }
+    watch.armed.store(false, Ordering::Release);
+    // 关通道让写线程排空收兵（逐片已 flush，无尾数据）；写线程异常即整进程退，
+    // 不冒领成功。
+    drop(threads.tx);
+    if let Err(e) = threads.writer.join() {
+        eprintln!("rr3-audio-rec: 写线程异常退出: {e:?}");
+        std::process::exit(1);
+    }
+
+    if st.total_bytes == 0 {
+        eprintln!("[rec] 0 分片（查板面 AUDIO ON 应答/I2S 面波特率档）");
+        let _ = std::fs::remove_file(out_path); // 占位空壳不留垃圾
+        std::process::exit(1);
+    }
+    let measured = measured_rate(
+        st.rate_anchor,
+        st.last_frame,
+        st.total_bytes / 4,
+        st.declared_rate,
+    );
+    let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
+    match OpenOptions::new()
+        .write(true)
+        .open(out_path)
+        .and_then(|f| f.write_all_at(&wav_header(data_len, 2, measured, 16), 0))
+    {
+        Ok(()) => println!(
+            "[rec] ✓ {}：chunks={} gaps={} restarts={} err={} resyncs={} reconnects={} frames={} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
+            out_path.display(),
+            st.chunks,
+            st.tracker.gaps,
+            st.tracker.restarts,
+            st.errors,
+            st.resyncs,
+            watch.reconnects.load(Ordering::Acquire),
+            st.total_bytes / 4,
+            measured,
+            st.total_bytes as f64 / 4.0 / measured as f64,
+        ),
+        Err(e) => {
+            eprintln!("rr3-audio-rec: wav 补头失败 {}: {e}", out_path.display());
+            std::process::exit(1);
+        }
+    }
+    if doa {
+        println!("{}", st.doa.summary());
+    }
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&argv) {
@@ -771,12 +956,10 @@ fn main() {
     };
     let conn = open_handshake(&args.device, args.baud);
 
-    // 收流面线程化（判据② A/B 定案）：读线程（conn 所有权整体移交）只做大块
-    // 裸读推裸字节通道；解码主循环纯内存拆帧 → dst/Event/topic/b64 四道门 →
-    // 逐片交写线程落盘 + seq 对账。落盘线程化（d4 /dev/null 决定性实验定案）：
-    // 解码循环零磁盘 I/O——每片同步写刷的延迟尖峰把冻结概率放大 ~7 倍（38/51s
-    // vs 369s），通道解耦后尖峰不再进收流面；看门狗保数据前提不变（停滞即整
-    // 进程退，盘侧逐片写透）。
+    // 收流面线程化（判据② A/B 定案）：读线程只做大块裸读推裸字节通道；解码
+    // 主循环纯内存拆帧 → 四道门 → 逐片交写线程落盘 + seq 对账。落盘线程化
+    // （d4 /dev/null 定案）：解码循环零磁盘 I/O——逐片同步写刷的延迟尖峰把
+    // 冻结概率放大 ~7 倍，通道解耦后尖峰不再进收流面；看门狗保数据前提不变。
     let out_path = args.out.clone();
     let wav_file = match File::create(&out_path) {
         Ok(f) => f,
@@ -792,149 +975,33 @@ fn main() {
         rate: AtomicU32::new(NOMINAL_RATE_FALLBACK_HZ),
         armed: AtomicBool::new(false),
     });
-    // 写线程独占 wav 文件（占位头/逐片写透全在此线程）；mpsc 解耦见 writer_run。
-    let (tx, rx) = mpsc::channel::<Vec<u8>>();
-    let writer_thread = {
-        let w = Arc::clone(&watch);
-        let out = out_path.clone();
-        std::thread::spawn(move || writer_run(wav_file, rx, w, out))
-    };
-    {
-        let w = Arc::clone(&watch);
-        let path = out_path.clone();
-        std::thread::spawn(move || watchdog_run(w, path.to_string_lossy().into_owned()));
-    }
-    // 读线程：conn/裸字节通道/停流旗移交（静默重连与收兵 OFF 全在读侧闭环，
-    // 见 reader_run）。
-    let (byte_tx, byte_rx) = mpsc::channel::<Vec<u8>>();
-    let stop = Arc::new(AtomicBool::new(false));
-    let reader_thread = {
-        let w = Arc::clone(&watch);
-        let stop = Arc::clone(&stop);
-        let dev = args.device.clone();
-        let out = out_path.clone();
-        let baud = args.baud;
-        std::thread::spawn(move || reader_run(conn, byte_tx, stop, w, dev, baud, out))
-    };
+    let threads = rec_spawn_threads(
+        conn,
+        wav_file,
+        Arc::clone(&watch),
+        &out_path,
+        &args.device,
+        args.baud,
+    );
     watch.armed.store(true, Ordering::Release);
 
     let mut st = DecodeState::new(args.doa);
-    let mut err_streak = 0u64; // 连续拆帧失败（好片即清零；达阈值记重同步账）
-    let mut resyncs = 0u64;
     let deadline = Instant::now() + Duration::from_secs(args.secs);
     let mut asm = FrameAssembler::new();
     println!(
         "[rec] streaming {}s @ {} ({})…",
         args.secs, args.baud, args.device
     );
-    while Instant::now() < deadline {
-        match byte_rx.recv_timeout(DECODE_TICK) {
-            Ok(bytes) => asm.feed(&bytes),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                eprintln!("[rec] 裸字节通道断开（读线程已亡）");
-                bail_with_recovery(&out_path, &watch);
-            }
-        }
-        // 内存拆帧：出尽当前缓冲。坏帧弃扫即时完成（Err 起点已弃，续扫由下次
-        // pull 自然接上），丢片由 seq 对账如实记账。
-        loop {
-            let assembled = match asm.pull() {
-                Ok(Some(a)) => Some(a),
-                Ok(None) => break,
-                Err((dropped, why)) => {
-                    st.errors += 1;
-                    err_streak += 1;
-                    eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
-                    None
-                }
-            };
-            if let Some((header, payload)) = assembled {
-                let frame = Rr3Frame { header, payload };
-                match parse_audio_event(&frame) {
-                    Ok(chunk) => {
-                        err_streak = 0;
-                        st.ingest(
-                            chunk,
-                            frame.header.src_task,
-                            st.errors,
-                            &watch,
-                            &tx,
-                            &out_path,
-                        );
-                    }
-                    Err(e) => {
-                        st.errors += 1;
-                        err_streak += 1;
-                        eprintln!("[rec] 事件门拒收: {e}");
-                    }
-                }
-            }
-            // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
-            // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
-            if err_streak >= ERR_STREAK_RESYNC {
-                resyncs += 1;
-                err_streak = 0;
-                eprintln!(
-                    "[rec] 失步重同步 #{resyncs}：内存弃扫 {}B 后对齐续收",
-                    asm.discarded()
-                );
-            }
-        }
-    }
-    // 收兵：停流旗 → 读线程发 AUDIO OFF 退出（板面队列余片照发，本端不再读，
-    // conn 随线程收口关闭）。OFF 后解武装（本地补头不走看门狗）。
-    stop.store(true, Ordering::Release);
-    if reader_thread.join().is_err() {
-        eprintln!("rr3-audio-rec: 读线程异常退出");
-        std::process::exit(1);
-    }
-    watch.armed.store(false, Ordering::Release);
-    // 关通道让写线程排空收兵（逐片已 flush，无尾数据）；写线程异常即整进程退，
-    // 不冒领成功。
-    drop(tx);
-    if let Err(e) = writer_thread.join() {
-        eprintln!("rr3-audio-rec: 写线程异常退出: {e:?}");
-        std::process::exit(1);
-    }
-
-    if st.total_bytes == 0 {
-        eprintln!("[rec] 0 分片（查板面 AUDIO ON 应答/I2S 面波特率档）");
-        let _ = std::fs::remove_file(&out_path); // 占位空壳不留垃圾
-        std::process::exit(1);
-    }
-    let measured = measured_rate(
-        st.rate_anchor,
-        st.last_frame,
-        st.total_bytes / 4,
-        st.declared_rate,
+    decode_loop(
+        &threads.byte_rx,
+        &mut asm,
+        &mut st,
+        deadline,
+        &watch,
+        &threads.tx,
+        &out_path,
     );
-    let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
-    match OpenOptions::new()
-        .write(true)
-        .open(&out_path)
-        .and_then(|f| f.write_all_at(&wav_header(data_len, 2, measured, 16), 0))
-    {
-        Ok(()) => println!(
-            "[rec] ✓ {}：chunks={} gaps={} restarts={} err={} resyncs={resyncs} reconnects={} frames={} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
-            out_path.display(),
-            st.chunks,
-            st.tracker.gaps,
-            st.tracker.restarts,
-            st.errors,
-            watch.reconnects.load(Ordering::Acquire),
-            st.total_bytes / 4,
-            measured,
-            st.total_bytes as f64 / 4.0 / measured as f64,
-        ),
-        Err(e) => {
-            eprintln!("rr3-audio-rec: wav 补头失败 {}: {e}", out_path.display());
-            std::process::exit(1);
-        }
-    }
-    if args.doa {
-        println!("{}", st.doa.summary());
-    }
+    finish_and_report(threads, &watch, st, &out_path, args.doa);
 }
 
 // ---------------------------------------------------------------------------

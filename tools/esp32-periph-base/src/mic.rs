@@ -98,6 +98,144 @@ fn audio_chunk_to_frame(chunk: &[i32], seq: u32, dc: &mut Rr3DcBlocker) -> Optio
     .ok()
 }
 
+/// 冒烟统计窗（[`MIC_WINDOW_READS`] 读一窗）：RMS/peak/声道等值率/组帧耗时累计，
+/// 窗满打印并清零。实测采样率分母用本窗时长——窗重置连 `t0` 一起重置（首版
+/// 分母用累计时长导致 rate 逐窗走低，真板实录）。
+struct MicStats {
+    reads: usize,
+    frames: u64,
+    l_sum: i64,
+    r_sum: i64,
+    l_peak: i32,
+    r_peak: i32,
+    equal: u64,
+    build_us: u64,
+    build_n: u32,
+    t0: Instant,
+}
+
+impl MicStats {
+    fn new() -> Self {
+        Self {
+            reads: 0,
+            frames: 0,
+            l_sum: 0,
+            r_sum: 0,
+            l_peak: 0,
+            r_peak: 0,
+            equal: 0,
+            build_us: 0,
+            build_n: 0,
+            t0: Instant::now(),
+        }
+    }
+
+    /// 一帧进窗（RMS/peak/等值率记账；分片/组帧计时由调用方走 [`MicStats::add_build`]）。
+    fn accum(&mut self, l: i32, r: i32) {
+        self.l_sum += (l as i64) * (l as i64);
+        self.r_sum += (r as i64) * (r as i64);
+        self.l_peak = self.l_peak.max(l.abs());
+        self.r_peak = self.r_peak.max(r.abs());
+        if l == r {
+            self.equal += 1;
+        }
+    }
+
+    fn add_build(&mut self, us: u64) {
+        self.build_us += us;
+        self.build_n += 1;
+    }
+
+    /// 窗满统计行 + 清零重开窗（rate 分母 = 本窗时长）。
+    fn window_line(&mut self) {
+        if self.reads < MIC_WINDOW_READS {
+            return;
+        }
+        let dur = self.t0.elapsed().as_secs_f64();
+        let rate = if dur > 0.1 {
+            (self.frames as f64 / dur) as u32
+        } else {
+            0
+        };
+        let n_total = (self.frames as f64).max(1.0);
+        let l_rms = ((self.l_sum as f64) / n_total).sqrt() as i32;
+        let r_rms = ((self.r_sum as f64) / n_total).sqrt() as i32;
+        let eq_pct = (self.equal * 100 / self.frames.max(1)) as u64;
+        let build_ms = if self.build_n > 0 {
+            self.build_us as f64 / self.build_n as f64 / 1000.0
+        } else {
+            0.0
+        };
+        println!(
+            "[mic] {rate}Hz L rms={l_rms} peak={l_peak} | R rms={r_rms} peak={r_peak} | L==R {eq_pct}% | build={build_ms:.1}ms×{build_n}"
+        );
+        *self = Self::new();
+    }
+}
+
+/// 诊断位图对账：每 ~[`MIC_DUMP_READS`] 读比一次前 16B 原始位图——**只有与上
+/// 一窗完全相同才打印**（正常采集字节窗逐窗都在变 → 静默）。逐窗恒等（0x00E0FF00
+/// 一类固定模式）= SD 三态残留（硬件断/虚接）或驱动停摆，此时每 6.4s 一行告警即够。
+fn dump_watch(buf: &[u8], n: usize, last_dump: &mut [u8; 16], dump_count: u32) {
+    if dump_count % MIC_DUMP_READS != 1 {
+        return;
+    }
+    let w = 16.min(n);
+    let now = &buf[..w];
+    if now == &last_dump[..w] {
+        let hex: String = now
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!("[mic] dump 逐窗不变（疑似 SD 虚接/停摆） {hex}");
+    }
+    last_dump[..w].copy_from_slice(now);
+}
+
+/// A9.3 宿主失联看门狗：见过心跳（host_ms != 0）才启用（旧宿主无 PING，混版
+/// 部署保持常流语义），超窗即自动停流并清空待发队列——宿主进程被杀/整机断电
+/// 后，板侧不再对着无人 UART 无穷推流。宿主回来重连即重新握手起流。
+fn host_watchdog(bus: &Arc<Mutex<Bus>>, audio_on: bool, host_ms: u64) -> bool {
+    if audio_on && host_ms != 0 && now_ms().saturating_sub(host_ms) > AUDIO_HOST_TIMEOUT_MS {
+        let mut b = lock_bus(bus);
+        b.st.audio_on = false;
+        b.audio_q.clear();
+        println!("[mic] 宿主心跳停发超 {AUDIO_HOST_TIMEOUT_MS}ms → 自动停流（空行心跳看门狗）");
+        false
+    } else {
+        audio_on
+    }
+}
+
+/// 分片就绪段：取 seq（wrapping 自增）→ 组帧（脱锁，b64+JSON ~几 ms）→ 有界
+/// 入队（满丢**最旧** + 计 audio_dropped——背压观测面，与 recorder 端 seq 断档
+/// 互为对账）。锁只护取号/入队两小段。
+fn chunk_flush(
+    chunk: &mut Vec<i32>,
+    dc: &mut Rr3DcBlocker,
+    bus: &Arc<Mutex<Bus>>,
+    stats: &mut MicStats,
+) {
+    let seq = {
+        let mut b = lock_bus(bus);
+        let s = b.st.audio_seq;
+        b.st.audio_seq = b.st.audio_seq.wrapping_add(1);
+        s
+    };
+    let t_build = Instant::now();
+    let frame = audio_chunk_to_frame(chunk, seq, dc);
+    stats.add_build(t_build.elapsed().as_micros() as u64);
+    if let Some(bytes) = frame {
+        let mut b = lock_bus(bus);
+        // 背压入队（capture 机制件）：满丢**最旧**，true = 发生丢弃 → 计观测计数
+        if push_bounded(&mut b.audio_q, bytes, AUDIO_Q_CAP) {
+            b.st.audio_dropped += 1;
+        }
+    }
+    chunk.clear();
+}
+
 /// 起 I2S0 双麦采集线程（引脚 move 进线程独占，无并发访问面；`bus` 供音频上行：
 /// 读 `audio_on` 开关 + 组帧推 `audio_q`，统计面照旧走控制台 println）。
 /// `+ Send`：外设 token 与引脚是 ZST，cross-thread move 安全（哨兵 Send 纪律同款，
@@ -135,24 +273,12 @@ pub fn spawn_mic_smoke(
                 "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK={RR3_BIND_I2S_BCLK} SD={RR3_BIND_I2S_SD} WS={RR3_BIND_I2S_WS}（INMP441 双麦 L/R 时隙；对账锚，board.rs）"
             );
             let mut buf = [0u8; MIC_BUF];
-            let mut reads = 0usize;
-            let mut frames = 0u64;
-            let mut l_sum = 0i64;
-            let mut r_sum = 0i64;
-            let mut l_peak = 0i32;
-            let mut r_peak = 0i32;
-            let mut equal = 0u64;
-            let mut t0 = Instant::now();
+            let mut stats = MicStats::new();
             let mut dump_count = 0u32;
             // 上一次采样的前 16B（诊断位图对账面）：正常有数据的会话里字节窗
             // 一次一个样，只有**卡死**（SD 三态残留/虚接/驱动停摆）才会逐窗完全
             // 相同——故只在"与上次相同"时打印一次，正常采集全程静默。
             let mut last_dump = [0u8; 16];
-            // 组帧计时窗累计（排障定案面）：本窗各分片 audio_chunk_to_frame 耗时
-            // 微秒和 + 次数，统计行 build= 均值——"组帧慢" vs "整帧写同步排水饿死"
-            // 两论一测定案（b64/JSON 已被对表排除为 ms 级，此处真板实测收口）。
-            let mut build_us = 0u64;
-            let mut build_n = 0u32;
             // 批D③ 分片累积（交错 L,R 原始 24bit；堆上，16KB——栈 16KB 只放 buf 4KB）
             let mut chunk: Vec<i32> = Vec::with_capacity(AUDIO_CHUNK_FRAMES * 2);
             // 跨分片连续的 DC 阻断器（2026-10-31 S3 订正：逐片减均值会在 128ms
@@ -161,124 +287,36 @@ pub fn spawn_mic_smoke(
             loop {
                 match rx.read(&mut buf, MIC_I2C_TIMEOUT) {
                     Ok(n) if n >= 8 => {
-                        reads += 1;
+                        stats.reads += 1;
                         dump_count += 1;
-                        // 诊断面：每 ~6.4s 比一次前 16B 原始位图——**只有与上一窗
-                        // 完全相同才打印**（正常采集字节窗逐窗都在变 → 静默）。逐窗
-                        // 恒等（0x00E0FF00/0x1E0FF00 一类固定模式）= SD 三态残留
-                        // （硬件断/虚接）或驱动停摆，此时每 6.4s 一行告警即够。
-                        if dump_count % MIC_DUMP_READS == 1 {
-                            let w = 16.min(n);
-                            let now = &buf[..w];
-                            if now == &last_dump[..w] {
-                                let hex: String = now
-                                    .iter()
-                                    .map(|b| format!("{b:02X}"))
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-                                println!("[mic] dump 逐窗不变（疑似 SD 虚接/停摆） {hex}");
-                            }
-                            last_dump[..w].copy_from_slice(now);
-                        }
+                        dump_watch(&buf, n, &mut last_dump, dump_count);
                         // 音频开关每 read 批读一次（不逐帧拿锁）；关时清分片，
                         // ON 起始即整片（seq/DC 基线都从零起）
                         let (audio_on, host_ms) = {
                             let b = lock_bus(&bus);
                             (b.st.audio_on, b.st.audio_host_ms)
                         };
-                        // A9.3 宿主失联看门狗：见过心跳（host_ms != 0）才启用
-                        // （旧宿主无 PING，混版部署保持常流语义），超窗即自动停流
-                        // 并清空待发队列——宿主进程被杀/整机断电后，板侧不再对着
-                        // 无人 UART 无穷推流。宿主回来重连即重新握手起流。
-                        let audio_on = if audio_on
-                            && host_ms != 0
-                            && now_ms().saturating_sub(host_ms) > AUDIO_HOST_TIMEOUT_MS
-                        {
-                            let mut b = lock_bus(&bus);
-                            b.st.audio_on = false;
-                            b.audio_q.clear();
-                            println!(
-                                "[mic] 宿主心跳停发超 {AUDIO_HOST_TIMEOUT_MS}ms → 自动停流（空行心跳看门狗）"
-                            );
-                            false
-                        } else {
-                            audio_on
-                        };
+                        let audio_on = host_watchdog(&bus, audio_on, host_ms);
                         if !audio_on {
                             chunk.clear();
                             dc.reset();
                         }
                         let nframes = n / 8;
-                        frames += nframes as u64;
+                        stats.frames += nframes as u64;
                         for f in 0..nframes {
                             let o = f * 8;
                             // 32bit 帧大端线序 → 24bit 符号幅度（capture 机制件）
                             let (l, r) = frame32_to_pair(&buf[o..o + 8]);
-                            l_sum += (l as i64) * (l as i64);
-                            r_sum += (r as i64) * (r as i64);
-                            l_peak = l_peak.max(l.abs());
-                            r_peak = r_peak.max(r.abs());
-                            if l == r {
-                                equal += 1;
-                            }
+                            stats.accum(l, r);
                             if audio_on {
                                 chunk.push(l);
                                 chunk.push(r);
                                 if chunk.len() >= AUDIO_CHUNK_FRAMES * 2 {
-                                    // 分片就绪：取 seq（wrapping 自增）→ 组帧 → 有界
-                                    // 入队（满丢**最旧** + 计 audio_dropped——背压观测
-                                    // 面，与 recorder 端 seq 断档互为对账）。锁只护
-                                    // 取号/入队两小段，组帧（b64+JSON ~几 ms）脱锁。
-                                    let seq = {
-                                        let mut b = lock_bus(&bus);
-                                        let s = b.st.audio_seq;
-                                        b.st.audio_seq = b.st.audio_seq.wrapping_add(1);
-                                        s
-                                    };
-                                    let t_build = Instant::now();
-                                    let frame = audio_chunk_to_frame(&chunk, seq, &mut dc);
-                                    build_us += t_build.elapsed().as_micros() as u64;
-                                    build_n += 1;
-                                    if let Some(bytes) = frame {
-                                        let mut b = lock_bus(&bus);
-                                        // 背压入队（capture 机制件）：满丢**最旧**，
-                                        // true = 发生丢弃 → 计观测计数
-                                        if push_bounded(&mut b.audio_q, bytes, AUDIO_Q_CAP) {
-                                            b.st.audio_dropped += 1;
-                                        }
-                                    }
-                                    chunk.clear();
+                                    chunk_flush(&mut chunk, &mut dc, &bus, &mut stats);
                                 }
                             }
                         }
-                        if reads >= MIC_WINDOW_READS {
-                            // 实测采样率 = 本窗帧数 / 本窗时长（修复：窗重置后 t0 也要
-                            // 重置——首版分母用累计时长导致 rate 逐窗走低，真板实录）
-                            let dur = t0.elapsed().as_secs_f64();
-                            let rate = if dur > 0.1 { (frames as f64 / dur) as u32 } else { 0 };
-                            let n_total = (frames as f64).max(1.0);
-                            let l_rms = ((l_sum as f64) / n_total).sqrt() as i32;
-                            let r_rms = ((r_sum as f64) / n_total).sqrt() as i32;
-                            let eq_pct = (equal * 100 / frames.max(1)) as u64;
-                            let build_ms = if build_n > 0 {
-                                build_us as f64 / build_n as f64 / 1000.0
-                            } else {
-                                0.0
-                            };
-                            println!(
-                                "[mic] {rate}Hz L rms={l_rms} peak={l_peak} | R rms={r_rms} peak={r_peak} | L==R {eq_pct}% | build={build_ms:.1}ms×{build_n}"
-                            );
-                            reads = 0;
-                            frames = 0;
-                            l_sum = 0;
-                            r_sum = 0;
-                            l_peak = 0;
-                            r_peak = 0;
-                            equal = 0;
-                            build_us = 0;
-                            build_n = 0;
-                            t0 = Instant::now();
-                        }
+                        stats.window_line();
                     }
                     Ok(_) => {}
                     Err(e) => {

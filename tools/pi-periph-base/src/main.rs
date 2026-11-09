@@ -472,32 +472,8 @@ impl Board {
                         self.state.rail_tier.name()
                     )
                 }),
-            "OLED" => {
-                let rest = line[head.len()..].trim_start();
-                if rest.is_empty() {
-                    Err("OLED 缺文本参数".into())
-                } else if rest.len() > OLED_COLS * (OLED_ROWS - 1) {
-                    Err(format!(
-                        "OLED 文本超长（≤{} 字符 = {} 行 × {} 列）",
-                        OLED_COLS * (OLED_ROWS - 1),
-                        OLED_ROWS - 1,
-                        OLED_COLS
-                    ))
-                } else {
-                    self.state.last_text = rest.to_string();
-                    self.state.frame_mode = false;
-                    self.state.expr_mode = false;
-                    self.redraw_text();
-                    Ok(format!("OK oled \"{rest}\""))
-                }
-            }
-            "FACE" => match parts.next() {
-                Some(expr) if RR3_FACE_EXPRS.contains(&expr) => {
-                    self.render_expression(expr).map(|()| format!("OK face={expr}"))
-                }
-                Some(expr) => Err(format!("FACE 表情不在白名单: \"{expr}\"")),
-                None => Err("FACE 缺表情参数".into()),
-            },
+            "OLED" => self.oled_text(line[head.len()..].trim_start()),
+            "FACE" => self.face_expr(parts.next()),
             "PAN" => parse_deg(parts.next()).and_then(|deg| {
                 self.servo_move(Axis::Pan, deg)
                     .map(|d| format!("OK pan={d}"))
@@ -506,13 +482,7 @@ impl Board {
                 self.servo_move(Axis::Tilt, deg)
                     .map(|d| format!("OK tilt={d}"))
             }),
-            "SERVO" => match (parse_deg(parts.next()), parse_deg(parts.next())) {
-                (Ok(p), Ok(t)) => self
-                    .servo_move(Axis::Pan, p)
-                    .and_then(|p| self.servo_move(Axis::Tilt, t).map(|t| (p, t)))
-                    .map(|(p, t)| format!("OK servo pan={p} tilt={t}")),
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
+            "SERVO" => self.servo_pair(parse_deg(parts.next()), parse_deg(parts.next())),
             "WANDER" => Err("WANDER 不支持（T3 档无自主扫摆；INFO 恒报 wander=off）".into()),
             "SCAN" => Err("SCAN 不支持（用 PAN/TILT/SERVO 逐点）".into()),
             "AUDIO" => Err("AUDIO 不支持（T3 档明确不做语音/DoA）".into()),
@@ -521,6 +491,52 @@ impl Board {
         match result {
             Ok(s) => self.reply(&s),
             Err(e) => self.reply(&format!("ERR {e}")),
+        }
+    }
+
+    /// OLED 文本臂：非空 + 长度上限（行数×列数），设置后重绘。
+    fn oled_text(&mut self, rest: &str) -> Result<String, String> {
+        if rest.is_empty() {
+            Err("OLED 缺文本参数".into())
+        } else if rest.len() > OLED_COLS * (OLED_ROWS - 1) {
+            Err(format!(
+                "OLED 文本超长（≤{} 字符 = {} 行 × {} 列）",
+                OLED_COLS * (OLED_ROWS - 1),
+                OLED_ROWS - 1,
+                OLED_COLS
+            ))
+        } else {
+            self.state.last_text = rest.to_string();
+            self.state.frame_mode = false;
+            self.state.expr_mode = false;
+            self.redraw_text();
+            Ok(format!("OK oled \"{rest}\""))
+        }
+    }
+
+    /// FACE 表情臂：白名单内才进渲染。
+    fn face_expr(&mut self, expr: Option<&str>) -> Result<String, String> {
+        match expr {
+            Some(expr) if RR3_FACE_EXPRS.contains(&expr) => self
+                .render_expression(expr)
+                .map(|()| format!("OK face={expr}")),
+            Some(expr) => Err(format!("FACE 表情不在白名单: \"{expr}\"")),
+            None => Err("FACE 缺表情参数".into()),
+        }
+    }
+
+    /// SERVO 双轴臂：两角度同序解析（任一非法即拒），pan 先动 tilt 后动。
+    fn servo_pair(
+        &mut self,
+        p: Result<u32, String>,
+        t: Result<u32, String>,
+    ) -> Result<String, String> {
+        match (p, t) {
+            (Ok(p), Ok(t)) => self
+                .servo_move(Axis::Pan, p)
+                .and_then(|p| self.servo_move(Axis::Tilt, t).map(|t| (p, t)))
+                .map(|(p, t)| format!("OK servo pan={p} tilt={t}")),
+            (Err(e), _) | (_, Err(e)) => Err(e),
         }
     }
 

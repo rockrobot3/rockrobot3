@@ -102,6 +102,15 @@ metrics.py **双 `production_part` 定义遮蔽**（旧版"只截 mod"定义在�
 "散点剔除"，t15 修复实际半失效）：旧版删除后散点 cfg(test) 项（CC≈1）不再
 稀释均值，基线按真口径重校 3.92→3.93（红账方向不变，只升 0.01 属口径归真）。
 
+**2026-11-10 CC 热点 ≥24 档全拆（max 26→21）**：rr3-audio-rec main（26→5，起子
+`rec_spawn_threads`/解码 `decode_loop`/收兵 `finish_and_report`，`err_streak`/`resyncs`
+归并进 `DecodeState`，三线程面收口为 `RecThreads`）、esp32-uart-echo main（26→14，
+`drain_oversize`/`recv_payload`/`echo_frame` 三臂）、esp32-periph-base `spawn_mic_smoke`
+（25→11，统计窗收口 `MicStats` 结构体 + `chunk_flush`/`dump_watch`/`host_watchdog`）、
+pi-periph-base `line_round`（24→16，OLED/FACE/SERVO 三臂抽 `oled_text`/`face_expr`/
+`servo_pair`）。宿主面全量 clippy+测试绿；esp 面按 ④b 口径 fmt 过（本地不编译，
+行为等价逐分支核对）。基线 `cc_max_fn` 26→21（真降，红账只降不升兑现）。
+
 **拟增三步（2026-10-14 增补轮六登记，尚未建成——建成前不得当作现有强度引用）**：
 **第八轮实测（2026-10-15）把"尚未建成"从声明变成计数**：`tools/ci/check.sh` 里可数的 step 只有
 ①/①b/②/②b/③/④/⑤/⑥/⑦/⑧ 共 **10** 行，⑨/⑩/⑪ **零命中** ⇒ 待建门 **20 把、专属执法位建成 0 把**（全案 §22.1，基线 `b11dd2f`）。
