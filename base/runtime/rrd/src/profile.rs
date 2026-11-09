@@ -79,6 +79,8 @@ mod tests {
     use super::*;
 
     mod surgery;
+    mod surgery_gates;
+    mod surgery_pins;
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
 
