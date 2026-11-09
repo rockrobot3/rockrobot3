@@ -20,7 +20,9 @@
 //! 裁定 2.1 逐语义保留）；缺 key 的 real 调用照报缺环境变量，不静默降级。
 //!
 //! HTTP/TLS 选型（批N32 裁定 5）：[`ureq`] 同步阻塞客户端＋rustls（零异步栈，
-//! 本仓全同步面；TLS 必须库承载）。与 Python 侧的三笔语义差如实登记：
+//! 本仓全同步面；TLS 必须库承载）。B19 起改用进程级共享 Agent（空闲连接池）：
+//! 一轮对话的 ASR/LLM/TTS 在同一 TCP＋TLS 会话内往返，不再每次调用重新握手；
+//! 三家共用一条有界重试机制 [`rr3_http_try`]。与 Python 侧的三笔语义差如实登记：
 //! ①超时语义——urllib 是 per-op 上界（connect/read 各算），ureq `.timeout()` 是
 //! 整请求上界（更严，无害收敛）；②TLS 根证书——urllib 用系统 CA，rustls 用
 //! webpki-roots 内置（公共 CA 全覆盖，板上无系统 CA 库亦可复现）；③应答字段
@@ -80,6 +82,12 @@ pub(crate) const RR3_KEY_REF_ENV_PREFIX: &str = "env:";
 /// 云端应答体策略帽（32 MiB）：ASR/LLM 应答 KB 级，TTS PCM 30s@48k 双声道约
 /// 5.7MB；32 MiB 给足长语音余量，同时任何单次调用都不允许把板子内存顶穿。
 const RR3_CLOUD_BODY_CAP: usize = 32 * 1024 * 1024;
+
+/// 空闲连接池上界（连接复用机制的策略量）：三家端点同宿主不同路径，对话轮内
+/// 同步串行，1 条即可复用；2 条给面板测连与对话轮并发的两路各留一条。总 4 条
+/// 是"进程内至多两路并发 × 两条宿主"的上界，内存占用与连接数都可判定。
+const RR3_CLOUD_IDLE_MAX: usize = 4;
+const RR3_CLOUD_IDLE_PER_HOST: usize = 2;
 
 // ---------- 模式与密钥（自 cloud/__init__.py 迁入） ----------
 
@@ -142,6 +150,27 @@ pub(crate) fn rr3_secrets_get(reference: &str) -> Option<String> {
 
 // ---------- HTTP 与编码纯函数（自 cloud/__init__.py 迁入） ----------
 
+/// 进程级共享 HTTP 代理（连接复用机制）：`ureq::post()` 顶层函数每次新建 Agent，
+/// 即每次调用重做 TCP＋TLS 握手——一轮对话 ASR/LLM/TTS 三次握手，移动网络下多付
+/// 数百 ms，且握手失败面按调用次数放大。共享 Agent 自带空闲连接池：同宿主请求
+/// 串行复用同一条连接（keep-alive），池上界见 [`RR3_CLOUD_IDLE_MAX`]。
+///
+/// 失效连接语义如实登记：服务端在空闲期关闭连接后，客户端复用才发现的写失败由
+/// ureq 自动换新连接重放（`send_prelude` 失败路径）；写成功而读响应前被关的窄
+/// 竞态 ureq 不重放非幂等 POST 体，由调用方 [`rr3_http_try`] 的有界重试兜住。
+fn rr3_http_agent() -> &'static ureq::Agent {
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| {
+        eprintln!(
+            "rr3-brain: 云端连接池就绪（空闲≤{RR3_CLOUD_IDLE_MAX}，每宿主≤{RR3_CLOUD_IDLE_PER_HOST}）"
+        );
+        ureq::AgentBuilder::new()
+            .max_idle_connections(RR3_CLOUD_IDLE_MAX)
+            .max_idle_connections_per_host(RR3_CLOUD_IDLE_PER_HOST)
+            .build()
+    })
+}
+
 /// 一次 POST；返回 (status, body)。4xx/5xx 也带回状态码与错误体（调用方折业务失败）。
 ///
 /// key 空串 → 不带 Authorization 头（local 免鉴权路径）；real 档缺 key 由调用方
@@ -155,7 +184,8 @@ pub(crate) fn rr3_http_post(
     content_type: &str,
     timeout_s: f64,
 ) -> Result<(u16, Vec<u8>), String> {
-    let req = ureq::post(url)
+    let req = rr3_http_agent()
+        .post(url)
         .set("Content-Type", content_type)
         .timeout(Duration::from_secs_f64(timeout_s));
     let req = if key.is_empty() {
@@ -206,7 +236,8 @@ const RR3_CLOUD_RETRY_PAUSE: Duration = Duration::from_millis(500);
 
 /// 可重试判据（纯函数，单测钉域）：传输层「云端不可达 …」与 HTTP 429/5xx 重试；
 /// 其余（4xx/坏应答/缺密钥/缺字段）不重试。`interface` 是各云端错误文案的接口
-/// 前缀词（"识别接口"/"合成接口"），用于解析 `"{interface} HTTP {code}"`。
+/// 前缀词（"识别接口"/"合成接口"/"大模型接口"），用于解析
+/// `"{interface} HTTP {code}"`。
 fn rr3_cloud_retryable(interface: &str, err: &str) -> bool {
     if err.starts_with("云端不可达") {
         return true;
@@ -218,6 +249,39 @@ fn rr3_cloud_retryable(interface: &str, err: &str) -> bool {
     {
         Some(code) => code == 429 || (500..=599).contains(&code),
         None => false,
+    }
+}
+
+/// 有界重试机制（策略由调用方注入：接口前缀词＋台账标签＋单次尝试闭包）。三家
+/// 客户端共用同一循环，重试判据只有 [`rr3_cloud_retryable`] 一处——重复率与
+/// 圈复杂度的唯一落点。闭包每次调用重发同一请求体（体在闭包外装配一次）。
+fn rr3_http_try<T>(
+    interface: &str,
+    label: &str,
+    mut attempt_fn: impl FnMut() -> Result<T, String>,
+) -> Result<T, String> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match attempt_fn() {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                if rr3_cloud_retryable(interface, &e) && attempt < RR3_CLOUD_ATTEMPTS {
+                    eprintln!(
+                        "rr3-brain: {label} 第 {attempt}/{RR3_CLOUD_ATTEMPTS} 次失败（{e}），{}ms 后重试",
+                        RR3_CLOUD_RETRY_PAUSE.as_millis()
+                    );
+                    std::thread::sleep(RR3_CLOUD_RETRY_PAUSE);
+                    continue;
+                }
+                // 重试过的最终失败补尝试数（首调失败文案逐字不变——台账/单测依赖）
+                return if attempt > 1 {
+                    Err(format!("{e}（{label} 共尝试 {attempt} 次）"))
+                } else {
+                    Err(e)
+                };
+            }
+        }
     }
 }
 
@@ -261,12 +325,10 @@ impl Rr3AsrClient {
         );
         let url = format!("{}/v1/audio/transcriptions", self.base_url);
         let content_type = format!("multipart/form-data; boundary={boundary}");
-        // 有界重试（见 [`rr3_cloud_retryable`]）：multipart 体一次装配、多轮
-        // 复用；只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
-        let mut attempt = 0u32;
-        loop {
-            attempt += 1;
-            let posted = rr3_http_post(&url, &key, &body, &content_type, self.timeout_s).and_then(
+        // 有界重试（见 [`rr3_http_try`]）：multipart 体一次装配、多轮复用；
+        // 只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
+        let resp = rr3_http_try("识别接口", "ASR", || {
+            rr3_http_post(&url, &key, &body, &content_type, self.timeout_s).and_then(
                 |(status, resp)| {
                     if status == 200 {
                         Ok(resp)
@@ -274,36 +336,15 @@ impl Rr3AsrClient {
                         Err(format!("识别接口 HTTP {status}"))
                     }
                 },
-            );
-            match posted {
-                Ok(resp) => {
-                    // json.loads 进护栏（B-16②）：坏 JSON 折 Err 不逃逸（Python try 同形状）
-                    let data: Value = serde_json::from_slice(&resp)
-                        .map_err(|e| format!("识别应答非 JSON: {e}"))?;
-                    return data
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .map(|s| s.to_string())
-                        .ok_or_else(|| "识别应答缺 text 字段".to_string());
-                }
-                Err(e) => {
-                    if rr3_cloud_retryable("识别接口", &e) && attempt < RR3_CLOUD_ATTEMPTS {
-                        eprintln!(
-                            "rr3-brain: ASR 第 {attempt}/{RR3_CLOUD_ATTEMPTS} 次失败（{e}），{}ms 后重试",
-                            RR3_CLOUD_RETRY_PAUSE.as_millis()
-                        );
-                        std::thread::sleep(RR3_CLOUD_RETRY_PAUSE);
-                        continue;
-                    }
-                    // 重试过的最终失败补尝试数（首调失败文案逐字不变——台账/单测依赖）
-                    return if attempt > 1 {
-                        Err(format!("{e}（ASR 共尝试 {attempt} 次）"))
-                    } else {
-                        Err(e)
-                    };
-                }
-            }
-        }
+            )
+        })?;
+        // json.loads 进护栏（B-16②）：坏 JSON 折 Err 不逃逸（Python try 同形状）
+        let data: Value =
+            serde_json::from_slice(&resp).map_err(|e| format!("识别应答非 JSON: {e}"))?;
+        data.get("text")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string())
+            .ok_or_else(|| "识别应答缺 text 字段".to_string())
     }
 }
 
@@ -417,11 +458,28 @@ impl Rr3LlmClient {
         // 只拼 `/chat/completions`——GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`
         // 与 DeepSeek `/v1` 同形接入，不按厂商猜版本段（ADR-0023）。
         let url = format!("{}/chat/completions", self.base_url);
-        let (status, resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
-        if status != 200 {
-            self.history.rr3_rollback_last();
-            return Err(format!("大模型接口 HTTP {status}"));
-        }
+        // 重试与 ASR/TTS 同轨：连接池复用引入"写成功、读前被关"的窄竞态需要一次
+        // 重放，5xx/429 同属瞬时态。代价如实登记——补全非幂等，极端竞态下同轮
+        // 可能被云端处理两次（OpenAI 兼容面无幂等键）；会话语义只采纳一次应答、
+        // 历史只入账一次，换来"问了不回"这一生产不可接受结局的收敛。
+        let resp = rr3_http_try("大模型接口", "LLM", || {
+            rr3_http_post(&url, &key, &body, "application/json", self.timeout_s).and_then(
+                |(status, resp)| {
+                    if status == 200 {
+                        Ok(resp)
+                    } else {
+                        Err(format!("大模型接口 HTTP {status}"))
+                    }
+                },
+            )
+        });
+        let resp = match resp {
+            Ok(resp) => resp,
+            Err(e) => {
+                self.history.rr3_rollback_last();
+                return Err(e);
+            }
+        };
         // 应答形状面收敛为一档（Python KeyError/IndexError/JSONDecodeError 同一
         // except 折同文案）：取不出 choices[0].message.content 串即形状不符
         let reply = serde_json::from_slice::<Value>(&resp).ok().and_then(|v| {
@@ -510,39 +568,19 @@ impl Rr3TtsClient {
         .to_string()
         .into_bytes();
         let url = format!("{}/v1/audio/speech", self.base_url);
-        // 有界重试（与 ASR 同轨，见 [`rr3_cloud_retryable`]）：CosyVoice
-        // 读响应超时是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
-        let mut attempt = 0u32;
-        loop {
-            attempt += 1;
-            let posted = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)
-                .and_then(|(status, resp)| {
+        // 有界重试（与 ASR/LLM 同轨，见 [`rr3_http_try`]）：CosyVoice 读响应超时
+        // 是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
+        rr3_http_try("合成接口", "TTS", || {
+            rr3_http_post(&url, &key, &body, "application/json", self.timeout_s).and_then(
+                |(status, resp)| {
                     if status == 200 {
                         Ok(resp)
                     } else {
                         Err(format!("合成接口 HTTP {status}"))
                     }
-                });
-            match posted {
-                Ok(resp) => return Ok(resp),
-                Err(e) => {
-                    if rr3_cloud_retryable("合成接口", &e) && attempt < RR3_CLOUD_ATTEMPTS {
-                        eprintln!(
-                            "rr3-brain: TTS 第 {attempt}/{RR3_CLOUD_ATTEMPTS} 次失败（{e}），{}ms 后重试",
-                            RR3_CLOUD_RETRY_PAUSE.as_millis()
-                        );
-                        std::thread::sleep(RR3_CLOUD_RETRY_PAUSE);
-                        continue;
-                    }
-                    // 重试过的最终失败补尝试数（首调失败文案逐字不变——台账/单测依赖）
-                    return if attempt > 1 {
-                        Err(format!("{e}（TTS 共尝试 {attempt} 次）"))
-                    } else {
-                        Err(e)
-                    };
-                }
-            }
-        }
+                },
+            )
+        })
     }
 }
 
@@ -626,6 +664,7 @@ pub(crate) mod testkit {
     use std::collections::HashMap;
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Mutex};
 
     use serde_json::json;
@@ -650,10 +689,22 @@ pub(crate) mod testkit {
         pub(crate) fail_once_path: FakePath,
         pub(crate) bad_json_path: FakePath,
         pub(crate) missing_field_path: FakePath,
+        /// 累计 accept 次数（连接复用断言：N 请求 = 1 accept 即证明复用）
+        pub(crate) conns: Arc<AtomicU32>,
     }
 
     impl FakeCloud {
+        /// 默认档：应答带 `Connection: close`——每请求一条连接（对位既有断言）
         pub(crate) fn start() -> Self {
+            Self::start_with(false)
+        }
+
+        /// keep-alive 档：同连接连续服务多请求（连接复用回归的观测面）
+        pub(crate) fn start_keep_alive() -> Self {
+            Self::start_with(true)
+        }
+
+        fn start_with(keep_alive: bool) -> Self {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
             let requests = Arc::new(Mutex::new(Vec::new()));
@@ -661,61 +712,61 @@ pub(crate) mod testkit {
             let fail_once_path = Arc::new(Mutex::new(None));
             let bad_json_path = Arc::new(Mutex::new(None));
             let missing_field_path = Arc::new(Mutex::new(None));
-            let (r, f, fo, b, m) = (
+            let conns = Arc::new(AtomicU32::new(0));
+            let (r, f, fo, b, m, c) = (
                 requests.clone(),
                 fail_path.clone(),
                 fail_once_path.clone(),
                 bad_json_path.clone(),
                 missing_field_path.clone(),
+                conns.clone(),
             );
             // 线程随测试进程退出回收（cargo test 主线程等所有 #[test] 完成，本
             // detached 线程不阻塞收尾；每测试独立端口，线程间零干扰）
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     let Ok(mut stream) = stream else { break };
-                    let Some((path, headers, body)) = read_request(&mut stream) else {
-                        continue;
-                    };
-                    r.lock().unwrap().push((
-                        path.clone(),
-                        headers.get("authorization").cloned().unwrap_or_default(),
-                        body,
-                    ));
-                    let fail = f.lock().unwrap().clone();
-                    let fail_once = fo.lock().unwrap().clone();
-                    let bad = b.lock().unwrap().clone();
-                    let missing = m.lock().unwrap().clone();
-                    if Some(&path) == fail_once.as_ref() {
-                        respond(
-                            &mut stream,
-                            "500 Internal Server Error",
-                            b"{\"error\":\"boom\"}",
-                        );
-                        *fo.lock().unwrap() = None; // 一次性：下一请求恢复罐头
-                    } else if Some(&path) == fail.as_ref() {
-                        respond(
-                            &mut stream,
-                            "500 Internal Server Error",
-                            b"{\"error\":\"boom\"}",
-                        );
-                    } else if Some(&path) == bad.as_ref() {
-                        // 200 + 非 JSON 体（B-16②：云 200 坏体的静默假成功口）
-                        respond(&mut stream, "200 OK", b"not-json-at-all");
-                    } else if Some(&path) == missing.as_ref() {
-                        respond(&mut stream, "200 OK", b"{}");
-                    } else if path == "/v1/audio/transcriptions" {
-                        respond(&mut stream, "200 OK", "{\"text\": \"你好\"}".as_bytes());
-                    } else if path == "/v1/chat/completions" {
-                        respond(
-                            &mut stream,
-                            "200 OK",
-                            json!({"choices": [{"message": {"role": "assistant", "content": "好的"}}]})
-                                .to_string()
-                                .as_bytes(),
-                        );
-                    } else {
-                        // /v1/audio/speech → 原始 PCM
-                        respond(&mut stream, "200 OK", &[1u8, 0].repeat(1600));
+                    c.fetch_add(1, Ordering::Relaxed);
+                    // keep-alive 档在同一条流上连续读数个请求；读到 EOF 即收
+                    while let Some((path, headers, body)) = read_request(&mut stream) {
+                        r.lock().unwrap().push((
+                            path.clone(),
+                            headers.get("authorization").cloned().unwrap_or_default(),
+                            body,
+                        ));
+                        let fail = f.lock().unwrap().clone();
+                        let fail_once = fo.lock().unwrap().clone();
+                        let bad = b.lock().unwrap().clone();
+                        let missing = m.lock().unwrap().clone();
+                        let (status, payload): (&str, Vec<u8>) = if Some(&path)
+                            == fail_once.as_ref()
+                        {
+                            *fo.lock().unwrap() = None; // 一次性：下一请求恢复罐头
+                            ("500 Internal Server Error", br#"{"error":"boom"}"#.to_vec())
+                        } else if Some(&path) == fail.as_ref() {
+                            ("500 Internal Server Error", br#"{"error":"boom"}"#.to_vec())
+                        } else if Some(&path) == bad.as_ref() {
+                            // 200 + 非 JSON 体（B-16②：云 200 坏体的静默假成功口）
+                            ("200 OK", b"not-json-at-all".to_vec())
+                        } else if Some(&path) == missing.as_ref() {
+                            ("200 OK", b"{}".to_vec())
+                        } else if path == "/v1/audio/transcriptions" {
+                            ("200 OK", "{\"text\": \"你好\"}".as_bytes().to_vec())
+                        } else if path == "/v1/chat/completions" {
+                            (
+                                "200 OK",
+                                json!({"choices": [{"message": {"role": "assistant", "content": "好的"}}]})
+                                    .to_string()
+                                    .into_bytes(),
+                            )
+                        } else {
+                            // /v1/audio/speech → 原始 PCM
+                            ("200 OK", [1u8, 0].repeat(1600))
+                        };
+                        respond(&mut stream, status, &payload, keep_alive);
+                        if !keep_alive {
+                            break;
+                        }
                     }
                 }
             });
@@ -726,6 +777,7 @@ pub(crate) mod testkit {
                 fail_once_path,
                 bad_json_path,
                 missing_field_path,
+                conns,
             }
         }
 
@@ -772,9 +824,10 @@ pub(crate) mod testkit {
         Some((path, headers, data[header_end..header_end + clen].to_vec()))
     }
 
-    fn respond(stream: &mut TcpStream, status: &str, body: &[u8]) {
+    fn respond(stream: &mut TcpStream, status: &str, body: &[u8], keep_alive: bool) {
+        let conn = if keep_alive { "keep-alive" } else { "close" };
         let head = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: {conn}\r\n\r\n",
             body.len()
         );
         let _ = stream.write_all(head.as_bytes());
@@ -870,7 +923,25 @@ mod tests {
         assert!(!e.contains("Bearer"), "文案不得带出密钥");
     }
 
-    /// 云端重试判据（2026-10-31 有界重试，ASR/TTS 同轨）：429/5xx/传输层可重试；
+    /// 连接复用（B19）：keep-alive 服务端连续两请求只 accept 一次——进程级共享
+    /// Agent 的池化生效（改造前 `ureq::post` 每次新建 Agent，必然两条连接）。
+    #[test]
+    fn http_post_reuses_pooled_connection() {
+        let srv = FakeCloud::start_keep_alive();
+        let url = format!("{}/v1/chat/completions", srv.base);
+        for _ in 0..2 {
+            let (status, _) = rr3_http_post(&url, "k", b"{}", "application/json", 5.0).unwrap();
+            assert_eq!(status, 200);
+        }
+        assert_eq!(srv.requests.lock().unwrap().len(), 2, "两请求都应到达");
+        assert_eq!(
+            srv.conns.load(Ordering::Relaxed),
+            1,
+            "两请求应复用同一条 TCP 连接"
+        );
+    }
+
+    /// 云端重试判据（2026-10-31 有界重试，ASR/LLM/TTS 同轨）：429/5xx/传输层可重试；
     /// 4xx/坏应答/缺密钥不重试（重试只会重复同一结局，还把 401 拖成 2 倍时延）。
     #[test]
     fn cloud_error_retry_classification() {
@@ -1027,6 +1098,32 @@ mod tests {
             srv.requests.lock().unwrap().len(),
             2,
             "有界：总尝试 2 次后不再打"
+        );
+        std::env::remove_var(RR3_API_KEY_ENV);
+        std::env::remove_var(RR3_CLOUD_MODE_ENV);
+    }
+
+    /// LLM 有界重试（B19，与 ASR/TTS 同轨）：首请求 500 → 重试一次 → 200；
+    /// 请求数恰 2，历史只入账一轮（重试不产生额外对话轮）。
+    #[test]
+    fn llm_retries_5xx_once_then_succeeds() {
+        let _g = env_lock();
+        let srv = FakeCloud::start();
+        std::env::set_var(RR3_CLOUD_MODE_ENV, "real");
+        std::env::set_var(RR3_API_KEY_ENV, "test-key");
+        *srv.fail_once_path.lock().unwrap() = Some("/v1/chat/completions".into());
+        let llm_root = format!("{}/v1", srv.base);
+        let mut client = Rr3LlmClient::new(&llm_root, "m", 5.0, None, None);
+        assert_eq!(client.rr3_complete("在吗").unwrap(), "好的");
+        assert_eq!(
+            srv.requests.lock().unwrap().len(),
+            2,
+            "首调 + 1 次重试（有界）"
+        );
+        assert_eq!(
+            client.rr3_history().len(),
+            3,
+            "system + user + assistant 各一条（重试不额外入账）"
         );
         std::env::remove_var(RR3_API_KEY_ENV);
         std::env::remove_var(RR3_CLOUD_MODE_ENV);
