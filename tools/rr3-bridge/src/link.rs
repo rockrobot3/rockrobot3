@@ -6,8 +6,8 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use rr_ipc::transport::uart::{Rr3UartConn, RR3_UART_BAUD_DEFAULT};
 
@@ -21,6 +21,13 @@ const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_CAP: Duration = Duration::from_secs(10);
 /// 主循环等线程消息的轮询片（同时是 SIGTERM 响应上界）。
 const WAIT_SLICE: Duration = Duration::from_millis(250);
+/// UDS 上行写窗口（与 rrd 侧 B-5 写超时同值）：对端停读时 5s 内必须显形。
+/// 没有这道窗口，连接塞满内核发送缓冲后 `write_all` 永久阻塞——上行线程挂死，
+/// 且再也收不到 UART 断链消息，桥只能靠人工重启（生产事故面）。
+const UDS_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// UDS 连接最短存活窗：短于此视为"接了就关"的异常对端，重连走退避。
+/// 没有这道窗，rrd 反复 accept-close 时桥会以微秒级空转重连打满 CPU 与日志。
+const UDS_MIN_DWELL: Duration = Duration::from_secs(1);
 
 /// 桥的运行参数（CLI 解析产物）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +139,31 @@ enum LinkOutcome {
     UartDead,
 }
 
+/// 连接交接槽：同一方向只保留"最新一条待接手的连接"，换手即关旧句柄。
+///
+/// 为什么不是队列：UDS 断链重连期间，若 UART 静默（上行线程阻塞在 read，
+/// 不换手），队列会把每次重连的旧句柄攒住；rrd 若"接了就关"地反复重连，
+/// 句柄按重连次数无界增长，直到 fd 表耗尽连 UART 都开不出来。槽语义让
+/// "最新连接"恒为唯一真值，旧句柄在放入时立刻关闭，增长面为零。
+#[derive(Clone)]
+struct Rr3LinkSlot(Arc<Mutex<Option<UnixStream>>>);
+
+impl Rr3LinkSlot {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+
+    /// 放入最新连接；返回被顶掉的旧连接（由调用方 drop，即关闭句柄）。
+    fn put(&self, s: UnixStream) -> Option<UnixStream> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).replace(s)
+    }
+
+    /// 取走待接手的连接（无则 None）。
+    fn take(&self) -> Option<UnixStream> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).take()
+    }
+}
+
 /// 一条链路的一生（§5.1.5）：起上行/下行线程，逐条 UDS 连接接力，直到
 /// UART 断链或关停。UART 断链时先关 UDS（kill 半边）再返回。
 fn run_link(
@@ -142,25 +174,30 @@ fn run_link(
 ) -> LinkOutcome {
     let dropped = Arc::new(AtomicU64::new(0));
     let (exit_tx, exit_rx) = mpsc::channel::<ExitMsg>();
-    let (sink_tx, sink_rx) = mpsc::channel::<UnixStream>();
-    let (src_tx, src_rx) = mpsc::channel::<UnixStream>();
+    let sink = Rr3LinkSlot::new();
+    let src = Rr3LinkSlot::new();
     {
         let exit = exit_tx.clone();
         let dropped = Arc::clone(&dropped);
+        let sink = sink.clone();
         std::thread::Builder::new()
             .name("bridge-upstream".into())
-            .spawn(move || upstream_loop(rx, sink_rx, dropped, exit))
+            .spawn(move || upstream_loop(rx, sink, dropped, exit))
             .expect("起上行线程失败");
     }
     {
         let exit = exit_tx.clone();
+        let src = src.clone();
+        let stop = Arc::clone(shutdown);
         std::thread::Builder::new()
             .name("bridge-downstream".into())
-            .spawn(move || downstream_loop(tx, src_rx, exit))
+            .spawn(move || downstream_loop(tx, src, stop, exit))
             .expect("起下行线程失败");
     }
     drop(exit_tx); // 线程各自持一份；主线程只收不发
 
+    // 短命连接退避（见 [`UDS_MIN_DWELL`]）；连接活过窗口即复位。
+    let mut dwell = Backoff::new();
     'uds: loop {
         if shutdown.load(Ordering::SeqCst) {
             return LinkOutcome::Shutdown;
@@ -170,6 +207,12 @@ fn run_link(
             None => return LinkOutcome::Shutdown,
             Some(s) => s,
         };
+        // 写向窗口必须在交接前设好：这是阻塞写面的唯一上界（见常量注记）。
+        if let Err(e) = stream.set_write_timeout(Some(UDS_WRITE_TIMEOUT)) {
+            log(&format!("uds 写超时设置失败（{e}）；重试"));
+            continue 'uds;
+        }
+        let conn_at = Instant::now();
         if waited {
             log(&format!(
                 "uds connected {}（等待期上行丢弃 {} 字节，未缓冲）",
@@ -192,15 +235,14 @@ fn run_link(
             Ok(s) => s,
             Err(e) => {
                 log(&format!("uds clone 失败（{e}）；重试"));
-                drop(wr);
                 continue 'uds;
             }
         };
         let kill = stream; // 第三个半边归主线程
-        if sink_tx.send(wr).is_err() || src_tx.send(rd).is_err() {
-            // 线程都没了（UART 已死且线程退场）——回 run 重开
-            return LinkOutcome::UartDead;
+        if sink.put(wr).is_some() {
+            log("uds 上行交接：顶掉上一条未接手连接，旧句柄即刻关闭");
         }
+        src.put(rd);
         // —— 看守线程消息：UDS 断链重连 / UART 断链重开 / 关停 ——
         loop {
             if shutdown.load(Ordering::SeqCst) {
@@ -208,8 +250,10 @@ fn run_link(
             }
             match exit_rx.recv_timeout(WAIT_SLICE) {
                 Ok(ExitMsg::UdsDead(why)) => {
-                    log(&format!("uds 断链（{why}）；保住 UART，走重连"));
                     drop(kill); // 闭合第三个半边，放行阻塞在旧流上的对端线程
+                    if !uds_retire(&why, conn_at.elapsed(), &mut dwell, shutdown) {
+                        return LinkOutcome::Shutdown;
+                    }
                     continue 'uds;
                 }
                 Ok(ExitMsg::UartDead(why)) => {
@@ -228,13 +272,31 @@ fn run_link(
     }
 }
 
+/// UDS 断链后的重连前处置：活过 [`UDS_MIN_DWELL`] 的连接视为正常断链（立即
+/// 重连并复位退避）；短命连接按指数退避等待。返回 false = 等待期收到关停。
+fn uds_retire(why: &str, lived: Duration, dwell: &mut Backoff, shutdown: &AtomicBool) -> bool {
+    if lived >= UDS_MIN_DWELL {
+        dwell.reset();
+        log(&format!("uds 断链（{why}）；保住 UART，走重连"));
+        return true;
+    }
+    let wait = dwell.next();
+    log(&format!(
+        "uds 断链（{why}）；连接仅存活 {}ms（<{}s），{}s 后重连（防接了就关的空转）",
+        lived.as_millis(),
+        UDS_MIN_DWELL.as_secs(),
+        wait.as_secs()
+    ));
+    sleep_sliced(wait, shutdown)
+}
+
 /// 上行线程：UART 读（阻塞）→ UDS 写；UDS 未就绪/断链时丢弃 + 计数（不缓冲）。
 /// 循环序刻意为"读 → 换流 → 路由"：换流放在读之后、路由之前，读阻塞期间新到的
 /// UDS 连接在本轮就生效——不会把字节写进已经死掉的旧流（丢字节 = 帧撕裂 = 哨兵
 /// 超时重启，能自愈但能不丢就不丢）。
 fn upstream_loop(
     mut rx: Rr3UartConn,
-    new_sink: mpsc::Receiver<UnixStream>,
+    new_sink: Rr3LinkSlot,
     dropped: Arc<AtomicU64>,
     exit: mpsc::Sender<ExitMsg>,
 ) {
@@ -253,7 +315,7 @@ fn upstream_loop(
                 return;
             }
         };
-        while let Ok(s) = new_sink.try_recv() {
+        if let Some(s) = new_sink.take() {
             cur = Some(s);
         }
         let chunk = &buf[..n];
@@ -290,29 +352,26 @@ fn upstream_loop(
     }
 }
 
-/// 下行线程：UDS 读（阻塞）→ UART 写；无连接时等流（100ms 轮询）。
+/// 下行线程：UDS 读（阻塞）→ UART 写；无连接时按 [`WAIT_SLICE`] 轮询交接槽。
 /// 读阻塞可接受的理由见模块注记：rrd 断链以 FIN 及时显形，不会卡死换流。
 fn downstream_loop(
     mut tx: Rr3UartConn,
-    new_src: mpsc::Receiver<UnixStream>,
+    new_src: Rr3LinkSlot,
+    stop: Arc<AtomicBool>,
     exit: mpsc::Sender<ExitMsg>,
 ) {
     let mut buf = [0u8; CHUNK];
     let mut cur: Option<UnixStream> = None;
     loop {
-        while let Ok(s) = new_src.try_recv() {
+        if let Some(s) = new_src.take() {
             cur = Some(s);
         }
-        let stream = match cur.as_mut() {
-            Some(s) => s,
-            None => match new_src.recv_timeout(WAIT_SLICE) {
-                Ok(s) => {
-                    cur = Some(s);
-                    continue;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => return, // 主线程已弃链
-            },
+        let Some(stream) = cur.as_mut() else {
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(WAIT_SLICE);
+            continue;
         };
         let n = match stream.read(&mut buf) {
             Ok(0) => {
@@ -372,6 +431,9 @@ impl Backoff {
     }
     fn peek(&self) -> Duration {
         self.cur
+    }
+    fn reset(&mut self) {
+        self.cur = BACKOFF_START;
     }
     fn next(&mut self) -> Duration {
         let w = self.cur;
@@ -503,6 +565,43 @@ mod tests {
     /// 被丢弃计数吃掉——那是真实语义，不是缺陷，测试得让开这个窗口）。
     fn settle() {
         std::thread::sleep(Duration::from_millis(100));
+    }
+
+    /// 交接槽语义：只保留最新一条，旧句柄在换手瞬间关闭（防"接了就关"的
+    /// 反复重连把 fd 攒到耗尽）。旧句柄关闭用对端 EOF 证明。
+    #[test]
+    fn slot_keeps_latest_and_closes_previous() {
+        let slot = Rr3LinkSlot::new();
+        assert!(slot.take().is_none(), "空槽取走必须为 None");
+        let (a, mut a_peer) = UnixStream::pair().expect("pair 失败");
+        let (b, mut b_peer) = UnixStream::pair().expect("pair 失败");
+        assert!(slot.put(a).is_none(), "首个放入不顶替");
+        assert!(slot.put(b).is_some(), "第二个放入必须顶掉旧的");
+        // macOS 的 AF_UNIX 上 SO_RCVTIMEO 不被接受（EINVAL），这里用非阻塞读：
+        // 旧句柄已关 → 立即 0（EOF）；未关 → WouldBlock。
+        a_peer.set_nonblocking(true).expect("设非阻塞失败");
+        let mut one = [0u8; 1];
+        match a_peer.read(&mut one) {
+            Ok(0) => {}
+            other => panic!("旧句柄必须在换手时关闭（读得 {other:?}）"),
+        }
+        let mut got = slot.take().expect("槽里应有最新连接");
+        assert!(slot.take().is_none(), "取走后槽必须为空");
+        b_peer.write_all(b"x").expect("写最新连接对端失败");
+        got.set_nonblocking(true).expect("设非阻塞失败");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match got.read(&mut one) {
+                Ok(1) => break,
+                Ok(_) => panic!("最新连接读到空"),
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "最新连接 2s 内不可读");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("读最新连接失败: {e}"),
+            }
+        }
+        assert_eq!(one[0], b'x', "最新连接必须仍可用");
     }
 
     /// 带 timeout 的 accept（桥 connect 退避最长 1+2+4+…，给足 15s）。
