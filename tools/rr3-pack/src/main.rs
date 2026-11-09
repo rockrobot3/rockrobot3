@@ -314,7 +314,30 @@ fn rr3_module_names(payload: &Path) -> Result<Vec<String>, String> {
 /// staging 装配（纯 Rust）：把两份真值落成 deb 布局树，返回 staging 目录路径。
 /// 路径 = `--out` 值加 `.stage` 后缀（与产物相邻，清掉即重来，不污染别处）。
 pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
-    // ---- 注入产物完整性（缺席逐件点名，不静默跳过——装机半成品比不出包更危险）----
+    let (names, profile_name, truth) = rr3_stage_check(cfg)?;
+    let stage = cfg.out.with_file_name(format!(
+        "{}.stage",
+        cfg.out
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("out")
+    ));
+    let root = stage.join("usr/lib/rockrobot3");
+    rr3_stage_layout(cfg, &stage)?;
+    rr3_stage_unit(&stage, &profile_name)?;
+    rr3_stage_truth(cfg, &root, &truth)?;
+    // ---- 逐模块：manifest（entry 改写）+ 产物（rust bin / python pkg+shim）+ config（仓内源真值）----
+    for name in &names {
+        rr3_stage_module(cfg, &root, name)?;
+    }
+    Ok(stage)
+}
+
+/// 注入产物完整性 + 模块名单 + 装载真值预验（缺席逐件点名，不静默跳过——
+/// 装机半成品比不出包更危险）。
+fn rr3_stage_check(
+    cfg: &Rr3PackConfig,
+) -> Result<(Vec<String>, String, rrd::profile::Rr3RuntimeTruthSet), String> {
     for bin in ["rrd", "rr3-ctl"] {
         let p = cfg.payload.join(bin);
         if !p.is_file() {
@@ -326,15 +349,11 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     }
     let names = rr3_module_names(&cfg.payload)?;
     let (profile_name, truth) = rr3_truth_ready(cfg)?;
-    // ---- 落 staging ----
-    let stage = cfg.out.with_file_name(format!(
-        "{}.stage",
-        cfg.out
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("out")
-    ));
-    let root = stage.join("usr/lib/rockrobot3");
+    Ok((names, profile_name, truth))
+}
+
+/// deb 骨架：目录 + 两个入口产物 + control/postinst。
+fn rr3_stage_layout(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
     for d in [
         stage.join("DEBIAN"),
         stage.join("usr/bin"),
@@ -351,9 +370,13 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     let postinst = stage.join("DEBIAN/postinst");
     fs::write(&postinst, rr3_postinst_text()).map_err(|e| format!("写 postinst 失败: {e}"))?;
     rr3_make_executable(&postinst);
-    // ExecStart 的 --profile 装机位随 --profile 改写（内容改写②，见模块头注）：模板
-    // 锚定缺省机型 distro.toml，非 distro 机型照抄则 systemd 拉起的 rrd 找不到装配单。
-    // 锚点缺席先报错（对表 base/os/distro/units/rrd.service），不静默照抄。
+    Ok(())
+}
+
+/// systemd 单元：--profile 装机位随 --profile 改写（内容改写②，见模块头注）。
+/// 模板锚定缺省机型 distro.toml，非 distro 机型照抄则 systemd 拉起的 rrd 找不到
+/// 装配单；锚点缺席先报错（对表 base/os/distro/units/rrd.service），不静默照抄。
+fn rr3_stage_unit(stage: &Path, profile_name: &str) -> Result<(), String> {
     const SERVICE_PROFILE_ANCHOR: &str = "/usr/lib/rockrobot3/profiles/distro.toml";
     if !RR3_SERVICE_UNIT.contains(SERVICE_PROFILE_ANCHOR) {
         return Err(format!(
@@ -367,10 +390,17 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
             &format!("{RR3_INSTALL_ROOT}/profiles/{profile_name}"),
         ),
     )
-    .map_err(|e| format!("写 rrd.service 失败: {e}"))?;
-    // ---- 数据真值随包：按清单逐条落位（files 直落、dirs 在则整目录随装）----
-    // 装机布局与仓根同名同布（清单相对路径两侧通用）；轴档案目录缺席合法跳过——
-    // 与装载链 rr3_axis_files_load 的"无 axis 目录 = 无档案"同语义（基-25 清单 dirs 成员）。
+    .map_err(|e| format!("写 rrd.service 失败: {e}"))
+}
+
+/// 数据真值随包：按清单逐条落位（files 直落、dirs 在则整目录随装）。装机布局
+/// 与仓根同名同布（清单相对路径两侧通用）；轴档案目录缺席合法跳过——与装载链
+/// rr3_axis_files_load 的"无 axis 目录 = 无档案"同语义（基-25 清单 dirs 成员）。
+fn rr3_stage_truth(
+    cfg: &Rr3PackConfig,
+    root: &Path,
+    truth: &rrd::profile::Rr3RuntimeTruthSet,
+) -> Result<(), String> {
     for rel in &truth.files {
         let dst = root.join(rel);
         let parent = dst
@@ -385,11 +415,7 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
             rr3_copy_dir(&src, &root.join(rel))?;
         }
     }
-    // ---- 逐模块：manifest（entry 改写）+ 产物（rust bin / python pkg+shim）+ config（仓内源真值）----
-    for name in &names {
-        rr3_stage_module(cfg, &root, name)?;
-    }
-    Ok(stage)
+    Ok(())
 }
 
 /// 装载消费真值集预验（基-25／实-12）：打包与装载同一判据，清单真值只有 rrd
