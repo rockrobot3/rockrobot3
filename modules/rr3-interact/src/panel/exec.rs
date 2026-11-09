@@ -2,8 +2,9 @@
 //!
 //! 本模块只回答一件事：**路由产物 → 应答字节的判据**。监听、accept、限额、
 //! 连接线程归 `server.rs`；路由表（[`super::RR3_PANEL_ROUTES`]）与分派
-//! （[`super::Rr3PanelDispatch`]）也在 `server.rs`，执行面按分派臂逐域折小函数
-//! （`rr3_exec_*`），自检腿（`rr3_leg_*`）与 verdict 判定同址。
+//! （[`super::Rr3PanelDispatch`]）也在 `server.rs`。执行面按应答形状分三域
+//! （协议层自述 / 读口 / 写口），域内按分派臂折小函数（`rr3_exec_*`），
+//! 自检腿（`rr3_leg_*`）与 verdict 判定同址。
 //!
 //! 判据边界（与拆分前逐字一致，结构重构只动形状不动语义）：
 //! - BusCall 载荷含 `error` → 422 + ok:false（上游受理但拒，与 502 传输失败分码）；
@@ -77,10 +78,37 @@ pub(super) fn rr3_panel_execute(req: &Rr3HttpRequest, shared: &Rr3PanelShared) -
     rr3_panel_reply(rr3_panel_route(&req.method, &req.path, &req.body), shared)
 }
 
-/// 分派 → 应答（执行面主表，平铺；动作体按域折到 `rr3_exec_*` 小函数）。
-/// 文案/状态码与拆分前逐字一致——结构重构只动形状不动判据。
+/// 分派 → 应答（执行面主表）：按**应答形状**三域折叠——协议层（不触总线）、
+/// 读口（ctl 查询）、写口（总线/主循环/secrets）。与路由面 `rr3_route_*` 同一
+/// 分面纪律：组函数只认自己那一域，认不出返回 `None`，主表按序兜底。文案与
+/// 状态码逐字保留，本拆分只动形状不动判据。
+///
+/// 三域并集 = 分派枚举全集；`None` 兜底只在**新增变体未并入任何一域**时显形
+/// （500 + 点名），不会把未接线臂静默当 200。改枚举须同步改本表——这是分派的
+/// 单真值点。
 fn rr3_panel_reply(d: Rr3PanelDispatch, shared: &Rr3PanelShared) -> Rr3PanelReply {
-    match d {
+    if let Some(r) = rr3_reply_proto(&d) {
+        return r;
+    }
+    if let Some(r) = rr3_reply_read(shared, &d) {
+        return r;
+    }
+    rr3_reply_write(shared, d).unwrap_or_else(rr3_reply_miss)
+}
+
+/// 未接线兜底：新增分派变体没有并入三域时的唯一出口（fail-closed，点名不断言）
+fn rr3_reply_miss() -> Rr3PanelReply {
+    Rr3PanelReply::json(
+        500,
+        "Internal Server Error",
+        json!({ "error": "面板分派臂未接线（新变体须并入三域之一）" }),
+    )
+}
+
+/// 协议层应答：路由判决（404/405/400）与自述（index/healthz/version）——
+/// 零总线依赖，纯常量应答。
+fn rr3_reply_proto(d: &Rr3PanelDispatch) -> Option<Rr3PanelReply> {
+    Some(match d {
         Rr3PanelDispatch::Html => Rr3PanelReply::html(),
         Rr3PanelDispatch::NotFound => {
             Rr3PanelReply::json(404, "Not Found", json!({ "error": "not found" }))
@@ -111,21 +139,38 @@ fn rr3_panel_reply(d: Rr3PanelDispatch, shared: &Rr3PanelShared) -> Rr3PanelRepl
                 "routes": RR3_PANEL_ROUTES.len(),
             }),
         ),
+        _ => return None,
+    })
+}
+
+/// 读口应答：全部经 ctl 查询或总线取数，只读不动运行态。接线图与 reboot 的
+/// 状态码差异在各自 `rr3_exec_*` 里定形（数据态/拒因语义归 rrd）。
+fn rr3_reply_read(shared: &Rr3PanelShared, d: &Rr3PanelDispatch) -> Option<Rr3PanelReply> {
+    Some(match d {
         Rr3PanelDispatch::StatusQuery => rr3_exec_status(shared),
         Rr3PanelDispatch::CountersQuery => rr3_exec_ctl(shared, "rr3.ctl.counters", 2),
         Rr3PanelDispatch::LogsQuery => rr3_exec_ctl(shared, "rr3.ctl.logs", 3),
         // 接线图：rrd 应答原样透传（available:false 是数据态不是网关错）
         Rr3PanelDispatch::WiringQuery => rr3_exec_ctl(shared, "rr3.ctl.wiring", 5),
-        Rr3PanelDispatch::BusCall { topic, args } => rr3_exec_bus(shared, &topic, &args),
-        Rr3PanelDispatch::PanelAct(action) => rr3_exec_act(shared, action),
         Rr3PanelDispatch::SelfTest => rr3_exec_selftest(shared),
         Rr3PanelDispatch::Reboot => rr3_exec_reboot(shared),
+        _ => return None,
+    })
+}
+
+/// 写口应答：总线透传（BusCall）、主循环代执行（PanelAct）、装配侧写
+/// （ProfileDomainSet）与 secrets 面（ModelKeySet/ModelKeysQuery）。
+fn rr3_reply_write(shared: &Rr3PanelShared, d: Rr3PanelDispatch) -> Option<Rr3PanelReply> {
+    Some(match d {
+        Rr3PanelDispatch::BusCall { topic, args } => rr3_exec_bus(shared, &topic, &args),
+        Rr3PanelDispatch::PanelAct(action) => rr3_exec_act(shared, action),
         // 装配侧写口：body 原样透传 rrd 门序——502 而非 403：码→HTTP 映射是
         // rrd 应答层业务语义，面板只保真转达拒因文案（第二真值点禁令）
         Rr3PanelDispatch::ProfileDomainSet { params } => rr3_exec_domain(shared, &params),
         Rr3PanelDispatch::ModelKeysQuery => rr3_exec_keys(),
         Rr3PanelDispatch::ModelKeySet { ref_name, value } => rr3_exec_key(&ref_name, &value),
-    }
+        _ => return None,
+    })
 }
 
 /// 状态页：health 走 ctl 查询；link 是主循环订阅缓存（只读快照）

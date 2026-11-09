@@ -194,7 +194,7 @@ impl Rr3InteractDispatcher {
 /// 弃帧留痕闸门（纯函数，单测钉域）：第 1 帧必留（"什么时候开始坏的"），其后
 /// 每 N 帧一条（"还在坏、坏因未变"），中间帧只进计数。
 fn rr3_bad_log_due(n: u32) -> bool {
-    n == 1 || n % RR3_TTS_BAD_LOG_EVERY == 0
+    n == 1 || n.is_multiple_of(RR3_TTS_BAD_LOG_EVERY)
 }
 
 impl Dispatcher for Rr3InteractDispatcher {
