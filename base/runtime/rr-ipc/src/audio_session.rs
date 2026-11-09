@@ -102,11 +102,21 @@ fn rr3_log_head(line: &str, max_chars: usize) -> String {
     line.chars().take(max_chars).collect()
 }
 
+/// 板对 `AUDIO ON` 的应答标记（判据与日志切点共用这一条字面量）。
+const RR3_AUDIO_OK: &str = "OK audio on";
+
+/// 标记在行内的字节位置（None = 本行不是 OK 应答）。判据与"前置流/残渣字节
+/// 计数"同一次查找——先前实现先 `contains` 判真再 `find().unwrap()` 切点，
+/// 两处各自写同一字面量，判据一改就是运行期 panic（风险构造，批N44 收口）。
+fn ok_reply_at(line: &str) -> Option<usize> {
+    line.find(RR3_AUDIO_OK)
+}
+
 /// ON 应答行判据：OK 可在行中——流前缀混行合法（p3 实录形状）。
 /// 判 `OK audio on` 全串而非裸 `OK`：b64 字符表含 O/K，裸两字符在流 payload 里
 /// 误配率不可忽略；9 字节全串在 b64/JSON 流里现实上不可撞。
 pub fn ok_reply_line(line: &str) -> bool {
-    line.contains("OK audio on")
+    ok_reply_at(line).is_some()
 }
 
 /// 开口握手（首连/重连同款，批C settle 纪律）：停 1.2s 让开口翻转的板复位走完
@@ -147,8 +157,8 @@ pub fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
     let deadline = Instant::now() + Duration::from_millis(REPLY_TIMEOUT_MS as u64);
     loop {
         let line = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
-        if ok_reply_line(&line) {
-            let (pfx, _) = line.split_at(line.find("OK audio on").unwrap());
+        if let Some(pos) = ok_reply_at(&line) {
+            let (pfx, _) = line.split_at(pos);
             println!(
                 "[audio] board reply: OK（行内扫得；前置 {}B 流/残渣字节）",
                 pfx.len()
