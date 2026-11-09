@@ -997,6 +997,7 @@ mod tests {
         ));
         let f = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&path)
             .expect("tee 上限测试文件打开失败");
