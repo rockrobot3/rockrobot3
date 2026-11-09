@@ -220,6 +220,9 @@ fn rr3_remote_bridge(
 
 /// 桥共享判据（纯函数）：舵机面与音频采集面同选 esp32 ⇒ 同一外设桥，契约所有者
 /// 是音频面 rr3-sense；act 不参与 flock 竞争，直接走远端命令面。
+/// 只在宿主档有跨进程命令面（`rr3_bridge_shared` 的 linux/macos 臂）——rtos/bare
+/// 档恒 false，函数随臂一起 cfg，避免板侧编出"从未被调用"的死码。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn rr3_shared_rule(servo: &str, audio: &str) -> bool {
     servo == RR3_BACKEND_ESP32 && audio == RR3_BACKEND_ESP32
 }
