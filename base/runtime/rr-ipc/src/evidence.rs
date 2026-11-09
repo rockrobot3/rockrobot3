@@ -106,35 +106,46 @@ fn rr3_evidence_head(text: &str) -> Result<Vec<(&str, &str)>, String> {
         if line.is_empty() {
             continue;
         }
-        let Some((key, value)) = line.split_once('=') else {
-            return Err(format!("字段行缺少 '=': {line:?}"));
-        };
-        let key = key.trim();
-        let value = value.trim();
-        if !RR3_EVIDENCE_KEYS.contains(&key) {
-            return Err(format!(
-                "未知键 {key:?}（只认 {}）",
-                RR3_EVIDENCE_KEYS.join("/")
-            ));
-        }
-        let inner = value
-            .strip_prefix('"')
-            .and_then(|v| v.strip_suffix('"'))
-            .ok_or_else(|| format!("{key} 的值必须是一行双引号文本: {value:?}"))?;
-        if inner.contains('"') {
-            return Err(format!("{key} 的值内不许出现双引号: {value:?}"));
-        }
-        fields.push((key, inner));
+        fields.push(rr3_ev_field(line)?);
     }
     if !closed {
         return Err("frontmatter 缺收界 +++".to_string());
     }
+    rr3_ev_required(&fields)?;
+    Ok(fields)
+}
+
+/// 单字段行：`key = "一行文本"`——键在册、值双引号包一行、值内不许再出现双引号
+fn rr3_ev_field(line: &str) -> Result<(&str, &str), String> {
+    let Some((key, value)) = line.split_once('=') else {
+        return Err(format!("字段行缺少 '=': {line:?}"));
+    };
+    let key = key.trim();
+    let value = value.trim();
+    if !RR3_EVIDENCE_KEYS.contains(&key) {
+        return Err(format!(
+            "未知键 {key:?}（只认 {}）",
+            RR3_EVIDENCE_KEYS.join("/")
+        ));
+    }
+    let inner = value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .ok_or_else(|| format!("{key} 的值必须是一行双引号文本: {value:?}"))?;
+    if inner.contains('"') {
+        return Err(format!("{key} 的值内不许出现双引号: {value:?}"));
+    }
+    Ok((key, inner))
+}
+
+/// 必填键核对：字段集必须覆盖 [`RR3_EVIDENCE_KEYS`] 全集
+fn rr3_ev_required(fields: &[(&str, &str)]) -> Result<(), String> {
     for key in RR3_EVIDENCE_KEYS {
         if !fields.iter().any(|(k, _)| *k == key) {
             return Err(format!("缺必填键 {key:?}"));
         }
     }
-    Ok(fields)
+    Ok(())
 }
 
 #[cfg(test)]
