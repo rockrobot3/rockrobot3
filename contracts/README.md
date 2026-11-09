@@ -10,7 +10,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 |---|---|---|
 | `envelope.schema.json` | A-IPC 128B 消息头逐字节偏移表 + payload 类型/flags/错误码枚举 | L1 |
 | `golden/event-header-128.hex` | 一条真实头的 hex 向量（IPC-T-001 的**同机**基准；跨架构等值另见下） | L1 |
-| `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_publish_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
+| `topics.toml` | 主题所有权注册表：`[[owner]]` + `[[topic]]` 两组表（校验入口共三处——`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表判定 `RrdRegistry::rr3_reg_pub_check`；职责与顺序见 [docs/architecture/architecture.md §6.3](../docs/architecture/architecture.md)，第三个入口的线上接线进度属实况，见 [docs/status.md](../docs/status.md)） | L2 |
 | `slots.toml` | 能力格坐标系总表：`[[slot]]`（name/layer/note），三层 base/body/cognition（查册门真值见下"slots.toml 裁定"） | L2 |
 | `roles.toml` | 角色词表（增补轮六 §4.1 新建）：`[[role]]`（name/slot/kind/iface/requires/derives/direction/droppable/input_only_ok/per_instance/note）——profiles `[pins]` 的 role 外键、rrd 派生器（derives）与门 a 六表对账的真值源；slot 外键必须命中 `slots.toml`，iface 外键必须命中 `RR3_ASSEMBLE_HANDLE_TRAITS`（两者由 ⑨-a 报告模式执法——2026-10-18 批N2 件六建步：红账三段对低水位基线 `tools/ci/gate-a-baseline.txt`，转红随基-39 全刀落完） | L2 |
 | `devices.toml` | 器件型号词表（增补轮六 §4.1b 新立，sense S-13）：`[[device]]`（model/bus/addrs/baud_ok/id_reg/peak_ma/mate）——门 o 在册对账、门 i 前件、§12.1 器件级在位探测（id_reg，缺省时探测面只许报 reachable/absent）与校验⑨ 电流互校的真值源；装载期不认型号（D10a），评审期与出厂自检必须认 | L2 |
@@ -32,7 +32,7 @@ Rust 基座（`base/runtime/rr-ipc`）与 Python brain（`rr3-brain`）对同一
 > 与 `tests/envelope_meta.rs` 的元数据守护，读 JSON 而非 Rust 自比；守护条数的唯一登记处是
 > [docs/process/conventions.md](../docs/process/conventions.md) §2，本文件不复述数字）与
 > `bash tools/ci/check.sh`（manifest、主题前缀与注册表形状）兜住；主题前缀归属则在生成/契约
-> 两路自检之外有第三处入口——rrd 在册表 `RrdRegistry::rr3_reg_publish_check`（判定逻辑已交付，
+> 两路自检之外有第三处入口——rrd 在册表 `RrdRegistry::rr3_reg_pub_check`（判定逻辑已交付，
 > 是否接到线上连接路径以 [docs/status.md](../docs/status.md) 为准；三入口职责见
 > [docs/architecture/architecture.md](../docs/architecture/architecture.md) §6.3）。
 

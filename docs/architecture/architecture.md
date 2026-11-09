@@ -997,7 +997,7 @@ rr3-runtime/module/state       rr3-runtime/system/heartbeat
 2. **`rr-registry` 契约测试**（`cargo test -p rr-registry`，用例面在
    `base/runtime/rr-registry/tests/contract.rs`）：按 `module.schema.toml` 逐字段与跨字段规则
    校验每份真实 manifest，含"引用了未注册主题即拒"。
-3. **rrd 在册表判定**：`RrdRegistry::rr3_reg_publish_check(sender_name, topic, topics)`，
+3. **rrd 在册表判定**：`RrdRegistry::rr3_reg_pub_check(sender_name, topic, topics)`，
    返回 `Result<(), Rr3PublishDeny>`。它是**四道门按固定顺序**：
    ① `rr3-runtime/*` 冒充 → `ReservedNamespace`（最严重的定性必须拿得到，故排在最前）
    ② 主题首段 ≠ 发送方 → `ForeignPrefix`
@@ -1177,7 +1177,7 @@ kernel → init → rrd → 读装配单 + 硬件探测（格位匹配，缺格 
 | R1 | 保底轨 Buildroot + RK3566 DTS/音频补丁工作量超预期 | M1 / 保底轨 | 快路上线后保底轨冻结在 Radxa ZERO 3 参考板，自绘板后置；新板优先走发行版快路（ADR-0013） |
 | R2 | ALSA 全双工延迟不达标 | M3 | legacy 闭环 2~5s 为基线，Linux 侧硬件换血预期更好；先实测再优化 |
 | R3 | Python brain GIL/冷启动 | M4 | 策略预载；必要时 brain 拆子进程 |
-| R4 | Rust↔Python 契约漂移 | M2+ | `contracts/` 目录 [SC] 唯一事实源；漂移由**三个入口**分层拦：`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表的 `rr3_reg_publish_check`（三者职责与顺序见 §6.3）。前两个在提交前跑，第三个在线上判定；它接到线上流量的哪一段属实况，见 [`../status.md`](../status.md) |
+| R4 | Rust↔Python 契约漂移 | M2+ | `contracts/` 目录 [SC] 唯一事实源；漂移由**三个入口**分层拦：`rr3-mkmod` 生成自检、`rr-registry` 契约测试、rrd 在册表的 `rr3_reg_pub_check`（三者职责与顺序见 §6.3）。前两个在提交前跑，第三个在线上判定；它接到线上流量的哪一段属实况，见 [`../status.md`](../status.md) |
 | R5 | 0.5L 体积散热（RK3566 被动散热） | 硬件 | 选型时评估无风扇功耗档，后期实机温测 |
 | R6 | A-IPC 自实现运行时与标准偏差 | M2 | IPC-T-001~003 必测；半年复查时对照标准版本变更 |
 | R7 | 待机 <1W 需 suspend/电源状态机与 OS 深度协同 | M5 | rr3-power 与 rrd 电源状态机设计前置，模块声明 wake 权限 |

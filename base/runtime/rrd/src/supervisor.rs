@@ -17,7 +17,7 @@
 //! ④ **depends / degraded 不在本文件裁定**（原"两条不做"随 F2/ADR-0009 解除，但裁定权不在这）：
 //!    boot 启动序由 `rr3_plan_boot` 在 `daemon.rs` 仲裁后投递（环 / 不可满足都在
 //!    那里拒）；降级传播只在本文件收尸那一路"记账之后"被动触发——置位/解除的账本在
-//!    `registry.rs`（`rr3_reg_degrade_after` / `rr3_reg_undegrade_after`），本文件不判
+//!    `registry.rs`（`rr3_reg_degrade` / `rr3_reg_undegrade`），本文件不判
 //!    "谁该降级"，只把收尸事实交出去。降级不出重启计划、不吃预算（裁定 4）。
 //!
 //! 锁纪律（**违反即同线程重入自死锁**，而 `#[cfg(unix)]` 让 Windows L1 全绿也看不见）：
@@ -266,7 +266,7 @@ fn rr3_absorb_exit(
             // 死者若是某能力的提供者且再无人在位 → 下游逐个置 Degraded 并广播。
             // EarlyExit / Silent 两路不传播：前者从未注册过（没有"离开 Running"的相位
             // 事件），后者的死亡已由别人记过、传播也归那一拍。
-            let degraded = rr3_lock(shared).rr3_reg_degrade_after(name);
+            let degraded = rr3_lock(shared).rr3_reg_degrade(name);
             for (dep, task) in degraded {
                 // 排除项 `RR3_TASK_RRD`（不排除，E-9 同一理据）：降级要送到依赖者自己耳朵里。
                 let n = rr3_lock(shared).rr3_reg_fanout(
@@ -362,7 +362,7 @@ fn rr3_boot_spawn(
     // 低电兜底（0.0.2 方案 Q4 裁定）：全局低电旗生效后**停止一切新 spawn**——boot 与
     // 重启共用本漏斗（D-7：护栏长在唯一入口上），一问全挡。挂死的旧进程不在此杀：
     // "杀而不重启"属关机策略，归 rr3-power 演进与 M6；本面只保证不再起新的。
-    if rr3_lock(shared).rr3_reg_low_power_is_set() {
+    if rr3_lock(shared).rr3_reg_lp_is_set() {
         rr3_log(&format!(
             "低电兜底：拒绝 spawn {name}（全局低电旗已置位，停止新 spawn）"
         ));

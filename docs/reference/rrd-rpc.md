@@ -77,10 +77,10 @@
 | `method` | 变体 | `params` 要求 | 成功 `result` 形状 | 出处 |
 |---|---|---|---|---|
 | `rr3.ctl.status` | `CtlStatus` | 无必填 | `{"modules":[{"name","task","phase"}], "denied_publish":<u64>, "boot":<string|null>}`——在册快照按 task 升序，与下行 state 的 phase 词表一致；`boot` 为启动摘要一行（`tier/chip/profile/modules/预降级/缺格/后端`），未定格为 `null` 不造假值 | `conn.rs` 的 `rr3_ctl_status` |
-| `rr3.ctl.health` | `CtlHealth` | 无必填 | `{"modules":[{"name","task","phase","heartbeat_ms","watchdog_ms","since_beat_ms"}], "degraded":[{"module","kind","detail"}]|null}`——后三数是**判定用的数回显**（条目自己的配置 + `now - last_beat`）；`degraded` 为降级原因（`kind` ∈ `missing_slot` / `assemble_broken`），未定格（`--manifest` 后门）为 `null` 不造假值 | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_health_snapshot` |
+| `rr3.ctl.health` | `CtlHealth` | 无必填 | `{"modules":[{"name","task","phase","heartbeat_ms","watchdog_ms","since_beat_ms"}], "degraded":[{"module","kind","detail"}]|null}`——后三数是**判定用的数回显**（条目自己的配置 + `now - last_beat`）；`degraded` 为降级原因（`kind` ∈ `missing_slot` / `assemble_broken`），未定格（`--manifest` 后门）为 `null` 不造假值 | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_health` |
 | `rr3.ctl.logs` | `CtlLogs` | 可选 `prefix`（子串过滤）/ `tail`（尾行数，0 = 不限） | `{"lines":["rrd: …", …]}`——rrd 内存日志环（512 行环形，`rr3_log` 单点落环、不落盘）过滤后的尾部副本；缺省参数与旧行为逐字等价，坏形参数回 `Invalid`（不静默折默认） | `conn.rs` 的 `rr3_log_args`/`rr3_serve_ctl`、`lib.rs` 的 `rr3_log`/`rr3_log_query` |
 | `rr3.ctl.ota` | `CtlOta` | 无必填 | **无**——恒拒：`Permission`（-22，`AIRY_EPERM`）+ 文案点 M6（契约状态码是冻结集，不自造 `NotSupported`） | `conn.rs` 的 `rr3_serve_ctl` |
-| `rr3.ctl.counters` | `CtlCounters` | 无必填 | `{"counters":{"<模块名>/<键>":<u64>, …, "boots":<u64>}}`——运维计数聚合快照（0.0.4 批B，Q1/Q2 裁定）：心跳可选 `counters` 按 `模块名/键` 前缀归并进在册表（`rr3_reg_counters_merge`，饱和加法），`boots` 是 rrd 自有裸键（每次启动自增，不走心跳）；持久化路径与语义见 [`rrd-cli.md`](rrd-cli.md) 的 `RR3_DATA_DIR`。**聚合与落盘在心跳 Rejected 之后也做**——运维账不跟判活走 | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_counters_*` 三方法、`counters.rs` |
+| `rr3.ctl.counters` | `CtlCounters` | 无必填 | `{"counters":{"<模块名>/<键>":<u64>, …, "boots":<u64>}}`——运维计数聚合快照（0.0.4 批B，Q1/Q2 裁定）：心跳可选 `counters` 按 `模块名/键` 前缀归并进在册表（`rr3_reg_ctr_merge`，饱和加法），`boots` 是 rrd 自有裸键（每次启动自增，不走心跳）；持久化路径与语义见 [`rrd-cli.md`](rrd-cli.md) 的 `RR3_DATA_DIR`。**聚合与落盘在心跳 Rejected 之后也做**——运维账不跟判活走 | `conn.rs` 的 `rr3_serve_ctl`、`registry.rs` 的 `rr3_reg_counters_*` 三方法、`counters.rs` |
 | `rr3.ctl.reboot` | `CtlReboot` | 无必填 | `{"reboot":true}`（重启命令已发起）——0.0.4 批C（Q3 裁定）：执行面**双重门**，`cfg(target_os = "linux")` **且** env `RR3_REBOOT_OK=1` 同时成立才真跑；执行面双轨——systemd 轨 `systemctl reboot`，Buildroot/BusyBox 轨回退 `/sbin/reboot`、`/bin/reboot`（解锁旋钮由装机单元/init 脚本注入）；任一不成立 → `Permission`（-22）+ 文案 `reboot 执行面未解锁（需 cfg(linux) 且 env RR3_REBOOT_OK=1，缺省恒拒）`——恒拒路径可测（单测钉拒绝面），解锁面留装机环境，CI 拿不到真重启能力 | `conn.rs` 的 `rr3_reboot_unlocked`/`rr3_reboot_run`/`rr3_ctl_reboot` |
 | `rr3.ctl.wiring` | `CtlWiring` | 无必填 | `{"available":<bool>, "pins":[…], "domains":[…], "wires":[…], "axis":[…], "roles":[…], "checks":[{"item","pass","reason"}]}`——装配快照读口（批N4 件九笔4，白名单六→七 ctl）：boot 装载链产物（[pins]×wiring 全交叉判据含 ⑦-c1 额定加总族，批N5 件五笔3 起）的 OnceLock 副本，判据真值单点在 `assembly.rs` 的 `rr3_assembly_cross_checks`，面板只透传不重判；`--manifest` 调试路径 `available:false` | `conn.rs` 的 `rr3_serve_ctl`、`assembly.rs` 的 `rr3_assembly_render` |
 | `rr3.ctl.contracts` | `CtlContracts` | 无必填 | `{"available":<bool>, "contracts":[{"file","sha256","bytes"}], "checks":[{"item","pass","reason"}]}`——契约完整性审计读口（批N5 件五笔4，白名单七→八 ctl）：boot 装载链验收后契约四册（topics/slots/roles/devices）sha256 记账快照＋自检时点重读对比的"齐全且 sha 对"判果一应答给出（缺册＝齐全破、sha 漂＝sha 对破），判据真值单点在 `contracts.rs` 的 `rr3_contracts_checks`；`--manifest` 调试路径（快照未在册）如实 `available:false` | `conn.rs` 的 `rr3_serve_ctl`、`contracts.rs` 的 `rr3_contracts_json` |
@@ -162,7 +162,7 @@ EOF 同样算干净收尾（`conn.rs` 的 `rr3_serve_request`、`conn.rs` 的 `r
   **不是**模块的上行心跳。
 - **模块要喂狗只能调 `rr3.heartbeat` RPC**（§3）。发布主题喂不了狗：`rr3-runtime/*`
   是内建命名空间（`topics_load.rs` 的 `RR3_RESERVED_OWNER` 常量，值 `rr3-runtime`），
-  任何模块发它都会被 `rr3_reg_publish_check` 的第一道门判成
+  任何模块发它都会被 `rr3_reg_pub_check` 的第一道门判成
   `Rr3PublishDeny::ReservedNamespace`；用这个名字注册则直接
   `Rr3RegisterError::ReservedName` → `Permission`。
 - 契约侧的登记（[`../../contracts/topics.toml`](../../contracts/topics.toml)，本档不抄表）：
@@ -204,24 +204,24 @@ payload 类型 `Notification`（`daemon.rs` 的 `rr3_state_frame`），`src_task
 | 入口 | 冻结的形状 | 线上调用点 |
 |---|---|---|
 | `rr3_rpc_topic_param` | 取发布帧体的 `topic`，非空字符串口径同 `param_str`（`rpc.rs`） | `conn.rs` 的 `rr3_publish` |
-| `RrdRegistry::rr3_reg_publish_check` | `(sender_name, topic, topics) -> Result<(), Rr3PublishDeny>` | `conn.rs` 的 `rr3_publish` |
+| `RrdRegistry::rr3_reg_pub_check` | `(sender_name, topic, topics) -> Result<(), Rr3PublishDeny>` | `conn.rs` 的 `rr3_publish` |
 | `rr3_rpc_status_for_publish_deny` | `&Rr3PublishDeny -> Rr3StatusCode`（映射见 §5） | `conn.rs` 的 `rr3_publish` |
 
 `rr3_publish` 的处理序：取 `topic`（缺键或类型错 → 回 `Invalid` + 保留连接，**不按崩溃收尾、
-且不计数**，`conn.rs` 的 `rr3_publish`）→ `rr3_reg_publish_check` 判归属，被拒则 `rr3_reg_note_denied` 计数并按
+且不计数**，`conn.rs` 的 `rr3_publish`）→ `rr3_reg_pub_check` 判归属，被拒则 `rr3_reg_note_denied` 计数并按
 `rr3_rpc_status_for_publish_deny` 回错误帧 + `Rr3Flow::Keep`（`conn.rs` 的 `rr3_publish`，**不断连**：
 发布越权是数据面问题，不带走控制面，与 `src_task` 伪造同一口径）→ 放行则保留原体转发，
 头改写成发布者 task + `RR3_BROADCAST_DST_TASK`，`rr3_reg_fanout(&frame, me.task)` 排除发布者自己
 （`conn.rs` 的 `rr3_publish`）。
 
 **低电兜底钩子（T4b，0.0.2 方案 Q4 裁定）挂在转发点之后**：原帧已照常扇出后，若 `topic == rr3-power/battery/low`
-（`conn.rs` 的 `RR3_BATTERY_LOW_TOPIC` 常量），调 `rr3_reg_low_power_raise`（[`rrd-registry.md`](rrd-registry.md) §10）——
+（`conn.rs` 的 `RR3_BATTERY_LOW_TOPIC` 常量），调 `rr3_reg_lp_raise`（[`rrd-registry.md`](rrd-registry.md) §10）——
 上升沿则取已解析体里的 `percent` / `voltage_mv` 透传构造 `rr3-runtime/system/power` 帧（`daemon.rs` 的
 `rr3_system_power_frame`，缺键按 0），以 `src = RR3_TASK_RRD` 再扇出一次并打 `低电兜底触发：battery/low percent=… voltage_mv=… → 置全局低电旗、停止新 spawn，广播 rr3-runtime/system/power 到 {n} 个连接`；
 非上升沿只打 `低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）`。**兜底是额外动作，
 不截断事件流**——battery/low 本身在上一步已作为普通事件转发；supervisor 的 spawn 漏斗据旗拒新 spawn。
 **解除路径（批N5 件二笔3，全案 §17 运维留痕）**：同一钩子点若 `topic == rr3-power/battery/ok`（`RR3_BATTERY_OK_TOPIC`），
-调 `rr3_reg_low_power_lower`——下降沿则同式构造 `reason = "battery-ok"` 的点名帧扇出并打
+调 `rr3_reg_lp_lower`——下降沿则同式构造 `reason = "battery-ok"` 的点名帧扇出并打
 `低电兜底解除：battery/ok percent=… voltage_mv=… → 清全局低电旗、恢复新 spawn，…`；旗未置位时只打
 `低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）`。两个沿一个对：置旗听 low、清旗听 ok，
 同一次低电段各点名恰一次。
@@ -229,7 +229,7 @@ payload 类型 `Notification`（`daemon.rs` 的 `rr3_state_frame`），`src_task
 一条由 `conn.rs` 承担的调用方义务：`sender_name` 取的是**这条连接注册时确立的在册身份**
 `me.name`（`Rr3Peer` 随握手成功才构造，`conn.rs` 的 `rr3_handshake`），转发前帧上的 `src_task` 已被强制等于
 `me.task`（`conn.rs` 的 `rr3_serve_frame`），所以它既**不取自帧体、也不取自注册报文里自称的 `name` 字段**——
-这正是 `registry.rs` 的 `rr3_reg_publish_check` 文档注释里那句"唯一防线建在调用侧"在线上成立的方式。`registry.rs` 那段注释
+这正是 `registry.rs` 的 `rr3_reg_pub_check` 文档注释里那句"唯一防线建在调用侧"在线上成立的方式。`registry.rs` 那段注释
 设想的取名途径 `rr3_reg_name_of(src_task)` 本 HEAD 仍无生产调用点：`rr3_publish` 用的是注册时
 缓存的 `me.name`，二者都是"连接持有的身份"、都不来自帧体，语义等价。判定函数本身是关联函数、
 看不见在册表，替不了调用方保证这件事。

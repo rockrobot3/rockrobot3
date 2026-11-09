@@ -452,7 +452,7 @@ fn rr3_serve_ctl(
         // 语义（watchdog 判活的输入），counters 是业务运维账（"机器慢先看数字"）。
         // 键 = `模块名/键`（模块自报归并）或 `boots`（rrd 自有）；未持久化时只有内存账。
         Rr3RpcMethod::CtlCounters => {
-            let counters = rr3_lock(&ctx.shared).rr3_reg_counters_snapshot();
+            let counters = rr3_lock(&ctx.shared).rr3_reg_counters();
             Ok(json!({ "counters": counters }))
         }
         // 恒拒（ADR-0010 裁定 4）：方法名进白名单把协议面定型，语义随 M6；
@@ -528,7 +528,7 @@ fn rr3_ctl_status(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
 fn rr3_ctl_health(ctx: &Rr3ConnCtx) -> Result<Value, (Rr3StatusCode, String)> {
     let modules = {
         let g = rr3_lock(&ctx.shared);
-        g.rr3_reg_health_snapshot(ctx.rr3_ctx_now_ms())
+        g.rr3_reg_health(ctx.rr3_ctx_now_ms())
             .into_iter()
             .map(|r| {
                 json!({
@@ -708,7 +708,7 @@ fn rr3_pub_gate(
     topic: &str,
 ) -> Option<Rr3Flow> {
     let deny = {
-        let check = RrdRegistry::rr3_reg_publish_check(&me.name, topic, &ctx.topics);
+        let check = RrdRegistry::rr3_reg_pub_check(&me.name, topic, &ctx.topics);
         if let Err(e) = check {
             rr3_lock(&ctx.shared).rr3_reg_note_denied();
             Some(e)
@@ -755,7 +755,7 @@ fn rr3_pub_forward(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str) {
         let n = g.rr3_reg_fanout(&frame, me.task);
         // 影子统计（广播面 ADR 前哨）：只按 manifest subscribes 记账"本应过滤"的
         // 目标数，不改上面的全量投递——计数面 = rr3.ctl.counters 的 fanout_shadow*
-        g.rr3_reg_fanout_shadow(topic, me.task);
+        g.rr3_reg_shadow(topic, me.task);
         let changed = g.rr3_reg_fan_changed(topic, n);
         (n, changed)
     };
@@ -774,7 +774,7 @@ fn rr3_pub_forward(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str) {
 /// 额外动作，不截断事件流。
 fn rr3_pub_batt(ctx: &Rr3ConnCtx, topic: &str, parsed: &Value) {
     if topic == RR3_BATTERY_LOW_TOPIC {
-        let rising = rr3_lock(&ctx.shared).rr3_reg_low_power_raise();
+        let rising = rr3_lock(&ctx.shared).rr3_reg_lp_raise();
         if rising {
             let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
             let voltage_mv = parsed
@@ -792,7 +792,7 @@ fn rr3_pub_batt(ctx: &Rr3ConnCtx, topic: &str, parsed: &Value) {
             rr3_log("低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）");
         }
     } else if topic == RR3_BATTERY_OK_TOPIC {
-        let falling = rr3_lock(&ctx.shared).rr3_reg_low_power_lower();
+        let falling = rr3_lock(&ctx.shared).rr3_reg_lp_lower();
         if falling {
             let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
             let voltage_mv = parsed
@@ -916,7 +916,7 @@ fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
     let Some(counters) = rr3_rpc_counters(params) else {
         return;
     };
-    let changed = rr3_lock(&ctx.shared).rr3_reg_counters_merge(&me.name, &counters);
+    let changed = rr3_lock(&ctx.shared).rr3_reg_ctr_merge(&me.name, &counters);
     if !changed || ctx.counters_path.is_none() {
         return;
     }
@@ -926,7 +926,7 @@ fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
     if !gate.rr3_on_change(ctx.rr3_ctx_now_ms()) {
         return;
     }
-    let snap = rr3_lock(&ctx.shared).rr3_reg_counters_snapshot();
+    let snap = rr3_lock(&ctx.shared).rr3_reg_counters();
     let Some(path) = ctx.counters_path.as_deref() else {
         return;
     };
@@ -944,7 +944,7 @@ fn rr3_beat_promote(ctx: &Rr3ConnCtx, me: &Rr3Peer) {
     rr3_log(&format!("{} → running（广播到 {n} 个连接）", me.name));
     // ADR-0009 裁定 3 恢复半边：提供者回到 Running → 依赖者逐个重算，全部
     // required 就位才回 Running。谁记的账谁传播。
-    let recovered = rr3_lock(&ctx.shared).rr3_reg_undegrade_after(&me.name);
+    let recovered = rr3_lock(&ctx.shared).rr3_reg_undegrade(&me.name);
     for (dep, task) in recovered {
         let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
             &rr3_state_frame(&dep, Rr3Phase::Running.as_str(), task),
@@ -1149,7 +1149,7 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
             // 只置位与广播，不记账不出计划（裁定 4）。Deferred/Silent 两路不在这里传播：
             // 死亡分别由退出码那一路（supervisor）与到期那一路（watchdog）记，各自的
             // 落点负责各自的传播，一次死亡恰好传播一次。
-            let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade_after(&me.name);
+            let degraded = rr3_lock(&ctx.shared).rr3_reg_degrade(&me.name);
             for (dep, task) in degraded {
                 let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
                     &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),

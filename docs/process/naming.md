@@ -47,8 +47,8 @@
 > **校验入口（v0.0.1 实况，与 [architecture.md](../architecture/architecture.md) §6.3 同一口径）**：
 > 共**三处**，职责各不相同——① `rr3-mkmod` 生成自检；② `rr-registry` 契约测试
 > （`cargo test -p rr-registry`，由 `tools/ci/check.sh` ②/③ 步点名）；③ rrd 在册表判定
-> `RrdRegistry::rr3_reg_publish_check`（按 `manifest.name` 判前缀归属并放行/拒绝，四道门）。
-> 入口 ③ 的判定逻辑在 `base/runtime/rrd/src/registry.rs`（`RrdRegistry::rr3_reg_publish_check`
+> `RrdRegistry::rr3_reg_pub_check`（按 `manifest.name` 判前缀归属并放行/拒绝，四道门）。
+> 入口 ③ 的判定逻辑在 `base/runtime/rrd/src/registry.rs`（`RrdRegistry::rr3_reg_pub_check`
 > 返回 `Rr3PublishDeny`，四道门次序即安全语义）；**它接到线上流量的哪一段属实况，一律以
 > [`../status.md`](../status.md) 为准，本文不复述**。接口字面量（门序、错误码、`Display` 文案）
 > 归 [`../reference/rrd-registry.md`](../reference/rrd-registry.md) §8 与

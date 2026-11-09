@@ -85,17 +85,26 @@ pub(crate) fn rr3_nm_read_capped(s: &mut impl Read, deadline: Instant) -> Vec<u8
     capped_loop(s, deadline)
 }
 
-/// 两平台共用的读循环主体：EOF/到点/错误三出口。
+/// 子进程输出字节上限：nmcli 的 terse 输出是行文本（扫描表每 AP 一行），1 MiB
+/// 已远超真实环境；设帽防"nmcli 被替换/异常刷屏"把内存吃穿（deadline 只管时间，
+/// 不管字节量——2026-11-09 静态审计）。
+const RR3_NM_OUT_CAP: usize = 1 << 20;
+
+/// 两平台共用的读循环主体：EOF/到点/超帽/错误四出口。超帽截断返回，调用方按
+/// 自身的解析/报错路径处理残文（不在这里判业务语义）。
 fn capped_loop(s: &mut impl Read, deadline: Instant) -> Vec<u8> {
     let mut out = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
-        if Instant::now() >= deadline {
+        if Instant::now() >= deadline || out.len() >= RR3_NM_OUT_CAP {
             break;
         }
         match s.read(&mut buf) {
             Ok(0) => break,
-            Ok(n) => out.extend_from_slice(&buf[..n]),
+            Ok(n) => {
+                let room = RR3_NM_OUT_CAP - out.len();
+                out.extend_from_slice(&buf[..n.min(room)]);
+            }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(RR3_NM_POLL);
             }
@@ -242,5 +251,13 @@ mod tests {
             !eq.contains("s3cret") && eq.contains("802-11-wireless-security.psk=***"),
             "等号形式同样脱敏: {eq}"
         );
+    }
+
+    /// 读帽：源源不断的输入也只收到 1MiB（deadline 管时间，帽管字节量）。
+    #[test]
+    fn read_stops_at_byte_cap() {
+        let mut src = std::io::repeat(b'x').take((RR3_NM_OUT_CAP as u64) * 4);
+        let out = capped_loop(&mut src, Instant::now() + Duration::from_secs(5));
+        assert_eq!(out.len(), RR3_NM_OUT_CAP, "超帽即截断");
     }
 }

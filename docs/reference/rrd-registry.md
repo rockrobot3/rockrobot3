@@ -23,7 +23,7 @@
 
 | 项 | 事实 | 出处 |
 |---|---|---|
-| 类型 | `RrdRegistry`，字段 `modules`（`BTreeMap` 名→条目）、`by_task`（task→名）、`next_task`、`restart_base_ms`、`denied_publish`、`crash_streak`（`BTreeMap` 名→崩溃连击数）、`owned`（`BTreeSet` 名）、`stopped`（`BTreeSet` 名）、`providers`（能力→提供者名集合，**boot 仲裁产物**、只含非 base 能力；写入方 `rr3_reg_set_providers`，运行期不重排）、`low_power`（全局低电旗，T4b：conn 转发 `rr3-power/battery/low` 时置位、supervisor 的 spawn 漏斗读它拒新 spawn；批N5 件二笔3 起收到 `rr3-power/battery/ok` 清位、恢复新 spawn——与 `denied_publish` 同款 conn 与 supervisor 两路共见守护态，两个沿一个对，见 §10 末行） | `registry.rs` 的 `RrdRegistry` 结构体 |
+| 类型 | `RrdRegistry`，字段 `modules`（`BTreeMap` 名→条目）、`by_task`（task→名）、`next_task`、`restart_base_ms`、`denied_publish`、`crash_streak`（`BTreeMap` 名→崩溃连击数）、`owned`（`BTreeSet` 名）、`stopped`（`BTreeSet` 名）、`providers`（能力→提供者名集合，**boot 仲裁产物**、只含非 base 能力；写入方 `rr3_reg_providers`，运行期不重排）、`low_power`（全局低电旗，T4b：conn 转发 `rr3-power/battery/low` 时置位、supervisor 的 spawn 漏斗读它拒新 spawn；批N5 件二笔3 起收到 `rr3-power/battery/ok` 清位、恢复新 spawn——与 `denied_publish` 同款 conn 与 supervisor 两路共见守护态，两个沿一个对，见 §10 末行） | `registry.rs` 的 `RrdRegistry` 结构体 |
 | 构造 | `RrdRegistry::new(restart_base_ms)`，`next_task` 起点 = `RR3_TASK_FIRST_MODULE`，其余账全部为空 | `registry.rs` 的 `RrdRegistry::new` |
 | 条目 | `Entry { name, src_task, phase, facts, last_beat_ms, registered_at_ms, tx }`——**两颗时间基准**：判死看 `last_beat_ms`（多久没喂狗）、恢复归零看 `registered_at_ms`（这一世活了多久），不许混用 | `registry.rs` 的 `Entry` 结构体 |
 | 平台 | 平台无关：只碰 `BTreeMap` / `mpsc` / `u64` 单调毫秒；UDS 与进程派生在 `conn.rs` / `daemon.rs`（整体 `#[cfg(unix)]`） | `registry.rs` 的模块级文档注释 |
@@ -53,7 +53,7 @@
 |---|---|---|
 | `Registered` | `registered` | 已注册、**尚未收到任何心跳**：此刻不判活（legacy 教训 76c0ad8） |
 | `Running` | `running` | 收到过至少一颗心跳 |
-| `Degraded` | `degraded` | required 能力的提供者**全部**离开 Running（ADR-0009 裁定 3）；置位方 `rr3_reg_degrade_after`、解除方 `rr3_reg_undegrade_after` |
+| `Degraded` | `degraded` | required 能力的提供者**全部**离开 Running（ADR-0009 裁定 3）；置位方 `rr3_reg_degrade`、解除方 `rr3_reg_undegrade` |
 | `Failed` | `failed` | 到期判死（`rr3_reg_expire`）、非 owned 的连接收尾（`rr3_reg_death`）、子进程退出码收尸（`rr3_reg_child_exit`）三路置位并**保留**条目。注意 `rr3.unregister` 走 `rr3_reg_remove` 是**直接把条目删掉**、不经 `Failed`，两条退场路径别混 |
 
 当前可发生的转移（真值见 `registry.rs` 的 `Rr3Phase` 文档注释）：
@@ -64,23 +64,23 @@
 | `registered \| running → failed`（心跳超 `watchdog_ms`；同一趟里兼做恢复归零） | `rr3_reg_expire(now_ms)` | `registry.rs` 的 `rr3_reg_expire` |
 | `registered \| running → failed`（连接收尾；**owned 的名字不让位之前不动相位**，见 §7.1） | `rr3_reg_death(name, clean_exit, now_ms) -> Rr3Death` | `registry.rs` 的 `rr3_reg_death` |
 | `registered \| running → failed`（子进程退出码，supervisor 收尸） | `rr3_reg_child_exit(facts, clean_exit, now_ms) -> Rr3ChildExit` | `registry.rs` 的 `rr3_reg_child_exit` |
-| `running → degraded`（`provider` 离开 Running 后，它提供的某能力再无任何 **Running** 提供者 → 依赖该能力的在册 `Running` 模块逐个置位；多提供者时任一存活即满足） | `rr3_reg_degrade_after(provider) -> Vec<(String, u64)>` | `registry.rs` 的 `rr3_reg_degrade_after` |
-| `degraded → running`（`provider` 回到 Running 那一拍重算，**全部** required 能力重新就位才回——只回来一个提供者不代表别的依赖也好了） | `rr3_reg_undegrade_after(provider) -> Vec<(String, u64)>` | `registry.rs` 的 `rr3_reg_undegrade_after` |
+| `running → degraded`（`provider` 离开 Running 后，它提供的某能力再无任何 **Running** 提供者 → 依赖该能力的在册 `Running` 模块逐个置位；多提供者时任一存活即满足） | `rr3_reg_degrade(provider) -> Vec<(String, u64)>` | `registry.rs` 的 `rr3_reg_degrade` |
+| `degraded → running`（`provider` 回到 Running 那一拍重算，**全部** required 能力重新就位才回——只回来一个提供者不代表别的依赖也好了） | `rr3_reg_undegrade(provider) -> Vec<(String, u64)>` | `registry.rs` 的 `rr3_reg_undegrade` |
 
 两条要记住的限定：
 
 - **`Degraded` 的置位 / 解除 / 续命三条都已实装**（ADR-0009 裁定 3；不再是"随 M5 落地"）：
   - **只续命不升级**：`rr3_reg_beat` 遇 `Degraded` 归 `Kept`（`registry.rs` 的 `rr3_reg_beat`），
     "一颗心跳抹平降级标注"的欠账已结清。
-  - **置位**：`rr3_reg_degrade_after(provider)`——`provider` 的死亡**已先在本表落账**
+  - **置位**：`rr3_reg_degrade(provider)`——`provider` 的死亡**已先在本表落账**
     （三条死亡路各自先记账再传播，否则"它自己还 Running"会挡住判空），只置位、
     **不记账不出重启计划**（裁定 4：降级不是崩溃，不吃预算不经 supervisor）。
-  - **解除**：`rr3_reg_undegrade_after(provider)`——逐模块重算，`rr3_deps_satisfied`
+  - **解除**：`rr3_reg_undegrade(provider)`——逐模块重算，`rr3_deps_satisfied`
     要求 **全部** required 能力就位；不在 `providers` 表里的能力视为 base 内建、永远在位
     （线上补注册的模块不做二次裁定，ADR-0009 不做清单 2 的同一条边界）。
   - **线侧接线四处**：watchdog 判死（`daemon.rs`）、supervisor 收尸（`supervisor.rs`）、
     conn 的死亡与复活两路（`conn.rs`）各在记账后调用传播方法，并照返回的 `(名, task)`
-    广播 state。`providers` 表由 `rr3_reg_set_providers` 在 boot 仲裁时一次性写入
+    广播 state。`providers` 表由 `rr3_reg_providers` 在 boot 仲裁时一次性写入
     （含被仲裁拒绝的模块——它们的 provides 仍计入可满足性宇宙）。
 - 另有第五个词 `unregistered` **不属** `Rr3Phase`：由 `rr3_phase_for_exit(clean_exit)`
   映射（干净退场 → `unregistered`，否则 `failed`，`registry.rs` 的 `rr3_phase_for_exit`），conn 收尾与
@@ -276,9 +276,9 @@ supervisor 已退出，重启投递丢弃: {name}
 
 ## 8 发布归属：四道门的**次序**就是安全语义
 
-`RrdRegistry::rr3_reg_publish_check(sender_name, topic, topics) -> Result<(), Rr3PublishDeny>`
+`RrdRegistry::rr3_reg_pub_check(sender_name, topic, topics) -> Result<(), Rr3PublishDeny>`
 是**关联函数**（不碰 `self`，看不见在册表），生产路径与测试路径完全同码
-（`registry.rs` 的 `rr3_reg_publish_check`）——线上调用点是发布入口 `rr3_publish`（`conn.rs` 的 `rr3_publish`，见
+（`registry.rs` 的 `rr3_reg_pub_check`）——线上调用点是发布入口 `rr3_publish`（`conn.rs` 的 `rr3_publish`，见
 [`rrd-rpc.md`](rrd-rpc.md) §7）：
 
 | 门 | 条件 | 拒绝 | 映射码 |
@@ -292,12 +292,12 @@ supervisor 已退出，重启投递丢弃: {name}
 
 - **顺序不是洁癖**：`rr3-runtime/*` 的冒充者在主题集里可以"合法在册"（`owner` 就写
   `rr3-runtime`），先查前缀或先查在册会把它判成 `ForeignPrefix` / `Ok` 而不是"冒充"这条
-  最严重的定性。rrd 自己是该命名空间唯一合法发布者，走下行广播路径，**不调本函数**（`rr3_reg_publish_check` 的文档注释）。
+  最严重的定性。rrd 自己是该命名空间唯一合法发布者，走下行广播路径，**不调本函数**（`rr3_reg_pub_check` 的文档注释）。
 - **④ 不是重复劳动**：首段 == `sender_name` 只是主题串的**语法**事实，登记 `owner` ==
   `sender_name` 才是**在册事实**。`rr3_topic_check` 的"首段 == owner"前置只在
   `rr3_topics_load` 的装载路径上强制，而 `rr3_topic_parse` 本身是 public，
   绕开 check 造一张"首段是 rr3-sima、登记 owner 是 rr3-simb"的表并不费力——安全判定不押在
-  "上游一定查过"上（`rr3_reg_publish_check` 的末段 owner 比对）。
+  "上游一定查过"上（`rr3_reg_pub_check` 的末段 owner 比对）。
 - **③ 指的是主题不在册**（首段与发送方相符、名字拼错或没登记），**不是**指发送方那个模块
   没在册：本函数不碰 `self`（`Rr3PublishDeny` 的 `NotRegistered` 变体文档注释）。
 
@@ -313,10 +313,10 @@ supervisor 已退出，重启投递丢弃: {name}
 未注册主题 {topic}，拒绝发布
 ```
 
-**调用方义务（本函数替不了你保证）**：`rr3_reg_publish_check` 收 `sender_name: &str`、
+**调用方义务（本函数替不了你保证）**：`rr3_reg_pub_check` 收 `sender_name: &str`、
 不碰 `self`，所以它既不知道这个名字是否在册（从未注册、或已 `Failed` 的名字照样能拿到
 `Ok`），也不知道它是不是报文里编出来的——唯一的防线建在调用侧：传进来的发送方**绝不得
-取自帧体或注册报文里自称的 `name` 字段**（`rr3_reg_publish_check` 的文档注释）。HEAD 的线上发布分支
+取自帧体或注册报文里自称的 `name` 字段**（`rr3_reg_pub_check` 的文档注释）。HEAD 的线上发布分支
 （`rr3_publish`）用 `me.name` 兑现这条前提——它是 `Rr3Peer` 随握手成功才存在的、
 rrd 在注册时收下并分配的在册身份（`rr3_handshake` 的 `rr3_reg_add` 调用段），帧上的 `src_task` 又已在分发前被强制
 等于 `me.task`（`rr3_serve_frame` 的 `src_task` 校验段），而 `me.name` 与 `me.task` 出自同一次 `rr3_reg_add`
@@ -355,7 +355,7 @@ rrd 在注册时收下并分配的在册身份（`rr3_handshake` 的 `rr3_reg_ad
 | `rr3_reg_snapshot() -> Vec<(String, u64, Rr3Phase)>` | — | 按 **task 升序**（不是名字序）：状态广播与运维输出处要靠它对齐 task 号，名字序只是 `BTreeMap` 的顺带结果，故显式排序。后到连接补发快照用的就是它（`rr3_handshake` 的快照补发段，排除自己同名条目） | `registry.rs` 的 `rr3_reg_snapshot` |
 | `rr3_reg_callee_for(topic) -> Option<(String, u64)>` | (名， task) | M3 `rr3.call` 的被调方查找：在**相位非 `Failed` 且句柄在**、`[rpc].exposes` 含该主题的在册条目里取 **task 最小**者（同主题多提供方时的确定性裁定）；无人匹配回 `None`。唯一生产调用点 `rr3_route_call`（`conn.rs` 的 `rr3_route_call`，[`rrd-rpc.md`](rrd-rpc.md) §8） | `registry.rs` 的 `rr3_reg_callee_for` |
 | `rr3_reg_send_to(task, frame) -> bool` | 是否成功入队 | M3 点名**单播**：按 `by_task` 找到那条连接的 `Sender` 投一帧（`rr3_reg_fanout` 签名冻结不动，单播由本函数承担）。不在册 / 句柄已 drop / 收件人已 drop 都回 `false`，由调用方决定回什么错。两个生产调用点都在 conn 层的 `rr3.call` 面上：转发请求（`rr3_route_call` 的投递段）与应答回路改道（`conn.rs` 的 `rr3_route_response`） | `registry.rs` 的 `rr3_reg_send_to` |
-| `rr3_reg_low_power_raise() -> bool` / `rr3_reg_low_power_lower() -> bool` / `rr3_reg_low_power_is_set() -> bool` | 是否上升沿 / 是否下降沿 / 旗现状 | T4b 全局低电旗（0.0.2 方案 Q4 裁定）＋解除路径（批N5 件二笔3，全案 §17 运维留痕）：`raise` 在**上升沿**回 `true`——调用方（conn 转发点）据此点名广播一次 `rr3-runtime/system/power`（reason=battery-low；Notification / src=rrd / dst=广播 / 体恰四字段；帧构造在 `daemon.rs` 的 `rr3_system_power_frame`，钩子序见 [`rrd-rpc.md`](rrd-rpc.md) §7）；重复 `battery/low` 只打"已生效"日志不重复广播。`lower` 在旗已置位时回 `true`（**下降沿**）——conn 收到 `rr3-power/battery/ok`（恢复沿）清旗、同式点名一次 reason=battery-ok 并恢复新 spawn；旗未置位时回 `false` 只打"本未触发"日志。两个沿一个对，低电是可循环的 episodes。`is_set` 的唯一消费者是 supervisor 的 spawn 漏斗（`rr3_boot_spawn` 拒一切新 spawn：boot 与重启一问全挡；杀而不重启属关机策略，不在这里） | `registry.rs` 的 `rr3_reg_low_power_raise` / `rr3_reg_low_power_lower` / `rr3_reg_low_power_is_set`、`conn.rs` 的低电兜底段、`supervisor.rs` 的 `rr3_boot_spawn` |
+| `rr3_reg_lp_raise() -> bool` / `rr3_reg_lp_lower() -> bool` / `rr3_reg_lp_is_set() -> bool` | 是否上升沿 / 是否下降沿 / 旗现状 | T4b 全局低电旗（0.0.2 方案 Q4 裁定）＋解除路径（批N5 件二笔3，全案 §17 运维留痕）：`raise` 在**上升沿**回 `true`——调用方（conn 转发点）据此点名广播一次 `rr3-runtime/system/power`（reason=battery-low；Notification / src=rrd / dst=广播 / 体恰四字段；帧构造在 `daemon.rs` 的 `rr3_system_power_frame`，钩子序见 [`rrd-rpc.md`](rrd-rpc.md) §7）；重复 `battery/low` 只打"已生效"日志不重复广播。`lower` 在旗已置位时回 `true`（**下降沿**）——conn 收到 `rr3-power/battery/ok`（恢复沿）清旗、同式点名一次 reason=battery-ok 并恢复新 spawn；旗未置位时回 `false` 只打"本未触发"日志。两个沿一个对，低电是可循环的 episodes。`is_set` 的唯一消费者是 supervisor 的 spawn 漏斗（`rr3_boot_spawn` 拒一切新 spawn：boot 与重启一问全挡；杀而不重启属关机策略，不在这里） | `registry.rs` 的 `rr3_reg_lp_raise` / `rr3_reg_lp_lower` / `rr3_reg_lp_is_set`、`conn.rs` 的低电兜底段、`supervisor.rs` 的 `rr3_boot_spawn` |
 
 ## 11 相关文档
 

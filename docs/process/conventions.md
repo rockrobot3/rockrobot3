@@ -313,7 +313,7 @@ pass`——n-a 不拖累不救场，全 n-a＝无一真判如实 fail；旧 all_
 additionalProperties=false；RR3_PINNED_TOPICS 数组随本笔补齐批N4 件六二/九二/九三漏掉的
 7 条 ops 主题 31→39，既有缺口顺带修复留痕）；`Rr3LowEdge` 补 `rr3_low_edge_recover`
 （回阈首拍恰一次；先 recover 后 cross、同一采样值的喂入次序是契约——先喂 cross 会被再武装
-分支吞掉恢复沿）；rrd `rr3_reg_low_power_lower()`（返回是否真下降沿）＋conn battery/ok 臂
+分支吞掉恢复沿）；rrd `rr3_reg_lp_lower()`（返回是否真下降沿）＋conn battery/ok 臂
 （falling 才广播 `system/power(reason=battery-ok)`，重复 ok 不重复广播）＋新
 `e2e_power_ok` 全链线级证据；"low_power 旗补解除路径（今天只升不降）"敞口自此关闭——
 两个沿一个对：battery/low 上升沿置旗拒新 spawn／battery/ok 回阈下降沿清旗恢复新 spawn。
@@ -778,7 +778,7 @@ Windows **221**（未实跑，按 214 + 平台无关 7 推算）。② 29 条无
 
 测试面如实登记（2026-10-01 F3 控制通道收口复测（`rr3.ctl.*` 查询面 + rr3-ctl 实装，
 语义裁定全文见 ADR-0010）。净增 **10** 条 + 独立工程 **12** 条：rr-registry lib 23→25——
-`registry::tests` 2 条（`rr3_reg_health_snapshot` 的判定数回显：task 升序 + `since_beat_ms`
+`registry::tests` 2 条（`rr3_reg_health` 的判定数回显：task 升序 + `since_beat_ms`
 = `now - last_beat` 三数逐一对、`saturating_sub` 对 now < last_beat 夹 0 不回绕）+
 rrd lib 105→108——`rpc::tests` 1 条（四个 ctl 方法过同一解析器且 `is_ctl` 判据与方法面一致、
 模块四方法全部 `!is_ctl`）+ `registry::tests` 2 条并入上面 rr-registry 段、rrd 侧实为
@@ -879,7 +879,7 @@ charger/state，rrd 低电兜底四件动作面，0.0.2 方案 Q4 裁定）同�
 17→**19**（+2：sim 电池三元组读回与电压曲线两端钉死（3200mV + 10mV/1%）/ 电池
 env 取值裁决纯函数（percent 0–100、charging 只认 1/0，未设缺省 80/未充电））；rrd
 lib +2：registry 全局低电旗（上升沿恰一次、只升不降〔解除沿批N5 件二笔3 补——
-`rr3_reg_low_power_lower`＋battery/ok 回阈清旗，两个沿一个对，见 2026-10-20 件二条目〕——与 denied_publish 同款
+`rr3_reg_lp_lower`＋battery/ok 回阈清旗，两个沿一个对，见 2026-10-20 件二条目〕——与 denied_publish 同款
 "conn 与 supervisor 两路共见"守护态）+ daemon 低电点名帧形状钉死（Notification /
 src=rrd / dst=广播 / 体恰四字段——e2e 旁观者接入时首拍已过，帧形状只有单测能钉，
 两半拼成完整证据链）；新线级目标 `rrd/tests/e2e_power.rs` **1** 条（整体
@@ -1012,8 +1012,8 @@ T4a/b/c 三模块实装、T4b 低电兜底、T5 deb 打包链、保底轨修复�
 "例外面"行——目录不单独规范化、存在性由 join 出的 topics/slots 各自 canonicalize 把关 /
 §5 启动序第 5 步契约定位与第 7 步致命面补"格位契约读不到"）；
 [rrd-registry.md](../reference/rrd-registry.md) §1 `RrdRegistry` 字段列补 `low_power`、
-§10 补 `rr3_reg_low_power_raise` / `rr3_reg_low_power_is_set` 行（上升沿恰一次、只升不降
-不设解除口〔解除口 `rr3_reg_low_power_lower` 批N5 件二笔3 补，见 2026-10-20 件二条目〕、
+§10 补 `rr3_reg_lp_raise` / `rr3_reg_lp_is_set` 行（上升沿恰一次、只升不降
+不设解除口〔解除口 `rr3_reg_lp_lower` 批N5 件二笔3 补，见 2026-10-20 件二条目〕、
 spawn 漏斗唯一消费者）；[rrd-rpc.md](../reference/rrd-rpc.md) §7 发布处理序
 补低电兜底钩子段（挂转发点之后、兜底是额外动作不截断事件流、两段日志逐字）。
 同批订正 [.github/README.md](../../.github/README.md) 的实况漂移（四 job → 七 job 清单、
@@ -1096,7 +1096,7 @@ Q1/Q2 裁定落地）**新增 5 条单测 + 2 条 e2e**：rr-bus client（`clien
 `rr3_counters_snapshot`、`rr3_counter_bump` 记账，非空才带 `counters`（新用例
 `heartbeat_carries_counters_only_after_bump`，lib 实测 11 条含新用例）；rrd 新模块 `counters.rs`
 （路径三态 + 原子写序 tmp→fsync→rename，5 单测）、`registry.rs` 加
-`rr3_reg_counters_replace/bump/merge/snapshot` 四方法
+`rr3_reg_ctr_replace/bump/merge/snapshot` 四方法
 （merge 按 `模块名/键` 前缀归并、饱和加法）、`rpc.rs` 加 `CtlCounters` 变体 +
 `rr3_rpc_heartbeat_counters`（脏值逐对静默跳过）——**九方法白名单**（控制四→五）；
 `conn.rs` 心跳分支聚合+write-through（锁内归并锁外写盘，Rejected 之后也聚合），
@@ -2115,7 +2115,7 @@ G6 档位↔watchdog 一致性校验落描述符装载门（tier=bare 无 watchd
 desc_key∈九表/点路径合法；注入级：ops src_key 对模块 config.toml 点路径游走），七 trait × 九键在册表
 另立副本 + 契约测试钉死（扩面/扩键走契约级评审两处同批，副本滞后 fail-closed）；rrd 装配段扫描缺项
 （缺文件/坏形/注入缺）逐条点名到件 → 模块照常 spawn 但注册入表即 `Rr3Phase::Degraded`、心跳 Kept
-不升级、`rr3_reg_undegrade_after` 不捞回（唯一解除路 = 修数据 + 重启 rrd）；17 份 assemble.toml 同批升
+不升级、`rr3_reg_undegrade` 不捞回（唯一解除路 = 修数据 + 重启 rrd）；17 份 assemble.toml 同批升
 v2——battery 真值样板（handles 引 i2c_bus+ina219_addr、ops 三槽引 Rr3BatteryCfg 同源键）、bt 兑现
 迁移承诺（ops 声明 `rr3-connect.bt.up`）、其余 14 份如实空声明；`rr3-pack` staging 扩整树
 （composite.toml + atoms/ 随包，C1 裁定"随包附可校验件声明"）；mkmod 模板升 v2 并回灌装配校验

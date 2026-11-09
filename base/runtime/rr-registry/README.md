@@ -12,7 +12,7 @@
 
 调用方实况：`rr3-mkmod` 的生成自检、本 crate `tests/contract.rs`（schema 校验 + 注册表形状 pin），
 以及 **rrd 的注册握手与发布判定**——`conn.rs` 用 `rr3_manifest_chk` 决定要不要
-让这条连接进在册表，`registry.rs` 的 `RrdRegistry::rr3_reg_publish_check` 拿 `Rr3TopicSet`
+让这条连接进在册表，`registry.rs` 的 `RrdRegistry::rr3_reg_pub_check` 拿 `Rr3TopicSet`
 判在册与 owner（职责与顺序见
 [`architecture.md`](../../../docs/architecture/architecture.md) §6.3；接到哪一段属实况，见
 [`docs/status.md`](../../../docs/status.md)）。
