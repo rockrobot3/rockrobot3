@@ -34,7 +34,7 @@ mod peer {
         opcode, rr3_body_encode, rr3_body_split, rr3_frame_read, rr3_frame_write, Rr3Frame,
         Rr3Header, Rr3PayloadType,
     };
-    use rrd::manifest::rr3_manifest_parse;
+    use rrd::manifest::{rr3_manifest_parse, Rr3ManifestFacts};
     use serde_json::{json, Value};
 
     /// 一次"挑自己的应答"最多扫多少帧。与集成测试夹具同口径，理由也相同：
@@ -58,10 +58,38 @@ mod peer {
 
     /// 身份只从 manifest 来；role 只选行为。见 support 的约定 1。
     pub fn rr3_peer_main() -> Result<(), String> {
+        let role = env::var("RR3_SIM_PEER_ROLE").unwrap_or_else(|_| "resident".to_string());
+        let (mut stream, task, facts, text) = rr3_peer_setup()?;
+        match role.as_str() {
+            "resident" => rr3_resident(&mut stream, task, facts.heartbeat_ms),
+            "publish_once" => rr3_peer_once(&mut stream, task, &text),
+            // e2e 点名发起方（0.0.7 §9.4 ⑤ macOS 档）：注册后发一次 `rr3.call`，
+            // 等被调方沿 Response 回路（trace_id = 本 task）送回的应答，result
+            // 原样打行作 round-trip 物证，喂一颗心跳后退场。点名对象与参数由
+            // 环境给（topic 必填、args 可选 JSON）——夹具不持业务主题知识。
+            // error 应答即 Err（非零退出）：e2e 的"点名被拒"负向判据就靠它。
+            "call_once" => rr3_peer_call(&mut stream, task),
+            "exit_clean" => rr3_peer_exit(&mut stream, task),
+            "abort" => rr3_peer_abort(&mut stream, task),
+            // 注册 + 一颗心跳后**彻底静默**（不再喂狗，也不再读帧）。
+            // 这正是 watchdog 要抓的形状：连接还在、fd 没关、只是不喂狗了。
+            // 里程碑只打一行（约定 3：只打里程碑，不打循环）。
+            "go_silent" => rr3_peer_silent(&mut stream, task),
+            // 静默到必然已过期，再回头连续喂 5 次，并把每一次的接受/被拒打出来。
+            // 与 `rr3_beat` 的区别：那个把被拒当致命错误直接退出（继续喂一条已不在册的
+            // 连接没有观察价值）；本支要观察的恰是"被拒之后是什么样"，所以必须用
+            // `rr3_beat_verdict`。
+            "silent_then_beat" => rr3_peer_revive(&mut stream, task),
+            other => Err(format!("未知 RR3_SIM_PEER_ROLE: {other}")),
+        }
+    }
+
+    /// 装配段：env 两参 → manifest 读/解析 → 连总线 → 注册换 task。身份只从
+    /// manifest 来（support 约定 1），role 只选行为。注册前的每个失败点都点名
+    /// 原因（夹具退出并打一行，不挂 cargo test）；读超时 5s 同理。
+    fn rr3_peer_setup() -> Result<(UnixStream, u64, Rr3ManifestFacts, String), String> {
         let bus = env::var("RR3_BUS_PATH").map_err(|_| "缺 RR3_BUS_PATH".to_string())?;
         let manifest_path = env::var("RR3_MANIFEST").map_err(|_| "缺 RR3_MANIFEST".to_string())?;
-        let role = env::var("RR3_SIM_PEER_ROLE").unwrap_or_else(|_| "resident".to_string());
-
         let text = std::fs::read_to_string(&manifest_path)
             .map_err(|e| format!("读 {manifest_path} 失败: {e}"))?;
         let facts = rr3_manifest_parse(&text).map_err(|errs| errs.join("; "))?;
@@ -88,29 +116,7 @@ mod peer {
             .as_u64()
             .ok_or("注册应答里没有 result.src_task")?;
         println!("sim-peer: 注册成功 name={} task={task}", facts.name);
-
-        match role.as_str() {
-            "resident" => rr3_resident(&mut stream, task, facts.heartbeat_ms),
-            "publish_once" => rr3_peer_once(&mut stream, task, &text),
-            // e2e 点名发起方（0.0.7 §9.4 ⑤ macOS 档）：注册后发一次 `rr3.call`，
-            // 等被调方沿 Response 回路（trace_id = 本 task）送回的应答，result
-            // 原样打行作 round-trip 物证，喂一颗心跳后退场。点名对象与参数由
-            // 环境给（topic 必填、args 可选 JSON）——夹具不持业务主题知识。
-            // error 应答即 Err（非零退出）：e2e 的"点名被拒"负向判据就靠它。
-            "call_once" => rr3_peer_call(&mut stream, task),
-            "exit_clean" => rr3_peer_exit(&mut stream, task),
-            "abort" => rr3_peer_abort(&mut stream, task),
-            // 注册 + 一颗心跳后**彻底静默**（不再喂狗，也不再读帧）。
-            // 这正是 watchdog 要抓的形状：连接还在、fd 没关、只是不喂狗了。
-            // 里程碑只打一行（约定 3：只打里程碑，不打循环）。
-            "go_silent" => rr3_peer_silent(&mut stream, task),
-            // 静默到必然已过期，再回头连续喂 5 次，并把每一次的接受/被拒打出来。
-            // 与 `rr3_beat` 的区别：那个把被拒当致命错误直接退出（继续喂一条已不在册的
-            // 连接没有观察价值）；本支要观察的恰是"被拒之后是什么样"，所以必须用
-            // `rr3_beat_verdict`。
-            "silent_then_beat" => rr3_peer_revive(&mut stream, task),
-            other => Err(format!("未知 RR3_SIM_PEER_ROLE: {other}")),
-        }
+        Ok((stream, task, facts, text))
     }
 
     /// publish_once：主题名从自己的 manifest 取（约定 2），不硬编码；发一帧后喂一颗
