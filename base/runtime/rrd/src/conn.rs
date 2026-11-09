@@ -11,6 +11,7 @@
 //! - `src_task` 由 rrd 分配并在应答 result 里回带；注册后上行帧的 `src_task` 必须等于分配值
 //!   （AOS-STD-IPC-024：用户态不得自设）——伪造的那一帧被拒，但连接不断（一次笔误不该让整机掉线）；
 //! - 注册完成前不收心跳、不判活（legacy 教训 76c0ad8）；未注册连接由读超时收掉；
+//!   注册后由静默上界（2 × 该模块看门狗窗口，ADR-0025）回收连接，判死权仍归看门狗；
 //! - `rr3.unregister` 是模块主动退场，**不走** restart_policy（那是崩溃语义）；
 //! - 上行 `Event` 是业务发布：过三层归属检查（冒充内建命名空间 → 前缀/在册 owner 越权 →
 //!   主题未登记）后原样转发给**除发布者外**的在册连接，头改写成发布者 task + `dst=0`；
@@ -384,21 +385,40 @@ fn rr3_conn_finish(ctx: &Rr3ConnCtx, me: &Rr3Peer, clean_exit: bool, reason: &st
 
 /// 注册后的读循环：逐帧读、逐帧处理，直到干净收尾或带原因断开。
 /// EOF（对端关连接）与 `rr3.unregister` 都是 `QuitClean`；其余读错/处理错带原因返回。
+///
+/// `idle_ms` 是注册后静默上界（ADR-0025：2 × 该模块看门狗窗口，0 = 不设上界）。
+/// 触发时文案点名空闲时长与归属——判死、广播、重启预算仍归看门狗那一拍，本循环
+/// 只回收连接本身。
 fn rr3_read_loop(
     out: &Arc<Mutex<UnixStream>>,
     ctx: &Rr3ConnCtx,
     me: &Rr3Peer,
     reader: &mut UnixStream,
+    idle_ms: u64,
 ) -> Result<Rr3Flow, String> {
+    let mut last_frame = Instant::now();
     loop {
         match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
-            Ok(frame) => match rr3_serve_frame(out, ctx, me, &frame) {
-                Ok(Rr3Flow::Keep) => {}
-                Ok(Rr3Flow::QuitClean) => break Ok(Rr3Flow::QuitClean),
-                Err(reason) => break Err(reason),
-            },
+            Ok(frame) => {
+                last_frame = Instant::now();
+                match rr3_serve_frame(out, ctx, me, &frame) {
+                    Ok(Rr3Flow::Keep) => {}
+                    Ok(Rr3Flow::QuitClean) => break Ok(Rr3Flow::QuitClean),
+                    Err(reason) => break Err(reason),
+                }
+            }
             Err(Rr3FrameError::Closed) => break Ok(Rr3Flow::QuitClean),
-            Err(e) => break Err(format!("帧读取失败: {e:?}")),
+            Err(e) => {
+                let idle = last_frame.elapsed().as_millis() as u64;
+                break Err(if idle_ms > 0 && idle >= idle_ms {
+                    format!(
+                        "静默超时：{idle}ms 无完整帧（上界 = 2 × 看门狗 {idle_ms}ms），\
+                         本连接回收；判死与重启归看门狗一拍"
+                    )
+                } else {
+                    format!("帧读取失败: {e:?}")
+                });
+            }
         }
     }
 }
@@ -438,11 +458,30 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
         .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
     let mut reader = stream;
     let me = handshake::rr3_handshake(&mut reader, &out, &ctx, fan_tx)?;
-    reader
-        .set_read_timeout(None)
-        .map_err(|e| format!("清读超时失败: {e}"))?;
+    // 注册后静默上界（ADR-0025）：模块自己申报的看门狗窗口 × 2。2 倍是**归属裁定**
+    // 而不是余量估算——保证看门狗先到期，本连接收尾走 Silent，判死与重启预算不双计。
+    // 健康模块按 heartbeat_ms 喂狗（< watchdog_ms），正常业务永远触不到这条上界。
+    let idle_ms = match rr3_lock(&ctx.shared).rr3_reg_facts(&me.name) {
+        Some(f) => f.watchdog_ms.saturating_mul(2),
+        None => {
+            rr3_log(&format!(
+                "{} 在册事实缺失，读侧不设静默上界（连接回收退化为依赖对端断开）",
+                me.name
+            ));
+            0
+        }
+    };
+    if idle_ms > 0 {
+        reader
+            .set_read_timeout(Some(Duration::from_millis(idle_ms)))
+            .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
+    } else {
+        reader
+            .set_read_timeout(None)
+            .map_err(|e| format!("清读超时失败: {e}"))?;
+    }
 
-    let outcome = rr3_read_loop(&out, &ctx, &me, &mut reader);
+    let outcome = rr3_read_loop(&out, &ctx, &me, &mut reader, idle_ms);
 
     let clean_exit = outcome.is_ok();
     let reason = match &outcome {

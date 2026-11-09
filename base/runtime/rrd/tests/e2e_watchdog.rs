@@ -94,6 +94,14 @@ fn watchdog_expires_a_silent_peer_and_broadcasts_failed() {
         .and_then(|s| s.parse().ok())
         .expect("广播行里没有可解析的连接数");
     assert_eq!(n, 1, "只该发给那条旁观连接: {n}");
+
+    // ADR-0025：判死后连接由上界（2 × 500ms）回收，收尾必须让给看门狗那一拍——
+    // 既证明"注册即静默"不再永久占线程，也证明判死/广播/重启没有第二个作者。
+    let close = rrd.rr3_wait_log("静默超时：");
+    assert!(
+        close.contains("不重复广播"),
+        "连接收尾必须走 Silent 一路: {close}"
+    );
 }
 
 /// W2 — 健康模块不受牵连（正反两路同框）
