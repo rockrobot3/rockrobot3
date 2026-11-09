@@ -177,44 +177,55 @@ fn rr3_ops_slot_check(group: &str, slot: &str) -> Result<(), String> {
 /// 返回落 doc 的规范化值。
 fn rr3_ops_value_check(group: &str, slot: &str, value: &Value) -> Result<Value, String> {
     if RR3_OPS_STRING_SLOTS.contains(&slot) {
-        let s = value.as_str().ok_or_else(|| {
-            format!(
-                "槽 {group}.{slot} 须字符串，收到 {}",
-                rr3_py_type_name(value)
-            )
-        })?;
-        let s = s.trim();
-        if s.is_empty() {
-            return Err(format!("槽 {group}.{slot} 不得为空"));
-        }
-        return Ok(json!(s));
+        return rr3_ops_str(group, slot, value);
     }
+    let f = rr3_ops_num(group, slot, value)?;
     if slot == "timeout_s" {
-        if value.is_boolean() || !value.is_number() {
-            return Err(format!(
-                "槽 {group}.{slot} 须数值，收到 {}",
-                rr3_py_type_name(value)
-            ));
-        }
-        let f = value.as_f64().unwrap_or(0.0);
-        // NaN 不可比：显式拒（判据"必须 >0"不得让 NaN 漏过）
-        if f.is_nan() || f <= 0.0 {
-            return Err(format!(
-                "槽 {group}.{slot} 须 >0，收到 {}",
-                rr3_py_float_str(f)
-            ));
-        }
-        return Ok(json!(f));
+        return rr3_ops_secs(group, slot, f);
     }
-    // max_utterance_ms（白名单仅此一整数槽，走这里即它）
+    rr3_ops_uint(group, slot, value, f)
+}
+
+/// 字符串槽：去空白后非空（B9 自 value_check 按值型拆出）
+fn rr3_ops_str(group: &str, slot: &str, value: &Value) -> Result<Value, String> {
+    let s = value.as_str().ok_or_else(|| {
+        format!(
+            "槽 {group}.{slot} 须字符串，收到 {}",
+            rr3_py_type_name(value)
+        )
+    })?;
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(format!("槽 {group}.{slot} 不得为空"));
+    }
+    Ok(json!(s))
+}
+
+/// 数值前置门：布尔与一切非数值一律拒（Python 侧 bool 是 int 子类，必须显式拦）
+fn rr3_ops_num(group: &str, slot: &str, value: &Value) -> Result<f64, String> {
     if value.is_boolean() || !value.is_number() {
         return Err(format!(
             "槽 {group}.{slot} 须数值，收到 {}",
             rr3_py_type_name(value)
         ));
     }
+    Ok(value.as_f64().unwrap_or(0.0))
+}
+
+/// timeout_s：有限正浮点（NaN 不可比，显式拒，判据"必须 >0"不得让 NaN 漏过）
+fn rr3_ops_secs(group: &str, slot: &str, f: f64) -> Result<Value, String> {
+    if f.is_nan() || f <= 0.0 {
+        return Err(format!(
+            "槽 {group}.{slot} 须 >0，收到 {}",
+            rr3_py_float_str(f)
+        ));
+    }
+    Ok(json!(f))
+}
+
+/// 整数槽（白名单仅 max_utterance_ms）：整值判据 + 正值判据
+fn rr3_ops_uint(group: &str, slot: &str, value: &Value, f: f64) -> Result<Value, String> {
     let is_int = value.is_i64() || value.is_u64();
-    let f = value.as_f64().unwrap_or(0.0);
     if !is_int && f.fract() != 0.0 {
         return Err(format!(
             "槽 {group}.{slot} 须整数，收到 {}",
@@ -235,83 +246,106 @@ fn rr3_ops_apply(
     slot: &str,
     new: Value,
 ) -> Result<(Value, Value), String> {
-    // 写源映射（Python rr3_ops_write 尾段同形状）：dialog → dialog 段（缺段建段，
-    // setdefault 同义）；asr/tts 全槽与 llm.timeout_s → cloud 段；llm 组
-    // llm_model/base_url → 实效源（模型行 active 在则写行、否则 cloud fallback）
     let brain = doc
         .get_mut("rr3-brain")
         .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())?;
-    let (section_key, key): (&str, &str) = if group == "dialog" {
-        ("dialog", slot)
+    let (section_key, key) = rr3_ops_target(brain, group, slot)?;
+    let old = rr3_ops_store(brain, section_key, &key, &new)?;
+    Ok((old, new))
+}
+
+/// 写源映射（Python rr3_ops_write 尾段同形状，B9 自 apply 抽出）：dialog →
+/// dialog 段；asr/tts 全槽与 llm.timeout_s → cloud 段；llm 组 llm_model/base_url
+/// → 实效源（模型行 active 在则写行、否则 cloud fallback）。返回 (段名, 行内键)。
+fn rr3_ops_target(
+    brain: &Value,
+    group: &str,
+    slot: &str,
+) -> Result<(&'static str, String), String> {
+    let section = if group == "dialog" {
+        "dialog"
     } else if group == "asr" || group == "tts" || slot == "timeout_s" {
-        // asr/tts 全槽与 llm.timeout_s 读源都在 cloud 段
-        ("cloud", slot)
+        "cloud"
+    } else if rr3_model_rows_or_empty(brain) {
+        "cloud"
     } else {
-        // llm 组 llm_model/base_url：实效源 = 模型行 active 在则行、否则 cloud fallback
-        let rows_empty = brain
+        let actives = brain
             .get("model")
             .and_then(Value::as_array)
-            .map(|r| r.is_empty())
-            .unwrap_or(true);
-        if rows_empty {
-            ("cloud", slot)
-        } else {
-            let actives = brain
-                .get("model")
-                .and_then(Value::as_array)
-                .map(|rows| {
-                    rows.iter()
-                        .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
-                        .count()
-                })
-                .unwrap_or(0);
-            if actives != 1 {
-                return Err(format!(
-                    "[[rr3-brain.model]] 须恰一行 active=true（现 {actives} 行）——写面不修结构错误"
-                ));
-            }
-            ("model", slot)
+            .map(|rows| {
+                rows.iter()
+                    .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
+                    .count()
+            })
+            .unwrap_or(0);
+        if actives != 1 {
+            return Err(format!(
+                "[[rr3-brain.model]] 须恰一行 active=true（现 {actives} 行）——写面不修结构错误"
+            ));
         }
+        "model"
     };
     // model 路写键名换算（行内键：llm_model → model_id；base_url → base_url）
-    let key = if section_key == "model" && slot == "llm_model" {
-        "model_id"
+    let key = if section == "model" && slot == "llm_model" {
+        "model_id".to_string()
     } else {
-        key
+        slot.to_string()
     };
-    // dialog 段缺段建段（Python setdefault 同义）；cloud/model 段 boot 校验在册
+    Ok((section, key))
+}
+
+/// 模型行表是否缺省（缺表/空表走 cloud fallback；非数组视同非空由调用方拦）
+fn rr3_model_rows_or_empty(brain: &Value) -> bool {
+    brain
+        .get("model")
+        .and_then(Value::as_array)
+        .map(|r| r.is_empty())
+        .unwrap_or(true)
+}
+
+/// 写源落盘（B9 自 apply 抽出）：model → 唯一 active 行；dialog 缺段建段；
+/// 其余段直写。old = 键现值（缺键 Null），new 由调用方克隆写入。
+fn rr3_ops_store(
+    brain: &mut Value,
+    section_key: &str,
+    key: &str,
+    new: &Value,
+) -> Result<Value, String> {
+    if section_key == "model" {
+        return rr3_row_store(brain, key, new);
+    }
     if section_key == "dialog" && brain.get("dialog").is_none() {
         brain
             .as_object_mut()
             .expect("brain 段是对象（TOML 表同构）")
             .insert("dialog".to_string(), json!({}));
     }
-    let old = if section_key == "model" {
-        // 模型行写源：写进唯一 active 行（结构已验 actives==1），不是行表本身
-        let row = brain
-            .get_mut("model")
-            .and_then(Value::as_array_mut)
-            .expect("model 是行表（上方结构校验已拦截）")
-            .iter_mut()
-            .find(|r| r.get("active").and_then(Value::as_bool) == Some(true))
-            .expect("active 行在（上方结构校验已拦截）");
-        let old = row.get(key).cloned().unwrap_or(Value::Null);
-        row.as_object_mut()
-            .expect("模型行是表（TOML 行表同构）")
-            .insert(key.to_string(), new.clone());
-        old
-    } else {
-        let section = brain
-            .get_mut(section_key)
-            .ok_or_else(|| format!("config 缺 [rr3-brain.{section_key}] 段"))?;
-        let old = section.get(key).cloned().unwrap_or(Value::Null);
-        section
-            .as_object_mut()
-            .ok_or_else(|| format!("config [rr3-brain.{section_key}] 须为表"))?
-            .insert(key.to_string(), new.clone());
-        old
-    };
-    Ok((old, new))
+    let section = brain
+        .get_mut(section_key)
+        .ok_or_else(|| format!("config 缺 [rr3-brain.{section_key}] 段"))?;
+    let old = section.get(key).cloned().unwrap_or(Value::Null);
+    section
+        .as_object_mut()
+        .ok_or_else(|| format!("config [rr3-brain.{section_key}] 须为表"))?
+        .insert(key.to_string(), new.clone());
+    Ok(old)
+}
+
+/// 模型行写源（B9 自 apply 抽出）：写进唯一 active 行（结构已验 actives==1），
+/// 不是行表本身。
+fn rr3_row_store(brain: &mut Value, key: &str, new: &Value) -> Result<Value, String> {
+    let row = brain
+        .get_mut("model")
+        .and_then(Value::as_array_mut)
+        .expect("model 是行表（上方结构校验已拦截）")
+        .iter_mut()
+        .find(|r| r.get("active").and_then(Value::as_bool) == Some(true))
+        .expect("active 行在（上方结构校验已拦截）");
+    let old = row.get(key).cloned().unwrap_or(Value::Null);
+    row.as_object_mut()
+        .expect("模型行是表（TOML 行表同构）")
+        .insert(key.to_string(), new.clone());
+    Ok(old)
 }
 
 /// Python float 的 f"{value}" 形状（错误文案逐字对位的数据基础）：整值不带 .0
@@ -393,38 +427,63 @@ pub(crate) fn rr3_model_list(cfg: &Rr3BrainCfg) -> Result<Value, String> {
     let rows = rr3_model_rows(&cfg.doc)?;
     let mut models = Vec::with_capacity(rows.len());
     for (i, row) in rows.iter().enumerate() {
-        let name = rr3_row_str(row, "name", i)?;
-        if name.trim().is_empty() {
-            return Err(format!("模型行 #{i} 缺 name"));
-        }
-        let mode = match rr3_row_str(row, "mode", i)?.trim() {
-            "" => "api",
-            v => v,
-        };
-        let api_format = match rr3_row_str(row, "api_format", i)?.trim() {
-            "" => "openai",
-            v => v,
-        };
-        let key_ref = match rr3_row_str(row, "api_key_ref", i)?.trim() {
-            "" => None,
-            v => Some(v.to_string()),
-        };
-        let mode_enum = match mode {
-            "local" => Some(Rr3LlmMode::Local),
-            _ => Some(Rr3LlmMode::Api),
-        };
-        models.push(json!({
-            "name": name,
-            "base_url": rr3_row_str(row, "base_url", i)?,
-            "model_id": rr3_row_str(row, "model_id", i)?,
-            "api_format": api_format,
-            "mode": mode,
-            "key_ref": key_ref,
-            "key_set": rr3_key_set_of(&key_ref, mode_enum),
-            "active": row.get("active").and_then(Value::as_bool).unwrap_or(false),
-        }));
+        models.push(rr3_model_row(row, i)?);
     }
     Ok(json!({ "models": models, "active": rr3_row_active_name(&rows) }))
+}
+
+/// 单行投影（B9 自 list 抽出）：名称/API 根/模型/格式/模式/key_ref/key 就位/
+/// active——只回 `key_set` 布尔，永无密钥明文。
+fn rr3_model_row(row: &Value, i: usize) -> Result<Value, String> {
+    let v = rr3_row_view(row, i)?;
+    let mode_enum = match v.mode {
+        "local" => Some(Rr3LlmMode::Local),
+        _ => Some(Rr3LlmMode::Api),
+    };
+    Ok(json!({
+        "name": v.name,
+        "base_url": rr3_row_str(row, "base_url", i)?,
+        "model_id": rr3_row_str(row, "model_id", i)?,
+        "api_format": v.api_format,
+        "mode": v.mode,
+        "key_ref": v.key_ref,
+        "key_set": rr3_key_set_of(&v.key_ref, mode_enum),
+        "active": row.get("active").and_then(Value::as_bool).unwrap_or(false),
+    }))
+}
+
+/// 行视图（B9 自 model_row 抽出）：name/mode/api_format 的缺省归一与 key_ref
+/// 三态读取同址——投影面只做拼装。
+struct Rr3RowView<'a> {
+    name: &'a str,
+    mode: &'a str,
+    api_format: &'a str,
+    key_ref: Option<String>,
+}
+
+fn rr3_row_view<'a>(row: &'a Value, i: usize) -> Result<Rr3RowView<'a>, String> {
+    let name = rr3_row_str(row, "name", i)?;
+    if name.trim().is_empty() {
+        return Err(format!("模型行 #{i} 缺 name"));
+    }
+    let mode = match rr3_row_str(row, "mode", i)?.trim() {
+        "" => "api",
+        v => v,
+    };
+    let api_format = match rr3_row_str(row, "api_format", i)?.trim() {
+        "" => "openai",
+        v => v,
+    };
+    let key_ref = match rr3_row_str(row, "api_key_ref", i)?.trim() {
+        "" => None,
+        v => Some(v.to_string()),
+    };
+    Ok(Rr3RowView {
+        name,
+        mode,
+        api_format,
+        key_ref,
+    })
 }
 
 /// upsert 入参（一次解析；`key_ref` 三态：缺席 = 保留现值、空串 = 清除、
@@ -535,17 +594,7 @@ fn rr3_model_row_input<'a>(name: &str, args: &'a Value) -> Result<Rr3ModelRowInp
 /// upsert 一行（同名即更新；新行在表内无 active 时自动接任）
 fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(), String> {
     let inp = rr3_model_row_input(name, args)?;
-    let idx = rows
-        .iter()
-        .position(|r| r.get("name").and_then(Value::as_str) == Some(name));
-    let is_new = idx.is_none();
-    let i = match idx {
-        Some(i) => i,
-        None => {
-            rows.push(json!({}));
-            rows.len() - 1
-        }
-    };
+    let (i, is_new) = rr3_row_slot(rows, name);
     let others_active = rows
         .iter()
         .enumerate()
@@ -553,40 +602,64 @@ fn rr3_model_upsert(rows: &mut Vec<Value>, name: &str, args: &Value) -> Result<(
     let prev_active = rows[i].get("active").and_then(Value::as_bool) == Some(true);
     let active = match inp.active {
         Some(a) => a,
-        None => {
-            if is_new {
-                !others_active // 表内无 active（空表/结构坏）→ 新行接任
-            } else {
-                prev_active
-            }
-        }
+        None if is_new => !others_active, // 表内无 active（空表/结构坏）→ 新行接任
+        None => prev_active,
     };
-    {
-        let obj = rows[i]
-            .as_object_mut()
-            .ok_or_else(|| format!("模型行 #{i} 须为表（TOML 行表同构）"))?;
-        obj.insert("name".to_string(), json!(name));
-        obj.insert("mode".to_string(), json!(inp.mode));
-        obj.insert("api_format".to_string(), json!(inp.api_format));
-        obj.insert("base_url".to_string(), json!(inp.base_url));
-        obj.insert("model_id".to_string(), json!(inp.model_id));
-        if let Some(k) = inp.key_ref {
-            obj.insert("api_key_ref".to_string(), json!(k));
-        } else if inp.key_ref_clear {
-            obj.remove("api_key_ref");
-        }
-        obj.insert("active".to_string(), json!(active));
-    }
+    rr3_row_fill(rows, i, name, &inp, active)?;
     if active {
-        for (j, r) in rows.iter_mut().enumerate() {
-            if j != i {
-                if let Some(o) = r.as_object_mut() {
-                    o.insert("active".to_string(), json!(false));
-                }
-            }
-        }
+        rr3_row_deactivate(rows, i);
     }
     Ok(())
+}
+
+/// 行槽定位（B9 自 upsert 抽出）：同名行下标；缺席即补空行、返回 (下标, 是否新增)
+fn rr3_row_slot(rows: &mut Vec<Value>, name: &str) -> (usize, bool) {
+    match rows
+        .iter()
+        .position(|r| r.get("name").and_then(Value::as_str) == Some(name))
+    {
+        Some(i) => (i, false),
+        None => {
+            rows.push(json!({}));
+            (rows.len() - 1, true)
+        }
+    }
+}
+
+/// 行写入（B9 自 upsert 抽出）：六键 + key_ref 三态（有值写/空串清/缺席保留）
+fn rr3_row_fill(
+    rows: &mut [Value],
+    i: usize,
+    name: &str,
+    inp: &Rr3ModelRowInput<'_>,
+    active: bool,
+) -> Result<(), String> {
+    let obj = rows[i]
+        .as_object_mut()
+        .ok_or_else(|| format!("模型行 #{i} 须为表（TOML 行表同构）"))?;
+    obj.insert("name".to_string(), json!(name));
+    obj.insert("mode".to_string(), json!(inp.mode));
+    obj.insert("api_format".to_string(), json!(inp.api_format));
+    obj.insert("base_url".to_string(), json!(inp.base_url));
+    obj.insert("model_id".to_string(), json!(inp.model_id));
+    if let Some(k) = &inp.key_ref {
+        obj.insert("api_key_ref".to_string(), json!(k));
+    } else if inp.key_ref_clear {
+        obj.remove("api_key_ref");
+    }
+    obj.insert("active".to_string(), json!(active));
+    Ok(())
+}
+
+/// active 唯一性（B9 自 upsert 抽出）：新 active 行就位后其余行一律置 false
+fn rr3_row_deactivate(rows: &mut [Value], keep: usize) {
+    for (j, r) in rows.iter_mut().enumerate() {
+        if j != keep {
+            if let Some(o) = r.as_object_mut() {
+                o.insert("active".to_string(), json!(false));
+            }
+        }
+    }
 }
 
 /// 切换 active（其余行一律置 false）
