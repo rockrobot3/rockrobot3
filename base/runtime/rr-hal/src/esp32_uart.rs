@@ -14,9 +14,10 @@
 //! 点名，不是静默截流；open 自带 TCIFLUSH 开口即净，批D1 敞口的正式处置）。
 //! macOS CP2102 的 DTR/RTS 翻转会复位板子（E7 实锤），open 后等
 //! [`RR3_OPEN_SETTLE_MS`] 启动窗口再发首帧。io 失败 drop 连接（close + flock 退账）
-//! 下次调用重开。读侧是阻塞语义：板侧对合法 Request 确定性应答，拔线时写侧先报
-//! 错——"板死无应答则本侧阻塞"是已知敞口（rr3-bridge 中继批E 统一收口，本档
-//! 不在 rr-ipc 加读超时机制）。
+//! 下次调用重开。**读侧带应答窗口**（[`RR3_REPLY_WAIT_DS`]）：板侧对合法 Request
+//! 确定性应答，板死/断线/复位时读在窗口耗尽后回 Closed，调用方报废连接重开——
+//! 旧版缺省阻塞读会让 HAL/面板线程永久挂死（rr-ipc 只提供显式超时档，桥/哨兵等
+//! 该阻塞等的收流端语义不受影响）。
 //!
 //! task 位形（帧头约定）：宿主下行 `src=1`（rrd 位形，与 `rr-core::RR3_TASK_RRD`
 //! 同值），板上 `dst=2`（外设执行面位形，[`RR3_PERIPH_TASK`]）。应答帧板侧回
@@ -57,6 +58,12 @@ pub use rr_periph_proto::response::rr3_bridge_decode;
 /// open 后的启动窗口：DTR/RTS 翻转复位板子（E7），ESP32 上电到帧面就绪的
 /// 等待（esp-idf 启动 + OLED init 的实测时长量级，1.2s 留裕量）。
 const RR3_OPEN_SETTLE_MS: u64 = 1200;
+
+/// 应答等待窗口（十分之一秒；50 = 5s）：板侧正常应答在毫秒级，最长延迟来源是
+/// 控制面每轮先排空的音频分片（4×59ms @1.5M ≈ 236ms）与 outbox 回包，5s 留足
+/// 一个量级。窗口耗尽即判"板侧无应答/链路断"，报废连接下次重开——**不许**让
+/// 调用线程无限等（拔线/板死时 HAL 面与面板 RPC 会整条挂死）。
+const RR3_REPLY_WAIT_DS: u8 = 50;
 
 /// ESP32 档舵机轴 env 键：`pan` / `tilt`（板上双轴云台 ↔ 宿主单轴 trait 的
 /// 映射面，缺省 `pan`；板侧帧面另有 `axis` 参数可逐调用覆盖）。真值单点已上移
@@ -193,6 +200,12 @@ impl Rr3BridgeConn {
                     eprintln!("rr-hal-esp32: 开口净化失败 {}: {e}", self.path.display());
                     return Err(Rr3HalError::Busy);
                 }
+                // 应答窗口一开口就定档：本连接的一切 rr3_recv_buf 都带同一静默
+                // 上限（见 [`RR3_REPLY_WAIT_DS`]）——板死/断线时调用线程必能醒来。
+                if let Err(e) = c.rr3_set_read_timeout(RR3_REPLY_WAIT_DS) {
+                    eprintln!("rr-hal-esp32: 设应答窗口失败 {}: {e}", self.path.display());
+                    return Err(Rr3HalError::Busy);
+                }
                 self.conn = Some(c);
                 // 板侧绑定推送（批N4 件七(b) 基-24 桥上配置腿）：每次（重）开连接
                 // 都推——板侧重启或连接重建后注入态随之恢复，板侧覆盖语义幂等。
@@ -244,12 +257,12 @@ impl Rr3BridgeConn {
             self.conn = None;
             return Err(Rr3HalError::Busy);
         }
-        // 阻塞读：板侧对合法 Request 确定性应答（模块注记敞口：板死无应答则
-        // 本侧阻塞，批E 桥面统一收口）
+        // 收帧：连接开口已把读侧定档为"静默 ≤ [RR3_REPLY_WAIT_DS] 即返回"，
+        // 板侧无应答/链路断时这里不会挂死——报错即报废连接，下次调用重开。
         let buf = match conn.rr3_recv_buf() {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("rr-hal-esp32: 应答收帧失败: {e:?}");
+                eprintln!("rr-hal-esp32: 应答收帧失败（板侧无应答/链路断）: {e:?}");
                 self.conn = None;
                 return Err(Rr3HalError::Busy);
             }
