@@ -344,19 +344,27 @@ fn rr3_cmd_ui(
             // 余片仍照常发完（drain_audio 不看开关），mic 线不再攒新片。
             // PING 是宿主收流线程的 5s 静默心跳（A9.3）：只刷新失联看门狗时刻，
             // **不回任何字节**（应答会插进音频帧流污染宿主拆帧器）。
+            // ON/OFF 把心跳时刻归零：看门狗只认**本会话内**的 PING——旧宿主不发
+            // PING 时永不启用（混版部署保持常流），新宿主重连后首个 PING 才武装。
             "AUDIO" => match parts.next() {
                 Some("ON") => {
                     let mut b = lock_bus(bus);
                     b.st.audio_on = true;
-                    b.st.audio_host_ms = now_ms();
+                    b.st.audio_host_ms = 0;
                     Ok("OK audio on".into())
                 }
                 Some("OFF") => {
-                    lock_bus(bus).st.audio_on = false;
+                    let mut b = lock_bus(bus);
+                    b.st.audio_on = false;
+                    b.st.audio_host_ms = 0;
                     Ok("OK audio off".into())
                 }
                 Some("PING") => {
-                    lock_bus(bus).st.audio_host_ms = now_ms();
+                    let mut b = lock_bus(bus);
+                    if b.st.audio_host_ms == 0 {
+                        println!("[periph] 宿主音频心跳已建立（AUDIO PING 5s 周期，看门狗 15s）");
+                    }
+                    b.st.audio_host_ms = now_ms();
                     Ok(String::new())
                 }
                 _ => Err("AUDIO 需 ON|OFF|PING 参数".into()),
