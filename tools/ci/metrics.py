@@ -5,8 +5,9 @@
 # - 重复率：**硬门槛 3%**。相邻 W=10 条"有效行"滑窗取哈希，出现 ≥2 次的窗口
 #   所覆盖行计为重复行；有效行 = 去注释、字符串/字符字面量内容折占位符、去纯
 #   标点行后的非空行。生成物（文件头 @generated/自动生成）与测试面（tests/ 目录、
-#   首个 #[cfg(...test...)] 之后的尾部）不参与——它们是夹具/生成数据，不是可
-#   复用缺陷。
+#   cfg(test) 门 mod 块之后的尾部）不参与——它们是夹具/生成数据，不是可
+#   复用缺陷。测试面判定：cfg 谓词**测试专用**（`test` 裸项/`all(…test…)`），
+#   `any(…)`/`not(…)` 门是生产件不剔除（backend.rs 613 行教训）。
 # - 圈复杂度：均值与单函数最大值按 `tools/ci/metrics-baseline.json` **钉基线、
 #   只降不升**（与仓内红账基线门同款纪律）。目标均值 2.5 尚未达到，红账在账；
 #   基线只能随重构下调，上调须在评审里说明理由。
@@ -26,6 +27,80 @@ import sys
 WINDOW = 10
 NAME_MAX = 20
 FFI_PREFIXES = ("AudioQueue",)
+# cfg(test) 门 mod 的形状：属性本体 +（可连挂的其他属性）+ mod 声明。
+TEST_ATTR = re.compile(r"#\[cfg\(")
+TEST_MOD_TAIL = re.compile(
+    r"\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\b"
+)
+TEST_ITEM_TAIL = re.compile(
+    r"\s*(?:#\[[^\]]*\]\s*)*"
+    r"(?:(?:pub|pub\(crate\)|pub\(super\))\s+)?"
+    r"(mod|fn|const|static|use|type)\b"
+)
+
+
+def _pred_test_only(src, open_paren):
+    """cfg 谓词是否**测试专用**：`test` 裸项或 `all(…test…)` 算；
+    `any(…)`/`not(…)` 不算——`#[cfg(any(target_os = "linux", test))]` 是
+    linux 生产件（树莓派档必需），误判会把整段生产代码藏出度量
+    （实测 rr-hal/backend.rs 613 行）。"""
+    depth, k = 1, open_paren + 1
+    while k < len(src) and depth:
+        if src[k] == "(":
+            depth += 1
+        elif src[k] == ")":
+            depth -= 1
+        k += 1
+    pred = src[open_paren + 1 : k - 1]
+    head = pred.lstrip()
+    if head.startswith("any(") or head.startswith("not("):
+        return False
+    return re.search(r"\btest\b", pred) is not None
+
+
+def _item_end(src, head_at):
+    """项体终点（含）：`{…}` 平衡配对，或语句形到 `;`；找不到按体处理。"""
+    body_at = src.find("{", head_at)
+    semi_at = src.find(";", head_at)
+    if body_at < 0 or (0 <= semi_at < body_at):
+        return semi_at + 1
+    depth, k = 0, body_at
+    while k < len(src):
+        if src[k] == "{":
+            depth += 1
+        elif src[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return k + 1
+        k += 1
+    return len(src)
+
+
+def production_part(src):
+    """截掉测试面：**测试专用 cfg 门**（`test` 裸项/`all(…test…)`）的 mod 块
+    整体截断、单项（fn/const/use/…）就地剔除，其后即生产面。
+
+    只认"cfg(test) 属性（可连挂其他属性）+ 项"形状——mod 之后整段是测试
+    尾巴；逐项门是散点测试辅助，只摘项不伤其后生产（`fn main` 必须留在
+    度量内，实测 rr3-audio-rec main CC 46 曾被整段藏出）。入参须是
+    strip_code 之后的文本：注释/字符串里提到 `#[cfg(test)]` 不构成依据。"""
+    pos = 0
+    while True:
+        m = TEST_ATTR.search(src, pos)
+        if not m:
+            return src
+        if not _pred_test_only(src, m.end() - 1):
+            pos = m.end()
+            continue
+        im = TEST_ITEM_TAIL.match(src[m.start() :])
+        if not im:
+            pos = m.end()
+            continue
+        if im.group(1) == "mod":
+            return src[: m.start()]
+        end = _item_end(src, m.start() + im.end(1))
+        src = src[: m.start()] + src[end:]
+        pos = m.start()
 
 
 def repo_root():
@@ -47,8 +122,32 @@ def rust_files(root):
     return [f for f in out.stdout.splitlines() if f]
 
 
+def _raw_string_at(src, i):
+    """`i` 处是否生字符串前缀（r"…" / r#"…"#，b/br 前缀同理）。
+    返回 (引号下标, 井号数)；否则 None。识别失败按普通字符处理。"""
+    j = i
+    if j < len(src) and src[j] == "b":
+        j += 1
+    if j >= len(src) or src[j] != "r":
+        return None
+    j += 1
+    hashes = 0
+    while j < len(src) and src[j] == "#":
+        hashes += 1
+        j += 1
+    if j >= len(src) or src[j] != '"':
+        return None
+    return j, hashes
+
+
 def strip_code(src):
-    """去注释；字符串/字符字面量内容折占位符，保留换行与代码行结构。"""
+    """去注释；字符串/字符字面量/生字符串内容折占位符，保留换行与代码行结构。
+
+    字符字面量与生命周期用"引号后形制"消歧：`'x'`/`'\\''` 是字面量（折
+    `''`），`'a`/`'static`/`'label:` 是生命周期（单引号直通）——不消歧则
+    `.strip_prefix('"')` 这类内嵌双引号的字面量会让字符串态翻转级联，整段
+    生产代码被当字符串内容吞掉（实测 evidence.rs 测试 mod 因此漏截断）。
+    生字符串终止符是 `"` + 等量 `#`，不认转义。"""
     out = []
     i, n = 0, len(src)
     while i < n:
@@ -61,13 +160,38 @@ def strip_code(src):
             end = n if j < 0 else j + 2
             out.append("\n" * src.count("\n", i, end))
             i = end
-        elif c == '"':
-            out.append('""')
+        elif c == '"' or (rs := _raw_string_at(src, i)):
+            if c == '"':
+                out.append('""')
+                j = i + 1
+                term = None
+            else:
+                q, hashes = rs
+                out.append('""')
+                j = q + 1
+                term = '"' + "#" * hashes
+            while j < n:
+                if term is None and src[j] == "\\":
+                    j += 2
+                elif term is not None and src.startswith(term, j):
+                    j += len(term)
+                    break
+                elif term is None and src[j] == '"':
+                    j += 1
+                    break
+                else:
+                    if src[j] == "\n":
+                        out.append("\n")
+                    j += 1
+            i = j
+        elif c == "'" and (i + 2 < n and src[i + 2] == "'" or i + 1 < n and src[i + 1] == "\\"):
+            # 字符/字节字面量：'x' 或 '\…'；折 '' 占位
+            out.append("''")
             j = i + 1
             while j < n:
                 if src[j] == "\\":
                     j += 2
-                elif src[j] == '"':
+                elif src[j] == "'":
                     j += 1
                     break
                 else:
@@ -82,9 +206,17 @@ def strip_code(src):
 
 
 def production_part(src):
-    """截掉测试尾巴：首个 #[cfg(...test...)] 之后不进度量。"""
-    m = re.search(r"#\[cfg\([^\]]*test", src)
-    return src[: m.start()] if m else src
+    """截掉测试尾巴：**cfg(test) 门 mod** 的块起点之后不进度量。
+
+    只认"cfg(test) 属性（可连挂其他属性）+ mod"形状——`#[cfg(test)] const/fn`
+    等单点豁免不是测试面边界，其后的 `fn main` 等主面代码必须留在度量内
+    （实测 rr3-audio-rec main CC 46 曾被首个非 mod cfg(test) 项整段藏出）。
+    入参须是 strip_code 之后的文本：注释/字符串里提到 `#[cfg(test)]` 不构成
+    截断依据。"""
+    for m in TEST_ATTR.finditer(src):
+        if TEST_MOD_TAIL.match(src[m.start() :]):
+            return src[: m.start()]
+    return src
 
 
 def functions(src):
@@ -148,7 +280,7 @@ def measure(root):
         head = "\n".join(raw.splitlines()[:5])
         if "@generated" in head or "自动生成" in raw[:400]:
             continue
-        src = strip_code(production_part(raw))
+        src = production_part(strip_code(raw))
         for name, body in functions(src):
             ccs.append(cyclomatic(body))
             if len(name.encode()) > NAME_MAX and not name.startswith(FFI_PREFIXES):
