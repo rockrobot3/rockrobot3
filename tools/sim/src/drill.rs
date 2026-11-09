@@ -99,43 +99,61 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
             "--keep" => a.keep = true,
             "--brain" => a.brain = true,
             "--chain" => a.chain = true,
-            "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense" | "--interact"
-            | "--act" | "--brain-bin" | "--profile" | "--audio-backend" | "--sink-backend"
-            | "--brain-cloud" | "--brain-base-url" => {
-                let v = args
-                    .get(i + 1)
-                    .ok_or_else(|| format!("{flag} 缺参数"))?
-                    .clone();
-                if v.starts_with('-') {
-                    return Err(format!("{flag} 缺参数：收到疑似开关的 {v}"));
-                }
-                let p = PathBuf::from(v);
-                match flag {
-                    "--socket" => a.socket = Some(p),
-                    "--repo" => a.repo = Some(p),
-                    "--rrd" => a.rrd = Some(p),
-                    "--sim-peer" => a.sim_peer = Some(p),
-                    "--sense" => a.sense = Some(p),
-                    "--interact" => a.interact = Some(p),
-                    "--act" => a.act = Some(p),
-                    "--brain-bin" => a.brain_bin = Some(p),
-                    "--profile" => a.profile = Some(p),
-                    "--audio-backend" => a.audio_backend = Some(p.to_string_lossy().into_owned()),
-                    "--sink-backend" => a.sink_backend = Some(p.to_string_lossy().into_owned()),
-                    "--brain-cloud" => a.brain_cloud = Some(p.to_string_lossy().into_owned()),
-                    "--brain-base-url" => a.brain_base_url = Some(p.to_string_lossy().into_owned()),
-                    _ => a.rrctl = Some(p),
-                }
+            "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense"
+            | "--interact" | "--act" | "--brain-bin" | "--profile" | "--audio-backend"
+            | "--sink-backend" | "--brain-cloud" | "--brain-base-url" => {
+                rr3_sim_arg_set(&mut a, flag, rr3_sim_arg_value(args, i, flag)?);
                 i += 1;
             }
-            other => {
-                return Err(format!(
-                    "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act --brain-bin --audio-backend --sink-backend --brain-cloud --brain-base-url）"
-                ))
-            }
+            other => return Err(rr3_sim_unknown(other)),
         }
         i += 1;
     }
+    rr3_sim_args_check(&a)?;
+    Ok(a)
+}
+
+/// 取值旗标的下一项：缺项/疑似开关即点名（脚本工具的第一错法是静默吃掉下一旗标）。
+fn rr3_sim_arg_value(args: &[String], i: usize, flag: &str) -> Result<String, String> {
+    let v = args
+        .get(i + 1)
+        .ok_or_else(|| format!("{flag} 缺参数"))?
+        .clone();
+    if v.starts_with('-') {
+        return Err(format!("{flag} 缺参数：收到疑似开关的 {v}"));
+    }
+    Ok(v)
+}
+
+/// 取值旗标落位（路径四件与后端词四件；`--rrctl` 无专名分支，与旧实现同义）。
+fn rr3_sim_arg_set(a: &mut Rr3SimArgs, flag: &str, v: String) {
+    let p = PathBuf::from(&v);
+    match flag {
+        "--socket" => a.socket = Some(p),
+        "--repo" => a.repo = Some(p),
+        "--rrd" => a.rrd = Some(p),
+        "--sim-peer" => a.sim_peer = Some(p),
+        "--sense" => a.sense = Some(p),
+        "--interact" => a.interact = Some(p),
+        "--act" => a.act = Some(p),
+        "--brain-bin" => a.brain_bin = Some(p),
+        "--profile" => a.profile = Some(p),
+        "--audio-backend" => a.audio_backend = Some(v),
+        "--sink-backend" => a.sink_backend = Some(v),
+        "--brain-cloud" => a.brain_cloud = Some(v),
+        "--brain-base-url" => a.brain_base_url = Some(v),
+        _ => a.rrctl = Some(p),
+    }
+}
+
+fn rr3_sim_unknown(other: &str) -> String {
+    format!(
+        "未知参数 {other}（可用：--socket --repo --keep --brain --chain --profile --rrd --sim-peer --rrctl --sense --interact --act --brain-bin --audio-backend --sink-backend --brain-cloud --brain-base-url）"
+    )
+}
+
+/// 旗标组合与取值域裁决（互斥/归属/白名单/fail-closed ① ②），parse 只编排。
+fn rr3_sim_args_check(a: &Rr3SimArgs) -> Result<(), String> {
     if (a.brain || a.profile.is_some()) && a.chain {
         return Err(
             "--chain 与 --brain/--profile 同给：全链闭环、对话闭环与装配演练互斥（各证一面，不合并）"
@@ -214,7 +232,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
                 .to_string(),
         );
     }
-    Ok(a)
+    Ok(())
 }
 
 /// 从 `start` 向上找仓根：判定标记是 `contracts/topics.toml` 存在——
