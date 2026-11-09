@@ -1492,6 +1492,66 @@ if [ "$hyg_fail" -ne 0 ]; then
   fail=1
 fi
 
+# ⑭ 装载门体量基线门（裁-13／基-38；批N8 件六"执法位下轮再论"兑现）：三项块
+# 计数各不得超过 tools/ci/gate-size-baseline.txt 钉数（只降不升）。锚函数缺失
+# = 基线失锚，红（B7 实证：旧名已改、无读者基线的注记烂掉无人知——失锚不许
+# 静默跳过）。计数命令与基线行尾注同源；钉数解析按 "^<名> = <纯整数>"，
+# 形状坏照 ⑩ 纪律 fail-closed。
+printf '\n=== ⑭ 装载门体量基线（块行数 / 读表样板 / 同形函数） ===\n'
+gs_base=tools/ci/gate-size-baseline.txt
+gs_fail=0
+gs_pin() { sed -n "s/^$1 *= *\([0-9][0-9]*\).*/\1/p" "$gs_base" | head -1; }
+if [ ! -f "$gs_base" ]; then
+  printf 'FAIL  ⑭ 基线文件缺失: %s\n' "$gs_base"
+  gs_fail=1
+else
+  gs_file=base/runtime/rrd/src/profile.rs
+  gs_fn='pub fn rr3_boot_with_probe('
+  gs_start=$(grep -nF "$gs_fn" "$gs_file" | head -1 | cut -d: -f1)
+  if [ -z "$gs_start" ]; then
+    printf 'FAIL  ⑭ 基线锚函数缺失: %s 中找不到 %s——装载门被改名/搬走须同批改基线，不许静默\n' \
+      "$gs_file" "$gs_fn"
+    gs_fail=1
+  else
+    gs_end=$(awk -v s="$gs_start" 'NR>=s && /^}/ {print NR; exit}' "$gs_file")
+    gs_fn_lines=$((gs_end - gs_start + 1))
+    gs_reads=$(awk -v s="$gs_start" -v e="$gs_end" \
+      'NR>=s && NR<=e && /read_to_string/' "$gs_file" | wc -l | tr -d ' ')
+    gs_shapes=$(grep -rhoE 'fn rr3_[a-z_0-9]*(from_text|is_empty|contains|check)[a-z_0-9]*\(' \
+      base/runtime/rr-registry/src/*.rs | sort -u | wc -l | tr -d ' ')
+    gs_check() {
+      gs_name=$1
+      gs_got=$2
+      gs_p=$(gs_pin "$gs_name")
+      case "$gs_p" in
+        ''|*[!0-9]*)
+          printf 'FAIL  ⑭ 基线行形状坏: %s 的 "%s" 须为 "名 = 纯整数"（实得 "%s"）\n' \
+            "$gs_base" "$gs_name" "${gs_p:-<缺>}"
+          gs_fail=1
+          ;;
+        *)
+          if [ "$gs_got" -gt "$gs_p" ]; then
+            printf 'FAIL  ⑭ %s 回涨: %s > 钉数 %s（体量纪律只降不升；确须增长走评审并同批动基线）\n' \
+              "$gs_name" "$gs_got" "$gs_p"
+            gs_fail=1
+          elif [ "$gs_got" -lt "$gs_p" ]; then
+            printf 'PASS  ⑭ %s %s ≤ 钉数 %s（**下降 %s：须同批下调 %s**）\n' \
+              "$gs_name" "$gs_got" "$gs_p" "$((gs_p - gs_got))" "$gs_base"
+          else
+            printf 'PASS  ⑭ %s %s = 钉数 %s\n' "$gs_name" "$gs_got" "$gs_p"
+          fi
+          ;;
+      esac
+    }
+    gs_check gate_fn_lines "$gs_fn_lines"
+    gs_check read_table_boilerplate "$gs_reads"
+    gs_check same_shape_fns "$gs_shapes"
+  fi
+fi
+if [ "$gs_fail" -ne 0 ]; then
+  fail=1
+fi
+
 printf '\n=== 汇总 ===\n'
 if [ "$fail" -eq 0 ]; then
   echo "所有规约检查通过"
