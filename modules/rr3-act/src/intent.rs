@@ -91,7 +91,8 @@ fn servo_motion_of(args: &Value) -> Result<rr_hal_api::Rr3ActMotion, String> {
 }
 
 /// 单条动作：形状裁决 → 两道门 → 执行（低电闸门只辖执行面；servo 动作再过
-/// 拒动判据——批N3 件三，与 RPC 路同判）
+/// 拒动判据——批N3 件三，与 RPC 路同判）。B9：门面/执行臂各自成函数，本函数只
+/// 留归属分派。
 fn rr3_action_handle(
     item: &Value,
     gpio: &mut dyn rr_hal_api::Rr3GpioOut,
@@ -101,6 +102,23 @@ fn rr3_action_handle(
     axis: &Rr3ActAxisState,
     open_topics: &[String],
 ) -> Result<Rr3IntentOutcome, String> {
+    let (topic, args) = rr3_item_gate(item, open_topics)?;
+    match topic {
+        RR3_RELAY_SET_TOPIC => rr3_relay_arm(args, gpio, low_blocked),
+        RR3_SERVO_COMMAND_TOPIC => rr3_servo_arm(args, servo, servo_cfg, low_blocked, axis),
+        // 开放集已 boot 校验只含上述两条执行臂主题；此臂为配置/执行面不一致的兜底
+        other => Err(format!(
+            "意图开放集含 {other} 但本模块无对应执行臂（配置与执行面不一致）"
+        )),
+    }
+}
+
+/// 形状 + 两道门（B9 自 action_handle 抽出）：topic/args 形状、归属门、
+/// 开放门。通过即返回 (topic, args)。
+fn rr3_item_gate<'a>(
+    item: &'a Value,
+    open_topics: &[String],
+) -> Result<(&'a str, &'a Value), String> {
     let topic = item
         .get("topic")
         .and_then(Value::as_str)
@@ -119,43 +137,52 @@ fn rr3_action_handle(
             rr3_open_topics_join(open_topics)
         ));
     }
-    match topic {
-        RR3_RELAY_SET_TOPIC => {
-            if low_blocked {
-                return Err(rr3_low_power_reject(RR3_RELAY_SET_TOPIC));
-            }
-            let on = rr3_relay_parse_args(args)?;
-            let (on, prev) =
-                relay::rr3_relay_apply(gpio, on).map_err(|e| rr3_relay_err_text(&e))?;
-            Ok(Rr3IntentOutcome::Relay(on, prev))
-        }
-        RR3_SERVO_COMMAND_TOPIC => {
-            if low_blocked {
-                return Err(rr3_low_power_reject(RR3_SERVO_COMMAND_TOPIC));
-            }
-            // 拒动硬约束（§6，批N3 件三）：广播无 motion 键 = auto（保守缺省），
-            // 未标定轴被代码拒动——判据与 RPC 路同源（rr-hal-api 单真值点）
-            let motion = servo_motion_of(args)?;
-            rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
-                .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
-            let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
-            // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
-            let angle = rr_core::control::rr3_travel_clamp(
-                angle,
-                servo_cfg.angle_min_deg,
-                servo_cfg.angle_max_deg,
-            );
-            // HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）
-            servo
-                .set_angle(angle)
-                .map_err(|e| format!("舵机写入失败: {e}"))?;
-            Ok(Rr3IntentOutcome::Servo(angle))
-        }
-        // 开放集已 boot 校验只含上述两条执行臂主题；此臂为配置/执行面不一致的兜底
-        other => Err(format!(
-            "意图开放集含 {other} 但本模块无对应执行臂（配置与执行面不一致）"
-        )),
+    Ok((topic, args))
+}
+
+/// relay 执行臂（B9 自 action_handle 抽出）
+fn rr3_relay_arm(
+    args: &Value,
+    gpio: &mut dyn rr_hal_api::Rr3GpioOut,
+    low_blocked: bool,
+) -> Result<Rr3IntentOutcome, String> {
+    if low_blocked {
+        return Err(rr3_low_power_reject(RR3_RELAY_SET_TOPIC));
     }
+    let on = rr3_relay_parse_args(args)?;
+    let (on, prev) = relay::rr3_relay_apply(gpio, on).map_err(|e| rr3_relay_err_text(&e))?;
+    Ok(Rr3IntentOutcome::Relay(on, prev))
+}
+
+/// servo 执行臂（B9 自 action_handle 抽出）：低电闸门 → 拒动判据 → 参数裁决
+/// → 行程钳位 → HAL 写。
+fn rr3_servo_arm(
+    args: &Value,
+    servo: &mut dyn rr_hal_api::Rr3PwmServo,
+    servo_cfg: &Rr3ServoCfg,
+    low_blocked: bool,
+    axis: &Rr3ActAxisState,
+) -> Result<Rr3IntentOutcome, String> {
+    if low_blocked {
+        return Err(rr3_low_power_reject(RR3_SERVO_COMMAND_TOPIC));
+    }
+    // 拒动硬约束（§6，批N3 件三）：广播无 motion 键 = auto（保守缺省），
+    // 未标定轴被代码拒动——判据与 RPC 路同源（rr-hal-api 单真值点）
+    let motion = servo_motion_of(args)?;
+    rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
+        .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
+    let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
+    // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
+    let angle = rr_core::control::rr3_travel_clamp(
+        angle,
+        servo_cfg.angle_min_deg,
+        servo_cfg.angle_max_deg,
+    );
+    // HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）
+    servo
+        .set_angle(angle)
+        .map_err(|e| format!("舵机写入失败: {e}"))?;
+    Ok(Rr3IntentOutcome::Servo(angle))
 }
 
 #[cfg(test)]
