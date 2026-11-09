@@ -450,6 +450,44 @@ fn rr3_tee_write(sink: &mut Option<std::fs::File>, bytes: &[u8]) {
     }
 }
 
+/// 桥链周期统计（10min 窗）：帧数/坏帧/重连累计，1.5M 长跑的误码口径。
+/// 误码率 = 坏帧 / 音频帧；一次会话内即可算，跨重连也连续（计数在核上）。
+fn rr3_stat_tick(core: &Rr3Esp32AudioCore) {
+    eprintln!(
+        "rr-hal-esp32-audio: 桥链统计（{}min 窗）: 音频帧累计={} 坏帧累计={} 重连累计={}",
+        RR3_BRIDGE_STAT_PERIOD.as_secs() / 60,
+        core.chunks.load(Ordering::Relaxed),
+        core.errs.load(Ordering::Relaxed),
+        core.reconnects.load(Ordering::Relaxed),
+    );
+}
+
+/// 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出（板侧执行前
+/// 回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插队首不丢，调用方按
+/// 读失败同路重连后补写（有界丢最旧兜底）。b3 冒烟修正：原实现把排水放在建连
+/// 拍——会话中途入队的命令永远等不到写出口（队容 2 满丢最旧），板面收不到
+/// servo 点名——b1 计划原文即「读循环每拍先排水再读」，此为落位笔误。
+fn rr3_drain_cmds(
+    c: &mut Rr3UartConn,
+    core: &Rr3Esp32AudioCore,
+    cmd_id: &mut u64,
+) -> Result<(), String> {
+    let Some(rx) = core.cmd.as_ref() else {
+        return Ok(());
+    };
+    while let Some(cmd) = rx.rr3_cmd_pop() {
+        let frame = rr3_esp32_cmd_frame(*cmd_id, &cmd);
+        if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
+            rx.rr3_cmd_push_front(cmd);
+            return Err(format!(
+                "命令写出失败（回插队首，连接报废转重连）: {e:?}"
+            ));
+        }
+        *cmd_id += 1;
+    }
+    Ok(())
+}
+
 /// 读线程主体：会话内大块裸读 → 拆帧 → 四道门 → 入环；断流/错会话就地转
 /// 重连。收兵（stop 旗）时板面 `AUDIO OFF`（防残流，conn 随作用域释放 →
 /// flock 退账）。
@@ -486,13 +524,7 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
             }
             if stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
                 stat_at = Instant::now();
-                eprintln!(
-                    "rr-hal-esp32-audio: 桥链统计（{}min 窗）: 音频帧累计={} 坏帧累计={} 重连累计={}",
-                    RR3_BRIDGE_STAT_PERIOD.as_secs() / 60,
-                    core.chunks.load(Ordering::Relaxed),
-                    core.errs.load(Ordering::Relaxed),
-                    core.reconnects.load(Ordering::Relaxed),
-                );
+                rr3_stat_tick(&core);
             }
             // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一条静默行；写失败
             // 即连接坏，与读失败同路重连（重连后握手会再 AUDIO ON）——
@@ -510,24 +542,10 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
             // 原实现把排水放在建连拍——会话中途入队的命令永远等不到写出口
             // （队容 2 满丢最旧），板面收不到 servo 点名——b1 计划原文即
             // 「读循环每拍先排水再读」，此为落位笔误。
-            if let Some(rx) = core.cmd.as_ref() {
-                let mut cmd_io_err = false;
-                while let Some(cmd) = rx.rr3_cmd_pop() {
-                    let frame = rr3_esp32_cmd_frame(cmd_id, &cmd);
-                    if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
-                        rx.rr3_cmd_push_front(cmd);
-                        eprintln!(
-                            "rr-hal-esp32-audio: 命令写出失败（回插队首，连接报废转重连）: {e:?}"
-                        );
-                        cmd_io_err = true;
-                        break;
-                    }
-                    cmd_id += 1;
-                }
-                if cmd_io_err {
-                    conn = None;
-                    break;
-                }
+            if let Err(e) = rr3_drain_cmds(c, &core, &mut cmd_id) {
+                eprintln!("rr-hal-esp32-audio: {e}");
+                conn = None;
+                break;
             }
             match c.rr3_read_timeout(&mut raw, READ_TIMEOUT_MS) {
                 Err(e) => {
