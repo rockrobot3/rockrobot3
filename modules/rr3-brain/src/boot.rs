@@ -135,23 +135,7 @@ fn rr3_wake_cfg_of(doc: &Value) -> Result<Rr3WakeCfg, String> {
             .ok_or_else(|| "config [rr3-brain.wake] enable 须布尔".to_string())?;
     }
     if let Some(v) = w.get("phrases") {
-        let arr = v
-            .as_array()
-            .ok_or_else(|| "config [rr3-brain.wake] phrases 须字符串数组".to_string())?;
-        let mut out = Vec::new();
-        for item in arr {
-            let s = item
-                .as_str()
-                .ok_or_else(|| "config [rr3-brain.wake] phrases 项须字符串".to_string())?
-                .trim();
-            if !s.is_empty() {
-                out.push(s.to_string());
-            }
-        }
-        if out.is_empty() {
-            return Err("config [rr3-brain.wake] phrases 须至少一个非空短语".to_string());
-        }
-        cfg.phrases = out;
+        cfg.phrases = rr3_wake_phrases(v)?;
     }
     if let Some(v) = w.get("ack") {
         let s = v
@@ -169,6 +153,28 @@ fn rr3_wake_cfg_of(doc: &Value) -> Result<Rr3WakeCfg, String> {
             .ok_or_else(|| "config [rr3-brain.wake] followup_ms 须非负整数".to_string())?;
     }
     Ok(cfg)
+}
+
+/// `phrases` 项形状核：字符串数组、项去空白、空项跳过——全空即拒（空短语表
+/// 等于"永不唤醒"却挂着 enable=true，是误配不是关闭语义）。
+fn rr3_wake_phrases(v: &Value) -> Result<Vec<String>, String> {
+    let arr = v
+        .as_array()
+        .ok_or_else(|| "config [rr3-brain.wake] phrases 须字符串数组".to_string())?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        let s = item
+            .as_str()
+            .ok_or_else(|| "config [rr3-brain.wake] phrases 项须字符串".to_string())?
+            .trim();
+        if !s.is_empty() {
+            out.push(s.to_string());
+        }
+    }
+    if out.is_empty() {
+        return Err("config [rr3-brain.wake] phrases 须至少一个非空短语".to_string());
+    }
+    Ok(out)
 }
 
 // ---------- 文档树下钻助手（点名文案与 power/sense 同款中文形状） ----------
@@ -383,30 +389,10 @@ pub(crate) fn rr3_brain_cfg_parse(text: &str) -> Result<Rr3BrainCfg, String> {
     let model = rr3_brain_model_row(&doc)?;
     // bus 段可选（Python cfg["rr3-brain"].get("bus", {}) 同形状）；
     // connect_timeout_s 已随迁移退役（批N32 增补裁定 4），本面不读
-    let call_timeout_s = match doc.get("rr3-brain").and_then(|b| b.get("bus")) {
-        Some(bus) => match bus.get("call_timeout_s") {
-            Some(v) => rr3_timeout_value(v, "bus", "call_timeout_s")?,
-            None => RR3_BUS_CALL_TIMEOUT_DEFAULT_S,
-        },
-        None => RR3_BUS_CALL_TIMEOUT_DEFAULT_S,
-    };
+    let call_timeout_s = rr3_bus_timeout_of(&doc)?;
     // dialog 段必填（Python dialog_cfg = cfg["rr3-brain"]["dialog"] 直取同义），
     // 键可选缺省 8000；<=0 与 ops/set 写臂同一判据拒（起轮即过期/永不过期都是误配）
-    let dialog = rr3_brain_sect(&doc, "dialog")?;
-    let max_utterance_ms = match dialog.get("max_utterance_ms") {
-        Some(v) => {
-            let n = v
-                .as_i64()
-                .ok_or_else(|| "config [rr3-brain.dialog] max_utterance_ms 须整数".to_string())?;
-            if n <= 0 {
-                return Err(format!(
-                    "config [rr3-brain.dialog] max_utterance_ms 须 >0，收到 {n}"
-                ));
-            }
-            n
-        }
-        None => RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS,
-    };
+    let max_utterance_ms = rr3_dialog_ms_of(&doc)?;
     // 唤醒词段可选（缺段 = 关闭门控；见 [`rr3_wake_cfg_of`]）
     let wake = rr3_wake_cfg_of(&doc)?;
     Ok(Rr3BrainCfg {
@@ -418,6 +404,38 @@ pub(crate) fn rr3_brain_cfg_parse(text: &str) -> Result<Rr3BrainCfg, String> {
         wake,
         config_path: None,
     })
+}
+
+/// `[rr3-brain.bus]` 段（可选段）：`call_timeout_s` 缺段/缺键一律回落总线缺省，
+/// 在册即按超时值域核（非有限/≤0/超上界点名拒）。
+fn rr3_bus_timeout_of(doc: &Value) -> Result<f64, String> {
+    let bus = match doc.get("rr3-brain").and_then(|b| b.get("bus")) {
+        Some(bus) => bus,
+        None => return Ok(RR3_BUS_CALL_TIMEOUT_DEFAULT_S),
+    };
+    match bus.get("call_timeout_s") {
+        Some(v) => rr3_timeout_value(v, "bus", "call_timeout_s"),
+        None => Ok(RR3_BUS_CALL_TIMEOUT_DEFAULT_S),
+    }
+}
+
+/// `[rr3-brain.dialog]` 段（必填段）：`max_utterance_ms` 缺键回落缺省，在册即
+/// 整数且 >0（<=0 与 ops/set 写臂同判据）。
+fn rr3_dialog_ms_of(doc: &Value) -> Result<i64, String> {
+    let dialog = rr3_brain_sect(doc, "dialog")?;
+    let v = match dialog.get("max_utterance_ms") {
+        Some(v) => v,
+        None => return Ok(RR3_DIALOG_MAX_UTTERANCE_DEFAULT_MS),
+    };
+    let n = v
+        .as_i64()
+        .ok_or_else(|| "config [rr3-brain.dialog] max_utterance_ms 须整数".to_string())?;
+    if n <= 0 {
+        return Err(format!(
+            "config [rr3-brain.dialog] max_utterance_ms 须 >0，收到 {n}"
+        ));
+    }
+    Ok(n)
 }
 
 /// config 路径投影（ADR-0023 模型行落盘用）：与 [`rr3mod::bootstrap`] 实读同一

@@ -439,6 +439,62 @@ struct Rr3ModelRowInput<'a> {
     active: Option<bool>,
 }
 
+/// `api_format` 词表核（缺省 openai；本批仅 openai）。
+fn rr3_api_format_of<'a>(name: &str, args: &'a Value) -> Result<&'a str, String> {
+    let api_format = args
+        .get("api_format")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("openai");
+    if api_format != "openai" {
+        return Err(format!(
+            "模型行 {name} api_format 暂不支持: {api_format}（本批仅 openai）"
+        ));
+    }
+    Ok(api_format)
+}
+
+/// `mode` 词表核（缺省 api；允许 api/local）。
+fn rr3_mode_of<'a>(name: &str, args: &'a Value) -> Result<&'a str, String> {
+    let mode = args
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("api");
+    if mode != "api" && mode != "local" {
+        return Err(format!("模型行 {name} mode 不认: {mode}（允许 api/local）"));
+    }
+    Ok(mode)
+}
+
+/// `api_key_ref` 三态核：缺席 = 保留现值（None,false）；空串 = 清除（None,true）；
+/// 有值 = 无空白且 `env:` 前缀后是合法变量名后写入（Some(s),false）。
+fn rr3_key_ref_input(name: &str, args: &Value) -> Result<(Option<String>, bool), String> {
+    let Some(v) = args.get("api_key_ref") else {
+        return Ok((None, false));
+    };
+    let s = v
+        .as_str()
+        .map(str::trim)
+        .ok_or_else(|| format!("模型行 {name} api_key_ref 须字符串"))?;
+    if s.is_empty() {
+        return Ok((None, true));
+    }
+    if s.chars().any(char::is_whitespace) {
+        return Err(format!("模型行 {name} api_key_ref 不得含空白: '{s}'"));
+    }
+    if let Some(var) = s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX) {
+        if var.is_empty() || var.chars().any(char::is_whitespace) {
+            return Err(format!(
+                "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
+            ));
+        }
+    }
+    Ok((Some(s.to_string()), false))
+}
+
 /// 模型行进参解析：必填/域名/键引用/active 逐项按旧文案 fail-closed。
 fn rr3_model_row_input<'a>(name: &str, args: &'a Value) -> Result<Rr3ModelRowInput<'a>, String> {
     let base_url = args
@@ -455,50 +511,9 @@ fn rr3_model_row_input<'a>(name: &str, args: &'a Value) -> Result<Rr3ModelRowInp
         return Err("upsert 须同时给 base_url 与 model_id（非空）".to_string());
     }
     rr3_base_url_check(base_url).map_err(|e| format!("模型行 {name} {e}"))?;
-    let api_format = args
-        .get("api_format")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("openai");
-    if api_format != "openai" {
-        return Err(format!(
-            "模型行 {name} api_format 暂不支持: {api_format}（本批仅 openai）"
-        ));
-    }
-    let mode = args
-        .get("mode")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("api");
-    if mode != "api" && mode != "local" {
-        return Err(format!("模型行 {name} mode 不认: {mode}（允许 api/local）"));
-    }
-    let (key_ref, key_ref_clear) = match args.get("api_key_ref") {
-        None => (None, false),
-        Some(v) => {
-            let s = v
-                .as_str()
-                .map(str::trim)
-                .ok_or_else(|| format!("模型行 {name} api_key_ref 须字符串"))?;
-            if s.is_empty() {
-                (None, true)
-            } else {
-                if s.chars().any(char::is_whitespace) {
-                    return Err(format!("模型行 {name} api_key_ref 不得含空白: '{s}'"));
-                }
-                if let Some(var) = s.strip_prefix(crate::cloud::RR3_KEY_REF_ENV_PREFIX) {
-                    if var.is_empty() || var.chars().any(char::is_whitespace) {
-                        return Err(format!(
-                            "模型行 {name} api_key_ref 的 env: 后须变量名（非空、无空白）: '{s}'"
-                        ));
-                    }
-                }
-                (Some(s.to_string()), false)
-            }
-        }
-    };
+    let api_format = rr3_api_format_of(name, args)?;
+    let mode = rr3_mode_of(name, args)?;
+    let (key_ref, key_ref_clear) = rr3_key_ref_input(name, args)?;
     let active = match args.get("active") {
         None => None,
         Some(v) => Some(
@@ -622,14 +637,30 @@ pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<V
         return Err("模型行 name 不得为空".to_string());
     }
     let mut rows = rr3_model_rows(&cfg.doc)?;
-    match op {
-        "upsert" => rr3_model_upsert(&mut rows, name, args)?,
-        "activate" => rr3_model_activate(&mut rows, name)?,
-        "delete" => rr3_model_delete(&mut rows, name)?,
-        "" => return Err("缺 op（允许 upsert/activate/delete）".to_string()),
-        other => return Err(format!("op 不认: '{other}'（允许 upsert/activate/delete）")),
-    }
+    rr3_model_op_apply(&mut rows, op, name, args)?;
     // 结构门（写面自守，不依赖 boot 兜底）：恰一 active
+    rr3_model_one_active(&rows)?;
+    rr3_model_commit(cfg, rows, op, name)
+}
+
+/// op 分派（upsert/activate/delete；空串与词表外点名拒）。
+fn rr3_model_op_apply(
+    rows: &mut Vec<Value>,
+    op: &str,
+    name: &str,
+    args: &Value,
+) -> Result<(), String> {
+    match op {
+        "upsert" => rr3_model_upsert(rows, name, args),
+        "activate" => rr3_model_activate(rows, name),
+        "delete" => rr3_model_delete(rows, name),
+        "" => Err("缺 op（允许 upsert/activate/delete）".to_string()),
+        other => Err(format!("op 不认: '{other}'（允许 upsert/activate/delete）")),
+    }
+}
+
+/// 结构门：恰一行 active=true（多 active/零 active 都是误配，写面自守）。
+fn rr3_model_one_active(rows: &[Value]) -> Result<(), String> {
     let active_n = rows
         .iter()
         .filter(|r| r.get("active").and_then(Value::as_bool) == Some(true))
@@ -637,6 +668,17 @@ pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<V
     if active_n != 1 {
         return Err(format!("模型行表须恰一行 active=true（现 {active_n} 行）"));
     }
+    Ok(())
+}
+
+/// 落盘 + 内存提交：文本手术 → boot 解析器预核 → 原子落盘 → 文档树/模型行同步。
+/// 预核在落盘前，解析不过零字节进正档（失败面全部走完才动文件）。
+fn rr3_model_commit(
+    cfg: &mut Rr3BrainCfg,
+    rows: Vec<Value>,
+    op: &str,
+    name: &str,
+) -> Result<Value, String> {
     let path = cfg.config_path.clone().ok_or_else(|| {
         "模型行写面未接 config 路径（cfg.config_path 未注入）——本次未改任何文件".to_string()
     })?;

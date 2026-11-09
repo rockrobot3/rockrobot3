@@ -77,34 +77,52 @@ pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
             .and_then(|s| s.get(name))
             .ok_or_else(|| format!("config 缺 [rr3-power.{name}] 段"))
     };
-    let battery_sect = sect("battery")?.clone();
-    let charger_sect = sect("charger")?.clone();
     // battery/charger 先解析（既有红例的次序契约：缺字段点名先于 rail 段点名），
     // rail 段（批N2 件五）殿后——段必填＋全键必填，up=false 惰性但显式写
-    let battery = Rr3BatteryCfg {
-        sample_period_ms: rr3_period(&battery_sect, "sample_period_ms", "battery")?,
-        low_voltage_mv: rr3_u16(&battery_sect, "low_voltage_mv", "battery")?,
-        cutoff_voltage_mv: rr3_u16(&battery_sect, "cutoff_voltage_mv", "battery")?,
-    };
-    let charger = Rr3ChargerCfg {
-        state_period_ms: rr3_period(&charger_sect, "state_period_ms", "charger")?,
-    };
-    let rail_sect = sect("rail")?.clone();
+    let battery = rr3_battery_of(&sect("battery")?.clone())?;
+    let charger = rr3_charger_of(&sect("charger")?.clone())?;
+    let rail = rr3_rail_of(&sect("rail")?.clone())?;
+    Ok(Rr3PowerCfg {
+        battery,
+        charger,
+        rail,
+    })
+}
+
+/// `[rr3-power.battery]` 段：三键全必填（周期低于下限钳制留痕）。
+fn rr3_battery_of(sect: &toml::Value) -> Result<Rr3BatteryCfg, String> {
+    Ok(Rr3BatteryCfg {
+        sample_period_ms: rr3_period(sect, "sample_period_ms", "battery")?,
+        low_voltage_mv: rr3_u16(sect, "low_voltage_mv", "battery")?,
+        cutoff_voltage_mv: rr3_u16(sect, "cutoff_voltage_mv", "battery")?,
+    })
+}
+
+/// `[rr3-power.charger]` 段：周期必填。
+fn rr3_charger_of(sect: &toml::Value) -> Result<Rr3ChargerCfg, String> {
+    Ok(Rr3ChargerCfg {
+        state_period_ms: rr3_period(sect, "state_period_ms", "charger")?,
+    })
+}
+
+/// `[rr3-power.rail]` 段：全键必填 + 阈值次序（severe < mild，相等则 Mild 档
+/// 不可达，属误配不是"更保守"）。
+fn rr3_rail_of(sect: &toml::Value) -> Result<Rr3RailCfg, String> {
     let rail = Rr3RailCfg {
-        up: rail_sect
+        up: sect
             .get("up")
             .and_then(toml::Value::as_bool)
             .ok_or_else(|| "config [rr3-power.rail] 缺 up（布尔）".to_string())?,
-        domain: rail_sect
+        domain: sect
             .get("domain")
             .and_then(toml::Value::as_str)
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .ok_or_else(|| "config [rr3-power.rail] 缺 domain（非空字符串）".to_string())?,
-        sample_period_ms: rr3_period(&rail_sect, "sample_period_ms", "rail")?,
-        mild_mv: rr3_u16(&rail_sect, "mild_mv", "rail")?,
-        severe_mv: rr3_u16(&rail_sect, "severe_mv", "rail")?,
-        max_age_ms: rr3_u32(&rail_sect, "max_age_ms", "rail")?,
+        sample_period_ms: rr3_period(sect, "sample_period_ms", "rail")?,
+        mild_mv: rr3_u16(sect, "mild_mv", "rail")?,
+        severe_mv: rr3_u16(sect, "severe_mv", "rail")?,
+        max_age_ms: rr3_u32(sect, "max_age_ms", "rail")?,
     };
     if rail.severe_mv >= rail.mild_mv {
         return Err(format!(
@@ -112,11 +130,7 @@ pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
             rail.severe_mv, rail.mild_mv
         ));
     }
-    Ok(Rr3PowerCfg {
-        battery,
-        charger,
-        rail,
-    })
+    Ok(rail)
 }
 
 /// `[rr3-power.<段>] <key>` 取 u16（0..=65535 整数；缺键/越界同文案点名）。

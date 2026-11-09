@@ -390,6 +390,17 @@ fn rr3_conf_item(
         ));
         return;
     };
+    rr3_conf_keys(c, i, errs);
+    let group = rr3_conf_group(c, i, errs);
+    let (pins, controllers) = rr3_conf_members(c, i, &group, table, errs);
+    let why = rr3_conf_why(c, i, errs);
+    if let Some(g) = group {
+        rr3_conf_register(i, g, pins, controllers, why, groups_seen, table, errs);
+    }
+}
+
+/// 键词表核：只认 group / pins / controllers / why（其余逐键点名）。
+fn rr3_conf_keys(c: &toml::Table, i: usize, errs: &mut Vec<String>) {
     for k in c.keys() {
         if k != "group" && k != "pins" && k != "controllers" && k != "why" {
             errs.push(format!(
@@ -397,7 +408,11 @@ fn rr3_conf_item(
             ));
         }
     }
-    let group = match c.get("group").and_then(Value::as_str) {
+}
+
+/// 组名：非空字符串（空串/非串各自点名，返回 None 即不登记）。
+fn rr3_conf_group(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<String> {
+    match c.get("group").and_then(Value::as_str) {
         Some(g) if !g.trim().is_empty() => Some(g.to_string()),
         Some(_) => {
             errs.push(format!("conflict[{i}].group 不得为空串"));
@@ -407,32 +422,49 @@ fn rr3_conf_item(
             errs.push(format!("conflict[{i}].group 应为字符串"));
             None
         }
-    };
-    let (pins, controllers) = rr3_conf_members(c, i, &group, table, errs);
-    match c.get("why").and_then(Value::as_str) {
-        Some(w) if !w.trim().is_empty() => {}
-        Some(_) => errs.push(format!("conflict[{i}].why 不得为空串")),
-        None => errs.push(format!("conflict[{i}] 缺 why（进册的冲突必须带可读理由）")),
     }
-    if let Some(g) = group {
-        if !g.trim().is_empty() && !(pins.is_empty() && controllers.is_empty()) {
-            if !groups_seen.insert(g.clone()) {
-                errs.push(format!(
-                    "conflict[{i}] 组名 {g} 重复（一组一条，互斥集不许同名两册）"
-                ));
-            }
-            table.conflicts.push(Rr3ConflictEntry {
-                group: g,
-                pins,
-                controllers,
-                why: c
-                    .get("why")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-            });
+}
+
+/// 理由：进册必须带非空可读理由（缺失/空串点名，登记值取空串保持旧形状）。
+fn rr3_conf_why<'a>(c: &'a toml::Table, i: usize, errs: &mut Vec<String>) -> &'a str {
+    match c.get("why").and_then(Value::as_str) {
+        Some(w) if !w.trim().is_empty() => w,
+        Some(_) => {
+            errs.push(format!("conflict[{i}].why 不得为空串"));
+            ""
+        }
+        None => {
+            errs.push(format!("conflict[{i}] 缺 why（进册的冲突必须带可读理由）"));
+            ""
         }
     }
+}
+
+/// 入册：成员集全空不登记（已是错误面）；组名唯一（同名两册点名）。
+fn rr3_conf_register(
+    i: usize,
+    g: String,
+    pins: BTreeSet<i64>,
+    controllers: BTreeSet<String>,
+    why: &str,
+    groups_seen: &mut BTreeSet<String>,
+    table: &mut Rr3PlatformTable,
+    errs: &mut Vec<String>,
+) {
+    if pins.is_empty() && controllers.is_empty() {
+        return;
+    }
+    if !groups_seen.insert(g.clone()) {
+        errs.push(format!(
+            "conflict[{i}] 组名 {g} 重复（一组一条，互斥集不许同名两册）"
+        ));
+    }
+    table.conflicts.push(Rr3ConflictEntry {
+        group: g,
+        pins,
+        controllers,
+        why: why.to_string(),
+    });
 }
 
 /// 冲突集成员：pins/controllers 两数组（缺省空集）；两集皆空即点名；controllers
