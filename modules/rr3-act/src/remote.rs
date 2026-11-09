@@ -23,8 +23,10 @@ const RR3_SENSE_SERVO_TOPIC: &str = "rr3-sense/servo/set";
 const RR3_SENSE_OPS_TOPIC: &str = "rr3-sense/ops/list";
 /// 单次 RPC 超时：命令面是反射环低频路径，500ms 足够覆盖 rrd 转发 + sense 入队
 const RR3_REMOTE_TIMEOUT: Duration = Duration::from_millis(500);
-/// 构造探测重试：模块启动序不保证 sense 先起，2s 窗口吸收正常启动抖动
-const RR3_REMOTE_TRIES: u32 = 20;
+/// 构造探测重试：模块启动序不保证 sense 先起，5s 窗口吸收正常启动抖动
+/// （真板实测 sense 开桥到应答案接近 2s，20×100ms 只剩最后一次余量——
+/// 这里放大到 50×100ms，避免宿主机负载高时 act 白白重启一轮）。
+const RR3_REMOTE_TRIES: u32 = 50;
 const RR3_REMOTE_BACKOFF_MS: u64 = 100;
 
 /// 远端舵机：BusHandle clone 共享同一连接（客户端 reader 线程按 id 路由应答，
