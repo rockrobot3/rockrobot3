@@ -431,60 +431,72 @@ fn heartbeat_loop(sh: Arc<Shared>) {
 /// （头/payload 拆解走 rr-ipc，分类走 rr-core）。
 fn reader_loop(mut rx: UartRxHalf, sh: Arc<Shared>) {
     loop {
-        // rx 半体 → std adapter → blanket conn：rr3_recv_buf 带全量拒收路径
-        // （半帧/坏 magic/长度不符），错误面与宿主三实现同源
-        let buf = match rx.rr3_recv_buf() {
-            Ok(b) => b,
-            Err(e) => sh.rr3_mark_restart(&format!("收帧失败: {e:?}")),
-        };
-        let frame = match Rr3Frame::try_from(buf) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("[sentinel] 帧还原失败: {e:?}");
-                continue;
-            }
-        };
-        let (ty, body) = match rr3_body_split(&frame.payload) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[sentinel] payload 前缀非法: {e:?}");
-                continue;
-            }
+        let Some((ty, frame, body)) = next_frame(&mut rx, &sh) else {
+            continue;
         };
         match rr3_dispatch_class(ty) {
-            Rr3Dispatch::Pending => {
-                // 应答帧：按 JSON-RPC id 路由到等待者（std 驱动器 reader 同构）
-                let v: Value = match serde_json::from_slice(&body) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("[sentinel] 应答体非 JSON: {e}");
-                        continue;
-                    }
-                };
-                let id = v.get("id").and_then(Value::as_u64).map(|i| i as u32);
-                let waiter = id.and_then(|i| {
-                    sh.pending
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .remove(&i)
-                });
-                match waiter {
-                    Some(w) => {
-                        let _ = w.send(v);
-                    }
-                    None => eprintln!("[sentinel] 无等待者的应答帧 id={id:?}"),
-                }
-            }
-            Rr3Dispatch::Inbox => {
-                if ty == Rr3PayloadType::Request {
-                    handle_request(&frame, &body, &sh);
-                } else {
-                    // Event / Stream / Notification：inbox 计账（哨兵无订阅主题，
-                    // 广播 state 帧是唯一合法来客——按类型点到名即可）
-                    eprintln!("[sentinel] inbox: {ty:?} {}B", body.len());
-                }
-            }
+            Rr3Dispatch::Pending => deliver_pending(&body, &sh),
+            Rr3Dispatch::Inbox => route_inbox(ty, &frame, &body, &sh),
         }
+    }
+}
+
+/// 收一帧并做前缀校验：坏帧只打站并回 `None`（下一轮重收）；链路层错误走
+/// `rr3_mark_restart`（重启不返回）。
+fn next_frame(rx: &mut UartRxHalf, sh: &Shared) -> Option<(Rr3PayloadType, Rr3Frame, Vec<u8>)> {
+    // rx 半体 → std adapter → blanket conn：rr3_recv_buf 带全量拒收路径
+    // （半帧/坏 magic/长度不符），错误面与宿主三实现同源
+    let buf = match rx.rr3_recv_buf() {
+        Ok(b) => b,
+        Err(e) => sh.rr3_mark_restart(&format!("收帧失败: {e:?}")),
+    };
+    let frame = match Rr3Frame::try_from(buf) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[sentinel] 帧还原失败: {e:?}");
+            return None;
+        }
+    };
+    match rr3_body_split(&frame.payload) {
+        Ok((ty, body)) => Some((ty, frame, body)),
+        Err(e) => {
+            eprintln!("[sentinel] payload 前缀非法: {e:?}");
+            None
+        }
+    }
+}
+
+/// 应答帧：按 JSON-RPC id 路由到等待者（std 驱动器 reader 同构）。
+fn deliver_pending(body: &[u8], sh: &Shared) {
+    let v: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[sentinel] 应答体非 JSON: {e}");
+            return;
+        }
+    };
+    let id = v.get("id").and_then(Value::as_u64).map(|i| i as u32);
+    let waiter = id.and_then(|i| {
+        sh.pending
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&i)
+    });
+    match waiter {
+        Some(w) => {
+            let _ = w.send(v);
+        }
+        None => eprintln!("[sentinel] 无等待者的应答帧 id={id:?}"),
+    }
+}
+
+/// 入站面分流：Request 走 round-trip 应答，其余（Event/Stream/Notification）inbox
+/// 计账（哨兵无订阅主题，广播 state 帧是唯一合法来客——按类型点到名即可）。
+fn route_inbox(ty: Rr3PayloadType, frame: &Rr3Frame, body: &[u8], sh: &Shared) {
+    if ty == Rr3PayloadType::Request {
+        handle_request(frame, body, sh);
+    } else {
+        eprintln!("[sentinel] inbox: {ty:?} {}B", body.len());
     }
 }
 
