@@ -184,39 +184,49 @@ pub(crate) fn rr3_handles_parse(items: &[Value]) -> (Vec<Rr3AssembleHandle>, Vec
     let mut handles = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let Some(h) = item.as_table() else {
-            errs.push(format!("handles[{i}] 应为内联表 {{ trait, desc_key }}"));
-            continue;
-        };
-        for k in h.keys() {
-            if k != "trait" && k != "desc_key" {
-                errs.push(format!("handles[{i}] 未知键 {k}（只认 trait / desc_key）"));
-            }
-        }
-        let trait_name = h.get("trait").and_then(Value::as_str);
-        let desc_key = h.get("desc_key").and_then(Value::as_str);
-        match trait_name {
-            Some(tr) if RR3_ASSEMBLE_HANDLE_TRAITS.contains(&tr) => {}
-            Some(tr) => errs.push(format!(
-                "handles[{i}].trait \"{tr}\" 未在册（能力面表见 assemble.rs，扩面走契约级评审）"
-            )),
-            None => errs.push(format!("handles[{i}].trait 应为字符串")),
-        }
-        match desc_key {
-            Some(dk) if RR3_ASSEMBLE_DESC_KEYS.contains(&dk) => {}
-            Some(dk) => errs.push(format!(
-                "handles[{i}].desc_key \"{dk}\" 未在册（键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
-            )),
-            None => errs.push(format!("handles[{i}].desc_key 应为字符串")),
-        }
-        if let (Some(tr), Some(dk)) = (trait_name, desc_key) {
-            handles.push(Rr3AssembleHandle {
-                trait_name: tr.into(),
-                desc_key: dk.into(),
-            });
-        }
+        rr3_handle_item(item, i, &mut handles, &mut errs);
     }
     (handles, errs)
+}
+
+/// 单条 handle：未知键 + trait/desc_key 双域在册（两域都合法才入列）。
+fn rr3_handle_item(
+    item: &Value,
+    i: usize,
+    handles: &mut Vec<Rr3AssembleHandle>,
+    errs: &mut Vec<String>,
+) {
+    let Some(h) = item.as_table() else {
+        errs.push(format!("handles[{i}] 应为内联表 {{ trait, desc_key }}"));
+        return;
+    };
+    for k in h.keys() {
+        if k != "trait" && k != "desc_key" {
+            errs.push(format!("handles[{i}] 未知键 {k}（只认 trait / desc_key）"));
+        }
+    }
+    let trait_name = h.get("trait").and_then(Value::as_str);
+    let desc_key = h.get("desc_key").and_then(Value::as_str);
+    match trait_name {
+        Some(tr) if RR3_ASSEMBLE_HANDLE_TRAITS.contains(&tr) => {}
+        Some(tr) => errs.push(format!(
+            "handles[{i}].trait \"{tr}\" 未在册（能力面表见 assemble.rs，扩面走契约级评审）"
+        )),
+        None => errs.push(format!("handles[{i}].trait 应为字符串")),
+    }
+    match desc_key {
+        Some(dk) if RR3_ASSEMBLE_DESC_KEYS.contains(&dk) => {}
+        Some(dk) => errs.push(format!(
+            "handles[{i}].desc_key \"{dk}\" 未在册（键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
+        )),
+        None => errs.push(format!("handles[{i}].desc_key 应为字符串")),
+    }
+    if let (Some(tr), Some(dk)) = (trait_name, desc_key) {
+        handles.push(Rr3AssembleHandle {
+            trait_name: tr.into(),
+            desc_key: dk.into(),
+        });
+    }
 }
 
 /// ops 数组条目级解析与校验（同上：件级与组合件级共用）
@@ -224,37 +234,42 @@ pub(crate) fn rr3_ops_parse(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<String>
     let mut ops = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let Some(o) = item.as_table() else {
-            errs.push(format!("ops[{i}] 应为内联表 {{ slot, src_key }}"));
-            continue;
-        };
-        for k in o.keys() {
-            if k != "slot" && k != "src_key" {
-                errs.push(format!("ops[{i}] 未知键 {k}（只认 slot / src_key）"));
-            }
-        }
-        let slot = o.get("slot").and_then(Value::as_str);
-        let src_key = o.get("src_key").and_then(Value::as_str);
-        match slot {
-            Some(s) if !s.trim().is_empty() => {}
-            Some(_) => errs.push(format!("ops[{i}].slot 不得为空")),
-            None => errs.push(format!("ops[{i}].slot 应为字符串")),
-        }
-        match src_key {
-            Some(k) if rr3_dotted_key_ok(k) => {}
-            Some(k) => errs.push(format!(
-                "ops[{i}].src_key \"{k}\" 不是合法点路径（按 . 切分后每段须非空）"
-            )),
-            None => errs.push(format!("ops[{i}].src_key 应为字符串")),
-        }
-        if let (Some(s), Some(k)) = (slot, src_key) {
-            ops.push(Rr3AssembleOp {
-                slot: s.into(),
-                src_key: k.into(),
-            });
-        }
+        rr3_op_item(item, i, &mut ops, &mut errs);
     }
     (ops, errs)
+}
+
+/// 单条 op：未知键 + slot 非空 + src_key 点路径（两域都合法才入列）。
+fn rr3_op_item(item: &Value, i: usize, ops: &mut Vec<Rr3AssembleOp>, errs: &mut Vec<String>) {
+    let Some(o) = item.as_table() else {
+        errs.push(format!("ops[{i}] 应为内联表 {{ slot, src_key }}"));
+        return;
+    };
+    for k in o.keys() {
+        if k != "slot" && k != "src_key" {
+            errs.push(format!("ops[{i}] 未知键 {k}（只认 slot / src_key）"));
+        }
+    }
+    let slot = o.get("slot").and_then(Value::as_str);
+    let src_key = o.get("src_key").and_then(Value::as_str);
+    match slot {
+        Some(s) if !s.trim().is_empty() => {}
+        Some(_) => errs.push(format!("ops[{i}].slot 不得为空")),
+        None => errs.push(format!("ops[{i}].slot 应为字符串")),
+    }
+    match src_key {
+        Some(k) if rr3_dotted_key_ok(k) => {}
+        Some(k) => errs.push(format!(
+            "ops[{i}].src_key \"{k}\" 不是合法点路径（按 . 切分后每段须非空）"
+        )),
+        None => errs.push(format!("ops[{i}].src_key 应为字符串")),
+    }
+    if let (Some(s), Some(k)) = (slot, src_key) {
+        ops.push(Rr3AssembleOp {
+            slot: s.into(),
+            src_key: k.into(),
+        });
+    }
 }
 
 /// demands 数组条目级解析与校验（**件级专用**：组合件级 [assemble] 不认 demands——
