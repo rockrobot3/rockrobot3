@@ -44,28 +44,35 @@ pub fn rr3_frame_read(r: impl Read) -> Result<Rr3Frame, Rr3FrameError> {
 /// `vec![0u8; want]`，协议规格 64MB 上界对守护进程仍是单连接可打穿的
 /// 分配面；消费方按自身最大合法帧给策略帽（总线/面板 = 1MB 档）。
 pub fn rr3_frame_read_cap(mut r: impl Read, cap: usize) -> Result<Rr3Frame, Rr3FrameError> {
-    let mut head = [0u8; RR3_IPC_HDR_SIZE];
-    match read_fill(&mut r, &mut head)? {
-        None => return Err(Rr3FrameError::Closed),
-        Some(got) if got < head.len() => return Err(Rr3FrameError::TornHeader { got }),
-        _ => {}
-    }
-    let header = Rr3Header::from_bytes(&head).map_err(Rr3FrameError::Header)?;
+    let header = rr3_head_read(&mut r)?;
     let want = header.payload_len as usize;
     if want > cap {
         return Err(Rr3FrameError::Header(Rr3HdrError::PayloadTooLarge {
             len: header.payload_len,
         }));
     }
+    let payload = rr3_payload_read(&mut r, want)?;
+    Ok(Rr3Frame { header, payload })
+}
+
+/// 读满 128B 定长头（空读 = 对端关闭；半头 = TornHeader）。
+fn rr3_head_read(r: &mut impl Read) -> Result<Rr3Header, Rr3FrameError> {
+    let mut head = [0u8; RR3_IPC_HDR_SIZE];
+    match read_fill(r, &mut head)? {
+        None => Err(Rr3FrameError::Closed),
+        Some(got) if got < head.len() => Err(Rr3FrameError::TornHeader { got }),
+        _ => Rr3Header::from_bytes(&head).map_err(Rr3FrameError::Header),
+    }
+}
+
+/// 读满 payload（`want=0` 不分配；半 payload 报 TornPayload，已读计数如实）。
+fn rr3_payload_read(r: &mut impl Read, want: usize) -> Result<Vec<u8>, Rr3FrameError> {
     if want == 0 {
-        return Ok(Rr3Frame {
-            header,
-            payload: Vec::new(),
-        });
+        return Ok(Vec::new());
     }
     let mut payload = vec![0u8; want];
-    match read_fill(&mut r, &mut payload)? {
-        Some(got) if got == want => Ok(Rr3Frame { header, payload }),
+    match read_fill(r, &mut payload)? {
+        Some(got) if got == want => Ok(payload),
         Some(got) => Err(Rr3FrameError::TornPayload { want, got }),
         None => Err(Rr3FrameError::TornPayload { want, got: 0 }),
     }
