@@ -452,6 +452,54 @@ fn rr3_timing(intervals: &[u128], beats: usize, hb_ms: u64) -> (String, u32) {
     (hist, fail)
 }
 
+/// round-trip 单帧判定（命中 / 心跳跳过 / 终态失败；失败已在此点名）。
+enum RtFrame {
+    Hit { echo_ok: bool },
+    Skip,
+    Fail,
+}
+
+/// 单帧 verdict：echo 语义判据＝哨兵把 params 原样回带（result.echo == 发出的 params）。
+fn rt_verdict(frame: Rr3Frame) -> RtFrame {
+    match parse_upstream(frame) {
+        Ok((Rr3PayloadType::Response, id, _, _, v)) if id == ROUND_TRIP_ID => RtFrame::Hit {
+            echo_ok: v.pointer("/result/echo/args/ping").and_then(Value::as_str) == Some("pong")
+                && v.pointer("/result/echo/topic").and_then(Value::as_str)
+                    == Some("rr3-sentinel/diag/probe"),
+        },
+        Ok((Rr3PayloadType::Request, _, _, _, _)) => RtFrame::Skip, // 心跳并发到达，跳过再等
+        Ok((ty, id, m, _, _)) => {
+            eprintln!(
+                "FAIL  round-trip 应答形状错: {ty:?}/id={id}/{}",
+                m.as_deref().unwrap_or("-")
+            );
+            RtFrame::Fail
+        }
+        Err(e) => {
+            eprintln!("FAIL  round-trip 应答畸形: {e}");
+            RtFrame::Fail
+        }
+    }
+}
+
+/// 收一帧并还原；读/还原失败点名后回 `None`。
+fn rt_recv(conn: &mut Rr3UartConn) -> Option<Rr3Frame> {
+    let buf = match conn.rr3_recv_buf() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("FAIL  round-trip 应答读取失败: {e:?}");
+            return None;
+        }
+    };
+    match Rr3Frame::try_from(buf) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            eprintln!("FAIL  round-trip 应答还原失败: {e:?}");
+            None
+        }
+    }
+}
+
 /// ③ round-trip：下行 rr3.call → Response id 回显 + result.echo 原样回带。
 /// 返回 (应答到达, echo 对拍通过, 耗时 ms)。
 fn rr3_round_trip(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (bool, bool, u128) {
@@ -464,42 +512,15 @@ fn rr3_round_trip(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (bool, bo
     let mut rt_ok = false;
     let mut rt_echo_ok = false;
     loop {
-        let buf = match conn.rr3_recv_buf() {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("FAIL  round-trip 应答读取失败: {e:?}");
-                break;
-            }
-        };
-        let frame = match Rr3Frame::try_from(buf) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("FAIL  round-trip 应答还原失败: {e:?}");
-                break;
-            }
-        };
-        match parse_upstream(frame) {
-            Ok((Rr3PayloadType::Response, id, _, _, v)) if id == ROUND_TRIP_ID => {
+        let Some(frame) = rt_recv(conn) else { break };
+        match rt_verdict(frame) {
+            RtFrame::Hit { echo_ok } => {
                 rt_ok = true;
-                // echo 语义判据：哨兵把 params 原样回带（result.echo == 发出的 params）
-                rt_echo_ok = v.pointer("/result/echo/args/ping").and_then(Value::as_str)
-                    == Some("pong")
-                    && v.pointer("/result/echo/topic").and_then(Value::as_str)
-                        == Some("rr3-sentinel/diag/probe");
+                rt_echo_ok = echo_ok;
                 break;
             }
-            Ok((Rr3PayloadType::Request, _, _, _, _)) => continue, // 心跳并发到达，跳过再等
-            Ok((ty, id, m, _, _)) => {
-                eprintln!(
-                    "FAIL  round-trip 应答形状错: {ty:?}/id={id}/{}",
-                    m.as_deref().unwrap_or("-")
-                );
-                break;
-            }
-            Err(e) => {
-                eprintln!("FAIL  round-trip 应答畸形: {e}");
-                break;
-            }
+            RtFrame::Skip => continue,
+            RtFrame::Fail => break,
         }
     }
     (rt_ok, rt_echo_ok, rt_start.elapsed().as_millis())

@@ -237,40 +237,48 @@ fn rr3_itact_expect(e: &toml::Value) -> Result<Rr3SelftestExpect, String> {
     Ok(expect)
 }
 
+/// wiring 组闭集对账（词表外点名拒 boot）。
+fn expect_wiring(sval: &str) -> Result<&'static str, String> {
+    Rr3SelftestExpect::rr3_wiring_lookup(sval).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest.expect] wiring 非在册组预期 {sval:?}（在册值 {}）",
+            RR3_SELFTEST_WIRING_EXPECTS.join("/")
+        )
+    })
+}
+
+/// contracts 组闭集对账（批N5 件五笔4，Z-4：同 wiring 组口径）。
+fn expect_contr(sval: &str) -> Result<&'static str, String> {
+    Rr3SelftestExpect::rr3_contracts_lookup(sval).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest.expect] contracts 非在册组预期 {sval:?}（在册值 {}）",
+            RR3_SELFTEST_CONTRACTS_EXPECTS.join("/")
+        )
+    })
+}
+
+/// 固定腿三态落位（`leg` 已由调用方守卫限定在册）。
+fn expect_leg(expect: &mut Rr3SelftestExpect, leg: &str, sval: &str) -> Result<(), String> {
+    let st = Rr3SelftestExpect::rr3_state_lookup(sval).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest.expect] {leg} 非在册三态 {sval:?}（在册值 {}）",
+            RR3_SELFTEST_LEG_STATES.join("/")
+        )
+    })?;
+    match leg {
+        "speaker" => expect.speaker = st,
+        "relay" => expect.relay = st,
+        _ => expect.face = st,
+    }
+    Ok(())
+}
+
 /// 单腿预期落位（腿名册与三态闭集逐键对账；未知腿名/在册外值点名拒）。
 fn rr3_expect_set(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Result<(), String> {
     match k {
-        "wiring" => {
-            expect.wiring = Rr3SelftestExpect::rr3_wiring_lookup(sval).ok_or_else(|| {
-                format!(
-                    "config [rr3-interact.selftest.expect] wiring 非在册组预期 {sval:?}（在册值 {}）",
-                    RR3_SELFTEST_WIRING_EXPECTS.join("/")
-                )
-            })?;
-        }
-        // contracts 组（批N5 件五笔4，Z-4）：同 wiring 组的闭集对账
-        "contracts" => {
-            expect.contracts =
-                Rr3SelftestExpect::rr3_contracts_lookup(sval).ok_or_else(|| {
-                    format!(
-                        "config [rr3-interact.selftest.expect] contracts 非在册组预期 {sval:?}（在册值 {}）",
-                        RR3_SELFTEST_CONTRACTS_EXPECTS.join("/")
-                    )
-                })?;
-        }
-        leg @ ("speaker" | "relay" | "face") => {
-            let st = Rr3SelftestExpect::rr3_state_lookup(sval).ok_or_else(|| {
-                format!(
-                    "config [rr3-interact.selftest.expect] {leg} 非在册三态 {sval:?}（在册值 {}）",
-                    RR3_SELFTEST_LEG_STATES.join("/")
-                )
-            })?;
-            match leg {
-                "speaker" => expect.speaker = st,
-                "relay" => expect.relay = st,
-                _ => expect.face = st,
-            }
-        }
+        "wiring" => expect.wiring = expect_wiring(sval)?,
+        "contracts" => expect.contracts = expect_contr(sval)?,
+        leg @ ("speaker" | "relay" | "face") => expect_leg(expect, leg, sval)?,
         other => {
             return Err(format!(
                 "config [rr3-interact.selftest.expect] 未知腿名 {other:?}（在册腿 speaker/relay/face/wiring/contracts）"

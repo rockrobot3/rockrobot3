@@ -109,64 +109,97 @@ struct Args {
     doa: bool,
 }
 
+/// 参数解析中间态（device 必填校验与缺省输出名在 [`parse_args`] 收尾段）。
+struct ArgsDraft {
+    device: Option<String>,
+    out: Option<PathBuf>,
+    secs: u64,
+    baud: u32,
+    doa: bool,
+}
+
+impl Default for ArgsDraft {
+    fn default() -> Self {
+        Self {
+            device: None,
+            out: None,
+            secs: 30,
+            baud: 1_500_000,
+            doa: false,
+        }
+    }
+}
+
+/// flag 后的值参数（缺＝点名错误；原文案逐字保留）。
+fn arg_val<'a>(argv: &'a [String], i: usize, miss: &str) -> Result<&'a String, String> {
+    argv.get(i).ok_or_else(|| miss.to_string())
+}
+
+/// `--secs` 值域（≥1；解析失败点名原值）。
+fn parse_secs(v: &str) -> Result<u64, String> {
+    let secs: u64 = v.parse().map_err(|_| format!("--secs 非法: \"{v}\""))?;
+    if secs == 0 {
+        return Err("--secs 须 ≥1".into());
+    }
+    Ok(secs)
+}
+
+/// `--baud` 值域（解析失败点名原值；档位表校验在 [`parse_args`] 收尾段）。
+fn parse_baud(v: &str) -> Result<u32, String> {
+    v.parse().map_err(|_| format!("--baud 非法: \"{v}\""))
+}
+
+/// 裸参数按 device 收（重复即拒）。
+fn set_device(device: &mut Option<String>, other: &str) -> Result<(), String> {
+    if device.is_some() {
+        return Err(format!("device 重复: {other}"));
+    }
+    *device = Some(other.to_string());
+    Ok(())
+}
+
+/// 单参数步进：消费一个 flag（含其后值参数）或一个裸 device 参数。
+fn arg_step(d: &mut ArgsDraft, argv: &[String], i: &mut usize) -> Result<(), String> {
+    match argv[*i].as_str() {
+        "--out" => {
+            *i += 1;
+            d.out = Some(PathBuf::from(
+                arg_val(argv, *i, "--out 缺路径参数")?.clone(),
+            ));
+        }
+        "--secs" => {
+            *i += 1;
+            d.secs = parse_secs(arg_val(argv, *i, "--secs 缺秒数参数")?)?;
+        }
+        "--baud" => {
+            *i += 1;
+            d.baud = parse_baud(arg_val(argv, *i, "--baud 缺波特率参数")?)?;
+        }
+        "--doa" => d.doa = true,
+        other if other.starts_with("--") => return Err(format!("未知参数: {other}")),
+        other => set_device(&mut d.device, other)?,
+    }
+    Ok(())
+}
+
 /// 参数解析（device 必给；波特率过 rr-ipc 档位表白名单——真值单点）。
 fn parse_args(argv: &[String]) -> Result<Args, String> {
-    let mut device: Option<String> = None;
-    let mut out: Option<PathBuf> = None;
-    let mut secs = 30u64;
-    let mut baud = 1_500_000u32;
-    let mut doa = false;
+    let mut d = ArgsDraft::default();
     let mut i = 0;
     while i < argv.len() {
-        match argv[i].as_str() {
-            "--out" => {
-                i += 1;
-                out = Some(PathBuf::from(
-                    argv.get(i).ok_or("--out 缺路径参数")?.clone(),
-                ));
-            }
-            "--secs" => {
-                i += 1;
-                secs = argv
-                    .get(i)
-                    .ok_or("--secs 缺秒数参数")?
-                    .parse()
-                    .map_err(|_| format!("--secs 非法: \"{}\"", argv[i]))?;
-                if secs == 0 {
-                    return Err("--secs 须 ≥1".into());
-                }
-            }
-            "--baud" => {
-                i += 1;
-                baud = argv
-                    .get(i)
-                    .ok_or("--baud 缺波特率参数")?
-                    .parse()
-                    .map_err(|_| format!("--baud 非法: \"{}\"", argv[i]))?;
-            }
-            "--doa" => {
-                doa = true;
-            }
-            other if other.starts_with("--") => {
-                return Err(format!("未知参数: {other}"));
-            }
-            other => {
-                if device.is_some() {
-                    return Err(format!("device 重复: {other}"));
-                }
-                device = Some(other.to_string());
-            }
-        }
+        arg_step(&mut d, argv, &mut i)?;
         i += 1;
     }
-    let device = device.ok_or("缺 <device> 参数（如 /dev/cu.usbserial-0001）")?;
-    rr3_uart_baud_speed(baud).map_err(|e| format!("--baud {baud} 不在档位表: {e}"))?;
+    let device = d
+        .device
+        .ok_or("缺 <device> 参数（如 /dev/cu.usbserial-0001）")?;
+    rr3_uart_baud_speed(d.baud).map_err(|e| format!("--baud {} 不在档位表: {e}", d.baud))?;
     Ok(Args {
         device,
-        out: out.unwrap_or_else(default_out),
-        secs,
-        baud,
-        doa,
+        out: d.out.unwrap_or_else(default_out),
+        secs: d.secs,
+        baud: d.baud,
+        doa: d.doa,
     })
 }
 
