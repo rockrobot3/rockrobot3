@@ -293,12 +293,16 @@ pub fn rr3_log_backfill() {
     if f.seek(SeekFrom::Start(start)).is_err() {
         return;
     }
-    let mut buf = String::new();
-    if f.read_to_string(&mut buf).is_err() {
+    // 按字节读到尾块、有损解码：尾块起点常落在多字节字符中间（中文日志每行
+    // 都可能是），旧序 `read_to_string` 遇非 UTF-8 边界整块 Err，回填被静默
+    // 跳过＝重启后环里没有崩溃前的行；块首残行由 drop_first 丢弃。
+    let mut bytes = Vec::new();
+    if f.read_to_end(&mut bytes).is_err() {
         return;
     }
+    let text = String::from_utf8_lossy(&bytes);
     let cap = rr3_log_ring_cap();
-    let lines = rr3_backfill_lines(&buf, start > 0, cap);
+    let lines = rr3_backfill_lines(&text, start > 0, cap);
     let mut ring = rr3_lock(rr3_log_ring());
     for line in lines {
         ring.push_front(line);
@@ -314,7 +318,7 @@ pub fn rr3_log_backfill() {
 /// 无全局态地钉选取序（同 [`rr3_ring_push`] 的理由）。
 fn rr3_backfill_lines(text: &str, drop_first: bool, cap: usize) -> Vec<String> {
     let mut lines: Vec<&str> = text.lines().collect();
-    if drop_first {
+    if drop_first && !lines.is_empty() {
         lines.remove(0);
     }
     lines.reverse();
@@ -488,6 +492,16 @@ mod tests {
             "drop_first 只丢 l0，不影响尾部选取"
         );
         assert!(rr3_backfill_lines("", false, 4).is_empty(), "空文件回填空");
+        // 尾块切在多字节字符中间：有损解码后块首是残行（替换符），drop_first 丢它
+        assert_eq!(
+            rr3_backfill_lines("\u{FFFD}\u{FFFD}行\nl1\nl2", true, 9),
+            vec!["l2".to_string(), "l1".to_string()],
+            "块首残行丢弃，其后行照常回填"
+        );
+        assert!(
+            rr3_backfill_lines("", true, 4).is_empty(),
+            "空尾块 + drop_first 不得越界"
+        );
     }
 
     /// 目录派生单点：`<socket>.log` 后缀直拼，不解析不 canonicalize——supervisor
