@@ -326,8 +326,7 @@ fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::Fi
             "socket 路径非绝对（上游绝对化失效）",
         ));
     }
-    let dir = crate::rr3_unit_log_dir(bus_path);
-    std::fs::create_dir_all(&dir)?;
+    let dir = crate::rr3_log_dir_ensure(bus_path)?;
     let path = dir.join(format!("{unit}.log"));
     crate::rr3_log_rotate(&path);
     std::fs::OpenOptions::new()
