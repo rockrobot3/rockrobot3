@@ -13,7 +13,7 @@
 //! 策略→机制单向依赖：oled.rs 逐页取本件位图后只做页写。
 //!
 //! 表情白名单键与 `RR3_FACE_EXPRS` 生成物同源档案（contracts/face-expressions.toml，
-//! 帧面/指令面守门）；本件 `expr_eye_base` 的 match 兜底 fail-safe（未知表情
+//! 帧面/指令面守门）；本件 `expr_eye_base` 查表兜底 fail-safe（未知表情
 //! 正目全开），白名单扩员不哑不红。
 
 // —— 画布与眼形（ui.face 板侧执行面内在定义：0.96" 128×64 OLED 胶囊眼面目，
@@ -239,25 +239,43 @@ fn hw_at(py: i32, rc: i32, straight: i32) -> i32 {
 /// angry 窄眼压眉、sad 半垂垂眉；二批：confused 左眯右睁一高一低眉、focus 窄眼平眉、
 /// love 心形眼、dizzy 同心环、scared 空心大眼小瞳孔。
 pub(crate) fn expr_eye_base(expr: &str) -> EyeStyle {
-    match expr {
-        "blink" => EyeStyle::new(4, 0, 0, 100, Brow::None), // 眯缝
-        "happy" => EyeStyle::new(55, 0, 2, 100, Brow::None), // 眯眼微垂
-        "talk" => EyeStyle::new(70, 0, 0, 100, Brow::None), // 说话态半开
-        "think" => EyeStyle::new(100, 6, -3, 100, Brow::None), // 抬眼右上
-        "listen" => EyeStyle::new(100, -6, 0, 100, Brow::None), // 侧耳向左
-        "turn" => EyeStyle::new(100, 8, 0, 100, Brow::None), // 回望右方
-        "sleepy" => EyeStyle::new(22, 0, 2, 100, Brow::None), // 半合下垂
-        "surprised" => EyeStyle::new(100, 0, -2, 125, Brow::None), // 眼高放大上提
-        "angry" => EyeStyle::new(45, 0, 1, 100, Brow::Angry), // 窄眼压眉
-        "sad" => EyeStyle::new(65, 0, 3, 100, Brow::Sad),   // 半垂垂眉
-        "confused" => EyeStyle::new(90, 0, 1, 100, Brow::Confused).uneven(-35), // 左眯右睁
-        "focus" => EyeStyle::new(45, 0, 0, 100, Brow::Focus), // 窄眼平眉
-        "love" => EyeStyle::new(100, 0, 0, 100, Brow::None).art(EyeShape::Heart), // 心形眼
-        "dizzy" => EyeStyle::new(100, 0, 0, 100, Brow::None).art(EyeShape::Spiral), // 同心环
-        "scared" => EyeStyle::new(100, 0, 0, 110, Brow::Sad).art(EyeShape::Ring), // 空心大眼
-        _ => EYE_IDLE,                                      // idle 与兜底：正目全开
-    }
+    EXPR_EYES
+        .iter()
+        .find(|(k, _)| *k == expr)
+        .map_or(EYE_IDLE, |(_, s)| *s)
 }
+
+/// 表情基态表（15 项；`idle` 与未知表情统一走 [`EYE_IDLE`] 兜底）。键不得重复
+/// ——查表取首命中，重复键会被静默遮蔽（`expr_eyes_keys_unique` 守门）。
+const EXPR_EYES: [(&str, EyeStyle); 15] = [
+    ("blink", EyeStyle::new(4, 0, 0, 100, Brow::None)), // 眯缝
+    ("happy", EyeStyle::new(55, 0, 2, 100, Brow::None)), // 眯眼微垂
+    ("talk", EyeStyle::new(70, 0, 0, 100, Brow::None)), // 说话态半开
+    ("think", EyeStyle::new(100, 6, -3, 100, Brow::None)), // 抬眼右上
+    ("listen", EyeStyle::new(100, -6, 0, 100, Brow::None)), // 侧耳向左
+    ("turn", EyeStyle::new(100, 8, 0, 100, Brow::None)), // 回望右方
+    ("sleepy", EyeStyle::new(22, 0, 2, 100, Brow::None)), // 半合下垂
+    ("surprised", EyeStyle::new(100, 0, -2, 125, Brow::None)), // 眼高放大上提
+    ("angry", EyeStyle::new(45, 0, 1, 100, Brow::Angry)), // 窄眼压眉
+    ("sad", EyeStyle::new(65, 0, 3, 100, Brow::Sad)),   // 半垂垂眉
+    (
+        "confused",
+        EyeStyle::new(90, 0, 1, 100, Brow::Confused).uneven(-35),
+    ), // 左眯右睁
+    ("focus", EyeStyle::new(45, 0, 0, 100, Brow::Focus)), // 窄眼平眉
+    (
+        "love",
+        EyeStyle::new(100, 0, 0, 100, Brow::None).art(EyeShape::Heart),
+    ), // 心形眼
+    (
+        "dizzy",
+        EyeStyle::new(100, 0, 0, 100, Brow::None).art(EyeShape::Spiral),
+    ), // 同心环
+    (
+        "scared",
+        EyeStyle::new(100, 0, 0, 110, Brow::Sad).art(EyeShape::Ring),
+    ), // 空心大眼
+];
 
 #[cfg(test)]
 mod tests {
@@ -296,6 +314,17 @@ mod tests {
         assert_eq!(s("idle"), EyeStyle::new(100, 0, 0, 100, Brow::None));
         // 未知表情兜底 fail-safe：正目全开（白名单守门在帧面/指令面，本件不拒）
         assert_eq!(s("no-such"), EyeStyle::new(100, 0, 0, 100, Brow::None));
+    }
+
+    /// 基态表键唯一且不含 `idle`（`idle` 归兜底；重复键会被首命中遮蔽）。
+    #[test]
+    fn expr_eyes_keys_unique() {
+        for (i, (a, _)) in EXPR_EYES.iter().enumerate() {
+            assert_ne!(*a, "idle", "idle 不占表位");
+            for (b, _) in EXPR_EYES.iter().skip(i + 1) {
+                assert_ne!(a, b, "基态表键重复：{a}");
+            }
+        }
     }
 
     /// 满开 100%：眼中心行（直段区）实心段 = 两眼各 19 列（cx±9 含端点），
