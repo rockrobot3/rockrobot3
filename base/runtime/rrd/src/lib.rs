@@ -58,6 +58,21 @@ pub(crate) fn rr3_unit_log_dir(bus_path: &Path) -> PathBuf {
 /// = 纯内存，`rr3_log` 行为与笔1 之前一字不变。
 static RR3_LOG_SINK: OnceLock<PathBuf> = OnceLock::new();
 
+/// 建 `<socket>.log` 目录并收紧到 0o750（属主 rwx / 属主组 r-x / other 无份）：
+/// 日志面与 rrd socket 的 0o660 组访问模型对齐——同机无组身份的用户不得旁读
+/// 运行日志（模块名/错误链/请求 id 都是运维内部面）。位元设置失败不阻断
+/// （观测通道故障不放大成可用性故障），留痕后续沿用默认位。
+#[cfg(unix)]
+pub(crate) fn rr3_log_dir_ensure(bus_path: &Path) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = rr3_unit_log_dir(bus_path);
+    std::fs::create_dir_all(&dir)?;
+    if let Err(e) = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o750)) {
+        eprintln!("rrd 日志目录收紧 0750 失败（继续，{}）: {e}", dir.display());
+    }
+    Ok(dir)
+}
+
 /// 落盘写失败后的降级记账位：置位后本进程不再重试（磁盘故障不是每行日志都要
 /// 重新撞一遍的墙），点名一次交给运维，之后退纯内存。
 static RR3_LOG_SINK_DEAD: AtomicBool = AtomicBool::new(false);
@@ -72,8 +87,7 @@ pub fn rr3_log_sink_set(bus_path: &Path) -> Result<(), String> {
     if !bus_path.is_absolute() {
         return Err("socket 路径非绝对（上游绝对化失效）".into());
     }
-    let dir = rr3_unit_log_dir(bus_path);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("建目录 {}: {e}", dir.display()))?;
+    let dir = rr3_log_dir_ensure(bus_path).map_err(|e| format!("建日志目录失败: {e}"))?;
     RR3_LOG_SINK
         .set(dir.join("rrd.log"))
         .map_err(|_| "落盘路径已定格过（首份胜出，重复定格被拒）".to_string())
@@ -413,6 +427,24 @@ mod tests {
         assert!(rr3_log_ring_cap_set(8), "首次 set 必须成功");
         assert!(!rr3_log_ring_cap_set(999), "重复 set 必须失败（首份胜出）");
         assert_eq!(rr3_log_ring_cap(), 8);
+    }
+
+    /// 日志目录落位与收紧（0750）：other 无份，与 socket 0o660 的组模型对齐。
+    #[cfg(unix)]
+    #[test]
+    fn log_dir_ensure_locks_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("rr3-rrd-logdir-{}-{nanos}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = rr3_log_dir_ensure(&base.join("rr3.sock")).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o750, "日志目录须 0750（other 无份）");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// 单代轮转（B-8）：超上界 rename 到 `.1`（旧 `.1` 覆盖），未超界不动；
