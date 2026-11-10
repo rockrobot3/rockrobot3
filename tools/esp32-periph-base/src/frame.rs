@@ -92,14 +92,7 @@ fn rr3_handle_bindings(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, Str
 /// 缺省 pan（宿主单轴 trait ↔ 板上双轴的映射面，RR3_HAL_PERIPH_AXIS env + 本参数
 /// 两级）。写路径推 `Job::RedrawOled` 令角度行随动（运行面按模式守卫决定刷否）。
 fn frame_handle_servo(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, String> {
-    let axis = match args.get("axis") {
-        None | Some(Value::Null) => Axis::Pan,
-        Some(v) => match v.as_str() {
-            Some("pan") => Axis::Pan,
-            Some("tilt") => Axis::Tilt,
-            _ => return Err(format!("axis 非法: {v}（pan|tilt）")),
-        },
-    };
+    let axis = rr3_axis_arg(args)?;
     match args.get("angle_deg") {
         None | Some(Value::Null) => {
             let deg = {
@@ -111,32 +104,46 @@ fn frame_handle_servo(bus: &Arc<Mutex<Bus>>, args: &Value) -> Result<Value, Stri
             };
             Ok(json!({ "angle_deg": deg, "move_ms": 0 }))
         }
-        Some(v) => {
-            let deg = v.as_u64().ok_or_else(|| format!("angle_deg 非法: {v}"))? as u32;
-            let d = axis_check(axis, deg)?;
-            {
-                // **不写前记账**：角度只由运行面在作业成功后镜像硬件真值（与行面
-                // PAN/TILT 同口径）——读 `angle_deg` 永不复述没到达的角。
-                let mut b = lock_bus(bus);
-                b.st.wander_on = false; // 外部点名优先，自主扫摆让位
-            }
-            push_job(
-                bus,
-                match axis {
-                    Axis::Pan => Job::Move {
-                        pan: Some(d),
-                        tilt: None,
-                    },
-                    Axis::Tilt => Job::Move {
-                        pan: None,
-                        tilt: Some(d),
-                    },
-                },
-            );
-            push_job(bus, Job::RedrawOled);
-            Ok(json!({ "angle_deg": d, "move_ms": 0 }))
-        }
+        Some(v) => rr3_servo_write(bus, axis, v),
     }
+}
+
+/// `axis` 参数裁决：缺省/`null` = pan，只认 pan/tilt（其余点名拒绝）。
+fn rr3_axis_arg(args: &Value) -> Result<Axis, String> {
+    match args.get("axis") {
+        None | Some(Value::Null) => Ok(Axis::Pan),
+        Some(v) => match v.as_str() {
+            Some("pan") => Ok(Axis::Pan),
+            Some("tilt") => Ok(Axis::Tilt),
+            _ => Err(format!("axis 非法: {v}（pan|tilt）")),
+        },
+    }
+}
+
+/// 写路径：范围校验 → 让位自主扫摆 → 推 `Job::Move` + 重绘（角度只由运行面
+/// 在作业成功后镜像硬件真值，不写前记账）。
+fn rr3_servo_write(bus: &Arc<Mutex<Bus>>, axis: Axis, v: &Value) -> Result<Value, String> {
+    let deg = v.as_u64().ok_or_else(|| format!("angle_deg 非法: {v}"))? as u32;
+    let d = axis_check(axis, deg)?;
+    {
+        let mut b = lock_bus(bus);
+        b.st.wander_on = false; // 外部点名优先，自主扫摆让位
+    }
+    push_job(
+        bus,
+        match axis {
+            Axis::Pan => Job::Move {
+                pan: Some(d),
+                tilt: None,
+            },
+            Axis::Tilt => Job::Move {
+                pan: None,
+                tilt: Some(d),
+            },
+        },
+    );
+    push_job(bus, Job::RedrawOled);
+    Ok(json!({ "angle_deg": d, "move_ms": 0 }))
 }
 
 /// 表情执行（rr3-interact/face/expression，**控制面**）：expression 变体出胶囊眼
