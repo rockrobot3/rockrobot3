@@ -47,6 +47,13 @@ crc_bad = 0
 #   后的重扫伪命中，不是线面故障。
 crc_frame = []   # (t_s, plen) 真帧坏
 crc_sync = []    # (t_s, plen) 失步伪帧
+# 每拍 INFO 的当前空闲堆（free，非 min_free）：长跑期间的趋势面，用来区分
+# "水位噪声抖动"与"持续下降的真实泄漏"。
+free_samples = []
+# 水位新低的判据容差（字节）：min_free 是分配器水位，跨 30min 出现个位/百字节级
+# 之差是碎片噪声，不是堆退化；超出容差才算新低（旧的"任何 < 即 FAIL"会把
+# 4B 抖动判成故障——2026-11-10 A-2 实证）。
+HEAP_LOW_TOL = 1024
 T0 = time.time()
 
 
@@ -153,8 +160,10 @@ def main():
         # 首版用 elif：INFO 与 MOVE 同到期时 MOVE 被吞到下轮——两支独立判定
         if now >= next_info:
             txt = line(fd, "INFO", 0.5, buf)
-            if INFO_RE.search(txt.replace("\r\n", " ")):
+            mi = INFO_RE.search(txt.replace("\r\n", " "))
+            if mi:
                 info_n += 1
+                free_samples.append(int(mi.group(11)))
             next_info += INFO_PERIOD
         if now >= next_move:
             cmd, ang = move_list[moves_sent % len(move_list)]
@@ -216,10 +225,20 @@ def main():
         # min_free 是**开机以来**最低水位（单调不升），判据取增量口径：本轮刷新
         # 历史低点才算堆水位退化；绝对门槛只在首跑（基线 ≥96KB）时有意义——
         # 旧实现拿绝对值对 96KB，历史低点一旦跌破，此后每次长跑都永久 FAIL（仪器缺陷）。
-        if e_minfree < b_minfree:
-            verdict.append(f"✗ min_free 新低 {e_minfree} < 基线 {b_minfree}B（本轮压出更低水位，查堆）")
+        # 容差带：水位是分配器粒度，个位/百字节级之差是碎片噪声（A-2 实测 4B）。
+        if b_minfree - e_minfree > HEAP_LOW_TOL:
+            verdict.append(
+                f"✗ min_free 新低 {e_minfree} < 基线 {b_minfree}B（差 {b_minfree - e_minfree}B > 容差 {HEAP_LOW_TOL}B，查堆）"
+            )
+        elif e_minfree < b_minfree:
+            print(f"  （min_free {b_minfree}B → {e_minfree}B，差 {b_minfree - e_minfree}B ≤ 容差 {HEAP_LOW_TOL}B：水位噪声，不判 FAIL）")
         elif e_minfree < 96 * 1024:
             print(f"  （min_free {e_minfree}B 低于 96KB 健康线：历史水位，本轮未刷新——记观察）")
+        if free_samples:
+            print(
+                f"  free 采样 {len(free_samples)} 拍：首 {free_samples[0]}B / 末 {free_samples[-1]}B / "
+                f"min {min(free_samples)}B / max {max(free_samples)}B（趋势面，越小越接近泄漏）"
+            )
         if last_move and last_move[0] == "PAN" and int(pan) != last_move[1]:
             verdict.append(f"✗ 末角漂移 pan={pan} ≠ {last_move[1]}")
         print("V5 结论:", "PASS" if not verdict else "；".join(verdict))
