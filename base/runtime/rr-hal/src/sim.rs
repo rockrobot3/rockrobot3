@@ -170,64 +170,74 @@ impl Rr3AudioSource for Rr3SimAudioSource {
             Some(d) => (Some(d.rr3_sim_doa_sin()), Some(d.rr3_sim_doa_itd_s())),
             None => (None, None),
         };
-        let sine_at = |t_s: f64| -> f64 {
-            RR3_SIM_SINE_AMP as f64 * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
-        };
         for (i, out) in buf.iter_mut().enumerate() {
             let idx = open.cursor + i as u64;
-            // 波形时间轴按**帧序**（idx/ch_n）：每通道按自己的采样时刻取值——
-            // B批 b3b 修复：旧写法 t = idx/rate 是交错样点轴，双通道下每通道波形
-            // 时间被拉伸 2 倍（16k 轴上 440Hz 实际出 880Hz），ITD 注入的互相关
-            // 出"伪峰与物理峰并列"双峰（b3b 回归 root cause 之二）。mono 路径
-            // idx/1 = idx 逐点等价，golden 向量不动。
-            let t = (idx / ch_n as u64) as f64 / rate;
-            // 通道归属：交错排布，i % 声道数。方位注入只进前两路（L/R 对），
-            // 更多路输出静音（真件换装 F5a 按阵列实际通道序重排，sim 不发明通道语义）
-            let ch = i % ch_n;
-            // 各路形状：增益（ILD）与音调相位偏移（ITD，仅音调波）
-            let (gain, t_shift) = match (k, itd) {
-                (Some(k), itd) => {
-                    // 通道序对齐板端口径（ch0=物理右、ch1=物理左）：θ>0（右）时
-                    // ch0 近——增益高（1+sinθ）、先到（R[t]=s(t+itd/2) 取未来样本
-                    // 即超前 itd/2；左右半差分配，绝对相位中心不动）
-                    let (g, dt) = match (ch, itd) {
-                        (0, Some(itd)) => (1.0 + k, itd / 2.0),
-                        (1, Some(itd)) => (1.0 - k, -itd / 2.0),
-                        _ => (0.0, 0.0),
-                    };
-                    (g, dt)
-                }
-                _ => (1.0, 0.0),
-            };
-            let v = match self.wave {
-                Rr3SimWave::Sine => sine_at(t + t_shift),
-                Rr3SimWave::Burst => {
-                    // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
-                    // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等；
-                    // 门控按绝对**帧**序号（idx/声道数，0.0.6 批F4 真板实测：按
-                    // 交错样点序号算会在多通道下把窗口折半成 500ms，短于 VAD
-                    // 判停尾静音 700ms，offset 永不触发）；有声路内才带 ITD 偏移
-                    let frame_idx = idx / ch_n as u64;
-                    if frame_idx / rate as u64 % 2 == 0 {
-                        sine_at(t + t_shift)
-                    } else {
-                        0.0
-                    }
-                }
-                Rr3SimWave::Noise => {
-                    let mut x = RR3_SIM_NOISE_SEED ^ idx.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-                    x ^= x >> 12;
-                    x ^= x << 25;
-                    x ^= x >> 27;
-                    let v = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as i64;
-                    (v % (RR3_SIM_NOISE_AMP as i64)) as f64
-                }
-                Rr3SimWave::Silence => 0.0,
-            };
-            *out = (v * gain) as i16;
+            *out = rr3_sim_sample(self.wave, idx, i % ch_n, ch_n, rate, k, itd) as i16;
         }
         open.cursor += n as u64;
         Ok(n)
+    }
+}
+
+/// 单采样点：波形（正弦/间歇/噪声/静音）× 通道方位增益与 ITD 相位。
+/// 波形时间轴按**帧序**（idx/ch_n）：每通道按自己的采样时刻取值——B批 b3b
+/// 修复：旧写法 t = idx/rate 是交错样点轴，双通道下每通道波形时间被拉伸 2 倍
+/// （16k 轴上 440Hz 实际出 880Hz），ITD 注入的互相关出"伪峰与物理峰并列"
+/// 双峰。mono 路径 idx/1 = idx 逐点等价，golden 向量不动。
+fn rr3_sim_sample(
+    wave: Rr3SimWave,
+    idx: u64,
+    ch: usize,
+    ch_n: usize,
+    rate: f64,
+    k: Option<f64>,
+    itd: Option<f64>,
+) -> f64 {
+    let t = (idx / ch_n as u64) as f64 / rate;
+    let sine_at = |t_s: f64| {
+        RR3_SIM_SINE_AMP as f64 * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
+    };
+    let (gain, t_shift) = rr3_sim_gain(ch, k, itd);
+    let v = match wave {
+        Rr3SimWave::Sine => sine_at(t + t_shift),
+        Rr3SimWave::Burst => {
+            // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
+            // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等；
+            // 门控按绝对**帧**序号（idx/声道数，0.0.6 批F4 真板实测：按
+            // 交错样点序号算会在多通道下把窗口折半成 500ms，短于 VAD
+            // 判停尾静音 700ms，offset 永不触发）；有声路内才带 ITD 偏移
+            let frame_idx = idx / ch_n as u64;
+            if frame_idx / rate as u64 % 2 == 0 {
+                sine_at(t + t_shift)
+            } else {
+                0.0
+            }
+        }
+        Rr3SimWave::Noise => {
+            let mut x = RR3_SIM_NOISE_SEED ^ idx.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            let v = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as i64;
+            (v % (RR3_SIM_NOISE_AMP as i64)) as f64
+        }
+        Rr3SimWave::Silence => 0.0,
+    };
+    v * gain
+}
+
+/// 通道方位模型：增益（ILD）与音调相位偏移（ITD，仅音调波）。方位注入只进
+/// 前两路（L/R 对），更多路输出静音（真件换装 F5a 按阵列实际通道序重排，
+/// sim 不发明通道语义）。通道序对齐板端口径（ch0=物理右、ch1=物理左）。
+fn rr3_sim_gain(ch: usize, k: Option<f64>, itd: Option<f64>) -> (f64, f64) {
+    match (k, itd) {
+        (Some(k), itd) => match (ch, itd) {
+            // θ>0（右）时 ch0 近——增益高（1+sinθ）、先到
+            (0, Some(itd)) => (1.0 + k, itd / 2.0),
+            (1, Some(itd)) => (1.0 - k, -itd / 2.0),
+            _ => (0.0, 0.0),
+        },
+        _ => (1.0, 0.0),
     }
 }
 
