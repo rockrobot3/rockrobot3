@@ -167,20 +167,7 @@ fn rr3_llm_root_of(base_url: &str) -> String {
 
 pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let bins = rr3_brain_bins(a)?;
-    // 音频后端与云模式（缺省行为零改动：sim + mock——CI/无头纪律；真件只显式启用）
-    let audio_backend = a.audio_backend.clone().unwrap_or_else(|| "sim".to_string());
-    // 回放面（interact）：缺省跟随源面（既有 sim/mac 链路零改动）；esp32 源
-    // 档必显式分列（参数解析处 fail-closed 把关，此处 unwrap 缺省不可达 esp32）
-    let sink_backend = a
-        .sink_backend
-        .clone()
-        .unwrap_or_else(|| audio_backend.clone());
-    let cloud_real = a.brain_cloud.as_deref() == Some("real");
-    // real 的 base_url 已在参数解析处 fail-closed 把关（必给），此处 unwrap 不可达
-    let brain_base_url = a
-        .brain_base_url
-        .clone()
-        .unwrap_or_else(|| "http://127.0.0.1:9/v1".to_string());
+    let (audio_backend, sink_backend, cloud_real, brain_base_url) = rr3_brain_defaults(a);
     let fix = rr3_brain_fix(a, &bins, cloud_real, &brain_base_url)?;
     let ctx = Rr3BrainCtx {
         bins: &bins,
@@ -192,24 +179,51 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
     let outcome = rr3_brain_run(&ctx, &mut children, &mut report);
+    rr3_brain_finish(&ctx, a, children, outcome, report)
+}
 
-    // ---- 收尾：杀全部子进程；--keep 保留现场 ----
-    let cloud_label = if cloud_real {
+/// 演练缺省面：音频/回放后端缺省 sim（CI/无头纪律），回放跟随源面；云端缺省
+/// mock、base_url 占位（real 必给已在参数面 fail-closed）。
+fn rr3_brain_defaults(a: &Rr3SimArgs) -> (String, String, bool, String) {
+    let audio_backend = a.audio_backend.clone().unwrap_or_else(|| "sim".to_string());
+    let sink_backend = a
+        .sink_backend
+        .clone()
+        .unwrap_or_else(|| audio_backend.clone());
+    let cloud_real = a.brain_cloud.as_deref() == Some("real");
+    let brain_base_url = a
+        .brain_base_url
+        .clone()
+        .unwrap_or_else(|| "http://127.0.0.1:9/v1".to_string());
+    (audio_backend, sink_backend, cloud_real, brain_base_url)
+}
+
+/// 收尾面：--keep 保留现场或杀全部子进程；成功附录演练结论，失败附日志位置。
+fn rr3_brain_finish(
+    ctx: &Rr3BrainCtx,
+    a: &Rr3SimArgs,
+    children: Vec<(String, Child)>,
+    outcome: Result<(), String>,
+    mut report: String,
+) -> Result<String, String> {
+    let cloud_label = if ctx.cloud_real {
         "云端 real"
     } else {
         "云端 mock"
     };
-    let chain_label =
-        format!("rrd + rr3-sense({audio_backend}) + rr3-brain + rr3-interact({sink_backend})");
+    let chain_label = format!(
+        "rrd + rr3-sense({}) + rr3-brain + rr3-interact({})",
+        ctx.audio_backend, ctx.sink_backend
+    );
     if a.keep {
         println!(
             "rr3-sim --brain: --keep 保留现场：socket={} workdir={}",
-            fix.socket.display(),
-            fix.workdir.display()
+            ctx.fix.socket.display(),
+            ctx.fix.workdir.display()
         );
         println!(
             "rr3-sim --brain: 手动收尾：kill 上述进程；rm -rf {:?}",
-            fix.workdir
+            ctx.fix.workdir
         );
         return match outcome {
             Ok(()) => {
@@ -221,7 +235,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             Err(e) => Err(e),
         };
     }
-    rr3_teardown_procs(children, &fix.socket);
+    rr3_teardown_procs(children, &ctx.fix.socket);
     match outcome {
         Ok(()) => {
             report.push_str(&format!(
@@ -229,7 +243,7 @@ pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
             ));
             Ok(report)
         }
-        Err(e) => Err(format!("{e}\n（现场日志在 {:?}）", fix.workdir)),
+        Err(e) => Err(format!("{e}\n（现场日志在 {:?}）", ctx.fix.workdir)),
     }
 }
 
