@@ -136,24 +136,30 @@ pub fn ok_reply_line(line: &str) -> bool {
 /// 3s 无字节 Err，失败行为不变。
 pub fn handshake(conn: &mut Rr3UartConn) -> Result<String, String> {
     std::thread::sleep(SETTLE);
+    rr3_audio_stop(conn)?;
+    conn.write_all(b"AUDIO ON\n")
+        .map_err(|e| format!("发 AUDIO ON 失败: {e}"))?;
+    rr3_await_ok(conn)
+}
+
+/// 防御停流段：冲残留 → `AUDIO OFF` → 应答读了即弃但**超时可见** → 再冲一次。
+/// 应答丢弃是刻意的（残流混行不解析），超时留痕是 d4 排障教训（静默丢弃害排查）。
+fn rr3_audio_stop(conn: &mut Rr3UartConn) -> Result<(), String> {
     conn.rr3_flush_input()
         .map_err(|e| format!("flush 失败: {e}"))?;
-    // 防御停流：残流开着也停、没流也幂等；应答行（可能混残流）读了即弃
-    if let Err(e) = conn.write_all(b"AUDIO OFF\n") {
-        return Err(format!("发防御 AUDIO OFF 失败: {e}"));
-    }
-    // OFF 应答读了即弃，但**超时可见**（d4 run#2 排障教训：`let _ =` 静默丢弃
-    // 害排查——宿主侧 USB RX 冻结时这条读无声超时，故障面全靠 seq 对账反推）
+    conn.write_all(b"AUDIO OFF\n")
+        .map_err(|e| format!("发防御 AUDIO OFF 失败: {e}"))?;
     match read_reply_line(conn) {
         Ok(l) => eprintln!("[audio] 防御 OFF 应答: {:?}", rr3_log_head(&l, 120)),
         Err(e) => eprintln!("[audio] 防御 OFF 应答未收到（残流/宿主侧静默，继续）: {e}"),
     }
     conn.rr3_flush_input()
-        .map_err(|e| format!("二次 flush 失败: {e}"))?;
-    conn.write_all(b"AUDIO ON\n")
-        .map_err(|e| format!("发 AUDIO ON 失败: {e}"))?;
-    // 逐行扫（判据见 [`ok_reply_line`]；每行超时同 [`read_reply_line`] 口径，
-    // 总预算 [`REPLY_TIMEOUT_MS`] 兜底防板持续推流把握手拖死）
+        .map_err(|e| format!("二次 flush 失败: {e}"))
+}
+
+/// ON 应答等待段：逐行扫 `OK audio on`（判据见 [`ok_reply_line`]），总预算
+/// [`REPLY_TIMEOUT_MS`] 兜底防板持续推流把握手拖死。
+fn rr3_await_ok(conn: &mut Rr3UartConn) -> Result<String, String> {
     let deadline = Instant::now() + Duration::from_millis(REPLY_TIMEOUT_MS as u64);
     loop {
         let line = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
