@@ -164,44 +164,52 @@ pub fn rr3_contracts_checks() -> Vec<Rr3AssemblyCheck> {
     let Some(s) = rr3_contracts_snap() else {
         return Vec::new();
     };
-    let mut out = Vec::new();
-    for e in &s.entries {
-        let item = format!("contract:{}", e.file);
-        match std::fs::read(&e.path) {
-            Ok(bytes) => {
-                let now = rr3_sha256_hex(&bytes);
-                if now == e.sha256 {
-                    out.push(Rr3AssemblyCheck {
-                        item,
-                        pass: RR3_CHECK_PASS,
-                        reason: format!(
-                            "sha256 对上 boot 装载面记账（{} 字节）——齐全且未漂移（Z-4 自检判）",
-                            e.bytes
-                        ),
-                    });
-                } else {
-                    out.push(Rr3AssemblyCheck {
-                        item,
-                        pass: RR3_CHECK_FAIL,
-                        reason: format!(
-                            "sha256 漂移：boot 记账 {} → 现读 {}（Z-4 sha 对破——boot 后内容被改）",
-                            e.sha256, now
-                        ),
-                    });
+    let mut out: Vec<Rr3AssemblyCheck> = s.entries.iter().map(rr3_book_row).collect();
+    out.push(rr3_truth_row(&s.truth_set));
+    out
+}
+
+/// 单册判果（Z-4 四册逐条，`contract:<名>` 点名）：重读记账路径——缺 = 齐全破、
+/// sha 不等 = sha 对破、等 = pass。
+fn rr3_book_row(e: &Rr3ContractsEntry) -> Rr3AssemblyCheck {
+    let item = format!("contract:{}", e.file);
+    match std::fs::read(&e.path) {
+        Ok(bytes) => {
+            let now = rr3_sha256_hex(&bytes);
+            if now == e.sha256 {
+                Rr3AssemblyCheck {
+                    item,
+                    pass: RR3_CHECK_PASS,
+                    reason: format!(
+                        "sha256 对上 boot 装载面记账（{} 字节）——齐全且未漂移（Z-4 自检判）",
+                        e.bytes
+                    ),
+                }
+            } else {
+                Rr3AssemblyCheck {
+                    item,
+                    pass: RR3_CHECK_FAIL,
+                    reason: format!(
+                        "sha256 漂移：boot 记账 {} → 现读 {}（Z-4 sha 对破——boot 后内容被改）",
+                        e.sha256, now
+                    ),
                 }
             }
-            Err(_) => out.push(Rr3AssemblyCheck {
-                item,
-                pass: RR3_CHECK_FAIL,
-                reason: "文件缺失——boot 装载面验收后包内契约被删（Z-4 齐全破）".to_string(),
-            }),
         }
+        Err(_) => Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_FAIL,
+            reason: "文件缺失——boot 装载面验收后包内契约被删（Z-4 齐全破）".to_string(),
+        },
     }
-    // 基-40 成员完整性判据（一条汇总）：真值集七成员逐条重读，缺/漂收集后
-    // 逐枚点名——pass 判据 = 缺表与漂表皆空；fail 不如四册逐条细，但点名到
-    // 成员名，病在哪份文件一读便知（成员集账的义务是"不缺册不漂移"本身）。
+}
+
+/// 基-40 成员完整性一条汇总判果：真值集七成员逐条重读，缺/漂收集后逐枚点名
+/// ——pass 判据 = 缺表与漂表皆空；fail 不如四册逐条细，但点名到成员名，病在
+/// 哪份文件一读便知（成员集账的义务是"不缺册不漂移"本身）。
+fn rr3_truth_row(truth_set: &[Rr3TruthSetEntry]) -> Rr3AssemblyCheck {
     let (mut missing, mut drifted) = (Vec::new(), Vec::new());
-    for t in &s.truth_set {
+    for t in truth_set {
         match std::fs::read(&t.path) {
             Ok(bytes) => {
                 if rr3_sha256_hex(&bytes) != t.sha256 {
@@ -211,13 +219,13 @@ pub fn rr3_contracts_checks() -> Vec<Rr3AssemblyCheck> {
             Err(_) => missing.push(t.member.clone()),
         }
     }
-    out.push(if missing.is_empty() && drifted.is_empty() {
+    if missing.is_empty() && drifted.is_empty() {
         Rr3AssemblyCheck {
             item: "truth_set".to_string(),
             pass: RR3_CHECK_PASS,
             reason: format!(
                 "真值集 {} 成员齐全且未漂移（基-40 成员完整性判——装载面真值集逐条 sha 对上 boot 记账）",
-                s.truth_set.len()
+                truth_set.len()
             ),
         }
     } else {
@@ -236,8 +244,7 @@ pub fn rr3_contracts_checks() -> Vec<Rr3AssemblyCheck> {
                 parts.join("；")
             ),
         }
-    });
-    out
+    }
 }
 
 /// `rr3.ctl.contracts` 应答渲染（conn.rs 单点调用；形状与 `rr3.ctl.wiring`
