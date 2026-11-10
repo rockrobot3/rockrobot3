@@ -296,11 +296,11 @@ fn rr3_sense_cfg_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
             cfg.doa.window_ms
         ));
     }
-    rr3_reflex_time_check(&cfg.reflex)
+    rr3_span_cap_check(&cfg.reflex)
 }
 
 /// 反射环四时间键的上界判定（判据单点；键名逐条点名便于定位配置错）。
-fn rr3_reflex_time_check(r: &Rr3ReflexConfig) -> Result<(), String> {
+fn rr3_span_cap_check(r: &Rr3ReflexConfig) -> Result<(), String> {
     for (key, v) in [
         ("gate_tail_ms", r.gate_tail_ms),
         ("gate_gap_ms", r.gate_gap_ms),
