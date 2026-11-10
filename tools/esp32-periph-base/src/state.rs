@@ -357,44 +357,58 @@ pub(crate) fn lock_bus(bus: &Arc<Mutex<Bus>>) -> std::sync::MutexGuard<'_, Bus> 
 ///    两者都计 `job_dropped`（`INFO` 观测）。
 pub(crate) fn push_job(bus: &Arc<Mutex<Bus>>, job: Job) {
     let mut b = lock_bus(bus);
-    if matches!(job, Job::RedrawOled) && b.jobs.iter().any(|j| matches!(j, Job::RedrawOled)) {
+    if rr3_job_fold(&mut b.jobs, &job) {
         return;
     }
-    if let Job::Move { pan, tilt } = &job {
-        let same_shape = |j: &Job| match j {
-            Job::Move { pan: qp, tilt: qt } => {
-                qp.is_some() == pan.is_some() && qt.is_some() == tilt.is_some()
-            }
-            _ => false,
-        };
-        if let Some(queued) = b.jobs.iter_mut().find(|j| same_shape(j)) {
-            if let Job::Move { pan: qp, tilt: qt } = queued {
-                if pan.is_some() {
-                    *qp = *pan;
-                }
-                if tilt.is_some() {
-                    *qt = *tilt;
-                }
-            }
-            return;
-        }
-    }
-    if b.jobs.len() >= crate::board::JOB_CAP {
-        let oldest_move = b.jobs.iter().position(|j| matches!(j, Job::Move { .. }));
-        match (matches!(job, Job::Move { .. }), oldest_move) {
-            // 新目标优先：让位给新的 Move
-            (true, Some(pos)) => {
-                b.jobs.remove(pos);
-            }
-            _ => {
-                // 非 Move 且队列已满，或队里没有可让位的 Move：拒收本件
-                b.st.job_dropped = b.st.job_dropped.saturating_add(1);
-                return;
-            }
-        }
-        b.st.job_dropped = b.st.job_dropped.saturating_add(1);
+    if !rr3_job_room(&mut b, &job) {
+        return;
     }
     b.jobs.push_back(job);
+}
+
+/// 折叠判定（规则 1/2）：`true` = 本件已并入既有作业，不再入队。
+fn rr3_job_fold(jobs: &mut VecDeque<Job>, job: &Job) -> bool {
+    if matches!(job, Job::RedrawOled) && jobs.iter().any(|j| matches!(j, Job::RedrawOled)) {
+        return true;
+    }
+    let Job::Move { pan, tilt } = job else {
+        return false;
+    };
+    let same_shape = |j: &Job| match j {
+        Job::Move { pan: qp, tilt: qt } => {
+            qp.is_some() == pan.is_some() && qt.is_some() == tilt.is_some()
+        }
+        _ => false,
+    };
+    let Some(queued) = jobs.iter_mut().find(|j| same_shape(j)) else {
+        return false;
+    };
+    if let Job::Move { pan: qp, tilt: qt } = queued {
+        if pan.is_some() {
+            *qp = *pan;
+        }
+        if tilt.is_some() {
+            *qt = *tilt;
+        }
+    }
+    true
+}
+
+/// 容量判定（规则 3）：`true` = 有位置可入队；`false` = 本件拒收（已计 job_dropped）。
+fn rr3_job_room(b: &mut Bus, job: &Job) -> bool {
+    if b.jobs.len() < crate::board::JOB_CAP {
+        return true;
+    }
+    let oldest_move = b.jobs.iter().position(|j| matches!(j, Job::Move { .. }));
+    if !matches!(job, Job::Move { .. }) || oldest_move.is_none() {
+        b.st.job_dropped = b.st.job_dropped.saturating_add(1);
+        return false;
+    }
+    if let Some(pos) = oldest_move {
+        b.jobs.remove(pos);
+    }
+    b.st.job_dropped = b.st.job_dropped.saturating_add(1);
+    true
 }
 
 /// 运行面 → 控制面的异步回包行（SCAN 逐点等；控制面每轮取空）。
