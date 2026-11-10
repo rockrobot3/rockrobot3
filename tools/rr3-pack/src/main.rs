@@ -228,26 +228,7 @@ fn rr3_manifest_rewrite(
     facts_entry: &str,
     module: &str,
 ) -> Result<String, String> {
-    let mut hits: Vec<(usize, Range)> = Vec::new();
-    for (idx, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        let is_entry_line =
-            t.starts_with("entry") && t["entry".len()..].trim_start().starts_with('=');
-        if !is_entry_line {
-            continue;
-        }
-        let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) else {
-            return Err(format!(
-                "模块 {module} 的 entry 行不是引号包裹的字符串（schema 违约）: {line}"
-            ));
-        };
-        if b <= a {
-            return Err(format!(
-                "模块 {module} 的 entry 行引号内无值（schema 违约）: {line}"
-            ));
-        }
-        hits.push((idx, Range { a, b }));
-    }
+    let hits = rr3_entry_hits(text, module)?;
     let (idx, rng) = match hits.as_slice() {
         [(idx, rng)] => (*idx, *rng),
         [] => {
@@ -298,6 +279,32 @@ fn rr3_manifest_rewrite(
         ));
     }
     Ok(out)
+}
+
+/// 扫描 entry 行（key 为 `entry` 且后随 `=`）：逐行收 (行号, 引号区间)；
+/// 引号缺失或引号内无值即 schema 违约。
+fn rr3_entry_hits(text: &str, module: &str) -> Result<Vec<(usize, Range)>, String> {
+    let mut hits: Vec<(usize, Range)> = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        let is_entry_line =
+            t.starts_with("entry") && t["entry".len()..].trim_start().starts_with('=');
+        if !is_entry_line {
+            continue;
+        }
+        let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) else {
+            return Err(format!(
+                "模块 {module} 的 entry 行不是引号包裹的字符串（schema 违约）: {line}"
+            ));
+        };
+        if b <= a {
+            return Err(format!(
+                "模块 {module} 的 entry 行引号内无值（schema 违约）: {line}"
+            ));
+        }
+        hits.push((idx, Range { a, b }));
+    }
+    Ok(hits)
 }
 
 /// 引号内值在行内的字节区间 [a+1, b)
@@ -489,6 +496,32 @@ fn rr3_truth_ready(
 /// RR3_INSTALL_ROOT）；config 与可选原子件/编排/形态档按"在位即纯副本"随装。
 fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), String> {
     let mod_src = cfg.payload.join("rr3-modules").join(name);
+    let (text, facts) = rr3_mod_facts(&mod_src, name)?;
+    let staged = root.join("modules").join(name);
+    fs::create_dir_all(&staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
+    let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
+    let rewritten = rr3_manifest_rewrite(&text, &installed_entry, &facts.entry, name)?;
+    fs::write(staged.join("module.toml"), rewritten)
+        .map_err(|e| format!("写 {}/module.toml 失败: {e}", staged.display()))?;
+    let entry_path = staged.join(&facts.entry);
+    if let Some(parent) = entry_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
+    }
+    if facts.lang == "python" {
+        rr3_stage_py(&mod_src, &staged, &entry_path, name)?;
+    } else {
+        rr3_stage_bin(&mod_src, &entry_path, name)?;
+    }
+    rr3_stage_cfg(cfg, &staged, name)?;
+    rr3_stage_opt(cfg, &staged, name)
+}
+
+/// 读取并校验注入产物 manifest：文件在否 → 解析 → 目录名与 manifest.name 一致
+/// → entry 安全（绝对路径/上级目录逃逸在此拒）。
+fn rr3_mod_facts(
+    mod_src: &Path,
+    name: &str,
+) -> Result<(String, rrd::manifest::Rr3ManifestFacts), String> {
     let manifest_src = mod_src.join("manifest.toml");
     if !manifest_src.is_file() {
         return Err(format!(
@@ -511,23 +544,11 @@ fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), 
         ));
     }
     rr3_entry_ok(&facts.entry, name)?;
-    let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
-    let staged = root.join("modules").join(name);
-    fs::create_dir_all(&staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
-    fs::write(
-        staged.join("module.toml"),
-        rr3_manifest_rewrite(&text, &installed_entry, &facts.entry, name)?,
-    )
-    .map_err(|e| format!("写 {}/module.toml 失败: {e}", staged.display()))?;
-    let entry_path = staged.join(&facts.entry);
-    if let Some(parent) = entry_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
-    }
-    if facts.lang == "python" {
-        rr3_stage_py(&mod_src, &staged, &entry_path, name)?;
-    } else {
-        rr3_stage_bin(&mod_src, &entry_path, name)?;
-    }
+    Ok((text, facts))
+}
+
+/// 仓内 config.toml 随包：模块开机即读 manifest 同目录 config.toml，缺件必重启环。
+fn rr3_stage_cfg(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), String> {
     let config_src = cfg.repo.join("modules").join(name).join("config.toml");
     if !config_src.is_file() {
         return Err(format!(
@@ -537,7 +558,7 @@ fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), 
     }
     fs::copy(&config_src, staged.join("config.toml"))
         .map_err(|e| format!("复制 {name} config.toml 失败: {e}"))?;
-    rr3_stage_opt(cfg, &staged, name)
+    Ok(())
 }
 
 /// python 模块：pkg 树 + 装机绝对路径 shim。
