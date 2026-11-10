@@ -287,66 +287,78 @@ fn rr3_open(device: &str) -> Rr3UartConn {
     }
 }
 
-/// ① 注册：首帧必须是 rr3.register，params.name/manifest 在场（rrd 握手门序同款）。
-fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u64) {
-    match conn.rr3_recv_buf() {
-        Ok(buf) => match Rr3Frame::try_from(buf) {
-            Ok(f) => match parse_upstream(f) {
-                Ok((Rr3PayloadType::Request, id, m, params, _))
-                    if m.as_deref() == Some("rr3.register") =>
-                {
-                    let manifest = params
-                        .get("manifest")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    if manifest.is_empty() {
-                        eprintln!("FAIL  注册缺 params.manifest");
-                        std::process::exit(1);
-                    }
-                    let name = params
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    let hb = manifest
-                        .lines()
-                        .find_map(|l| l.strip_prefix("heartbeat_ms = "))
-                        .and_then(|v| v.trim().parse::<u64>().ok())
-                        .unwrap_or(0);
-                    println!("---- 哨兵 manifest ----\n{manifest}------------------------");
-                    if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&register_reply(
-                        id,
-                        HARNESS_TASK,
-                        now_ns(),
-                    ))) {
-                        eprintln!("FAIL  注册应答写出失败: {e:?}");
-                        std::process::exit(1);
-                    }
-                    (name, hb)
-                }
-                Ok((ty, _, m, _, _)) => {
-                    eprintln!(
-                        "FAIL  首帧必须是 Request/rr3.register，收到 {ty:?}/{}",
-                        m.as_deref().unwrap_or("-")
-                    );
-                    std::process::exit(1);
-                }
-                Err(e) => {
-                    eprintln!("FAIL  首帧畸形: {e}");
-                    std::process::exit(1);
-                }
-            },
-            Err(e) => {
-                eprintln!("FAIL  首帧还原失败: {e:?}");
-                std::process::exit(1);
-            }
-        },
+/// 收一帧或点名退出（读取/还原失败按调用方给定文案 FAIL 并 exit 1）。
+fn rr3_recv_frame(conn: &mut Rr3UartConn, on_recv: &str, on_parse: &str) -> Rr3Frame {
+    let buf = match conn.rr3_recv_buf() {
+        Ok(b) => b,
         Err(e) => {
-            eprintln!("FAIL  首帧读取失败: {e:?}");
+            eprintln!("{on_recv}: {e:?}");
+            std::process::exit(1);
+        }
+    };
+    match Rr3Frame::try_from(buf) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("{on_parse}: {e:?}");
             std::process::exit(1);
         }
     }
+}
+
+/// ① 注册：首帧必须是 rr3.register，params.name/manifest 在场（rrd 握手门序同款）。
+fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u64) {
+    let frame = rr3_recv_frame(conn, "FAIL  首帧读取失败", "FAIL  首帧还原失败");
+    match parse_upstream(frame) {
+        Ok((Rr3PayloadType::Request, id, m, params, _)) if m.as_deref() == Some("rr3.register") => {
+            let (name, hb) = rr3_reg_fields(&params);
+            if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&register_reply(
+                id,
+                HARNESS_TASK,
+                now_ns(),
+            ))) {
+                eprintln!("FAIL  注册应答写出失败: {e:?}");
+                std::process::exit(1);
+            }
+            (name, hb)
+        }
+        Ok((ty, _, m, _, _)) => {
+            eprintln!(
+                "FAIL  首帧必须是 Request/rr3.register，收到 {ty:?}/{}",
+                m.as_deref().unwrap_or("-")
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("FAIL  首帧畸形: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 注册参数取数：manifest 必填（空即拒），name 可空；heartbeat_ms 从 manifest
+/// 行面取（缺省 0）。manifest 原文先打印（现场取证）。
+fn rr3_reg_fields(params: &Value) -> (String, u64) {
+    let manifest = params
+        .get("manifest")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if manifest.is_empty() {
+        eprintln!("FAIL  注册缺 params.manifest");
+        std::process::exit(1);
+    }
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let hb = manifest
+        .lines()
+        .find_map(|l| l.strip_prefix("heartbeat_ms = "))
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    println!("---- 哨兵 manifest ----\n{manifest}------------------------");
+    (name, hb)
 }
 
 /// ② 心跳 N 拍：逐拍回 accepted，记间隔（相对节拍的外部观测；首拍间隔含
@@ -355,51 +367,55 @@ fn rr3_beats(conn: &mut Rr3UartConn, beats: usize, now_ns: &dyn Fn() -> u64) -> 
     let mut intervals: Vec<u128> = Vec::new();
     let mut last = Instant::now();
     for i in 0..beats {
-        let frame = match conn.rr3_recv_buf() {
-            Ok(buf) => Rr3Frame::try_from(buf),
-            Err(e) => {
-                eprintln!("FAIL  第{}拍读取失败: {e:?}", i + 1);
-                std::process::exit(1);
-            }
-        };
-        let frame = match frame {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("FAIL  第{}拍还原失败: {e:?}", i + 1);
-                std::process::exit(1);
-            }
-        };
-        let now = Instant::now();
-        let dt = now.duration_since(last).as_millis();
-        last = now;
-        match parse_upstream(frame) {
-            Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => {
-                if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&heartbeat_reply(
-                    id,
-                    HARNESS_TASK,
-                    now_ns(),
-                ))) {
-                    eprintln!("FAIL  第{}拍应答写出失败: {e:?}", i + 1);
-                    std::process::exit(1);
-                }
-                println!("PASS  ② 第{}拍 rr3.heartbeat id={id} 间隔={dt}ms", i + 1);
-                intervals.push(dt);
-            }
-            Ok((ty, _, m, _, _)) => {
-                eprintln!(
-                    "FAIL  第{}拍应为 rr3.heartbeat，收到 {ty:?}/{}",
-                    i + 1,
-                    m.as_deref().unwrap_or("-")
-                );
-                std::process::exit(1);
-            }
-            Err(e) => {
-                eprintln!("FAIL  第{}拍畸形: {e}", i + 1);
-                std::process::exit(1);
-            }
+        if let Some(dt) = rr3_beat(conn, i, &mut last, now_ns) {
+            intervals.push(dt);
         }
     }
     intervals
+}
+
+/// 单拍：收帧 → 必须 Request/rr3.heartbeat → 回应答并打 PASS；返回本拍间隔
+/// （ms，相对上一拍）。形状/io 违约即点名 exit 1。
+fn rr3_beat(
+    conn: &mut Rr3UartConn,
+    i: usize,
+    last: &mut Instant,
+    now_ns: &dyn Fn() -> u64,
+) -> Option<u128> {
+    let n = i + 1;
+    let frame = rr3_recv_frame(
+        conn,
+        &format!("FAIL  第{n}拍读取失败"),
+        &format!("FAIL  第{n}拍还原失败"),
+    );
+    let now = Instant::now();
+    let dt = now.duration_since(*last).as_millis();
+    *last = now;
+    match parse_upstream(frame) {
+        Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => {
+            if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&heartbeat_reply(
+                id,
+                HARNESS_TASK,
+                now_ns(),
+            ))) {
+                eprintln!("FAIL  第{n}拍应答写出失败: {e:?}");
+                std::process::exit(1);
+            }
+            println!("PASS  ② 第{n}拍 rr3.heartbeat id={id} 间隔={dt}ms");
+            Some(dt)
+        }
+        Ok((ty, _, m, _, _)) => {
+            eprintln!(
+                "FAIL  第{n}拍应为 rr3.heartbeat，收到 {ty:?}/{}",
+                m.as_deref().unwrap_or("-")
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("FAIL  第{n}拍畸形: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 /// ② 全收/无停摆 + ⑦ 时序对表（判据窗出处见 BEAT_* 常量注记）。返回
@@ -534,26 +550,31 @@ fn rr3_parity_wait(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (Option<
         std::process::exit(1);
     }
     let parity_start = Instant::now();
-    let mut board_parity: Option<Value> = None;
+    let board_parity = rr3_parity_recv(conn);
+    (board_parity, parity_start.elapsed().as_millis())
+}
+
+/// parity 应答收帧（读到 id 匹配的 Response 为止；并发心跳 Request 跳过再等；
+/// 读取/还原/形状/畸形违约点名后返回 None——此面不 exit，交由判据面记 FAIL）。
+fn rr3_parity_recv(conn: &mut Rr3UartConn) -> Option<Value> {
     loop {
         let buf = match conn.rr3_recv_buf() {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("FAIL  parity 应答读取失败: {e:?}");
-                break;
+                return None;
             }
         };
         let frame = match Rr3Frame::try_from(buf) {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("FAIL  parity 应答还原失败: {e:?}");
-                break;
+                return None;
             }
         };
         match parse_upstream(frame) {
             Ok((Rr3PayloadType::Response, id, _, _, v)) if id == PARITY_CALL_ID => {
-                board_parity = v.get("result").cloned();
-                break;
+                return v.get("result").cloned();
             }
             Ok((Rr3PayloadType::Request, _, _, _, _)) => continue, // 心跳并发到达，跳过再等
             Ok((ty, id, m, _, _)) => {
@@ -561,15 +582,14 @@ fn rr3_parity_wait(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (Option<
                     "FAIL  parity 应答形状错: {ty:?}/id={id}/{}",
                     m.as_deref().unwrap_or("-")
                 );
-                break;
+                return None;
             }
             Err(e) => {
                 eprintln!("FAIL  parity 应答畸形: {e}");
-                break;
+                return None;
             }
         }
     }
-    (board_parity, parity_start.elapsed().as_millis())
 }
 
 /// ④ 三方两腿对拍：板回向量在册 / 契约腿（宿主 runner == 期望）/ 确定性腿
