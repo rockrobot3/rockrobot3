@@ -441,19 +441,7 @@ impl Rr3LlmClient {
         }
         let key = self.rr3_resolve_key()?;
         self.history.rr3_user_turn(prompt);
-        let messages: Vec<Value> = self
-            .history
-            .rr3_messages()
-            .iter()
-            .map(|(role, content)| json!({ "role": role, "content": content }))
-            .collect();
-        let body = json!({
-            "model": self.model_id,
-            "messages": messages,
-            "max_tokens": RR3_LLM_MAX_TOKENS,
-        })
-        .to_string()
-        .into_bytes();
+        let body = rr3_chat_body(&self.history, &self.model_id);
         // base_url = 完整 OpenAI 兼容 API 根（含版本段，模型行配置承载），客户端
         // 只拼 `/chat/completions`——GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`
         // 与 DeepSeek `/v1` 同形接入，不按厂商猜版本段（ADR-0023）。
@@ -462,7 +450,7 @@ impl Rr3LlmClient {
         // 重放，5xx/429 同属瞬时态。代价如实登记——补全非幂等，极端竞态下同轮
         // 可能被云端处理两次（OpenAI 兼容面无幂等键）；会话语义只采纳一次应答、
         // 历史只入账一次，换来"问了不回"这一生产不可接受结局的收敛。
-        let resp = rr3_http_try("大模型接口", "LLM", || {
+        let resp = match rr3_http_try("大模型接口", "LLM", || {
             rr3_http_post(&url, &key, &body, "application/json", self.timeout_s).and_then(
                 |(status, resp)| {
                     if status == 200 {
@@ -472,25 +460,14 @@ impl Rr3LlmClient {
                     }
                 },
             )
-        });
-        let resp = match resp {
+        }) {
             Ok(resp) => resp,
             Err(e) => {
                 self.history.rr3_rollback_last();
                 return Err(e);
             }
         };
-        // 应答形状面收敛为一档（Python KeyError/IndexError/JSONDecodeError 同一
-        // except 折同文案）：取不出 choices[0].message.content 串即形状不符
-        let reply = serde_json::from_slice::<Value>(&resp).ok().and_then(|v| {
-            v.get("choices")?
-                .get(0)?
-                .get("message")?
-                .get("content")?
-                .as_str()
-                .map(|s| s.to_string())
-        });
-        match reply {
+        match rr3_reply_text(&resp) {
             Some(t) => {
                 self.history.rr3_assistant_turn(&t);
                 Ok(t)
@@ -510,6 +487,34 @@ impl Rr3LlmClient {
     fn rr3_history(&self) -> &[(String, String)] {
         self.history.rr3_messages()
     }
+}
+
+/// 补全请求体：历史 → OpenAI 兼容 messages + 模型行 + 回复长度上限。
+fn rr3_chat_body(history: &crate::llm::Rr3LlmHistory, model: &str) -> Vec<u8> {
+    let messages: Vec<Value> = history
+        .rr3_messages()
+        .iter()
+        .map(|(role, content)| json!({ "role": role, "content": content }))
+        .collect();
+    json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": RR3_LLM_MAX_TOKENS,
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// 应答形状收敛为一档：取不出 choices[0].message.content 串即 None（形状不符）。
+fn rr3_reply_text(resp: &[u8]) -> Option<String> {
+    serde_json::from_slice::<Value>(resp).ok().and_then(|v| {
+        v.get("choices")?
+            .get(0)?
+            .get("message")?
+            .get("content")?
+            .as_str()
+            .map(|s| s.to_string())
+    })
 }
 
 /// 模型行密钥是否就位（面板模型列表只回布尔 `key_set`，值零回显）：local 免鉴权
