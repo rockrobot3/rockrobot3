@@ -125,30 +125,43 @@ impl TryFrom<Rr3FrameBuf> for Rr3Frame {
 /// [`rr3_frame_read`](crate::transport::frame::rr3_frame_read) 完全一致：
 /// `Closed` / `TornHeader` / `TornPayload` / `Header(..)`。
 pub fn rr3_framebuf_read<S: Rr3ByteStream>(s: &mut S) -> Result<Rr3FrameBuf, Rr3FrameError> {
-    let mut bytes = vec![0u8; RR3_IPC_HDR_SIZE];
-    match rr3_stream_read_fill(s, &mut bytes)? {
-        None => return Err(Rr3FrameError::Closed),
-        Some(got) if got < RR3_IPC_HDR_SIZE => {
-            return Err(Rr3FrameError::TornHeader { got });
-        }
-        _ => {}
-    }
-    let hdr = Rr3Header::from_bytes(&bytes).map_err(Rr3FrameError::Header)?;
-    let want = hdr.payload_len as usize;
-    if want > 0 {
-        bytes.resize(RR3_IPC_HDR_SIZE + want, 0);
-        match rr3_stream_read_fill(s, &mut bytes[RR3_IPC_HDR_SIZE..])? {
-            Some(got) if got == want => {}
-            Some(got) => return Err(Rr3FrameError::TornPayload { want, got }),
-            None => return Err(Rr3FrameError::TornPayload { want, got: 0 }),
-        }
-    }
+    let (hdr, mut bytes) = rr3_buf_head(s)?;
+    rr3_buf_payload(s, &mut bytes, hdr.payload_len as usize)?;
     rr3_verify_crc(&hdr, &bytes[RR3_IPC_HDR_SIZE..])?;
     Ok(Rr3FrameBuf {
         hdr,
         bytes,
         sealed: true,
     })
+}
+
+/// 读满 128B 定长头并还原（空读 = 关闭，半头 = TornHeader）。
+fn rr3_buf_head<S: Rr3ByteStream>(s: &mut S) -> Result<(Rr3Header, Vec<u8>), Rr3FrameError> {
+    let mut bytes = vec![0u8; RR3_IPC_HDR_SIZE];
+    match rr3_stream_read_fill(s, &mut bytes)? {
+        None => return Err(Rr3FrameError::Closed),
+        Some(got) if got < RR3_IPC_HDR_SIZE => return Err(Rr3FrameError::TornHeader { got }),
+        _ => {}
+    }
+    let hdr = Rr3Header::from_bytes(&bytes).map_err(Rr3FrameError::Header)?;
+    Ok((hdr, bytes))
+}
+
+/// 按头声明长度扩容并读满 payload（`want=0` 不扩容；半 payload 如实计数）。
+fn rr3_buf_payload<S: Rr3ByteStream>(
+    s: &mut S,
+    bytes: &mut Vec<u8>,
+    want: usize,
+) -> Result<(), Rr3FrameError> {
+    if want == 0 {
+        return Ok(());
+    }
+    bytes.resize(RR3_IPC_HDR_SIZE + want, 0);
+    match rr3_stream_read_fill(s, &mut bytes[RR3_IPC_HDR_SIZE..])? {
+        Some(got) if got == want => Ok(()),
+        Some(got) => Err(Rr3FrameError::TornPayload { want, got }),
+        None => Err(Rr3FrameError::TornPayload { want, got: 0 }),
+    }
 }
 
 /// 载荷 CRC32 校验（收侧单点）：声明值与实算值不符即返回 [`Rr3FrameError::CrcMismatch`]。
