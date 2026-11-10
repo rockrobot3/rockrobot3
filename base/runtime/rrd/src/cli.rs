@@ -148,23 +148,42 @@ fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, 
 
 /// 路径型参数族：值走 `need_path_value`（缺值/疑似开关一律拒，不静默回落）。
 fn rr3_cli_path(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
-    let val = || need_path_value(&args[i], args, i).map(PathBuf::from);
-    match args[i].as_str() {
-        "--socket" => cfg.socket = val()?,
-        "--topics-overlay" => cfg.overlay = Some(val()?),
-        "--contracts" => cfg.contracts = Some(val()?),
-        "--profile" => {
-            rr3_profile_conflict(cfg)?;
-            cfg.profile = Some(val()?);
-        }
-        "--manifest" => {
-            rr3_manifest_conflict(cfg)?;
-            cfg.manifests.push(val()?);
-        }
-        other => return Err(format!("未知选项 {other}\n{USAGE}")),
-    }
+    let opt = args[i].as_str();
+    let (_, set) = RR3_PATH_OPTS
+        .iter()
+        .find(|(name, _)| *name == opt)
+        .ok_or_else(|| format!("未知选项 {opt}\n{USAGE}"))?;
+    let p = PathBuf::from(need_path_value(opt, args, i)?);
+    set(cfg, p)?;
     Ok(i + 2)
 }
+
+/// 路径型参数表：`--名称 → 落位函数`（含 profile/manifest 互斥判据）。
+type Rr3PathSet = fn(&mut RrdConfig, PathBuf) -> Result<(), String>;
+const RR3_PATH_OPTS: [(&str, Rr3PathSet); 5] = [
+    ("--socket", |c, p| {
+        c.socket = p;
+        Ok(())
+    }),
+    ("--topics-overlay", |c, p| {
+        c.overlay = Some(p);
+        Ok(())
+    }),
+    ("--contracts", |c, p| {
+        c.contracts = Some(p);
+        Ok(())
+    }),
+    ("--profile", |c, p| {
+        rr3_profile_conflict(c)?;
+        c.profile = Some(p);
+        Ok(())
+    }),
+    ("--manifest", |c, p| {
+        rr3_manifest_conflict(c)?;
+        c.manifests.push(p);
+        Ok(())
+    }),
+];
 
 /// `--profile` 与已收 `--manifest` 互斥（反之同）。
 fn rr3_profile_conflict(cfg: &RrdConfig) -> Result<(), String> {
