@@ -727,8 +727,18 @@ fn rr3_accept_loop(
     live: Arc<AtomicUsize>,
     mut make_builder: impl FnMut() -> std::thread::Builder,
 ) -> Result<(), String> {
+    // accept 失败退避（与 rrd 守护 accept 同款策略，200ms）：单次失败不许带走
+    // 服务面——面板是运维的最后一扇门，EMFILE/ENFILE 等瞬态错误后必须还能接客。
+    const RR3_ACCEPT_BACKOFF: Duration = Duration::from_millis(200);
     loop {
-        let (mut stream, _) = listener.accept().map_err(|e| format!("accept 失败: {e}"))?;
+        let (mut stream, _) = match listener.accept() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("面板 accept 失败（继续服务）: {e}");
+                std::thread::sleep(RR3_ACCEPT_BACKOFF);
+                continue;
+            }
+        };
         // 连接 IO 耐心（读侧已在 rr3_http_read_req 设，写侧在此按同一预算补）：
         // 对端只连不读时 write_all 会一直堵在“发送缓冲已满”，8 个槽位被钉死＝
         // 面板整体失联（运维最后一扇门自锁，静态审计 B16）。
