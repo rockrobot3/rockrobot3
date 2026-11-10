@@ -13,13 +13,16 @@
 //! 最低公共依赖层（evidence 先例同径），故原样迁此，rrd 侧 re-export 保持
 //! 既有调用点（counters/axis）零改动。
 //!
-//! 权限语义：tmp 经 `File::create` 落盘，最终权限 = umask 后的常规档
-//! （0644 典型）；敏感面（secrets 0600）由调用方在 rename 后收权——敏感
-//! 读面的真正护城河是**父目录 0700**（同机他用户进不了目录，tmp 窗口
-//! 同样被挡），文件收权是第二道。调用方清单（改动须同批过本注释）：
+//! 权限语义：**tmp 建时即定权**（[`rr3_atomic_store_perm`]，unix `mode` 经
+//! `OpenOptions::mode` 落位）——旧序"`File::create` 0644 建 tmp、rename 后
+//! 再 chmod"在外部注入路径（父目录非 0700，如运维指定 `/data/rr3`）下留了
+//! 同机他用户读 tmp 的窗口，崩溃残留时更是长期可读；敏感面（模型凭据 0600）
+//! 由此不再依赖父目录护城河。非敏感面经 [`rr3_atomic_store`] 沿用 0644 档。
+//! 调用方清单（改动须同批过本注释）：
 //! - `rrd/src/counters.rs`：运维计数账（R26 合并写窗口尾 flush）
 //! - `rrd/src/axis.rs`：执行件标定档案（§4.4"不许出现第二条写路径"）
-//! - `modules/rr3-interact/src/panel/secrets.rs`：模型凭据（rename 后收 0600）
+//! - `modules/rr3-brain/src/config_store.rs`：模型行改写（只存 api_key_ref，无密钥）
+//! - `modules/rr3-interact/src/panel/secrets.rs`：模型凭据（建 tmp 即 0600）
 
 // no_std crate 的 std 显式恢复（evidence.rs 同径写法）：本模块是 std::fs 文件面，
 // 只在 linux/macos 门内编译（lib.rs 模块声明同径）。
@@ -33,8 +36,30 @@ use std::string::String;
 /// 把错误交回调用方（daemon/conn 落日志点名，secrets 折 502 应答），不 panic
 /// 不重试——重试在窗口判据再次成立时自然发生（R26 合并写）。
 pub fn rr3_atomic_store(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), String> {
+    rr3_atomic_store_perm(path, tmp, body, 0o644)
+}
+
+/// 原子写序（显式权限版）：tmp **建时即**以 `mode` 落盘（unix；非 unix 忽略
+/// `mode`），rename 原子替换后目标继承 tmp 权限——敏感面无须再二次 chmod。
+pub fn rr3_atomic_store_perm(
+    path: &Path,
+    tmp: &Path,
+    body: &[u8],
+    mode: u32,
+) -> Result<(), String> {
+    #[cfg(not(unix))]
+    let _ = mode;
     {
-        let mut f = File::create(tmp).map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
+        let mut opt = std::fs::OpenOptions::new();
+        opt.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opt.mode(mode);
+        }
+        let mut f = opt
+            .open(tmp)
+            .map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
         f.write_all(body)
             .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
         f.sync_all()
@@ -73,6 +98,23 @@ mod tests {
         // 覆盖写：目标先旧后新，无半截态可观察
         rr3_atomic_store(&path, &tmp, b"{\"v\":2}").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"{\"v\":2}");
+        assert!(!tmp.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 显式权限版：目标文件（rename 自 tmp）落在 0600——敏感面的写窗口与崩溃
+    /// 残留都不给同机他用户读的机会（umask 只会收紧不会放宽）。
+    #[cfg(unix)]
+    #[test]
+    fn perm_store_lands_restricted_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("rr3-persist-perm-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("s.json");
+        let tmp = dir.join("s.json.tmp");
+        rr3_atomic_store_perm(&path, &tmp, b"{\"k\":\"v\"}", 0o600).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "敏感落盘须 0600");
         assert!(!tmp.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

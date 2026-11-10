@@ -13,7 +13,7 @@ use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use rr_ipc::persist::rr3_atomic_store;
+use rr_ipc::persist::rr3_atomic_store_perm;
 use serde_json::{json, Value};
 
 /// secrets 读-改-写串行锁：面板每连接一线程，两个并发 `POST /api/model/key`
@@ -78,10 +78,11 @@ fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
 }
 
 /// upsert 一条（`POST /api/model/key` 的落点）：value 非空=写入/覆盖，空=删除
-/// 该 ref（轮换与撤销一个语义）；ref 只认非空无空白。落盘走 [`rr3_atomic_store`]
-/// （批N4 件四 I-20：原 `truncate(true)` 原地覆盖无 tmp/无 fsync，掉电卡写中间
-/// ⇒ 凭据文件恒 Err 且写侧不能自愈——全案 §19.2 Y-2 判据 2"落盘原子序单点"），
-/// 父目录 0700（tmp 窗口的护城河），rename 后收 0600（敏感面铁律）。
+/// 该 ref（轮换与撤销一个语义）；ref 只认非空无空白。落盘走
+/// [`rr3_atomic_store_perm`]（批N4 件四 I-20：原 `truncate(true)` 原地覆盖无 tmp/
+/// 无 fsync，掉电卡写中间 ⇒ 凭据文件恒 Err 且写侧不能自愈——全案 §19.2 Y-2
+/// 判据 2"落盘原子序单点"），tmp **建时即 0600**（消除 0644 写窗口，外部注入
+/// 路径下同机他用户读不到），父目录 0700 是第二道。
 pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<(), String> {
     let ref_name = ref_name.trim();
     if ref_name.is_empty() {
@@ -114,9 +115,8 @@ pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<()
     }
     let body = json!({ "keys": keys }).to_string();
     let tmp = path.with_extension("json.tmp");
-    rr3_atomic_store(path, &tmp, body.as_bytes())?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        .map_err(|e| format!("收 {} 权限失败: {e}", path.display()))?;
+    // tmp 建时即 0600，rename 原子替换后目标继承该权限（敏感面铁律）
+    rr3_atomic_store_perm(path, &tmp, body.as_bytes(), 0o600)?;
     Ok(())
 }
 
