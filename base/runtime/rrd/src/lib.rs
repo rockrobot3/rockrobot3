@@ -185,9 +185,10 @@ const RR3_LOG_RING_CAP_FALLBACK: usize = 512;
 static RR3_LOG_RING_CAP: OnceLock<usize> = OnceLock::new();
 
 /// 定格日志环容量（行数）。daemon 装配链装载成功后调一次；重复调用失败返回
-/// `false`——容量是 boot 期事实，运行期不改。
+/// `false`——容量是 boot 期事实，运行期不改。0 拒定格：入环的"满则丢最旧"在
+/// 0 容量下无元素可丢，会持环锁死转；解析侧已把 0 判红，这里守 API 边界。
 pub fn rr3_log_ring_cap_set(cap: usize) -> bool {
-    RR3_LOG_RING_CAP.set(cap).is_ok()
+    cap > 0 && RR3_LOG_RING_CAP.set(cap).is_ok()
 }
 
 /// 当前生效的环容量：定格值未落（未走装配单路径/尚未装载完）按兜底值收。
@@ -428,6 +429,7 @@ mod tests {
     /// 全 crate 单测只有本用例 set（OnceLock 进程级单次，别处再 set 会互相污染）。
     #[test]
     fn log_ring_cap_sets_once_and_first_wins() {
+        assert!(!rr3_log_ring_cap_set(0), "0 容量拒定格（入环会持锁死转）");
         assert!(rr3_log_ring_cap_set(8), "首次 set 必须成功");
         assert!(!rr3_log_ring_cap_set(999), "重复 set 必须失败（首份胜出）");
         assert_eq!(rr3_log_ring_cap(), 8);
