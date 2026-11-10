@@ -677,43 +677,58 @@ fn rr3_reader_loop(
         if inner.stop.load(Ordering::Relaxed) {
             break;
         }
-        let (ty, body) = match rr3_body_split(&frame.payload) {
-            Ok(v) => v,
-            Err(_) => break,
-        };
-        match rr3_dispatch_class(ty) {
-            Rr3Dispatch::Pending => {
-                // 按 JSON-RPC id 挑自己的应答（序不可依赖的同一条事实，读侧的答案）
-                let v: Value = match serde_json::from_slice(&body) {
-                    Ok(v) => v,
-                    Err(_) => break,
-                };
-                let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
-                let sender = inner
-                    .pending
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .remove(&id);
-                if let Some(tx) = sender {
-                    let payload = match v.get("result") {
-                        Some(r) => Ok(r.clone()),
-                        None => Err(format!(
-                            "RPC 被拒: {}",
-                            v.get("error").cloned().unwrap_or(Value::Null)
-                        )),
-                    };
-                    let _ = tx.send(payload);
-                }
-                // 无主应答：超时已被调用方记账，静默丢弃
-            }
-            Rr3Dispatch::Inbox => {
-                if inbox_tx.send(frame).is_err() {
-                    break; // inbox 没了：客户端已死
-                }
-            }
+        if !rr3_reader_frame(frame, &inner, &inbox_tx) {
+            break;
         }
     }
-    // 收尾：唤醒所有还在等应答的调用方，让它们拿到确定性错误而不是吃满超时
+    rr3_reader_teardown(&inner);
+}
+
+/// 单帧裁决：`true` = 继续读，`false` = 断开（坏帧/机身失配/inbox 已关）。
+fn rr3_reader_frame(
+    frame: Rr3Frame,
+    inner: &Arc<Rr3Inner>,
+    inbox_tx: &mpsc::SyncSender<Rr3Frame>,
+) -> bool {
+    let (ty, body) = match rr3_body_split(&frame.payload) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    match rr3_dispatch_class(ty) {
+        // 按 JSON-RPC id 挑自己的应答（序不可依赖的同一条事实，读侧的答案）
+        Rr3Dispatch::Pending => rr3_pending_reply(inner, &body),
+        Rr3Dispatch::Inbox => inbox_tx.send(frame).is_ok(), // inbox 没了 = 客户端已死
+    }
+}
+
+/// 应答投邮箱：按 id 取等待者，命中则投 result / 拒因；无主应答静默丢弃
+/// （超时已被调用方记账）。`false` = 应答体坏了，读侧按断开处理。
+fn rr3_pending_reply(inner: &Arc<Rr3Inner>, body: &[u8]) -> bool {
+    let v: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let id = v.get("id").and_then(Value::as_u64).unwrap_or(0);
+    let sender = inner
+        .pending
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&id);
+    if let Some(tx) = sender {
+        let payload = match v.get("result") {
+            Some(r) => Ok(r.clone()),
+            None => Err(format!(
+                "RPC 被拒: {}",
+                v.get("error").cloned().unwrap_or(Value::Null)
+            )),
+        };
+        let _ = tx.send(payload);
+    }
+    true
+}
+
+/// 收尾：唤醒所有还在等应答的调用方，让它们拿到确定性错误而不是吃满超时。
+fn rr3_reader_teardown(inner: &Arc<Rr3Inner>) {
     let mut pending = inner.pending.lock().unwrap_or_else(|p| p.into_inner());
     for (_, tx) in pending.drain() {
         let _ = tx.send(Err("总线已断开".into()));
