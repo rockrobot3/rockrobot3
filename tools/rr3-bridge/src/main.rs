@@ -74,28 +74,17 @@ pub fn parse_args(args: &[String]) -> Result<link::BridgeConfig, String> {
     let mut baud = link::RR3_BRIDGE_BAUD_DEFAULT;
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--uart" | "--socket" | "--baud" => {
-                let v = args
-                    .get(i + 1)
-                    .ok_or_else(|| format!("{0} 缺参数", args[i]))?;
-                if v.starts_with('-') {
-                    return Err(format!("{0} 缺参数：收到疑似开关的 {v}", args[i]));
-                }
-                match args[i].as_str() {
-                    "--uart" => uart = Some(PathBuf::from(v)),
-                    "--socket" => socket = Some(PathBuf::from(v)),
-                    _ => {
-                        baud = v
-                            .parse::<u32>()
-                            .map_err(|_| format!("--baud 应为数字，实际 {v}"))?;
-                    }
-                }
-                i += 1;
-            }
-            other => return Err(format!("未知参数 {other}（可用：--uart --socket --baud）")),
+        let flag = args[i].as_str();
+        if !matches!(flag, "--uart" | "--socket" | "--baud") {
+            return Err(format!("未知参数 {flag}（可用：--uart --socket --baud）"));
         }
-        i += 1;
+        let v = rr3_arg_value(flag, args, i)?;
+        match flag {
+            "--uart" => uart = Some(PathBuf::from(v)),
+            "--socket" => socket = Some(PathBuf::from(v)),
+            _ => baud = rr3_arg_baud(v)?,
+        }
+        i += 2;
     }
     let uart = uart.ok_or("缺 --uart（UART 设备路径）")?;
     let socket = socket.ok_or("缺 --socket（rrd 套接字路径）")?;
@@ -104,6 +93,21 @@ pub fn parse_args(args: &[String]) -> Result<link::BridgeConfig, String> {
     rr_ipc::transport::uart::rr3_uart_baud_speed(baud)
         .map_err(|e| format!("--baud {baud} 不可用: {e}"))?;
     Ok(link::BridgeConfig { uart, baud, socket })
+}
+
+/// 取值：缺值或疑似开关一律拒（静默忽略拼写错误是脚本工具的第一错法）。
+fn rr3_arg_value<'a>(flag: &str, args: &'a [String], i: usize) -> Result<&'a str, String> {
+    let v = args.get(i + 1).ok_or_else(|| format!("{flag} 缺参数"))?;
+    if v.starts_with('-') {
+        return Err(format!("{flag} 缺参数：收到疑似开关的 {v}"));
+    }
+    Ok(v)
+}
+
+/// 波特率数字面（档位白名单另在 parse_args 末尾统一裁决）。
+fn rr3_arg_baud(v: &str) -> Result<u32, String> {
+    v.parse::<u32>()
+        .map_err(|_| format!("--baud 应为数字，实际 {v}"))
 }
 
 #[cfg(test)]
