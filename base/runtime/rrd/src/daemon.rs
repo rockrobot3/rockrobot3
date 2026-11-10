@@ -787,7 +787,24 @@ extern "C" fn rr3_term_pipe_wake(_sig: i32) {
 /// 只落日志不挡关停（运维账不许挡产品路，与启动装载同一口径）。未装上（pipe
 /// 失败/线程起不来）留痕跳过，SIGTERM 回落默认杀进程语义，不致命。
 fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
-    use std::io::Read;
+    let Some(rx) = rr3_flush_arm() else {
+        return;
+    };
+    let spawned = thread::Builder::new()
+        .name("counters-term-flush".into())
+        .spawn(move || rr3_flush_wait(rx, shared, path));
+    if let Err(e) = spawned {
+        // 线程起不来：处理器已在位但无人读 self-pipe。Rust 把 SIGPIPE 置 IGN，
+        // 信号处理器写空管道只会得 EPIPE 而不终止——必须在这里恢复默认处置，
+        // 否则 systemctl stop 会一直等到 SIGKILL（与 EINTR 那条同源的吞信号故障）。
+        rr3_log(&format!("counters 关停 flush 未装上（线程起不来）: {e}"));
+        rr3_term_default();
+    }
+}
+
+/// 装管道与信号处理器：返回 self-pipe 读端；pipe 失败留痕跳过（SIGTERM 回落
+/// 默认杀进程语义，不致命）。
+fn rr3_flush_arm() -> Option<std::os::unix::net::UnixStream> {
     use std::os::unix::io::IntoRawFd;
     let (tx, rx) = match std::os::unix::net::UnixStream::pair() {
         Ok(pair) => pair,
@@ -795,7 +812,7 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
             rr3_log(&format!(
                 "counters 关停 flush 未装上（self-pipe 失败）: {e}"
             ));
-            return;
+            return None;
         }
     };
     // 发送端交给处理器：取裸 fd 后刻意不 close（进程生命期一根管，泄漏即设计）
@@ -810,62 +827,56 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
             rr3_term_pipe_wake as extern "C" fn(i32) as usize,
         );
     }
-    let spawned = thread::Builder::new()
-        .name("counters-term-flush".into())
-        .spawn(move || {
-            let mut rx = rx;
-            let mut one = [0u8; 1];
-            // 平时睡在 read；醒来一次 = 一个 TERM/INT，flush 后即关停（exit 不返回）。
-            // EINTR 必须重试：std 的 read 不自动吞信号中断，若按"非 Ok(1) 即收场"
-            // 处理，一次 EINTR 就让本线程退出，而 SIGTERM/SIGINT 处理器已在位——
-            // 守护从此不再响应默认终止语义，systemd stop 会一直等到 SIGKILL，
-            // 尾部计数也永远不会 flush。
-            loop {
-                match rx.read(&mut one) {
-                    Ok(1) => {
-                        // 关停起点先行留痕：若后续 flush 卡在磁盘上，这行是
-                        // "信号已收到、正在落盘"与"信号都没到"的分界。
-                        rr3_log("收到终止信号（SIGTERM/SIGINT），开始关停 flush");
-                        let snap = rr3_lock(&shared).rr3_reg_counters();
-                        match path
-                            .as_deref()
-                            .map(|p| crate::counters::rr3_counters_store(p, &snap))
-                        {
-                            Some(Ok(())) => rr3_log("counters 关停 flush 已落盘（SIGTERM/SIGINT）"),
-                            Some(Err(e)) => {
-                                rr3_log(&format!("counters 关停 flush 失败（不挡关停）: {e}"))
-                            }
-                            None => rr3_log("counters 关停 flush 跳过（未启用持久化）"),
-                        }
-                        std::process::exit(0);
-                    }
-                    Ok(_) => {
-                        // self-pipe 写端是进程生命期的静态 fd，EOF 理论上不发生；
-                        // 真发生则恢复默认信号处置后收场——宁可让 SIGTERM 回到
-                        // "直接杀进程"，也不能留一个吞信号的空壳线程。
-                        rr3_log(
-                            "counters 关停 flush 线程异常收场（self-pipe EOF），恢复默认信号处置",
-                        );
-                        rr3_term_default();
-                        return;
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(e) => {
-                        rr3_log(&format!(
-                            "counters 关停 flush 线程读 self-pipe 失败（{e}），恢复默认信号处置"
-                        ));
-                        rr3_term_default();
-                        return;
-                    }
-                }
+    Some(rx)
+}
+
+/// flush 线程主体：平时睡在 self-pipe read；醒来一次 = 一个 TERM/INT，落盘后
+/// 即关停（exit 不返回）。EINTR 必须重试——std 的 read 不自动吞信号中断，
+/// 若按"非 Ok(1) 即收场"处理，一次 EINTR 就让本线程退出，而处理器已在位，
+/// 守护从此不再响应默认终止语义（systemd stop 等到 SIGKILL，尾部计数丢）。
+fn rr3_flush_wait(
+    mut rx: std::os::unix::net::UnixStream,
+    shared: Arc<Mutex<RrdRegistry>>,
+    path: Option<PathBuf>,
+) {
+    use std::io::Read;
+    let mut one = [0u8; 1];
+    loop {
+        match rx.read(&mut one) {
+            Ok(1) => {
+                rr3_flush_store(&shared, path.as_deref());
+                std::process::exit(0);
             }
-        });
-    if let Err(e) = spawned {
-        // 线程起不来：处理器已在位但无人读 self-pipe。Rust 把 SIGPIPE 置 IGN，
-        // 信号处理器写空管道只会得 EPIPE 而不终止——必须在这里恢复默认处置，
-        // 否则 systemctl stop 会一直等到 SIGKILL（与 EINTR 那条同源的吞信号故障）。
-        rr3_log(&format!("counters 关停 flush 未装上（线程起不来）: {e}"));
-        rr3_term_default();
+            Ok(_) => {
+                // self-pipe 写端是进程生命期的静态 fd，EOF 理论上不发生；
+                // 真发生则恢复默认信号处置后收场——宁可让 SIGTERM 回到
+                // "直接杀进程"，也不能留一个吞信号的空壳线程。
+                rr3_log("counters 关停 flush 线程异常收场（self-pipe EOF），恢复默认信号处置");
+                rr3_term_default();
+                return;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                rr3_log(&format!(
+                    "counters 关停 flush 线程读 self-pipe 失败（{e}），恢复默认信号处置"
+                ));
+                rr3_term_default();
+                return;
+            }
+        }
+    }
+}
+
+/// 关停落盘一段：快照 → 持久化 → 成败留痕（失败不挡关停，运维账不许挡产品路）。
+fn rr3_flush_store(shared: &Mutex<RrdRegistry>, path: Option<&std::path::Path>) {
+    // 关停起点先行留痕：若后续 flush 卡在磁盘上，这行是"信号已收到、正在落盘"
+    // 与"信号都没到"的分界。
+    rr3_log("收到终止信号（SIGTERM/SIGINT），开始关停 flush");
+    let snap = rr3_lock(shared).rr3_reg_counters();
+    match path.map(|p| crate::counters::rr3_counters_store(p, &snap)) {
+        Some(Ok(())) => rr3_log("counters 关停 flush 已落盘（SIGTERM/SIGINT）"),
+        Some(Err(e)) => rr3_log(&format!("counters 关停 flush 失败（不挡关停）: {e}")),
+        None => rr3_log("counters 关停 flush 跳过（未启用持久化）"),
     }
 }
 
