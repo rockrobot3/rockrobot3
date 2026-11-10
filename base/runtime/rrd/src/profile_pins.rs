@@ -29,32 +29,54 @@ pub(crate) fn rr3_pin_capabilities(
     let mut errs = Vec::new();
     let plat = platform.rr3_platform_name();
     for pin in &profile.pins {
-        let label = format!("pins[{}]", pin.rr3_pin_id());
-        // ⑧-b 控制器在册（词表随平台表，装配单不得自造控制器）
-        if !pin.controller.is_empty()
-            && !platform
-                .rr3_ctl_names()
-                .iter()
-                .any(|c| c == &pin.controller)
-        {
-            errs.push(format!(
-                "{label} controller \"{}\" 不在平台 {plat} 的在册控制器词表（校验⑧-b——词表源 contracts/platform/{plat}.toml 的 [[controller]]，装配单不得自造控制器）",
-                pin.controller
-            ));
-        }
-        // ⑤-a output 落 input-only 集（角色 input_only_ok 的另一侧输入取 roles 表）
-        if pin.direction == "out" && roles.rr3_role_input_only(&pin.role) == Some(false) {
-            for p in &pin.physical {
-                if platform.rr3_input_only_pins().contains(p) {
-                    errs.push(format!(
-                        "{label} physical 元素 {p} 落在平台 {plat} 的 input-only 脚集（校验⑤-a：direction = out 且角色 {} input_only_ok = false，input-only 脚无输出驱动能力）",
-                        pin.role
-                    ));
-                }
+        rr3_pin_caps(pin, roles, platform, plat, &mut errs);
+    }
+    rr3_pin_adc(profile, platform, plat, &mut errs);
+    errs
+}
+
+/// 单脚能力判据：⑧-b 控制器在册 + ⑤-a out 落 input-only 集。
+fn rr3_pin_caps(
+    pin: &Rr3PinEntry,
+    roles: &Rr3RoleTable,
+    platform: &Rr3PlatformTable,
+    plat: &str,
+    errs: &mut Vec<String>,
+) {
+    let label = format!("pins[{}]", pin.rr3_pin_id());
+    // ⑧-b 控制器在册（词表随平台表，装配单不得自造控制器）
+    if !pin.controller.is_empty()
+        && !platform
+            .rr3_ctl_names()
+            .iter()
+            .any(|c| c == &pin.controller)
+    {
+        errs.push(format!(
+            "{label} controller \"{}\" 不在平台 {plat} 的在册控制器词表（校验⑧-b——词表源 contracts/platform/{plat}.toml 的 [[controller]]，装配单不得自造控制器）",
+            pin.controller
+        ));
+    }
+    // ⑤-a output 落 input-only 集（角色 input_only_ok 的另一侧输入取 roles 表）
+    if pin.direction == "out" && roles.rr3_role_input_only(&pin.role) == Some(false) {
+        for p in &pin.physical {
+            if platform.rr3_input_only_pins().contains(p) {
+                errs.push(format!(
+                    "{label} physical 元素 {p} 落在平台 {plat} 的 input-only 脚集（校验⑤-a：direction = out 且角色 {} input_only_ok = false，input-only 脚无输出驱动能力）",
+                    pin.role
+                ));
             }
         }
     }
-    // ⑤-b 模拟测点落 ADC 能力集（测点引用面 = 域绑定位，与 ⑥-d 同一 pin_id 语法）
+}
+
+/// ⑤-b 模拟测点判据：域 sense/current_sense 引用的 pin physical 全落 ADC 集。
+fn rr3_pin_adc(
+    profile: &Rr3Profile,
+    platform: &Rr3PlatformTable,
+    plat: &str,
+    errs: &mut Vec<String>,
+) {
+    // 测点引用面 = 域绑定位，与 ⑥-d 同一 pin_id 语法
     for d in &profile.supplies.domains {
         for (key, val) in [("sense", &d.sense), ("current_sense", &d.current_sense)] {
             if val == "none" {
@@ -74,7 +96,6 @@ pub(crate) fn rr3_pin_capabilities(
             }
         }
     }
-    errs
 }
 
 /// 装载期校验③-a/③-b/③-c + ④-b（增补轮六 §5，后果 = 拒；施工图 Task 5）：不双占
