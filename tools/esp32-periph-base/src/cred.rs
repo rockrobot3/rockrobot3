@@ -144,68 +144,71 @@ unsafe fn nvs_get_str_boxed(h: nvs_handle_t, key: &CString, max: usize) -> Optio
 /// 两键写 → commit。错误只回码，点名在调用方（键名级，不出值）。
 pub(crate) fn rr3_cred_write(ssid: &str, pass: &str) -> Result<(), i32> {
     rr3_cred_form_check(ssid, pass).map_err(|_| -1)?; // -1：形制域内错误（非 esp_err 码空间）
-    unsafe fn raw(h: nvs_handle_t, key: &CString, v: &str) -> Result<(), i32> {
-        let cv = CString::new(v).map_err(|_| -1)?;
-        if nvs_set_str(h, key.as_ptr(), cv.as_ptr()) != ESP_OK {
-            return Err(-2);
-        }
-        Ok(())
-    }
-    let ns = match CString::new(RR3_CRED_NAMESPACE) {
-        Ok(s) => s,
-        Err(_) => return Err(-1),
-    };
-    let k_ssid = match CString::new(RR3_CRED_KEY_SSID) {
-        Ok(s) => s,
-        Err(_) => return Err(-1),
-    };
-    let k_pass = match CString::new(RR3_CRED_KEY_PASS) {
-        Ok(s) => s,
-        Err(_) => return Err(-1),
-    };
+    let keys = rr3_cred_keys()?;
     let mut h: nvs_handle_t = 0;
     unsafe {
-        if nvs_open(ns.as_ptr(), nvs_open_mode_t_NVS_READWRITE, &mut h) != ESP_OK {
+        if nvs_open(keys.ns.as_ptr(), nvs_open_mode_t_NVS_READWRITE, &mut h) != ESP_OK {
             return Err(-3);
         }
-        let r = (|| -> Result<(), i32> {
-            raw(h, &k_ssid, ssid)?;
-            raw(h, &k_pass, pass)?;
-            if nvs_commit(h) != ESP_OK {
-                return Err(-4);
-            }
-            Ok(())
-        })();
+        let r = rr3_cred_put(h, &keys, ssid, pass);
         nvs_close(h);
         r
     }
+}
+
+/// NVS 命名空间与两键名的 C 串（含 NUL 的常量不可能失败，失败即 -1 形制域）。
+struct Rr3CredKeys {
+    ns: CString,
+    ssid: CString,
+    pass: CString,
+}
+
+fn rr3_cred_keys() -> Result<Rr3CredKeys, i32> {
+    let cstr = |s: &str| CString::new(s).map_err(|_| -1);
+    Ok(Rr3CredKeys {
+        ns: cstr(RR3_CRED_NAMESPACE)?,
+        ssid: cstr(RR3_CRED_KEY_SSID)?,
+        pass: cstr(RR3_CRED_KEY_PASS)?,
+    })
+}
+
+/// 两键写入 + commit（-2 写失败 / -1 值含 NUL / -4 commit 失败）。
+unsafe fn rr3_cred_put(
+    h: nvs_handle_t,
+    k: &Rr3CredKeys,
+    ssid: &str,
+    pass: &str,
+) -> Result<(), i32> {
+    rr3_cred_raw(h, &k.ssid, ssid)?;
+    rr3_cred_raw(h, &k.pass, pass)?;
+    if nvs_commit(h) != ESP_OK {
+        return Err(-4);
+    }
+    Ok(())
+}
+
+unsafe fn rr3_cred_raw(h: nvs_handle_t, key: &CString, v: &str) -> Result<(), i32> {
+    let cv = CString::new(v).map_err(|_| -1)?;
+    if nvs_set_str(h, key.as_ptr(), cv.as_ptr()) != ESP_OK {
+        return Err(-2);
+    }
+    Ok(())
 }
 
 /// 擦除（事务回退到"原空态"消费点，批N14 件二 [crate::httpd::rr3_wifi_write_apply]）：
 /// 两键 erase + commit；键不存在不算错（幂等——回退目标是"读不到"，erase 一个
 /// 不存在的键语义已达成）。
 pub(crate) fn rr3_cred_erase() -> Result<(), i32> {
-    let ns = match CString::new(RR3_CRED_NAMESPACE) {
-        Ok(s) => s,
-        Err(_) => return Err(-1),
-    };
-    let k_ssid = match CString::new(RR3_CRED_KEY_SSID) {
-        Ok(s) => s,
-        Err(_) => return Err(-1),
-    };
-    let k_pass = match CString::new(RR3_CRED_KEY_PASS) {
-        Ok(s) => s,
-        Err(_) => return Err(-1),
-    };
+    let keys = rr3_cred_keys()?;
     let mut h: nvs_handle_t = 0;
     unsafe {
-        if nvs_open(ns.as_ptr(), nvs_open_mode_t_NVS_READWRITE, &mut h) != ESP_OK {
+        if nvs_open(keys.ns.as_ptr(), nvs_open_mode_t_NVS_READWRITE, &mut h) != ESP_OK {
             return Err(-3);
         }
         let r = (|| -> Result<(), i32> {
             // ESP_ERR_NVS_NOT_FOUND＝键本就不在——幂等语义，不算错
-            let e1 = nvs_erase_key(h, k_ssid.as_ptr());
-            let e2 = nvs_erase_key(h, k_pass.as_ptr());
+            let e1 = nvs_erase_key(h, keys.ssid.as_ptr());
+            let e2 = nvs_erase_key(h, keys.pass.as_ptr());
             let bad = [e1, e2]
                 .into_iter()
                 .any(|e| e != ESP_OK && e != ESP_ERR_NVS_NOT_FOUND);
