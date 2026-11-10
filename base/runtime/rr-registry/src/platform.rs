@@ -589,35 +589,47 @@ fn rr3_cons_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Ve
 
 /// `[controller_wordform]` 段：封闭四键、值 = 非空前缀；空表 = 显式无词形派生面。
 fn rr3_plat_wf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match t.get("controller_wordform") {
-        Some(Value::Table(wf)) => {
-            for (k, v) in wf {
-                if !RR3_PLATFORM_WORDFORM_KEYS.contains(&k.as_str()) {
-                    errs.push(format!(
-                        "[controller_wordform] 未知键 {k}（只认词形派生四键 {RR3_PLATFORM_WORDFORM_KEYS:?}；physical/channel/addr 类派生不经词形）"
-                    ));
-                    continue;
-                }
-                match v.as_str() {
-                    Some(p) if !p.trim().is_empty() => {
-                        table.controller_wordform.insert(k.clone(), p.to_string());
-                    }
-                    Some(_) => errs.push(format!(
-                        "[controller_wordform].{k} 词形前缀不得为空串（无词形须删键走空表显式）"
-                    )),
-                    None => errs.push(format!(
-                        "[controller_wordform].{k} 应为字符串前缀，收到 {v:?}"
-                    )),
-                }
-            }
+    let wf = match t.get("controller_wordform") {
+        Some(Value::Table(wf)) => wf,
+        Some(other) => {
+            errs.push(format!(
+                "平台表 controller_wordform 应为表（[controller_wordform]），收到 {other:?}"
+            ));
+            return;
         }
-        Some(other) => errs.push(format!(
-            "平台表 controller_wordform 应为表（[controller_wordform]），收到 {other:?}"
+        None => {
+            errs.push(
+                "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
+                    .into(),
+            );
+            return;
+        }
+    };
+    for (k, v) in wf {
+        rr3_wf_item(k, v, table, errs);
+    }
+}
+
+/// 单条词形：键在册四键内、值为非空前缀。
+fn rr3_wf_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    if !RR3_PLATFORM_WORDFORM_KEYS.contains(&k) {
+        errs.push(format!(
+            "[controller_wordform] 未知键 {k}（只认词形派生四键 {RR3_PLATFORM_WORDFORM_KEYS:?}；physical/channel/addr 类派生不经词形）"
+        ));
+        return;
+    }
+    match v.as_str() {
+        Some(p) if !p.trim().is_empty() => {
+            table
+                .controller_wordform
+                .insert(k.to_string(), p.to_string());
+        }
+        Some(_) => errs.push(format!(
+            "[controller_wordform].{k} 词形前缀不得为空串（无词形须删键走空表显式）"
         )),
-        None => errs.push(
-            "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
-                .into(),
-        ),
+        None => errs.push(format!(
+            "[controller_wordform].{k} 应为字符串前缀，收到 {v:?}"
+        )),
     }
 }
 
