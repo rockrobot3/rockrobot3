@@ -34,7 +34,7 @@
 | [`full_smoke.py`](full_smoke.py) | 全功能冒烟（11 条命令＋边界/交叉） | 逐条正则断言全过（含拒绝面两腿） |
 | [`servo_motion.py`](servo_motion.py) | V4 舵机运动正确性 | 到位回读四相 / 连续动作不丢帧 / 双轴串行 |
 | [`voice_respond.py`](voice_respond.py) | 声音事件→表情/转向闭环 | 每次喊话 2s 内 FACE+TILT+PAN 三串 OK |
-| [`longrun.py`](longrun.py) | V5 长跑稳定性（并发） | ack 缺失 0 / drop 增量 0 / seq 断档 0 / 真帧 CRC 不符 0（失步伪帧按探针侧记账）/ min_free 不刷新历史低点 |
+| [`longrun.py`](longrun.py) | V5 长跑稳定性（并发） | ack 缺失 0 / drop 增量 0 / seq 断档 0 / 真帧 CRC 不符 0（失步伪帧按探针侧记账）/ min_free 新低超 1KB 容差才 FAIL（附 free 趋势面） |
 | [`doa_probe.py`](doa_probe.py) | DoA 判向判定实验 | 六轮带真值定向喊话，输出三特征证据（非验收断言） |
 
 ### C 音频与电源（声学面标定）
