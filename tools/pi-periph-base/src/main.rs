@@ -368,14 +368,16 @@ impl Board {
             if !RR3_FACE_EXPRS.contains(&expr) {
                 return Err(format!("expression 不在白名单: \"{expr}\""));
             }
-            let previous = std::mem::replace(&mut self.state.prev_expr, expr.to_string());
             let base = expr_eye_base(expr);
-            self.state.base = base;
-            self.state.expr_mode = true;
-            self.state.frame_mode = false;
+            // 先渲染后提交状态：渲染失败不污染内部视图（效应确认才记账，
+            // 否则状态报"已生效"而屏幕未变，排障时视图与现场不一致）
             self.oled
                 .capsules(base)
                 .map_err(|e| format!("OLED 表情渲染失败: {e}"))?;
+            let previous = std::mem::replace(&mut self.state.prev_expr, expr.to_string());
+            self.state.base = base;
+            self.state.expr_mode = true;
+            self.state.frame_mode = false;
             Ok(json!({ "expression": expr, "previous": previous }))
         } else if let Some(v) = args.get("frame") {
             let arr = v
@@ -394,11 +396,12 @@ impl Board {
                 }
                 f[i] = b as u8;
             }
-            self.state.frame_mode = true;
-            self.state.expr_mode = false;
+            // 同上：点阵上屏成功后才切换模式
             self.oled
                 .frame(&f)
                 .map_err(|e| format!("OLED 点阵渲染失败: {e}"))?;
+            self.state.frame_mode = true;
+            self.state.expr_mode = false;
             Ok(json!({ "applied": true }))
         } else {
             Err("缺 expression/frame 之一".into())
@@ -424,13 +427,15 @@ impl Board {
 
     fn render_expression(&mut self, expr: &str) -> Result<(), String> {
         let base = expr_eye_base(expr);
+        // 先渲染后提交状态（同 handle_face：效应确认才记账）
+        self.oled
+            .capsules(base)
+            .map_err(|e| format!("OLED 表情渲染失败: {e}"))?;
         self.state.base = base;
         self.state.expr_mode = true;
         self.state.frame_mode = false;
         self.state.prev_expr = expr.to_string();
-        self.oled
-            .capsules(base)
-            .map_err(|e| format!("OLED 表情渲染失败: {e}"))
+        Ok(())
     }
 
     /// 文本模式重绘（帧/表情模式占满 8 页时跳过，不凿位图）。
