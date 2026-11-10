@@ -279,21 +279,29 @@ struct Rr3Esp32AudioChunk {
     samples: Vec<u8>,
 }
 
-/// Event 帧解析（四道门全过才 Ok，任一失败 Err 点名——与板侧 frame_recv 同款
-/// fail-closed 口径；与 tools/rr3-audio-rec `parse_audio_event` 同值锚定）：
-/// dst=宿主门 → payload Event 类型门 → topic 门 → 字段/b64 门。
-fn rr3_esp32_evt_parse(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3Esp32AudioChunk, String> {
+/// 四道门之一：dst 位形门（非宿主位形即拒，点名实际值）。
+fn rr3_evt_dst(hdr: &Rr3Header) -> Result<(), String> {
     if hdr.dst_task != RR3_HOST_TASK {
         return Err(format!(
             "dst_task={} 非宿主位形 {RR3_HOST_TASK}",
             hdr.dst_task
         ));
     }
+    Ok(())
+}
+
+/// 四道门之二：payload 前缀类型门（须 Event）+ 事件体 JSON 解析。
+fn rr3_evt_body(payload: &[u8]) -> Result<Value, String> {
     let (ty, body) = rr3_body_split(payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
     if ty != Rr3PayloadType::Event {
         return Err(format!("payload 类型非 Event: {ty:?}"));
     }
-    let v: Value = serde_json::from_slice(&body).map_err(|e| format!("事件体非 JSON: {e}"))?;
+    serde_json::from_slice(&body).map_err(|e| format!("事件体非 JSON: {e}"))
+}
+
+/// 四道门之三/四：topic 门 + 字段门（format/rate/seq/ms/pcm_b64），返回
+/// (采样率, b64 载荷)。字段检查次序即报错次序（首缺即点名）。
+fn rr3_evt_fields(v: &Value) -> Result<(u32, &str), String> {
     if v.get("topic").and_then(Value::as_str) != Some(RR3_AUDIO_TOPIC) {
         return Err(format!(
             "topic 非 {}: {:?}",
@@ -315,6 +323,16 @@ fn rr3_esp32_evt_parse(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3Esp32AudioC
         .get("pcm_b64")
         .and_then(Value::as_str)
         .ok_or("缺 pcm_b64")?;
+    Ok((rate, b64))
+}
+
+/// Event 帧解析（四道门全过才 Ok，任一失败 Err 点名——与板侧 frame_recv 同款
+/// fail-closed 口径；与 tools/rr3-audio-rec `parse_audio_event` 同值锚定）：
+/// dst=宿主门 → payload Event 类型门 → topic 门 → 字段/b64 门。
+fn rr3_esp32_evt_parse(hdr: &Rr3Header, payload: &[u8]) -> Result<Rr3Esp32AudioChunk, String> {
+    rr3_evt_dst(hdr)?;
+    let v = rr3_evt_body(payload)?;
+    let (rate, b64) = rr3_evt_fields(&v)?;
     let samples = rr3_base64_decode(b64).map_err(|e| format!("pcm_b64 解码失败: {e:?}"))?;
     Ok(Rr3Esp32AudioChunk { rate, samples })
 }
@@ -553,13 +571,9 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
             }
             // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
             // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
-            if ping_at.elapsed() >= RR3_PING_PERIOD {
-                ping_at = Instant::now();
-                if let Err(e) = c.write_all(b"\n") {
-                    eprintln!("rr-hal-esp32-audio: 心跳写出失败: {e} → 重连");
-                    conn = None;
-                    break;
-                }
+            if !rr3_ping(c, &mut ping_at) {
+                conn = None;
+                break;
             }
             // —— 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出
             // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
@@ -572,28 +586,13 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
                 conn = None;
                 break;
             }
-            match c.rr3_read_timeout(&mut raw, READ_TIMEOUT_MS) {
-                Err(e) => {
-                    eprintln!("rr-hal-esp32-audio: 读失败: {e} → 重连");
+            match rr3_read_step(c, &mut raw, &mut zeros, &mut seen) {
+                Rr3ReadStep::Reconnect => {
                     conn = None;
                     break;
                 }
-                Ok(0) => {
-                    // 此刻无数据（EOF 形状）；见过数据后连续零读 = 断流
-                    if seen {
-                        zeros += 1;
-                        if zeros >= RESYNC_ZERO_BAIL {
-                            eprintln!(
-                                "rr-hal-esp32-audio: 断流（连续 {RESYNC_ZERO_BAIL}×{READ_TIMEOUT_MS}ms 静默）→ 重连"
-                            );
-                            conn = None;
-                            break;
-                        }
-                    }
-                }
-                Ok(n) => {
-                    zeros = 0;
-                    seen = true;
+                Rr3ReadStep::Data(0) => {}
+                Rr3ReadStep::Data(n) => {
                     // 批N12 件二：宿主读面原始字节 tee（拆帧前镜像——批N10 件二
                     // 病灶"帧内尾随残渣"的取证层，tee 流与消费流逐字节一致）
                     rr3_tee_write(&mut tee, &raw[..n]);
@@ -606,6 +605,60 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     // 收兵：板面停流（防御残流），conn 释放 → flock 退账
     if let Some(mut c) = conn {
         let _ = c.write_all(b"AUDIO OFF\n");
+    }
+}
+
+/// 宿主心跳到点一拍（A9.3）：`true` = 本拍无心跳或写成功；`false` = 写失败
+/// （已点名，连接不可用）。空行不是协议命令，新旧固件都静默忽略。
+fn rr3_ping(c: &mut Rr3UartConn, at: &mut Instant) -> bool {
+    if at.elapsed() < RR3_PING_PERIOD {
+        return true;
+    }
+    *at = Instant::now();
+    if let Err(e) = c.write_all(b"\n") {
+        eprintln!("rr-hal-esp32-audio: 心跳写出失败: {e} → 重连");
+        return false;
+    }
+    true
+}
+
+/// 读一拍裁决：`Data(n)` = 读到 n 字节（n=0 即本拍无数据）；`Reconnect` =
+/// 读失败或见过数据后连续静默达阈值（均已点名，调用方报废连接重开）。
+enum Rr3ReadStep {
+    Data(usize),
+    Reconnect,
+}
+
+/// 会话内读一拍：超时窗口裸读 + 零读计数/断流判据（计数与 `seen` 跨拍保留）。
+fn rr3_read_step(
+    c: &mut Rr3UartConn,
+    raw: &mut [u8],
+    zeros: &mut u32,
+    seen: &mut bool,
+) -> Rr3ReadStep {
+    match c.rr3_read_timeout(raw, READ_TIMEOUT_MS) {
+        Err(e) => {
+            eprintln!("rr-hal-esp32-audio: 读失败: {e} → 重连");
+            Rr3ReadStep::Reconnect
+        }
+        Ok(0) => {
+            // 此刻无数据（EOF 形状）；见过数据后连续零读 = 断流
+            if *seen {
+                *zeros += 1;
+                if *zeros >= RESYNC_ZERO_BAIL {
+                    eprintln!(
+                        "rr-hal-esp32-audio: 断流（连续 {RESYNC_ZERO_BAIL}×{READ_TIMEOUT_MS}ms 静默）→ 重连"
+                    );
+                    return Rr3ReadStep::Reconnect;
+                }
+            }
+            Rr3ReadStep::Data(0)
+        }
+        Ok(n) => {
+            *zeros = 0;
+            *seen = true;
+            Rr3ReadStep::Data(n)
+        }
     }
 }
 
