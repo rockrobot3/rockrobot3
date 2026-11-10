@@ -160,41 +160,50 @@ fn rr3_pub_forward(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str) {
 /// battery/ok（旗本就没置）不重复广播。battery/low|ok 本身照常已转发，兜底是
 /// 额外动作，不截断事件流。
 fn rr3_pub_batt(ctx: &Rr3ConnCtx, topic: &str, parsed: &Value) {
+    let Some((edge, percent, voltage_mv, n)) = rr3_pub_power_latch(ctx, topic, parsed) else {
+        return;
+    };
     if topic == RR3_BATTERY_LOW_TOPIC {
-        let rising = rr3_lock(&ctx.shared).rr3_reg_lp_raise();
-        if rising {
-            let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
-            let voltage_mv = parsed
-                .get("voltage_mv")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-                &crate::daemon::rr3_power_frame("battery-low", percent, voltage_mv),
-                rr_bus::RR3_TASK_RRD,
-            );
+        if edge {
             rr3_log(&format!(
                 "低电兜底触发：battery/low percent={percent} voltage_mv={voltage_mv} → 置全局低电旗、停止新 spawn，广播 rr3-runtime/system/power 到 {n} 个连接"
             ));
         } else {
             rr3_log("低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）");
         }
-    } else if topic == RR3_BATTERY_OK_TOPIC {
-        let falling = rr3_lock(&ctx.shared).rr3_reg_lp_lower();
-        if falling {
-            let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
-            let voltage_mv = parsed
-                .get("voltage_mv")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
-                &crate::daemon::rr3_power_frame("battery-ok", percent, voltage_mv),
-                rr_bus::RR3_TASK_RRD,
-            );
-            rr3_log(&format!(
-                "低电兜底解除：battery/ok percent={percent} voltage_mv={voltage_mv} → 清全局低电旗、恢复新 spawn，广播 rr3-runtime/system/power(reason=battery-ok) 到 {n} 个连接"
-            ));
-        } else {
-            rr3_log("低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）");
-        }
+    } else if edge {
+        rr3_log(&format!(
+            "低电兜底解除：battery/ok percent={percent} voltage_mv={voltage_mv} → 清全局低电旗、恢复新 spawn，广播 rr3-runtime/system/power(reason=battery-ok) 到 {n} 个连接"
+        ));
+    } else {
+        rr3_log("低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）");
     }
+}
+
+/// 低电两沿的共用机制（置旗/清旗的镜像两份只留一份）：取读数 → 旗动作
+/// （恰在沿上返回 true）→ 沿上广播 system/power。返回 `None` = 非低电主题；
+/// 非沿上返回 n=0（无广播），留痕措辞归调用侧的沿语义（两沿文案不同）。
+fn rr3_pub_power_latch(
+    ctx: &Rr3ConnCtx,
+    topic: &str,
+    parsed: &Value,
+) -> Option<(bool, u64, u64, usize)> {
+    let (reason, edge) = match topic {
+        RR3_BATTERY_LOW_TOPIC => ("battery-low", rr3_lock(&ctx.shared).rr3_reg_lp_raise()),
+        RR3_BATTERY_OK_TOPIC => ("battery-ok", rr3_lock(&ctx.shared).rr3_reg_lp_lower()),
+        _ => return None,
+    };
+    let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
+    let voltage_mv = parsed
+        .get("voltage_mv")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if !edge {
+        return Some((false, percent, voltage_mv, 0));
+    }
+    let n = rr3_lock(&ctx.shared).rr3_reg_fanout(
+        &crate::daemon::rr3_power_frame(reason, percent, voltage_mv),
+        rr_bus::RR3_TASK_RRD,
+    );
+    Some((true, percent, voltage_mv, n))
 }
