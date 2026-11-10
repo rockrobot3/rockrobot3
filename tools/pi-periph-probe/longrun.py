@@ -41,6 +41,22 @@ MOVE_RE = re.compile(r"OK (pan|tilt)=(\d+)")
 
 parse_errors = 0
 crc_bad = 0
+# CRC 不符分两类（本轮 30min 长跑 5 例的分类取证）：
+#   真帧坏 = body[2:] 仍是合法 JSON（帧头可信、载荷字节被改）→ 线面传输损坏；
+#   失步伪帧 = body 不是 JSON（帧头是 b64 载荷里偶然撞到的 MAGIC）→ 探针侧丢帧
+#   后的重扫伪命中，不是线面故障。
+crc_frame = []   # (t_s, plen) 真帧坏
+crc_sync = []    # (t_s, plen) 失步伪帧
+T0 = time.time()
+
+
+def _body_is_json(body):
+    """CRC 失败时的帧头可信度判据：body[2:] 解出含 pcm_b64 的 JSON = 真帧（载荷被改）。"""
+    try:
+        v = json.loads(body[2:])
+        return isinstance(v, dict) and "pcm_b64" in v
+    except Exception:
+        return False
 
 
 def parse_pcm_stream(buf):
@@ -64,6 +80,10 @@ def parse_pcm_stream(buf):
         declared = int.from_bytes(buf[i + OFF_CRC32:i + OFF_CRC32 + 4], "little")
         if declared != (zlib.crc32(body) & 0xFFFF_FFFF):
             crc_bad += 1
+            if _body_is_json(body):
+                crc_frame.append((round(time.time() - T0, 1), plen))
+            else:
+                crc_sync.append((round(time.time() - T0, 1), plen))
         else:
             try:
                 v = json.loads(body[2:])
@@ -157,7 +177,11 @@ def main():
     final = line(fd, "INFO", 0.5, buf)
     m = INFO_RE.search(final.replace("\r\n", " "))
     print("=== 结算（全部为**增量**口径）===")
-    print(f"  探针解析音频帧 {frames}，CRC 不符 {crc_bad}，解析失败 {parse_errors}")
+    print(f"  探针解析音频帧 {frames}，CRC 不符 {crc_bad}（真帧坏 {len(crc_frame)} / 失步伪帧 {len(crc_sync)}），解析失败 {parse_errors}")
+    if crc_frame:
+        print(f"  真帧坏事件(t,plen)前 8: {crc_frame[:8]}")
+    if crc_sync:
+        print(f"  失步伪帧事件(t,plen)前 8: {crc_sync[:8]}")
     print(f"  动作 {moves_sent} 条 ack 缺失 {ack_miss}，INFO {info_n} 次")
     verdict = []
     if m:
@@ -173,8 +197,10 @@ def main():
             verdict.append(f"✗ 作业/应答丢失 job={e_job - b_job} reply={e_reply - b_reply}")
         if e_drop - b_drop:
             verdict.append(f"✗ 音频背压丢弃 {e_drop - b_drop}")
-        if crc_bad:
-            verdict.append(f"✗ 线面 CRC 不符 {crc_bad}（传输损坏）")
+        if crc_frame:
+            verdict.append(f"✗ 线面 CRC 不符 {len(crc_frame)}（真帧载荷损坏）")
+        if crc_sync:
+            print(f"  （失步伪帧 {len(crc_sync)}：丢帧后重扫撞 b64 内 MAGIC，探针侧记账）")
         if parse_errors:
             verdict.append(f"✗ CRC 过但解析失败 {parse_errors}（组帧面疑点）")
         # 探针 RX 消化差额（帧头被 RX 停顿打断而跳帧 + 流尾截断片）：<1% 记仪器
