@@ -18,6 +18,12 @@
 //! 再 chmod"在外部注入路径（父目录非 0700，如运维指定 `/data/rr3`）下留了
 //! 同机他用户读 tmp 的窗口，崩溃残留时更是长期可读；敏感面（模型凭据 0600）
 //! 由此不再依赖父目录护城河。非敏感面经 [`rr3_atomic_store`] 沿用 0644 档。
+//!
+//! 独占建语义：tmp 一律先清残留再 `create_new` 建（[`rr3_stage_excl`]）——
+//! `create+truncate` 式开文件会跟着同机攻击者预置的符号链接写穿到链接目标
+//! （root 侧写口 = 任意文件截断器）；独占建把"清→建"之间的换链竞态变成建失败
+//! 而非写穿，崩溃残留也不再挡下一次写。
+//!
 //! 调用方清单（改动须同批过本注释）：
 //! - `rrd/src/counters.rs`：运维计数账（R26 合并写窗口尾 flush）
 //! - `rrd/src/axis.rs`：执行件标定档案（§4.4"不许出现第二条写路径"）
@@ -39,22 +45,40 @@ pub fn rr3_atomic_store(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), Stri
     rr3_store_perm(path, tmp, body, 0o644)
 }
 
+/// 独占建 tmp（机制单点）：先清上次崩溃残留，再 `create_new` 建——清与建之间
+/// 被换成符号链接时建直接失败（`AlreadyExists`），绝不跟链写穿。建时即定权
+/// （unix `mode`；非 unix 忽略），避免"建后 chmod"的读窗口。
+fn rr3_tmp_open(tmp: &Path, mode: u32) -> std::io::Result<File> {
+    let _ = std::fs::remove_file(tmp);
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut opt = std::fs::OpenOptions::new();
+    opt.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opt.mode(mode);
+    }
+    opt.open(tmp)
+}
+
+/// 两段式写的候选落盘（独占建 + 写全量，不 fsync 不 rename）：调用方要
+/// "先落候选 → 过全判据 → 再原子换"时用（域写口的装载链预核、轴档案候选）。
+/// 与 [`rr3_store_perm`] 同一独占建语义，候选档同样不给符号链接写穿面。
+pub fn rr3_stage_excl(tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> {
+    let mut f = rr3_tmp_open(tmp, mode).map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
+    f.write_all(body)
+        .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
+    f.flush()
+        .map_err(|e| format!("刷 {} 失败: {e}", tmp.display()))
+}
+
 /// 原子写序（显式权限版）：tmp **建时即**以 `mode` 落盘（unix；非 unix 忽略
 /// `mode`），rename 原子替换后目标继承 tmp 权限——敏感面无须再二次 chmod。
 pub fn rr3_store_perm(path: &Path, tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> {
-    #[cfg(not(unix))]
-    let _ = mode;
     {
-        let mut opt = std::fs::OpenOptions::new();
-        opt.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opt.mode(mode);
-        }
-        let mut f = opt
-            .open(tmp)
-            .map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
+        let mut f =
+            rr3_tmp_open(tmp, mode).map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
         f.write_all(body)
             .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
         f.sync_all()
@@ -94,6 +118,49 @@ mod tests {
         rr3_atomic_store(&path, &tmp, b"{\"v\":2}").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"{\"v\":2}");
         assert!(!tmp.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// tmp 位预置符号链接不许写穿：清残留后独占建新档，受害文件原封——root 侧
+    /// 写口不得因同机可写目录里的链接变成任意文件截断器。
+    #[cfg(unix)]
+    #[test]
+    fn store_does_not_follow_tmp_symlink() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("rr3-persist-link-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let victim = dir.join("victim.txt");
+        std::fs::write(&victim, "untouched").unwrap();
+        let path = dir.join("t.json");
+        let tmp = dir.join("t.json.tmp");
+        symlink(&victim, &tmp).unwrap();
+        rr3_atomic_store(&path, &tmp, b"{\"v\":1}").expect("独占建应换掉链接而不是写穿");
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "untouched",
+            "链接目标不许被写"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"v\":1}");
+        assert!(!tmp.exists(), "rename 后 tmp 不残留");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 两段式候选落盘：独占建 + 定权（0600），残留链接同样被换掉不写穿。
+    #[cfg(unix)]
+    #[test]
+    fn stage_excl_is_symlink_safe_and_mode_restricted() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = std::env::temp_dir().join(format!("rr3-persist-stage-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let victim = dir.join("victim.txt");
+        std::fs::write(&victim, "untouched").unwrap();
+        let link = dir.join("candidate.toml");
+        symlink(&victim, &link).unwrap();
+        rr3_stage_excl(&link, b"body", 0o600).expect("独占建必成");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "untouched");
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "body");
+        let mode = std::fs::metadata(&link).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "候选档只许属主读写");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
