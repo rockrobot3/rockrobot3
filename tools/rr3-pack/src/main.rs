@@ -102,6 +102,37 @@ fn rr3_need(args: &[String], i: usize, flag: &str) -> Result<String, String> {
     }
 }
 
+/// 单选项步进：值选项消费两槽、开关消费一槽；返回消费的槽数。
+fn pack_arg(cfg: &mut Rr3PackConfig, args: &[String], i: usize) -> Result<usize, String> {
+    match args[i].as_str() {
+        "--payload" => {
+            cfg.payload = PathBuf::from(rr3_need(args, i, "--payload")?);
+            Ok(2)
+        }
+        "--repo" => {
+            cfg.repo = PathBuf::from(rr3_need(args, i, "--repo")?);
+            Ok(2)
+        }
+        "--out" => {
+            cfg.out = PathBuf::from(rr3_need(args, i, "--out")?);
+            Ok(2)
+        }
+        "--profile" => {
+            cfg.profile = rr3_need(args, i, "--profile")?;
+            Ok(2)
+        }
+        "--arch" => {
+            cfg.arch = rr3_need(args, i, "--arch")?;
+            Ok(2)
+        }
+        "--stage-only" => {
+            cfg.stage_only = true;
+            Ok(1)
+        }
+        other => Err(format!("未知选项 {other}\n{}", usage())),
+    }
+}
+
 /// 解析参数。必给项缺席 / 未知选项一律报错带用法，不静默回落（fail-closed）。
 pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
     let mut cfg = Rr3PackConfig {
@@ -114,38 +145,12 @@ pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
     };
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--payload" => {
-                cfg.payload = PathBuf::from(rr3_need(args, i, "--payload")?);
-                i += 2;
-            }
-            "--repo" => {
-                cfg.repo = PathBuf::from(rr3_need(args, i, "--repo")?);
-                i += 2;
-            }
-            "--out" => {
-                cfg.out = PathBuf::from(rr3_need(args, i, "--out")?);
-                i += 2;
-            }
-            "--profile" => {
-                cfg.profile = rr3_need(args, i, "--profile")?;
-                i += 2;
-            }
-            "--arch" => {
-                cfg.arch = rr3_need(args, i, "--arch")?;
-                i += 2;
-            }
-            "--stage-only" => {
-                cfg.stage_only = true;
-                i += 1;
-            }
-            other => return Err(format!("未知选项 {other}\n{}", usage())),
-        }
+        i += pack_arg(&mut cfg, args, i)?;
     }
-    if cfg.payload.as_os_str().is_empty()
-        || cfg.repo.as_os_str().is_empty()
-        || cfg.out.as_os_str().is_empty()
-    {
+    let missing = [&cfg.payload, &cfg.repo, &cfg.out]
+        .iter()
+        .any(|p| p.as_os_str().is_empty());
+    if missing {
         return Err(format!("--payload/--repo/--out 三者必给\n{}", usage()));
     }
     Ok(cfg)
