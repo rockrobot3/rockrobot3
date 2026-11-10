@@ -62,7 +62,7 @@ pub use bindings::{
 pub use evidence::{rr3_evidence_ref_ok, rr3_evidence_verify};
 pub use framing::{Assembled, FrameAssembler, RR3_FRAMING_PLEN_CAP_DEFAULT, RR3_MAGIC_LE};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use persist::{rr3_atomic_store, rr3_atomic_store_perm};
+pub use persist::{rr3_atomic_store, rr3_store_perm};
 pub use protocol::b64::{rr3_base64_decode, rr3_base64_encode, Rr3Base64Error};
 pub use protocol::body::{rr3_body_encode, rr3_body_split, Rr3BodyError, RR3_BODY_TYPE_PREFIX_LEN};
 pub use protocol::header::{

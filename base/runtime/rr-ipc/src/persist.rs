@@ -13,7 +13,7 @@
 //! 最低公共依赖层（evidence 先例同径），故原样迁此，rrd 侧 re-export 保持
 //! 既有调用点（counters/axis）零改动。
 //!
-//! 权限语义：**tmp 建时即定权**（[`rr3_atomic_store_perm`]，unix `mode` 经
+//! 权限语义：**tmp 建时即定权**（[`rr3_store_perm`]，unix `mode` 经
 //! `OpenOptions::mode` 落位）——旧序"`File::create` 0644 建 tmp、rename 后
 //! 再 chmod"在外部注入路径（父目录非 0700，如运维指定 `/data/rr3`）下留了
 //! 同机他用户读 tmp 的窗口，崩溃残留时更是长期可读；敏感面（模型凭据 0600）
@@ -36,17 +36,12 @@ use std::string::String;
 /// 把错误交回调用方（daemon/conn 落日志点名，secrets 折 502 应答），不 panic
 /// 不重试——重试在窗口判据再次成立时自然发生（R26 合并写）。
 pub fn rr3_atomic_store(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), String> {
-    rr3_atomic_store_perm(path, tmp, body, 0o644)
+    rr3_store_perm(path, tmp, body, 0o644)
 }
 
 /// 原子写序（显式权限版）：tmp **建时即**以 `mode` 落盘（unix；非 unix 忽略
 /// `mode`），rename 原子替换后目标继承 tmp 权限——敏感面无须再二次 chmod。
-pub fn rr3_atomic_store_perm(
-    path: &Path,
-    tmp: &Path,
-    body: &[u8],
-    mode: u32,
-) -> Result<(), String> {
+pub fn rr3_store_perm(path: &Path, tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> {
     #[cfg(not(unix))]
     let _ = mode;
     {
@@ -112,7 +107,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("s.json");
         let tmp = dir.join("s.json.tmp");
-        rr3_atomic_store_perm(&path, &tmp, b"{\"k\":\"v\"}", 0o600).unwrap();
+        rr3_store_perm(&path, &tmp, b"{\"k\":\"v\"}", 0o600).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "敏感落盘须 0600");
         assert!(!tmp.exists());
