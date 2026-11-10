@@ -127,37 +127,42 @@ impl Rr3SlotTable {
         }
         let mut errs = Vec::new();
         for (name, entry) in &self.slots {
-            errs.extend(crate::validate::rr3_registry_check("capability", name));
-            if !RR3_SLOT_LAYERS.contains(&entry.layer.as_str()) {
-                errs.push(format!(
-                    "slot {name} 的 layer 非法: {}（只允许 {RR3_SLOT_LAYERS:?}）",
-                    entry.layer
-                ));
-            }
-            if entry.status.is_empty() {
-                errs.push(format!(
-                    "slot {name} 缺 status 登记（schema_version=2 起必有: {RR3_SLOT_STATUS:?}）"
-                ));
-            } else if !RR3_SLOT_STATUS.contains(&entry.status.as_str()) {
-                errs.push(format!(
-                    "slot {name} 的 status 非法: {}（只允许 {RR3_SLOT_STATUS:?}）",
-                    entry.status
-                ));
-            }
-            if entry.tier_scope.is_empty() {
-                errs.push(format!(
-                    "slot {name} 缺 tier_scope 登记（至少覆盖一个承载档: {RR3_SLOT_TIERS:?}）"
-                ));
-            }
-            for t in &entry.tier_scope {
-                if !RR3_SLOT_TIERS.contains(&t.as_str()) {
-                    errs.push(format!(
-                        "slot {name} 的 tier_scope 含非法档 {t}（只允许 {RR3_SLOT_TIERS:?}）"
-                    ));
-                }
-            }
+            rr3_slot_entry(name, entry, &mut errs);
         }
         errs
+    }
+}
+
+/// 单格判据：能力名规则 + layer/status/tier_scope 三域（空值与非册值分别点名）。
+fn rr3_slot_entry(name: &str, entry: &Rr3SlotEntry, errs: &mut Vec<String>) {
+    errs.extend(crate::validate::rr3_registry_check("capability", name));
+    if !RR3_SLOT_LAYERS.contains(&entry.layer.as_str()) {
+        errs.push(format!(
+            "slot {name} 的 layer 非法: {}（只允许 {RR3_SLOT_LAYERS:?}）",
+            entry.layer
+        ));
+    }
+    if entry.status.is_empty() {
+        errs.push(format!(
+            "slot {name} 缺 status 登记（schema_version=2 起必有: {RR3_SLOT_STATUS:?}）"
+        ));
+    } else if !RR3_SLOT_STATUS.contains(&entry.status.as_str()) {
+        errs.push(format!(
+            "slot {name} 的 status 非法: {}（只允许 {RR3_SLOT_STATUS:?}）",
+            entry.status
+        ));
+    }
+    if entry.tier_scope.is_empty() {
+        errs.push(format!(
+            "slot {name} 缺 tier_scope 登记（至少覆盖一个承载档: {RR3_SLOT_TIERS:?}）"
+        ));
+    }
+    for t in &entry.tier_scope {
+        if !RR3_SLOT_TIERS.contains(&t.as_str()) {
+            errs.push(format!(
+                "slot {name} 的 tier_scope 含非法档 {t}（只允许 {RR3_SLOT_TIERS:?}）"
+            ));
+        }
     }
 }
 
