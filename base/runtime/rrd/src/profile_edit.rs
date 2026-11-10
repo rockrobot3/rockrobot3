@@ -65,41 +65,8 @@ pub fn rr3_domain_apply(
     updates: &[(&str, &str)],
 ) -> Result<String, String> {
     let lines: Vec<String> = text.lines().map(str::to_string).collect();
-    // 块扫描（两段式）：先收块头行序号（`[` 起头行；[[supplies.domain]] 精确等值
-    // 才算域块头——GOOD 锚形状，装载期验收过的档保证），再按下一块头定界块行范围。
-    let heads: Vec<(usize, bool)> = lines
-        .iter()
-        .enumerate()
-        .filter_map(|(i, raw)| {
-            let t = raw.trim_start();
-            if t == "[[supplies.domain]]" {
-                Some((i, true))
-            } else if t.starts_with('[') {
-                Some((i, false))
-            } else {
-                None
-            }
-        })
-        .collect();
-    let mut matched: Vec<(usize, usize)> = Vec::new(); // 命中块行范围（头行+1 .. 下一块头）
-    for (idx, &(head_i, is_domain)) in heads.iter().enumerate() {
-        if !is_domain {
-            continue;
-        }
-        let end = heads.get(idx + 1).map(|&(h, _)| h).unwrap_or(lines.len());
-        let is_match = lines[head_i + 1..end].iter().any(|l| {
-            rr3_key_line_is(l, "name")
-                && l.split_once('=')
-                    // 域名是引号串（GOOD 形状），允许行内注释——取首对引号内内容
-                    .and_then(|(_, v)| v.trim().strip_prefix('"'))
-                    .and_then(|s| s.split_once('"'))
-                    .map(|(inner, _)| inner == domain)
-                    .unwrap_or(false)
-        });
-        if is_match {
-            matched.push((head_i + 1, end));
-        }
-    }
+    let heads = rr3_domain_heads(&lines);
+    let matched = rr3_domain_spans(&lines, &heads, domain);
     match matched.len() {
         0 => Err(format!(
             "域 {domain:?} 不在 [[supplies.domain]] 在册（缺域拒——新域是契约事件，不经写口注册）"
@@ -119,4 +86,52 @@ pub fn rr3_domain_apply(
             "域名 {domain:?} 命中 {n} 个 [[supplies.domain]] 块（装载期域名唯一判据破，档已病），拒绝手术"
         )),
     }
+}
+
+/// 块头行扫描（两段式之一）：`[` 起头行收序号，`[[supplies.domain]]` 精确等值
+/// 记为域块头（GOOD 锚形状，装载期验收过的档保证）；非块头行不入表。
+fn rr3_domain_heads(lines: &[String]) -> Vec<(usize, bool)> {
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, raw)| {
+            let t = raw.trim_start();
+            if t == "[[supplies.domain]]" {
+                Some((i, true))
+            } else if t.starts_with('[') {
+                Some((i, false))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// 块定界（两段式之二）：按下一块头定界块行范围，收 `name` 键值等于 `domain`
+/// 的域块（头行+1 .. 下一块头）。
+fn rr3_domain_spans(
+    lines: &[String],
+    heads: &[(usize, bool)],
+    domain: &str,
+) -> Vec<(usize, usize)> {
+    let mut matched: Vec<(usize, usize)> = Vec::new();
+    for (idx, &(head_i, is_domain)) in heads.iter().enumerate() {
+        if !is_domain {
+            continue;
+        }
+        let end = heads.get(idx + 1).map(|&(h, _)| h).unwrap_or(lines.len());
+        let is_match = lines[head_i + 1..end].iter().any(|l| {
+            rr3_key_line_is(l, "name")
+                && l.split_once('=')
+                    // 域名是引号串（GOOD 形状），允许行内注释——取首对引号内内容
+                    .and_then(|(_, v)| v.trim().strip_prefix('"'))
+                    .and_then(|s| s.split_once('"'))
+                    .map(|(inner, _)| inner == domain)
+                    .unwrap_or(false)
+        });
+        if is_match {
+            matched.push((head_i + 1, end));
+        }
+    }
+    matched
 }
