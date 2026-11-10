@@ -224,30 +224,7 @@ impl Dispatcher for Rr3ActDispatcher {
             )),
         };
         let (reply, state_angle, relay_applied) = outcome?;
-        // servo/state 限速流先于应答上路：被限速挡掉的发布不补发，
-        // 下一次命令自然携带最新角度（流是摘要不是逐拍镜像）
-        if let Some(angle) = state_angle {
-            if self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
-                self.servo_seq += 1;
-                bus.publish(
-                    servo::RR3_SERVO_STATE_TOPIC,
-                    rpc::rr3_servo_state_body(self.servo_seq, angle),
-                )?;
-            }
-        }
-        // relay/state 变化即发（0.0.5 批I A-7）：只在电平**真变**时续
-        // seq 并发布/计数——同态命令不产生状态帧（§9 不变量；
-        // counters 与发布同门，保持键值 = 实际翻转数）
-        if let Some((on, prev)) = relay_applied {
-            if relay::rr3_relay_state_due(prev, on) {
-                self.relay_seq += 1;
-                bus.counter_bump(relay::rr3_relay_count_key(on), 1);
-                bus.publish(
-                    relay::RR3_RELAY_STATE_TOPIC,
-                    rpc::rr3_relay_state_body(self.relay_seq, on),
-                )?;
-            }
-        }
+        self.rr3_pub_state(state_angle, relay_applied, bus)?;
         Ok(reply)
     }
 
@@ -302,6 +279,43 @@ impl Dispatcher for Rr3ActDispatcher {
             self.led_gpio
                 .set(level)
                 .unwrap_or_else(|e| eprintln!("rr3-act-led: 翻转写电平失败: {e}"));
+        }
+        Ok(())
+    }
+}
+
+impl Rr3ActDispatcher {
+    /// 状态摘要发布（顺序语义）：servo/state 受限速门节流，relay/state 仅在
+    /// 电平真变时发——两者都在应答之前上路，失败即上抛。
+    fn rr3_pub_state(
+        &mut self,
+        state_angle: Option<u16>,
+        relay_applied: Option<(bool, bool)>,
+        bus: &BusHandle,
+    ) -> Result<(), String> {
+        // servo/state 限速流先于应答上路：被限速挡掉的发布不补发，
+        // 下一次命令自然携带最新角度（流是摘要不是逐拍镜像）
+        if let Some(angle) = state_angle {
+            if self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
+                self.servo_seq += 1;
+                bus.publish(
+                    servo::RR3_SERVO_STATE_TOPIC,
+                    rpc::rr3_servo_state_body(self.servo_seq, angle),
+                )?;
+            }
+        }
+        // relay/state 变化即发（0.0.5 批I A-7）：只在电平**真变**时续
+        // seq 并发布/计数——同态命令不产生状态帧（§9 不变量；
+        // counters 与发布同门，保持键值 = 实际翻转数）
+        if let Some((on, prev)) = relay_applied {
+            if relay::rr3_relay_state_due(prev, on) {
+                self.relay_seq += 1;
+                bus.counter_bump(relay::rr3_relay_count_key(on), 1);
+                bus.publish(
+                    relay::RR3_RELAY_STATE_TOPIC,
+                    rpc::rr3_relay_state_body(self.relay_seq, on),
+                )?;
+            }
         }
         Ok(())
     }
