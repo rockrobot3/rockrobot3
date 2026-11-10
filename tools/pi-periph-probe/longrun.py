@@ -187,8 +187,13 @@ def main():
                 print(f"  （探针 RX 消化差额 {probe_loss}/{sent_delta} = {pct:.2f}%，<1% 记仪器限制）")
             elif probe_loss > 0:
                 verdict.append(f"✗ 探针侧丢帧 {probe_loss}/{sent_delta} = {pct:.2f}%")
-        if e_minfree < 96 * 1024:  # 已知健康水位 100352B，地板取 96KB 留余量
-            verdict.append(f"✗ min_free 新低 {e_minfree} < 96KB")
+        # min_free 是**开机以来**最低水位（单调不升），判据取增量口径：本轮刷新
+        # 历史低点才算堆水位退化；绝对门槛只在首跑（基线 ≥96KB）时有意义——
+        # 旧实现拿绝对值对 96KB，历史低点一旦跌破，此后每次长跑都永久 FAIL（仪器缺陷）。
+        if e_minfree < b_minfree:
+            verdict.append(f"✗ min_free 新低 {e_minfree} < 基线 {b_minfree}B（本轮压出更低水位，查堆）")
+        elif e_minfree < 96 * 1024:
+            print(f"  （min_free {e_minfree}B 低于 96KB 健康线：历史水位，本轮未刷新——记观察）")
         if last_move and last_move[0] == "PAN" and int(pan) != last_move[1]:
             verdict.append(f"✗ 末角漂移 pan={pan} ≠ {last_move[1]}")
         print("V5 结论:", "PASS" if not verdict else "；".join(verdict))
