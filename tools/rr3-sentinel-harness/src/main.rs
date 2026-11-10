@@ -557,36 +557,56 @@ fn rr3_parity_wait(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (Option<
 /// 读取/还原/形状/畸形违约点名后返回 None——此面不 exit，交由判据面记 FAIL）。
 fn rr3_parity_recv(conn: &mut Rr3UartConn) -> Option<Value> {
     loop {
-        let buf = match conn.rr3_recv_buf() {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("FAIL  parity 应答读取失败: {e:?}");
-                return None;
-            }
-        };
-        let frame = match Rr3Frame::try_from(buf) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("FAIL  parity 应答还原失败: {e:?}");
-                return None;
-            }
-        };
-        match parse_upstream(frame) {
-            Ok((Rr3PayloadType::Response, id, _, _, v)) if id == PARITY_CALL_ID => {
-                return v.get("result").cloned();
-            }
-            Ok((Rr3PayloadType::Request, _, _, _, _)) => continue, // 心跳并发到达，跳过再等
-            Ok((ty, id, m, _, _)) => {
-                eprintln!(
-                    "FAIL  parity 应答形状错: {ty:?}/id={id}/{}",
-                    m.as_deref().unwrap_or("-")
-                );
-                return None;
-            }
-            Err(e) => {
-                eprintln!("FAIL  parity 应答畸形: {e}");
-                return None;
-            }
+        let frame = rr3_parity_frame(conn)?;
+        match rr3_parity_verdict(frame) {
+            Rr3ParityStep::Hit(v) => return v,
+            Rr3ParityStep::Skip => continue,
+            Rr3ParityStep::Fail => return None,
+        }
+    }
+}
+
+/// parity 单帧读取与还原（失败点名后返回 None——此面不 exit）。
+fn rr3_parity_frame(conn: &mut Rr3UartConn) -> Option<Rr3Frame> {
+    let buf = match conn.rr3_recv_buf() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("FAIL  parity 应答读取失败: {e:?}");
+            return None;
+        }
+    };
+    match Rr3Frame::try_from(buf) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            eprintln!("FAIL  parity 应答还原失败: {e:?}");
+            None
+        }
+    }
+}
+
+/// parity 单帧裁决：id 匹配 Response = 命中；并发心跳 Request = 跳过；其余点名即失败。
+enum Rr3ParityStep {
+    Hit(Option<Value>),
+    Skip,
+    Fail,
+}
+
+fn rr3_parity_verdict(frame: Rr3Frame) -> Rr3ParityStep {
+    match parse_upstream(frame) {
+        Ok((Rr3PayloadType::Response, id, _, _, v)) if id == PARITY_CALL_ID => {
+            Rr3ParityStep::Hit(v.get("result").cloned())
+        }
+        Ok((Rr3PayloadType::Request, _, _, _, _)) => Rr3ParityStep::Skip,
+        Ok((ty, id, m, _, _)) => {
+            eprintln!(
+                "FAIL  parity 应答形状错: {ty:?}/id={id}/{}",
+                m.as_deref().unwrap_or("-")
+            );
+            Rr3ParityStep::Fail
+        }
+        Err(e) => {
+            eprintln!("FAIL  parity 应答畸形: {e}");
+            Rr3ParityStep::Fail
         }
     }
 }
