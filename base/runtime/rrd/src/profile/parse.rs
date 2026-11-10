@@ -410,7 +410,10 @@ fn rr3_runtime_parse(root: &toml::Value, errs: &mut Vec<String>) -> Rr3RuntimePa
             .push("缺少 [runtime]（rrd 运行参数；schema_version=5 起必填，批N5 件二）".to_string()),
         Some(t) => {
             match t.get("log_ring_cap").and_then(toml::Value::as_integer) {
-                Some(v) if v > 0 => out.log_ring_cap = v as usize,
+                Some(v) if v > 0 && v <= RR3_LOG_CAP_MAX => out.log_ring_cap = v as usize,
+                Some(v) if v > 0 => errs.push(format!(
+                    "runtime.log_ring_cap = {v} 超上界 {RR3_LOG_CAP_MAX}（日志环按行常驻内存，超界会随日志量吃光板载内存）"
+                )),
                 Some(v) => errs.push(format!(
                     "runtime.log_ring_cap = {v} 须为正整数（日志环容量，0 = 运维留痕无环）"
                 )),
