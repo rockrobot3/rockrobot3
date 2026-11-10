@@ -156,7 +156,13 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
 /// 顶面三事（B10 自 plat_parse 抽出）：七键封闭、schema_version=1、
 /// platform 非空——点名文案逐字保留。
 fn rr3_plat_head(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    // 顶层未知键点名（只认七键）
+    rr3_plat_keys(t, errs);
+    rr3_plat_ver(t, errs);
+    rr3_plat_name(t, table, errs);
+}
+
+/// 顶层七键封闭（未知键点名，文案逐字保留）。
+fn rr3_plat_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
         if ![
             "schema_version",
@@ -174,14 +180,20 @@ fn rr3_plat_head(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
             ));
         }
     }
-    // schema_version：平台表自己的版本域（当前 1；破坏性变更才 bump）
+}
+
+/// schema_version：平台表自己的版本域（当前 1；破坏性变更才 bump）。
+fn rr3_plat_ver(t: &toml::Table, errs: &mut Vec<String>) {
     match t.get("schema_version") {
         Some(Value::Integer(1)) => {}
         Some(Value::Integer(v)) => errs.push(format!("平台表 schema_version 必须为 1，收到 {v}")),
         Some(other) => errs.push(format!("平台表 schema_version 应为整数，收到 {other:?}")),
         None => errs.push("平台表缺 schema_version（必须为 1）".into()),
     }
-    // platform：非空字符串（与 profiles [platform] 的平台标识同源，§4.6）
+}
+
+/// platform：非空字符串（与 profiles [platform] 的平台标识同源，§4.6）。
+fn rr3_plat_name(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     match t.get("platform") {
         Some(Value::String(s)) if !s.trim().is_empty() => table.platform = s.clone(),
         Some(Value::String(_)) => errs.push("平台表 platform 不得为空串".into()),
@@ -522,45 +534,56 @@ fn rr3_conf_members(
 
 /// `[construction]` 段：`controller:role:instance` 三元键，controller 须本表在册。
 fn rr3_plat_cons(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match t.get("construction") {
-        Some(Value::Table(cons)) => {
-            for (k, v) in cons {
-                let segs: Vec<&str> = k.split(':').collect();
-                if segs.len() != 3 {
-                    errs.push(format!(
-                        "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
-                    ));
-                    continue;
-                }
-                if segs[0].is_empty() || segs[1].is_empty() {
-                    errs.push(format!(
-                        "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
-                    ));
-                    continue;
-                }
-                if !table.controllers.contains_key(segs[0]) {
-                    errs.push(format!(
-                        "construction 键 \"{k}\" 的 controller 段 {} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）",
-                        segs[0]
-                    ));
-                    continue;
-                }
-                match v.as_str() {
-                    Some(p) if !p.trim().is_empty() => {
-                        table.construction.insert(k.clone(), p.to_string());
-                    }
-                    Some(_) => errs.push(format!("construction[\"{k}\"] 构造路径不得为空串")),
-                    None => errs.push(format!(
-                        "construction[\"{k}\"] 应为字符串（平台侧构造路径，§4.5），收到 {v:?}"
-                    )),
-                }
-            }
+    let cons = match t.get("construction") {
+        Some(Value::Table(cons)) => cons,
+        Some(other) => {
+            errs.push(format!(
+                "平台表 construction 应为表（[construction]），收到 {other:?}"
+            ));
+            return;
         }
-        Some(other) => errs.push(format!(
-            "平台表 construction 应为表（[construction]），收到 {other:?}"
+        None => {
+            errs.push(
+                "平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into(),
+            );
+            return;
+        }
+    };
+    for (k, v) in cons {
+        rr3_cons_item(k, v, table, errs);
+    }
+}
+
+/// 单条 construction：三元键（controller/role 非空、controller 在册）+ 非空路径。
+fn rr3_cons_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
+    let segs: Vec<&str> = k.split(':').collect();
+    if segs.len() != 3 {
+        errs.push(format!(
+            "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
+        ));
+        return;
+    }
+    if segs[0].is_empty() || segs[1].is_empty() {
+        errs.push(format!(
+            "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
+        ));
+        return;
+    }
+    if !table.controllers.contains_key(segs[0]) {
+        errs.push(format!(
+            "construction 键 \"{k}\" 的 controller 段 {} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）",
+            segs[0]
+        ));
+        return;
+    }
+    match v.as_str() {
+        Some(p) if !p.trim().is_empty() => {
+            table.construction.insert(k.to_string(), p.to_string());
+        }
+        Some(_) => errs.push(format!("construction[\"{k}\"] 构造路径不得为空串")),
+        None => errs.push(format!(
+            "construction[\"{k}\"] 应为字符串（平台侧构造路径，§4.5），收到 {v:?}"
         )),
-        None => errs
-            .push("平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into()),
     }
 }
 
