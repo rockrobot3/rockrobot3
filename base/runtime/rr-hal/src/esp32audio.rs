@@ -381,14 +381,22 @@ struct Rr3Esp32AudioCore {
     reconnects: AtomicU64,
 }
 
-/// 断流重连（永不放弃）：歇口 → [`HANDSHAKE_TRIES`] 轮逐次**重开 fd** + 握手
+/// 断连重连（永不放弃）：歇口 → [`HANDSHAKE_TRIES`] 轮逐次**重开 fd** + 握手
 /// （宿主侧 USB RX 冻结唯一捅法）；全败外层循环续轮。stop 置位即收兵回 None。
+///
+/// 打点节流（2026-11-10 B26 静态审计）：板长期不在位时每轮 10 次失败会按 3s
+/// 周期刷屏（rrd 日志面持续增长、现场排障被噪声淹没）。首败必打、其后每
+/// [`RR3_RECON_LOG_EVERY`] 次失败一条；轮摘要每 [`RR3_RECON_ROUND_LOG_EVERY`]
+/// 轮一条；重连成功必打（恢复事实不能漏）。状态机与重试次数零改动。
 fn rr3_esp32_reconnect(core: &Rr3Esp32AudioCore) -> Option<Rr3UartConn> {
+    let mut fails: u64 = 0;
+    let mut round: u64 = 0;
     loop {
         if core.stop.load(Ordering::Acquire) {
             return None;
         }
         std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
+        round += 1;
         for attempt in 1..=HANDSHAKE_TRIES {
             if core.stop.load(Ordering::Acquire) {
                 return None;
@@ -400,15 +408,31 @@ fn rr3_esp32_reconnect(core: &Rr3Esp32AudioCore) -> Option<Rr3UartConn> {
                     return Some(c);
                 }
                 Err(e) => {
-                    eprintln!("rr-hal-esp32-audio: 重连第 {attempt}/{HANDSHAKE_TRIES} 轮失败: {e}")
+                    fails += 1;
+                    if rr3_recon_log_now(fails) {
+                        eprintln!(
+                            "rr-hal-esp32-audio: 重连第 {attempt}/{HANDSHAKE_TRIES} 轮失败（累计 {fails} 次）: {e}"
+                        );
+                    }
                 }
             }
             std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
         }
-        eprintln!(
-            "rr-hal-esp32-audio: 重连 {HANDSHAKE_TRIES} 轮全败，继续循环（常驻源不放弃；饥饿期消费面走 pcm_empty_frames 记账）"
-        );
+        if round % RR3_RECON_ROUND_LOG_EVERY == 0 {
+            eprintln!(
+                "rr-hal-esp32-audio: 重连 {HANDSHAKE_TRIES} 轮全败（第 {round} 轮），继续循环（常驻源不放弃；饥饿期消费面走 pcm_empty_frames 记账）"
+            );
+        }
     }
+}
+
+/// 重连失败打点判据：首败必打，其后每 [`RR3_RECON_LOG_EVERY`] 次一条。
+const RR3_RECON_LOG_EVERY: u64 = 100;
+/// 轮摘要打点周期（轮）。
+const RR3_RECON_ROUND_LOG_EVERY: u64 = 5;
+
+fn rr3_recon_log_now(fails: u64) -> bool {
+    fails == 1 || fails % RR3_RECON_LOG_EVERY == 0
 }
 
 /// 取证 tee 开关 env（批N12 件二，批N10 件二定案"原始流 tee 双录板面/宿主读面"
@@ -903,6 +927,17 @@ mod tests {
             channels: RR3_ESP32_AUDIO_CHANNELS,
             bit_depth: 16,
         }
+    }
+
+    /// 重连失败打点节流：首败必打，其后每 100 次一条（板长期不在位不刷屏）。
+    #[test]
+    fn recon_log_is_rate_limited() {
+        assert!(rr3_recon_log_now(1));
+        assert!(!rr3_recon_log_now(2));
+        assert!(!rr3_recon_log_now(99));
+        assert!(rr3_recon_log_now(100));
+        assert!(!rr3_recon_log_now(101));
+        assert!(rr3_recon_log_now(1000));
     }
 
     /// 构造一条与板面 mic.rs 同形的 Event 帧（seal/还原链路与收流端同源 rr-ipc；
