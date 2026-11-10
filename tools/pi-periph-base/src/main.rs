@@ -24,6 +24,7 @@ mod servo;
 #[path = "../../esp32-periph-base/src/topics_gen.rs"]
 mod topics_gen;
 
+use std::str::SplitWhitespace;
 use std::time::Duration;
 
 use periph_mech::periph_core::{rr3_servo_gate, rr3_slew_steps, Rr3ServoCore};
@@ -362,50 +363,57 @@ impl Board {
 
     fn handle_face(&mut self, args: &Value) -> Result<Value, String> {
         if let Some(v) = args.get("expression") {
-            let expr = v
-                .as_str()
-                .ok_or_else(|| format!("expression 非法: {v}（须字符串）"))?;
-            if !RR3_FACE_EXPRS.contains(&expr) {
-                return Err(format!("expression 不在白名单: \"{expr}\""));
-            }
-            let base = expr_eye_base(expr);
-            // 先渲染后提交状态：渲染失败不污染内部视图（效应确认才记账，
-            // 否则状态报"已生效"而屏幕未变，排障时视图与现场不一致）
-            self.oled
-                .capsules(base)
-                .map_err(|e| format!("OLED 表情渲染失败: {e}"))?;
-            let previous = std::mem::replace(&mut self.state.prev_expr, expr.to_string());
-            self.state.base = base;
-            self.state.expr_mode = true;
-            self.state.frame_mode = false;
-            Ok(json!({ "expression": expr, "previous": previous }))
+            self.expr_apply(v)
         } else if let Some(v) = args.get("frame") {
-            let arr = v
-                .as_array()
-                .ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
-            if arr.len() != 8 {
-                return Err(format!("frame 长度非法: {}（须 8）", arr.len()));
-            }
-            let mut f = [0u8; 8];
-            for (i, item) in arr.iter().enumerate() {
-                let b = item
-                    .as_u64()
-                    .ok_or_else(|| format!("frame[{i}] 非法: {item}"))?;
-                if b > 255 {
-                    return Err(format!("frame[{i}] 超 u8: {b}"));
-                }
-                f[i] = b as u8;
-            }
-            // 同上：点阵上屏成功后才切换模式
-            self.oled
-                .frame(&f)
-                .map_err(|e| format!("OLED 点阵渲染失败: {e}"))?;
-            self.state.frame_mode = true;
-            self.state.expr_mode = false;
-            Ok(json!({ "applied": true }))
+            self.frame_apply(v)
         } else {
             Err("缺 expression/frame 之一".into())
         }
+    }
+
+    /// 表情臂：白名单门 → 渲染 → 提交状态（先渲染后提交：渲染失败不污染视图）。
+    fn expr_apply(&mut self, v: &Value) -> Result<Value, String> {
+        let expr = v
+            .as_str()
+            .ok_or_else(|| format!("expression 非法: {v}（须字符串）"))?;
+        if !RR3_FACE_EXPRS.contains(&expr) {
+            return Err(format!("expression 不在白名单: \"{expr}\""));
+        }
+        let base = expr_eye_base(expr);
+        self.oled
+            .capsules(base)
+            .map_err(|e| format!("OLED 表情渲染失败: {e}"))?;
+        let previous = std::mem::replace(&mut self.state.prev_expr, expr.to_string());
+        self.state.base = base;
+        self.state.expr_mode = true;
+        self.state.frame_mode = false;
+        Ok(json!({ "expression": expr, "previous": previous }))
+    }
+
+    /// 点阵臂：8 字节帧门 → 上屏 → 提交状态（同上，上屏成功才切模式）。
+    fn frame_apply(&mut self, v: &Value) -> Result<Value, String> {
+        let arr = v
+            .as_array()
+            .ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
+        if arr.len() != 8 {
+            return Err(format!("frame 长度非法: {}（须 8）", arr.len()));
+        }
+        let mut f = [0u8; 8];
+        for (i, item) in arr.iter().enumerate() {
+            let b = item
+                .as_u64()
+                .ok_or_else(|| format!("frame[{i}] 非法: {item}"))?;
+            if b > 255 {
+                return Err(format!("frame[{i}] 超 u8: {b}"));
+            }
+            f[i] = b as u8;
+        }
+        self.oled
+            .frame(&f)
+            .map_err(|e| format!("OLED 点阵渲染失败: {e}"))?;
+        self.state.frame_mode = true;
+        self.state.expr_mode = false;
+        Ok(json!({ "applied": true }))
     }
 
     /// 舵机移动（机制核：行程校验 + 轨压闸 + 缓速步进；本面只管写端口与等待）。
@@ -487,36 +495,55 @@ impl Board {
         }
         let mut parts = line.split_whitespace();
         let head = parts.next().unwrap_or("");
-        let result: Result<String, String> = match head {
-            "HELP" => Ok("CMDS: OLED <text> | FACE <expr> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | RAIL | INFO | HELP".into()),
-            "INFO" => Ok(self.info_line()),
-            "RAIL" => self
-                .sample_rail()
-                .map(|(mv, raw)| {
-                    format!(
-                        "OK rail={mv}mV raw={raw} tier={}",
-                        self.state.rail_tier.name()
-                    )
-                }),
-            "OLED" => self.oled_text(line[head.len()..].trim_start()),
-            "FACE" => self.face_expr(parts.next()),
-            "PAN" => parse_deg(parts.next()).and_then(|deg| {
-                self.servo_move(Axis::Pan, deg)
-                    .map(|d| format!("OK pan={d}"))
-            }),
-            "TILT" => parse_deg(parts.next()).and_then(|deg| {
-                self.servo_move(Axis::Tilt, deg)
-                    .map(|d| format!("OK tilt={d}"))
-            }),
-            "SERVO" => self.servo_pair(parse_deg(parts.next()), parse_deg(parts.next())),
-            "WANDER" => Err("WANDER 不支持（T3 档无自主扫摆；INFO 恒报 wander=off）".into()),
-            "SCAN" => Err("SCAN 不支持（用 PAN/TILT/SERVO 逐点）".into()),
-            "AUDIO" => Err("AUDIO 不支持（T3 档明确不做语音/DoA）".into()),
-            other => Err(format!("unknown cmd \"{other}\"")),
+        let result = match head {
+            "PAN" | "TILT" | "SERVO" | "WANDER" | "SCAN" | "AUDIO" => {
+                self.cmd_motion(head, &mut parts)
+            }
+            _ => self.cmd_view(line, head, &mut parts),
         };
         match result {
             Ok(s) => self.reply(&s),
             Err(e) => self.reply(&format!("ERR {e}")),
+        }
+    }
+
+    /// 运动类命令（定位/云台/明确不支持项）：pan/tilt 共用一条轴臂。
+    fn cmd_motion(
+        &mut self,
+        head: &str,
+        parts: &mut SplitWhitespace<'_>,
+    ) -> Result<String, String> {
+        match head {
+            "PAN" => self.axis_deg(Axis::Pan, "pan", parts.next()),
+            "TILT" => self.axis_deg(Axis::Tilt, "tilt", parts.next()),
+            "SERVO" => self.servo_pair(parse_deg(parts.next()), parse_deg(parts.next())),
+            "WANDER" => Err("WANDER 不支持（T3 档无自主扫摆；INFO 恒报 wander=off）".into()),
+            "SCAN" => Err("SCAN 不支持（用 PAN/TILT/SERVO 逐点）".into()),
+            _ => Err("AUDIO 不支持（T3 档明确不做语音/DoA）".into()),
+        }
+    }
+
+    /// 单轴定位（PAN/TILT 共用）：角度解析 → 缓速移动 → 回执带实际角度。
+    fn axis_deg(&mut self, axis: Axis, tag: &str, arg: Option<&str>) -> Result<String, String> {
+        parse_deg(arg).and_then(|deg| self.servo_move(axis, deg).map(|d| format!("OK {tag}={d}")))
+    }
+
+    /// 展示/查询类命令（帮助/信息/轨压/文本/表情）。
+    fn cmd_view(
+        &mut self,
+        line: &str,
+        head: &str,
+        parts: &mut SplitWhitespace<'_>,
+    ) -> Result<String, String> {
+        match head {
+            "HELP" => Ok("CMDS: OLED <text> | FACE <expr> | PAN <deg> | TILT <deg> | SERVO <pan> <tilt> | RAIL | INFO | HELP".into()),
+            "INFO" => Ok(self.info_line()),
+            "RAIL" => self.sample_rail().map(|(mv, raw)| {
+                format!("OK rail={mv}mV raw={raw} tier={}", self.state.rail_tier.name())
+            }),
+            "OLED" => self.oled_text(line[head.len()..].trim_start()),
+            "FACE" => self.face_expr(parts.next()),
+            other => Err(format!("unknown cmd \"{other}\"")),
         }
     }
 
