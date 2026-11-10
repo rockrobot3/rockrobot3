@@ -70,8 +70,18 @@ fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
     })?;
     let mut out = BTreeMap::new();
     for (k, val) in keys {
-        if let Some(s) = val.as_str() {
-            out.insert(k.clone(), s.to_string());
+        match val.as_str() {
+            Some(s) => {
+                out.insert(k.clone(), s.to_string());
+            }
+            // 坏形状 = 回错（与坏 json 同一口径）：写路径是整表重写，静默忽略
+            // 非字符串条目会让下一次 upsert 把它永久抹掉——数据丢失伪装成成功。
+            None => {
+                return Err(format!(
+                    "{} 的 keys.{k} 不是字符串（坏形状：写回会丢键，故拒读）",
+                    path.display()
+                ))
+            }
         }
     }
     Ok(out)
@@ -193,6 +203,28 @@ mod tests {
             Some("/home/u".into())
         ));
         assert!(!rr3_secrets_own(None, &def, None));
+    }
+
+    /// 坏形状 fail-closed（本轮审计）：非字符串值原先被静默忽略，而写路径是
+    /// 整表重写——下一次 upsert 会把它永久抹掉（数据丢失伪装成成功）。读须
+    /// 回错点名 ref，写路径随之拒且原文件逐字不动。
+    #[test]
+    fn read_rejects_non_string_values_without_data_loss() {
+        let path = tmp_secrets("shape");
+        let bad = r#"{"keys":{"a":"v","b":123}}"#;
+        std::fs::write(&path, bad).unwrap();
+        let e = rr3_secrets_read(&path).unwrap_err();
+        assert!(e.contains("keys.b") && e.contains("不是字符串"), "{e}");
+        assert!(
+            rr3_secrets_upsert(&path, "c", "v2").is_err(),
+            "坏形状下写必须拒"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            bad,
+            "原文件不得被改写"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
