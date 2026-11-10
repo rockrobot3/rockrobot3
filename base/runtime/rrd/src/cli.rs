@@ -179,7 +179,7 @@ const RR3_PATH_OPTS: [(&str, Rr3PathSet); 5] = [
         Ok(())
     }),
     ("--manifest", |c, p| {
-        rr3_manifest_conflict(c)?;
+        rr3_mf_conflict(c)?;
         c.manifests.push(p);
         Ok(())
     }),
@@ -194,7 +194,7 @@ fn rr3_profile_conflict(cfg: &RrdConfig) -> Result<(), String> {
     }
 }
 
-fn rr3_manifest_conflict(cfg: &RrdConfig) -> Result<(), String> {
+fn rr3_mf_conflict(cfg: &RrdConfig) -> Result<(), String> {
     if cfg.profile.is_none() {
         Ok(())
     } else {
