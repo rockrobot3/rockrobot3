@@ -527,8 +527,7 @@ fn rr3_round_trip(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (bool, bo
     let rt_start = Instant::now();
     let mut rt_ok = false;
     let mut rt_echo_ok = false;
-    loop {
-        let Some(frame) = rt_recv(conn) else { break };
+    while let Some(frame) = rt_recv(conn) {
         match rt_verdict(frame) {
             RtFrame::Hit { echo_ok } => {
                 rt_ok = true;
