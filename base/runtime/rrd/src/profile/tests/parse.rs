@@ -142,6 +142,13 @@ fn runtime_log_ring_cap_missing_or_nonpositive_is_red_and_value_flows() {
             "{bad} 必须点名正整数判据: {errs:?}"
         );
     }
+    // 上界（本轮静态审计）：超界即装配单值域错误，上界本身合法
+    let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 65537"))
+        .expect_err("超上界必须报错");
+    assert!(errs.iter().any(|e| e.contains("超上界 65536")), "{errs:?}");
+    let p = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = 65536"))
+        .expect("上界本身合法");
+    assert_eq!(p.log_ring_cap, 65_536);
     // 类型错（字符串不是整数）
     let errs = rr3_profile_parse(&GOOD.replace("log_ring_cap = 512", "log_ring_cap = \"many\""))
         .expect_err("字符串容量必须报错");

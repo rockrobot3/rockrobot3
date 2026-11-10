@@ -57,6 +57,12 @@ pub(super) const RR3_RUNTIME_KEYS: [&str; 5] = [
 /// 依赖 rr-hal 符号以保持基座轻量，此处独立钉合法取值集，装载期 fail-closed）。
 pub(super) const RR3_HAL_BACKEND_LEGAL: [&str; 5] = ["sim", "linux", "esp32", "mac", "placeholder"];
 
+/// 日志环容量上界（行，本轮静态审计）：环按行常驻内存，容量键此前只有"正整数"
+/// 下界——装配单被写坏成一个天文数字时，rrd 会随日志量增长直至吃光板载内存，
+/// 且该值经装配侧写口落盘后跨重启常驻。65_536 行（默认 512 的 128 倍）足够
+/// 覆盖现场排障，超界即装配单值域错误，装载期点名拒。
+pub(super) const RR3_LOG_CAP_MAX: i64 = 65_536;
+
 /// [supplies] 六键（ADR-0018 修订 4 ② 看门狗三键 + 修订 2 ③ 时序预算位三键）——
 /// 未知键点名与解析白名单共用（budget 子段单独成块解析，同 domain）
 pub(super) const RR3_SUPPLIES_KEYS: [&str; 6] = [
