@@ -263,34 +263,40 @@ fn rr3_pin_str_opt(
 /// 数组类键：physical（整数数组）与 mux_group（非空字符串数组）。
 fn rr3_pin_list(i: usize, k: &str, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
     match k {
-        "physical" => match v.as_array() {
-            Some(a) => {
-                for x in a {
-                    match x.as_integer() {
-                        Some(n) => pin.physical.push(n),
-                        None => errs.push(format!(
-                            "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
-                        )),
-                    }
-                }
-            }
-            None => errs.push(format!("pin #{i}.physical 应为整数数组")),
-        },
-        _ => match v.as_array() {
-            Some(a) => {
-                for x in a {
-                    match x.as_str() {
-                        Some(s) if !s.is_empty() => pin.mux_group.push(s.to_string()),
-                        _ => errs.push(format!(
-                            "pin #{i}.mux_group 的每一项都必须是非空字符串"
-                        )),
-                    }
-                }
-            }
+        "physical" => rr3_pin_phys(i, v, pin, errs),
+        _ => rr3_pin_mux(i, v, pin, errs),
+    }
+}
+
+/// `physical`：整数数组（逐项判型）。
+fn rr3_pin_phys(i: usize, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
+    let Some(a) = v.as_array() else {
+        errs.push(format!("pin #{i}.physical 应为整数数组"));
+        return;
+    };
+    for x in a {
+        match x.as_integer() {
+            Some(n) => pin.physical.push(n),
             None => errs.push(format!(
-                "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表，批N7 已立册）"
+                "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
             )),
-        },
+        }
+    }
+}
+
+/// `mux_group`：非空字符串数组（显式 [] 合法）。
+fn rr3_pin_mux(i: usize, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
+    let Some(a) = v.as_array() else {
+        errs.push(format!(
+            "pin #{i}.mux_group 应为字符串数组（显式 [] 合法，互斥组归平台 conflicts 表，批N7 已立册）"
+        ));
+        return;
+    };
+    for x in a {
+        match x.as_str() {
+            Some(s) if !s.is_empty() => pin.mux_group.push(s.to_string()),
+            _ => errs.push(format!("pin #{i}.mux_group 的每一项都必须是非空字符串")),
+        }
     }
 }
 
