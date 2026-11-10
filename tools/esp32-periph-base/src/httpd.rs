@@ -661,15 +661,22 @@ enum BodyErr {
 /// 请求 body 有界收：`content_len` 是客户端可控的 Content-Length，超
 /// [`RR3_WIFI_BODY_MAX`] 一律不读全（无上限 `vec![0u8; clen]` 在 4MB RAM 板上
 /// 即 OOM abort——同网段一个请求打挂 httpd，静态审计 0.0.8b 实锤）。
+/// 本轮审计：`httpd_req_recv` 单次返回可短于请求长度（TCP 分段/IDF 收包窗），
+/// 原"单次读 + 满长判据"会把弱信号下的分段到达误判成坏包（配置写入随机 400）；
+/// 循环读满或 IDF 收包超时（n ≤ 0）才回 Recv。
 unsafe fn req_body_read(req: *mut httpd_req_t) -> Result<Vec<u8>, BodyErr> {
     let clen = (*req).content_len;
     if clen == 0 || clen > RR3_WIFI_BODY_MAX {
         return Err(BodyErr::Bounds);
     }
     let mut buf = vec![0u8; clen];
-    let got = httpd_req_recv(req, buf.as_mut_ptr() as *mut _, buf.len());
-    if got <= 0 || got as usize != buf.len() {
-        return Err(BodyErr::Recv);
+    let mut got = 0usize;
+    while got < buf.len() {
+        let n = httpd_req_recv(req, buf[got..].as_mut_ptr() as *mut _, buf.len() - got);
+        if n <= 0 {
+            return Err(BodyErr::Recv);
+        }
+        got += n as usize;
     }
     Ok(buf)
 }
