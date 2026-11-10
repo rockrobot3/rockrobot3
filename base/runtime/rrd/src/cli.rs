@@ -148,35 +148,38 @@ fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, 
 
 /// 路径型参数族：值走 `need_path_value`（缺值/疑似开关一律拒，不静默回落）。
 fn rr3_cli_path(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    let val = || need_path_value(&args[i], args, i).map(PathBuf::from);
     match args[i].as_str() {
-        "--socket" => {
-            cfg.socket = PathBuf::from(need_path_value("--socket", args, i)?);
-            Ok(i + 2)
-        }
-        "--topics-overlay" => {
-            cfg.overlay = Some(PathBuf::from(need_path_value("--topics-overlay", args, i)?));
-            Ok(i + 2)
-        }
-        "--contracts" => {
-            cfg.contracts = Some(PathBuf::from(need_path_value("--contracts", args, i)?));
-            Ok(i + 2)
-        }
+        "--socket" => cfg.socket = val()?,
+        "--topics-overlay" => cfg.overlay = Some(val()?),
+        "--contracts" => cfg.contracts = Some(val()?),
         "--profile" => {
-            if !cfg.manifests.is_empty() {
-                return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
-            }
-            cfg.profile = Some(PathBuf::from(need_path_value("--profile", args, i)?));
-            Ok(i + 2)
+            rr3_profile_conflict(cfg)?;
+            cfg.profile = Some(val()?);
         }
         "--manifest" => {
-            if cfg.profile.is_some() {
-                return Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"));
-            }
-            cfg.manifests
-                .push(PathBuf::from(need_path_value("--manifest", args, i)?));
-            Ok(i + 2)
+            rr3_manifest_conflict(cfg)?;
+            cfg.manifests.push(val()?);
         }
-        other => Err(format!("未知选项 {other}\n{USAGE}")),
+        other => return Err(format!("未知选项 {other}\n{USAGE}")),
+    }
+    Ok(i + 2)
+}
+
+/// `--profile` 与已收 `--manifest` 互斥（反之同）。
+fn rr3_profile_conflict(cfg: &RrdConfig) -> Result<(), String> {
+    if cfg.manifests.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"))
+    }
+}
+
+fn rr3_manifest_conflict(cfg: &RrdConfig) -> Result<(), String> {
+    if cfg.profile.is_none() {
+        Ok(())
+    } else {
+        Err(format!("{PROFILE_MANIFEST_CONFLICT}\n{USAGE}"))
     }
 }
 
