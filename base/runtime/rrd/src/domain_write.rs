@@ -605,20 +605,21 @@ fn rr3_axis_old(
     Ok(json!(file.profile.current_ceil_ma))
 }
 
-/// 候选档独占写（机制）：`create_new` 拒跟符号链接、拒覆盖已存在项，权限 0600
-/// 保证"落盘 → 读回校验"之间无第三方可改。文件名只作去重，不承担安全——
-/// 放在世界可写的 tmp 目录里时，安全属性必须由本函数给足（读写同机、非机密，
-/// 只要求完整性与防篡改）。
-#[cfg(unix)]
+/// 候选档独占写（机制）：`create_new` 拒跟符号链接、拒覆盖已存在项；unix 上以
+/// 0600 创建，保证"落盘 → 读回校验"之间无第三方可改。文件名只作去重，不承担
+/// 安全——放在世界可写的 tmp 目录里时，安全属性必须由本函数给足（读写同机、
+/// 非机密，只要求完整性与防篡改）。
 fn rr3_stage_write(path: &Path, body: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
 
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
+    let mut opt = std::fs::OpenOptions::new();
+    opt.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opt.mode(0o600);
+    }
+    let mut f = opt.open(path)?;
     f.write_all(body)?;
     f.flush()?;
     Ok(())
