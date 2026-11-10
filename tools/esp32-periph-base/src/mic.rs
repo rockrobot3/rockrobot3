@@ -252,80 +252,124 @@ pub fn spawn_mic_smoke(
     thread::Builder::new()
         .name("mic-smoke".into())
         .stack_size(MIC_THREAD_STACK)
-        .spawn(move || {
-            let mut rx: I2sDriver<'static, I2sRx> =
-                match I2sDriver::new_std_rx(i2s0, &cfg, bclk, din, None::<AnyIOPin>, ws) {
-                    Ok(mut d) => {
-                        // **enable 必须显式调**（esp-idf-hal 0.44.1 i2s.rs L803/L804 注释
-                        // 在案：enable 后 BCLK/WS 才开始输出，INMP441 才出数据——真板
-                        // 首烧 read() 永挂无 Err 无统计行，根因即缺 enable）
-                        if let Err(e) = d.rx_enable() {
-                            println!("[mic] I2S0 rx_enable 失败: {e:?}");
-                            return;
-                        }
-                        d
-                    }
-                    Err(e) => {
-                        println!("[mic] I2S0 驱动安装失败: {e:?}（查 4/26/27 占用/接线）");
-                        return;
-                    }
-                };
-            println!(
-                "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK={RR3_BIND_I2S_BCLK} SD={RR3_BIND_I2S_SD} WS={RR3_BIND_I2S_WS}（INMP441 双麦 L/R 时隙；对账锚，board.rs）"
-            );
-            let mut buf = [0u8; MIC_BUF];
-            let mut stats = MicStats::new();
-            let mut dump_count = 0u32;
-            // 上一次采样的前 16B（诊断位图对账面）：正常有数据的会话里字节窗
-            // 一次一个样，只有**卡死**（SD 三态残留/虚接/驱动停摆）才会逐窗完全
-            // 相同——故只在"与上次相同"时打印一次，正常采集全程静默。
-            let mut last_dump = [0u8; 16];
-            // 批D③ 分片累积（交错 L,R 原始 24bit；堆上，16KB——栈 16KB 只放 buf 4KB）
-            let mut chunk: Vec<i32> = Vec::with_capacity(AUDIO_CHUNK_FRAMES * 2);
-            // 跨分片连续的 DC 阻断器（2026-10-31 S3 订正：逐片减均值会在 128ms
-            // 边界造台阶，频谱 31/47/62/78Hz 拉链噪声压过语音——见 capture/mech.rs）
-            let mut dc = Rr3DcBlocker::new();
-            loop {
-                match rx.read(&mut buf, MIC_I2C_TIMEOUT) {
-                    Ok(n) if n >= 8 => {
-                        stats.reads += 1;
-                        dump_count += 1;
-                        dump_watch(&buf, n, &mut last_dump, dump_count);
-                        // 音频开关每 read 批读一次（不逐帧拿锁）；关时清分片，
-                        // ON 起始即整片（seq/DC 基线都从零起）
-                        let (audio_on, host_ms) = {
-                            let b = lock_bus(&bus);
-                            (b.st.audio_on, b.st.audio_host_ms)
-                        };
-                        let audio_on = host_watchdog(&bus, audio_on, host_ms);
-                        if !audio_on {
-                            chunk.clear();
-                            dc.reset();
-                        }
-                        let nframes = n / 8;
-                        stats.frames += nframes as u64;
-                        for f in 0..nframes {
-                            let o = f * 8;
-                            // 32bit 帧大端线序 → 24bit 符号幅度（capture 机制件）
-                            let (l, r) = frame32_to_pair(&buf[o..o + 8]);
-                            stats.accum(l, r);
-                            if audio_on {
-                                chunk.push(l);
-                                chunk.push(r);
-                                if chunk.len() >= AUDIO_CHUNK_FRAMES * 2 {
-                                    chunk_flush(&mut chunk, &mut dc, &bus, &mut stats);
-                                }
-                            }
-                        }
-                        stats.window_line();
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("[mic] I2S read 失败: {e:?}");
-                        thread::sleep(Duration::from_millis(100));
-                    }
+        .spawn(move || mic_run(bus, cfg, i2s0, bclk, din, ws))
+        .expect("起 mic 冒烟线程失败");
+}
+
+/// I2S0 驱动装配 + 显式 `rx_enable`；任一步失败点名后回 `None`（线程退出，不 panic）。
+fn mic_open(
+    cfg: &StdConfig,
+    i2s0: impl Peripheral<P = I2S0> + 'static,
+    bclk: impl Peripheral<P = impl InputPin + OutputPin> + 'static,
+    din: impl Peripheral<P = impl InputPin> + 'static,
+    ws: impl Peripheral<P = impl InputPin + OutputPin> + 'static,
+) -> Option<I2sDriver<'static, I2sRx>> {
+    let mut d = match I2sDriver::new_std_rx(i2s0, cfg, bclk, din, None::<AnyIOPin>, ws) {
+        Ok(d) => d,
+        Err(e) => {
+            println!("[mic] I2S0 驱动安装失败: {e:?}（查 4/26/27 占用/接线）");
+            return None;
+        }
+    };
+    // **enable 必须显式调**（esp-idf-hal 0.44.1 i2s.rs L803/L804 注释在案：enable
+    // 后 BCLK/WS 才开始输出，INMP441 才出数据——真板首烧 read() 永挂无 Err 无统计行，
+    // 根因即缺 enable）
+    if let Err(e) = d.rx_enable() {
+        println!("[mic] I2S0 rx_enable 失败: {e:?}");
+        return None;
+    }
+    Some(d)
+}
+
+/// 采集线程主体：装配 → 逐 read 批处理（统计 / 诊断位图 / 音频分片）。
+fn mic_run(
+    bus: Arc<Mutex<Bus>>,
+    cfg: StdConfig,
+    i2s0: impl Peripheral<P = I2S0> + 'static,
+    bclk: impl Peripheral<P = impl InputPin + OutputPin> + 'static,
+    din: impl Peripheral<P = impl InputPin> + 'static,
+    ws: impl Peripheral<P = impl InputPin + OutputPin> + 'static,
+) {
+    let Some(mut rx) = mic_open(&cfg, i2s0, bclk, din, ws) else {
+        return;
+    };
+    println!(
+        "[mic] I2S0 ✓ philips {MIC_SR_HZ}Hz 32bit stereo BCLK={RR3_BIND_I2S_BCLK} SD={RR3_BIND_I2S_SD} WS={RR3_BIND_I2S_WS}（INMP441 双麦 L/R 时隙；对账锚，board.rs）"
+    );
+    let mut buf = [0u8; MIC_BUF];
+    let mut run = MicRun::new();
+    loop {
+        match rx.read(&mut buf, MIC_I2C_TIMEOUT) {
+            Ok(n) if n >= 8 => run.batch(&buf, n, &bus),
+            Ok(_) => {}
+            Err(e) => {
+                println!("[mic] I2S read 失败: {e:?}");
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+/// 跨 read 保持的采集运行态（统计窗 / 诊断位图 / 分片累积 / DC 阻断）。
+struct MicRun {
+    stats: MicStats,
+    dump_count: u32,
+    /// 上一次采样的前 16B（诊断位图对账面）：正常有数据的会话里字节窗一次一个样，
+    /// 只有**卡死**（SD 三态残留/虚接/驱动停摆）才会逐窗完全相同——故只在"与上次
+    /// 相同"时打印一次，正常采集全程静默。
+    last_dump: [u8; 16],
+    /// 批D③ 分片累积（交错 L,R 原始 24bit；堆上，16KB——栈 16KB 只放 buf 4KB）。
+    chunk: Vec<i32>,
+    /// 跨分片连续的 DC 阻断器（2026-10-31 S3 订正：逐片减均值会在 128ms 边界造
+    /// 台阶，频谱 31/47/62/78Hz 拉链噪声压过语音——见 capture/mech.rs）。
+    dc: Rr3DcBlocker,
+}
+
+impl MicRun {
+    fn new() -> Self {
+        Self {
+            stats: MicStats::new(),
+            dump_count: 0,
+            last_dump: [0u8; 16],
+            chunk: Vec::with_capacity(AUDIO_CHUNK_FRAMES * 2),
+            dc: Rr3DcBlocker::new(),
+        }
+    }
+
+    /// 一次有效 read：统计 + 诊断 + 音频开关（每 read 批读一次，不逐帧拿锁）。
+    fn batch(&mut self, buf: &[u8], n: usize, bus: &Arc<Mutex<Bus>>) {
+        self.stats.reads += 1;
+        self.dump_count += 1;
+        dump_watch(buf, n, &mut self.last_dump, self.dump_count);
+        let (audio_on, host_ms) = {
+            let b = lock_bus(bus);
+            (b.st.audio_on, b.st.audio_host_ms)
+        };
+        let audio_on = host_watchdog(bus, audio_on, host_ms);
+        if !audio_on {
+            self.chunk.clear();
+            self.dc.reset();
+        }
+        let nframes = n / 8;
+        self.stats.frames += nframes as u64;
+        self.frames(buf, nframes, audio_on, bus);
+        self.stats.window_line();
+    }
+
+    /// 逐帧 32bit 大端 → 24bit 符号幅度（capture 机制件），统计累加；ON 时累积到
+    /// 分片，满片即发。
+    fn frames(&mut self, buf: &[u8], nframes: usize, audio_on: bool, bus: &Arc<Mutex<Bus>>) {
+        for f in 0..nframes {
+            let o = f * 8;
+            let (l, r) = frame32_to_pair(&buf[o..o + 8]);
+            self.stats.accum(l, r);
+            if audio_on {
+                self.chunk.push(l);
+                self.chunk.push(r);
+                if self.chunk.len() >= AUDIO_CHUNK_FRAMES * 2 {
+                    chunk_flush(&mut self.chunk, &mut self.dc, bus, &mut self.stats);
                 }
             }
-        })
-        .expect("起 mic 冒烟线程失败");
+        }
+    }
 }

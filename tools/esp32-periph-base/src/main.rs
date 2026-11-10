@@ -104,7 +104,7 @@ use esp_idf_hal::ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver};
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::uart::{UartConfig, UartDriver};
 use esp_idf_hal::units::Hertz;
-use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches};
+use esp_idf_sys::{esp_get_free_heap_size, esp_get_minimum_free_heap_size, link_patches, EspError};
 
 use crate::board::{
     BOOT_PAN_DEG, BOOT_TILT_DEG, I2C_BAUD_HZ, LEDC_FREQ_HZ, LEDC_RES_BITS, OLED_ADDR,
@@ -128,24 +128,176 @@ fn ram_point(point: &str) {
     println!("[periph] RAM point={point} free={free}B min_free={min_free}B");
 }
 
-fn main() {
-    // IDF 绑定面补丁（esp-idf-hal 工程惯例起手，哨兵同款）
-    link_patches();
-
+/// 启动横幅（引脚号不上横幅：I2C/轨测点真值经 rr3.set_bindings 注入；芯片档自证行
+/// 让证据记录直接可辨 classic / S3，引脚真值以 board/pins_*.rs 对账锚为准）。
+/// n20-live 标记：重烧后此行在册＝新固件上板实证；同屏「凭据源=nvs」＝NVS 凭据跨
+/// 重烧保留实证（升级即重烧语义）。
+fn boot_banner() {
     println!(
-        // 引脚号不上横幅（批N4 件七(c)）：I2C/轨测点真值经 rr3.set_bindings 注入
-        // （成功打印见 rr3_handle_bindings），装配面引脚号在各装配打印自证。
         "[periph] surface=esp-rs-std crate=esp32-periph-base oled=i2c0 servo=ledc rail=adc1 cmd=uart2@{UART2_BAUD_HZ} line+frame planes=ctrl+runtime serial-servo n20-live"
     );
-    // 芯片档自证行（W1/T2 §6.4 件四）：证据记录里直接可辨 classic / S3；引脚真值
-    // 仍以 board/pins_*.rs 装配对账锚为准（本行不印引脚号）。
     #[cfg(feature = "esp32")]
     println!("[periph] chip=esp32 pins=classic");
     #[cfg(feature = "esp32s3")]
     println!("[periph] chip=esp32s3 pins=s3 flash=16MB psram=8MB-octal");
-    // n20-live 标记（0.0.5 增补轮六 批N20 件二① 升级实录）：重烧后此行在册＝新固件
-    // 上板实证；同屏「凭据源=nvs」＝NVS 凭据跨重烧保留实证（升级即重烧语义）。
     ram_point("1-boot");
+}
+
+/// UART2 TX 驱动档拉满 CAP_3（判据② 音频上行病害的定案修复，2026-10-16）。根因
+/// （真板双探针实锤）：默认档 CAP_2（≈20mA）推不动指令面长跳线 + FT232 接收链路
+/// ——长零串（线上持续低电平）期间电平被耦合/漏电抬高，接收端把 0 读成 1（受害区＝
+/// 帧头部长零串与 payload 头 212B）；CAP_3（≈40mA）下 27 完整帧位级全对。失败
+/// 点名后继续跑，不阻断装配。
+fn uart_tx_drive() {
+    let res = unsafe {
+        esp_idf_sys::gpio_set_drive_capability(
+            RR3_BIND_UART2_TX as esp_idf_sys::gpio_num_t,
+            esp_idf_sys::gpio_drive_cap_t_GPIO_DRIVE_CAP_3,
+        )
+    };
+    if res != 0 {
+        println!(
+            "[periph] UART2 TX(GPIO{RR3_BIND_UART2_TX}) 驱动档 CAP_3 设置失败 err={res}（继续跑，查 esp-idf-sys 对表）"
+        );
+    }
+}
+
+/// I2C 扫描结果点名（OLED 在列 ✓ / 不在列 ✗）。
+fn i2c_scan_report(found: &[u8]) {
+    if found.contains(&OLED_ADDR) {
+        println!("[periph] I2C 扫描应答: {found:02X?} —— OLED 0x{OLED_ADDR:02X} 在列 ✓");
+    } else {
+        println!(
+            "[periph] I2C 扫描应答: {found:02X?} —— 0x{OLED_ADDR:02X} 不在列 ✗（查接线/上拉）"
+        );
+    }
+}
+
+/// OLED init 重试：100k 档上电电荷泵未稳的瞬态失败，每次隔 1s、最多 5 次；
+/// 真板诊断面纪律——失败打印 Err 明细不 panic（panic_abort 下 expect 无消息）。
+fn oled_init_retry(i2c: &mut I2cDriver) -> bool {
+    for attempt in 1..=5u32 {
+        match oled_init(i2c) {
+            Ok(()) => {
+                println!("[periph] OLED init ✓（100k 档第 {attempt} 次过）");
+                return true;
+            }
+            Err(e) => {
+                println!("[periph] OLED 100k init 第 {attempt}/5 次失败: {e}");
+                thread::sleep(Duration::from_secs(1));
+            }
+        }
+    }
+    false
+}
+
+/// boot 四行（4 行扩行能力的直证；行2/行3 从 board 真值拼出，防字面量漂移）。
+fn oled_boot_rows(i2c: &mut I2cDriver) {
+    let boot_rows: [(String, &str); 4] = [
+        ("ROCK3 PERIPH BASE".into(), "boot 行0写失败"),
+        ("4-ROW OLED READY".into(), "boot 行1写失败"),
+        (format!("UART2 CMD @{UART2_BAUD_HZ}"), "boot 行2写失败"),
+        (
+            format!("P:{BOOT_PAN_DEG:03} T:{BOOT_TILT_DEG:03}"),
+            "boot 角度行写失败",
+        ),
+    ];
+    let mut boot_ok = true;
+    for (row, (text, msg)) in boot_rows.iter().enumerate() {
+        if let Err(e) = oled_text(i2c, row, text.as_bytes()) {
+            println!("[periph] {msg}: {e}");
+            boot_ok = false;
+        }
+    }
+    if boot_ok {
+        println!("[periph] OLED ✓ boot 画面已出（4 行）");
+    }
+}
+
+/// OLED 装配面：扫描点名 → init 重试 → boot 画面；全程不 panic（终败继续跑指令面）。
+fn oled_boot(i2c: &mut I2cDriver) {
+    let found = i2c_scan(&mut crate::ports_impl::rr3_esp_i2c(&mut *i2c));
+    i2c_scan_report(&found);
+    if oled_init_retry(i2c) {
+        oled_boot_rows(i2c);
+    } else {
+        println!(
+            "[periph] OLED init 终败（400k/100k 双档）——不 panic 继续跑指令面（查上拉/接线/供电）"
+        );
+    }
+}
+
+/// 5V 轨监测装配（失败不 panic，回 `None`——采样路径据此回 Err，不冒领读数）。
+fn rail_open(rail: Result<RailMonitor, EspError>) -> Option<RailMonitor> {
+    match rail {
+        Ok(r) => {
+            // 测点引脚号不上打印（批N4 件七(c)）：真值以 rr3.set_bindings 注入为准。
+            println!(
+                "[periph] 5V 轨监测 ✓ ADC1 @ 测点引脚经 rr3.set_bindings 下发（占位分压 1:1 待标定；RAIL 命令采一次）"
+            );
+            Some(r)
+        }
+        Err(e) => {
+            println!("[periph] 5V 轨监测装配失败（不 panic 继续跑指令面）: {e:?}");
+            None
+        }
+    }
+}
+
+/// 共享总线 + 开机表情/姿态种子：表情**先上屏**（可见性优先：板载 5V 直供下舵机
+/// 启动是全板最大电流事件，万一触发 BOD 也要保住已出的表情），随后由运行面走姿态
+/// Move——串行降级（先 pan 后 tilt）+ 缓速软启动把两轴电流尖峰摊开摊薄。
+fn bus_seed() -> Arc<Mutex<Bus>> {
+    let bus = Arc::new(Mutex::new(Bus {
+        jobs: VecDeque::new(),
+        outbox: VecDeque::new(),
+        audio_q: VecDeque::new(),
+        st: PeriphState::boot(),
+    }));
+    {
+        let base = expr_eye_base("idle");
+        let mut b = lock_bus(&bus);
+        b.st.expr_mode = true;
+        b.st.frame_mode = false;
+        b.st.base = base;
+        b.st.last_text = String::from("EXPR idle");
+        b.st.anim_reset();
+        b.st.drawn = base;
+        b.st.pan_deg = BOOT_PAN_DEG;
+        b.st.tilt_deg = BOOT_TILT_DEG;
+    }
+    push_job(&bus, Job::RenderCapsules);
+    push_job(
+        &bus,
+        Job::Move {
+            pan: Some(BOOT_PAN_DEG),
+            tilt: Some(BOOT_TILT_DEG),
+        },
+    );
+    bus
+}
+
+/// 起两平面线程：运行面先起（boot 后即可接作业 + 跑自主节拍），控制面随后。
+fn spawn_planes(ctl: CtlUart, rt: RtPeriph, bus: Arc<Mutex<Bus>>) {
+    {
+        let bus = bus.clone();
+        thread::Builder::new()
+            .name("periph-runtime".into())
+            .stack_size(THREAD_STACK)
+            .spawn(move || runtime_loop(rt, bus))
+            .expect("起运行面线程失败");
+    }
+    thread::Builder::new()
+        .name("periph-ctl".into())
+        .stack_size(THREAD_STACK)
+        .spawn(move || cmd_loop(ctl, bus))
+        .expect("起控制面线程失败");
+}
+
+fn main() {
+    // IDF 绑定面补丁（esp-idf-hal 工程惯例起手，哨兵同款）
+    link_patches();
+    boot_banner();
 
     let peripherals = Peripherals::take()
         .expect("Peripherals::take 失败：外设已被取走（启动期不应发生，查是否有二次取）");
@@ -183,27 +335,8 @@ fn main() {
     .expect("UART2 驱动安装失败");
     println!("[periph] UART2 ✓ 指令面 {UART2_BAUD_HZ} @ GPIO{RR3_BIND_UART2_TX}(TX)/GPIO{RR3_BIND_UART2_RX}(RX)（对账锚，board.rs）");
 
-    // ---- UART2 TX 驱动档拉满 CAP_3（判据② 音频上行病害的定案修复，2026-10-16）----
-    // 根因（真板双探针实锤）：默认档 CAP_2（≈20mA）推不动指令面长跳线 + FT232
-    // 接收链路——**长零串（线上持续低电平）期间电平被耦合/漏电抬高**，接收端把 0
-    // 读成 1。受害区 = 帧头部长零串（trace_id/reserved 全零收成 0xff 族）+ payload
-    // 头 212B；'A' 等边沿密集内容完好。三重证据定案：① 片内 TX→RX 环回 2KB 四段
-    // 图案（长零串/'A'/递增/0xFF）逐字节全对上——芯片内排除；② CAP_3（≈40mA）
-    // 拉满后 FT232 抓流 27 完整帧**位级全对**（payload 整体 + PCM 图案 L=seq/R=递增
-    // 核验过）；③ 损坏按字节数定界不按时间（921600/460800 同窗口）= 内容依赖。与
-    // I2C 被迫 50k 同族（长跳线电气边际），但本例驱动档即可治。临时排障探针（环回
-    // 函数 + 460800 对照）定案已撤。
-    let drive_res = unsafe {
-        esp_idf_sys::gpio_set_drive_capability(
-            RR3_BIND_UART2_TX as esp_idf_sys::gpio_num_t,
-            esp_idf_sys::gpio_drive_cap_t_GPIO_DRIVE_CAP_3,
-        )
-    };
-    if drive_res != 0 {
-        println!(
-            "[periph] UART2 TX(GPIO{RR3_BIND_UART2_TX}) 驱动档 CAP_3 设置失败 err={drive_res}（继续跑，查 esp-idf-sys 对表）"
-        );
-    }
+    // UART2 TX 驱动档 CAP_3（长零串电平抬升病害的定案修复，根因见 [`uart_tx_drive`]）
+    uart_tx_drive();
 
     // ---- I2C0（判据①：扫描 0x3C 应答；classic 21/22，S3 8/9）----
     // 频率档 400k → 100k → **50k**：真板实证 400k/100k 在长跳线 + 模块弱上拉下**时序
@@ -227,63 +360,8 @@ fn main() {
     let (i2c_sda, i2c_scl) = (peripherals.pins.gpio8, peripherals.pins.gpio9);
     let mut i2c =
         I2cDriver::new(peripherals.i2c0, i2c_sda, i2c_scl, &i2c_config).expect("I2C0 驱动安装失败");
-    let found = i2c_scan(&mut crate::ports_impl::rr3_esp_i2c(&mut i2c));
-    if found.contains(&OLED_ADDR) {
-        println!(
-            "[periph] I2C 扫描应答: {:02X?} —— OLED 0x{OLED_ADDR:02X} 在列 ✓",
-            found
-        );
-    } else {
-        println!(
-            "[periph] I2C 扫描应答: {found:02X?} —— 0x{OLED_ADDR:02X} 不在列 ✗（查接线/上拉）"
-        );
-    }
-    // 真板诊断面（b7 实录）：init 失败打印 Err 明细不 panic——panic_abort 下
-    // expect 无消息直接 Guru 复位循环，排障拿不到证据；终败继续跑指令面。
-    // 100k 档 init 偶发瞬态失败（上电电荷泵未稳）——重试 5 次（每次 1s）兜底。
-    let mut oled_ok = false;
-    for attempt in 1..=5u32 {
-        match oled_init(&mut i2c) {
-            Ok(()) => {
-                oled_ok = true;
-                println!("[periph] OLED init ✓（100k 档第 {attempt} 次过）");
-                break;
-            }
-            Err(e) => {
-                println!("[periph] OLED 100k init 第 {attempt}/5 次失败: {e}");
-                thread::sleep(Duration::from_secs(1));
-            }
-        }
-    }
-    if oled_ok {
-        // boot 画面 4 行全出（4 行扩行能力的 boot 直证；row3 由 oled_show 常刷，
-        // boot 期先摆初始角度占位）
-        // 行2 波特率从 board 真值拼出（批D② 起 921600、2026-10-30 起定档 1.5M，防字面量漂移）
-        // 行3 开机姿态从 board 常量拼出（同 行2 纪律：防字面量漂移）
-        let boot_rows: [(String, &str); 4] = [
-            ("ROCK3 PERIPH BASE".into(), "boot 行0写失败"),
-            ("4-ROW OLED READY".into(), "boot 行1写失败"),
-            (format!("UART2 CMD @{UART2_BAUD_HZ}"), "boot 行2写失败"),
-            (
-                format!("P:{BOOT_PAN_DEG:03} T:{BOOT_TILT_DEG:03}"),
-                "boot 角度行写失败",
-            ),
-        ];
-        let mut boot_ok = true;
-        for (row, (text, msg)) in boot_rows.iter().enumerate() {
-            if let Err(e) = oled_text(&mut i2c, row, text.as_bytes()) {
-                println!("[periph] {msg}: {e}");
-                boot_ok = false;
-            }
-        }
-        if boot_ok {
-            println!("[periph] OLED ✓ boot 画面已出（4 行）");
-        }
-    } else {
-        println!(
-            "[periph] OLED init 终败（400k/100k 双档）——不 panic 继续跑指令面（查上拉/接线/供电）"
-        );
-    }
+    // 扫描点名 → init 重试 → boot 画面（真板诊断面纪律：失败打印 Err 明细不 panic）
+    oled_boot(&mut i2c);
 
     // ---- ADC1：5V 轨电压监测（方案A Q1；classic GPIO34=CH6，S3 GPIO1=CH0）----
     // 根因链（真板实锤）：OLED 大面亮点帧 + 舵机保持电流抢同一条 5V 轨 → 轨压跌落
@@ -294,20 +372,7 @@ fn main() {
     let rail = RailMonitor::new(peripherals.adc1, peripherals.pins.gpio34);
     #[cfg(feature = "esp32s3")]
     let rail = RailMonitor::new(peripherals.adc1, peripherals.pins.gpio1);
-    let rail = match rail {
-        Ok(r) => {
-            println!(
-                // 测点引脚号不上打印（批N4 件七(c)）：具名装配自证，数字真值
-                // 以 rr3.set_bindings 注入打印为准（观测面唯一真值点）。
-                "[periph] 5V 轨监测 ✓ ADC1 @ 测点引脚经 rr3.set_bindings 下发（占位分压 1:1 待标定；RAIL 命令采一次）"
-            );
-            Some(r)
-        }
-        Err(e) => {
-            println!("[periph] 5V 轨监测装配失败（不 panic 继续跑指令面）: {e:?}");
-            None
-        }
-    };
+    let rail = rail_open(rail);
 
     // ---- LEDC timer0 50Hz 14bit：pan/tilt（classic 32/33，S3 4/5）----
     let timer_config = TimerConfig::new()
@@ -341,38 +406,8 @@ fn main() {
         "[periph] LEDC ✓ pan=GPIO{RR3_BIND_LEDC_PAN} tilt=GPIO{RR3_BIND_LEDC_TILT} duty=0（待表情上屏后激磁）max={max_duty}"
     );
     let ctl = CtlUart { uart };
-    let bus = Arc::new(Mutex::new(Bus {
-        jobs: VecDeque::new(),
-        outbox: VecDeque::new(),
-        audio_q: VecDeque::new(),
-        st: PeriphState::boot(),
-    }));
-    // 开机默认进入表情（idle 胶囊眼）+ 走一遍指定姿态（pan 左转 30°、tilt 上抬 8°，
-    // 串行降级）——UART2 指令链路现场劣化时的"可见性"兜底（用户现场裁定）。排队
-    // RenderCapsules + Move，由运行面线程接管；姿态经 axis_check 已在本轴行程内。
-    {
-        let base = expr_eye_base("idle");
-        let mut b = lock_bus(&bus);
-        b.st.expr_mode = true;
-        b.st.frame_mode = false;
-        b.st.base = base;
-        b.st.last_text = String::from("EXPR idle");
-        b.st.anim_reset();
-        b.st.drawn = base;
-        b.st.pan_deg = BOOT_PAN_DEG;
-        b.st.tilt_deg = BOOT_TILT_DEG;
-    }
-    // 表情**先上屏**（可见性优先：板载 5V 直供下舵机启动是全板最大电流事件，万一
-    // 触发 BOD 也要保住已出的表情），随后由运行面走姿态 Move——串行降级（先 pan 后
-    // tilt）+ 缓速软启动（[`SERVO_SLEW_STEP_DEG`]）把两轴电流尖峰摊开摊薄。
-    push_job(&bus, Job::RenderCapsules);
-    push_job(
-        &bus,
-        Job::Move {
-            pan: Some(BOOT_PAN_DEG),
-            tilt: Some(BOOT_TILT_DEG),
-        },
-    );
+    // 开机表情 + 姿态种子（表情先上屏，姿态由运行面串行降级执行）
+    let bus = bus_seed();
     ram_point("2-periph-ready");
     // mic 线与控制面共享 bus（audio_q 产者/消费者；clone 须在 cmd_loop move 前）
     let mic_bus = bus.clone();
@@ -381,20 +416,7 @@ fn main() {
     //值不落仓）」，都缺 fail-honest 点名后缺席，板其余功能照常；细节见 [httpd]/[cred]
     //模块文档。（clone 同前——须在 cmd_loop move 前）
     httpd::rr3_board_httpd_spawn(&bus);
-    // 运行面先起（boot 后即可接作业 + 跑自主节拍），再起控制面
-    {
-        let bus = bus.clone();
-        thread::Builder::new()
-            .name("periph-runtime".into())
-            .stack_size(THREAD_STACK)
-            .spawn(move || runtime_loop(rt, bus))
-            .expect("起运行面线程失败");
-    }
-    thread::Builder::new()
-        .name("periph-ctl".into())
-        .stack_size(THREAD_STACK)
-        .spawn(move || cmd_loop(ctl, bus))
-        .expect("起控制面线程失败");
+    spawn_planes(ctl, rt, bus);
 
     // ---- 批D 采集冒烟 + 音频上行：INMP441 双麦 @ I2S0（classic 4/27/26，S3 6/15/7）----
     // **BCLK 迁移实录（2026-10-20/21）**：原 GPIO25 装配下 10-13 起全部音频数据均为
