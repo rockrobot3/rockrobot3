@@ -139,41 +139,54 @@ impl Rr3LinuxPwmServo {
         if ensured.is_some() {
             return Ok(());
         }
+        let we_exported = self.rr3_export()?;
+        self.rr3_configure()?;
+        *ensured = Some(we_exported);
+        Ok(())
+    }
+
+    /// 按需导出通道（已在位不写 export；等目录出现有超时）。返回是否由本实例
+    /// 导出——Drop 只归还自己导出的通道。
+    fn rr3_export(&self) -> Result<bool, Rr3HalError> {
         let dir = self.pwm_dir();
-        let we_exported = !dir.exists();
-        if we_exported {
-            let export_path = self.chip_dir().join("export");
-            std::fs::write(&export_path, format!("{}\n", self.channel)).map_err(|e| {
-                Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
-                    "pwm 导出通道 {} 写 {:?} 失败: {e}（芯片不在位——dtoverlay=pwm-2chan 未开，或权限不足）",
-                    self.channel,
-                    export_path.display()
-                )))
-            })?;
-            let t0 = Instant::now();
-            while !dir.exists() {
-                if t0.elapsed() >= PWM_EXPORT_TIMEOUT {
-                    return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                        &format!(
-                            "pwm 导出后 {:?} 未在 {}ms 内出现（内核 sysfs 异常）",
-                            dir.display(),
-                            PWM_EXPORT_TIMEOUT.as_millis()
-                        ),
-                    )));
-                }
-                std::thread::sleep(PWM_EXPORT_POLL);
-            }
+        if dir.exists() {
+            return Ok(false);
         }
-        // 周期仅在变化时重写；重写前先归零占空比（旧 duty > 新 period 会被内核
-        // EINVAL 拒）。读不到/读成垃圾按 0 处理 → 走全量写。
+        let export_path = self.chip_dir().join("export");
+        std::fs::write(&export_path, format!("{}\n", self.channel)).map_err(|e| {
+            Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+                "pwm 导出通道 {} 写 {:?} 失败: {e}（芯片不在位——dtoverlay=pwm-2chan 未开，或权限不足）",
+                self.channel,
+                export_path.display()
+            )))
+        })?;
+        let t0 = Instant::now();
+        while !dir.exists() {
+            if t0.elapsed() >= PWM_EXPORT_TIMEOUT {
+                return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                    &format!(
+                        "pwm 导出后 {:?} 未在 {}ms 内出现（内核 sysfs 异常）",
+                        dir.display(),
+                        PWM_EXPORT_TIMEOUT.as_millis()
+                    ),
+                )));
+            }
+            std::thread::sleep(PWM_EXPORT_POLL);
+        }
+        Ok(true)
+    }
+
+    /// 落定全量配置：周期仅在变化时重写（重写前先归零占空比——旧 duty > 新
+    /// period 会被内核 EINVAL 拒；读不到/读成垃圾按 0 处理走全量写），然后中位
+    /// 脉宽 + 使能。
+    fn rr3_configure(&self) -> Result<(), Rr3HalError> {
+        let dir = self.pwm_dir();
         if pwm_read_u64(&dir.join("period")).unwrap_or(0) != RR3_SERVO_PERIOD_NS as u64 {
             pwm_write(&dir.join("duty_cycle"), 0)?;
             pwm_write(&dir.join("period"), RR3_SERVO_PERIOD_NS)?;
         }
         pwm_write(&dir.join("duty_cycle"), servo_duty_ns(SERVO_NEUTRAL_DEG)?)?;
-        pwm_write(&dir.join("enable"), 1)?;
-        *ensured = Some(we_exported);
-        Ok(())
+        pwm_write(&dir.join("enable"), 1)
     }
 }
 
