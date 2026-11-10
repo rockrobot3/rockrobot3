@@ -129,30 +129,49 @@ fn rr3_wake_cfg_of(doc: &Value) -> Result<Rr3WakeCfg, String> {
     let Some(w) = doc.get("rr3-brain").and_then(|b| b.get("wake")) else {
         return Ok(cfg);
     };
-    if let Some(v) = w.get("enable") {
-        cfg.enable = v
-            .as_bool()
-            .ok_or_else(|| "config [rr3-brain.wake] enable 须布尔".to_string())?;
-    }
-    if let Some(v) = w.get("phrases") {
-        cfg.phrases = rr3_wake_phrases(v)?;
-    }
-    if let Some(v) = w.get("ack") {
-        let s = v
-            .as_str()
-            .ok_or_else(|| "config [rr3-brain.wake] ack 须字符串".to_string())?
-            .trim();
-        if s.is_empty() {
-            return Err("config [rr3-brain.wake] ack 不得为空".to_string());
+    for (key, set) in RR3_WAKE_SETS {
+        if let Some(v) = w.get(key) {
+            set(&mut cfg, v)?;
         }
-        cfg.ack = s.to_string();
-    }
-    if let Some(v) = w.get("followup_ms") {
-        cfg.followup_ms = v
-            .as_u64()
-            .ok_or_else(|| "config [rr3-brain.wake] followup_ms 须非负整数".to_string())?;
     }
     Ok(cfg)
+}
+
+/// 唤醒段四键 → 落位（未给键保留缺省；未知键维持原状不拒）。
+type Rr3WakeSet = fn(&mut Rr3WakeCfg, &Value) -> Result<(), String>;
+const RR3_WAKE_SETS: [(&str, Rr3WakeSet); 4] = [
+    ("enable", |c, v| {
+        c.enable = v
+            .as_bool()
+            .ok_or_else(|| "config [rr3-brain.wake] enable 须布尔".to_string())?;
+        Ok(())
+    }),
+    ("phrases", |c, v| {
+        c.phrases = rr3_wake_phrases(v)?;
+        Ok(())
+    }),
+    ("ack", |c, v| {
+        c.ack = rr3_wake_ack(v)?;
+        Ok(())
+    }),
+    ("followup_ms", |c, v| {
+        c.followup_ms = v
+            .as_u64()
+            .ok_or_else(|| "config [rr3-brain.wake] followup_ms 须非负整数".to_string())?;
+        Ok(())
+    }),
+];
+
+/// `ack`：非空字符串（trim 后空即拒）。
+fn rr3_wake_ack(v: &Value) -> Result<String, String> {
+    let s = v
+        .as_str()
+        .ok_or_else(|| "config [rr3-brain.wake] ack 须字符串".to_string())?
+        .trim();
+    if s.is_empty() {
+        return Err("config [rr3-brain.wake] ack 不得为空".to_string());
+    }
+    Ok(s.to_string())
 }
 
 /// `phrases` 项形状核：字符串数组、项去空白、空项跳过——全空即拒（空短语表
