@@ -125,26 +125,31 @@ fn rr3_sim_arg_value(args: &[String], i: usize, flag: &str) -> Result<String, St
     Ok(v)
 }
 
-/// 取值旗标落位（路径四件与后端词四件；`--rrctl` 无专名分支，与旧实现同义）。
+/// 取值旗标落位（路径九件与后端词四件；`--rrctl` 无专名分支，与旧实现同义）。
 fn rr3_sim_arg_set(a: &mut Rr3SimArgs, flag: &str, v: String) {
-    let p = PathBuf::from(&v);
-    match flag {
-        "--socket" => a.socket = Some(p),
-        "--repo" => a.repo = Some(p),
-        "--rrd" => a.rrd = Some(p),
-        "--sim-peer" => a.sim_peer = Some(p),
-        "--sense" => a.sense = Some(p),
-        "--interact" => a.interact = Some(p),
-        "--act" => a.act = Some(p),
-        "--brain-bin" => a.brain_bin = Some(p),
-        "--profile" => a.profile = Some(p),
-        "--audio-backend" => a.audio_backend = Some(v),
-        "--sink-backend" => a.sink_backend = Some(v),
-        "--brain-cloud" => a.brain_cloud = Some(v),
-        "--brain-base-url" => a.brain_base_url = Some(v),
-        _ => a.rrctl = Some(p),
+    match RR3_SIM_ARG_SETS.iter().find(|(f, _)| *f == flag) {
+        Some((_, set)) => set(a, v),
+        None => a.rrctl = Some(PathBuf::from(v)),
     }
 }
+
+/// 旗标 → 落位函数表（`--rrctl` 不在表内：兜底语义归 `rr3_sim_arg_set`）。
+type Rr3SimSet = fn(&mut Rr3SimArgs, String);
+const RR3_SIM_ARG_SETS: [(&str, Rr3SimSet); 13] = [
+    ("--socket", |a, v| a.socket = Some(PathBuf::from(v))),
+    ("--repo", |a, v| a.repo = Some(PathBuf::from(v))),
+    ("--rrd", |a, v| a.rrd = Some(PathBuf::from(v))),
+    ("--sim-peer", |a, v| a.sim_peer = Some(PathBuf::from(v))),
+    ("--sense", |a, v| a.sense = Some(PathBuf::from(v))),
+    ("--interact", |a, v| a.interact = Some(PathBuf::from(v))),
+    ("--act", |a, v| a.act = Some(PathBuf::from(v))),
+    ("--brain-bin", |a, v| a.brain_bin = Some(PathBuf::from(v))),
+    ("--profile", |a, v| a.profile = Some(PathBuf::from(v))),
+    ("--audio-backend", |a, v| a.audio_backend = Some(v)),
+    ("--sink-backend", |a, v| a.sink_backend = Some(v)),
+    ("--brain-cloud", |a, v| a.brain_cloud = Some(v)),
+    ("--brain-base-url", |a, v| a.brain_base_url = Some(v)),
+];
 
 fn rr3_sim_unknown(other: &str) -> String {
     format!(
