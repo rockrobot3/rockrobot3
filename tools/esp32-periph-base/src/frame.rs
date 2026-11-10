@@ -157,52 +157,63 @@ fn frame_handle_face(
     args: &Value,
 ) -> Result<Value, String> {
     if let Some(v) = args.get("expression") {
-        let expr = v
-            .as_str()
-            .ok_or_else(|| format!("expression 非法: {v}（须字符串）"))?;
-        if !RR3_FACE_EXPRS.contains(&expr) {
-            return Err(format!("expression 不在白名单: \"{expr}\""));
-        }
-        let base = expr_eye_base(expr);
-        let previous = std::mem::replace(&mut ctl.prev_expr, expr.to_string());
-        {
-            let mut b = lock_bus(bus);
-            b.st.expr_mode = true;
-            b.st.frame_mode = false;
-            b.st.base = base;
-            b.st.last_text = format!("EXPR {expr}");
-            b.st.anim_reset();
-            b.st.drawn = base;
-        }
-        push_job(bus, Job::RenderCapsules);
-        Ok(json!({ "expression": expr, "previous": previous }))
+        rr3_face_expr(bus, ctl, v)
     } else if let Some(v) = args.get("frame") {
-        let arr = v
-            .as_array()
-            .ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
-        if arr.len() != 8 {
-            return Err(format!("frame 长度非法: {}（须 8）", arr.len()));
-        }
-        let mut f = [0u8; 8];
-        for (i, item) in arr.iter().enumerate() {
-            let b = item
-                .as_u64()
-                .ok_or_else(|| format!("frame[{i}] 非法: {item}"))?;
-            if b > 255 {
-                return Err(format!("frame[{i}] 超 u8: {b}"));
-            }
-            f[i] = b as u8;
-        }
-        {
-            let mut b = lock_bus(bus);
-            b.st.frame_mode = true;
-            b.st.expr_mode = false;
-        }
-        push_job(bus, Job::RenderFrame(f));
-        Ok(json!({ "applied": true }))
+        rr3_face_frame(bus, v)
     } else {
         Err("缺 expression/frame 之一".into())
     }
+}
+
+/// 表情臂：白名单门 → 基态预设 → 提交控制面状态（模式/基态/动画时钟清零）→
+/// 推渲染作业；previous 记账在 [`CtlState`]。
+fn rr3_face_expr(bus: &Arc<Mutex<Bus>>, ctl: &mut CtlState, v: &Value) -> Result<Value, String> {
+    let expr = v
+        .as_str()
+        .ok_or_else(|| format!("expression 非法: {v}（须字符串）"))?;
+    if !RR3_FACE_EXPRS.contains(&expr) {
+        return Err(format!("expression 不在白名单: \"{expr}\""));
+    }
+    let base = expr_eye_base(expr);
+    let previous = std::mem::replace(&mut ctl.prev_expr, expr.to_string());
+    {
+        let mut b = lock_bus(bus);
+        b.st.expr_mode = true;
+        b.st.frame_mode = false;
+        b.st.base = base;
+        b.st.last_text = format!("EXPR {expr}");
+        b.st.anim_reset();
+        b.st.drawn = base;
+    }
+    push_job(bus, Job::RenderCapsules);
+    Ok(json!({ "expression": expr, "previous": previous }))
+}
+
+/// 点阵臂：8 字节帧门 → 切模式 → 推 64x64 放大渲染作业。
+fn rr3_face_frame(bus: &Arc<Mutex<Bus>>, v: &Value) -> Result<Value, String> {
+    let arr = v
+        .as_array()
+        .ok_or_else(|| format!("frame 非法: {v}（须 8 字节数组）"))?;
+    if arr.len() != 8 {
+        return Err(format!("frame 长度非法: {}（须 8）", arr.len()));
+    }
+    let mut f = [0u8; 8];
+    for (i, item) in arr.iter().enumerate() {
+        let b = item
+            .as_u64()
+            .ok_or_else(|| format!("frame[{i}] 非法: {item}"))?;
+        if b > 255 {
+            return Err(format!("frame[{i}] 超 u8: {b}"));
+        }
+        f[i] = b as u8;
+    }
+    {
+        let mut b = lock_bus(bus);
+        b.st.frame_mode = true;
+        b.st.expr_mode = false;
+    }
+    push_job(bus, Job::RenderFrame(f));
+    Ok(json!({ "applied": true }))
 }
 
 /// Response 回帧（组帧机制在 periph-mech，平台面只做"失败点名不重试"）：result
