@@ -451,7 +451,9 @@ fn rr3_domain_commit(
     let tmp = paths
         .profile
         .with_file_name(format!("{stem}.tmp-write.toml"));
-    std::fs::write(&tmp, new_text.as_bytes())
+    // 候选档独占建（机制单点 rr-ipc）：tmp 位同机可写，跟随符号链接写会变成
+    // 任意文件截断器；独占建 + 定权把这条路径关死（残留由机制先清）。
+    rr_ipc::rr3_stage_excl(&tmp, new_text.as_bytes(), 0o644)
         .map_err(|e| invalid(format!("写临时档 {} 失败: {e}", tmp.display())))?;
     let boot = match crate::profile::rr3_boot_inputs(
         &tmp,
@@ -605,27 +607,9 @@ fn rr3_axis_old(
     Ok(json!(file.profile.current_ceil_ma))
 }
 
-/// 候选档独占写（机制）：`create_new` 拒跟符号链接、拒覆盖已存在项；unix 上以
-/// 0600 创建，保证"落盘 → 读回校验"之间无第三方可改。文件名只作去重，不承担
-/// 安全——放在世界可写的 tmp 目录里时，安全属性必须由本函数给足（读写同机、
-/// 非机密，只要求完整性与防篡改）。
-fn rr3_stage_write(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-
-    let mut opt = std::fs::OpenOptions::new();
-    opt.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opt.mode(0o600);
-    }
-    let mut f = opt.open(path)?;
-    f.write_all(body)?;
-    f.flush()?;
-    Ok(())
-}
-
-/// 单键手术产出 tmp 候选档：读旧档 → 改 current_ceil_ma → 独占写到临时路径。
+/// 单键手术产出 tmp 候选档：读旧档 → 改 current_ceil_ma → 独占写到临时路径
+/// （机制单点 rr-ipc 的 0600 候选落盘——文件名只作去重、不承担安全，落在世界
+/// 可写的 tmp 目录里时安全属性由独占建给足）。
 fn rr3_axis_stage(axis_path: &Path, n: u64) -> Result<PathBuf, (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let new_text = crate::profile::rr3_key_line_apply(
@@ -643,7 +627,7 @@ fn rr3_axis_stage(axis_path: &Path, n: u64) -> Result<PathBuf, (Rr3StatusCode, S
         "rr3-axis-candidate-{}-{nanos}.toml",
         std::process::id()
     ));
-    rr3_stage_write(&tmp, new_text.as_bytes())
+    rr_ipc::rr3_stage_excl(&tmp, new_text.as_bytes(), 0o600)
         .map_err(|e| invalid(format!("写候选档 {} 失败: {e}", tmp.display())))?;
     Ok(tmp)
 }
@@ -1091,33 +1075,6 @@ present = ["act.servo", "power.charger"]
             let (code, msg) = rr3_write_execute(&fx.paths, &p).expect_err("档缺必须拒");
             assert_eq!(code, Rr3StatusCode::Invalid);
             assert!(msg.contains("不在场"), "{msg}");
-        }
-
-        /// 候选档独占写：已存在项（含符号链接）一律拒，且落盘权限 0600
-        /// （共享 tmp 目录里的篡改/覆盖面由机制本身关死，不靠文件名随机）。
-        #[cfg(unix)]
-        #[test]
-        fn stage_write_excl() {
-            use std::os::unix::fs::{symlink, PermissionsExt};
-            let dir = crate::test_fixtures::tmpdir_ns("rrd-axis-stage-", "excl");
-            let victim = dir.join("victim.txt");
-            std::fs::write(&victim, "untouched").unwrap();
-            let link = dir.join("candidate.toml");
-            symlink(&victim, &link).unwrap();
-            let e = rr3_stage_write(&link, b"pwned").expect_err("符号链接必须拒写");
-            assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
-            assert_eq!(
-                std::fs::read_to_string(&victim).unwrap(),
-                "untouched",
-                "链接目标不许被写"
-            );
-
-            let fresh = dir.join("fresh.toml");
-            rr3_stage_write(&fresh, b"body").expect("独占写必成");
-            assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "body");
-            let mode = std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600, "候选档只许属主读写（同机第三方不可改）");
-            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 }
