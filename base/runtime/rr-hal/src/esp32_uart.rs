@@ -93,41 +93,22 @@ pub fn rr3_baud_parse(s: &str) -> Option<u32> {
 /// 侧不换形）；全缺 = `None`（无板侧配置可注）。独立纯函数：键位/换形可单测。
 fn rr3_board_payload(b: &Rr3HalBindings) -> Option<Value> {
     let mut m = Map::new();
-    if let Some(v) = b.i2c_sda {
-        m.insert(RR3_BOARD_BINDING_I2C_SDA.to_string(), json!(v.to_string()));
-    }
-    if let Some(v) = b.i2c_scl {
-        m.insert(RR3_BOARD_BINDING_I2C_SCL.to_string(), json!(v.to_string()));
-    }
-    if let Some(v) = b.adc_rail_pin {
-        m.insert(
-            RR3_BOARD_BINDING_ADC_RAIL_PIN.to_string(),
-            json!(v.to_string()),
-        );
-    }
-    if let Some(v) = b.uart2_tx {
-        m.insert(RR3_BOARD_BINDING_UART2_TX.to_string(), json!(v.to_string()));
-    }
-    if let Some(v) = b.uart2_rx {
-        m.insert(RR3_BOARD_BINDING_UART2_RX.to_string(), json!(v.to_string()));
-    }
-    if let Some(v) = b.ledc_pan {
-        m.insert(RR3_BOARD_BINDING_LEDC_PAN.to_string(), json!(v.to_string()));
-    }
-    if let Some(v) = b.ledc_tilt {
-        m.insert(
-            RR3_BOARD_BINDING_LEDC_TILT.to_string(),
-            json!(v.to_string()),
-        );
-    }
-    if let Some(v) = b.i2s_bclk {
-        m.insert(RR3_BOARD_BINDING_I2S_BCLK.to_string(), json!(v.to_string()));
-    }
-    if let Some(v) = b.i2s_sd {
-        m.insert(RR3_BOARD_BINDING_I2S_SD.to_string(), json!(v.to_string()));
-    }
-    if let Some(v) = b.i2s_ws {
-        m.insert(RR3_BOARD_BINDING_I2S_WS.to_string(), json!(v.to_string()));
+    let pins: [(&str, Option<u8>); 10] = [
+        (RR3_BOARD_BINDING_I2C_SDA, b.i2c_sda),
+        (RR3_BOARD_BINDING_I2C_SCL, b.i2c_scl),
+        (RR3_BOARD_BINDING_ADC_RAIL_PIN, b.adc_rail_pin),
+        (RR3_BOARD_BINDING_UART2_TX, b.uart2_tx),
+        (RR3_BOARD_BINDING_UART2_RX, b.uart2_rx),
+        (RR3_BOARD_BINDING_LEDC_PAN, b.ledc_pan),
+        (RR3_BOARD_BINDING_LEDC_TILT, b.ledc_tilt),
+        (RR3_BOARD_BINDING_I2S_BCLK, b.i2s_bclk),
+        (RR3_BOARD_BINDING_I2S_SD, b.i2s_sd),
+        (RR3_BOARD_BINDING_I2S_WS, b.i2s_ws),
+    ];
+    for (key, v) in pins {
+        if let Some(v) = v {
+            m.insert(key.to_string(), json!(v.to_string()));
+        }
     }
     if let Some(v) = &b.cred_store {
         m.insert(
@@ -257,16 +238,13 @@ impl Rr3BridgeConn {
             self.conn = None;
             return Err(Rr3HalError::Busy);
         }
-        // 收帧：连接开口已把读侧定档为"静默 ≤ [RR3_REPLY_WAIT_DS] 即返回"，
-        // 板侧无应答/链路断时这里不会挂死——报错即报废连接，下次调用重开。
-        let buf = match conn.rr3_recv_buf() {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("rr-hal-esp32: 应答收帧失败（板侧无应答/链路断）: {e:?}");
-                self.conn = None;
-                return Err(Rr3HalError::Busy);
-            }
-        };
+        self.rr3_reply(id)
+    }
+
+    /// 应答收帧与解码（`rr3_method_call` 的下半程）：读超时档已在连接开口时定
+    /// 死，板侧无应答/链路断在此回 Busy 并报废连接，下次调用重开。
+    fn rr3_reply(&mut self, id: u64) -> Result<Value, Rr3HalError> {
+        let buf = self.rr3_recv_reply()?;
         let frame = match Rr3Frame::try_from(buf) {
             Ok(f) => f,
             Err(e) => {
@@ -295,6 +273,22 @@ impl Rr3BridgeConn {
             eprintln!("rr-hal-esp32: 应答门拒绝: {e}");
             Rr3HalError::Busy
         })
+    }
+
+    /// 读一帧（窗口耗尽即判板侧无应答/链路断，点名后报废连接）。
+    fn rr3_recv_reply(&mut self) -> Result<Rr3FrameBuf, Rr3HalError> {
+        let conn = match self.conn.as_mut() {
+            Some(c) => c,
+            None => return Err(Rr3HalError::Busy),
+        };
+        match conn.rr3_recv_buf() {
+            Ok(b) => Ok(b),
+            Err(e) => {
+                eprintln!("rr-hal-esp32: 应答收帧失败（板侧无应答/链路断）: {e:?}");
+                self.conn = None;
+                Err(Rr3HalError::Busy)
+            }
+        }
     }
 }
 
