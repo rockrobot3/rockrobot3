@@ -609,7 +609,9 @@ fn rr3_axis_old(
 
 /// 单键手术产出 tmp 候选档：读旧档 → 改 current_ceil_ma → 独占写到临时路径
 /// （机制单点 rr-ipc 的 0600 候选落盘——文件名只作去重、不承担安全，落在世界
-/// 可写的 tmp 目录里时安全属性由独占建给足）。
+/// 可写的 tmp 目录里时安全属性由独占建给足）。随落盘序 unix 门：唯一调用方
+/// [`rr3_write_axis`] 同门，非 unix 编译面不得引用该门内的机制件。
+#[cfg(unix)]
 fn rr3_axis_stage(axis_path: &Path, n: u64) -> Result<PathBuf, (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let new_text = crate::profile::rr3_key_line_apply(
