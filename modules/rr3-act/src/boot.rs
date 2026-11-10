@@ -336,6 +336,11 @@ pub(crate) struct Rr3IntentCfg {
 /// 在生产里没有物理意义，却会让循环周期归零（满转自旋）。
 const RR3_MAX_LOOP_HZ: u32 = 1_000;
 
+/// 饱和通告窗上界（毫秒，本轮静态审计）：`rr3_reflex_plan` 以 250ms 窗折算
+/// 窗数 `div_ceil(… ) as u32`——无上界的巨值会静默截断成任意窗数（饱和通告
+/// 语义失真）；超 10min 的连续饱和通告窗在生产无意义，超界即配置错点名拒。
+const RR3_MAX_NOTICE_MS: u64 = 600_000;
+
 /// TOML 文本 → Rr3ActCfg。手工下钻不引 serde derive：字段个位数，
 /// 点名缺字段的文案比派生宏的默认报错可读。
 pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
@@ -393,11 +398,17 @@ fn rr3_act_led(sect: &toml::Value) -> Result<Rr3LedCfg, String> {
     })
 }
 
-/// reflex 段：节拍走越界裁决（`rr3_act_cfg_loop`），饱和提示阈值直取。
+/// reflex 段：节拍走越界裁决（`rr3_act_cfg_loop`），饱和提示阈值同域裁决。
 fn rr3_act_reflex(sect: &toml::Value) -> Result<Rr3ReflexCfg, String> {
+    let notice = rr3_act_cfg_u64(sect, "saturate_notice_ms", "reflex")?;
+    if notice > RR3_MAX_NOTICE_MS {
+        return Err(format!(
+            "config [rr3-act.reflex] saturate_notice_ms 须在 0..={RR3_MAX_NOTICE_MS}，收到 {notice}（窗数以 u32 折算，超界会静默截断）"
+        ));
+    }
     Ok(Rr3ReflexCfg {
         loop_hz: rr3_act_cfg_loop(sect)?,
-        saturate_notice_ms: rr3_act_cfg_u64(sect, "saturate_notice_ms", "reflex")?,
+        saturate_notice_ms: notice,
     })
 }
 
@@ -643,6 +654,39 @@ saturate_notice_ms = 500
         assert!(
             e.contains("loop_hz") && e.contains("满转自旋"),
             "超大 loop_hz 点名: {e}"
+        );
+    }
+
+    /// 饱和通告窗越界拒 boot（本轮静态审计）：`rr3_reflex_plan` 的窗数折算
+    /// `div_ceil(…) as u32` 会把无上界巨值静默截断，语义失真且不可定位。
+    #[test]
+    fn config_parse_rejects_notice_overflow() {
+        let text = r#"
+[rr3-act.servo]
+move_timeout_ms = 800
+state_min_interval_ms = 50
+
+[rr3-act.led]
+blink_period_ms = 500
+effects = ["on"]
+
+[rr3-act.intent]
+open_topics = []
+
+[rr3-act.reflex]
+loop_hz = 1000
+saturate_notice_ms = 18446744073709551615
+"#;
+        let e = rr3_act_config_parse(text).unwrap_err();
+        assert!(e.contains("saturate_notice_ms"), "越界点名: {e}");
+        let ok = text.replace(
+            "saturate_notice_ms = 18446744073709551615",
+            "saturate_notice_ms = 600000",
+        );
+        assert_eq!(
+            rr3_act_config_parse(&ok).unwrap().reflex.saturate_notice_ms,
+            600_000,
+            "上界本身合法"
         );
     }
 

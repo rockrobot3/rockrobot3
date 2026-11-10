@@ -131,6 +131,11 @@ const RR3_MAX_CHANNELS: u8 = 8;
 const RR3_MAX_FRAME_MS: u64 = 1_000;
 /// 判向窗 ring 的采样点总上界（8Mi 点 ≈ 16MiB）
 const RR3_MAX_RING_SAMPLES: u128 = 8 * 1024 * 1024;
+/// 反射环时间策略量上界（本轮静态审计）：门控尾窗/播放间隔/点头两段时序都是
+/// 与 `Instant` 或 `Duration` 相加的毫秒量，畸形巨值在 debug 档触发加法溢出
+/// panic、release 档回绕成"门立关/手势错时"——长于 10min 的门控与蓄势在真机上
+/// 没有语义，超界即配置错，装载期点名拒（与 frame_ms/window_ms 同一 fail-closed 口径）。
+const RR3_MAX_STRATEGY_MS: u64 = 600_000;
 
 /// 解析配置文本：缺键回落默认，类型错显式报错（不静默吞）。
 pub(crate) fn rr3_sense_cfg_parse(text: &str) -> Result<Rr3SenseConfig, String> {
@@ -291,6 +296,23 @@ fn rr3_sense_cfg_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
             cfg.doa.window_ms
         ));
     }
+    rr3_reflex_time_check(&cfg.reflex)
+}
+
+/// 反射环四时间键的上界判定（判据单点；键名逐条点名便于定位配置错）。
+fn rr3_reflex_time_check(r: &Rr3ReflexConfig) -> Result<(), String> {
+    for (key, v) in [
+        ("gate_tail_ms", r.gate_tail_ms),
+        ("gate_gap_ms", r.gate_gap_ms),
+        ("nod_delay_ms", r.nod_delay_ms),
+        ("nod_hold_ms", r.nod_hold_ms),
+    ] {
+        if v > RR3_MAX_STRATEGY_MS {
+            return Err(format!(
+                "[rr3-sense.reflex] {key} 须在 0..={RR3_MAX_STRATEGY_MS}，收到 {v}（门控/手势毫秒量与 Instant 相加，超界会溢出 panic 或回绕）"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -394,9 +416,16 @@ mod tests {
             "[rr3-sense.doa]\nbin_threshold_deg = 181\n",
             "[rr3-sense.reflex]\ndeadband_deg = -1\n",
             "[rr3-sense.doa]\nwindow_ms = 3600000\n",
+            // 本轮审计：时间策略量超上界会参与 Instant 加法（debug panic / release 回绕）
+            "[rr3-sense.reflex]\ngate_tail_ms = 600001\n",
+            "[rr3-sense.reflex]\ngate_gap_ms = 18446744073709551615\n",
+            "[rr3-sense.reflex]\nnod_delay_ms = 600001\n",
+            "[rr3-sense.reflex]\nnod_hold_ms = 600001\n",
         ] {
             assert!(rr3_sense_cfg_parse(text).is_err(), "必须拒: {text}");
         }
+        // 上界本身合法（含门控尾窗取满）
+        assert!(rr3_sense_cfg_parse("[rr3-sense.reflex]\ngate_tail_ms = 600000\n").is_ok());
         assert!(rr3_sense_cfg_parse(
             "[rr3-sense.audio]\nsample_rate = 48000\nchannels = 2\nframe_ms = 10\n"
         )
