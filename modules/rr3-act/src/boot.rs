@@ -117,11 +117,24 @@ fn rr3_axis_kv(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
     if rr3_axis_seen(raw, k)? {
         return Err(format!("执行轴状态 {k} 重复"));
     }
+    rr3_axis_slot(raw, k, v)
+}
+
+/// 单键落位分派（重复键已由调用方判过；未知键点名）。
+fn rr3_axis_slot(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
+    match k {
+        "calibrated" | "hard_stop" => rr3_axis_flag(raw, k, v),
+        "lo" | "hi" | "center" => rr3_axis_pose(raw, k, v),
+        other => Err(format!("执行轴状态未知键 {other:?}")),
+    }
+}
+
+/// calibrated/hard_stop 两键（显式布尔 / 档案词表）。
+fn rr3_axis_flag(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
     match k {
         "calibrated" => raw.calibrated = Some(rr3_axis_bool(v)?),
         "hard_stop" => raw.hard_stop = Some(rr3_axis_stop(v)?),
-        "lo" | "hi" | "center" => rr3_axis_pose(raw, k, v)?,
-        other => return Err(format!("执行轴状态未知键 {other:?}")),
+        _ => return Err(format!("执行轴状态未知键 {k:?}")),
     }
     Ok(())
 }
@@ -270,32 +283,37 @@ fn rr3_bridge_shared(servo: &str) -> bool {
 /// 物理执行器、单一写者），并把 backend 名回显为 `remote(rr3-sense)`；其余
 /// Unsupported/参数错仍 fail-closed 上抛，不把"开不了桥"当通用降级借口。
 pub(crate) fn rr3_act_probe(bus: &BusHandle) -> Result<Rr3ActDevs, String> {
-    let (servo_dev, servo_backend) = {
-        // 单所有者优先（A9 根因）：音频采集面同走 esp32 桥时，桥的契约所有者是
-        // rr3-sense（音频流 + 命令旁路）。此处**不得先开桥再等 Busy**——两进程同时
-        // 起跑时 act 先 open 会赢下 flock，sense 随后连报 HAL 设备忙（2026-11-09
-        // 真板实录，两次部署复现）。改为直接走远端命令面；sense 未起时 act 显式
-        // 失败交 supervisor 退避重试，绝不抢桥。
-        let backend = rr3_servo_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER);
-        if rr3_bridge_shared(backend) {
-            rr3_remote_bridge(bus, backend)?
-        } else {
-            let (dev, backend) = rr3_hal_servo();
-            match dev.angle() {
-                Ok(_) => (dev, backend),
-                Err(Rr3HalError::Busy) if backend == RR3_BACKEND_ESP32 => {
-                    rr3_remote_bridge(bus, backend)?
-                }
-                Err(e) => return Err(format!("舵机面探活失败({backend}): {e}")),
-            }
-        }
-    };
+    let (servo_dev, servo_backend) = rr3_servo_pick(bus)?;
     let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
     let (relay_gpio, relay_backend) = rr3_hal_gpio_out("relay");
     rr3_opt_face("LED", led_backend, led_gpio.level())?;
     rr3_opt_face("继电器", relay_backend, relay_gpio.level())?;
     eprintln!("执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}");
     Ok((servo_dev, led_gpio, relay_gpio))
+}
+
+/// 舵机面选择：共享桥单所有者优先走远端命令面，否则本进程开桥探活。
+fn rr3_servo_pick(bus: &BusHandle) -> Result<(Box<dyn Rr3PwmServo>, &'static str), String> {
+    // 单所有者优先（A9 根因）：音频采集面同走 esp32 桥时，桥的契约所有者是
+    // rr3-sense（音频流 + 命令旁路）。此处**不得先开桥再等 Busy**——两进程同时
+    // 起跑时 act 先 open 会赢下 flock，sense 随后连报 HAL 设备忙（2026-11-09
+    // 真板实录，两次部署复现）。改为直接走远端命令面；sense 未起时 act 显式
+    // 失败交 supervisor 退避重试，绝不抢桥。
+    let backend = rr3_servo_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER);
+    if rr3_bridge_shared(backend) {
+        return rr3_remote_bridge(bus, backend);
+    }
+    rr3_servo_open(bus)
+}
+
+/// 本进程舵机面探活（Busy + esp32 降级远端，其余读失败 fail-closed 上抛）。
+fn rr3_servo_open(bus: &BusHandle) -> Result<(Box<dyn Rr3PwmServo>, &'static str), String> {
+    let (dev, backend) = rr3_hal_servo();
+    match dev.angle() {
+        Ok(_) => Ok((dev, backend)),
+        Err(Rr3HalError::Busy) if backend == RR3_BACKEND_ESP32 => rr3_remote_bridge(bus, backend),
+        Err(e) => Err(format!("舵机面探活失败({backend}): {e}")),
+    }
 }
 
 /// 可缺面探活：占位后端（`Unsupported`）是装配单"该格未启用"的诚实投影——点名
@@ -360,10 +378,25 @@ const RR3_MAX_NOTICE_MS: u64 = 600_000;
 /// 点名缺字段的文案比派生宏的默认报错可读。
 pub(crate) fn rr3_act_config_parse(text: &str) -> Result<Rr3ActCfg, String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
-    let servo_sect = rr3_act_cfg_sect(&v, "servo")?;
-    let led_sect = rr3_act_cfg_sect(&v, "led")?;
-    let intent_sect = rr3_act_cfg_sect(&v, "intent")?;
-    let reflex_sect = rr3_act_cfg_sect(&v, "reflex")?;
+    rr3_act_cfg_build(&v)
+}
+
+/// 四个段址齐取后逐段解析（取址次序与解析次序分开，便于各自定位）。
+fn rr3_act_cfg_build(v: &toml::Value) -> Result<Rr3ActCfg, String> {
+    let servo_sect = rr3_act_cfg_sect(v, "servo")?;
+    let led_sect = rr3_act_cfg_sect(v, "led")?;
+    let intent_sect = rr3_act_cfg_sect(v, "intent")?;
+    let reflex_sect = rr3_act_cfg_sect(v, "reflex")?;
+    rr3_act_cfg_parts(servo_sect, led_sect, intent_sect, reflex_sect)
+}
+
+/// 段 → 汇总形状（字段按声明序求值）。
+fn rr3_act_cfg_parts(
+    servo_sect: &toml::Value,
+    led_sect: &toml::Value,
+    intent_sect: &toml::Value,
+    reflex_sect: &toml::Value,
+) -> Result<Rr3ActCfg, String> {
     Ok(Rr3ActCfg {
         servo: rr3_act_servo(servo_sect)?,
         led: rr3_act_led(led_sect)?,

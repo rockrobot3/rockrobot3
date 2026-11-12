@@ -19,10 +19,19 @@ pub fn rr3_tts_voice(model: &str) -> String {
 /// WAV 容器里 `data` 块的载荷（宿主 `say` 兜底用）：跳过 RIFF 头与各子块，
 /// 只取 `data` 块本体；无 `data` 块/长度越界返回 None（不猜不补）。
 pub fn rr3_wav_data_chunk(wav: &[u8]) -> Option<&[u8]> {
-    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+    if !rr3_wav_is_riff(wav) {
         return None;
     }
-    let mut i = 12;
+    rr3_wav_find_data(wav, 12)
+}
+
+/// RIFF/WAVE 容器头形状（不足 12 字节或魔数不符即否）。
+fn rr3_wav_is_riff(wav: &[u8]) -> bool {
+    wav.len() >= 12 && &wav[0..4] == b"RIFF" && &wav[8..12] == b"WAVE"
+}
+
+/// 自 `start` 起逐子块跳读，命中 `data` 块返回载荷（越界即 None）。
+fn rr3_wav_find_data(wav: &[u8], mut i: usize) -> Option<&[u8]> {
     while i + 8 <= wav.len() {
         let id = &wav[i..i + 4];
         let len = u32::from_le_bytes(wav[i + 4..i + 8].try_into().ok()?) as usize;

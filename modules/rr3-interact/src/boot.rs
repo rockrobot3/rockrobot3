@@ -278,14 +278,19 @@ fn rr3_expect_set(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Result
     match k {
         "wiring" => expect.wiring = expect_wiring(sval)?,
         "contracts" => expect.contracts = expect_contr(sval)?,
-        leg @ ("speaker" | "relay" | "face") => expect_leg(expect, leg, sval)?,
-        other => {
-            return Err(format!(
-                "config [rr3-interact.selftest.expect] 未知腿名 {other:?}（在册腿 speaker/relay/face/wiring/contracts）"
-            ))
-        }
+        _ => return rr3_expect_leg_key(expect, k, sval),
     }
     Ok(())
+}
+
+/// 固定腿三态键（腿名册外点名拒）。
+fn rr3_expect_leg_key(expect: &mut Rr3SelftestExpect, k: &str, sval: &str) -> Result<(), String> {
+    match k {
+        "speaker" | "relay" | "face" => expect_leg(expect, k, sval),
+        other => Err(format!(
+            "config [rr3-interact.selftest.expect] 未知腿名 {other:?}（在册腿 speaker/relay/face/wiring/contracts）"
+        )),
+    }
 }
 
 /// face 段：non_pointable 必填（在册表情白名单逐条对账）、节拍与兜底表情
@@ -310,26 +315,35 @@ fn rr3_itact_face(v: &toml::Value) -> Result<Rr3FaceCfg, String> {
 /// 不可点名集（I-11）：数组逐元素必须是**在册契约值**，非在册名或非字符串
 /// 逐条点名拒 boot（fail-closed）；键在而数组为空 = 本形态不排除任何表情点名（合法）
 fn rr3_face_nonpt(face_sect: &toml::Value) -> Result<Vec<&'static str>, String> {
-    let arr = face_sect
+    let arr = rr3_face_arr(face_sect)?;
+    let mut non_pointable = Vec::with_capacity(arr.len());
+    for (i, e) in arr.iter().enumerate() {
+        non_pointable.push(rr3_face_at(i, e)?);
+    }
+    Ok(non_pointable)
+}
+
+/// 不可点名数组键取址（缺键点名拒 boot）。
+fn rr3_face_arr(face_sect: &toml::Value) -> Result<&Vec<toml::Value>, String> {
+    face_sect
         .get("non_pointable")
         .and_then(toml::Value::as_array)
         .ok_or_else(|| {
             "config [rr3-interact.face] 缺 non_pointable（不可点名表情数组）".to_string()
-        })?;
-    let mut non_pointable = Vec::with_capacity(arr.len());
-    for (i, e) in arr.iter().enumerate() {
-        let s = e.as_str().ok_or_else(|| {
-            format!("config [rr3-interact.face] non_pointable[{i}] 必须是字符串，收到 {e}")
-        })?;
-        let expr = rr3_face_expr_lookup(s).ok_or_else(|| {
-            format!(
-                "config [rr3-interact.face] non_pointable[{i}] 非在册表情 {s:?}（在册值 {}）",
-                RR3_FACE_EXPRESSIONS_JOINED
-            )
-        })?;
-        non_pointable.push(expr);
-    }
-    Ok(non_pointable)
+        })
+}
+
+/// 单项：必须是**在册契约值**的字符串（逐条点名拒 boot）。
+fn rr3_face_at(i: usize, e: &toml::Value) -> Result<&'static str, String> {
+    let s = e.as_str().ok_or_else(|| {
+        format!("config [rr3-interact.face] non_pointable[{i}] 必须是字符串，收到 {e}")
+    })?;
+    rr3_face_expr_lookup(s).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.face] non_pointable[{i}] 非在册表情 {s:?}（在册值 {}）",
+            RR3_FACE_EXPRESSIONS_JOINED
+        )
+    })
 }
 
 /// 兜底表情：缺键回落 `idle`（在册白名单恒含，expect 不是兜底而是不变量）
