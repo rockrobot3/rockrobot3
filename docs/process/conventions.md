@@ -118,7 +118,7 @@ pi-periph-base `line_round`（24→16，OLED/FACE/SERVO 三臂抽 `oled_text`/`f
 远端回执考古红至至少 12 run 连败、早于本会话——P0-3（e392d70）消除"漏 env 静默
 落 sim"后，部署真值 hal_backend=linux 直透无硬件环境，三个演练载体全部翻红：
 ① sim-assemble——rr3-sim 只给 rrd 设了 sim env，supervisor 按装配单注入覆盖之；
-修 = 沙箱装配单副本 sim 变换（`rr3_asm_sim_profile_text`：hal_backend→sim +
+修 = 沙箱装配单副本 sim 变换（`rr3_asm_sim_text`：hal_backend→sim +
 audio/servo/display 专面摘除，改写后重解析复核，仓源装配单零改，与 --chain 同语义）。
 ② distro-smoke——双根因：仍按批N32 已删除的 Python brain pkg 树打包（③ 即爆）+
 容器内 linux 后端不可兑现；修 = brain 装机面改 Rust 形（bin+manifest+config，Python
