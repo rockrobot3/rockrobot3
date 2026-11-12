@@ -55,13 +55,8 @@ impl Rr3RemoteServo {
 fn rr3_remote_probe(bus: &BusHandle, axis: &str) -> Result<(), String> {
     let mut last_err = String::new();
     for try_no in 1..=RR3_REMOTE_TRIES {
-        match bus.call(RR3_SENSE_OPS_TOPIC, &json!({}), RR3_REMOTE_TIMEOUT) {
-            Ok(_) => {
-                eprintln!(
-                    "rr3-act: 远端舵机面就绪（axis={axis}，rr3-sense 持桥，第 {try_no} 次探测）"
-                );
-                return Ok(());
-            }
+        match rr3_probe_once(bus, axis, try_no) {
+            Ok(()) => return Ok(()),
             Err(e) => {
                 last_err = e;
                 std::thread::sleep(Duration::from_millis(RR3_REMOTE_BACKOFF_MS));
@@ -71,6 +66,14 @@ fn rr3_remote_probe(bus: &BusHandle, axis: &str) -> Result<(), String> {
     Err(format!(
         "远端舵机面不可达（rr3-sense {RR3_REMOTE_TRIES} 次探测全败）: {last_err}"
     ))
+}
+
+/// 单次探测：就绪即点名，失败原样回错（重试编排在调用方）。
+fn rr3_probe_once(bus: &BusHandle, axis: &str, try_no: u32) -> Result<(), String> {
+    bus.call(RR3_SENSE_OPS_TOPIC, &json!({}), RR3_REMOTE_TIMEOUT)
+        .map(|_| {
+            eprintln!("rr3-act: 远端舵机面就绪（axis={axis}，rr3-sense 持桥，第 {try_no} 次探测）");
+        })
 }
 
 /// 轴词域：缺省 pan（契约常量），tilt 在册，其余 fail-closed（与 rr-hal 同域）。

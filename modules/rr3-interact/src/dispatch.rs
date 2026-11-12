@@ -60,21 +60,10 @@ impl Rr3TtsPcmBuf {
     /// 带帽收帧（帽参数显式化，单测用小帽钉边界）：先按 base64 上界估算，
     /// 超帽时不解码、不分配。
     fn rr3_tts_push_cap(&mut self, pcm_b64: &str, cap: usize) -> Result<(), String> {
-        let projected = self.bytes.len().saturating_add(pcm_b64.len() / 4 * 3);
-        if projected > cap {
-            return Err(format!(
-                "tts_pcm 缓冲超界（>{}B）：丢弃本帧，后续点名对账将拒播",
-                cap
-            ));
-        }
+        rr3_push_room(cap, self.bytes.len(), pcm_b64.len() / 4 * 3)?;
         let chunk = rr_ipc::rr3_base64_decode(pcm_b64)
             .map_err(|e| format!("tts_pcm 帧 base64 解码失败: {e:?}"))?;
-        if self.bytes.len().saturating_add(chunk.len()) > cap {
-            return Err(format!(
-                "tts_pcm 缓冲超界（>{}B）：丢弃本帧，后续点名对账将拒播",
-                cap
-            ));
-        }
+        rr3_push_room(cap, self.bytes.len(), chunk.len())?;
         self.bytes.extend_from_slice(&chunk);
         Ok(())
     }
@@ -206,6 +195,17 @@ impl Rr3InteractDispatcher {
 /// 每 N 帧一条（"还在坏、坏因未变"），中间帧只进计数。
 fn rr3_bad_log_due(n: u32) -> bool {
     n == 1 || n.is_multiple_of(RR3_TTS_BAD_LOG_EVERY)
+}
+
+/// 收流缓冲余量判据（解码前后的估算值与实解值同文案）。
+fn rr3_push_room(cap: usize, have: usize, add: usize) -> Result<(), String> {
+    if have.saturating_add(add) > cap {
+        return Err(format!(
+            "tts_pcm 缓冲超界（>{}B）：丢弃本帧，后续点名对账将拒播",
+            cap
+        ));
+    }
+    Ok(())
 }
 
 /// 坏帧记账：计数 +1，按留痕闸门点名（中间帧只计数）。

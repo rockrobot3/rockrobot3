@@ -189,13 +189,8 @@ fn rr3_nod_advance(
     st: Rr3NodState,
     now: Instant,
 ) -> Option<Rr3NodState> {
-    if rr3_nod_dip_due(&st, now) {
-        rr3_nod_tilt(tx, bus, st.dip_deg);
-        eprintln!("反射环: 点头蓄势 tilt={}°", st.dip_deg);
-        return Some(Rr3NodState {
-            dip_sent: true,
-            ..st
-        });
+    if let Some(next) = rr3_nod_dip_step(tx, bus, st, now) {
+        return Some(next);
     }
     if rr3_nod_lift_due(&st, now) {
         rr3_nod_tilt(tx, bus, st.lift_deg);
@@ -203,6 +198,25 @@ fn rr3_nod_advance(
         return None;
     }
     Some(st)
+}
+
+/// 蓄势段：到点即下发并标记已蓄势（`None` = 未到点或已蓄势）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_nod_dip_step(
+    tx: &rr_hal::backend::Rr3AudioCmdProducer,
+    bus: &BusHandle,
+    st: Rr3NodState,
+    now: Instant,
+) -> Option<Rr3NodState> {
+    if !rr3_nod_dip_due(&st, now) {
+        return None;
+    }
+    rr3_nod_tilt(tx, bus, st.dip_deg);
+    eprintln!("反射环: 点头蓄势 tilt={}°", st.dip_deg);
+    Some(Rr3NodState {
+        dip_sent: true,
+        ..st
+    })
 }
 
 /// 蓄势段到点判据（未蓄势且时刻已到）。
@@ -324,12 +338,18 @@ impl Rr3SenseDispatcher {
             bus.counter_bump(RR3_PCM_EMPTY_FRAMES_KEY, 1);
         }
         self.seq += 1;
+        self.rr3_pcm_pub(bus, &pcm)?;
+        Ok(pcm)
+    }
+
+    /// 帧发布 + 成帧计数（seq 已在调用方续号）。
+    fn rr3_pcm_pub(&self, bus: &BusHandle, pcm: &Rr3PcmStream) -> Result<(), String> {
         bus.publish(
             capture::RR3_PCM_TOPIC,
-            rpc::rr3_pcm_event_body(self.seq, &pcm),
+            rpc::rr3_pcm_event_body(self.seq, pcm),
         )?;
         bus.counter_bump(RR3_PCM_FRAMES_KEY, 1);
-        Ok(pcm)
+        Ok(())
     }
 
     /// 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；抖动可接受——

@@ -53,19 +53,22 @@ pub(crate) fn rr3_hit_word(text: &str, words: &[&str]) -> bool {
         let Some(hit) = text.find(word) else {
             continue;
         };
-        // 前两字符窗（Python text[max(0, hit-2):hit] 同形状——find 的字节位切出
-        // 命中前缀，末两字符即字面「前两字符」，CJK 等宽与否则本表词边界内无害）
-        let neg_hit = text[..hit]
-            .chars()
-            .rev()
-            .take(2)
-            .any(|c| RR3_NEGATIVE_CHARS.contains(&c));
-        if neg_hit {
+        if rr3_negated(text, hit) {
             continue;
         }
         return true;
     }
     false
+}
+
+/// 命中前缀是否被否定词覆盖（前两字符窗，Python `text[max(0, hit-2):hit]`
+/// 同形状——find 的字节位切出命中前缀，末两字符即字面「前两字符」）。
+fn rr3_negated(text: &str, hit: usize) -> bool {
+    text[..hit]
+        .chars()
+        .rev()
+        .take(2)
+        .any(|c| RR3_NEGATIVE_CHARS.contains(&c))
 }
 
 /// 词表命中 → actions 清单（元素 {topic, args}）。

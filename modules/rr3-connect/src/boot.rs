@@ -134,14 +134,18 @@ fn rr3_conn_u64_of(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64
 /// 超时越上界直接拒（配置错，不猜意图）。
 fn rr3_link_period_of(sect: &toml::Value) -> Result<u64, String> {
     let raw = rr3_conn_u64_of(sect, "link_report_period_ms", "wifi")?;
+    Ok(rr3_period_floor(raw))
+}
+
+/// 上报周期下限钳位（防 nmcli fork 风暴），低于下限即点名并抬到下限。
+fn rr3_period_floor(raw: u64) -> u64 {
     if raw < RR3_MIN_LINK_PERIOD_MS {
         eprintln!(
             "config [rr3-connect.wifi] link_report_period_ms={raw} 低于下限，钳到 {RR3_MIN_LINK_PERIOD_MS}ms（防 nmcli fork 风暴）"
         );
-        Ok(RR3_MIN_LINK_PERIOD_MS)
-    } else {
-        Ok(raw)
+        return RR3_MIN_LINK_PERIOD_MS;
     }
+    raw
 }
 
 /// nmcli 子进程超时：越上界拒（配置错），低于下限抬到 1s。
@@ -159,16 +163,19 @@ fn rr3_nm_timeout_of(sect: &toml::Value) -> Result<u64, String> {
 /// =出厂不自动开蓝牙，等价旧 env 未设行为（已部署旧 config 兼容）；
 /// 有段则 up 必须是布尔（类型错点名拒，不静默吞）
 fn rr3_bt_up_of(v: &toml::Value) -> Result<bool, String> {
-    let bt_up = v
-        .get("rr3-connect")
+    Ok(rr3_bt_flag(v)?.unwrap_or(false))
+}
+
+/// bt 段 up 键（段缺 = None；键在须布尔）。
+fn rr3_bt_flag(v: &toml::Value) -> Result<Option<bool>, String> {
+    v.get("rr3-connect")
         .and_then(|s| s.get("bt"))
         .map(|sect| {
             sect.get("up")
                 .and_then(toml::Value::as_bool)
                 .ok_or_else(|| "config [rr3-connect.bt] 缺 up（布尔）".to_string())
         })
-        .transpose()?;
-    Ok(bt_up.unwrap_or(false))
+        .transpose()
 }
 
 /// 配网口令下限（缺键回落 8 = legacy；显式 0 按 1 拒放）。

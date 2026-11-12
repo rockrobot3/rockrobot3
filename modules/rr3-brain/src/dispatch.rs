@@ -547,18 +547,7 @@ impl Rr3BrainDispatcher {
         // 意图→动作映射在 brain（策略层唯一归属，0.0.3 Q1 裁定）：结构化 actions
         // 随 intent/result 广播，执行器按 exposes 归属门各自认领（brain 不单播不
         // 等待）；只喂 user_text，机器人自己的 reply_text 不参与匹配
-        let actions = rr3_extract_actions(&user_text);
-        let actions_n = actions.len();
-        bus.publish(
-            RR3_TOPIC_INTENT,
-            json!({
-                "trace": trace,
-                "user_text": user_text,
-                "reply_text": reply_text,
-                "tts_ms": tts_ms,
-                "actions": actions,
-            }),
-        )?;
+        let actions_n = self.rr3_turn_broadcast(bus, trace, &user_text, &reply_text, tts_ms)?;
         self.dialog.rr3_record(Rr3DialogTurn {
             user_text: user_text.clone(),
             reply_text: reply_text.clone(),
@@ -576,6 +565,31 @@ impl Rr3BrainDispatcher {
         // 用户在机器人说完后拥有完整 followup_ms。
         self.last_wake_ms = Some(self.tb.rr3_now_ms());
         Ok(())
+    }
+
+    /// 轮末意图广播：结构化 actions 随 intent/result 广播，执行器按 exposes
+    /// 归属门各自认领（brain 不单播不等待）；只喂 user_text。回 actions 条数。
+    fn rr3_turn_broadcast<B: Rr3TurnBus>(
+        &self,
+        bus: &B,
+        trace: u64,
+        user_text: &str,
+        reply_text: &str,
+        tts_ms: u64,
+    ) -> Result<usize, String> {
+        let actions = rr3_extract_actions(user_text);
+        let actions_n = actions.len();
+        bus.publish(
+            RR3_TOPIC_INTENT,
+            json!({
+                "trace": trace,
+                "user_text": user_text,
+                "reply_text": reply_text,
+                "tts_ms": tts_ms,
+                "actions": actions,
+            }),
+        )?;
+        Ok(actions_n)
     }
 
     /// 应答 PCM 折算毫秒：奇数长度截尾（Python `reply_pcm[:-1]` 同形状）后按 16k 计。
@@ -622,17 +636,7 @@ impl Rr3BrainDispatcher {
         pcm: &[u8],
         started: Instant,
     ) -> Option<(String, u128)> {
-        let user_text = match self.clients.asr.rr3_transcribe(pcm, RR3_TTS_SAMPLE_RATE) {
-            Ok(t) => t,
-            Err(e) => {
-                bus.counter_bump("asr_fail", 1);
-                eprintln!(
-                    "轮次 {trace}: ASR 失败，弃轮（asr_ms={}，{e}）",
-                    started.elapsed().as_millis()
-                );
-                return None;
-            }
-        };
+        let user_text = self.rr3_asr_call(bus, trace, pcm, started)?;
         let asr_cost_ms = started.elapsed().as_millis();
         bus.counter_bump("asr_ok", 1);
         if user_text.trim().is_empty() {
@@ -640,6 +644,27 @@ impl Rr3BrainDispatcher {
             return None;
         }
         Some((user_text, asr_cost_ms))
+    }
+
+    /// 识别一跳：失败即记账弃轮（None），文案带耗时与错因。
+    fn rr3_asr_call<B: Rr3TurnBus>(
+        &self,
+        bus: &B,
+        trace: u64,
+        pcm: &[u8],
+        started: Instant,
+    ) -> Option<String> {
+        match self.clients.asr.rr3_transcribe(pcm, RR3_TTS_SAMPLE_RATE) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                bus.counter_bump("asr_fail", 1);
+                eprintln!(
+                    "轮次 {trace}: ASR 失败，弃轮（asr_ms={}，{e}）",
+                    started.elapsed().as_millis()
+                );
+                None
+            }
+        }
     }
 
     /// 唤醒门控 + LLM 段：命中唤醒 → 固定应答/命令进 LLM；窗外未命中 → 静默

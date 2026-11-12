@@ -126,19 +126,24 @@ impl Rr3VadState {
         if rms >= self.cfg.rms_start {
             self.silence_ms = 0;
             self.speech_ms += self.frame_ms;
-        } else {
-            self.silence_ms += self.frame_ms;
-            if self.silence_ms >= self.cfg.silence_tail_ms {
-                self.in_speech = false;
-                let speech_ms = self.speech_ms;
-                self.above_ms = 0;
-                self.silence_ms = 0;
-                self.speech_ms = 0;
-                self.rms_peak = 0;
-                return Some(Rr3VadEdge::Offset { speech_ms });
-            }
+            return None;
         }
-        None
+        self.rr3_tail_silence()
+    }
+
+    /// 静音尾段：攒够静音尾即报 offset 并清窗。
+    fn rr3_tail_silence(&mut self) -> Option<Rr3VadEdge> {
+        self.silence_ms += self.frame_ms;
+        if self.silence_ms < self.cfg.silence_tail_ms {
+            return None;
+        }
+        self.in_speech = false;
+        let speech_ms = self.speech_ms;
+        self.above_ms = 0;
+        self.silence_ms = 0;
+        self.speech_ms = 0;
+        self.rms_peak = 0;
+        Some(Rr3VadEdge::Offset { speech_ms })
     }
 }
 

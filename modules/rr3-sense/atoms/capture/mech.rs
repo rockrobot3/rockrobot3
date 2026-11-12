@@ -219,12 +219,14 @@ fn rr3_doa_loud(samples: &[i16], ch: usize, cfg: &Rr3DoaCfg) -> bool {
         return true;
     }
     let gate_sq = min * min * frame_len as u64;
-    for fr in samples.chunks_exact(ch * frame_len) {
-        if rr3_doa_frame_loud(fr, ch, gate_sq) {
-            return true;
-        }
-    }
-    false
+    rr3_any_loud(samples, ch, frame_len, gate_sq)
+}
+
+/// 门内任一采集帧 rms 过阈即过（阈值²×帧长定标比较，免 isqrt）。
+fn rr3_any_loud(samples: &[i16], ch: usize, frame_len: usize, gate_sq: u64) -> bool {
+    samples
+        .chunks_exact(ch * frame_len)
+        .any(|fr| rr3_doa_frame_loud(fr, ch, gate_sq))
 }
 
 /// 单采集帧的 L/R 能量门（i16 取绝对值后平方累加）。

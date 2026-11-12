@@ -582,9 +582,18 @@ fn rr3_ctl_roundtrip(
     params: &Value,
     id: u64,
 ) -> Result<Value, String> {
+    let frame = rr3_ctl_frame(method, params, id);
+    rr3_frame_write(&mut *stream, &frame).map_err(|e| format!("写 ctl 请求失败: {e:?}"))?;
+    let frame = rr3_frame_read_cap(&mut *stream, RR3_FRAMING_PLEN_CAP_DEFAULT)
+        .map_err(|e| format!("读 ctl 应答失败: {e:?}"))?;
+    rr3_ctl_reply(frame, method)
+}
+
+/// ctl 请求帧装配（jsonrpc 信封 + 帧头）。
+fn rr3_ctl_frame(method: &str, params: &Value, id: u64) -> Rr3Frame {
     let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
     let payload = rr3_body_encode(Rr3PayloadType::Request, body.to_string().as_bytes());
-    let frame = Rr3Frame {
+    Rr3Frame {
         header: Rr3Header {
             opcode: opcode::SEND,
             flags: 0,
@@ -596,11 +605,7 @@ fn rr3_ctl_roundtrip(
             payload_crc32: rr_ipc::rr3_crc32(&payload),
         },
         payload,
-    };
-    rr3_frame_write(&mut *stream, &frame).map_err(|e| format!("写 ctl 请求失败: {e:?}"))?;
-    let frame = rr3_frame_read_cap(&mut *stream, RR3_FRAMING_PLEN_CAP_DEFAULT)
-        .map_err(|e| format!("读 ctl 应答失败: {e:?}"))?;
-    rr3_ctl_reply(frame, method)
+    }
 }
 
 /// 应答帧解码：类型必须是 Response。
@@ -876,17 +881,16 @@ fn rr3_panel_handle(stream: &mut TcpStream, shared: &Rr3PanelShared) {
         Ok(r) => r,
         Err(e) => {
             let reply = Rr3PanelReply::json(400, "Bad Request", json!({ "error": e }));
-            let _ = rr3_http_respond(
-                stream,
-                reply.status,
-                reply.reason,
-                reply.content_type,
-                &reply.body,
-            );
+            rr3_reply_send(stream, &reply);
             return;
         }
     };
     let reply = rr3_panel_execute(&req, shared);
+    rr3_reply_send(stream, &reply);
+}
+
+/// 应答写出（坏请求与正常应答同一出口，写失败不打断连接语义）。
+fn rr3_reply_send(stream: &mut TcpStream, reply: &Rr3PanelReply) {
     let _ = rr3_http_respond(
         stream,
         reply.status,

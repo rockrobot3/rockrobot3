@@ -238,6 +238,12 @@ pub(crate) fn rr3_axis_state_load() -> Rr3ActAxisState {
             Rr3ActAxisState::rr3_conservative()
         }
     };
+    rr3_axis_echo(&axis);
+    axis
+}
+
+/// 注入策略面回显（A-9：改数据即改行为，日志是第一证据）。
+fn rr3_axis_echo(axis: &Rr3ActAxisState) {
     eprintln!(
         "执行轴状态: calibrated={} hard_stop={} 行程=[{}, {}] 中位={}（注入策略面在启动自述可见，A-9）",
         axis.calibrated,
@@ -246,7 +252,6 @@ pub(crate) fn rr3_axis_state_load() -> Rr3ActAxisState {
         axis.hi_deg,
         axis.center_deg
     );
-    axis
 }
 
 /// 执行面三句柄：舵机 + 灯 + 继电器
@@ -317,10 +322,22 @@ pub(crate) fn rr3_act_probe(bus: &BusHandle) -> Result<Rr3ActDevs, String> {
     let (servo_dev, servo_backend) = rr3_servo_pick(bus)?;
     let (led_gpio, led_backend) = rr3_hal_gpio_out("led");
     let (relay_gpio, relay_backend) = rr3_hal_gpio_out("relay");
-    rr3_opt_face("LED", led_backend, led_gpio.level())?;
-    rr3_opt_face("继电器", relay_backend, relay_gpio.level())?;
+    rr3_probe_quiet(
+        (led_backend, led_gpio.as_ref()),
+        (relay_backend, relay_gpio.as_ref()),
+    )?;
     eprintln!("执行面就绪: servo={servo_backend} led={led_backend} relay={relay_backend}");
     Ok((servo_dev, led_gpio, relay_gpio))
+}
+
+/// 可缺面（LED / 继电器）逐面探活：占位只点名，其余错误致命。
+fn rr3_probe_quiet(
+    led: (&str, &dyn Rr3GpioOut),
+    relay: (&str, &dyn Rr3GpioOut),
+) -> Result<(), String> {
+    rr3_opt_face("LED", led.0, led.1.level())?;
+    rr3_opt_face("继电器", relay.0, relay.1.level())?;
+    Ok(())
 }
 
 /// 舵机面选择：共享桥单所有者优先走远端命令面，否则本进程开桥探活。
@@ -479,16 +496,22 @@ fn rr3_act_led(sect: &toml::Value) -> Result<Rr3LedCfg, String> {
 
 /// reflex 段：节拍走越界裁决（`rr3_act_cfg_loop`），饱和提示阈值同域裁决。
 fn rr3_act_reflex(sect: &toml::Value) -> Result<Rr3ReflexCfg, String> {
+    let notice = rr3_act_notice(sect)?;
+    Ok(Rr3ReflexCfg {
+        loop_hz: rr3_act_cfg_loop(sect)?,
+        saturate_notice_ms: notice,
+    })
+}
+
+/// 饱和通告窗阈：读数 + 上界裁决。
+fn rr3_act_notice(sect: &toml::Value) -> Result<u64, String> {
     let notice = rr3_act_cfg_u64(sect, "saturate_notice_ms", "reflex")?;
     if notice > RR3_MAX_NOTICE_MS {
         return Err(format!(
             "config [rr3-act.reflex] saturate_notice_ms 须在 0..={RR3_MAX_NOTICE_MS}，收到 {notice}（窗数以 u32 折算，超界会静默截断）"
         ));
     }
-    Ok(Rr3ReflexCfg {
-        loop_hz: rr3_act_cfg_loop(sect)?,
-        saturate_notice_ms: notice,
-    })
+    Ok(notice)
 }
 
 /// reflex 环节拍：越界拒 boot（0.0.5 批I A-3）——`as u32` 裸截断会把 2^32+1
