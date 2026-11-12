@@ -307,11 +307,22 @@ fn rr3_write_evidence(
     })
 }
 
+/// 写口执行段进程级串行锁（B38 审计）：ctl 每连接一线程，两个并发写各自
+/// "读旧档 → 手术 → 装载预核 → 原子换"互不可见——候选档用固定 tmp 名
+/// （`<stem>.tmp-write.toml`），对方 `rr3_stage_excl` 的"清残留"会先删掉己方
+/// 候选再建自己的：己方预核读到的是**对方**的文本（自己文本没过预核也可能被
+/// 提交 = fail-open），或后写者静默覆盖前写者（丢写；武装写被并发阈值写吞掉
+/// 是安全面事故）。锁覆盖执行全段，与 counters 落盘锁同一"原子写单写者"纪律。
+/// 跨进程（运维 CLI `rrd axis-write`）不在同一锁面：它是离线立档工具，与 daemon
+/// 写口并发须人工避让；两者各产完整合法候选档、落盘都是原子换，不会有半截档。
+#[cfg(unix)]
+static RR3_WRITE_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// 写口执行（策略编排，逐门显式；`#[cfg(unix)]` 随落盘序同门——原子写与
 /// `rr3_axis_write_run` 都在 unix 门内，非 unix 编译时本函数不存在，conn 臂
-/// 如实回"写面仅 unix"）。门序：confirm 门 → 旧值提取（域缺/档缺拒）→
-/// 证据引用门 → 文本手术 → tmp 落盘 → 装载链全量预核（Err 即拒写清 tmp，
-/// 零字节进正档）→ 原子写回 → 契约记账重记 → 审计留痕。
+/// 如实回"写面仅 unix"）。门序：confirm 门 → 执行段串行锁 → 旧值提取（域缺/
+/// 档缺拒）→ 证据引用门 → 文本手术 → tmp 落盘 → 装载链全量预核（Err 即拒写清
+/// tmp，零字节进正档）→ 原子写回 → 契约记账重记 → 审计留痕。
 #[cfg(unix)]
 pub fn rr3_write_execute(
     paths: &Rr3DomainWritePaths,
@@ -326,6 +337,8 @@ pub fn rr3_write_execute(
                 .to_string(),
         ));
     }
+    // ② 执行段串行（见 [`RR3_WRITE_SERIAL`] 注记）：读 → 预核 → 换整段单写者
+    let _serial = RR3_WRITE_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     match params.target {
         Rr3WriteTarget::Domain => rr3_write_domain(paths, params),
         Rr3WriteTarget::Axis => rr3_write_axis(paths, params),
@@ -1087,6 +1100,45 @@ present = ["act.servo", "power.charger"]
                 after.contains("evidence = \"none\""),
                 "evidence 不入档: {after}"
             );
+        }
+
+        /// 并发串行化（B38 审计）：两个不同键的写并发——执行段锁下两改都在，
+        /// 无丢写、无候选 tmp 互踩（不加锁时候选档被对方先清后建，预核与提交
+        /// 各读一份文本，偶发丢写）。窗口极窄，本用例是串行化回归钉不是竞态证明。
+        #[cfg(unix)]
+        #[test]
+        fn concurrent_writes_serialize_and_keep_both() {
+            let fx = fixture();
+            write_evidence(&fx.dir, "实测", 1);
+            let base = std::fs::read_to_string(&fx.paths.profile).unwrap();
+            let text = base
+                .replace("sense = \"none\"", "sense = \"power.charger.meter\"")
+                .replace("max_age_ms = 0", "max_age_ms = 30000");
+            std::fs::write(&fx.paths.profile, text).unwrap();
+            let mut armed = rr3_write_parse(&params_armed_true()).unwrap();
+            armed.confirm = Some(true);
+            let mut severe = rr3_write_parse(&json!({
+                "target": "domain", "name": "rail5v", "key": "severe_mv",
+                "value": 4300, "evidence": "实测/0001"
+            }))
+            .unwrap();
+            severe.confirm = Some(true);
+            let (pa, pb) = (fx.paths.clone(), fx.paths.clone());
+            let h1 = std::thread::spawn(move || rr3_write_execute(&pa, &armed));
+            let h2 = std::thread::spawn(move || rr3_write_execute(&pb, &severe));
+            h1.join()
+                .expect("写线程不得 panic")
+                .expect("armed 写应成功");
+            h2.join()
+                .expect("写线程不得 panic")
+                .expect("severe_mv 写应成功");
+            let after = std::fs::read_to_string(&fx.paths.profile).unwrap();
+            assert!(after.contains("armed = true"), "{after}");
+            assert!(
+                after.contains("severe_mv = 4300"),
+                "并发写不得丢写: {after}"
+            );
+            assert!(after.contains("evidence = \"实测/0001\""), "{after}");
         }
 
         /// 红三：手术后装载预核不过拒落盘——未标定域（sense=none、max_age_ms=0）
