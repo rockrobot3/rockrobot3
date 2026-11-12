@@ -83,6 +83,19 @@ fn domain_keys_apply_accepts_single_quoted_name() {
     assert!(out.contains("severe_mv = 3200"), "{out}");
 }
 
+/// 域块头带行内注释/尾空白仍识头（TOML 允许；旧整行等值会漏收该域——
+/// 轻则误报"缺域"，重则把其键行算进邻块）。
+#[test]
+fn domain_keys_apply_accepts_commented_block_head() {
+    let text = SURGERY_TEXT.replace(
+        "[[supplies.domain]]\nname = \"batt\"",
+        "[[supplies.domain]]  # 电池域\nname = \"batt\"",
+    );
+    let out =
+        rr3_domain_apply(&text, "batt", &[("severe_mv", "3200")]).expect("带注释的头行应识头");
+    assert!(out.contains("severe_mv = 3200"), "{out}");
+}
+
 /// 缺域拒：域名不在册不带病落盘
 #[test]
 fn domain_keys_apply_rejects_missing_domain() {
