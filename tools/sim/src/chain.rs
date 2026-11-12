@@ -262,6 +262,11 @@ fn rr3_obs_register(stream: &mut UnixStream, manifest_text: &str) -> Result<(), 
     });
     rr3_frame_write(stream, &rr3_obs_frame(Rr3PayloadType::Request, &body))
         .map_err(|e| format!("写注册帧失败: {e:?}"))?;
+    rr3_obs_wait(stream)
+}
+
+/// 等注册应答：2s 一拍读，10s deadline 统一收口。
+fn rr3_obs_wait(stream: &mut UnixStream) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if Instant::now() > deadline {
@@ -269,18 +274,7 @@ fn rr3_obs_register(stream: &mut UnixStream, manifest_text: &str) -> Result<(), 
         }
         match rr3_frame_read(&mut *stream) {
             Ok(frame) => {
-                let Ok((ty, raw)) = rr3_body_split(&frame.payload) else {
-                    continue;
-                };
-                if ty != Rr3PayloadType::Response {
-                    continue; // 注册期间到达的广播/通知不入账
-                }
-                let v: Value =
-                    serde_json::from_slice(&raw).map_err(|e| format!("注册应答非 JSON: {e}"))?;
-                if v.get("id").and_then(Value::as_u64) == Some(1) {
-                    if v.get("error").is_some_and(Value::is_object) {
-                        return Err(format!("观察者注册被拒: {}", v["error"]));
-                    }
+                if rr3_obs_reply(&frame.payload)?.is_some() {
                     return Ok(());
                 }
             }
@@ -288,6 +282,25 @@ fn rr3_obs_register(stream: &mut UnixStream, manifest_text: &str) -> Result<(), 
             Err(_) => continue,
         }
     }
+}
+
+/// 单帧归类：`Ok(Some(()))` = 注册成功，`Ok(None)` = 不入账继续等；
+/// `Err` = JSON 非形或注册被拒（原样带回原因）。
+fn rr3_obs_reply(payload: &[u8]) -> Result<Option<()>, String> {
+    let Ok((ty, raw)) = rr3_body_split(payload) else {
+        return Ok(None);
+    };
+    if ty != Rr3PayloadType::Response {
+        return Ok(None); // 注册期间到达的广播/通知不入账
+    }
+    let v: Value = serde_json::from_slice(&raw).map_err(|e| format!("注册应答非 JSON: {e}"))?;
+    if v.get("id").and_then(Value::as_u64) != Some(1) {
+        return Ok(None);
+    }
+    if v.get("error").is_some_and(Value::is_object) {
+        return Err(format!("观察者注册被拒: {}", v["error"]));
+    }
+    Ok(Some(()))
 }
 
 /// 取证收集：读到两路证据齐或超时。读超时/暂无帧按"这拍没帧"继续，

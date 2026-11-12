@@ -454,6 +454,21 @@ fn rr3_read_loop(
     }
 }
 
+/// 广播写线程：从有界队列取帧，写失败即退出（连接回收随通道 drop 走 Disconnected）。
+fn rr3_conn_writer(
+    out: &Arc<Mutex<UnixStream>>,
+    fan_rx: mpsc::Receiver<Rr3Frame>,
+) -> JoinHandle<()> {
+    let out = out.clone();
+    thread::spawn(move || {
+        for frame in fan_rx.iter() {
+            if !rr3_write(&out, &frame) {
+                break;
+            }
+        }
+    })
+}
+
 /// 服务一条连接。返回 `Err` 只描述**这一条**连接的断开原因；守护进程与别的连接不受影响。
 pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String> {
     let out: Arc<Mutex<UnixStream>> = Arc::new(Mutex::new(
@@ -470,16 +485,7 @@ pub fn rr3_conn_serve(stream: UnixStream, ctx: Rr3ConnCtx) -> Result<(), String>
     // 有界收件队列（RR3_FAN_CAP）：满侧策略见 registry.rs fanout doc——僵尸订阅者
     // 的积压被封顶在"上界 × 帧大小"，不再无界吃到 rrd 被 OOM 杀。
     let (fan_tx, fan_rx) = mpsc::sync_channel::<Rr3Frame>(RR3_FAN_CAP);
-    let writer: JoinHandle<()> = {
-        let out = out.clone();
-        thread::spawn(move || {
-            for frame in fan_rx.iter() {
-                if !rr3_write(&out, &frame) {
-                    break;
-                }
-            }
-        })
-    };
+    let writer: JoinHandle<()> = rr3_conn_writer(&out, fan_rx);
 
     // 注册前设读超时：连上却不注册的客户端不能永久占着线程（spec §5.0）
     stream

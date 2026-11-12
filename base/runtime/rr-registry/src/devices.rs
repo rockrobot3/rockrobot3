@@ -155,37 +155,42 @@ impl Rr3DeviceTable {
         }
         let mut errs = Vec::new();
         for (model, e) in &self.devices {
-            if model.is_empty() {
-                errs.push("device 的 model 缺失或为空".to_string());
-            }
-            if !RR3_DEVICE_BUSES.contains(&e.bus.as_str()) {
-                errs.push(format!(
-                    "device {model} 的 bus 非法: {}（封闭词域 {RR3_DEVICE_BUSES:?}）",
-                    e.bus
-                ));
-            }
-            if e.bus == "i2c" && e.addrs.is_empty() {
-                errs.push(format!(
-                    "device {model} 是 I2C 类但 addrs 为空（合法地址集必填——装机写集外地址即红）"
-                ));
-            }
-            for a in &e.addrs {
-                if a.is_empty() {
-                    errs.push(format!("device {model} 的 addrs 含空串"));
-                }
-            }
-            if e.baud_ok.is_empty() {
-                errs.push(format!(
-                    "device {model} 的 baud_ok 为空（速率取值域必填——坑 7 的落点，不在册即拒 boot）"
-                ));
-            }
-            if e.peak_ma <= 0 {
-                errs.push(format!(
-                    "device {model} 的 peak_ma 缺失或 ≤ 0（校验⑨ 预算分母的事实源，0 会让预算恒过）"
-                ));
-            }
+            rr3_dev_entry_errs(model, e, &mut errs);
         }
         errs
+    }
+}
+
+/// 单条器件的形状错误（逐条点名，文案与判据次序不变）。
+fn rr3_dev_entry_errs(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
+    if model.is_empty() {
+        errs.push("device 的 model 缺失或为空".to_string());
+    }
+    if !RR3_DEVICE_BUSES.contains(&e.bus.as_str()) {
+        errs.push(format!(
+            "device {model} 的 bus 非法: {}（封闭词域 {RR3_DEVICE_BUSES:?}）",
+            e.bus
+        ));
+    }
+    if e.bus == "i2c" && e.addrs.is_empty() {
+        errs.push(format!(
+            "device {model} 是 I2C 类但 addrs 为空（合法地址集必填——装机写集外地址即红）"
+        ));
+    }
+    for a in &e.addrs {
+        if a.is_empty() {
+            errs.push(format!("device {model} 的 addrs 含空串"));
+        }
+    }
+    if e.baud_ok.is_empty() {
+        errs.push(format!(
+            "device {model} 的 baud_ok 为空（速率取值域必填——坑 7 的落点，不在册即拒 boot）"
+        ));
+    }
+    if e.peak_ma <= 0 {
+        errs.push(format!(
+            "device {model} 的 peak_ma 缺失或 ≤ 0（校验⑨ 预算分母的事实源，0 会让预算恒过）"
+        ));
     }
 }
 

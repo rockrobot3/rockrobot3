@@ -306,6 +306,17 @@ fn rr3_write_evidence(
     })
 }
 
+/// 必携证据取得：缺证据即 Permission 拒写，核验通过后回带引用文本。
+fn rr3_take_evidence(
+    profile_path: &std::path::Path,
+    evidence: Option<String>,
+    missing: &str,
+) -> Result<String, (Rr3StatusCode, String)> {
+    let ev = evidence.ok_or_else(|| (Rr3StatusCode::Permission, missing.to_string()))?;
+    rr3_write_evidence(profile_path, &ev)?;
+    Ok(ev)
+}
+
 /// 写口执行段进程级串行锁（B38 审计）：ctl 每连接一线程，两个并发写各自
 /// "读旧档 → 手术 → 装载预核 → 原子换"互不可见——候选档用固定 tmp 名
 /// （`<stem>.tmp-write.toml`），对方 `rr3_stage_excl` 的"清残留"会先删掉己方
@@ -429,18 +440,15 @@ fn rr3_domain_plan(
     params: &Rr3DomainWriteParams,
     dom: &crate::profile::Rr3Domain,
 ) -> Result<(Value, Rr3DomainUpdates), (Rr3StatusCode, String)> {
-    let perm = |msg: String| (Rr3StatusCode::Permission, msg);
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let plan = match (params.key.as_str(), &params.value) {
         // armed 写：evidence 联动（成对纪律——写面直接落出⑥-e 要求的档内形状）
         ("armed", Rr3WriteValue::Bool(true)) => {
-            let ev = params.evidence.clone().ok_or_else(|| {
-                perm(
-                    "armed = true 置位必携证据引用 params.evidence（D11 界面门——必须引用一条真板对拍证据编号）"
-                        .to_string(),
-                )
-            })?;
-            rr3_write_evidence(&paths.profile, &ev)?;
+            let ev = rr3_take_evidence(
+                &paths.profile,
+                params.evidence.clone(),
+                "armed = true 置位必携证据引用 params.evidence（D11 界面门——必须引用一条真板对拍证据编号）",
+            )?;
             (
                 json!(dom.armed),
                 vec![
@@ -457,10 +465,11 @@ fn rr3_domain_plan(
             ],
         ),
         ("severe_mv", Rr3WriteValue::Num(n)) => {
-            let ev = params.evidence.clone().ok_or_else(|| {
-                perm("severe_mv 安全写必携证据引用 params.evidence（B-15 ③）".to_string())
-            })?;
-            rr3_write_evidence(&paths.profile, &ev)?;
+            rr3_take_evidence(
+                &paths.profile,
+                params.evidence.clone(),
+                "severe_mv 安全写必携证据引用 params.evidence（B-15 ③）",
+            )?;
             (json!(dom.severe_mv), vec![("severe_mv", n.to_string())])
         }
         // 键/值型不配：parse 层白名单已裁，正常到不了；但参数结构对库内可见可构造，

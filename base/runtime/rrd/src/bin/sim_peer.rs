@@ -89,10 +89,7 @@ mod peer {
     /// 原因（夹具退出并打一行，不挂 cargo test）；读超时 5s 同理。
     fn rr3_peer_setup() -> Result<(UnixStream, u64, Rr3ManifestFacts, String), String> {
         let bus = env::var("RR3_BUS_PATH").map_err(|_| "缺 RR3_BUS_PATH".to_string())?;
-        let manifest_path = env::var("RR3_MANIFEST").map_err(|_| "缺 RR3_MANIFEST".to_string())?;
-        let text = std::fs::read_to_string(&manifest_path)
-            .map_err(|e| format!("读 {manifest_path} 失败: {e}"))?;
-        let facts = rr3_manifest_parse(&text).map_err(|errs| errs.join("; "))?;
+        let (text, facts) = rr3_peer_facts()?;
 
         let mut stream = UnixStream::connect(&bus).map_err(|e| format!("连 {bus} 失败: {e}"))?;
         // 有超时：卡住要成为"夹具退出并打一行原因"，而不是把整个 cargo test 挂住
@@ -117,6 +114,15 @@ mod peer {
             .ok_or("注册应答里没有 result.src_task")?;
         println!("sim-peer: 注册成功 name={} task={task}", facts.name);
         Ok((stream, task, facts, text))
+    }
+
+    /// manifest 取得段：路径 env → 读文 → 解析 facts；身份只从 manifest 来。
+    fn rr3_peer_facts() -> Result<(String, Rr3ManifestFacts), String> {
+        let manifest_path = env::var("RR3_MANIFEST").map_err(|_| "缺 RR3_MANIFEST".to_string())?;
+        let text = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("读 {manifest_path} 失败: {e}"))?;
+        let facts = rr3_manifest_parse(&text).map_err(|errs| errs.join("; "))?;
+        Ok((text, facts))
     }
 
     /// publish_once：主题名从自己的 manifest 取（约定 2），不硬编码；发一帧后喂一颗

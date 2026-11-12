@@ -655,6 +655,63 @@ fn rr3_parity_judge(board_parity: Option<&Value>, parity_ms: u128) -> u32 {
     fail
 }
 
+/// ① 注册两项判据：返回 (FAIL 数, heartbeat_ms)。
+fn rr3_register_checks(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (u32, u64) {
+    let (reg_name, hb_ms) = rr3_register(conn, now_ns);
+    let mut fail = 0;
+    if !verdict(
+        !reg_name.is_empty(),
+        &format!("① 注册（Request/rr3.register，name={reg_name}）"),
+    ) {
+        fail += 1;
+    }
+    if !verdict(
+        hb_ms > 0,
+        &format!("① manifest [health].heartbeat_ms 在场（{hb_ms}ms）"),
+    ) {
+        fail += 1;
+    }
+    (fail, hb_ms)
+}
+
+/// ③ round-trip 两项判据：返回 FAIL 数。
+fn rr3_rt_checks(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> u32 {
+    let (rt_ok, rt_echo_ok, rt_ms) = rr3_round_trip(conn, now_ns);
+    let mut fail = 0;
+    if !verdict(
+        rt_ok,
+        &format!("③ round-trip 应答（id={ROUND_TRIP_ID} 回显，耗时 {rt_ms}ms）"),
+    ) {
+        fail += 1;
+    }
+    if !verdict(rt_echo_ok, "③ result.echo 原样回带（params→echo 逐字对拍）") {
+        fail += 1;
+    }
+    fail
+}
+
+/// C12 证据文件（三样契约）：fail 也写，原始数据留痕。
+fn rr3_evidence_write(
+    ep: Option<&String>,
+    device: &str,
+    intervals: &[u128],
+    hist: &str,
+    board_parity: Option<&Value>,
+    t0_unix: u64,
+) {
+    let Some(ep) = ep else {
+        return;
+    };
+    let t1_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match write_evidence(ep, device, intervals, hist, board_parity, t0_unix, t1_unix) {
+        Ok(_) => println!("OK    证据文件已写: {ep}"),
+        Err(e) => eprintln!("FAIL  证据文件写出失败: {e}"),
+    }
+}
+
 fn main() {
     let t0 = Instant::now();
     let t0_unix = std::time::SystemTime::now()
@@ -676,57 +733,27 @@ fn main() {
     let mut fail = 0u32;
     let mut conn = rr3_open(&device);
 
-    let (reg_name, hb_ms) = rr3_register(&mut conn, &now_ns);
-    if !verdict(
-        !reg_name.is_empty(),
-        &format!("① 注册（Request/rr3.register，name={reg_name}）"),
-    ) {
-        fail += 1;
-    }
-    if !verdict(
-        hb_ms > 0,
-        &format!("① manifest [health].heartbeat_ms 在场（{hb_ms}ms）"),
-    ) {
-        fail += 1;
-    }
+    let (reg_fail, hb_ms) = rr3_register_checks(&mut conn, &now_ns);
+    fail += reg_fail;
 
     let intervals = rr3_beats(&mut conn, beats, &now_ns);
     let (hist, timing_fail) = rr3_timing(&intervals, beats, hb_ms);
     fail += timing_fail;
 
-    let (rt_ok, rt_echo_ok, rt_ms) = rr3_round_trip(&mut conn, &now_ns);
-    if !verdict(
-        rt_ok,
-        &format!("③ round-trip 应答（id={ROUND_TRIP_ID} 回显，耗时 {rt_ms}ms）"),
-    ) {
-        fail += 1;
-    }
-    if !verdict(rt_echo_ok, "③ result.echo 原样回带（params→echo 逐字对拍）") {
-        fail += 1;
-    }
+    fail += rr3_rt_checks(&mut conn, &now_ns);
 
     let (board_parity, parity_ms) = rr3_parity_wait(&mut conn, &now_ns);
     fail += rr3_parity_judge(board_parity.as_ref(), parity_ms);
 
     // C12 证据文件（三样契约；rustc -Vv 由操作面追记）——fail 也写，原始数据留痕。
-    if let Some(ep) = &evidence_path {
-        let t1_unix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        match write_evidence(
-            ep,
-            &device,
-            &intervals,
-            &hist,
-            board_parity.as_ref(),
-            t0_unix,
-            t1_unix,
-        ) {
-            Ok(_) => println!("OK    证据文件已写: {ep}"),
-            Err(e) => eprintln!("FAIL  证据文件写出失败: {e}"),
-        }
-    }
+    rr3_evidence_write(
+        evidence_path.as_ref(),
+        &device,
+        &intervals,
+        &hist,
+        board_parity.as_ref(),
+        t0_unix,
+    );
 
     println!("---- D1 harness 判据汇总: {fail} 项 FAIL ----");
     if fail == 0 {

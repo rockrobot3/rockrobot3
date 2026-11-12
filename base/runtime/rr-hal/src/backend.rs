@@ -272,6 +272,78 @@ fn rr3_hal_sim_wave() -> crate::sim::Rr3SimWave {
         .unwrap_or(crate::sim::Rr3SimWave::Sine)
 }
 
+/// linux/alsa 回放面：生效绑定给设备名，缺键返回 `None` 交调用方落占位。
+#[cfg(all(target_os = "linux", feature = "alsa"))]
+fn rr3_sink_linux() -> Option<(Box<dyn Rr3AudioSink>, &'static str)> {
+    rr3_bindings_eff_log("音频回放").and_then(|b| {
+        b.alsa_device.map(|dev| {
+            (
+                Box::new(crate::linux::Rr3AlsaAudioSink::rr3_alsa_sink_new(&dev))
+                    as Box<dyn Rr3AudioSink>,
+                RR3_BACKEND_LINUX,
+            )
+        })
+    })
+}
+
+/// macOS 回放面（显式 `mac` 才进）。
+#[cfg(target_os = "macos")]
+fn rr3_sink_mac() -> (Box<dyn Rr3AudioSink>, &'static str) {
+    (
+        Box::new(crate::macaudio::Rr3MacAudioSink::rr3_mac_sink_new()) as Box<dyn Rr3AudioSink>,
+        RR3_BACKEND_MAC,
+    )
+}
+
+/// linux sysfs PWM 舵机面：生效绑定给芯片/通道，缺键返回 `None` 交调用方落占位。
+#[cfg(target_os = "linux")]
+fn rr3_servo_linux() -> Option<(Box<dyn Rr3PwmServo>, &'static str)> {
+    rr3_bindings_eff_log("舵机").and_then(|b| {
+        Some((
+            Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_pwm_servo_new(
+                std::path::Path::new(crate::linux_pwm::RR3_PWM_SYSFS_ROOT_DEFAULT),
+                b.pwm_chip?,
+                b.pwm_channel?,
+            )) as Box<dyn Rr3PwmServo>,
+            RR3_BACKEND_LINUX,
+        ))
+    })
+}
+
+/// ESP32 外设桥舵机面：设备路径/轴/波特取自生效绑定与应急 env，缺路径落占位。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_servo_esp32() -> (Box<dyn Rr3PwmServo>, &'static str) {
+    match rr3_periph_uart_path() {
+        Some(p) => {
+            let axis = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_AXIS_ENV)
+                .ok()
+                .and_then(|v| crate::esp32_uart::rr3_axis_parse(&v))
+                .unwrap_or(rr_hal_api::RR3_PERIPH_AXIS_DEFAULT);
+            // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
+            // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
+            let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
+                .ok()
+                .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
+                .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+            (
+                Box::new(crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_servo_baud(
+                    std::path::PathBuf::from(p),
+                    axis,
+                    baud,
+                )) as Box<dyn Rr3PwmServo>,
+                RR3_BACKEND_ESP32,
+            )
+        }
+        None => {
+            eprintln!(
+                "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），舵机面落占位（使用时以 Unsupported 回错）",
+                crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
+            );
+            (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+        }
+    }
+}
+
 /// ESP32 外设桥 UART 设备路径解析（P0-3/P0-4）：优先从生效绑定
 /// （描述符 [hardware].periph_uart + 应急 env RR3_HAL_PERIPH_UART 覆盖）取，
 /// 回落直接读 env；都没有 → None（调用方 fail-closed 落 placeholder）。
@@ -441,41 +513,36 @@ pub fn rr3_audio_source_cmd() -> (
 /// 按环境选音频播放面（与 [`rr3_audio_source`] 同一套规则）
 pub fn rr3_hal_audio_sink() -> (Box<dyn Rr3AudioSink>, &'static str) {
     match rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
-        RR3_BACKEND_LINUX if cfg!(all(target_os = "linux", feature = "alsa")) => {
+        // linux/alsa 编进 → 真件；显式 linux 但 alsa 没编进 → 占位显式回错，
+        // 不静默落 sim。
+        RR3_BACKEND_LINUX => {
             #[cfg(all(target_os = "linux", feature = "alsa"))]
-            return rr3_bindings_eff_log("音频回放")
-                .and_then(|b| {
-                    b.alsa_device.map(|dev| {
-                        (
-                            Box::new(crate::linux::Rr3AlsaAudioSink::rr3_alsa_sink_new(&dev))
-                                as Box<dyn Rr3AudioSink>,
-                            RR3_BACKEND_LINUX,
-                        )
-                    })
-                })
-                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
+            {
+                rr3_sink_linux()
+                    .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER))
+            }
             #[cfg(not(all(target_os = "linux", feature = "alsa")))]
-            unreachable!("上面 guard 已保证只在本分支编译")
+            {
+                (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+            }
         }
-        // 同 audio_source：显式 linux 但 alsa 没编进 → 占位显式回错，不静默落 sim
-        RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
-        // macOS 真扬声器（显式 mac 才进；缺省仍 sim——CI/无头不真开设备）
-        RR3_BACKEND_MAC if cfg!(target_os = "macos") => {
+        // macOS 真扬声器（显式 mac 才进；缺省仍 sim——CI/无头不真开设备）；
+        // 显式 mac 但平台不是 macOS：占位显式回错，不静默落 sim。
+        RR3_BACKEND_MAC => {
             #[cfg(target_os = "macos")]
-            return (
-                Box::new(crate::macaudio::Rr3MacAudioSink::rr3_mac_sink_new())
-                    as Box<dyn Rr3AudioSink>,
-                RR3_BACKEND_MAC,
-            );
+            {
+                rr3_sink_mac()
+            }
             #[cfg(not(target_os = "macos"))]
-            unreachable!("上面 guard 已保证只在本分支编译")
+            {
+                (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+            }
         }
-        // 显式 mac 但平台不是 macOS：占位显式回错，不静默落 sim
-        RR3_BACKEND_MAC => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         // 板无扬声器（A 批 c3）：esp32 档回放面显式落占位——TTS 回放恒宿主
         // （mac AudioQueue / sim 尾窗），fail-closed 不静默换。
-        RR3_BACKEND_ESP32 => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
-        RR3_BACKEND_PLACEHOLDER => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+        RR3_BACKEND_ESP32 | RR3_BACKEND_PLACEHOLDER => {
+            (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+        }
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimAudioSink::rr3_sim_sink_new(16000 * 10)),
             RR3_BACKEND_SIM,
@@ -494,61 +561,25 @@ pub fn rr3_hal_servo() -> (Box<dyn Rr3PwmServo>, &'static str) {
     // 舵机面走能力面覆盖键（[`RR3_HAL_SERVO_BACKEND_ENV`]）：组合档舵机在 ESP32
     // 板上时设 esp32，全局 hal_backend 仍 linux（其余能力面走宿主）。
     match rr3_servo_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
-        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
+        // linux 平台走 sysfs PWM；显式 linux 但非 linux 平台同落占位，不静默换 sim。
+        RR3_BACKEND_LINUX => {
             #[cfg(target_os = "linux")]
-            return rr3_bindings_eff_log("舵机")
-                .and_then(|b| {
-                    Some((
-                        Box::new(crate::linux_pwm::Rr3LinuxPwmServo::rr3_pwm_servo_new(
-                            std::path::Path::new(crate::linux_pwm::RR3_PWM_SYSFS_ROOT_DEFAULT),
-                            b.pwm_chip?,
-                            b.pwm_channel?,
-                        )) as Box<dyn Rr3PwmServo>,
-                        RR3_BACKEND_LINUX,
-                    ))
-                })
-                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
+            {
+                rr3_servo_linux()
+                    .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER))
+            }
             #[cfg(not(target_os = "linux"))]
-            unreachable!("上面 guard 已保证只在本分支编译")
+            {
+                (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+            }
         }
-        RR3_BACKEND_LINUX => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
         // ESP32 外设桥（批C）：设备路径来自生效绑定（描述符 [hardware].periph_uart
         // + 应急 env RR3_HAL_PERIPH_UART 覆盖）；键缺失 → 占位显式回错
         // （fail-closed，不猜设备）。
         // 宿主档门（批N8 件三）：espidf 档无桥面，本臂剔除后显式要 esp32 落
         // 下方 `_` 兜底臂占位回错（resolve 白名单单点不裁）。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        RR3_BACKEND_ESP32 => {
-            match rr3_periph_uart_path() {
-                Some(p) => {
-                    let axis = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_AXIS_ENV)
-                        .ok()
-                        .and_then(|v| crate::esp32_uart::rr3_axis_parse(&v))
-                        .unwrap_or(rr_hal_api::RR3_PERIPH_AXIS_DEFAULT);
-                    // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
-                    // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
-                    let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
-                        .ok()
-                        .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
-                        .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
-                    (
-                        Box::new(crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_servo_baud(
-                            std::path::PathBuf::from(p),
-                            axis,
-                            baud,
-                        )) as Box<dyn Rr3PwmServo>,
-                        RR3_BACKEND_ESP32,
-                    )
-                }
-                None => {
-                    eprintln!(
-                        "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），舵机面落占位（使用时以 Unsupported 回错）",
-                        crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
-                    );
-                    (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
-                }
-            }
-        }
+        RR3_BACKEND_ESP32 => rr3_servo_esp32(),
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimServo::rr3_sim_servo_new(90)),
             RR3_BACKEND_SIM,
