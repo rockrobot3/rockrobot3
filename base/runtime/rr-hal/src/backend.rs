@@ -182,23 +182,20 @@ fn rr3_backend_parse(key: &str, v: &str) -> Result<&'static str, String> {
         RR3_BACKEND_SIM => Ok(RR3_BACKEND_SIM),
         RR3_BACKEND_PLACEHOLDER => Ok(RR3_BACKEND_PLACEHOLDER),
         RR3_BACKEND_ESP32 => Ok(RR3_BACKEND_ESP32),
-        RR3_BACKEND_LINUX => {
-            if cfg!(target_os = "linux") {
-                Ok(RR3_BACKEND_LINUX)
-            } else {
-                Ok(RR3_BACKEND_PLACEHOLDER) // 使用时回 Unsupported，不静默降级
-            }
-        }
-        RR3_BACKEND_MAC => {
-            if cfg!(target_os = "macos") {
-                Ok(RR3_BACKEND_MAC)
-            } else {
-                Ok(RR3_BACKEND_PLACEHOLDER) // 使用时回 Unsupported，不静默降级
-            }
-        }
+        RR3_BACKEND_LINUX => Ok(rr3_backend_os(RR3_BACKEND_LINUX, cfg!(target_os = "linux"))),
+        RR3_BACKEND_MAC => Ok(rr3_backend_os(RR3_BACKEND_MAC, cfg!(target_os = "macos"))),
         other => Err(format!(
             "环境变量 {key} 取值不认: {other}（允许 sim/linux/esp32/mac/placeholder）"
         )),
+    }
+}
+
+/// 平台门：本平台才认该后端，否则落占位（使用时回 Unsupported，不静默降级）。
+fn rr3_backend_os(backend: &'static str, native: bool) -> &'static str {
+    if native {
+        backend
+    } else {
+        RR3_BACKEND_PLACEHOLDER
     }
 }
 
@@ -603,34 +600,47 @@ pub fn rr3_hal_gpio_out(
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] role: &str,
 ) -> (Box<dyn Rr3GpioOut>, &'static str) {
     match rr3_backend_resolve().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
-        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
-            #[cfg(target_os = "linux")]
-            return rr3_bindings_eff_log("数字输出")
-                .and_then(|b| {
-                    let line = match role {
-                        "led" => b.gpio_led_line,
-                        "relay" => b.gpio_relay_line,
-                        _ => None, // 白名单外：无键无绑定，fail-closed
-                    };
-                    Some((
-                        Box::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_gpio_out_new(
-                            std::path::Path::new(crate::linux_gpio::RR3_GPIO_DEV_ROOT_DEFAULT),
-                            b.gpio_chip?,
-                            line?,
-                            role,
-                        )) as Box<dyn Rr3GpioOut>,
-                        RR3_BACKEND_LINUX,
-                    ))
-                })
-                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
-            #[cfg(not(target_os = "linux"))]
-            unreachable!("上面 guard 已保证只在本分支编译")
-        }
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => rr3_gpio_linux(role),
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimGpioOut::rr3_sim_gpio_new(false)),
             RR3_BACKEND_SIM,
         ),
         _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
+/// linux 档数字输出：芯片号/线偏移取自生效绑定，role 白名单外或键缺失落占位。
+fn rr3_gpio_linux(role: &str) -> (Box<dyn Rr3GpioOut>, &'static str) {
+    #[cfg(target_os = "linux")]
+    {
+        rr3_bindings_eff_log("数字输出")
+            .and_then(|b| {
+                Some((
+                    Box::new(crate::linux_gpio::Rr3LinuxGpioOut::rr3_gpio_out_new(
+                        std::path::Path::new(crate::linux_gpio::RR3_GPIO_DEV_ROOT_DEFAULT),
+                        b.gpio_chip?,
+                        rr3_gpio_line(&b, role)?,
+                        role,
+                    )) as Box<dyn Rr3GpioOut>,
+                    RR3_BACKEND_LINUX,
+                ))
+            })
+            .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = role;
+        unreachable!("上面 guard 已保证只在本分支编译")
+    }
+}
+
+/// role 白名单到线偏移：白名单外 = 无键无绑定（fail-closed）。
+#[cfg(target_os = "linux")]
+fn rr3_gpio_line(b: &crate::descriptor::Rr3HalBindings, role: &str) -> Option<u32> {
+    match role {
+        "led" => b.gpio_led_line,
+        "relay" => b.gpio_relay_line,
+        _ => None, // 白名单外：无键无绑定，fail-closed
     }
 }
 
@@ -683,21 +693,7 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
     // 显示面走能力面覆盖键（[`RR3_HAL_DISPLAY_BACKEND_ENV`]）：组合档 OLED/点阵在
     // ESP32 板上时设 esp32，全局 hal_backend 仍 linux（其余能力面走宿主）。
     match rr3_display_backend().unwrap_or(RR3_BACKEND_PLACEHOLDER) {
-        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => {
-            #[cfg(target_os = "linux")]
-            return rr3_bindings_eff_log("显示")
-                .and_then(|b| {
-                    Some((
-                        Box::new(crate::linux_display::Rr3Max7219SpiDisplay::rr3_max7219_new(
-                            std::path::Path::new(b.spi_device.as_deref()?),
-                        )) as Box<dyn crate::Rr3Display>,
-                        RR3_BACKEND_LINUX,
-                    ))
-                })
-                .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER));
-            #[cfg(not(target_os = "linux"))]
-            unreachable!("上面 guard 已保证只在本分支编译")
-        }
+        RR3_BACKEND_LINUX if cfg!(target_os = "linux") => rr3_display_linux(),
         RR3_BACKEND_SIM => (
             Box::new(crate::sim::Rr3SimDisplay::rr3_sim_display_new([0; 8])),
             RR3_BACKEND_SIM,
@@ -713,33 +709,58 @@ pub fn rr3_hal_display() -> (Box<dyn crate::Rr3Display>, &'static str) {
         // + 应急 env RR3_HAL_PERIPH_UART 覆盖）；缺 → 占位显式回错。
         // 宿主档门（批N8 件三）：同 [`rr3_hal_servo`] 的 esp32 臂。
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        RR3_BACKEND_ESP32 => {
-            match rr3_periph_uart_path() {
-                Some(p) => {
-                    // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
-                    // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
-                    let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
-                        .ok()
-                        .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
-                        .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
-                    (
-                        Box::new(crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_disp_baud(
-                            std::path::PathBuf::from(p),
-                            baud,
-                        )) as Box<dyn crate::Rr3Display>,
-                        RR3_BACKEND_ESP32,
-                    )
-                }
-                None => {
-                    eprintln!(
-                        "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），显示面落占位（使用时以 Unsupported 回错）",
-                        crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
-                    );
-                    (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
-                }
-            }
-        }
+        RR3_BACKEND_ESP32 => rr3_display_esp32(),
         _ => (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER),
+    }
+}
+
+/// linux 档显示：MAX7219 spidev 后端，设备路径取自生效绑定（缺键落占位回错）。
+fn rr3_display_linux() -> (Box<dyn crate::Rr3Display>, &'static str) {
+    #[cfg(target_os = "linux")]
+    {
+        rr3_bindings_eff_log("显示")
+            .and_then(|b| {
+                Some((
+                    Box::new(crate::linux_display::Rr3Max7219SpiDisplay::rr3_max7219_new(
+                        std::path::Path::new(b.spi_device.as_deref()?),
+                    )) as Box<dyn crate::Rr3Display>,
+                    RR3_BACKEND_LINUX,
+                ))
+            })
+            .unwrap_or((Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        unreachable!("上面 guard 已保证只在本分支编译")
+    }
+}
+
+/// esp32 档显示：UART 帧面承载，UART 路径缺失即点名落占位（fail-closed）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_display_esp32() -> (Box<dyn crate::Rr3Display>, &'static str) {
+    match rr3_periph_uart_path() {
+        Some(p) => {
+            // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
+            // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
+            let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
+                .ok()
+                .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
+                .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+            (
+                Box::new(crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_disp_baud(
+                    std::path::PathBuf::from(p),
+                    baud,
+                )) as Box<dyn crate::Rr3Display>,
+                RR3_BACKEND_ESP32,
+            )
+        }
+        None => {
+            eprintln!(
+                "rr-hal: esp32 档缺 UART 路径（装配单 [hardware].periph_uart 或 env {}），显示面落占位（使用时以 Unsupported 回错）",
+                crate::esp32_uart::RR3_HAL_PERIPH_UART_ENV
+            );
+            (Box::new(Rr3UnavailableSource), RR3_BACKEND_PLACEHOLDER)
+        }
     }
 }
 

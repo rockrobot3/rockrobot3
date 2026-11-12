@@ -451,38 +451,54 @@ fn rr3_demand_crit(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<bool> 
 /// concurrency_group（T-5）：必须显式写；空数组 = 不分组 = 全体并发（最坏口径）
 /// 合法；非空元素须非空字符串（组名是判据 label 的一部分）。
 fn rr3_demand_grp(d: &Value, i: usize, errs: &mut Vec<String>) -> Vec<String> {
-    match d.get("concurrency_group") {
-        Some(Value::Array(gs)) => {
-            for (j, g) in gs.iter().enumerate() {
-                match g.as_str() {
-                    Some(s) if !s.trim().is_empty() => {}
-                    Some(_) => errs.push(format!(
-                        "demands[{i}].concurrency_group[{j}] 不得为空（组名是互斥判据的 label）"
-                    )),
-                    None => errs.push(format!(
-                        "demands[{i}].concurrency_group[{j}] 应为字符串（组名）"
-                    )),
-                }
-            }
-            gs.iter()
-                .filter_map(Value::as_str)
-                .filter(|s| !s.trim().is_empty())
-                .map(str::to_string)
-                .collect()
+    let Some(v) = d.get("concurrency_group") else {
+        errs.push(format!(
+            "demands[{i}].concurrency_group 缺失（T-5：必须显式写，[] = 不分组 = 全体并发最坏口径；同 no_injection 范式）"
+        ));
+        return Vec::new();
+    };
+    let Some(gs) = v.as_array() else {
+        errs.push(format!(
+            "demands[{i}].concurrency_group 应为字符串数组（[] 显式不分组合法——T-5 必须显式写）"
+        ));
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (j, g) in gs.iter().enumerate() {
+        if let Some(s) = rr3_grp_name(g, i, j, errs) {
+            out.push(s);
         }
+    }
+    out
+}
+
+/// 单个组名：非空字符串入列，坏元素逐条点名（不静默丢弃）。
+fn rr3_grp_name(g: &Value, i: usize, j: usize, errs: &mut Vec<String>) -> Option<String> {
+    match g.as_str() {
+        Some(s) if !s.trim().is_empty() => Some(s.to_string()),
         Some(_) => {
             errs.push(format!(
-                "demands[{i}].concurrency_group 应为字符串数组（[] 显式不分组合法——T-5 必须显式写）"
+                "demands[{i}].concurrency_group[{j}] 不得为空（组名是互斥判据的 label）"
             ));
-            Vec::new()
+            None
         }
         None => {
             errs.push(format!(
-                "demands[{i}].concurrency_group 缺失（T-5：必须显式写，[] = 不分组 = 全体并发最坏口径；同 no_injection 范式）"
+                "demands[{i}].concurrency_group[{j}] 应为字符串（组名）"
             ));
-            Vec::new()
+            None
         }
     }
+}
+
+/// 两数组均在文本中出现且均为空（L-5 空面的前件）。
+fn rr3_empty_surface(
+    handles_present: bool,
+    handles_empty: bool,
+    ops_present: bool,
+    ops_empty: bool,
+) -> bool {
+    handles_present && handles_empty && ops_present && ops_empty
 }
 
 /// L-5 空面规则（0.0.5 批M MC-10）：两数组均在文本中出现且均为空 ⇒ 必须明写
@@ -495,13 +511,14 @@ pub(crate) fn rr3_no_injection_err(
     no_injection: bool,
 ) -> Vec<String> {
     let mut errs: Vec<String> = Vec::new();
-    if handles_present && handles_empty && ops_present && ops_empty && !no_injection {
+    let empty = rr3_empty_surface(handles_present, handles_empty, ops_present, ops_empty);
+    if empty && !no_injection {
         errs.push(
             "注入面两数组均空却未明写 no_injection = true（L-5：或补齐 handles/ops，或明写该件不需注入面）"
                 .into(),
         );
     }
-    if no_injection && !(handles_present && handles_empty && ops_present && ops_empty) {
+    if no_injection && !empty {
         errs.push("no_injection = true 只允许与空的 handles/ops 并存（该声明与注入面互斥）".into());
     }
     errs
@@ -558,6 +575,18 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
 
 /// 顶层形状：schema_version（必须 2）与顶层未知键（只认 schema_version / assemble）。
 fn rr3_asm_head(t: &toml::Table, errs: &mut Vec<String>) {
+    rr3_asm_ver(t, errs);
+    for k in t.keys() {
+        if k != "schema_version" && k != "assemble" {
+            errs.push(format!(
+                "装配清单顶层未知键 {k}（只认 schema_version / assemble）"
+            ));
+        }
+    }
+}
+
+/// schema_version 版本对账（本文件定形即 2）。
+fn rr3_asm_ver(t: &toml::Table, errs: &mut Vec<String>) {
     // v1 是"无代码读它"时代的死数据形状，直接点名不迁就
     match t.get("schema_version") {
         Some(Value::Integer(v)) if *v == RR3_ASSEMBLE_SCHEMA_VERSION as i64 => {}
@@ -569,25 +598,21 @@ fn rr3_asm_head(t: &toml::Table, errs: &mut Vec<String>) {
             "装配清单缺 schema_version（必须为 {RR3_ASSEMBLE_SCHEMA_VERSION}）"
         )),
     }
-    for k in t.keys() {
-        if k != "schema_version" && k != "assemble" {
-            errs.push(format!(
-                "装配清单顶层未知键 {k}（只认 schema_version / assemble）"
-            ));
-        }
-    }
 }
 
 /// `[assemble]` 未知键点名（内存申报键 task_stack_bytes/heap_peak_bytes 是件级
 /// 专用——组合件级 [assemble] 不认，同 demands：内存账是原子件的物理属性）。
 fn rr3_asm_keys(asm: &toml::Table, errs: &mut Vec<String>) {
     for k in asm.keys() {
-        if k != "handles"
-            && k != "ops"
-            && k != "no_injection"
-            && k != "demands"
-            && k != "task_stack_bytes"
-            && k != "heap_peak_bytes"
+        if ![
+            "handles",
+            "ops",
+            "no_injection",
+            "demands",
+            "task_stack_bytes",
+            "heap_peak_bytes",
+        ]
+        .contains(&k.as_str())
         {
             errs.push(format!(
                 "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands / task_stack_bytes / heap_peak_bytes）"
