@@ -182,6 +182,17 @@ impl Rr3Max7219SpiDisplay {
         Ok(())
     }
 
+    /// 整帧逐行写（一次包络一片一包，行号直排 bit7 最左）。
+    fn rr3_draw_rows(&self, frame: &Rr3FaceFrame) -> Result<(), Rr3HalError> {
+        for row in 0u8..8 {
+            self.write_all(
+                &rr3_max7219_cmd(RR3_MAX7219_REG_DIGIT0 + row, frame[row as usize]),
+                "出帧写失败",
+            )?;
+        }
+        Ok(())
+    }
+
     /// 对在位设备整包写出（ensure 已过，fd 必在位）。写失败统一 InvalidParam
     /// 点名——SPI 无"忙"语义（独占 fd 自持），硬件掉线/线松在此显式听见。
     fn write_all(&self, payload: &[u8], what: &str) -> Result<(), Rr3HalError> {
@@ -222,12 +233,7 @@ impl Rr3Display for Rr3Max7219SpiDisplay {
             self.ensure(&mut guard)?;
         }
         // 整帧逐行 write（级联锁存纪律：一次包络一片一包，行号直排 bit7 最左）
-        for row in 0u8..8 {
-            self.write_all(
-                &rr3_max7219_cmd(RR3_MAX7219_REG_DIGIT0 + row, frame[row as usize]),
-                "出帧写失败",
-            )?;
-        }
+        self.rr3_draw_rows(frame)?;
         *self.last.lock().unwrap_or_else(|p| p.into_inner()) = *frame;
         Ok(())
     }

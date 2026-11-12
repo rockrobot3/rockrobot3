@@ -573,11 +573,7 @@ impl Rr3UartConn {
     /// 1.5M 下 ~6.7µs，正常链路远小于任一台法档位；只有"根本没人发"才会触发。
     /// 对桥/哨兵等本来就该阻塞等的收流端不适用，故只作显式调用。
     pub fn rr3_set_read_timeout(&self, ds: u8) -> std::io::Result<()> {
-        let mut t = Termios::zeroed();
-        // SAFETY：t 是本栈上的合法 termios，tcgetattr 只写它。
-        if unsafe { c_tcgetattr(self.fd, &mut t) } != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        let mut t = rr3_termios_of(self.fd)?;
         rr3_vtime(&mut t, ds);
         // SAFETY：合法指针；TCSANOW 立即生效。
         if unsafe { c_tcsetattr(self.fd, TCSANOW, &t) } != 0 {
@@ -585,6 +581,16 @@ impl Rr3UartConn {
         }
         Ok(())
     }
+}
+
+/// 取当前 termios（tcgetattr 失败即回 os error）。
+fn rr3_termios_of(fd: i32) -> std::io::Result<Termios> {
+    let mut t = Termios::zeroed();
+    // SAFETY：t 是本栈上的合法 termios，tcgetattr 只写它。
+    if unsafe { c_tcgetattr(fd, &mut t) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(t)
 }
 
 /// 读侧档位：`0` = 阻塞读满（VMIN=1/VTIME=0），否则 VMIN=0/VTIME=ds。
@@ -613,11 +619,7 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
 
 /// 构造 raw termios：取当前值 → cfmakeraw → CLOCAL|CREAD + VMIN/VTIME → 波特率。
 fn rr3_raw_termios(fd: i32, speed: SpeedT) -> std::io::Result<Termios> {
-    let mut t = Termios::zeroed();
-    // SAFETY：t 是本栈上的合法 termios，tcgetattr 只写它。
-    if unsafe { c_tcgetattr(fd, &mut t) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
+    let mut t = rr3_termios_of(fd)?;
     // SAFETY：合法指针；cfmakeraw 只改 termios 位面（清回显/规范化/流控）。
     unsafe { c_cfmakeraw(&mut t) };
     // CLOCAL|CREAD：TTL 链路本无 modem，载波检测语义必须整体摘除——不置位时
@@ -716,6 +718,11 @@ impl Rr3UartConn {
         if !idle {
             return;
         }
+        self.rr3_preamble_byte();
+    }
+
+    /// 写出前导 `\n` 并隔挡：写成功才记时刻（失败不拦路，正式字节自会报错）。
+    fn rr3_preamble_byte(&mut self) {
         let one = [0x0Au8];
         // SAFETY：one 活到调用返回，fd 属 self。
         let n = unsafe { c_write(self.fd, one.as_ptr() as *const std::ffi::c_void, 1) };

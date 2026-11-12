@@ -170,19 +170,29 @@ impl Rr3LinuxPwmServo {
     fn rr3_configure(&self) -> Result<(), Rr3HalError> {
         let dir = self.pwm_dir();
         rr3_pwm_period(&dir)?;
-        pwm_write(&dir.join("duty_cycle"), servo_duty_ns(SERVO_NEUTRAL_DEG)?)?;
-        pwm_write(&dir.join("enable"), 1)
+        rr3_pwm_start(&dir)
     }
+}
+
+/// 中位脉宽 + 使能（周期已在位；探活读回与 sim 同观测的落点）。
+fn rr3_pwm_start(dir: &Path) -> Result<(), Rr3HalError> {
+    pwm_write(&dir.join("duty_cycle"), servo_duty_ns(SERVO_NEUTRAL_DEG)?)?;
+    pwm_write(&dir.join("enable"), 1)
 }
 
 /// 周期落定：仅在变化时重写（重写前先归零占空比——旧 duty > 新 period 会被
 /// 内核 EINVAL 拒；读不到/读成垃圾按 0 处理走全量写）。
 fn rr3_pwm_period(dir: &Path) -> Result<(), Rr3HalError> {
     if pwm_read_u64(&dir.join("period")).unwrap_or(0) != RR3_SERVO_PERIOD_NS as u64 {
-        pwm_write(&dir.join("duty_cycle"), 0)?;
-        pwm_write(&dir.join("period"), RR3_SERVO_PERIOD_NS)?;
+        rr3_pwm_renew(dir)?;
     }
     Ok(())
+}
+
+/// 全量重写周期：先归零占空比（旧 duty > 新 period 会被内核 EINVAL 拒）。
+fn rr3_pwm_renew(dir: &Path) -> Result<(), Rr3HalError> {
+    pwm_write(&dir.join("duty_cycle"), 0)?;
+    pwm_write(&dir.join("period"), RR3_SERVO_PERIOD_NS)
 }
 
 /// 等 `pwmN` 目录出现（内核 workqueue 异步建目录，超时即点名 sysfs 异常）。

@@ -178,11 +178,16 @@ impl Rr3WifiStore for Rr3NmWifiStore {
         )?;
         // terse 单字段行 `802-11-wireless.ssid:<值>`（字段提取与链路读数共用
         // nmcli_support 一份真值）；NM 空值 `--`/空串 → None
-        let v = rr3_nm_field(&out, "802-11-wireless.ssid")
-            .map(str::trim)
-            .filter(|v| !v.is_empty() && *v != "--");
-        Ok(v.map(|s| Rr3SsidText::rr3_ssid_text_new(&rr3_nm_unescape(s))))
+        Ok(rr3_nm_ssid_of(&out))
     }
+}
+
+/// 在册 SSID 取值：NM 空值 `--`/空串 → None，其余反转义收编定长文本。
+fn rr3_nm_ssid_of(out: &str) -> Option<Rr3SsidText> {
+    let v = rr3_nm_field(out, "802-11-wireless.ssid")
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && *v != "--");
+    v.map(|s| Rr3SsidText::rr3_ssid_text_new(&rr3_nm_unescape(s)))
 }
 
 /// sim 凭据存储（内存档）：sim 是显式档不是持久化承载——进程内存态即"在册"，

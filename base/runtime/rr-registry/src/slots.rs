@@ -149,6 +149,12 @@ fn rr3_slot_entry(name: &str, entry: &Rr3SlotEntry, errs: &mut Vec<String>) {
             entry.layer
         ));
     }
+    rr3_slot_status_err(name, entry, errs);
+    rr3_slot_tier_err(name, entry, errs);
+}
+
+/// status 域：空值（缺登记）与越册值分别点名。
+fn rr3_slot_status_err(name: &str, entry: &Rr3SlotEntry, errs: &mut Vec<String>) {
     if entry.status.is_empty() {
         errs.push(format!(
             "slot {name} 缺 status 登记（schema_version=2 起必有: {RR3_SLOT_STATUS:?}）"
@@ -159,6 +165,10 @@ fn rr3_slot_entry(name: &str, entry: &Rr3SlotEntry, errs: &mut Vec<String>) {
             entry.status
         ));
     }
+}
+
+/// tier_scope 域：空集与逐项越册值分别点名。
+fn rr3_slot_tier_err(name: &str, entry: &Rr3SlotEntry, errs: &mut Vec<String>) {
     if entry.tier_scope.is_empty() {
         errs.push(format!(
             "slot {name} 缺 tier_scope 登记（至少覆盖一个承载档: {RR3_SLOT_TIERS:?}）"

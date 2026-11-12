@@ -406,16 +406,22 @@ impl RrdRegistry {
 
     /// 计数键数达上界时拒新键（既有键照常累加），并只点一次名。
     fn rr3_ctr_capped(&mut self, key: &str) -> bool {
-        if !self.counters.contains_key(key) && self.counters.len() >= RR3_CTR_KEY_CAP {
-            if !self.ctr_cap_noted {
-                self.ctr_cap_noted = true;
-                rr3_log(&format!(
-                    "运维计数键数达上界 {RR3_CTR_KEY_CAP}，拒新键 {key}（既有键照常累加；查模块是否每拍换键）"
-                ));
-            }
-            return true;
+        if self.counters.contains_key(key) || self.counters.len() < RR3_CTR_KEY_CAP {
+            return false;
         }
-        false
+        self.rr3_cap_note_once(key);
+        true
+    }
+
+    /// 达上界只点一次名（后续拒新键不再刷屏）。
+    fn rr3_cap_note_once(&mut self, key: &str) {
+        if self.ctr_cap_noted {
+            return;
+        }
+        self.ctr_cap_noted = true;
+        rr3_log(&format!(
+            "运维计数键数达上界 {RR3_CTR_KEY_CAP}，拒新键 {key}（既有键照常累加；查模块是否每拍换键）"
+        ));
     }
 
     /// 运维计数：全表只读快照（`rr3.ctl.counters` 的读面与持久化写盘共用）

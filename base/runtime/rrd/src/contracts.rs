@@ -161,16 +161,21 @@ fn rr3_truth_entries(
     let mut truth_set = Vec::new();
     for loc in crate::profile::rr3_truth_locations(profile_path, contracts_dir, wiring_path, chip)?
     {
-        let bytes = std::fs::read(&loc.path)
-            .map_err(|e| format!("真值集记账读失败 {}: {e}", loc.path.display()))?;
-        truth_set.push(Rr3TruthSetEntry {
-            member: loc.member,
-            path: loc.path,
-            sha256: rr3_sha256_hex(&bytes),
-            bytes: bytes.len() as u64,
-        });
+        truth_set.push(rr3_truth_entry(loc)?);
     }
     Ok(truth_set)
+}
+
+/// 单成员记账：读字节 → sha256 + 长度，读不到即 Err（真值集成员刚被装载面读过）。
+fn rr3_truth_entry(loc: crate::profile::Rr3TruthSetLocation) -> Result<Rr3TruthSetEntry, String> {
+    let bytes = std::fs::read(&loc.path)
+        .map_err(|e| format!("真值集记账读失败 {}: {e}", loc.path.display()))?;
+    Ok(Rr3TruthSetEntry {
+        member: loc.member,
+        path: loc.path,
+        sha256: rr3_sha256_hex(&bytes),
+        bytes: bytes.len() as u64,
+    })
 }
 
 /// 自检判果（纯函数，判据真值单点）：Z-4 判据 = "包内四份契约文件齐全且 sha 对"

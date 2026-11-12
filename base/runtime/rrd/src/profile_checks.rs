@@ -189,17 +189,22 @@ fn rr3_check_bind_slots(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<Strin
 fn rr3_check_present(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
     let mut errs = Vec::new();
     for slot in &profile.slots_present {
-        if !table.rr3_slot_contains(slot) {
-            errs.push(format!(
-                "[slots].present 格位 {slot} 未在册（contracts/slots.toml 无此格）"
-            ));
-        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
-            errs.push(format!(
-                "[slots].present 不得声明基础层格位 {slot}（基础层由基座内建承载，恒在位）"
-            ));
-        }
+        rr3_present_slot(slot, table, &mut errs);
     }
     errs
+}
+
+/// present 单格两判：在册性 + 基础层禁入。
+fn rr3_present_slot(slot: &str, table: &Rr3SlotTable, errs: &mut Vec<String>) {
+    if !table.rr3_slot_contains(slot) {
+        errs.push(format!(
+            "[slots].present 格位 {slot} 未在册（contracts/slots.toml 无此格）"
+        ));
+    } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
+        errs.push(format!(
+            "[slots].present 不得声明基础层格位 {slot}（基础层由基座内建承载，恒在位）"
+        ));
+    }
 }
 
 /// [slots].device_absent 查册门（D3 裁定 5）：格名在册 + 只登记 base 层格
@@ -207,17 +212,22 @@ fn rr3_check_present(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> 
 fn rr3_check_absent(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
     let mut errs = Vec::new();
     for slot in profile.slots_device_absent.keys() {
-        if !table.rr3_slot_contains(slot) {
-            errs.push(format!(
-                "[slots].device_absent 格位 {slot} 未在册（contracts/slots.toml 无此格）"
-            ));
-        } else if table.rr3_slot_layer(slot).as_deref() != Some("base") {
-            errs.push(format!(
-                "[slots].device_absent 只登记基础层格位，{slot} 非 base 层（非基础层格的缺席表达 = 不进 [slots].present，写进本表属第二套语法）"
-            ));
-        }
+        rr3_absent_slot(slot, table, &mut errs);
     }
     errs
+}
+
+/// device_absent 单格两判：在册性 + 只认 base 层。
+fn rr3_absent_slot(slot: &str, table: &Rr3SlotTable, errs: &mut Vec<String>) {
+    if !table.rr3_slot_contains(slot) {
+        errs.push(format!(
+            "[slots].device_absent 格位 {slot} 未在册（contracts/slots.toml 无此格）"
+        ));
+    } else if table.rr3_slot_layer(slot).as_deref() != Some("base") {
+        errs.push(format!(
+            "[slots].device_absent 只登记基础层格位，{slot} 非 base 层（非基础层格的缺席表达 = 不进 [slots].present，写进本表属第二套语法）"
+        ));
+    }
 }
 
 /// 档位一致性（G6：bare 必须有看门狗）+ tier↔tier_scope 交叉校验（L-10）+
@@ -401,17 +411,22 @@ fn rr3_inst_msg(pin: &Rr3PinEntry, label: &str, per_inst: bool) -> String {
 /// requires 逐项在场（§5 缺失语义：空串/None/空数组 = 缺；"none" 算在场）。
 fn rr3_pin_req_check(pin: &Rr3PinEntry, roles: &Rr3RoleTable, label: &str, errs: &mut Vec<String>) {
     for f in roles.rr3_role_requires(&pin.role).unwrap_or_default() {
-        if !RR3_PIN_KEYS.contains(&f.as_str()) {
-            errs.push(format!(
-                "角色 {} 的 requires 引用未知字段 {f}（[pins] 字段词表外——门 a 六表对账第 5 张的漂移）",
-                pin.role
-            ));
-        } else if !rr3_pin_has(pin, &f) {
-            errs.push(format!(
-                "{label} 缺 {f}（角色 {} requires 必填，留空即红——§5 缺失语义；\"合法不适用\"须显式写 none）",
-                pin.role
-            ));
-        }
+        rr3_pin_req_one(&f, pin, label, errs);
+    }
+}
+
+/// 单条 requires 两判：字段名词表外 / 必填位缺失。
+fn rr3_pin_req_one(f: &str, pin: &Rr3PinEntry, label: &str, errs: &mut Vec<String>) {
+    if !RR3_PIN_KEYS.contains(&f) {
+        errs.push(format!(
+            "角色 {} 的 requires 引用未知字段 {f}（[pins] 字段词表外——门 a 六表对账第 5 张的漂移）",
+            pin.role
+        ));
+    } else if !rr3_pin_has(pin, f) {
+        errs.push(format!(
+            "{label} 缺 {f}（角色 {} requires 必填，留空即红——§5 缺失语义；\"合法不适用\"须显式写 none）",
+            pin.role
+        ));
     }
 }
 
@@ -497,14 +512,18 @@ fn rr3_drift_check(
         return;
     }
     for (key, prefix) in platform.rr3_wordform_map() {
-        if rr3_wordform_tail(&pin.controller, prefix).is_some() && !derives.iter().any(|d| d == key)
-        {
+        if rr3_drift_hit(pin, derives, key, prefix) {
             errs.push(format!(
                 "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
                 pin.controller, pin.role
             ));
         }
     }
+}
+
+/// 词形命中该族、而角色 derives 未声明该键 = 派生漂移。
+fn rr3_drift_hit(pin: &Rr3PinEntry, derives: &[String], key: &str, prefix: &str) -> bool {
+    rr3_wordform_tail(&pin.controller, prefix).is_some() && !derives.iter().any(|d| d == key)
 }
 
 /// 门 n（§8 注入路径唯一）：[hardware] 出现引脚侧派生键一律红——pin 实际派生
@@ -516,17 +535,22 @@ pub(crate) fn rr3_check_hw_keys(
     let mut errs = Vec::new();
     for k in RR3_PIN_DERIVED_KEYS {
         if let Some(hv) = profile.hardware.get(k) {
-            match derived.get(k) {
-                Some(dv) => errs.push(format!(
-                    "hardware.{k} = \"{hv}\" 与 [pins] 派生值 \"{dv}\" 两处并存（门 n：注入路径唯一，[pins] 派生或 [hardware] 直给二者取一）"
-                )),
-                None => errs.push(format!(
-                    "hardware.{k} 是引脚侧派生键（schema 3 起唯一来源 = [pins] 派生，[hardware] 不得直给——门 n 稳态判据）"
-                )),
-            }
+            rr3_hw_key_note(k, hv, derived, &mut errs);
         }
     }
     errs
+}
+
+/// 单键两判：pin 也派生该键（两份取值并存）/ 只有 [hardware] 直给（稳态判据）。
+fn rr3_hw_key_note(k: &str, hv: &str, derived: &BTreeMap<String, String>, errs: &mut Vec<String>) {
+    match derived.get(k) {
+        Some(dv) => errs.push(format!(
+            "hardware.{k} = \"{hv}\" 与 [pins] 派生值 \"{dv}\" 两处并存（门 n：注入路径唯一，[pins] 派生或 [hardware] 直给二者取一）"
+        )),
+        None => errs.push(format!(
+            "hardware.{k} 是引脚侧派生键（schema 3 起唯一来源 = [pins] 派生，[hardware] 不得直给——门 n 稳态判据）"
+        )),
+    }
 }
 
 /// 装载期校验⑥-a/⑥-b：功率面角色必须挂真实供电轨，轨名必须在册；
@@ -637,14 +661,19 @@ fn rr3_bind_check(d: &Rr3Domain, pins: &[Rr3PinEntry], label: &str, errs: &mut V
         ("current_sense", &d.current_sense),
         ("switch", &d.switch),
     ] {
-        if val == "none" {
-            continue;
-        }
-        if !pins.iter().any(|p| p.rr3_pin_id() == *val) {
-            errs.push(format!(
-                "{label}.{key} = {val} 不在 [pins] 的 pin_id 集（校验⑥-d：绑定位一律写 pin_id，\"none\" 是合法显式值——第二套语法如 adc:gp34 一律红，F-2）"
-            ));
-        }
+        rr3_bind_one(key, val, pins, label, errs);
+    }
+}
+
+/// 单个绑定位两判：`none` 显式不适跳过 / 必须命中 [pins] 的 pin_id。
+fn rr3_bind_one(key: &str, val: &str, pins: &[Rr3PinEntry], label: &str, errs: &mut Vec<String>) {
+    if val == "none" {
+        return;
+    }
+    if !pins.iter().any(|p| p.rr3_pin_id() == val) {
+        errs.push(format!(
+            "{label}.{key} = {val} 不在 [pins] 的 pin_id 集（校验⑥-d：绑定位一律写 pin_id，\"none\" 是合法显式值——第二套语法如 adc:gp34 一律红，F-2）"
+        ));
     }
 }
 
@@ -787,15 +816,23 @@ fn rr3_probe_gaps(
 ) -> Vec<(String, String)> {
     let mut missing = Vec::new();
     for (slot, module) in &profile.bindings {
-        let (bus, addr) = match i2c_bind.get(slot) {
-            Some((n, a)) => (Some(*n), Some(a.as_str())),
-            None => (None, None),
-        };
+        let (bus, addr) = rr3_bind_pair(i2c_bind, slot);
         if !probe.rr3_probe_slot_bound(slot, bus, addr) {
             missing.push((module.clone(), slot.clone()));
         }
     }
     missing
+}
+
+/// 格位的器件级 (bus, addr)：无绑定回落总线级五面判据（None, None）。
+fn rr3_bind_pair<'a>(
+    i2c_bind: &'a BTreeMap<String, (u32, String)>,
+    slot: &str,
+) -> (Option<u32>, Option<&'a str>) {
+    match i2c_bind.get(slot) {
+        Some((n, a)) => (Some(*n), Some(a.as_str())),
+        None => (None, None),
+    }
 }
 
 /// 声明缺/注入缺逐格补齐（去重；板说没有的格不再看 binding——绑了也白绑）

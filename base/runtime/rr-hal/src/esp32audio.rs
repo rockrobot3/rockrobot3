@@ -607,13 +607,24 @@ fn rr3_drain_cmds(
         return Ok(());
     };
     while let Some(cmd) = rx.rr3_cmd_pop() {
-        let frame = rr3_esp32_cmd_frame(*cmd_id, &cmd);
-        if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
-            rx.rr3_cmd_push_front(cmd);
-            return Err(format!("命令写出失败（回插队首，连接报废转重连）: {e:?}"));
-        }
-        *cmd_id += 1;
+        rr3_drain_one(c, rx, cmd, cmd_id)?;
     }
+    Ok(())
+}
+
+/// 写出一条命令：失败回插队首并交回错误（命令不丢，重连后补写）。
+fn rr3_drain_one(
+    c: &mut Rr3UartConn,
+    rx: &Rr3AudioCmdConsumer,
+    cmd: Rr3PeriphCmd,
+    cmd_id: &mut u64,
+) -> Result<(), String> {
+    let frame = rr3_esp32_cmd_frame(*cmd_id, &cmd);
+    if let Err(e) = c.rr3_send_buf(Rr3FrameBuf::from(&frame)) {
+        rx.rr3_cmd_push_front(cmd);
+        return Err(format!("命令写出失败（回插队首，连接报废转重连）: {e:?}"));
+    }
+    *cmd_id += 1;
     Ok(())
 }
 
@@ -760,6 +771,11 @@ fn rr3_ping(c: &mut Rr3UartConn, at: &mut Instant) -> bool {
         return true;
     }
     *at = Instant::now();
+    rr3_ping_send(c)
+}
+
+/// 写出一个空行心跳；失败点名并回 false（连接不可用）。
+fn rr3_ping_send(c: &mut Rr3UartConn) -> bool {
     if let Err(e) = c.write_all(b"\n") {
         eprintln!("rr-hal-esp32-audio: 心跳写出失败: {e} → 重连");
         return false;
@@ -875,22 +891,29 @@ fn rr3_esp32_take_audio(
     chunk: Rr3Esp32AudioChunk,
 ) {
     core.chunks.fetch_add(1, Ordering::Relaxed);
-    if !once.ready {
-        once.ready = true;
-        eprintln!(
-            "rr-hal-esp32-audio: 板面流就绪（实测 rate={} ch=2 s16le）",
-            chunk.rate
-        );
-    }
+    rr3_audio_ready_once(once, chunk.rate);
     let samples = rr3_s16le_decode(&chunk.samples);
     let mut ring = core.ring.lock().unwrap_or_else(|p| p.into_inner());
     ring.rr3_ring_push(&samples, core.channels as usize);
-    if ring.rr3_ring_dropped() > 0 && !once.overflow {
-        once.overflow = true;
-        eprintln!(
-            "rr-hal-esp32-audio: 环形缓冲开始溢丢最旧（板-宿主钟滑移稳态损耗，VAD/ASR 可容忍）"
-        );
+    rr3_overflow_once(once, ring.rr3_ring_dropped());
+}
+
+/// 首帧就绪打点（会话内只打一次）。
+fn rr3_audio_ready_once(once: &mut Rr3IngestLog, rate: u32) {
+    if once.ready {
+        return;
     }
+    once.ready = true;
+    eprintln!("rr-hal-esp32-audio: 板面流就绪（实测 rate={rate} ch=2 s16le）");
+}
+
+/// 首次溢丢打点（会话内只打一次：稳态钟滑移损耗不刷屏）。
+fn rr3_overflow_once(once: &mut Rr3IngestLog, dropped: u64) {
+    if dropped == 0 || once.overflow {
+        return;
+    }
+    once.overflow = true;
+    eprintln!("rr-hal-esp32-audio: 环形缓冲开始溢丢最旧（板-宿主钟滑移稳态损耗，VAD/ASR 可容忍）");
 }
 
 /// 命令回执：业务失败逐条点名；成功回执只打首条（高频命令面不刷屏，首条

@@ -76,17 +76,20 @@ fn rr3_call_reply(
     match outcome {
         Ok(true) => {}
         // 查表时还活着、投递时收件人没了：对调用方而言就是"这一拍没人接"
-        Ok(false) => {
-            rr3_reply_err(
-                out,
-                me,
-                id,
-                Rr3StatusCode::Invalid,
-                &format!("主题 {topic} 的被调方在投递前退场"),
-            );
-        }
+        Ok(false) => rr3_fwd_gone(out, me, id, topic),
         Err(msg) => rr3_reply_err(out, me, id, Rr3StatusCode::Invalid, &msg),
     }
+}
+
+/// 投递前退场：回 Invalid 错误帧（不断连），点名被调方已走。
+fn rr3_fwd_gone(out: &Arc<Mutex<UnixStream>>, me: &Rr3Peer, id: u64, topic: &str) {
+    rr3_reply_err(
+        out,
+        me,
+        id,
+        Rr3StatusCode::Invalid,
+        &format!("主题 {topic} 的被调方在投递前退场"),
+    );
 }
 
 /// `rr3.call` 的转发帧：src/trace = 调用方 task，dst = 被调方 task，body 原样。

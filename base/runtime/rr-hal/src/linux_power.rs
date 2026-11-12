@@ -141,27 +141,38 @@ impl Rr3LinuxIna219 {
     fn read_register(&self, reg: u8) -> Result<u16, Rr3HalError> {
         let guard = self.bus_fd.lock().unwrap_or_else(|p| p.into_inner());
         let fd = guard.expect("ensure 已过，总线 fd 必在位");
-        // SAFETY：fd 合法，缓冲区与长度配对
-        let wr = unsafe { libc::write(fd, &reg as *const u8 as *const libc::c_void, 1) };
-        if wr != 1 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                &format!("i2c 写寄存器号 {reg:#04x} 失败（errno {errno}）"),
-            )));
-        }
-        let mut buf = [0u8; 2];
-        // SAFETY：同上
-        let rd = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 2) };
-        if rd != 2 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                &format!(
-                    "i2c 读寄存器 {reg:#04x} 失败（{rd}/2 字节，errno {errno}——地址无应答或 NACK）"
-                ),
-            )));
-        }
-        Ok(u16::from_be_bytes(buf))
+        rr3_reg_write(fd, reg)?;
+        Ok(u16::from_be_bytes(rr3_reg_read(fd, reg)?))
     }
+}
+
+/// 写 1 字节寄存器号（INA219 原生读的地址相位）。
+fn rr3_reg_write(fd: std::os::raw::c_int, reg: u8) -> Result<(), Rr3HalError> {
+    // SAFETY：fd 合法，缓冲区与长度配对
+    let wr = unsafe { libc::write(fd, &reg as *const u8 as *const libc::c_void, 1) };
+    if wr != 1 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+            &format!("i2c 写寄存器号 {reg:#04x} 失败（errno {errno}）"),
+        )));
+    }
+    Ok(())
+}
+
+/// 读 2 字节寄存器值（INA219 原生大端；两步不完整即回错）。
+fn rr3_reg_read(fd: std::os::raw::c_int, reg: u8) -> Result<[u8; 2], Rr3HalError> {
+    let mut buf = [0u8; 2];
+    // SAFETY：fd 合法，缓冲区与长度配对
+    let rd = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 2) };
+    if rd != 2 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+            &format!(
+                "i2c 读寄存器 {reg:#04x} 失败（{rd}/2 字节，errno {errno}——地址无应答或 NACK）"
+            ),
+        )));
+    }
+    Ok(buf)
 }
 
 impl Drop for Rr3LinuxIna219 {

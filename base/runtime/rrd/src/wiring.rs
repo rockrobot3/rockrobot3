@@ -320,10 +320,7 @@ fn rr3_wire_keyed(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> b
 
 /// rated_a：正数（0 额定线不存在；⑦-c 的判据面）。
 fn rr3_wire_rated(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> f64 {
-    let rated = t
-        .get("rated_a")
-        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)));
-    match rated {
+    match rr3_rated_parse(t) {
         Some(a) if a > 0.0 => a,
         _ => {
             errs.push(format!(
@@ -332,6 +329,12 @@ fn rr3_wire_rated(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> f
             0.0
         }
     }
+}
+
+/// rated_a 取值（浮点或整数皆收）：缺失或非数值 = None，域判归调用方。
+fn rr3_rated_parse(t: &toml::value::Table) -> Option<f64> {
+    t.get("rated_a")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)))
 }
 
 /// 闭合面：feeds 必须指向本档其他线组位号（自环即红）
@@ -344,17 +347,22 @@ fn rr3_wire_close(wires: &[Rr3Wire], errs: &mut Vec<String>) {
 
 fn rr3_close_wire(w: &Rr3Wire, connectors: &BTreeSet<&str>, errs: &mut Vec<String>) {
     for f in &w.feeds {
-        if f == &w.connector {
-            errs.push(format!(
-                "wiring[{}].feeds 自环（本线组不能承载自己）",
-                w.connector
-            ));
-        } else if !connectors.contains(f.as_str()) {
-            errs.push(format!(
-                "wiring[{}].feeds = {f} 未在本接线档的位号集（接线闭合：feeds 指向同文件其他线组的位号）",
-                w.connector
-            ));
-        }
+        rr3_close_one(w, f, connectors, errs);
+    }
+}
+
+/// 单条 feeds 两判：自环 / 不在本档位号集。
+fn rr3_close_one(w: &Rr3Wire, f: &str, connectors: &BTreeSet<&str>, errs: &mut Vec<String>) {
+    if f == w.connector.as_str() {
+        errs.push(format!(
+            "wiring[{}].feeds 自环（本线组不能承载自己）",
+            w.connector
+        ));
+    } else if !connectors.contains(&f) {
+        errs.push(format!(
+            "wiring[{}].feeds = {f} 未在本接线档的位号集（接线闭合：feeds 指向同文件其他线组的位号）",
+            w.connector
+        ));
     }
 }
 
@@ -386,15 +394,20 @@ impl Rr3Wiring {
 /// ⑦-a：signal 除 vcc/gnd 外一律写 pin_id（F-3）
 fn rr3_wire_signal(w: &Rr3Wire, pin_ids: &BTreeSet<String>, errs: &mut Vec<String>) {
     for s in &w.signal {
-        if s == "vcc" || s == "gnd" {
-            continue;
-        }
-        if !pin_ids.contains(s) {
-            errs.push(format!(
-                "wiring[{}].signal 元素 {s} 不在 [pins] 的 pin_id 集（校验⑦-a：signal 除 vcc/gnd 外一律写 pin_id，不各造语法——F-3）",
-                w.connector
-            ));
-        }
+        rr3_signal_one(w, s, pin_ids, errs);
+    }
+}
+
+/// 单 signal 元素：vcc/gnd 免检，其余一律须是 [pins] 的 pin_id。
+fn rr3_signal_one(w: &Rr3Wire, s: &str, pin_ids: &BTreeSet<String>, errs: &mut Vec<String>) {
+    if s == "vcc" || s == "gnd" {
+        return;
+    }
+    if !pin_ids.contains(s) {
+        errs.push(format!(
+            "wiring[{}].signal 元素 {s} 不在 [pins] 的 pin_id 集（校验⑦-a：signal 除 vcc/gnd 外一律写 pin_id，不各造语法——F-3）",
+            w.connector
+        ));
     }
 }
 

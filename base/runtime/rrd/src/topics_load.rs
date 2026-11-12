@@ -145,13 +145,20 @@ fn rr3_merge_conflicts(
     name: &str,
     errs: &mut Vec<String>,
 ) {
-    let want = base.rr3_topic_owner(name);
-    let want_kind = base.rr3_topic_kind(name);
     if !merged.rr3_topic_contains(name) {
         errs.push(format!(
             "合并后契约 topic 丢失: {name}（叠加层不得覆盖生产条目）"
         ));
-    } else if merged.rr3_topic_owner(name) != want {
+        return;
+    }
+    rr3_merge_rewrite(base, merged, name, errs);
+}
+
+/// owner / kind 两处改写复验（丢失已在调用方裁掉）：owner 优先点名。
+fn rr3_merge_rewrite(base: &Rr3TopicSet, merged: &Rr3TopicSet, name: &str, errs: &mut Vec<String>) {
+    let want = base.rr3_topic_owner(name);
+    let want_kind = base.rr3_topic_kind(name);
+    if merged.rr3_topic_owner(name) != want {
         errs.push(format!(
             "契约 topic {name} 的 owner 被叠加层改写: {:?} → {:?}",
             want,
