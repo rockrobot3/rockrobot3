@@ -325,21 +325,37 @@ fn rr3_obs_reply(payload: &[u8]) -> Result<Option<()>, String> {
 /// 取证收集：读到两路证据齐或超时。读超时/暂无帧按"这拍没帧"继续，
 /// 到 deadline 收口——缺什么在错误里点名什么。
 fn rr3_obs_collect(stream: &mut UnixStream, deadline: Duration) -> Result<Rr3ChainObs, String> {
+    rr3_obs_arm(stream)?;
+    rr3_obs_gather(stream, deadline)
+}
+
+/// 取证读超时（250ms 一拍）。
+fn rr3_obs_arm(stream: &mut UnixStream) -> Result<(), String> {
     stream
         .set_read_timeout(Some(Duration::from_millis(250)))
-        .map_err(|e| format!("设读超时失败: {e}"))?;
+        .map_err(|e| format!("设读超时失败: {e}"))
+}
+
+/// 收集循环：两路证据齐或到 deadline（缺什么在错误里点名什么）。
+fn rr3_obs_gather(stream: &mut UnixStream, deadline: Duration) -> Result<Rr3ChainObs, String> {
     let mut obs = Rr3ChainObs::default();
     let t0 = Instant::now();
     while !obs.rr3_obs_ready() {
-        if t0.elapsed() >= deadline {
-            return Err(format!(
-                "超时（{deadline:?}）：全链取证未齐（doa={:?} servo={:?}）——判向注入或意图-转向链没走通",
-                obs.doa_deg, obs.servo_angle
-            ));
-        }
+        rr3_obs_deadline(t0, deadline, &obs)?;
         rr3_obs_step(stream, &mut obs);
     }
     Ok(obs)
+}
+
+/// 取证超时门（缺什么在错误里点名什么）。
+fn rr3_obs_deadline(t0: Instant, deadline: Duration, obs: &Rr3ChainObs) -> Result<(), String> {
+    if t0.elapsed() >= deadline {
+        return Err(format!(
+            "超时（{deadline:?}）：全链取证未齐（doa={:?} servo={:?}）——判向注入或意图-转向链没走通",
+            obs.doa_deg, obs.servo_angle
+        ));
+    }
+    Ok(())
 }
 
 /// 一拍取证：读超时/非事件/非 JSON 一律按"这拍没帧"跳过。

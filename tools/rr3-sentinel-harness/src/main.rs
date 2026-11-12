@@ -306,6 +306,11 @@ fn rr3_recv_frame(conn: &mut Rr3UartConn, on_recv: &str, on_parse: &str) -> Rr3F
             std::process::exit(1);
         }
     };
+    rr3_frame_parse(buf, on_parse)
+}
+
+/// 还原一帧（失败点名后退出 1）。
+fn rr3_frame_parse(buf: Rr3FrameBuf, on_parse: &str) -> Rr3Frame {
     match Rr3Frame::try_from(buf) {
         Ok(f) => f,
         Err(e) => {
@@ -686,35 +691,29 @@ fn rr3_parity_judge(board_parity: Option<&Value>, parity_ms: u128) -> u32 {
 /// 板回后的三条腿：向量在册 / 契约腿 / 确定性腿。返回 FAIL 数。
 fn rr3_parity_legs(bv: &Value, parity_ms: u128) -> u32 {
     let mut fail = 0u32;
-    if !verdict(
+    fail += rr3_tally(
         bv.get("v").and_then(Value::as_u64) == Some(RR3_PARITY_VERSION as u64),
         &format!(
             "④ 板回 parity 向量在册（v={}，耗时 {parity_ms}ms）",
             RR3_PARITY_VERSION
         ),
-    ) {
-        fail += 1;
-    }
+    );
     // 契约腿（宿主自证）：runner 与期望向量的一致性漂移在宿主先红。
     let host = parity_expect_json(&rr3_parity_run());
     let expected = parity_expect_json(&RR3_PARITY_EXPECTED);
-    if !verdict(
+    fail += rr3_tally(
         host == expected,
         "④ 契约腿：宿主 runner == RR3_PARITY_EXPECTED（手推期望守门）",
-    ) {
-        fail += 1;
-    }
+    );
     // 确定性腿：板输出 == 宿主 runner（同 runner 同输入，bit-for-bit）。
     let diff = parity_first_diff(bv, &host);
-    if !verdict(
+    fail += rr3_tally(
         diff.is_none(),
         &format!(
             "④ 确定性腿：板 == 宿主 runner（xtensa LX6 bit-for-bit）{}",
             diff.map(|d| format!("——{d}")).unwrap_or_default()
         ),
-    ) {
-        fail += 1;
-    }
+    );
     fail
 }
 

@@ -291,10 +291,15 @@ fn rr3_cloud_url(a: &Rr3SimArgs) -> Result<(), String> {
                 .to_string(),
         );
     }
-    if !u.starts_with("http://") && !u.starts_with("https://") {
+    if !rr3_url_http_ok(u) {
         return Err(format!("--brain-base-url 须以 http(s):// 开头: {u}"));
     }
     Ok(())
+}
+
+/// 端点须是 http(s) 绝对地址。
+fn rr3_url_http_ok(u: &str) -> bool {
+    u.starts_with("http://") || u.starts_with("https://")
 }
 
 /// 从 `start` 向上找仓根：判定标记是 `contracts/topics.toml` 存在——

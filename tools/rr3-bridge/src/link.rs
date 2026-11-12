@@ -85,23 +85,28 @@ pub fn run(cfg: BridgeConfig, shutdown: Arc<AtomicBool>) -> u8 {
         cfg.socket.display()
     ));
     loop {
-        if shutdown.load(Ordering::SeqCst) {
+        if rr3_bridge_link(&cfg, &shutdown) {
             return shutdown_exit();
         }
-        // —— UART 开口（失败退避重开；开口净化由 Rr3UartConn::open 兜底）——
-        let Some((rx, tx)) = rr3_uart_pair(&cfg, &shutdown) else {
-            return shutdown_exit();
-        };
-        log(&format!(
-            "uart link up dev={} baud={}",
-            cfg.uart.display(),
-            cfg.baud
-        ));
-        if run_link(&cfg, &shutdown, rx, tx) == LinkOutcome::Shutdown {
-            return shutdown_exit();
-        }
-        // run_link 返回 = UART 断链（或关停），循环重开设备节点
     }
+}
+
+/// 一轮链路（`true` = 关停收兵）：UART 开口 → 记上线 → 跑到断链或关停。
+fn rr3_bridge_link(cfg: &BridgeConfig, shutdown: &Arc<AtomicBool>) -> bool {
+    if shutdown.load(Ordering::SeqCst) {
+        return true;
+    }
+    // —— UART 开口（失败退避重开；开口净化由 Rr3UartConn::open 兜底）——
+    let Some((rx, tx)) = rr3_uart_pair(cfg, shutdown) else {
+        return true;
+    };
+    log(&format!(
+        "uart link up dev={} baud={}",
+        cfg.uart.display(),
+        cfg.baud
+    ));
+    // 返回 = UART 断链（或关停）；关停即收兵，否则由 run 循环重开设备节点。
+    run_link(cfg, shutdown, rx, tx) == LinkOutcome::Shutdown
 }
 
 /// UART 开口循环（三态之二）：失败按退避重开，None = 等待期收到关停。
@@ -432,25 +437,40 @@ fn upstream_route(
 ) {
     match cur.as_mut() {
         Some(s) => {
-            if *discarding {
-                *discarding = false;
-                // 恢复点：丢弃期结束必须报累计，运维据此判断"看起来在跑"是否真在跑
-                log(&format!(
-                    "uds 上行恢复：此前丢弃累计 {} 字节（帧撕裂面由哨兵超时自愈）",
-                    dropped.load(Ordering::Relaxed)
-                ));
-            }
-            if let Err(e) = s.write_all(chunk) {
+            if rr3_route_write(s, chunk, n, dropped, discarding, exit) {
                 *cur = None;
-                let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
-                log(&format!(
-                    "uds 上行写出失败（{e}）：本块 {n} 字节丢弃，改入丢弃计数"
-                ));
-                let _ = exit.send(ExitMsg::UdsDead("上行写出失败".into()));
             }
         }
         None => rr3_route_discard(n, dropped, discarding),
     }
+}
+
+/// 有连接时的一块：恢复点日志 + 写 UDS；`true` = 写失败（连接已死，调用方清空）。
+fn rr3_route_write(
+    s: &mut UnixStream,
+    chunk: &[u8],
+    n: usize,
+    dropped: &AtomicU64,
+    discarding: &mut bool,
+    exit: &mpsc::Sender<ExitMsg>,
+) -> bool {
+    if *discarding {
+        *discarding = false;
+        // 恢复点：丢弃期结束必须报累计，运维据此判断"看起来在跑"是否真在跑
+        log(&format!(
+            "uds 上行恢复：此前丢弃累计 {} 字节（帧撕裂面由哨兵超时自愈）",
+            dropped.load(Ordering::Relaxed)
+        ));
+    }
+    if let Err(e) = s.write_all(chunk) {
+        let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
+        log(&format!(
+            "uds 上行写出失败（{e}）：本块 {n} 字节丢弃，改入丢弃计数"
+        ));
+        let _ = exit.send(ExitMsg::UdsDead("上行写出失败".into()));
+        return true;
+    }
+    false
 }
 
 /// 无连接时的一块：计入丢弃，首次进入与每 ~4KiB 节流各打一行。

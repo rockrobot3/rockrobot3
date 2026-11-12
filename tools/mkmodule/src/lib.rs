@@ -168,11 +168,7 @@ fn readme(id: &str) -> String {
 /// 返回绝对路径，为相对路径时返回相对路径（其解析依赖调用方当前工作目录）。
 /// 本函数不会把 `out_root` 规范化为绝对路径。
 pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, Rr3MkmodError> {
-    let id = rr3_mkmod_stem(name)?;
-    let target = out_root.join(&id);
-    if target.exists() {
-        return Err(Rr3MkmodError::AlreadyExists(target));
-    }
+    let (id, target) = rr3_mkmod_target(name, out_root)?;
 
     // 先写临时目录，manifest 校验通过后再 rename，避免留下半成品模块
     let staging = out_root.join(format!(".staging-{id}"));
@@ -183,10 +179,35 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
         ("src/main.rs", main_rs(&id)),
         ("README.md", readme(&id)),
     ];
-    rr3_mkmod_stage(&staging, &files)?;
+    rr3_mkmod_commit(&staging, &target, &files)
+}
 
-    std::fs::rename(&staging, &target)?;
+/// 归一化名字并确认目标目录尚不存在。
+fn rr3_mkmod_target(name: &str, out_root: &Path) -> Result<(String, PathBuf), Rr3MkmodError> {
+    let id = rr3_mkmod_stem(name)?;
+    let target = out_root.join(&id);
+    rr3_mkmod_free(&target)?;
+    Ok((id, target))
+}
+
+/// staging 落盘 + 校验 + rename（成功返回产物路径）。
+fn rr3_mkmod_commit(
+    staging: &Path,
+    target: &Path,
+    files: &[(&str, String)],
+) -> Result<Vec<PathBuf>, Rr3MkmodError> {
+    rr3_mkmod_stage(staging, files)?;
+
+    std::fs::rename(staging, target)?;
     Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+}
+
+/// 目标目录必须尚不存在（已存在即拒，不覆盖）。
+fn rr3_mkmod_free(target: &Path) -> Result<(), Rr3MkmodError> {
+    if target.exists() {
+        return Err(Rr3MkmodError::AlreadyExists(target.to_path_buf()));
+    }
+    Ok(())
 }
 
 /// 临时树落盘 + manifest 回灌门（不合规即整体丢弃，不留半成品）。
@@ -206,10 +227,16 @@ fn rr3_mkmod_stage(staging: &Path, files: &[(&str, String)]) -> Result<(), Rr3Mk
 fn rr3_mkmod_write(out: &Path, files: &[(&str, String)]) -> Result<(), Rr3MkmodError> {
     for (rel, body) in files {
         let path = out.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        rr3_mkmod_mkdir(&path)?;
         std::fs::write(&path, body)?;
+    }
+    Ok(())
+}
+
+/// 落盘前建父目录（无父目录即 no-op）。
+fn rr3_mkmod_mkdir(path: &Path) -> Result<(), Rr3MkmodError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
     Ok(())
 }

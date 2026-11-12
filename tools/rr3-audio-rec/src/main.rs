@@ -208,12 +208,7 @@ fn arg_other(d: &mut ArgsDraft, other: &str) -> Result<(), String> {
 
 /// 参数解析（device 必给；波特率过 rr-ipc 档位表白名单——真值单点）。
 fn parse_args(argv: &[String]) -> Result<Args, String> {
-    let mut d = ArgsDraft::default();
-    let mut i = 0;
-    while i < argv.len() {
-        arg_step(&mut d, argv, &mut i)?;
-        i += 1;
-    }
+    let d = rr3_parse_draft(argv)?;
     let device = d
         .device
         .ok_or("缺 <device> 参数（如 /dev/cu.usbserial-0001）")?;
@@ -225,6 +220,17 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         baud: d.baud,
         doa: d.doa,
     })
+}
+
+/// 参数逐项收集（缺省值由 [`ArgsDraft::default`] 给）。
+fn rr3_parse_draft(argv: &[String]) -> Result<ArgsDraft, String> {
+    let mut d = ArgsDraft::default();
+    let mut i = 0;
+    while i < argv.len() {
+        arg_step(&mut d, argv, &mut i)?;
+        i += 1;
+    }
+    Ok(d)
 }
 
 /// 缺省输出名（unix 秒时戳防覆盖；chrono 不进依赖闭包）。
@@ -280,11 +286,22 @@ fn parse_audio_event(frame: &Rr3Frame) -> Result<AudioChunk, String> {
 
 /// payload 前缀类型门 → 事件体 JSON → topic 门（失败点名原文案）。
 fn audio_event_body(payload: &[u8]) -> Result<Value, String> {
+    let v = rr3_event_value(payload)?;
+    rr3_audio_topic_ok(&v)?;
+    Ok(v)
+}
+
+/// payload 前缀类型门 → 事件体 JSON 解析（次序与拒收文案保持原样）。
+fn rr3_event_value(payload: &[u8]) -> Result<Value, String> {
     let (ty, body) = rr3_body_split(payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
     if ty != Rr3PayloadType::Event {
         return Err(format!("payload 类型非 Event: {ty:?}"));
     }
-    let v: Value = serde_json::from_slice(&body).map_err(|e| format!("事件体非 JSON: {e}"))?;
+    serde_json::from_slice(&body).map_err(|e| format!("事件体非 JSON: {e}"))
+}
+
+/// topic 门（失败点名原文案）。
+fn rr3_audio_topic_ok(v: &Value) -> Result<(), String> {
     if v.get("topic").and_then(Value::as_str) != Some(RR3_AUDIO_TOPIC) {
         return Err(format!(
             "topic 非 {}: {:?}",
@@ -292,7 +309,7 @@ fn audio_event_body(payload: &[u8]) -> Result<Value, String> {
             v.get("topic")
         ));
     }
-    Ok(v)
+    Ok(())
 }
 
 /// 事件体字段门 → s16le 解码出分片（字段次序与拒收文案保持原样）。
@@ -619,17 +636,7 @@ fn watchdog_run(w: Arc<WatchState>, out: String) {
     let mut last_move = Instant::now();
     loop {
         std::thread::sleep(Duration::from_millis(500));
-        let nb = w.ingested.load(Ordering::Acquire);
-        if nb != last_seen {
-            last_seen = nb;
-            last_move = Instant::now();
-            continue;
-        }
-        if !w.armed.load(Ordering::Acquire) {
-            last_move = Instant::now(); // 未武装期不计时
-            continue;
-        }
-        if last_move.elapsed() < STALL {
+        if rr3_watch_idle(&w, &mut last_seen, &mut last_move) {
             continue;
         }
         let disk = w.disk_bytes.load(Ordering::Acquire);
@@ -638,6 +645,21 @@ fn watchdog_run(w: Arc<WatchState>, out: String) {
         );
         exit_with_recovery(std::path::Path::new(&out), &w, 3);
     }
+}
+
+/// 一拍看门狗记账：推进/未武装/未到死线都返回 `true`（继续循环）。
+fn rr3_watch_idle(w: &WatchState, last_seen: &mut u64, last_move: &mut Instant) -> bool {
+    let nb = w.ingested.load(Ordering::Acquire);
+    if nb != *last_seen {
+        *last_seen = nb;
+        *last_move = Instant::now();
+        return true;
+    }
+    if !w.armed.load(Ordering::Acquire) {
+        *last_move = Instant::now(); // 未武装期不计时
+        return true;
+    }
+    last_move.elapsed() < STALL
 }
 
 /// 写线程（落盘独占面）：占位头 → 逐片写透（write_all + flush，崩溃面数据风险
@@ -650,13 +672,7 @@ fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>, o
     let mut w = BufWriter::new(file);
     // 占位头（data_len=0）：正常收兵与看门狗/重连/写失败三路都回头 write_at(0) 补
     // 真头。**立即 flush**：磁盘恒有合法头，恢复路径不依赖 BufWriter 析构刷出。
-    if let Err(e) = w
-        .write_all(&wav_header(0, 2, 16000, 16))
-        .and_then(|()| w.flush())
-    {
-        eprintln!("rr3-audio-rec: wav 占位头写入失败: {e}");
-        std::process::exit(1);
-    }
+    rr3_writer_head(&mut w);
     let mut written = 0u64;
     for buf in rx {
         if let Err(e) = w.write_all(&buf).and_then(|()| w.flush()) {
@@ -665,6 +681,17 @@ fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>, o
         }
         written += buf.len() as u64;
         watch.disk_bytes.store(written, Ordering::Release);
+    }
+}
+
+/// 占位 wav 头写入（失败即整进程退，文案逐字保留）。
+fn rr3_writer_head(w: &mut BufWriter<File>) {
+    if let Err(e) = w
+        .write_all(&wav_header(0, 2, 16000, 16))
+        .and_then(|()| w.flush())
+    {
+        eprintln!("rr3-audio-rec: wav 占位头写入失败: {e}");
+        std::process::exit(1);
     }
 }
 
@@ -825,13 +852,7 @@ fn measured_rate(
     let nominal = declared.unwrap_or(NOMINAL_RATE_FALLBACK_HZ);
     match anchor {
         Some((t0, f0)) => {
-            let end = last_frame.unwrap_or(t0);
-            let d = end.duration_since(t0).as_secs_f64();
-            let r = if d > 0.5 {
-                (((frames_total - f0) as f64) / d).round() as u32
-            } else {
-                0
-            };
+            let r = rr3_measure_span(t0, f0, last_frame.unwrap_or(t0), frames_total);
             if r >= 1000 {
                 r
             } else {
@@ -842,21 +863,36 @@ fn measured_rate(
     }
 }
 
+/// 连续段实测率：段 >0.5s 才给值（不足 0.5s 测时回 0）。
+fn rr3_measure_span(t0: Instant, f0: u64, end: Instant, frames_total: u64) -> u32 {
+    let d = end.duration_since(t0).as_secs_f64();
+    if d > 0.5 {
+        (((frames_total - f0) as f64) / d).round() as u32
+    } else {
+        0
+    }
+}
+
 /// 首连开口 + 握手（重连同款路径，见 handshake；开口翻转复位板子 → settle 后
 /// 冲残留）。失败即退 1，文案与旧版逐字一致。
 fn open_handshake(device: &str, baud: u32) -> Rr3UartConn {
-    let mut conn = match Rr3UartConn::open_with_baud(std::path::Path::new(device), baud) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("rr3-audio-rec: 开口失败 {device}: {e}");
-            std::process::exit(1);
-        }
-    };
+    let mut conn = rr3_open_uart(device, baud);
     if let Err(e) = handshake(&mut conn) {
         eprintln!("rr3-audio-rec: 握手失败: {e}");
         std::process::exit(1);
     }
     conn
+}
+
+/// 首次开口（失败即退 1，文案与旧版逐字一致）。
+fn rr3_open_uart(device: &str, baud: u32) -> Rr3UartConn {
+    match Rr3UartConn::open_with_baud(std::path::Path::new(device), baud) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("rr3-audio-rec: 开口失败 {device}: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 /// 三线程与通道面（起子产物；收兵按 reader → writer 顺序收口，见 finish_and_report）。
@@ -1051,6 +1087,19 @@ fn finish_and_report(
         st.total_bytes / 4,
         st.declared_rate,
     );
+    rr3_finish_head(out_path, &st, watch, measured);
+    if doa {
+        println!("{}", st.doa.summary());
+    }
+}
+
+/// 实测率终值补真头 + 收兵汇总（写失败即整进程退）。
+fn rr3_finish_head(
+    out_path: &std::path::Path,
+    st: &DecodeState,
+    watch: &WatchState,
+    measured: u32,
+) {
     let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
     match OpenOptions::new()
         .write(true)
@@ -1074,9 +1123,6 @@ fn finish_and_report(
             eprintln!("rr3-audio-rec: wav 补头失败 {}: {e}", out_path.display());
             std::process::exit(1);
         }
-    }
-    if doa {
-        println!("{}", st.doa.summary());
     }
 }
 

@@ -26,15 +26,25 @@ fn parse(args: &[String]) -> (Option<String>, Option<String>) {
     let mut cmd = None;
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--bus-path" {
-            i += 1;
-            bus = Some(rr3_bus_value(args.get(i)));
-        } else if cmd.is_none() {
-            cmd = Some(args[i].clone());
-        }
+        rr3_parse_step(args, &mut i, &mut bus, &mut cmd);
         i += 1;
     }
     (bus, cmd)
+}
+
+/// 单参数落位：`--bus-path` 消费下一槽，否则首个裸参即命令名。
+fn rr3_parse_step(
+    args: &[String],
+    i: &mut usize,
+    bus: &mut Option<String>,
+    cmd: &mut Option<String>,
+) {
+    if args[*i] == "--bus-path" {
+        *i += 1;
+        *bus = Some(rr3_bus_value(args.get(*i)));
+    } else if cmd.is_none() {
+        *cmd = Some(args[*i].clone());
+    }
 }
 
 /// `--bus-path` 的值（缺值即用法错误退出）。
