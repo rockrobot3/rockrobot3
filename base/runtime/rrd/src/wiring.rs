@@ -179,6 +179,21 @@ fn rr3_wire_conductors(
     t: &toml::value::Table,
     errs: &mut Vec<String>,
 ) -> (Vec<i64>, Vec<String>) {
+    let hdr_pin = rr3_wire_pins(i, t, errs);
+    let signal = rr3_wire_signals(i, t, errs);
+    // 位序对应：hdr_pin[k] ↔ signal[k]（丝印序即信号序）
+    if rr3_wire_arity_bad(&hdr_pin, &signal) {
+        errs.push(format!(
+            "wire #{i} 的 hdr_pin（{} 个）与 signal（{} 个）数目不等（位序对应：hdr_pin[k] ↔ signal[k]）",
+            hdr_pin.len(),
+            signal.len()
+        ));
+    }
+    (hdr_pin, signal)
+}
+
+/// `hdr_pin`：非空整数数组（非整数元素静默跳过，与拆分前一致）。
+fn rr3_wire_pins(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> Vec<i64> {
     let hdr_pin: Vec<i64> = t
         .get("hdr_pin")
         .and_then(toml::Value::as_array)
@@ -187,6 +202,11 @@ fn rr3_wire_conductors(
     if hdr_pin.is_empty() {
         errs.push(format!("wire #{i}.hdr_pin 必须是非空整数数组"));
     }
+    hdr_pin
+}
+
+/// `signal`：非空字符串数组（非串元素静默跳过，与拆分前一致）。
+fn rr3_wire_signals(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> Vec<String> {
     let signal: Vec<String> = t
         .get("signal")
         .and_then(toml::Value::as_array)
@@ -200,15 +220,7 @@ fn rr3_wire_conductors(
     if signal.is_empty() {
         errs.push(format!("wire #{i}.signal 必须是非空字符串数组"));
     }
-    // 位序对应：hdr_pin[k] ↔ signal[k]（丝印序即信号序）
-    if rr3_wire_arity_bad(&hdr_pin, &signal) {
-        errs.push(format!(
-            "wire #{i} 的 hdr_pin（{} 个）与 signal（{} 个）数目不等（位序对应：hdr_pin[k] ↔ signal[k]）",
-            hdr_pin.len(),
-            signal.len()
-        ));
-    }
-    (hdr_pin, signal)
+    signal
 }
 
 /// 单条线组的八字段解析（connector 已由身份门给出）；形状错逐条点名、不静默

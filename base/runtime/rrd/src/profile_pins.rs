@@ -198,19 +198,41 @@ fn rr3_pin_chan_take(
     owner: &mut BTreeMap<(String, i64), usize>,
     errs: &mut Vec<String>,
 ) {
-    if let (true, Some(ch)) = (!pin.controller.is_empty(), pin.channel) {
-        let key = (pin.controller.clone(), ch);
-        match owner.get(&key) {
-            Some(first) if *first != idx => errs.push(format!(
-                "{label} (controller {}, channel {ch}) 与 pins[{}] 双占（校验③-b：同一 (controller, channel) ≤ 1 次——F-7 脚+通道两维）",
-                pin.controller,
-                profile.pins[*first].rr3_pin_id()
-            )),
-            None => {
-                owner.insert(key, idx);
-            }
-            _ => {}
-        }
+    let Some(ch) = rr3_chan_of(pin) else {
+        return;
+    };
+    let key = (pin.controller.clone(), ch);
+    if let Some(first) = owner.get(&key).copied() {
+        rr3_chan_conflict(label, profile, idx, pin, ch, first, errs);
+    } else {
+        owner.insert(key, idx);
+    }
+}
+
+/// 通道占位键的前件：controller 非空且 channel 在场（缺席不占通道维，F-7）。
+fn rr3_chan_of(pin: &Rr3PinEntry) -> Option<i64> {
+    match (!pin.controller.is_empty(), pin.channel) {
+        (true, Some(ch)) => Some(ch),
+        _ => None,
+    }
+}
+
+/// ③-b 双占点名（首占者与本次同一条 pin 不算）。
+fn rr3_chan_conflict(
+    label: &str,
+    profile: &Rr3Profile,
+    idx: usize,
+    pin: &Rr3PinEntry,
+    ch: i64,
+    first: usize,
+    errs: &mut Vec<String>,
+) {
+    if first != idx {
+        errs.push(format!(
+            "{label} (controller {}, channel {ch}) 与 pins[{}] 双占（校验③-b：同一 (controller, channel) ≤ 1 次——F-7 脚+通道两维）",
+            pin.controller,
+            profile.pins[first].rr3_pin_id()
+        ));
     }
 }
 
@@ -243,7 +265,7 @@ fn rr3_addr_conflict(
     first_pin: &Rr3PinEntry,
     errs: &mut Vec<String>,
 ) {
-    if pin.device.is_empty() || first_pin.device.is_empty() {
+    if rr3_dev_unset(pin, first_pin) {
         errs.push(format!(
             "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 缺省（校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册——共读源须显式登记器件身份，缺省 = 不可判即红）",
             pin.controller, pin.addr, first_pin.rr3_pin_id()
@@ -258,6 +280,11 @@ fn rr3_addr_conflict(
             pin.device
         ));
     }
+}
+
+/// 共址任一侧 device 缺省谓词（身份不可判，fail-closed）。
+fn rr3_dev_unset(a: &Rr3PinEntry, b: &Rr3PinEntry) -> bool {
+    a.device.is_empty() || b.device.is_empty()
 }
 
 /// ④-b conflicts 反推互斥：同一条冲突登记面的命中者 ≥ 2 且任一未申报该组 → 红

@@ -579,11 +579,16 @@ fn rr3_arm_check(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
         rr3_arm_sense(d, label, errs);
         rr3_arm_ev(d, label, errs);
     } else if d.evidence != "none" {
-        errs.push(format!(
-            "{label} armed = false 但 evidence = {}（校验⑥-e：未武装不携证据，evidence 显式写 \"none\"——证据位与武装位成对，不出现过期引用）",
-            if d.evidence.is_empty() { "缺失" } else { &d.evidence }
-        ));
+        rr3_arm_off(d, label, errs);
     }
+}
+
+/// 未武装却携证据的拒动（证据位与武装位成对，不出现过期引用）。
+fn rr3_arm_off(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
+    errs.push(format!(
+        "{label} armed = false 但 evidence = {}（校验⑥-e：未武装不携证据，evidence 显式写 \"none\"——证据位与武装位成对，不出现过期引用）",
+        if d.evidence.is_empty() { "缺失" } else { &d.evidence }
+    ));
 }
 
 /// ⑥-c：无测点/无龄期上界的域不得武装拒动。
@@ -597,7 +602,7 @@ fn rr3_arm_sense(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
 
 /// ⑥-e：武装拒动必须引用一条形制合法的真板实测证据。
 fn rr3_arm_ev(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
-    if d.evidence == "none" || d.evidence.is_empty() {
+    if rr3_ev_unset(d) {
         errs.push(format!(
             "{label} armed = true 但 evidence = none（校验⑥-e：武装拒动必须引用一条真板实测证据，规则住 conventions §6.1；未标定即 armed = false）"
         ));
@@ -607,6 +612,11 @@ fn rr3_arm_ev(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
             d.evidence
         ));
     }
+}
+
+/// 武装域证据位缺失谓词（缺省或显式 `none` 都算没写）。
+fn rr3_ev_unset(d: &Rr3Domain) -> bool {
+    d.evidence == "none" || d.evidence.is_empty()
 }
 
 /// ⑥-d 绑定位：sense/current_sense/switch 一律写 pin_id（"none" 是合法显式值）。

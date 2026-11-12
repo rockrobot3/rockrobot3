@@ -56,8 +56,15 @@ fn rr3_pub_parse(
     me: &Rr3Peer,
     body: &[u8],
 ) -> Result<(Value, String), Rr3Flow> {
-    let parsed = match serde_json::from_slice::<Value>(body) {
-        Ok(v) => v,
+    let parsed = rr3_pub_body(out, me, body)?;
+    let topic = rr3_pub_topic(out, me, body, &parsed)?;
+    Ok((parsed, topic))
+}
+
+/// Event 体的 JSON 形状门（非 JSON 回 Invalid 帧并保持连接）。
+fn rr3_pub_body(out: &Arc<Mutex<UnixStream>>, me: &Rr3Peer, body: &[u8]) -> Result<Value, Rr3Flow> {
+    match serde_json::from_slice::<Value>(body) {
+        Ok(v) => Ok(v),
         Err(e) => {
             rr3_reply_err(
                 out,
@@ -66,11 +73,20 @@ fn rr3_pub_parse(
                 Rr3StatusCode::Invalid,
                 &format!("Event 体必须是 JSON 对象: {e}"),
             );
-            return Err(Rr3Flow::Keep);
+            Err(Rr3Flow::Keep)
         }
-    };
-    let topic = match rr3_rpc_topic_param(&parsed) {
-        Ok(t) => t,
+    }
+}
+
+/// topic 参数提取与坏形应答（缺/坏 `topic` 回 Invalid 帧，不断连）。
+fn rr3_pub_topic(
+    out: &Arc<Mutex<UnixStream>>,
+    me: &Rr3Peer,
+    body: &[u8],
+    parsed: &Value,
+) -> Result<String, Rr3Flow> {
+    match rr3_rpc_topic_param(parsed) {
+        Ok(t) => Ok(t),
         Err((_, msg)) => {
             rr3_reply_err(
                 out,
@@ -79,10 +95,9 @@ fn rr3_pub_parse(
                 Rr3StatusCode::Invalid,
                 &msg,
             );
-            return Err(Rr3Flow::Keep);
+            Err(Rr3Flow::Keep)
         }
-    };
-    Ok((parsed, topic))
+    }
 }
 
 /// 归属门（三层归属检查的应答侧）：拒则计数 + 回错误帧 + `Some(Keep)`；
@@ -163,20 +178,25 @@ fn rr3_pub_batt(ctx: &Rr3ConnCtx, topic: &str, parsed: &Value) {
     let Some((edge, percent, voltage_mv, n)) = rr3_pub_power_latch(ctx, topic, parsed) else {
         return;
     };
+    rr3_log(&rr3_pub_batt_msg(topic, edge, percent, voltage_mv, n));
+}
+
+/// 兜底留痕文案选取（主题 × 沿两种判据，四格各一句；文案逐字不变）。
+fn rr3_pub_batt_msg(topic: &str, edge: bool, percent: u64, voltage_mv: u64, n: usize) -> String {
     if topic == RR3_BATTERY_LOW_TOPIC {
         if edge {
-            rr3_log(&format!(
+            format!(
                 "低电兜底触发：battery/low percent={percent} voltage_mv={voltage_mv} → 置全局低电旗、停止新 spawn，广播 rr3-runtime/system/power 到 {n} 个连接"
-            ));
+            )
         } else {
-            rr3_log("低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）");
+            "低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）".to_string()
         }
     } else if edge {
-        rr3_log(&format!(
+        format!(
             "低电兜底解除：battery/ok percent={percent} voltage_mv={voltage_mv} → 清全局低电旗、恢复新 spawn，广播 rr3-runtime/system/power(reason=battery-ok) 到 {n} 个连接"
-        ));
+        )
     } else {
-        rr3_log("低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）");
+        "低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）".to_string()
     }
 }
 
@@ -188,11 +208,7 @@ fn rr3_pub_power_latch(
     topic: &str,
     parsed: &Value,
 ) -> Option<(bool, u64, u64, usize)> {
-    let (reason, edge) = match topic {
-        RR3_BATTERY_LOW_TOPIC => ("battery-low", rr3_lock(&ctx.shared).rr3_reg_lp_raise()),
-        RR3_BATTERY_OK_TOPIC => ("battery-ok", rr3_lock(&ctx.shared).rr3_reg_lp_lower()),
-        _ => return None,
-    };
+    let (reason, edge) = rr3_pub_edge(ctx, topic)?;
     let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
     let voltage_mv = parsed
         .get("voltage_mv")
@@ -206,4 +222,13 @@ fn rr3_pub_power_latch(
         rr_bus::RR3_TASK_RRD,
     );
     Some((true, percent, voltage_mv, n))
+}
+
+/// 低电主题 → (广播 reason, 是否恰在沿上)：非低电主题返回 `None`。
+fn rr3_pub_edge(ctx: &Rr3ConnCtx, topic: &str) -> Option<(&'static str, bool)> {
+    match topic {
+        RR3_BATTERY_LOW_TOPIC => Some(("battery-low", rr3_lock(&ctx.shared).rr3_reg_lp_raise())),
+        RR3_BATTERY_OK_TOPIC => Some(("battery-ok", rr3_lock(&ctx.shared).rr3_reg_lp_lower())),
+        _ => None,
+    }
 }

@@ -966,23 +966,33 @@ fn rr3_term_default() {
 /// libc 仅声明壳（`chmod`/`getgrnam`/`chown`，musl 静态零额外 C 依赖，R13）；
 /// errno 逐调用取出（连续调用互不覆盖）。
 fn rr3_socket_acl_grant(path: &std::path::Path) {
-    use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
-    let Ok(cpath) = CString::new(path.as_os_str().as_bytes()) else {
+    let Ok(cpath) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
         rr3_log("socket 放行跳过：路径含 NUL（不可能的缺省值）");
         return;
     };
-    // 1) chmod 0o660：other 位清掉，属主组位落上
+    if !rr3_acl_chmod(&cpath) {
+        return; // chgrp 无从谈起，权限面交回调用方日志
+    }
+    rr3_acl_group(&cpath);
+}
+
+/// 放行第 1 步：`chmod 0o660`（other 位清掉，属主组位落上）。false = chmod 失败。
+fn rr3_acl_chmod(cpath: &std::ffi::CString) -> bool {
     let rc = unsafe { libc::chmod(cpath.as_ptr(), 0o660) };
     if rc != 0 {
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
         rr3_log(&format!(
             "socket 放行 chmod 失败（errno {errno}，保留 umask 权限如旧）"
         ));
-        return; // chgrp 无从谈起，权限面交回调用方日志
+        return false;
     }
-    // 2) chgrp 到属主组：组不在位（装机未建组/开发机）→ 留痕跳过不视为错
-    let Ok(cgroup) = CString::new(RR3_CTL_SOCKET_GROUP) else {
+    true
+}
+
+/// 放行第 2 步：`chgrp` 到属主组（组不在位留痕跳过不视为错）。
+fn rr3_acl_group(cpath: &std::ffi::CString) {
+    let Ok(cgroup) = std::ffi::CString::new(RR3_CTL_SOCKET_GROUP) else {
         return;
     };
     let gr = unsafe { libc::getgrnam(cgroup.as_ptr()) };

@@ -260,6 +260,29 @@ fn owner_for_echo(registered: Option<String>) -> String {
         .unwrap_or_else(|| "?".to_string())
 }
 
+/// 主题在册判据（第三层归属门；未在册回 NotRegistered）。
+fn rr3_pub_registered(topic: &str, topics: &Rr3TopicSet) -> Result<(), Rr3PublishDeny> {
+    if topics.rr3_topic_contains(topic) {
+        return Ok(());
+    }
+    Err(Rr3PublishDeny::NotRegistered {
+        topic: topic.to_string(),
+    })
+}
+
+/// 在册 owner 与发送方比对（末段判据；取不到 owner 同样按越权拒）。
+fn rr3_pub_owner(sender: &str, topic: &str, topics: &Rr3TopicSet) -> Result<(), Rr3PublishDeny> {
+    let owner = topics.rr3_topic_owner(topic);
+    if RrdRegistry::rr3_owner_mismatch(owner.as_deref(), sender) {
+        return Err(Rr3PublishDeny::ForeignPrefix {
+            topic: topic.to_string(),
+            owner: owner_for_echo(owner),
+            sender: sender.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// 运维计数聚合表的键数上界：模块自报键是**外部输入**（心跳 `counters`），
 /// 键只增不减且随 write-through 落盘——故障模块每拍换键可把内存/计数器文件
 /// 撑爆。六模块的静态键集远小于本值；越界即拒新键并一次性点名（既有键照常
@@ -566,27 +589,39 @@ impl RrdRegistry {
             // 段 3：判死。saturating_sub：调用方的毫秒读数理论上单调，但真出现倒退时宁可判
             // "未到期"也不回绕成一个巨大差值把健康模块集体判死。差值提成绑定：判据与回报共用它。
             let elapsed_ms = now_ms.saturating_sub(last_beat_ms);
-            if elapsed_ms >= watchdog_ms {
-                let facts = {
-                    let e = self.modules.get_mut(&name).expect("刚读出、仍在册");
-                    e.phase = Rr3Phase::Failed;
-                    e.tx = None;
-                    e.facts.clone()
-                };
-                // clean_exit = false：超时就是崩溃，与 EOF 是不是 FIN 无关。facts 必须先 clone，
-                // 否则 `&mut self.modules` 的守卫会越过 `&mut self` 的 rr3_charge 活着。
-                let restart = self.rr3_charge(&facts, false);
-                out.push(Rr3Expiry {
-                    name,
-                    src_task,
-                    reason: RR3_EXPIRE_HEARTBEAT_TIMEOUT,
-                    elapsed_ms,
-                    watchdog_ms,
-                    restart,
-                });
-            }
+            self.rr3_reg_kill(name, src_task, elapsed_ms, watchdog_ms, &mut out);
         }
         out
+    }
+
+    /// 段 3 实体：到期即置 Failed、记账并回报（差值不到窗口则本拍无动作）。
+    fn rr3_reg_kill(
+        &mut self,
+        name: String,
+        src_task: u64,
+        elapsed_ms: u64,
+        watchdog_ms: u64,
+        out: &mut Vec<Rr3Expiry>,
+    ) {
+        if elapsed_ms >= watchdog_ms {
+            let facts = {
+                let e = self.modules.get_mut(&name).expect("刚读出、仍在册");
+                e.phase = Rr3Phase::Failed;
+                e.tx = None;
+                e.facts.clone()
+            };
+            // clean_exit = false：超时就是崩溃，与 EOF 是不是 FIN 无关。facts 必须先 clone，
+            // 否则 `&mut self.modules` 的守卫会越过 `&mut self` 的 rr3_charge 活着。
+            let restart = self.rr3_charge(&facts, false);
+            out.push(Rr3Expiry {
+                name,
+                src_task,
+                reason: RR3_EXPIRE_HEARTBEAT_TIMEOUT,
+                elapsed_ms,
+                watchdog_ms,
+                restart,
+            });
+        }
     }
 
     /// 段 2 判据：活过一整条自己的窗口（`registered_at_ms` 基准，D-2）即清崩溃账。
@@ -652,24 +687,12 @@ impl RrdRegistry {
         topics: &Rr3TopicSet,
     ) -> Result<(), Rr3PublishDeny> {
         Self::rr3_pub_namespace(sender_name, topic, topics)?;
-        if !topics.rr3_topic_contains(topic) {
-            return Err(Rr3PublishDeny::NotRegistered {
-                topic: topic.to_string(),
-            });
-        }
+        rr3_pub_registered(topic, topics)?;
         // 首段相符只说明主题串"写着是这个命名空间"；在册 owner 是别人就是越权。
         // 取不到 owner（登记表里 owner 缺失 = 没写这个键，解析成空串）同样按越权拒，
         // 绝不因"查不到"而放行；回显与另一条 ForeignPrefix 分支一致地写 `?`（同走
         // `owner_for_echo`）。
-        let owner = topics.rr3_topic_owner(topic);
-        if Self::rr3_owner_mismatch(owner.as_deref(), sender_name) {
-            return Err(Rr3PublishDeny::ForeignPrefix {
-                topic: topic.to_string(),
-                owner: owner_for_echo(owner),
-                sender: sender_name.to_string(),
-            });
-        }
-        Ok(())
+        rr3_pub_owner(sender_name, topic, topics)
     }
 
     /// 在册 owner 与发送方是否不符。
@@ -949,33 +972,45 @@ impl RrdRegistry {
             .modules
             .get(facts.name.as_str())
             .map(|e| (e.phase, e.src_task));
-        match present {
-            None => {
-                // 不在册：若被显式 stop 过（D-4），它的退出不是崩溃，不得记账。
-                if self.stopped.contains(facts.name.as_str()) {
-                    Rr3ChildExit::Silent
-                } else {
-                    // 从没注册过 → 没有条目可广播，但账必须按 name 记（坏 entry 不能空转重起）。
-                    Rr3ChildExit::EarlyExit {
-                        plan: self.rr3_charge(facts, clean_exit),
-                    }
-                }
-            }
-            // 已被 watchdog 判死：收尸不得双计（R-A4 的封印）。
-            Some((Rr3Phase::Failed, _)) => Rr3ChildExit::Silent,
-            // 在册且活着：相位、句柄、账都在这一次到位。
-            Some((_, src_task)) => {
-                let e = self
-                    .modules
-                    .get_mut(facts.name.as_str())
-                    .expect("刚确认在册");
-                e.tx = None;
-                e.phase = Rr3Phase::Failed;
-                Rr3ChildExit::Crashed {
-                    src_task,
-                    clean_exit,
-                    plan: self.rr3_charge(facts, clean_exit),
-                }
+        let Some((phase, src_task)) = present else {
+            return self.rr3_child_absent(facts, clean_exit);
+        };
+        // 已被 watchdog 判死：收尸不得双计（R-A4 的封印）。
+        if phase == Rr3Phase::Failed {
+            return Rr3ChildExit::Silent;
+        }
+        // 在册且活着：相位、句柄、账都在这一次到位。
+        self.rr3_child_crashed(facts, clean_exit, src_task)
+    }
+
+    /// 在册崩溃那一路：置 Failed、摘句柄、记账。
+    fn rr3_child_crashed(
+        &mut self,
+        facts: &Rr3ManifestFacts,
+        clean_exit: bool,
+        src_task: u64,
+    ) -> Rr3ChildExit {
+        let e = self
+            .modules
+            .get_mut(facts.name.as_str())
+            .expect("刚确认在册");
+        e.tx = None;
+        e.phase = Rr3Phase::Failed;
+        Rr3ChildExit::Crashed {
+            src_task,
+            clean_exit,
+            plan: self.rr3_charge(facts, clean_exit),
+        }
+    }
+
+    /// 不在册那一路：显式 stop 过的退出不记账，其余按 EarlyExit 吃预算。
+    fn rr3_child_absent(&mut self, facts: &Rr3ManifestFacts, clean_exit: bool) -> Rr3ChildExit {
+        if self.stopped.contains(facts.name.as_str()) {
+            Rr3ChildExit::Silent
+        } else {
+            // 从没注册过 → 没有条目可广播，但账必须按 name 记（坏 entry 不能空转重起）。
+            Rr3ChildExit::EarlyExit {
+                plan: self.rr3_charge(facts, clean_exit),
             }
         }
     }
