@@ -190,12 +190,23 @@ fn rr3_sim_args_check(a: &Rr3SimArgs) -> Result<(), String> {
 
 /// 三种演练模式互斥（各证一面，不合并）。
 fn rr3_args_modes(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_modes_chain(a)?;
+    rr3_modes_brain(a)
+}
+
+/// --chain 与 --brain/--profile 互斥（全链闭环与后两者各证一面）。
+fn rr3_modes_chain(a: &Rr3SimArgs) -> Result<(), String> {
     if (a.brain || a.profile.is_some()) && a.chain {
         return Err(
             "--chain 与 --brain/--profile 同给：全链闭环、对话闭环与装配演练互斥（各证一面，不合并）"
                 .to_string(),
         );
     }
+    Ok(())
+}
+
+/// --brain 与 --profile 互斥（对话闭环演练与装配演练各证一面）。
+fn rr3_modes_brain(a: &Rr3SimArgs) -> Result<(), String> {
     if a.brain && a.profile.is_some() {
         return Err(
             "--brain 与 --profile 同给：对话闭环演练与装配演练互斥（各证一面，不合并）".to_string(),
@@ -230,16 +241,25 @@ fn rr3_audio_backend(a: &Rr3SimArgs, flag: &str, backend: Option<&String>) -> Re
 
 /// 两后端组合裁决（fail-closed ①②）。
 fn rr3_audio_pairs(a: &Rr3SimArgs) -> Result<(), String> {
-    // fail-closed ②（A 批 c4）：板无扬声器，回放恒宿主——显式给 esp32 即拒
+    rr3_audio_sink_ok(a)?;
+    rr3_audio_src_ok(a)
+}
+
+/// fail-closed ②（A 批 c4）：板无扬声器，回放恒宿主——显式给 esp32 即拒。
+fn rr3_audio_sink_ok(a: &Rr3SimArgs) -> Result<(), String> {
     if a.sink_backend.as_deref() == Some("esp32") {
         return Err(
             "--sink-backend esp32 拒收：板无扬声器，TTS 回放恒宿主（mac AudioQueue / sim 尾窗）"
                 .to_string(),
         );
     }
-    // fail-closed ①（A 批 c4）：esp32 源未显式给回放后端拒起——缺省跟随
-    // audio_backend 会令 interact 吃 esp32 抢同一 UART（Rr3UartConn flock 跨进程
-    // 排他），探活必败；板面流与回放是两块后端，必须分列明示。
+    Ok(())
+}
+
+/// fail-closed ①（A 批 c4）：esp32 源未显式给回放后端拒起——缺省跟随
+/// audio_backend 会令 interact 吃 esp32 抢同一 UART（Rr3UartConn flock 跨进程
+/// 排他），探活必败；板面流与回放是两块后端，必须分列明示。
+fn rr3_audio_src_ok(a: &Rr3SimArgs) -> Result<(), String> {
     if a.audio_backend.as_deref() == Some("esp32") && a.sink_backend.is_none() {
         return Err(
             "--audio-backend esp32 必须显式给 --sink-backend（板面流与回放是两块后端；缺省跟随会令 interact 抢同一 UART 被 flock 拒）"
@@ -253,6 +273,11 @@ fn rr3_audio_pairs(a: &Rr3SimArgs) -> Result<(), String> {
 fn rr3_args_cloud(a: &Rr3SimArgs) -> Result<(), String> {
     rr3_cloud_mode(a)?;
     rr3_cloud_url(a)?;
+    rr3_cloud_real(a)
+}
+
+/// real 必须显式端点（演练 config 缺省是死地址，fail-closed 不落）。
+fn rr3_cloud_real(a: &Rr3SimArgs) -> Result<(), String> {
     if a.brain_cloud.as_deref() == Some("real") && a.brain_base_url.is_none() {
         return Err(
             "--brain-cloud real 必须显式给 --brain-base-url（演练 config 缺省是死地址，fail-closed 不落）"

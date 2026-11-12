@@ -278,10 +278,7 @@ fn uds_attach(
         };
         let at = Instant::now();
         log_connected(&cfg.socket, waited, dropped);
-        let Some(wr) = rr3_uds_clone(&stream) else {
-            continue;
-        };
-        let Some(rd) = rr3_uds_clone(&stream) else {
+        let Some((wr, rd)) = rr3_uds_halves(&stream) else {
             continue;
         };
         // 三个半边：wr→上行线程、rd→下行线程、kill 留主线程（断链时先行闭合，
@@ -303,6 +300,13 @@ fn rr3_uds_ready(stream: UnixStream) -> Option<UnixStream> {
             None
         }
     }
+}
+
+/// 上行/下行两个半边克隆（任一失败即重连；已克隆的句柄随返回 None 关闭）。
+fn rr3_uds_halves(stream: &UnixStream) -> Option<(UnixStream, UnixStream)> {
+    let wr = rr3_uds_clone(stream)?;
+    let rd = rr3_uds_clone(stream)?;
+    Some((wr, rd))
 }
 
 /// 连接日志（等待过退避时带丢弃累计——运维据它判断"看起来在跑"是否真在跑）。
@@ -414,16 +418,16 @@ fn upstream_read(
     exit: &mpsc::Sender<ExitMsg>,
 ) -> Option<usize> {
     match rx.read(buf) {
-        Ok(0) => {
-            let _ = exit.send(ExitMsg::UartDead("上行 EOF".into()));
-            None
-        }
+        Ok(0) => rr3_up_dead(exit, "上行 EOF".to_string()),
         Ok(n) => Some(n),
-        Err(e) => {
-            let _ = exit.send(ExitMsg::UartDead(format!("上行读失败: {e}")));
-            None
-        }
+        Err(e) => rr3_up_dead(exit, format!("上行读失败: {e}")),
     }
+}
+
+/// 上行断链收口：报 UartDead 并回 None。
+fn rr3_up_dead(exit: &mpsc::Sender<ExitMsg>, msg: String) -> Option<usize> {
+    let _ = exit.send(ExitMsg::UartDead(msg));
+    None
 }
 
 /// 一块的去向：有连接写 UDS（写失败转丢弃计数并报 UdsDead），无连接计入丢弃。

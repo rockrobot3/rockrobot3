@@ -243,14 +243,17 @@ fn rr3_mkmod_mkdir(path: &Path) -> Result<(), Rr3MkmodError> {
 
 /// 原子件名：`^[a-z][a-z_]*$`，2..=24 字符（atom.schema.toml 的 atom_name 规则同款）
 fn rr3_mkmod_atom_stem(name: &str) -> Result<String, Rr3MkmodError> {
-    let ok = name.len() >= 2
-        && name.len() <= 24
-        && name.starts_with(|c: char| c.is_ascii_lowercase())
-        && name.chars().all(|c| c.is_ascii_lowercase() || c == '_');
-    if !ok {
+    if !rr3_atom_name_ok(name) {
         return Err(Rr3MkmodError::InvalidName(name.to_string()));
     }
     Ok(name.to_string())
+}
+
+/// 原子件名合法：`^[a-z][a-z_]*$`，2..=24 字符。
+fn rr3_atom_name_ok(name: &str) -> bool {
+    (2..=24).contains(&name.len())
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c == '_')
 }
 
 fn atom_manifest_toml(name: &str, slot: &str) -> String {

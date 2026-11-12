@@ -66,19 +66,25 @@ mod run {
                 return 2;
             }
         };
-        // --chain 走批F4 全链闭环演练（判据 10 的 sim 档），与前两者互斥
+        rr3_drill_exit(rr3_sim_route(&a))
+    }
+
+    /// 演练路由：--chain / --brain / --profile 各证一面（互斥已由参数面裁定），
+    /// 缺省走两面演练。
+    fn rr3_sim_route(a: &crate::drill::Rr3SimArgs) -> Result<String, String> {
+        // --chain 走批F4 全链闭环演练（判据 10 的 sim 档）
         if a.chain {
-            return rr3_drill_exit(crate::chain::rr3_chain_drill(&a));
+            return crate::chain::rr3_chain_drill(a);
         }
-        // --brain 走 M4 四真进程演练（ADR-0014 裁定 4），与两面演练互斥
+        // --brain 走 M4 四真进程演练（ADR-0014 裁定 4）
         if a.brain {
-            return rr3_drill_exit(crate::brain::rr3_brain_drill(&a));
+            return crate::brain::rr3_brain_drill(a);
         }
-        // --profile 走 D9 装配演练（装配单驱动 boot + 全模块真进程巡检），与前两者互斥
+        // --profile 走 D9 装配演练（装配单驱动 boot + 全模块真进程巡检）
         if a.profile.is_some() {
-            return rr3_drill_exit(crate::assemble::rr3_assemble_drill(&a));
+            return crate::assemble::rr3_assemble_drill(a);
         }
-        rr3_drill_exit(rr3_sim_drill(&a))
+        rr3_sim_drill(a)
     }
 
     /// 演练报告统一出口（各演练分支同款底座）：报告上 stdout 退 0，报错上 stderr 退 1。
@@ -167,14 +173,20 @@ mod run {
         let status_out = rr3_ctl_out(rrctl, socket, "status")?;
         report.push_str(&status_out);
         // denied_publish = 0 是"事件真被接受"的线上证据：发布被拒会在这里现形
+        rr3_denied_gate(&status_out, log_path)?;
+        let rows = rr3_ctl_rows(rrctl, socket);
+        rr3_rows_audit(&rows, report)?;
+        rr3_ctl_reports(rrctl, socket, report)?;
+        Ok(())
+    }
+
+    /// denied_publish = 0 是"事件真被接受"的线上证据（发布被拒即红）。
+    fn rr3_denied_gate(status_out: &str, log_path: &Path) -> Result<(), String> {
         if !status_out.contains("denied_publish = 0") {
             return Err(format!(
                 "denied_publish ≠ 0：{RR3_SIM_B_TOPIC} 的发布被 rrd 拒了，见日志 {log_path:?}\n{status_out}"
             ));
         }
-        let rows = rr3_ctl_rows(rrctl, socket);
-        rr3_rows_audit(&rows, report)?;
-        rr3_ctl_reports(rrctl, socket, report)?;
         Ok(())
     }
 
@@ -183,6 +195,12 @@ mod run {
     /// 队列，未读广播帧会让对端把 FIN 变 RST（sim_peer.rs 的 abort 支注释记了同一
     /// 形状），终相随收尾路径在 unregistered/failed 两可——只断言"不在 running 了"。
     fn rr3_rows_audit(rows: &[(String, u64, String)], report: &mut String) -> Result<(), String> {
+        rr3_resident_running(rows)?;
+        rr3_publisher_audit(rows, report)
+    }
+
+    /// resident 必须仍在 running（巡检期间掉线即红）。
+    fn rr3_resident_running(rows: &[(String, u64, String)]) -> Result<(), String> {
         if !rows
             .iter()
             .any(|(n, _, p)| n == RR3_DRILL_RESIDENT && p == "running")
@@ -191,6 +209,14 @@ mod run {
                 "{RR3_DRILL_RESIDENT} 不在 running（巡检期间掉线？）：{rows:?}"
             ));
         }
+        Ok(())
+    }
+
+    /// 发布者若出现，终相不许是 running；退场后两可，只登记注记。
+    fn rr3_publisher_audit(
+        rows: &[(String, u64, String)],
+        report: &mut String,
+    ) -> Result<(), String> {
         let Some((n, _, p)) = rows.iter().find(|(n, _, _)| n == RR3_DRILL_PUBLISHER) else {
             return Ok(());
         };
@@ -210,11 +236,16 @@ mod run {
         report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
         report.push_str(&rr3_ctl_out(rrctl, socket, "logs")?);
         report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
+        rr3_ota_report(rrctl, socket, report);
+        Ok(())
+    }
+
+    /// ota 预期恒拒：成功反而是意外，两种形态都写进报告。
+    fn rr3_ota_report(rrctl: &Path, socket: &Path, report: &mut String) {
         match rr3_ctl_maybe_fail(rrctl, socket, "ota") {
             Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
             Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
         }
-        Ok(())
     }
 
     /// 6. sim 设备源不变量（rr-hal 同一种流）。
