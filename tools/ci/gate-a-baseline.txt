@@ -1,15 +1,13 @@
 # 门 a（check.sh ⑨-a）红账低水位基线——裁定配套(c)"红条数单调不增"机器判据
 # （decisions.md §2 施工图§6-④ / 全案 §24.1 第 5 条 + 裁-6，批N2 件六落）。
-# 语义：红账总数（A 未覆盖 normal 格 + B roles 悬空 + C trait/键差集，⑨-a 报告打印）
-#   不得超过本数——count > 本数即 FAIL（防红账回涨）；count < 本数须同批下调本数
-#   （⑨-a 打印提醒；转红终点 = 基-39 全覆盖 count=0，届时本门转红、本文件退役）。
-#   文件缺/坏/首个非注释行非纯整数即 FAIL（fail-closed）。
-# 23 = 批N2 件六初值：15 未覆盖 normal 格（20 normal − 5 covered：act.servo / act.led /
-#   act.relay / power.battery / power.rail）+ 4 TRAITS 差（Rr3AudioSource / Rr3AudioSink /
-#   Rr3Link / Rr3Display）+ 4 PIN_KEYS 差（role / instance / direction / mux_group）。
-# 21 = 批N3 件六（ui.face SPI 词形拆格，敞口 18 行收口）：14 未覆盖 normal 格
-#   （20 normal − 6 covered：上批 5 + ui.face）+ 3 TRAITS 差（Rr3AudioSource /
-#   Rr3AudioSink / Rr3Link，Rr3Display 随 ui.face.spi 角色引用出场）+ 4 PIN_KEYS 差
-#   （role / instance / direction / mux_group，SPI 词形不加键——controller/channel 复用
-#   既有两物理键）。
-21
+# 语义：红账总数（A 未覆盖 body normal 格 + B roles 悬空 + C trait/键差集）
+#   不得超过本数——count > 本数即 FAIL（防红账回涨）；文件缺/坏/首个非注释行非纯
+#   整数即 FAIL（fail-closed）。
+# 历史（只降不升）：23（批N2 件六初值）→ 21（批N3 件六/件八）→ 0
+#   （2026-11-12 P1 审计件四：基-39 转绿收口）。
+# 0 = P1 件四转执法：roles 10→14（net.wifi.link / audio.capture.mic /
+#   audio.playback.spk / audio.vad.gate 四格能力面角色，kind=logic、requires 显式空），
+#   A 段口径收为 layer=body（base 内建/cognition 软件格无 [pins] 角色域），
+#   C 段豁免 Rr3DigitalIn（S-10 未立项的能力面前置件）与 role/instance/direction/
+#   mux_group 四枚永不进 requires 的键。红账 21→0 后本门为执法态：任何新红即 FAIL。
+0

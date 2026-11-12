@@ -138,6 +138,66 @@ input_only_ok = false
 per_instance = false
 note = "SPI 显示器件（链④真件档 MAX7219 点阵类）；host 侧 controller 词形 spidev<N> 派生总线号、channel 派生片选号，合成 spi_device=/dev/spidev<N>.<M>（与旧 [hardware] 直给值逐字节对齐，profiles/distro.toml 迁移批N3 件六）。物理走线（DIN/CS/CLK）由总线自身钉死，不占 physical 维"
 
+# —— P1 审计件四（2026-11-12，基-39 转执法收口）：四格能力面角色进场。
+#    这四格的共同事实：**今天没有任何 [[pin]] 物理绑定**——链路身份是 [hardware].link_ifname，
+#    音频设备名是 [hardware].alsa_device，板侧音频三脚由 board 具名装配直给（I2S 不入
+#    平台表，见平台表内裁定注记）。故 kind=logic（roles.toml 头注：logic = 无物理绑定，
+#    不进 [pins]），requires 显式 [] 即该事实，derives 显式 [] 无注入键。
+#    iface 取该格真实承载的能力面（rr-hal 有 prod 实现，门 a D 段可判）：链路=Rr3Link、
+#    播放=Rr3AudioSink、拾音=Rr3AudioSource；VAD 不独立绑设备、消费同源采集面，故其
+#    iface 指向 Rr3AudioSource（判别参数住 rr3-sense config.toml，不在契约）。
+[[role]]
+name = "net.wifi.link"
+slot = "net.wifi"
+kind = "logic"
+iface = "Rr3Link"
+requires = []
+derives = []
+direction = "io"
+droppable = false
+input_only_ok = false
+per_instance = false
+note = "WiFi 链路管理面（rr-hal linux_link 的 Rr3LinuxNmLink 承载同名 face）。droppable=false：链路是认知面出入口，欠压降载不得切断"
+
+[[role]]
+name = "audio.capture.mic"
+slot = "audio.capture"
+kind = "logic"
+iface = "Rr3AudioSource"
+requires = []
+derives = []
+direction = "in"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "拾音面（Rr3AudioSource 四实现：linux ALSA / sim / mac / 板侧 I2S）。droppable=true：欠压降载可停采集"
+
+[[role]]
+name = "audio.playback.spk"
+slot = "audio.playback"
+kind = "logic"
+iface = "Rr3AudioSink"
+requires = []
+derives = []
+direction = "out"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "播放面（Rr3AudioSink 四实现同 audio.capture.mic）。droppable=true：欠压降载可停播放"
+
+[[role]]
+name = "audio.vad.gate"
+slot = "audio.vad"
+kind = "logic"
+iface = "Rr3AudioSource"
+requires = []
+derives = []
+direction = "in"
+droppable = true
+input_only_ok = false
+per_instance = false
+note = "语音活动判别面：不独立绑设备（输入流与 audio.capture 同源），iface 指向其消费的采集能力面；阈/窗等判别参数住 rr3-sense config.toml，契约只登记格—角色—能力面三者关系"
+
 # —— 批N3 件八（基-39 N3 那一刀 + 器件角色进场，decisions.md §2 行 2）：I2C 读数
 #    器件三角色进场。requires 首次引用 device 键（[pins] 字段词表批N3 件八起十一键）：
 #    device = 器件型号词（外键 → contracts/devices.toml，门 o 装载侧执法；校验③-c

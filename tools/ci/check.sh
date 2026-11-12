@@ -888,8 +888,9 @@ fi
 step "⑨-c 电流预算装载拒链（校验⑨ per-instance 扩算 + kind=power 覆盖判据，门 c）"
 run_tests sh -c 'cd base/runtime && cargo test -p rrd --lib demand_budget'
 
-# —— ⑨-a 基-39 角色覆盖六表对账·报告模式（门 a 第 ③ 层执法位——报告不置红，转红随
-#     基-39 全刀落完；全案 §8 门 a / §24.1 第 5 条 + 裁-6，批N2 件六）。
+# —— ⑨-a 基-39 角色覆盖六表对账·执法（门 a 第 ③ 层执法位——2026-11-12 P1 审计件四
+#     起由"报告模式"转执法：红账 21→0 连带基线归零，此后任何新红即 FAIL；全案 §8
+#     门 a / §24.1 第 5 条 + 裁-6，批N2 件六建步、P1 件四转执法）。
 #     四腿键集全部自代码常量/契约表导出（单真值点，不抄第二份；⑨-n 先例）：
 #       slots ← contracts/slots.toml；roles ← contracts/roles.toml；
 #       TRAITS/DESC_KEYS ← rr-registry/src/assemble.rs 两在册表；
@@ -908,11 +909,17 @@ run_tests sh -c 'cd base/runtime && cargo test -p rrd --lib demand_budget'
 #     门 a 数学（§24.1 第 5 条 + 裁-17）：置红 ＝ A + B + C + D。
 #     机器判据（裁定配套 (c)）：低水位基线文件 tools/ci/gate-a-baseline.txt——
 #       count > 基线即 FAIL（防红账回涨）；文件缺/坏/非整数即 FAIL（fail-closed）；
-#       count < 基线 PASS 并打印"须同批下调基线"提醒（转红终点＝基-39 全覆盖 count=0）。
+#       count < 基线 PASS 并打印"须同批下调基线"提醒。
+#       **2026-11-12 转执法**：基线已降至 0（基-39 转绿收口件落地），故 count>0 即
+#       FAIL；文件保留为低水位锚（0），不再随批下调。
+#     A 段分母口径（P1 件四裁定）：只判 layer=body 的 normal 格；base 内建四族与
+#       cognition 软件四格无 [pins] 角色域，不计入（设计原文"logic 内建格覆盖口径
+#       归转红收口件另裁"即本步）。C 段分母口径同批：Rr3DigitalIn（S-10 未立项的
+#       能力面前置件）与四枚永不进 requires 的 pin 键豁免，理由见 C 段内注。
 #     六表之第 5 表（件 handles[].desc_key × DESC_KEYS）已由 ② parse 层执法；第 6 表
 #     （平台 role→具名构造）归门 a 转红收口件——本步如实不判、不抄第二份。
 #     TRAITS/DESC_KEYS 是 &[&str] 切片无常量 N，提取打空的护栏＝B 段全悬空硬红＋扫面前件四查。
-step "⑨-a 基-39 角色覆盖六表对账·报告模式（A 未覆盖 normal 格 / B roles 悬空 / C trait·键差集 / D iface 实现者缺位，门 a）"
+step "⑨-a 基-39 角色覆盖六表对账·执法（A 未覆盖 body normal 格 / B roles 悬空 / C trait·键差集 / D iface 实现者缺位，门 a）"
 gate_a_fail=0
 ga_slots="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
 ga_roles="$(mktemp)" || { echo "ERROR: mktemp 失败。" >&2; exit 1; }
@@ -932,9 +939,10 @@ decl_pin_n="$(grep -h -m1 -oE 'RR3_PIN_KEYS: \[&str; [0-9]+\]' $prof_src | grep 
 real_pin_n="$(grep -c . "$ga_pins" || true)"
 # slots：name+status 两轴逐格（⑧-a 同款 awk 口径）；roles：name/slot/iface/requires/derives 逐条
 awk '
-  /^\[\[slot\]\]/        { in_s = 1; nm = "" }
+  /^\[\[slot\]\]/        { in_s = 1; nm = ""; ly = "" }
   in_s && $1 == "name"   { v = $3; gsub(/[",]/, "", v); nm = v }
-  in_s && $1 == "status" { v = $3; gsub(/[",]/, "", v); print nm "\t" v; in_s = 0 }
+  in_s && $1 == "layer"  { v = $3; gsub(/[",]/, "", v); ly = v }
+  in_s && $1 == "status" { v = $3; gsub(/[",]/, "", v); print nm "\t" v "\t" ly; in_s = 0 }
 ' contracts/slots.toml > "$ga_slots"
 awk '
   function flush() { if (nm != "") printf "%s\t%s\t%s\t%s\t%s\n", nm, sl, ifc, rq, dv }
@@ -1007,20 +1015,37 @@ else
       fi
     done
   done < "$ga_roles"
-  # —— A 段：未覆盖 normal 格
+  # —— A 段：未覆盖 normal 格（P1 件四口径：只判 layer=body 的格）
+  # base 层四族（bus.*/net.online/power.battery|rail|budget）由基座内建承载、
+  # cognition 层四格是纯软件格——两类按 roles.toml 头注"logic 内建格不进 [pins]"
+  # 本就没有引脚角色，计入红账会让门 a 永远红（设计原文：logic 内建格覆盖口径
+  # 归转红收口件另裁，本步即该裁定的落点）。body 层 normal 格 8 个必须全有角色。
   ga_covered="$(awk -F'\t' '{print $2}' "$ga_roles" | sort -u)"
-  while IFS=$'\t' read -r s_nm s_st; do
+  while IFS=$'\t' read -r s_nm s_st s_ly; do
     [ -n "$s_nm" ] || continue
+    [ "$s_ly" = "body" ] || continue
     if [ "$s_st" = "normal" ] && ! printf '%s\n' "$ga_covered" | grep -qxF "$s_nm"; then
       printf 'A  normal 格未覆盖: %s（无任何 role.slot 指向）\n' "$s_nm"
       ga_a=$((ga_a + 1))
     fi
   done < "$ga_slots"
   # —— C 段：trait 差集 ＋ pin 键差集（未被 roles 引用侧）
+  # C 段分母口径（P1 件四裁定，逐条理由在案——不是"把红的藏起来"，是这两类
+  # 成员按设计不可能被 roles 引用）：
+  #   trait 侧 Rr3DigitalIn：能力面前置件（模块索引 L-12 / sense S-10"数字输入面"
+  #     未立项），今天零格位消费者、零 prod 实现——它不是"漏覆盖"，是"还没有格"，
+  #     计入即永久红；S-10 立项时删本豁免并同步补格—角色。
+  #   pin 键侧四键永不进 requires：role 是 pin 指向角色的**自指键**（不能由角色
+  #     要求自己）、instance 只对 per_instance 角色必填、direction 由独立的方
+  #     向域判据校验、mux_group 明文不归 requires（profile_checks.rs 注记：互斥组
+  #     由平台 conflicts 表承载）。
+  ga_trait_exempt="Rr3DigitalIn"
+  ga_pin_exempt="role instance direction mux_group"
   ga_used_if="$(awk -F'\t' '{print $3}' "$ga_roles" | sort -u)"
   ga_used_rq="$(awk -F'\t' '{print $4}' "$ga_roles" | tr ' ' '\n' | sort -u)"
   while IFS= read -r t; do
     [ -n "$t" ] || continue
+    printf '%s\n' " $ga_trait_exempt " | grep -qF " $t " && continue
     if ! printf '%s\n' "$ga_used_if" | grep -qxF "$t"; then
       printf 'C  trait 未被 roles.iface 引用: %s\n' "$t"
       ga_c=$((ga_c + 1))
@@ -1028,6 +1053,7 @@ else
   done < "$ga_traits"
   while IFS= read -r k; do
     [ -n "$k" ] || continue
+    printf '%s\n' " $ga_pin_exempt " | grep -qF " $k " && continue
     if ! printf '%s\n' "$ga_used_rq" | grep -qxF "$k"; then
       printf 'C  pin 键未被 roles.requires 引用: %s\n' "$k"
       ga_c=$((ga_c + 1))
@@ -1086,7 +1112,7 @@ else
           printf 'PASS  ⑨-a 红账 %s ≤ 基线 %s（**红账下降 %s 笔：须同批下调 tools/ci/gate-a-baseline.txt；转红终点 = 基-39 全覆盖 count=0，届时本门转红、基线文件退役**）\n' \
             "$ga_total" "$ga_baseline" "$((ga_baseline - ga_total))"
         else
-          printf 'PASS  ⑨-a 红账 %s = 基线 %s（报告模式：A/C 已知红不置红，转红随基-39 全刀落完）\n' "$ga_total" "$ga_baseline"
+          printf 'PASS  ⑨-a 红账 %s = 基线 %s（执法态：转绿收口后本门对任何新红即 FAIL）\n' "$ga_total" "$ga_baseline"
         fi
         ;;
     esac

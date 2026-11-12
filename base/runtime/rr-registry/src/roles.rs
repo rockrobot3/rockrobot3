@@ -205,9 +205,15 @@ impl Rr3RoleTable {
                     "role {name} 缺 iface 外键（→ RR3_ASSEMBLE_HANDLE_TRAITS）"
                 ));
             }
-            if e.requires.is_empty() {
+            // requires 空只在 kind=logic 上合法：logic 角色无 [pins] 物理绑定
+            // （链路/音频四格的真值住 [hardware] 与 board 具名装配），"没有必填
+            // 引脚字段"是事实而非缺写。signal/power 角色一律非空——引脚身份
+            // （controller/addr/physical 等）必须由角色说清，留空即红。
+            // 显式性由 CI 契约测试逐条点名钉住（与 derives 显式空的处置同款）。
+            if e.requires.is_empty() && e.kind != "logic" {
                 errs.push(format!(
-                    "role {name} 的 requires 为空（无必填字段须显式 []，留空不可区分）"
+                    "role {name} 的 requires 为空（kind={} 无逻辑豁免，须列必填引脚字段）",
+                    e.kind
                 ));
             }
             if !RR3_ROLE_DIRECTIONS.contains(&e.direction.as_str()) {
@@ -233,14 +239,14 @@ mod tests {
     // include_str! 以本文件所在目录为基准：src → rr-registry → runtime → base → 仓库根
     const CONTRACT: &str = include_str!("../../../../contracts/roles.toml");
 
-    /// 契约必须解析成 10 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
+    /// 契约必须解析成 14 条角色，逐条点名断言（与 contract.rs 的形状 pin 同源、彼此独立）
     #[test]
     fn contract_text_parses_into_expected_shape() {
         let table = rr3_role_parse(CONTRACT);
         assert_eq!(
             table.roles.len(),
-            10,
-            "契约角色数（批N3 件八器件三角色进场后十条）"
+            14,
+            "契约角色数（P1 件四四格能力面角色进场后十四条）"
         );
         assert_eq!(
             table.rr3_role_names(),
@@ -248,6 +254,10 @@ mod tests {
                 "act.axis.pwm",
                 "act.led.gpio",
                 "act.relay.gpio",
+                "audio.capture.mic",
+                "audio.playback.spk",
+                "audio.vad.gate",
+                "net.wifi.link",
                 "power.battery.meter",
                 "power.charger.meter",
                 "power.current.sense",
@@ -365,10 +375,52 @@ mod tests {
             table.rr3_role_direction("sensor.env.meter").as_deref(),
             Some("in")
         );
+        // P1 件四新角色：四格能力面（logic 无引脚绑定，requires/derives 双显式空；
+        // iface 取真实承载 face——VAD 消费同源采集面）
+        for (name, slot, iface, dir) in [
+            ("net.wifi.link", "net.wifi", "Rr3Link", "io"),
+            ("audio.capture.mic", "audio.capture", "Rr3AudioSource", "in"),
+            (
+                "audio.playback.spk",
+                "audio.playback",
+                "Rr3AudioSink",
+                "out",
+            ),
+            ("audio.vad.gate", "audio.vad", "Rr3AudioSource", "in"),
+        ] {
+            assert_eq!(table.rr3_role_slot(name).as_deref(), Some(slot));
+            assert_eq!(table.rr3_role_iface(name).as_deref(), Some(iface));
+            assert_eq!(table.rr3_role_kind(name).as_deref(), Some("logic"));
+            assert_eq!(table.rr3_role_requires(name), Some(vec![]));
+            assert_eq!(table.rr3_role_derives(name), Some(vec![]));
+            assert_eq!(table.rr3_role_direction(name).as_deref(), Some(dir));
+            assert_eq!(table.rr3_role_per_inst(name), Some(false));
+        }
         assert!(
             table.rr3_role_check().is_empty(),
             "{:?}",
             table.rr3_role_check()
+        );
+    }
+
+    /// kind=logic 的 requires 显式 [] 合法；signal 角色留空仍必须红（形状放宽的边界）
+    #[test]
+    fn empty_requires_is_logical_only() {
+        let logic = rr3_role_parse(
+            "[[role]]\nname = \"a.b\"\nslot = \"net.wifi\"\nkind = \"logic\"\niface = \"Rr3Link\"\nrequires = []\nderives = []\ndirection = \"io\"\n",
+        );
+        assert!(
+            logic.rr3_role_check().is_empty(),
+            "{:?}",
+            logic.rr3_role_check()
+        );
+        let signal = rr3_role_parse(
+            "[[role]]\nname = \"a.b\"\nslot = \"act.led\"\nkind = \"signal\"\niface = \"Rr3GpioOut\"\nrequires = []\nderives = []\ndirection = \"out\"\n",
+        );
+        let errs = signal.rr3_role_check();
+        assert!(
+            errs.iter().any(|e| e.contains("requires 为空")),
+            "signal 角色 requires 留空必须点名: {errs:?}"
         );
     }
 
