@@ -150,6 +150,16 @@ pub(crate) fn rr3_handle_face(
 /// PCM 的字节总数，播放面对账收流缓冲完整性的唯一判据（无流不静默）。校验
 /// 失败返回 `Err`，由调用方折成 error 应答（请求-应答语义，不当致命错误）。
 pub(crate) fn rr3_tts_parse_args(args: &Value) -> Result<(String, u64), String> {
+    let text = rr3_tts_text(args)?;
+    let pcm_bytes = args
+        .get("pcm_bytes")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{} 缺 integer 参数 pcm_bytes", player::RR3_TTS_TOPIC))?;
+    Ok((text, pcm_bytes))
+}
+
+/// text 取值：必填且非空字符串。
+fn rr3_tts_text(args: &Value) -> Result<String, String> {
     let text = args
         .get("text")
         .and_then(Value::as_str)
@@ -157,11 +167,7 @@ pub(crate) fn rr3_tts_parse_args(args: &Value) -> Result<(String, u64), String> 
     if text.is_empty() {
         return Err(format!("{} 的 text 不能为空", player::RR3_TTS_TOPIC));
     }
-    let pcm_bytes = args
-        .get("pcm_bytes")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("{} 缺 integer 参数 pcm_bytes", player::RR3_TTS_TOPIC))?;
-    Ok((text.to_string(), pcm_bytes))
+    Ok(text.to_string())
 }
 
 /// tts PCM 缓冲对账（MC-1）：点名申报的 `pcm_bytes` vs 缓冲实收。少 = 半流
@@ -178,14 +184,19 @@ pub(crate) fn rr3_pcm_integrity(pcm_bytes: u64, buffered: usize) -> Result<(), S
     if buffered == pcm_bytes {
         return Ok(());
     }
-    let (how, gap) = if buffered < pcm_bytes {
-        ("半流", pcm_bytes - buffered)
-    } else {
-        ("残留", buffered - pcm_bytes)
-    };
+    let (how, gap) = rr3_pcm_gap(pcm_bytes, buffered);
     Err(format!(
         "tts PCM 缓冲不完整（{how}）：点名申报 {pcm_bytes} 字节、缓冲实收 {buffered} 字节，缺口 {gap} 字节，弃播"
     ))
+}
+
+/// 缺口分类：少 = 半流，多 = 残留。
+fn rr3_pcm_gap(pcm_bytes: u64, buffered: u64) -> (&'static str, u64) {
+    if buffered < pcm_bytes {
+        ("半流", pcm_bytes - buffered)
+    } else {
+        ("残留", buffered - pcm_bytes)
+    }
 }
 
 /// s16le 字节列 → i16 样点：小端两两成对。brain 分帧保证偶数字节，尾部奇数

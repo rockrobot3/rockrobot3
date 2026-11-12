@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use rr_hal::backend::{rr3_hal_link, rr3_hal_wifi_store};
 use rr_hal::provision_store::Rr3WifiStore;
-use rr_hal_api::Rr3Link;
+use rr_hal_api::{Rr3Link, Rr3SsidText};
 
 use crate::wifi::{Rr3LinkCfg, Rr3Provision};
 
@@ -44,10 +44,15 @@ pub(crate) fn rr3_wifi_provision(
     timeout_ms: u64,
 ) -> Result<(Box<dyn Rr3WifiStore>, Rr3Provision), String> {
     let (store, store_backend) = rr3_hal_wifi_store(Duration::from_millis(timeout_ms));
-    let prov = match store
+    let ssid = store
         .rr3_wifi_ssid()
-        .map_err(|e| format!("配网凭据在册查询失败（{store_backend}）: {e}"))?
-    {
+        .map_err(|e| format!("配网凭据在册查询失败（{store_backend}）: {e}"))?;
+    Ok((store, rr3_prov_of(store_backend, ssid)))
+}
+
+/// 在册则直起 station（重启仍在册），否则出厂 ap。
+fn rr3_prov_of(store_backend: &str, ssid: Option<Rr3SsidText>) -> Rr3Provision {
+    match ssid {
         Some(ssid) => {
             let ssid = ssid.rr3_ssid_text_as_str();
             eprintln!("配网面就绪: {store_backend} 在册 ssid={ssid:?}（重启恢复 station）");
@@ -57,8 +62,7 @@ pub(crate) fn rr3_wifi_provision(
             eprintln!("配网面就绪: {store_backend} 无在册凭据（出厂 ap）");
             Rr3Provision::rr3_provision_new()
         }
-    };
-    Ok((store, prov))
+    }
 }
 
 /// 链路轮询周期下限（ms）：0/极小值会让 nmcli 子进程每秒被 fork 上千次，
@@ -78,20 +82,21 @@ const RR3_MAX_NM_TIMEOUT_MS: u64 = 60_000;
 pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
     let wifi_sect = rr3_conn_wifi_sect(&v)?;
-    let link_period = rr3_link_period_of(&wifi_sect)?;
-    let nm_timeout = rr3_nm_timeout_of(&wifi_sect)?;
+    let link = rr3_conn_link_of(&wifi_sect)?;
     let bt_up = rr3_bt_up_of(&v)?;
-    Ok((
-        Rr3LinkCfg {
-            link_report_period_ms: link_period,
-            timeout_ms: nm_timeout,
-            // 配网口令下限（N-11①/M-6，批N4 件五数据化）：缺键回落 8 = legacy
-            // 语义（已部署旧 config 兼容，同 bt 段缺段回落口径）；显式给值时
-            // 必须 ≥1（0 = 无下限是策略漏洞，不当合法配置放行）
-            min_pass_len: rr3_min_pass_len_of(&wifi_sect),
-        },
-        bt_up,
-    ))
+    Ok((link, bt_up))
+}
+
+/// wifi 段三键 → 链路 cfg（周期/超时工程域 + 口令下限）。
+fn rr3_conn_link_of(wifi_sect: &toml::Value) -> Result<Rr3LinkCfg, String> {
+    Ok(Rr3LinkCfg {
+        link_report_period_ms: rr3_link_period_of(wifi_sect)?,
+        timeout_ms: rr3_nm_timeout_of(wifi_sect)?,
+        // 配网口令下限（N-11①/M-6，批N4 件五数据化）：缺键回落 8 = legacy
+        // 语义（已部署旧 config 兼容，同 bt 段缺段回落口径）；显式给值时
+        // 必须 ≥1（0 = 无下限是策略漏洞，不当合法配置放行）
+        min_pass_len: rr3_min_pass_len_of(wifi_sect),
+    })
 }
 
 /// `[rr3-connect.wifi]` 段取址（缺段点名）。

@@ -243,13 +243,7 @@ fn rr3_wake_phrase(norm_chars: &[char], phrase: &str) -> Option<Rr3WakeAction> {
         return None;
     }
     if norm_chars.len() < pn_chars.len() {
-        if norm_chars.len() + 1 < pn_chars.len() {
-            return None;
-        }
-        let prefix: String = norm_chars.iter().collect();
-        let phrase_prefix: String = pn_chars[..norm_chars.len()].iter().collect();
-        return (rr3_wake_edit_dist(&prefix, &phrase_prefix) <= rr3_wake_max_edits(pn_chars.len()))
-            .then_some(Rr3WakeAction::Ack);
+        return rr3_wake_short(norm_chars, &pn_chars);
     }
     let prefix: String = norm_chars[..pn_chars.len()].iter().collect();
     if rr3_wake_edit_dist(&prefix, &pn) > rr3_wake_max_edits(pn_chars.len()) {
@@ -262,6 +256,17 @@ fn rr3_wake_phrase(norm_chars: &[char], phrase: &str) -> Option<Rr3WakeAction> {
     } else {
         Rr3WakeAction::Command(rest.to_string())
     })
+}
+
+/// 短一字的容错前缀（ASR 吞词尾）：短 2 字以上不认，编辑距内回 Ack。
+fn rr3_wake_short(norm_chars: &[char], pn_chars: &[char]) -> Option<Rr3WakeAction> {
+    if norm_chars.len() + 1 < pn_chars.len() {
+        return None;
+    }
+    let prefix: String = norm_chars.iter().collect();
+    let phrase_prefix: String = pn_chars[..norm_chars.len()].iter().collect();
+    (rr3_wake_edit_dist(&prefix, &phrase_prefix) <= rr3_wake_max_edits(pn_chars.len()))
+        .then_some(Rr3WakeAction::Ack)
 }
 
 /// 整轮编排面的总线写口窄化（Python rr3_finish_turn 首参 bus 的鸭子类型对位）：

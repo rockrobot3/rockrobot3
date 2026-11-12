@@ -269,15 +269,7 @@ fn rr3_doa_lag(samples: &[i16], ch: usize, frames: usize, d: i64) -> i64 {
 /// [−lag_max, lag_max]（域外次峰按构造剔除）；真峰处 2y1 > y0+y2，den ≤ 0
 /// （平台/边界）不插补。返回 Q7 lag。
 fn rr3_doa_peak(cc: &[i64], lag_max: usize, half: usize) -> i64 {
-    let mut best = 0i64;
-    let mut bv = -1i64;
-    for d in -(lag_max as i64)..=(lag_max as i64) {
-        let v = cc[(d + half as i64) as usize].abs();
-        if v > bv {
-            bv = v;
-            best = d;
-        }
-    }
+    let (best, bv) = rr3_doa_argmax(cc, lag_max, half);
     let y0 = cc[(best - 1 + half as i64) as usize].abs();
     let y2 = cc[(best + 1 + half as i64) as usize].abs();
     let den = 2 * bv - y0 - y2;
@@ -287,6 +279,20 @@ fn rr3_doa_peak(cc: &[i64], lag_max: usize, half: usize) -> i64 {
         0
     };
     best * 128 + sub
+}
+
+/// 物理域内峰值搜索（域外次峰按构造剔除）。
+fn rr3_doa_argmax(cc: &[i64], lag_max: usize, half: usize) -> (i64, i64) {
+    let mut best = 0i64;
+    let mut bv = -1i64;
+    for d in -(lag_max as i64)..=(lag_max as i64) {
+        let v = cc[(d + half as i64) as usize].abs();
+        if v > bv {
+            bv = v;
+            best = d;
+        }
+    }
+    (best, bv)
 }
 
 #[cfg(test)]

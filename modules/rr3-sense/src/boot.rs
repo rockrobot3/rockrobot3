@@ -266,9 +266,13 @@ fn rr3_cfg_reflex(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Re
     rr3_reflex_gate_ms(reflex, cfg)?;
     // 0.0.8 批"转完点头"：策略三键（缺键回落默认；nod_deg 缺省 0 = 手势关，
     // 与旧版逐点等价）。行程不在此预钳——板侧 fail-closed 是唯一裁决面。
+    rr3_cfg_nod(reflex, cfg)
+}
+
+/// 点头策略三键（nod_deg 缺省 0 = 手势关）。
+fn rr3_cfg_nod(reflex: &toml::Value, cfg: &mut Rr3SenseConfig) -> Result<(), String> {
     cfg.reflex.nod_deg = rr3_reflex_deg(reflex, "nod_deg", cfg.reflex.nod_deg)?;
-    rr3_reflex_nod_ms(reflex, cfg)?;
-    Ok(())
+    rr3_reflex_nod_ms(reflex, cfg)
 }
 
 /// deadband_deg/nod_deg 同形角度键（缺键保留现值，越 i32 点名）。
@@ -309,22 +313,34 @@ fn rr3_sense_cfg_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
 
 /// 采集面三键域（采样率/声道/单拍时长）。
 fn rr3_audio_cap_check(audio: &Rr3AudioConfig) -> Result<(), String> {
+    rr3_cap_rate(audio)?;
+    rr3_cap_chan(audio)?;
+    if audio.frame_ms > RR3_MAX_FRAME_MS {
+        return Err(format!(
+            "[rr3-sense.audio] frame_ms 须在 1..={RR3_MAX_FRAME_MS}，收到 {}",
+            audio.frame_ms
+        ));
+    }
+    Ok(())
+}
+
+/// 采样率域（1..=上限）。
+fn rr3_cap_rate(audio: &Rr3AudioConfig) -> Result<(), String> {
     if audio.sample_rate == 0 || audio.sample_rate > RR3_MAX_SAMPLE_RATE {
         return Err(format!(
             "[rr3-sense.audio] sample_rate 须在 1..={RR3_MAX_SAMPLE_RATE}，收到 {}",
             audio.sample_rate
         ));
     }
+    Ok(())
+}
+
+/// 声道数域（1..=上限）。
+fn rr3_cap_chan(audio: &Rr3AudioConfig) -> Result<(), String> {
     if audio.channels == 0 || audio.channels > RR3_MAX_CHANNELS {
         return Err(format!(
             "[rr3-sense.audio] channels 须在 1..={RR3_MAX_CHANNELS}，收到 {}",
             audio.channels
-        ));
-    }
-    if audio.frame_ms > RR3_MAX_FRAME_MS {
-        return Err(format!(
-            "[rr3-sense.audio] frame_ms 须在 1..={RR3_MAX_FRAME_MS}，收到 {}",
-            audio.frame_ms
         ));
     }
     Ok(())

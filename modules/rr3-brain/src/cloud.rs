@@ -428,6 +428,11 @@ impl Rr3LlmClient {
         if rr3_cloud_mode()? == Rr3CloudMode::Mock {
             return Ok((0, true));
         }
+        self.rr3_probe_real()
+    }
+
+    /// real 档最小补全：只判 HTTP 2xx 与耗时，不写对话历史。
+    fn rr3_probe_real(&self) -> Result<(u64, bool), String> {
         let key = self.rr3_resolve_key()?;
         let body = json!({
             "model": self.model_id,
@@ -556,12 +561,17 @@ pub(crate) fn rr3_key_set_of(key_ref: &Option<String>, mode: Option<Rr3LlmMode>)
     }
     match key_ref {
         None => rr3_cloud_api_key().is_ok(),
-        Some(r) => match r.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
-            Some(var) => std::env::var(var)
-                .map(|v| !v.trim().is_empty())
-                .unwrap_or(false),
-            None => rr3_secrets_get(r).is_some(),
-        },
+        Some(r) => rr3_key_ref_set(r),
+    }
+}
+
+/// 引用式 key_ref 是否就位：`env:` 看环境变量非空；裸名看 secrets 现读。
+fn rr3_key_ref_set(r: &str) -> bool {
+    match r.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
+        Some(var) => std::env::var(var)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false),
+        None => rr3_secrets_get(r).is_some(),
     }
 }
 

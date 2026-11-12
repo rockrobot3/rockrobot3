@@ -284,20 +284,31 @@ pub(crate) fn rr3_base_url_check(base_url: &str) -> Result<(), String> {
     if base_url.is_empty() {
         return Err("base_url 不得为空".to_string());
     }
-    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
-        return Err(format!(
-            "base_url 须为完整 API 根（http:// 或 https:// 开头）: {base_url}"
-        ));
+    rr3_base_url_scheme(base_url)?;
+    rr3_base_url_tail(base_url)
+}
+
+/// 协议头判定：须为 `http(s)://` 完整 API 根。
+fn rr3_base_url_scheme(base_url: &str) -> Result<(), String> {
+    if base_url.starts_with("http://") || base_url.starts_with("https://") {
+        return Ok(());
     }
-    if base_url
+    Err(format!(
+        "base_url 须为完整 API 根（http:// 或 https:// 开头）: {base_url}"
+    ))
+}
+
+/// 尾段判定：不得含 `/chat/completions`（客户端自拼，防双拼 404）。
+fn rr3_base_url_tail(base_url: &str) -> Result<(), String> {
+    if !base_url
         .trim_end_matches('/')
         .ends_with("/chat/completions")
     {
-        return Err(format!(
-            "base_url 是完整 API 根，不得含 /chat/completions（客户端自拼）: {base_url}"
-        ));
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "base_url 是完整 API 根，不得含 /chat/completions（客户端自拼）: {base_url}"
+    ))
 }
 
 /// LLM 连接行解析（自 composite.py `rr3_brain_model_row` 逐语义迁入，0.0.6 抽象批）：
@@ -317,6 +328,11 @@ fn rr3_model_rows(doc: &Value) -> Result<&[Value], String> {
     let brain = doc
         .get("rr3-brain")
         .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())?;
+    rr3_model_row_list(brain)
+}
+
+/// 行表形状：缺键/Null = 空表（走 legacy 四元组），非数组拒 boot。
+fn rr3_model_row_list(brain: &Value) -> Result<&[Value], String> {
     match brain.get("model") {
         None | Some(Value::Null) => Ok(&[]),
         Some(Value::Array(rows)) => Ok(rows.as_slice()),

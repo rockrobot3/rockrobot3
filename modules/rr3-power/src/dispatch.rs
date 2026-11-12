@@ -187,13 +187,7 @@ impl Rr3PowerDispatcher {
     /// ＋边沿守护行。HAL 读数失败同 battery_read_fail 纪律：counter 先行再退——
     /// 失败是设备/传输级，上抛致命不装活着。
     fn rr3_rail_tick(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
-        let st = match self.rail_dev.rr3_read(&self.cfg.rail.domain) {
-            Ok(st) => st,
-            Err(e) => {
-                bus.counter_bump("rail_read_fail", 1);
-                return Err(format!("轨压读数失败（{}）: {e}", self.rail_backend));
-            }
-        };
+        let st = self.rr3_rail_state(bus)?;
         self.rail_seq += 1;
         let (tier, event) = rr3_rail_beat(&mut self.rail_judge, st, self.cfg.rail.max_age_ms);
         bus.publish(
@@ -210,6 +204,17 @@ impl Rr3PowerDispatcher {
         }
         self.next_rail = now + Duration::from_millis(self.cfg.rail.sample_period_ms);
         Ok(())
+    }
+
+    /// 轨压读数：失败先记账再退（设备/传输级，上抛致命不装活着）。
+    fn rr3_rail_state(&self, bus: &BusHandle) -> Result<Rr3RailState, String> {
+        match self.rail_dev.rr3_read(&self.cfg.rail.domain) {
+            Ok(st) => Ok(st),
+            Err(e) => {
+                bus.counter_bump("rail_read_fail", 1);
+                Err(format!("轨压读数失败（{}）: {e}", self.rail_backend))
+            }
+        }
     }
 }
 

@@ -19,14 +19,18 @@ pub const SURFACE: &[&str] = &[
 
 /// session 点名参数裁决：只认 `action="open"`。缺参/类型错/未知值点名拒。
 pub fn rr3_session_args(args: &Value) -> Result<(), String> {
-    let action = args
-        .get("action")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "缺 action（必须取 \"open\"）".to_string())?;
+    let action = rr3_session_action(args)?;
     if action != "open" {
         return Err(format!("未知 action: {action}（只认 \"open\"）"));
     }
     Ok(())
+}
+
+/// action 取值（必填字符串）。
+fn rr3_session_action(args: &Value) -> Result<&str, String> {
+    args.get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "缺 action（必须取 \"open\"）".to_string())
 }
 
 /// 会话结果裁决：链路 up → mock 会话应答（回显当前链路 ssid）；down → 业务性
