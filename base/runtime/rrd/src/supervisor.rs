@@ -182,7 +182,11 @@ fn rr3_job_facts(manifest_path: &Path) -> Option<Rr3ManifestFacts> {
             return None;
         }
     };
-    match rr3_manifest_parse(&text) {
+    rr3_parse_facts(&text, manifest_path)
+}
+
+fn rr3_parse_facts(text: &str, manifest_path: &Path) -> Option<Rr3ManifestFacts> {
+    match rr3_manifest_parse(text) {
         Ok(f) => Some(f),
         Err(errs) => {
             rr3_log(&format!(

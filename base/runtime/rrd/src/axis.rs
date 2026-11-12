@@ -202,6 +202,10 @@ fn rr3_axis_keys(path: &str, table: &toml::value::Table, errs: &mut Vec<String>)
             ));
         }
     }
+    rr3_axis_missing(path, &seen, errs);
+}
+
+fn rr3_axis_missing(path: &str, seen: &BTreeSet<&str>, errs: &mut Vec<String>) {
     for f in RR3_ACT_PROFILE_FIELDS {
         if !seen.contains(f.key) {
             errs.push(format!(
@@ -336,11 +340,15 @@ fn rr3_axis_pin(
 /// 自洽判据（§4.4）：行程窗口必须包住中位锚——lo < center < hi（三键在场才判）
 fn rr3_axis_window(path: &str, nums: &Rr3AxisNums, errs: &mut Vec<String>) {
     if let (Some(lo), Some(center), Some(hi)) = (nums.lo, nums.center, nums.hi) {
-        if !(lo < center && center < hi) {
-            errs.push(format!(
-                "{path}: 行程窗口自洽破：lo_deg = {lo}, center_deg = {center}, hi_deg = {hi}（须 lo < center < hi）"
-            ));
-        }
+        rr3_window_check(path, lo, center, hi, errs);
+    }
+}
+
+fn rr3_window_check(path: &str, lo: i64, center: i64, hi: i64, errs: &mut Vec<String>) {
+    if !(lo < center && center < hi) {
+        errs.push(format!(
+            "{path}: 行程窗口自洽破：lo_deg = {lo}, center_deg = {center}, hi_deg = {hi}（须 lo < center < hi）"
+        ));
     }
 }
 

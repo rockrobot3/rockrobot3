@@ -238,13 +238,7 @@ fn rr3_truth_row(truth_set: &[Rr3TruthSetEntry]) -> Rr3AssemblyCheck {
             ),
         }
     } else {
-        let mut parts = Vec::new();
-        if !missing.is_empty() {
-            parts.push(format!("缺册: {}", missing.join(", ")));
-        }
-        if !drifted.is_empty() {
-            parts.push(format!("漂移: {}", drifted.join(", ")));
-        }
+        let parts = rr3_truth_parts(&missing, &drifted);
         Rr3AssemblyCheck {
             item: "truth_set".to_string(),
             pass: RR3_CHECK_FAIL,
@@ -256,20 +250,33 @@ fn rr3_truth_row(truth_set: &[Rr3TruthSetEntry]) -> Rr3AssemblyCheck {
     }
 }
 
+fn rr3_truth_parts(missing: &[String], drifted: &[String]) -> Vec<String> {
+    let mut parts = Vec::new();
+    if !missing.is_empty() {
+        parts.push(format!("缺册: {}", missing.join(", ")));
+    }
+    if !drifted.is_empty() {
+        parts.push(format!("漂移: {}", drifted.join(", ")));
+    }
+    parts
+}
+
 /// 真值集逐成员重读：收集缺册与漂移成员名（判果由 [`rr3_truth_row`] 汇总）。
 fn rr3_truth_scan(truth_set: &[Rr3TruthSetEntry]) -> (Vec<String>, Vec<String>) {
     let (mut missing, mut drifted) = (Vec::new(), Vec::new());
     for t in truth_set {
         match std::fs::read(&t.path) {
-            Ok(bytes) => {
-                if rr3_sha256_hex(&bytes) != t.sha256 {
-                    drifted.push(t.member.clone());
-                }
-            }
+            Ok(bytes) => rr3_truth_drift(t, &bytes, &mut drifted),
             Err(_) => missing.push(t.member.clone()),
         }
     }
     (missing, drifted)
+}
+
+fn rr3_truth_drift(t: &Rr3TruthSetEntry, bytes: &[u8], drifted: &mut Vec<String>) {
+    if rr3_sha256_hex(bytes) != t.sha256 {
+        drifted.push(t.member.clone());
+    }
 }
 
 /// `rr3.ctl.contracts` 应答渲染（conn.rs 单点调用；形状与 `rr3.ctl.wiring`

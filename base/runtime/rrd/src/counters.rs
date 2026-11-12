@@ -94,15 +94,7 @@ fn rr3_counters_text(path: &Path) -> Result<String, Option<String>> {
 /// 解析计数档：非对象/坏 JSON 按空表起账并回显原因。
 fn rr3_counters_parse(text: &str) -> (BTreeMap<String, u64>, Option<String>) {
     match serde_json::from_str::<Value>(text) {
-        Ok(Value::Object(map)) => {
-            let mut out = BTreeMap::new();
-            for (k, v) in map {
-                if let Some(n) = v.as_u64() {
-                    out.insert(k, n);
-                }
-            }
-            (out, None)
-        }
+        Ok(Value::Object(map)) => (rr3_ctr_rows(map), None),
         other => (
             BTreeMap::new(),
             Some(format!(
@@ -114,6 +106,16 @@ fn rr3_counters_parse(text: &str) -> (BTreeMap<String, u64>, Option<String>) {
             )),
         ),
     }
+}
+
+fn rr3_ctr_rows(map: serde_json::Map<String, Value>) -> BTreeMap<String, u64> {
+    let mut out = BTreeMap::new();
+    for (k, v) in map {
+        if let Some(n) = v.as_u64() {
+            out.insert(k, n);
+        }
+    }
+    out
 }
 
 /// 原子写序共享件（批N4 件四 I-20 下沉）：实现原样迁 `rr-ipc/src/persist.rs`

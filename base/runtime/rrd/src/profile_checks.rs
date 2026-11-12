@@ -24,10 +24,14 @@ use crate::profile::{
 /// 换平台 = 改数据），本函数只做词形匹配机制。
 fn rr3_wordform_tail(controller: &str, prefix: &str) -> Option<String> {
     let rest = controller.strip_prefix(prefix)?;
-    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+    if !rr3_tail_digits(rest) {
         return None;
     }
     Some(rest.to_string())
+}
+
+fn rr3_tail_digits(rest: &str) -> bool {
+    !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// 词形前缀查询 + fail-closed 守卫（实-6 (a)）：派生键查平台表词形前缀，查不到
@@ -297,12 +301,7 @@ pub(crate) fn rr3_check_pins(
     let mut errs = Vec::new();
     let mut derived = BTreeMap::new();
     // host 档词形前件守卫（实-6 (a)）：词形表空 = 平台没提供派生前件，fail-closed
-    if profile.platform_tier == "host" && platform.rr3_wordform_map().is_empty() {
-        errs.push(
-            "host 档平台事实表 controller_wordform 为空（词形派生前件缺失，host 档必须选带词形表的主机平台册，fail-closed）"
-                .into(),
-        );
-    }
+    rr3_wordform_guard(profile, platform, &mut errs);
     for pin in &profile.pins {
         let (pin_errs, derives) = rr3_check_pin(pin, roles, table);
         errs.extend(pin_errs);
@@ -313,6 +312,15 @@ pub(crate) fn rr3_check_pins(
         errs.extend(rr3_derive_pin(pin, &derives, platform, &mut derived));
     }
     (errs, derived)
+}
+
+fn rr3_wordform_guard(profile: &Rr3Profile, platform: &Rr3PlatformTable, errs: &mut Vec<String>) {
+    if profile.platform_tier == "host" && platform.rr3_wordform_map().is_empty() {
+        errs.push(
+            "host 档平台事实表 controller_wordform 为空（词形派生前件缺失，host 档必须选带词形表的主机平台册，fail-closed）"
+                .into(),
+        );
+    }
 }
 
 /// 单条 pin 的静态校验（角色查册 / per_instance / requires / direction /

@@ -529,6 +529,10 @@ fn rr3_supplies_core(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec
         errs,
     );
     // domain / budget 是子段键，各自成块解析（第七供给位 / 校验⑩ 分母）
+    rr3_supplies_keys(t, errs);
+}
+
+fn rr3_supplies_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
         if k != "domain" && k != "budget" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
             errs.push(format!(
@@ -573,6 +577,15 @@ fn rr3_supplies_sub(
                 .to_string(),
         ),
     }
+    rr3_budget_into(t, supplies, tier, errs);
+}
+
+fn rr3_budget_into(
+    t: &toml::Table,
+    supplies: &mut Rr3Supplies,
+    tier: &str,
+    errs: &mut Vec<String>,
+) {
     match t.get("budget").and_then(toml::Value::as_table) {
         None => errs.push(
             "缺少 [supplies.budget]（内存预算声明，校验⑩ 分母；schema_version=4 起必填——host 档显式写 not_applicable = true，不许留空）"

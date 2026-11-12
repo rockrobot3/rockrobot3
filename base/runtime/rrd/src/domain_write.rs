@@ -278,10 +278,14 @@ fn rr3_slot_path(
         }
     };
     // platform 槽登记的是 chip 表文件本身，写口要的是目录（兄弟表落位同目录）
+    Ok(rr3_slot_pick(e, slot))
+}
+
+fn rr3_slot_pick(e: &Rr3TruthSetEntry, slot: Rr3PathSlot) -> Option<PathBuf> {
     if slot == Rr3PathSlot::Platform {
-        Ok(e.path.parent().map(PathBuf::from))
+        e.path.parent().map(PathBuf::from)
     } else {
-        Ok(Some(e.path.clone()))
+        Some(e.path.clone())
     }
 }
 
@@ -369,6 +373,13 @@ pub fn rr3_write_execute(
     }
     // ② 执行段串行（见 [`RR3_WRITE_SERIAL`] 注记）：读 → 预核 → 换整段单写者
     let _serial = RR3_WRITE_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    rr3_write_apply(paths, params)
+}
+
+fn rr3_write_apply(
+    paths: &Rr3DomainWritePaths,
+    params: &Rr3DomainWriteParams,
+) -> Result<Value, (Rr3StatusCode, String)> {
     match params.target {
         Rr3WriteTarget::Domain => rr3_write_domain(paths, params),
         Rr3WriteTarget::Axis => rr3_write_axis(paths, params),
@@ -677,11 +688,18 @@ fn rr3_axis_path(
         .ok_or_else(|| invalid("接线档路径无父目录".to_string()))?
         .join("axis");
     let axis_path = axis_dir.join(format!("{name}.toml"));
+    rr3_axis_must_exist(axis_path)
+}
+
+fn rr3_axis_must_exist(axis_path: PathBuf) -> Result<PathBuf, (Rr3StatusCode, String)> {
     if !axis_path.exists() {
-        return Err(invalid(format!(
-            "轴档 {} 不在场（写口只改在册档单键；立档走产线写入面 axis_write 全判据流程）",
-            axis_path.display()
-        )));
+        return Err((
+            Rr3StatusCode::Invalid,
+            format!(
+                "轴档 {} 不在场（写口只改在册档单键；立档走产线写入面 axis_write 全判据流程）",
+                axis_path.display()
+            ),
+        ));
     }
     Ok(axis_path)
 }

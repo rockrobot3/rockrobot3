@@ -326,18 +326,22 @@ fn rr3_wire_rated(i: usize, t: &toml::value::Table, errs: &mut Vec<String>) -> f
 fn rr3_wire_close(wires: &[Rr3Wire], errs: &mut Vec<String>) {
     let connectors: BTreeSet<&str> = wires.iter().map(|w| w.connector.as_str()).collect();
     for w in wires {
-        for f in &w.feeds {
-            if f == &w.connector {
-                errs.push(format!(
-                    "wiring[{}].feeds 自环（本线组不能承载自己）",
-                    w.connector
-                ));
-            } else if !connectors.contains(f.as_str()) {
-                errs.push(format!(
-                    "wiring[{}].feeds = {f} 未在本接线档的位号集（接线闭合：feeds 指向同文件其他线组的位号）",
-                    w.connector
-                ));
-            }
+        rr3_close_wire(w, &connectors, errs);
+    }
+}
+
+fn rr3_close_wire(w: &Rr3Wire, connectors: &BTreeSet<&str>, errs: &mut Vec<String>) {
+    for f in &w.feeds {
+        if f == &w.connector {
+            errs.push(format!(
+                "wiring[{}].feeds 自环（本线组不能承载自己）",
+                w.connector
+            ));
+        } else if !connectors.contains(f.as_str()) {
+            errs.push(format!(
+                "wiring[{}].feeds = {f} 未在本接线档的位号集（接线闭合：feeds 指向同文件其他线组的位号）",
+                w.connector
+            ));
         }
     }
 }

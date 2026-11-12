@@ -141,26 +141,36 @@ fn rr3_check_signal<'a>(
 ) {
     for (k, sig) in w.signal.iter().enumerate() {
         let item = format!("signal:{}[{}]:{sig}", w.connector, k);
-        if rr3_power_conductor(sig) {
-            out.push(Rr3AssemblyCheck {
-                item,
-                pass: RR3_CHECK_NA,
-                reason: "供电/地导体，非 pin 引用（校验⑦-a 豁免面）".to_string(),
-            });
-        } else if pin_ids.contains(sig) {
-            *refs.entry(sig.as_str()).or_insert(0) += 1;
-            out.push(Rr3AssemblyCheck {
-                item,
-                pass: RR3_CHECK_PASS,
-                reason: "已解析到 [pins] 装载快照（校验⑦-a 复演）".to_string(),
-            });
-        } else {
-            out.push(Rr3AssemblyCheck {
-                item,
-                pass: RR3_CHECK_FAIL,
-                reason: "signal 不在 [pins] pin_id 集（校验⑦-a 破——快照与装载面漂移）".to_string(),
-            });
-        }
+        rr3_signal_row(item, sig.as_str(), pin_ids, refs, out);
+    }
+}
+
+fn rr3_signal_row<'a>(
+    item: String,
+    sig: &'a str,
+    pin_ids: &BTreeSet<String>,
+    refs: &mut BTreeMap<&'a str, usize>,
+    out: &mut Vec<Rr3AssemblyCheck>,
+) {
+    if rr3_power_conductor(sig) {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_NA,
+            reason: "供电/地导体，非 pin 引用（校验⑦-a 豁免面）".to_string(),
+        });
+    } else if pin_ids.contains(sig) {
+        *refs.entry(sig).or_insert(0) += 1;
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_PASS,
+            reason: "已解析到 [pins] 装载快照（校验⑦-a 复演）".to_string(),
+        });
+    } else {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_FAIL,
+            reason: "signal 不在 [pins] pin_id 集（校验⑦-a 破——快照与装载面漂移）".to_string(),
+        });
     }
 }
 
@@ -212,29 +222,37 @@ fn rr3_check_rated<'a>(
             pass: RR3_CHECK_FAIL,
             reason: format!("feeds {fault}——额定加总不可判（快照与装载面漂移，正是自检要抓的）"),
         }),
-        Ok(closure) => {
-            let sum_ma: i64 = closure.iter().map(|g| rr3_peak_ma(g, peak_by_mate)).sum();
-            if sum_ma as f64 > w.rated_a * 1000.0 {
-                out.push(Rr3AssemblyCheck {
-                    item,
-                    pass: RR3_CHECK_FAIL,
-                    reason: format!(
-                        "馈线峰值加总 {sum_ma}mA > 本线额定 {}mA（校验⑦-c1 破——F-10：本线 + feeds 闭包 {} 组按拓扑加总，不逐角色判）",
-                        w.rated_a * 1000.0,
-                        closure.len()
-                    ),
-                });
-            } else {
-                out.push(Rr3AssemblyCheck {
-                    item,
-                    pass: RR3_CHECK_PASS,
-                    reason: format!(
-                        "馈线峰值加总 {sum_ma}mA ≤ 本线额定 {}mA（校验⑦-c1 额定加总·自检时点判——F-10 拓扑加总；mate=none 直连负载未注册按 0 计）",
-                        w.rated_a * 1000.0
-                    ),
-                });
-            }
-        }
+        Ok(closure) => rr3_rated_ok(w, &closure, peak_by_mate, item, out),
+    }
+}
+
+fn rr3_rated_ok(
+    w: &Rr3Wire,
+    closure: &[&Rr3Wire],
+    peak_by_mate: &BTreeMap<String, i64>,
+    item: String,
+    out: &mut Vec<Rr3AssemblyCheck>,
+) {
+    let sum_ma: i64 = closure.iter().map(|g| rr3_peak_ma(g, peak_by_mate)).sum();
+    if sum_ma as f64 > w.rated_a * 1000.0 {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_FAIL,
+            reason: format!(
+                "馈线峰值加总 {sum_ma}mA > 本线额定 {}mA（校验⑦-c1 破——F-10：本线 + feeds 闭包 {} 组按拓扑加总，不逐角色判）",
+                w.rated_a * 1000.0,
+                closure.len()
+            ),
+        });
+    } else {
+        out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_PASS,
+            reason: format!(
+                "馈线峰值加总 {sum_ma}mA ≤ 本线额定 {}mA（校验⑦-c1 额定加总·自检时点判——F-10 拓扑加总；mate=none 直连负载未注册按 0 计）",
+                w.rated_a * 1000.0
+            ),
+        });
     }
 }
 
@@ -256,19 +274,29 @@ fn rr3_check_pins(
     for pin in &profile.pins {
         let id = pin.rr3_pin_id();
         let item = format!("pin:{id}");
-        match refs.get(id.as_str()) {
-            Some(n) => out.push(Rr3AssemblyCheck {
-                item,
-                pass: RR3_CHECK_PASS,
-                reason: format!("接线引用 {n} 导体（[pins]×wiring 交叉命中）"),
-            }),
-            None => out.push(Rr3AssemblyCheck {
-                item,
-                pass: RR3_CHECK_NA,
-                reason: "零引用（接线档未收敛该 pin——总线钉死/共读源/占位格/待收敛类合法态，见装配注记）"
+        rr3_pin_ref_row(item, &id, refs, out);
+    }
+}
+
+fn rr3_pin_ref_row(
+    item: String,
+    id: &str,
+    refs: &BTreeMap<&str, usize>,
+    out: &mut Vec<Rr3AssemblyCheck>,
+) {
+    match refs.get(id) {
+        Some(n) => out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_PASS,
+            reason: format!("接线引用 {n} 导体（[pins]×wiring 交叉命中）"),
+        }),
+        None => out.push(Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_NA,
+            reason:
+                "零引用（接线档未收敛该 pin——总线钉死/共读源/占位格/待收敛类合法态，见装配注记）"
                     .to_string(),
-            }),
-        }
+        }),
     }
 }
 
