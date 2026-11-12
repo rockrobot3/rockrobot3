@@ -54,18 +54,48 @@ fn rr3_sim_stamp() -> u128 {
 /// 份 manifest 两侧判定不同，registry 的 `rr3_manifest_abs` 同款理由）；
 /// 门 1 entry 行恰一条；门 2 旧值与解析事实交叉核验（防夹具读错文件）；
 /// 门 3 改写后重解析复核。
-pub fn rr3_entry_rewrite(
-    text: &str,
-    installed: &Path,
-    facts_entry: &str,
-    module: &str,
-) -> Result<String, String> {
+/// 装机 entry 形制门（单点）：POSIX 绝对路径且不含 `.`/`..` 段——演练布局的
+/// 入口路径直接进"产物是否可装机"判据，相对路径会让演练端由 CWD 决定起哪个
+/// 二进制（与 rrd 侧绝对化纪律同一条）。
+fn rr3_entry_target(installed: &Path, module: &str) -> Result<String, String> {
     let target = installed.to_string_lossy().into_owned();
     if !target.starts_with('/') || target.split('/').any(|s| s == "." || s == "..") {
         return Err(format!(
             "模块 {module} 的装机 entry 不可装机（{target}：须 POSIX 绝对路径且无 . / .. 段）"
         ));
     }
+    Ok(target)
+}
+
+/// 单条 entry 行的值置换：取首对引号内的旧值对账解析事实，换为新装机路径，
+/// 行内其余字节（前导空白/键名/尾注释）原封。
+fn rr3_entry_line(
+    line: &str,
+    facts_entry: &str,
+    target: &str,
+    module: &str,
+) -> Result<String, String> {
+    let (before, rest) = line
+        .split_once('"')
+        .ok_or_else(|| format!("模块 {module} 的 entry 行无引号值"))?;
+    let (old, after) = rest
+        .split_once('"')
+        .ok_or_else(|| format!("模块 {module} 的 entry 行引号不闭合"))?;
+    if old != facts_entry {
+        return Err(format!(
+            "模块 {module} 的 entry 旧值 {old:?} 与解析事实 {facts_entry:?} 不一致（夹具读错文件？）"
+        ));
+    }
+    Ok(format!("{before}\"{target}\"{after}"))
+}
+
+pub fn rr3_entry_rewrite(
+    text: &str,
+    installed: &Path,
+    facts_entry: &str,
+    module: &str,
+) -> Result<String, String> {
+    let target = rr3_entry_target(installed, module)?;
     let mut n = 0;
     let mut out = String::with_capacity(text.len() + target.len());
     // split_inclusive 保住原文件的行尾形状（含"无尾换行"），除 entry 外逐字节零差异
@@ -83,22 +113,7 @@ pub fn rr3_entry_rewrite(
                 "模块 {module} 的 manifest 有多条 entry 行（须恰一条）"
             ));
         }
-        let (before, rest) = line
-            .split_once('"')
-            .ok_or_else(|| format!("模块 {module} 的 entry 行无引号值"))?;
-        let (old, after) = rest
-            .split_once('"')
-            .ok_or_else(|| format!("模块 {module} 的 entry 行引号不闭合"))?;
-        if old != facts_entry {
-            return Err(format!(
-                "模块 {module} 的 entry 旧值 {old:?} 与解析事实 {facts_entry:?} 不一致（夹具读错文件？）"
-            ));
-        }
-        out.push_str(before);
-        out.push('"');
-        out.push_str(&target);
-        out.push('"');
-        out.push_str(after);
+        out.push_str(&rr3_entry_line(line, facts_entry, &target, module)?);
     }
     if n == 0 {
         return Err(format!("模块 {module} 的 manifest 无 entry 行"));
