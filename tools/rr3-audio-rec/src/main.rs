@@ -281,13 +281,19 @@ struct AudioChunk {
 /// Event 帧解析（四道门全过才 Ok，任一失败 Err 点名——与板侧 frame_recv 同款
 /// fail-closed 口径）：dst=宿主门 → payload Event 类型门 → topic 门 → 字段/b64 门。
 fn parse_audio_event(frame: &Rr3Frame) -> Result<AudioChunk, String> {
+    rr3_audio_dst(frame)?;
+    audio_chunk_fields(&audio_event_body(&frame.payload)?)
+}
+
+/// dst 门：事件帧必须寄给宿主位形。
+fn rr3_audio_dst(frame: &Rr3Frame) -> Result<(), String> {
     if frame.header.dst_task != RR3_HOST_TASK {
         return Err(format!(
             "dst_task={} 非宿主位形 {RR3_HOST_TASK}",
             frame.header.dst_task
         ));
     }
-    audio_chunk_fields(&audio_event_body(&frame.payload)?)
+    Ok(())
 }
 
 /// payload 前缀类型门 → 事件体 JSON → topic 门（失败点名原文案）。
@@ -300,10 +306,16 @@ fn audio_event_body(payload: &[u8]) -> Result<Value, String> {
 /// payload 前缀类型门 → 事件体 JSON 解析（次序与拒收文案保持原样）。
 fn rr3_event_value(payload: &[u8]) -> Result<Value, String> {
     let (ty, body) = rr3_body_split(payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+    rr3_event_type(ty)?;
+    serde_json::from_slice(&body).map_err(|e| format!("事件体非 JSON: {e}"))
+}
+
+/// payload 类型门：必须是 Event。
+fn rr3_event_type(ty: Rr3PayloadType) -> Result<(), String> {
     if ty != Rr3PayloadType::Event {
         return Err(format!("payload 类型非 Event: {ty:?}"));
     }
-    serde_json::from_slice(&body).map_err(|e| format!("事件体非 JSON: {e}"))
+    Ok(())
 }
 
 /// topic 门（失败点名原文案）。
@@ -877,11 +889,16 @@ fn rate_progress(
     frames: u64,
     watch: &WatchState,
 ) {
-    if broke || anchor.is_none() {
-        *anchor = Some((now, frames));
-    }
+    rr3_rate_anchor(anchor, broke, now, frames);
     if let Some(r) = rr3_rate_sample(*anchor, now, frames) {
         watch.rate.store(r, Ordering::Release);
+    }
+}
+
+/// 断档/重启/首片重锚（空洞不摊进分母）。
+fn rr3_rate_anchor(anchor: &mut Option<(Instant, u64)>, broke: bool, now: Instant, frames: u64) {
+    if broke || anchor.is_none() {
+        *anchor = Some((now, frames));
     }
 }
 
@@ -904,10 +921,9 @@ fn measured_rate(
     declared: Option<u32>,
 ) -> u32 {
     let nominal = declared.unwrap_or(NOMINAL_RATE_FALLBACK_HZ);
-    match anchor {
-        Some((t0, f0)) => rr3_measure_pick(t0, f0, last_frame.unwrap_or(t0), frames_total, nominal),
-        None => nominal,
-    }
+    anchor.map_or(nominal, |(t0, f0)| {
+        rr3_measure_pick(t0, f0, last_frame.unwrap_or(t0), frames_total, nominal)
+    })
 }
 
 /// 锚后实测率与 1kHz 下限：退化段（<1kHz）回板侧声明率。
@@ -943,13 +959,10 @@ fn open_handshake(device: &str, baud: u32) -> Rr3UartConn {
 
 /// 首次开口（失败即退 1，文案与旧版逐字一致）。
 fn rr3_open_uart(device: &str, baud: u32) -> Rr3UartConn {
-    match Rr3UartConn::open_with_baud(std::path::Path::new(device), baud) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("rr3-audio-rec: 开口失败 {device}: {e}");
-            std::process::exit(1);
-        }
-    }
+    Rr3UartConn::open_with_baud(std::path::Path::new(device), baud).unwrap_or_else(|e| {
+        eprintln!("rr3-audio-rec: 开口失败 {device}: {e}");
+        std::process::exit(1)
+    })
 }
 
 /// 三线程与通道面（起子产物；收兵按 reader → writer 顺序收口，见 finish_and_report）。
@@ -986,13 +999,15 @@ fn rec_spawn_threads(
     // 见 reader_run）。
     let (byte_tx, byte_rx) = mpsc::channel::<Vec<u8>>();
     let stop = Arc::new(AtomicBool::new(false));
-    let reader = {
-        let w = Arc::clone(&watch);
-        let stop = Arc::clone(&stop);
-        let dev = device.to_string();
-        let out = out_path.to_path_buf();
-        std::thread::spawn(move || reader_run(conn, byte_tx, stop, w, dev, baud, out))
-    };
+    let reader = rr3_spawn_reader(
+        conn,
+        byte_tx,
+        Arc::clone(&stop),
+        Arc::clone(&watch),
+        device,
+        baud,
+        out_path,
+    );
     RecThreads {
         tx,
         byte_rx,
@@ -1000,6 +1015,22 @@ fn rec_spawn_threads(
         writer,
         reader,
     }
+}
+
+/// 读线程起子：conn/裸字节通道/停流旗移交（静默重连与收兵 OFF 全在读侧闭环，
+/// 见 reader_run）。
+fn rr3_spawn_reader(
+    conn: Rr3UartConn,
+    byte_tx: mpsc::Sender<Vec<u8>>,
+    stop: Arc<AtomicBool>,
+    watch: Arc<WatchState>,
+    device: &str,
+    baud: u32,
+    out_path: &std::path::Path,
+) -> std::thread::JoinHandle<()> {
+    let dev = device.to_string();
+    let out = out_path.to_path_buf();
+    std::thread::spawn(move || reader_run(conn, byte_tx, stop, watch, dev, baud, out))
 }
 
 /// 看门狗线程（武装后停滞即补 wav 恢复头退 3）。
@@ -1109,16 +1140,21 @@ fn decode_frame(
 /// 任一线程异常即整进程退，不冒领成功。
 fn finish_threads(threads: RecThreads, watch: &WatchState) {
     threads.stop.store(true, Ordering::Release);
-    if threads.reader.join().is_err() {
-        eprintln!("rr3-audio-rec: 读线程异常退出");
-        std::process::exit(1);
-    }
+    rr3_join_reader(threads.reader);
     watch.armed.store(false, Ordering::Release);
     // 关通道让写线程排空收兵（逐片已 flush，无尾数据）；写线程异常即整进程退，
     // 不冒领成功。
     drop(threads.tx);
     if let Err(e) = threads.writer.join() {
         eprintln!("rr3-audio-rec: 写线程异常退出: {e:?}");
+        std::process::exit(1);
+    }
+}
+
+/// 读线程收口（异常即整进程退，不冒领成功）。
+fn rr3_join_reader(reader: std::thread::JoinHandle<()>) {
+    if reader.join().is_err() {
+        eprintln!("rr3-audio-rec: 读线程异常退出");
         std::process::exit(1);
     }
 }
@@ -1164,29 +1200,32 @@ fn rr3_finish_head(
     measured: u32,
 ) {
     let data_len = watch.disk_bytes.load(Ordering::Acquire) as u32;
-    match OpenOptions::new()
+    rr3_head_write(out_path, data_len, measured);
+    println!(
+        "[rec] ✓ {}：chunks={} gaps={} restarts={} err={} resyncs={} reconnects={} frames={} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
+        out_path.display(),
+        st.chunks,
+        st.tracker.gaps,
+        st.tracker.restarts,
+        st.errors,
+        st.resyncs,
+        watch.reconnects.load(Ordering::Acquire),
+        st.total_bytes / 4,
+        measured,
+        st.total_bytes as f64 / 4.0 / measured as f64,
+    );
+}
+
+/// 占位头改写为实测真头（写失败即整进程退）。
+fn rr3_head_write(out_path: &std::path::Path, data_len: u32, measured: u32) {
+    OpenOptions::new()
         .write(true)
         .open(out_path)
         .and_then(|f| f.write_all_at(&wav_header(data_len, 2, measured, 16), 0))
-    {
-        Ok(()) => println!(
-            "[rec] ✓ {}：chunks={} gaps={} restarts={} err={} resyncs={} reconnects={} frames={} rate={}Hz（实测连续段）dur≈{:.1}s size={data_len}B",
-            out_path.display(),
-            st.chunks,
-            st.tracker.gaps,
-            st.tracker.restarts,
-            st.errors,
-            st.resyncs,
-            watch.reconnects.load(Ordering::Acquire),
-            st.total_bytes / 4,
-            measured,
-            st.total_bytes as f64 / 4.0 / measured as f64,
-        ),
-        Err(e) => {
+        .unwrap_or_else(|e| {
             eprintln!("rr3-audio-rec: wav 补头失败 {}: {e}", out_path.display());
-            std::process::exit(1);
-        }
-    }
+            std::process::exit(1)
+        });
 }
 
 fn main() {

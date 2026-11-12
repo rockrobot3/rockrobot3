@@ -248,13 +248,19 @@ fn rr3_chain_doa_ok(obs: &Rr3ChainObs) -> Result<i64, String> {
     let deg = obs
         .doa_deg
         .ok_or("判向档缺失：onset 没携 doa（注入没生效或链路没走通）")?;
+    rr3_chain_deg_ok(deg)?;
+    rr3_chain_left(obs.doa_bin.as_deref())?;
+    Ok(deg)
+}
+
+/// 判向档容差门：落注入值的 ±2° 内。
+fn rr3_chain_deg_ok(deg: i64) -> Result<(), String> {
     if !(-62..=-58).contains(&deg) {
         return Err(format!(
             "注入 {RR3_CHAIN_DOA_DEG}° 的 ILD 反演必须落 ±2° 容差: {deg}°"
         ));
     }
-    rr3_chain_left(obs.doa_bin.as_deref())?;
-    Ok(deg)
+    Ok(())
 }
 
 /// 分档判定：必须落左档（|deg| > 30 的注入档）。
@@ -809,12 +815,18 @@ fn rr3_chain_turn(ctx: &Rr3ChainCtx) -> Result<String, String> {
         crate::brain::RR3_BRAIN_TURN_MARK,
         RR3_CHAIN_READY_DEADLINE,
     )?;
+    rr3_chain_acts(&turn)?;
+    Ok(turn)
+}
+
+/// 轮次行动作数门：词表左档应产一条 servo 动作。
+fn rr3_chain_acts(turn: &str) -> Result<(), String> {
     if !turn.contains("actions=1") {
         return Err(format!(
             "brain 轮次行的动作数不是 1（词表左档应产一条 servo 动作）: {turn}"
         ));
     }
-    Ok(turn)
+    Ok(())
 }
 
 /// interact 播放行：必须携「talk 挂起」（表情机没接管即红）。

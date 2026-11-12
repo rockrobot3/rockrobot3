@@ -570,15 +570,24 @@ pub fn rr3_wait_modules(
             return Ok(());
         }
         if t0.elapsed() >= deadline {
-            return Err(format!(
-                "超时（{deadline:?}）：仍未达成 {:?}，最后一次快照 {rows:?}",
-                want.iter()
-                    .map(|(n, p)| format!("{n}/{p}"))
-                    .collect::<Vec<_>>()
-            ));
+            return Err(rr3_wait_timeout(want, &rows, deadline));
         }
         std::thread::sleep(Duration::from_millis(150));
     }
+}
+
+/// 超时文案：点名仍缺谁与最后一次快照。
+fn rr3_wait_timeout(
+    want: &[(&str, &str)],
+    rows: &[(String, u64, String)],
+    deadline: Duration,
+) -> String {
+    format!(
+        "超时（{deadline:?}）：仍未达成 {:?}，最后一次快照 {rows:?}",
+        want.iter()
+            .map(|(n, p)| format!("{n}/{p}"))
+            .collect::<Vec<_>>()
+    )
 }
 
 /// 巡检报告的分节标题（纯函数：报告形状在这里定，main 只负责打印）。

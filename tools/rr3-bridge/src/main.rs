@@ -89,11 +89,17 @@ fn rr3_bridge_arg(
     socket: &mut Option<PathBuf>,
     baud: &mut u32,
 ) -> Result<(), String> {
+    rr3_bridge_flag(flag)?;
+    let v = rr3_arg_value(flag, args, i)?;
+    rr3_bridge_set(flag, v, uart, socket, baud)
+}
+
+/// 旗标白名单门（未知旗标即错）。
+fn rr3_bridge_flag(flag: &str) -> Result<(), String> {
     if !matches!(flag, "--uart" | "--socket" | "--baud") {
         return Err(format!("未知参数 {flag}（可用：--uart --socket --baud）"));
     }
-    let v = rr3_arg_value(flag, args, i)?;
-    rr3_bridge_set(flag, v, uart, socket, baud)
+    Ok(())
 }
 
 /// 已校验旗标的值落位（`--uart` / `--socket` / `--baud`）。
@@ -121,18 +127,30 @@ fn rr3_bridge_config(
 ) -> Result<link::BridgeConfig, String> {
     let uart = uart.ok_or("缺 --uart（UART 设备路径）")?;
     let socket = socket.ok_or("缺 --socket（rrd 套接字路径）")?;
+    rr3_bridge_baud(baud)?;
+    Ok(link::BridgeConfig { uart, baud, socket })
+}
+
+/// 档位门（三档白名单真值单点在 rr-ipc，桥不自持档位清单）。
+fn rr3_bridge_baud(baud: u32) -> Result<(), String> {
     rr_ipc::transport::uart::rr3_uart_baud_speed(baud)
         .map_err(|e| format!("--baud {baud} 不可用: {e}"))?;
-    Ok(link::BridgeConfig { uart, baud, socket })
+    Ok(())
 }
 
 /// 取值：缺值或疑似开关一律拒（静默忽略拼写错误是脚本工具的第一错法）。
 fn rr3_arg_value<'a>(flag: &str, args: &'a [String], i: usize) -> Result<&'a str, String> {
     let v = args.get(i + 1).ok_or_else(|| format!("{flag} 缺参数"))?;
+    rr3_arg_switch_ok(flag, v)?;
+    Ok(v)
+}
+
+/// 值不像开关（漏值/拼写错误都点名拒）。
+fn rr3_arg_switch_ok(flag: &str, v: &str) -> Result<(), String> {
     if v.starts_with('-') {
         return Err(format!("{flag} 缺参数：收到疑似开关的 {v}"));
     }
-    Ok(v)
+    Ok(())
 }
 
 /// 波特率数字面（档位白名单另在 parse_args 末尾统一裁决）。

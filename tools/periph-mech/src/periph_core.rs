@@ -15,12 +15,18 @@ pub fn rr3_axis_check(name: &str, lo: u32, hi: u32, center: u32, deg: u32) -> Re
     if deg > 180 {
         return Err(format!("角度超范围 0-180: {deg}"));
     }
+    rr3_axis_limit(name, lo, hi, center, deg)?;
+    Ok(deg)
+}
+
+/// 轴行程门：落在 `[lo, hi]` 之外点名拒收（`center` 只进文案）。
+fn rr3_axis_limit(name: &str, lo: u32, hi: u32, center: u32, deg: u32) -> Result<(), String> {
     if !(lo..=hi).contains(&deg) {
         return Err(format!(
             "{name} 轴超出行程 [{lo}, {hi}]（中位 {center}°）: {deg}"
         ));
     }
-    Ok(deg)
+    Ok(())
 }
 
 /// 角度 → duty ticks（线性 0–180 ↦ duty_min–duty_max；入参须已过行程校验）。
