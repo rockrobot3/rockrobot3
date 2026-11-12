@@ -111,6 +111,22 @@ pi-periph-base `line_round`（24→16，OLED/FACE/SERVO 三臂抽 `oled_text`/`f
 `servo_pair`）。宿主面全量 clippy+测试绿；esp 面按 ④b 口径 fmt 过（本地不编译，
 行为等价逐分支核对）。基线 `cc_max_fn` 26→21（真降，红账只降不升兑现）。
 
+**2026-11-10 远端 CI 三红根因收口（P0-3 连带，夹具/CI 层零生产码改动）**：
+远端回执考古红至至少 12 run 连败、早于本会话——P0-3（e392d70）消除"漏 env 静默
+落 sim"后，部署真值 hal_backend=linux 直透无硬件环境，三个演练载体全部翻红：
+① sim-assemble——rr3-sim 只给 rrd 设了 sim env，supervisor 按装配单注入覆盖之；
+修 = 沙箱装配单副本 sim 变换（`rr3_asm_sim_profile_text`：hal_backend→sim +
+audio/servo/display 专面摘除，改写后重解析复核，仓源装配单零改，与 --chain 同语义）。
+② distro-smoke——双根因：仍按批N32 已删除的 Python brain pkg 树打包（③ 即爆）+
+容器内 linux 后端不可兑现；修 = brain 装机面改 Rust 形（bin+manifest+config，Python
+shim 断言与 python3 apt 安装撤）+ ⑥ 前装机 distro.toml 副本 sed 变换 sim（变换前后
+双断言）+ RR3_BRAIN_CLOUD=mock。③ matrix——job 缺 `docker/setup-qemu-action`，
+① 的 ipct003.sh arm64 容器真跑（--platform linux/arm64）无 binfmt 时失败非 SKIP
+被误判"对拍破裂"；修 = 补一步与 ipct003 job 同源。本地复现-修复-复绿闭环：
+sim-assemble 六模块 running + denied_publish=0、sim 27 单测绿、matrix FAIL=0。
+教训入册：**改"隐式缺省→显式数据"类真值收紧时，必须全量清点每个无硬件消费
+载体（演练夹具/容器冒烟/CI 矩阵），否则门禁绿、真装配红**。
+
 **2026-11-10 第六轮跨平台静态审计（四平台三方对账，[审计文档](dev/0.0.8静态生产审计-第六轮-跨平台-2026-11-10.md)）**：
 真值漂移一处——esp32s3 平台表 UART2 conflict 集仍钉 17/18，真板订正（85bbcaa 迁
 41/42）只同步了 profile 键值漏了契约表，已随真值修（4501b8c）；mkmodule fmt 漂移
