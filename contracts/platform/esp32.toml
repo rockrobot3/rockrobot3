@@ -61,8 +61,8 @@ channels = 0
 # 补登记的顺手动作。且 I2S 不是"通道可分配"资源——它的三个信号脚由 board 具名
 # 装配直给（esp-idf-hal 具名类型，§4.5 生成物表第 3 行），不进 profiles `[[pin]]`
 # 角色域（无 role 消费者、无 (controller, channel) 上界判据、无 ④ 互斥需求）。
-# 故音频面的事实真值点维持在 pins_classic.rs + [controller_wordform] 之外的具名
-# 构造面，本表如实不抄第二份；待 I2S 成为可分配角色（如多路音频/编解码器选型）
+# 故音频面的事实真值点维持在 pins_classic.rs + 词形段之外的具名构造面，
+# 本表如实不抄第二份；待 I2S 成为可分配角色（如多路音频/编解码器选型）
 # 时，按契约级流程扩 kind 词域 + 落 [[controller]] 与 [[conflict]] 再进本表。
 # 审计存照：docs/process/dev/0.0.8静态生产审计-第七轮-平台表I2S裁定-2026-11-12.md。
 
