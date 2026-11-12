@@ -408,20 +408,43 @@ pub fn rr3_motion_allowed(
     calibrated: bool,
     motion: Rr3ActMotion,
 ) -> Result<(), Rr3HalError> {
-    let refuse = |why: &str| Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(why)));
     match motion {
         Rr3ActMotion::Jog => Ok(()),
-        Rr3ActMotion::Auto if calibrated => Ok(()),
-        Rr3ActMotion::Auto => refuse("未标定轴不得自动（只许点动，§6 硬约束）"),
-        Rr3ActMotion::CalibOpenLoop if hard_stop == Rr3ActHardStop::Unknown => {
-            refuse("hard_stop=unknown：路线 C 自动段禁用（§6 护栏）")
-        }
-        Rr3ActMotion::CalibOpenLoop => Ok(()),
-        Rr3ActMotion::CalibStallSearch if hard_stop != Rr3ActHardStop::Yes => {
-            refuse("hard_stop≠yes：路线 B 禁用（unknown 未标定挡块事实 / no 无挡块可找）")
-        }
-        Rr3ActMotion::CalibStallSearch => Ok(()),
+        Rr3ActMotion::Auto => rr3_motion_auto(calibrated),
+        Rr3ActMotion::CalibOpenLoop => rr3_motion_calib(hard_stop),
+        Rr3ActMotion::CalibStallSearch => rr3_motion_stall(hard_stop),
     }
+}
+
+/// 拒收回错（文案带动作形态与判据名，与板侧 `axis_check` 越域回错同形）。
+fn rr3_motion_refuse(why: &str) -> Result<(), Rr3HalError> {
+    Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(why)))
+}
+
+/// 自动动作：未标定一律拒。
+fn rr3_motion_auto(calibrated: bool) -> Result<(), Rr3HalError> {
+    if calibrated {
+        return Ok(());
+    }
+    rr3_motion_refuse("未标定轴不得自动（只许点动，§6 硬约束）")
+}
+
+/// 路线 C 自动段：hard_stop=unknown 拒。
+fn rr3_motion_calib(hard_stop: Rr3ActHardStop) -> Result<(), Rr3HalError> {
+    if hard_stop == Rr3ActHardStop::Unknown {
+        return rr3_motion_refuse("hard_stop=unknown：路线 C 自动段禁用（§6 护栏）");
+    }
+    Ok(())
+}
+
+/// 路线 B（电流找挡块）：hard_stop≠yes 拒（unknown 未标定挡块事实 / no 无挡块可找）。
+fn rr3_motion_stall(hard_stop: Rr3ActHardStop) -> Result<(), Rr3HalError> {
+    if hard_stop != Rr3ActHardStop::Yes {
+        return rr3_motion_refuse(
+            "hard_stop≠yes：路线 B 禁用（unknown 未标定挡块事实 / no 无挡块可找）",
+        );
+    }
+    Ok(())
 }
 
 /// 执行件动作面（批N3，全案 §9 N3——"关节成为对象"的契约承载）。

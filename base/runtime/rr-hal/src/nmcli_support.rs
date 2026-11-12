@@ -90,29 +90,57 @@ pub(crate) fn rr3_nm_read_capped(s: &mut impl Read, deadline: Instant) -> Vec<u8
 /// 不管字节量——2026-11-09 静态审计）。
 const RR3_NM_OUT_CAP: usize = 1 << 20;
 
+/// 读循环终止条件：到点或到字节帽。
+fn rr3_nm_stop(out: &[u8], deadline: Instant) -> bool {
+    Instant::now() >= deadline || out.len() >= RR3_NM_OUT_CAP
+}
+
+/// 一次读错误后的处置：WouldBlock 睡一轮重试、Interrupted 立刻重试、其余终止。
+fn rr3_nm_retry(kind: std::io::ErrorKind) -> bool {
+    match kind {
+        std::io::ErrorKind::WouldBlock => {
+            std::thread::sleep(RR3_NM_POLL);
+            true
+        }
+        std::io::ErrorKind::Interrupted => true,
+        _ => false,
+    }
+}
+
 /// 两平台共用的读循环主体：EOF/到点/超帽/错误四出口。超帽截断返回，调用方按
 /// 自身的解析/报错路径处理残文（不在这里判业务语义）。
 fn capped_loop(s: &mut impl Read, deadline: Instant) -> Vec<u8> {
     let mut out = Vec::new();
     let mut buf = [0u8; 4096];
-    loop {
-        if Instant::now() >= deadline || out.len() >= RR3_NM_OUT_CAP {
-            break;
-        }
+    while !rr3_nm_stop(&out, deadline) {
         match s.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
                 let room = RR3_NM_OUT_CAP - out.len();
                 out.extend_from_slice(&buf[..n.min(room)]);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(RR3_NM_POLL);
+            Err(e) => {
+                if !rr3_nm_retry(e.kind()) {
+                    break;
+                }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => break,
         }
     }
     out
+}
+
+/// 凭据键判定：`psk` / `password` / `*.psk`（裸键与等号式键同一判据）。
+fn rr3_nm_secret(key: &str) -> bool {
+    key == "psk" || key == "password" || key.ends_with(".psk")
+}
+
+/// 等号形式单个参数：凭据键值打码，其余原样。
+fn rr3_nm_pair(a: &str, k: &str) -> String {
+    if rr3_nm_secret(k) {
+        format!("{k}=***")
+    } else {
+        a.to_string()
+    }
 }
 
 /// 错误文案里的 argv 脱敏：Wi-Fi 凭据只以 `psk`/`password` 键的下一项或
@@ -127,17 +155,11 @@ fn rr3_nm_redact(args: &[&str]) -> String {
             continue;
         }
         if let Some((k, _)) = a.split_once('=') {
-            if k == "psk" || k == "password" || k.ends_with(".psk") {
-                out.push(format!("{k}=***"));
-            } else {
-                out.push((*a).to_string());
-            }
+            out.push(rr3_nm_pair(a, k));
             continue;
         }
         out.push((*a).to_string());
-        if *a == "psk" || *a == "password" || a.ends_with(".psk") {
-            mask_next = true;
-        }
+        mask_next = rr3_nm_secret(a);
     }
     out.join(" ")
 }
@@ -165,30 +187,7 @@ pub(crate) fn rr3_nm_run(
             )))
         })?;
     let deadline = Instant::now() + timeout;
-    let mut timed_out = false;
-    let mut status: Option<std::process::ExitStatus> = None;
-    loop {
-        match child.try_wait() {
-            Ok(Some(st)) => {
-                status = Some(st);
-                break;
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    timed_out = true;
-                    break;
-                }
-                std::thread::sleep(RR3_NM_POLL);
-            }
-            Err(e) => {
-                return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                    &format!("nmcli 等待失败: {e}"),
-                )))
-            }
-        }
-    }
+    let (status, timed_out) = rr3_nm_wait(&mut child, deadline)?;
     if timed_out {
         return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
             &format!(
@@ -221,6 +220,31 @@ pub(crate) fn rr3_nm_run(
         )));
     }
     Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+/// 等子进程退出：到点 kill 并标记超时（`(status, timed_out)`），等待失败即回错。
+fn rr3_nm_wait(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Result<(Option<std::process::ExitStatus>, bool), Rr3HalError> {
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => return Ok((Some(st), false)),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Ok((None, true));
+                }
+                std::thread::sleep(RR3_NM_POLL);
+            }
+            Err(e) => {
+                return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                    &format!("nmcli 等待失败: {e}"),
+                )))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

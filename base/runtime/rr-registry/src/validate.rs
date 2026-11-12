@@ -70,24 +70,48 @@ fn rr3_semver_ok(s: &str) -> bool {
 /// 单条规则检查（上下文无关规则）。`own_topic` 需 manifest.name，由
 /// `rr3_manifest_gate` 特判，不进这里。
 pub fn rr3_registry_check(rule: &str, value: &str) -> Vec<String> {
-    let pass = match rule {
-        "none" => true,
-        "module_name" => rr3_lower_alpha(value.strip_prefix(RR3_TOPIC_HEAD).unwrap_or("")),
-        "semver" => rr3_semver_ok(value),
-        "type" | "lang" | "restart_policy" => rr3_rule_list(rule)
-            .unwrap_or_default()
-            .iter()
-            .any(|a| a == value),
-        "capability" => rr3_capability_shape(value),
+    match rr3_rule_pass(rule, value) {
+        Some(true) => Vec::new(),
+        Some(false) => vec![rr3_rule_err(rule, value)],
+        None => vec![format!("未知规则名（schema 与代码不同步）: {rule}")],
+    }
+}
+
+/// 规则裁决总入口：词形类（[`rr3_rule_shape`]）先查，未命中再查枚举词表；
+/// `None` = 规则名不在册（调用方点名）。
+fn rr3_rule_pass(rule: &str, value: &str) -> Option<bool> {
+    if let Some(ok) = rr3_rule_shape(rule, value) {
+        return Some(ok);
+    }
+    rr3_rule_enum(rule, value)
+}
+
+/// 词形类规则（值自身判据，与词表无关）。
+fn rr3_rule_shape(rule: &str, value: &str) -> Option<bool> {
+    match rule {
+        "module_name" => Some(rr3_lower_alpha(
+            value.strip_prefix(RR3_TOPIC_HEAD).unwrap_or(""),
+        )),
+        "semver" => Some(rr3_semver_ok(value)),
+        "capability" => Some(rr3_capability_shape(value)),
         // 原子件名（atom.schema.toml，0.0.5 批B①）：^[a-z][a-z_]*$，复用 capability 段规则
-        "atom_name" => rr3_lower_us(value),
-        "topic" => rr3_topic_shape_ok(value),
-        other => return vec![format!("未知规则名（schema 与代码不同步）: {other}")],
-    };
-    if pass {
-        Vec::new()
-    } else {
-        vec![rr3_rule_err(rule, value)]
+        "atom_name" => Some(rr3_lower_us(value)),
+        "topic" => Some(rr3_topic_shape_ok(value)),
+        _ => None,
+    }
+}
+
+/// 枚举类规则（`[rules]` 词表成员检查）；`none` 恒放行。
+fn rr3_rule_enum(rule: &str, value: &str) -> Option<bool> {
+    match rule {
+        "none" => Some(true),
+        "type" | "lang" | "restart_policy" => Some(
+            rr3_rule_list(rule)
+                .unwrap_or_default()
+                .iter()
+                .any(|a| a == value),
+        ),
+        _ => None,
     }
 }
 
@@ -143,28 +167,37 @@ pub fn rr3_no_unknown_keys(
         return errs;
     };
     for (name, value) in table {
-        if !allow.contains_key(name.as_str()) {
-            if top_scalars.contains(name.as_str()) {
-                continue; // 顶层标量键（契约登记在案），不做段内对账
-            }
+        if let Some(keys) = allow.get(name.as_str()) {
+            rr3_chk_section(name, value, keys, what, &mut errs);
+        } else if !top_scalars.contains(name.as_str()) {
+            // 顶层标量键（契约登记在案）不做段内对账，其余未登记段即红
             errs.push(format!(
                 "{what} 含未登记段 [{name}]（schema_version 契约无此段——typo 或契约未演进）"
             ));
-            continue;
-        }
-        let Some(section) = value.as_table() else {
-            errs.push(format!("{what} 段 [{name}] 必须是表，实际为 {value:?}"));
-            continue;
-        };
-        for k in section.keys() {
-            if !allow[name.as_str()].contains(k.as_str()) {
-                errs.push(format!(
-                    "{what} 含未登记字段 {name}.{k}（typo 或契约未演进——未知字段不报错即静默丢语义）"
-                ));
-            }
         }
     }
     errs
+}
+
+/// 单个段的形状与段内键对账（段必须是表，键必须在规格树内）。
+fn rr3_chk_section(
+    name: &str,
+    value: &Value,
+    keys: &std::collections::BTreeSet<&str>,
+    what: &str,
+    errs: &mut Vec<String>,
+) {
+    let Some(section) = value.as_table() else {
+        errs.push(format!("{what} 段 [{name}] 必须是表，实际为 {value:?}"));
+        return;
+    };
+    for k in section.keys() {
+        if !keys.contains(k.as_str()) {
+            errs.push(format!(
+                "{what} 含未登记字段 {name}.{k}（typo 或契约未演进——未知字段不报错即静默丢语义）"
+            ));
+        }
+    }
 }
 
 /// 从 manifest 路径向上定位 `contracts/topics.toml`
@@ -305,20 +338,23 @@ fn rr3_kind_ok(
     errs: &mut Vec<String>,
 ) -> bool {
     match spec.kind.as_str() {
-        "string" => match value.as_str() {
-            Some(s) => {
-                if let Some(rule) = &spec.rule {
-                    errs.extend(rr3_registry_check(rule, s));
-                }
-                true
-            }
-            None => false,
-        },
+        "string" => rr3_kind_str(spec, value, errs),
         "bool" => value.as_bool().is_some(),
         "int" => value.as_integer().is_some(),
         "list" => rr3_chk_list(spec, value, self_name, topics, errs),
         other => panic!("schema 未知 kind {other}（契约与代码不同步）"),
     }
+}
+
+/// 字符串字段：规则在场则下沉到 `rr3_registry_check`，非串一律不合法。
+fn rr3_kind_str(spec: &Rr3FieldSpec, value: &Value, errs: &mut Vec<String>) -> bool {
+    let Some(s) = value.as_str() else {
+        return false;
+    };
+    if let Some(rule) = &spec.rule {
+        errs.extend(rr3_registry_check(rule, s));
+    }
+    true
 }
 
 /// 列表字段：无规则只看数组形状；有规则逐项过 `rr3_chk_item`。非字符串项必须
@@ -365,24 +401,40 @@ fn rr3_chk_item(
         return;
     }
     errs.extend(rr3_registry_check("topic", s));
+    rr3_chk_own_prefix(s, self_name, errs);
+    rr3_chk_declared(spec, s, topics, errs);
+}
+
+/// own_topic 的前缀归属：主题必须以 `<manifest.name>/` 开头。
+fn rr3_chk_own_prefix(s: &str, self_name: &str, errs: &mut Vec<String>) {
     let want = format!("{self_name}/");
     if !self_name.is_empty() && !s.starts_with(&want) {
         errs.push(format!("越权主题 {s}（前缀必须是 {want}）"));
     }
+}
+
+/// 申报面注册与退役：publishes/rpc.exposes 必须在主题集注册、不得是 retired。
+fn rr3_chk_declared(
+    spec: &Rr3FieldSpec,
+    s: &str,
+    topics: &crate::topics::Rr3TopicSet,
+    errs: &mut Vec<String>,
+) {
     // F2：events.publishes 与 rpc.exposes 都必须在主题集
     // （contracts/topics.toml，CI 检查③）注册，未注册的 RPC 名不再放行。
     // F3：主题集为空的内核入口已由两个包装 fail-closed（rr3_topic_
     // is_empty 护栏）——空注册表不得让成员检查被空洞满足。
     let check_registered = spec.path == "events.publishes" || spec.path == "rpc.exposes";
-    if check_registered && !topics.rr3_topic_contains(s) {
+    if !check_registered {
+        return;
+    }
+    if !topics.rr3_topic_contains(s) {
         errs.push(format!("未注册主题 {s}"));
+        return;
     }
     // C14 门改判（0.0.5 批J）：retired 主题 = 号位保留、义务解除，
     // 申报发布/暴露即拒（ADR-0019 修订 2 ②）。
-    if check_registered
-        && topics.rr3_topic_contains(s)
-        && topics.rr3_topic_status(s).as_deref() == Some("retired")
-    {
+    if topics.rr3_topic_status(s).as_deref() == Some("retired") {
         errs.push(format!(
             "retired 主题 {s} 不得被申报（发布/暴露）——号位保留、义务解除（ADR-0019 修订 2 ②）"
         ));
@@ -457,28 +509,56 @@ pub fn rr3_topics_chk(text: &str, known_owners: &[String]) -> Vec<String> {
     }
 
     for entry in topics.into_iter().flatten() {
-        let Some(t) = entry.as_table() else { continue };
-        let Some(name) = t.get("name").and_then(Value::as_str) else {
-            errs.push("topic 缺少 name".to_string());
-            continue;
-        };
-        let owner = t.get("owner").and_then(Value::as_str).unwrap_or("");
-        let kind = t.get("kind").and_then(Value::as_str).unwrap_or("");
-
-        errs.extend(rr3_registry_check("topic", name));
-        if !known_owners.iter().any(|o| o == owner) && !declared_owners.iter().any(|o| o == owner) {
-            errs.push(format!("topic {name} 的 owner 未登记: {owner}"));
-        } else if !name.starts_with(&format!("{owner}/"))
-            || name.split('/').next().unwrap_or("") != owner
-        {
-            // 前缀归属 + owner==首段 双重不变量（二者不等价时也要报错）
-            errs.push(format!("topic {name} 不在 owner {owner} 命名空间内"));
-        }
-        if !allowed_kinds.iter().any(|k| k == kind) {
-            errs.push(format!("topic {name} 的 kind 非法: {kind}"));
-        }
+        rr3_topic_entry(
+            entry,
+            known_owners,
+            &declared_owners,
+            &allowed_kinds,
+            &mut errs,
+        );
     }
     errs
+}
+
+/// 单条 `[[topic]]`：name 必填 → 主题形制 → owner 归属 → kind 在册。
+fn rr3_topic_entry(
+    entry: &Value,
+    known_owners: &[String],
+    declared_owners: &[String],
+    allowed_kinds: &[String],
+    errs: &mut Vec<String>,
+) {
+    let Some(t) = entry.as_table() else { return };
+    let Some(name) = t.get("name").and_then(Value::as_str) else {
+        errs.push("topic 缺少 name".to_string());
+        return;
+    };
+    let owner = t.get("owner").and_then(Value::as_str).unwrap_or("");
+    let kind = t.get("kind").and_then(Value::as_str).unwrap_or("");
+
+    errs.extend(rr3_registry_check("topic", name));
+    rr3_topic_owner_ok(name, owner, known_owners, declared_owners, errs);
+    if !allowed_kinds.iter().any(|k| k == kind) {
+        errs.push(format!("topic {name} 的 kind 非法: {kind}"));
+    }
+}
+
+/// owner 归属：登记（调用方白名单或本表 [[owner]]）+ 前缀命名空间双重不变量。
+fn rr3_topic_owner_ok(
+    name: &str,
+    owner: &str,
+    known_owners: &[String],
+    declared_owners: &[String],
+    errs: &mut Vec<String>,
+) {
+    if !known_owners.iter().any(|o| o == owner) && !declared_owners.iter().any(|o| o == owner) {
+        errs.push(format!("topic {name} 的 owner 未登记: {owner}"));
+    } else if !name.starts_with(&format!("{owner}/"))
+        || name.split('/').next().unwrap_or("") != owner
+    {
+        // 前缀归属 + owner==首段 双重不变量（二者不等价时也要报错）
+        errs.push(format!("topic {name} 不在 owner {owner} 命名空间内"));
+    }
 }
 
 #[cfg(test)]

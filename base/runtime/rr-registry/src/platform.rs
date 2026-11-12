@@ -205,20 +205,7 @@ fn rr3_plat_name(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
 /// `[[controller]]` 段：先逐条收集再建映射，重复名在此点名（词表一名一条）。
 fn rr3_plat_ctl(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     let mut entries: Vec<(String, String, i64)> = Vec::new();
-    match t.get("controller") {
-        Some(Value::Array(items)) if !items.is_empty() => {
-            for (i, item) in items.iter().enumerate() {
-                rr3_ctl_item(item, i, &mut entries, errs);
-            }
-        }
-        Some(Value::Array(_)) => errs.push(
-            "平台表 [[controller]] 为空（在册控制器词表为空 = ⑧-b 无键空间可判，词表事故）".into(),
-        ),
-        Some(other) => errs.push(format!(
-            "平台表 controller 应为数组（[[controller]]），收到 {other:?}"
-        )),
-        None => errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into()),
-    }
+    rr3_ctl_collect(t, &mut entries, errs);
     for (n, k, ch) in entries {
         match table.controllers.entry(n) {
             std::collections::btree_map::Entry::Occupied(e) => {
@@ -231,6 +218,28 @@ fn rr3_plat_ctl(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<St
                 });
             }
         }
+    }
+}
+
+/// `[[controller]]` 数组形状与逐条解析（空表 = 词表事故，缺段/非数组分述点名）。
+fn rr3_ctl_collect(
+    t: &toml::Table,
+    entries: &mut Vec<(String, String, i64)>,
+    errs: &mut Vec<String>,
+) {
+    match t.get("controller") {
+        Some(Value::Array(items)) if !items.is_empty() => {
+            for (i, item) in items.iter().enumerate() {
+                rr3_ctl_item(item, i, entries, errs);
+            }
+        }
+        Some(Value::Array(_)) => errs.push(
+            "平台表 [[controller]] 为空（在册控制器词表为空 = ⑧-b 无键空间可判，词表事故）".into(),
+        ),
+        Some(other) => errs.push(format!(
+            "平台表 controller 应为数组（[[controller]]），收到 {other:?}"
+        )),
+        None => errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into()),
     }
 }
 
@@ -321,10 +330,13 @@ fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
     match t.get("capabilities") {
         Some(Value::Table(caps)) => {
             for k in caps.keys() {
-                if k != "adc_pins"
-                    && k != "input_only_pins"
-                    && k != "no_open_drain"
-                    && k != "output_capable_pins"
+                if ![
+                    "adc_pins",
+                    "input_only_pins",
+                    "no_open_drain",
+                    "output_capable_pins",
+                ]
+                .contains(&k.as_str())
                 {
                     errs.push(format!(
                         "[capabilities] 未知键 {k}（只认 adc_pins / input_only_pins / no_open_drain / output_capable_pins）"
@@ -451,7 +463,7 @@ fn rr3_conf_item(
 /// 键词表核：只认 group / pins / controllers / why（其余逐键点名）。
 fn rr3_conf_keys(c: &toml::Table, i: usize, errs: &mut Vec<String>) {
     for k in c.keys() {
-        if k != "group" && k != "pins" && k != "controllers" && k != "why" {
+        if !["group", "pins", "controllers", "why"].contains(&k.as_str()) {
             errs.push(format!(
                 "conflict[{i}] 未知键 {k}（只认 group / pins / controllers / why）"
             ));
@@ -579,24 +591,7 @@ fn rr3_plat_cons(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
 
 /// 单条 construction：三元键（controller/role 非空、controller 在册）+ 非空路径。
 fn rr3_cons_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    let segs: Vec<&str> = k.split(':').collect();
-    if segs.len() != 3 {
-        errs.push(format!(
-            "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
-        ));
-        return;
-    }
-    if segs[0].is_empty() || segs[1].is_empty() {
-        errs.push(format!(
-            "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
-        ));
-        return;
-    }
-    if !table.controllers.contains_key(segs[0]) {
-        errs.push(format!(
-            "construction 键 \"{k}\" 的 controller 段 {} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）",
-            segs[0]
-        ));
+    if !rr3_cons_key(k, table, errs) {
         return;
     }
     match v.as_str() {
@@ -608,6 +603,32 @@ fn rr3_cons_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Ve
             "construction[\"{k}\"] 应为字符串（平台侧构造路径，§4.5），收到 {v:?}"
         )),
     }
+}
+
+/// 三元键形状与在册性：`controller:role:instance`，前两段非空且 controller 在册。
+/// 返回 false = 该键已拒，不登记。
+fn rr3_cons_key(k: &str, table: &Rr3PlatformTable, errs: &mut Vec<String>) -> bool {
+    let segs: Vec<&str> = k.split(':').collect();
+    if segs.len() != 3 {
+        errs.push(format!(
+            "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
+        ));
+        return false;
+    }
+    if segs[0].is_empty() || segs[1].is_empty() {
+        errs.push(format!(
+            "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
+        ));
+        return false;
+    }
+    if !table.controllers.contains_key(segs[0]) {
+        errs.push(format!(
+            "construction 键 \"{k}\" 的 controller 段 {} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）",
+            segs[0]
+        ));
+        return false;
+    }
+    true
 }
 
 /// `[controller_wordform]` 段：封闭四键、值 = 非空前缀；空表 = 显式无词形派生面。

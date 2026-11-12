@@ -91,28 +91,36 @@ pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
 /// value 为一行双引号文本（内部不许出现双引号）；六键齐、缺一红、未知键红。
 fn rr3_evidence_head(text: &str) -> Result<Vec<(&str, &str)>, String> {
     let mut lines = text.lines();
-    match lines.next() {
-        Some(l) if l.trim() == "+++" => {}
-        _ => return Err("首行必须是 +++（frontmatter 定界）".to_string()),
+    rr3_ev_open(lines.next())?;
+    let fields = rr3_ev_fields(lines)?;
+    rr3_ev_required(&fields)?;
+    Ok(fields)
+}
+
+/// 首行定界：必须是 `+++`。
+fn rr3_ev_open(first: Option<&str>) -> Result<(), String> {
+    match first {
+        Some(l) if l.trim() == "+++" => Ok(()),
+        _ => Err("首行必须是 +++（frontmatter 定界）".to_string()),
     }
+}
+
+/// 收界前逐行取字段（空行跳过，收界 `+++` 即返回）；缺收界即红。
+fn rr3_ev_fields<'a>(
+    lines: impl Iterator<Item = &'a str>,
+) -> Result<Vec<(&'a str, &'a str)>, String> {
     let mut fields: Vec<(&str, &str)> = Vec::new();
-    let mut closed = false;
     for raw in lines {
         let line = raw.trim();
         if line == "+++" {
-            closed = true;
-            break;
+            return Ok(fields);
         }
         if line.is_empty() {
             continue;
         }
         fields.push(rr3_ev_field(line)?);
     }
-    if !closed {
-        return Err("frontmatter 缺收界 +++".to_string());
-    }
-    rr3_ev_required(&fields)?;
-    Ok(fields)
+    Err("frontmatter 缺收界 +++".to_string())
 }
 
 /// 单字段行：`key = "一行文本"`——键在册、值双引号包一行、值内不许再出现双引号
