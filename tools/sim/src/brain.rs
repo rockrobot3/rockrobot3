@@ -574,11 +574,8 @@ pub(crate) fn wait_log_contains(
     let t0 = Instant::now();
     let mut seen = String::new();
     while t0.elapsed() < deadline {
-        if let Ok(s) = std::fs::read_to_string(path) {
-            if let Some(line) = s.lines().find(|l| l.contains(needle)) {
-                return Ok(line.to_string());
-            }
-            seen = s;
+        if let Some(line) = rr3_log_probe(path, needle, &mut seen) {
+            return Ok(line);
         }
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -594,6 +591,19 @@ pub(crate) fn wait_log_contains(
     Err(format!(
         "超时（{deadline:?}）：日志 {path:?} 未出现「{needle}」\n日志尾部:\n{tail}"
     ))
+}
+
+/// 日志里首个含 `needle` 的行（无则 None）。
+fn rr3_log_find(s: &str, needle: &str) -> Option<String> {
+    s.lines().find(|l| l.contains(needle)).map(str::to_string)
+}
+
+/// 读一次日志并找 needle；未命中时把最新全文存进 `seen`（超时尾部用）。
+fn rr3_log_probe(path: &Path, needle: &str, seen: &mut String) -> Option<String> {
+    let s = std::fs::read_to_string(path).ok()?;
+    let hit = rr3_log_find(&s, needle);
+    *seen = s;
+    hit
 }
 
 #[cfg(test)]

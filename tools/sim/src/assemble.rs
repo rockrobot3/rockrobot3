@@ -132,6 +132,13 @@ fn rr3_profile_key_of(line: &str) -> Option<&str> {
 /// 由调用方重解析复核（hal_backend 必填缺行即红，其余字段保真——与 manifest
 /// entry 绝对化同一条"改写后复核"纪律）。
 fn rr3_asm_sim_text(text: &str) -> Result<String, String> {
+    let (out, saw_hal) = rr3_asm_transform(text);
+    rr3_asm_hal_gate(saw_hal)?;
+    Ok(out)
+}
+
+/// 逐行 sim 变换本体（返回变换文本与是否见到 `hal_backend`）。
+fn rr3_asm_transform(text: &str) -> (String, bool) {
     let mut out = String::with_capacity(text.len() + 16);
     let mut in_runtime = false;
     let mut saw_hal = false;
@@ -142,10 +149,15 @@ fn rr3_asm_sim_text(text: &str) -> Result<String, String> {
         out.push_str(line);
         out.push('\n');
     }
+    (out, saw_hal)
+}
+
+/// 变换后必填门：`hal_backend` 未见即红（无落点）。
+fn rr3_asm_hal_gate(saw_hal: bool) -> Result<(), String> {
     if !saw_hal {
         return Err("装配单 [runtime] 缺 hal_backend（P0-3 必填）——sim 变换无落点".into());
     }
-    Ok(out)
+    Ok(())
 }
 
 /// 单行分派：段头与 [runtime] 段内改写（`true` = 本行已输出，不再原样追加）。
@@ -551,11 +563,16 @@ fn rr3_asm_denied(status_out: &str) -> Result<(), String> {
 fn rr3_asm_rows_ok(ctx: &Rr3AsmCtx) -> Result<(), String> {
     let rows = rr3_ctl_status_rows(ctx.rrctl, ctx.socket);
     for (m, _) in ctx.entries {
-        if !rows.iter().any(|(n, _, p)| n == m && p == "running") {
+        if !rr3_row_running(&rows, m) {
             return Err(format!("巡检快照里 {m} 不在 running（掉线？）：{rows:?}"));
         }
     }
     Ok(())
+}
+
+/// 快照里 `m` 是否仍在 running。
+fn rr3_row_running(rows: &[(String, u64, String)], m: &str) -> bool {
+    rows.iter().any(|(n, _, p)| n == m && p == "running")
 }
 
 /// ota 预期恒拒：成功反而是意外，两种形态都写进报告。

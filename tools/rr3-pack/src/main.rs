@@ -175,13 +175,24 @@ pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
     while i < args.len() {
         i += pack_arg(&mut cfg, args, i)?;
     }
+    rr3_pack_finish(cfg)
+}
+
+/// 必给项复核后交回配置（缺席带用法）。
+fn rr3_pack_finish(cfg: Rr3PackConfig) -> Result<Rr3PackConfig, String> {
+    rr3_pack_required(&cfg)?;
+    Ok(cfg)
+}
+
+/// 三个必给项在场门（fail-closed，缺席带用法）。
+fn rr3_pack_required(cfg: &Rr3PackConfig) -> Result<(), String> {
     let missing = [&cfg.payload, &cfg.repo, &cfg.out]
         .iter()
         .any(|p| p.as_os_str().is_empty());
     if missing {
         return Err(format!("--payload/--repo/--out 三者必给\n{}", usage()));
     }
-    Ok(cfg)
+    Ok(())
 }
 
 /// entry 可装机性：必须相对、且每段都是普通名（拒绝对路径与 `..`/`.` 段——
@@ -189,18 +200,28 @@ pub fn rr3_pack_parse(args: &[String]) -> Result<Rr3PackConfig, String> {
 /// 在仓六份 manifest 全是生成器落盘的裸模块名，这条门禁只为把"装机约定"从
 /// 口头变成打包期硬门：绝对/逃逸 entry 一律点名拒绝，不猜测意图。
 fn rr3_entry_ok(entry: &str, module: &str) -> Result<(), String> {
-    let p = Path::new(entry);
-    if p.is_absolute() {
-        return Err(format!(
-            "模块 {module} 的 entry 是绝对路径 {entry}（在仓约定 entry 相对，装机绝对由打包器写入——见 modules/README.md）"
-        ));
-    }
-    for c in p.components() {
+    rr3_entry_relative(entry, module)?;
+    rr3_entry_segments(entry, module)
+}
+
+/// entry 每段都必须是普通名（拒 `.`/`..` 段）。
+fn rr3_entry_segments(entry: &str, module: &str) -> Result<(), String> {
+    for c in Path::new(entry).components() {
         if !matches!(c, Component::Normal(_)) {
             return Err(format!(
                 "模块 {module} 的 entry {entry} 含 . 或 .. 段（装机路径逃逸，打包拒绝）"
             ));
         }
+    }
+    Ok(())
+}
+
+/// entry 必须是相对路径（绝对路径点名拒绝）。
+fn rr3_entry_relative(entry: &str, module: &str) -> Result<(), String> {
+    if Path::new(entry).is_absolute() {
+        return Err(format!(
+            "模块 {module} 的 entry 是绝对路径 {entry}（在仓约定 entry 相对，装机绝对由打包器写入——见 modules/README.md）"
+        ));
     }
     Ok(())
 }
@@ -743,23 +764,34 @@ fn rr3_make_executable(_p: &Path) {}
 
 /// dpkg-deb 出包。缺席给可操作的指引（macOS 本机没有 dpkg 是常态，不是故障）。
 fn rr3_build_deb(stage: &Path, out: &Path) -> Result<(), String> {
-    if Command::new("dpkg-deb").arg("--version").output().is_err() {
-        return Err(
-            "dpkg-deb 不可用（本机多半没装 dpkg）：用 --stage-only 只出 staging 树，真装交给 CI distro-smoke 容器"
-                .to_string(),
-        );
-    }
-    let outp = Command::new("dpkg-deb")
-        .args(["--root-owner-group", "--build"])
-        .arg(stage)
-        .arg(out)
-        .output()
-        .map_err(|e| format!("调 dpkg-deb 失败: {e}"))?;
+    let outp = rr3_dpkg_build(stage, out)?;
     if !outp.status.success() {
         return Err(format!(
             "dpkg-deb 失败: {}",
             String::from_utf8_lossy(&outp.stderr)
         ));
+    }
+    Ok(())
+}
+
+/// 可用性检查 + 调 dpkg-deb 出包（失败文案带 stderr）。
+fn rr3_dpkg_build(stage: &Path, out: &Path) -> Result<std::process::Output, String> {
+    rr3_dpkg_ready()?;
+    Command::new("dpkg-deb")
+        .args(["--root-owner-group", "--build"])
+        .arg(stage)
+        .arg(out)
+        .output()
+        .map_err(|e| format!("调 dpkg-deb 失败: {e}"))
+}
+
+/// dpkg-deb 可用性（缺席给可操作指引）。
+fn rr3_dpkg_ready() -> Result<(), String> {
+    if Command::new("dpkg-deb").arg("--version").output().is_err() {
+        return Err(
+            "dpkg-deb 不可用（本机多半没装 dpkg）：用 --stage-only 只出 staging 树，真装交给 CI distro-smoke 容器"
+                .to_string(),
+        );
     }
     Ok(())
 }

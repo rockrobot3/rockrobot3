@@ -121,12 +121,7 @@ fn rr3_ctl_query(_bus: &str, _method: &str) -> Result<Value, String> {
 
 /// 渲染一张等宽对齐的文本表（列宽由数据决定，中文字符按 chars 计）
 fn render_table(header: &[&str], rows: &[Vec<String>]) -> String {
-    let mut widths: Vec<usize> = header.iter().map(|h| h.chars().count()).collect();
-    for r in rows {
-        for (i, cell) in r.iter().enumerate() {
-            widths[i] = widths[i].max(cell.chars().count());
-        }
-    }
+    let widths = rr3_table_widths(header, rows);
     let line = |cells: &[String]| -> String {
         cells
             .iter()
@@ -145,6 +140,17 @@ fn render_table(header: &[&str], rows: &[Vec<String>]) -> String {
         out.push('\n');
     }
     out
+}
+
+/// 列宽（由表头与数据决定，中文字符按 chars 计）。
+fn rr3_table_widths(header: &[&str], rows: &[Vec<String>]) -> Vec<usize> {
+    let mut widths: Vec<usize> = header.iter().map(|h| h.chars().count()).collect();
+    for r in rows {
+        for (i, cell) in r.iter().enumerate() {
+            widths[i] = widths[i].max(cell.chars().count());
+        }
+    }
+    widths
 }
 
 /// 单元格取值：字符串去引号、数字原样、缺字段显式 `?`（两种缺失不混用一种写法）
@@ -216,12 +222,17 @@ fn format_logs(envelope: &Value) -> Result<String, String> {
     if lines.is_empty() {
         return Ok("（rrd 日志环为空）".to_string());
     }
+    Ok(rr3_logs_text(lines))
+}
+
+/// 日志行逐行拼接（非字符串项以 `?` 占位）。
+fn rr3_logs_text(lines: &[Value]) -> String {
     let mut out = String::new();
     for l in lines {
         out.push_str(l.as_str().unwrap_or("?"));
         out.push('\n');
     }
-    Ok(out)
+    out
 }
 
 /// `counters` 运维计数读面（0.0.4 批B append，与 health 分开）：health 是心跳
