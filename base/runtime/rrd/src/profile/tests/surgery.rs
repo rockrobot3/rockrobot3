@@ -5,7 +5,7 @@
 //! 值与证据更新后重解析等值。被测面 = [`crate::profile_edit`]（机制）经
 //! [`crate::profile`] 重导出。
 
-use crate::profile::{rr3_domain_apply, rr3_key_line_apply};
+use crate::profile::{rr3_domain_apply, rr3_key_line_apply, rr3_profile_parse};
 
 // ── TOML 键行手术面单测（批N22 件一）：红绿判据 = 只动目标行、fail-closed 四拒 ──
 
@@ -136,6 +136,62 @@ fn domain_locator_agrees_with_toml_loader() {
             "{head}: 他域仍须拒"
         );
     }
+}
+
+/// 单层目录取档（对拍矩阵用：profiles/ 与 hardware/<形态>/axis/ 都是平铺）。
+fn rr3_repo_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("toml"))
+        .collect();
+    out.sort();
+    out
+}
+
+/// 等价性对拍矩阵（B39）：仓内**真实**装配单与轴档案——装载器认得的域/键，
+/// 手术面必须也能定位。B37（单引号/带注释块头）与 B38（括号内空白）是同一
+/// 病根：文本启发式与解析器判据劈叉。逐档逐条判等后，新增合法书写形制不靠
+/// 人工想用例也不会静默丢功能。不空转：至少各判一份。
+#[test]
+fn repo_files_locator_matches_loader() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let mut domains = 0usize;
+    for f in rr3_repo_files(&root.join("profiles")) {
+        let text = std::fs::read_to_string(&f).expect("读装配单");
+        let p = rr3_profile_parse(&text).unwrap_or_else(|e| panic!("{}: {e:?}", f.display()));
+        for d in &p.supplies.domains {
+            rr3_domain_apply(&text, &d.name, &[("severe_mv", "1")]).unwrap_or_else(|e| {
+                panic!(
+                    "{} 域 {:?} 装载器在册但手术定位失败: {e}",
+                    f.display(),
+                    d.name
+                )
+            });
+            domains += 1;
+        }
+    }
+    assert!(domains > 0, "仓内装配单至少一份有域声明（对拍不得空转）");
+
+    let mut axes = 0usize;
+    let hw = root.join("hardware");
+    for shape in std::fs::read_dir(&hw).into_iter().flatten().flatten() {
+        for f in rr3_repo_files(&shape.path().join("axis")) {
+            let text = std::fs::read_to_string(&f).expect("读轴档案");
+            let v: toml::Value = toml::from_str(&text).expect("轴档案须是合法 TOML");
+            assert!(
+                v.get("current_ceil_ma").is_some(),
+                "{} 十四键必填",
+                f.display()
+            );
+            rr3_key_line_apply(&text, "current_ceil_ma", "1")
+                .unwrap_or_else(|e| panic!("{} 装载器在册但手术定位失败: {e}", f.display()));
+            axes += 1;
+        }
+    }
+    assert!(axes > 0, "仓内至少一份轴档案（对拍不得空转）");
 }
 
 /// 缺域拒：域名不在册不带病落盘
