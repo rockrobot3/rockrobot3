@@ -362,6 +362,11 @@ fn rr3_face_default(face_sect: &toml::Value) -> Result<&'static str, String> {
     let s = name.as_str().ok_or_else(|| {
         format!("config [rr3-interact.face] default_expression 必须是字符串，收到 {name}")
     })?;
+    rr3_face_pick(s)
+}
+
+/// 在册表情解析：表外点名（在册值清单逐字带出）。
+fn rr3_face_pick(s: &str) -> Result<&'static str, String> {
     rr3_face_expr_lookup(s).ok_or_else(|| {
         format!(
             "config [rr3-interact.face] default_expression 非在册表情 {s:?}（在册值 {}）",

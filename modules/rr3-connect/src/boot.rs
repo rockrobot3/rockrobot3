@@ -16,6 +16,19 @@ use rr_hal_api::{Rr3Link, Rr3SsidText};
 
 use crate::wifi::{Rr3LinkCfg, Rr3Provision};
 
+/// 启动自述：三面 SURFACE 链式打印（装配段原序逐字沿用）。
+pub(crate) fn rr3_conn_surface() {
+    eprintln!("rr3-connect 0.0.1 (0.0.2 T4c 实装)");
+    for line in crate::wifi::SURFACE
+        .iter()
+        .copied()
+        .chain(crate::session::SURFACE.iter().copied())
+        .chain(crate::bt::SURFACE.iter().copied())
+    {
+        eprintln!("  {line}");
+    }
+}
+
 /// HAL 链路面选择 + 开机探活：首读即探活（Unsupported / 读数失败显式回错），
 /// 「链路面就绪」回显归本编排（方案 §4.2 映射表字面）。nmcli 子进程超时由
 /// config timeout_ms 传入（0.0.5 批I N-2：最坏翻转延迟由配置管住，不再由子

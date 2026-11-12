@@ -42,6 +42,22 @@ pub(crate) fn rr3_rail_probe(cfg: &Rr3RailCfg) -> Result<(Box<dyn Rr3Rail>, &'st
     Ok((rail_dev, rail_backend))
 }
 
+/// 两面探活 + 分发器构造：探活次序与就绪回显逐字不变，任一探活失败即致命。
+pub(crate) fn rr3_power_ready(
+    cfg: Rr3PowerCfg,
+) -> Result<crate::dispatch::Rr3PowerDispatcher, String> {
+    let (dev, backend, first) = rr3_power_probe()?;
+    let (rail_dev, rail_backend) = rr3_rail_probe(&cfg.rail)?;
+    Ok(crate::dispatch::Rr3PowerDispatcher::new(
+        dev,
+        backend,
+        rail_dev,
+        rail_backend,
+        cfg,
+        first,
+    ))
+}
+
 /// 本模块 config 的汇总形状（自原 composite.rs 迁入，字段形状零改动）
 #[derive(Debug, Clone)]
 pub(crate) struct Rr3PowerCfg {

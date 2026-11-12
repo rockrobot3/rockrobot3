@@ -17,6 +17,20 @@ use rr_hal_api::Rr3AudioSource;
 use crate::capture::Rr3AudioConfig;
 use crate::vad::Rr3VadConfig;
 
+/// 启动自述：四面 SURFACE 链式打印（装配段原序逐字沿用）。
+pub(crate) fn rr3_sense_surface() {
+    eprintln!("rr3-sense 0.0.1 (M3 实装)");
+    for line in crate::capture::SURFACE
+        .iter()
+        .copied()
+        .chain(crate::vad::SURFACE.iter().copied())
+        .chain(crate::env::SURFACE.iter().copied())
+        .chain(crate::imu::SURFACE.iter().copied())
+    {
+        eprintln!("  {line}");
+    }
+}
+
 /// 音频源探活返回：源 + 命令旁路 + 后端名（错误文案复用）+ 开源形状（采集拍复用）
 pub(crate) type Rr3SenseProbe = (
     Box<dyn Rr3AudioSource>,
@@ -418,37 +432,35 @@ fn rr3_span_cap_check(r: &Rr3ReflexConfig) -> Result<(), String> {
 }
 
 fn rr3_cfg_u64(table: &toml::Value, key: &str, slot: &mut u64) -> Result<(), String> {
-    match table.get(key) {
-        None => Ok(()),
-        Some(v) => {
-            *slot = v
-                .as_integer()
-                .and_then(|i| u64::try_from(i).ok())
-                .ok_or_else(|| format!("配置项 {key} 须为非负整数，收到 {v}"))?;
-            Ok(())
-        }
-    }
+    rr3_cfg_slot(
+        table,
+        key,
+        slot,
+        |v| v.as_integer().and_then(|i| u64::try_from(i).ok()),
+        "非负整数",
+    )
 }
 
 fn rr3_cfg_i64(table: &toml::Value, key: &str, slot: &mut i64) -> Result<(), String> {
-    match table.get(key) {
-        None => Ok(()),
-        Some(v) => {
-            *slot = v
-                .as_integer()
-                .ok_or_else(|| format!("配置项 {key} 须为整数，收到 {v}"))?;
-            Ok(())
-        }
-    }
+    rr3_cfg_slot(table, key, slot, toml::Value::as_integer, "整数")
 }
 
 fn rr3_cfg_bool(table: &toml::Value, key: &str, slot: &mut bool) -> Result<(), String> {
+    rr3_cfg_slot(table, key, slot, toml::Value::as_bool, "布尔值")
+}
+
+/// 可选配置项落槽：键缺省不动（回落调用方默认），类型错按 `what` 点名拒。
+fn rr3_cfg_slot<T>(
+    table: &toml::Value,
+    key: &str,
+    slot: &mut T,
+    pick: impl Fn(&toml::Value) -> Option<T>,
+    what: &str,
+) -> Result<(), String> {
     match table.get(key) {
         None => Ok(()),
         Some(v) => {
-            *slot = v
-                .as_bool()
-                .ok_or_else(|| format!("配置项 {key} 须为布尔值，收到 {v}"))?;
+            *slot = pick(v).ok_or_else(|| format!("配置项 {key} 须为{what}，收到 {v}"))?;
             Ok(())
         }
     }

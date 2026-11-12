@@ -106,21 +106,19 @@ fn rr3_secret_map(
 ) -> Result<BTreeMap<String, String>, String> {
     let mut out = BTreeMap::new();
     for (k, val) in keys {
-        match val.as_str() {
-            Some(s) => {
-                out.insert(k.clone(), s.to_string());
-            }
-            // 坏形状 = 回错（与坏 json 同一口径）：写路径是整表重写，静默忽略
-            // 非字符串条目会让下一次 upsert 把它永久抹掉——数据丢失伪装成成功。
-            None => {
-                return Err(format!(
-                    "{} 的 keys.{k} 不是字符串（坏形状：写回会丢键，故拒读）",
-                    path.display()
-                ))
-            }
-        }
+        out.insert(k.clone(), rr3_secret_str(path, k, val)?);
     }
     Ok(out)
+}
+
+/// 单条值：非字符串即回错（写路径整表重写，静默忽略会把该键永久抹掉）。
+fn rr3_secret_str(path: &Path, k: &str, val: &Value) -> Result<String, String> {
+    val.as_str().map(str::to_string).ok_or_else(|| {
+        format!(
+            "{} 的 keys.{k} 不是字符串（坏形状：写回会丢键，故拒读）",
+            path.display()
+        )
+    })
 }
 
 /// upsert 一条（`POST /api/model/key` 的落点）：value 非空=写入/覆盖，空=删除
@@ -168,6 +166,11 @@ fn rr3_secrets_dir_perm(path: &Path) -> Result<(), String> {
         return Ok(());
     };
     std::fs::create_dir_all(parent).map_err(|e| format!("建 {} 失败: {e}", parent.display()))?;
+    rr3_dir_own_perm(path, parent)
+}
+
+/// 自有目录收 0700（归属判据看文件路径，外部注入路径不动别人的目录）。
+fn rr3_dir_own_perm(path: &Path, parent: &Path) -> Result<(), String> {
     if rr3_secrets_own(
         std::env::var(RR3_SECRETS_FILE_ENV).ok(),
         path,

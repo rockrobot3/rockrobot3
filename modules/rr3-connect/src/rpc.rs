@@ -100,10 +100,15 @@ pub fn rr3_link_body(seq: u64, st: &Rr3LinkState, mode: &str) -> Value {
 /// wifi/scan 点名参数裁决：无参动作，`null` 与空对象放行，多余字段点名拒。
 /// （自 wifi 原子件上移）
 pub fn rr3_wifi_scan_args(args: &Value) -> Result<(), String> {
+    rr3_no_args(args, "wifi/scan")
+}
+
+/// 无参 RPC 的形状判据：`null` 与空对象放行，多余字段点名拒（两条无参臂共用）。
+fn rr3_no_args(args: &Value, what: &str) -> Result<(), String> {
     match args {
         Value::Null => Ok(()),
         Value::Object(m) if m.is_empty() => Ok(()),
-        _ => Err("wifi/scan 无参数（收到多余字段）".into()),
+        _ => Err(format!("{what} 无参数（收到多余字段）")),
     }
 }
 
@@ -157,11 +162,7 @@ pub fn rr3_wifi_conn_result(st: &Rr3LinkState, ssid: &str) -> Value {
 
 /// wifi/forget 点名参数裁决：无参动作（同 scan）。（自 wifi 原子件上移）
 pub fn rr3_wifi_forget_args(args: &Value) -> Result<(), String> {
-    match args {
-        Value::Null => Ok(()),
-        Value::Object(m) if m.is_empty() => Ok(()),
-        _ => Err("wifi/forget 无参数（收到多余字段）".into()),
-    }
+    rr3_no_args(args, "wifi/forget")
 }
 
 /// wifi/forget 结果：清凭据回 ap，回执转移后的模式。（自 wifi 原子件上移）

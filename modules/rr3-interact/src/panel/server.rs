@@ -778,6 +778,12 @@ pub fn spawn_host(
         selftest_face_expect: selftest.face_expect,
         selftest_expect: selftest.expect,
     });
+    rr3_panel_spawn(shared)?;
+    Ok((act_rx, link))
+}
+
+/// 面板线程起转：绑核失败点名为装配期错（服务退出只落日志，不拉主循环）。
+fn rr3_panel_spawn(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     std::thread::Builder::new()
         .name("rr3-panel".into())
         .spawn(move || {
@@ -786,7 +792,7 @@ pub fn spawn_host(
             }
         })
         .map_err(|e| format!("起面板线程失败: {e}"))?;
-    Ok((act_rx, link))
+    Ok(())
 }
 
 /// accept 循环本体（批M M-β I-4 抽缝）：listener、槽位账与线程工厂显式注入——

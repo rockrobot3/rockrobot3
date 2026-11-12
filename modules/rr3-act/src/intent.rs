@@ -175,6 +175,17 @@ fn rr3_servo_arm(
     low_blocked: bool,
     axis: &Rr3ActAxisState,
 ) -> Result<Rr3IntentOutcome, String> {
+    let angle = rr3_servo_target(args, servo_cfg, low_blocked, axis)?;
+    rr3_servo_commit(servo, angle)
+}
+
+/// 判据 + 裁决段：低电闸门 → 拒动判据 → 参数裁决 → 行程钳位，回落角。
+fn rr3_servo_target(
+    args: &Value,
+    servo_cfg: &Rr3ServoCfg,
+    low_blocked: bool,
+    axis: &Rr3ActAxisState,
+) -> Result<u16, String> {
     if low_blocked {
         return Err(rr3_low_power_reject(RR3_SERVO_COMMAND_TOPIC));
     }
@@ -183,9 +194,18 @@ fn rr3_servo_arm(
     rr3_servo_gate(args, axis)?;
     let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
     // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
-    let angle =
-        rr_core::control::rr3_travel_clamp(angle, servo_cfg.angle_min_deg, servo_cfg.angle_max_deg);
-    // HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）
+    Ok(rr_core::control::rr3_travel_clamp(
+        angle,
+        servo_cfg.angle_min_deg,
+        servo_cfg.angle_max_deg,
+    ))
+}
+
+/// 落角段：HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）。
+fn rr3_servo_commit(
+    servo: &mut dyn rr_hal_api::Rr3PwmServo,
+    angle: u16,
+) -> Result<Rr3IntentOutcome, String> {
     servo
         .set_angle(angle)
         .map_err(|e| format!("舵机写入失败: {e}"))?;

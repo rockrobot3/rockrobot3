@@ -35,15 +35,7 @@ fn main() {
 /// 装配序列（自原 composite.rs `rr3_connect_run` 迁入，打印序列逐字不变）。
 fn rr3_connect_run() -> Result<(), String> {
     // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    eprintln!("rr3-connect 0.0.1 (0.0.2 T4c 实装)");
-    for line in wifi::SURFACE
-        .iter()
-        .copied()
-        .chain(session::SURFACE.iter().copied())
-        .chain(bt::SURFACE.iter().copied())
-    {
-        eprintln!("  {line}");
-    }
+    boot::rr3_conn_surface();
 
     // 总线接入 + config 读取解析（收敛序列前四段在 rr3mod bootstrap，文案逐字；
     // 路径段 RR3_CONNECT_CONFIG_ENV 覆盖 + manifest 同目录缺省归 load_config_text）

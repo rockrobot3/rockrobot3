@@ -40,12 +40,9 @@ fn rr3_power_run() -> Result<(), String> {
     })?;
     boot::rr3_power_echo(&cfg);
 
-    // HAL 电源面/轨压面探活（接入层编排，Unsupported 即致命——fail-closed 口径不变）
-    let (dev, backend, first) = boot::rr3_power_probe()?;
-    let (rail_dev, rail_backend) = boot::rr3_rail_probe(&cfg.rail)?;
+    // HAL 电源面/轨压面探活 + 机制层注册面构造（接入层编排，Unsupported 即致命）
+    let mut dispatcher = boot::rr3_power_ready(cfg)?;
 
-    // 机制层注册面构造 + 主循环骨架（rr3mod serve：死亡探针/分帧/RPC/订阅/节拍）
-    let mut dispatcher =
-        dispatch::Rr3PowerDispatcher::new(dev, backend, rail_dev, rail_backend, cfg, first);
+    // 主循环骨架（rr3mod serve：死亡探针/分帧/RPC/订阅/节拍）
     serve(bus, &mut dispatcher, RR3_POLL_WAIT)
 }
