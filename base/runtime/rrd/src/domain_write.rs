@@ -376,6 +376,9 @@ pub fn rr3_write_execute(
     rr3_write_apply(paths, params)
 }
 
+/// 写目标分派（`#[cfg(unix)]` 与两臂的落盘实现同门：本函数体只转发，
+/// 非 unix 目标下没有可转发对象——门少写一处即 Windows 编面红，⑨-y 已抓过）。
+#[cfg(unix)]
 fn rr3_write_apply(
     paths: &Rr3DomainWritePaths,
     params: &Rr3DomainWriteParams,
