@@ -12,6 +12,10 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 
+/// ctl 分派表的臂签名：`(ctx, params)` 入、应答体出。只有 logs/domain.set 用
+/// params，其余臂忽略它以统一表型（臂内语义仍单点在各自函数）。
+type Rr3CtlArm = fn(&Rr3ConnCtx, &Value) -> Result<Value, (Rr3StatusCode, String)>;
+
 /// 控制旁支（ADR-0010 裁定 2/4）：一次性查询连接，一问一答即断。
 ///
 /// 不注册、不进在册表、不受 watchdog 管——在册表是"活的业务模块"的账本，运维探针
@@ -25,50 +29,64 @@ pub(super) fn rr3_serve_ctl(
     req: Rr3RpcRequest,
 ) -> String {
     // 先在锁内取数、锁外应答：与握手主路的锁纪律一致（持 shared 锁时不碰 out 锁）
-    let result: Result<Value, (Rr3StatusCode, String)> = match req.method {
-        Rr3RpcMethod::CtlStatus => rr3_ctl_status(ctx),
-        Rr3RpcMethod::CtlHealth => rr3_ctl_health(ctx),
-        Rr3RpcMethod::CtlLogs => rr3_log_args(&req.params)
-            .map(|(prefix, tail)| json!({"lines": rr3_log_query(&prefix, tail)})),
+    // 分派表键 = 方法变体（成员与 [`Rr3RpcMethod::is_ctl`] 白名单同源）。
+    let arms: [(Rr3RpcMethod, Rr3CtlArm); 9] = [
+        (Rr3RpcMethod::CtlStatus, |ctx, _| rr3_ctl_status(ctx)),
+        (Rr3RpcMethod::CtlHealth, |ctx, _| rr3_ctl_health(ctx)),
+        (Rr3RpcMethod::CtlLogs, |_, p| {
+            rr3_log_args(p).map(|(prefix, tail)| json!({"lines": rr3_log_query(&prefix, tail)}))
+        }),
         // 运维计数读面（0.0.4 批B，Q1 裁定）：与 CtlHealth 分开——health 是心跳健康
         // 语义（watchdog 判活的输入），counters 是业务运维账（"机器慢先看数字"）。
         // 键 = `模块名/键`（模块自报归并）或 `boots`（rrd 自有）；未持久化时只有内存账。
-        Rr3RpcMethod::CtlCounters => {
+        (Rr3RpcMethod::CtlCounters, |ctx, _| {
             let counters = rr3_lock(&ctx.shared).rr3_reg_counters();
             Ok(json!({ "counters": counters }))
-        }
+        }),
         // 恒拒（ADR-0010 裁定 4）：方法名进白名单把协议面定型，语义随 M6；
         // 契约状态码是冻结的 AIRY_E* 子集，用 Permission 而不是自造 NotSupported，
         // 与 rr3-ota-ctl switch 的"恒拒 + 文案点 M6"先例同构。
-        Rr3RpcMethod::CtlOta => Err((
-            Rr3StatusCode::Permission,
-            "OTA（含模块级 staging 更新）随 M6 落地，当前拒绝执行".to_string(),
-        )),
+        (Rr3RpcMethod::CtlOta, |_, _| {
+            Err((
+                Rr3StatusCode::Permission,
+                "OTA（含模块级 staging 更新）随 M6 落地，当前拒绝执行".to_string(),
+            ))
+        }),
         // 系统重启（0.0.4 批C，Q3 裁定）：执行面带**双重门**——cfg(linux) 且
         // env `RR3_REBOOT_OK=1`（装机服务单元/init 脚本注入）才真跑重启命令；
         // 其余一律 Permission 拒 + 日志点名。为什么加 env 门：cfg(linux) 单独
         // 解锁会让 CI 的 ubuntu runner 在 e2e 里真重启——e2e 可测性要求缺省路径
         // 恒拒，解锁面留装机环境（distro 的 rrd.service 与 buildroot 的 S99rrd 同设）。
-        Rr3RpcMethod::CtlReboot => rr3_ctl_reboot(),
+        (Rr3RpcMethod::CtlReboot, |_, _| rr3_ctl_reboot()),
         // 装配快照读口（批N4 件九笔4）：boot 装载链验收后的四路底账 + [pins]×
         // wiring 全交叉逐条判果，一应答给出（判据真值单点 = assembly.rs）。快照
         // 未在册（--manifest 调试路径）时如实回不可得，不造假数据。
-        Rr3RpcMethod::CtlWiring => Ok(crate::assembly::rr3_assembly_json()),
+        (Rr3RpcMethod::CtlWiring, |_, _| {
+            Ok(crate::assembly::rr3_assembly_json())
+        }),
         // 契约完整性审计读口（批N5 件五笔4，Z-4）：boot 装载链验收后的契约四册
         // sha256 记账 + "齐全且 sha 对"自检判果一应答给出（判据真值单点 =
         // contracts.rs）。快照未在册（--manifest 调试路径）如实回不可得。
-        Rr3RpcMethod::CtlContracts => Ok(crate::contracts::rr3_contracts_json()),
+        (Rr3RpcMethod::CtlContracts, |_, _| {
+            Ok(crate::contracts::rr3_contracts_json())
+        }),
         // 装配侧写口（批N22 件一，conventions §6.1 三写口 + ADR-0021 裁定 6）：
         // 门序编排全在 domain_write.rs 单点（confirm 门 → 证据四道核 → key 白名单
         // → 文本手术 → 装载链全量预核 → 原子写回 → 契约记账重记），此处只接线。
         // 快照未在册由 run 薄壳如实拒（--manifest 调试路径无装配单可写）。
-        Rr3RpcMethod::CtlDomainSet => crate::domain_write::rr3_domain_write_run(&req.params),
-        // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
-        other => Err((
-            Rr3StatusCode::Invalid,
-            format!("ctl 连接只接受 rr3.ctl.*，收到 {}", other.as_str()),
-        )),
-    };
+        (Rr3RpcMethod::CtlDomainSet, |_, p| {
+            crate::domain_write::rr3_domain_write_run(p)
+        }),
+    ];
+    let result: Result<Value, (Rr3StatusCode, String)> =
+        match arms.iter().find(|(m, _)| *m == req.method) {
+            Some((_, arm)) => arm(ctx, &req.params),
+            // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
+            None => Err((
+                Rr3StatusCode::Invalid,
+                format!("ctl 连接只接受 rr3.ctl.*，收到 {}", req.method.as_str()),
+            )),
+        };
     let payload = match &result {
         Ok(v) => rr3_rpc_build_result(req.id, v),
         Err((code, msg)) => rr3_rpc_build_error(req.id, *code, msg),

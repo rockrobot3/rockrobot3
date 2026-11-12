@@ -44,9 +44,27 @@ pub enum Rr3RpcMethod {
     CtlDomainSet,
 }
 
+/// 枚举 → 方法名（判别式即下标，与变体声明次序一一对应；`Call` 仍取 rr-bus 的
+/// 唯一真值常量）。变体增减时长度断言与 `CtlDomainSet` 下标同时红。
+const RR3_RPC_NAMES: [&str; 13] = [
+    "rr3.register",
+    "rr3.heartbeat",
+    "rr3.unregister",
+    rr_bus::RR3_METHOD_CALL,
+    "rr3.ctl.status",
+    "rr3.ctl.health",
+    "rr3.ctl.logs",
+    "rr3.ctl.ota",
+    "rr3.ctl.counters",
+    "rr3.ctl.reboot",
+    "rr3.ctl.wiring",
+    "rr3.ctl.contracts",
+    "rr3.ctl.domain.set",
+];
+
 /// ctl 方法族在册表（ADR-0010）：解析面的 ctl 反查与 [`Rr3RpcMethod::is_ctl`]
-/// 的成员判据共用本表；方法名的唯一真值仍单点在 [`Rr3RpcMethod::as_str`]
-/// （本表只列变体、不携字面名，名字漂移只在 as_str 一处发生）。
+/// 的成员判据共用本表；方法名的唯一真值在 [`RR3_RPC_NAMES`]（本表只列变体、
+/// 不携字面名，名字漂移只在一处发生）。
 const RR3_CTL_METHODS: [Rr3RpcMethod; 9] = [
     Rr3RpcMethod::CtlStatus,
     Rr3RpcMethod::CtlHealth,
@@ -61,22 +79,7 @@ const RR3_CTL_METHODS: [Rr3RpcMethod; 9] = [
 
 impl Rr3RpcMethod {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Register => "rr3.register",
-            Self::Heartbeat => "rr3.heartbeat",
-            Self::Unregister => "rr3.unregister",
-            // 方法名的唯一真值点在 rr-bus（模块侧客户端与 rrd 共用一份）
-            Self::Call => rr_bus::RR3_METHOD_CALL,
-            Self::CtlStatus => "rr3.ctl.status",
-            Self::CtlHealth => "rr3.ctl.health",
-            Self::CtlLogs => "rr3.ctl.logs",
-            Self::CtlOta => "rr3.ctl.ota",
-            Self::CtlCounters => "rr3.ctl.counters",
-            Self::CtlReboot => "rr3.ctl.reboot",
-            Self::CtlWiring => "rr3.ctl.wiring",
-            Self::CtlContracts => "rr3.ctl.contracts",
-            Self::CtlDomainSet => "rr3.ctl.domain.set",
-        }
+        RR3_RPC_NAMES[*self as usize]
     }
 
     /// 名字 → 变体：核心四方法直配，ctl 族按 [`RR3_CTL_METHODS`] 反查
@@ -259,6 +262,13 @@ mod tests {
             assert_eq!(got.method.as_str(), m);
         }
         assert_eq!(Rr3RpcMethod::Register.as_str(), "rr3.register");
+    }
+
+    /// 名字表覆盖全部变体：长度对齐、判别式连续（末变体下标 = 表长 - 1）
+    #[test]
+    fn name_table_covers_all_variants() {
+        assert_eq!(RR3_RPC_NAMES.len(), 13);
+        assert_eq!(Rr3RpcMethod::CtlDomainSet as usize, RR3_RPC_NAMES.len() - 1);
     }
 
     /// 畸形 JSON-RPC：一律 Invalid，文案指出缺哪一项

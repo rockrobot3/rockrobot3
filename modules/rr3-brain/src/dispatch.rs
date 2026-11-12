@@ -768,10 +768,15 @@ impl Dispatcher for Rr3BrainDispatcher {
     }
 }
 
-/// 事务面三臂（自 Python composite.py 主循环 RPC 分支逐语义迁入）：completion
+/// 事务面分派表的臂签名：`(cfg, clients, dialog, args)` 入、应答体出（六臂是
+/// 内存面不触总线，bus 参数留给 trait 形状）。
+type Rr3RpcArm =
+    fn(&mut Rr3BrainCfg, &mut Rr3CloudClients, &mut Rr3Dialog, &Value) -> Result<Value, String>;
+
+/// 事务面六臂（自 Python composite.py 主循环 RPC 分支逐语义迁入）：completion
 /// （[`Rr3LlmClient`]）＋ops/list 快照＋ops/set 写臂（写 doc → 按组重建受影响
-/// 客户端——dialog 组就地改参）；未知 topic 返 Err 由 serve 折 `{"error": …}`
-/// 应答（与 Python 主循环兜底分支同 wire）。
+/// 客户端——dialog 组就地改参）＋模型行三臂；未知 topic 返 Err 由 serve 折
+/// `{"error": …}` 应答（与 Python 主循环兜底分支同 wire）。
 pub(crate) fn rr3_rpc_arm(
     cfg: &mut Rr3BrainCfg,
     clients: &mut Rr3CloudClients,
@@ -779,17 +784,20 @@ pub(crate) fn rr3_rpc_arm(
     topic: &str,
     args: &Value,
 ) -> Result<Value, String> {
-    match topic {
+    // 表项次序即 exposes 申报次序（兜底文案仍按 RR3_RPC_EXPOSES 列举）
+    let arms: [(&str, Rr3RpcArm); 6] = [
         // completion 臂：业务失败（缺密钥/HTTP 4xx-5xx/应答形状不符）Err 折 error
         // 应答——Python try/except RuntimeError 同 wire（传输异常已在 cloud 层折
         // 同型 Err，同一次云不可用结局只剩一种：弃轮/错误应答，进程不死）
-        RR3_COMPLETION_TOPIC => {
+        (RR3_COMPLETION_TOPIC, |_, clients, _, args| {
             // Python: text = str(params.get("args", {}).get("text", ""))
             let text = args.get("text").map(rr3_py_str).unwrap_or_default();
             Ok(json!({ "text": clients.llm.rr3_complete(&text)? }))
-        }
-        RR3_OPS_LIST_TOPIC => Ok(json!({ "ops": rr3_ops_snapshot(cfg)? })),
-        RR3_OPS_SET_TOPIC => {
+        }),
+        (RR3_OPS_LIST_TOPIC, |cfg, _, _, _| {
+            Ok(json!({ "ops": rr3_ops_snapshot(cfg)? }))
+        }),
+        (RR3_OPS_SET_TOPIC, |cfg, clients, dialog, args| {
             let reply = rr3_ops_set_arm(cfg, args)?;
             // Python: group = str(args.get("group", ""))（同 ops/set 臂的 coercion）；
             // new 是写臂类型域校验产物（dialog 组消费其整数值）
@@ -797,18 +805,23 @@ pub(crate) fn rr3_rpc_arm(
             let new = reply.get("new").cloned().unwrap_or(Value::Null);
             rr3_rebuild_clients(cfg, &group, &new, dialog, clients)?;
             Ok(reply)
-        }
+        }),
         // 模型行三臂（ADR-0023）：列表只读；set 落盘后按 llm 组重建客户端
         // （写面已自守结构门，重建取数不可达失败面如实上抛）；test 只探测一次，
         // 业务失败用 `ok:false` 表达（面板要区分"接口通"与"RPC 出错"）
-        RR3_MODEL_LIST_TOPIC => rr3_model_list(cfg),
-        RR3_MODEL_SET_TOPIC => {
+        (RR3_MODEL_LIST_TOPIC, |cfg, _, _, _| rr3_model_list(cfg)),
+        (RR3_MODEL_SET_TOPIC, |cfg, clients, dialog, args| {
             let reply = rr3_model_set_arm(cfg, args)?;
             rr3_rebuild_clients(cfg, "llm", &Value::Null, dialog, clients)?;
             Ok(reply)
-        }
-        RR3_MODEL_TEST_TOPIC => rr3_model_test_arm(cfg, args),
-        _ => {
+        }),
+        (RR3_MODEL_TEST_TOPIC, |cfg, _, _, args| {
+            rr3_model_test_arm(cfg, args)
+        }),
+    ];
+    match arms.iter().find(|(t, _)| *t == topic) {
+        Some((_, arm)) => arm(cfg, clients, dialog, args),
+        None => {
             let list: Vec<String> = RR3_RPC_EXPOSES.iter().map(|t| format!("'{t}'")).collect();
             Err(format!(
                 "rr3-brain 只 exposes [{}]，收到 {topic}",
