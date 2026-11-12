@@ -35,7 +35,7 @@ pub mod protocol;
 pub mod audio_session;
 // 本地落盘原子序（批N4 件四 I-20 下沉，全仓唯一实现）：std::fs 文件面，与
 // evidence 同径 cfg 门——消费面（rrd 计数/档案、面板凭据）都在宿主 std 语境。
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod persist;
 // transport 层拆门（批J G1，ADR-0018 修订 3 ①）：窄缝 bytestream（Rr3ByteStream）
 // 与帧缓冲 buf（alloc 面）在裸金属目标（target_os="none"，如 0.0.7 层① 的

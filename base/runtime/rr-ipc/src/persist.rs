@@ -31,7 +31,7 @@
 //! - `modules/rr3-interact/src/panel/secrets.rs`：模型凭据（建 tmp 即 0600）
 
 // no_std crate 的 std 显式恢复（evidence.rs 同径写法）：本模块是 std::fs 文件面，
-// 只在 linux/macos 门内编译（lib.rs 模块声明同径）。
+// 与 evidence 同门编译（linux/macos/windows；权限位在非 unix 忽略）。
 use std::format;
 use std::fs::File;
 use std::io::Write;
