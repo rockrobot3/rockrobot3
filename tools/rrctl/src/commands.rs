@@ -23,6 +23,19 @@ const RR3_CTL_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// 客户端帧的 src_task 按契约填 0：未注册连接没有 rrd 分配的 task，与注册帧同口径
 const RR3_CTL_SRC_TASK: u64 = 0;
 
+/// 错误信封渲染（单点）：rrd 的拒应答统一成 `cmd 被拒（code N）：msg`。缺字段
+/// 以 `?` 占位而不是丢信息——"被拒"这一事实比拒因字段的完整度更重要。
+fn rr3_ctl_reject(cmd: &str, envelope: &Value) -> Option<String> {
+    let err = envelope.get("error")?;
+    Some(format!(
+        "{cmd} 被拒（code {}）：{}",
+        err.get("code")
+            .map(Value::to_string)
+            .unwrap_or_else(|| "?".into()),
+        err.get("message").and_then(Value::as_str).unwrap_or("?")
+    ))
+}
+
 pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
     if !COMMANDS.contains(&cmd) {
         return Err(format!("未知命令 {cmd}，可用：{}", COMMANDS.join(" | ")));
@@ -30,14 +43,8 @@ pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
     let envelope = rr3_ctl_query(bus, &format!("rr3.ctl.{cmd}"))?;
     // 错误信封统一走 Err：ota 的恒拒（rrd 回 AIRY_EPERM，文案点 M6）与 reboot 的
     // 缺省恒拒（文案点双重门）都落在这一条上，main 会把它打到 stderr 并以非 0 退出
-    if let Some(err) = envelope.get("error") {
-        return Err(format!(
-            "{cmd} 被拒（code {}）：{}",
-            err.get("code")
-                .map(Value::to_string)
-                .unwrap_or_else(|| "?".into()),
-            err.get("message").and_then(Value::as_str).unwrap_or("?")
-        ));
+    if let Some(why) = rr3_ctl_reject(cmd, &envelope) {
+        return Err(why);
     }
     match cmd {
         "status" => format_status(&envelope),
@@ -269,6 +276,21 @@ mod tests {
             err.contains("status") && err.contains("reboot"),
             "错误文案没给出可用命令: {err}"
         );
+    }
+
+    /// 拒应答渲染（B44 拆件后的单点）：code/message 都在文案里；字段缺失也要保住
+    /// "被拒"这一事实；成功信封不干预（走各自 format_*）。
+    #[test]
+    fn rejection_envelope_names_code_and_message() {
+        let env = json!({"error": {"code": 7, "message": "ota 在 M6 前恒拒"}});
+        let msg = rr3_ctl_reject("ota", &env).expect("有 error 必渲染");
+        assert!(msg.contains("ota 被拒"), "{msg}");
+        assert!(msg.contains("code 7"), "{msg}");
+        assert!(msg.contains("M6"), "{msg}");
+        let bare = json!({"error": {}});
+        let msg = rr3_ctl_reject("reboot", &bare).expect("有 error 必渲染");
+        assert!(msg.contains("code ?") && msg.ends_with('?'), "{msg}");
+        assert!(rr3_ctl_reject("status", &json!({"result": {}})).is_none());
     }
 
     #[test]
