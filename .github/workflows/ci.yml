@@ -136,6 +136,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 与其余 job 同源：runner 预装 rustc 版本不受控，① 现在编 brain（ureq/rustls
+      # /ring MSRV 面），工具链必须钉 stable 而非吃镜像预装版
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime

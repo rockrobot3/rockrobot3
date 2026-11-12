@@ -108,9 +108,9 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
     /usr/lib/rockrobot3/modules/rr3-act/module.toml # entry 已装机绝对化
 
   echo "== ⑥ 装机装配单 sim 变换（部署真值零改；容器无 RK3566 硬件面，见文件头）=="
-  must_grep 'hal_backend = "linux"' /usr/lib/rockrobot3/profiles/distro.toml # 变换前在位
-  sed -i 's/^hal_backend = "linux"$/hal_backend = "sim"/' /usr/lib/rockrobot3/profiles/distro.toml
-  must_grep 'hal_backend = "sim"' /usr/lib/rockrobot3/profiles/distro.toml # 变换后生效
+  must_grep "hal_backend = \"linux\"" /usr/lib/rockrobot3/profiles/distro.toml # 变换前在位
+  sed -i "s/^hal_backend = \"linux\"/hal_backend = \"sim\"/" /usr/lib/rockrobot3/profiles/distro.toml
+  must_grep "hal_backend = \"sim\"" /usr/lib/rockrobot3/profiles/distro.toml # 变换后生效
 
   echo "== ⑦ rrd 装配单正门冒烟（参数与 rrd.service 的 ExecStart 一致，仅套接字换测试位；RR3_DATA_DIR 同 unit Environment）=="
   SOCK=/tmp/smoke-ipc.sock
