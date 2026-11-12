@@ -68,7 +68,7 @@ workspace 内，字节级单测钉死，含 extlinux.conf 真工件对拍）：
   `rr-ota::bootconf::rr3_cmdline_slot` 只认 `root=LABEL=rr_` 形态，
   裸设备形态（root=/dev/…）明确不覆盖、报"板上核对项"。
 
-### 回滚链（U-Boot 标准语义；本版本未实装，属板上件）
+### 回滚链（U-Boot 标准语义；写侧 0.0.8 P1 已实装，主机可测）
 
 A/B 切换的断电安全不靠"翻标志不失败"，靠**失败可回**。U-Boot 的标准机制：
 
@@ -90,6 +90,20 @@ A/B 切换的断电安全不靠"翻标志不失败"，靠**失败可回**。U-Bo
 7. 启动失败 → bootcount 达 bootlimit → U-Boot 自动走 `altbootcmd` 回原槽；
    恢复出厂场景则由 rr_factory 镜像内恢复流程把标签切回（最近好槽或 rr_a）。
 
+**写侧实装面（`rr_ota::bootenv`，0.0.8 P1 审计件五）**：
+
+- raw env 载体（`[crc32 LE][k=v\0]…\0`）的解析/渲染/改键，CRC 与 A-IPC 载荷
+  同一份实现（`rr3_crc32`）；坏 CRC、截断、重复键、非 UTF-8 一律 fail-closed 拒读。
+- `/etc/fw_env.config` 解析（`device offset env_size [sector_size num_sectors]`，
+  数支持 `0x`）——env 存储位置/偏移/容量从板上配置来，工具不猜。
+- 回滚链状态迁移：`rr3_rollback_arm(limit, altcmd)` 落第 4 步四变量、
+  `rr3_rollback_ok()` 落第 6 步解除；`altbootcmd` 由调用方给（distro boot 的
+  备援命令随板/构建而变，契约不预造），空落点与 `bootlimit=0` 当场拒。
+- 区读写走 `std::fs` 定位读写（无 ioctl），板上 Linux 与主机 macOS 测试面同一份
+  代码；主机用例用临时文件顶替块设备，验证偏移、整区覆盖、区外字节不动。
+- 第 3 步（extlinux 标签改写）仍由 `bootconf` 的 switch/factory 承担，两件拼起来
+  才是完整的一轮 A/B 切换。
+
 ### 板上核对项清单（硬件未采购，以下全部未实测）
 
 1. **boot 分区是 vfat**（genimage.cfg `image boot.vfat`）：vfat 无日志，
@@ -102,8 +116,9 @@ A/B 切换的断电安全不靠"翻标志不失败"，靠**失败可回**。U-Bo
    未做，板上加固项。
 3. U-Boot defconfig 是否启用 `CONFIG_BOOTCOUNT_LIMIT` 及其计数载体
    （env / RTC / I2C EEPROM）；无载体则 altbootcmd 链不生效，回滚退化为人工。
-4. Buildroot 是否打包 `fw_setenv`/`fw_printenv`（`BR2_PACKAGE_UBOOT_TOOLS`），
-   `/etc/fw_env.config` 的 env 存储偏移是否命中本板 U-Boot 布局。
+4. 写侧改由 `rr_ota::bootenv` 自实装后**不再依赖** `fw_setenv`/`fw_printenv`
+   （不再需要 `BR2_PACKAGE_UBOOT_TOOLS`）；仍需核对 `/etc/fw_env.config` 的
+   env 存储偏移/容量是否命中本板 U-Boot 布局，以及冗余双副本是否需要同步写。
 5. `/proc/cmdline` 实际形态：确认 root 是 `LABEL=rr_X` 而非裸设备。
 6. boot 分区挂载点与读写权限（`/boot` 或独立挂载），以及 rr3-ota-ctl 的
    运行身份与最小权限面。

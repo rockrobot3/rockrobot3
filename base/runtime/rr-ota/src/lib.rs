@@ -2,9 +2,13 @@
 //!
 //! v0.0.1 冻结"双轨"的类型形状：整镜像 A/B（M6）与模块级 staging（M6+）。
 //! 0.0.3 批D 增加引导配置改写面（[`bootconf`]）：switch/factory 的判定与
-//! 原子落盘逻辑主机可测；U-Boot 环境变量写侧与块设备探测属板上件，不 claim。
+//! 原子落盘逻辑主机可测。
+//! 0.0.8 P1 审计件五补齐 U-Boot 环境变量写侧（[`bootenv`]）：raw env 的
+//! CRC32 校验/渲染、fw_env.config 解析、回滚链四变量的状态迁移（arm/ok）全部
+//! 主机可测；块设备读写在 linux 目标用 std::fs 实装，其余目标只编纯逻辑。
 
 pub mod bootconf;
+pub mod bootenv;
 
 /// 整镜像 A/B 与出厂槽位
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

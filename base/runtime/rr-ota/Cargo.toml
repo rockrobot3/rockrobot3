@@ -12,3 +12,6 @@ name = "rr_ota"
 path = "src/lib.rs"
 
 [dependencies]
+# env 区 CRC32 与 A-IPC 载荷同一份实现（IEEE 802.3，U-Boot crc32(0, …) 同形态）——
+# 单点真值，不在本 crate 抄第二份。
+rr-ipc = { path = "../rr-ipc" }

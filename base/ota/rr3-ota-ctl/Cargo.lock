@@ -3,8 +3,15 @@
 version = 3
 
 [[package]]
+name = "rr-ipc"
+version = "0.0.1"
+
+[[package]]
 name = "rr-ota"
 version = "0.0.1"
+dependencies = [
+ "rr-ipc",
+]
 
 [[package]]
 name = "rr3-ota-ctl"
