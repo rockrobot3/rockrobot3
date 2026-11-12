@@ -55,17 +55,7 @@ fn rr3_bootconf_arg(args: &[String]) -> Result<PathBuf, String> {
 }
 
 fn rr3_parse_switch(args: &[String]) -> Result<(Rr3Slot, PathBuf), ExitCode> {
-    let Some(label) = args.first() else {
-        eprintln!("switch 缺目标槽位参数");
-        return Err(usage());
-    };
-    let target = match rr3_slot_arg(label) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{e}");
-            return Err(usage());
-        }
-    };
+    let target = rr3_switch_target(args)?;
     match rr3_bootconf_arg(&args[1..]) {
         Ok(path) => Ok((target, path)),
         Err(e) => {
@@ -73,6 +63,18 @@ fn rr3_parse_switch(args: &[String]) -> Result<(Rr3Slot, PathBuf), ExitCode> {
             Err(usage())
         }
     }
+}
+
+/// 首参即目标槽：缺参 / 不在册标签都属用法错（exit 2）。
+fn rr3_switch_target(args: &[String]) -> Result<Rr3Slot, ExitCode> {
+    let Some(label) = args.first() else {
+        eprintln!("switch 缺目标槽位参数");
+        return Err(usage());
+    };
+    rr3_slot_arg(label).map_err(|e| {
+        eprintln!("{e}");
+        usage()
+    })
 }
 
 /// switch：读 → 判定改写 → 原子写回。业务拒（同槽幂等拒 / rr_factory 目标 /

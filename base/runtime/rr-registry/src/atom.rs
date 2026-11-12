@@ -269,9 +269,14 @@ fn rr3_atom_list_item(
         errs.extend(crate::validate::rr3_registry_check(rule, s));
     }
     // 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）
-    if (spec.path == "provides.slots" || spec.path == "uses.slots") && !slots.rr3_slot_contains(s) {
+    if rr3_atom_slot_field(spec) && !slots.rr3_slot_contains(s) {
         errs.push(format!("字段 {} 引用未登记格位 {s}", spec.path));
     }
+}
+
+/// 该字段是查册字段（provides.slots / uses.slots）。
+fn rr3_atom_slot_field(spec: &Rr3FieldSpec) -> bool {
+    spec.path == "provides.slots" || spec.path == "uses.slots"
 }
 
 /// int 型：JSON 整数判定（浮点/字符串不算）

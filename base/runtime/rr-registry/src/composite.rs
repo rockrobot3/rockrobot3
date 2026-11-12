@@ -181,13 +181,18 @@ fn rr3_comp_meta(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<
         errs.push("组合件清单缺 [composite] 表（name / unit 必填）".into());
         return;
     };
+    rr3_comp_meta_keys(comp, errs);
+    rr3_comp_name(comp, facts, errs);
+    rr3_comp_unit(comp, facts, errs);
+}
+
+/// `[composite]` 键词表核：只认 name / unit（其余逐键点名）。
+fn rr3_comp_meta_keys(comp: &toml::Table, errs: &mut Vec<String>) {
     for k in comp.keys() {
         if k != "name" && k != "unit" {
             errs.push(format!("[composite] 未知键 {k}（只认 name / unit）"));
         }
     }
-    rr3_comp_name(comp, facts, errs);
-    rr3_comp_unit(comp, facts, errs);
 }
 
 /// `[composite].name`：非空字符串（空串/缺键/非字符串分别点名）。

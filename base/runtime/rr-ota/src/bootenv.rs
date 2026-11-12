@@ -92,25 +92,35 @@ pub fn rr3_env_cfg_parse(text: &str) -> Result<Vec<Rr3EnvDev>, String> {
 
 /// 十进制或 `0x` 十六进制的无符号数（U-Boot 配置惯用十六进制偏移）。
 fn rr3_env_num(s: &str) -> Result<u64, String> {
-    let (digits, radix) = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        Some(rest) => (rest, 16),
-        None => (s, 10),
-    };
+    let (digits, radix) = rr3_num_parts(s);
     if digits.is_empty() {
         return Err(format!("{s:?} 缺数字"));
     }
     u64::from_str_radix(digits, radix).map_err(|_| format!("{s:?} 不是合法无符号数"))
 }
 
+/// 进制前缀：`0x`/`0X` 为十六进制，其余十进制。
+fn rr3_num_parts(s: &str) -> (&str, u32) {
+    match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(rest) => (rest, 16),
+        None => (s, 10),
+    }
+}
+
 /// 键值合法性：键非空且不含 `=`/`\0`，值不含 `\0`。
 fn rr3_env_kv_chk(key: &str, value: &str) -> Result<(), String> {
-    if key.is_empty() || key.contains('=') || key.contains('\0') {
+    if !rr3_env_key_ok(key) {
         return Err(format!("env 键 {key:?} 非法（非空、不得含 '=' 或 \\0）"));
     }
     if value.contains('\0') {
         return Err(format!("env 键 {key:?} 的值含 \\0，写不进 env 载体"));
     }
     Ok(())
+}
+
+/// 键形制：非空且不含 `=`/`\0`。
+fn rr3_env_key_ok(key: &str) -> bool {
+    !key.is_empty() && !key.contains('=') && !key.contains('\0')
 }
 
 /// env 体（键值有序表；顺序即渲染顺序，U-Boot 不要求排序）。

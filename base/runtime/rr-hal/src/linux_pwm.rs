@@ -160,19 +160,7 @@ impl Rr3LinuxPwmServo {
                 export_path.display()
             )))
         })?;
-        let t0 = Instant::now();
-        while !dir.exists() {
-            if t0.elapsed() >= PWM_EXPORT_TIMEOUT {
-                return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                    &format!(
-                        "pwm 导出后 {:?} 未在 {}ms 内出现（内核 sysfs 异常）",
-                        dir.display(),
-                        PWM_EXPORT_TIMEOUT.as_millis()
-                    ),
-                )));
-            }
-            std::thread::sleep(PWM_EXPORT_POLL);
-        }
+        rr3_pwm_await(&dir)?;
         Ok(true)
     }
 
@@ -188,6 +176,24 @@ impl Rr3LinuxPwmServo {
         pwm_write(&dir.join("duty_cycle"), servo_duty_ns(SERVO_NEUTRAL_DEG)?)?;
         pwm_write(&dir.join("enable"), 1)
     }
+}
+
+/// 等 `pwmN` 目录出现（内核 workqueue 异步建目录，超时即点名 sysfs 异常）。
+fn rr3_pwm_await(dir: &Path) -> Result<(), Rr3HalError> {
+    let t0 = Instant::now();
+    while !dir.exists() {
+        if t0.elapsed() >= PWM_EXPORT_TIMEOUT {
+            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+                &format!(
+                    "pwm 导出后 {:?} 未在 {}ms 内出现（内核 sysfs 异常）",
+                    dir.display(),
+                    PWM_EXPORT_TIMEOUT.as_millis()
+                ),
+            )));
+        }
+        std::thread::sleep(PWM_EXPORT_POLL);
+    }
+    Ok(())
 }
 
 impl Drop for Rr3LinuxPwmServo {

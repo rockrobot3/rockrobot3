@@ -268,18 +268,24 @@ fn rr3_nm_poll(
 ) -> Result<Option<(Option<std::process::ExitStatus>, bool)>, Rr3HalError> {
     match child.try_wait() {
         Ok(Some(st)) => Ok(Some((Some(st), false))),
-        Ok(None) => {
-            if Instant::now() >= deadline {
-                rr3_nm_kill(child);
-                return Ok(Some((None, true)));
-            }
-            std::thread::sleep(RR3_NM_POLL);
-            Ok(None)
-        }
+        Ok(None) => rr3_nm_idle(child, deadline),
         Err(e) => Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
             &format!("nmcli 等待失败: {e}"),
         ))),
     }
+}
+
+/// 未退出一拍：到点收尸并标超时，否则睡一轮等下一拍。
+fn rr3_nm_idle(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Result<Option<(Option<std::process::ExitStatus>, bool)>, Rr3HalError> {
+    if Instant::now() >= deadline {
+        rr3_nm_kill(child);
+        return Ok(Some((None, true)));
+    }
+    std::thread::sleep(RR3_NM_POLL);
+    Ok(None)
 }
 
 /// 到点收尸：kill 直子进程并回收（孙进程不在守护面内）。

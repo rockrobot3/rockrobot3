@@ -43,11 +43,16 @@ pub fn rr3_evidence_ref_ok(reference: &str) -> bool {
         return false;
     };
     // 形态段：非空、无空白（斜杠不可能出现在本段——split_once 只切第一个 '/'）
-    if form.is_empty() || form.chars().any(char::is_whitespace) {
+    if !rr3_ref_form_ok(form) {
         return false;
     }
     // 编号段：恰好四位数字（同时天然排除第二个 '/' 与字母）
     num.len() == 4 && num.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// 形态段合法：非空且不含空白。
+fn rr3_ref_form_ok(form: &str) -> bool {
+    !form.is_empty() && !form.chars().any(char::is_whitespace)
 }
 
 /// 证据引用完整校验：`root`＝证据容器根（仓内上下文为 `docs/evidence`），
@@ -77,6 +82,11 @@ pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
         .find(|(k, _)| *k == "form")
         .map(|(_, v)| *v)
         .expect("frontmatter 已验六键齐，form 必在");
+    rr3_ev_declared_chk(&path, declared, form)
+}
+
+/// 声明值与引用形态目录一致（文件搬家不改 form = 立刻红）。
+fn rr3_ev_declared_chk(path: &Path, declared: &str, form: &str) -> Result<(), String> {
     if declared != form {
         return Err(format!(
             "证据文件 {} 的 form = {declared:?} 与引用形态目录 {form:?} 不一致",
@@ -142,14 +152,19 @@ fn rr3_ev_field(line: &str) -> Result<(&str, &str), String> {
 
 /// 双引号值：剥离首尾引号，值内不许再出现双引号（一行文本的形制）。
 fn rr3_ev_quoted<'a>(key: &str, value: &'a str) -> Result<&'a str, String> {
-    let inner = value
-        .strip_prefix('"')
-        .and_then(|v| v.strip_suffix('"'))
-        .ok_or_else(|| format!("{key} 的值必须是一行双引号文本: {value:?}"))?;
+    let inner = rr3_quoted_inner(key, value)?;
     if inner.contains('"') {
         return Err(format!("{key} 的值内不许出现双引号: {value:?}"));
     }
     Ok(inner)
+}
+
+/// 剥离首尾双引号；不成对即点名。
+fn rr3_quoted_inner<'a>(key: &str, value: &'a str) -> Result<&'a str, String> {
+    value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .ok_or_else(|| format!("{key} 的值必须是一行双引号文本: {value:?}"))
 }
 
 /// 必填键核对：字段集必须覆盖 [`RR3_EVIDENCE_KEYS`] 全集

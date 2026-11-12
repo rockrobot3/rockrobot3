@@ -130,6 +130,12 @@ impl FrameAssembler {
             Ok(h) => h,
             Err(e) => return Err(self.drop_magic(4, alloc::format!("头层拒收: {e:?}"))),
         };
+        self.rr3_plen_guard(&header)?;
+        Ok(Some(header))
+    }
+
+    /// plen 护栏：超拆帧上限即弃 4B magic（幻影头）。
+    fn rr3_plen_guard(&mut self, header: &Rr3Header) -> Result<(), (u64, String)> {
         let plen = header.payload_len as usize;
         if plen > self.plen_cap {
             return Err(self.drop_magic(
@@ -137,7 +143,7 @@ impl FrameAssembler {
                 alloc::format!("payload_len {plen} 越拆帧护栏 {}（幻影头）", self.plen_cap),
             ));
         }
-        Ok(Some(header))
+        Ok(())
     }
 
     /// 坏帧处置：弃 magic 起点（坏头只弃 4B——真帧起点可能就在其后不远处，

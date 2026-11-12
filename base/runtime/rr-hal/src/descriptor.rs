@@ -277,11 +277,20 @@ pub fn rr3_bindings_compose(
     overrides: &BTreeMap<String, String>,
 ) -> Result<Rr3HalBindings, String> {
     let mut b = rr3_desc_base(descriptor)?;
+    rr3_overrides_apply(&mut b, overrides)?;
+    Ok(b)
+}
+
+/// 应急覆盖逐键落到描述符底上（同键覆盖赢，写错当场点名）。
+fn rr3_overrides_apply(
+    b: &mut Rr3HalBindings,
+    overrides: &BTreeMap<String, String>,
+) -> Result<(), String> {
     for (k, raw) in overrides {
         b.rr3_binding_set(k, raw)
             .map_err(|e| format!("应急覆盖无效: {e}"))?;
     }
-    Ok(b)
+    Ok(())
 }
 
 /// 描述符为底：缺省/空文本即空表，解析失败整册拒。

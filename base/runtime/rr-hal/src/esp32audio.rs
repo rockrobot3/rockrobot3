@@ -503,10 +503,7 @@ pub(crate) const RR3_HAL_ESP32_TEE_ENV: &str = "RR3_HAL_ESP32_TEE";
 /// 由**构造面**保证（不 open 即无 fd 无文件，非运行期判断）。打开失败 = tee
 /// 缺席（打一条不挡链路——tee 是观测面，不是链路面）。
 fn rr3_tee_open() -> Option<std::fs::File> {
-    let path = std::env::var(RR3_HAL_ESP32_TEE_ENV).ok()?;
-    if path.is_empty() {
-        return None;
-    }
+    let path = rr3_tee_path()?;
     match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -521,6 +518,15 @@ fn rr3_tee_open() -> Option<std::fs::File> {
             None
         }
     }
+}
+
+/// tee 目标路径：env 未设或为空即无（关闭态零落盘）。
+fn rr3_tee_path() -> Option<String> {
+    let path = std::env::var(RR3_HAL_ESP32_TEE_ENV).ok()?;
+    if path.is_empty() {
+        return None;
+    }
+    Some(path)
 }
 
 /// tee 单文件上限（真板实录 2026-11-09）：取证开关被留在 systemd drop-in 里时，
@@ -656,6 +662,11 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
         }
     }
     // 收兵：板面停流（防御残流），conn 释放 → flock 退账
+    rr3_reader_tail(conn);
+}
+
+/// 读线程收尾：残留连接上补发停流（conn 释放即 flock 退账）。
+fn rr3_reader_tail(conn: Option<Rr3UartConn>) {
     if let Some(mut c) = conn {
         let _ = c.write_all(b"AUDIO OFF\n");
     }
@@ -970,11 +981,16 @@ impl Rr3Esp32UartAudioSource {
     fn rr3_close_stream(stream: Rr3Esp32AudioStream) {
         stream.core.stop.store(true, Ordering::Release);
         if let Some(h) = stream.reader.as_ref() {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while !h.is_finished() && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            rr3_join_reader(h);
         }
+    }
+}
+
+/// 有界等读线程退出（超时 detach——线程下一查旗点自灭）。
+fn rr3_join_reader(h: &std::thread::JoinHandle<()>) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !h.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
