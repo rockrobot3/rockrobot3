@@ -87,10 +87,7 @@ pub(super) fn rr3_serve_ctl(
                 format!("ctl 连接只接受 rr3.ctl.*，收到 {}", req.method.as_str()),
             )),
         };
-    let payload = match &result {
-        Ok(v) => rr3_rpc_build_result(req.id, v),
-        Err((code, msg)) => rr3_rpc_build_error(req.id, *code, msg),
-    };
+    let payload = rr3_ctl_payload(req.id, &result);
     rr3_write(
         out,
         &rr3_out_frame(Rr3PayloadType::Response, reported_task, &payload),
@@ -100,6 +97,14 @@ pub(super) fn rr3_serve_ctl(
         req.method.as_str()
     ));
     "ctl 查询完成，一次性控制连接按 ADR-0010 收尾".to_string()
+}
+
+/// 应答体：Ok 出结果帧、Err 出错误帧。
+fn rr3_ctl_payload(req_id: u64, result: &Result<Value, (Rr3StatusCode, String)>) -> Vec<u8> {
+    match result {
+        Ok(v) => rr3_rpc_build_result(req_id, v),
+        Err((code, msg)) => rr3_rpc_build_error(req_id, *code, msg),
+    }
 }
 
 /// ctl.status 读面：在册模块快照 + 越权发布计数（锁内取数、锁外组 JSON）。
@@ -217,13 +222,21 @@ fn rr3_reboot_run() -> Result<(), String> {
     ];
     let mut errs = Vec::new();
     for (cmd, args) in TRIES {
-        match std::process::Command::new(cmd).args(args).status() {
-            Ok(st) if st.success() => return Ok(()),
-            Ok(st) => errs.push(format!("{cmd}: {st}")),
-            Err(e) => errs.push(format!("{cmd}: {e}")),
+        match rr3_cmd_err(cmd, std::process::Command::new(cmd).args(args).status()) {
+            Some(e) => errs.push(e),
+            None => return Ok(()),
         }
     }
     Err(errs.join("; "))
+}
+
+/// 单条重启命令的结果 → 失败描述（成功返回 None）。
+fn rr3_cmd_err(cmd: &str, st: std::io::Result<std::process::ExitStatus>) -> Option<String> {
+    match st {
+        Ok(st) if st.success() => None,
+        Ok(st) => Some(format!("{cmd}: {st}")),
+        Err(e) => Some(format!("{cmd}: {e}")),
+    }
 }
 
 #[cfg(test)]

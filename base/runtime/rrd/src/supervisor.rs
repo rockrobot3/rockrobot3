@@ -210,16 +210,23 @@ fn rr3_job_entry(manifest_path: &Path, facts: &Rr3ManifestFacts) -> Option<PathB
             .join(&facts.entry)
     };
     // E-3 的两项检查。`PermissionsExt::mode()` 在 `std::os::unix::fs` 里，仍是零外部依赖。
-    match std::fs::metadata(&entry) {
-        Ok(md) if md.is_file() && md.permissions().mode() & 0o111 != 0 => Some(entry),
-        _ => {
-            rr3_log(&format!(
-                "拒绝启动 {}：entry {} 不存在或不可执行",
-                facts.name,
-                entry.display()
-            ));
-            None
-        }
+    if rr3_entry_runnable(&entry) {
+        Some(entry)
+    } else {
+        rr3_log(&format!(
+            "拒绝启动 {}：entry {} 不存在或不可执行",
+            facts.name,
+            entry.display()
+        ));
+        None
+    }
+}
+
+/// E-3：entry 存在、是文件且可执行。
+fn rr3_entry_runnable(entry: &Path) -> bool {
+    match std::fs::metadata(entry) {
+        Ok(md) => md.is_file() && md.permissions().mode() & 0o111 != 0,
+        Err(_) => false,
     }
 }
 
@@ -415,15 +422,7 @@ fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Comma
     // stderr 接 per-unit 日志文件（门 r 留痕通道定形，批N4 件八）：模块留痕唯一可达
     // 通道——append 语义让"一次重启后仍能取到崩溃前的最后 N 行"（§17 同轨判据）天然
     // 成立；文件打不开回退 inherit 并点名，观测通道故障降级、不挡起跑。
-    let stderr_stdio = match rr3_open_unit_log(bus_path, name) {
-        Ok(f) => Stdio::from(f),
-        Err(e) => {
-            rr3_log(&format!(
-                "per-unit 日志打不开（{name}）: {e} —— stderr 回退 inherit"
-            ));
-            Stdio::inherit()
-        }
-    };
+    let stderr_stdio = rr3_unit_stderr(bus_path, name);
     cmd.stdout(Stdio::null()).stderr(stderr_stdio);
     // 父死子收（Linux）：rrd 崩溃/被杀时子进程不能变孤儿继续占 UART/声卡。
     // 2026-11-09 真板实录：部署停旧栈后新 sense 连报两次 `HAL 设备忙`——旧 sense
@@ -444,6 +443,19 @@ fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Comma
         }
     }
     cmd
+}
+
+/// per-unit 日志 stderr；打不开回退 inherit 并点名（观测降级不挡起跑）。
+fn rr3_unit_stderr(bus_path: &Path, name: &str) -> Stdio {
+    match rr3_open_unit_log(bus_path, name) {
+        Ok(f) => Stdio::from(f),
+        Err(e) => {
+            rr3_log(&format!(
+                "per-unit 日志打不开（{name}）: {e} —— stderr 回退 inherit"
+            ));
+            Stdio::inherit()
+        }
+    }
 }
 
 /// 可选面注入：物理绑定描述符、HAL 后端与音频/舵机/显示三面覆盖、执行轴状态，

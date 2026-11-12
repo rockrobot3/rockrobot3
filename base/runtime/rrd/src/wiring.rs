@@ -168,6 +168,11 @@ fn rr3_wire_ident<'a>(
     connector
 }
 
+/// 位序对应破：两边都非空且长度不等（hdr_pin[k] ↔ signal[k]）。
+fn rr3_wire_arity_bad(hdr_pin: &[i64], signal: &[String]) -> bool {
+    !hdr_pin.is_empty() && !signal.is_empty() && hdr_pin.len() != signal.len()
+}
+
 /// 导体面：hdr_pin 非空整数数组 + signal 非空字符串数组 + 位序对应（等长）
 fn rr3_wire_conductors(
     i: usize,
@@ -196,7 +201,7 @@ fn rr3_wire_conductors(
         errs.push(format!("wire #{i}.signal 必须是非空字符串数组"));
     }
     // 位序对应：hdr_pin[k] ↔ signal[k]（丝印序即信号序）
-    if !hdr_pin.is_empty() && !signal.is_empty() && hdr_pin.len() != signal.len() {
+    if rr3_wire_arity_bad(&hdr_pin, &signal) {
         errs.push(format!(
             "wire #{i} 的 hdr_pin（{} 个）与 signal（{} 个）数目不等（位序对应：hdr_pin[k] ↔ signal[k]）",
             hdr_pin.len(),

@@ -120,6 +120,11 @@ pub fn rr3_cli_parse_env(
     while i < args.len() {
         i = rr3_cli_arg(&mut cfg, args, i)?;
     }
+    rr3_cli_finish(cfg)
+}
+
+/// 末尾两道语义门：socket 非空 → 装配面必选（形状错误已在解析循环内拒）。
+fn rr3_cli_finish(cfg: RrdConfig) -> Result<RrdConfig, String> {
     if cfg.socket.as_os_str().is_empty() {
         return Err("--socket 不得为空".to_string());
     }

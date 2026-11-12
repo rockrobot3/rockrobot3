@@ -85,15 +85,26 @@ fn rr3_pin_adc(
             let Some(pin) = profile.pins.iter().find(|p| &p.rr3_pin_id() == val) else {
                 continue; // 悬空 pin_id 由 ⑥-d 点名，此处不重复报
             };
-            for p in &pin.physical {
-                if !platform.rr3_adc_pins().contains(p) {
-                    errs.push(format!(
-                        "pins[{}] 是域 {} 的模拟测点（{key} 绑定），physical 元素 {p} 不在平台 {plat} 的 ADC 能力集（校验⑤-b：测点落非 ADC 脚读回恒值，档位恒真或恒假——F-9）",
-                        pin.rr3_pin_id(),
-                        d.name
-                    ));
-                }
-            }
+            rr3_adc_phys_check(pin, &d.name, key, platform, plat, errs);
+        }
+    }
+}
+
+/// 单 pin 的 physical 全落 ADC 集判据。
+fn rr3_adc_phys_check(
+    pin: &Rr3PinEntry,
+    domain_name: &str,
+    key: &str,
+    platform: &Rr3PlatformTable,
+    plat: &str,
+    errs: &mut Vec<String>,
+) {
+    for p in &pin.physical {
+        if !platform.rr3_adc_pins().contains(p) {
+            errs.push(format!(
+                "pins[{}] 是域 {domain_name} 的模拟测点（{key} 绑定），physical 元素 {p} 不在平台 {plat} 的 ADC 能力集（校验⑤-b：测点落非 ADC 脚读回恒值，档位恒真或恒假——F-9）",
+                pin.rr3_pin_id()
+            ));
         }
     }
 }

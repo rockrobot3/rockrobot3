@@ -236,7 +236,15 @@ fn rr3_entry_span(text: &str, module: &str) -> Result<(usize, usize, usize), Str
             hits.push((idx, a, b));
         }
     }
-    if let [one] = hits.as_slice() {
+    rr3_entry_single(module, &hits)
+}
+
+/// entry 行数裁定：恰一条返回位置，零条 / 多条逐类点名。
+fn rr3_entry_single(
+    module: &str,
+    hits: &[(usize, usize, usize)],
+) -> Result<(usize, usize, usize), String> {
+    if let [one] = hits {
         return Ok(*one);
     }
     if hits.is_empty() {
