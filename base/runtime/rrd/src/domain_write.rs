@@ -431,6 +431,7 @@ fn rr3_domain_plan(
     dom: &crate::profile::Rr3Domain,
 ) -> Result<(Value, Rr3DomainUpdates), (Rr3StatusCode, String)> {
     let perm = |msg: String| (Rr3StatusCode::Permission, msg);
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let plan = match (params.key.as_str(), &params.value) {
         // armed 写：evidence 联动（成对纪律——写面直接落出⑥-e 要求的档内形状）
         ("armed", Rr3WriteValue::Bool(true)) => {
@@ -463,7 +464,13 @@ fn rr3_domain_plan(
             rr3_write_evidence(&paths.profile, &ev)?;
             (json!(dom.severe_mv), vec![("severe_mv", n.to_string())])
         }
-        _ => unreachable!("parse 层白名单已裁，值型与键必配"),
+        // 键/值型不配：parse 层白名单已裁，正常到不了；但参数结构对库内可见可构造，
+        // 不变式破损必须落成"拒"而不是 panic——写面在守护线程里，panic 断连接丢应答。
+        (key, _) => {
+            return Err(invalid(format!(
+                "写口键 {key:?} 与值型不配（domain → armed 布尔 / severe_mv 正整数），拒"
+            )))
+        }
     };
     Ok(plan)
 }
@@ -1139,6 +1146,31 @@ present = ["act.servo", "power.charger"]
                 "并发写不得丢写: {after}"
             );
             assert!(after.contains("evidence = \"实测/0001\""), "{after}");
+        }
+
+        /// 键/值型不配（B39 审计）：参数结构破损落成 Invalid 拒，不再 panic——
+        /// 正常路径由 parse 层白名单拦在前面，本用例钉的是拒面表达方式：写面住在
+        /// 守护线程里，panic = 断连接、丢应答。
+        #[cfg(unix)]
+        #[test]
+        fn plan_rejects_key_value_mismatch_without_panic() {
+            let fx = fixture();
+            let dom = crate::profile::Rr3Domain {
+                armed: false,
+                severe_mv: 4400,
+                ..Default::default()
+            };
+            let p = Rr3DomainWriteParams {
+                target: Rr3WriteTarget::Domain,
+                name: "rail5v".to_string(),
+                key: "nominal_mv".to_string(),
+                value: Rr3WriteValue::Num(1),
+                evidence: None,
+                confirm: Some(true),
+            };
+            let (code, msg) = rr3_domain_plan(&fx.paths, &p, &dom).expect_err("白名单外组合必须拒");
+            assert_eq!(code, Rr3StatusCode::Invalid);
+            assert!(msg.contains("不配"), "{msg}");
         }
 
         /// 红三：手术后装载预核不过拒落盘——未标定域（sense=none、max_age_ms=0）
