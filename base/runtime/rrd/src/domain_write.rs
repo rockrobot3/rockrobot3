@@ -679,7 +679,7 @@ fn rr3_axis_stage(axis_path: &Path, n: u64) -> Result<PathBuf, (Rr3StatusCode, S
 /// 拒因文案不含任何密钥值（写口参数只有域/轴名、键名、数字与证据引用）。
 #[cfg(unix)]
 pub fn rr3_domain_write_run(params: &Value) -> Result<Value, (Rr3StatusCode, String)> {
-    let out = rr3_domain_write_inner(params);
+    let out = rr3_write_body(params);
     if let Err((code, msg)) = &out {
         crate::rr3_log(&format!("domain 写口拒（{code:?}）: {msg}"));
     }
@@ -689,7 +689,7 @@ pub fn rr3_domain_write_run(params: &Value) -> Result<Value, (Rr3StatusCode, Str
 /// 写口执行薄壳：params 拆包 → 快照路径推导 → 执行。快照未在册（--manifest
 /// 调试路径）如实回不可得——无记账即无路径依据，写口不猜路径。
 #[cfg(unix)]
-fn rr3_domain_write_inner(params: &Value) -> Result<Value, (Rr3StatusCode, String)> {
+fn rr3_write_body(params: &Value) -> Result<Value, (Rr3StatusCode, String)> {
     let parsed = rr3_write_parse(params)?;
     let mut p = parsed.clone();
     p.confirm = Rr3DomainWriteParams::confirm_from(params);
