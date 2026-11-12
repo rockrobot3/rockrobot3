@@ -47,87 +47,15 @@ fn rr3_sim_stamp() -> u128 {
         .unwrap_or(0)
 }
 
-/// 仓源 manifest 的 entry 装机改写（rr3-pack `rr3_manifest_rewrite` 同语义同
-/// 三道门，只改 entry 引号内的值，其余字节原样）：
-/// 门 0 装机值可装机（绝对路径 + 无 `.` / `..` 段；POSIX 语法判定——
-/// `Path::is_absolute` 在 Windows host 对 `/x` 返回 false，语义随 host 漂移会让同一
-/// 份 manifest 两侧判定不同，registry 的 `rr3_manifest_abs` 同款理由）；
-/// 门 1 entry 行恰一条；门 2 旧值与解析事实交叉核验（防夹具读错文件）；
-/// 门 3 改写后重解析复核。
-/// 装机 entry 形制门（单点）：POSIX 绝对路径且不含 `.`/`..` 段——演练布局的
-/// 入口路径直接进"产物是否可装机"判据，相对路径会让演练端由 CWD 决定起哪个
-/// 二进制（与 rrd 侧绝对化纪律同一条）。
-fn rr3_entry_target(installed: &Path, module: &str) -> Result<String, String> {
-    let target = installed.to_string_lossy().into_owned();
-    if !target.starts_with('/') || target.split('/').any(|s| s == "." || s == "..") {
-        return Err(format!(
-            "模块 {module} 的装机 entry 不可装机（{target}：须 POSIX 绝对路径且无 . / .. 段）"
-        ));
-    }
-    Ok(target)
-}
-
-/// 单条 entry 行的值置换：取首对引号内的旧值对账解析事实，换为新装机路径，
-/// 行内其余字节（前导空白/键名/尾注释）原封。
-fn rr3_entry_line(
-    line: &str,
-    facts_entry: &str,
-    target: &str,
-    module: &str,
-) -> Result<String, String> {
-    let (before, rest) = line
-        .split_once('"')
-        .ok_or_else(|| format!("模块 {module} 的 entry 行无引号值"))?;
-    let (old, after) = rest
-        .split_once('"')
-        .ok_or_else(|| format!("模块 {module} 的 entry 行引号不闭合"))?;
-    if old != facts_entry {
-        return Err(format!(
-            "模块 {module} 的 entry 旧值 {old:?} 与解析事实 {facts_entry:?} 不一致（夹具读错文件？）"
-        ));
-    }
-    Ok(format!("{before}\"{target}\"{after}"))
-}
-
-pub fn rr3_entry_rewrite(
+/// 仓源 manifest 的 entry 装机改写（B45 起委托 rrd 单点 [`rr3_manifest_rewrite`]：
+/// 演练布局与 rr3-pack 打包共用同一实现，四道门与文案不再各写一份）。
+fn rr3_entry_rewrite(
     text: &str,
     installed: &Path,
     facts_entry: &str,
     module: &str,
 ) -> Result<String, String> {
-    let target = rr3_entry_target(installed, module)?;
-    let mut n = 0;
-    let mut out = String::with_capacity(text.len() + target.len());
-    // split_inclusive 保住原文件的行尾形状（含"无尾换行"），除 entry 外逐字节零差异
-    for line in text.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        let is_entry = trimmed.starts_with("entry")
-            && trimmed["entry".len()..].starts_with(|c: char| c.is_whitespace() || c == '=');
-        if !is_entry {
-            out.push_str(line);
-            continue;
-        }
-        n += 1;
-        if n > 1 {
-            return Err(format!(
-                "模块 {module} 的 manifest 有多条 entry 行（须恰一条）"
-            ));
-        }
-        out.push_str(&rr3_entry_line(line, facts_entry, &target, module)?);
-    }
-    if n == 0 {
-        return Err(format!("模块 {module} 的 manifest 无 entry 行"));
-    }
-    // 门 3：改写后重解析复核（entry 恰为新值，顺带保住"其余字段仍可解析"）
-    let re = rr3_manifest_parse(&out)
-        .map_err(|errs| format!("模块 {module} 改写后不可解析: {errs:?}"))?;
-    if re.entry != target {
-        return Err(format!(
-            "模块 {module} 改写复核不一致（得 {:?}，want {target:?}）",
-            re.entry
-        ));
-    }
-    Ok(out)
+    rrd::manifest::rr3_manifest_rewrite(text, &installed.to_string_lossy(), facts_entry, module)
 }
 
 /// 装配布局的一条产物：模块名、entry 绝对路径

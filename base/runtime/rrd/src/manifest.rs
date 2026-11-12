@@ -211,6 +211,90 @@ pub fn rr3_manifest_abs(entry: &str) -> bool {
     entry.starts_with('/')
 }
 
+/// entry 行定位（单点）：全文本内恰一条 `entry = "…"`，返回（行号, 值区间）。
+/// 引号内无值、多条、零条都是契约事故，逐类点名拒绝。
+fn rr3_entry_span(text: &str, module: &str) -> Result<(usize, usize, usize), String> {
+    let mut hits: Vec<(usize, usize, usize)> = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        let is_entry = t.starts_with("entry")
+            && t["entry".len()..].starts_with(|c: char| c.is_whitespace() || c == '=');
+        if !is_entry {
+            continue;
+        }
+        let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) else {
+            return Err(format!(
+                "模块 {module} 的 entry 行不是双引号字符串（schema 违约）: {line}"
+            ));
+        };
+        if b <= a + 1 {
+            return Err(format!(
+                "模块 {module} 的 entry 行引号内无值（schema 违约）: {line}"
+            ));
+        }
+        hits.push((idx, a + 1, b));
+    }
+    match hits.as_slice() {
+        [one] => Ok(*one),
+        [] => Err(format!(
+            "模块 {module} 的 manifest 无 entry 行（schema 违约，打包/装机拒绝）"
+        )),
+        n => Err(format!(
+            "模块 {module} 的 manifest 有 {} 行 entry（须恰一条；歧义，打包/装机拒绝）",
+            n.len()
+        )),
+    }
+}
+
+/// 装机的 entry 值形制门（单点）：POSIX 绝对路径且不含 `.`/`..` 段——装机布局的
+/// 入口直接进"是否可装机"判据，相对路径会让起进程方由 CWD 决定起哪个二进制。
+fn rr3_entry_target(installed: &str, module: &str) -> Result<(), String> {
+    if !rr3_manifest_abs(installed) || installed.split('/').any(|s| s == "." || s == "..") {
+        return Err(format!(
+            "模块 {module} 的装机 entry 不可装机（{installed}：须 POSIX 绝对路径且无 . / .. 段）"
+        ));
+    }
+    Ok(())
+}
+
+/// manifest 的 entry 装机改写（**单点**：打包与演练布局共用同一实现，防两侧
+/// 判据漂移）：形制门 → 恰一条 → 旧值对账解析事实 → 引号外零差异改写 →
+/// 重解析复核新值已生效。不整文件重序列化（那会重排/丢注释，违反"只动一个值"）。
+pub fn rr3_manifest_rewrite(
+    text: &str,
+    installed_entry: &str,
+    facts_entry: &str,
+    module: &str,
+) -> Result<String, String> {
+    rr3_entry_target(installed_entry, module)?;
+    let (idx, a, b) = rr3_entry_span(text, module)?;
+    let mut out = String::with_capacity(text.len() + installed_entry.len());
+    for (i, line) in text.split_inclusive('\n').enumerate() {
+        if i != idx {
+            out.push_str(line);
+            continue;
+        }
+        let old = &line[a..b];
+        if old != facts_entry {
+            return Err(format!(
+                "模块 {module} 的 entry 旧值 {old:?} 与解析事实 {facts_entry:?} 不一致（疑似同名键，拒绝改写）"
+            ));
+        }
+        out.push_str(&line[..a]);
+        out.push_str(installed_entry);
+        out.push_str(&line[b..]);
+    }
+    let re = rr3_manifest_parse(&out)
+        .map_err(|errs| format!("模块 {module} 改写后不可解析: {errs:?}"))?;
+    if re.entry != installed_entry {
+        return Err(format!(
+            "模块 {module} 改写复核不一致（得 {:?}，want {installed_entry:?}）",
+            re.entry
+        ));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +339,51 @@ watchdog_timeout_ms = 1000
         );
         assert!(f.depends_required.is_empty());
         assert!(f.provides.is_empty());
+    }
+
+    /// 装机改写（B45 起打包与演练布局共用本实现）：只动 entry 引号内的值，其余
+    /// 字节（行尾注释、段序、尾换行）原样；四道门各自的坏形拒且点名。
+    #[test]
+    fn rewrite_touches_only_the_entry_value() {
+        let text = GOOD.replace(
+            "entry = \"/usr/bin/sim_peer\"",
+            "entry = \"/usr/bin/sim_peer\" # 行尾注释随原值保留",
+        );
+        let out = rr3_manifest_rewrite(
+            &text,
+            "/opt/rr3/modules/rr3-sima/rr3-sima",
+            "/usr/bin/sim_peer",
+            "rr3-sima",
+        )
+        .expect("合法改写应过");
+        assert!(
+            out.contains("entry = \"/opt/rr3/modules/rr3-sima/rr3-sima\" # 行尾注释随原值保留\n"),
+            "{out}"
+        );
+        let strip = |s: &str| {
+            s.lines()
+                .filter(|l| !l.trim_start().starts_with("entry"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert_eq!(strip(&text), strip(&out), "除 entry 外须逐字节零差异");
+        assert!(
+            rr3_manifest_rewrite(&text, "rel/bin", "/usr/bin/sim_peer", "m")
+                .unwrap_err()
+                .contains("不可装机")
+        );
+        assert!(
+            rr3_manifest_rewrite(&text, "/abs/../esc", "/usr/bin/sim_peer", "m")
+                .unwrap_err()
+                .contains("不可装机")
+        );
+        assert!(rr3_manifest_rewrite(&text, "/x", "other", "m")
+            .unwrap_err()
+            .contains("不一致"));
+        let dup = format!("{text}entry = \"/usr/bin/other\"\n");
+        assert!(rr3_manifest_rewrite(&dup, "/x", "/usr/bin/sim_peer", "m")
+            .unwrap_err()
+            .contains("恰一条"));
     }
 
     /// 缺字段逐条点名且继续检查其余字段（不是遇一个就返回）
