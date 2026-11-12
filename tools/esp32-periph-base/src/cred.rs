@@ -91,8 +91,16 @@ pub(crate) fn rr3_cred_read() -> Option<Rr3Cred> {
     let k_ssid = CString::new(RR3_CRED_KEY_SSID).ok()?;
     let k_pass = CString::new(RR3_CRED_KEY_PASS).ok()?;
     let mut h: nvs_handle_t = 0;
-    // 命名空间不存在＝没配过（常态，非错误——静默回 None，boot 走编译期回落）
-    if unsafe { nvs_open(ns.as_ptr(), nvs_open_mode_t_NVS_READONLY, &mut h) } != ESP_OK {
+    // 命名空间不存在＝没配过（常态，非错误——静默回 None，boot 走编译期回落）。
+    // 其余打开失败（无空闲页/分区版本不符/参数坏）= 存储面故障，必须点名：静默按
+    // "没配过"处理会让固化凭据悄悄回落到编译期注入（设备连到另一张网），排障零线索。
+    let open = unsafe { nvs_open(ns.as_ptr(), nvs_open_mode_t_NVS_READONLY, &mut h) };
+    if open != ESP_OK {
+        if open != ESP_ERR_NVS_NOT_FOUND {
+            eprintln!(
+                "[periph] 凭据 NVS 打不开（ns={RR3_CRED_NAMESPACE}，err={open:#x}）——按未配置处理（存储面故障，非未配网）"
+            );
+        }
         return None;
     }
     let r = unsafe {
@@ -127,7 +135,10 @@ unsafe fn nvs_get_str_boxed(h: nvs_handle_t, key: &CString, max: usize) -> Optio
         return None;
     }
     if r != ESP_OK {
-        // NVS_NOT_FOUND 等＝该键没配（常态走 None）；其余错误同样键名级点名不出值
+        // NOT_FOUND = 该键没配（常态走 None）；其余错误是存储面故障，同上必须点名
+        if r != ESP_ERR_NVS_NOT_FOUND {
+            eprintln!("[periph] 凭据键 {kname} 读失败（err={r:#x}）——按未配置处理");
+        }
         return None;
     }
     match rr3_cred_take(&buf, max) {
