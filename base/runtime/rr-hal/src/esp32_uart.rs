@@ -33,11 +33,12 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use rr_ipc::{
-    rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3TransportConn, Rr3UartConn,
-    RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_CRED_STORE, RR3_BOARD_BINDING_I2C_SCL,
-    RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK, RR3_BOARD_BINDING_I2S_SD,
-    RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_LEDC_PAN, RR3_BOARD_BINDING_LEDC_TILT,
-    RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX, RR3_METHOD_SET_BINDINGS,
+    rr3_body_split, rr3_uart_baud_speed, Rr3Frame, Rr3FrameBuf, Rr3PayloadType, Rr3TransportConn,
+    Rr3UartConn, RR3_BOARD_BINDING_ADC_RAIL_PIN, RR3_BOARD_BINDING_CRED_STORE,
+    RR3_BOARD_BINDING_I2C_SCL, RR3_BOARD_BINDING_I2C_SDA, RR3_BOARD_BINDING_I2S_BCLK,
+    RR3_BOARD_BINDING_I2S_SD, RR3_BOARD_BINDING_I2S_WS, RR3_BOARD_BINDING_LEDC_PAN,
+    RR3_BOARD_BINDING_LEDC_TILT, RR3_BOARD_BINDING_UART2_RX, RR3_BOARD_BINDING_UART2_TX,
+    RR3_METHOD_SET_BINDINGS,
 };
 use serde_json::{json, Map, Value};
 
@@ -136,18 +137,23 @@ fn rr3_board_pins(m: &mut Map<String, Value>, b: &Rr3HalBindings) {
 /// - 三键全缺 = 无板侧配置可注（host 档描述符本就无板侧键）。
 fn rr3_env_bindings() -> Option<Value> {
     let text = std::env::var(RR3_HAL_BINDINGS_ENV).ok()?;
-    let b = match rr3_bindings_parse(&text) {
-        Ok(b) => b,
+    let b = rr3_bindings_of(&text)?;
+    rr3_board_payload(&b)
+}
+
+/// 描述符文本解析：失败点名后跳过（fail-visible，不静默放行坏值）。
+fn rr3_bindings_of(text: &str) -> Option<Rr3HalBindings> {
+    match rr3_bindings_parse(text) {
+        Ok(b) => Some(b),
         Err(errs) => {
             eprintln!(
                 "rr-hal-esp32: {} 解析失败，跳过板侧绑定推送: {}",
                 RR3_HAL_BINDINGS_ENV,
                 errs.join("; ")
             );
-            return None;
+            None
         }
-    };
-    rr3_board_payload(&b)
+    }
 }
 
 /// 开串口：失败当场点名（细节落日志）后折 Busy。
@@ -247,16 +253,18 @@ impl Rr3BridgeConn {
 
     /// 组一帧并写出（id 在此分配）：失败点名并报废连接，下次调用重开。
     fn rr3_send_req(&mut self, method: &str, params: &Value) -> Result<u64, Rr3HalError> {
-        if self.conn.is_none() {
-            return Err(Rr3HalError::Busy); // rr3_ensure 后必在，防御性兜底
-        }
         let id = self.next_id;
         self.next_id += 1;
         let req = rr3_bridge_req_frame(id, method, params);
+        self.rr3_write_req(&req, id)
+    }
+
+    /// 写出请求帧：失败点名并报废连接（下次调用重开），成功回 id。
+    fn rr3_write_req(&mut self, req: &Rr3Frame, id: u64) -> Result<u64, Rr3HalError> {
         let Some(conn) = self.conn.as_mut() else {
-            return Err(Rr3HalError::Busy); // 上面已判在位，防御性兜底
+            return Err(Rr3HalError::Busy); // rr3_ensure 后必在，防御性兜底
         };
-        match conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
+        match conn.rr3_send_buf(Rr3FrameBuf::from(req)) {
             Ok(()) => Ok(id),
             Err(e) => {
                 eprintln!("rr-hal-esp32: Request 写出失败: {e:?}");
@@ -271,30 +279,28 @@ impl Rr3BridgeConn {
     fn rr3_reply(&mut self, id: u64) -> Result<Value, Rr3HalError> {
         let buf = self.rr3_recv_reply()?;
         let frame = self.rr3_reply_frame(buf)?;
-        let (ty, body) = match rr3_body_split(&frame.payload) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("rr-hal-esp32: 应答 payload 前缀非法: {e:?}");
-                self.conn = None;
-                return Err(Rr3HalError::Busy);
-            }
-        };
+        let (ty, body) = self.rr3_split_body(&frame.payload)?;
         rr3_bridge_decode(ty, &body, id).map_err(|e| {
             eprintln!("rr-hal-esp32: 应答门拒绝: {e}");
             Rr3HalError::Busy
         })
     }
 
+    /// 拆 payload 类型前缀：非法即点名并报废连接。
+    fn rr3_split_body(&mut self, payload: &[u8]) -> Result<(Rr3PayloadType, Vec<u8>), Rr3HalError> {
+        match rr3_body_split(payload) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                eprintln!("rr-hal-esp32: 应答 payload 前缀非法: {e:?}");
+                self.conn = None;
+                Err(Rr3HalError::Busy)
+            }
+        }
+    }
+
     /// 应答帧还原与 dst 归属门：任一不过即点名并报废连接。
     fn rr3_reply_frame(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
-        let frame = match Rr3Frame::try_from(buf) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("rr-hal-esp32: 应答帧还原失败: {e:?}");
-                self.conn = None;
-                return Err(Rr3HalError::Busy);
-            }
-        };
+        let frame = self.rr3_frame_of(buf)?;
         if frame.header.dst_task != RR3_TASK_HOST {
             eprintln!(
                 "rr-hal-esp32: 应答 dst_task={} 非 {RR3_TASK_HOST}，拒收",
@@ -304,6 +310,18 @@ impl Rr3BridgeConn {
             return Err(Rr3HalError::Busy);
         }
         Ok(frame)
+    }
+
+    /// 应答帧还原：失败点名并报废连接。
+    fn rr3_frame_of(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
+        match Rr3Frame::try_from(buf) {
+            Ok(f) => Ok(f),
+            Err(e) => {
+                eprintln!("rr-hal-esp32: 应答帧还原失败: {e:?}");
+                self.conn = None;
+                Err(Rr3HalError::Busy)
+            }
+        }
     }
 
     /// 读一帧（窗口耗尽即判板侧无应答/链路断，点名后报废连接）。

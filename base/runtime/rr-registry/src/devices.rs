@@ -64,11 +64,7 @@ pub fn rr3_dev_parse(text: &str) -> Rr3DeviceTable {
 /// 单条 `[[device]]`：model 必填（缺省整条不收），其余键按各自缺省收。
 fn rr3_dev_one(d: &toml::Table) -> Option<(&str, Rr3DeviceEntry)> {
     let model = d.get("model").and_then(Value::as_str)?;
-    let id_reg = d.get("id_reg").and_then(Value::as_table).and_then(|t| {
-        let addr = t.get("addr").and_then(Value::as_integer)?;
-        let expect = t.get("expect").and_then(Value::as_integer)?;
-        Some((addr, expect))
-    });
+    let id_reg = rr3_dev_id_reg(d);
     let entry = Rr3DeviceEntry {
         bus: d
             .get("bus")
@@ -99,6 +95,15 @@ fn rr3_dev_one(d: &toml::Table) -> Option<(&str, Rr3DeviceEntry)> {
             .to_string(),
     };
     Some((model, entry))
+}
+
+/// 器件级在位探测寄存器 `id_reg = { addr, expect }`：缺键/类型不合按缺省收。
+fn rr3_dev_id_reg(d: &toml::Table) -> Option<(i64, i64)> {
+    d.get("id_reg").and_then(Value::as_table).and_then(|t| {
+        let addr = t.get("addr").and_then(Value::as_integer)?;
+        let expect = t.get("expect").and_then(Value::as_integer)?;
+        Some((addr, expect))
+    })
 }
 
 impl Rr3DeviceTable {

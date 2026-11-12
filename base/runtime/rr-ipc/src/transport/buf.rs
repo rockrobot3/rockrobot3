@@ -104,19 +104,25 @@ impl TryFrom<Rr3FrameBuf> for Rr3Frame {
 
     /// 缓冲 → 值视图。未 seal 时头区不可信，拒转。
     fn try_from(mut buf: Rr3FrameBuf) -> Result<Self, Self::Error> {
-        if !buf.sealed {
-            return Err(Rr3FrameError::Unsealed);
-        }
-        let header =
-            Rr3Header::from_bytes(&buf.bytes[..RR3_IPC_HDR_SIZE]).map_err(Rr3FrameError::Header)?;
-        // 头以 buf.hdr 为准编出，此处解析回读是防御：两者不一致说明 seal 后缓冲头区被外力改写。
-        debug_assert_eq!(header, buf.hdr);
-        buf.bytes.drain(..RR3_IPC_HDR_SIZE);
+        let header = rr3_buf_open(&mut buf)?;
         Ok(Rr3Frame {
             header,
             payload: buf.bytes,
         })
     }
+}
+
+/// 缓冲 → 可信头（未 seal 拒转；头按 seal 后的线上字节回读），并剥掉头区。
+fn rr3_buf_open(buf: &mut Rr3FrameBuf) -> Result<Rr3Header, Rr3FrameError> {
+    if !buf.sealed {
+        return Err(Rr3FrameError::Unsealed);
+    }
+    let header =
+        Rr3Header::from_bytes(&buf.bytes[..RR3_IPC_HDR_SIZE]).map_err(Rr3FrameError::Header)?;
+    // 头以 buf.hdr 为准编出，此处解析回读是防御：两者不一致说明 seal 后缓冲头区被外力改写。
+    debug_assert_eq!(header, buf.hdr);
+    buf.bytes.drain(..RR3_IPC_HDR_SIZE);
+    Ok(header)
 }
 
 /// 读一帧进单块缓冲（阻塞至读满，或 EOF/坏帧报错）。计数走窄缝

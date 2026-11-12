@@ -120,6 +120,12 @@ impl Rr3LinuxIna219 {
         if slot.is_some() {
             return Ok(());
         }
+        *slot = Some(self.rr3_bus_open()?); // fd 所有权移交 self，Drop close
+        Ok(())
+    }
+
+    /// 打开总线文件并 `I2C_SLAVE` 定从地址，交出 fd 所有权。
+    fn rr3_bus_open(&self) -> Result<std::os::raw::c_int, Rr3HalError> {
         let file = std::fs::File::open(self.bus_dev_path()).map_err(|e| {
             Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
                 "i2c 打开 {:?} 失败: {e}（总线不在位或权限不足——raspi-config 需开 I2C）",
@@ -127,8 +133,7 @@ impl Rr3LinuxIna219 {
             )))
         })?;
         rr3_slave_set(file.as_raw_fd(), &self.bus_dev_path(), self.addr)?;
-        *slot = Some(file.into_raw_fd()); // fd 所有权移交 self，Drop close
-        Ok(())
+        Ok(file.into_raw_fd())
     }
 
     /// 原生寄存器读：写 1 字节寄存器号 + 读 2 字节（INA219 原生大端）。

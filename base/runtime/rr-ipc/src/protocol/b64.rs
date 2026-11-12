@@ -46,18 +46,23 @@ pub fn rr3_base64_encode(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(RR3_B64_ALPHABET[(n >> 18) as usize & 63] as char);
         out.push(RR3_B64_ALPHABET[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            RR3_B64_ALPHABET[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            RR3_B64_ALPHABET[n as usize & 63] as char
-        } else {
-            '='
-        });
+        rr3_b64_tail(n, chunk.len(), &mut out);
     }
     out
+}
+
+/// 每组末两字符：数据不足则以 `=` 补位（`len` = 本组实际字节数）。
+fn rr3_b64_tail(n: u32, len: usize, out: &mut String) {
+    out.push(if len > 1 {
+        RR3_B64_ALPHABET[(n >> 6) as usize & 63] as char
+    } else {
+        '='
+    });
+    out.push(if len > 2 {
+        RR3_B64_ALPHABET[n as usize & 63] as char
+    } else {
+        '='
+    });
 }
 
 /// 单组 4 字符 → 24bit 值与填充位数；非法填充/字符按 fail-closed 回错。
@@ -101,9 +106,7 @@ fn rr3_b64_group(
 /// `=` 只许出现在末组尾部、字母表外字符即拒（fail-closed，不做"尽力而为"）。
 pub fn rr3_base64_decode(s: &str) -> Result<Vec<u8>, Rr3Base64Error> {
     let bytes = s.as_bytes();
-    if bytes.len() % 4 != 0 {
-        return Err(Rr3Base64Error::BadLength { got: bytes.len() });
-    }
+    rr3_b64_len_ok(bytes)?;
     let table = rr3_b64_rev_table();
     let groups = bytes.len() / 4;
     let mut out = Vec::with_capacity(groups * 3);
@@ -113,6 +116,14 @@ pub fn rr3_base64_decode(s: &str) -> Result<Vec<u8>, Rr3Base64Error> {
         rr3_b64_push(n, pad, &mut out);
     }
     Ok(out)
+}
+
+/// 组宽判据：带填充的 base64 长度必须是 4 的倍数。
+fn rr3_b64_len_ok(bytes: &[u8]) -> Result<(), Rr3Base64Error> {
+    if bytes.len() % 4 != 0 {
+        return Err(Rr3Base64Error::BadLength { got: bytes.len() });
+    }
+    Ok(())
 }
 
 /// 一组 24 bit 按 padding 落 1–3 字节（pad=2 → 1B，pad=1 → 2B，否则 3B）。

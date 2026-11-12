@@ -223,6 +223,21 @@ fn rr3_hdr_precheck(magic: u32, buf: &[u8]) -> Result<(), Rr3HdrError> {
     Ok(())
 }
 
+/// 头层前置判据（长度 → magic → 保留区 → payload_len 上界），返回 payload_len。
+fn rr3_hdr_guard(buf: &[u8]) -> Result<u32, Rr3HdrError> {
+    if buf.len() < RR3_IPC_HDR_SIZE {
+        return Err(Rr3HdrError::TooShort { got: buf.len() });
+    }
+    let u32le = |o: usize| u32::from_le_bytes(buf[o..o + 4].try_into().unwrap());
+    let magic = u32le(OFF_MAGIC);
+    rr3_hdr_precheck(magic, buf)?;
+    let payload_len = u32le(OFF_PAYLOAD_LEN);
+    if payload_len > MAX_PAYLOAD_LEN {
+        return Err(Rr3HdrError::PayloadTooLarge { len: payload_len });
+    }
+    Ok(payload_len)
+}
+
 impl Rr3Header {
     /// 广播目标（dst_task = 0，标准不为其设独立标志位）
     pub fn rr3_hdr_broadcast(opcode: u16, payload_len: u32) -> Self {
@@ -241,21 +256,13 @@ impl Rr3Header {
     /// 解析 128 字节头（小端）。IPC-T-001/002/010。**不校验 CRC**（此处的入参只有
     /// 头，CRC 覆盖载荷）——校验点在拿到 payload 的调用方（见 [`rr3_crc32`]）。
     pub fn from_bytes(buf: &[u8]) -> Result<Self, Rr3HdrError> {
-        if buf.len() < RR3_IPC_HDR_SIZE {
-            return Err(Rr3HdrError::TooShort { got: buf.len() });
-        }
+        let payload_len = rr3_hdr_guard(buf)?;
         // 长度守卫已保证 buf.len() ≥ 128，任意常量偏移 + 宽度都不越界，
         // try_into 定长切片必然成功——unwrap 是守卫的直读推论，不是风险点。
         let u16le = |o: usize| u16::from_le_bytes(buf[o..o + 2].try_into().unwrap());
         let u32le = |o: usize| u32::from_le_bytes(buf[o..o + 4].try_into().unwrap());
         let u64le = |o: usize| u64::from_le_bytes(buf[o..o + 8].try_into().unwrap());
 
-        let magic = u32le(OFF_MAGIC);
-        rr3_hdr_precheck(magic, buf)?;
-        let payload_len = u32le(OFF_PAYLOAD_LEN);
-        if payload_len > MAX_PAYLOAD_LEN {
-            return Err(Rr3HdrError::PayloadTooLarge { len: payload_len });
-        }
         Ok(Self {
             opcode: u16le(OFF_OPCODE),
             // 未知 flags 位原样保留、不报错：AOS-STD-IPC-004 要求接收方忽略未知位

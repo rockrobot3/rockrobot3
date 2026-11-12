@@ -153,14 +153,19 @@ fn rr3_nm_redact(args: &[&str]) -> String {
     let mut out: Vec<String> = Vec::with_capacity(args.len());
     let mut mask_next = false;
     for a in args {
-        if mask_next {
-            out.push("***".to_string());
-            mask_next = false;
-            continue;
-        }
-        mask_next = rr3_nm_arg(a, &mut out);
+        mask_next = rr3_nm_mask(a, &mut out, mask_next);
     }
     out.join(" ")
+}
+
+/// 单个 argv 的脱敏步：上一项是凭据键则整体打码，否则按键判定；返回下一项
+/// 是否须整体打码。
+fn rr3_nm_mask(a: &str, out: &mut Vec<String>, mask_next: bool) -> bool {
+    if mask_next {
+        out.push("***".to_string());
+        return false;
+    }
+    rr3_nm_arg(a, out)
 }
 
 /// 单个 argv 脱敏：等号形式按键判定是否打码，裸项原样；返回下一项是否须整体
@@ -198,6 +203,16 @@ pub(crate) fn rr3_nm_run(
         })?;
     let deadline = Instant::now() + timeout;
     let status = rr3_nm_await(&mut child, deadline, timeout, args)?;
+    rr3_nm_finish(&mut child, status, timeout, args)
+}
+
+/// 正常退出后的收尾：读尽两条管道，非零退出即点名回错，成功回 stdout。
+fn rr3_nm_finish(
+    child: &mut std::process::Child,
+    status: Option<std::process::ExitStatus>,
+    timeout: Duration,
+    args: &[&str],
+) -> Result<String, Rr3HalError> {
     // 超时路径已在上面回错——这里只在正常退出后走到。读管道各挂一档
     // deadline（rr3_nm_read_capped）：真 nmcli 毫秒级 EOF，守护只对
     // "脚本被替换成 fork 幸存孙进程的假件"一类旁路兜底，不让调用面被拖住

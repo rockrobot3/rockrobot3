@@ -153,9 +153,21 @@ pub fn rr3_no_unknown_keys(
         errs.push(format!("{what} 顶层必须是表（[段] 结构），实际为 {root:?}"));
         return errs;
     };
+    rr3_top_scan(table, &allow, &top_scalars, what, &mut errs);
+    errs
+}
+
+/// 顶层逐段对账：在册段进段内核，顶层标量键放行，其余未登记段即红。
+fn rr3_top_scan(
+    table: &toml::Table,
+    allow: &std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>>,
+    top_scalars: &std::collections::BTreeSet<&str>,
+    what: &str,
+    errs: &mut Vec<String>,
+) {
     for (name, value) in table {
         if let Some(keys) = allow.get(name.as_str()) {
-            rr3_chk_section(name, value, keys, what, &mut errs);
+            rr3_chk_section(name, value, keys, what, errs);
         } else if !top_scalars.contains(name.as_str()) {
             // 顶层标量键（契约登记在案）不做段内对账，其余未登记段即红
             errs.push(format!(
@@ -163,7 +175,6 @@ pub fn rr3_no_unknown_keys(
             ));
         }
     }
-    errs
 }
 
 /// 从字段规格重建允许键树：段 → 键集；一段式 path = 顶层标量键
@@ -290,12 +301,8 @@ pub fn rr3_manifest_chk(text: &str, topics: &crate::topics::Rr3TopicSet) -> Rr3V
 fn rr3_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) -> Vec<String> {
     let mut report = Rr3ValidationReport::default();
 
-    let root: Value = match toml::from_str(text) {
-        Ok(v) => v,
-        Err(e) => {
-            report.errors.push(format!("manifest TOML 解析失败: {e}"));
-            return report.errors;
-        }
+    let Some(root) = rr3_toml_root(text, &mut report.errors) else {
+        return report.errors;
     };
 
     let self_name = rr3_get_by_path(&root, "manifest.name")
@@ -321,6 +328,17 @@ fn rr3_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) -> Vec<St
     rr3_chk_subs(&root, topics, &mut report.errors);
 
     report.errors
+}
+
+/// manifest 文本的 TOML 根：解析失败即点名并入 `errs`（返回 `None`）。
+fn rr3_toml_root(text: &str, errs: &mut Vec<String>) -> Option<Value> {
+    match toml::from_str(text) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            errs.push(format!("manifest TOML 解析失败: {e}"));
+            None
+        }
+    }
 }
 
 /// 跨字段：heartbeat_ms 必须小于 watchdog_timeout_ms（两键都在才判）。
@@ -453,8 +471,7 @@ fn rr3_chk_declared(
     // （contracts/topics.toml，CI 检查③）注册，未注册的 RPC 名不再放行。
     // F3：主题集为空的内核入口已由两个包装 fail-closed（rr3_topic_
     // is_empty 护栏）——空注册表不得让成员检查被空洞满足。
-    let check_registered = spec.path == "events.publishes" || spec.path == "rpc.exposes";
-    if !check_registered {
+    if !rr3_decl_gate(spec) {
         return;
     }
     if !topics.rr3_topic_contains(s) {
@@ -462,6 +479,11 @@ fn rr3_chk_declared(
         return;
     }
     rr3_chk_retired(s, topics, errs);
+}
+
+/// 申报面键：只有 publishes / rpc.exposes 进注册与退役两道门。
+fn rr3_decl_gate(spec: &Rr3FieldSpec) -> bool {
+    spec.path == "events.publishes" || spec.path == "rpc.exposes"
 }
 
 /// C14 门改判（0.0.5 批J）：retired 主题 = 号位保留、义务解除，申报发布/暴露即拒。
@@ -541,9 +563,7 @@ pub fn rr3_topics_chk(text: &str, known_owners: &[String]) -> Vec<String> {
     // F3：注册表为空（0 个 [[topic]]）是契约事故，不是放行许可证。若坐视空表，
     // 下游成员检查（publishes/rpc.exposes/subscribes）会被空洞满足而 fail-open。
     // owner 维度的登记检查保持原样，仅新增这条零主题护栏。
-    if topics.is_none_or(|v| v.is_empty()) {
-        errs.push("主题注册表为空：必须至少登记一个 [[topic]]（ADR-0006）".to_string());
-    }
+    rr3_topics_guard(topics, &mut errs);
 
     for entry in topics.into_iter().flatten() {
         rr3_topic_entry(
@@ -555,6 +575,13 @@ pub fn rr3_topics_chk(text: &str, known_owners: &[String]) -> Vec<String> {
         );
     }
     errs
+}
+
+/// 零主题护栏：`[[topic]]` 缺失或为空表即点名（空注册表不是放行许可证）。
+fn rr3_topics_guard(topics: Option<&Vec<Value>>, errs: &mut Vec<String>) {
+    if topics.is_none_or(|v| v.is_empty()) {
+        errs.push("主题注册表为空：必须至少登记一个 [[topic]]（ADR-0006）".to_string());
+    }
 }
 
 /// 单条 `[[topic]]`：name 必填 → 主题形制 → owner 归属 → kind 在册。

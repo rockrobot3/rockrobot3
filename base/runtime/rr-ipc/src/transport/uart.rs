@@ -607,6 +607,12 @@ fn rr3_vtime(t: &mut Termios, ds: u8) {
 /// 冲的是**开口时刻之前**积压的队列——对线上语义零改写：开口后的字节一概不碰，
 /// 帧层拒收路径照旧兜底。
 fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
+    let t = rr3_raw_termios(fd, speed)?;
+    rr3_apply_termios(fd, &t)
+}
+
+/// 构造 raw termios：取当前值 → cfmakeraw → CLOCAL|CREAD + VMIN/VTIME → 波特率。
+fn rr3_raw_termios(fd: i32, speed: SpeedT) -> std::io::Result<Termios> {
     let mut t = Termios::zeroed();
     // SAFETY：t 是本栈上的合法 termios，tcgetattr 只写它。
     if unsafe { c_tcgetattr(fd, &mut t) } != 0 {
@@ -621,8 +627,13 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
     t.c_cc[VMIN] = 1;
     t.c_cc[VTIME] = 0;
     rr3_uart_speed(&mut t, speed)?;
+    Ok(t)
+}
+
+/// 落盘生效：TCSANOW 设 termios，随后 `tcflush(TCIFLUSH)` 净化开口前的输入队列。
+fn rr3_apply_termios(fd: i32, t: &Termios) -> std::io::Result<()> {
     // SAFETY：合法指针；TCSANOW 立即生效。
-    if unsafe { c_tcsetattr(fd, TCSANOW, &t) } != 0 {
+    if unsafe { c_tcsetattr(fd, TCSANOW, t) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY：合法指针；冲掉开口前积压的输入队列（TCIFLUSH 只冲收不冲发）。

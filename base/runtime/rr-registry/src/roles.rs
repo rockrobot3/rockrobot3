@@ -54,64 +54,71 @@ pub fn rr3_role_parse(text: &str) -> Rr3RoleTable {
         .flatten()
         .filter_map(Value::as_table)
     {
-        if let Some(name) = r.get("name").and_then(Value::as_str) {
-            table.roles.insert(
-                name.to_string(),
-                Rr3RoleEntry {
-                    slot: r
-                        .get("slot")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    kind: r
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    iface: r
-                        .get("iface")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    requires: r
-                        .get("requires")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_string)
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    derives: r
-                        .get("derives")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_string)
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    direction: r
-                        .get("direction")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    droppable: r.get("droppable").and_then(Value::as_bool).unwrap_or(false),
-                    input_only_ok: r
-                        .get("input_only_ok")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                    per_instance: r
-                        .get("per_instance")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                },
-            );
-        }
+        rr3_role_row(&mut table, r);
     }
     table
+}
+
+/// 单条入册：缺 name 的条目整条不收（其余键按各自缺省收）。
+fn rr3_role_row(table: &mut Rr3RoleTable, r: &toml::Table) {
+    if let Some(name) = r.get("name").and_then(Value::as_str) {
+        table.roles.insert(name.to_string(), rr3_role_entry(r));
+    }
+}
+
+/// 单条 `[[role]]` 的登记面：缺键按空串/false 收（逐字段次序同旧内联构造）。
+fn rr3_role_entry(r: &toml::Table) -> Rr3RoleEntry {
+    Rr3RoleEntry {
+        slot: r
+            .get("slot")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        kind: r
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        iface: r
+            .get("iface")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        requires: r
+            .get("requires")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        derives: r
+            .get("derives")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        direction: r
+            .get("direction")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        droppable: r.get("droppable").and_then(Value::as_bool).unwrap_or(false),
+        input_only_ok: r
+            .get("input_only_ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        per_instance: r
+            .get("per_instance")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
 }
 
 impl Rr3RoleTable {

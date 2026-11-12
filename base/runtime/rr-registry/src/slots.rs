@@ -50,35 +50,42 @@ pub fn rr3_slot_parse(text: &str) -> Rr3SlotTable {
         .flatten()
         .filter_map(Value::as_table)
     {
-        if let Some(name) = s.get("name").and_then(Value::as_str) {
-            table.slots.insert(
-                name.to_string(),
-                Rr3SlotEntry {
-                    layer: s
-                        .get("layer")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    status: s
-                        .get("status")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    tier_scope: s
-                        .get("tier_scope")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_string)
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                },
-            );
-        }
+        rr3_slot_add(&mut table, s);
     }
     table
+}
+
+/// 单条入册：缺 name 的条目整条不收（其余键按各自缺省收）。
+fn rr3_slot_add(table: &mut Rr3SlotTable, s: &toml::Table) {
+    if let Some(name) = s.get("name").and_then(Value::as_str) {
+        table.slots.insert(name.to_string(), rr3_slot_row(s));
+    }
+}
+
+/// 单条 `[[slot]]` 的登记面：缺键按空串/空集收（逐字段次序同旧内联构造）。
+fn rr3_slot_row(s: &toml::Table) -> Rr3SlotEntry {
+    Rr3SlotEntry {
+        layer: s
+            .get("layer")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        status: s
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        tier_scope: s
+            .get("tier_scope")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
 }
 
 impl Rr3SlotTable {

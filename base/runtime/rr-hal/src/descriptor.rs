@@ -247,6 +247,14 @@ pub fn rr3_bindings_parse(text: &str) -> Result<Rr3HalBindings, Vec<String>> {
     let mut b = Rr3HalBindings::default();
     let mut errs = Vec::new();
     rr3_bindings_each(t, &mut b, &mut errs);
+    rr3_bindings_finish(b, errs)
+}
+
+/// 收尾：错误集空即交绑定，否则整册拒（收集式校验，文案次序不变）。
+fn rr3_bindings_finish(
+    b: Rr3HalBindings,
+    errs: Vec<String>,
+) -> Result<Rr3HalBindings, Vec<String>> {
     if errs.is_empty() {
         Ok(b)
     } else {

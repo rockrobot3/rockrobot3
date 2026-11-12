@@ -372,16 +372,28 @@ pub(crate) fn rr3_demands_parse(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec
         if let (Some(rail), Some(peak_ma), Some(sustained_ma), Some(critical)) =
             (rail, peak, sustained, critical)
         {
-            demands.push(Rr3AssembleDemand {
-                rail,
-                peak_ma,
-                sustained_ma,
-                critical,
-                concurrency_group: groups,
-            });
+            rr3_demand_push(&mut demands, rail, peak_ma, sustained_ma, critical, groups);
         }
     }
     (demands, errs)
+}
+
+/// 五键齐备的需求入列（判据已在前置各步判完，此处只成型）。
+fn rr3_demand_push(
+    demands: &mut Vec<Rr3AssembleDemand>,
+    rail: String,
+    peak_ma: i64,
+    sustained_ma: i64,
+    critical: bool,
+    concurrency_group: Vec<String>,
+) {
+    demands.push(Rr3AssembleDemand {
+        rail,
+        peak_ma,
+        sustained_ma,
+        critical,
+        concurrency_group,
+    });
 }
 
 /// 未知键点名（五键定形：拼错键不能被静默忽略）。
@@ -550,12 +562,7 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
     rr3_asm_head(t, &mut errs);
 
     let Some(asm) = t.get("assemble").and_then(Value::as_table) else {
-        errs.push("装配清单缺 [assemble] 表（handles / ops 两键都必填，空数组合法）".into());
-        return if errs.is_empty() {
-            Ok(Rr3AssembleFacts::default())
-        } else {
-            Err(errs)
-        };
+        return rr3_asm_no_table(errs);
     };
     rr3_asm_keys(asm, &mut errs);
 
@@ -579,6 +586,16 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
 
     if errs.is_empty() {
         Ok(facts)
+    } else {
+        Err(errs)
+    }
+}
+
+/// 缺 `[assemble]` 段的终局：点名后按错误集判（与旧内联分支逐字同形）。
+fn rr3_asm_no_table(mut errs: Vec<String>) -> Result<Rr3AssembleFacts, Vec<String>> {
+    errs.push("装配清单缺 [assemble] 表（handles / ops 两键都必填，空数组合法）".into());
+    if errs.is_empty() {
+        Ok(Rr3AssembleFacts::default())
     } else {
         Err(errs)
     }
@@ -736,18 +753,7 @@ fn rr3_asm_mem(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<S
 pub fn rr3_injection_gaps(facts: &Rr3AssembleFacts, config_text: &str) -> Vec<String> {
     let cfg: Value = match toml::from_str(config_text) {
         Ok(v) => v,
-        Err(e) => {
-            return facts
-                .ops
-                .iter()
-                .map(|o| {
-                    format!(
-                        "参数槽 {} 的来源键 {} 不可证：config 文本解析失败 ({e})",
-                        o.slot, o.src_key
-                    )
-                })
-                .collect();
-        }
+        Err(e) => return rr3_gaps_unparsable(facts, &e),
     };
     facts
         .ops
@@ -765,6 +771,20 @@ pub fn rr3_injection_gaps(facts: &Rr3AssembleFacts, config_text: &str) -> Vec<St
 /// 点路径游走：任一段取不到即 `None`（注入缺级的判定本体）。
 fn rr3_path_get<'a>(cfg: &'a Value, key: &str) -> Option<&'a Value> {
     key.split('.').try_fold(cfg, |cur, seg| cur.get(seg))
+}
+
+/// config 文本解析失败 = 全部来源键不可证，逐条点同名缺口（文案同旧内联分支）。
+fn rr3_gaps_unparsable(facts: &Rr3AssembleFacts, e: &toml::de::Error) -> Vec<String> {
+    facts
+        .ops
+        .iter()
+        .map(|o| {
+            format!(
+                "参数槽 {} 的来源键 {} 不可证：config 文本解析失败 ({e})",
+                o.slot, o.src_key
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -34,14 +34,19 @@ fn rr3_root_spans(text: &str) -> Vec<Rr3RootSpan> {
     let mut out = Vec::new();
     let mut base = 0usize; // 当前行起始的绝对字节偏移
     for line in text.split_inclusive('\n') {
-        if line.trim_start().starts_with('#') {
-            base += line.len();
-            continue;
-        }
-        rr3_root_scan(line, base, &mut out);
+        rr3_root_line(line, base, &mut out);
         base += line.len();
     }
     out
+}
+
+/// 单行处理：注释行跳过，其余扫 token（返回是否跳过）。
+fn rr3_root_line(line: &str, base: usize, out: &mut Vec<Rr3RootSpan>) -> bool {
+    if line.trim_start().starts_with('#') {
+        return true;
+    }
+    rr3_root_scan(line, base, out);
+    false
 }
 
 /// 单行内的全部 `root=LABEL` token（标签 = token 尾部到首个空白）。
