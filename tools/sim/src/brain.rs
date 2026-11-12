@@ -445,6 +445,22 @@ fn rr3_brain_cloud_word(ctx: &Rr3BrainCtx) -> &'static str {
 /// 外部起 interact 与 brain（两个真模块，各自日志进 workdir）。
 fn rr3_brain_up_ext(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
     let fix = ctx.fix;
+    rr3_brain_up_ic(ctx, children)?;
+
+    let mut bc = Command::new(&ctx.bins.brain);
+    bc.env("RR3_BUS_PATH", &fix.socket)
+        .env("RR3_MANIFEST", &fix.m_brain)
+        .env("RR3_BRAIN_CLOUD", rr3_brain_cloud_word(ctx))
+        .env("RR3_BRAIN_CONFIG", &fix.brain_cfg);
+    let brain_log = fix.workdir.join("brain.log");
+    let brain_child = rr3_spawn_logged(bc, &brain_log, RR3_SIM_MODULE_BRAIN)?;
+    children.push((RR3_SIM_MODULE_BRAIN.into(), brain_child));
+    Ok(())
+}
+
+/// 外部起 interact（回放面独立后端；面板地址可被 env 覆盖）。
+fn rr3_brain_up_ic(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
+    let fix = ctx.fix;
     let mut ic = Command::new(&ctx.bins.interact);
     ic.env("RR3_BUS_PATH", &fix.socket)
         .env("RR3_MANIFEST", &fix.m_interact)
@@ -465,15 +481,6 @@ fn rr3_brain_up_ext(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> R
     let interact_log = fix.workdir.join("interact.log");
     let interact_child = rr3_spawn_logged(ic, &interact_log, RR3_SIM_MODULE_B)?;
     children.push((RR3_SIM_MODULE_B.into(), interact_child));
-
-    let mut bc = Command::new(&ctx.bins.brain);
-    bc.env("RR3_BUS_PATH", &fix.socket)
-        .env("RR3_MANIFEST", &fix.m_brain)
-        .env("RR3_BRAIN_CLOUD", rr3_brain_cloud_word(ctx))
-        .env("RR3_BRAIN_CONFIG", &fix.brain_cfg);
-    let brain_log = fix.workdir.join("brain.log");
-    let brain_child = rr3_spawn_logged(bc, &brain_log, RR3_SIM_MODULE_BRAIN)?;
-    children.push((RR3_SIM_MODULE_BRAIN.into(), brain_child));
     Ok(())
 }
 
@@ -491,9 +498,14 @@ fn rr3_brain_wait(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), String> 
     )?;
     report.push_str("\n=== 三模块 running ===\n");
     rr3_brain_logs_wait(ctx, report)?;
+    rr3_brain_status(ctx, report)
+}
+
+/// 巡检面：`rr3-ctl status` 的 denied_publish 归零门与状态表入报告。
+fn rr3_brain_status(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), String> {
     let status_out = rr3_ctl_denied_zero(
         &ctx.bins.rrctl,
-        &fix.socket,
+        &ctx.fix.socket,
         "denied_publish ≠ 0：brain 的发布被 rrd 拒了",
     )?;
     report.push_str("\n=== rr3-ctl status 巡检 ===\n");

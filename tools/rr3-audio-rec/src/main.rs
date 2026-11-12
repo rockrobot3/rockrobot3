@@ -379,16 +379,7 @@ impl DoaTracker {
 
     /// 喂一片 s16le 交错 PCM；攒满 1s 窗回一行打印（None = 窗未满）。
     fn feed(&mut self, samples: &[u8]) -> Option<String> {
-        let mut i = 0;
-        while i + 3 < samples.len() {
-            let l = i16::from_le_bytes([samples[i], samples[i + 1]]) as i32;
-            let r = i16::from_le_bytes([samples[i + 2], samples[i + 3]]) as i32;
-            self.l_sq += (l as f64) * (l as f64);
-            self.r_sq += (r as f64) * (r as f64);
-            self.peak = self.peak.max(l.abs()).max(r.abs());
-            self.n += 1;
-            i += 4;
-        }
+        self.rr3_doa_accum(samples);
         if self.n < DOA_WIN_FRAMES {
             return None;
         }
@@ -400,6 +391,20 @@ impl DoaTracker {
         self.n = 0;
         self.peak = 0;
         Some(out)
+    }
+
+    /// 一片 s16le 交错 PCM 的平方和/峰值/帧数累加。
+    fn rr3_doa_accum(&mut self, samples: &[u8]) {
+        let mut i = 0;
+        while i + 3 < samples.len() {
+            let l = i16::from_le_bytes([samples[i], samples[i + 1]]) as i32;
+            let r = i16::from_le_bytes([samples[i + 2], samples[i + 3]]) as i32;
+            self.l_sq += (l as f64) * (l as f64);
+            self.r_sq += (r as f64) * (r as f64);
+            self.peak = self.peak.max(l.abs()).max(r.abs());
+            self.n += 1;
+            i += 4;
+        }
     }
 
     /// 满窗一行打印（active 窗的方位角同时入袋）。
@@ -562,6 +567,19 @@ fn rr3_reader_gap(
         return;
     }
     eprintln!("[rec] 1.6s 连续静默 → 线上断流，读线程重连");
+    rr3_gap_reconnect(conn, device, baud, watch, out_path);
+    *seen = false;
+    *zeros = 0;
+}
+
+/// 断流重连：解武装 → 重开 fd/握手 → 记重连账再武装（全败 fail-honest 退 4）。
+fn rr3_gap_reconnect(
+    conn: &mut Rr3UartConn,
+    device: &str,
+    baud: u32,
+    watch: &WatchState,
+    out_path: &std::path::Path,
+) {
     watch.armed.store(false, Ordering::Release);
     if !reader_reconnect(conn, device, baud) {
         eprintln!("[rec] 读线程重连全败");
@@ -569,8 +587,6 @@ fn rr3_reader_gap(
     }
     watch.reconnects.fetch_add(1, Ordering::Relaxed);
     watch.armed.store(true, Ordering::Release);
-    *seen = false;
-    *zeros = 0;
 }
 
 /// 读线程重连（三级防护第 ③ 级，判据② 改造后搬进读线程）：[HANDSHAKE_TRIES]
@@ -809,6 +825,12 @@ fn account_chunk(
     let before = (tracker.gaps, tracker.restarts);
     tracker.feed(seq);
     let broke = (tracker.gaps, tracker.restarts) != before;
+    rr3_declare_rate(rate, declared, watch);
+    broke
+}
+
+/// 板侧声明率首见入账/变更告警（首片同步写成 wav 头初值）。
+fn rr3_declare_rate(rate: u32, declared: &mut Option<u32>, watch: &WatchState) {
     match *declared {
         None => {
             *declared = Some(rate);
@@ -821,7 +843,6 @@ fn account_chunk(
         }
         _ => {}
     }
-    broke
 }
 
 /// 连续段实测率推进：断档/重启/首片重锚（空洞不摊进分母）；段 >0.5s 才把
@@ -934,11 +955,7 @@ fn rec_spawn_threads(
         let out = out_path.to_path_buf();
         std::thread::spawn(move || writer_run(wav_file, rx, w, out))
     };
-    {
-        let w = Arc::clone(&watch);
-        let path = out_path.to_string_lossy().into_owned();
-        std::thread::spawn(move || watchdog_run(w, path));
-    }
+    rr3_spawn_watch(Arc::clone(&watch), out_path);
     // 读线程：conn/裸字节通道/停流旗移交（静默重连与收兵 OFF 全在读侧闭环，
     // 见 reader_run）。
     let (byte_tx, byte_rx) = mpsc::channel::<Vec<u8>>();
@@ -957,6 +974,12 @@ fn rec_spawn_threads(
         writer,
         reader,
     }
+}
+
+/// 看门狗线程（武装后停滞即补 wav 恢复头退 3）。
+fn rr3_spawn_watch(watch: Arc<WatchState>, out_path: &std::path::Path) {
+    let path = out_path.to_string_lossy().into_owned();
+    std::thread::spawn(move || watchdog_run(watch, path));
 }
 
 /// 解码主循环：裸字节通道节拍收料 → 内存拆帧出尽 → dst/Event/topic/b64 四道门

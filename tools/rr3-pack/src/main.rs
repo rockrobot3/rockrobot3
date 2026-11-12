@@ -267,6 +267,11 @@ fn rr3_copy_entry(e: &fs::DirEntry, dst: &Path) -> Result<(), String> {
     if ft.is_dir() {
         return rr3_copy_dir(&from, &to);
     }
+    rr3_copy_node(ft, from, to)
+}
+
+/// 非目录条目：普通文件复制，链接/特殊文件点名拒绝。
+fn rr3_copy_node(ft: fs::FileType, from: PathBuf, to: PathBuf) -> Result<(), String> {
     if ft.is_file() {
         return rr3_copy_plain(&from, &to);
     }
@@ -304,16 +309,26 @@ fn rr3_module_names(payload: &Path) -> Result<Vec<String>, String> {
 
 /// 注入目录下的子目录名（read_dir 序不可靠，排序归调用方）。
 fn rr3_names_read(dir: &Path) -> Result<Vec<String>, String> {
-    let mut names = Vec::new();
     let entries =
         fs::read_dir(dir).map_err(|e| format!("读注入目录 {} 失败: {e}", dir.display()))?;
+    rr3_names_of(entries, dir)
+}
+
+/// 遍历注入目录条目，取出子目录名（排序归调用方）。
+fn rr3_names_of(entries: fs::ReadDir, dir: &Path) -> Result<Vec<String>, String> {
+    let mut names = Vec::new();
     for e in entries {
         let e = e.map_err(|err| format!("读注入目录 {} 失败: {err}", dir.display()))?;
-        if e.path().is_dir() {
-            names.push(e.file_name().to_string_lossy().into_owned());
-        }
+        names.extend(rr3_dir_name(&e));
     }
     Ok(names)
+}
+
+/// 单条目的目录名（非目录回 None）。
+fn rr3_dir_name(e: &fs::DirEntry) -> Option<String> {
+    e.path()
+        .is_dir()
+        .then(|| e.file_name().to_string_lossy().into_owned())
 }
 
 /// 模块名单非空门（空注入目录不得出包）。
@@ -471,6 +486,15 @@ fn rr3_stage_truth(
     for rel in &truth.files {
         rr3_stage_one_file(cfg, root, rel)?;
     }
+    rr3_stage_truth_dirs(cfg, root, truth)
+}
+
+/// 目录真值随装（在则整目录随装，缺席合法跳过）。
+fn rr3_stage_truth_dirs(
+    cfg: &Rr3PackConfig,
+    root: &Path,
+    truth: &rrd::profile::Rr3RuntimeTruthSet,
+) -> Result<(), String> {
     for rel in &truth.dirs {
         rr3_stage_one_dir(cfg, root, rel)?;
     }
@@ -480,12 +504,17 @@ fn rr3_stage_truth(
 /// 单册落位：父目录就绪后按清单相对路径同名复制。
 fn rr3_stage_one_file(cfg: &Rr3PackConfig, root: &Path, rel: &str) -> Result<(), String> {
     let dst = root.join(rel);
+    rr3_stage_parent(&dst, rel)?;
+    fs::copy(cfg.repo.join(rel), &dst).map_err(|e| format!("复制 {rel} 失败: {e}"))?;
+    Ok(())
+}
+
+/// 落位父目录就绪（清单相对路径无父目录即拒）。
+fn rr3_stage_parent(dst: &Path, rel: &str) -> Result<(), String> {
     let parent = dst
         .parent()
         .ok_or_else(|| format!("清单相对路径异常（无父目录）: {rel}"))?;
-    fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
-    fs::copy(cfg.repo.join(rel), &dst).map_err(|e| format!("复制 {rel} 失败: {e}"))?;
-    Ok(())
+    fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))
 }
 
 /// 单目录落位：在则整目录随装（轴档案目录缺席合法跳过）。
@@ -607,21 +636,30 @@ fn rr3_facts_load(
     manifest_src: &Path,
     name: &str,
 ) -> Result<(String, rrd::manifest::Rr3ManifestFacts), String> {
+    let text = rr3_facts_text(manifest_src, name)?;
+    let facts = rr3_facts_parse(&text, name)?;
+    Ok((text, facts))
+}
+
+/// manifest 文本读入（缺席先点名，读失败带路径）。
+fn rr3_facts_text(manifest_src: &Path, name: &str) -> Result<String, String> {
     if !manifest_src.is_file() {
         return Err(format!(
             "模块 {name} 注入产物不完整: {} 缺席（约定 rr3-modules/<name>/manifest.toml）",
             manifest_src.display()
         ));
     }
-    let text = fs::read_to_string(manifest_src)
-        .map_err(|e| format!("读 {} 失败: {e}", manifest_src.display()))?;
-    let facts = rr3_manifest_parse(&text).map_err(|errs| {
+    fs::read_to_string(manifest_src).map_err(|e| format!("读 {} 失败: {e}", manifest_src.display()))
+}
+
+/// manifest 文本解析（坏形点名注入产物来源）。
+fn rr3_facts_parse(text: &str, name: &str) -> Result<rrd::manifest::Rr3ManifestFacts, String> {
+    rr3_manifest_parse(text).map_err(|errs| {
         format!(
             "模块 {name} 的 manifest 解析失败: {}（注入产物须是仓内 module.toml 的副本）",
             errs.join("; ")
         )
-    })?;
-    Ok((text, facts))
+    })
 }
 
 /// 目录名与 manifest.name 必须一致（注入产物自相矛盾即拒）。
@@ -657,14 +695,25 @@ fn rr3_stage_py(
     name: &str,
 ) -> Result<(), String> {
     let pkg_src = mod_src.join("pkg");
+    rr3_stage_pkg(&pkg_src, staged, name)?;
+    rr3_stage_py_shim(entry_path, name)?;
+    rr3_make_executable(entry_path);
+    Ok(())
+}
+
+/// pkg 树落位（缺席先点名，复制失败带模块名）。
+fn rr3_stage_pkg(pkg_src: &Path, staged: &Path, name: &str) -> Result<(), String> {
     if !pkg_src.is_dir() {
         return Err(format!(
             "模块 {name}（lang=python）注入产物不完整: {} 缺席（python 模块约定 rr3-modules/<name>/{{pkg/,manifest.toml}}）",
             pkg_src.display()
         ));
     }
-    rr3_copy_dir(&pkg_src, &staged.join("pkg"))
-        .map_err(|e| format!("复制 {name} pkg 树失败: {e}"))?;
+    rr3_copy_dir(pkg_src, &staged.join("pkg")).map_err(|e| format!("复制 {name} pkg 树失败: {e}"))
+}
+
+/// python 入口 shim：装机绝对路径的 pkg/config 写进 entry。
+fn rr3_stage_py_shim(entry_path: &Path, name: &str) -> Result<(), String> {
     let pkg_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/pkg");
     let config_installed = format!("{RR3_INSTALL_ROOT}/modules/{name}/config.toml");
     fs::write(
@@ -675,9 +724,7 @@ fn rr3_stage_py(
             Path::new(&config_installed),
         ),
     )
-    .map_err(|e| format!("写 {name} shim 失败: {e}"))?;
-    rr3_make_executable(entry_path);
-    Ok(())
+    .map_err(|e| format!("写 {name} shim 失败: {e}"))
 }
 
 /// rust 模块：注入 bin 按 entry 落位。
@@ -815,7 +862,12 @@ fn rr3_pack(cfg: &Rr3PackConfig) -> Result<String, String> {
             stage.display()
         ));
     }
-    rr3_build_deb(&stage, &cfg.out)?;
+    rr3_pack_deb(cfg, &stage)
+}
+
+/// 出 deb 并给出产物与 staging 树路径。
+fn rr3_pack_deb(cfg: &Rr3PackConfig, stage: &Path) -> Result<String, String> {
+    rr3_build_deb(stage, &cfg.out)?;
     Ok(format!(
         "deb 就绪: {}（staging 树: {}）",
         cfg.out.display(),
@@ -825,18 +877,23 @@ fn rr3_pack(cfg: &Rr3PackConfig) -> Result<String, String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let cfg = match rr3_pack_parse(&args) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("rr3-pack: {e}");
-            std::process::exit(2);
-        }
-    };
+    let cfg = rr3_pack_cfg(&args);
     match rr3_pack(&cfg) {
         Ok(msg) => println!("{msg}"),
         Err(e) => {
             eprintln!("rr3-pack: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// 参数解析失败即退 2（用法错误）。
+fn rr3_pack_cfg(args: &[String]) -> Rr3PackConfig {
+    match rr3_pack_parse(args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("rr3-pack: {e}");
+            std::process::exit(2);
         }
     }
 }

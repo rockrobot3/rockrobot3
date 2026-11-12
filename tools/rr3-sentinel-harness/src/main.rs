@@ -418,6 +418,17 @@ fn rr3_beat(
     let now = Instant::now();
     let dt = now.duration_since(*last).as_millis();
     *last = now;
+    rr3_beat_judge(conn, n, frame, dt, now_ns)
+}
+
+/// 单拍判据：必须 Request/rr3.heartbeat → 回应答并打 PASS；形状/畸形违约 exit 1。
+fn rr3_beat_judge(
+    conn: &mut Rr3UartConn,
+    n: usize,
+    frame: Rr3Frame,
+    dt: u128,
+    now_ns: &dyn Fn() -> u64,
+) -> Option<u128> {
     match parse_upstream(frame) {
         Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => {
             rr3_beat_ack(conn, n, id, now_ns());
@@ -551,13 +562,23 @@ fn rt_echo_ok(v: &Value) -> bool {
 
 /// 收一帧并还原；读/还原失败点名后回 `None`。
 fn rt_recv(conn: &mut Rr3UartConn) -> Option<Rr3Frame> {
-    let buf = match conn.rr3_recv_buf() {
-        Ok(b) => b,
+    let buf = rt_buf(conn)?;
+    rt_parse(buf)
+}
+
+/// round-trip 应答读一帧（读失败点名后回 `None`）。
+fn rt_buf(conn: &mut Rr3UartConn) -> Option<Rr3FrameBuf> {
+    match conn.rr3_recv_buf() {
+        Ok(b) => Some(b),
         Err(e) => {
             eprintln!("FAIL  round-trip 应答读取失败: {e:?}");
-            return None;
+            None
         }
-    };
+    }
+}
+
+/// 裸帧还原（还原失败点名后回 `None`）。
+fn rt_parse(buf: Rr3FrameBuf) -> Option<Rr3Frame> {
     match Rr3Frame::try_from(buf) {
         Ok(f) => Some(f),
         Err(e) => {
@@ -624,13 +645,23 @@ fn rr3_parity_recv(conn: &mut Rr3UartConn) -> Option<Value> {
 
 /// parity 单帧读取与还原（失败点名后返回 None——此面不 exit）。
 fn rr3_parity_frame(conn: &mut Rr3UartConn) -> Option<Rr3Frame> {
-    let buf = match conn.rr3_recv_buf() {
-        Ok(b) => b,
+    let buf = rr3_parity_buf(conn)?;
+    rr3_parity_parse(buf)
+}
+
+/// parity 应答读一帧（读失败点名后回 `None`——此面不 exit）。
+fn rr3_parity_buf(conn: &mut Rr3UartConn) -> Option<Rr3FrameBuf> {
+    match conn.rr3_recv_buf() {
+        Ok(b) => Some(b),
         Err(e) => {
             eprintln!("FAIL  parity 应答读取失败: {e:?}");
-            return None;
+            None
         }
-    };
+    }
+}
+
+/// parity 裸帧还原（还原失败点名后回 `None`——此面不 exit）。
+fn rr3_parity_parse(buf: Rr3FrameBuf) -> Option<Rr3Frame> {
     match Rr3Frame::try_from(buf) {
         Ok(f) => Some(f),
         Err(e) => {
