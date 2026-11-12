@@ -115,21 +115,22 @@ fn rr3_nm_retry(kind: std::io::ErrorKind) -> bool {
 fn capped_loop(s: &mut impl Read, deadline: Instant) -> Vec<u8> {
     let mut out = Vec::new();
     let mut buf = [0u8; 4096];
-    while !rr3_nm_stop(&out, deadline) {
-        match s.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                let room = RR3_NM_OUT_CAP - out.len();
-                out.extend_from_slice(&buf[..n.min(room)]);
-            }
-            Err(e) => {
-                if !rr3_nm_retry(e.kind()) {
-                    break;
-                }
-            }
-        }
-    }
+    while !rr3_nm_stop(&out, deadline) && rr3_nm_step(s, &mut buf, &mut out) {}
     out
+}
+
+/// 一次读步：EOF/不可重试错误回 `false`（循环终止），读到内容或可重试错误回
+/// `true`（继续读）。
+fn rr3_nm_step(s: &mut impl Read, buf: &mut [u8], out: &mut Vec<u8>) -> bool {
+    match s.read(buf) {
+        Ok(0) => false,
+        Ok(n) => {
+            let room = RR3_NM_OUT_CAP - out.len();
+            out.extend_from_slice(&buf[..n.min(room)]);
+            true
+        }
+        Err(e) => rr3_nm_retry(e.kind()),
+    }
 }
 
 /// 凭据键判定：`psk` / `password` / `*.psk`（裸键与等号式键同一判据）。
@@ -157,14 +158,20 @@ fn rr3_nm_redact(args: &[&str]) -> String {
             mask_next = false;
             continue;
         }
-        if let Some((k, _)) = a.split_once('=') {
-            out.push(rr3_nm_pair(a, k));
-            continue;
-        }
-        out.push((*a).to_string());
-        mask_next = rr3_nm_secret(a);
+        mask_next = rr3_nm_arg(a, &mut out);
     }
     out.join(" ")
+}
+
+/// 单个 argv 脱敏：等号形式按键判定是否打码，裸项原样；返回下一项是否须整体
+/// 打码（`psk`/`password` 类键的值是独立的下一项）。
+fn rr3_nm_arg(a: &str, out: &mut Vec<String>) -> bool {
+    if let Some((k, _)) = a.split_once('=') {
+        out.push(rr3_nm_pair(a, k));
+        return false;
+    }
+    out.push((*a).to_string());
+    rr3_nm_secret(a)
 }
 
 /// 起一次 nmcli 子进程（terse 模式由调用方的 args 自带），带超时守护：
@@ -190,16 +197,7 @@ pub(crate) fn rr3_nm_run(
             )))
         })?;
     let deadline = Instant::now() + timeout;
-    let (status, timed_out) = rr3_nm_wait(&mut child, deadline)?;
-    if timed_out {
-        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-            &format!(
-                "nmcli 超时（>{}ms）被终止: {}",
-                timeout.as_millis(),
-                rr3_nm_redact(args),
-            ),
-        )));
-    }
+    let status = rr3_nm_await(&mut child, deadline, timeout, args)?;
     // 超时路径已在上面回错——这里只在正常退出后走到。读管道各挂一档
     // deadline（rr3_nm_read_capped）：真 nmcli 毫秒级 EOF，守护只对
     // "脚本被替换成 fork 幸存孙进程的假件"一类旁路兜底，不让调用面被拖住
@@ -214,15 +212,41 @@ pub(crate) fn rr3_nm_run(
         .map(|mut s| rr3_nm_read_capped(&mut s, Instant::now() + timeout))
         .unwrap_or_default();
     if !status.map(|s| s.success()).unwrap_or(false) {
-        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-            &format!(
-                "nmcli 退出非零（{}）: {}",
-                rr3_nm_redact(args),
-                String::from_utf8_lossy(&stderr).trim()
-            ),
-        )));
+        return Err(rr3_nm_exit_err(args, &stderr));
     }
     Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+/// 等退出并裁超时：超时即回错（`None` 状态只属超时路径，已在上游折错）。
+fn rr3_nm_await(
+    child: &mut std::process::Child,
+    deadline: Instant,
+    timeout: Duration,
+    args: &[&str],
+) -> Result<Option<std::process::ExitStatus>, Rr3HalError> {
+    let (status, timed_out) = rr3_nm_wait(child, deadline)?;
+    if timed_out {
+        return Err(rr3_nm_timeout_err(timeout, args));
+    }
+    Ok(status)
+}
+
+/// 超时回错（文案带超时档与脱敏 argv——口令不进日志）。
+fn rr3_nm_timeout_err(timeout: Duration, args: &[&str]) -> Rr3HalError {
+    Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+        "nmcli 超时（>{}ms）被终止: {}",
+        timeout.as_millis(),
+        rr3_nm_redact(args),
+    )))
+}
+
+/// 退出非零回错（文案带脱敏 argv 与 stderr 原文）。
+fn rr3_nm_exit_err(args: &[&str], stderr: &[u8]) -> Rr3HalError {
+    Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(&format!(
+        "nmcli 退出非零（{}）: {}",
+        rr3_nm_redact(args),
+        String::from_utf8_lossy(stderr).trim()
+    )))
 }
 
 /// 等子进程退出：到点 kill 并标记超时（`(status, timed_out)`），等待失败即回错。
@@ -231,23 +255,37 @@ fn rr3_nm_wait(
     deadline: Instant,
 ) -> Result<(Option<std::process::ExitStatus>, bool), Rr3HalError> {
     loop {
-        match child.try_wait() {
-            Ok(Some(st)) => return Ok((Some(st), false)),
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Ok((None, true));
-                }
-                std::thread::sleep(RR3_NM_POLL);
-            }
-            Err(e) => {
-                return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                    &format!("nmcli 等待失败: {e}"),
-                )))
-            }
+        if let Some(done) = rr3_nm_poll(child, deadline)? {
+            return Ok(done);
         }
     }
+}
+
+/// 一拍轮询：已退出/到点即回终局，否则睡一轮后回 `None`（继续等）。
+fn rr3_nm_poll(
+    child: &mut std::process::Child,
+    deadline: Instant,
+) -> Result<Option<(Option<std::process::ExitStatus>, bool)>, Rr3HalError> {
+    match child.try_wait() {
+        Ok(Some(st)) => Ok(Some((Some(st), false))),
+        Ok(None) => {
+            if Instant::now() >= deadline {
+                rr3_nm_kill(child);
+                return Ok(Some((None, true)));
+            }
+            std::thread::sleep(RR3_NM_POLL);
+            Ok(None)
+        }
+        Err(e) => Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+            &format!("nmcli 等待失败: {e}"),
+        ))),
+    }
+}
+
+/// 到点收尸：kill 直子进程并回收（孙进程不在守护面内）。
+fn rr3_nm_kill(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]

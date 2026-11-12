@@ -43,6 +43,14 @@ pub const RR3_AUDIO_CFG_16K_MONO16: Rr3AudioCfg = Rr3AudioCfg {
     bit_depth: 16,
 };
 
+/// 退到 char 边界：返回不劈多字节字符的最大前缀字节数（定长文本共用）。
+fn rr3_text_trim(s: &str, mut len: usize) -> usize {
+    while len > 0 && s.get(..len).is_none() {
+        len -= 1;
+    }
+    len
+}
+
 /// 定长错误文案（[`Rr3HalError::InvalidParam`] 载荷）。no_std 面没有 `String`，
 /// 但实现层（Linux 后端）的错误文案是动态的（io error、路径、数值插值）——
 /// 实现层 `format!` 后经 [`Rr3ErrText::rr3_err_text_new`] 截断入缓冲，按 char
@@ -72,12 +80,9 @@ impl Rr3ErrText {
             len = i + 1;
         }
         // 退到 char 边界（UTF-8 多字节序列不劈半）
-        while len > 0 && s.get(..len).is_none() {
-            len -= 1;
-        }
         Self {
             bytes,
-            len: len as u8,
+            len: rr3_text_trim(s, len) as u8,
         }
     }
 
@@ -113,12 +118,9 @@ impl Rr3SsidText {
             bytes[i] = *b;
             len = i + 1;
         }
-        while len > 0 && s.get(..len).is_none() {
-            len -= 1;
-        }
         Self {
             bytes,
-            len: len as u8,
+            len: rr3_text_trim(s, len) as u8,
         }
     }
 

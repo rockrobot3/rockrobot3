@@ -76,14 +76,7 @@ pub fn rr3_stage_excl(tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> 
 /// 原子写序（显式权限版）：tmp **建时即**以 `mode` 落盘（unix；非 unix 忽略
 /// `mode`），rename 原子替换后目标继承 tmp 权限——敏感面无须再二次 chmod。
 pub fn rr3_store_perm(path: &Path, tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> {
-    {
-        let mut f =
-            rr3_tmp_open(tmp, mode).map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
-        f.write_all(body)
-            .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
-        f.sync_all()
-            .map_err(|e| format!("fsync {} 失败: {e}", tmp.display()))?;
-    }
+    rr3_store_full(tmp, body, mode)?;
     std::fs::rename(tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(tmp);
         format!("rename {} → {} 失败: {e}", tmp.display(), path.display())
@@ -94,6 +87,15 @@ pub fn rr3_store_perm(path: &Path, tmp: &Path, body: &[u8], mode: u32) -> Result
     // 文件级保证仍在，比没有强；调用方无需感知。
     rr3_dir_sync(path);
     Ok(())
+}
+
+/// tmp 独占建 → 写全量 → fsync（不 rename：换名归调用方）。
+fn rr3_store_full(tmp: &Path, body: &[u8], mode: u32) -> Result<(), String> {
+    let mut f = rr3_tmp_open(tmp, mode).map_err(|e| format!("建 {} 失败: {e}", tmp.display()))?;
+    f.write_all(body)
+        .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
+    f.sync_all()
+        .map_err(|e| format!("fsync {} 失败: {e}", tmp.display()))
 }
 
 /// 父目录 fsync（尽力而为，失败静默）。

@@ -357,6 +357,13 @@ fn excl_enter(path: &str) -> std::io::Result<()> {
     if fd < 0 {
         return Err(std::io::Error::last_os_error());
     }
+    rr3_excl_lock(fd)?;
+    m.insert(String::from(path), ExclGuard { fd, refs: 1 });
+    Ok(())
+}
+
+/// 对 guard fd 取排他 non-blocking 锁：被占即点名 ResourceBusy，失败归还 fd。
+fn rr3_excl_lock(fd: i32) -> std::io::Result<()> {
     // SAFETY：合法 fd；LOCK_EX|LOCK_NB 非阻塞取锁，被占即 EWOULDBLOCK。
     if unsafe { c_flock(fd, LOCK_EX | LOCK_NB) } != 0 {
         let e = std::io::Error::last_os_error();
@@ -372,7 +379,6 @@ fn excl_enter(path: &str) -> std::io::Result<()> {
             Err(e)
         };
     }
-    m.insert(String::from(path), ExclGuard { fd, refs: 1 });
     Ok(())
 }
 

@@ -245,23 +245,32 @@ fn rr3_atom_list(
         return;
     };
     for (idx, item) in arr.iter().enumerate() {
-        let Some(s) = item.as_str() else {
-            errs.push(format!(
-                "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
-                spec.path,
-                idx + 1
-            ));
-            continue;
-        };
-        if let Some(rule) = &spec.rule {
-            errs.extend(crate::validate::rr3_registry_check(rule, s));
-        }
-        // 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）
-        if (spec.path == "provides.slots" || spec.path == "uses.slots")
-            && !slots.rr3_slot_contains(s)
-        {
-            errs.push(format!("字段 {} 引用未登记格位 {s}", spec.path));
-        }
+        rr3_atom_list_item(spec, item, idx, slots, errs);
+    }
+}
+
+/// 单条 list 项：字符串判定 → 词形规则 → provides/uses 查册门。
+fn rr3_atom_list_item(
+    spec: &Rr3FieldSpec,
+    item: &Value,
+    idx: usize,
+    slots: &crate::slots::Rr3SlotTable,
+    errs: &mut Vec<String>,
+) {
+    let Some(s) = item.as_str() else {
+        errs.push(format!(
+            "字段 {} 第 {} 项应为字符串，实际为 {item:?}",
+            spec.path,
+            idx + 1
+        ));
+        return;
+    };
+    if let Some(rule) = &spec.rule {
+        errs.extend(crate::validate::rr3_registry_check(rule, s));
+    }
+    // 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）
+    if (spec.path == "provides.slots" || spec.path == "uses.slots") && !slots.rr3_slot_contains(s) {
+        errs.push(format!("字段 {} 引用未登记格位 {s}", spec.path));
     }
 }
 

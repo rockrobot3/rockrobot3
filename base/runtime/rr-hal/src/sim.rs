@@ -194,12 +194,19 @@ fn rr3_sim_sample(
     itd: Option<f64>,
 ) -> f64 {
     let t = (idx / ch_n as u64) as f64 / rate;
-    let sine_at = |t_s: f64| {
-        RR3_SIM_SINE_AMP as f64 * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
-    };
     let (gain, t_shift) = rr3_sim_gain(ch, k, itd);
-    let v = match wave {
-        Rr3SimWave::Sine => sine_at(t + t_shift),
+    rr3_sim_wave_at(wave, t + t_shift, idx, ch_n, rate) * gain
+}
+
+/// 正弦样本（单点振幅/频率参数，形波与 burst 共用）。
+fn rr3_sim_sine(t_s: f64) -> f64 {
+    RR3_SIM_SINE_AMP as f64 * (2.0 * std::f64::consts::PI * RR3_SIM_SINE_HZ * t_s).sin()
+}
+
+/// 波形取值：burst 门控按绝对**帧**序号（idx/声道数）；噪声按序号确定性派生。
+fn rr3_sim_wave_at(wave: Rr3SimWave, t: f64, idx: u64, ch_n: usize, rate: f64) -> f64 {
+    match wave {
+        Rr3SimWave::Sine => rr3_sim_sine(t),
         Rr3SimWave::Burst => {
             // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
             // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等；
@@ -208,22 +215,24 @@ fn rr3_sim_sample(
             // 判停尾静音 700ms，offset 永不触发）；有声路内才带 ITD 偏移
             let frame_idx = idx / ch_n as u64;
             if frame_idx / rate as u64 % 2 == 0 {
-                sine_at(t + t_shift)
+                rr3_sim_sine(t)
             } else {
                 0.0
             }
         }
-        Rr3SimWave::Noise => {
-            let mut x = RR3_SIM_NOISE_SEED ^ idx.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            x ^= x >> 12;
-            x ^= x << 25;
-            x ^= x >> 27;
-            let v = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as i64;
-            (v % (RR3_SIM_NOISE_AMP as i64)) as f64
-        }
+        Rr3SimWave::Noise => rr3_sim_noise(idx),
         Rr3SimWave::Silence => 0.0,
-    };
-    v * gain
+    }
+}
+
+/// 确定性噪声（xorshift）：同序号的点在任何机器任何时刻逐点相等。
+fn rr3_sim_noise(idx: u64) -> f64 {
+    let mut x = RR3_SIM_NOISE_SEED ^ idx.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    let v = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as i64;
+    (v % (RR3_SIM_NOISE_AMP as i64)) as f64
 }
 
 /// 通道方位模型：增益（ILD）与音调相位偏移（ITD，仅音调波）。方位注入只进
@@ -231,13 +240,18 @@ fn rr3_sim_sample(
 /// sim 不发明通道语义）。通道序对齐板端口径（ch0=物理右、ch1=物理左）。
 fn rr3_sim_gain(ch: usize, k: Option<f64>, itd: Option<f64>) -> (f64, f64) {
     match (k, itd) {
-        (Some(k), itd) => match (ch, itd) {
-            // θ>0（右）时 ch0 近——增益高（1+sinθ）、先到
-            (0, Some(itd)) => (1.0 + k, itd / 2.0),
-            (1, Some(itd)) => (1.0 - k, -itd / 2.0),
-            _ => (0.0, 0.0),
-        },
+        (Some(k), itd) => rr3_sim_gain_ch(ch, k, itd),
         _ => (1.0, 0.0),
+    }
+}
+
+/// 单通道增益与相位：只有前两路（L/R 对）承载方位，其余静音。
+fn rr3_sim_gain_ch(ch: usize, k: f64, itd: Option<f64>) -> (f64, f64) {
+    match (ch, itd) {
+        // θ>0（右）时 ch0 近——增益高（1+sinθ）、先到
+        (0, Some(itd)) => (1.0 + k, itd / 2.0),
+        (1, Some(itd)) => (1.0 - k, -itd / 2.0),
+        _ => (0.0, 0.0),
     }
 }
 

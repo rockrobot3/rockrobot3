@@ -136,6 +136,12 @@ fn rr3_ev_field(line: &str) -> Result<(&str, &str), String> {
             RR3_EVIDENCE_KEYS.join("/")
         ));
     }
+    let inner = rr3_ev_quoted(key, value)?;
+    Ok((key, inner))
+}
+
+/// 双引号值：剥离首尾引号，值内不许再出现双引号（一行文本的形制）。
+fn rr3_ev_quoted<'a>(key: &str, value: &'a str) -> Result<&'a str, String> {
     let inner = value
         .strip_prefix('"')
         .and_then(|v| v.strip_suffix('"'))
@@ -143,7 +149,7 @@ fn rr3_ev_field(line: &str) -> Result<(&str, &str), String> {
     if inner.contains('"') {
         return Err(format!("{key} 的值内不许出现双引号: {value:?}"));
     }
-    Ok((key, inner))
+    Ok(inner)
 }
 
 /// 必填键核对：字段集必须覆盖 [`RR3_EVIDENCE_KEYS`] 全集

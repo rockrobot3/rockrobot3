@@ -444,8 +444,11 @@ fn rr3_chk_declared(
         errs.push(format!("未注册主题 {s}"));
         return;
     }
-    // C14 门改判（0.0.5 批J）：retired 主题 = 号位保留、义务解除，
-    // 申报发布/暴露即拒（ADR-0019 修订 2 ②）。
+    rr3_chk_retired(s, topics, errs);
+}
+
+/// C14 门改判（0.0.5 批J）：retired 主题 = 号位保留、义务解除，申报发布/暴露即拒。
+fn rr3_chk_retired(s: &str, topics: &crate::topics::Rr3TopicSet, errs: &mut Vec<String>) {
     if topics.rr3_topic_status(s).as_deref() == Some("retired") {
         errs.push(format!(
             "retired 主题 {s} 不得被申报（发布/暴露）——号位保留、义务解除（ADR-0019 修订 2 ②）"
