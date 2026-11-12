@@ -268,19 +268,23 @@ unsafe extern "C" fn rr3_mac_input_cb(
     // 钳制：字节数不超容量且为 s16 样点整数倍（CoreAudio 侧数据本应如此，防御性）
     let filled = (filled_bytes.min(cap_bytes) as usize) / 2 * 2;
     if filled > 0 {
-        let src = (*buffer).m_audio_data as *const i16;
-        let n = filled / 2;
-        let mut state = rr3_mac_lock(&shared.state);
-        if state.len() + n > shared.cap {
-            let drop_n = (state.len() + n - shared.cap).min(state.len());
-            state.drain(..drop_n);
-        }
-        state.extend(core::slice::from_raw_parts(src, n));
-        shared.cv.notify_all();
+        rr3_mac_push_in(shared, (*buffer).m_audio_data as *const i16, filled / 2);
     }
     // 重入队：请求整块容量继续收（m_audio_data_byte_size 置回容量）
     (*buffer).m_audio_data_byte_size = cap_bytes;
     let _ = AudioQueueEnqueueBuffer(aq, buffer, 0, ptr::null());
+}
+
+/// 整块拷入 deque 尾（超上限丢最旧）并唤醒等待者。
+fn rr3_mac_push_in(shared: &SourceShared, src: *const i16, n: usize) {
+    let mut state = rr3_mac_lock(&shared.state);
+    if state.len() + n > shared.cap {
+        let drop_n = (state.len() + n - shared.cap).min(state.len());
+        state.drain(..drop_n);
+    }
+    // SAFETY：src 指向回调给出的 buffer 数据区，n 为钳制后的样点数。
+    state.extend(unsafe { core::slice::from_raw_parts(src, n) });
+    shared.cv.notify_all();
 }
 
 /// 一条已 open 的拾音流：AudioQueue 句柄 + 回调共享态（Box 持有，裸指针交 C）。
@@ -360,6 +364,31 @@ impl Rr3MacAudioSource {
     }
 }
 
+/// 建拾音队列：失败先回收共享态再折 InvalidParam（回调可能已注册，先 Dispose）。
+fn rr3_mac_new_input(
+    asbd: &AudioStreamBasicDescription,
+    shared: *mut SourceShared,
+) -> Result<AudioQueueRef, Rr3HalError> {
+    let mut aq: AudioQueueRef = ptr::null_mut();
+    // SAFETY：asbd/shared 为合法指针，回调是非捕获 fn，out_aq 为本地出参
+    let status = unsafe {
+        AudioQueueNewInput(
+            asbd,
+            rr3_mac_input_cb,
+            shared as *mut core::ffi::c_void,
+            ptr::null_mut(), // NULL runloop = AudioQueue 内部线程回调
+            ptr::null_mut(),
+            0,
+            &mut aq,
+        )
+    };
+    if status != 0 {
+        unsafe { drop(Box::from_raw(shared)) };
+        return Err(rr3_mac_status_err("AudioQueueNewInput", status));
+    }
+    Ok(aq)
+}
+
 impl Rr3AudioSource for Rr3MacAudioSource {
     fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
         rr3_mac_cfg_check(cfg)?;
@@ -369,24 +398,8 @@ impl Rr3AudioSource for Rr3MacAudioSource {
             cap: rr3_mac_in_deque_cap(cfg),
         }));
         // 任何后续失败都要回收 Shared（回调可能已注册，故先 Dispose 再回收）
-        let mut aq: AudioQueueRef = ptr::null_mut();
         let asbd = rr3_mac_asbd(cfg);
-        // SAFETY：asbd/shared 为合法指针，回调是非捕获 fn，out_aq 为本地出参
-        let status = unsafe {
-            AudioQueueNewInput(
-                &asbd,
-                rr3_mac_input_cb,
-                shared as *mut core::ffi::c_void,
-                ptr::null_mut(), // NULL runloop = AudioQueue 内部线程回调
-                ptr::null_mut(),
-                0,
-                &mut aq,
-            )
-        };
-        if status != 0 {
-            unsafe { drop(Box::from_raw(shared)) };
-            return Err(rr3_mac_status_err("AudioQueueNewInput", status));
-        }
+        let aq = rr3_mac_new_input(&asbd, shared)?;
         if let Err(e) = Self::prime_and_start(aq) {
             unsafe {
                 let _ = AudioQueueStop(aq, 1);
@@ -424,10 +437,15 @@ impl Rr3AudioSource for Rr3MacAudioSource {
                 ),
             )));
         }
-        for (d, b) in state.drain(..buf.len()).zip(buf.iter_mut()) {
-            *b = d;
-        }
+        rr3_mac_drain_into(&mut state, buf);
         Ok(buf.len())
+    }
+}
+
+/// 从 deque 取 `buf.len()` 个样点填满调用方缓冲。
+fn rr3_mac_drain_into(state: &mut VecDeque<i16>, buf: &mut [i16]) {
+    for (d, b) in state.drain(..buf.len()).zip(buf.iter_mut()) {
+        *b = d;
     }
 }
 
@@ -435,19 +453,7 @@ impl Rr3MacAudioSource {
     /// 分配并预入队拾音 buffer（byte_size 置满容量 = 请求整块收满），Start 起流。
     fn prime_and_start(aq: AudioQueueRef) -> Result<(), Rr3HalError> {
         for _ in 0..MAC_IN_BUF_COUNT {
-            let mut buf: AudioQueueBufferRef = ptr::null_mut();
-            // SAFETY：aq 为 NewInput 出参合法句柄，buf 为本地出参
-            let status = unsafe { AudioQueueAllocateBuffer(aq, MAC_IN_BUF_BYTES, &mut buf) };
-            if status != 0 {
-                return Err(rr3_mac_status_err("AudioQueueAllocateBuffer", status));
-            }
-            unsafe {
-                (*buf).m_audio_data_byte_size = MAC_IN_BUF_BYTES;
-                let status = AudioQueueEnqueueBuffer(aq, buf, 0, ptr::null());
-                if status != 0 {
-                    return Err(rr3_mac_status_err("AudioQueueEnqueueBuffer", status));
-                }
-            }
+            rr3_mac_prime_in_buf(aq)?;
         }
         let status = unsafe { AudioQueueStart(aq, ptr::null()) };
         if status != 0 {
@@ -455,6 +461,24 @@ impl Rr3MacAudioSource {
         }
         Ok(())
     }
+}
+
+/// 分配并预入队一块拾音 buffer（byte_size 置满容量 = 请求整块收满）。
+fn rr3_mac_prime_in_buf(aq: AudioQueueRef) -> Result<(), Rr3HalError> {
+    let mut buf: AudioQueueBufferRef = ptr::null_mut();
+    // SAFETY：aq 为 NewInput 出参合法句柄，buf 为本地出参
+    let status = unsafe { AudioQueueAllocateBuffer(aq, MAC_IN_BUF_BYTES, &mut buf) };
+    if status != 0 {
+        return Err(rr3_mac_status_err("AudioQueueAllocateBuffer", status));
+    }
+    unsafe {
+        (*buf).m_audio_data_byte_size = MAC_IN_BUF_BYTES;
+        let status = AudioQueueEnqueueBuffer(aq, buf, 0, ptr::null());
+        if status != 0 {
+            return Err(rr3_mac_status_err("AudioQueueEnqueueBuffer", status));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -483,18 +507,22 @@ unsafe extern "C" fn rr3_mac_output_cb(
     let cap_bytes = (*buffer).m_audio_data_bytes_capacity;
     let cap_samples = cap_bytes as usize / 2;
     let dst = (*buffer).m_audio_data as *mut i16;
+    rr3_mac_fill_out(shared, dst, cap_samples);
+    (*buffer).m_audio_data_byte_size = cap_bytes;
+    let _ = AudioQueueEnqueueBuffer(aq, buffer, 0, ptr::null());
+}
+
+/// 从 deque 取满一块（不足补零=静音拍），唤醒 write。
+fn rr3_mac_fill_out(shared: &SinkShared, dst: *mut i16, cap_samples: usize) {
     let mut state = rr3_mac_lock(&shared.state);
     let n = state.deque.len().min(cap_samples);
     for (i, s) in state.deque.drain(..n).enumerate() {
-        *dst.add(i) = s;
+        unsafe { *dst.add(i) = s };
     }
     if n < cap_samples {
-        ptr::write_bytes(dst.add(n), 0, cap_samples - n);
+        unsafe { ptr::write_bytes(dst.add(n), 0, cap_samples - n) };
     }
     shared.cv.notify_all();
-    drop(state);
-    (*buffer).m_audio_data_byte_size = cap_bytes;
-    let _ = AudioQueueEnqueueBuffer(aq, buffer, 0, ptr::null());
 }
 
 /// 一条已 open 的回放流：同 [`SourceStream`] 的生命周期纪律。
@@ -530,6 +558,31 @@ impl Rr3MacAudioSink {
     }
 }
 
+/// 建回放队列：失败先回收共享态再折 InvalidParam（与拾音 open 同款）。
+fn rr3_mac_new_output(
+    asbd: &AudioStreamBasicDescription,
+    shared: *mut SinkShared,
+) -> Result<AudioQueueRef, Rr3HalError> {
+    let mut aq: AudioQueueRef = ptr::null_mut();
+    // SAFETY：同拾音 open
+    let status = unsafe {
+        AudioQueueNewOutput(
+            asbd,
+            rr3_mac_output_cb,
+            shared as *mut core::ffi::c_void,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            0,
+            &mut aq,
+        )
+    };
+    if status != 0 {
+        unsafe { drop(Box::from_raw(shared)) };
+        return Err(rr3_mac_status_err("AudioQueueNewOutput", status));
+    }
+    Ok(aq)
+}
+
 impl Rr3AudioSink for Rr3MacAudioSink {
     fn open(&mut self, cfg: Rr3AudioCfg) -> Result<(), Rr3HalError> {
         rr3_mac_cfg_check(cfg)?;
@@ -542,24 +595,8 @@ impl Rr3AudioSink for Rr3MacAudioSink {
             }),
             cv: Condvar::new(),
         }));
-        let mut aq: AudioQueueRef = ptr::null_mut();
         let asbd = rr3_mac_asbd(cfg);
-        // SAFETY：同拾音 open
-        let status = unsafe {
-            AudioQueueNewOutput(
-                &asbd,
-                rr3_mac_output_cb,
-                shared as *mut core::ffi::c_void,
-                ptr::null_mut(),
-                ptr::null_mut(),
-                0,
-                &mut aq,
-            )
-        };
-        if status != 0 {
-            unsafe { drop(Box::from_raw(shared)) };
-            return Err(rr3_mac_status_err("AudioQueueNewOutput", status));
-        }
+        let aq = rr3_mac_new_output(&asbd, shared)?;
         if let Err(e) = Self::prime_and_start(aq) {
             unsafe {
                 let _ = AudioQueueStop(aq, 1);
@@ -583,24 +620,8 @@ impl Rr3AudioSink for Rr3MacAudioSink {
         let mut state = rr3_mac_lock(&shared.state);
         let mut i = 0usize;
         while i < samples.len() {
-            let (guard, roomy) = rr3_mac_wait(
-                &shared.cv,
-                state,
-                |s| s.deque.len() < s.watermark,
-                Duration::from_millis(RR3_MAC_WAIT_MS),
-            );
+            let (guard, take) = rr3_mac_room(shared, state, i, samples.len())?;
             state = guard;
-            if !roomy {
-                return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                    &format!(
-                        "mac 回放 {RR3_MAC_WAIT_MS}ms 队列未排水（已写 {}/{} 样点）——输出设备掉线或回调停摆",
-                        i,
-                        samples.len()
-                    ),
-                )));
-            }
-            let room = state.watermark - state.deque.len();
-            let take = room.min(samples.len() - i);
             state.deque.extend(&samples[i..i + take]);
             i += take;
         }
@@ -608,24 +629,36 @@ impl Rr3AudioSink for Rr3MacAudioSink {
     }
 }
 
+/// 等可写空位：队列低于高水位即回（守卫, 本次可写样点数）；超时即点名回错。
+fn rr3_mac_room<'a>(
+    shared: &SinkShared,
+    state: std::sync::MutexGuard<'a, SinkState>,
+    written: usize,
+    total: usize,
+) -> Result<(std::sync::MutexGuard<'a, SinkState>, usize), Rr3HalError> {
+    let (state, roomy) = rr3_mac_wait(
+        &shared.cv,
+        state,
+        |s| s.deque.len() < s.watermark,
+        Duration::from_millis(RR3_MAC_WAIT_MS),
+    );
+    if !roomy {
+        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+            &format!(
+                "mac 回放 {RR3_MAC_WAIT_MS}ms 队列未排水（已写 {written}/{total} 样点）——输出设备掉线或回调停摆"
+            ),
+        )));
+    }
+    let room = state.watermark - state.deque.len();
+    let take = room.min(total - written);
+    Ok((state, take))
+}
+
 impl Rr3MacAudioSink {
     /// 分配回放 buffer（先清零，首拍静音而非垃圾）、全部入队，Start 起流。
     fn prime_and_start(aq: AudioQueueRef) -> Result<(), Rr3HalError> {
         for _ in 0..MAC_OUT_BUF_COUNT {
-            let mut buf: AudioQueueBufferRef = ptr::null_mut();
-            // SAFETY：aq 为 NewOutput 出参合法句柄
-            let status = unsafe { AudioQueueAllocateBuffer(aq, MAC_OUT_BUF_BYTES, &mut buf) };
-            if status != 0 {
-                return Err(rr3_mac_status_err("AudioQueueAllocateBuffer", status));
-            }
-            unsafe {
-                ptr::write_bytes((*buf).m_audio_data, 0, MAC_OUT_BUF_BYTES as usize);
-                (*buf).m_audio_data_byte_size = MAC_OUT_BUF_BYTES;
-                let status = AudioQueueEnqueueBuffer(aq, buf, 0, ptr::null());
-                if status != 0 {
-                    return Err(rr3_mac_status_err("AudioQueueEnqueueBuffer", status));
-                }
-            }
+            rr3_mac_out_buf(aq)?;
         }
         let status = unsafe { AudioQueueStart(aq, ptr::null()) };
         if status != 0 {
@@ -633,6 +666,25 @@ impl Rr3MacAudioSink {
         }
         Ok(())
     }
+}
+
+/// 分配并预入队一块回放 buffer（先清零，首拍静音而非垃圾）。
+fn rr3_mac_out_buf(aq: AudioQueueRef) -> Result<(), Rr3HalError> {
+    let mut buf: AudioQueueBufferRef = ptr::null_mut();
+    // SAFETY：aq 为 NewOutput 出参合法句柄
+    let status = unsafe { AudioQueueAllocateBuffer(aq, MAC_OUT_BUF_BYTES, &mut buf) };
+    if status != 0 {
+        return Err(rr3_mac_status_err("AudioQueueAllocateBuffer", status));
+    }
+    unsafe {
+        ptr::write_bytes((*buf).m_audio_data, 0, MAC_OUT_BUF_BYTES as usize);
+        (*buf).m_audio_data_byte_size = MAC_OUT_BUF_BYTES;
+        let status = AudioQueueEnqueueBuffer(aq, buf, 0, ptr::null());
+        if status != 0 {
+            return Err(rr3_mac_status_err("AudioQueueEnqueueBuffer", status));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -80,12 +80,7 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
 
     // [assemble]：atoms 必填非空不重复；handles/ops/no_injection 与件级同规则。
     // 段缺同样只点名，让 schema/[composite] 的错误同批亮出。
-    let asm = t.get("assemble").and_then(Value::as_table);
-    let Some(asm) = asm else {
-        errs.push(
-            "组合件清单缺 [assemble] 表（atoms 必填，handles / ops / no_injection 同件级规则）"
-                .into(),
-        );
+    let Some(asm) = rr3_comp_asm_tbl(&t, &mut errs) else {
         return Err(errs);
     };
     rr3_comp_asm(asm, &mut facts, &mut errs);
@@ -95,6 +90,18 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
     } else {
         Err(errs)
     }
+}
+
+/// 取 `[assemble]` 段（缺段点名回 None，调用方按 errs 收兵）。
+fn rr3_comp_asm_tbl<'a>(t: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a toml::Table> {
+    let asm = t.get("assemble").and_then(Value::as_table);
+    if asm.is_none() {
+        errs.push(
+            "组合件清单缺 [assemble] 表（atoms 必填，handles / ops / no_injection 同件级规则）"
+                .into(),
+        );
+    }
+    asm
 }
 
 /// 顶层 TOML 解析：语法错与"顶层非表"各自成条 Err（与旧实现逐字同文案）。

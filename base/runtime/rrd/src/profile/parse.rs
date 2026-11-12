@@ -112,14 +112,24 @@ fn rr3_enabled_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<Str
 fn rr3_slot_items(module: &str, items: &[toml::Value], errs: &mut Vec<String>) -> Vec<String> {
     let mut slots = Vec::new();
     for item in items {
-        match item.as_str() {
-            Some(s) if !s.is_empty() => slots.push(s.to_string()),
-            _ => errs.push(format!(
-                "enabled_slots.{module} 的每一项都必须是非空字符串（格位名）"
-            )),
-        }
+        rr3_slot_item(module, item, &mut slots, errs);
     }
     slots
+}
+
+/// 单格位项：非空字符串收册，其余逐条点名（文案只报一次模块名）。
+fn rr3_slot_item(
+    module: &str,
+    item: &toml::Value,
+    slots: &mut Vec<String>,
+    errs: &mut Vec<String>,
+) {
+    match item.as_str() {
+        Some(s) if !s.is_empty() => slots.push(s.to_string()),
+        _ => errs.push(format!(
+            "enabled_slots.{module} 的每一项都必须是非空字符串（格位名）"
+        )),
+    }
 }
 
 /// [hardware]：可选段（纯 sim/无硬件格形态可以不给）。每键非空、值必须是
@@ -291,12 +301,17 @@ fn rr3_pin_phys(i: usize, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec
         return;
     };
     for x in a {
-        match x.as_integer() {
-            Some(n) => pin.physical.push(n),
-            None => errs.push(format!(
-                "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
-            )),
-        }
+        rr3_phys_item(i, x, pin, errs);
+    }
+}
+
+/// 单个物理引脚号：整数收册，其余逐项点名。
+fn rr3_phys_item(i: usize, x: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
+    match x.as_integer() {
+        Some(n) => pin.physical.push(n),
+        None => errs.push(format!(
+            "pin #{i}.physical 的每一项都必须是整数（物理引脚号）"
+        )),
     }
 }
 
@@ -309,10 +324,15 @@ fn rr3_pin_mux(i: usize, v: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<
         return;
     };
     for x in a {
-        match x.as_str() {
-            Some(s) if !s.is_empty() => pin.mux_group.push(s.to_string()),
-            _ => errs.push(format!("pin #{i}.mux_group 的每一项都必须是非空字符串")),
-        }
+        rr3_mux_item(i, x, pin, errs);
+    }
+}
+
+/// 单个 mux_group 元素：非空字符串收册，其余逐项点名。
+fn rr3_mux_item(i: usize, x: &toml::Value, pin: &mut Rr3PinEntry, errs: &mut Vec<String>) {
+    match x.as_str() {
+        Some(s) if !s.is_empty() => pin.mux_group.push(s.to_string()),
+        _ => errs.push(format!("pin #{i}.mux_group 的每一项都必须是非空字符串")),
     }
 }
 
@@ -896,14 +916,24 @@ fn rr3_slots_absent(t: &toml::Table, out: &mut BTreeMap<String, String>, errs: &
         return;
     };
     for (slot, reason) in absent {
-        match reason.as_str() {
-            Some(r) if !r.trim().is_empty() => {
-                out.insert(slot.clone(), r.to_string());
-            }
-            _ => errs.push(format!(
-                "[slots].device_absent 格位 {slot} 的理由必须是非空字符串（缺席须显式申报理由，留空即红）"
-            )),
+        rr3_absent_item(slot, reason, out, errs);
+    }
+}
+
+/// 单条 device_absent：非空理由收册，否则按同一文案点名。
+fn rr3_absent_item(
+    slot: &str,
+    reason: &toml::Value,
+    out: &mut BTreeMap<String, String>,
+    errs: &mut Vec<String>,
+) {
+    match reason.as_str() {
+        Some(r) if !r.trim().is_empty() => {
+            out.insert(slot.to_string(), r.to_string());
         }
+        _ => errs.push(format!(
+            "[slots].device_absent 格位 {slot} 的理由必须是非空字符串（缺席须显式申报理由，留空即红）"
+        )),
     }
 }
 

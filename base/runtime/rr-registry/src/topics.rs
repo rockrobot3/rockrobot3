@@ -72,25 +72,20 @@ fn rr3_topic_add(set: &mut Rr3TopicSet, t: &toml::Table) {
     let Some(name) = t.get("name").and_then(Value::as_str) else {
         return;
     };
-    set.topics.insert(
-        name.to_string(),
-        t.get("owner")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-    );
-    set.kinds.insert(
-        name.to_string(),
-        t.get("kind")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-    );
+    set.topics
+        .insert(name.to_string(), rr3_topic_meta(t, "owner"));
+    set.kinds
+        .insert(name.to_string(), rr3_topic_meta(t, "kind"));
     if let Some(st) = t.get("status").and_then(Value::as_str) {
         if !st.is_empty() {
             set.statuses.insert(name.to_string(), st.to_string());
         }
     }
+}
+
+/// 单字段文本值：缺键/非串按空串收（形状真值由契约测试钉住）。
+fn rr3_topic_meta(t: &toml::Table, key: &str) -> String {
+    t.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
 impl Rr3TopicSet {

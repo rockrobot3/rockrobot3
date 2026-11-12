@@ -97,14 +97,24 @@ fn rr3_spawn_watchdog(
         // 打在这里它证明的是"线程真的跑起来过"。文案与格式一字不改（needle 依赖它）。
         rr3_log(&format!("watchdog 启动 tick={tick_ms}ms"));
         let tick = Duration::from_millis(tick_ms);
-        loop {
-            thread::sleep(tick);
-            let expiries = rr3_lock(&shared).rr3_reg_expire(rr3_now_ms(t0));
-            for ex in expiries {
-                rr3_expiry_fan(&shared, &sup, ex);
-            }
-        }
+        rr3_watchdog_loop(&shared, t0, tick, &sup);
     });
+}
+
+/// 看门狗节拍本体：每 tick 判死一拍，逐条到期交广播/重启/降级。
+fn rr3_watchdog_loop(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    t0: Instant,
+    tick: Duration,
+    sup: &Rr3Supervisor,
+) {
+    loop {
+        thread::sleep(tick);
+        let expiries = rr3_lock(shared).rr3_reg_expire(rr3_now_ms(t0));
+        for ex in expiries {
+            rr3_expiry_fan(shared, sup, ex);
+        }
+    }
 }
 
 /// 单条到期判死：点名、广播 failed、交重启计划、降级传播。
@@ -795,14 +805,19 @@ fn rr3_spawn_conn(stream: UnixStream, conn: Rr3ConnCtx, slot: Rr3ConnSlot) {
         .name("rrd-conn".into())
         .spawn(move || {
             let _slot = slot;
-            if let Err(e) = rr3_conn_serve(stream, conn) {
-                rr3_log(&format!("连接收尾: {e}"));
-            }
+            rr3_conn_thread(stream, conn);
         });
     if let Err(e) = spawned {
         // 线程起不来（资源耗尽）只拒这一条连接：accept 主循环不能 panic——
         // 守护停摆比少一条连接严重得多（闭包已 drop，槽位随 Drop 归还）。
         rr3_log(&format!("连接线程起不来，拒连（继续服务）: {e}"));
+    }
+}
+
+/// 连接线程本体：服务一条连接，退出（含 panic）由槽守卫归还并发位。
+fn rr3_conn_thread(stream: UnixStream, conn: Rr3ConnCtx) {
+    if let Err(e) = rr3_conn_serve(stream, conn) {
+        rr3_log(&format!("连接收尾: {e}"));
     }
 }
 

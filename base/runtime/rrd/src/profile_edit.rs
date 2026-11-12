@@ -154,12 +154,16 @@ fn rr3_domain_spans(
         }
         let end = heads.get(idx + 1).map(|&(h, _)| h).unwrap_or(lines.len());
         // 域名是引号串，允许行内注释——单/双引号同义取首对引号内内容
-        let is_match = lines[head_i + 1..end]
-            .iter()
-            .any(|l| rr3_quoted_value(l, "name") == Some(domain));
-        if is_match {
+        if rr3_span_names(lines, head_i + 1, end, domain) {
             matched.push((head_i + 1, end));
         }
     }
     matched
+}
+
+/// 块行范围内是否写着 `name = "<domain>"`（单/双引号同义）。
+fn rr3_span_names(lines: &[String], start: usize, end: usize, domain: &str) -> bool {
+    lines[start..end]
+        .iter()
+        .any(|l| rr3_quoted_value(l, "name") == Some(domain))
 }

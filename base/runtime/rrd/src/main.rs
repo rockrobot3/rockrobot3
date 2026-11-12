@@ -77,14 +77,19 @@ fn rr3_banner_print(
     );
     if let Some(ov) = overlay {
         // 叠加层的可见凭证（spec §6：非生产放行口）：绝对路径，与 CWD 无关
-        println!("rrd: 主题叠加层已加载（仅测试用）: {}", ov.display());
-        for t in added {
-            println!("rrd: 叠加主题 {t}");
-        }
+        rr3_banner_overlay(ov, added);
     }
     if let Some(p) = &cfg.profile {
         // 装配单的可见凭证：绝对路径（0.0.2 方案 Q3：装机正门），与 CWD 无关
         println!("rrd: 装配单已加载: {}", p.display());
+    }
+}
+
+/// 叠加层横幅段：路径一行 + 每条新增主题一行（键序由调用方给）。
+fn rr3_banner_overlay(ov: &std::path::Path, added: &[String]) {
+    println!("rrd: 主题叠加层已加载（仅测试用）: {}", ov.display());
+    for t in added {
+        println!("rrd: 叠加主题 {t}");
     }
 }
 

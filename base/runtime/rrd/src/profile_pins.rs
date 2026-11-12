@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use rr_registry::{Rr3DeviceTable, Rr3PlatformTable, Rr3RoleTable};
 
-use crate::profile::{Rr3PinEntry, Rr3Profile};
+use crate::profile::{Rr3Domain, Rr3PinEntry, Rr3Profile};
 
 /// 装载期校验⑤-a/⑤-b/⑧-b（增补轮六 §5，后果 = 拒；施工图 Task 4）：方向与能力
 /// 合法、控制器在册，判据真值 = 平台事实表（`contracts/platform/<chip>.toml`，
@@ -79,15 +79,28 @@ fn rr3_pin_adc(
     // 测点引用面 = 域绑定位，与 ⑥-d 同一 pin_id 语法
     for d in &profile.supplies.domains {
         for (key, val) in [("sense", &d.sense), ("current_sense", &d.current_sense)] {
-            if val == "none" {
-                continue;
-            }
-            let Some(pin) = profile.pins.iter().find(|p| &p.rr3_pin_id() == val) else {
-                continue; // 悬空 pin_id 由 ⑥-d 点名，此处不重复报
-            };
-            rr3_adc_phys_check(pin, &d.name, key, platform, plat, errs);
+            rr3_adc_bind(profile, d, key, val, platform, plat, errs);
         }
     }
+}
+
+/// 单个测点绑定：`none` 显式不适跳过；悬空 pin_id 由 ⑥-d 点名，此处不重复报。
+fn rr3_adc_bind(
+    profile: &Rr3Profile,
+    d: &Rr3Domain,
+    key: &str,
+    val: &str,
+    platform: &Rr3PlatformTable,
+    plat: &str,
+    errs: &mut Vec<String>,
+) {
+    if val == "none" {
+        return;
+    }
+    let Some(pin) = profile.pins.iter().find(|p| p.rr3_pin_id() == val) else {
+        return;
+    };
+    rr3_adc_phys_check(pin, &d.name, key, platform, plat, errs);
 }
 
 /// 单 pin 的 physical 全落 ADC 集判据。

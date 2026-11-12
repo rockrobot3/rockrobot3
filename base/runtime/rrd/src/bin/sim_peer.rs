@@ -147,13 +147,18 @@ mod peer {
                     "params": {"name": facts.name, "manifest": text}}),
         )?;
         let reply = rr3_wait_reply(stream, 1)?;
+        rr3_reg_task(&reply, &facts.name)
+    }
+
+    /// 注册应答取 task：error 对象 = 拒，缺 result.src_task = 拒。
+    fn rr3_reg_task(reply: &Value, name: &str) -> Result<u64, String> {
         if reply["error"].is_object() {
             return Err(format!("注册被拒: {}", reply["error"]));
         }
         let task = reply["result"]["src_task"]
             .as_u64()
             .ok_or("注册应答里没有 result.src_task")?;
-        println!("sim-peer: 注册成功 name={} task={task}", facts.name);
+        println!("sim-peer: 注册成功 name={} task={task}", name);
         Ok(task)
     }
 

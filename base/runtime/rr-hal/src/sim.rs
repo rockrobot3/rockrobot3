@@ -166,16 +166,35 @@ impl Rr3AudioSource for Rr3SimAudioSource {
         let rate = open.cfg.sample_rate_hz.max(1) as f64;
         // 方位模型参数（无注入或单声道时全 None——mono 链路没有方向语义，
         // 逐采样路径与旧实现逐点等价，golden 向量不因 DoA 注入而动）
-        let (k, itd) = match self.doa.filter(|_| ch_n >= 2) {
-            Some(d) => (Some(d.rr3_sim_doa_sin()), Some(d.rr3_sim_doa_itd_s())),
-            None => (None, None),
-        };
-        for (i, out) in buf.iter_mut().enumerate() {
-            let idx = open.cursor + i as u64;
-            *out = rr3_sim_sample(self.wave, idx, i % ch_n, ch_n, rate, k, itd) as i16;
-        }
+        let (k, itd) = rr3_sim_doa_args(self.doa, ch_n);
+        let cursor = open.cursor;
+        rr3_sim_fill(self.wave, buf, cursor, ch_n, rate, k, itd);
         open.cursor += n as u64;
         Ok(n)
+    }
+}
+
+/// 方位模型参数（无注入或单声道时全 None——mono 链路没有方向语义）。
+fn rr3_sim_doa_args(doa: Option<Rr3SimDoa>, ch_n: usize) -> (Option<f64>, Option<f64>) {
+    match doa.filter(|_| ch_n >= 2) {
+        Some(d) => (Some(d.rr3_sim_doa_sin()), Some(d.rr3_sim_doa_itd_s())),
+        None => (None, None),
+    }
+}
+
+/// 按绝对序号（cursor + i）逐点确定性填充输出缓冲。
+fn rr3_sim_fill(
+    wave: Rr3SimWave,
+    buf: &mut [i16],
+    cursor: u64,
+    ch_n: usize,
+    rate: f64,
+    k: Option<f64>,
+    itd: Option<f64>,
+) {
+    for (i, out) in buf.iter_mut().enumerate() {
+        let idx = cursor + i as u64;
+        *out = rr3_sim_sample(wave, idx, i % ch_n, ch_n, rate, k, itd) as i16;
     }
 }
 
@@ -309,11 +328,16 @@ impl Rr3AudioSink for Rr3SimAudioSink {
         }
         let mut played = self.played.lock().unwrap_or_else(|p| p.into_inner());
         played.extend_from_slice(samples);
-        let over = played.len().saturating_sub(self.cap);
-        if over > 0 {
-            played.drain(..over);
-        }
+        rr3_sim_trim(&mut played, self.cap);
         Ok(())
+    }
+}
+
+/// 尾窗上限：超出部分从最旧端丢弃（e2e 长跑不吃内存）。
+fn rr3_sim_trim(played: &mut Vec<i16>, cap: usize) {
+    let over = played.len().saturating_sub(cap);
+    if over > 0 {
+        played.drain(..over);
     }
 }
 

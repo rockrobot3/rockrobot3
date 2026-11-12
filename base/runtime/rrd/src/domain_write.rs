@@ -269,16 +269,19 @@ fn rr3_slot_path(
     let e = match hits.len() {
         0 => return Ok(None),
         1 => hits[0],
-        n => {
-            let names: Vec<&str> = hits.iter().take(3).map(|e| e.member.as_str()).collect();
-            return Err(format!(
-                "真值集同类记账成员重复 {n} 条（{} 等）——写口路径歧义，拒",
-                names.join(", ")
-            ));
-        }
+        n => return Err(rr3_slot_dup_err(&hits, n)),
     };
     // platform 槽登记的是 chip 表文件本身，写口要的是目录（兄弟表落位同目录）
     Ok(rr3_slot_pick(e, slot))
+}
+
+/// 同槽多条记账 = 路径歧义：点名前三条成员，拒（写口不猜哪个是真目标）。
+fn rr3_slot_dup_err(hits: &[&Rr3TruthSetEntry], n: usize) -> String {
+    let names: Vec<&str> = hits.iter().take(3).map(|e| e.member.as_str()).collect();
+    format!(
+        "真值集同类记账成员重复 {n} 条（{} 等）——写口路径歧义，拒",
+        names.join(", ")
+    )
 }
 
 fn rr3_slot_pick(e: &Rr3TruthSetEntry, slot: Rr3PathSlot) -> Option<PathBuf> {
@@ -685,13 +688,18 @@ fn rr3_axis_path(
             "轴实例名 {name:?} 须为单段标识（不含路径分隔符 / `..` / 控制字符）——写口只改本形态 axis/ 目录内的在册档"
         )));
     }
-    let axis_dir = paths
-        .wiring
-        .parent()
-        .ok_or_else(|| invalid("接线档路径无父目录".to_string()))?
-        .join("axis");
+    let axis_dir = rr3_axis_dir(paths)?;
     let axis_path = axis_dir.join(format!("{name}.toml"));
     rr3_axis_must_exist(axis_path)
+}
+
+/// 轴档目录（hardware/<形态>/axis）：由接线档的父目录推导，无父目录即拒。
+fn rr3_axis_dir(paths: &Rr3DomainWritePaths) -> Result<PathBuf, (Rr3StatusCode, String)> {
+    let parent = paths
+        .wiring
+        .parent()
+        .ok_or_else(|| (Rr3StatusCode::Invalid, "接线档路径无父目录".to_string()))?;
+    Ok(parent.join("axis"))
 }
 
 fn rr3_axis_must_exist(axis_path: PathBuf) -> Result<PathBuf, (Rr3StatusCode, String)> {

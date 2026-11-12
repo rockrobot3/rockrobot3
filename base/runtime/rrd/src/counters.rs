@@ -190,6 +190,11 @@ impl Rr3CountersGate {
     /// ③待落盘拍数 ≥ 兜底即刷。
     pub fn rr3_on_change(&mut self, now_ms: u64) -> bool {
         self.pending = self.pending.saturating_add(1);
+        self.rr3_flush_due(now_ms)
+    }
+
+    /// flush 判据（R26 ②③）：首拍即刷，否则距上次落盘满窗口或兜底拍数到点。
+    fn rr3_flush_due(&self, now_ms: u64) -> bool {
         match self.last_flush_ms {
             None => true,
             Some(last) => {

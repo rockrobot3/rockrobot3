@@ -403,15 +403,20 @@ fn rr3_conn_idle_set(
             .set_read_timeout(Some(Duration::from_millis(idle_ms)))
             .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
     } else {
-        rr3_log(&format!(
-            "{name} 无可用看门狗窗口（在册事实缺失或为 0），读侧不设静默上界——\
-             连接回收退化为依赖对端断开"
-        ));
-        stream
-            .set_read_timeout(None)
-            .map_err(|e| format!("清读超时失败: {e}"))?;
+        rr3_idle_unbounded(stream, name)?;
     }
     Ok(idle_ms)
+}
+
+/// 无上界分支：留痕并清掉读超时（退化依赖对端断开）。
+fn rr3_idle_unbounded(stream: &UnixStream, name: &str) -> Result<(), String> {
+    rr3_log(&format!(
+        "{name} 无可用看门狗窗口（在册事实缺失或为 0），读侧不设静默上界——\
+         连接回收退化为依赖对端断开"
+    ));
+    stream
+        .set_read_timeout(None)
+        .map_err(|e| format!("清读超时失败: {e}"))
 }
 
 /// 注册后的读循环：逐帧读、逐帧处理，直到干净收尾或带原因断开。

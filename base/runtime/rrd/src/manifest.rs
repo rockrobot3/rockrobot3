@@ -145,40 +145,8 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
     let heartbeat_ms = req_int(&root, "health.heartbeat_ms", &mut errs);
     let watchdog_ms = req_int(&root, "health.watchdog_timeout_ms", &mut errs);
     rr3_hb_order(heartbeat_ms, watchdog_ms, &mut errs);
-    // [rpc].exposes：可选；给了就必须是**非空字符串数组**——类型错要报错，
-    // 不能静默当空表（空表 = "不接请求"，类型错被吞掉会让调用方拿到"无人在册"的假诊断）
-    let rpc_exposes = rr3_opt_str_list(
-        &root,
-        "rpc.exposes",
-        "rpc.exposes",
-        "[rpc].exposes",
-        &mut errs,
-    );
-    // [depends].required 与 [provides].capabilities（ADR-0009 裁定 1）：可选段，
-    // 给了就必须是**非空字符串数组**——类型错要报错，与 rpc.exposes 同一条纪律
-    let depends_required = rr3_opt_str_list(
-        &root,
-        "depends.required",
-        "depends.required",
-        "depends.required",
-        &mut errs,
-    );
-    // [events].subscribes：可选；类型与空项纪律同 rpc.exposes（fail-closed，
-    // 不求值不静默吞）——运行期消费面 = 影子统计，见 Rr3ManifestFacts 注记
-    let subscribes = rr3_opt_str_list(
-        &root,
-        "events.subscribes",
-        "events.subscribes",
-        "[events].subscribes",
-        &mut errs,
-    );
-    let provides = rr3_opt_str_list(
-        &root,
-        "provides.capabilities",
-        "provides.capabilities",
-        "provides.capabilities",
-        &mut errs,
-    );
+    let (rpc_exposes, depends_required, subscribes, provides) =
+        rr3_manifest_lists(&root, &mut errs);
     if !errs.is_empty() {
         return Err(errs);
     }
@@ -197,6 +165,38 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
         rpc_exposes,
         subscribes,
     })
+}
+
+/// 四个可选字符串数组段（[rpc].exposes / [depends].required / [events].subscribes /
+/// [provides].capabilities）：给了就必须是**非空字符串数组**——类型错要报错，
+/// 不能静默当空表（空表 = "不接请求"，类型错被吞掉会让调用方拿到"无人在册"的假诊断）。
+fn rr3_manifest_lists(
+    root: &Value,
+    errs: &mut Vec<String>,
+) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
+    let rpc_exposes = rr3_opt_str_list(root, "rpc.exposes", "rpc.exposes", "[rpc].exposes", errs);
+    let depends_required = rr3_opt_str_list(
+        root,
+        "depends.required",
+        "depends.required",
+        "depends.required",
+        errs,
+    );
+    let subscribes = rr3_opt_str_list(
+        root,
+        "events.subscribes",
+        "events.subscribes",
+        "[events].subscribes",
+        errs,
+    );
+    let provides = rr3_opt_str_list(
+        root,
+        "provides.capabilities",
+        "provides.capabilities",
+        "provides.capabilities",
+        errs,
+    );
+    (rpc_exposes, depends_required, subscribes, provides)
 }
 
 /// 模块名形状点名（空名留给"缺少 manifest.name"单点报，不重复）。

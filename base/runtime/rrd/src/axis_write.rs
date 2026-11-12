@@ -198,20 +198,28 @@ fn rr3_aw_same_pin(
     file: &Rr3AxisFile,
     pin_ids: &BTreeSet<String>,
 ) -> Option<String> {
-    if p == target || p.extension().and_then(|x| x.to_str()) != Some("toml") {
+    if rr3_aw_peer_skip(p, target) {
         return None;
     }
-    if let Ok(Some(other)) = rr3_act_profile_load(p, pin_ids) {
-        if other.pin == file.pin {
-            return Some(format!(
-                "axis/ 下已有 {} 装同一 pin {:?}（候选目标 {}）——同 pin 两份合法档会让 boot 链拒注入（恰一份才投影），先清理副本",
-                p.display(),
-                file.pin,
-                target.display()
-            ));
-        }
+    match rr3_act_profile_load(p, pin_ids) {
+        Ok(Some(other)) if other.pin == file.pin => Some(rr3_aw_dup_msg(p, target, file)),
+        _ => None,
     }
-    None
+}
+
+/// 目录项过滤：目标本身与非 `.toml` 都不是副本候选。
+fn rr3_aw_peer_skip(p: &Path, target: &Path) -> bool {
+    p == target || p.extension().and_then(|x| x.to_str()) != Some("toml")
+}
+
+/// 同 pin 异名副本的拒写文案（点名副本、pin 与候选目标）。
+fn rr3_aw_dup_msg(p: &Path, target: &Path, file: &Rr3AxisFile) -> String {
+    format!(
+        "axis/ 下已有 {} 装同一 pin {:?}（候选目标 {}）——同 pin 两份合法档会让 boot 链拒注入（恰一份才投影），先清理副本",
+        p.display(),
+        file.pin,
+        target.display()
+    )
 }
 
 /// 拒绝面 b：同 pin 异名副本不制造（boot 链恰一份合法才投影；装载红散件不越权判）

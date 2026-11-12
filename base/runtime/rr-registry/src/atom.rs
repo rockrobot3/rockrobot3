@@ -112,21 +112,35 @@ fn rr3_atom_slots_path(manifest: &Path) -> PathBuf {
 /// 校验单个 atom.toml 文件：读文件 → 定位并解析 `contracts/slots.toml` → 全量校验。
 /// 生成器（tools/mkmodule）staging 回灌与 CI 用；路径须位于仓内以找到契约。
 pub fn rr3_atom_gate(path: &Path) -> Vec<String> {
+    let (text, slots_text) = match rr3_atom_texts(path) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    rr3_atom_chk(&text, &crate::slots::rr3_slot_parse(&slots_text))
+}
+
+/// 读 atom manifest 与其格位契约两份文本（任一读不到即点名回错）。
+fn rr3_atom_texts(path: &Path) -> Result<(String, String), Vec<String>> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) => return vec![format!("无法读取 atom manifest {}: {e}", path.display())],
+        Err(e) => {
+            return Err(vec![format!(
+                "无法读取 atom manifest {}: {e}",
+                path.display()
+            )])
+        }
     };
     let slots_path = rr3_atom_slots_path(path);
     let slots_text = match std::fs::read_to_string(&slots_path) {
         Ok(t) => t,
         Err(e) => {
-            return vec![format!(
+            return Err(vec![format!(
                 "无法读取格位契约 {}（atom 查册门需要它）: {e}",
                 slots_path.display()
-            )]
+            )])
         }
     };
-    rr3_atom_chk(&text, &crate::slots::rr3_slot_parse(&slots_text))
+    Ok((text, slots_text))
 }
 
 /// 校验一段 atom.toml 文本 + 调用方给定的格位表（查册门真值注入侧）。

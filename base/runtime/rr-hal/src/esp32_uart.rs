@@ -211,16 +211,21 @@ impl Rr3BridgeConn {
         if self.conn.is_some() {
             return Ok(());
         }
-        let c = rr3_conn_open(&self.path, self.baud)?;
-        std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
-        rr3_conn_ready(&c, &self.path)?;
-        self.conn = Some(c);
+        self.conn = Some(self.rr3_dial()?);
         // 板侧绑定推送（批N4 件七(b) 基-24 桥上配置腿）：每次（重）开连接
         // 都推——板侧重启或连接重建后注入态随之恢复，板侧覆盖语义幂等。
         // 推送失败只点名不上抛（rr3_push_bindings 内部消化）：绑定仅服务
         // 板侧自愈路径，执法点在板侧消费面 fail-closed，不挡舵机/表情能力面。
         self.rr3_push_bindings();
         Ok(())
+    }
+
+    /// 开口 + 启动窗口等待 + 定档（净化输入队列 + 应答窗口），交回新连接。
+    fn rr3_dial(&self) -> Result<Rr3UartConn, Rr3HalError> {
+        let c = rr3_conn_open(&self.path, self.baud)?;
+        std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
+        rr3_conn_ready(&c, &self.path)?;
+        Ok(c)
     }
 
     /// 板侧绑定推送（`rr3.set_bindings`，载荷住 `params.args`——method 面信封，
@@ -301,6 +306,12 @@ impl Rr3BridgeConn {
     /// 应答帧还原与 dst 归属门：任一不过即点名并报废连接。
     fn rr3_reply_frame(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
         let frame = self.rr3_frame_of(buf)?;
+        self.rr3_dst_gate(&frame)?;
+        Ok(frame)
+    }
+
+    /// dst 归属门：非宿主位形即点名并报废连接。
+    fn rr3_dst_gate(&mut self, frame: &Rr3Frame) -> Result<(), Rr3HalError> {
         if frame.header.dst_task != RR3_TASK_HOST {
             eprintln!(
                 "rr-hal-esp32: 应答 dst_task={} 非 {RR3_TASK_HOST}，拒收",
@@ -309,7 +320,7 @@ impl Rr3BridgeConn {
             self.conn = None;
             return Err(Rr3HalError::Busy);
         }
-        Ok(frame)
+        Ok(())
     }
 
     /// 应答帧还原：失败点名并报废连接。
@@ -326,10 +337,7 @@ impl Rr3BridgeConn {
 
     /// 读一帧（窗口耗尽即判板侧无应答/链路断，点名后报废连接）。
     fn rr3_recv_reply(&mut self) -> Result<Rr3FrameBuf, Rr3HalError> {
-        let conn = match self.conn.as_mut() {
-            Some(c) => c,
-            None => return Err(Rr3HalError::Busy),
-        };
+        let conn = self.rr3_conn_mut()?;
         match conn.rr3_recv_buf() {
             Ok(b) => Ok(b),
             Err(e) => {
@@ -337,6 +345,14 @@ impl Rr3BridgeConn {
                 self.conn = None;
                 Err(Rr3HalError::Busy)
             }
+        }
+    }
+
+    /// 取连接可变引用（未开即 Busy，防御性兜底）。
+    fn rr3_conn_mut(&mut self) -> Result<&mut Rr3UartConn, Rr3HalError> {
+        match self.conn.as_mut() {
+            Some(c) => Ok(c),
+            None => Err(Rr3HalError::Busy),
         }
     }
 }
@@ -378,29 +394,37 @@ impl Rr3PwmServo for Rr3Esp32UartServo {
             RR3_SERVO_TOPIC,
             &json!({ "angle_deg": deg, "axis": self.axis }),
         )?;
-        // 回显一致性：板侧生效角必须与设定角逐度一致（round-trip 判据的协议面）
-        if result.get("angle_deg").and_then(Value::as_u64) != Some(deg as u64) {
-            eprintln!(
-                "rr-hal-esp32: 舵机回显不一致（设 {deg}，回 {:?}）",
-                result.get("angle_deg")
-            );
-            return Err(Rr3HalError::Busy);
-        }
-        Ok(())
+        rr3_echo_check(&result, deg)
     }
 
     fn angle(&self) -> Result<u16, Rr3HalError> {
         let result = lock(&self.conn).rr3_call(RR3_SERVO_TOPIC, &json!({ "axis": self.axis }))?;
-        let deg = result
-            .get("angle_deg")
-            .and_then(Value::as_u64)
-            .and_then(|v| u16::try_from(v).ok())
-            .ok_or_else(|| {
-                eprintln!("rr-hal-esp32: 舵机回读缺 angle_deg 或越 u16");
-                Rr3HalError::Busy
-            })?;
-        Ok(deg)
+        rr3_angle_of(&result)
     }
+}
+
+/// 回显一致性：板侧生效角必须与设定角逐度一致（round-trip 判据的协议面）。
+fn rr3_echo_check(result: &Value, deg: u16) -> Result<(), Rr3HalError> {
+    if result.get("angle_deg").and_then(Value::as_u64) != Some(deg as u64) {
+        eprintln!(
+            "rr-hal-esp32: 舵机回显不一致（设 {deg}，回 {:?}）",
+            result.get("angle_deg")
+        );
+        return Err(Rr3HalError::Busy);
+    }
+    Ok(())
+}
+
+/// 回读角：缺键或越 u16 即点名回 Busy。
+fn rr3_angle_of(result: &Value) -> Result<u16, Rr3HalError> {
+    result
+        .get("angle_deg")
+        .and_then(Value::as_u64)
+        .and_then(|v| u16::try_from(v).ok())
+        .ok_or_else(|| {
+            eprintln!("rr-hal-esp32: 舵机回读缺 angle_deg 或越 u16");
+            Rr3HalError::Busy
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -433,10 +457,7 @@ impl Rr3Esp32UartDisplay {
 impl Rr3Display for Rr3Esp32UartDisplay {
     fn draw(&mut self, frame: &Rr3FaceFrame) -> Result<(), Rr3HalError> {
         let result = lock(&self.conn).rr3_call(RR3_FACE_TOPIC, &json!({ "frame": frame }))?;
-        if result.get("applied").and_then(Value::as_bool) != Some(true) {
-            eprintln!("rr-hal-esp32: 出帧应答缺 applied=true");
-            return Err(Rr3HalError::Busy);
-        }
+        rr3_applied_check(&result)?;
         *lock(&self.last) = *frame;
         // draw 成功 = 链路已证（四道应答门真 round-trip），frame() 不必再探活
         // ——探活帧是全黑位图，板侧当真渲染会擦掉屏上现帧（批C e2e 实证）。
@@ -449,13 +470,30 @@ impl Rr3Display for Rr3Esp32UartDisplay {
     /// 验证——板不在位则 Busy 显式回错，探活 exit(1) 是预期语义，R11③ 口径），
     /// 之后恒返回缓存（节拍 250ms 的 draw 持续真发，链路活性由 draw 面兜底）。
     fn frame(&self) -> Result<Rr3FaceFrame, Rr3HalError> {
-        let need_probe = !*lock(&self.probed);
-        if need_probe {
-            let probe: Rr3FaceFrame = [0; 8];
-            lock(&self.conn).rr3_call(RR3_FACE_TOPIC, &json!({ "frame": probe }))?;
-            *lock(&self.probed) = true;
-        }
+        self.rr3_probe()?;
         Ok(*lock(&self.last))
+    }
+}
+
+/// 出帧应答门：缺 applied=true 即点名回 Busy。
+fn rr3_applied_check(result: &Value) -> Result<(), Rr3HalError> {
+    if result.get("applied").and_then(Value::as_bool) != Some(true) {
+        eprintln!("rr-hal-esp32: 出帧应答缺 applied=true");
+        return Err(Rr3HalError::Busy);
+    }
+    Ok(())
+}
+
+impl Rr3Esp32UartDisplay {
+    /// 链路未证（从未 draw 过）时先发一条全黑探活帧；已证则直返。
+    fn rr3_probe(&self) -> Result<(), Rr3HalError> {
+        if *lock(&self.probed) {
+            return Ok(());
+        }
+        let probe: Rr3FaceFrame = [0; 8];
+        lock(&self.conn).rr3_call(RR3_FACE_TOPIC, &json!({ "frame": probe }))?;
+        *lock(&self.probed) = true;
+        Ok(())
     }
 }
 

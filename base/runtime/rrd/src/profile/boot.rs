@@ -64,16 +64,26 @@ pub(crate) fn rr3_axis_files_load(
     let files = rr3_axis_paths(axis_dir);
     let mut found = Vec::new();
     for f in &files {
-        match crate::axis::rr3_act_profile_load(f, pin_ids) {
-            Ok(Some(file)) => found.push(file),
-            Ok(None) => {}
-            Err(errs) => notes.extend(
-                errs.into_iter()
-                    .map(|e| format!("轴档案 {} 坏形: {e}", f.display())),
-            ),
-        }
+        rr3_axis_file_take(f, pin_ids, &mut found, &mut notes);
     }
     (found, notes)
+}
+
+/// 单份轴档归置：合法进 found，坏形逐条折进 notes（无档案是常态，不点名）。
+fn rr3_axis_file_take(
+    f: &Path,
+    pin_ids: &BTreeSet<String>,
+    found: &mut Vec<crate::axis::Rr3AxisFile>,
+    notes: &mut Vec<String>,
+) {
+    match crate::axis::rr3_act_profile_load(f, pin_ids) {
+        Ok(Some(file)) => found.push(file),
+        Ok(None) => {}
+        Err(errs) => notes.extend(
+            errs.into_iter()
+                .map(|e| format!("轴档案 {} 坏形: {e}", f.display())),
+        ),
+    }
 }
 
 /// 执行轴状态投影（批N3 件三建，件五收口消歧；批N4 件九笔4 起吃
@@ -233,8 +243,25 @@ pub fn rr3_truth_locations(
         .ok_or_else(|| format!("装配单 {} 无文件名", abs.display()))?;
     let names = rr3_truth_names(stem, chip);
     // 与 names 同序逐条映射（成员名生成与定位映射一一对应，错位即成员集判等红）
-    let paths = [
-        vec![abs.clone()],
+    let paths = rr3_truth_paths(&abs, contracts_dir, wiring_path, chip);
+    debug_assert_eq!(names.len(), paths.len(), "真值集成员名与定位映射错位");
+    Ok(names
+        .into_iter()
+        .zip(paths)
+        .map(|(member, path)| Rr3TruthSetLocation { member, path })
+        .collect())
+}
+
+/// 真值集七成员的定位映射（与 [`rr3_truth_names`] 同序）：装配单本体 → 契约四册
+/// → 平台事实表 → 接线档。
+fn rr3_truth_paths(
+    abs: &Path,
+    contracts_dir: &Path,
+    wiring_path: &Path,
+    chip: &str,
+) -> Vec<PathBuf> {
+    [
+        vec![abs.to_path_buf()],
         RR3_CONTRACT_BOOKS
             .iter()
             .map(|b| contracts_dir.join(b))
@@ -242,13 +269,7 @@ pub fn rr3_truth_locations(
         vec![contracts_dir.join("platform").join(rr3_platform_file(chip))],
         vec![wiring_path.to_path_buf()],
     ]
-    .concat();
-    debug_assert_eq!(names.len(), paths.len(), "真值集成员名与定位映射错位");
-    Ok(names
-        .into_iter()
-        .zip(paths)
-        .map(|(member, path)| Rr3TruthSetLocation { member, path })
-        .collect())
+    .concat()
 }
 
 /// 装配链 boot 输入装配（daemon 在 bind 之前调用，fatal 即非 0 退出、套接字不留残迹）。
@@ -579,17 +600,22 @@ fn rr3_load_platform(dir: &Path, chip: &str) -> Result<Rr3PlatformTable, String>
 pub fn rr3_evidence_check(root: &Path, profile: &Rr3Profile) -> Vec<String> {
     let mut errs = Vec::new();
     for d in &profile.supplies.domains {
-        if !d.armed {
-            continue;
-        }
-        if let Err(e) = rr_ipc::evidence::rr3_evidence_verify(root, &d.evidence) {
-            errs.push(format!(
-                "supplies.domains[{}] armed = true 的证据引用核验不过（校验⑥-e）: {e}",
-                d.name
-            ));
-        }
+        rr3_armed_ev(d, root, &mut errs);
     }
     errs
+}
+
+/// 单域证据门：未武装域零波及，武装域引用须过四道核。
+fn rr3_armed_ev(d: &Rr3Domain, root: &Path, errs: &mut Vec<String>) {
+    if !d.armed {
+        return;
+    }
+    if let Err(e) = rr_ipc::evidence::rr3_evidence_verify(root, &d.evidence) {
+        errs.push(format!(
+            "supplies.domains[{}] armed = true 的证据引用核验不过（校验⑥-e）: {e}",
+            d.name
+        ));
+    }
 }
 
 // ── TOML 键行手术面（批N22 件一；批N44 起机制迁 [`crate::profile_edit`]）──────
@@ -659,14 +685,17 @@ fn rr3_atom_scan(
 /// ops 注入缺点路径游走：声明的参数槽必须能从模块 config.toml 按点路径取到。
 fn rr3_atom_inject(module_dir: &Path, atom: &str, facts: &Rr3AssembleFacts, out: &mut Vec<String>) {
     match std::fs::read_to_string(module_dir.join("config.toml")) {
-        Ok(cfg) => {
-            for gap in rr_registry::rr3_injection_gaps(facts, &cfg) {
-                out.push(format!("件 {atom} {gap}"));
-            }
-        }
+        Ok(cfg) => rr3_atom_gaps(atom, facts, &cfg, out),
         Err(e) => out.push(format!(
             "件 {atom} 参数槽来源不可证：config.toml 读不到 ({e})"
         )),
+    }
+}
+
+/// 注入缺点路径游走（config 可读的那一半）：逐条缺点路径点名。
+fn rr3_atom_gaps(atom: &str, facts: &Rr3AssembleFacts, cfg: &str, out: &mut Vec<String>) {
+    for gap in rr_registry::rr3_injection_gaps(facts, cfg) {
+        out.push(format!("件 {atom} {gap}"));
     }
 }
 
@@ -717,7 +746,7 @@ fn rr3_rail_known(
 ) {
     for (owner, demands) in declared {
         for d in demands {
-            if !domains.iter().any(|dm| dm.name == d.rail) {
+            if rr3_rail_unlisted(d, domains) {
                 errs.push(format!(
                     "件 {owner} 申报 rail = {} 不在 [[supplies.domain]] 在册域集（校验⑨：域缺即 current_cap_ma 缺，预算无分母）",
                     d.rail
@@ -725,6 +754,11 @@ fn rr3_rail_known(
             }
         }
     }
+}
+
+/// 需求申报的 rail 是否不在域在册集（缺分母）。
+fn rr3_rail_unlisted(d: &Rr3AssembleDemand, domains: &[Rr3Domain]) -> bool {
+    !domains.iter().any(|dm| dm.name == d.rail)
 }
 
 /// 单域最坏并发电流与申报者集：不分组/多组归属全额加总，恰一组归属按组互斥取 max。

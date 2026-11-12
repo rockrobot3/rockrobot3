@@ -138,38 +138,54 @@ impl Rr3Link for Rr3LinuxNmLink {
         // 断链强制 None（同 sim 断链语义）；非 wifi 设备无 SSID/RSSI 词汇。
         // 契约面 SSID 是定长 Rr3SsidText（批I F1），nmcli 读出的 String 收编入
         // 32 octets 缓冲（超长截断——SSID 域本身 ≤32 octets，截断是防御面）
-        let mut ssid = if up {
-            rr3_nm_field(&show, "GENERAL.CONNECTION")
-                .and_then(rr3_nm_ssid_opt)
-                .map(|s| Rr3SsidText::rr3_ssid_text_new(&s))
-        } else {
-            None
+        let mut st = Rr3LinkState {
+            up,
+            ssid: rr3_link_ssid(&show, up),
+            rssi_dbm: None,
         };
-        let mut rssi_dbm = None;
-        let is_wifi = rr3_nm_field(&show, "GENERAL.TYPE") == Some("wifi");
-        if up && is_wifi {
-            // 只读缓存不触发扫描（扫描秒级阻塞，不进周期拍）；失败回落
-            // CONNECTION 的 SSID、RSSI None，不编造
-            if let Ok(list) = self.nm(&[
-                "-t",
-                "-f",
-                "IN-USE,SSID,SIGNAL",
-                "dev",
-                "wifi",
-                "list",
-                "ifname",
-                &self.ifname,
-                "--rescan",
-                "no",
-            ]) {
-                if let Some((pick_ssid, q)) = list.lines().find_map(rr3_nm_wifi_row) {
-                    ssid = Some(Rr3SsidText::rr3_ssid_text_new(&pick_ssid));
-                    rssi_dbm = rr3_nm_signal_to_dbm(q);
-                }
-            }
-        }
-        Ok(Rr3LinkState { up, ssid, rssi_dbm })
+        self.rr3_wifi_fill(&show, &mut st);
+        Ok(st)
     }
+}
+
+impl Rr3LinuxNmLink {
+    /// wifi 支路补齐 SSID/RSSI（非 wifi / 断链不动；缓存空或调用失败静默回落，
+    /// 不编造）。
+    fn rr3_wifi_fill(&self, show: &str, st: &mut Rr3LinkState) {
+        if !st.up || rr3_nm_field(show, "GENERAL.TYPE") != Some("wifi") {
+            return;
+        }
+        // 只读缓存不触发扫描（扫描秒级阻塞，不进周期拍）；失败回落
+        // CONNECTION 的 SSID、RSSI None，不编造
+        let Ok(list) = self.nm(&[
+            "-t",
+            "-f",
+            "IN-USE,SSID,SIGNAL",
+            "dev",
+            "wifi",
+            "list",
+            "ifname",
+            &self.ifname,
+            "--rescan",
+            "no",
+        ]) else {
+            return;
+        };
+        if let Some((pick_ssid, q)) = list.lines().find_map(rr3_nm_wifi_row) {
+            st.ssid = Some(Rr3SsidText::rr3_ssid_text_new(&pick_ssid));
+            st.rssi_dbm = rr3_nm_signal_to_dbm(q);
+        }
+    }
+}
+
+/// 断链时 SSID 强制 None（同 sim 断链语义）；在线取活动连接名作候选。
+fn rr3_link_ssid(show: &str, up: bool) -> Option<Rr3SsidText> {
+    if !up {
+        return None;
+    }
+    rr3_nm_field(show, "GENERAL.CONNECTION")
+        .and_then(rr3_nm_ssid_opt)
+        .map(|s| Rr3SsidText::rr3_ssid_text_new(&s))
 }
 
 #[cfg(all(test, target_os = "linux"))]

@@ -312,16 +312,8 @@ fn rr3_servo_linux() -> Option<(Box<dyn Rr3PwmServo>, &'static str)> {
 fn rr3_servo_esp32() -> (Box<dyn Rr3PwmServo>, &'static str) {
     match rr3_periph_uart_path() {
         Some(p) => {
-            let axis = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_AXIS_ENV)
-                .ok()
-                .and_then(|v| crate::esp32_uart::rr3_axis_parse(&v))
-                .unwrap_or(rr_hal_api::RR3_PERIPH_AXIS_DEFAULT);
-            // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
-            // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
-            let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
-                .ok()
-                .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
-                .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+            let axis = rr3_periph_axis();
+            let baud = rr3_periph_baud();
             (
                 Box::new(crate::esp32_uart::Rr3Esp32UartServo::rr3_esp32_servo_baud(
                     std::path::PathBuf::from(p),
@@ -356,6 +348,24 @@ fn rr3_periph_uart_path() -> Option<String> {
         .map(|p| p.trim().to_string())
         .ok()
         .filter(|p| !p.is_empty())
+}
+
+/// 舵机轴 env 裁决（只认 pan/tilt，缺省 [`rr_hal_api::RR3_PERIPH_AXIS_DEFAULT`]）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_periph_axis() -> &'static str {
+    std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_AXIS_ENV)
+        .ok()
+        .and_then(|v| crate::esp32_uart::rr3_axis_parse(&v))
+        .unwrap_or(rr_hal_api::RR3_PERIPH_AXIS_DEFAULT)
+}
+
+/// 桥面波特 env 裁决（白名单在 rr-ipc；缺省 = 板固件同档 RR3_BRIDGE_BAUD）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_periph_baud() -> u32 {
+    std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
+        .ok()
+        .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
+        .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD)
 }
 
 /// sim 方位角键的取值裁决（-90..=90 的有限十进制小数）。独立成纯函数：裁决可单测，
@@ -740,12 +750,7 @@ fn rr3_display_linux() -> (Box<dyn crate::Rr3Display>, &'static str) {
 fn rr3_display_esp32() -> (Box<dyn crate::Rr3Display>, &'static str) {
     match rr3_periph_uart_path() {
         Some(p) => {
-            // 批D②：波特率 env（白名单裁决；缺省=板固件 UART2_BAUD_HZ 的
-            // 同一常量 RR3_BRIDGE_BAUD=1.5M，env 仅作降速实验覆盖）
-            let baud = std::env::var(crate::esp32_uart::RR3_HAL_PERIPH_BAUD_ENV)
-                .ok()
-                .and_then(|v| crate::esp32_uart::rr3_baud_parse(&v))
-                .unwrap_or(crate::esp32_uart::RR3_BRIDGE_BAUD);
+            let baud = rr3_periph_baud();
             (
                 Box::new(crate::esp32_uart::Rr3Esp32UartDisplay::rr3_esp32_disp_baud(
                     std::path::PathBuf::from(p),
