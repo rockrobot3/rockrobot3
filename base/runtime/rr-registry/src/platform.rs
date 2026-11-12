@@ -257,18 +257,23 @@ fn rr3_ctl_item(
         ));
         return;
     };
+    rr3_ctl_keys(c, i, errs);
+    let name = rr3_ctl_name(c, i, errs);
+    let kind = rr3_ctl_kind(c, i, errs);
+    let channels = rr3_ctl_chans(c, i, errs);
+    if let (Some(n), Some(k), Some(ch)) = (name, kind, channels) {
+        entries.push((n, k, ch));
+    }
+}
+
+/// `[[controller]]` 键词表核：只认 name / kind / channels（其余逐键点名）。
+fn rr3_ctl_keys(c: &toml::Table, i: usize, errs: &mut Vec<String>) {
     for k in c.keys() {
         if k != "name" && k != "kind" && k != "channels" {
             errs.push(format!(
                 "controller[{i}] 未知键 {k}（只认 name / kind / channels）"
             ));
         }
-    }
-    let name = rr3_ctl_name(c, i, errs);
-    let kind = rr3_ctl_kind(c, i, errs);
-    let channels = rr3_ctl_chans(c, i, errs);
-    if let (Some(n), Some(k), Some(ch)) = (name, kind, channels) {
-        entries.push((n, k, ch));
     }
 }
 
@@ -329,26 +334,31 @@ fn rr3_ctl_chans(c: &toml::Table, i: usize, errs: &mut Vec<String>) -> Option<i6
 fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     match t.get("capabilities") {
         Some(Value::Table(caps)) => {
-            for k in caps.keys() {
-                if ![
-                    "adc_pins",
-                    "input_only_pins",
-                    "no_open_drain",
-                    "output_capable_pins",
-                ]
-                .contains(&k.as_str())
-                {
-                    errs.push(format!(
-                        "[capabilities] 未知键 {k}（只认 adc_pins / input_only_pins / no_open_drain / output_capable_pins）"
-                    ));
-                }
-            }
+            rr3_caps_keys(caps, errs);
             rr3_caps_set(caps, table, errs);
         }
         Some(other) => errs.push(format!(
             "平台表 capabilities 应为表（[capabilities]），收到 {other:?}"
         )),
         None => errs.push("平台表缺 [capabilities] 段（⑤-a/⑤-b 判据前件，缺段即红，裁定①）".into()),
+    }
+}
+
+/// 能力集四键封闭：未知键逐条点名。
+fn rr3_caps_keys(caps: &toml::Table, errs: &mut Vec<String>) {
+    for k in caps.keys() {
+        if ![
+            "adc_pins",
+            "input_only_pins",
+            "no_open_drain",
+            "output_capable_pins",
+        ]
+        .contains(&k.as_str())
+        {
+            errs.push(format!(
+                "[capabilities] 未知键 {k}（只认 adc_pins / input_only_pins / no_open_drain / output_capable_pins）"
+            ));
+        }
     }
 }
 
@@ -543,6 +553,25 @@ fn rr3_conf_members(
     table: &Rr3PlatformTable,
     errs: &mut Vec<String>,
 ) -> (BTreeSet<i64>, BTreeSet<String>) {
+    let (pins, controllers) = rr3_conf_sets(c, i, group, errs);
+    for ctl in &controllers {
+        if !table.controllers.contains_key(ctl) {
+            errs.push(format!(
+                "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
+            ));
+        }
+    }
+    (pins, controllers)
+}
+
+/// 冲突集成员解析：pins/controllers 两数组（缺省空集，坏元素逐条点名），
+/// 两集皆空即点名（点名不到任何成员的冲突集无判据对象）。
+fn rr3_conf_sets(
+    c: &toml::Table,
+    i: usize,
+    group: &Option<String>,
+    errs: &mut Vec<String>,
+) -> (BTreeSet<i64>, BTreeSet<String>) {
     let mut pins = BTreeSet::new();
     let mut controllers = BTreeSet::new();
     if let Some(v) = c.get("pins") {
@@ -557,35 +586,35 @@ fn rr3_conf_members(
             group.as_deref().unwrap_or("")
         ));
     }
-    for ctl in &controllers {
-        if !table.controllers.contains_key(ctl) {
-            errs.push(format!(
-                "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
-            ));
-        }
-    }
     (pins, controllers)
 }
 
 /// `[construction]` 段：`controller:role:instance` 三元键，controller 须本表在册。
 fn rr3_plat_cons(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    let cons = match t.get("construction") {
-        Some(Value::Table(cons)) => cons,
+    let Some(cons) = rr3_cons_tbl(t, errs) else {
+        return;
+    };
+    for (k, v) in cons {
+        rr3_cons_item(k, v, table, errs);
+    }
+}
+
+/// `[construction]` 段形状：段缺/类型错各自点名回 None。
+fn rr3_cons_tbl<'a>(t: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a toml::Table> {
+    match t.get("construction") {
+        Some(Value::Table(cons)) => Some(cons),
         Some(other) => {
             errs.push(format!(
                 "平台表 construction 应为表（[construction]），收到 {other:?}"
             ));
-            return;
+            None
         }
         None => {
             errs.push(
                 "平台表缺 [construction] 段（⑧ 对账前件；无绑定形态显式写空表，裁定①）".into(),
             );
-            return;
+            None
         }
-    };
-    for (k, v) in cons {
-        rr3_cons_item(k, v, table, errs);
     }
 }
 

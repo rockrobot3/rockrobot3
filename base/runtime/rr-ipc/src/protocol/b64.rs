@@ -110,15 +110,20 @@ pub fn rr3_base64_decode(s: &str) -> Result<Vec<u8>, Rr3Base64Error> {
     for g in 0..groups {
         let grp = &bytes[g * 4..g * 4 + 4];
         let (n, pad) = rr3_b64_group(grp, g + 1 == groups, g * 4, &table)?;
-        out.push((n >> 16) as u8);
-        if pad < 2 {
-            out.push((n >> 8) as u8);
-        }
-        if pad < 1 {
-            out.push(n as u8);
-        }
+        rr3_b64_push(n, pad, &mut out);
     }
     Ok(out)
+}
+
+/// 一组 24 bit 按 padding 落 1–3 字节（pad=2 → 1B，pad=1 → 2B，否则 3B）。
+fn rr3_b64_push(n: u32, pad: usize, out: &mut Vec<u8>) {
+    out.push((n >> 16) as u8);
+    if pad < 2 {
+        out.push((n >> 8) as u8);
+    }
+    if pad < 1 {
+        out.push(n as u8);
+    }
 }
 
 #[cfg(test)]

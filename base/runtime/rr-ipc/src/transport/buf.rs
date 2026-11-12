@@ -138,13 +138,18 @@ pub fn rr3_framebuf_read<S: Rr3ByteStream>(s: &mut S) -> Result<Rr3FrameBuf, Rr3
 /// 读满 128B 定长头并还原（空读 = 关闭，半头 = TornHeader）。
 fn rr3_buf_head<S: Rr3ByteStream>(s: &mut S) -> Result<(Rr3Header, Vec<u8>), Rr3FrameError> {
     let mut bytes = vec![0u8; RR3_IPC_HDR_SIZE];
-    match rr3_stream_read_fill(s, &mut bytes)? {
-        None => return Err(Rr3FrameError::Closed),
-        Some(got) if got < RR3_IPC_HDR_SIZE => return Err(Rr3FrameError::TornHeader { got }),
-        _ => {}
-    }
+    rr3_head_fill(s, &mut bytes)?;
     let hdr = Rr3Header::from_bytes(&bytes).map_err(Rr3FrameError::Header)?;
     Ok((hdr, bytes))
+}
+
+/// 读满定长头区：空读 = 关闭，半头 = TornHeader。
+fn rr3_head_fill<S: Rr3ByteStream>(s: &mut S, bytes: &mut [u8]) -> Result<(), Rr3FrameError> {
+    match rr3_stream_read_fill(s, bytes)? {
+        None => Err(Rr3FrameError::Closed),
+        Some(got) if got < RR3_IPC_HDR_SIZE => Err(Rr3FrameError::TornHeader { got }),
+        _ => Ok(()),
+    }
 }
 
 /// 按头声明长度扩容并读满 payload（`want=0` 不扩容；半 payload 如实计数）。
@@ -157,7 +162,16 @@ fn rr3_buf_payload<S: Rr3ByteStream>(
         return Ok(());
     }
     bytes.resize(RR3_IPC_HDR_SIZE + want, 0);
-    match rr3_stream_read_fill(s, &mut bytes[RR3_IPC_HDR_SIZE..])? {
+    rr3_payload_fill(s, &mut bytes[RR3_IPC_HDR_SIZE..], want)
+}
+
+/// 读满 payload 区：短读如实计数（`None` = 读侧关闭）。
+fn rr3_payload_fill<S: Rr3ByteStream>(
+    s: &mut S,
+    bytes: &mut [u8],
+    want: usize,
+) -> Result<(), Rr3FrameError> {
+    match rr3_stream_read_fill(s, bytes)? {
         Some(got) if got == want => Ok(()),
         Some(got) => Err(Rr3FrameError::TornPayload { want, got }),
         None => Err(Rr3FrameError::TornPayload { want, got: 0 }),

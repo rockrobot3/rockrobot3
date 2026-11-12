@@ -246,6 +246,16 @@ pub fn rr3_bindings_parse(text: &str) -> Result<Rr3HalBindings, Vec<String>> {
     };
     let mut b = Rr3HalBindings::default();
     let mut errs = Vec::new();
+    rr3_bindings_each(t, &mut b, &mut errs);
+    if errs.is_empty() {
+        Ok(b)
+    } else {
+        Err(errs)
+    }
+}
+
+/// 逐键收集：非字符串标量点名，键值合法性下沉到 `rr3_binding_set`。
+fn rr3_bindings_each(t: &toml::Table, b: &mut Rr3HalBindings, errs: &mut Vec<String>) {
     for (k, val) in t {
         let Some(s) = val.as_str() else {
             errs.push(format!(
@@ -257,11 +267,6 @@ pub fn rr3_bindings_parse(text: &str) -> Result<Rr3HalBindings, Vec<String>> {
             errs.push(e);
         }
     }
-    if errs.is_empty() {
-        Ok(b)
-    } else {
-        Err(errs)
-    }
 }
 
 /// 生效绑定合成（ADR-0018 裁定 4 的字面分层）：描述符为底，`overrides` 应急覆盖
@@ -271,16 +276,22 @@ pub fn rr3_bindings_compose(
     descriptor: Option<&str>,
     overrides: &BTreeMap<String, String>,
 ) -> Result<Rr3HalBindings, String> {
-    let mut b = match descriptor {
-        None | Some("") => Rr3HalBindings::default(),
-        Some(text) => rr3_bindings_parse(text)
-            .map_err(|errs| format!("描述符解析失败: {}", errs.join("; ")))?,
-    };
+    let mut b = rr3_desc_base(descriptor)?;
     for (k, raw) in overrides {
         b.rr3_binding_set(k, raw)
             .map_err(|e| format!("应急覆盖无效: {e}"))?;
     }
     Ok(b)
+}
+
+/// 描述符为底：缺省/空文本即空表，解析失败整册拒。
+fn rr3_desc_base(descriptor: Option<&str>) -> Result<Rr3HalBindings, String> {
+    match descriptor {
+        None | Some("") => Ok(Rr3HalBindings::default()),
+        Some(text) => {
+            rr3_bindings_parse(text).map_err(|errs| format!("描述符解析失败: {}", errs.join("; ")))
+        }
+    }
 }
 
 /// 读进程环境的 `RR3_HAL_*` 应急键，映射成描述符键名（compose 的 overrides 供数）。
