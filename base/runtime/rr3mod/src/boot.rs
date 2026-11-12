@@ -27,9 +27,14 @@ pub fn bootstrap<C>(cfg: Rr3ModConfig<C>) -> Result<(BusHandle, C), String> {
         client.rr3_name(),
         client.rr3_task()
     );
-    let text = load_config_text(cfg.config_env, &manifest_path)?;
-    let parsed = (cfg.parse_config)(&text)?;
+    let parsed = rr3_cfg_parse(&cfg, &manifest_path)?;
     Ok((BusHandle { client }, parsed))
+}
+
+/// 配置装载与解析：路径投影 → 读文本 → 调用方解析器。
+fn rr3_cfg_parse<C>(cfg: &Rr3ModConfig<C>, manifest_path: &str) -> Result<C, String> {
+    let text = load_config_text(cfg.config_env, manifest_path)?;
+    (cfg.parse_config)(&text)
 }
 
 /// config 路径解析单点（方案 §2.4）：`config_env` 设了读 env 路径；未设读
