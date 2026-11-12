@@ -188,6 +188,13 @@ impl Rr3PowerDispatcher {
     /// 失败是设备/传输级，上抛致命不装活着。
     fn rr3_rail_tick(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
         let st = self.rr3_rail_state(bus)?;
+        self.rr3_rail_emit(bus, st)?;
+        self.next_rail = now + Duration::from_millis(self.cfg.rail.sample_period_ms);
+        Ok(())
+    }
+
+    /// 判定 + 周期流 + 越阈通告（续 seq 与通告同门）。
+    fn rr3_rail_emit(&mut self, bus: &BusHandle, st: Rr3RailState) -> Result<(), String> {
         self.rail_seq += 1;
         let (tier, event) = rr3_rail_beat(&mut self.rail_judge, st, self.cfg.rail.max_age_ms);
         bus.publish(
@@ -195,15 +202,19 @@ impl Rr3PowerDispatcher {
             rr3_rail_state_body(self.rail_seq, st.mv, st.age_ms, tier.rr3_rail_tier_name()),
         )?;
         if event == Some(true) {
-            bus.counter_bump("rail_edge", 1);
-            eprintln!(
-                "rail/edge: {}mV tier={}（越阈首拍，段内不重发）",
-                st.mv,
-                tier.rr3_rail_tier_name()
-            );
+            Self::rr3_rail_notice(bus, &st, tier);
         }
-        self.next_rail = now + Duration::from_millis(self.cfg.rail.sample_period_ms);
         Ok(())
+    }
+
+    /// 越阈首拍通告：计数 + 一行台账（段内不重发，由判定核保证）。
+    fn rr3_rail_notice(bus: &BusHandle, st: &Rr3RailState, tier: Rr3RailTier) {
+        bus.counter_bump("rail_edge", 1);
+        eprintln!(
+            "rail/edge: {}mV tier={}（越阈首拍，段内不重发）",
+            st.mv,
+            tier.rr3_rail_tier_name()
+        );
     }
 
     /// 轨压读数：失败先记账再退（设备/传输级，上抛致命不装活着）。

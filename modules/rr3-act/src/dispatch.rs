@@ -301,9 +301,15 @@ impl Rr3ActDispatcher {
     /// 自然携带最新角度（流是摘要不是逐拍镜像）。
     fn rr3_state_servo(&mut self, bus: &BusHandle, state_angle: Option<u16>) -> Result<(), String> {
         if let Some(angle) = state_angle {
-            if self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
-                self.rr3_pub_servo(bus, angle)?;
-            }
+            self.rr3_state_servo_pub(bus, angle)?;
+        }
+        Ok(())
+    }
+
+    /// 限速门内的单帧发布（门闭整帧跳过，不补发）。
+    fn rr3_state_servo_pub(&mut self, bus: &BusHandle, angle: u16) -> Result<(), String> {
+        if self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
+            self.rr3_pub_servo(bus, angle)?;
         }
         Ok(())
     }

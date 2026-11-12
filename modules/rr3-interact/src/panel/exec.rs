@@ -267,10 +267,15 @@ fn rr3_exec_act(shared: &Rr3PanelShared, action: Rr3PanelAction) -> Rr3PanelRepl
 /// 模型密钥清单：只回 ref 名，永不回值
 fn rr3_exec_keys() -> Rr3PanelReply {
     match rr3_secrets_path() {
-        Ok(path) => match rr3_secrets_list_at(&path) {
-            Ok(keys) => Rr3PanelReply::json(200, "OK", json!({ "keys": keys })),
-            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
-        },
+        Ok(path) => rr3_keys_at(&path),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
+    }
+}
+
+/// 清单读口（路径就绪后）：读失败同折 502，形状与路径失败一致。
+fn rr3_keys_at(path: &std::path::Path) -> Rr3PanelReply {
+    match rr3_secrets_list_at(path) {
+        Ok(keys) => Rr3PanelReply::json(200, "OK", json!({ "keys": keys })),
         Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "error": e })),
     }
 }
@@ -278,14 +283,19 @@ fn rr3_exec_keys() -> Rr3PanelReply {
 /// 模型密钥写入：应答只回 ref；applies=live（secrets 落盘后 brain 每轮现读）
 fn rr3_exec_key(ref_name: &str, value: &str) -> Rr3PanelReply {
     match rr3_secrets_path() {
-        Ok(path) => match rr3_secrets_upsert(&path, ref_name, value) {
-            Ok(()) => Rr3PanelReply::json(
-                200,
-                "OK",
-                json!({ "ok": true, "ref": ref_name, "applies": "live" }),
-            ),
-            Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
-        },
+        Ok(path) => rr3_key_at(&path, ref_name, value),
+        Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+    }
+}
+
+/// 写入路（路径就绪后）：落盘成败折同一 502 形状。
+fn rr3_key_at(path: &std::path::Path, ref_name: &str, value: &str) -> Rr3PanelReply {
+    match rr3_secrets_upsert(path, ref_name, value) {
+        Ok(()) => Rr3PanelReply::json(
+            200,
+            "OK",
+            json!({ "ok": true, "ref": ref_name, "applies": "live" }),
+        ),
         Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
     }
 }
@@ -391,14 +401,19 @@ fn rr3_relay_cycle(shared: &Rr3PanelShared) -> (&'static str, Option<String>) {
         shared.limits.call_timeout,
     ) {
         Err(e) => ("fail", Some(format!("on 未成功（off 未执行）: {e}"))),
-        Ok(_) => match shared.bus.call(
-            "rr3-act/relay/set",
-            &json!({ "on": false }),
-            shared.limits.call_timeout,
-        ) {
-            Ok(_) => ("pass", None),
-            Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
-        },
+        Ok(_) => rr3_relay_off(shared),
+    }
+}
+
+/// 断开臂：吸合成功后复位（失败点名未复位，成功即 pass）。
+fn rr3_relay_off(shared: &Rr3PanelShared) -> (&'static str, Option<String>) {
+    match shared.bus.call(
+        "rr3-act/relay/set",
+        &json!({ "on": false }),
+        shared.limits.call_timeout,
+    ) {
+        Ok(_) => ("pass", None),
+        Err(e) => ("fail", Some(format!("off 未复位: {e}"))),
     }
 }
 
@@ -592,7 +607,15 @@ fn rr3_panel_act(shared: &Rr3PanelShared, action: Rr3PanelAction) -> Result<Valu
         .actions
         .send((action, tx))
         .map_err(|_| "主循环不在了（进程正在退出）".to_string())?;
-    match rx.recv_timeout(shared.limits.call_timeout) {
+    rr3_act_wait(rx, shared.limits.call_timeout)
+}
+
+/// 等主循环回执：超时/通道断各点名（业务性失败，不致命）。
+fn rr3_act_wait(
+    rx: std::sync::mpsc::Receiver<Result<Value, String>>,
+    timeout: Duration,
+) -> Result<Value, String> {
+    match rx.recv_timeout(timeout) {
         Ok(v) => v,
         Err(RecvTimeoutError::Timeout) => Err("主循环处理动作超时".to_string()),
         Err(RecvTimeoutError::Disconnected) => Err("应答通道已断（主循环退出）".to_string()),

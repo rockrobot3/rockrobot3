@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use rr3mod::{BusHandle, Dispatcher};
 use rr_hal::provision_store::Rr3WifiStore;
-use rr_hal_api::Rr3Link;
+use rr_hal_api::{Rr3Link, Rr3LinkState};
 use serde_json::Value;
 
 use crate::rpc;
@@ -75,6 +75,28 @@ impl Rr3ConnectDispatcher {
             next_report: Instant::now(),
         }
     }
+
+    /// 上报时机：翻转立即发，同态到周期拍点才发（流是摘要不是逐拍镜像）。
+    fn rr3_link_due(&mut self, now: Instant, st: &Rr3LinkState) -> bool {
+        self.edge.rr3_link_edge_cross(st.up) || now >= self.next_report
+    }
+
+    /// 链路摘要上报：续 seq、发 link 帧、排下一周期（翻转与到点共用一径）。
+    fn rr3_link_report(
+        &mut self,
+        now: Instant,
+        bus: &BusHandle,
+        st: &Rr3LinkState,
+    ) -> Result<(), String> {
+        self.link_seq += 1;
+        let mode = self.prov.rr3_provision_mode();
+        bus.publish(
+            wifi::RR3_LINK_TOPIC,
+            rpc::rr3_link_body(self.link_seq, st, mode),
+        )?;
+        self.next_report = now + Duration::from_millis(self.wifi_cfg.link_report_period_ms);
+        Ok(())
+    }
 }
 
 impl Dispatcher for Rr3ConnectDispatcher {
@@ -122,14 +144,8 @@ impl Dispatcher for Rr3ConnectDispatcher {
             .dev
             .state()
             .map_err(|e| format!("链路读数失败（{}）: {e}", self.backend))?;
-        if self.edge.rr3_link_edge_cross(st.up) || now >= self.next_report {
-            self.link_seq += 1;
-            let mode = self.prov.rr3_provision_mode();
-            bus.publish(
-                wifi::RR3_LINK_TOPIC,
-                rpc::rr3_link_body(self.link_seq, &st, mode),
-            )?;
-            self.next_report = now + Duration::from_millis(self.wifi_cfg.link_report_period_ms);
+        if self.rr3_link_due(now, &st) {
+            self.rr3_link_report(now, bus, &st)?;
         }
         Ok(())
     }

@@ -82,14 +82,15 @@ const RR3_SUBSCRIBES: [&str; 2] = ["rr3-sense/audio/pcm", "rr3-sense/audio/vad_s
 /// dispatch（装配入口只留启动编排，ADR-0017 五层表 ≤80 行门）。
 pub(crate) fn rr3_brain_surface() {
     eprintln!("rr3-brain 0.1.0 (M4 实装)");
-    for topic in RR3_PUBLISHES {
-        eprintln!("  publish   {topic}");
-    }
-    for topic in RR3_SUBSCRIBES {
-        eprintln!("  subscribe {topic}");
-    }
-    for topic in RR3_RPC_EXPOSES {
-        eprintln!("  rpc       {topic}");
+    rr3_surface_echo("  publish   ", &RR3_PUBLISHES);
+    rr3_surface_echo("  subscribe ", &RR3_SUBSCRIBES);
+    rr3_surface_echo("  rpc       ", &RR3_RPC_EXPOSES);
+}
+
+/// 自述行回声：前缀连对齐空白逐字沿用（三面共用一柄）。
+fn rr3_surface_echo(prefix: &str, topics: &[&str]) {
+    for topic in topics {
+        eprintln!("{prefix}{topic}");
     }
 }
 
@@ -539,11 +540,7 @@ impl Rr3BrainDispatcher {
         };
         // ready_ms 与拆分前同刻：ASR 起点到 TTS 完成（含唤醒判决与 LLM）。
         let ready_ms = asr_started.elapsed().as_millis();
-        if reply_pcm.len() % 2 == 1 {
-            reply_pcm.pop(); // 奇数长度截尾（Python reply_pcm[:-1] 同形状）
-        }
-        let samples = reply_pcm.len() as u64 / 2;
-        let tts_ms = samples / 16_000 * 1000 + samples % 16_000 * 1000 / 16_000;
+        let tts_ms = Self::rr3_pcm_ms(&mut reply_pcm);
 
         let played = self.rr3_turn_play(bus, trace, &reply_text, &reply_pcm)?;
 
@@ -581,6 +578,15 @@ impl Rr3BrainDispatcher {
         Ok(())
     }
 
+    /// 应答 PCM 折算毫秒：奇数长度截尾（Python `reply_pcm[:-1]` 同形状）后按 16k 计。
+    fn rr3_pcm_ms(pcm: &mut Vec<u8>) -> u64 {
+        if pcm.len() % 2 == 1 {
+            pcm.pop();
+        }
+        let samples = pcm.len() as u64 / 2;
+        samples / 16_000 * 1000 + samples % 16_000 * 1000 / 16_000
+    }
+
     /// 取本轮 utterance 并定格轮次号：空缓冲 = 无轮可开（不占 trace 号）。
     /// `RR3_BRAIN_DUMP_UTT` 诊断落盘（env 门控，默认关）随取随做。
     fn rr3_turn_utt(&mut self) -> Option<(Vec<u8>, u64)> {
@@ -590,17 +596,22 @@ impl Rr3BrainDispatcher {
         }
         self.trace_seq += 1;
         let trace = self.trace_seq;
-        // 诊断面（2026-10-31，env 门控，默认关）：把本轮**送 ASR 的 utterance**
-        // 落盘成裸 PCM（s16le 16k mono，字节数/32 = 毫秒）——唤醒词被截断/"只识别
-        // 到你好"类问题，音频证据比转写文本可靠。空值/未设 = 零落盘。
-        if let Ok(dir) = std::env::var("RR3_BRAIN_DUMP_UTT") {
-            let dir = dir.trim();
-            if !dir.is_empty() {
-                let _ = std::fs::create_dir_all(dir);
-                let _ = std::fs::write(format!("{dir}/utt-{trace}.pcm"), &pcm);
-            }
-        }
+        Self::rr3_dump_utt(&pcm, trace);
         Some((pcm, trace))
+    }
+
+    /// 诊断面（2026-10-31，env 门控，默认关）：把本轮**送 ASR 的 utterance**
+    /// 落盘成裸 PCM（s16le 16k mono，字节数/32 = 毫秒）——唤醒词被截断/"只识别
+    /// 到你好"类问题，音频证据比转写文本可靠。空值/未设 = 零落盘。
+    fn rr3_dump_utt(pcm: &[u8], trace: u64) {
+        let Ok(dir) = std::env::var("RR3_BRAIN_DUMP_UTT") else {
+            return;
+        };
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(format!("{dir}/utt-{trace}.pcm"), pcm);
+        }
     }
 
     /// ASR 段：转写失败/空文本折日志弃轮（None），不占后续段。

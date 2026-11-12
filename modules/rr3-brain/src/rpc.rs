@@ -715,6 +715,26 @@ fn rr3_model_delete(rows: &mut Vec<Value>, name: &str) -> Result<(), String> {
 /// 模型行 CRUD 写臂（`rr3-brain/model/set`）：克隆行表改 → 渲染块 → 解析验证 →
 /// 原子落盘（`.bak` + rename）→ 提交内存。任一步失败：内存与旧文件都不变。
 pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<Value, String> {
+    let (op, name) = rr3_model_pick(args)?;
+    let rows = rr3_model_rows(&cfg.doc)?;
+    rr3_model_write(cfg, rows, op, name, args)
+}
+
+/// 写臂：落改动 → 结构门（写面自守，不依赖 boot 兜底：恰一 active）→ 提交。
+fn rr3_model_write(
+    cfg: &mut Rr3BrainCfg,
+    mut rows: Vec<Value>,
+    op: &str,
+    name: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    rr3_model_op_apply(&mut rows, op, name, args)?;
+    rr3_model_one_active(&rows)?;
+    rr3_model_commit(cfg, rows, op, name)
+}
+
+/// 写面取参：op/name 去空白（缺省空串），空名点名拒。
+fn rr3_model_pick(args: &Value) -> Result<(&str, &str), String> {
     let op = args
         .get("op")
         .and_then(Value::as_str)
@@ -728,11 +748,7 @@ pub(crate) fn rr3_model_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<V
     if name.is_empty() {
         return Err("模型行 name 不得为空".to_string());
     }
-    let mut rows = rr3_model_rows(&cfg.doc)?;
-    rr3_model_op_apply(&mut rows, op, name, args)?;
-    // 结构门（写面自守，不依赖 boot 兜底）：恰一 active
-    rr3_model_one_active(&rows)?;
-    rr3_model_commit(cfg, rows, op, name)
+    Ok((op, name))
 }
 
 /// op 分派（upsert/activate/delete；空串与词表外点名拒）。

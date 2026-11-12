@@ -74,17 +74,33 @@ fn rr3_servo_apply(
     args: &Value,
     axis: &Rr3ActAxisState,
 ) -> Result<(u16, u64), String> {
+    let (angle, move_ms) = rr3_servo_plan(cfg, args, axis)?;
+    // HAL 写失败按业务性失败折 error（同 interact 的后端写失败口径）
+    rr3_servo_land(servo_dev, angle, move_ms)?;
+    Ok((angle, move_ms))
+}
+
+/// 裁决段：拒动判据 → 参数裁决 → 行程钳位（安全核永远包住控制图，输入合法时恒等）。
+fn rr3_servo_plan(
+    cfg: &Rr3ServoCfg,
+    args: &Value,
+    axis: &Rr3ActAxisState,
+) -> Result<(u16, u64), String> {
     rr3_servo_gate(args, axis)?;
     let (angle, move_ms) = rr3_servo_parse_args(args, cfg)?;
-    // 安全核钳位最后包一道（批D₃ 裁定 5：安全核永远包住控制图）——上游裁决
-    // 被绕过时输出也不越行程；输入合法时恒等，行为守恒
-    let angle = rr3_travel_clamp(angle, cfg.angle_min_deg, cfg.angle_max_deg);
-    // HAL 写失败按业务性失败折 error（同 interact 的后端写失败口径）
+    Ok((
+        rr3_travel_clamp(angle, cfg.angle_min_deg, cfg.angle_max_deg),
+        move_ms,
+    ))
+}
+
+/// 落角末段：HAL 写 + 台账一行（写失败折业务性拒因）。
+fn rr3_servo_land(servo_dev: &mut dyn Rr3PwmServo, angle: u16, move_ms: u64) -> Result<(), String> {
     servo_dev
         .set_angle(angle)
         .map_err(|e| format!("舵机写入失败: {e}"))?;
     eprintln!("servo: angle={angle} move_ms={move_ms}（sim 即时到位；实机按时限走反射环闭环）");
-    Ok((angle, move_ms))
+    Ok(())
 }
 
 /// led/effect 点名：效果裁决 → 状态机切换 + 同步落电平（批I A-1：写失败折日志

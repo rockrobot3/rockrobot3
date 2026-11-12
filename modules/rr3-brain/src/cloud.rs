@@ -668,21 +668,32 @@ fn rr3_say_pcm(text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
         .arg(text)
         .output()
         .map_err(|e| format!("宿主合成不可用（/usr/bin/say）: {e}"))?;
-    if !out.status.success() {
-        let _ = std::fs::remove_file(&path);
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(format!(
-            "宿主合成失败（say {}）: {}",
-            out.status,
-            err.trim()
-        ));
-    }
+    rr3_say_check(&path, &out)?;
     let bytes = std::fs::read(&path);
     let _ = std::fs::remove_file(&path);
     let bytes = bytes.map_err(|e| format!("读宿主合成 WAV 失败: {e}"))?;
-    crate::tts::rr3_wav_data_chunk(&bytes)
+    rr3_say_pcm_of(&bytes)
+}
+
+/// WAV data 块 → 裸 PCM（无 data 块点名）。
+fn rr3_say_pcm_of(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    crate::tts::rr3_wav_data_chunk(bytes)
         .map(|b| b.to_vec())
         .ok_or_else(|| "宿主合成 WAV 无 data 块".to_string())
+}
+
+/// say 退出码判据：非零即清临时文件并点名 stderr（不静默降级）。
+fn rr3_say_check(path: &std::path::Path, out: &std::process::Output) -> Result<(), String> {
+    if out.status.success() {
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(path);
+    let err = String::from_utf8_lossy(&out.stderr);
+    Err(format!(
+        "宿主合成失败（say {}）: {}",
+        out.status,
+        err.trim()
+    ))
 }
 
 /// splitmix64（纯 std 的 64bit 混淆——uuid crate 不引，裁定 5 最小依赖面）。

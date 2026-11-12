@@ -42,29 +42,35 @@ impl Rr3RemoteServo {
     pub(crate) fn rr3_remote_new(bus: &BusHandle) -> Result<Self, String> {
         let raw = std::env::var(rr_hal_api::RR3_PERIPH_AXIS_ENV).ok();
         let axis = rr3_remote_axis(raw.as_deref())?;
-        let mut last_err = String::new();
-        for try_no in 1..=RR3_REMOTE_TRIES {
-            match bus.call(RR3_SENSE_OPS_TOPIC, &json!({}), RR3_REMOTE_TIMEOUT) {
-                Ok(_) => {
-                    eprintln!(
-                        "rr3-act: 远端舵机面就绪（axis={axis}，rr3-sense 持桥，第 {try_no} 次探测）"
-                    );
-                    return Ok(Self {
-                        bus: bus.clone(),
-                        axis,
-                        last: Cell::new(90),
-                    });
-                }
-                Err(e) => {
-                    last_err = e;
-                    std::thread::sleep(Duration::from_millis(RR3_REMOTE_BACKOFF_MS));
-                }
+        rr3_remote_probe(bus, axis)?;
+        Ok(Self {
+            bus: bus.clone(),
+            axis,
+            last: Cell::new(90),
+        })
+    }
+}
+
+/// 构造期探活段：有界重试 sense 的 `ops/list`，成功即回。
+fn rr3_remote_probe(bus: &BusHandle, axis: &str) -> Result<(), String> {
+    let mut last_err = String::new();
+    for try_no in 1..=RR3_REMOTE_TRIES {
+        match bus.call(RR3_SENSE_OPS_TOPIC, &json!({}), RR3_REMOTE_TIMEOUT) {
+            Ok(_) => {
+                eprintln!(
+                    "rr3-act: 远端舵机面就绪（axis={axis}，rr3-sense 持桥，第 {try_no} 次探测）"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = e;
+                std::thread::sleep(Duration::from_millis(RR3_REMOTE_BACKOFF_MS));
             }
         }
-        Err(format!(
-            "远端舵机面不可达（rr3-sense {RR3_REMOTE_TRIES} 次探测全败）: {last_err}"
-        ))
     }
+    Err(format!(
+        "远端舵机面不可达（rr3-sense {RR3_REMOTE_TRIES} 次探测全败）: {last_err}"
+    ))
 }
 
 /// 轴词域：缺省 pan（契约常量），tilt 在册，其余 fail-closed（与 rr-hal 同域）。

@@ -36,16 +36,7 @@ fn main() {
 
 /// 装配序列（自原 composite.rs `rr3_sense_run` 迁入，打印序列逐字不变）。
 fn rr3_sense_run() -> Result<(), String> {
-    eprintln!("rr3-sense 0.0.1 (M3 实装)");
-    for line in capture::SURFACE
-        .iter()
-        .copied()
-        .chain(vad::SURFACE.iter().copied())
-        .chain(env::SURFACE.iter().copied())
-        .chain(imu::SURFACE.iter().copied())
-    {
-        eprintln!("  {line}");
-    }
+    boot::rr3_sense_surface();
 
     let manifest_path = std::env::var(rr3mod::RR3_MANIFEST_ENV).map_err(|_| {
         format!(

@@ -29,6 +29,7 @@ use serde_json::{json, Value};
 
 use crate::boot::Rr3SenseConfig;
 use crate::capture;
+use crate::capture::Rr3DoaFix;
 use crate::rpc;
 use crate::vad::{self, Rr3VadEdge, Rr3VadState};
 
@@ -188,22 +189,39 @@ fn rr3_nod_advance(
     st: Rr3NodState,
     now: Instant,
 ) -> Option<Rr3NodState> {
-    if !st.dip_sent && now >= st.dip_at {
-        tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.dip_deg));
-        bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
+    if rr3_nod_dip_due(&st, now) {
+        rr3_nod_tilt(tx, bus, st.dip_deg);
         eprintln!("反射环: 点头蓄势 tilt={}°", st.dip_deg);
         return Some(Rr3NodState {
             dip_sent: true,
             ..st
         });
     }
-    if st.dip_sent && now >= st.lift_at {
-        tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.lift_deg));
-        bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
+    if rr3_nod_lift_due(&st, now) {
+        rr3_nod_tilt(tx, bus, st.lift_deg);
         eprintln!("反射环: 点头示意 tilt={}°", st.lift_deg);
         return None;
     }
     Some(st)
+}
+
+/// 蓄势段到点判据（未蓄势且时刻已到）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_nod_dip_due(st: &Rr3NodState, now: Instant) -> bool {
+    !st.dip_sent && now >= st.dip_at
+}
+
+/// 上仰段到点判据（已蓄势且时刻已到）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_nod_lift_due(st: &Rr3NodState, now: Instant) -> bool {
+    st.dip_sent && now >= st.lift_at
+}
+
+/// 单脚下发：命令旁路 + 计数（蓄势/上仰两段共用）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_nod_tilt(tx: &rr_hal::backend::Rr3AudioCmdProducer, bus: &BusHandle, deg: u16) {
+    tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(deg));
+    bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
 }
 
 impl Dispatcher for Rr3SenseDispatcher {
@@ -245,19 +263,22 @@ impl Dispatcher for Rr3SenseDispatcher {
     fn on_tick(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
         // 读一拍：buf 按"帧×声道"分配采样点数（F1 定形 read 收采样点 buf，
         // 返回实填采样点数，欠载按实数截断）
-        let mut buf = vec![0i16; self.frames_per_tick * self.cfg.audio.channels as usize];
-        let done = self
-            .source
-            .read(&mut buf)
-            .map_err(|e| format!("读帧失败({}): {e}", self.backend))?;
-        buf.truncate(done);
-        let raw = Rr3PcmStream {
-            cfg: self.open_cfg,
-            samples: buf,
-        };
+        let (raw, done) = self.rr3_read_frame()?;
         let pcm = self.rr3_tick_pub(raw, done, bus)?;
+        self.rr3_tick_tail(&pcm, now, bus)?;
+        Ok(())
+    }
+}
 
-        self.rr3_vad_beat(&pcm, now, bus)?;
+impl Rr3SenseDispatcher {
+    /// 拍尾段：VAD 节拍 → 点头手势推进 → 节奏（失败原样上抛）。
+    fn rr3_tick_tail(
+        &mut self,
+        pcm: &Rr3PcmStream,
+        now: Instant,
+        bus: &BusHandle,
+    ) -> Result<(), String> {
+        self.rr3_vad_beat(pcm, now, bus)?;
 
         // 点头手势推进（0.0.8 批）：与 VAD 边沿无关，每拍看时刻——蓄势/上仰
         // 两段按 config 时序到点下发（宿主桥档专用，espidf 档无旁路自然跳过）
@@ -267,9 +288,24 @@ impl Dispatcher for Rr3SenseDispatcher {
         self.rr3_pace(now);
         Ok(())
     }
-}
 
-impl Rr3SenseDispatcher {
+    /// 读一拍（按帧×声道分配、欠载按实填数截断），回原始流与实填采样点数。
+    fn rr3_read_frame(&mut self) -> Result<(Rr3PcmStream, usize), String> {
+        let mut buf = vec![0i16; self.frames_per_tick * self.cfg.audio.channels as usize];
+        let done = self
+            .source
+            .read(&mut buf)
+            .map_err(|e| format!("读帧失败({}): {e}", self.backend))?;
+        buf.truncate(done);
+        Ok((
+            Rr3PcmStream {
+                cfg: self.open_cfg,
+                samples: buf,
+            },
+            done,
+        ))
+    }
+
     /// 判向窗积累 + 下混入总线 + 采集新鲜度记账（自 on_tick 拆出的发布步）：
     /// 原始双通道帧在下混**前**入 ring（双麦原始通道只在此一用）；判向本身挪到
     /// onset 边沿整窗回看。空帧另账（欠载饿死信号），帧账在发布成功后 +1——记账
@@ -344,18 +380,23 @@ impl Rr3SenseDispatcher {
         edge: &Rr3VadEdge,
         bus: &BusHandle,
     ) -> Result<Option<i32>, String> {
-        let doa = match (edge, self.doa_ring.as_ref()) {
-            (Rr3VadEdge::Onset { .. }, Some(ring)) => {
-                let snap = ring.rr3_ring_snapshot();
-                capture::rr3_doa_fix(&snap, self.cfg.audio.channels, &self.doa_cfg)
-            }
-            _ => None,
-        };
+        let doa = self.rr3_vad_doa(edge);
         bus.publish(
             vad::RR3_VAD_START_TOPIC,
             rpc::rr3_vad_event_body(self.seq, *edge, doa.map(|d| rpc::rr3_doa_field(&d))),
         )?;
         Ok(doa.map(|d| d.deg))
+    }
+
+    /// 判向段：仅 onset 有方向可判，判向窗 = ring 线性化快照（单声道链路恒 None）。
+    fn rr3_vad_doa(&self, edge: &Rr3VadEdge) -> Option<Rr3DoaFix> {
+        match (edge, self.doa_ring.as_ref()) {
+            (Rr3VadEdge::Onset { .. }, Some(ring)) => {
+                let snap = ring.rr3_ring_snapshot();
+                capture::rr3_doa_fix(&snap, self.cfg.audio.channels, &self.doa_cfg)
+            }
+            _ => None,
+        }
     }
 
     /// onset 反射环（B批 b2 起 onset 判向；2026-10-21 EMI 避让改判停后动作）：
