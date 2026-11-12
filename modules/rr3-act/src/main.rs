@@ -35,7 +35,7 @@ fn main() {
 
 /// 装配序列（自原 composite.rs `rr3_act_run` 迁入，打印序列逐字不变）。
 fn rr3_act_run() -> Result<(), String> {
-    rr3_act_banner();
+    boot::rr3_act_banner();
 
     let (bus, mut cfg) = bootstrap(Rr3ModConfig {
         config_env: Some(RR3_ACT_CONFIG_ENV),
@@ -46,7 +46,7 @@ fn rr3_act_run() -> Result<(), String> {
     let axis = boot::rr3_axis_state_load();
     cfg.servo.angle_min_deg = axis.lo_deg;
     cfg.servo.angle_max_deg = axis.hi_deg;
-    let intent_open = rr3_intent_open(&cfg.intent.open_topics);
+    let intent_open = boot::rr3_intent_open(&cfg.intent.open_topics);
     eprintln!(
         "config 就绪: servo [{}, {}]（行程=轴档案）/{}/ms state>={}ms blink={}ms led_effects={} intent_open={intent_open} reflex {}Hz",
         cfg.servo.angle_min_deg, cfg.servo.angle_max_deg, cfg.servo.move_timeout_ms,
@@ -63,27 +63,4 @@ fn rr3_act_run() -> Result<(), String> {
     let mut dispatcher =
         dispatch::Rr3ActDispatcher::new(servo_dev, led_gpio, relay_gpio, cfg, axis);
     serve(bus, &mut dispatcher, RR3_POLL_WAIT)
-}
-
-/// 启动自述：模块名/版本行 + 四个原子件的 SURFACE 行。
-fn rr3_act_banner() {
-    eprintln!("rr3-act 0.0.1 (0.0.2 T4a 实装，0.0.3 T3 意图执行)");
-    for line in servo::SURFACE
-        .iter()
-        .copied()
-        .chain(led::SURFACE.iter().copied())
-        .chain(relay::SURFACE.iter().copied())
-        .chain(reflex::SURFACE.iter().copied())
-    {
-        eprintln!("  {line}");
-    }
-}
-
-/// intent 开放集展示串（空集 = `(空)`）。
-fn rr3_intent_open(open: &[String]) -> String {
-    if open.is_empty() {
-        "(空)".into()
-    } else {
-        open.join("/")
-    }
 }
