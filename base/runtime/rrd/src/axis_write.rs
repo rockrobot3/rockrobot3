@@ -150,34 +150,30 @@ fn rr3_aw_candidate(
     Ok((file, target))
 }
 
-/// 拒绝面 a：坏目标不覆盖；同文件名异 pin 拒覆盖（pin 才是档案身份键）
+/// 拒绝面 a：不在场 = 无旧档可保护；坏档/读不出不覆盖；同档异 pin 拒覆盖（pin
+/// 才是档案身份键）。**不以 `exists()` 先判**：判与读之间档会被移除（运维并发、
+/// 外部清理），那样"装载回 None"只能落进 panic——写面拒面不许用 panic 表达
+/// 文件系统事实，daemon 写口线程 panic 会断连接、丢应答。装载三态即三分支本身。
 #[cfg(unix)]
 fn rr3_aw_existing(
     target: &Path,
     file: &Rr3AxisFile,
     pin_ids: &BTreeSet<String>,
 ) -> Result<(), String> {
-    if !target.exists() {
-        return Ok(());
-    }
     match rr3_act_profile_load(target, pin_ids) {
+        Ok(None) => Ok(()),
         Err(errs) => Err(format!(
             "目标 {} 已存在且装载红（{}）——坏档案不许覆盖，先修或手工移除后再写",
             target.display(),
             errs.join("; ")
         )),
-        Ok(Some(existing)) => {
-            if existing.pin != file.pin {
-                return Err(format!(
-                    "目标 {} 已存在且 pin = {:?}（候选 {:?}）——instance 落位与档案身份冲突，拒绝覆盖",
-                    target.display(),
-                    existing.pin,
-                    file.pin
-                ));
-            }
-            Ok(())
-        }
-        Ok(None) => unreachable!("target.exists() 为真时装载不会回 None"),
+        Ok(Some(existing)) if existing.pin != file.pin => Err(format!(
+            "目标 {} 已存在且 pin = {:?}（候选 {:?}）——instance 落位与档案身份冲突，拒绝覆盖",
+            target.display(),
+            existing.pin,
+            file.pin
+        )),
+        Ok(Some(_)) => Ok(()),
     }
 }
 
