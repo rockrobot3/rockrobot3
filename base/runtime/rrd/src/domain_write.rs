@@ -273,13 +273,23 @@ fn rr3_req(v: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
 }
 
 /// 证据容器根（§6.1：modules-root 同一条 `<root>/profiles/` 布局纪律推导出
-/// `<root>/docs/evidence`；与装载期⑥-e 文件半边同一条推导）。
-fn rr3_evidence_root(profile_path: &std::path::Path) -> PathBuf {
+/// `<root>/docs/evidence`；与装载期⑥-e 文件半边同一条推导）。推不出两级父目录
+/// = 装配单路径形状破，**拒**——旧序退回相对路径 `docs/evidence`，root 侧写口
+/// 按 CWD 解析等于"证据根由启动目录决定"，这是猜路径不是推导。
+fn rr3_evidence_root(profile_path: &std::path::Path) -> Result<PathBuf, (Rr3StatusCode, String)> {
     profile_path
         .parent()
         .and_then(|p| p.parent())
         .map(|p| p.join("docs/evidence"))
-        .unwrap_or_else(|| PathBuf::from("docs/evidence"))
+        .ok_or_else(|| {
+            (
+                Rr3StatusCode::Invalid,
+                format!(
+                    "装配单路径 {} 无两级父目录，证据容器根不可推导——写口拒（不按 CWD 猜证据根）",
+                    profile_path.display()
+                ),
+            )
+        })
 }
 
 /// 证据引用门（B-15 ③）：必填形状 + 四道核（`rr-ipc::evidence` 唯一实现）。
@@ -288,14 +298,13 @@ fn rr3_write_evidence(
     profile_path: &std::path::Path,
     reference: &str,
 ) -> Result<(), (Rr3StatusCode, String)> {
-    rr_ipc::evidence::rr3_evidence_verify(&rr3_evidence_root(profile_path), reference).map_err(
-        |e| {
-            (
-                Rr3StatusCode::Permission,
-                format!("写口证据引用核验不过（B-15 ③——安全写必须携带真板证据）: {e}"),
-            )
-        },
-    )
+    let root = rr3_evidence_root(profile_path)?;
+    rr_ipc::evidence::rr3_evidence_verify(&root, reference).map_err(|e| {
+        (
+            Rr3StatusCode::Permission,
+            format!("写口证据引用核验不过（B-15 ③——安全写必须携带真板证据）: {e}"),
+        )
+    })
 }
 
 /// 写口执行（策略编排，逐门显式；`#[cfg(unix)]` 随落盘序同门——原子写与
@@ -814,6 +823,16 @@ mod tests {
             sha256: "0".repeat(64),
             bytes: 1,
         }
+    }
+
+    /// 证据根推导（本轮审计）：两级父目录才成立；推不出即拒——旧序退回相对
+    /// 路径，root 侧写口的证据根会由启动目录决定（猜路径）。
+    #[test]
+    fn evidence_root_derives_or_rejects() {
+        let root = rr3_evidence_root(Path::new("/x/profiles/a.toml")).unwrap();
+        assert_eq!(root, PathBuf::from("/x/docs/evidence"));
+        let e = rr3_evidence_root(Path::new("a.toml")).expect_err("无两级父目录必须拒");
+        assert!(e.1.contains("证据容器根不可推导"), "{}", e.1);
     }
 
     /// 轴实例名形制（本轮审计）：只收单段标识——名字直接拼进轴档路径，`..`
