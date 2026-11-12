@@ -354,34 +354,46 @@ impl Rr3Wiring {
     ) -> Vec<String> {
         let mut errs = Vec::new();
         for w in &self.wires {
-            // ⑦-a：signal 除 vcc/gnd 外一律写 pin_id（F-3）
-            for s in &w.signal {
-                if s == "vcc" || s == "gnd" {
-                    continue;
-                }
-                if !pin_ids.contains(s) {
-                    errs.push(format!(
-                        "wiring[{}].signal 元素 {s} 不在 [pins] 的 pin_id 集（校验⑦-a：signal 除 vcc/gnd 外一律写 pin_id，不各造语法——F-3）",
-                        w.connector
-                    ));
-                }
-            }
-            // ⑦-b：net 是 domains 外键（F-5）；"none" = 纯信号/地线组
-            if w.net != "none" && !domain_names.contains(&w.net) {
-                errs.push(format!(
-                    "wiring[{}].net = {} 未在 [[supplies.domain]] 在册（校验⑦-b：wire.net 是 domains 外键——F-5）",
-                    w.connector, w.net
-                ));
-            }
-            // ⑦-d：对端连接器型号与器件词表对账（§4.1b 门 o）
-            if w.mate != "none" && !mate_set.contains(&w.mate) {
-                errs.push(format!(
-                    "wiring[{}].mate = {} 不在 devices.toml 的 mate 集（校验⑦-d：对端连接器型号必须与器件词表对账，§4.1b）",
-                    w.connector, w.mate
-                ));
-            }
+            rr3_wire_signal(w, pin_ids, &mut errs);
+            rr3_wire_net(w, domain_names, &mut errs);
+            rr3_wire_mate(w, mate_set, &mut errs);
         }
         errs
+    }
+}
+
+/// ⑦-a：signal 除 vcc/gnd 外一律写 pin_id（F-3）
+fn rr3_wire_signal(w: &Rr3Wire, pin_ids: &BTreeSet<String>, errs: &mut Vec<String>) {
+    for s in &w.signal {
+        if s == "vcc" || s == "gnd" {
+            continue;
+        }
+        if !pin_ids.contains(s) {
+            errs.push(format!(
+                "wiring[{}].signal 元素 {s} 不在 [pins] 的 pin_id 集（校验⑦-a：signal 除 vcc/gnd 外一律写 pin_id，不各造语法——F-3）",
+                w.connector
+            ));
+        }
+    }
+}
+
+/// ⑦-b：net 是 domains 外键（F-5）；"none" = 纯信号/地线组
+fn rr3_wire_net(w: &Rr3Wire, domain_names: &BTreeSet<String>, errs: &mut Vec<String>) {
+    if w.net != "none" && !domain_names.contains(&w.net) {
+        errs.push(format!(
+            "wiring[{}].net = {} 未在 [[supplies.domain]] 在册（校验⑦-b：wire.net 是 domains 外键——F-5）",
+            w.connector, w.net
+        ));
+    }
+}
+
+/// ⑦-d：对端连接器型号与器件词表对账（§4.1b 门 o）
+fn rr3_wire_mate(w: &Rr3Wire, mate_set: &BTreeSet<String>, errs: &mut Vec<String>) {
+    if w.mate != "none" && !mate_set.contains(&w.mate) {
+        errs.push(format!(
+            "wiring[{}].mate = {} 不在 devices.toml 的 mate 集（校验⑦-d：对端连接器型号必须与器件词表对账，§4.1b）",
+            w.connector, w.mate
+        ));
     }
 }
 

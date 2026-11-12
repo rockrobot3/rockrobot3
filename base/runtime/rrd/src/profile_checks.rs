@@ -211,12 +211,7 @@ fn rr3_check_absent(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
 /// 上面查册门点名，此处只对在册格判 scope，不重复报。
 pub(crate) fn rr3_check_tier(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
     let mut errs = Vec::new();
-    if profile.platform_tier == "bare" && !profile.supplies.watchdog_present {
-        errs.push(
-            "档位一致性校验失败：tier = bare 但 supplies.watchdog_present = false——无看门狗的板不允许归 bare 档（ADR-0018 修订 1），拒绝启动"
-                .to_string(),
-        );
-    }
+    rr3_tier_bare(profile, &mut errs);
     let mut referenced: BTreeSet<String> = BTreeSet::new();
     referenced.extend(profile.bindings.keys().cloned());
     for slots in profile.enabled_slots.values() {
@@ -227,23 +222,41 @@ pub(crate) fn rr3_check_tier(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<
         if !table.rr3_slot_contains(slot) {
             continue;
         }
-        // P0-2 根因门：占位/退役格不得进生产装配面（真件落地后改 status=normal）
-        if let Some(status) = table.rr3_slot_status(slot) {
-            if status == "placeholder" || status == "retired" {
-                errs.push(format!(
-                    "装配面引用 {status} 格 {slot}（占位/退役格不得进生产装配面；真件落地后改 contracts/slots.toml status=normal 再绑定）"
-                ));
-            }
-        }
-        let scope = table.rr3_slot_tier_scope(slot).unwrap_or_default();
-        if !scope.iter().any(|t| t == &profile.platform_tier) {
+        rr3_slot_retired(slot, table, &mut errs);
+        rr3_slot_scope(&profile.platform_tier, slot, table, &mut errs);
+    }
+    errs
+}
+
+/// G6：无看门狗的板不允许归 bare 档（ADR-0018 修订 1）。
+fn rr3_tier_bare(profile: &Rr3Profile, errs: &mut Vec<String>) {
+    if profile.platform_tier == "bare" && !profile.supplies.watchdog_present {
+        errs.push(
+            "档位一致性校验失败：tier = bare 但 supplies.watchdog_present = false——无看门狗的板不允许归 bare 档（ADR-0018 修订 1），拒绝启动"
+                .to_string(),
+        );
+    }
+}
+
+/// P0-2 根因门：占位/退役格不得进生产装配面（真件落地后改 status=normal）。
+fn rr3_slot_retired(slot: &str, table: &Rr3SlotTable, errs: &mut Vec<String>) {
+    if let Some(status) = table.rr3_slot_status(slot) {
+        if status == "placeholder" || status == "retired" {
             errs.push(format!(
-                "tier↔tier_scope 交叉校验失败：装配档 {tier} 引用格 {slot}，其 tier_scope = {scope:?} 不含 {tier}（该档不适用此格，ADR-0012 增补注记分族），拒绝启动",
-                tier = profile.platform_tier
+                "装配面引用 {status} 格 {slot}（占位/退役格不得进生产装配面；真件落地后改 contracts/slots.toml status=normal 再绑定）"
             ));
         }
     }
-    errs
+}
+
+/// L-10：tier↔tier_scope 交叉校验（该档不适用此格）。
+fn rr3_slot_scope(tier: &str, slot: &str, table: &Rr3SlotTable, errs: &mut Vec<String>) {
+    let scope = table.rr3_slot_tier_scope(slot).unwrap_or_default();
+    if !scope.iter().any(|t| t == tier) {
+        errs.push(format!(
+            "tier↔tier_scope 交叉校验失败：装配档 {tier} 引用格 {slot}，其 tier_scope = {scope:?} 不含 {tier}（该档不适用此格，ADR-0012 增补注记分族），拒绝启动"
+        ));
+    }
 }
 
 /// 结构自洽：每条 binding 都必须被 enabled_slots 认领（否则是死数据）
@@ -537,26 +550,36 @@ fn rr3_check_domain(d: &Rr3Domain, pins: &[Rr3PinEntry]) -> Vec<String> {
 
 /// ⑥-c/⑥-e 武装面：武装需测点与龄期上界，evidence 与 armed 成对且形制合法。
 fn rr3_arm_check(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
-    if d.armed && (d.sense == "none" || d.max_age_ms <= 0) {
-        errs.push(format!(
-            "{label} armed = true 但 sense = none 或 max_age_ms ≤ 0（校验⑥-c：无测点/无龄期上界的域不得武装拒动——未标定即 armed=false，§3.1 降级语义）"
-        ));
-    }
     if d.armed {
-        if d.evidence == "none" || d.evidence.is_empty() {
-            errs.push(format!(
-                "{label} armed = true 但 evidence = none（校验⑥-e：武装拒动必须引用一条真板实测证据，规则住 conventions §6.1；未标定即 armed = false）"
-            ));
-        } else if !rr_ipc::evidence::rr3_evidence_ref_ok(&d.evidence) {
-            errs.push(format!(
-                "{label}.evidence = {} 形制不合法（校验⑥-e：应为 <形态>/<四位编号>，如 实测/0001）",
-                d.evidence
-            ));
-        }
+        rr3_arm_sense(d, label, errs);
+        rr3_arm_ev(d, label, errs);
     } else if d.evidence != "none" {
         errs.push(format!(
             "{label} armed = false 但 evidence = {}（校验⑥-e：未武装不携证据，evidence 显式写 \"none\"——证据位与武装位成对，不出现过期引用）",
             if d.evidence.is_empty() { "缺失" } else { &d.evidence }
+        ));
+    }
+}
+
+/// ⑥-c：无测点/无龄期上界的域不得武装拒动。
+fn rr3_arm_sense(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
+    if d.sense == "none" || d.max_age_ms <= 0 {
+        errs.push(format!(
+            "{label} armed = true 但 sense = none 或 max_age_ms ≤ 0（校验⑥-c：无测点/无龄期上界的域不得武装拒动——未标定即 armed=false，§3.1 降级语义）"
+        ));
+    }
+}
+
+/// ⑥-e：武装拒动必须引用一条形制合法的真板实测证据。
+fn rr3_arm_ev(d: &Rr3Domain, label: &str, errs: &mut Vec<String>) {
+    if d.evidence == "none" || d.evidence.is_empty() {
+        errs.push(format!(
+            "{label} armed = true 但 evidence = none（校验⑥-e：武装拒动必须引用一条真板实测证据，规则住 conventions §6.1；未标定即 armed = false）"
+        ));
+    } else if !rr_ipc::evidence::rr3_evidence_ref_ok(&d.evidence) {
+        errs.push(format!(
+            "{label}.evidence = {} 形制不合法（校验⑥-e：应为 <形态>/<四位编号>，如 实测/0001）",
+            d.evidence
         ));
     }
 }

@@ -429,28 +429,46 @@ fn rr3_read_loop(
 ) -> Result<Rr3Flow, String> {
     let mut last_frame = Instant::now();
     loop {
-        match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
-            Ok(frame) => {
-                last_frame = Instant::now();
-                match rr3_serve_frame(out, ctx, me, &frame) {
-                    Ok(Rr3Flow::Keep) => {}
-                    Ok(Rr3Flow::QuitClean) => break Ok(Rr3Flow::QuitClean),
-                    Err(reason) => break Err(reason),
-                }
-            }
-            Err(Rr3FrameError::Closed) => break Ok(Rr3Flow::QuitClean),
-            Err(e) => {
-                let idle = last_frame.elapsed().as_millis() as u64;
-                break Err(if idle_ms > 0 && idle >= idle_ms {
-                    format!(
-                        "静默超时：{idle}ms 无完整帧（上界 = 2 × 看门狗 {idle_ms}ms），\
-                         本连接回收；判死与重启归看门狗一拍"
-                    )
-                } else {
-                    format!("帧读取失败: {e:?}")
-                });
+        // 逐帧读：`Some` = 该收尾了（干净或带原因），`None` = 继续下一帧。
+        if let Some(done) = rr3_read_step(out, ctx, me, reader, &mut last_frame, idle_ms) {
+            break done;
+        }
+    }
+}
+
+/// 读一帧并处理；`Some(结论)` = 收尾，`None` = 本帧已消化、继续读。
+fn rr3_read_step(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    reader: &mut UnixStream,
+    last_frame: &mut Instant,
+    idle_ms: u64,
+) -> Option<Result<Rr3Flow, String>> {
+    match rr3_frame_read_cap(&mut *reader, RR3_FRAMING_PLEN_CAP_DEFAULT) {
+        Ok(frame) => {
+            *last_frame = Instant::now();
+            match rr3_serve_frame(out, ctx, me, &frame) {
+                Ok(Rr3Flow::Keep) => None,
+                Ok(Rr3Flow::QuitClean) => Some(Ok(Rr3Flow::QuitClean)),
+                Err(reason) => Some(Err(reason)),
             }
         }
+        Err(Rr3FrameError::Closed) => Some(Ok(Rr3Flow::QuitClean)),
+        Err(e) => Some(Err(rr3_read_err(&e, *last_frame, idle_ms))),
+    }
+}
+
+/// 读错文案：静默超时（上界 = 2 × 看门狗）与普通读错分流。
+fn rr3_read_err(e: &Rr3FrameError, last_frame: Instant, idle_ms: u64) -> String {
+    let idle = last_frame.elapsed().as_millis() as u64;
+    if idle_ms > 0 && idle >= idle_ms {
+        format!(
+            "静默超时：{idle}ms 无完整帧（上界 = 2 × 看门狗 {idle_ms}ms），\
+             本连接回收；判死与重启归看门狗一拍"
+        )
+    } else {
+        format!("帧读取失败: {e:?}")
     }
 }
 

@@ -154,6 +154,24 @@ impl Rr3Supervisor {
 /// entry 不合格时点名的是"哪个模块的哪条 entry"。把文案塞进返回值再让 daemon 打，
 /// 就等于逼调用方去猜这两种形状，日志出口反而分散。
 pub fn rr3_boot_job_parse(manifest_path: &Path) -> Option<Rr3SpawnJob> {
+    let facts = rr3_job_facts(manifest_path)?;
+    let entry = rr3_job_entry(manifest_path, &facts)?;
+    Some(Rr3SpawnJob {
+        manifest_path: manifest_path.to_path_buf(),
+        entry,
+        facts,
+        // `--manifest` 直起路径没有装配单，描述符/执行轴/HAL 后端由 daemon 组装时统一透传
+        hal_bindings: String::new(),
+        axis_state: String::new(),
+        hal_backend: String::new(),
+        audio_backend: None,
+        servo_backend: None,
+        display_backend: None,
+    })
+}
+
+/// manifest 读取 + 解析：两种失败点名对象不同（读不动点名文件，解析失败附逐条原因）。
+fn rr3_job_facts(manifest_path: &Path) -> Option<Rr3ManifestFacts> {
     let text = match std::fs::read_to_string(manifest_path) {
         Ok(t) => t,
         Err(e) => {
@@ -164,17 +182,21 @@ pub fn rr3_boot_job_parse(manifest_path: &Path) -> Option<Rr3SpawnJob> {
             return None;
         }
     };
-    let facts = match rr3_manifest_parse(&text) {
-        Ok(f) => f,
+    match rr3_manifest_parse(&text) {
+        Ok(f) => Some(f),
         Err(errs) => {
             rr3_log(&format!(
                 "拒绝启动：manifest {} 解析失败: {}",
                 manifest_path.display(),
                 errs.join("; ")
             ));
-            return None;
+            None
         }
-    };
+    }
+}
+
+/// entry 定位 + E-3 两项检查（存在 / 可执行位）：不合格点名模块与 entry。
+fn rr3_job_entry(manifest_path: &Path, facts: &Rr3ManifestFacts) -> Option<PathBuf> {
     // E-7：绝对则原样，否则相对 **manifest 所在目录** join（不是 rrd 的 CWD——装机后模块的
     // 相对 entry 是相对它自己的 manifest 写的，跟着 CWD 走就成了一台机器一个目录树）。
     // 父目录取不到（`--manifest` 给的是裸文件名）时按空串 join，即由 rrd 的 CWD 展开——
@@ -189,28 +211,16 @@ pub fn rr3_boot_job_parse(manifest_path: &Path) -> Option<Rr3SpawnJob> {
     };
     // E-3 的两项检查。`PermissionsExt::mode()` 在 `std::os::unix::fs` 里，仍是零外部依赖。
     match std::fs::metadata(&entry) {
-        Ok(md) if md.is_file() && md.permissions().mode() & 0o111 != 0 => {}
+        Ok(md) if md.is_file() && md.permissions().mode() & 0o111 != 0 => Some(entry),
         _ => {
             rr3_log(&format!(
                 "拒绝启动 {}：entry {} 不存在或不可执行",
                 facts.name,
                 entry.display()
             ));
-            return None;
+            None
         }
     }
-    Some(Rr3SpawnJob {
-        manifest_path: manifest_path.to_path_buf(),
-        entry,
-        facts,
-        // `--manifest` 直起路径没有装配单，描述符/执行轴/HAL 后端由 daemon 组装时统一透传
-        hal_bindings: String::new(),
-        axis_state: String::new(),
-        hal_backend: String::new(),
-        audio_backend: None,
-        servo_backend: None,
-        display_backend: None,
-    })
 }
 
 /// 到期表（E-4）：`(起它的时刻, 计划)`。`Instant::now() + Duration::from_millis(delay_ms)` 在
@@ -610,70 +620,81 @@ pub fn rr3_spawn_supervisor(
         let mut jobs: BTreeMap<String, Rr3SpawnJob> = BTreeMap::new();
         let mut children: BTreeMap<String, Child> = BTreeMap::new();
         let mut due: Vec<(Instant, Rr3RestartPlan)> = Vec::new();
-        loop {
-            // 一拍等多久：`sweep` 与"最近一个到期点"取小者。
-            // 为什么不能只用 `sweep`：`recv_timeout` 一收到消息就立刻醒，醒完这一轮又 park 回
-            // `sweep` —— 而既有 e2e 线级用例的 tick 是 1 小时（`RR3_QUIET_WATCHDOG_TICK_MS`），
-            // 那样"20ms 后到期的重启"永远等不到 `rr3_fire_due` 被叫到，E-1 那句 `跳过重启`
-            // 也就永远打不出来（`e2e_sim_peer` 那条对照用例正面等的就是它）。
-            // 取小者同时把 E-4 补全：退避表是**到期时刻**队列，到点了就得有人看表；
-            // "没东西到期时这一拍仍等于 `--watchdog-tick-ms`"这句话没被改动（E-5 的接线照旧）。
-            let wait = match due.iter().map(|(at, _)| *at).min() {
-                Some(at) => sweep.min(at.saturating_duration_since(Instant::now())),
-                None => sweep,
-            };
-            // 一次收件即一拍：`Timeout` 就是"这一拍没信"（节拍本身）。
-            let mut keep_running = true;
-            match rx.recv_timeout(wait) {
-                Ok(Rr3SuperMsg::Boot(job)) => {
-                    // 先登记"我能起谁"再起第一世：`rr3_reap` 里那句 `expect("children 里的 name
-                    // 必有 job")` 就建立在这个顺序上（`children` 的键只可能来自这里）。
-                    // 这里不打日志：可见证据是 `rr3_boot_spawn` 的 `spawn …` 那一行，
-                    // 多打一条"登记了"只是把同一件事说两遍（日志面每多一行就要多审一次 needle）。
-                    let job = *job;
-                    let for_spawn = job.clone();
-                    jobs.insert(job.facts.name.clone(), job);
-                    rr3_boot_spawn(
-                        &shared,
-                        t0,
-                        &mut children,
-                        &mut due,
-                        &for_spawn,
-                        0,
-                        &bus_path,
-                        &boot_role,
-                    );
-                }
-                Ok(Rr3SuperMsg::Restart(plan)) => rr3_schedule_due(&mut due, plan),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    // brief 把 Disconnected 也当"这一拍没信"，但它是**永久**状态：
-                    // `recv_timeout` 在已断开的通道上立即返回 Err，于是"每拍等 sweep"退化成
-                    // 100% 忙等（正是本仓拒 `--watchdog-tick-ms 0` 的那条理由）。
-                    // 现值：daemon 永不 shutdown（`incoming()` 不返回），而 watchdog 与每条 conn
-                    // 各持一份 Sender，所以这一支在真路径上不可达；真到了那一刻说明进程正在收尾，
-                    // 剩下的子进程由 rrd 退出与 `e2e_spawn_restart` 的 S5（孤儿卫生）负责。
-                    // 冲突已写进实施报告：这一支按"退出而不忙等"实现，语义与 brief 相同
-                    //（都不再处理新请求），只是不烧核。
-                    rr3_log("supervisor 退出：已无投递方（不再忙等）");
-                    keep_running = false;
-                }
-            }
-            rr3_reap(&shared, t0, &jobs, &mut children, &mut due);
-            rr3_fire_due(
-                &shared,
-                t0,
-                &jobs,
-                &mut children,
-                &mut due,
-                &bus_path,
-                &boot_role,
-            );
-            if !keep_running {
-                break;
-            }
-        }
+        while rr3_super_tick(
+            &rx,
+            sweep,
+            &shared,
+            t0,
+            &mut jobs,
+            &mut children,
+            &mut due,
+            &bus_path,
+            &boot_role,
+        ) {}
     })
+}
+
+/// 一拍等多久：`sweep` 与"最近一个到期点"取小者。为什么不能只用 `sweep`：
+/// `recv_timeout` 一收到消息就立刻醒，醒完这一轮又 park 回 `sweep` —— 而既有 e2e
+/// 线级用例的 tick 是 1 小时（`RR3_QUIET_WATCHDOG_TICK_MS`），那样"20ms 后到期的
+/// 重启"永远等不到 `rr3_fire_due` 被叫到，E-1 那句 `跳过重启` 也就永远打不出来
+/// （`e2e_sim_peer` 那条对照用例正面等的就是它）。取小者同时把 E-4 补全：退避表是
+/// **到期时刻**队列，到点了就得有人看表；"没东西到期时这一拍仍等于
+/// `--watchdog-tick-ms`"这句话没被改动（E-5 的接线照旧）。
+fn rr3_sweep_wait(due: &[(Instant, Rr3RestartPlan)], sweep: Duration) -> Duration {
+    match due.iter().map(|(at, _)| *at).min() {
+        Some(at) => sweep.min(at.saturating_duration_since(Instant::now())),
+        None => sweep,
+    }
+}
+
+/// supervisor 一拍：收件 → 扫尸 → 到期执行。返回 false = 投递方已断，收摊退出。
+#[allow(clippy::too_many_arguments)]
+fn rr3_super_tick(
+    rx: &Receiver<Rr3SuperMsg>,
+    sweep: Duration,
+    shared: &Arc<Mutex<RrdRegistry>>,
+    t0: Instant,
+    jobs: &mut BTreeMap<String, Rr3SpawnJob>,
+    children: &mut BTreeMap<String, Child>,
+    due: &mut Vec<(Instant, Rr3RestartPlan)>,
+    bus_path: &Path,
+    boot_role: &str,
+) -> bool {
+    let wait = rr3_sweep_wait(due, sweep);
+    // 一次收件即一拍：`Timeout` 就是"这一拍没信"（节拍本身）。
+    let mut keep_running = true;
+    match rx.recv_timeout(wait) {
+        Ok(Rr3SuperMsg::Boot(job)) => {
+            // 先登记"我能起谁"再起第一世：`rr3_reap` 里那句 `expect("children 里的 name
+            // 必有 job")` 就建立在这个顺序上（`children` 的键只可能来自这里）。
+            // 这里不打日志：可见证据是 `rr3_boot_spawn` 的 `spawn …` 那一行，
+            // 多打一条"登记了"只是把同一件事说两遍（日志面每多一行就要多审一次 needle）。
+            let job = *job;
+            let for_spawn = job.clone();
+            jobs.insert(job.facts.name.clone(), job);
+            rr3_boot_spawn(
+                shared, t0, children, due, &for_spawn, 0, bus_path, boot_role,
+            );
+        }
+        Ok(Rr3SuperMsg::Restart(plan)) => rr3_schedule_due(due, plan),
+        Err(RecvTimeoutError::Timeout) => {}
+        Err(RecvTimeoutError::Disconnected) => {
+            // brief 把 Disconnected 也当"这一拍没信"，但它是**永久**状态：
+            // `recv_timeout` 在已断开的通道上立即返回 Err，于是"每拍等 sweep"退化成
+            // 100% 忙等（正是本仓拒 `--watchdog-tick-ms 0` 的那条理由）。
+            // 现值：daemon 永不 shutdown（`incoming()` 不返回），而 watchdog 与每条 conn
+            // 各持一份 Sender，所以这一支在真路径上不可达；真到了那一刻说明进程正在收尾，
+            // 剩下的子进程由 rrd 退出与 `e2e_spawn_restart` 的 S5（孤儿卫生）负责。
+            // 冲突已写进实施报告：这一支按"退出而不忙等"实现，语义与 brief 相同
+            //（都不再处理新请求），只是不烧核。
+            rr3_log("supervisor 退出：已无投递方（不再忙等）");
+            keep_running = false;
+        }
+    }
+    rr3_reap(shared, t0, jobs, children, due);
+    rr3_fire_due(shared, t0, jobs, children, due, bus_path, boot_role);
+    keep_running
 }
 
 #[cfg(test)]

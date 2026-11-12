@@ -37,40 +37,55 @@ pub(super) fn rr3_route_call(
             return Ok(Rr3Flow::Keep);
         }
     };
-    // 查表 + 构帧 + 投递在同一把锁内完成：避免"查到 callee、锁一放它就死了"的窗口里
-    // 构出一帧注定无处投递的转发。锁内 send 与 `rr3_reg_fanout` 同一口径（无界 mpsc 不阻塞）。
-    let outcome: Result<bool, String> = {
-        let g = rr3_lock(&ctx.shared);
-        match g.rr3_reg_callee_for(&topic) {
-            None => Err(format!(
-                "没有在册模块 exposes 主题 {topic}（被调方须在 manifest 的 [rpc].exposes 里声明）"
-            )),
-            Some((_, task)) if task == me.task => {
-                Err(format!("主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼"))
-            }
-            Some((name, task)) => {
-                let payload = rr3_body_encode(Rr3PayloadType::Request, body);
-                let frame = Rr3Frame {
-                    header: Rr3Header {
-                        opcode: opcode::SEND,
-                        flags: 0,
-                        trace_id: me.task,
-                        timestamp_ns: rr3_now_ns(),
-                        src_task: me.task,
-                        dst_task: task,
-                        payload_len: payload.len() as u32,
-                        payload_crc32: rr_ipc::rr3_crc32(&payload),
-                    },
-                    payload,
-                };
-                rr3_log(&format!(
-                    "rr3.call {topic}: {}(task={}) → {name}(task={task})",
-                    me.name, me.task
-                ));
-                Ok(g.rr3_reg_send_to(task, &frame))
-            }
+    let outcome = rr3_call_fwd(ctx, me, &topic, body);
+    rr3_call_reply(out, me, id, &topic, outcome);
+    Ok(Rr3Flow::Keep)
+}
+
+/// 查表 + 构帧 + 投递在同一把锁内完成：避免"查到 callee、锁一放它就死了"的窗口里
+/// 构出一帧注定无处投递的转发。锁内 send 与 `rr3_reg_fanout` 同一口径（无界 mpsc 不阻塞）。
+/// `Ok(bool)` = 投递结果，`Err` = 拒法文案（无人在册 / 自呼）。
+fn rr3_call_fwd(ctx: &Rr3ConnCtx, me: &Rr3Peer, topic: &str, body: &[u8]) -> Result<bool, String> {
+    let g = rr3_lock(&ctx.shared);
+    match g.rr3_reg_callee_for(topic) {
+        None => Err(format!(
+            "没有在册模块 exposes 主题 {topic}（被调方须在 manifest 的 [rpc].exposes 里声明）"
+        )),
+        Some((_, task)) if task == me.task => {
+            Err(format!("主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼"))
         }
-    };
+        Some((name, task)) => {
+            let payload = rr3_body_encode(Rr3PayloadType::Request, body);
+            let frame = Rr3Frame {
+                header: Rr3Header {
+                    opcode: opcode::SEND,
+                    flags: 0,
+                    trace_id: me.task,
+                    timestamp_ns: rr3_now_ns(),
+                    src_task: me.task,
+                    dst_task: task,
+                    payload_len: payload.len() as u32,
+                    payload_crc32: rr_ipc::rr3_crc32(&payload),
+                },
+                payload,
+            };
+            rr3_log(&format!(
+                "rr3.call {topic}: {}(task={}) → {name}(task={task})",
+                me.name, me.task
+            ));
+            Ok(g.rr3_reg_send_to(task, &frame))
+        }
+    }
+}
+
+/// 投递结果 → 调用方应答（拒法与投递前退场都回 Invalid 错误帧，不断连）。
+fn rr3_call_reply(
+    out: &Arc<Mutex<UnixStream>>,
+    me: &Rr3Peer,
+    id: u64,
+    topic: &str,
+    outcome: Result<bool, String>,
+) {
     match outcome {
         Ok(true) => {}
         // 查表时还活着、投递时收件人没了：对调用方而言就是"这一拍没人接"
@@ -85,7 +100,6 @@ pub(super) fn rr3_route_call(
         }
         Err(msg) => rr3_reply_err(out, me, id, Rr3StatusCode::Invalid, &msg),
     }
-    Ok(Rr3Flow::Keep)
 }
 
 /// 上行 Response 的回路（M3）：rr3.call 的应答去路。头上的 `trace_id` 是**调用方

@@ -34,19 +34,38 @@ fn main() -> std::process::ExitCode {
     // 契约目录运行期落点（T5）：--contracts 显式 > 编译期仓内路径；topics/slots
     // 由装载入口各自 join，路径必须已存在（canonicalize 的 ENOENT 正是该报的错）。
     let contracts_dir = topics_load::rr3_contracts_dir(cfg.contracts.as_deref());
-    let (topics, added) = match topics_load::rr3_topics_load(
-        &contracts_dir.join("topics.toml"),
-        overlay.as_deref(),
-    ) {
-        Ok(t) => t,
+    let (topics, added) = match rr3_topics_read(&contracts_dir, overlay.as_deref()) {
+        Some(t) => t,
+        None => return std::process::ExitCode::FAILURE,
+    };
+
+    rr3_banner_print(&cfg, &topics, overlay.as_deref(), &added);
+    rr3_run(cfg, topics)
+}
+
+/// 主题装载（叠加层合并）：失败逐条点名并交回 None，由 main 统一非 0 退出。
+fn rr3_topics_read(
+    contracts_dir: &std::path::Path,
+    overlay: Option<&std::path::Path>,
+) -> Option<(Rr3TopicSet, Vec<String>)> {
+    match topics_load::rr3_topics_load(&contracts_dir.join("topics.toml"), overlay) {
+        Ok(t) => Some(t),
         Err(errs) => {
             for e in &errs {
                 eprintln!("rrd: 主题装载失败: {e}");
             }
-            return std::process::ExitCode::FAILURE;
+            None
         }
-    };
+    }
+}
 
+/// 横幅与可见凭证：叠加层/装配单都按绝对路径回显（与 CWD 无关）。
+fn rr3_banner_print(
+    cfg: &cli::RrdConfig,
+    topics: &Rr3TopicSet,
+    overlay: Option<&std::path::Path>,
+    added: &[String],
+) {
     println!(
         "{}",
         rr3_banner(
@@ -56,10 +75,10 @@ fn main() -> std::process::ExitCode {
             topics.rr3_topic_names().len()
         )
     );
-    if let Some(ov) = &overlay {
+    if let Some(ov) = overlay {
         // 叠加层的可见凭证（spec §6：非生产放行口）：绝对路径，与 CWD 无关
         println!("rrd: 主题叠加层已加载（仅测试用）: {}", ov.display());
-        for t in &added {
+        for t in added {
             println!("rrd: 叠加主题 {t}");
         }
     }
@@ -67,8 +86,6 @@ fn main() -> std::process::ExitCode {
         // 装配单的可见凭证：绝对路径（0.0.2 方案 Q3：装机正门），与 CWD 无关
         println!("rrd: 装配单已加载: {}", p.display());
     }
-
-    rr3_run(cfg, topics)
 }
 
 /// 启动参数的三处路径（套接字/叠加层/装配单）一次性绝对化：解析结果既是装载输入
