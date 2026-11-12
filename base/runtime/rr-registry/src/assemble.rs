@@ -178,6 +178,60 @@ fn rr3_dotted_key_ok(s: &str) -> bool {
     !s.is_empty() && s.split('.').all(|seg| !seg.is_empty())
 }
 
+/// 内联表条目骨架（单点）：非表即拒（点名期望形状）、未知键逐条点名（只认名单内
+/// 的键）。两条拒因都进 `errs`（收集式校验：一次报全，不遇错即返）。
+fn rr3_item_tbl<'a>(
+    item: &'a Value,
+    what: &str,
+    i: usize,
+    shape: &str,
+    keys: &[&str],
+    errs: &mut Vec<String>,
+) -> Option<&'a Value> {
+    let Some(t) = item.as_table() else {
+        errs.push(format!("{what}[{i}] 应为内联表 {shape}"));
+        return None;
+    };
+    for k in t.keys() {
+        if !keys.contains(&k.as_str()) {
+            errs.push(format!(
+                "{what}[{i}] 未知键 {k}（只认 {}）",
+                keys.join(" / ")
+            ));
+        }
+    }
+    Some(item)
+}
+
+/// 必填字符串键（单点）：缺键/非串与"串但不合判据"两类拒因分述，判据不满足时把
+/// 值原样点名（`bad` 承载判据说明）。返 None 表示该键已拒，条目不入列。
+fn rr3_item_str<'a>(
+    t: &'a Value,
+    what: &str,
+    i: usize,
+    key: &str,
+    bad: &str,
+    ok: impl Fn(&str) -> bool,
+    errs: &mut Vec<String>,
+) -> Option<&'a str> {
+    match t.get(key).and_then(Value::as_str) {
+        Some(v) if ok(v) => Some(v),
+        // 值原样点名（空串不回声，避免 `slot "" 不得为空` 这类噪声）
+        Some("") => {
+            errs.push(format!("{what}[{i}].{key} {bad}"));
+            None
+        }
+        Some(v) => {
+            errs.push(format!("{what}[{i}].{key} \"{v}\" {bad}"));
+            None
+        }
+        None => {
+            errs.push(format!("{what}[{i}].{key} 应为字符串"));
+            None
+        }
+    }
+}
+
 /// handles 数组条目级解析与校验（件级与组合件级**同形同规则**，composite.rs 共用；
 /// 点名文案两处一致——一份判据一份真值）
 pub(crate) fn rr3_handles_parse(items: &[Value]) -> (Vec<Rr3AssembleHandle>, Vec<String>) {
@@ -196,31 +250,34 @@ fn rr3_handle_item(
     handles: &mut Vec<Rr3AssembleHandle>,
     errs: &mut Vec<String>,
 ) {
-    let Some(h) = item.as_table() else {
-        errs.push(format!("handles[{i}] 应为内联表 {{ trait, desc_key }}"));
+    let Some(h) = rr3_item_tbl(
+        item,
+        "handles",
+        i,
+        "{ trait, desc_key }",
+        &["trait", "desc_key"],
+        errs,
+    ) else {
         return;
     };
-    for k in h.keys() {
-        if k != "trait" && k != "desc_key" {
-            errs.push(format!("handles[{i}] 未知键 {k}（只认 trait / desc_key）"));
-        }
-    }
-    let trait_name = h.get("trait").and_then(Value::as_str);
-    let desc_key = h.get("desc_key").and_then(Value::as_str);
-    match trait_name {
-        Some(tr) if RR3_ASSEMBLE_HANDLE_TRAITS.contains(&tr) => {}
-        Some(tr) => errs.push(format!(
-            "handles[{i}].trait \"{tr}\" 未在册（能力面表见 assemble.rs，扩面走契约级评审）"
-        )),
-        None => errs.push(format!("handles[{i}].trait 应为字符串")),
-    }
-    match desc_key {
-        Some(dk) if RR3_ASSEMBLE_DESC_KEYS.contains(&dk) => {}
-        Some(dk) => errs.push(format!(
-            "handles[{i}].desc_key \"{dk}\" 未在册（键表见 assemble.rs / descriptor.rs，扩键走契约级评审）"
-        )),
-        None => errs.push(format!("handles[{i}].desc_key 应为字符串")),
-    }
+    let trait_name = rr3_item_str(
+        h,
+        "handles",
+        i,
+        "trait",
+        "未在册（能力面表见 assemble.rs，扩面走契约级评审）",
+        |s| RR3_ASSEMBLE_HANDLE_TRAITS.contains(&s),
+        errs,
+    );
+    let desc_key = rr3_item_str(
+        h,
+        "handles",
+        i,
+        "desc_key",
+        "未在册（键表见 assemble.rs / descriptor.rs，扩键走契约级评审）",
+        |s| RR3_ASSEMBLE_DESC_KEYS.contains(&s),
+        errs,
+    );
     if let (Some(tr), Some(dk)) = (trait_name, desc_key) {
         handles.push(Rr3AssembleHandle {
             trait_name: tr.into(),
@@ -241,29 +298,34 @@ pub(crate) fn rr3_ops_parse(items: &[Value]) -> (Vec<Rr3AssembleOp>, Vec<String>
 
 /// 单条 op：未知键 + slot 非空 + src_key 点路径（两域都合法才入列）。
 fn rr3_op_item(item: &Value, i: usize, ops: &mut Vec<Rr3AssembleOp>, errs: &mut Vec<String>) {
-    let Some(o) = item.as_table() else {
-        errs.push(format!("ops[{i}] 应为内联表 {{ slot, src_key }}"));
+    let Some(o) = rr3_item_tbl(
+        item,
+        "ops",
+        i,
+        "{ slot, src_key }",
+        &["slot", "src_key"],
+        errs,
+    ) else {
         return;
     };
-    for k in o.keys() {
-        if k != "slot" && k != "src_key" {
-            errs.push(format!("ops[{i}] 未知键 {k}（只认 slot / src_key）"));
-        }
-    }
-    let slot = o.get("slot").and_then(Value::as_str);
-    let src_key = o.get("src_key").and_then(Value::as_str);
-    match slot {
-        Some(s) if !s.trim().is_empty() => {}
-        Some(_) => errs.push(format!("ops[{i}].slot 不得为空")),
-        None => errs.push(format!("ops[{i}].slot 应为字符串")),
-    }
-    match src_key {
-        Some(k) if rr3_dotted_key_ok(k) => {}
-        Some(k) => errs.push(format!(
-            "ops[{i}].src_key \"{k}\" 不是合法点路径（按 . 切分后每段须非空）"
-        )),
-        None => errs.push(format!("ops[{i}].src_key 应为字符串")),
-    }
+    let slot = rr3_item_str(
+        o,
+        "ops",
+        i,
+        "slot",
+        "不得为空",
+        |s| !s.trim().is_empty(),
+        errs,
+    );
+    let src_key = rr3_item_str(
+        o,
+        "ops",
+        i,
+        "src_key",
+        "不是合法点路径（按 . 切分后每段须非空）",
+        rr3_dotted_key_ok,
+        errs,
+    );
     if let (Some(s), Some(k)) = (slot, src_key) {
         ops.push(Rr3AssembleOp {
             slot: s.into(),
@@ -280,13 +342,22 @@ pub(crate) fn rr3_demands_parse(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec
     let mut demands = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let Some(d) = item.as_table() else {
-            errs.push(format!(
-                "demands[{i}] 应为内联表 {{ rail, peak_ma, sustained_ma, critical, concurrency_group }}"
-            ));
+        let Some(d) = rr3_item_tbl(
+            item,
+            "demands",
+            i,
+            "{ rail, peak_ma, sustained_ma, critical, concurrency_group }",
+            &[
+                "rail",
+                "peak_ma",
+                "sustained_ma",
+                "critical",
+                "concurrency_group",
+            ],
+            &mut errs,
+        ) else {
             continue;
         };
-        rr3_demand_keys(d, i, &mut errs);
         let rail = rr3_demand_rail(d, i, &mut errs);
         let peak = rr3_demand_peak(d, i, &mut errs);
         let sustained = rr3_demand_sust(d, i, &mut errs);
@@ -315,25 +386,8 @@ pub(crate) fn rr3_demands_parse(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec
 }
 
 /// 未知键点名（五键定形：拼错键不能被静默忽略）。
-fn rr3_demand_keys(d: &toml::map::Map<String, Value>, i: usize, errs: &mut Vec<String>) {
-    for k in d.keys() {
-        if !matches!(
-            k.as_str(),
-            "rail" | "peak_ma" | "sustained_ma" | "critical" | "concurrency_group"
-        ) {
-            errs.push(format!(
-                "demands[{i}] 未知键 {k}（只认 rail / peak_ma / sustained_ma / critical / concurrency_group）"
-            ));
-        }
-    }
-}
-
 /// rail 键：非空字符串。
-fn rr3_demand_rail(
-    d: &toml::map::Map<String, Value>,
-    i: usize,
-    errs: &mut Vec<String>,
-) -> Option<String> {
+fn rr3_demand_rail(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<String> {
     match d.get("rail").and_then(Value::as_str) {
         Some(r) if !r.trim().is_empty() => Some(r.to_string()),
         Some(_) => {
@@ -348,11 +402,7 @@ fn rr3_demand_rail(
 }
 
 /// peak_ma：正整数（每实例峰值电流 mA）。
-fn rr3_demand_peak(
-    d: &toml::map::Map<String, Value>,
-    i: usize,
-    errs: &mut Vec<String>,
-) -> Option<i64> {
+fn rr3_demand_peak(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<i64> {
     match d.get("peak_ma").and_then(Value::as_integer) {
         Some(v) if v > 0 => Some(v),
         Some(v) => {
@@ -369,11 +419,7 @@ fn rr3_demand_peak(
 }
 
 /// sustained_ma：正整数，须 ≤ peak_ma（ADR-0021 裁定 2 五键定形）。
-fn rr3_demand_sust(
-    d: &toml::map::Map<String, Value>,
-    i: usize,
-    errs: &mut Vec<String>,
-) -> Option<i64> {
+fn rr3_demand_sust(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<i64> {
     match d.get("sustained_ma").and_then(Value::as_integer) {
         Some(v) if v > 0 => Some(v),
         Some(v) => {
@@ -392,11 +438,7 @@ fn rr3_demand_sust(
 }
 
 /// critical：必须显式布尔（true 进校验⑨ 预算加总）。
-fn rr3_demand_crit(
-    d: &toml::map::Map<String, Value>,
-    i: usize,
-    errs: &mut Vec<String>,
-) -> Option<bool> {
+fn rr3_demand_crit(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<bool> {
     let critical = d.get("critical").and_then(Value::as_bool);
     if critical.is_none() {
         errs.push(format!(
@@ -408,11 +450,7 @@ fn rr3_demand_crit(
 
 /// concurrency_group（T-5）：必须显式写；空数组 = 不分组 = 全体并发（最坏口径）
 /// 合法；非空元素须非空字符串（组名是判据 label 的一部分）。
-fn rr3_demand_grp(
-    d: &toml::map::Map<String, Value>,
-    i: usize,
-    errs: &mut Vec<String>,
-) -> Vec<String> {
+fn rr3_demand_grp(d: &Value, i: usize, errs: &mut Vec<String>) -> Vec<String> {
     match d.get("concurrency_group") {
         Some(Value::Array(gs)) => {
             for (j, g) in gs.iter().enumerate() {
