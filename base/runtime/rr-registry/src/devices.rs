@@ -184,7 +184,7 @@ fn rr3_dev_id_errs(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
 
 /// I2C 类地址集必填 + 地址项非空。
 fn rr3_dev_addr_errs(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
-    if e.bus == "i2c" && e.addrs.is_empty() {
+    if rr3_dev_bus_blank(e) {
         errs.push(format!(
             "device {model} 是 I2C 类但 addrs 为空（合法地址集必填——装机写集外地址即红）"
         ));
@@ -194,6 +194,11 @@ fn rr3_dev_addr_errs(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
             errs.push(format!("device {model} 的 addrs 含空串"));
         }
     }
+}
+
+/// I2C 类却无地址集（地址集必填的判据前件）。
+fn rr3_dev_bus_blank(e: &Rr3DeviceEntry) -> bool {
+    e.bus == "i2c" && e.addrs.is_empty()
 }
 
 /// baud_ok 非空。

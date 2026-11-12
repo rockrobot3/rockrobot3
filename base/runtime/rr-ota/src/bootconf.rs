@@ -38,22 +38,27 @@ fn rr3_root_spans(text: &str) -> Vec<Rr3RootSpan> {
             base += line.len();
             continue;
         }
-        let mut from = 0usize;
-        while let Some(pos) = line[from..].find(RR3_ROOT_TOKEN) {
-            let tok = from + pos;
-            let rest = &line[tok + RR3_ROOT_TOKEN.len()..];
-            let len = rest.find(char::is_whitespace).unwrap_or(rest.len());
-            let label_start = base + tok + RR3_ROOT_TOKEN.len();
-            out.push(Rr3RootSpan {
-                label: rest[..len].to_string(),
-                start: label_start,
-                end: label_start + len,
-            });
-            from = tok + RR3_ROOT_TOKEN.len() + len;
-        }
+        rr3_root_scan(line, base, &mut out);
         base += line.len();
     }
     out
+}
+
+/// 单行内的全部 `root=LABEL` token（标签 = token 尾部到首个空白）。
+fn rr3_root_scan(line: &str, base: usize, out: &mut Vec<Rr3RootSpan>) {
+    let mut from = 0usize;
+    while let Some(pos) = line[from..].find(RR3_ROOT_TOKEN) {
+        let tok = from + pos;
+        let rest = &line[tok + RR3_ROOT_TOKEN.len()..];
+        let len = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let label_start = base + tok + RR3_ROOT_TOKEN.len();
+        out.push(Rr3RootSpan {
+            label: rest[..len].to_string(),
+            start: label_start,
+            end: label_start + len,
+        });
+        from = tok + RR3_ROOT_TOKEN.len() + len;
+    }
 }
 
 /// 根定位 token 恰好一处、标签在册——否则报形状漂移（配置烂了不许猜）
@@ -170,14 +175,19 @@ fn rr3_cmdline_scan(text: &str) -> Result<Option<Rr3Slot>, String> {
         let Some(rest) = tok.strip_prefix(RR3_ROOT_TOKEN) else {
             continue;
         };
-        let slot = Rr3Slot::rr3_slot_from_label(rest)
-            .ok_or_else(|| format!("cmdline root=LABEL={rest} 不在在册标签——形状漂移，拒判定"))?;
+        let slot = rr3_cmdline_of(rest)?;
         if found.is_some() {
             return Err("cmdline 有多处 root=LABEL=rr_ token——形状歧义，拒判定".into());
         }
         found = Some(slot);
     }
     Ok(found)
+}
+
+/// 单个标签反查槽位：不在册即点名回错。
+fn rr3_cmdline_of(rest: &str) -> Result<Rr3Slot, String> {
+    Rr3Slot::rr3_slot_from_label(rest)
+        .ok_or_else(|| format!("cmdline root=LABEL={rest} 不在在册标签——形状漂移，拒判定"))
 }
 
 /// 读 /proc/cmdline（linux 门：/proc 是 linux 特有面；解析逻辑全平台可测）

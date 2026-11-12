@@ -207,16 +207,27 @@ fn rr3_plat_ctl(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<St
     let mut entries: Vec<(String, String, i64)> = Vec::new();
     rr3_ctl_collect(t, &mut entries, errs);
     for (n, k, ch) in entries {
-        match table.controllers.entry(n) {
-            std::collections::btree_map::Entry::Occupied(e) => {
-                errs.push(format!("controller {} 重复（词表一名一条）", e.key()));
-            }
-            std::collections::btree_map::Entry::Vacant(v) => {
-                v.insert(Rr3ControllerEntry {
-                    kind: k,
-                    channels: ch,
-                });
-            }
+        rr3_ctl_insert(table, n, k, ch, errs);
+    }
+}
+
+/// 单条控制器入册：同名两册点名（词表一名一条）。
+fn rr3_ctl_insert(
+    table: &mut Rr3PlatformTable,
+    n: String,
+    k: String,
+    ch: i64,
+    errs: &mut Vec<String>,
+) {
+    match table.controllers.entry(n) {
+        std::collections::btree_map::Entry::Occupied(e) => {
+            errs.push(format!("controller {} 重复（词表一名一条）", e.key()));
+        }
+        std::collections::btree_map::Entry::Vacant(v) => {
+            v.insert(Rr3ControllerEntry {
+                kind: k,
+                channels: ch,
+            });
         }
     }
 }
@@ -580,13 +591,18 @@ fn rr3_conf_sets(
     if let Some(v) = c.get("controllers") {
         controllers = rr3_str_set_from(v, &format!("conflict[{i}].controllers"), errs);
     }
-    if pins.is_empty() && controllers.is_empty() {
+    if rr3_sets_blank(&pins, &controllers) {
         errs.push(format!(
             "conflict[{i}]（组 {}）pins 与 controllers 均空：点名不到任何成员的冲突集无判据对象",
             group.as_deref().unwrap_or("")
         ));
     }
     (pins, controllers)
+}
+
+/// 冲突集两成员皆空（点名不到任何成员 = 无判据对象）。
+fn rr3_sets_blank(pins: &BTreeSet<i64>, controllers: &BTreeSet<String>) -> bool {
+    pins.is_empty() && controllers.is_empty()
 }
 
 /// `[construction]` 段：`controller:role:instance` 三元键，controller 须本表在册。
@@ -637,13 +653,9 @@ fn rr3_cons_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Ve
 /// 三元键形状与在册性：`controller:role:instance`，前两段非空且 controller 在册。
 /// 返回 false = 该键已拒，不登记。
 fn rr3_cons_key(k: &str, table: &Rr3PlatformTable, errs: &mut Vec<String>) -> bool {
-    let segs: Vec<&str> = k.split(':').collect();
-    if segs.len() != 3 {
-        errs.push(format!(
-            "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
-        ));
+    let Some(segs) = rr3_cons_segs(k, errs) else {
         return false;
-    }
+    };
     if segs[0].is_empty() || segs[1].is_empty() {
         errs.push(format!(
             "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
@@ -660,26 +672,45 @@ fn rr3_cons_key(k: &str, table: &Rr3PlatformTable, errs: &mut Vec<String>) -> bo
     true
 }
 
+/// 三元键切段：非三段即点名回 None（键已拒，不登记）。
+fn rr3_cons_segs<'a>(k: &'a str, errs: &mut Vec<String>) -> Option<Vec<&'a str>> {
+    let segs: Vec<&str> = k.split(':').collect();
+    if segs.len() != 3 {
+        errs.push(format!(
+            "construction 键 \"{k}\" 不是三元串（⑧-a：controller:role:instance，非 per_instance 角色第三段留空）"
+        ));
+        return None;
+    }
+    Some(segs)
+}
+
 /// `[controller_wordform]` 段：封闭四键、值 = 非空前缀；空表 = 显式无词形派生面。
 fn rr3_plat_wf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    let wf = match t.get("controller_wordform") {
-        Some(Value::Table(wf)) => wf,
+    let Some(wf) = rr3_wf_tbl(t, errs) else {
+        return;
+    };
+    for (k, v) in wf {
+        rr3_wf_item(k, v, table, errs);
+    }
+}
+
+/// `[controller_wordform]` 段形状：段缺/类型错各自点名回 None。
+fn rr3_wf_tbl<'a>(t: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a toml::Table> {
+    match t.get("controller_wordform") {
+        Some(Value::Table(wf)) => Some(wf),
         Some(other) => {
             errs.push(format!(
                 "平台表 controller_wordform 应为表（[controller_wordform]），收到 {other:?}"
             ));
-            return;
+            None
         }
         None => {
             errs.push(
                 "平台表缺 [controller_wordform] 段（host 词形派生表，实-6 (a)；无词形派生面须显式写空表并带注记，裁定①）"
                     .into(),
             );
-            return;
+            None
         }
-    };
-    for (k, v) in wf {
-        rr3_wf_item(k, v, table, errs);
     }
 }
 

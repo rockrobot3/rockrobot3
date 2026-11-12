@@ -211,11 +211,21 @@ fn rr3_kahn_ready<'a>(
 ) -> BTreeSet<(i64, &'a str)> {
     let mut ready: BTreeSet<(i64, &str)> = BTreeSet::new();
     for (idx, f) in facts.iter().enumerate() {
-        if !excluded.contains(&f.name) && indegree.get(&idx).copied().unwrap_or(0) == 0 {
+        if rr3_ready_at(f, idx, excluded, indegree) {
             ready.insert((f.start_priority, f.name.as_str()));
         }
     }
     ready
+}
+
+/// 就绪判据：未被剔除且入度为 0（两条判据同处，次序不变）。
+fn rr3_ready_at(
+    f: &Rr3DependsFacts,
+    idx: usize,
+    excluded: &BTreeSet<String>,
+    indegree: &BTreeMap<usize, usize>,
+) -> bool {
+    !excluded.contains(&f.name) && indegree.get(&idx).copied().unwrap_or(0) == 0
 }
 
 /// 出一个模块后释放其下游：入度减一，归零者入就绪集合。
@@ -279,14 +289,18 @@ fn rr3_cap_gaps(
     errs: &mut Vec<String>,
 ) {
     for cap in &f.depends_required {
-        if base.contains(cap) {
-            continue;
-        }
-        let provided = facts.iter().any(|g| g.provides.iter().any(|p| p == cap));
-        if !provided {
+        if rr3_cap_unmet(facts, base, cap) {
             errs.push(unsatisfiable_error(&f.name, cap));
         }
     }
+}
+
+/// 能力不可满足：base 能力免判，其余须有任一模块 provides。
+fn rr3_cap_unmet(facts: &[Rr3DependsFacts], base: &BTreeSet<String>, cap: &str) -> bool {
+    if base.contains(cap) {
+        return false;
+    }
+    !facts.iter().any(|g| g.provides.iter().any(|p| p == cap))
 }
 
 /// 建边（裁定 2）：消费者 → 全部提供者；base 能力无边；剔除模块两侧都不建边。
@@ -331,10 +345,15 @@ fn rr3_edges_cap(
     edges: &mut BTreeSet<(usize, usize)>,
 ) {
     for (pi, g) in facts.iter().enumerate() {
-        if !excluded.contains(&g.name) && g.provides.iter().any(|p| p == cap) {
+        if rr3_edge_hit(g, cap, excluded) {
             edges.insert((ci, pi));
         }
     }
+}
+
+/// 供给命中：未剔除且 `provides` 含该能力。
+fn rr3_edge_hit(g: &Rr3DependsFacts, cap: &str, excluded: &BTreeSet<String>) -> bool {
+    !excluded.contains(&g.name) && g.provides.iter().any(|p| p == cap)
 }
 
 /// boot 仲裁的**完整裁定**（ADR-0009 裁定 2，rrd 只执行、不 reimplement）：
