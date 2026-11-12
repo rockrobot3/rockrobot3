@@ -72,9 +72,19 @@ pub fn rr3_assemble_layout(
     profile_src: &Path,
 ) -> Result<(PathBuf, Vec<Rr3AssembleEntry>), String> {
     let (profile_dst, profile) = rr3_asm_profile_read(workdir, profile_src)?;
-    rr3_asm_wiring(repo, workdir, profile_src)?;
-    let entries = rr3_layout_entries(repo, workdir, &profile)?;
+    let entries = rr3_asm_layout_rest(repo, workdir, profile_src, &profile)?;
     Ok((profile_dst, entries))
+}
+
+/// 接线档随装 + 逐模块装机清单（装配单已读定）。
+fn rr3_asm_layout_rest(
+    repo: &Path,
+    workdir: &Path,
+    profile_src: &Path,
+    profile: &Rr3Profile,
+) -> Result<Vec<Rr3AssembleEntry>, String> {
+    rr3_asm_wiring(repo, workdir, profile_src)?;
+    rr3_layout_entries(repo, workdir, profile)
 }
 
 /// 装配单：读源 → sim 变换 → 复核解析 → 落位，返回 (落位路径, 解析结果)。
@@ -209,12 +219,17 @@ fn rr3_asm_opt_drop(key: Option<&str>) -> bool {
 fn rr3_layout_profile(workdir: &Path, profile_src: &Path, text: &str) -> Result<PathBuf, String> {
     let profiles_dir = workdir.join("profiles");
     std::fs::create_dir_all(&profiles_dir).map_err(|e| format!("建 {profiles_dir:?} 失败: {e}"))?;
-    let profile_name = profile_src
-        .file_name()
-        .ok_or_else(|| format!("装配单路径 {} 无文件名", profile_src.display()))?;
+    let profile_name = rr3_layout_name(profile_src)?;
     let profile_dst = profiles_dir.join(profile_name);
     std::fs::write(&profile_dst, text).map_err(|e| format!("写 {profile_dst:?} 失败: {e}"))?;
     Ok(profile_dst)
+}
+
+/// 装配单文件名（保仓源名；无文件名即红）。
+fn rr3_layout_name(profile_src: &Path) -> Result<&std::ffi::OsStr, String> {
+    profile_src
+        .file_name()
+        .ok_or_else(|| format!("装配单路径 {} 无文件名", profile_src.display()))
 }
 
 /// 装配单文件名主干（接线档目录名，`hardware/<stem>/wiring.toml`）。
@@ -312,6 +327,11 @@ fn rr3_layout_sidecars(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
     std::fs::copy(&src_config, dst_dir.join("config.toml")).map_err(|e| {
         format!("仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环")
     })?;
+    rr3_layout_atoms(src_dir, dst_dir)
+}
+
+/// atoms/ 申报面整树同批装机（缺席合法跳过）。
+fn rr3_layout_atoms(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
     let atoms_src = src_dir.join("atoms");
     if atoms_src.is_dir() {
         rr3_copy_tree(&atoms_src, &dst_dir.join("atoms"))?;
@@ -533,10 +553,7 @@ fn rr3_asm_up_rrd(ctx: &Rr3AsmCtx) -> Result<(std::process::Child, u32), String>
         .env("RR3_PROBE", "sim")
         .env("RR3_HAL_SIM_WAVE", "burst")
         .env("RR3_BRAIN_CLOUD", "mock")
-        .stdout(Stdio::from(
-            std::fs::File::create(ctx.log_path)
-                .map_err(|e| format!("建 {:?} 失败: {e}", ctx.log_path))?,
-        ))
+        .stdout(rr3_asm_log(ctx)?)
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| format!("起 rrd 失败: {e}"))?;
@@ -547,6 +564,14 @@ fn rr3_asm_up_rrd(ctx: &Rr3AsmCtx) -> Result<(std::process::Child, u32), String>
         ctx.profile_dst.display()
     );
     Ok((child, pid))
+}
+
+/// rrd 日志文件（stdout 落盘；建失败点名路径）。
+fn rr3_asm_log(ctx: &Rr3AsmCtx) -> Result<Stdio, String> {
+    Ok(Stdio::from(
+        std::fs::File::create(ctx.log_path)
+            .map_err(|e| format!("建 {:?} 失败: {e}", ctx.log_path))?,
+    ))
 }
 
 /// 等全模块 running → rr3-ctl 四命令巡检（status/health/logs/ota）。
@@ -657,8 +682,18 @@ pub(crate) fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<Stri
         .output()
         .map_err(|e| format!("跑 rr3-ctl {cmd} 失败: {e}"))?;
     let s = String::from_utf8_lossy(&out.stdout).into_owned();
-    if !out.status.success() {
-        return Err(rr3_ctl_fail(cmd, &out.status, &out.stderr, s));
+    rr3_ctl_check(cmd, &out.status, &out.stderr, s)
+}
+
+/// 退出码门：非 0 即点名失败，成功补尾换行。
+fn rr3_ctl_check(
+    cmd: &str,
+    status: &std::process::ExitStatus,
+    stderr: &[u8],
+    s: String,
+) -> Result<String, String> {
+    if !status.success() {
+        return Err(rr3_ctl_fail(cmd, status, stderr, s));
     }
     Ok(rr3_ctl_nl(s))
 }

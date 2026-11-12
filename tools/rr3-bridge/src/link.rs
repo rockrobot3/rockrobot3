@@ -463,14 +463,7 @@ fn rr3_route_write(
     discarding: &mut bool,
     exit: &mpsc::Sender<ExitMsg>,
 ) -> bool {
-    if *discarding {
-        *discarding = false;
-        // 恢复点：丢弃期结束必须报累计，运维据此判断"看起来在跑"是否真在跑
-        log(&format!(
-            "uds 上行恢复：此前丢弃累计 {} 字节（帧撕裂面由哨兵超时自愈）",
-            dropped.load(Ordering::Relaxed)
-        ));
-    }
+    rr3_route_recover(discarding, dropped);
     if let Err(e) = s.write_all(chunk) {
         let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
         log(&format!(
@@ -480,6 +473,17 @@ fn rr3_route_write(
         return true;
     }
     false
+}
+
+/// 丢弃期结束的恢复点：必须报累计（运维据它判断"看起来在跑"是否真在跑）。
+fn rr3_route_recover(discarding: &mut bool, dropped: &AtomicU64) {
+    if *discarding {
+        *discarding = false;
+        log(&format!(
+            "uds 上行恢复：此前丢弃累计 {} 字节（帧撕裂面由哨兵超时自愈）",
+            dropped.load(Ordering::Relaxed)
+        ));
+    }
 }
 
 /// 无连接时的一块：计入丢弃，首次进入与每 ~4KiB 节流各打一行。
