@@ -139,12 +139,8 @@ pub fn rr3_atom_chk(text: &str, slots: &crate::slots::Rr3SlotTable) -> Vec<Strin
         return errs;
     }
 
-    let root: Value = match toml::from_str(text) {
-        Ok(v) => v,
-        Err(e) => {
-            errs.push(format!("atom manifest TOML 解析失败: {e}"));
-            return errs;
-        }
+    let Some(root) = rr3_atom_root(text, &mut errs) else {
+        return errs;
     };
 
     // 0) 板无关断言（对 manifest 全文本，含注释——注释也是 manifest 的载荷面）
@@ -159,22 +155,43 @@ pub fn rr3_atom_chk(text: &str, slots: &crate::slots::Rr3SlotTable) -> Vec<Strin
     ));
 
     // 1) 逐字段：存在性 + 类型 + 规则（与 validate.rs 逐字段循环同构，字段集来自 atom.schema.toml）
-    for spec in rr3_atom_field_specs() {
-        rr3_atom_one(&spec, &root, slots, &mut errs);
-    }
+    rr3_atom_fields(&root, slots, &mut errs);
 
     // 2) 跨字段：每格一件（ADR-0019 裁定 1——Atom 填一个格、不可再分，恰一项）
-    let provided = rr3_get_by_path(&root, "provides.slots").and_then(Value::as_array);
-    match provided {
-        Some(arr) if arr.len() == 1 => {}
-        Some(arr) => errs.push(format!(
-            "provides.slots 必须恰有一项（每格一件，ADR-0019 裁定 1），实际 {} 项",
-            arr.len()
-        )),
-        None => {} // 缺失已由必填字段检查点名，不重复报
-    }
+    rr3_atom_one_slot(&root, &mut errs);
 
     errs
+}
+
+/// TOML 解析：失败入 errs 并回 None（调用方据此提前收兵）。
+fn rr3_atom_root(text: &str, errs: &mut Vec<String>) -> Option<Value> {
+    match toml::from_str(text) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            errs.push(format!("atom manifest TOML 解析失败: {e}"));
+            None
+        }
+    }
+}
+
+/// 逐字段校验（字段集来自 atom.schema.toml）。
+fn rr3_atom_fields(root: &Value, slots: &crate::slots::Rr3SlotTable, errs: &mut Vec<String>) {
+    for spec in rr3_atom_field_specs() {
+        rr3_atom_one(&spec, root, slots, errs);
+    }
+}
+
+/// provides.slots 恰一项；缺键已由必填字段检查点名，不重复报。
+fn rr3_atom_one_slot(root: &Value, errs: &mut Vec<String>) {
+    let Some(arr) = rr3_get_by_path(root, "provides.slots").and_then(Value::as_array) else {
+        return;
+    };
+    if arr.len() != 1 {
+        errs.push(format!(
+            "provides.slots 必须恰有一项（每格一件，ADR-0019 裁定 1），实际 {} 项",
+            arr.len()
+        ));
+    }
 }
 
 /// 单字段校验（存在性→类型→规则→查册）：错误逐条点名，文案逐字保留。

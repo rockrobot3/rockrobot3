@@ -302,6 +302,38 @@ fn rr3_evt_body(payload: &[u8]) -> Result<Value, String> {
 /// 四道门之三/四：topic 门 + 字段门（format/rate/seq/ms/pcm_b64），返回
 /// (采样率, b64 载荷)。字段检查次序即报错次序（首缺即点名）。
 fn rr3_evt_fields(v: &Value) -> Result<(u32, &str), String> {
+    rr3_evt_topic(v)?;
+    rr3_evt_format(v)?;
+    let rate = v.get("rate").and_then(Value::as_u64).ok_or("缺 rate")? as u32;
+    rr3_evt_time(v)?;
+    let b64 = v
+        .get("pcm_b64")
+        .and_then(Value::as_str)
+        .ok_or("缺 pcm_b64")?;
+    Ok((rate, b64))
+}
+
+/// format 门（板面流固定 s16le）。
+fn rr3_evt_format(v: &Value) -> Result<(), String> {
+    if v.get("format").and_then(Value::as_str) != Some("s16le") {
+        return Err("format 非 s16le".into());
+    }
+    Ok(())
+}
+
+/// seq / ms 必填（次序即报错次序）。
+fn rr3_evt_time(v: &Value) -> Result<(), String> {
+    if v.get("seq").and_then(Value::as_u64).is_none() {
+        return Err("缺 seq".into());
+    }
+    if v.get("ms").and_then(Value::as_u64).is_none() {
+        return Err("缺 ms".into());
+    }
+    Ok(())
+}
+
+/// topic 门（在册主题，点名实际值）。
+fn rr3_evt_topic(v: &Value) -> Result<(), String> {
     if v.get("topic").and_then(Value::as_str) != Some(RR3_AUDIO_TOPIC) {
         return Err(format!(
             "topic 非 {}: {:?}",
@@ -309,21 +341,7 @@ fn rr3_evt_fields(v: &Value) -> Result<(u32, &str), String> {
             v.get("topic")
         ));
     }
-    if v.get("format").and_then(Value::as_str) != Some("s16le") {
-        return Err("format 非 s16le".into());
-    }
-    let rate = v.get("rate").and_then(Value::as_u64).ok_or("缺 rate")? as u32;
-    if v.get("seq").and_then(Value::as_u64).is_none() {
-        return Err("缺 seq".into());
-    }
-    if v.get("ms").and_then(Value::as_u64).is_none() {
-        return Err("缺 ms".into());
-    }
-    let b64 = v
-        .get("pcm_b64")
-        .and_then(Value::as_str)
-        .ok_or("缺 pcm_b64")?;
-    Ok((rate, b64))
+    Ok(())
 }
 
 /// Event 帧解析（四道门全过才 Ok，任一失败 Err 点名——与板侧 frame_recv 同款
@@ -359,6 +377,17 @@ fn rr3_esp32_audio_open(path: &Path, baud: u32) -> Result<Rr3UartConn, String> {
         Rr3UartConn::open_with_baud(path, baud).map_err(|e| format!("open 失败: {e}"))?;
     handshake(&mut conn).map_err(|e| format!("握手失败: {e}"))?;
     Ok(conn)
+}
+
+/// 开口失败收敛为 `Busy`（点名实际路径与原因）。
+fn rr3_esp32_open_conn(path: &Path, baud: u32) -> Result<Rr3UartConn, Rr3HalError> {
+    match rr3_esp32_audio_open(path, baud) {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            eprintln!("rr-hal-esp32-audio: 开口失败 {}: {e}", path.display());
+            Err(Rr3HalError::Busy)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -397,32 +426,53 @@ fn rr3_esp32_reconnect(core: &Rr3Esp32AudioCore) -> Option<Rr3UartConn> {
         }
         std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
         round += 1;
-        for attempt in 1..=HANDSHAKE_TRIES {
-            if core.stop.load(Ordering::Acquire) {
-                return None;
-            }
-            match rr3_esp32_audio_open(&core.path, core.baud) {
-                Ok(c) => {
-                    core.reconnects.fetch_add(1, Ordering::Relaxed);
-                    eprintln!("rr-hal-esp32-audio: 重连成功（第 {attempt}/{HANDSHAKE_TRIES} 轮）");
-                    return Some(c);
-                }
-                Err(e) => {
-                    fails += 1;
-                    if rr3_recon_log_now(fails) {
-                        eprintln!(
-                            "rr-hal-esp32-audio: 重连第 {attempt}/{HANDSHAKE_TRIES} 轮失败（累计 {fails} 次）: {e}"
-                        );
-                    }
-                }
-            }
-            std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
+        match rr3_recon_round(core, &mut fails) {
+            Rr3ReconStep::Conn(c) => return Some(c),
+            Rr3ReconStep::Stop => return None,
+            Rr3ReconStep::Spent => rr3_recon_summary(round),
         }
-        if round % RR3_RECON_ROUND_LOG_EVERY == 0 {
-            eprintln!(
-                "rr-hal-esp32-audio: 重连 {HANDSHAKE_TRIES} 轮全败（第 {round} 轮），继续循环（常驻源不放弃；饥饿期消费面走 pcm_empty_frames 记账）"
-            );
+    }
+}
+
+/// 一轮重连的结局。
+enum Rr3ReconStep {
+    Stop,
+    Conn(Rr3UartConn),
+    Spent,
+}
+
+/// 一轮 [`HANDSHAKE_TRIES`] 次逐次重开 fd + 握手。
+fn rr3_recon_round(core: &Rr3Esp32AudioCore, fails: &mut u64) -> Rr3ReconStep {
+    for attempt in 1..=HANDSHAKE_TRIES {
+        if core.stop.load(Ordering::Acquire) {
+            return Rr3ReconStep::Stop;
         }
+        match rr3_esp32_audio_open(&core.path, core.baud) {
+            Ok(c) => {
+                core.reconnects.fetch_add(1, Ordering::Relaxed);
+                eprintln!("rr-hal-esp32-audio: 重连成功（第 {attempt}/{HANDSHAKE_TRIES} 轮）");
+                return Rr3ReconStep::Conn(c);
+            }
+            Err(e) => {
+                *fails += 1;
+                if rr3_recon_log_now(*fails) {
+                    eprintln!(
+                        "rr-hal-esp32-audio: 重连第 {attempt}/{HANDSHAKE_TRIES} 轮失败（累计 {fails} 次）: {e}"
+                    );
+                }
+            }
+        }
+        std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
+    }
+    Rr3ReconStep::Spent
+}
+
+/// 轮摘要打点（每 [`RR3_RECON_ROUND_LOG_EVERY`] 轮一条）。
+fn rr3_recon_summary(round: u64) {
+    if round % RR3_RECON_ROUND_LOG_EVERY == 0 {
+        eprintln!(
+            "rr-hal-esp32-audio: 重连 {HANDSHAKE_TRIES} 轮全败（第 {round} 轮），继续循环（常驻源不放弃；饥饿期消费面走 pcm_empty_frames 记账）"
+        );
     }
 }
 
@@ -623,43 +673,62 @@ fn rr3_esp32_stream(
         if core.stop.load(Ordering::Acquire) {
             return false;
         }
-        if st.stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
-            st.stat_at = Instant::now();
-            rr3_stat_tick(core, &mut st.stat_mark);
-        }
-        // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
-        // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
-        if !rr3_ping(c, &mut st.ping_at) {
-            return true;
-        }
-        // —— 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出
-        // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
-        // 队首不丢，按读失败同路重连后补写（有界丢最旧兜底）。b3 冒烟修正：
-        // 原实现把排水放在建连拍——会话中途入队的命令永远等不到写出口
-        // （队容 2 满丢最旧），板面收不到 servo 点名——b1 计划原文即
-        // 「读循环每拍先排水再读」，此为落位笔误。
-        if let Err(e) = rr3_drain_cmds(c, core, &mut st.cmd_id) {
-            eprintln!("rr-hal-esp32-audio: {e}");
+        if !rr3_stream_beat(core, c, st) {
             return true;
         }
         match rr3_read_step(c, &mut raw, &mut zeros, &mut seen) {
             Rr3ReadStep::Reconnect => return true,
             Rr3ReadStep::Data(0) => {}
-            Rr3ReadStep::Data(n) => {
-                // 批N12 件二：宿主读面原始字节 tee（拆帧前镜像——批N10 件二
-                // 病灶"帧内尾随残渣"的取证层，tee 流与消费流逐字节一致）
-                rr3_tee_write(&mut st.tee, &raw[..n]);
-                asm.feed(&raw[..n]);
-                rr3_esp32_frames(
-                    core,
-                    &mut asm,
-                    &mut st.once,
-                    &mut err_streak,
-                    &mut err_total,
-                );
-            }
+            Rr3ReadStep::Data(n) => rr3_stream_data(
+                core,
+                &raw[..n],
+                &mut asm,
+                st,
+                &mut err_streak,
+                &mut err_total,
+            ),
         }
     }
+}
+
+/// 每拍会话杂务：统计窗、宿主心跳、命令旁路排水；`false` = 连接坏需重连。
+fn rr3_stream_beat(core: &Rr3Esp32AudioCore, c: &mut Rr3UartConn, st: &mut Rr3ReaderState) -> bool {
+    if st.stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
+        st.stat_at = Instant::now();
+        rr3_stat_tick(core, &mut st.stat_mark);
+    }
+    // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
+    // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
+    if !rr3_ping(c, &mut st.ping_at) {
+        return false;
+    }
+    // —— 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出
+    // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
+    // 队首不丢，按读失败同路重连后补写（有界丢最旧兜底）。b3 冒烟修正：
+    // 原实现把排水放在建连拍——会话中途入队的命令永远等不到写出口
+    // （队容 2 满丢最旧），板面收不到 servo 点名——b1 计划原文即
+    // 「读循环每拍先排水再读」，此为落位笔误。
+    if let Err(e) = rr3_drain_cmds(c, core, &mut st.cmd_id) {
+        eprintln!("rr-hal-esp32-audio: {e}");
+        return false;
+    }
+    true
+}
+
+/// 一拍新数据：原始流 tee → 拆帧 → 逐帧落账。
+fn rr3_stream_data(
+    core: &Rr3Esp32AudioCore,
+    bytes: &[u8],
+    asm: &mut FrameAssembler,
+    st: &mut Rr3ReaderState,
+    err_streak: &mut u64,
+    err_total: &mut u64,
+) {
+    // 批N12 件二：宿主读面原始字节 tee（拆帧前镜像——批N10 件二
+    // 病灶"帧内尾随残渣"的取证层，tee 流与消费流逐字节一致）
+    rr3_tee_write(&mut st.tee, bytes);
+    asm.feed(bytes);
+    rr3_esp32_frames(core, asm, &mut st.once, err_streak, err_total);
 }
 
 /// 宿主心跳到点一拍（A9.3）：`true` = 本拍无心跳或写成功；`false` = 写失败
@@ -736,13 +805,25 @@ fn rr3_esp32_frames(
 ) {
     loop {
         match asm.pull() {
-            Ok(Some((hdr, body))) => match rr3_esp32_classify(&hdr, &body) {
-                Ok(frame) => rr3_esp32_take(core, once, err_streak, frame),
-                Err(e) => rr3_esp32_miss(core, err_streak, err_total, &e),
-            },
+            Ok(Some((hdr, body))) => rr3_esp32_frame(core, once, err_streak, err_total, hdr, body),
             Ok(None) => break,
             Err((discarded, why)) => rr3_esp32_lost(core, err_streak, err_total, discarded, &why),
         }
+    }
+}
+
+/// 一帧的分类落账：好帧入环/记账，坏帧按门故障计数。
+fn rr3_esp32_frame(
+    core: &Rr3Esp32AudioCore,
+    once: &mut Rr3IngestLog,
+    err_streak: &mut u64,
+    err_total: &mut u64,
+    hdr: Rr3Header,
+    body: Vec<u8>,
+) {
+    match rr3_esp32_classify(&hdr, &body) {
+        Ok(frame) => rr3_esp32_take(core, once, err_streak, frame),
+        Err(e) => rr3_esp32_miss(core, err_streak, err_total, &e),
     }
 }
 
@@ -890,13 +971,7 @@ impl Rr3AudioSource for Rr3Esp32UartAudioSource {
         if let Some(old) = self.inner.lock().unwrap_or_else(|p| p.into_inner()).take() {
             Self::rr3_close_stream(old);
         }
-        let conn = match rr3_esp32_audio_open(&self.path, self.baud) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("rr-hal-esp32-audio: 开口失败 {}: {e}", self.path.display());
-                return Err(Rr3HalError::Busy);
-            }
-        };
+        let conn = rr3_esp32_open_conn(&self.path, self.baud)?;
         let core = Arc::new(Rr3Esp32AudioCore {
             path: self.path.clone(),
             baud: self.baud,
