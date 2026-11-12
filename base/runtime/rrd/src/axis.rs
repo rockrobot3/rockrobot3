@@ -231,48 +231,53 @@ struct Rr3AxisWords {
 
 /// 词键走在册词表解析：词形真值在 rr-hal-api 各 enum 的 impl，此处不认第二份
 fn rr3_axis_words(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Rr3AxisWords {
-    let hold = match rr3_text_field(v, errs, path, "hold") {
-        Some(s) => match Rr3ActHold::rr3_act_hold_parse(s) {
-            Some(h) => Some(h),
-            None => {
-                errs.push(format!(
-                    "{path}: hold = \"{s}\" 不在册（只认 hold | release）"
-                ));
-                None
-            }
-        },
-        None => None,
-    };
-    let hard_stop = match rr3_text_field(v, errs, path, "hard_stop") {
-        Some(s) => match Rr3ActHardStop::rr3_hard_stop_parse(s) {
-            Some(h) => Some(h),
-            None => {
-                errs.push(format!(
-                    "{path}: hard_stop = \"{s}\" 不在册（只认 unknown | yes | no）"
-                ));
-                None
-            }
-        },
-        None => None,
-    };
-    let source = match rr3_text_field(v, errs, path, "source") {
-        Some(s) => match Rr3ActSource::rr3_act_source_parse(s) {
-            Some(src) => Some(src),
-            None => {
-                errs.push(format!(
-                    "{path}: source = \"{s}\" 不在册（只认 manual | fixture | openloop-recover | stall-search）"
-                ));
-                None
-            }
-        },
-        None => None,
-    };
-    let calibrated = rr3_bool_field(v, errs, path, "calibrated");
     Rr3AxisWords {
-        hold,
-        hard_stop,
-        source,
-        calibrated,
+        hold: rr3_axis_hold(v, path, errs),
+        hard_stop: rr3_axis_stop(v, path, errs),
+        source: rr3_axis_src(v, path, errs),
+        calibrated: rr3_bool_field(v, errs, path, "calibrated"),
+    }
+}
+
+/// hold 词族：只认 hold | release。
+fn rr3_axis_hold(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Option<Rr3ActHold> {
+    let s = rr3_text_field(v, errs, path, "hold")?;
+    match Rr3ActHold::rr3_act_hold_parse(s) {
+        Some(h) => Some(h),
+        None => {
+            errs.push(format!(
+                "{path}: hold = \"{s}\" 不在册（只认 hold | release）"
+            ));
+            None
+        }
+    }
+}
+
+/// hard_stop 词族：只认 unknown | yes | no。
+fn rr3_axis_stop(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Option<Rr3ActHardStop> {
+    let s = rr3_text_field(v, errs, path, "hard_stop")?;
+    match Rr3ActHardStop::rr3_hard_stop_parse(s) {
+        Some(h) => Some(h),
+        None => {
+            errs.push(format!(
+                "{path}: hard_stop = \"{s}\" 不在册（只认 unknown | yes | no）"
+            ));
+            None
+        }
+    }
+}
+
+/// source 词族：只认 manual | fixture | openloop-recover | stall-search。
+fn rr3_axis_src(v: &toml::Value, path: &str, errs: &mut Vec<String>) -> Option<Rr3ActSource> {
+    let s = rr3_text_field(v, errs, path, "source")?;
+    match Rr3ActSource::rr3_act_source_parse(s) {
+        Some(src) => Some(src),
+        None => {
+            errs.push(format!(
+                "{path}: source = \"{s}\" 不在册（只认 manual | fixture | openloop-recover | stall-search）"
+            ));
+            None
+        }
     }
 }
 

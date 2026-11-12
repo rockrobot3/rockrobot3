@@ -161,25 +161,49 @@ fn set_device(device: &mut Option<String>, other: &str) -> Result<(), String> {
 /// 单参数步进：消费一个 flag（含其后值参数）或一个裸 device 参数。
 fn arg_step(d: &mut ArgsDraft, argv: &[String], i: &mut usize) -> Result<(), String> {
     match argv[*i].as_str() {
-        "--out" => {
-            *i += 1;
-            d.out = Some(PathBuf::from(
-                arg_val(argv, *i, "--out 缺路径参数")?.clone(),
-            ));
-        }
-        "--secs" => {
-            *i += 1;
-            d.secs = parse_secs(arg_val(argv, *i, "--secs 缺秒数参数")?)?;
-        }
-        "--baud" => {
-            *i += 1;
-            d.baud = parse_baud(arg_val(argv, *i, "--baud 缺波特率参数")?)?;
-        }
-        "--doa" => d.doa = true,
-        other if other.starts_with("--") => return Err(format!("未知参数: {other}")),
-        other => set_device(&mut d.device, other)?,
+        "--out" => arg_out(d, argv, i),
+        "--secs" => arg_secs(d, argv, i),
+        "--baud" => arg_baud(d, argv, i),
+        "--doa" => arg_doa(d),
+        other => arg_other(d, other),
     }
+}
+
+/// `--out` 族：取路径参数（缺值点名原文案）。
+fn arg_out(d: &mut ArgsDraft, argv: &[String], i: &mut usize) -> Result<(), String> {
+    *i += 1;
+    d.out = Some(PathBuf::from(
+        arg_val(argv, *i, "--out 缺路径参数")?.clone(),
+    ));
     Ok(())
+}
+
+/// `--secs` 族：取秒数参数（缺值点名原文案）。
+fn arg_secs(d: &mut ArgsDraft, argv: &[String], i: &mut usize) -> Result<(), String> {
+    *i += 1;
+    d.secs = parse_secs(arg_val(argv, *i, "--secs 缺秒数参数")?)?;
+    Ok(())
+}
+
+/// `--baud` 族：取波特率参数（缺值点名原文案）。
+fn arg_baud(d: &mut ArgsDraft, argv: &[String], i: &mut usize) -> Result<(), String> {
+    *i += 1;
+    d.baud = parse_baud(arg_val(argv, *i, "--baud 缺波特率参数")?)?;
+    Ok(())
+}
+
+/// `--doa` 族：无值开关。
+fn arg_doa(d: &mut ArgsDraft) -> Result<(), String> {
+    d.doa = true;
+    Ok(())
+}
+
+/// 非已知 flag：`--` 前缀是未知参数，其余按裸 device 收。
+fn arg_other(d: &mut ArgsDraft, other: &str) -> Result<(), String> {
+    if other.starts_with("--") {
+        return Err(format!("未知参数: {other}"));
+    }
+    set_device(&mut d.device, other)
 }
 
 /// 参数解析（device 必给；波特率过 rr-ipc 档位表白名单——真值单点）。

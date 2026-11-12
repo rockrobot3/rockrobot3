@@ -418,6 +418,12 @@ fn rr3_asm_up_rrd(ctx: &Rr3AsmCtx) -> Result<(std::process::Child, u32), String>
 
 /// 等全模块 running → rr3-ctl 四命令巡检（status/health/logs/ota）。
 fn rr3_asm_wait(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
+    rr3_asm_wait_ready(ctx, report)?;
+    rr3_asm_wait_ctl(ctx, report)
+}
+
+/// 阶段一：等 socket 与全部 face 模块 running，登记 boot 报告。
+fn rr3_asm_wait_ready(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
     wait_socket_exists(ctx.socket, RR3_ASSEMBLE_READY_DEADLINE)?;
     let wanted: Vec<(&str, &str)> = ctx
         .entries
@@ -434,31 +440,51 @@ fn rr3_asm_wait(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
     for (m, entry_abs) in ctx.entries {
         report.push_str(&format!("{m}  entry={}\n", entry_abs.display()));
     }
+    Ok(())
+}
 
-    // ---- 4. rr3-ctl 四命令巡检 ----
+/// 阶段二：rr3-ctl 四命令巡检（status/health/logs/ota）。
+fn rr3_asm_wait_ctl(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
     report.push_str(rr3_section("rr3-ctl status 巡检").as_str());
     let status_out = rr3_ctl_out(ctx.rrctl, ctx.socket, "status")?;
     report.push_str(&status_out);
-    // denied_publish = 0 是"事件真被接受"的线上证据（D9 验收判据）
-    if !status_out.contains("denied_publish = 0") {
-        return Err(format!("denied_publish ≠ 0：发布被 rrd 拒了\n{status_out}"));
+    rr3_asm_denied(&status_out)?;
+    rr3_asm_rows_ok(ctx)?;
+    report.push_str(rr3_section("rr3-ctl health").as_str());
+    report.push_str(&rr3_ctl_out(ctx.rrctl, ctx.socket, "health")?);
+    report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
+    report.push_str(&rr3_ctl_out(ctx.rrctl, ctx.socket, "logs")?);
+    report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
+    rr3_asm_ota(ctx, report);
+    Ok(())
+}
+
+/// denied_publish = 0 是"事件真被接受"的线上证据（D9 验收判据）。
+fn rr3_asm_denied(status_out: &str) -> Result<(), String> {
+    if status_out.contains("denied_publish = 0") {
+        Ok(())
+    } else {
+        Err(format!("denied_publish ≠ 0：发布被 rrd 拒了\n{status_out}"))
     }
+}
+
+/// 巡检快照里每个 face 模块都须在 running（掉线即红）。
+fn rr3_asm_rows_ok(ctx: &Rr3AsmCtx) -> Result<(), String> {
     let rows = rr3_ctl_status_rows(ctx.rrctl, ctx.socket);
     for (m, _) in ctx.entries {
         if !rows.iter().any(|(n, _, p)| n == m && p == "running") {
             return Err(format!("巡检快照里 {m} 不在 running（掉线？）：{rows:?}"));
         }
     }
-    report.push_str(rr3_section("rr3-ctl health").as_str());
-    report.push_str(&rr3_ctl_out(ctx.rrctl, ctx.socket, "health")?);
-    report.push_str(rr3_section("rr3-ctl logs（rrd 日志环尾部）").as_str());
-    report.push_str(&rr3_ctl_out(ctx.rrctl, ctx.socket, "logs")?);
-    report.push_str(rr3_section("rr3-ctl ota（预期恒拒，随 M6）").as_str());
+    Ok(())
+}
+
+/// ota 预期恒拒：成功反而是意外，两种形态都写进报告。
+fn rr3_asm_ota(ctx: &Rr3AsmCtx, report: &mut String) {
     match rr3_ctl_maybe_fail(ctx.rrctl, ctx.socket, "ota") {
         Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
         Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
     }
-    Ok(())
 }
 
 /// 轮询用的 status 快照（main.rs run / chain / brain 各演练共用同一真值）：
