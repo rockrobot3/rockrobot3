@@ -246,6 +246,27 @@ mod tests {
         );
     }
 
+    /// 声明长度超界的 body 必须在**分配前**被拒（B44 审计）：面板对局域网开放，
+    /// 若按 `Content-Length` 直接 `vec![0; n]`，一个 `999999999999` 的声明就是一次
+    /// 必然 OOM/abort。本用例钉"先判上界、再分配"这条顺序。
+    #[test]
+    fn oversized_content_length_is_rejected_before_alloc() {
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut peer = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        peer.write_all(b"POST /api/x HTTP/1.1\r\nContent-Length: 999999999999\r\n\r\n")
+            .unwrap();
+        let limits = Rr3PanelLimits {
+            body_limit: 1024,
+            ..Rr3PanelLimits::default()
+        };
+        let e = rr3_http_read_req(&server, &limits).unwrap_err();
+        assert!(e.contains("body 超界"), "超界须在分配前拒: {e}");
+    }
+
     /// 三段解析各自的坏形判据：缺路径、非法 Content-Length、头区超界
     #[test]
     fn req_stages_reject_bad_shapes() {
