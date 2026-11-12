@@ -48,7 +48,16 @@ pub(crate) fn rr3_doa_field(d: &Rr3DoaFix) -> Value {
 /// 批F2 的负载扩展（append 兼容，schema_version 仍 1）：仅 onset 且判出
 /// （多通道非静音帧）时携带，offset 不带——与 rms_peak 同一形状纪律。
 pub(crate) fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge, doa: Option<Value>) -> Value {
-    let mut body = match edge {
+    let mut body = rr3_vad_body_of(seq, &edge);
+    if let (Rr3VadEdge::Onset { .. }, Some(d)) = (&edge, doa) {
+        body["doa"] = d;
+    }
+    body
+}
+
+/// 边沿基础负载（onset/offset 两形，字段随边沿）。
+fn rr3_vad_body_of(seq: u64, edge: &Rr3VadEdge) -> Value {
+    match edge {
         Rr3VadEdge::Onset {
             rms_peak,
             speech_ms,
@@ -58,11 +67,7 @@ pub(crate) fn rr3_vad_event_body(seq: u64, edge: Rr3VadEdge, doa: Option<Value>)
         Rr3VadEdge::Offset { speech_ms } => json!({
             "seq": seq, "edge": "offset", "speech_ms": speech_ms,
         }),
-    };
-    if let (Rr3VadEdge::Onset { .. }, Some(d)) = (&edge, doa) {
-        body["doa"] = d;
     }
-    body
 }
 
 /// `rr3-sense/capture/dump`（rpc.exposes 的事务面）的应答体：

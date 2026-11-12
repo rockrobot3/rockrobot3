@@ -67,15 +67,19 @@ fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
 
 /// 读 secrets 文件全文；文件不存在回 None（首次使用是常态）。
 fn rr3_secrets_text(path: &Path) -> Result<Option<String>, String> {
-    let mut text = String::new();
-    match File::open(path) {
-        Ok(mut f) => {
-            f.read_to_string(&mut text)
-                .map_err(|e| format!("读 {} 失败: {e}", path.display()))?;
-        }
+    let mut f = match File::open(path) {
+        Ok(f) => f,
         Err(e) => return rr3_secret_open_err(path, &e),
-    }
-    Ok(Some(text))
+    };
+    Ok(Some(rr3_secret_slurp(path, &mut f)?))
+}
+
+/// 文件全文读尽（打开失败已由调用方分类）。
+fn rr3_secret_slurp(path: &Path, f: &mut File) -> Result<String, String> {
+    let mut text = String::new();
+    f.read_to_string(&mut text)
+        .map_err(|e| format!("读 {} 失败: {e}", path.display()))?;
+    Ok(text)
 }
 
 /// 打开失败分类：文件不存在回 None（首次使用是常态），其余回错。
@@ -90,13 +94,20 @@ fn rr3_secret_open_err(path: &Path, e: &std::io::Error) -> Result<Option<String>
 fn rr3_secrets_parse(path: &Path, text: &str) -> Result<BTreeMap<String, String>, String> {
     let v: Value =
         serde_json::from_str(text).map_err(|e| format!("{} 不是合法 JSON: {e}", path.display()))?;
-    let keys = v.get("keys").and_then(Value::as_object).ok_or_else(|| {
+    rr3_secret_map(path, rr3_secret_keys_of(path, &v)?)
+}
+
+/// 取 `keys` 对象（形状不符即回错）。
+fn rr3_secret_keys_of<'a>(
+    path: &Path,
+    v: &'a Value,
+) -> Result<&'a serde_json::Map<String, Value>, String> {
+    v.get("keys").and_then(Value::as_object).ok_or_else(|| {
         format!(
             "{} 形状不符（须 {{\"keys\": {{ref: 值}}}}）",
             path.display()
         )
-    })?;
-    rr3_secret_map(path, keys)
+    })
 }
 
 /// keys 全表落位：值须为字符串（坏形状 = 回错，与坏 json 同一口径）。
@@ -141,12 +152,18 @@ pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<()
 
 /// ref 形制：非空、无空白（落盘前的 fail-closed 门）。
 fn rr3_secrets_ref_gate(ref_name: &str) -> Result<&str, String> {
+    let ref_name = rr3_ref_nonblank(ref_name)?;
+    if ref_name.chars().any(char::is_whitespace) {
+        return Err(format!("ref 含空白: {ref_name:?}"));
+    }
+    Ok(ref_name)
+}
+
+/// ref 非空（trim 后），空值即回错。
+fn rr3_ref_nonblank(ref_name: &str) -> Result<&str, String> {
     let ref_name = ref_name.trim();
     if ref_name.is_empty() {
         return Err("ref 不能为空".to_string());
-    }
-    if ref_name.chars().any(char::is_whitespace) {
-        return Err(format!("ref 含空白: {ref_name:?}"));
     }
     Ok(ref_name)
 }

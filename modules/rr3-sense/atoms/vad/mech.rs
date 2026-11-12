@@ -47,6 +47,11 @@ fn rr3_isqrt(x: u64) -> u64 {
     if x < 2 {
         return x;
     }
+    rr3_isqrt_scan(x)
+}
+
+/// 二分求整数平方根（`x ≥ 2`）。
+fn rr3_isqrt_scan(x: u64) -> u64 {
     let (mut lo, mut hi, mut ans) = (1u64, x, 1u64);
     while lo <= hi {
         let mid = lo + (hi - lo) / 2;

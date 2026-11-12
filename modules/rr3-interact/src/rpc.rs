@@ -109,9 +109,14 @@ fn rr3_tts_play_out(
     let played_ms = player::rr3_tts_play(sink, samples).map_err(|e| rr3_tts_err_text(&e));
     face.rr3_face_end_talk();
     let played_ms = played_ms?;
-    // played_ms==0 不得记 ok（批N4 件六 I-21①）：对账通过但样点不足一个毫秒窗
-    // （<16 样点）对用户等于没听见——按业务失败折 error 应答（brain 侧 audible
-    // 不计，B-16① 拆账判据），与传输失败分账不折成功。
+    rr3_play_zero_gate(bus, played_ms, pcm_bytes)?;
+    Ok((played_ms, suspended))
+}
+
+/// 播出 0ms 不得记 ok（批N4 件六 I-21①）：对账通过但样点不足一个毫秒窗
+/// （<16 样点）对用户等于没听见——按业务失败折 error 应答（brain 侧 audible
+/// 不计，B-16① 拆账判据），与传输失败分账不折成功。
+fn rr3_play_zero_gate(bus: &BusHandle, played_ms: u64, pcm_bytes: u64) -> Result<(), String> {
     if played_ms == 0 {
         bus.counter_bump("tts_play_reject", 1);
         return Err(format!(
@@ -119,7 +124,7 @@ fn rr3_tts_play_out(
         ));
     }
     bus.counter_bump("tts_play_ok", 1);
-    Ok((played_ms, suspended))
+    Ok(())
 }
 
 /// 起播水位判据（MC-2）：对账通过即缓冲完整，`buffered == total` 是对账蕴含的

@@ -427,11 +427,17 @@ fn rr3_span_cap_check(r: &Rr3ReflexConfig) -> Result<(), String> {
         ("nod_delay_ms", r.nod_delay_ms),
         ("nod_hold_ms", r.nod_hold_ms),
     ] {
-        if v > RR3_MAX_STRATEGY_MS {
-            return Err(format!(
-                "[rr3-sense.reflex] {key} 须在 0..={RR3_MAX_STRATEGY_MS}，收到 {v}（门控/手势毫秒量与 Instant 相加，超界会溢出 panic 或回绕）"
-            ));
-        }
+        rr3_span_one(key, v)?;
+    }
+    Ok(())
+}
+
+/// 单键上界判定（键名逐条点名便于定位配置错）。
+fn rr3_span_one(key: &str, v: u64) -> Result<(), String> {
+    if v > RR3_MAX_STRATEGY_MS {
+        return Err(format!(
+            "[rr3-sense.reflex] {key} 须在 0..={RR3_MAX_STRATEGY_MS}，收到 {v}（门控/手势毫秒量与 Instant 相加，超界会溢出 panic 或回绕）"
+        ));
     }
     Ok(())
 }

@@ -339,17 +339,22 @@ fn rr3_exec_selftest(shared: &Rr3PanelShared) -> Rr3PanelReply {
     Rr3PanelReply::json(200, "OK", json!({ "legs": legs, "verdict": verdict }))
 }
 
-/// 腿1 speaker：内置测试音播放成功即 pass（主循环缺席/写播放面失败如实 fail）
-fn rr3_leg_beep(shared: &Rr3PanelShared) -> Value {
-    let reason = rr3_panel_act(shared, Rr3PanelAction::Beep).err();
+/// 腿对象定形：pass 随拒因有无，拒因存在时随腿带上（腿名由调用方点名）。
+fn rr3_leg_json(name: &str, reason: Option<String>) -> Value {
     let mut leg = json!({
-        "leg": "speaker",
+        "leg": name,
         "pass": if reason.is_none() { "pass" } else { "fail" },
     });
     if let Some(e) = reason {
         leg["reason"] = json!(e);
     }
     leg
+}
+
+/// 腿1 speaker：内置测试音播放成功即 pass（主循环缺席/写播放面失败如实 fail）
+fn rr3_leg_beep(shared: &Rr3PanelShared) -> Value {
+    let reason = rr3_panel_act(shared, Rr3PanelAction::Beep).err();
+    rr3_leg_json("speaker", reason)
 }
 
 /// 腿2 relay：能力面先判——`rr3-act` 不在册即 n-a，不向总线发无人接的
@@ -431,14 +436,7 @@ fn rr3_leg_face(shared: &Rr3PanelShared) -> Value {
         },
     )
     .err();
-    let mut leg = json!({
-        "leg": "face",
-        "pass": if reason.is_none() { "pass" } else { "fail" },
-    });
-    if let Some(e) = reason {
-        leg["reason"] = json!(e);
-    }
-    leg
+    rr3_leg_json("face", reason)
 }
 
 /// 腿4/5 组腿：ctl 取数失败/快照不可得 = 单腿 fail 如实点名；取到即把 rrd

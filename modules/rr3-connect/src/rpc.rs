@@ -110,11 +110,15 @@ pub fn rr3_wifi_scan_args(args: &Value) -> Result<(), String> {
 
 /// 无参 RPC 的形状判据：`null` 与空对象放行，多余字段点名拒（两条无参臂共用）。
 fn rr3_no_args(args: &Value, what: &str) -> Result<(), String> {
-    match args {
-        Value::Null => Ok(()),
-        Value::Object(m) if m.is_empty() => Ok(()),
-        _ => Err(format!("{what} 无参数（收到多余字段）")),
+    if rr3_args_empty(args) {
+        return Ok(());
     }
+    Err(format!("{what} 无参数（收到多余字段）"))
+}
+
+/// 无参形制：`null` 或空对象。
+fn rr3_args_empty(args: &Value) -> bool {
+    matches!(args, Value::Null) || matches!(args, Value::Object(m) if m.is_empty())
 }
 
 /// wifi/scan 结果（sim 后端）：确定性三行模拟列表，元素形状 = legacy panel.c

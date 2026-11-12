@@ -43,16 +43,21 @@ fn rr3_session_action(args: &Value) -> Result<&str, String> {
 /// 原文案字面未动，既有断言/e2e 判据词"链路"两分支都在）。
 pub fn rr3_session_result(st: &Rr3LinkState, mode: &str) -> Result<Value, String> {
     if !st.up {
-        if mode == "ap" {
-            return Err("配网态 AP（mode=ap，未关联上游链路），云端会话拒绝建立".into());
-        }
-        return Err("链路未就绪（net/link up=false），云端会话拒绝建立".into());
+        return Err(rr3_link_down_err(mode));
     }
     Ok(json!({
         "session": "opened",
         "endpoint": "mock",
         "ssid": st.ssid.as_ref().map(|s| s.rr3_ssid_text_as_str()),
     }))
+}
+
+/// 未就绪文案：AP 配网态与 station 断链分开点名（现场不同，不折叠）。
+fn rr3_link_down_err(mode: &str) -> String {
+    if mode == "ap" {
+        return "配网态 AP（mode=ap，未关联上游链路），云端会话拒绝建立".to_string();
+    }
+    "链路未就绪（net/link up=false），云端会话拒绝建立".to_string()
 }
 
 #[cfg(test)]

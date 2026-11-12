@@ -445,17 +445,8 @@ impl Rr3BrainDispatcher {
 
     /// 预合成结果落账：非空 PCM 入表，空/失败只留痕（首轮按需重试）。
     fn rr3_ack_take(&mut self, res: Result<Vec<u8>, String>, started: Instant) {
-        match res {
-            Ok(pcm) if !pcm.is_empty() => {
-                eprintln!(
-                    "唤醒应答预合成就绪: {}ms pcm_bytes={}",
-                    started.elapsed().as_millis(),
-                    pcm.len()
-                );
-                self.wake_ack_pcm = Some(pcm);
-            }
-            Ok(_) => eprintln!("唤醒应答预合成返回空 PCM，首个唤醒轮将按需重试"),
-            Err(e) => eprintln!("唤醒应答预合成失败，首个唤醒轮将按需重试（{e}）"),
+        if let Some(pcm) = rr3_ack_pcm_of(started, res) {
+            self.wake_ack_pcm = Some(pcm);
         }
     }
 
@@ -932,11 +923,38 @@ fn rr3_publish_tts_pcm<B: Rr3TurnBus>(bus: &B, pcm: &[u8], seq: u64) -> Result<u
     let (frames, seq) = rr3_tts_pcm_frames(pcm, seq);
     for (i, body) in frames.into_iter().enumerate() {
         bus.publish(RR3_TOPIC_TTS_PCM, body)?;
-        if (i + 1) % RR3_TTS_PUB_BURST == 0 {
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        rr3_tts_burst_gap(i);
     }
     Ok(seq)
+}
+
+/// 分块发布节流：每 `RR3_TTS_PUB_BURST` 帧歇 1ms（给总线消费侧留拍）。
+fn rr3_tts_burst_gap(i: usize) {
+    if (i + 1).is_multiple_of(RR3_TTS_PUB_BURST) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// 预合成结果分类：非空 PCM 入表，空/失败只留痕（首轮按需重试）。
+fn rr3_ack_pcm_of(started: Instant, res: Result<Vec<u8>, String>) -> Option<Vec<u8>> {
+    match res {
+        Ok(pcm) if !pcm.is_empty() => {
+            eprintln!(
+                "唤醒应答预合成就绪: {}ms pcm_bytes={}",
+                started.elapsed().as_millis(),
+                pcm.len()
+            );
+            Some(pcm)
+        }
+        Ok(_) => {
+            eprintln!("唤醒应答预合成返回空 PCM，首个唤醒轮将按需重试");
+            None
+        }
+        Err(e) => {
+            eprintln!("唤醒应答预合成失败，首个唤醒轮将按需重试（{e}）");
+            None
+        }
+    }
 }
 
 #[cfg(test)]

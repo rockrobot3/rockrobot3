@@ -508,14 +508,18 @@ fn rr3_cloud_check(doc: &Value) -> Result<f64, String> {
 /// `[rr3-brain.bus]` 段（可选段）：`call_timeout_s` 缺段/缺键一律回落总线缺省，
 /// 在册即按超时值域核（非有限/≤0/超上界点名拒）。
 fn rr3_bus_timeout_of(doc: &Value) -> Result<f64, String> {
-    let bus = match doc.get("rr3-brain").and_then(|b| b.get("bus")) {
-        Some(bus) => bus,
-        None => return Ok(RR3_BUS_CALL_TIMEOUT_DEFAULT_S),
+    let Some(bus) = rr3_bus_sect(doc) else {
+        return Ok(RR3_BUS_CALL_TIMEOUT_DEFAULT_S);
     };
     match bus.get("call_timeout_s") {
         Some(v) => rr3_timeout_value(v, "bus", "call_timeout_s"),
         None => Ok(RR3_BUS_CALL_TIMEOUT_DEFAULT_S),
     }
+}
+
+/// `[rr3-brain.bus]` 段（可选段）。
+fn rr3_bus_sect(doc: &Value) -> Option<&Value> {
+    doc.get("rr3-brain").and_then(|b| b.get("bus"))
 }
 
 /// `[rr3-brain.dialog]` 段（必填段）：`max_utterance_ms` 缺键回落缺省，在册即

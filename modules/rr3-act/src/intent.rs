@@ -121,8 +121,12 @@ fn rr3_gates(topic: &str, open_topics: &[String]) -> Result<(), String> {
     if !EXPOSED.contains(&topic) {
         return Err(format!("越权拒执行 {topic}：不在本模块 exposes"));
     }
-    // 开放门（A-9）：开放集由 config 注入（组合件读入透传），不再硬编码 match；
-    // 已归属但不在开放集的主题（led/effect）到此拒执行。
+    rr3_topic_open(topic, open_topics)
+}
+
+/// 开放门（A-9）：开放集由 config 注入（组合件读入透传），不再硬编码 match；
+/// 已归属但不在开放集的主题（led/effect）到此拒执行。
+fn rr3_topic_open(topic: &str, open_topics: &[String]) -> Result<(), String> {
     if !open_topics.iter().any(|t| t.as_str() == topic) {
         return Err(format!(
             "已归属但意图执行面未开放 {topic}（当前开放集 {}）",

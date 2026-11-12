@@ -36,17 +36,19 @@ impl Rr3LinkEdge {
 
     /// 每拍 HAL 读数喂一次 up 值。返回 true = 此刻应立即发布（首拍基线 / 翻转）。
     pub fn rr3_link_edge_cross(&mut self, up: bool) -> bool {
-        match self.last {
-            None => {
-                self.last = Some(up);
-                true // 首拍基线：观察者无论何时接入，下一条周期流必然等不来"没发过"
-            }
-            Some(prev) if prev != up => {
-                self.last = Some(up);
-                true // 翻转必发：在线/离线边界是这条流唯一的"新闻"
-            }
-            Some(_) => false,
-        }
+        let prev = self.last;
+        self.last = Some(up);
+        rr3_edge_changed(prev, up)
+    }
+}
+
+/// 发布判据：首拍基线或状态翻转（相等即不续发）。
+fn rr3_edge_changed(prev: Option<bool>, up: bool) -> bool {
+    match prev {
+        // 首拍基线：观察者无论何时接入，下一条周期流必然等不来"没发过"
+        None => true,
+        // 翻转必发：在线/离线边界是这条流唯一的"新闻"
+        Some(prev) => prev != up,
     }
 }
 

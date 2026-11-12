@@ -42,6 +42,11 @@ pub(crate) fn rr3_pcm_best_channel(samples: &[i16], channels: u8) -> Vec<i16> {
     // 整数能量比较（sum_sq 足够，免开方）；并列取最小通道号（确定性）
     let sums = rr3_chan_energy(samples, ch, frames);
     let best = rr3_chan_pick(&sums);
+    rr3_pcm_take(samples, ch, best, frames)
+}
+
+/// 按选中通道抽单声道（尾部余数已由 `frames` 截断）。
+fn rr3_pcm_take(samples: &[i16], ch: usize, best: usize, frames: usize) -> Vec<i16> {
     (0..frames).map(|i| samples[i * ch + best]).collect()
 }
 
@@ -49,12 +54,17 @@ pub(crate) fn rr3_pcm_best_channel(samples: &[i16], channels: u8) -> Vec<i16> {
 fn rr3_chan_energy(samples: &[i16], ch: usize, frames: usize) -> Vec<i64> {
     let mut sums = vec![0i64; ch];
     for i in 0..frames {
-        for (c, sum) in sums.iter_mut().enumerate() {
-            let v = samples[i * ch + c] as i64;
-            *sum += v * v;
-        }
+        rr3_chan_row(samples, ch, i, &mut sums);
     }
     sums
+}
+
+/// 单帧逐通道能量累加（第 `i` 帧）。
+fn rr3_chan_row(samples: &[i16], ch: usize, i: usize, sums: &mut [i64]) {
+    for (c, sum) in sums.iter_mut().enumerate() {
+        let v = samples[i * ch + c] as i64;
+        *sum += v * v;
+    }
 }
 
 /// 能量最高的通道号（并列取最小通道号）。
@@ -231,6 +241,12 @@ fn rr3_any_loud(samples: &[i16], ch: usize, frame_len: usize, gate_sq: u64) -> b
 
 /// 单采集帧的 L/R 能量门（i16 取绝对值后平方累加）。
 fn rr3_doa_frame_loud(fr: &[i16], ch: usize, gate_sq: u64) -> bool {
+    let (sq_l, sq_r) = rr3_sq_pair(fr, ch);
+    sq_l >= gate_sq || sq_r >= gate_sq
+}
+
+/// 单采集帧的 L/R 平方和（`(左, 右)`）。
+fn rr3_sq_pair(fr: &[i16], ch: usize) -> (u64, u64) {
     let (mut sq_l, mut sq_r) = (0u64, 0u64);
     let mut i = 0;
     while i + 1 < fr.len() {
@@ -240,7 +256,7 @@ fn rr3_doa_frame_loud(fr: &[i16], ch: usize, gate_sq: u64) -> bool {
         sq_r += w * w;
         i += ch;
     }
-    sq_l >= gate_sq || sq_r >= gate_sq
+    (sq_l, sq_r)
 }
 
 /// 互相关积分（B9 自 doa_fix 抽出）：cc[d] = Σ_t R[t]·L[t+d]，
@@ -258,7 +274,11 @@ fn rr3_doa_lag(samples: &[i16], ch: usize, frames: usize, d: i64) -> i64 {
     if d >= 0 {
         return rr3_doa_lag_fwd(samples, ch, frames, d as usize);
     }
-    let off = (-d) as usize;
+    rr3_doa_lag_back(samples, ch, frames, (-d) as usize)
+}
+
+/// 反向 lag 的互相关（`L` 领先 `off` 帧）。
+fn rr3_doa_lag_back(samples: &[i16], ch: usize, frames: usize, off: usize) -> i64 {
     let mut acc: i64 = 0;
     for t in off..frames {
         acc += samples[t * ch] as i64 * samples[(t - off) * ch + 1] as i64;
