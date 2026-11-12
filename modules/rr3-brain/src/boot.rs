@@ -236,12 +236,18 @@ fn rr3_timeout_value(v: &Value, sect_name: &str, key: &str) -> Result<f64, Strin
     let x = v
         .as_f64()
         .ok_or_else(|| format!("config [rr3-brain.{sect_name}] {key} 须数值"))?;
+    rr3_timeout_cap(x, sect_name, key)?;
+    Ok(x)
+}
+
+/// 超时上界（有限、>0、≤ 上界）。
+fn rr3_timeout_cap(x: f64, sect_name: &str, key: &str) -> Result<(), String> {
     if !x.is_finite() || x <= 0.0 || x > RR3_CFG_TIMEOUT_MAX_S {
         return Err(format!(
             "config [rr3-brain.{sect_name}] {key} 须为 (0, {RR3_CFG_TIMEOUT_MAX_S}] 秒内的有限数，收到 {x}"
         ));
     }
-    Ok(x)
+    Ok(())
 }
 
 /// Python float 的打印形状（config 就绪行逐字对位）：整值补 .0（20 → "20.0"），

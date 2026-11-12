@@ -262,18 +262,23 @@ fn expect_contr(sval: &str) -> Result<&'static str, String> {
 
 /// 固定腿三态落位（`leg` 已由调用方守卫限定在册）。
 fn expect_leg(expect: &mut Rr3SelftestExpect, leg: &str, sval: &str) -> Result<(), String> {
-    let st = Rr3SelftestExpect::rr3_state_lookup(sval).ok_or_else(|| {
-        format!(
-            "config [rr3-interact.selftest.expect] {leg} 非在册三态 {sval:?}（在册值 {}）",
-            RR3_SELFTEST_LEG_STATES.join("/")
-        )
-    })?;
+    let st = rr3_leg_state(leg, sval)?;
     match leg {
         "speaker" => expect.speaker = st,
         "relay" => expect.relay = st,
         _ => expect.face = st,
     }
     Ok(())
+}
+
+/// 固定腿三态取值（在册词表对账，越界点名）。
+fn rr3_leg_state(leg: &str, sval: &str) -> Result<&'static str, String> {
+    Rr3SelftestExpect::rr3_state_lookup(sval).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest.expect] {leg} 非在册三态 {sval:?}（在册值 {}）",
+            RR3_SELFTEST_LEG_STATES.join("/")
+        )
+    })
 }
 
 /// 单腿预期落位（腿名册与三态闭集逐键对账；未知腿名/在册外值点名拒）。

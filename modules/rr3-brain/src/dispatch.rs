@@ -224,6 +224,11 @@ fn rr3_wake_hit(norm: &str, cfg: &Rr3WakeCfg) -> Option<Rr3WakeAction> {
     if let Some(action) = rr3_phrase_scan(&norm_chars, &cfg.phrases) {
         return Some(action);
     }
+    rr3_wake_fallback(norm)
+}
+
+/// 短语表未中时的"你好"兜底（≤2 字 = Ack，更长 = 命令）。
+fn rr3_wake_fallback(norm: &str) -> Option<Rr3WakeAction> {
     let rest = norm.strip_prefix("你好")?.trim();
     Some(if rest.chars().count() <= 2 {
         Rr3WakeAction::Ack

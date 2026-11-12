@@ -97,10 +97,16 @@ fn rr3_req_parts(
     // 无界增长（局域网 DoS 面，静态审计 0.0.8b 收口）。
     let content_length = rr3_req_heads(reader, limits.header_limit, used)?;
     // body 上界先判、再分配：按声明长度 `vec![0; n]` 前必须确认 n 在限内
-    if content_length > limits.body_limit {
-        return Err(format!("body 超界（>{0}B）", limits.body_limit));
-    }
+    rr3_body_cap(content_length, limits.body_limit)?;
     Ok((method, path, rr3_req_body(reader, content_length)?))
+}
+
+/// body 声明长度上界（分配前判）。
+fn rr3_body_cap(len: usize, limit: usize) -> Result<(), String> {
+    if len > limit {
+        return Err(format!("body 超界（>{limit}B）"));
+    }
+    Ok(())
 }
 
 /// 请求行："METHOD /path HTTP/1.x" →（方法, 路径, 已用头区字节数）。
@@ -141,16 +147,22 @@ fn rr3_head_read(
     cap: usize,
     used: usize,
 ) -> Result<Option<(String, usize)>, String> {
-    let remaining = cap.saturating_sub(used);
-    if remaining == 0 {
-        return Err(format!("头区超界（>{cap}B）"));
-    }
+    let remaining = rr3_head_room(cap, used)?;
     let mut head = String::new();
     let n = rr3_read_line_cap(reader, remaining, "头区", &mut head)?;
     if n == 0 {
         return Ok(None);
     }
     Ok(Some((head, n)))
+}
+
+/// 头区剩余预算（0 = 超界）。
+fn rr3_head_room(cap: usize, used: usize) -> Result<usize, String> {
+    let remaining = cap.saturating_sub(used);
+    if remaining == 0 {
+        return Err(format!("头区超界（>{cap}B）"));
+    }
+    Ok(remaining)
 }
 
 /// 单条头行落位：空行 = 头区结束；只认 Content-Length。

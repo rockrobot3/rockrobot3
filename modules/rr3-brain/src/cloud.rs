@@ -103,13 +103,18 @@ pub(crate) enum Rr3CloudMode {
 pub(crate) fn rr3_cloud_mode() -> Result<Rr3CloudMode, String> {
     match std::env::var(RR3_CLOUD_MODE_ENV) {
         Err(_) => Ok(Rr3CloudMode::Real),
-        Ok(v) => match v.trim().to_lowercase().as_str() {
-            "real" => Ok(Rr3CloudMode::Real),
-            "mock" => Ok(Rr3CloudMode::Mock),
-            other => Err(format!(
-                "{RR3_CLOUD_MODE_ENV} 取值不认: {other}（允许 real/mock）"
-            )),
-        },
+        Ok(v) => rr3_cloud_mode_word(&v),
+    }
+}
+
+/// 云档词表（real/mock；词表外点名拒）。
+fn rr3_cloud_mode_word(v: &str) -> Result<Rr3CloudMode, String> {
+    match v.trim().to_lowercase().as_str() {
+        "real" => Ok(Rr3CloudMode::Real),
+        "mock" => Ok(Rr3CloudMode::Mock),
+        other => Err(format!(
+            "{RR3_CLOUD_MODE_ENV} 取值不认: {other}（允许 real/mock）"
+        )),
     }
 }
 
@@ -414,15 +419,19 @@ impl Rr3LlmClient {
 /// 裸名 ref 取值：`env:VAR` → 环境变量；裸名 → secrets 文件（每次调用现读）。
 fn rr3_ref_key(r: &str) -> Result<String, String> {
     if let Some(var) = r.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
-        let val = std::env::var(var).unwrap_or_default();
-        let val = val.trim();
-        if val.is_empty() {
-            return Err(format!("缺少环境变量 {var}（模型行 key_ref={r}）"));
-        }
-        Ok(val.to_string())
-    } else {
-        rr3_secrets_get(r).ok_or_else(|| format!("secrets 缺引用 {r}（面板填 key 后下一轮生效）"))
+        return rr3_env_ref_key(var, r);
     }
+    rr3_secrets_get(r).ok_or_else(|| format!("secrets 缺引用 {r}（面板填 key 后下一轮生效）"))
+}
+
+/// `env:VAR` 分支取值（空值点名，不回显凭据）。
+fn rr3_env_ref_key(var: &str, r: &str) -> Result<String, String> {
+    let val = std::env::var(var).unwrap_or_default();
+    let val = val.trim();
+    if val.is_empty() {
+        return Err(format!("缺少环境变量 {var}（模型行 key_ref={r}）"));
+    }
+    Ok(val.to_string())
 }
 
 impl Rr3LlmClient {

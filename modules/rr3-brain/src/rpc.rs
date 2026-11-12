@@ -160,10 +160,7 @@ pub(crate) fn rr3_ops_write(
 
 /// 组/槽白名单校验（组不认/槽不认逐条点名）。
 fn rr3_ops_slot_check(group: &str, slot: &str) -> Result<(), String> {
-    let (_, slots) = RR3_OPS_WRITE_GROUPS
-        .iter()
-        .find(|(g, _)| *g == group)
-        .ok_or_else(|| format!("组不认: '{group}'（白名单 {}）", rr3_ops_groups_text()))?;
+    let slots = rr3_ops_slots_of(group)?;
     if !slots.contains(&slot) {
         return Err(format!(
             "组 {group} 槽不认: '{slot}'（白名单 {}）",
@@ -171,6 +168,15 @@ fn rr3_ops_slot_check(group: &str, slot: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// 组白名单取槽名单（组不认点名）。
+fn rr3_ops_slots_of(group: &str) -> Result<&'static [&'static str], String> {
+    RR3_OPS_WRITE_GROUPS
+        .iter()
+        .find(|(g, _)| *g == group)
+        .map(|(_, slots)| *slots)
+        .ok_or_else(|| format!("组不认: '{group}'（白名单 {}）", rr3_ops_groups_text()))
 }
 
 /// 类型域值校验（Python 分支同序：字符串槽 → timeout_s → max_utterance_ms），
@@ -663,10 +669,15 @@ fn rr3_row_key_ref(obj: &mut serde_json::Map<String, Value>, inp: &Rr3ModelRowIn
 fn rr3_row_deactivate(rows: &mut [Value], keep: usize) {
     for (j, r) in rows.iter_mut().enumerate() {
         if j != keep {
-            if let Some(o) = r.as_object_mut() {
-                o.insert("active".to_string(), json!(false));
-            }
+            rr3_row_clear(r);
         }
+    }
+}
+
+/// 单行 active 清零。
+fn rr3_row_clear(r: &mut Value) {
+    if let Some(o) = r.as_object_mut() {
+        o.insert("active".to_string(), json!(false));
     }
 }
 
