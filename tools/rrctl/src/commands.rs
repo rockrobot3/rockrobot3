@@ -54,10 +54,7 @@ fn rr3_cmd_known(cmd: &str) -> Result<(), String> {
 /// 错误信封统一走 Err：ota 的恒拒（rrd 回 AIRY_EPERM，文案点 M6）与 reboot 的
 /// 缺省恒拒（文案点双重门）都落在这一条上。
 fn rr3_ctl_ensure(cmd: &str, envelope: &Value) -> Result<(), String> {
-    match rr3_ctl_reject(cmd, envelope) {
-        Some(why) => Err(why),
-        None => Ok(()),
-    }
+    rr3_ctl_reject(cmd, envelope).map_or(Ok(()), Err)
 }
 
 /// 成功信封按命令分派到各自的渲染器。
@@ -181,10 +178,7 @@ fn cell(v: &Value, key: &str) -> String {
 
 /// 数字原样、缺字段显式 `?`。
 fn rr3_cell_num(v: &Value) -> String {
-    match v.as_u64() {
-        Some(n) => n.to_string(),
-        None => "?".to_string(),
-    }
+    v.as_u64().map_or("?".to_string(), |n| n.to_string())
 }
 
 fn format_status(envelope: &Value) -> Result<String, String> {
@@ -200,7 +194,7 @@ fn format_status(envelope: &Value) -> Result<String, String> {
 
 /// `result` 与其 `modules` 数组（缺件逐级点名）。
 fn rr3_ctl_modules(envelope: &Value) -> Result<(&Value, &[Value]), String> {
-    let result = envelope.get("result").ok_or("应答缺 result")?;
+    let result = rr3_ctl_result(envelope)?;
     let modules = result
         .get("modules")
         .and_then(Value::as_array)
@@ -209,12 +203,19 @@ fn rr3_ctl_modules(envelope: &Value) -> Result<(&Value, &[Value]), String> {
     Ok((result, modules))
 }
 
+/// 应答 `result`（缺件点名）。
+fn rr3_ctl_result(envelope: &Value) -> Result<&Value, String> {
+    envelope
+        .get("result")
+        .ok_or_else(|| "应答缺 result".to_string())
+}
+
 /// `denied_publish` 附加行（缺字段不渲染）。
 fn rr3_denied_note(result: &Value) -> String {
-    match result.get("denied_publish").and_then(Value::as_u64) {
-        Some(d) => format!("denied_publish = {d}\n"),
-        None => String::new(),
-    }
+    result
+        .get("denied_publish")
+        .and_then(Value::as_u64)
+        .map_or(String::new(), |d| format!("denied_publish = {d}\n"))
 }
 
 fn format_health(envelope: &Value) -> Result<String, String> {
@@ -301,11 +302,11 @@ fn format_counters(envelope: &Value) -> Result<String, String> {
 /// `reboot` 系统重启（0.0.4 批C append）：CLI 不加本地门（见模块头注释），
 /// rrd 执行面已解锁时回执 `{"reboot": true}`，这里只渲染一行确认。
 fn format_reboot(envelope: &Value) -> Result<String, String> {
-    let result = envelope.get("result").ok_or("应答缺 result")?;
-    match result.get("reboot").and_then(Value::as_bool) {
-        Some(true) => Ok("系统重启已发起（rrd 侧重启命令已执行）".to_string()),
-        _ => Err("reboot 应答缺 result.reboot 或非 true".to_string()),
+    let result = rr3_ctl_result(envelope)?;
+    if result.get("reboot").and_then(Value::as_bool) == Some(true) {
+        return Ok("系统重启已发起（rrd 侧重启命令已执行）".to_string());
     }
+    Err("reboot 应答缺 result.reboot 或非 true".to_string())
 }
 
 #[cfg(test)]

@@ -83,15 +83,21 @@ fn bus_frame(
 fn parse_upstream(
     frame: Rr3Frame,
 ) -> Result<(Rr3PayloadType, u64, Option<String>, Value, Value), String> {
+    rr3_up_dst_ok(&frame)?;
+    let (ty, v) = rr3_upstream_value(&frame.payload)?;
+    let (id, method, params) = rr3_upstream_rpc(&v)?;
+    Ok((ty, id, method, params, v))
+}
+
+/// dst 门：上行帧必须寄给 rrd。
+fn rr3_up_dst_ok(frame: &Rr3Frame) -> Result<(), String> {
     if frame.header.dst_task != RR3_TASK_RRD {
         return Err(format!(
             "dst_task 必须为 {RR3_TASK_RRD}（rrd），收到 {}",
             frame.header.dst_task
         ));
     }
-    let (ty, v) = rr3_upstream_value(&frame.payload)?;
-    let (id, method, params) = rr3_upstream_rpc(&v)?;
-    Ok((ty, id, method, params, v))
+    Ok(())
 }
 
 /// payload 拆前缀 + 解析 JSON 体。
@@ -280,8 +286,7 @@ fn verdict(ok: bool, label: &str) -> bool {
 
 /// 全程看门狗：到点 exit 2（环境性失败），预算随拍数放宽。
 fn rr3_watchdog(t0: Instant, beats: usize) {
-    let wd_budget =
-        Duration::from_secs(WATCHDOG_BASE_SECS + beats as u64 * WATCHDOG_PER_BEAT_MS / 1000);
+    let wd_budget = rr3_wd_budget(beats);
     thread::spawn(move || loop {
         thread::sleep(Duration::from_millis(200));
         if t0.elapsed() > wd_budget {
@@ -289,6 +294,11 @@ fn rr3_watchdog(t0: Instant, beats: usize) {
             std::process::exit(2);
         }
     });
+}
+
+/// 看门狗预算：基准 + 每拍放宽量。
+fn rr3_wd_budget(beats: usize) -> Duration {
+    Duration::from_secs(WATCHDOG_BASE_SECS + beats as u64 * WATCHDOG_PER_BEAT_MS / 1000)
 }
 
 /// 打开串口：打不开 = 环境性失败（exit 2，与判据 FAIL=1 分开）。
@@ -567,6 +577,11 @@ fn rt_frame_kind(ty: Rr3PayloadType, id: u64, m: Option<&str>, v: &Value) -> RtF
     if ty == Rr3PayloadType::Request {
         return RtFrame::Skip; // 心跳并发到达，跳过再等
     }
+    rt_shape_fail(ty, id, m)
+}
+
+/// 既非命中亦非跳过：形状错点名后记失败。
+fn rt_shape_fail(ty: Rr3PayloadType, id: u64, m: Option<&str>) -> RtFrame {
     eprintln!(
         "FAIL  round-trip 应答形状错: {ty:?}/id={id}/{}",
         m.unwrap_or("-")

@@ -165,13 +165,19 @@ fn axis_entries(dir: &Path, errs: &mut Vec<String>) -> Option<Vec<PathBuf>> {
 /// 独立校验，坏几个报几个），由调用方统一入 errs——判断面与收集面分离。
 fn axis_row_of(path: &Path) -> Result<(String, u32, u32, u32), Vec<String>> {
     let (stem, center, lo, hi) = axis_core(path)?;
+    axis_window_ok(path, center, lo, hi)?;
+    Ok((stem, lo, hi, center))
+}
+
+/// 行程窗口自洽门：须 `lo < center < hi`。
+fn axis_window_ok(path: &Path, center: u32, lo: u32, hi: u32) -> Result<(), Vec<String>> {
     if !(lo < center && center < hi) {
         return Err(vec![format!(
             "{} 行程窗口不自洽：须 lo < center < hi（{lo} < {center} < {hi}）",
             path.display()
         )]);
     }
-    Ok((stem, lo, hi, center))
+    Ok(())
 }
 
 /// 身份、三键取数：`(stem, center, lo, hi)`；坏几个报几个。

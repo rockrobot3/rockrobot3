@@ -417,13 +417,19 @@ fn rr3_stage_names(cfg: &Rr3PackConfig) -> Result<Vec<String>, String> {
 /// 两个入口产物在场门（缺席逐件点名）。
 fn rr3_payload_bins(cfg: &Rr3PackConfig) -> Result<(), String> {
     for bin in ["rrd", "rr3-ctl"] {
-        let p = cfg.payload.join(bin);
-        if !p.is_file() {
-            return Err(format!(
-                "注入产物 {bin} 缺席: {}（约定 --payload 下有 rrd、rr3-ctl、rr3-modules/<name>/{{bin,manifest.toml}}）",
-                p.display()
-            ));
-        }
+        rr3_bin_ready(cfg, bin)?;
+    }
+    Ok(())
+}
+
+/// 单件注入产物在场门（缺席点名）。
+fn rr3_bin_ready(cfg: &Rr3PackConfig, bin: &str) -> Result<(), String> {
+    let p = cfg.payload.join(bin);
+    if !p.is_file() {
+        return Err(format!(
+            "注入产物 {bin} 缺席: {}（约定 --payload 下有 rrd、rr3-ctl、rr3-modules/<name>/{{bin,manifest.toml}}）",
+            p.display()
+        ));
     }
     Ok(())
 }
@@ -542,9 +548,18 @@ fn rr3_truth_ready(
     // 拒出包——出包时红比装机 boot 红早一个环节（块-15：装载必需件缺席而装机验证全绿
     // 才是最贵的洞）；预验同时给出 [platform].chip，平台事实表按它选册。
     let profile = rr3_profile_precheck(&profile_src)?;
-    let truth = rrd::profile::rr3_truth_set(&profile, &cfg.profile);
-    rr3_truth_missing(cfg, &truth)?;
+    let truth = rr3_truth_collect(cfg, &profile)?;
     Ok((profile_name, truth))
+}
+
+/// 真值集构造 + 缺册门（清单真值只有 rrd `rr3_truth_set` 一份）。
+fn rr3_truth_collect(
+    cfg: &Rr3PackConfig,
+    profile: &rrd::profile::Rr3Profile,
+) -> Result<rrd::profile::Rr3RuntimeTruthSet, String> {
+    let truth = rrd::profile::rr3_truth_set(profile, &cfg.profile);
+    rr3_truth_missing(cfg, &truth)?;
+    Ok(truth)
 }
 
 /// 装载消费真值集缺册门（缺任一必需册即拒出包）。
@@ -604,11 +619,21 @@ fn rr3_stage_manifest(
     name: &str,
 ) -> Result<(rrd::manifest::Rr3ManifestFacts, PathBuf), String> {
     let (text, facts) = rr3_mod_facts(mod_src, name)?;
-    fs::create_dir_all(staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
-    rr3_stage_toml_write(staged, name, &text, &facts)?;
+    rr3_stage_mod_write(staged, name, &text, &facts)?;
     let entry_path = staged.join(&facts.entry);
     rr3_stage_entry_dir(&entry_path)?;
     Ok((facts, entry_path))
+}
+
+/// manifest 改写落位（entry 父目录由调用方按装机路径再就绪）。
+fn rr3_stage_mod_write(
+    staged: &Path,
+    name: &str,
+    text: &str,
+    facts: &rrd::manifest::Rr3ManifestFacts,
+) -> Result<(), String> {
+    fs::create_dir_all(staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
+    rr3_stage_toml_write(staged, name, text, facts)
 }
 
 /// manifest 改写（entry 装机绝对化）后落位。

@@ -45,11 +45,15 @@ const RR3_NAME_HEAD: &str = "rr3-";
 /// 词干必须匹配方案 §4 的 `^rr3-[a-z]+$`（小写字母，不含数字/连字符），长度 2..=24
 fn rr3_mkmod_stem(name: &str) -> Result<String, Rr3MkmodError> {
     let stem = name.strip_prefix(RR3_NAME_HEAD).unwrap_or(name);
-    let ok = stem.len() >= 2 && stem.len() <= 24 && stem.chars().all(|c| c.is_ascii_lowercase());
-    if !ok {
+    if !rr3_mkmod_stem_ok(stem) {
         return Err(Rr3MkmodError::InvalidName(name.to_string()));
     }
     Ok(format!("{RR3_NAME_HEAD}{stem}"))
+}
+
+/// 词干形制：2..=24 个小写 ASCII 字母。
+fn rr3_mkmod_stem_ok(stem: &str) -> bool {
+    (2..=24).contains(&stem.len()) && stem.chars().all(|c| c.is_ascii_lowercase())
 }
 
 fn module_toml(id: &str) -> String {
@@ -215,6 +219,11 @@ fn rr3_mkmod_stage(staging: &Path, files: &[(&str, String)]) -> Result<(), Rr3Mk
     let _ = std::fs::remove_dir_all(staging);
     std::fs::create_dir_all(staging.join("src"))?;
     rr3_mkmod_write(staging, files)?;
+    rr3_mkmod_gate(staging)
+}
+
+/// manifest 回灌门（不合规即整体丢弃，不留半成品）。
+fn rr3_mkmod_gate(staging: &Path) -> Result<(), Rr3MkmodError> {
     let report = rr_registry::rr3_manifest_gate(&staging.join("module.toml"));
     if !report.ok() {
         let _ = std::fs::remove_dir_all(staging);

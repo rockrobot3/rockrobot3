@@ -151,12 +151,18 @@ mod run {
             .stderr(Stdio::inherit())
             .status()
             .map_err(|e| format!("起 {RR3_DRILL_PUBLISHER} 失败: {e}"))?;
-        if !st.success() {
-            return Err(rr3_pub_fail(st, log_path));
-        }
+        rr3_pub_ready(st, log_path)?;
         report.push_str(&format!(
             "{RR3_DRILL_PUBLISHER} 已发布 {RR3_SIM_B_TOPIC} 并退场（exit {st}）\n"
         ));
+        Ok(())
+    }
+
+    /// 发布者必须以 0 退场。
+    fn rr3_pub_ready(st: std::process::ExitStatus, log_path: &Path) -> Result<(), String> {
+        if !st.success() {
+            return Err(rr3_pub_fail(st, log_path));
+        }
         Ok(())
     }
 
@@ -255,10 +261,11 @@ mod run {
 
     /// ota 预期恒拒：成功反而是意外，两种形态都写进报告。
     fn rr3_ota_report(rrctl: &Path, socket: &Path, report: &mut String) {
-        match rr3_ctl_maybe_fail(rrctl, socket, "ota") {
-            Ok(out) => report.push_str(&format!("意外成功：\n{out}")),
-            Err((code, out)) => report.push_str(&format!("按预期被拒（exit {code}）:\n{out}")),
-        }
+        let text = rr3_ctl_maybe_fail(rrctl, socket, "ota").map_or_else(
+            |(code, out)| format!("按预期被拒（exit {code}）:\n{out}"),
+            |out| format!("意外成功：\n{out}"),
+        );
+        report.push_str(&text);
     }
 
     /// 6. sim 设备源不变量（rr-hal 同一种流）。

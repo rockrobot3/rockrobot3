@@ -255,9 +255,16 @@ fn rr3_brain_done(
             report.push_str(ok_line);
             Ok(report)
         }
-        Err(e) if keep => Err(e),
-        Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
+        Err(e) => Err(rr3_brain_fail(e, workdir, keep)),
     }
+}
+
+/// 失败面：`--keep` 原样带回；否则补现场日志位置。
+fn rr3_brain_fail(e: String, workdir: &Path, keep: bool) -> String {
+    if keep {
+        return e;
+    }
+    format!("{e}\n（现场日志在 {workdir:?}）")
 }
 
 /// 演练二进制集（定位 + 存在性校验一次做完）。
@@ -527,6 +534,11 @@ fn rr3_brain_logs_wait(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), Str
     report.push_str(&format!(
         "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
     ));
+    rr3_interact_trace(ctx, report)
+}
+
+/// interact 播放留痕（brain 的 rr3.call 播放点名已应答）。
+fn rr3_interact_trace(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), String> {
     let interact_log = ctx.fix.workdir.join("interact.log");
     wait_log_contains(&interact_log, RR3_INTERACT_TTS_MARK, rr3_brain_ready_at())?;
     report.push_str(&format!(
@@ -606,18 +618,22 @@ pub(crate) fn wait_log_contains(
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    let tail: String = seen
-        .lines()
+    Err(format!(
+        "超时（{deadline:?}）：日志 {path:?} 未出现「{needle}」\n日志尾部:\n{}",
+        rr3_log_tail(&seen)
+    ))
+}
+
+/// 日志尾部：末 15 行，保持原序。
+fn rr3_log_tail(seen: &str) -> String {
+    seen.lines()
         .rev()
         .take(15)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect::<Vec<_>>()
-        .join("\n");
-    Err(format!(
-        "超时（{deadline:?}）：日志 {path:?} 未出现「{needle}」\n日志尾部:\n{tail}"
-    ))
+        .join("\n")
 }
 
 /// 日志里首个含 `needle` 的行（无则 None）。

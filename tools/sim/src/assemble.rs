@@ -367,13 +367,23 @@ fn rr3_copy_node(ent: &std::fs::DirEntry, dst: &Path) -> Result<(), String> {
 /// 调用方，不删其父目录。回（目录是否归本次演练所有, workdir, socket）。
 fn rr3_drill_stage(a: &Rr3SimArgs) -> Result<(bool, PathBuf, PathBuf), String> {
     let (owned_dir, workdir) = rr3_stage_workdir(a);
-    if owned_dir {
-        let _ = std::fs::remove_dir_all(&workdir);
-    }
-    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
-    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
+    rr3_stage_reset_dir(owned_dir, &workdir)?;
+    let socket = rr3_stage_socket(a, &workdir);
     let _ = std::fs::remove_file(&socket);
     Ok((owned_dir, workdir, socket))
+}
+
+/// 目录重置：归本次演练所有才删，随后建空目录。
+fn rr3_stage_reset_dir(owned_dir: bool, workdir: &Path) -> Result<(), String> {
+    if owned_dir {
+        let _ = std::fs::remove_dir_all(workdir);
+    }
+    std::fs::create_dir_all(workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))
+}
+
+/// 套接字位置：显式 `--socket` 优先，否则 workdir 下的 bus.sock。
+fn rr3_stage_socket(a: &Rr3SimArgs, workdir: &Path) -> PathBuf {
+    a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"))
 }
 
 /// 工作目录归属与位置：显式 `--socket` 归调用方（取其父目录），否则按 pid+戳唯一。
