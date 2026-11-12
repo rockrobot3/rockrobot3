@@ -214,22 +214,29 @@ fn rr3_comp_unit(comp: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut V
 
 /// atoms（⊗ 链）：非空数组、每条非空串、不重复。
 fn rr3_comp_atoms(asm: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
-    let items = match asm.get("atoms") {
-        Some(Value::Array(items)) => items,
-        Some(other) => {
-            errs.push(format!("[assemble].atoms 应为数组，收到 {other:?}"));
-            return;
-        }
-        None => {
-            errs.push("[assemble] 缺 atoms 键（组合件必须申报装配了哪些原子件）".into());
-            return;
-        }
+    let Some(items) = rr3_comp_atom_items(asm, errs) else {
+        return;
     };
     if items.is_empty() {
         errs.push("[assemble].atoms 不得为空（组合件至少装配一个原子件）".into());
     }
     for (i, item) in items.iter().enumerate() {
         rr3_atom_item(item, i, facts, errs);
+    }
+}
+
+/// `atoms` 数组取形：缺键/非数组各自点名后回 None。
+fn rr3_comp_atom_items<'a>(asm: &'a toml::Table, errs: &mut Vec<String>) -> Option<&'a Vec<Value>> {
+    match asm.get("atoms") {
+        Some(Value::Array(items)) => Some(items),
+        Some(other) => {
+            errs.push(format!("[assemble].atoms 应为数组，收到 {other:?}"));
+            None
+        }
+        None => {
+            errs.push("[assemble] 缺 atoms 键（组合件必须申报装配了哪些原子件）".into());
+            None
+        }
     }
 }
 

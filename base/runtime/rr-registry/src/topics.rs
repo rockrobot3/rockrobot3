@@ -60,32 +60,37 @@ pub fn rr3_topic_parse(text: &str) -> Rr3TopicSet {
         ..Default::default()
     };
     for t in entries(&root, "topic") {
-        let Some(name) = t.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        set.topics.insert(
-            name.to_string(),
-            t.get("owner")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-        );
-        set.kinds.insert(
-            name.to_string(),
-            t.get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-        );
-        if let Some(st) = t.get("status").and_then(Value::as_str) {
-            if !st.is_empty() {
-                set.statuses.insert(name.to_string(), st.to_string());
-            }
-        }
+        rr3_topic_add(&mut set, t);
     }
     set.owners.sort();
     set.owners.dedup();
     set
+}
+
+/// 单条 `[[topic]]`：名字缺省即跳过；owner/kind 缺省空串，status 非空才入册。
+fn rr3_topic_add(set: &mut Rr3TopicSet, t: &toml::Table) {
+    let Some(name) = t.get("name").and_then(Value::as_str) else {
+        return;
+    };
+    set.topics.insert(
+        name.to_string(),
+        t.get("owner")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    );
+    set.kinds.insert(
+        name.to_string(),
+        t.get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    );
+    if let Some(st) = t.get("status").and_then(Value::as_str) {
+        if !st.is_empty() {
+            set.statuses.insert(name.to_string(), st.to_string());
+        }
+    }
 }
 
 impl Rr3TopicSet {

@@ -149,12 +149,17 @@ fn rr3_audio_stop(conn: &mut Rr3UartConn) -> Result<(), String> {
         .map_err(|e| format!("flush 失败: {e}"))?;
     conn.write_all(b"AUDIO OFF\n")
         .map_err(|e| format!("发防御 AUDIO OFF 失败: {e}"))?;
+    rr3_audio_off_drain(conn);
+    conn.rr3_flush_input()
+        .map_err(|e| format!("二次 flush 失败: {e}"))
+}
+
+/// 防御 OFF 的应答读了即弃（残流混行不解析），未收到留痕（d4 排障教训）。
+fn rr3_audio_off_drain(conn: &mut Rr3UartConn) {
     match read_reply_line(conn) {
         Ok(l) => eprintln!("[audio] 防御 OFF 应答: {:?}", rr3_log_head(&l, 120)),
         Err(e) => eprintln!("[audio] 防御 OFF 应答未收到（残流/宿主侧静默，继续）: {e}"),
     }
-    conn.rr3_flush_input()
-        .map_err(|e| format!("二次 flush 失败: {e}"))
 }
 
 /// ON 应答等待段：逐行扫 `OK audio on`（判据见 [`ok_reply_line`]），总预算

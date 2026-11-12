@@ -93,6 +93,21 @@ pub fn rr3_baud_parse(s: &str) -> Option<u32> {
 /// 侧不换形）；全缺 = `None`（无板侧配置可注）。独立纯函数：键位/换形可单测。
 fn rr3_board_payload(b: &Rr3HalBindings) -> Option<Value> {
     let mut m = Map::new();
+    rr3_board_pins(&mut m, b);
+    if let Some(v) = &b.cred_store {
+        m.insert(
+            RR3_BOARD_BINDING_CRED_STORE.to_string(),
+            json!(v.to_string()),
+        );
+    }
+    if m.is_empty() {
+        return None;
+    }
+    Some(Value::Object(m))
+}
+
+/// 十个板侧引脚键逐键入载荷：`Some` 者按十进制字符串写（描述符值全字符串同形）。
+fn rr3_board_pins(m: &mut Map<String, Value>, b: &Rr3HalBindings) {
     let pins: [(&str, Option<u8>); 10] = [
         (RR3_BOARD_BINDING_I2C_SDA, b.i2c_sda),
         (RR3_BOARD_BINDING_I2C_SCL, b.i2c_scl),
@@ -110,16 +125,6 @@ fn rr3_board_payload(b: &Rr3HalBindings) -> Option<Value> {
             m.insert(key.to_string(), json!(v.to_string()));
         }
     }
-    if let Some(v) = &b.cred_store {
-        m.insert(
-            RR3_BOARD_BINDING_CRED_STORE.to_string(),
-            json!(v.to_string()),
-        );
-    }
-    if m.is_empty() {
-        return None;
-    }
-    Some(Value::Object(m))
 }
 
 /// 板侧绑定载荷取环境（[`RR3_HAL_BINDINGS_ENV`] → 同形解析 → 载荷）。返回 `None`
@@ -143,6 +148,23 @@ fn rr3_env_bindings() -> Option<Value> {
         }
     };
     rr3_board_payload(&b)
+}
+
+/// 开口后定档：净化输入队列 + 应答窗口。失败当场点名（细节落日志）后折 Busy。
+fn rr3_conn_ready(c: &Rr3UartConn, path: &std::path::Path) -> Result<(), Rr3HalError> {
+    // settle 后补冲：开口触发的 DTR/RTS 复位让板端 banner 在开口
+    // flush 之后才进队（批C e2e 实证 BadMagic），首帧前必须净化。
+    if let Err(e) = c.rr3_flush_input() {
+        eprintln!("rr-hal-esp32: 开口净化失败 {}: {e}", path.display());
+        return Err(Rr3HalError::Busy);
+    }
+    // 应答窗口一开口就定档：本连接的一切 rr3_recv_buf 都带同一静默
+    // 上限（见 [`RR3_REPLY_WAIT_DS`]）——板死/断线时调用线程必能醒来。
+    if let Err(e) = c.rr3_set_read_timeout(RR3_REPLY_WAIT_DS) {
+        eprintln!("rr-hal-esp32: 设应答窗口失败 {}: {e}", path.display());
+        return Err(Rr3HalError::Busy);
+    }
+    Ok(())
 }
 
 /// UART 长连接 + 请求 id 计数（servo/display 两实例面共用的连接盒）。
@@ -175,18 +197,7 @@ impl Rr3BridgeConn {
         match Rr3UartConn::open_with_baud(&self.path, self.baud) {
             Ok(c) => {
                 std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
-                // settle 后补冲：开口触发的 DTR/RTS 复位让板端 banner 在开口
-                // flush 之后才进队（批C e2e 实证 BadMagic），首帧前必须净化。
-                if let Err(e) = c.rr3_flush_input() {
-                    eprintln!("rr-hal-esp32: 开口净化失败 {}: {e}", self.path.display());
-                    return Err(Rr3HalError::Busy);
-                }
-                // 应答窗口一开口就定档：本连接的一切 rr3_recv_buf 都带同一静默
-                // 上限（见 [`RR3_REPLY_WAIT_DS`]）——板死/断线时调用线程必能醒来。
-                if let Err(e) = c.rr3_set_read_timeout(RR3_REPLY_WAIT_DS) {
-                    eprintln!("rr-hal-esp32: 设应答窗口失败 {}: {e}", self.path.display());
-                    return Err(Rr3HalError::Busy);
-                }
+                rr3_conn_ready(&c, &self.path)?;
                 self.conn = Some(c);
                 // 板侧绑定推送（批N4 件七(b) 基-24 桥上配置腿）：每次（重）开连接
                 // 都推——板侧重启或连接重建后注入态随之恢复，板侧覆盖语义幂等。

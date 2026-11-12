@@ -205,6 +205,24 @@ pub struct Rr3Header {
     pub payload_crc32: u32,
 }
 
+/// 保留区必须全零（线上形状漂移的当场签名）。
+fn rr3_reserved_zero(buf: &[u8]) -> bool {
+    buf[OFF_RESERVED..OFF_RESERVED + LEN_RESERVED]
+        .iter()
+        .all(|&b| b == 0)
+}
+
+/// 头层前置判据：magic 对齐 + 保留区全零（形状漂移的当场签名）。
+fn rr3_hdr_precheck(magic: u32, buf: &[u8]) -> Result<(), Rr3HdrError> {
+    if magic != MAGIC {
+        return Err(Rr3HdrError::BadMagic { got: magic });
+    }
+    if !rr3_reserved_zero(buf) {
+        return Err(Rr3HdrError::ReservedNotZero);
+    }
+    Ok(())
+}
+
 impl Rr3Header {
     /// 广播目标（dst_task = 0，标准不为其设独立标志位）
     pub fn rr3_hdr_broadcast(opcode: u16, payload_len: u32) -> Self {
@@ -233,15 +251,7 @@ impl Rr3Header {
         let u64le = |o: usize| u64::from_le_bytes(buf[o..o + 8].try_into().unwrap());
 
         let magic = u32le(OFF_MAGIC);
-        if magic != MAGIC {
-            return Err(Rr3HdrError::BadMagic { got: magic });
-        }
-        if buf[OFF_RESERVED..OFF_RESERVED + LEN_RESERVED]
-            .iter()
-            .any(|&b| b != 0)
-        {
-            return Err(Rr3HdrError::ReservedNotZero);
-        }
+        rr3_hdr_precheck(magic, buf)?;
         let payload_len = u32le(OFF_PAYLOAD_LEN);
         if payload_len > MAX_PAYLOAD_LEN {
             return Err(Rr3HdrError::PayloadTooLarge { len: payload_len });

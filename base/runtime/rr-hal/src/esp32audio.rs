@@ -448,23 +448,29 @@ fn rr3_recon_round(core: &Rr3Esp32AudioCore, fails: &mut u64) -> Rr3ReconStep {
             return Rr3ReconStep::Stop;
         }
         match rr3_esp32_audio_open(&core.path, core.baud) {
-            Ok(c) => {
-                core.reconnects.fetch_add(1, Ordering::Relaxed);
-                eprintln!("rr-hal-esp32-audio: 重连成功（第 {attempt}/{HANDSHAKE_TRIES} 轮）");
-                return Rr3ReconStep::Conn(c);
-            }
-            Err(e) => {
-                *fails += 1;
-                if rr3_recon_log_now(*fails) {
-                    eprintln!(
-                        "rr-hal-esp32-audio: 重连第 {attempt}/{HANDSHAKE_TRIES} 轮失败（累计 {fails} 次）: {e}"
-                    );
-                }
-            }
+            Ok(c) => return rr3_recon_ok(core, attempt, c),
+            Err(e) => rr3_recon_fail(attempt, fails, &e),
         }
         std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
     }
     Rr3ReconStep::Spent
+}
+
+/// 单轮重开成功：计数 + 点名并交回连接。
+fn rr3_recon_ok(core: &Rr3Esp32AudioCore, attempt: u32, c: Rr3UartConn) -> Rr3ReconStep {
+    core.reconnects.fetch_add(1, Ordering::Relaxed);
+    eprintln!("rr-hal-esp32-audio: 重连成功（第 {attempt}/{HANDSHAKE_TRIES} 轮）");
+    Rr3ReconStep::Conn(c)
+}
+
+/// 单轮重开失败：累计计数，按打点判据点名。
+fn rr3_recon_fail(attempt: u32, fails: &mut u64, e: &str) {
+    *fails += 1;
+    if rr3_recon_log_now(*fails) {
+        eprintln!(
+            "rr-hal-esp32-audio: 重连第 {attempt}/{HANDSHAKE_TRIES} 轮失败（累计 {fails} 次）: {e}"
+        );
+    }
 }
 
 /// 轮摘要打点（每 [`RR3_RECON_ROUND_LOG_EVERY`] 轮一条）。
@@ -693,10 +699,7 @@ fn rr3_esp32_stream(
 
 /// 每拍会话杂务：统计窗、宿主心跳、命令旁路排水；`false` = 连接坏需重连。
 fn rr3_stream_beat(core: &Rr3Esp32AudioCore, c: &mut Rr3UartConn, st: &mut Rr3ReaderState) -> bool {
-    if st.stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
-        st.stat_at = Instant::now();
-        rr3_stat_tick(core, &mut st.stat_mark);
-    }
+    rr3_stat_maybe(core, st);
     // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
     // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
     if !rr3_ping(c, &mut st.ping_at) {
@@ -713,6 +716,14 @@ fn rr3_stream_beat(core: &Rr3Esp32AudioCore, c: &mut Rr3UartConn, st: &mut Rr3Re
         return false;
     }
     true
+}
+
+/// 统计窗到期即出窗（帧数/坏帧/重连增量打点，10min 一条）。
+fn rr3_stat_maybe(core: &Rr3Esp32AudioCore, st: &mut Rr3ReaderState) {
+    if st.stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
+        st.stat_at = Instant::now();
+        rr3_stat_tick(core, &mut st.stat_mark);
+    }
 }
 
 /// 一拍新数据：原始流 tee → 拆帧 → 逐帧落账。
@@ -764,25 +775,28 @@ fn rr3_read_step(
             eprintln!("rr-hal-esp32-audio: 读失败: {e} → 重连");
             Rr3ReadStep::Reconnect
         }
-        Ok(0) => {
-            // 此刻无数据（EOF 形状）；见过数据后连续零读 = 断流
-            if *seen {
-                *zeros += 1;
-                if *zeros >= RESYNC_ZERO_BAIL {
-                    eprintln!(
-                        "rr-hal-esp32-audio: 断流（连续 {RESYNC_ZERO_BAIL}×{READ_TIMEOUT_MS}ms 静默）→ 重连"
-                    );
-                    return Rr3ReadStep::Reconnect;
-                }
-            }
-            Rr3ReadStep::Data(0)
-        }
+        Ok(0) => rr3_read_zero(zeros, *seen),
         Ok(n) => {
             *zeros = 0;
             *seen = true;
             Rr3ReadStep::Data(n)
         }
     }
+}
+
+/// 零读一拍的裁决：见过数据后连续静默达阈值即判断流。
+fn rr3_read_zero(zeros: &mut u32, seen: bool) -> Rr3ReadStep {
+    // 此刻无数据（EOF 形状）；见过数据后连续零读 = 断流
+    if seen {
+        *zeros += 1;
+        if *zeros >= RESYNC_ZERO_BAIL {
+            eprintln!(
+                "rr-hal-esp32-audio: 断流（连续 {RESYNC_ZERO_BAIL}×{READ_TIMEOUT_MS}ms 静默）→ 重连"
+            );
+            return Rr3ReadStep::Reconnect;
+        }
+    }
+    Rr3ReadStep::Data(0)
 }
 
 /// 会话内「只打一次」观测旗标（跨重连保留：首帧就绪/首次溢丢/首条回执各打一行）。

@@ -35,21 +35,23 @@ pub struct Rr3DependsFacts {
 fn string_list(root: &Value, path: &str, errs: &mut Vec<String>) -> Vec<String> {
     match rr3_get_by_path(root, path).and_then(Value::as_array) {
         None => vec![],
-        Some(arr) => {
-            let mut out = Vec::new();
-            for (idx, item) in arr.iter().enumerate() {
-                match item.as_str() {
-                    // 非字符串项必须报告，不许被 filter_map 静默吞掉（fail-open）
-                    Some(s) => out.push(s.to_string()),
-                    None => errs.push(format!(
-                        "{path} 第 {} 项应为字符串，实际为 {item:?}",
-                        idx + 1
-                    )),
-                }
-            }
-            out
+        Some(arr) => rr3_str_items(arr, path, errs),
+    }
+}
+
+/// 数组项逐条收为字符串：非字符串项必须报告，不许被 filter_map 静默吞掉（fail-open）。
+fn rr3_str_items(arr: &[Value], path: &str, errs: &mut Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for (idx, item) in arr.iter().enumerate() {
+        match item.as_str() {
+            Some(s) => out.push(s.to_string()),
+            None => errs.push(format!(
+                "{path} 第 {} 项应为字符串，实际为 {item:?}",
+                idx + 1
+            )),
         }
     }
+    out
 }
 
 /// 不可满足错误行（唯一拼装点）：`resolve` 生成、`plan_boot` 按前缀归还给点名模块。
@@ -316,10 +318,21 @@ fn rr3_edges_one(
         if base.contains(cap) {
             continue;
         }
-        for (pi, g) in facts.iter().enumerate() {
-            if !excluded.contains(&g.name) && g.provides.iter().any(|p| p == cap) {
-                edges.insert((ci, pi));
-            }
+        rr3_edges_cap(ci, cap, facts, excluded, edges);
+    }
+}
+
+/// 单个能力的供给边：未剔除模块中 `provides` 命中者即建边。
+fn rr3_edges_cap(
+    ci: usize,
+    cap: &str,
+    facts: &[Rr3DependsFacts],
+    excluded: &BTreeSet<String>,
+    edges: &mut BTreeSet<(usize, usize)>,
+) {
+    for (pi, g) in facts.iter().enumerate() {
+        if !excluded.contains(&g.name) && g.provides.iter().any(|p| p == cap) {
+            edges.insert((ci, pi));
         }
     }
 }
@@ -389,13 +402,16 @@ fn rr3_plan_drop(facts: &[Rr3DependsFacts], excluded: &mut BTreeSet<String>, err
         if excluded.contains(&f.name) {
             continue;
         }
-        if errs
-            .iter()
-            .any(|e| e.starts_with(&unsatisfiable_prefix(&f.name)))
-        {
+        if rr3_plan_unsat(&f.name, errs) {
             excluded.insert(f.name.clone());
         }
     }
+}
+
+/// 错误行是否点名该消费者（前缀由 `unsatisfiable_error` 唯一拼装，与此同源）。
+fn rr3_plan_unsat(name: &str, errs: &[String]) -> bool {
+    errs.iter()
+        .any(|e| e.starts_with(&unsatisfiable_prefix(name)))
 }
 
 /// [`rr3_plan_boot`] 的回报。字段语义见该函数文档。
