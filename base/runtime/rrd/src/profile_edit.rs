@@ -94,17 +94,21 @@ fn rr3_domain_heads(lines: &[String]) -> Vec<(usize, bool)> {
     lines
         .iter()
         .enumerate()
-        .filter_map(|(i, raw)| {
-            let t = raw.trim_start();
-            if t == "[[supplies.domain]]" {
-                Some((i, true))
-            } else if t.starts_with('[') {
-                Some((i, false))
-            } else {
-                None
-            }
-        })
+        .filter_map(|(i, raw)| rr3_head_kind(raw.trim_start()).map(|d| (i, d)))
         .collect()
+}
+
+/// 块头判据（纯函数）：`[[supplies.domain]]` 后只许空白或行内注释（TOML 允许
+/// 头行带注释，装载期照收；旧判据按整行等值，带注释/尾空白的头行认不出——
+/// 其域会被误报"缺域"，更坏时把键行算进邻块）。
+fn rr3_head_kind(t: &str) -> Option<bool> {
+    if let Some(rest) = t.strip_prefix("[[supplies.domain]]") {
+        let rest = rest.trim_start();
+        if rest.is_empty() || rest.starts_with('#') {
+            return Some(true);
+        }
+    }
+    t.starts_with('[').then_some(false)
 }
 
 /// 键行引号串取值（单/双引号同义）：TOML 两形都合法、装载期都收——手术面的
