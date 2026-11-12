@@ -291,6 +291,15 @@ pub fn rr3_log_backfill() {
     // 丢弃（rr3_backfill_lines 的 drop_first）。
     const RR3_LOG_BACKFILL_TAIL_BYTES: u64 = 64 * 1024;
     let start = len.saturating_sub(RR3_LOG_BACKFILL_TAIL_BYTES);
+    // 起点前一个字节决定块首行是否残行：上一行以 '\n' 收尾即块首行完整，
+    // 不必丢（旧序无条件丢，每重启白丢一行历史）；读不到按残行保守处理。
+    let mut prev = None;
+    if start > 0 {
+        let mut one = [0u8; 1];
+        if f.seek(SeekFrom::Start(start - 1)).is_ok() && f.read_exact(&mut one).is_ok() {
+            prev = Some(one[0]);
+        }
+    }
     if f.seek(SeekFrom::Start(start)).is_err() {
         return;
     }
@@ -303,7 +312,7 @@ pub fn rr3_log_backfill() {
     }
     let text = String::from_utf8_lossy(&bytes);
     let cap = rr3_log_ring_cap();
-    let lines = rr3_backfill_lines(&text, start > 0, cap);
+    let lines = rr3_backfill_lines(&text, rr3_tail_head_partial(prev, start), cap);
     let mut ring = rr3_lock(rr3_log_ring());
     for line in lines {
         ring.push_front(line);
@@ -311,6 +320,12 @@ pub fn rr3_log_backfill() {
     while ring.len() > cap {
         ring.pop_front();
     }
+}
+
+/// 尾块首行是否残行（纯函数）：起点在文件头不算；否则看起点前一字节——上一行
+/// 以 '\n' 收尾即块首行完整。读不到前一字节（`prev=None`）按残行保守处理。
+fn rr3_tail_head_partial(prev: Option<u8>, start: u64) -> bool {
+    start > 0 && prev != Some(b'\n')
 }
 
 /// 回填行集（纯函数）：文本按行取尾 `cap` 行，按 push_front 消费序返回——
@@ -504,6 +519,15 @@ mod tests {
             rr3_backfill_lines("", true, 4).is_empty(),
             "空尾块 + drop_first 不得越界"
         );
+        // 块首是否残行：文件头不丢；前一字节是换行 = 完整行保留；否则丢；
+        // 前一字节读不到按残行保守处理
+        assert!(!rr3_tail_head_partial(Some(b'\n'), 0), "文件头无残行");
+        assert!(
+            !rr3_tail_head_partial(Some(b'\n'), 99),
+            "起点前一字节换行 = 块首行完整，不丢"
+        );
+        assert!(rr3_tail_head_partial(Some(b'x'), 99), "切在行中 = 残行");
+        assert!(rr3_tail_head_partial(None, 99), "前字节取不到按残行保守");
     }
 
     /// 目录派生单点：`<socket>.log` 后缀直拼，不解析不 canonicalize——supervisor
