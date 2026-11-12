@@ -72,17 +72,11 @@ pub struct Rr3CompositeFacts {
 /// 解析 + 全量形状校验一份组合件清单文本。fail-closed：一条不静默放行，
 /// 全部错误逐条点名（与件级装配清单同一口径）。
 pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>> {
-    let root: Value = match toml::from_str(text) {
-        Ok(v) => v,
-        Err(e) => return Err(vec![format!("组合件清单 TOML 解析失败: {e}")]),
-    };
-    let Some(t) = root.as_table() else {
-        return Err(vec![format!("组合件清单顶层必须是 TOML 表，收到 {root:?}")]);
-    };
+    let t = rr3_comp_root(text)?;
 
     let mut errs: Vec<String> = Vec::new();
     let mut facts = Rr3CompositeFacts::default();
-    rr3_comp_head(t, &mut facts, &mut errs);
+    rr3_comp_head(&t, &mut facts, &mut errs);
 
     // [assemble]：atoms 必填非空不重复；handles/ops/no_injection 与件级同规则。
     // 段缺同样只点名，让 schema/[composite] 的错误同批亮出。
@@ -92,29 +86,42 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
             "组合件清单缺 [assemble] 表（atoms 必填，handles / ops / no_injection 同件级规则）"
                 .into(),
         );
-        return if errs.is_empty() {
-            Ok(facts)
-        } else {
-            Err(errs)
-        };
+        return Err(errs);
     };
-    for k in asm.keys() {
-        if k != "atoms" && k != "handles" && k != "ops" && k != "no_injection" {
-            errs.push(format!(
-                "[assemble] 未知键 {k}（只认 atoms / handles / ops / no_injection）"
-            ));
-        }
-    }
-
-    rr3_comp_atoms(asm, &mut facts, &mut errs);
-
-    rr3_comp_surface(asm, &mut facts, &mut errs);
+    rr3_comp_asm(asm, &mut facts, &mut errs);
 
     if errs.is_empty() {
         Ok(facts)
     } else {
         Err(errs)
     }
+}
+
+/// 顶层 TOML 解析：语法错与"顶层非表"各自成条 Err（与旧实现逐字同文案）。
+fn rr3_comp_root(text: &str) -> Result<toml::Table, Vec<String>> {
+    let root: Value = match toml::from_str(text) {
+        Ok(v) => v,
+        Err(e) => return Err(vec![format!("组合件清单 TOML 解析失败: {e}")]),
+    };
+    match root.as_table() {
+        Some(t) => Ok(t.clone()),
+        None => Err(vec![format!("组合件清单顶层必须是 TOML 表，收到 {root:?}")]),
+    }
+}
+
+/// `[assemble]` 段整体：键域 + atoms 链 + 注入面。
+fn rr3_comp_asm(asm: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
+    for k in asm.keys() {
+        if !matches!(k.as_str(), "atoms" | "handles" | "ops" | "no_injection") {
+            errs.push(format!(
+                "[assemble] 未知键 {k}（只认 atoms / handles / ops / no_injection）"
+            ));
+        }
+    }
+
+    rr3_comp_atoms(asm, facts, errs);
+
+    rr3_comp_surface(asm, facts, errs);
 }
 
 /// 顶层形状段：顶层未知键、schema_version 域、`[composite]`（name / unit）。
@@ -126,25 +133,43 @@ fn rr3_comp_head(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<
 
 /// 顶层键域与版本域（只认 schema_version / composite / assemble）。
 fn rr3_comp_keys(t: &toml::Table, errs: &mut Vec<String>) {
-    // 顶层未知键点名（只认 schema_version / composite / assemble）
+    rr3_comp_top_keys(t, errs);
+    rr3_comp_schema(t, errs);
+}
+
+/// 顶层未知键点名（只认 schema_version / composite / assemble）。
+fn rr3_comp_top_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
-        if k != "schema_version" && k != "composite" && k != "assemble" {
+        if !matches!(k.as_str(), "schema_version" | "composite" | "assemble") {
             errs.push(format!(
                 "组合件清单顶层未知键 {k}（只认 schema_version / composite / assemble）"
             ));
         }
     }
-    // schema_version：组合件面自己的版本域（当前 1）。与件级 assemble.toml 的
-    // 2 是两个域——点名时把域差说清，防止"顺手改成 2 对齐件级"的误修。
-    match t.get("schema_version") {
-        Some(Value::Integer(v)) if *v == RR3_COMPOSITE_SCHEMA_VERSION as i64 => {}
-        Some(Value::Integer(v)) => errs.push(format!(
-            "组合件清单 schema_version 必须为 {RR3_COMPOSITE_SCHEMA_VERSION}，收到 {v}（组合件面与件级装配清单是两个版本域：件级 RR3_ASSEMBLE_SCHEMA_VERSION = 2，同名不同域，不互认不迁移）"
-        )),
-        Some(other) => errs.push(format!("组合件清单 schema_version 应为整数，收到 {other:?}")),
-        None => errs.push(format!(
+}
+
+/// schema_version：组合件面自己的版本域（当前 1）。与件级 assemble.toml 的
+/// 2 是两个域——点名时把域差说清，防止"顺手改成 2 对齐件级"的误修。
+fn rr3_comp_schema(t: &toml::Table, errs: &mut Vec<String>) {
+    let Some(v) = t.get("schema_version") else {
+        errs.push(format!(
             "组合件清单缺 schema_version（必须为 {RR3_COMPOSITE_SCHEMA_VERSION}）"
-        )),
+        ));
+        return;
+    };
+    rr3_comp_schema_val(v, errs);
+}
+
+/// schema_version 取值：缺与"非整数"分条，整数则比对版本域。
+fn rr3_comp_schema_val(v: &Value, errs: &mut Vec<String>) {
+    let Some(n) = v.as_integer() else {
+        errs.push(format!("组合件清单 schema_version 应为整数，收到 {v:?}"));
+        return;
+    };
+    if n != RR3_COMPOSITE_SCHEMA_VERSION as i64 {
+        errs.push(format!(
+            "组合件清单 schema_version 必须为 {RR3_COMPOSITE_SCHEMA_VERSION}，收到 {n}（组合件面与件级装配清单是两个版本域：件级 RR3_ASSEMBLE_SCHEMA_VERSION = 2，同名不同域，不互认不迁移）"
+        ));
     }
 }
 

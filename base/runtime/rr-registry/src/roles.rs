@@ -189,46 +189,71 @@ impl Rr3RoleTable {
         }
         let mut errs = Vec::new();
         for (name, e) in &self.roles {
-            if e.slot.is_empty() {
-                errs.push(format!(
-                    "role {name} 缺 slot 外键（→ contracts/slots.toml）"
-                ));
-            }
-            if !RR3_ROLE_KINDS.contains(&e.kind.as_str()) {
-                errs.push(format!(
-                    "role {name} 的 kind 非法: {}（封闭三值 {RR3_ROLE_KINDS:?}，§18 F-27）",
-                    e.kind
-                ));
-            }
-            if e.iface.is_empty() {
-                errs.push(format!(
-                    "role {name} 缺 iface 外键（→ RR3_ASSEMBLE_HANDLE_TRAITS）"
-                ));
-            }
-            // requires 空只在 kind=logic 上合法：logic 角色无 [pins] 物理绑定
-            // （链路/音频四格的真值住 [hardware] 与 board 具名装配），"没有必填
-            // 引脚字段"是事实而非缺写。signal/power 角色一律非空——引脚身份
-            // （controller/addr/physical 等）必须由角色说清，留空即红。
-            // 显式性由 CI 契约测试逐条点名钉住（与 derives 显式空的处置同款）。
-            if e.requires.is_empty() && e.kind != "logic" {
-                errs.push(format!(
-                    "role {name} 的 requires 为空（kind={} 无逻辑豁免，须列必填引脚字段）",
-                    e.kind
-                ));
-            }
-            if !RR3_ROLE_DIRECTIONS.contains(&e.direction.as_str()) {
-                errs.push(format!(
-                    "role {name} 的 direction 非法: {}（只允许 {RR3_ROLE_DIRECTIONS:?}）",
-                    e.direction
-                ));
-            }
-            // derives 允许显式空（批N3 件八放宽）：P-5 共读源角色（power.charger.meter
-            // 与 battery.meter 同一 INA219 读数面）与 placeholder 格角色（env/imu，
-            // 真后端未到无句柄消费）不派生注入键，维持"无第二真值点"。判空即红的
-            // 旧判据撤销——解析层无法区分"缺键"与"显式 []"，显式性由 CI 契约测试
-            // 逐条点名钉住（roles.rs / contract.rs 各一份名单）。
+            rr3_role_one(name, e, &mut errs);
         }
         errs
+    }
+}
+
+/// 单条角色的形状判据（判据与文案次序同旧实现）。
+fn rr3_role_one(name: &str, e: &Rr3RoleEntry, errs: &mut Vec<String>) {
+    rr3_role_slot_chk(name, e, errs);
+    rr3_role_kind_chk(name, e, errs);
+    rr3_role_iface_chk(name, e, errs);
+    rr3_role_req_chk(name, e, errs);
+    rr3_role_dir_chk(name, e, errs);
+    // derives 允许显式空（批N3 件八放宽）：P-5 共读源角色（power.charger.meter
+    // 与 battery.meter 同一 INA219 读数面）与 placeholder 格角色（env/imu，
+    // 真后端未到无句柄消费）不派生注入键，维持"无第二真值点"。判空即红的
+    // 旧判据撤销——解析层无法区分"缺键"与"显式 []"，显式性由 CI 契约测试
+    // 逐条点名钉住（roles.rs / contract.rs 各一份名单）。
+}
+
+fn rr3_role_slot_chk(name: &str, e: &Rr3RoleEntry, errs: &mut Vec<String>) {
+    if e.slot.is_empty() {
+        errs.push(format!(
+            "role {name} 缺 slot 外键（→ contracts/slots.toml）"
+        ));
+    }
+}
+
+fn rr3_role_kind_chk(name: &str, e: &Rr3RoleEntry, errs: &mut Vec<String>) {
+    if !RR3_ROLE_KINDS.contains(&e.kind.as_str()) {
+        errs.push(format!(
+            "role {name} 的 kind 非法: {}（封闭三值 {RR3_ROLE_KINDS:?}，§18 F-27）",
+            e.kind
+        ));
+    }
+}
+
+fn rr3_role_iface_chk(name: &str, e: &Rr3RoleEntry, errs: &mut Vec<String>) {
+    if e.iface.is_empty() {
+        errs.push(format!(
+            "role {name} 缺 iface 外键（→ RR3_ASSEMBLE_HANDLE_TRAITS）"
+        ));
+    }
+}
+
+/// requires 空只在 kind=logic 上合法：logic 角色无 [pins] 物理绑定
+/// （链路/音频四格的真值住 [hardware] 与 board 具名装配），"没有必填
+/// 引脚字段"是事实而非缺写。signal/power 角色一律非空——引脚身份
+/// （controller/addr/physical 等）必须由角色说清，留空即红。
+/// 显式性由 CI 契约测试逐条点名钉住（与 derives 显式空的处置同款）。
+fn rr3_role_req_chk(name: &str, e: &Rr3RoleEntry, errs: &mut Vec<String>) {
+    if e.requires.is_empty() && e.kind != "logic" {
+        errs.push(format!(
+            "role {name} 的 requires 为空（kind={} 无逻辑豁免，须列必填引脚字段）",
+            e.kind
+        ));
+    }
+}
+
+fn rr3_role_dir_chk(name: &str, e: &Rr3RoleEntry, errs: &mut Vec<String>) {
+    if !RR3_ROLE_DIRECTIONS.contains(&e.direction.as_str()) {
+        errs.push(format!(
+            "role {name} 的 direction 非法: {}（只允许 {RR3_ROLE_DIRECTIONS:?}）",
+            e.direction
+        ));
     }
 }
 
