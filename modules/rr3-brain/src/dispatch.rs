@@ -435,12 +435,18 @@ impl Rr3BrainDispatcher {
         if !self.cfg.wake.enable || self.cfg.wake.ack.trim().is_empty() {
             return;
         }
+        let (res, started) = self.rr3_ack_synth();
+        self.rr3_ack_take(res, started);
+    }
+
+    /// 固定唤醒语合成一次（返回结果与起算时刻，落账归调用方）。
+    fn rr3_ack_synth(&self) -> (Result<Vec<u8>, String>, Instant) {
         let started = Instant::now();
         let res = self
             .clients
             .tts
             .rr3_synthesize(&self.cfg.wake.ack, RR3_TTS_SAMPLE_RATE);
-        self.rr3_ack_take(res, started);
+        (res, started)
     }
 
     /// 预合成结果落账：非空 PCM 入表，空/失败只留痕（首轮按需重试）。
@@ -539,14 +545,7 @@ impl Rr3BrainDispatcher {
         // 随 intent/result 广播，执行器按 exposes 归属门各自认领（brain 不单播不
         // 等待）；只喂 user_text，机器人自己的 reply_text 不参与匹配
         let actions_n = self.rr3_turn_broadcast(bus, trace, &user_text, &reply_text, tts_ms)?;
-        self.dialog.rr3_record(Rr3DialogTurn {
-            user_text: user_text.clone(),
-            reply_text: reply_text.clone(),
-            trace_id: trace,
-        });
-        // 完成一轮才记账（计数点 = rr3_record 成功，方案 §4 归属表）。键名拆账
-        // （B-16①）：chat_rounds 一个词盖"应答"与"听见"两件事，退役拆两本
-        bus.counter_bump("rounds_replied", 1);
+        self.rr3_round_record(bus, trace, &user_text, &reply_text);
         eprintln!(
             "对话轮完成: trace={trace} user='{user_text}' reply='{reply_text}' asr_ms={asr_cost_ms} llm_ms={llm_cost_ms} tts_cost_ms={tts_cost_ms} ready_ms={ready_ms} tts_pcm_ms={tts_ms}{played} actions={actions_n}"
         );
@@ -556,6 +555,17 @@ impl Rr3BrainDispatcher {
         // 用户在机器人说完后拥有完整 followup_ms。
         self.last_wake_ms = Some(self.tb.rr3_now_ms());
         Ok(())
+    }
+
+    /// 轮末入账：对话历史登记 + 应答轮计数（计数点 = rr3_record 成功，方案 §4
+    /// 归属表）。键名拆账（B-16①）：`rounds_replied` 只记"应答发布完毕"。
+    fn rr3_round_record<B: Rr3TurnBus>(&mut self, bus: &B, trace: u64, user: &str, reply: &str) {
+        self.dialog.rr3_record(Rr3DialogTurn {
+            user_text: user.to_string(),
+            reply_text: reply.to_string(),
+            trace_id: trace,
+        });
+        bus.counter_bump("rounds_replied", 1);
     }
 
     /// 轮末意图广播：结构化 actions 随 intent/result 广播，执行器按 exposes
@@ -572,15 +582,26 @@ impl Rr3BrainDispatcher {
         let actions_n = actions.len();
         bus.publish(
             RR3_TOPIC_INTENT,
-            json!({
-                "trace": trace,
-                "user_text": user_text,
-                "reply_text": reply_text,
-                "tts_ms": tts_ms,
-                "actions": actions,
-            }),
+            Self::rr3_intent_body(trace, user_text, reply_text, tts_ms, actions),
         )?;
         Ok(actions_n)
+    }
+
+    /// 轮末意图广播体（一行对账所需的五个字段原样透传）。
+    fn rr3_intent_body(
+        trace: u64,
+        user_text: &str,
+        reply_text: &str,
+        tts_ms: u64,
+        actions: Vec<Value>,
+    ) -> Value {
+        json!({
+            "trace": trace,
+            "user_text": user_text,
+            "reply_text": reply_text,
+            "tts_ms": tts_ms,
+            "actions": actions,
+        })
     }
 
     /// 应答 PCM 折算毫秒：奇数长度截尾（Python `reply_pcm[:-1]` 同形状）后按 16k 计。
@@ -938,23 +959,26 @@ fn rr3_tts_burst_gap(i: usize) {
 /// 预合成结果分类：非空 PCM 入表，空/失败只留痕（首轮按需重试）。
 fn rr3_ack_pcm_of(started: Instant, res: Result<Vec<u8>, String>) -> Option<Vec<u8>> {
     match res {
-        Ok(pcm) if !pcm.is_empty() => {
-            eprintln!(
-                "唤醒应答预合成就绪: {}ms pcm_bytes={}",
-                started.elapsed().as_millis(),
-                pcm.len()
-            );
-            Some(pcm)
-        }
-        Ok(_) => {
-            eprintln!("唤醒应答预合成返回空 PCM，首个唤醒轮将按需重试");
-            None
-        }
+        Ok(pcm) => rr3_ack_pcm_hit(started, pcm),
         Err(e) => {
             eprintln!("唤醒应答预合成失败，首个唤醒轮将按需重试（{e}）");
             None
         }
     }
+}
+
+/// 预合成成功分支：非空 PCM 入表并点名耗时，空 PCM 只留痕（首轮按需重试）。
+fn rr3_ack_pcm_hit(started: Instant, pcm: Vec<u8>) -> Option<Vec<u8>> {
+    if pcm.is_empty() {
+        eprintln!("唤醒应答预合成返回空 PCM，首个唤醒轮将按需重试");
+        return None;
+    }
+    eprintln!(
+        "唤醒应答预合成就绪: {}ms pcm_bytes={}",
+        started.elapsed().as_millis(),
+        pcm.len()
+    );
+    Some(pcm)
 }
 
 #[cfg(test)]

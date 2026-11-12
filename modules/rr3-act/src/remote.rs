@@ -93,15 +93,20 @@ fn rr3_remote_axis(v: Option<&str>) -> Result<&'static str, String> {
     }
 }
 
+/// 单轴命令参数体 `{<axis>: deg}`（sense 命令面契约形状）。
+fn rr3_servo_deg_args(axis: &str, deg: u16) -> Value {
+    let mut args = Map::new();
+    args.insert(axis.to_string(), json!(deg));
+    Value::Object(args)
+}
+
 impl Rr3PwmServo for Rr3RemoteServo {
     fn set_angle(&mut self, deg: u16) -> Result<(), Rr3HalError> {
-        let mut args = Map::new();
-        args.insert(self.axis.to_string(), json!(deg));
-        match self.bus.call(
-            RR3_SENSE_SERVO_TOPIC,
-            &Value::Object(args),
-            RR3_REMOTE_TIMEOUT,
-        ) {
+        let args = rr3_servo_deg_args(self.axis, deg);
+        match self
+            .bus
+            .call(RR3_SENSE_SERVO_TOPIC, &args, RR3_REMOTE_TIMEOUT)
+        {
             Ok(_) => {
                 self.last.set(deg);
                 Ok(())

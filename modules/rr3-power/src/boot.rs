@@ -34,12 +34,17 @@ pub(crate) fn rr3_power_probe() -> Result<(Box<dyn Rr3Power>, &'static str, Rr3B
 pub(crate) fn rr3_rail_probe(cfg: &Rr3RailCfg) -> Result<(Box<dyn Rr3Rail>, &'static str), String> {
     let (rail_dev, rail_backend) = rr3_hal_rail();
     if cfg.up {
-        rail_dev
-            .rr3_read(&cfg.domain)
-            .map_err(|e| format!("轨压面探活失败({rail_backend}): {e}"))?;
-        eprintln!("轨压面就绪: {rail_backend} domain={}", cfg.domain);
+        rr3_rail_touch(rail_dev.as_ref(), rail_backend, &cfg.domain)?;
     }
     Ok((rail_dev, rail_backend))
+}
+
+/// 轨压面首读探活 + 就绪回显（up=false 是合法不适用，不探活）。
+fn rr3_rail_touch(dev: &dyn Rr3Rail, backend: &str, domain: &str) -> Result<(), String> {
+    dev.rr3_read(domain)
+        .map_err(|e| format!("轨压面探活失败({backend}): {e}"))?;
+    eprintln!("轨压面就绪: {backend} domain={domain}");
+    Ok(())
 }
 
 /// 两面探活 + 分发器构造：探活次序与就绪回显逐字不变，任一探活失败即致命。
@@ -218,14 +223,18 @@ fn rr3_u64(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String
 /// [`RR3_MIN_PERIOD_MS`] 并打一行（哪个键、原值、钳后值）。
 fn rr3_period(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String> {
     let raw = rr3_u64(sect, key, sect_name)?;
+    Ok(rr3_period_floor(key, sect_name, raw))
+}
+
+/// 周期下限钳制留痕（低于下限折 [`RR3_MIN_PERIOD_MS`] 并点名原值/钳后值）。
+fn rr3_period_floor(key: &str, sect_name: &str, raw: u64) -> u64 {
     if raw < RR3_MIN_PERIOD_MS {
         eprintln!(
             "config [rr3-power.{sect_name}] {key}={raw} 低于采样下限，钳到 {RR3_MIN_PERIOD_MS}ms（防读数自旋）"
         );
-        Ok(RR3_MIN_PERIOD_MS)
-    } else {
-        Ok(raw)
+        return RR3_MIN_PERIOD_MS;
     }
+    raw
 }
 
 /// 启动自述：模块名/版本行 + 电源面两原子件的 SURFACE 行（装配层调用）。

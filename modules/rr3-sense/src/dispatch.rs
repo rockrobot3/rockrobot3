@@ -260,14 +260,7 @@ impl Dispatcher for Rr3SenseDispatcher {
     /// 无关径直忽略。门控轮分隔/外推用真实时刻（原主循环 poll 排空逐字语义）。
     fn on_event(&mut self, topic: &str, body: &Value, _bus: &BusHandle) -> Result<(), String> {
         if topic == RR3_TTS_PCM_TOPIC {
-            if let Some(ms) = body.get("ms").and_then(Value::as_u64) {
-                self.tts_gate.rr3_tts_gate_feed(
-                    Instant::now(),
-                    ms,
-                    self.cfg.reflex.gate_gap_ms,
-                    self.cfg.reflex.gate_tail_ms,
-                );
-            }
+            self.rr3_gate_feed(body);
         }
         Ok(())
     }
@@ -285,6 +278,19 @@ impl Dispatcher for Rr3SenseDispatcher {
 }
 
 impl Rr3SenseDispatcher {
+    /// 门控喂帧：`ms` 缺席即整帧忽略（帧体适配口径与上游同款）。
+    fn rr3_gate_feed(&mut self, body: &Value) {
+        let Some(ms) = body.get("ms").and_then(Value::as_u64) else {
+            return;
+        };
+        self.tts_gate.rr3_tts_gate_feed(
+            Instant::now(),
+            ms,
+            self.cfg.reflex.gate_gap_ms,
+            self.cfg.reflex.gate_tail_ms,
+        );
+    }
+
     /// 拍尾段：VAD 节拍 → 点头手势推进 → 节奏（失败原样上抛）。
     fn rr3_tick_tail(
         &mut self,
@@ -334,12 +340,17 @@ impl Rr3SenseDispatcher {
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
         let pcm = rr3_pcm_downmix(raw);
+        self.rr3_frame_book(bus, done);
+        self.rr3_pcm_pub(bus, &pcm)?;
+        Ok(pcm)
+    }
+
+    /// 采集新鲜度记账：空帧另账（欠载饿死信号），流序自增（单点续号）。
+    fn rr3_frame_book(&mut self, bus: &BusHandle, done: usize) {
         if done == 0 {
             bus.counter_bump(RR3_PCM_EMPTY_FRAMES_KEY, 1);
         }
         self.seq += 1;
-        self.rr3_pcm_pub(bus, &pcm)?;
-        Ok(pcm)
     }
 
     /// 帧发布 + 成帧计数（seq 已在调用方续号）。
@@ -437,27 +448,36 @@ impl Rr3SenseDispatcher {
     /// pending 自然落空，take 即弃，不进旁路（批N8 件三）。
     fn rr3_vad_stop(&mut self, now: Instant, bus: &BusHandle) {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        if let Some(target) = self.pending_pan.take() {
-            if let Some(tx) = self.cmd_tx.as_ref() {
-                tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
-                bus.counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
-                eprintln!("反射环: 判停后下发 pan={target}°");
-                // 点头示意（0.0.8 批）：pan 之后接一手势，
-                // 时序量全在 config；nod_deg=0 时计划为 None
-                self.pending_nod = rr3_reflex_nod_plan(
-                    RR3_REFLEX_TILT_CENTER_DEG,
-                    self.cfg.reflex.nod_deg,
-                    self.cfg.reflex.nod_delay_ms,
-                    self.cfg.reflex.nod_hold_ms,
-                    now,
-                );
-            }
-        }
+        self.rr3_pan_apply(now, bus);
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             self.pending_pan.take();
             let _ = (now, bus);
         }
+    }
+
+    /// 判停动作：pan 下发 + 记账，随后按 config 时序排点头手势。
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn rr3_pan_apply(&mut self, now: Instant, bus: &BusHandle) {
+        let Some(target) = self.pending_pan.take() else {
+            return;
+        };
+        let Some(tx) = self.cmd_tx.as_ref() else {
+            return;
+        };
+        tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
+        bus.counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
+        eprintln!("反射环: 判停后下发 pan={target}°");
+        // 点头示意（0.0.8 批）：pan 之后接一手势，时序量全在 config；
+        // nod_deg=0 时计划为 None
+        let nod = rr3_reflex_nod_plan(
+            RR3_REFLEX_TILT_CENTER_DEG,
+            self.cfg.reflex.nod_deg,
+            self.cfg.reflex.nod_delay_ms,
+            self.cfg.reflex.nod_hold_ms,
+            now,
+        );
+        self.pending_nod = nod;
     }
 }
 

@@ -795,13 +795,16 @@ pub fn spawn_host(
 fn rr3_panel_spawn(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
     std::thread::Builder::new()
         .name("rr3-panel".into())
-        .spawn(move || {
-            if let Err(e) = rr3_panel_serve(shared) {
-                eprintln!("面板服务退出: {e}");
-            }
-        })
+        .spawn(move || rr3_panel_guard(shared))
         .map_err(|e| format!("起面板线程失败: {e}"))?;
     Ok(())
+}
+
+/// 面板线程体：serve 退出即点名（面板故障不带走主循环）。
+fn rr3_panel_guard(shared: Arc<Rr3PanelShared>) {
+    if let Err(e) = rr3_panel_serve(shared) {
+        eprintln!("面板服务退出: {e}");
+    }
 }
 
 /// accept 循环本体（批M M-β I-4 抽缝）：listener、槽位账与线程工厂显式注入——

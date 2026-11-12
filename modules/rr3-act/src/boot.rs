@@ -236,15 +236,18 @@ pub(crate) fn rr3_axis_state_load() -> Rr3ActAxisState {
 /// env 读取 + 坏形/缺席折保守缺省并点名（安全向，不退）。
 fn rr3_axis_env_axis() -> Rr3ActAxisState {
     match std::env::var(RR3_ACT_AXIS_STATE_ENV) {
-        Ok(text) => Rr3ActAxisState::rr3_from_env(&text).unwrap_or_else(|e| {
-            eprintln!("rr3-act: {e}，按保守缺省起跑（未标定，只受点动）");
-            Rr3ActAxisState::rr3_conservative()
-        }),
+        Ok(text) => Rr3ActAxisState::rr3_from_env(&text).unwrap_or_else(|e| rr3_axis_bad(&e)),
         Err(_) => {
             eprintln!("执行轴状态: 未注入（无档案/坏件/副本/轴错配），按保守缺省起跑");
             Rr3ActAxisState::rr3_conservative()
         }
     }
+}
+
+/// 注入文本坏形：点名后折保守缺省（安全向，不退）。
+fn rr3_axis_bad(e: &str) -> Rr3ActAxisState {
+    eprintln!("rr3-act: {e}，按保守缺省起跑（未标定，只受点动）");
+    Rr3ActAxisState::rr3_conservative()
 }
 
 /// 注入策略面回显（A-9：改数据即改行为，日志是第一证据）。

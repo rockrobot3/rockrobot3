@@ -51,8 +51,13 @@ pub(crate) fn rr3_wifi_connect(
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
     rr3_wifi_persist(store, &ssid, &pass)?;
     prov.rr3_prov_connect(&ssid, &pass);
+    Ok(rr3_wifi_connected(&st, &ssid))
+}
+
+/// 连接回执：点名一行 + 载荷组装（connect 臂尾部，与状态机推进解耦）。
+fn rr3_wifi_connected(st: &Rr3LinkState, ssid: &str) -> Value {
     eprintln!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
-    Ok(rr3_wifi_conn_result(&st, &ssid))
+    rr3_wifi_conn_result(st, ssid)
 }
 
 /// 凭据持久化：先过存储后端（失败即折 error、状态机不动，fail-closed）。

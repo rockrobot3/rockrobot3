@@ -160,12 +160,18 @@ fn rr3_itact_sect<'a>(v: &'a toml::Value, name: &str) -> Option<&'a toml::Value>
 fn rr3_itact_player(v: &toml::Value) -> Result<Rr3PlayerCfg, String> {
     let mut player = Rr3PlayerCfg::default();
     if let Some(p) = rr3_itact_sect(v, "player") {
-        let mut t = player.prebuffer_ms;
-        rr3_cfg_u64(p, "prebuffer_ms", "player", &mut t)?;
-        player.prebuffer_ms = t;
-        player.volume_pct = rr3_itact_volume(p, player.volume_pct)?;
+        rr3_player_keys(p, &mut player)?;
     }
     Ok(player)
+}
+
+/// player 段两键落位（缺键保留默认；类型错/越界逐键点名）。
+fn rr3_player_keys(p: &toml::Value, player: &mut Rr3PlayerCfg) -> Result<(), String> {
+    let mut t = player.prebuffer_ms;
+    rr3_cfg_u64(p, "prebuffer_ms", "player", &mut t)?;
+    player.prebuffer_ms = t;
+    player.volume_pct = rr3_itact_volume(p, player.volume_pct)?;
+    Ok(())
 }
 
 /// volume_pct 值域 0..=1000（10 倍封顶防呆）。
@@ -209,18 +215,23 @@ fn rr3_itact_selftest(v: &toml::Value) -> Result<Rr3SelftestCfg, String> {
     let mut selftest = Rr3SelftestCfg::default();
     if let Some(s) = rr3_itact_sect(v, "selftest") {
         if let Some(name) = s.get("face_expect").and_then(toml::Value::as_str) {
-            selftest.face_expect = rr3_face_expr_lookup(name).ok_or_else(|| {
-                format!(
-                    "config [rr3-interact.selftest] face_expect 非在册表情 {name:?}（在册值 {}）",
-                    RR3_FACE_EXPRESSIONS_JOINED
-                )
-            })?;
+            selftest.face_expect = rr3_face_expect(name)?;
         }
         if let Some(e) = s.get("expect") {
             selftest.expect = rr3_itact_expect(e)?;
         }
     }
     Ok(selftest)
+}
+
+/// 兜底表情预期（在册表情白名单对账，越界点名拒 boot）。
+fn rr3_face_expect(name: &str) -> Result<&'static str, String> {
+    rr3_face_expr_lookup(name).ok_or_else(|| {
+        format!(
+            "config [rr3-interact.selftest] face_expect 非在册表情 {name:?}（在册值 {}）",
+            RR3_FACE_EXPRESSIONS_JOINED
+        )
+    })
 }
 
 /// selftest 预期表（批N5 件五 F-31）：段/键缺省回落默认（固定腿全 pass +
@@ -263,12 +274,17 @@ fn expect_contr(sval: &str) -> Result<&'static str, String> {
 /// 固定腿三态落位（`leg` 已由调用方守卫限定在册）。
 fn expect_leg(expect: &mut Rr3SelftestExpect, leg: &str, sval: &str) -> Result<(), String> {
     let st = rr3_leg_state(leg, sval)?;
+    rr3_leg_put(expect, leg, st);
+    Ok(())
+}
+
+/// 固定腿三态落位（`leg` 已由调用方守卫限定在册）。
+fn rr3_leg_put(expect: &mut Rr3SelftestExpect, leg: &str, st: &'static str) {
     match leg {
         "speaker" => expect.speaker = st,
         "relay" => expect.relay = st,
         _ => expect.face = st,
     }
-    Ok(())
 }
 
 /// 固定腿三态取值（在册词表对账，越界点名）。

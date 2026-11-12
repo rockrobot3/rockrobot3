@@ -93,11 +93,16 @@ const RR3_MAX_NM_TIMEOUT_MS: u64 = 60_000;
 /// 0.0.5 批I N-6：无读者的 roam_probe_enabled / tls_min_version / 总段 log_level
 /// 删除；N-2：timeout_ms 迁 wifi 段，生效点 = nmcli 子进程超时。
 pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
-    let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
+    let v = rr3_toml_doc(text)?;
     let wifi_sect = rr3_conn_wifi_sect(&v)?;
     let link = rr3_conn_link_of(&wifi_sect)?;
     let bt_up = rr3_bt_up_of(&v)?;
     Ok((link, bt_up))
+}
+
+/// config 文本 → TOML 文档树（坏文本点名）。
+fn rr3_toml_doc(text: &str) -> Result<toml::Value, String> {
+    toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))
 }
 
 /// wifi 段三键 → 链路 cfg（周期/超时工程域 + 口令下限）。
@@ -151,12 +156,18 @@ fn rr3_period_floor(raw: u64) -> u64 {
 /// nmcli 子进程超时：越上界拒（配置错），低于下限抬到 1s。
 fn rr3_nm_timeout_of(sect: &toml::Value) -> Result<u64, String> {
     let raw = rr3_conn_u64_of(sect, "timeout_ms", "wifi")?;
+    rr3_nm_cap(raw)?;
+    Ok(raw.max(RR3_MIN_NM_TIMEOUT_MS))
+}
+
+/// 超时上界门（越界即配置错拒 boot，不猜意图）。
+fn rr3_nm_cap(raw: u64) -> Result<(), String> {
     if raw > RR3_MAX_NM_TIMEOUT_MS {
         return Err(format!(
             "config [rr3-connect.wifi] timeout_ms 须在 {RR3_MIN_NM_TIMEOUT_MS}..={RR3_MAX_NM_TIMEOUT_MS}，收到 {raw}"
         ));
     }
-    Ok(raw.max(RR3_MIN_NM_TIMEOUT_MS))
+    Ok(())
 }
 
 /// bt 开机初值（N-1：env 注入退役改 config 数据化注入）：缺段回落 false

@@ -167,6 +167,11 @@ impl Rr3InteractDispatcher {
             .and_then(Value::as_str)
             .ok_or_else(|| "帧缺 pcm_b64".to_string())
             .and_then(|b64| self.tts_pcm.rr3_tts_buf_push(b64));
+        self.rr3_frame_done(pushed, bus);
+    }
+
+    /// 收帧落账：成帧计数；坏帧按留痕闸门点名并另账（弃该帧不弃模块）。
+    fn rr3_frame_done(&mut self, pushed: Result<(), String>, bus: &BusHandle) {
         match pushed {
             Ok(()) => bus.counter_bump(RR3_TTS_PCM_FRAMES_KEY, 1),
             Err(e) => rr3_tts_bad_frame(bus, &mut self.tts_pcm_bad, &e),
@@ -176,17 +181,20 @@ impl Rr3InteractDispatcher {
     /// 面板动作排空（face/beep 主循环串行代执行后回执）。
     fn rr3_act_drain(&mut self) {
         while let Ok((action, tx)) = self.act_rx.try_recv() {
-            let result = match action {
-                Rr3PanelAction::Beep => {
-                    rr3_beep_play(self.sink.as_mut(), self.cfg.player.volume_pct)
-                }
-                Rr3PanelAction::Face { expression } => self
-                    .face
-                    .rr3_face_set(&expression, &self.cfg.face.non_pointable)
-                    .map(|(c, p)| rpc::rr3_face_result(c, p))
-                    .map_err(|e| rpc::rr3_face_err_text(&e, &self.cfg.face.non_pointable)),
-            };
+            let result = self.rr3_act_one(action);
             let _ = tx.send(result);
+        }
+    }
+
+    /// 单条面板动作执行（beep 测试音 / 表情点名，均回执）。
+    fn rr3_act_one(&mut self, action: Rr3PanelAction) -> Result<Value, String> {
+        match action {
+            Rr3PanelAction::Beep => rr3_beep_play(self.sink.as_mut(), self.cfg.player.volume_pct),
+            Rr3PanelAction::Face { expression } => self
+                .face
+                .rr3_face_set(&expression, &self.cfg.face.non_pointable)
+                .map(|(c, p)| rpc::rr3_face_result(c, p))
+                .map_err(|e| rpc::rr3_face_err_text(&e, &self.cfg.face.non_pointable)),
         }
     }
 }
@@ -265,16 +273,24 @@ impl Dispatcher for Rr3InteractDispatcher {
     /// 失败只 eprintln 不退出，同 led worker 口径）。
     fn on_tick(&mut self, now: Instant, _bus: &BusHandle) -> Result<(), String> {
         self.rr3_act_drain();
-        if self.face_tick_at.elapsed() >= Duration::from_millis(self.cfg.face.face_tick_ms) {
-            // 节拍锚重置用 serve 传入的 now 实参（同拍时刻，帧节拍不可观测）
-            self.face_tick_at = now;
-            let (expr, ix) = self.face.rr3_face_tick();
-            let frame = face::rr3_face_frames(expr)[ix];
-            self.display
-                .draw(&frame)
-                .unwrap_or_else(|e| eprintln!("rr3-interact-face: 出帧失败: {e}"));
-        }
+        self.rr3_face_tick(now);
         Ok(())
+    }
+}
+
+impl Rr3InteractDispatcher {
+    /// 表情帧节拍：到点重置节拍锚并出帧（显示是妆面件，draw 失败只点名不退出）。
+    fn rr3_face_tick(&mut self, now: Instant) {
+        if self.face_tick_at.elapsed() < Duration::from_millis(self.cfg.face.face_tick_ms) {
+            return;
+        }
+        // 节拍锚重置用 serve 传入的 now 实参（同拍时刻，帧节拍不可观测）
+        self.face_tick_at = now;
+        let (expr, ix) = self.face.rr3_face_tick();
+        let frame = face::rr3_face_frames(expr)[ix];
+        self.display
+            .draw(&frame)
+            .unwrap_or_else(|e| eprintln!("rr3-interact-face: 出帧失败: {e}"));
     }
 }
 

@@ -217,16 +217,27 @@ fn rr3_read_body(url: &str, resp: ureq::Response) -> Result<Vec<u8>, String> {
 /// 带帽读体（帽参数显式化，单测用小帽钉边界）。
 fn rr3_read_capped_body(url: &str, reader: impl Read, cap: usize) -> Result<Vec<u8>, String> {
     let mut buf = Vec::new();
-    reader
-        .take(cap as u64 + 1)
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("云端不可达 {url}: {e}"))?;
+    rr3_read_take(url, reader, cap, &mut buf)?;
     if buf.len() > cap {
         return Err(format!(
             "云端应答体超界（>{cap}B）: {url}（流式应答读尽策略帽，防内存耗尽）"
         ));
     }
     Ok(buf)
+}
+
+/// 带帽读尽：`take(cap+1)` 多读 1 字节专门用于判"是否还有余量"。
+fn rr3_read_take(
+    url: &str,
+    reader: impl Read,
+    cap: usize,
+    buf: &mut Vec<u8>,
+) -> Result<(), String> {
+    reader
+        .take(cap as u64 + 1)
+        .read_to_end(buf)
+        .map_err(|e| format!("云端不可达 {url}: {e}"))?;
+    Ok(())
 }
 
 /// 云端调用有界重试：总尝试次数（首调 + 1 次重试，2026-10-31；TTS 同轨同批——
@@ -505,15 +516,8 @@ impl Rr3LlmClient {
     /// 历史只入账一次，换来"问了不回"这一生产不可接受结局的收敛。
     fn rr3_llm_post(&self, url: &str, key: &str, body: &[u8]) -> Result<Vec<u8>, String> {
         rr3_http_try("大模型接口", "LLM", || {
-            rr3_http_post(url, key, body, "application/json", self.timeout_s).and_then(
-                |(status, resp)| {
-                    if status == 200 {
-                        Ok(resp)
-                    } else {
-                        Err(format!("大模型接口 HTTP {status}"))
-                    }
-                },
-            )
+            rr3_http_post(url, key, body, "application/json", self.timeout_s)
+                .and_then(|(status, resp)| rr3_ok_resp("大模型接口", status, resp))
         })
     }
 
@@ -524,14 +528,14 @@ impl Rr3LlmClient {
                 self.history.rr3_assistant_turn(&t);
                 Ok(t)
             }
-            None => {
-                self.history.rr3_rollback_last();
-                Err(
-                    "大模型应答形状不符: 缺 choices[0].message.content（或应答非 JSON）"
-                        .to_string(),
-                )
-            }
+            None => Err(self.rr3_shape_fail()),
         }
+    }
+
+    /// 应答形状不符：回滚本轮 user 入账并回拒因文案（历史不入账）。
+    fn rr3_shape_fail(&mut self) -> String {
+        self.history.rr3_rollback_last();
+        "大模型应答形状不符: 缺 choices[0].message.content（或应答非 JSON）".to_string()
     }
 
     /// 对话历史在册（仅测试编译：mock/裁窗/回滚断言的观测面）。

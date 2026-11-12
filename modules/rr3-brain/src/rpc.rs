@@ -199,17 +199,21 @@ fn rr3_ops_num_slot(group: &str, slot: &str, value: &Value, f: f64) -> Result<Va
 
 /// 字符串槽：去空白后非空（B9 自 value_check 按值型拆出）
 fn rr3_ops_str(group: &str, slot: &str, value: &Value) -> Result<Value, String> {
-    let s = value.as_str().ok_or_else(|| {
-        format!(
-            "槽 {group}.{slot} 须字符串，收到 {}",
-            rr3_py_type_name(value)
-        )
-    })?;
-    let s = s.trim();
+    let s = rr3_slot_str(group, slot, value)?;
     if s.is_empty() {
         return Err(format!("槽 {group}.{slot} 不得为空"));
     }
     Ok(json!(s))
+}
+
+/// 字符串槽取值（trim 后），非串点名 Python 类型词。
+fn rr3_slot_str<'a>(group: &str, slot: &str, value: &'a Value) -> Result<&'a str, String> {
+    value.as_str().map(str::trim).ok_or_else(|| {
+        format!(
+            "槽 {group}.{slot} 须字符串，收到 {}",
+            rr3_py_type_name(value)
+        )
+    })
 }
 
 /// 数值前置门：布尔与一切非数值一律拒（Python 侧 bool 是 int 子类，必须显式拦）
@@ -243,10 +247,16 @@ fn rr3_ops_uint(group: &str, slot: &str, value: &Value, f: f64) -> Result<Value,
         ));
     }
     let i = f as i64;
-    if !(i > 0) {
-        return Err(format!("槽 {group}.{slot} 须 >0，收到 {i}"));
-    }
+    rr3_pos_int(group, slot, i)?;
     Ok(json!(i))
+}
+
+/// 正整数判据（0/负值点名，>0 放行）。
+fn rr3_pos_int(group: &str, slot: &str, i: i64) -> Result<(), String> {
+    if i > 0 {
+        return Ok(());
+    }
+    Err(format!("槽 {group}.{slot} 须 >0，收到 {i}"))
 }
 
 /// 整值判据：JSON 整数，或整值浮点（`.0` 尾）。
@@ -640,11 +650,14 @@ fn rr3_row_slot(rows: &mut Vec<Value>, name: &str) -> (usize, bool) {
         .position(|r| r.get("name").and_then(Value::as_str) == Some(name))
     {
         Some(i) => (i, false),
-        None => {
-            rows.push(json!({}));
-            (rows.len() - 1, true)
-        }
+        None => (rr3_row_push(rows), true),
     }
+}
+
+/// 补空行并回其下标（upsert 新行落位）。
+fn rr3_row_push(rows: &mut Vec<Value>) -> usize {
+    rows.push(json!({}));
+    rows.len() - 1
 }
 
 /// 行写入（B9 自 upsert 抽出）：六键 + key_ref 三态（有值写/空串清/缺席保留）
@@ -658,6 +671,17 @@ fn rr3_row_fill(
     let obj = rows[i]
         .as_object_mut()
         .ok_or_else(|| format!("模型行 #{i} 须为表（TOML 行表同构）"))?;
+    rr3_row_put(obj, name, inp, active);
+    Ok(())
+}
+
+/// 行内六键落位（key_ref 三态随 `inp`，active 由调用方裁定）。
+fn rr3_row_put(
+    obj: &mut serde_json::Map<String, Value>,
+    name: &str,
+    inp: &Rr3ModelRowInput<'_>,
+    active: bool,
+) {
     obj.insert("name".to_string(), json!(name));
     obj.insert("mode".to_string(), json!(inp.mode));
     obj.insert("api_format".to_string(), json!(inp.api_format));
@@ -665,7 +689,6 @@ fn rr3_row_fill(
     obj.insert("model_id".to_string(), json!(inp.model_id));
     rr3_row_key_ref(obj, inp);
     obj.insert("active".to_string(), json!(active));
-    Ok(())
 }
 
 /// key_ref 三态：有值写 / 空串清 / 缺席保留。
@@ -701,12 +724,17 @@ fn rr3_model_activate(rows: &mut [Value], name: &str) -> Result<(), String> {
     else {
         return Err(format!("模型行不认: '{name}'"));
     };
+    rr3_rows_activate(rows, i);
+    Ok(())
+}
+
+/// active 唯一性（切换语义）：仅 `keep` 行为 true，其余一律置 false。
+fn rr3_rows_activate(rows: &mut [Value], keep: usize) {
     for (j, r) in rows.iter_mut().enumerate() {
         if let Some(o) = r.as_object_mut() {
-            o.insert("active".to_string(), json!(j == i));
+            o.insert("active".to_string(), json!(j == keep));
         }
     }
-    Ok(())
 }
 
 /// 删除非 active 行（active 行拒删——先切换再删，保证表内始终有连接）

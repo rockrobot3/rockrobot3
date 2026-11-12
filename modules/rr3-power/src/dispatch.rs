@@ -173,14 +173,19 @@ impl Rr3PowerDispatcher {
     /// charger 拍：由最近一次电池读数派生；首拍 battery 之前不发（读数还没着落）
     fn rr3_charger_beat(&mut self, now: Instant, bus: &BusHandle) -> Result<(), String> {
         if let Some(st) = self.last {
-            self.charger_seq += 1;
-            bus.publish(
-                RR3_CHARGER_STATE_TOPIC,
-                rr3_charger_body(self.charger_seq, st.charging),
-            )?;
+            self.rr3_charger_pub(bus, st)?;
         }
         self.next_charger = now + Duration::from_millis(self.cfg.charger.state_period_ms);
         Ok(())
+    }
+
+    /// charger/state 单帧（续 seq 后发布，charging 位由调用方透传）。
+    fn rr3_charger_pub(&mut self, bus: &BusHandle, st: Rr3BatteryState) -> Result<(), String> {
+        self.charger_seq += 1;
+        bus.publish(
+            RR3_CHARGER_STATE_TOPIC,
+            rr3_charger_body(self.charger_seq, st.charging),
+        )
     }
 
     /// rail 拍（批N2 件五）：读域压 → ⑥-c2 按龄期折有效档位 → 判定核 → 周期流
