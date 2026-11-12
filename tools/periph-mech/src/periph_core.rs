@@ -55,12 +55,17 @@ impl Iterator for Rr3SlewSteps {
         if self.cur == self.target {
             return None;
         }
-        self.cur = if self.target > self.cur {
-            (self.cur + self.step).min(self.target)
-        } else {
-            self.cur.saturating_sub(self.step).max(self.target)
-        };
+        self.cur = rr3_slew_step(self.cur, self.target, self.step);
         Some(self.cur)
+    }
+}
+
+/// 单步逼近（越界贴端点；步进 0 已在构造面兜底为 1）。
+fn rr3_slew_step(cur: u32, target: u32, step: u32) -> u32 {
+    if target > cur {
+        (cur + step).min(target)
+    } else {
+        cur.saturating_sub(step).max(target)
     }
 }
 

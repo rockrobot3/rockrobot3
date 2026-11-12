@@ -200,26 +200,40 @@ fn rr3_link_threads(
 ) -> (Rr3LinkSlot, Rr3LinkSlot) {
     let sink = Rr3LinkSlot::new();
     let src = Rr3LinkSlot::new();
-    {
-        let exit = exit_tx.clone();
-        let dropped = Arc::clone(dropped);
-        let sink = sink.clone();
-        std::thread::Builder::new()
-            .name("bridge-upstream".into())
-            .spawn(move || upstream_loop(rx, sink, dropped, exit))
-            .expect("起上行线程失败");
-    }
-    {
-        let exit = exit_tx.clone();
-        let src = src.clone();
-        let stop = Arc::clone(shutdown);
-        std::thread::Builder::new()
-            .name("bridge-downstream".into())
-            .spawn(move || downstream_loop(tx, src, stop, exit))
-            .expect("起下行线程失败");
-    }
+    rr3_up_spawn(rx, &sink, dropped, exit_tx.clone());
+    rr3_down_spawn(tx, &src, shutdown, exit_tx.clone());
     drop(exit_tx); // 线程各自持一份；主线程只收不发
     (sink, src)
+}
+
+/// 起上行线程（UART 读 → UDS 写）。
+fn rr3_up_spawn(
+    rx: Rr3UartConn,
+    sink: &Rr3LinkSlot,
+    dropped: &Arc<AtomicU64>,
+    exit: mpsc::Sender<ExitMsg>,
+) {
+    let dropped = Arc::clone(dropped);
+    let sink = sink.clone();
+    std::thread::Builder::new()
+        .name("bridge-upstream".into())
+        .spawn(move || upstream_loop(rx, sink, dropped, exit))
+        .expect("起上行线程失败");
+}
+
+/// 起下行线程（UDS 读 → UART 写）。
+fn rr3_down_spawn(
+    tx: Rr3UartConn,
+    src: &Rr3LinkSlot,
+    shutdown: &Arc<AtomicBool>,
+    exit: mpsc::Sender<ExitMsg>,
+) {
+    let src = src.clone();
+    let stop = Arc::clone(shutdown);
+    std::thread::Builder::new()
+        .name("bridge-downstream".into())
+        .spawn(move || downstream_loop(tx, src, stop, exit))
+        .expect("起下行线程失败");
 }
 
 /// 逐条 UDS 连接接力（三态之三）：直到 UART 断链或关停。
@@ -409,10 +423,15 @@ fn upstream_loop(
         let Some(n) = upstream_read(&mut rx, &mut buf, &exit) else {
             return;
         };
-        if let Some(s) = new_sink.take() {
-            cur = Some(s);
-        }
+        rr3_up_swap(&mut cur, &new_sink);
         upstream_route(&mut cur, &buf[..n], n, &dropped, &mut discarding, &exit);
+    }
+}
+
+/// 换流：交接槽里的新连接顶掉当前句柄（无新连接则沿用旧句柄）。
+fn rr3_up_swap(cur: &mut Option<UnixStream>, new_sink: &Rr3LinkSlot) {
+    if let Some(s) = new_sink.take() {
+        *cur = Some(s);
     }
 }
 
@@ -465,14 +484,19 @@ fn rr3_route_write(
 ) -> bool {
     rr3_route_recover(discarding, dropped);
     if let Err(e) = s.write_all(chunk) {
-        let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
-        log(&format!(
-            "uds 上行写出失败（{e}）：本块 {n} 字节丢弃，改入丢弃计数"
-        ));
-        let _ = exit.send(ExitMsg::UdsDead("上行写出失败".into()));
+        rr3_route_fail(e, n, dropped, exit);
         return true;
     }
     false
+}
+
+/// 写失败收口：计丢弃、留痕、报 UdsDead。
+fn rr3_route_fail(e: std::io::Error, n: usize, dropped: &AtomicU64, exit: &mpsc::Sender<ExitMsg>) {
+    let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
+    log(&format!(
+        "uds 上行写出失败（{e}）：本块 {n} 字节丢弃，改入丢弃计数"
+    ));
+    let _ = exit.send(ExitMsg::UdsDead("上行写出失败".into()));
 }
 
 /// 丢弃期结束的恢复点：必须报累计（运维据它判断"看起来在跑"是否真在跑）。
@@ -509,9 +533,7 @@ fn downstream_loop(
     let mut buf = [0u8; CHUNK];
     let mut cur: Option<UnixStream> = None;
     loop {
-        if let Some(s) = new_src.take() {
-            cur = Some(s);
-        }
+        rr3_down_swap(&mut cur, &new_src);
         let Some(stream) = cur.as_mut() else {
             if rr3_down_idle(&stop) {
                 return;
@@ -523,6 +545,13 @@ fn downstream_loop(
             Some(false) => return,
             None => cur = None,
         }
+    }
+}
+
+/// 换流：交接槽里的新连接顶掉当前句柄（无新连接则沿用旧句柄）。
+fn rr3_down_swap(cur: &mut Option<UnixStream>, new_src: &Rr3LinkSlot) {
+    if let Some(s) = new_src.take() {
+        *cur = Some(s);
     }
 }
 

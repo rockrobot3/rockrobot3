@@ -29,11 +29,21 @@ fn rr3_ctl_reject(cmd: &str, envelope: &Value) -> Option<String> {
     let err = envelope.get("error")?;
     Some(format!(
         "{cmd} 被拒（code {}）：{}",
-        err.get("code")
-            .map(Value::to_string)
-            .unwrap_or_else(|| "?".into()),
-        err.get("message").and_then(Value::as_str).unwrap_or("?")
+        rr3_reject_code(err),
+        rr3_reject_msg(err)
     ))
+}
+
+/// 拒因码（缺字段以 `?` 占位）。
+fn rr3_reject_code(err: &Value) -> String {
+    err.get("code")
+        .map(Value::to_string)
+        .unwrap_or_else(|| "?".into())
+}
+
+/// 拒因文案（缺字段以 `?` 占位）。
+fn rr3_reject_msg(err: &Value) -> &str {
+    err.get("message").and_then(Value::as_str).unwrap_or("?")
 }
 
 pub fn run(cmd: &str, bus: &str) -> Result<String, String> {

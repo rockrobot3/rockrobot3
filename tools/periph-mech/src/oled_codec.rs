@@ -211,15 +211,20 @@ pub fn rr3_oled_lines(
     let ascii: Vec<u8> = rr3_oled_ascii(text);
     let mut lines: Vec<Vec<u8>> = Vec::with_capacity(rows);
     for row in 0..rows.saturating_sub(1) {
-        let start = row * cols;
-        lines.push(if start < ascii.len() {
-            ascii[start..(start + cols).min(ascii.len())].to_vec()
-        } else {
-            Vec::new()
-        });
+        lines.push(rr3_oled_row(&ascii, row, cols));
     }
     lines.push(format!("P:{pan_deg:03} T:{tilt_deg:03}").into_bytes());
     lines
+}
+
+/// 单行切列：起点越界给空行（行数不足时补空行，超出 `cols` 硬截断）。
+fn rr3_oled_row(ascii: &[u8], row: usize, cols: usize) -> Vec<u8> {
+    let start = row * cols;
+    if start < ascii.len() {
+        ascii[start..(start + cols).min(ascii.len())].to_vec()
+    } else {
+        Vec::new()
+    }
 }
 
 /// 可见 ASCII 折字节，其余一律空格（先按 char 过滤，不劈多字节字符）。

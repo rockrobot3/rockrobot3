@@ -143,12 +143,7 @@ mod run {
         log_path: &Path,
         report: &mut String,
     ) -> Result<(), String> {
-        let st = Command::new(peer)
-            .env("RR3_BUS_PATH", socket)
-            .env("RR3_MANIFEST", m_b)
-            .env("RR3_SIM_PEER_ROLE", "publish_once")
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+        let st = rr3_peer_cmd(peer, socket, m_b)
             .status()
             .map_err(|e| format!("起 {RR3_DRILL_PUBLISHER} 失败: {e}"))?;
         rr3_pub_ready(st, log_path)?;
@@ -156,6 +151,17 @@ mod run {
             "{RR3_DRILL_PUBLISHER} 已发布 {RR3_SIM_B_TOPIC} 并退场（exit {st}）\n"
         ));
         Ok(())
+    }
+
+    /// 发布者命令面（一次性 publish_once 角色的环境与输出接线）。
+    fn rr3_peer_cmd(peer: &Path, socket: &Path, m_b: &Path) -> Command {
+        let mut cmd = Command::new(peer);
+        cmd.env("RR3_BUS_PATH", socket)
+            .env("RR3_MANIFEST", m_b)
+            .env("RR3_SIM_PEER_ROLE", "publish_once")
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        cmd
     }
 
     /// 发布者必须以 0 退场。
@@ -290,14 +296,17 @@ mod run {
 
         let mut report = String::new();
         let outcome = rr3_sim_wait(&rrctl, &peer, &fx.socket, &fx.m_b, &log_path, &mut report);
-        let result = outcome.map(|()| {
-            report.push_str(rr3_section("演练结论").as_str());
-            report.push_str("全链路 OK：rrd + boot spawn + 外部发布 + rr3-ctl 巡检\n");
-            report
-        });
+        let result = outcome.map(|()| rr3_sim_ok(report));
         // ---- 收尾：杀 rrd；resident 模块喂狗失败自退；--keep 保留现场 ----
         rr3_cleanup(a, &mut rrd_child, &fx, &log_path);
         result
+    }
+
+    /// 成功结论：分节标题 + 全链路结论（报告原样带回）。
+    fn rr3_sim_ok(mut report: String) -> String {
+        report.push_str(rr3_section("演练结论").as_str());
+        report.push_str("全链路 OK：rrd + boot spawn + 外部发布 + rr3-ctl 巡检\n");
+        report
     }
 
     /// 夹具与 rrd 起跑（两段：落盘 manifest → 起 rrd boot spawn）。
@@ -401,16 +410,8 @@ mod run {
     ) -> Result<(std::process::Child, std::path::PathBuf), String> {
         let log_path = fx.workdir.join("rrd.log");
         let log = rr3_rrd_log(&log_path)?;
-        let rrd_child = Command::new(rrd)
-            .arg("--socket")
-            .arg(&fx.socket)
-            .arg("--manifest")
-            .arg(&fx.m_a)
-            .arg("--boot-role")
-            .arg("resident")
-            .args(["--pre-register-timeout-ms", "3000"])
+        let rrd_child = rr3_rrd_cmd(rrd, fx)
             .stdout(Stdio::from(log))
-            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("起 rrd 失败: {e}"))?;
         println!(
@@ -423,6 +424,20 @@ mod run {
             fx.m_a.display()
         );
         Ok((rrd_child, log_path))
+    }
+
+    /// rrd 命令面（boot spawn resident；stdout 由调用方接日志文件）。
+    fn rr3_rrd_cmd(rrd: &Path, fx: &SimFx) -> Command {
+        let mut cmd = Command::new(rrd);
+        cmd.arg("--socket")
+            .arg(&fx.socket)
+            .arg("--manifest")
+            .arg(&fx.m_a)
+            .arg("--boot-role")
+            .arg("resident")
+            .args(["--pre-register-timeout-ms", "3000"])
+            .stderr(Stdio::inherit());
+        cmd
     }
 
     /// rrd 日志文件（stdout 落盘；建失败点名路径）。
@@ -438,20 +453,25 @@ mod run {
         log_path: &Path,
     ) {
         if a.keep {
-            println!(
-                "rr3-sim: --keep 保留现场：socket={} log={}",
-                fx.socket.display(),
-                log_path.display()
-            );
-            println!(
-                "rr3-sim: 手动收尾：kill {}；rm -rf {:?}",
-                rrd_child.id(),
-                fx.workdir
-            );
-        } else {
-            let _ = rrd_child.kill();
-            let _ = rrd_child.wait();
+            rr3_cleanup_keep(rrd_child, fx, log_path);
+            return;
         }
+        let _ = rrd_child.kill();
+        let _ = rrd_child.wait();
+    }
+
+    /// `--keep`：打印现场保留与手动收尾指引（不杀 rrd）。
+    fn rr3_cleanup_keep(rrd_child: &std::process::Child, fx: &SimFx, log_path: &Path) {
+        println!(
+            "rr3-sim: --keep 保留现场：socket={} log={}",
+            fx.socket.display(),
+            log_path.display()
+        );
+        println!(
+            "rr3-sim: 手动收尾：kill {}；rm -rf {:?}",
+            rrd_child.id(),
+            fx.workdir
+        );
     }
 }
 

@@ -683,8 +683,25 @@ fn rr3_chain_up_exts(
 fn rr3_chain_up_rrd(ctx: &Rr3ChainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
     let fix = ctx.fix;
     let rrd_log = fix.workdir.join("rrd.log");
-    let rrd_child = Command::new(&ctx.bins.rrd)
-        .arg("--socket")
+    let log = Stdio::from(
+        std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
+    );
+    let rrd_child = rr3_chain_rrd_cmd(ctx, log)
+        .spawn()
+        .map_err(|e| format!("起 rrd 失败: {e}"))?;
+    children.push(("rrd".into(), rrd_child));
+    println!(
+        "rr3-sim --chain: rrd 已起，socket={}（sense 双麦 burst + DOA 注入 {RR3_CHAIN_DOA_DEG}°）",
+        fix.socket.display()
+    );
+    Ok(())
+}
+
+/// rrd 命令面（boot spawn rr3-sense；双麦 burst 与判向注入随 rrd 环境继承）。
+fn rr3_chain_rrd_cmd(ctx: &Rr3ChainCtx, log: Stdio) -> Command {
+    let fix = ctx.fix;
+    let mut cmd = Command::new(&ctx.bins.rrd);
+    cmd.arg("--socket")
         .arg(&fix.socket)
         .arg("--manifest")
         .arg(&fix.m_sense)
@@ -695,18 +712,9 @@ fn rr3_chain_up_rrd(ctx: &Rr3ChainCtx, children: &mut Vec<(String, Child)>) -> R
         .env("RR3_HAL_SIM_WAVE", "burst")
         .env("RR3_HAL_SIM_DOA_DEG", RR3_CHAIN_DOA_DEG.to_string())
         .env("RR3_SENSE_CONFIG", &fix.sense_cfg)
-        .stdout(Stdio::from(
-            std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
-        ))
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("起 rrd 失败: {e}"))?;
-    children.push(("rrd".into(), rrd_child));
-    println!(
-        "rr3-sim --chain: rrd 已起，socket={}（sense 双麦 burst + DOA 注入 {RR3_CHAIN_DOA_DEG}°）",
-        fix.socket.display()
-    );
-    Ok(())
+        .stdout(log)
+        .stderr(Stdio::inherit());
+    cmd
 }
 
 /// 观察者连总线并注册（最小身份，专收两个取证主题）。
@@ -725,7 +733,20 @@ fn rr3_chain_obs_up(fix: &Rr3ChainFix, report: &mut String) -> Result<UnixStream
 /// 外部起 interact / brain / act（三真模块，各自日志进 workdir，复用共用起法）。
 fn rr3_chain_up_ext(ctx: &Rr3ChainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
     let fix = ctx.fix;
-    for (name, mut cmd) in [
+    for (name, mut cmd) in rr3_chain_ext_cmds(ctx) {
+        let log = fix.workdir.join(format!("{name}.log"));
+        cmd.env("RR3_BUS_PATH", &fix.socket)
+            .env("RR3_MANIFEST", fix.workdir.join(format!("{name}.toml")));
+        let child = rr3_spawn_logged(cmd, &log, name)?;
+        children.push((name.to_string(), child));
+    }
+    Ok(())
+}
+
+/// 三外部真模块的命令面（interact / brain / act，各自的环境接线）。
+fn rr3_chain_ext_cmds(ctx: &Rr3ChainCtx) -> [(&'static str, Command); 3] {
+    let fix = ctx.fix;
+    [
         {
             let mut c = Command::new(&ctx.bins.interact);
             c.env("RR3_HAL_BACKEND", "sim")
@@ -753,14 +774,7 @@ fn rr3_chain_up_ext(ctx: &Rr3ChainCtx, children: &mut Vec<(String, Child)>) -> R
                 );
             (RR3_SIM_MODULE_ACT, c)
         },
-    ] {
-        let log = fix.workdir.join(format!("{name}.log"));
-        cmd.env("RR3_BUS_PATH", &fix.socket)
-            .env("RR3_MANIFEST", fix.workdir.join(format!("{name}.toml")));
-        let child = rr3_spawn_logged(cmd, &log, name)?;
-        children.push((name.to_string(), child));
-    }
-    Ok(())
+    ]
 }
 
 /// 有界等四模块 running。
@@ -801,10 +815,15 @@ fn rr3_chain_logs(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> 
     report.push_str(&format!(
         "interact: {tts}（表情机 talk 自动挂起，sim 档无显示件）\n"
     ));
-    let act_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_ACT}.log"));
-    let intent = wait_log_contains(&act_log, "servo angle=", RR3_CHAIN_READY_DEADLINE)?;
+    let intent = rr3_chain_act(ctx)?;
     report.push_str(&format!("act: {intent}\n"));
     Ok(())
+}
+
+/// act 落角行（执行动作真落 servo/state 的留痕）。
+fn rr3_chain_act(ctx: &Rr3ChainCtx) -> Result<String, String> {
+    let act_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_ACT}.log"));
+    wait_log_contains(&act_log, "servo angle=", RR3_CHAIN_READY_DEADLINE)
 }
 
 /// brain 轮次行：动作数必须是 1（词表左档应产一条 servo 动作）。

@@ -429,10 +429,7 @@ impl DoaTracker {
     fn rr3_doa_line(&mut self, t: f64) -> String {
         let l_rms = (self.l_sq / self.n as f64).sqrt();
         let r_rms = (self.r_sq / self.n as f64).sqrt();
-        if self.peak > DOA_ACTIVE_PEAK && l_rms > 0.0 && r_rms > 0.0 {
-            let ild = 20.0 * (l_rms / r_rms).log10();
-            let az = (ild * AZ_PER_DB).clamp(-90.0, 90.0);
-            self.azs.push((self.win, az));
+        if let Some((ild, az)) = self.rr3_doa_az(l_rms, r_rms) {
             format!(
                 "[doa] t={t:5.1}s win={} peak={} l_rms={l_rms:.0} r_rms={r_rms:.0} ild={ild:+.1}dB az={az:+.0}° *",
                 self.win, self.peak
@@ -442,6 +439,18 @@ impl DoaTracker {
                 "[doa] t={t:5.1}s win={} peak={} l_rms={l_rms:.0} r_rms={r_rms:.0} （静默）",
                 self.win, self.peak
             )
+        }
+    }
+
+    /// active 窗的 ILD 与方位角（静默窗 None，不出角也不进账）。
+    fn rr3_doa_az(&mut self, l_rms: f64, r_rms: f64) -> Option<(f64, f64)> {
+        if self.peak > DOA_ACTIVE_PEAK && l_rms > 0.0 && r_rms > 0.0 {
+            let ild = 20.0 * (l_rms / r_rms).log10();
+            let az = (ild * AZ_PER_DB).clamp(-90.0, 90.0);
+            self.azs.push((self.win, az));
+            Some((ild, az))
+        } else {
+            None
         }
     }
 
@@ -577,17 +586,22 @@ fn rr3_reader_gap(
     watch: &WatchState,
     out_path: &std::path::Path,
 ) {
-    if !*seen {
-        return; // 武装后首片前的静默合法（复位 banner/settle 窗）
-    }
-    *zeros += 1;
-    if *zeros < RESYNC_ZERO_BAIL {
+    if !rr3_gap_count(seen, zeros) {
         return;
     }
     eprintln!("[rec] 1.6s 连续静默 → 线上断流，读线程重连");
     rr3_gap_reconnect(conn, device, baud, watch, out_path);
     *seen = false;
     *zeros = 0;
+}
+
+/// 零读计数：false = 还没到断流判据（首片前的静默合法）。
+fn rr3_gap_count(seen: &mut bool, zeros: &mut u32) -> bool {
+    if !*seen {
+        return false;
+    }
+    *zeros += 1;
+    *zeros >= RESYNC_ZERO_BAIL
 }
 
 /// 断流重连：解武装 → 重开 fd/握手 → 记重连账再武装（全败 fail-honest 退 4）。
@@ -678,12 +692,17 @@ fn watchdog_run(w: Arc<WatchState>, out: String) {
         if rr3_watch_idle(&w, &mut last_seen, &mut last_move) {
             continue;
         }
-        let disk = w.disk_bytes.load(Ordering::Acquire);
-        eprintln!(
-            "[rec] ✗ 收流停滞 ≥{STALL:?} 无新分片字节（楔死防护触发）：入队 {last_seen}B/盘侧 {disk}B，补恢复头后退出"
-        );
-        exit_with_recovery(std::path::Path::new(&out), &w, 3);
+        rr3_watch_fail(&w, last_seen, &out);
     }
+}
+
+/// 停滞收口：点名入队/盘侧字节后补恢复头退出 3。
+fn rr3_watch_fail(w: &WatchState, last_seen: u64, out: &str) -> ! {
+    let disk = w.disk_bytes.load(Ordering::Acquire);
+    eprintln!(
+        "[rec] ✗ 收流停滞 ≥{STALL:?} 无新分片字节（楔死防护触发）：入队 {last_seen}B/盘侧 {disk}B，补恢复头后退出"
+    );
+    exit_with_recovery(std::path::Path::new(out), w, 3);
 }
 
 /// 一拍看门狗记账：推进/未武装/未到死线都返回 `true`（继续循环）。
@@ -1228,6 +1247,28 @@ fn rr3_head_write(out_path: &std::path::Path, data_len: u32, measured: u32) {
         });
 }
 
+/// wav 建档（失败即退 1，文案逐字保留）。
+fn rr3_wav_create(out_path: &std::path::Path) -> File {
+    match File::create(out_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("rr3-audio-rec: wav 建档失败 {}: {e}", out_path.display());
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 跨线程共享账的初值（三线程按需克隆）。
+fn rr3_watch_state() -> Arc<WatchState> {
+    Arc::new(WatchState {
+        ingested: AtomicU64::new(0),
+        disk_bytes: AtomicU64::new(0),
+        reconnects: AtomicU64::new(0),
+        rate: AtomicU32::new(NOMINAL_RATE_FALLBACK_HZ),
+        armed: AtomicBool::new(false),
+    })
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&argv) {
@@ -1244,20 +1285,8 @@ fn main() {
     // （d4 /dev/null 定案）：解码循环零磁盘 I/O——逐片同步写刷的延迟尖峰把
     // 冻结概率放大 ~7 倍，通道解耦后尖峰不再进收流面；看门狗保数据前提不变。
     let out_path = args.out.clone();
-    let wav_file = match File::create(&out_path) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("rr3-audio-rec: wav 建档失败 {}: {e}", out_path.display());
-            std::process::exit(1);
-        }
-    };
-    let watch = Arc::new(WatchState {
-        ingested: AtomicU64::new(0),
-        disk_bytes: AtomicU64::new(0),
-        reconnects: AtomicU64::new(0),
-        rate: AtomicU32::new(NOMINAL_RATE_FALLBACK_HZ),
-        armed: AtomicBool::new(false),
-    });
+    let wav_file = rr3_wav_create(&out_path);
+    let watch = rr3_watch_state();
     let threads = rec_spawn_threads(
         conn,
         wav_file,
