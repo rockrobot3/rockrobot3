@@ -275,13 +275,19 @@ fn rr3_module_names(payload: &Path) -> Result<Vec<String>, String> {
         }
     }
     names.sort();
+    rr3_names_nonempty(&names, &dir)?;
+    Ok(names)
+}
+
+/// 模块名单非空门（空注入目录不得出包）。
+fn rr3_names_nonempty(names: &[String], dir: &Path) -> Result<(), String> {
     if names.is_empty() {
         return Err(format!(
             "注入目录 {} 无模块（约定 rr3-modules/<name>/{{bin,manifest.toml}}，至少一个模块）",
             dir.display()
         ));
     }
-    Ok(names)
+    Ok(())
 }
 
 /// staging 装配（纯 Rust）：把两份真值落成 deb 布局树，返回 staging 目录路径。
@@ -345,6 +351,14 @@ fn rr3_stage_reset(stage: &Path) -> Result<(), String> {
 fn rr3_stage_check(
     cfg: &Rr3PackConfig,
 ) -> Result<(Vec<String>, String, rrd::profile::Rr3RuntimeTruthSet), String> {
+    rr3_payload_bins(cfg)?;
+    let names = rr3_module_names(&cfg.payload)?;
+    let (profile_name, truth) = rr3_truth_ready(cfg)?;
+    Ok((names, profile_name, truth))
+}
+
+/// 两个入口产物在场门（缺席逐件点名）。
+fn rr3_payload_bins(cfg: &Rr3PackConfig) -> Result<(), String> {
     for bin in ["rrd", "rr3-ctl"] {
         let p = cfg.payload.join(bin);
         if !p.is_file() {
@@ -354,9 +368,7 @@ fn rr3_stage_check(
             ));
         }
     }
-    let names = rr3_module_names(&cfg.payload)?;
-    let (profile_name, truth) = rr3_truth_ready(cfg)?;
-    Ok((names, profile_name, truth))
+    Ok(())
 }
 
 /// deb 骨架：目录 + 两个入口产物 + control/postinst。
@@ -556,14 +568,20 @@ fn rr3_mod_facts(
             errs.join("; ")
         )
     })?;
+    rr3_name_agree(&facts, name)?;
+    rr3_entry_ok(&facts.entry, name)?;
+    Ok((text, facts))
+}
+
+/// 目录名与 manifest.name 必须一致（注入产物自相矛盾即拒）。
+fn rr3_name_agree(facts: &rrd::manifest::Rr3ManifestFacts, name: &str) -> Result<(), String> {
     if facts.name != name {
         return Err(format!(
             "模块目录名 {name} 与 manifest.name {} 不一致（注入产物自相矛盾，打包拒绝）",
             facts.name
         ));
     }
-    rr3_entry_ok(&facts.entry, name)?;
-    Ok((text, facts))
+    Ok(())
 }
 
 /// 仓内 config.toml 随包：模块开机即读 manifest 同目录 config.toml，缺件必重启环。

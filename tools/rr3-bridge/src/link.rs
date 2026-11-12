@@ -268,10 +268,9 @@ fn uds_attach(
     loop {
         let (stream, waited) = connect_with_backoff(&cfg.socket, shutdown)?;
         // 写向窗口必须在交接前设好：这是阻塞写面的唯一上界（见常量注记）。
-        if let Err(e) = stream.set_write_timeout(Some(UDS_WRITE_TIMEOUT)) {
-            log(&format!("uds 写超时设置失败（{e}）；重试"));
+        let Some(stream) = rr3_uds_ready(stream) else {
             continue;
-        }
+        };
         let at = Instant::now();
         log_connected(&cfg.socket, waited, dropped);
         let Some(wr) = rr3_uds_clone(&stream) else {
@@ -287,6 +286,17 @@ fn uds_attach(
         }
         src.put(rd);
         return Some(Rr3UdsConn { kill: stream, at });
+    }
+}
+
+/// 交接前的写向窗口就位（设置失败打日志后重试，返回 None）。
+fn rr3_uds_ready(stream: UnixStream) -> Option<UnixStream> {
+    match stream.set_write_timeout(Some(UDS_WRITE_TIMEOUT)) {
+        Ok(()) => Some(stream),
+        Err(e) => {
+            log(&format!("uds 写超时设置失败（{e}）；重试"));
+            None
+        }
     }
 }
 
@@ -439,16 +449,19 @@ fn upstream_route(
                 let _ = exit.send(ExitMsg::UdsDead("上行写出失败".into()));
             }
         }
-        None => {
-            let total = dropped.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
-            if !*discarding {
-                *discarding = true;
-                log("uds 未就绪：UART 上行开始丢弃（不缓冲，等 rrd 就绪后自愈）");
-            } else if total % 4096 < n as u64 {
-                // 每 ~4KiB 一行的节流计数（1s 内 4096/60 帧的量级不会刷屏）
-                log(&format!("UART 上行丢弃累计 {total} 字节"));
-            }
-        }
+        None => rr3_route_discard(n, dropped, discarding),
+    }
+}
+
+/// 无连接时的一块：计入丢弃，首次进入与每 ~4KiB 节流各打一行。
+fn rr3_route_discard(n: usize, dropped: &AtomicU64, discarding: &mut bool) {
+    let total = dropped.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
+    if !*discarding {
+        *discarding = true;
+        log("uds 未就绪：UART 上行开始丢弃（不缓冲，等 rrd 就绪后自愈）");
+    } else if total % 4096 < n as u64 {
+        // 每 ~4KiB 一行的节流计数（1s 内 4096/60 帧的量级不会刷屏）
+        log(&format!("UART 上行丢弃累计 {total} 字节"));
     }
 }
 
@@ -467,10 +480,9 @@ fn downstream_loop(
             cur = Some(s);
         }
         let Some(stream) = cur.as_mut() else {
-            if stop.load(Ordering::SeqCst) {
+            if rr3_down_idle(&stop) {
                 return;
             }
-            std::thread::sleep(WAIT_SLICE);
             continue;
         };
         match rr3_down_step(stream, &mut buf, &mut tx, &exit) {
@@ -479,6 +491,15 @@ fn downstream_loop(
             None => cur = None,
         }
     }
+}
+
+/// 无连接时等一拍；返回 true = 等待期收到关停，调用方退场。
+fn rr3_down_idle(stop: &AtomicBool) -> bool {
+    if stop.load(Ordering::SeqCst) {
+        return true;
+    }
+    std::thread::sleep(WAIT_SLICE);
+    false
 }
 
 /// 下行一块：UDS 读到即写 UART。None = 连接已死（cur 清零）；Some(false) = 写失败退场。
