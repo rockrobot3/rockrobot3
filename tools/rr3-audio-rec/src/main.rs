@@ -275,8 +275,12 @@ fn parse_audio_event(frame: &Rr3Frame) -> Result<AudioChunk, String> {
             frame.header.dst_task
         ));
     }
-    let (ty, body) =
-        rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+    audio_chunk_fields(&audio_event_body(&frame.payload)?)
+}
+
+/// payload 前缀类型门 → 事件体 JSON → topic 门（失败点名原文案）。
+fn audio_event_body(payload: &[u8]) -> Result<Value, String> {
+    let (ty, body) = rr3_body_split(payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
     if ty != Rr3PayloadType::Event {
         return Err(format!("payload 类型非 Event: {ty:?}"));
     }
@@ -288,6 +292,11 @@ fn parse_audio_event(frame: &Rr3Frame) -> Result<AudioChunk, String> {
             v.get("topic")
         ));
     }
+    Ok(v)
+}
+
+/// 事件体字段门 → s16le 解码出分片（字段次序与拒收文案保持原样）。
+fn audio_chunk_fields(v: &Value) -> Result<AudioChunk, String> {
     if v.get("format").and_then(Value::as_str) != Some("s16le") {
         return Err("format 非 s16le".into());
     }
@@ -890,50 +899,81 @@ fn decode_loop(
     out_path: &std::path::Path,
 ) {
     while Instant::now() < deadline {
-        match byte_rx.recv_timeout(DECODE_TICK) {
-            Ok(bytes) => asm.feed(&bytes),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                eprintln!("[rec] 裸字节通道断开（读线程已亡）");
-                bail_with_recovery(out_path, watch);
-            }
+        decode_feed(byte_rx, asm, watch, out_path);
+        decode_drain(asm, st, watch, tx, out_path);
+    }
+}
+
+/// 一拍收料：节拍取一块裸字节喂拆帧器（超时=空拍；通道断=读线程已亡）。
+fn decode_feed(
+    byte_rx: &mpsc::Receiver<Vec<u8>>,
+    asm: &mut FrameAssembler,
+    watch: &WatchState,
+    out_path: &std::path::Path,
+) {
+    match byte_rx.recv_timeout(DECODE_TICK) {
+        Ok(bytes) => asm.feed(&bytes),
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            eprintln!("[rec] 裸字节通道断开（读线程已亡）");
+            bail_with_recovery(out_path, watch);
         }
-        loop {
-            let assembled = match asm.pull() {
-                Ok(Some(a)) => Some(a),
-                Ok(None) => break,
-                Err((dropped, why)) => {
-                    st.errors += 1;
-                    st.err_streak += 1;
-                    eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
-                    None
-                }
-            };
-            if let Some((header, payload)) = assembled {
-                let frame = Rr3Frame { header, payload };
-                match parse_audio_event(&frame) {
-                    Ok(chunk) => {
-                        st.err_streak = 0;
-                        st.ingest(chunk, frame.header.src_task, st.errors, watch, tx, out_path);
-                    }
-                    Err(e) => {
-                        st.errors += 1;
-                        st.err_streak += 1;
-                        eprintln!("[rec] 事件门拒收: {e}");
-                    }
-                }
+    }
+}
+
+/// 出尽成帧：坏帧弃扫记账、好片交写线程，成片损坏记一次失步重同步账。
+fn decode_drain(
+    asm: &mut FrameAssembler,
+    st: &mut DecodeState,
+    watch: &WatchState,
+    tx: &mpsc::Sender<Vec<u8>>,
+    out_path: &std::path::Path,
+) {
+    loop {
+        let assembled = match asm.pull() {
+            Ok(Some(a)) => Some(a),
+            Ok(None) => break,
+            Err((dropped, why)) => {
+                st.errors += 1;
+                st.err_streak += 1;
+                eprintln!("[rec] 帧头拒收（弃 {dropped}B 续扫）: {why}");
+                None
             }
-            // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
-            // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
-            if st.err_streak >= ERR_STREAK_RESYNC {
-                st.resyncs += 1;
-                st.err_streak = 0;
-                eprintln!(
-                    "[rec] 失步重同步 #{}：内存弃扫 {}B 后对齐续收",
-                    st.resyncs,
-                    asm.discarded()
-                );
-            }
+        };
+        if let Some((header, payload)) = assembled {
+            decode_frame(Rr3Frame { header, payload }, st, watch, tx, out_path);
+        }
+        // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
+        // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
+        if st.err_streak >= ERR_STREAK_RESYNC {
+            st.resyncs += 1;
+            st.err_streak = 0;
+            eprintln!(
+                "[rec] 失步重同步 #{}：内存弃扫 {}B 后对齐续收",
+                st.resyncs,
+                asm.discarded()
+            );
+        }
+    }
+}
+
+/// 单帧四道门：全过即交写线程；拒收计错误与连续失败账。
+fn decode_frame(
+    frame: Rr3Frame,
+    st: &mut DecodeState,
+    watch: &WatchState,
+    tx: &mpsc::Sender<Vec<u8>>,
+    out_path: &std::path::Path,
+) {
+    match parse_audio_event(&frame) {
+        Ok(chunk) => {
+            st.err_streak = 0;
+            st.ingest(chunk, frame.header.src_task, st.errors, watch, tx, out_path);
+        }
+        Err(e) => {
+            st.errors += 1;
+            st.err_streak += 1;
+            eprintln!("[rec] 事件门拒收: {e}");
         }
     }
 }

@@ -63,24 +63,32 @@ pub fn rr3_axis_write_parse(args: &[String]) -> Result<Rr3AxisWriteArgs, String>
     let mut candidate: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--profile" => {
-                profile = Some(need_path_value("--profile", args, i)?);
-                i += 2;
-            }
-            "--candidate" => {
-                candidate = Some(need_path_value("--candidate", args, i)?);
-                i += 2;
-            }
-            "-h" | "--help" => {
-                return Err(USAGE.to_string());
-            }
-            other => return Err(format!("未知选项 {other}\n{USAGE}")),
-        }
+        i = rr3_aw_arg(args, i, &mut profile, &mut candidate)?;
     }
     let profile = profile.ok_or_else(|| format!("--profile 缺失\n{USAGE}"))?;
     let candidate = candidate.ok_or_else(|| format!("--candidate 缺失\n{USAGE}"))?;
     Ok(Rr3AxisWriteArgs { profile, candidate })
+}
+
+/// 单个参数位分派，返回下一个待解析下标：未知开关 / 缺参数 / `-` 开头值即拒。
+fn rr3_aw_arg(
+    args: &[String],
+    i: usize,
+    profile: &mut Option<PathBuf>,
+    candidate: &mut Option<PathBuf>,
+) -> Result<usize, String> {
+    match args[i].as_str() {
+        "--profile" => {
+            *profile = Some(need_path_value("--profile", args, i)?);
+            Ok(i + 2)
+        }
+        "--candidate" => {
+            *candidate = Some(need_path_value("--candidate", args, i)?);
+            Ok(i + 2)
+        }
+        "-h" | "--help" => Err(USAGE.to_string()),
+        other => Err(format!("未知选项 {other}\n{USAGE}")),
+    }
 }
 
 /// 写入编排（策略全在本函数，逐条显式）：装配单装载 → 候选全判据 → 拒绝面

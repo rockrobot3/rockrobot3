@@ -209,31 +209,30 @@ fn rr3_path_slot(member: &str) -> Option<Rr3PathSlot> {
 /// 内部按 contracts 目录读）。
 pub fn rr3_write_paths(truth_set: &[Rr3TruthSetEntry]) -> Result<Rr3DomainWritePaths, String> {
     Ok(Rr3DomainWritePaths {
-        profile: rr3_req(
-            rr3_slot_path(truth_set, Rr3PathSlot::Profile)?,
-            "profiles/<stem>.toml",
-        )?,
-        slots: rr3_req(
-            rr3_slot_path(truth_set, Rr3PathSlot::Slots)?,
-            "contracts/slots.toml",
-        )?,
-        roles: rr3_req(
-            rr3_slot_path(truth_set, Rr3PathSlot::Roles)?,
-            "contracts/roles.toml",
-        )?,
-        devices: rr3_req(
-            rr3_slot_path(truth_set, Rr3PathSlot::Devices)?,
-            "contracts/devices.toml",
-        )?,
-        wiring: rr3_req(
-            rr3_slot_path(truth_set, Rr3PathSlot::Wiring)?,
+        profile: rr3_path_at(truth_set, Rr3PathSlot::Profile, "profiles/<stem>.toml")?,
+        slots: rr3_path_at(truth_set, Rr3PathSlot::Slots, "contracts/slots.toml")?,
+        roles: rr3_path_at(truth_set, Rr3PathSlot::Roles, "contracts/roles.toml")?,
+        devices: rr3_path_at(truth_set, Rr3PathSlot::Devices, "contracts/devices.toml")?,
+        wiring: rr3_path_at(
+            truth_set,
+            Rr3PathSlot::Wiring,
             "hardware/<stem>/wiring.toml",
         )?,
-        platform_dir: rr3_req(
-            rr3_slot_path(truth_set, Rr3PathSlot::Platform)?,
+        platform_dir: rr3_path_at(
+            truth_set,
+            Rr3PathSlot::Platform,
             "contracts/platform/<chip>.toml",
         )?,
     })
+}
+
+/// 单槽取必需路径：分类/歧义/缺员判据全在下游单点，此处只做"取 → 点名"。
+fn rr3_path_at(
+    truth_set: &[Rr3TruthSetEntry],
+    slot: Rr3PathSlot,
+    what: &str,
+) -> Result<PathBuf, String> {
+    rr3_req(rr3_slot_path(truth_set, slot)?, what)
 }
 
 /// 按槽取路径（B10 自 write_paths 抽出；本轮审计加歧义门）：分类单点仍是

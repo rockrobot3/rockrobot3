@@ -51,17 +51,30 @@ fn rr3_secrets_resolve(
 /// 读全表：缺文件=空表（首次使用是常态）；坏 json/坏形状=回错**不静默覆盖**
 /// （覆盖会把用户已存的其他 key 一把抹掉）。
 fn rr3_secrets_read(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let Some(text) = rr3_secrets_text(path)? else {
+        return Ok(BTreeMap::new());
+    };
+    rr3_secrets_parse(path, &text)
+}
+
+/// 读 secrets 文件全文；文件不存在回 None（首次使用是常态）。
+fn rr3_secrets_text(path: &Path) -> Result<Option<String>, String> {
     let mut text = String::new();
     match File::open(path) {
         Ok(mut f) => {
             f.read_to_string(&mut text)
                 .map_err(|e| format!("读 {} 失败: {e}", path.display()))?;
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("开 {} 失败: {e}", path.display())),
     }
-    let v: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("{} 不是合法 JSON: {e}", path.display()))?;
+    Ok(Some(text))
+}
+
+/// 文本 → keys 全表：坏 json/坏形状回错**不静默覆盖**（覆盖会抹掉已存 key）。
+fn rr3_secrets_parse(path: &Path, text: &str) -> Result<BTreeMap<String, String>, String> {
+    let v: Value =
+        serde_json::from_str(text).map_err(|e| format!("{} 不是合法 JSON: {e}", path.display()))?;
     let keys = v.get("keys").and_then(Value::as_object).ok_or_else(|| {
         format!(
             "{} 形状不符（须 {{\"keys\": {{ref: 值}}}}）",
