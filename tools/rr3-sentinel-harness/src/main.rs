@@ -646,7 +646,7 @@ fn rr3_parity_verdict(frame: Rr3Frame) -> Rr3ParityStep {
     if ty == Rr3PayloadType::Request {
         return Rr3ParityStep::Skip;
     }
-    rr3_parity_shape_fail(ty, id, m)
+    rr3_parity_shape(ty, id, m)
 }
 
 /// 拆帧；畸形即点名（本次裁决记 Fail）。
@@ -663,7 +663,7 @@ fn rr3_parity_parsed(
 }
 
 /// 既非命中亦非跳过：形状错点名后记 Fail。
-fn rr3_parity_shape_fail(ty: Rr3PayloadType, id: u64, m: Option<String>) -> Rr3ParityStep {
+fn rr3_parity_shape(ty: Rr3PayloadType, id: u64, m: Option<String>) -> Rr3ParityStep {
     eprintln!(
         "FAIL  parity 应答形状错: {ty:?}/id={id}/{}",
         m.as_deref().unwrap_or("-")

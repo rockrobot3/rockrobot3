@@ -511,12 +511,12 @@ fn rr3_asm_wait_ready(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String
     )
     .map_err(|e| rr3_with_log_tail(&e, ctx.log_path))?;
     report.push_str(rr3_section("装配单驱动 boot：全部 face 模块 running").as_str());
-    rr3_asm_report_entries(ctx.entries, report);
+    rr3_asm_entries(ctx.entries, report);
     Ok(())
 }
 
 /// 报告里逐模块登记 entry 装机路径。
-fn rr3_asm_report_entries(entries: &[Rr3AssembleEntry], report: &mut String) {
+fn rr3_asm_entries(entries: &[Rr3AssembleEntry], report: &mut String) {
     for (m, entry_abs) in entries {
         report.push_str(&format!("{m}  entry={}\n", entry_abs.display()));
     }

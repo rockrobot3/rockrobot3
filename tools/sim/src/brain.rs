@@ -322,7 +322,7 @@ fn rr3_brain_fix(
     let brain_cfg = workdir.join("config.toml");
     let interact_cfg = workdir.join("interact-config.toml");
     rr3_brain_cfg_write(&brain_cfg, &interact_cfg, cloud_real, base_url)?;
-    rr3_brain_manifests_write(&workdir, bins)?;
+    rr3_mods_write(&workdir, bins)?;
     let m_sense = workdir.join(format!("{RR3_SIM_MODULE_A}.toml"));
     let m_interact = workdir.join(format!("{RR3_SIM_MODULE_B}.toml"));
     let m_brain = workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.toml"));
@@ -338,7 +338,7 @@ fn rr3_brain_fix(
 }
 
 /// 三份 wire manifest 落盘（写完即用）。
-fn rr3_brain_manifests_write(workdir: &Path, bins: &Rr3BrainBins) -> Result<(), String> {
+fn rr3_mods_write(workdir: &Path, bins: &Rr3BrainBins) -> Result<(), String> {
     for (name, text) in rr3_brain_manifests(&bins.sense, &bins.interact, &bins.brain) {
         let p = workdir.join(format!("{name}.toml"));
         std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
