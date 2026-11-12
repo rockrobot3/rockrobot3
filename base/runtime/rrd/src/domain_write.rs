@@ -556,6 +556,17 @@ fn rr3_write_axis(
     }))
 }
 
+/// 轴实例名形制（纯函数）：单段标识，不含路径分隔符 / `.` / `..` / 控制字符。
+/// 名字直接拼进轴档路径，放开就成"写口可改轴目录外的任意在册轴档"——实例名是
+/// 标识符不是路径，形制核在拼路径的单点处裁，fail-closed。
+fn rr3_axis_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains(['/', '\\'])
+        && !name.chars().any(char::is_control)
+}
+
 /// 轴档定位：hardware/<形态>/axis/<instance>.toml（接线布局推导的同一目录锚），
 /// 不在场即拒（写口只改在册档单键；立档走产线写入面全判据流程）。
 fn rr3_axis_path(
@@ -563,6 +574,11 @@ fn rr3_axis_path(
     name: &str,
 ) -> Result<PathBuf, (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    if !rr3_axis_name_ok(name) {
+        return Err(invalid(format!(
+            "轴实例名 {name:?} 须为单段标识（不含路径分隔符 / `..` / 控制字符）——写口只改本形态 axis/ 目录内的在册档"
+        )));
+    }
     let axis_dir = paths
         .wiring
         .parent()
@@ -770,6 +786,18 @@ mod tests {
             path: PathBuf::from(path),
             sha256: "0".repeat(64),
             bytes: 1,
+        }
+    }
+
+    /// 轴实例名形制（本轮审计）：只收单段标识——名字直接拼进轴档路径，`..`
+    /// 或分隔符会把写口放大成"改轴目录外的在册档"。
+    #[test]
+    fn axis_name_is_single_segment_only() {
+        for ok in ["pan", "tilt", "arm_l", "a"] {
+            assert!(rr3_axis_name_ok(ok), "{ok} 是合法单段名");
+        }
+        for bad in ["", ".", "..", "../pan", "a/b", "a\\b", "pan\0"] {
+            assert!(!rr3_axis_name_ok(bad), "{bad:?} 必须拒");
         }
     }
 
