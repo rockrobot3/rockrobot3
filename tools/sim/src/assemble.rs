@@ -548,8 +548,24 @@ fn rr3_asm_bins(rrd: &Path, rrctl: &Path, entries: &[Rr3AssembleEntry]) -> Resul
 
 /// 起 rrd：装配单驱动 boot（参数与 rrd.service 的 ExecStart 同形）。
 fn rr3_asm_up_rrd(ctx: &Rr3AsmCtx) -> Result<(std::process::Child, u32), String> {
-    let child = Command::new(ctx.rrd)
-        .arg("--socket")
+    let child = rr3_asm_rrd_cmd(ctx)
+        .stdout(rr3_asm_log(ctx)?)
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("起 rrd 失败: {e}"))?;
+    let pid = child.id();
+    println!(
+        "rr3-sim --profile: rrd 已起 pid={pid}，socket={}，装配单={}",
+        ctx.socket.display(),
+        ctx.profile_dst.display()
+    );
+    Ok((child, pid))
+}
+
+/// rrd 命令面（装配单驱动 boot，参数与 rrd.service 的 ExecStart 同形；stdout 由调用方接）。
+fn rr3_asm_rrd_cmd(ctx: &Rr3AsmCtx) -> Command {
+    let mut cmd = Command::new(ctx.rrd);
+    cmd.arg("--socket")
         .arg(ctx.socket)
         .arg("--contracts")
         .arg(ctx.repo.join("contracts"))
@@ -562,18 +578,8 @@ fn rr3_asm_up_rrd(ctx: &Rr3AsmCtx) -> Result<(std::process::Child, u32), String>
         .env("RR3_HAL_BACKEND", "sim")
         .env("RR3_PROBE", "sim")
         .env("RR3_HAL_SIM_WAVE", "burst")
-        .env("RR3_BRAIN_CLOUD", "mock")
-        .stdout(rr3_asm_log(ctx)?)
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| format!("起 rrd 失败: {e}"))?;
-    let pid = child.id();
-    println!(
-        "rr3-sim --profile: rrd 已起 pid={pid}，socket={}，装配单={}",
-        ctx.socket.display(),
-        ctx.profile_dst.display()
-    );
-    Ok((child, pid))
+        .env("RR3_BRAIN_CLOUD", "mock");
+    cmd
 }
 
 /// rrd 日志文件（stdout 落盘；建失败点名路径）。
@@ -601,11 +607,7 @@ fn rr3_asm_wait_ready(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String
 /// 有界等 socket 就位与全部 face 模块 running（失败附 rrd.log 尾部）。
 fn rr3_asm_boot_wait(ctx: &Rr3AsmCtx) -> Result<(), String> {
     wait_socket_exists(ctx.socket, RR3_ASSEMBLE_READY_DEADLINE)?;
-    let wanted: Vec<(&str, &str)> = ctx
-        .entries
-        .iter()
-        .map(|(m, _)| (m.as_str(), "running"))
-        .collect();
+    let wanted = rr3_asm_wanted(ctx.entries);
     rr3_wait_modules(
         || rr3_ctl_status_rows(ctx.rrctl, ctx.socket),
         &wanted,
@@ -613,6 +615,14 @@ fn rr3_asm_boot_wait(ctx: &Rr3AsmCtx) -> Result<(), String> {
     )
     .map_err(|e| rr3_with_log_tail(&e, ctx.log_path))?;
     Ok(())
+}
+
+/// 等跑期望表：每个 face 模块都要到 running。
+fn rr3_asm_wanted(entries: &[Rr3AssembleEntry]) -> Vec<(&str, &str)> {
+    entries
+        .iter()
+        .map(|(m, _)| (m.as_str(), "running"))
+        .collect()
 }
 
 /// 报告里逐模块登记 entry 装机路径。
@@ -674,21 +684,22 @@ fn rr3_asm_ota(ctx: &Rr3AsmCtx, report: &mut String) {
 /// 轮询用的 status 快照（main.rs run / chain / brain 各演练共用同一真值）：
 /// 连接失败（rrd 尚未就绪）当空表处理，由 deadline 收口
 pub(crate) fn rr3_ctl_status_rows(rrctl: &Path, socket: &Path) -> Vec<(String, u64, String)> {
-    Command::new(rrctl)
-        .arg("--bus-path")
-        .arg(socket)
-        .arg("status")
+    rr3_ctl_cmd(rrctl, socket, "status")
         .output()
         .map(|o| rr3_parse_status(&String::from_utf8_lossy(&o.stdout)))
         .unwrap_or_default()
 }
 
+/// rr3-ctl 子命令的命令面（--bus-path + 命令，三处读面共用）。
+fn rr3_ctl_cmd(rrctl: &Path, socket: &Path, cmd: &str) -> Command {
+    let mut c = Command::new(rrctl);
+    c.arg("--bus-path").arg(socket).arg(cmd);
+    c
+}
+
 /// 跑一次 rr3-ctl 子命令，stdout 原样带回（巡检报告素材）；意外失败即 Err
 pub(crate) fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<String, String> {
-    let out = Command::new(rrctl)
-        .arg("--bus-path")
-        .arg(socket)
-        .arg(cmd)
+    let out = rr3_ctl_cmd(rrctl, socket, cmd)
         .output()
         .map_err(|e| format!("跑 rr3-ctl {cmd} 失败: {e}"))?;
     let s = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -733,20 +744,23 @@ pub(crate) fn rr3_ctl_maybe_fail(
     socket: &Path,
     cmd: &str,
 ) -> Result<String, (i32, String)> {
-    let out = Command::new(rrctl)
-        .arg("--bus-path")
-        .arg(socket)
-        .arg(cmd)
+    let out = rr3_ctl_cmd(rrctl, socket, cmd)
         .output()
         .map_err(|e| (1, format!("跑 rr3-ctl {cmd} 失败: {e}")))?;
     let code = out.status.code().unwrap_or(1);
-    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
-    s.push_str(&String::from_utf8_lossy(&out.stderr));
+    let s = rr3_ctl_merged(&out.stdout, &out.stderr);
     if out.status.success() {
         Ok(s)
     } else {
         Err((code, s))
     }
+}
+
+/// stdout 原文 + stderr 续接（预期失败面的合并输出）。
+fn rr3_ctl_merged(stdout: &[u8], stderr: &[u8]) -> String {
+    let mut s = String::from_utf8_lossy(stdout).into_owned();
+    s.push_str(&String::from_utf8_lossy(stderr));
+    s
 }
 
 /// 失败时带上 rrd.log 尾部（排查起点，不让人再跑一遍去找日志）

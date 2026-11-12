@@ -208,25 +208,27 @@ fn rr3_brain_finish(
     outcome: Result<(), String>,
     report: String,
 ) -> Result<String, String> {
-    let cloud_label = if ctx.cloud_real {
-        "云端 real"
-    } else {
-        "云端 mock"
-    };
+    let cloud_label = format!("云端 {}", rr3_brain_cloud_word(ctx));
     let chain_label = format!(
         "rrd + rr3-sense({}) + rr3-brain + rr3-interact({})",
         ctx.audio_backend, ctx.sink_backend
     );
+    let ok_line = rr3_brain_ok_line(a.keep, &cloud_label, &chain_label);
     if a.keep {
         rr3_brain_keep(ctx);
-        let ok_line =
-            format!("\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}：{chain_label}）\n");
         return rr3_brain_done(outcome, report, &ctx.fix.workdir, true, &ok_line);
     }
     rr3_teardown_procs(children, &ctx.fix.socket);
-    let ok_line =
-        format!("\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}）：{chain_label}\n");
     rr3_brain_done(outcome, report, &ctx.fix.workdir, false, &ok_line)
+}
+
+/// 结论文案：`--keep` 档链条在括号内（全角冒号分隔），常规档在括号后分列。
+fn rr3_brain_ok_line(keep: bool, cloud_label: &str, chain_label: &str) -> String {
+    if keep {
+        format!("\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}：{chain_label}）\n")
+    } else {
+        format!("\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}）：{chain_label}\n")
+    }
 }
 
 /// `--keep`：打印现场保留与手动收尾指引（不杀子进程）。
@@ -333,9 +335,7 @@ fn rr3_brain_fix(
 ) -> Result<Rr3BrainFix, String> {
     let (workdir, socket) = rr3_brain_place(a)?;
 
-    let brain_cfg = workdir.join("config.toml");
-    let interact_cfg = workdir.join("interact-config.toml");
-    rr3_brain_cfg_write(&brain_cfg, &interact_cfg, cloud_real, base_url)?;
+    let (brain_cfg, interact_cfg) = rr3_brain_cfgs(&workdir, cloud_real, base_url)?;
     rr3_mods_write(&workdir, bins)?;
     let m_sense = workdir.join(format!("{RR3_SIM_MODULE_A}.toml"));
     let m_interact = workdir.join(format!("{RR3_SIM_MODULE_B}.toml"));
@@ -351,6 +351,18 @@ fn rr3_brain_fix(
     })
 }
 
+/// 演练 config 两份落点（写盘归 [`rr3_brain_cfg_write`]；返回两路径）。
+fn rr3_brain_cfgs(
+    workdir: &Path,
+    cloud_real: bool,
+    base_url: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    let brain_cfg = workdir.join("config.toml");
+    let interact_cfg = workdir.join("interact-config.toml");
+    rr3_brain_cfg_write(&brain_cfg, &interact_cfg, cloud_real, base_url)?;
+    Ok((brain_cfg, interact_cfg))
+}
+
 /// 三份 wire manifest 落盘（写完即用）。
 fn rr3_mods_write(workdir: &Path, bins: &Rr3BrainBins) -> Result<(), String> {
     for (name, text) in rr3_brain_manifests(&bins.sense, &bins.interact, &bins.brain) {
@@ -362,14 +374,19 @@ fn rr3_mods_write(workdir: &Path, bins: &Rr3BrainBins) -> Result<(), String> {
 
 /// 演练工作目录与套接字：`--socket` 显式给定则同目录，否则临时目录按进程号。
 fn rr3_brain_place(a: &Rr3SimArgs) -> Result<(PathBuf, PathBuf), String> {
-    let workdir = match &a.socket {
-        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
-        None => std::env::temp_dir().join(format!("rr3-sim-brain-{}", std::process::id())),
-    };
+    let workdir = rr3_brain_workdir(a);
     std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
     let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
     let _ = std::fs::remove_file(&socket);
     Ok((workdir, socket))
+}
+
+/// 演练工作目录：`--socket` 显式给定取其父目录，否则临时目录按进程号。
+fn rr3_brain_workdir(a: &Rr3SimArgs) -> PathBuf {
+    match &a.socket {
+        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        None => std::env::temp_dir().join(format!("rr3-sim-brain-{}", std::process::id())),
+    }
 }
 
 /// 演练 config 两份：brain 云档 + interact 独立 config。
@@ -415,22 +432,10 @@ fn rr3_brain_run(
 fn rr3_brain_up_rrd(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
     let fix = ctx.fix;
     let rrd_log = fix.workdir.join("rrd.log");
-    let rrd = Command::new(&ctx.bins.rrd)
-        .arg("--socket")
-        .arg(&fix.socket)
-        .arg("--manifest")
-        .arg(&fix.m_sense)
-        .arg("--boot-role")
-        .arg("resident")
-        .args(["--pre-register-timeout-ms", "3000"])
-        .env("RR3_HAL_BACKEND", ctx.audio_backend)
-        // burst（1s 正弦 + 1s 静音循环）：VAD 周期性发 onset/offset，
-        // brain 晚于首个 onset 注册也能赶上下一轮——sine 恒有声只发一次 onset
-        .env("RR3_HAL_SIM_WAVE", "burst")
-        .stdout(Stdio::from(
-            std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
-        ))
-        .stderr(Stdio::inherit())
+    let log = Stdio::from(
+        std::fs::File::create(&rrd_log).map_err(|e| format!("建 {rrd_log:?} 失败: {e}"))?,
+    );
+    let rrd = rr3_brain_rrd_cmd(ctx, log)
         .spawn()
         .map_err(|e| format!("起 rrd 失败: {e}"))?;
     let rrd_pid = rrd.id();
@@ -443,6 +448,26 @@ fn rr3_brain_up_rrd(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> R
         rr3_brain_cloud_word(ctx),
     );
     Ok(())
+}
+
+/// rrd 命令面（boot spawn rr3-sense；burst 波形让 VAD 周期发边沿）。
+fn rr3_brain_rrd_cmd(ctx: &Rr3BrainCtx, log: Stdio) -> Command {
+    let fix = ctx.fix;
+    let mut cmd = Command::new(&ctx.bins.rrd);
+    cmd.arg("--socket")
+        .arg(&fix.socket)
+        .arg("--manifest")
+        .arg(&fix.m_sense)
+        .arg("--boot-role")
+        .arg("resident")
+        .args(["--pre-register-timeout-ms", "3000"])
+        .env("RR3_HAL_BACKEND", ctx.audio_backend)
+        // burst（1s 正弦 + 1s 静音循环）：VAD 周期性发 onset/offset，
+        // brain 晚于首个 onset 注册也能赶上下一轮——sine 恒有声只发一次 onset
+        .env("RR3_HAL_SIM_WAVE", "burst")
+        .stdout(log)
+        .stderr(Stdio::inherit());
+    cmd
 }
 
 /// 云端档位的报告词（real/mock）。
@@ -459,19 +484,36 @@ fn rr3_brain_up_ext(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> R
     let fix = ctx.fix;
     rr3_brain_up_ic(ctx, children)?;
 
-    let mut bc = Command::new(&ctx.bins.brain);
-    bc.env("RR3_BUS_PATH", &fix.socket)
-        .env("RR3_MANIFEST", &fix.m_brain)
-        .env("RR3_BRAIN_CLOUD", rr3_brain_cloud_word(ctx))
-        .env("RR3_BRAIN_CONFIG", &fix.brain_cfg);
+    let bc = rr3_brain_cmd(ctx);
     let brain_log = fix.workdir.join("brain.log");
     let brain_child = rr3_spawn_logged(bc, &brain_log, RR3_SIM_MODULE_BRAIN)?;
     children.push((RR3_SIM_MODULE_BRAIN.into(), brain_child));
     Ok(())
 }
 
+/// brain 进程的命令面（总线/清单/云档/config 全在此接线）。
+fn rr3_brain_cmd(ctx: &Rr3BrainCtx) -> Command {
+    let fix = ctx.fix;
+    let mut bc = Command::new(&ctx.bins.brain);
+    bc.env("RR3_BUS_PATH", &fix.socket)
+        .env("RR3_MANIFEST", &fix.m_brain)
+        .env("RR3_BRAIN_CLOUD", rr3_brain_cloud_word(ctx))
+        .env("RR3_BRAIN_CONFIG", &fix.brain_cfg);
+    bc
+}
+
 /// 外部起 interact（回放面独立后端；面板地址可被 env 覆盖）。
 fn rr3_brain_up_ic(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Result<(), String> {
+    let fix = ctx.fix;
+    let ic = rr3_ic_cmd(ctx);
+    let interact_log = fix.workdir.join("interact.log");
+    let interact_child = rr3_spawn_logged(ic, &interact_log, RR3_SIM_MODULE_B)?;
+    children.push((RR3_SIM_MODULE_B.into(), interact_child));
+    Ok(())
+}
+
+/// interact 进程的命令面（回放面后端 + 面板地址 + config 接线）。
+fn rr3_ic_cmd(ctx: &Rr3BrainCtx) -> Command {
     let fix = ctx.fix;
     let mut ic = Command::new(&ctx.bins.interact);
     ic.env("RR3_BUS_PATH", &fix.socket)
@@ -484,10 +526,7 @@ fn rr3_brain_up_ic(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Re
         // 未给才落演练缺省回环 18080
         .env("RR3_PANEL_ADDR", rr3_panel_addr())
         .env("RR3_INTERACT_CONFIG", &fix.interact_cfg);
-    let interact_log = fix.workdir.join("interact.log");
-    let interact_child = rr3_spawn_logged(ic, &interact_log, RR3_SIM_MODULE_B)?;
-    children.push((RR3_SIM_MODULE_B.into(), interact_child));
-    Ok(())
+    ic
 }
 
 /// 面板地址：环境变量 RR3_PANEL_ADDR 优先，未给才落演练缺省回环。

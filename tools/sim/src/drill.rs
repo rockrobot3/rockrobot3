@@ -73,7 +73,18 @@ pub struct Rr3SimArgs {
 
 /// 解析 `rr3-sim` 参数。未知参数即错（脚本工具的第一错法是静默忽略拼写错误）。
 pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
-    let mut a = Rr3SimArgs {
+    let mut a = rr3_sim_args_default();
+    let mut i = 0;
+    while i < args.len() {
+        i = rr3_sim_arg_step(&mut a, args, i)?;
+    }
+    rr3_sim_args_check(&a)?;
+    Ok(a)
+}
+
+/// 演练参数缺省面（全部有默认值：在仓内任意目录直接 `rr3-sim` 即可跑）。
+fn rr3_sim_args_default() -> Rr3SimArgs {
+    Rr3SimArgs {
         socket: None,
         repo: None,
         keep: false,
@@ -91,13 +102,7 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
         brain_cloud: None,
         brain_base_url: None,
         brain_bin: None,
-    };
-    let mut i = 0;
-    while i < args.len() {
-        i = rr3_sim_arg_step(&mut a, args, i)?;
     }
-    rr3_sim_args_check(&a)?;
-    Ok(a)
 }
 
 /// 单步解析：返回下一项下标（布尔旗标推进 1、取值旗标推进 2）。

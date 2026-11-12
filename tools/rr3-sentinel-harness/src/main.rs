@@ -109,9 +109,7 @@ fn rr3_upstream_value(payload: &[u8]) -> Result<(Rr3PayloadType, Value), String>
 
 /// JSON-RPC 信封门：jsonrpc 版本 + id（无符号整数）；method/params 原样取出。
 fn rr3_upstream_rpc(v: &Value) -> Result<(u64, Option<String>, Value), String> {
-    if v.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return Err("jsonrpc 必须等于 \"2.0\"".into());
-    }
+    rr3_rpc_version_ok(v)?;
     let id = v
         .get("id")
         .and_then(Value::as_u64)
@@ -119,6 +117,14 @@ fn rr3_upstream_rpc(v: &Value) -> Result<(u64, Option<String>, Value), String> {
     let method = v.get("method").and_then(Value::as_str).map(str::to_string);
     let params = v.get("params").cloned().unwrap_or(Value::Null);
     Ok((id, method, params))
+}
+
+/// JSON-RPC 版本门。
+fn rr3_rpc_version_ok(v: &Value) -> Result<(), String> {
+    if v.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+        return Err("jsonrpc 必须等于 \"2.0\"".into());
+    }
+    Ok(())
 }
 
 /// 注册应答（rrd rr3_handshake 同款：Response + id 回显 + result.src_task）。
@@ -287,13 +293,18 @@ fn verdict(ok: bool, label: &str) -> bool {
 /// 全程看门狗：到点 exit 2（环境性失败），预算随拍数放宽。
 fn rr3_watchdog(t0: Instant, beats: usize) {
     let wd_budget = rr3_wd_budget(beats);
-    thread::spawn(move || loop {
+    thread::spawn(move || rr3_wd_loop(t0, wd_budget));
+}
+
+/// 看门狗循环体：每 200ms 查一次死线，到点 exit 2（环境性失败）。
+fn rr3_wd_loop(t0: Instant, wd_budget: Duration) {
+    loop {
         thread::sleep(Duration::from_millis(200));
         if t0.elapsed() > wd_budget {
             eprintln!("FAIL  harness 全程 {wd_budget:?} 看门狗到点（板侧在跑吗？线松了吗？）");
             std::process::exit(2);
         }
-    });
+    }
 }
 
 /// 看门狗预算：基准 + 每拍放宽量。
@@ -314,14 +325,19 @@ fn rr3_open(device: &str) -> Rr3UartConn {
 
 /// 收一帧或点名退出（读取/还原失败按调用方给定文案 FAIL 并 exit 1）。
 fn rr3_recv_frame(conn: &mut Rr3UartConn, on_recv: &str, on_parse: &str) -> Rr3Frame {
-    let buf = match conn.rr3_recv_buf() {
+    let buf = rr3_recv_buf(conn, on_recv);
+    rr3_frame_parse(buf, on_parse)
+}
+
+/// 收一帧裸帧；读取失败按 `on_recv` 点名后退出 1。
+fn rr3_recv_buf(conn: &mut Rr3UartConn, on_recv: &str) -> Rr3FrameBuf {
+    match conn.rr3_recv_buf() {
         Ok(b) => b,
         Err(e) => {
             eprintln!("{on_recv}: {e:?}");
             std::process::exit(1);
         }
-    };
-    rr3_frame_parse(buf, on_parse)
+    }
 }
 
 /// 还原一帧（失败点名后退出 1）。
@@ -718,6 +734,11 @@ fn rr3_parity_verdict(frame: Rr3Frame) -> Rr3ParityStep {
     let Some((ty, id, m, _, v)) = rr3_parity_parsed(frame) else {
         return Rr3ParityStep::Fail;
     };
+    rr3_parity_step(ty, id, m, &v)
+}
+
+/// 已拆帧归类：命中 / 心跳跳过 / 形状错。
+fn rr3_parity_step(ty: Rr3PayloadType, id: u64, m: Option<String>, v: &Value) -> Rr3ParityStep {
     if ty == Rr3PayloadType::Response && id == PARITY_CALL_ID {
         return Rr3ParityStep::Hit(v.get("result").cloned());
     }
@@ -824,14 +845,32 @@ fn rr3_evidence_write(
     let Some(ep) = ep else {
         return;
     };
-    let t1_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let t1_unix = rr3_now_unix();
+    rr3_evidence_flush(ep, device, intervals, hist, board_parity, t0_unix, t1_unix);
+}
+
+/// 证据文件写出并按结果留痕（失败不 exit——判据面已记账）。
+fn rr3_evidence_flush(
+    ep: &str,
+    device: &str,
+    intervals: &[u128],
+    hist: &str,
+    board_parity: Option<&Value>,
+    t0_unix: u64,
+    t1_unix: u64,
+) {
     match write_evidence(ep, device, intervals, hist, board_parity, t0_unix, t1_unix) {
         Ok(_) => println!("OK    证据文件已写: {ep}"),
         Err(e) => eprintln!("FAIL  证据文件写出失败: {e}"),
     }
+}
+
+/// 当前 UNIX 秒（采样窗口与证据档共用）。
+fn rr3_now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// 命令行参数：设备必给（缺即按用法退 2），拍数缺省 8，证据路径可选。
@@ -848,10 +887,7 @@ fn rr3_args(args: &[String]) -> (String, usize, Option<String>) {
 
 fn main() {
     let t0 = Instant::now();
-    let t0_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let t0_unix = rr3_now_unix();
     let args: Vec<String> = env::args().collect();
     let (device, beats, evidence_path) = rr3_args(&args);
     rr3_watchdog(t0, beats);
@@ -881,6 +917,11 @@ fn main() {
         t0_unix,
     );
 
+    rr3_exit_summary(fail);
+}
+
+/// 判据汇总出口：全过退 0，有 FAIL 退 1。
+fn rr3_exit_summary(fail: u32) -> ! {
     println!("---- D1 harness 判据汇总: {fail} 项 FAIL ----");
     if fail == 0 {
         println!("OK    层③ 宿主半边判据全过（编译面/三点堆采样见板侧 monitor 日志）");
