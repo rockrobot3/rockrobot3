@@ -577,6 +577,13 @@ pub(crate) fn rr3_role_gaps(profile: &Rr3Profile, roles: &Rr3RoleTable) -> Vec<(
             continue;
         }
         for role in roles.rr3_role_slot_names(slot) {
+            // kind=logic 角色按定义无 [pins] 物理绑定（roles.toml 头注：logic =
+            // 无物理绑定，不进 [pins]；链路/音频四格的真实载体是 [hardware]
+            // link_ifname/alsa_device 与 board 具名装配）——它们不在缺角色点名面，
+            // 否则"能力面已角色化"反会把 boot 判降（P1 件四）。
+            if roles.rr3_role_kind(&role).as_deref() == Some("logic") {
+                continue;
+            }
             if !profile.pins.iter().any(|p| p.role == role) {
                 gaps.push((slot.clone(), role));
             }

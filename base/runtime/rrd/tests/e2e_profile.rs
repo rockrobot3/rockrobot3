@@ -228,7 +228,9 @@ fn full_profile_spawns_every_face_module_and_all_reach_running() {
     assert_eq!(w["profile"], "default", "形态名 = 装配单文件 stem: {v}");
     assert_eq!(w["domains"][0]["name"], "rail5v", "{v}");
     assert_eq!(w["wires"][0]["connector"], "J-T", "{v}");
-    assert_eq!(w["roles"].as_array().map(Vec::len), Some(10), "{v}");
+    // 14 = P1 件四四格能力面角色进场（net.wifi.link / audio.capture.mic /
+    // audio.playback.spk / audio.vad.gate）后的在册数
+    assert_eq!(w["roles"].as_array().map(Vec::len), Some(14), "{v}");
     let checks = w["checks"].as_array().expect("checks 必须在场: {v}");
     let net_pass = checks
         .iter()
