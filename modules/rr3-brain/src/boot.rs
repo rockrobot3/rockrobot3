@@ -267,14 +267,19 @@ fn rr3_model_api_root(host_or_root: &str) -> String {
     if s.is_empty() {
         return String::new();
     }
-    let has_path = match s.split_once("://") {
-        Some((_, rest)) => rest.contains('/'),
-        None => s.contains('/'),
-    };
+    let has_path = rr3_root_has_path(s);
     if has_path {
         s.to_string()
     } else {
         format!("{s}/v1")
+    }
+}
+
+/// 根串是否已含路径（`scheme://host` 后的首字符 `/` 之外也算路径段）。
+fn rr3_root_has_path(s: &str) -> bool {
+    match s.split_once("://") {
+        Some((_, rest)) => rest.contains('/'),
+        None => s.contains('/'),
     }
 }
 

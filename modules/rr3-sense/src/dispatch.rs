@@ -176,21 +176,34 @@ impl Rr3SenseDispatcher {
             self.pending_nod = None;
             return;
         };
-        if !st.dip_sent && now >= st.dip_at {
-            tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.dip_deg));
-            bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
-            eprintln!("反射环: 点头蓄势 tilt={}°", st.dip_deg);
-            self.pending_nod = Some(Rr3NodState {
-                dip_sent: true,
-                ..st
-            });
-        } else if st.dip_sent && now >= st.lift_at {
-            tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.lift_deg));
-            bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
-            eprintln!("反射环: 点头示意 tilt={}°", st.lift_deg);
-            self.pending_nod = None;
-        }
+        self.pending_nod = rr3_nod_advance(tx, bus, st, now);
     }
+}
+
+/// 点头推进：蓄势段/上仰段到点即下发并推进，`None` = 手势结束。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_nod_advance(
+    tx: &rr_hal::backend::Rr3AudioCmdProducer,
+    bus: &BusHandle,
+    st: Rr3NodState,
+    now: Instant,
+) -> Option<Rr3NodState> {
+    if !st.dip_sent && now >= st.dip_at {
+        tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.dip_deg));
+        bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
+        eprintln!("反射环: 点头蓄势 tilt={}°", st.dip_deg);
+        return Some(Rr3NodState {
+            dip_sent: true,
+            ..st
+        });
+    }
+    if st.dip_sent && now >= st.lift_at {
+        tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(st.lift_deg));
+        bus.counter_bump(RR3_REFLEX_TILT_CMDS_KEY, 1);
+        eprintln!("反射环: 点头示意 tilt={}°", st.lift_deg);
+        return None;
+    }
+    Some(st)
 }
 
 impl Dispatcher for Rr3SenseDispatcher {
@@ -207,13 +220,7 @@ impl Dispatcher for Rr3SenseDispatcher {
             if topic == RR3_SERVO_TOPIC {
                 return rr3_sense_servo(self.cmd_tx.as_ref(), _args);
             }
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
-            let servo = format!("/{RR3_SERVO_TOPIC}");
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            let servo = String::new();
-            Err(format!(
-                "rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}{servo}，收到 {topic}"
-            ))
+            Err(rr3_sense_unknown(topic))
         }
     }
 
@@ -273,9 +280,7 @@ impl Rr3SenseDispatcher {
         done: usize,
         bus: &BusHandle,
     ) -> Result<Rr3PcmStream, String> {
-        if let Some(ring) = self.doa_ring.as_mut() {
-            ring.rr3_ring_feed(&raw.samples);
-        }
+        rr3_ring_feed(self.doa_ring.as_mut(), &raw.samples);
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
         let pcm = rr3_pcm_downmix(raw);
@@ -395,6 +400,22 @@ impl Rr3SenseDispatcher {
     }
 }
 
+/// 兜底面点名：exposes 清单（宿主档另含舵机命令面）。
+fn rr3_sense_unknown(topic: &str) -> String {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let servo = format!("/{RR3_SERVO_TOPIC}");
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let servo = String::new();
+    format!("rr3-sense 只 exposes {RR3_DUMP_TOPIC}/{RR3_OPS_LIST_TOPIC}{servo}，收到 {topic}")
+}
+
+/// 判向窗积累（未分配 ring = 单声道链路，跳过）。
+fn rr3_ring_feed(ring: Option<&mut Rr3DoaRing>, samples: &[i16]) {
+    if let Some(ring) = ring {
+        ring.rr3_ring_feed(samples);
+    }
+}
+
 /// 流级单声道化（R14 + 2026-10-31 实机订正）：`cfg.channels` 归 1、rate/bit_depth
 /// 不动、samples 收缩为**能量最高通道**（不平均——双麦平均下混实测梳状滤波，
 /// ASR 质量显著劣于单通道）；`channels <= 1` 时原样返回（零改动）。自 capture/
@@ -432,11 +453,7 @@ struct Rr3TtsGate {
 impl Rr3TtsGate {
     /// 喂一帧 tts_pcm：轮分隔（与上一帧间隔 > `gap_ms` 重置累计）→ 累计 → 外推。
     fn rr3_tts_gate_feed(&mut self, now: Instant, ms: u64, gap_ms: u64, tail_ms: u64) {
-        let new_round = match self.last_frame_at {
-            None => true,
-            Some(t) => now.duration_since(t) > Duration::from_millis(gap_ms),
-        };
-        if new_round {
+        if Self::rr3_round_break(self.last_frame_at, now, gap_ms) {
             self.round_start = Some(now);
             self.cum_ms = 0;
         }
@@ -445,6 +462,14 @@ impl Rr3TtsGate {
         if let Some(start) = self.round_start {
             // checked_add：Instant 端点溢出按"门长开"处理，不 panic（裸板口径）
             self.deadline = start.checked_add(Duration::from_millis(self.cum_ms + tail_ms));
+        }
+    }
+
+    /// 轮分隔判据：从未收帧，或与上一帧间隔超 `gap_ms`，即新一轮。
+    fn rr3_round_break(last: Option<Instant>, now: Instant, gap_ms: u64) -> bool {
+        match last {
+            None => true,
+            Some(t) => now.duration_since(t) > Duration::from_millis(gap_ms),
         }
     }
 
@@ -571,13 +596,19 @@ fn rr3_sense_servo(
     let Some(tx) = tx else {
         return Err("舵机命令面未就绪：本进程不持有外设桥（音频后端须为 esp32）".into());
     };
+    rr3_servo_push(tx, pan, tilt);
+    Ok(json!({ "queued": n }))
+}
+
+/// 逐轴推入命令旁路（缺键 = 本轴不下发）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_servo_push(tx: &rr_hal::backend::Rr3AudioCmdProducer, pan: Option<u16>, tilt: Option<u16>) {
     if let Some(p) = pan {
         tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(p));
     }
     if let Some(t) = tilt {
         tx.rr3_cmd_push(Rr3PeriphCmd::ServoTilt(t));
     }
-    Ok(json!({ "queued": n }))
 }
 
 /// 双轴角度解码（缺键 = 本轴不下发）与下发键数。

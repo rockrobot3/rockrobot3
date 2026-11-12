@@ -221,10 +221,8 @@ pub(crate) fn rr3_wake_decide(
 /// 当命令（去前缀）进 LLM。
 fn rr3_wake_hit(norm: &str, cfg: &Rr3WakeCfg) -> Option<Rr3WakeAction> {
     let norm_chars: Vec<char> = norm.chars().collect();
-    for phrase in &cfg.phrases {
-        if let Some(action) = rr3_wake_phrase(&norm_chars, phrase) {
-            return Some(action);
-        }
+    if let Some(action) = rr3_phrase_scan(&norm_chars, &cfg.phrases) {
+        return Some(action);
     }
     let rest = norm.strip_prefix("你好")?.trim();
     Some(if rest.chars().count() <= 2 {
@@ -232,6 +230,16 @@ fn rr3_wake_hit(norm: &str, cfg: &Rr3WakeCfg) -> Option<Rr3WakeAction> {
     } else {
         Rr3WakeAction::Command(rest.to_string())
     })
+}
+
+/// 短语表逐条匹配（首中即返）。
+fn rr3_phrase_scan(norm_chars: &[char], phrases: &[String]) -> Option<Rr3WakeAction> {
+    for phrase in phrases {
+        if let Some(action) = rr3_wake_phrase(norm_chars, phrase) {
+            return Some(action);
+        }
+    }
+    None
 }
 
 /// 单条短语：归一后空串跳过；ASR 吞词尾（实机"你好洛克"→"你好，洛。"）时文本
@@ -251,11 +259,16 @@ fn rr3_wake_phrase(norm_chars: &[char], phrase: &str) -> Option<Rr3WakeAction> {
     }
     let rest: String = norm_chars[pn_chars.len()..].iter().collect();
     let rest = rest.trim();
-    Some(if rest.is_empty() {
+    Some(rr3_wake_tail(rest))
+}
+
+/// 短语命中后：无后续文本 = 固定应答，否则命令进 LLM。
+fn rr3_wake_tail(rest: &str) -> Rr3WakeAction {
+    if rest.is_empty() {
         Rr3WakeAction::Ack
     } else {
         Rr3WakeAction::Command(rest.to_string())
-    })
+    }
 }
 
 /// 短一字的容错前缀（ASR 吞词尾）：短 2 字以上不认，编辑距内回 Ack。

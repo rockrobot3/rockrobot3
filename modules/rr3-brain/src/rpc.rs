@@ -225,8 +225,7 @@ fn rr3_ops_secs(group: &str, slot: &str, f: f64) -> Result<Value, String> {
 
 /// 整数槽（白名单仅 max_utterance_ms）：整值判据 + 正值判据
 fn rr3_ops_uint(group: &str, slot: &str, value: &Value, f: f64) -> Result<Value, String> {
-    let is_int = value.is_i64() || value.is_u64();
-    if !is_int && f.fract() != 0.0 {
+    if !rr3_uint_shaped(value, f) {
         return Err(format!(
             "槽 {group}.{slot} 须整数，收到 {}",
             rr3_py_float_str(f)
@@ -237,6 +236,11 @@ fn rr3_ops_uint(group: &str, slot: &str, value: &Value, f: f64) -> Result<Value,
         return Err(format!("槽 {group}.{slot} 须 >0，收到 {i}"));
     }
     Ok(json!(i))
+}
+
+/// 整值判据：JSON 整数，或整值浮点（`.0` 尾）。
+fn rr3_uint_shaped(value: &Value, f: f64) -> bool {
+    value.is_i64() || value.is_u64() || f.fract() == 0.0
 }
 
 /// 写源落位（Python rr3_ops_write 尾段同形状）：返回 (old, new)。
@@ -641,13 +645,18 @@ fn rr3_row_fill(
     obj.insert("api_format".to_string(), json!(inp.api_format));
     obj.insert("base_url".to_string(), json!(inp.base_url));
     obj.insert("model_id".to_string(), json!(inp.model_id));
+    rr3_row_key_ref(obj, inp);
+    obj.insert("active".to_string(), json!(active));
+    Ok(())
+}
+
+/// key_ref 三态：有值写 / 空串清 / 缺席保留。
+fn rr3_row_key_ref(obj: &mut serde_json::Map<String, Value>, inp: &Rr3ModelRowInput<'_>) {
     if let Some(k) = &inp.key_ref {
         obj.insert("api_key_ref".to_string(), json!(k));
     } else if inp.key_ref_clear {
         obj.remove("api_key_ref");
     }
-    obj.insert("active".to_string(), json!(active));
-    Ok(())
 }
 
 /// active 唯一性（B9 自 upsert 抽出）：新 active 行就位后其余行一律置 false

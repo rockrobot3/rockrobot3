@@ -75,12 +75,25 @@ pub(crate) fn rr3_hit_word(text: &str, words: &[&str]) -> bool {
 /// 转向三档（左/中/右）各取一次命中，产 servo/command 动作（批F2 判据 8）。
 pub(crate) fn rr3_extract_actions(user_text: &str) -> Vec<Value> {
     let text = user_text.trim();
+    let mut actions = rr3_relay_actions(text);
+    actions.extend(rr3_turn_actions(text));
+    actions
+}
+
+/// 吸合/断开词表 → relay/set 动作（各取一次命中，按序）。
+fn rr3_relay_actions(text: &str) -> Vec<Value> {
     let mut actions = Vec::new();
     for (words, on) in [(&RR3_ON_WORDS[..], true), (&RR3_OFF_WORDS[..], false)] {
         if rr3_hit_word(text, words) {
             actions.push(json!({ "topic": RR3_TOPIC_RELAY_SET, "args": { "on": on } }));
         }
     }
+    actions
+}
+
+/// 转向三档词表（左/中/右）→ servo/command 动作。
+fn rr3_turn_actions(text: &str) -> Vec<Value> {
+    let mut actions = Vec::new();
     for (words, angle) in [
         (&RR3_LEFT_WORDS[..], RR3_SERVO_ANGLE_LEFT),
         (&RR3_RIGHT_WORDS[..], RR3_SERVO_ANGLE_RIGHT),

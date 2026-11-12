@@ -78,14 +78,19 @@ impl Rr3ActAxisState {
     /// 键值对切分：形状错点名，逐键交 [`rr3_axis_kv`] 路由。
     fn rr3_axis_pairs(text: &str, raw: &mut Rr3AxisRaw) -> Result<(), String> {
         for kv in text.split(',') {
-            let (k, v) = kv.split_once('=').ok_or_else(|| {
-                format!(
-                    "执行轴状态段 {kv:?} 缺 =（形状 calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>）"
-                )
-            })?;
+            let (k, v) = Self::rr3_axis_split(kv)?;
             rr3_axis_kv(raw, k, v)?;
         }
         Ok(())
+    }
+
+    /// 单个键值对切分（缺 `=` 点名形状）。
+    fn rr3_axis_split(kv: &str) -> Result<(&str, &str), String> {
+        kv.split_once('=').ok_or_else(|| {
+            format!(
+                "执行轴状态段 {kv:?} 缺 =（形状 calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>）"
+            )
+        })
     }
 
     /// 五键齐备检查 → 投影（缺键逐条点名）。

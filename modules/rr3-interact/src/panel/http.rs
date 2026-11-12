@@ -155,20 +155,26 @@ fn rr3_head_read(
 
 /// 单条头行落位：空行 = 头区结束；只认 Content-Length。
 fn rr3_head_line(head: &str, content_length: &mut usize) -> Result<bool, String> {
+    let Some(v) = rr3_content_length(head)? else {
+        return Ok(!head.trim_end().is_empty());
+    };
+    *content_length = v;
+    Ok(true)
+}
+
+/// `Content-Length` 头取值：空行/不认的头行回 None，非数字点名。
+fn rr3_content_length(head: &str) -> Result<Option<usize>, String> {
     let head = head.trim_end();
     if head.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
-    if let Some(v) = head
-        .to_ascii_lowercase()
-        .strip_prefix("content-length:")
-        .map(str::trim)
-    {
-        *content_length = v
-            .parse()
-            .map_err(|_| format!("Content-Length 不是数字: {v:?}"))?;
-    }
-    Ok(true)
+    let lower = head.to_ascii_lowercase();
+    let Some(v) = lower.strip_prefix("content-length:").map(str::trim) else {
+        return Ok(None);
+    };
+    v.parse()
+        .map(Some)
+        .map_err(|_| format!("Content-Length 不是数字: {v:?}"))
 }
 
 /// 按声明长度读满 body——半包在这里等满或超时。
