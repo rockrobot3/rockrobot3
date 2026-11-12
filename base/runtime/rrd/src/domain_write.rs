@@ -78,10 +78,8 @@ pub struct Rr3DomainWriteParams {
 /// params 拆包＋形状核（跨平台纯函数）。confirm 门不在本层（它是权限语义，
 /// 归 execute 的门序；parse 只裁"形状合不合法"）。错误码全 Invalid（参数形状病）。
 pub fn rr3_write_parse(params: &Value) -> Result<Rr3DomainWriteParams, (Rr3StatusCode, String)> {
-    let target = rr3_write_target(params)?;
-    let name = rr3_write_text(params, "name")?.to_string();
-    let key = rr3_write_text(params, "key")?;
-    let value = rr3_write_value(params, target, key)?;
+    let (target, name, key) = rr3_write_head(params)?;
+    let value = rr3_write_value(params, target, &key)?;
     let evidence = params
         .get("evidence")
         .and_then(Value::as_str)
@@ -95,6 +93,16 @@ pub fn rr3_write_parse(params: &Value) -> Result<Rr3DomainWriteParams, (Rr3Statu
         evidence,
         confirm: None,
     })
+}
+
+/// params 三段拆包（target / name / key）：逐段形状核与文案归各自的取值函数。
+fn rr3_write_head(
+    params: &Value,
+) -> Result<(Rr3WriteTarget, String, String), (Rr3StatusCode, String)> {
+    let target = rr3_write_target(params)?;
+    let name = rr3_write_text(params, "name")?.to_string();
+    let key = rr3_write_text(params, "key")?;
+    Ok((target, name, key.to_string()))
 }
 
 /// `params.target` 词表（domain/axis）：出域即拒，文案点名两种合法取值。
@@ -266,13 +274,20 @@ fn rr3_slot_path(
         .iter()
         .filter(|e| rr3_path_slot(&e.member) == Some(slot))
         .collect();
-    let e = match hits.len() {
-        0 => return Ok(None),
-        1 => hits[0],
-        n => return Err(rr3_slot_dup_err(&hits, n)),
+    let Some(e) = rr3_slot_one(&hits)? else {
+        return Ok(None);
     };
     // platform 槽登记的是 chip 表文件本身，写口要的是目录（兄弟表落位同目录）
     Ok(rr3_slot_pick(e, slot))
+}
+
+/// 同槽命中数裁定：0 条 = 该槽无成员，1 条 = 唯一目标，多条 = 歧义拒。
+fn rr3_slot_one<'a>(hits: &[&'a Rr3TruthSetEntry]) -> Result<Option<&'a Rr3TruthSetEntry>, String> {
+    match hits.len() {
+        0 => Ok(None),
+        1 => Ok(Some(hits[0])),
+        n => Err(rr3_slot_dup_err(hits, n)),
+    }
 }
 
 /// 同槽多条记账 = 路径歧义：点名前三条成员，拒（写口不猜哪个是真目标）。
@@ -442,15 +457,7 @@ fn rr3_domain_read(
     params: &Rr3DomainWriteParams,
 ) -> Result<(String, crate::profile::Rr3Domain), (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
-    let text = std::fs::read_to_string(&paths.profile)
-        .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
-    let profile = crate::profile::rr3_profile_parse(&text).map_err(|errs| {
-        invalid(format!(
-            "装配单 {} 形状不合: {}",
-            paths.profile.display(),
-            errs.join("; ")
-        ))
-    })?;
+    let (text, profile) = rr3_profile_load(paths)?;
     let dom = profile
         .supplies
         .domains
@@ -464,6 +471,24 @@ fn rr3_domain_read(
             ))
         })?;
     Ok((text, dom))
+}
+
+/// 读装配单文本并解析（读不到 / 形状不合各自带因点名）。
+#[cfg(unix)]
+fn rr3_profile_load(
+    paths: &Rr3DomainWritePaths,
+) -> Result<(String, crate::profile::Rr3Profile), (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    let text = std::fs::read_to_string(&paths.profile)
+        .map_err(|e| invalid(format!("读不到装配单 {}: {e}", paths.profile.display())))?;
+    let profile = crate::profile::rr3_profile_parse(&text).map_err(|errs| {
+        invalid(format!(
+            "装配单 {} 形状不合: {}",
+            paths.profile.display(),
+            errs.join("; ")
+        ))
+    })?;
+    Ok((text, profile))
 }
 
 /// 键行更新集：键名 → 新值文本（手术输入）
@@ -625,13 +650,7 @@ fn rr3_write_axis(
     };
     let (axis_path, old, ev) = rr3_axis_write_prep(paths, params)?;
     // 单键手术 → tmp 候选档 → 复用产线写入面（全判据＋原子落盘＋副本拒单点）
-    let tmp = rr3_axis_stage(&axis_path, n)?;
-    let run = crate::axis_write::rr3_axis_write_run(&crate::axis_write::Rr3AxisWriteArgs {
-        profile: paths.profile.clone(),
-        candidate: tmp.clone(),
-    });
-    let _ = std::fs::remove_file(&tmp);
-    let echo = run.map_err(invalid)?;
+    let echo = rr3_axis_swap(&paths.profile, &axis_path, n)?;
     crate::rr3_log(&format!(
         "axis 写口: {} current_ceil_ma {}→{}（evidence {ev}，effective boot——rrd 下次 boot 扫描 axis/ 投影）",
         params.name, old, n,
@@ -647,6 +666,23 @@ fn rr3_write_axis(
         "effective": "boot",
         "echo": echo,
     }))
+}
+
+/// 单键手术到落盘的一段：tmp 候选档 → 产线写入面 → 清候选档。
+#[cfg(unix)]
+fn rr3_axis_swap(
+    profile: &Path,
+    axis_path: &Path,
+    n: u64,
+) -> Result<String, (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    let tmp = rr3_axis_stage(axis_path, n)?;
+    let run = crate::axis_write::rr3_axis_write_run(&crate::axis_write::Rr3AxisWriteArgs {
+        profile: profile.to_path_buf(),
+        candidate: tmp.clone(),
+    });
+    let _ = std::fs::remove_file(&tmp);
+    run.map_err(invalid)
 }
 
 /// 轴档写口证据门：必携引用且过核验（仅留痕，不入档）。
@@ -682,15 +718,23 @@ fn rr3_axis_path(
     paths: &Rr3DomainWritePaths,
     name: &str,
 ) -> Result<PathBuf, (Rr3StatusCode, String)> {
-    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
-    if !rr3_axis_name_ok(name) {
-        return Err(invalid(format!(
-            "轴实例名 {name:?} 须为单段标识（不含路径分隔符 / `..` / 控制字符）——写口只改本形态 axis/ 目录内的在册档"
-        )));
-    }
+    rr3_axis_name_gate(name)?;
     let axis_dir = rr3_axis_dir(paths)?;
     let axis_path = axis_dir.join(format!("{name}.toml"));
     rr3_axis_must_exist(axis_path)
+}
+
+/// 轴实例名形制门：不合即拒并点名缺的是哪一层（形制判据在 [`rr3_axis_name_ok`]）。
+fn rr3_axis_name_gate(name: &str) -> Result<(), (Rr3StatusCode, String)> {
+    if rr3_axis_name_ok(name) {
+        return Ok(());
+    }
+    Err((
+        Rr3StatusCode::Invalid,
+        format!(
+            "轴实例名 {name:?} 须为单段标识（不含路径分隔符 / `..` / 控制字符）——写口只改本形态 axis/ 目录内的在册档"
+        ),
+    ))
 }
 
 /// 轴档目录（hardware/<形态>/axis）：由接线档的父目录推导，无父目录即拒。

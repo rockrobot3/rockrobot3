@@ -186,20 +186,11 @@ fn rr3_hs_admit(
     reported_task: u64,
     req_id: u64,
 ) -> Result<Rr3Peer, String> {
-    let now = ctx.rr3_ctx_now_ms();
     // 一份 Sender 进在册表（此后它是这条连接唯一的广播入口），一份给补快照用
     let replay_tx = fan_tx.clone();
     // 硬规矩：锁结果先 `let` 绑再 `match`——Guard 临时量不得延寿到 Err 臂的
     // rr3_refuse（那边要取另一把锁），与 rr3_conn_finish 同形。
-    let added = rr3_lock(&ctx.shared).rr3_reg_add(facts, fan_tx, now);
-    let task = match added {
-        Ok(t) => t,
-        Err(e) => {
-            // 状态码映射只在这一处（rr3_rpc_reg_status），不在 conn 里重写
-            let code = rr3_rpc_reg_status(&e);
-            return Err(rr3_refuse(out, reported_task, req_id, code, &e.to_string()));
-        }
-    };
+    let task = rr3_hs_register(ctx, facts, fan_tx, out, reported_task, req_id)?;
     rr3_log(&format!(
         "注册 {} task={task} hb={}ms wd={}ms policy={}",
         facts.name, facts.heartbeat_ms, facts.watchdog_ms, facts.restart_policy
@@ -227,4 +218,25 @@ fn rr3_hs_admit(
     let replayed = rr3_hs_replay(&ctx.shared, &replay_tx, &peer.name);
     rr3_log(&format!("向 {} 补发在册状态 {replayed} 条", peer.name));
     Ok(peer)
+}
+
+/// 注册入库一段：取现在册表 → 失败按状态码映射回拒帧。
+fn rr3_hs_register(
+    ctx: &Rr3ConnCtx,
+    facts: &Rr3ManifestFacts,
+    fan_tx: SyncSender<Rr3Frame>,
+    out: &Arc<Mutex<UnixStream>>,
+    reported_task: u64,
+    req_id: u64,
+) -> Result<u64, String> {
+    let now = ctx.rr3_ctx_now_ms();
+    let added = rr3_lock(&ctx.shared).rr3_reg_add(facts, fan_tx, now);
+    match added {
+        Ok(t) => Ok(t),
+        Err(e) => {
+            // 状态码映射只在这一处（rr3_rpc_reg_status），不在 conn 里重写
+            let code = rr3_rpc_reg_status(&e);
+            Err(rr3_refuse(out, reported_task, req_id, code, &e.to_string()))
+        }
+    }
 }

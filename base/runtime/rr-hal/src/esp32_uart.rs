@@ -95,16 +95,21 @@ pub fn rr3_baud_parse(s: &str) -> Option<u32> {
 fn rr3_board_payload(b: &Rr3HalBindings) -> Option<Value> {
     let mut m = Map::new();
     rr3_board_pins(&mut m, b);
+    rr3_cred_store_put(&mut m, b);
+    if m.is_empty() {
+        return None;
+    }
+    Some(Value::Object(m))
+}
+
+/// 凭证库键（描述符有值才注入，值保持字符串）。
+fn rr3_cred_store_put(m: &mut Map<String, Value>, b: &Rr3HalBindings) {
     if let Some(v) = &b.cred_store {
         m.insert(
             RR3_BOARD_BINDING_CRED_STORE.to_string(),
             json!(v.to_string()),
         );
     }
-    if m.is_empty() {
-        return None;
-    }
-    Some(Value::Object(m))
 }
 
 /// 十个板侧引脚键逐键入载荷：`Some` 者按十进制字符串写（描述符值全字符串同形）。

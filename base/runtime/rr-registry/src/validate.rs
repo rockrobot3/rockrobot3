@@ -168,13 +168,26 @@ fn rr3_top_scan(
     for (name, value) in table {
         if let Some(keys) = allow.get(name.as_str()) {
             rr3_chk_section(name, value, keys, what, errs);
-        } else if !top_scalars.contains(name.as_str()) {
-            // 顶层标量键（契约登记在案）不做段内对账，其余未登记段即红
-            errs.push(format!(
-                "{what} 含未登记段 [{name}]（schema_version 契约无此段——typo 或契约未演进）"
-            ));
+        } else {
+            rr3_top_unknown(name, top_scalars, what, errs);
         }
     }
+}
+
+/// 未进段树的顶层键：在册标量键放行，其余未登记段即红。
+fn rr3_top_unknown(
+    name: &str,
+    top_scalars: &std::collections::BTreeSet<&str>,
+    what: &str,
+    errs: &mut Vec<String>,
+) {
+    // 顶层标量键（契约登记在案）不做段内对账，其余未登记段即红
+    if top_scalars.contains(name) {
+        return;
+    }
+    errs.push(format!(
+        "{what} 含未登记段 [{name}]（schema_version 契约无此段——typo 或契约未演进）"
+    ));
 }
 
 /// 从字段规格重建允许键树：段 → 键集；一段式 path = 顶层标量键
@@ -615,14 +628,22 @@ fn rr3_topic_owner_ok(
     declared_owners: &[String],
     errs: &mut Vec<String>,
 ) {
-    if !known_owners.iter().any(|o| o == owner) && !declared_owners.iter().any(|o| o == owner) {
+    if !rr3_owner_known(owner, known_owners, declared_owners) {
         errs.push(format!("topic {name} 的 owner 未登记: {owner}"));
-    } else if !name.starts_with(&format!("{owner}/"))
-        || name.split('/').next().unwrap_or("") != owner
-    {
+    } else if !rr3_owner_ns_ok(name, owner) {
         // 前缀归属 + owner==首段 双重不变量（二者不等价时也要报错）
         errs.push(format!("topic {name} 不在 owner {owner} 命名空间内"));
     }
+}
+
+/// owner 已登记：调用方白名单或本表 `[[owner]]` 任一命中。
+fn rr3_owner_known(owner: &str, known_owners: &[String], declared_owners: &[String]) -> bool {
+    known_owners.iter().any(|o| o == owner) || declared_owners.iter().any(|o| o == owner)
+}
+
+/// 前缀归属与 owner==首段双重不变量（两条同时成立才算在命名空间内）。
+fn rr3_owner_ns_ok(name: &str, owner: &str) -> bool {
+    name.starts_with(&format!("{owner}/")) && name.split('/').next().unwrap_or("") == owner
 }
 
 #[cfg(test)]

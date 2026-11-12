@@ -535,16 +535,26 @@ pub(crate) fn rr3_no_injection_err(
 ) -> Vec<String> {
     let mut errs: Vec<String> = Vec::new();
     let empty = rr3_empty_surface(handles_present, handles_empty, ops_present, ops_empty);
+    rr3_noinj_empty(empty, no_injection, &mut errs);
+    rr3_noinj_clash(empty, no_injection, &mut errs);
+    errs
+}
+
+/// 两数组均空却未明写 no_injection = true（L-5）。
+fn rr3_noinj_empty(empty: bool, no_injection: bool, errs: &mut Vec<String>) {
     if empty && !no_injection {
         errs.push(
             "注入面两数组均空却未明写 no_injection = true（L-5：或补齐 handles/ops，或明写该件不需注入面）"
                 .into(),
         );
     }
+}
+
+/// 明写 no_injection 却与注入面并存（两者互斥）。
+fn rr3_noinj_clash(empty: bool, no_injection: bool, errs: &mut Vec<String>) {
     if no_injection && !empty {
         errs.push("no_injection = true 只允许与空的 handles/ops 并存（该声明与注入面互斥）".into());
     }
-    errs
 }
 
 /// 解析 + 形状级校验一份装配清单文本。fail-closed：一条不静默放行，全部错误
@@ -604,6 +614,11 @@ fn rr3_asm_no_table(mut errs: Vec<String>) -> Result<Rr3AssembleFacts, Vec<Strin
 /// 顶层形状：schema_version（必须 2）与顶层未知键（只认 schema_version / assemble）。
 fn rr3_asm_head(t: &toml::Table, errs: &mut Vec<String>) {
     rr3_asm_ver(t, errs);
+    rr3_asm_top_keys(t, errs);
+}
+
+/// 顶层未知键（只认 schema_version / assemble）。
+fn rr3_asm_top_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
         if k != "schema_version" && k != "assemble" {
             errs.push(format!(

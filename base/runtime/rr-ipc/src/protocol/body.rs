@@ -36,14 +36,25 @@ pub fn rr3_body_encode(ty: Rr3PayloadType, body: &[u8]) -> Vec<u8> {
 
 /// 解码：拆出类型与体（体是新拥有的 Vec，调用方随便 move）
 pub fn rr3_body_split(raw: &[u8]) -> Result<(Rr3PayloadType, Vec<u8>), Rr3BodyError> {
+    rr3_body_len_ok(raw)?;
+    let ty = rr3_body_ty(raw)?;
+    Ok((ty, raw[RR3_BODY_TYPE_PREFIX_LEN..].to_vec()))
+}
+
+/// 体长下界：连类型前缀都带不全即短。
+fn rr3_body_len_ok(raw: &[u8]) -> Result<(), Rr3BodyError> {
     if raw.len() < RR3_BODY_TYPE_PREFIX_LEN {
         return Err(Rr3BodyError::TooShort { got: raw.len() });
     }
+    Ok(())
+}
+
+/// 类型前缀解码（值不在冻结枚举里即拒）。
+fn rr3_body_ty(raw: &[u8]) -> Result<Rr3PayloadType, Rr3BodyError> {
     let mut buf = [0u8; RR3_BODY_TYPE_PREFIX_LEN];
     buf.copy_from_slice(&raw[..RR3_BODY_TYPE_PREFIX_LEN]);
     let v = u16::from_le_bytes(buf);
-    let ty = Rr3PayloadType::from_u16(v).ok_or(Rr3BodyError::UnknownType { v })?;
-    Ok((ty, raw[RR3_BODY_TYPE_PREFIX_LEN..].to_vec()))
+    Rr3PayloadType::from_u16(v).ok_or(Rr3BodyError::UnknownType { v })
 }
 
 #[cfg(test)]

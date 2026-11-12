@@ -418,13 +418,15 @@ fn rr3_plan_reject(
 /// 把错误行点名的消费者加入剔除集（已在剔除集者跳过）。
 fn rr3_plan_drop(facts: &[Rr3DependsFacts], excluded: &mut BTreeSet<String>, errs: &[String]) {
     for f in facts {
-        if excluded.contains(&f.name) {
-            continue;
-        }
-        if rr3_plan_unsat(&f.name, errs) {
+        if rr3_plan_take(f, excluded, errs) {
             excluded.insert(f.name.clone());
         }
     }
+}
+
+/// 该模块是否本轮该剔除：尚未剔除且错误行点名了它。
+fn rr3_plan_take(f: &Rr3DependsFacts, excluded: &BTreeSet<String>, errs: &[String]) -> bool {
+    !excluded.contains(&f.name) && rr3_plan_unsat(&f.name, errs)
 }
 
 /// 错误行是否点名该消费者（前缀由 `unsatisfiable_error` 唯一拼装，与此同源）。

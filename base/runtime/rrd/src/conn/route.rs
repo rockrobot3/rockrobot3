@@ -151,7 +151,20 @@ pub(super) fn rr3_route_response(
         return Ok(Rr3Flow::Keep);
     }
     let fwd = rr3_fwd_frame(me, trace, body);
-    if !rr3_lock(&ctx.shared).rr3_reg_send_to(trace, &fwd) {
+    rr3_resp_send(out, ctx, me, trace, &fwd, body);
+    Ok(Rr3Flow::Keep)
+}
+
+/// 回程投递：调用方已不在册（已退场/已过期）则回 Invalid 错误帧，不断连。
+fn rr3_resp_send(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    trace: u64,
+    fwd: &Rr3Frame,
+    body: &[u8],
+) {
+    if !rr3_lock(&ctx.shared).rr3_reg_send_to(trace, fwd) {
         rr3_reply_err(
             out,
             me,
@@ -160,5 +173,4 @@ pub(super) fn rr3_route_response(
             &format!("应答的调用方 task={trace} 已不在册，无处投递"),
         );
     }
-    Ok(Rr3Flow::Keep)
 }

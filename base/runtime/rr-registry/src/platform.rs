@@ -288,12 +288,17 @@ fn rr3_ctl_item(
 /// `[[controller]]` 键词表核：只认 name / kind / channels（其余逐键点名）。
 fn rr3_ctl_keys(c: &toml::Table, i: usize, errs: &mut Vec<String>) {
     for k in c.keys() {
-        if k != "name" && k != "kind" && k != "channels" {
+        if !rr3_ctl_key_ok(k) {
             errs.push(format!(
                 "controller[{i}] 未知键 {k}（只认 name / kind / channels）"
             ));
         }
     }
+}
+
+/// 控制器键在册（只认 name / kind / channels）。
+fn rr3_ctl_key_ok(k: &str) -> bool {
+    k == "name" || k == "kind" || k == "channels"
 }
 
 /// `[[controller]]` 单条 name：非空字符串。
@@ -549,18 +554,27 @@ fn rr3_conf_register(
     if d.pins.is_empty() && d.controllers.is_empty() {
         return;
     }
-    if !groups_seen.insert(d.group.clone()) {
-        errs.push(format!(
-            "conflict[{}] 组名 {} 重复（一组一条，互斥集不许同名两册）",
-            d.i, d.group
-        ));
-    }
+    rr3_conf_dup_err(&d, groups_seen, errs);
     table.conflicts.push(Rr3ConflictEntry {
         group: d.group,
         pins: d.pins,
         controllers: d.controllers,
         why: d.why,
     });
+}
+
+/// 组名唯一（一组一条，互斥集不许同名两册）。
+fn rr3_conf_dup_err(
+    d: &Rr3ConflictDraft,
+    groups_seen: &mut BTreeSet<String>,
+    errs: &mut Vec<String>,
+) {
+    if !groups_seen.insert(d.group.clone()) {
+        errs.push(format!(
+            "conflict[{}] 组名 {} 重复（一组一条，互斥集不许同名两册）",
+            d.i, d.group
+        ));
+    }
 }
 
 /// 冲突集成员：pins/controllers 两数组（缺省空集）；两集皆空即点名；controllers
@@ -599,13 +613,24 @@ fn rr3_conf_sets(
     if let Some(v) = c.get("controllers") {
         controllers = rr3_str_set_from(v, &format!("conflict[{i}].controllers"), errs);
     }
-    if rr3_sets_blank(&pins, &controllers) {
+    rr3_conf_blank_err(i, group, &pins, &controllers, errs);
+    (pins, controllers)
+}
+
+/// 两集皆空即点名（点名不到任何成员的冲突集无判据对象）。
+fn rr3_conf_blank_err(
+    i: usize,
+    group: &Option<String>,
+    pins: &BTreeSet<i64>,
+    controllers: &BTreeSet<String>,
+    errs: &mut Vec<String>,
+) {
+    if rr3_sets_blank(pins, controllers) {
         errs.push(format!(
             "conflict[{i}]（组 {}）pins 与 controllers 均空：点名不到任何成员的冲突集无判据对象",
             group.as_deref().unwrap_or("")
         ));
     }
-    (pins, controllers)
 }
 
 /// 冲突集两成员皆空（点名不到任何成员 = 无判据对象）。
@@ -675,14 +700,18 @@ fn rr3_cons_key(k: &str, table: &Rr3PlatformTable, errs: &mut Vec<String>) -> bo
         ));
         return false;
     }
-    if !table.controllers.contains_key(segs[0]) {
-        errs.push(format!(
-            "construction 键 \"{k}\" 的 controller 段 {} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）",
-            segs[0]
-        ));
-        return false;
+    rr3_cons_ctl_ok(k, segs[0], table, errs)
+}
+
+/// controller 段须在本表 `[[controller]]` 在册（同文件真值，先立词表再引）。
+fn rr3_cons_ctl_ok(k: &str, ctl: &str, table: &Rr3PlatformTable, errs: &mut Vec<String>) -> bool {
+    if table.controllers.contains_key(ctl) {
+        return true;
     }
-    true
+    errs.push(format!(
+        "construction 键 \"{k}\" 的 controller 段 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
+    ));
+    false
 }
 
 /// 三元键前两段非空（instance 段允许留空）。

@@ -264,13 +264,16 @@ fn rr3_truth_row(truth_set: &[Rr3TruthSetEntry]) -> Rr3AssemblyCheck {
 
 fn rr3_truth_parts(missing: &[String], drifted: &[String]) -> Vec<String> {
     let mut parts = Vec::new();
-    if !missing.is_empty() {
-        parts.push(format!("缺册: {}", missing.join(", ")));
-    }
-    if !drifted.is_empty() {
-        parts.push(format!("漂移: {}", drifted.join(", ")));
-    }
+    rr3_parts_note(&mut parts, "缺册", missing);
+    rr3_parts_note(&mut parts, "漂移", drifted);
     parts
+}
+
+/// 单类成员名落一条（空集不落）。
+fn rr3_parts_note(parts: &mut Vec<String>, label: &str, names: &[String]) {
+    if !names.is_empty() {
+        parts.push(format!("{label}: {}", names.join(", ")));
+    }
 }
 
 /// 真值集逐成员重读：收集缺册与漂移成员名（判果由 [`rr3_truth_row`] 汇总）。

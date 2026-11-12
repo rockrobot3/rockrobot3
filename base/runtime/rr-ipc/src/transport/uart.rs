@@ -375,17 +375,19 @@ fn rr3_excl_lock(fd: i32) -> std::io::Result<()> {
         let e = std::io::Error::last_os_error();
         // SAFETY：合法 fd，锁失败则归还。
         unsafe { c_close(fd) };
-        return if e.kind() == std::io::ErrorKind::WouldBlock {
-            // EWOULDBLOCK（macOS=35/Linux=11 同 kind）：节点被另一个进程锁着。
-            // （ErrorKind::ResourceBusy 1.83 才 stable，MSRV 1.82 用 Other + 文案点名）
-            Err(std::io::Error::other(format!(
-                "串口已被其他进程占用（flock 排他）：{e}"
-            )))
-        } else {
-            Err(e)
-        };
+        return Err(rr3_excl_busy_err(e));
     }
     Ok(())
+}
+
+/// 取锁失败的回错：被占即点名 ResourceBusy，其余原样上报。
+fn rr3_excl_busy_err(e: std::io::Error) -> std::io::Error {
+    if e.kind() != std::io::ErrorKind::WouldBlock {
+        return e;
+    }
+    // EWOULDBLOCK（macOS=35/Linux=11 同 kind）：节点被另一个进程锁着。
+    // （ErrorKind::ResourceBusy 1.83 才 stable，MSRV 1.82 用 Other + 文案点名）
+    std::io::Error::other(format!("串口已被其他进程占用（flock 排他）：{e}"))
 }
 
 /// 退账：refs 减到零关 guard fd（flock 随最后一次 close 释放），并移除账目。
@@ -638,7 +640,12 @@ fn rr3_apply_termios(fd: i32, t: &Termios) -> std::io::Result<()> {
     if unsafe { c_tcsetattr(fd, TCSANOW, t) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
-    // SAFETY：合法指针；冲掉开口前积压的输入队列（TCIFLUSH 只冲收不冲发）。
+    rr3_termios_flush(fd)
+}
+
+/// 冲掉开口前积压的输入队列（TCIFLUSH 只冲收不冲发）。
+fn rr3_termios_flush(fd: i32) -> std::io::Result<()> {
+    // SAFETY：合法指针。
     if unsafe { c_tcflush(fd, TCIFLUSH) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -663,7 +670,12 @@ fn rr3_uart_clear_nb(fd: i32) -> std::io::Result<()> {
     if flags < 0 {
         return Err(std::io::Error::last_os_error());
     }
-    // SAFETY：合法 fd；F_SETFL 形状带一个 int 变参。
+    rr3_nb_clear(fd, flags)
+}
+
+/// 按已取到的 flags 撤 `O_NONBLOCK`（F_SETFL 带一个 int 变参）。
+fn rr3_nb_clear(fd: i32, flags: i32) -> std::io::Result<()> {
+    // SAFETY：合法 fd。
     if unsafe { c_fcntl(fd, F_SETFL, flags & !O_NONBLOCK) } < 0 {
         return Err(std::io::Error::last_os_error());
     }

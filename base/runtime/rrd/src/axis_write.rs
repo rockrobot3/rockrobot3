@@ -201,6 +201,16 @@ fn rr3_aw_same_pin(
     if rr3_aw_peer_skip(p, target) {
         return None;
     }
+    rr3_aw_pin_hit(p, target, file, pin_ids)
+}
+
+/// 装载一份目录项：与候选同 pin 即交出拒写原因（坏档/异 pin 不越权判）。
+fn rr3_aw_pin_hit(
+    p: &Path,
+    target: &Path,
+    file: &Rr3AxisFile,
+    pin_ids: &BTreeSet<String>,
+) -> Option<String> {
     match rr3_act_profile_load(p, pin_ids) {
         Ok(Some(other)) if other.pin == file.pin => Some(rr3_aw_dup_msg(p, target, file)),
         _ => None,
@@ -230,16 +240,27 @@ fn rr3_aw_duplicates(
     file: &Rr3AxisFile,
     pin_ids: &BTreeSet<String>,
 ) -> Result<(), String> {
-    let Ok(entries) = std::fs::read_dir(axis_dir) else {
-        return Ok(());
-    };
+    if let Some(msg) = rr3_aw_scan(axis_dir, target, file, pin_ids) {
+        return Err(msg);
+    }
+    Ok(())
+}
+
+/// 扫 axis/ 目录：首个同 pin 副本即交出拒写原因（目录读不到 = 无副本可判）。
+fn rr3_aw_scan(
+    axis_dir: &Path,
+    target: &Path,
+    file: &Rr3AxisFile,
+    pin_ids: &BTreeSet<String>,
+) -> Option<String> {
+    let entries = std::fs::read_dir(axis_dir).ok()?;
     for e in entries.flatten() {
         let p = e.path();
         if let Some(msg) = rr3_aw_same_pin(&p, target, file, pin_ids) {
-            return Err(msg);
+            return Some(msg);
         }
     }
-    Ok(())
+    None
 }
 
 /// 原子落盘（tmp→fsync→rename 唯一写路径）并回显写入路径与档案要点

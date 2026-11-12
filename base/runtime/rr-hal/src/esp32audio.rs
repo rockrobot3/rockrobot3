@@ -921,15 +921,17 @@ fn rr3_overflow_once(once: &mut Rr3IngestLog, dropped: u64) {
 fn rr3_esp32_take_reply(once: &mut Rr3IngestLog, id: u64, err: Option<String>) {
     match err {
         Some(e) => eprintln!("rr-hal-esp32-audio: 板面应答 id={id} 业务失败: {e}"),
-        None => {
-            if !once.ack {
-                once.ack = true;
-                eprintln!(
-                    "rr-hal-esp32-audio: 板面命令回执就绪（id={id} ok；后续成功回执不逐条打印）"
-                );
-            }
-        }
+        None => rr3_take_ack_log(once, id),
     }
+}
+
+/// 成功回执只打首条（首条已证明回执通道活着，高频面不刷屏）。
+fn rr3_take_ack_log(once: &mut Rr3IngestLog, id: u64) {
+    if once.ack {
+        return;
+    }
+    once.ack = true;
+    eprintln!("rr-hal-esp32-audio: 板面命令回执就绪（id={id} ok；后续成功回执不逐条打印）");
 }
 
 /// 四道门未过（帧界损坏/载荷 CRC 不符）：连续与累计双计数，首条与每千条点名。

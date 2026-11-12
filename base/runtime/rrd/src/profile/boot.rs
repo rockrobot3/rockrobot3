@@ -481,15 +481,20 @@ fn rr3_slots_gate(abs: &Path, table: &Rr3SlotTable) -> Result<(), String> {
             abs.display()
         ));
     }
+    rr3_slots_shape(abs, table)
+}
+
+/// 格位契约的形状门（空表门已在调用方）。
+fn rr3_slots_shape(abs: &Path, table: &Rr3SlotTable) -> Result<(), String> {
     let errs = table.rr3_slot_check();
-    if !errs.is_empty() {
-        return Err(format!(
-            "格位契约 {} 形状不合，拒绝启动: {}",
-            abs.display(),
-            errs.join("; ")
-        ));
+    if errs.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "格位契约 {} 形状不合，拒绝启动: {}",
+        abs.display(),
+        errs.join("; ")
+    ))
 }
 
 /// 角色契约装载 + 空表/形状门（与格位契约同一 fail-closed 口径）
@@ -508,15 +513,20 @@ fn rr3_roles_gate(abs: &Path, roles: &Rr3RoleTable) -> Result<(), String> {
             abs.display()
         ));
     }
+    rr3_roles_shape(abs, roles)
+}
+
+/// 角色契约的形状门（空表门已在调用方）。
+fn rr3_roles_shape(abs: &Path, roles: &Rr3RoleTable) -> Result<(), String> {
     let errs = roles.rr3_role_check();
-    if !errs.is_empty() {
-        return Err(format!(
-            "角色契约 {} 形状不合，拒绝启动: {}",
-            abs.display(),
-            errs.join("; ")
-        ));
+    if errs.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "角色契约 {} 形状不合，拒绝启动: {}",
+        abs.display(),
+        errs.join("; ")
+    ))
 }
 
 /// 器件词表装载 + 空表/形状门（装载期只查 mate 外键闭合，不认型号能力，D10a）
@@ -544,23 +554,25 @@ fn rr3_devs_gate(abs: &Path, devices: &Rr3DeviceTable) -> Result<(), String> {
             abs.display()
         ));
     }
+    rr3_devs_shape(abs, devices)
+}
+
+/// 器件词表的形状门（空表门已在调用方）。
+fn rr3_devs_shape(abs: &Path, devices: &Rr3DeviceTable) -> Result<(), String> {
     let errs = devices.rr3_dev_check();
-    if !errs.is_empty() {
-        return Err(format!(
-            "器件词表 {} 形状不合，拒绝启动: {}",
-            abs.display(),
-            errs.join("; ")
-        ));
+    if errs.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "器件词表 {} 形状不合，拒绝启动: {}",
+        abs.display(),
+        errs.join("; ")
+    ))
 }
 
 /// 接线档装载（装机档必在：读不到/形状不合都拒启动；返回绝对路径供轴目录推导）
 fn rr3_load_wiring(path: &Path) -> Result<(PathBuf, crate::wiring::Rr3Wiring), String> {
-    let abs =
-        std::fs::canonicalize(path).map_err(|e| format!("读不到接线档 {}: {e}", path.display()))?;
-    let text = std::fs::read_to_string(&abs)
-        .map_err(|e| format!("读不到接线档 {}: {e}", abs.display()))?;
+    let (abs, text) = rr3_boot_text(path, "接线档")?;
     let wiring = crate::wiring::rr3_wiring_from_text(&text).map_err(|errs| {
         format!(
             "接线档 {} 形状不合，拒绝启动: {}",

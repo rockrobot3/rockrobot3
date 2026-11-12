@@ -355,12 +355,17 @@ fn rr3_platform_parse(root: &toml::Value, errs: &mut Vec<String>) -> (String, St
     };
     let tier = rr3_plat_tier(t, errs);
     let chip = rr3_plat_chip(t, errs);
+    rr3_plat_unknown(t, errs);
+    (tier, chip)
+}
+
+/// [platform] 未知键点名（只认 tier / chip）。
+fn rr3_plat_unknown(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
         if k != "tier" && k != "chip" {
             errs.push(format!("[platform] 未知键 {k}（只认 tier / chip）"));
         }
     }
-    (tier, chip)
 }
 
 /// [platform].tier：封闭三档（host/rtos/bare）；缺键或出域逐条点名。
@@ -554,13 +559,18 @@ fn rr3_supplies_core(t: &toml::Table, supplies: &mut Rr3Supplies, errs: &mut Vec
 
 fn rr3_supplies_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
-        if k != "domain" && k != "budget" && !RR3_SUPPLIES_KEYS.contains(&k.as_str()) {
+        if !rr3_sup_key_ok(k) {
             errs.push(format!(
                 "[supplies] 未知键 {k}（只认 {}）",
                 RR3_SUPPLIES_KEYS.join("/")
             ));
         }
     }
+}
+
+/// supplies 键白名单：两个子段键（domain/budget）不在 [`RR3_SUPPLIES_KEYS`] 里也照收。
+fn rr3_sup_key_ok(k: &str) -> bool {
+    k == "domain" || k == "budget" || RR3_SUPPLIES_KEYS.contains(&k)
 }
 
 /// 看门狗有无与非空喂者两键（B9 自 supplies_core 抽出）：缺/型错各自点名。
@@ -886,12 +896,17 @@ fn rr3_slots_parse(
 /// [slots] 未知键点名（只认 present / device_absent）。
 fn rr3_slots_unknown(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
-        if k != "present" && k != "device_absent" {
+        if !rr3_slot_key_ok(k) {
             errs.push(format!(
                 "[slots] 未知键 {k}（只认 present / device_absent）"
             ));
         }
     }
+}
+
+/// slots 键白名单：present / device_absent 两键。
+fn rr3_slot_key_ok(k: &str) -> bool {
+    k == "present" || k == "device_absent"
 }
 
 /// [slots].present（B9 自 slots_parse 抽出）：本板物理在位格位数组，逐项非空。

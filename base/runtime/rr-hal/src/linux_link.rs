@@ -171,10 +171,15 @@ impl Rr3LinuxNmLink {
         ]) else {
             return;
         };
-        if let Some((pick_ssid, q)) = list.lines().find_map(rr3_nm_wifi_row) {
-            st.ssid = Some(Rr3SsidText::rr3_ssid_text_new(&pick_ssid));
-            st.rssi_dbm = rr3_nm_signal_to_dbm(q);
-        }
+        rr3_wifi_pick(&list, st);
+    }
+}
+
+/// 从 `wifi list` 行里取活动网络（SSID + 信号），取不到即不动读数。
+fn rr3_wifi_pick(list: &str, st: &mut Rr3LinkState) {
+    if let Some((pick_ssid, q)) = list.lines().find_map(rr3_nm_wifi_row) {
+        st.ssid = Some(Rr3SsidText::rr3_ssid_text_new(&pick_ssid));
+        st.rssi_dbm = rr3_nm_signal_to_dbm(q);
     }
 }
 

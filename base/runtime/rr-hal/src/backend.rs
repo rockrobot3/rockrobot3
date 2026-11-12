@@ -202,40 +202,32 @@ fn rr3_backend_os(backend: &'static str, native: bool) -> &'static str {
 /// 音频采集面生效后端：能力面覆盖键（[`RR3_HAL_AUDIO_BACKEND_ENV`]，未设/空白
 /// 视为未设）优先，否则回落全局 [`rr3_backend_resolve`]。只此一处读覆盖键。
 pub fn rr3_audio_backend() -> Result<&'static str, String> {
-    if let Some(v) = std::env::var_os(RR3_HAL_AUDIO_BACKEND_ENV) {
-        let s = v.to_string_lossy();
-        let s = s.trim();
-        if !s.is_empty() {
-            return rr3_backend_parse(RR3_HAL_AUDIO_BACKEND_ENV, s);
-        }
-    }
-    rr3_backend_resolve()
+    rr3_backend_override(RR3_HAL_AUDIO_BACKEND_ENV)?.map_or_else(rr3_backend_resolve, Ok)
 }
 
 /// 舵机面生效后端（P0-4）：能力面覆盖键 [`RR3_HAL_SERVO_BACKEND_ENV`] 优先，否则
 /// 回落全局。组合档舵机在 ESP32 板上时设 `esp32`，host-only 档不设回落全局。
 pub fn rr3_servo_backend() -> Result<&'static str, String> {
-    if let Some(v) = std::env::var_os(RR3_HAL_SERVO_BACKEND_ENV) {
-        let s = v.to_string_lossy();
-        let s = s.trim();
-        if !s.is_empty() {
-            return rr3_backend_parse(RR3_HAL_SERVO_BACKEND_ENV, s);
-        }
-    }
-    rr3_backend_resolve()
+    rr3_backend_override(RR3_HAL_SERVO_BACKEND_ENV)?.map_or_else(rr3_backend_resolve, Ok)
 }
 
 /// 显示面生效后端（P0-4）：能力面覆盖键 [`RR3_HAL_DISPLAY_BACKEND_ENV`] 优先，否则
 /// 回落全局。组合档 OLED/点阵在 ESP32 板上时设 `esp32`，host-only 档不设回落全局。
 pub fn rr3_display_backend() -> Result<&'static str, String> {
-    if let Some(v) = std::env::var_os(RR3_HAL_DISPLAY_BACKEND_ENV) {
-        let s = v.to_string_lossy();
-        let s = s.trim();
-        if !s.is_empty() {
-            return rr3_backend_parse(RR3_HAL_DISPLAY_BACKEND_ENV, s);
-        }
+    rr3_backend_override(RR3_HAL_DISPLAY_BACKEND_ENV)?.map_or_else(rr3_backend_resolve, Ok)
+}
+
+/// 能力面覆盖键取值：未设/空白视为未设（`None` 交调用方回落全局）。
+fn rr3_backend_override(env: &str) -> Result<Option<&'static str>, String> {
+    let Some(v) = std::env::var_os(env) else {
+        return Ok(None);
+    };
+    let s = v.to_string_lossy();
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(None);
     }
-    rr3_backend_resolve()
+    rr3_backend_parse(env, s).map(Some)
 }
 
 /// 描述符失败点名文案（R3-D3/0.0.5 批J G5）：裁决纯函数独立可单测。
@@ -339,15 +331,21 @@ fn rr3_servo_esp32() -> (Box<dyn Rr3PwmServo>, &'static str) {
 /// 宿主档门（linux/mac 是桥的承载侧；espidf 档无桥面，调用点全部同门）。
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn rr3_periph_uart_path() -> Option<String> {
-    if let Ok(b) = crate::descriptor::rr3_bindings_eff() {
-        if let Some(p) = b.periph_uart {
-            return Some(p);
-        }
+    if let Some(p) = rr3_periph_binding() {
+        return Some(p);
     }
     std::env::var(rr_periph_proto::consts::RR3_HAL_PERIPH_UART_ENV)
         .map(|p| p.trim().to_string())
         .ok()
         .filter(|p| !p.is_empty())
+}
+
+/// 描述符里的桥面设备路径（[hardware].periph_uart；无绑定/缺键 = None）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_periph_binding() -> Option<String> {
+    crate::descriptor::rr3_bindings_eff()
+        .ok()
+        .and_then(|b| b.periph_uart)
 }
 
 /// 舵机轴 env 裁决（只认 pan/tilt，缺省 [`rr_hal_api::RR3_PERIPH_AXIS_DEFAULT`]）。

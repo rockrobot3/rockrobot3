@@ -398,14 +398,20 @@ fn rr3_conn_idle_set(
         .rr3_reg_facts(name)
         .map(|f| f.watchdog_ms.saturating_mul(2))
         .unwrap_or(0);
+    rr3_idle_arm(stream, name, idle_ms)?;
+    Ok(idle_ms)
+}
+
+/// 按上界落位：有窗口即设读超时，无窗口走无上界分支。
+fn rr3_idle_arm(stream: &UnixStream, name: &str, idle_ms: u64) -> Result<(), String> {
     if idle_ms > 0 {
         stream
             .set_read_timeout(Some(Duration::from_millis(idle_ms)))
             .map_err(|e| format!("set_read_timeout 失败: {e}"))?;
+        Ok(())
     } else {
-        rr3_idle_unbounded(stream, name)?;
+        rr3_idle_unbounded(stream, name)
     }
-    Ok(idle_ms)
 }
 
 /// 无上界分支：留痕并清掉读超时（退化依赖对端断开）。

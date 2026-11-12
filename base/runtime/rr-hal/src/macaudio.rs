@@ -473,10 +473,16 @@ fn rr3_mac_prime_in_buf(aq: AudioQueueRef) -> Result<(), Rr3HalError> {
     }
     unsafe {
         (*buf).m_audio_data_byte_size = MAC_IN_BUF_BYTES;
-        let status = AudioQueueEnqueueBuffer(aq, buf, 0, ptr::null());
-        if status != 0 {
-            return Err(rr3_mac_status_err("AudioQueueEnqueueBuffer", status));
-        }
+    }
+    rr3_mac_enq(aq, buf)
+}
+
+/// 缓冲入队（失败回带 FFI 名字的错）。
+fn rr3_mac_enq(aq: AudioQueueRef, buf: AudioQueueBufferRef) -> Result<(), Rr3HalError> {
+    // SAFETY：aq/buf 均为配好容量的合法句柄
+    let status = unsafe { AudioQueueEnqueueBuffer(aq, buf, 0, ptr::null()) };
+    if status != 0 {
+        return Err(rr3_mac_status_err("AudioQueueEnqueueBuffer", status));
     }
     Ok(())
 }
@@ -679,12 +685,8 @@ fn rr3_mac_out_buf(aq: AudioQueueRef) -> Result<(), Rr3HalError> {
     unsafe {
         ptr::write_bytes((*buf).m_audio_data, 0, MAC_OUT_BUF_BYTES as usize);
         (*buf).m_audio_data_byte_size = MAC_OUT_BUF_BYTES;
-        let status = AudioQueueEnqueueBuffer(aq, buf, 0, ptr::null());
-        if status != 0 {
-            return Err(rr3_mac_status_err("AudioQueueEnqueueBuffer", status));
-        }
     }
-    Ok(())
+    rr3_mac_enq(aq, buf)
 }
 
 // ---------------------------------------------------------------------------

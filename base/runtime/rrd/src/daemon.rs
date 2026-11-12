@@ -647,17 +647,22 @@ fn rr3_daemon_queue(
     rr3_queue_fatal(&plan)?;
     // 提供者表：boot 全集一次性写入，含被拒模块——provides 仍计入可满足性宇宙
     rr3_queue_providers(&jobs, shared);
-    for name in &plan.rejected {
-        rr3_log(&format!(
-            "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
-        ));
-    }
+    rr3_queue_rejects(&plan);
     let by_name: BTreeMap<String, Rr3SpawnJob> = jobs
         .into_iter()
         .map(|j| (j.facts.name.clone(), j))
         .collect();
     rr3_queue_dispatch(boot, &plan, by_name, sup);
     Ok(())
+}
+
+/// 被仲裁拒的模块逐个点名（不可满足，但不连坐下游）。
+fn rr3_queue_rejects(plan: &rr_registry::Rr3BootPlan) {
+    for name in &plan.rejected {
+        rr3_log(&format!(
+            "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
+        ));
+    }
 }
 
 /// fatal 裁定点名：非空即拒整个 boot（环/名重复）。
@@ -888,16 +893,25 @@ fn rr3_flush_on_term(shared: Arc<Mutex<RrdRegistry>>, path: Option<PathBuf>) {
     let Some(rx) = rr3_flush_arm() else {
         return;
     };
-    let spawned = thread::Builder::new()
-        .name("counters-term-flush".into())
-        .spawn(move || rr3_flush_wait(rx, shared, path));
-    if let Err(e) = spawned {
+    if let Err(e) = rr3_flush_spawn(rx, shared, path) {
         // 线程起不来：处理器已在位但无人读 self-pipe。Rust 把 SIGPIPE 置 IGN，
         // 信号处理器写空管道只会得 EPIPE 而不终止——必须在这里恢复默认处置，
         // 否则 systemctl stop 会一直等到 SIGKILL（与 EINTR 那条同源的吞信号故障）。
         rr3_log(&format!("counters 关停 flush 未装上（线程起不来）: {e}"));
         rr3_term_default();
     }
+}
+
+/// 起 flush 线程（读 self-pipe → 落盘 → exit）。
+fn rr3_flush_spawn(
+    rx: std::os::unix::net::UnixStream,
+    shared: Arc<Mutex<RrdRegistry>>,
+    path: Option<PathBuf>,
+) -> std::io::Result<()> {
+    thread::Builder::new()
+        .name("counters-term-flush".into())
+        .spawn(move || rr3_flush_wait(rx, shared, path))
+        .map(|_| ())
 }
 
 /// 装管道与信号处理器：返回 self-pipe 读端；pipe 失败留痕跳过（SIGTERM 回落
@@ -1038,6 +1052,11 @@ fn rr3_acl_group(cpath: &std::ffi::CString) {
         return;
     }
     let gid = unsafe { (*gr).gr_gid };
+    rr3_acl_chown(cpath, gid);
+}
+
+/// 放行第 2 步的落位：`chown` 到属主组（失败留痕不拒启）。
+fn rr3_acl_chown(cpath: &std::ffi::CString, gid: libc::gid_t) {
     let uid = libc::uid_t::MAX; // chown 不改属主（uid_t 无符号，MAX 即 POSIX 的 (uid_t)-1）
     let rc = unsafe { libc::chown(cpath.as_ptr(), uid, gid) };
     if rc != 0 {

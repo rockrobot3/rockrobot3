@@ -196,10 +196,15 @@ fn rr3_comp_meta(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<
 /// `[composite]` 键词表核：只认 name / unit（其余逐键点名）。
 fn rr3_comp_meta_keys(comp: &toml::Table, errs: &mut Vec<String>) {
     for k in comp.keys() {
-        if k != "name" && k != "unit" {
+        if !rr3_meta_key_ok(k) {
             errs.push(format!("[composite] 未知键 {k}（只认 name / unit）"));
         }
     }
+}
+
+/// `[composite]` 键在册（只认 name / unit）。
+fn rr3_meta_key_ok(k: &str) -> bool {
+    k == "name" || k == "unit"
 }
 
 /// `[composite].name`：非空字符串（空串/缺键/非字符串分别点名）。

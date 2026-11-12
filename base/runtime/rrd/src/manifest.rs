@@ -230,13 +230,19 @@ pub fn rr3_manifest_abs(entry: &str) -> bool {
 /// entry 行定位（单点）：全文本内恰一条 `entry = "…"`，返回（行号, 值区间）。
 /// 引号内无值、多条、零条都是契约事故，逐类点名拒绝。
 fn rr3_entry_span(text: &str, module: &str) -> Result<(usize, usize, usize), String> {
+    let hits = rr3_entry_hits(text, module)?;
+    rr3_entry_single(module, &hits)
+}
+
+/// 全文扫 entry 行：逐行收集（行号, 值区间）。
+fn rr3_entry_hits(text: &str, module: &str) -> Result<Vec<(usize, usize, usize)>, String> {
     let mut hits: Vec<(usize, usize, usize)> = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         if let Some((a, b)) = rr3_entry_row(line, module)? {
             hits.push((idx, a, b));
         }
     }
-    rr3_entry_single(module, &hits)
+    Ok(hits)
 }
 
 /// entry 行数裁定：恰一条返回位置，零条 / 多条逐类点名。
@@ -290,12 +296,17 @@ fn rr3_entry_bounds(line: &str, module: &str) -> Result<(usize, usize), String> 
 /// 装机的 entry 值形制门（单点）：POSIX 绝对路径且不含 `.`/`..` 段——装机布局的
 /// 入口直接进"是否可装机"判据，相对路径会让起进程方由 CWD 决定起哪个二进制。
 fn rr3_entry_target(installed: &str, module: &str) -> Result<(), String> {
-    if !rr3_manifest_abs(installed) || installed.split('/').any(|s| s == "." || s == "..") {
+    if !rr3_manifest_abs(installed) || rr3_entry_dotty(installed) {
         return Err(format!(
             "模块 {module} 的装机 entry 不可装机（{installed}：须 POSIX 绝对路径且无 . / .. 段）"
         ));
     }
     Ok(())
+}
+
+/// 路径含 `.` / `..` 段（装机布局禁止）。
+fn rr3_entry_dotty(installed: &str) -> bool {
+    installed.split('/').any(|s| s == "." || s == "..")
 }
 
 /// manifest 的 entry 装机改写（**单点**：打包与演练布局共用同一实现，防两侧

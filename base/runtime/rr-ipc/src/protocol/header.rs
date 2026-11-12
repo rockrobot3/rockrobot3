@@ -231,7 +231,11 @@ fn rr3_hdr_guard(buf: &[u8]) -> Result<u32, Rr3HdrError> {
     let u32le = |o: usize| u32::from_le_bytes(buf[o..o + 4].try_into().unwrap());
     let magic = u32le(OFF_MAGIC);
     rr3_hdr_precheck(magic, buf)?;
-    let payload_len = u32le(OFF_PAYLOAD_LEN);
+    rr3_hdr_len_max(u32le(OFF_PAYLOAD_LEN))
+}
+
+/// 载荷长度上界（超过即拒，防自称长度撑爆上限）。
+fn rr3_hdr_len_max(payload_len: u32) -> Result<u32, Rr3HdrError> {
     if payload_len > MAX_PAYLOAD_LEN {
         return Err(Rr3HdrError::PayloadTooLarge { len: payload_len });
     }

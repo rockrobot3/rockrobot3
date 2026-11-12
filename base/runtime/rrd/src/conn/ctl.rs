@@ -84,16 +84,7 @@ pub(super) fn rr3_serve_ctl(
 ) -> String {
     // 先在锁内取数、锁外应答：与握手主路的锁纪律一致（持 shared 锁时不碰 out 锁）
     // 分派表键 = 方法变体（成员与 [`Rr3RpcMethod::is_ctl`] 白名单同源）。
-    let arms = rr3_ctl_arms();
-    let result: Result<Value, (Rr3StatusCode, String)> =
-        match arms.iter().find(|(m, _)| *m == req.method) {
-            Some((_, arm)) => arm(ctx, &req.params),
-            // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
-            None => Err((
-                Rr3StatusCode::Invalid,
-                format!("ctl 连接只接受 rr3.ctl.*，收到 {}", req.method.as_str()),
-            )),
-        };
+    let result = rr3_ctl_call(ctx, &req);
     let payload = rr3_ctl_payload(req.id, &result);
     rr3_write(
         out,
@@ -104,6 +95,19 @@ pub(super) fn rr3_serve_ctl(
         req.method.as_str()
     ));
     "ctl 查询完成，一次性控制连接按 ADR-0010 收尾".to_string()
+}
+
+/// 分派表查表 + 调用：未命中即拒（ctl 白名单外的请求到不了这里）。
+fn rr3_ctl_call(ctx: &Rr3ConnCtx, req: &Rr3RpcRequest) -> Result<Value, (Rr3StatusCode, String)> {
+    let arms = rr3_ctl_arms();
+    match arms.iter().find(|(m, _)| *m == req.method) {
+        Some((_, arm)) => arm(ctx, &req.params),
+        // 到不了：握手只把 is_ctl 的请求分进来（解析器与分流判据同一真值）
+        None => Err((
+            Rr3StatusCode::Invalid,
+            format!("ctl 连接只接受 rr3.ctl.*，收到 {}", req.method.as_str()),
+        )),
+    }
 }
 
 /// 应答体：Ok 出结果帧、Err 出错误帧。
