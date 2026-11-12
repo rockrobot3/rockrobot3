@@ -188,33 +188,35 @@ pub fn rr3_contracts_checks() -> Vec<Rr3AssemblyCheck> {
     out
 }
 
+/// 单册读出成功后的判果：sha 对上 = pass，不等 = sha 对破。
+fn rr3_book_sha(item: String, e: &Rr3ContractsEntry, now: &str) -> Rr3AssemblyCheck {
+    if now == e.sha256 {
+        Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_PASS,
+            reason: format!(
+                "sha256 对上 boot 装载面记账（{} 字节）——齐全且未漂移（Z-4 自检判）",
+                e.bytes
+            ),
+        }
+    } else {
+        Rr3AssemblyCheck {
+            item,
+            pass: RR3_CHECK_FAIL,
+            reason: format!(
+                "sha256 漂移：boot 记账 {} → 现读 {}（Z-4 sha 对破——boot 后内容被改）",
+                e.sha256, now
+            ),
+        }
+    }
+}
+
 /// 单册判果（Z-4 四册逐条，`contract:<名>` 点名）：重读记账路径——缺 = 齐全破、
 /// sha 不等 = sha 对破、等 = pass。
 fn rr3_book_row(e: &Rr3ContractsEntry) -> Rr3AssemblyCheck {
     let item = format!("contract:{}", e.file);
     match std::fs::read(&e.path) {
-        Ok(bytes) => {
-            let now = rr3_sha256_hex(&bytes);
-            if now == e.sha256 {
-                Rr3AssemblyCheck {
-                    item,
-                    pass: RR3_CHECK_PASS,
-                    reason: format!(
-                        "sha256 对上 boot 装载面记账（{} 字节）——齐全且未漂移（Z-4 自检判）",
-                        e.bytes
-                    ),
-                }
-            } else {
-                Rr3AssemblyCheck {
-                    item,
-                    pass: RR3_CHECK_FAIL,
-                    reason: format!(
-                        "sha256 漂移：boot 记账 {} → 现读 {}（Z-4 sha 对破——boot 后内容被改）",
-                        e.sha256, now
-                    ),
-                }
-            }
-        }
+        Ok(bytes) => rr3_book_sha(item, e, &rr3_sha256_hex(&bytes)),
         Err(_) => Rr3AssemblyCheck {
             item,
             pass: RR3_CHECK_FAIL,
@@ -223,12 +225,17 @@ fn rr3_book_row(e: &Rr3ContractsEntry) -> Rr3AssemblyCheck {
     }
 }
 
+/// 真值集 pass 前件：缺表与漂表皆空。
+fn rr3_truth_ok(missing: &[String], drifted: &[String]) -> bool {
+    missing.is_empty() && drifted.is_empty()
+}
+
 /// 基-40 成员完整性一条汇总判果：真值集七成员逐条重读，缺/漂收集后逐枚点名
 /// ——pass 判据 = 缺表与漂表皆空；fail 不如四册逐条细，但点名到成员名，病在
 /// 哪份文件一读便知（成员集账的义务是"不缺册不漂移"本身）。
 fn rr3_truth_row(truth_set: &[Rr3TruthSetEntry]) -> Rr3AssemblyCheck {
     let (missing, drifted) = rr3_truth_scan(truth_set);
-    if missing.is_empty() && drifted.is_empty() {
+    if rr3_truth_ok(&missing, &drifted) {
         Rr3AssemblyCheck {
             item: "truth_set".to_string(),
             pass: RR3_CHECK_PASS,
@@ -279,15 +286,20 @@ fn rr3_truth_drift(t: &Rr3TruthSetEntry, bytes: &[u8], drifted: &mut Vec<String>
     }
 }
 
+/// 四册与真值集逐条判果的 JSON 投影。
+fn rr3_checks_json() -> Vec<Value> {
+    rr3_contracts_checks()
+        .iter()
+        .map(|c| json!({ "item": c.item, "pass": c.pass, "reason": c.reason }))
+        .collect()
+}
+
 /// `rr3.ctl.contracts` 应答渲染（conn.rs 单点调用；形状与 `rr3.ctl.wiring`
 /// 同族：available + checks）。快照未在册（--manifest 调试路径）如实报不可得。
 pub fn rr3_contracts_json() -> Value {
     match rr3_contracts_snap() {
         Some(s) => {
-            let checks: Vec<Value> = rr3_contracts_checks()
-                .iter()
-                .map(|c| json!({ "item": c.item, "pass": c.pass, "reason": c.reason }))
-                .collect();
+            let checks = rr3_checks_json();
             json!({
                 "available": true,
                 "contracts": s.entries.iter().map(|e| json!({

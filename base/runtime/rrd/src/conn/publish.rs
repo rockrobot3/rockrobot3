@@ -12,6 +12,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::registry::Rr3PublishDeny;
 
 /// 低电兜底的触发主题（D3 append 的契约主题；owner=rr3-power，rrd 只订阅不发布）
 const RR3_BATTERY_LOW_TOPIC: &str = "rr3-power/battery/low";
@@ -100,6 +101,17 @@ fn rr3_pub_topic(
     }
 }
 
+/// 归属门判定：拒则记拒次并带回拒因。
+fn rr3_pub_check(ctx: &Rr3ConnCtx, me: &Rr3Peer, topic: &str) -> Option<Rr3PublishDeny> {
+    let check = RrdRegistry::rr3_reg_pub_check(&me.name, topic, &ctx.topics);
+    if let Err(e) = check {
+        rr3_lock(&ctx.shared).rr3_reg_note_denied();
+        Some(e)
+    } else {
+        None
+    }
+}
+
 /// 归属门（三层归属检查的应答侧）：拒则计数 + 回错误帧 + `Some(Keep)`；
 /// 放行返回 `None`。三种归属拒法都不断连（与 src_task 伪造同一口径）。
 fn rr3_pub_gate(
@@ -109,16 +121,7 @@ fn rr3_pub_gate(
     body: &[u8],
     topic: &str,
 ) -> Option<Rr3Flow> {
-    let deny = {
-        let check = RrdRegistry::rr3_reg_pub_check(&me.name, topic, &ctx.topics);
-        if let Err(e) = check {
-            rr3_lock(&ctx.shared).rr3_reg_note_denied();
-            Some(e)
-        } else {
-            None
-        }
-    };
-    let e = deny?;
+    let e = rr3_pub_check(ctx, me, topic)?;
     rr3_reply_err(
         out,
         me,
@@ -200,6 +203,16 @@ fn rr3_pub_batt_msg(topic: &str, edge: bool, percent: u64, voltage_mv: u64, n: u
     }
 }
 
+/// 低电读数（缺省 0）：percent / voltage_mv。
+fn rr3_pub_levels(parsed: &Value) -> (u64, u64) {
+    let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
+    let voltage_mv = parsed
+        .get("voltage_mv")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    (percent, voltage_mv)
+}
+
 /// 低电两沿的共用机制（置旗/清旗的镜像两份只留一份）：取读数 → 旗动作
 /// （恰在沿上返回 true）→ 沿上广播 system/power。返回 `None` = 非低电主题；
 /// 非沿上返回 n=0（无广播），留痕措辞归调用侧的沿语义（两沿文案不同）。
@@ -209,11 +222,7 @@ fn rr3_pub_power_latch(
     parsed: &Value,
 ) -> Option<(bool, u64, u64, usize)> {
     let (reason, edge) = rr3_pub_edge(ctx, topic)?;
-    let percent = parsed.get("percent").and_then(Value::as_u64).unwrap_or(0);
-    let voltage_mv = parsed
-        .get("voltage_mv")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let (percent, voltage_mv) = rr3_pub_levels(parsed);
     if !edge {
         return Some((false, percent, voltage_mv, 0));
     }

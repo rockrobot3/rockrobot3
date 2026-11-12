@@ -162,6 +162,21 @@ fn rr3_hs_facts(
     Ok(facts)
 }
 
+/// 后到者补发在册状态（跳过自己）：只保证入队次序，不构成上线次序。
+fn rr3_hs_replay(shared: &Arc<Mutex<RrdRegistry>>, tx: &SyncSender<Rr3Frame>, skip: &str) -> usize {
+    let snapshot = rr3_lock(shared).rr3_reg_snapshot();
+    let mut replayed = 0usize;
+    for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != skip) {
+        if tx
+            .try_send(rr3_state_frame(name, phase.as_str(), *t))
+            .is_ok()
+        {
+            replayed += 1;
+        }
+    }
+    replayed
+}
+
 /// 入册与应答：注册成功 → 回 src_task → 广播 registered → 给后到者补发在册快照
 fn rr3_hs_admit(
     ctx: &Rr3ConnCtx,
@@ -209,16 +224,7 @@ fn rr3_hs_admit(
     rr3_log(&format!("广播 registered 到 {n} 个连接"));
     // 后到者补发在册状态：只发转移不发快照的话，后起模块看不到先起模块上线过。
     // 这里只保证入队次序，不构成上线次序——读侧一律按类型/字段挑帧。
-    let snapshot = rr3_lock(&ctx.shared).rr3_reg_snapshot();
-    let mut replayed = 0usize;
-    for (name, t, phase) in snapshot.iter().filter(|(name, _, _)| *name != peer.name) {
-        if replay_tx
-            .try_send(rr3_state_frame(name, phase.as_str(), *t))
-            .is_ok()
-        {
-            replayed += 1;
-        }
-    }
+    let replayed = rr3_hs_replay(&ctx.shared, &replay_tx, &peer.name);
     rr3_log(&format!("向 {} 补发在册状态 {replayed} 条", peer.name));
     Ok(peer)
 }

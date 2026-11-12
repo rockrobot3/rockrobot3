@@ -31,16 +31,25 @@ pub(super) fn rr3_beat_handle(
                 "该 task 已过期或不在册，需重新注册",
             );
         }
-        other => {
-            rr3_reply_ok(out, me, id, &json!({"beat": "accepted"}));
-            // 只在 Promoted 上广播：Kept 若也发，每次心跳都会重发一条 state
-            // （spec §5.0 的 state 是转移流，不是快照流）
-            if other == Rr3Beat::Promoted {
-                rr3_beat_promote(ctx, me);
-            }
-        }
+        other => rr3_beat_ok(out, ctx, me, id, other),
     }
     Ok(Rr3Flow::Keep)
+}
+
+/// 心跳被接受的回执与续命后动作。
+fn rr3_beat_ok(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    me: &Rr3Peer,
+    id: u64,
+    beat: Rr3Beat,
+) {
+    rr3_reply_ok(out, me, id, &json!({"beat": "accepted"}));
+    // 只在 Promoted 上广播：Kept 若也发，每次心跳都会重发一条 state
+    // （spec §5.0 的 state 是转移流，不是快照流）
+    if beat == Rr3Beat::Promoted {
+        rr3_beat_promote(ctx, me);
+    }
 }
 
 /// 心跳可选 counters 字段归并 + R26 合并写（变化 → 闸门 → 快照 → 落盘）。

@@ -55,20 +55,7 @@ fn rr3_call_fwd(ctx: &Rr3ConnCtx, me: &Rr3Peer, topic: &str, body: &[u8]) -> Res
             Err(format!("主题 {topic} 的唯一被调方就是调用方自己，拒绝自呼"))
         }
         Some((name, task)) => {
-            let payload = rr3_body_encode(Rr3PayloadType::Request, body);
-            let frame = Rr3Frame {
-                header: Rr3Header {
-                    opcode: opcode::SEND,
-                    flags: 0,
-                    trace_id: me.task,
-                    timestamp_ns: rr3_now_ns(),
-                    src_task: me.task,
-                    dst_task: task,
-                    payload_len: payload.len() as u32,
-                    payload_crc32: rr_ipc::rr3_crc32(&payload),
-                },
-                payload,
-            };
+            let frame = rr3_req_frame(me, task, body);
             rr3_log(&format!(
                 "rr3.call {topic}: {}(task={}) → {name}(task={task})",
                 me.name, me.task
@@ -102,6 +89,42 @@ fn rr3_call_reply(
     }
 }
 
+/// `rr3.call` 的转发帧：src/trace = 调用方 task，dst = 被调方 task，body 原样。
+fn rr3_req_frame(me: &Rr3Peer, task: u64, body: &[u8]) -> Rr3Frame {
+    let payload = rr3_body_encode(Rr3PayloadType::Request, body);
+    Rr3Frame {
+        header: Rr3Header {
+            opcode: opcode::SEND,
+            flags: 0,
+            trace_id: me.task,
+            timestamp_ns: rr3_now_ns(),
+            src_task: me.task,
+            dst_task: task,
+            payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
+        },
+        payload,
+    }
+}
+
+/// 上行应答的回程帧：dst/trace 改写成调用方 task，body 原样。
+fn rr3_fwd_frame(me: &Rr3Peer, trace: u64, body: &[u8]) -> Rr3Frame {
+    let payload = rr3_body_encode(Rr3PayloadType::Response, body);
+    Rr3Frame {
+        header: Rr3Header {
+            opcode: opcode::SEND,
+            flags: 0,
+            trace_id: trace,
+            timestamp_ns: rr3_now_ns(),
+            src_task: me.task,
+            dst_task: trace,
+            payload_len: payload.len() as u32,
+            payload_crc32: rr_ipc::rr3_crc32(&payload),
+        },
+        payload,
+    }
+}
+
 /// 上行 Response 的回路（M3）：rr3.call 的应答去路。头上的 `trace_id` 是**调用方
 /// task**（`rr3_route_call` 转发时写入，被调方须原样带回）；body 原样转发，只把
 /// dst 改写成 trace_id。trace_id = 0 无从投递，回 Invalid；调用方已不在册（已退场 /
@@ -124,20 +147,7 @@ pub(super) fn rr3_route_response(
         );
         return Ok(Rr3Flow::Keep);
     }
-    let payload = rr3_body_encode(Rr3PayloadType::Response, body);
-    let fwd = Rr3Frame {
-        header: Rr3Header {
-            opcode: opcode::SEND,
-            flags: 0,
-            trace_id: trace,
-            timestamp_ns: rr3_now_ns(),
-            src_task: me.task,
-            dst_task: trace,
-            payload_len: payload.len() as u32,
-            payload_crc32: rr_ipc::rr3_crc32(&payload),
-        },
-        payload,
-    };
+    let fwd = rr3_fwd_frame(me, trace, body);
     if !rr3_lock(&ctx.shared).rr3_reg_send_to(trace, &fwd) {
         rr3_reply_err(
             out,

@@ -42,13 +42,10 @@ pub(crate) fn rr3_bindings_text(hardware: &BTreeMap<String, String>) -> String {
 /// 坏件逐条点名)。目录读不到同零份（无 axis 目录 = 无档案）。拆出理由：
 /// 装配快照要的是**全量**合法档案件（面板出图要看见全部轴），投影函数只返回
 /// 消歧后的 (state_text, notes)、清单被丢弃——装载与投影两段各自可测可复用。
-pub(crate) fn rr3_axis_files_load(
-    axis_dir: &Path,
-    pin_ids: &BTreeSet<String>,
-) -> (Vec<crate::axis::Rr3AxisFile>, Vec<String>) {
-    let mut notes = Vec::new();
+/// axis 目录下的 `.toml` 档路径（读不到目录 = 零份），排序保确定性。
+fn rr3_axis_paths(axis_dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(axis_dir) else {
-        return (Vec::new(), notes);
+        return Vec::new();
     };
     let mut files: Vec<PathBuf> = entries
         .flatten()
@@ -56,6 +53,15 @@ pub(crate) fn rr3_axis_files_load(
         .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("toml"))
         .collect();
     files.sort();
+    files
+}
+
+pub(crate) fn rr3_axis_files_load(
+    axis_dir: &Path,
+    pin_ids: &BTreeSet<String>,
+) -> (Vec<crate::axis::Rr3AxisFile>, Vec<String>) {
+    let mut notes = Vec::new();
+    let files = rr3_axis_paths(axis_dir);
     let mut found = Vec::new();
     for f in &files {
         match crate::axis::rr3_act_profile_load(f, pin_ids) {
@@ -676,6 +682,16 @@ fn rr3_atom_inject(module_dir: &Path, atom: &str, facts: &Rr3AssembleFacts, out:
 /// 推断。收窄是申报者的自证声明，判据只认数据不验物理——错报收窄即假绿，归申报者。
 /// `critical=false` 不进 Σ；输入条目应已经 [`rr3_demand_expand`] 按角色
 /// 实例数扩算（每实例语义，assemble.rs 头注同源）。
+/// 域预算超限点名（校验⑨）：最坏并发与申报者一并给出。
+fn rr3_budget_over(dm: &Rr3Domain, worst: i64, owners: &BTreeSet<&str>) -> String {
+    format!(
+        "域 {} 电流预算超限（校验⑨）：扩算后 Σ demands.peak_ma (critical=true) 最坏并发 = {worst} mA > current_cap_ma = {} mA（申报者：{}；缺省 = 全部同时，显式 concurrency_group 按组互斥取 max——F-12 不重叠必须是数据）",
+        dm.name,
+        dm.current_cap_ma,
+        owners.iter().copied().collect::<Vec<_>>().join("、")
+    )
+}
+
 pub(crate) fn rr3_demand_budget(
     declared: &[(String, Vec<Rr3AssembleDemand>)],
     domains: &[Rr3Domain],
@@ -687,12 +703,7 @@ pub(crate) fn rr3_demand_budget(
     for dm in domains {
         let (worst, owners) = rr3_rail_sum(declared, &dm.name);
         if worst > dm.current_cap_ma {
-            errs.push(format!(
-                "域 {} 电流预算超限（校验⑨）：扩算后 Σ demands.peak_ma (critical=true) 最坏并发 = {worst} mA > current_cap_ma = {} mA（申报者：{}；缺省 = 全部同时，显式 concurrency_group 按组互斥取 max——F-12 不重叠必须是数据）",
-                dm.name,
-                dm.current_cap_ma,
-                owners.into_iter().collect::<Vec<_>>().join("、")
-            ));
+            errs.push(rr3_budget_over(dm, worst, &owners));
         }
     }
     errs
@@ -819,6 +830,20 @@ fn rr3_power_kind(pin: &Rr3PinEntry, roles: &Rr3RoleTable) -> bool {
 /// kind=power → 红"）：角色 kind=power 的每个 pin，其绑定模块的件申报面必须覆盖
 /// 该 pin 的 rail（≥1 条 rail 相同的申报，跨件合计）。绑定缺失由缺格/结构自洽判
 /// 点名，此处不重复报；rail 空/none 由校验⑥-b 点名，此处跳过不双报。
+/// 该模块的件申报面是否覆盖 rail（跨件合计，≥1 条即算）。
+fn rr3_pow_covered(
+    scanned: &[(String, Vec<(String, Rr3AssembleFacts)>)],
+    module: &str,
+    rail: &str,
+) -> bool {
+    scanned
+        .iter()
+        .filter(|(m, _)| m.as_str() == module)
+        .flat_map(|(_, atoms)| atoms.iter())
+        .flat_map(|(_, f)| f.demands.iter())
+        .any(|d| d.rail == rail)
+}
+
 pub(crate) fn rr3_power_gaps(
     profile: &Rr3Profile,
     roles: &Rr3RoleTable,
@@ -835,12 +860,7 @@ pub(crate) fn rr3_power_gaps(
         else {
             continue;
         };
-        let covered = scanned
-            .iter()
-            .filter(|(m, _)| m == module)
-            .flat_map(|(_, atoms)| atoms.iter())
-            .flat_map(|(_, f)| f.demands.iter())
-            .any(|d| d.rail == pin.rail);
+        let covered = rr3_pow_covered(scanned, module, rail);
         if !covered {
             errs.push(format!(
                 "pins[{}] 角色 {} kind = power 挂轨 {rail}，但模块 {module} 的件申报面无 {rail} 需求（校验⑨ 缺失语义：件未申报 demands 而角色 kind=power → 红）",

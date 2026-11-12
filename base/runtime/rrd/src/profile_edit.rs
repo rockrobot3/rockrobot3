@@ -41,15 +41,19 @@ fn rr3_key_line_replace(lines: &mut [String], key: &str, new_raw: &str) -> Resul
             "键行 {key} 缺失（装配期全键必填保证在场，缺失说明档已被改病），拒绝手术"
         )),
         1 => {
-            let indent = lines[hits[0]][..lines[hits[0]].len() - lines[hits[0]].trim_start().len()]
-                .to_string();
-            lines[hits[0]] = format!("{indent}{key} = {new_raw}");
+            rr3_key_put(lines, hits[0], key, new_raw);
             Ok(())
         }
         n => Err(format!(
             "键行 {key} 出现 {n} 次（TOML 重复键是解析期红），拒绝手术"
         )),
     }
+}
+
+/// 单行改写：保留原行前导空白，键值重排。
+fn rr3_key_put(lines: &mut [String], at: usize, key: &str, new_raw: &str) {
+    let indent = lines[at][..lines[at].len() - lines[at].trim_start().len()].to_string();
+    lines[at] = format!("{indent}{key} = {new_raw}");
 }
 
 /// 平铺 TOML 键行手术（轴档案等无块头平表用，批N22 件一）：全文本内 `key` 键行

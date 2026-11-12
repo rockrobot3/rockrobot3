@@ -108,16 +108,7 @@ pub fn rr3_axis_write_run(cfg: &Rr3AxisWriteArgs) -> Result<String, String> {
 /// 写入面只吃装载域，不做 boot 的十条校验（整机合法性归 boot 正门）。
 #[cfg(unix)]
 fn rr3_aw_layout(cfg: &Rr3AxisWriteArgs) -> Result<(BTreeSet<String>, PathBuf), String> {
-    let profile_abs = crate::profile::rr3_profile_abs(&cfg.profile)?;
-    let profile_text = std::fs::read_to_string(&profile_abs)
-        .map_err(|e| format!("读不到装配单 {}: {e}", profile_abs.display()))?;
-    let profile = crate::profile::rr3_profile_parse(&profile_text).map_err(|errs| {
-        format!(
-            "装配单 {} 形状不合: {}",
-            profile_abs.display(),
-            errs.join("; ")
-        )
-    })?;
+    let profile = rr3_aw_profile(cfg)?;
     let pin_ids: BTreeSet<String> = profile.pins.iter().map(|p| p.rr3_pin_id()).collect();
     let wiring_path = crate::wiring::rr3_wiring_path(&cfg.profile)?;
     let axis_dir = wiring_path
@@ -125,6 +116,21 @@ fn rr3_aw_layout(cfg: &Rr3AxisWriteArgs) -> Result<(BTreeSet<String>, PathBuf), 
         .expect("wiring 路径必有父目录")
         .join("axis");
     Ok((pin_ids, axis_dir))
+}
+
+/// 装配单读入并解析（路径绝对化后读文本）。
+#[cfg(unix)]
+fn rr3_aw_profile(cfg: &Rr3AxisWriteArgs) -> Result<crate::profile::Rr3Profile, String> {
+    let profile_abs = crate::profile::rr3_profile_abs(&cfg.profile)?;
+    let profile_text = std::fs::read_to_string(&profile_abs)
+        .map_err(|e| format!("读不到装配单 {}: {e}", profile_abs.display()))?;
+    crate::profile::rr3_profile_parse(&profile_text).map_err(|errs| {
+        format!(
+            "装配单 {} 形状不合: {}",
+            profile_abs.display(),
+            errs.join("; ")
+        )
+    })
 }
 
 /// 候选档案全判据 + 落位文件名（pin 末段 instance；非两段式拒猜）

@@ -201,18 +201,7 @@ fn rr3_parse_facts(text: &str, manifest_path: &Path) -> Option<Rr3ManifestFacts>
 
 /// entry 定位 + E-3 两项检查（存在 / 可执行位）：不合格点名模块与 entry。
 fn rr3_job_entry(manifest_path: &Path, facts: &Rr3ManifestFacts) -> Option<PathBuf> {
-    // E-7：绝对则原样，否则相对 **manifest 所在目录** join（不是 rrd 的 CWD——装机后模块的
-    // 相对 entry 是相对它自己的 manifest 写的，跟着 CWD 走就成了一台机器一个目录树）。
-    // 父目录取不到（`--manifest` 给的是裸文件名）时按空串 join，即由 rrd 的 CWD 展开——
-    // 那是 CLI 原词本身有歧义，而回显出去的永远是最终解析后的那一条路径，不猜。
-    let entry = if rr3_manifest_abs(&facts.entry) {
-        PathBuf::from(&facts.entry)
-    } else {
-        manifest_path
-            .parent()
-            .unwrap_or(Path::new(""))
-            .join(&facts.entry)
-    };
+    let entry = rr3_entry_path(manifest_path, facts);
     // E-3 的两项检查。`PermissionsExt::mode()` 在 `std::os::unix::fs` 里，仍是零外部依赖。
     if rr3_entry_runnable(&entry) {
         Some(entry)
@@ -223,6 +212,21 @@ fn rr3_job_entry(manifest_path: &Path, facts: &Rr3ManifestFacts) -> Option<PathB
             entry.display()
         ));
         None
+    }
+}
+
+/// E-7：绝对则原样，否则相对 **manifest 所在目录** join（不是 rrd 的 CWD——装机后模块的
+/// 相对 entry 是相对它自己的 manifest 写的，跟着 CWD 走就成了一台机器一个目录树）。
+/// 父目录取不到（`--manifest` 给的是裸文件名）时按空串 join，即由 rrd 的 CWD 展开——
+/// 那是 CLI 原词本身有歧义，而回显出去的永远是最终解析后的那一条路径，不猜。
+fn rr3_entry_path(manifest_path: &Path, facts: &Rr3ManifestFacts) -> PathBuf {
+    if rr3_manifest_abs(&facts.entry) {
+        PathBuf::from(&facts.entry)
+    } else {
+        manifest_path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join(&facts.entry)
     }
 }
 
@@ -339,6 +343,15 @@ fn rr3_absorb_exit(
 /// 超上界单代轮转（0.0.8c 审计 B-8）在打开前做——子进程持 fd 直写，rrd 只能在
 /// spawn 窗口收口体量；长跑期间体量由模块侧留痕纪律（事件级频率）约束。
 fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::File> {
+    let path = rr3_unit_log_path(bus_path, unit)?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+}
+
+/// 日志文件路径：bus_path 必须绝对（fail-closed），建目录 + 轮转后交出待开路径。
+fn rr3_unit_log_path(bus_path: &Path, unit: &str) -> std::io::Result<PathBuf> {
     // fail-closed：bus_path 由 daemon 侧绝对化（cli.rs 的 rr3_socket_abs），
     // 相对/空路径到这里就是链条上游破了——拒开，绝不相对 CWD 悄悄建目录
     if !bus_path.is_absolute() {
@@ -350,10 +363,7 @@ fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::Fi
     let dir = crate::rr3_log_dir_ensure(bus_path)?;
     let path = dir.join(format!("{unit}.log"));
     crate::rr3_log_rotate(&path);
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
+    Ok(path)
 }
 
 /// 起进程的唯一漏斗：boot 与到期重启都过这里（Task 10 的 D-7 同一条教训——
@@ -470,19 +480,23 @@ fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Comma
     // 子进程补 SIGTERM，孤儿窗口从"等模块自己发现总线断了"缩到信号投递延迟。
     // pre_exec 只调 prctl（async-signal-safe，无分配），失败按 spawn 错误上抛。
     #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY：闭包内仅一次 prctl 调用并读 errno，不触碰父进程状态。
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM, 0, 0, 0) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
+    rr3_pdeath_signal(&mut cmd);
     cmd
+}
+
+/// pre_exec 装 PDEATHSIG：父进程死亡由内核补 SIGTERM。
+#[cfg(target_os = "linux")]
+fn rr3_pdeath_signal(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY：闭包内仅一次 prctl 调用并读 errno，不触碰父进程状态。
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM, 0, 0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 }
 
 /// per-unit 日志 stderr；打不开回退 inherit 并点名（观测降级不挡起跑）。
