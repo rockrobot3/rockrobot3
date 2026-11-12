@@ -302,14 +302,19 @@ impl Rr3ActDispatcher {
     fn rr3_state_servo(&mut self, bus: &BusHandle, state_angle: Option<u16>) -> Result<(), String> {
         if let Some(angle) = state_angle {
             if self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
-                self.servo_seq += 1;
-                bus.publish(
-                    servo::RR3_SERVO_STATE_TOPIC,
-                    rpc::rr3_servo_state_body(self.servo_seq, angle),
-                )?;
+                self.rr3_pub_servo(bus, angle)?;
             }
         }
         Ok(())
+    }
+
+    /// servo/state 单帧（续 seq 后发布）。
+    fn rr3_pub_servo(&mut self, bus: &BusHandle, angle: u16) -> Result<(), String> {
+        self.servo_seq += 1;
+        bus.publish(
+            servo::RR3_SERVO_STATE_TOPIC,
+            rpc::rr3_servo_state_body(self.servo_seq, angle),
+        )
     }
 
     /// relay/state 变化即发（0.0.5 批I A-7）：只在电平**真变**时续 seq 并
@@ -322,14 +327,19 @@ impl Rr3ActDispatcher {
     ) -> Result<(), String> {
         if let Some((on, prev)) = relay_applied {
             if relay::rr3_relay_state_due(prev, on) {
-                self.relay_seq += 1;
-                bus.counter_bump(relay::rr3_relay_count_key(on), 1);
-                bus.publish(
-                    relay::RR3_RELAY_STATE_TOPIC,
-                    rpc::rr3_relay_state_body(self.relay_seq, on),
-                )?;
+                self.rr3_pub_relay(bus, on)?;
             }
         }
         Ok(())
+    }
+
+    /// relay/state 单帧（续 seq、计数后发布）。
+    fn rr3_pub_relay(&mut self, bus: &BusHandle, on: bool) -> Result<(), String> {
+        self.relay_seq += 1;
+        bus.counter_bump(relay::rr3_relay_count_key(on), 1);
+        bus.publish(
+            relay::RR3_RELAY_STATE_TOPIC,
+            rpc::rr3_relay_state_body(self.relay_seq, on),
+        )
     }
 }

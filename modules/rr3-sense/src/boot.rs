@@ -157,16 +157,22 @@ fn rr3_cfg_audio(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Res
     let Some(audio) = section.and_then(|s| s.get("audio")) else {
         return Ok(());
     };
-    let (rate, ch, mut fms) = rr3_audio_raw(audio, cfg)?;
+    let (rate, ch, fms) = rr3_audio_raw(audio, cfg)?;
     // 0.0.5 批I S-1：frame_ms < 1（u64 域即 0）无节拍意义（0 帧 → read 空
     // → 全速刷总线），收敛到登记默认 20ms 并留痕——半有效的配置比报错更隐蔽
-    if fms < 1 {
-        eprintln!("config [rr3-sense.audio] frame_ms={fms} 无节拍意义，收敛 20ms");
-        fms = 20;
-    }
+    let fms = rr3_frame_ms(fms);
     (cfg.audio.sample_rate, cfg.audio.channels) = rr3_audio_take(rate, ch)?;
     cfg.audio.frame_ms = fms;
     Ok(())
+}
+
+/// frame_ms 收敛：0 无节拍意义，折登记默认 20ms 并留痕。
+fn rr3_frame_ms(fms: u64) -> u64 {
+    if fms < 1 {
+        eprintln!("config [rr3-sense.audio] frame_ms={fms} 无节拍意义，收敛 20ms");
+        return 20;
+    }
+    fms
 }
 
 /// `[rr3-sense.audio]` 三键读取（缺键保留现值，u64 域中转）。
@@ -299,22 +305,37 @@ fn rr3_reflex_nod_ms(reflex: &toml::Value, cfg: &mut Rr3SenseConfig) -> Result<(
 /// 采集/判据面不变量（解析后统一校验，默认值同过一遍）：全部 fail-closed，
 /// 错误文案点名键、收到值与合法域。
 fn rr3_sense_cfg_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
-    rr3_audio_cap_check(&cfg.audio)?;
-    rr3_vad_cap_check(&cfg.vad)?;
+    rr3_media_cap_check(&cfg.audio, &cfg.vad)?;
+    rr3_deg_cap_pair(cfg)?;
+    rr3_ring_cap_check(cfg)?;
+    rr3_span_cap_check(&cfg.reflex)
+}
+
+/// 采集面与 VAD 面域（采样/声道/单拍 + 阈值）。
+fn rr3_media_cap_check(audio: &Rr3AudioConfig, vad: &Rr3VadConfig) -> Result<(), String> {
+    rr3_audio_cap_check(audio)?;
+    rr3_vad_cap_check(vad)
+}
+
+/// 两处角度键域（doa 档界 + reflex 死区）。
+fn rr3_deg_cap_pair(cfg: &Rr3SenseConfig) -> Result<(), String> {
     rr3_deg_cap_check(
         "rr3-sense.doa",
         "bin_threshold_deg",
         cfg.doa.bin_threshold_deg,
     )?;
-    rr3_deg_cap_check("rr3-sense.reflex", "deadband_deg", cfg.reflex.deadband_deg)?;
-    rr3_ring_cap_check(cfg)?;
-    rr3_span_cap_check(&cfg.reflex)
+    rr3_deg_cap_check("rr3-sense.reflex", "deadband_deg", cfg.reflex.deadband_deg)
 }
 
 /// 采集面三键域（采样率/声道/单拍时长）。
 fn rr3_audio_cap_check(audio: &Rr3AudioConfig) -> Result<(), String> {
     rr3_cap_rate(audio)?;
     rr3_cap_chan(audio)?;
+    rr3_cap_frame(audio)
+}
+
+/// 单拍时长域（1..=上限）。
+fn rr3_cap_frame(audio: &Rr3AudioConfig) -> Result<(), String> {
     if audio.frame_ms > RR3_MAX_FRAME_MS {
         return Err(format!(
             "[rr3-sense.audio] frame_ms 须在 1..={RR3_MAX_FRAME_MS}，收到 {}",

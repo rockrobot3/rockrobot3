@@ -498,12 +498,18 @@ fn rr3_act_cfg_loop(sect: &toml::Value) -> Result<u32, String> {
     let raw = rr3_act_loop_raw(sect)?;
     let hz = u32::try_from(raw)
         .map_err(|_| format!("config [rr3-act.reflex] loop_hz={raw} 超出 u32 范围，拒 boot"))?;
+    rr3_loop_cap(hz)?;
+    Ok(hz)
+}
+
+/// 环节拍上界（1..=上限）。
+fn rr3_loop_cap(hz: u32) -> Result<(), String> {
     if hz > RR3_MAX_LOOP_HZ {
         return Err(format!(
             "config [rr3-act.reflex] loop_hz 须在 1..={RR3_MAX_LOOP_HZ}，收到 {hz}（更大值会退化为满转自旋）"
         ));
     }
-    Ok(hz)
+    Ok(())
 }
 
 /// loop_hz 原始值（非负整数，下限 1）。
@@ -524,6 +530,11 @@ fn rr3_act_cfg_effects(sect: &toml::Value) -> Result<Vec<Rr3LedEffect>, String> 
         .get("effects")
         .and_then(toml::Value::as_array)
         .ok_or_else(|| "config [rr3-act.led] 缺 effects（灯效白名单数组）".to_string())?;
+    rr3_effects_of(arr)
+}
+
+/// 灯效数组逐项落位（顺序与下标文案随项）。
+fn rr3_effects_of(arr: &[toml::Value]) -> Result<Vec<Rr3LedEffect>, String> {
     let mut effects = Vec::with_capacity(arr.len());
     for (i, e) in arr.iter().enumerate() {
         effects.push(rr3_act_effect_at(i, e)?);
@@ -551,6 +562,11 @@ fn rr3_act_cfg_topics(sect: &toml::Value) -> Result<Vec<String>, String> {
         .get("open_topics")
         .and_then(toml::Value::as_array)
         .ok_or_else(|| "config [rr3-act.intent] 缺 open_topics（意图开放主题数组）".to_string())?;
+    rr3_topics_of(arr)
+}
+
+/// 主题数组逐项落位（顺序与下标文案随项）。
+fn rr3_topics_of(arr: &[toml::Value]) -> Result<Vec<String>, String> {
     let mut topics = Vec::with_capacity(arr.len());
     for (i, t) in arr.iter().enumerate() {
         topics.push(rr3_act_topic_at(i, t)?);

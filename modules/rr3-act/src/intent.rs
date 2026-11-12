@@ -134,14 +134,22 @@ fn rr3_gates(topic: &str, open_topics: &[String]) -> Result<(), String> {
 
 /// 单条动作的形状裁决：`topic` 须为字符串、`args` 须在场。
 fn rr3_item_shape(item: &Value) -> Result<(&str, &Value), String> {
-    let topic = item
-        .get("topic")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("动作缺 topic（字符串），收到 {item}"))?;
-    let args = item
-        .get("args")
-        .ok_or_else(|| format!("动作缺 args（对象），收到 {item}"))?;
+    let topic = rr3_item_topic(item)?;
+    let args = rr3_item_args(item)?;
     Ok((topic, args))
+}
+
+/// 动作 topic 形状（须为字符串）。
+fn rr3_item_topic(item: &Value) -> Result<&str, String> {
+    item.get("topic")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("动作缺 topic（字符串），收到 {item}"))
+}
+
+/// 动作 args 形状（须在场）。
+fn rr3_item_args(item: &Value) -> Result<&Value, String> {
+    item.get("args")
+        .ok_or_else(|| format!("动作缺 args（对象），收到 {item}"))
 }
 
 /// relay 执行臂（B9 自 action_handle 抽出）

@@ -40,6 +40,11 @@ fn rr3_secrets_resolve(
     if let Some(p) = rr3_secrets_env_path(secrets_env) {
         return Ok(p);
     }
+    rr3_secrets_home(home)
+}
+
+/// HOME 回落后备路径（空 HOME 显式回错）。
+fn rr3_secrets_home(home: Option<String>) -> Result<PathBuf, String> {
     let home = home
         .filter(|h| !h.trim().is_empty())
         .ok_or_else(|| "secrets 路径无着落：缺 HOME 且未设 RR3_SECRETS_FILE".to_string())?;
@@ -68,10 +73,17 @@ fn rr3_secrets_text(path: &Path) -> Result<Option<String>, String> {
             f.read_to_string(&mut text)
                 .map_err(|e| format!("读 {} 失败: {e}", path.display()))?;
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("开 {} 失败: {e}", path.display())),
+        Err(e) => return rr3_secret_open_err(path, &e),
     }
     Ok(Some(text))
+}
+
+/// 打开失败分类：文件不存在回 None（首次使用是常态），其余回错。
+fn rr3_secret_open_err(path: &Path, e: &std::io::Error) -> Result<Option<String>, String> {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        return Ok(None);
+    }
+    Err(format!("开 {} 失败: {e}", path.display()))
 }
 
 /// 文本 → keys 全表：坏 json/坏形状回错**不静默覆盖**（覆盖会抹掉已存 key）。

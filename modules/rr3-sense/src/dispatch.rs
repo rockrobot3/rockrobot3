@@ -501,8 +501,13 @@ fn rr3_reflex_pan(enable: bool, deadband_deg: i32, doa_deg: i32, gate_open: bool
     if !enable || gate_open || doa_deg.abs() < deadband_deg {
         return None;
     }
+    Some(rr3_pan_swing(doa_deg))
+}
+
+/// 判向角 → pan 目标（中位 + ±摆幅限幅）。
+fn rr3_pan_swing(doa_deg: i32) -> u16 {
     let swing = doa_deg.clamp(-RR3_REFLEX_PAN_SWING_DEG, RR3_REFLEX_PAN_SWING_DEG);
-    Some((RR3_REFLEX_PAN_CENTER_DEG + swing) as u16)
+    (RR3_REFLEX_PAN_CENTER_DEG + swing) as u16
 }
 
 /// 点头手势计划（纯函数）：pan 下发时刻 `now` → 两段 tilt 目标与到点时刻。
@@ -636,10 +641,17 @@ fn rr3_deg_of(v: &Value, key: &str) -> Result<Option<u16>, String> {
     let n = v
         .as_u64()
         .ok_or_else(|| format!("{key} 应为整数角度（0..=180）"))?;
+    rr3_deg_cap(key, n)?;
+    Ok(Some(n as u16))
+}
+
+/// 单轴角度上界（0..=180，越界逐键点名）。
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rr3_deg_cap(key: &str, n: u64) -> Result<(), String> {
     if n > 180 {
         return Err(format!("{key} 越界 0..=180: {n}"));
     }
-    Ok(Some(n as u16))
+    Ok(())
 }
 
 #[cfg(test)]

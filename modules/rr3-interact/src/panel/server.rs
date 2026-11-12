@@ -471,6 +471,11 @@ fn rr3_relay_set(body: &[u8]) -> Rr3PanelDispatch {
         Ok(v) => v,
         Err(e) => return Rr3PanelDispatch::BadRequest(e),
     };
+    rr3_relay_call(&args)
+}
+
+/// relay 参数落派发（只认布尔 on）。
+fn rr3_relay_call(args: &Value) -> Rr3PanelDispatch {
     match args.get("on").and_then(Value::as_bool) {
         Some(on) => Rr3PanelDispatch::BusCall {
             topic: "rr3-act/relay/set".to_string(),
@@ -486,6 +491,11 @@ fn rr3_face_set(body: &[u8]) -> Rr3PanelDispatch {
         Ok(v) => v,
         Err(e) => return Rr3PanelDispatch::BadRequest(e),
     };
+    rr3_face_call(&args)
+}
+
+/// face 参数落派发（只认字符串 expression）。
+fn rr3_face_call(args: &Value) -> Rr3PanelDispatch {
     match args.get("expression").and_then(Value::as_str) {
         Some(expression) => Rr3PanelDispatch::PanelAct(Rr3PanelAction::Face {
             expression: expression.to_string(),
@@ -500,6 +510,11 @@ fn rr3_key_set(body: &[u8]) -> Rr3PanelDispatch {
         Ok(v) => v,
         Err(e) => return Rr3PanelDispatch::BadRequest(e),
     };
+    rr3_key_call(&args)
+}
+
+/// key 参数落派发（只认字符串 ref/value）。
+fn rr3_key_call(args: &Value) -> Rr3PanelDispatch {
     match (
         args.get("ref").and_then(Value::as_str),
         args.get("value").and_then(Value::as_str),
