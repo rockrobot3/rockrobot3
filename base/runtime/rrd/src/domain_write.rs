@@ -210,44 +210,59 @@ fn rr3_path_slot(member: &str) -> Option<Rr3PathSlot> {
 pub fn rr3_write_paths(truth_set: &[Rr3TruthSetEntry]) -> Result<Rr3DomainWritePaths, String> {
     Ok(Rr3DomainWritePaths {
         profile: rr3_req(
-            rr3_path_pick(truth_set, Rr3PathSlot::Profile),
+            rr3_slot_path(truth_set, Rr3PathSlot::Profile)?,
             "profiles/<stem>.toml",
         )?,
         slots: rr3_req(
-            rr3_path_pick(truth_set, Rr3PathSlot::Slots),
+            rr3_slot_path(truth_set, Rr3PathSlot::Slots)?,
             "contracts/slots.toml",
         )?,
         roles: rr3_req(
-            rr3_path_pick(truth_set, Rr3PathSlot::Roles),
+            rr3_slot_path(truth_set, Rr3PathSlot::Roles)?,
             "contracts/roles.toml",
         )?,
         devices: rr3_req(
-            rr3_path_pick(truth_set, Rr3PathSlot::Devices),
+            rr3_slot_path(truth_set, Rr3PathSlot::Devices)?,
             "contracts/devices.toml",
         )?,
         wiring: rr3_req(
-            rr3_path_pick(truth_set, Rr3PathSlot::Wiring),
+            rr3_slot_path(truth_set, Rr3PathSlot::Wiring)?,
             "hardware/<stem>/wiring.toml",
         )?,
         platform_dir: rr3_req(
-            rr3_path_pick(truth_set, Rr3PathSlot::Platform),
+            rr3_slot_path(truth_set, Rr3PathSlot::Platform)?,
             "contracts/platform/<chip>.toml",
         )?,
     })
 }
 
-/// 按槽取路径（B10 自 write_paths 抽出）：分类单点仍是 [`rr3_path_slot`]，
-/// 命中即取该成员路径；同一槽多成员记账 = 形状破，取首条并交由上游点名。
-fn rr3_path_pick(truth_set: &[Rr3TruthSetEntry], slot: Rr3PathSlot) -> Option<PathBuf> {
-    let p = truth_set
+/// 按槽取路径（B10 自 write_paths 抽出；本轮审计加歧义门）：分类单点仍是
+/// [`rr3_path_slot`]；同一槽多成员记账 = 记账形状破，**拒**（写口不猜哪个是
+/// 真目标——静默取首条会把写落到错误文件）。
+fn rr3_slot_path(
+    truth_set: &[Rr3TruthSetEntry],
+    slot: Rr3PathSlot,
+) -> Result<Option<PathBuf>, String> {
+    let hits: Vec<&Rr3TruthSetEntry> = truth_set
         .iter()
-        .find(|e| rr3_path_slot(&e.member) == Some(slot))
-        .map(|e| e.path.clone())?;
+        .filter(|e| rr3_path_slot(&e.member) == Some(slot))
+        .collect();
+    let e = match hits.len() {
+        0 => return Ok(None),
+        1 => hits[0],
+        n => {
+            let names: Vec<&str> = hits.iter().take(3).map(|e| e.member.as_str()).collect();
+            return Err(format!(
+                "真值集同类记账成员重复 {n} 条（{} 等）——写口路径歧义，拒",
+                names.join(", ")
+            ));
+        }
+    };
     // platform 槽登记的是 chip 表文件本身，写口要的是目录（兄弟表落位同目录）
     if slot == Rr3PathSlot::Platform {
-        p.parent().map(PathBuf::from)
+        Ok(e.path.parent().map(PathBuf::from))
     } else {
-        Some(p)
+        Ok(Some(e.path.clone()))
     }
 }
 
@@ -778,6 +793,18 @@ mod tests {
         )];
         let e = rr3_write_paths(&ts).expect_err("缺契约册必须拒");
         assert!(e.contains("contracts/slots.toml"), "{e}");
+    }
+
+    /// 同类成员重复 = 记账形状破：写口拒，不静默取首条（那会把写落到错误文件）
+    #[test]
+    fn paths_reject_duplicate_members() {
+        let ts = vec![
+            ts_entry("profiles/a.toml", "/x/profiles/a.toml"),
+            ts_entry("profiles/b.toml", "/x/profiles/b.toml"),
+        ];
+        let e = rr3_write_paths(&ts).expect_err("同类重复必须拒");
+        assert!(e.contains("重复"), "歧义要点名重复: {e}");
+        assert!(e.contains("profiles/a.toml"), "要点名重复成员: {e}");
     }
 
     fn ts_entry(member: &str, path: &str) -> Rr3TruthSetEntry {
