@@ -74,6 +74,15 @@ fn domain_keys_apply_pairs_armed_and_evidence() {
     assert!(batt.contains("armed = false"), "batt 不得波及: {batt}");
 }
 
+/// 单引号域名的档同样可手术（TOML 两形都合法、装载期都收）：旧判据只认双
+/// 引号会把在册域误报"缺域"——写口功能丢失且拒因与事实不符。
+#[test]
+fn domain_keys_apply_accepts_single_quoted_name() {
+    let text = SURGERY_TEXT.replace("name = \"batt\"", "name = 'batt'");
+    let out = rr3_domain_apply(&text, "batt", &[("severe_mv", "3200")]).expect("单引号域应可手术");
+    assert!(out.contains("severe_mv = 3200"), "{out}");
+}
+
 /// 缺域拒：域名不在册不带病落盘
 #[test]
 fn domain_keys_apply_rejects_missing_domain() {

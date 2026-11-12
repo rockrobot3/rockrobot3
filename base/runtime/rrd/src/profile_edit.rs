@@ -107,6 +107,18 @@ fn rr3_domain_heads(lines: &[String]) -> Vec<(usize, bool)> {
         .collect()
 }
 
+/// 键行引号串取值（单/双引号同义）：TOML 两形都合法、装载期都收——手术面的
+/// "域在不在册"判据只认双引号时，单引号档会被误报"缺域"（功能丢失且文案失实）。
+fn rr3_quoted_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    if !rr3_key_line_is(line, key) {
+        return None;
+    }
+    let (_, v) = line.split_once('=')?;
+    let v = v.trim_start();
+    let quote = v.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    v[1..].split_once(quote).map(|(inner, _)| inner)
+}
+
 /// 块定界（两段式之二）：按下一块头定界块行范围，收 `name` 键值等于 `domain`
 /// 的域块（头行+1 .. 下一块头）。
 fn rr3_domain_spans(
@@ -120,15 +132,10 @@ fn rr3_domain_spans(
             continue;
         }
         let end = heads.get(idx + 1).map(|&(h, _)| h).unwrap_or(lines.len());
-        let is_match = lines[head_i + 1..end].iter().any(|l| {
-            rr3_key_line_is(l, "name")
-                && l.split_once('=')
-                    // 域名是引号串（GOOD 形状），允许行内注释——取首对引号内内容
-                    .and_then(|(_, v)| v.trim().strip_prefix('"'))
-                    .and_then(|s| s.split_once('"'))
-                    .map(|(inner, _)| inner == domain)
-                    .unwrap_or(false)
-        });
+        // 域名是引号串，允许行内注释——单/双引号同义取首对引号内内容
+        let is_match = lines[head_i + 1..end]
+            .iter()
+            .any(|l| rr3_quoted_value(l, "name") == Some(domain));
         if is_match {
             matched.push((head_i + 1, end));
         }
