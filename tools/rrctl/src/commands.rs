@@ -46,12 +46,17 @@ pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
     if let Some(why) = rr3_ctl_reject(cmd, &envelope) {
         return Err(why);
     }
+    rr3_ctl_render(cmd, &envelope)
+}
+
+/// 成功信封按命令分派到各自的渲染器。
+fn rr3_ctl_render(cmd: &str, envelope: &Value) -> Result<String, String> {
     match cmd {
-        "status" => format_status(&envelope),
-        "health" => format_health(&envelope),
-        "logs" => format_logs(&envelope),
-        "counters" => format_counters(&envelope),
-        "reboot" => format_reboot(&envelope),
+        "status" => format_status(envelope),
+        "health" => format_health(envelope),
+        "logs" => format_logs(envelope),
+        "counters" => format_counters(envelope),
+        "reboot" => format_reboot(envelope),
         // COMMANDS 白名单已把 cmd 限定在六者之内；其余到这里必有 result（不会发生）
         _ => Err(format!("{cmd}: 应答形状意外（无 result 也无 error）")),
     }

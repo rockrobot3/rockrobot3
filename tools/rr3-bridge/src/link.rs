@@ -89,23 +89,8 @@ pub fn run(cfg: BridgeConfig, shutdown: Arc<AtomicBool>) -> u8 {
             return shutdown_exit();
         }
         // —— UART 开口（失败退避重开；开口净化由 Rr3UartConn::open 兜底）——
-        let mut backoff = Backoff::new();
-        let (rx, tx) = loop {
-            if shutdown.load(Ordering::SeqCst) {
-                return shutdown_exit();
-            }
-            match open_uart_pair(&cfg) {
-                Ok(pair) => break pair,
-                Err(e) => {
-                    log(&format!(
-                        "uart open 失败（{e}）；{}s 后重开",
-                        backoff.peek().as_secs()
-                    ));
-                    if !sleep_sliced(backoff.next(), &shutdown) {
-                        return shutdown_exit();
-                    }
-                }
-            }
+        let Some((rx, tx)) = rr3_uart_pair(&cfg, &shutdown) else {
+            return shutdown_exit();
         };
         log(&format!(
             "uart link up dev={} baud={}",
@@ -116,6 +101,28 @@ pub fn run(cfg: BridgeConfig, shutdown: Arc<AtomicBool>) -> u8 {
             return shutdown_exit();
         }
         // run_link 返回 = UART 断链（或关停），循环重开设备节点
+    }
+}
+
+/// UART 开口循环（三态之二）：失败按退避重开，None = 等待期收到关停。
+fn rr3_uart_pair(cfg: &BridgeConfig, shutdown: &AtomicBool) -> Option<(Rr3UartConn, Rr3UartConn)> {
+    let mut backoff = Backoff::new();
+    loop {
+        if shutdown.load(Ordering::SeqCst) {
+            return None;
+        }
+        match open_uart_pair(cfg) {
+            Ok(pair) => return Some(pair),
+            Err(e) => {
+                log(&format!(
+                    "uart open 失败（{e}）；{}s 后重开",
+                    backoff.peek().as_secs()
+                ));
+                if !sleep_sliced(backoff.next(), shutdown) {
+                    return None;
+                }
+            }
+        }
     }
 }
 
@@ -174,11 +181,23 @@ fn run_link(
 ) -> LinkOutcome {
     let dropped = Arc::new(AtomicU64::new(0));
     let (exit_tx, exit_rx) = mpsc::channel::<ExitMsg>();
+    let (sink, src) = rr3_link_threads(rx, tx, shutdown, &dropped, exit_tx);
+    rr3_link_serve(cfg, shutdown, &sink, &src, &dropped, &exit_rx)
+}
+
+/// 起上行/下行线程（断链由它们经 `ExitMsg` 报回主线程）。
+fn rr3_link_threads(
+    rx: Rr3UartConn,
+    tx: Rr3UartConn,
+    shutdown: &Arc<AtomicBool>,
+    dropped: &Arc<AtomicU64>,
+    exit_tx: mpsc::Sender<ExitMsg>,
+) -> (Rr3LinkSlot, Rr3LinkSlot) {
     let sink = Rr3LinkSlot::new();
     let src = Rr3LinkSlot::new();
     {
         let exit = exit_tx.clone();
-        let dropped = Arc::clone(&dropped);
+        let dropped = Arc::clone(dropped);
         let sink = sink.clone();
         std::thread::Builder::new()
             .name("bridge-upstream".into())
@@ -195,18 +214,28 @@ fn run_link(
             .expect("起下行线程失败");
     }
     drop(exit_tx); // 线程各自持一份；主线程只收不发
+    (sink, src)
+}
 
+/// 逐条 UDS 连接接力（三态之三）：直到 UART 断链或关停。
+fn rr3_link_serve(
+    cfg: &BridgeConfig,
+    shutdown: &Arc<AtomicBool>,
+    sink: &Rr3LinkSlot,
+    src: &Rr3LinkSlot,
+    dropped: &Arc<AtomicU64>,
+    exit_rx: &mpsc::Receiver<ExitMsg>,
+) -> LinkOutcome {
     // 短命连接退避（见 [`UDS_MIN_DWELL`]）；连接活过窗口即复位。
     let mut dwell = Backoff::new();
     loop {
         if shutdown.load(Ordering::SeqCst) {
             return LinkOutcome::Shutdown;
         }
-        let conn = match uds_attach(cfg, shutdown, &sink, &src, &dropped) {
-            None => return LinkOutcome::Shutdown,
-            Some(c) => c,
+        let Some(conn) = uds_attach(cfg, shutdown, sink, src, dropped) else {
+            return LinkOutcome::Shutdown;
         };
-        match uds_wait(&exit_rx, shutdown, conn, &mut dwell) {
+        match uds_wait(exit_rx, shutdown, conn, &mut dwell) {
             WaitOutcome::Reconnect => continue,
             WaitOutcome::UartDead => return LinkOutcome::UartDead,
             WaitOutcome::Shutdown => return LinkOutcome::Shutdown,
@@ -245,19 +274,11 @@ fn uds_attach(
         }
         let at = Instant::now();
         log_connected(&cfg.socket, waited, dropped);
-        let wr = match stream.try_clone() {
-            Ok(s) => s,
-            Err(e) => {
-                log(&format!("uds clone 失败（{e}）；重试"));
-                continue;
-            }
+        let Some(wr) = rr3_uds_clone(&stream) else {
+            continue;
         };
-        let rd = match stream.try_clone() {
-            Ok(s) => s,
-            Err(e) => {
-                log(&format!("uds clone 失败（{e}）；重试"));
-                continue;
-            }
+        let Some(rd) = rr3_uds_clone(&stream) else {
+            continue;
         };
         // 三个半边：wr→上行线程、rd→下行线程、kill 留主线程（断链时先行闭合，
         // 把还阻塞在旧流上的线程及时放出来）。
@@ -279,6 +300,17 @@ fn log_connected(socket: &Path, waited: bool, dropped: &AtomicU64) {
         ));
     } else {
         log(&format!("uds connected {}", socket.display()));
+    }
+}
+
+/// 克隆一个半边；失败点名后按"重试"处理（None）。
+fn rr3_uds_clone(stream: &UnixStream) -> Option<UnixStream> {
+    match stream.try_clone() {
+        Ok(s) => Some(s),
+        Err(e) => {
+            log(&format!("uds clone 失败（{e}）；重试"));
+            None
+        }
     }
 }
 
@@ -441,24 +473,39 @@ fn downstream_loop(
             std::thread::sleep(WAIT_SLICE);
             continue;
         };
-        let n = match stream.read(&mut buf) {
-            Ok(0) => {
-                cur = None;
-                log("uds 下行 EOF（rrd 侧关闭）");
-                let _ = exit.send(ExitMsg::UdsDead("下行 EOF".into()));
-                continue;
-            }
-            Ok(n) => n,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => {
-                cur = None;
-                let _ = exit.send(ExitMsg::UdsDead(format!("下行读失败: {e}")));
-                continue;
-            }
-        };
-        if let Err(e) = tx.write_all(&buf[..n]) {
+        match rr3_down_step(stream, &mut buf, &mut tx, &exit) {
+            Some(true) => continue,
+            Some(false) => return,
+            None => cur = None,
+        }
+    }
+}
+
+/// 下行一块：UDS 读到即写 UART。None = 连接已死（cur 清零）；Some(false) = 写失败退场。
+fn rr3_down_step(
+    stream: &mut UnixStream,
+    buf: &mut [u8],
+    tx: &mut Rr3UartConn,
+    exit: &mpsc::Sender<ExitMsg>,
+) -> Option<bool> {
+    let n = match stream.read(buf) {
+        Ok(0) => {
+            log("uds 下行 EOF（rrd 侧关闭）");
+            let _ = exit.send(ExitMsg::UdsDead("下行 EOF".into()));
+            return None;
+        }
+        Ok(n) => n,
+        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => return Some(true),
+        Err(e) => {
+            let _ = exit.send(ExitMsg::UdsDead(format!("下行读失败: {e}")));
+            return None;
+        }
+    };
+    match tx.write_all(&buf[..n]) {
+        Ok(()) => Some(true),
+        Err(e) => {
             let _ = exit.send(ExitMsg::UartDead(format!("下行写失败: {e}")));
-            return;
+            Some(false)
         }
     }
 }
