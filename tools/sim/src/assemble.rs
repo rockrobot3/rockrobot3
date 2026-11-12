@@ -17,8 +17,11 @@
 //!   仓源真云 base_url 不触达）。
 //!
 //! mock 注入走 rrd 进程 env（`RR3_BRAIN_CLOUD=mock` 由 brain 继承；其余模块无
-//! 消费者）+ `RR3_HAL_BACKEND=sim`（模块 HAL 后端全落 sim）。本模块依赖 UDS 与
-//! 真进程，仅 Unix 参与编译。
+//! 消费者）+ `RR3_HAL_BACKEND=sim`。HAL 面的 sim 落点有二：沙箱装配单副本经
+//! [`rr3_asm_sim_profile_text`] 变换（hal_backend → sim、可选真后端专面摘除）——
+//! P0-3 起 supervisor 按装配单声明的 `RR3_HAL_BACKEND` 注入子进程、装配单是
+//! 部署真值，rrd env 的 sim 只护 rrd 自己不护模块；rrd env 再兜一层
+//! `--manifest` 调试路径。本模块依赖 UDS 与真进程，仅 Unix 参与编译。
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -117,8 +120,9 @@ pub type Rr3AssembleEntry = (String, PathBuf);
 
 /// 演练夹具：把仓源真值装进 workdir 的装机布局（modules-root），返回
 /// (夹具装配单路径, 模块产物清单)。
-/// 装配单原文拷贝零改；接线档同批原文拷贝零改（`hardware/<形态>/wiring.toml`，
-/// 校验⑦ 要求装机档必在，缺件 fail-fast）；manifest 仅 entry 绝对化；config 同目录就位。
+/// 装配单经 [`rr3_asm_sim_profile_text`] sim 变换后落位（仓源原文零改）；接线档
+/// 同批原文拷贝零改（`hardware/<形态>/wiring.toml`，校验⑦ 要求装机档必在，缺件
+/// fail-fast）；manifest 仅 entry 绝对化；config 同目录就位。
 pub fn rr3_assemble_layout(
     repo: &Path,
     workdir: &Path,
@@ -126,9 +130,14 @@ pub fn rr3_assemble_layout(
 ) -> Result<(PathBuf, Vec<Rr3AssembleEntry>), String> {
     let profile_text = std::fs::read_to_string(profile_src)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
-    let profile = rr3_profile_parse(&profile_text)
-        .map_err(|errs| format!("装配单 {} 形状不合: {errs:?}", profile_src.display()))?;
-    let profile_dst = rr3_layout_profile(workdir, profile_src, &profile_text)?;
+    let sim_text = rr3_asm_sim_profile_text(&profile_text)?;
+    let profile = rr3_profile_parse(&sim_text).map_err(|errs| {
+        format!(
+            "装配单 {} sim 变换后不可解析: {errs:?}",
+            profile_src.display()
+        )
+    })?;
+    let profile_dst = rr3_layout_profile(workdir, profile_src, &sim_text)?;
     let stem = rr3_layout_stem(profile_src)?;
     rr3_layout_wiring(repo, workdir, stem)?;
 
@@ -139,7 +148,56 @@ pub fn rr3_assemble_layout(
     Ok((profile_dst, entries))
 }
 
-/// 装配单原文落位到演练 modules-root（`profiles/<名>.toml`），零改。
+/// 装配单键名摘取（行首 `key =` 形；非键行 None）。
+fn rr3_profile_key_of(line: &str) -> Option<&str> {
+    let t = line.trim();
+    let eq = t.find('=')?;
+    let k = t[..eq].trim();
+    let ok = !k.is_empty() && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    ok.then_some(k)
+}
+
+/// sim 演练装配单变换：仓源装配单是部署真值（P0-3 起 `[runtime].hal_backend`
+/// 必填、真件档声明 linux/esp32 等真后端），而演练环境（开发机/CI runner）无
+/// 硬件面可兑现——沙箱副本改写为 sim 面：`hal_backend` → `"sim"`，可选真后端
+/// 专面覆盖（`audio_backend`/`servo_backend`/`display_backend`）整行摘除。
+/// 与 [`rr3_asm_up_rrd`] 的 rrd env、`--chain` 的子进程注入同一语义；机制与
+/// 策略分离：仓源装配单零改，变换只落 `profiles/<名>.toml` 沙箱副本。改写后
+/// 由调用方重解析复核（hal_backend 必填缺行即红，其余字段保真——与 manifest
+/// entry 绝对化同一条"改写后复核"纪律）。
+fn rr3_asm_sim_profile_text(text: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut in_runtime = false;
+    let mut saw_hal = false;
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.starts_with('[') {
+            in_runtime = t.trim() == "[runtime]";
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if in_runtime {
+            match rr3_profile_key_of(line) {
+                Some("hal_backend") => {
+                    saw_hal = true;
+                    out.push_str("hal_backend = \"sim\"\n");
+                    continue;
+                }
+                Some("audio_backend" | "servo_backend" | "display_backend") => continue,
+                _ => {}
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !saw_hal {
+        return Err("装配单 [runtime] 缺 hal_backend（P0-3 必填）——sim 变换无落点".into());
+    }
+    Ok(out)
+}
+
+/// 装配单 sim 变换落位到演练 modules-root（`profiles/<名>.toml`，文件名保仓源）。
 fn rr3_layout_profile(workdir: &Path, profile_src: &Path, text: &str) -> Result<PathBuf, String> {
     let profiles_dir = workdir.join("profiles");
     std::fs::create_dir_all(&profiles_dir).map_err(|e| format!("建 {profiles_dir:?} 失败: {e}"))?;
@@ -558,6 +616,23 @@ watchdog_timeout_ms = 5000\n";
                 "{bad} 须拒"
             );
         }
+    }
+
+    #[test]
+    fn sim_profile_transform_rewrites_hal_and_drops_face_overrides() {
+        let t = "[runtime]\nlog_ring_cap = 512\nhal_backend = \"linux\"\n\
+                 audio_backend = \"esp32\"\nservo_backend = \"esp32\"\n\n\
+                 [platform]\ntier = \"host\"\nnote = \"hal_backend 字样在段外不受影响\"\n";
+        let out = rr3_asm_sim_profile_text(t).unwrap();
+        assert!(out.contains("hal_backend = \"sim\"\n"), "{out}");
+        assert!(!out.contains("audio_backend"), "{out}");
+        assert!(!out.contains("servo_backend"), "{out}");
+        assert!(out.contains("段外不受影响"), "{out}");
+        // 缺 hal_backend 即红（P0-3 必填无落点）
+        let no_hal = "[runtime]\nlog_ring_cap = 512\n\n[platform]\ntier = \"host\"\n";
+        assert!(rr3_asm_sim_profile_text(no_hal)
+            .unwrap_err()
+            .contains("缺 hal_backend"));
     }
 
     #[test]
