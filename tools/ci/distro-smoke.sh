@@ -115,7 +115,12 @@ docker run --rm -v "$(pwd)":/work -w /work "$IMAGE" bash -euo pipefail -c '
   echo "== ⑦ rrd 装配单正门冒烟（参数与 rrd.service 的 ExecStart 一致，仅套接字换测试位；RR3_DATA_DIR 同 unit Environment）=="
   SOCK=/tmp/smoke-ipc.sock
   # RR3_BRAIN_CLOUD=mock：brain 云端压成确定性行为（不发网络，与 tools/sim 演练同一纪律）
-  RR3_DATA_DIR=/var/lib/rockrobot3 RR3_BRAIN_CLOUD=mock /usr/bin/rrd --socket "$SOCK" \
+  # RR3_PROBE=sim：容器是 linux 目标但**没有硬件面**——缺省探测会走五面真值探测
+  # （sysfs PWM/GPIO、I2C/SPI 节点、ALSA 卡），于是 act.servo/act.led/act.relay、
+  # ui.face、power.charger、audio.* 八格恒判缺，三个模块被"缺格"拒起、⑥ 的六
+  # spawn 断言必红。探测档与 hal_backend 同为显式部署数据：容器无硬件可探，
+  # 显式置 sim（probe.rs 文件头：sim 档只在 test 面与显式 env 里用）。
+  RR3_DATA_DIR=/var/lib/rockrobot3 RR3_BRAIN_CLOUD=mock RR3_PROBE=sim /usr/bin/rrd --socket "$SOCK" \
     --contracts /usr/lib/rockrobot3/contracts \
     --profile /usr/lib/rockrobot3/profiles/distro.toml >/tmp/rrd-smoke.log 2>&1 &
   RRDPID=$!
