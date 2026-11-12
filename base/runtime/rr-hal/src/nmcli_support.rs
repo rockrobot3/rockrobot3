@@ -36,19 +36,22 @@ pub(crate) fn rr3_nm_unescape(s: &str) -> String {
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '\\' {
-            match chars.next() {
-                Some(':') => out.push(':'),
-                Some('\\') => out.push('\\'),
-                Some(other) => {
-                    out.push(other);
-                }
-                None => {}
-            }
+            rr3_nm_esc(chars.next(), &mut out);
         } else {
             out.push(c);
         }
     }
     out
+}
+
+/// 反斜杠后的一个字符：`\:`/`\\` 还原，其余原样透传，无后继则不产出。
+fn rr3_nm_esc(next: Option<char>, out: &mut String) {
+    match next {
+        Some(':') => out.push(':'),
+        Some('\\') => out.push('\\'),
+        Some(other) => out.push(other),
+        None => {}
+    }
 }
 
 /// terse 输出里取一个字段值：逐行找 `key:` 前缀，冒号后整段返回

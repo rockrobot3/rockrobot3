@@ -39,17 +39,26 @@ fn entries<'a>(root: &'a Value, key: &str) -> impl Iterator<Item = &'a toml::Tab
         .filter_map(Value::as_table)
 }
 
+/// `[[owner]]` 名收集（顺序保持，去重排序由调用方做）
+fn rr3_topic_owners(root: &Value) -> Vec<String> {
+    let mut owners = Vec::new();
+    for o in entries(root, "owner") {
+        if let Some(n) = o.get("name").and_then(Value::as_str) {
+            owners.push(n.to_string());
+        }
+    }
+    owners
+}
+
 /// 解析一份主题文本（`contracts/topics.toml` 与叠加层同构，共用同一解析器，不写第二套）
 pub fn rr3_topic_parse(text: &str) -> Rr3TopicSet {
     let Ok(root) = toml::from_str::<Value>(text) else {
         return Rr3TopicSet::default();
     };
-    let mut set = Rr3TopicSet::default();
-    for o in entries(&root, "owner") {
-        if let Some(n) = o.get("name").and_then(Value::as_str) {
-            set.owners.push(n.to_string());
-        }
-    }
+    let mut set = Rr3TopicSet {
+        owners: rr3_topic_owners(&root),
+        ..Default::default()
+    };
     for t in entries(&root, "topic") {
         let Some(name) = t.get("name").and_then(Value::as_str) else {
             continue;

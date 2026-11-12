@@ -245,6 +245,23 @@ impl Rr3BridgeConn {
     /// 死，板侧无应答/链路断在此回 Busy 并报废连接，下次调用重开。
     fn rr3_reply(&mut self, id: u64) -> Result<Value, Rr3HalError> {
         let buf = self.rr3_recv_reply()?;
+        let frame = self.rr3_reply_frame(buf)?;
+        let (ty, body) = match rr3_body_split(&frame.payload) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("rr-hal-esp32: 应答 payload 前缀非法: {e:?}");
+                self.conn = None;
+                return Err(Rr3HalError::Busy);
+            }
+        };
+        rr3_bridge_decode(ty, &body, id).map_err(|e| {
+            eprintln!("rr-hal-esp32: 应答门拒绝: {e}");
+            Rr3HalError::Busy
+        })
+    }
+
+    /// 应答帧还原与 dst 归属门：任一不过即点名并报废连接。
+    fn rr3_reply_frame(&mut self, buf: Rr3FrameBuf) -> Result<Rr3Frame, Rr3HalError> {
         let frame = match Rr3Frame::try_from(buf) {
             Ok(f) => f,
             Err(e) => {
@@ -261,18 +278,7 @@ impl Rr3BridgeConn {
             self.conn = None;
             return Err(Rr3HalError::Busy);
         }
-        let (ty, body) = match rr3_body_split(&frame.payload) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("rr-hal-esp32: 应答 payload 前缀非法: {e:?}");
-                self.conn = None;
-                return Err(Rr3HalError::Busy);
-            }
-        };
-        rr3_bridge_decode(ty, &body, id).map_err(|e| {
-            eprintln!("rr-hal-esp32: 应答门拒绝: {e}");
-            Rr3HalError::Busy
-        })
+        Ok(frame)
     }
 
     /// 读一帧（窗口耗尽即判板侧无应答/链路断，点名后报废连接）。

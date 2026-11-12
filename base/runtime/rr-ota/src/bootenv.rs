@@ -102,6 +102,17 @@ fn rr3_env_num(s: &str) -> Result<u64, String> {
     u64::from_str_radix(digits, radix).map_err(|_| format!("{s:?} 不是合法无符号数"))
 }
 
+/// 键值合法性：键非空且不含 `=`/`\0`，值不含 `\0`。
+fn rr3_env_kv_chk(key: &str, value: &str) -> Result<(), String> {
+    if key.is_empty() || key.contains('=') || key.contains('\0') {
+        return Err(format!("env 键 {key:?} 非法（非空、不得含 '=' 或 \\0）"));
+    }
+    if value.contains('\0') {
+        return Err(format!("env 键 {key:?} 的值含 \\0，写不进 env 载体"));
+    }
+    Ok(())
+}
+
 /// env 体（键值有序表；顺序即渲染顺序，U-Boot 不要求排序）。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Rr3BootEnv {
@@ -186,12 +197,7 @@ impl Rr3BootEnv {
 
     /// 写一个键（存在即覆盖，不存在即追加）。键/值的非法字符当场拒。
     pub fn rr3_env_set(&mut self, key: &str, value: &str) -> Result<(), String> {
-        if key.is_empty() || key.contains('=') || key.contains('\0') {
-            return Err(format!("env 键 {key:?} 非法（非空、不得含 '=' 或 \\0）"));
-        }
-        if value.contains('\0') {
-            return Err(format!("env 键 {key:?} 的值含 \\0，写不进 env 载体"));
-        }
+        rr3_env_kv_chk(key, value)?;
         match self.vars.iter_mut().find(|(k, _)| k == key) {
             Some(slot) => slot.1 = value.to_string(),
             None => self.vars.push((key.to_string(), value.to_string())),

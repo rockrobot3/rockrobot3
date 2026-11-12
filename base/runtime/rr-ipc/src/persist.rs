@@ -92,12 +92,17 @@ pub fn rr3_store_perm(path: &Path, tmp: &Path, body: &[u8], mode: u32) -> Result
     // rename 的目录项持久化要父目录 fsync 才成立——不刷则掉电可能静默回旧值
     // （凭据/标定/计数全受影响）。失败不致命（tmpfs 等不支持时 EINVAL）：
     // 文件级保证仍在，比没有强；调用方无需感知。
+    rr3_dir_sync(path);
+    Ok(())
+}
+
+/// 父目录 fsync（尽力而为，失败静默）。
+fn rr3_dir_sync(path: &Path) {
     if let Some(parent) = path.parent() {
         if let Ok(d) = File::open(parent) {
             let _ = d.sync_all();
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]

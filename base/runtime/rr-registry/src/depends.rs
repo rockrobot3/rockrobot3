@@ -265,14 +265,24 @@ fn rr3_caps_unmet(
         if excluded.contains(&f.name) {
             continue;
         }
-        for cap in &f.depends_required {
-            if base.contains(cap) {
-                continue;
-            }
-            let provided = facts.iter().any(|g| g.provides.iter().any(|p| p == cap));
-            if !provided {
-                errs.push(unsatisfiable_error(&f.name, cap));
-            }
+        rr3_cap_gaps(f, facts, base, errs);
+    }
+}
+
+/// 单个模块的未满足能力：base 能力免判，其余须有任一模块 provides。
+fn rr3_cap_gaps(
+    f: &Rr3DependsFacts,
+    facts: &[Rr3DependsFacts],
+    base: &BTreeSet<String>,
+    errs: &mut Vec<String>,
+) {
+    for cap in &f.depends_required {
+        if base.contains(cap) {
+            continue;
+        }
+        let provided = facts.iter().any(|g| g.provides.iter().any(|p| p == cap));
+        if !provided {
+            errs.push(unsatisfiable_error(&f.name, cap));
         }
     }
 }

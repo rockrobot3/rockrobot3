@@ -148,20 +148,7 @@ pub fn rr3_no_unknown_keys(
     what: &str,
 ) -> Vec<String> {
     let mut errs = Vec::new();
-    let mut allow: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
-        Default::default();
-    // 一段式 path = 顶层标量键（如 atom manifest 的 schema_version），不进段树单独放行
-    let mut top_scalars: std::collections::BTreeSet<&str> = Default::default();
-    for s in specs {
-        match s.path.split_once('.') {
-            Some((section, key)) => {
-                allow.entry(section).or_default().insert(key);
-            }
-            None => {
-                top_scalars.insert(s.path.as_str());
-            }
-        }
-    }
+    let (allow, top_scalars) = rr3_allow_tree(specs);
     let Some(table) = root.as_table() else {
         errs.push(format!("{what} 顶层必须是表（[段] 结构），实际为 {root:?}"));
         return errs;
@@ -177,6 +164,31 @@ pub fn rr3_no_unknown_keys(
         }
     }
     errs
+}
+
+/// 从字段规格重建允许键树：段 → 键集；一段式 path = 顶层标量键
+/// （如 atom manifest 的 schema_version），不进段树单独放行。
+#[allow(clippy::type_complexity)]
+fn rr3_allow_tree(
+    specs: &[crate::schema::Rr3FieldSpec],
+) -> (
+    std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>>,
+    std::collections::BTreeSet<&str>,
+) {
+    let mut allow: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+        Default::default();
+    let mut top_scalars: std::collections::BTreeSet<&str> = Default::default();
+    for s in specs {
+        match s.path.split_once('.') {
+            Some((section, key)) => {
+                allow.entry(section).or_default().insert(key);
+            }
+            None => {
+                top_scalars.insert(s.path.as_str());
+            }
+        }
+    }
+    (allow, top_scalars)
 }
 
 /// 单个段的形状与段内键对账（段必须是表，键必须在规格树内）。
@@ -447,14 +459,19 @@ fn rr3_chk_declared(
 fn rr3_chk_subs(root: &Value, topics: &crate::topics::Rr3TopicSet, errs: &mut Vec<String>) {
     if let Some(arr) = rr3_get_by_path(root, "events.subscribes").and_then(Value::as_array) {
         for topic in arr.iter().filter_map(Value::as_str) {
-            if !topics.rr3_topic_contains(topic) {
-                errs.push(format!("events.subscribes 引用未注册主题 {topic}"));
-            } else if topics.rr3_topic_status(topic).as_deref() == Some("retired") {
-                errs.push(format!(
-                    "events.subscribes 引用 retired 主题 {topic}——号位保留、义务解除（ADR-0019 修订 2 ②）"
-                ));
-            }
+            rr3_subs_one(topic, topics, errs);
         }
+    }
+}
+
+/// 单条订阅：必须已注册；retired 主题不得被申报订阅。
+fn rr3_subs_one(topic: &str, topics: &crate::topics::Rr3TopicSet, errs: &mut Vec<String>) {
+    if !topics.rr3_topic_contains(topic) {
+        errs.push(format!("events.subscribes 引用未注册主题 {topic}"));
+    } else if topics.rr3_topic_status(topic).as_deref() == Some("retired") {
+        errs.push(format!(
+            "events.subscribes 引用 retired 主题 {topic}——号位保留、义务解除（ADR-0019 修订 2 ②）"
+        ));
     }
 }
 

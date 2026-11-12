@@ -157,6 +157,14 @@ pub fn rr3_bootconf_store(path: &Path, text: &str) -> Result<(), String> {
 /// 只写进引导配置，真正生效的是启动时的 cmdline）。只认 `root=LABEL=rr_`
 /// token 形态；root=/dev/mmcblk… 裸设备形态不覆盖，如实报"板上核对项"。
 pub fn rr3_cmdline_slot(text: &str) -> Result<Rr3Slot, String> {
+    let found = rr3_cmdline_scan(text)?;
+    found.ok_or_else(|| {
+        "cmdline 无 root=LABEL=rr_ token（root=/dev/… 裸设备形态不覆盖）——板上核对项".into()
+    })
+}
+
+/// 扫描全部 token 收集 root=LABEL 槽位：标签不在册点名回错，多处即形状歧义。
+fn rr3_cmdline_scan(text: &str) -> Result<Option<Rr3Slot>, String> {
     let mut found: Option<Rr3Slot> = None;
     for tok in text.split_whitespace() {
         let Some(rest) = tok.strip_prefix(RR3_ROOT_TOKEN) else {
@@ -169,9 +177,7 @@ pub fn rr3_cmdline_slot(text: &str) -> Result<Rr3Slot, String> {
         }
         found = Some(slot);
     }
-    found.ok_or_else(|| {
-        "cmdline 无 root=LABEL=rr_ token（root=/dev/… 裸设备形态不覆盖）——板上核对项".into()
-    })
+    Ok(found)
 }
 
 /// 读 /proc/cmdline（linux 门：/proc 是 linux 特有面；解析逻辑全平台可测）
