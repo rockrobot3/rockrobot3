@@ -32,6 +32,14 @@ pub(crate) fn rr3_motion_reject(word: &str) -> String {
     format!("不认的动作形态 {word:?}（运行命令面只认 jog/auto）")
 }
 
+/// 动作形态门（§6 硬约束；RPC 与意图两路同源）：词面裁决 → 单真值点判据。
+pub(crate) fn rr3_servo_gate(args: &Value, axis: &Rr3ActAxisState) -> Result<(), String> {
+    let motion = servo::rr3_servo_motion(args.get("motion").and_then(Value::as_str))
+        .map_err(|servo::Rr3ServoMotionError::UnknownWord(word)| rr3_motion_reject(word))?;
+    rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
+        .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))
+}
+
 /// 点名处置三元组：(应答体, servo 待发新角（servo 面才有）, relay `(生效, 前一)`
 /// （relay 面才有——A-7 同态抑制的组合件侧原料）)。Err = 业务性失败折 result.error。
 pub(crate) type Rr3CallOutcome = Result<(Value, Option<u16>, Option<(bool, bool)>), String>;
@@ -66,13 +74,7 @@ fn rr3_servo_apply(
     args: &Value,
     axis: &Rr3ActAxisState,
 ) -> Result<(u16, u64), String> {
-    // 拒动硬约束（§6，批N3 件三）：词缺席 = auto（保守——不申报按自动）；
-    // 判据拒收回 InvalidParam，折业务性失败点名言（批N34 件二：机制层零堆
-    // 枚举，词面文案在编排层渲染——契约字面量逐字不变）
-    let motion = servo::rr3_servo_motion(args.get("motion").and_then(Value::as_str))
-        .map_err(|servo::Rr3ServoMotionError::UnknownWord(word)| rr3_motion_reject(word))?;
-    rr_hal_api::rr3_motion_allowed(axis.hard_stop, axis.calibrated, motion)
-        .map_err(|e| format!("动作形态 {} 被拒: {e}", motion.rr3_act_motion_name()))?;
+    rr3_servo_gate(args, axis)?;
     let (angle, move_ms) = rr3_servo_parse_args(args, cfg)?;
     // 安全核钳位最后包一道（批D₃ 裁定 5：安全核永远包住控制图）——上游裁决
     // 被绕过时输出也不越行程；输入合法时恒等，行为守恒

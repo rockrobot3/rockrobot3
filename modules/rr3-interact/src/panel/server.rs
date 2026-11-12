@@ -324,6 +324,11 @@ pub(super) fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3Panel
     if let Some(d) = rr3_route_mod(method, path, body) {
         return d;
     }
+    rr3_route_writes(method, path, body)
+}
+
+/// 写口两组（cfg/act）：都未命中即 404。
+fn rr3_route_writes(method: &str, path: &str, body: &[u8]) -> Rr3PanelDispatch {
     if let Some(d) = rr3_route_cfg(method, path, body) {
         return d;
     }

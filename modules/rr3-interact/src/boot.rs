@@ -163,16 +163,19 @@ fn rr3_itact_player(v: &toml::Value) -> Result<Rr3PlayerCfg, String> {
         let mut t = player.prebuffer_ms;
         rr3_cfg_u64(p, "prebuffer_ms", "player", &mut t)?;
         player.prebuffer_ms = t;
-        let mut t = player.volume_pct as u64;
-        rr3_cfg_u64(p, "volume_pct", "player", &mut t)?;
-        player.volume_pct = u32::try_from(t)
-            .ok()
-            .filter(|pct| *pct <= 1000)
-            .ok_or_else(|| {
-                format!("[rr3-interact.player] volume_pct 越界（值域 0..=1000）: {t}")
-            })?;
+        player.volume_pct = rr3_itact_volume(p, player.volume_pct)?;
     }
     Ok(player)
+}
+
+/// volume_pct 值域 0..=1000（10 倍封顶防呆）。
+fn rr3_itact_volume(p: &toml::Value, cur: u32) -> Result<u32, String> {
+    let mut t = cur as u64;
+    rr3_cfg_u64(p, "volume_pct", "player", &mut t)?;
+    u32::try_from(t)
+        .ok()
+        .filter(|pct| *pct <= 1000)
+        .ok_or_else(|| format!("[rr3-interact.player] volume_pct 越界（值域 0..=1000）: {t}"))
 }
 
 /// panel 段（批N4 件五 I-18②）：段/键缺省回落 legacy 常量值（S-5 口径）；

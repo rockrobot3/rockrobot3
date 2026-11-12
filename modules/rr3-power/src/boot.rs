@@ -72,12 +72,16 @@ const RR3_MIN_PERIOD_MS: u64 = 100;
 /// 点名缺字段的文案比派生宏的默认报错可读（rr3-act 同款）。
 pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
-    // battery/charger 先解析（既有红例的次序契约：缺字段点名先于 rail 段点名），
+    rr3_power_sects(&v)
+}
+
+/// battery/charger/rail 三段（既有红例的次序契约：battery → charger → rail）。
+fn rr3_power_sects(v: &toml::Value) -> Result<Rr3PowerCfg, String> {
     // rail 段（批N2 件五）殿后——段必填＋全键必填，up=false 惰性但显式写
     Ok(Rr3PowerCfg {
-        battery: rr3_power_battery(&v)?,
-        charger: rr3_power_charger(&v)?,
-        rail: rr3_power_rail(&v)?,
+        battery: rr3_power_battery(v)?,
+        charger: rr3_power_charger(v)?,
+        rail: rr3_power_rail(v)?,
     })
 }
 

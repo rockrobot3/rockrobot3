@@ -90,14 +90,40 @@ impl Rr3ActAxisState {
 
     /// 五键齐备检查 → 投影（缺键逐条点名）。
     fn rr3_axis_finish(raw: Rr3AxisRaw) -> Result<Self, String> {
+        let (calibrated, hard_stop) = rr3_axis_flags(raw.calibrated, raw.hard_stop)?;
+        let (lo_deg, hi_deg, center_deg) = rr3_axis_pose_of(raw.lo, raw.hi, raw.center)?;
         Ok(Self {
-            calibrated: raw.calibrated.ok_or("执行轴状态缺 calibrated")?,
-            hard_stop: raw.hard_stop.ok_or("执行轴状态缺 hard_stop")?,
-            lo_deg: raw.lo.ok_or("执行轴状态缺 lo（档案行程下限）")?,
-            hi_deg: raw.hi.ok_or("执行轴状态缺 hi（档案行程上限）")?,
-            center_deg: raw.center.ok_or("执行轴状态缺 center（档案中位锚）")?,
+            calibrated,
+            hard_stop,
+            lo_deg,
+            hi_deg,
+            center_deg,
         })
     }
+}
+
+/// 布尔/词表两键（缺席逐条点名）。
+fn rr3_axis_flags(
+    calibrated: Option<bool>,
+    hard_stop: Option<rr_hal_api::Rr3ActHardStop>,
+) -> Result<(bool, rr_hal_api::Rr3ActHardStop), String> {
+    Ok((
+        calibrated.ok_or("执行轴状态缺 calibrated")?,
+        hard_stop.ok_or("执行轴状态缺 hard_stop")?,
+    ))
+}
+
+/// 三数值键（缺席逐条点名）。
+fn rr3_axis_pose_of(
+    lo: Option<u16>,
+    hi: Option<u16>,
+    center: Option<u16>,
+) -> Result<(u16, u16, u16), String> {
+    Ok((
+        lo.ok_or("执行轴状态缺 lo（档案行程下限）")?,
+        hi.ok_or("执行轴状态缺 hi（档案行程上限）")?,
+        center.ok_or("执行轴状态缺 center（档案中位锚）")?,
+    ))
 }
 
 /// 注入文本的原始槽位（五键各一，重复键由 [`rr3_axis_seen`] 拒）。
@@ -464,13 +490,7 @@ fn rr3_act_reflex(sect: &toml::Value) -> Result<Rr3ReflexCfg, String> {
 /// 之类值偷偷收成 1，节拍面静默变形；上界补 1kHz（`1_000_000/loop_hz` 在极值
 /// 时取整为 0µs，反射环会退化为满转自旋）。
 fn rr3_act_cfg_loop(sect: &toml::Value) -> Result<u32, String> {
-    let raw = sect
-        .get("loop_hz")
-        .and_then(toml::Value::as_integer)
-        .filter(|n| *n >= 0)
-        .map(|n| n as u64)
-        .ok_or_else(|| "config [rr3-act.reflex] 缺 loop_hz（非负整数）".to_string())?
-        .max(1);
+    let raw = rr3_act_loop_raw(sect)?;
     let hz = u32::try_from(raw)
         .map_err(|_| format!("config [rr3-act.reflex] loop_hz={raw} 超出 u32 范围，拒 boot"))?;
     if hz > RR3_MAX_LOOP_HZ {
@@ -479,6 +499,17 @@ fn rr3_act_cfg_loop(sect: &toml::Value) -> Result<u32, String> {
         ));
     }
     Ok(hz)
+}
+
+/// loop_hz 原始值（非负整数，下限 1）。
+fn rr3_act_loop_raw(sect: &toml::Value) -> Result<u64, String> {
+    Ok(sect
+        .get("loop_hz")
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .ok_or_else(|| "config [rr3-act.reflex] 缺 loop_hz（非负整数）".to_string())?
+        .max(1))
 }
 
 /// 灯效白名单子集（A-9）：数组逐元素必须是**在册契约值**，非在册值或非字符串
@@ -524,9 +555,7 @@ fn rr3_act_cfg_topics(sect: &toml::Value) -> Result<Vec<String>, String> {
 
 /// 单项主题：字符串且在本模块执行臂内（只认 relay/set 与 servo/command）。
 fn rr3_act_topic_at(i: usize, t: &toml::Value) -> Result<String, String> {
-    let s = t.as_str().ok_or_else(|| {
-        format!("config [rr3-act.intent] open_topics[{i}] 必须是字符串，收到 {t}")
-    })?;
+    let s = rr3_act_topic_str(i, t)?;
     if s != RR3_SERVO_COMMAND_TOPIC && s != RR3_RELAY_SET_TOPIC {
         return Err(format!(
             "config [rr3-act.intent] open_topics[{i}] 非本模块可执行的意图主题 {s:?}（只认 {}/{}）",
@@ -534,6 +563,12 @@ fn rr3_act_topic_at(i: usize, t: &toml::Value) -> Result<String, String> {
         ));
     }
     Ok(s.to_string())
+}
+
+/// 单项必须是字符串（非字符串逐条点名）。
+fn rr3_act_topic_str(i: usize, t: &toml::Value) -> Result<&str, String> {
+    t.as_str()
+        .ok_or_else(|| format!("config [rr3-act.intent] open_topics[{i}] 必须是字符串，收到 {t}"))
 }
 
 /// 启动自述：模块名/版本行 + 四个原子件的 SURFACE 行（装配层调用，文案逐字不变）。

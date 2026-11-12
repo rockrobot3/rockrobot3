@@ -470,16 +470,21 @@ fn rr3_leg_avail(
 /// 单条判据转述：pass → pass、not-applicable → n-a、其余未知 fail-closed 折 fail。
 fn rr3_leg_item(prefix: &str, c: &Value) -> Value {
     let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
-    let pass = match c.get("pass").and_then(Value::as_str) {
-        Some("pass") => "pass",
-        Some("not-applicable") => "n-a",
-        _ => "fail",
-    };
+    let pass = rr3_leg_pass(c);
     let mut leg = json!({ "leg": format!("{prefix}/{item}"), "pass": pass });
     if let Some(r) = c.get("reason") {
         leg["reason"] = r.clone();
     }
     leg
+}
+
+/// 判据三态转述：pass → pass、not-applicable → n-a、其余未知 fail-closed 折 fail。
+fn rr3_leg_pass(c: &Value) -> &'static str {
+    match c.get("pass").and_then(Value::as_str) {
+        Some("pass") => "pass",
+        Some("not-applicable") => "n-a",
+        _ => "fail",
+    }
 }
 
 /// 自检 relay 腿的能力面：`rr3-act` 是否在册（按 ctl.status 模块表）。
