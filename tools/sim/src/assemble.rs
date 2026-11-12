@@ -230,12 +230,29 @@ fn rr3_layout_wiring(repo: &Path, workdir: &Path, stem: &str) -> Result<(), Stri
 }
 
 /// 一个模块的五件套装机（manifest entry 绝对化 + config + atoms 申报面）。
+/// 拆成"manifest 面 / 旁件面"两件（CC 攻坚）：前者是身份改写的主件，后者是
+/// 开机即读的旁件（缺件都必红），两段判据互不依赖。
 fn rr3_layout_module(
     repo: &Path,
     workdir: &Path,
     module: &str,
 ) -> Result<Rr3AssembleEntry, String> {
     let src_dir = repo.join("modules").join(module);
+    let dst_dir = workdir.join("modules").join(module);
+    std::fs::create_dir_all(&dst_dir).map_err(|e| format!("建 {dst_dir:?} 失败: {e}"))?;
+    let entry = rr3_layout_manifest(repo, &src_dir, &dst_dir, module)?;
+    rr3_layout_sidecars(&src_dir, &dst_dir)?;
+    Ok((module.to_string(), entry))
+}
+
+/// manifest 面：读仓源 manifest → 解析 → 入口绝对化改写（三道门）→ 落位，
+/// 回写入产物的绝对入口。
+fn rr3_layout_manifest(
+    repo: &Path,
+    src_dir: &Path,
+    dst_dir: &Path,
+    module: &str,
+) -> Result<PathBuf, String> {
     let src_manifest = src_dir.join("module.toml");
     let text = std::fs::read_to_string(&src_manifest).map_err(|e| {
         format!(
@@ -249,29 +266,27 @@ fn rr3_layout_module(
     // Rust——brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest
     // 解析保证）。target-dir 已由仓根配置移出源码区，定位走单点。
     let entry_abs = rr3_bin_dir(repo).join(&facts.entry);
-    // manifest 装机改写（三道门）后落位
     let installed = rr3_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
-    let dst_dir = workdir.join("modules").join(module);
-    std::fs::create_dir_all(&dst_dir).map_err(|e| format!("建 {dst_dir:?} 失败: {e}"))?;
     let dst_manifest = dst_dir.join("module.toml");
     std::fs::write(&dst_manifest, installed)
         .map_err(|e| format!("写 {dst_manifest:?} 失败: {e}"))?;
-    // config 同目录就位（模块 rr3_config_load 读 manifest 同目录 config.toml，
-    // 缺件必重启环——演练 fail-fast 不装必死模块）：全部模块用仓源 config
-    // （纯运行参数；brain 云端由 rrd env RR3_BRAIN_CLOUD=mock 压成 mock 档）
-    let dst_config = dst_dir.join("config.toml");
+    Ok(entry_abs)
+}
+
+/// 旁件面：config 同目录就位（模块开机即读，缺件必重启环）+ atoms/ 申报面
+/// 整树同批装机（校验⑨ 从 `modules/<m>/atoms/*/assemble.toml` 读 demands，
+/// 漏拷会让 rrd 判"件未申报 demands 而角色 kind=power"红、拒绝 bind——演练
+/// 布局与装机布局在此处必须逐件等价）。
+fn rr3_layout_sidecars(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
     let src_config = src_dir.join("config.toml");
-    std::fs::copy(&src_config, &dst_config).map_err(|e| {
+    std::fs::copy(&src_config, dst_dir.join("config.toml")).map_err(|e| {
         format!("仓源 config {src_config:?} 拷贝失败: {e}——模块开机即读 config，缺件必重启环")
     })?;
-    // atoms/ 申报面同批装机：校验⑨ 从 `modules/<m>/atoms/*/assemble.toml` 读
-    // demands（rail/电流预算）。漏拷会让 rrd 判"件未申报 demands 而角色
-    // kind=power"红、拒绝 bind——演练布局与装机布局在此处必须逐件等价。
     let atoms_src = src_dir.join("atoms");
     if atoms_src.is_dir() {
         rr3_copy_tree(&atoms_src, &dst_dir.join("atoms"))?;
     }
-    Ok((module.to_string(), entry_abs))
+    Ok(())
 }
 
 /// 目录递归拷贝（std 无内置；只服务演练夹具，符号链接按文件内容拷贝）。
