@@ -13,6 +13,7 @@
 //! 单次 accept 失败只记日志不带走守护进程；协议错误只结束那一条连接。
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -604,18 +605,40 @@ fn rr3_daemon_queue(
         })
         .collect();
     let plan = rr3_plan_boot(&arb);
-    if !plan.fatal.is_empty() {
-        for e in &plan.fatal {
-            rr3_log(&format!("拒绝 boot：{e}"));
-        }
-        return Err(format!(
-            "拒绝进入 boot 阶段（ADR-0009 裁定 2，环拒整个 boot）: {}",
-            plan.fatal.join("; ")
+    rr3_queue_fatal(&plan)?;
+    // 提供者表：boot 全集一次性写入，含被拒模块——provides 仍计入可满足性宇宙
+    rr3_queue_providers(&jobs, shared);
+    for name in &plan.rejected {
+        rr3_log(&format!(
+            "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
         ));
     }
-    // 提供者表：boot 全集一次性写入，含被拒模块——provides 仍计入可满足性宇宙
+    let by_name: BTreeMap<String, Rr3SpawnJob> = jobs
+        .into_iter()
+        .map(|j| (j.facts.name.clone(), j))
+        .collect();
+    rr3_queue_dispatch(boot, &plan, by_name, sup);
+    Ok(())
+}
+
+/// fatal 裁定点名：非空即拒整个 boot（环/名重复）。
+fn rr3_queue_fatal(plan: &rr_registry::Rr3BootPlan) -> Result<(), String> {
+    if plan.fatal.is_empty() {
+        return Ok(());
+    }
+    for e in &plan.fatal {
+        rr3_log(&format!("拒绝 boot：{e}"));
+    }
+    Err(format!(
+        "拒绝进入 boot 阶段（ADR-0009 裁定 2，环拒整个 boot）: {}",
+        plan.fatal.join("; ")
+    ))
+}
+
+/// 提供者表写入：能力 → 声明模块名集合（含被拒模块）。
+fn rr3_queue_providers(jobs: &[Rr3SpawnJob], shared: &Arc<Mutex<RrdRegistry>>) {
     let mut providers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for j in &jobs {
+    for j in jobs {
         for cap in &j.facts.provides {
             providers
                 .entry(cap.clone())
@@ -624,17 +647,16 @@ fn rr3_daemon_queue(
         }
     }
     rr3_lock(shared).rr3_reg_providers(providers);
-    for name in &plan.rejected {
-        rr3_log(&format!(
-            "拒绝启动 {name}：required 能力不可满足（base 内建与 boot 全集 provides 均无，ADR-0009 裁定 2）"
-        ));
-    }
-    let mut by_name: BTreeMap<String, Rr3SpawnJob> = jobs
-        .into_iter()
-        .map(|j| (j.facts.name.clone(), j))
-        .collect();
+}
+
+/// 按 order 投递：缺格模块跳过（provides 已在表里，下游不连坐）。
+fn rr3_queue_dispatch(
+    boot: &Rr3DaemonBoot,
+    plan: &rr_registry::Rr3BootPlan,
+    mut by_name: BTreeMap<String, Rr3SpawnJob>,
+    sup: &Rr3Supervisor,
+) {
     for name in &plan.order {
-        // 缺格模块不进 boot 队列；provides 已在 providers 表里，下游不连坐
         if boot.degraded.contains(name) {
             continue;
         }
@@ -642,7 +664,6 @@ fn rr3_daemon_queue(
             sup.rr3_boot(job);
         }
     }
-    Ok(())
 }
 
 /// 装载期解析全部 manifest 并为每个 job 注入装配链事实
@@ -676,50 +697,73 @@ struct Rr3AcceptCtx {
 
 /// accept 主循环（永不返回）：持续性错误退避 200ms，并发连接上限 64
 fn rr3_daemon_accept(listener: Rr3UdsListener, ctx: Rr3AcceptCtx) -> ! {
-    const RR3_ACCEPT_ERR_BACKOFF: Duration = Duration::from_millis(200);
     const RR3_MAX_CONNS: usize = 64;
     let live = Arc::new(AtomicUsize::new(0));
     loop {
-        let stream = match listener.rr3_accept() {
-            Ok(s) => s,
-            Err(e) => {
-                rr3_log(&format!("accept 失败（继续服务）: {e}"));
-                thread::sleep(RR3_ACCEPT_ERR_BACKOFF);
-                continue;
-            }
+        let Some((stream, slot)) = rr3_accept_pair(&listener, &live, RR3_MAX_CONNS) else {
+            continue;
         };
-        let slot = match rr3_conn_acquire(&live, RR3_MAX_CONNS) {
-            Some(slot) => slot,
-            None => {
-                rr3_log(&format!(
-                    "连接数超上限 {RR3_MAX_CONNS}，拒绝新连接（在服 {} 条）",
-                    live.load(Ordering::Relaxed)
-                ));
-                continue;
-            }
-        };
-        let conn = Rr3ConnCtx {
-            shared: ctx.shared.clone(),
-            topics: ctx.topics.clone(),
-            t0: ctx.t0,
-            pre_register_timeout_ms: ctx.pre_register_timeout_ms,
-            sup: ctx.sup.clone(),
-            counters_path: ctx.counters_path.clone(),
-            counters_gate: ctx.counters_gate.clone(),
-        };
-        let spawned = thread::Builder::new()
-            .name("rrd-conn".into())
-            .spawn(move || {
-                let _slot = slot; // 线程退出（含 panic）必归还并发槽
-                if let Err(e) = rr3_conn_serve(stream, conn) {
-                    rr3_log(&format!("连接收尾: {e}"));
-                }
-            });
-        if let Err(e) = spawned {
-            // 线程起不来（资源耗尽）只拒这一条连接：accept 主循环不能 panic——
-            // 守护停摆比少一条连接严重得多（闭包已 drop，槽位随 Drop 归还）。
-            rr3_log(&format!("连接线程起不来，拒连（继续服务）: {e}"));
+        rr3_spawn_conn(stream, ctx.rr3_conn_ctx(), slot);
+    }
+}
+
+impl Rr3AcceptCtx {
+    /// 逐连接克隆共享面。
+    fn rr3_conn_ctx(&self) -> Rr3ConnCtx {
+        Rr3ConnCtx {
+            shared: self.shared.clone(),
+            topics: self.topics.clone(),
+            t0: self.t0,
+            pre_register_timeout_ms: self.pre_register_timeout_ms,
+            sup: self.sup.clone(),
+            counters_path: self.counters_path.clone(),
+            counters_gate: self.counters_gate.clone(),
         }
+    }
+}
+
+/// 取一条连接：accept 失败退避后回 None；并发满拒连并点名后回 None。
+fn rr3_accept_pair(
+    listener: &Rr3UdsListener,
+    live: &Arc<AtomicUsize>,
+    max: usize,
+) -> Option<(UnixStream, Rr3ConnSlot)> {
+    const RR3_ACCEPT_ERR_BACKOFF: Duration = Duration::from_millis(200);
+    let stream = match listener.rr3_accept() {
+        Ok(s) => s,
+        Err(e) => {
+            rr3_log(&format!("accept 失败（继续服务）: {e}"));
+            thread::sleep(RR3_ACCEPT_ERR_BACKOFF);
+            return None;
+        }
+    };
+    let slot = match rr3_conn_acquire(live, max) {
+        Some(slot) => slot,
+        None => {
+            rr3_log(&format!(
+                "连接数超上限 {max}，拒绝新连接（在服 {} 条）",
+                live.load(Ordering::Relaxed)
+            ));
+            return None;
+        }
+    };
+    Some((stream, slot))
+}
+
+/// 连接线程：线程退出（含 panic）必归还并发槽；起不来只拒这一条连接。
+fn rr3_spawn_conn(stream: UnixStream, conn: Rr3ConnCtx, slot: Rr3ConnSlot) {
+    let spawned = thread::Builder::new()
+        .name("rrd-conn".into())
+        .spawn(move || {
+            let _slot = slot;
+            if let Err(e) = rr3_conn_serve(stream, conn) {
+                rr3_log(&format!("连接收尾: {e}"));
+            }
+        });
+    if let Err(e) = spawned {
+        // 线程起不来（资源耗尽）只拒这一条连接：accept 主循环不能 panic——
+        // 守护停摆比少一条连接严重得多（闭包已 drop，槽位随 Drop 归还）。
+        rr3_log(&format!("连接线程起不来，拒连（继续服务）: {e}"));
     }
 }
 

@@ -66,21 +66,25 @@ fn rr3_opt_str_list(
     errs: &mut Vec<String>,
 ) -> Vec<String> {
     let mut out = Vec::new();
-    match lookup(root, path) {
-        None => {}
-        Some(v) => match v.as_array() {
-            Some(items) => {
-                for item in items {
-                    match item.as_str() {
-                        Some(s) if !s.is_empty() => out.push(s.to_string()),
-                        _ => errs.push(format!("{item_label} 的每一项都必须是非空字符串")),
-                    }
-                }
-            }
-            None => errs.push(format!("{type_label} 应为字符串数组")),
-        },
+    let Some(v) = lookup(root, path) else {
+        return out;
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("{type_label} 应为字符串数组"));
+        return out;
+    };
+    for item in items {
+        rr3_str_item(item, item_label, &mut out, errs);
     }
     out
+}
+
+/// 单项：非空串入表，否则逐条点名。
+fn rr3_str_item(item: &Value, item_label: &str, out: &mut Vec<String>, errs: &mut Vec<String>) {
+    match item.as_str() {
+        Some(s) if !s.is_empty() => out.push(s.to_string()),
+        _ => errs.push(format!("{item_label} 的每一项都必须是非空字符串")),
+    }
 }
 
 fn req_str(root: &Value, path: &str, errs: &mut Vec<String>) -> String {
@@ -131,22 +135,13 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
     };
     let mut errs = Vec::new();
     let name = req_str(&root, "manifest.name", &mut errs);
-    if !name.is_empty() && !rr3_name_ok(&name) {
-        errs.push(format!(
-            "manifest.name {name:?} 形状非法（只允许 ASCII 字母/数字/-/_/.，不得为 . 或 ..，长度 1..=64）"
-        ));
-    }
+    rr3_name_shape(&name, &mut errs);
     let entry = req_str(&root, "manifest.entry", &mut errs);
     let lang = req_str(&root, "manifest.lang", &mut errs);
     let restart_policy = req_str(&root, "resources.restart_policy", &mut errs);
     let heartbeat_ms = req_int(&root, "health.heartbeat_ms", &mut errs);
     let watchdog_ms = req_int(&root, "health.watchdog_timeout_ms", &mut errs);
-    // 只在两个数都取到时才比对：否则会把"缺字段"伪装成"跨字段矛盾"
-    if heartbeat_ms > 0 && watchdog_ms > 0 && heartbeat_ms >= watchdog_ms {
-        errs.push(format!(
-            "health.heartbeat_ms({heartbeat_ms}) 必须小于 watchdog_timeout_ms({watchdog_ms})"
-        ));
-    }
+    rr3_hb_order(heartbeat_ms, watchdog_ms, &mut errs);
     // [rpc].exposes：可选；给了就必须是**非空字符串数组**——类型错要报错，
     // 不能静默当空表（空表 = "不接请求"，类型错被吞掉会让调用方拿到"无人在册"的假诊断）
     let rpc_exposes = rr3_opt_str_list(
@@ -201,6 +196,24 @@ pub fn rr3_manifest_parse(text: &str) -> Result<Rr3ManifestFacts, Vec<String>> {
     })
 }
 
+/// 模块名形状点名（空名留给"缺少 manifest.name"单点报，不重复）。
+fn rr3_name_shape(name: &str, errs: &mut Vec<String>) {
+    if !name.is_empty() && !rr3_name_ok(name) {
+        errs.push(format!(
+            "manifest.name {name:?} 形状非法（只允许 ASCII 字母/数字/-/_/.，不得为 . 或 ..，长度 1..=64）"
+        ));
+    }
+}
+
+/// 心跳/看门狗次序点名：只在两个数都取到时才比对，否则会把"缺字段"伪装成"跨字段矛盾"。
+fn rr3_hb_order(heartbeat_ms: u64, watchdog_ms: u64, errs: &mut Vec<String>) {
+    if heartbeat_ms > 0 && watchdog_ms > 0 && heartbeat_ms >= watchdog_ms {
+        errs.push(format!(
+            "health.heartbeat_ms({heartbeat_ms}) 必须小于 watchdog_timeout_ms({watchdog_ms})"
+        ));
+    }
+}
+
 /// M2 只接受绝对路径 entry（manifest 从 wire 来，没有"所在目录"可依据）。
 ///
 /// 按 **POSIX 语法**判定，刻意不用 `std::path::Path::is_absolute`：entry 永远是目标机
@@ -216,23 +229,9 @@ pub fn rr3_manifest_abs(entry: &str) -> bool {
 fn rr3_entry_span(text: &str, module: &str) -> Result<(usize, usize, usize), String> {
     let mut hits: Vec<(usize, usize, usize)> = Vec::new();
     for (idx, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        let is_entry = t.starts_with("entry")
-            && t["entry".len()..].starts_with(|c: char| c.is_whitespace() || c == '=');
-        if !is_entry {
-            continue;
+        if let Some((a, b)) = rr3_entry_row(line, module)? {
+            hits.push((idx, a, b));
         }
-        let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) else {
-            return Err(format!(
-                "模块 {module} 的 entry 行不是双引号字符串（schema 违约）: {line}"
-            ));
-        };
-        if b <= a + 1 {
-            return Err(format!(
-                "模块 {module} 的 entry 行引号内无值（schema 违约）: {line}"
-            ));
-        }
-        hits.push((idx, a + 1, b));
     }
     match hits.as_slice() {
         [one] => Ok(*one),
@@ -244,6 +243,27 @@ fn rr3_entry_span(text: &str, module: &str) -> Result<(usize, usize, usize), Str
             n.len()
         )),
     }
+}
+
+/// 单行 entry 定位：非 entry 行回 None；entry 行回引号内的值区间（行内偏移）。
+fn rr3_entry_row(line: &str, module: &str) -> Result<Option<(usize, usize)>, String> {
+    let t = line.trim_start();
+    let is_entry = t.starts_with("entry")
+        && t["entry".len()..].starts_with(|c: char| c.is_whitespace() || c == '=');
+    if !is_entry {
+        return Ok(None);
+    }
+    let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) else {
+        return Err(format!(
+            "模块 {module} 的 entry 行不是双引号字符串（schema 违约）: {line}"
+        ));
+    };
+    if b <= a + 1 {
+        return Err(format!(
+            "模块 {module} 的 entry 行引号内无值（schema 违约）: {line}"
+        ));
+    }
+    Ok(Some((a + 1, b)))
 }
 
 /// 装机的 entry 值形制门（单点）：POSIX 绝对路径且不含 `.`/`..` 段——装机布局的

@@ -118,22 +118,35 @@ mod peer {
     fn rr3_peer_setup() -> Result<(UnixStream, u64, Rr3ManifestFacts, String), String> {
         let bus = env::var("RR3_BUS_PATH").map_err(|_| "缺 RR3_BUS_PATH".to_string())?;
         let (text, facts) = rr3_peer_facts()?;
+        let mut stream = rr3_peer_connect(&bus)?;
+        let task = rr3_peer_register(&mut stream, &facts, &text)?;
+        Ok((stream, task, facts, text))
+    }
 
-        let mut stream = UnixStream::connect(&bus).map_err(|e| format!("连 {bus} 失败: {e}"))?;
-        // 有超时：卡住要成为"夹具退出并打一行原因"，而不是把整个 cargo test 挂住
+    /// 连总线并设读超时：卡住要成为"夹具退出并打一行原因"，而不是把整个 cargo test 挂住。
+    fn rr3_peer_connect(bus: &str) -> Result<UnixStream, String> {
+        let stream = UnixStream::connect(bus).map_err(|e| format!("连 {bus} 失败: {e}"))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .map_err(|e| e.to_string())?;
+        Ok(stream)
+    }
 
+    /// 注册并取回 task：注册前的失败点逐个点名。
+    fn rr3_peer_register(
+        stream: &mut UnixStream,
+        facts: &Rr3ManifestFacts,
+        text: &str,
+    ) -> Result<u64, String> {
         // 注册前还没有 task，按契约填 0（"用户态不得自设"的另一种写法，与夹具同形）
         rr3_send(
-            &mut stream,
+            stream,
             Rr3PayloadType::Request,
             0,
             &json!({"jsonrpc": "2.0", "id": 1, "method": "rr3.register",
                     "params": {"name": facts.name, "manifest": text}}),
         )?;
-        let reply = rr3_wait_reply(&mut stream, 1)?;
+        let reply = rr3_wait_reply(stream, 1)?;
         if reply["error"].is_object() {
             return Err(format!("注册被拒: {}", reply["error"]));
         }
@@ -141,7 +154,7 @@ mod peer {
             .as_u64()
             .ok_or("注册应答里没有 result.src_task")?;
         println!("sim-peer: 注册成功 name={} task={task}", facts.name);
-        Ok((stream, task, facts, text))
+        Ok(task)
     }
 
     /// manifest 取得段：路径 env → 读文 → 解析 facts；身份只从 manifest 来。
