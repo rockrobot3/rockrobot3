@@ -341,6 +341,13 @@ fn excl_enter(path: &str) -> std::io::Result<()> {
         g.refs += 1;
         return Ok(());
     }
+    let fd = rr3_excl_grab(path)?;
+    m.insert(String::from(path), ExclGuard { fd, refs: 1 });
+    Ok(())
+}
+
+/// 开 guard fd（O_NONBLOCK 防 carrier 阻塞）并取排他 non-blocking 锁。
+fn rr3_excl_grab(path: &str) -> std::io::Result<i32> {
     let mut cpath = path.as_bytes().to_vec();
     cpath.push(0);
     // SAFETY：cpath 以 NUL 结尾，open 只读它；guard fd 不收发数据，O_NONBLOCK
@@ -358,8 +365,7 @@ fn excl_enter(path: &str) -> std::io::Result<()> {
         return Err(std::io::Error::last_os_error());
     }
     rr3_excl_lock(fd)?;
-    m.insert(String::from(path), ExclGuard { fd, refs: 1 });
-    Ok(())
+    Ok(fd)
 }
 
 /// 对 guard fd 取排他 non-blocking 锁：被占即点名 ResourceBusy，失败归还 fd。
@@ -572,18 +578,23 @@ impl Rr3UartConn {
         if unsafe { c_tcgetattr(self.fd, &mut t) } != 0 {
             return Err(std::io::Error::last_os_error());
         }
-        if ds == 0 {
-            t.c_cc[VMIN] = 1;
-            t.c_cc[VTIME] = 0;
-        } else {
-            t.c_cc[VMIN] = 0;
-            t.c_cc[VTIME] = ds;
-        }
+        rr3_vtime(&mut t, ds);
         // SAFETY：合法指针；TCSANOW 立即生效。
         if unsafe { c_tcsetattr(self.fd, TCSANOW, &t) } != 0 {
             return Err(std::io::Error::last_os_error());
         }
         Ok(())
+    }
+}
+
+/// 读侧档位：`0` = 阻塞读满（VMIN=1/VTIME=0），否则 VMIN=0/VTIME=ds。
+fn rr3_vtime(t: &mut Termios, ds: u8) {
+    if ds == 0 {
+        t.c_cc[VMIN] = 1;
+        t.c_cc[VTIME] = 0;
+    } else {
+        t.c_cc[VMIN] = 0;
+        t.c_cc[VTIME] = ds;
     }
 }
 
@@ -609,17 +620,22 @@ fn configure(fd: i32, speed: SpeedT) -> std::io::Result<()> {
     t.c_cflag |= CLOCAL | CREAD;
     t.c_cc[VMIN] = 1;
     t.c_cc[VTIME] = 0;
-    // SAFETY：合法指针。
-    if unsafe { c_cfsetispeed(&mut t, speed) } != 0 || unsafe { c_cfsetospeed(&mut t, speed) } != 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
+    rr3_uart_speed(&mut t, speed)?;
     // SAFETY：合法指针；TCSANOW 立即生效。
     if unsafe { c_tcsetattr(fd, TCSANOW, &t) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY：合法指针；冲掉开口前积压的输入队列（TCIFLUSH 只冲收不冲发）。
     if unsafe { c_tcflush(fd, TCIFLUSH) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// 收发两侧波特率（ispeed/ospeed 同值）。
+fn rr3_uart_speed(t: &mut Termios, speed: SpeedT) -> std::io::Result<()> {
+    // SAFETY：合法指针。
+    if unsafe { c_cfsetispeed(t, speed) } != 0 || unsafe { c_cfsetospeed(t, speed) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())

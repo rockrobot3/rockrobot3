@@ -65,6 +65,24 @@ fn cell_percent(mv: u32) -> u8 {
     ((mv - CELL_MV_MIN) / 10) as u8
 }
 
+/// 定从地址（`I2C_SLAVE` ioctl）：失败点名总线路径与地址（errno 就地取出）。
+fn rr3_slave_set(fd: std::os::raw::c_int, bus_path: &Path, addr: u8) -> Result<(), Rr3HalError> {
+    // SAFETY：fd 合法，I2C_SLAVE 是 i2c-dev.h 定值 ioctl（0x0703），参数
+    // 为 7-bit 从地址。errno 在 File drop 前取出（close 可能改写 errno）。
+    let ret = unsafe { libc::ioctl(fd, I2C_SLAVE_IOCTL as _, addr as u32) };
+    if ret < 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        let detail = std::io::Error::from_raw_os_error(errno);
+        return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
+            &format!(
+                "i2c {:?} 设从地址 {addr:#04x} 失败: {detail}（errno {errno}）",
+                bus_path.display()
+            ),
+        )));
+    }
+    Ok(())
+}
+
 /// linux I2C INA219 电池读数（[`crate::Rr3Power`] 的 linux 后端）。
 ///
 /// 选择函数（[`crate::backend::rr3_hal_power`]）不触设备：构造只算路径，
@@ -108,25 +126,7 @@ impl Rr3LinuxIna219 {
                 self.bus_dev_path().display()
             )))
         })?;
-        let fd = file.as_raw_fd();
-        // SAFETY：fd 合法，I2C_SLAVE 是 i2c-dev.h 定值 ioctl（0x0703），参数
-        // 为 7-bit 从地址。errno 在 File drop 前取出（close 可能改写 errno）。
-        let ret = unsafe { libc::ioctl(fd, I2C_SLAVE_IOCTL as _, self.addr as u32) };
-        let errno = if ret < 0 {
-            std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
-        } else {
-            0
-        };
-        if ret < 0 {
-            let detail = std::io::Error::from_raw_os_error(errno);
-            return Err(Rr3HalError::InvalidParam(Rr3ErrText::rr3_err_text_new(
-                &format!(
-                    "i2c {:?} 设从地址 {:#04x} 失败: {detail}（errno {errno}）",
-                    self.bus_dev_path().display(),
-                    self.addr
-                ),
-            )));
-        }
+        rr3_slave_set(file.as_raw_fd(), &self.bus_dev_path(), self.addr)?;
         *slot = Some(file.into_raw_fd()); // fd 所有权移交 self，Drop close
         Ok(())
     }

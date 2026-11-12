@@ -227,12 +227,7 @@ impl Rr3BootEnv {
     /// 空串拒绝——空 altbootcmd 等于"回滚落点不存在"，宁可失败不许假绿。
     /// `limit=0` 拒绝（bootlimit=0 在 U-Boot 里不进回滚链）。
     pub fn rr3_rollback_arm(&mut self, limit: u32, altcmd: &str) -> Result<(), String> {
-        if altcmd.trim().is_empty() {
-            return Err("altbootcmd 不得为空（回滚落点必须可执行，不许假绿）".into());
-        }
-        if limit == 0 {
-            return Err("bootlimit 不得为 0（U-Boot 以 0 表示不进回滚链）".into());
-        }
+        rr3_arm_chk(limit, altcmd)?;
         self.rr3_env_set("upgrade_available", "1")?;
         self.rr3_env_set("bootcount", "0")?;
         self.rr3_env_set("bootlimit", &limit.to_string())?;
@@ -247,6 +242,17 @@ impl Rr3BootEnv {
         self.rr3_env_set("bootcount", "0")?;
         self.rr3_env_set("upgrade_available", "0")
     }
+}
+
+/// 上膛前件：altcmd 非空、limit 非 0（否则回滚链落空，假绿不许）。
+fn rr3_arm_chk(limit: u32, altcmd: &str) -> Result<(), String> {
+    if altcmd.trim().is_empty() {
+        return Err("altbootcmd 不得为空（回滚落点必须可执行，不许假绿）".into());
+    }
+    if limit == 0 {
+        return Err("bootlimit 不得为 0（U-Boot 以 0 表示不进回滚链）".into());
+    }
+    Ok(())
 }
 
 /// 从 config 指明的设备区读出 env（unix：真块设备/普通文件同码）。
@@ -281,8 +287,24 @@ pub fn rr3_env_read(dev: &Rr3EnvDev) -> Result<Rr3BootEnv, String> {
 /// （容量不够）时设备一个字节都不动。
 #[cfg(unix)]
 pub fn rr3_env_write(dev: &Rr3EnvDev, env: &Rr3BootEnv) -> Result<(), String> {
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::Write;
     let image = env.rr3_env_render(dev.rr3_dev_size())?;
+    let mut f = rr3_env_open_w(dev)?;
+    f.write_all(&image).map_err(|e| {
+        format!(
+            "写 {} 的 {}B env 区失败：{e}",
+            dev.rr3_dev_path(),
+            image.len()
+        )
+    })?;
+    f.flush()
+        .map_err(|e| format!("flush {} 失败：{e}", dev.rr3_dev_path()))
+}
+
+/// 以写打开设备区并按偏移定位（失败点名路径与偏移）。
+#[cfg(unix)]
+fn rr3_env_open_w(dev: &Rr3EnvDev) -> Result<std::fs::File, String> {
+    use std::io::{Seek, SeekFrom};
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .open(dev.rr3_dev_path())
@@ -294,15 +316,7 @@ pub fn rr3_env_write(dev: &Rr3EnvDev, env: &Rr3BootEnv) -> Result<(), String> {
             dev.rr3_dev_offset()
         )
     })?;
-    f.write_all(&image).map_err(|e| {
-        format!(
-            "写 {} 的 {}B env 区失败：{e}",
-            dev.rr3_dev_path(),
-            image.len()
-        )
-    })?;
-    f.flush()
-        .map_err(|e| format!("flush {} 失败：{e}", dev.rr3_dev_path()))
+    Ok(f)
 }
 
 #[cfg(test)]

@@ -248,15 +248,18 @@ fn rr3_comp_atom_items<'a>(asm: &'a toml::Table, errs: &mut Vec<String>) -> Opti
 /// 单条原子件名判据：空串/非字符串/重复各点名；合格则入链。
 fn rr3_atom_item(item: &Value, i: usize, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
     match item.as_str() {
-        Some(a) if !a.trim().is_empty() => {
-            if facts.atoms.iter().any(|x| x == a) {
-                errs.push(format!("atoms[{i}] \"{a}\" 重复（⊗ 链一名一条）"));
-            } else {
-                facts.atoms.push(a.to_string());
-            }
-        }
+        Some(a) if !a.trim().is_empty() => rr3_atom_push(facts, a, i, errs),
         Some(_) => errs.push(format!("atoms[{i}] 不得为空串")),
         None => errs.push(format!("atoms[{i}] 应为字符串，收到 {item:?}")),
+    }
+}
+
+/// 原子名去重入列：重复项点名（⊗ 链一名一条）。
+fn rr3_atom_push(facts: &mut Rr3CompositeFacts, a: &str, i: usize, errs: &mut Vec<String>) {
+    if facts.atoms.iter().any(|x| x == a) {
+        errs.push(format!("atoms[{i}] \"{a}\" 重复（⊗ 链一名一条）"));
+    } else {
+        facts.atoms.push(a.to_string());
     }
 }
 

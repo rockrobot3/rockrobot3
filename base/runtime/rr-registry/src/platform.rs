@@ -639,6 +639,11 @@ fn rr3_cons_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Ve
     if !rr3_cons_key(k, table, errs) {
         return;
     }
+    rr3_cons_val(k, v, table, errs);
+}
+
+/// 构造路径值：非空字符串入表，空串/非串各自点名（文案逐字保留）。
+fn rr3_cons_val(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     match v.as_str() {
         Some(p) if !p.trim().is_empty() => {
             table.construction.insert(k.to_string(), p.to_string());
@@ -722,6 +727,11 @@ fn rr3_wf_item(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<
         ));
         return;
     }
+    rr3_wf_val(k, v, table, errs);
+}
+
+/// 词形值：非空前缀入表（空串/非串各自点名，文案逐字保留）。
+fn rr3_wf_val(k: &str, v: &Value, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     match v.as_str() {
         Some(p) if !p.trim().is_empty() => {
             table

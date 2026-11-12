@@ -11,7 +11,7 @@
 //! 板上件（U-Boot 环境变量写侧、块设备/挂载探测）本版本不 claim，
 //! 见 base/ota/partition-layout.md 增补段。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use rr_ota::bootconf;
@@ -80,14 +80,10 @@ fn rr3_switch_target(args: &[String]) -> Result<Rr3Slot, ExitCode> {
 /// switch：读 → 判定改写 → 原子写回。业务拒（同槽幂等拒 / rr_factory 目标 /
 /// 形状漂移）一律 (文案, 1)——文案全部来自 rr-ota::bootconf，本层不重抄语义。
 fn rr3_cmd_switch(target: Rr3Slot, path: &PathBuf) -> Result<String, (String, ExitCode)> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| (format!("读引导配置 {path:?} 失败: {e}"), ExitCode::from(1)))?;
-    let from = bootconf::rr3_bootconf_slot(&text)
-        .map_err(|e| (format!("拒绝切换：{e}"), ExitCode::from(1)))?;
+    let (text, from) = rr3_conf_slot(path, "拒绝切换")?;
     let out = bootconf::rr3_bootconf_switch(&text, target)
         .map_err(|e| (format!("拒绝切换：{e}"), ExitCode::from(1)))?;
-    bootconf::rr3_bootconf_store(path, &out)
-        .map_err(|e| (format!("原子落盘失败: {e}"), ExitCode::from(1)))?;
+    rr3_conf_store(path, &out)?;
     Ok(format!(
         "引导配置已改写：root=LABEL={} → {}（持久切换，重启后生效）",
         from.rr3_slot_label(),
@@ -97,18 +93,29 @@ fn rr3_cmd_switch(target: Rr3Slot, path: &PathBuf) -> Result<String, (String, Ex
 
 /// factory：同上，但目标是 rr_factory 的一次性出厂引导（分区本体不写）。
 fn rr3_cmd_factory(path: &PathBuf) -> Result<String, (String, ExitCode)> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| (format!("读引导配置 {path:?} 失败: {e}"), ExitCode::from(1)))?;
-    let from = bootconf::rr3_bootconf_slot(&text)
-        .map_err(|e| (format!("拒绝恢复出厂：{e}"), ExitCode::from(1)))?;
+    let (text, from) = rr3_conf_slot(path, "拒绝恢复出厂")?;
     let out = bootconf::rr3_bootconf_factory(&text)
         .map_err(|e| (format!("拒绝恢复出厂：{e}"), ExitCode::from(1)))?;
-    bootconf::rr3_bootconf_store(path, &out)
-        .map_err(|e| (format!("原子落盘失败: {e}"), ExitCode::from(1)))?;
+    rr3_conf_store(path, &out)?;
     Ok(format!(
         "引导配置已改写：root=LABEL={} → rr_factory（一次性出厂引导，重启后生效；rr_factory 分区本体不写）",
         from.rr3_slot_label()
     ))
+}
+
+/// 读引导配置 + 判当前槽：`why` 是业务拒文案前缀（两子命令各自口径）。
+fn rr3_conf_slot(path: &PathBuf, why: &str) -> Result<(String, Rr3Slot), (String, ExitCode)> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| (format!("读引导配置 {path:?} 失败: {e}"), ExitCode::from(1)))?;
+    let from = bootconf::rr3_bootconf_slot(&text)
+        .map_err(|e| (format!("{why}：{e}"), ExitCode::from(1)))?;
+    Ok((text, from))
+}
+
+/// 原子写回引导配置（失败文案统一）。
+fn rr3_conf_store(path: &Path, out: &str) -> Result<(), (String, ExitCode)> {
+    bootconf::rr3_bootconf_store(path, out)
+        .map_err(|e| (format!("原子落盘失败: {e}"), ExitCode::from(1)))
 }
 
 fn main() -> ExitCode {

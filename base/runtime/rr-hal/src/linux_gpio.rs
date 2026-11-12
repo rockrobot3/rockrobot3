@@ -88,6 +88,45 @@ fn rr3_gpio_ioctl_err(context: &str, errno: libc::c_int) -> Rr3HalError {
     }
 }
 
+/// 芯片 fd 上请求 OUTPUT 句柄（初值 0）：成功回句柄 fd，失败点名回错。
+fn rr3_gpio_ask(
+    chip_file: &std::fs::File,
+    chip_path: &Path,
+    line: u32,
+    role: &str,
+) -> Result<std::os::raw::c_int, Rr3HalError> {
+    let mut req = Rr3GpioHandleRequest {
+        lineoffsets: [0; 64],
+        flags: GPIOHANDLE_REQUEST_OUTPUT,
+        default_values: [0; 64],
+        consumer_label: [0; 32],
+        lines: 1,
+        fd: -1,
+    };
+    req.lineoffsets[0] = line;
+    for (i, b) in role.bytes().take(32).enumerate() {
+        req.consumer_label[i] = b;
+    }
+    // SAFETY：req 是合法可写指针，ioctl 号与结构体布局配对（单测钉死）；
+    // 成功时内核回填 req.fd（新句柄 fd）。errno 必须在 File drop（close
+    // 可能改写 errno）之前取出。
+    let ret = unsafe {
+        libc::ioctl(
+            std::os::fd::AsRawFd::as_raw_fd(chip_file),
+            GPIO_GET_LINEHANDLE_IOCTL as _, // glibc 声明 c_ulong / musl 声明 c_int，按平台推断
+            &mut req as *mut Rr3GpioHandleRequest,
+        )
+    };
+    if ret < 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        return Err(rr3_gpio_ioctl_err(
+            &format!("gpio 请求 {chip_path:?} line{line} 输出句柄失败（line 被占或越界）"),
+            errno,
+        ));
+    }
+    Ok(req.fd)
+}
+
 /// linux chardev GPIO 数字输出（[`crate::Rr3GpioOut`] 的 linux 后端）。
 ///
 /// 选择函数（[`crate::backend::rr3_hal_gpio_out`]）不触设备：构造只算路径，
@@ -135,45 +174,9 @@ impl Rr3LinuxGpioOut {
                 self.chip_dev_path().display()
             )))
         })?;
-        let mut req = Rr3GpioHandleRequest {
-            lineoffsets: [0; 64],
-            flags: GPIOHANDLE_REQUEST_OUTPUT,
-            default_values: [0; 64],
-            consumer_label: [0; 32],
-            lines: 1,
-            fd: -1,
-        };
-        req.lineoffsets[0] = self.line;
-        for (i, b) in self.role.bytes().take(32).enumerate() {
-            req.consumer_label[i] = b;
-        }
-        // SAFETY：req 是合法可写指针，ioctl 号与结构体布局配对（单测钉死）；
-        // 成功时内核回填 req.fd（新句柄 fd）。errno 必须在 File drop（close
-        // 可能改写 errno）之前取出。
-        let ret = unsafe {
-            libc::ioctl(
-                std::os::fd::AsRawFd::as_raw_fd(&chip_file),
-                GPIO_GET_LINEHANDLE_IOCTL as _, // glibc 声明 c_ulong / musl 声明 c_int，按平台推断
-                &mut req as *mut Rr3GpioHandleRequest,
-            )
-        };
-        let errno = if ret < 0 {
-            std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
-        } else {
-            0
-        };
+        let fd = rr3_gpio_ask(&chip_file, &self.chip_dev_path(), self.line, &self.role)?;
         drop(chip_file);
-        if ret < 0 {
-            return Err(rr3_gpio_ioctl_err(
-                &format!(
-                    "gpio 请求 {:?} line{} 输出句柄失败（line 被占或越界）",
-                    self.chip_dev_path().display(),
-                    self.line
-                ),
-                errno,
-            ));
-        }
-        *slot = Some(req.fd);
+        *slot = Some(fd);
         Ok(())
     }
 

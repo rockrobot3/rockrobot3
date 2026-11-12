@@ -207,21 +207,24 @@ fn rr3_sim_sine(t_s: f64) -> f64 {
 fn rr3_sim_wave_at(wave: Rr3SimWave, t: f64, idx: u64, ch_n: usize, rate: f64) -> f64 {
     match wave {
         Rr3SimWave::Sine => rr3_sim_sine(t),
-        Rr3SimWave::Burst => {
-            // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
-            // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等；
-            // 门控按绝对**帧**序号（idx/声道数，0.0.6 批F4 真板实测：按
-            // 交错样点序号算会在多通道下把窗口折半成 500ms，短于 VAD
-            // 判停尾静音 700ms，offset 永不触发）；有声路内才带 ITD 偏移
-            let frame_idx = idx / ch_n as u64;
-            if frame_idx / rate as u64 % 2 == 0 {
-                rr3_sim_sine(t)
-            } else {
-                0.0
-            }
-        }
+        Rr3SimWave::Burst => rr3_sim_burst(t, idx, ch_n, rate),
         Rr3SimWave::Noise => rr3_sim_noise(idx),
         Rr3SimWave::Silence => 0.0,
+    }
+}
+
+/// burst 门控：偶秒有声、奇秒静音，按绝对**帧**序号（idx/声道数）判。
+fn rr3_sim_burst(t: f64, idx: u64, ch_n: usize, rate: f64) -> f64 {
+    // 偶秒有声、奇秒静音：440Hz 的 2s 周期恰好整周期（880 圈），
+    // 相位跨门控边界连续，burst 的第 3 秒与第 1 秒逐点相等；
+    // 门控按绝对**帧**序号（idx/声道数，0.0.6 批F4 真板实测：按
+    // 交错样点序号算会在多通道下把窗口折半成 500ms，短于 VAD
+    // 判停尾静音 700ms，offset 永不触发）；有声路内才带 ITD 偏移
+    let frame_idx = idx / ch_n as u64;
+    if frame_idx / rate as u64 % 2 == 0 {
+        rr3_sim_sine(t)
+    } else {
+        0.0
     }
 }
 
