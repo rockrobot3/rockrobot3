@@ -154,15 +154,17 @@ pub fn rr3_brain_cfg_text(cloud_real: bool, base_url: &str) -> String {
 /// 路径为空补 `/v1`；已带路径（GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`）原样。
 fn rr3_llm_root_of(base_url: &str) -> String {
     let s = base_url.trim().trim_end_matches('/');
-    let has_path = match s.split_once("://") {
-        Some((_, rest)) => rest.contains('/'),
-        None => s.contains('/'),
-    };
-    if has_path {
+    if rr3_url_has_path(s) {
         s.to_string()
     } else {
         format!("{s}/v1")
     }
+}
+
+/// `scheme://host` 之后是否已带路径（GLM/Qwen 等自带路径档原样保留）。
+fn rr3_url_has_path(s: &str) -> bool {
+    let (_, rest) = s.split_once("://").unwrap_or(("", s));
+    rest.contains('/')
 }
 
 pub fn rr3_brain_drill(a: &Rr3SimArgs) -> Result<String, String> {
@@ -488,16 +490,7 @@ fn rr3_brain_wait(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), String> 
         rr3_brain_ready_at(),
     )?;
     report.push_str("\n=== 三模块 running ===\n");
-    let brain_log = fix.workdir.join("brain.log");
-    wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, rr3_brain_ready_at())?;
-    report.push_str(&format!(
-        "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
-    ));
-    let interact_log = fix.workdir.join("interact.log");
-    wait_log_contains(&interact_log, RR3_INTERACT_TTS_MARK, rr3_brain_ready_at())?;
-    report.push_str(&format!(
-        "interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"
-    ));
+    rr3_brain_logs_wait(ctx, report)?;
     let status_out = rr3_ctl_denied_zero(
         &ctx.bins.rrctl,
         &fix.socket,
@@ -505,6 +498,21 @@ fn rr3_brain_wait(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), String> 
     )?;
     report.push_str("\n=== rr3-ctl status 巡检 ===\n");
     report.push_str(&status_out);
+    Ok(())
+}
+
+/// 两处留痕：brain 轮次完成行 → interact TTS 播放行（各按演练 deadline 有界等）。
+fn rr3_brain_logs_wait(ctx: &Rr3BrainCtx, report: &mut String) -> Result<(), String> {
+    let brain_log = ctx.fix.workdir.join("brain.log");
+    wait_log_contains(&brain_log, RR3_BRAIN_TURN_MARK, rr3_brain_ready_at())?;
+    report.push_str(&format!(
+        "brain 日志出现「{RR3_BRAIN_TURN_MARK}」（云端 mock 的整轮 ASR→LLM→TTS 已走通）\n"
+    ));
+    let interact_log = ctx.fix.workdir.join("interact.log");
+    wait_log_contains(&interact_log, RR3_INTERACT_TTS_MARK, rr3_brain_ready_at())?;
+    report.push_str(&format!(
+        "interact 日志出现「{RR3_INTERACT_TTS_MARK}」（brain 的 rr3.call 播放点名已应答）\n"
+    ));
     Ok(())
 }
 

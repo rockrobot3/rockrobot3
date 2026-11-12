@@ -41,12 +41,17 @@ pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
         return Err(format!("未知命令 {cmd}，可用：{}", COMMANDS.join(" | ")));
     }
     let envelope = rr3_ctl_query(bus, &format!("rr3.ctl.{cmd}"))?;
-    // 错误信封统一走 Err：ota 的恒拒（rrd 回 AIRY_EPERM，文案点 M6）与 reboot 的
-    // 缺省恒拒（文案点双重门）都落在这一条上，main 会把它打到 stderr 并以非 0 退出
-    if let Some(why) = rr3_ctl_reject(cmd, &envelope) {
-        return Err(why);
-    }
+    rr3_ctl_ensure(cmd, &envelope)?;
     rr3_ctl_render(cmd, &envelope)
+}
+
+/// 错误信封统一走 Err：ota 的恒拒（rrd 回 AIRY_EPERM，文案点 M6）与 reboot 的
+/// 缺省恒拒（文案点双重门）都落在这一条上。
+fn rr3_ctl_ensure(cmd: &str, envelope: &Value) -> Result<(), String> {
+    match rr3_ctl_reject(cmd, envelope) {
+        Some(why) => Err(why),
+        None => Ok(()),
+    }
 }
 
 /// 成功信封按命令分派到各自的渲染器。

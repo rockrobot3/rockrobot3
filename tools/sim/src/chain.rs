@@ -217,16 +217,19 @@ impl Rr3ChainObs {
 /// （offset 不带 doa，批F2 负载纪律，喂了也取不到），servo/state 取落角。
 pub fn rr3_obs_feed(obs: &mut Rr3ChainObs, body: &Value) {
     match body.get("topic").and_then(Value::as_str) {
-        Some(RR3_SENSE_TOPIC_VAD) => {
-            if let Some(d) = body.get("doa") {
-                obs.doa_deg = d.get("deg").and_then(Value::as_i64);
-                obs.doa_bin = d.get("bin").and_then(Value::as_str).map(str::to_string);
-            }
-        }
+        Some(RR3_SENSE_TOPIC_VAD) => rr3_obs_doa(obs, body),
         Some(RR3_ACT_TOPIC_SERVO_STATE) => {
             obs.servo_angle = body.get("angle_deg").and_then(Value::as_i64);
         }
         _ => {}
+    }
+}
+
+/// vad_start 的 doa 档入袋（offset 不带 doa，喂了也取不到）。
+fn rr3_obs_doa(obs: &mut Rr3ChainObs, body: &Value) {
+    if let Some(d) = body.get("doa") {
+        obs.doa_deg = d.get("deg").and_then(Value::as_i64);
+        obs.doa_bin = d.get("bin").and_then(Value::as_str).map(str::to_string);
     }
 }
 
@@ -250,10 +253,16 @@ fn rr3_chain_doa_ok(obs: &Rr3ChainObs) -> Result<i64, String> {
             "注入 {RR3_CHAIN_DOA_DEG}° 的 ILD 反演必须落 ±2° 容差: {deg}°"
         ));
     }
-    if obs.doa_bin.as_deref() != Some("left") {
-        return Err(format!("|deg| > 30 必须落左档: {:?}", obs.doa_bin));
-    }
+    rr3_chain_left(obs.doa_bin.as_deref())?;
     Ok(deg)
+}
+
+/// 分档判定：必须落左档（|deg| > 30 的注入档）。
+fn rr3_chain_left(bin: Option<&str>) -> Result<(), String> {
+    if bin != Some("left") {
+        return Err(format!("|deg| > 30 必须落左档: {bin:?}"));
+    }
+    Ok(())
 }
 
 /// 转向落角判定：必须是词表左档角。
@@ -306,6 +315,17 @@ fn rr3_obs_one(stream: &mut UnixStream) -> Result<bool, String> {
 /// 单帧归类：`Ok(Some(()))` = 注册成功，`Ok(None)` = 不入账继续等；
 /// `Err` = JSON 非形或注册被拒（原样带回原因）。
 fn rr3_obs_reply(payload: &[u8]) -> Result<Option<()>, String> {
+    let Some(v) = rr3_obs_reply_body(payload)? else {
+        return Ok(None);
+    };
+    if v.get("error").is_some_and(Value::is_object) {
+        return Err(format!("观察者注册被拒: {}", v["error"]));
+    }
+    Ok(Some(()))
+}
+
+/// 注册应答体：非 Response、id≠1、非 JSON 都不入账（`Ok(None)`）；非 JSON 是错。
+fn rr3_obs_reply_body(payload: &[u8]) -> Result<Option<Value>, String> {
     let Ok((ty, raw)) = rr3_body_split(payload) else {
         return Ok(None);
     };
@@ -316,10 +336,7 @@ fn rr3_obs_reply(payload: &[u8]) -> Result<Option<()>, String> {
     if v.get("id").and_then(Value::as_u64) != Some(1) {
         return Ok(None);
     }
-    if v.get("error").is_some_and(Value::is_object) {
-        return Err(format!("观察者注册被拒: {}", v["error"]));
-    }
-    Ok(Some(()))
+    Ok(Some(v))
 }
 
 /// 取证收集：读到两路证据齐或超时。读超时/暂无帧按"这拍没帧"继续，
@@ -435,13 +452,24 @@ fn rr3_chain_done(
     ok_text: &str,
 ) -> Result<String, String> {
     match outcome {
-        Ok(()) => {
-            report.push_str(rr3_section("演练结论（R9 档位逐项标注）").as_str());
-            report.push_str(ok_text);
-            Ok(std::mem::take(report))
-        }
-        Err(e) if keep => Err(e),
-        Err(e) => Err(format!("{e}\n（现场日志在 {:?}）", fix.workdir)),
+        Ok(()) => Ok(rr3_chain_ok_report(report, ok_text)),
+        Err(e) => Err(rr3_chain_err(e, fix, keep)),
+    }
+}
+
+/// 成功结论：分节标题 + 演练结论原文。
+fn rr3_chain_ok_report(report: &mut String, ok_text: &str) -> String {
+    report.push_str(rr3_section("演练结论（R9 档位逐项标注）").as_str());
+    report.push_str(ok_text);
+    std::mem::take(report)
+}
+
+/// 失败结论：`--keep` 原样带回，否则附现场日志位置。
+fn rr3_chain_err(e: String, fix: &Rr3ChainFix, keep: bool) -> String {
+    if keep {
+        e
+    } else {
+        format!("{e}\n（现场日志在 {:?}）", fix.workdir)
     }
 }
 
@@ -720,9 +748,21 @@ fn rr3_chain_evidence(
 /// 三段进程内日志留痕（brain 动作数 / interact 挂起 / act 落角）。
 fn rr3_chain_logs(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> {
     report.push_str(rr3_section("全链留痕（进程内日志）").as_str());
-    let brain_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.log"));
-    let interact_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_B}.log"));
+    let turn = rr3_chain_turn(ctx)?;
+    report.push_str(&format!("brain: {turn}\n"));
+    let tts = rr3_chain_tts(ctx)?;
+    report.push_str(&format!(
+        "interact: {tts}（表情机 talk 自动挂起，sim 档无显示件）\n"
+    ));
     let act_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_ACT}.log"));
+    let intent = wait_log_contains(&act_log, "servo angle=", RR3_CHAIN_READY_DEADLINE)?;
+    report.push_str(&format!("act: {intent}\n"));
+    Ok(())
+}
+
+/// brain 轮次行：动作数必须是 1（词表左档应产一条 servo 动作）。
+fn rr3_chain_turn(ctx: &Rr3ChainCtx) -> Result<String, String> {
+    let brain_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.log"));
     let turn = wait_log_contains(
         &brain_log,
         crate::brain::RR3_BRAIN_TURN_MARK,
@@ -733,19 +773,19 @@ fn rr3_chain_logs(ctx: &Rr3ChainCtx, report: &mut String) -> Result<(), String> 
             "brain 轮次行的动作数不是 1（词表左档应产一条 servo 动作）: {turn}"
         ));
     }
-    report.push_str(&format!("brain: {turn}\n"));
+    Ok(turn)
+}
+
+/// interact 播放行：必须携「talk 挂起」（表情机没接管即红）。
+fn rr3_chain_tts(ctx: &Rr3ChainCtx) -> Result<String, String> {
+    let interact_log = ctx.fix.workdir.join(format!("{RR3_SIM_MODULE_B}.log"));
     let tts = wait_log_contains(&interact_log, "tts:", RR3_CHAIN_READY_DEADLINE)?;
     if !tts.contains("talk 挂起") {
         return Err(format!(
             "interact 播放行没携 talk 挂起（表情机没接管）: {tts}"
         ));
     }
-    report.push_str(&format!(
-        "interact: {tts}（表情机 talk 自动挂起，sim 档无显示件）\n"
-    ));
-    let intent = wait_log_contains(&act_log, "servo angle=", RR3_CHAIN_READY_DEADLINE)?;
-    report.push_str(&format!("act: {intent}\n"));
-    Ok(())
+    Ok(tts)
 }
 
 /// `rr3-ctl status` 巡检：denied_publish = 0 是"事件真被接受"的线上证据。

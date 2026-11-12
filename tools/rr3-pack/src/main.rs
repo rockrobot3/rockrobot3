@@ -268,13 +268,18 @@ fn rr3_copy_entry(e: &fs::DirEntry, dst: &Path) -> Result<(), String> {
         return rr3_copy_dir(&from, &to);
     }
     if ft.is_file() {
-        fs::copy(&from, &to).map_err(|err| format!("复制 {} 失败: {err}", from.display()))?;
-        return Ok(());
+        return rr3_copy_plain(&from, &to);
     }
     Err(format!(
         "python pkg 树含非普通文件（{}）——注入产物须是仓内包目录的纯副本，打包拒绝",
         from.display()
     ))
+}
+
+/// 普通文件复制（错误带来源路径）。
+fn rr3_copy_plain(from: &Path, to: &Path) -> Result<(), String> {
+    fs::copy(from, to).map_err(|err| format!("复制 {} 失败: {err}", from.display()))?;
+    Ok(())
 }
 
 /// 打包面的 entry 改写（B45 起委托 rrd 单点 [`rrd::manifest::rr3_manifest_rewrite`]）：
@@ -291,17 +296,23 @@ fn rr3_manifest_rewrite(
 /// 列出注入产物里的模块名（升序——staging 落位与出错点名都要确定性，read_dir 序不可靠）。
 fn rr3_module_names(payload: &Path) -> Result<Vec<String>, String> {
     let dir = payload.join("rr3-modules");
+    let mut names = rr3_names_read(&dir)?;
+    names.sort();
+    rr3_names_nonempty(&names, &dir)?;
+    Ok(names)
+}
+
+/// 注入目录下的子目录名（read_dir 序不可靠，排序归调用方）。
+fn rr3_names_read(dir: &Path) -> Result<Vec<String>, String> {
     let mut names = Vec::new();
     let entries =
-        fs::read_dir(&dir).map_err(|e| format!("读注入目录 {} 失败: {e}", dir.display()))?;
+        fs::read_dir(dir).map_err(|e| format!("读注入目录 {} 失败: {e}", dir.display()))?;
     for e in entries {
         let e = e.map_err(|err| format!("读注入目录 {} 失败: {err}", dir.display()))?;
         if e.path().is_dir() {
             names.push(e.file_name().to_string_lossy().into_owned());
         }
     }
-    names.sort();
-    rr3_names_nonempty(&names, &dir)?;
     Ok(names)
 }
 

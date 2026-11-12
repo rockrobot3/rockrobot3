@@ -394,9 +394,19 @@ impl DoaTracker {
         }
         self.win += 1;
         let t = self.t0.elapsed().as_secs_f64();
+        let out = self.rr3_doa_line(t);
+        self.l_sq = 0.0;
+        self.r_sq = 0.0;
+        self.n = 0;
+        self.peak = 0;
+        Some(out)
+    }
+
+    /// 满窗一行打印（active 窗的方位角同时入袋）。
+    fn rr3_doa_line(&mut self, t: f64) -> String {
         let l_rms = (self.l_sq / self.n as f64).sqrt();
         let r_rms = (self.r_sq / self.n as f64).sqrt();
-        let out = if self.peak > DOA_ACTIVE_PEAK && l_rms > 0.0 && r_rms > 0.0 {
+        if self.peak > DOA_ACTIVE_PEAK && l_rms > 0.0 && r_rms > 0.0 {
             let ild = 20.0 * (l_rms / r_rms).log10();
             let az = (ild * AZ_PER_DB).clamp(-90.0, 90.0);
             self.azs.push((self.win, az));
@@ -409,12 +419,7 @@ impl DoaTracker {
                 "[doa] t={t:5.1}s win={} peak={} l_rms={l_rms:.0} r_rms={r_rms:.0} （静默）",
                 self.win, self.peak
             )
-        };
-        self.l_sq = 0.0;
-        self.r_sq = 0.0;
-        self.n = 0;
-        self.peak = 0;
-        Some(out)
+        }
     }
 
     /// 收兵汇总：active 窗方位角列表 + 符号分离判定（正负都有 = 左右发声方向可分）。
@@ -737,6 +742,15 @@ impl DecodeState {
         }
     }
 
+    /// DoA 冒烟：开则喂片，满窗即打印一行。
+    fn rr3_doa_smoke(&mut self, samples: &[u8]) {
+        if self.doa_on {
+            if let Some(line) = self.doa.feed(samples) {
+                println!("{line}");
+            }
+        }
+    }
+
     /// 好片全链：seq/声明率记账 → DoA 冒烟 → 移交写线程（零磁盘 I/O）→ 连续段
     /// 实测率推进 → 节拍打印。写线程亡 = fail-honest 补恢复头退 4。
     fn ingest(
@@ -759,11 +773,7 @@ impl DecodeState {
         );
         self.chunks += 1;
         // DoA 在解码面算（纯计算）；分片移交写线程
-        if self.doa_on {
-            if let Some(line) = self.doa.feed(&chunk.samples) {
-                println!("{line}");
-            }
-        }
+        self.rr3_doa_smoke(&chunk.samples);
         let nsamp = chunk.samples.len();
         if tx.send(chunk.samples).is_err() {
             eprintln!("rr3-audio-rec: 写线程通道断开（写线程已亡）");

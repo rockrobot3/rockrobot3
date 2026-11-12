@@ -329,18 +329,24 @@ fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u6
             rr3_register_ack(conn, id, now_ns());
             (name, hb)
         }
-        Ok((ty, _, m, _, _)) => {
-            eprintln!(
-                "FAIL  首帧必须是 Request/rr3.register，收到 {ty:?}/{}",
-                m.as_deref().unwrap_or("-")
-            );
-            std::process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("FAIL  首帧畸形: {e}");
-            std::process::exit(1);
-        }
+        Ok((ty, _, m, _, _)) => rr3_register_shape(ty, m),
+        Err(e) => rr3_register_bad(&e),
     }
+}
+
+/// 首帧形状错：点名收到什么，退 1。
+fn rr3_register_shape(ty: Rr3PayloadType, m: Option<String>) -> ! {
+    eprintln!(
+        "FAIL  首帧必须是 Request/rr3.register，收到 {ty:?}/{}",
+        m.as_deref().unwrap_or("-")
+    );
+    std::process::exit(1)
+}
+
+/// 首帧畸形：点名后按判据失败退 1。
+fn rr3_register_bad(e: &str) -> ! {
+    eprintln!("FAIL  首帧畸形: {e}");
+    std::process::exit(1)
 }
 
 /// 注册应答写出（失败即点名退场）。
@@ -566,20 +572,20 @@ fn rt_recv(conn: &mut Rr3UartConn) -> Option<Rr3Frame> {
 fn rr3_round_trip(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (bool, bool, u128) {
     rr3_rt_send(conn, now_ns);
     let rt_start = Instant::now();
-    let mut rt_ok = false;
-    let mut rt_echo_ok = false;
+    let (rt_ok, rt_echo_ok) = rr3_rt_scan(conn);
+    (rt_ok, rt_echo_ok, rt_start.elapsed().as_millis())
+}
+
+/// 逐帧等命中：Hit 记结果收兵，Skip 继续等，Fail 收兵。
+fn rr3_rt_scan(conn: &mut Rr3UartConn) -> (bool, bool) {
     while let Some(frame) = rt_recv(conn) {
         match rt_verdict(frame) {
-            RtFrame::Hit { echo_ok } => {
-                rt_ok = true;
-                rt_echo_ok = echo_ok;
-                break;
-            }
+            RtFrame::Hit { echo_ok } => return (true, echo_ok),
             RtFrame::Skip => continue,
             RtFrame::Fail => break,
         }
     }
-    (rt_ok, rt_echo_ok, rt_start.elapsed().as_millis())
+    (false, false)
 }
 
 /// round-trip 请求写出（失败即点名退场）。
@@ -761,6 +767,18 @@ fn rr3_evidence_write(
     }
 }
 
+/// 命令行参数：设备必给（缺即按用法退 2），拍数缺省 8，证据路径可选。
+fn rr3_args(args: &[String]) -> (String, usize, Option<String>) {
+    let Some(device) = args.get(1) else {
+        eprintln!(
+            "用法: rr3-sentinel-harness <串口设备> [拍数，缺省 8] [证据文件路径（C12 三样）]"
+        );
+        std::process::exit(2);
+    };
+    let beats: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(8);
+    (device.clone(), beats, args.get(3).cloned())
+}
+
 fn main() {
     let t0 = Instant::now();
     let t0_unix = std::time::SystemTime::now()
@@ -768,15 +786,7 @@ fn main() {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!(
-            "用法: rr3-sentinel-harness <串口设备> [拍数，缺省 8] [证据文件路径（C12 三样）]"
-        );
-        std::process::exit(2);
-    }
-    let device = args[1].clone();
-    let beats: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(8);
-    let evidence_path = args.get(3).cloned();
+    let (device, beats, evidence_path) = rr3_args(&args);
     rr3_watchdog(t0, beats);
     let now_ns = || t0.elapsed().as_nanos() as u64;
     let mut fail = 0u32;

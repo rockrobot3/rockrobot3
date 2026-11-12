@@ -85,14 +85,19 @@ fn rr3_asm_profile_read(
     let profile_text = std::fs::read_to_string(profile_src)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
     let sim_text = rr3_asm_sim_text(&profile_text)?;
-    let profile = rr3_profile_parse(&sim_text).map_err(|errs| {
+    let profile = rr3_asm_parse(&sim_text, profile_src)?;
+    let profile_dst = rr3_layout_profile(workdir, profile_src, &sim_text)?;
+    Ok((profile_dst, profile))
+}
+
+/// sim 变换后复核解析（坏单点名源装配单）。
+fn rr3_asm_parse(sim_text: &str, profile_src: &Path) -> Result<Rr3Profile, String> {
+    rr3_profile_parse(sim_text).map_err(|errs| {
         format!(
             "装配单 {} sim 变换后不可解析: {errs:?}",
             profile_src.display()
         )
-    })?;
-    let profile_dst = rr3_layout_profile(workdir, profile_src, &sim_text)?;
-    Ok((profile_dst, profile))
+    })
 }
 
 /// 接线档同批装机（文件名主干定 `hardware/<形态>/wiring.toml`）。
@@ -373,23 +378,38 @@ fn rr3_drill_verdict(
     workdir: &Path,
     entries: &[Rr3AssembleEntry],
     profile_dst: &Path,
-    mut report: String,
+    report: String,
 ) -> Result<String, String> {
     match outcome {
-        Ok(()) => {
-            if owned_dir {
-                let _ = std::fs::remove_dir_all(workdir);
-            }
-            report.push_str(rr3_section("演练结论").as_str());
-            report.push_str(&format!(
-                "装配演练 OK：{} 个 face 模块全 running + denied_publish = 0（装配单 {}）\n",
-                entries.len(),
-                profile_dst.display()
-            ));
-            Ok(report)
-        }
+        Ok(()) => Ok(rr3_drill_ok(
+            owned_dir,
+            workdir,
+            entries,
+            profile_dst,
+            report,
+        )),
         Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
     }
+}
+
+/// 成功结论：装配目录归本次演练所有才清场，再追加逐模块结论。
+fn rr3_drill_ok(
+    owned_dir: bool,
+    workdir: &Path,
+    entries: &[Rr3AssembleEntry],
+    profile_dst: &Path,
+    mut report: String,
+) -> String {
+    if owned_dir {
+        let _ = std::fs::remove_dir_all(workdir);
+    }
+    report.push_str(rr3_section("演练结论").as_str());
+    report.push_str(&format!(
+        "装配演练 OK：{} 个 face 模块全 running + denied_publish = 0（装配单 {}）\n",
+        entries.len(),
+        profile_dst.display()
+    ));
+    report
 }
 
 pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
@@ -605,16 +625,23 @@ pub(crate) fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<Stri
         .map_err(|e| format!("跑 rr3-ctl {cmd} 失败: {e}"))?;
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
-        s.push_str(&String::from_utf8_lossy(&out.stderr));
-        return Err(format!(
-            "rr3-ctl {cmd} 意外失败（exit {}）:\n{s}",
-            out.status
-        ));
+        return Err(rr3_ctl_fail(cmd, &out.status, &out.stderr, s));
     }
     if !s.ends_with('\n') {
         s.push('\n');
     }
     Ok(s)
+}
+
+/// 非预期失败收口：stdout 原样 + stderr 续接，点名退出码。
+fn rr3_ctl_fail(
+    cmd: &str,
+    status: &std::process::ExitStatus,
+    stderr: &[u8],
+    mut s: String,
+) -> String {
+    s.push_str(&String::from_utf8_lossy(stderr));
+    format!("rr3-ctl {cmd} 意外失败（exit {status}）:\n{s}")
 }
 
 /// 预期会失败的那一类（ota）：把 (退出码, 合并输出) 带回来由调用方裁定
