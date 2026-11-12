@@ -12,8 +12,6 @@
 //! 一次性兜底）与块设备/挂载探测。这些是板上件，随板上批次过 cfg(linux) 门
 //! 实装；标准语义与板上核对项清单登记在 `base/ota/partition-layout.md` 增补段。
 
-use std::fs;
-use std::io;
 use std::path::Path;
 
 use crate::Rr3Slot;
@@ -130,29 +128,29 @@ pub fn rr3_bootconf_factory(text: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// 原子落盘：同目录临时文件写满 → 文件 fsync → rename 覆盖（同文件系统内
-/// rename 原子，断电只得到旧文本或新文本，不存在半截文件）→ 父目录 fsync
-/// （尽力而为）——POSIX 下 rename 的目录项持久化要目录 fsync 才成立，不刷
-/// 则掉电可能"引导标志看似已翻、重启回旧槽"。vfat（boot 分区）rename 原子
-/// 性弱于 unix 文件系统的残余风险仍列 partition-layout.md 板上核对项。
-pub fn rr3_bootconf_store(path: &Path, text: &str) -> io::Result<()> {
+/// 唯一临时名：引导配置的写入方可来自多个进程（运维 CLI 与面板 OTA 并发），
+/// 固定名会让两个写共用同一中间态——后建者截断前者，前者的 rename 会把后者的
+/// 半截文本提成正式引导配置（设备起不来）。pid + 进程内自增保证互不干扰，
+/// 跨进程不共享任何状态。崩溃残留（唯一名）不自动清扫：每次最多 1KB，人工可见；
+/// 清扫需判定"另一进程是否仍活跃"，属跨进程锁面，收益不足。
+fn rr3_bootconf_tmp(path: &Path) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("extlinux.conf");
-    let tmp = dir.join(format!(".{name}.rr3-ota-tmp"));
-    {
-        use std::io::Write as _;
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-    }
-    fs::rename(&tmp, path)?;
-    if let Ok(d) = fs::File::open(dir) {
-        let _ = d.sync_all();
-    }
-    Ok(())
+    dir.join(format!(".{name}.rr3-ota-tmp.{}.{n}", std::process::id()))
+}
+
+/// 原子落盘（委托 [`rr_ipc::persist::rr3_store_perm`] 单点：tmp 独占建 → 写全量 →
+/// 文件 fsync → rename → 父目录 fsync）。引导配置与其它落盘面同一原子序，不再
+/// 自持一份"读改写"实现。注：vfat（boot 分区）rename 原子性弱于 unix 文件系统的
+/// 残余风险仍列 partition-layout.md 板上核对项。
+pub fn rr3_bootconf_store(path: &Path, text: &str) -> Result<(), String> {
+    rr_ipc::persist::rr3_store_perm(path, &rr3_bootconf_tmp(path), text.as_bytes(), 0o644)
 }
 
 /// 从内核 cmdline 文本解析运行槽（板上"当前槽"的权威来源——extlinux.conf
@@ -178,13 +176,14 @@ pub fn rr3_cmdline_slot(text: &str) -> Result<Rr3Slot, String> {
 
 /// 读 /proc/cmdline（linux 门：/proc 是 linux 特有面；解析逻辑全平台可测）
 #[cfg(target_os = "linux")]
-pub fn rr3_cmdline_read() -> io::Result<String> {
-    fs::read_to_string("/proc/cmdline")
+pub fn rr3_cmdline_read() -> std::io::Result<String> {
+    std::fs::read_to_string("/proc/cmdline")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
 
     /// 真工件逐字对拍基准（buildroot 板级目录的那份；文件挪动即编译失败）
@@ -304,6 +303,33 @@ mod tests {
         assert!(
             leftovers.is_empty(),
             "临时文件必须被 rename 消耗: {leftovers:?}"
+        );
+    }
+
+    /// 并发落盘（B46）：两个写方各自持一份完整文本同时落盘，最终文件只许是
+    /// **其中一份完整文本**——固定 tmp 名时后建者会截断前者、前者的 rename 把
+    /// 后者半截文本提成正式引导配置（设备起不来）。
+    #[test]
+    fn concurrent_stores_never_promote_a_partial_file() {
+        let tmp = TmpDir::new("race");
+        let path = tmp.0.join("extlinux.conf");
+        fs::write(&path, "root=LABEL=rr_a").expect("写初版");
+        let a = rr3_bootconf_switch(&fs::read_to_string(&path).unwrap(), Rr3Slot::SlotB).unwrap();
+        let b = rr3_bootconf_factory(&fs::read_to_string(&path).unwrap()).unwrap();
+        let (p1, a2) = (path.clone(), a.clone());
+        let h = std::thread::spawn(move || {
+            for _ in 0..64 {
+                rr3_bootconf_store(&p1, &a2).expect("并发写 A");
+            }
+        });
+        for _ in 0..64 {
+            rr3_bootconf_store(&path, &b).expect("并发写 B");
+        }
+        h.join().expect("并发写线程");
+        let got = fs::read_to_string(&path).unwrap();
+        assert!(
+            got == a || got == b,
+            "并发落盘只许得到两份完整文本之一: {got:?}"
         );
     }
 
