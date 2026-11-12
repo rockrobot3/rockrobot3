@@ -286,95 +286,98 @@ impl Dispatcher for Rr3SenseDispatcher {
 }
 
 impl Rr3SenseDispatcher {
-    /// VAD 边沿拍（B9 自 on_tick 拆出）：判向、发布、反射环与点头蓄势同址。
-    /// 判据全量入参（门控/DoA/时序）不变，拆面只动形状不动语义。
+    /// VAD 边沿拍（B9 自 on_tick 拆出；本轮按沿分臂）：本函数只做门判与编排，
+    /// 发布/判向/反射环各自成件。判据全量入参（门控/DoA/时序）不变。
     fn rr3_vad_beat(
         &mut self,
         pcm: &Rr3PcmStream,
         now: Instant,
         bus: &BusHandle,
     ) -> Result<(), String> {
-        if let Some(edge) = self.vad.rr3_vad_feed(&pcm.samples) {
-            // 拍时刻入参（`now`）统一用作门判基准：本拍内不二次读时钟，
-            // 门判/节点计划与 tick 同一条时间轴（espidf 档计划面不落，
-            // 旧版此处另取 `Instant::now()` 让 `now` 在该档成死参）。
-            let gate_open = self.tts_gate.rr3_tts_gate_open(now);
-            match edge {
-                // 播放期门控（B批 b2）：门开只弃 onset 发布（扬声器自声不再触发
-                // 听声转头），VAD 状态机照喂不中断；offset 与门无关照发
-                Rr3VadEdge::Onset { .. } if gate_open => {
-                    bus.counter_bump(RR3_VAD_ONSET_GATED_KEY, 1);
-                    eprintln!("播放期门控: onset 弃发布（TTS 回声中）");
-                }
-                edge => {
-                    // DoA 判向（B批 b3b）：仅 onset 判（offset 静音无方向可判），
-                    // 判向窗 = ring 线性化快照（最近 window_ms 的原始立体声）交
-                    // 机制纯函数；单声道链路 ring 不分配 → 恒 None，事件体不带 doa
-                    // （与旧版等价）。onset 时 VAD 已证 ≥min_speech_ms 连续有声帧，
-                    // 能量门对 onset 路径恒过——门防的是非 onset 直调与全静音窗
-                    let doa = match (&edge, self.doa_ring.as_ref()) {
-                        (Rr3VadEdge::Onset { .. }, Some(ring)) => {
-                            let snap = ring.rr3_ring_snapshot();
-                            capture::rr3_doa_fix(&snap, self.cfg.audio.channels, &self.doa_cfg)
-                        }
-                        _ => None,
-                    };
-                    let doa_deg = doa.map(|d| d.deg);
-                    bus.publish(
-                        vad::RR3_VAD_START_TOPIC,
-                        rpc::rr3_vad_event_body(
-                            self.seq,
-                            edge,
-                            doa.map(|d| rpc::rr3_doa_field(&d)),
-                        ),
-                    )?;
-                    // 反射环（B批 b2 起 onset 判向；2026-10-21 EMI 避让改判停后
-                    // 动作）：onset 实际发布后才换算存 pending（被门弃掉的 onset
-                    // 不进 pending），判停（语音采集完毕）才实际下发——激磁尖峰
-                    // 不落采集窗。判向缺档（单声道/静音帧）自然无目标，机制面零
-                    // 特判；判据全量入参（gate_open 此臂恒 false），纯函数独立可单测
-                    match &edge {
-                        Rr3VadEdge::Onset { .. } => {
-                            if let Some(deg) = doa_deg {
-                                self.pending_pan = rr3_reflex_pan(
-                                    self.cfg.reflex.enable,
-                                    self.cfg.reflex.deadband_deg,
-                                    deg,
-                                    gate_open,
-                                );
-                            }
-                        }
-                        Rr3VadEdge::Offset { .. } => {
-                            // 旁路下发是宿主桥档行为（Rr3PeriphCmd，rr-hal backend
-                            // 宿主档门）：espidf 档 pending 自然落空，take 即弃，
-                            // 不进旁路（批N8 件三）。
-                            #[cfg(any(target_os = "linux", target_os = "macos"))]
-                            if let Some(target) = self.pending_pan.take() {
-                                if let Some(tx) = self.cmd_tx.as_ref() {
-                                    tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
-                                    bus.counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
-                                    eprintln!("反射环: 判停后下发 pan={target}°");
-                                    // 点头示意（0.0.8 批）：pan 之后接一手势，
-                                    // 时序量全在 config；nod_deg=0 时计划为 None
-                                    self.pending_nod = rr3_reflex_nod_plan(
-                                        RR3_REFLEX_TILT_CENTER_DEG,
-                                        self.cfg.reflex.nod_deg,
-                                        self.cfg.reflex.nod_delay_ms,
-                                        self.cfg.reflex.nod_hold_ms,
-                                        now,
-                                    );
-                                }
-                            }
-                            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-                            {
-                                self.pending_pan.take();
-                            }
-                        }
-                    }
-                }
-            }
+        let Some(edge) = self.vad.rr3_vad_feed(&pcm.samples) else {
+            return Ok(());
+        };
+        // 拍时刻入参（`now`）统一用作门判基准：本拍内不二次读时钟，
+        // 门判/节点计划与 tick 同一条时间轴（espidf 档计划面不落，
+        // 旧版此处另取 `Instant::now()` 让 `now` 在该档成死参）。
+        let gate_open = self.tts_gate.rr3_tts_gate_open(now);
+        // 播放期门控（B批 b2）：门开只弃 onset 发布（扬声器自声不再触发听声
+        // 转头），VAD 状态机照喂不中断；offset 与门无关照发
+        if matches!(edge, Rr3VadEdge::Onset { .. }) && gate_open {
+            bus.counter_bump(RR3_VAD_ONSET_GATED_KEY, 1);
+            eprintln!("播放期门控: onset 弃发布（TTS 回声中）");
+            return Ok(());
+        }
+        let doa_deg = self.rr3_vad_publish(&edge, bus)?;
+        match edge {
+            Rr3VadEdge::Onset { .. } => self.rr3_vad_pan(doa_deg, gate_open),
+            Rr3VadEdge::Offset { .. } => self.rr3_vad_stop(now, bus),
         }
         Ok(())
+    }
+
+    /// 边沿发布（两沿同址）：DoA 仅 onset 判（offset 静音无方向可判），判向窗 =
+    /// ring 线性化快照（最近 window_ms 的原始立体声）交机制纯函数；单声道链路
+    /// ring 不分配 → 恒 None，事件体不带 doa（与旧版等价）。onset 时 VAD 已证
+    /// ≥min_speech_ms 连续有声帧，能量门对 onset 路径恒过。返回判向角供反射环。
+    fn rr3_vad_publish(
+        &mut self,
+        edge: &Rr3VadEdge,
+        bus: &BusHandle,
+    ) -> Result<Option<i32>, String> {
+        let doa = match (edge, self.doa_ring.as_ref()) {
+            (Rr3VadEdge::Onset { .. }, Some(ring)) => {
+                let snap = ring.rr3_ring_snapshot();
+                capture::rr3_doa_fix(&snap, self.cfg.audio.channels, &self.doa_cfg)
+            }
+            _ => None,
+        };
+        bus.publish(
+            vad::RR3_VAD_START_TOPIC,
+            rpc::rr3_vad_event_body(self.seq, *edge, doa.map(|d| rpc::rr3_doa_field(&d))),
+        )?;
+        Ok(doa.map(|d| d.deg))
+    }
+
+    /// onset 反射环（B批 b2 起 onset 判向；2026-10-21 EMI 避让改判停后动作）：
+    /// 实际发布后才换算存 pending（被门弃掉的 onset 不进 pending），判停才
+    /// 实际下发——激磁尖峰不落采集窗。判向缺档自然无目标，机制面零特判。
+    fn rr3_vad_pan(&mut self, doa_deg: Option<i32>, gate_open: bool) {
+        let Some(deg) = doa_deg else { return };
+        self.pending_pan = rr3_reflex_pan(
+            self.cfg.reflex.enable,
+            self.cfg.reflex.deadband_deg,
+            deg,
+            gate_open,
+        );
+    }
+
+    /// offset 反射环：判停（语音采集完毕）下发 pending pan 并排 nod 手势。旁路
+    /// 下发是宿主桥档行为（Rr3PeriphCmd，rr-hal backend 宿主档门）；espidf 档
+    /// pending 自然落空，take 即弃，不进旁路（批N8 件三）。
+    fn rr3_vad_stop(&mut self, now: Instant, bus: &BusHandle) {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if let Some(target) = self.pending_pan.take() {
+            if let Some(tx) = self.cmd_tx.as_ref() {
+                tx.rr3_cmd_push(Rr3PeriphCmd::ServoPan(target));
+                bus.counter_bump(RR3_REFLEX_PAN_CMDS_KEY, 1);
+                eprintln!("反射环: 判停后下发 pan={target}°");
+                // 点头示意（0.0.8 批）：pan 之后接一手势，
+                // 时序量全在 config；nod_deg=0 时计划为 None
+                self.pending_nod = rr3_reflex_nod_plan(
+                    RR3_REFLEX_TILT_CENTER_DEG,
+                    self.cfg.reflex.nod_deg,
+                    self.cfg.reflex.nod_delay_ms,
+                    self.cfg.reflex.nod_hold_ms,
+                    now,
+                );
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            self.pending_pan.take();
+            let _ = (now, bus);
+        }
     }
 }
 
