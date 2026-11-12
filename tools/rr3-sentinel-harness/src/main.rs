@@ -168,19 +168,18 @@ fn parity_expect_json(o: &Rr3ParityOutputs) -> Value {
 
 /// 板回 JSON 逐字段点名差分：返回首个不匹配/缺字段的说明（全等则 None）。
 fn parity_first_diff(board: &Value, expect: &Value) -> Option<String> {
-    for key in ["v", "rate", "low", "sat", "plan", "wsat", "rhz", "clamp"] {
-        let b = board.get(key);
-        let e = expect.get(key);
-        match (b, e) {
-            (Some(b), Some(e)) if b == e => {}
-            (Some(b), Some(e)) => {
-                return Some(format!("字段 {key} 不一致：板={b} 期望/宿主={e}"));
-            }
-            (None, _) => return Some(format!("板回缺字段 {key}")),
-            (_, None) => return Some(format!("期望侧缺字段 {key}（形状漂移？）")),
-        }
+    ["v", "rate", "low", "sat", "plan", "wsat", "rhz", "clamp"]
+        .iter()
+        .find_map(|key| parity_key_diff(board, expect, key))
+}
+
+/// 单字段差异（`None` = 该字段一致）。
+fn parity_key_diff(board: &Value, expect: &Value, key: &str) -> Option<String> {
+    match (board.get(key), expect.get(key)) {
+        (Some(b), Some(e)) => (b != e).then(|| format!("字段 {key} 不一致：板={b} 期望/宿主={e}")),
+        (None, _) => Some(format!("板回缺字段 {key}")),
+        (_, None) => Some(format!("期望侧缺字段 {key}（形状漂移？）")),
     }
-    None
 }
 
 /// ⑦ 直方图（10ms 桶）紧凑串：`[200-209ms)=12` 按桶升序空格连接。
@@ -428,44 +427,55 @@ fn rr3_timing(intervals: &[u128], beats: usize, hb_ms: u64) -> (String, u32) {
     } else {
         intervals.iter().sum::<u128>() / intervals.len() as u128
     };
-    if !verdict(
+    fail += rr3_tally(
         intervals.len() == beats,
         &format!("② 心跳 {beats} 拍全收全应"),
-    ) {
-        fail += 1;
-    }
-    if !verdict(
+    );
+    fail += rr3_tally(
         max_dt <= HEARTBEAT_STALL_FAIL_MS,
         &format!(
             "② 心跳无停摆（最大间隔 {max_dt}ms ≤ {HEARTBEAT_STALL_FAIL_MS}ms；平均 {avg_dt}ms）"
         ),
-    ) {
-        fail += 1;
-    }
+    );
     let hist = histogram_text(intervals);
     println!("② 直方图(10ms桶): {hist}");
+    fail += rr3_beat_window(intervals, hb_ms, max_dt as i64, avg_dt as i64);
+    (hist, fail)
+}
+
+/// 单条判据计数：不过即记 1（打印与文案仍归 `verdict` 单点）。
+fn rr3_tally(ok: bool, msg: &str) -> u32 {
+    if verdict(ok, msg) {
+        0
+    } else {
+        1
+    }
+}
+
+/// ⑦ 间隔对表：区间与均值窗判定，返回 FAIL 计数。
+fn rr3_beat_window(intervals: &[u128], hb_ms: u64, max_i: i64, avg_i: i64) -> u32 {
     let hb = hb_ms as i64;
     let floor_ms = hb - BEAT_FLOOR_SLACK_MS;
     let ceil_ms = hb + 100;
     let avg_floor = hb - BEAT_AVG_FLOOR_SLACK_MS;
     let avg_ceil = hb + BEAT_AVG_CEIL_SLACK_MS;
     let min_i = intervals.iter().copied().min().unwrap_or(0) as i64;
-    let max_i = max_dt as i64;
-    let avg_i = avg_dt as i64;
-    if !verdict(
-        !intervals.is_empty()
-            && min_i >= floor_ms
-            && max_i <= ceil_ms
-            && avg_i >= avg_floor
-            && avg_i <= avg_ceil,
+    let in_window = !intervals.is_empty()
+        && [
+            min_i >= floor_ms,
+            max_i <= ceil_ms,
+            avg_i >= avg_floor,
+            avg_i <= avg_ceil,
+        ]
+        .iter()
+        .all(|ok| *ok);
+    rr3_tally(
+        in_window,
         &format!(
             "⑦ 间隔对表（[{floor_ms},{ceil_ms}]ms 均值[{avg_floor},{avg_ceil}]ms；\
              实测 min={min_i} avg={avg_i} max={max_i}，名义 hb={hb}ms）"
         ),
-    ) {
-        fail += 1;
-    }
-    (hist, fail)
+    )
 }
 
 /// round-trip 单帧判定（命中 / 心跳跳过 / 终态失败；失败已在此点名）。
@@ -478,24 +488,36 @@ enum RtFrame {
 /// 单帧 verdict：echo 语义判据＝哨兵把 params 原样回带（result.echo == 发出的 params）。
 fn rt_verdict(frame: Rr3Frame) -> RtFrame {
     match parse_upstream(frame) {
-        Ok((Rr3PayloadType::Response, id, _, _, v)) if id == ROUND_TRIP_ID => RtFrame::Hit {
-            echo_ok: v.pointer("/result/echo/args/ping").and_then(Value::as_str) == Some("pong")
-                && v.pointer("/result/echo/topic").and_then(Value::as_str)
-                    == Some("rr3-sentinel/diag/probe"),
-        },
-        Ok((Rr3PayloadType::Request, _, _, _, _)) => RtFrame::Skip, // 心跳并发到达，跳过再等
-        Ok((ty, id, m, _, _)) => {
-            eprintln!(
-                "FAIL  round-trip 应答形状错: {ty:?}/id={id}/{}",
-                m.as_deref().unwrap_or("-")
-            );
-            RtFrame::Fail
-        }
+        Ok((ty, id, m, _, v)) => rt_frame_kind(ty, id, m.as_deref(), &v),
         Err(e) => {
             eprintln!("FAIL  round-trip 应答畸形: {e}");
             RtFrame::Fail
         }
     }
+}
+
+/// 已还原帧归类：命中 / 心跳跳过 / 形状错点名失败。
+fn rt_frame_kind(ty: Rr3PayloadType, id: u64, m: Option<&str>, v: &Value) -> RtFrame {
+    if ty == Rr3PayloadType::Response && id == ROUND_TRIP_ID {
+        return RtFrame::Hit {
+            echo_ok: rt_echo_ok(v),
+        };
+    }
+    if ty == Rr3PayloadType::Request {
+        return RtFrame::Skip; // 心跳并发到达，跳过再等
+    }
+    eprintln!(
+        "FAIL  round-trip 应答形状错: {ty:?}/id={id}/{}",
+        m.unwrap_or("-")
+    );
+    RtFrame::Fail
+}
+
+/// echo 对拍：ping 回 `pong` 且 topic 原样。
+fn rt_echo_ok(v: &Value) -> bool {
+    v.pointer("/result/echo/args/ping").and_then(Value::as_str) == Some("pong")
+        && v.pointer("/result/echo/topic").and_then(Value::as_str)
+            == Some("rr3-sentinel/diag/probe")
 }
 
 /// 收一帧并还原；读/还原失败点名后回 `None`。

@@ -94,23 +94,39 @@ pub fn rr3_sim_args_parse(args: &[String]) -> Result<Rr3SimArgs, String> {
     };
     let mut i = 0;
     while i < args.len() {
-        let flag = args[i].as_str();
-        match flag {
-            "--keep" => a.keep = true,
-            "--brain" => a.brain = true,
-            "--chain" => a.chain = true,
-            "--socket" | "--repo" | "--rrd" | "--sim-peer" | "--rrctl" | "--sense"
-            | "--interact" | "--act" | "--brain-bin" | "--profile" | "--audio-backend"
-            | "--sink-backend" | "--brain-cloud" | "--brain-base-url" => {
-                rr3_sim_arg_set(&mut a, flag, rr3_sim_arg_value(args, i, flag)?);
-                i += 1;
-            }
-            other => return Err(rr3_sim_unknown(other)),
-        }
-        i += 1;
+        i = rr3_sim_arg_step(&mut a, args, i)?;
     }
     rr3_sim_args_check(&a)?;
     Ok(a)
+}
+
+/// 单步解析：返回下一项下标（布尔旗标推进 1、取值旗标推进 2）。
+fn rr3_sim_arg_step(a: &mut Rr3SimArgs, args: &[String], i: usize) -> Result<usize, String> {
+    let flag = args[i].as_str();
+    if rr3_sim_arg_switch(a, flag) {
+        return Ok(i + 1);
+    }
+    if !rr3_sim_arg_takes(flag) {
+        return Err(rr3_sim_unknown(flag));
+    }
+    rr3_sim_arg_set(a, flag, rr3_sim_arg_value(args, i, flag)?);
+    Ok(i + 2)
+}
+
+/// 无值开关（布尔旗标）落位；`true` = 本项已被消费。
+fn rr3_sim_arg_switch(a: &mut Rr3SimArgs, flag: &str) -> bool {
+    match RR3_SIM_BOOLS.iter().find(|(f, _)| *f == flag) {
+        Some((_, set)) => {
+            set(a);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 取值旗标判定（含 `--rrctl`：落位兜底归 `rr3_sim_arg_set`）。
+fn rr3_sim_arg_takes(flag: &str) -> bool {
+    flag == "--rrctl" || RR3_SIM_ARG_SETS.iter().any(|(f, _)| *f == flag)
 }
 
 /// 取值旗标的下一项：缺项/疑似开关即点名（脚本工具的第一错法是静默吃掉下一旗标）。
@@ -149,6 +165,14 @@ const RR3_SIM_ARG_SETS: [(&str, Rr3SimSet); 13] = [
     ("--sink-backend", |a, v| a.sink_backend = Some(v)),
     ("--brain-cloud", |a, v| a.brain_cloud = Some(v)),
     ("--brain-base-url", |a, v| a.brain_base_url = Some(v)),
+];
+
+/// 无值开关（布尔旗标）落位表。
+type Rr3SimFlag = fn(&mut Rr3SimArgs);
+const RR3_SIM_BOOLS: [(&str, Rr3SimFlag); 3] = [
+    ("--keep", |a| a.keep = true),
+    ("--brain", |a| a.brain = true),
+    ("--chain", |a| a.chain = true),
 ];
 
 fn rr3_sim_unknown(other: &str) -> String {

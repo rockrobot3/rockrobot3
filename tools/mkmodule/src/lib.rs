@@ -176,9 +176,6 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
 
     // 先写临时目录，manifest 校验通过后再 rename，避免留下半成品模块
     let staging = out_root.join(format!(".staging-{id}"));
-    let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(staging.join("src"))?;
-
     let files: Vec<(&str, String)> = vec![
         ("module.toml", module_toml(&id)),
         ("config.toml", config_toml(&id)),
@@ -186,16 +183,23 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
         ("src/main.rs", main_rs(&id)),
         ("README.md", readme(&id)),
     ];
-    rr3_mkmod_write(&staging, &files)?;
-
-    let report = rr_registry::rr3_manifest_gate(&staging.join("module.toml"));
-    if !report.ok() {
-        let _ = std::fs::remove_dir_all(&staging);
-        return Err(Rr3MkmodError::Manifest(report.errors));
-    }
+    rr3_mkmod_stage(&staging, &files)?;
 
     std::fs::rename(&staging, &target)?;
     Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+}
+
+/// 临时树落盘 + manifest 回灌门（不合规即整体丢弃，不留半成品）。
+fn rr3_mkmod_stage(staging: &Path, files: &[(&str, String)]) -> Result<(), Rr3MkmodError> {
+    let _ = std::fs::remove_dir_all(staging);
+    std::fs::create_dir_all(staging.join("src"))?;
+    rr3_mkmod_write(staging, files)?;
+    let report = rr_registry::rr3_manifest_gate(&staging.join("module.toml"));
+    if !report.ok() {
+        let _ = std::fs::remove_dir_all(staging);
+        return Err(Rr3MkmodError::Manifest(report.errors));
+    }
+    Ok(())
 }
 
 /// 把生成物逐件落到 staging 树（相对路径带子目录时按需建父目录）。
@@ -321,21 +325,37 @@ pub fn rr3_mkmod_gen_atom(
     }
 
     let staging = out_root.join(format!(".staging-{stem}"));
-    let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging)?;
+    let files = rr3_mkmod_atom_files(&stem, slot);
+    rr3_mkmod_atom_write(&staging, &files)?;
+    rr3_mkmod_atom_gate(&staging, &files)?;
 
-    let files: Vec<(String, String)> = vec![
-        ("atom.toml".into(), atom_manifest_toml(&stem, slot)),
-        (format!("{stem}.rs"), atom_entry_rs(&stem, slot)),
-        ("mech.rs".into(), atom_mech_rs(&stem)),
-        ("assemble.toml".into(), atom_assemble_toml(&stem)),
-        ("private.rs".into(), atom_private_rs(&stem)),
-    ];
-    for (rel, body) in &files {
+    std::fs::rename(&staging, &target)?;
+    Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+}
+
+/// 五件套内容（相对路径 + 正文），顺序即落盘顺序。
+fn rr3_mkmod_atom_files(stem: &str, slot: &str) -> Vec<(String, String)> {
+    vec![
+        ("atom.toml".into(), atom_manifest_toml(stem, slot)),
+        (format!("{stem}.rs"), atom_entry_rs(stem, slot)),
+        ("mech.rs".into(), atom_mech_rs(stem)),
+        ("assemble.toml".into(), atom_assemble_toml(stem)),
+        ("private.rs".into(), atom_private_rs(stem)),
+    ]
+}
+
+/// staging 目录就绪并逐件写入（旧 staging 先清空）。
+fn rr3_mkmod_atom_write(staging: &Path, files: &[(String, String)]) -> Result<(), Rr3MkmodError> {
+    let _ = std::fs::remove_dir_all(staging);
+    std::fs::create_dir_all(staging)?;
+    for (rel, body) in files {
         std::fs::write(staging.join(rel), body)?;
     }
+    Ok(())
+}
 
-    // 回灌校验（②b 同款纪律）：manifest + 装配清单生成即自检，不合规即中止。
+/// 回灌校验（②b 同款纪律）：manifest + 装配清单生成即自检，不合规即中止。
+fn rr3_mkmod_atom_gate(staging: &Path, files: &[(String, String)]) -> Result<(), Rr3MkmodError> {
     // G4：装配清单走 rr-registry 形状级真值（模板空数组必过；填实后坏形当场听见）。
     let mut errs = rr_registry::rr3_atom_gate(&staging.join("atom.toml"));
     let assemble_body = files
@@ -347,12 +367,10 @@ pub fn rr3_mkmod_gen_atom(
         errs.extend(asm_errs);
     }
     if !errs.is_empty() {
-        let _ = std::fs::remove_dir_all(&staging);
+        let _ = std::fs::remove_dir_all(staging);
         return Err(Rr3MkmodError::Manifest(errs));
     }
-
-    std::fs::rename(&staging, &target)?;
-    Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+    Ok(())
 }
 
 #[cfg(test)]

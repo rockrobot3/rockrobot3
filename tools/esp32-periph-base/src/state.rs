@@ -261,14 +261,7 @@ impl PeriphState {
     fn anim_glance(&mut self, now: u64, style: &mut EyeStyle) {
         if self.glance_until_ms == 0 {
             if now >= self.next_glance_ms {
-                self.glance_dx = (esp_random_u32() % 13) as i16 - 6;
-                self.glance_dy = match esp_random_u32() % 3 {
-                    0 => -2,
-                    1 => 2,
-                    _ => 0,
-                };
-                self.glance_until_ms = now + 500 + (esp_random_u32() % 400) as u64;
-                self.next_glance_ms = now + 4000 + (esp_random_u32() % 4000) as u64;
+                self.glance_start(now);
             }
         } else if now >= self.glance_until_ms {
             self.glance_until_ms = 0;
@@ -276,6 +269,18 @@ impl PeriphState {
             style.dx += self.glance_dx;
             style.dy += self.glance_dy;
         }
+    }
+
+    /// 起扫：随机偏移与起止时刻（±6px/±2 行，500–900ms，下次 4–8s）。
+    fn glance_start(&mut self, now: u64) {
+        self.glance_dx = (esp_random_u32() % 13) as i16 - 6;
+        self.glance_dy = match esp_random_u32() % 3 {
+            0 => -2,
+            1 => 2,
+            _ => 0,
+        };
+        self.glance_until_ms = now + 500 + (esp_random_u32() % 400) as u64;
+        self.next_glance_ms = now + 4000 + (esp_random_u32() % 4000) as u64;
     }
 
     /// 云台自主扫摆决策（**纯计算**，60ms 一拍）：pan 每 2 拍走 2°（≈16.7°/s，
@@ -378,30 +383,45 @@ pub(crate) fn push_job(bus: &Arc<Mutex<Bus>>, job: Job) {
 
 /// 折叠判定（规则 1/2）：`true` = 本件已并入既有作业，不再入队。
 fn rr3_job_fold(jobs: &mut VecDeque<Job>, job: &Job) -> bool {
-    if matches!(job, Job::RedrawOled) && jobs.iter().any(|j| matches!(j, Job::RedrawOled)) {
+    if rr3_job_redraw_dup(jobs, job) {
         return true;
     }
+    rr3_job_move_merge(jobs, job)
+}
+
+/// 规则 1：队列里已有一件 `RedrawOled` 即折叠本件。
+fn rr3_job_redraw_dup(jobs: &VecDeque<Job>, job: &Job) -> bool {
+    matches!(job, Job::RedrawOled) && jobs.iter().any(|j| matches!(j, Job::RedrawOled))
+}
+
+/// 规则 2：同形 `Move`（被动的轴集合相同）就地改写目标角。
+fn rr3_job_move_merge(jobs: &mut VecDeque<Job>, job: &Job) -> bool {
     let Job::Move { pan, tilt } = job else {
         return false;
     };
-    let same_shape = |j: &Job| match j {
+    let Some(queued) = jobs.iter_mut().find(|j| rr3_job_same_shape(j, pan, tilt)) else {
+        return false;
+    };
+    rr3_job_move_take(queued, *pan, *tilt);
+    true
+}
+
+/// 同形判定：被动的轴集合（`is_some` 形状）相同。
+fn rr3_job_same_shape(j: &Job, pan: &Option<u32>, tilt: &Option<u32>) -> bool {
+    match j {
         Job::Move { pan: qp, tilt: qt } => {
             qp.is_some() == pan.is_some() && qt.is_some() == tilt.is_some()
         }
         _ => false,
-    };
-    let Some(queued) = jobs.iter_mut().find(|j| same_shape(j)) else {
-        return false;
-    };
-    if let Job::Move { pan: qp, tilt: qt } = queued {
-        if pan.is_some() {
-            *qp = *pan;
-        }
-        if tilt.is_some() {
-            *qt = *tilt;
-        }
     }
-    true
+}
+
+/// 目标角改写：新目标为 `Some` 的轴才覆盖（与旧实现同义）。
+fn rr3_job_move_take(queued: &mut Job, pan: Option<u32>, tilt: Option<u32>) {
+    if let Job::Move { pan: qp, tilt: qt } = queued {
+        *qp = pan.or(*qp);
+        *qt = tilt.or(*qt);
+    }
 }
 
 /// 容量判定（规则 3）：`true` = 有位置可入队；`false` = 本件拒收（已计 job_dropped）。

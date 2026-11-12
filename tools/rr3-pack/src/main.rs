@@ -120,10 +120,30 @@ fn pack_arg_value(
     i: usize,
     flag: &str,
 ) -> Result<usize, String> {
+    if let Some(dst) = pack_arg_path(cfg, flag) {
+        return pack_arg_set(dst, args, i, flag);
+    }
+    pack_arg_text(cfg, args, i, flag)
+}
+
+/// 路径族选项的目标位（三件；非路径族回 `None`）。
+fn pack_arg_path<'a>(cfg: &'a mut Rr3PackConfig, flag: &str) -> Option<&'a mut PathBuf> {
     match flag {
-        "--payload" => pack_arg_set(&mut cfg.payload, args, i, flag),
-        "--repo" => pack_arg_set(&mut cfg.repo, args, i, flag),
-        "--out" => pack_arg_set(&mut cfg.out, args, i, flag),
+        "--payload" => Some(&mut cfg.payload),
+        "--repo" => Some(&mut cfg.repo),
+        "--out" => Some(&mut cfg.out),
+        _ => None,
+    }
+}
+
+/// 文本族选项落位（两件 + 未知选项拒收）。
+fn pack_arg_text(
+    cfg: &mut Rr3PackConfig,
+    args: &[String],
+    i: usize,
+    flag: &str,
+) -> Result<usize, String> {
+    match flag {
         "--profile" => pack_arg_set(&mut cfg.profile, args, i, flag),
         "--arch" => pack_arg_set(&mut cfg.arch, args, i, flag),
         other => Err(format!("未知选项 {other}\n{}", usage())),
@@ -268,6 +288,14 @@ fn rr3_module_names(payload: &Path) -> Result<Vec<String>, String> {
 /// 路径 = `--out` 值加 `.stage` 后缀（与产物相邻，清掉即重来，不污染别处）。
 pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     let (names, profile_name, truth) = rr3_stage_check(cfg)?;
+    let (stage, root) = rr3_stage_root(cfg)?;
+    rr3_stage_skeleton(cfg, &stage, &root, &profile_name, &truth)?;
+    rr3_stage_modules(cfg, &root, &names)?;
+    Ok(stage)
+}
+
+/// staging 目录（`--out` 加 `.stage` 后缀）与安装根；旧树先清空。
+fn rr3_stage_root(cfg: &Rr3PackConfig) -> Result<(PathBuf, PathBuf), String> {
     let stage = cfg.out.with_file_name(format!(
         "{}.stage",
         cfg.out
@@ -277,14 +305,28 @@ pub fn rr3_stage(cfg: &Rr3PackConfig) -> Result<PathBuf, String> {
     ));
     rr3_stage_reset(&stage)?;
     let root = stage.join("usr/lib/rockrobot3");
-    rr3_stage_layout(cfg, &stage)?;
-    rr3_stage_unit(&stage, &profile_name)?;
-    rr3_stage_truth(cfg, &root, &truth)?;
-    // ---- 逐模块：manifest（entry 改写）+ 产物（rust bin / python pkg+shim）+ config（仓内源真值）----
-    for name in &names {
-        rr3_stage_module(cfg, &root, name)?;
+    Ok((stage, root))
+}
+
+/// deb 骨架：目录/入口产物 + systemd 单元 + 数据真值。
+fn rr3_stage_skeleton(
+    cfg: &Rr3PackConfig,
+    stage: &Path,
+    root: &Path,
+    profile_name: &str,
+    truth: &rrd::profile::Rr3RuntimeTruthSet,
+) -> Result<(), String> {
+    rr3_stage_layout(cfg, stage)?;
+    rr3_stage_unit(stage, profile_name)?;
+    rr3_stage_truth(cfg, root, truth)
+}
+
+/// 逐模块：manifest（entry 改写）+ 产物 + config。
+fn rr3_stage_modules(cfg: &Rr3PackConfig, root: &Path, names: &[String]) -> Result<(), String> {
+    for name in names {
+        rr3_stage_module(cfg, root, name)?;
     }
-    Ok(stage)
+    Ok(())
 }
 
 /// staging 目录复用语义：**先清空再装配**。上一次失败或模块下线留下的文件不能
@@ -319,6 +361,16 @@ fn rr3_stage_check(
 
 /// deb 骨架：目录 + 两个入口产物 + control/postinst。
 fn rr3_stage_layout(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
+    rr3_stage_dirs(stage)?;
+    fs::copy(cfg.payload.join("rrd"), stage.join("usr/bin/rrd"))
+        .map_err(|e| format!("复制 rrd 失败: {e}"))?;
+    fs::copy(cfg.payload.join("rr3-ctl"), stage.join("usr/bin/rr3-ctl"))
+        .map_err(|e| format!("复制 rr3-ctl 失败: {e}"))?;
+    rr3_stage_debian(cfg, stage)
+}
+
+/// 骨架目录三件。
+fn rr3_stage_dirs(stage: &Path) -> Result<(), String> {
     for d in [
         stage.join("DEBIAN"),
         stage.join("usr/bin"),
@@ -326,10 +378,11 @@ fn rr3_stage_layout(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
     ] {
         fs::create_dir_all(&d).map_err(|e| format!("建目录 {} 失败: {e}", d.display()))?;
     }
-    fs::copy(cfg.payload.join("rrd"), stage.join("usr/bin/rrd"))
-        .map_err(|e| format!("复制 rrd 失败: {e}"))?;
-    fs::copy(cfg.payload.join("rr3-ctl"), stage.join("usr/bin/rr3-ctl"))
-        .map_err(|e| format!("复制 rr3-ctl 失败: {e}"))?;
+    Ok(())
+}
+
+/// control + postinst（postinst 落位即置可执行位）。
+fn rr3_stage_debian(cfg: &Rr3PackConfig, stage: &Path) -> Result<(), String> {
     fs::write(stage.join("DEBIAN/control"), rr3_control_text(&cfg.arch))
         .map_err(|e| format!("写 control 失败: {e}"))?;
     let postinst = stage.join("DEBIAN/postinst");
@@ -367,18 +420,30 @@ fn rr3_stage_truth(
     truth: &rrd::profile::Rr3RuntimeTruthSet,
 ) -> Result<(), String> {
     for rel in &truth.files {
-        let dst = root.join(rel);
-        let parent = dst
-            .parent()
-            .ok_or_else(|| format!("清单相对路径异常（无父目录）: {rel}"))?;
-        fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
-        fs::copy(cfg.repo.join(rel), &dst).map_err(|e| format!("复制 {rel} 失败: {e}"))?;
+        rr3_stage_one_file(cfg, root, rel)?;
     }
     for rel in &truth.dirs {
-        let src = cfg.repo.join(rel);
-        if src.is_dir() {
-            rr3_copy_dir(&src, &root.join(rel))?;
-        }
+        rr3_stage_one_dir(cfg, root, rel)?;
+    }
+    Ok(())
+}
+
+/// 单册落位：父目录就绪后按清单相对路径同名复制。
+fn rr3_stage_one_file(cfg: &Rr3PackConfig, root: &Path, rel: &str) -> Result<(), String> {
+    let dst = root.join(rel);
+    let parent = dst
+        .parent()
+        .ok_or_else(|| format!("清单相对路径异常（无父目录）: {rel}"))?;
+    fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
+    fs::copy(cfg.repo.join(rel), &dst).map_err(|e| format!("复制 {rel} 失败: {e}"))?;
+    Ok(())
+}
+
+/// 单目录落位：在则整目录随装（轴档案目录缺席合法跳过）。
+fn rr3_stage_one_dir(cfg: &Rr3PackConfig, root: &Path, rel: &str) -> Result<(), String> {
+    let src = cfg.repo.join(rel);
+    if src.is_dir() {
+        rr3_copy_dir(&src, &root.join(rel))?;
     }
     Ok(())
 }
@@ -443,15 +508,31 @@ fn rr3_stage_manifest(
 ) -> Result<(rrd::manifest::Rr3ManifestFacts, PathBuf), String> {
     let (text, facts) = rr3_mod_facts(mod_src, name)?;
     fs::create_dir_all(staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
-    let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
-    let rewritten = rr3_manifest_rewrite(&text, &installed_entry, &facts.entry, name)?;
-    fs::write(staged.join("module.toml"), rewritten)
-        .map_err(|e| format!("写 {}/module.toml 失败: {e}", staged.display()))?;
+    rr3_stage_toml_write(staged, name, &text, &facts)?;
     let entry_path = staged.join(&facts.entry);
+    rr3_stage_entry_dir(&entry_path)?;
+    Ok((facts, entry_path))
+}
+
+/// manifest 改写（entry 装机绝对化）后落位。
+fn rr3_stage_toml_write(
+    staged: &Path,
+    name: &str,
+    text: &str,
+    facts: &rrd::manifest::Rr3ManifestFacts,
+) -> Result<(), String> {
+    let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
+    let rewritten = rr3_manifest_rewrite(text, &installed_entry, &facts.entry, name)?;
+    fs::write(staged.join("module.toml"), rewritten)
+        .map_err(|e| format!("写 {}/module.toml 失败: {e}", staged.display()))
+}
+
+/// entry 父目录就绪（入口可能带子目录）。
+fn rr3_stage_entry_dir(entry_path: &Path) -> Result<(), String> {
     if let Some(parent) = entry_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
     }
-    Ok((facts, entry_path))
+    Ok(())
 }
 
 /// 读取并校验注入产物 manifest：文件在否 → 解析 → 目录名与 manifest.name 一致
@@ -547,22 +628,39 @@ fn rr3_stage_bin(mod_src: &Path, entry_path: &Path, name: &str) -> Result<(), St
 /// 在位即纯副本——缺省不是错误，模块形态允许无原子件/无编排）。
 fn rr3_stage_opt(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), String> {
     let repo_mod = cfg.repo.join("modules").join(name);
-    let config_esp32_src = repo_mod.join("config-esp32.toml");
-    if config_esp32_src.is_file() {
-        fs::copy(&config_esp32_src, staged.join("config-esp32.toml"))
-            .map_err(|e| format!("复制 {name} config-esp32.toml 失败: {e}"))?;
+    rr3_stage_opt_file(
+        &repo_mod.join("config-esp32.toml"),
+        &staged.join("config-esp32.toml"),
+        &format!("复制 {name} config-esp32.toml 失败"),
+    )?;
+    rr3_stage_opt_file(
+        &repo_mod.join("composite.toml"),
+        &staged.join("composite.toml"),
+        &format!("复制 {name} composite.toml 失败"),
+    )?;
+    rr3_stage_opt_tree(
+        &repo_mod.join("atoms"),
+        &staged.join("atoms"),
+        &format!("复制 {name} atoms 树失败"),
+    )
+}
+
+/// 单件可选随装：来源在位即原样复制，缺席合法跳过。
+fn rr3_stage_opt_file(src: &Path, dst: &Path, ctx: &str) -> Result<(), String> {
+    if !src.is_file() {
+        return Ok(());
     }
-    let composite_src = repo_mod.join("composite.toml");
-    if composite_src.is_file() {
-        fs::copy(&composite_src, staged.join("composite.toml"))
-            .map_err(|e| format!("复制 {name} composite.toml 失败: {e}"))?;
+    fs::copy(src, dst)
+        .map(|_| ())
+        .map_err(|e| format!("{ctx}: {e}"))
+}
+
+/// 单目录可选随装：来源在位即整树复制，缺席合法跳过。
+fn rr3_stage_opt_tree(src: &Path, dst: &Path, ctx: &str) -> Result<(), String> {
+    if !src.is_dir() {
+        return Ok(());
     }
-    let atoms_src = repo_mod.join("atoms");
-    if atoms_src.is_dir() {
-        rr3_copy_dir(&atoms_src, &staged.join("atoms"))
-            .map_err(|e| format!("复制 {name} atoms 树失败: {e}"))?;
-    }
-    Ok(())
+    rr3_copy_dir(src, dst).map_err(|e| format!("{ctx}: {e}"))
 }
 
 /// 发版维护者标识缺省值：`.invalid` 是 RFC 2606 保留域，源码仓不写个人/单位

@@ -204,7 +204,7 @@ fn rr3_brain_finish(
     a: &Rr3SimArgs,
     children: Vec<(String, Child)>,
     outcome: Result<(), String>,
-    mut report: String,
+    report: String,
 ) -> Result<String, String> {
     let cloud_label = if ctx.cloud_real {
         "云端 real"
@@ -216,34 +216,45 @@ fn rr3_brain_finish(
         ctx.audio_backend, ctx.sink_backend
     );
     if a.keep {
-        println!(
-            "rr3-sim --brain: --keep 保留现场：socket={} workdir={}",
-            ctx.fix.socket.display(),
-            ctx.fix.workdir.display()
-        );
-        println!(
-            "rr3-sim --brain: 手动收尾：kill 上述进程；rm -rf {:?}",
-            ctx.fix.workdir
-        );
-        return match outcome {
-            Ok(()) => {
-                report.push_str(&format!(
-                    "\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}：{chain_label}）\n"
-                ));
-                Ok(report)
-            }
-            Err(e) => Err(e),
-        };
+        rr3_brain_keep(ctx);
+        let ok_line =
+            format!("\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}：{chain_label}）\n");
+        return rr3_brain_done(outcome, report, &ctx.fix.workdir, true, &ok_line);
     }
     rr3_teardown_procs(children, &ctx.fix.socket);
+    let ok_line =
+        format!("\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}）：{chain_label}\n");
+    rr3_brain_done(outcome, report, &ctx.fix.workdir, false, &ok_line)
+}
+
+/// `--keep`：打印现场保留与手动收尾指引（不杀子进程）。
+fn rr3_brain_keep(ctx: &Rr3BrainCtx) {
+    println!(
+        "rr3-sim --brain: --keep 保留现场：socket={} workdir={}",
+        ctx.fix.socket.display(),
+        ctx.fix.workdir.display()
+    );
+    println!(
+        "rr3-sim --brain: 手动收尾：kill 上述进程；rm -rf {:?}",
+        ctx.fix.workdir
+    );
+}
+
+/// 收尾结论：成功追加结论文本；失败带回现场位置（`--keep` 不追加日志路径）。
+fn rr3_brain_done(
+    outcome: Result<(), String>,
+    mut report: String,
+    workdir: &Path,
+    keep: bool,
+    ok_line: &str,
+) -> Result<String, String> {
     match outcome {
         Ok(()) => {
-            report.push_str(&format!(
-                "\n=== 演练结论 ===\n全语音对话闭环 OK（{cloud_label}）：{chain_label}\n"
-            ));
+            report.push_str(ok_line);
             Ok(report)
         }
-        Err(e) => Err(format!("{e}\n（现场日志在 {:?}）", ctx.fix.workdir)),
+        Err(e) if keep => Err(e),
+        Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
     }
 }
 
@@ -306,24 +317,11 @@ fn rr3_brain_fix(
     cloud_real: bool,
     base_url: &str,
 ) -> Result<Rr3BrainFix, String> {
-    let workdir = match &a.socket {
-        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
-        None => std::env::temp_dir().join(format!("rr3-sim-brain-{}", std::process::id())),
-    };
-    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
-    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
-    let _ = std::fs::remove_file(&socket);
+    let (workdir, socket) = rr3_brain_place(a)?;
 
     let brain_cfg = workdir.join("config.toml");
-    std::fs::write(&brain_cfg, rr3_brain_cfg_text(cloud_real, base_url))
-        .map_err(|e| format!("写演练 config 失败: {e}"))?;
-    // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
-    // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
-    // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
     let interact_cfg = workdir.join("interact-config.toml");
-    std::fs::write(&interact_cfg, crate::chain::rr3_chain_itact_cfg())
-        .map_err(|e| format!("写 interact config 失败: {e}"))?;
-
+    rr3_brain_cfg_write(&brain_cfg, &interact_cfg, cloud_real, base_url)?;
     for (name, text) in rr3_brain_manifests(&bins.sense, &bins.interact, &bins.brain) {
         let p = workdir.join(format!("{name}.toml"));
         std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
@@ -340,6 +338,34 @@ fn rr3_brain_fix(
         m_interact,
         m_brain,
     })
+}
+
+/// 演练工作目录与套接字：`--socket` 显式给定则同目录，否则临时目录按进程号。
+fn rr3_brain_place(a: &Rr3SimArgs) -> Result<(PathBuf, PathBuf), String> {
+    let workdir = match &a.socket {
+        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        None => std::env::temp_dir().join(format!("rr3-sim-brain-{}", std::process::id())),
+    };
+    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
+    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
+    let _ = std::fs::remove_file(&socket);
+    Ok((workdir, socket))
+}
+
+/// 演练 config 两份：brain 云档 + interact 独立 config。
+fn rr3_brain_cfg_write(
+    brain_cfg: &Path,
+    interact_cfg: &Path,
+    cloud_real: bool,
+    base_url: &str,
+) -> Result<(), String> {
+    std::fs::write(brain_cfg, rr3_brain_cfg_text(cloud_real, base_url))
+        .map_err(|e| format!("写演练 config 失败: {e}"))?;
+    // interact 是同一 workdir 里的外部进程：其 manifest 平铺 workdir，缺省 config.toml
+    // 会撞上面 brain 的 config.toml（同目录同名）——I-11 起 interact 必读 config，
+    // 故写独立 interact-config.toml 并 env 指定（与 chain.rs 同一纪律）。
+    std::fs::write(interact_cfg, crate::chain::rr3_chain_itact_cfg())
+        .map_err(|e| format!("写 interact config 失败: {e}"))
 }
 
 /// 演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
