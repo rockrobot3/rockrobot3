@@ -264,7 +264,8 @@ fn rr3_ops_target(
 ) -> Result<(&'static str, String), String> {
     let section = if group == "dialog" {
         "dialog"
-    } else if group == "asr" || group == "tts" || slot == "timeout_s" || rr3_no_model_rows(brain) {
+    } else if group == "asr" || group == "tts" || slot == "timeout_s" || rr3_no_model_rows(brain)
+    {
         // asr/tts/timeout 恒写 cloud；llm 组无模型行时写行无处落，同落 cloud
         "cloud"
     } else {

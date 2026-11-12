@@ -412,11 +412,16 @@ impl Rr3BrainDispatcher {
             return;
         }
         let started = Instant::now();
-        match self
+        let res = self
             .clients
             .tts
-            .rr3_synthesize(&self.cfg.wake.ack, RR3_TTS_SAMPLE_RATE)
-        {
+            .rr3_synthesize(&self.cfg.wake.ack, RR3_TTS_SAMPLE_RATE);
+        self.rr3_ack_take(res, started);
+    }
+
+    /// 预合成结果落账：非空 PCM 入表，空/失败只留痕（首轮按需重试）。
+    fn rr3_ack_take(&mut self, res: Result<Vec<u8>, String>, started: Instant) {
+        match res {
             Ok(pcm) if !pcm.is_empty() => {
                 eprintln!(
                     "唤醒应答预合成就绪: {}ms pcm_bytes={}",

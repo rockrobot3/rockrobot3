@@ -435,16 +435,7 @@ fn rr3_py_list_repr(items: &[String]) -> String {
 pub(crate) fn rr3_brain_cfg_parse(text: &str) -> Result<Rr3BrainCfg, String> {
     let doc: Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
     let cloud_timeout_s = rr3_cloud_check(&doc)?;
-    // 模型行实效（fail-closed 同 boot：active 数≠1 等在连接注册之后仍拒不放行）
-    let model = rr3_brain_model_row(&doc)?;
-    // bus 段可选（Python cfg["rr3-brain"].get("bus", {}) 同形状）；
-    // connect_timeout_s 已随迁移退役（批N32 增补裁定 4），本面不读
-    let call_timeout_s = rr3_bus_timeout_of(&doc)?;
-    // dialog 段必填（Python dialog_cfg = cfg["rr3-brain"]["dialog"] 直取同义），
-    // 键可选缺省 8000；<=0 与 ops/set 写臂同一判据拒（起轮即过期/永不过期都是误配）
-    let max_utterance_ms = rr3_dialog_ms_of(&doc)?;
-    // 唤醒词段可选（缺段 = 关闭门控；见 [`rr3_wake_cfg_of`]）
-    let wake = rr3_wake_cfg_of(&doc)?;
+    let (model, call_timeout_s, max_utterance_ms, wake) = rr3_cfg_proj(&doc)?;
     Ok(Rr3BrainCfg {
         doc,
         model,
@@ -454,6 +445,21 @@ pub(crate) fn rr3_brain_cfg_parse(text: &str) -> Result<Rr3BrainCfg, String> {
         wake,
         config_path: None,
     })
+}
+
+/// boot 投影：模型行实效 + bus/dialog/wake 三段（cloud 段由 [`rr3_cloud_check`] 核）。
+fn rr3_cfg_proj(doc: &Value) -> Result<(Rr3ModelRow, f64, i64, Rr3WakeCfg), String> {
+    // 模型行实效（fail-closed 同 boot：active 数≠1 等在连接注册之后仍拒不放行）
+    let model = rr3_brain_model_row(doc)?;
+    // bus 段可选（Python cfg["rr3-brain"].get("bus", {}) 同形状）；
+    // connect_timeout_s 已随迁移退役（批N32 增补裁定 4），本面不读
+    let call_timeout_s = rr3_bus_timeout_of(doc)?;
+    // dialog 段必填（Python dialog_cfg = cfg["rr3-brain"]["dialog"] 直取同义），
+    // 键可选缺省 8000；<=0 与 ops/set 写臂同一判据拒（起轮即过期/永不过期都是误配）
+    let max_utterance_ms = rr3_dialog_ms_of(doc)?;
+    // 唤醒词段可选（缺段 = 关闭门控；见 [`rr3_wake_cfg_of`]）
+    let wake = rr3_wake_cfg_of(doc)?;
+    Ok((model, call_timeout_s, max_utterance_ms, wake))
 }
 
 /// cloud 段必填四键 + timeout_s（Python cfg["rr3-brain"]["cloud"] 直取同义；

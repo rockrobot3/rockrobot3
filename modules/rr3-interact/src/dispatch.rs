@@ -189,6 +189,23 @@ impl Rr3InteractDispatcher {
             }
         }
     }
+
+    /// 面板动作排空（face/beep 主循环串行代执行后回执）。
+    fn rr3_act_drain(&mut self) {
+        while let Ok((action, tx)) = self.act_rx.try_recv() {
+            let result = match action {
+                Rr3PanelAction::Beep => {
+                    rr3_beep_play(self.sink.as_mut(), self.cfg.player.volume_pct)
+                }
+                Rr3PanelAction::Face { expression } => self
+                    .face
+                    .rr3_face_set(&expression, &self.cfg.face.non_pointable)
+                    .map(|(c, p)| rpc::rr3_face_result(c, p))
+                    .map_err(|e| rpc::rr3_face_err_text(&e, &self.cfg.face.non_pointable)),
+            };
+            let _ = tx.send(result);
+        }
+    }
 }
 
 /// 弃帧留痕闸门（纯函数，单测钉域）：第 1 帧必留（"什么时候开始坏的"），其后
@@ -244,19 +261,7 @@ impl Dispatcher for Rr3InteractDispatcher {
     /// 内存记录，真件档 MAX7219 SPI 换后端零编排改动。显示是妆面件，draw
     /// 失败只 eprintln 不退出，同 led worker 口径）。
     fn on_tick(&mut self, now: Instant, _bus: &BusHandle) -> Result<(), String> {
-        while let Ok((action, tx)) = self.act_rx.try_recv() {
-            let result = match action {
-                Rr3PanelAction::Beep => {
-                    rr3_beep_play(self.sink.as_mut(), self.cfg.player.volume_pct)
-                }
-                Rr3PanelAction::Face { expression } => self
-                    .face
-                    .rr3_face_set(&expression, &self.cfg.face.non_pointable)
-                    .map(|(c, p)| rpc::rr3_face_result(c, p))
-                    .map_err(|e| rpc::rr3_face_err_text(&e, &self.cfg.face.non_pointable)),
-            };
-            let _ = tx.send(result);
-        }
+        self.rr3_act_drain();
         if self.face_tick_at.elapsed() >= Duration::from_millis(self.cfg.face.face_tick_ms) {
             // 节拍锚重置用 serve 传入的 now 实参（同拍时刻，帧节拍不可观测）
             self.face_tick_at = now;

@@ -401,22 +401,26 @@ impl Rr3LlmClient {
         }
         match &self.key_ref {
             None => rr3_cloud_api_key(), // 旧路径：通用环境变量键
-            Some(r) => {
-                if let Some(var) = r.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
-                    let val = std::env::var(var).unwrap_or_default();
-                    let val = val.trim();
-                    if val.is_empty() {
-                        return Err(format!("缺少环境变量 {var}（模型行 key_ref={r}）"));
-                    }
-                    Ok(val.to_string())
-                } else {
-                    rr3_secrets_get(r)
-                        .ok_or_else(|| format!("secrets 缺引用 {r}（面板填 key 后下一轮生效）"))
-                }
-            }
+            Some(r) => rr3_ref_key(r),
         }
     }
+}
 
+/// 裸名 ref 取值：`env:VAR` → 环境变量；裸名 → secrets 文件（每次调用现读）。
+fn rr3_ref_key(r: &str) -> Result<String, String> {
+    if let Some(var) = r.strip_prefix(RR3_KEY_REF_ENV_PREFIX) {
+        let val = std::env::var(var).unwrap_or_default();
+        let val = val.trim();
+        if val.is_empty() {
+            return Err(format!("缺少环境变量 {var}（模型行 key_ref={r}）"));
+        }
+        Ok(val.to_string())
+    } else {
+        rr3_secrets_get(r).ok_or_else(|| format!("secrets 缺引用 {r}（面板填 key 后下一轮生效）"))
+    }
+}
+
+impl Rr3LlmClient {
     /// 连通性测试（面板"测连"，ADR-0023）：mock 档不触网直接成功（`mock:true`、
     /// 0ms）；real 档发一条 `max_tokens=1` 的最小补全，只判 HTTP 2xx 与耗时。
     /// **不写对话历史**——测连是只读探针，不带任何会话副作用。
@@ -589,6 +593,11 @@ impl Rr3TtsClient {
         if std::env::var(RR3_TTS_BACKEND_ENV).as_deref() == Ok(RR3_TTS_BACKEND_MAC_SAY) {
             return rr3_say_pcm(text, sample_rate);
         }
+        self.rr3_tts_cloud(text, sample_rate)
+    }
+
+    /// 真云 TTS 一跳：请求体装配 + 有界重试，只回 200 应答体。
+    fn rr3_tts_cloud(&self, text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
         let key = rr3_cloud_api_key()?;
         let body = json!({
             "model": self.model,

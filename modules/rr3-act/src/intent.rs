@@ -119,13 +119,7 @@ fn rr3_item_gate<'a>(
     item: &'a Value,
     open_topics: &[String],
 ) -> Result<(&'a str, &'a Value), String> {
-    let topic = item
-        .get("topic")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("动作缺 topic（字符串），收到 {item}"))?;
-    let args = item
-        .get("args")
-        .ok_or_else(|| format!("动作缺 args（对象），收到 {item}"))?;
+    let (topic, args) = rr3_item_shape(item)?;
     if !EXPOSED.contains(&topic) {
         return Err(format!("越权拒执行 {topic}：不在本模块 exposes"));
     }
@@ -137,6 +131,18 @@ fn rr3_item_gate<'a>(
             rr3_open_topics_join(open_topics)
         ));
     }
+    Ok((topic, args))
+}
+
+/// 单条动作的形状裁决：`topic` 须为字符串、`args` 须在场。
+fn rr3_item_shape(item: &Value) -> Result<(&str, &Value), String> {
+    let topic = item
+        .get("topic")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("动作缺 topic（字符串），收到 {item}"))?;
+    let args = item
+        .get("args")
+        .ok_or_else(|| format!("动作缺 args（对象），收到 {item}"))?;
     Ok((topic, args))
 }
 

@@ -40,6 +40,13 @@ pub(crate) fn rr3_pcm_best_channel(samples: &[i16], channels: u8) -> Vec<i16> {
         return Vec::new();
     }
     // 整数能量比较（sum_sq 足够，免开方）；并列取最小通道号（确定性）
+    let sums = rr3_chan_energy(samples, ch, frames);
+    let best = rr3_chan_pick(&sums);
+    (0..frames).map(|i| samples[i * ch + best]).collect()
+}
+
+/// 各通道整数能量（`sum_sq`，免开方）。
+fn rr3_chan_energy(samples: &[i16], ch: usize, frames: usize) -> Vec<i64> {
     let mut sums = vec![0i64; ch];
     for i in 0..frames {
         for (c, sum) in sums.iter_mut().enumerate() {
@@ -47,13 +54,18 @@ pub(crate) fn rr3_pcm_best_channel(samples: &[i16], channels: u8) -> Vec<i16> {
             *sum += v * v;
         }
     }
+    sums
+}
+
+/// 能量最高的通道号（并列取最小通道号）。
+fn rr3_chan_pick(sums: &[i64]) -> usize {
     let mut best = 0usize;
-    for c in 1..ch {
+    for c in 1..sums.len() {
         if sums[c] > sums[best] {
             best = c;
         }
     }
-    (0..frames).map(|i| samples[i * ch + best]).collect()
+    best
 }
 
 // ---------- DoA 粗判向（B批 b3b：TDOA 时域互相关；批F2 ILD 版被 b3a 实证替换） ----------
@@ -229,24 +241,28 @@ fn rr3_doa_frame_loud(fr: &[i16], ch: usize, gate_sq: u64) -> bool {
 fn rr3_doa_cc(samples: &[i16], ch: usize, frames: usize, half: usize) -> Vec<i64> {
     let mut cc = vec![0i64; 2 * half + 1];
     for (i, slot) in cc.iter_mut().enumerate() {
-        let d = i as i64 - half as i64;
-        let mut acc: i64 = 0;
-        if d >= 0 {
-            let dd = d as usize;
-            if dd < frames {
-                for t in 0..frames - dd {
-                    acc += samples[t * ch] as i64 * samples[(t + dd) * ch + 1] as i64;
-                }
-            }
-        } else {
-            let off = (-d) as usize;
-            for t in off..frames {
-                acc += samples[t * ch] as i64 * samples[(t - off) * ch + 1] as i64;
-            }
-        }
-        *slot = acc;
+        *slot = rr3_doa_lag(samples, ch, frames, i as i64 - half as i64);
     }
     cc
+}
+
+/// 单个 lag 的互相关：`Σ_t R[t]·L[t+d]`（d 正负两向；d 越出帧数即 0）。
+fn rr3_doa_lag(samples: &[i16], ch: usize, frames: usize, d: i64) -> i64 {
+    let mut acc: i64 = 0;
+    if d >= 0 {
+        let dd = d as usize;
+        if dd < frames {
+            for t in 0..frames - dd {
+                acc += samples[t * ch] as i64 * samples[(t + dd) * ch + 1] as i64;
+            }
+        }
+    } else {
+        let off = (-d) as usize;
+        for t in off..frames {
+            acc += samples[t * ch] as i64 * samples[(t - off) * ch + 1] as i64;
+        }
+    }
+    acc
 }
 
 /// 峰值 + 整数抛物线亚样本（B9 自 doa_fix 抽出，Q7）：峰值搜索限物理域
