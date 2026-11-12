@@ -387,12 +387,16 @@ fn rr3_cfg_u64(
     let Some(v) = sect.get(key) else {
         return Ok(());
     };
+    *out = rr3_cfg_nonneg(v, key, sect_name)?;
+    Ok(())
+}
+
+/// 非负整数域（类型错/负数逐条点名，段名进文案便于定位）。
+fn rr3_cfg_nonneg(v: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String> {
     let t = v
         .as_integer()
         .ok_or_else(|| format!("[rr3-interact.{sect_name}] {key} 必须是整数，收到 {v}"))?;
-    *out =
-        u64::try_from(t).map_err(|_| format!("[rr3-interact.{sect_name}] {key} 不得为负: {t}"))?;
-    Ok(())
+    u64::try_from(t).map_err(|_| format!("[rr3-interact.{sect_name}] {key} 不得为负: {t}"))
 }
 
 #[cfg(test)]

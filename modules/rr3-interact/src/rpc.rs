@@ -102,13 +102,7 @@ fn rr3_tts_play_out(
     // 才起播、流完整未攒满也播）；流式化（增补轮五批E）后 buffered < total 的
     // 真分支接管起播时机。fail-closed：不过即拒（拒因点名水位）。
     let total_ms = samples.len() as u64 * 1000 / player::RR3_TTS_SAMPLE_RATE as u64;
-    if !player::rr3_prebuffer_ready(total_ms, total_ms, player.prebuffer_ms) {
-        bus.counter_bump("tts_play_reject", 1);
-        return Err(format!(
-            "起播水位未达：缓冲 {total_ms}ms < 水位 {}ms（prebuffer_ms），弃播",
-            player.prebuffer_ms
-        ));
-    }
+    rr3_play_gate(bus, total_ms, player.prebuffer_ms)?;
     // 播放增益（MC-2）：config 注入的 volume_pct 整型饱和缩放，播放前就地生效
     player::rr3_tts_apply_gain(samples, player.volume_pct);
     let suspended = face.rr3_face_begin_talk();
@@ -126,6 +120,18 @@ fn rr3_tts_play_out(
     }
     bus.counter_bump("tts_play_ok", 1);
     Ok((played_ms, suspended))
+}
+
+/// 起播水位判据（MC-2）：对账通过即缓冲完整，`buffered == total` 是对账蕴含的
+/// 架构事实；不过即拒（拒因点名水位，fail-closed）。
+fn rr3_play_gate(bus: &BusHandle, total_ms: u64, prebuffer_ms: u64) -> Result<(), String> {
+    if !player::rr3_prebuffer_ready(total_ms, total_ms, prebuffer_ms) {
+        bus.counter_bump("tts_play_reject", 1);
+        return Err(format!(
+            "起播水位未达：缓冲 {total_ms}ms < 水位 {prebuffer_ms}ms（prebuffer_ms），弃播"
+        ));
+    }
+    Ok(())
 }
 
 /// 表情点名：校验并切换，回 `{"expression","previous"}`。`non_pointable` = 本形态

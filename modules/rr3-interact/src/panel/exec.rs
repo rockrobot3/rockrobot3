@@ -242,17 +242,22 @@ fn rr3_exec_bus(shared: &Rr3PanelShared, topic: &str, args: &Value) -> Rr3PanelR
     match shared.bus.call(topic, args, shared.limits.call_timeout) {
         Ok(result) => {
             let (status, reason) = rr3_bus_reply_status(&result);
-            if status == 200 {
-                Rr3PanelReply::json(status, reason, json!({ "ok": true, "result": result }))
-            } else {
-                Rr3PanelReply::json(
-                    status,
-                    reason,
-                    json!({ "ok": false, "error": result["error"] }),
-                )
-            }
+            rr3_bus_reply(status, reason, &result)
         }
         Err(e) => Rr3PanelReply::json(502, "Bad Gateway", json!({ "ok": false, "error": e })),
+    }
+}
+
+/// 业务应答体：200 回 result，其余回 error（状态码由 [`rr3_bus_reply_status`] 定）。
+fn rr3_bus_reply(status: u16, reason: &'static str, result: &Value) -> Rr3PanelReply {
+    if status == 200 {
+        Rr3PanelReply::json(status, reason, json!({ "ok": true, "result": result }))
+    } else {
+        Rr3PanelReply::json(
+            status,
+            reason,
+            json!({ "ok": false, "error": result["error"] }),
+        )
     }
 }
 
@@ -481,12 +486,7 @@ fn rr3_leg_shape(
     empty_reason: &str,
 ) -> bool {
     if v.get("available").and_then(Value::as_bool) != Some(true) {
-        legs.push(json!({
-            "leg": format!("{prefix}/取数"), "pass": "fail",
-            "reason": v.get("reason").cloned().unwrap_or(json!(
-                format!("ctl.{prefix} 应答缺 available:true（数据漂移）")
-            )),
-        }));
+        rr3_leg_fail(legs, v, prefix);
         return false;
     }
     if checks_of(v).is_empty() {
@@ -496,6 +496,16 @@ fn rr3_leg_shape(
         }));
     }
     true
+}
+
+/// 取数腿失败（reason 缺省点名数据漂移）。
+fn rr3_leg_fail(legs: &mut Vec<Value>, v: &Value, prefix: &str) {
+    legs.push(json!({
+        "leg": format!("{prefix}/取数"), "pass": "fail",
+        "reason": v.get("reason").cloned().unwrap_or(json!(
+            format!("ctl.{prefix} 应答缺 available:true（数据漂移）")
+        )),
+    }));
 }
 
 /// 单条判据转述：pass → pass、not-applicable → n-a、其余未知 fail-closed 折 fail。
@@ -523,13 +533,18 @@ fn rr3_leg_pass(c: &Value) -> &'static str {
 /// fail，不能把“模块起了但坏了”误判成 host-only 的 n-a。
 fn rr3_act_enabled(bus_path: &str, timeout: Duration) -> Result<bool, String> {
     let v = rr3_ctl_query(bus_path, "rr3.ctl.status", 6, timeout)?;
-    let modules = v
-        .get("modules")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "ctl.status 应答缺 modules".to_string())?;
+    let modules = rr3_ctl_modules(&v)?;
     Ok(modules
         .iter()
         .any(|m| m.get("name").and_then(Value::as_str) == Some("rr3-act")))
+}
+
+/// ctl.status 应答的 modules 数组（缺键即点名）。
+fn rr3_ctl_modules(v: &Value) -> Result<&[Value], String> {
+    v.get("modules")
+        .and_then(Value::as_array)
+        .map(|m| m.as_slice())
+        .ok_or_else(|| "ctl.status 应答缺 modules".to_string())
 }
 
 /// relay 腿的期望态：能力缺席或配置显式 n-a 即 n-a；其余沿用预期表。

@@ -129,12 +129,18 @@ fn rr3_wake_cfg_of(doc: &Value) -> Result<Rr3WakeCfg, String> {
     let Some(w) = doc.get("rr3-brain").and_then(|b| b.get("wake")) else {
         return Ok(cfg);
     };
+    rr3_wake_apply(w, &mut cfg)?;
+    Ok(cfg)
+}
+
+/// 唤醒段逐键应用（键表顺序即应用序，坏值逐条点名）。
+fn rr3_wake_apply(w: &Value, cfg: &mut Rr3WakeCfg) -> Result<(), String> {
     for (key, set) in RR3_WAKE_SETS {
         if let Some(v) = w.get(key) {
-            set(&mut cfg, v)?;
+            set(cfg, v)?;
         }
     }
-    Ok(cfg)
+    Ok(())
 }
 
 /// 唤醒段四键 → 落位（未给键保留缺省；未知键维持原状不拒）。

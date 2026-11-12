@@ -326,17 +326,7 @@ impl Rr3AsrClient {
     /// 真云路径：multipart 一次装配、有界重试，只回 200 应答体。
     fn rr3_transcribe_net(&self, pcm: &[u8], sample_rate: u32) -> Result<Vec<u8>, String> {
         let key = rr3_cloud_api_key()?;
-        let boundary = rr3_boundary_hex();
-        let boosted = crate::asr::rr3_asr_boost_pcm(pcm, RR3_ASR_INPUT_GAIN);
-        let body = crate::asr::rr3_multipart_body(
-            &self.model,
-            &boosted,
-            sample_rate,
-            &boundary,
-            Some(RR3_ASR_LANGUAGE),
-        );
-        let url = format!("{}/v1/audio/transcriptions", self.base_url);
-        let content_type = format!("multipart/form-data; boundary={boundary}");
+        let (url, body, content_type) = self.rr3_asr_wire(pcm, sample_rate);
         // 有界重试（见 [`rr3_http_try`]）：multipart 体一次装配、多轮复用；
         // 只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
         rr3_http_try("识别接口", "ASR", || {
@@ -350,6 +340,22 @@ impl Rr3AsrClient {
                 },
             )
         })
+    }
+
+    /// 识别请求面装配：boundary/输入增益/WAV 体/URL/类型一次成型。
+    fn rr3_asr_wire(&self, pcm: &[u8], sample_rate: u32) -> (String, Vec<u8>, String) {
+        let boundary = rr3_boundary_hex();
+        let boosted = crate::asr::rr3_asr_boost_pcm(pcm, RR3_ASR_INPUT_GAIN);
+        let body = crate::asr::rr3_multipart_body(
+            &self.model,
+            &boosted,
+            sample_rate,
+            &boundary,
+            Some(RR3_ASR_LANGUAGE),
+        );
+        let url = format!("{}/v1/audio/transcriptions", self.base_url);
+        let content_type = format!("multipart/form-data; boundary={boundary}");
+        (url, body, content_type)
     }
 }
 
@@ -448,13 +454,7 @@ impl Rr3LlmClient {
     /// real 档最小补全：只判 HTTP 2xx 与耗时，不写对话历史。
     fn rr3_probe_real(&self) -> Result<(u64, bool), String> {
         let key = self.rr3_resolve_key()?;
-        let body = json!({
-            "model": self.model_id,
-            "messages": [{ "role": "user", "content": "ping" }],
-            "max_tokens": 1,
-        })
-        .to_string()
-        .into_bytes();
+        let body = rr3_ping_body(&self.model_id);
         let url = format!("{}/chat/completions", self.base_url);
         let started = std::time::Instant::now();
         let (status, _resp) = rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)?;
@@ -537,6 +537,17 @@ impl Rr3LlmClient {
     fn rr3_history(&self) -> &[(String, String)] {
         self.history.rr3_messages()
     }
+}
+
+/// 连通性测试的最小补全体（`ping` 一句、`max_tokens=1`）。
+fn rr3_ping_body(model: &str) -> Vec<u8> {
+    json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": "ping" }],
+        "max_tokens": 1,
+    })
+    .to_string()
+    .into_bytes()
 }
 
 /// 补全请求体：历史 → OpenAI 兼容 messages + 模型行 + 回复长度上限。
@@ -623,15 +634,7 @@ impl Rr3TtsClient {
     /// 真云 TTS 一跳：请求体装配 + 有界重试，只回 200 应答体。
     fn rr3_tts_cloud(&self, text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
         let key = rr3_cloud_api_key()?;
-        let body = json!({
-            "model": self.model,
-            "input": text,
-            "voice": crate::tts::rr3_tts_voice(&self.model),
-            "response_format": "pcm",
-            "sample_rate": sample_rate,
-        })
-        .to_string()
-        .into_bytes();
+        let body = self.rr3_tts_body(text, sample_rate);
         let url = format!("{}/v1/audio/speech", self.base_url);
         // 有界重试（与 ASR/LLM 同轨，见 [`rr3_http_try`]）：CosyVoice 读响应超时
         // 是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
@@ -647,6 +650,19 @@ impl Rr3TtsClient {
             )
         })
     }
+
+    /// 合成请求体（模型/文本/音色/格式/采样率）。
+    fn rr3_tts_body(&self, text: &str, sample_rate: u32) -> Vec<u8> {
+        json!({
+            "model": self.model,
+            "input": text,
+            "voice": crate::tts::rr3_tts_voice(&self.model),
+            "response_format": "pcm",
+            "sample_rate": sample_rate,
+        })
+        .to_string()
+        .into_bytes()
+    }
 }
 
 /// 宿主合成临时文件序号（同进程内多次合成不撞名）
@@ -658,21 +674,30 @@ static RR3_SAY_SEQ: AtomicU32 = AtomicU32::new(0);
 fn rr3_say_pcm(text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
     let seq = RR3_SAY_SEQ.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("rr3-tts-{}-{seq}.wav", std::process::id()));
-    let out = std::process::Command::new("/usr/bin/say")
-        .arg("-v")
-        .arg(RR3_SAY_VOICE)
-        .arg("--file-format=WAVE")
-        .arg(format!("--data-format=LEI16@{sample_rate}"))
-        .arg("-o")
-        .arg(&path)
-        .arg(text)
-        .output()
-        .map_err(|e| format!("宿主合成不可用（/usr/bin/say）: {e}"))?;
+    let out = rr3_say_run(text, sample_rate, &path)?;
     rr3_say_check(&path, &out)?;
     let bytes = std::fs::read(&path);
     let _ = std::fs::remove_file(&path);
     let bytes = bytes.map_err(|e| format!("读宿主合成 WAV 失败: {e}"))?;
     rr3_say_pcm_of(&bytes)
+}
+
+/// 宿主 `say` 一次执行（参数面：音色/波形格式/采样率/输出文件/文本）。
+fn rr3_say_run(
+    text: &str,
+    sample_rate: u32,
+    path: &std::path::Path,
+) -> Result<std::process::Output, String> {
+    std::process::Command::new("/usr/bin/say")
+        .arg("-v")
+        .arg(RR3_SAY_VOICE)
+        .arg("--file-format=WAVE")
+        .arg(format!("--data-format=LEI16@{sample_rate}"))
+        .arg("-o")
+        .arg(path)
+        .arg(text)
+        .output()
+        .map_err(|e| format!("宿主合成不可用（/usr/bin/say）: {e}"))
 }
 
 /// WAV data 块 → 裸 PCM（无 data 块点名）。

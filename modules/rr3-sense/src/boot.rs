@@ -46,11 +46,7 @@ pub(crate) type Rr3SenseProbe = (
 /// 构造 `Rr3PcmStream` 复用）。
 pub(crate) fn rr3_sense_probe(cfg: &Rr3SenseConfig) -> Result<Rr3SenseProbe, String> {
     let (mut source, cmd_tx, backend) = rr3_audio_source_cmd();
-    if cfg.reflex.enable && cmd_tx.is_none() {
-        eprintln!(
-            "rr3-sense: 反射环已启用但后端 {backend} 无命令旁路，转头指令无处可去（仅 esp32 档承载）"
-        );
-    }
+    rr3_reflex_warn(cfg, cmd_tx.is_some(), backend);
     // 采集配置按 config 真值开（R14：channels>1 即双麦期；默认 1 声道与旧硬编码逐点等价）
     let open_cfg = Rr3AudioCfg {
         sample_rate_hz: cfg.audio.sample_rate,
@@ -65,6 +61,15 @@ pub(crate) fn rr3_sense_probe(cfg: &Rr3SenseConfig) -> Result<Rr3SenseProbe, Str
         cfg.audio.sample_rate, cfg.audio.channels, cfg.audio.frame_ms
     );
     Ok((source, cmd_tx, backend, open_cfg))
+}
+
+/// 反射环启用的后端门：无命令旁路即点名（仅 esp32 档承载）。
+fn rr3_reflex_warn(cfg: &Rr3SenseConfig, has_cmd: bool, backend: &str) {
+    if cfg.reflex.enable && !has_cmd {
+        eprintln!(
+            "rr3-sense: 反射环已启用但后端 {backend} 无命令旁路，转头指令无处可去（仅 esp32 档承载）"
+        );
+    }
 }
 
 /// 模块全量运行期配置（自原 composite.rs 迁入，逐字）

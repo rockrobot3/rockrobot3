@@ -370,15 +370,7 @@ fn rr3_py_float_str(x: f64) -> String {
 /// 受影响客户端重建随迁移件三落（cloud 三客户端 Rust 化后接管）；dialog 参数
 /// 消费随迁移件四落。
 pub(crate) fn rr3_ops_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<Value, String> {
-    // Python str(args.get("group", "")) 同形状：缺键回落空串，键在则 str() coercion
-    let py_arg = |key: &str| -> String {
-        match args.get(key) {
-            Some(v) => rr3_py_str(v),
-            None => String::new(),
-        }
-    };
-    let group = py_arg("group");
-    let slot = py_arg("slot");
+    let (group, slot) = rr3_set_args(args);
     let (old, new) = rr3_ops_write(
         &mut cfg.doc,
         &group,
@@ -394,6 +386,17 @@ pub(crate) fn rr3_ops_set_arm(cfg: &mut Rr3BrainCfg, args: &Value) -> Result<Val
         "persisted": false,
         "applies": "live",
     }))
+}
+
+/// 取参：group/slot 按 Python `str(args.get(key, ""))` 同形状（缺键回落空串）。
+fn rr3_set_args(args: &Value) -> (String, String) {
+    let py_arg = |key: &str| -> String {
+        match args.get(key) {
+            Some(v) => rr3_py_str(v),
+            None => String::new(),
+        }
+    };
+    (py_arg("group"), py_arg("slot"))
 }
 
 /// 模型行实效重解析（ops/set llm 组写后供客户端重建消费——dispatch.rs 接线；

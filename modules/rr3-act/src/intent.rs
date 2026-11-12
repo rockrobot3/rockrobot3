@@ -186,12 +186,7 @@ fn rr3_servo_target(
     low_blocked: bool,
     axis: &Rr3ActAxisState,
 ) -> Result<u16, String> {
-    if low_blocked {
-        return Err(rr3_low_power_reject(RR3_SERVO_COMMAND_TOPIC));
-    }
-    // 拒动硬约束（§6，批N3 件三）：广播无 motion 键 = auto（保守缺省），
-    // 未标定轴被代码拒动——判据与 RPC 路同源（rr-hal-api 单真值点）
-    rr3_servo_gate(args, axis)?;
+    rr3_servo_ready(args, low_blocked, axis)?;
     let (angle, _move_ms) = rr3_servo_parse_args(args, servo_cfg)?;
     // 安全核钳位最后包一道（批D₃ 裁定 5）：与 RPC 路同口径，落角前不越行程
     Ok(rr_core::control::rr3_travel_clamp(
@@ -199,6 +194,15 @@ fn rr3_servo_target(
         servo_cfg.angle_min_deg,
         servo_cfg.angle_max_deg,
     ))
+}
+
+/// 闸门段：低电禁动 + 拒动硬约束（§6，批N3 件三——广播无 motion 键 = auto，
+/// 未标定轴被代码拒动；判据与 RPC 路同源 rr-hal-api 单真值点）。
+fn rr3_servo_ready(args: &Value, low_blocked: bool, axis: &Rr3ActAxisState) -> Result<(), String> {
+    if low_blocked {
+        return Err(rr3_low_power_reject(RR3_SERVO_COMMAND_TOPIC));
+    }
+    rr3_servo_gate(args, axis)
 }
 
 /// 落角段：HAL 写失败按业务性失败折拒因（同 RPC 路的后端写失败口径）。

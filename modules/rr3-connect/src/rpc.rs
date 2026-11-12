@@ -49,12 +49,17 @@ pub(crate) fn rr3_wifi_connect(
 ) -> Result<Value, String> {
     let (ssid, pass) = rr3_wifi_conn_args(args, min_pass_len)?;
     let st = dev.state().map_err(|e| format!("链路读数失败: {e}"))?;
-    store
-        .rr3_wifi_connect(&ssid, &pass)
-        .map_err(|e| format!("凭据持久化失败: {e}"))?;
+    rr3_wifi_persist(store, &ssid, &pass)?;
     prov.rr3_prov_connect(&ssid, &pass);
     eprintln!("wifi: connect ssid={ssid} mode=station（凭据由后端持久化，重启仍在册）");
     Ok(rr3_wifi_conn_result(&st, &ssid))
+}
+
+/// 凭据持久化：先过存储后端（失败即折 error、状态机不动，fail-closed）。
+fn rr3_wifi_persist(store: &dyn Rr3WifiStore, ssid: &str, pass: &str) -> Result<(), String> {
+    store
+        .rr3_wifi_connect(ssid, pass)
+        .map_err(|e| format!("凭据持久化失败: {e}"))
 }
 
 /// wifi/forget 点名：无参裁决 → **先真删后端配置**（失败折 error、状态机不动）
@@ -139,6 +144,11 @@ pub fn rr3_wifi_conn_args(args: &Value, min_pass_len: u64) -> Result<(String, St
         .map(str::trim)
         .unwrap_or("");
     let pass = args.get("pass").and_then(Value::as_str).unwrap_or("");
+    rr3_conn_gate(ssid, pass, min_pass_len)
+}
+
+/// 配网参数裁决（legacy 语义：ssid 非空、密码不少于下限）。
+fn rr3_conn_gate(ssid: &str, pass: &str, min_pass_len: u64) -> Result<(String, String), String> {
     if ssid.is_empty() {
         return Err("缺 ssid（非空字符串）".into());
     }

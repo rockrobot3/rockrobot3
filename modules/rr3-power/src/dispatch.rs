@@ -197,13 +197,24 @@ impl Rr3PowerDispatcher {
     fn rr3_rail_emit(&mut self, bus: &BusHandle, st: Rr3RailState) -> Result<(), String> {
         self.rail_seq += 1;
         let (tier, event) = rr3_rail_beat(&mut self.rail_judge, st, self.cfg.rail.max_age_ms);
+        self.rr3_rail_pub(bus, st, tier)?;
+        if event == Some(true) {
+            Self::rr3_rail_notice(bus, &st, tier);
+        }
+        Ok(())
+    }
+
+    /// 周期流发布（seq 已在调用方续号）。
+    fn rr3_rail_pub(
+        &self,
+        bus: &BusHandle,
+        st: Rr3RailState,
+        tier: Rr3RailTier,
+    ) -> Result<(), String> {
         bus.publish(
             RR3_RAIL_STATE_TOPIC,
             rr3_rail_state_body(self.rail_seq, st.mv, st.age_ms, tier.rr3_rail_tier_name()),
         )?;
-        if event == Some(true) {
-            Self::rr3_rail_notice(bus, &st, tier);
-        }
         Ok(())
     }
 
@@ -219,14 +230,16 @@ impl Rr3PowerDispatcher {
 
     /// 轨压读数：失败先记账再退（设备/传输级，上抛致命不装活着）。
     fn rr3_rail_state(&self, bus: &BusHandle) -> Result<Rr3RailState, String> {
-        match self.rail_dev.rr3_read(&self.cfg.rail.domain) {
-            Ok(st) => Ok(st),
-            Err(e) => {
-                bus.counter_bump("rail_read_fail", 1);
-                Err(format!("轨压读数失败（{}）: {e}", self.rail_backend))
-            }
-        }
+        self.rail_dev
+            .rr3_read(&self.cfg.rail.domain)
+            .map_err(|e| rr3_rail_read_err(bus, self.rail_backend, e))
     }
+}
+
+/// 轨压读失败文案（记账先行，退因与后端名同句）。
+fn rr3_rail_read_err(bus: &BusHandle, backend: &str, e: impl std::fmt::Display) -> String {
+    bus.counter_bump("rail_read_fail", 1);
+    format!("轨压读数失败（{backend}）: {e}")
 }
 
 // ---------- 载荷组装面（0.0.5 批I P-7：上移承载层，ADR-0019 修订 4） ----------
