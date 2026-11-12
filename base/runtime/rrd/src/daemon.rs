@@ -23,7 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rr_bus::{RR3_BROADCAST_DST_TASK, RR3_TASK_RRD};
 use rr_ipc::{opcode, rr3_body_encode, Rr3Frame, Rr3Header, Rr3TransportListener, Rr3UdsListener};
-use rr_registry::{rr3_plan_boot, Rr3DependsFacts, Rr3TopicSet};
+use rr_registry::{rr3_plan_boot, Rr3BootPlan, Rr3DependsFacts, Rr3TopicSet};
 use serde_json::json;
 
 use crate::cli::RrdConfig;
@@ -513,14 +513,19 @@ fn rr3_dash_opt(s: Option<&str>) -> &str {
     }
 }
 
-/// 装配链点名：缺格 / 缺角色 / 装配缺项 / 轴档案注记——四类分开，不混写
-fn rr3_boot_notes(boot: &crate::profile::Rr3ProfileBoot) {
-    rr3_note_missing(boot);
+/// 缺角色点名（校验②：该格缺能力，修装配单 [pins] 后重启解除）。
+fn rr3_note_roles(boot: &crate::profile::Rr3ProfileBoot) {
     for (slot, role) in &boot.role_missing {
         rr3_log(&format!(
             "缺角色 {slot}：角色 {role} 无 [pins] 绑定（校验②——该格缺能力，修装配单 [pins] 后重启解除）"
         ));
     }
+}
+
+/// 装配链点名：缺格 / 缺角色 / 装配缺项 / 轴档案注记——四类分开，不混写
+fn rr3_boot_notes(boot: &crate::profile::Rr3ProfileBoot) {
+    rr3_note_missing(boot);
+    rr3_note_roles(boot);
     rr3_note_broken(boot);
     for note in &boot.axis_notes {
         rr3_log(note);
@@ -604,6 +609,20 @@ fn rr3_daemon_counters(shared: &Arc<Mutex<RrdRegistry>>) -> Option<PathBuf> {
     counters_path
 }
 
+/// 装载全集 → 依赖事实表 → 仲裁计划（拓扑序 + 层内确定性次键）。
+fn rr3_queue_arb(jobs: &[Rr3SpawnJob]) -> Rr3BootPlan {
+    let arb: Vec<Rr3DependsFacts> = jobs
+        .iter()
+        .map(|j| Rr3DependsFacts {
+            name: j.facts.name.clone(),
+            provides: j.facts.provides.clone(),
+            depends_required: j.facts.depends_required.clone(),
+            start_priority: j.facts.start_priority,
+        })
+        .collect();
+    rr3_plan_boot(&arb)
+}
+
 /// boot 队列：装载 → 仲裁 → 提供者表 → 按 order 投递（缺格模块跳过）
 fn rr3_daemon_queue(
     boot: &Rr3DaemonBoot,
@@ -614,16 +633,7 @@ fn rr3_daemon_queue(
     // ADR-0009 裁定 1/2：装载全集交 rr-registry 仲裁——rrd 只执行裁定：
     // 环/名重复 → fatal 拒整个 boot；不可满足 → rejected 点名；order = 拓扑序 +
     // 层内 (start_priority, name) 确定性次键。
-    let arb: Vec<Rr3DependsFacts> = jobs
-        .iter()
-        .map(|j| Rr3DependsFacts {
-            name: j.facts.name.clone(),
-            provides: j.facts.provides.clone(),
-            depends_required: j.facts.depends_required.clone(),
-            start_priority: j.facts.start_priority,
-        })
-        .collect();
-    let plan = rr3_plan_boot(&arb);
+    let plan = rr3_queue_arb(&jobs);
     rr3_queue_fatal(&plan)?;
     // 提供者表：boot 全集一次性写入，含被拒模块——provides 仍计入可满足性宇宙
     rr3_queue_providers(&jobs, shared);
@@ -694,18 +704,23 @@ fn rr3_dispatch_one(
     }
 }
 
+/// 装配链事实透传给 job（空串 = 不注入）。
+fn rr3_job_attach(job: &mut Rr3SpawnJob, boot: &Rr3DaemonBoot) {
+    // 物理绑定/轴状态/HAL 后端随 job 透传给子进程（空串 = 不注入）
+    job.hal_bindings = boot.hal_bindings.clone();
+    job.axis_state = boot.axis_state.clone();
+    job.hal_backend = boot.hal_backend.clone();
+    job.audio_backend = boot.audio_backend.clone();
+    job.servo_backend = boot.servo_backend.clone();
+    job.display_backend = boot.display_backend.clone();
+}
+
 /// 装载期解析全部 manifest 并为每个 job 注入装配链事实
 fn rr3_jobs_load(boot: &Rr3DaemonBoot) -> Vec<Rr3SpawnJob> {
     let mut jobs = Vec::new();
     for manifest in &boot.manifests {
         if let Some(mut job) = rr3_boot_job_parse(manifest) {
-            // 物理绑定/轴状态/HAL 后端随 job 透传给子进程（空串 = 不注入）
-            job.hal_bindings = boot.hal_bindings.clone();
-            job.axis_state = boot.axis_state.clone();
-            job.hal_backend = boot.hal_backend.clone();
-            job.audio_backend = boot.audio_backend.clone();
-            job.servo_backend = boot.servo_backend.clone();
-            job.display_backend = boot.display_backend.clone();
+            rr3_job_attach(&mut job, boot);
             jobs.push(job);
         }
     }
@@ -885,6 +900,12 @@ fn rr3_flush_arm() -> Option<std::os::unix::net::UnixStream> {
     };
     // 发送端交给处理器：取裸 fd 后刻意不 close（进程生命期一根管，泄漏即设计）
     RR3_TERM_PIPE_FD.store(tx.into_raw_fd(), Ordering::Relaxed);
+    rr3_term_signals();
+    Some(rx)
+}
+
+/// SIGTERM/SIGINT 接唤醒处理器（信号投递后由读端退出关停 flush）。
+fn rr3_term_signals() {
     unsafe {
         signal(
             RR3_SIGTERM,
@@ -895,7 +916,6 @@ fn rr3_flush_arm() -> Option<std::os::unix::net::UnixStream> {
             rr3_term_pipe_wake as extern "C" fn(i32) as usize,
         );
     }
-    Some(rx)
 }
 
 /// flush 线程主体：平时睡在 self-pipe read；醒来一次 = 一个 TERM/INT，落盘后

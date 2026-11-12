@@ -388,16 +388,20 @@ impl RrdRegistry {
         }
         let mut changed = false;
         for (k, v) in counters {
-            let key = format!("{module}/{k}");
-            if self.rr3_ctr_capped(&key) {
-                continue;
-            }
-            let slot = self.counters.entry(key).or_insert(0);
-            let before = *slot;
-            *slot = before.saturating_add(*v);
-            changed |= *slot != before;
+            changed |= self.rr3_ctr_one(format!("{module}/{k}"), *v);
         }
         changed
+    }
+
+    /// 单键累加（键数上界拒新键）：返回本键是否产生了变化。
+    fn rr3_ctr_one(&mut self, key: String, v: u64) -> bool {
+        if self.rr3_ctr_capped(&key) {
+            return false;
+        }
+        let slot = self.counters.entry(key).or_insert(0);
+        let before = *slot;
+        *slot = before.saturating_add(v);
+        *slot != before
     }
 
     /// 计数键数达上界时拒新键（既有键照常累加），并只点一次名。
@@ -533,6 +537,11 @@ impl RrdRegistry {
         let Some(e) = self.modules.get_mut(&name) else {
             return Rr3Beat::Rejected;
         };
+        Self::rr3_beat_phase(e, now_ms)
+    }
+
+    /// 相位推进一拍：只有 `Registered → Running` 是升级（回报 `Promoted`）。
+    fn rr3_beat_phase(e: &mut Entry, now_ms: u64) -> Rr3Beat {
         match e.phase {
             Rr3Phase::Failed => Rr3Beat::Rejected,
             // degraded 只续命不升级（本轮 degraded 尚无 setter，此支为 11b 之后兜底）
@@ -749,8 +758,13 @@ impl RrdRegistry {
         }
         let attempt = streak + 1;
         self.crash_streak.insert(facts.name.clone(), attempt);
+        Some(self.rr3_charge_plan(facts, attempt))
+    }
+
+    /// 退避表 → 重启计划：倍数 × base，封顶到 u64::MAX（永不 panic、不回绕）。
+    fn rr3_charge_plan(&self, facts: &Rr3ManifestFacts, attempt: u32) -> Rr3RestartPlan {
         let idx = (attempt as usize - 1).min(RR3_RESTART_BACKOFF.len() - 1);
-        Some(Rr3RestartPlan {
+        Rr3RestartPlan {
             name: facts.name.clone(),
             attempt,
             // 退避倍数 × base：溢出既不 panic（debug 的 `*` 会 panic）也不回绕
@@ -759,7 +773,7 @@ impl RrdRegistry {
             // （`cli.rs::parse_restart_base`，提交 f69eda8：拒 0、拒超上界），本表不替它裁定语义。
             delay_ms: RR3_RESTART_BACKOFF[idx].saturating_mul(self.restart_base_ms),
             entry: facts.entry.clone(),
-        })
+        }
     }
 
     /// 重启策略 → 是否重启（"never" 与非预期值一律否；校验已在 Task 2 挡住，这里只保证不 panic）。
@@ -794,6 +808,11 @@ impl RrdRegistry {
         if self.owned.contains(name) {
             return Rr3Death::DeferredToExitStatus;
         }
+        self.rr3_death_fail(name, clean_exit)
+    }
+
+    /// 判死后落账：摘发送端 → 标 failed → 按策略记重启账。
+    fn rr3_death_fail(&mut self, name: &str, clean_exit: bool) -> Rr3Death {
         {
             let e = self.modules.get_mut(name).expect("上面确认过条目在");
             e.tx = None;
@@ -906,20 +925,24 @@ impl RrdRegistry {
             // 先按不可变借用收齐本拍要重算的名字，再逐个改（两段式借用，与
             // `rr3_reg_expire` 同一条纪律）。刚解除的模块在下一轮 cap 里已是 Running，
             // 不会被重复处理。
-            let candidates: Vec<String> = self
-                .modules
-                .values()
-                .filter(|e| {
-                    e.phase == Rr3Phase::Degraded
-                        // G4：装配缺项的预降级不归能力传播管，解除路只有修数据 + 重启
-                        && !self.pre_degraded.contains(e.name.as_str())
-                        && e.facts.depends_required.iter().any(|d| d == &cap)
-                })
-                .map(|e| e.name.clone())
-                .collect();
+            let candidates = self.rr3_cap_stuck(&cap);
             out.extend(self.rr3_undegrade_apply(candidates));
         }
         out
+    }
+
+    /// 本拍因 `cap` 回来而要重算的 Degraded 模块名（预降级不归能力传播管）。
+    fn rr3_cap_stuck(&self, cap: &str) -> Vec<String> {
+        self.modules
+            .values()
+            .filter(|e| {
+                e.phase == Rr3Phase::Degraded
+                    // G4：装配缺项的预降级不归能力传播管，解除路只有修数据 + 重启
+                    && !self.pre_degraded.contains(e.name.as_str())
+                    && e.facts.depends_required.iter().any(|d| d.as_str() == cap)
+            })
+            .map(|e| e.name.clone())
+            .collect()
     }
 
     /// 重算候选：required 全部就位才回 Running。

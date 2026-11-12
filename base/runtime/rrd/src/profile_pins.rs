@@ -270,7 +270,7 @@ fn rr3_addr_conflict(
             "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 缺省（校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册——共读源须显式登记器件身份，缺省 = 不可判即红）",
             pin.controller, pin.addr, first_pin.rr3_pin_id()
         ));
-    } else if pin.device != first_pin.device {
+    } else if rr3_addr_diff(pin, first_pin) {
         errs.push(format!(
             "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 不同（{} vs {}）——校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册（器件身份不同 = 地址冲突，坑 7）",
             pin.controller,
@@ -280,6 +280,11 @@ fn rr3_addr_conflict(
             pin.device
         ));
     }
+}
+
+/// 共址两侧 device 不同（器件身份冲突）。
+fn rr3_addr_diff(pin: &Rr3PinEntry, first_pin: &Rr3PinEntry) -> bool {
+    pin.device != first_pin.device
 }
 
 /// 共址任一侧 device 缺省谓词（身份不可判，fail-closed）。

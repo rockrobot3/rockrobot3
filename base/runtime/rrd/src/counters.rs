@@ -56,20 +56,18 @@ pub fn rr3_counters_path() -> Option<PathBuf> {
 /// 空串 env 视同未设置（与线上入口 `rr3_counters_path` 的 filter 同一口径）。
 pub fn rr3_path_with(env: Option<&str>, linux_default: Option<&str>) -> Option<String> {
     match env.filter(|s| !s.is_empty()) {
-        Some(dir) => Some(
-            Path::new(dir)
-                .join(COUNTERS_FILE)
-                .to_string_lossy()
-                .into_owned(),
-        ),
+        Some(dir) => Some(rr3_ctr_path(dir)),
         // 非 linux（macOS sim 直跑）无 env 即不持久化；linux 缺省吃 rr_data 分区挂载点
-        None => linux_default.map(|d| {
-            Path::new(d)
-                .join(COUNTERS_FILE)
-                .to_string_lossy()
-                .into_owned()
-        }),
+        None => linux_default.map(rr3_ctr_path),
     }
+}
+
+/// `dir/counters.json`（lossy、owned）。
+fn rr3_ctr_path(dir: &str) -> String {
+    Path::new(dir)
+        .join(COUNTERS_FILE)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// 启动加载：读全表。文件不存在 = 首启（空表）；坏文件按空表处理并回显原因

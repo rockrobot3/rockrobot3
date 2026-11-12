@@ -705,14 +705,24 @@ fn rr3_budget_parse(bt: &toml::Table, tier: &str, errs: &mut Vec<String>) -> Rr3
         ),
     }
     let nums = rr3_budget_nums(bt, &mut budget, errs);
+    rr3_budget_tier(tier, &budget, &nums, errs);
+    budget
+}
+
+/// 分档自洽（校验⑩）：host 走不适用位，其余档走数字预算对账。
+fn rr3_budget_tier(
+    tier: &str,
+    budget: &Rr3Budget,
+    nums: &BTreeMap<&'static str, i64>,
+    errs: &mut Vec<String>,
+) {
     if !tier.is_empty() {
         if tier == "host" {
-            rr3_budget_host(&budget, &nums, errs);
+            rr3_budget_host(budget, nums, errs);
         } else {
-            rr3_budget_rtos(&budget, &nums, errs);
+            rr3_budget_rtos(budget, nums, errs);
         }
     }
-    budget
 }
 
 /// 未知键点名：预算段只认 [`RR3_BUDGET_KEYS`] 四键（三数 + 不适用位）。
@@ -849,6 +859,12 @@ fn rr3_slots_parse(
     };
     rr3_slots_present(t, &mut slots_present, errs);
     rr3_slots_absent(t, &mut slots_device_absent, errs);
+    rr3_slots_unknown(t, errs);
+    (slots_present, slots_device_absent)
+}
+
+/// [slots] 未知键点名（只认 present / device_absent）。
+fn rr3_slots_unknown(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
         if k != "present" && k != "device_absent" {
             errs.push(format!(
@@ -856,7 +872,6 @@ fn rr3_slots_parse(
             ));
         }
     }
-    (slots_present, slots_device_absent)
 }
 
 /// [slots].present（B9 自 slots_parse 抽出）：本板物理在位格位数组，逐项非空。

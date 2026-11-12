@@ -226,12 +226,7 @@ fn rr3_check_absent(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
 pub(crate) fn rr3_check_tier(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
     let mut errs = Vec::new();
     rr3_tier_bare(profile, &mut errs);
-    let mut referenced: BTreeSet<String> = BTreeSet::new();
-    referenced.extend(profile.bindings.keys().cloned());
-    for slots in profile.enabled_slots.values() {
-        referenced.extend(slots.iter().cloned());
-    }
-    referenced.extend(profile.slots_present.iter().cloned());
+    let referenced = rr3_tier_refs(profile);
     for slot in &referenced {
         if !table.rr3_slot_contains(slot) {
             continue;
@@ -240,6 +235,17 @@ pub(crate) fn rr3_check_tier(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<
         rr3_slot_scope(&profile.platform_tier, slot, table, &mut errs);
     }
     errs
+}
+
+/// 被引用的格位集：bindings 键 + enabled_slots 值 + slots_present 并集。
+fn rr3_tier_refs(profile: &Rr3Profile) -> BTreeSet<String> {
+    let mut referenced: BTreeSet<String> = BTreeSet::new();
+    referenced.extend(profile.bindings.keys().cloned());
+    for slots in profile.enabled_slots.values() {
+        referenced.extend(slots.iter().cloned());
+    }
+    referenced.extend(profile.slots_present.iter().cloned());
+    referenced
 }
 
 /// G6：无看门狗的板不允许归 bare 档（ADR-0018 修订 1）。
@@ -374,16 +380,21 @@ fn rr3_pin_inst_check(
     if per_inst != pin.instance.is_empty() {
         return;
     }
+    errs.push(rr3_inst_msg(pin, label, per_inst));
+}
+
+/// per_instance 违规文案：true 缺 instance / false 多填 instance。
+fn rr3_inst_msg(pin: &Rr3PinEntry, label: &str, per_inst: bool) -> String {
     if per_inst {
-        errs.push(format!(
+        format!(
             "{label} 角色 {} per_instance = true，instance 必填（多实例角色的身份一半在 instance）",
             pin.role
-        ));
+        )
     } else {
-        errs.push(format!(
+        format!(
             "{label} 角色 {} per_instance = false，instance 禁填（填了 pin_id 就有两个真值点）",
             pin.role
-        ));
+        )
     }
 }
 

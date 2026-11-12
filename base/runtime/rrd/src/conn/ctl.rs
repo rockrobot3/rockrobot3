@@ -15,22 +15,12 @@ use super::*;
 /// ctl 分派表的臂签名：`(ctx, params)` 入、应答体出。只有 logs/domain.set 用
 /// params，其余臂忽略它以统一表型（臂内语义仍单点在各自函数）。
 type Rr3CtlArm = fn(&Rr3ConnCtx, &Value) -> Result<Value, (Rr3StatusCode, String)>;
+/// 分派表的表型：方法变体 → 臂（九条 ctl 方法）。
+type Rr3CtlTable = [(Rr3RpcMethod, Rr3CtlArm); 9];
 
-/// 控制旁支（ADR-0010 裁定 2/4）：一次性查询连接，一问一答即断。
-///
-/// 不注册、不进在册表、不受 watchdog 管——在册表是"活的业务模块"的账本，运维探针
-/// 不记账。返回值作为握手 `Err` 的理由交回 `rr3_conn_serve`：握手失败路径不做死亡记账
-/// （`me` 尚不存在），daemon 侧按既有"连接收尾"落一行日志，连接随之关闭。
-/// 应答按对端**自报**的 `src_task` 回（与注册期 `rr3_refuse` 同一口径——rrd 尚未分配 task）。
-pub(super) fn rr3_serve_ctl(
-    out: &Arc<Mutex<UnixStream>>,
-    ctx: &Rr3ConnCtx,
-    reported_task: u64,
-    req: Rr3RpcRequest,
-) -> String {
-    // 先在锁内取数、锁外应答：与握手主路的锁纪律一致（持 shared 锁时不碰 out 锁）
-    // 分派表键 = 方法变体（成员与 [`Rr3RpcMethod::is_ctl`] 白名单同源）。
-    let arms: [(Rr3RpcMethod, Rr3CtlArm); 9] = [
+/// ctl 分派表：键 = 方法变体（成员与 [`Rr3RpcMethod::is_ctl`] 白名单同源）。
+fn rr3_ctl_arms() -> Rr3CtlTable {
+    [
         (Rr3RpcMethod::CtlStatus, |ctx, _| rr3_ctl_status(ctx)),
         (Rr3RpcMethod::CtlHealth, |ctx, _| rr3_ctl_health(ctx)),
         (Rr3RpcMethod::CtlLogs, |_, p| {
@@ -77,7 +67,24 @@ pub(super) fn rr3_serve_ctl(
         (Rr3RpcMethod::CtlDomainSet, |_, p| {
             crate::domain_write::rr3_domain_write_run(p)
         }),
-    ];
+    ]
+}
+
+/// 控制旁支（ADR-0010 裁定 2/4）：一次性查询连接，一问一答即断。
+///
+/// 不注册、不进在册表、不受 watchdog 管——在册表是"活的业务模块"的账本，运维探针
+/// 不记账。返回值作为握手 `Err` 的理由交回 `rr3_conn_serve`：握手失败路径不做死亡记账
+/// （`me` 尚不存在），daemon 侧按既有"连接收尾"落一行日志，连接随之关闭。
+/// 应答按对端**自报**的 `src_task` 回（与注册期 `rr3_refuse` 同一口径——rrd 尚未分配 task）。
+pub(super) fn rr3_serve_ctl(
+    out: &Arc<Mutex<UnixStream>>,
+    ctx: &Rr3ConnCtx,
+    reported_task: u64,
+    req: Rr3RpcRequest,
+) -> String {
+    // 先在锁内取数、锁外应答：与握手主路的锁纪律一致（持 shared 锁时不碰 out 锁）
+    // 分派表键 = 方法变体（成员与 [`Rr3RpcMethod::is_ctl`] 白名单同源）。
+    let arms = rr3_ctl_arms();
     let result: Result<Value, (Rr3StatusCode, String)> =
         match arms.iter().find(|(m, _)| *m == req.method) {
             Some((_, arm)) => arm(ctx, &req.params),
