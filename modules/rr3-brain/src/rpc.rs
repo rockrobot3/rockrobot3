@@ -186,6 +186,11 @@ fn rr3_ops_value_check(group: &str, slot: &str, value: &Value) -> Result<Value, 
         return rr3_ops_str(group, slot, value);
     }
     let f = rr3_ops_num(group, slot, value)?;
+    rr3_ops_num_slot(group, slot, value, f)
+}
+
+/// 数值槽按语义分流：`timeout_s` 走秒域，其余走正整数域。
+fn rr3_ops_num_slot(group: &str, slot: &str, value: &Value, f: f64) -> Result<Value, String> {
     if slot == "timeout_s" {
         return rr3_ops_secs(group, slot, f);
     }
@@ -256,12 +261,16 @@ fn rr3_ops_apply(
     slot: &str,
     new: Value,
 ) -> Result<(Value, Value), String> {
-    let brain = doc
-        .get_mut("rr3-brain")
-        .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())?;
+    let brain = rr3_ops_brain_mut(doc)?;
     let (section_key, key) = rr3_ops_target(brain, group, slot)?;
     let old = rr3_ops_store(brain, section_key, &key, &new)?;
     Ok((old, new))
+}
+
+/// 写臂根段：`[rr3-brain]` 缺席即回错。
+fn rr3_ops_brain_mut(doc: &mut Value) -> Result<&mut Value, String> {
+    doc.get_mut("rr3-brain")
+        .ok_or_else(|| "config 缺 [rr3-brain] 段".to_string())
 }
 
 /// 写源映射（Python rr3_ops_write 尾段同形状，B9 自 apply 抽出）：dialog →

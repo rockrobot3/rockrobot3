@@ -247,13 +247,22 @@ fn rr3_cloud_retryable(interface: &str, err: &str) -> bool {
     if err.starts_with("云端不可达") {
         return true;
     }
+    rr3_http_code_of(interface, err).is_some_and(rr3_retry_code)
+}
+
+/// 从 `"{interface} HTTP {code}"` 解析状态码（形状不符即 None）。
+fn rr3_http_code_of(interface: &str, err: &str) -> Option<u16> {
     let prefix = format!("{interface} HTTP ");
-    match err
-        .strip_prefix(&prefix)
+    err.strip_prefix(&prefix)
         .and_then(|s| s.parse::<u16>().ok())
-    {
-        Some(code) => rr3_retry_code(code),
-        None => false,
+}
+
+/// 200 应答体直通，其余按接口前缀点名（业务失败；重试判据见 [`rr3_cloud_retryable`]）。
+fn rr3_ok_resp(interface: &str, status: u16, resp: Vec<u8>) -> Result<Vec<u8>, String> {
+    if status == 200 {
+        Ok(resp)
+    } else {
+        Err(format!("{interface} HTTP {status}"))
     }
 }
 
@@ -330,15 +339,8 @@ impl Rr3AsrClient {
         // 有界重试（见 [`rr3_http_try`]）：multipart 体一次装配、多轮复用；
         // 只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
         rr3_http_try("识别接口", "ASR", || {
-            rr3_http_post(&url, &key, &body, &content_type, self.timeout_s).and_then(
-                |(status, resp)| {
-                    if status == 200 {
-                        Ok(resp)
-                    } else {
-                        Err(format!("识别接口 HTTP {status}"))
-                    }
-                },
-            )
+            rr3_http_post(&url, &key, &body, &content_type, self.timeout_s)
+                .and_then(|(status, resp)| rr3_ok_resp("识别接口", status, resp))
         })
     }
 
@@ -568,14 +570,19 @@ fn rr3_chat_body(history: &crate::llm::Rr3LlmHistory, model: &str) -> Vec<u8> {
 
 /// 应答形状收敛为一档：取不出 choices[0].message.content 串即 None（形状不符）。
 fn rr3_reply_text(resp: &[u8]) -> Option<String> {
-    serde_json::from_slice::<Value>(resp).ok().and_then(|v| {
-        v.get("choices")?
-            .get(0)?
-            .get("message")?
-            .get("content")?
-            .as_str()
-            .map(|s| s.to_string())
-    })
+    serde_json::from_slice::<Value>(resp)
+        .ok()
+        .and_then(|v| rr3_choice_text(&v))
+}
+
+/// 应答信封取值：`choices[0].message.content`（形状不符即 None）。
+fn rr3_choice_text(v: &Value) -> Option<String> {
+    v.get("choices")?
+        .get(0)?
+        .get("message")?
+        .get("content")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 /// 模型行密钥是否就位（面板模型列表只回布尔 `key_set`，值零回显）：local 免鉴权
@@ -622,13 +629,10 @@ impl Rr3TtsClient {
     /// atoms）；real 档响应为原始 PCM 流（read-until-close，[`rr3_read_body`]
     /// 读尽即得）。
     pub(crate) fn rr3_synthesize(&self, text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
-        if rr3_cloud_mode()? == Rr3CloudMode::Mock {
-            return Ok(crate::tts::rr3_sine_pcm(text, sample_rate));
+        match rr3_tts_local(text, sample_rate)? {
+            Some(pcm) => Ok(pcm),
+            None => self.rr3_tts_cloud(text, sample_rate),
         }
-        if std::env::var(RR3_TTS_BACKEND_ENV).as_deref() == Ok(RR3_TTS_BACKEND_MAC_SAY) {
-            return rr3_say_pcm(text, sample_rate);
-        }
-        self.rr3_tts_cloud(text, sample_rate)
     }
 
     /// 真云 TTS 一跳：请求体装配 + 有界重试，只回 200 应答体。
@@ -639,15 +643,8 @@ impl Rr3TtsClient {
         // 有界重试（与 ASR/LLM 同轨，见 [`rr3_http_try`]）：CosyVoice 读响应超时
         // 是瞬时态，一次即弃会让唤醒 Ack 静默（用户喊了没应答）。
         rr3_http_try("合成接口", "TTS", || {
-            rr3_http_post(&url, &key, &body, "application/json", self.timeout_s).and_then(
-                |(status, resp)| {
-                    if status == 200 {
-                        Ok(resp)
-                    } else {
-                        Err(format!("合成接口 HTTP {status}"))
-                    }
-                },
-            )
+            rr3_http_post(&url, &key, &body, "application/json", self.timeout_s)
+                .and_then(|(status, resp)| rr3_ok_resp("合成接口", status, resp))
         })
     }
 
@@ -672,14 +669,30 @@ static RR3_SAY_SEQ: AtomicU32 = AtomicU32::new(0);
 /// 采样率的 s16le 单声道）→ 抽 `data` 块 → 返回裸 PCM。退出非零/文件缺失/
 /// 无 data 块一律 Err（文案带 stderr，不静默降级）。
 fn rr3_say_pcm(text: &str, sample_rate: u32) -> Result<Vec<u8>, String> {
-    let seq = RR3_SAY_SEQ.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("rr3-tts-{}-{seq}.wav", std::process::id()));
+    let path = rr3_say_path();
     let out = rr3_say_run(text, sample_rate, &path)?;
     rr3_say_check(&path, &out)?;
     let bytes = std::fs::read(&path);
     let _ = std::fs::remove_file(&path);
     let bytes = bytes.map_err(|e| format!("读宿主合成 WAV 失败: {e}"))?;
     rr3_say_pcm_of(&bytes)
+}
+
+/// 免网兜底两档（mock 正弦 / 宿主 `say`）；real 云档回 None 交调用方触网。
+fn rr3_tts_local(text: &str, sample_rate: u32) -> Result<Option<Vec<u8>>, String> {
+    if rr3_cloud_mode()? == Rr3CloudMode::Mock {
+        return Ok(Some(crate::tts::rr3_sine_pcm(text, sample_rate)));
+    }
+    if std::env::var(RR3_TTS_BACKEND_ENV).as_deref() == Ok(RR3_TTS_BACKEND_MAC_SAY) {
+        return rr3_say_pcm(text, sample_rate).map(Some);
+    }
+    Ok(None)
+}
+
+/// 宿主合成临时文件路径（同进程内多次合成不撞名）。
+fn rr3_say_path() -> std::path::PathBuf {
+    let seq = RR3_SAY_SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("rr3-tts-{}-{seq}.wav", std::process::id()))
 }
 
 /// 宿主 `say` 一次执行（参数面：音色/波形格式/采样率/输出文件/文本）。

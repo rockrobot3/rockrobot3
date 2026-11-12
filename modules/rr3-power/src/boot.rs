@@ -144,13 +144,19 @@ fn rr3_charger_of(sect: &toml::Value) -> Result<Rr3ChargerCfg, String> {
 /// 不可达，属误配不是"更保守"）。
 fn rr3_rail_of(sect: &toml::Value) -> Result<Rr3RailCfg, String> {
     let rail = rr3_rail_fields(sect)?;
+    rr3_rail_order(&rail)?;
+    Ok(rail)
+}
+
+/// 阈值次序（severe < mild，相等则 Mild 档不可达，属误配不是"更保守"）。
+fn rr3_rail_order(rail: &Rr3RailCfg) -> Result<(), String> {
     if rail.severe_mv >= rail.mild_mv {
         return Err(format!(
             "config [rr3-power.rail] 阈值倒挂: severe={}mV 必须 < mild={}mV（相等则 Mild 档不可达）",
             rail.severe_mv, rail.mild_mv
         ));
     }
-    Ok(rail)
+    Ok(())
 }
 
 /// rail 段全键取值（缺键/类型错逐键点名）。

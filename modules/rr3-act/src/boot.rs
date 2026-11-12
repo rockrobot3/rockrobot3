@@ -228,7 +228,14 @@ fn rr3_axis_num(v: &str, k: &str, what: &str) -> Result<u16, String> {
 /// 的策略面（A-9：改数据即改行为，日志是第一证据）。自原 composite.rs 逐字迁入
 /// （缺席/坏形/回显三文案逐字）。
 pub(crate) fn rr3_axis_state_load() -> Rr3ActAxisState {
-    let axis = match std::env::var(RR3_ACT_AXIS_STATE_ENV) {
+    let axis = rr3_axis_env_axis();
+    rr3_axis_echo(&axis);
+    axis
+}
+
+/// env 读取 + 坏形/缺席折保守缺省并点名（安全向，不退）。
+fn rr3_axis_env_axis() -> Rr3ActAxisState {
+    match std::env::var(RR3_ACT_AXIS_STATE_ENV) {
         Ok(text) => Rr3ActAxisState::rr3_from_env(&text).unwrap_or_else(|e| {
             eprintln!("rr3-act: {e}，按保守缺省起跑（未标定，只受点动）");
             Rr3ActAxisState::rr3_conservative()
@@ -237,9 +244,7 @@ pub(crate) fn rr3_axis_state_load() -> Rr3ActAxisState {
             eprintln!("执行轴状态: 未注入（无档案/坏件/副本/轴错配），按保守缺省起跑");
             Rr3ActAxisState::rr3_conservative()
         }
-    };
-    rr3_axis_echo(&axis);
-    axis
+    }
 }
 
 /// 注入策略面回显（A-9：改数据即改行为，日志是第一证据）。
@@ -567,15 +572,19 @@ fn rr3_effects_of(arr: &[toml::Value]) -> Result<Vec<Rr3LedEffect>, String> {
 
 /// 单项灯效：必为在册契约值的字符串（越界值点名在册值）。
 fn rr3_act_effect_at(i: usize, e: &toml::Value) -> Result<Rr3LedEffect, String> {
-    let s = e
-        .as_str()
-        .ok_or_else(|| format!("config [rr3-act.led] effects[{i}] 必须是字符串，收到 {e}"))?;
+    let s = rr3_act_effect_str(i, e)?;
     Rr3LedEffect::rr3_led_effect_parse(s).ok_or_else(|| {
         format!(
             "config [rr3-act.led] effects[{i}] 非在册灯效 {s:?}（在册值 {}）",
             RR3_LED_EFFECT_VALUES.join("/")
         )
     })
+}
+
+/// 单项灯效必须是字符串（非字符串逐条点名）。
+fn rr3_act_effect_str(i: usize, e: &toml::Value) -> Result<&str, String> {
+    e.as_str()
+        .ok_or_else(|| format!("config [rr3-act.led] effects[{i}] 必须是字符串，收到 {e}"))
 }
 
 /// 意图执行面开放集（A-9）：只认本模块**有执行臂**的在册意图主题
@@ -600,13 +609,18 @@ fn rr3_topics_of(arr: &[toml::Value]) -> Result<Vec<String>, String> {
 /// 单项主题：字符串且在本模块执行臂内（只认 relay/set 与 servo/command）。
 fn rr3_act_topic_at(i: usize, t: &toml::Value) -> Result<String, String> {
     let s = rr3_act_topic_str(i, t)?;
-    if s != RR3_SERVO_COMMAND_TOPIC && s != RR3_RELAY_SET_TOPIC {
+    if !rr3_topic_known(s) {
         return Err(format!(
             "config [rr3-act.intent] open_topics[{i}] 非本模块可执行的意图主题 {s:?}（只认 {}/{}）",
             RR3_RELAY_SET_TOPIC, RR3_SERVO_COMMAND_TOPIC
         ));
     }
     Ok(s.to_string())
+}
+
+/// 本模块有执行臂的意图主题（relay/set 与 servo/command）。
+fn rr3_topic_known(s: &str) -> bool {
+    s == RR3_SERVO_COMMAND_TOPIC || s == RR3_RELAY_SET_TOPIC
 }
 
 /// 单项必须是字符串（非字符串逐条点名）。

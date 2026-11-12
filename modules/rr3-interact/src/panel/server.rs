@@ -723,15 +723,19 @@ pub fn rr3_panel_serve(shared: Arc<Rr3PanelShared>) -> Result<(), String> {
         "面板就绪: http://{addr}（{}端点，控制全走 RPC 归属门）",
         RR3_PANEL_ROUTES.len()
     );
-    // 安全面自述：面板写口无令牌鉴权，非回环监听是"可信局域网"决策，启动即点名。
-    if !rr3_panel_loopback(&addr) {
+    rr3_panel_warn_addr(&addr);
+    rr3_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
+        std::thread::Builder::new().name("rr3-panel-conn".into())
+    })
+}
+
+/// 安全面自述：面板写口无令牌鉴权，非回环监听是"可信局域网"决策，启动即点名。
+fn rr3_panel_warn_addr(addr: &str) {
+    if !rr3_panel_loopback(addr) {
         eprintln!(
             "面板警告: 监听 {addr} 非回环——写口无令牌鉴权（继电器/密钥/配网/重启），仅限可信局域网"
         );
     }
-    rr3_accept_loop(listener, shared, Arc::new(AtomicUsize::new(0)), || {
-        std::thread::Builder::new().name("rr3-panel-conn".into())
-    })
 }
 
 /// 监听是否只绑回环：可解析 IP 才判 loopback；主机名/非法形状按非回环处理

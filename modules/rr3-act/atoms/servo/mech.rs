@@ -38,10 +38,15 @@ pub use rr_core::control::Rr3RateGate;
 pub fn rr3_servo_motion(word: Option<&str>) -> Result<Rr3ActMotion, Rr3ServoMotionError<'_>> {
     match word {
         None => Ok(Rr3ActMotion::Auto),
-        Some(s) => match Rr3ActMotion::rr3_act_motion_parse(s) {
-            Some(m @ (Rr3ActMotion::Jog | Rr3ActMotion::Auto)) => Ok(m),
-            _ => Err(Rr3ServoMotionError::UnknownWord(s)),
-        },
+        Some(s) => rr3_motion_of(s),
+    }
+}
+
+/// 词面落档：只认 jog/auto（词表外与标定面词统一 UnknownWord）。
+fn rr3_motion_of(s: &str) -> Result<Rr3ActMotion, Rr3ServoMotionError<'_>> {
+    match Rr3ActMotion::rr3_act_motion_parse(s) {
+        Some(m @ (Rr3ActMotion::Jog | Rr3ActMotion::Auto)) => Ok(m),
+        _ => Err(Rr3ServoMotionError::UnknownWord(s)),
     }
 }
 

@@ -74,16 +74,23 @@ pub fn rr3_http_read_req(
     stream: &TcpStream,
     limits: &Rr3PanelLimits,
 ) -> Result<Rr3HttpRequest, String> {
-    stream
-        .set_read_timeout(Some(limits.read_timeout))
-        .map_err(|e| format!("设读超时失败: {e}"))?;
-    let mut reader = BufReader::new(
-        stream
-            .try_clone()
-            .map_err(|e| format!("try_clone 失败: {e}"))?,
-    );
+    let mut reader = rr3_req_reader(stream, limits.read_timeout)?;
     let (method, path, body) = rr3_req_parts(&mut reader, limits)?;
     Ok(Rr3HttpRequest { method, path, body })
+}
+
+/// 读侧连接包装：设读超时后克隆句柄进 `BufReader`（写侧仍用原连接）。
+fn rr3_req_reader(
+    stream: &TcpStream,
+    read_timeout: Duration,
+) -> Result<BufReader<TcpStream>, String> {
+    stream
+        .set_read_timeout(Some(read_timeout))
+        .map_err(|e| format!("设读超时失败: {e}"))?;
+    let cloned = stream
+        .try_clone()
+        .map_err(|e| format!("try_clone 失败: {e}"))?;
+    Ok(BufReader::new(cloned))
 }
 
 /// 请求行 → 头区 → body 三段读取：请求行与头区共用同一总额预算（请求行不设界
@@ -92,13 +99,22 @@ fn rr3_req_parts(
     reader: &mut impl BufRead,
     limits: &Rr3PanelLimits,
 ) -> Result<(String, String, Vec<u8>), String> {
+    let (method, path, content_length) = rr3_req_head(reader, limits)?;
+    // body 上界先判、再分配：按声明长度 `vec![0; n]` 前必须确认 n 在限内
+    rr3_body_cap(content_length, limits.body_limit)?;
+    Ok((method, path, rr3_req_body(reader, content_length)?))
+}
+
+/// 请求行 + 头区（两段共用同一总额预算），返回（方法, 路径, 声明 body 长度）。
+fn rr3_req_head(
+    reader: &mut impl BufRead,
+    limits: &Rr3PanelLimits,
+) -> Result<(String, String, usize), String> {
     let (method, path, used) = rr3_req_line(reader, limits.header_limit)?;
     // 请求行与头区共用同一总额预算：请求行不设界的话，单行无 \n 的慢发可让读侧
     // 无界增长（局域网 DoS 面，静态审计 0.0.8b 收口）。
     let content_length = rr3_req_heads(reader, limits.header_limit, used)?;
-    // body 上界先判、再分配：按声明长度 `vec![0; n]` 前必须确认 n 在限内
-    rr3_body_cap(content_length, limits.body_limit)?;
-    Ok((method, path, rr3_req_body(reader, content_length)?))
+    Ok((method, path, content_length))
 }
 
 /// body 声明长度上界（分配前判）。

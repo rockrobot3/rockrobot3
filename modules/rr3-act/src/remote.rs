@@ -53,19 +53,27 @@ impl Rr3RemoteServo {
 
 /// 构造期探活段：有界重试 sense 的 `ops/list`，成功即回。
 fn rr3_remote_probe(bus: &BusHandle, axis: &str) -> Result<(), String> {
+    match rr3_probe_retry(bus, axis) {
+        None => Ok(()),
+        Some(last_err) => Err(format!(
+            "远端舵机面不可达（rr3-sense {RR3_REMOTE_TRIES} 次探测全败）: {last_err}"
+        )),
+    }
+}
+
+/// 有界重试段：成功回 None，全败回最后一次错误（文案归调用方组装）。
+fn rr3_probe_retry(bus: &BusHandle, axis: &str) -> Option<String> {
     let mut last_err = String::new();
     for try_no in 1..=RR3_REMOTE_TRIES {
         match rr3_probe_once(bus, axis, try_no) {
-            Ok(()) => return Ok(()),
+            Ok(()) => return None,
             Err(e) => {
                 last_err = e;
                 std::thread::sleep(Duration::from_millis(RR3_REMOTE_BACKOFF_MS));
             }
         }
     }
-    Err(format!(
-        "远端舵机面不可达（rr3-sense {RR3_REMOTE_TRIES} 次探测全败）: {last_err}"
-    ))
+    Some(last_err)
 }
 
 /// 单次探测：就绪即点名，失败原样回错（重试编排在调用方）。
