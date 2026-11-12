@@ -194,6 +194,83 @@ fn repo_files_locator_matches_loader() {
     assert!(axes > 0, "仓内至少一份轴档案（对拍不得空转）");
 }
 
+/// 装配单里的域表（解析器口径，变体矩阵的 oracle）
+fn rr3_domains(v: &toml::Value) -> Vec<&toml::Value> {
+    v.get("supplies")
+        .and_then(|s| s.get("domain"))
+        .and_then(toml::Value::as_array)
+        .map(|a| a.iter().collect())
+        .unwrap_or_default()
+}
+
+/// 指名域的整型键（缺失即红——变体矩阵的判据不接受"读不出就当没变"）
+fn rr3_dom_int(v: &toml::Value, name: &str, key: &str) -> i64 {
+    rr3_domains(v)
+        .into_iter()
+        .find(|d| d.get("name").and_then(toml::Value::as_str) == Some(name))
+        .and_then(|d| d.get(key).and_then(toml::Value::as_integer))
+        .unwrap_or_else(|| panic!("域 {name:?} 缺整型键 {key}"))
+}
+
+/// 变体矩阵（B43）：对每份真实装配单的每个在册域，做三种合法书写变体
+/// （括号内空白 / 块头行内注释 / 单引号名），逐变体断言三件事：变体仍是合法
+/// TOML、手术能定位、手术后重解析**只有目标域变**（其余域逐键零漂移）。
+/// B37/B38 的误报都是"合法变体被文本判据拒"，这里用解析器做 oracle，
+/// 而不是只断言"没报错"。
+#[test]
+fn repo_domain_variants_survive_surgery() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let mut checked = 0usize;
+    for f in rr3_repo_files(&root.join("profiles")) {
+        let text = std::fs::read_to_string(&f).expect("读装配单");
+        let base: toml::Value = toml::from_str(&text).expect("仓内装配单须合法 TOML");
+        let names: Vec<String> = rr3_domains(&base)
+            .into_iter()
+            .filter_map(|d| {
+                d.get("name")
+                    .and_then(toml::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
+        let mut quoted = text.clone();
+        for name in &names {
+            quoted = quoted.replace(&format!("name = \"{name}\""), &format!("name = '{name}'"));
+        }
+        let variants = [
+            text.replace("[[supplies.domain]]", "[[ supplies.domain ]]"),
+            text.replace("[[supplies.domain]]", "[[supplies.domain]]  # 域"),
+            quoted,
+        ];
+        for (vi, vtext) in variants.iter().enumerate() {
+            let v: toml::Value = toml::from_str(vtext)
+                .unwrap_or_else(|e| panic!("{} 变体 {vi} 不是合法 TOML: {e}", f.display()));
+            for name in &names {
+                let out = rr3_domain_apply(vtext, name, &[("severe_mv", "1")])
+                    .unwrap_or_else(|e| panic!("{} 域 {name} 变体 {vi}: {e}", f.display()));
+                let after: toml::Value = toml::from_str(&out).expect("手术产物须合法 TOML");
+                for other in &names {
+                    let want = if other == name {
+                        1
+                    } else {
+                        rr3_dom_int(&v, other, "severe_mv")
+                    };
+                    assert_eq!(
+                        rr3_dom_int(&after, other, "severe_mv"),
+                        want,
+                        "{} 域 {other} 在 {name} 手术、变体 {vi} 下漂移",
+                        f.display()
+                    );
+                }
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "变体矩阵不得空转（仓内装配单至少一份有域）");
+}
+
 /// 缺域拒：域名不在册不带病落盘
 #[test]
 fn domain_keys_apply_rejects_missing_domain() {
