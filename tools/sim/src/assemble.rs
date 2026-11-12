@@ -28,7 +28,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use rrd::manifest::rr3_manifest_parse;
-use rrd::profile::rr3_profile_parse;
+use rrd::profile::{rr3_profile_parse, Rr3Profile};
 
 use crate::brain::wait_socket_exists;
 use crate::drill::{
@@ -71,6 +71,17 @@ pub fn rr3_assemble_layout(
     workdir: &Path,
     profile_src: &Path,
 ) -> Result<(PathBuf, Vec<Rr3AssembleEntry>), String> {
+    let (profile_dst, profile) = rr3_asm_profile_read(workdir, profile_src)?;
+    rr3_asm_wiring(repo, workdir, profile_src)?;
+    let entries = rr3_layout_entries(repo, workdir, &profile)?;
+    Ok((profile_dst, entries))
+}
+
+/// 装配单：读源 → sim 变换 → 复核解析 → 落位，返回 (落位路径, 解析结果)。
+fn rr3_asm_profile_read(
+    workdir: &Path,
+    profile_src: &Path,
+) -> Result<(PathBuf, Rr3Profile), String> {
     let profile_text = std::fs::read_to_string(profile_src)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
     let sim_text = rr3_asm_sim_text(&profile_text)?;
@@ -81,14 +92,26 @@ pub fn rr3_assemble_layout(
         )
     })?;
     let profile_dst = rr3_layout_profile(workdir, profile_src, &sim_text)?;
-    let stem = rr3_layout_stem(profile_src)?;
-    rr3_layout_wiring(repo, workdir, stem)?;
+    Ok((profile_dst, profile))
+}
 
+/// 接线档同批装机（文件名主干定 `hardware/<形态>/wiring.toml`）。
+fn rr3_asm_wiring(repo: &Path, workdir: &Path, profile_src: &Path) -> Result<(), String> {
+    let stem = rr3_layout_stem(profile_src)?;
+    rr3_layout_wiring(repo, workdir, stem)
+}
+
+/// 逐模块装机清单（manifest entry 绝对化 + 旁件），顺序随装配单。
+fn rr3_layout_entries(
+    repo: &Path,
+    workdir: &Path,
+    profile: &Rr3Profile,
+) -> Result<Vec<Rr3AssembleEntry>, String> {
     let mut entries = Vec::with_capacity(profile.enabled_slots.len());
     for module in profile.enabled_slots.keys() {
         entries.push(rr3_layout_module(repo, workdir, module)?);
     }
-    Ok((profile_dst, entries))
+    Ok(entries)
 }
 
 /// 装配单键名摘取（行首 `key =` 形；非键行 None）。
@@ -120,16 +143,8 @@ fn rr3_asm_sim_text(text: &str) -> Result<String, String> {
             out.push('\n');
             continue;
         }
-        if in_runtime {
-            match rr3_profile_key_of(line) {
-                Some("hal_backend") => {
-                    saw_hal = true;
-                    out.push_str("hal_backend = \"sim\"\n");
-                    continue;
-                }
-                Some("audio_backend" | "servo_backend" | "display_backend") => continue,
-                _ => {}
-            }
+        if rr3_asm_runtime_line(line, in_runtime, &mut saw_hal, &mut out) {
+            continue;
         }
         out.push_str(line);
         out.push('\n');
@@ -138,6 +153,27 @@ fn rr3_asm_sim_text(text: &str) -> Result<String, String> {
         return Err("装配单 [runtime] 缺 hal_backend（P0-3 必填）——sim 变换无落点".into());
     }
     Ok(out)
+}
+
+/// [runtime] 段内单行改写：`true` = 本行已改写或摘除，不再原样输出。
+fn rr3_asm_runtime_line(
+    line: &str,
+    in_runtime: bool,
+    saw_hal: &mut bool,
+    out: &mut String,
+) -> bool {
+    if !in_runtime {
+        return false;
+    }
+    match rr3_profile_key_of(line) {
+        Some("hal_backend") => {
+            *saw_hal = true;
+            out.push_str("hal_backend = \"sim\"\n");
+            true
+        }
+        Some("audio_backend" | "servo_backend" | "display_backend") => true,
+        _ => false,
+    }
 }
 
 /// 装配单 sim 变换落位到演练 modules-root（`profiles/<名>.toml`，文件名保仓源）。
@@ -238,15 +274,21 @@ fn rr3_copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
     let rd = std::fs::read_dir(src).map_err(|e| format!("读目录 {src:?} 失败: {e}"))?;
     for ent in rd {
         let ent = ent.map_err(|e| format!("遍历 {src:?} 失败: {e}"))?;
-        let from = ent.path();
-        let to = dst.join(ent.file_name());
-        if from.is_dir() {
-            rr3_copy_tree(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to).map_err(|e| format!("拷贝 {from:?} 失败: {e}"))?;
-        }
+        rr3_copy_node(&ent, dst)?;
     }
     Ok(())
+}
+
+/// 单条目：目录递归、其余按文件拷贝。
+fn rr3_copy_node(ent: &std::fs::DirEntry, dst: &Path) -> Result<(), String> {
+    let from = ent.path();
+    let to = dst.join(ent.file_name());
+    if from.is_dir() {
+        return rr3_copy_tree(&from, &to);
+    }
+    std::fs::copy(&from, &to)
+        .map(|_| ())
+        .map_err(|e| format!("拷贝 {from:?} 失败: {e}"))
 }
 
 /// 演练夹具定位（工作目录 + socket）：缺省工作目录每次运行唯一（pid 会被容器
@@ -331,9 +373,8 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
 
     // ---- 1. 夹具：演练 modules-root（装机布局）----
-    let (owned_dir, workdir, socket) = rr3_drill_stage(a)?;
-    let (profile_dst, entries) = rr3_assemble_layout(&repo, &workdir, &profile_src)?;
-    rr3_asm_bins(&rrd, &rrctl, &entries)?;
+    let (owned_dir, workdir, socket, profile_dst, entries) =
+        rr3_asm_fixture(a, &repo, &profile_src, &rrd, &rrctl)?;
 
     let log_path = workdir.join("rrd.log");
     let ctx = Rr3AsmCtx {
@@ -351,6 +392,20 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
 
     rr3_drill_teardown(a.keep, &mut rrd_child, rrd_pid, &socket, &workdir);
     rr3_drill_verdict(outcome, owned_dir, &workdir, &entries, &profile_dst, report)
+}
+
+/// 夹具 + 装机布局 + 产物存在性（返回定位、装配单与模块清单）。
+fn rr3_asm_fixture(
+    a: &Rr3SimArgs,
+    repo: &Path,
+    profile_src: &Path,
+    rrd: &Path,
+    rrctl: &Path,
+) -> Result<(bool, PathBuf, PathBuf, PathBuf, Vec<Rr3AssembleEntry>), String> {
+    let (owned_dir, workdir, socket) = rr3_drill_stage(a)?;
+    let (profile_dst, entries) = rr3_assemble_layout(repo, &workdir, profile_src)?;
+    rr3_asm_bins(rrd, rrctl, &entries)?;
+    Ok((owned_dir, workdir, socket, profile_dst, entries))
 }
 
 /// 装配演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
