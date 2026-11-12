@@ -240,18 +240,20 @@ impl Rr3AudioRing {
         // 溢出量按整帧对齐后从最旧端丢弃
         let overflow = (self.deque.len() + samples.len()).saturating_sub(self.cap);
         let drop_n = overflow - overflow % ch;
-        for _ in 0..drop_n {
-            self.deque.pop_front();
-        }
-        self.dropped += drop_n as u64;
+        self.rr3_ring_drop(drop_n);
         self.deque.extend(samples.iter().copied());
         // 入样本身超容量（理论形状，片 4096 << cap 32000 不可达）：再削最旧整帧
         let over = self.deque.len().saturating_sub(self.cap);
         let over_n = over - over % ch;
-        for _ in 0..over_n {
+        self.rr3_ring_drop(over_n);
+    }
+
+    /// 从最旧端削 `n` 个采样并计数（溢出丢帧的唯一落点）。
+    fn rr3_ring_drop(&mut self, n: usize) {
+        for _ in 0..n {
             self.deque.pop_front();
         }
-        self.dropped += over_n as u64;
+        self.dropped += n as u64;
     }
 
     /// 弹出整声道帧填充 `out`：`floor(avail/ch)` 与 `floor(out.len()/ch)` 取小
@@ -447,13 +449,23 @@ fn rr3_recon_round(core: &Rr3Esp32AudioCore, fails: &mut u64) -> Rr3ReconStep {
         if core.stop.load(Ordering::Acquire) {
             return Rr3ReconStep::Stop;
         }
-        match rr3_esp32_audio_open(&core.path, core.baud) {
-            Ok(c) => return rr3_recon_ok(core, attempt, c),
-            Err(e) => rr3_recon_fail(attempt, fails, &e),
+        if let Some(step) = rr3_recon_try(core, attempt, fails) {
+            return step;
         }
         std::thread::sleep(HANDSHAKE_RETRY_PAUSE);
     }
     Rr3ReconStep::Spent
+}
+
+/// 单轮重开：成功交回连接，失败累计计数后继续（`Spent` 由循环终局给出）。
+fn rr3_recon_try(core: &Rr3Esp32AudioCore, attempt: u32, fails: &mut u64) -> Option<Rr3ReconStep> {
+    match rr3_esp32_audio_open(&core.path, core.baud) {
+        Ok(c) => Some(rr3_recon_ok(core, attempt, c)),
+        Err(e) => {
+            rr3_recon_fail(attempt, fails, &e);
+            None
+        }
+    }
 }
 
 /// 单轮重开成功：计数 + 点名并交回连接。
@@ -664,16 +676,25 @@ fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
     let mut st = Rr3ReaderState::rr3_new();
     let mut conn: Option<Rr3UartConn> = Some(first);
     while !core.stop.load(Ordering::Acquire) {
-        let Some(c) = conn.as_mut() else {
-            conn = rr3_esp32_reconnect(&core);
-            continue;
-        };
-        if rr3_esp32_stream(&core, c, &mut st) {
-            conn = None;
-        }
+        rr3_reader_round(&core, &mut conn, &mut st);
     }
     // 收兵：板面停流（防御残流），conn 释放 → flock 退账
     rr3_reader_tail(conn);
+}
+
+/// 读循环一拍：无连接先重连；有连接跑一整个会话，坏链即摘除待下拍重连。
+fn rr3_reader_round(
+    core: &Rr3Esp32AudioCore,
+    conn: &mut Option<Rr3UartConn>,
+    st: &mut Rr3ReaderState,
+) {
+    let Some(c) = conn.as_mut() else {
+        *conn = rr3_esp32_reconnect(core);
+        return;
+    };
+    if rr3_esp32_stream(core, c, st) {
+        *conn = None;
+    }
 }
 
 /// 读线程收尾：残留连接上补发停流（conn 释放即 flock 退账）。
@@ -733,6 +754,11 @@ fn rr3_stream_beat(core: &Rr3Esp32AudioCore, c: &mut Rr3UartConn, st: &mut Rr3Re
     // 原实现把排水放在建连拍——会话中途入队的命令永远等不到写出口
     // （队容 2 满丢最旧），板面收不到 servo 点名——b1 计划原文即
     // 「读循环每拍先排水再读」，此为落位笔误。
+    rr3_beat_drain(c, core, st)
+}
+
+/// 命令旁路排水一拍：io 失败点名后回 false（连接坏，命令回插队首不丢）。
+fn rr3_beat_drain(c: &mut Rr3UartConn, core: &Rr3Esp32AudioCore, st: &mut Rr3ReaderState) -> bool {
     if let Err(e) = rr3_drain_cmds(c, core, &mut st.cmd_id) {
         eprintln!("rr-hal-esp32-audio: {e}");
         return false;

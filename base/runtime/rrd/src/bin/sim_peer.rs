@@ -254,6 +254,15 @@ mod peer {
         rr3_beat(stream, task, 10)?;
         println!("sim-peer: 静默中（已喂 1 次）");
         std::thread::sleep(SILENT_BEFORE_REVIVE);
+        rr3_beat_five(stream, task)?;
+        println!("sim-peer: 已试喂 5 次");
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+
+    /// 连续喂 5 次并逐次打接受/被拒（观察"被拒之后是什么样"）。
+    fn rr3_beat_five(stream: &mut UnixStream, task: u64) -> Result<(), String> {
         for n in 1..=5u64 {
             let accepted = rr3_beat_verdict(stream, task, 20 + n)?;
             println!(
@@ -262,10 +271,7 @@ mod peer {
             );
             std::thread::sleep(Duration::from_millis(REVIVE_BEAT_GAP_MS));
         }
-        println!("sim-peer: 已试喂 5 次");
-        loop {
-            std::thread::sleep(Duration::from_secs(3600));
-        }
+        Ok(())
     }
 
     /// 常驻：按 manifest 的 heartbeat_ms 一直喂狗，直到被杀。

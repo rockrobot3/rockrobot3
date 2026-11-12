@@ -172,17 +172,22 @@ pub fn rr3_boot_job_parse(manifest_path: &Path) -> Option<Rr3SpawnJob> {
 
 /// manifest 读取 + 解析：两种失败点名对象不同（读不动点名文件，解析失败附逐条原因）。
 fn rr3_job_facts(manifest_path: &Path) -> Option<Rr3ManifestFacts> {
-    let text = match std::fs::read_to_string(manifest_path) {
-        Ok(t) => t,
+    let text = rr3_job_text(manifest_path)?;
+    rr3_parse_facts(&text, manifest_path)
+}
+
+/// manifest 文本读取：读不动点名文件并回 None。
+fn rr3_job_text(manifest_path: &Path) -> Option<String> {
+    match std::fs::read_to_string(manifest_path) {
+        Ok(t) => Some(t),
         Err(e) => {
             rr3_log(&format!(
                 "拒绝启动：manifest {} 读取失败: {e}",
                 manifest_path.display()
             ));
-            return None;
+            None
         }
-    };
-    rr3_parse_facts(&text, manifest_path)
+    }
 }
 
 fn rr3_parse_facts(text: &str, manifest_path: &Path) -> Option<Rr3ManifestFacts> {
@@ -292,16 +297,7 @@ fn rr3_absorb_exit(
             // EarlyExit / Silent 两路不传播：前者从未注册过（没有"离开 Running"的相位
             // 事件），后者的死亡已由别人记过、传播也归那一拍。
             let degraded = rr3_lock(shared).rr3_reg_degrade(name);
-            for (dep, task) in degraded {
-                // 排除项 `RR3_TASK_RRD`（不排除，E-9 同一理据）：降级要送到依赖者自己耳朵里。
-                let n = rr3_lock(shared).rr3_reg_fanout(
-                    &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
-                    rr_bus::RR3_TASK_RRD,
-                );
-                rr3_log(&format!(
-                    "{dep} 依赖断供 → degraded（提供者 {name} 离开 Running）广播到 {n} 个连接"
-                ));
-            }
+            rr3_degrade_fanout(shared, name, degraded);
             plan
         }
         Rr3ChildExit::EarlyExit { plan } => {
@@ -329,6 +325,19 @@ fn rr3_absorb_exit(
                 ));
             }
         }
+    }
+}
+
+/// 降级传播广播：逐个依赖者点名并记数（排除项 `RR3_TASK_RRD`，E-9 同一理据）。
+fn rr3_degrade_fanout(shared: &Arc<Mutex<RrdRegistry>>, name: &str, degraded: Vec<(String, u64)>) {
+    for (dep, task) in degraded {
+        let n = rr3_lock(shared).rr3_reg_fanout(
+            &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+            rr_bus::RR3_TASK_RRD,
+        );
+        rr3_log(&format!(
+            "{dep} 依赖断供 → degraded（提供者 {name} 离开 Running）广播到 {n} 个连接"
+        ));
     }
 }
 
@@ -532,23 +541,28 @@ fn rr3_spawn_env(cmd: &mut Command, job: &Rr3SpawnJob) {
     }
     // 音频采集面后端覆盖（组合档 Pi×ESP32 用 esp32）：注入 `RR3_HAL_AUDIO_BACKEND`，
     // 让音频面独占 UART 而不影响全局后端。None 不注入（音频面回落全局 hal_backend）。
-    if let Some(ab) = &job.audio_backend {
-        cmd.env("RR3_HAL_AUDIO_BACKEND", ab);
-    }
+    rr3_env_opt(cmd, "RR3_HAL_AUDIO_BACKEND", job.audio_backend.as_deref());
     // 舵机面后端覆盖（P0-4 组合档归属）：组合档舵机在 ESP32 板上时设 esp32。
     // None 不注入（舵机面回落全局 hal_backend）。
-    if let Some(sb) = &job.servo_backend {
-        cmd.env("RR3_HAL_SERVO_BACKEND", sb);
-    }
+    rr3_env_opt(cmd, "RR3_HAL_SERVO_BACKEND", job.servo_backend.as_deref());
     // 显示面后端覆盖（P0-4 组合档归属）：组合档 OLED/点阵在 ESP32 板上时设 esp32。
     // None 不注入（显示面回落全局 hal_backend）。
-    if let Some(db) = &job.display_backend {
-        cmd.env("RR3_HAL_DISPLAY_BACKEND", db);
-    }
+    rr3_env_opt(
+        cmd,
+        "RR3_HAL_DISPLAY_BACKEND",
+        job.display_backend.as_deref(),
+    );
     // 执行轴状态（批N3 件三）：空值不注入——模块侧折保守缺省（未标定不得自动），
     // 与 hal_bindings 同一条"空 = 无真值，fail-closed"纪律
     if !job.axis_state.is_empty() {
         cmd.env("RR3_ACT_AXIS_STATE", &job.axis_state);
+    }
+}
+
+/// 可选后端覆盖注入：None 不注入（对应能力面回落全局后端）。
+fn rr3_env_opt(cmd: &mut Command, key: &str, v: Option<&str>) {
+    if let Some(v) = v {
+        cmd.env(key, v);
     }
 }
 
@@ -628,6 +642,21 @@ fn rr3_reap_scan(children: &mut BTreeMap<String, Child>) -> Vec<(String, ExitSta
     exited
 }
 
+/// 到期表摘取：取出已到期计划，未到期项原样保留。
+fn rr3_due_ready(due: &mut Vec<(Instant, Rr3RestartPlan)>) -> Vec<Rr3RestartPlan> {
+    let now = Instant::now();
+    let mut ready = Vec::new();
+    due.retain(|(at, p)| {
+        if *at <= now {
+            ready.push(p.clone());
+            false
+        } else {
+            true
+        }
+    });
+    ready
+}
+
 /// 到期执行。**退避不是睡眠**：这里只问"到点了没有"，从不 sleep（E-4）。
 fn rr3_fire_due(
     shared: &Arc<Mutex<RrdRegistry>>,
@@ -641,16 +670,7 @@ fn rr3_fire_due(
     if due.is_empty() {
         return;
     }
-    let now = Instant::now();
-    let mut ready: Vec<Rr3RestartPlan> = Vec::new();
-    due.retain(|(at, p)| {
-        if *at <= now {
-            ready.push(p.clone());
-            false
-        } else {
-            true
-        }
-    });
+    let ready = rr3_due_ready(due);
     for plan in ready {
         // 硬规矩：`rr3_reg_live` 先 `let` 绑，绝不写进被匹配表达式/守卫（文件头那段）。
         // 这一问挡住的是"外来模块自己回来了"那一格（A-5② 的同名窗口）：判死到到期之间它若

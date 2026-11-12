@@ -67,18 +67,21 @@ fn rr3_bindings_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<St
     match root.get("bindings").and_then(toml::Value::as_table) {
         None => errs
             .push("缺少 [bindings]（body/cognition 格位 → 模块；可为空表但段必须在）".to_string()),
-        Some(t) => {
-            for (slot, v) in t {
-                match v.as_str() {
-                    Some(m) if !m.is_empty() => {
-                        bindings.insert(slot.clone(), m.to_string());
-                    }
-                    _ => errs.push(format!("bindings.{slot} 应为非空字符串（模块名）")),
-                }
-            }
-        }
+        Some(t) => rr3_bind_rows(t, &mut bindings, errs),
     }
     bindings
+}
+
+/// 逐格位收册：非空串入表，其余逐条点名。
+fn rr3_bind_rows(t: &toml::Table, bindings: &mut BTreeMap<String, String>, errs: &mut Vec<String>) {
+    for (slot, v) in t {
+        match v.as_str() {
+            Some(m) if !m.is_empty() => {
+                bindings.insert(slot.clone(), m.to_string());
+            }
+            _ => errs.push(format!("bindings.{slot} 应为非空字符串（模块名）")),
+        }
+    }
 }
 
 /// [enabled_slots]：非空表、每值非空字符串数组。enabled_slots 决定起谁（Q3 裁定），
@@ -87,25 +90,29 @@ fn rr3_enabled_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<Str
     let mut enabled_slots = BTreeMap::new();
     match root.get("enabled_slots").and_then(toml::Value::as_table) {
         None => errs.push("缺少 [enabled_slots]（模块 → 本形态启用的格位集合）".to_string()),
-        Some(t) => {
-            if t.is_empty() {
-                errs.push(
-                    "[enabled_slots] 为空：enabled_slots 决定起谁，空装配单没有可起模块"
-                        .to_string(),
-                );
-            }
-            for (module, v) in t {
-                match v.as_array() {
-                    Some(items) => {
-                        let slots = rr3_slot_items(module, items, errs);
-                        enabled_slots.insert(module.clone(), slots);
-                    }
-                    None => errs.push(format!("enabled_slots.{module} 应为字符串数组")),
-                }
-            }
-        }
+        Some(t) => rr3_enabled_rows(t, &mut enabled_slots, errs),
     }
     enabled_slots
+}
+
+/// 逐模块格位集：空表点名，值须为字符串数组。
+fn rr3_enabled_rows(
+    t: &toml::Table,
+    out: &mut BTreeMap<String, Vec<String>>,
+    errs: &mut Vec<String>,
+) {
+    if t.is_empty() {
+        errs.push("[enabled_slots] 为空：enabled_slots 决定起谁，空装配单没有可起模块".to_string());
+    }
+    for (module, v) in t {
+        match v.as_array() {
+            Some(items) => {
+                let slots = rr3_slot_items(module, items, errs);
+                out.insert(module.clone(), slots);
+            }
+            None => errs.push(format!("enabled_slots.{module} 应为字符串数组")),
+        }
+    }
 }
 
 /// 单模块格位集：每项必须是非空字符串，逐条点名。
@@ -139,27 +146,34 @@ fn rr3_hardware_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<St
     let mut hardware = BTreeMap::new();
     match root.get("hardware").and_then(toml::Value::as_table) {
         None => {}
-        Some(t) => {
-            for (k, v) in t {
-                if k.is_empty() {
-                    errs.push("[hardware] 键不得为空串".to_string());
-                    continue;
-                }
-                match v {
-                    toml::Value::String(s) => {
-                        hardware.insert(k.clone(), s.clone());
-                    }
-                    toml::Value::Integer(i) => {
-                        hardware.insert(k.clone(), i.to_string());
-                    }
-                    other => errs.push(format!(
-                        "hardware.{k} 应为字符串或整数标量（物理绑定值），收到 {other:?}"
-                    )),
-                }
-            }
-        }
+        Some(t) => rr3_hardware_rows(t, &mut hardware, errs),
     }
     hardware
+}
+
+/// 逐键收册：空键点名，值只收字符串/整数标量（整数十进制字符串化）。
+fn rr3_hardware_rows(
+    t: &toml::Table,
+    hardware: &mut BTreeMap<String, String>,
+    errs: &mut Vec<String>,
+) {
+    for (k, v) in t {
+        if k.is_empty() {
+            errs.push("[hardware] 键不得为空串".to_string());
+            continue;
+        }
+        match v {
+            toml::Value::String(s) => {
+                hardware.insert(k.clone(), s.clone());
+            }
+            toml::Value::Integer(i) => {
+                hardware.insert(k.clone(), i.to_string());
+            }
+            other => errs.push(format!(
+                "hardware.{k} 应为字符串或整数标量（物理绑定值），收到 {other:?}"
+            )),
+        }
+    }
 }
 
 /// [[pin]]：可选段（schema 3，增补轮六 §4.2——纯 sim/无硬件格形态不给，此时校验②
@@ -198,6 +212,12 @@ fn rr3_pin_entry_parse(i: usize, t: &toml::Table, errs: &mut Vec<String>) -> Rr3
             )),
         }
     }
+    rr3_pin_required(i, t, errs);
+    pin
+}
+
+/// 身份键在场判据：role / direction 缺一即红（顺序固定）。
+fn rr3_pin_required(i: usize, t: &toml::Table, errs: &mut Vec<String>) {
     if !t.contains_key("role") {
         errs.push(format!(
             "pin #{i} 缺 role（角色外键——引脚侧唯一真值点必须挂角色）"
@@ -206,7 +226,6 @@ fn rr3_pin_entry_parse(i: usize, t: &toml::Table, errs: &mut Vec<String>) -> Rr3
     if !t.contains_key("direction") {
         errs.push(format!("pin #{i} 缺 direction（校验①缺失语义）"));
     }
-    pin
 }
 
 /// 字符串类键（role/instance/controller/direction/rail/addr/device/failsafe）。
@@ -652,6 +671,12 @@ fn rr3_domain_one(dt: &toml::Table, label: &str, errs: &mut Vec<String>) -> Rr3D
             _ => rr3_domain_int(&mut d, key, dt.get(key), &path, errs),
         }
     }
+    rr3_domain_unknown(dt, label, errs);
+    d
+}
+
+/// 域表未知键点名：只认 [`RR3_DOMAIN_KEYS`]。
+fn rr3_domain_unknown(dt: &toml::Table, label: &str, errs: &mut Vec<String>) {
     for k in dt.keys() {
         if !RR3_DOMAIN_KEYS.contains(&k.as_str()) {
             errs.push(format!(
@@ -660,7 +685,6 @@ fn rr3_domain_one(dt: &toml::Table, label: &str, errs: &mut Vec<String>) -> Rr3D
             ));
         }
     }
-    d
 }
 
 /// 字符串类域键：非空即收；缺失/空串同文案。
@@ -782,11 +806,7 @@ fn rr3_budget_nums(
         match bt.get(key).and_then(toml::Value::as_integer) {
             Some(v) => {
                 nums.insert(key, v);
-                match key {
-                    "task_stack_budget_bytes" => budget.task_stack_budget_bytes = v,
-                    "heap_total_bytes" => budget.heap_total_bytes = v,
-                    _ => budget.heap_reserved_bytes = v,
-                }
+                rr3_budget_slot(budget, key, v);
             }
             None => {
                 if bt.get(key).is_some() {
@@ -796,6 +816,15 @@ fn rr3_budget_nums(
         }
     }
     nums
+}
+
+/// 三数键落位：按固定键名写入预算字段。
+fn rr3_budget_slot(budget: &mut Rr3Budget, key: &'static str, v: i64) {
+    match key {
+        "task_stack_budget_bytes" => budget.task_stack_budget_bytes = v,
+        "heap_total_bytes" => budget.heap_total_bytes = v,
+        _ => budget.heap_reserved_bytes = v,
+    }
 }
 
 /// host 档自洽：不适用必须显式为 true，且三数键不得并存（F-6 / ADR-0021 修订 3）。
@@ -848,26 +877,31 @@ fn rr3_budget_limits(nums: &BTreeMap<&'static str, i64>, errs: &mut Vec<String>)
         nums.get("heap_total_bytes"),
         nums.get("heap_reserved_bytes"),
     ) {
-        if st <= 0 {
-            errs.push(format!(
-                "supplies.budget.task_stack_budget_bytes = {st} 须为正整数（⑩-a 分母，0 预算 = 栈账无分母）"
-            ));
-        }
-        if tot <= 0 {
-            errs.push(format!(
-                "supplies.budget.heap_total_bytes = {tot} 须为正整数（⑩-b 分母基数）"
-            ));
-        }
-        if res < 0 {
-            errs.push(format!(
-                "supplies.budget.heap_reserved_bytes = {res} 须为非负整数（平台常驻占用，负数是物理矛盾）"
-            ));
-        }
+        rr3_budget_signs(st, tot, res, errs);
         if tot > 0 && res >= 0 && tot <= res {
             errs.push(format!(
                 "supplies.budget.heap_total_bytes = {tot} ≤ heap_reserved_bytes = {res}（可用堆 = total − reserved ≤ 0，⑩-b 无分母——物理矛盾）"
             ));
         }
+    }
+}
+
+/// 三数正负域判据：栈/堆基数须正、预留非负。
+fn rr3_budget_signs(st: i64, tot: i64, res: i64, errs: &mut Vec<String>) {
+    if st <= 0 {
+        errs.push(format!(
+            "supplies.budget.task_stack_budget_bytes = {st} 须为正整数（⑩-a 分母，0 预算 = 栈账无分母）"
+        ));
+    }
+    if tot <= 0 {
+        errs.push(format!(
+            "supplies.budget.heap_total_bytes = {tot} 须为正整数（⑩-b 分母基数）"
+        ));
+    }
+    if res < 0 {
+        errs.push(format!(
+            "supplies.budget.heap_reserved_bytes = {res} 须为非负整数（平台常驻占用，负数是物理矛盾）"
+        ));
     }
 }
 
@@ -912,16 +946,18 @@ fn rr3_slot_key_ok(k: &str) -> bool {
 /// [slots].present（B9 自 slots_parse 抽出）：本板物理在位格位数组，逐项非空。
 fn rr3_slots_present(t: &toml::Table, out: &mut Vec<String>, errs: &mut Vec<String>) {
     match t.get("present").and_then(toml::Value::as_array) {
-        Some(items) => {
-            for item in items {
-                match item.as_str() {
-                    Some(s) if !s.is_empty() => out.push(s.to_string()),
-                    _ => errs
-                        .push("[slots].present 的每一项都必须是非空字符串（格位名）".to_string()),
-                }
-            }
-        }
+        Some(items) => rr3_present_items(items, out, errs),
         None => errs.push("[slots] 缺 present（本板物理在位格位数组）".to_string()),
+    }
+}
+
+/// present 数组逐项：非空字符串收册，其余点名。
+fn rr3_present_items(items: &[toml::Value], out: &mut Vec<String>, errs: &mut Vec<String>) {
+    for item in items {
+        match item.as_str() {
+            Some(s) if !s.is_empty() => out.push(s.to_string()),
+            _ => errs.push("[slots].present 的每一项都必须是非空字符串（格位名）".to_string()),
+        }
     }
 }
 

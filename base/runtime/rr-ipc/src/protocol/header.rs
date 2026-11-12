@@ -319,19 +319,25 @@ pub const fn rr3_crc32(bytes: &[u8]) -> u32 {
     let mut crc: u32 = 0xFFFF_FFFF;
     let mut i = 0;
     while i < bytes.len() {
-        crc ^= bytes[i] as u32;
-        let mut k = 0;
-        while k < 8 {
-            crc = if crc & 1 != 0 {
-                (crc >> 1) ^ 0xEDB8_8320
-            } else {
-                crc >> 1
-            };
-            k += 1;
-        }
+        crc = rr3_crc_byte(crc, bytes[i]);
         i += 1;
     }
     !crc
+}
+
+/// 单字节推进（8 次反射移位，IEEE 802.3 多项式）。
+const fn rr3_crc_byte(mut crc: u32, b: u8) -> u32 {
+    crc ^= b as u32;
+    let mut k = 0;
+    while k < 8 {
+        crc = if crc & 1 != 0 {
+            (crc >> 1) ^ 0xEDB8_8320
+        } else {
+            crc >> 1
+        };
+        k += 1;
+    }
+    crc
 }
 
 /// 编出带正确 CRC 的 128B 头（**发送路径的唯一入口**）：CRC 覆盖整段 payload。

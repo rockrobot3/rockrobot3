@@ -85,6 +85,14 @@ pub fn rr3_composite_parse(text: &str) -> Result<Rr3CompositeFacts, Vec<String>>
     };
     rr3_comp_asm(asm, &mut facts, &mut errs);
 
+    rr3_comp_finish(facts, errs)
+}
+
+/// 终局：错误集空交表，否则整册拒（与旧内联分支逐字同形）。
+fn rr3_comp_finish(
+    facts: Rr3CompositeFacts,
+    errs: Vec<String>,
+) -> Result<Rr3CompositeFacts, Vec<String>> {
     if errs.is_empty() {
         Ok(facts)
     } else {
@@ -119,16 +127,21 @@ fn rr3_comp_root(text: &str) -> Result<toml::Table, Vec<String>> {
 /// `[assemble]` 段整体：键域 + atoms 链 + 注入面。
 fn rr3_comp_asm(asm: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<String>) {
     for k in asm.keys() {
-        if !matches!(k.as_str(), "atoms" | "handles" | "ops" | "no_injection") {
-            errs.push(format!(
-                "[assemble] 未知键 {k}（只认 atoms / handles / ops / no_injection）"
-            ));
-        }
+        rr3_asm_key_chk(k, errs);
     }
 
     rr3_comp_atoms(asm, facts, errs);
 
     rr3_comp_surface(asm, facts, errs);
+}
+
+/// `[assemble]` 单个键裁决（四键外点名）。
+fn rr3_asm_key_chk(k: &str, errs: &mut Vec<String>) {
+    if !matches!(k, "atoms" | "handles" | "ops" | "no_injection") {
+        errs.push(format!(
+            "[assemble] 未知键 {k}（只认 atoms / handles / ops / no_injection）"
+        ));
+    }
 }
 
 /// 顶层形状段：顶层未知键、schema_version 域、`[composite]`（name / unit）。
@@ -147,11 +160,16 @@ fn rr3_comp_keys(t: &toml::Table, errs: &mut Vec<String>) {
 /// 顶层未知键点名（只认 schema_version / composite / assemble）。
 fn rr3_comp_top_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
-        if !matches!(k.as_str(), "schema_version" | "composite" | "assemble") {
-            errs.push(format!(
-                "组合件清单顶层未知键 {k}（只认 schema_version / composite / assemble）"
-            ));
-        }
+        rr3_top_key_chk(k, errs);
+    }
+}
+
+/// 顶层单个键裁决（只认 schema_version / composite / assemble）。
+fn rr3_top_key_chk(k: &str, errs: &mut Vec<String>) {
+    if !matches!(k, "schema_version" | "composite" | "assemble") {
+        errs.push(format!(
+            "组合件清单顶层未知键 {k}（只认 schema_version / composite / assemble）"
+        ));
     }
 }
 
@@ -196,9 +214,14 @@ fn rr3_comp_meta(t: &toml::Table, facts: &mut Rr3CompositeFacts, errs: &mut Vec<
 /// `[composite]` 键词表核：只认 name / unit（其余逐键点名）。
 fn rr3_comp_meta_keys(comp: &toml::Table, errs: &mut Vec<String>) {
     for k in comp.keys() {
-        if !rr3_meta_key_ok(k) {
-            errs.push(format!("[composite] 未知键 {k}（只认 name / unit）"));
-        }
+        rr3_meta_key_chk(k, errs);
+    }
+}
+
+/// `[composite]` 单个键裁决（只认 name / unit）。
+fn rr3_meta_key_chk(k: &str, errs: &mut Vec<String>) {
+    if !rr3_meta_key_ok(k) {
+        errs.push(format!("[composite] 未知键 {k}（只认 name / unit）"));
     }
 }
 
@@ -299,22 +322,18 @@ fn rr3_comp_handles(
     facts: &mut Rr3CompositeFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    match asm.get("handles") {
-        Some(Value::Array(items)) => {
-            let (parsed, mut item_errs) = rr3_handles_parse(items);
-            facts.handles = parsed;
-            errs.append(&mut item_errs);
-            (true, items.is_empty())
-        }
-        Some(other) => {
-            errs.push(format!("[assemble].handles 应为数组，收到 {other:?}"));
-            (false, false)
-        }
-        None => {
-            errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填，N-11）".into());
-            (false, false)
-        }
-    }
+    let Some(v) = asm.get("handles") else {
+        errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填，N-11）".into());
+        return (false, false);
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("[assemble].handles 应为数组，收到 {v:?}"));
+        return (false, false);
+    };
+    let (parsed, mut item_errs) = rr3_handles_parse(items);
+    facts.handles = parsed;
+    errs.append(&mut item_errs);
+    (true, items.is_empty())
 }
 
 /// ops 键：同上共用件级 helper。返回 (键出现, 数组为空)。
@@ -323,22 +342,18 @@ fn rr3_comp_ops(
     facts: &mut Rr3CompositeFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    match asm.get("ops") {
-        Some(Value::Array(items)) => {
-            let (parsed, mut item_errs) = rr3_ops_parse(items);
-            facts.ops = parsed;
-            errs.append(&mut item_errs);
-            (true, items.is_empty())
-        }
-        Some(other) => {
-            errs.push(format!("[assemble].ops 应为数组，收到 {other:?}"));
-            (false, false)
-        }
-        None => {
-            errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填，N-11）".into());
-            (false, false)
-        }
-    }
+    let Some(v) = asm.get("ops") else {
+        errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填，N-11）".into());
+        return (false, false);
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("[assemble].ops 应为数组，收到 {v:?}"));
+        return (false, false);
+    };
+    let (parsed, mut item_errs) = rr3_ops_parse(items);
+    facts.ops = parsed;
+    errs.append(&mut item_errs);
+    (true, items.is_empty())
 }
 
 /// no_injection = true 是"本组合件不需注入面"的显式声明（L-5）：只认布尔 true。

@@ -51,20 +51,31 @@ fn rr3_capability_shape(s: &str) -> bool {
 /// `rr3-<模块>/<域>/<事件>`，三段；首段带 rr3- 前缀
 fn rr3_topic_shape_ok(name: &str) -> bool {
     let segs: Vec<&str> = name.split('/').collect();
-    if segs.len() != 3 || !segs[0].starts_with(RR3_TOPIC_HEAD) {
+    if !rr3_topic_head_ok(&segs) {
         return false;
     }
+    rr3_topic_tail_ok(&segs)
+}
+
+/// 首段形制：三段且首段带 rr3- 前缀
+fn rr3_topic_head_ok(segs: &[&str]) -> bool {
+    segs.len() == 3 && segs[0].starts_with(RR3_TOPIC_HEAD)
+}
+
+/// 首段主干小写字母，域/事件段小写下划线
+fn rr3_topic_tail_ok(segs: &[&str]) -> bool {
     let stem = &segs[0][RR3_TOPIC_HEAD.len()..];
     rr3_lower_alpha(stem) && segs[1..].iter().all(|s| rr3_lower_us(s))
 }
 
 /// 点分数字版本
 fn rr3_semver_ok(s: &str) -> bool {
-    s.contains('.')
-        && !s.starts_with('.')
-        && !s.ends_with('.')
-        && s.split('.')
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    s.contains('.') && !s.starts_with('.') && !s.ends_with('.') && s.split('.').all(rr3_semver_part)
+}
+
+/// 版本段：非空且全十进制数字
+fn rr3_semver_part(p: &str) -> bool {
+    !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())
 }
 
 /// 单条规则检查（上下文无关规则）。`own_topic` 需 manifest.name，由
@@ -203,16 +214,26 @@ fn rr3_allow_tree(
         Default::default();
     let mut top_scalars: std::collections::BTreeSet<&str> = Default::default();
     for s in specs {
-        match s.path.split_once('.') {
-            Some((section, key)) => {
-                allow.entry(section).or_default().insert(key);
-            }
-            None => {
-                top_scalars.insert(s.path.as_str());
-            }
-        }
+        rr3_allow_one(s, &mut allow, &mut top_scalars);
     }
     (allow, top_scalars)
+}
+
+/// 单条字段规格入树：两段式 path 进段键集，一段式进顶层标量集。
+#[allow(clippy::type_complexity)]
+fn rr3_allow_one<'a>(
+    s: &'a Rr3FieldSpec,
+    allow: &mut std::collections::BTreeMap<&'a str, std::collections::BTreeSet<&'a str>>,
+    top_scalars: &mut std::collections::BTreeSet<&'a str>,
+) {
+    match s.path.split_once('.') {
+        Some((section, key)) => {
+            allow.entry(section).or_default().insert(key);
+        }
+        None => {
+            top_scalars.insert(s.path.as_str());
+        }
+    }
 }
 
 /// 单个段的形状与段内键对账（段必须是表，键必须在规格树内）。
@@ -228,11 +249,22 @@ fn rr3_chk_section(
         return;
     };
     for k in section.keys() {
-        if !keys.contains(k.as_str()) {
-            errs.push(format!(
-                "{what} 含未登记字段 {name}.{k}（typo 或契约未演进——未知字段不报错即静默丢语义）"
-            ));
-        }
+        rr3_section_key_err(name, k, keys, what, errs);
+    }
+}
+
+/// 段内单个键对账：规格树外点名（typo 或契约未演进）。
+fn rr3_section_key_err(
+    name: &str,
+    k: &str,
+    keys: &std::collections::BTreeSet<&str>,
+    what: &str,
+    errs: &mut Vec<String>,
+) {
+    if !keys.contains(k) {
+        errs.push(format!(
+            "{what} 含未登记字段 {name}.{k}（typo 或契约未演进——未知字段不报错即静默丢语义）"
+        ));
     }
 }
 
@@ -468,9 +500,14 @@ fn rr3_chk_item(
 /// own_topic 的前缀归属：主题必须以 `<manifest.name>/` 开头。
 fn rr3_chk_own_prefix(s: &str, self_name: &str, errs: &mut Vec<String>) {
     let want = format!("{self_name}/");
-    if !self_name.is_empty() && !s.starts_with(&want) {
+    if !rr3_own_prefix_ok(self_name, s, &want) {
         errs.push(format!("越权主题 {s}（前缀必须是 {want}）"));
     }
+}
+
+/// 前缀归属：manifest.name 为空不判，否则主题须以 `<名>/` 开头。
+fn rr3_own_prefix_ok(self_name: &str, s: &str, want: &str) -> bool {
+    self_name.is_empty() || s.starts_with(want)
 }
 
 /// 申报面注册与退役：publishes/rpc.exposes 必须在主题集注册、不得是 retired。

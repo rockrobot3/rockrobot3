@@ -69,16 +69,20 @@ pub fn rr3_wiring_path(profile: &std::path::Path) -> Result<PathBuf, String> {
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .ok_or_else(|| format!("装配单 {} 无文件名", abs.display()))?;
-    let root = abs
-        .parent()
+    let root = rr3_hardware_root(&abs)?;
+    Ok(root.join("hardware").join(stem).join("wiring.toml"))
+}
+
+/// 装配单的两级父目录（`<root>/profiles/` 的 root），推不出即点名。
+fn rr3_hardware_root(abs: &std::path::Path) -> Result<&std::path::Path, String> {
+    abs.parent()
         .and_then(std::path::Path::parent)
         .ok_or_else(|| {
             format!(
                 "装配单 {} 无法定位 hardware-root（须在 <root>/profiles/ 下）",
                 abs.display()
             )
-        })?;
-    Ok(root.join("hardware").join(stem).join("wiring.toml"))
+        })
 }
 
 /// [[wire]] 九字段词表（§4.3 定形）：全键必填，未知键点名
@@ -115,15 +119,7 @@ pub fn rr3_wiring_from_text(text: &str) -> Result<Rr3Wiring, Vec<String>> {
     }
     let mut wires: Vec<Rr3Wire> = Vec::new();
     let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
-    for (i, item) in entries.iter().enumerate() {
-        let Some(t) = item.as_table() else {
-            errs.push(format!("wire #{i} 必须是 TOML 表（[[wire]]）"));
-            continue;
-        };
-        rr3_wire_unknown(i, t, &mut errs);
-        let connector = rr3_wire_ident(i, t, &mut seen, &mut errs);
-        wires.push(rr3_wire_fields(i, t, connector, &mut errs));
-    }
+    rr3_wire_collect(entries, &mut wires, &mut seen, &mut errs);
     if !errs.is_empty() {
         return Err(errs);
     }
@@ -134,6 +130,24 @@ pub fn rr3_wiring_from_text(text: &str) -> Result<Rr3Wiring, Vec<String>> {
         return Err(errs);
     }
     Ok(Rr3Wiring { wires })
+}
+
+/// 逐条 [[wire]]：非表项点名，表项走未知键/身份/字段三段。
+fn rr3_wire_collect<'a>(
+    entries: &'a [toml::Value],
+    wires: &mut Vec<Rr3Wire>,
+    seen: &mut BTreeMap<&'a str, usize>,
+    errs: &mut Vec<String>,
+) {
+    for (i, item) in entries.iter().enumerate() {
+        let Some(t) = item.as_table() else {
+            errs.push(format!("wire #{i} 必须是 TOML 表（[[wire]]）"));
+            continue;
+        };
+        rr3_wire_unknown(i, t, errs);
+        let connector = rr3_wire_ident(i, t, seen, errs);
+        wires.push(rr3_wire_fields(i, t, connector, errs));
+    }
 }
 
 /// 未知键门：九字段封闭（§4.3），表内多一个键即点名

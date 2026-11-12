@@ -267,19 +267,22 @@ const RR3_NUM_OPTS: [(&str, Rr3NumSet); 3] = [
 /// 杂项参数族：boot-role 的两道拒法 + help。
 fn rr3_cli_misc(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
     match args[i].as_str() {
-        "--boot-role" => {
-            let raw = need_value("--boot-role", args, i)?;
-            rr3_boot_role_guard(&raw)?;
-            // **不校验取值**（E-6）：合法集是夹具的约定，rrd 只透传。
-            cfg.boot_role = raw;
-            Ok(i + 2)
-        }
+        "--boot-role" => rr3_cli_role(cfg, args, i),
         "-h" | "--help" => {
             println!("{USAGE}");
             Ok(i + 1)
         }
         other => Err(format!("未知选项 {other}\n{USAGE}")),
     }
+}
+
+/// boot-role 取值：形状门过后原样透传（**不校验取值**，E-6）。
+fn rr3_cli_role(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    let raw = need_value("--boot-role", args, i)?;
+    rr3_boot_role_guard(&raw)?;
+    // **不校验取值**（E-6）：合法集是夹具的约定，rrd 只透传。
+    cfg.boot_role = raw;
+    Ok(i + 2)
 }
 
 /// boot-role 取值形状门：空值与疑似开关一律拒。

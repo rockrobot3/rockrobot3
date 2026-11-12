@@ -192,19 +192,25 @@ fn rr3_pub_batt(ctx: &Rr3ConnCtx, topic: &str, parsed: &Value) {
 /// 兜底留痕文案选取（主题 × 沿两种判据，四格各一句；文案逐字不变）。
 fn rr3_pub_batt_msg(topic: &str, edge: bool, percent: u64, voltage_mv: u64, n: usize) -> String {
     if topic == RR3_BATTERY_LOW_TOPIC {
-        if edge {
-            format!(
-                "低电兜底触发：battery/low percent={percent} voltage_mv={voltage_mv} → 置全局低电旗、停止新 spawn，广播 rr3-runtime/system/power 到 {n} 个连接"
-            )
-        } else {
-            "低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）".to_string()
-        }
-    } else if edge {
+        return rr3_batt_low_msg(edge, percent, voltage_mv, n);
+    }
+    if edge {
         format!(
             "低电兜底解除：battery/ok percent={percent} voltage_mv={voltage_mv} → 清全局低电旗、恢复新 spawn，广播 rr3-runtime/system/power(reason=battery-ok) 到 {n} 个连接"
         )
     } else {
         "低电兜底本未触发：重复 battery/ok 不重复广播（旗未置位无从解除）".to_string()
+    }
+}
+
+/// battery/low 两沿文案：触发沿记读数与广播数，重复沿点名不重复广播。
+fn rr3_batt_low_msg(edge: bool, percent: u64, voltage_mv: u64, n: usize) -> String {
+    if edge {
+        format!(
+            "低电兜底触发：battery/low percent={percent} voltage_mv={voltage_mv} → 置全局低电旗、停止新 spawn，广播 rr3-runtime/system/power 到 {n} 个连接"
+        )
+    } else {
+        "低电兜底已生效：重复 battery/low 不重复广播（同一次低电段只点名一次）".to_string()
     }
 }
 

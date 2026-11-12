@@ -50,14 +50,19 @@ fn rr3_topics_gate(path: &Path, role: &str, set: &Rr3TopicSet) -> Result<(), Vec
             path.display()
         )]);
     }
+    rr3_topic_shape_errs(path, role, set)
+}
+
+/// 形状错误逐条包上 {role}+path（哪一册坏了一眼可见）。
+fn rr3_topic_shape_errs(path: &Path, role: &str, set: &Rr3TopicSet) -> Result<(), Vec<String>> {
     let errs = set.rr3_topic_check();
-    if !errs.is_empty() {
-        return Err(errs
-            .into_iter()
-            .map(|e| format!("{role} {} 形状不合: {e}", path.display()))
-            .collect());
+    if errs.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(errs
+        .into_iter()
+        .map(|e| format!("{role} {} 形状不合: {e}", path.display()))
+        .collect())
 }
 
 /// 把命令行传入的路径解析成绝对路径（`canonicalize`：纯 `std::fs`，两平台同语义）。
@@ -205,9 +210,18 @@ pub fn rr3_topics_load(
     };
     let ov = rr3_overlay_abs(ov)?;
     let ov_set = read_set(&ov, "主题叠加层")?;
-    rr3_reject_reserved(&ov_set, &ov)?;
-    let added = ov_set.rr3_topic_names();
-    let merged = base.rr3_topic_merge(&ov_set)?; // 撞名 → Err(冲突条目)
+    rr3_topics_overlay(base, &ov_set, &ov)
+}
+
+/// 叠加层合并：冒充/撞名/合并复检三道门，回合并表与新增条目。
+fn rr3_topics_overlay(
+    base: Rr3TopicSet,
+    ov: &Rr3TopicSet,
+    ov_path: &Path,
+) -> Result<(Rr3TopicSet, Vec<String>), Vec<String>> {
+    rr3_reject_reserved(ov, ov_path)?;
+    let added = ov.rr3_topic_names();
+    let merged = base.rr3_topic_merge(ov)?; // 撞名 → Err(冲突条目)
     reject_bad_merge(&base, &merged)?;
     Ok((merged, added))
 }

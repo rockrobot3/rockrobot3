@@ -221,6 +221,11 @@ fn rr3_path_slot(member: &str) -> Option<Rr3PathSlot> {
         return rest.ends_with(".toml").then_some(Rr3PathSlot::Platform);
     }
     let books = &crate::profile::RR3_CONTRACT_BOOKS;
+    rr3_slot_book(member, books)
+}
+
+/// 契约三册（slots/roles/devices）成员 → 写口槽位。
+fn rr3_slot_book(member: &str, books: &[&str; 4]) -> Option<Rr3PathSlot> {
     for (idx, slot) in [
         (1, Rr3PathSlot::Slots),
         (2, Rr3PathSlot::Roles),
@@ -425,10 +430,7 @@ fn rr3_write_domain(
     let (old_value, updates) = rr3_domain_plan(paths, params, &dom)?;
     let boot = rr3_domain_commit(paths, &text, params, &updates)?;
     let relogged = rr3_domain_relog(paths, &boot);
-    let new_value = match &params.value {
-        Rr3WriteValue::Bool(b) => json!(b),
-        Rr3WriteValue::Num(n) => json!(n),
-    };
+    let new_value = rr3_json_value(&params.value);
     crate::rr3_log(&format!(
         "domain 写口: {}.{} {}→{}（evidence {}，effective boot——下次 rrd 装载投影）",
         params.name,
@@ -448,6 +450,15 @@ fn rr3_write_domain(
         "effective": "boot",
         "contracts_relogged": relogged,
     }))
+}
+
+/// 写口值 → JSON 应答值。
+#[cfg(unix)]
+fn rr3_json_value(v: &Rr3WriteValue) -> Value {
+    match v {
+        Rr3WriteValue::Bool(b) => json!(b),
+        Rr3WriteValue::Num(n) => json!(n),
+    }
 }
 
 /// 读装配单并定位目标域（域缺拒——写面不做新域注册；与 boot 同一解析器）
@@ -505,27 +516,7 @@ fn rr3_domain_plan(
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     let plan = match (params.key.as_str(), &params.value) {
         // armed 写：evidence 联动（成对纪律——写面直接落出⑥-e 要求的档内形状）
-        ("armed", Rr3WriteValue::Bool(true)) => {
-            let ev = rr3_take_evidence(
-                &paths.profile,
-                params.evidence.clone(),
-                "armed = true 置位必携证据引用 params.evidence（D11 界面门——必须引用一条真板对拍证据编号）",
-            )?;
-            (
-                json!(dom.armed),
-                vec![
-                    ("armed", "true".to_string()),
-                    ("evidence", format!("\"{ev}\"")),
-                ],
-            )
-        }
-        ("armed", Rr3WriteValue::Bool(false)) => (
-            json!(dom.armed),
-            vec![
-                ("armed", "false".to_string()),
-                ("evidence", "\"none\"".to_string()),
-            ],
-        ),
+        ("armed", Rr3WriteValue::Bool(armed)) => rr3_plan_armed(paths, params, dom, *armed)?,
         ("severe_mv", Rr3WriteValue::Num(n)) => {
             rr3_take_evidence(
                 &paths.profile,
@@ -543,6 +534,38 @@ fn rr3_domain_plan(
         }
     };
     Ok(plan)
+}
+
+/// armed 写计划：置 true 携证据并在档内成对写 evidence，置 false 显式写 none。
+#[cfg(unix)]
+fn rr3_plan_armed(
+    paths: &Rr3DomainWritePaths,
+    params: &Rr3DomainWriteParams,
+    dom: &crate::profile::Rr3Domain,
+    armed: bool,
+) -> Result<(Value, Rr3DomainUpdates), (Rr3StatusCode, String)> {
+    if armed {
+        let ev = rr3_take_evidence(
+            &paths.profile,
+            params.evidence.clone(),
+            "armed = true 置位必携证据引用 params.evidence（D11 界面门——必须引用一条真板对拍证据编号）",
+        )?;
+        Ok((
+            json!(dom.armed),
+            vec![
+                ("armed", "true".to_string()),
+                ("evidence", format!("\"{ev}\"")),
+            ],
+        ))
+    } else {
+        Ok((
+            json!(dom.armed),
+            vec![
+                ("armed", "false".to_string()),
+                ("evidence", "\"none\"".to_string()),
+            ],
+        ))
+    }
 }
 
 /// 手术 → tmp 落盘 → 装载链全量预核 → 原子写回（Err 即清 tmp，旧档原封）
@@ -569,22 +592,7 @@ fn rr3_domain_commit(
     // 任意文件截断器；独占建 + 定权把这条路径关死（残留由机制先清）。
     rr_ipc::rr3_stage_excl(&tmp, new_text.as_bytes(), 0o644)
         .map_err(|e| invalid(format!("写临时档 {} 失败: {e}", tmp.display())))?;
-    let boot = match crate::profile::rr3_boot_inputs(
-        &tmp,
-        &paths.slots,
-        &paths.roles,
-        &paths.devices,
-        &paths.wiring,
-        &paths.platform_dir,
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(invalid(format!(
-                "手术后装载链预核不过，拒绝落盘（旧档原封）: {e}"
-            )));
-        }
-    };
+    let boot = rr3_commit_preboot(paths, &tmp)?;
     // 原子写回（机制单点 tmp→fsync→rename；失败清 tmp 旧档原封）
     crate::counters::rr3_atomic_store(&paths.profile, &tmp, new_text.as_bytes()).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -594,6 +602,31 @@ fn rr3_domain_commit(
         ))
     })?;
     Ok(boot)
+}
+
+/// 候选档装载链全量预核：红即清 tmp 并带因拒（旧档原封）。
+#[cfg(unix)]
+fn rr3_commit_preboot(
+    paths: &Rr3DomainWritePaths,
+    tmp: &Path,
+) -> Result<crate::profile::Rr3ProfileBoot, (Rr3StatusCode, String)> {
+    match crate::profile::rr3_boot_inputs(
+        tmp,
+        &paths.slots,
+        &paths.roles,
+        &paths.devices,
+        &paths.wiring,
+        &paths.platform_dir,
+    ) {
+        Ok(b) => Ok(b),
+        Err(e) => {
+            let _ = std::fs::remove_file(tmp);
+            Err((
+                Rr3StatusCode::Invalid,
+                format!("手术后装载链预核不过，拒绝落盘（旧档原封）: {e}"),
+            ))
+        }
+    }
 }
 
 /// 契约记账重记：写口的 tmp 产物已过装载链预核 = 新验收事实；重记失败不回滚

@@ -127,12 +127,18 @@ pub fn rr3_contracts_scan(
     wiring_path: &std::path::Path,
     chip: &str,
 ) -> Result<Rr3ContractsSnapshot, String> {
+    let entries = rr3_book_entries(contracts_dir)?;
+    let truth_set = rr3_truth_entries(profile_path, contracts_dir, wiring_path, chip)?;
+    Ok(Rr3ContractsSnapshot { entries, truth_set })
+}
+
+/// 四册逐条记账：读字节 + sha256 + 长度（任一册读不到即 Err）。
+fn rr3_book_entries(contracts_dir: &std::path::Path) -> Result<Vec<Rr3ContractsEntry>, String> {
     let mut entries = Vec::with_capacity(RR3_CONTRACT_FILES.len());
     for f in RR3_CONTRACT_FILES {
         entries.push(rr3_contract_entry(contracts_dir, f)?);
     }
-    let truth_set = rr3_truth_entries(profile_path, contracts_dir, wiring_path, chip)?;
-    Ok(Rr3ContractsSnapshot { entries, truth_set })
+    Ok(entries)
 }
 
 /// 四册单册记账：读字节 + sha256 + 长度。
@@ -306,28 +312,31 @@ fn rr3_checks_json() -> Vec<Value> {
 /// 同族：available + checks）。快照未在册（--manifest 调试路径）如实报不可得。
 pub fn rr3_contracts_json() -> Value {
     match rr3_contracts_snap() {
-        Some(s) => {
-            let checks = rr3_checks_json();
-            json!({
-                "available": true,
-                "contracts": s.entries.iter().map(|e| json!({
-                    "file": e.file,
-                    "sha256": e.sha256,
-                    "bytes": e.bytes,
-                })).collect::<Vec<Value>>(),
-                "truth_set": s.truth_set.iter().map(|t| json!({
-                    "member": t.member,
-                    "sha256": t.sha256,
-                    "bytes": t.bytes,
-                })).collect::<Vec<Value>>(),
-                "checks": checks,
-            })
-        }
+        Some(s) => rr3_contracts_render(&s),
         None => json!({
             "available": false,
             "reason": "未以 --profile 启动（--manifest 调试路径无契约记账），契约审计不可得",
         }),
     }
+}
+
+/// 快照在册形渲染：四册账 + 真值集账 + 判果。
+fn rr3_contracts_render(s: &Rr3ContractsSnapshot) -> Value {
+    let checks = rr3_checks_json();
+    json!({
+        "available": true,
+        "contracts": s.entries.iter().map(|e| json!({
+            "file": e.file,
+            "sha256": e.sha256,
+            "bytes": e.bytes,
+        })).collect::<Vec<Value>>(),
+        "truth_set": s.truth_set.iter().map(|t| json!({
+            "member": t.member,
+            "sha256": t.sha256,
+            "bytes": t.bytes,
+        })).collect::<Vec<Value>>(),
+        "checks": checks,
+    })
 }
 
 /// sha256（FIPS 180-4）——纯函数，无查表依赖，正确性由 [`tests`] 的 NIST

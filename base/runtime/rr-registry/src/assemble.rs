@@ -347,35 +347,45 @@ pub(crate) fn rr3_demands_parse(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec
     let mut demands = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     for (i, item) in items.iter().enumerate() {
-        let Some(d) = rr3_item_tbl(
-            item,
-            "demands",
-            i,
-            "{ rail, peak_ma, sustained_ma, critical, concurrency_group }",
-            &[
-                "rail",
-                "peak_ma",
-                "sustained_ma",
-                "critical",
-                "concurrency_group",
-            ],
-            &mut errs,
-        ) else {
-            continue;
-        };
-        let rail = rr3_demand_rail(d, i, &mut errs);
-        let peak = rr3_demand_peak(d, i, &mut errs);
-        let sustained = rr3_demand_sust(d, i, &mut errs);
-        rr3_demand_cmp(peak, sustained, i, &mut errs);
-        let critical = rr3_demand_crit(d, i, &mut errs);
-        let groups = rr3_demand_grp(d, i, &mut errs);
-        if let (Some(rail), Some(peak_ma), Some(sustained_ma), Some(critical)) =
-            (rail, peak, sustained, critical)
-        {
-            rr3_demand_push(&mut demands, rail, peak_ma, sustained_ma, critical, groups);
-        }
+        rr3_demand_item(item, i, &mut demands, &mut errs);
     }
     (demands, errs)
+}
+
+/// 单条 demand：骨架 → 五键 → 交叉判据 → 齐备入列（拒项不入列）。
+fn rr3_demand_item(
+    item: &Value,
+    i: usize,
+    demands: &mut Vec<Rr3AssembleDemand>,
+    errs: &mut Vec<String>,
+) {
+    let Some(d) = rr3_item_tbl(
+        item,
+        "demands",
+        i,
+        "{ rail, peak_ma, sustained_ma, critical, concurrency_group }",
+        &[
+            "rail",
+            "peak_ma",
+            "sustained_ma",
+            "critical",
+            "concurrency_group",
+        ],
+        errs,
+    ) else {
+        return;
+    };
+    let rail = rr3_demand_rail(d, i, errs);
+    let peak = rr3_demand_peak(d, i, errs);
+    let sustained = rr3_demand_sust(d, i, errs);
+    rr3_demand_cmp(peak, sustained, i, errs);
+    let critical = rr3_demand_crit(d, i, errs);
+    let groups = rr3_demand_grp(d, i, errs);
+    if let (Some(rail), Some(peak_ma), Some(sustained_ma), Some(critical)) =
+        (rail, peak, sustained, critical)
+    {
+        rr3_demand_push(demands, rail, peak_ma, sustained_ma, critical, groups);
+    }
 }
 
 /// 五键齐备的需求入列（判据已在前置各步判完，此处只成型）。
@@ -594,6 +604,14 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
         facts.no_injection,
     ));
 
+    rr3_asm_finish(facts, errs)
+}
+
+/// 终局：错误集空交表，否则整册拒（与旧内联分支逐字同形）。
+fn rr3_asm_finish(
+    facts: Rr3AssembleFacts,
+    errs: Vec<String>,
+) -> Result<Rr3AssembleFacts, Vec<String>> {
     if errs.is_empty() {
         Ok(facts)
     } else {
@@ -604,11 +622,7 @@ pub fn rr3_assemble_parse(text: &str) -> Result<Rr3AssembleFacts, Vec<String>> {
 /// 缺 `[assemble]` 段的终局：点名后按错误集判（与旧内联分支逐字同形）。
 fn rr3_asm_no_table(mut errs: Vec<String>) -> Result<Rr3AssembleFacts, Vec<String>> {
     errs.push("装配清单缺 [assemble] 表（handles / ops 两键都必填，空数组合法）".into());
-    if errs.is_empty() {
-        Ok(Rr3AssembleFacts::default())
-    } else {
-        Err(errs)
-    }
+    rr3_asm_finish(Rr3AssembleFacts::default(), errs)
 }
 
 /// 顶层形状：schema_version（必须 2）与顶层未知键（只认 schema_version / assemble）。
@@ -620,11 +634,16 @@ fn rr3_asm_head(t: &toml::Table, errs: &mut Vec<String>) {
 /// 顶层未知键（只认 schema_version / assemble）。
 fn rr3_asm_top_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
-        if k != "schema_version" && k != "assemble" {
-            errs.push(format!(
-                "装配清单顶层未知键 {k}（只认 schema_version / assemble）"
-            ));
-        }
+        rr3_asm_top_key_err(k, errs);
+    }
+}
+
+/// 单个顶层键裁决（只认 schema_version / assemble）。
+fn rr3_asm_top_key_err(k: &str, errs: &mut Vec<String>) {
+    if k != "schema_version" && k != "assemble" {
+        errs.push(format!(
+            "装配清单顶层未知键 {k}（只认 schema_version / assemble）"
+        ));
     }
 }
 
@@ -647,20 +666,25 @@ fn rr3_asm_ver(t: &toml::Table, errs: &mut Vec<String>) {
 /// 专用——组合件级 [assemble] 不认，同 demands：内存账是原子件的物理属性）。
 fn rr3_asm_keys(asm: &toml::Table, errs: &mut Vec<String>) {
     for k in asm.keys() {
-        if ![
-            "handles",
-            "ops",
-            "no_injection",
-            "demands",
-            "task_stack_bytes",
-            "heap_peak_bytes",
-        ]
-        .contains(&k.as_str())
-        {
-            errs.push(format!(
-                "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands / task_stack_bytes / heap_peak_bytes）"
-            ));
-        }
+        rr3_asm_key_err(k, errs);
+    }
+}
+
+/// `[assemble]` 单个键裁决（六键外点名）。
+fn rr3_asm_key_err(k: &str, errs: &mut Vec<String>) {
+    if ![
+        "handles",
+        "ops",
+        "no_injection",
+        "demands",
+        "task_stack_bytes",
+        "heap_peak_bytes",
+    ]
+    .contains(&k)
+    {
+        errs.push(format!(
+            "[assemble] 未知键 {k}（只认 handles / ops / no_injection / demands / task_stack_bytes / heap_peak_bytes）"
+        ));
     }
 }
 
@@ -683,22 +707,18 @@ fn rr3_asm_handles(
     facts: &mut Rr3AssembleFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    match asm.get("handles") {
-        Some(Value::Array(items)) => {
-            let (parsed, mut item_errs) = rr3_handles_parse(items);
-            facts.handles = parsed;
-            errs.append(&mut item_errs);
-            (true, items.is_empty())
-        }
-        Some(other) => {
-            errs.push(format!("[assemble].handles 应为数组，收到 {other:?}"));
-            (false, false)
-        }
-        None => {
-            errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into());
-            (false, false)
-        }
-    }
+    let Some(v) = asm.get("handles") else {
+        errs.push("[assemble] 缺 handles 键（空数组合法，键本身必填）".into());
+        return (false, false);
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("[assemble].handles 应为数组，收到 {v:?}"));
+        return (false, false);
+    };
+    let (parsed, mut item_errs) = rr3_handles_parse(items);
+    facts.handles = parsed;
+    errs.append(&mut item_errs);
+    (true, items.is_empty())
 }
 
 /// ops：数组，每条 = { slot, src_key }，slot 非空、src_key 为合法点路径（共用同上）。
@@ -708,36 +728,33 @@ fn rr3_asm_ops(
     facts: &mut Rr3AssembleFacts,
     errs: &mut Vec<String>,
 ) -> (bool, bool) {
-    match asm.get("ops") {
-        Some(Value::Array(items)) => {
-            let (parsed, mut item_errs) = rr3_ops_parse(items);
-            facts.ops = parsed;
-            errs.append(&mut item_errs);
-            (true, items.is_empty())
-        }
-        Some(other) => {
-            errs.push(format!("[assemble].ops 应为数组，收到 {other:?}"));
-            (false, false)
-        }
-        None => {
-            errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into());
-            (false, false)
-        }
-    }
+    let Some(v) = asm.get("ops") else {
+        errs.push("[assemble] 缺 ops 键（空数组合法，键本身必填）".into());
+        return (false, false);
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("[assemble].ops 应为数组，收到 {v:?}"));
+        return (false, false);
+    };
+    let (parsed, mut item_errs) = rr3_ops_parse(items);
+    facts.ops = parsed;
+    errs.append(&mut item_errs);
+    (true, items.is_empty())
 }
 
 /// demands：电流需求申报（基-36 首件）。缺键 = 空申报合法（执法面归门 c，
 /// 不在形状层强制——L-5 空面规则只管注入面 handles/ops，不涉 demands）。
 fn rr3_asm_demands(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<String>) {
-    match asm.get("demands") {
-        Some(Value::Array(items)) => {
-            let (parsed, mut item_errs) = rr3_demands_parse(items);
-            facts.demands = parsed;
-            errs.append(&mut item_errs);
-        }
-        Some(other) => errs.push(format!("[assemble].demands 应为数组，收到 {other:?}")),
-        None => {}
-    }
+    let Some(v) = asm.get("demands") else {
+        return;
+    };
+    let Some(items) = v.as_array() else {
+        errs.push(format!("[assemble].demands 应为数组，收到 {v:?}"));
+        return;
+    };
+    let (parsed, mut item_errs) = rr3_demands_parse(items);
+    facts.demands = parsed;
+    errs.append(&mut item_errs);
 }
 
 /// task_stack_bytes / heap_peak_bytes：内存需求申报（校验⑩ 分子面，批N2 n2c-v10）。
@@ -750,14 +767,19 @@ fn rr3_asm_mem(asm: &toml::Table, facts: &mut Rr3AssembleFacts, errs: &mut Vec<S
         ("task_stack_bytes", &mut facts.task_stack_bytes),
         ("heap_peak_bytes", &mut facts.heap_peak_bytes),
     ] {
-        match asm.get(key) {
-            Some(Value::Integer(v)) if *v >= 0 => *slot = *v,
-            Some(Value::Integer(v)) => errs.push(format!(
-                "[assemble].{key} = {v} 须为非负整数（本件内存占用字节数，负数是物理矛盾）"
-            )),
-            Some(other) => errs.push(format!("[assemble].{key} 应为整数，收到 {other:?}")),
-            None => {}
-        }
+        rr3_asm_mem_one(asm, key, slot, errs);
+    }
+}
+
+/// 单个内存申报键：非负整数入档，负数/非整数各点名；缺键 = 未申报。
+fn rr3_asm_mem_one(asm: &toml::Table, key: &str, slot: &mut i64, errs: &mut Vec<String>) {
+    match asm.get(key) {
+        Some(Value::Integer(v)) if *v >= 0 => *slot = *v,
+        Some(Value::Integer(v)) => errs.push(format!(
+            "[assemble].{key} = {v} 须为非负整数（本件内存占用字节数，负数是物理矛盾）"
+        )),
+        Some(other) => errs.push(format!("[assemble].{key} 应为整数，收到 {other:?}")),
+        None => {}
     }
 }
 

@@ -122,6 +122,16 @@ pub(crate) fn rr3_axis_state_text(
         return (String::new(), notes);
     }
     // 轴消歧（件五）：instance（pin 末段）与轴读数相等的恰一份才投影
+    let text = rr3_axis_pick(found, axis, &mut notes);
+    (text, notes)
+}
+
+/// 按轴读数消歧投影：恰一份合法才出注入文本，零份/多份空串并点名。
+fn rr3_axis_pick(
+    found: &[crate::axis::Rr3AxisFile],
+    axis: &str,
+    notes: &mut Vec<String>,
+) -> String {
     let selected: Vec<&crate::axis::Rr3AxisFile> = found
         .iter()
         .filter(|f| f.pin.rsplit('.').next() == Some(axis))
@@ -135,20 +145,17 @@ pub(crate) fn rr3_axis_state_text(
                     rr_hal_api::RR3_PERIPH_AXIS_ENV
                 ));
             }
-            (String::new(), notes)
+            String::new()
         }
         [one] => {
             let p = &one.profile;
-            (
-                format!(
-                    "calibrated={},hard_stop={},lo={},hi={},center={}",
-                    p.calibrated,
-                    p.hard_stop.rr3_hard_stop_name(),
-                    p.lo_deg,
-                    p.hi_deg,
-                    p.center_deg
-                ),
-                notes,
+            format!(
+                "calibrated={},hard_stop={},lo={},hi={},center={}",
+                p.calibrated,
+                p.hard_stop.rr3_hard_stop_name(),
+                p.lo_deg,
+                p.hi_deg,
+                p.center_deg
             )
         }
         many => {
@@ -156,7 +163,7 @@ pub(crate) fn rr3_axis_state_text(
                 "instance {axis:?} 命中 {} 份合法档案（同 instance 异 pin，装配单形貌异常）——不注入执行轴状态，模块按保守缺省起跑",
                 many.len()
             ));
-            (String::new(), notes)
+            String::new()
         }
     }
 }
