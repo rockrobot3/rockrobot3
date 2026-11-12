@@ -338,18 +338,27 @@ pub(super) fn rr3_panel_route(method: &str, path: &str, body: &[u8]) -> Rr3Panel
 /// 端点真值仍是 [`RR3_PANEL_ROUTES`]（本组表不复制申报列），漂移由
 /// `route_table_matches_dispatch` 逐表项钉死。
 fn rr3_route_sys(method: &str, path: &str) -> Option<Rr3PanelDispatch> {
-    Some(match path {
-        "/" => rr3_get_only(method, Rr3PanelDispatch::Html),
-        "/api/status" => rr3_get_only(method, Rr3PanelDispatch::StatusQuery),
+    let d = match path {
+        "/" => Rr3PanelDispatch::Html,
+        "/api/status" => Rr3PanelDispatch::StatusQuery,
         // 存活/版本探针（2026-10-31）：不触总线、零依赖，可高频轮询
-        "/api/healthz" => rr3_get_only(method, Rr3PanelDispatch::HealthQuery),
-        "/api/version" => rr3_get_only(method, Rr3PanelDispatch::VersionQuery),
-        "/api/data" => rr3_get_only(method, Rr3PanelDispatch::CountersQuery),
-        "/api/logs" => rr3_get_only(method, Rr3PanelDispatch::LogsQuery),
+        "/api/healthz" => Rr3PanelDispatch::HealthQuery,
+        "/api/version" => Rr3PanelDispatch::VersionQuery,
+        _ => return rr3_route_sys_tail(method, path),
+    };
+    Some(rr3_get_only(method, d))
+}
+
+/// 系统读面续组：计数/日志/接线图（未知路径仍 404）。
+fn rr3_route_sys_tail(method: &str, path: &str) -> Option<Rr3PanelDispatch> {
+    let d = match path {
+        "/api/data" => Rr3PanelDispatch::CountersQuery,
+        "/api/logs" => Rr3PanelDispatch::LogsQuery,
         // 接线图读口：ctl.wiring 透传，判据真值单点在 rrd assembly.rs
-        "/api/wiring" => rr3_get_only(method, Rr3PanelDispatch::WiringQuery),
+        "/api/wiring" => Rr3PanelDispatch::WiringQuery,
         _ => return None,
-    })
+    };
+    Some(rr3_get_only(method, d))
 }
 
 /// 模块面：五模块 ops 读口（表驱动 [`RR3_OPS_ROUTES`]）＋ brain ops/模型行
@@ -358,14 +367,30 @@ fn rr3_route_mod(method: &str, path: &str, body: &[u8]) -> Option<Rr3PanelDispat
     if let Some(topic) = rr3_ops_topic(path) {
         return Some(rr3_get_only(method, rr3_get_call(&topic)));
     }
-    Some(match path {
+    rr3_route_brain(method, path, body)
+}
+
+/// brain 读/写面（ops 同源、模型行、密钥面在 [`rr3_route_keys`]）。
+fn rr3_route_brain(method: &str, path: &str, body: &[u8]) -> Option<Rr3PanelDispatch> {
+    match path {
         // brain ops 读/写同源（读渲染与写同一批 ops 槽）
-        "/api/brain/ops" => rr3_brain_ops(method, body),
-        "/api/brain/models" => rr3_get_only(method, rr3_get_call("rr3-brain/model/list")),
-        "/api/brain/model" => rr3_post_only(method, rr3_post_call("rr3-brain/model/set", body)),
-        "/api/brain/model/test" => {
-            rr3_post_only(method, rr3_post_call("rr3-brain/model/test", body))
-        }
+        "/api/brain/ops" => Some(rr3_brain_ops(method, body)),
+        "/api/brain/models" => Some(rr3_get_only(method, rr3_get_call("rr3-brain/model/list"))),
+        "/api/brain/model" => Some(rr3_post_only(
+            method,
+            rr3_post_call("rr3-brain/model/set", body),
+        )),
+        "/api/brain/model/test" => Some(rr3_post_only(
+            method,
+            rr3_post_call("rr3-brain/model/test", body),
+        )),
+        _ => rr3_route_keys(method, path, body),
+    }
+}
+
+/// 模型密钥面（只报 ref 名，POST 应答不回值）。
+fn rr3_route_keys(method: &str, path: &str, body: &[u8]) -> Option<Rr3PanelDispatch> {
+    Some(match path {
         "/api/model/keys" => rr3_get_only(method, Rr3PanelDispatch::ModelKeysQuery),
         "/api/model/key" => rr3_post_only(method, rr3_key_set(body)),
         _ => return None,
@@ -513,11 +538,30 @@ pub fn rr3_ctl_send(
     id: u64,
     read_timeout: Duration,
 ) -> Result<Value, String> {
-    let mut stream = std::os::unix::net::UnixStream::connect(bus_path)
+    let mut stream = rr3_ctl_conn(bus_path, read_timeout)?;
+    rr3_ctl_roundtrip(&mut stream, method, params, id)
+}
+
+/// 连总线短连并设读耐心。
+fn rr3_ctl_conn(
+    bus_path: &str,
+    read_timeout: Duration,
+) -> Result<std::os::unix::net::UnixStream, String> {
+    let stream = std::os::unix::net::UnixStream::connect(bus_path)
         .map_err(|e| format!("连总线失败: {e}"))?;
     stream
         .set_read_timeout(Some(read_timeout))
         .map_err(|e| format!("设读超时失败: {e}"))?;
+    Ok(stream)
+}
+
+/// 一问一答：发 Request 帧、收一条应答帧。
+fn rr3_ctl_roundtrip(
+    stream: &mut std::os::unix::net::UnixStream,
+    method: &str,
+    params: &Value,
+    id: u64,
+) -> Result<Value, String> {
     let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
     let payload = rr3_body_encode(Rr3PayloadType::Request, body.to_string().as_bytes());
     let frame = Rr3Frame {
@@ -533,13 +577,23 @@ pub fn rr3_ctl_send(
         },
         payload,
     };
-    rr3_frame_write(&mut stream, &frame).map_err(|e| format!("写 ctl 请求失败: {e:?}"))?;
-    let frame = rr3_frame_read_cap(&mut stream, RR3_FRAMING_PLEN_CAP_DEFAULT)
+    rr3_frame_write(&mut *stream, &frame).map_err(|e| format!("写 ctl 请求失败: {e:?}"))?;
+    let frame = rr3_frame_read_cap(&mut *stream, RR3_FRAMING_PLEN_CAP_DEFAULT)
         .map_err(|e| format!("读 ctl 应答失败: {e:?}"))?;
+    rr3_ctl_reply(frame, method)
+}
+
+/// 应答帧解码：类型必须是 Response。
+fn rr3_ctl_reply(frame: Rr3Frame, method: &str) -> Result<Value, String> {
     let (ty, payload) = Rr3BusClient::rr3_frame_body(&frame)?;
     if ty != Rr3PayloadType::Response {
         return Err(format!("ctl 应答类型错误: {ty:?}"));
     }
+    rr3_ctl_result(payload, method)
+}
+
+/// 应答体折 result：错误信封折 Err，缺 result 也回错。
+fn rr3_ctl_result(payload: Value, method: &str) -> Result<Value, String> {
     if let Some(err) = payload.get("error") {
         return Err(format!(
             "ctl {method} 被拒: {}",

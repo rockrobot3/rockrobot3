@@ -194,34 +194,54 @@ fn rr3_cfg_doa(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Resul
     let Some(doa) = section.and_then(|s| s.get("doa")) else {
         return Ok(());
     };
-    let mut t = cfg.doa.bin_threshold_deg as i64;
+    cfg.doa.bin_threshold_deg = rr3_doa_deg(doa, cfg.doa.bin_threshold_deg)?;
+    cfg.doa.window_ms = rr3_doa_window(doa, cfg.doa.window_ms)?;
+    cfg.doa.window_rms_min = rr3_doa_rms(doa, cfg.doa.window_rms_min)?;
+    cfg.doa.mic_baseline_mm = rr3_doa_base(doa, cfg.doa.mic_baseline_mm)?;
+    Ok(())
+}
+
+/// 判向角阈值键（i64 中转后收 i32 域，越界点名）。
+fn rr3_doa_deg(doa: &toml::Value, cur: i32) -> Result<i32, String> {
+    let mut t = cur as i64;
     rr3_cfg_i64(doa, "bin_threshold_deg", &mut t)?;
-    cfg.doa.bin_threshold_deg =
-        i32::try_from(t).map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))?;
-    rr3_cfg_u64(doa, "window_ms", &mut cfg.doa.window_ms)?;
-    if cfg.doa.window_ms < 1 {
+    i32::try_from(t).map_err(|_| format!("[rr3-sense.doa] bin_threshold_deg 越界: {t}"))
+}
+
+/// 判向窗长键（0 无窗意义收敛 1000ms 留痕）。
+fn rr3_doa_window(doa: &toml::Value, cur: u64) -> Result<u64, String> {
+    let mut ms = cur;
+    rr3_cfg_u64(doa, "window_ms", &mut ms)?;
+    if ms < 1 {
         eprintln!(
             "config [rr3-sense.doa] window_ms={} 无窗意义，收敛 1000ms",
-            cfg.doa.window_ms
+            ms
         );
-        cfg.doa.window_ms = 1000;
+        ms = 1000;
     }
-    let mut wrm = cfg.doa.window_rms_min;
+    Ok(ms)
+}
+
+/// 判向窗 RMS 门限键（i16 采样域）。
+fn rr3_doa_rms(doa: &toml::Value, cur: i64) -> Result<i64, String> {
+    let mut wrm = cur;
     rr3_cfg_i64(doa, "window_rms_min", &mut wrm)?;
     if !(0..=32767).contains(&wrm) {
         return Err(format!(
             "[rr3-sense.doa] window_rms_min 须在 0..=32767，收到 {wrm}"
         ));
     }
-    cfg.doa.window_rms_min = wrm;
-    let mut mm = cfg.doa.mic_baseline_mm as u64;
+    Ok(wrm)
+}
+
+/// 麦间距键（0 无几何可判向；u64 中转后收 u32 域）。
+fn rr3_doa_base(doa: &toml::Value, cur: u32) -> Result<u32, String> {
+    let mut mm = cur as u64;
     rr3_cfg_u64(doa, "mic_baseline_mm", &mut mm)?;
     if mm == 0 {
         return Err("[rr3-sense.doa] mic_baseline_mm=0 无几何可判向".to_string());
     }
-    cfg.doa.mic_baseline_mm =
-        u32::try_from(mm).map_err(|_| format!("[rr3-sense.doa] mic_baseline_mm 越界: {mm}"))?;
-    Ok(())
+    u32::try_from(mm).map_err(|_| format!("[rr3-sense.doa] mic_baseline_mm 越界: {mm}"))
 }
 
 /// `[rr3-sense.reflex]` 段（B批 b2：缺键回落默认，enable 缺省 false）。

@@ -40,15 +40,11 @@ pub(super) fn rr3_read_line_cap(
         if buf.is_empty() {
             return Ok(used);
         }
-        let (take, complete) = match buf.iter().position(|&b| b == b'\n') {
-            Some(i) => (i + 1, true),
-            None => (buf.len(), false),
-        };
+        let (take, complete) = rr3_line_span(buf);
         if used + take > cap {
             return Err(format!("{what}超界（单行 > {cap}B）"));
         }
-        let chunk =
-            std::str::from_utf8(&buf[..take]).map_err(|e| format!("{what}不是合法 UTF-8: {e}"))?;
+        let chunk = rr3_utf8(&buf[..take], what)?;
         out.push_str(chunk);
         reader.consume(take);
         used += take;
@@ -56,6 +52,19 @@ pub(super) fn rr3_read_line_cap(
             return Ok(used);
         }
     }
+}
+
+/// 行切点：到换行的前缀长度 + 是否含换行（无换行 = 整块未完成）。
+fn rr3_line_span(buf: &[u8]) -> (usize, bool) {
+    match buf.iter().position(|&b| b == b'\n') {
+        Some(i) => (i + 1, true),
+        None => (buf.len(), false),
+    }
+}
+
+/// 可见块转 UTF-8（错误文案带段名）。
+fn rr3_utf8<'a>(bytes: &'a [u8], what: &str) -> Result<&'a str, String> {
+    std::str::from_utf8(bytes).map_err(|e| format!("{what}不是合法 UTF-8: {e}"))
 }
 
 /// 从连接上读一个请求：请求行 → 头（找 Content-Length）→ 读满 body。
@@ -111,32 +120,49 @@ fn rr3_req_line(reader: &mut impl BufRead, cap: usize) -> Result<(String, String
 /// Content-Length，其余头一律忽略。返回声明的 body 长度。
 fn rr3_req_heads(reader: &mut impl BufRead, cap: usize, mut used: usize) -> Result<usize, String> {
     let mut content_length = 0usize;
-    loop {
-        let remaining = cap.saturating_sub(used);
-        if remaining == 0 {
-            return Err(format!("头区超界（>{cap}B）"));
-        }
-        let mut head = String::new();
-        let n = rr3_read_line_cap(reader, remaining, "头区", &mut head)?;
-        if n == 0 {
-            break;
-        }
+    while let Some((head, n)) = rr3_head_read(reader, cap, used)? {
         used += n;
-        let head = head.trim_end();
-        if head.is_empty() {
+        if !rr3_head_line(&head, &mut content_length)? {
             break;
-        }
-        if let Some(v) = head
-            .to_ascii_lowercase()
-            .strip_prefix("content-length:")
-            .map(str::trim)
-        {
-            content_length = v
-                .parse()
-                .map_err(|_| format!("Content-Length 不是数字: {v:?}"))?;
         }
     }
     Ok(content_length)
+}
+
+/// 读一条头行：先判剩余预算，再按剩余额度读（返回 None = EOF）。
+fn rr3_head_read(
+    reader: &mut impl BufRead,
+    cap: usize,
+    used: usize,
+) -> Result<Option<(String, usize)>, String> {
+    let remaining = cap.saturating_sub(used);
+    if remaining == 0 {
+        return Err(format!("头区超界（>{cap}B）"));
+    }
+    let mut head = String::new();
+    let n = rr3_read_line_cap(reader, remaining, "头区", &mut head)?;
+    if n == 0 {
+        return Ok(None);
+    }
+    Ok(Some((head, n)))
+}
+
+/// 单条头行落位：空行 = 头区结束；只认 Content-Length。
+fn rr3_head_line(head: &str, content_length: &mut usize) -> Result<bool, String> {
+    let head = head.trim_end();
+    if head.is_empty() {
+        return Ok(false);
+    }
+    if let Some(v) = head
+        .to_ascii_lowercase()
+        .strip_prefix("content-length:")
+        .map(str::trim)
+    {
+        *content_length = v
+            .parse()
+            .map_err(|_| format!("Content-Length 不是数字: {v:?}"))?;
+    }
+    Ok(true)
 }
 
 /// 按声明长度读满 body——半包在这里等满或超时。
