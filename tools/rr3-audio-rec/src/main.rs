@@ -504,27 +504,46 @@ fn reader_run(
                     return; // 解码面已亡（主线程先退），主线程/看门狗收口
                 }
             }
-            _ => {
-                if !seen_data {
-                    continue; // 武装后首片前的静默合法（复位 banner/settle 窗）
-                }
-                zeros += 1;
-                if zeros < RESYNC_ZERO_BAIL {
-                    continue;
-                }
-                eprintln!("[rec] 1.6s 连续静默 → 线上断流，读线程重连");
-                watch.armed.store(false, Ordering::Release);
-                if !reader_reconnect(&mut conn, &device, baud) {
-                    eprintln!("[rec] 读线程重连全败");
-                    bail_with_recovery(&out_path, &watch); // exit(4)，盘侧真相保数据
-                }
-                watch.reconnects.fetch_add(1, Ordering::Relaxed);
-                watch.armed.store(true, Ordering::Release);
-                seen_data = false;
-                zeros = 0;
-            }
+            _ => rr3_reader_gap(
+                &mut conn,
+                &mut seen_data,
+                &mut zeros,
+                &device,
+                baud,
+                &watch,
+                &out_path,
+            ),
         }
     }
+}
+
+/// 零读分支：静默计数与就地重连；重连成功后复位本段计数。
+fn rr3_reader_gap(
+    conn: &mut Rr3UartConn,
+    seen: &mut bool,
+    zeros: &mut u32,
+    device: &str,
+    baud: u32,
+    watch: &WatchState,
+    out_path: &std::path::Path,
+) {
+    if !*seen {
+        return; // 武装后首片前的静默合法（复位 banner/settle 窗）
+    }
+    *zeros += 1;
+    if *zeros < RESYNC_ZERO_BAIL {
+        return;
+    }
+    eprintln!("[rec] 1.6s 连续静默 → 线上断流，读线程重连");
+    watch.armed.store(false, Ordering::Release);
+    if !reader_reconnect(conn, device, baud) {
+        eprintln!("[rec] 读线程重连全败");
+        bail_with_recovery(out_path, watch); // exit(4)，盘侧真相保数据
+    }
+    watch.reconnects.fetch_add(1, Ordering::Relaxed);
+    watch.armed.store(true, Ordering::Release);
+    *seen = false;
+    *zeros = 0;
 }
 
 /// 读线程重连（三级防护第 ③ 级，判据② 改造后搬进读线程）：[HANDSHAKE_TRIES]

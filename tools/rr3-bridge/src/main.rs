@@ -74,22 +74,42 @@ pub fn parse_args(args: &[String]) -> Result<link::BridgeConfig, String> {
     let mut baud = link::RR3_BRIDGE_BAUD_DEFAULT;
     let mut i = 0;
     while i < args.len() {
-        let flag = args[i].as_str();
-        if !matches!(flag, "--uart" | "--socket" | "--baud") {
-            return Err(format!("未知参数 {flag}（可用：--uart --socket --baud）"));
-        }
-        let v = rr3_arg_value(flag, args, i)?;
-        match flag {
-            "--uart" => uart = Some(PathBuf::from(v)),
-            "--socket" => socket = Some(PathBuf::from(v)),
-            _ => baud = rr3_arg_baud(v)?,
-        }
+        rr3_bridge_arg(&args[i], args, i, &mut uart, &mut socket, &mut baud)?;
         i += 2;
     }
+    rr3_bridge_config(uart, socket, baud)
+}
+
+/// 单个旗标落位（`--uart` / `--socket` / `--baud`；未知旗标即错）。
+fn rr3_bridge_arg(
+    flag: &str,
+    args: &[String],
+    i: usize,
+    uart: &mut Option<PathBuf>,
+    socket: &mut Option<PathBuf>,
+    baud: &mut u32,
+) -> Result<(), String> {
+    if !matches!(flag, "--uart" | "--socket" | "--baud") {
+        return Err(format!("未知参数 {flag}（可用：--uart --socket --baud）"));
+    }
+    let v = rr3_arg_value(flag, args, i)?;
+    match flag {
+        "--uart" => *uart = Some(PathBuf::from(v)),
+        "--socket" => *socket = Some(PathBuf::from(v)),
+        _ => *baud = rr3_arg_baud(v)?,
+    }
+    Ok(())
+}
+
+/// 必给项与档位裁决（档位校验在这里显形：rr3_uart_baud_speed 同表，三档白名单
+/// 真值单点在 rr-ipc；桥不自持档位清单）。
+fn rr3_bridge_config(
+    uart: Option<PathBuf>,
+    socket: Option<PathBuf>,
+    baud: u32,
+) -> Result<link::BridgeConfig, String> {
     let uart = uart.ok_or("缺 --uart（UART 设备路径）")?;
     let socket = socket.ok_or("缺 --socket（rrd 套接字路径）")?;
-    // 档位校验在这里显形（rr3_uart_baud_speed 同表，三档白名单真值单点在
-    // rr-ipc）；桥不自持档位清单。
     rr_ipc::transport::uart::rr3_uart_baud_speed(baud)
         .map_err(|e| format!("--baud {baud} 不可用: {e}"))?;
     Ok(link::BridgeConfig { uart, baud, socket })

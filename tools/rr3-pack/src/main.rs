@@ -206,23 +206,29 @@ fn rr3_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
     let entries = fs::read_dir(src).map_err(|e| format!("读目录 {} 失败: {e}", src.display()))?;
     for e in entries {
         let e = e.map_err(|err| format!("读目录 {} 失败: {err}", src.display()))?;
-        let from = e.path();
-        let to = dst.join(e.file_name());
-        let ft = e
-            .file_type()
-            .map_err(|err| format!("取 {} 类型失败: {err}", from.display()))?;
-        if ft.is_dir() {
-            rr3_copy_dir(&from, &to)?;
-        } else if ft.is_file() {
-            fs::copy(&from, &to).map_err(|err| format!("复制 {} 失败: {err}", from.display()))?;
-        } else {
-            return Err(format!(
-                "python pkg 树含非普通文件（{}）——注入产物须是仓内包目录的纯副本，打包拒绝",
-                from.display()
-            ));
-        }
+        rr3_copy_entry(&e, dst)?;
     }
     Ok(())
+}
+
+/// 单个条目：目录递归、普通文件复制，其余（链接/特殊文件）点名拒绝。
+fn rr3_copy_entry(e: &fs::DirEntry, dst: &Path) -> Result<(), String> {
+    let from = e.path();
+    let to = dst.join(e.file_name());
+    let ft = e
+        .file_type()
+        .map_err(|err| format!("取 {} 类型失败: {err}", from.display()))?;
+    if ft.is_dir() {
+        return rr3_copy_dir(&from, &to);
+    }
+    if ft.is_file() {
+        fs::copy(&from, &to).map_err(|err| format!("复制 {} 失败: {err}", from.display()))?;
+        return Ok(());
+    }
+    Err(format!(
+        "python pkg 树含非普通文件（{}）——注入产物须是仓内包目录的纯副本，打包拒绝",
+        from.display()
+    ))
 }
 
 /// 打包面的 entry 改写（B45 起委托 rrd 单点 [`rrd::manifest::rr3_manifest_rewrite`]）：

@@ -96,30 +96,36 @@ pub(crate) fn rr3_cred_read() -> Option<Rr3Cred> {
     // "没配过"处理会让固化凭据悄悄回落到编译期注入（设备连到另一张网），排障零线索。
     let open = unsafe { nvs_open(ns.as_ptr(), nvs_open_mode_t_NVS_READONLY, &mut h) };
     if open != ESP_OK {
-        if open != ESP_ERR_NVS_NOT_FOUND {
-            eprintln!(
-                "[periph] 凭据 NVS 打不开（ns={RR3_CRED_NAMESPACE}，err={open:#x}）——按未配置处理（存储面故障，非未配网）"
-            );
-        }
+        rr3_cred_open_fault(open);
         return None;
     }
-    let r = unsafe {
-        (|| {
-            let ssid = nvs_get_str_boxed(h, &k_ssid, RR3_CRED_SSID_MAX)?;
-            let pass = nvs_get_str_boxed(h, &k_pass, RR3_CRED_PASS_MAX)?;
-            // 写侧同门复验（空 SSID 等半份形制在此折缺席，读口不是"任何字节能进"
-            if rr3_cred_form_check(&ssid, &pass).is_err() {
-                eprintln!(
-                    "[periph] 凭据形制不合（键 {}）——按缺席处理",
-                    k_ssid.to_string_lossy()
-                );
-                return None;
-            }
-            Some(Rr3Cred::new(ssid, pass))
-        })()
-    };
+    let r = unsafe { rr3_cred_pairs(h, &k_ssid, &k_pass) };
     unsafe { nvs_close(h) };
     r
+}
+
+/// NVS 打开失败的点名：命名空间不存在是常态（不报），其余按存储面故障报。
+fn rr3_cred_open_fault(open: i32) {
+    if open != ESP_ERR_NVS_NOT_FOUND {
+        eprintln!(
+            "[periph] 凭据 NVS 打不开（ns={RR3_CRED_NAMESPACE}，err={open:#x}）——按未配置处理（存储面故障，非未配网）"
+        );
+    }
+}
+
+/// 两键读取与同门复验（读口一次现取，不缓存）。
+unsafe fn rr3_cred_pairs(h: nvs_handle_t, k_ssid: &CString, k_pass: &CString) -> Option<Rr3Cred> {
+    let ssid = nvs_get_str_boxed(h, k_ssid, RR3_CRED_SSID_MAX)?;
+    let pass = nvs_get_str_boxed(h, k_pass, RR3_CRED_PASS_MAX)?;
+    // 写侧同门复验（空 SSID 等半份形制在此折缺席，读口不是"任何字节能进"
+    if rr3_cred_form_check(&ssid, &pass).is_err() {
+        eprintln!(
+            "[periph] 凭据形制不合（键 {}）——按缺席处理",
+            k_ssid.to_string_lossy()
+        );
+        return None;
+    }
+    Some(Rr3Cred::new(ssid, pass))
 }
 
 /// 单键读出（定长缓冲一次取——形制上限已知，两段式探测无必要；超形/坏 UTF-8＝

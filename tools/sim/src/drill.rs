@@ -182,33 +182,36 @@ fn rr3_args_modes(a: &Rr3SimArgs) -> Result<(), String> {
 
 /// 音频双后端旗标：仅 --brain 适用，白名单 + 板面约束（fail-closed ①②）。
 fn rr3_args_audio(a: &Rr3SimArgs) -> Result<(), String> {
+    rr3_audio_backend(a, "--audio-backend", a.audio_backend.as_ref())?;
+    rr3_audio_backend(a, "--sink-backend", a.sink_backend.as_ref())?;
+    rr3_audio_pairs(a)
+}
+
+/// 单面后端旗标的归属与白名单（`--audio-backend` / `--sink-backend` 同域）。
+fn rr3_audio_backend(a: &Rr3SimArgs, flag: &str, backend: Option<&String>) -> Result<(), String> {
     const AUDIO_BACKENDS: [&str; 5] = ["sim", "linux", "esp32", "mac", "placeholder"];
-    if let Some(b) = &a.audio_backend {
-        if !a.brain {
-            return Err("--audio-backend 仅 --brain 演练适用".to_string());
-        }
-        if !AUDIO_BACKENDS.contains(&b.as_str()) {
-            return Err(format!(
-                "--audio-backend 取值不认: {b}（允许 sim/linux/esp32/mac/placeholder——与 RR3_HAL_BACKEND 同白名单）"
-            ));
-        }
+    let Some(b) = backend else {
+        return Ok(());
+    };
+    if !a.brain {
+        return Err(format!("{flag} 仅 --brain 演练适用"));
     }
-    if let Some(b) = &a.sink_backend {
-        if !a.brain {
-            return Err("--sink-backend 仅 --brain 演练适用".to_string());
-        }
-        if !AUDIO_BACKENDS.contains(&b.as_str()) {
-            return Err(format!(
-                "--sink-backend 取值不认: {b}（允许 sim/linux/esp32/mac/placeholder——与 RR3_HAL_BACKEND 同白名单）"
-            ));
-        }
-        // fail-closed ②（A 批 c4）：板无扬声器，回放恒宿主——显式给 esp32 即拒
-        if b == "esp32" {
-            return Err(
-                "--sink-backend esp32 拒收：板无扬声器，TTS 回放恒宿主（mac AudioQueue / sim 尾窗）"
-                    .to_string(),
-            );
-        }
+    if !AUDIO_BACKENDS.contains(&b.as_str()) {
+        return Err(format!(
+            "{flag} 取值不认: {b}（允许 sim/linux/esp32/mac/placeholder——与 RR3_HAL_BACKEND 同白名单）"
+        ));
+    }
+    Ok(())
+}
+
+/// 两后端组合裁决（fail-closed ①②）。
+fn rr3_audio_pairs(a: &Rr3SimArgs) -> Result<(), String> {
+    // fail-closed ②（A 批 c4）：板无扬声器，回放恒宿主——显式给 esp32 即拒
+    if a.sink_backend.as_deref() == Some("esp32") {
+        return Err(
+            "--sink-backend esp32 拒收：板无扬声器，TTS 回放恒宿主（mac AudioQueue / sim 尾窗）"
+                .to_string(),
+        );
     }
     // fail-closed ①（A 批 c4）：esp32 源未显式给回放后端拒起——缺省跟随
     // audio_backend 会令 interact 吃 esp32 抢同一 UART（Rr3UartConn flock 跨进程
@@ -224,34 +227,48 @@ fn rr3_args_audio(a: &Rr3SimArgs) -> Result<(), String> {
 
 /// 云端旗标：仅 --brain 适用，枚举 + 端点形状 + real 必须显式端点。
 fn rr3_args_cloud(a: &Rr3SimArgs) -> Result<(), String> {
-    const BRAIN_CLOUDS: [&str; 2] = ["mock", "real"];
-    if let Some(c) = &a.brain_cloud {
-        if !a.brain {
-            return Err("--brain-cloud 仅 --brain 演练适用".to_string());
-        }
-        if !BRAIN_CLOUDS.contains(&c.as_str()) {
-            return Err(format!("--brain-cloud 取值不认: {c}（允许 mock/real）"));
-        }
-    }
-    if let Some(u) = &a.brain_base_url {
-        if !a.brain {
-            return Err("--brain-base-url 仅 --brain 演练适用".to_string());
-        }
-        if a.brain_cloud.as_deref() != Some("real") {
-            return Err(
-                "--brain-base-url 仅 --brain-cloud real 适用：mock 云不碰网络，端点给了也不会被读"
-                    .to_string(),
-            );
-        }
-        if !u.starts_with("http://") && !u.starts_with("https://") {
-            return Err(format!("--brain-base-url 须以 http(s):// 开头: {u}"));
-        }
-    }
+    rr3_cloud_mode(a)?;
+    rr3_cloud_url(a)?;
     if a.brain_cloud.as_deref() == Some("real") && a.brain_base_url.is_none() {
         return Err(
             "--brain-cloud real 必须显式给 --brain-base-url（演练 config 缺省是死地址，fail-closed 不落）"
                 .to_string(),
         );
+    }
+    Ok(())
+}
+
+/// 云模式枚举与 --brain 归属。
+fn rr3_cloud_mode(a: &Rr3SimArgs) -> Result<(), String> {
+    const BRAIN_CLOUDS: [&str; 2] = ["mock", "real"];
+    let Some(c) = &a.brain_cloud else {
+        return Ok(());
+    };
+    if !a.brain {
+        return Err("--brain-cloud 仅 --brain 演练适用".to_string());
+    }
+    if !BRAIN_CLOUDS.contains(&c.as_str()) {
+        return Err(format!("--brain-cloud 取值不认: {c}（允许 mock/real）"));
+    }
+    Ok(())
+}
+
+/// 云端点形状与 mock/real 组合。
+fn rr3_cloud_url(a: &Rr3SimArgs) -> Result<(), String> {
+    let Some(u) = &a.brain_base_url else {
+        return Ok(());
+    };
+    if !a.brain {
+        return Err("--brain-base-url 仅 --brain 演练适用".to_string());
+    }
+    if a.brain_cloud.as_deref() != Some("real") {
+        return Err(
+            "--brain-base-url 仅 --brain-cloud real 适用：mock 云不碰网络，端点给了也不会被读"
+                .to_string(),
+        );
+    }
+    if !u.starts_with("http://") && !u.starts_with("https://") {
+        return Err(format!("--brain-base-url 须以 http(s):// 开头: {u}"));
     }
     Ok(())
 }

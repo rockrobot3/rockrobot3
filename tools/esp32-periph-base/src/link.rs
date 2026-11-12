@@ -53,51 +53,61 @@ pub(crate) fn reply(uart: &mut UartDriver, line: &str) -> bool {
 /// portMAX_DELAY 阻塞，主机发半行后断线/复位就让控制面永久卡死（outbox/audio/
 /// INFO 全停，只能硬件复位）。
 pub(crate) fn read_line(uart: &mut UartDriver, first: u8) -> Result<String, &'static str> {
-    let mut buf = Vec::with_capacity(LINE_CAP);
     if first == b'\n' {
         // 空行保持批B 行为：静默空串（cmd_loop trim 后跳过）
         return Ok(String::new());
     }
+    let mut buf = Vec::with_capacity(LINE_CAP);
     buf.push(first);
     let mut byte = [0u8; 1];
     let mut idle = 0u32;
     loop {
+        let b = rr3_line_byte(uart, &mut byte, &mut idle)?;
+        if b == b'\n' {
+            return Ok(rr3_line_finish(&mut buf));
+        }
+        if buf.len() >= LINE_CAP {
+            return Err(rr3_line_overflow(uart, &buf));
+        }
+        buf.push(b);
+    }
+}
+
+/// 读一个字节：零读累计到预算即判半行断线（返回 Err）。
+fn rr3_line_byte(
+    uart: &mut UartDriver,
+    byte: &mut [u8],
+    idle: &mut u32,
+) -> Result<u8, &'static str> {
+    loop {
         let n = uart
-            .read(&mut byte, LINE_BYTE_TICKS)
+            .read(byte, LINE_BYTE_TICKS)
             .map_err(|_| "uart read 失败")?;
         if n == 0 {
-            idle += 1;
-            if idle >= LINE_GAP_BUDGET {
+            *idle += 1;
+            if *idle >= LINE_GAP_BUDGET {
                 return Err("line timeout（半行无进展丢弃）");
             }
             continue;
         }
-        idle = 0;
-        match byte[0] {
-            b'\n' => {
-                while matches!(buf.last(), Some(b'\r')) {
-                    buf.pop();
-                }
-                return Ok(String::from_utf8_lossy(&buf).into_owned());
-            }
-            b => {
-                if buf.len() >= LINE_CAP {
-                    // 超长行：**必须把本行余下字节吞掉**再返回——旧版直接 return，
-                    // 行尾残留在 UART FIFO 里被下一轮当成新命令解析（垃圾指令执行
-                    // + 一串没人请求的 ERR 行）。
-                    drain_line_tail(uart);
-                    // 帧失步取证（2026-10-30 帧面真机首验）：宿主突发首字节失步会把
-                    // 整帧降级成行。行首字节可定位失步点——0x45/0x52/0x41 = magic
-                    // 第 2-4 字节（首字节丢失），其他值 = 首字节已坏。宿主侧已加
-                    // 空闲前导（rr-ipc `Rr3UartConn::tx_idle_preamble`），正常运行
-                    // 本路径不应再触发；触发即凭这 8 字节指认。
-                    eprintln!("[periph] line too long: 前8字节 {:02x?}", &buf[..8]);
-                    return Err("line too long");
-                }
-                buf.push(b);
-            }
-        }
+        *idle = 0;
+        return Ok(byte[0]);
     }
+}
+
+/// 行尾定形：剥掉 '\r' 后按 UTF-8 宽松转字符串。
+fn rr3_line_finish(buf: &mut Vec<u8>) -> String {
+    while matches!(buf.last(), Some(b'\r')) {
+        buf.pop();
+    }
+    String::from_utf8_lossy(&buf[..]).into_owned()
+}
+
+/// 超长行：先吞净本行余下字节再点名，返回错误文案。
+fn rr3_line_overflow(uart: &mut UartDriver, buf: &[u8]) -> &'static str {
+    drain_line_tail(uart);
+    eprintln!("[periph] line too long: 前8字节 {:02x?}", &buf[..8]);
+    "line too long"
 }
 
 /// 吞掉当前行剩余字节（超长行处置）：读到 '\n' 为止；字节带超时 + 行进总预算，
@@ -178,23 +188,7 @@ impl Rr3ByteStream for UartIo<'_> {
         // 永久阻塞在 128B 头里，控制面再也回不到轮首——正是 `read_line` 早已修掉
         // 的"整面锁死"形状，帧面此前漏改。预算用尽折叠为 0（缝上无错误通道，
         // Closed 形状）→ `TornHeader/TornPayload` → 调用方残尾吞净后复位失步。
-        let mut idle = 0u32;
-        loop {
-            match self.uart.read(buf, LINE_BYTE_TICKS) {
-                Ok(0) => {
-                    idle += 1;
-                    if idle >= LINE_GAP_BUDGET {
-                        eprintln!("[periph] 帧内读超时（{LINE_GAP_BUDGET} 拍无进展，判半帧断线）");
-                        return 0;
-                    }
-                }
-                Ok(n) => return n,
-                Err(e) => {
-                    eprintln!("[periph] UART 读失败: {e:?}");
-                    return 0;
-                }
-            }
-        }
+        rr3_uart_read(self.uart, buf)
     }
 
     fn rr3_write_all_bytes(&mut self, buf: &[u8]) -> usize {
@@ -212,6 +206,27 @@ impl Rr3ByteStream for UartIo<'_> {
         // 等移位完成再返回（reply 同款"应答发完再返回"语义）
         let _ = self.uart.wait_tx_done(u32::MAX);
         done
+    }
+}
+
+/// 帧内读：字节间超时 + 无进展预算，预算用尽折叠为 0。
+fn rr3_uart_read(uart: &mut UartDriver, buf: &mut [u8]) -> usize {
+    let mut idle = 0u32;
+    loop {
+        match uart.read(buf, LINE_BYTE_TICKS) {
+            Ok(0) => {
+                idle += 1;
+                if idle >= LINE_GAP_BUDGET {
+                    eprintln!("[periph] 帧内读超时（{LINE_GAP_BUDGET} 拍无进展，判半帧断线）");
+                    return 0;
+                }
+            }
+            Ok(n) => return n,
+            Err(e) => {
+                eprintln!("[periph] UART 读失败: {e:?}");
+                return 0;
+            }
+        }
     }
 }
 

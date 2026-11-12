@@ -186,13 +186,7 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
         ("src/main.rs", main_rs(&id)),
         ("README.md", readme(&id)),
     ];
-    for (rel, body) in &files {
-        let path = staging.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, body)?;
-    }
+    rr3_mkmod_write(&staging, &files)?;
 
     let report = rr_registry::rr3_manifest_gate(&staging.join("module.toml"));
     if !report.ok() {
@@ -202,6 +196,18 @@ pub fn rr3_mkmod_generate(name: &str, out_root: &Path) -> Result<Vec<PathBuf>, R
 
     std::fs::rename(&staging, &target)?;
     Ok(files.iter().map(|(rel, _)| target.join(rel)).collect())
+}
+
+/// 把生成物逐件落到 staging 树（相对路径带子目录时按需建父目录）。
+fn rr3_mkmod_write(out: &Path, files: &[(&str, String)]) -> Result<(), Rr3MkmodError> {
+    for (rel, body) in files {
+        let path = out.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, body)?;
+    }
+    Ok(())
 }
 
 /// 原子件名：`^[a-z][a-z_]*$`，2..=24 字符（atom.schema.toml 的 atom_name 规则同款）
