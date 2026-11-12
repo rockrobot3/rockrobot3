@@ -162,13 +162,15 @@ fn rr3_write_bool(params: &Value) -> Result<Rr3WriteValue, (Rr3StatusCode, Strin
 /// 正整数值型：0 与缺席/非整数分别点名。
 fn rr3_write_num(params: &Value, key: &str) -> Result<Rr3WriteValue, (Rr3StatusCode, String)> {
     let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
-    match params.get("value").and_then(Value::as_u64) {
-        Some(n) if n > 0 => Ok(Rr3WriteValue::Num(n)),
-        Some(_) => Err(invalid(format!(
+    let Some(n) = params.get("value").and_then(Value::as_u64) else {
+        return Err(invalid(format!("{key} 的 params.value 要求正整数")));
+    };
+    if n == 0 {
+        return Err(invalid(format!(
             "{key} 的 params.value 要求正整数（收到 0）"
-        ))),
-        None => Err(invalid(format!("{key} 的 params.value 要求正整数"))),
+        )));
     }
+    Ok(Rr3WriteValue::Num(n))
 }
 
 /// 写口路径集（真值集记账推导，零新增全局）：记账成员判据 = 成员相对名（基-40

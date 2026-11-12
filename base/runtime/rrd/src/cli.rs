@@ -134,17 +134,29 @@ pub fn rr3_cli_parse_env(
 /// 解析单个参数位，返回下一个待解析下标：形状门（未知选项 / 缺参数 / 值以 `-`
 /// 开头 / 非数字）全在此处拒，不静默回落默认值（fail-closed）。
 fn rr3_cli_arg(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
-    match args[i].as_str() {
-        "--socket" | "--topics-overlay" | "--contracts" | "--profile" | "--manifest" => {
-            rr3_cli_path(cfg, args, i)
-        }
-        "--restart-base-ms" | "--pre-register-timeout-ms" | "--watchdog-tick-ms" => {
-            rr3_cli_num(cfg, args, i)
-        }
-        "--boot-role" | "-h" | "--help" => rr3_cli_misc(cfg, args, i),
-        other => Err(format!("未知选项 {other}\n{USAGE}")),
-    }
+    let opt = args[i].as_str();
+    let (_, handle) = RR3_ARG_HANDLERS
+        .iter()
+        .find(|(name, _)| *name == opt)
+        .ok_or_else(|| format!("未知选项 {opt}\n{USAGE}"))?;
+    handle(cfg, args, i)
 }
+
+/// 开关 → 族处理器（路径/数值/杂项三族；未知开关由查表失败点名）。
+type Rr3ArgHandler = fn(&mut RrdConfig, &[String], usize) -> Result<usize, String>;
+const RR3_ARG_HANDLERS: [(&str, Rr3ArgHandler); 11] = [
+    ("--socket", rr3_cli_path),
+    ("--topics-overlay", rr3_cli_path),
+    ("--contracts", rr3_cli_path),
+    ("--profile", rr3_cli_path),
+    ("--manifest", rr3_cli_path),
+    ("--restart-base-ms", rr3_cli_num),
+    ("--pre-register-timeout-ms", rr3_cli_num),
+    ("--watchdog-tick-ms", rr3_cli_num),
+    ("--boot-role", rr3_cli_misc),
+    ("-h", rr3_cli_misc),
+    ("--help", rr3_cli_misc),
+];
 
 /// 路径型参数族：值走 `need_path_value`（缺值/疑似开关一律拒，不静默回落）。
 fn rr3_cli_path(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
@@ -204,62 +216,44 @@ fn rr3_mf_conflict(cfg: &RrdConfig) -> Result<(), String> {
 
 /// 数值型参数族：非负整数毫秒；watchdog 额外拒 0（忙循环不是"更快一点"）。
 fn rr3_cli_num(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
-    match args[i].as_str() {
-        "--restart-base-ms" => rr3_num_restart(cfg, args, i),
-        "--pre-register-timeout-ms" => rr3_num_pre(cfg, args, i),
-        "--watchdog-tick-ms" => rr3_num_tick(cfg, args, i),
-        other => Err(format!("未知选项 {other}\n{USAGE}")),
-    }
-}
-
-/// `--restart-base-ms`：非负整数 + 0/溢出两道专用门禁。
-fn rr3_num_restart(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
-    cfg.restart_base_ms = parse_restart_base(&need_value("--restart-base-ms", args, i)?)?;
+    let opt = args[i].as_str();
+    let (_, set) = RR3_NUM_OPTS
+        .iter()
+        .find(|(name, _)| *name == opt)
+        .ok_or_else(|| format!("未知选项 {opt}\n{USAGE}"))?;
+    set(cfg, &need_value(opt, args, i)?)?;
     Ok(i + 2)
 }
 
-/// `--pre-register-timeout-ms`：非负整数毫秒（0 合法，conn 层按 max(1) 用）。
-fn rr3_num_pre(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
-    cfg.pre_register_timeout_ms = parse_ms(
-        "--pre-register-timeout-ms",
-        &need_value("--pre-register-timeout-ms", args, i)?,
-    )?;
-    Ok(i + 2)
-}
-
-/// `--watchdog-tick-ms`：非负整数毫秒，0 额外拒（忙循环不是"更快一点"）。
-fn rr3_num_tick(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
-    let raw = need_value("--watchdog-tick-ms", args, i)?;
-    let n = parse_ms("--watchdog-tick-ms", &raw)?;
-    if n == 0 {
-        return Err(
-            "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）".to_string(),
-        );
-    }
-    cfg.watchdog_tick_ms = n;
-    Ok(i + 2)
-}
+/// 数值开关表：`--名称 → 落位函数`（各值自己的门禁住落位函数内）。
+type Rr3NumSet = fn(&mut RrdConfig, &str) -> Result<(), String>;
+const RR3_NUM_OPTS: [(&str, Rr3NumSet); 3] = [
+    ("--restart-base-ms", |c, raw| {
+        c.restart_base_ms = parse_restart_base(raw)?;
+        Ok(())
+    }),
+    ("--pre-register-timeout-ms", |c, raw| {
+        c.pre_register_timeout_ms = parse_ms("--pre-register-timeout-ms", raw)?;
+        Ok(())
+    }),
+    ("--watchdog-tick-ms", |c, raw| {
+        let n = parse_ms("--watchdog-tick-ms", raw)?;
+        if n == 0 {
+            return Err(
+                "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）".to_string(),
+            );
+        }
+        c.watchdog_tick_ms = n;
+        Ok(())
+    }),
+];
 
 /// 杂项参数族：boot-role 的两道拒法 + help。
 fn rr3_cli_misc(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
     match args[i].as_str() {
         "--boot-role" => {
             let raw = need_value("--boot-role", args, i)?;
-            // 两道拒法都只为一个目的：**role 进了子进程才炸，就查不出是谁给的**。
-            // 空值：`sim_peer` 会打"未知 RR3_SIM_PEER_ROLE: "（一个空名字的错误行，
-            // 既指不出参数也指不出用例）；疑似开关的值：`--boot-role --socket` 会把
-            // `--socket` 当成 role 吞下、于是**下一个真开关**丢了（与 `need_path_value`
-            // 当年修的"叠加层被静默丢掉"同一形状，只是这里丢的是 socket 路径）。
-            if raw.is_empty() {
-                return Err(format!(
-                    "--boot-role 不得为空（role 由夹具解释，空值只会得到一条查不出来源的\"未知 RR3_SIM_PEER_ROLE\"）\n{USAGE}"
-                ));
-            }
-            if raw.starts_with('-') {
-                return Err(format!(
-                    "--boot-role 缺参数：收到疑似开关的 {raw}（role 不得以 - 开头）\n{USAGE}"
-                ));
-            }
+            rr3_boot_role_guard(&raw)?;
             // **不校验取值**（E-6）：合法集是夹具的约定，rrd 只透传。
             cfg.boot_role = raw;
             Ok(i + 2)
@@ -270,6 +264,27 @@ fn rr3_cli_misc(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize,
         }
         other => Err(format!("未知选项 {other}\n{USAGE}")),
     }
+}
+
+/// boot-role 取值形状门：空值与疑似开关一律拒。
+///
+/// 两道拒法都只为一个目的：**role 进了子进程才炸，就查不出是谁给的**。
+/// 空值：`sim_peer` 会打"未知 RR3_SIM_PEER_ROLE: "（一个空名字的错误行，
+/// 既指不出参数也指不出用例）；疑似开关的值：`--boot-role --socket` 会把
+/// `--socket` 当成 role 吞下、于是**下一个真开关**丢了（与 `need_path_value`
+/// 当年修的"叠加层被静默丢掉"同一形状，只是这里丢的是 socket 路径）。
+fn rr3_boot_role_guard(raw: &str) -> Result<(), String> {
+    if raw.is_empty() {
+        return Err(format!(
+            "--boot-role 不得为空（role 由夹具解释，空值只会得到一条查不出来源的\"未知 RR3_SIM_PEER_ROLE\"）\n{USAGE}"
+        ));
+    }
+    if raw.starts_with('-') {
+        return Err(format!(
+            "--boot-role 缺参数：收到疑似开关的 {raw}（role 不得以 - 开头）\n{USAGE}"
+        ));
+    }
+    Ok(())
 }
 
 fn parse_ms(flag: &str, raw: &str) -> Result<u64, String> {

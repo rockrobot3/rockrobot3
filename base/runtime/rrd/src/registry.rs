@@ -723,11 +723,14 @@ impl RrdRegistry {
                         //   2) **不在册必须先于 owned 判定**：unregister 已把条目摘掉，此时"等退出码"会让
                         //      `unregistered` 永远没人广播（收尸那一路对不在册的条目走 stopped/Silent，也不会补）
                         //   3) 在册且 owned → 让位给退出码那一路（conn 不改相位、不记账、不广播）
-        match self.modules.get(name).map(|e| e.phase) {
-            Some(Rr3Phase::Failed) => return Rr3Death::Silent,
-            None => return Rr3Death::Broadcast { plan: None }, // unregister 之后的收尾：照今天广播 unregistered
-            Some(_) if self.owned.contains(name) => return Rr3Death::DeferredToExitStatus,
-            Some(_) => {}
+        let Some(entry) = self.modules.get(name) else {
+            return Rr3Death::Broadcast { plan: None }; // unregister 之后的收尾：照今天广播 unregistered
+        };
+        if entry.phase == Rr3Phase::Failed {
+            return Rr3Death::Silent;
+        }
+        if self.owned.contains(name) {
+            return Rr3Death::DeferredToExitStatus;
         }
         {
             let e = self.modules.get_mut(name).expect("上面确认过条目在");

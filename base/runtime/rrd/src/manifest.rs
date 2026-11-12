@@ -88,43 +88,46 @@ fn rr3_str_item(item: &Value, item_label: &str, out: &mut Vec<String>, errs: &mu
 }
 
 fn req_str(root: &Value, path: &str, errs: &mut Vec<String>) -> String {
-    match lookup(root, path) {
-        None => {
-            errs.push(format!("缺少 {path}"));
+    let Some(v) = rr3_req_present(root, path, errs) else {
+        return String::new();
+    };
+    match v.as_str() {
+        Some(s) if !s.is_empty() => s.to_string(),
+        Some(_) => {
+            errs.push(format!("{path} 不得为空字符串"));
             String::new()
         }
-        Some(v) => match v.as_str() {
-            Some(s) if !s.is_empty() => s.to_string(),
-            Some(_) => {
-                errs.push(format!("{path} 不得为空字符串"));
-                String::new()
-            }
-            None => {
-                errs.push(format!("{path} 应为字符串"));
-                String::new()
-            }
-        },
+        None => {
+            errs.push(format!("{path} 应为字符串"));
+            String::new()
+        }
     }
 }
 
 fn req_int(root: &Value, path: &str, errs: &mut Vec<String>) -> u64 {
-    match lookup(root, path) {
-        None => {
-            errs.push(format!("缺少 {path}"));
+    let Some(v) = rr3_req_present(root, path, errs) else {
+        return 0;
+    };
+    match v.as_integer() {
+        Some(n) if n > 0 => n as u64,
+        Some(n) => {
+            errs.push(format!("{path} 应为正整数，实际 {n}"));
             0
         }
-        Some(v) => match v.as_integer() {
-            Some(n) if n > 0 => n as u64,
-            Some(n) => {
-                errs.push(format!("{path} 应为正整数，实际 {n}"));
-                0
-            }
-            None => {
-                errs.push(format!("{path} 应为整数"));
-                0
-            }
-        },
+        None => {
+            errs.push(format!("{path} 应为整数"));
+            0
+        }
     }
+}
+
+/// 必填项取在场值：缺项当场点名并返回 `None`。
+fn rr3_req_present<'a>(root: &'a Value, path: &str, errs: &mut Vec<String>) -> Option<&'a Value> {
+    let v = lookup(root, path);
+    if v.is_none() {
+        errs.push(format!("缺少 {path}"));
+    }
+    v
 }
 
 /// 读取运行期事实；取不到的字段逐条点名（全部收集完才返回，便于运维一次改对）
@@ -233,16 +236,18 @@ fn rr3_entry_span(text: &str, module: &str) -> Result<(usize, usize, usize), Str
             hits.push((idx, a, b));
         }
     }
-    match hits.as_slice() {
-        [one] => Ok(*one),
-        [] => Err(format!(
-            "模块 {module} 的 manifest 无 entry 行（schema 违约，打包/装机拒绝）"
-        )),
-        n => Err(format!(
-            "模块 {module} 的 manifest 有 {} 行 entry（须恰一条；歧义，打包/装机拒绝）",
-            n.len()
-        )),
+    if let [one] = hits.as_slice() {
+        return Ok(*one);
     }
+    if hits.is_empty() {
+        return Err(format!(
+            "模块 {module} 的 manifest 无 entry 行（schema 违约，打包/装机拒绝）"
+        ));
+    }
+    Err(format!(
+        "模块 {module} 的 manifest 有 {} 行 entry（须恰一条；歧义，打包/装机拒绝）",
+        hits.len()
+    ))
 }
 
 /// 单行 entry 定位：非 entry 行回 None；entry 行回引号内的值区间（行内偏移）。
