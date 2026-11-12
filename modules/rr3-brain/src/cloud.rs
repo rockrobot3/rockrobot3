@@ -247,9 +247,14 @@ fn rr3_cloud_retryable(interface: &str, err: &str) -> bool {
         .strip_prefix(&prefix)
         .and_then(|s| s.parse::<u16>().ok())
     {
-        Some(code) => code == 429 || (500..=599).contains(&code),
+        Some(code) => rr3_retry_code(code),
         None => false,
     }
+}
+
+/// 可重试状态码：限流（429）与服务端（5xx）。
+fn rr3_retry_code(code: u16) -> bool {
+    code == 429 || (500..=599).contains(&code)
 }
 
 /// 有界重试机制（策略由调用方注入：接口前缀词＋台账标签＋单次尝试闭包）。三家

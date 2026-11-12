@@ -180,13 +180,7 @@ impl Rr3InteractDispatcher {
             .and_then(|b64| self.tts_pcm.rr3_tts_buf_push(b64));
         match pushed {
             Ok(()) => bus.counter_bump(RR3_TTS_PCM_FRAMES_KEY, 1),
-            Err(e) => {
-                self.tts_pcm_bad = self.tts_pcm_bad.saturating_add(1);
-                bus.counter_bump(RR3_TTS_PCM_BAD_KEY, 1);
-                if rr3_bad_log_due(self.tts_pcm_bad) {
-                    eprintln!("tts_pcm 弃帧（累计 {} 帧）: {e}", self.tts_pcm_bad);
-                }
-            }
+            Err(e) => rr3_tts_bad_frame(bus, &mut self.tts_pcm_bad, &e),
         }
     }
 
@@ -212,6 +206,15 @@ impl Rr3InteractDispatcher {
 /// 每 N 帧一条（"还在坏、坏因未变"），中间帧只进计数。
 fn rr3_bad_log_due(n: u32) -> bool {
     n == 1 || n.is_multiple_of(RR3_TTS_BAD_LOG_EVERY)
+}
+
+/// 坏帧记账：计数 +1，按留痕闸门点名（中间帧只计数）。
+fn rr3_tts_bad_frame(bus: &BusHandle, bad: &mut u32, e: &str) {
+    *bad = bad.saturating_add(1);
+    bus.counter_bump(RR3_TTS_PCM_BAD_KEY, 1);
+    if rr3_bad_log_due(*bad) {
+        eprintln!("tts_pcm 弃帧（累计 {} 帧）: {e}", bad);
+    }
 }
 
 impl Dispatcher for Rr3InteractDispatcher {

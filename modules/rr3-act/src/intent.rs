@@ -112,6 +112,12 @@ fn rr3_item_gate<'a>(
     open_topics: &[String],
 ) -> Result<(&'a str, &'a Value), String> {
     let (topic, args) = rr3_item_shape(item)?;
+    rr3_gates(topic, open_topics)?;
+    Ok((topic, args))
+}
+
+/// 两道归属门（B9 自 item_gate 抽出）：exposes 归属门 + 意图开放门（A-9）。
+fn rr3_gates(topic: &str, open_topics: &[String]) -> Result<(), String> {
     if !EXPOSED.contains(&topic) {
         return Err(format!("越权拒执行 {topic}：不在本模块 exposes"));
     }
@@ -123,7 +129,7 @@ fn rr3_item_gate<'a>(
             rr3_open_topics_join(open_topics)
         ));
     }
-    Ok((topic, args))
+    Ok(())
 }
 
 /// 单条动作的形状裁决：`topic` 须为字符串、`args` 须在场。

@@ -66,17 +66,23 @@ fn rr3_block_bounds(text: &str) -> Option<(usize, usize)> {
     for line in text.split_inclusive('\n') {
         let bare = line.trim_end_matches(['\r', '\n']);
         let head = bare.trim();
-        match start {
-            None => start = rr3_bounds_head(head, offset),
-            Some(s) => {
-                if let Some(b) = rr3_bounds_end(head, s, offset) {
-                    return Some(b);
-                }
-            }
+        if let Some(b) = rr3_bounds_step(&mut start, head, offset) {
+            return Some(b);
         }
         offset += line.len();
     }
     start.map(|s| (s, offset))
+}
+
+/// 单行推进：未见表头则试认起点，已见则试认块尾（Some = 块闭合）。
+fn rr3_bounds_step(start: &mut Option<usize>, head: &str, offset: usize) -> Option<(usize, usize)> {
+    match start {
+        None => {
+            *start = rr3_bounds_head(head, offset);
+            None
+        }
+        Some(s) => rr3_bounds_end(head, *s, offset),
+    }
 }
 
 /// 行首是否块表头 `[[rr3-brain.model]]`（是则块起点 = 该行偏移）。
@@ -142,13 +148,18 @@ pub(crate) fn rr3_config_persist(
     if old_text == new_text {
         return Ok(());
     }
+    let tmp = rr3_cfg_stage(path, old_text)?;
+    rr_ipc::rr3_atomic_store(path, &tmp, new_text.as_bytes())
+}
+
+/// 落盘前置：写 `.bak` 旧全量快照，回临时文件路径（备份失败即中止）。
+fn rr3_cfg_stage(path: &Path, old_text: &str) -> Result<PathBuf, String> {
     let bak = rr3_cfg_backup_path(path);
     std::fs::write(&bak, old_text).map_err(|e| format!("写备份 {} 失败: {e}", bak.display()))?;
     let file_name = path
         .file_name()
         .ok_or_else(|| format!("config 路径无名: {}", path.display()))?;
-    let tmp = path.with_file_name(format!("{}.tmp", file_name.to_string_lossy()));
-    rr_ipc::rr3_atomic_store(path, &tmp, new_text.as_bytes())
+    Ok(path.with_file_name(format!("{}.tmp", file_name.to_string_lossy())))
 }
 
 #[cfg(test)]

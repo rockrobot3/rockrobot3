@@ -51,15 +51,7 @@ pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
         ticks += 1;
         let now = Instant::now();
         if now.duration_since(window_start) >= window {
-            let saturated = rr3_reflex_saturated(ticks, expect);
-            if det.rr3_detector_feed(saturated) {
-                seq += 1;
-                let rate_hz = rr3_reflex_rate_hz(ticks, window_ms);
-                let _ = bus.publish(
-                    RR3_REFLEX_NOTICE_TOPIC,
-                    json!({ "seq": seq, "reason": "saturate", "rate_hz": rate_hz }),
-                );
-            }
+            rr3_reflex_settle(&bus, &mut det, &mut seq, ticks, window_ms, expect);
             // 窗结算记账（批M M-β A-6）：值 = 窗内实跑节拍数，重置前落账；
             // bump 失败不进总线发布面（异常通告语义），静默容忍——计数是运维账
             bus.counter_bump(RR3_REFLEX_TICKS_KEY, ticks);
@@ -67,6 +59,27 @@ pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
             window_start = now;
         }
     }
+}
+
+/// 窗结算：饱和 episode 判定，首报时发一条通告并续 seq。
+fn rr3_reflex_settle(
+    bus: &BusHandle,
+    det: &mut Rr3SaturationDetector,
+    seq: &mut u64,
+    ticks: u64,
+    window_ms: u64,
+    expect: u64,
+) {
+    let saturated = rr3_reflex_saturated(ticks, expect);
+    if !det.rr3_detector_feed(saturated) {
+        return;
+    }
+    *seq += 1;
+    let rate_hz = rr3_reflex_rate_hz(ticks, window_ms);
+    let _ = bus.publish(
+        RR3_REFLEX_NOTICE_TOPIC,
+        json!({ "seq": *seq, "reason": "saturate", "rate_hz": rate_hz }),
+    );
 }
 
 #[cfg(test)]

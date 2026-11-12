@@ -37,15 +37,18 @@ fn rr3_secrets_resolve(
     secrets_env: Option<String>,
     home: Option<String>,
 ) -> Result<PathBuf, String> {
-    if let Some(p) = secrets_env {
-        if !p.trim().is_empty() {
-            return Ok(PathBuf::from(p));
-        }
+    if let Some(p) = rr3_secrets_env_path(secrets_env) {
+        return Ok(p);
     }
     let home = home
         .filter(|h| !h.trim().is_empty())
         .ok_or_else(|| "secrets 路径无着落：缺 HOME 且未设 RR3_SECRETS_FILE".to_string())?;
     Ok(PathBuf::from(home).join(".rr3").join("secrets.json"))
+}
+
+/// env 覆盖路径（空白值等同未设）。
+fn rr3_secrets_env_path(p: Option<String>) -> Option<PathBuf> {
+    p.filter(|s| !s.trim().is_empty()).map(PathBuf::from)
 }
 
 /// 读全表：缺文件=空表（首次使用是常态）；坏 json/坏形状=回错**不静默覆盖**

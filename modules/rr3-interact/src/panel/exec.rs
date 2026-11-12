@@ -342,18 +342,7 @@ fn rr3_leg_beep(shared: &Rr3PanelShared) -> Value {
 /// 返回 (腿, 期望态)——ctl 失败时期望态记 fail 与腿等值（既有判据，行为不变）。
 pub(super) fn rr3_leg_relay(shared: &Rr3PanelShared) -> (Value, &'static str) {
     match rr3_act_enabled(&shared.bus_path, shared.limits.read_timeout) {
-        Ok(enabled) => {
-            let want = rr3_relay_expect(enabled, shared.selftest_expect.relay);
-            if want == "n-a" {
-                return rr3_relay_na(enabled);
-            }
-            let (pass, reason) = rr3_relay_cycle(shared);
-            let mut leg = json!({ "leg": "relay", "pass": pass });
-            if let Some(e) = reason {
-                leg["reason"] = json!(e);
-            }
-            (leg, want)
-        }
+        Ok(enabled) => rr3_relay_leg_ok(shared, enabled),
         // 取数失败 = 能力面不可核验：腿如实 fail，期望态按最严的 pass 记——
         // 旧实现把期望也记 fail，等值判定会把这条故障腿抵消成"符合预期"，
         // 自检 verdict 可能在 rrd 状态面故障时假绿（0.0.8c 审计收口）。
@@ -365,6 +354,20 @@ pub(super) fn rr3_leg_relay(shared: &Rr3PanelShared) -> (Value, &'static str) {
             "pass",
         ),
     }
+}
+
+/// 能力在册时的 relay 腿：n-a 档早退，其余走 on/off 往返并带上拒因。
+fn rr3_relay_leg_ok(shared: &Rr3PanelShared, enabled: bool) -> (Value, &'static str) {
+    let want = rr3_relay_expect(enabled, shared.selftest_expect.relay);
+    if want == "n-a" {
+        return rr3_relay_na(enabled);
+    }
+    let (pass, reason) = rr3_relay_cycle(shared);
+    let mut leg = json!({ "leg": "relay", "pass": pass });
+    if let Some(e) = reason {
+        leg["reason"] = json!(e);
+    }
+    (leg, want)
 }
 
 /// relay 腿 n-a 档：拒因区分"配置声明不适用"与"rr3-act 不在册"。
@@ -446,6 +449,22 @@ fn rr3_leg_avail(
     empty_pass: &str,
     empty_reason: &str,
 ) {
+    if !rr3_leg_shape(legs, &v, prefix, empty_pass, empty_reason) {
+        return;
+    }
+    for c in checks_of(&v) {
+        legs.push(rr3_leg_item(prefix, &c));
+    }
+}
+
+/// available 门 + 空表态：不可用即记 fail 腿并返回 false（不再逐条转述）。
+fn rr3_leg_shape(
+    legs: &mut Vec<Value>,
+    v: &Value,
+    prefix: &str,
+    empty_pass: &str,
+    empty_reason: &str,
+) -> bool {
     if v.get("available").and_then(Value::as_bool) != Some(true) {
         legs.push(json!({
             "leg": format!("{prefix}/取数"), "pass": "fail",
@@ -453,18 +472,15 @@ fn rr3_leg_avail(
                 format!("ctl.{prefix} 应答缺 available:true（数据漂移）")
             )),
         }));
-        return;
+        return false;
     }
-    let checks = checks_of(&v);
-    if checks.is_empty() {
+    if checks_of(v).is_empty() {
         legs.push(json!({
             "leg": format!("{prefix}/空"), "pass": empty_pass,
             "reason": empty_reason,
         }));
     }
-    for c in &checks {
-        legs.push(rr3_leg_item(prefix, c));
-    }
+    true
 }
 
 /// 单条判据转述：pass → pass、not-applicable → n-a、其余未知 fail-closed 折 fail。
@@ -519,17 +535,25 @@ pub(super) fn rr3_relay_expect(enabled: bool, configured: &'static str) -> &'sta
 /// （改数据不改码）。
 pub(super) fn rr3_selftest_verdict(legs: &[Value], expect: &Rr3SelftestExpect) -> &'static str {
     let mut seen = [false; 3]; // speaker/relay/face 到场记账（缺腿即红）
-    for l in legs {
-        let name = l.get("leg").and_then(Value::as_str).unwrap_or("");
-        let state = l.get("pass").and_then(Value::as_str).unwrap_or("");
-        if !rr3_leg_track(name, state, expect, &mut seen) {
-            return "fail";
-        }
+    if !rr3_legs_match(legs, expect, &mut seen) {
+        return "fail";
     }
     if seen.iter().any(|s| !s) {
         return "fail"; // 结果集缺固定腿即红
     }
     "pass"
+}
+
+/// 逐腿裁决（任一腿不合即 false，同时记固定三腿到场）。
+fn rr3_legs_match(legs: &[Value], expect: &Rr3SelftestExpect, seen: &mut [bool; 3]) -> bool {
+    for l in legs {
+        let name = l.get("leg").and_then(Value::as_str).unwrap_or("");
+        let state = l.get("pass").and_then(Value::as_str).unwrap_or("");
+        if !rr3_leg_track(name, state, expect, seen) {
+            return false;
+        }
+    }
+    true
 }
 
 /// 单腿裁决：固定三腿对预期值并记到场；wiring/* 与 contracts/* 组内零 fail 即

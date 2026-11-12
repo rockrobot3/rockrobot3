@@ -192,10 +192,7 @@ pub fn rr3_doa_fix(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<Rr3
 /// 形状门 + 能量门（B9 自 doa_fix 抽出）：通道/基线/帧数合法且至少一采集帧
 /// rms ≥ 阈值才继续。阈值²×帧长定标比较，免 isqrt。
 fn rr3_doa_gate(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<(usize, usize)> {
-    if channels < 2 || cfg.mic_baseline_mm == 0 {
-        return None;
-    }
-    let ch = channels as usize;
+    let ch = rr3_doa_shape(channels, cfg)?;
     let frames = samples.len() / ch;
     if frames == 0 {
         return None;
@@ -204,6 +201,14 @@ fn rr3_doa_gate(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<(usize
         return None;
     }
     Some((ch, frames))
+}
+
+/// 形状门：通道数与基线合法才继续（单声道/零基线无方向可判）。
+fn rr3_doa_shape(channels: u8, cfg: &Rr3DoaCfg) -> Option<usize> {
+    if channels < 2 || cfg.mic_baseline_mm == 0 {
+        return None;
+    }
+    Some(channels as usize)
 }
 
 /// 能量门（门内任一采集帧 rms 过阈即过；阈值²×帧长定标比较，免 isqrt）。
@@ -248,18 +253,23 @@ fn rr3_doa_cc(samples: &[i16], ch: usize, frames: usize, half: usize) -> Vec<i64
 
 /// 单个 lag 的互相关：`Σ_t R[t]·L[t+d]`（d 正负两向；d 越出帧数即 0）。
 fn rr3_doa_lag(samples: &[i16], ch: usize, frames: usize, d: i64) -> i64 {
-    let mut acc: i64 = 0;
     if d >= 0 {
-        let dd = d as usize;
-        if dd < frames {
-            for t in 0..frames - dd {
-                acc += samples[t * ch] as i64 * samples[(t + dd) * ch + 1] as i64;
-            }
-        }
-    } else {
-        let off = (-d) as usize;
-        for t in off..frames {
-            acc += samples[t * ch] as i64 * samples[(t - off) * ch + 1] as i64;
+        return rr3_doa_lag_fwd(samples, ch, frames, d as usize);
+    }
+    let off = (-d) as usize;
+    let mut acc: i64 = 0;
+    for t in off..frames {
+        acc += samples[t * ch] as i64 * samples[(t - off) * ch + 1] as i64;
+    }
+    acc
+}
+
+/// 正向 lag 的互相关（`d` 越出帧数即 0）。
+fn rr3_doa_lag_fwd(samples: &[i16], ch: usize, frames: usize, dd: usize) -> i64 {
+    let mut acc: i64 = 0;
+    if dd < frames {
+        for t in 0..frames - dd {
+            acc += samples[t * ch] as i64 * samples[(t + dd) * ch + 1] as i64;
         }
     }
     acc
