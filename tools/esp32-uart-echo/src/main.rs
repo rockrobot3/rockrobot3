@@ -311,6 +311,27 @@ fn echo_frame(
     }
 }
 
+/// 串口打开：UART0 = 控制台（GPIO1=TX / GPIO3=RX，devkit USB 板载 CP2102，只写
+/// 不读）；UART2 = 链路（GPIO17=TX2 / GPIO16=RX2，方案 §9.2 ① 接线表；115200），
+/// 收发拆分后交 echo 状态机。
+fn open_ports(
+    p: esp_hal::peripherals::Peripherals,
+) -> (
+    UartTx<'static, Blocking>,
+    UartRx<'static, Blocking>,
+    UartTx<'static, Blocking>,
+) {
+    let console = esp_hal::uart::UartTx::new(p.UART0, esp_hal::uart::Config::default())
+        .expect("uart0 init")
+        .with_tx(p.GPIO1);
+    let link = esp_hal::uart::Uart::new(p.UART2, esp_hal::uart::Config::default())
+        .expect("uart2 init")
+        .with_tx(p.GPIO17)
+        .with_rx(p.GPIO16);
+    let (rx, tx) = link.split();
+    (console, rx, tx)
+}
+
 #[esp_hal::main]
 fn main() -> ! {
     // 64 KiB 内部堆：payload 回发缓冲按 8 KiB 封顶分配（先验头再分配，见
@@ -318,99 +339,124 @@ fn main() -> ! {
     esp_alloc::heap_allocator!(size: 65536);
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
-
-    // UART0 = 控制台（GPIO1=TX / GPIO3=RX，devkit USB 板载 CP2102）；夹具只写不读
-    let mut console: UartTx<'_, Blocking> =
-        esp_hal::uart::UartTx::new(peripherals.UART0, esp_hal::uart::Config::default())
-            .expect("uart0 init")
-            .with_tx(peripherals.GPIO1);
-    // UART2 = 链路（GPIO17=TX2 / GPIO16=RX2，方案 §9.2 ① 接线表；115200）。
-    // 收发拆分：echo 状态机从 rx 轮询、往 tx 回发。
-    let link = esp_hal::uart::Uart::new(peripherals.UART2, esp_hal::uart::Config::default())
-        .expect("uart2 init")
-        .with_tx(peripherals.GPIO17)
-        .with_rx(peripherals.GPIO16);
-    let (mut rx, mut tx): (
-        esp_hal::uart::UartRx<'_, Blocking>,
-        esp_hal::uart::UartTx<'_, Blocking>,
-    ) = link.split();
+    let (mut console, mut rx, mut tx) = open_ports(peripherals);
 
     boot_dump(&mut console);
+    echo_loop(&mut rx, &mut tx, &mut console)
+}
 
-    // echo 状态机：逐字节累积 128B 头；magic 不符滑动 1 字节重同步；
-    // 头非法滑动 1 字节重扫；payload 按头声明收满后整帧原样回发。
-    let mut hdr = [0u8; RR3_IPC_HDR_SIZE];
-    let mut fill: usize = 0;
-    let mut last_rx = Instant::now();
-    let mut one = [0u8; 1];
+/// echo 状态机的滚动状态：头累积窗口、静默计时与单字节读缓冲。
+struct RxState {
+    hdr: [u8; RR3_IPC_HDR_SIZE],
+    fill: usize,
+    last_rx: Instant,
+    one: [u8; 1],
+}
+
+/// 行读取与回显循环：逐字节累积 128B 头；magic 不符滑动 1 字节重同步；头非法
+/// 滑动 1 字节重扫；payload 按头声明收满后整帧原样回发。
+fn echo_loop(
+    rx: &mut UartRx<'_, Blocking>,
+    tx: &mut UartTx<'_, Blocking>,
+    console: &mut UartTx<'_, Blocking>,
+) -> ! {
+    let mut st = RxState {
+        hdr: [0u8; RR3_IPC_HDR_SIZE],
+        fill: 0,
+        last_rx: Instant::now(),
+        one: [0u8; 1],
+    };
 
     loop {
-        match rx.read_buffered(&mut one) {
-            Ok(0) => {
-                // 线路静默：帧中途停流 = 半帧，按 runbook ⑤ 拒收并复位
-                if fill > 0 && last_rx.elapsed() > IDLE_TIMEOUT {
-                    log!(
-                        &mut console,
-                        "reject: short frame (got {fill}/{RR3_IPC_HDR_SIZE} header bytes)"
-                    );
-                    fill = 0;
-                }
-            }
+        match rx.read_buffered(&mut st.one) {
+            Ok(0) => rx_idle(console, &mut st),
             Ok(_) => {
-                let b = one[0];
-                last_rx = Instant::now();
-                hdr[fill] = b;
-                fill += 1;
-
-                // 头前缀滑窗：前导垃圾/半帧后新帧都能对齐——fill 恰为 4 时校验 magic，
-                // 不符则丢最旧 1 字节继续滑（下一字节进来又是 fill=4）
-                if fill == 4 && hdr[0..4] != rr_ipc::MAGIC.to_le_bytes() {
-                    hdr.copy_within(1..4, 0);
-                    fill = 3;
-                } else if fill == RR3_IPC_HDR_SIZE {
-                    match Rr3Header::from_bytes(&hdr) {
-                        Err(e) => {
-                            log!(&mut console, "{}, sliding resync", hdr_err_log(e));
-                            // 已缓冲的 127 字节可能是后续帧的前缀，滑动 1 字节重扫
-                            hdr.copy_within(1..RR3_IPC_HDR_SIZE, 0);
-                            fill = RR3_IPC_HDR_SIZE - 1;
-                        }
-                        Ok(h) => {
-                            let want = h.payload_len as usize;
-                            if want > PAYLOAD_CAP {
-                                // 头层合法但超出夹具承载：排空线路保持对齐
-                                log!(
-                                    &mut console,
-                                    "reject: payload too large (declared {want}, cap {PAYLOAD_CAP}) — draining"
-                                );
-                                // 排空中断（超时/读错）同样按对齐破坏处理：缓冲重扫
-                                let _ = drain_oversize(
-                                    &mut rx,
-                                    &mut one,
-                                    want,
-                                    &mut last_rx,
-                                    &mut console,
-                                );
-                                fill = 0;
-                            } else {
-                                if let Some(payload) = recv_payload(
-                                    &mut rx,
-                                    &mut one,
-                                    want,
-                                    &mut last_rx,
-                                    &mut console,
-                                ) {
-                                    echo_frame(&mut tx, &hdr, &payload, &mut console);
-                                }
-                                fill = 0;
-                            }
-                        }
-                    }
-                }
+                let b = st.one[0];
+                rx_byte(rx, tx, console, &mut st, b);
             }
             Err(_) => {
-                log!(&mut console, "reject: rx error");
+                log!(&mut *console, "reject: rx error");
             }
         }
+    }
+}
+
+/// 线路静默：帧中途停流 = 半帧，按 runbook ⑤ 拒收并复位。
+fn rx_idle(console: &mut UartTx<'_, Blocking>, st: &mut RxState) {
+    if st.fill > 0 && st.last_rx.elapsed() > IDLE_TIMEOUT {
+        log!(
+            &mut *console,
+            "reject: short frame (got {}/{} header bytes)",
+            st.fill,
+            RR3_IPC_HDR_SIZE
+        );
+        st.fill = 0;
+    }
+}
+
+/// 收到一个字节：推进 128B 头滑窗；前导垃圾/半帧后新帧都能对齐——fill 恰为 4
+/// 时校验 magic，不符则丢最旧 1 字节继续滑（下一字节进来又是 fill=4）。
+fn rx_byte(
+    rx: &mut UartRx<'_, Blocking>,
+    tx: &mut UartTx<'_, Blocking>,
+    console: &mut UartTx<'_, Blocking>,
+    st: &mut RxState,
+    b: u8,
+) {
+    st.last_rx = Instant::now();
+    st.hdr[st.fill] = b;
+    st.fill += 1;
+    if st.fill == 4 && st.hdr[0..4] != rr_ipc::MAGIC.to_le_bytes() {
+        st.hdr.copy_within(1..4, 0);
+        st.fill = 3;
+        return;
+    }
+    if st.fill < RR3_IPC_HDR_SIZE {
+        return;
+    }
+    st.fill = hdr_done(rx, tx, console, st);
+}
+
+/// 128B 头收满：头非法滑动 1 字节重扫；头合法即按声明收载荷或排空超限帧。
+fn hdr_done(
+    rx: &mut UartRx<'_, Blocking>,
+    tx: &mut UartTx<'_, Blocking>,
+    console: &mut UartTx<'_, Blocking>,
+    st: &mut RxState,
+) -> usize {
+    match Rr3Header::from_bytes(&st.hdr) {
+        Err(e) => {
+            log!(&mut *console, "{}, sliding resync", hdr_err_log(e));
+            // 已缓冲的 127 字节可能是后续帧的前缀，滑动 1 字节重扫
+            st.hdr.copy_within(1..RR3_IPC_HDR_SIZE, 0);
+            RR3_IPC_HDR_SIZE - 1
+        }
+        Ok(h) => {
+            frame_body(rx, tx, console, st, h.payload_len as usize);
+            0
+        }
+    }
+}
+
+/// 头层合法帧：超出夹具承载则排空线路保持对齐，否则收满载荷整帧回发。
+fn frame_body(
+    rx: &mut UartRx<'_, Blocking>,
+    tx: &mut UartTx<'_, Blocking>,
+    console: &mut UartTx<'_, Blocking>,
+    st: &mut RxState,
+    want: usize,
+) {
+    if want > PAYLOAD_CAP {
+        // 头层合法但超出夹具承载：排空线路保持对齐
+        log!(
+            &mut *console,
+            "reject: payload too large (declared {want}, cap {PAYLOAD_CAP}) — draining"
+        );
+        // 排空中断（超时/读错）同样按对齐破坏处理：缓冲重扫
+        let _ = drain_oversize(rx, &mut st.one, want, &mut st.last_rx, console);
+        return;
+    }
+    if let Some(payload) = recv_payload(rx, &mut st.one, want, &mut st.last_rx, console) {
+        echo_frame(tx, &st.hdr, &payload, console);
     }
 }

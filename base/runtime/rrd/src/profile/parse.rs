@@ -236,20 +236,30 @@ fn rr3_pin_str_opt(
     errs: &mut Vec<String>,
 ) {
     let Some(s) = v.as_str() else {
-        errs.push(match k {
-            "instance" => format!("pin #{i}.instance 应为字符串"),
-            "controller" => format!("pin #{i}.controller 应为字符串"),
-            "rail" => format!("pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"),
-            "addr" => format!(
-                "pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）"
-            ),
-            "device" => format!(
-                "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
-            ),
-            _ => format!("pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"),
-        });
+        errs.push(rr3_pin_str_miss(i, k));
         return;
     };
+    rr3_pin_str_set(pin, k, s);
+}
+
+/// 可空字符串键的类型错文案（逐键点名，与拆分前逐字一致）。
+fn rr3_pin_str_miss(i: usize, k: &str) -> String {
+    match k {
+        "instance" => format!("pin #{i}.instance 应为字符串"),
+        "controller" => format!("pin #{i}.controller 应为字符串"),
+        "rail" => format!("pin #{i}.rail 应为字符串（供电轨名；信号侧控制线显式写 \"none\"）"),
+        "addr" => {
+            format!("pin #{i}.addr 应为字符串（0x 前缀十六进制；\"合法不适用\"显式写 \"none\"）")
+        }
+        "device" => format!(
+            "pin #{i}.device 应为字符串（器件型号词，外键 → contracts/devices.toml——批N3 件八）"
+        ),
+        _ => format!("pin #{i}.failsafe 应为字符串（release/hold/driven_low/driven_high）"),
+    }
+}
+
+/// 字面值落位（可空字符串键）。
+fn rr3_pin_str_set(pin: &mut Rr3PinEntry, k: &str, s: &str) {
     match k {
         "instance" => pin.instance = s.to_string(),
         "controller" => pin.controller = s.to_string(),

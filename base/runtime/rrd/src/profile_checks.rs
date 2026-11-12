@@ -293,7 +293,7 @@ pub(crate) fn rr3_check_pins(
 
 /// 单条 pin 的静态校验（角色查册 / per_instance / requires / direction /
 /// role.slot）；角色未在册时直接返回单条点名（不级联刷屏），Second 返回 derived
-/// 声明供 host 档派生。
+/// 声明供 host 档派生。四类判据各自具名，追加次序不变。
 fn rr3_check_pin(
     pin: &Rr3PinEntry,
     roles: &Rr3RoleTable,
@@ -301,14 +301,40 @@ fn rr3_check_pin(
 ) -> (Vec<String>, Option<Vec<String>>) {
     let mut errs = Vec::new();
     let label = format!("pins[{}]", pin.rr3_pin_id());
+    let Some(derives) = rr3_pin_role_gate(pin, roles, &label, &mut errs) else {
+        return (errs, None);
+    };
+    rr3_pin_inst_check(pin, roles, &label, &mut errs);
+    rr3_pin_req_check(pin, roles, &label, &mut errs);
+    rr3_pin_dir_check(pin, roles, &label, &mut errs);
+    rr3_pin_slot_check(pin, roles, table, &mut errs);
+    (errs, Some(derives))
+}
+
+/// 角色在册门：未在册即点名并中止本条（不级联刷屏）。
+fn rr3_pin_role_gate(
+    pin: &Rr3PinEntry,
+    roles: &Rr3RoleTable,
+    label: &str,
+    errs: &mut Vec<String>,
+) -> Option<Vec<String>> {
     let Some(derives) = roles.rr3_role_derives(&pin.role) else {
         errs.push(format!(
             "{label} 角色 {} 未在册（contracts/roles.toml 无此角色，装配单不得自造角色）",
             pin.role
         ));
-        return (errs, None);
+        return None;
     };
-    // per_instance 规则：true ⇒ instance 必填；false ⇒ instance 禁填
+    Some(derives)
+}
+
+/// per_instance 规则：true ⇒ instance 必填；false ⇒ instance 禁填。
+fn rr3_pin_inst_check(
+    pin: &Rr3PinEntry,
+    roles: &Rr3RoleTable,
+    label: &str,
+    errs: &mut Vec<String>,
+) {
     match roles.rr3_role_per_inst(&pin.role) {
         Some(true) if pin.instance.is_empty() => errs.push(format!(
             "{label} 角色 {} per_instance = true，instance 必填（多实例角色的身份一半在 instance）",
@@ -320,7 +346,10 @@ fn rr3_check_pin(
         )),
         _ => {}
     }
-    // requires 逐项在场（§5 缺失语义：空串/None/空数组 = 缺；"none" 算在场）
+}
+
+/// requires 逐项在场（§5 缺失语义：空串/None/空数组 = 缺；"none" 算在场）。
+fn rr3_pin_req_check(pin: &Rr3PinEntry, roles: &Rr3RoleTable, label: &str, errs: &mut Vec<String>) {
     for f in roles.rr3_role_requires(&pin.role).unwrap_or_default() {
         if !RR3_PIN_KEYS.contains(&f.as_str()) {
             errs.push(format!(
@@ -334,7 +363,10 @@ fn rr3_check_pin(
             ));
         }
     }
-    // direction 相等（pin 的物理方向与角色声明各说一套 = 数据矛盾）
+}
+
+/// direction 相等（pin 的物理方向与角色声明各说一套 = 数据矛盾）。
+fn rr3_pin_dir_check(pin: &Rr3PinEntry, roles: &Rr3RoleTable, label: &str, errs: &mut Vec<String>) {
     if let Some(d) = roles.rr3_role_direction(&pin.role) {
         if pin.direction != d {
             errs.push(format!(
@@ -343,7 +375,15 @@ fn rr3_check_pin(
             ));
         }
     }
-    // role.slot ∈ slots（roles/slots 两表对账的装载侧执法）
+}
+
+/// role.slot ∈ slots（roles/slots 两表对账的装载侧执法）。
+fn rr3_pin_slot_check(
+    pin: &Rr3PinEntry,
+    roles: &Rr3RoleTable,
+    table: &Rr3SlotTable,
+    errs: &mut Vec<String>,
+) {
     if let Some(slot) = roles.rr3_role_slot(&pin.role) {
         if !table.rr3_slot_contains(&slot) {
             errs.push(format!(
@@ -352,7 +392,6 @@ fn rr3_check_pin(
             ));
         }
     }
-    (errs, Some(derives))
 }
 
 /// host 档派生：derives 声明逐键取值（多实例共键须同值）+ 词形漂移检查。
