@@ -66,6 +66,14 @@ pins = [41, 42]
 group = "uart2"
 why = "UART2 TX/RX 用 GPIO41/42（pins_s3.rs，2026-10-29 真板订正自 17/18 迁钉）——同一外设矩阵，两条线必须同组申报"
 
+# —— I2S 不登记本表（P1 审计件，2026-11-12 裁定，同 esp32.toml 同段注记）——
+# 板侧 I2S0 音频面（BCLK=GPIO6 / SD=GPIO15 / WS=GPIO7，src/board/pins_s3.rs 引脚
+# 真值段与 RR3_BIND_I2S_* 装配对账锚）不入本表：`kind` 封闭七值无 i2s（扩域走
+# 契约级评审），且 I2S 三信号脚由 board 具名装配直给、不进 profiles `[[pin]]`
+# 角色域，无 (controller, channel) 上界与 ④ 互斥判据需求。事实真值点维持
+# pins_s3.rs 单点；待音频面成为可分配角色时按契约级流程扩词域再进表。
+# 审计存照：docs/process/dev/0.0.8静态生产审计-第七轮-平台表I2S裁定-2026-11-12.md。
+
 [construction]
 # 具名构造表（esp-idf-hal 具名类型，不可生成）。S3 现役构造两处：
 # LEDC GPIO4 pan / GPIO5 tilt。
