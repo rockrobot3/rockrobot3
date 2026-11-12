@@ -18,7 +18,7 @@
 //!
 //! mock 注入走 rrd 进程 env（`RR3_BRAIN_CLOUD=mock` 由 brain 继承；其余模块无
 //! 消费者）+ `RR3_HAL_BACKEND=sim`。HAL 面的 sim 落点有二：沙箱装配单副本经
-//! [`rr3_asm_sim_profile_text`] 变换（hal_backend → sim、可选真后端专面摘除）——
+//! [`rr3_asm_sim_text`] 变换（hal_backend → sim、可选真后端专面摘除）——
 //! P0-3 起 supervisor 按装配单声明的 `RR3_HAL_BACKEND` 注入子进程、装配单是
 //! 部署真值，rrd env 的 sim 只护 rrd 自己不护模块；rrd env 再兜一层
 //! `--manifest` 调试路径。本模块依赖 UDS 与真进程，仅 Unix 参与编译。
@@ -120,7 +120,7 @@ pub type Rr3AssembleEntry = (String, PathBuf);
 
 /// 演练夹具：把仓源真值装进 workdir 的装机布局（modules-root），返回
 /// (夹具装配单路径, 模块产物清单)。
-/// 装配单经 [`rr3_asm_sim_profile_text`] sim 变换后落位（仓源原文零改）；接线档
+/// 装配单经 [`rr3_asm_sim_text`] sim 变换后落位（仓源原文零改）；接线档
 /// 同批原文拷贝零改（`hardware/<形态>/wiring.toml`，校验⑦ 要求装机档必在，缺件
 /// fail-fast）；manifest 仅 entry 绝对化；config 同目录就位。
 pub fn rr3_assemble_layout(
@@ -130,7 +130,7 @@ pub fn rr3_assemble_layout(
 ) -> Result<(PathBuf, Vec<Rr3AssembleEntry>), String> {
     let profile_text = std::fs::read_to_string(profile_src)
         .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
-    let sim_text = rr3_asm_sim_profile_text(&profile_text)?;
+    let sim_text = rr3_asm_sim_text(&profile_text)?;
     let profile = rr3_profile_parse(&sim_text).map_err(|errs| {
         format!(
             "装配单 {} sim 变换后不可解析: {errs:?}",
@@ -165,7 +165,7 @@ fn rr3_profile_key_of(line: &str) -> Option<&str> {
 /// 策略分离：仓源装配单零改，变换只落 `profiles/<名>.toml` 沙箱副本。改写后
 /// 由调用方重解析复核（hal_backend 必填缺行即红，其余字段保真——与 manifest
 /// entry 绝对化同一条"改写后复核"纪律）。
-fn rr3_asm_sim_profile_text(text: &str) -> Result<String, String> {
+fn rr3_asm_sim_text(text: &str) -> Result<String, String> {
     let mut out = String::with_capacity(text.len() + 16);
     let mut in_runtime = false;
     let mut saw_hal = false;
@@ -623,14 +623,14 @@ watchdog_timeout_ms = 5000\n";
         let t = "[runtime]\nlog_ring_cap = 512\nhal_backend = \"linux\"\n\
                  audio_backend = \"esp32\"\nservo_backend = \"esp32\"\n\n\
                  [platform]\ntier = \"host\"\nnote = \"hal_backend 字样在段外不受影响\"\n";
-        let out = rr3_asm_sim_profile_text(t).unwrap();
+        let out = rr3_asm_sim_text(t).unwrap();
         assert!(out.contains("hal_backend = \"sim\"\n"), "{out}");
         assert!(!out.contains("audio_backend"), "{out}");
         assert!(!out.contains("servo_backend"), "{out}");
         assert!(out.contains("段外不受影响"), "{out}");
         // 缺 hal_backend 即红（P0-3 必填无落点）
         let no_hal = "[runtime]\nlog_ring_cap = 512\n\n[platform]\ntier = \"host\"\n";
-        assert!(rr3_asm_sim_profile_text(no_hal)
+        assert!(rr3_asm_sim_text(no_hal)
             .unwrap_err()
             .contains("缺 hal_backend"));
     }
