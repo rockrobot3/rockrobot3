@@ -96,6 +96,48 @@ fn domain_keys_apply_accepts_commented_block_head() {
     assert!(out.contains("severe_mv = 3200"), "{out}");
 }
 
+/// 块头括号内空白（TOML 规范：表头键名内空白忽略）：`[[ supplies.domain ]]`
+/// 与紧写同义、装载期同收——手术面旧判据按紧写字面前缀匹配会误报"缺域"，
+/// 在册域的写口功能整体丢失。
+#[test]
+fn domain_keys_apply_accepts_spaced_block_head() {
+    let text = SURGERY_TEXT.replace(
+        "[[supplies.domain]]\nname = \"batt\"",
+        "[[ supplies.domain ]]\nname = \"batt\"",
+    );
+    let out = rr3_domain_apply(&text, "batt", &[("severe_mv", "3200")]).expect("括号内空白应识头");
+    assert!(out.contains("severe_mv = 3200"), "{out}");
+    assert!(out.contains("severe_mv = 4400"), "邻域不得波及: {out}");
+}
+
+/// 等价性对拍（B38）：装载器（TOML 解析）收的形状，手术面必须能定位——两处
+/// 对"在册域"的判据不得劈叉，否则写口对合法档误报"缺域"。逐形各判一次，
+/// 同时核"他域仍拒"（定界没被放宽成"见块就收"）。
+#[test]
+fn domain_locator_agrees_with_toml_loader() {
+    for head in [
+        "[[supplies.domain]]",
+        "[[ supplies.domain ]]",
+        "[[supplies.domain]]  # 带注释",
+        "  [[supplies.domain]]   ",
+    ] {
+        let text = format!("{head}\nname = 'batt'\nnominal_mv = 3700\nsevere_mv = 3300\n");
+        let v: toml::Value =
+            toml::from_str(&text).unwrap_or_else(|e| panic!("{head}: 装载器应收: {e}"));
+        assert_eq!(
+            v["supplies"]["domain"].as_array().map(Vec::len),
+            Some(1),
+            "{head}"
+        );
+        rr3_domain_apply(&text, "batt", &[("severe_mv", "3200")])
+            .unwrap_or_else(|e| panic!("{head}: 装载器收则手术必须收: {e}"));
+        assert!(
+            rr3_domain_apply(&text, "rail5v", &[("severe_mv", "1")]).is_err(),
+            "{head}: 他域仍须拒"
+        );
+    }
+}
+
 /// 缺域拒：域名不在册不带病落盘
 #[test]
 fn domain_keys_apply_rejects_missing_domain() {

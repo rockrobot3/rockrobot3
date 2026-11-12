@@ -98,17 +98,20 @@ fn rr3_domain_heads(lines: &[String]) -> Vec<(usize, bool)> {
         .collect()
 }
 
-/// 块头判据（纯函数）：`[[supplies.domain]]` 后只许空白或行内注释（TOML 允许
-/// 头行带注释，装载期照收；旧判据按整行等值，带注释/尾空白的头行认不出——
-/// 其域会被误报"缺域"，更坏时把键行算进邻块）。
+/// 块头判据（纯函数）：按 TOML 表头语法取键名——`[[`/`[` 起头、键名内空白
+/// 忽略（`[[ supplies.domain ]]` 与紧写同义，装载期照收）、收尾括号之后允许
+/// 行内注释。键名归一后与 `supplies.domain` 相等即域块头，其余块头（含子表
+/// `[[supplies.domain.extra]]`）只作定界。旧判据按紧写字面前缀匹配，括号内
+/// 带空白或尾空白的头行认不出——其域会被误报"缺域"（在册域写口功能丢失）。
 fn rr3_head_kind(t: &str) -> Option<bool> {
-    if let Some(rest) = t.strip_prefix("[[supplies.domain]]") {
-        let rest = rest.trim_start();
-        if rest.is_empty() || rest.starts_with('#') {
-            return Some(true);
-        }
-    }
-    t.starts_with('[').then_some(false)
+    let rest = t.strip_prefix('[')?;
+    let (array, body) = match rest.strip_prefix('[') {
+        Some(b) => (true, b),
+        None => (false, rest),
+    };
+    let key = body.split(if array { "]]" } else { "]" }).next()?;
+    let key: String = key.chars().filter(|c| !c.is_whitespace()).collect();
+    Some(array && key == "supplies.domain")
 }
 
 /// 键行引号串取值（单/双引号同义）：TOML 两形都合法、装载期都收——手术面的
