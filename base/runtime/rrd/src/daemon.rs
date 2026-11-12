@@ -729,23 +729,19 @@ fn rr3_accept_pair(
     max: usize,
 ) -> Option<(UnixStream, Rr3ConnSlot)> {
     const RR3_ACCEPT_ERR_BACKOFF: Duration = Duration::from_millis(200);
-    let stream = match listener.rr3_accept() {
-        Ok(s) => s,
-        Err(e) => {
+    let stream = listener
+        .rr3_accept()
+        .map_err(|e| {
             rr3_log(&format!("accept 失败（继续服务）: {e}"));
             thread::sleep(RR3_ACCEPT_ERR_BACKOFF);
-            return None;
-        }
-    };
-    let slot = match rr3_conn_acquire(live, max) {
-        Some(slot) => slot,
-        None => {
-            rr3_log(&format!(
-                "连接数超上限 {max}，拒绝新连接（在服 {} 条）",
-                live.load(Ordering::Relaxed)
-            ));
-            return None;
-        }
+        })
+        .ok()?;
+    let Some(slot) = rr3_conn_acquire(live, max) else {
+        rr3_log(&format!(
+            "连接数超上限 {max}，拒绝新连接（在服 {} 条）",
+            live.load(Ordering::Relaxed)
+        ));
+        return None;
     };
     Some((stream, slot))
 }

@@ -59,19 +59,37 @@ pub enum Rr3ProbeFace {
     Alsa,
 }
 
+/// 目录型探测面表：面 → (根下目录, 条目前缀)。
+const RR3_FACE_DIRS: &[(Rr3ProbeFace, &str, &str)] = &[
+    (Rr3ProbeFace::Pwm, "sys/class/pwm", "pwmchip"),
+    (Rr3ProbeFace::Gpio, "sys/class/gpio", "gpiochip"),
+    (Rr3ProbeFace::I2c, "dev", "i2c-"),
+    (Rr3ProbeFace::Spi, "dev", "spidev"),
+];
+
+/// 格位 → 探测面映射表（同一面可由多个格位共用；表内格位唯一）。
+const RR3_SLOT_FACES: &[(&str, Rr3ProbeFace)] = &[
+    ("act.servo", Rr3ProbeFace::Pwm),
+    ("act.led", Rr3ProbeFace::Gpio),
+    ("act.relay", Rr3ProbeFace::Gpio),
+    ("ui.face", Rr3ProbeFace::Spi),
+    ("power.charger", Rr3ProbeFace::I2c),
+    ("sensor.env", Rr3ProbeFace::I2c),
+    ("sensor.imu", Rr3ProbeFace::I2c),
+    ("audio.capture", Rr3ProbeFace::Alsa),
+    ("audio.playback", Rr3ProbeFace::Alsa),
+    ("audio.vad", Rr3ProbeFace::Alsa),
+];
+
 /// 格位 → 探测面。`None` = 无硬件面可反证（软件格 / 运行期格 / 基础层），
 /// 探测对它们回"在位"（见文件头末段）。
 pub fn rr3_slot_probe_face(slot: &str) -> Option<Rr3ProbeFace> {
-    match slot {
-        "act.servo" => Some(Rr3ProbeFace::Pwm),
-        "act.led" | "act.relay" => Some(Rr3ProbeFace::Gpio),
-        "ui.face" => Some(Rr3ProbeFace::Spi),
-        "power.charger" | "sensor.env" | "sensor.imu" => Some(Rr3ProbeFace::I2c),
-        "audio.capture" | "audio.playback" | "audio.vad" => Some(Rr3ProbeFace::Alsa),
-        // cognition.*（软件格）、net.wifi/net.bt（运行期/占位格）、基础层 bus.*/
-        // net.online/power.battery：无硬件面，无反证 → 在位。
-        _ => None,
-    }
+    // cognition.*（软件格）、net.wifi/net.bt（运行期/占位格）、基础层 bus.*/
+    // net.online/power.battery：无硬件面，无反证 → 在位。
+    RR3_SLOT_FACES
+        .iter()
+        .find(|(name, _)| *name == slot)
+        .map(|(_, face)| *face)
 }
 
 /// linux 参数真值探测（MC-4）：五面在位性，探测根可注入。
@@ -121,17 +139,13 @@ impl Rr3LinuxProbe {
 
     /// 面在位性。任一面拿不到答案 → `false`（fail-closed）。
     fn rr3_face_present(&self, face: Rr3ProbeFace) -> bool {
-        match face {
-            Rr3ProbeFace::Pwm => {
-                Self::rr3_dir_has_prefix(&self.root.join("sys/class/pwm"), "pwmchip")
-            }
-            Rr3ProbeFace::Gpio => {
-                Self::rr3_dir_has_prefix(&self.root.join("sys/class/gpio"), "gpiochip")
-            }
-            Rr3ProbeFace::I2c => Self::rr3_dir_has_prefix(&self.root.join("dev"), "i2c-"),
-            Rr3ProbeFace::Spi => Self::rr3_dir_has_prefix(&self.root.join("dev"), "spidev"),
-            Rr3ProbeFace::Alsa => Self::rr3_file_nonempty(&self.root.join("proc/asound/cards")),
+        if face == Rr3ProbeFace::Alsa {
+            return Self::rr3_file_nonempty(&self.root.join("proc/asound/cards"));
         }
+        RR3_FACE_DIRS
+            .iter()
+            .find(|(f, _, _)| *f == face)
+            .is_some_and(|(_, dir, prefix)| Self::rr3_dir_has_prefix(&self.root.join(dir), prefix))
     }
 }
 

@@ -323,16 +323,14 @@ fn rr3_axis_pin(
     pin_ids: &BTreeSet<String>,
     errs: &mut Vec<String>,
 ) -> Option<String> {
-    match rr3_text_field(v, errs, path, "pin") {
-        Some(s) if pin_ids.contains(s) => Some(s.to_string()),
-        Some(s) => {
-            errs.push(format!(
-                "{path}: pin = \"{s}\" 未命中 [pins] 的 pin_id 集（F-4：档案外键与绑定必须对账）"
-            ));
-            None
-        }
-        None => None,
+    let s = rr3_text_field(v, errs, path, "pin")?;
+    if pin_ids.contains(s) {
+        return Some(s.to_string());
     }
+    errs.push(format!(
+        "{path}: pin = \"{s}\" 未命中 [pins] 的 pin_id 集（F-4：档案外键与绑定必须对账）"
+    ));
+    None
 }
 
 /// 自洽判据（§4.4）：行程窗口必须包住中位锚——lo < center < hi（三键在场才判）

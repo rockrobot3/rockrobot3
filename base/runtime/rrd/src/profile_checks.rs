@@ -54,15 +54,25 @@ fn rr3_pin_derive_value(
     key: &str,
     platform: &Rr3PlatformTable,
 ) -> Result<String, String> {
-    match key {
-        "pwm_chip" | "gpio_chip" | "i2c_bus" => rr3_derive_word(pin, key, platform),
-        "spi_device" => rr3_derive_spi(pin, key, platform),
-        "pwm_channel" => rr3_derive_channel(pin),
-        "gpio_led_line" | "gpio_relay_line" => rr3_derive_line(pin),
-        "ina219_addr" => rr3_derive_addr(pin),
-        other => Err(format!("派生键 {other} 不在派生规则表（八物理键封闭）")),
-    }
+    RR3_DERIVE_RULES
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, derive)| derive(pin, key, platform))
+        .unwrap_or_else(|| Err(format!("派生键 {key} 不在派生规则表（八物理键封闭）")))
 }
+
+/// 派生规则表：八物理键 → 取值法（同法可由多键共用）。
+type Rr3DeriveFn = fn(&Rr3PinEntry, &str, &Rr3PlatformTable) -> Result<String, String>;
+const RR3_DERIVE_RULES: [(&str, Rr3DeriveFn); 8] = [
+    ("pwm_chip", rr3_derive_word),
+    ("gpio_chip", rr3_derive_word),
+    ("i2c_bus", rr3_derive_word),
+    ("spi_device", rr3_derive_spi),
+    ("pwm_channel", |p, _, _| rr3_derive_channel(p)),
+    ("gpio_led_line", |p, _, _| rr3_derive_line(p)),
+    ("gpio_relay_line", |p, _, _| rr3_derive_line(p)),
+    ("ina219_addr", |p, _, _| rr3_derive_addr(p)),
+];
 
 /// 词形键派生（B9 自 pin_derive_value 抽出）：controller 必须合 `<prefix><N>`，
 /// 派生值 = N 的字符串形式。
@@ -349,16 +359,23 @@ fn rr3_pin_inst_check(
     label: &str,
     errs: &mut Vec<String>,
 ) {
-    match roles.rr3_role_per_inst(&pin.role) {
-        Some(true) if pin.instance.is_empty() => errs.push(format!(
+    let Some(per_inst) = roles.rr3_role_per_inst(&pin.role) else {
+        return;
+    };
+    // per_instance 与 instance 在场必须一致（true 必填 / false 禁填）。
+    if per_inst != pin.instance.is_empty() {
+        return;
+    }
+    if per_inst {
+        errs.push(format!(
             "{label} 角色 {} per_instance = true，instance 必填（多实例角色的身份一半在 instance）",
             pin.role
-        )),
-        Some(false) if !pin.instance.is_empty() => errs.push(format!(
+        ));
+    } else {
+        errs.push(format!(
             "{label} 角色 {} per_instance = false，instance 禁填（填了 pin_id 就有两个真值点）",
             pin.role
-        )),
-        _ => {}
+        ));
     }
 }
 
