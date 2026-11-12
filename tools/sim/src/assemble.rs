@@ -321,20 +321,10 @@ fn rr3_copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
-    let profile_src = a
-        .profile
-        .clone()
-        .ok_or("内部错误：装配演练缺 --profile（main 路由保证）")?;
-    // ---- 0. 定位：仓根与二进制 ----
-    let repo = crate::drill::rr3_repo_locate(a)?;
-    let (d_rrd, _peer, d_rrctl) = rr3_default_bins(&repo);
-    let rrd = a.rrd.clone().unwrap_or(d_rrd);
-    let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
-
-    // ---- 1. 夹具：演练 modules-root（装机布局）----
-    // 缺省工作目录每次运行唯一（pid 会被容器快速复用，单 pid 命名会让上一轮
-    // 遗留模块混进本轮装配）；显式 --socket 时目录归调用方，不删其父目录。
+/// 演练夹具定位（工作目录 + socket）：缺省工作目录每次运行唯一（pid 会被容器
+/// 快速复用，单 pid 命名会让上一轮遗留模块混进本轮）；显式 `--socket` 时目录归
+/// 调用方，不删其父目录。回（目录是否归本次演练所有, workdir, socket）。
+fn rr3_drill_stage(a: &Rr3SimArgs) -> Result<(bool, PathBuf, PathBuf), String> {
     let owned_dir = a.socket.is_none();
     let workdir = match &a.socket {
         Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -350,6 +340,70 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
     std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
     let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
     let _ = std::fs::remove_file(&socket);
+    Ok((owned_dir, workdir, socket))
+}
+
+/// 收尾：杀 rrd（子模块喂狗失败自退）；`--keep` 保留现场并打印手动收尾指引。
+fn rr3_drill_teardown(
+    keep: bool,
+    child: &mut std::process::Child,
+    pid: u32,
+    socket: &Path,
+    workdir: &Path,
+) {
+    if keep {
+        println!(
+            "rr3-sim --profile: --keep 保留现场：socket={} workdir={}",
+            socket.display(),
+            workdir.display()
+        );
+        println!("rr3-sim --profile: 手动收尾：kill {pid}；rm -rf {workdir:?}");
+        return;
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(socket);
+}
+
+/// 结论：成功即收现场（失败保留供排障，错误信息点名 workdir 与现场日志）。
+fn rr3_drill_verdict(
+    outcome: Result<(), String>,
+    owned_dir: bool,
+    workdir: &Path,
+    entries: &[Rr3AssembleEntry],
+    profile_dst: &Path,
+    mut report: String,
+) -> Result<String, String> {
+    match outcome {
+        Ok(()) => {
+            if owned_dir {
+                let _ = std::fs::remove_dir_all(workdir);
+            }
+            report.push_str(rr3_section("演练结论").as_str());
+            report.push_str(&format!(
+                "装配演练 OK：{} 个 face 模块全 running + denied_publish = 0（装配单 {}）\n",
+                entries.len(),
+                profile_dst.display()
+            ));
+            Ok(report)
+        }
+        Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
+    }
+}
+
+pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
+    let profile_src = a
+        .profile
+        .clone()
+        .ok_or("内部错误：装配演练缺 --profile（main 路由保证）")?;
+    // ---- 0. 定位：仓根与二进制 ----
+    let repo = crate::drill::rr3_repo_locate(a)?;
+    let (d_rrd, _peer, d_rrctl) = rr3_default_bins(&repo);
+    let rrd = a.rrd.clone().unwrap_or(d_rrd);
+    let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
+
+    // ---- 1. 夹具：演练 modules-root（装机布局）----
+    let (owned_dir, workdir, socket) = rr3_drill_stage(a)?;
     let (profile_dst, entries) = rr3_assemble_layout(&repo, &workdir, &profile_src)?;
     rr3_asm_bins(&rrd, &rrctl, &entries)?;
 
@@ -367,36 +421,8 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let (mut rrd_child, rrd_pid) = rr3_asm_up_rrd(&ctx)?;
     let outcome = rr3_asm_wait(&ctx, &mut report);
 
-    // ---- 收尾：杀 rrd（子模块喂狗失败自退）；--keep 保留现场 ----
-    if a.keep {
-        println!(
-            "rr3-sim --profile: --keep 保留现场：socket={} workdir={}",
-            socket.display(),
-            workdir.display()
-        );
-        println!("rr3-sim --profile: 手动收尾：kill {rrd_pid}；rm -rf {workdir:?}");
-    } else {
-        let _ = rrd_child.kill();
-        let _ = rrd_child.wait();
-        let _ = std::fs::remove_file(&socket);
-    }
-
-    match outcome {
-        Ok(()) => {
-            // 成功即收现场（失败保留供排障，错误信息已点名 workdir）。
-            if owned_dir {
-                let _ = std::fs::remove_dir_all(&workdir);
-            }
-            report.push_str(rr3_section("演练结论").as_str());
-            report.push_str(&format!(
-                "装配演练 OK：{} 个 face 模块全 running + denied_publish = 0（装配单 {}）\n",
-                entries.len(),
-                profile_dst.display()
-            ));
-            Ok(report)
-        }
-        Err(e) => Err(format!("{e}\n（现场日志在 {workdir:?}）")),
-    }
+    rr3_drill_teardown(a.keep, &mut rrd_child, rrd_pid, &socket, &workdir);
+    rr3_drill_verdict(outcome, owned_dir, &workdir, &entries, &profile_dst, report)
 }
 
 /// 装配演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
