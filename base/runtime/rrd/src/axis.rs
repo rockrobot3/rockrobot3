@@ -139,20 +139,55 @@ pub fn rr3_act_prof_parse(
 /// 十二键构造（B10 自 act_prof_parse 抽出）：只做 Option 拼接，判据已在
 /// 调用方逐键点名；返回 None 即判据面与构造面不一致（调用方折 Err 点名）。
 fn rr3_axis_build(nums: &Rr3AxisNums, words: &Rr3AxisWords) -> Option<Rr3ActProfile> {
+    let (center_deg, lo_deg, hi_deg, dir_sign) = rr3_axis_motion(nums)?;
+    let (slew_deg_s, settle_ms, current_ceil_ma, warmup_ms) = rr3_axis_drive(nums)?;
+    let (hold, hard_stop, calibrated, source) = rr3_axis_vocab(words)?;
     Some(Rr3ActProfile {
-        center_deg: nums.center? as u16,
-        lo_deg: nums.lo? as u16,
-        hi_deg: nums.hi? as u16,
-        dir_sign: nums.dir? as i8,
-        slew_deg_s: nums.slew? as u16,
-        settle_ms: nums.settle? as u32,
-        hold: words.hold?,
-        current_ceil_ma: nums.ceil_ma? as u16,
-        warmup_ms: nums.warmup? as u32,
-        hard_stop: words.hard_stop?,
-        calibrated: words.calibrated?,
-        source: words.source?,
+        center_deg,
+        lo_deg,
+        hi_deg,
+        dir_sign,
+        slew_deg_s,
+        settle_ms,
+        hold,
+        current_ceil_ma,
+        warmup_ms,
+        hard_stop,
+        calibrated,
+        source,
     })
+}
+
+/// 行程四键（center/lo/hi/dir）：只做 Option 拼接，域判据在调用方。
+fn rr3_axis_motion(nums: &Rr3AxisNums) -> Option<(u16, u16, u16, i8)> {
+    Some((
+        nums.center? as u16,
+        nums.lo? as u16,
+        nums.hi? as u16,
+        nums.dir? as i8,
+    ))
+}
+
+/// 驱动四键（slew/settle/ceil/warmup）：只做 Option 拼接，域判据在调用方。
+fn rr3_axis_drive(nums: &Rr3AxisNums) -> Option<(u16, u32, u16, u32)> {
+    Some((
+        nums.slew? as u16,
+        nums.settle? as u32,
+        nums.ceil_ma? as u16,
+        nums.warmup? as u32,
+    ))
+}
+
+/// 词键四键（hold/hard_stop/calibrated/source）：只做 Option 拼接，词表判据在调用方。
+fn rr3_axis_vocab(
+    words: &Rr3AxisWords,
+) -> Option<(Rr3ActHold, Rr3ActHardStop, bool, Rr3ActSource)> {
+    Some((
+        words.hold?,
+        words.hard_stop?,
+        words.calibrated?,
+        words.source?,
+    ))
 }
 
 /// 白名单 + F-6 全键必填：词表外键点名、词表内键登记、随后反向扫缺键

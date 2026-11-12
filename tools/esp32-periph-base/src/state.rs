@@ -231,6 +231,22 @@ impl PeriphState {
             return None;
         }
         let now = now_ms();
+        self.anim_blink(now);
+        let mut style = self.base;
+        if self.blink_until_ms != 0 {
+            style.open = 4;
+        }
+        self.anim_glance(now, &mut style);
+        if style != self.drawn {
+            self.drawn = style;
+            Some(style)
+        } else {
+            None
+        }
+    }
+
+    /// 眨眼一步：起眨（闭 130ms + 2.8–5.2s 后下次）/ 到点收眨 / 待触发。
+    fn anim_blink(&mut self, now: u64) {
         if self.blink_until_ms == 0 {
             if now >= self.next_blink_ms {
                 self.blink_until_ms = now + 130;
@@ -239,10 +255,10 @@ impl PeriphState {
         } else if now >= self.blink_until_ms {
             self.blink_until_ms = 0;
         }
-        let mut style = self.base;
-        if self.blink_until_ms != 0 {
-            style.open = 4;
-        }
+    }
+
+    /// 微扫视一步：扫视中叠偏移到 style；否则起扫（±6px/±2 行，500–900ms）或收扫。
+    fn anim_glance(&mut self, now: u64, style: &mut EyeStyle) {
         if self.glance_until_ms == 0 {
             if now >= self.next_glance_ms {
                 self.glance_dx = (esp_random_u32() % 13) as i16 - 6;
@@ -259,12 +275,6 @@ impl PeriphState {
         } else {
             style.dx += self.glance_dx;
             style.dy += self.glance_dy;
-        }
-        if style != self.drawn {
-            self.drawn = style;
-            Some(style)
-        } else {
-            None
         }
     }
 

@@ -205,30 +205,39 @@ fn rr3_mf_conflict(cfg: &RrdConfig) -> Result<(), String> {
 /// 数值型参数族：非负整数毫秒；watchdog 额外拒 0（忙循环不是"更快一点"）。
 fn rr3_cli_num(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
     match args[i].as_str() {
-        "--restart-base-ms" => {
-            cfg.restart_base_ms = parse_restart_base(&need_value("--restart-base-ms", args, i)?)?;
-            Ok(i + 2)
-        }
-        "--pre-register-timeout-ms" => {
-            cfg.pre_register_timeout_ms = parse_ms(
-                "--pre-register-timeout-ms",
-                &need_value("--pre-register-timeout-ms", args, i)?,
-            )?;
-            Ok(i + 2)
-        }
-        "--watchdog-tick-ms" => {
-            let raw = need_value("--watchdog-tick-ms", args, i)?;
-            let n = parse_ms("--watchdog-tick-ms", &raw)?;
-            if n == 0 {
-                return Err(
-                    "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）".to_string(),
-                );
-            }
-            cfg.watchdog_tick_ms = n;
-            Ok(i + 2)
-        }
+        "--restart-base-ms" => rr3_num_restart(cfg, args, i),
+        "--pre-register-timeout-ms" => rr3_num_pre(cfg, args, i),
+        "--watchdog-tick-ms" => rr3_num_tick(cfg, args, i),
         other => Err(format!("未知选项 {other}\n{USAGE}")),
     }
+}
+
+/// `--restart-base-ms`：非负整数 + 0/溢出两道专用门禁。
+fn rr3_num_restart(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    cfg.restart_base_ms = parse_restart_base(&need_value("--restart-base-ms", args, i)?)?;
+    Ok(i + 2)
+}
+
+/// `--pre-register-timeout-ms`：非负整数毫秒（0 合法，conn 层按 max(1) 用）。
+fn rr3_num_pre(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    cfg.pre_register_timeout_ms = parse_ms(
+        "--pre-register-timeout-ms",
+        &need_value("--pre-register-timeout-ms", args, i)?,
+    )?;
+    Ok(i + 2)
+}
+
+/// `--watchdog-tick-ms`：非负整数毫秒，0 额外拒（忙循环不是"更快一点"）。
+fn rr3_num_tick(cfg: &mut RrdConfig, args: &[String], i: usize) -> Result<usize, String> {
+    let raw = need_value("--watchdog-tick-ms", args, i)?;
+    let n = parse_ms("--watchdog-tick-ms", &raw)?;
+    if n == 0 {
+        return Err(
+            "--watchdog-tick-ms 需为正整数毫秒（0 是忙循环，不是\"更快一点\"）".to_string(),
+        );
+    }
+    cfg.watchdog_tick_ms = n;
+    Ok(i + 2)
 }
 
 /// 杂项参数族：boot-role 的两道拒法 + help。

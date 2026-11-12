@@ -105,32 +105,40 @@ fn rr3_need(args: &[String], i: usize, flag: &str) -> Result<String, String> {
 /// 单选项步进：值选项消费两槽、开关消费一槽；返回消费的槽数。
 fn pack_arg(cfg: &mut Rr3PackConfig, args: &[String], i: usize) -> Result<usize, String> {
     match args[i].as_str() {
-        "--payload" => {
-            cfg.payload = PathBuf::from(rr3_need(args, i, "--payload")?);
-            Ok(2)
-        }
-        "--repo" => {
-            cfg.repo = PathBuf::from(rr3_need(args, i, "--repo")?);
-            Ok(2)
-        }
-        "--out" => {
-            cfg.out = PathBuf::from(rr3_need(args, i, "--out")?);
-            Ok(2)
-        }
-        "--profile" => {
-            cfg.profile = rr3_need(args, i, "--profile")?;
-            Ok(2)
-        }
-        "--arch" => {
-            cfg.arch = rr3_need(args, i, "--arch")?;
-            Ok(2)
-        }
         "--stage-only" => {
             cfg.stage_only = true;
             Ok(1)
         }
+        flag => pack_arg_value(cfg, args, i, flag),
+    }
+}
+
+/// 值选项落位（五族分派；未知选项即拒，文案与旧版逐字一致）。
+fn pack_arg_value(
+    cfg: &mut Rr3PackConfig,
+    args: &[String],
+    i: usize,
+    flag: &str,
+) -> Result<usize, String> {
+    match flag {
+        "--payload" => pack_arg_set(&mut cfg.payload, args, i, flag),
+        "--repo" => pack_arg_set(&mut cfg.repo, args, i, flag),
+        "--out" => pack_arg_set(&mut cfg.out, args, i, flag),
+        "--profile" => pack_arg_set(&mut cfg.profile, args, i, flag),
+        "--arch" => pack_arg_set(&mut cfg.arch, args, i, flag),
         other => Err(format!("未知选项 {other}\n{}", usage())),
     }
+}
+
+/// 取 flag 后的值写进目标位（缺值点名原文案）。
+fn pack_arg_set<T: From<String>>(
+    dst: &mut T,
+    args: &[String],
+    i: usize,
+    flag: &str,
+) -> Result<usize, String> {
+    *dst = rr3_need(args, i, flag)?.into();
+    Ok(2)
 }
 
 /// 解析参数。必给项缺席 / 未知选项一律报错带用法，不静默回落（fail-closed）。
@@ -410,9 +418,25 @@ fn rr3_truth_ready(
 /// RR3_INSTALL_ROOT）；config 与可选原子件/编排/形态档按"在位即纯副本"随装。
 fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), String> {
     let mod_src = cfg.payload.join("rr3-modules").join(name);
-    let (text, facts) = rr3_mod_facts(&mod_src, name)?;
     let staged = root.join("modules").join(name);
-    fs::create_dir_all(&staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
+    let (facts, entry_path) = rr3_stage_manifest(&mod_src, &staged, name)?;
+    if facts.lang == "python" {
+        rr3_stage_py(&mod_src, &staged, &entry_path, name)?;
+    } else {
+        rr3_stage_bin(&mod_src, &entry_path, name)?;
+    }
+    rr3_stage_cfg(cfg, &staged, name)?;
+    rr3_stage_opt(cfg, &staged, name)
+}
+
+/// manifest 改写落位 + entry 父目录就绪；返回 facts 与 entry 装机路径。
+fn rr3_stage_manifest(
+    mod_src: &Path,
+    staged: &Path,
+    name: &str,
+) -> Result<(rrd::manifest::Rr3ManifestFacts, PathBuf), String> {
+    let (text, facts) = rr3_mod_facts(mod_src, name)?;
+    fs::create_dir_all(staged).map_err(|e| format!("建目录 {} 失败: {e}", staged.display()))?;
     let installed_entry = format!("{RR3_INSTALL_ROOT}/modules/{name}/{}", facts.entry);
     let rewritten = rr3_manifest_rewrite(&text, &installed_entry, &facts.entry, name)?;
     fs::write(staged.join("module.toml"), rewritten)
@@ -421,13 +445,7 @@ fn rr3_stage_module(cfg: &Rr3PackConfig, root: &Path, name: &str) -> Result<(), 
     if let Some(parent) = entry_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("建目录 {} 失败: {e}", parent.display()))?;
     }
-    if facts.lang == "python" {
-        rr3_stage_py(&mod_src, &staged, &entry_path, name)?;
-    } else {
-        rr3_stage_bin(&mod_src, &entry_path, name)?;
-    }
-    rr3_stage_cfg(cfg, &staged, name)?;
-    rr3_stage_opt(cfg, &staged, name)
+    Ok((facts, entry_path))
 }
 
 /// 读取并校验注入产物 manifest：文件在否 → 解析 → 目录名与 manifest.name 一致

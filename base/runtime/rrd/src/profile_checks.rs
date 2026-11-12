@@ -118,19 +118,20 @@ fn rr3_derive_addr(pin: &Rr3PinEntry) -> Result<String, String> {
 /// 缺、physical 以空数组 = 缺。mux_group 不进 requires（互斥组由平台 conflicts 表
 /// 反推，批N7 已立册）；词表外字段名由调用方点名（门 a 六表对账第 5 张的漂移）。
 fn rr3_pin_has(pin: &Rr3PinEntry, field: &str) -> bool {
-    match field {
-        "role" => !pin.role.is_empty(),
-        "instance" => !pin.instance.is_empty(),
-        "controller" => !pin.controller.is_empty(),
-        "channel" => pin.channel.is_some(),
-        "physical" => !pin.physical.is_empty(),
-        "direction" => !pin.direction.is_empty(),
-        "rail" => !pin.rail.is_empty(),
-        "addr" => !pin.addr.is_empty(),
-        "device" => !pin.device.is_empty(),
-        "failsafe" => !pin.failsafe.is_empty(),
-        _ => false,
-    }
+    [
+        ("role", !pin.role.is_empty()),
+        ("instance", !pin.instance.is_empty()),
+        ("controller", !pin.controller.is_empty()),
+        ("channel", pin.channel.is_some()),
+        ("physical", !pin.physical.is_empty()),
+        ("direction", !pin.direction.is_empty()),
+        ("rail", !pin.rail.is_empty()),
+        ("addr", !pin.addr.is_empty()),
+        ("device", !pin.device.is_empty()),
+        ("failsafe", !pin.failsafe.is_empty()),
+    ]
+    .into_iter()
+    .any(|(k, has)| k == field && has)
 }
 
 /// 格位引用查册门三扇合一：bindings/enabled_slots、[slots].present、
@@ -405,34 +406,56 @@ fn rr3_derive_pin(
     let mut errs = Vec::new();
     let label = format!("pins[{}]", pin.rr3_pin_id());
     for d in derives {
-        match rr3_pin_derive_value(pin, d, platform) {
-            Ok(v) => match derived.get(d) {
-                None => {
-                    derived.insert(d.clone(), v);
-                }
-                Some(prev) if prev != &v => errs.push(format!(
-                    "{label} 派生键 {d} 与他条取值不同（{prev} vs {v}）——多实例共键须同值（同一资源维）"
-                )),
-                _ => {}
-            },
-            Err(e) => errs.push(format!("{label} 派生 {d} 失败: {e}")),
-        }
+        rr3_derive_one(pin, d, &label, platform, derived, &mut errs);
     }
-    // 词形漂移（①-f）：控制器词形指明总线族，该族派生键必须被角色声明。
-    // derives 显式空的角色跳过（"不派生"是声明不是漏声明）。
-    if !derives.is_empty() {
-        for (key, prefix) in platform.rr3_wordform_map() {
-            if rr3_wordform_tail(&pin.controller, prefix).is_some()
-                && !derives.iter().any(|d| d == key)
-            {
-                errs.push(format!(
-                    "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
-                    pin.controller, pin.role
-                ));
-            }
-        }
-    }
+    rr3_drift_check(pin, derives, &label, platform, &mut errs);
     errs
+}
+
+/// 单条派生键取值并落账：多实例共键须同值（同一资源维）。
+fn rr3_derive_one(
+    pin: &Rr3PinEntry,
+    d: &str,
+    label: &str,
+    platform: &Rr3PlatformTable,
+    derived: &mut BTreeMap<String, String>,
+    errs: &mut Vec<String>,
+) {
+    match rr3_pin_derive_value(pin, d, platform) {
+        Ok(v) => match derived.get(d) {
+            None => {
+                derived.insert(d.to_string(), v);
+            }
+            Some(prev) if prev != &v => errs.push(format!(
+                "{label} 派生键 {d} 与他条取值不同（{prev} vs {v}）——多实例共键须同值（同一资源维）"
+            )),
+            _ => {}
+        },
+        Err(e) => errs.push(format!("{label} 派生 {d} 失败: {e}")),
+    }
+}
+
+/// 词形漂移（①-f）：控制器词形指明总线族，该族派生键必须被角色声明。
+/// derives 显式空的角色跳过（"不派生"是声明不是漏声明）。
+fn rr3_drift_check(
+    pin: &Rr3PinEntry,
+    derives: &[String],
+    label: &str,
+    platform: &Rr3PlatformTable,
+    errs: &mut Vec<String>,
+) {
+    if derives.is_empty() {
+        return;
+    }
+    for (key, prefix) in platform.rr3_wordform_map() {
+        if rr3_wordform_tail(&pin.controller, prefix).is_some() && !derives.iter().any(|d| d == key)
+        {
+            errs.push(format!(
+                "{label} controller 词形 {} 指明 {key}，但角色 {} derives 未声明（派生漂移）",
+                pin.controller, pin.role
+            ));
+        }
+    }
 }
 
 /// 门 n（§8 注入路径唯一）：[hardware] 出现引脚侧派生键一律红——pin 实际派生

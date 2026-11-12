@@ -651,38 +651,11 @@ pub(crate) fn rr3_demand_budget(
     domains: &[Rr3Domain],
 ) -> Vec<String> {
     let mut errs = Vec::new();
-    // 域在册性先行：rail 不在 domains ⇒ 该条需求无分母可比，逐条点名
-    for (owner, demands) in declared {
-        for d in demands {
-            if !domains.iter().any(|dm| dm.name == d.rail) {
-                errs.push(format!(
-                    "件 {owner} 申报 rail = {} 不在 [[supplies.domain]] 在册域集（校验⑨：域缺即 current_cap_ma 缺，预算无分母）",
-                    d.rail
-                ));
-            }
-        }
-    }
+    rr3_rail_known(declared, domains, &mut errs);
     // per rail 预算加总：不分组/多组归属条目全额进最坏值，恰一组归属的条目按组
     // 互斥取组内 max（BTreeMap 保确定性，红例文案顺序稳定）
     for dm in domains {
-        let mut worst = 0i64;
-        let mut owners: BTreeSet<&str> = BTreeSet::new();
-        let mut groups: BTreeMap<&str, i64> = BTreeMap::new();
-        for (owner, demands) in declared {
-            for d in demands.iter().filter(|d| d.critical && d.rail == dm.name) {
-                owners.insert(owner.as_str());
-                match d.concurrency_group.as_slice() {
-                    [g] => {
-                        let slot = groups.entry(g.as_str()).or_insert(0);
-                        *slot = (*slot).max(d.peak_ma);
-                    }
-                    _ => worst += d.peak_ma,
-                }
-            }
-        }
-        for peak in groups.values() {
-            worst += peak;
-        }
+        let (worst, owners) = rr3_rail_sum(declared, &dm.name);
         if worst > dm.current_cap_ma {
             errs.push(format!(
                 "域 {} 电流预算超限（校验⑨）：扩算后 Σ demands.peak_ma (critical=true) 最坏并发 = {worst} mA > current_cap_ma = {} mA（申报者：{}；缺省 = 全部同时，显式 concurrency_group 按组互斥取 max——F-12 不重叠必须是数据）",
@@ -693,6 +666,50 @@ pub(crate) fn rr3_demand_budget(
         }
     }
     errs
+}
+
+/// 域在册性先行：rail 不在 domains ⇒ 该条需求无分母可比，逐条点名。
+fn rr3_rail_known(
+    declared: &[(String, Vec<Rr3AssembleDemand>)],
+    domains: &[Rr3Domain],
+    errs: &mut Vec<String>,
+) {
+    for (owner, demands) in declared {
+        for d in demands {
+            if !domains.iter().any(|dm| dm.name == d.rail) {
+                errs.push(format!(
+                    "件 {owner} 申报 rail = {} 不在 [[supplies.domain]] 在册域集（校验⑨：域缺即 current_cap_ma 缺，预算无分母）",
+                    d.rail
+                ));
+            }
+        }
+    }
+}
+
+/// 单域最坏并发电流与申报者集：不分组/多组归属全额加总，恰一组归属按组互斥取 max。
+fn rr3_rail_sum<'a>(
+    declared: &'a [(String, Vec<Rr3AssembleDemand>)],
+    dname: &str,
+) -> (i64, BTreeSet<&'a str>) {
+    let mut worst = 0i64;
+    let mut owners: BTreeSet<&str> = BTreeSet::new();
+    let mut groups: BTreeMap<&str, i64> = BTreeMap::new();
+    for (owner, demands) in declared {
+        for d in demands.iter().filter(|d| d.critical && d.rail == dname) {
+            owners.insert(owner.as_str());
+            match d.concurrency_group.as_slice() {
+                [g] => {
+                    let slot = groups.entry(g.as_str()).or_insert(0);
+                    *slot = (*slot).max(d.peak_ma);
+                }
+                _ => worst += d.peak_ma,
+            }
+        }
+    }
+    for peak in groups.values() {
+        worst += peak;
+    }
+    (worst, owners)
 }
 
 /// 门 c 申报分子构建（批N2 本体 ⑨-c）：把装配扫描 facts 扩算成校验⑨ 的加总输入。

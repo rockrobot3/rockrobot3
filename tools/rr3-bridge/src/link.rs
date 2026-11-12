@@ -350,49 +350,71 @@ fn upstream_loop(
     let mut cur: Option<UnixStream> = None;
     let mut discarding = false; // 用于"进入丢弃期"只打一行
     loop {
-        let n = match rx.read(&mut buf) {
-            Ok(0) => {
-                let _ = exit.send(ExitMsg::UartDead("上行 EOF".into()));
-                return;
-            }
-            Ok(n) => n,
-            Err(e) => {
-                let _ = exit.send(ExitMsg::UartDead(format!("上行读失败: {e}")));
-                return;
-            }
+        let Some(n) = upstream_read(&mut rx, &mut buf, &exit) else {
+            return;
         };
         if let Some(s) = new_sink.take() {
             cur = Some(s);
         }
-        let chunk = &buf[..n];
-        match cur.as_mut() {
-            Some(s) => {
-                if discarding {
-                    discarding = false;
-                    // 恢复点：丢弃期结束必须报累计，运维据此判断"看起来在跑"是否真在跑
-                    log(&format!(
-                        "uds 上行恢复：此前丢弃累计 {} 字节（帧撕裂面由哨兵超时自愈）",
-                        dropped.load(Ordering::Relaxed)
-                    ));
-                }
-                if let Err(e) = s.write_all(chunk) {
-                    cur = None;
-                    let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
-                    log(&format!(
-                        "uds 上行写出失败（{e}）：本块 {n} 字节丢弃，改入丢弃计数"
-                    ));
-                    let _ = exit.send(ExitMsg::UdsDead("上行写出失败".into()));
-                }
+        upstream_route(&mut cur, &buf[..n], n, &dropped, &mut discarding, &exit);
+    }
+}
+
+/// 读一块 UART；EOF/读错即报 UartDead 并回 None（上行线程该退场）。
+fn upstream_read(
+    rx: &mut Rr3UartConn,
+    buf: &mut [u8],
+    exit: &mpsc::Sender<ExitMsg>,
+) -> Option<usize> {
+    match rx.read(buf) {
+        Ok(0) => {
+            let _ = exit.send(ExitMsg::UartDead("上行 EOF".into()));
+            None
+        }
+        Ok(n) => Some(n),
+        Err(e) => {
+            let _ = exit.send(ExitMsg::UartDead(format!("上行读失败: {e}")));
+            None
+        }
+    }
+}
+
+/// 一块的去向：有连接写 UDS（写失败转丢弃计数并报 UdsDead），无连接计入丢弃。
+fn upstream_route(
+    cur: &mut Option<UnixStream>,
+    chunk: &[u8],
+    n: usize,
+    dropped: &AtomicU64,
+    discarding: &mut bool,
+    exit: &mpsc::Sender<ExitMsg>,
+) {
+    match cur.as_mut() {
+        Some(s) => {
+            if *discarding {
+                *discarding = false;
+                // 恢复点：丢弃期结束必须报累计，运维据此判断"看起来在跑"是否真在跑
+                log(&format!(
+                    "uds 上行恢复：此前丢弃累计 {} 字节（帧撕裂面由哨兵超时自愈）",
+                    dropped.load(Ordering::Relaxed)
+                ));
             }
-            None => {
-                let total = dropped.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
-                if !discarding {
-                    discarding = true;
-                    log("uds 未就绪：UART 上行开始丢弃（不缓冲，等 rrd 就绪后自愈）");
-                } else if total % 4096 < n as u64 {
-                    // 每 ~4KiB 一行的节流计数（1s 内 4096/60 帧的量级不会刷屏）
-                    log(&format!("UART 上行丢弃累计 {total} 字节"));
-                }
+            if let Err(e) = s.write_all(chunk) {
+                *cur = None;
+                let _ = dropped.fetch_add(n as u64, Ordering::Relaxed);
+                log(&format!(
+                    "uds 上行写出失败（{e}）：本块 {n} 字节丢弃，改入丢弃计数"
+                ));
+                let _ = exit.send(ExitMsg::UdsDead("上行写出失败".into()));
+            }
+        }
+        None => {
+            let total = dropped.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
+            if !*discarding {
+                *discarding = true;
+                log("uds 未就绪：UART 上行开始丢弃（不缓冲，等 rrd 就绪后自愈）");
+            } else if total % 4096 < n as u64 {
+                // 每 ~4KiB 一行的节流计数（1s 内 4096/60 帧的量级不会刷屏）
+                log(&format!("UART 上行丢弃累计 {total} 字节"));
             }
         }
     }
