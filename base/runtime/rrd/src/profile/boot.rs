@@ -849,6 +849,17 @@ pub(crate) fn rr3_memory_budget(
     if budget.not_applicable {
         return errs;
     }
+    rr3_budget_cmp(stack_sum, heap_sum, budget, tier, &mut errs);
+    errs
+}
+
+fn rr3_budget_cmp(
+    stack_sum: i64,
+    heap_sum: i64,
+    budget: &Rr3Budget,
+    tier: &str,
+    errs: &mut Vec<String>,
+) {
     if stack_sum > budget.task_stack_budget_bytes {
         errs.push(format!(
             "内存预算超限（校验⑩-a，{tier} 档）：Σ task_stack_bytes = {stack_sum} B > task_stack_budget_bytes = {} B（分子为件级直加非每实例扩算，分母住 [supplies].budget——ADR-0021 修订 3 三份数据三个主人）",
@@ -862,5 +873,4 @@ pub(crate) fn rr3_memory_budget(
             budget.heap_total_bytes, budget.heap_reserved_bytes
         ));
     }
-    errs
 }

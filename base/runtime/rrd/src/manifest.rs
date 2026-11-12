@@ -260,12 +260,20 @@ fn rr3_entry_single(
 
 /// 单行 entry 定位：非 entry 行回 None；entry 行回引号内的值区间（行内偏移）。
 fn rr3_entry_row(line: &str, module: &str) -> Result<Option<(usize, usize)>, String> {
-    let t = line.trim_start();
-    let is_entry = t.starts_with("entry")
-        && t["entry".len()..].starts_with(|c: char| c.is_whitespace() || c == '=');
-    if !is_entry {
+    if !rr3_entry_head(line) {
         return Ok(None);
     }
+    let (a, b) = rr3_entry_bounds(line, module)?;
+    Ok(Some((a + 1, b)))
+}
+
+fn rr3_entry_head(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("entry")
+        && t["entry".len()..].starts_with(|c: char| c.is_whitespace() || c == '=')
+}
+
+fn rr3_entry_bounds(line: &str, module: &str) -> Result<(usize, usize), String> {
     let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) else {
         return Err(format!(
             "模块 {module} 的 entry 行不是双引号字符串（schema 违约）: {line}"
@@ -276,7 +284,7 @@ fn rr3_entry_row(line: &str, module: &str) -> Result<Option<(usize, usize)>, Str
             "模块 {module} 的 entry 行引号内无值（schema 违约）: {line}"
         ));
     }
-    Ok(Some((a + 1, b)))
+    Ok((a, b))
 }
 
 /// 装机的 entry 值形制门（单点）：POSIX 绝对路径且不含 `.`/`..` 段——装机布局的

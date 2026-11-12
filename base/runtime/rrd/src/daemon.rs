@@ -28,7 +28,7 @@ use serde_json::json;
 
 use crate::cli::RrdConfig;
 use crate::conn::{rr3_conn_serve, Rr3ConnCtx};
-use crate::registry::{Rr3Phase, RrdRegistry};
+use crate::registry::{Rr3Expiry, Rr3Phase, RrdRegistry};
 use crate::supervisor::{
     rr3_boot_job_parse, rr3_spawn_supervisor, Rr3SpawnJob, Rr3SuperMsg, Rr3Supervisor,
 };
@@ -101,29 +101,34 @@ fn rr3_spawn_watchdog(
             thread::sleep(tick);
             let expiries = rr3_lock(&shared).rr3_reg_expire(rr3_now_ms(t0));
             for ex in expiries {
-                rr3_log(&format!(
-                    "watchdog 判死 {} task={} 距上次心跳 {}ms ≥ 超时 {}ms",
-                    ex.name, ex.src_task, ex.elapsed_ms, ex.watchdog_ms
-                ));
-                let frame = rr3_state_frame(&ex.name, Rr3Phase::Failed.as_str(), ex.src_task);
-                // 阶段名取自 `Rr3Phase::as_str()`，不写字面量 "failed"：那是第二个真值
-                // （as_str 改了而广播没改，`rr3_read_state(.., "failed")` 会替我们抓到，
-                // 但抓到的是一条本该不必存在的失败）。
-                let n = rr3_lock(&shared).rr3_reg_fanout(&frame, ex.src_task);
-                rr3_log(&format!("watchdog 广播 failed 到 {n} 个连接"));
-                // D-8 的落点（11b）：到期那一路的记账结果交给 supervisor。
-                // `rr3_restart` 只做一次 send，绝不在这条线程里 spawn/睡眠。
-                if let Some(p) = ex.restart {
-                    sup.rr3_restart(p);
-                }
-                // ADR-0009 裁定 3：提供者离开 Running（到期判死这一路，死亡已在
-                // `rr3_reg_expire` 里落账）→ 降级传播。只置位与广播，不产计划、
-                // 不经 supervisor（裁定 4：降级不是崩溃）。
-                let degraded = rr3_lock(&shared).rr3_reg_degrade(&ex.name);
-                rr3_fan_degraded(&shared, &ex.name, degraded);
+                rr3_expiry_fan(&shared, &sup, ex);
             }
         }
     });
+}
+
+/// 单条到期判死：点名、广播 failed、交重启计划、降级传播。
+fn rr3_expiry_fan(shared: &Arc<Mutex<RrdRegistry>>, sup: &Rr3Supervisor, ex: Rr3Expiry) {
+    rr3_log(&format!(
+        "watchdog 判死 {} task={} 距上次心跳 {}ms ≥ 超时 {}ms",
+        ex.name, ex.src_task, ex.elapsed_ms, ex.watchdog_ms
+    ));
+    let frame = rr3_state_frame(&ex.name, Rr3Phase::Failed.as_str(), ex.src_task);
+    // 阶段名取自 `Rr3Phase::as_str()`，不写字面量 "failed"：那是第二个真值
+    // （as_str 改了而广播没改，`rr3_read_state(.., "failed")` 会替我们抓到，
+    // 但抓到的是一条本该不必存在的失败）。
+    let n = rr3_lock(shared).rr3_reg_fanout(&frame, ex.src_task);
+    rr3_log(&format!("watchdog 广播 failed 到 {n} 个连接"));
+    // D-8 的落点（11b）：到期那一路的记账结果交给 supervisor。
+    // `rr3_restart` 只做一次 send，绝不在这条线程里 spawn/睡眠。
+    if let Some(p) = ex.restart {
+        sup.rr3_restart(p);
+    }
+    // ADR-0009 裁定 3：提供者离开 Running（到期判死这一路，死亡已在
+    // `rr3_reg_expire` 里落账）→ 降级传播。只置位与广播，不产计划、
+    // 不经 supervisor（裁定 4：降级不是崩溃）。
+    let degraded = rr3_lock(shared).rr3_reg_degrade(&ex.name);
+    rr3_fan_degraded(shared, &ex.name, degraded);
 }
 
 /// 降级传播：逐个依赖者广播 degraded（排除项 RR3_TASK_RRD = 不排除，E-9 同一理据）。
@@ -510,23 +515,31 @@ fn rr3_dash_opt(s: Option<&str>) -> &str {
 
 /// 装配链点名：缺格 / 缺角色 / 装配缺项 / 轴档案注记——四类分开，不混写
 fn rr3_boot_notes(boot: &crate::profile::Rr3ProfileBoot) {
-    for (module, slot) in &boot.missing {
-        rr3_log(&format!(
-            "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
-        ));
-    }
+    rr3_note_missing(boot);
     for (slot, role) in &boot.role_missing {
         rr3_log(&format!(
             "缺角色 {slot}：角色 {role} 无 [pins] 绑定（校验②——该格缺能力，修装配单 [pins] 后重启解除）"
         ));
     }
+    rr3_note_broken(boot);
+    for note in &boot.axis_notes {
+        rr3_log(note);
+    }
+}
+
+fn rr3_note_missing(boot: &crate::profile::Rr3ProfileBoot) {
+    for (module, slot) in &boot.missing {
+        rr3_log(&format!(
+            "拒绝启动 {module}：缺格 {slot}（装配单 bindings 无此格或探测不到，fail-closed 绝不带病起）"
+        ));
+    }
+}
+
+fn rr3_note_broken(boot: &crate::profile::Rr3ProfileBoot) {
     for (module, msg) in &boot.assemble_broken {
         rr3_log(&format!(
             "装配缺项 {module}：{msg}（该模块在册即 Degraded，不致命——修数据后重启 rrd 解除）"
         ));
-    }
-    for note in &boot.axis_notes {
-        rr3_log(note);
     }
 }
 
@@ -663,12 +676,21 @@ fn rr3_queue_dispatch(
     sup: &Rr3Supervisor,
 ) {
     for name in &plan.order {
-        if boot.degraded.contains(name) {
-            continue;
-        }
-        if let Some(job) = by_name.remove(name) {
-            sup.rr3_boot(job);
-        }
+        rr3_dispatch_one(name, boot, &mut by_name, sup);
+    }
+}
+
+fn rr3_dispatch_one(
+    name: &str,
+    boot: &Rr3DaemonBoot,
+    by_name: &mut BTreeMap<String, Rr3SpawnJob>,
+    sup: &Rr3Supervisor,
+) {
+    if boot.degraded.contains(name) {
+        return;
+    }
+    if let Some(job) = by_name.remove(name) {
+        sup.rr3_boot(job);
     }
 }
 

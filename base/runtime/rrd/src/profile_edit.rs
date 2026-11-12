@@ -127,6 +127,10 @@ fn rr3_quoted_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
         return None;
     }
     let (_, v) = line.split_once('=')?;
+    rr3_quote_inner(v)
+}
+
+fn rr3_quote_inner(v: &str) -> Option<&str> {
     let v = v.trim_start();
     let quote = v.chars().next().filter(|c| *c == '"' || *c == '\'')?;
     v[1..].split_once(quote).map(|(inner, _)| inner)

@@ -127,6 +127,11 @@ impl Rr3LinuxProbe {
     /// 如 `1-0040`）。"0x" 前缀认、越出 7 位地址域（>0x7F）不认——词形解析失败
     /// = 拿不到答案 = 缺（fail-closed，不回落总线级冒充在位）。
     fn rr3_i2c_addr_word(addr: &str) -> Option<String> {
+        let v = Self::rr3_i2c_addr_hex(addr)?;
+        Some(format!("{v:04x}"))
+    }
+
+    fn rr3_i2c_addr_hex(addr: &str) -> Option<u32> {
         let hex = addr
             .strip_prefix("0x")
             .or_else(|| addr.strip_prefix("0X"))?;
@@ -134,7 +139,21 @@ impl Rr3LinuxProbe {
         if v > 0x7F {
             return None;
         }
-        Some(format!("{v:04x}"))
+        Some(v)
+    }
+
+    fn rr3_i2c_node(&self, n: u32, a: &str) -> bool {
+        let Some(word) = Self::rr3_i2c_addr_word(a) else {
+            return false; // 词形解析失败 = 拿不到答案 = 缺（fail-closed）
+        };
+        // 前置条件：该具体总线的设备节点在（n 由装机档 controller 词形
+        // i2c<N> 数据驱动，非硬编码板号）；器件级：sysfs 从机节点在。
+        self.root.join("dev").join(format!("i2c-{n}")).exists()
+            && self
+                .root
+                .join("sys/bus/i2c/devices")
+                .join(format!("{n}-{word}"))
+                .exists()
     }
 
     /// 面在位性。任一面拿不到答案 → `false`（fail-closed）。
@@ -165,19 +184,7 @@ impl Rr3Probe for Rr3LinuxProbe {
     /// 归器件与真板批（status 敞口在案）——本判据不冒充它是读回。
     fn rr3_probe_slot_bound(&self, slot: &str, bus: Option<u32>, addr: Option<&str>) -> bool {
         match (rr3_slot_probe_face(slot), bus, addr) {
-            (Some(Rr3ProbeFace::I2c), Some(n), Some(a)) => {
-                let Some(word) = Self::rr3_i2c_addr_word(a) else {
-                    return false; // 词形解析失败 = 拿不到答案 = 缺（fail-closed）
-                };
-                // 前置条件：该具体总线的设备节点在（n 由装机档 controller 词形
-                // i2c<N> 数据驱动，非硬编码板号）；器件级：sysfs 从机节点在。
-                self.root.join("dev").join(format!("i2c-{n}")).exists()
-                    && self
-                        .root
-                        .join("sys/bus/i2c/devices")
-                        .join(format!("{n}-{word}"))
-                        .exists()
-            }
+            (Some(Rr3ProbeFace::I2c), Some(n), Some(a)) => self.rr3_i2c_node(n, a),
             _ => self.rr3_probe_slot(slot),
         }
     }
