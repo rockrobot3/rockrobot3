@@ -766,6 +766,12 @@ fn rr3_budget_rtos(budget: &Rr3Budget, nums: &BTreeMap<&'static str, i64>, errs:
                 .to_string(),
         );
     }
+    rr3_budget_need(nums, errs);
+    rr3_budget_limits(nums, errs);
+}
+
+/// 三数必填位（rtos/bare 档）：逐键缺失点名。
+fn rr3_budget_need(nums: &BTreeMap<&'static str, i64>, errs: &mut Vec<String>) {
     for key in [
         "task_stack_budget_bytes",
         "heap_total_bytes",
@@ -777,6 +783,10 @@ fn rr3_budget_rtos(budget: &Rr3Budget, nums: &BTreeMap<&'static str, i64>, errs:
             ));
         }
     }
+}
+
+/// 三数正负域与"可用堆 > 0"物理判据（三数全在才判）。
+fn rr3_budget_limits(nums: &BTreeMap<&'static str, i64>, errs: &mut Vec<String>) {
     if let (Some(&st), Some(&tot), Some(&res)) = (
         nums.get("task_stack_budget_bytes"),
         nums.get("heap_total_bytes"),

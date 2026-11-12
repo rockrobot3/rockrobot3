@@ -61,26 +61,54 @@ mod peer {
         let role = env::var("RR3_SIM_PEER_ROLE").unwrap_or_else(|_| "resident".to_string());
         let (mut stream, task, facts, text) = rr3_peer_setup()?;
         match role.as_str() {
-            "resident" => rr3_resident(&mut stream, task, facts.heartbeat_ms),
-            "publish_once" => rr3_peer_once(&mut stream, task, &text),
+            // 常驻类：喂狗/静默后长期不退出
+            "resident" | "go_silent" | "silent_then_beat" => {
+                rr3_peer_long(&role, &mut stream, task, facts.heartbeat_ms)
+            }
+            // 一次性类：做完一件事即退场（abort 由进程终止退出）
+            "publish_once" | "call_once" | "exit_clean" | "abort" => {
+                rr3_peer_oneshot(&role, &mut stream, task, &text)
+            }
+            other => Err(format!("未知 RR3_SIM_PEER_ROLE: {other}")),
+        }
+    }
+
+    /// 常驻类角色：逐拍喂狗常驻 / 一颗心跳后静默 / 静默到过期再复活观察。
+    fn rr3_peer_long(
+        role: &str,
+        stream: &mut UnixStream,
+        task: u64,
+        heartbeat_ms: u64,
+    ) -> Result<(), String> {
+        match role {
+            "resident" => rr3_resident(stream, task, heartbeat_ms),
+            // 注册 + 一颗心跳后**彻底静默**（不再喂狗、不再读帧）：watchdog 要抓的形状
+            "go_silent" => rr3_peer_silent(stream, task),
+            // 静默到必然已过期，再回头连续喂 5 次，并把每一次的接受/被拒打出来。
+            // 与 `rr3_beat` 的区别：那个把被拒当致命错误直接退出（继续喂一条已不在册的
+            // 连接没有观察价值）；本支要观察的恰是"被拒之后是什么样"，所以必须用
+            // `rr3_beat_verdict`。
+            _ => rr3_peer_revive(stream, task),
+        }
+    }
+
+    /// 一次性角色：发布一次 / 点名一次 / 主动退场 / 排空后 abort。
+    fn rr3_peer_oneshot(
+        role: &str,
+        stream: &mut UnixStream,
+        task: u64,
+        text: &str,
+    ) -> Result<(), String> {
+        match role {
+            "publish_once" => rr3_peer_once(stream, task, text),
             // e2e 点名发起方（0.0.7 §9.4 ⑤ macOS 档）：注册后发一次 `rr3.call`，
             // 等被调方沿 Response 回路（trace_id = 本 task）送回的应答，result
             // 原样打行作 round-trip 物证，喂一颗心跳后退场。点名对象与参数由
             // 环境给（topic 必填、args 可选 JSON）——夹具不持业务主题知识。
             // error 应答即 Err（非零退出）：e2e 的"点名被拒"负向判据就靠它。
-            "call_once" => rr3_peer_call(&mut stream, task),
-            "exit_clean" => rr3_peer_exit(&mut stream, task),
-            "abort" => rr3_peer_abort(&mut stream, task),
-            // 注册 + 一颗心跳后**彻底静默**（不再喂狗，也不再读帧）。
-            // 这正是 watchdog 要抓的形状：连接还在、fd 没关、只是不喂狗了。
-            // 里程碑只打一行（约定 3：只打里程碑，不打循环）。
-            "go_silent" => rr3_peer_silent(&mut stream, task),
-            // 静默到必然已过期，再回头连续喂 5 次，并把每一次的接受/被拒打出来。
-            // 与 `rr3_beat` 的区别：那个把被拒当致命错误直接退出（继续喂一条已不在册的
-            // 连接没有观察价值）；本支要观察的恰是"被拒之后是什么样"，所以必须用
-            // `rr3_beat_verdict`。
-            "silent_then_beat" => rr3_peer_revive(&mut stream, task),
-            other => Err(format!("未知 RR3_SIM_PEER_ROLE: {other}")),
+            "call_once" => rr3_peer_call(stream, task),
+            "exit_clean" => rr3_peer_exit(stream, task),
+            _ => rr3_peer_abort(stream, task),
         }
     }
 

@@ -597,41 +597,55 @@ pub(crate) fn rr3_assemble_scan(
     let mut facts_out: Vec<(String, Rr3AssembleFacts)> = Vec::new();
     let mut out: Vec<String> = Vec::new();
     for atom in names {
-        let path = atoms_dir.join(&atom).join("assemble.toml");
-        let text = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => {
-                out.push(format!("件 {atom} 缺 assemble.toml（五件套④，装配段点名）"));
-                continue;
-            }
-        };
-        let facts = match rr_registry::rr3_assemble_parse(&text) {
-            Ok(f) => f,
-            Err(errs) => {
-                for e in errs {
-                    out.push(format!("件 {atom} 装配清单坏形: {e}"));
-                }
-                continue;
-            }
-        };
-        if facts.ops.is_empty() {
-            facts_out.push((atom, facts));
-            continue;
+        if let Some(one) = rr3_atom_scan(module_dir, &atoms_dir, &atom, &mut out) {
+            facts_out.push(one);
         }
-        // 注入缺：ops 声明的参数槽必须能从模块 config.toml 按点路径取到
-        match std::fs::read_to_string(module_dir.join("config.toml")) {
-            Ok(cfg) => {
-                for gap in rr_registry::rr3_injection_gaps(&facts, &cfg) {
-                    out.push(format!("件 {atom} {gap}"));
-                }
-            }
-            Err(e) => out.push(format!(
-                "件 {atom} 参数槽来源不可证：config.toml 读不到 ({e})"
-            )),
-        }
-        facts_out.push((atom, facts));
     }
     (facts_out, out)
+}
+
+/// 单件装配清单扫描（五件套④）：缺件/坏形只点名不回，可进预算加总的件原样返回。
+fn rr3_atom_scan(
+    module_dir: &Path,
+    atoms_dir: &Path,
+    atom: &str,
+    out: &mut Vec<String>,
+) -> Option<(String, Rr3AssembleFacts)> {
+    let path = atoms_dir.join(atom).join("assemble.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => {
+            out.push(format!("件 {atom} 缺 assemble.toml（五件套④，装配段点名）"));
+            return None;
+        }
+    };
+    let facts = match rr_registry::rr3_assemble_parse(&text) {
+        Ok(f) => f,
+        Err(errs) => {
+            for e in errs {
+                out.push(format!("件 {atom} 装配清单坏形: {e}"));
+            }
+            return None;
+        }
+    };
+    if !facts.ops.is_empty() {
+        rr3_atom_inject(module_dir, atom, &facts, out);
+    }
+    Some((atom.to_string(), facts))
+}
+
+/// ops 注入缺点路径游走：声明的参数槽必须能从模块 config.toml 按点路径取到。
+fn rr3_atom_inject(module_dir: &Path, atom: &str, facts: &Rr3AssembleFacts, out: &mut Vec<String>) {
+    match std::fs::read_to_string(module_dir.join("config.toml")) {
+        Ok(cfg) => {
+            for gap in rr_registry::rr3_injection_gaps(facts, &cfg) {
+                out.push(format!("件 {atom} {gap}"));
+            }
+        }
+        Err(e) => out.push(format!(
+            "件 {atom} 参数槽来源不可证：config.toml 读不到 ({e})"
+        )),
+    }
 }
 
 /// 校验⑨ 判据实体（批N2 首件基-36 落、门 c ⑨-c 接链，全案 §5 判据⑨）：
