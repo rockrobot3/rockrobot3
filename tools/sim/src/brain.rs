@@ -280,6 +280,12 @@ fn rr3_brain_bins(a: &Rr3SimArgs) -> Result<Rr3BrainBins, String> {
         interact: a.interact.clone().unwrap_or(dir.join("rr3-interact")),
         brain: a.brain_bin.clone().unwrap_or(dir.join("rr3-brain")),
     };
+    rr3_brain_bins_check(&bins)?;
+    Ok(bins)
+}
+
+/// 五件产物存在性校验（缺件逐件点名各自构建命令）。
+fn rr3_brain_bins_check(bins: &Rr3BrainBins) -> Result<(), String> {
     rr3_require_bins_ext(&[
         (&bins.rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
         (
@@ -298,8 +304,7 @@ fn rr3_brain_bins(a: &Rr3SimArgs) -> Result<Rr3BrainBins, String> {
             &bins.brain,
             "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
         ),
-    ])?;
-    Ok(bins)
+    ])
 }
 
 /// 演练夹具：工作目录 + 套接字 + 三份 manifest + 两份 config（写完即用）。
@@ -470,18 +475,20 @@ fn rr3_brain_up_ic(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> Re
         .env("RR3_HAL_BACKEND", ctx.sink_backend)
         // 面板地址：用户显式给的 RR3_PANEL_ADDR 优先（手机/局域网面板面），
         // 未给才落演练缺省回环 18080
-        .env(
-            "RR3_PANEL_ADDR",
-            std::env::var("RR3_PANEL_ADDR")
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| crate::drill::RR3_SIM_PANEL_ADDR.to_string()),
-        )
+        .env("RR3_PANEL_ADDR", rr3_panel_addr())
         .env("RR3_INTERACT_CONFIG", &fix.interact_cfg);
     let interact_log = fix.workdir.join("interact.log");
     let interact_child = rr3_spawn_logged(ic, &interact_log, RR3_SIM_MODULE_B)?;
     children.push((RR3_SIM_MODULE_B.into(), interact_child));
     Ok(())
+}
+
+/// 面板地址：环境变量 RR3_PANEL_ADDR 优先，未给才落演练缺省回环。
+fn rr3_panel_addr() -> String {
+    std::env::var("RR3_PANEL_ADDR")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| crate::drill::RR3_SIM_PANEL_ADDR.to_string())
 }
 
 /// 有界等：三模块 running → brain 轮次完成 → interact 播放过 → 拒绝发布为 0。

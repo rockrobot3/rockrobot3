@@ -224,14 +224,19 @@ fn rr3_args_audio(a: &Rr3SimArgs) -> Result<(), String> {
 
 /// 单面后端旗标的归属与白名单（`--audio-backend` / `--sink-backend` 同域）。
 fn rr3_audio_backend(a: &Rr3SimArgs, flag: &str, backend: Option<&String>) -> Result<(), String> {
-    const AUDIO_BACKENDS: [&str; 5] = ["sim", "linux", "esp32", "mac", "placeholder"];
     let Some(b) = backend else {
         return Ok(());
     };
     if !a.brain {
         return Err(format!("{flag} 仅 --brain 演练适用"));
     }
-    if !AUDIO_BACKENDS.contains(&b.as_str()) {
+    rr3_backend_known(flag, b)
+}
+
+/// 后端词必须在白名单（与 RR3_HAL_BACKEND 同表）。
+fn rr3_backend_known(flag: &str, b: &str) -> Result<(), String> {
+    const AUDIO_BACKENDS: [&str; 5] = ["sim", "linux", "esp32", "mac", "placeholder"];
+    if !AUDIO_BACKENDS.contains(&b) {
         return Err(format!(
             "{flag} 取值不认: {b}（允许 sim/linux/esp32/mac/placeholder——与 RR3_HAL_BACKEND 同白名单）"
         ));
@@ -289,14 +294,19 @@ fn rr3_cloud_real(a: &Rr3SimArgs) -> Result<(), String> {
 
 /// 云模式枚举与 --brain 归属。
 fn rr3_cloud_mode(a: &Rr3SimArgs) -> Result<(), String> {
-    const BRAIN_CLOUDS: [&str; 2] = ["mock", "real"];
     let Some(c) = &a.brain_cloud else {
         return Ok(());
     };
     if !a.brain {
         return Err("--brain-cloud 仅 --brain 演练适用".to_string());
     }
-    if !BRAIN_CLOUDS.contains(&c.as_str()) {
+    rr3_cloud_known(c)
+}
+
+/// 云模式词必须在白名单（mock/real）。
+fn rr3_cloud_known(c: &str) -> Result<(), String> {
+    const BRAIN_CLOUDS: [&str; 2] = ["mock", "real"];
+    if !BRAIN_CLOUDS.contains(&c) {
         return Err(format!("--brain-cloud 取值不认: {c}（允许 mock/real）"));
     }
     Ok(())
@@ -310,6 +320,11 @@ fn rr3_cloud_url(a: &Rr3SimArgs) -> Result<(), String> {
     if !a.brain {
         return Err("--brain-base-url 仅 --brain 演练适用".to_string());
     }
+    rr3_cloud_url_ok(a, u)
+}
+
+/// mock/real 组合门 + 端点形状门。
+fn rr3_cloud_url_ok(a: &Rr3SimArgs, u: &str) -> Result<(), String> {
     if a.brain_cloud.as_deref() != Some("real") {
         return Err(
             "--brain-base-url 仅 --brain-cloud real 适用：mock 云不碰网络，端点给了也不会被读"

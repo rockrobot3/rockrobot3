@@ -248,11 +248,7 @@ fn write_evidence(
     text.push_str(&format!(
         "心跳间隔 {} 拍；parity 逐拍对拍 1 次（{} 八组原语）\n",
         intervals.len(),
-        if parity_board.is_some() {
-            "板回向量"
-        } else {
-            "未完成——证据无效"
-        }
+        rr3_parity_word(parity_board)
     ));
     text.push_str("=== 原始数据 ===\n");
     text.push_str(&format!("逐拍间隔 ms: {intervals:?}\n"));
@@ -261,6 +257,15 @@ fn write_evidence(
         text.push_str(&format!("板回 parity 向量: {p}\n"));
     }
     std::fs::write(path, text)
+}
+
+/// parity 面的证据档位词（有板回向量才算有效）。
+fn rr3_parity_word(parity_board: Option<&Value>) -> &'static str {
+    if parity_board.is_some() {
+        "板回向量"
+    } else {
+        "未完成——证据无效"
+    }
 }
 
 /// 判据输出：PASS/FAIL 逐条点名，返回 ok 供调用方累计。
@@ -323,11 +328,17 @@ fn rr3_frame_parse(buf: Rr3FrameBuf, on_parse: &str) -> Rr3Frame {
 /// ① 注册：首帧必须是 rr3.register，params.name/manifest 在场（rrd 握手门序同款）。
 fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u64) {
     let frame = rr3_recv_frame(conn, "FAIL  首帧读取失败", "FAIL  首帧还原失败");
+    let (id, params) = rr3_reg_params(frame);
+    let (name, hb) = rr3_reg_fields(&params);
+    rr3_register_ack(conn, id, now_ns());
+    (name, hb)
+}
+
+/// 首帧必须 Request/rr3.register（形状/畸形退 1），返回 id 与 params。
+fn rr3_reg_params(frame: Rr3Frame) -> (u64, Value) {
     match parse_upstream(frame) {
         Ok((Rr3PayloadType::Request, id, m, params, _)) if m.as_deref() == Some("rr3.register") => {
-            let (name, hb) = rr3_reg_fields(&params);
-            rr3_register_ack(conn, id, now_ns());
-            (name, hb)
+            (id, params)
         }
         Ok((ty, _, m, _, _)) => rr3_register_shape(ty, m),
         Err(e) => rr3_register_bad(&e),
@@ -429,24 +440,34 @@ fn rr3_beat_judge(
     dt: u128,
     now_ns: &dyn Fn() -> u64,
 ) -> Option<u128> {
+    let id = rr3_beat_id(n, frame);
+    rr3_beat_ack(conn, n, id, now_ns());
+    println!("PASS  ② 第{n}拍 rr3.heartbeat id={id} 间隔={dt}ms");
+    Some(dt)
+}
+
+/// 单拍帧必须是 Request/rr3.heartbeat（形状/畸形违约 exit 1），返回应答 id。
+fn rr3_beat_id(n: usize, frame: Rr3Frame) -> u64 {
     match parse_upstream(frame) {
-        Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => {
-            rr3_beat_ack(conn, n, id, now_ns());
-            println!("PASS  ② 第{n}拍 rr3.heartbeat id={id} 间隔={dt}ms");
-            Some(dt)
-        }
-        Ok((ty, _, m, _, _)) => {
-            eprintln!(
-                "FAIL  第{n}拍应为 rr3.heartbeat，收到 {ty:?}/{}",
-                m.as_deref().unwrap_or("-")
-            );
-            std::process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("FAIL  第{n}拍畸形: {e}");
-            std::process::exit(1);
-        }
+        Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => id,
+        Ok((ty, _, m, _, _)) => rr3_beat_shape(n, ty, m),
+        Err(e) => rr3_beat_bad(n, &e),
     }
+}
+
+/// 单拍形状错：点名收到什么，退 1。
+fn rr3_beat_shape(n: usize, ty: Rr3PayloadType, m: Option<String>) -> ! {
+    eprintln!(
+        "FAIL  第{n}拍应为 rr3.heartbeat，收到 {ty:?}/{}",
+        m.as_deref().unwrap_or("-")
+    );
+    std::process::exit(1)
+}
+
+/// 单拍畸形：点名后按判据失败退 1。
+fn rr3_beat_bad(n: usize, e: &str) -> ! {
+    eprintln!("FAIL  第{n}拍畸形: {e}");
+    std::process::exit(1)
 }
 
 /// 单拍应答写出（失败即点名退场）。

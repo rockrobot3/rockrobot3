@@ -212,7 +212,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let device = d
         .device
         .ok_or("缺 <device> 参数（如 /dev/cu.usbserial-0001）")?;
-    rr3_uart_baud_speed(d.baud).map_err(|e| format!("--baud {} 不在档位表: {e}", d.baud))?;
+    rr3_baud_gate(d.baud)?;
     Ok(Args {
         device,
         out: d.out.unwrap_or_else(default_out),
@@ -220,6 +220,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         baud: d.baud,
         doa: d.doa,
     })
+}
+
+/// 波特率必须落 rr-ipc 档位表白名单（真值单点）。
+fn rr3_baud_gate(baud: u32) -> Result<(), String> {
+    rr3_uart_baud_speed(baud).map_err(|e| format!("--baud {baud} 不在档位表: {e}"))?;
+    Ok(())
 }
 
 /// 参数逐项收集（缺省值由 [`ArgsDraft::default`] 给）。
@@ -696,13 +702,24 @@ fn writer_run(file: File, rx: mpsc::Receiver<Vec<u8>>, watch: Arc<WatchState>, o
     rr3_writer_head(&mut w);
     let mut written = 0u64;
     for buf in rx {
-        if let Err(e) = w.write_all(&buf).and_then(|()| w.flush()) {
-            eprintln!("rr3-audio-rec: wav 写线程写失败（磁盘满/IO 错）: {e}");
-            exit_with_recovery(&out_path, &watch, 1);
-        }
-        written += buf.len() as u64;
-        watch.disk_bytes.store(written, Ordering::Release);
+        rr3_writer_chunk(&mut w, &buf, &out_path, &watch, &mut written);
     }
+}
+
+/// 单分片写透 + 盘侧真相推进（写失败补恢复头退 1）。
+fn rr3_writer_chunk(
+    w: &mut BufWriter<File>,
+    buf: &[u8],
+    out_path: &std::path::Path,
+    watch: &WatchState,
+    written: &mut u64,
+) {
+    if let Err(e) = w.write_all(buf).and_then(|()| w.flush()) {
+        eprintln!("rr3-audio-rec: wav 写线程写失败（磁盘满/IO 错）: {e}");
+        exit_with_recovery(out_path, watch, 1);
+    }
+    *written += buf.len() as u64;
+    watch.disk_bytes.store(*written, Ordering::Release);
 }
 
 /// 占位 wav 头写入（失败即整进程退，文案逐字保留）。
@@ -799,15 +816,15 @@ impl DecodeState {
         watch.ingested.store(self.total_bytes, Ordering::Release);
         let frames = self.total_bytes / 4;
         rate_progress(&mut self.rate_anchor, broke, now, frames, watch);
+        self.rr3_ingest_tick(errors, src_task, chunk.seq, chunk.ms);
+    }
+
+    /// 每 8 片一节拍留痕（chunk/seq/ms/bytes/gaps/restarts）。
+    fn rr3_ingest_tick(&self, errors: u64, src_task: u64, seq: u32, ms: u64) {
         if self.chunks % 8 == 0 {
             println!(
-                "[rec] chunk={} seq={} ms={} bytes={} gaps={} restarts={} err={errors} src_task={src_task}",
-                self.chunks,
-                chunk.seq,
-                chunk.ms,
-                self.total_bytes,
-                self.tracker.gaps,
-                self.tracker.restarts
+                "[rec] chunk={} seq={seq} ms={ms} bytes={} gaps={} restarts={} err={errors} src_task={src_task}",
+                self.chunks, self.total_bytes, self.tracker.gaps, self.tracker.restarts
             );
         }
     }
@@ -832,16 +849,22 @@ fn account_chunk(
 /// 板侧声明率首见入账/变更告警（首片同步写成 wav 头初值）。
 fn rr3_declare_rate(rate: u32, declared: &mut Option<u32>, watch: &WatchState) {
     match *declared {
-        None => {
-            *declared = Some(rate);
-            // 首片即把声明率写成 wav 头的初值（实测率 0.5s 后才可信）
-            watch.rate.store(rate, Ordering::Release);
-        }
-        Some(r) if r != rate => {
-            eprintln!("rr3-audio-rec: 板侧声明率变更 {r}Hz → {rate}Hz（wav 头以末值/实测为准）");
-            *declared = Some(rate);
-        }
-        _ => {}
+        None => rr3_declare_first(rate, declared, watch),
+        Some(r) => rr3_declare_change(r, rate, declared),
+    }
+}
+
+/// 首片声明率入账（实测率 0.5s 后才可信，先写成 wav 头初值）。
+fn rr3_declare_first(rate: u32, declared: &mut Option<u32>, watch: &WatchState) {
+    *declared = Some(rate);
+    watch.rate.store(rate, Ordering::Release);
+}
+
+/// 声明率变更告警（板侧重配置，wav 头以末值/实测为准）。
+fn rr3_declare_change(r: u32, rate: u32, declared: &mut Option<u32>) {
+    if r != rate {
+        eprintln!("rr3-audio-rec: 板侧声明率变更 {r}Hz → {rate}Hz（wav 头以末值/实测为准）");
+        *declared = Some(rate);
     }
 }
 
@@ -882,15 +905,18 @@ fn measured_rate(
 ) -> u32 {
     let nominal = declared.unwrap_or(NOMINAL_RATE_FALLBACK_HZ);
     match anchor {
-        Some((t0, f0)) => {
-            let r = rr3_measure_span(t0, f0, last_frame.unwrap_or(t0), frames_total);
-            if r >= 1000 {
-                r
-            } else {
-                nominal
-            }
-        }
+        Some((t0, f0)) => rr3_measure_pick(t0, f0, last_frame.unwrap_or(t0), frames_total, nominal),
         None => nominal,
+    }
+}
+
+/// 锚后实测率与 1kHz 下限：退化段（<1kHz）回板侧声明率。
+fn rr3_measure_pick(t0: Instant, f0: u64, end: Instant, frames_total: u64, nominal: u32) -> u32 {
+    let r = rr3_measure_span(t0, f0, end, frames_total);
+    if r >= 1000 {
+        r
+    } else {
+        nominal
     }
 }
 
@@ -1108,12 +1134,7 @@ fn finish_and_report(
     doa: bool,
 ) {
     finish_threads(threads, watch);
-
-    if st.total_bytes == 0 {
-        eprintln!("[rec] 0 分片（查板面 AUDIO ON 应答/I2S 面波特率档）");
-        let _ = std::fs::remove_file(out_path); // 占位空壳不留垃圾
-        std::process::exit(1);
-    }
+    rr3_finish_zero(&st, out_path);
     let measured = measured_rate(
         st.rate_anchor,
         st.last_frame,
@@ -1123,6 +1144,15 @@ fn finish_and_report(
     rr3_finish_head(out_path, &st, watch, measured);
     if doa {
         println!("{}", st.doa.summary());
+    }
+}
+
+/// 0 分片收口：点名退出 1，占位空壳不留垃圾。
+fn rr3_finish_zero(st: &DecodeState, out_path: &std::path::Path) {
+    if st.total_bytes == 0 {
+        eprintln!("[rec] 0 分片（查板面 AUDIO ON 应答/I2S 面波特率档）");
+        let _ = std::fs::remove_file(out_path); // 占位空壳不留垃圾
+        std::process::exit(1);
     }
 }
 

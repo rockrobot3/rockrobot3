@@ -37,12 +37,18 @@ fn rr3_ctl_reject(cmd: &str, envelope: &Value) -> Option<String> {
 }
 
 pub fn run(cmd: &str, bus: &str) -> Result<String, String> {
-    if !COMMANDS.contains(&cmd) {
-        return Err(format!("未知命令 {cmd}，可用：{}", COMMANDS.join(" | ")));
-    }
+    rr3_cmd_known(cmd)?;
     let envelope = rr3_ctl_query(bus, &format!("rr3.ctl.{cmd}"))?;
     rr3_ctl_ensure(cmd, &envelope)?;
     rr3_ctl_render(cmd, &envelope)
+}
+
+/// 命令必须在白名单（未知命令点名可用项）。
+fn rr3_cmd_known(cmd: &str) -> Result<(), String> {
+    if !COMMANDS.contains(&cmd) {
+        return Err(format!("未知命令 {cmd}，可用：{}", COMMANDS.join(" | ")));
+    }
+    Ok(())
 }
 
 /// 错误信封统一走 Err：ota 的恒拒（rrd 回 AIRY_EPERM，文案点 M6）与 reboot 的
@@ -151,11 +157,16 @@ fn render_table(header: &[&str], rows: &[Vec<String>]) -> String {
 fn rr3_table_widths(header: &[&str], rows: &[Vec<String>]) -> Vec<usize> {
     let mut widths: Vec<usize> = header.iter().map(|h| h.chars().count()).collect();
     for r in rows {
-        for (i, cell) in r.iter().enumerate() {
-            widths[i] = widths[i].max(cell.chars().count());
-        }
+        rr3_width_row(&mut widths, r);
     }
     widths
+}
+
+/// 一行的列宽推进（同列取最大）。
+fn rr3_width_row(widths: &mut [usize], r: &[String]) {
+    for (i, cell) in r.iter().enumerate() {
+        widths[i] = widths[i].max(cell.chars().count());
+    }
 }
 
 /// 单元格取值：字符串去引号、数字原样、缺字段显式 `?`（两种缺失不混用一种写法）
@@ -163,10 +174,16 @@ fn cell(v: &Value, key: &str) -> String {
     let v = &v[key];
     if let Some(s) = v.as_str() {
         s.to_string()
-    } else if let Some(n) = v.as_u64() {
-        n.to_string()
     } else {
-        "?".to_string()
+        rr3_cell_num(v)
+    }
+}
+
+/// 数字原样、缺字段显式 `?`。
+fn rr3_cell_num(v: &Value) -> String {
+    match v.as_u64() {
+        Some(n) => n.to_string(),
+        None => "?".to_string(),
     }
 }
 
@@ -227,10 +244,15 @@ fn format_logs(envelope: &Value) -> Result<String, String> {
         .and_then(|r| r.get("lines"))
         .and_then(Value::as_array)
         .ok_or("应答缺 result.lines")?;
+    Ok(rr3_logs_body(lines))
+}
+
+/// 日志行体：空环给固定文案，否则逐行拼接。
+fn rr3_logs_body(lines: &[Value]) -> String {
     if lines.is_empty() {
-        return Ok("（rrd 日志环为空）".to_string());
+        return "（rrd 日志环为空）".to_string();
     }
-    Ok(rr3_logs_text(lines))
+    rr3_logs_text(lines)
 }
 
 /// 日志行逐行拼接（非字符串项以 `?` 占位）。

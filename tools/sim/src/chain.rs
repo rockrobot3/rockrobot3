@@ -280,9 +280,7 @@ fn rr3_chain_servo_ok(obs: &Rr3ChainObs) -> Result<i64, String> {
 /// 同一机制）。应答 id=1 的 error 面原样带回（注册被拒要当场可辨，不等取证超时）。
 fn rr3_obs_register(stream: &mut UnixStream, manifest_text: &str) -> Result<(), String> {
     // 读超时先行：注册应答不来时按 deadline 收口，不无限阻塞演练
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|e| format!("设读超时失败: {e}"))?;
+    rr3_obs_arm(stream, Duration::from_secs(2))?;
     let body = json!({
         "jsonrpc": "2.0", "id": 1, "method": "rr3.register",
         "params": {"name": RR3_CHAIN_OBS, "manifest": manifest_text}
@@ -349,14 +347,14 @@ fn rr3_obs_id_ok(v: &Value) -> bool {
 /// 取证收集：读到两路证据齐或超时。读超时/暂无帧按"这拍没帧"继续，
 /// 到 deadline 收口——缺什么在错误里点名什么。
 fn rr3_obs_collect(stream: &mut UnixStream, deadline: Duration) -> Result<Rr3ChainObs, String> {
-    rr3_obs_arm(stream)?;
+    rr3_obs_arm(stream, Duration::from_millis(250))?;
     rr3_obs_gather(stream, deadline)
 }
 
-/// 取证读超时（250ms 一拍）。
-fn rr3_obs_arm(stream: &mut UnixStream) -> Result<(), String> {
+/// 读超时设置（取证 250ms 一拍；注册应答 2s）。
+fn rr3_obs_arm(stream: &mut UnixStream, timeout: Duration) -> Result<(), String> {
     stream
-        .set_read_timeout(Some(Duration::from_millis(250)))
+        .set_read_timeout(Some(timeout))
         .map_err(|e| format!("设读超时失败: {e}"))
 }
 
@@ -511,6 +509,12 @@ fn rr3_chain_bins(a: &Rr3SimArgs) -> Result<Rr3ChainBins, String> {
         act: a.act.clone().unwrap_or(dir.join("rr3-act")),
         brain: a.brain_bin.clone().unwrap_or(dir.join("rr3-brain")),
     };
+    rr3_chain_bins_check(&bins)?;
+    Ok(bins)
+}
+
+/// 六件产物存在性校验（缺件逐件点名各自构建命令）。
+fn rr3_chain_bins_check(bins: &Rr3ChainBins) -> Result<(), String> {
     rr3_require_bins_ext(&[
         (&bins.rrd, "cargo build -p rrd（在 base/runtime/ 下）"),
         (
@@ -533,8 +537,7 @@ fn rr3_chain_bins(a: &Rr3SimArgs) -> Result<Rr3ChainBins, String> {
             &bins.brain,
             "cargo build -p rr3-brain（在 modules/rr3-brain/ 下）",
         ),
-    ])?;
-    Ok(bins)
+    ])
 }
 
 /// 演练夹具：工作目录 + 套接字 + 四份 manifest + 五份文本（写完即用）。

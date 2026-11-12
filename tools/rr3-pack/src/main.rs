@@ -403,10 +403,15 @@ fn rr3_stage_reset(stage: &Path) -> Result<(), String> {
 fn rr3_stage_check(
     cfg: &Rr3PackConfig,
 ) -> Result<(Vec<String>, String, rrd::profile::Rr3RuntimeTruthSet), String> {
-    rr3_payload_bins(cfg)?;
-    let names = rr3_module_names(&cfg.payload)?;
+    let names = rr3_stage_names(cfg)?;
     let (profile_name, truth) = rr3_truth_ready(cfg)?;
     Ok((names, profile_name, truth))
+}
+
+/// 注入产物两入口在场门 + 模块名单（缺件逐件点名）。
+fn rr3_stage_names(cfg: &Rr3PackConfig) -> Result<Vec<String>, String> {
+    rr3_payload_bins(cfg)?;
+    rr3_module_names(&cfg.payload)
 }
 
 /// 两个入口产物在场门（缺席逐件点名）。
@@ -538,6 +543,15 @@ fn rr3_truth_ready(
     // 才是最贵的洞）；预验同时给出 [platform].chip，平台事实表按它选册。
     let profile = rr3_profile_precheck(&profile_src)?;
     let truth = rrd::profile::rr3_truth_set(&profile, &cfg.profile);
+    rr3_truth_missing(cfg, &truth)?;
+    Ok((profile_name, truth))
+}
+
+/// 装载消费真值集缺册门（缺任一必需册即拒出包）。
+fn rr3_truth_missing(
+    cfg: &Rr3PackConfig,
+    truth: &rrd::profile::Rr3RuntimeTruthSet,
+) -> Result<(), String> {
     let missing: Vec<String> = truth
         .files
         .iter()
@@ -551,7 +565,7 @@ fn rr3_truth_ready(
             cfg.repo.display()
         ));
     }
-    Ok((profile_name, truth))
+    Ok(())
 }
 
 /// 装配单读取 + 预验（打包与装载同一判据，坏单点名拒收）。
@@ -744,6 +758,16 @@ fn rr3_stage_bin(mod_src: &Path, entry_path: &Path, name: &str) -> Result<(), St
 /// 在位即纯副本——缺省不是错误，模块形态允许无原子件/无编排）。
 fn rr3_stage_opt(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), String> {
     let repo_mod = cfg.repo.join("modules").join(name);
+    rr3_stage_opt_files(&repo_mod, staged, name)?;
+    rr3_stage_opt_tree(
+        &repo_mod.join("atoms"),
+        &staged.join("atoms"),
+        &format!("复制 {name} atoms 树失败"),
+    )
+}
+
+/// 两件可选单文件（config-esp32 / composite）随装，缺席合法跳过。
+fn rr3_stage_opt_files(repo_mod: &Path, staged: &Path, name: &str) -> Result<(), String> {
     rr3_stage_opt_file(
         &repo_mod.join("config-esp32.toml"),
         &staged.join("config-esp32.toml"),
@@ -753,11 +777,6 @@ fn rr3_stage_opt(cfg: &Rr3PackConfig, staged: &Path, name: &str) -> Result<(), S
         &repo_mod.join("composite.toml"),
         &staged.join("composite.toml"),
         &format!("复制 {name} composite.toml 失败"),
-    )?;
-    rr3_stage_opt_tree(
-        &repo_mod.join("atoms"),
-        &staged.join("atoms"),
-        &format!("复制 {name} atoms 树失败"),
     )
 }
 
@@ -824,12 +843,14 @@ fn rr3_make_executable(_p: &Path) {}
 fn rr3_build_deb(stage: &Path, out: &Path) -> Result<(), String> {
     let outp = rr3_dpkg_build(stage, out)?;
     if !outp.status.success() {
-        return Err(format!(
-            "dpkg-deb 失败: {}",
-            String::from_utf8_lossy(&outp.stderr)
-        ));
+        return Err(rr3_deb_fail(&outp.stderr));
     }
     Ok(())
+}
+
+/// dpkg-deb 失败文案（stderr 原样带回）。
+fn rr3_deb_fail(stderr: &[u8]) -> String {
+    format!("dpkg-deb 失败: {}", String::from_utf8_lossy(stderr))
 }
 
 /// 可用性检查 + 调 dpkg-deb 出包（失败文案带 stderr）。
@@ -856,13 +877,18 @@ fn rr3_dpkg_ready() -> Result<(), String> {
 
 fn rr3_pack(cfg: &Rr3PackConfig) -> Result<String, String> {
     let stage = rr3_stage(cfg)?;
+    rr3_pack_from(cfg, &stage)
+}
+
+/// staging 树就绪后的两条出口（`--stage-only` 直接收兵，否则出 deb）。
+fn rr3_pack_from(cfg: &Rr3PackConfig, stage: &Path) -> Result<String, String> {
     if cfg.stage_only {
         return Ok(format!(
             "staging 树就绪（--stage-only，未调 dpkg-deb）: {}",
             stage.display()
         ));
     }
-    rr3_pack_deb(cfg, &stage)
+    rr3_pack_deb(cfg, stage)
 }
 
 /// 出 deb 并给出产物与 staging 树路径。
