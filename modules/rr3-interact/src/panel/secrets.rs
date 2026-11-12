@@ -193,10 +193,15 @@ fn rr3_dir_own_perm(path: &Path, parent: &Path) -> Result<(), String> {
         path,
         std::env::var("HOME").ok(),
     ) {
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| format!("收 {} 目录权限失败: {e}", parent.display()))?;
+        rr3_dir_chmod(parent)?;
     }
     Ok(())
+}
+
+/// 收目录权限（0700：仅属主可进出）。
+fn rr3_dir_chmod(parent: &Path) -> Result<(), String> {
+    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+        .map_err(|e| format!("收 {} 目录权限失败: {e}", parent.display()))
 }
 
 /// 整表落盘：tmp 建时即 0600，rename 原子替换后目标继承该权限（敏感面铁律）。

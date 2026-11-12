@@ -52,13 +52,17 @@ pub fn rr3_reflex_loop(cfg: Rr3ReflexCfg, bus: BusHandle) {
         let now = Instant::now();
         if now.duration_since(window_start) >= window {
             rr3_reflex_settle(&bus, &mut det, &mut seq, ticks, window_ms, expect);
-            // 窗结算记账（批M M-β A-6）：值 = 窗内实跑节拍数，重置前落账；
-            // bump 失败不进总线发布面（异常通告语义），静默容忍——计数是运维账
-            bus.counter_bump(RR3_REFLEX_TICKS_KEY, ticks);
-            ticks = 0;
-            window_start = now;
+            rr3_reflex_mark(&bus, &mut ticks, &mut window_start, now);
         }
     }
+}
+
+/// 窗结算记账（批M M-β A-6）：值 = 窗内实跑节拍数，重置前落账；bump 失败不进
+/// 总线发布面（异常通告语义），静默容忍——计数是运维账。
+fn rr3_reflex_mark(bus: &BusHandle, ticks: &mut u64, window_start: &mut Instant, now: Instant) {
+    bus.counter_bump(RR3_REFLEX_TICKS_KEY, *ticks);
+    *ticks = 0;
+    *window_start = now;
 }
 
 /// 窗结算：饱和 episode 判定，首报时发一条通告并续 seq。

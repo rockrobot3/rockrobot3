@@ -50,15 +50,16 @@ const RR3_NEGATIVE_CHARS: [char; 6] = ['别', '不', '莫', '勿', '未', '没']
 /// 词表命中 + 前邻否定护栏：任一词命中且其前两字符内无否定字才算真。
 pub(crate) fn rr3_hit_word(text: &str, words: &[&str]) -> bool {
     for word in words {
-        let Some(hit) = text.find(word) else {
-            continue;
-        };
-        if rr3_negated(text, hit) {
-            continue;
+        if rr3_word_hits(text, word) {
+            return true;
         }
-        return true;
     }
     false
+}
+
+/// 单词命中且未被否定（命中位前两字符内无否定字）。
+fn rr3_word_hits(text: &str, word: &str) -> bool {
+    text.find(word).is_some_and(|hit| !rr3_negated(text, hit))
 }
 
 /// 命中前缀是否被否定词覆盖（前两字符窗，Python `text[max(0, hit-2):hit]`

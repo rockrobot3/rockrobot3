@@ -105,18 +105,23 @@ impl Rr3Dialog {
     pub fn rr3_feed_vad(&mut self, edge: &str, now_ms: u64) -> bool {
         match edge {
             "onset" => {
-                self.active = true;
-                self.buf = self
-                    .preroll
-                    .iter()
-                    .flat_map(|(p, _)| p.iter().copied())
-                    .collect();
-                self.started_ms = now_ms;
+                self.rr3_round_open(now_ms);
                 false
             }
             "offset" if self.active => true,
             _ => false,
         }
+    }
+
+    /// 开轮：预滚环拼回采集头，起轮时刻落账（onset 臂本体）。
+    fn rr3_round_open(&mut self, now_ms: u64) {
+        self.active = true;
+        self.buf = self
+            .preroll
+            .iter()
+            .flat_map(|(p, _)| p.iter().copied())
+            .collect();
+        self.started_ms = now_ms;
     }
 
     /// 开轮中且时长上限到点（主循环每圈问一次）。

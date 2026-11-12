@@ -366,14 +366,19 @@ pub(super) fn rr3_leg_relay(shared: &Rr3PanelShared) -> (Value, &'static str) {
         // 取数失败 = 能力面不可核验：腿如实 fail，期望态按最严的 pass 记——
         // 旧实现把期望也记 fail，等值判定会把这条故障腿抵消成"符合预期"，
         // 自检 verdict 可能在 rrd 状态面故障时假绿（0.0.8c 审计收口）。
-        Err(e) => (
-            json!({
-                "leg": "relay", "pass": "fail",
-                "reason": format!("ctl.status 取数失败: {e}"),
-            }),
-            "pass",
-        ),
+        Err(e) => rr3_relay_leg_err(&e),
     }
+}
+
+/// 取数失败腿的应答与期望态（腿 fail、期望 pass，防等值判定假绿）。
+fn rr3_relay_leg_err(e: &str) -> (Value, &'static str) {
+    (
+        json!({
+            "leg": "relay", "pass": "fail",
+            "reason": format!("ctl.status 取数失败: {e}"),
+        }),
+        "pass",
+    )
 }
 
 /// 能力在册时的 relay 腿：n-a 档早退，其余走 on/off 往返并带上拒因。

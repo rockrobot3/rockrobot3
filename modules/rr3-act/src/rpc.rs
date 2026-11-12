@@ -60,6 +60,11 @@ pub(crate) fn rr3_handle_servo(
         return Err(rr3_low_power_reject(servo::RR3_SERVO_COMMAND_TOPIC));
     }
     let (angle, move_ms) = rr3_servo_apply(servo_dev, cfg, args, axis)?;
+    rr3_servo_outcome(angle, move_ms)
+}
+
+/// servo 点名应答三元组（应答体 + 待发 state 角度 + relay 无）。
+fn rr3_servo_outcome(angle: u16, move_ms: u64) -> Rr3CallOutcome {
     Ok((
         json!({ "angle_deg": angle, "move_ms": move_ms }),
         Some(angle),

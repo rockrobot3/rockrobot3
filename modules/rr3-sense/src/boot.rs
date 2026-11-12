@@ -249,26 +249,37 @@ fn rr3_doa_deg(doa: &toml::Value, cur: i32) -> Result<i32, String> {
 fn rr3_doa_window(doa: &toml::Value, cur: u64) -> Result<u64, String> {
     let mut ms = cur;
     rr3_cfg_u64(doa, "window_ms", &mut ms)?;
+    Ok(rr3_doa_window_fold(ms))
+}
+
+/// 窗长 0 无窗意义：折 1000ms 并留痕。
+fn rr3_doa_window_fold(ms: u64) -> u64 {
     if ms < 1 {
         eprintln!(
             "config [rr3-sense.doa] window_ms={} 无窗意义，收敛 1000ms",
             ms
         );
-        ms = 1000;
+        return 1000;
     }
-    Ok(ms)
+    ms
 }
 
 /// 判向窗 RMS 门限键（i16 采样域）。
 fn rr3_doa_rms(doa: &toml::Value, cur: i64) -> Result<i64, String> {
     let mut wrm = cur;
     rr3_cfg_i64(doa, "window_rms_min", &mut wrm)?;
+    rr3_rms_cap(wrm)?;
+    Ok(wrm)
+}
+
+/// RMS 门限值域（i16 采样域 0..=32767）。
+fn rr3_rms_cap(wrm: i64) -> Result<(), String> {
     if !(0..=32767).contains(&wrm) {
         return Err(format!(
             "[rr3-sense.doa] window_rms_min 须在 0..=32767，收到 {wrm}"
         ));
     }
-    Ok(wrm)
+    Ok(())
 }
 
 /// 麦间距键（0 无几何可判向；u64 中转后收 u32 域）。
@@ -278,6 +289,11 @@ fn rr3_doa_base(doa: &toml::Value, cur: u32) -> Result<u32, String> {
     if mm == 0 {
         return Err("[rr3-sense.doa] mic_baseline_mm=0 无几何可判向".to_string());
     }
+    rr3_base_u32(mm)
+}
+
+/// 麦间距收窄到 u32 域（越界点名）。
+fn rr3_base_u32(mm: u64) -> Result<u32, String> {
     u32::try_from(mm).map_err(|_| format!("[rr3-sense.doa] mic_baseline_mm 越界: {mm}"))
 }
 

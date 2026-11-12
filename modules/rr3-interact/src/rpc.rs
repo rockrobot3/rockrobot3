@@ -64,13 +64,24 @@ pub(crate) fn rr3_handle_tts(
     let mut samples = rr3_tts_take(bus, tts_pcm, pcm_bytes)?;
     let (played_ms, suspended) =
         rr3_tts_play_out(bus, sink, face, &mut samples, player, pcm_bytes)?;
+    rr3_tts_log(&text, played_ms, pcm_bytes, player, suspended);
+    Ok(rr3_tts_result(&text, played_ms))
+}
+
+/// 一轮播放的运维日志（字符数/毫秒/字节/增益/水位/挂起表情，一行对账）。
+fn rr3_tts_log(
+    text: &str,
+    played_ms: u64,
+    pcm_bytes: u64,
+    player: &Rr3PlayerCfg,
+    suspended: &'static str,
+) {
     eprintln!(
         "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，gain {}%，水位 {}ms，talk 挂起 {suspended}）",
         text.chars().count(),
         player.volume_pct,
         player.prebuffer_ms
     );
-    Ok(rr3_tts_result(&text, played_ms))
 }
 
 /// 收流对账：点名字节数须与缓冲实收相等；不过即整缓冲作废并记拒播。
