@@ -160,17 +160,7 @@ pub(crate) fn rr3_check_slot_refs(profile: &Rr3Profile, table: &Rr3SlotTable) ->
 /// bindings/enabled_slots 的查册门（bindings 另拒基础层格位——基础层恒在位）
 fn rr3_check_bind_slots(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<String> {
     let mut errs = Vec::new();
-    for slot in profile.bindings.keys() {
-        if !table.rr3_slot_contains(slot) {
-            errs.push(format!(
-                "bindings 格位 {slot} 未在册（contracts/slots.toml 无此格，装配单不得自造格位）"
-            ));
-        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
-            errs.push(format!(
-                "bindings 不得绑定基础层格位 {slot}（基础层由基座内建承载，恒在位）"
-            ));
-        }
-    }
+    rr3_bind_rows_check(profile, table, &mut errs);
     // enabled_slots 的格位必须查册命中（基础层允许——恒在位，只记账不绑定）
     for (module, slots) in &profile.enabled_slots {
         for slot in slots {
@@ -182,6 +172,21 @@ fn rr3_check_bind_slots(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<Strin
         }
     }
     errs
+}
+
+/// bindings 格位查册：未在册/基础层绑定两判。
+fn rr3_bind_rows_check(profile: &Rr3Profile, table: &Rr3SlotTable, errs: &mut Vec<String>) {
+    for slot in profile.bindings.keys() {
+        if !table.rr3_slot_contains(slot) {
+            errs.push(format!(
+                "bindings 格位 {slot} 未在册（contracts/slots.toml 无此格，装配单不得自造格位）"
+            ));
+        } else if table.rr3_slot_layer(slot).as_deref() == Some("base") {
+            errs.push(format!(
+                "bindings 不得绑定基础层格位 {slot}（基础层由基座内建承载，恒在位）"
+            ));
+        }
+    }
 }
 
 /// [slots].present 查册门：声明集只认 rr-registry 那一册；基础层进 present 属
@@ -237,14 +242,24 @@ pub(crate) fn rr3_check_tier(profile: &Rr3Profile, table: &Rr3SlotTable) -> Vec<
     let mut errs = Vec::new();
     rr3_tier_bare(profile, &mut errs);
     let referenced = rr3_tier_refs(profile);
-    for slot in &referenced {
+    rr3_tier_slots(&referenced, profile, table, &mut errs);
+    errs
+}
+
+/// 被引用格位逐条判：未在册由查册门点名，此处只判退役与档位范围。
+fn rr3_tier_slots(
+    referenced: &BTreeSet<String>,
+    profile: &Rr3Profile,
+    table: &Rr3SlotTable,
+    errs: &mut Vec<String>,
+) {
+    for slot in referenced {
         if !table.rr3_slot_contains(slot) {
             continue;
         }
-        rr3_slot_retired(slot, table, &mut errs);
-        rr3_slot_scope(&profile.platform_tier, slot, table, &mut errs);
+        rr3_slot_retired(slot, table, errs);
+        rr3_slot_scope(&profile.platform_tier, slot, table, errs);
     }
-    errs
 }
 
 /// 被引用的格位集：bindings 键 + enabled_slots 值 + slots_present 并集。
@@ -535,6 +550,17 @@ fn rr3_drift_check(
     if derives.is_empty() {
         return;
     }
+    rr3_drift_scan(pin, derives, label, platform, errs);
+}
+
+/// 逐词形族比对：命中且未声明 = 派生漂移，点名。
+fn rr3_drift_scan(
+    pin: &Rr3PinEntry,
+    derives: &[String],
+    label: &str,
+    platform: &Rr3PlatformTable,
+    errs: &mut Vec<String>,
+) {
     for (key, prefix) in platform.rr3_wordform_map() {
         if rr3_drift_hit(pin, derives, key, prefix) {
             errs.push(format!(
@@ -586,26 +612,36 @@ pub(crate) fn rr3_check_rails(
 ) -> Vec<String> {
     let mut errs = Vec::new();
     for pin in &profile.pins {
-        let kind = roles.rr3_role_kind(&pin.role);
-        let rail_unlisted = pin.rail.is_empty() || pin.rail == "none";
-        if rail_unlisted {
-            if kind.as_deref() == Some("power") {
-                errs.push(format!(
-                    "pins[{}] rail {} 但角色 {} kind = power（校验⑥-b：功率面必须挂真实供电轨，缺 rail 或 none 即红）",
-                    pin.rr3_pin_id(),
-                    if pin.rail.is_empty() { "缺失" } else { "= none" },
-                    pin.role
-                ));
-            }
-        } else if !domain_names.contains(pin.rail.as_str()) {
-            errs.push(format!(
-                "pins[{}] rail = {} 未在 [[supplies.domain]] 在册（校验⑥-a；域名单源在该形态的域声明，§18 F-5）",
-                pin.rr3_pin_id(),
-                pin.rail
-            ));
-        }
+        rr3_rail_pin(pin, roles, domain_names, &mut errs);
     }
     errs
+}
+
+/// 单引脚轨判据：功率面缺轨/写 none 即红；其余轨名须在域名单在册。
+fn rr3_rail_pin(
+    pin: &Rr3PinEntry,
+    roles: &Rr3RoleTable,
+    domain_names: &BTreeSet<String>,
+    errs: &mut Vec<String>,
+) {
+    let kind = roles.rr3_role_kind(&pin.role);
+    let rail_unlisted = pin.rail.is_empty() || pin.rail == "none";
+    if rail_unlisted {
+        if kind.as_deref() == Some("power") {
+            errs.push(format!(
+                "pins[{}] rail {} 但角色 {} kind = power（校验⑥-b：功率面必须挂真实供电轨，缺 rail 或 none 即红）",
+                pin.rr3_pin_id(),
+                if pin.rail.is_empty() { "缺失" } else { "= none" },
+                pin.role
+            ));
+        }
+    } else if !domain_names.contains(pin.rail.as_str()) {
+        errs.push(format!(
+            "pins[{}] rail = {} 未在 [[supplies.domain]] 在册（校验⑥-a；域名单源在该形态的域声明，§18 F-5）",
+            pin.rr3_pin_id(),
+            pin.rail
+        ));
+    }
 }
 
 /// 装载期校验⑥-c/⑥-d/⑥-e 的域面：武装需测点与龄期上界、evidence 与 armed

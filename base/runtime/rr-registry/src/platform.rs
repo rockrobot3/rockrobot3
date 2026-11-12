@@ -82,39 +82,61 @@ pub struct Rr3PlatformTable {
 /// 脚号数组解析：逐元素判非负整数，坏的逐条点名（不静默丢弃）
 fn rr3_pin_set_from(v: &Value, what: &str, errs: &mut Vec<String>) -> BTreeSet<i64> {
     let mut out = BTreeSet::new();
-    if let Some(items) = v.as_array() {
-        for (i, item) in items.iter().enumerate() {
-            match item.as_integer() {
-                Some(n) if n >= 0 => {
-                    out.insert(n);
-                }
-                Some(n) => errs.push(format!("{what}[{i}] 脚号须非负，收到 {n}")),
-                None => errs.push(format!("{what}[{i}] 应为整数脚号，收到 {item:?}")),
-            }
-        }
-    } else {
+    let Some(items) = v.as_array() else {
         errs.push(format!("{what} 应为数组，收到 {v:?}"));
+        return out;
+    };
+    for (i, item) in items.iter().enumerate() {
+        if let Some(n) = rr3_pin_item(item, i, what, errs) {
+            out.insert(n);
+        }
     }
     out
+}
+
+/// 单个脚号元素：非负整数入集，坏的逐条点名。
+fn rr3_pin_item(item: &Value, i: usize, what: &str, errs: &mut Vec<String>) -> Option<i64> {
+    match item.as_integer() {
+        Some(n) if n >= 0 => Some(n),
+        Some(n) => {
+            errs.push(format!("{what}[{i}] 脚号须非负，收到 {n}"));
+            None
+        }
+        None => {
+            errs.push(format!("{what}[{i}] 应为整数脚号，收到 {item:?}"));
+            None
+        }
+    }
 }
 
 /// 字符串数组解析：逐元素判非空字符串，坏的逐条点名
 fn rr3_str_set_from(v: &Value, what: &str, errs: &mut Vec<String>) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    if let Some(items) = v.as_array() {
-        for (i, item) in items.iter().enumerate() {
-            match item.as_str() {
-                Some(s) if !s.trim().is_empty() => {
-                    out.insert(s.to_string());
-                }
-                Some(_) => errs.push(format!("{what}[{i}] 不得为空串")),
-                None => errs.push(format!("{what}[{i}] 应为字符串，收到 {item:?}")),
-            }
-        }
-    } else {
+    let Some(items) = v.as_array() else {
         errs.push(format!("{what} 应为数组，收到 {v:?}"));
+        return out;
+    };
+    for (i, item) in items.iter().enumerate() {
+        if let Some(s) = rr3_str_item(item, i, what, errs) {
+            out.insert(s);
+        }
     }
     out
+}
+
+/// 单个字符串元素：非空串入集，坏的逐条点名。
+fn rr3_str_item(item: &Value, i: usize, what: &str, errs: &mut Vec<String>) -> Option<String> {
+    match item.as_str() {
+        Some(s) if !s.trim().is_empty() => Some(s.to_string()),
+        Some(_) => {
+            errs.push(format!("{what}[{i}] 不得为空串"));
+            None
+        }
+        None => {
+            errs.push(format!("{what}[{i}] 应为字符串，收到 {item:?}"));
+            None
+        }
+    }
 }
 
 /// 解析 + 全量形状校验一份平台表文本。fail-closed：任何一段缺、任何键坏、
@@ -172,21 +194,26 @@ fn rr3_plat_head(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
 /// 顶层七键封闭（未知键点名，文案逐字保留）。
 fn rr3_plat_keys(t: &toml::Table, errs: &mut Vec<String>) {
     for k in t.keys() {
-        if ![
-            "schema_version",
-            "platform",
-            "controller",
-            "capabilities",
-            "conflict",
-            "construction",
-            "controller_wordform",
-        ]
-        .contains(&k.as_str())
-        {
-            errs.push(format!(
-                "平台表顶层未知键 {k}（只认 schema_version / platform / controller / capabilities / conflict / construction / controller_wordform）"
-            ));
-        }
+        rr3_plat_key_err(k, errs);
+    }
+}
+
+/// 单个顶层键裁决：七键外点名（文案逐字保留）。
+fn rr3_plat_key_err(k: &str, errs: &mut Vec<String>) {
+    if ![
+        "schema_version",
+        "platform",
+        "controller",
+        "capabilities",
+        "conflict",
+        "construction",
+        "controller_wordform",
+    ]
+    .contains(&k)
+    {
+        errs.push(format!(
+            "平台表顶层未知键 {k}（只认 schema_version / platform / controller / capabilities / conflict / construction / controller_wordform）"
+        ));
     }
 }
 
@@ -247,18 +274,28 @@ fn rr3_ctl_collect(
     errs: &mut Vec<String>,
 ) {
     match t.get("controller") {
-        Some(Value::Array(items)) if !items.is_empty() => {
-            for (i, item) in items.iter().enumerate() {
-                rr3_ctl_item(item, i, entries, errs);
-            }
-        }
-        Some(Value::Array(_)) => errs.push(
-            "平台表 [[controller]] 为空（在册控制器词表为空 = ⑧-b 无键空间可判，词表事故）".into(),
-        ),
+        Some(Value::Array(items)) => rr3_ctl_items(items, entries, errs),
         Some(other) => errs.push(format!(
             "平台表 controller 应为数组（[[controller]]），收到 {other:?}"
         )),
         None => errs.push("平台表缺 [[controller]] 段（在册控制器词表必填）".into()),
+    }
+}
+
+/// `[[controller]]` 数组逐条：空表 = 词表事故（在册控制器词表为空 = ⑧-b 无键空间可判）。
+fn rr3_ctl_items(
+    items: &[Value],
+    entries: &mut Vec<(String, String, i64)>,
+    errs: &mut Vec<String>,
+) {
+    if items.is_empty() {
+        errs.push(
+            "平台表 [[controller]] 为空（在册控制器词表为空 = ⑧-b 无键空间可判，词表事故）".into(),
+        );
+        return;
+    }
+    for (i, item) in items.iter().enumerate() {
+        rr3_ctl_item(item, i, entries, errs);
     }
 }
 
@@ -288,11 +325,16 @@ fn rr3_ctl_item(
 /// `[[controller]]` 键词表核：只认 name / kind / channels（其余逐键点名）。
 fn rr3_ctl_keys(c: &toml::Table, i: usize, errs: &mut Vec<String>) {
     for k in c.keys() {
-        if !rr3_ctl_key_ok(k) {
-            errs.push(format!(
-                "controller[{i}] 未知键 {k}（只认 name / kind / channels）"
-            ));
-        }
+        rr3_ctl_key_err(k, i, errs);
+    }
+}
+
+/// 单个控制器键裁决（词表外点名）。
+fn rr3_ctl_key_err(k: &str, i: usize, errs: &mut Vec<String>) {
+    if !rr3_ctl_key_ok(k) {
+        errs.push(format!(
+            "controller[{i}] 未知键 {k}（只认 name / kind / channels）"
+        ));
     }
 }
 
@@ -371,18 +413,23 @@ fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
 /// 能力集四键封闭：未知键逐条点名。
 fn rr3_caps_keys(caps: &toml::Table, errs: &mut Vec<String>) {
     for k in caps.keys() {
-        if ![
-            "adc_pins",
-            "input_only_pins",
-            "no_open_drain",
-            "output_capable_pins",
-        ]
-        .contains(&k.as_str())
-        {
-            errs.push(format!(
-                "[capabilities] 未知键 {k}（只认 adc_pins / input_only_pins / no_open_drain / output_capable_pins）"
-            ));
-        }
+        rr3_caps_key_err(k, errs);
+    }
+}
+
+/// 单个能力集键裁决（四键外点名）。
+fn rr3_caps_key_err(k: &str, errs: &mut Vec<String>) {
+    if ![
+        "adc_pins",
+        "input_only_pins",
+        "no_open_drain",
+        "output_capable_pins",
+    ]
+    .contains(&k)
+    {
+        errs.push(format!(
+            "[capabilities] 未知键 {k}（只认 adc_pins / input_only_pins / no_open_drain / output_capable_pins）"
+        ));
     }
 }
 
@@ -444,11 +491,7 @@ fn rr3_caps_output(caps: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut 
 fn rr3_plat_conf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     let mut groups_seen = BTreeSet::<String>::new();
     match t.get("conflict") {
-        Some(Value::Array(items)) => {
-            for (i, item) in items.iter().enumerate() {
-                rr3_conf_item(item, i, table, &mut groups_seen, errs);
-            }
-        }
+        Some(Value::Array(items)) => rr3_conf_items(items, table, &mut groups_seen, errs),
         Some(other) => errs.push(format!(
             "平台表 conflict 应为数组（[[conflict]] / []），收到 {other:?}"
         )),
@@ -456,6 +499,18 @@ fn rr3_plat_conf(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
             "平台表缺 conflict 键（无冲突也必须显式写 conflict = [] 并带'评审确认无冲突矩阵'注记，裁定②）"
                 .into(),
         ),
+    }
+}
+
+/// `[[conflict]]` 数组逐条：组名唯一状态随遍历累积。
+fn rr3_conf_items(
+    items: &[Value],
+    table: &mut Rr3PlatformTable,
+    groups_seen: &mut BTreeSet<String>,
+    errs: &mut Vec<String>,
+) {
+    for (i, item) in items.iter().enumerate() {
+        rr3_conf_item(item, i, table, groups_seen, errs);
     }
 }
 
@@ -497,11 +552,16 @@ fn rr3_conf_item(
 /// 键词表核：只认 group / pins / controllers / why（其余逐键点名）。
 fn rr3_conf_keys(c: &toml::Table, i: usize, errs: &mut Vec<String>) {
     for k in c.keys() {
-        if !["group", "pins", "controllers", "why"].contains(&k.as_str()) {
-            errs.push(format!(
-                "conflict[{i}] 未知键 {k}（只认 group / pins / controllers / why）"
-            ));
-        }
+        rr3_conf_key_err(k, i, errs);
+    }
+}
+
+/// 单个冲突键裁决（四键外点名）。
+fn rr3_conf_key_err(k: &str, i: usize, errs: &mut Vec<String>) {
+    if !["group", "pins", "controllers", "why"].contains(&k) {
+        errs.push(format!(
+            "conflict[{i}] 未知键 {k}（只认 group / pins / controllers / why）"
+        ));
     }
 }
 
@@ -551,7 +611,7 @@ fn rr3_conf_register(
     table: &mut Rr3PlatformTable,
     errs: &mut Vec<String>,
 ) {
-    if d.pins.is_empty() && d.controllers.is_empty() {
+    if rr3_sets_blank(&d.pins, &d.controllers) {
         return;
     }
     rr3_conf_dup_err(&d, groups_seen, errs);
@@ -588,13 +648,18 @@ fn rr3_conf_members(
 ) -> (BTreeSet<i64>, BTreeSet<String>) {
     let (pins, controllers) = rr3_conf_sets(c, i, group, errs);
     for ctl in &controllers {
-        if !table.controllers.contains_key(ctl) {
-            errs.push(format!(
-                "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
-            ));
-        }
+        rr3_conf_ctl_err(ctl, i, table, errs);
     }
     (pins, controllers)
+}
+
+/// 单个 controllers 成员的在册性（同文件真值，先立词表再引）。
+fn rr3_conf_ctl_err(ctl: &str, i: usize, table: &Rr3PlatformTable, errs: &mut Vec<String>) {
+    if !table.controllers.contains_key(ctl) {
+        errs.push(format!(
+            "conflict[{i}] 的 controllers 成员 {ctl} 不在本表 [[controller]] 在册（同文件真值，先立词表再引）"
+        ));
+    }
 }
 
 /// 冲突集成员解析：pins/controllers 两数组（缺省空集，坏元素逐条点名），

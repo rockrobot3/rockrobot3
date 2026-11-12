@@ -112,10 +112,22 @@ pub fn rr3_base64_decode(s: &str) -> Result<Vec<u8>, Rr3Base64Error> {
     let mut out = Vec::with_capacity(groups * 3);
     for g in 0..groups {
         let grp = &bytes[g * 4..g * 4 + 4];
-        let (n, pad) = rr3_b64_group(grp, g + 1 == groups, g * 4, &table)?;
-        rr3_b64_push(n, pad, &mut out);
+        rr3_b64_decode_one(grp, g + 1 == groups, g * 4, &table, &mut out)?;
     }
     Ok(out)
+}
+
+/// 单组解码落账：24bit 值按填充位落 1–3 字节。
+fn rr3_b64_decode_one(
+    grp: &[u8],
+    last: bool,
+    base: usize,
+    table: &[u8; 256],
+    out: &mut Vec<u8>,
+) -> Result<(), Rr3Base64Error> {
+    let (n, pad) = rr3_b64_group(grp, last, base, table)?;
+    rr3_b64_push(n, pad, out);
+    Ok(())
 }
 
 /// 组宽判据：带填充的 base64 长度必须是 4 的倍数。

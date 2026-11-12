@@ -71,11 +71,23 @@ fn rr3_hs_read(
             ))
         }
     };
+    rr3_hs_gates(&frame, &body, ty, reported_task, out)?;
+    Ok((reported_task, body))
+}
+
+/// 首帧两道形状门：dst_task 必须是 rrd、payload 类型必须是 Request。
+fn rr3_hs_gates(
+    frame: &Rr3Frame,
+    body: &[u8],
+    ty: Rr3PayloadType,
+    reported_task: u64,
+    out: &Arc<Mutex<UnixStream>>,
+) -> Result<(), String> {
     if frame.header.dst_task != RR3_TASK_RRD {
         return Err(rr3_refuse(
             out,
             reported_task,
-            rr3_best_effort_id(&body),
+            rr3_best_effort_id(body),
             Rr3StatusCode::Invalid,
             &format!(
                 "首帧 dst_task 必须为 {RR3_TASK_RRD}，收到 {}",
@@ -87,12 +99,12 @@ fn rr3_hs_read(
         return Err(rr3_refuse(
             out,
             reported_task,
-            rr3_best_effort_id(&body),
+            rr3_best_effort_id(body),
             Rr3StatusCode::Invalid,
             &format!("首帧 payload 类型必须是 Request，收到 {ty:?}"),
         ));
     }
-    Ok((reported_task, body))
+    Ok(())
 }
 
 /// 注册门：方法/参数/形状/entry 绝对路径四道，全 fail-closed 回错误帧
@@ -102,6 +114,37 @@ fn rr3_hs_facts(
     reported_task: u64,
     ctx: &Rr3ConnCtx,
 ) -> Result<Rr3ManifestFacts, String> {
+    let (text, facts) = rr3_hs_facts_read(req, out, reported_task)?;
+    let report = rr3_manifest_chk(&text, &ctx.topics);
+    if !report.ok() {
+        return Err(rr3_refuse(
+            out,
+            reported_task,
+            req.id,
+            Rr3StatusCode::Invalid,
+            &report.errors.join("; "),
+        ));
+    }
+    // M2 的 manifest 从线上来，没有"所在目录"可依据 → entry 必须是绝对路径。
+    // 在仓 modules/*/module.toml 是契约工件而非注册输入（装机时写入绝对 entry）。
+    if !rr3_manifest_abs(&facts.entry) {
+        return Err(rr3_refuse(
+            out,
+            reported_task,
+            req.id,
+            Rr3StatusCode::Invalid,
+            &format!("manifest.entry 必须是绝对路径，收到 {}", facts.entry),
+        ));
+    }
+    Ok(facts)
+}
+
+/// 注册门前三道：方法必须 register、params 取 manifest 文本、文本过解析。
+fn rr3_hs_facts_read(
+    req: &Rr3RpcRequest,
+    out: &Arc<Mutex<UnixStream>>,
+    reported_task: u64,
+) -> Result<(String, Rr3ManifestFacts), String> {
     if req.method != Rr3RpcMethod::Register {
         return Err(rr3_refuse(
             out,
@@ -138,28 +181,7 @@ fn rr3_hs_facts(
             ))
         }
     };
-    let report = rr3_manifest_chk(&text, &ctx.topics);
-    if !report.ok() {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            req.id,
-            Rr3StatusCode::Invalid,
-            &report.errors.join("; "),
-        ));
-    }
-    // M2 的 manifest 从线上来，没有"所在目录"可依据 → entry 必须是绝对路径。
-    // 在仓 modules/*/module.toml 是契约工件而非注册输入（装机时写入绝对 entry）。
-    if !rr3_manifest_abs(&facts.entry) {
-        return Err(rr3_refuse(
-            out,
-            reported_task,
-            req.id,
-            Rr3StatusCode::Invalid,
-            &format!("manifest.entry 必须是绝对路径，收到 {}", facts.entry),
-        ));
-    }
-    Ok(facts)
+    Ok((text, facts))
 }
 
 /// 后到者补发在册状态（跳过自己）：只保证入队次序，不构成上线次序。

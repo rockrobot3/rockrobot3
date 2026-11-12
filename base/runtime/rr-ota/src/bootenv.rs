@@ -58,36 +58,41 @@ impl Rr3EnvDev {
 pub fn rr3_env_cfg_parse(text: &str) -> Result<Vec<Rr3EnvDev>, String> {
     let mut out: Vec<Rr3EnvDev> = Vec::new();
     for (i, line) in text.lines().enumerate() {
-        let ln = i + 1;
-        let body = line.split('#').next().unwrap_or("").trim();
-        if body.is_empty() {
-            continue;
+        if let Some(dev) = rr3_env_cfg_line(line, i)? {
+            out.push(dev);
         }
-        let f: Vec<&str> = body.split_whitespace().collect();
-        if f.len() < 3 {
-            return Err(format!(
-                "fw_env.config 第 {ln} 行字段不足（要 device offset env_size，收到 {body:?}）"
-            ));
-        }
-        let offset =
-            rr3_env_num(f[1]).map_err(|e| format!("fw_env.config 第 {ln} 行 offset：{e}"))?;
-        let size =
-            rr3_env_num(f[2]).map_err(|e| format!("fw_env.config 第 {ln} 行 env_size：{e}"))?;
-        if size < 5 {
-            return Err(format!(
-                "fw_env.config 第 {ln} 行 env_size={size} 过小（至少 4B CRC + 1B 载荷）"
-            ));
-        }
-        out.push(Rr3EnvDev {
-            device: f[0].to_string(),
-            offset,
-            size: size as usize,
-        });
     }
     if out.is_empty() {
         return Err("fw_env.config 没有任何有效行（空册 = 不知道 env 在哪，拒）".into());
     }
     Ok(out)
+}
+
+/// 单行解析：空行/注释回 `None`，坏行按行号点名回 `Err`。
+fn rr3_env_cfg_line(line: &str, i: usize) -> Result<Option<Rr3EnvDev>, String> {
+    let ln = i + 1;
+    let body = line.split('#').next().unwrap_or("").trim();
+    if body.is_empty() {
+        return Ok(None);
+    }
+    let f: Vec<&str> = body.split_whitespace().collect();
+    if f.len() < 3 {
+        return Err(format!(
+            "fw_env.config 第 {ln} 行字段不足（要 device offset env_size，收到 {body:?}）"
+        ));
+    }
+    let offset = rr3_env_num(f[1]).map_err(|e| format!("fw_env.config 第 {ln} 行 offset：{e}"))?;
+    let size = rr3_env_num(f[2]).map_err(|e| format!("fw_env.config 第 {ln} 行 env_size：{e}"))?;
+    if size < 5 {
+        return Err(format!(
+            "fw_env.config 第 {ln} 行 env_size={size} 过小（至少 4B CRC + 1B 载荷）"
+        ));
+    }
+    Ok(Some(Rr3EnvDev {
+        device: f[0].to_string(),
+        offset,
+        size: size as usize,
+    }))
 }
 
 /// 十进制或 `0x` 十六进制的无符号数（U-Boot 配置惯用十六进制偏移）。
@@ -163,18 +168,7 @@ impl Rr3BootEnv {
             if seg.is_empty() {
                 break; // 收尾空段；其后全为补齐 0
             }
-            let s = std::str::from_utf8(seg)
-                .map_err(|_| format!("env 段非 UTF-8（{}B），拒读", seg.len()))?;
-            let Some((k, v)) = s.split_once('=') else {
-                return Err(format!("env 段 {s:?} 缺 '='（形状坏，拒读）"));
-            };
-            if k.is_empty() {
-                return Err("env 段键为空（形状坏，拒读）".into());
-            }
-            if vars.iter().any(|(ek, _)| ek == k) {
-                return Err(format!("env 键 {k:?} 重复（载体损坏，拒读）"));
-            }
-            vars.push((k.to_string(), v.to_string()));
+            rr3_env_seg(seg, &mut vars)?;
         }
         Ok(Self { vars })
     }
@@ -253,6 +247,23 @@ impl Rr3BootEnv {
         self.rr3_env_set("bootcount", "0")?;
         self.rr3_env_set("upgrade_available", "0")
     }
+}
+
+/// 单个 env 段：必须是 `k=v`、键非空且不与已有键重复（坏形状一律 fail-closed）。
+fn rr3_env_seg(seg: &[u8], vars: &mut Vec<(String, String)>) -> Result<(), String> {
+    let s =
+        std::str::from_utf8(seg).map_err(|_| format!("env 段非 UTF-8（{}B），拒读", seg.len()))?;
+    let Some((k, v)) = s.split_once('=') else {
+        return Err(format!("env 段 {s:?} 缺 '='（形状坏，拒读）"));
+    };
+    if k.is_empty() {
+        return Err("env 段键为空（形状坏，拒读）".into());
+    }
+    if vars.iter().any(|(ek, _)| ek == k) {
+        return Err(format!("env 键 {k:?} 重复（载体损坏，拒读）"));
+    }
+    vars.push((k.to_string(), v.to_string()));
+    Ok(())
 }
 
 /// 上膛前件：altcmd 非空、limit 非 0（否则回滚链落空，假绿不许）。

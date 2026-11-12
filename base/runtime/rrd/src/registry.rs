@@ -466,18 +466,8 @@ impl RrdRegistry {
         // 这里只**记下**待替换条目的 task 号，真正的摘除延后到门+断言全过之后：
         // 被 catch_unwind 吞掉的 debug panic（坏 watchdog）不许留下已改一半的表
         // （`caught_panic_leaves_the_failed_entry_registered` 钉住）。
-        let mut superseded: Option<u64> = None;
-        if let Some(old) = self.modules.get(&facts.name) {
-            if old.phase != Rr3Phase::Failed {
-                return Err(Rr3RegisterError::Duplicate {
-                    name: facts.name.clone(),
-                    src_task: old.src_task,
-                });
-            }
-            superseded = Some(old.src_task);
-        }
-        // 容量门认 superseded：表满但同名条目是 Failed 时，旧条目即将腾出槽位，
-        // 这是合法的 Failed 重注册，不得被容量拒（与移位前的现行行为一致）。
+        let superseded = self.rr3_add_superseded(facts)?; // 容量门认 superseded：表满但同名条目是 Failed 时，旧条目即将腾出槽位，
+                                                          // 这是合法的 Failed 重注册，不得被容量拒（与移位前的现行行为一致）。
         if superseded.is_none() && self.modules.len() >= RR3_REG_MAX_MODULES {
             return Err(Rr3RegisterError::Capacity {
                 limit: RR3_REG_MAX_MODULES,
@@ -534,6 +524,23 @@ impl RrdRegistry {
             },
         );
         Ok(task)
+    }
+
+    /// 同名在册门：非 Failed 即拒，Failed 条目记下待替换 task。
+    fn rr3_add_superseded(
+        &self,
+        facts: &Rr3ManifestFacts,
+    ) -> Result<Option<u64>, Rr3RegisterError> {
+        let Some(old) = self.modules.get(&facts.name) else {
+            return Ok(None);
+        };
+        if old.phase != Rr3Phase::Failed {
+            return Err(Rr3RegisterError::Duplicate {
+                name: facts.name.clone(),
+                src_task: old.src_task,
+            });
+        }
+        Ok(Some(old.src_task))
     }
 
     /// 心跳：`registered → running` 的唯一入口（回报 `Promoted`），并刷新到期基准。
@@ -903,23 +910,28 @@ impl RrdRegistry {
             .collect();
         let mut out = Vec::new();
         for cap in caps {
-            // 该能力还有在册且 Running 的提供者吗？刚死的那个已在表里置 Failed
-            // （或已注销摘除），天然不在数内，无需按名排除。
-            let names = self.providers.get(&cap).cloned().unwrap_or_default();
-            let any_alive = self
-                .modules
-                .values()
-                .any(|e| e.phase == Rr3Phase::Running && names.contains(&e.name));
-            if any_alive {
-                continue;
-            }
-            for e in self.modules.values_mut() {
-                if e.phase == Rr3Phase::Running
-                    && e.facts.depends_required.iter().any(|d| d == &cap)
-                {
-                    e.phase = Rr3Phase::Degraded;
-                    out.push((e.name.clone(), e.src_task));
-                }
+            out.extend(self.rr3_degrade_cap(&cap));
+        }
+        out
+    }
+
+    /// 单能力降级：该能力再无 Running 提供者时，依赖它的 Running 模块逐个置 Degraded。
+    fn rr3_degrade_cap(&mut self, cap: &str) -> Vec<(String, u64)> {
+        // 该能力还有在册且 Running 的提供者吗？刚死的那个已在表里置 Failed
+        // （或已注销摘除），天然不在数内，无需按名排除。
+        let names = self.providers.get(cap).cloned().unwrap_or_default();
+        let any_alive = self
+            .modules
+            .values()
+            .any(|e| e.phase == Rr3Phase::Running && names.contains(&e.name));
+        if any_alive {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for e in self.modules.values_mut() {
+            if e.phase == Rr3Phase::Running && e.facts.depends_required.iter().any(|d| d == cap) {
+                e.phase = Rr3Phase::Degraded;
+                out.push((e.name.clone(), e.src_task));
             }
         }
         out

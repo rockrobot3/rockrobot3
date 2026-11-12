@@ -43,15 +43,26 @@ fn string_list(root: &Value, path: &str, errs: &mut Vec<String>) -> Vec<String> 
 fn rr3_str_items(arr: &[Value], path: &str, errs: &mut Vec<String>) -> Vec<String> {
     let mut out = Vec::new();
     for (idx, item) in arr.iter().enumerate() {
-        match item.as_str() {
-            Some(s) => out.push(s.to_string()),
-            None => errs.push(format!(
-                "{path} 第 {} 项应为字符串，实际为 {item:?}",
-                idx + 1
-            )),
-        }
+        rr3_str_item(item, idx, path, &mut out, errs);
     }
     out
+}
+
+/// 单个数组项：串入列，非串必须点名（不许静默吞掉，fail-open）。
+fn rr3_str_item(
+    item: &Value,
+    idx: usize,
+    path: &str,
+    out: &mut Vec<String>,
+    errs: &mut Vec<String>,
+) {
+    match item.as_str() {
+        Some(s) => out.push(s.to_string()),
+        None => errs.push(format!(
+            "{path} 第 {} 项应为字符串，实际为 {item:?}",
+            idx + 1
+        )),
+    }
 }
 
 /// 不可满足错误行（唯一拼装点）：`resolve` 生成、`plan_boot` 按前缀归还给点名模块。
@@ -154,14 +165,23 @@ fn rr3_boot_order_excl(
 fn rr3_names_unique(facts: &[Rr3DependsFacts], errs: &mut Vec<String>) -> bool {
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     for f in facts {
-        if !seen.insert(f.name.as_str()) {
-            errs.push(format!(
-                "manifest 名重复: {}（依赖仲裁要求模块名唯一）",
-                f.name
-            ));
-        }
+        rr3_name_unique_chk(f, &mut seen, errs);
     }
     errs.is_empty()
+}
+
+/// 单个名字入见集：重复即点名（依赖仲裁要求模块名唯一）。
+fn rr3_name_unique_chk<'a>(
+    f: &'a Rr3DependsFacts,
+    seen: &mut BTreeSet<&'a str>,
+    errs: &mut Vec<String>,
+) {
+    if !seen.insert(f.name.as_str()) {
+        errs.push(format!(
+            "manifest 名重复: {}（依赖仲裁要求模块名唯一）",
+            f.name
+        ));
+    }
 }
 
 /// base 能力集（常驻词表，与 manifest 无关）。
@@ -244,12 +264,22 @@ fn rr3_kahn_release<'a>(
         return;
     };
     for d in deps {
-        let e = indegree.get_mut(d).expect("边表里出现过的消费者必有入度");
-        *e -= 1;
-        if *e == 0 {
-            let f = &facts[*d];
-            ready.insert((f.start_priority, f.name.as_str()));
-        }
+        rr3_release_one(facts, indegree, ready, *d);
+    }
+}
+
+/// 释放单条下游边：入度减一，归零者入就绪集合。
+fn rr3_release_one<'a>(
+    facts: &'a [Rr3DependsFacts],
+    indegree: &mut BTreeMap<usize, usize>,
+    ready: &mut BTreeSet<(i64, &'a str)>,
+    d: usize,
+) {
+    let e = indegree.get_mut(&d).expect("边表里出现过的消费者必有入度");
+    *e -= 1;
+    if *e == 0 {
+        let f = &facts[d];
+        ready.insert((f.start_priority, f.name.as_str()));
     }
 }
 
@@ -274,11 +304,16 @@ fn rr3_caps_unmet(
     errs: &mut Vec<String>,
 ) {
     for f in facts {
-        if excluded.contains(&f.name) {
+        if !rr3_kept(&f.name, excluded) {
             continue;
         }
         rr3_cap_gaps(f, facts, base, errs);
     }
+}
+
+/// 未剔除（在启动序宇宙里）
+fn rr3_kept(name: &str, excluded: &BTreeSet<String>) -> bool {
+    !excluded.contains(name)
 }
 
 /// 单个模块的未满足能力：base 能力免判，其余须有任一模块 provides。
@@ -311,7 +346,7 @@ fn rr3_edges_build(
 ) -> BTreeSet<(usize, usize)> {
     let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new(); // (consumer, provider)
     for (ci, f) in facts.iter().enumerate() {
-        if excluded.contains(&f.name) {
+        if !rr3_kept(&f.name, excluded) {
             continue;
         }
         rr3_edges_one(ci, f, facts, excluded, base, &mut edges);
@@ -366,14 +401,20 @@ fn rr3_edge_hit(g: &Rr3DependsFacts, cap: &str, excluded: &BTreeSet<String>) -> 
 pub fn rr3_plan_boot(facts: &[Rr3DependsFacts]) -> Rr3BootPlan {
     let mut excluded: BTreeSet<String> = BTreeSet::new();
     loop {
-        match rr3_boot_order_excl(facts, &excluded) {
-            Ok(order) => return rr3_plan_ok(order, &excluded),
-            Err(errs) => {
-                if let Some(plan) = rr3_plan_reject(facts, &mut excluded, errs) {
-                    return plan;
-                }
-            }
+        if let Some(plan) = rr3_plan_round(facts, &mut excluded) {
+            return plan;
         }
+    }
+}
+
+/// 单轮仲裁：成功即终局；失败交 [`rr3_plan_reject`] 判终局或继续（`None` = 继续）。
+fn rr3_plan_round(
+    facts: &[Rr3DependsFacts],
+    excluded: &mut BTreeSet<String>,
+) -> Option<Rr3BootPlan> {
+    match rr3_boot_order_excl(facts, excluded) {
+        Ok(order) => Some(rr3_plan_ok(order, excluded)),
+        Err(errs) => rr3_plan_reject(facts, excluded, errs),
     }
 }
 
@@ -426,7 +467,7 @@ fn rr3_plan_drop(facts: &[Rr3DependsFacts], excluded: &mut BTreeSet<String>, err
 
 /// 该模块是否本轮该剔除：尚未剔除且错误行点名了它。
 fn rr3_plan_take(f: &Rr3DependsFacts, excluded: &BTreeSet<String>, errs: &[String]) -> bool {
-    !excluded.contains(&f.name) && rr3_plan_unsat(&f.name, errs)
+    rr3_kept(&f.name, excluded) && rr3_plan_unsat(&f.name, errs)
 }
 
 /// 错误行是否点名该消费者（前缀由 `unsatisfiable_error` 唯一拼装，与此同源）。

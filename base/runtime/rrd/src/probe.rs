@@ -233,15 +233,18 @@ pub fn rr3_probe_select(explicit: Option<&str>) -> Arc<dyn Rr3Probe> {
             }
         }
         // 未给 / 取值不认：平台默认（取值不认的点名由 rr3_probe_default 出）
-        _ => {
-            if cfg!(test) {
-                Arc::new(Rr3SimProbe)
-            } else if cfg!(target_os = "linux") {
-                Arc::new(Rr3LinuxProbe::rr3_linux_probe_new("/"))
-            } else {
-                Arc::new(Rr3AbsentProbe)
-            }
-        }
+        _ => rr3_probe_platform(),
+    }
+}
+
+/// 平台默认探测件：test → sim；linux → 真值探测；其余生产面 → 恒缺。
+fn rr3_probe_platform() -> Arc<dyn Rr3Probe> {
+    if cfg!(test) {
+        Arc::new(Rr3SimProbe)
+    } else if cfg!(target_os = "linux") {
+        Arc::new(Rr3LinuxProbe::rr3_linux_probe_new("/"))
+    } else {
+        Arc::new(Rr3AbsentProbe)
     }
 }
 

@@ -135,7 +135,17 @@ pub fn rr3_act_prof_parse(
     }
     // 判据全绿后十四键必在场：上面每个 None 分支都已同步点名——errs 空 ⟺ 全 Some。
     // B10：残留缺键按"内部不一致"折 Err 点名，不再 expect 崩溃（库不杀宿主）。
-    let profile = rr3_axis_build(&nums, &words).ok_or_else(|| {
+    rr3_axis_finish(&nums, &words, pin, path)
+}
+
+/// 判据全绿后的构造段：残留 None 按"内部不一致"折 Err 点名。
+fn rr3_axis_finish(
+    nums: &Rr3AxisNums,
+    words: &Rr3AxisWords,
+    pin: Option<String>,
+    path: &str,
+) -> Result<Rr3AxisFile, Vec<String>> {
+    let profile = rr3_axis_build(nums, words).ok_or_else(|| {
         vec![format!(
             "{path}: 逐键判据全绿但十二键不全（判据与构造面不一致，内部缺陷）"
         )]
@@ -409,12 +419,19 @@ pub fn rr3_act_profile_load(
     path: &Path,
     pin_ids: &BTreeSet<String>,
 ) -> Result<Option<Rr3AxisFile>, Vec<String>> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(vec![format!("读 {} 失败: {e}", path.display())]),
+    let Some(text) = rr3_axis_text_read(path)? else {
+        return Ok(None);
     };
     rr3_act_prof_parse(&text, &path.display().to_string(), pin_ids).map(Some)
+}
+
+/// 读档案文本：`NotFound` 折 `None`（无档案），其余读错带因点名。
+fn rr3_axis_text_read(path: &Path) -> Result<Option<String>, Vec<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(vec![format!("读 {} 失败: {e}", path.display())]),
+    }
 }
 
 #[cfg(test)]

@@ -91,6 +91,11 @@ fn req_str(root: &Value, path: &str, errs: &mut Vec<String>) -> String {
     let Some(v) = rr3_req_present(root, path, errs) else {
         return String::new();
     };
+    rr3_str_take(v, path, errs)
+}
+
+/// 必填字符串值型：空串与类型错两类点名（均回空串）。
+fn rr3_str_take(v: &Value, path: &str, errs: &mut Vec<String>) -> String {
     match v.as_str() {
         Some(s) if !s.is_empty() => s.to_string(),
         Some(_) => {
@@ -108,6 +113,11 @@ fn req_int(root: &Value, path: &str, errs: &mut Vec<String>) -> u64 {
     let Some(v) = rr3_req_present(root, path, errs) else {
         return 0;
     };
+    rr3_int_take(v, path, errs)
+}
+
+/// 必填整数值型：非正与类型错两类点名（均回 0）。
+fn rr3_int_take(v: &Value, path: &str, errs: &mut Vec<String>) -> u64 {
     match v.as_integer() {
         Some(n) if n > 0 => n as u64,
         Some(n) => {
@@ -320,6 +330,27 @@ pub fn rr3_manifest_rewrite(
 ) -> Result<String, String> {
     rr3_entry_target(installed_entry, module)?;
     let (idx, a, b) = rr3_entry_span(text, module)?;
+    let out = rr3_entry_swap(text, (idx, a, b), installed_entry, facts_entry, module)?;
+    let re = rr3_manifest_parse(&out)
+        .map_err(|errs| format!("模块 {module} 改写后不可解析: {errs:?}"))?;
+    if re.entry != installed_entry {
+        return Err(format!(
+            "模块 {module} 改写复核不一致（得 {:?}，want {installed_entry:?}）",
+            re.entry
+        ));
+    }
+    Ok(out)
+}
+
+/// 只改目标行引号内的值：其余字节原样；旧值对账失败即拒。
+fn rr3_entry_swap(
+    text: &str,
+    span: (usize, usize, usize),
+    installed_entry: &str,
+    facts_entry: &str,
+    module: &str,
+) -> Result<String, String> {
+    let (idx, a, b) = span;
     let mut out = String::with_capacity(text.len() + installed_entry.len());
     for (i, line) in text.split_inclusive('\n').enumerate() {
         if i != idx {
@@ -335,14 +366,6 @@ pub fn rr3_manifest_rewrite(
         out.push_str(&line[..a]);
         out.push_str(installed_entry);
         out.push_str(&line[b..]);
-    }
-    let re = rr3_manifest_parse(&out)
-        .map_err(|errs| format!("模块 {module} 改写后不可解析: {errs:?}"))?;
-    if re.entry != installed_entry {
-        return Err(format!(
-            "模块 {module} 改写复核不一致（得 {:?}，want {installed_entry:?}）",
-            re.entry
-        ));
     }
     Ok(out)
 }
