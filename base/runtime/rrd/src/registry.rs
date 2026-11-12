@@ -366,13 +366,7 @@ impl RrdRegistry {
         let mut changed = false;
         for (k, v) in counters {
             let key = format!("{module}/{k}");
-            if !self.counters.contains_key(&key) && self.counters.len() >= RR3_CTR_KEY_CAP {
-                if !self.ctr_cap_noted {
-                    self.ctr_cap_noted = true;
-                    rr3_log(&format!(
-                        "运维计数键数达上界 {RR3_CTR_KEY_CAP}，拒新键 {key}（既有键照常累加；查模块是否每拍换键）"
-                    ));
-                }
+            if self.rr3_ctr_capped(&key) {
                 continue;
             }
             let slot = self.counters.entry(key).or_insert(0);
@@ -381,6 +375,20 @@ impl RrdRegistry {
             changed |= *slot != before;
         }
         changed
+    }
+
+    /// 计数键数达上界时拒新键（既有键照常累加），并只点一次名。
+    fn rr3_ctr_capped(&mut self, key: &str) -> bool {
+        if !self.counters.contains_key(key) && self.counters.len() >= RR3_CTR_KEY_CAP {
+            if !self.ctr_cap_noted {
+                self.ctr_cap_noted = true;
+                rr3_log(&format!(
+                    "运维计数键数达上界 {RR3_CTR_KEY_CAP}，拒新键 {key}（既有键照常累加；查模块是否每拍换键）"
+                ));
+            }
+            return true;
+        }
+        false
     }
 
     /// 运维计数：全表只读快照（`rr3.ctl.counters` 的读面与持久化写盘共用）
@@ -554,10 +562,7 @@ impl RrdRegistry {
                 continue;
             }
             // 段 2：恢复归零——活过一整条自己的窗口 = 上一世的崩溃账到此为止。
-            if phase == Rr3Phase::Running && now_ms.saturating_sub(registered_at_ms) >= watchdog_ms
-            {
-                self.crash_streak.remove(&name);
-            }
+            self.rr3_reg_reset(&name, phase, registered_at_ms, now_ms, watchdog_ms);
             // 段 3：判死。saturating_sub：调用方的毫秒读数理论上单调，但真出现倒退时宁可判
             // "未到期"也不回绕成一个巨大差值把健康模块集体判死。差值提成绑定：判据与回报共用它。
             let elapsed_ms = now_ms.saturating_sub(last_beat_ms);
@@ -582,6 +587,42 @@ impl RrdRegistry {
             }
         }
         out
+    }
+
+    /// 段 2 判据：活过一整条自己的窗口（`registered_at_ms` 基准，D-2）即清崩溃账。
+    fn rr3_reg_reset(
+        &mut self,
+        name: &str,
+        phase: Rr3Phase,
+        registered_at_ms: u64,
+        now_ms: u64,
+        watchdog_ms: u64,
+    ) {
+        if phase == Rr3Phase::Running && now_ms.saturating_sub(registered_at_ms) >= watchdog_ms {
+            self.crash_streak.remove(name);
+        }
+    }
+
+    /// 前三层安全判据的前两层：保留命名空间 → 前缀越权。
+    fn rr3_pub_namespace(
+        sender_name: &str,
+        topic: &str,
+        topics: &Rr3TopicSet,
+    ) -> Result<(), Rr3PublishDeny> {
+        if crate::topics_load::rr3_topics_reserved(topic) {
+            return Err(Rr3PublishDeny::ReservedNamespace {
+                topic: topic.to_string(),
+            });
+        }
+        let head = topic.split('/').next().unwrap_or("");
+        if head != sender_name {
+            return Err(Rr3PublishDeny::ForeignPrefix {
+                topic: topic.to_string(),
+                owner: owner_for_echo(topics.rr3_topic_owner(topic)),
+                sender: sender_name.to_string(),
+            });
+        }
+        Ok(())
     }
 
     /// 发布归属判定。三层顺序即安全语义：下行冒充 → 前缀越权 → 未在册，`Ok` 之前再把
@@ -610,19 +651,7 @@ impl RrdRegistry {
         topic: &str,
         topics: &Rr3TopicSet,
     ) -> Result<(), Rr3PublishDeny> {
-        if crate::topics_load::rr3_topics_reserved(topic) {
-            return Err(Rr3PublishDeny::ReservedNamespace {
-                topic: topic.to_string(),
-            });
-        }
-        let head = topic.split('/').next().unwrap_or("");
-        if head != sender_name {
-            return Err(Rr3PublishDeny::ForeignPrefix {
-                topic: topic.to_string(),
-                owner: owner_for_echo(topics.rr3_topic_owner(topic)),
-                sender: sender_name.to_string(),
-            });
-        }
+        Self::rr3_pub_namespace(sender_name, topic, topics)?;
         if !topics.rr3_topic_contains(topic) {
             return Err(Rr3PublishDeny::NotRegistered {
                 topic: topic.to_string(),
@@ -633,7 +662,7 @@ impl RrdRegistry {
         // 绝不因"查不到"而放行；回显与另一条 ForeignPrefix 分支一致地写 `?`（同走
         // `owner_for_echo`）。
         let owner = topics.rr3_topic_owner(topic);
-        if owner.as_deref() != Some(sender_name) {
+        if Self::rr3_owner_mismatch(owner.as_deref(), sender_name) {
             return Err(Rr3PublishDeny::ForeignPrefix {
                 topic: topic.to_string(),
                 owner: owner_for_echo(owner),
@@ -641,6 +670,11 @@ impl RrdRegistry {
             });
         }
         Ok(())
+    }
+
+    /// 在册 owner 与发送方是否不符。
+    fn rr3_owner_mismatch(owner: Option<&str>, sender: &str) -> bool {
+        owner != Some(sender)
     }
 
     /// 记一次越权/被拒发布。只加计数：生命周期状态与别人的转发都不受影响。
@@ -681,11 +715,7 @@ impl RrdRegistry {
     /// 先判后加：策略说不重启、或已达上限 → 直接 None，**不增长** streak
     /// （与今天 `restarts` 的次序一致——达上限不再往里加，也不给计划）。
     fn rr3_charge(&mut self, facts: &Rr3ManifestFacts, clean_exit: bool) -> Option<Rr3RestartPlan> {
-        let restart = match facts.restart_policy.as_str() {
-            "always" => true,
-            "on-failure" => !clean_exit,
-            _ => false, // "never" 与非预期值（校验已在 Task 2 挡住，这里只保证不 panic）
-        };
+        let restart = Self::rr3_restart_wanted(&facts.restart_policy, clean_exit);
         let streak = self
             .crash_streak
             .get(facts.name.as_str())
@@ -707,6 +737,15 @@ impl RrdRegistry {
             delay_ms: RR3_RESTART_BACKOFF[idx].saturating_mul(self.restart_base_ms),
             entry: facts.entry.clone(),
         })
+    }
+
+    /// 重启策略 → 是否重启（"never" 与非预期值一律否；校验已在 Task 2 挡住，这里只保证不 panic）。
+    fn rr3_restart_wanted(policy: &str, clean_exit: bool) -> bool {
+        match policy {
+            "always" => true,
+            "on-failure" => !clean_exit,
+            _ => false,
+        }
     }
 
     /// 死亡处理（conn EOF 那一路）：判定序见下，每一步都可被一条表级用例指认。
@@ -855,17 +894,24 @@ impl RrdRegistry {
                 })
                 .map(|e| e.name.clone())
                 .collect();
-            for name in candidates {
-                let deps = self
-                    .modules
-                    .get(&name)
-                    .map(|e| e.facts.depends_required.clone())
-                    .unwrap_or_default();
-                if self.rr3_deps_satisfied(&deps) {
-                    let e = self.modules.get_mut(&name).expect("刚读过、仍在册");
-                    e.phase = Rr3Phase::Running;
-                    out.push((name, e.src_task));
-                }
+            out.extend(self.rr3_undegrade_apply(candidates));
+        }
+        out
+    }
+
+    /// 重算候选：required 全部就位才回 Running。
+    fn rr3_undegrade_apply(&mut self, candidates: Vec<String>) -> Vec<(String, u64)> {
+        let mut out = Vec::new();
+        for name in candidates {
+            let deps = self
+                .modules
+                .get(&name)
+                .map(|e| e.facts.depends_required.clone())
+                .unwrap_or_default();
+            if self.rr3_deps_satisfied(&deps) {
+                let e = self.modules.get_mut(&name).expect("刚读过、仍在册");
+                e.phase = Rr3Phase::Running;
+                out.push((name, e.src_task));
             }
         }
         out

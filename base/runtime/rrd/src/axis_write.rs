@@ -185,6 +185,29 @@ fn rr3_aw_existing(
     }
 }
 
+/// 目录项与目标同 pin：跳过目标本身与非 toml，命中同 pin 返回点名原因。
+fn rr3_aw_same_pin(
+    p: &Path,
+    target: &Path,
+    file: &Rr3AxisFile,
+    pin_ids: &BTreeSet<String>,
+) -> Option<String> {
+    if p == target || p.extension().and_then(|x| x.to_str()) != Some("toml") {
+        return None;
+    }
+    if let Ok(Some(other)) = rr3_act_profile_load(p, pin_ids) {
+        if other.pin == file.pin {
+            return Some(format!(
+                "axis/ 下已有 {} 装同一 pin {:?}（候选目标 {}）——同 pin 两份合法档会让 boot 链拒注入（恰一份才投影），先清理副本",
+                p.display(),
+                file.pin,
+                target.display()
+            ));
+        }
+    }
+    None
+}
+
 /// 拒绝面 b：同 pin 异名副本不制造（boot 链恰一份合法才投影；装载红散件不越权判）
 #[cfg(unix)]
 fn rr3_aw_duplicates(
@@ -198,18 +221,8 @@ fn rr3_aw_duplicates(
     };
     for e in entries.flatten() {
         let p = e.path();
-        if p == target || p.extension().and_then(|x| x.to_str()) != Some("toml") {
-            continue;
-        }
-        if let Ok(Some(other)) = rr3_act_profile_load(&p, pin_ids) {
-            if other.pin == file.pin {
-                return Err(format!(
-                    "axis/ 下已有 {} 装同一 pin {:?}（候选目标 {}）——同 pin 两份合法档会让 boot 链拒注入（恰一份才投影），先清理副本",
-                    p.display(),
-                    file.pin,
-                    target.display()
-                ));
-            }
+        if let Some(msg) = rr3_aw_same_pin(&p, target, file, pin_ids) {
+            return Err(msg);
         }
     }
     Ok(())

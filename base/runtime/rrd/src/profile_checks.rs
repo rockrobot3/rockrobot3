@@ -670,6 +670,11 @@ pub(crate) fn rr3_check_budgets(
     errs
 }
 
+/// kind=logic 角色按定义无 [pins] 物理绑定，不进缺角色点名面。
+fn rr3_role_is_logic(roles: &Rr3RoleTable, role: &str) -> bool {
+    roles.rr3_role_kind(role).as_deref() == Some("logic")
+}
+
 /// 校验②（后果 = 降不拒）：present ∩ enabled_slots 的缺角色清单
 pub(crate) fn rr3_role_gaps(profile: &Rr3Profile, roles: &Rr3RoleTable) -> Vec<(String, String)> {
     let mut gaps = Vec::new();
@@ -679,20 +684,27 @@ pub(crate) fn rr3_role_gaps(profile: &Rr3Profile, roles: &Rr3RoleTable) -> Vec<(
             continue;
         }
         for role in roles.rr3_role_slot_names(slot) {
-            // kind=logic 角色按定义无 [pins] 物理绑定（roles.toml 头注：logic =
-            // 无物理绑定，不进 [pins]；链路/音频四格的真实载体是 [hardware]
-            // link_ifname/alsa_device 与 board 具名装配）——它们不在缺角色点名面，
-            // 否则"能力面已角色化"反会把 boot 判降（P1 件四）。
-            if roles.rr3_role_kind(&role).as_deref() == Some("logic") {
-                continue;
-            }
-            if !profile.pins.iter().any(|p| p.role == role) {
-                gaps.push((slot.clone(), role));
-            }
+            rr3_role_gap(profile, roles, slot, &role, &mut gaps);
         }
     }
     gaps.sort();
     gaps
+}
+
+/// 单角色缺格判定：logic 角色无物理绑定，其余须在 [pins] 有绑定。
+fn rr3_role_gap(
+    profile: &Rr3Profile,
+    roles: &Rr3RoleTable,
+    slot: &str,
+    role: &str,
+    gaps: &mut Vec<(String, String)>,
+) {
+    if rr3_role_is_logic(roles, role) {
+        return;
+    }
+    if !profile.pins.iter().any(|p| p.role == role) {
+        gaps.push((slot.to_string(), role.to_string()));
+    }
 }
 
 /// 缺格三源合一（方案 §15）：实测缺（探测）+ 声明缺（present）+ 注入缺

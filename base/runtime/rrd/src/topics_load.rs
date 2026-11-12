@@ -134,6 +134,34 @@ fn rr3_reject_reserved(set: &Rr3TopicSet, path: &Path) -> Result<(), Vec<String>
 /// 复验范围到 kind 为止：主题集只存 name→owner、name→kind 与 owner 名单，`stable`、
 /// `note` 那类注释性字段不在它的视图里，故本注释不称"全字段复验"。
 /// 与 `rr3_reject_reserved` 一样是"装载即拒"，不留到运行期靠发布检查兜底。
+/// 单条契约 topic 的合并复验：丢失 / owner 改写 / kind 改写，逐类点名。
+fn rr3_merge_conflicts(
+    base: &Rr3TopicSet,
+    merged: &Rr3TopicSet,
+    name: &str,
+    errs: &mut Vec<String>,
+) {
+    let want = base.rr3_topic_owner(name);
+    let want_kind = base.rr3_topic_kind(name);
+    if !merged.rr3_topic_contains(name) {
+        errs.push(format!(
+            "合并后契约 topic 丢失: {name}（叠加层不得覆盖生产条目）"
+        ));
+    } else if merged.rr3_topic_owner(name) != want {
+        errs.push(format!(
+            "契约 topic {name} 的 owner 被叠加层改写: {:?} → {:?}",
+            want,
+            merged.rr3_topic_owner(name)
+        ));
+    } else if merged.rr3_topic_kind(name) != want_kind {
+        errs.push(format!(
+            "契约 topic {name} 的 kind 被叠加层改写: {:?} → {:?}",
+            want_kind,
+            merged.rr3_topic_kind(name)
+        ));
+    }
+}
+
 fn reject_bad_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<String>> {
     let mut errs: Vec<String> = merged
         .rr3_topic_check()
@@ -141,25 +169,7 @@ fn reject_bad_merge(base: &Rr3TopicSet, merged: &Rr3TopicSet) -> Result<(), Vec<
         .map(|e| format!("合并后主题集形状不合: {e}"))
         .collect();
     for name in base.rr3_topic_names() {
-        let want = base.rr3_topic_owner(&name);
-        let want_kind = base.rr3_topic_kind(&name);
-        if !merged.rr3_topic_contains(&name) {
-            errs.push(format!(
-                "合并后契约 topic 丢失: {name}（叠加层不得覆盖生产条目）"
-            ));
-        } else if merged.rr3_topic_owner(&name) != want {
-            errs.push(format!(
-                "契约 topic {name} 的 owner 被叠加层改写: {:?} → {:?}",
-                want,
-                merged.rr3_topic_owner(&name)
-            ));
-        } else if merged.rr3_topic_kind(&name) != want_kind {
-            errs.push(format!(
-                "契约 topic {name} 的 kind 被叠加层改写: {:?} → {:?}",
-                want_kind,
-                merged.rr3_topic_kind(&name)
-            ));
-        }
+        rr3_merge_conflicts(base, merged, &name, &mut errs);
     }
     if errs.is_empty() {
         Ok(())

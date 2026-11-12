@@ -50,7 +50,7 @@ fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
         return;
     };
     let changed = rr3_lock(&ctx.shared).rr3_reg_ctr_merge(&me.name, &counters);
-    if !changed || ctx.counters_path.is_none() {
+    if !rr3_ctr_ready(changed, ctx) {
         return;
     }
     // 整段持闸：on_change→快照→store→on_flushed 必须在同一临界区。锁序
@@ -67,6 +67,14 @@ fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
         Ok(()) => gate.rr3_on_flushed(ctx.rr3_ctx_now_ms()),
         Err(e) => rr3_log(&format!("counters 落盘失败（下一拍窗口到自然重试）: {e}")),
     }
+}
+
+/// 是否满足落盘前提：确有变化且有落盘路径。
+fn rr3_ctr_ready(changed: bool, ctx: &Rr3ConnCtx) -> bool {
+    if !changed || ctx.counters_path.is_none() {
+        return false;
+    }
+    true
 }
 
 /// `registered → running` 的唯一升级时刻：广播 running + 依赖恢复传播。

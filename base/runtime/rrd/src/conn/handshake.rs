@@ -21,25 +21,31 @@ pub(super) fn rr3_handshake(
     ctx: &Rr3ConnCtx,
     fan_tx: SyncSender<Rr3Frame>,
 ) -> Result<Rr3Peer, String> {
-    let (reported_task, body) = rr3_hs_read(reader, out)?;
-    let req = match rr3_rpc_parse(&body) {
-        Ok(r) => r,
-        Err((_, msg)) => {
-            return Err(rr3_refuse(
-                out,
-                reported_task,
-                rr3_best_effort_id(&body),
-                Rr3StatusCode::Invalid,
-                &format!("首帧 RPC 畸形: {msg}"),
-            ))
-        }
-    };
+    let (reported_task, req) = rr3_hs_first(reader, out)?;
     // ADR-0010 裁定 3：首帧是 rr3.ctl.* → 控制旁支，不注册、一问一答即断
     if req.method.is_ctl() {
         return Err(super::ctl::rr3_serve_ctl(out, ctx, reported_task, req));
     }
     let facts = rr3_hs_facts(&req, out, reported_task, ctx)?;
     rr3_hs_admit(ctx, &facts, fan_tx, out, reported_task, req.id)
+}
+
+/// 首帧读取 + 解析；畸形按对端自报 task 回错误帧并交回原因。
+fn rr3_hs_first(
+    reader: &mut UnixStream,
+    out: &Arc<Mutex<UnixStream>>,
+) -> Result<(u64, Rr3RpcRequest), String> {
+    let (reported_task, body) = rr3_hs_read(reader, out)?;
+    match rr3_rpc_parse(&body) {
+        Ok(r) => Ok((reported_task, r)),
+        Err((_, msg)) => Err(rr3_refuse(
+            out,
+            reported_task,
+            rr3_best_effort_id(&body),
+            Rr3StatusCode::Invalid,
+            &format!("首帧 RPC 畸形: {msg}"),
+        )),
+    }
 }
 
 /// 握手首段：读首帧并过 dst/类型两道门（注册前应答按对端自报 src_task 回）

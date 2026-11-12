@@ -778,6 +778,17 @@ pub(crate) fn rr3_demand_expand(
     out
 }
 
+/// power 角色的有效挂轨；非 power 或轨缺失/`none` 返回 None（⑥-b 已点名，不双报）。
+fn rr3_power_rail<'a>(pin: &'a Rr3PinEntry, roles: &Rr3RoleTable) -> Option<&'a str> {
+    if roles.rr3_role_kind(&pin.role).as_deref() != Some("power") {
+        return None;
+    }
+    if pin.rail.is_empty() || pin.rail == "none" {
+        return None;
+    }
+    Some(pin.rail.as_str())
+}
+
 /// 门 c 覆盖判据（校验⑨ 缺失语义另一半，§5 ⑨ 行"件未申报 demands 而角色
 /// kind=power → 红"）：角色 kind=power 的每个 pin，其绑定模块的件申报面必须覆盖
 /// 该 pin 的 rail（≥1 条 rail 相同的申报，跨件合计）。绑定缺失由缺格/结构自洽判
@@ -789,12 +800,9 @@ pub(crate) fn rr3_power_gaps(
 ) -> Vec<String> {
     let mut errs = Vec::new();
     for pin in &profile.pins {
-        if roles.rr3_role_kind(&pin.role).as_deref() != Some("power") {
-            continue;
-        }
-        if pin.rail.is_empty() || pin.rail == "none" {
-            continue; // ⑥-b 已点名功率面缺轨，不双报
-        }
+        let Some(rail) = rr3_power_rail(pin, roles) else {
+            continue; // 非 power / ⑥-b 已点名功率面缺轨，不双报
+        };
         let Some(module) = roles
             .rr3_role_slot(&pin.role)
             .and_then(|s| profile.bindings.get(&s))
@@ -812,7 +820,7 @@ pub(crate) fn rr3_power_gaps(
                 "pins[{}] 角色 {} kind = power 挂轨 {rail}，但模块 {module} 的件申报面无 {rail} 需求（校验⑨ 缺失语义：件未申报 demands 而角色 kind=power → 红）",
                 pin.rr3_pin_id(),
                 pin.role,
-                rail = pin.rail
+                rail = rail
             ));
         }
     }

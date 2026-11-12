@@ -19,17 +19,23 @@ fn rr3_key_line_is(line: &str, key: &str) -> bool {
         .is_some_and(|rest| rest.trim_start().starts_with('='))
 }
 
-/// 在行序列内把 `key` 的键行替换为 `key = new_raw`（机制核心，两手术面共用）：
-/// 命中 0 行 = 拒（键缺失——装载期全键必填保证在场，缺失即档已病）；命中多行 = 拒
-/// （TOML 重复键解析期就红，这里不替解析器兜底）。替换保留原行前导空白（域块/
-/// 轴档键行今无缩进，保留是防御不是依赖）。
-fn rr3_key_line_replace(lines: &mut [String], key: &str, new_raw: &str) -> Result<(), String> {
+/// 命中 `key` 的键行下标（可多行，由调用方判唯一性）。
+fn rr3_key_hits(lines: &[String], key: &str) -> Vec<usize> {
     let mut hits = Vec::new();
     for (i, l) in lines.iter().enumerate() {
         if rr3_key_line_is(l, key) {
             hits.push(i);
         }
     }
+    hits
+}
+
+/// 在行序列内把 `key` 的键行替换为 `key = new_raw`（机制核心，两手术面共用）：
+/// 命中 0 行 = 拒（键缺失——装载期全键必填保证在场，缺失即档已病）；命中多行 = 拒
+/// （TOML 重复键解析期就红，这里不替解析器兜底）。替换保留原行前导空白（域块/
+/// 轴档键行今无缩进，保留是防御不是依赖）。
+fn rr3_key_line_replace(lines: &mut [String], key: &str, new_raw: &str) -> Result<(), String> {
+    let hits = rr3_key_hits(lines, key);
     match hits.len() {
         0 => Err(format!(
             "键行 {key} 缺失（装配期全键必填保证在场，缺失说明档已被改病），拒绝手术"

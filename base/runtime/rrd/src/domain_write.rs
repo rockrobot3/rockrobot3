@@ -583,6 +583,19 @@ fn rr3_domain_relog(paths: &Rr3DomainWritePaths, boot: &crate::profile::Rr3Profi
 /// 第 15-16 行："批N4 面板接线时复用同一函数（§7'落盘只许有一份实现'，第二条写
 /// 路径即红"）——本函数只做"读旧档 → 单键手术 → 产 tmp 候选档"，十四键全判据、
 /// 原子落盘、副本拒全部归它。
+/// axis 写口前置：定位轴档、读旧值、过证据门。
+#[cfg(unix)]
+fn rr3_axis_write_prep(
+    paths: &Rr3DomainWritePaths,
+    params: &Rr3DomainWriteParams,
+) -> Result<(PathBuf, Value, String), (Rr3StatusCode, String)> {
+    let axis_path = rr3_axis_path(paths, &params.name)?;
+    let old = rr3_axis_old(paths, &axis_path)?;
+    // 证据引用门（仅留痕——轴档十四键无 evidence 键，写动作证据住审计留痕）
+    let ev = rr3_axis_evidence(paths, params)?;
+    Ok((axis_path, old, ev))
+}
+
 #[cfg(unix)]
 fn rr3_write_axis(
     paths: &Rr3DomainWritePaths,
@@ -593,10 +606,7 @@ fn rr3_write_axis(
     let Rr3WriteValue::Num(n) = params.value else {
         return Err(invalid("current_ceil_ma 要求正整数".to_string()));
     };
-    let axis_path = rr3_axis_path(paths, &params.name)?;
-    let old = rr3_axis_old(paths, &axis_path)?;
-    // 证据引用门（仅留痕——轴档十四键无 evidence 键，写动作证据住审计留痕）
-    let ev = rr3_axis_evidence(paths, params)?;
+    let (axis_path, old, ev) = rr3_axis_write_prep(paths, params)?;
     // 单键手术 → tmp 候选档 → 复用产线写入面（全判据＋原子落盘＋副本拒单点）
     let tmp = rr3_axis_stage(&axis_path, n)?;
     let run = crate::axis_write::rr3_axis_write_run(&crate::axis_write::Rr3AxisWriteArgs {

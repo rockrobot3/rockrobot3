@@ -128,6 +128,10 @@ pub fn rr3_cross_checks(
     out
 }
 
+fn rr3_power_conductor(sig: &str) -> bool {
+    sig == "vcc" || sig == "gnd"
+}
+
 /// signal 族（wiring→pins 方向，⑦-a 自检复演）：每导体一条，vcc/gnd 记 n-a
 fn rr3_check_signal<'a>(
     w: &'a Rr3Wire,
@@ -137,7 +141,7 @@ fn rr3_check_signal<'a>(
 ) {
     for (k, sig) in w.signal.iter().enumerate() {
         let item = format!("signal:{}[{}]:{sig}", w.connector, k);
-        if sig == "vcc" || sig == "gnd" {
+        if rr3_power_conductor(sig) {
             out.push(Rr3AssemblyCheck {
                 item,
                 pass: RR3_CHECK_NA,
@@ -202,13 +206,6 @@ fn rr3_check_rated<'a>(
     }
     // mate = none 直连无注册对端型号，负载未注册按 0 计（诚实边界）；mate 非 none
     // 必在器件 mate 集（装载期⑦-d 已判），查不到只会是契约坏形，按 0 计不炸。
-    let peak = |g: &Rr3Wire| -> i64 {
-        if g.mate == "none" {
-            0
-        } else {
-            peak_by_mate.get(g.mate.as_str()).copied().unwrap_or(0)
-        }
-    };
     match rated_closure(w, by_conn) {
         Err(fault) => out.push(Rr3AssemblyCheck {
             item,
@@ -216,7 +213,7 @@ fn rr3_check_rated<'a>(
             reason: format!("feeds {fault}——额定加总不可判（快照与装载面漂移，正是自检要抓的）"),
         }),
         Ok(closure) => {
-            let sum_ma: i64 = closure.iter().map(|g| peak(g)).sum();
+            let sum_ma: i64 = closure.iter().map(|g| rr3_peak_ma(g, peak_by_mate)).sum();
             if sum_ma as f64 > w.rated_a * 1000.0 {
                 out.push(Rr3AssemblyCheck {
                     item,
@@ -238,6 +235,15 @@ fn rr3_check_rated<'a>(
                 });
             }
         }
+    }
+}
+
+/// 单线组对端型号峰值（mate=none 直连按 0 计；查不到按 0，契约坏形不炸）。
+fn rr3_peak_ma(g: &Rr3Wire, peak_by_mate: &BTreeMap<String, i64>) -> i64 {
+    if g.mate == "none" {
+        0
+    } else {
+        peak_by_mate.get(g.mate.as_str()).copied().unwrap_or(0)
     }
 }
 

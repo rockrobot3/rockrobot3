@@ -129,16 +129,35 @@ pub fn rr3_contracts_scan(
 ) -> Result<Rr3ContractsSnapshot, String> {
     let mut entries = Vec::with_capacity(RR3_CONTRACT_FILES.len());
     for f in RR3_CONTRACT_FILES {
-        let path = contracts_dir.join(f);
-        let bytes = std::fs::read(&path)
-            .map_err(|e| format!("契约四册记账读失败 {}: {e}", path.display()))?;
-        entries.push(Rr3ContractsEntry {
-            file: f.to_string(),
-            path,
-            sha256: rr3_sha256_hex(&bytes),
-            bytes: bytes.len() as u64,
-        });
+        entries.push(rr3_contract_entry(contracts_dir, f)?);
     }
+    let truth_set = rr3_truth_entries(profile_path, contracts_dir, wiring_path, chip)?;
+    Ok(Rr3ContractsSnapshot { entries, truth_set })
+}
+
+/// 四册单册记账：读字节 + sha256 + 长度。
+fn rr3_contract_entry(
+    contracts_dir: &std::path::Path,
+    f: &str,
+) -> Result<Rr3ContractsEntry, String> {
+    let path = contracts_dir.join(f);
+    let bytes =
+        std::fs::read(&path).map_err(|e| format!("契约四册记账读失败 {}: {e}", path.display()))?;
+    Ok(Rr3ContractsEntry {
+        file: f.to_string(),
+        path,
+        sha256: rr3_sha256_hex(&bytes),
+        bytes: bytes.len() as u64,
+    })
+}
+
+/// 真值集七成员记账：定位 → 读字节 + sha256 + 长度。
+fn rr3_truth_entries(
+    profile_path: &std::path::Path,
+    contracts_dir: &std::path::Path,
+    wiring_path: &std::path::Path,
+    chip: &str,
+) -> Result<Vec<Rr3TruthSetEntry>, String> {
     let mut truth_set = Vec::new();
     for loc in crate::profile::rr3_truth_locations(profile_path, contracts_dir, wiring_path, chip)?
     {
@@ -151,7 +170,7 @@ pub fn rr3_contracts_scan(
             bytes: bytes.len() as u64,
         });
     }
-    Ok(Rr3ContractsSnapshot { entries, truth_set })
+    Ok(truth_set)
 }
 
 /// 自检判果（纯函数，判据真值单点）：Z-4 判据 = "包内四份契约文件齐全且 sha 对"

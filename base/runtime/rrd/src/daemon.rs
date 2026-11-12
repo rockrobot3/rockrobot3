@@ -120,21 +120,27 @@ fn rr3_spawn_watchdog(
                 // `rr3_reg_expire` 里落账）→ 降级传播。只置位与广播，不产计划、
                 // 不经 supervisor（裁定 4：降级不是崩溃）。
                 let degraded = rr3_lock(&shared).rr3_reg_degrade(&ex.name);
-                for (dep, task) in degraded {
-                    // 排除项是 `RR3_TASK_RRD`（等于不排除，E-9 的同一理据）：依赖者自己
-                    // 恰恰是最需要知道"我已降级"的一方——它没有别的途径查自己的相位。
-                    let n = rr3_lock(&shared).rr3_reg_fanout(
-                        &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
-                        RR3_TASK_RRD,
-                    );
-                    rr3_log(&format!(
-                        "{dep} 依赖断供 → degraded（提供者 {} 离开 Running）广播到 {n} 个连接",
-                        ex.name
-                    ));
-                }
+                rr3_fan_degraded(&shared, &ex.name, degraded);
             }
         }
     });
+}
+
+/// 降级传播：逐个依赖者广播 degraded（排除项 RR3_TASK_RRD = 不排除，E-9 同一理据）。
+fn rr3_fan_degraded(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    provider: &str,
+    degraded: Vec<(String, u64)>,
+) {
+    for (dep, task) in degraded {
+        let n = rr3_lock(shared).rr3_reg_fanout(
+            &rr3_state_frame(&dep, Rr3Phase::Degraded.as_str(), task),
+            RR3_TASK_RRD,
+        );
+        rr3_log(&format!(
+            "{dep} 依赖断供 → degraded（提供者 {provider} 离开 Running）广播到 {n} 个连接"
+        ));
+    }
 }
 
 /// `rr3-runtime/module/state` 下行广播帧：owner 是内建命名空间，只许 rrd 发（spec §5.0）
