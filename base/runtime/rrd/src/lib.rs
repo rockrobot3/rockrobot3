@@ -114,6 +114,16 @@ pub(crate) fn rr3_log_rotate(path: &std::path::Path) {
     let _ = std::fs::rename(path, path.with_file_name(format!("{name}.1")));
 }
 
+/// 行字节（单点）：文本 + 换行一次成片。**分行两次 write 会在多线程日志下交错**
+/// （A 行头 + B 行头 + 两个换行 ⇒ 排障看到被吞并的半截行），且每次 write 各自
+/// 一次系统调用；O_APPEND 的单次 write 是"行完整性"的唯一保证。
+fn rr3_line_bytes(line: &str) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(line.len() + 1);
+    buf.extend_from_slice(line.as_bytes());
+    buf.push(b'\n');
+    buf
+}
+
 /// `rr3_log` 的落盘臂：一行同步 append，不缓冲不批写——"崩溃前最后 N 行"的判据
 /// 要求打过的行当场就在文件里。超上界单代轮转（B-8，修订批N4 件八"不轮转"纪律）。
 /// 每行现开现写：运维留痕是事件级频率，不值得常持句柄。打开或写失败 = 点名
@@ -130,10 +140,7 @@ fn rr3_log_sink_append(line: &str) {
         .create(true)
         .append(true)
         .open(path)
-        .and_then(|mut f| {
-            f.write_all(line.as_bytes())
-                .and_then(|_| f.write_all(b"\n"))
-        });
+        .and_then(|mut f| f.write_all(&rr3_line_bytes(line)));
     if let Err(e) = res {
         if !RR3_LOG_SINK_DEAD.swap(true, Ordering::Relaxed) {
             // eprintln 不走 rr3_log：降级说明本身不能再依赖降级中的通道（递归），
@@ -166,10 +173,10 @@ pub fn rr3_log(msg: &str) {
     rr3_ring_push(&mut ring, line, rr3_log_ring_cap());
 }
 
-/// 单行写出（含换行与 flush）：返回 false = 观测通道写失败，调用方降级不 panic。
+/// 单行写出（含换行与 flush，**一次 write 落整行**——见 [`rr3_line_bytes`]）：
+/// 返回 false = 观测通道写失败，调用方降级不 panic。
 fn rr3_log_emit(out: &mut dyn Write, line: &str) -> bool {
-    out.write_all(line.as_bytes())
-        .and_then(|()| out.write_all(b"\n"))
+    out.write_all(&rr3_line_bytes(line))
         .and_then(|()| out.flush())
         .is_ok()
 }
@@ -558,5 +565,32 @@ mod tests {
         let mut ok = Vec::new();
         assert!(rr3_log_emit(&mut ok, "rrd: x"), "可写通道须成功");
         assert_eq!(ok, b"rrd: x\n", "逐行写出，带换行分隔");
+    }
+
+    /// 行必须一次 write 落整（B40 审计）：分行两次 write 在多线程下会交错，
+    /// 落盘档出现"两行头 + 两个换行"的坏行；单次 O_APPEND 写才保证行完整。
+    #[test]
+    fn log_line_is_single_write() {
+        struct Counting {
+            bytes: Vec<u8>,
+            calls: usize,
+        }
+        impl Write for Counting {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.calls += 1;
+                self.bytes.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut c = Counting {
+            bytes: Vec::new(),
+            calls: 0,
+        };
+        assert!(rr3_log_emit(&mut c, "rrd: 一行日志"));
+        assert_eq!(c.calls, 1, "整行须一次 write: {:?}", c.bytes);
+        assert_eq!(c.bytes, "rrd: 一行日志\n".as_bytes());
     }
 }
