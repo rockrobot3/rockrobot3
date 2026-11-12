@@ -217,101 +217,15 @@ fn rr3_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// manifest 装机改写：把 entry 引号内的值换成装机绝对路径，**其余字节零差异**
-/// （缩进、注释、段序原样保留）。行扫描 + 引号内拼接，不整文件重序列化——
-/// 重序列化会重排/丢注释，违反"只动一个值"的承诺。
-/// 门禁三道：entry 行恰一条（0 或多条 = 歧义契约事故）；旧行值与 facts.entry
-/// 交叉核验（防扫到别的表的同名键）；改写完重新解析 facts 复核新值已生效。
+/// 打包面的 entry 改写（B45 起委托 rrd 单点 [`rrd::manifest::rr3_manifest_rewrite`]）：
+/// 打包与演练布局共用同一实现，四道门与文案不再各写一份。
 fn rr3_manifest_rewrite(
     text: &str,
     installed_entry: &str,
     facts_entry: &str,
     module: &str,
 ) -> Result<String, String> {
-    let hits = rr3_entry_hits(text, module)?;
-    let (idx, rng) = match hits.as_slice() {
-        [(idx, rng)] => (*idx, *rng),
-        [] => {
-            return Err(format!(
-                "模块 {module} 的 manifest 无 entry 行（schema 违约，打包拒绝）"
-            ))
-        }
-        n => {
-            return Err(format!(
-                "模块 {module} 的 manifest 有 {} 行 entry（歧义，打包拒绝）",
-                n.len()
-            ))
-        }
-    };
-    // idx 来自同文本的 entry 行扫描（hits 的来源），行必然存在——unwrap 是扫描的直读推论
-    if &text.lines().nth(idx).unwrap()[rng.a + 1..rng.b] != facts_entry {
-        return Err(format!(
-            "模块 {module} 的 entry 行值与 [manifest].entry 解析值不一致（疑似同名键，打包拒绝）"
-        ));
-    }
-    let mut out_lines: Vec<String> = Vec::with_capacity(text.lines().count());
-    for (i, line) in text.lines().enumerate() {
-        if i == idx {
-            // 引号内拼接：引号外（缩进/key/行尾注释）原样
-            let head = &line[..rng.a + 1];
-            let tail = &line[rng.b..];
-            out_lines.push(format!("{head}{installed_entry}{tail}"));
-        } else {
-            out_lines.push(line.to_string());
-        }
-    }
-    let out = if text.ends_with('\n') {
-        format!("{}\n", out_lines.join("\n"))
-    } else {
-        out_lines.join("\n")
-    };
-    // 复核：改写产物必须仍能按 facts 解析且 entry 已是新值（改错了当场炸，不带病出包）
-    let reparsed = rr3_manifest_parse(&out).map_err(|errs| {
-        format!(
-            "模块 {module} 的 manifest 改写后解析失败: {}",
-            errs.join("; ")
-        )
-    })?;
-    if reparsed.entry != installed_entry {
-        return Err(format!(
-            "模块 {module} 的 manifest 改写后 entry 仍为 {}（期望 {installed_entry}，改写逻辑事故）",
-            reparsed.entry
-        ));
-    }
-    Ok(out)
-}
-
-/// 扫描 entry 行（key 为 `entry` 且后随 `=`）：逐行收 (行号, 引号区间)；
-/// 引号缺失或引号内无值即 schema 违约。
-fn rr3_entry_hits(text: &str, module: &str) -> Result<Vec<(usize, Range)>, String> {
-    let mut hits: Vec<(usize, Range)> = Vec::new();
-    for (idx, line) in text.lines().enumerate() {
-        let t = line.trim_start();
-        let is_entry_line =
-            t.starts_with("entry") && t["entry".len()..].trim_start().starts_with('=');
-        if !is_entry_line {
-            continue;
-        }
-        let (Some(a), Some(b)) = (line.find('"'), line.rfind('"')) else {
-            return Err(format!(
-                "模块 {module} 的 entry 行不是引号包裹的字符串（schema 违约）: {line}"
-            ));
-        };
-        if b <= a {
-            return Err(format!(
-                "模块 {module} 的 entry 行引号内无值（schema 违约）: {line}"
-            ));
-        }
-        hits.push((idx, Range { a, b }));
-    }
-    Ok(hits)
-}
-
-/// 引号内值在行内的字节区间 [a+1, b)
-#[derive(Debug, Clone, Copy)]
-struct Range {
-    a: usize,
-    b: usize,
+    rrd::manifest::rr3_manifest_rewrite(text, installed_entry, facts_entry, module)
 }
 
 /// 列出注入产物里的模块名（升序——staging 落位与出错点名都要确定性，read_dir 序不可靠）。
