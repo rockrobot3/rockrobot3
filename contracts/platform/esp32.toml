@@ -53,6 +53,19 @@ name = "vspi"
 kind = "vspi"
 channels = 0
 
+# —— I2S 不登记本表（P1 审计件，2026-11-12 裁定，登记原因与边界如下）——
+# 板侧确有 I2S0 音频面（BCLK=GPIO4 / SD=GPIO27 / WS=GPIO26，src/board/pins_classic.rs
+# 引脚真值段与 RR3_BIND_I2S_* 装配对账锚），但本表 `kind` 是封闭七值
+# （pwm/gpio/i2c/spi/vspi/adc/uart，platform.rs RR3_PLATFORM_KINDS），**没有 i2s**：
+# 扩词域 = 契约级评审（同 roles.toml 头注"加一类外设 = 同批改多处"），不属平台表
+# 补登记的顺手动作。且 I2S 不是"通道可分配"资源——它的三个信号脚由 board 具名
+# 装配直给（esp-idf-hal 具名类型，§4.5 生成物表第 3 行），不进 profiles `[[pin]]`
+# 角色域（无 role 消费者、无 (controller, channel) 上界判据、无 ④ 互斥需求）。
+# 故音频面的事实真值点维持在 pins_classic.rs + [controller_wordform] 之外的具名
+# 构造面，本表如实不抄第二份；待 I2S 成为可分配角色（如多路音频/编解码器选型）
+# 时，按契约级流程扩 kind 词域 + 落 [[controller]] 与 [[conflict]] 再进本表。
+# 审计存照：docs/process/dev/0.0.8静态生产审计-第七轮-平台表I2S裁定-2026-11-12.md。
+
 [capabilities]
 # ADC1 六个出脚（同 [[controller]] adc1 的通道集——两处是"脚集/控制器"两个视图，
 # 由 CI 契约测试钉住计数相等，不写第二份枚举以外的推导）。
