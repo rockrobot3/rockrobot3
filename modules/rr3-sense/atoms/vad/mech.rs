@@ -94,24 +94,36 @@ impl Rr3VadState {
     pub fn rr3_vad_feed(&mut self, samples: &[i16]) -> Option<Rr3VadEdge> {
         let rms = rr3_frame_rms(samples);
         if !self.in_speech {
-            if rms >= self.cfg.rms_start {
-                self.above_ms += self.frame_ms;
-                self.rms_peak = self.rms_peak.max(rms);
-                if self.above_ms >= self.cfg.min_speech_ms {
-                    self.in_speech = true;
-                    self.speech_ms = self.above_ms;
-                    self.silence_ms = 0;
-                    return Some(Rr3VadEdge::Onset {
-                        rms_peak: self.rms_peak,
-                        speech_ms: self.speech_ms,
-                    });
-                }
-            } else {
-                // below 一帧即清零起音窗：瞬态 blip 永远攒不满 min_speech_ms
-                self.above_ms = 0;
-                self.rms_peak = 0;
+            return self.rr3_vad_onset(rms);
+        }
+        self.rr3_vad_tail(rms)
+    }
+
+    /// 非语音态：起音窗积累（`min_speech_ms` 到点发 Onset；below 一帧即清零）。
+    fn rr3_vad_onset(&mut self, rms: i64) -> Option<Rr3VadEdge> {
+        if rms >= self.cfg.rms_start {
+            self.above_ms += self.frame_ms;
+            self.rms_peak = self.rms_peak.max(rms);
+            if self.above_ms >= self.cfg.min_speech_ms {
+                self.in_speech = true;
+                self.speech_ms = self.above_ms;
+                self.silence_ms = 0;
+                return Some(Rr3VadEdge::Onset {
+                    rms_peak: self.rms_peak,
+                    speech_ms: self.speech_ms,
+                });
             }
-        } else if rms >= self.cfg.rms_start {
+        } else {
+            // below 一帧即清零起音窗：瞬态 blip 永远攒不满 min_speech_ms
+            self.above_ms = 0;
+            self.rms_peak = 0;
+        }
+        None
+    }
+
+    /// 语音态：净有声时长累计 / 判停窗积累（`silence_tail_ms` 到点发 Offset）。
+    fn rr3_vad_tail(&mut self, rms: i64) -> Option<Rr3VadEdge> {
+        if rms >= self.cfg.rms_start {
             self.silence_ms = 0;
             self.speech_ms += self.frame_ms;
         } else {

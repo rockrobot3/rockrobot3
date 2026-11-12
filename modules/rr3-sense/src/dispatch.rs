@@ -248,16 +248,37 @@ impl Dispatcher for Rr3SenseDispatcher {
             cfg: self.open_cfg,
             samples: buf,
         };
-        // 判向窗积累（B批 b3b）：原始双通道帧在下混**前**入 ring（双麦原始通道
-        // 只在此一用）；判向本身挪到 onset 边沿整窗回看（下方），单声道无 ring 直跳
+        let pcm = self.rr3_tick_pub(raw, done, bus)?;
+
+        self.rr3_vad_beat(&pcm, now, bus)?;
+
+        // 点头手势推进（0.0.8 批）：与 VAD 边沿无关，每拍看时刻——蓄势/上仰
+        // 两段按 config 时序到点下发（宿主桥档专用，espidf 档无旁路自然跳过）
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        self.rr3_nod_step(now, bus);
+
+        self.rr3_pace(now);
+        Ok(())
+    }
+}
+
+impl Rr3SenseDispatcher {
+    /// 判向窗积累 + 下混入总线 + 采集新鲜度记账（自 on_tick 拆出的发布步）：
+    /// 原始双通道帧在下混**前**入 ring（双麦原始通道只在此一用）；判向本身挪到
+    /// onset 边沿整窗回看。空帧另账（欠载饿死信号），帧账在发布成功后 +1——记账
+    /// = 真上了总线的帧数（发布失败即 exit，临死一帧不入账）。返回总线 mono 帧。
+    fn rr3_tick_pub(
+        &mut self,
+        raw: Rr3PcmStream,
+        done: usize,
+        bus: &BusHandle,
+    ) -> Result<Rr3PcmStream, String> {
         if let Some(ring) = self.doa_ring.as_mut() {
             ring.rr3_ring_feed(&raw.samples);
         }
         // 多通道下混 mono 入总线（R14）：双麦原始多通道只供 sense 内部（DoA 随批F2），
         // 总线承载恒 mono——brain 消费面零改动；单麦链路 channels=1 时零拷贝等价
         let pcm = rr3_pcm_downmix(raw);
-        // 采集新鲜度记账（批M M-β S-3）：空帧另账（欠载饿死信号），帧账在发布
-        // 成功后 +1——记账 = 真上了总线的帧数（发布失败即 exit，临死一帧不入账）
         if done == 0 {
             bus.counter_bump(RR3_PCM_EMPTY_FRAMES_KEY, 1);
         }
@@ -267,25 +288,18 @@ impl Dispatcher for Rr3SenseDispatcher {
             rpc::rr3_pcm_event_body(self.seq, &pcm),
         )?;
         bus.counter_bump(RR3_PCM_FRAMES_KEY, 1);
+        Ok(pcm)
+    }
 
-        self.rr3_vad_beat(&pcm, now, bus)?;
-
-        // 点头手势推进（0.0.8 批）：与 VAD 边沿无关，每拍看时刻——蓄势/上仰
-        // 两段按 config 时序到点下发（宿主桥档专用，espidf 档无旁路自然跳过）
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        self.rr3_nod_step(now, bus);
-
-        // 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；
-        // 抖动可接受——v0.0.1 的 pcm 流只供联调，时序对齐挂 M5）
+    /// 自 pacing：补足本节拍剩余时间（sim read 即时返回的关键；抖动可接受——
+    /// v0.0.1 的 pcm 流只供联调，时序对齐挂 M5）。
+    fn rr3_pace(&self, now: Instant) {
         let spent = now.elapsed();
         if spent < self.tick {
             std::thread::sleep(self.tick - spent);
         }
-        Ok(())
     }
-}
 
-impl Rr3SenseDispatcher {
     /// VAD 边沿拍（B9 自 on_tick 拆出；本轮按沿分臂）：本函数只做门判与编排，
     /// 发布/判向/反射环各自成件。判据全量入参（门控/DoA/时序）不变。
     fn rr3_vad_beat(

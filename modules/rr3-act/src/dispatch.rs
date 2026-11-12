@@ -293,8 +293,13 @@ impl Rr3ActDispatcher {
         relay_applied: Option<(bool, bool)>,
         bus: &BusHandle,
     ) -> Result<(), String> {
-        // servo/state 限速流先于应答上路：被限速挡掉的发布不补发，
-        // 下一次命令自然携带最新角度（流是摘要不是逐拍镜像）
+        self.rr3_state_servo(bus, state_angle)?;
+        self.rr3_state_relay(bus, relay_applied)
+    }
+
+    /// servo/state 摘要发布（限速门节流）：被限速挡掉的发布不补发，下一次命令
+    /// 自然携带最新角度（流是摘要不是逐拍镜像）。
+    fn rr3_state_servo(&mut self, bus: &BusHandle, state_angle: Option<u16>) -> Result<(), String> {
         if let Some(angle) = state_angle {
             if self.servo_gate.rr3_gate_allow(self.tb.rr3_now_ms()) {
                 self.servo_seq += 1;
@@ -304,9 +309,17 @@ impl Rr3ActDispatcher {
                 )?;
             }
         }
-        // relay/state 变化即发（0.0.5 批I A-7）：只在电平**真变**时续
-        // seq 并发布/计数——同态命令不产生状态帧（§9 不变量；
-        // counters 与发布同门，保持键值 = 实际翻转数）
+        Ok(())
+    }
+
+    /// relay/state 变化即发（0.0.5 批I A-7）：只在电平**真变**时续 seq 并
+    /// 发布/计数——同态命令不产生状态帧（§9 不变量；counters 与发布同门，
+    /// 保持键值 = 实际翻转数）。
+    fn rr3_state_relay(
+        &mut self,
+        bus: &BusHandle,
+        relay_applied: Option<(bool, bool)>,
+    ) -> Result<(), String> {
         if let Some((on, prev)) = relay_applied {
             if relay::rr3_relay_state_due(prev, on) {
                 self.relay_seq += 1;

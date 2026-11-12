@@ -82,19 +82,25 @@ pub fn rr3_http_read_req(
             .try_clone()
             .map_err(|e| format!("try_clone 失败: {e}"))?,
     );
-    let (method, path, used) = rr3_req_line(&mut reader, limits.header_limit)?;
+    let (method, path, body) = rr3_req_parts(&mut reader, limits)?;
+    Ok(Rr3HttpRequest { method, path, body })
+}
+
+/// 请求行 → 头区 → body 三段读取：请求行与头区共用同一总额预算（请求行不设界
+/// 的话，单行无 \n 的慢发可让读侧无界增长），body 上界先判、再分配。
+fn rr3_req_parts(
+    reader: &mut impl BufRead,
+    limits: &Rr3PanelLimits,
+) -> Result<(String, String, Vec<u8>), String> {
+    let (method, path, used) = rr3_req_line(reader, limits.header_limit)?;
     // 请求行与头区共用同一总额预算：请求行不设界的话，单行无 \n 的慢发可让读侧
     // 无界增长（局域网 DoS 面，静态审计 0.0.8b 收口）。
-    let content_length = rr3_req_heads(&mut reader, limits.header_limit, used)?;
+    let content_length = rr3_req_heads(reader, limits.header_limit, used)?;
     // body 上界先判、再分配：按声明长度 `vec![0; n]` 前必须确认 n 在限内
     if content_length > limits.body_limit {
         return Err(format!("body 超界（>{0}B）", limits.body_limit));
     }
-    Ok(Rr3HttpRequest {
-        method,
-        path,
-        body: rr3_req_body(&mut reader, content_length)?,
-    })
+    Ok((method, path, rr3_req_body(reader, content_length)?))
 }
 
 /// 请求行："METHOD /path HTTP/1.x" →（方法, 路径, 已用头区字节数）。

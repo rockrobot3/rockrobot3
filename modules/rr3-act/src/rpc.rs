@@ -51,6 +51,21 @@ pub(crate) fn rr3_handle_servo(
     if blocked {
         return Err(rr3_low_power_reject(servo::RR3_SERVO_COMMAND_TOPIC));
     }
+    let (angle, move_ms) = rr3_servo_apply(servo_dev, cfg, args, axis)?;
+    Ok((
+        json!({ "angle_deg": angle, "move_ms": move_ms }),
+        Some(angle),
+        None,
+    ))
+}
+
+/// servo 落角段：拒动判据 → 参数裁决 → 行程钳位 → HAL 写。返回落角与申报时限。
+fn rr3_servo_apply(
+    servo_dev: &mut dyn Rr3PwmServo,
+    cfg: &Rr3ServoCfg,
+    args: &Value,
+    axis: &Rr3ActAxisState,
+) -> Result<(u16, u64), String> {
     // 拒动硬约束（§6，批N3 件三）：词缺席 = auto（保守——不申报按自动）；
     // 判据拒收回 InvalidParam，折业务性失败点名言（批N34 件二：机制层零堆
     // 枚举，词面文案在编排层渲染——契约字面量逐字不变）
@@ -67,11 +82,7 @@ pub(crate) fn rr3_handle_servo(
         .set_angle(angle)
         .map_err(|e| format!("舵机写入失败: {e}"))?;
     eprintln!("servo: angle={angle} move_ms={move_ms}（sim 即时到位；实机按时限走反射环闭环）");
-    Ok((
-        json!({ "angle_deg": angle, "move_ms": move_ms }),
-        Some(angle),
-        None,
-    ))
+    Ok((angle, move_ms))
 }
 
 /// led/effect 点名：效果裁决 → 状态机切换 + 同步落电平（批I A-1：写失败折日志

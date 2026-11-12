@@ -67,20 +67,34 @@ fn rr3_block_bounds(text: &str) -> Option<(usize, usize)> {
         let bare = line.trim_end_matches(['\r', '\n']);
         let head = bare.trim();
         match start {
-            None => {
-                if head == "[[rr3-brain.model]]" {
-                    start = Some(offset);
-                }
-            }
+            None => start = rr3_bounds_head(head, offset),
             Some(s) => {
-                if head.starts_with('[') && head != "[[rr3-brain.model]]" {
-                    return Some((s, offset));
+                if let Some(b) = rr3_bounds_end(head, s, offset) {
+                    return Some(b);
                 }
             }
         }
         offset += line.len();
     }
     start.map(|s| (s, offset))
+}
+
+/// 行首是否块表头 `[[rr3-brain.model]]`（是则块起点 = 该行偏移）。
+fn rr3_bounds_head(head: &str, offset: usize) -> Option<usize> {
+    if head == "[[rr3-brain.model]]" {
+        Some(offset)
+    } else {
+        None
+    }
+}
+
+/// 块尾判据：**别的**表头行（`[...]` 开头）即块边界；多行表头本身不算。
+fn rr3_bounds_end(head: &str, start: usize, offset: usize) -> Option<(usize, usize)> {
+    if head.starts_with('[') && head != "[[rr3-brain.model]]" {
+        Some((start, offset))
+    } else {
+        None
+    }
 }
 
 /// 用 `rows` 渲染的块替换 `full_text` 里的模型行块（纯函数）。无表 → EOF 追加

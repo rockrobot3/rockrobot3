@@ -61,12 +61,42 @@ pub(crate) fn rr3_handle_tts(
     player: &Rr3PlayerCfg,
 ) -> Result<Value, String> {
     let (text, pcm_bytes) = rr3_tts_parse_args(args)?;
+    let mut samples = rr3_tts_take(bus, tts_pcm, pcm_bytes)?;
+    let (played_ms, suspended) =
+        rr3_tts_play_out(bus, sink, face, &mut samples, player, pcm_bytes)?;
+    eprintln!(
+        "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，gain {}%，水位 {}ms，talk 挂起 {suspended}）",
+        text.chars().count(),
+        player.volume_pct,
+        player.prebuffer_ms
+    );
+    Ok(rr3_tts_result(&text, played_ms))
+}
+
+/// 收流对账：点名字节数须与缓冲实收相等；不过即整缓冲作废并记拒播。
+fn rr3_tts_take(
+    bus: &BusHandle,
+    tts_pcm: &mut Rr3TtsPcmBuf,
+    pcm_bytes: u64,
+) -> Result<Vec<i16>, String> {
     if let Err(e) = rr3_pcm_integrity(pcm_bytes, tts_pcm.rr3_tts_buf_len()) {
         bus.counter_bump("tts_play_reject", 1);
         tts_pcm.rr3_tts_buf_take();
         return Err(e);
     }
-    let mut samples = rr3_pcm_to_samples(&tts_pcm.rr3_tts_buf_take());
+    Ok(rr3_pcm_to_samples(&tts_pcm.rr3_tts_buf_take()))
+}
+
+/// 起播水位 → 播放增益 → 挂起表情 → 播放 → 0ms 拒播与计数。返回 (播出毫秒,
+/// 挂起前的表情名)。
+fn rr3_tts_play_out(
+    bus: &BusHandle,
+    sink: &mut dyn rr_hal_api::Rr3AudioSink,
+    face: &mut face::Rr3Face,
+    samples: &mut [i16],
+    player: &Rr3PlayerCfg,
+    pcm_bytes: u64,
+) -> Result<(u64, &'static str), String> {
     // 起播水位（MC-2）：对账通过即缓冲完整——`buffered == total` 是对账蕴含的
     // 架构事实，两处如实传同一值。判据显式在场（legacy 0cf029e 语义：达水位
     // 才起播、流完整未攒满也播）；流式化（增补轮五批E）后 buffered < total 的
@@ -80,9 +110,9 @@ pub(crate) fn rr3_handle_tts(
         ));
     }
     // 播放增益（MC-2）：config 注入的 volume_pct 整型饱和缩放，播放前就地生效
-    player::rr3_tts_apply_gain(&mut samples, player.volume_pct);
+    player::rr3_tts_apply_gain(samples, player.volume_pct);
     let suspended = face.rr3_face_begin_talk();
-    let played_ms = player::rr3_tts_play(sink, &samples).map_err(|e| rr3_tts_err_text(&e));
+    let played_ms = player::rr3_tts_play(sink, samples).map_err(|e| rr3_tts_err_text(&e));
     face.rr3_face_end_talk();
     let played_ms = played_ms?;
     // played_ms==0 不得记 ok（批N4 件六 I-21①）：对账通过但样点不足一个毫秒窗
@@ -95,13 +125,7 @@ pub(crate) fn rr3_handle_tts(
         ));
     }
     bus.counter_bump("tts_play_ok", 1);
-    eprintln!(
-        "tts: {} 字符播了 {played_ms}ms（PCM {pcm_bytes} 字节，gain {}%，水位 {}ms，talk 挂起 {suspended}）",
-        text.chars().count(),
-        player.volume_pct,
-        player.prebuffer_ms
-    );
-    Ok(rr3_tts_result(&text, played_ms))
+    Ok((played_ms, suspended))
 }
 
 /// 表情点名：校验并切换，回 `{"expression","previous"}`。`non_pointable` = 本形态

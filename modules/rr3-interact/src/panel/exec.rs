@@ -345,15 +345,7 @@ pub(super) fn rr3_leg_relay(shared: &Rr3PanelShared) -> (Value, &'static str) {
         Ok(enabled) => {
             let want = rr3_relay_expect(enabled, shared.selftest_expect.relay);
             if want == "n-a" {
-                let why = if enabled {
-                    "expect.relay=n-a（配置声明不适用）"
-                } else {
-                    "rr3-act 未启用（host-only 能力面 n-a）"
-                };
-                return (
-                    json!({ "leg": "relay", "pass": "n-a", "reason": why }),
-                    want,
-                );
+                return rr3_relay_na(enabled);
             }
             let (pass, reason) = rr3_relay_cycle(shared);
             let mut leg = json!({ "leg": "relay", "pass": pass });
@@ -373,6 +365,19 @@ pub(super) fn rr3_leg_relay(shared: &Rr3PanelShared) -> (Value, &'static str) {
             "pass",
         ),
     }
+}
+
+/// relay 腿 n-a 档：拒因区分"配置声明不适用"与"rr3-act 不在册"。
+fn rr3_relay_na(enabled: bool) -> (Value, &'static str) {
+    let why = if enabled {
+        "expect.relay=n-a（配置声明不适用）"
+    } else {
+        "rr3-act 未启用（host-only 能力面 n-a）"
+    };
+    (
+        json!({ "leg": "relay", "pass": "n-a", "reason": why }),
+        "n-a",
+    )
 }
 
 /// relay on→off 往返：on 失败不执行 off；off 失败如实点名

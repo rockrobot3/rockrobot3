@@ -157,24 +157,36 @@ fn rr3_cfg_audio(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Res
     let Some(audio) = section.and_then(|s| s.get("audio")) else {
         return Ok(());
     };
-    let mut rate = cfg.audio.sample_rate as u64;
-    let mut ch = cfg.audio.channels as u64;
-    let mut fms = cfg.audio.frame_ms;
-    rr3_cfg_u64(audio, "sample_rate", &mut rate)?;
-    rr3_cfg_u64(audio, "channels", &mut ch)?;
-    rr3_cfg_u64(audio, "frame_ms", &mut fms)?;
+    let (rate, ch, mut fms) = rr3_audio_raw(audio, cfg)?;
     // 0.0.5 批I S-1：frame_ms < 1（u64 域即 0）无节拍意义（0 帧 → read 空
     // → 全速刷总线），收敛到登记默认 20ms 并留痕——半有效的配置比报错更隐蔽
     if fms < 1 {
         eprintln!("config [rr3-sense.audio] frame_ms={fms} 无节拍意义，收敛 20ms");
         fms = 20;
     }
-    cfg.audio.sample_rate =
-        u32::try_from(rate).map_err(|_| format!("[rr3-sense.audio] sample_rate 越界: {rate}"))?;
-    cfg.audio.channels =
-        u8::try_from(ch).map_err(|_| format!("[rr3-sense.audio] channels 越界: {ch}"))?;
+    (cfg.audio.sample_rate, cfg.audio.channels) = rr3_audio_take(rate, ch)?;
     cfg.audio.frame_ms = fms;
     Ok(())
+}
+
+/// `[rr3-sense.audio]` 三键读取（缺键保留现值，u64 域中转）。
+fn rr3_audio_raw(audio: &toml::Value, cfg: &Rr3SenseConfig) -> Result<(u64, u64, u64), String> {
+    let mut rate = cfg.audio.sample_rate as u64;
+    let mut ch = cfg.audio.channels as u64;
+    let mut fms = cfg.audio.frame_ms;
+    rr3_cfg_u64(audio, "sample_rate", &mut rate)?;
+    rr3_cfg_u64(audio, "channels", &mut ch)?;
+    rr3_cfg_u64(audio, "frame_ms", &mut fms)?;
+    Ok((rate, ch, fms))
+}
+
+/// 采样率/声道收窄到装配域（越界逐键点名）。
+fn rr3_audio_take(rate: u64, ch: u64) -> Result<(u32, u8), String> {
+    let sample_rate =
+        u32::try_from(rate).map_err(|_| format!("[rr3-sense.audio] sample_rate 越界: {rate}"))?;
+    let channels =
+        u8::try_from(ch).map_err(|_| format!("[rr3-sense.audio] channels 越界: {ch}"))?;
+    Ok((sample_rate, channels))
 }
 
 /// `[rr3-sense.vad]` 段（缺段回落默认）。

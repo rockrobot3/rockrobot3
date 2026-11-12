@@ -81,6 +81,14 @@ fn rr3_secrets_parse(path: &Path, text: &str) -> Result<BTreeMap<String, String>
             path.display()
         )
     })?;
+    rr3_secret_map(path, keys)
+}
+
+/// keys 全表落位：值须为字符串（坏形状 = 回错，与坏 json 同一口径）。
+fn rr3_secret_map(
+    path: &Path,
+    keys: &serde_json::Map<String, Value>,
+) -> Result<BTreeMap<String, String>, String> {
     let mut out = BTreeMap::new();
     for (k, val) in keys {
         match val.as_str() {
