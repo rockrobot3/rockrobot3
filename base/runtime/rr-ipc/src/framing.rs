@@ -85,6 +85,15 @@ impl FrameAssembler {
         if self.buf.len() < want {
             return Ok(None);
         }
+        self.rr3_take_frame(header, want).map(Some)
+    }
+
+    /// 整帧落袋：CRC 一致则消费出帧，不一致整帧丢弃。
+    fn rr3_take_frame(
+        &mut self,
+        header: Rr3Header,
+        want: usize,
+    ) -> Result<Assembled, (u64, String)> {
         let payload = self.buf[RR3_IPC_HDR_SIZE..want].to_vec();
         let actual = crate::protocol::header::rr3_crc32(&payload);
         if actual != header.payload_crc32 {
@@ -102,7 +111,7 @@ impl FrameAssembler {
         }
         self.buf.drain(..want);
         self.discarded = 0;
-        Ok(Some((header, payload)))
+        Ok((header, payload))
     }
 
     /// magic 对齐：找到即弃前导并回 `true`；无 magic 只留尾 3B 并回 `false`。
@@ -126,12 +135,17 @@ impl FrameAssembler {
         if self.buf.len() < RR3_IPC_HDR_SIZE {
             return Ok(None);
         }
-        let header = match Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]) {
-            Ok(h) => h,
-            Err(e) => return Err(self.drop_magic(4, alloc::format!("头层拒收: {e:?}"))),
-        };
+        let header = self.rr3_head_of()?;
         self.rr3_plen_guard(&header)?;
         Ok(Some(header))
+    }
+
+    /// 头层解码：坏头弃 4B magic 回错（真帧起点可能就在其后不远处）。
+    fn rr3_head_of(&mut self) -> Result<Rr3Header, (u64, String)> {
+        match Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]) {
+            Ok(h) => Ok(h),
+            Err(e) => Err(self.drop_magic(4, alloc::format!("头层拒收: {e:?}"))),
+        }
     }
 
     /// plen 护栏：超拆帧上限即弃 4B magic（幻影头）。

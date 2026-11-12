@@ -54,47 +54,51 @@ pub fn rr3_dev_parse(text: &str) -> Rr3DeviceTable {
         .flatten()
         .filter_map(Value::as_table)
     {
-        if let Some(model) = d.get("model").and_then(Value::as_str) {
-            let id_reg = d.get("id_reg").and_then(Value::as_table).and_then(|t| {
-                let addr = t.get("addr").and_then(Value::as_integer)?;
-                let expect = t.get("expect").and_then(Value::as_integer)?;
-                Some((addr, expect))
-            });
-            table.devices.insert(
-                model.to_string(),
-                Rr3DeviceEntry {
-                    bus: d
-                        .get("bus")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    addrs: d
-                        .get("addrs")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_string)
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    baud_ok: d
-                        .get("baud_ok")
-                        .and_then(Value::as_array)
-                        .map(|a| a.iter().filter_map(Value::as_integer).collect())
-                        .unwrap_or_default(),
-                    id_reg,
-                    peak_ma: d.get("peak_ma").and_then(Value::as_integer).unwrap_or(0),
-                    mate: d
-                        .get("mate")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                },
-            );
+        if let Some((model, entry)) = rr3_dev_one(d) {
+            table.devices.insert(model.to_string(), entry);
         }
     }
     table
+}
+
+/// 单条 `[[device]]`：model 必填（缺省整条不收），其余键按各自缺省收。
+fn rr3_dev_one(d: &toml::Table) -> Option<(&str, Rr3DeviceEntry)> {
+    let model = d.get("model").and_then(Value::as_str)?;
+    let id_reg = d.get("id_reg").and_then(Value::as_table).and_then(|t| {
+        let addr = t.get("addr").and_then(Value::as_integer)?;
+        let expect = t.get("expect").and_then(Value::as_integer)?;
+        Some((addr, expect))
+    });
+    let entry = Rr3DeviceEntry {
+        bus: d
+            .get("bus")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        addrs: d
+            .get("addrs")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        baud_ok: d
+            .get("baud_ok")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_integer).collect())
+            .unwrap_or_default(),
+        id_reg,
+        peak_ma: d.get("peak_ma").and_then(Value::as_integer).unwrap_or(0),
+        mate: d
+            .get("mate")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    };
+    Some((model, entry))
 }
 
 impl Rr3DeviceTable {

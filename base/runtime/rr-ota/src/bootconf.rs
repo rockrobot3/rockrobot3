@@ -105,20 +105,32 @@ pub fn rr3_bootconf_slot(text: &str) -> Result<Rr3Slot, String> {
 /// 不提供"原地重写"这个无意义的副作用）；rr_factory 不走本入口——
 /// 恢复出厂是一次性引导语义，走 [`rr3_bootconf_factory`]。
 pub fn rr3_bootconf_switch(text: &str, target: Rr3Slot) -> Result<String, String> {
-    if target == Rr3Slot::Factory {
-        return Err(
-            "switch 不接受 rr_factory——恢复出厂走 factory 子命令（一次性引导，rr_factory 分区本体不写）"
-                .into(),
-        );
-    }
+    rr3_switch_chk(target)?;
     let (out, current) = rr3_bootconf_rewrite(text, target)?;
-    if current == target {
-        return Err(format!(
-            "已在该槽（root=LABEL={}）——同槽幂等拒，不重写引导配置",
-            target.rr3_slot_label()
-        ));
-    }
+    rr3_switch_same(current, target)?;
     Ok(out)
+}
+
+/// 同槽幂等拒：改写请求必须移动到对侧（不提供"原地重写"这个无意义的副作用）。
+fn rr3_switch_same(current: Rr3Slot, target: Rr3Slot) -> Result<(), String> {
+    if current != target {
+        return Ok(());
+    }
+    Err(format!(
+        "已在该槽（root=LABEL={}）——同槽幂等拒，不重写引导配置",
+        target.rr3_slot_label()
+    ))
+}
+
+/// switch 入口的槽位门：rr_factory 不走本入口。
+fn rr3_switch_chk(target: Rr3Slot) -> Result<(), String> {
+    if target != Rr3Slot::Factory {
+        return Ok(());
+    }
+    Err(
+        "switch 不接受 rr_factory——恢复出厂走 factory 子命令（一次性引导，rr_factory 分区本体不写）"
+            .into(),
+    )
 }
 
 /// 一次性出厂引导：把根定位切到 rr_factory。**只改引导配置**，rr_factory

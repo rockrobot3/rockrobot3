@@ -224,25 +224,11 @@ fn rr3_contract_path(manifest: &Path) -> PathBuf {
 /// 校验单个 module.toml（与 contracts/topics.toml 交叉校验）——旧签名、旧行为
 pub fn rr3_manifest_gate(path: &Path) -> Rr3ValidationReport {
     let mut report = Rr3ValidationReport::default();
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) => {
-            report
-                .errors
-                .push(format!("无法读取 manifest {}: {e}", path.display()));
-            return report;
-        }
+    let Some(text) = rr3_manifest_text(path, &mut report.errors) else {
+        return report;
     };
-    let contract_path = rr3_contract_path(path);
-    let contract_text = match std::fs::read_to_string(&contract_path) {
-        Ok(t) => t,
-        Err(e) => {
-            report.errors.push(format!(
-                "无法读取主题契约 {}（manifest 交叉校验需要它）: {e}",
-                contract_path.display()
-            ));
-            return report;
-        }
+    let Some((contract_path, contract_text)) = rr3_contract_read(path, &mut report.errors) else {
+        return report;
     };
     let set = crate::topics::rr3_topic_parse(&contract_text);
     // 收紧（不是放宽）：契约解析后空表直接拒，原行为靠 F3 护栏隐式覆盖。
@@ -255,6 +241,32 @@ pub fn rr3_manifest_gate(path: &Path) -> Rr3ValidationReport {
     }
     report.errors = rr3_validate_inner(&text, &set);
     report
+}
+
+/// 读 manifest 文本；读不到即点名（路径原样上报）。
+fn rr3_manifest_text(path: &Path, errs: &mut Vec<String>) -> Option<String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            errs.push(format!("无法读取 manifest {}: {e}", path.display()));
+            None
+        }
+    }
+}
+
+/// 读主题契约文本（相对 manifest 定位）；读不到即点名。
+fn rr3_contract_read(path: &Path, errs: &mut Vec<String>) -> Option<(PathBuf, String)> {
+    let contract_path = rr3_contract_path(path);
+    match std::fs::read_to_string(&contract_path) {
+        Ok(t) => Some((contract_path, t)),
+        Err(e) => {
+            errs.push(format!(
+                "无法读取主题契约 {}（manifest 交叉校验需要它）: {e}",
+                contract_path.display()
+            ));
+            None
+        }
+    }
 }
 
 /// 直接校验一段 manifest 文本 + 调用方给定的主题集。
@@ -303,20 +315,25 @@ fn rr3_validate_inner(text: &str, topics: &crate::topics::Rr3TopicSet) -> Vec<St
     }
 
     // 2) 跨字段：heartbeat < watchdog（方案 §4 [health] 约束）
-    let hb = rr3_get_by_path(&root, "health.heartbeat_ms").and_then(Value::as_integer);
-    let wd = rr3_get_by_path(&root, "health.watchdog_timeout_ms").and_then(Value::as_integer);
-    if let (Some(hb), Some(wd)) = (hb, wd) {
-        if hb >= wd {
-            report.errors.push(format!(
-                "heartbeat_ms({hb}) 必须小于 watchdog_timeout_ms({wd})"
-            ));
-        }
-    }
+    rr3_hb_lt_wd(&root, &mut report.errors);
 
     // 3) subscribes 必须已注册（订阅方不要求前缀归属）
     rr3_chk_subs(&root, topics, &mut report.errors);
 
     report.errors
+}
+
+/// 跨字段：heartbeat_ms 必须小于 watchdog_timeout_ms（两键都在才判）。
+fn rr3_hb_lt_wd(root: &Value, errs: &mut Vec<String>) {
+    let hb = rr3_get_by_path(root, "health.heartbeat_ms").and_then(Value::as_integer);
+    let wd = rr3_get_by_path(root, "health.watchdog_timeout_ms").and_then(Value::as_integer);
+    if let (Some(hb), Some(wd)) = (hb, wd) {
+        if hb >= wd {
+            errs.push(format!(
+                "heartbeat_ms({hb}) 必须小于 watchdog_timeout_ms({wd})"
+            ));
+        }
+    }
 }
 
 /// 单字段检查：存在性（必填）→ 类型 → 规则；类型错只报一次并给出实际值。

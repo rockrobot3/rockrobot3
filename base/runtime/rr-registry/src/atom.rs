@@ -202,10 +202,7 @@ fn rr3_atom_one(
     slots: &crate::slots::Rr3SlotTable,
     errs: &mut Vec<String>,
 ) {
-    let Some(value) = rr3_get_by_path(root, &spec.path) else {
-        if spec.required {
-            errs.push(format!("缺少必填字段 {}", spec.path));
-        }
+    let Some(value) = rr3_atom_req(spec, root, errs) else {
         return;
     };
     match spec.kind.as_str() {
@@ -214,6 +211,21 @@ fn rr3_atom_one(
         "int" => rr3_atom_int(spec, value, errs),
         other => panic!("atom schema 未知 kind {other}（契约与代码不同步）"),
     }
+}
+
+/// 字段存在性与必填：缺键且必填即点名；`None` = 无值，类型/规则不判。
+fn rr3_atom_req<'a>(
+    spec: &Rr3FieldSpec,
+    root: &'a Value,
+    errs: &mut Vec<String>,
+) -> Option<&'a Value> {
+    let Some(value) = rr3_get_by_path(root, &spec.path) else {
+        if spec.required {
+            errs.push(format!("缺少必填字段 {}", spec.path));
+        }
+        return None;
+    };
+    Some(value)
 }
 
 /// string 型：类型判定 + 词形规则校验

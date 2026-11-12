@@ -216,19 +216,24 @@ fn rr3_item_str<'a>(
 ) -> Option<&'a str> {
     match t.get(key).and_then(Value::as_str) {
         Some(v) if ok(v) => Some(v),
-        // 值原样点名（空串不回声，避免 `slot "" 不得为空` 这类噪声）
-        Some("") => {
-            errs.push(format!("{what}[{i}].{key} {bad}"));
-            None
-        }
         Some(v) => {
-            errs.push(format!("{what}[{i}].{key} \"{v}\" {bad}"));
+            // 值原样点名（空串不回声，避免 `slot "" 不得为空` 这类噪声）
+            rr3_item_str_bad(what, i, key, v, bad, errs);
             None
         }
         None => {
             errs.push(format!("{what}[{i}].{key} 应为字符串"));
             None
         }
+    }
+}
+
+/// 串键值不合判据时的点名（空串不回声值，其余原样点名）。
+fn rr3_item_str_bad(what: &str, i: usize, key: &str, v: &str, bad: &str, errs: &mut Vec<String>) {
+    if v.is_empty() {
+        errs.push(format!("{what}[{i}].{key} {bad}"));
+    } else {
+        errs.push(format!("{what}[{i}].{key} \"{v}\" {bad}"));
     }
 }
 
@@ -361,13 +366,7 @@ pub(crate) fn rr3_demands_parse(items: &[Value]) -> (Vec<Rr3AssembleDemand>, Vec
         let rail = rr3_demand_rail(d, i, &mut errs);
         let peak = rr3_demand_peak(d, i, &mut errs);
         let sustained = rr3_demand_sust(d, i, &mut errs);
-        if let (Some(p), Some(s)) = (peak, sustained) {
-            if p > 0 && s > p {
-                errs.push(format!(
-                    "demands[{i}].sustained_ma = {s} > peak_ma = {p}（连续分量超过峰值是物理矛盾，fail-closed）"
-                ));
-            }
-        }
+        rr3_demand_cmp(peak, sustained, i, &mut errs);
         let critical = rr3_demand_crit(d, i, &mut errs);
         let groups = rr3_demand_grp(d, i, &mut errs);
         if let (Some(rail), Some(peak_ma), Some(sustained_ma), Some(critical)) =
@@ -434,6 +433,18 @@ fn rr3_demand_sust(d: &Value, i: usize, errs: &mut Vec<String>) -> Option<i64> {
             ));
             None
         }
+    }
+}
+
+/// peak/sustained 交叉判据：连续分量超过峰值是物理矛盾（两值都可解析时才判）。
+fn rr3_demand_cmp(peak: Option<i64>, sust: Option<i64>, i: usize, errs: &mut Vec<String>) {
+    let (Some(p), Some(s)) = (peak, sust) else {
+        return;
+    };
+    if p > 0 && s > p {
+        errs.push(format!(
+            "demands[{i}].sustained_ma = {s} > peak_ma = {p}（连续分量超过峰值是物理矛盾，fail-closed）"
+        ));
     }
 }
 
@@ -741,16 +752,7 @@ pub fn rr3_injection_gaps(facts: &Rr3AssembleFacts, config_text: &str) -> Vec<St
     facts
         .ops
         .iter()
-        .filter(|o| {
-            let mut cur = &cfg;
-            for seg in o.src_key.split('.') {
-                match cur.get(seg) {
-                    Some(v) => cur = v,
-                    None => return true,
-                }
-            }
-            false
-        })
+        .filter(|o| rr3_path_get(&cfg, &o.src_key).is_none())
         .map(|o| {
             format!(
                 "参数槽 {} 的来源键 {} 在 config 中取不到（注入缺）",
@@ -758,6 +760,11 @@ pub fn rr3_injection_gaps(facts: &Rr3AssembleFacts, config_text: &str) -> Vec<St
             )
         })
         .collect()
+}
+
+/// 点路径游走：任一段取不到即 `None`（注入缺级的判定本体）。
+fn rr3_path_get<'a>(cfg: &'a Value, key: &str) -> Option<&'a Value> {
+    key.split('.').try_fold(cfg, |cur, seg| cur.get(seg))
 }
 
 #[cfg(test)]

@@ -150,6 +150,17 @@ fn rr3_env_bindings() -> Option<Value> {
     rr3_board_payload(&b)
 }
 
+/// 开串口：失败当场点名（细节落日志）后折 Busy。
+fn rr3_conn_open(path: &std::path::Path, baud: u32) -> Result<Rr3UartConn, Rr3HalError> {
+    match Rr3UartConn::open_with_baud(path, baud) {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            eprintln!("rr-hal-esp32: 串口 open 失败 {}: {e}", path.display());
+            Err(Rr3HalError::Busy)
+        }
+    }
+}
+
 /// 开口后定档：净化输入队列 + 应答窗口。失败当场点名（细节落日志）后折 Busy。
 fn rr3_conn_ready(c: &Rr3UartConn, path: &std::path::Path) -> Result<(), Rr3HalError> {
     // settle 后补冲：开口触发的 DTR/RTS 复位让板端 banner 在开口
@@ -194,23 +205,16 @@ impl Rr3BridgeConn {
         if self.conn.is_some() {
             return Ok(());
         }
-        match Rr3UartConn::open_with_baud(&self.path, self.baud) {
-            Ok(c) => {
-                std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
-                rr3_conn_ready(&c, &self.path)?;
-                self.conn = Some(c);
-                // 板侧绑定推送（批N4 件七(b) 基-24 桥上配置腿）：每次（重）开连接
-                // 都推——板侧重启或连接重建后注入态随之恢复，板侧覆盖语义幂等。
-                // 推送失败只点名不上抛（rr3_push_bindings 内部消化）：绑定仅服务
-                // 板侧自愈路径，执法点在板侧消费面 fail-closed，不挡舵机/表情能力面。
-                self.rr3_push_bindings();
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("rr-hal-esp32: 串口 open 失败 {}: {e}", self.path.display());
-                Err(Rr3HalError::Busy)
-            }
-        }
+        let c = rr3_conn_open(&self.path, self.baud)?;
+        std::thread::sleep(Duration::from_millis(RR3_OPEN_SETTLE_MS));
+        rr3_conn_ready(&c, &self.path)?;
+        self.conn = Some(c);
+        // 板侧绑定推送（批N4 件七(b) 基-24 桥上配置腿）：每次（重）开连接
+        // 都推——板侧重启或连接重建后注入态随之恢复，板侧覆盖语义幂等。
+        // 推送失败只点名不上抛（rr3_push_bindings 内部消化）：绑定仅服务
+        // 板侧自愈路径，执法点在板侧消费面 fail-closed，不挡舵机/表情能力面。
+        self.rr3_push_bindings();
+        Ok(())
     }
 
     /// 板侧绑定推送（`rr3.set_bindings`，载荷住 `params.args`——method 面信封，
@@ -237,19 +241,29 @@ impl Rr3BridgeConn {
     /// jsonrpc+id/error）。io 或协议失败点名后折 Busy，连接报废下次重开。
     fn rr3_method_call(&mut self, method: &str, params: &Value) -> Result<Value, Rr3HalError> {
         self.rr3_ensure()?;
-        let conn = match self.conn.as_mut() {
-            Some(c) => c,
-            None => return Err(Rr3HalError::Busy), // rr3_ensure 后必在，防御性兜底
-        };
+        let id = self.rr3_send_req(method, params)?;
+        self.rr3_reply(id)
+    }
+
+    /// 组一帧并写出（id 在此分配）：失败点名并报废连接，下次调用重开。
+    fn rr3_send_req(&mut self, method: &str, params: &Value) -> Result<u64, Rr3HalError> {
+        if self.conn.is_none() {
+            return Err(Rr3HalError::Busy); // rr3_ensure 后必在，防御性兜底
+        }
         let id = self.next_id;
         self.next_id += 1;
         let req = rr3_bridge_req_frame(id, method, params);
-        if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
-            eprintln!("rr-hal-esp32: Request 写出失败: {e:?}");
-            self.conn = None;
-            return Err(Rr3HalError::Busy);
+        let Some(conn) = self.conn.as_mut() else {
+            return Err(Rr3HalError::Busy); // 上面已判在位，防御性兜底
+        };
+        match conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
+            Ok(()) => Ok(id),
+            Err(e) => {
+                eprintln!("rr-hal-esp32: Request 写出失败: {e:?}");
+                self.conn = None;
+                Err(Rr3HalError::Busy)
+            }
         }
-        self.rr3_reply(id)
     }
 
     /// 应答收帧与解码（`rr3_method_call` 的下半程）：读超时档已在连接开口时定

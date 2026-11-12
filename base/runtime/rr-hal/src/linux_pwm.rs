@@ -169,13 +169,20 @@ impl Rr3LinuxPwmServo {
     /// 脉宽 + 使能。
     fn rr3_configure(&self) -> Result<(), Rr3HalError> {
         let dir = self.pwm_dir();
-        if pwm_read_u64(&dir.join("period")).unwrap_or(0) != RR3_SERVO_PERIOD_NS as u64 {
-            pwm_write(&dir.join("duty_cycle"), 0)?;
-            pwm_write(&dir.join("period"), RR3_SERVO_PERIOD_NS)?;
-        }
+        rr3_pwm_period(&dir)?;
         pwm_write(&dir.join("duty_cycle"), servo_duty_ns(SERVO_NEUTRAL_DEG)?)?;
         pwm_write(&dir.join("enable"), 1)
     }
+}
+
+/// 周期落定：仅在变化时重写（重写前先归零占空比——旧 duty > 新 period 会被
+/// 内核 EINVAL 拒；读不到/读成垃圾按 0 处理走全量写）。
+fn rr3_pwm_period(dir: &Path) -> Result<(), Rr3HalError> {
+    if pwm_read_u64(&dir.join("period")).unwrap_or(0) != RR3_SERVO_PERIOD_NS as u64 {
+        pwm_write(&dir.join("duty_cycle"), 0)?;
+        pwm_write(&dir.join("period"), RR3_SERVO_PERIOD_NS)?;
+    }
+    Ok(())
 }
 
 /// 等 `pwmN` 目录出现（内核 workqueue 异步建目录，超时即点名 sysfs 异常）。
