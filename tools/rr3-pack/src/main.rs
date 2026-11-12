@@ -224,6 +224,11 @@ fn rr3_python_shim_text(pkg_dir: &Path, py_module: &str, config_path: &Path) -> 
 fn rr3_copy_dir(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("建目录 {} 失败: {e}", dst.display()))?;
     let entries = fs::read_dir(src).map_err(|e| format!("读目录 {} 失败: {e}", src.display()))?;
+    rr3_copy_entries(entries, src, dst)
+}
+
+/// 逐条目复制（目录读错的文案带来源路径）。
+fn rr3_copy_entries(entries: fs::ReadDir, src: &Path, dst: &Path) -> Result<(), String> {
     for e in entries {
         let e = e.map_err(|err| format!("读目录 {} 失败: {err}", src.display()))?;
         rr3_copy_entry(&e, dst)?;
@@ -470,15 +475,7 @@ fn rr3_truth_ready(
     // 打包先按装载同判据预验装配单（rr3_profile_parse，与 boot 链同一函数）：坏单
     // 拒出包——出包时红比装机 boot 红早一个环节（块-15：装载必需件缺席而装机验证全绿
     // 才是最贵的洞）；预验同时给出 [platform].chip，平台事实表按它选册。
-    let profile_text = fs::read_to_string(&profile_src)
-        .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
-    let profile = rrd::profile::rr3_profile_parse(&profile_text).map_err(|errs| {
-        format!(
-            "装配单 {} 预验失败（打包与装载同一判据，坏单不得出包）: {}",
-            profile_src.display(),
-            errs.join("; ")
-        )
-    })?;
+    let profile = rr3_profile_precheck(&profile_src)?;
     let truth = rrd::profile::rr3_truth_set(&profile, &cfg.profile);
     let missing: Vec<String> = truth
         .files
@@ -494,6 +491,19 @@ fn rr3_truth_ready(
         ));
     }
     Ok((profile_name, truth))
+}
+
+/// 装配单读取 + 预验（打包与装载同一判据，坏单点名拒收）。
+fn rr3_profile_precheck(profile_src: &Path) -> Result<rrd::profile::Rr3Profile, String> {
+    let text = fs::read_to_string(profile_src)
+        .map_err(|e| format!("读不到装配单 {}: {e}", profile_src.display()))?;
+    rrd::profile::rr3_profile_parse(&text).map_err(|errs| {
+        format!(
+            "装配单 {} 预验失败（打包与装载同一判据，坏单不得出包）: {}",
+            profile_src.display(),
+            errs.join("; ")
+        )
+    })
 }
 
 /// 单模块落 staging：产物按 lang 分型（rust = 注入 bin 按 entry 落位；python =
@@ -554,13 +564,24 @@ fn rr3_mod_facts(
     name: &str,
 ) -> Result<(String, rrd::manifest::Rr3ManifestFacts), String> {
     let manifest_src = mod_src.join("manifest.toml");
+    let (text, facts) = rr3_facts_load(&manifest_src, name)?;
+    rr3_name_agree(&facts, name)?;
+    rr3_entry_ok(&facts.entry, name)?;
+    Ok((text, facts))
+}
+
+/// 注入产物 manifest 读入并解析（在场门与两条错误文案逐字保留）。
+fn rr3_facts_load(
+    manifest_src: &Path,
+    name: &str,
+) -> Result<(String, rrd::manifest::Rr3ManifestFacts), String> {
     if !manifest_src.is_file() {
         return Err(format!(
             "模块 {name} 注入产物不完整: {} 缺席（约定 rr3-modules/<name>/manifest.toml）",
             manifest_src.display()
         ));
     }
-    let text = fs::read_to_string(&manifest_src)
+    let text = fs::read_to_string(manifest_src)
         .map_err(|e| format!("读 {} 失败: {e}", manifest_src.display()))?;
     let facts = rr3_manifest_parse(&text).map_err(|errs| {
         format!(
@@ -568,8 +589,6 @@ fn rr3_mod_facts(
             errs.join("; ")
         )
     })?;
-    rr3_name_agree(&facts, name)?;
-    rr3_entry_ok(&facts.entry, name)?;
     Ok((text, facts))
 }
 

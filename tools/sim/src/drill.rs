@@ -384,6 +384,14 @@ pub fn rr3_require_bins_ext(bins: &[(&Path, &str)]) -> Result<(), String> {
     Ok(())
 }
 
+/// 快照里还没到期望相位的模块名（报错时点名用）。
+fn rr3_missing<'a>(rows: &[(String, u64, String)], want: &[(&'a str, &str)]) -> Vec<&'a str> {
+    want.iter()
+        .filter(|(name, phase)| !rows.iter().any(|(n, _, p)| n == name && p == *phase))
+        .map(|(name, _)| *name)
+        .collect()
+}
+
 /// 演练用 manifest 文本。与 rrd/tests/support 的 `rr3_manifest` 同形但**不共用**：
 /// 那是 base/runtime 的测试夹具，tools/ 不能反向依赖测试代码。
 /// `entry` 由调用方传**绝对路径**（sim_peer 二进制），注册门禁（`rr3_manifest_abs`）要求它。
@@ -477,17 +485,29 @@ subscribes = [{}]
 pub fn rr3_parse_status(out: &str) -> Vec<(String, u64, String)> {
     let mut rows = Vec::new();
     for (n, line) in out.lines().enumerate() {
-        if n == 0 || line.trim().is_empty() {
+        if rr3_status_skip(n, line) {
             continue; // 表头与空行
         }
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() == 3 {
-            if let Ok(task) = parts[1].parse::<u64>() {
-                rows.push((parts[0].to_string(), task, parts[2].to_string()));
-            }
+        if let Some(row) = rr3_status_row(line) {
+            rows.push(row);
         }
     }
     rows
+}
+
+/// 表头与空行跳过（第 0 行恒为表头）。
+fn rr3_status_skip(n: usize, line: &str) -> bool {
+    n == 0 || line.trim().is_empty()
+}
+
+/// 数据行三列（空白分隔，task 列必须是数）。
+fn rr3_status_row(line: &str) -> Option<(String, u64, String)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let task = parts[1].parse::<u64>().ok()?;
+    Some((parts[0].to_string(), task, parts[2].to_string()))
 }
 
 /// 轮询到 `want` 里每个名字都以 `phase` 出现（注入 `poll`，可测、可换 rr3-ctl 的调用方式）。
@@ -500,11 +520,7 @@ pub fn rr3_wait_modules(
     let t0 = Instant::now();
     loop {
         let rows = poll();
-        let missing: Vec<&str> = want
-            .iter()
-            .filter(|(name, phase)| !rows.iter().any(|(n, _, p)| n == name && p == *phase))
-            .map(|(name, _)| *name)
-            .collect();
+        let missing = rr3_missing(&rows, want);
         if missing.is_empty() {
             return Ok(());
         }
