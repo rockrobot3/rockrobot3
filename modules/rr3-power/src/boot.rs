@@ -72,21 +72,36 @@ const RR3_MIN_PERIOD_MS: u64 = 100;
 /// 点名缺字段的文案比派生宏的默认报错可读（rr3-act 同款）。
 pub(crate) fn rr3_power_cfg_parse(text: &str) -> Result<Rr3PowerCfg, String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
-    let sect = |name: &str| -> Result<&toml::Value, String> {
-        v.get("rr3-power")
-            .and_then(|s| s.get(name))
-            .ok_or_else(|| format!("config 缺 [rr3-power.{name}] 段"))
-    };
     // battery/charger 先解析（既有红例的次序契约：缺字段点名先于 rail 段点名），
     // rail 段（批N2 件五）殿后——段必填＋全键必填，up=false 惰性但显式写
-    let battery = rr3_battery_of(&sect("battery")?.clone())?;
-    let charger = rr3_charger_of(&sect("charger")?.clone())?;
-    let rail = rr3_rail_of(&sect("rail")?.clone())?;
     Ok(Rr3PowerCfg {
-        battery,
-        charger,
-        rail,
+        battery: rr3_power_battery(&v)?,
+        charger: rr3_power_charger(&v)?,
+        rail: rr3_power_rail(&v)?,
     })
+}
+
+/// `[rr3-power.<名>]` 段取址（缺段点名）。
+fn rr3_power_sect(v: &toml::Value, name: &str) -> Result<toml::Value, String> {
+    v.get("rr3-power")
+        .and_then(|s| s.get(name))
+        .cloned()
+        .ok_or_else(|| format!("config 缺 [rr3-power.{name}] 段"))
+}
+
+/// battery 段取址 + 解析。
+fn rr3_power_battery(v: &toml::Value) -> Result<Rr3BatteryCfg, String> {
+    rr3_battery_of(&rr3_power_sect(v, "battery")?)
+}
+
+/// charger 段取址 + 解析。
+fn rr3_power_charger(v: &toml::Value) -> Result<Rr3ChargerCfg, String> {
+    rr3_charger_of(&rr3_power_sect(v, "charger")?)
+}
+
+/// rail 段取址 + 解析。
+fn rr3_power_rail(v: &toml::Value) -> Result<Rr3RailCfg, String> {
+    rr3_rail_of(&rr3_power_sect(v, "rail")?)
 }
 
 /// `[rr3-power.battery]` 段：三键全必填（周期低于下限钳制留痕）。
@@ -108,22 +123,7 @@ fn rr3_charger_of(sect: &toml::Value) -> Result<Rr3ChargerCfg, String> {
 /// `[rr3-power.rail]` 段：全键必填 + 阈值次序（severe < mild，相等则 Mild 档
 /// 不可达，属误配不是"更保守"）。
 fn rr3_rail_of(sect: &toml::Value) -> Result<Rr3RailCfg, String> {
-    let rail = Rr3RailCfg {
-        up: sect
-            .get("up")
-            .and_then(toml::Value::as_bool)
-            .ok_or_else(|| "config [rr3-power.rail] 缺 up（布尔）".to_string())?,
-        domain: sect
-            .get("domain")
-            .and_then(toml::Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .ok_or_else(|| "config [rr3-power.rail] 缺 domain（非空字符串）".to_string())?,
-        sample_period_ms: rr3_period(sect, "sample_period_ms", "rail")?,
-        mild_mv: rr3_u16(sect, "mild_mv", "rail")?,
-        severe_mv: rr3_u16(sect, "severe_mv", "rail")?,
-        max_age_ms: rr3_u32(sect, "max_age_ms", "rail")?,
-    };
+    let rail = rr3_rail_fields(sect)?;
     if rail.severe_mv >= rail.mild_mv {
         return Err(format!(
             "config [rr3-power.rail] 阈值倒挂: severe={}mV 必须 < mild={}mV（相等则 Mild 档不可达）",
@@ -131,6 +131,34 @@ fn rr3_rail_of(sect: &toml::Value) -> Result<Rr3RailCfg, String> {
         ));
     }
     Ok(rail)
+}
+
+/// rail 段全键取值（缺键/类型错逐键点名）。
+fn rr3_rail_fields(sect: &toml::Value) -> Result<Rr3RailCfg, String> {
+    Ok(Rr3RailCfg {
+        up: rr3_rail_up(sect)?,
+        domain: rr3_rail_domain(sect)?,
+        sample_period_ms: rr3_period(sect, "sample_period_ms", "rail")?,
+        mild_mv: rr3_u16(sect, "mild_mv", "rail")?,
+        severe_mv: rr3_u16(sect, "severe_mv", "rail")?,
+        max_age_ms: rr3_u32(sect, "max_age_ms", "rail")?,
+    })
+}
+
+/// `up`：必填布尔（缺键/类型错点名）。
+fn rr3_rail_up(sect: &toml::Value) -> Result<bool, String> {
+    sect.get("up")
+        .and_then(toml::Value::as_bool)
+        .ok_or_else(|| "config [rr3-power.rail] 缺 up（布尔）".to_string())
+}
+
+/// `domain`：必填非空字符串。
+fn rr3_rail_domain(sect: &toml::Value) -> Result<String, String> {
+    sect.get("domain")
+        .and_then(toml::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "config [rr3-power.rail] 缺 domain（非空字符串）".to_string())
 }
 
 /// `[rr3-power.<段>] <key>` 取 u16（0..=65535 整数；缺键/越界同文案点名）。

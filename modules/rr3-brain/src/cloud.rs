@@ -307,12 +307,14 @@ impl Rr3AsrClient {
     /// PCM（s16le 单声道）→ 识别文本。云端失败/非 200 折 Err（业务失败）。
     pub(crate) fn rr3_transcribe(&self, pcm: &[u8], sample_rate: u32) -> Result<String, String> {
         if rr3_cloud_mode()? == Rr3CloudMode::Mock {
-            return Ok(std::env::var(RR3_MOCK_TEXT_ENV)
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| RR3_MOCK_TEXT.to_string()));
+            return Ok(rr3_mock_text());
         }
+        let resp = self.rr3_transcribe_net(pcm, sample_rate)?;
+        rr3_asr_text(&resp)
+    }
+
+    /// 真云路径：multipart 一次装配、有界重试，只回 200 应答体。
+    fn rr3_transcribe_net(&self, pcm: &[u8], sample_rate: u32) -> Result<Vec<u8>, String> {
         let key = rr3_cloud_api_key()?;
         let boundary = rr3_boundary_hex();
         let boosted = crate::asr::rr3_asr_boost_pcm(pcm, RR3_ASR_INPUT_GAIN);
@@ -327,7 +329,7 @@ impl Rr3AsrClient {
         let content_type = format!("multipart/form-data; boundary={boundary}");
         // 有界重试（见 [`rr3_http_try`]）：multipart 体一次装配、多轮复用；
         // 只对瞬时失败续打，非瞬时/耗尽即按原形状回错。
-        let resp = rr3_http_try("识别接口", "ASR", || {
+        rr3_http_try("识别接口", "ASR", || {
             rr3_http_post(&url, &key, &body, &content_type, self.timeout_s).and_then(
                 |(status, resp)| {
                     if status == 200 {
@@ -337,15 +339,26 @@ impl Rr3AsrClient {
                     }
                 },
             )
-        })?;
-        // json.loads 进护栏（B-16②）：坏 JSON 折 Err 不逃逸（Python try 同形状）
-        let data: Value =
-            serde_json::from_slice(&resp).map_err(|e| format!("识别应答非 JSON: {e}"))?;
-        data.get("text")
-            .and_then(Value::as_str)
-            .map(|s| s.to_string())
-            .ok_or_else(|| "识别应答缺 text 字段".to_string())
+        })
     }
+}
+
+/// mock 档识别文本（`RR3_BRAIN_MOCK_ASR_TEXT` 注入覆盖，空白回落固定文本）。
+fn rr3_mock_text() -> String {
+    std::env::var(RR3_MOCK_TEXT_ENV)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| RR3_MOCK_TEXT.to_string())
+}
+
+/// 识别应答形状：坏 JSON / 缺 text 折 Err（B-16②：不逃逸护栏）。
+fn rr3_asr_text(resp: &[u8]) -> Result<String, String> {
+    let data: Value = serde_json::from_slice(resp).map_err(|e| format!("识别应答非 JSON: {e}"))?;
+    data.get("text")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())
+        .ok_or_else(|| "识别应答缺 text 字段".to_string())
 }
 
 /// LLM 连接与历史整体（0.0.6 模型连接抽象批逐语义迁入）：OpenAI Chat
@@ -434,10 +447,7 @@ impl Rr3LlmClient {
     /// 对位 legacy：只有成功才追加 assistant）。
     pub(crate) fn rr3_complete(&mut self, prompt: &str) -> Result<String, String> {
         if rr3_cloud_mode()? == Rr3CloudMode::Mock {
-            let reply = format!("（mock 回复）{prompt}");
-            self.history.rr3_user_turn(prompt);
-            self.history.rr3_assistant_turn(&reply);
-            return Ok(reply);
+            return Ok(self.rr3_mock_reply(prompt));
         }
         let key = self.rr3_resolve_key()?;
         self.history.rr3_user_turn(prompt);
@@ -446,12 +456,31 @@ impl Rr3LlmClient {
         // 只拼 `/chat/completions`——GLM `/api/paas/v4`、Qwen `/compatible-mode/v1`
         // 与 DeepSeek `/v1` 同形接入，不按厂商猜版本段（ADR-0023）。
         let url = format!("{}/chat/completions", self.base_url);
-        // 重试与 ASR/TTS 同轨：连接池复用引入"写成功、读前被关"的窄竞态需要一次
-        // 重放，5xx/429 同属瞬时态。代价如实登记——补全非幂等，极端竞态下同轮
-        // 可能被云端处理两次（OpenAI 兼容面无幂等键）；会话语义只采纳一次应答、
-        // 历史只入账一次，换来"问了不回"这一生产不可接受结局的收敛。
-        let resp = match rr3_http_try("大模型接口", "LLM", || {
-            rr3_http_post(&url, &key, &body, "application/json", self.timeout_s).and_then(
+        let resp = match self.rr3_llm_post(&url, &key, &body) {
+            Ok(resp) => resp,
+            Err(e) => {
+                self.history.rr3_rollback_last();
+                return Err(e);
+            }
+        };
+        self.rr3_take_reply(&resp)
+    }
+
+    /// mock 档：回显应答入账后返回。
+    fn rr3_mock_reply(&mut self, prompt: &str) -> String {
+        let reply = format!("（mock 回复）{prompt}");
+        self.history.rr3_user_turn(prompt);
+        self.history.rr3_assistant_turn(&reply);
+        reply
+    }
+
+    /// 补全真调：重试与 ASR/TTS 同轨：连接池复用引入"写成功、读前被关"的窄竞态
+    /// 需要一次重放，5xx/429 同属瞬时态。代价如实登记——补全非幂等，极端竞态下
+    /// 同轮可能被云端处理两次（OpenAI 兼容面无幂等键）；会话语义只采纳一次应答、
+    /// 历史只入账一次，换来"问了不回"这一生产不可接受结局的收敛。
+    fn rr3_llm_post(&self, url: &str, key: &str, body: &[u8]) -> Result<Vec<u8>, String> {
+        rr3_http_try("大模型接口", "LLM", || {
+            rr3_http_post(url, key, body, "application/json", self.timeout_s).and_then(
                 |(status, resp)| {
                     if status == 200 {
                         Ok(resp)
@@ -460,14 +489,12 @@ impl Rr3LlmClient {
                     }
                 },
             )
-        }) {
-            Ok(resp) => resp,
-            Err(e) => {
-                self.history.rr3_rollback_last();
-                return Err(e);
-            }
-        };
-        match rr3_reply_text(&resp) {
+        })
+    }
+
+    /// 应答形状收敛 + 历史入账：取不出即回滚并报形状不符。
+    fn rr3_take_reply(&mut self, resp: &[u8]) -> Result<String, String> {
+        match rr3_reply_text(resp) {
             Some(t) => {
                 self.history.rr3_assistant_turn(&t);
                 Ok(t)

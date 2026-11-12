@@ -121,6 +121,13 @@ fn rr3_reply_proto(d: &Rr3PanelDispatch) -> Option<Rr3PanelReply> {
         Rr3PanelDispatch::BadRequest(e) => {
             Rr3PanelReply::json(400, "Bad Request", json!({ "error": e }))
         }
+        _ => return rr3_reply_self(d),
+    })
+}
+
+/// 自述应答：healthz/version 两类纯常量（零总线依赖）。
+fn rr3_reply_self(d: &Rr3PanelDispatch) -> Option<Rr3PanelReply> {
+    Some(match d {
         Rr3PanelDispatch::HealthQuery => Rr3PanelReply::json(
             200,
             "OK",
@@ -152,6 +159,13 @@ fn rr3_reply_read(shared: &Rr3PanelShared, d: &Rr3PanelDispatch) -> Option<Rr3Pa
         Rr3PanelDispatch::LogsQuery => rr3_exec_ctl(shared, "rr3.ctl.logs", 3),
         // 接线图：rrd 应答原样透传（available:false 是数据态不是网关错）
         Rr3PanelDispatch::WiringQuery => rr3_exec_ctl(shared, "rr3.ctl.wiring", 5),
+        _ => return rr3_reply_probe(shared, d),
+    })
+}
+
+/// 读口自检臂：自检与重启（拒因语义归 rrd）。
+fn rr3_reply_probe(shared: &Rr3PanelShared, d: &Rr3PanelDispatch) -> Option<Rr3PanelReply> {
+    Some(match d {
         Rr3PanelDispatch::SelfTest => rr3_exec_selftest(shared),
         Rr3PanelDispatch::Reboot => rr3_exec_reboot(shared),
         _ => return None,
@@ -415,38 +429,52 @@ fn rr3_leg_group(
         Err(e) => legs.push(json!({
             "leg": format!("{prefix}/取数"), "pass": "fail", "reason": e,
         })),
-        Ok(v) => {
-            if v.get("available").and_then(Value::as_bool) != Some(true) {
-                legs.push(json!({
-                    "leg": format!("{prefix}/取数"), "pass": "fail",
-                    "reason": v.get("reason").cloned().unwrap_or(json!(
-                        format!("ctl.{prefix} 应答缺 available:true（数据漂移）")
-                    )),
-                }));
-                return;
-            }
-            let checks = checks_of(&v);
-            if checks.is_empty() {
-                legs.push(json!({
-                    "leg": format!("{prefix}/空"), "pass": empty_pass,
-                    "reason": empty_reason,
-                }));
-            }
-            for c in &checks {
-                let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
-                let pass = match c.get("pass").and_then(Value::as_str) {
-                    Some("pass") => "pass",
-                    Some("not-applicable") => "n-a",
-                    _ => "fail",
-                };
-                let mut leg = json!({ "leg": format!("{prefix}/{item}"), "pass": pass });
-                if let Some(r) = c.get("reason") {
-                    leg["reason"] = r.clone();
-                }
-                legs.push(leg);
-            }
-        }
+        Ok(v) => rr3_leg_avail(legs, v, prefix, empty_pass, empty_reason),
     }
+}
+
+/// available 门 + 空表态 + 逐条转述（rrd 三态折叠见 [`rr3_leg_item`]）。
+fn rr3_leg_avail(
+    legs: &mut Vec<Value>,
+    v: Value,
+    prefix: &str,
+    empty_pass: &str,
+    empty_reason: &str,
+) {
+    if v.get("available").and_then(Value::as_bool) != Some(true) {
+        legs.push(json!({
+            "leg": format!("{prefix}/取数"), "pass": "fail",
+            "reason": v.get("reason").cloned().unwrap_or(json!(
+                format!("ctl.{prefix} 应答缺 available:true（数据漂移）")
+            )),
+        }));
+        return;
+    }
+    let checks = checks_of(&v);
+    if checks.is_empty() {
+        legs.push(json!({
+            "leg": format!("{prefix}/空"), "pass": empty_pass,
+            "reason": empty_reason,
+        }));
+    }
+    for c in &checks {
+        legs.push(rr3_leg_item(prefix, c));
+    }
+}
+
+/// 单条判据转述：pass → pass、not-applicable → n-a、其余未知 fail-closed 折 fail。
+fn rr3_leg_item(prefix: &str, c: &Value) -> Value {
+    let item = c.get("item").and_then(Value::as_str).unwrap_or("?");
+    let pass = match c.get("pass").and_then(Value::as_str) {
+        Some("pass") => "pass",
+        Some("not-applicable") => "n-a",
+        _ => "fail",
+    };
+    let mut leg = json!({ "leg": format!("{prefix}/{item}"), "pass": pass });
+    if let Some(r) = c.get("reason") {
+        leg["reason"] = r.clone();
+    }
+    leg
 }
 
 /// 自检 relay 腿的能力面：`rr3-act` 是否在册（按 ctl.status 模块表）。

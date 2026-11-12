@@ -188,31 +188,40 @@ fn rr3_doa_gate(samples: &[i16], channels: u8, cfg: &Rr3DoaCfg) -> Option<(usize
     if frames == 0 {
         return None;
     }
-    let frame_len = ((cfg.sample_rate_hz as u64 * cfg.frame_ms) / 1000).max(1) as usize;
-    let min = cfg.window_rms_min.max(0) as u64;
-    if min > 0 {
-        let gate_sq = min * min * frame_len as u64;
-        let mut loud = false;
-        for fr in samples.chunks_exact(ch * frame_len) {
-            let (mut sq_l, mut sq_r) = (0u64, 0u64);
-            let mut i = 0;
-            while i + 1 < fr.len() {
-                let v = (fr[i] as i64).unsigned_abs();
-                sq_l += v * v;
-                let w = (fr[i + 1] as i64).unsigned_abs();
-                sq_r += w * w;
-                i += ch;
-            }
-            if sq_l >= gate_sq || sq_r >= gate_sq {
-                loud = true;
-                break;
-            }
-        }
-        if !loud {
-            return None;
-        }
+    if !rr3_doa_loud(samples, ch, cfg) {
+        return None;
     }
     Some((ch, frames))
+}
+
+/// 能量门（门内任一采集帧 rms 过阈即过；阈值²×帧长定标比较，免 isqrt）。
+fn rr3_doa_loud(samples: &[i16], ch: usize, cfg: &Rr3DoaCfg) -> bool {
+    let frame_len = ((cfg.sample_rate_hz as u64 * cfg.frame_ms) / 1000).max(1) as usize;
+    let min = cfg.window_rms_min.max(0) as u64;
+    if min == 0 {
+        return true;
+    }
+    let gate_sq = min * min * frame_len as u64;
+    for fr in samples.chunks_exact(ch * frame_len) {
+        if rr3_doa_frame_loud(fr, ch, gate_sq) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 单采集帧的 L/R 能量门（i16 取绝对值后平方累加）。
+fn rr3_doa_frame_loud(fr: &[i16], ch: usize, gate_sq: u64) -> bool {
+    let (mut sq_l, mut sq_r) = (0u64, 0u64);
+    let mut i = 0;
+    while i + 1 < fr.len() {
+        let v = (fr[i] as i64).unsigned_abs();
+        sq_l += v * v;
+        let w = (fr[i + 1] as i64).unsigned_abs();
+        sq_r += w * w;
+        i += ch;
+    }
+    sq_l >= gate_sq || sq_r >= gate_sq
 }
 
 /// 互相关积分（B9 自 doa_fix 抽出）：cc[d] = Σ_t R[t]·L[t+d]，

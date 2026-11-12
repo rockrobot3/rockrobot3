@@ -77,41 +77,70 @@ const RR3_MAX_NM_TIMEOUT_MS: u64 = 60_000;
 /// 删除；N-2：timeout_ms 迁 wifi 段，生效点 = nmcli 子进程超时。
 pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), String> {
     let v: toml::Value = toml::from_str(text).map_err(|e| format!("config TOML 解析失败: {e}"))?;
-    let sect = |name: &str| -> Result<&toml::Value, String> {
-        v.get("rr3-connect")
-            .and_then(|s| s.get(name))
-            .ok_or_else(|| format!("config 缺 [rr3-connect.{name}] 段"))
-    };
-    let u64_of = |sect: &toml::Value, key: &str, sect_name: &str| -> Result<u64, String> {
-        sect.get(key)
-            .and_then(toml::Value::as_integer)
-            .filter(|n| *n >= 0)
-            .map(|n| n as u64)
-            .ok_or_else(|| format!("config [rr3-connect.{sect_name}] 缺 {key}（非负整数）"))
-    };
-    let wifi_sect = sect("wifi")?.clone();
-    // 轮询周期/超时的工程域（本轮审计）：0 周期不可折 1ms——那是 fork 风暴；
-    // 超时过小恒失败、过大拖住 on_tick 心跳。周期按 100ms 下限钳制并留痕，
-    // 超时越上界直接拒（配置错，不猜意图）。
-    let raw_period = u64_of(&wifi_sect, "link_report_period_ms", "wifi")?;
-    let link_period = if raw_period < RR3_MIN_LINK_PERIOD_MS {
+    let wifi_sect = rr3_conn_wifi_sect(&v)?;
+    let link_period = rr3_link_period_of(&wifi_sect)?;
+    let nm_timeout = rr3_nm_timeout_of(&wifi_sect)?;
+    let bt_up = rr3_bt_up_of(&v)?;
+    Ok((
+        Rr3LinkCfg {
+            link_report_period_ms: link_period,
+            timeout_ms: nm_timeout,
+            // 配网口令下限（N-11①/M-6，批N4 件五数据化）：缺键回落 8 = legacy
+            // 语义（已部署旧 config 兼容，同 bt 段缺段回落口径）；显式给值时
+            // 必须 ≥1（0 = 无下限是策略漏洞，不当合法配置放行）
+            min_pass_len: rr3_min_pass_len_of(&wifi_sect),
+        },
+        bt_up,
+    ))
+}
+
+/// `[rr3-connect.wifi]` 段取址（缺段点名）。
+fn rr3_conn_wifi_sect(v: &toml::Value) -> Result<toml::Value, String> {
+    v.get("rr3-connect")
+        .and_then(|s| s.get("wifi"))
+        .cloned()
+        .ok_or_else(|| "config 缺 [rr3-connect.wifi] 段".to_string())
+}
+
+/// 段内非负整数键（缺键/类型错点名）。
+fn rr3_conn_u64_of(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64, String> {
+    sect.get(key)
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .ok_or_else(|| format!("config [rr3-connect.{sect_name}] 缺 {key}（非负整数）"))
+}
+
+/// 轮询周期/超时的工程域（本轮审计）：0 周期不可折 1ms——那是 fork 风暴；
+/// 超时过小恒失败、过大拖住 on_tick 心跳。周期按 100ms 下限钳制并留痕，
+/// 超时越上界直接拒（配置错，不猜意图）。
+fn rr3_link_period_of(sect: &toml::Value) -> Result<u64, String> {
+    let raw = rr3_conn_u64_of(sect, "link_report_period_ms", "wifi")?;
+    if raw < RR3_MIN_LINK_PERIOD_MS {
         eprintln!(
-            "config [rr3-connect.wifi] link_report_period_ms={raw_period} 低于下限，钳到 {RR3_MIN_LINK_PERIOD_MS}ms（防 nmcli fork 风暴）"
+            "config [rr3-connect.wifi] link_report_period_ms={raw} 低于下限，钳到 {RR3_MIN_LINK_PERIOD_MS}ms（防 nmcli fork 风暴）"
         );
-        RR3_MIN_LINK_PERIOD_MS
+        Ok(RR3_MIN_LINK_PERIOD_MS)
     } else {
-        raw_period
-    };
-    let raw_timeout = u64_of(&wifi_sect, "timeout_ms", "wifi")?;
-    if raw_timeout > RR3_MAX_NM_TIMEOUT_MS {
+        Ok(raw)
+    }
+}
+
+/// nmcli 子进程超时：越上界拒（配置错），低于下限抬到 1s。
+fn rr3_nm_timeout_of(sect: &toml::Value) -> Result<u64, String> {
+    let raw = rr3_conn_u64_of(sect, "timeout_ms", "wifi")?;
+    if raw > RR3_MAX_NM_TIMEOUT_MS {
         return Err(format!(
-            "config [rr3-connect.wifi] timeout_ms 须在 {RR3_MIN_NM_TIMEOUT_MS}..={RR3_MAX_NM_TIMEOUT_MS}，收到 {raw_timeout}"
+            "config [rr3-connect.wifi] timeout_ms 须在 {RR3_MIN_NM_TIMEOUT_MS}..={RR3_MAX_NM_TIMEOUT_MS}，收到 {raw}"
         ));
     }
-    let nm_timeout = raw_timeout.max(RR3_MIN_NM_TIMEOUT_MS);
-    // bt 开机初值（N-1：env 注入退役改 config 数据化注入）：缺段回落 false
-    // =出厂不自动开蓝牙，等价旧 env 未设行为（已部署旧 config 兼容）；
-    // 有段则 up 必须是布尔（类型错点名拒，不静默吞）
+    Ok(raw.max(RR3_MIN_NM_TIMEOUT_MS))
+}
+
+/// bt 开机初值（N-1：env 注入退役改 config 数据化注入）：缺段回落 false
+/// =出厂不自动开蓝牙，等价旧 env 未设行为（已部署旧 config 兼容）；
+/// 有段则 up 必须是布尔（类型错点名拒，不静默吞）
+fn rr3_bt_up_of(v: &toml::Value) -> Result<bool, String> {
     let bt_up = v
         .get("rr3-connect")
         .and_then(|s| s.get("bt"))
@@ -120,25 +149,18 @@ pub(crate) fn rr3_conn_cfg_parse(text: &str) -> Result<(Rr3LinkCfg, bool), Strin
                 .and_then(toml::Value::as_bool)
                 .ok_or_else(|| "config [rr3-connect.bt] 缺 up（布尔）".to_string())
         })
-        .transpose()?
-        .unwrap_or(false);
-    Ok((
-        Rr3LinkCfg {
-            link_report_period_ms: link_period,
-            timeout_ms: nm_timeout,
-            // 配网口令下限（N-11①/M-6，批N4 件五数据化）：缺键回落 8 = legacy
-            // 语义（已部署旧 config 兼容，同 bt 段缺段回落口径）；显式给值时
-            // 必须 ≥1（0 = 无下限是策略漏洞，不当合法配置放行）
-            min_pass_len: wifi_sect
-                .get("min_pass_len")
-                .and_then(toml::Value::as_integer)
-                .filter(|n| *n >= 0)
-                .map(|n| n as u64)
-                .unwrap_or(8)
-                .max(1),
-        },
-        bt_up,
-    ))
+        .transpose()?;
+    Ok(bt_up.unwrap_or(false))
+}
+
+/// 配网口令下限（缺键回落 8 = legacy；显式 0 按 1 拒放）。
+fn rr3_min_pass_len_of(sect: &toml::Value) -> u64 {
+    sect.get("min_pass_len")
+        .and_then(toml::Value::as_integer)
+        .filter(|n| *n >= 0)
+        .map(|n| n as u64)
+        .unwrap_or(8)
+        .max(1)
 }
 
 #[cfg(test)]

@@ -71,14 +71,25 @@ impl Rr3ActAxisState {
     /// 由调用方折保守缺省并打点（不 exit——保守态是安全向，退出反而进重启循环）。
     fn rr3_from_env(text: &str) -> Result<Self, String> {
         let mut raw = Rr3AxisRaw::default();
+        Self::rr3_axis_pairs(text, &mut raw)?;
+        Self::rr3_axis_finish(raw)
+    }
+
+    /// 键值对切分：形状错点名，逐键交 [`rr3_axis_kv`] 路由。
+    fn rr3_axis_pairs(text: &str, raw: &mut Rr3AxisRaw) -> Result<(), String> {
         for kv in text.split(',') {
             let (k, v) = kv.split_once('=').ok_or_else(|| {
                 format!(
                     "执行轴状态段 {kv:?} 缺 =（形状 calibrated=<bool>,hard_stop=<词>,lo=<n>,hi=<n>,center=<n>）"
                 )
             })?;
-            rr3_axis_kv(&mut raw, k, v)?;
+            rr3_axis_kv(raw, k, v)?;
         }
+        Ok(())
+    }
+
+    /// 五键齐备检查 → 投影（缺键逐条点名）。
+    fn rr3_axis_finish(raw: Rr3AxisRaw) -> Result<Self, String> {
         Ok(Self {
             calibrated: raw.calibrated.ok_or("执行轴状态缺 calibrated")?,
             hard_stop: raw.hard_stop.ok_or("执行轴状态缺 hard_stop")?,
@@ -130,18 +141,22 @@ fn rr3_axis_seen(raw: &Rr3AxisRaw, k: &str) -> Result<bool, String> {
 
 /// lo/hi/center 三数值键（同形 u16 域，文案按键取域说明）
 fn rr3_axis_pose(raw: &mut Rr3AxisRaw, k: &str, v: &str) -> Result<(), String> {
-    let what = match k {
-        "lo" => "行程下限",
-        "hi" => "行程上限",
-        _ => "中位锚",
-    };
-    let n = rr3_axis_num(v, k, what)?;
+    let n = rr3_axis_num(v, k, rr3_axis_what(k))?;
     match k {
         "lo" => raw.lo = Some(n),
         "hi" => raw.hi = Some(n),
         _ => raw.center = Some(n),
     }
     Ok(())
+}
+
+/// lo/hi/center 三数值键的文案域说明。
+fn rr3_axis_what(k: &str) -> &'static str {
+    match k {
+        "lo" => "行程下限",
+        "hi" => "行程上限",
+        _ => "中位锚",
+    }
 }
 
 /// 显式布尔（只认 `true`/`false`：注入链错值必须点名，不猜同义写法）。
@@ -442,18 +457,22 @@ fn rr3_act_cfg_effects(sect: &toml::Value) -> Result<Vec<Rr3LedEffect>, String> 
         .ok_or_else(|| "config [rr3-act.led] 缺 effects（灯效白名单数组）".to_string())?;
     let mut effects = Vec::with_capacity(arr.len());
     for (i, e) in arr.iter().enumerate() {
-        let s = e
-            .as_str()
-            .ok_or_else(|| format!("config [rr3-act.led] effects[{i}] 必须是字符串，收到 {e}"))?;
-        let eff = Rr3LedEffect::rr3_led_effect_parse(s).ok_or_else(|| {
-            format!(
-                "config [rr3-act.led] effects[{i}] 非在册灯效 {s:?}（在册值 {}）",
-                RR3_LED_EFFECT_VALUES.join("/")
-            )
-        })?;
-        effects.push(eff);
+        effects.push(rr3_act_effect_at(i, e)?);
     }
     Ok(effects)
+}
+
+/// 单项灯效：必为在册契约值的字符串（越界值点名在册值）。
+fn rr3_act_effect_at(i: usize, e: &toml::Value) -> Result<Rr3LedEffect, String> {
+    let s = e
+        .as_str()
+        .ok_or_else(|| format!("config [rr3-act.led] effects[{i}] 必须是字符串，收到 {e}"))?;
+    Rr3LedEffect::rr3_led_effect_parse(s).ok_or_else(|| {
+        format!(
+            "config [rr3-act.led] effects[{i}] 非在册灯效 {s:?}（在册值 {}）",
+            RR3_LED_EFFECT_VALUES.join("/")
+        )
+    })
 }
 
 /// 意图执行面开放集（A-9）：只认本模块**有执行臂**的在册意图主题
@@ -465,19 +484,23 @@ fn rr3_act_cfg_topics(sect: &toml::Value) -> Result<Vec<String>, String> {
         .ok_or_else(|| "config [rr3-act.intent] 缺 open_topics（意图开放主题数组）".to_string())?;
     let mut topics = Vec::with_capacity(arr.len());
     for (i, t) in arr.iter().enumerate() {
-        let s = t.as_str().ok_or_else(|| {
-            format!("config [rr3-act.intent] open_topics[{i}] 必须是字符串，收到 {t}")
-        })?;
-        if s != RR3_SERVO_COMMAND_TOPIC && s != RR3_RELAY_SET_TOPIC {
-            return Err(format!(
-                "config [rr3-act.intent] open_topics[{i}] 非本模块可执行的意图主题 {s:?}（只认 {}/{}）",
-                RR3_RELAY_SET_TOPIC,
-                RR3_SERVO_COMMAND_TOPIC
-            ));
-        }
-        topics.push(s.to_string());
+        topics.push(rr3_act_topic_at(i, t)?);
     }
     Ok(topics)
+}
+
+/// 单项主题：字符串且在本模块执行臂内（只认 relay/set 与 servo/command）。
+fn rr3_act_topic_at(i: usize, t: &toml::Value) -> Result<String, String> {
+    let s = t.as_str().ok_or_else(|| {
+        format!("config [rr3-act.intent] open_topics[{i}] 必须是字符串，收到 {t}")
+    })?;
+    if s != RR3_SERVO_COMMAND_TOPIC && s != RR3_RELAY_SET_TOPIC {
+        return Err(format!(
+            "config [rr3-act.intent] open_topics[{i}] 非本模块可执行的意图主题 {s:?}（只认 {}/{}）",
+            RR3_RELAY_SET_TOPIC, RR3_SERVO_COMMAND_TOPIC
+        ));
+    }
+    Ok(s.to_string())
 }
 
 #[cfg(test)]

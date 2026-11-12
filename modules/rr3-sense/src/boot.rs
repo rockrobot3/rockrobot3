@@ -230,18 +230,31 @@ fn rr3_cfg_reflex(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Re
         return Ok(());
     };
     rr3_cfg_bool(reflex, "enable", &mut cfg.reflex.enable)?;
-    let mut db = cfg.reflex.deadband_deg as i64;
-    rr3_cfg_i64(reflex, "deadband_deg", &mut db)?;
-    cfg.reflex.deadband_deg =
-        i32::try_from(db).map_err(|_| format!("[rr3-sense.reflex] deadband_deg 越界: {db}"))?;
-    rr3_cfg_u64(reflex, "gate_tail_ms", &mut cfg.reflex.gate_tail_ms)?;
-    rr3_cfg_u64(reflex, "gate_gap_ms", &mut cfg.reflex.gate_gap_ms)?;
+    cfg.reflex.deadband_deg = rr3_reflex_deg(reflex, "deadband_deg", cfg.reflex.deadband_deg)?;
+    rr3_reflex_gate_ms(reflex, cfg)?;
     // 0.0.8 批"转完点头"：策略三键（缺键回落默认；nod_deg 缺省 0 = 手势关，
     // 与旧版逐点等价）。行程不在此预钳——板侧 fail-closed 是唯一裁决面。
-    let mut nod = cfg.reflex.nod_deg as i64;
-    rr3_cfg_i64(reflex, "nod_deg", &mut nod)?;
-    cfg.reflex.nod_deg =
-        i32::try_from(nod).map_err(|_| format!("[rr3-sense.reflex] nod_deg 越界: {nod}"))?;
+    cfg.reflex.nod_deg = rr3_reflex_deg(reflex, "nod_deg", cfg.reflex.nod_deg)?;
+    rr3_reflex_nod_ms(reflex, cfg)?;
+    Ok(())
+}
+
+/// deadband_deg/nod_deg 同形角度键（缺键保留现值，越 i32 点名）。
+fn rr3_reflex_deg(reflex: &toml::Value, key: &str, cur: i32) -> Result<i32, String> {
+    let mut raw = cur as i64;
+    rr3_cfg_i64(reflex, key, &mut raw)?;
+    i32::try_from(raw).map_err(|_| format!("[rr3-sense.reflex] {key} 越界: {raw}"))
+}
+
+/// 门控两时间键（tail/gap，缺键保留现值）。
+fn rr3_reflex_gate_ms(reflex: &toml::Value, cfg: &mut Rr3SenseConfig) -> Result<(), String> {
+    rr3_cfg_u64(reflex, "gate_tail_ms", &mut cfg.reflex.gate_tail_ms)?;
+    rr3_cfg_u64(reflex, "gate_gap_ms", &mut cfg.reflex.gate_gap_ms)?;
+    Ok(())
+}
+
+/// 点头两时间键（delay/hold，缺键保留现值）。
+fn rr3_reflex_nod_ms(reflex: &toml::Value, cfg: &mut Rr3SenseConfig) -> Result<(), String> {
     rr3_cfg_u64(reflex, "nod_delay_ms", &mut cfg.reflex.nod_delay_ms)?;
     rr3_cfg_u64(reflex, "nod_hold_ms", &mut cfg.reflex.nod_hold_ms)?;
     Ok(())
@@ -250,44 +263,63 @@ fn rr3_cfg_reflex(section: Option<&toml::Value>, cfg: &mut Rr3SenseConfig) -> Re
 /// 采集/判据面不变量（解析后统一校验，默认值同过一遍）：全部 fail-closed，
 /// 错误文案点名键、收到值与合法域。
 fn rr3_sense_cfg_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
-    if cfg.audio.sample_rate == 0 || cfg.audio.sample_rate > RR3_MAX_SAMPLE_RATE {
+    rr3_audio_cap_check(&cfg.audio)?;
+    rr3_vad_cap_check(&cfg.vad)?;
+    rr3_deg_cap_check(
+        "rr3-sense.doa",
+        "bin_threshold_deg",
+        cfg.doa.bin_threshold_deg,
+    )?;
+    rr3_deg_cap_check("rr3-sense.reflex", "deadband_deg", cfg.reflex.deadband_deg)?;
+    rr3_ring_cap_check(cfg)?;
+    rr3_span_cap_check(&cfg.reflex)
+}
+
+/// 采集面三键域（采样率/声道/单拍时长）。
+fn rr3_audio_cap_check(audio: &Rr3AudioConfig) -> Result<(), String> {
+    if audio.sample_rate == 0 || audio.sample_rate > RR3_MAX_SAMPLE_RATE {
         return Err(format!(
             "[rr3-sense.audio] sample_rate 须在 1..={RR3_MAX_SAMPLE_RATE}，收到 {}",
-            cfg.audio.sample_rate
+            audio.sample_rate
         ));
     }
-    if cfg.audio.channels == 0 || cfg.audio.channels > RR3_MAX_CHANNELS {
+    if audio.channels == 0 || audio.channels > RR3_MAX_CHANNELS {
         return Err(format!(
             "[rr3-sense.audio] channels 须在 1..={RR3_MAX_CHANNELS}，收到 {}",
-            cfg.audio.channels
+            audio.channels
         ));
     }
-    if cfg.audio.frame_ms > RR3_MAX_FRAME_MS {
+    if audio.frame_ms > RR3_MAX_FRAME_MS {
         return Err(format!(
             "[rr3-sense.audio] frame_ms 须在 1..={RR3_MAX_FRAME_MS}，收到 {}",
-            cfg.audio.frame_ms
+            audio.frame_ms
         ));
     }
-    if !(0..=32767).contains(&cfg.vad.rms_start) {
+    Ok(())
+}
+
+/// VAD 阈值域（i16 采样域）。
+fn rr3_vad_cap_check(vad: &Rr3VadConfig) -> Result<(), String> {
+    if !(0..=32767).contains(&vad.rms_start) {
         return Err(format!(
             "[rr3-sense.vad] rms_start 须在 0..=32767（i16 采样域），收到 {}",
-            cfg.vad.rms_start
+            vad.rms_start
         ));
     }
-    if !(0..=180).contains(&cfg.doa.bin_threshold_deg) {
-        return Err(format!(
-            "[rr3-sense.doa] bin_threshold_deg 须在 0..=180，收到 {}",
-            cfg.doa.bin_threshold_deg
-        ));
+    Ok(())
+}
+
+/// 角度键域（0..=180；段名/键名由调用方点名，便于定位配置错）。
+fn rr3_deg_cap_check(tag: &str, key: &str, deg: i32) -> Result<(), String> {
+    if !(0..=180).contains(&deg) {
+        return Err(format!("[{tag}] {key} 须在 0..=180，收到 {deg}"));
     }
-    if !(0..=180).contains(&cfg.reflex.deadband_deg) {
-        return Err(format!(
-            "[rr3-sense.reflex] deadband_deg 须在 0..=180，收到 {}",
-            cfg.reflex.deadband_deg
-        ));
-    }
-    // 判向 ring 分配量 = rate × window_ms / 1000 × channels（采样点）：用 u128
-    // 计算再比上界，避免 u64 乘法在畸形配置下溢出。
+    Ok(())
+}
+
+/// 判向 ring 分配量 = rate × window_ms / 1000 × channels（采样点）：用 u128
+/// 计算再比上界，避免 u64 乘法在畸形配置下溢出。
+fn rr3_ring_cap_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
     let ring_samples = cfg.audio.sample_rate as u128 * cfg.doa.window_ms as u128 / 1000
         * cfg.audio.channels as u128;
     if ring_samples > RR3_MAX_RING_SAMPLES {
@@ -296,7 +328,7 @@ fn rr3_sense_cfg_check(cfg: &Rr3SenseConfig) -> Result<(), String> {
             cfg.doa.window_ms
         ));
     }
-    rr3_span_cap_check(&cfg.reflex)
+    Ok(())
 }
 
 /// 反射环四时间键的上界判定（判据单点；键名逐条点名便于定位配置错）。

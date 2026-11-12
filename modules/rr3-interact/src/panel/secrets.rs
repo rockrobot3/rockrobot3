@@ -107,6 +107,19 @@ fn rr3_secrets_parse(path: &Path, text: &str) -> Result<BTreeMap<String, String>
 /// 判据 2"落盘原子序单点"），tmp **建时即 0600**（消除 0644 写窗口，外部注入
 /// 路径下同机他用户读不到），父目录 0700 是第二道。
 pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<(), String> {
+    let ref_name = rr3_secrets_ref_gate(ref_name)?;
+    // 读-改-写整段持锁：丢键与 tmp 互踩都由此封死（见静态锁注释）。
+    let _write = RR3_SECRETS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let mut keys = rr3_secrets_read(path)?;
+    rr3_secrets_apply(&mut keys, ref_name, value);
+    rr3_secrets_dir_perm(path)?;
+    rr3_secrets_write(path, keys)
+}
+
+/// ref 形制：非空、无空白（落盘前的 fail-closed 门）。
+fn rr3_secrets_ref_gate(ref_name: &str) -> Result<&str, String> {
     let ref_name = ref_name.trim();
     if ref_name.is_empty() {
         return Err("ref 不能为空".to_string());
@@ -114,33 +127,40 @@ pub fn rr3_secrets_upsert(path: &Path, ref_name: &str, value: &str) -> Result<()
     if ref_name.chars().any(char::is_whitespace) {
         return Err(format!("ref 含空白: {ref_name:?}"));
     }
-    // 读-改-写整段持锁：丢键与 tmp 互踩都由此封死（见静态锁注释）。
-    let _write = RR3_SECRETS_WRITE_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let mut keys = rr3_secrets_read(path)?;
+    Ok(ref_name)
+}
+
+/// value 非空=写入/覆盖，空=删除（轮换与撤销一个语义）。
+fn rr3_secrets_apply(keys: &mut BTreeMap<String, String>, ref_name: &str, value: &str) {
     if value.trim().is_empty() {
         keys.remove(ref_name);
     } else {
         keys.insert(ref_name.to_string(), value.to_string());
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("建 {} 失败: {e}", parent.display()))?;
-        if rr3_secrets_own(
-            std::env::var(RR3_SECRETS_FILE_ENV).ok(),
-            path,
-            std::env::var("HOME").ok(),
-        ) {
-            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
-                .map_err(|e| format!("收 {} 目录权限失败: {e}", parent.display()))?;
-        }
+}
+
+/// 父目录准备：缺省 `~/.rr3` 收 0700（第二道）；外部注入路径不动别人的目录。
+fn rr3_secrets_dir_perm(path: &Path) -> Result<(), String> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(parent).map_err(|e| format!("建 {} 失败: {e}", parent.display()))?;
+    if rr3_secrets_own(
+        std::env::var(RR3_SECRETS_FILE_ENV).ok(),
+        path,
+        std::env::var("HOME").ok(),
+    ) {
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("收 {} 目录权限失败: {e}", parent.display()))?;
     }
+    Ok(())
+}
+
+/// 整表落盘：tmp 建时即 0600，rename 原子替换后目标继承该权限（敏感面铁律）。
+fn rr3_secrets_write(path: &Path, keys: BTreeMap<String, String>) -> Result<(), String> {
     let body = json!({ "keys": keys }).to_string();
     let tmp = path.with_extension("json.tmp");
-    // tmp 建时即 0600，rename 原子替换后目标继承该权限（敏感面铁律）
-    rr3_store_perm(path, &tmp, body.as_bytes(), 0o600)?;
-    Ok(())
+    rr3_store_perm(path, &tmp, body.as_bytes(), 0o600)
 }
 
 /// 目录归属（策略面，纯函数）：只有缺省 `~/.rr3` 是面板自己建的，目录权限由
