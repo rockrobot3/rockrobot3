@@ -202,6 +202,42 @@ fn rr3_period(sect: &toml::Value, key: &str, sect_name: &str) -> Result<u64, Str
     }
 }
 
+/// 启动自述：模块名/版本行 + 电源面两原子件的 SURFACE 行（装配层调用）。
+pub(crate) fn rr3_power_banner() {
+    use crate::{battery, charger};
+    eprintln!("rr3-power 0.0.1 (0.0.2 T4b 实装)");
+    for line in battery::SURFACE
+        .iter()
+        .copied()
+        .chain(charger::SURFACE.iter().copied())
+    {
+        eprintln!("  {line}");
+    }
+}
+
+/// config/rail 两行回显（cutoff「声明未生效」文案逐字红线）。
+pub(crate) fn rr3_power_echo(cfg: &Rr3PowerCfg) {
+    eprintln!(
+        "config 就绪: battery sample={}ms low={}mV charger state={}ms | cutoff={}mV（声明未生效：本版不关断，归 M6）",
+        cfg.battery.sample_period_ms,
+        cfg.battery.low_voltage_mv,
+        cfg.charger.state_period_ms,
+        cfg.battery.cutoff_voltage_mv,
+    );
+    if cfg.rail.up {
+        eprintln!(
+            "rail 监测就绪: domain={} mild={}mV severe={}mV max_age={}ms period={}ms",
+            cfg.rail.domain,
+            cfg.rail.mild_mv,
+            cfg.rail.severe_mv,
+            cfg.rail.max_age_ms,
+            cfg.rail.sample_period_ms
+        );
+    } else {
+        eprintln!("rail 未启用（up=false，合法不适用显式写）");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

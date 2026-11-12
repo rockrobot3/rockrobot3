@@ -31,14 +31,14 @@ fn main() {
 
 /// 装配序列（自原 composite.rs `rr3_power_run` 迁入，打印序列逐字不变）。
 fn rr3_power_run() -> Result<(), String> {
-    rr3_power_banner();
+    boot::rr3_power_banner();
 
     // 总线接入 + config 读取解析（收敛序列前四段在 rr3mod bootstrap，文案逐字）
     let (bus, cfg) = bootstrap(Rr3ModConfig {
         config_env: Some(RR3_POWER_CONFIG_ENV),
         parse_config: boot::rr3_power_cfg_parse,
     })?;
-    rr3_power_echo(&cfg);
+    boot::rr3_power_echo(&cfg);
 
     // HAL 电源面/轨压面探活（接入层编排，Unsupported 即致命——fail-closed 口径不变）
     let (dev, backend, first) = boot::rr3_power_probe()?;
@@ -48,42 +48,4 @@ fn rr3_power_run() -> Result<(), String> {
     let mut dispatcher =
         dispatch::Rr3PowerDispatcher::new(dev, backend, rail_dev, rail_backend, cfg, first);
     serve(bus, &mut dispatcher, RR3_POLL_WAIT)
-}
-
-/// 启动自述：模块名/版本行 + 电源面两原子件的 SURFACE 行。
-fn rr3_power_banner() {
-    // 启动自述保留骨架的 SURFACE 行：架构面"这个模块管什么"的一行说明
-    eprintln!("rr3-power 0.0.1 (0.0.2 T4b 实装)");
-    for line in battery::SURFACE
-        .iter()
-        .copied()
-        .chain(charger::SURFACE.iter().copied())
-    {
-        eprintln!("  {line}");
-    }
-}
-
-/// config/rail 两行回显（cutoff「声明未生效」文案逐字红线）。
-fn rr3_power_echo(cfg: &boot::Rr3PowerCfg) {
-    // cutoff 显式标注"声明未生效"（MC-8① 裁定 (c)）：回显 ≠ 读者，关断动作归 M6。
-    eprintln!(
-        "config 就绪: battery sample={}ms low={}mV charger state={}ms | cutoff={}mV（声明未生效：本版不关断，归 M6）",
-        cfg.battery.sample_period_ms,
-        cfg.battery.low_voltage_mv,
-        cfg.charger.state_period_ms,
-        cfg.battery.cutoff_voltage_mv,
-    );
-    // rail 段回显（批N2 件五）：独立一行，不动上面的 config 就绪行（逐字红线）
-    if cfg.rail.up {
-        eprintln!(
-            "rail 监测就绪: domain={} mild={}mV severe={}mV max_age={}ms period={}ms",
-            cfg.rail.domain,
-            cfg.rail.mild_mv,
-            cfg.rail.severe_mv,
-            cfg.rail.max_age_ms,
-            cfg.rail.sample_period_ms
-        );
-    } else {
-        eprintln!("rail 未启用（up=false，合法不适用显式写）");
-    }
 }
