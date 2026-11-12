@@ -136,14 +136,7 @@ fn rr3_asm_sim_text(text: &str) -> Result<String, String> {
     let mut in_runtime = false;
     let mut saw_hal = false;
     for line in text.lines() {
-        let t = line.trim_start();
-        if t.starts_with('[') {
-            in_runtime = t.trim() == "[runtime]";
-            out.push_str(line);
-            out.push('\n');
-            continue;
-        }
-        if rr3_asm_runtime_line(line, in_runtime, &mut saw_hal, &mut out) {
+        if rr3_asm_line(line, &mut in_runtime, &mut saw_hal, &mut out) {
             continue;
         }
         out.push_str(line);
@@ -153,6 +146,18 @@ fn rr3_asm_sim_text(text: &str) -> Result<String, String> {
         return Err("装配单 [runtime] 缺 hal_backend（P0-3 必填）——sim 变换无落点".into());
     }
     Ok(out)
+}
+
+/// 单行分派：段头与 [runtime] 段内改写（`true` = 本行已输出，不再原样追加）。
+fn rr3_asm_line(line: &str, in_runtime: &mut bool, saw_hal: &mut bool, out: &mut String) -> bool {
+    let t = line.trim_start();
+    if t.starts_with('[') {
+        *in_runtime = t.trim() == "[runtime]";
+        out.push_str(line);
+        out.push('\n');
+        return true;
+    }
+    rr3_asm_runtime_line(line, *in_runtime, saw_hal, out)
 }
 
 /// [runtime] 段内单行改写：`true` = 本行已改写或摘除，不再原样输出。
@@ -233,14 +238,7 @@ fn rr3_layout_manifest(
     module: &str,
 ) -> Result<PathBuf, String> {
     let src_manifest = src_dir.join("module.toml");
-    let text = std::fs::read_to_string(&src_manifest).map_err(|e| {
-        format!(
-            "读不到仓源 manifest {}: {e}（装配演练要求 face 模块五件齐全）",
-            src_manifest.display()
-        )
-    })?;
-    let facts = rr3_manifest_parse(&text)
-        .map_err(|errs| format!("仓源 manifest {src_manifest:?} 解析失败: {errs:?}"))?;
+    let (text, facts) = rr3_layout_src_facts(&src_manifest)?;
     // 产物 = 与 rr3-sim 同 target-dir 的模块产物（批N32 件四起六模块全
     // Rust——brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest
     // 解析保证）。target-dir 已由仓根配置移出源码区，定位走单点。
@@ -250,6 +248,21 @@ fn rr3_layout_manifest(
     std::fs::write(&dst_manifest, installed)
         .map_err(|e| format!("写 {dst_manifest:?} 失败: {e}"))?;
     Ok(entry_abs)
+}
+
+/// 读仓源 manifest 并解析（读不到/坏形都点名）。
+fn rr3_layout_src_facts(
+    src_manifest: &Path,
+) -> Result<(String, rrd::manifest::Rr3ManifestFacts), String> {
+    let text = std::fs::read_to_string(src_manifest).map_err(|e| {
+        format!(
+            "读不到仓源 manifest {}: {e}（装配演练要求 face 模块五件齐全）",
+            src_manifest.display()
+        )
+    })?;
+    let facts = rr3_manifest_parse(&text)
+        .map_err(|errs| format!("仓源 manifest {src_manifest:?} 解析失败: {errs:?}"))?;
+    Ok((text, facts))
 }
 
 /// 旁件面：config 同目录就位（模块开机即读，缺件必重启环）+ atoms/ 申报面
@@ -295,6 +308,18 @@ fn rr3_copy_node(ent: &std::fs::DirEntry, dst: &Path) -> Result<(), String> {
 /// 快速复用，单 pid 命名会让上一轮遗留模块混进本轮）；显式 `--socket` 时目录归
 /// 调用方，不删其父目录。回（目录是否归本次演练所有, workdir, socket）。
 fn rr3_drill_stage(a: &Rr3SimArgs) -> Result<(bool, PathBuf, PathBuf), String> {
+    let (owned_dir, workdir) = rr3_stage_workdir(a);
+    if owned_dir {
+        let _ = std::fs::remove_dir_all(&workdir);
+    }
+    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
+    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
+    let _ = std::fs::remove_file(&socket);
+    Ok((owned_dir, workdir, socket))
+}
+
+/// 工作目录归属与位置：显式 `--socket` 归调用方（取其父目录），否则按 pid+戳唯一。
+fn rr3_stage_workdir(a: &Rr3SimArgs) -> (bool, PathBuf) {
     let owned_dir = a.socket.is_none();
     let workdir = match &a.socket {
         Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
@@ -304,13 +329,7 @@ fn rr3_drill_stage(a: &Rr3SimArgs) -> Result<(bool, PathBuf, PathBuf), String> {
             rr3_sim_stamp()
         )),
     };
-    if owned_dir {
-        let _ = std::fs::remove_dir_all(&workdir);
-    }
-    std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
-    let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
-    let _ = std::fs::remove_file(&socket);
-    Ok((owned_dir, workdir, socket))
+    (owned_dir, workdir)
 }
 
 /// 收尾：杀 rrd（子模块喂狗失败自退）；`--keep` 保留现场并打印手动收尾指引。
@@ -492,10 +511,15 @@ fn rr3_asm_wait_ready(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String
     )
     .map_err(|e| rr3_with_log_tail(&e, ctx.log_path))?;
     report.push_str(rr3_section("装配单驱动 boot：全部 face 模块 running").as_str());
-    for (m, entry_abs) in ctx.entries {
+    rr3_asm_report_entries(ctx.entries, report);
+    Ok(())
+}
+
+/// 报告里逐模块登记 entry 装机路径。
+fn rr3_asm_report_entries(entries: &[Rr3AssembleEntry], report: &mut String) {
+    for (m, entry_abs) in entries {
         report.push_str(&format!("{m}  entry={}\n", entry_abs.display()));
     }
-    Ok(())
 }
 
 /// 阶段二：rr3-ctl 四命令巡检（status/health/logs/ota）。

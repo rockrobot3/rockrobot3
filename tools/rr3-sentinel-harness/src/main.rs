@@ -89,9 +89,20 @@ fn parse_upstream(
             frame.header.dst_task
         ));
     }
-    let (ty, body) =
-        rr3_body_split(&frame.payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
+    let (ty, v) = rr3_upstream_value(&frame.payload)?;
+    let (id, method, params) = rr3_upstream_rpc(&v)?;
+    Ok((ty, id, method, params, v))
+}
+
+/// payload 拆前缀 + 解析 JSON 体。
+fn rr3_upstream_value(payload: &[u8]) -> Result<(Rr3PayloadType, Value), String> {
+    let (ty, body) = rr3_body_split(payload).map_err(|e| format!("payload 前缀非法: {e:?}"))?;
     let v: Value = serde_json::from_slice(&body).map_err(|e| format!("体非 JSON: {e}"))?;
+    Ok((ty, v))
+}
+
+/// JSON-RPC 信封门：jsonrpc 版本 + id（无符号整数）；method/params 原样取出。
+fn rr3_upstream_rpc(v: &Value) -> Result<(u64, Option<String>, Value), String> {
     if v.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return Err("jsonrpc 必须等于 \"2.0\"".into());
     }
@@ -101,7 +112,7 @@ fn parse_upstream(
         .ok_or("缺 id（要求无符号整数）")?;
     let method = v.get("method").and_then(Value::as_str).map(str::to_string);
     let params = v.get("params").cloned().unwrap_or(Value::Null);
-    Ok((ty, id, method, params, v))
+    Ok((id, method, params))
 }
 
 /// 注册应答（rrd rr3_handshake 同款：Response + id 回显 + result.src_task）。
@@ -548,11 +559,7 @@ fn rt_recv(conn: &mut Rr3UartConn) -> Option<Rr3Frame> {
 /// ③ round-trip：下行 rr3.call → Response id 回显 + result.echo 原样回带。
 /// 返回 (应答到达, echo 对拍通过, 耗时 ms)。
 fn rr3_round_trip(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (bool, bool, u128) {
-    let req = round_trip_request(HARNESS_TASK, now_ns());
-    if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
-        eprintln!("FAIL  round-trip 请求写出失败: {e:?}");
-        std::process::exit(1);
-    }
+    rr3_rt_send(conn, now_ns);
     let rt_start = Instant::now();
     let mut rt_ok = false;
     let mut rt_echo_ok = false;
@@ -570,6 +577,15 @@ fn rr3_round_trip(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (bool, bo
     (rt_ok, rt_echo_ok, rt_start.elapsed().as_millis())
 }
 
+/// round-trip 请求写出（失败即点名退场）。
+fn rr3_rt_send(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) {
+    let req = round_trip_request(HARNESS_TASK, now_ns());
+    if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&req)) {
+        eprintln!("FAIL  round-trip 请求写出失败: {e:?}");
+        std::process::exit(1);
+    }
+}
+
 /// ④ parity 应答等待：返回 (板回 result, 耗时 ms)。
 fn rr3_parity_wait(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (Option<Value>, u128) {
     let req = parity_request(HARNESS_TASK, now_ns());
@@ -585,14 +601,14 @@ fn rr3_parity_wait(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (Option<
 /// parity 应答收帧（读到 id 匹配的 Response 为止；并发心跳 Request 跳过再等；
 /// 读取/还原/形状/畸形违约点名后返回 None——此面不 exit，交由判据面记 FAIL）。
 fn rr3_parity_recv(conn: &mut Rr3UartConn) -> Option<Value> {
-    loop {
-        let frame = rr3_parity_frame(conn)?;
+    while let Some(frame) = rr3_parity_frame(conn) {
         match rr3_parity_verdict(frame) {
             Rr3ParityStep::Hit(v) => return v,
             Rr3ParityStep::Skip => continue,
             Rr3ParityStep::Fail => return None,
         }
     }
+    None
 }
 
 /// parity 单帧读取与还原（失败点名后返回 None——此面不 exit）。
@@ -621,23 +637,38 @@ enum Rr3ParityStep {
 }
 
 fn rr3_parity_verdict(frame: Rr3Frame) -> Rr3ParityStep {
+    let Some((ty, id, m, _, v)) = rr3_parity_parsed(frame) else {
+        return Rr3ParityStep::Fail;
+    };
+    if ty == Rr3PayloadType::Response && id == PARITY_CALL_ID {
+        return Rr3ParityStep::Hit(v.get("result").cloned());
+    }
+    if ty == Rr3PayloadType::Request {
+        return Rr3ParityStep::Skip;
+    }
+    rr3_parity_shape_fail(ty, id, m)
+}
+
+/// 拆帧；畸形即点名（本次裁决记 Fail）。
+fn rr3_parity_parsed(
+    frame: Rr3Frame,
+) -> Option<(Rr3PayloadType, u64, Option<String>, Value, Value)> {
     match parse_upstream(frame) {
-        Ok((Rr3PayloadType::Response, id, _, _, v)) if id == PARITY_CALL_ID => {
-            Rr3ParityStep::Hit(v.get("result").cloned())
-        }
-        Ok((Rr3PayloadType::Request, _, _, _, _)) => Rr3ParityStep::Skip,
-        Ok((ty, id, m, _, _)) => {
-            eprintln!(
-                "FAIL  parity 应答形状错: {ty:?}/id={id}/{}",
-                m.as_deref().unwrap_or("-")
-            );
-            Rr3ParityStep::Fail
-        }
+        Ok(t) => Some(t),
         Err(e) => {
             eprintln!("FAIL  parity 应答畸形: {e}");
-            Rr3ParityStep::Fail
+            None
         }
     }
+}
+
+/// 既非命中亦非跳过：形状错点名后记 Fail。
+fn rr3_parity_shape_fail(ty: Rr3PayloadType, id: u64, m: Option<String>) -> Rr3ParityStep {
+    eprintln!(
+        "FAIL  parity 应答形状错: {ty:?}/id={id}/{}",
+        m.as_deref().unwrap_or("-")
+    );
+    Rr3ParityStep::Fail
 }
 
 /// ④ 三方两腿对拍：板回向量在册 / 契约腿（宿主 runner == 期望）/ 确定性腿
@@ -690,36 +721,23 @@ fn rr3_parity_legs(bv: &Value, parity_ms: u128) -> u32 {
 /// ① 注册两项判据：返回 (FAIL 数, heartbeat_ms)。
 fn rr3_register_checks(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (u32, u64) {
     let (reg_name, hb_ms) = rr3_register(conn, now_ns);
-    let mut fail = 0;
-    if !verdict(
+    let fail = rr3_tally(
         !reg_name.is_empty(),
         &format!("① 注册（Request/rr3.register，name={reg_name}）"),
-    ) {
-        fail += 1;
-    }
-    if !verdict(
+    ) + rr3_tally(
         hb_ms > 0,
         &format!("① manifest [health].heartbeat_ms 在场（{hb_ms}ms）"),
-    ) {
-        fail += 1;
-    }
+    );
     (fail, hb_ms)
 }
 
 /// ③ round-trip 两项判据：返回 FAIL 数。
 fn rr3_rt_checks(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> u32 {
     let (rt_ok, rt_echo_ok, rt_ms) = rr3_round_trip(conn, now_ns);
-    let mut fail = 0;
-    if !verdict(
+    rr3_tally(
         rt_ok,
         &format!("③ round-trip 应答（id={ROUND_TRIP_ID} 回显，耗时 {rt_ms}ms）"),
-    ) {
-        fail += 1;
-    }
-    if !verdict(rt_echo_ok, "③ result.echo 原样回带（params→echo 逐字对拍）") {
-        fail += 1;
-    }
-    fail
+    ) + rr3_tally(rt_echo_ok, "③ result.echo 原样回带（params→echo 逐字对拍）")
 }
 
 /// C12 证据文件（三样契约）：fail 也写，原始数据留痕。

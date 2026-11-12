@@ -229,12 +229,7 @@ mod run {
 
     fn rr3_sim_drill(a: &crate::drill::Rr3SimArgs) -> Result<String, String> {
         // ---- 0. 定位：仓根与三个二进制 ----
-        let repo = crate::drill::rr3_repo_locate(a)?;
-        let (d_rrd, d_peer, d_rrctl) = rr3_default_bins(&repo);
-        let rrd = a.rrd.clone().unwrap_or(d_rrd);
-        let peer = a.sim_peer.clone().unwrap_or(d_peer);
-        let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
-        rr3_require_bins(&rrd, &peer, &rrctl)?;
+        let (rrd, peer, rrctl) = rr3_sim_bins(a)?;
 
         // ---- 1. 夹具：套接字 + 两份 manifest（entry 用 sim_peer 的绝对路径）。
         // C14① 换位：resident = rr3-interact（不发布），外部发布者 = rr3-sense
@@ -256,6 +251,19 @@ mod run {
         result
     }
 
+    /// 仓根定位与三个二进制（缺省随 target-dir 同层；存在性一次校验）。
+    fn rr3_sim_bins(
+        a: &crate::drill::Rr3SimArgs,
+    ) -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf), String> {
+        let repo = crate::drill::rr3_repo_locate(a)?;
+        let (d_rrd, d_peer, d_rrctl) = rr3_default_bins(&repo);
+        let rrd = a.rrd.clone().unwrap_or(d_rrd);
+        let peer = a.sim_peer.clone().unwrap_or(d_peer);
+        let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
+        rr3_require_bins(&rrd, &peer, &rrctl)?;
+        Ok((rrd, peer, rrctl))
+    }
+
     /// 演练夹具：工作目录/套接字/两份 manifest 的落点与内容。
     struct SimFx {
         workdir: std::path::PathBuf,
@@ -268,8 +276,7 @@ mod run {
     fn rr3_fixture(a: &crate::drill::Rr3SimArgs, peer: &Path) -> Result<SimFx, String> {
         let workdir = rr3_workdir(a);
         std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
-        let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
-        let _ = std::fs::remove_file(&socket);
+        let socket = rr3_fixture_socket(a, &workdir);
         let m_a = workdir.join(format!("{RR3_DRILL_RESIDENT}.toml"));
         let m_b = workdir.join(format!("{RR3_DRILL_PUBLISHER}.toml"));
         rr3_write_manifest(&m_a, RR3_DRILL_RESIDENT, peer, "always", &[])?;
@@ -280,6 +287,16 @@ mod run {
             m_a,
             m_b,
         })
+    }
+
+    /// 夹具套接字：显式 `--socket` 优先，否则落在工作目录；旧文件先清掉。
+    fn rr3_fixture_socket(
+        a: &crate::drill::Rr3SimArgs,
+        workdir: &std::path::Path,
+    ) -> std::path::PathBuf {
+        let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
+        let _ = std::fs::remove_file(&socket);
+        socket
     }
 
     /// 夹具工作目录：显式 `--socket` 取其父目录，否则按 pid 落 tmp。

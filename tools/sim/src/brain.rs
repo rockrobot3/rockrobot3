@@ -322,10 +322,7 @@ fn rr3_brain_fix(
     let brain_cfg = workdir.join("config.toml");
     let interact_cfg = workdir.join("interact-config.toml");
     rr3_brain_cfg_write(&brain_cfg, &interact_cfg, cloud_real, base_url)?;
-    for (name, text) in rr3_brain_manifests(&bins.sense, &bins.interact, &bins.brain) {
-        let p = workdir.join(format!("{name}.toml"));
-        std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
-    }
+    rr3_brain_manifests_write(&workdir, bins)?;
     let m_sense = workdir.join(format!("{RR3_SIM_MODULE_A}.toml"));
     let m_interact = workdir.join(format!("{RR3_SIM_MODULE_B}.toml"));
     let m_brain = workdir.join(format!("{RR3_SIM_MODULE_BRAIN}.toml"));
@@ -338,6 +335,15 @@ fn rr3_brain_fix(
         m_interact,
         m_brain,
     })
+}
+
+/// 三份 wire manifest 落盘（写完即用）。
+fn rr3_brain_manifests_write(workdir: &Path, bins: &Rr3BrainBins) -> Result<(), String> {
+    for (name, text) in rr3_brain_manifests(&bins.sense, &bins.interact, &bins.brain) {
+        let p = workdir.join(format!("{name}.toml"));
+        std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
+    }
+    Ok(())
 }
 
 /// 演练工作目录与套接字：`--socket` 显式给定则同目录，否则临时目录按进程号。
@@ -420,9 +426,18 @@ fn rr3_brain_up_rrd(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> R
         fix.socket.display(),
         ctx.audio_backend,
         ctx.sink_backend,
-        if ctx.cloud_real { "real" } else { "mock" },
+        rr3_brain_cloud_word(ctx),
     );
     Ok(())
+}
+
+/// 云端档位的报告词（real/mock）。
+fn rr3_brain_cloud_word(ctx: &Rr3BrainCtx) -> &'static str {
+    if ctx.cloud_real {
+        "real"
+    } else {
+        "mock"
+    }
 }
 
 /// 外部起 interact 与 brain（两个真模块，各自日志进 workdir）。
@@ -452,10 +467,7 @@ fn rr3_brain_up_ext(ctx: &Rr3BrainCtx, children: &mut Vec<(String, Child)>) -> R
     let mut bc = Command::new(&ctx.bins.brain);
     bc.env("RR3_BUS_PATH", &fix.socket)
         .env("RR3_MANIFEST", &fix.m_brain)
-        .env(
-            "RR3_BRAIN_CLOUD",
-            if ctx.cloud_real { "real" } else { "mock" },
-        )
+        .env("RR3_BRAIN_CLOUD", rr3_brain_cloud_word(ctx))
         .env("RR3_BRAIN_CONFIG", &fix.brain_cfg);
     let brain_log = fix.workdir.join("brain.log");
     let brain_child = rr3_spawn_logged(bc, &brain_log, RR3_SIM_MODULE_BRAIN)?;

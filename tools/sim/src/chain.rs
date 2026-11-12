@@ -233,6 +233,15 @@ pub fn rr3_obs_feed(obs: &mut Rr3ChainObs, body: &Value) {
 /// 取证判定（纯函数）：判向档落注入值的 ±2° 容差且分左档；落角 = 词表左档 70°。
 /// 收集循环只等 presence，档位对不对在这里裁——证据与判定分离，tests 可直测。
 pub fn rr3_chain_judge(obs: &Rr3ChainObs) -> Result<String, String> {
+    let deg = rr3_chain_doa_ok(obs)?;
+    let angle = rr3_chain_servo_ok(obs)?;
+    Ok(format!(
+        "doa={deg}°/left（注入 {RR3_CHAIN_DOA_DEG}° ±2° 容差内）→ servo={angle}°（词表左档）"
+    ))
+}
+
+/// 判向档判定：落注入值的 ±2° 容差且分左档。
+fn rr3_chain_doa_ok(obs: &Rr3ChainObs) -> Result<i64, String> {
     let deg = obs
         .doa_deg
         .ok_or("判向档缺失：onset 没携 doa（注入没生效或链路没走通）")?;
@@ -244,15 +253,18 @@ pub fn rr3_chain_judge(obs: &Rr3ChainObs) -> Result<String, String> {
     if obs.doa_bin.as_deref() != Some("left") {
         return Err(format!("|deg| > 30 必须落左档: {:?}", obs.doa_bin));
     }
+    Ok(deg)
+}
+
+/// 转向落角判定：必须是词表左档角。
+fn rr3_chain_servo_ok(obs: &Rr3ChainObs) -> Result<i64, String> {
     let angle = obs
         .servo_angle
         .ok_or("转向落角缺失：intent 动作没落到 servo/state（词表映射或 act 链路断）")?;
     if angle != RR3_CHAIN_LEFT_ANGLE {
         return Err(format!("词表左档必须落 {RR3_CHAIN_LEFT_ANGLE}°: {angle}°"));
     }
-    Ok(format!(
-        "doa={deg}°/left（注入 {RR3_CHAIN_DOA_DEG}° ±2° 容差内）→ servo={angle}°（词表左档）"
-    ))
+    Ok(angle)
 }
 
 /// 裸 UDS 观察者：rr3.register 最小身份（与 e2e support 的 rr3_connect_observer
@@ -480,18 +492,7 @@ struct Rr3ChainFix {
 fn rr3_chain_fix(a: &Rr3SimArgs, bins: &Rr3ChainBins) -> Result<Rr3ChainFix, String> {
     let (workdir, socket) = rr3_chain_place(a)?;
 
-    for (name, text) in [
-        (
-            "brain-config.toml",
-            rr3_brain_cfg_text(false, "http://127.0.0.1:9/v1"),
-        ),
-        ("sense-config.toml", rr3_chain_sense_cfg()),
-        ("interact-config.toml", rr3_chain_itact_cfg()),
-        ("act-config.toml", rr3_chain_act_cfg()),
-    ] {
-        let p = workdir.join(name);
-        std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
-    }
+    rr3_chain_cfgs(&workdir)?;
     let obs_manifest = workdir.join(format!("{RR3_CHAIN_OBS}.toml"));
     // 观察者 manifest 需要绝对 entry：指向 act 真二进制（不 exec，只过注册门禁）
     std::fs::write(&obs_manifest, rr3_chain_obs(&bins.act))
@@ -506,6 +507,23 @@ fn rr3_chain_fix(a: &Rr3SimArgs, bins: &Rr3ChainBins) -> Result<Rr3ChainFix, Str
         workdir,
         socket,
     })
+}
+
+/// 四份演练 config 落盘（写完即用）。
+fn rr3_chain_cfgs(workdir: &Path) -> Result<(), String> {
+    for (name, text) in [
+        (
+            "brain-config.toml",
+            rr3_brain_cfg_text(false, "http://127.0.0.1:9/v1"),
+        ),
+        ("sense-config.toml", rr3_chain_sense_cfg()),
+        ("interact-config.toml", rr3_chain_itact_cfg()),
+        ("act-config.toml", rr3_chain_act_cfg()),
+    ] {
+        let p = workdir.join(name);
+        std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
+    }
+    Ok(())
 }
 
 /// 演练工作目录与套接字：`--socket` 显式给定则同目录，否则临时目录按进程号。

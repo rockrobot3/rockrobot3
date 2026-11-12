@@ -49,18 +49,19 @@ fn topic_string_of(topics: &Value, want: &str, errs: &mut Vec<String>) -> String
         errs.push("contracts/topics.toml 缺 [[topic]] 段".into());
         return String::new();
     };
-    for t in arr {
-        match t.get("name").and_then(Value::as_str) {
-            Some(n) if n == want => {
-                return want.to_string();
-            }
-            _ => continue,
-        }
+    if !topic_listed(arr, want) {
+        errs.push(format!(
+            "contracts/topics.toml 不含在册主题 \"{want}\"（板侧常量只认契约在册名）"
+        ));
+        return String::new();
     }
-    errs.push(format!(
-        "contracts/topics.toml 不含在册主题 \"{want}\"（板侧常量只认契约在册名）"
-    ));
-    String::new()
+    want.to_string()
+}
+
+/// `[[topic]]` 段里是否登记了 `want`。
+fn topic_listed(arr: &[Value], want: &str) -> bool {
+    arr.iter()
+        .any(|t| t.get("name").and_then(Value::as_str) == Some(want))
 }
 
 /// face-expressions.toml 取 expressions 全集与 board_subset（fail-closed 同上）。
@@ -158,9 +159,7 @@ fn axis_entries(dir: &Path, errs: &mut Vec<String>) -> Option<Vec<PathBuf>> {
 /// 单档案 → 一行 (stem, lo, hi, center)；不合规处逐条折 Err（可多条：三键各自
 /// 独立校验，坏几个报几个），由调用方统一入 errs——判断面与收集面分离。
 fn axis_row_of(path: &Path) -> Result<(String, u32, u32, u32), Vec<String>> {
-    let v = axis_doc_of(path).map_err(|e| vec![e])?;
-    let stem = axis_ident(path, &v).map_err(|e| vec![e])?;
-    let (center, lo, hi) = axis_triple(&v, path)?;
+    let (stem, center, lo, hi) = axis_core(path)?;
     if !(lo < center && center < hi) {
         return Err(vec![format!(
             "{} 行程窗口不自洽：须 lo < center < hi（{lo} < {center} < {hi}）",
@@ -170,9 +169,27 @@ fn axis_row_of(path: &Path) -> Result<(String, u32, u32, u32), Vec<String>> {
     Ok((stem, lo, hi, center))
 }
 
+/// 身份、三键取数：`(stem, center, lo, hi)`；坏几个报几个。
+fn axis_core(path: &Path) -> Result<(String, u32, u32, u32), Vec<String>> {
+    let v = axis_doc_of(path).map_err(|e| vec![e])?;
+    let stem = axis_ident(path, &v).map_err(|e| vec![e])?;
+    let (center, lo, hi) = axis_triple(&v, path)?;
+    Ok((stem, center, lo, hi))
+}
+
 /// 三键并检：`center_deg`/`lo_deg`/`hi_deg` 各自独立，逐键留痕不短路（一次
 /// 运行把同一档案的坏键全报出来，省掉"改一个键再跑一次"的往返）。
 fn axis_triple(v: &Value, path: &Path) -> Result<(u32, u32, u32), Vec<String>> {
+    let (vals, errs) = axis_collect(v, path);
+    if errs.is_empty() {
+        Ok((vals[0], vals[1], vals[2]))
+    } else {
+        Err(errs)
+    }
+}
+
+/// 三键逐把取数：各自独立留痕，不短路。
+fn axis_collect(v: &Value, path: &Path) -> ([u32; 3], Vec<String>) {
     let keys = ["center_deg", "lo_deg", "hi_deg"];
     let mut vals = [0u32; 3];
     let mut errs: Vec<String> = Vec::new();
@@ -182,11 +199,7 @@ fn axis_triple(v: &Value, path: &Path) -> Result<(u32, u32, u32), Vec<String>> {
             Err(e) => errs.push(e),
         }
     }
-    if errs.is_empty() {
-        Ok((vals[0], vals[1], vals[2]))
-    } else {
-        Err(errs)
-    }
+    (vals, errs)
 }
 
 /// 档案装载面：读文本 → 解析 → schema 钉 1（档案 schema 升版 = 装载器与

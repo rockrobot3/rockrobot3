@@ -208,16 +208,7 @@ pub fn rr3_oled_lines(
     rows: usize,
     cols: usize,
 ) -> Vec<Vec<u8>> {
-    let ascii: Vec<u8> = text
-        .chars()
-        .map(|c| {
-            if (0x20..=0x7E).contains(&(c as u32)) {
-                c as u8
-            } else {
-                b' '
-            }
-        })
-        .collect();
+    let ascii: Vec<u8> = rr3_oled_ascii(text);
     let mut lines: Vec<Vec<u8>> = Vec::with_capacity(rows);
     for row in 0..rows.saturating_sub(1) {
         let start = row * cols;
@@ -229,6 +220,19 @@ pub fn rr3_oled_lines(
     }
     lines.push(format!("P:{pan_deg:03} T:{tilt_deg:03}").into_bytes());
     lines
+}
+
+/// 可见 ASCII 折字节，其余一律空格（先按 char 过滤，不劈多字节字符）。
+fn rr3_oled_ascii(text: &str) -> Vec<u8> {
+    text.chars()
+        .map(|c| {
+            if (0x20..=0x7E).contains(&(c as u32)) {
+                c as u8
+            } else {
+                b' '
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
