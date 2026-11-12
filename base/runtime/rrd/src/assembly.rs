@@ -216,6 +216,17 @@ fn rr3_check_rated<'a>(
     }
     // mate = none 直连无注册对端型号，负载未注册按 0 计（诚实边界）；mate 非 none
     // 必在器件 mate 集（装载期⑦-d 已判），查不到只会是契约坏形，按 0 计不炸。
+    rr3_rated_body(w, peak_by_mate, by_conn, item, out);
+}
+
+/// 额定加总体：馈线闭包可判则加总，闭包破直接点名 FAIL。
+fn rr3_rated_body<'a>(
+    w: &'a Rr3Wire,
+    peak_by_mate: &BTreeMap<String, i64>,
+    by_conn: &BTreeMap<&str, &'a Rr3Wire>,
+    item: String,
+    out: &mut Vec<Rr3AssemblyCheck>,
+) {
     match rated_closure(w, by_conn) {
         Err(fault) => out.push(Rr3AssemblyCheck {
             item,

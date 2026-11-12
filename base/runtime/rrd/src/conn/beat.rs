@@ -63,7 +63,17 @@ fn rr3_beat_counters(ctx: &Rr3ConnCtx, me: &Rr3Peer, params: &Value) {
     let Some(path) = ctx.counters_path.as_deref() else {
         return;
     };
-    match crate::counters::rr3_counters_store(path, &snap) {
+    rr3_ctr_flush(&mut gate, path, &snap, ctx);
+}
+
+/// 落盘结果回执：成功开下一拍窗口，失败留痕等自然重试。
+fn rr3_ctr_flush(
+    gate: &mut crate::counters::Rr3CountersGate,
+    path: &std::path::Path,
+    snap: &std::collections::BTreeMap<String, u64>,
+    ctx: &Rr3ConnCtx,
+) {
+    match crate::counters::rr3_counters_store(path, snap) {
         Ok(()) => gate.rr3_on_flushed(ctx.rr3_ctx_now_ms()),
         Err(e) => rr3_log(&format!("counters 落盘失败（下一拍窗口到自然重试）: {e}")),
     }

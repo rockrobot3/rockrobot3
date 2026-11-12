@@ -38,6 +38,12 @@ fn read_set(path: &Path, role: &str) -> Result<Rr3TopicSet, Vec<String>> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| vec![format!("读不到{role} {}: {e}", path.display())])?;
     let set = rr3_topic_parse(&text);
+    rr3_topics_gate(path, role, &set)?;
+    Ok(set)
+}
+
+/// 装载后两道门：空表即契约事故；形状错误逐条包上 {role}+path（哪一册坏了一眼可见）。
+fn rr3_topics_gate(path: &Path, role: &str, set: &Rr3TopicSet) -> Result<(), Vec<String>> {
     if set.rr3_topic_is_empty() {
         return Err(vec![format!(
             "{role} {} 解析后为空，拒绝启动",
@@ -46,14 +52,12 @@ fn read_set(path: &Path, role: &str) -> Result<Rr3TopicSet, Vec<String>> {
     }
     let errs = set.rr3_topic_check();
     if !errs.is_empty() {
-        // 形状错误本身不带来源，这里逐条包上 {role}+path：契约的错和叠加层的错
-        // 不能打出一样的字，否则"哪一册坏了"要人二次猜
         return Err(errs
             .into_iter()
             .map(|e| format!("{role} {} 形状不合: {e}", path.display()))
             .collect());
     }
-    Ok(set)
+    Ok(())
 }
 
 /// 把命令行传入的路径解析成绝对路径（`canonicalize`：纯 `std::fs`，两平台同语义）。

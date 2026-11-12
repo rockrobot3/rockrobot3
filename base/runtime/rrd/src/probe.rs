@@ -254,14 +254,19 @@ pub fn rr3_probe_default() -> Arc<dyn Rr3Probe> {
         None => rr3_probe_select(None),
         Some(v) => {
             let v = v.to_string_lossy().into_owned();
-            let known = matches!(v.as_str(), "sim" | "linux" | "absent");
-            if !known {
-                eprintln!(
-                    "rrd: 环境变量 {RR3_PROBE_ENV} 取值不认: {v}（允许 sim/linux/absent），回落平台默认"
-                );
-            }
+            rr3_probe_warn(&v);
             rr3_probe_select(Some(&v))
         }
+    }
+}
+
+/// 未知取值留痕（不拦启动，回落平台默认）。
+fn rr3_probe_warn(v: &str) {
+    let known = matches!(v, "sim" | "linux" | "absent");
+    if !known {
+        eprintln!(
+            "rrd: 环境变量 {RR3_PROBE_ENV} 取值不认: {v}（允许 sim/linux/absent），回落平台默认"
+        );
     }
 }
 

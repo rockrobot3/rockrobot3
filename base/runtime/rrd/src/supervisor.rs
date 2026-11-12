@@ -382,30 +382,66 @@ fn rr3_boot_spawn(
     // 低电兜底（0.0.2 方案 Q4 裁定）：全局低电旗生效后**停止一切新 spawn**——boot 与
     // 重启共用本漏斗（D-7：护栏长在唯一入口上），一问全挡。挂死的旧进程不在此杀：
     // "杀而不重启"属关机策略，归 rr3-power 演进与 M6；本面只保证不再起新的。
-    if rr3_lock(shared).rr3_reg_lp_is_set() {
-        rr3_log(&format!(
-            "低电兜底：拒绝 spawn {name}（全局低电旗已置位，停止新 spawn）"
-        ));
-        // 计划不丢：旗解除后模块必须回得来。丢了就是"一次低电段永久少一个模块"，
-        // rr3-power 自己死掉更会锁死解除路径（只有它能发 battery/ok）。
-        rr3_log(&format!(
-            "低电兜底：{name} 的启动计划保留，{RR3_LOW_POWER_RETRY_MS}ms 后重试（旗解除即放行）"
-        ));
-        rr3_schedule_due(due, rr3_low_power_retry(&name, attempt, &job.facts.entry));
+    if rr3_boot_lp_hold(shared, due, job, &name, attempt) {
         return;
     }
-    if let Some(mut old) = children.remove(&name) {
+    rr3_boot_kill_old(children, &name);
+    rr3_boot_launch(
+        shared, t0, children, due, job, &name, attempt, bus_path, boot_role,
+    );
+}
+
+/// own → spawn → 成功入表 / 失败记账（own 必须在前：子进程可能同毫秒内注册并死掉）。
+#[allow(clippy::too_many_arguments)]
+fn rr3_boot_launch(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    t0: Instant,
+    children: &mut BTreeMap<String, Child>,
+    due: &mut Vec<(Instant, Rr3RestartPlan)>,
+    job: &Rr3SpawnJob,
+    name: &str,
+    attempt: u32,
+    bus_path: &Path,
+    boot_role: &str,
+) {
+    rr3_lock(shared).rr3_reg_own(name);
+    match rr3_spawn_build(job, bus_path, boot_role).spawn() {
+        Ok(child) => rr3_spawn_ok(children, name, child, job, attempt),
+        Err(e) => rr3_spawn_err(shared, t0, due, job, name, e),
+    }
+}
+
+/// 低电旗门：置位时留痕并把计划延后重试（返回 true = 本拍不起进程）。
+fn rr3_boot_lp_hold(
+    shared: &Arc<Mutex<RrdRegistry>>,
+    due: &mut Vec<(Instant, Rr3RestartPlan)>,
+    job: &Rr3SpawnJob,
+    name: &str,
+    attempt: u32,
+) -> bool {
+    if !rr3_lock(shared).rr3_reg_lp_is_set() {
+        return false;
+    }
+    rr3_log(&format!(
+        "低电兜底：拒绝 spawn {name}（全局低电旗已置位，停止新 spawn）"
+    ));
+    // 计划不丢：旗解除后模块必须回得来。丢了就是"一次低电段永久少一个模块"，
+    // rr3-power 自己死掉更会锁死解除路径（只有它能发 battery/ok）。
+    rr3_log(&format!(
+        "低电兜底：{name} 的启动计划保留，{RR3_LOW_POWER_RETRY_MS}ms 后重试（旗解除即放行）"
+    ));
+    rr3_schedule_due(due, rr3_low_power_retry(name, attempt, &job.facts.entry));
+    true
+}
+
+/// 同名旧 handle 先杀后收：覆盖 `Child` 不等于杀进程（std 的 drop 既不 kill 也不 wait）。
+fn rr3_boot_kill_old(children: &mut BTreeMap<String, Child>, name: &str) {
+    if let Some(mut old) = children.remove(name) {
         // 走到这里只有一种形状：到期判死挂住的子进程（conn/收尸那两路都会先把 handle 交出来）。
-        // 不杀就是"两份同名进程并存 + 旧 handle 被 insert 覆盖成永久孤儿"——
-        // 覆盖 `Child` 不等于杀进程，std 的 drop 既不 kill 也不 wait。
+        // 不杀就是"两份同名进程并存 + 旧 handle 被 insert 覆盖成永久孤儿"。
         let _ = old.kill();
         let _ = old.wait(); // 当场收掉，绝不留僵尸；这里阻塞是故意的（就等这一个）
         rr3_log(&format!("杀掉挂死的 {name} pid={}", old.id()));
-    }
-    rr3_lock(shared).rr3_reg_own(&name);
-    match rr3_spawn_build(job, bus_path, boot_role).spawn() {
-        Ok(child) => rr3_spawn_ok(children, &name, child, job, attempt),
-        Err(e) => rr3_spawn_err(shared, t0, due, job, &name, e),
     }
 }
 
@@ -547,13 +583,7 @@ fn rr3_reap(
     children: &mut BTreeMap<String, Child>,
     due: &mut Vec<(Instant, Rr3RestartPlan)>,
 ) {
-    let mut exited: Vec<(String, ExitStatus)> = Vec::new();
-    for (name, child) in children.iter_mut() {
-        // `try_wait` 不阻塞；`Ok(None)` = 还活着；`Err` 只可能是 ECHILD 这类"没得收"，跳过它。
-        if let Ok(Some(status)) = child.try_wait() {
-            exited.push((name.clone(), status));
-        }
-    }
+    let exited = rr3_reap_scan(children);
     for (name, status) in exited {
         // 先把 handle 交出来：之后无论走哪条分支，这个 pid 都不再是"我的活"（绝不留僵尸，
         // 也绝不让下一轮把它当还活着的进程重复收一次）。
@@ -565,6 +595,17 @@ fn rr3_reap(
         let verdict = rr3_lock(shared).rr3_reg_child_exit(&job.facts, clean, rr3_now_ms(t0));
         rr3_absorb_exit(shared, &name, &status.to_string(), verdict, due);
     }
+}
+
+/// 扫尸收集：`try_wait` 非阻塞，`Ok(None)` = 还活着；`Err` 只可能是 ECHILD 这类"没得收"，跳过。
+fn rr3_reap_scan(children: &mut BTreeMap<String, Child>) -> Vec<(String, ExitStatus)> {
+    let mut exited: Vec<(String, ExitStatus)> = Vec::new();
+    for (name, child) in children.iter_mut() {
+        if let Ok(Some(status)) = child.try_wait() {
+            exited.push((name.clone(), status));
+        }
+    }
+    exited
 }
 
 /// 到期执行。**退避不是睡眠**：这里只问"到点了没有"，从不 sleep（E-4）。

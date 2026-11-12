@@ -125,15 +125,26 @@ pub fn rr3_cli_parse_env(
 
 /// 末尾两道语义门：socket 非空 → 装配面必选（形状错误已在解析循环内拒）。
 fn rr3_cli_finish(cfg: RrdConfig) -> Result<RrdConfig, String> {
+    rr3_socket_ok(&cfg)?;
+    rr3_surface_ok(&cfg)?;
+    Ok(cfg)
+}
+
+/// socket 非空门。
+fn rr3_socket_ok(cfg: &RrdConfig) -> Result<(), String> {
     if cfg.socket.as_os_str().is_empty() {
         return Err("--socket 不得为空".to_string());
     }
-    // 装配面必选门（基-23）：放在 socket 空检查之后——参数形状错误（缺值/未知开关）
-    // 在循环内已拒，双缺是"形状合法但语义不合法"的最后一道，报错也要最后说。
+    Ok(())
+}
+
+/// 装配面必选门（基-23）：放在 socket 空检查之后——参数形状错误（缺值/未知开关）
+/// 在循环内已拒，双缺是"形状合法但语义不合法"的最后一道，报错也要最后说。
+fn rr3_surface_ok(cfg: &RrdConfig) -> Result<(), String> {
     if cfg.profile.is_none() && cfg.manifests.is_empty() {
         return Err(format!("{ASSEMBLY_SURFACE_REQUIRED}\n{USAGE}"));
     }
-    Ok(cfg)
+    Ok(())
 }
 
 /// 解析单个参数位，返回下一个待解析下标：形状门（未知选项 / 缺参数 / 值以 `-`
@@ -316,8 +327,14 @@ pub fn rr3_socket_abs(path: &Path) -> Result<PathBuf, String> {
 /// `always` 策略的模块以零延迟无限重启。上界同理：过了界 `delay_ms` 饱和成 `u64::MAX`，
 /// 表现是"模块再也不回来"，两者都必须在启动那一刻就听见。
 fn parse_restart_base(raw: &str) -> Result<u64, String> {
+    let v = parse_ms("--restart-base-ms", raw)?;
+    rr3_restart_base_ok(v)?;
+    Ok(v)
+}
+
+/// 退避基数两侧界：下界 1（0 = 热重启循环）、上界防末档乘算溢出 u64。
+fn rr3_restart_base_ok(v: u64) -> Result<(), String> {
     const FLAG: &str = "--restart-base-ms";
-    let v = parse_ms(FLAG, raw)?;
     if v == 0 {
         return Err(format!(
             "{FLAG} 需为正整数毫秒：0 会让重启退避恒为 0（热重启循环，spec §5.3）\n{USAGE}"
@@ -328,7 +345,7 @@ fn parse_restart_base(raw: &str) -> Result<u64, String> {
             "{FLAG} {v} 过大：退避末档乘上它会溢出 u64（饱和 = 永不重启），最大 {RR3_RESTART_BASE_MS_MAX}\n{USAGE}"
         ));
     }
-    Ok(v)
+    Ok(())
 }
 
 #[cfg(test)]

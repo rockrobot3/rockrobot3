@@ -440,19 +440,20 @@ fn rr3_load_profile(path: &Path) -> Result<(PathBuf, Rr3Profile), String> {
 
 /// 格位契约装载 + 空表/形状门（查册真值 = rr-registry 那一册，与 CI 全集层同源）
 fn rr3_load_slots(path: &Path) -> Result<Rr3SlotTable, String> {
-    let abs = std::fs::canonicalize(path)
-        .map_err(|e| format!("读不到格位契约 {}: {e}", path.display()))?;
-    let text = std::fs::read_to_string(&abs)
-        .map_err(|e| format!("读不到格位契约 {}: {e}", abs.display()))?;
+    let (abs, text) = rr3_boot_text(path, "格位契约")?;
     let table: Rr3SlotTable = rr3_slot_parse(&text);
+    rr3_slots_gate(&abs, &table)?;
+    Ok(table)
+}
+
+/// 格位契约的空表门与形状门（与 topics 装载同构：CI 全集层与运行期门两轴缺一即带病）。
+fn rr3_slots_gate(abs: &Path, table: &Rr3SlotTable) -> Result<(), String> {
     if table.rr3_slot_is_empty() {
         return Err(format!(
             "格位契约 {} 解析后为空，拒绝启动（空格位表是契约事故）",
             abs.display()
         ));
     }
-    // 形状门（0.0.5 批J 深挖收口；与 topics 装载的 rr3_topic_check 同构——
-    // CI 契约测试钉 23 格是全集层门，这里是运行期门，两轴缺一即带病）。
     let errs = table.rr3_slot_check();
     if !errs.is_empty() {
         return Err(format!(
@@ -461,16 +462,19 @@ fn rr3_load_slots(path: &Path) -> Result<Rr3SlotTable, String> {
             errs.join("; ")
         ));
     }
-    Ok(table)
+    Ok(())
 }
 
 /// 角色契约装载 + 空表/形状门（与格位契约同一 fail-closed 口径）
 fn rr3_load_roles(path: &Path) -> Result<Rr3RoleTable, String> {
-    let abs = std::fs::canonicalize(path)
-        .map_err(|e| format!("读不到角色契约 {}: {e}", path.display()))?;
-    let text = std::fs::read_to_string(&abs)
-        .map_err(|e| format!("读不到角色契约 {}: {e}", abs.display()))?;
+    let (abs, text) = rr3_boot_text(path, "角色契约")?;
     let roles: Rr3RoleTable = rr3_role_parse(&text);
+    rr3_roles_gate(&abs, &roles)?;
+    Ok(roles)
+}
+
+/// 角色契约的空表门与形状门（与格位契约同一 fail-closed 口径）。
+fn rr3_roles_gate(abs: &Path, roles: &Rr3RoleTable) -> Result<(), String> {
     if roles.rr3_role_is_empty() {
         return Err(format!(
             "角色契约 {} 解析后为空，拒绝启动（空角色表是契约事故）",
@@ -485,16 +489,28 @@ fn rr3_load_roles(path: &Path) -> Result<Rr3RoleTable, String> {
             errs.join("; ")
         ));
     }
-    Ok(roles)
+    Ok(())
 }
 
 /// 器件词表装载 + 空表/形状门（装载期只查 mate 外键闭合，不认型号能力，D10a）
 fn rr3_load_devices(path: &Path) -> Result<Rr3DeviceTable, String> {
-    let abs = std::fs::canonicalize(path)
-        .map_err(|e| format!("读不到器件词表 {}: {e}", path.display()))?;
-    let text = std::fs::read_to_string(&abs)
-        .map_err(|e| format!("读不到器件词表 {}: {e}", abs.display()))?;
+    let (abs, text) = rr3_boot_text(path, "器件词表")?;
     let devices: Rr3DeviceTable = rr3_dev_parse(&text);
+    rr3_devs_gate(&abs, &devices)?;
+    Ok(devices)
+}
+
+/// 契约册装载前两步：绝对化 + 读文本（两处失败同一句"读不到{what}"）。
+fn rr3_boot_text(path: &Path, what: &str) -> Result<(PathBuf, String), String> {
+    let abs =
+        std::fs::canonicalize(path).map_err(|e| format!("读不到{what} {}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(&abs)
+        .map_err(|e| format!("读不到{what} {}: {e}", abs.display()))?;
+    Ok((abs, text))
+}
+
+/// 器件词表的空表门与形状门（与格位/角色同一 fail-closed 口径）。
+fn rr3_devs_gate(abs: &Path, devices: &Rr3DeviceTable) -> Result<(), String> {
     if devices.rr3_dev_is_empty() {
         return Err(format!(
             "器件词表 {} 解析后为空，拒绝启动（空器件表是契约事故）",
@@ -509,7 +525,7 @@ fn rr3_load_devices(path: &Path) -> Result<Rr3DeviceTable, String> {
             errs.join("; ")
         ));
     }
-    Ok(devices)
+    Ok(())
 }
 
 /// 接线档装载（装机档必在：读不到/形状不合都拒启动；返回绝对路径供轴目录推导）
@@ -780,13 +796,23 @@ pub(crate) fn rr3_demand_expand(
 
 /// power 角色的有效挂轨；非 power 或轨缺失/`none` 返回 None（⑥-b 已点名，不双报）。
 fn rr3_power_rail<'a>(pin: &'a Rr3PinEntry, roles: &Rr3RoleTable) -> Option<&'a str> {
-    if roles.rr3_role_kind(&pin.role).as_deref() != Some("power") {
+    if !rr3_power_kind(pin, roles) {
         return None;
     }
-    if pin.rail.is_empty() || pin.rail == "none" {
+    if rr3_rail_unset(pin) {
         return None;
     }
     Some(pin.rail.as_str())
+}
+
+/// 挂轨缺失/显式 `none` 谓词（⑥-b 已点名，不双报）。
+fn rr3_rail_unset(pin: &Rr3PinEntry) -> bool {
+    pin.rail.is_empty() || pin.rail == "none"
+}
+
+/// 角色 kind = power 谓词（⑥-b 的有效挂轨前件）。
+fn rr3_power_kind(pin: &Rr3PinEntry, roles: &Rr3RoleTable) -> bool {
+    roles.rr3_role_kind(&pin.role).as_deref() == Some("power")
 }
 
 /// 门 c 覆盖判据（校验⑨ 缺失语义另一半，§5 ⑨ 行"件未申报 demands 而角色

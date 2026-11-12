@@ -111,18 +111,7 @@ pub struct Rr3RpcRequest {
 
 /// 解析上行 RPC。错误码走契约的 AIRY_E* 子集，不自造。
 pub fn rr3_rpc_parse(payload: &[u8]) -> Result<Rr3RpcRequest, (i32, String)> {
-    let text = std::str::from_utf8(payload).map_err(|e| {
-        (
-            Rr3StatusCode::Invalid as i32,
-            format!("payload 非 UTF-8: {e}"),
-        )
-    })?;
-    let v: Value = serde_json::from_str(text).map_err(|e| {
-        (
-            Rr3StatusCode::Invalid as i32,
-            format!("JSON-RPC 解析失败: {e}"),
-        )
-    })?;
+    let v: Value = rr3_rpc_body(payload)?;
     if v["jsonrpc"] != "2.0" {
         return Err((
             Rr3StatusCode::Invalid as i32,
@@ -151,6 +140,22 @@ pub fn rr3_rpc_parse(payload: &[u8]) -> Result<Rr3RpcRequest, (i32, String)> {
         id,
         method,
         params: v.get("params").cloned().unwrap_or(Value::Null),
+    })
+}
+
+/// 传输层解码：UTF-8 文本 → JSON 值（两步形状错都折 Invalid 与逐字文案）。
+fn rr3_rpc_body(payload: &[u8]) -> Result<Value, (i32, String)> {
+    let text = std::str::from_utf8(payload).map_err(|e| {
+        (
+            Rr3StatusCode::Invalid as i32,
+            format!("payload 非 UTF-8: {e}"),
+        )
+    })?;
+    serde_json::from_str(text).map_err(|e| {
+        (
+            Rr3StatusCode::Invalid as i32,
+            format!("JSON-RPC 解析失败: {e}"),
+        )
     })
 }
 
