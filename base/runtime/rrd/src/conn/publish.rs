@@ -45,9 +45,14 @@ pub(super) fn rr3_publish(
     if let Some(flow) = rr3_pub_gate(out, ctx, me, body, &topic) {
         return Ok(flow);
     }
-    rr3_pub_forward(ctx, me, body, &topic);
-    rr3_pub_batt(ctx, &topic, &parsed);
+    rr3_pub_fan(ctx, me, body, &topic, &parsed);
     Ok(Rr3Flow::Keep)
+}
+
+/// 放行后的两条消费面：广播转发 + 低电兜底面。
+fn rr3_pub_fan(ctx: &Rr3ConnCtx, me: &Rr3Peer, body: &[u8], topic: &str, parsed: &Value) {
+    rr3_pub_forward(ctx, me, body, topic);
+    rr3_pub_batt(ctx, topic, parsed);
 }
 
 /// Event 体的解析与 topic 提取。两条形状错（非 JSON / 缺坏 topic）都回 Invalid 帧

@@ -76,6 +76,11 @@ fn rr3_topic_add(set: &mut Rr3TopicSet, t: &toml::Table) {
         .insert(name.to_string(), rr3_topic_meta(t, "owner"));
     set.kinds
         .insert(name.to_string(), rr3_topic_meta(t, "kind"));
+    rr3_topic_status(set, t, name);
+}
+
+/// status 登记：非空才入册（缺键/空串即无此状态）。
+fn rr3_topic_status(set: &mut Rr3TopicSet, t: &toml::Table, name: &str) {
     if let Some(st) = t.get("status").and_then(Value::as_str) {
         if !st.is_empty() {
             set.statuses.insert(name.to_string(), st.to_string());

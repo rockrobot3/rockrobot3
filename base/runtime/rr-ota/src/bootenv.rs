@@ -112,6 +112,11 @@ fn rr3_env_kv_chk(key: &str, value: &str) -> Result<(), String> {
     if !rr3_env_key_ok(key) {
         return Err(format!("env 键 {key:?} 非法（非空、不得含 '=' 或 \\0）"));
     }
+    rr3_env_val_ok(key, value)
+}
+
+/// 值形制：不含 `\0`（写不进 env 载体）。
+fn rr3_env_val_ok(key: &str, value: &str) -> Result<(), String> {
     if value.contains('\0') {
         return Err(format!("env 键 {key:?} 的值含 \\0，写不进 env 载体"));
     }

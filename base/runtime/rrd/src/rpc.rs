@@ -112,12 +112,7 @@ pub struct Rr3RpcRequest {
 /// 解析上行 RPC。错误码走契约的 AIRY_E* 子集，不自造。
 pub fn rr3_rpc_parse(payload: &[u8]) -> Result<Rr3RpcRequest, (i32, String)> {
     let v: Value = rr3_rpc_body(payload)?;
-    if v["jsonrpc"] != "2.0" {
-        return Err((
-            Rr3StatusCode::Invalid as i32,
-            "jsonrpc 必须等于 \"2.0\"".to_string(),
-        ));
-    }
+    rr3_rpc_ver(&v)?;
     let Some(id) = v["id"].as_u64() else {
         return Err((
             Rr3StatusCode::Invalid as i32,
@@ -141,6 +136,17 @@ pub fn rr3_rpc_parse(payload: &[u8]) -> Result<Rr3RpcRequest, (i32, String)> {
         method,
         params: v.get("params").cloned().unwrap_or(Value::Null),
     })
+}
+
+/// 协议版本门：jsonrpc 必须等于 "2.0"。
+fn rr3_rpc_ver(v: &Value) -> Result<(), (i32, String)> {
+    if v["jsonrpc"] == "2.0" {
+        return Ok(());
+    }
+    Err((
+        Rr3StatusCode::Invalid as i32,
+        "jsonrpc 必须等于 \"2.0\"".to_string(),
+    ))
 }
 
 /// 传输层解码：UTF-8 文本 → JSON 值（两步形状错都折 Invalid 与逐字文案）。

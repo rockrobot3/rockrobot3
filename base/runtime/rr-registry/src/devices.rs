@@ -183,6 +183,11 @@ fn rr3_dev_id_errs(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
     if model.is_empty() {
         errs.push("device 的 model 缺失或为空".to_string());
     }
+    rr3_dev_bus_err(model, e, errs);
+}
+
+/// bus 在册（封闭词域）。
+fn rr3_dev_bus_err(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
     if !RR3_DEVICE_BUSES.contains(&e.bus.as_str()) {
         errs.push(format!(
             "device {model} 的 bus 非法: {}（封闭词域 {RR3_DEVICE_BUSES:?}）",
@@ -198,6 +203,11 @@ fn rr3_dev_addr_errs(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
             "device {model} 是 I2C 类但 addrs 为空（合法地址集必填——装机写集外地址即红）"
         ));
     }
+    rr3_dev_addrs_each(model, e, errs);
+}
+
+/// 地址集逐项非空。
+fn rr3_dev_addrs_each(model: &str, e: &Rr3DeviceEntry, errs: &mut Vec<String>) {
     for a in &e.addrs {
         if a.is_empty() {
             errs.push(format!("device {model} 的 addrs 含空串"));

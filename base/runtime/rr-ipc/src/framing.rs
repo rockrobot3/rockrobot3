@@ -116,18 +116,22 @@ impl FrameAssembler {
 
     /// magic 对齐：找到即弃前导并回 `true`；无 magic 只留尾 3B 并回 `false`。
     fn rr3_align_magic(&mut self) -> bool {
-        if let Some(pos) = find(&self.buf, &RR3_MAGIC_LE) {
-            if pos > 0 {
-                self.discarded += pos as u64;
-                self.buf.drain(..pos);
-            }
-            true
-        } else {
-            let keep_from = self.buf.len().saturating_sub(RR3_MAGIC_LE.len() - 1);
-            self.discarded += keep_from as u64;
-            self.buf.drain(..keep_from);
-            false
+        let Some(pos) = find(&self.buf, &RR3_MAGIC_LE) else {
+            return self.rr3_magic_tail();
+        };
+        if pos > 0 {
+            self.discarded += pos as u64;
+            self.buf.drain(..pos);
         }
+        true
+    }
+
+    /// 无 magic：只留尾 3B（可能跨块的前缀），其余作残骸弃掉并回 `false`。
+    fn rr3_magic_tail(&mut self) -> bool {
+        let keep_from = self.buf.len().saturating_sub(RR3_MAGIC_LE.len() - 1);
+        self.discarded += keep_from as u64;
+        self.buf.drain(..keep_from);
+        false
     }
 
     /// 头层解析 + plen 护栏：不够一帧头回 `Ok(None)`；头非法/越栏弃 4B magic 回错。

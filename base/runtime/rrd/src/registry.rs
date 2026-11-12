@@ -386,6 +386,11 @@ impl RrdRegistry {
         if counters.is_empty() {
             return false;
         }
+        self.rr3_ctr_fold(module, counters)
+    }
+
+    /// 逐键带模块名前缀累加；返回是否产生了变化。
+    fn rr3_ctr_fold(&mut self, module: &str, counters: &BTreeMap<String, u64>) -> bool {
         let mut changed = false;
         for (k, v) in counters {
             changed |= self.rr3_ctr_one(format!("{module}/{k}"), *v);
@@ -653,6 +658,11 @@ impl RrdRegistry {
         }
     }
 
+    /// 主题首段（命名空间）：`a/b` → `a`，无分隔符即整串。
+    fn rr3_pub_head(topic: &str) -> &str {
+        topic.split('/').next().unwrap_or("")
+    }
+
     /// 前三层安全判据的前两层：保留命名空间 → 前缀越权。
     fn rr3_pub_namespace(
         sender_name: &str,
@@ -664,8 +674,7 @@ impl RrdRegistry {
                 topic: topic.to_string(),
             });
         }
-        let head = topic.split('/').next().unwrap_or("");
-        if head != sender_name {
+        if Self::rr3_pub_head(topic) != sender_name {
             return Err(Rr3PublishDeny::ForeignPrefix {
                 topic: topic.to_string(),
                 owner: owner_for_echo(topics.rr3_topic_owner(topic)),
@@ -754,17 +763,18 @@ impl RrdRegistry {
     /// （与今天 `restarts` 的次序一致——达上限不再往里加，也不给计划）。
     fn rr3_charge(&mut self, facts: &Rr3ManifestFacts, clean_exit: bool) -> Option<Rr3RestartPlan> {
         let restart = Self::rr3_restart_wanted(&facts.restart_policy, clean_exit);
-        let streak = self
-            .crash_streak
-            .get(facts.name.as_str())
-            .copied()
-            .unwrap_or(0);
+        let streak = self.rr3_streak(facts.name.as_str());
         if !restart || streak >= RR3_RESTART_FAILURE_CAP {
             return None;
         }
         let attempt = streak + 1;
         self.crash_streak.insert(facts.name.clone(), attempt);
         Some(self.rr3_charge_plan(facts, attempt))
+    }
+
+    /// 崩溃账读取：同名连续失败次数（无账 = 0）。
+    fn rr3_streak(&self, name: &str) -> u32 {
+        self.crash_streak.get(name).copied().unwrap_or(0)
     }
 
     /// 退避表 → 重启计划：倍数 × base，封顶到 u64::MAX（永不 panic、不回绕）。
@@ -976,12 +986,15 @@ impl RrdRegistry {
     fn rr3_deps_satisfied(&self, required: &[String]) -> bool {
         required.iter().all(|cap| match self.providers.get(cap) {
             None => true,
-            Some(names) => names.iter().any(|n| {
-                self.modules
-                    .get(n)
-                    .is_some_and(|e| e.phase == Rr3Phase::Running)
-            }),
+            Some(names) => names.iter().any(|n| self.rr3_mod_live(n)),
         })
+    }
+
+    /// 提供者是否在位：在册且相位 = Running。
+    fn rr3_mod_live(&self, name: &str) -> bool {
+        self.modules
+            .get(name)
+            .is_some_and(|e| e.phase == Rr3Phase::Running)
     }
 
     /// 子进程退出码那一路（11b 的 supervisor 收尸用；11a 只把表级记账钉死）。

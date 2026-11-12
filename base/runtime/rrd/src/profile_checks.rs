@@ -271,12 +271,17 @@ fn rr3_tier_bare(profile: &Rr3Profile, errs: &mut Vec<String>) {
 /// P0-2 根因门：占位/退役格不得进生产装配面（真件落地后改 status=normal）。
 fn rr3_slot_retired(slot: &str, table: &Rr3SlotTable, errs: &mut Vec<String>) {
     if let Some(status) = table.rr3_slot_status(slot) {
-        if status == "placeholder" || status == "retired" {
+        if rr3_slot_dead(&status) {
             errs.push(format!(
                 "装配面引用 {status} 格 {slot}（占位/退役格不得进生产装配面；真件落地后改 contracts/slots.toml status=normal 再绑定）"
             ));
         }
     }
+}
+
+/// 非生产状态：占位 / 退役。
+fn rr3_slot_dead(status: &str) -> bool {
+    status == "placeholder" || status == "retired"
 }
 
 /// L-10：tier↔tier_scope 交叉校验（该档不适用此格）。
@@ -321,13 +326,32 @@ pub(crate) fn rr3_check_pins(
     for pin in &profile.pins {
         let (pin_errs, derives) = rr3_check_pin(pin, roles, table);
         errs.extend(pin_errs);
-        let Some(derives) = derives else { continue };
-        if profile.platform_tier != "host" {
-            continue;
-        }
-        errs.extend(rr3_derive_pin(pin, &derives, platform, &mut derived));
+        errs.extend(rr3_pins_derive(
+            profile,
+            pin,
+            derives,
+            platform,
+            &mut derived,
+        ));
     }
     (errs, derived)
+}
+
+/// host 档派生一段：非 host 档或该 pin 未声明 derives 时零波及。
+fn rr3_pins_derive(
+    profile: &Rr3Profile,
+    pin: &Rr3PinEntry,
+    derives: Option<Vec<String>>,
+    platform: &Rr3PlatformTable,
+    derived: &mut BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(derives) = derives else {
+        return Vec::new();
+    };
+    if profile.platform_tier != "host" {
+        return Vec::new();
+    }
+    rr3_derive_pin(pin, &derives, platform, derived)
 }
 
 fn rr3_wordform_guard(profile: &Rr3Profile, platform: &Rr3PlatformTable, errs: &mut Vec<String>) {

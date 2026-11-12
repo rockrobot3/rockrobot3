@@ -58,11 +58,23 @@ fn rr3_int_field(
         errs.push(format!("{path}: {key} 应为整数"));
         return None;
     };
-    if !(lo..=hi).contains(&n) {
-        errs.push(format!("{path}: {key} = {n} 越域（合法域 {lo}..={hi}）"));
-        return None;
+    rr3_field_range(n, lo, hi, path, key, errs)
+}
+
+/// 键级域判：越域当场点名并弃值（域界由调用点给定）。
+fn rr3_field_range(
+    n: i64,
+    lo: i64,
+    hi: i64,
+    path: &str,
+    key: &str,
+    errs: &mut Vec<String>,
+) -> Option<i64> {
+    if (lo..=hi).contains(&n) {
+        return Some(n);
     }
-    Some(n)
+    errs.push(format!("{path}: {key} = {n} 越域（合法域 {lo}..={hi}）"));
+    None
 }
 
 /// text 键取值（词表 kind = Text 的键走这里）：非字符串形状当场点名置 `None`。

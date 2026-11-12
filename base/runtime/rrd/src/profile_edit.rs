@@ -152,13 +152,24 @@ fn rr3_domain_spans(
         if !is_domain {
             continue;
         }
-        let end = heads.get(idx + 1).map(|&(h, _)| h).unwrap_or(lines.len());
-        // 域名是引号串，允许行内注释——单/双引号同义取首对引号内内容
-        if rr3_span_names(lines, head_i + 1, end, domain) {
-            matched.push((head_i + 1, end));
+        if let Some(span) = rr3_span_of(lines, heads, idx, head_i, domain) {
+            matched.push(span);
         }
     }
     matched
+}
+
+/// 单块定界：块行范围 = 头行+1 .. 下一块头，且块内 name 须等于 `domain`。
+fn rr3_span_of(
+    lines: &[String],
+    heads: &[(usize, bool)],
+    idx: usize,
+    head_i: usize,
+    domain: &str,
+) -> Option<(usize, usize)> {
+    let end = heads.get(idx + 1).map(|&(h, _)| h).unwrap_or(lines.len());
+    // 域名是引号串，允许行内注释——单/双引号同义取首对引号内内容
+    rr3_span_names(lines, head_i + 1, end, domain).then_some((head_i + 1, end))
 }
 
 /// 块行范围内是否写着 `name = "<domain>"`（单/双引号同义）。

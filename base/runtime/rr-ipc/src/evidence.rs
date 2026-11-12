@@ -47,6 +47,11 @@ pub fn rr3_evidence_ref_ok(reference: &str) -> bool {
         return false;
     }
     // 编号段：恰好四位数字（同时天然排除第二个 '/' 与字母）
+    rr3_ref_num_ok(num)
+}
+
+/// 编号段合法：恰好四位十进制数字（0001 起，四位零填充）。
+fn rr3_ref_num_ok(num: &str) -> bool {
     num.len() == 4 && num.bytes().all(|b| b.is_ascii_digit())
 }
 
@@ -165,14 +170,20 @@ fn rr3_ev_field(line: &str) -> Result<(&str, &str), String> {
     };
     let key = key.trim();
     let value = value.trim();
-    if !RR3_EVIDENCE_KEYS.contains(&key) {
-        return Err(format!(
-            "未知键 {key:?}（只认 {}）",
-            RR3_EVIDENCE_KEYS.join("/")
-        ));
-    }
+    rr3_ev_key_chk(key)?;
     let inner = rr3_ev_quoted(key, value)?;
     Ok((key, inner))
+}
+
+/// 键在册（词表外即拒，不猜）。
+fn rr3_ev_key_chk(key: &str) -> Result<(), String> {
+    if RR3_EVIDENCE_KEYS.contains(&key) {
+        return Ok(());
+    }
+    Err(format!(
+        "未知键 {key:?}（只认 {}）",
+        RR3_EVIDENCE_KEYS.join("/")
+    ))
 }
 
 /// 双引号值：剥离首尾引号，值内不许再出现双引号（一行文本的形制）。

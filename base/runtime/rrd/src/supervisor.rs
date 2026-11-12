@@ -354,16 +354,22 @@ fn rr3_open_unit_log(bus_path: &Path, unit: &str) -> std::io::Result<std::fs::Fi
 fn rr3_unit_log_path(bus_path: &Path, unit: &str) -> std::io::Result<PathBuf> {
     // fail-closed：bus_path 由 daemon 侧绝对化（cli.rs 的 rr3_socket_abs），
     // 相对/空路径到这里就是链条上游破了——拒开，绝不相对 CWD 悄悄建目录
-    if !bus_path.is_absolute() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "socket 路径非绝对（上游绝对化失效）",
-        ));
-    }
+    rr3_log_abs(bus_path)?;
     let dir = crate::rr3_log_dir_ensure(bus_path)?;
     let path = dir.join(format!("{unit}.log"));
     crate::rr3_log_rotate(&path);
     Ok(path)
+}
+
+/// 绝对路径门：非绝对即拒（上游绝对化失效的信号）。
+fn rr3_log_abs(bus_path: &Path) -> std::io::Result<()> {
+    if bus_path.is_absolute() {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "socket 路径非绝对（上游绝对化失效）",
+    ))
 }
 
 /// 起进程的唯一漏斗：boot 与到期重启都过这里（Task 10 的 D-7 同一条教训——

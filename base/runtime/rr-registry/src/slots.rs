@@ -174,6 +174,11 @@ fn rr3_slot_tier_err(name: &str, entry: &Rr3SlotEntry, errs: &mut Vec<String>) {
             "slot {name} 缺 tier_scope 登记（至少覆盖一个承载档: {RR3_SLOT_TIERS:?}）"
         ));
     }
+    rr3_slot_tier_bad(name, entry, errs);
+}
+
+/// tier_scope 逐项越册值点名（档名须在 [`RR3_SLOT_TIERS`] 内）。
+fn rr3_slot_tier_bad(name: &str, entry: &Rr3SlotEntry, errs: &mut Vec<String>) {
     for t in &entry.tier_scope {
         if !RR3_SLOT_TIERS.contains(&t.as_str()) {
             errs.push(format!(

@@ -294,7 +294,16 @@ fn rr3_atom_list_item(
     if let Some(rule) = &spec.rule {
         errs.extend(crate::validate::rr3_registry_check(rule, s));
     }
-    // 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）
+    rr3_atom_item_slot(spec, s, slots, errs);
+}
+
+/// 查册门：provides/uses 的每一格都必须命中格位表（裁定 5②）。
+fn rr3_atom_item_slot(
+    spec: &Rr3FieldSpec,
+    s: &str,
+    slots: &crate::slots::Rr3SlotTable,
+    errs: &mut Vec<String>,
+) {
     if rr3_atom_slot_field(spec) && !slots.rr3_slot_contains(s) {
         errs.push(format!("字段 {} 引用未登记格位 {s}", spec.path));
     }
