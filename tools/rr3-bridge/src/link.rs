@@ -283,12 +283,17 @@ fn uds_attach(
         };
         // 三个半边：wr→上行线程、rd→下行线程、kill 留主线程（断链时先行闭合，
         // 把还阻塞在旧流上的线程及时放出来）。
-        if sink.put(wr).is_some() {
-            log("uds 上行交接：顶掉上一条未接手连接，旧句柄即刻关闭");
-        }
-        src.put(rd);
+        rr3_uds_handoff(sink, src, wr, rd);
         return Some(Rr3UdsConn { kill: stream, at });
     }
+}
+
+/// 三半边交接：wr/rd 入槽（上行槽顶掉旧连接时留痕）。
+fn rr3_uds_handoff(sink: &Rr3LinkSlot, src: &Rr3LinkSlot, wr: UnixStream, rd: UnixStream) {
+    if sink.put(wr).is_some() {
+        log("uds 上行交接：顶掉上一条未接手连接，旧句柄即刻关闭");
+    }
+    src.put(rd);
 }
 
 /// 交接前的写向窗口就位（设置失败打日志后重试，返回 None）。

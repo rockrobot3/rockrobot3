@@ -393,14 +393,17 @@ fn rr3_mkmod_atom_gate(staging: &Path, files: &[(String, String)]) -> Result<(),
         .find(|(rel, _)| rel == "assemble.toml")
         .map(|(_, body)| body.as_str())
         .expect("五件套必含 assemble.toml");
-    if let Err(asm_errs) = rr_registry::rr3_assemble_parse(assemble_body) {
-        errs.extend(asm_errs);
+    let assemble_errs = rr_registry::rr3_assemble_parse(assemble_body).err();
+    errs.extend(assemble_errs.unwrap_or_default());
+    if errs.is_empty() {
+        return Ok(());
     }
-    if !errs.is_empty() {
-        let _ = std::fs::remove_dir_all(staging);
-        return Err(Rr3MkmodError::Manifest(errs));
-    }
-    Ok(())
+    rr3_atom_gate_fail(staging, errs)
+}
+/// 回灌门失败收口：清临时树后带回全部错误。
+fn rr3_atom_gate_fail(staging: &Path, errs: Vec<String>) -> Result<(), Rr3MkmodError> {
+    let _ = std::fs::remove_dir_all(staging);
+    Err(Rr3MkmodError::Manifest(errs))
 }
 
 #[cfg(test)]

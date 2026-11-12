@@ -171,11 +171,7 @@ fn cell(v: &Value, key: &str) -> String {
 }
 
 fn format_status(envelope: &Value) -> Result<String, String> {
-    let result = envelope.get("result").ok_or("应答缺 result")?;
-    let modules = result
-        .get("modules")
-        .and_then(Value::as_array)
-        .ok_or("应答缺 result.modules")?;
+    let (result, modules) = rr3_ctl_modules(envelope)?;
     let rows: Vec<Vec<String>> = modules
         .iter()
         .map(|m| vec![cell(m, "name"), cell(m, "task"), cell(m, "phase")])
@@ -183,6 +179,17 @@ fn format_status(envelope: &Value) -> Result<String, String> {
     let mut out = render_table(&["NAME", "TASK", "PHASE"], &rows);
     out.push_str(&rr3_denied_note(result));
     Ok(out)
+}
+
+/// `result` 与其 `modules` 数组（缺件逐级点名）。
+fn rr3_ctl_modules(envelope: &Value) -> Result<(&Value, &[Value]), String> {
+    let result = envelope.get("result").ok_or("应答缺 result")?;
+    let modules = result
+        .get("modules")
+        .and_then(Value::as_array)
+        .map(|a| a.as_slice())
+        .ok_or_else(|| "应答缺 result.modules".to_string())?;
+    Ok((result, modules))
 }
 
 /// `denied_publish` 附加行（缺字段不渲染）。
@@ -194,11 +201,7 @@ fn rr3_denied_note(result: &Value) -> String {
 }
 
 fn format_health(envelope: &Value) -> Result<String, String> {
-    let result = envelope.get("result").ok_or("应答缺 result")?;
-    let modules = result
-        .get("modules")
-        .and_then(Value::as_array)
-        .ok_or("应答缺 result.modules")?;
+    let (_result, modules) = rr3_ctl_modules(envelope)?;
     let rows: Vec<Vec<String>> = modules
         .iter()
         .map(|m| {

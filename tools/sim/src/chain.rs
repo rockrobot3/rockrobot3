@@ -329,14 +329,21 @@ fn rr3_obs_reply_body(payload: &[u8]) -> Result<Option<Value>, String> {
     let Ok((ty, raw)) = rr3_body_split(payload) else {
         return Ok(None);
     };
+    rr3_obs_response(ty, &raw)
+}
+
+/// Response 帧体：非 Response/id≠1 不入账，非 JSON 是错。
+fn rr3_obs_response(ty: Rr3PayloadType, raw: &[u8]) -> Result<Option<Value>, String> {
     if ty != Rr3PayloadType::Response {
         return Ok(None); // 注册期间到达的广播/通知不入账
     }
-    let v: Value = serde_json::from_slice(&raw).map_err(|e| format!("注册应答非 JSON: {e}"))?;
-    if v.get("id").and_then(Value::as_u64) != Some(1) {
-        return Ok(None);
-    }
-    Ok(Some(v))
+    let v: Value = serde_json::from_slice(raw).map_err(|e| format!("注册应答非 JSON: {e}"))?;
+    Ok(rr3_obs_id_ok(&v).then_some(v))
+}
+
+/// 注册应答的 id 门（id≠1 不入账）。
+fn rr3_obs_id_ok(v: &Value) -> bool {
+    v.get("id").and_then(Value::as_u64) == Some(1)
 }
 
 /// 取证收集：读到两路证据齐或超时。读超时/暂无帧按"这拍没帧"继续，
@@ -420,14 +427,23 @@ pub fn rr3_chain_drill(a: &Rr3SimArgs) -> Result<String, String> {
     let mut children: Vec<(String, Child)> = Vec::new();
     let mut report = String::new();
     let outcome = rr3_chain_run(&ctx, &mut children, &mut report);
+    rr3_chain_finish(a, &fix, children, outcome, &mut report)
+}
 
-    // ---- 收尾：杀全部子进程；--keep 保留现场 ----
+/// 收尾：杀全部子进程；`--keep` 保留现场并给出手动收尾指引。
+fn rr3_chain_finish(
+    a: &Rr3SimArgs,
+    fix: &Rr3ChainFix,
+    children: Vec<(String, Child)>,
+    outcome: Result<(), String>,
+    report: &mut String,
+) -> Result<String, String> {
     if a.keep {
-        rr3_chain_keep(&fix);
-        return rr3_chain_done(outcome, &mut report, &fix, true, RR3_CHAIN_OK_KEEP);
+        rr3_chain_keep(fix);
+        return rr3_chain_done(outcome, report, fix, true, RR3_CHAIN_OK_KEEP);
     }
     rr3_teardown_procs(children, &fix.socket);
-    rr3_chain_done(outcome, &mut report, &fix, false, RR3_CHAIN_OK)
+    rr3_chain_done(outcome, report, fix, false, RR3_CHAIN_OK)
 }
 
 /// `--keep`：打印现场保留与手动收尾指引（不杀子进程）。
@@ -535,12 +551,7 @@ struct Rr3ChainFix {
 
 fn rr3_chain_fix(a: &Rr3SimArgs, bins: &Rr3ChainBins) -> Result<Rr3ChainFix, String> {
     let (workdir, socket) = rr3_chain_place(a)?;
-
-    rr3_chain_cfgs(&workdir)?;
-    let obs_manifest = workdir.join(format!("{RR3_CHAIN_OBS}.toml"));
-    // 观察者 manifest 需要绝对 entry：指向 act 真二进制（不 exec，只过注册门禁）
-    std::fs::write(&obs_manifest, rr3_chain_obs(&bins.act))
-        .map_err(|e| format!("写 {obs_manifest:?} 失败: {e}"))?;
+    let obs_manifest = rr3_chain_texts(&workdir, &bins.act)?;
     Ok(Rr3ChainFix {
         brain_cfg: workdir.join("brain-config.toml"),
         sense_cfg: workdir.join("sense-config.toml"),
@@ -551,6 +562,21 @@ fn rr3_chain_fix(a: &Rr3SimArgs, bins: &Rr3ChainBins) -> Result<Rr3ChainFix, Str
         workdir,
         socket,
     })
+}
+
+/// 四份 config 与观察者 manifest 落盘（返回观察者 manifest 路径）。
+fn rr3_chain_texts(workdir: &Path, act: &Path) -> Result<PathBuf, String> {
+    rr3_chain_cfgs(workdir)?;
+    rr3_chain_obs_write(workdir, act)
+}
+
+/// 观察者 manifest 落盘（entry 指向 act 真二进制，只过注册门禁）。
+fn rr3_chain_obs_write(workdir: &Path, act: &Path) -> Result<PathBuf, String> {
+    let obs_manifest = workdir.join(format!("{RR3_CHAIN_OBS}.toml"));
+    // 观察者 manifest 需要绝对 entry：指向 act 真二进制（不 exec，只过注册门禁）
+    std::fs::write(&obs_manifest, rr3_chain_obs(act))
+        .map_err(|e| format!("写 {obs_manifest:?} 失败: {e}"))?;
+    Ok(obs_manifest)
 }
 
 /// 四份演练 config 落盘（写完即用）。
@@ -572,14 +598,19 @@ fn rr3_chain_cfgs(workdir: &Path) -> Result<(), String> {
 
 /// 演练工作目录与套接字：`--socket` 显式给定则同目录，否则临时目录按进程号。
 fn rr3_chain_place(a: &Rr3SimArgs) -> Result<(PathBuf, PathBuf), String> {
-    let workdir = match &a.socket {
-        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
-        None => std::env::temp_dir().join(format!("rr3-sim-chain-{}", std::process::id())),
-    };
+    let workdir = rr3_chain_dir(a);
     std::fs::create_dir_all(&workdir).map_err(|e| format!("建 {workdir:?} 失败: {e}"))?;
     let socket = a.socket.clone().unwrap_or_else(|| workdir.join("bus.sock"));
     let _ = std::fs::remove_file(&socket);
     Ok((workdir, socket))
+}
+
+/// 演练工作目录：`--socket` 显式给定取其父目录，否则临时目录按进程号。
+fn rr3_chain_dir(a: &Rr3SimArgs) -> PathBuf {
+    match &a.socket {
+        Some(s) => s.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        None => std::env::temp_dir().join(format!("rr3-sim-chain-{}", std::process::id())),
+    }
 }
 
 /// 演练上下文（一次演练内的不变量；只读借用，便于按阶段拆函数）。
@@ -607,6 +638,16 @@ fn rr3_chain_boot(
     report: &mut String,
 ) -> Result<UnixStream, String> {
     let fix = ctx.fix;
+    rr3_chain_mans(ctx)?;
+    rr3_chain_up_rrd(ctx, children)?;
+    // 等 bind，观察者**先于外部模块**注册（servo/state 一次性广播，晚注册漏收）
+    wait_socket_exists(&fix.socket, RR3_CHAIN_READY_DEADLINE)?;
+    rr3_chain_obs_up(fix, report)
+}
+
+/// 四份 wire manifest 落盘（写完即用）。
+fn rr3_chain_mans(ctx: &Rr3ChainCtx) -> Result<(), String> {
+    let fix = ctx.fix;
     for (name, text) in rr3_chain_manifests(
         &ctx.bins.sense,
         &ctx.bins.interact,
@@ -616,10 +657,7 @@ fn rr3_chain_boot(
         let p = fix.workdir.join(format!("{name}.toml"));
         std::fs::write(&p, text).map_err(|e| format!("写 {p:?} 失败: {e}"))?;
     }
-    rr3_chain_up_rrd(ctx, children)?;
-    // 等 bind，观察者**先于外部模块**注册（servo/state 一次性广播，晚注册漏收）
-    wait_socket_exists(&fix.socket, RR3_CHAIN_READY_DEADLINE)?;
-    rr3_chain_obs_up(fix, report)
+    Ok(())
 }
 
 /// 外部模块起跑：三外部进程 → 有界等四模块 running。

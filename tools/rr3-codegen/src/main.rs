@@ -118,6 +118,11 @@ fn axis_travel_rows(root: &Path, errs: &mut Vec<String>) -> Vec<(String, u32, u3
     let Some(entries) = axis_entries(&dir, errs) else {
         return Vec::new();
     };
+    rr3_axis_rows(entries, errs)
+}
+
+/// 逐档案取行（坏档折进 errs，不短路）。
+fn rr3_axis_rows(entries: Vec<PathBuf>, errs: &mut Vec<String>) -> Vec<(String, u32, u32, u32)> {
     let mut rows: Vec<(String, u32, u32, u32)> = Vec::new();
     for path in entries {
         match axis_row_of(&path) {
@@ -208,6 +213,11 @@ fn axis_doc_of(path: &Path) -> Result<Value, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("读 {} 失败: {e}", path.display()))?;
     let v: Value =
         toml::from_str(&text).map_err(|e| format!("{} 解析失败: {e}", path.display()))?;
+    rr3_axis_schema(v, path)
+}
+
+/// schema 钉 1（旧版显式拒收）。
+fn rr3_axis_schema(v: Value, path: &Path) -> Result<Value, String> {
     match v.get("schema").and_then(Value::as_integer) {
         Some(1) => Ok(v),
         other => Err(format!(

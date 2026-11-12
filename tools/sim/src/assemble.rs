@@ -193,9 +193,16 @@ fn rr3_asm_runtime_line(
             out.push_str("hal_backend = \"sim\"\n");
             true
         }
-        Some("audio_backend" | "servo_backend" | "display_backend") => true,
-        _ => false,
+        other => rr3_asm_opt_drop(other),
     }
+}
+
+/// 真后端专面（audio/servo/display）整行摘除（`true` = 不原样输出）。
+fn rr3_asm_opt_drop(key: Option<&str>) -> bool {
+    matches!(
+        key,
+        Some("audio_backend" | "servo_backend" | "display_backend")
+    )
 }
 
 /// 装配单 sim 变换落位到演练 modules-root（`profiles/<名>.toml`，文件名保仓源）。
@@ -255,16 +262,30 @@ fn rr3_layout_manifest(
     module: &str,
 ) -> Result<PathBuf, String> {
     let src_manifest = src_dir.join("module.toml");
-    let (text, facts) = rr3_layout_src_facts(&src_manifest)?;
+    let (entry_abs, installed) = rr3_layout_installed(repo, &src_manifest, module)?;
+    let dst_manifest = dst_dir.join("module.toml");
+    rr3_layout_write(&dst_manifest, installed)?;
+    Ok(entry_abs)
+}
+
+/// 仓源 manifest 读入并做 entry 绝对化改写（返回绝对入口与改写文本）。
+fn rr3_layout_installed(
+    repo: &Path,
+    src_manifest: &Path,
+    module: &str,
+) -> Result<(PathBuf, String), String> {
+    let (text, facts) = rr3_layout_src_facts(src_manifest)?;
     // 产物 = 与 rr3-sim 同 target-dir 的模块产物（批N32 件四起六模块全
     // Rust——brain 翻面后 shim 产物路径退役；lang 合法性由 rrd manifest
     // 解析保证）。target-dir 已由仓根配置移出源码区，定位走单点。
     let entry_abs = rr3_bin_dir(repo).join(&facts.entry);
     let installed = rr3_entry_rewrite(&text, &entry_abs, &facts.entry, module)?;
-    let dst_manifest = dst_dir.join("module.toml");
-    std::fs::write(&dst_manifest, installed)
-        .map_err(|e| format!("写 {dst_manifest:?} 失败: {e}"))?;
-    Ok(entry_abs)
+    Ok((entry_abs, installed))
+}
+
+/// 装机 manifest 落位（写失败点名目标路径）。
+fn rr3_layout_write(dst: &Path, installed: String) -> Result<(), String> {
+    std::fs::write(dst, installed).map_err(|e| format!("写 {dst:?} 失败: {e}"))
 }
 
 /// 读仓源 manifest 并解析（读不到/坏形都点名）。
@@ -413,15 +434,8 @@ fn rr3_drill_ok(
 }
 
 pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
-    let profile_src = a
-        .profile
-        .clone()
-        .ok_or("内部错误：装配演练缺 --profile（main 路由保证）")?;
     // ---- 0. 定位：仓根与二进制 ----
-    let repo = crate::drill::rr3_repo_locate(a)?;
-    let (d_rrd, _peer, d_rrctl) = rr3_default_bins(&repo);
-    let rrd = a.rrd.clone().unwrap_or(d_rrd);
-    let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
+    let (repo, rrd, rrctl, profile_src) = rr3_asm_locate(a)?;
 
     // ---- 1. 夹具：演练 modules-root（装机布局）----
     let (owned_dir, workdir, socket, profile_dst, entries) =
@@ -443,6 +457,19 @@ pub fn rr3_assemble_drill(a: &Rr3SimArgs) -> Result<String, String> {
 
     rr3_drill_teardown(a.keep, &mut rrd_child, rrd_pid, &socket, &workdir);
     rr3_drill_verdict(outcome, owned_dir, &workdir, &entries, &profile_dst, report)
+}
+
+/// 定位：仓根、rrd/rrctl 产物与装配单源路径（缺 --profile 即内部错）。
+fn rr3_asm_locate(a: &Rr3SimArgs) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
+    let profile_src = a
+        .profile
+        .clone()
+        .ok_or("内部错误：装配演练缺 --profile（main 路由保证）")?;
+    let repo = crate::drill::rr3_repo_locate(a)?;
+    let (d_rrd, _peer, d_rrctl) = rr3_default_bins(&repo);
+    let rrd = a.rrd.clone().unwrap_or(d_rrd);
+    let rrctl = a.rrctl.clone().unwrap_or(d_rrctl);
+    Ok((repo, rrd, rrctl, profile_src))
 }
 
 /// 夹具 + 装机布局 + 产物存在性（返回定位、装配单与模块清单）。
@@ -530,6 +557,14 @@ fn rr3_asm_wait(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
 
 /// 阶段一：等 socket 与全部 face 模块 running，登记 boot 报告。
 fn rr3_asm_wait_ready(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String> {
+    rr3_asm_boot_wait(ctx)?;
+    report.push_str(rr3_section("装配单驱动 boot：全部 face 模块 running").as_str());
+    rr3_asm_entries(ctx.entries, report);
+    Ok(())
+}
+
+/// 有界等 socket 就位与全部 face 模块 running（失败附 rrd.log 尾部）。
+fn rr3_asm_boot_wait(ctx: &Rr3AsmCtx) -> Result<(), String> {
     wait_socket_exists(ctx.socket, RR3_ASSEMBLE_READY_DEADLINE)?;
     let wanted: Vec<(&str, &str)> = ctx
         .entries
@@ -542,8 +577,6 @@ fn rr3_asm_wait_ready(ctx: &Rr3AsmCtx, report: &mut String) -> Result<(), String
         RR3_ASSEMBLE_READY_DEADLINE,
     )
     .map_err(|e| rr3_with_log_tail(&e, ctx.log_path))?;
-    report.push_str(rr3_section("装配单驱动 boot：全部 face 模块 running").as_str());
-    rr3_asm_entries(ctx.entries, report);
     Ok(())
 }
 
@@ -623,14 +656,19 @@ pub(crate) fn rr3_ctl_out(rrctl: &Path, socket: &Path, cmd: &str) -> Result<Stri
         .arg(cmd)
         .output()
         .map_err(|e| format!("跑 rr3-ctl {cmd} 失败: {e}"))?;
-    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+    let s = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
         return Err(rr3_ctl_fail(cmd, &out.status, &out.stderr, s));
     }
+    Ok(rr3_ctl_nl(s))
+}
+
+/// stdout 收口：输出不以换行结尾时补一行（报告拼接不粘连）。
+fn rr3_ctl_nl(mut s: String) -> String {
     if !s.ends_with('\n') {
         s.push('\n');
     }
-    Ok(s)
+    s
 }
 
 /// 非预期失败收口：stdout 原样 + stderr 续接，点名退出码。
