@@ -146,6 +146,14 @@ pub fn rr3_plat_parse(text: &str) -> Result<Rr3PlatformTable, Vec<String>> {
     rr3_plat_cons(t, &mut table, &mut errs);
     rr3_plat_wf(t, &mut table, &mut errs);
 
+    rr3_plat_finish(table, errs)
+}
+
+/// 收尾：错误集空即交表，否则整册拒（收集式校验，文案次序不变）。
+fn rr3_plat_finish(
+    table: Rr3PlatformTable,
+    errs: Vec<String>,
+) -> Result<Rr3PlatformTable, Vec<String>> {
     if errs.is_empty() {
         Ok(table)
     } else {
@@ -661,7 +669,7 @@ fn rr3_cons_key(k: &str, table: &Rr3PlatformTable, errs: &mut Vec<String>) -> bo
     let Some(segs) = rr3_cons_segs(k, errs) else {
         return false;
     };
-    if segs[0].is_empty() || segs[1].is_empty() {
+    if !rr3_cons_segs_ok(&segs) {
         errs.push(format!(
             "construction 键 \"{k}\" 的 controller/role 段不得为空（instance 段可空）"
         ));
@@ -675,6 +683,11 @@ fn rr3_cons_key(k: &str, table: &Rr3PlatformTable, errs: &mut Vec<String>) -> bo
         return false;
     }
     true
+}
+
+/// 三元键前两段非空（instance 段允许留空）。
+fn rr3_cons_segs_ok(segs: &[&str]) -> bool {
+    !segs[0].is_empty() && !segs[1].is_empty()
 }
 
 /// 三元键切段：非三段即点名回 None（键已拒，不登记）。

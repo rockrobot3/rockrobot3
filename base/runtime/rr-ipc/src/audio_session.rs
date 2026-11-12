@@ -167,7 +167,7 @@ fn rr3_audio_off_drain(conn: &mut Rr3UartConn) {
 fn rr3_await_ok(conn: &mut Rr3UartConn) -> Result<String, String> {
     let deadline = Instant::now() + Duration::from_millis(REPLY_TIMEOUT_MS as u64);
     loop {
-        let line = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
+        let line = rr3_next_line(conn, deadline)?;
         if let Some(pos) = ok_reply_at(&line) {
             let (pfx, _) = line.split_at(pos);
             println!(
@@ -176,18 +176,32 @@ fn rr3_await_ok(conn: &mut Rr3UartConn) -> Result<String, String> {
             );
             return Ok(line);
         }
+    }
+}
+
+/// 读一行应答；未见 OK 即留痕，并按总预算判是否继续（`Err` = 预算耗尽）。
+fn rr3_next_line(conn: &mut Rr3UartConn, deadline: Instant) -> Result<String, String> {
+    let line = read_reply_line(conn).map_err(|e| format!("读应答失败: {e}"))?;
+    if ok_reply_at(&line).is_none() {
         eprintln!(
             "[audio] 应答行未见 OK（{}B，继续扫）: {:?}",
             line.len(),
             rr3_log_head(&line, 80)
         );
-        if Instant::now() >= deadline {
-            return Err(format!(
-                "应答 {REPLY_TIMEOUT_MS}ms 预算内未见 OK audio on（末行 {:?}）",
-                rr3_log_head(&line, 80)
-            ));
-        }
+        rr3_await_more(&line, deadline)?;
     }
+    Ok(line)
+}
+
+/// 未见 OK 的续扫步：留痕后按总预算判是否继续（`Err` = 预算耗尽，文案同旧）。
+fn rr3_await_more(line: &str, deadline: Instant) -> Result<(), String> {
+    if Instant::now() >= deadline {
+        return Err(format!(
+            "应答 {REPLY_TIMEOUT_MS}ms 预算内未见 OK audio on（末行 {:?}）",
+            rr3_log_head(line, 80)
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

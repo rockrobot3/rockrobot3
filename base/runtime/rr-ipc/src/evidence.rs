@@ -66,15 +66,24 @@ fn rr3_ref_form_ok(form: &str) -> bool {
 /// fail-closed：任一道不过即点名拒绝，无豁免通道——与"缺键即红"同列语义
 /// （B-15 ②）。
 pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
+    let (form, path) = rr3_ev_ref(root, reference)?;
+    rr3_ev_check(&path, &form)
+}
+
+/// 形制门 + 落盘路径（形制不合在查文件之前就拒）。
+fn rr3_ev_ref(root: &Path, reference: &str) -> Result<(String, std::path::PathBuf), String> {
     if !rr3_evidence_ref_ok(reference) {
         return Err(format!(
             "证据引用 {reference:?} 形制不合法（应为 <形态>/<四位编号>，形态段不含空白）"
         ));
     }
     let (form, _) = reference.split_once('/').expect("形制已过，'/' 必在");
-    let path = root.join(format!("{reference}.md"));
-    let text = fs::read_to_string(&path)
-        .map_err(|e| format!("证据文件读不到（{}）: {e}", path.display()))?;
+    Ok((form.to_string(), root.join(format!("{reference}.md"))))
+}
+
+/// 文件存在 + frontmatter 合法 + form 与形态目录一致（三道路径判据）。
+fn rr3_ev_check(path: &Path, form: &str) -> Result<(), String> {
+    let text = rr3_ev_read(path)?;
     let fields = rr3_evidence_head(&text)
         .map_err(|e| format!("证据文件 {} frontmatter 不合法: {e}", path.display()))?;
     let declared = fields
@@ -82,7 +91,12 @@ pub fn rr3_evidence_verify(root: &Path, reference: &str) -> Result<(), String> {
         .find(|(k, _)| *k == "form")
         .map(|(_, v)| *v)
         .expect("frontmatter 已验六键齐，form 必在");
-    rr3_ev_declared_chk(&path, declared, form)
+    rr3_ev_declared_chk(path, declared, form)
+}
+
+/// 读证据文件全文；读不到即点名路径（文案与旧内联 map_err 逐字同）。
+fn rr3_ev_read(path: &Path) -> Result<String, String> {
+    fs::read_to_string(path).map_err(|e| format!("证据文件读不到（{}）: {e}", path.display()))
 }
 
 /// 声明值与引用形态目录一致（文件搬家不改 form = 立刻红）。
@@ -122,15 +136,26 @@ fn rr3_ev_fields<'a>(
     let mut fields: Vec<(&str, &str)> = Vec::new();
     for raw in lines {
         let line = raw.trim();
-        if line == "+++" {
+        if rr3_ev_close(line) {
             return Ok(fields);
         }
-        if line.is_empty() {
-            continue;
-        }
-        fields.push(rr3_ev_field(line)?);
+        rr3_ev_line(line, &mut fields)?;
     }
     Err("frontmatter 缺收界 +++".to_string())
+}
+
+/// 收界行：`+++` 即 frontmatter 结束。
+fn rr3_ev_close(line: &str) -> bool {
+    line == "+++"
+}
+
+/// 非收界行：空行跳过，其余取一条字段（键值形状交给 `rr3_ev_field`）。
+fn rr3_ev_line<'a>(line: &'a str, fields: &mut Vec<(&'a str, &'a str)>) -> Result<(), String> {
+    if line.is_empty() {
+        return Ok(());
+    }
+    fields.push(rr3_ev_field(line)?);
+    Ok(())
 }
 
 /// 单字段行：`key = "一行文本"`——键在册、值双引号包一行、值内不许再出现双引号

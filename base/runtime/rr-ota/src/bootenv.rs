@@ -178,14 +178,7 @@ impl Rr3BootEnv {
     ///
     /// `size` 必须容纳 `4 + Σ(k=v\0) + 1`，否则点名需要多少字节。
     pub fn rr3_env_render(&self, size: usize) -> Result<Vec<u8>, String> {
-        let mut payload: Vec<u8> = Vec::new();
-        for (k, v) in &self.vars {
-            payload.extend_from_slice(k.as_bytes());
-            payload.push(b'=');
-            payload.extend_from_slice(v.as_bytes());
-            payload.push(0);
-        }
-        payload.push(0);
+        let mut payload = Self::rr3_env_payload(&self.vars);
         let need = payload.len() + 4;
         if need > size {
             return Err(format!("env 载荷需 {need}B（含 CRC），区容量只有 {size}B"));
@@ -195,6 +188,19 @@ impl Rr3BootEnv {
         out.extend_from_slice(&rr3_crc32(&payload).to_le_bytes());
         out.extend_from_slice(&payload);
         Ok(out)
+    }
+
+    /// 渲染载荷：每键 `k=v\0`，末尾一个空段收尾（不含 4B CRC，也不含补齐）。
+    fn rr3_env_payload(vars: &[(String, String)]) -> Vec<u8> {
+        let mut payload: Vec<u8> = Vec::new();
+        for (k, v) in vars {
+            payload.extend_from_slice(k.as_bytes());
+            payload.push(b'=');
+            payload.extend_from_slice(v.as_bytes());
+            payload.push(0);
+        }
+        payload.push(0);
+        payload
     }
 
     /// 读一个键（不存在 → None）。
@@ -258,18 +264,8 @@ fn rr3_arm_chk(limit: u32, altcmd: &str) -> Result<(), String> {
 /// 从 config 指明的设备区读出 env（unix：真块设备/普通文件同码）。
 #[cfg(unix)]
 pub fn rr3_env_read(dev: &Rr3EnvDev) -> Result<Rr3BootEnv, String> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::OpenOptions::new()
-        .read(true)
-        .open(dev.rr3_dev_path())
-        .map_err(|e| format!("打开 {} 失败：{e}", dev.rr3_dev_path()))?;
-    f.seek(SeekFrom::Start(dev.rr3_dev_offset())).map_err(|e| {
-        format!(
-            "定位 {} 到 {} 失败：{e}",
-            dev.rr3_dev_path(),
-            dev.rr3_dev_offset()
-        )
-    })?;
+    use std::io::Read;
+    let mut f = rr3_env_open_r(dev)?;
     let mut buf = vec![0u8; dev.rr3_dev_size()];
     f.read_exact(&mut buf).map_err(|e| {
         format!(
@@ -281,16 +277,40 @@ pub fn rr3_env_read(dev: &Rr3EnvDev) -> Result<Rr3BootEnv, String> {
     Rr3BootEnv::rr3_env_parse(&buf)
 }
 
+/// 以读打开设备区并按偏移定位（失败点名路径与偏移）。
+#[cfg(unix)]
+fn rr3_env_open_r(dev: &Rr3EnvDev) -> Result<std::fs::File, String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .open(dev.rr3_dev_path())
+        .map_err(|e| format!("打开 {} 失败：{e}", dev.rr3_dev_path()))?;
+    f.seek(SeekFrom::Start(dev.rr3_dev_offset())).map_err(|e| {
+        format!(
+            "定位 {} 到 {} 失败：{e}",
+            dev.rr3_dev_path(),
+            dev.rr3_dev_offset()
+        )
+    })?;
+    Ok(f)
+}
+
 /// 把 env 整区写回 config 指明的设备位置（仅 linux）。
 ///
 /// 单份整区覆盖（不碰冗余副本——见模块头"不做"）；先渲染成功再落盘，渲染失败
 /// （容量不够）时设备一个字节都不动。
 #[cfg(unix)]
 pub fn rr3_env_write(dev: &Rr3EnvDev, env: &Rr3BootEnv) -> Result<(), String> {
-    use std::io::Write;
     let image = env.rr3_env_render(dev.rr3_dev_size())?;
+    rr3_env_put(dev, &image)
+}
+
+/// 整区写到设备偏移处：写全量 + flush（失败点名路径与字节数）。
+#[cfg(unix)]
+fn rr3_env_put(dev: &Rr3EnvDev, image: &[u8]) -> Result<(), String> {
+    use std::io::Write;
     let mut f = rr3_env_open_w(dev)?;
-    f.write_all(&image).map_err(|e| {
+    f.write_all(image).map_err(|e| {
         format!(
             "写 {} 的 {}B env 区失败：{e}",
             dev.rr3_dev_path(),

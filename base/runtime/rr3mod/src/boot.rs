@@ -16,11 +16,7 @@ use crate::{BusHandle, Rr3ModConfig, RR3_MANIFEST_ENV};
 /// 收敛序列（方案 §2.4）：装配段构造 [`Rr3ModConfig`] 调入；HAL 探活与
 /// SURFACE 自述留在模块装配段（见模块头注）。
 pub fn bootstrap<C>(cfg: Rr3ModConfig<C>) -> Result<(BusHandle, C), String> {
-    let manifest_path = std::env::var(RR3_MANIFEST_ENV).map_err(|_| {
-        format!("缺环境变量 {RR3_MANIFEST_ENV}（rrd spawn 注入；直跑请指向 module.toml）")
-    })?;
-    let manifest_text = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
+    let (manifest_path, manifest_text) = rr3_manifest_load()?;
     let client = Rr3BusClient::rr3_connect(&manifest_text)?;
     eprintln!(
         "总线就绪: name={} task={}",
@@ -29,6 +25,16 @@ pub fn bootstrap<C>(cfg: Rr3ModConfig<C>) -> Result<(BusHandle, C), String> {
     );
     let parsed = rr3_cfg_parse(&cfg, &manifest_path)?;
     Ok((BusHandle { client }, parsed))
+}
+
+/// 读 `RR3_MANIFEST` 指向的 manifest：缺键/读失败按现行文案点名。
+fn rr3_manifest_load() -> Result<(String, String), String> {
+    let manifest_path = std::env::var(RR3_MANIFEST_ENV).map_err(|_| {
+        format!("缺环境变量 {RR3_MANIFEST_ENV}（rrd spawn 注入；直跑请指向 module.toml）")
+    })?;
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("读 manifest {manifest_path} 失败: {e}"))?;
+    Ok((manifest_path, manifest_text))
 }
 
 /// 配置装载与解析：路径投影 → 读文本 → 调用方解析器。
