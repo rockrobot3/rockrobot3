@@ -170,10 +170,16 @@ fn format_status(envelope: &Value) -> Result<String, String> {
         .map(|m| vec![cell(m, "name"), cell(m, "task"), cell(m, "phase")])
         .collect();
     let mut out = render_table(&["NAME", "TASK", "PHASE"], &rows);
-    if let Some(d) = result.get("denied_publish").and_then(Value::as_u64) {
-        out.push_str(&format!("denied_publish = {d}\n"));
-    }
+    out.push_str(&rr3_denied_note(result));
     Ok(out)
+}
+
+/// `denied_publish` 附加行（缺字段不渲染）。
+fn rr3_denied_note(result: &Value) -> String {
+    match result.get("denied_publish").and_then(Value::as_u64) {
+        Some(d) => format!("denied_publish = {d}\n"),
+        None => String::new(),
+    }
 }
 
 fn format_health(envelope: &Value) -> Result<String, String> {

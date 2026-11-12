@@ -28,16 +28,21 @@ fn parse(args: &[String]) -> (Option<String>, Option<String>) {
     while i < args.len() {
         if args[i] == "--bus-path" {
             i += 1;
-            match args.get(i) {
-                Some(v) => bus = Some(v.clone()),
-                None => usage(),
-            }
+            bus = Some(rr3_bus_value(args.get(i)));
         } else if cmd.is_none() {
             cmd = Some(args[i].clone());
         }
         i += 1;
     }
     (bus, cmd)
+}
+
+/// `--bus-path` 的值（缺值即用法错误退出）。
+fn rr3_bus_value(v: Option<&String>) -> String {
+    match v {
+        Some(v) => v.clone(),
+        None => usage(),
+    }
 }
 
 /// 套接字路径优先级：命令行 > `RR3_BUS_PATH` > 契约默认值

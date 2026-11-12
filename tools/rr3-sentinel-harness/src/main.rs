@@ -310,14 +310,7 @@ fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u6
     match parse_upstream(frame) {
         Ok((Rr3PayloadType::Request, id, m, params, _)) if m.as_deref() == Some("rr3.register") => {
             let (name, hb) = rr3_reg_fields(&params);
-            if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&register_reply(
-                id,
-                HARNESS_TASK,
-                now_ns(),
-            ))) {
-                eprintln!("FAIL  注册应答写出失败: {e:?}");
-                std::process::exit(1);
-            }
+            rr3_register_ack(conn, id, now_ns());
             (name, hb)
         }
         Ok((ty, _, m, _, _)) => {
@@ -331,6 +324,14 @@ fn rr3_register(conn: &mut Rr3UartConn, now_ns: &dyn Fn() -> u64) -> (String, u6
             eprintln!("FAIL  首帧畸形: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// 注册应答写出（失败即点名退场）。
+fn rr3_register_ack(conn: &mut Rr3UartConn, id: u64, now: u64) {
+    if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&register_reply(id, HARNESS_TASK, now))) {
+        eprintln!("FAIL  注册应答写出失败: {e:?}");
+        std::process::exit(1);
     }
 }
 
@@ -351,13 +352,18 @@ fn rr3_reg_fields(params: &Value) -> (String, u64) {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let hb = manifest
+    let hb = rr3_hb_ms(&manifest);
+    println!("---- 哨兵 manifest ----\n{manifest}------------------------");
+    (name, hb)
+}
+
+/// manifest 行面的 heartbeat_ms（缺省 0）。
+fn rr3_hb_ms(manifest: &str) -> u64 {
+    manifest
         .lines()
         .find_map(|l| l.strip_prefix("heartbeat_ms = "))
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .unwrap_or(0);
-    println!("---- 哨兵 manifest ----\n{manifest}------------------------");
-    (name, hb)
+        .unwrap_or(0)
 }
 
 /// ② 心跳 N 拍：逐拍回 accepted，记间隔（相对节拍的外部观测；首拍间隔含
@@ -392,14 +398,7 @@ fn rr3_beat(
     *last = now;
     match parse_upstream(frame) {
         Ok((Rr3PayloadType::Request, id, m, _, _)) if m.as_deref() == Some("rr3.heartbeat") => {
-            if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&heartbeat_reply(
-                id,
-                HARNESS_TASK,
-                now_ns(),
-            ))) {
-                eprintln!("FAIL  第{n}拍应答写出失败: {e:?}");
-                std::process::exit(1);
-            }
+            rr3_beat_ack(conn, n, id, now_ns());
             println!("PASS  ② 第{n}拍 rr3.heartbeat id={id} 间隔={dt}ms");
             Some(dt)
         }
@@ -414,6 +413,14 @@ fn rr3_beat(
             eprintln!("FAIL  第{n}拍畸形: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// 单拍应答写出（失败即点名退场）。
+fn rr3_beat_ack(conn: &mut Rr3UartConn, n: usize, id: u64, now: u64) {
+    if let Err(e) = conn.rr3_send_buf(Rr3FrameBuf::from(&heartbeat_reply(id, HARNESS_TASK, now))) {
+        eprintln!("FAIL  第{n}拍应答写出失败: {e:?}");
+        std::process::exit(1);
     }
 }
 
@@ -636,43 +643,46 @@ fn rr3_parity_verdict(frame: Rr3Frame) -> Rr3ParityStep {
 /// ④ 三方两腿对拍：板回向量在册 / 契约腿（宿主 runner == 期望）/ 确定性腿
 /// （板 == 宿主 runner，bit-for-bit）。返回 FAIL 数。
 fn rr3_parity_judge(board_parity: Option<&Value>, parity_ms: u128) -> u32 {
-    let mut fail = 0u32;
     match board_parity {
-        Some(bv) => {
-            if !verdict(
-                bv.get("v").and_then(Value::as_u64) == Some(RR3_PARITY_VERSION as u64),
-                &format!(
-                    "④ 板回 parity 向量在册（v={}，耗时 {parity_ms}ms）",
-                    RR3_PARITY_VERSION
-                ),
-            ) {
-                fail += 1;
-            }
-            // 契约腿（宿主自证）：runner 与期望向量的一致性漂移在宿主先红。
-            let host = parity_expect_json(&rr3_parity_run());
-            let expected = parity_expect_json(&RR3_PARITY_EXPECTED);
-            if !verdict(
-                host == expected,
-                "④ 契约腿：宿主 runner == RR3_PARITY_EXPECTED（手推期望守门）",
-            ) {
-                fail += 1;
-            }
-            // 确定性腿：板输出 == 宿主 runner（同 runner 同输入，bit-for-bit）。
-            let diff = parity_first_diff(bv, &host);
-            if !verdict(
-                diff.is_none(),
-                &format!(
-                    "④ 确定性腿：板 == 宿主 runner（xtensa LX6 bit-for-bit）{}",
-                    diff.map(|d| format!("——{d}")).unwrap_or_default()
-                ),
-            ) {
-                fail += 1;
-            }
-        }
+        Some(bv) => rr3_parity_legs(bv, parity_ms),
         None => {
             eprintln!("FAIL  ④ 板回 parity 应答未收到（点名 diag/parity 无应答）");
-            fail += 1;
+            1
         }
+    }
+}
+
+/// 板回后的三条腿：向量在册 / 契约腿 / 确定性腿。返回 FAIL 数。
+fn rr3_parity_legs(bv: &Value, parity_ms: u128) -> u32 {
+    let mut fail = 0u32;
+    if !verdict(
+        bv.get("v").and_then(Value::as_u64) == Some(RR3_PARITY_VERSION as u64),
+        &format!(
+            "④ 板回 parity 向量在册（v={}，耗时 {parity_ms}ms）",
+            RR3_PARITY_VERSION
+        ),
+    ) {
+        fail += 1;
+    }
+    // 契约腿（宿主自证）：runner 与期望向量的一致性漂移在宿主先红。
+    let host = parity_expect_json(&rr3_parity_run());
+    let expected = parity_expect_json(&RR3_PARITY_EXPECTED);
+    if !verdict(
+        host == expected,
+        "④ 契约腿：宿主 runner == RR3_PARITY_EXPECTED（手推期望守门）",
+    ) {
+        fail += 1;
+    }
+    // 确定性腿：板输出 == 宿主 runner（同 runner 同输入，bit-for-bit）。
+    let diff = parity_first_diff(bv, &host);
+    if !verdict(
+        diff.is_none(),
+        &format!(
+            "④ 确定性腿：板 == 宿主 runner（xtensa LX6 bit-for-bit）{}",
+            diff.map(|d| format!("——{d}")).unwrap_or_default()
+        ),
+    ) {
+        fail += 1;
     }
     fail
 }

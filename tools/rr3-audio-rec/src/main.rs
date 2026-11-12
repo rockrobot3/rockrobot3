@@ -413,13 +413,18 @@ impl DoaTracker {
             .join(" ");
         let has_pos = self.azs.iter().any(|(_, az)| *az > 5.0);
         let has_neg = self.azs.iter().any(|(_, az)| *az < -5.0);
-        let verdict = match (has_pos, has_neg) {
-            (true, true) => "左右符号分离 ✓（冒烟过）",
-            (true, false) => "仅正向角（对照位缺或方向映射相反）",
-            (false, true) => "仅负向角（对照位缺或方向映射相反）",
-            (false, false) => "全部近 0°（ILD 不显著，查音量/距离）",
-        };
+        let verdict = rr3_doa_verdict(has_pos, has_neg);
         format!("[doa] 汇总 active={}：{list} —— {verdict}", self.azs.len())
+    }
+}
+
+/// 符号分离判定文案（正负都有 = 左右发声方向可分）。
+fn rr3_doa_verdict(has_pos: bool, has_neg: bool) -> &'static str {
+    match (has_pos, has_neg) {
+        (true, true) => "左右符号分离 ✓（冒烟过）",
+        (true, false) => "仅正向角（对照位缺或方向映射相反）",
+        (false, true) => "仅负向角（对照位缺或方向映射相反）",
+        (false, false) => "全部近 0°（ILD 不显著，查音量/距离）",
     }
 }
 
@@ -794,15 +799,18 @@ fn rate_progress(
     if broke || anchor.is_none() {
         *anchor = Some((now, frames));
     }
-    if let Some((t0, f0)) = *anchor {
-        let d = now.duration_since(t0);
-        if d.as_secs_f64() > 0.5 {
-            let r = (((frames - f0) as f64) / d.as_secs_f64()).round() as u32;
-            if r > 0 {
-                watch.rate.store(r, Ordering::Release);
-            }
-        }
+    if let Some(r) = rr3_rate_sample(*anchor, now, frames) {
+        watch.rate.store(r, Ordering::Release);
     }
+}
+
+/// 连续段实测率：段 >0.5s 且率非零才给值（不足 0.5s 测时标称）。
+fn rr3_rate_sample(anchor: Option<(Instant, u64)>, now: Instant, frames: u64) -> Option<u32> {
+    let (t0, f0) = anchor?;
+    let d = now.duration_since(t0).as_secs_f64();
+    (d > 0.5)
+        .then(|| (((frames - f0) as f64) / d).round() as u32)
+        .filter(|r| *r > 0)
 }
 
 /// 收兵期实测率终值：连续段（锚后至最后一片的墙钟 × 段内帧数），断流空洞不摊
@@ -964,15 +972,20 @@ fn decode_drain(
         }
         // 失步重同步账（三级防护第 ② 级的记账面）：坏帧弃扫已在内存即时
         // 完成，这里只把成片损坏点名为日志（丢片由 seq 对账如实记账）。
-        if st.err_streak >= ERR_STREAK_RESYNC {
-            st.resyncs += 1;
-            st.err_streak = 0;
-            eprintln!(
-                "[rec] 失步重同步 #{}：内存弃扫 {}B 后对齐续收",
-                st.resyncs,
-                asm.discarded()
-            );
-        }
+        rr3_resync_note(st, asm);
+    }
+}
+
+/// 连续拆帧失败达阈值即记一次失步重同步账并清零。
+fn rr3_resync_note(st: &mut DecodeState, asm: &FrameAssembler) {
+    if st.err_streak >= ERR_STREAK_RESYNC {
+        st.resyncs += 1;
+        st.err_streak = 0;
+        eprintln!(
+            "[rec] 失步重同步 #{}：内存弃扫 {}B 后对齐续收",
+            st.resyncs,
+            asm.discarded()
+        );
     }
 }
 
@@ -997,16 +1010,9 @@ fn decode_frame(
     }
 }
 
-/// 收兵 + 汇总：停流旗 → 读线程发 AUDIO OFF 退出（板面队列余片照发，本端不再
-/// 读，conn 随线程收口关闭）。OFF 后解武装；关通道让写线程排空收兵；最后按
-/// 实测率补真头并打印汇总。任一线程异常即整进程退，不冒领成功。
-fn finish_and_report(
-    threads: RecThreads,
-    watch: &WatchState,
-    st: DecodeState,
-    out_path: &std::path::Path,
-    doa: bool,
-) {
+/// 收兵第一段：停流旗 → 读线程退场 → 解武装 → 关通道让写线程排空；
+/// 任一线程异常即整进程退，不冒领成功。
+fn finish_threads(threads: RecThreads, watch: &WatchState) {
     threads.stop.store(true, Ordering::Release);
     if threads.reader.join().is_err() {
         eprintln!("rr3-audio-rec: 读线程异常退出");
@@ -1020,6 +1026,19 @@ fn finish_and_report(
         eprintln!("rr3-audio-rec: 写线程异常退出: {e:?}");
         std::process::exit(1);
     }
+}
+
+/// 收兵 + 汇总：停流旗 → 读线程发 AUDIO OFF 退出（板面队列余片照发，本端不再
+/// 读，conn 随线程收口关闭）。OFF 后解武装；关通道让写线程排空收兵；最后按
+/// 实测率补真头并打印汇总。任一线程异常即整进程退，不冒领成功。
+fn finish_and_report(
+    threads: RecThreads,
+    watch: &WatchState,
+    st: DecodeState,
+    out_path: &std::path::Path,
+    doa: bool,
+) {
+    finish_threads(threads, watch);
 
     if st.total_bytes == 0 {
         eprintln!("[rec] 0 分片（查板面 AUDIO ON 应答/I2S 面波特率档）");

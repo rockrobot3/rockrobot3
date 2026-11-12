@@ -93,6 +93,17 @@ fn rr3_bridge_arg(
         return Err(format!("未知参数 {flag}（可用：--uart --socket --baud）"));
     }
     let v = rr3_arg_value(flag, args, i)?;
+    rr3_bridge_set(flag, v, uart, socket, baud)
+}
+
+/// 已校验旗标的值落位（`--uart` / `--socket` / `--baud`）。
+fn rr3_bridge_set(
+    flag: &str,
+    v: &str,
+    uart: &mut Option<PathBuf>,
+    socket: &mut Option<PathBuf>,
+    baud: &mut u32,
+) -> Result<(), String> {
     match flag {
         "--uart" => *uart = Some(PathBuf::from(v)),
         "--socket" => *socket = Some(PathBuf::from(v)),
