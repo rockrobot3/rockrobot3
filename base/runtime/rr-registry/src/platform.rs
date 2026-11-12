@@ -342,22 +342,45 @@ fn rr3_plat_caps(t: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<S
 
 /// 能力四键取值：三个引脚集 + output_capable_pins 规则集（缺键分别点名）。
 fn rr3_caps_set(caps: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
-    match caps.get("adc_pins") {
-        Some(v) => table.capabilities.adc_pins = rr3_pin_set_from(v, "adc_pins", errs),
+    table.capabilities.adc_pins = rr3_caps_pins(
+        caps,
+        "adc_pins",
+        "[capabilities] 缺 adc_pins（无 ADC 须显式写 [] 并带行级注记，裁定②）",
+        errs,
+    );
+    table.capabilities.input_only_pins = rr3_caps_pins(
+        caps,
+        "input_only_pins",
+        "[capabilities] 缺 input_only_pins（无此类脚须显式写 []）",
+        errs,
+    );
+    table.capabilities.no_open_drain = rr3_caps_pins(
+        caps,
+        "no_open_drain",
+        "[capabilities] 缺 no_open_drain（无此类脚须显式写 []）",
+        errs,
+    );
+    rr3_caps_output(caps, table, errs);
+}
+
+/// 单个引脚集键：有值解析，缺键点名并回空集。
+fn rr3_caps_pins(
+    caps: &toml::Table,
+    key: &str,
+    missing: &str,
+    errs: &mut Vec<String>,
+) -> BTreeSet<i64> {
+    match caps.get(key) {
+        Some(v) => rr3_pin_set_from(v, key, errs),
         None => {
-            errs.push("[capabilities] 缺 adc_pins（无 ADC 须显式写 [] 并带行级注记，裁定②）".into())
+            errs.push(missing.to_string());
+            BTreeSet::new()
         }
     }
-    match caps.get("input_only_pins") {
-        Some(v) => {
-            table.capabilities.input_only_pins = rr3_pin_set_from(v, "input_only_pins", errs)
-        }
-        None => errs.push("[capabilities] 缺 input_only_pins（无此类脚须显式写 []）".into()),
-    }
-    match caps.get("no_open_drain") {
-        Some(v) => table.capabilities.no_open_drain = rr3_pin_set_from(v, "no_open_drain", errs),
-        None => errs.push("[capabilities] 缺 no_open_drain（无此类脚须显式写 []）".into()),
-    }
+}
+
+/// output_capable_pins：在册规则写入，越域/缺键分别点名。
+fn rr3_caps_output(caps: &toml::Table, table: &mut Rr3PlatformTable, errs: &mut Vec<String>) {
     match caps.get("output_capable_pins").and_then(Value::as_str) {
         Some(r) if RR3_PLATFORM_OUTPUT_RULES.contains(&r) => {
             table.capabilities.output_rule = r.to_string();

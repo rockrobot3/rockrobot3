@@ -97,15 +97,7 @@ fn rr3_enabled_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<Str
             for (module, v) in t {
                 match v.as_array() {
                     Some(items) => {
-                        let mut slots = Vec::new();
-                        for item in items {
-                            match item.as_str() {
-                                Some(s) if !s.is_empty() => slots.push(s.to_string()),
-                                _ => errs.push(format!(
-                                    "enabled_slots.{module} 的每一项都必须是非空字符串（格位名）"
-                                )),
-                            }
-                        }
+                        let slots = rr3_slot_items(module, items, errs);
                         enabled_slots.insert(module.clone(), slots);
                     }
                     None => errs.push(format!("enabled_slots.{module} 应为字符串数组")),
@@ -114,6 +106,20 @@ fn rr3_enabled_parse(root: &toml::Value, errs: &mut Vec<String>) -> BTreeMap<Str
         }
     }
     enabled_slots
+}
+
+/// 单模块格位集：每项必须是非空字符串，逐条点名。
+fn rr3_slot_items(module: &str, items: &[toml::Value], errs: &mut Vec<String>) -> Vec<String> {
+    let mut slots = Vec::new();
+    for item in items {
+        match item.as_str() {
+            Some(s) if !s.is_empty() => slots.push(s.to_string()),
+            _ => errs.push(format!(
+                "enabled_slots.{module} 的每一项都必须是非空字符串（格位名）"
+            )),
+        }
+    }
+    slots
 }
 
 /// [hardware]：可选段（纯 sim/无硬件格形态可以不给）。每键非空、值必须是

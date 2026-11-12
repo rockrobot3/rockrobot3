@@ -60,6 +60,43 @@ pub fn rr3_base64_encode(data: &[u8]) -> String {
     out
 }
 
+/// 单组 4 字符 → 24bit 值与填充位数；非法填充/字符按 fail-closed 回错。
+fn rr3_b64_group(
+    grp: &[u8],
+    last: bool,
+    base: usize,
+    table: &[u8; 256],
+) -> Result<(u32, usize), Rr3Base64Error> {
+    let mut vals = [0u8; 4];
+    let mut pad = 0usize;
+    for (i, &c) in grp.iter().enumerate() {
+        if c == b'=' {
+            // 填充只允许在末组的末两位；`==` 前不得再插数据（i<2 即 `=` 占数据位）
+            if !last || i < 2 {
+                return Err(Rr3Base64Error::BadPadding { at: base + i });
+            }
+            pad += 1;
+        } else {
+            if pad > 0 {
+                return Err(Rr3Base64Error::BadPadding { at: base + i });
+            }
+            let v = table[c as usize];
+            if v == 0xFF {
+                return Err(Rr3Base64Error::BadChar {
+                    at: base + i,
+                    c: c as char,
+                });
+            }
+            vals[i] = v;
+        }
+    }
+    let n = ((vals[0] as u32) << 18)
+        | ((vals[1] as u32) << 12)
+        | ((vals[2] as u32) << 6)
+        | (vals[3] as u32);
+    Ok((n, pad))
+}
+
 /// base64 解码（RFC 4648 标准字母表带填充）。非法输入一律 `Err`——
 /// `=` 只许出现在末组尾部、字母表外字符即拒（fail-closed，不做"尽力而为"）。
 pub fn rr3_base64_decode(s: &str) -> Result<Vec<u8>, Rr3Base64Error> {
@@ -72,34 +109,7 @@ pub fn rr3_base64_decode(s: &str) -> Result<Vec<u8>, Rr3Base64Error> {
     let mut out = Vec::with_capacity(groups * 3);
     for g in 0..groups {
         let grp = &bytes[g * 4..g * 4 + 4];
-        let last = g + 1 == groups;
-        let mut vals = [0u8; 4];
-        let mut pad = 0usize;
-        for (i, &c) in grp.iter().enumerate() {
-            if c == b'=' {
-                // 填充只允许在末组的末两位；`==` 前不得再插数据（i<2 即 `=` 占数据位）
-                if !last || i < 2 {
-                    return Err(Rr3Base64Error::BadPadding { at: g * 4 + i });
-                }
-                pad += 1;
-            } else {
-                if pad > 0 {
-                    return Err(Rr3Base64Error::BadPadding { at: g * 4 + i });
-                }
-                let v = table[c as usize];
-                if v == 0xFF {
-                    return Err(Rr3Base64Error::BadChar {
-                        at: g * 4 + i,
-                        c: c as char,
-                    });
-                }
-                vals[i] = v;
-            }
-        }
-        let n = ((vals[0] as u32) << 18)
-            | ((vals[1] as u32) << 12)
-            | ((vals[2] as u32) << 6)
-            | (vals[3] as u32);
+        let (n, pad) = rr3_b64_group(grp, g + 1 == groups, g * 4, &table)?;
         out.push((n >> 16) as u8);
         if pad < 2 {
             out.push((n >> 8) as u8);

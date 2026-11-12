@@ -558,77 +558,107 @@ fn rr3_drain_cmds(
 /// 读线程主体：会话内大块裸读 → 拆帧 → 四道门 → 入环；断流/错会话就地转
 /// 重连。收兵（stop 旗）时板面 `AUDIO OFF`（防残流，conn 随作用域释放 →
 /// flock 退账）。
+/// 读线程跨会话持久状态（tee/记账/计时；重连不清零）。
+struct Rr3ReaderState {
+    tee: Option<std::fs::File>,
+    once: Rr3IngestLog,
+    cmd_id: u64,
+    stat_at: Instant,
+    stat_mark: Rr3StatMark,
+    ping_at: Instant,
+}
+
+impl Rr3ReaderState {
+    fn rr3_new() -> Self {
+        Self {
+            // 取证 tee（批N12 件二）：线程级开口一次，重连续写同一文件（见 [`rr3_tee_open`]）
+            tee: rr3_tee_open(),
+            once: Rr3IngestLog::default(),
+            // 命令旁路请求 id 计数（读线程局部；fire-and-forget 面只服务回执对账日志，
+            // 无跨会话唯一性要求）
+            cmd_id: 1,
+            // 桥链周期统计计时（统计面与链路控制解耦：到点只打一行，不改任何状态）
+            stat_at: Instant::now(),
+            // 统计水位（上一窗累计值；本窗增量 = 现值 − 水位）
+            stat_mark: Rr3StatMark::default(),
+            // 宿主音频心跳计时（A9.3：板侧失联看门狗的时间源）
+            ping_at: Instant::now(),
+        }
+    }
+}
+
 fn rr3_esp32_reader(core: Arc<Rr3Esp32AudioCore>, first: Rr3UartConn) {
-    // 取证 tee（批N12 件二）：线程级开口一次，重连续写同一文件（见 [`rr3_tee_open`]）
-    let mut tee = rr3_tee_open();
+    let mut st = Rr3ReaderState::rr3_new();
     let mut conn: Option<Rr3UartConn> = Some(first);
-    let mut once = Rr3IngestLog::default();
-    // 桥链周期统计计时（统计面与链路控制解耦：到点只打一行，不改任何状态）
-    let mut stat_at = Instant::now();
-    // 统计水位（上一窗累计值；本窗增量 = 现值 − 水位）
-    let mut stat_mark = Rr3StatMark::default();
-    // 宿主音频心跳计时（A9.3：板侧失联看门狗的时间源）
-    let mut ping_at = Instant::now();
-    // 命令旁路请求 id 计数（读线程局部；fire-and-forget 面只服务回执对账日志，
-    // 无跨会话唯一性要求）
-    let mut cmd_id: u64 = 1;
     while !core.stop.load(Ordering::Acquire) {
         let Some(c) = conn.as_mut() else {
             conn = rr3_esp32_reconnect(&core);
             continue;
         };
-        // —— 会话内读循环（拆帧器/记账随会话重置：新会话是新流）——
-        let mut asm = FrameAssembler::new();
-        let mut raw = vec![0u8; READ_BLOCK];
-        let mut zeros = 0u32;
-        let mut seen = false;
-        let mut err_streak = 0u64;
-        // 累计坏帧（拆帧失败 + 未过门）：间歇性丢帧的唯一可见口径（见上注）
-        let mut err_total = 0u64;
-        loop {
-            if core.stop.load(Ordering::Acquire) {
-                break;
-            }
-            if stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
-                stat_at = Instant::now();
-                rr3_stat_tick(&core, &mut stat_mark);
-            }
-            // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
-            // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
-            if !rr3_ping(c, &mut ping_at) {
-                conn = None;
-                break;
-            }
-            // —— 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出
-            // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
-            // 队首不丢，按读失败同路重连后补写（有界丢最旧兜底）。b3 冒烟修正：
-            // 原实现把排水放在建连拍——会话中途入队的命令永远等不到写出口
-            // （队容 2 满丢最旧），板面收不到 servo 点名——b1 计划原文即
-            // 「读循环每拍先排水再读」，此为落位笔误。
-            if let Err(e) = rr3_drain_cmds(c, &core, &mut cmd_id) {
-                eprintln!("rr-hal-esp32-audio: {e}");
-                conn = None;
-                break;
-            }
-            match rr3_read_step(c, &mut raw, &mut zeros, &mut seen) {
-                Rr3ReadStep::Reconnect => {
-                    conn = None;
-                    break;
-                }
-                Rr3ReadStep::Data(0) => {}
-                Rr3ReadStep::Data(n) => {
-                    // 批N12 件二：宿主读面原始字节 tee（拆帧前镜像——批N10 件二
-                    // 病灶"帧内尾随残渣"的取证层，tee 流与消费流逐字节一致）
-                    rr3_tee_write(&mut tee, &raw[..n]);
-                    asm.feed(&raw[..n]);
-                    rr3_esp32_frames(&core, &mut asm, &mut once, &mut err_streak, &mut err_total);
-                }
-            }
+        if rr3_esp32_stream(&core, c, &mut st) {
+            conn = None;
         }
     }
     // 收兵：板面停流（防御残流），conn 释放 → flock 退账
     if let Some(mut c) = conn {
         let _ = c.write_all(b"AUDIO OFF\n");
+    }
+}
+
+/// 单会话读循环：`true` = 连接坏需重连，`false` = 收兵（stop 旗）。
+fn rr3_esp32_stream(
+    core: &Rr3Esp32AudioCore,
+    c: &mut Rr3UartConn,
+    st: &mut Rr3ReaderState,
+) -> bool {
+    // —— 会话内读循环（拆帧器/记账随会话重置：新会话是新流）——
+    let mut asm = FrameAssembler::new();
+    let mut raw = vec![0u8; READ_BLOCK];
+    let mut zeros = 0u32;
+    let mut seen = false;
+    let mut err_streak = 0u64;
+    // 累计坏帧（拆帧失败 + 未过门）：间歇性丢帧的唯一可见口径（见上注）
+    let mut err_total = 0u64;
+    loop {
+        if core.stop.load(Ordering::Acquire) {
+            return false;
+        }
+        if st.stat_at.elapsed() >= RR3_BRIDGE_STAT_PERIOD {
+            st.stat_at = Instant::now();
+            rr3_stat_tick(core, &mut st.stat_mark);
+        }
+        // —— 宿主心跳（A9.3）：与命令同线程串行写，5s 一个空行（非协议命令，
+        // 任何版本固件都静默忽略；写失败即连接坏，与读失败同路重连）——
+        if !rr3_ping(c, &mut st.ping_at) {
+            return true;
+        }
+        // —— 命令旁路排水（每拍先排水再读）：逐条弹出 fire-and-forget 写出
+        // （板侧执行前回成功，回执由分类面记账）；io 失败 = 连接坏，命令回插
+        // 队首不丢，按读失败同路重连后补写（有界丢最旧兜底）。b3 冒烟修正：
+        // 原实现把排水放在建连拍——会话中途入队的命令永远等不到写出口
+        // （队容 2 满丢最旧），板面收不到 servo 点名——b1 计划原文即
+        // 「读循环每拍先排水再读」，此为落位笔误。
+        if let Err(e) = rr3_drain_cmds(c, core, &mut st.cmd_id) {
+            eprintln!("rr-hal-esp32-audio: {e}");
+            return true;
+        }
+        match rr3_read_step(c, &mut raw, &mut zeros, &mut seen) {
+            Rr3ReadStep::Reconnect => return true,
+            Rr3ReadStep::Data(0) => {}
+            Rr3ReadStep::Data(n) => {
+                // 批N12 件二：宿主读面原始字节 tee（拆帧前镜像——批N10 件二
+                // 病灶"帧内尾随残渣"的取证层，tee 流与消费流逐字节一致）
+                rr3_tee_write(&mut st.tee, &raw[..n]);
+                asm.feed(&raw[..n]);
+                rr3_esp32_frames(
+                    core,
+                    &mut asm,
+                    &mut st.once,
+                    &mut err_streak,
+                    &mut err_total,
+                );
+            }
+        }
     }
 }
 

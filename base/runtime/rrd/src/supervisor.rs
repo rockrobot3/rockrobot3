@@ -400,35 +400,7 @@ fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Comma
     cmd.env("RR3_BUS_PATH", bus_path)
         .env("RR3_MANIFEST", &job.manifest_path)
         .env("RR3_SIM_PEER_ROLE", boot_role);
-    if !job.hal_bindings.is_empty() {
-        cmd.env("RR3_HAL_BINDINGS", &job.hal_bindings);
-    }
-    // P0-3 根因门：装配单声明的 HAL 后端注入子进程 `RR3_HAL_BACKEND`——后端选择
-    // 是部署事实，必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产
-    // 假验证）。空串 = --manifest 调试路径不注入（模块侧走平台缺省）。
-    if !job.hal_backend.is_empty() {
-        cmd.env("RR3_HAL_BACKEND", &job.hal_backend);
-    }
-    // 音频采集面后端覆盖（组合档 Pi×ESP32 用 esp32）：注入 `RR3_HAL_AUDIO_BACKEND`，
-    // 让音频面独占 UART 而不影响全局后端。None 不注入（音频面回落全局 hal_backend）。
-    if let Some(ab) = &job.audio_backend {
-        cmd.env("RR3_HAL_AUDIO_BACKEND", ab);
-    }
-    // 舵机面后端覆盖（P0-4 组合档归属）：组合档舵机在 ESP32 板上时设 esp32。
-    // None 不注入（舵机面回落全局 hal_backend）。
-    if let Some(sb) = &job.servo_backend {
-        cmd.env("RR3_HAL_SERVO_BACKEND", sb);
-    }
-    // 显示面后端覆盖（P0-4 组合档归属）：组合档 OLED/点阵在 ESP32 板上时设 esp32。
-    // None 不注入（显示面回落全局 hal_backend）。
-    if let Some(db) = &job.display_backend {
-        cmd.env("RR3_HAL_DISPLAY_BACKEND", db);
-    }
-    // 执行轴状态（批N3 件三）：空值不注入——模块侧折保守缺省（未标定不得自动），
-    // 与 hal_bindings 同一条"空 = 无真值，fail-closed"纪律
-    if !job.axis_state.is_empty() {
-        cmd.env("RR3_ACT_AXIS_STATE", &job.axis_state);
-    }
+    rr3_spawn_env(&mut cmd, job);
     // 见文件头的 stdout 纪律：子进程输出绝不进 rrd 自己那条管道（stdout null 不动）。
     // stderr 接 per-unit 日志文件（门 r 留痕通道定形，批N4 件八）：模块留痕唯一可达
     // 通道——append 语义让"一次重启后仍能取到崩溃前的最后 N 行"（§17 同轨判据）天然
@@ -462,6 +434,40 @@ fn rr3_spawn_build(job: &Rr3SpawnJob, bus_path: &Path, boot_role: &str) -> Comma
         }
     }
     cmd
+}
+
+/// 可选面注入：物理绑定描述符、HAL 后端与音频/舵机/显示三面覆盖、执行轴状态，
+/// 空值/None 一律不注入（模块侧折 fail-closed 缺省）。
+fn rr3_spawn_env(cmd: &mut Command, job: &Rr3SpawnJob) {
+    if !job.hal_bindings.is_empty() {
+        cmd.env("RR3_HAL_BINDINGS", &job.hal_bindings);
+    }
+    // P0-3 根因门：装配单声明的 HAL 后端注入子进程 `RR3_HAL_BACKEND`——后端选择
+    // 是部署事实，必须进装配单显式数据，不靠隐式缺省（漏 env 静默落 sim = 生产
+    // 假验证）。空串 = --manifest 调试路径不注入（模块侧走平台缺省）。
+    if !job.hal_backend.is_empty() {
+        cmd.env("RR3_HAL_BACKEND", &job.hal_backend);
+    }
+    // 音频采集面后端覆盖（组合档 Pi×ESP32 用 esp32）：注入 `RR3_HAL_AUDIO_BACKEND`，
+    // 让音频面独占 UART 而不影响全局后端。None 不注入（音频面回落全局 hal_backend）。
+    if let Some(ab) = &job.audio_backend {
+        cmd.env("RR3_HAL_AUDIO_BACKEND", ab);
+    }
+    // 舵机面后端覆盖（P0-4 组合档归属）：组合档舵机在 ESP32 板上时设 esp32。
+    // None 不注入（舵机面回落全局 hal_backend）。
+    if let Some(sb) = &job.servo_backend {
+        cmd.env("RR3_HAL_SERVO_BACKEND", sb);
+    }
+    // 显示面后端覆盖（P0-4 组合档归属）：组合档 OLED/点阵在 ESP32 板上时设 esp32。
+    // None 不注入（显示面回落全局 hal_backend）。
+    if let Some(db) = &job.display_backend {
+        cmd.env("RR3_HAL_DISPLAY_BACKEND", db);
+    }
+    // 执行轴状态（批N3 件三）：空值不注入——模块侧折保守缺省（未标定不得自动），
+    // 与 hal_bindings 同一条"空 = 无真值，fail-closed"纪律
+    if !job.axis_state.is_empty() {
+        cmd.env("RR3_ACT_AXIS_STATE", &job.axis_state);
+    }
 }
 
 /// 起进程成功：入子进程表 + 点名日志；`attempt>0` 才附尾注（boot 那次没有

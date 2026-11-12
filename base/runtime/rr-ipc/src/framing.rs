@@ -74,31 +74,13 @@ impl FrameAssembler {
     pub fn pull(&mut self) -> Result<Option<Assembled>, (u64, String)> {
         // 对齐 magic：无全 magic 则只留尾 3B（可能跨块的前缀），其余静默弃
         // （起始垃圾/断帧残骸——帧间垃圾不计数，丢片由 seq 对账如实记账）。
-        if let Some(pos) = find(&self.buf, &RR3_MAGIC_LE) {
-            if pos > 0 {
-                self.discarded += pos as u64;
-                self.buf.drain(..pos);
-            }
-        } else {
-            let keep_from = self.buf.len().saturating_sub(RR3_MAGIC_LE.len() - 1);
-            self.discarded += keep_from as u64;
-            self.buf.drain(..keep_from);
+        if !self.rr3_align_magic() {
             return Ok(None);
         }
-        if self.buf.len() < RR3_IPC_HDR_SIZE {
+        let Some(header) = self.rr3_parse_header()? else {
             return Ok(None);
-        }
-        let header = match Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]) {
-            Ok(h) => h,
-            Err(e) => return Err(self.drop_magic(4, alloc::format!("头层拒收: {e:?}"))),
         };
         let plen = header.payload_len as usize;
-        if plen > self.plen_cap {
-            return Err(self.drop_magic(
-                4,
-                alloc::format!("payload_len {plen} 越拆帧护栏 {}（幻影头）", self.plen_cap),
-            ));
-        }
         let want = RR3_IPC_HDR_SIZE + plen;
         if self.buf.len() < want {
             return Ok(None);
@@ -121,6 +103,41 @@ impl FrameAssembler {
         self.buf.drain(..want);
         self.discarded = 0;
         Ok(Some((header, payload)))
+    }
+
+    /// magic 对齐：找到即弃前导并回 `true`；无 magic 只留尾 3B 并回 `false`。
+    fn rr3_align_magic(&mut self) -> bool {
+        if let Some(pos) = find(&self.buf, &RR3_MAGIC_LE) {
+            if pos > 0 {
+                self.discarded += pos as u64;
+                self.buf.drain(..pos);
+            }
+            true
+        } else {
+            let keep_from = self.buf.len().saturating_sub(RR3_MAGIC_LE.len() - 1);
+            self.discarded += keep_from as u64;
+            self.buf.drain(..keep_from);
+            false
+        }
+    }
+
+    /// 头层解析 + plen 护栏：不够一帧头回 `Ok(None)`；头非法/越栏弃 4B magic 回错。
+    fn rr3_parse_header(&mut self) -> Result<Option<Rr3Header>, (u64, String)> {
+        if self.buf.len() < RR3_IPC_HDR_SIZE {
+            return Ok(None);
+        }
+        let header = match Rr3Header::from_bytes(&self.buf[..RR3_IPC_HDR_SIZE]) {
+            Ok(h) => h,
+            Err(e) => return Err(self.drop_magic(4, alloc::format!("头层拒收: {e:?}"))),
+        };
+        let plen = header.payload_len as usize;
+        if plen > self.plen_cap {
+            return Err(self.drop_magic(
+                4,
+                alloc::format!("payload_len {plen} 越拆帧护栏 {}（幻影头）", self.plen_cap),
+            ));
+        }
+        Ok(Some(header))
     }
 
     /// 坏帧处置：弃 magic 起点（坏头只弃 4B——真帧起点可能就在其后不远处，
