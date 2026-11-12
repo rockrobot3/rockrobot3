@@ -629,17 +629,20 @@ fn rr3_domain_str(
     errs: &mut Vec<String>,
 ) {
     match v.and_then(toml::Value::as_str) {
-        Some(s) if !s.is_empty() => {
-            let v = s.to_string();
-            match key {
-                "name" => d.name = v,
-                "sense" => d.sense = v,
-                "current_sense" => d.current_sense = v,
-                "evidence" => d.evidence = v,
-                _ => d.switch = v,
-            }
-        }
+        Some(s) if !s.is_empty() => rr3_domain_set(d, key, s),
         _ => errs.push(format!("{path} 缺失或不是非空字符串")),
+    }
+}
+
+/// 字符串值按键落位。
+fn rr3_domain_set(d: &mut Rr3Domain, key: &str, s: &str) {
+    let v = s.to_string();
+    match key {
+        "name" => d.name = v,
+        "sense" => d.sense = v,
+        "current_sense" => d.current_sense = v,
+        "evidence" => d.evidence = v,
+        _ => d.switch = v,
     }
 }
 

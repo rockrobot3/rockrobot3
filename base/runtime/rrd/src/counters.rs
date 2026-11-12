@@ -75,17 +75,25 @@ pub fn rr3_path_with(env: Option<&str>, linux_default: Option<&str>) -> Option<S
 /// 启动加载：读全表。文件不存在 = 首启（空表）；坏文件按空表处理并回显原因
 /// （计数账丢了不致命，守护必须照常起来——运维账不许挡产品路）。
 pub fn rr3_counters_load(path: &Path) -> (BTreeMap<String, u64>, Option<String>) {
-    let text = match std::fs::read_to_string(path) {
+    let text = match rr3_counters_text(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (BTreeMap::new(), None),
-        Err(e) => {
-            return (
-                BTreeMap::new(),
-                Some(format!("读 {COUNTERS_FILE} 失败: {e}")),
-            )
-        }
+        Err(reason) => return (BTreeMap::new(), reason),
     };
-    match serde_json::from_str::<Value>(&text) {
+    rr3_counters_parse(&text)
+}
+
+/// 读计数档：不存在 = 首启（无原因），其余读错带回显原因。
+fn rr3_counters_text(path: &Path) -> Result<String, Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(None),
+        Err(e) => Err(Some(format!("读 {COUNTERS_FILE} 失败: {e}"))),
+    }
+}
+
+/// 解析计数档：非对象/坏 JSON 按空表起账并回显原因。
+fn rr3_counters_parse(text: &str) -> (BTreeMap<String, u64>, Option<String>) {
+    match serde_json::from_str::<Value>(text) {
         Ok(Value::Object(map)) => {
             let mut out = BTreeMap::new();
             for (k, v) in map {

@@ -213,31 +213,39 @@ fn rr3_pin_addr_take(
     owner: &mut BTreeMap<(String, String), usize>,
     errs: &mut Vec<String>,
 ) {
-    if !pin.controller.is_empty() && !pin.addr.is_empty() && pin.addr != "none" {
-        let key = (pin.controller.clone(), pin.addr.clone());
-        match owner.get(&key) {
-            Some(first) => {
-                let first_pin = &profile.pins[*first];
-                if pin.device.is_empty() || first_pin.device.is_empty() {
-                    errs.push(format!(
-                        "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 缺省（校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册——共读源须显式登记器件身份，缺省 = 不可判即红）",
-                        pin.controller, pin.addr, first_pin.rr3_pin_id()
-                    ));
-                } else if pin.device != first_pin.device {
-                    errs.push(format!(
-                        "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 不同（{} vs {}）——校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册（器件身份不同 = 地址冲突，坑 7）",
-                        pin.controller,
-                        pin.addr,
-                        first_pin.rr3_pin_id(),
-                        first_pin.device,
-                        pin.device
-                    ));
-                }
-            }
-            None => {
-                owner.insert(key, idx);
-            }
+    if pin.controller.is_empty() || pin.addr.is_empty() || pin.addr == "none" {
+        return;
+    }
+    let key = (pin.controller.clone(), pin.addr.clone());
+    match owner.get(&key) {
+        Some(first) => rr3_addr_conflict(label, pin, &profile.pins[*first], errs),
+        None => {
+            owner.insert(key, idx);
         }
+    }
+}
+
+/// ③-c 共址对账：同址须同 device 且非空（device 缺省 = 身份不可判，fail-closed 红）。
+fn rr3_addr_conflict(
+    label: &str,
+    pin: &Rr3PinEntry,
+    first_pin: &Rr3PinEntry,
+    errs: &mut Vec<String>,
+) {
+    if pin.device.is_empty() || first_pin.device.is_empty() {
+        errs.push(format!(
+            "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 缺省（校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册——共读源须显式登记器件身份，缺省 = 不可判即红）",
+            pin.controller, pin.addr, first_pin.rr3_pin_id()
+        ));
+    } else if pin.device != first_pin.device {
+        errs.push(format!(
+            "{label} (bus {}, addr {}) 与 pins[{}] 共址而 device 不同（{} vs {}）——校验③-c：同一 (bus, addr) 的多条 pin 须同 device 且型号在册（器件身份不同 = 地址冲突，坑 7）",
+            pin.controller,
+            pin.addr,
+            first_pin.rr3_pin_id(),
+            first_pin.device,
+            pin.device
+        ));
     }
 }
 

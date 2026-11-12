@@ -131,25 +131,43 @@ fn rr3_write_value(
     target: Rr3WriteTarget,
     key: &str,
 ) -> Result<Rr3WriteValue, (Rr3StatusCode, String)> {
-    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
     match (target, key) {
-        (Rr3WriteTarget::Domain, "armed") => params
-            .get("value")
-            .and_then(Value::as_bool)
-            .map(Rr3WriteValue::Bool)
-            .ok_or_else(|| invalid("armed 的 params.value 要求布尔（true/false）".to_string())),
+        (Rr3WriteTarget::Domain, "armed") => rr3_write_bool(params),
         (Rr3WriteTarget::Domain, "severe_mv") | (Rr3WriteTarget::Axis, "current_ceil_ma") => {
-            match params.get("value").and_then(Value::as_u64) {
-                Some(n) if n > 0 => Ok(Rr3WriteValue::Num(n)),
-                Some(_) => Err(invalid(format!(
-                    "{key} 的 params.value 要求正整数（收到 0）"
-                ))),
-                None => Err(invalid(format!("{key} 的 params.value 要求正整数"))),
-            }
+            rr3_write_num(params, key)
         }
-        _ => Err(invalid(format!(
-            "key {key:?} 不在写口白名单（domain → armed/severe_mv；axis → current_ceil_ma；conventions §6.1 三写口点名集）"
+        _ => Err((
+            Rr3StatusCode::Invalid,
+            format!(
+                "key {key:?} 不在写口白名单（domain → armed/severe_mv；axis → current_ceil_ma；conventions §6.1 三写口点名集）"
+            ),
+        )),
+    }
+}
+
+/// armed 值型：缺/非布尔一律拒。
+fn rr3_write_bool(params: &Value) -> Result<Rr3WriteValue, (Rr3StatusCode, String)> {
+    params
+        .get("value")
+        .and_then(Value::as_bool)
+        .map(Rr3WriteValue::Bool)
+        .ok_or_else(|| {
+            (
+                Rr3StatusCode::Invalid,
+                "armed 的 params.value 要求布尔（true/false）".to_string(),
+            )
+        })
+}
+
+/// 正整数值型：0 与缺席/非整数分别点名。
+fn rr3_write_num(params: &Value, key: &str) -> Result<Rr3WriteValue, (Rr3StatusCode, String)> {
+    let invalid = |msg: String| (Rr3StatusCode::Invalid, msg);
+    match params.get("value").and_then(Value::as_u64) {
+        Some(n) if n > 0 => Ok(Rr3WriteValue::Num(n)),
+        Some(_) => Err(invalid(format!(
+            "{key} 的 params.value 要求正整数（收到 0）"
         ))),
+        None => Err(invalid(format!("{key} 的 params.value 要求正整数"))),
     }
 }
 
@@ -576,13 +594,7 @@ fn rr3_write_axis(
     let axis_path = rr3_axis_path(paths, &params.name)?;
     let old = rr3_axis_old(paths, &axis_path)?;
     // 证据引用门（仅留痕——轴档十四键无 evidence 键，写动作证据住审计留痕）
-    let ev = params.evidence.clone().ok_or_else(|| {
-        (
-            Rr3StatusCode::Permission,
-            "current_ceil_ma 安全写必携证据引用 params.evidence（B-15 ③）".to_string(),
-        )
-    })?;
-    rr3_write_evidence(&paths.profile, &ev)?;
+    let ev = rr3_axis_evidence(paths, params)?;
     // 单键手术 → tmp 候选档 → 复用产线写入面（全判据＋原子落盘＋副本拒单点）
     let tmp = rr3_axis_stage(&axis_path, n)?;
     let run = crate::axis_write::rr3_axis_write_run(&crate::axis_write::Rr3AxisWriteArgs {
@@ -606,6 +618,22 @@ fn rr3_write_axis(
         "effective": "boot",
         "echo": echo,
     }))
+}
+
+/// 轴档写口证据门：必携引用且过核验（仅留痕，不入档）。
+#[cfg(unix)]
+fn rr3_axis_evidence(
+    paths: &Rr3DomainWritePaths,
+    params: &Rr3DomainWriteParams,
+) -> Result<String, (Rr3StatusCode, String)> {
+    let ev = params.evidence.clone().ok_or_else(|| {
+        (
+            Rr3StatusCode::Permission,
+            "current_ceil_ma 安全写必携证据引用 params.evidence（B-15 ③）".to_string(),
+        )
+    })?;
+    rr3_write_evidence(&paths.profile, &ev)?;
+    Ok(ev)
 }
 
 /// 轴实例名形制（纯函数）：单段标识，不含路径分隔符 / `.` / `..` / 控制字符。
