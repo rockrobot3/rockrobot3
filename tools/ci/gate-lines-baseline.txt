@@ -6,4 +6,6 @@
 # 初值 58 = 立规时的存量盘点（2026-11-13，含测试文件；最大三件：
 #   rr-registry/tests/contract.rs 2632、rr3-interact/src/panel/server.rs 2079、
 #   rrd/src/registry/tests.rs 1917）。
-58
+# 2026-11-13 首拆：rrd registry 测试 1917 行拆成 tests/{mod,fanout,register,beat,
+#   publish,restart,death,degrade}.rs（最大 421 行）→ 超标数 58→57。
+57
