@@ -100,12 +100,11 @@ watchdog_timeout_ms = 500
     rr3_manifest_parse(&text).expect("测试 manifest 必须可读")
 }
 
-/// 影子统计：按 subscribes 只记账"本应过滤"的连接，不改变全量投递
-
-mod fanout;
-mod register;
 mod beat;
-mod publish;
-mod restart;
 mod death;
 mod degrade;
+/// 影子统计：按 subscribes 只记账"本应过滤"的连接，不改变全量投递
+mod fanout;
+mod publish;
+mod register;
+mod restart;
