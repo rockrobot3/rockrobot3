@@ -293,6 +293,11 @@ pub(crate) const RR3_CTR_KEY_CAP: usize = 4096;
 pub struct RrdRegistry {
     modules: BTreeMap<String, Entry>,
     by_task: BTreeMap<u64, String>,
+    /// exposes 索引（批D2）：topic → 候选 task 升序集。`rr3.call` 路由按它取最小
+    /// 存活被调方，不再全表扫 modules×rpc_exposes。只在注册/摘除时增删；判死或
+    /// 摘发送端的条目**仍留在索引里**，由查表处的 live 判据过滤——索引是候选集，
+    /// 不是活表，故失败历史不会让一次路由多出一次清扫。
+    exposes: BTreeMap<String, BTreeSet<u64>>,
     next_task: u64,
     restart_base_ms: u64,
     denied_publish: u32,
@@ -341,6 +346,7 @@ impl RrdRegistry {
         Self {
             modules: BTreeMap::new(),
             by_task: BTreeMap::new(),
+            exposes: BTreeMap::new(),
             next_task: rr_bus::RR3_TASK_FIRST_MODULE,
             restart_base_ms,
             denied_publish: 0,
@@ -493,8 +499,10 @@ impl RrdRegistry {
         // 到这里门与断言全过，才动表：先摘旧 Failed 条目（task→name 映射与条目本体），
         // 再插入新条目。panic 路径在上面就返回了，走不到这一步。
         if let Some(t) = superseded {
+            if let Some(old) = self.modules.remove(&facts.name) {
+                self.rr3_drop_exposes(&old.facts, old.src_task);
+            }
             self.by_task.remove(&t);
-            self.modules.remove(&facts.name);
         }
         let task = self.next_task;
         self.next_task = self.next_task.saturating_add(1);
@@ -523,7 +531,32 @@ impl RrdRegistry {
                 fan_dropped: 0,
             },
         );
+        self.rr3_add_exposes(facts, task);
         Ok(task)
+    }
+
+    /// exposes 索引登记：逐主题挂 task（同一主题重复声明由集合去重）。
+    fn rr3_add_exposes(&mut self, facts: &Rr3ManifestFacts, task: u64) {
+        for topic in &facts.rpc_exposes {
+            self.exposes.entry(topic.clone()).or_default().insert(task);
+        }
+    }
+
+    /// exposes 索引摘除：条目整体离表（重注册替换 / unregister）时调用；摘空的主题
+    /// 整键删掉——索引只跟"有过声明者"走，不随失败历史长存。
+    fn rr3_drop_exposes(&mut self, facts: &Rr3ManifestFacts, task: u64) {
+        for topic in &facts.rpc_exposes {
+            let empty = match self.exposes.get_mut(topic) {
+                Some(tasks) => {
+                    tasks.remove(&task);
+                    tasks.is_empty()
+                }
+                None => false,
+            };
+            if empty {
+                self.exposes.remove(topic);
+            }
+        }
     }
 
     /// 同名在册门：非 Failed 即拒，Failed 条目记下待替换 task。
@@ -852,6 +885,7 @@ impl RrdRegistry {
         match self.modules.remove(name) {
             Some(e) => {
                 self.by_task.remove(&e.src_task);
+                self.rr3_drop_exposes(&e.facts, e.src_task);
                 // D-4：显式退场（unregister RPC）记进 stopped——之后这条 name 的子进程退出码
                 // 不得被收尸路当成一次崩溃记账。rr3_reg_add 会把它移回。
                 self.stopped.insert(name.to_string());
@@ -1206,15 +1240,21 @@ impl RrdRegistry {
     /// 被调条件：**在册且活着**（phase ≠ `Failed` 且 `tx` 存在，与 `rr3_reg_live` 同一判据）
     /// 且 manifest 的 `[rpc].exposes` 里登记了这个 topic——call 的路由表来自被调方
     /// 自己的声明，不走 topics.toml 的发布归属（那是 publish 的检查，与 call 无关）。
-    /// 多个模块 exposes 同一 topic 时取 **src_task 最小者**：路由必须确定，不能随
-    /// BTreeMap 的名字序漂。
+    /// 多个模块 exposes 同一 topic 时取 **src_task 最小者**：候选集来自注册期维护的
+    /// [`RrdRegistry::exposes`] 索引（升序），首个存活者即最小者，路由不随名字序漂。
     pub fn rr3_reg_callee_for(&self, topic: &str) -> Option<(String, u64)> {
-        self.modules
-            .values()
-            .filter(|e| e.phase != Rr3Phase::Failed && e.tx.is_some())
-            .filter(|e| e.facts.rpc_exposes.iter().any(|t| t == topic))
-            .min_by_key(|e| e.src_task)
-            .map(|e| (e.name.clone(), e.src_task))
+        for task in self.exposes.get(topic)? {
+            let Some(name) = self.by_task.get(task) else {
+                continue;
+            };
+            let Some(e) = self.modules.get(name) else {
+                continue;
+            };
+            if e.phase != Rr3Phase::Failed && e.tx.is_some() {
+                return Some((e.name.clone(), e.src_task));
+            }
+        }
+        None
     }
 
     /// 点名投递：按 task 找到那条连接的 `Sender` 投一帧。返回是否成功入队。
@@ -1433,6 +1473,40 @@ watchdog_timeout_ms = 500
             r.rr3_reg_callee_for("rr3-x/t/b"),
             None,
             "failed 条目必须被路由排除"
+        );
+    }
+
+    /// exposes 索引随条目离表同步（批D2）：unregister 摘掉候选后路由即空；同身份
+    /// 重注册换新 task，旧 task 的索引项不残留（索引不随失败历史增长）。
+    #[test]
+    fn callee_index_follows_unregister_and_reregistration() {
+        let mut r = RrdRegistry::new(1000);
+        let t0 = r
+            .rr3_reg_add(&facts_exposes("rr3-idx", &["rr3-x/t/a"]), chan().0, 0)
+            .unwrap();
+        assert_eq!(
+            r.rr3_reg_callee_for("rr3-x/t/a"),
+            Some(("rr3-idx".into(), t0))
+        );
+        assert!(r.rr3_reg_remove("rr3-idx"));
+        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/a"), None, "摘除后索引同步");
+        assert!(r.exposes.is_empty(), "摘空的 topic 键必须整键删掉");
+
+        let t1 = r
+            .rr3_reg_add(&facts_exposes("rr3-idx", &["rr3-x/t/a"]), chan().0, 0)
+            .unwrap();
+        r.rr3_reg_death("rr3-idx", false, 0);
+        assert_eq!(r.rr3_reg_callee_for("rr3-x/t/a"), None, "failed 不进路由");
+        let t2 = r
+            .rr3_reg_add(&facts_exposes("rr3-idx", &["rr3-x/t/a"]), chan().0, 700)
+            .unwrap();
+        assert_eq!(
+            r.rr3_reg_callee_for("rr3-x/t/a"),
+            Some(("rr3-idx".into(), t2))
+        );
+        assert!(
+            !r.exposes["rr3-x/t/a"].contains(&t1),
+            "被替换条目的旧 task 不得留在索引里"
         );
     }
 
