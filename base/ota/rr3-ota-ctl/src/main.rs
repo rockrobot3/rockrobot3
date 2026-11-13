@@ -114,10 +114,14 @@ fn rr3_conf_slot(path: &Path, why: &str) -> Result<(String, Rr3Slot), (String, E
     Ok((text, from))
 }
 
-/// 原子写回引导配置（失败文案统一）。
+/// 原子写回引导配置（失败点名路径与原因）。
 fn rr3_conf_store(path: &Path, out: &str) -> Result<(), (String, ExitCode)> {
-    bootconf::rr3_bootconf_store(path, out)
-        .map_err(|e| (format!("原子落盘失败: {e}"), ExitCode::from(1)))
+    bootconf::rr3_bootconf_store(path, out).map_err(|e| {
+        (
+            format!("引导配置 {path:?} 原子落盘失败: {e}"),
+            ExitCode::from(1),
+        )
+    })
 }
 
 /// rollback：arm 上膛 / ok 解除（`base/ota/partition-layout.md` 标准序第 4/6 步）。
