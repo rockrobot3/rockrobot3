@@ -14,4 +14,8 @@
 #   + server/{ctl,selftest,serve}.rs + server/tests/ 四段（最大 424 行）→ 56→55。
 # 2026-11-14 四拆（测试体抽取）：rrctl commands.rs 638→374 + commands/tests.rs 262；
 #   sim main.rs 735→497 + src/tests.rs 236 → 55→53。
-53
+# 2026-11-14 五拆（批量测试体抽取，15 件，生产面均 <600、测试面最大 457）：
+#   rr-hal esp32_uart、rr-ipc protocol/header、rr-mech control、rr-registry atom/depends、
+#   rrd assembly/cli/manifest/topics_load/wiring、rr3-act intent、rr3-interact boot、
+#   rr3-power dispatch、rr3-sense boot、pi-periph-base ports → 53→38。
+38
