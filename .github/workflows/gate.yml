@@ -32,7 +32,18 @@ jobs:
           workspaces: base/runtime
       # ⑨-y 跨平台可编面的前件（批N8 件六）：门内不设 SKIP，target 缺位即红
       - name: 安装 Windows target（⑨-y 门前置）
-        run: rustup target add x86_64-pc-windows-msvc
+        run: |
+          # 有界重试（3 次，间隔 5s）：rustup 拉 target 会撞网络抖动；失败必须留注解，
+          # 否则 check-run 只剩 "exit code 1"，根因不可见（本步曾整步失败而无任何信息）。
+          for i in 1 2 3; do
+            if rustup target add x86_64-pc-windows-msvc; then
+              exit 0
+            fi
+            echo "::warning title=rustup target::第 ${i} 次安装失败，5s 后重试"
+            sleep 5
+          done
+          echo "::error title=rustup target::x86_64-pc-windows-msvc 连续 3 次安装失败（网络/镜像）"
+          exit 1
       - name: 规约门禁检查（check.sh 全步，含 ⑫ 质量度量）
         run: |
           # 失败把日志尾部写成注解：匿名日志接口 403 时，check-run annotations
@@ -43,6 +54,10 @@ jobs:
           if ! bash tools/ci/check.sh 2>&1 | tee /tmp/gate.log; then
             fails=$(grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -4 | tr '\n' ' ')
             errs=$(grep -E "error(\[|:)" /tmp/gate.log | head -3 | tr '\n' ' ')
+            # 两类特征都没抓到（脚本自身崩、被信号打断等）时，退回日志尾部，保证不空
+            if [ -z "${fails}${errs}" ]; then
+              errs=$(tail -3 /tmp/gate.log | tr '\n' ' ')
+            fi
             echo "::error title=check.sh::${fails:0:500} @@ ${errs:0:700}"
             grep -E "^(FAIL|ERROR)" /tmp/gate.log | tail -20
             exit 1
