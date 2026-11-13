@@ -59,8 +59,6 @@ fn selftest_roundtrip(addr: std::net::SocketAddr, jh: std::thread::JoinHandle<()
     serde_json::from_str(body).expect("自检应答是 JSON: {body}")
 }
 
-/// BusCall 应答状态码裁定（I-21③）：载荷含 error = 422 业务失败，其余 200
-
 // ---------- 批M M-β I-4：spawn 失败不退 accept 循环 + 槽位 RAII ----------
 
 /// 假 rrd（I-4 夹具）：注册回 src_task=7、心跳回 accepted，并把每拍心跳
