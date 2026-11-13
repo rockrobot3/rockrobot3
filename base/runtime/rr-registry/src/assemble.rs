@@ -113,6 +113,11 @@ pub const RR3_ASSEMBLE_DESC_KEYS: &[&str] = &[
     "i2s_ws",
     // 批N17 件三（N-10 ② 键半边）：凭据存储源标记（非 GPIO，板侧读数面可见）
     "cred_store",
+    // 批B62（0.0.8 无硬件窗，同款契约级扩批）：INA219 分流校准两键——分流电阻
+    // （毫欧，装配事实）与电流 LSB（微安/位，量程策略）。两键齐备才写 0x05 校准；
+    // 不在 [pins] 派生键集（无 role 对应），[hardware] 直给。
+    "ina219_shunt_mohm",
+    "ina219_ilsb_ua",
 ];
 
 /// 一条句柄声明：件用 `trait_name` 能力面，绑描述符 `desc_key` 键

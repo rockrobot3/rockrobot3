@@ -2375,6 +2375,10 @@ fn assemble_registry_tables_are_pinned() {
             // 批N17 件三（N-10 ② 键半边）：凭据存储源标记（非 GPIO，板侧读数面
             // 可见；boot 读链不消费＝批N14 架构事实，非引脚不进对账锚）
             "cred_store",
+            // 批B62：INA219 分流校准两键（分流电阻毫欧 / 电流 LSB 微安，无 role
+            // 对应故不在 [pins] 派生键集，[hardware] 直给）
+            "ina219_shunt_mohm",
+            "ina219_ilsb_ua",
         ]
     );
 }
