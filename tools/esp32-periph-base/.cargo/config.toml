@@ -24,18 +24,20 @@ target = "xtensa-esp32-espidf"
 linker = "ldproxy"
 runner = "espflash flash --monitor"
 # esp-idf-sys BUILD-OPTIONS：IDF 5.0+ 必设（libc time_t 64 位面与 C 头对齐）
-rustflags = ["--cfg", "espidf_time64"]
+rustflags = ["--cfg", "espidf_time64", "-Zunstable-options", "-Cpanic=immediate-abort"]
 
 # ESP32-S3 N16R8（8MB Octal PSRAM）。runner 与 rustflags 同 classic；
 # 芯片差异走 MCU env + sdkconfig.defaults.esp32s3。
 [target.xtensa-esp32s3-espidf]
 linker = "ldproxy"
 runner = "espflash flash --monitor"
-rustflags = ["--cfg", "espidf_time64"]
+rustflags = ["--cfg", "espidf_time64", "-Zunstable-options", "-Cpanic=immediate-abort"]
 
 [unstable]
 build-std = ["std", "panic_abort"]
-build-std-features = ["panic_immediate_abort"]
+# 新工具链里 panic_immediate_abort 已是正式 panic 策略：不再作为 build-std
+# feature 开启，改由 target rustflags 的 -Cpanic=immediate-abort 表达（见上）。
+build-std-features = []
 
 # MCU 必须显式（esp-idf-sys 据此选 IDF 工具链与目标）。
 [env]

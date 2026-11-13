@@ -36,11 +36,11 @@ jobs:
           - chip: 瑞芯微（RK3566/RK3588）
             triple: aarch64-unknown-linux-musl
             arch: "ARM aarch64"
-            qemu: qemu-aarch64-static
+            platform: linux/arm64
           - chip: 进迭时空（SpacemiT K1/K3）
             triple: riscv64gc-unknown-linux-musl
             arch: "RISC-V"
-            qemu: qemu-riscv64-static
+            platform: linux/riscv64
     name: cross / ${{ matrix.chip }}
     steps:
       - uses: actions/checkout@v4
@@ -50,10 +50,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: base/runtime
-      # Ubuntu 只有 qemu-user-static 一个包（内含 qemu-aarch64-static /
-      # qemu-riscv64-static 等全部架构）；没有 per-arch 独立包，装错名 apt 退 100。
-      - name: 安装 qemu-user-static
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user-static
+      # binfmt 走 setup-qemu（与 ipct003/matrix 同源，已在本仓长期验证）；
+      # 不再 apt 装 qemu-user-static——runner 的 apt 源不稳定时整条腿会因装包红，
+      # 而那与"芯片平台能不能跑"无关。
+      - uses: docker/setup-qemu-action@v3
       - name: 交叉构建 + ELF 断言（失败把日志尾部打成注解，便于远端归因）
         run: |
           set -o pipefail
@@ -61,17 +61,18 @@ jobs:
             tail -c 3000 /tmp/cross.log | sed 's/^/::error title=cross-artifacts::/'
             exit 1
           fi
-      - name: qemu 目标 ISA 执行冒烟（产物真能跑起来）
+      - name: 目标 ISA 执行冒烟（binfmt + docker，产物真能跑起来）
         run: |
           rel="/tmp/rr3-build/${{ matrix.triple }}/release"
           for b in rrd rr3-ctl; do
-            out=$("${{ matrix.qemu }}" "$rel/$b" --help 2>&1) && rc=0 || rc=$?
+            out=$(docker run --rm --platform "${{ matrix.platform }}" \
+              -v "$rel:/b:ro" alpine:3.20 "/b/$b" --help 2>&1) && rc=0 || rc=$?
             echo "$out" | head -3
-            if echo "$out" | grep -qiE "exec format error|Exec format error|could not open"; then
-              echo "FAIL  $b 在 ${{ matrix.triple }} 上无法执行" >&2
+            if echo "$out" | grep -qiE "exec format error|could not open"; then
+              echo "FAIL  $b 在 ${{ matrix.platform }} 上无法执行" >&2
               exit 1
             fi
-            echo "PASS  $b 可在 ${{ matrix.triple }} 执行（rc=$rc）"
+            echo "PASS  $b 可在 ${{ matrix.platform }} 执行（rc=$rc）"
           done
       - name: 上传静态产物
         uses: actions/upload-artifact@v4
