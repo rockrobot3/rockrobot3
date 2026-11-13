@@ -1499,7 +1499,7 @@ fi
 # ⑫ 质量度量门（B11，基线钉数）：重复率硬门槛 3%；圈复杂度与超长生产函数名按
 # tools/ci/metrics-baseline.json 只降不升（与红账基线门同款纪律）。度量核为纯
 # Python 标准库脚本（无外网依赖）；python3 缺位按 SKIP 纪律明说不放行静默。
-printf '\n=== ⑫ 质量度量门（重复率 / 圈复杂度 / 函数名长度） ===\n'
+printf '\n=== ⑫ 质量度量门（重复率 / 圈复杂度 / 生产 panic 落点 / 函数名长度） ===\n'
 if command -v python3 >/dev/null 2>&1; then
   if python3 tools/ci/metrics.py; then
     :
